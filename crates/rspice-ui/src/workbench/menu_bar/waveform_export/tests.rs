@@ -1829,3 +1829,175 @@ fn a_domain_the_matlab_layout_has_no_coordinate_for_refuses_and_writes_nothing()
             .collect::<Vec<_>>()
     );
 }
+
+/// A persisted export coordinate id is not a display label.
+///
+/// The first column of an exported table is an identifier a reader keys on,
+/// and its `SignalType` is what restores the coordinate's unit. `.PXF`'s
+/// Studio axis is titled "Offset Frequency" and its exported coordinate is
+/// still `frequency`, typed as a frequency, because the exported quantity is
+/// a frequency in hertz either way.
+///
+/// Deriving the id from the title is what moved it once: `6dc39920d`
+/// retitled that axis -- a display-only change by intent -- and thereby
+/// republished every `.PXF` coordinate as `offset_frequency` carrying
+/// `SignalType::Unknown`, which has no unit at all.
+#[test]
+fn a_display_label_change_does_not_move_an_exported_coordinate_id() {
+    let pxf =
+        AnalysisResult::new(1, AnalysisType::Pxf, "PXF").with_waveforms(vec![complex_waveform(
+            "|V(out)|",
+            "V(out)",
+            vec![1.0e3, 1.0e4],
+            vec![1.0, 2.0],
+            vec![0.8, 1.6],
+            vec![0.6, 1.2],
+        )]);
+    let mut run = SimulationRun::new(7);
+    run.add_analysis(pxf);
+
+    let mut state = AppState::default();
+    state.simulation.runs = vec![run].into();
+    state.simulation.active_run_idx = Some(0);
+    state.simulation.active_analysis_idx = Some(0);
+    activate_result_document(&mut state, crate::workbench::ResultViewer::Bode);
+
+    let io = MockExportWorkflowIo::default();
+    action_export_csv_with_io(&mut state, &io);
+
+    let datasets = io.datasets.borrow();
+    assert_eq!(datasets.len(), 1);
+    let coordinate = datasets[0]
+        .x_signal
+        .as_ref()
+        .expect("a CSV export publishes its coordinate");
+    println!(
+        "PXF export coordinate: id={:?} signal_type={:?} unit={:?}; Studio axis label={:?}",
+        coordinate.name,
+        coordinate.signal_type,
+        coordinate.signal_type.default_unit(),
+        AnalysisType::Pxf.axis_info().0,
+    );
+    assert_eq!(
+        (coordinate.name.as_str(), coordinate.signal_type),
+        ("frequency", crate::io::SignalType::Frequency),
+        "a periodic transfer sweep exports a typed frequency coordinate",
+    );
+    assert_ne!(
+        AnalysisType::Pxf.axis_info().0,
+        coordinate.name,
+        "this fixture only means anything while the label and the id differ",
+    );
+}
+
+/// Nothing an export publishes is computed from a display label.
+///
+/// The behavioural pin above catches the one analysis whose label and id
+/// differ today. This catches the mechanism instead, in every file the export
+/// module ships: a coordinate id read out of `axis_info` is how a display-only
+/// change moved a persisted identifier in the first place, and the next such
+/// rename would be silent again.
+#[test]
+fn no_shipped_export_path_derives_an_identifier_from_a_display_label() {
+    let module = [
+        ("waveform_export.rs", include_str!("../waveform_export.rs")),
+        ("hdf5.rs", include_str!("hdf5.rs")),
+        ("matlab.rs", include_str!("matlab.rs")),
+        ("numpy.rs", include_str!("numpy.rs")),
+        ("typed_csv.rs", include_str!("typed_csv.rs")),
+        ("vcd.rs", include_str!("vcd.rs")),
+    ];
+    // Split so this test's own source can neither satisfy nor trip the scan.
+    let reader = ["axis", "_info"].concat();
+    let offenders = module
+        .iter()
+        .flat_map(|(name, source)| {
+            crate::source_guard::production_source(source)
+                .lines()
+                .enumerate()
+                .filter(|(_, line)| line.contains(&reader))
+                .map(move |(index, line)| format!("{name}:{}: {}", index + 1, line.trim()))
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        offenders.is_empty(),
+        "an export identifier must be stated, not read from the Studio's axis caption:\n{}",
+        offenders.join("\n")
+    );
+}
+
+/// Every analysis states the coordinate it exports, and this is the table.
+///
+/// The match behind it is exhaustive, so a new analysis type cannot compile
+/// without an entry; this pins what the entries are, so moving one is a named
+/// test failure rather than a quietly rewritten file header. Rows sharing an
+/// id share a physical quantity: every frequency sweep is `frequency` in
+/// hertz, whether it sweeps a drive or an offset from a carrier.
+#[test]
+fn every_analysis_type_pins_the_coordinate_identity_it_exports() {
+    use crate::io::SignalType;
+    let expected = [
+        (AnalysisType::Transient, "time", SignalType::Time),
+        (AnalysisType::TransientNoise, "time", SignalType::Time),
+        (AnalysisType::Pss, "time", SignalType::Time),
+        (AnalysisType::Envelope, "time", SignalType::Time),
+        (AnalysisType::Soa, "time", SignalType::Time),
+        (AnalysisType::Ac, "frequency", SignalType::Frequency),
+        (AnalysisType::Disto, "frequency", SignalType::Frequency),
+        (AnalysisType::Tf, "frequency", SignalType::Frequency),
+        (AnalysisType::Stb, "frequency", SignalType::Frequency),
+        (AnalysisType::SParameter, "frequency", SignalType::Frequency),
+        (
+            AnalysisType::HarmonicBalance,
+            "frequency",
+            SignalType::Frequency,
+        ),
+        (AnalysisType::Fourier, "frequency", SignalType::Frequency),
+        (AnalysisType::Noise, "frequency", SignalType::Frequency),
+        (AnalysisType::Qpss, "frequency", SignalType::Frequency),
+        (AnalysisType::Hbsp, "frequency", SignalType::Frequency),
+        (AnalysisType::Psp, "frequency", SignalType::Frequency),
+        (AnalysisType::Pac, "frequency", SignalType::Frequency),
+        (AnalysisType::Pxf, "frequency", SignalType::Frequency),
+        (AnalysisType::Qpac, "frequency", SignalType::Frequency),
+        (AnalysisType::Qpxf, "frequency", SignalType::Frequency),
+        (AnalysisType::Pnoise, "frequency", SignalType::Frequency),
+        (AnalysisType::Qpnoise, "frequency", SignalType::Frequency),
+        (AnalysisType::Hbnoise, "frequency", SignalType::Frequency),
+        (AnalysisType::DcSweep, "voltage", SignalType::Unknown),
+        (AnalysisType::Pstb, "mode", SignalType::Unknown),
+        (AnalysisType::PoleZero, "real", SignalType::Unknown),
+        (AnalysisType::Sensitivity, "parameter", SignalType::Unknown),
+        (AnalysisType::DcMismatch, "parameter", SignalType::Unknown),
+        (AnalysisType::MonteCarlo, "value", SignalType::Unknown),
+        (AnalysisType::Parametric, "sweep", SignalType::Unknown),
+        (AnalysisType::Corner, "temperature", SignalType::Unknown),
+        (AnalysisType::Reliability, "lifetime", SignalType::Unknown),
+        (AnalysisType::Optimization, "iteration", SignalType::Unknown),
+        (AnalysisType::DcOp, "x", SignalType::Unknown),
+    ];
+    for (analysis, id, signal_type) in expected {
+        assert_eq!(
+            axis_signal_for_analysis_type(analysis),
+            (id, signal_type),
+            "{analysis:?} exports a different coordinate than the one pinned here",
+        );
+    }
+    // A table that stopped covering the enum stops guarding it. The match is
+    // exhaustive, so a new variant cannot compile without an entry there; this
+    // is what stops it reaching the export unpinned here.
+    let distinct = expected
+        .iter()
+        .map(|(analysis, ..)| format!("{analysis:?}"))
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(
+        distinct.len(),
+        expected.len(),
+        "duplicate rows: {distinct:?}"
+    );
+    assert_eq!(
+        distinct.len(),
+        34,
+        "AnalysisType has a variant this table does not pin; add its row and this count",
+    );
+}

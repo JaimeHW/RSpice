@@ -164,7 +164,9 @@ pub(super) fn prepare_hdf5(
         return Err(NO_SAMPLES_MESSAGE.to_owned());
     }
 
-    let coordinate_name = super::axis_signal_for_analysis_type(analysis.analysis_type).0;
+    let coordinate_name = super::axis_signal_for_analysis_type(analysis.analysis_type)
+        .0
+        .to_owned();
     let rows = coordinate.len();
     let count = columns.len();
     let mut document = Hdf5Document::new(analysis.label.clone());

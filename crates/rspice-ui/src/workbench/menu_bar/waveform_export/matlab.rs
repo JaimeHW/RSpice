@@ -264,7 +264,7 @@ pub(super) fn prepare_matlab(
         imag: None,
     }];
     let coordinate_source = super::axis_signal_for_analysis_type(analysis.analysis_type).0;
-    let mut entries = vec![note_entry(coordinate_name, &coordinate_source, None)];
+    let mut entries = vec![note_entry(coordinate_name, coordinate_source, None)];
     let mut zeroed_imaginary = Vec::new();
     for waveform in waveforms {
         // Every variable stands on the one coordinate, because that is what

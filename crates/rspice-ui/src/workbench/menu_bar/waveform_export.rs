@@ -958,7 +958,7 @@ fn export_native_result_bundle(
         .collect();
     let native_dataset = NativeBundleDataset {
         analysis: native_analysis,
-        coordinate_name: &coordinate_name,
+        coordinate_name,
         coordinate: reference,
         signals,
     };
@@ -1461,7 +1461,7 @@ fn prepare_single_analysis_dataset(
 
 fn prepare_flat_waveform_dataset(
     waveforms: &[&crate::state::WaveformData],
-    x_name: String,
+    x_name: &str,
     x_signal_type: crate::io::SignalType,
 ) -> Result<PreparedWaveformDataset, String> {
     let reference_waveform = waveforms
@@ -1508,24 +1508,66 @@ fn validate_shared_x_axis(
     Ok(())
 }
 
-fn axis_signal_for_analysis_type(
+/// The coordinate identity an analysis publishes in an exported file: the id
+/// a reader keys the first column on, and the `SignalType` that restores its
+/// unit.
+///
+/// This is a persisted identifier, not a caption, and it used to be spelled by
+/// lower-casing the Studio's display axis label -- which tied it to a string
+/// written to be read. That coupling has already fired: `6dc39920d` retitled
+/// `.PXF`'s Studio axis
+/// "Offset Frequency", a display-only change by intent, and thereby moved
+/// every `.PXF` export's coordinate from `frequency` to `offset_frequency` and
+/// dropped its type to `Unknown`, which carries no unit at all. So the
+/// identity is stated here per analysis, and the match is exhaustive: a new
+/// analysis type must say what it exports rather than inherit a title.
+///
+/// Every frequency-swept analysis publishes `("frequency", Frequency)`,
+/// whether its abscissa is an absolute drive frequency or an offset from a
+/// carrier. The exported quantity is a frequency in hertz either way, and
+/// which frequency it is belongs to the analysis type the file already names.
+const fn axis_signal_for_analysis_type(
     analysis: crate::state::AnalysisType,
-) -> (String, crate::io::SignalType) {
-    let axis_label = analysis.axis_info().0;
-    if axis_label.eq_ignore_ascii_case("time") {
-        ("time".to_string(), crate::io::SignalType::Time)
-    } else if axis_label.eq_ignore_ascii_case("frequency") {
-        ("frequency".to_string(), crate::io::SignalType::Frequency)
-    } else if axis_label.trim().is_empty() {
-        ("x".to_string(), crate::io::SignalType::Unknown)
-    } else {
-        (
-            axis_label
-                .trim()
-                .to_ascii_lowercase()
-                .replace([' ', '-'], "_"),
-            crate::io::SignalType::Unknown,
-        )
+) -> (&'static str, crate::io::SignalType) {
+    use crate::io::SignalType;
+    use crate::state::AnalysisType as A;
+    match analysis {
+        A::Transient | A::TransientNoise | A::Pss | A::Envelope | A::Soa => {
+            ("time", SignalType::Time)
+        }
+        A::Ac
+        | A::Disto
+        | A::Tf
+        | A::Stb
+        | A::SParameter
+        | A::HarmonicBalance
+        | A::Fourier
+        | A::Noise
+        | A::Qpss
+        | A::Hbsp
+        | A::Psp
+        // The periodic small-signal family sweeps an offset from the carrier
+        // rather than a drive frequency. An offset is still a frequency in
+        // hertz, and a reader that keys on the coordinate needs the same id
+        // and the same unit for it.
+        | A::Pac
+        | A::Pxf
+        | A::Qpac
+        | A::Qpxf
+        | A::Pnoise
+        | A::Qpnoise
+        | A::Hbnoise => ("frequency", SignalType::Frequency),
+        A::DcSweep => ("voltage", SignalType::Unknown),
+        A::Pstb => ("mode", SignalType::Unknown),
+        A::PoleZero => ("real", SignalType::Unknown),
+        A::Sensitivity | A::DcMismatch => ("parameter", SignalType::Unknown),
+        A::MonteCarlo => ("value", SignalType::Unknown),
+        A::Parametric => ("sweep", SignalType::Unknown),
+        A::Corner => ("temperature", SignalType::Unknown),
+        A::Reliability => ("lifetime", SignalType::Unknown),
+        A::Optimization => ("iteration", SignalType::Unknown),
+        // A scalar operating point has no abscissa to name.
+        A::DcOp => ("x", SignalType::Unknown),
     }
 }
 
