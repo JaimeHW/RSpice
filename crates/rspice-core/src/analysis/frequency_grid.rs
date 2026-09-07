@@ -24,6 +24,8 @@ pub enum FrequencyGridError {
     InvalidStopFrequency,
     /// The analysis requires a non-degenerate range but stop equaled start.
     NonIncreasingSweep,
+    /// The requested grid cannot retain distinct finite values within its endpoints.
+    UnrepresentableSpacing,
     /// No frequency points were requested.
     EmptySweep,
     /// An explicitly authored frequency was not finite and strictly positive.
@@ -60,6 +62,9 @@ impl std::fmt::Display for FrequencyGridError {
             }
             Self::NonIncreasingSweep => {
                 formatter.write_str("stop frequency must be greater than start frequency")
+            }
+            Self::UnrepresentableSpacing => {
+                formatter.write_str("frequency spacing cannot be represented as distinct finite values within the requested range")
             }
             Self::EmptySweep => {
                 formatter.write_str("frequency sweep must contain at least one point")
@@ -172,30 +177,42 @@ pub(crate) fn generate_frequency_grid(
             requested: point_count,
         })?;
 
-    if point_count == 1 {
-        frequencies.push(start);
-    } else if scale == FrequencyGridScale::Linear {
-        // Divide the span before multiplying by the index. `(stop - start) *
-        // index / denominator` can overflow at a finite `stop == f64::MAX`.
-        let step = (stop - start) / (point_count - 1) as Value;
-        for index in 0..point_count {
-            poll_abort(abort, index)?;
-            frequencies.push(start + index as Value * step);
-        }
-    } else {
-        let (axis_start, axis_stop, base) = match scale {
-            FrequencyGridScale::Decade => (start.log10(), stop.log10(), 10.0_f64),
-            FrequencyGridScale::Octave => (start.log2(), stop.log2(), 2.0_f64),
-            FrequencyGridScale::Linear => {
-                return Err(FrequencyGridError::PointCountOverflow);
+    let (axis_start, axis_stop) = match scale {
+        FrequencyGridScale::Linear => (start, stop),
+        FrequencyGridScale::Decade => (start.log10(), stop.log10()),
+        FrequencyGridScale::Octave => (start.log2(), stop.log2()),
+    };
+    let denominator = point_count.saturating_sub(1).max(1) as Value;
+    for index in 0..point_count {
+        poll_abort(abort, index)?;
+        // Authored endpoints are exact. Reconstructing them from rounded
+        // logarithms can overflow even when the original value is finite.
+        let value = if index == 0 {
+            start
+        } else if index == point_count - 1 {
+            stop
+        } else {
+            match scale {
+                FrequencyGridScale::Linear => {
+                    start + index as Value * ((stop - start) / denominator)
+                }
+                FrequencyGridScale::Decade => 10.0_f64
+                    .powf(axis_start + (axis_stop - axis_start) * index as Value / denominator),
+                FrequencyGridScale::Octave => 2.0_f64
+                    .powf(axis_start + (axis_stop - axis_start) * index as Value / denominator),
             }
         };
-        let denominator = (point_count - 1) as Value;
-        for index in 0..point_count {
-            poll_abort(abort, index)?;
-            let axis_value = axis_start + (axis_stop - axis_start) * index as Value / denominator;
-            frequencies.push(base.powf(axis_value));
+        if !value.is_finite()
+            || value < start
+            || value > stop
+            || (start < stop
+                && frequencies
+                    .last()
+                    .is_some_and(|previous| value <= *previous))
+        {
+            return Err(FrequencyGridError::UnrepresentableSpacing);
         }
+        frequencies.push(value);
     }
 
     ensure_not_aborted(abort)?;
@@ -286,6 +303,39 @@ mod tests {
             )
             .expect("extreme finite linear grid"),
             vec![0.0, Value::MAX / 2.0, Value::MAX]
+        );
+    }
+
+    #[test]
+    fn generated_grid_preserves_extreme_finite_endpoints_exactly() {
+        for scale in [
+            FrequencyGridScale::Linear,
+            FrequencyGridScale::Decade,
+            FrequencyGridScale::Octave,
+        ] {
+            let start = Value::MAX / 1024.0;
+            let grid = generate_frequency_grid(start, Value::MAX, 32, scale, false, 2, &NoAbort)
+                .expect("representable extreme sweep");
+            assert_eq!(grid.first(), Some(&start), "{scale:?}");
+            assert_eq!(grid.last(), Some(&Value::MAX), "{scale:?}");
+            assert!(grid.iter().all(|value| value.is_finite()), "{scale:?}");
+            assert!(grid.windows(2).all(|pair| pair[0] < pair[1]), "{scale:?}");
+        }
+    }
+
+    #[test]
+    fn generated_grid_refuses_unrepresentable_spacing() {
+        assert!(
+            generate_frequency_grid(
+                1.0,
+                1.0_f64.next_up(),
+                3,
+                FrequencyGridScale::Linear,
+                false,
+                1,
+                &NoAbort
+            )
+            .is_err()
         );
     }
 

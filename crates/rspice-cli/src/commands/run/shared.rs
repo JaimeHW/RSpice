@@ -169,6 +169,10 @@ fn generate_step_values(
                 }
             }
             SweepPointGenerationError::Aborted => super::cancellation_cli_error(timeout_seconds),
+            SweepPointGenerationError::UnrepresentableSpacing => CliError::SimulationError {
+                message: format!(".STEP {error}"),
+                analysis: Some("Step".to_owned()),
+            },
             _ => CliError::InternalError {
                 message: format!("unrecognized sweep generation failure: {error}"),
             },

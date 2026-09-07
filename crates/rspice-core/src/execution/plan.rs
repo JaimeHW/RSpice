@@ -364,6 +364,11 @@ impl RunAxis {
             .values_bounded_with_abort(limits.max_batch_runs, abort)
             .map_err(|error| match error {
                 crate::netlist::SweepPointGenerationError::Aborted => DeckPlanError::Aborted,
+                crate::netlist::SweepPointGenerationError::UnrepresentableSpacing => {
+                    DeckPlanError::UnrepresentableSweep {
+                        axis: target.axis_name(),
+                    }
+                }
                 crate::netlist::SweepPointGenerationError::LimitExceeded { requested, limit } => {
                     DeckPlanError::ResourceLimit(ResourceLimitError {
                         resource: ResourceKind::BatchRuns,
@@ -1169,6 +1174,9 @@ impl DeckPlan {
 #[non_exhaustive]
 pub enum DeckPlanError {
     EmptyAxisName,
+    UnrepresentableSweep {
+        axis: String,
+    },
     EmptyAxis {
         axis: String,
     },
@@ -1259,6 +1267,10 @@ impl fmt::Display for DeckPlanError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::EmptyAxisName => formatter.write_str("run axis name must not be empty"),
+            Self::UnrepresentableSweep { axis } => write!(
+                formatter,
+                "run axis '{axis}' spacing cannot be represented as distinct finite values within the requested range"
+            ),
             Self::EmptyAxis { axis } => write!(formatter, "run axis '{axis}' has no values"),
             Self::EmptyAxisValue { axis } => {
                 write!(formatter, "run axis '{axis}' contains an empty value")

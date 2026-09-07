@@ -28,6 +28,49 @@ fn explicit_temp_deck(temp_c: f64) -> String {
 }
 
 #[test]
+fn unrepresentable_spacing_is_reported_by_both_step_planners_and_dc() {
+    use rspice_core::ResourceLimits;
+    use rspice_core::abort_signal::NoAbort;
+    use rspice_core::engine::{StepPlanLimits, bounded_dc_sweep_points};
+    use rspice_core::execution::{DeckPlan, DeckPlanError};
+    use rspice_core::netlist::DcSweepSpec;
+
+    let netlist = Netlist::parse(
+        "unrepresentable sweep\n.param rval=1\nV1 in 0 1\nR1 in 0 {rval}\n.step param rval 1 2 1e-50\n.op\n.end\n",
+    ).unwrap();
+    let error = DeckPlan::from_netlist(&netlist, &ResourceLimits::default()).unwrap_err();
+    assert!(
+        matches!(error, DeckPlanError::UnrepresentableSweep { ref axis } if axis == "param:rval")
+    );
+    let steps = netlist
+        .analyses
+        .iter()
+        .filter_map(|analysis| match analysis {
+            AnalysisCommand::Step(step) => Some(step.clone()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let engine = Engine::default();
+    let error = engine
+        .plan_step_commands(
+            &netlist,
+            &steps,
+            StepPlanLimits::from_resource_limits(ResourceLimits::default()),
+        )
+        .expect_err("STEP must reject duplicate generated points");
+    assert!(
+        error.to_string().contains("spacing cannot be represented"),
+        "{error}"
+    );
+    let error = bounded_dc_sweep_points(&engine, &DcSweepSpec::linear(1.0, 2.0, 1e-50), &NoAbort)
+        .unwrap_err();
+    assert!(
+        error.to_string().contains("spacing cannot be represented"),
+        "{error}"
+    );
+}
+
+#[test]
 fn step_temp_list_rebuilds_operating_point_at_each_temperature() {
     let deck = "* .STEP TEMP should execute as temperature-configured OP runs\n\
                 v1 in 0 dc 0.7\n\
