@@ -83,6 +83,7 @@ wasmi = { version = "1.1.0", default-features = false, features = ["std", "extra
 
 # Logging
 log = "0.4"
+web-time = "1.1"
 
 # FFT for frequency analysis
 rustfft.workspace = true
@@ -122,14 +123,16 @@ rfd = { version = "0.17", features = ["file-handle-inner"] }
 dirs = "6.0"
 
 [dev-dependencies]
+wat = "1"
+fst-writer = "0.3"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 # Keypair generation for license issuance in the `services::license` tests.
 # The matching `rand_core` feature on ed25519-dalek is dev-only for the same
 # reason: `cargo test` unions it in, `cargo build` never sees it.
 ed25519-dalek = { version = "2", features = ["rand_core"] }
 rand = "0.8"
 lopdf = { version = "0.44", default-features = false }
-wat = "1"
-fst-writer = "0.3"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 # Native builds expose egui's semantic tree to platform assistive technology
@@ -269,6 +272,9 @@ rspice-pack = { workspace = true }
 time = { workspace = true }
 url = { workspace = true }
 wasm-streams = { workspace = true }
+
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+wasm-bindgen-test = "0.3.76"
 
 [lints]
 workspace = true

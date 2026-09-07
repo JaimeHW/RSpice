@@ -407,12 +407,7 @@ pub(super) fn ensure_project_recovery_catalog(ctx: &Context, state: &mut AppStat
 }
 
 fn checkpoint_age(created_unix_ms: u64) -> String {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis()
-        .try_into()
-        .unwrap_or(u64::MAX);
+    let now = crate::time_compat::unix_time_ms();
     let seconds = now.saturating_sub(created_unix_ms) / 1_000;
     match seconds {
         0..=59 => format!("{seconds} s ago"),

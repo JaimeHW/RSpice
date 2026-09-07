@@ -242,8 +242,7 @@ impl ModelValidationReceipt {
     ) -> Result<Self, String> {
         let engine_version = env!("CARGO_PKG_VERSION").to_owned();
         let platform = model_validation_platform().to_owned();
-        let validated_at_unix_ms = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
+        let validated_at_unix_ms = crate::time_compat::checked_unix_epoch()
             .map_err(|error| format!("system clock cannot timestamp model validation: {error}"))?
             .as_millis()
             .try_into()
@@ -2067,8 +2066,7 @@ impl ModelLibraryManager {
                 provider.library
             ));
         }
-        let created_at_unix_ms = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
+        let created_at_unix_ms = crate::time_compat::checked_unix_epoch()
             .map_err(|error| format!("system clock cannot timestamp provider decision: {error}"))?
             .as_millis()
             .try_into()

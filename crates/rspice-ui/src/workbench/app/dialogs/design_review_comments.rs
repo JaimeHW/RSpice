@@ -8,6 +8,7 @@ use egui::{Align, Context, Frame, Layout, RichText, ScrollArea, Stroke, TextEdit
 
 use crate::diagnostics::ConsoleMessage;
 use crate::state::{DesignNote, DesignNoteKind, DesignReviewMutation, DesignReviewState, Point};
+use crate::time_compat::unix_time_ms;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{
@@ -1014,13 +1015,6 @@ fn relative_time(timestamp_ms: u64) -> String {
         3_600_000..=86_399_999 => format!("{} h ago", elapsed / 3_600_000),
         _ => format!("{} d ago", elapsed / 86_400_000),
     }
-}
-
-fn unix_time_ms() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|duration| duration.as_millis().try_into().unwrap_or(u64::MAX))
-        .unwrap_or_default()
 }
 
 #[cfg(test)]

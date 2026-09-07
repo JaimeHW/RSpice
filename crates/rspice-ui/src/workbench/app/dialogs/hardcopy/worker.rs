@@ -746,7 +746,7 @@ mod browser {
         _onmessage: Closure<dyn FnMut(web_sys::MessageEvent)>,
         _onerror: Closure<dyn FnMut(web_sys::ErrorEvent)>,
         _onmessageerror: Closure<dyn FnMut(web_sys::MessageEvent)>,
-        deadline_ms: f64,
+        deadline: crate::time_compat::Instant,
     }
 
     impl Drop for ActiveHardcopyWorker {
@@ -1004,13 +1004,13 @@ mod browser {
                 _onmessage: onmessage,
                 _onerror: onerror,
                 _onmessageerror: onmessageerror,
-                deadline_ms: js_sys::Date::now()
-                    + match operation {
+                deadline: crate::time_compat::Instant::now()
+                    + std::time::Duration::from_secs(match operation {
                         HardcopyWorkerOperation::ResolveSource
-                        | HardcopyWorkerOperation::Preview => 120_000.0,
+                        | HardcopyWorkerOperation::Preview => 120,
                         HardcopyWorkerOperation::Publication
-                        | HardcopyWorkerOperation::PackagedPublication => 1_800_000.0,
-                    },
+                        | HardcopyWorkerOperation::PackagedPublication => 1_800,
+                    }),
             });
         });
         if let Err(error) = worker.post_message_with_transfer(&message, &transfer) {
@@ -1031,7 +1031,7 @@ mod browser {
             }
             if active
                 .as_ref()
-                .is_some_and(|worker| js_sys::Date::now() >= worker.deadline_ms)
+                .is_some_and(|worker| crate::time_compat::Instant::now() >= worker.deadline)
             {
                 active.take();
                 return Some(Err(

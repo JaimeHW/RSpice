@@ -11,6 +11,7 @@ use thiserror::Error;
 use uuid::Uuid;
 
 use crate::product::ContentDigest;
+use crate::time_compat::unix_time_ms;
 
 use super::{
     Bus, BusTap, Component, DesignNote, DocumentationShape, Junction, NetLabel,
@@ -808,15 +809,6 @@ fn validate_dispositions(
 
 fn digest(bytes: &[u8]) -> ContentDigest {
     ContentDigest::from_bytes(Sha256::digest(bytes).into())
-}
-
-fn unix_time_ms() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis()
-        .try_into()
-        .unwrap_or(u64::MAX)
 }
 
 #[cfg(test)]

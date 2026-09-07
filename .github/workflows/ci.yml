@@ -743,6 +743,16 @@ jobs:
           --max-gzip 8388608
       - name: Install pinned wasm-bindgen CLI
         run: cargo install wasm-bindgen-cli --version 0.2.126 --locked
+      - name: Test UI clocks in a browser window
+        env:
+          CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER: wasm-bindgen-test-runner
+          WASM_BINDGEN_USE_BROWSER: '1'
+        run: cargo test --locked -p rspice-ui --target wasm32-unknown-unknown --test browser_clock
+      - name: Test UI clocks in a dedicated worker
+        env:
+          CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER: wasm-bindgen-test-runner
+          WASM_BINDGEN_USE_DEDICATED_WORKER: '1'
+        run: cargo test --locked -p rspice-ui --target wasm32-unknown-unknown --test browser_clock
       - name: Generate optimized browser worker bindings
         run: >-
           wasm-bindgen --target web

@@ -15,6 +15,9 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 #[cfg(any(test, target_arch = "wasm32"))]
+use crate::time_compat::Instant;
+
+#[cfg(any(test, target_arch = "wasm32"))]
 use crate::workbench::routing::surface_route::{SurfaceRoute, SurfaceRouteParseError};
 
 #[cfg(any(test, target_arch = "wasm32"))]
@@ -33,28 +36,26 @@ const HISTORY_STATE_VERSION: u8 = 1;
 #[cfg(any(test, target_arch = "wasm32"))]
 const OWNED_HISTORY_LIMIT: i32 = 32;
 #[cfg(any(test, target_arch = "wasm32"))]
-const TRAVERSAL_WATCHDOG_TIMEOUT_MS: f64 = 5_000.0;
+const TRAVERSAL_WATCHDOG_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
 #[cfg(any(test, target_arch = "wasm32"))]
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 struct TraversalWatchdog {
-    deadline_ms: Option<f64>,
+    deadline: Option<Instant>,
 }
 
 #[cfg(any(test, target_arch = "wasm32"))]
 impl TraversalWatchdog {
-    fn arm(&mut self, now_ms: f64) {
-        self.deadline_ms = now_ms
-            .is_finite()
-            .then_some(now_ms + TRAVERSAL_WATCHDOG_TIMEOUT_MS);
+    fn arm(&mut self, now: Instant) {
+        self.deadline = Some(now + TRAVERSAL_WATCHDOG_TIMEOUT);
     }
 
     fn clear(&mut self) {
-        self.deadline_ms = None;
+        self.deadline = None;
     }
 
-    fn expired(self, now_ms: f64) -> bool {
-        now_ms.is_finite() && self.deadline_ms.is_some_and(|deadline| now_ms >= deadline)
+    fn expired(self, now: Instant) -> bool {
+        self.deadline.is_some_and(|deadline| now >= deadline)
     }
 }
 
@@ -692,7 +693,7 @@ mod browser {
         static HISTORY_SESSION: RefCell<Option<HistorySession>> = const { RefCell::new(None) };
         static HISTORY_SESSION_READY: Cell<bool> = const { Cell::new(false) };
         static TRAVERSAL_WATCHDOG: RefCell<TraversalWatchdog> =
-            const { RefCell::new(TraversalWatchdog { deadline_ms: None }) };
+            const { RefCell::new(TraversalWatchdog { deadline: None }) };
     }
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -788,8 +789,11 @@ mod browser {
         if !traversal_in_flight() {
             return false;
         }
-        let expired =
-            TRAVERSAL_WATCHDOG.with(|watchdog| watchdog.borrow().expired(js_sys::Date::now()));
+        let expired = TRAVERSAL_WATCHDOG.with(|watchdog| {
+            watchdog
+                .borrow()
+                .expired(crate::time_compat::Instant::now())
+        });
         if expired {
             disable_history_session();
         }
@@ -934,7 +938,11 @@ mod browser {
                 .ok_or(BrowserNavigationError::BrowserSessionUnavailable)?;
             session.commit_traversal_started(&target)
         })?;
-        TRAVERSAL_WATCHDOG.with(|watchdog| watchdog.borrow_mut().arm(js_sys::Date::now()));
+        TRAVERSAL_WATCHDOG.with(|watchdog| {
+            watchdog
+                .borrow_mut()
+                .arm(crate::time_compat::Instant::now())
+        });
         Ok(())
     }
 
@@ -1613,15 +1621,16 @@ mod tests {
     #[test]
     fn traversal_watchdog_expires_at_the_bounded_deadline_and_clears() {
         let mut watchdog = TraversalWatchdog::default();
-        assert!(!watchdog.expired(100.0));
+        let now = Instant::now();
+        assert!(!watchdog.expired(now));
 
-        watchdog.arm(100.0);
-        assert!(!watchdog.expired(100.0 + TRAVERSAL_WATCHDOG_TIMEOUT_MS - 0.1));
-        assert!(watchdog.expired(100.0 + TRAVERSAL_WATCHDOG_TIMEOUT_MS));
+        watchdog.arm(now);
+        let deadline = now + TRAVERSAL_WATCHDOG_TIMEOUT;
+        assert!(!watchdog.expired(deadline - std::time::Duration::from_millis(1)));
+        assert!(watchdog.expired(deadline));
 
         watchdog.clear();
-        assert!(!watchdog.expired(f64::MAX));
-        watchdog.arm(f64::NAN);
-        assert_eq!(watchdog.deadline_ms, None);
+        assert!(!watchdog.expired(deadline + TRAVERSAL_WATCHDOG_TIMEOUT));
+        assert_eq!(watchdog.deadline, None);
     }
 }

@@ -9,7 +9,6 @@
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
 use std::path::PathBuf;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
@@ -169,12 +168,7 @@ fn prepare_checkpoint(
     let serialized = crate::io::project_io::serialize_project_file(&project)
         .map_err(|error| format!("project checkpoint serialization failed: {error}"))?;
     let bytes = serialized.as_bytes();
-    let created_unix_ms = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis()
-        .try_into()
-        .unwrap_or(u64::MAX);
+    let created_unix_ms = crate::time_compat::unix_time_ms();
     let project_id = project.workspace.project.id().to_string();
     let checkpoint_id = Uuid::new_v4();
     let snapshot_name = format!("{created_unix_ms}-{checkpoint_id}{SNAPSHOT_SUFFIX}");

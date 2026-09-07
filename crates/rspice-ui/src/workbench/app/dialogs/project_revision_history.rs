@@ -1167,10 +1167,7 @@ fn nonempty_or(value: &str, fallback: &str) -> String {
 }
 
 fn format_revision_time(timestamp_ms: u64) -> String {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|duration| duration.as_millis().try_into().unwrap_or(u64::MAX))
-        .unwrap_or_default();
+    let now = crate::time_compat::unix_time_ms();
     if timestamp_ms > now {
         return "clock skew".to_owned();
     }

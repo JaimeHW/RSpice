@@ -6,7 +6,9 @@
 //! verifier/state pair survives the full-page authorization redirect, in the
 //! current tab's `sessionStorage`, and it is deleted before code exchange.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+use crate::time_compat::Instant;
 
 use futures_util::{FutureExt as _, pin_mut, select};
 use rspice_cloud_client::contract::{
@@ -351,11 +353,18 @@ impl BrowserExecutor {
                 return;
             }
         };
+        let created_at_unix_seconds = match unix_seconds() {
+            Ok(timestamp) => timestamp,
+            Err(error) => {
+                self.set_signed_out(Some(error));
+                return;
+            }
+        };
         let record = PendingPkceRecord {
             state,
             verifier: pkce.verifier,
             redirect_uri: self.configuration.browser_redirect_uri.clone(),
-            created_at_unix_seconds: time::OffsetDateTime::now_utc().unix_timestamp(),
+            created_at_unix_seconds,
         };
         if store_pkce_record(&record).is_err() {
             self.set_signed_out(Some(
@@ -1226,9 +1235,23 @@ fn granted_features(features: &serde_json::Value) -> Vec<String> {
 }
 
 fn now_rfc3339() -> Option<String> {
-    time::OffsetDateTime::now_utc()
+    let timestamp = crate::time_compat::checked_unix_epoch()
+        .ok()?
+        .as_nanos()
+        .try_into()
+        .ok()?;
+    time::OffsetDateTime::from_unix_timestamp_nanos(timestamp)
+        .ok()?
         .format(&time::format_description::well_known::Rfc3339)
         .ok()
+}
+
+fn unix_seconds() -> Result<i64, String> {
+    crate::time_compat::checked_unix_epoch()
+        .map_err(|error| format!("Cannot timestamp browser sign-in: {error}."))?
+        .as_secs()
+        .try_into()
+        .map_err(|_| "The browser clock exceeds the supported timestamp range.".to_owned())
 }
 
 #[derive(serde::Deserialize, serde::Serialize)]
@@ -1351,9 +1374,7 @@ fn take_browser_callback(
     }
     let pending: PendingPkceRecord = serde_json::from_str(&raw)
         .map_err(|_| "The pending sign-in record is invalid.".to_owned())?;
-    let age = time::OffsetDateTime::now_utc()
-        .unix_timestamp()
-        .saturating_sub(pending.created_at_unix_seconds);
+    let age = unix_seconds()?.saturating_sub(pending.created_at_unix_seconds);
     let base64url = |value: &str| {
         value
             .bytes()

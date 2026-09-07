@@ -16,7 +16,7 @@
 //! echo so the leaseholder never fights its own edits.
 
 use std::collections::{HashMap, HashSet};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use crate::diagnostics::ConsoleMessage;
 use crate::io::schematic_io::{load_schematic_text, serialize_schematic_for_wire};
@@ -30,6 +30,7 @@ use crate::services::live_protocol::{
     content_digest, replace_messages,
 };
 use crate::state::SchematicState;
+use crate::time_compat::Instant;
 use crate::workbench::AppState;
 use crate::workbench::state::LiveWriteLocks;
 
