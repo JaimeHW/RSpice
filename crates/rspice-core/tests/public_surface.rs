@@ -493,7 +493,7 @@ use rspice_core::analysis::harmonic_balance::{
 // name below is on the path from a declared bus to a viewer, a dump or a
 // binding that can show it.
 //
-// - 7 in `engine/result.rs`. `DigitalBusDeclaration` is the declaration
+// - 7 in `analysis/transient.rs`. `DigitalBusDeclaration` is the declaration
 //   itself and `DigitalBusSource` is a public field of it, so
 //   `private_interfaces` makes the enum public by construction; `::new` is the
 //   checked constructor and `::validate` the same rules for a declaration that

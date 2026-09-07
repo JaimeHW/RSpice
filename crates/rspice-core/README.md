@@ -245,7 +245,7 @@ Semiconductor temperature behavior belongs to each device model;
 | :--- | :--- |
 | DC operating point and DC sweep | `analysis/dc.rs`, `engine/dc.rs` |
 | AC small-signal sweep | `analysis/ac.rs`, `engine/ac.rs` |
-| Transient | `engine/transient/` |
+| Transient | `engine/transient/`; shared results in `analysis/transient.rs` |
 | Temperature handling | `analysis/temperature.rs` |
 | Laplace-defined sources/filters | `netlist/parser/laplace_synthesis.rs` |
 

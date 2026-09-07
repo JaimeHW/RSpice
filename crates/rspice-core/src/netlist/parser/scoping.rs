@@ -349,6 +349,60 @@ fn uses_generated_xyce_diode_model(model: &ModelDef) -> bool {
         })
 }
 
+/// Return whether Xyce 7.10's legacy `D` model registry accepts a model
+/// parameter name.
+///
+/// RSpice's native diode also supports ngspice-compatible and geometry
+/// fields, while Xyce's parser diagnoses those names when they are authored
+/// on a legacy diode model card. The entries below are the exact
+/// `Traits::loadModelParameters` names from Xyce 7.10 `N_DEV_Diode.C`, plus
+/// the framework-owned `LEVEL` selector.
+fn supports_xyce_legacy_diode_model_parameter(name: &str) -> bool {
+    matches!(
+        name.to_ascii_uppercase().as_str(),
+        "LEVEL"
+            | "IS"
+            | "JS"
+            | "JSW"
+            | "RS"
+            | "N"
+            | "NS"
+            | "ISR"
+            | "NR"
+            | "IKF"
+            | "TT"
+            | "CJO"
+            | "CJ"
+            | "CJ0"
+            | "VJ"
+            | "M"
+            | "CJSW"
+            | "CJP"
+            | "PHP"
+            | "VJSW"
+            | "MJSW"
+            | "EG"
+            | "XTI"
+            | "TIKF"
+            | "TBV1"
+            | "TBV2"
+            | "TRS1"
+            | "TRS"
+            | "TRS2"
+            | "FC"
+            | "FCS"
+            | "BV"
+            | "VB"
+            | "IBV"
+            | "NBV"
+            | "IBVL"
+            | "NBVL"
+            | "TNOM"
+            | "KF"
+            | "AF"
+    )
+}
+
 fn push_unknown_xyce_diode_model_parameter_warnings(
     model: &ModelDef,
     model_name: &str,
@@ -365,7 +419,7 @@ fn push_unknown_xyce_diode_model_parameter_warnings(
         if !model_has_parameter(model, name) {
             continue;
         }
-        if crate::device::Diode::supports_xyce_legacy_model_parameter(name) {
+        if supports_xyce_legacy_diode_model_parameter(name) {
             continue;
         }
         let canonical_name = name.to_ascii_uppercase();

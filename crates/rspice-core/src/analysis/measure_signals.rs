@@ -37,6 +37,7 @@ fn first_ordered_pair(pair: &[Value]) -> Option<bool> {
     }
 }
 
+use super::error::SimulationError;
 use super::measure::{
     AcceptedRowAtMatch, ContinuousMeasureResult, DelayConditionTracker, EdgeType,
     ErrorFunctionNorm, ExtremaOutput, LegacyFracDelayTracker, MeasureConditionDirection,
@@ -44,10 +45,10 @@ use super::measure::{
     MeasureWindow, TrigSpec, TriggerEvent, WhenCondition, accepted_row_at_match,
     accepted_row_secant_slope, canonical_measure_signal_name,
 };
+use super::transient::{TransientDeviceOpTrace, TransientResult};
 use crate::Value;
 use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::analysis::{AcResult, NoiseContributionKind, NoiseContributionProbe};
-use crate::engine::{SimulationError, TransientDeviceOpTrace, TransientResult};
 use crate::netlist::expr::{ComplexValue, Expr as NetExpr, PreparedExpression, is_real};
 use crate::netlist::{
     InterfaceNodeAliases, Netlist, NetlistSourceLocation, OutputAnalysisKind, OutputDirectiveKind,

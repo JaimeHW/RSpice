@@ -56,7 +56,7 @@ mod core;
 mod data;
 mod dc;
 mod distortion;
-mod error;
+use crate::analysis::error;
 mod hb;
 mod health;
 mod matrix;
@@ -73,8 +73,8 @@ mod pole_zero;
 mod pss;
 mod pss_noise;
 mod pstb;
+use crate::analysis::transient as result;
 pub use pstb::PeriodicStabilityResult;
-mod result;
 mod sensitivity;
 pub use sensitivity::SensitivityCardResult;
 mod sp;
@@ -85,7 +85,7 @@ mod stb;
 mod step;
 mod transfer;
 mod transient;
-pub mod waveform;
+pub use crate::analysis::transient::waveform;
 // CI ratchets on the XSPICE settle loop's dispatch and copy-on-write cost.
 // Nothing but tests lives here, and it lives at rank 12 because it drives a
 // whole transient run through `Engine` to take its measurement.

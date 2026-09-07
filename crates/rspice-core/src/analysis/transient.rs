@@ -1,11 +1,13 @@
 //! Public time-domain result types.
 
-use crate::analysis::fourier::FourierResult;
-use crate::analysis::measure::MeasureResult;
-use crate::engine::waveform::{
+pub mod waveform;
+
+use self::waveform::{
     TransientChannelAvailability, TransientChannelRole, TransientChannelSample,
     TransientResultCompressed, TransientSampleAbsence,
 };
+use crate::analysis::fourier::FourierResult;
+use crate::analysis::measure::MeasureResult;
 use crate::netlist::{FftFormat, FftOutput, FftWindow, XyceFftMode, XyceOutputIntervalSchedule};
 use crate::xspice::{DigitalState, DigitalStrength, DigitalValue};
 use crate::{NodeId, Value};

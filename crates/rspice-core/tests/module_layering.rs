@@ -155,75 +155,8 @@ const LAYERS: &[(&str, u32)] = &[
     ("execution", 13),
 ];
 
-/// Layer-order violations present in the tree today, with exact counts.
-///
-/// Sorted by the remediation phase that retires them. Do not add entries to
-/// unblock new code — a new violation means the code is in the wrong module.
-const ALLOWED_VIOLATIONS: &[(&str, &str, usize)] = &[
-    // ---------------------------------------------------------------------
-    // Phase 2 — foundation leaves.
-    //
-    // The ground-name predicate moved to the layer-0 `naming` leaf, which
-    // retired `device`, `netlist`, `circuit` and `solver` reaching into
-    // `compat`. `compat` itself is gone: its RAW reader now sits in `io`
-    // beside the RAW writers that used to live in `analysis::output`, which
-    // retired `analysis -> compat` as well.
-    //
-    // `expr -> analysis` is retired: it was the Celsius/Kelvin conversions,
-    // which now live in `constants` beside the physical constants they are
-    // arithmetic on.
-    //
-    // `resource -> netlist` is retired too: it was the default include depth,
-    // which `resource` had to reach up into `netlist` to read even though it
-    // is a resource limit and sits beside the other fifteen now. Phase 2 has
-    // no remaining edges.
-
-    // ---------------------------------------------------------------------
-    // Phase 3 — extract `config`.
-    //
-    // `SimulationConfig`, `SpiceDialect` and their companions now live in
-    // `crate::config` at rank 3, below everything that reads them, so the
-    // twenty-seven references that made those three edges are downward.
-    //
-    // `expr -> netlist` is retired too: it was `ExpressionDialect`, the last
-    // dialect enum left in `netlist`, which the VM and the power operator both
-    // read to decide whether `log(x)` is natural or base 10. It followed
-    // `SpiceDialect` into `config`.
-    //
-    // ---------------------------------------------------------------------
-    // Phase 6 — one module per analysis.
-    //
-    // `analysis::measure_signals` reaching for `TransientResult`,
-    // a driver-side result type. The merge puts each analysis's result type in
-    // the same module as its driver. The other half of this edge is gone:
-    // `TransientResultCompressed` named `TransientStoreTrace` from across the
-    // boundary, and now sits beside it in `engine::waveform`.
-    ("analysis", "engine", 1),
-    // ---------------------------------------------------------------------
-    // Phase 7 — built-in name catalogues.
-    //
-    // The flattener asking the device layer which built-in Verilog-A models
-    // exist, so an `X` card naming one is not mistaken for a missing
-    // subcircuit. The XSPICE half of this edge went to `codemodels`; this half
-    // cannot follow, because the list is generator output whose `#[cfg]` gates
-    // must stay in lockstep with the generated model modules beside it. Moving
-    // it is a change to `rspice-veriloga-gen`, not a change to this crate.
-    ("netlist", "device", 1),
-    // ---------------------------------------------------------------------
-    // Phase 8 — device layer. Both edges retired.
-    //
-    // `device -> circuit` was never devices reaching into circuit storage, as
-    // this list claimed while the counter under-reported it at four. It was
-    // thirty-eight files importing `NodeId`, an alias to `usize`. It sits
-    // beside `Value` at the crate root now: shared vocabulary, named by every
-    // layer and owned by none.
-    //
-    // `device -> engine` was one `#[ignore]`d probe in `transmission_line`
-    // that built an `Engine` to print where an LTRA trajectory drifts from an
-    // ngspice oracle. It asserted nothing, so it could not fail and could not
-    // protect anything; the asserting replay test beside it keeps both
-    // fixtures.
-];
+/// No upward dependencies are permitted. Keep this list empty.
+const ALLOWED_VIOLATIONS: &[(&str, &str, usize)] = &[];
 
 fn src_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("src")

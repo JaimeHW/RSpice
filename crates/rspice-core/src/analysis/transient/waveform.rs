@@ -41,8 +41,8 @@
 //! `crate::execution` maps it into the shared result document. The mapping is
 //! total and tested; it is not a second decision about what a volt is.
 
+use super::{DigitalBusDeclaration, DigitalTrace, RealTrace, TransientPostResults};
 use crate::Value;
-use crate::engine::result::{DigitalBusDeclaration, DigitalTrace, RealTrace, TransientPostResults};
 
 //=============================================================================
 // Configuration

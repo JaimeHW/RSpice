@@ -26,6 +26,7 @@ pub mod ac;
 pub mod corner;
 pub mod dc;
 pub mod distortion;
+pub mod error;
 pub mod floquet;
 pub mod fourier;
 pub mod frequency_grid;
@@ -49,6 +50,7 @@ pub mod signal_integrity;
 pub mod stb;
 pub mod temperature;
 pub mod transfer;
+pub mod transient;
 
 pub use floquet::{
     FLOQUET_UNIT_CIRCLE_BAND, FloquetOrbitKind, FloquetSpectrumCertificate,

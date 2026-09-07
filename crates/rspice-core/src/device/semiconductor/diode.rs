@@ -868,60 +868,6 @@ impl Diode {
         self
     }
 
-    /// Return whether Xyce 7.10's legacy `D` model registry accepts a model
-    /// parameter name.
-    ///
-    /// RSpice's native diode also supports ngspice-compatible and geometry
-    /// fields, while Xyce's parser diagnoses those names when they are authored
-    /// on a legacy diode model card. The entries below are the exact
-    /// `Traits::loadModelParameters` names from Xyce 7.10 `N_DEV_Diode.C`, plus
-    /// the framework-owned `LEVEL` selector.
-    pub(crate) fn supports_xyce_legacy_model_parameter(name: &str) -> bool {
-        matches!(
-            name.to_ascii_uppercase().as_str(),
-            "LEVEL"
-                | "IS"
-                | "JS"
-                | "JSW"
-                | "RS"
-                | "N"
-                | "NS"
-                | "ISR"
-                | "NR"
-                | "IKF"
-                | "TT"
-                | "CJO"
-                | "CJ"
-                | "CJ0"
-                | "VJ"
-                | "M"
-                | "CJSW"
-                | "CJP"
-                | "PHP"
-                | "VJSW"
-                | "MJSW"
-                | "EG"
-                | "XTI"
-                | "TIKF"
-                | "TBV1"
-                | "TBV2"
-                | "TRS1"
-                | "TRS"
-                | "TRS2"
-                | "FC"
-                | "FCS"
-                | "BV"
-                | "VB"
-                | "IBV"
-                | "NBV"
-                | "IBVL"
-                | "NBVL"
-                | "TNOM"
-                | "KF"
-                | "AF"
-        )
-    }
-
     /// Set model parameters from a HashMap (for .MODEL statement parsing)
     pub fn with_model_params(mut self, params: &std::collections::HashMap<String, Value>) -> Self {
         self.level = params

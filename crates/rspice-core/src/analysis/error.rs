@@ -1,4 +1,4 @@
-//! Engine error types.
+//! Shared simulation error types for analyses and engine orchestration.
 //!
 //! # The taxonomy
 //!
@@ -31,7 +31,7 @@ use crate::solver::SolverError;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum SimulationErrorCode {
-    /// The supplied [`super::SimulationConfig`] violates an invariant.
+    /// The supplied [`crate::config::SimulationConfig`] violates an invariant.
     InvalidConfiguration,
     /// A configured resource budget was exceeded.
     ResourceLimit,
@@ -645,7 +645,7 @@ impl std::error::Error for ResultSchemaMismatchError {}
 #[derive(Debug, Error)]
 pub enum SimulationError {
     #[error("Invalid simulation configuration: {0}")]
-    Configuration(#[from] super::SimulationConfigError),
+    Configuration(#[from] crate::config::SimulationConfigError),
 
     #[error(transparent)]
     ResourceLimit(#[from] crate::resource::ResourceLimitError),
@@ -757,7 +757,7 @@ impl SimulationError {
     /// message or duplicate knowledge of nested error variants.
     pub fn descriptor(&self) -> SimulationErrorDescriptor {
         let (code, category, retryable) = match self {
-            Self::Configuration(super::SimulationConfigError::ResourceLimit(_))
+            Self::Configuration(crate::config::SimulationConfigError::ResourceLimit(_))
             | Self::ResourceLimit(_) => (
                 SimulationErrorCode::ResourceLimit,
                 SimulationErrorCategory::ResourceLimit,
@@ -845,7 +845,7 @@ impl SimulationError {
                 _ => None,
             },
             resource_limit: match self {
-                Self::Configuration(super::SimulationConfigError::ResourceLimit(error))
+                Self::Configuration(crate::config::SimulationConfigError::ResourceLimit(error))
                 | Self::ResourceLimit(error) => Some(*error),
                 _ => None,
             },
