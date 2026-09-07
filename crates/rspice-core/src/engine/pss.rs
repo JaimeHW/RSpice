@@ -82,7 +82,7 @@ impl PssAcceptedStepHistory {
 
 const PSS_KRYLOV_STATE_THRESHOLD: usize = 12;
 const PSS_KRYLOV_REL_TOL: Value = 1e-9;
-const PSS_OPERATING_POINT_IDENTITY_VERSION: u32 = 11;
+const PSS_OPERATING_POINT_IDENTITY_VERSION: u32 = 12;
 
 fn pss_identity_field(hasher: &mut blake3::Hasher, name: &str, bytes: &[u8]) {
     hasher.update(&(name.len() as u64).to_le_bytes());
@@ -1434,6 +1434,88 @@ impl PssContinuationState {
 }
 
 impl Engine {
+    pub(super) fn ensure_pss_source_periodicity(
+        circuit: &CircuitData,
+        period: Value,
+        autonomous: bool,
+        abort: &dyn AbortSignal,
+    ) -> Result<(), SimulationError> {
+        if !period.is_finite() || period <= 0.0 {
+            return Err(SimulationError::Circuit(
+                "PSS source period must be finite and positive".to_owned(),
+            ));
+        }
+        for (index, (name, periodic)) in circuit
+            .independent_source_periodicities(period, autonomous)
+            .enumerate()
+        {
+            if index & 0x1f == 0 && abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
+            if !periodic {
+                if autonomous {
+                    return Err(SimulationError::unsupported_capability(
+                        "analysis.pss.autonomous_source_waveform",
+                        format!(
+                            "autonomous PSS source '{name}' must be constant throughout the free-running orbit [0, {period:e}] s, including its outgoing endpoint; place startup kicks outside that window or use driven PSS"
+                        ),
+                    ));
+                }
+                return Err(SimulationError::unsupported_capability(
+                    "analysis.pss.driven_source_waveform",
+                    format!(
+                        "PSS source '{name}' is not certified periodic with period {period:e} s from the source time origin; its frequencies must be integer multiples of the carrier and its startup prefix must repeat"
+                    ),
+                ));
+            }
+        }
+        let behavioral = circuit
+            .behavioral_sources
+            .voltage_sources
+            .iter()
+            .map(|source| {
+                (
+                    source.name.as_str(),
+                    source.has_periodic_time_dependence(period, autonomous),
+                )
+            })
+            .chain(
+                circuit
+                    .behavioral_sources
+                    .current_sources
+                    .iter()
+                    .map(|source| {
+                        (
+                            source.name.as_str(),
+                            source.has_periodic_time_dependence(period, autonomous),
+                        )
+                    }),
+            );
+        for (index, (name, periodic)) in behavioral.enumerate() {
+            if index & 0x1f == 0 && abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
+            if !periodic {
+                return Err(SimulationError::unsupported_capability(
+                    if autonomous {
+                        "analysis.pss.autonomous_source_waveform"
+                    } else {
+                        "analysis.pss.driven_source_waveform"
+                    },
+                    format!(
+                        "PSS behavioral source '{name}' has no structural certificate for {} with period {period:e} s",
+                        if autonomous {
+                            "constant explicit-time dependence throughout the free-running orbit"
+                        } else {
+                            "time periodicity"
+                        }
+                    ),
+                ));
+            }
+        }
+        Ok(())
+    }
+
     fn pss_shooting_state_basis(circuit: &CircuitData) -> Vec<String> {
         state::PssStateBasis::new(circuit).names(circuit)
     }
@@ -1977,7 +2059,6 @@ impl Engine {
 
         let mut circuit = PssCircuit::new(circuit);
         circuit.ensure_regular_prescribed_currents(config.period())?;
-
         // Validate circuit has reactive elements
         let state_dimension = circuit.state_dimension();
         if circuit
@@ -1994,6 +2075,12 @@ impl Engine {
         {
             return Err(PssError::NoReactiveElements.into());
         }
+        Self::ensure_pss_source_periodicity(
+            &circuit,
+            config.period(),
+            config.is_autonomous(),
+            abort,
+        )?;
         self.ensure_result_values(
             config
                 .points_per_period
@@ -2488,6 +2575,7 @@ impl Engine {
     ) -> Result<(Vec<Value>, TransientResult), SimulationError> {
         let max_step = period / config.points_per_period as f64;
         if config.is_autonomous() {
+            Self::ensure_pss_source_periodicity(circuit, period, true, abort)?;
             circuit.ensure_regular_prescribed_currents(period)?;
         }
 
@@ -3207,7 +3295,19 @@ impl Engine {
                         }
                     }
                 }
-                Err(_) => return Ok(None),
+                Err(error @ (SolverError::OutOfMemory | SolverError::InvalidCircuit(_))) => {
+                    // A timestep retry cannot repair allocation or structural
+                    // failures. Preserve their diagnostic; the trial wrapper
+                    // restores the nonlinear/evaluator state on this path.
+                    return Err(error.into());
+                }
+                Err(
+                    SolverError::SingularMatrix
+                    | SolverError::ConvergenceFailed(_)
+                    | SolverError::Overflow
+                    | SolverError::PivotGrowth
+                    | SolverError::InaccurateSolution(_),
+                ) => return Ok(None),
             }
         }
 
@@ -4101,6 +4201,66 @@ mod tests {
             circuit.behavioral_sources.voltage_sources[0].cached_exact_constraint_at(freeze_time),
             None,
             "the exact consistency solve must not leak its rejected expression cache"
+        );
+    }
+
+    #[test]
+    fn malformed_newton_matrix_preserves_the_solver_error_and_rolls_back_the_trial() {
+        let netlist =
+            Netlist::parse("invalid PSS matrix\nB1 out 0 V=1\nR1 out 0 1k\nC1 out 0 100p\n.end\n")
+                .unwrap();
+        let engine = Engine::default();
+        let mut circuit = PssCircuit::new(engine.build_circuit(&netlist).unwrap());
+        let size = circuit.matrix_size();
+        // Keep every valid stamp slot, but give the solver a matrix whose
+        // dimension disagrees with the circuit's RHS. This is a structural
+        // failure; reducing the timestep or retrying Newton cannot repair it.
+        let triplets = (0..=size)
+            .flat_map(|row| (0..=size).map(move |column| (row, column, 0.0)))
+            .collect::<Vec<_>>();
+        let mut malformed = StaticMatrix::from_triplets(size + 1, size + 1, &triplets).unwrap();
+        circuit.link_indices(&malformed);
+        let coeff = CompanionCoefficients::for_method(IntegrationMethod::BackwardEuler);
+        let step = PssCompanionStep {
+            coeff: &coeff,
+            t_next: 1e-9,
+            dt: 1e-9,
+            initialization: false,
+        };
+        let start = vec![0.0; size];
+        let error = engine
+            .pss_newton_trial(&mut circuit, &mut malformed, step, &start, &NoAbort)
+            .expect_err(
+                "a malformed sparse solve must not be converted to ordinary nonconvergence",
+            );
+        assert!(
+            matches!(
+                error,
+                SimulationError::Solver(SolverError::InvalidCircuit(_))
+            ),
+            "{error}"
+        );
+        assert_eq!(
+            circuit.behavioral_sources.voltage_sources[0].cached_exact_constraint_at(step.t_next),
+            None
+        );
+
+        let mut fresh = PssCircuit::new(engine.build_circuit(&netlist).unwrap());
+        let mut fresh_matrix = engine.build_matrix(&fresh).unwrap();
+        fresh.link_indices(&fresh_matrix);
+        let expected = engine
+            .pss_newton_trial(&mut fresh, &mut fresh_matrix, step, &start, &NoAbort)
+            .unwrap()
+            .unwrap();
+        let mut matrix = engine.build_matrix(&circuit).unwrap();
+        circuit.link_indices(&matrix);
+        let actual = engine
+            .pss_newton_trial(&mut circuit, &mut matrix, step, &start, &NoAbort)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            actual, expected,
+            "the failed trial must not change a subsequent valid solve"
         );
     }
 

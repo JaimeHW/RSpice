@@ -1,4 +1,4 @@
-//! Structural admission for regular periodic prescribed-current waveforms.
+//! Structural periodicity and continuity of authored source waveforms.
 //!
 //! Sampling a waveform cannot prove periodicity: a nonperiodic drive can alias
 //! on every shooting point. Certify its authored periods and piecewise-linear
@@ -6,19 +6,14 @@
 //! of individually nonperiodic sources require a more general constraint model.
 
 use super::*;
-
-fn integral_cycles(cycles: Value) -> bool {
-    cycles.is_finite()
-        && cycles > 0.0
-        && (cycles - cycles.round()).abs() <= (32.0 * Value::EPSILON * cycles.max(1.0)).min(1e-10)
-        && cycles.round() >= 1.0
-}
+use crate::numerics::is_integral_cycle_count as integral_cycles;
 
 fn periodic_linear_points(
     points: &[(Value, Value)],
     period: Value,
     delay: Value,
     repeat_from: Option<Value>,
+    require_continuity: bool,
 ) -> bool {
     let Some(&(first_time, first_value)) = points.first() else {
         return true;
@@ -36,16 +31,22 @@ fn periodic_linear_points(
         && last > start
         && integral_cycles(period / (last - start))
         && VoltageSources::pwl_time_component::<false>(points, start, 0.0, None) == last_value
-        && points.windows(2).all(|pair| {
-            let dt = pair[1].0 - pair[0].0;
-            dt >= 0.0
-                && (pair[0].1 == pair[1].1
-                    || (dt > Value::EPSILON && ((pair[1].1 - pair[0].1) / dt).is_finite()))
-        })
+        && (!require_continuity
+            || points.windows(2).all(|pair| {
+                let dt = pair[1].0 - pair[0].0;
+                dt >= 0.0
+                    && (pair[0].1 == pair[1].1
+                        || (dt > Value::EPSILON && ((pair[1].1 - pair[0].1) / dt).is_finite()))
+            }))
 }
 
 impl VoltageSources {
-    pub(super) fn regular_periodic_waveform(
+    /// Autonomous shooting repeats the authored [0, T] quiet window. A
+    /// startup kick later than T still acts during stabilization, and is
+    /// restored at its authored time by subsequent transient continuation.
+    /// Certify that window structurally, including its outgoing endpoint;
+    /// an endpoint-only comparison could miss an entire pulse.
+    pub(super) fn constant_waveform_over_orbit(
         spec: &crate::netlist::SourceSpec,
         period: Value,
         context: Option<TransientSourceContext>,
@@ -59,9 +60,104 @@ impl VoltageSources {
             }
             | SourceSpec::DcAcTransient {
                 transient: inner, ..
-            } => Self::regular_periodic_waveform(inner, period, context, pwl),
+            } => Self::constant_waveform_over_orbit(inner, period, context, pwl),
             SourceSpec::RfPort { inner, port } => {
-                Self::regular_periodic_waveform(inner, period, context, pwl)
+                port.drive_tone()
+                    .is_none_or(|(amplitude, frequency, _)| amplitude == 0.0 || frequency == 0.0)
+                    && Self::constant_waveform_over_orbit(inner, period, context, pwl)
+            }
+            SourceSpec::Dc(_)
+            | SourceSpec::Ac { .. }
+            | SourceSpec::DcAc { .. }
+            | SourceSpec::TrNoise { .. }
+            | SourceSpec::TrRandom { .. } => true,
+            SourceSpec::Sin {
+                amplitude,
+                frequency,
+                delay,
+                damping,
+                ..
+            } => {
+                *amplitude == 0.0
+                    || *delay > period
+                    || (*damping == 0.0 && Self::resolve_sin_frequency(*frequency, context) == 0.0)
+            }
+            SourceSpec::Pulse { v1, v2, delay, .. } => v1 == v2 || *delay > period,
+            SourceSpec::Exp {
+                v1,
+                v2,
+                td1,
+                tau1,
+                td2,
+                tau2,
+            } => {
+                let (td1, _, td2, _) = Self::resolve_exp_timing(*td1, *tau1, *td2, *tau2, context);
+                v1 == v2 || (td1 > period && td2 > period)
+            }
+            SourceSpec::Pwl {
+                points,
+                delay,
+                repeat_from,
+            } => {
+                // A repeating profile can wrap before the first changed
+                // knot; qualify only the non-repeating prefix here.
+                *delay > period
+                    || points.first().is_none_or(|&(_, first)| {
+                        (*delay <= 0.0 || first == 0.0)
+                            && (points.iter().all(|&(_, value)| value == first)
+                                || (repeat_from.is_none()
+                                    && points.windows(2).all(|pair| {
+                                        pair[0].0 + delay > period || pair[0].1 == pair[1].1
+                                    })))
+                    })
+            }
+            SourceSpec::PwlFile { delay, .. } => pwl.is_some() && *delay > period,
+            SourceSpec::Pat {
+                vhi, vlo, delay, ..
+            } => vhi == vlo || *delay > period,
+            SourceSpec::Sffm {
+                offset,
+                amplitude,
+                delay,
+                ..
+            } => {
+                let xyce = Self::pulse_dialect(context) == crate::config::SpiceDialect::Xyce;
+                (!xyce && *delay > period)
+                    || (*amplitude == 0.0 && (xyce || *delay < 0.0 || *offset == 0.0))
+            }
+            SourceSpec::Am {
+                offset,
+                modulation_offset,
+                modulation_amplitude,
+                delay,
+                ..
+            } => {
+                *delay > period
+                    || (*modulation_offset == 0.0
+                        && *modulation_amplitude == 0.0
+                        && (*delay < 0.0 || *offset == 0.0))
+            }
+        }
+    }
+
+    pub(super) fn periodic_waveform(
+        spec: &crate::netlist::SourceSpec,
+        period: Value,
+        context: Option<TransientSourceContext>,
+        pwl: Option<&crate::device::pwl_file::PwlWaveform>,
+        require_continuity: bool,
+    ) -> bool {
+        use crate::netlist::SourceSpec;
+        match spec {
+            SourceSpec::Distortion { inner, .. }
+            | SourceSpec::DcTransient {
+                transient: inner, ..
+            }
+            | SourceSpec::DcAcTransient {
+                transient: inner, ..
+            } => Self::periodic_waveform(inner, period, context, pwl, require_continuity),
+            SourceSpec::RfPort { inner, port } => {
+                Self::periodic_waveform(inner, period, context, pwl, require_continuity)
                     && port.drive_tone().is_none_or(|(amplitude, frequency, _)| {
                         amplitude == 0.0
                             || frequency == 0.0
@@ -111,11 +207,10 @@ impl VoltageSources {
                 );
                 // A pulse wider than its period jumps at the wrap. A finite
                 // train has a stop event and does not repeat indefinitely.
-                rise > 0.0
-                    && fall > 0.0
+                (!require_continuity
+                    || (rise > 0.0 && fall > 0.0 && rise + width + fall <= source_period))
                     && width >= 0.0
-                    && delay <= source_period - (rise + width + fall)
-                    && rise + width + fall <= source_period
+                    && (delay <= 0.0 || delay <= source_period - (rise + width + fall))
                     && (pulse_count.is_nan() || *pulse_count <= 0.0)
                     && integral_cycles(period / source_period)
             }
@@ -123,7 +218,7 @@ impl VoltageSources {
                 points,
                 delay,
                 repeat_from,
-            } => periodic_linear_points(points, period, *delay, *repeat_from),
+            } => periodic_linear_points(points, period, *delay, *repeat_from, require_continuity),
             SourceSpec::PwlFile {
                 time_scale,
                 time_offset,
@@ -144,6 +239,7 @@ impl VoltageSources {
                     period,
                     *delay,
                     repeat_from.map(|start| time_offset + time_scale * start),
+                    require_continuity,
                 )
             }
             SourceSpec::Pat {
@@ -176,7 +272,13 @@ impl VoltageSources {
                     && *repeat_count < 0
                     && *delay <= 0.0
                     && integral_cycles(period / (count as Value * sample))
-                    && periodic_linear_points(&points, period, *delay, Some(0.0))
+                    && periodic_linear_points(
+                        &points,
+                        period,
+                        *delay,
+                        Some(0.0),
+                        require_continuity,
+                    )
             }
             SourceSpec::Exp { v1, v2, .. } => v1 == v2,
             SourceSpec::Sffm {

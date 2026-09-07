@@ -8,6 +8,77 @@ use std::sync::atomic::{AtomicU64, Ordering};
 const F0: f64 = 1.0e6;
 
 #[test]
+fn autonomous_startup_kick_remains_quiet_on_the_orbit_and_reactivates_after_saved_continuation() {
+    use rspice_core::engine::{TransientCheckpoint, TransientCheckpointEncoding};
+    let netlist = Netlist::parse("oscillator startup continuation\nL1 osc 0 1u\nC1 osc 0 1u\nB1 osc 0 I=-0.05*v(osc)+0.025*v(osc)*v(osc)*v(osc)\nI1 0 kick PULSE(0 1 10u 10n 10n 1u 1)\nRkick kick osc 1\n.end\n").unwrap();
+    let engine = Engine::default();
+    let (analysis, state) = engine
+        .run_pss_with_continuation_state(
+            &netlist,
+            PssConfig::autonomous()
+                .with_period_guess(6.3e-6)
+                .with_tstab_periods(30)
+                .with_tolerance(1e-6)
+                .with_max_iterations(60),
+        )
+        .unwrap();
+    let node = |names: &[String], name: &str| {
+        names
+            .iter()
+            .position(|n| n.eq_ignore_ascii_case(name))
+            .unwrap()
+    };
+    let osc = node(&analysis.result.node_names, "osc");
+    let kick = node(&analysis.result.node_names, "kick");
+    for (&vosc, &vkick) in analysis.result.waveforms[osc]
+        .values
+        .iter()
+        .zip(&analysis.result.waveforms[kick].values)
+    {
+        assert!(
+            (vkick - vosc).abs() < 1e-10,
+            "startup must not drive the periodic orbit"
+        );
+    }
+    let (_, checkpoint) = engine
+        .run_tran_from_pss_state(&netlist, &state, 8e-6, 1e-8)
+        .unwrap();
+    let (direct, _) = engine
+        .run_tran_resume(&netlist, &checkpoint, 12e-6, 1e-8)
+        .unwrap();
+    for encoding in [
+        TransientCheckpointEncoding::Unpacked,
+        TransientCheckpointEncoding::Packed,
+    ] {
+        let restored =
+            TransientCheckpoint::from_bytes(&checkpoint.to_bytes(encoding).unwrap()).unwrap();
+        let (resumed, _) = engine
+            .run_tran_resume(&netlist, &restored, 12e-6, 1e-8)
+            .unwrap();
+        assert_eq!(resumed.time, direct.time);
+        assert_eq!(resumed.voltages, direct.voltages);
+        let osc = node(&resumed.node_names, "osc");
+        let kick = node(&resumed.node_names, "kick");
+        let mut plateau = 0;
+        for ((&time, &vosc), &vkick) in resumed
+            .time
+            .iter()
+            .zip(&resumed.voltages[osc])
+            .zip(&resumed.voltages[kick])
+        {
+            if (10.1e-6..10.9e-6).contains(&time) {
+                plateau += 1;
+                assert!(
+                    (vkick - vosc - 1.0).abs() < 1e-9,
+                    "{encoding:?}, t={time:e}: startup source must reactivate at its authored time"
+                );
+            }
+        }
+        assert!(plateau > 10);
+    }
+}
+
+#[test]
 fn source_defaults_survive_pss_continuation_and_persisted_transient_segments() {
     use rspice_core::engine::{TransientCheckpoint, TransientCheckpointEncoding};
     for (dialect, nox) in [

@@ -236,6 +236,34 @@ mod wasm_tests {
     }
 
     #[wasm_bindgen_test]
+    fn pss_source_periodicity_rejects_endpoint_aliases_in_wasm() {
+        for source in [
+            "V1 out 0 SIN(0 1 1.5meg)",
+            "B1 out 0 V=sin(2*pi*1.5meg*time)",
+            "B1 out 0 V=spice_sin(0,1,1.5meg)",
+            "B1 out 0 V=1meg*time",
+        ] {
+            let netlist = rspice_core::Netlist::parse(&format!(
+                "WASM nonperiodic forcing\n{source}\nC1 out 0 1p\n.end\n"
+            ))
+            .unwrap();
+            let error = rspice_core::Engine::default()
+                .run_pss_with_abort(
+                    &netlist,
+                    rspice_core::analysis::PssConfig::new(1e6).with_tstab_periods(0),
+                    &rspice_core::abort_signal::NoAbort,
+                )
+                .unwrap_err();
+            assert!(
+                error
+                    .to_string()
+                    .contains("analysis.pss.driven_source_waveform"),
+                "{source}: {error}"
+            );
+        }
+    }
+
+    #[wasm_bindgen_test]
     fn monte_carlo_host_entropy_is_available_and_replayable_in_wasm() {
         use rspice_core::analysis::{MonteCarloConfig, MonteCarloRunner, Tolerance};
         let run = |config| {

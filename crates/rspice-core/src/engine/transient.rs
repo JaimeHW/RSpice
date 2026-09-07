@@ -2178,14 +2178,33 @@ impl Engine {
         fundamental: Value,
         abort: &dyn AbortSignal,
     ) -> Result<(), SimulationError> {
+        self.validate_pss_source_contract_with_abort(
+            netlist,
+            source_names,
+            &crate::analysis::PssConfig::new(fundamental),
+            abort,
+        )
+    }
+
+    /// Validate the complete selected source set using the exact PSS grid
+    /// and carrier that will resolve omitted waveform timing. The older
+    /// frequency-only form uses the default PSS point count.
+    pub fn validate_pss_source_contract_with_abort(
+        &self,
+        netlist: &Netlist,
+        source_names: &[String],
+        config: &crate::analysis::PssConfig,
+        abort: &dyn AbortSignal,
+    ) -> Result<(), SimulationError> {
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }
-        if !fundamental.is_finite() || fundamental <= 0.0 {
+        if !config.fundamental_freq.is_finite() || config.fundamental_freq <= 0.0 {
             return Err(SimulationError::Circuit(
                 "periodic source fundamental must be finite and positive".to_owned(),
             ));
         }
+        config.validate().map_err(SimulationError::Circuit)?;
         let engine = self.resolved_for_netlist(netlist);
         let circuit = engine.build_circuit_with_abort(netlist, abort)?;
         let selected = Self::validated_transient_source_selection(&circuit, source_names)?;
@@ -2210,94 +2229,18 @@ impl Engine {
                 omitted.join(", ")
             )));
         }
-        for (index, (name, spec, _)) in sources.iter().enumerate() {
-            if index & 0x1f == 0 && abort.is_aborted() {
-                return Err(SimulationError::Aborted);
-            }
-            Self::validate_periodic_source_spec(name, spec, fundamental)?;
-        }
-        Ok(())
-    }
-
-    fn validate_periodic_source_spec(
-        name: &str,
-        spec: &crate::netlist::SourceSpec,
-        fundamental: Value,
-    ) -> Result<(), SimulationError> {
-        use crate::netlist::SourceSpec;
-
-        let source_frequency = match spec {
-            SourceSpec::Distortion { inner, .. }
-            | SourceSpec::RfPort { inner, .. }
-            | SourceSpec::DcTransient {
-                transient: inner, ..
-            }
-            | SourceSpec::DcAcTransient {
-                transient: inner, ..
-            } => return Self::validate_periodic_source_spec(name, inner, fundamental),
-            SourceSpec::Sin {
-                frequency,
-                delay,
-                damping,
-                ..
-            } => {
-                if *delay != 0.0 || *damping != 0.0 {
-                    return Err(SimulationError::unsupported_capability(
-                        "analysis.pss.driven_source_waveform",
-                        format!("periodic source '{name}' uses a delayed or damped SIN waveform"),
-                    ));
-                }
-                *frequency
-            }
-            SourceSpec::Pulse { period, delay, .. } => {
-                if *delay != 0.0 || !period.is_finite() || *period <= 0.0 {
-                    return Err(SimulationError::unsupported_capability(
-                        "analysis.pss.driven_source_waveform",
-                        format!(
-                            "periodic source '{name}' requires an undelayed PULSE with a positive period"
-                        ),
-                    ));
-                }
-                1.0 / *period
-            }
-            SourceSpec::Pwl { .. } | SourceSpec::PwlFile { .. } => {
-                return Err(SimulationError::unsupported_capability(
-                    "analysis.pss.driven_source_waveform",
-                    format!(
-                        "periodic source '{name}' uses PWL; exact PWL period authentication is unavailable"
-                    ),
-                ));
-            }
-            SourceSpec::Exp { .. } => {
-                return Err(SimulationError::unsupported_capability(
-                    "analysis.pss.driven_source_waveform",
-                    format!("periodic source '{name}' uses the non-periodic EXP waveform"),
-                ));
-            }
-            other => {
-                return Err(SimulationError::unsupported_capability(
-                    "analysis.pss.driven_source_waveform",
-                    format!(
-                        "periodic source '{name}' uses unsupported waveform {other:?}; driven PSS accepts undelayed SIN and PULSE sources"
-                    ),
-                ));
-            }
+        let mut circuit = circuit;
+        let basis = crate::circuit::SourceTimeBasis {
+            tstep: config.period() / config.points_per_period as Value,
+            tstop: config.period(),
         };
-        if !source_frequency.is_finite() || source_frequency <= 0.0 {
-            return Err(SimulationError::Circuit(format!(
-                "periodic source '{name}' has a non-positive waveform frequency"
-            )));
-        }
-        let ratio = source_frequency / fundamental;
-        let nearest = ratio.round();
-        let commensurate =
-            nearest >= 1.0 && (ratio - nearest).abs() <= 1.0e-9 * ratio.abs().max(1.0);
-        if !commensurate {
-            return Err(SimulationError::Circuit(format!(
-                "periodic source '{name}' frequency {source_frequency:.17e} Hz is not an integer multiple of the PSS fundamental {fundamental:.17e} Hz"
-            )));
-        }
-        Ok(())
+        basis.validate().map_err(SimulationError::Circuit)?;
+        circuit.set_independent_source_context(
+            basis,
+            engine.config.spice_dialect,
+            engine.config.resource_limits,
+        );
+        Self::ensure_pss_source_periodicity(&circuit, config.period(), false, abort)
     }
 
     fn validated_transient_source_selection(
@@ -14609,16 +14552,18 @@ D1 D 0 DMOD
             .expect_err("omitted driving source is rejected");
         assert!(omitted.to_string().contains("omitted: V2"));
 
-        for (waveform, expected) in [
-            ("EXP(0 1 1u 1u 2u 1u)", "non-periodic EXP"),
-            ("PWL(0 0 1m 1)", "uses PWL"),
-        ] {
+        for waveform in ["EXP(0 1 1u 1u 2u 1u)", "PWL(0 0 1m 1)"] {
             let deck = format!("nonperiodic source\nV1 out 0 {waveform}\nR1 out 0 1k\n.end\n");
             let netlist = crate::Netlist::parse(&deck).expect("deck parses");
             let error = engine
                 .validate_periodic_source_contract(&netlist, &["V1".to_owned()], 1.0e3)
                 .expect_err("non-periodic waveform is rejected");
-            assert!(error.to_string().contains(expected), "{error}");
+            assert!(
+                error
+                    .to_string()
+                    .contains("source 'V1' is not certified periodic"),
+                "{error}"
+            );
         }
     }
 
@@ -14631,7 +14576,11 @@ D1 D 0 DMOD
         let error = Engine::new(crate::SimulationConfig::default())
             .validate_periodic_source_contract(&netlist, &["V1".to_owned()], 1.0e3)
             .expect_err("incommensurate source is rejected");
-        assert!(error.to_string().contains("not an integer multiple"));
+        assert!(
+            error
+                .to_string()
+                .contains("frequencies must be integer multiples")
+        );
     }
 
     fn parse_solution_dependent_capacitor_deck(source: &str) -> Netlist {

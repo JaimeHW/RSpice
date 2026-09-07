@@ -216,21 +216,21 @@ fn run_pss_analysis_internal(
     // with the fundamental, while an oscillator's only source is a one-shot
     // startup kick and its fundamental is the solver's unknown, so neither an
     // empty selection nor a complete one can pass. Core imposes no such rule
-    // on `PssConfig::autonomous()`, which carries no tone field at all.
+    // on the tone list of `PssConfig::autonomous()`. Core separately verifies
+    // that the free-running orbit has no changing external drive.
+    let pss_config = core_pss_config(config);
     if !config.oscillator_mode {
         engine
-            .validate_periodic_source_contract_with_abort(
+            .validate_pss_source_contract_with_abort(
                 &netlist,
                 &config.tone_sources,
-                config.fundamental_freq,
+                &pss_config,
                 abort,
             )
             .map_err(|error| {
                 ServiceRunError::from_core("PSS tone-source validation failed", error)
             })?;
     }
-
-    let pss_config = core_pss_config(config);
 
     let operating_point = match seed_environment {
         Some(environment) => engine
@@ -657,6 +657,27 @@ mod tests {
          b1 osc 0 i=-0.05*v(osc)+0.025*v(osc)*v(osc)*v(osc)\n\
          i1 0 osc pulse(0 1 10u 10n 10n 1u 1)\n\
          .end\n";
+
+    #[test]
+    fn pss_runner_uses_the_configured_grid_in_source_preflight() {
+        let source = "source defaults\nV1 in 0 PULSE(0 1 0.7u 0 0 0.28u 1u)\nR1 in out 1k\nC1 out 0 1n\n.end\n";
+        for (points, periodic) in [(32, false), (512, true)] {
+            let config = PssRunConfig {
+                fundamental_freq: 1e6,
+                tone_sources: vec!["V1".to_owned()],
+                points_per_period: points,
+                num_harmonics: 4,
+                tstab_periods: 0,
+                tolerance: 1e-7,
+                oscillator_mode: false,
+                oscillator_node: None,
+            };
+            let result = run_pss_analysis_with_config_and_source_path_and_abort(
+                source, &config, None, &NoAbort,
+            );
+            assert_eq!(result.is_ok(), periodic, "{points}: {:?}", result.err());
+        }
+    }
 
     /// An autonomous solve holds its period as an unknown, so the driven
     /// periodic-source contract cannot be asked of it and the Studio's draft

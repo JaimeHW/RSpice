@@ -15,6 +15,169 @@ const R: f64 = 1.0e3;
 const C: f64 = 159.154943091895e-12; // RC corner ~ 1 MHz (w*RC = 1)
 
 #[test]
+fn every_pss_entry_point_rejects_nonperiodic_forcing_even_when_endpoints_alias() {
+    use rspice_core::engine::PssDcOperatingPointSeed;
+    for source in [
+        "V1 out 0 SIN(0 1 1.25meg)",
+        "V1 out 0 SIN(0 1 1.5meg)",
+        "V1 out 0 SIN(0 1 256.5meg)",
+        "V1 out 0 SIN(0 1 1meg 0 1000)",
+        "I1 0 out SIN(0 1m 1.5meg)",
+        "B1 out 0 V=sin(2*pi*1.25meg*time)",
+        "B1 out 0 V=sin(2*pi*1.5meg*time)",
+        "B1 out 0 V=1meg*time",
+        "B1 0 out I=1m*sin(2*pi*1.5meg*time)",
+        "B1 out 0 V=spice_sin(0,1,1.5meg)",
+        "V1 out 0 DC 0 AC 1 portnum=1 z0=50 pwr=0.001 freq=1.5meg",
+    ] {
+        let netlist = Netlist::parse(&format!(
+            "nonperiodic forcing\n{source}\nR1 out 0 1k\nC1 out 0 1p\n.end\n"
+        ))
+        .unwrap();
+        let engine = Engine::default();
+        let circuit = engine.build_circuit(&netlist).unwrap();
+        let seed = PssDcOperatingPointSeed::try_new(
+            circuit.node_names_sorted(),
+            circuit.branch_names_sorted(),
+            vec![0.0; circuit.matrix_size()],
+        )
+        .unwrap();
+        let config = PssConfig::new(F0).with_tstab_periods(0);
+        let errors = [
+            engine.run_pss(&netlist, config.clone()).unwrap_err(),
+            engine
+                .run_pss_with_abort(&netlist, config.clone(), &NoAbort)
+                .unwrap_err(),
+            engine
+                .run_pss_operating_point_with_abort(&netlist, config.clone(), &NoAbort)
+                .unwrap_err(),
+            engine
+                .run_pss_operating_point_with_dc_seed_and_abort(
+                    &netlist,
+                    config.clone(),
+                    &seed,
+                    &NoAbort,
+                )
+                .unwrap_err(),
+            engine
+                .run_pss_with_continuation_state(&netlist, config.clone())
+                .unwrap_err(),
+            engine
+                .run_pss_with_frozen_source_continuation_state(&netlist, config, &[])
+                .unwrap_err(),
+        ];
+        for error in errors {
+            assert!(
+                error
+                    .to_string()
+                    .contains("analysis.pss.driven_source_waveform"),
+                "{source}: {error}"
+            );
+        }
+    }
+}
+
+#[test]
+fn source_selection_and_solver_share_resolved_periodicity_for_all_waveform_routes() {
+    use rspice_core::config::SpiceDialect;
+    for dialect in [SpiceDialect::Ngspice, SpiceDialect::Xyce] {
+        for source in [
+            "V1 in 0 SIN(0 1 0)",
+            "V1 in 0 SFFM(0 1 2meg 0.3 1meg)",
+            "V1 in 0 PWL(0 0 0.5u 1 1u 0) R=0",
+            "V1 in 0 DC 0 AC 1 portnum=1 z0=50 pwr=0.001 freq=2meg",
+            "B1 in 0 V=sin(2*pi*1meg*time+0.3)",
+            "B1 in 0 V=spice_sin(0,1,1meg,0,0,37)",
+            "B1 in 0 V=spice_sffm(0,1,2meg,0.3,1meg)",
+            "B1 in 0 V=spice_pulse(0,1,0,0.1u,0.1u,0.3u,1u)",
+            "B1 in 0 V=table(time%1u,0,0,0.5u,1,1u,0)",
+        ] {
+            let engine = Engine::new(SimulationConfig::default().with_spice_dialect(dialect));
+            let netlist = Netlist::parse(&format!(
+                "periodic forcing\n{source}\nR1 in out 1k\nC1 out 0 1n\n.end\n"
+            ))
+            .unwrap();
+            let config = PssConfig::new(F0)
+                .with_tstab_periods(0)
+                .with_points_per_period(128);
+            let selected = if source.starts_with('V') {
+                vec!["V1".to_owned()]
+            } else {
+                Vec::new()
+            };
+            engine
+                .validate_pss_source_contract_with_abort(&netlist, &selected, &config, &NoAbort)
+                .unwrap_or_else(|error| panic!("{dialect:?}, {source}: {error}"));
+            let analysis = engine
+                .run_pss(&netlist, config)
+                .unwrap_or_else(|error| panic!("{dialect:?}, {source}: {error}"));
+            assert!(analysis.result.residual_norm.is_finite());
+            for waveform in &analysis.result.waveforms {
+                let first = waveform.values.first().unwrap();
+                let last = waveform.values.last().unwrap();
+                assert!(
+                    (last - first).abs() < 1e-6,
+                    "{dialect:?}, {source}: seam {}",
+                    last - first
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn autonomous_pss_rejects_a_drive_or_startup_kick_inside_the_orbit_window() {
+    for source in [
+        "I1 0 out SIN(0 1m 1meg)",
+        "I1 0 out PULSE(0 1m 0.25u 1n 1n 0.1u 1)",
+        "I1 0 out PULSE(0 1m 1u 1n 1n 0.1u 1)",
+        "B1 0 out I=sin(2*pi*1meg*time)",
+    ] {
+        let netlist = Netlist::parse(&format!(
+            "forced oscillator\n{source}\nR1 out 0 1k\nC1 out 0 1n\n.end\n"
+        ))
+        .unwrap();
+        let error = Engine::default()
+            .run_pss(
+                &netlist,
+                PssConfig::autonomous()
+                    .with_period_guess(1e-6)
+                    .with_tstab_periods(0),
+            )
+            .unwrap_err();
+        assert!(error.to_string().contains("source"), "{source}: {error}");
+        assert!(
+            error.to_string().contains("analysis.pss."),
+            "{source}: {error}"
+        );
+    }
+}
+
+#[test]
+fn periodic_source_preflight_uses_the_authored_point_count_for_default_edges() {
+    let engine = Engine::default();
+    // The delay fits the repeated low segment only at the finer grid, whose
+    // omitted native rise/fall defaults are shorter. The source is not
+    // periodic from zero at 32 points, but is periodic at 512 points.
+    let netlist = Netlist::parse("grid-dependent source defaults\nV1 in 0 PULSE(0 1 0.7u 0 0 0.28u 1u)\nR1 in out 1k\nC1 out 0 1n\n.end\n").unwrap();
+    for (points, periodic) in [(32, false), (512, true)] {
+        let config = PssConfig::new(F0)
+            .with_harmonics(4)
+            .with_points_per_period(points)
+            .with_tstab_periods(0);
+        let preflight = engine.validate_pss_source_contract_with_abort(
+            &netlist,
+            &["V1".to_owned()],
+            &config,
+            &NoAbort,
+        );
+        assert_eq!(preflight.is_ok(), periodic, "{points}: {preflight:?}");
+        let solve = engine.run_pss(&netlist, config);
+        assert_eq!(solve.is_ok(), periodic, "{points}: {solve:?}");
+    }
+}
+
+#[test]
 fn small_signal_shooting_closes_the_orbit_from_a_zero_initial_state() {
     for amplitude in [1.0_f64, 1e-3, 1e-6, 1e-7, 1e-9] {
         let netlist = Netlist::parse(&format!(
