@@ -27,6 +27,130 @@ fn compiler() -> VerilogACompiler {
 }
 
 #[test]
+fn runtime_integrity_rejects_modified_digital_control_flow() {
+    let mut report = VerilogACompiler::new(CompilerOptions {
+        enable_ams: true,
+        ..CompilerOptions::default()
+    })
+    .compile_runtime(
+        "module mixed(p,n,q); inout p,n; electrical p,n; output reg q; \
+         initial #1 q=1'b1; analog I(p,n)<+V(p,n); endmodule",
+        None,
+    )
+    .expect("mixed runtime report");
+    report.validate_integrity().expect("pristine report");
+    report.canonical_ir.digital.processes[0].function.blocks[0].terminator =
+        rspice_veriloga::canonical_ir::CfgTerminator::Return;
+    assert!(
+        matches!(
+            report.validate_integrity(),
+            Err(RuntimeArtifactIntegrityError::InvalidCanonicalIr { .. })
+        ),
+        "changing digital behavior must invalidate the compiled artifact"
+    );
+}
+
+#[test]
+fn runtime_integrity_refuses_malformed_digital_tables_and_indices_without_panicking() {
+    use rspice_veriloga::canonical_ir::{
+        CanonicalDigitalPlan, CfgTerminator, CfgValueKind, CfgValueType,
+    };
+    let report = VerilogACompiler::new(CompilerOptions {
+        enable_ams: true,
+        ..CompilerOptions::default()
+    })
+    .compile_runtime(
+        "module mixed(p,n,q,w); inout p,n; electrical p,n; output reg q; output wire w; \
+            real sampled; initial begin sampled=V(p,n); #1 q=1'b1; end \
+            assign w=q; analog I(p,n)<+V(p,n); endmodule",
+        None,
+    )
+    .unwrap();
+    report.validate_integrity().unwrap();
+    type Mutation = (&'static str, fn(&mut CanonicalDigitalPlan));
+    let mutations: &[Mutation] = &[
+        ("entry", |p| p.processes[0].function.entry = 999usize.into()),
+        ("successor", |p| {
+            p.processes[0].function.blocks[0].terminator = CfgTerminator::Jump {
+                target: 999usize.into(),
+                args: vec![],
+            }
+        }),
+        ("instruction", |p| {
+            p.processes[0].function.blocks[0].instructions[0].result = 999usize.into()
+        }),
+        ("parameter", |p| {
+            p.processes[0].function.blocks[0]
+                .params
+                .push(999usize.into())
+        }),
+        ("operand", |p| {
+            p.processes[0].function.values[0].kind = CfgValueKind::DigitalBitwiseNot {
+                input: 999usize.into(),
+            }
+        }),
+        ("shape", |p| {
+            p.processes[0].function.values[0].value_type = CfgValueType::Lanes(999usize.into())
+        }),
+        ("block ID", |p| {
+            p.processes[0].function.blocks[0].id = 999usize.into()
+        }),
+        ("value ID", |p| {
+            p.processes[0].function.values[0].id = 999usize.into()
+        }),
+        ("process ID", |p| p.processes[0].id = 999usize.into()),
+        ("signal ID", |p| p.signals[0].id = 999usize.into()),
+        ("signal width", |p| p.signals[0].width = u32::MAX),
+        ("signal bounds", |p| {
+            p.signals[0].bounds = Some((i64::MIN, i64::MAX))
+        }),
+        ("signal semantics", |p| {
+            p.signals[0].signed = !p.signals[0].signed
+        }),
+        ("probe ID", |p| p.analog_probes[0].id = 999usize.into()),
+        ("probe endpoint", |p| {
+            p.analog_probes[0].positive = "different_net".into()
+        }),
+        ("driver index", |p| p.drivers[0].id.index = 999),
+        ("driver target", |p| {
+            p.drivers[0].target.signal = 999usize.into()
+        }),
+        ("driver process", |p| p.drivers[0].process = 999usize.into()),
+        ("identity", |p| p.content_identity = [0; 32]),
+        ("erased behavior", |p| {
+            p.signals.clear();
+            p.processes.clear();
+            p.drivers.clear();
+            p.analog_probes.clear();
+        }),
+    ];
+    for (name, mutate) in mutations {
+        let mut changed = report.clone();
+        mutate(&mut changed.canonical_ir.digital);
+        assert!(
+            matches!(
+                changed.validate_integrity(),
+                Err(RuntimeArtifactIntegrityError::InvalidCanonicalIr { .. })
+            ),
+            "accepted {name}"
+        );
+    }
+    let mut encoded = serde_json::to_value(&report).unwrap();
+    encoded["canonical_ir"]
+        .as_object_mut()
+        .unwrap()
+        .remove("digital");
+    let missing: rspice_veriloga::RuntimeCompileReport = serde_json::from_value(encoded).unwrap();
+    assert!(
+        matches!(
+            missing.validate_integrity(),
+            Err(RuntimeArtifactIntegrityError::InvalidCanonicalIr { .. })
+        ),
+        "removing the entire digital payload must not erase its behavior"
+    );
+}
+
+#[test]
 fn exact_workbench_sample_compiles_to_coherent_runtime_artifacts() {
     let report = compiler()
         .compile_runtime(SENSOR_BRIDGE_SOURCE, Some("sensor_bridge"))

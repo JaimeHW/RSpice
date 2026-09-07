@@ -29,6 +29,7 @@ pub mod diagnostic;
 pub mod digital;
 pub mod digital_eval;
 pub mod digital_lower;
+mod digital_validate;
 pub mod digital_value;
 pub mod hir;
 pub mod ids;

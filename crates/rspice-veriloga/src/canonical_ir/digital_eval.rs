@@ -350,6 +350,7 @@ pub enum DigitalWaitRequest {
 /// anyway — a state can outlive a recompilation.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DigitalResumeState {
+    plan_identity: [u8; 32],
     process: DigitalProcessId,
     block: BlockId,
     arguments: Vec<DigitalScalar>,
@@ -378,12 +379,17 @@ impl DigitalResumeState {
 
 /// Why a process could not be run.
 ///
-/// Every one of these is a refusal rather than a panic, including the ones that
-/// can only be reached by a malformed graph. A kernel that hits one has a bug
-/// to report, and a process interpreter that aborts the simulator instead is
-/// harder to debug and impossible to test.
+/// Execution requires a validated, immutable digital plan. These errors report
+/// unavailable values, incompatible resume states, and runtime limits without
+/// aborting the simulator.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DigitalEvalError {
+    /// The caller paired a process with a different containing plan.
+    ProcessNotInPlan(DigitalProcessId),
+    /// A raw plan was supplied without a compiled content identity.
+    UnsealedPlan,
+    /// The state was produced by different compiled digital behavior.
+    ResumePlanMismatch,
     /// A value was read before anything defined it.
     ///
     /// An unbound block parameter reaches here, which is how a resumption that
@@ -457,6 +463,15 @@ pub enum DigitalEvalError {
 impl std::fmt::Display for DigitalEvalError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::ProcessNotInPlan(id) => write!(
+                f,
+                "process {id} is not a member of the supplied digital plan"
+            ),
+            Self::UnsealedPlan => write!(f, "digital plan has no compiled content identity"),
+            Self::ResumePlanMismatch => write!(
+                f,
+                "resume state belongs to a different compiled digital plan"
+            ),
             Self::UndefinedValue(value) => {
                 write!(
                     f,
@@ -1081,6 +1096,10 @@ pub fn start_with_limit<E: DigitalEnvironment + ?Sized>(
 }
 
 /// Run a process from its entry block against a caller-owned working set.
+///
+/// Validate decoded or edited plans with [`CanonicalDigitalPlan::validate`]
+/// before execution and keep them immutable. `process` must be borrowed from
+/// `plan`; compiler-produced plans already satisfy the validation contract.
 pub fn start_in<E: DigitalEnvironment + ?Sized>(
     plan: &CanonicalDigitalPlan,
     process: &CfgDigitalProcess,
@@ -1088,6 +1107,7 @@ pub fn start_in<E: DigitalEnvironment + ?Sized>(
     scratch: &mut DigitalEvalScratch,
     step_limit: usize,
 ) -> Result<DigitalProcessOutcome, DigitalEvalError> {
+    validate_process_membership(plan, process)?;
     let entry = process.function.entry;
     if !process.function.block(entry).params.is_empty() {
         return Err(DigitalEvalError::EntryBlockHasParameters(entry));
@@ -1137,6 +1157,7 @@ pub fn resume_with_limit<E: DigitalEnvironment + ?Sized>(
 }
 
 /// Resume a suspended process against a caller-owned working set.
+/// The plan has the same validation and immutability contract as [`start_in`].
 ///
 /// The state arrives **by value**, which is the whole point: its argument list
 /// is the one the previous suspension built, and taking ownership lets the same
@@ -1157,6 +1178,10 @@ pub fn resume_in<E: DigitalEnvironment + ?Sized>(
             found: state.process,
         });
     }
+    validate_process_membership(plan, process)?;
+    if state.plan_identity != plan.content_identity {
+        return Err(DigitalEvalError::ResumePlanMismatch);
+    }
     let blocks = process.function.blocks.len();
     if usize::from(state.block) >= blocks {
         return Err(DigitalEvalError::ResumeBlockOutOfRange {
@@ -1170,6 +1195,24 @@ pub fn resume_in<E: DigitalEnvironment + ?Sized>(
     let displaced = std::mem::replace(&mut scratch.arguments, state.arguments);
     scratch.recycle_resume(displaced);
     Interpreter::new(plan, process, environment, scratch).run(block, step_limit)
+}
+
+// The containing artifact is validated before publication; this check remains
+// constant-time on every activation. Callers must keep that plan immutable.
+fn validate_process_membership(
+    plan: &CanonicalDigitalPlan,
+    process: &CfgDigitalProcess,
+) -> Result<(), DigitalEvalError> {
+    if plan
+        .process(process.id)
+        .is_none_or(|member| !std::ptr::eq(member, process))
+    {
+        return Err(DigitalEvalError::ProcessNotInPlan(process.id));
+    }
+    if plan.content_identity == [0; 32] {
+        return Err(DigitalEvalError::UnsealedPlan);
+    }
+    Ok(())
 }
 
 struct Interpreter<'a, 's, E: ?Sized> {
@@ -1302,6 +1345,7 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
                     return Ok(DigitalProcessOutcome::Suspended(DigitalSuspension {
                         wait,
                         resume: DigitalResumeState {
+                            plan_identity: self.plan.content_identity,
                             process: self.process.id,
                             block: *resume,
                             arguments,
@@ -1885,14 +1929,19 @@ mod tests {
     /// block argument would pass here and disagree with every other backend.
     #[test]
     fn a_value_computed_before_a_suspension_is_undefined_after_it() {
-        let plan = CanonicalDigitalPlan::default();
-        let process = process_reading_across_a_suspension();
+        let plan = CanonicalDigitalPlan {
+            processes: vec![process_reading_across_a_suspension()],
+            ..one_signal_plan(None, 1)
+        }
+        .seal()
+        .unwrap();
+        let process = &plan.processes[0];
         let mut environment = NoEnvironment;
         let mut scratch = DigitalEvalScratch::new();
 
         let outcome = start_in(
             &plan,
-            &process,
+            process,
             &mut environment,
             &mut scratch,
             DEFAULT_PROCESS_STEP_LIMIT,
@@ -1905,7 +1954,7 @@ mod tests {
         let (_, state) = suspension.into_parts();
         let error = resume_in(
             &plan,
-            &process,
+            process,
             state,
             &mut environment,
             &mut scratch,

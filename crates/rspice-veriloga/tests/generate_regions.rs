@@ -310,6 +310,14 @@ fn a_process_inside_a_loop_is_copied_with_a_fresh_identity() {
     identities.sort();
     identities.dedup();
     assert_eq!(identities.len(), 4, "two iterations share a process id");
+    for (index, process) in plan.processes.iter().enumerate() {
+        assert_eq!(
+            usize::from(process.id),
+            index,
+            "generated processes have dense IDs"
+        );
+        assert_eq!(plan.process(process.id), Some(process));
+    }
 }
 
 /// Regenerating is deterministic: the same source produces the same plan, so a

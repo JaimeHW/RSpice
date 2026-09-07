@@ -14,10 +14,10 @@ use smol_str::SmolStr;
 /// never deserialize a structurally different artifact merely because its HIR
 /// and metadata happen to repeat the same stale version number.
 ///
-/// Version 15 fixes the lifetime of static digital locals in process graphs.
-/// Earlier graphs reset them on block re-entry and must be rebuilt from source.
-/// Version 14 also introduced resolved potential/flow roles for branch access.
-pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 15;
+/// Version 16 authenticates and validates the complete digital plan, including
+/// the process identity carried by suspended execution. Earlier artifacts must
+/// be rebuilt from source. Version 15 fixed static digital local lifetimes.
+pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 16;
 
 /// Collision-resistant identity of one exact preprocessed source closure.
 pub fn source_identity(source_text: &str) -> String {

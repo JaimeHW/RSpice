@@ -1289,7 +1289,7 @@ fn metadata_digest_is_stable_and_hex_encoded() {
     assert_ne!(digest, StableDigest::from_text("module other; endmodule"));
 
     let metadata = CanonicalMetadata::for_source("fixture", "module tiny; endmodule");
-    assert_eq!(metadata.schema_version, 15);
+    assert_eq!(metadata.schema_version, 16);
     assert_eq!(metadata.source_package.as_str(), "fixture");
     assert_eq!(metadata.source_digest.as_str(), digest.as_hex());
 }
@@ -2129,7 +2129,7 @@ fn artifact_dump_is_deterministic_and_contains_phase_summaries() {
 
     assert_eq!(first, second);
     assert!(first.contains("canonical-veriloga-ir"));
-    assert!(first.contains("schema_version=15"));
+    assert!(first.contains("schema_version=16"));
     assert!(first.contains("source_package=fixture"));
     assert!(first.contains("source_digest="));
     assert!(first.contains("source_identity="));
@@ -2479,11 +2479,11 @@ fn artifact_digests_distinguish_same_count_ir_content() {
 }
 
 #[test]
-fn mir_validation_rejects_empty_node_set() {
+fn mir_validation_rejects_equations_referencing_removed_nodes() {
     let mut mir = lower_tiny_resistor_mir();
     mir.nodes.clear();
 
-    assert_mir_validation_message(&mir, "MIR model must have at least one node");
+    assert_mir_validation_message(&mir, "MIR unknown branch access node");
 }
 
 #[test]

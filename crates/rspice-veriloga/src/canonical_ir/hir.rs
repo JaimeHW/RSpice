@@ -1024,13 +1024,6 @@ impl HirModel {
             ));
         }
 
-        if self.ports.is_empty() {
-            diagnostics.push(IrDiagnostic::global_error(
-                CompilerPhase::HirValidation,
-                "HIR module must have at least one port",
-            ));
-        }
-
         if !self.default_transition.is_finite() || self.default_transition < 0.0 {
             diagnostics.push(IrDiagnostic::global_error(
                 CompilerPhase::HirValidation,

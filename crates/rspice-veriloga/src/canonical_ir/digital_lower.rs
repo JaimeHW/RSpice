@@ -248,24 +248,12 @@ pub fn lower(digital: &AnalyzedDigital) -> Result<CanonicalDigitalPlan, Vec<IrDi
     // ------------------------------------------------------------------
     // Processes and drivers.
     // ------------------------------------------------------------------
-    // Continuous assignments become processes too, numbered after the ones the
-    // front end named. An `assign` has no source-level process id — the parser
-    // assigns those to `always` and `initial` only — and neither has any
-    // process of an instance frame, because two instances of one module would
-    // otherwise share every id their module was given. So the numbering
-    // continues from the compiled module's own highest, in one fixed order:
-    // the module's own processes, its own assignments, then each frame in
-    // elaboration order with its processes, its assignments, and last its
-    // implicit port drivers. Driver indices fall out of the same order, which
-    // is what makes them stable across a recompilation.
-    let mut next_id = digital
-        .processes
-        .iter()
-        .map(|process| process.id.0)
-        .max()
-        .map_or(0, |highest| highest + 1);
+    // Allocate dense canonical IDs after elaboration: generate expansion can
+    // leave gaps in source IDs. The fixed order is root processes, root
+    // assignments, then each frame's processes, assignments and port drivers.
+    let mut next_id = 0usize;
     let mut allocate = move || {
-        let id = DigitalProcessId::from(next_id as usize);
+        let id = DigitalProcessId::from(next_id);
         next_id += 1;
         id
     };
@@ -291,10 +279,9 @@ pub fn lower(digital: &AnalyzedDigital) -> Result<CanonicalDigitalPlan, Vec<IrDi
     // its index.
     let mut probes = Vec::new();
     for process in &digital.processes {
-        let id = DigitalProcessId::from(usize::try_from(process.id.0).unwrap_or(usize::MAX));
         match lower_process(
             process,
-            id,
+            allocate(),
             &signals,
             &module_scope,
             &digital.constants,
@@ -367,12 +354,14 @@ pub fn lower(digital: &AnalyzedDigital) -> Result<CanonicalDigitalPlan, Vec<IrDi
     if !diagnostics.is_empty() {
         return Err(diagnostics);
     }
-    Ok(CanonicalDigitalPlan {
+    CanonicalDigitalPlan {
+        content_identity: [0; 32],
         signals,
         processes,
         drivers,
         analog_probes: probes,
-    })
+    }
+    .seal()
 }
 
 /// Refuse a plain `wreal` that more than one driver drives.

@@ -27,6 +27,9 @@ pub struct CanonicalIrArtifact {
     pub metadata: CanonicalMetadata,
     pub hir_digest: SmolStr,
     pub mir_digest: SmolStr,
+    /// Stored outside the optional digital payload so dropping that payload
+    /// cannot silently turn a mixed design into an analog-only artifact.
+    pub digital_identity: [u8; 32],
     #[serde(default)]
     pub noise_sources: CanonicalNoiseSourcePlan,
     pub hir: HirModel,
@@ -70,6 +73,7 @@ impl CanonicalIrArtifact {
             metadata,
             hir_digest,
             mir_digest,
+            digital_identity: [0; 32],
             noise_sources,
             hir,
             mir,
@@ -85,6 +89,7 @@ impl CanonicalIrArtifact {
     /// constructors to reach one field would give every analog caller an
     /// argument it has no use for.
     pub fn with_digital(mut self, digital: CanonicalDigitalPlan) -> Self {
+        self.digital_identity = digital.content_identity;
         self.digital = digital;
         self
     }
@@ -92,6 +97,14 @@ impl CanonicalIrArtifact {
     pub fn validate(&self) -> IrValidationResult {
         let mut diagnostics =
             validate_parts(&self.metadata, &self.hir, &self.mir, &self.noise_sources);
+        if let Err(mut errors) = self.digital.validate() {
+            diagnostics.append(&mut errors);
+        }
+        if self.digital_identity != self.digital.content_identity {
+            diagnostics.push(artifact_error(
+                "stored digital identity does not match the digital plan",
+            ));
+        }
         let (hir_digest, mir_digest) = phase_digests(&self.hir, &self.mir);
 
         if self.hir_digest != hir_digest {

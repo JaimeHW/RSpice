@@ -252,12 +252,6 @@ impl MirModel {
             ));
         }
 
-        if self.nodes.is_empty() {
-            diagnostics.push(IrDiagnostic::global_error(
-                CompilerPhase::MirValidation,
-                "MIR model must have at least one node",
-            ));
-        }
         if !self.default_transition.is_finite() || self.default_transition < 0.0 {
             diagnostics.push(IrDiagnostic::global_error(
                 CompilerPhase::MirValidation,

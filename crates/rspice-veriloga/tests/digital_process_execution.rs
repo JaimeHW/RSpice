@@ -2838,6 +2838,66 @@ endmodule
     assert_eq!(harness.get_real("b.q"), 1.0);
 }
 
+#[test]
+fn resume_refuses_a_recompiled_process_before_writing_any_signal() {
+    let mut old = Harness::new("reg q; initial #1 q = 1'b1;");
+    let state = expect_suspended(old.run()).resume_state().clone();
+    let mut changed = Harness::new("reg q; initial #1 q = 1'b0;");
+    changed.set("q", "1");
+    resume(
+        &changed.plan,
+        &changed.plan.processes[0],
+        &state,
+        &mut changed.store,
+    )
+    .expect_err("a resume frame must not enter a different compiled process");
+    assert_eq!(changed.get("q"), "1", "refusal must precede all writes");
+}
+
+#[test]
+fn a_portless_digital_module_executes_its_processes() {
+    let mut harness = Harness::from_source("module dut; reg q; initial q = 1'b1; endmodule");
+    expect_finished(harness.run());
+    assert_eq!(harness.get("q"), "1");
+}
+
+#[test]
+fn identical_recompilation_and_serialization_preserve_resume_identity() {
+    let source = "reg q; initial #1 q = 1'b1;";
+    let mut original = Harness::new(source);
+    let state = expect_suspended(original.run()).resume_state().clone();
+    let mut rebuilt = Harness::new(source);
+    rebuilt.plan = serde_json::from_str(&serde_json::to_string(&rebuilt.plan).unwrap()).unwrap();
+    rebuilt
+        .plan
+        .validate()
+        .expect("round-trip preserves integrity");
+    assert_eq!(
+        original.plan.content_identity,
+        rebuilt.plan.content_identity
+    );
+    expect_finished(rebuilt.resume(0, &state));
+    assert_eq!(rebuilt.get("q"), "1");
+}
+
+#[test]
+fn a_process_cannot_be_paired_with_another_containing_plan() {
+    let mut original = Harness::new("reg q; initial #1 q = 1'b1;");
+    let state = expect_suspended(original.run()).resume_state().clone();
+    let mut changed = Harness::new("reg q; initial #1 q = 1'b0;");
+    changed.set("q", "1");
+    assert!(matches!(
+        resume(
+            &original.plan,
+            &changed.plan.processes[0],
+            &state,
+            &mut changed.store
+        ),
+        Err(DigitalEvalError::ProcessNotInPlan(_))
+    ));
+    assert_eq!(changed.get("q"), "1");
+}
+
 /// A process-local `real` starts at zero; a four-state local starts at `x`.
 ///
 /// Two clauses, and they disagree on purpose. IEEE 1364-2005 section 3.9 gives

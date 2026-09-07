@@ -78,6 +78,33 @@ fn a_continuous_assignment_drives_from_time_zero() {
     );
 }
 
+#[test]
+fn portless_generated_processes_resume_on_the_event_kernel() {
+    let source = "module self_contained;
+        reg [3:0] q; wire [3:0] w; genvar i;
+        generate for (i=0; i<4; i=i+1) begin : gen
+            initial begin q[i]=i%2; #2 q[i]=~q[i]; end
+        end endgenerate
+        assign w=q;
+        endmodule";
+    let design = CompiledDigitalDesign::compile(source, None).expect("portless design compiles");
+    let stimulus = DigitalStimulus {
+        module: None,
+        inputs: vec![],
+        outputs: vec![port("w", 4)],
+        clock: None,
+        step: 2,
+        settle: 1,
+        vectors: vec![vec![], vec![], vec![]],
+    };
+    for _ in 0..2 {
+        let report = design
+            .run(&stimulus)
+            .expect("generated processes execute and resume");
+        assert_eq!(rows(&report), ["w=1010", "w=0101", "w=0101"]);
+    }
+}
+
 // ===========================================================================
 // Four-state resolution: sections 4.1 and 7.9
 // ===========================================================================

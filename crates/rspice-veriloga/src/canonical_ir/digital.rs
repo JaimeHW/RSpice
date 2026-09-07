@@ -435,7 +435,7 @@ pub struct DigitalWriteTarget {
 /// One `always` or `initial` process, lowered.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CfgDigitalProcess {
-    /// Declaration-ordered identity, the same number the front end assigned.
+    /// Dense declaration-ordered identity allocated after elaboration.
     pub id: DigitalProcessId,
     pub kind: DigitalProcessKind,
     pub function: CfgFunction,
@@ -550,6 +550,10 @@ pub struct DigitalDriver {
 /// [`CanonicalNoiseSourcePlan`]: super::noise::CanonicalNoiseSourcePlan
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct CanonicalDigitalPlan {
+    /// BLAKE3 identity of the complete lowered plan. Validate after decoding or
+    /// editing an artifact, then keep it immutable throughout execution.
+    #[serde(default)]
+    pub content_identity: [u8; 32],
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub signals: Vec<DigitalSignal>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -595,6 +599,8 @@ impl CanonicalDigitalPlan {
     }
 
     pub fn process(&self, id: DigitalProcessId) -> Option<&CfgDigitalProcess> {
-        self.processes.iter().find(|process| process.id == id)
+        self.processes
+            .get(usize::from(id))
+            .filter(|process| process.id == id)
     }
 }

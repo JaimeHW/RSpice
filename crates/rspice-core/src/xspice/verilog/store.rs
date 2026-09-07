@@ -938,7 +938,7 @@ mod tests {
             signals: vec![signal(0, "q", 4, true), signal(1, "w", 4, false)],
             processes: Vec::new(),
             drivers: Vec::new(),
-            analog_probes: Vec::new(),
+            ..CanonicalDigitalPlan::default()
         };
         let store = DigitalSignalStore::new(&plan);
         assert_eq!(
@@ -966,7 +966,7 @@ mod tests {
             signals: vec![signal(0, "y", 1, false)],
             processes: Vec::new(),
             drivers: vec![driver(0, 0, DigitalWriteSelect::Whole)],
-            analog_probes: Vec::new(),
+            ..CanonicalDigitalPlan::default()
         };
         let mut store = DigitalSignalStore::new(&plan);
         assert_eq!(
@@ -1010,7 +1010,7 @@ mod tests {
                 driver(0, 0, DigitalWriteSelect::Whole),
                 driver(0, 1, DigitalWriteSelect::Whole),
             ],
-            analog_probes: Vec::new(),
+            ..CanonicalDigitalPlan::default()
         };
         let mut store = DigitalSignalStore::new(&plan);
         let mut drive = |index: u32, spelling: &str| {
@@ -1049,7 +1049,7 @@ mod tests {
                 driver(0, 0, DigitalWriteSelect::Part { msb: 3, lsb: 0 }),
                 driver(0, 1, DigitalWriteSelect::Part { msb: 7, lsb: 4 }),
             ],
-            analog_probes: Vec::new(),
+            ..CanonicalDigitalPlan::default()
         };
         let mut store = DigitalSignalStore::new(&plan);
         store.drive_signal(DigitalDrive {
@@ -1096,7 +1096,7 @@ mod tests {
                 driver(0, 0, DigitalWriteSelect::Part { msb: 7, lsb: 6 }),
                 driver(0, 1, DigitalWriteSelect::Bit(4)),
             ],
-            analog_probes: Vec::new(),
+            ..CanonicalDigitalPlan::default()
         };
         let mut store = DigitalSignalStore::new(&plan);
         store.drive_signal(DigitalDrive {
@@ -1133,7 +1133,7 @@ mod tests {
             signals: vec![signal(0, "q", 2, true)],
             processes: Vec::new(),
             drivers: Vec::new(),
-            analog_probes: Vec::new(),
+            ..CanonicalDigitalPlan::default()
         };
         let mut store = DigitalSignalStore::new(&plan);
         store.write_signal(DigitalSignalId::from(0usize), value("01"));
@@ -1148,7 +1148,7 @@ mod tests {
             signals: vec![signal(0, "y", 1, false), signal(1, "a", 1, false)],
             processes: Vec::new(),
             drivers: vec![driver(0, 0, DigitalWriteSelect::Whole)],
-            analog_probes: Vec::new(),
+            ..CanonicalDigitalPlan::default()
         };
         let mut store = DigitalSignalStore::new(&plan);
         let error = store
@@ -1170,7 +1170,7 @@ mod tests {
             signals: vec![signal(0, "a", 4, false)],
             processes: Vec::new(),
             drivers: Vec::new(),
-            analog_probes: Vec::new(),
+            ..CanonicalDigitalPlan::default()
         };
         let mut store = DigitalSignalStore::new(&plan);
         let error = store
@@ -1190,7 +1190,7 @@ mod tests {
             drivers: (0..drivers)
                 .map(|index| driver(0, index, DigitalWriteSelect::Whole))
                 .collect(),
-            analog_probes: Vec::new(),
+            ..CanonicalDigitalPlan::default()
         }
     }
 
@@ -1307,7 +1307,7 @@ mod tests {
             ],
             processes: Vec::new(),
             drivers: Vec::new(),
-            analog_probes: Vec::new(),
+            ..CanonicalDigitalPlan::default()
         };
         let mut store = DigitalSignalStore::new(&plan);
         assert!(matches!(

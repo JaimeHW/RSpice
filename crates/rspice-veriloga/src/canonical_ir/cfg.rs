@@ -1855,21 +1855,44 @@ impl CfgFunction {
     /// that reaches the derivative pass presents as a wrong number rather than
     /// as a malformed graph, and is correspondingly harder to find.
     pub fn validate(&self) -> Result<(), CfgValidationError> {
+        // Check serialized indices before any indexed lookup in later passes.
+        self.validate_references()?;
         for block in &self.blocks {
             if matches!(block.terminator, CfgTerminator::Unset) {
                 return Err(CfgValidationError::UnterminatedBlock(block.id));
             }
-            for successor in block.successors() {
-                let arg_count = block.arguments_to(successor).map_or(0, <[ValueId]>::len);
-                let param_count = self.block(successor).params.len();
+            let check_edge = |target, args: &[ValueId]| {
+                let arg_count = args.len();
+                let param_count = self.block(target).params.len();
                 if arg_count != param_count {
                     return Err(CfgValidationError::ArgumentCountMismatch {
                         from: block.id,
-                        to: successor,
+                        to: target,
                         expected: param_count,
                         found: arg_count,
                     });
                 }
+                Ok(())
+            };
+            match &block.terminator {
+                CfgTerminator::Jump { target, args } => check_edge(*target, args)?,
+                CfgTerminator::Branch {
+                    then_target,
+                    then_args,
+                    else_target,
+                    else_args,
+                    ..
+                } => {
+                    // Both arms may name the same block with different arguments.
+                    check_edge(*then_target, then_args)?;
+                    check_edge(*else_target, else_args)?;
+                }
+                CfgTerminator::Wait {
+                    resume,
+                    resume_args,
+                    ..
+                } => check_edge(*resume, resume_args)?,
+                CfgTerminator::Return | CfgTerminator::Unset => {}
             }
         }
 
@@ -1900,6 +1923,80 @@ impl CfgFunction {
         }
 
         self.validate_shapes()
+    }
+
+    fn validate_references(&self) -> Result<(), CfgValidationError> {
+        let block_ref = |id: BlockId| {
+            if usize::from(id) < self.blocks.len() {
+                Ok(())
+            } else {
+                Err(CfgValidationError::InvalidBlockReference(id))
+            }
+        };
+        let value_ref = |id: ValueId| {
+            if usize::from(id) < self.values.len() {
+                Ok(())
+            } else {
+                Err(CfgValidationError::InvalidValueReference(id))
+            }
+        };
+        block_ref(self.entry)?;
+        for (index, block) in self.blocks.iter().enumerate() {
+            if usize::from(block.id) != index {
+                return Err(CfgValidationError::NonDenseBlockId(block.id));
+            }
+            for id in block
+                .params
+                .iter()
+                .copied()
+                .chain(block.instructions.iter().map(|i| i.result))
+            {
+                value_ref(id)?;
+            }
+            for successor in block.successors() {
+                block_ref(successor)?;
+            }
+            match &block.terminator {
+                CfgTerminator::Jump { args, .. } => {
+                    for arg in args {
+                        value_ref(*arg)?;
+                    }
+                }
+                CfgTerminator::Branch {
+                    condition,
+                    then_args,
+                    else_args,
+                    ..
+                } => {
+                    value_ref(*condition)?;
+                    for arg in then_args.iter().chain(else_args) {
+                        value_ref(*arg)?;
+                    }
+                }
+                CfgTerminator::Wait {
+                    wait, resume_args, ..
+                } => {
+                    for arg in wait.operands().iter().chain(resume_args) {
+                        value_ref(*arg)?;
+                    }
+                }
+                CfgTerminator::Return | CfgTerminator::Unset => {}
+            }
+        }
+        for (index, value) in self.values.iter().enumerate() {
+            if usize::from(value.id) != index {
+                return Err(CfgValidationError::NonDenseValueId(value.id));
+            }
+            if let Some(shape) = value.value_type.shape()
+                && usize::from(shape) >= self.shapes.len()
+            {
+                return Err(CfgValidationError::InvalidShapeReference(shape));
+            }
+            for operand in value.kind.operands() {
+                value_ref(operand)?;
+            }
+        }
+        Ok(())
     }
 
     /// Packed values agree with their operands about which unknowns they carry.
@@ -2183,6 +2280,11 @@ impl CfgBlock {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CfgValidationError {
+    InvalidBlockReference(BlockId),
+    InvalidValueReference(ValueId),
+    InvalidShapeReference(ShapeId),
+    NonDenseBlockId(BlockId),
+    NonDenseValueId(ValueId),
     UnterminatedBlock(BlockId),
     ArgumentCountMismatch {
         from: BlockId,
@@ -2208,6 +2310,15 @@ pub enum CfgValidationError {
 impl std::fmt::Display for CfgValidationError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::InvalidBlockReference(id) => write!(f, "block reference {id} is out of range"),
+            Self::InvalidValueReference(id) => write!(f, "value reference {id} is out of range"),
+            Self::InvalidShapeReference(id) => write!(f, "shape reference {id} is out of range"),
+            Self::NonDenseBlockId(id) => {
+                write!(f, "block {id} is not stored at its declared index")
+            }
+            Self::NonDenseValueId(id) => {
+                write!(f, "value {id} is not stored at its declared index")
+            }
             Self::UnterminatedBlock(block) => write!(f, "{block} has no terminator"),
             Self::ArgumentCountMismatch {
                 from,
@@ -3421,5 +3532,36 @@ mod tests {
         let function = builder.finish(entry).expect("valid function");
         assert_eq!(function.predecessors(target), vec![entry]);
         assert!(function.predecessors(entry).is_empty());
+    }
+
+    #[test]
+    fn both_branch_argument_lists_are_validated_when_targets_are_identical() {
+        let mut builder = SsaBuilder::new();
+        let entry = builder.create_block();
+        let target = builder.create_block();
+        builder.seal_block(entry);
+        builder.seal_block(target);
+        let condition =
+            builder.new_value(CfgValueType::Boolean, CfgValueKind::BooleanConstant(true));
+        builder.set_terminator(
+            entry,
+            CfgTerminator::Branch {
+                condition,
+                then_target: target,
+                then_args: vec![],
+                else_target: target,
+                else_args: vec![condition],
+            },
+        );
+        builder.set_terminator(target, CfgTerminator::Return);
+        assert_eq!(
+            builder.finish(entry),
+            Err(CfgValidationError::ArgumentCountMismatch {
+                from: entry,
+                to: target,
+                expected: 0,
+                found: 1,
+            })
+        );
     }
 }
