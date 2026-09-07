@@ -1124,7 +1124,7 @@ impl Engine {
 
             if !suppress_gate_charge && cgs.is_finite() && cgs > 0.0 {
                 let (geq, ieq, _q_curr, _cq_curr) = if let Some(charge) = jfet2_charge {
-                    Self::nonlinear_charge_companion_terms(
+                    nonlinear_charge_companion_terms(
                         coeff,
                         dt,
                         cgs,
@@ -1155,7 +1155,7 @@ impl Engine {
 
             if !suppress_gate_charge && cgd.is_finite() && cgd > 0.0 {
                 let (geq, ieq, _q_curr, _cq_curr) = if let Some(charge) = jfet2_charge {
-                    Self::nonlinear_charge_companion_terms(
+                    nonlinear_charge_companion_terms(
                         coeff,
                         dt,
                         cgd,
@@ -1317,7 +1317,7 @@ impl Engine {
             if !capd.is_finite() || capd <= 0.0 {
                 continue;
             }
-            let (geq, ieq, _q_curr, _cq_curr) = Self::nonlinear_charge_companion_terms(
+            let (geq, ieq, _q_curr, _cq_curr) = nonlinear_charge_companion_terms(
                 coeff,
                 dt,
                 capd,
@@ -1664,7 +1664,7 @@ impl Engine {
         if body_charge_mask & 1 != 0 {
             let vbs_j = mos.body_source_charge_branch_voltage(vbs_eval);
             let (qbs_curr, cbs) = mos.body_source_junction_charge_and_capacitance_at(vbs_eval);
-            let (geq_bs, ieq_bs, _q, _cq) = Self::nonlinear_charge_companion_terms(
+            let (geq_bs, ieq_bs, _q, _cq) = nonlinear_charge_companion_terms(
                 coeff,
                 dt,
                 cbs,
@@ -1683,7 +1683,7 @@ impl Engine {
             let vbd_j = mos.body_drain_charge_branch_voltage(vds_eval, vbs_eval);
             let (qbd_curr, cbd) =
                 mos.body_drain_junction_charge_and_capacitance_at(vds_eval, vbs_eval);
-            let (geq_bd, ieq_bd, _q, _cq) = Self::nonlinear_charge_companion_terms(
+            let (geq_bd, ieq_bd, _q, _cq) = nonlinear_charge_companion_terms(
                 coeff,
                 dt,
                 cbd,
@@ -1806,7 +1806,7 @@ impl Engine {
         );
         terms[3] = (geq_ds, ieq_ds);
 
-        let (geq_bs, ieq_bs, _qbs, _cqbs) = Self::nonlinear_charge_companion_terms(
+        let (geq_bs, ieq_bs, _qbs, _cqbs) = nonlinear_charge_companion_terms(
             coeff,
             dt,
             cbs,
@@ -1820,7 +1820,7 @@ impl Engine {
         );
         terms[4] = (geq_bs, ieq_bs);
 
-        let (geq_bd, ieq_bd, _qbd, _cqbd) = Self::nonlinear_charge_companion_terms(
+        let (geq_bd, ieq_bd, _qbd, _cqbd) = nonlinear_charge_companion_terms(
             coeff,
             dt,
             cbd,
@@ -1834,7 +1834,7 @@ impl Engine {
         );
         terms[5] = (geq_bd, ieq_bd);
 
-        let (geq_d1, ieq_d1, _qd1, _cqd1) = Self::nonlinear_charge_companion_terms(
+        let (geq_d1, ieq_d1, _qd1, _cqd1) = nonlinear_charge_companion_terms(
             coeff,
             dt,
             cd1,

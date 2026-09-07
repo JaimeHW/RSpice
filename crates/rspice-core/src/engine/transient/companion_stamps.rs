@@ -2,16 +2,6 @@
 
 use super::*;
 
-/// The accepted charge history one branch's companion is formed from: the two
-/// previous charges the integrator differences and the companion current at
-/// the previous step.
-#[derive(Clone, Copy)]
-pub(super) struct BranchChargeHistory {
-    pub q_prev: Value,
-    pub q_prev_prev: Value,
-    pub cq_prev: Value,
-}
-
 /// Pre-resolved matrix slots for one two-terminal companion branch.
 ///
 /// `stamp_two_terminal_companion` pays four position-map hash lookups per
@@ -844,38 +834,6 @@ impl Engine {
         let q_curr = q_prev + capacitance * (v_curr - v_prev);
         let cq_curr =
             unit_geq * q_curr - coeff.capacitor_ieq(1.0, dt, q_prev, q_prev_prev, cq_prev);
-        let ieq = geq * v_curr - cq_curr;
-        (geq, ieq, q_curr, cq_curr)
-    }
-
-    #[inline]
-    pub(super) fn nonlinear_charge_companion_terms(
-        coeff: &CompanionCoefficients,
-        dt: Value,
-        capacitance: Value,
-        v_curr: Value,
-        q_curr: Value,
-        history: BranchChargeHistory,
-    ) -> (Value, Value, Value, Value) {
-        let BranchChargeHistory {
-            q_prev,
-            q_prev_prev,
-            cq_prev,
-        } = history;
-        let geq = Self::jfet_companion_geq(coeff, capacitance, dt);
-        if geq == 0.0 {
-            return (0.0, 0.0, q_curr, 0.0);
-        }
-        let cq_curr = Self::jfet_companion_ccap(
-            coeff,
-            dt,
-            q_curr,
-            BranchChargeHistory {
-                q_prev,
-                q_prev_prev,
-                cq_prev,
-            },
-        );
         let ieq = geq * v_curr - cq_curr;
         (geq, ieq, q_curr, cq_curr)
     }

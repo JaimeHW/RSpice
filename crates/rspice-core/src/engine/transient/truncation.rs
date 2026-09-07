@@ -1338,7 +1338,7 @@ impl Engine {
                 // non-finite capacitance stays skipped.
 
                 let (_geq, _ieq, q_curr, cq_curr) = if let Some(q_exact) = q_curr_exact {
-                    Self::nonlinear_charge_companion_terms(
+                    nonlinear_charge_companion_terms(
                         &coeff,
                         dt,
                         capacitance,
@@ -1447,7 +1447,7 @@ impl Engine {
             // flux walks alone, as ngspice steps it, instead of falling to the
             // node-voltage estimator because the diodes "reported nothing".
 
-            let (_geq, _ieq, q_curr, cq_curr) = Self::nonlinear_charge_companion_terms(
+            let (_geq, _ieq, q_curr, cq_curr) = nonlinear_charge_companion_terms(
                 &coeff,
                 dt,
                 capd,
@@ -1826,7 +1826,7 @@ impl Engine {
                 // `nonlinear_charge_companion_terms` returns the exact
                 // `q_curr_exact` the commit path stores.
 
-                let (_geq, _ieq, q_curr, cq_curr) = Self::nonlinear_charge_companion_terms(
+                let (_geq, _ieq, q_curr, cq_curr) = nonlinear_charge_companion_terms(
                     &coeff,
                     dt,
                     capacitance,
