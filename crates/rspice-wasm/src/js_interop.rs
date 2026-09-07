@@ -180,7 +180,8 @@ pub(crate) fn execution_request_from_js(value: JsValue) -> DetailedWasmResult<Js
 }
 
 pub(crate) fn serialize_to_js<T: Serialize>(value: &T) -> Result<JsValue, JsValue> {
-    serde_wasm_bindgen::to_value(value)
+    value
+        .serialize(&serde_wasm_bindgen::Serializer::new().serialize_missing_as_null(true))
         .map_err(|err| JsValue::from_str(&format!("serialization failed: {err}")))
 }
 

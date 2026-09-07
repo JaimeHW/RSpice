@@ -193,6 +193,14 @@ pub fn run_authored_deck_document_js(
 /// the thrown error's shape, and the shared control word -- which is exactly
 /// what a native test cannot observe.
 #[cfg(all(test, target_arch = "wasm32"))]
+// Clippy's allow-*-in-tests policy recognizes #[test], but these functions
+// are registered by wasm-bindgen-test instead. Panics are test failures here.
+#[allow(
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::panic,
+    clippy::unwrap_used
+)]
 mod wasm_tests {
     use wasm_bindgen::JsCast;
     use wasm_bindgen_test::wasm_bindgen_test;
@@ -207,11 +215,12 @@ mod wasm_tests {
         )
         .unwrap();
         let result = rspice_core::Engine::default()
-            .run_pss(
+            .run_pss_with_abort(
                 &netlist,
                 rspice_core::analysis::PssConfig::new(1e6)
                     .with_tstab_periods(0)
                     .with_points_per_period(512),
+                &rspice_core::abort_signal::NoAbort,
             )
             .unwrap();
         let node = result
@@ -427,17 +436,19 @@ C1 out 0 1p\n\
         );
     }
 
-    /// A refused family throws the typed refusal, naming the card and the
-    /// missing core API, and publishes no handle.
+    /// The direct transient route cannot assign identities to attached FFT
+    /// results. Its typed refusal directs the caller to the authored route.
     #[wasm_bindgen_test]
-    fn a_refused_family_throws_the_typed_refusal() {
+    fn a_direct_transient_with_fft_throws_the_typed_refusal() {
         let source = "browser refusal deck\n\
-V1 in 0 AC 1\n\
+V1 in 0 SIN(0 1 1G)\n\
 R1 in out 1k\n\
-.SP DEC 3 1k 100k\n\
+C1 out 0 1p\n\
+.options fft\n\
+.FFT v(out) np=16 format=norm\n\
 .END\n";
-        let error = run_authored_deck_document_js(source, JsValue::UNDEFINED)
-            .expect_err("an unroutable family must be refused");
+        let error = run_transient_document_js(source, 1.6e-8, 5.0e-11, JsValue::UNDEFINED)
+            .expect_err("the direct route must refuse attached FFT results");
         assert_eq!(
             error_field(&error, "code").as_deref(),
             Some("unsupported_deck_analysis")
@@ -448,8 +459,8 @@ R1 in out 1k\n\
         );
         let message = error_field(&error, "message").unwrap_or_default();
         assert!(
-            message.contains(".SP") && message.contains("SParameterResult"),
-            "the refusal names the card and the missing core API: {message}"
+            message.contains(".FFT") && message.contains("runAuthoredDeckDocument"),
+            "the refusal names the attached card and its supported route: {message}"
         );
     }
 }
