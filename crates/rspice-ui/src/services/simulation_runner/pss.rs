@@ -205,14 +205,30 @@ fn run_pss_analysis_internal(
             rspice_core::SimulationError::Configuration(error),
         )
     })?;
-    engine
-        .validate_periodic_source_contract_with_abort(
-            &netlist,
-            &config.tone_sources,
-            config.fundamental_freq,
-            abort,
-        )
-        .map_err(|error| ServiceRunError::from_core("PSS tone-source validation failed", error))?;
+    // The closed periodic-source contract is a *driven* rule, and the draft
+    // validator already asks it only of a driven solve
+    // (`simulation::plan::config::PssConfigContext::validate_pss_sources`).
+    // Asking it here as well made the planner and the runner disagree about
+    // the same run: an autonomous draft that the Studio admits, queues and
+    // authenticates was then refused the moment it executed. It is
+    // unsatisfiable for an oscillator by construction -- the contract demands
+    // every elaborated source be named AND be an undelayed drive commensurate
+    // with the fundamental, while an oscillator's only source is a one-shot
+    // startup kick and its fundamental is the solver's unknown, so neither an
+    // empty selection nor a complete one can pass. Core imposes no such rule
+    // on `PssConfig::autonomous()`, which carries no tone field at all.
+    if !config.oscillator_mode {
+        engine
+            .validate_periodic_source_contract_with_abort(
+                &netlist,
+                &config.tone_sources,
+                config.fundamental_freq,
+                abort,
+            )
+            .map_err(|error| {
+                ServiceRunError::from_core("PSS tone-source validation failed", error)
+            })?;
+    }
 
     let pss_config = core_pss_config(config);
 
@@ -629,5 +645,66 @@ mod tests {
         )
         .expect_err("DC-only sources cannot authenticate a periodic solve");
         assert!(error.to_string().contains("tone-source validation"));
+    }
+
+    /// The one oscillator in the workspace that self-starts and converges in
+    /// autonomous shooting mode. `crates/rspice-core/tests/pss_shooting.rs`
+    /// solves this same deck and pins its period against the van der Pol
+    /// closed form. `i1` is a one-shot startup kick, not a periodic drive.
+    const NEGATIVE_RESISTANCE_OSCILLATOR: &str = "* negative-resistance lc oscillator\n\
+         l1 osc 0 1u\n\
+         c1 osc 0 1u\n\
+         b1 osc 0 i=-0.05*v(osc)+0.025*v(osc)*v(osc)*v(osc)\n\
+         i1 0 osc pulse(0 1 10u 10n 10n 1u 1)\n\
+         .end\n";
+
+    /// An autonomous solve holds its period as an unknown, so the driven
+    /// periodic-source contract cannot be asked of it and the Studio's draft
+    /// validator does not ask it. The runner used to ask it anyway, and the
+    /// two halves then disagreed about the same run: this deck's only source
+    /// is a delayed one-shot kick, which that contract refuses by name, while
+    /// omitting it from the selection is refused as an incomplete set. No
+    /// oscillator could satisfy both, so no oscillator could be solved from
+    /// the Studio at all.
+    #[test]
+    fn an_autonomous_carrier_solves_from_a_deck_whose_only_source_is_a_startup_kick() {
+        let period_guess = 6.3e-6;
+        let config = PssRunConfig {
+            fundamental_freq: 1.0 / period_guess,
+            // What the Studio's own autonomous draft projects: no tones.
+            tone_sources: Vec::new(),
+            tstab_periods: 30,
+            points_per_period: 256,
+            num_harmonics: 9,
+            tolerance: 1.0e-6,
+            oscillator_mode: true,
+            oscillator_node: Some("osc".to_owned()),
+        };
+
+        let data = run_pss_analysis_with_config_and_source_path_and_abort(
+            NEGATIVE_RESISTANCE_OSCILLATOR,
+            &config,
+            None,
+            &NoAbort,
+        )
+        .expect("the autonomous carrier converges through the Studio's own runner");
+
+        let result = &data.operating_point.analysis().result;
+        assert!(
+            result.period_detected,
+            "an autonomous orbit's period is a solver unknown, not authored input"
+        );
+        assert_ne!(
+            result.frequency.to_bits(),
+            config.fundamental_freq.to_bits(),
+            "the shooting solver moves the period off the authored guess, which is exactly \
+             why a consumer may not compare its own basis against that guess bit for bit"
+        );
+        let tank = 1.0 / (2.0 * std::f64::consts::PI * 1.0e-6);
+        assert!(
+            (result.frequency - tank).abs() < 1.0e-3 * tank,
+            "the solved carrier is the tank's own frequency {tank}, not the guess: {}",
+            result.frequency
+        );
     }
 }
