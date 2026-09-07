@@ -11,7 +11,7 @@ use rspice_veriloga::{
 };
 
 fn parse(source: &str) -> SourceFile {
-    let source_map = SourceMap::new();
+    let mut source_map = SourceMap::new();
     let source_id = source_map.add_source("<digital>", source);
     let tokens = Lexer::new(source, source_id)
         .collect_tokens()
@@ -22,7 +22,7 @@ fn parse(source: &str) -> SourceFile {
 }
 
 fn parse_error(source: &str) -> String {
-    let source_map = SourceMap::new();
+    let mut source_map = SourceMap::new();
     let source_id = source_map.add_source("<digital>", source);
     let tokens = match Lexer::new(source, source_id).collect_tokens() {
         Ok(tokens) => tokens,

@@ -844,7 +844,7 @@ module top(p, n);
   child outer (.p(p), .n(n));
 endmodule
 "#;
-        let source_map = crate::SourceMap::new();
+        let mut source_map = crate::SourceMap::new();
         let source_id = source_map.add_source("<hierarchy-evidence>", source);
         let tokens = crate::Lexer::new(source, source_id)
             .collect_tokens()

@@ -294,7 +294,7 @@ fn compile_file_module_with_timings(
     let dependency_count = pp.take_dependencies().len();
 
     let phase_start = Instant::now();
-    let source_map = SourceMap::new();
+    let mut source_map = SourceMap::new();
     let source_id = source_map.add_source(source.display().to_string(), &preprocessed);
     let tokens = Lexer::new(&preprocessed, source_id).collect_tokens()?;
     let lex_elapsed = phase_start.elapsed();

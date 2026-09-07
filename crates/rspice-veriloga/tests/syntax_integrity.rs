@@ -68,7 +68,7 @@ module parent(p, n);
     child u1(p, n);
 endmodule
 "#;
-    let source_map = SourceMap::new();
+    let mut source_map = SourceMap::new();
     let source_id = source_map.add_source("<direct-codegen>", source);
     let tokens = Lexer::new(source, source_id).collect_tokens().unwrap();
     let parsed = Parser::new(&tokens).parse().unwrap();

@@ -994,8 +994,9 @@ impl VerilogACompiler {
             Some(format!("{} bytes", source.len())),
         );
         let phase_started = web_time::Instant::now();
-        let source_map = SourceMap::new();
-        let source_id = source_map.add_source(source_package, source);
+        // This parse contains one preprocessed document. The caller retains
+        // the text for diagnostics; a source-map copy is unnecessary here.
+        let source_id = SourceId::new(0);
         let tokens = Lexer::new(source, source_id).collect_tokens()?;
         measurements.record(PipelinePhase::Lex, phase_started.elapsed())?;
         measurements.metrics_mut().token_count = metrics::usize_to_u64(tokens.len());
@@ -1231,8 +1232,7 @@ impl VerilogACompiler {
         &self,
         source: &str,
     ) -> CompileResult<ConnectSpecification> {
-        let source_map = SourceMap::new();
-        let source_id = source_map.add_source("<connect rules>", source);
+        let source_id = SourceId::new(0);
         let tokens = Lexer::new(source, source_id).collect_tokens()?;
         let source_file = Parser::new(&tokens).parse()?;
         let analyzed = SemanticAnalyzer::new().analyze(&source_file)?;
