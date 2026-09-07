@@ -242,29 +242,38 @@ impl AnalysisType {
             AnalysisType::Ac
             | AnalysisType::Disto
             | AnalysisType::Tf
-            | AnalysisType::Pac
             | AnalysisType::Stb
             | AnalysisType::SParameter
             | AnalysisType::HarmonicBalance
             | AnalysisType::Fourier => ("Frequency", "Hz", "Magnitude", "V"),
-            // A `.PXF` sweep is not a frequency the circuit is driven at. Its
-            // abscissa is the baseband offset the conversion matrix is indexed
-            // by; the drive sits at `offset + INPUTSIDEBAND * f0` and the
-            // response at `OUTSIDEBAND * f0 + offset`, which the run publishes
-            // as its own curve. Calling the axis "Frequency" invited a reader
-            // to take it for the first of those three. `.PNOISE` already
-            // spells the same quantity "offset frequency".
-            AnalysisType::Pxf => ("Offset Frequency", "Hz", "Magnitude", "V"),
-            AnalysisType::Qpss
-            | AnalysisType::Hbsp
-            | AnalysisType::Psp
-            | AnalysisType::Qpac
-            | AnalysisType::Qpxf => ("Frequency", "Hz", "Magnitude", "V"),
+            // A periodic small-signal sweep is not a frequency the circuit is
+            // driven at. Its abscissa is the baseband offset the conversion
+            // matrix is indexed by; the drive sits at
+            // `offset + INPUTSIDEBAND * f0` and the response at
+            // `OUTSIDEBAND * f0 + offset`, which the run publishes as its own
+            // curve. Calling the axis "Frequency" invited a reader to take it
+            // for the first of those three.
+            //
+            // "Offset frequency" is what core calls the quantity
+            // (`PacSidebandData::frequency_offset`, with
+            // `absolute_frequency = sideband * f0 + frequency_offset`), and it
+            // is true of every card in the family. "Translated frequency" is
+            // not: the translated frequency is `offset + n*f0`, one of the
+            // other two numbers.
+            AnalysisType::Pac | AnalysisType::Pxf | AnalysisType::Qpac | AnalysisType::Qpxf => {
+                ("Offset Frequency", "Hz", "Magnitude", "V")
+            }
+            AnalysisType::Qpss | AnalysisType::Hbsp | AnalysisType::Psp => {
+                ("Frequency", "Hz", "Magnitude", "V")
+            }
             AnalysisType::Pstb => ("Mode", "index", "Stability metric", ""),
-            AnalysisType::Noise
-            | AnalysisType::Pnoise
-            | AnalysisType::Hbnoise
-            | AnalysisType::Qpnoise => ("Frequency", "Hz", "Noise", "V^2/Hz"),
+            // Plain `.NOISE` sweeps a real absolute frequency about a DC
+            // operating point; it is the periodic members of the family whose
+            // abscissa is an offset from a carrier.
+            AnalysisType::Noise => ("Frequency", "Hz", "Noise", "V^2/Hz"),
+            AnalysisType::Pnoise | AnalysisType::Hbnoise | AnalysisType::Qpnoise => {
+                ("Offset Frequency", "Hz", "Noise", "V^2/Hz")
+            }
             AnalysisType::DcSweep => ("Voltage", "V", "Voltage", "V"),
             AnalysisType::DcOp => ("", "", "Voltage", "V"),
             AnalysisType::PoleZero => ("Real", "", "Imaginary", ""),
@@ -289,26 +298,83 @@ impl std::fmt::Display for AnalysisType {
 mod axis_tests {
     use super::AnalysisType;
 
-    /// A `.PXF` abscissa is the swept baseband offset, and the navigator's
-    /// sweep caption reads it from here. An absolute frequency is a different
-    /// number: the drive sits at `offset + INPUTSIDEBAND * f0`, and the
-    /// converted response, which the run publishes as its own curve, at
-    /// `OUTSIDEBAND * f0 + offset`.
+    /// A periodic small-signal abscissa is the swept baseband offset, and the
+    /// navigator's sweep caption reads it from here. An absolute frequency is
+    /// a different number: the drive sits at `offset + INPUTSIDEBAND * f0`,
+    /// and the converted response, which the run publishes as its own curve,
+    /// at `OUTSIDEBAND * f0 + offset`.
     ///
     /// Everything here is display text. A waveform export's first column is an
     /// identifier a reader keys on and it is spelled independently, in
     /// `waveform_export::axis_signal_for_analysis_type`, because retitling an
     /// axis once moved that identifier and lost the coordinate's unit.
     #[test]
-    fn the_pxf_sweep_axis_is_named_the_offset_it_holds() {
-        assert_eq!(
-            AnalysisType::Pxf.axis_info(),
-            ("Offset Frequency", "Hz", "Magnitude", "V")
-        );
+    fn every_periodic_small_signal_axis_is_named_the_offset_it_holds() {
+        for periodic in [
+            AnalysisType::Pac,
+            AnalysisType::Pxf,
+            AnalysisType::Qpac,
+            AnalysisType::Qpxf,
+        ] {
+            assert_eq!(
+                periodic.axis_info(),
+                ("Offset Frequency", "Hz", "Magnitude", "V"),
+                "{periodic:?}"
+            );
+        }
         assert_eq!(
             AnalysisType::Ac.axis_info(),
             ("Frequency", "Hz", "Magnitude", "V"),
             "an .AC sweep really is the frequency the circuit is driven at"
+        );
+        for absolute in [
+            AnalysisType::SParameter,
+            AnalysisType::Psp,
+            AnalysisType::Hbsp,
+        ] {
+            assert_eq!(
+                absolute.axis_info(),
+                ("Frequency", "Hz", "Magnitude", "V"),
+                "a scattering sweep states absolute port frequencies: {absolute:?}"
+            );
+        }
+    }
+
+    /// Only the periodic members of the noise family sweep an offset.
+    ///
+    /// A plain `.NOISE` run sweeps a real absolute frequency about a DC
+    /// operating point: there is no carrier to be offset from, and it shared
+    /// an arm with the three that have one.
+    #[test]
+    fn periodic_noise_sweeps_an_offset_and_plain_noise_sweeps_an_absolute_frequency() {
+        for periodic in [
+            AnalysisType::Pnoise,
+            AnalysisType::Qpnoise,
+            AnalysisType::Hbnoise,
+        ] {
+            assert_eq!(
+                periodic.axis_info(),
+                ("Offset Frequency", "Hz", "Noise", "V^2/Hz"),
+                "{periodic:?}"
+            );
+        }
+        assert_eq!(
+            AnalysisType::Noise.axis_info(),
+            ("Frequency", "Hz", "Noise", "V^2/Hz"),
+            "a .NOISE sweep is about a DC operating point, with no carrier to offset from"
+        );
+    }
+
+    /// A periodic run whose abscissa is not a frequency at all keeps its own
+    /// name: `.PSS` and `.QPSS` publish a periodic phase, and `.PSTB` a
+    /// Floquet mode index. The rename covers the small-signal family, not
+    /// everything with a carrier.
+    #[test]
+    fn a_periodic_axis_that_is_not_a_frequency_is_not_renamed_to_one() {
+        assert_eq!(AnalysisType::Pss.axis_info().0, "Time");
+        assert_eq!(
+            AnalysisType::Pstb.axis_info(),
+            ("Mode", "index", "Stability metric", "")
         );
     }
 }

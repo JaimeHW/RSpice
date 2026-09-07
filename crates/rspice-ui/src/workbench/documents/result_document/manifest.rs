@@ -776,8 +776,13 @@ const fn domain_meta(analysis: AnalysisType) -> DomainMeta {
             axis: "parameter vector",
             precision: "f64",
         },
+        // The abscissa is the offset from the carrier, which is what core
+        // calls it and what the periodic noise members below already say.
+        // Naming it after the translation instead named a different number --
+        // `offset + n*f0`, which the run publishes as its own curve -- and it
+        // also made .PXF contradict its own Studio caption.
         A::Pac | A::Pxf | A::Qpac | A::Qpxf => DomainMeta {
-            axis: "translated frequency",
+            axis: "offset frequency",
             precision: "complex128",
         },
         A::Pstb => DomainMeta {
@@ -1570,6 +1575,43 @@ mod tests {
             assert!(!meta.axis.is_empty(), "{kind:?}");
             assert!(!meta.precision.is_empty(), "{kind:?}");
         }
+    }
+
+    /// The Studio's axis caption and the manifest's domain name one quantity.
+    ///
+    /// `.PXF` used to say "Offset Frequency" on one surface and "translated
+    /// frequency" on the other, which teaches a reader to trust neither. The
+    /// manifest spells it in lower case; that is the only difference allowed.
+    #[test]
+    fn the_periodic_small_signal_family_names_one_quantity_on_both_surfaces() {
+        for periodic in [
+            AnalysisType::Pac,
+            AnalysisType::Pxf,
+            AnalysisType::Qpac,
+            AnalysisType::Qpxf,
+            AnalysisType::Pnoise,
+            AnalysisType::Qpnoise,
+            AnalysisType::Hbnoise,
+        ] {
+            assert_eq!(
+                domain_meta(periodic).axis,
+                "offset frequency",
+                "{periodic:?}"
+            );
+            assert_eq!(
+                periodic.axis_info().0.to_ascii_lowercase(),
+                domain_meta(periodic).axis,
+                "the Studio caption and the manifest domain disagree for {periodic:?}"
+            );
+        }
+        // The quantity these were named after is a different number, and
+        // nothing shipped here publishes it as an abscissa. Split so this
+        // test's own prose cannot trip the scan.
+        let retired = ["translated ", "frequency"].concat();
+        assert!(
+            !crate::source_guard::production_source(include_str!("manifest.rs")).contains(&retired),
+            "the translated frequency is `offset + n*f0`, not the swept axis"
+        );
     }
 
     #[test]

@@ -217,9 +217,37 @@ fn domain_label(analysis: &AnalysisResult) -> &'static str {
     match analysis.analysis_type {
         AnalysisType::Transient => "TRAN · time",
         AnalysisType::Ac => "AC · frequency",
-        AnalysisType::Noise | AnalysisType::Pnoise => "NOISE · frequency",
+        AnalysisType::Noise => "NOISE · frequency",
+        // A periodic noise spectrum stands on the offset from its carrier. It
+        // shared the arm above, which states the absolute frequency a .NOISE
+        // run sweeps about a DC operating point -- a different quantity.
+        AnalysisType::Pnoise => "PNOISE · offset frequency",
         AnalysisType::DcSweep => "DC · swept source",
         AnalysisType::DcOp => "OP · scalar",
         _ => "retained sweep",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::domain_label;
+    use crate::state::{AnalysisResult, AnalysisType};
+
+    /// The diagnostics row states the same quantity the rest of the product
+    /// does: a `.PNOISE` spectrum stands on an offset from its carrier, and a
+    /// `.NOISE` sweep on an absolute frequency about a DC operating point.
+    /// These two shared one arm, and it named the second.
+    #[test]
+    fn periodic_noise_states_the_offset_it_sweeps_and_plain_noise_its_own_frequency() {
+        for (analysis, domain) in [
+            (AnalysisType::Pnoise, "PNOISE · offset frequency"),
+            (AnalysisType::Noise, "NOISE · frequency"),
+        ] {
+            assert_eq!(
+                domain_label(&AnalysisResult::new(1, analysis, "expression domain")),
+                domain,
+                "{analysis:?}"
+            );
+        }
     }
 }
