@@ -399,7 +399,10 @@ module rspice_wasm_solver_probe(p, n);
   electrical p, n;
   parameter real gain = 2.0;
   real bias;
+  real declaration_seed = 1.0;
+  real initialized_gain;
   integer task_index;
+  analog initial initialized_gain = initialized_gain + declaration_seed * gain;
   analog begin
     bias = analysis("tran") ? ($param_given(gain) ? 100.0 : 1.0) : -1000.0;
     task_index = 0;
@@ -408,7 +411,7 @@ module rspice_wasm_solver_probe(p, n);
       task_index = task_index + 1;
     end
     if (V(p, n) < 0.0) $finish(99);
-    I(p, n) <+ bias + gain * V(p, n) + ddt(V(p, n));
+    I(p, n) <+ bias + initialized_gain * V(p, n) + ddt(V(p, n));
   end
 endmodule
 "#;
