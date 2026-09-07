@@ -49,7 +49,7 @@ cc = "1.2"
 # Execution-level conformance tests run emitted secondary modules in an
 # independent WebAssembly engine. This is test-only and cannot inflate either
 # browser code image.
-wasmi = { version = "1.1.0", default-features = false, features = ["std", "extra-checks", "prefer-btree-collections"] }
+wasmi = { version = "2.0.0", default-features = false, features = ["std", "extra-checks", "prefer-btree-collections"] }
 
 [features]
 default = []
