@@ -695,6 +695,35 @@ fn a_vector_discrete_port_bridges_one_net_per_bit() {
 }
 
 #[test]
+fn a_named_block_counter_keeps_its_state_through_the_engine_route() {
+    let local_source = VECTOR_PORT.replace(
+        "always #5 count = count + 2'b01;",
+        "always #5 begin : accumulator\n\
+         reg [1:0] saved = 2'b00;\n\
+         saved = saved + 2'b01;\n\
+         count = saved;\n\
+         end",
+    );
+    let reference = ModelFile::new("module_counter", VECTOR_PORT);
+    let local = ModelFile::new("block_counter", &local_source);
+    let expected = run(&vector_deck(&reference, ""), 40.0e-9, 1.0e-9);
+    for max_step in [1.0e-9, 0.2e-9] {
+        let actual = run(&vector_deck(&local, ""), 40.0e-9, max_step);
+        for net in ["count#0", "count#1"] {
+            let trace = |result: &TransientResult| {
+                result
+                    .digital_trace_named(net)
+                    .expect("counter trace")
+                    .iter()
+                    .map(|point| (point.time, point.value))
+                    .collect::<Vec<_>>()
+            };
+            assert_eq!(trace(&actual), trace(&expected), "{net}, step {max_step}");
+        }
+    }
+}
+
+#[test]
 fn a_vector_discrete_port_refuses_a_deck_that_names_one_node_for_it() {
     let model = ModelFile::new("vector_short", VECTOR_PORT);
     let deck = format!(

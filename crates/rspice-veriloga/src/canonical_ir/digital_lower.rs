@@ -463,6 +463,8 @@ fn lower_continuous_assign(
         diagnostics: Vec::new(),
         locals: Vec::new(),
         scopes: Vec::new(),
+        static_scopes: HashMap::new(),
+        static_local_count: 0,
     };
 
     if let Some(delay) = &assignment.assignment.delay {
@@ -617,6 +619,8 @@ fn lower_process(
         diagnostics: Vec::new(),
         locals: Vec::new(),
         scopes: Vec::new(),
+        static_scopes: HashMap::new(),
+        static_local_count: 0,
     };
 
     let kind = match process.kind {
@@ -625,28 +629,43 @@ fn lower_process(
     };
 
     let entry = lowerer.builder.create_block();
-    // An `initial` process's entry has no predecessors and can be sealed at
-    // once. An `always` process's entry gains one when the restart edge is
-    // added below, so sealing it here would decide a merge before the loop
-    // exists.
-    if !kind.restarts() {
+    lowerer.initialize_static_locals(entry, &process.body);
+    lowerer.static_local_count = lowerer.locals.len();
+    // Declaration initialization belongs to process startup. The restart edge
+    // must enter the body after it, preserving named-block variables (IEEE
+    // 1364-2005 section 9.8.1) even when a wait precedes their lexical scope.
+    let body = if lowerer.static_local_count == 0 {
+        entry
+    } else {
+        let body = lowerer.builder.create_block();
+        lowerer.builder.set_terminator(
+            entry,
+            CfgTerminator::Jump {
+                target: body,
+                args: Vec::new(),
+            },
+        );
         lowerer.builder.seal_block(entry);
+        body
+    };
+    if !kind.restarts() {
+        lowerer.builder.seal_block(body);
     }
-    let exit = lowerer.statement(entry, &process.body);
+    let exit = lowerer.statement(body, &process.body);
 
     // IEEE 1364-2005 sections 9.9.1 and 9.9.2, as a difference in the graph
     // rather than a flag: `always` loops back to its own entry, `initial`
     // returns. Nothing else has to be told which kind it is looking at.
     let terminator = if kind.restarts() {
         CfgTerminator::Jump {
-            target: entry,
+            target: body,
             args: Vec::new(),
         }
     } else {
         CfgTerminator::Return
     };
     lowerer.builder.set_terminator(exit, terminator);
-    lowerer.builder.seal_block(entry);
+    lowerer.builder.seal_block(body);
     // Every construct seals the blocks it creates as soon as their
     // predecessors are known. This is the backstop for the paths that stopped
     // early: a construct that refused left its blocks behind, and an unsealed
@@ -665,11 +684,11 @@ fn lower_process(
         )]
     })?;
 
-    // Read the static list back off the entry block's `Wait` rather than
+    // Read the static list back off the body entry's `Wait` rather than
     // computing it a second time. The metadata and the terminator then cannot
     // disagree, which is the failure a separately-derived copy invites — and
     // an `@*` list would otherwise be derived twice and reported twice.
-    let static_sensitivity = match (&process.body, &function.block(entry).terminator) {
+    let static_sensitivity = match (&process.body, &function.block(body).terminator) {
         (
             DigitalStatement::Timing(timing),
             CfgTerminator::Wait {
@@ -811,6 +830,10 @@ struct ProcessLowerer<'a> {
     locals: Vec<ProcessLocal>,
     /// Declarative regions, innermost last (IEEE 1364-2005 section 9.8.1).
     scopes: Vec<Vec<DigitalLocalId>>,
+    /// Declaration identities prepared before any suspension is lowered.
+    static_scopes: HashMap<Span, Vec<DigitalLocalId>>,
+    /// Compiler-generated loop counters follow these persistent declarations.
+    static_local_count: usize,
 }
 
 impl ProcessLowerer<'_> {
@@ -890,18 +913,8 @@ impl ProcessLowerer<'_> {
         }
     }
 
-    /// Declare a local and give it its initial value in `block`.
-    ///
-    /// The initial value is written at the declaration, which makes every
-    /// later read reach a definition and is what keeps the merge machinery
-    /// from ever having to answer "what was this before anything set it".
-    ///
-    /// That models a block variable as *automatic*: it starts at `x` (IEEE
-    /// 1364-2005 section 4.2.2) each time control enters the block. Section
-    /// 9.8.1 makes a named block's variable static, so an `always` process that
-    /// read one before writing it would see the previous pass's value; that is
-    /// a read of an uninitialised variable in any case, and the reading frozen
-    /// here is the one a loop counter needs.
+    /// Declare a local and initialize it in `block`. Source declarations use
+    /// the startup block; synthesized repeat counters use their loop entry.
     fn declare_local(
         &mut self,
         block: BlockId,
@@ -1061,6 +1074,58 @@ impl ProcessLowerer<'_> {
         self.scopes.iter().flatten().copied().collect()
     }
 
+    /// Allocate and initialize static declarations before lowering control
+    /// flow. Lexical visibility is restored separately when lowering each
+    /// block; leaving that scope must not end the declaration's lifetime.
+    fn initialize_static_locals(&mut self, entry: BlockId, statement: &DigitalStatement) {
+        match statement {
+            DigitalStatement::Block(block) => {
+                self.scopes.push(Vec::new());
+                self.declare_block_locals(entry, block);
+                let scope = self.scopes.last().cloned().unwrap_or_default();
+                self.static_scopes.insert(block.span, scope);
+                for child in &block.statements {
+                    self.initialize_static_locals(entry, child);
+                }
+                self.scopes.pop();
+            }
+            DigitalStatement::Conditional(conditional) => {
+                self.initialize_static_locals(entry, &conditional.then_branch);
+                if let Some(branch) = &conditional.else_branch {
+                    self.initialize_static_locals(entry, branch);
+                }
+            }
+            DigitalStatement::Case(case) => {
+                for item in &case.items {
+                    self.initialize_static_locals(entry, &item.statement);
+                }
+                if let Some(default) = &case.default {
+                    self.initialize_static_locals(entry, default);
+                }
+            }
+            DigitalStatement::For(statement) => {
+                self.initialize_static_locals(entry, &statement.body)
+            }
+            DigitalStatement::While(statement) => {
+                self.initialize_static_locals(entry, &statement.body)
+            }
+            DigitalStatement::Repeat(statement) => {
+                self.initialize_static_locals(entry, &statement.body)
+            }
+            DigitalStatement::Forever(statement) => {
+                self.initialize_static_locals(entry, &statement.body)
+            }
+            DigitalStatement::Timing(timing) => {
+                if let Some(statement) = &timing.statement {
+                    self.initialize_static_locals(entry, statement);
+                }
+            }
+            DigitalStatement::BlockingAssign(_)
+            | DigitalStatement::NonblockingAssign(_)
+            | DigitalStatement::Null(_) => {}
+        }
+    }
+
     /// Lower the declarations of one `begin`/`end` block.
     fn declare_block_locals(&mut self, block: BlockId, inner: &crate::ast::DigitalBlock) {
         for declaration in &inner.variables {
@@ -1193,8 +1258,14 @@ impl ProcessLowerer<'_> {
         match statement {
             DigitalStatement::Null(_) => block,
             DigitalStatement::Block(inner) => {
-                self.scopes.push(Vec::new());
-                self.declare_block_locals(block, inner);
+                let Some(scope) = self.static_scopes.get(&inner.span).cloned() else {
+                    self.error(
+                        "process block has no prepared declaration scope",
+                        inner.span,
+                    );
+                    return block;
+                };
+                self.scopes.push(scope);
                 let mut current = block;
                 for statement in &inner.statements {
                     current = self.statement(current, statement);
@@ -1839,12 +1910,13 @@ impl ProcessLowerer<'_> {
     /// Everything the resumed half of the process needs travels through
     /// `resume_args`, because a suspension does not preserve the value table:
     /// the process stopped, and the kernel that starts it again does so from a
-    /// resume state and nothing else. Two things cross here — every
-    /// process-local in scope, and whatever `carried` names, which is how
+    /// resume state and nothing else. Static declarations cross even outside
+    /// their lexical scope; synthesized counters cross while in scope.
+    /// Values explicitly named by `carried` cross too, which is how
     /// `q <= #5 d` gets the `d` it read *before* the delay (IEEE 1364-2005
     /// section 9.2.2) to the write that lands after it.
     ///
-    /// Every in-scope local crosses, not only the ones the resumed half reads.
+    /// Every such local crosses, not only the ones the resumed half reads.
     /// A liveness analysis would carry fewer; carrying one that is never read
     /// again costs a bound parameter and nothing else, and getting liveness
     /// wrong costs correctness.
@@ -1877,7 +1949,15 @@ impl ProcessLowerer<'_> {
         for value in carried.iter_mut() {
             *value = self.builder.carry_value(*value, block, resume);
         }
-        for local in self.locals_in_scope() {
+        let carried_locals: Vec<_> = (0..self.static_local_count)
+            .map(DigitalLocalId::from)
+            .chain(
+                self.locals_in_scope()
+                    .into_iter()
+                    .filter(|local| usize::from(*local) >= self.static_local_count),
+            )
+            .collect();
+        for local in carried_locals {
             self.builder
                 .carry_variable(CfgVariable::DigitalLocal(local), block, resume);
         }

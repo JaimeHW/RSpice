@@ -8,16 +8,16 @@
 use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
 
-/// Canonical HIR/MIR wire-format version emitted and accepted by this build.
+/// Canonical HIR/MIR artifact version emitted and accepted by this build.
 ///
 /// This is a hard compatibility boundary: caches and external backends must
 /// never deserialize a structurally different artifact merely because its HIR
 /// and metadata happen to repeat the same stale version number.
 ///
-/// Version 14 records each branch access's resolved potential/flow role.
-/// Earlier artifacts inferred that role from the access name and can encode
-/// incorrect custom-discipline physics; they must be rebuilt from source.
-pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 14;
+/// Version 15 fixes the lifetime of static digital locals in process graphs.
+/// Earlier graphs reset them on block re-entry and must be rebuilt from source.
+/// Version 14 also introduced resolved potential/flow roles for branch access.
+pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 15;
 
 /// Collision-resistant identity of one exact preprocessed source closure.
 pub fn source_identity(source_text: &str) -> String {

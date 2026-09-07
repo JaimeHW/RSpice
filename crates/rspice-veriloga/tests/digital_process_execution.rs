@@ -139,8 +139,12 @@ impl Harness {
     }
 
     fn from_source(source: &str) -> Self {
+        Self::from_module(source, None)
+    }
+
+    fn from_module(source: &str, module: Option<&str>) -> Self {
         let plan = VerilogACompiler::new(CompilerOptions::default())
-            .compile_canonical_ir(source)
+            .compile_canonical_ir_module(source, module)
             .expect("fixture must lower to canonical IR")
             .digital;
         // IEEE 1364-2005 section 4.2.2: a `reg` that nothing has written holds
@@ -2685,12 +2689,8 @@ fn an_unsigned_operand_poisons_the_whole_expression() {
 /// would leave `acc` at section 3.9's `0.0` every time and the sum would be the
 /// last addend rather than the total.
 ///
-/// The suspension is inside a `forever` rather than at the top of the process,
-/// so the declaration runs once and every later edge is a resumption into the
-/// loop. An `always` whose body *is* the declaration re-enters the declarative
-/// region on each restart and re-initialises the local, which is section
-/// 9.8.1's automatic reading and what this lowering froze — a different
-/// question from whether a suspension preserves it.
+/// This case suspends inside a `forever`; the re-entry cases below also require
+/// the static lifetime when control leaves and re-enters the declaring block.
 #[test]
 fn a_process_local_real_survives_a_suspension() {
     let mut harness = Harness::rnm(
@@ -2735,6 +2735,107 @@ fn a_process_local_real_survives_a_suspension() {
             state.arguments()
         );
     }
+}
+
+#[test]
+fn named_block_locals_retain_values_when_control_reenters_the_block() {
+    for process in [
+        "always #1 begin : acc real x; x = x + 1.0; q = x; end",
+        "always begin : acc real x; #1; x = x + 1.0; q = x; end",
+        "initial forever begin : acc real x; #1; x = x + 1.0; q = x; end",
+        "initial repeat (3) begin : acc real x; #1; x = x + 1.0; q = x; end",
+    ] {
+        let mut harness =
+            Harness::from_source(&format!("module dut(output real q); {process} endmodule"));
+        let mut state = expect_suspended(harness.start(0)).resume_state().clone();
+        for expected in [1.0, 2.0, 3.0] {
+            let outcome = harness.resume(0, &state);
+            assert_eq!(harness.get_real("q"), expected, "{process}");
+            if expected < 3.0 {
+                state = expect_suspended(outcome).resume_state().clone();
+            }
+        }
+    }
+}
+
+#[test]
+fn static_local_initializers_run_once_per_process_start() {
+    let mut harness = Harness::from_source(
+        r#"
+module dut(output reg [7:0] q);
+always #1 begin : acc
+    reg [7:0] count = 8'd4;
+    count = count + 1;
+    q = count;
+end
+endmodule
+"#,
+    );
+    for _ in 0..2 {
+        let mut state = expect_suspended(harness.start(0)).resume_state().clone();
+        for expected in ["00000101", "00000110", "00000111"] {
+            state = expect_suspended(harness.resume(0, &state))
+                .resume_state()
+                .clone();
+            assert_eq!(harness.get("q"), expected);
+        }
+    }
+}
+
+#[test]
+fn static_local_state_survives_waits_outside_its_lexical_scope() {
+    let mut harness = Harness::from_source(
+        r#"
+module dut(output real q, output real r);
+initial forever begin
+    #1;
+    begin : left real x; x = x + 1.0; q = x; end
+    #1;
+    begin : right real x; x = x + 10.0; r = x; end
+end
+endmodule
+"#,
+    );
+    let mut state = expect_suspended(harness.start(0)).resume_state().clone();
+    for expected in [1.0, 2.0, 3.0] {
+        state = expect_suspended(harness.resume(0, &state))
+            .resume_state()
+            .clone();
+        assert_eq!(harness.get_real("q"), expected);
+        state = expect_suspended(harness.resume(0, &state))
+            .resume_state()
+            .clone();
+        assert_eq!(harness.get_real("r"), expected * 10.0);
+    }
+}
+
+#[test]
+fn static_locals_are_independent_between_instances_and_resume_snapshots() {
+    let mut harness = Harness::from_module(
+        r#"
+module counter(output real q);
+always #1 begin : acc real x; x = x + 1.0; q = x; end
+endmodule
+module dut(input clk);
+counter a();
+counter b();
+endmodule
+"#,
+        Some("dut"),
+    );
+    let a = expect_suspended(harness.start(0)).resume_state().clone();
+    let b = expect_suspended(harness.start(1)).resume_state().clone();
+    let a_next = expect_suspended(harness.resume(0, &a))
+        .resume_state()
+        .clone();
+    harness.resume(0, &a_next);
+    assert_eq!(harness.get_real("a.q"), 2.0);
+    // Replaying the saved frame restores its static values, not the values
+    // left by a later evaluation or by another elaborated instance.
+    harness.resume(0, &a);
+    assert_eq!(harness.get_real("a.q"), 1.0);
+    harness.resume(1, &b);
+    assert_eq!(harness.get_real("b.q"), 1.0);
 }
 
 /// A process-local `real` starts at zero; a four-state local starts at `x`.
@@ -2990,30 +3091,9 @@ struct Design {
 
 impl Design {
     fn new(source: &str, module: &str) -> Self {
-        let plan = VerilogACompiler::new(CompilerOptions::default())
-            .compile_canonical_ir_module(source, Some(module))
-            .expect("the hierarchy must elaborate and lower")
-            .digital;
-        let values = plan
-            .signals
-            .iter()
-            .map(|signal| FourStateValue::splat(signal.width, FourStateBit::Unknown))
-            .collect();
+        let Harness { plan, store } = Harness::from_module(source, Some(module));
         let waits = vec![None; plan.processes.len()];
-        let reals = vec![0.0; plan.signals.len()];
-        let analog = vec![None; plan.analog_probes.len()];
-        Self {
-            plan,
-            store: Store {
-                values,
-                reals,
-                deferred: Vec::new(),
-                driven: BTreeMap::new(),
-                driven_reals: BTreeMap::new(),
-                analog,
-            },
-            waits,
-        }
+        Self { plan, store, waits }
     }
 
     fn signal(&self, name: &str) -> DigitalSignalId {
