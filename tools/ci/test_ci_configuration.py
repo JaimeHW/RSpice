@@ -821,11 +821,11 @@ class CiConfigurationTests(unittest.TestCase):
         self.assertIn("Smoke Verilog-A native JIT benchmark gate", workflow)
         self.assertRegex(
             workflow,
-            r"cargo test --locked -p rspice-veriloga --features native native::\s+-- --test-threads=1",
+            r"cargo test --locked -p rspice-veriloga --features native --lib native::\s+-- --test-threads=1",
         )
         self.assertRegex(
             workflow,
-            r"cargo test --locked -p rspice-veriloga --release --features native native::\s+-- --test-threads=1",
+            r"cargo test --locked -p rspice-veriloga --release --features native --lib native::\s+-- --test-threads=1",
         )
         self.assertIn(
             "cargo test --locked -p rspice-veriloga --features native-bytecode-contract-tests --test native_contract -- --test-threads=1",
@@ -857,11 +857,11 @@ class CiConfigurationTests(unittest.TestCase):
         self.assertIn('test "$(uname -m)" = "x86_64"', workflow)
         self.assertIn("Test Verilog-A native JIT (macOS Intel x64)", workflow)
         self.assertIn(
-            "cargo test --locked -p rspice-veriloga --features native native:: -- --test-threads=1",
+            "cargo test --locked -p rspice-veriloga --features native --lib native:: -- --test-threads=1",
             workflow,
         )
         self.assertIn(
-            "cargo test --locked -p rspice-veriloga --release --features native native:: -- --test-threads=1",
+            "cargo test --locked -p rspice-veriloga --release --features native --lib native:: -- --test-threads=1",
             workflow,
         )
         self.assertIn("Gate Verilog-A native JIT performance", workflow)
