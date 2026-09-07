@@ -46,6 +46,23 @@ fn repeating_pwl_events_preserve_distinct_authored_times_at_small_scales() {
 }
 
 #[test]
+fn authored_event_catalog_keeps_redundant_flat_pwl_knots() {
+    let netlist = Netlist::parse(
+        "authored flat events\nV1 in 0 PWL(0 0 1n 0 2n 0 3n 1 4n 0) R=0\nR1 in 0 1k\n.end\n",
+    )
+    .unwrap();
+    let events = Engine::default()
+        .transient_source_event_times(&netlist, 4e-9, 1e-10, &[])
+        .unwrap();
+    for knot in 0..=4 {
+        assert!(
+            contains_time(&events, knot as f64 * 1e-9),
+            "missing authored knot {knot}: {events:?}"
+        );
+    }
+}
+
+#[test]
 fn selected_source_events_use_the_transient_breakpoint_contract() {
     let engine = Engine::new(SimulationConfig::default());
     let events = engine

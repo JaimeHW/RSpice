@@ -295,6 +295,11 @@ mod wasm_tests {
         for (source, dc) in [
             ("V1 in 0 SIN(0 1 128meg)", 0.0),
             ("B1 in 0 V=sin(2*pi*64meg*time)^4", 0.375),
+            ("V1 in 0 PULSE(0 1 400p 10p 10p 100p 1u)", 0.00011),
+            (
+                "V1 in 0 PWL(0 0 400p 0 410p 1 510p 1 520p 0 1u 0) R=0",
+                0.00011,
+            ),
             (
                 "B1 in 0 V=table(time%1u,0,0,400p,0,500p,1,1.5n,1,1.6n,0,1u,0)",
                 0.0011,
@@ -319,8 +324,14 @@ mod wasm_tests {
                 .iter()
                 .position(|name| name.eq_ignore_ascii_case("out"))
                 .unwrap();
-            let mean = result.waveforms[output].values[..steps].iter().sum::<f64>() / steps as f64;
-            assert!((mean - dc).abs() < 1e-4, "{source}: DC {mean}");
+            let mean = result.waveforms[output].dc(&result.time, result.period);
+            let tolerance = if dc == 0.00011 {
+                assert!(steps < 1024, "the local source mesh must stay bounded");
+                1e-7
+            } else {
+                1e-4
+            };
+            assert!((mean - dc).abs() < tolerance, "{source}: DC {mean}");
         }
     }
 

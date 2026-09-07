@@ -428,6 +428,10 @@ impl Engine {
                 .time
                 .len()
                 .saturating_sub(1);
+            circuit.integration_mesh = Some(super::pss::PssIntegrationMesh::from_times(
+                operating_point.analysis().period,
+                operating_point.analysis().result.time.clone(),
+            )?);
             let state_dimension = circuit.state_dimension();
             if operating_point.shooting_state().len() != state_dimension {
                 return Err(SimulationError::Circuit(format!(
@@ -555,13 +559,24 @@ impl Engine {
         // Orbit tangent ds/dt on the grid (periodic central differences) and
         // the adjoint unity mode v1(0) from the monodromy Phi(T, 0).
         // ------------------------------------------------------------------
-        let dt = period / (n_grid - 1) as Value;
         let tangent = |k: usize| -> Vec<Value> {
             // s(0) == s(T) on the converged orbit, so wrap periodically.
+            let k = if k + 1 == n_grid { 0 } else { k };
             let prev = if k == 0 { n_grid - 2 } else { k - 1 };
-            let next = if k + 1 >= n_grid { 1 } else { k + 1 };
+            let next = k + 1;
+            let left_dt = if k == 0 {
+                period - base.times[prev]
+            } else {
+                base.times[k] - base.times[prev]
+            };
+            let right_dt = base.times[next] - base.times[k];
+            let left_weight = right_dt / (left_dt + right_dt);
+            let right_weight = left_dt / (left_dt + right_dt);
             (0..n_state)
-                .map(|i| (base.states[next][i] - base.states[prev][i]) / (2.0 * dt))
+                .map(|i| {
+                    left_weight * (base.states[k][i] - base.states[prev][i]) / left_dt
+                        + right_weight * (base.states[next][i] - base.states[k][i]) / right_dt
+                })
                 .collect()
         };
 
@@ -802,6 +817,7 @@ impl Engine {
             }
 
             if k > 0 {
+                let dt = base.times[k] - base.times[k - 1];
                 for index in 0..white_integrals.len() {
                     white_integrals[index] += 0.5 * (white[index] + previous_white[index]) * dt;
                 }

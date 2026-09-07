@@ -15,6 +15,19 @@ pub(in crate::engine) struct BreakpointWindow {
     pub dialect: crate::engine::SpiceDialect,
 }
 
+#[derive(Clone, Copy, Default)]
+pub(in crate::engine) enum SourceBreakpointGeometry {
+    #[default]
+    Authored,
+    PhysicalCorners,
+}
+
+#[derive(Clone, Copy, Default)]
+struct SourceBreakpointContext {
+    basis: Option<crate::circuit::SourceTimeBasis>,
+    geometry: SourceBreakpointGeometry,
+}
+
 /// A transmission-line arrival that may deserve a breakpoint.
 #[derive(Clone, Copy)]
 pub(super) struct TlineArrivalEvent {
@@ -161,7 +174,7 @@ impl Engine {
                 tstep_hint,
                 dialect,
             },
-            None,
+            SourceBreakpointContext::default(),
             &crate::abort_signal::NoAbort,
             usize::MAX,
         )
@@ -173,7 +186,7 @@ impl Engine {
         spec: &crate::netlist::SourceSpec,
         pwl_waveform: Option<&crate::device::pwl_file::PwlWaveform>,
         window: BreakpointWindow,
-        source_basis: Option<crate::circuit::SourceTimeBasis>,
+        context: SourceBreakpointContext,
         abort: &dyn crate::abort_signal::AbortSignal,
         max_points: usize,
     ) -> Result<(), crate::engine::SimulationError> {
@@ -182,7 +195,7 @@ impl Engine {
             tstep_hint,
             dialect,
         } = window;
-        let defaults = source_basis.unwrap_or(crate::circuit::SourceTimeBasis {
+        let defaults = context.basis.unwrap_or(crate::circuit::SourceTimeBasis {
             tstep: tstep_hint,
             tstop,
         });
@@ -199,7 +212,7 @@ impl Engine {
                         tstep_hint,
                         dialect,
                     },
-                    source_basis,
+                    context,
                     abort,
                     max_points,
                 )?;
@@ -214,7 +227,7 @@ impl Engine {
                         tstep_hint,
                         dialect,
                     },
-                    source_basis,
+                    context,
                     abort,
                     max_points,
                 )?;
@@ -237,7 +250,7 @@ impl Engine {
                         tstep_hint,
                         dialect,
                     },
-                    source_basis,
+                    context,
                     abort,
                     max_points,
                 )?;
@@ -367,7 +380,11 @@ impl Engine {
                 delay,
                 repeat_from,
             } => {
-                let times = points.iter().map(|(time, _)| *time + *delay);
+                let times = crate::numerics::pwl_event_points(
+                    points.iter().copied(),
+                    matches!(context.geometry, SourceBreakpointGeometry::Authored),
+                )
+                .map(|(time, _)| time + *delay);
                 Self::add_repeating_pwl_breakpoints(
                     breakpoints,
                     times,
@@ -390,7 +407,11 @@ impl Engine {
                 Some(wf) => {
                     Self::add_repeating_pwl_breakpoints(
                         breakpoints,
-                        wf.scaled_knot_times().map(|time| time + *delay),
+                        wf.scaled_event_knot_times(matches!(
+                            context.geometry,
+                            SourceBreakpointGeometry::Authored
+                        ))
+                        .map(|time| time + *delay),
                         repeat_from.map(|value| value * *time_scale),
                         *delay + *time_offset,
                         tstop,
@@ -404,7 +425,11 @@ impl Engine {
                             wf.with_scaling(*time_scale, *value_scale, *time_offset, *value_offset);
                         Self::add_repeating_pwl_breakpoints(
                             breakpoints,
-                            wf.scaled_knot_times().map(|time| time + *delay),
+                            wf.scaled_event_knot_times(matches!(
+                                context.geometry,
+                                SourceBreakpointGeometry::Authored
+                            ))
+                            .map(|time| time + *delay),
                             repeat_from.map(|value| value * *time_scale),
                             *delay + *time_offset,
                             tstop,
@@ -852,6 +877,7 @@ impl Engine {
             breakpoints,
             abort,
             max_points,
+            SourceBreakpointGeometry::Authored,
         )?;
 
         for switch in &circuit.generic_switches {
@@ -899,6 +925,7 @@ impl Engine {
         breakpoints: &mut BreakpointManager,
         abort: &dyn crate::abort_signal::AbortSignal,
         max_points: usize,
+        geometry: SourceBreakpointGeometry,
     ) -> Result<(), crate::engine::SimulationError> {
         let BreakpointWindow {
             tstop,
@@ -931,7 +958,10 @@ impl Engine {
                     tstep_hint,
                     dialect,
                 },
-                source_basis,
+                SourceBreakpointContext {
+                    basis: source_basis,
+                    geometry,
+                },
                 abort,
                 max_points,
             )?;
@@ -1170,6 +1200,7 @@ mod tests {
                 &mut events,
                 &crate::abort_signal::NoAbort,
                 1000,
+                SourceBreakpointGeometry::Authored,
             )
             .unwrap();
             let expected = if dialect == SpiceDialect::Xyce {
@@ -1327,7 +1358,7 @@ mod tests {
                 tstep_hint: 0.1,
                 dialect: crate::engine::SpiceDialect::Xyce,
             },
-            None,
+            SourceBreakpointContext::default(),
             &crate::abort_signal::NoAbort,
             usize::MAX,
         )
@@ -1532,7 +1563,7 @@ mod tests {
                 tstep_hint: 0.1,
                 dialect: crate::engine::SpiceDialect::Xyce,
             },
-            None,
+            SourceBreakpointContext::default(),
             &crate::abort_signal::NoAbort,
             64,
         )
