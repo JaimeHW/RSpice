@@ -36,6 +36,7 @@ pub(crate) struct A64UnwindFunction {
 }
 
 impl A64UnwindFunction {
+    #[cfg(any(unix, test))]
     pub(crate) fn len(self) -> usize {
         self.end.as_usize() - self.start.as_usize()
     }
