@@ -3802,6 +3802,18 @@ fn a_single_bit_vector_names_its_one_bit_by_its_bound() {
     assert_eq!(harness.get("seen"), "11");
 }
 
+#[test]
+fn large_integer_index_expressions_select_the_exact_declared_bit() {
+    let mut harness = Harness::new(
+        "reg [9007199254740992+1:9007199254740992+1] q;
+         reg seen;
+         initial begin q[9007199254740992+1] = 1'b1; seen = q[9007199254740992+1]; end",
+    );
+    expect_finished(harness.run());
+    assert_eq!(harness.get("q"), "1");
+    assert_eq!(harness.get("seen"), "1");
+}
+
 /// Section 4.2.1: a part select runs in the declaration's direction, and takes
 /// the bits it names.
 #[test]

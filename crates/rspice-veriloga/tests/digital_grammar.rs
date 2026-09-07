@@ -1,11 +1,7 @@
 //! The IEEE 1364-2005 digital subset that Verilog-AMS embeds.
 //!
-//! Every construct here has three pins: it **parses** into a faithful tree,
-//! it is **refused at the backend** because nothing can execute it yet, and its
-//! **diagnostics name the construct and the fix**. The refusal is the point of
-//! the wave: a digital source must be read and diagnosed properly, and must
-//! never compile into a device that quietly lacks the author's digital
-//! behavior.
+//! Frontend acceptance, elaboration, and diagnostics for unsupported constructs.
+//! Process execution is covered separately in `digital_process_execution.rs`.
 
 use rspice_veriloga::ast::*;
 use rspice_veriloga::four_state::{FourStateBit, LiteralBase};
@@ -227,11 +223,100 @@ fn vector_bounds_must_be_constant_and_bounded() {
         "expected a constant-bounds diagnostic, got {message:?}"
     );
 
-    let message = analyze_error(&digital_module("    reg [100000:0] enormous;"));
-    assert!(
-        message.contains("this compiler supports at most 65536 bits per signal"),
-        "expected a width-limit diagnostic, got {message:?}"
+    for range in [
+        "100000:0",
+        "4294967296:0",
+        "0:4294967296",
+        "-9.223372036854776e18:0",
+    ] {
+        let message = analyze_error(&digital_module(&format!("reg [{range}] enormous;")));
+        assert!(
+            message.contains("this compiler supports at most 65536 bits per signal"),
+            "expected a width-limit diagnostic for {range}, got {message:?}"
+        );
+    }
+}
+
+#[test]
+fn digital_bounds_outside_the_index_range_are_refused_before_conversion() {
+    for range in [
+        "1e30:1e30",
+        "-1e30:-1e30",
+        "9.223372036854776e18:9.223372036854776e18",
+        "-1e30:1e30",
+    ] {
+        let message = analyze_error(&digital_module(&format!("reg [{range}] invalid;")));
+        assert!(
+            message.contains("signed 64-bit index range"),
+            "{range}: {message}"
+        );
+    }
+}
+
+#[test]
+fn integer_range_expressions_keep_bits_beyond_f64_precision() {
+    let source = digital_module("reg [9007199254740992+1:9007199254740992] exact;");
+    let analyzed = analyze(&source);
+    let signal = &only_module(&analyzed).digital.signals[0];
+    let bounds = signal.range.expect("packed range");
+    assert_eq!(
+        (bounds.msb, bounds.lsb),
+        (9_007_199_254_740_993, 9_007_199_254_740_992)
     );
+    assert_eq!(bounds.width(), 2);
+}
+
+#[test]
+fn vector_range_arithmetic_never_wraps() {
+    use rspice_veriloga::canonical_ir::VectorBounds;
+    for bounds in [
+        VectorBounds {
+            msb: 4_294_967_296,
+            lsb: 0,
+        },
+        VectorBounds {
+            msb: i64::MIN,
+            lsb: i64::MAX,
+        },
+        VectorBounds {
+            msb: i64::MAX,
+            lsb: i64::MIN,
+        },
+    ] {
+        assert_eq!(bounds.width(), u32::MAX);
+    }
+    for bounds in [
+        VectorBounds {
+            msb: i64::MAX,
+            lsb: i64::MAX - 3,
+        },
+        VectorBounds {
+            msb: i64::MIN + 3,
+            lsb: i64::MIN,
+        },
+        VectorBounds {
+            msb: i64::MIN,
+            lsb: i64::MIN + 3,
+        },
+        VectorBounds {
+            msb: i64::MAX - 3,
+            lsb: i64::MAX,
+        },
+    ] {
+        assert_eq!(bounds.width(), 4);
+        for position in 0..4 {
+            let index = bounds.index_at(position);
+            assert!(bounds.contains(index));
+            assert_eq!(bounds.position_of(index), position);
+        }
+        let indices = bounds.indices_msb_first().collect::<Vec<_>>();
+        assert_eq!(indices.first(), Some(&bounds.msb));
+        assert_eq!(indices.last(), Some(&bounds.lsb));
+        for index in [i64::MIN, i64::MAX] {
+            let position = bounds.position_of(index);
+            assert_eq!(bounds.contains(index), (0..4).contains(&position));
+        }
+    }
 }
 
 // ===========================================================================

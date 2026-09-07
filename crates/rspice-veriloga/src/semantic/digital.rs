@@ -1,10 +1,7 @@
 //! Semantic analysis of the discrete (IEEE 1364-2005) half of a module.
 //!
-//! This pass resolves and validates what the digital grammar parsed; it does
-//! not lower anything. Nothing here produces executable form — a module that
-//! carries digital content is refused at every backend boundary, by name — so
-//! the pass's whole job is to make sure that what a later wave lowers has
-//! already been proven well-formed:
+//! This pass resolves and validates the digital grammar before canonical
+//! process lowering:
 //!
 //!   * every declared signal has a resolvable, bounded shape;
 //!   * every identifier a process reads or writes is declared;
@@ -16,7 +13,9 @@
 //! returned, so a module with several digital defects reports all of them
 //! alongside its analog ones.
 
-use super::{AnalyzedModule, MAX_DIGITAL_VECTOR_WIDTH, SemanticAnalyzer, Symbol, SymbolKind};
+use super::{
+    AnalyzedModule, ConstantValue, MAX_DIGITAL_VECTOR_WIDTH, SemanticAnalyzer, Symbol, SymbolKind,
+};
 use crate::ast::*;
 use crate::error::SemanticErrorKind;
 use crate::source::Span;
@@ -268,8 +267,15 @@ impl VectorBounds {
     /// one form rather than a special case at every call.
     pub const SCALAR: Self = Self { msb: 0, lsb: 0 };
 
+    /// Width, saturated when it cannot fit in the compiler's width type.
+    /// Such a range exceeds the supported signal limit and is rejected.
     pub const fn width(self) -> u32 {
-        (self.msb.abs_diff(self.lsb) + 1) as u32
+        let width = self.msb.abs_diff(self.lsb).saturating_add(1);
+        if width > u32::MAX as u64 {
+            u32::MAX
+        } else {
+            width as u32
+        }
     }
 
     pub const fn contains(self, index: i64) -> bool {
@@ -303,10 +309,12 @@ impl VectorBounds {
     /// `[7:4]` reg, `x[5:2]` reads two real bits and two `x`s rather than
     /// failing whole.
     pub const fn position_of(self, index: i64) -> i64 {
+        // An unrepresentable distance is necessarily outside a valid signal;
+        // keep it outside instead of wrapping it into an unrelated bit.
         if self.msb >= self.lsb {
-            index - self.lsb
+            index.saturating_sub(self.lsb)
         } else {
-            self.lsb - index
+            self.lsb.saturating_sub(index)
         }
     }
 
@@ -1137,10 +1145,10 @@ impl SemanticAnalyzer {
     ) -> Option<VectorBounds> {
         let range = range?;
         let (Some(msb), Some(lsb)) = (
-            self.eval_const_invariant(&range.msb)
-                .or_else(|| self.eval_const_parameter_default(&range.msb)),
-            self.eval_const_invariant(&range.lsb)
-                .or_else(|| self.eval_const_parameter_default(&range.lsb)),
+            self.eval_const_invariant_value(&range.msb)
+                .or_else(|| self.eval_const_value(&range.msb)),
+            self.eval_const_invariant_value(&range.lsb)
+                .or_else(|| self.eval_const_value(&range.lsb)),
         ) else {
             self.record_error_at(
                 SemanticErrorKind::UnsupportedFeature(format!(
@@ -1150,28 +1158,37 @@ impl SemanticAnalyzer {
             );
             return None;
         };
-        if msb.fract() != 0.0 || lsb.fract() != 0.0 {
+        if [msb, lsb]
+            .iter()
+            .any(|value| matches!(value, ConstantValue::Real(number) if number.fract() != 0.0))
+        {
             self.record_error_at(
                 SemanticErrorKind::TypeMismatch {
                     expected: "integer bounds".to_string(),
-                    found: format!("[{msb}:{lsb}]"),
+                    found: format!("[{}:{}]", msb.as_f64(), lsb.as_f64()),
                     context: format!("`{keyword}` vector range"),
                 },
                 range.span,
             );
             return None;
         }
-        let bounds = VectorBounds {
-            msb: msb as i64,
-            lsb: lsb as i64,
+        let (Some(msb), Some(lsb)) = (msb.as_exact_i64(), lsb.as_exact_i64()) else {
+            self.record_error_at(
+                SemanticErrorKind::UnsupportedFeature(format!(
+                    "`{keyword}` vector bounds must fit the supported signed 64-bit index range"
+                )),
+                range.span,
+            );
+            return None;
         };
+        let bounds = VectorBounds { msb, lsb };
         if bounds.width() > MAX_DIGITAL_VECTOR_WIDTH {
             self.record_error_at(
                 SemanticErrorKind::UnsupportedFeature(format!(
                     "`{keyword}` vector {} is {} bits; this compiler supports at most {} \
                      bits per signal",
                     bounds.spelling(),
-                    bounds.width(),
+                    u128::from(bounds.msb.abs_diff(bounds.lsb)) + 1,
                     MAX_DIGITAL_VECTOR_WIDTH
                 )),
                 range.span,
@@ -1705,19 +1722,18 @@ impl SemanticAnalyzer {
         };
         // A non-constant index is checked at run time by a later wave; only a
         // constant one can be refused here.
-        let value = self.eval_const_invariant(expression)?;
-        if value.fract() != 0.0 {
+        let value = self.eval_const_invariant_value(expression)?;
+        let Some(selected) = value.as_exact_i64() else {
             self.record_error_at(
                 SemanticErrorKind::TypeMismatch {
-                    expected: "integer bit index".to_string(),
-                    found: value.to_string(),
+                    expected: "integer bit index in the signed 64-bit index range".to_string(),
+                    found: value.as_f64().to_string(),
                     context: format!("select on `{name}`"),
                 },
                 expression.span(),
             );
             return None;
-        }
-        let selected = value as i64;
+        };
         let inside = match range {
             Some(bounds) => bounds.contains(selected),
             // A scalar signal has exactly one bit, numbered zero.

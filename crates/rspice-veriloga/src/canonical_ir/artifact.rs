@@ -36,9 +36,8 @@ pub struct CanonicalIrArtifact {
     pub mir: MirModel,
     /// The module's discrete-domain half, lowered to process functions.
     ///
-    /// Skipped entirely when empty, so an artifact for a continuous-domain
-    /// model serializes exactly as it did before processes existed — which is
-    /// what keeps the shipped models' regenerated output byte-identical.
+    /// Omitted when empty. The separate `digital_identity` still distinguishes
+    /// an absent plan from a nonempty plan lost during storage or transport.
     #[serde(default, skip_serializing_if = "CanonicalDigitalPlan::is_empty")]
     pub digital: CanonicalDigitalPlan,
 }

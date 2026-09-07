@@ -14,10 +14,10 @@ use smol_str::SmolStr;
 /// never deserialize a structurally different artifact merely because its HIR
 /// and metadata happen to repeat the same stale version number.
 ///
-/// Version 16 authenticates and validates the complete digital plan, including
-/// the process identity carried by suspended execution. Earlier artifacts must
-/// be rebuilt from source. Version 15 fixed static digital local lifetimes.
-pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 16;
+/// Version 17 rejects digital ranges whose widths or indices previously wrapped
+/// or clamped. Earlier artifacts must be rebuilt from source. Version 16 sealed
+/// digital plans and resume identities; version 15 fixed static local lifetimes.
+pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 17;
 
 /// Collision-resistant identity of one exact preprocessed source closure.
 pub fn source_identity(source_text: &str) -> String {

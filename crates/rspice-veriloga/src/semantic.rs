@@ -38,6 +38,13 @@ enum ConstantValue {
 }
 
 impl ConstantValue {
+    fn as_exact_i64(self) -> Option<i64> {
+        match self {
+            Self::Integer(value) => Some(value),
+            Self::Real(value) => SemanticAnalyzer::exact_const_i64(value),
+        }
+    }
+
     fn as_f64(self) -> f64 {
         match self {
             Self::Integer(value) => value as f64,
