@@ -2,8 +2,9 @@
 //!
 //! A checkpoint captures the integrator state at an accepted time point:
 //! the full MNA solution plus the capacitor and inductor companion-model
-//! histories. Restoring injects that state into a freshly built circuit and
-//! continues integration from the checkpoint time with absolute-time source
+//! histories. Mutual-inductance overlays are reconstructed from those same
+//! winding histories. Restoring injects that state into a freshly built
+//! circuit and continues from the checkpoint time with absolute-time source
 //! evaluation. Current files also retain the post-accept next-step proposal,
 //! its active Xyce breakpoint-span ceiling, its effective controller maximum,
 //! and the accepted analysis/restart phase controls that govern the next
@@ -22,9 +23,10 @@
 //! An arbitrary accepted proposal continues exactly, while an explicitly
 //! normalized endpoint or breakpoint contract deliberately takes an order-one
 //! restart step. Exact-proposal restore is target-aware and fails closed for
-//! native compact-model, thermal, stateful capacitor-expression, magnetic,
-//! stateful behavioral/switch, runtime Verilog-A, or generated dynamic-charge
-//! histories that do not yet have a complete versioned contract. Native VBIC,
+//! native compact-model, thermal, stateful capacitor-expression, nonlinear
+//! magnetic, standalone multi-winding transformer, stateful behavioral/switch,
+//! runtime Verilog-A, or generated dynamic-charge histories that do not yet
+//! have a complete versioned contract. Native VBIC,
 //! distributed LTRA/TXL, and coupled-line convolution runtimes block restart
 //! more broadly until their complete state is versioned.
 //!
@@ -6284,6 +6286,7 @@ impl TransientCheckpoint {
             .i_prev_prev_prev
             .copy_from_slice(&self.ind_i_prev_prev_prev);
         circuit.inductors.v_prev.copy_from_slice(&self.ind_v_prev);
+        circuit.restore_coupled_inductor_pair_state(&self.solution);
         for (binding, &resistance) in circuit
             .xyce_memristors
             .iter_mut()

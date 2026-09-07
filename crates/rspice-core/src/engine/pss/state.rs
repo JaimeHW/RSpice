@@ -177,7 +177,7 @@ pub(in crate::engine) struct PssCircuit {
     pub(super) circuit: CircuitData,
     pub(super) diode_history: TwoTerminalChargeHistory,
     basis: PssStateBasis,
-    voltage_scratch: Vec<Value>,
+    solution_scratch: Vec<Value>,
 }
 
 impl std::ops::Deref for PssCircuit {
@@ -196,7 +196,7 @@ impl std::ops::DerefMut for PssCircuit {
 impl PssCircuit {
     pub(in crate::engine) fn new(circuit: CircuitData) -> Self {
         let basis = PssStateBasis::new(&circuit);
-        let voltage_scratch = vec![0.0; circuit.num_nodes() + 1];
+        let solution_scratch = vec![0.0; circuit.matrix_size() + 1];
         let diode_history = TwoTerminalChargeHistory::from_biases(
             circuit
                 .diodes
@@ -208,7 +208,7 @@ impl PssCircuit {
             circuit,
             diode_history,
             basis,
-            voltage_scratch,
+            solution_scratch,
         }
     }
 
@@ -240,7 +240,7 @@ impl PssCircuit {
             self.state_dimension(),
             "PSS shooting-state shape must match its basis"
         );
-        self.voltage_scratch.fill(0.0);
+        self.solution_scratch.fill(0.0);
         for edge in &self.basis.forest {
             let value = match edge.value {
                 ForestValue::State(index) => state[index],
@@ -253,11 +253,11 @@ impl PssCircuit {
                         .map_err(|error| SimulationError::Circuit(error.to_string()))?
                 }
             };
-            self.voltage_scratch[edge.to] = self.voltage_scratch[edge.from] + edge.sign * value;
+            self.solution_scratch[edge.to] = self.solution_scratch[edge.from] + edge.sign * value;
         }
         let circuit = &mut self.circuit;
         for (index, stamp) in circuit.capacitors.stamps.iter().enumerate() {
-            let voltage = self.voltage_scratch[stamp.pp.row] - self.voltage_scratch[stamp.nn.row];
+            let voltage = self.solution_scratch[stamp.pp.row] - self.solution_scratch[stamp.nn.row];
             circuit.capacitors.v_prev[index] = voltage;
             circuit.capacitors.v_prev_prev[index] = voltage;
             circuit.capacitors.v_prev_prev_prev[index] = voltage;
@@ -266,8 +266,8 @@ impl PssCircuit {
         }
         self.diode_history
             .reset_biases(circuit.diodes.devices.iter().map(|diode| {
-                let voltage = self.voltage_scratch[diode.node_anode]
-                    - self.voltage_scratch[diode.node_cathode];
+                let voltage = self.solution_scratch[diode.node_anode]
+                    - self.solution_scratch[diode.node_cathode];
                 (voltage, diode.junction_charge_and_capacitance(voltage).0)
             }));
         for (index, coordinate) in self.basis.currents.coordinates.iter().enumerate() {
@@ -277,7 +277,13 @@ impl PssCircuit {
             circuit.inductors.i_prev_prev[index] = current;
             circuit.inductors.i_prev_prev_prev[index] = current;
             circuit.inductors.v_prev[index] = 0.0;
+            self.solution_scratch[circuit.num_nodes() + circuit.inductors.branch_indices[index]] =
+                current;
         }
+        // Mutual flux shares these physical winding currents. Restart both
+        // accepted history generations for each shooting perturbation; a
+        // prior period or derivative probe must never leak into the next.
+        circuit.reset_coupled_inductor_pair_state(&self.solution_scratch[1..]);
         Ok(())
     }
 
