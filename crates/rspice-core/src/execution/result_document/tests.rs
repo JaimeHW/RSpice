@@ -1508,13 +1508,23 @@ fn a_version_one_document_reads_back_declaring_no_bus() {
 
 #[test]
 fn a_combined_pstb_current_projection_survives_persistence() {
-    let (card, mut stability) = pstb_measurement();
+    let (mut card, mut stability) = pstb_measurement();
     stability.probe_instance = "L3".to_owned();
     stability.probe_state_index = None;
     stability.probe_state_projection = vec![(0, 1.0), (1, -1.0)];
     stability
         .probe_participation
         .fill(std::f64::consts::FRAC_1_SQRT_2);
+    let mismatched =
+        AnalysisResultDocument::from_pstb(instance(AnalysisKind::Pstb), &card, &stability);
+    assert!(
+        mismatched
+            .unwrap_err()
+            .to_string()
+            .contains("spectrum was measured at")
+    );
+    // Probe spelling is case-insensitive, while the result retains its canonical name.
+    card.probe_instance = "l3".to_owned();
     let document =
         AnalysisResultDocument::from_pstb(instance(AnalysisKind::Pstb), &card, &stability)
             .unwrap()

@@ -3193,6 +3193,18 @@ impl AnalysisResultDocument {
     ) -> Result<AnalysisResultDocumentBuilder, ResultDocumentError> {
         const LOCATION: &str = "PSTB result";
         let result = &stability.result;
+        if !card
+            .probe_instance
+            .eq_ignore_ascii_case(&stability.probe_instance)
+        {
+            return Err(source_error(
+                LOCATION,
+                format!(
+                    "the card names probe '{}' but the spectrum was measured at '{}'",
+                    card.probe_instance, stability.probe_instance,
+                ),
+            ));
+        }
         let mode_count = result.multipliers.len();
         if mode_count == 0 {
             return Err(source_error(
