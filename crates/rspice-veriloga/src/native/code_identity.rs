@@ -40,6 +40,71 @@ const SHIPPED_CENSUS_MODELS: usize = 43;
 /// move this pin exists to prevent — it converts a detector into a rubber
 /// stamp.
 ///
+/// # The power rule's zero-base guards
+///
+/// `556e82e4…` moved to `8cf0bc72…` over the six commits that guarded the
+/// power rule at `a = 0` — `584a631ab`, `0a9f58819`, `644745088`, `27dd41e44`,
+/// `589ffffcc` and `dfc3124a5`. They are one work stream landing the same
+/// guard in the three rule sets that differentiate a `pow`
+/// ([`crate::canonical_ir::ad`], `ir.rs`'s bytecode rule, and
+/// [`crate::native::expr`]'s assignment pass) plus the two second-derivative
+/// arms, so the honest attribution is the series and not one of them. Each
+/// rewrites `b·a^(b−1)·da` and `a^b·ln(a)·db` to nudge the base off exactly
+/// zero and to clamp the logarithm, **except where the exponent is a constant
+/// of 1 or more, which leaves every `pow(x, 2)` program byte-identical**.
+///
+/// **Thirty-seven modules moved, six are byte identical, and not one image
+/// shrank.** The corpus went from 105,811,376 bytes to **106,278,244, plus
+/// 0.4412 per cent** — the shape of a guard inserted per site, not of a
+/// lowering that was replaced.
+///
+/// Three readings say the mover is this series and nothing else in the range:
+///
+/// * **Both W-D refusals moved** — `mvsg_cmc` 2,861,548 to 2,961,256 (+3.48
+///   per cent, the largest factor in the corpus) and the `BSIM_SOI_100.1.1`
+///   `bsimsoi` 9,498,652 to 9,583,124. Those two keep the postfix plan, so a
+///   change confined to the CFG plan cannot reach them; a rule in the bytecode
+///   and canonical derivatives can, and does.
+/// * **Both noiseless modules moved** — `EPFL_HEMT_10a` +2.65 per cent and
+///   `vbic_4T_et_cf` +2.82 per cent are the only two shipped modules with no
+///   noise source (see the W-F13a section below), which rules out the three
+///   noise-pass commits that also land in this range. The converse holds too:
+///   two of the six *identical* modules, `angelov` and `hicumL0va`, do carry
+///   flicker noise, so a change to how a noise pass is stored would have had
+///   to move them and did not.
+/// * **The growth is a fixed cost per site.** The three `hisimhv` variants
+///   grew by exactly 53,776 bytes each; `r2_cmc` and `r2_et_cmc` by exactly 80;
+///   `vbic13` and `vbic13_3t_et` by exactly 3,104. That is a guard emitted at
+///   each differentiated `pow`, counted.
+///
+/// The six that did not move are `angelov`, `ekv3_rf`, `ekv_va`, `hicumL0va`
+/// and both `l_utsoi` variants, and they are one case rather than a residue:
+/// their non-constant exponents sit in parameter-only expressions that no
+/// derivative rule ever lowers, and their differentiated powers have constant
+/// exponents of 1 or more, which the guard leaves alone by construction.
+/// `ekv_va` spends both of its on `pow(ratioT, BEX)`, a temperature ratio
+/// raised to a parameter; `l_utsoi` spends thirty-nine on the
+/// `pow(iLE, ALP1LEXP)` geometry family, an inverse effective length raised to
+/// a parameter, and writes its bias-dependent power as `pow(temp0, 2.0)`,
+/// which is exactly the constant-exponent shape the guard skips. Those two
+/// were read; the other four were classified from the same scan and not from
+/// their sources line by line, so treat the case as demonstrated for `ekv_va`
+/// and `l_utsoi` and as strongly indicated for `angelov`, `ekv3_rf` and
+/// `hicumL0va`. The motivating model of `27dd41e44`, `bsimcmg_va`, is on the
+/// other side of the line at +9,728.
+///
+/// Two figures are worth recording because they cost nothing to check and they
+/// caught this note being written against the right revision: a census run on
+/// `4a53d105e` reproduces `556e82e4…` exactly, and its corpus total of
+/// 105,811,376 bytes is the figure the section below records to the byte.
+///
+/// Measured 2026-09-06 at `b71dabd2f`, alone under the box mutex, **196 s** —
+/// the before column is this box's own, from the `4a53d105e` run, at 573 s
+/// with a cold build for the older sources. The census is
+/// no longer the fifteen-minute run this file's older sections describe: the
+/// `IrExpr` arena took its front end from 364.6 seconds of compile to 44.2
+/// over the same forty-three modules.
+///
 /// # The observable set leaving the CFG plan's roots
 ///
 /// `86d6920e…` moved to `556e82e4…` at W-F14c, when the CFG plan's assignment
@@ -259,7 +324,7 @@ const SHIPPED_CENSUS_MODELS: usize = 43;
 /// `hicumL2va` `flicker_Pwr`, `r3_cmc` `gc`) — and the other thirty-five were
 /// digest identical (measured 2026-09-03 on `1ba20f27c`, peers idle, 893 s).
 const SHIPPED_CENSUS_DIGEST: &str =
-    "556e82e45b434464a31de8abf01cd71f295d800684e3364228458a5cee6dee65";
+    "8cf0bc72d6b42909c5124a75adf7773033e874933260120f2a7c2df9ecf5cc97";
 
 /// One shipped module's compiled machine-code digest.
 struct ModelImageDigest {

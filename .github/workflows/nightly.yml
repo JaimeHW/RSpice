@@ -285,6 +285,20 @@ jobs:
           cargo test --locked --release -p rspice-veriloga --features native --lib
           native_x64_shipped_model_finite_entries_match_bytecode_reference
           -- --ignored --nocapture --test-threads=1
+      - name: Shipped machine code is the code that was last measured
+        # The strongest identity gate the Verilog-A backend has, and until now
+        # the only one nothing ran: `#[ignore]`d so no lane pays for it, and
+        # named by no workflow, so it stood red against a stale baseline for a
+        # day without anyone seeing it. A default `cargo test` prints it as
+        # `ignored` inside a green summary, which is why the marking alone was
+        # never going to be enough. It belongs here, beside its three siblings,
+        # on the run nobody waits for.
+        env:
+          RUST_MIN_STACK: "67108864"
+        run: >-
+          cargo test --locked --release -p rspice-veriloga --features native --lib
+          shipped_model_machine_code_census_digest
+          -- --ignored --nocapture --test-threads=1
       - name: Upload Verilog-A stamp qualification
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
