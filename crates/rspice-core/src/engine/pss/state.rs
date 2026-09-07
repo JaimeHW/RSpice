@@ -180,6 +180,8 @@ pub(in crate::engine) struct PssCircuit {
     solution_scratch: Vec<Value>,
     current_balance: Vec<Value>,
     initial_flux_rates: Option<usize>,
+    current_source_correction: Vec<Value>,
+    current_source_times: [Value; 2],
 }
 
 impl std::ops::Deref for PssCircuit {
@@ -200,6 +202,11 @@ impl PssCircuit {
         let basis = PssStateBasis::new(&circuit);
         let solution_scratch = vec![0.0; circuit.matrix_size() + 1];
         let current_balance = vec![0.0; basis.currents.workspace_size()];
+        let current_source_correction = if basis.currents.has_prescribed_currents() {
+            vec![0.0; circuit.inductors.len()]
+        } else {
+            Vec::new()
+        };
         let diode_history = TwoTerminalChargeHistory::from_biases(
             circuit
                 .diodes
@@ -214,6 +221,8 @@ impl PssCircuit {
             solution_scratch,
             current_balance,
             initial_flux_rates: None,
+            current_source_correction,
+            current_source_times: [0.0; 2],
         }
     }
 
@@ -240,6 +249,7 @@ impl PssCircuit {
     }
 
     pub(super) fn set_state(&mut self, state: &[Value]) -> Result<(), SimulationError> {
+        self.current_source_times = [0.0; 2];
         assert_eq!(
             state.len(),
             self.state_dimension(),
@@ -275,6 +285,11 @@ impl PssCircuit {
                     - self.solution_scratch[diode.node_cathode];
                 (voltage, diode.junction_charge_and_capacitance(voltage).0)
             }));
+        self.basis.currents.source_balance(
+            &circuit.current_sources,
+            &mut self.current_balance,
+            false,
+        )?;
         self.basis.currents.set_state(
             &state[self.basis.voltage_branches.len()..],
             &mut circuit.inductors.i_prev,
@@ -298,7 +313,12 @@ impl PssCircuit {
     /// An exact initialization constraint carries displacement current while
     /// fixing the accepted branch voltage. Adding only forest coordinates
     /// avoids redundant ideal-source loops for parallel charge branches.
-    pub(super) fn add_initial_constraints(&mut self) {
+    pub(super) fn add_initial_constraints(&mut self) -> Result<(), SimulationError> {
+        self.basis.currents.source_balance(
+            &self.circuit.current_sources,
+            &mut self.current_balance,
+            true,
+        )?;
         for index in 0..self.basis.voltage_branches.len() {
             let (pos, neg) = self.basis.voltage_nodes(&self.circuit, index);
             let value = match self.basis.voltage_branches[index] {
@@ -328,6 +348,7 @@ impl PssCircuit {
                 self.circuit.allocate_branch();
             }
         }
+        Ok(())
     }
 
     pub(super) fn initial_extra_pattern(&self) -> Vec<(usize, usize)> {
@@ -348,7 +369,7 @@ impl PssCircuit {
         &self,
         matrix: &mut StaticMatrix,
         rhs: &mut [Value],
-    ) {
+    ) -> Result<(), SimulationError> {
         self.basis.currents.initial_matrix(
             &self.circuit,
             self.initial_flux_rates,
@@ -361,12 +382,61 @@ impl PssCircuit {
         {
             rhs[row] = self.inductors.i_prev[index];
         }
+        self.basis.currents.initial_rate_rhs(
+            &self.circuit,
+            self.initial_flux_rates,
+            &self.current_balance,
+            |row, value| rhs[row] = value,
+        )?;
+        Ok(())
     }
 
     pub(super) fn is_initial_current_row(&self, row: usize) -> bool {
         self.basis
             .currents
             .is_current_row(&self.circuit, row, self.initial_flux_rates)
+    }
+
+    pub(super) fn initialize_prescribed_currents(&mut self) -> Result<(), SimulationError> {
+        if !self.current_source_correction.is_empty() {
+            self.set_state(&self.extract_state())?;
+        }
+        Ok(())
+    }
+
+    pub(super) fn ensure_regular_prescribed_currents(
+        &self,
+        period: Value,
+    ) -> Result<(), SimulationError> {
+        self.basis
+            .currents
+            .ensure_regular_forcing(&self.circuit.current_sources, period)
+    }
+
+    pub(super) fn stamp_prescribed_current_correction(
+        &mut self,
+        rhs: &mut [Value],
+        step: PssCompanionStep<'_>,
+    ) -> Result<(), SimulationError> {
+        if !self.current_source_correction.is_empty() {
+            self.basis.currents.source_derivative_correction(
+                &self.circuit.current_sources,
+                &mut self.current_balance,
+                &mut self.current_source_correction,
+                self.current_source_times,
+                step,
+            )?;
+            self.basis.currents.add_flux_rhs(
+                &self.circuit,
+                &self.current_source_correction,
+                rhs,
+            )?;
+        }
+        Ok(())
+    }
+
+    pub(super) fn accept_source_time(&mut self, time: Value) {
+        self.current_source_times = [time, self.current_source_times[0]];
     }
 
     /// A physical winding current may be a signed sum of independent states.

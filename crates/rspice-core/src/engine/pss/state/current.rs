@@ -8,6 +8,7 @@ struct CurrentTreeEdge {
     child: usize,
     winding: usize,
     sign: Value,
+    voltage_scale: Value,
 }
 
 /// Contract the other electrical ports, then choose a spanning forest of the
@@ -21,6 +22,7 @@ pub(super) struct PssCurrentBasis {
     incident: Vec<Vec<(usize, Value)>>,
     winding_by_branch: Vec<usize>,
     has_mutual: bool,
+    source_ports: Vec<(usize, Option<usize>, Option<usize>)>,
 }
 
 fn root(parents: &mut [usize], mut node: usize) -> usize {
@@ -79,6 +81,7 @@ impl PssCurrentBasis {
                 incident: vec![Vec::new()],
                 winding_by_branch,
                 has_mutual,
+                source_ports: Vec::new(),
             };
         }
         let mut parents: Vec<_> = (0..nodes).collect();
@@ -110,10 +113,6 @@ impl PssCurrentBasis {
             (
                 &circuit.voltage_sources.node_pos,
                 &circuit.voltage_sources.node_neg,
-            ),
-            (
-                &circuit.current_sources.node_pos,
-                &circuit.current_sources.node_neg,
             ),
             (&circuit.vcvs.node_pos, &circuit.vcvs.node_neg),
             (&circuit.vccs.node_pos, &circuit.vccs.node_neg),
@@ -155,6 +154,20 @@ impl PssCurrentBasis {
             .collect::<Vec<_>>();
         let component_count = ids.len();
         let ground = ids.get(&root(&mut parents, 0)).copied();
+        // A source supplies a prescribed injection, not a free conductive
+        // path. Keeping its ports separate exposes affine winding cutsets.
+        let mut source_ports: Vec<_> = circuit
+            .current_sources
+            .node_pos
+            .iter()
+            .zip(&circuit.current_sources.node_neg)
+            .enumerate()
+            .filter_map(|(index, (&pos, &neg))| {
+                let pos = ids.get(&root(&mut parents, pos)).copied();
+                let neg = ids.get(&root(&mut parents, neg)).copied();
+                (pos != neg).then_some((index, pos, neg))
+            })
+            .collect();
         let mut incident = vec![Vec::new(); component_count];
         for (index, &(pos, neg)) in components.iter().enumerate() {
             if pos != neg {
@@ -200,12 +213,26 @@ impl PssCurrentBasis {
                             child,
                             winding,
                             sign,
+                            voltage_scale: incident[child]
+                                .iter()
+                                .map(|&(index, _)| circuit.inductors.inductances[index])
+                                .fold(Value::INFINITY, Value::min),
                         });
                         pending.push(child);
                     }
                 }
             }
         }
+        // Injections at a forest root do not prescribe any tree current.
+        // Exclude them so unrelated source waveforms need no differentiation
+        // or extra admission restrictions.
+        let mut constrained = vec![false; component_count];
+        for edge in &tree {
+            constrained[edge.child] = true;
+        }
+        source_ports.retain(|&(_, pos, neg)| {
+            pos.is_some_and(|pos| constrained[pos]) || neg.is_some_and(|neg| constrained[neg])
+        });
         Self {
             representatives,
             components,
@@ -213,6 +240,7 @@ impl PssCurrentBasis {
             incident,
             winding_by_branch,
             has_mutual,
+            source_ports,
         }
     }
 
@@ -224,9 +252,150 @@ impl PssCurrentBasis {
         !self.tree.is_empty() && self.has_mutual
     }
 
+    pub(super) fn has_prescribed_currents(&self) -> bool {
+        !self.tree.is_empty() && !self.source_ports.is_empty()
+    }
+
+    pub(super) fn ensure_regular_forcing(
+        &self,
+        sources: &crate::circuit::CurrentSources,
+        period: Value,
+    ) -> Result<(), SimulationError> {
+        for &(index, _, _) in &self.source_ports {
+            if !sources.has_regular_periodic_waveform(index, period) {
+                return Err(SimulationError::Circuit(format!(
+                    "PSS cannot certify prescribed current '{}' as continuous and periodic with period {period:e} s; a current cutset requires a regular periodic drive",
+                    sources.names[index],
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    pub(super) fn source_balance(
+        &self,
+        sources: &crate::circuit::CurrentSources,
+        balance: &mut [Value],
+        derivative: bool,
+    ) -> Result<(), SimulationError> {
+        self.source_balance_with(
+            sources,
+            balance,
+            if derivative {
+                "right-hand time derivative at time zero"
+            } else {
+                "value at time zero"
+            },
+            |index| {
+                if derivative {
+                    sources.right_derivative_at_time(index, 0.0)
+                } else {
+                    sources.value_at_time(index, 0.0)
+                }
+            },
+        )
+    }
+
+    fn source_balance_with(
+        &self,
+        sources: &crate::circuit::CurrentSources,
+        balance: &mut [Value],
+        quantity: &str,
+        mut evaluate: impl FnMut(usize) -> Value,
+    ) -> Result<(), SimulationError> {
+        balance.fill(0.0);
+        for &(index, pos, neg) in &self.source_ports {
+            let value = evaluate(index);
+            if !value.is_finite() {
+                return Err(SimulationError::Circuit(format!(
+                    "PSS prescribed current '{}' has no finite {quantity}",
+                    sources.names[index],
+                )));
+            }
+            if let Some(pos) = pos {
+                balance[pos] += value;
+            }
+            if let Some(neg) = neg {
+                balance[neg] -= value;
+            }
+        }
+        if balance.iter().any(|value| !value.is_finite()) {
+            return Err(SimulationError::Circuit(
+                "PSS prescribed-current balance is non-finite".to_owned(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Apply the companion only to the free part of I = P*x + q(t), then
+    /// restore the exact prescribed derivative q'(t). Differentiating the
+    /// sampled forcing itself would create parasitic trapezoidal voltage
+    /// oscillations in a current-source cutset, despite exact current KCL.
+    pub(super) fn source_derivative_correction(
+        &self,
+        sources: &crate::circuit::CurrentSources,
+        balance: &mut [Value],
+        correction: &mut [Value],
+        times: [Value; 2],
+        step: PssCompanionStep<'_>,
+    ) -> Result<(), SimulationError> {
+        self.source_balance_with(sources, balance, "current-constraint companion", |index| {
+            let latest = sources.value_at_time(index, times[0]);
+            let older = if step.coeff.needs_two_history {
+                sources.value_at_time(index, times[1])
+            } else {
+                latest
+            };
+            let derivative = sources.right_derivative_at_time(index, step.t_next);
+            let previous_derivative = if step.coeff.coeff_i_n == 0.0 {
+                0.0
+            } else {
+                sources.right_derivative_at_time(index, times[0])
+            };
+            derivative + step.coeff.coeff_i_n * previous_derivative
+                - step.coeff.inductor_charge_derivative_correction(
+                    1.0,
+                    step.dt,
+                    sources.value_at_time(index, step.t_next),
+                    latest,
+                    older,
+                )
+        })?;
+        self.set_state(&[], correction, balance);
+        Ok(())
+    }
+
+    pub(super) fn add_flux_rhs(
+        &self,
+        circuit: &CircuitData,
+        rates: &[Value],
+        rhs: &mut [Value],
+    ) -> Result<(), SimulationError> {
+        for (index, &rate) in rates.iter().enumerate() {
+            let row = circuit.num_nodes() + circuit.inductors.branch_indices[index] - 1;
+            rhs[row] += circuit.inductors.inductances[index] * rate;
+        }
+        for pair in &circuit.coupled_inductor_pairs {
+            let first = self.winding_by_branch[pair.branch1_ordinal];
+            let second = self.winding_by_branch[pair.branch2_ordinal];
+            rhs[circuit.num_nodes() + pair.branch1_ordinal - 1] += pair.device.m * rates[second];
+            rhs[circuit.num_nodes() + pair.branch2_ordinal - 1] += pair.device.m * rates[first];
+        }
+        if circuit
+            .inductors
+            .branch_indices
+            .iter()
+            .any(|&branch| !rhs[circuit.num_nodes() + branch - 1].is_finite())
+        {
+            return Err(SimulationError::Circuit(
+                "PSS prescribed-current flux correction is non-finite".to_owned(),
+            ));
+        }
+        Ok(())
+    }
+
     pub(super) fn set_state(&self, state: &[Value], currents: &mut [Value], balance: &mut [Value]) {
         currents.fill(0.0);
-        balance.fill(0.0);
         for (&index, &current) in self.representatives.iter().zip(state) {
             currents[index] = current;
             let (pos, neg) = self.components[index];
@@ -342,10 +511,7 @@ impl PssCurrentBasis {
             } else {
                 branch_row(edge.winding)
             };
-            let scale = self.incident[edge.child]
-                .iter()
-                .map(|&(index, _)| circuit.inductors.inductances[index])
-                .fold(Value::INFINITY, Value::min);
+            let scale = edge.voltage_scale;
             for &(index, sign) in &self.incident[edge.child] {
                 let weight = sign * (scale / circuit.inductors.inductances[index]);
                 if rates.is_some() {
@@ -363,11 +529,121 @@ impl PssCurrentBasis {
             }
         }
     }
+
+    pub(super) fn initial_rate_rhs(
+        &self,
+        circuit: &CircuitData,
+        rates: Option<usize>,
+        derivatives: &[Value],
+        mut visit: impl FnMut(usize, Value),
+    ) -> Result<(), SimulationError> {
+        for edge in &self.tree {
+            let branch = rates.map_or(circuit.inductors.branch_indices[edge.winding], |first| {
+                first + edge.winding
+            });
+            let value = -edge.voltage_scale * derivatives[edge.child];
+            if !value.is_finite() {
+                return Err(SimulationError::Circuit(
+                    "PSS prescribed-current initial flux rate is non-finite".to_owned(),
+                ));
+            }
+            visit(circuit.num_nodes() + branch - 1, value);
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn injected_current_junctions_preserve_physical_kcl_and_differentiated_kcl() {
+        let ports = [
+            ("out", "a"),
+            ("a", "b"),
+            ("b", "0"),
+            ("a", "0"),
+            ("b", "out"),
+        ];
+        let engine = Engine::default();
+        for reversed in 0..32 {
+            let mut deck = String::from(
+                "affine winding junctions\nV1 in 0 1\nR1 in out 100\nI1 0 a SIN(2m 1m 1meg 0 0 37)\nI2 b 0 DC -3m\n",
+            );
+            for (index, &(mut pos, mut neg)) in ports.iter().enumerate() {
+                if reversed & (1 << index) != 0 {
+                    std::mem::swap(&mut pos, &mut neg);
+                }
+                deck.push_str(&format!(
+                    "L{} {pos} {neg} {}u\n",
+                    index + 1,
+                    (index + 1) * 10
+                ));
+            }
+            deck.push_str("K1 L1 L5 0.3\n.end\n");
+            let netlist = Netlist::parse(&deck).unwrap();
+            let mut circuit = PssCircuit::new(engine.build_circuit(&netlist).unwrap());
+            assert_eq!(circuit.state_dimension(), 3);
+            circuit.set_state(&[0.0; 3]).unwrap();
+            let offset = circuit.inductors.i_prev.clone();
+            let state = [0.2, -0.3, 0.4];
+            circuit.set_state(&state).unwrap();
+            for (index, &offset) in offset.iter().enumerate() {
+                let projected: f64 = circuit
+                    .basis
+                    .currents
+                    .projection(index)
+                    .iter()
+                    .map(|&(i, weight)| state[i] * weight)
+                    .sum();
+                assert!((circuit.inductors.i_prev[index] - projected - offset).abs() < 1e-15);
+            }
+            let solution = engine
+                .pss_initial_node_solution(&mut circuit, &NoAbort)
+                .unwrap();
+            let mut rates = Vec::new();
+            for index in 0..5 {
+                let voltage = |node| if node == 0 { 0.0 } else { solution[node - 1] };
+                rates.push(
+                    (voltage(circuit.inductors.node_pos[index])
+                        - voltage(circuit.inductors.node_neg[index]))
+                        / circuit.inductors.inductances[index],
+                );
+            }
+            // Invert just the two-winding block of the physical flux matrix.
+            let first = rates[0];
+            let fifth = rates[4];
+            let mutual = 0.3 * (10e-6_f64 * 50e-6).sqrt();
+            rates[0] = (first - mutual / 10e-6 * fifth) / (1.0 - 0.3 * 0.3);
+            rates[4] = (fifth - mutual / 50e-6 * first) / (1.0 - 0.3 * 0.3);
+            for name in ["a", "b"] {
+                let node = circuit.get_node_by_name(name).unwrap();
+                let mut current_kcl = 0.0;
+                let mut rate_kcl = 0.0;
+                for (index, &rate) in rates.iter().enumerate() {
+                    let sign = f64::from(circuit.inductors.node_pos[index] == node)
+                        - f64::from(circuit.inductors.node_neg[index] == node);
+                    current_kcl += sign * circuit.inductors.i_prev[index];
+                    rate_kcl += sign * rate;
+                }
+                for index in 0..circuit.current_sources.names.len() {
+                    let sign = f64::from(circuit.current_sources.node_pos[index] == node)
+                        - f64::from(circuit.current_sources.node_neg[index] == node);
+                    current_kcl += sign * circuit.current_sources.value_at_time(index, 0.0);
+                    rate_kcl += sign * circuit.current_sources.right_derivative_at_time(index, 0.0);
+                }
+                assert!(
+                    current_kcl.abs() < 1e-15,
+                    "{name}, reverse={reversed}, KCL={current_kcl:e}"
+                );
+                assert!(
+                    rate_kcl.abs() < 1e-7,
+                    "{name}, reverse={reversed}, dKCL={rate_kcl:e}"
+                );
+            }
+        }
+    }
 
     #[test]
     fn winding_forest_preserves_kcl_and_every_physical_probe_under_terminal_reversal() {

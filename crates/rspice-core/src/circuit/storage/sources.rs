@@ -9,6 +9,9 @@
 use super::*;
 use crate::circuit::{CircuitError, projection_changed};
 
+mod periodicity;
+mod waveform;
+
 /// What an independent source is driving with: its DC operating value, the
 /// small-signal magnitude and phase an `.AC` sweep excites it at, and the
 /// authored waveform specification the transient engine plays. A source built
@@ -1352,358 +1355,7 @@ impl VoltageSources {
         context: Option<TransientSourceContext>,
         pwl_waveform: Option<&crate::device::pwl_file::PwlWaveform>,
     ) -> Value {
-        use crate::netlist::SourceSpec;
-        use std::f64::consts::PI;
-
-        match spec {
-            SourceSpec::Distortion { inner, .. } => {
-                Self::evaluate_source_at_time_with_context_and_pwl(
-                    inner,
-                    time,
-                    context,
-                    pwl_waveform,
-                )
-            }
-            // A port that declares a power or a frequency is a large-signal RF
-            // generator, and its drive rides on whatever the source itself was
-            // given. ngspice drops the source's own DC here; that would step
-            // the node by the bias between the operating point and the first
-            // transient sample, so the DC is kept.
-            SourceSpec::RfPort { inner, port } => {
-                Self::evaluate_source_at_time_with_context_and_pwl(
-                    inner,
-                    time,
-                    context,
-                    pwl_waveform,
-                ) + port.drive_at(time).unwrap_or(0.0)
-            }
-            SourceSpec::Dc(v) => *v,
-            SourceSpec::Ac { .. } => 0.0, // AC sources are DC=0 in transient
-            // TRNOISE expands into a PWL sample train before circuit
-            // construction; an unexpanded spec is zero-mean by definition.
-            SourceSpec::TrNoise { .. } => 0.0,
-            SourceSpec::TrRandom { parameter2, .. } => *parameter2,
-            SourceSpec::DcAc { dc_value, .. } => *dc_value,
-            SourceSpec::DcTransient { transient, .. } => {
-                Self::evaluate_source_at_time_with_context_and_pwl(
-                    transient,
-                    time,
-                    context,
-                    pwl_waveform,
-                )
-            }
-            SourceSpec::DcAcTransient { transient, .. } => {
-                Self::evaluate_source_at_time_with_context_and_pwl(
-                    transient,
-                    time,
-                    context,
-                    pwl_waveform,
-                )
-            }
-            SourceSpec::Pulse {
-                v1,
-                v2,
-                delay,
-                rise,
-                fall,
-                width,
-                period,
-                pulse_count,
-                width_defaults_to_zero,
-            } => {
-                let xyce_boundaries =
-                    Self::pulse_dialect(context) == crate::config::SpiceDialect::Xyce;
-                let (delay, rise, fall, width, period) = Self::resolve_pulse_timing(
-                    *delay,
-                    *rise,
-                    *fall,
-                    *width,
-                    *period,
-                    *width_defaults_to_zero,
-                    context,
-                );
-                if time < delay {
-                    return *v1;
-                }
-                let t_rel = time - delay;
-                // ngspice vsrcload.c: a positive eighth argument bounds the
-                // waveform to that many periods, after which it holds V1 for
-                // the rest of the run.
-                if Self::pulse_train_has_ended(t_rel, period, *pulse_count) {
-                    return *v1;
-                }
-                let repeating_period = if xyce_boundaries {
-                    period.is_finite() && period != 0.0
-                } else {
-                    period.is_finite() && period > 0.0
-                };
-                let t = if repeating_period && t_rel > period {
-                    t_rel - period * (t_rel / period).floor()
-                } else {
-                    t_rel
-                };
-                if xyce_boundaries {
-                    // Mirror Xyce 7.10 PulseData::updateSource branch-for-
-                    // branch. Its tolerance follows the transient hard
-                    // minimum timestep at the current accepted time and is
-                    // deliberately unrelated to the static source tstep. A
-                    // real transient supplies that accepted controller state;
-                    // only stateless waveform previews derive a target-time
-                    // fallback because they have no accepted state.
-                    let breakpoint_tolerance = context
-                        .and_then(|context| context.xyce_breakpoint_tolerance)
-                        .unwrap_or_else(|| 2.0 * crate::numerics::xyce_hard_min_timestep(time));
-                    let rise_width = rise + width;
-                    let end = rise_width + fall;
-                    if t <= 0.0 || (t > end && (t - end).abs() > breakpoint_tolerance) {
-                        *v1
-                    } else if t > rise
-                        && (t - rise).abs() > breakpoint_tolerance
-                        && (t < rise_width || (t - rise_width).abs() < breakpoint_tolerance)
-                    {
-                        *v2
-                    } else if t > 0.0 && (t < rise || (t - rise).abs() < breakpoint_tolerance) {
-                        if rise != 0.0 {
-                            v1 + (v2 - v1) * t / rise
-                        } else {
-                            *v1
-                        }
-                    } else if fall != 0.0 {
-                        v2 + (v1 - v2) * (t - rise_width) / fall
-                    } else {
-                        *v2
-                    }
-                } else if t <= 0.0 || t >= rise + width + fall {
-                    *v1
-                } else if t < rise {
-                    v1 + (v2 - v1) * t / rise
-                } else if t < rise + width {
-                    *v2
-                } else if t < rise + width + fall {
-                    v2 + (v1 - v2) * (t - rise - width) / fall
-                } else {
-                    *v1
-                }
-            }
-            SourceSpec::Sin {
-                offset,
-                amplitude,
-                frequency,
-                delay,
-                damping,
-                phase,
-            } => {
-                let frequency = Self::resolve_sin_frequency(*frequency, context);
-                if time < *delay {
-                    // ngspice holds VO + VA*sin(PHASE) before the delay,
-                    // not the bare offset (vsrcload.c).
-                    offset + amplitude * phase.sin()
-                } else {
-                    let t = time - delay;
-                    offset
-                        + amplitude
-                            * (-damping * t).exp()
-                            * (2.0 * PI * frequency * t + phase).sin()
-                }
-            }
-            SourceSpec::Pwl {
-                points,
-                delay,
-                repeat_from,
-            } => Self::evaluate_pwl_points(points, time, *delay, *repeat_from),
-            SourceSpec::PwlFile {
-                path,
-                time_scale,
-                value_scale,
-                time_offset,
-                value_offset,
-                delay,
-                repeat_from,
-            } => {
-                if let Some(waveform) = pwl_waveform {
-                    return if time < *delay {
-                        0.0
-                    } else {
-                        waveform.value_at_repeating(time - *delay, *repeat_from)
-                    };
-                }
-                let key =
-                    PwlCacheKey::new(path, *time_scale, *value_scale, *time_offset, *value_offset);
-                let resource_limits = context
-                    .map(|context| context.resource_limits)
-                    .unwrap_or_default();
-                match Self::load_pwl_waveform_cached_with_limits(
-                    path,
-                    *time_scale,
-                    *value_scale,
-                    *time_offset,
-                    *value_offset,
-                    resource_limits,
-                ) {
-                    Ok(waveform) => {
-                        if time < *delay {
-                            0.0
-                        } else {
-                            waveform.value_at_repeating(time - *delay, *repeat_from)
-                        }
-                    }
-                    Err(err) => {
-                        let message = format!("failed to load PWL file '{path}': {err}");
-                        Self::log_pwl_error_once(
-                            key,
-                            &message,
-                            resource_limits.max_shared_cache_bytes,
-                        );
-                        *value_offset
-                    }
-                }
-            }
-            SourceSpec::Pat {
-                vhi,
-                vlo,
-                delay,
-                rise,
-                fall,
-                sample,
-                data,
-                repeat_count,
-            } => Self::evaluate_pat_source(
-                *vhi,
-                *vlo,
-                *delay,
-                *rise,
-                *fall,
-                *sample,
-                data,
-                *repeat_count,
-                time,
-            ),
-            SourceSpec::Exp {
-                v1,
-                v2,
-                td1,
-                tau1,
-                td2,
-                tau2,
-            } => {
-                let (td1, tau1, td2, tau2) =
-                    Self::resolve_exp_timing(*td1, *tau1, *td2, *tau2, context);
-                if time <= td1 {
-                    *v1
-                } else if time <= td2 {
-                    v1 + (v2 - v1) * (1.0 - (-(time - td1) / tau1).exp())
-                } else {
-                    v1 + (v2 - v1) * (1.0 - (-(time - td1) / tau1).exp())
-                        - (v2 - v1) * (1.0 - (-(time - td2) / tau2).exp())
-                }
-            }
-            SourceSpec::Sffm {
-                offset,
-                amplitude,
-                carrier_freq,
-                modulation_index,
-                signal_freq,
-                delay,
-                phase_modulation,
-                phase_carrier,
-            } => {
-                if matches!(
-                    Self::pulse_dialect(context),
-                    crate::config::SpiceDialect::Xyce
-                ) {
-                    let fc = if carrier_freq.is_finite() {
-                        *carrier_freq
-                    } else {
-                        Self::xyce_modulated_frequency_default(context)
-                    };
-                    let fs = if signal_freq.is_finite() {
-                        *signal_freq
-                    } else {
-                        Self::xyce_modulated_frequency_default(context)
-                    };
-                    let mdi = if modulation_index.is_finite() {
-                        *modulation_index
-                    } else {
-                        0.0
-                    };
-                    return *offset
-                        + *amplitude
-                            * ((2.0 * PI * fc * time) + mdi * (2.0 * PI * fs * time).sin()).sin();
-                }
-
-                // ngspice vsrcload.c SFFM semantics, including the exact
-                // omitted-parameter defaults and the MDI limiter.
-                let fc = if carrier_freq.is_finite() && *carrier_freq > 0.0 {
-                    *carrier_freq
-                } else {
-                    Self::modulated_frequency_default(5.0, context)
-                };
-                let fm = if signal_freq.is_finite() && *signal_freq != 0.0 {
-                    *signal_freq
-                } else {
-                    Self::modulated_frequency_default(500.0, context)
-                };
-                // ngspice limits MDI with an if/else-if chain, not a symmetric
-                // clamp: a negative FM makes FC/FM negative, and any MDI above
-                // that ratio lands on the ratio itself. `f64::clamp(0.0, ratio)`
-                // panics on min > max for exactly that deck.
-                let ratio = fc / fm;
-                let mdi = if !modulation_index.is_finite() {
-                    90.0_f64.min(ratio)
-                } else if *modulation_index > ratio {
-                    ratio
-                } else if *modulation_index < 0.0 {
-                    0.0
-                } else {
-                    *modulation_index
-                };
-                let t = time - delay;
-                if t <= 0.0 {
-                    0.0
-                } else {
-                    let phasec = phase_carrier.to_radians();
-                    let phasem = phase_modulation.to_radians();
-                    offset
-                        + amplitude
-                            * ((2.0 * PI * fc * t + phasec)
-                                + mdi * (2.0 * PI * fm * t + phasem).sin())
-                            .sin()
-                }
-            }
-            SourceSpec::Am {
-                offset,
-                modulation_offset,
-                modulation_amplitude,
-                modulating_freq,
-                carrier_freq,
-                delay,
-                phase_modulation,
-                phase_carrier,
-            } => {
-                // ngspice vsrcload.c AM semantics.
-                let fm = if modulating_freq.is_finite() && *modulating_freq > 0.0 {
-                    *modulating_freq
-                } else {
-                    Self::modulated_frequency_default(5.0, context)
-                };
-                let fc = if carrier_freq.is_finite() && *carrier_freq > 0.0 {
-                    *carrier_freq
-                } else {
-                    Self::modulated_frequency_default(500.0, context)
-                };
-                let t = time - delay;
-                if t <= 0.0 {
-                    0.0
-                } else {
-                    let phasec = phase_carrier.to_radians();
-                    let phasem = phase_modulation.to_radians();
-                    offset
-                        + (modulation_offset
-                            + modulation_amplitude * (2.0 * PI * fm * t + phasem).sin())
-                            * (2.0 * PI * fc * t + phasec).sin()
-                }
-            }
-        }
+        Self::source_time_component::<false>(spec, time, context, pwl_waveform)
     }
 
     /// Enforce voltage source constraints on solution vector after force-accept
@@ -1771,6 +1423,31 @@ impl VoltageSources {
         repeat_count: i32,
         time: Value,
     ) -> Value {
+        Self::pat_time_component::<false>(
+            vhi,
+            vlo,
+            delay,
+            rise,
+            fall,
+            sample,
+            data,
+            repeat_count,
+            time,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn pat_time_component<const DERIVATIVE: bool>(
+        vhi: Value,
+        vlo: Value,
+        delay: Value,
+        rise: Value,
+        fall: Value,
+        sample: Value,
+        data: &str,
+        repeat_count: i32,
+        time: Value,
+    ) -> Value {
         let Some((first_bit, last_bit, bit_count)) = Self::pat_data_shape(data) else {
             return 0.0;
         };
@@ -1805,31 +1482,44 @@ impl VoltageSources {
         };
 
         let mut source_time = time - delay;
-        if source_time <= first_plateau_time {
-            return first_value;
+        if source_time < first_plateau_time || (!DERIVATIVE && source_time == first_plateau_time) {
+            return if DERIVATIVE { 0.0 } else { first_value };
         }
 
         if repeat_count >= 0
             && source_time >= repeat_count as Value * pattern_duration + second_last_time
         {
-            return second_last_value;
+            return if DERIVATIVE { 0.0 } else { second_last_value };
         }
 
         if source_time > pattern_duration {
             source_time -= pattern_duration;
             source_time -= pattern_duration * (source_time / pattern_duration).floor();
-            if source_time == 0.0 {
+            if !DERIVATIVE && source_time == 0.0 {
                 return last_value;
             }
         } else if source_time == pattern_duration {
-            return last_value;
+            if DERIVATIVE {
+                source_time = 0.0;
+            } else {
+                return last_value;
+            }
         }
 
-        Self::interpolate_pat_points(vhi, vlo, rise, fall, sample, data, source_time, last_value)
+        Self::interpolate_pat_points::<DERIVATIVE>(
+            vhi,
+            vlo,
+            rise,
+            fall,
+            sample,
+            data,
+            source_time,
+            last_value,
+        )
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn interpolate_pat_points(
+    fn interpolate_pat_points<const DERIVATIVE: bool>(
         vhi: Value,
         vlo: Value,
         rise: Value,
@@ -1840,7 +1530,7 @@ impl VoltageSources {
         last_value: Value,
     ) -> Value {
         let mut previous: Option<(Value, Value)> = None;
-        let mut result = last_value;
+        let mut result = if DERIVATIVE { 0.0 } else { last_value };
         let mut found = false;
         Self::visit_pat_points(
             vhi,
@@ -1856,13 +1546,19 @@ impl VoltageSources {
                 if time < point_time {
                     result = if let Some((time1, value1)) = previous {
                         let dt = point_time - time1;
-                        if dt == 0.0 {
+                        if DERIVATIVE {
+                            if dt == 0.0 {
+                                Value::NAN
+                            } else {
+                                (point_value - value1) / dt
+                            }
+                        } else if dt == 0.0 {
                             point_value
                         } else {
                             (point_time - time) * value1 / dt + (time - time1) * point_value / dt
                         }
                     } else {
-                        point_value
+                        if DERIVATIVE { 0.0 } else { point_value }
                     };
                     found = true;
                 } else {
@@ -1964,7 +1660,7 @@ impl VoltageSources {
         Some((bytes[1], *bytes.last()?, bytes.len() - 1))
     }
 
-    fn evaluate_pwl_points(
+    fn pwl_time_component<const DERIVATIVE: bool>(
         points: &[(Value, Value)],
         time: Value,
         delay: Value,
@@ -1977,12 +1673,31 @@ impl VoltageSources {
             return 0.0;
         }
         let shifted_time = time - delay;
-        if shifted_time <= points[0].0 {
-            return points[0].1;
+        if shifted_time < points[0].0 || (!DERIVATIVE && shifted_time == points[0].0) {
+            return if DERIVATIVE { 0.0 } else { points[0].1 };
         }
-        let time = Self::repeat_pwl_time(points, shifted_time, repeat_from);
+        let mut time = Self::repeat_pwl_time(points, shifted_time, repeat_from);
+        if DERIVATIVE
+            && time == points[points.len() - 1].0
+            && let Some(start) = repeat_from.filter(|start| start.is_finite())
+        {
+            let start = start.max(points[0].0);
+            let period = time - start;
+            if period.is_finite() && period > Value::EPSILON {
+                if Self::pwl_time_component::<false>(points, start, 0.0, None)
+                    != points[points.len() - 1].1
+                {
+                    return Value::NAN;
+                }
+                time = start;
+            }
+        }
         if time >= points[points.len() - 1].0 {
-            return points[points.len() - 1].1;
+            return if DERIVATIVE {
+                0.0
+            } else {
+                points[points.len() - 1].1
+            };
         }
         for window in points.windows(2) {
             let (t1, v1) = window[0];
@@ -1990,12 +1705,24 @@ impl VoltageSources {
             if time >= t1 && time < t2 {
                 let dt = t2 - t1;
                 if !dt.is_finite() || dt.abs() <= Value::EPSILON {
-                    return v1;
+                    return if DERIVATIVE { 0.0 } else { v1 };
                 }
-                return v1 + (v2 - v1) * (time - t1) / dt;
+                return if DERIVATIVE {
+                    if shifted_time == points[0].0 && v1 != points[0].1 {
+                        Value::NAN
+                    } else {
+                        (v2 - v1) / dt
+                    }
+                } else {
+                    v1 + (v2 - v1) * (time - t1) / dt
+                };
             }
         }
-        points.last().map(|(_, value)| *value).unwrap_or(0.0)
+        if DERIVATIVE {
+            0.0
+        } else {
+            points.last().map(|(_, value)| *value).unwrap_or(0.0)
+        }
     }
 
     fn repeat_pwl_time(
@@ -2085,6 +1812,33 @@ impl CurrentSources {
         (0..self.names.len())
             .map(|index| self.value_at_time(index, time))
             .collect()
+    }
+
+    /// Analytic outgoing time derivative under the same waveform defaults
+    /// and circuit-owned PWL snapshot used by transient stamping.
+    pub(crate) fn right_derivative_at_time(&self, index: usize, time: Value) -> Value {
+        self.source_specs[index].as_ref().map_or(0.0, |spec| {
+            VoltageSources::source_time_component::<true>(
+                spec,
+                time,
+                self.transient_context,
+                self.pwl_waveforms[index].as_deref(),
+            )
+        })
+    }
+
+    /// Certify a continuous periodic forcing before eliminating its prescribed
+    /// winding current from the shooting state. Otherwise an empty residual
+    /// can hide a nonperiodic source or an unrepresented impulse voltage.
+    pub(crate) fn has_regular_periodic_waveform(&self, index: usize, period: Value) -> bool {
+        self.source_specs[index].as_ref().is_none_or(|spec| {
+            VoltageSources::regular_periodic_waveform(
+                spec,
+                period,
+                self.transient_context,
+                self.pwl_waveforms[index].as_deref(),
+            )
+        })
     }
 
     pub fn new() -> Self {
@@ -2371,6 +2125,28 @@ mod tests {
     use crate::netlist::SourceSpec;
     use std::time::{SystemTime, UNIX_EPOCH};
 
+    pub(super) fn current_source_with_waveform(text: &str) -> CurrentSources {
+        let netlist =
+            crate::netlist::Netlist::parse(&format!("source waveform\nI1 0 a {text}\n.end\n"))
+                .unwrap();
+        let crate::netlist::ElementKind::CurrentSource(spec) = &netlist.elements[0].kind else {
+            panic!("expected a resolved current-source waveform: {text}");
+        };
+        let mut sources = CurrentSources::new();
+        sources.add_with_ac_and_spec(
+            "I1".to_owned(),
+            0,
+            1,
+            SourceExcitation {
+                dc_value: 0.0,
+                ac_magnitude: 0.0,
+                ac_phase: 0.0,
+                source_spec: Some(spec.clone()),
+            },
+        );
+        sources
+    }
+
     fn assert_close(actual: Value, expected: Value) {
         let tolerance = expected.abs().max(1.0) * 1.0e-12;
         assert!(
@@ -2499,6 +2275,9 @@ mod tests {
         );
 
         assert_close(sources.value_at_time(0, 0.5), 2.0);
+        assert_close(sources.right_derivative_at_time(0, 0.0), 2.0);
+        assert_close(sources.right_derivative_at_time(0, 0.5), 2.0);
+        assert_close(sources.right_derivative_at_time(0, 1.0), 0.0);
         assert_close(sources.max_expected_delta(0.25, 0.75), 1.0);
         assert_close(sources.max_dc_to_transient_delta(0.5), 1.0);
     }

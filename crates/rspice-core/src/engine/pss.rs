@@ -82,7 +82,7 @@ impl PssAcceptedStepHistory {
 
 const PSS_KRYLOV_STATE_THRESHOLD: usize = 12;
 const PSS_KRYLOV_REL_TOL: Value = 1e-9;
-const PSS_OPERATING_POINT_IDENTITY_VERSION: u32 = 6;
+const PSS_OPERATING_POINT_IDENTITY_VERSION: u32 = 7;
 
 fn pss_identity_field(hasher: &mut blake3::Hasher, name: &str, bytes: &[u8]) {
     hasher.update(&(name.len() as u64).to_le_bytes());
@@ -1444,6 +1444,13 @@ impl Engine {
     /// circuits (known period from source frequency) and autonomous oscillators
     /// (period detected from waveform).
     ///
+    /// Independent current sources in winding cutsets prescribe physical
+    /// currents without adding shooting coordinates. Their drives must be
+    /// continuous and periodic from the solve's time origin; admission rejects
+    /// uncertified startup prefixes and current jumps requiring impulse
+    /// voltages. Continuous piecewise-linear drives retain finite outgoing
+    /// winding voltages at their corners.
+    ///
     /// # Arguments
     ///
     /// * `netlist` - The circuit netlist
@@ -1959,6 +1966,7 @@ impl Engine {
         circuit.link_indices(&matrix);
 
         let mut circuit = PssCircuit::new(circuit);
+        circuit.ensure_regular_prescribed_currents(config.period())?;
 
         // Validate circuit has reactive elements
         let state_dimension = circuit.state_dimension();
@@ -2011,6 +2019,7 @@ impl Engine {
 
         // Initialize capacitor/inductor state from DC
         self.pss_initialize_reactive_state(&mut circuit, &dc_solution);
+        circuit.initialize_prescribed_currents()?;
 
         // ==================================================================
         // Phase 1: Stabilization (tstab)
@@ -2468,6 +2477,9 @@ impl Engine {
         abort: &dyn AbortSignal,
     ) -> Result<(Vec<Value>, TransientResult), SimulationError> {
         let max_step = period / config.points_per_period as f64;
+        if config.is_autonomous() {
+            circuit.ensure_regular_prescribed_currents(period)?;
+        }
 
         // Node voltages consistent with the frozen reactive state: they seed
         // the first Newton solve and become the genuine t=0 waveform sample.
@@ -2508,7 +2520,7 @@ impl Engine {
     ) -> Result<Vec<Value>, SimulationError> {
         let size = circuit.matrix_size();
         let mut initial = circuit.clone();
-        initial.add_initial_constraints();
+        initial.add_initial_constraints()?;
         let mut matrix =
             self.build_matrix_with_extra_pattern(&initial, &initial.initial_extra_pattern())?;
         initial.link_indices(&matrix);
@@ -3213,7 +3225,7 @@ impl Engine {
     #[allow(clippy::too_many_arguments)]
     pub(in crate::engine) fn pss_stamp_system(
         &self,
-        circuit: &mut PssCircuit,
+        pss: &mut PssCircuit,
         matrix: &mut StaticMatrix,
         rhs: &mut [Value],
         step: PssCompanionStep<'_>,
@@ -3223,14 +3235,14 @@ impl Engine {
         matrix.clear_values();
         rhs.fill(0.0);
         if step.initialization {
-            circuit.stamp_initial_inductor_constraints(matrix, rhs);
+            pss.stamp_initial_inductor_constraints(matrix, rhs)?;
         }
-        let initial_flux_rates = circuit.has_initial_flux_rates();
+        let initial_flux_rates = pss.has_initial_flux_rates();
         let PssCircuit {
             circuit,
             diode_history,
             ..
-        } = circuit;
+        } = pss;
         let PssCompanionStep {
             coeff,
             t_next,
@@ -3365,6 +3377,9 @@ impl Engine {
             )
         }
         .map_err(SimulationError::Circuit)?;
+        if !initialization {
+            pss.stamp_prescribed_current_correction(rhs, step)?;
+        }
         Ok(())
     }
 
@@ -3530,6 +3545,12 @@ impl Engine {
                     return Err(SimulationError::ConvergenceFailed(total_iterations));
                 }
                 timestep.force_step(dt * 0.25);
+                // force_step clamps to the hard floor. Retrying an identical
+                // or larger interval cannot recover this rejected trial and
+                // used to spin until the traversal's 100,000-iteration guard.
+                if timestep.dt() >= dt {
+                    return Err(SimulationError::ConvergenceFailed(total_iterations));
+                }
                 continue;
             };
             if fixed_grid {
@@ -3627,6 +3648,7 @@ impl Engine {
 
             solution = new_solution;
             accepted_step_history.accept(dt);
+            circuit.accept_source_time(t);
 
             if let Some(tr) = trace.as_deref_mut() {
                 tr.times.push(t);
@@ -3999,6 +4021,47 @@ mod tests {
             None,
             "the exact consistency solve must not leak its rejected expression cache"
         );
+    }
+
+    #[test]
+    fn adaptive_pss_stops_when_a_failed_trial_cannot_shrink_below_the_timestep_floor() {
+        let netlist =
+            Netlist::parse("bounded PSS retries\nV1 in 0 1\nR1 in out 1k\nC1 out 0 1n\n.end\n")
+                .unwrap();
+        let engine = Engine::new(SimulationConfig {
+            max_iterations: 1,
+            min_timestep: 1e-12,
+            ..SimulationConfig::default()
+        });
+        let mut circuit = PssCircuit::new(engine.build_circuit(&netlist).unwrap());
+        let mut matrix = engine.build_matrix(&circuit).unwrap();
+        circuit.link_indices(&matrix);
+        let initial = vec![0.0; circuit.matrix_size()];
+        // Every trial needs a second Newton iteration to confirm V(in)=1.
+        // The abort budget distinguishes bounded convergence failure from
+        // repeatedly solving the same minimum-size interval until cancellation.
+        let error = engine
+            .pss_run_tran_internal(
+                &mut circuit,
+                &mut matrix,
+                initial,
+                PssTraversal {
+                    tstop: 1e-6,
+                    max_step: 1e-6,
+                    fixed_grid: false,
+                    integration_method: None,
+                },
+                None,
+                &crate::abort_signal::CountingAbort::new(100),
+            )
+            .unwrap_err();
+        assert!(
+            matches!(error, SimulationError::ConvergenceFailed(iterations) if iterations <= 16),
+            "{error}"
+        );
+        assert_eq!(circuit.capacitors.v_prev, [0.0]);
+        assert_eq!(circuit.capacitors.v_prev_prev, [0.0]);
+        assert_eq!(circuit.capacitors.i_prev, [0.0]);
     }
 
     #[test]

@@ -15,6 +15,240 @@ const R: f64 = 1.0e3;
 const C: f64 = 159.154943091895e-12; // RC corner ~ 1 MHz (w*RC = 1)
 
 #[test]
+fn a_source_prescribes_its_series_winding_current() {
+    use rspice_core::numerics::integration::IntegrationMethod;
+    let engine = Engine::default();
+    let phase = 37.0_f64.to_radians();
+    let omega = std::f64::consts::TAU * F0;
+    for (source, amplitude) in [("DC 1m", 0.0), ("SIN(1m 2m 1meg 0 0 37)", 2e-3)] {
+        for reversed in [false, true] {
+            let winding = if reversed { "b a" } else { "a b" };
+            let netlist = Netlist::parse(&format!(
+                "prescribed winding current\nI1 0 a {source}\nI2 0 a DC -0.5m\nL1 {winding} 100u\nR1 b 0 100\n.end\n"
+            )).unwrap();
+            for method in [
+                IntegrationMethod::BackwardEuler,
+                IntegrationMethod::Trapezoidal,
+                IntegrationMethod::Gear2,
+                IntegrationMethod::TrapGear,
+            ] {
+                for stabilization in [0, 2] {
+                    let mut config = PssConfig::new(F0)
+                        .with_tstab_periods(stabilization)
+                        .with_points_per_period(256);
+                    config.integration_method = Some(method);
+                    let point = engine
+                        .run_pss_operating_point_with_abort(&netlist, config, &NoAbort)
+                        .unwrap_or_else(|error| panic!("{source}, {method:?}: {error}"));
+                    assert!(point.shooting_state_basis().is_empty());
+                    assert!(point.analysis().monodromy.is_empty());
+                    let result = &point.analysis().result;
+                    for (node, name) in result.node_names.iter().enumerate() {
+                        for (&time, &actual) in
+                            result.time.iter().zip(&result.waveforms[node].values)
+                        {
+                            let angle = omega * time + phase;
+                            let current = 0.5e-3 + amplitude * angle.sin();
+                            let expected = 100.0 * current
+                                + if name.eq_ignore_ascii_case("a") {
+                                    100e-6 * amplitude * omega * angle.cos()
+                                } else {
+                                    0.0
+                                };
+                            assert!(
+                                (actual - expected).abs() < 1e-10,
+                                "{source}, {method:?}, reversed={reversed}, {name} at {time:e}: {actual:e} vs {expected:e}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn prescribed_current_requires_a_continuous_periodic_drive() {
+    let engine = Engine::default();
+    for source in [
+        "SIN(0 1m 1.25meg)",
+        "SIN(0 1m 1meg 0 1000)",
+        "EXP(0 1m 0.1u 0.2u 0.7u 0.1u)",
+        "PWL(0 0 0.3u 1m 0.3u -1m 1u 0) R=0",
+        "PWL(0 0 1u 1m) R=0",
+        "PWL(0 0 0.5u 1m 1u 0)",
+        "PULSE(0 1m 0 0.2u 0.2u 0.9u 1u)",
+        "PULSE(0 1m 0 0.2u 0.2u 0.3u 1u 2)",
+    ] {
+        let netlist = Netlist::parse(&format!(
+            "irregular prescribed current\nI1 0 a {source}\nL1 a b 100u\nR1 b 0 100\n.end\n"
+        ))
+        .unwrap();
+        let error = engine
+            .run_pss(&netlist, PssConfig::new(F0).with_tstab_periods(0))
+            .unwrap_err();
+        assert!(
+            matches!(&error, SimulationError::Circuit(message) if message.contains("prescribed current 'I1'") && message.contains("continuous and periodic")),
+            "{source}: {error}"
+        );
+    }
+}
+
+#[test]
+fn piecewise_linear_prescribed_current_retains_the_outgoing_voltage_at_corners() {
+    let engine = Engine::default();
+    // A continuous triangular wave has finite, discontinuous inductor voltage.
+    // PULSE and repeating PWL encode the same waveform by independent routes.
+    for source in [
+        "PWL(0 0.2m 0.5u 1.2m 1u 0.2m) R=0",
+        "PULSE(0.2m 1.2m 0 0.5u 0.5u 0 1u)",
+    ] {
+        let netlist = Netlist::parse(&format!(
+            "regular piecewise current\nI1 0 a {source}\nL1 a b 100u\nR1 b 0 100\n.end\n"
+        ))
+        .unwrap();
+        let result = engine
+            .run_pss(
+                &netlist,
+                PssConfig::new(F0)
+                    .with_tstab_periods(0)
+                    .with_points_per_period(128),
+            )
+            .unwrap()
+            .result;
+        for (node, name) in result.node_names.iter().enumerate() {
+            for (&time, &actual) in result.time.iter().zip(&result.waveforms[node].values) {
+                let rising = time < 0.5e-6 || time == 1e-6;
+                let current = if time <= 0.5e-6 {
+                    0.2e-3 + 2000.0 * time
+                } else {
+                    1.2e-3 - 2000.0 * (time - 0.5e-6)
+                };
+                let expected = 100.0 * current
+                    + if name.eq_ignore_ascii_case("a") {
+                        if rising { 0.2 } else { -0.2 }
+                    } else {
+                        0.0
+                    };
+                assert!(
+                    (actual - expected).abs() < 1e-11,
+                    "{source}, {name}, t={time:e}: {actual:e} vs {expected:e}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn prescribed_current_drives_mutual_flux_without_adding_a_shooting_coordinate() {
+    use num_complex::Complex64;
+    use rspice_core::numerics::integration::IntegrationMethod;
+    let omega = std::f64::consts::TAU * F0;
+    let drive = Complex64::from_polar(2e-3, 37.0_f64.to_radians());
+    for reversed in [false, true] {
+        let winding = if reversed { "mid a" } else { "a mid" };
+        let mutual = if reversed { -1.0 } else { 1.0 } * 0.6 * (100e-6_f64 * 200e-6).sqrt();
+        let z_mutual = Complex64::new(0.0, omega * mutual);
+        let i2 = -z_mutual * drive / Complex64::new(200.0, omega * 200e-6);
+        let voltages = [
+            ("mid", 100.0 * drive, 0.1),
+            (
+                "a",
+                Complex64::new(100.0, omega * 100e-6) * drive + z_mutual * i2,
+                0.1,
+            ),
+            ("b", -200.0 * i2, 0.0),
+        ];
+        let netlist = Netlist::parse(&format!(
+            "prescribed mutual flux\nI1 0 a SIN(1m 2m 1meg 0 0 37)\nL1 {winding} 100u\nR1 mid 0 100\nL2 b 0 200u\nR2 b 0 200\nK1 L1 L2 0.6\n.end\n"
+        )).unwrap();
+        let engine = Engine::default();
+        for method in [
+            IntegrationMethod::BackwardEuler,
+            IntegrationMethod::Trapezoidal,
+            IntegrationMethod::Gear2,
+            IntegrationMethod::TrapGear,
+        ] {
+            let mut previous_error = f64::INFINITY;
+            for points in [256, 512, 1024] {
+                let mut config = PssConfig::new(F0)
+                    .with_tstab_periods(if points == 512 { 2 } else { 0 })
+                    .with_points_per_period(points)
+                    .with_tolerance(1e-11);
+                config.integration_method = Some(method);
+                let point = engine
+                    .run_pss_operating_point_with_abort(&netlist, config.clone(), &NoAbort)
+                    .unwrap();
+                assert_eq!(point.shooting_state_basis(), ["L:L2"]);
+                let analysis = point.analysis();
+                let mut error: f64 = 0.0;
+                for (name, phasor, dc) in voltages {
+                    let node = analysis
+                        .result
+                        .node_names
+                        .iter()
+                        .position(|n| n.eq_ignore_ascii_case(name))
+                        .unwrap();
+                    for (&time, &actual) in analysis
+                        .result
+                        .time
+                        .iter()
+                        .zip(&analysis.result.waveforms[node].values)
+                    {
+                        let expected = dc
+                            + phasor.re * (omega * time).sin()
+                            + phasor.im * (omega * time).cos();
+                        error = error.max((actual - expected).abs() / phasor.norm());
+                    }
+                }
+                assert!(
+                    error < 0.6 * previous_error,
+                    "{method:?}, points={points}, error={error:e}, previous={previous_error:e}"
+                );
+                previous_error = error;
+                if points == 1024 {
+                    assert!(
+                        error
+                            < if method == IntegrationMethod::BackwardEuler {
+                                0.004
+                            } else {
+                                0.0001
+                            },
+                        "{method:?}: {error:e}"
+                    );
+                    let multiplier = analysis.floquet_multipliers[0];
+                    assert!(multiplier.im.abs() < 1e-10);
+                    assert!((multiplier.re / (-1.0_f64).exp() - 1.0).abs() < 0.001);
+                    let (_, state) = engine
+                        .run_pss_with_continuation_state(&netlist, config)
+                        .unwrap();
+                    let (continued, _) = engine
+                        .run_tran_from_pss_state(&netlist, &state, 1e-6, 1e-6 / 1024.0)
+                        .unwrap();
+                    for (name, phasor, dc) in voltages {
+                        let node = continued
+                            .node_names
+                            .iter()
+                            .position(|n| n.eq_ignore_ascii_case(name))
+                            .unwrap();
+                        for (&time, &actual) in continued.time.iter().zip(&continued.voltages[node])
+                        {
+                            let expected = dc
+                                + phasor.re * (omega * time).sin()
+                                + phasor.im * (omega * time).cos();
+                            assert!(
+                                (actual - expected).abs() < 0.007 * phasor.norm(),
+                                "continuation {method:?}, {name}, t={time:e}: {actual:e} vs {expected:e}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn coupled_winding_history_preserves_the_transformer_orbit_and_continuation() {
     use num_complex::Complex64;
     let engine = Engine::default();
