@@ -25,7 +25,7 @@ fn validate_assignment_coverage(model: &CompiledModel, step: &AssignmentStep) ->
         AssignmentStep::AssignIndexed { base, len, .. } => {
             validate_assignment_range(model, *base, *len)
         }
-        AssignmentStep::Loop { body, .. } => {
+        AssignmentStep::Loop { body, .. } | AssignmentStep::Initialization { body, .. } => {
             for step in body {
                 validate_assignment_coverage(model, step)?;
             }

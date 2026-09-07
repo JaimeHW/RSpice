@@ -324,7 +324,7 @@ fn count_regions(regions: &[HirRegion]) -> (usize, usize) {
                     assignments += nested_assignments;
                 }
             }
-            HirRegion::Loop { body, .. } => {
+            HirRegion::Loop { body, .. } | HirRegion::Initialization { body, .. } => {
                 let (nested_conditionals, nested_assignments) = count_regions(body);
                 conditionals += nested_conditionals;
                 assignments += nested_assignments;

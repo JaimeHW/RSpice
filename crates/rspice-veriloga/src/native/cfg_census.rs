@@ -1366,6 +1366,9 @@ fn tag_assignment_steps(
 ) {
     for step in steps {
         match step {
+            AssignmentStep::Initialization { body, .. } => {
+                tag_assignment_steps(tags, body, context)
+            }
             AssignmentStep::Assign(assignment) => tag_program(tags, &assignment.program, context),
             AssignmentStep::Task(task) => {
                 for program in task.expressions() {

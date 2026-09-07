@@ -314,6 +314,10 @@ pub struct VmContext {
     pub param_given: Vec<u8>,
     /// Variable values (indexed by variable)
     pub variables: Vec<f64>,
+    /// Pre-simulation assignments have completed for this analysis/configuration.
+    pub(crate) analysis_initialized: bool,
+    /// Variable storage comes from a successful evaluation at the current inputs.
+    pub(crate) numerical_evaluation_valid: bool,
     /// Sorted variable slots whose values persist only after an accepted
     /// point because they are written by analog event-control bodies.
     ///
@@ -447,6 +451,8 @@ impl Default for VmContext {
             parameters: Vec::new(),
             param_given: Vec::new(),
             variables: Vec::new(),
+            analysis_initialized: false,
+            numerical_evaluation_valid: false,
             event_state_indices: Vec::new(),
             accepted_event_variables: Vec::new(),
             analog_effects: None,
@@ -556,6 +562,8 @@ impl VmContext {
             parameters: Vec::new(),
             param_given: Vec::new(),
             variables: Vec::new(),
+            analysis_initialized: false,
+            numerical_evaluation_valid: false,
             event_state_indices: Vec::new(),
             accepted_event_variables: Vec::new(),
             analog_effects: None,
@@ -605,6 +613,8 @@ impl VmContext {
             parameters: Vec::new(),
             param_given: Vec::new(),
             variables: Vec::new(),
+            analysis_initialized: false,
+            numerical_evaluation_valid: false,
             event_state_indices: Vec::new(),
             accepted_event_variables: Vec::new(),
             analog_effects: None,
@@ -654,6 +664,8 @@ impl VmContext {
             parameters: Vec::new(),
             param_given: Vec::new(),
             variables: Vec::new(),
+            analysis_initialized: false,
+            numerical_evaluation_valid: false,
             event_state_indices: Vec::new(),
             accepted_event_variables: Vec::new(),
             analog_effects: None,
@@ -715,6 +727,38 @@ impl VmContext {
         self.accepted_event_variables.clear();
         self.accepted_event_variables
             .extend(indices.iter().map(|&index| self.variables[index]));
+        Ok(())
+    }
+
+    /// Start pre-simulation execution from accepted procedural state, discarding
+    /// any Newton candidates left by the previous instance configuration.
+    pub(crate) fn begin_initialization(&mut self) {
+        self.begin_stateful_evaluation_with_tasks(true);
+        self.time = 0.0;
+        if let Some(journal) = &mut self.analog_effects {
+            journal.begin_evaluation();
+        }
+    }
+
+    /// Publish pre-simulation variable values without advancing analog histories.
+    pub(crate) fn commit_initialization(&mut self) -> Result<(), VmError> {
+        self.validate_event_state_candidate()?;
+        if let Some(journal) = &mut self.analog_effects {
+            journal.complete_evaluation();
+            journal
+                .validate_candidate()
+                .map_err(|error| VmError::AnalogTask(error.to_string()))?;
+            journal.apply_validated_acceptance();
+        }
+        for (&index, accepted) in self
+            .event_state_indices
+            .iter()
+            .zip(&mut self.accepted_event_variables)
+        {
+            *accepted = self.variables[index];
+        }
+        self.analysis_initialized = true;
+        self.numerical_evaluation_valid = false;
         Ok(())
     }
 
@@ -1185,6 +1229,8 @@ impl VmContext {
     }
 
     pub(crate) fn restore_accepted_checkpoint(&mut self, checkpoint: &VmAcceptedCheckpoint) {
+        self.analysis_initialized = true;
+        self.numerical_evaluation_valid = false;
         self.record_task_effects = false;
         if let Some(journal) = &mut self.analog_effects {
             journal.reset_analysis();
@@ -1263,6 +1309,8 @@ impl VmContext {
     /// variables and every analog-operator history start from their
     /// language-defined zero state.
     pub(crate) fn reset_analysis_state(&mut self) {
+        self.analysis_initialized = false;
+        self.numerical_evaluation_valid = false;
         self.record_task_effects = false;
         if let Some(journal) = &mut self.analog_effects {
             journal.reset_analysis();
@@ -1320,6 +1368,7 @@ impl VmContext {
     }
 
     pub(crate) fn begin_stateful_evaluation_with_tasks(&mut self, record_tasks: bool) {
+        self.numerical_evaluation_valid = false;
         self.record_task_effects = record_tasks;
         if record_tasks && let Some(journal) = &mut self.analog_effects {
             journal.discard_candidate();
@@ -1471,6 +1520,7 @@ impl VmContext {
     /// Checked timestep update. Validation completes before any runtime state
     /// or lifecycle lane is mutated.
     pub fn try_set_timestep(&mut self, dt: f64) -> Result<(), VmError> {
+        self.numerical_evaluation_valid = false;
         if !dt.is_finite() || dt < 0.0 {
             return Err(VmError::InvalidRuntimeConfiguration(format!(
                 "transient timestep must be finite and non-negative, got {dt}"
@@ -1498,6 +1548,7 @@ impl VmContext {
         &mut self,
         coefficients: IntegrationCoefficients,
     ) -> Result<(), VmError> {
+        self.numerical_evaluation_valid = false;
         coefficients.validate()?;
         self.apply_integration_coefficients(coefficients);
         Ok(())
@@ -1763,6 +1814,14 @@ impl VmContext {
 
     /// Set a parameter value.
     pub fn set_param(&mut self, index: usize, value: f64) {
+        self.numerical_evaluation_valid = false;
+        if self
+            .parameters
+            .get(index)
+            .is_some_and(|previous| *previous != value)
+        {
+            self.analysis_initialized = false;
+        }
         if index >= self.parameters.len() {
             self.parameters.resize(index + 1, 0.0);
         }
@@ -1771,8 +1830,12 @@ impl VmContext {
 
     /// Mark a parameter as explicitly given by the instance.
     pub fn mark_param_given(&mut self, index: usize) {
+        self.numerical_evaluation_valid = false;
         if index >= self.param_given.len() {
             self.param_given.resize(index + 1, 0);
+        }
+        if self.param_given[index] == 0 {
+            self.analysis_initialized = false;
         }
         self.param_given[index] = 1;
     }
@@ -1785,6 +1848,14 @@ impl VmContext {
 
     /// Set a variable value.
     pub fn set_variable(&mut self, index: usize, value: f64) {
+        if self
+            .variables
+            .get(index)
+            .is_none_or(|previous| *previous != value)
+        {
+            self.analysis_initialized = false;
+        }
+        self.numerical_evaluation_valid = false;
         if index >= self.variables.len() {
             self.variables.resize(index + 1, 0.0);
         }

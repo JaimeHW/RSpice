@@ -4295,22 +4295,22 @@ impl Instance {
 		let FQL=0.0;
 		let FQM=0.0;
 		if C{
-		analog_finish(479, time, D);
+		analog_finish(480, time, D);
 		}
 		if F{
-		analog_finish(482, time, D);
+		analog_finish(483, time, D);
 		}
 		if H{
-		analog_finish(487, time, D);
+		analog_finish(488, time, D);
 		}
 		if J{
-		analog_finish(490, time, D);
+		analog_finish(491, time, D);
 		}
 		if L{
-		analog_finish(495, time, D);
+		analog_finish(496, time, D);
 		}
 		if N{
-		analog_finish(498, time, D);
+		analog_finish(499, time, D);
 		}
 		if V{
 		loop{
@@ -4327,7 +4327,7 @@ impl Instance {
 		}
 		}
 		if AB!=0.0{
-		analog_finish(1430, time, D);
+		analog_finish(1431, time, D);
 		}
 		let AH;
 		let AI;

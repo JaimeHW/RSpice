@@ -1448,22 +1448,22 @@ impl Instance {
 		let DHO=0.0;
 		let DHP=0.0;
 		if A{
-		analog_finish(29, time, B);
+		analog_finish(30, time, B);
 		}
 		if D{
-		analog_finish(33, time, B);
+		analog_finish(34, time, B);
 		}
 		if F{
-		analog_finish(39, time, B);
+		analog_finish(40, time, B);
 		}
 		if H{
-		analog_finish(43, time, B);
+		analog_finish(44, time, B);
 		}
 		if K{
-		analog_finish(260, time, B);
+		analog_finish(261, time, B);
 		}
 		if M{
-		analog_finish(262, time, B);
+		analog_finish(263, time, B);
 		}
 		let U;
 		let V;

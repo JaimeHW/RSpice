@@ -73,6 +73,7 @@ fn flat_assignments(m: &AnalyzedModule) -> Vec<&AnalyzedAssignment> {
             match stmt {
                 AnalyzedStatement::Assignment(a) => out.push(a),
                 AnalyzedStatement::Loop(l) => walk(&l.body, out),
+                AnalyzedStatement::Initialization { body, .. } => walk(body, out),
                 AnalyzedStatement::Task(_) => {}
             }
         }
@@ -1664,7 +1665,9 @@ fn conditional_regions(regions: &[AnalyzedRegion]) -> usize {
                 else_body,
                 ..
             } => 1 + conditional_regions(then_body) + conditional_regions(else_body),
-            AnalyzedRegion::Loop { body, .. } => conditional_regions(body),
+            AnalyzedRegion::Loop { body, .. } | AnalyzedRegion::Initialization { body, .. } => {
+                conditional_regions(body)
+            }
             AnalyzedRegion::Assignment(_)
             | AnalyzedRegion::Contribution(_)
             | AnalyzedRegion::Task(_) => 0,
@@ -2432,7 +2435,9 @@ fn a_region_assignment_carries_the_expression_as_written() {
         AnalyzedStatement::Assignment(assignment) => {
             matches!(assignment.expression, Expression::Conditional(_))
         }
-        AnalyzedStatement::Loop(_) | AnalyzedStatement::Task(_) => false,
+        AnalyzedStatement::Loop(_)
+        | AnalyzedStatement::Task(_)
+        | AnalyzedStatement::Initialization { .. } => false,
     });
     assert!(
         flat_guarded,

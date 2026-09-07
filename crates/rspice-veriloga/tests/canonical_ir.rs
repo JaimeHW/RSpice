@@ -23,6 +23,58 @@ use rspice_veriloga::{
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+#[test]
+fn hir_rejects_misplaced_initialization_and_task_phase_metadata() {
+    use rspice_veriloga::canonical_ir::hir::HirRegion;
+    use rspice_veriloga_runtime::AnalogEvaluationPhase;
+    let source = "module phases(p,n); inout p,n; electrical p,n; analog initial $finish(0); analog I(p,n)<+1; endmodule";
+    let analyzed = analyze_fixture(source, "phases").unwrap();
+    let metadata = CanonicalMetadata::for_source("fixture", source);
+    let original = HirModel::from_analyzed_module(&metadata, &analyzed);
+    original.validate().unwrap();
+    let mut hir = original.clone();
+    let HirStatement::Initialization { body, .. } = &mut hir.statements[0] else {
+        panic!("initial phase");
+    };
+    let HirStatement::Task(task) = &mut body[0] else {
+        panic!("initial task");
+    };
+    task.initialization = false;
+    assert!(
+        hir.validate()
+            .unwrap_err()
+            .iter()
+            .any(|d| d.message.contains("execution phase"))
+    );
+    let mut hir = original.clone();
+    let HirStatement::Initialization { body, span, .. } = &mut hir.statements[0] else {
+        panic!("initial phase");
+    };
+    let nested = HirStatement::Initialization {
+        phase: AnalogEvaluationPhase::Initialization,
+        body: std::mem::take(body),
+        span: *span,
+    };
+    body.push(nested);
+    assert!(
+        hir.validate()
+            .unwrap_err()
+            .iter()
+            .any(|d| d.message.contains("top-level"))
+    );
+    let mut hir = original;
+    let HirRegion::Initialization { phase, .. } = &mut hir.body[0] else {
+        panic!("initial region");
+    };
+    *phase = AnalogEvaluationPhase::Declarations;
+    assert!(
+        hir.validate()
+            .unwrap_err()
+            .iter()
+            .any(|d| d.message.contains("phase order"))
+    );
+}
+
 fn analyze_fixture(
     source: &str,
     module_name: &str,
@@ -1289,7 +1341,7 @@ fn metadata_digest_is_stable_and_hex_encoded() {
     assert_ne!(digest, StableDigest::from_text("module other; endmodule"));
 
     let metadata = CanonicalMetadata::for_source("fixture", "module tiny; endmodule");
-    assert_eq!(metadata.schema_version, 20);
+    assert_eq!(metadata.schema_version, 21);
     assert_eq!(metadata.source_package.as_str(), "fixture");
     assert_eq!(metadata.source_digest.as_str(), digest.as_hex());
 }
@@ -2129,7 +2181,7 @@ fn artifact_dump_is_deterministic_and_contains_phase_summaries() {
 
     assert_eq!(first, second);
     assert!(first.contains("canonical-veriloga-ir"));
-    assert!(first.contains("schema_version=20"));
+    assert!(first.contains("schema_version=21"));
     assert!(first.contains("source_package=fixture"));
     assert!(first.contains("source_digest="));
     assert!(first.contains("source_identity="));
@@ -3598,7 +3650,9 @@ fn hir_validation_rejects_malformed_array_contribution_and_statement_paths() {
         .iter()
         .find_map(|statement| match statement {
             HirStatement::Assignment(assignment) => Some(assignment.clone()),
-            HirStatement::Loop(_) | HirStatement::Task(_) => None,
+            HirStatement::Loop(_) | HirStatement::Task(_) | HirStatement::Initialization { .. } => {
+                None
+            }
         })
         .expect("assignment statement");
     invalid_assignment.target = VariableId::from(variable_count);
@@ -3751,7 +3805,9 @@ endmodule
         .iter()
         .filter(|statement| match statement {
             HirStatement::Assignment(assignment) => assignment.target == snapshot.id,
-            HirStatement::Loop(_) | HirStatement::Task(_) => false,
+            HirStatement::Loop(_) | HirStatement::Task(_) | HirStatement::Initialization { .. } => {
+                false
+            }
         })
         .count();
     assert_eq!(
@@ -3770,7 +3826,9 @@ endmodule
                     else_body,
                     ..
                 } => region_writes(then_body, target) + region_writes(else_body, target),
-                HirRegion::Loop { body, .. } => region_writes(body, target),
+                HirRegion::Loop { body, .. } | HirRegion::Initialization { body, .. } => {
+                    region_writes(body, target)
+                }
             })
             .sum()
     }

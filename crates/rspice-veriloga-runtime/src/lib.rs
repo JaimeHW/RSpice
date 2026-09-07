@@ -19,12 +19,14 @@
 #![allow(clippy::too_many_arguments)]
 
 mod analog_effects;
+mod analog_lifecycle;
 mod compatibility_catalog;
 
 pub use analog_effects::{
     AnalogEffectError, AnalogEffectJournal, AnalogEffectLimits, AnalogTaskArgument,
     AnalogTaskInvocation, AnalogTaskKind,
 };
+pub use analog_lifecycle::AnalogEvaluationPhase;
 
 pub use compatibility_catalog::{
     GENERATED_VERILOGA_COMPATIBILITY_CATALOG, GENERATED_VERILOGA_V27_COMBINED_IDENTITY_ALIASES,
@@ -1922,6 +1924,9 @@ pub enum GeneratedStampLane {
 /// A recoverable failure reported while evaluating generated device code.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GeneratedEvaluationError {
+    Initialization {
+        slot: usize,
+    },
     AnalogTask {
         site: u32,
         source: AnalogEffectError,
@@ -1949,6 +1954,10 @@ pub enum GeneratedEvaluationError {
 impl std::fmt::Display for GeneratedEvaluationError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::Initialization { slot } => write!(
+                f,
+                "generated Verilog-A initializer produced a non-finite value in variable slot {slot}"
+            ),
             Self::AnalogTask { site, source } => {
                 write!(
                     f,
@@ -2174,6 +2183,7 @@ where
 /// A generated noise evaluator rejected invalid model state or output.
 #[derive(Debug, Clone, PartialEq)]
 pub enum GeneratedNoiseEvaluationError {
+    UninitializedAnalogState,
     SourceIndexOutOfRange {
         index: usize,
         count: usize,
@@ -2226,6 +2236,9 @@ pub enum GeneratedNoiseEvaluationError {
 impl std::fmt::Display for GeneratedNoiseEvaluationError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::UninitializedAnalogState => {
+                f.write_str("analog initialization must complete before generated noise evaluation")
+            }
             Self::SourceIndexOutOfRange { index, count } => write!(
                 f,
                 "generated Verilog-A noise source index {index} is outside the {count}-source catalog"
@@ -2743,6 +2756,13 @@ impl<'a> GeneratedEvalContext<'a> {
         if self.evaluation_error.get().is_none() {
             self.evaluation_error
                 .set(Some(GeneratedEvaluationError::AnalogTask { site, source }));
+        }
+    }
+
+    pub fn report_initialization_error(&self, slot: usize) {
+        if self.evaluation_error.get().is_none() {
+            self.evaluation_error
+                .set(Some(GeneratedEvaluationError::Initialization { slot }));
         }
     }
 

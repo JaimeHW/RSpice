@@ -72,6 +72,7 @@ pub(super) struct StateFileExtensions {
     pub checkpoint_capture_fields: String,
     pub checkpoint_shape_checks: String,
     pub checkpoint_restore_fields: String,
+    pub validate_checkpoint_ready: String,
     /// Additional scalar lanes appended to `event_variables` after ordinary
     /// procedural event state. This keeps the public checkpoint envelope
     /// stable while generated event operators retain accepted history.
@@ -109,6 +110,7 @@ impl Default for StateFileExtensions {
                     .to_string(),
             checkpoint_shape_checks: String::new(),
             checkpoint_restore_fields: String::new(),
+            validate_checkpoint_ready: String::new(),
             persistent_event_lane_count: 0,
             checkpoint_event_capture: String::new(),
             checkpoint_event_validate: String::new(),
@@ -577,6 +579,7 @@ pub(super) fn generate_state_file_with_extensions(
     out.push_str("    }\n\n");
 
     out.push_str("    pub fn validate_checkpoint_ready(&self) -> Result<(), String> {\n");
+    out.push_str(&extensions.validate_checkpoint_ready);
     if extensions.uses_analog_tasks {
         out.push_str("        if self.analog_effects.as_ref().is_some_and(|journal| journal.has_candidate() || !journal.accepted().is_empty()) {\n            return Err(\"generated Verilog-A checkpoint requires accepted system tasks to be delivered and no candidate evaluation\".to_string());\n        }\n");
     }

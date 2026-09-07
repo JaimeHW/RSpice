@@ -327,7 +327,7 @@ impl Instance {
 		let IN=0.0;
 		let IO=0.0;
 		if A{
-		analog_finish(1, time, B);
+		analog_finish(2, time, B);
 		}
 		let G=if parameter_given[10]{
 		E
@@ -366,7 +366,7 @@ impl Instance {
 		let AG=AE+ AF;
 		let AH=AG< J;
 		if AH{
-		analog_finish(32, time, B);
+		analog_finish(33, time, B);
 		}
 		let AO=AG> J;
 		let AW;
@@ -377,7 +377,7 @@ impl Instance {
 		let AS=AR- AA;
 		let AT=AS<= J;
 		if AT{
-		analog_finish(37, time, B);
+		analog_finish(38, time, B);
 		}
 		AW=AS;
 		AX=AQ;
@@ -439,7 +439,7 @@ impl Instance {
 		let BS=BR+ AA;
 		let BT=BS< J;
 		if BT{
-		analog_finish(62, time, B);
+		analog_finish(63, time, B);
 		}
 		let CA=BS> J;
 		let CG;
@@ -450,7 +450,7 @@ impl Instance {
 		let CC=CB- AF;
 		let CD=CC<= J;
 		if CD{
-		analog_finish(67, time, B);
+		analog_finish(68, time, B);
 		}
 		CG=CC;
 		CH=CB;
@@ -512,7 +512,7 @@ impl Instance {
 		let CV=CU+ AA;
 		let CW=CV< J;
 		if CW{
-		analog_finish(91, time, B);
+		analog_finish(92, time, B);
 		}
 		let DD=AD* O;
 		let DE=DD+ AF;
@@ -521,7 +521,7 @@ impl Instance {
 		if DF{
 		let DG=DE< J;
 		if DG{
-		analog_finish(96, time, B);
+		analog_finish(97, time, B);
 		}
 		let DJ=DE> J;
 		let DL;
@@ -569,7 +569,7 @@ impl Instance {
 		let DR=W> J;
 		let DT=((DQ<= J)&& DR)&& DS;
 		if DT{
-		analog_finish(112, time, B);
+		analog_finish(113, time, B);
 		}
 		let DV=V> J;
 		let DY;

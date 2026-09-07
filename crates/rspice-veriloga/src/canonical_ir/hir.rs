@@ -347,6 +347,11 @@ pub enum HirStatement {
     Assignment(HirAssignment),
     Loop(HirLoop),
     Task(crate::analog_tasks::AnalogTaskCall<HirExprRef, SourceSpanRef>),
+    Initialization {
+        phase: rspice_veriloga_runtime::AnalogEvaluationPhase,
+        body: Vec<HirStatement>,
+        span: SourceSpanRef,
+    },
 }
 
 /// One step of the analog block, with control flow intact.
@@ -376,6 +381,11 @@ pub enum HirRegion {
         span: SourceSpanRef,
     },
     Task(crate::analog_tasks::AnalogTaskCall<HirExprRef, SourceSpanRef>),
+    Initialization {
+        phase: rspice_veriloga_runtime::AnalogEvaluationPhase,
+        body: Vec<HirRegion>,
+        span: SourceSpanRef,
+    },
 }
 
 /// One run of body expression ids and the run of executed ids it names.
@@ -431,10 +441,10 @@ pub struct HirCorrespondenceSpan {
 ///
 /// A `case` arm's structured condition is `selector == match` while its executed
 /// counterpart is `__guardN == match`: two different expressions, not two copies
-/// of one, so no site pairs them. Module prologue statements (localparam and
-/// module-scope variable initializers, `$bound_step` resets) exist only in the
-/// executed copy and pair with nothing in the body — they run before the analog
-/// block rather than inside it, so the region tree has no position to hold them.
+/// of one, so no site pairs them. Pure localparam definitions and `$bound_step`
+/// resets exist only in the executed copy and pair with nothing in the body.
+/// Module variable initializers have explicit initialization regions in both
+/// representations and participate in correspondence like ordinary assignments.
 /// Neither gap is silent: [`Self::executed`] returns `None`, and
 /// [`crate::canonical_ir::state::CfgStateAllocation`] refuses the model by name.
 ///
@@ -754,20 +764,12 @@ pub struct HirModel {
     pub statements: Vec<HirStatement>,
     /// Indices into [`Self::statements`] of the module prologue.
     ///
-    /// The localparam and module-scope variable initializers that run before
-    /// the `analog` keyword. They are the statements [`Self::body`] has no
-    /// counterpart for — see [`HirExecutedCorrespondence`]'s "what is
-    /// deliberately not covered" — so a consumer built from `body` alone has no
-    /// definition of the variables they write, and a read of one falls through
-    /// to Verilog-AMS zero initialisation. A body-consuming lowering evaluates
-    /// these first, into the same variable slots, which is what the flat route
-    /// has always done by simply running the list in order.
-    ///
-    /// Carried from [`crate::semantic::AnalyzedModule::prologue_statements`]
-    /// rather than recovered here: only the analyzer knows which phase emitted
-    /// a statement, and the side effects a prologue initializer hoists *are*
-    /// recorded in `body`, so "assigns a variable the body never assigns" and
-    /// "has no correspondence span" both name the wrong set.
+    /// Pure localparam definitions have no [`Self::body`] counterpart. Every
+    /// CFG evaluates these definitions before its selected execution phase.
+    /// Variable declarations and analog initial blocks have explicit phase
+    /// wrappers in both representations and are excluded from this list.
+    /// Carried from [`crate::semantic::AnalyzedModule::prologue_statements`],
+    /// since hierarchy elaboration may interleave each module's statements.
     #[serde(default)]
     pub prologue_statements: Vec<u32>,
     /// The analog block with its control flow intact; see [`HirRegion`].
@@ -1054,7 +1056,7 @@ impl HirModel {
         ));
         self.validate_branches(&mut diagnostics);
         self.validate_contributions(&mut diagnostics);
-        self.validate_statements(&mut diagnostics, &self.statements);
+        self.validate_statements(&mut diagnostics, &self.statements, true, false);
         self.validate_body(&mut diagnostics);
 
         if diagnostics.is_empty() {
@@ -1717,10 +1719,27 @@ impl HirModel {
         &self,
         diagnostics: &mut Vec<IrDiagnostic>,
         statements: &[HirStatement],
+        allow_initialization: bool,
+        initialization: bool,
     ) {
         for statement in statements {
             match statement {
+                HirStatement::Initialization { phase, body, span } => {
+                    if !allow_initialization
+                        || *phase == rspice_veriloga_runtime::AnalogEvaluationPhase::Evaluation
+                    {
+                        diagnostics.push(IrDiagnostic::error(CompilerPhase::HirValidation, "initialization must be a top-level declaration or initialization phase", *span));
+                    }
+                    self.validate_statements(diagnostics, body, false, true)
+                }
                 HirStatement::Task(task) => {
+                    if task.initialization != initialization {
+                        diagnostics.push(IrDiagnostic::error(
+                            CompilerPhase::HirValidation,
+                            "analog task initialization flag disagrees with its execution phase",
+                            task.span,
+                        ));
+                    }
                     if task.finish_operand().is_none() {
                         diagnostics.push(IrDiagnostic::error(
                             CompilerPhase::HirValidation,
@@ -1768,7 +1787,12 @@ impl HirModel {
                         "loop condition",
                         &loop_statement.condition,
                     );
-                    self.validate_statements(diagnostics, &loop_statement.body);
+                    self.validate_statements(
+                        diagnostics,
+                        &loop_statement.body,
+                        false,
+                        initialization,
+                    );
                 }
             }
         }
@@ -1782,9 +1806,47 @@ impl HirModel {
     /// correspondence ever slips, a CFG built from the body would stamp the
     /// wrong branch — so it is checked, not assumed.
     fn validate_body(&self, diagnostics: &mut Vec<IrDiagnostic>) {
+        let flat_phases = self
+            .statements
+            .iter()
+            .filter_map(|statement| {
+                if let HirStatement::Initialization { phase, span, .. } = statement {
+                    Some((*phase, *span))
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+        let structured_phases = self
+            .body
+            .iter()
+            .filter_map(|region| {
+                if let HirRegion::Initialization { phase, span, .. } = region {
+                    Some((*phase, *span))
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+        if flat_phases != structured_phases
+            || flat_phases.iter().any(|(phase, _)| {
+                *phase == rspice_veriloga_runtime::AnalogEvaluationPhase::Evaluation
+            })
+        {
+            diagnostics.push(IrDiagnostic::global_error(
+                CompilerPhase::HirValidation,
+                "initialization regions disagree with the executable phase order",
+            ));
+        }
         self.validate_task_correspondence(diagnostics);
         let mut expected_contribution = 0usize;
-        self.validate_regions(diagnostics, &self.body, &mut expected_contribution);
+        self.validate_regions(
+            diagnostics,
+            &self.body,
+            &mut expected_contribution,
+            true,
+            false,
+        );
 
         if expected_contribution != self.contributions.len() {
             diagnostics.push(IrDiagnostic::global_error(
@@ -1807,6 +1869,7 @@ impl HirModel {
         ) {
             for statement in statements {
                 match statement {
+                    HirStatement::Initialization { body, .. } => collect(body, tasks, diagnostics),
                     HirStatement::Task(task) => {
                         if tasks.insert(task.site, task).is_some() {
                             diagnostics.push(IrDiagnostic::error(
@@ -1873,7 +1936,9 @@ impl HirModel {
                         validate(model, then_body, tasks, diagnostics);
                         validate(model, else_body, tasks, diagnostics);
                     }
-                    HirRegion::Loop { body, .. } => validate(model, body, tasks, diagnostics),
+                    HirRegion::Loop { body, .. } | HirRegion::Initialization { body, .. } => {
+                        validate(model, body, tasks, diagnostics)
+                    }
                     HirRegion::Assignment(_) | HirRegion::Contribution(_) => {}
                 }
             }
@@ -1895,10 +1960,23 @@ impl HirModel {
         diagnostics: &mut Vec<IrDiagnostic>,
         regions: &[HirRegion],
         next_contribution: &mut usize,
+        allow_initialization: bool,
+        initialization: bool,
     ) {
         for region in regions {
             match region {
+                HirRegion::Initialization { phase, body, span } => {
+                    if !allow_initialization
+                        || *phase == rspice_veriloga_runtime::AnalogEvaluationPhase::Evaluation
+                    {
+                        diagnostics.push(IrDiagnostic::error(CompilerPhase::HirValidation, "initialization region must be a top-level declaration or initialization phase", *span));
+                    }
+                    self.validate_regions(diagnostics, body, next_contribution, false, true)
+                }
                 HirRegion::Task(task) => {
+                    if task.initialization != initialization {
+                        diagnostics.push(IrDiagnostic::error(CompilerPhase::HirValidation, "analog task region initialization flag disagrees with its execution phase", task.span));
+                    }
                     for expression in task.expressions() {
                         self.validate_expr_ref(diagnostics, "analog task operand", expression);
                     }
@@ -1934,6 +2012,13 @@ impl HirModel {
                     self.validate_assignment_shape(diagnostics, assignment);
                 }
                 HirRegion::Contribution(contribution) => {
+                    if initialization {
+                        diagnostics.push(IrDiagnostic::error(
+                            CompilerPhase::HirValidation,
+                            "analog contributions cannot execute during initialization",
+                            contribution.span,
+                        ));
+                    }
                     self.validate_expr_ref(
                         diagnostics,
                         &format!("region contribution '{}' expression", contribution.branch),
@@ -1982,14 +2067,32 @@ impl HirModel {
                     ..
                 } => {
                     self.validate_expr_ref(diagnostics, "region condition", condition);
-                    self.validate_regions(diagnostics, then_body, next_contribution);
-                    self.validate_regions(diagnostics, else_body, next_contribution);
+                    self.validate_regions(
+                        diagnostics,
+                        then_body,
+                        next_contribution,
+                        false,
+                        initialization,
+                    );
+                    self.validate_regions(
+                        diagnostics,
+                        else_body,
+                        next_contribution,
+                        false,
+                        initialization,
+                    );
                 }
                 HirRegion::Loop {
                     condition, body, ..
                 } => {
                     self.validate_expr_ref(diagnostics, "region loop condition", condition);
-                    self.validate_regions(diagnostics, body, next_contribution);
+                    self.validate_regions(
+                        diagnostics,
+                        body,
+                        next_contribution,
+                        false,
+                        initialization,
+                    );
                 }
             }
         }
@@ -2297,6 +2400,16 @@ fn lower_statement(
     executed_sites: &mut HashMap<AnalogSiteId, ExecutedSite>,
 ) -> HirStatement {
     match statement {
+        AnalyzedStatement::Initialization {
+            phase, body, span, ..
+        } => HirStatement::Initialization {
+            phase: *phase,
+            body: body
+                .iter()
+                .map(|statement| lower_statement(lowerer, statement, executed_sites))
+                .collect(),
+            span: SourceSpanRef::from(*span),
+        },
         AnalyzedStatement::Task(task) => {
             let lowered = task.map(SourceSpanRef::from(task.span), |expression| {
                 lowerer.lower_expr(expression)
@@ -2366,6 +2479,22 @@ fn lower_region(
     correspondence: &mut CorrespondenceBuilder,
 ) -> HirRegion {
     match region {
+        AnalyzedRegion::Initialization { phase, body, span } => HirRegion::Initialization {
+            phase: *phase,
+            body: body
+                .iter()
+                .map(|region| {
+                    lower_region(
+                        lowerer,
+                        next_contribution,
+                        region,
+                        executed_sites,
+                        correspondence,
+                    )
+                })
+                .collect(),
+            span: SourceSpanRef::from(*span),
+        },
         AnalyzedRegion::Task(task) => {
             let arguments = lowerer
                 .task_arguments

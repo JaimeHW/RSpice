@@ -203,6 +203,22 @@ impl CfgModel {
         Self::from_hir_with_mode(hir, mir, CfgLowerMode::NOISE_METADATA)
     }
 
+    /// Lower one pre-simulation phase without ordinary analog evaluation.
+    pub fn from_hir_for_initialization(
+        hir: &HirModel,
+        mir: &MirModel,
+        phase: rspice_veriloga_runtime::AnalogEvaluationPhase,
+    ) -> Result<Self, Vec<IrDiagnostic>> {
+        Self::from_hir_with_mode(
+            hir,
+            mir,
+            CfgLowerMode {
+                phase,
+                ..CfgLowerMode::GENERATED
+            },
+        )
+    }
+
     fn from_hir_with_mode(
         hir: &HirModel,
         mir: &MirModel,
@@ -435,6 +451,7 @@ struct CfgLowerer<'a> {
     noise_metadata_only: bool,
     /// Whether this graph owns task execution. Executable JIT plans run their
     /// ordered assignment pass; numerical and noise slices must not replay it.
+    phase: rspice_veriloga_runtime::AnalogEvaluationPhase,
     record_tasks: bool,
     /// Whether each noise process publishes its site magnitudes as well as its
     /// exit-merged ones. See [`CfgNoiseProcess::site`].
@@ -714,6 +731,7 @@ fn hir_expr_is_instance_static(
 fn compute_instance_static_guard_conditions(hir: &HirModel) -> HashSet<ExprId> {
     fn analyze(
         hir: &HirModel,
+        mutable_state: &HashSet<VariableId>,
         regions: &[HirRegion],
         static_variables: &mut HashSet<VariableId>,
         static_control: bool,
@@ -721,6 +739,14 @@ fn compute_instance_static_guard_conditions(hir: &HirModel) -> HashSet<ExprId> {
     ) {
         for region in regions {
             match region {
+                HirRegion::Initialization { body, .. } => analyze(
+                    hir,
+                    mutable_state,
+                    body,
+                    static_variables,
+                    static_control,
+                    static_conditions.as_deref_mut(),
+                ),
                 HirRegion::Task(_) => {}
                 HirRegion::Assignment(assignment) => {
                     let write_static = static_control
@@ -729,7 +755,7 @@ fn compute_instance_static_guard_conditions(hir: &HirModel) -> HashSet<ExprId> {
                             hir_expr_is_instance_static(hir, index.id, static_variables)
                         });
                     for target in assignment_targets(hir, assignment) {
-                        if write_static {
+                        if write_static && !mutable_state.contains(&target) {
                             static_variables.insert(target);
                         } else {
                             static_variables.remove(&target);
@@ -753,6 +779,7 @@ fn compute_instance_static_guard_conditions(hir: &HirModel) -> HashSet<ExprId> {
                     let mut then_variables = incoming.clone();
                     analyze(
                         hir,
+                        mutable_state,
                         then_body,
                         &mut then_variables,
                         branch_control_static,
@@ -761,6 +788,7 @@ fn compute_instance_static_guard_conditions(hir: &HirModel) -> HashSet<ExprId> {
                     let mut else_variables = incoming;
                     analyze(
                         hir,
+                        mutable_state,
                         else_body,
                         &mut else_variables,
                         branch_control_static,
@@ -784,6 +812,7 @@ fn compute_instance_static_guard_conditions(hir: &HirModel) -> HashSet<ExprId> {
                         let mut body_variables = header.clone();
                         analyze(
                             hir,
+                            mutable_state,
                             body,
                             &mut body_variables,
                             static_control && condition_static,
@@ -803,6 +832,7 @@ fn compute_instance_static_guard_conditions(hir: &HirModel) -> HashSet<ExprId> {
                     let mut body_variables = header;
                     analyze(
                         hir,
+                        mutable_state,
                         body,
                         &mut body_variables,
                         static_control && condition_static,
@@ -816,13 +846,40 @@ fn compute_instance_static_guard_conditions(hir: &HirModel) -> HashSet<ExprId> {
         }
     }
 
+    fn collect_mutable_state(
+        hir: &HirModel,
+        statements: &[HirStatement],
+        mutable: &mut HashSet<VariableId>,
+    ) {
+        for statement in statements {
+            match statement {
+                HirStatement::Assignment(assignment) => {
+                    mutable.extend(
+                        assignment_targets(hir, assignment)
+                            .into_iter()
+                            .filter(|target| hir.variables[usize::from(*target)].is_state),
+                    );
+                }
+                HirStatement::Loop(loop_) => collect_mutable_state(hir, &loop_.body, mutable),
+                HirStatement::Initialization { .. } | HirStatement::Task(_) => {}
+            }
+        }
+    }
+    let mut mutable_state = HashSet::new();
+    collect_mutable_state(hir, &hir.statements, &mut mutable_state);
     // Verilog-AMS initializes every analog local to zero. That reaching
     // definition is instance-static until a runtime-dependent assignment
     // replaces it.
-    let mut static_variables = hir.variables.iter().map(|variable| variable.id).collect();
+    let mut static_variables = hir
+        .variables
+        .iter()
+        .map(|variable| variable.id)
+        .filter(|variable| !mutable_state.contains(variable))
+        .collect();
     let mut static_conditions = HashSet::new();
     analyze(
         hir,
+        &mutable_state,
         &hir.body,
         &mut static_variables,
         true,
@@ -861,6 +918,7 @@ pub(crate) fn simparam_source_default(name: &str) -> f64 {
 /// read per instance.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct CfgLowerMode {
+    phase: rspice_veriloga_runtime::AnalogEvaluationPhase,
     record_tasks: bool,
     /// Lower only what raw grouped-noise metadata needs.
     noise_metadata_only: bool,
@@ -935,27 +993,20 @@ struct CfgLowerMode {
 }
 
 impl CfgLowerMode {
-    /// # Why the generated backend does not lower the prologue *yet*
-    ///
-    /// It has the same hole, and for the same reason — it is built from the
-    /// body too — so this is not a difference the two consumers have earned,
-    /// the way `per_instance_ports` is. It is a frozen artifact: the forty-three
-    /// shipped devices are checked in as generated Rust under a `bundle_digest`,
-    /// and `hisimsotb`'s body reads three localparams (`TN`, `QN`, `QB` —
-    /// `hisimsotb.va:657`), so turning this on here changes that device's
-    /// emitted code. Flipping it is a one-word change plus a regeneration, and
-    /// it is a *fix*: today those reads compile to zero.
+    /// Generated and executable kernels share declaration-time localparam semantics.
     const GENERATED: Self = Self {
+        phase: rspice_veriloga_runtime::AnalogEvaluationPhase::Evaluation,
         record_tasks: true,
         noise_metadata_only: false,
         noise_site_values: false,
         per_instance_ports: false,
-        lower_prologue: false,
+        lower_prologue: true,
         frozen_event_state: false,
         frozen_contribution_current: false,
     };
     #[cfg(any(feature = "native", feature = "wasm-jit"))]
     const EXECUTABLE: Self = Self {
+        phase: rspice_veriloga_runtime::AnalogEvaluationPhase::Evaluation,
         record_tasks: false,
         noise_metadata_only: false,
         noise_site_values: true,
@@ -964,14 +1015,14 @@ impl CfgLowerMode {
         frozen_event_state: true,
         frozen_contribution_current: true,
     };
-    /// Raw grouped-noise metadata is lowered for the generated backend and is
-    /// part of the same frozen output, so it stays with `GENERATED` here.
+    /// Noise metadata consumes the same localparam prologue as the primal kernel.
     const NOISE_METADATA: Self = Self {
+        phase: rspice_veriloga_runtime::AnalogEvaluationPhase::Evaluation,
         record_tasks: false,
         noise_metadata_only: true,
         noise_site_values: false,
         per_instance_ports: true,
-        lower_prologue: false,
+        lower_prologue: true,
         frozen_event_state: false,
         frozen_contribution_current: false,
     };
@@ -1011,6 +1062,7 @@ impl<'a> CfgLowerer<'a> {
             noise: Vec::new(),
             noise_processes: Vec::new(),
             noise_metadata_only: mode.noise_metadata_only,
+            phase: mode.phase,
             record_tasks: mode.record_tasks,
             noise_site_values: mode.noise_site_values,
             per_instance_ports: mode.per_instance_ports,
@@ -1082,7 +1134,17 @@ impl<'a> CfgLowerer<'a> {
         }
 
         let body = self.hir.body.clone();
-        self.regions(&body, false);
+        if self.phase == rspice_veriloga_runtime::AnalogEvaluationPhase::Evaluation {
+            self.regions(&body, false);
+        } else {
+            for region in &body {
+                if let HirRegion::Initialization { phase, body, .. } = region
+                    && *phase == self.phase
+                {
+                    self.regions(body, false);
+                }
+            }
+        }
 
         let exit = self.block;
         let residuals: Vec<_> = (0..self.hir.contributions.len())
@@ -1221,6 +1283,7 @@ impl<'a> CfgLowerer<'a> {
 
     fn region(&mut self, region: &HirRegion, dynamic_topology_ancestor: bool) {
         match region {
+            HirRegion::Initialization { .. } => {}
             HirRegion::Task(task) => {
                 if self.record_tasks {
                     let task = task.map(task.span, |expression| self.expr(expression.id));
@@ -1301,27 +1364,10 @@ impl<'a> CfgLowerer<'a> {
 
     /// Evaluate the module prologue into the entry block.
     ///
-    /// The localparam and module-scope variable initializers run before the
-    /// `analog` keyword, so [`HirModel::body`] has no position for them and a
-    /// CFG built from the body alone has no definition of what they write. The
-    /// flat route runs them by simply executing its statement list in order;
-    /// this is the same thing at the one program point the body has for
-    /// "before anything else". A body assignment to the same variable then
-    /// overwrites the reaching definition exactly as a later statement
-    /// overwrites the slot, so a conditionally-reassigned initializer keeps its
-    /// declared value on the arm that does not assign it.
-    ///
-    /// Only the initializers themselves are here. A prologue initializer whose
-    /// right-hand side hoists a side effect — an analog function call with an
-    /// output argument — pushes that side effect into the flat list *and*
-    /// records it as a body region, because the analyzer's region stack is
-    /// already open when the prologue runs. Lowering it here as well would
-    /// duplicate every operator in it, and duplicating a `ddt` allocates a
-    /// second state record for one source operator. So the side effect stays
-    /// where the body has it, which leaves the initializer that reads it
-    /// reading a definition that does not reach the entry block:
-    /// [`Self::identifier`] warns and takes the language's zero, which is what
-    /// it did for the whole prologue before this existed.
+    /// Localparam definitions have no structured body counterpart. Each CFG
+    /// phase needs those pure definitions before reading them. Module variable
+    /// declarations and analog initial blocks instead have explicit regions;
+    /// their values enter ordinary evaluation through accepted state.
     fn prologue(&mut self) {
         let statements = self.hir.statements.clone();
         for index in &self.hir.prologue_statements {
@@ -1394,7 +1440,10 @@ impl<'a> CfgLowerer<'a> {
                         collect(else_body, out);
                     }
                     HirRegion::Loop { body, .. } => collect(body, out),
-                    HirRegion::Assignment(_) | HirRegion::Contribution(_) | HirRegion::Task(_) => {}
+                    HirRegion::Assignment(_)
+                    | HirRegion::Contribution(_)
+                    | HirRegion::Task(_)
+                    | HirRegion::Initialization { .. } => {}
                 }
             }
         }

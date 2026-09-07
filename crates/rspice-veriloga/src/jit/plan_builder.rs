@@ -549,6 +549,9 @@ fn build_model_plan_inner(
         current_dependencies,
         assignment_coverage: match policy {
             AssignmentRootPolicy::PostfixEntries => NativeAssignmentCoverage::ObservableVariables,
+            AssignmentRootPolicy::CfgPreludeSlots if !model.event_state_variables.is_empty() => {
+                NativeAssignmentCoverage::ObservableVariables
+            }
             AssignmentRootPolicy::CfgPreludeSlots => NativeAssignmentCoverage::CfgPlanReads,
             #[cfg(feature = "native")]
             AssignmentRootPolicy::ObservationPass => NativeAssignmentCoverage::ObservableVariables,
@@ -2656,6 +2659,7 @@ fn lower_assignment_phases(
             let live_assignment_steps = live_native_assignment_steps(model);
             let assignments = live_assignment_steps
                 .iter()
+                .filter(|step| !matches!(step, AssignmentStep::Initialization { .. }))
                 .map(|step| lower_assignment_step_with_limits(model, step, limits))
                 .collect::<JitResult<Vec<_>>>()?;
             (assignments, Vec::new())
@@ -2775,6 +2779,7 @@ fn mark_assignment_targets_after_a_current_read(
 
 fn bytecode_assignment_step_reads_current(step: &AssignmentStep) -> bool {
     match step {
+        AssignmentStep::Initialization { .. } => false,
         AssignmentStep::Task(task) => task.expressions().any(bytecode_program_reads_current),
         AssignmentStep::Assign(assignment) => bytecode_program_reads_current(&assignment.program),
         AssignmentStep::AssignIndexed { index, value, .. } => {
@@ -2797,6 +2802,7 @@ fn bytecode_program_reads_current(program: &BytecodeProgram) -> bool {
 fn mark_bytecode_assignment_targets(steps: &[AssignmentStep], targets: &mut [bool]) {
     for step in steps {
         match step {
+            AssignmentStep::Initialization { .. } => {}
             AssignmentStep::Task(_) => {}
             AssignmentStep::Assign(assignment) => {
                 if let Some(target) = targets.get_mut(assignment.var_index) {
@@ -2917,6 +2923,11 @@ pub(crate) fn live_canonical_assignment_slots(
         }
         AssignmentRootPolicy::CfgPreludeSlots => {
             mark_cfg_plan_variable_roots(model, mir, limits, &mut live)?;
+            // Replaying a stateful body after acceptance is a new event, not an
+            // observation. Retain its named values during the actual evaluation.
+            if !model.event_state_variables.is_empty() {
+                mark_observable_variable_roots(model, &mut live);
+            }
         }
         // The observable set, and nothing beyond it: this pass exists to
         // publish those names and runs no entry that could read anything else.
@@ -2968,6 +2979,7 @@ impl<'a> AssignmentProgramCursor<'a> {
     fn collect_steps(&mut self, steps: &'a [AssignmentStep]) {
         for step in steps {
             match step {
+                AssignmentStep::Initialization { .. } => {}
                 AssignmentStep::Task(task) => {
                     self.tasks.insert(task.site, task);
                 }
@@ -3393,6 +3405,7 @@ fn lower_canonical_assignment_statement(
     limits: NativeLoweringLimits<'_>,
 ) -> JitResult<Vec<NativeAssignment>> {
     match statement {
+        HirStatement::Initialization { .. } => Ok(Vec::new()),
         HirStatement::Task(task) => {
             let bytecode = program_cursor.tasks.get(&task.site).ok_or_else(|| {
                 JitError::InvalidCanonicalIr {
@@ -4365,6 +4378,7 @@ fn native_assignment_root_is_externally_observable(name: &str) -> bool {
 fn propagate_assignment_liveness(steps: &[AssignmentStep], live: &mut [bool], changed: &mut bool) {
     for step in steps.iter().rev() {
         match step {
+            AssignmentStep::Initialization { .. } => {}
             AssignmentStep::Task(task) => {
                 for program in task.expressions() {
                     mark_program_variable_reads_changed(program, live, changed);
@@ -4401,6 +4415,7 @@ fn filter_live_assignment_steps(steps: &[AssignmentStep], live: &[bool]) -> Vec<
     steps
         .iter()
         .filter_map(|step| match step {
+            AssignmentStep::Initialization { .. } => None,
             AssignmentStep::Task(_) => Some(step.clone()),
             AssignmentStep::Assign(assignment) => (assignment.var_index < live.len()
                 && live[assignment.var_index])
@@ -4421,6 +4436,7 @@ fn filter_live_assignment_steps(steps: &[AssignmentStep], live: &[bool]) -> Vec<
 
 fn assignment_steps_write_live(steps: &[AssignmentStep], live: &[bool]) -> bool {
     steps.iter().any(|step| match step {
+        AssignmentStep::Initialization { .. } => false,
         AssignmentStep::Task(_) => true,
         AssignmentStep::Assign(assignment) => {
             assignment.var_index < live.len() && live[assignment.var_index]
@@ -4485,6 +4501,10 @@ fn lower_assignment_step_with_limits(
     limits: NativeLoweringLimits<'_>,
 ) -> JitResult<NativeAssignment> {
     match step {
+        AssignmentStep::Initialization { .. } => Err(JitError::InvalidCanonicalIr {
+            model: model.name.clone(),
+            detail: "initialization region reached Newton assignment lowering".into(),
+        }),
         AssignmentStep::Task(task) => Ok(NativeAssignment::Task(task.try_map(
             task.span,
             |program| {
@@ -4552,6 +4572,7 @@ fn lower_assignment_step_with_limits(
             )?;
             let body = body
                 .iter()
+                .filter(|step| !matches!(step, AssignmentStep::Initialization { .. }))
                 .map(|step| lower_assignment_step_with_limits(model, step, limits))
                 .collect::<JitResult<Vec<_>>>()?;
             Ok(NativeAssignment::Loop { condition, body })

@@ -781,7 +781,15 @@ struct PotentialBranchGroup {
     duplicate_branches: Vec<usize>,
 }
 
+struct InitializationPlan {
+    phase: rspice_veriloga_runtime::AnalogEvaluationPhase,
+    function: CfgFunction,
+    outputs: Vec<ValueId>,
+    state_count: usize,
+}
+
 struct ModelPlan {
+    initialization: Vec<InitializationPlan>,
     /// One body computing both matrices' worth of values.
     ///
     /// Not two, and the corpus is what settled it: separate simplifications and
@@ -1304,7 +1312,50 @@ impl ModelPlan {
             phase_started.elapsed(),
         )?;
 
+        let mut initialization = Vec::new();
+        for phase in [
+            rspice_veriloga_runtime::AnalogEvaluationPhase::Declarations,
+            rspice_veriloga_runtime::AnalogEvaluationPhase::Initialization,
+        ] {
+            if !artifact.hir.body.iter().any(|region| matches!(region, crate::canonical_ir::hir::HirRegion::Initialization { phase: found, .. } if *found == phase)) {
+                continue;
+            }
+            let cfg = CfgModel::from_hir_for_initialization(&artifact.hir, &artifact.mir, phase)
+                .map_err(|diagnostics| {
+                    unsupported(
+                        artifact,
+                        diagnostics
+                            .iter()
+                            .map(|diagnostic| diagnostic.message.as_str())
+                            .collect::<Vec<_>>()
+                            .join("; "),
+                    )
+                })?;
+            let state_count = cfg.event_state_candidates.len();
+            let mut roots = cfg.event_state_candidates;
+            roots.extend(cfg.function.values.iter().filter_map(|value| {
+                matches!(value.kind, CfgValueKind::AnalogTask(_)).then_some(value.id)
+            }));
+            let (function, outputs) =
+                optimize_with_control(&cfg.function, &roots, measurements.control()).map_err(
+                    |error| {
+                        RustBackendError::cancelled(
+                            artifact.metadata.source_package.as_str(),
+                            artifact.mir.module_name.as_str(),
+                            error,
+                        )
+                    },
+                )?;
+            initialization.push(InitializationPlan {
+                phase,
+                function,
+                outputs,
+                state_count,
+            });
+        }
+
         Ok(Self {
+            initialization,
             function,
             outputs,
             conduction,
@@ -1469,6 +1520,10 @@ impl ModelPlan {
             shape.field(b"accepted:f64:positive-or-infinity");
         }
 
+        if self.initialization_uses_temperature() {
+            shape.section("initialization_temperature", 1);
+            shape.field(b"temperature:f64:finite");
+        }
         shape.section("terminal_currents", artifact.hir.ports.len());
         for (slot, port) in artifact.hir.ports.iter().enumerate() {
             shape.record("terminal_current");
@@ -2204,6 +2259,7 @@ impl ModelPlan {
             }
             self.emit_cached_stage(artifact, stage, &mut out)?;
         }
+        self.emit_initialization(artifact, &mut out)?;
         self.emit_stamp(artifact, control, &mut out)?;
         self.emit_stamp_reactive(&mut out)?;
 
@@ -2324,7 +2380,7 @@ impl ModelPlan {
                 "        let produced: [f64; {}] = {{",
                 produced.len().max(1)
             );
-            self.emit_prologue(artifact, &stage.function, 3, out)?;
+            self.emit_prologue(artifact, &stage.function, 3, out, false)?;
             out.push_str(&indent(&body, 3));
             if produced.is_empty() {
                 out.push_str("            [0.0]\n");
@@ -2483,7 +2539,10 @@ impl ModelPlan {
         out.push_str(
             "    pub fn stamp(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedStamper<'_>) {\n",
         );
-        if self.has_analog_tasks() {
+        if !self.initialization.is_empty() {
+            out.push_str("        self.initialize_analysis(ctx);\n        if ctx.evaluation_failed() || !self.canonical_initialization_valid { return; }\n");
+        }
+        if self.has_newton_tasks() {
             out.push_str("        if ctx.analog_tasks_enabled() { self.analog_effects.get_or_insert_with(Default::default).begin_evaluation(); }\n");
         }
         // Cleared per evaluation, so "was this device limited?" is a question
@@ -2510,7 +2569,7 @@ impl ModelPlan {
             .find(|stage| stage.class == InvalidationClass::Newton);
         let function = newton.map_or(&self.function, |stage| &stage.function);
         let (body, values) = self.newton_outputs(artifact, newton, control)?;
-        self.emit_prologue(artifact, function, 2, out)?;
+        self.emit_prologue(artifact, function, 2, out, false)?;
         out.push_str(&indent(&body, 2));
 
         for (slot, position) in self
@@ -2565,10 +2624,79 @@ impl ModelPlan {
                 );
             }
         }
-        if self.has_analog_tasks() {
+        if self.has_newton_tasks() {
             out.push_str("        if ctx.analog_tasks_enabled() && !ctx.evaluation_failed() { self.analog_effects.as_mut().expect(\"task evaluation began\").complete_evaluation(); }\n");
         }
         out.push_str("    }\n\n");
+        Ok(())
+    }
+
+    fn emit_initialization(
+        &self,
+        artifact: &CanonicalIrArtifact,
+        out: &mut String,
+    ) -> Result<(), RustBackendError> {
+        if self.initialization.is_empty() {
+            return Ok(());
+        }
+        out.push_str(
+            "    pub(crate) fn initialization_is_ready(&self, ctx: &GeneratedEvalContext<'_>) -> bool {\n",
+        );
+        if self.initialization_uses_temperature() {
+            out.push_str("        self.canonical_initialization_valid && self.canonical_initialization_temperature == ctx.temperature()\n");
+        } else {
+            out.push_str("        self.canonical_initialization_valid\n");
+        }
+        out.push_str("    }\n\n");
+        out.push_str(
+            "    pub fn initialize_analysis(&mut self, ctx: &GeneratedEvalContext<'_>) {\n",
+        );
+        out.push_str("        if self.initialization_is_ready(ctx) { return; }\n        let rollback = self.capture_rollback_state();\n");
+        if self.has_analog_tasks() {
+            out.push_str("        self.analog_effects.get_or_insert_with(Default::default).begin_evaluation();\n");
+        }
+        for plan in &self.initialization {
+            let _ = writeln!(
+                out,
+                "        self.canonical_initialize_{}(ctx);",
+                plan.phase as u8
+            );
+            out.push_str("        if ctx.evaluation_failed() { self.restore_rollback_state(&rollback); self.canonical_initialization_valid = false; return; }\n");
+        }
+        if self.has_analog_tasks() {
+            out.push_str("        let journal = self.analog_effects.as_mut().expect(\"initialization journal\");\n        journal.complete_evaluation();\n        if let Err(source) = journal.validate_candidate() { ctx.report_analog_task_error(0, source); self.restore_rollback_state(&rollback); self.canonical_initialization_valid = false; return; }\n        journal.apply_validated_acceptance();\n");
+        }
+        if self.initialization_uses_temperature() {
+            out.push_str(
+                "        self.canonical_initialization_temperature = ctx.temperature();\n",
+            );
+        }
+        out.push_str("        self.canonical_initialization_valid = true;\n    }\n\n");
+        for plan in &self.initialization {
+            let _ = writeln!(
+                out,
+                "    fn canonical_initialize_{}(&mut self, ctx: &GeneratedEvalContext<'_>) {{",
+                plan.phase as u8
+            );
+            self.emit_prologue(artifact, &plan.function, 2, out, true)?;
+            let (body, values) = emit_body(&plan.function, &plan.outputs, &self.emit_bindings())
+                .map_err(|error| unsupported(artifact, format!("initialization body: {error}")))?;
+            out.push_str(&indent(&body, 2));
+            for (slot, value) in values.iter().take(plan.state_count).enumerate() {
+                let _ = writeln!(
+                    out,
+                    "        if !({value}).is_finite() {{ ctx.report_initialization_error({slot}); return; }}"
+                );
+            }
+            out.push_str("        if ctx.evaluation_failed() { return; }\n");
+            for (slot, value) in values.iter().take(plan.state_count).enumerate() {
+                let _ = writeln!(
+                    out,
+                    "        self.event_state_accepted[{slot}] = {value};\n        self.event_state_candidate[{slot}] = {value};"
+                );
+            }
+            out.push_str("    }\n\n");
+        }
         Ok(())
     }
 
@@ -2704,6 +2832,15 @@ impl ModelPlan {
              \x20           return Err(GeneratedNoiseEvaluationError::InvalidMultiplicity { value: self.multiplicity });\n\
              \x20       }\n",
         );
+        if artifact.hir.body.iter().any(|region| {
+            matches!(
+                region,
+                crate::canonical_ir::hir::HirRegion::Initialization { .. }
+            )
+        }) {
+            out.push_str("        if !self.initialization_is_ready(ctx) { return Err(GeneratedNoiseEvaluationError::UninitializedAnalogState); }\n");
+        }
+
         if !shared_stages.is_empty() {
             let _ = writeln!(
                 out,
@@ -3234,6 +3371,7 @@ impl ModelPlan {
         function: &CfgFunction,
         depth: usize,
         out: &mut String,
+        initialization: bool,
     ) -> Result<(), RustBackendError> {
         let pad = "    ".repeat(depth);
         let mut wants = Wants::default();
@@ -3262,14 +3400,20 @@ impl ModelPlan {
             let _ = writeln!(out, "{pad}let multiplicity = self.multiplicity;");
         }
         if wants.time {
-            let _ = writeln!(out, "{pad}let time = self.time;");
+            let source = if initialization { "0.0" } else { "self.time" };
+            let _ = writeln!(out, "{pad}let time = {source};");
         }
         if wants.analog_tasks {
+            let guard = if initialization {
+                ""
+            } else {
+                "if ctx.analog_tasks_enabled() "
+            };
             let _ = writeln!(
                 out,
                 "{pad}let analog_effects = &mut self.analog_effects;\n\
                  {pad}let mut analog_finish = |site: u32, time: f64, diagnostic: f64| {{\n\
-                 {pad}    if ctx.analog_tasks_enabled() {{\n\
+                 {pad}    {guard}{{\n\
                  {pad}        if let Err(source) = analog_effects.get_or_insert_with(Default::default).record_finish(site, time, diagnostic) {{\n\
                  {pad}            ctx.report_analog_task_error(site, source);\n\
                  {pad}        }}\n\
@@ -3545,11 +3689,32 @@ impl ModelPlan {
         Ok(())
     }
 
-    fn has_analog_tasks(&self) -> bool {
+    fn has_newton_tasks(&self) -> bool {
         self.function
             .values
             .iter()
             .any(|value| matches!(value.kind, CfgValueKind::AnalogTask(_)))
+    }
+
+    fn initialization_uses_temperature(&self) -> bool {
+        self.initialization.iter().any(|plan| {
+            plan.function.values.iter().any(|value| {
+                matches!(
+                    value.kind,
+                    CfgValueKind::Temperature | CfgValueKind::ThermalVoltage
+                )
+            })
+        })
+    }
+
+    fn has_analog_tasks(&self) -> bool {
+        self.has_newton_tasks()
+            || self.initialization.iter().any(|plan| {
+                plan.function
+                    .values
+                    .iter()
+                    .any(|value| matches!(value.kind, CfgValueKind::AnalogTask(_)))
+            })
     }
 
     fn state_extensions(
@@ -3576,6 +3741,65 @@ impl ModelPlan {
         }
         self.push_limit_state_fields(&mut extensions);
         self.push_event_control_state_fields(&mut extensions);
+        if !self.initialization.is_empty() {
+            extensions
+                .instance_fields
+                .push_str("    pub(crate) canonical_initialization_valid: bool,\n");
+            extensions.clone_fields.push_str("            canonical_initialization_valid: self.canonical_initialization_valid,\n");
+            extensions
+                .new_initializers
+                .push_str("            canonical_initialization_valid: false,\n");
+            extensions
+                .set_parameter_hook
+                .push_str("self.canonical_initialization_valid = false;\n");
+            extensions
+                .set_multiplicity_hook
+                .push_str("self.canonical_initialization_valid = false;\n");
+            extensions.rollback_flag_count += 1;
+            extensions
+                .rollback_capture_flags
+                .push_str("        flags.push(self.canonical_initialization_valid);\n");
+            extensions.rollback_restore_fields.push_str("        let (initialized, remaining) = rollback_flags.split_first().expect(\"initialization rollback flag\");\n        self.canonical_initialization_valid = *initialized;\n        rollback_flags = remaining;\n");
+            extensions
+                .checkpoint_restore_fields
+                .push_str("        self.canonical_initialization_valid = true;\n");
+            extensions.validate_advance_state.push_str("        if !self.canonical_initialization_valid { return Err(\"generated analog initialization has not completed\".to_string()); }\n");
+            extensions.validate_checkpoint_ready.push_str("        if !self.canonical_initialization_valid { return Err(\"generated analog initialization has not completed\".to_string()); }\n");
+        }
+
+        if self.initialization_uses_temperature() {
+            extensions
+                .instance_fields
+                .push_str("    pub(crate) canonical_initialization_temperature: f64,\n");
+            extensions.clone_fields.push_str("            canonical_initialization_temperature: self.canonical_initialization_temperature,\n");
+            extensions
+                .new_initializers
+                .push_str("            canonical_initialization_temperature: 0.0,\n");
+            extensions.rollback_value_count += 1;
+            extensions
+                .rollback_capture_values
+                .push_str("        values.push(self.canonical_initialization_temperature);\n");
+            extensions.rollback_restore_fields.push_str("        let (temperature, remaining) = rollback_values.split_first().expect(\"initialization temperature\");\n        self.canonical_initialization_temperature = *temperature;\n        rollback_values = remaining;\n");
+            let slot = artifact
+                .hir
+                .variables
+                .iter()
+                .filter(|variable| variable.is_state)
+                .count()
+                + extensions.persistent_event_lane_count;
+            extensions.persistent_event_lane_count += 1;
+            extensions.checkpoint_event_capture.push_str(
+                "        event_variables.push(self.canonical_initialization_temperature);\n",
+            );
+            let _ = writeln!(
+                extensions.checkpoint_event_validate,
+                "        if !state.event_variables[{slot}].is_finite() {{ return Err(\"invalid initialization temperature\".into()); }}"
+            );
+            let _ = writeln!(
+                extensions.checkpoint_event_restore,
+                "        self.canonical_initialization_temperature = state.event_variables[{slot}];"
+            );
+        }
         let reactive = self.reactive.width();
         if reactive > 0 {
             let _ = writeln!(

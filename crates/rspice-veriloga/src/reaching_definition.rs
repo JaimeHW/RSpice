@@ -282,7 +282,7 @@ fn record_writes(item: &IrAssignmentItem, index: usize, out: &mut HashMap<usize,
                 }
             }
         }
-        IrAssignmentItem::Loop { body, .. } => {
+        IrAssignmentItem::Loop { body, .. } | IrAssignmentItem::Initialization { body, .. } => {
             for nested in body {
                 record_writes(nested, index, out);
             }

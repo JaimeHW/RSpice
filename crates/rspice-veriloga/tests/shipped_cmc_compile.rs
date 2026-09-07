@@ -362,6 +362,9 @@ fn count_assignment_steps(model: &CompiledModel) -> usize {
                 rspice_veriloga::codegen::AssignmentStep::Loop { body, .. } => {
                     1 + count_steps(body)
                 }
+                rspice_veriloga::codegen::AssignmentStep::Initialization { body, .. } => {
+                    count_steps(body)
+                }
             })
             .sum()
     }
@@ -385,6 +388,9 @@ fn count_assignment_instructions(model: &CompiledModel) -> usize {
                 } => index.instructions.len() + value.instructions.len(),
                 rspice_veriloga::codegen::AssignmentStep::Loop { condition, body } => {
                     condition.instructions.len() + count_steps(body)
+                }
+                rspice_veriloga::codegen::AssignmentStep::Initialization { body, .. } => {
+                    count_steps(body)
                 }
             })
             .sum()

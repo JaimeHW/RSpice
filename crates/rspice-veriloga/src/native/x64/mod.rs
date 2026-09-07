@@ -6264,6 +6264,7 @@ endmodule
     ) -> Result<(), crate::vm::VmError> {
         for step in steps {
             match step {
+                AssignmentStep::Initialization { .. } => {}
                 AssignmentStep::Task(task) => vm.execute_analog_task(task)?,
                 AssignmentStep::Assign(assignment) => {
                     let value = vm.execute(&assignment.program)?;
@@ -6312,6 +6313,7 @@ endmodule
 
     fn bytecode_assignment_step_reads_current(step: &AssignmentStep) -> bool {
         match step {
+            AssignmentStep::Initialization { .. } => false,
             AssignmentStep::Task(task) => task.expressions().any(bytecode_program_reads_current),
             AssignmentStep::Assign(assignment) => {
                 bytecode_program_reads_current(&assignment.program)
@@ -6336,6 +6338,7 @@ endmodule
     fn mark_bytecode_assignment_targets(steps: &[AssignmentStep], targets: &mut [bool]) {
         for step in steps {
             match step {
+                AssignmentStep::Initialization { .. } => {}
                 AssignmentStep::Task(_) => {}
                 AssignmentStep::Assign(assignment) => {
                     if let Some(target) = targets.get_mut(assignment.var_index) {
@@ -6443,6 +6446,9 @@ endmodule
     ) {
         for step in steps {
             match step {
+                AssignmentStep::Initialization { body, .. } => {
+                    scan_assignment_steps(body, scan_program)
+                }
                 AssignmentStep::Task(task) => {
                     for program in task.expressions() {
                         scan_program(program);
@@ -6595,7 +6601,9 @@ endmodule
                 AssignmentStep::Assign(_)
                 | AssignmentStep::AssignIndexed { .. }
                 | AssignmentStep::Task(_) => 1,
-                AssignmentStep::Loop { body, .. } => 1 + count_assignment_steps(body),
+                AssignmentStep::Loop { body, .. } | AssignmentStep::Initialization { body, .. } => {
+                    1 + count_assignment_steps(body)
+                }
             })
             .sum()
     }
@@ -6843,6 +6851,7 @@ endmodule
             num_variables,
             variable_names: Vec::new(),
             event_state_variables: Vec::new(),
+            initialization_prologue_variables: Vec::new(),
             assignment_steps: Vec::new(),
             noise_assignment_steps: Vec::new(),
             stamp_programs: Vec::new(),

@@ -1075,6 +1075,8 @@ impl SemanticAnalyzer {
             }
         }
 
+        let module_variable_count = analyzed.variables.len();
+
         // Phase 9: Lower localparams to computed variables. Their values may
         // depend on parameters, so they are evaluated at runtime before any
         // analog-block assignment, in declaration order.
@@ -1155,10 +1157,15 @@ impl SemanticAnalyzer {
         }
 
         // Phase 10: Module-level variable initializers run before the
-        // analog block, in declaration order.
+        // analog initialization, in declaration order.
+        self.in_analog_initial = true;
+        let declaration_site = self.next_analog_site();
+        let mut declaration_statements = Vec::new();
+        self.open_region();
         for var_decl in &module.variables {
             for item in &var_decl.items {
                 let Some(init) = &item.init else { continue };
+                function_effects::validate_initializer_expression(init, &self.user_functions)?;
 
                 if let Some(layout) = self.arrays.get(&item.name).cloned() {
                     // Array initializer: '{e0, e1, ...} fills the elements
@@ -1203,12 +1210,11 @@ impl SemanticAnalyzer {
                         let expression = self.lower_expression_with_side_effects(
                             element,
                             &mut analyzed,
-                            &mut statements,
+                            &mut declaration_statements,
                         )?;
                         let expr_type = self.infer_type(&expression)?;
                         let site = self.next_analog_site();
-                        analyzed.prologue_statements.push(statements.len());
-                        statements.push(AnalyzedStatement::Assignment(AnalyzedAssignment {
+                        let assignment = AnalyzedAssignment {
                             target: analyzed.variables[var_index].name.clone(),
                             var_index,
                             index: None,
@@ -1218,7 +1224,9 @@ impl SemanticAnalyzer {
                             expr_type,
                             span: item.span,
                             unfiltered_initial_step_guard: None,
-                        }));
+                        };
+                        self.record_region(AnalyzedRegion::Assignment(assignment.clone()));
+                        declaration_statements.push(AnalyzedStatement::Assignment(assignment));
                     }
                     continue;
                 }
@@ -1228,12 +1236,14 @@ impl SemanticAnalyzer {
                     .iter()
                     .position(|v| v.name == item.name)
                     .expect("variable registered above");
-                let expression =
-                    self.lower_expression_with_side_effects(init, &mut analyzed, &mut statements)?;
+                let expression = self.lower_expression_with_side_effects(
+                    init,
+                    &mut analyzed,
+                    &mut declaration_statements,
+                )?;
                 let expr_type = self.infer_type(&expression)?;
                 let site = self.next_analog_site();
-                analyzed.prologue_statements.push(statements.len());
-                statements.push(AnalyzedStatement::Assignment(AnalyzedAssignment {
+                let assignment = AnalyzedAssignment {
                     target: item.name.clone(),
                     var_index,
                     index: None,
@@ -1243,8 +1253,31 @@ impl SemanticAnalyzer {
                     expr_type,
                     span: item.span,
                     unfiltered_initial_step_guard: None,
-                }));
+                };
+                self.record_region(AnalyzedRegion::Assignment(assignment.clone()));
+                declaration_statements.push(AnalyzedStatement::Assignment(assignment));
             }
+        }
+
+        let declaration_body = self.close_region();
+        self.in_analog_initial = false;
+        if !declaration_statements.is_empty() {
+            Self::record_initial_state_variables(
+                &declaration_statements,
+                &mut analyzed,
+                module_variable_count,
+            );
+            statements.push(AnalyzedStatement::Initialization {
+                phase: AnalogEvaluationPhase::Declarations,
+                site: declaration_site,
+                body: declaration_statements,
+                span: module.span,
+            });
+            self.record_region(AnalyzedRegion::Initialization {
+                phase: AnalogEvaluationPhase::Declarations,
+                body: declaration_body,
+                span: module.span,
+            });
         }
 
         // `analog final` parses into its own block and has no consumer: no
@@ -1279,12 +1312,33 @@ impl SemanticAnalyzer {
         // boundary instead, where the compiler would have to run it.
         self.analyze_digital(module, &mut analyzed);
 
-        // Phase 11: analog initial runs before the main analog block
+        // Phase 11: Capture analog initialization independently of the Newton body.
         self.in_analog_initial = true;
         if let Some(block) = &module.analog_initial {
+            function_effects::validate_initialization(&block.statements, &self.user_functions)?;
+            let site = self.next_analog_site();
+            let mut initialization = Vec::new();
+            self.open_region();
             for stmt in &block.statements {
-                self.analyze_statement(stmt, &mut analyzed, &mut statements)?;
+                self.analyze_statement(stmt, &mut analyzed, &mut initialization)?;
             }
+            let body = self.close_region();
+            Self::record_initial_state_variables(
+                &initialization,
+                &mut analyzed,
+                module_variable_count,
+            );
+            statements.push(AnalyzedStatement::Initialization {
+                phase: AnalogEvaluationPhase::Initialization,
+                site,
+                body: initialization,
+                span: block.span,
+            });
+            self.record_region(AnalyzedRegion::Initialization {
+                phase: AnalogEvaluationPhase::Initialization,
+                body,
+                span: block.span,
+            });
         }
         self.in_analog_initial = false;
 
@@ -2928,6 +2982,7 @@ impl SemanticAnalyzer {
                         }
                     }
                     AnalyzedStatement::Loop(loop_) => collect(&loop_.body, module, slots),
+                    AnalyzedStatement::Initialization { body, .. } => collect(body, module, slots),
                 }
             }
         }
@@ -2942,6 +2997,26 @@ impl SemanticAnalyzer {
             }
         }
         module.event_state_variables = slots;
+    }
+
+    fn record_initial_state_variables(
+        statements: &[AnalyzedStatement],
+        module: &mut AnalyzedModule,
+        module_variable_count: usize,
+    ) {
+        let previous = module.event_state_variables.clone();
+        Self::record_event_state_variables(statements, module);
+        module
+            .event_state_variables
+            .retain(|&slot| slot < module_variable_count || previous.binary_search(&slot).is_ok());
+        for (slot, variable) in module
+            .variables
+            .iter_mut()
+            .enumerate()
+            .skip(module_variable_count)
+        {
+            variable.is_state = previous.binary_search(&slot).is_ok();
+        }
     }
 
     /// AND the enclosing guard into a runtime loop condition so a guarded

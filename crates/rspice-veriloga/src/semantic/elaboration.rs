@@ -1037,6 +1037,20 @@ fn rewrite_statement(
     base: InstanceBase,
 ) -> CompileResult<AnalyzedStatement> {
     Ok(match statement {
+        AnalyzedStatement::Initialization {
+            phase,
+            site,
+            body,
+            span,
+        } => AnalyzedStatement::Initialization {
+            phase: *phase,
+            site: base.site(*site)?,
+            body: body
+                .iter()
+                .map(|statement| rewrite_statement(statement, scope, base))
+                .collect::<CompileResult<Vec<_>>>()?,
+            span: *span,
+        },
         AnalyzedStatement::Task(task) => {
             let mut rewritten = task.try_map(task.span, |expression| {
                 rewrite_expression(expression, scope)
@@ -1067,6 +1081,14 @@ fn rewrite_region(
     base: InstanceBase,
 ) -> CompileResult<AnalyzedRegion> {
     Ok(match region {
+        AnalyzedRegion::Initialization { phase, body, span } => AnalyzedRegion::Initialization {
+            phase: *phase,
+            body: body
+                .iter()
+                .map(|region| rewrite_region(region, scope, base))
+                .collect::<CompileResult<Vec<_>>>()?,
+            span: *span,
+        },
         AnalyzedRegion::Task(task) => {
             let mut rewritten = task.try_map(task.span, |expression| {
                 rewrite_expression(expression, scope)

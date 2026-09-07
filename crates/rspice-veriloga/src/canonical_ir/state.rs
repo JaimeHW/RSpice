@@ -578,6 +578,11 @@ fn statement_roots(hir: &HirModel) -> Vec<ExprId> {
 /// The expressions one statement evaluates, in evaluation order.
 fn collect_statement_roots(statement: &HirStatement, roots: &mut Vec<ExprId>) {
     match statement {
+        HirStatement::Initialization { body, .. } => {
+            for statement in body {
+                collect_statement_roots(statement, roots);
+            }
+        }
         HirStatement::Task(task) => {
             roots.extend(task.expressions().map(|expression| expression.id))
         }

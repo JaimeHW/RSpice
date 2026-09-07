@@ -89,6 +89,10 @@ fn compiled_model_layout_identity(model: &CompiledModel) -> CompiledModelLayoutI
         usize_field(hasher, steps.len());
         for step in steps {
             match step {
+                AssignmentStep::Initialization { phase, body } => {
+                    hasher.update(&[4, *phase as u8]);
+                    assignment_layout(hasher, body);
+                }
                 AssignmentStep::Task(task) => {
                     hasher.update(&[3]);
                     hasher.update(&task.site.to_le_bytes());
@@ -141,6 +145,10 @@ fn compiled_model_layout_identity(model: &CompiledModel) -> CompiledModelLayoutI
     usize_field(&mut hasher, model.event_state_variables.len());
     for slot in &model.event_state_variables {
         usize_field(&mut hasher, *slot);
+    }
+    usize_field(&mut hasher, model.initialization_prologue_variables.len());
+    for &slot in &model.initialization_prologue_variables {
+        usize_field(&mut hasher, slot);
     }
     assignment_layout(&mut hasher, &model.assignment_steps);
     assignment_layout(&mut hasher, &model.noise_assignment_steps);
@@ -2443,6 +2451,26 @@ impl VerilogADevice {
             model.num_variables,
             &model.noise_assignment_steps,
         )?;
+        let mut prologue = std::collections::HashMap::new();
+        for &slot in &model.initialization_prologue_variables {
+            if slot >= model.num_variables || prologue.insert(slot, 0usize).is_some() {
+                return Err(VmError::InvalidModel(
+                    "invalid initialization prologue variable layout".into(),
+                ));
+            }
+        }
+        for step in &model.assignment_steps {
+            if let AssignmentStep::Assign(assignment) = step
+                && let Some(count) = prologue.get_mut(&assignment.var_index)
+            {
+                *count += 1;
+            }
+        }
+        if prologue.values().any(|&count| count != 1) {
+            return Err(VmError::InvalidModel(
+                "initialization prologue must name unique top-level assignments".into(),
+            ));
+        }
         // Validate before looking up a compiled image: a cache hit skips the
         // backend compiler, including its artifact checks.
         if let Some(artifact) = canonical_artifact {
@@ -2591,9 +2619,9 @@ impl VerilogADevice {
     ) -> Result<(), VmError> {
         const MAX_COMPILED_ASSIGNMENT_STEPS: usize = 4_194_304;
 
-        let mut pending = vec![assignment_steps];
+        let mut pending = vec![(assignment_steps, true, false)];
         let mut visited = 0_usize;
-        while let Some(steps) = pending.pop() {
+        while let Some((steps, top_level, initialization)) = pending.pop() {
             for step in steps {
                 visited = visited.checked_add(1).ok_or_else(|| {
                     VmError::InvalidModel("assignment-step count overflow".into())
@@ -2606,6 +2634,11 @@ impl VerilogADevice {
 
                 match step {
                     crate::codegen::AssignmentStep::Task(task) => {
+                        if task.initialization != initialization {
+                            return Err(VmError::InvalidModel(
+                                "analog task initialization flag disagrees with its execution phase".into(),
+                            ));
+                        }
                         if task.kind != crate::analog_tasks::AnalogTaskKind::Finish
                             || !matches!(
                                 task.arguments.as_slice(),
@@ -2642,7 +2675,19 @@ impl VerilogADevice {
                             )));
                         }
                     }
-                    crate::codegen::AssignmentStep::Loop { body, .. } => pending.push(body),
+                    crate::codegen::AssignmentStep::Loop { body, .. } => {
+                        pending.push((body, false, initialization))
+                    }
+                    crate::codegen::AssignmentStep::Initialization { phase, body } => {
+                        if !top_level
+                            || *phase == rspice_veriloga_runtime::AnalogEvaluationPhase::Evaluation
+                        {
+                            return Err(VmError::InvalidModel(
+                                "initialization must be a top-level declaration or initialization phase".into(),
+                            ));
+                        }
+                        pending.push((body, false, true));
+                    }
                 }
             }
         }
@@ -2715,6 +2760,9 @@ impl VerilogADevice {
         ) {
             for step in steps {
                 match step {
+                    crate::codegen::AssignmentStep::Initialization { body, .. } => {
+                        scan_steps(body, scan_program)
+                    }
                     crate::codegen::AssignmentStep::Task(task) => {
                         task.expressions().for_each(&mut *scan_program)
                     }
@@ -2985,6 +3033,8 @@ impl VerilogADevice {
 
         let previous = self.context.clone();
         self.context.multiplicity = m;
+        self.context.analysis_initialized = false;
+        self.context.numerical_evaluation_valid = false;
         if let Err(error) = self.try_refresh_static_conditions() {
             self.context = previous;
             return Err(error);
@@ -3528,6 +3578,8 @@ impl VerilogADevice {
 
         let previous = self.context.clone();
         self.context.temperature = temp_k;
+        self.context.analysis_initialized = false;
+        self.context.numerical_evaluation_valid = false;
         // Static guards may reference $temperature
         if let Err(error) = self.try_refresh_static_conditions() {
             self.context = previous;
@@ -3549,6 +3601,7 @@ impl VerilogADevice {
 
     /// Checked simulation-time update.
     pub fn try_set_time(&mut self, time: f64) -> Result<(), VmError> {
+        self.context.numerical_evaluation_valid = false;
         if !time.is_finite() || time < 0.0 {
             return Err(VmError::InvalidRuntimeConfiguration(format!(
                 "simulation time must be finite and non-negative, got {time}"
@@ -3622,6 +3675,8 @@ impl VerilogADevice {
 
         let previous = self.context.clone();
         self.context.analysis_type = analysis;
+        self.context.analysis_initialized = false;
+        self.context.numerical_evaluation_valid = false;
         self.context.evaluation_mode = evaluation_mode;
         if let Err(error) = self.try_refresh_static_conditions() {
             self.context = previous;
@@ -3639,6 +3694,62 @@ impl VerilogADevice {
     pub fn try_begin_analysis(&mut self, analysis: u8) -> Result<(), VmError> {
         self.try_set_analysis_type(analysis)?;
         self.context.reset_analysis_state();
+        self.try_initialize_analysis()?;
+        self.try_refresh_static_conditions()
+    }
+
+    fn has_initialization(&self) -> bool {
+        self.model
+            .assignment_steps
+            .iter()
+            .any(|step| matches!(step, crate::codegen::AssignmentStep::Initialization { .. }))
+    }
+
+    /// Execute the cold pre-simulation phases before any Newton evaluation.
+    /// A common ordered executor serves every executable backend; numerical
+    /// kernels retain their native/JIT implementation and contain no initializer.
+    pub fn try_initialize_analysis(&mut self) -> Result<(), VmError> {
+        if self.context.analysis_initialized {
+            return Ok(());
+        }
+        if !self.has_initialization() {
+            self.context.analysis_initialized = true;
+            return Ok(());
+        }
+        let previous = self.context.clone();
+        let result = (|| {
+            self.context.begin_initialization();
+            let mut vm = Vm::new(&mut self.context);
+            for step in &self.model.assignment_steps {
+                if let crate::codegen::AssignmentStep::Assign(assignment) = step
+                    && self
+                        .model
+                        .initialization_prologue_variables
+                        .contains(&assignment.var_index)
+                {
+                    Self::execute_assignment_steps(&mut vm, std::slice::from_ref(step))?;
+                }
+            }
+            for selected in [
+                rspice_veriloga_runtime::AnalogEvaluationPhase::Declarations,
+                rspice_veriloga_runtime::AnalogEvaluationPhase::Initialization,
+            ] {
+                for step in &self.model.assignment_steps {
+                    if let crate::codegen::AssignmentStep::Initialization { phase, body } = step
+                        && *phase == selected
+                    {
+                        Self::execute_assignment_steps(&mut vm, body)?;
+                    }
+                }
+            }
+            vm.context.commit_initialization()?;
+            vm.context.time = previous.time;
+            self.try_refresh_static_conditions()
+        })();
+        if let Err(error) = result {
+            self.context = previous;
+            return Err(error);
+        }
         Ok(())
     }
 
@@ -3671,6 +3782,7 @@ impl VerilogADevice {
         initial: bool,
         final_step: bool,
     ) -> Result<(), VmError> {
+        self.context.numerical_evaluation_valid = false;
         if self.context.analysis_initial_step == initial
             && self.context.analysis_final_step == final_step
         {
@@ -3707,7 +3819,17 @@ impl VerilogADevice {
 
     /// Validate an accepted-state commit without mutating this instance.
     pub fn validate_advance_state(&self) -> Result<(), VmError> {
+        self.validate_initialization_ready()?;
         self.context.validate_advance_state()
+    }
+
+    fn validate_initialization_ready(&self) -> Result<(), VmError> {
+        if self.has_initialization() && !self.context.analysis_initialized {
+            return Err(VmError::InvalidNumericResult(
+                "analog initialization has not completed".into(),
+            ));
+        }
+        Ok(())
     }
 
     /// Apply a commit only after all runtime instances in the circuit have
@@ -3740,6 +3862,7 @@ impl VerilogADevice {
     /// `runtime_veriloga_checkpoint_resumes_a_partly_live_variable_array_exactly`
     /// in `rspice-core`'s `transient_checkpoint` suite pins.
     pub fn checkpoint_state(&self) -> Result<VerilogADeviceCheckpoint, VmError> {
+        self.validate_initialization_ready()?;
         let checkpoint = VerilogADeviceCheckpoint {
             instance_name: self.name.clone(),
             model_name: self.model.name.clone(),
@@ -3920,6 +4043,9 @@ impl VerilogADevice {
     /// active potential contribution is forced to zero current.
     #[cfg(feature = "native")]
     fn try_refresh_static_conditions(&mut self) -> Result<(), VmError> {
+        if !self.context.analysis_initialized && self.has_initialization() {
+            return Ok(());
+        }
         let model = &self.model;
         let native = self.native_model.as_ref();
         let mut program_active = vec![true; model.stamp_programs.len()];
@@ -3992,6 +4118,9 @@ impl VerilogADevice {
 
     #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
     fn try_refresh_static_conditions(&mut self) -> Result<(), VmError> {
+        if !self.context.analysis_initialized && self.has_initialization() {
+            return Ok(());
+        }
         let model = &self.model;
         let wasm = self.wasm_jit_model.as_ref();
         let mut program_active = vec![true; model.stamp_programs.len()];
@@ -4169,6 +4298,9 @@ impl VerilogADevice {
         not(all(feature = "wasm-jit", target_arch = "wasm32"))
     ))]
     fn try_refresh_static_conditions(&mut self) -> Result<(), VmError> {
+        if !self.context.analysis_initialized && self.has_initialization() {
+            return Ok(());
+        }
         let model = &self.model;
         let mut program_active = vec![true; model.stamp_programs.len()];
         let mut branch_active = vec![false; model.branch_sources.len()];
@@ -4282,6 +4414,9 @@ impl VerilogADevice {
     pub fn observe_variables(&mut self, artifact: &CanonicalIrArtifact) -> Result<(), VmError> {
         self.context.record_task_effects = false;
         Self::validate_observation_artifact(&self.model, artifact)?;
+        if !self.model.event_state_variables.is_empty() {
+            return Ok(());
+        }
         let context = &mut self.context;
         if context.variables.len() < self.model.num_variables {
             context.variables.resize(self.model.num_variables, 0.0);
@@ -4703,6 +4838,7 @@ impl VerilogADevice {
 
     /// Checked terminal voltage update from circuit solution.
     pub fn try_update_voltages(&mut self, circuit_voltages: &[f64]) -> Result<(), VmError> {
+        self.context.numerical_evaluation_valid = false;
         for (terminal, &node) in self.node_mapping.iter().enumerate() {
             if terminal < self.context.voltages.len() {
                 let v =
@@ -4802,6 +4938,7 @@ impl VerilogADevice {
         mode: crate::vm::VerilogAEvaluationMode,
     ) -> Result<Vec<f64>, VmError> {
         let result = self.try_evaluate_with_task_recording(mode, true);
+        self.context.numerical_evaluation_valid = result.is_ok();
         if result.is_err() {
             self.context.invalidate_task_candidate();
         }
@@ -4813,6 +4950,7 @@ impl VerilogADevice {
         mode: crate::vm::VerilogAEvaluationMode,
         record_tasks: bool,
     ) -> Result<Vec<f64>, VmError> {
+        self.try_initialize_analysis()?;
         #[cfg(feature = "native")]
         if self.native_model.evaluation_kernel_is_eligible() {
             return self.try_evaluate_native_kernel(mode, record_tasks);
@@ -5935,7 +6073,6 @@ impl VerilogADevice {
 
     /// Safety cap on runtime-loop iterations per evaluation (a model bug
     /// must not hang the Newton loop)
-    #[cfg(not(feature = "native"))]
     const MAX_RUNTIME_LOOP_ITERATIONS: usize = 100_000;
 
     /// Execute assignment programs and update VM variable storage.
@@ -5957,13 +6094,13 @@ impl VerilogADevice {
     /// The interpreter route runs this as its evaluation; the browser route
     /// runs it only for [`Self::observe_variables`], which is why it is not
     /// gated on the interpreter alone.
-    #[cfg(not(feature = "native"))]
     fn execute_assignment_steps(
         vm: &mut Vm<'_>,
         steps: &[crate::codegen::AssignmentStep],
     ) -> Result<(), VmError> {
         for step in steps {
             match step {
+                crate::codegen::AssignmentStep::Initialization { .. } => {}
                 crate::codegen::AssignmentStep::Task(task) => vm.execute_analog_task(task)?,
                 crate::codegen::AssignmentStep::Assign(assignment) => {
                     if assignment.var_index >= vm.context.variables.len() {
@@ -6029,14 +6166,20 @@ impl VerilogADevice {
     /// Checked Jacobian evaluation path for callers that can surface
     /// runtime model errors as diagnostics instead of panicking.
     pub fn try_compute_jacobian(&mut self) -> Result<Vec<JacobianEntry>, VmError> {
-        self.context.record_task_effects = false;
+        self.try_initialize_analysis()?;
+        let replay = !self.context.numerical_evaluation_valid;
+        let mut observation = self.context.clone();
+        observation.record_task_effects = false;
         // A standalone Jacobian query belongs to the current nonlinear
         // evaluation and must not erase the convergence result established by
         // its value pass or advance limiter history a second time. Canonical
         // limiter Jacobians use the oriented proposal directly, so bypassing
         // candidate publication here preserves that contract.
-        self.context.evaluation_mode = crate::vm::VerilogAEvaluationMode::StaticProbe;
-        let context = &mut self.context;
+        observation.evaluation_mode = crate::vm::VerilogAEvaluationMode::StaticProbe;
+        let context = &mut observation;
+        if replay {
+            context.begin_stateful_evaluation_with_tasks(false);
+        }
         let model = &self.model;
         #[cfg(feature = "native")]
         let native = self.native_model.as_ref();
@@ -6048,14 +6191,16 @@ impl VerilogADevice {
 
         let program_active = &self.program_active;
         let mut vm = Vm::new(context);
-        Self::run_assignment_pass(
-            &mut vm,
-            model,
-            #[cfg(feature = "native")]
-            native,
-            #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
-            wasm,
-        )?;
+        if replay {
+            Self::run_assignment_pass(
+                &mut vm,
+                model,
+                #[cfg(feature = "native")]
+                native,
+                #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
+                wasm,
+            )?;
+        }
         let mut entries = Vec::new();
 
         for (prog_idx, program) in model.stamp_programs.iter().enumerate() {
@@ -6232,12 +6377,17 @@ impl VerilogADevice {
         M: FnMut(usize, usize, f64),
         R: FnMut(usize, f64),
     {
+        self.try_initialize_analysis()?;
         #[cfg(any(feature = "native", all(feature = "wasm-jit", target_arch = "wasm32")))]
         if self.fused_stamp_driver_is_active() {
-            return self.try_stamp_fused_kernel(circuit_voltages, matrix_add, rhs_add, mode);
+            let result = self.try_stamp_fused_kernel(circuit_voltages, matrix_add, rhs_add, mode);
+            self.context.numerical_evaluation_valid = result.is_ok();
+            return result;
         }
 
-        self.try_stamp_scalar_with_mode(circuit_voltages, matrix_add, rhs_add, mode)
+        let result = self.try_stamp_scalar_with_mode(circuit_voltages, matrix_add, rhs_add, mode);
+        self.context.numerical_evaluation_valid = result.is_ok();
+        result
     }
 
     /// Whether stamping dispatches the fused whole-model driver rather than
@@ -6744,6 +6894,7 @@ impl VerilogADevice {
                 .any(|instruction| matches!(instruction, Instruction::PushCurrent(_, _)))
         };
         match step {
+            AssignmentStep::Initialization { .. } => false,
             AssignmentStep::Task(task) => task.expressions().any(program_reads_current),
             AssignmentStep::Assign(assignment) => program_reads_current(&assignment.program),
             AssignmentStep::AssignIndexed { index, value, .. } => {
@@ -6778,6 +6929,7 @@ impl VerilogADevice {
         }
         fn step_targets(step: &AssignmentStep, out: &mut std::collections::HashSet<usize>) {
             match step {
+                AssignmentStep::Initialization { .. } => {}
                 AssignmentStep::Task(_) => {}
                 AssignmentStep::Assign(assignment) => {
                     out.insert(assignment.var_index);
@@ -6794,6 +6946,7 @@ impl VerilogADevice {
         }
         fn step_reads(step: &AssignmentStep, out: &mut std::collections::HashSet<usize>) {
             match step {
+                AssignmentStep::Initialization { .. } => {}
                 AssignmentStep::Task(task) => task
                     .expressions()
                     .for_each(|program| program_reads(program, out)),
@@ -7897,6 +8050,24 @@ mod bytecode_assignment_integrity_tests {
         assert!(matches!(&error, VmError::InvalidInstruction(_)));
         assert!(error.to_string().contains("indexed assignment target"));
         assert_eq!(vm.context.variables, vec![7.0]);
+    }
+
+    #[test]
+    fn compiled_assignment_layout_rejects_misplaced_initialization() {
+        use rspice_veriloga_runtime::AnalogEvaluationPhase;
+        let invalid_phase = [AssignmentStep::Initialization {
+            phase: AnalogEvaluationPhase::Evaluation,
+            body: Vec::new(),
+        }];
+        assert!(VerilogADevice::validate_compiled_assignment_layout(0, &invalid_phase).is_err());
+        let nested = [AssignmentStep::Initialization {
+            phase: AnalogEvaluationPhase::Declarations,
+            body: vec![AssignmentStep::Initialization {
+                phase: AnalogEvaluationPhase::Initialization,
+                body: Vec::new(),
+            }],
+        }];
+        assert!(VerilogADevice::validate_compiled_assignment_layout(0, &nested).is_err());
     }
 
     #[test]

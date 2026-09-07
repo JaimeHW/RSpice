@@ -276,6 +276,9 @@ fn scan_assignment_steps(
 ) {
     for step in steps {
         match step {
+            AssignmentStep::Initialization { body, .. } => {
+                scan_assignment_steps(body, scan_program)
+            }
             AssignmentStep::Task(task) => {
                 for program in task.expressions() {
                     scan_program(program);

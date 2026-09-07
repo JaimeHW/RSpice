@@ -1277,6 +1277,9 @@ impl BuiltinVerilogAInstance {
             )
             .map_err(|source| {
                 let (index, mechanism) = match &source {
+                    GeneratedNoiseEvaluationError::UninitializedAnalogState => {
+                        (0, "<analog initialization>")
+                    }
                     GeneratedNoiseEvaluationError::SourceIndexOutOfRange { index, .. }
                     | GeneratedNoiseEvaluationError::NonFinite { index, .. }
                     | GeneratedNoiseEvaluationError::NegativePower { index, .. } => (
@@ -1461,6 +1464,9 @@ impl BuiltinVerilogAInstance {
             )
             .map_err(|source| {
                 let (index, mechanism) = match &source {
+                    GeneratedNoiseEvaluationError::UninitializedAnalogState => {
+                        (0, "<analog initialization>")
+                    }
                     GeneratedNoiseEvaluationError::SourceIndexOutOfRange { index, .. }
                     | GeneratedNoiseEvaluationError::NonFinite { index, .. }
                     | GeneratedNoiseEvaluationError::NegativePower { index, .. }

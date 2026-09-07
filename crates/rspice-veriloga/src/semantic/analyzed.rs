@@ -4,6 +4,7 @@ use super::{AnalyzedDigital, SymbolTable};
 use crate::ast::{Expression, ParamType, PortDirection, SourceFile, VarType};
 use crate::source::Span;
 use crate::types::{ParameterRange as TypedParameterRange, ValueType};
+pub use rspice_veriloga_runtime::AnalogEvaluationPhase;
 use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
 use std::collections::HashMap;
@@ -78,8 +79,7 @@ pub struct AnalyzedModule {
     /// executed before the contributions on every device evaluation
     pub statements: Vec<AnalyzedStatement>,
     /// Indices into [`Self::statements`] of the module *prologue*: the
-    /// localparam and module-scope variable initializers that run before the
-    /// analog block.
+    /// pure localparam definitions needed before each execution phase.
     ///
     /// These are the statements [`Self::body`] has no counterpart for at all.
     /// The analog block's own steps are recorded twice — once here with the
@@ -212,6 +212,12 @@ pub enum AnalyzedRegion {
         span: Span,
     },
     Task(crate::analog_tasks::AnalogTaskCall<Expression, Span>),
+    /// A pre-simulation region, kept separate from Newton evaluation.
+    Initialization {
+        phase: AnalogEvaluationPhase,
+        body: Vec<AnalyzedRegion>,
+        span: Span,
+    },
 }
 
 /// An analyzed array variable: elements occupy contiguous slots in the
@@ -235,6 +241,12 @@ pub enum AnalyzedStatement {
     /// dependent). The condition is re-evaluated before every iteration.
     Loop(AnalyzedLoop),
     Task(crate::analog_tasks::AnalogTaskCall<Expression, Span>),
+    Initialization {
+        phase: AnalogEvaluationPhase,
+        site: AnalogSiteId,
+        body: Vec<AnalyzedStatement>,
+        span: Span,
+    },
 }
 
 /// Runtime-bounded loop over assignment statements

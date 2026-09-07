@@ -824,6 +824,15 @@ fn write_hir_expression(out: &mut String, expression: &HirExpression) {
 fn write_hir_statements(out: &mut String, prefix: &str, statements: &[HirStatement]) {
     for (index, statement) in statements.iter().enumerate() {
         match statement {
+            HirStatement::Initialization { phase, body, span } => {
+                writeln!(
+                    out,
+                    "{prefix}[{index}]=initialization phase={phase:?} span={}",
+                    span_label(*span)
+                )
+                .expect("write to string");
+                write_hir_statements(out, &format!("{prefix}[{index}].body"), body);
+            }
             HirStatement::Task(task) => {
                 writeln!(
                     out,

@@ -730,6 +730,9 @@ impl StateSlotMapping {
     fn note_assignment_pass_programs(&mut self, steps: &[AssignmentStep]) {
         for step in steps {
             match step {
+                AssignmentStep::Initialization { body, .. } => {
+                    self.note_assignment_pass_programs(body)
+                }
                 AssignmentStep::Task(task) => {
                     for program in task.expressions() {
                         self.programs += 1;
@@ -769,6 +772,7 @@ impl StateSlotMapping {
 fn assignment_pass_state(steps: &[AssignmentStep], out: &mut Vec<Instruction>) {
     for step in steps {
         match step {
+            AssignmentStep::Initialization { body, .. } => assignment_pass_state(body, out),
             AssignmentStep::Task(task) => task
                 .expressions()
                 .for_each(|program| push_state(program, out)),
@@ -950,6 +954,7 @@ fn for_each_program_mut(model: &mut CompiledModel, visit: &mut impl FnMut(&mut B
         num_variables: _,
         variable_names: _,
         event_state_variables: _,
+        initialization_prologue_variables: _,
         assignment_steps,
         noise_assignment_steps,
         stamp_programs,
@@ -1186,6 +1191,7 @@ fn visit_assignment_steps_mut(
 ) {
     for step in steps.iter_mut() {
         match step {
+            AssignmentStep::Initialization { body, .. } => visit_assignment_steps_mut(body, visit),
             AssignmentStep::Task(task) => task.expressions_mut().for_each(&mut *visit),
             AssignmentStep::Assign(assignment) => visit(&mut assignment.program),
             AssignmentStep::AssignIndexed { index, value, .. } => {

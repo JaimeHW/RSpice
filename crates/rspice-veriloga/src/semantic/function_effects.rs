@@ -14,7 +14,7 @@ pub(super) fn effectful_functions(functions: &HashMap<SmolStr, FunctionDef>) -> 
         for statement in &function.body.statements {
             effects.statement(statement);
         }
-        for callee in effects.calls {
+        for (callee, _) in effects.calls {
             callers.entry(callee).or_default().push(name.clone());
         }
         if effects.ordered
@@ -39,8 +39,9 @@ pub(super) fn effectful_functions(functions: &HashMap<SmolStr, FunctionDef>) -> 
 
 #[derive(Default)]
 struct Effects {
+    initialization_error: Option<(Span, &'static str)>,
     ordered: bool,
-    calls: HashSet<SmolStr>,
+    calls: std::collections::BTreeMap<SmolStr, Span>,
 }
 
 impl Effects {
@@ -65,7 +66,11 @@ impl Effects {
         match statement {
             AnalogStatement::Call(call) => {
                 self.ordered |= call.name.starts_with('$');
-                self.calls.insert(call.name.clone());
+                if call.name == "$stop" {
+                    self.initialization_error
+                        .get_or_insert((call.span, "$stop"));
+                }
+                self.calls.entry(call.name.clone()).or_insert(call.span);
                 for argument in &call.args {
                     self.expression(argument);
                 }
@@ -114,8 +119,18 @@ impl Effects {
             // they cannot be replaced by a symbolic function return value.
             AnalogStatement::Contribution(_)
             | AnalogStatement::IndirectContribution(_)
-            | AnalogStatement::EventControl(_)
-            | AnalogStatement::Disable(_) => self.ordered = true,
+            | AnalogStatement::EventControl(_) => {
+                self.ordered = true;
+                let span = match statement {
+                    AnalogStatement::Contribution(statement) => statement.span,
+                    AnalogStatement::IndirectContribution(statement) => statement.span,
+                    AnalogStatement::EventControl(statement) => statement.span,
+                    _ => unreachable!(),
+                };
+                self.initialization_error
+                    .get_or_insert((span, "contributions and analog events"));
+            }
+            AnalogStatement::Disable(_) => self.ordered = true,
             AnalogStatement::Null(_) => {}
         }
     }
@@ -123,12 +138,13 @@ impl Effects {
     fn expression(&mut self, expression: &Expression) {
         match expression {
             Expression::Call(call) => {
-                self.calls.insert(call.name.clone());
+                self.calls.entry(call.name.clone()).or_insert(call.span);
                 for argument in &call.args {
                     self.expression(argument);
                 }
             }
             Expression::SystemFunction(call) => {
+                self.calls.entry(call.name.clone()).or_insert(call.span);
                 for argument in &call.args {
                     self.expression(argument);
                 }
@@ -150,12 +166,19 @@ impl Effects {
                     self.expression(child);
                 }
             }
-            Expression::AnalogOperator(_) | Expression::NoiseSource(_) => self.ordered = true,
+            Expression::AnalogOperator(_) | Expression::NoiseSource(_) => {
+                self.ordered = true;
+                self.initialization_error
+                    .get_or_insert((expression.span(), "analog operators and noise sources"));
+            }
+            Expression::BranchAccess(_) => {
+                self.initialization_error
+                    .get_or_insert((expression.span(), "analog access functions"));
+            }
             Expression::Number(_)
             | Expression::StringLit(_)
             | Expression::NullArgument(_)
-            | Expression::Identifier(_)
-            | Expression::BranchAccess(_) => {}
+            | Expression::Identifier(_) => {}
         }
     }
 
@@ -166,6 +189,87 @@ impl Effects {
                 ArrayLiteralElement::Replication(replication) => {
                     self.expression(&replication.count);
                     self.elements(&replication.elements);
+                }
+            }
+        }
+    }
+}
+
+/// Validate authored initializer syntax, including unreachable branches and
+/// transitive function calls, before constant folding can erase an illegal use.
+pub(super) fn validate_initialization(
+    statements: &[AnalogStatement],
+    functions: &HashMap<SmolStr, FunctionDef>,
+) -> CompileResult<()> {
+    let mut effects = Effects::default();
+    for statement in statements {
+        effects.statement(statement);
+    }
+    validate_initialization_effects(effects, functions)
+}
+
+pub(super) fn validate_initializer_expression(
+    expression: &Expression,
+    functions: &HashMap<SmolStr, FunctionDef>,
+) -> CompileResult<()> {
+    let mut effects = Effects::default();
+    effects.expression(expression);
+    validate_initialization_effects(effects, functions)
+}
+
+fn validate_initialization_effects(
+    mut effects: Effects,
+    functions: &HashMap<SmolStr, FunctionDef>,
+) -> CompileResult<()> {
+    let mut visited = HashSet::new();
+    let builtins = FunctionRegistry::new();
+    loop {
+        if let Some((span, construct)) = effects.initialization_error {
+            return Err(CompileError::Semantic(SemanticError::new(
+                SemanticErrorKind::InvalidAnalogOperator(format!(
+                    "{construct} are not permitted during pre-simulation initialization"
+                )),
+                span,
+            )));
+        }
+        let pending = std::mem::take(&mut effects.calls);
+        if pending.is_empty() {
+            return Ok(());
+        }
+        for (name, span) in pending {
+            if !functions.contains_key(&name)
+                && (builtins
+                    .get(&name)
+                    .is_some_and(|function| function.is_analog_operator)
+                    || matches!(
+                        name.as_str(),
+                        "limexp"
+                            | "transition"
+                            | "last_crossing"
+                            | "cross"
+                            | "above"
+                            | "timer"
+                            | "zi_nd"
+                            | "zi_np"
+                            | "zi_zd"
+                            | "zi_zp"
+                            | "noise_table"
+                            | "$limit"
+                    ))
+            {
+                return Err(CompileError::Semantic(SemanticError::new(
+                    SemanticErrorKind::InvalidAnalogOperator(format!(
+                        "analog operator '{name}' is not permitted during pre-simulation initialization"
+                    )),
+                    span,
+                )));
+            }
+            if visited.insert(name.clone())
+                && let Some(function) = functions.get(&name)
+            {
+                effects.declarations(&function.locals);
+                for statement in &function.body.statements {
+                    effects.statement(statement);
                 }
             }
         }

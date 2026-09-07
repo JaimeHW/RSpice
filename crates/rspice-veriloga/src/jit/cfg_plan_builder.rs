@@ -2572,7 +2572,7 @@ endmodule
                 .unwrap_or_else(|diagnostics| panic!("{case}: lowers: {diagnostics:?}"));
             let mut node_potentials = vec![0.0; artifact.mir.nodes.len()];
             node_potentials[0] = *voltage;
-            let inputs = CfgEvalInputs {
+            let mut inputs = CfgEvalInputs {
                 parameters: artifact
                     .mir
                     .parameters
@@ -2581,7 +2581,15 @@ endmodule
                     .collect(),
                 parameter_given: vec![false; artifact.mir.parameters.len()],
                 port_connected: vec![true; artifact.hir.ports.len()],
-                event_state: Vec::new(),
+                event_state: vec![
+                    0.0;
+                    artifact
+                        .hir
+                        .variables
+                        .iter()
+                        .filter(|variable| variable.is_state)
+                        .count()
+                ],
                 event_controls: HashMap::new(),
                 node_potentials,
                 branch_flows: vec![0.0; artifact.mir.branches.len()],
@@ -2598,6 +2606,20 @@ endmodule
                 idt_scale: 0.0,
                 staged: Vec::new(),
             };
+            for phase in [
+                rspice_veriloga_runtime::AnalogEvaluationPhase::Declarations,
+                rspice_veriloga_runtime::AnalogEvaluationPhase::Initialization,
+            ] {
+                let initializer =
+                    CfgModel::from_hir_for_initialization(&artifact.hir, &artifact.mir, phase)
+                        .unwrap();
+                let snapshot = evaluate_cfg(&initializer.function, &inputs).unwrap();
+                inputs.event_state = initializer
+                    .event_state_candidates
+                    .iter()
+                    .map(|id| snapshot.value(*id).unwrap())
+                    .collect();
+            }
             let snapshot = evaluate_cfg(&cfg.function, &inputs)
                 .unwrap_or_else(|error| panic!("{case}: evaluates: {error:?}"));
             let residual = cfg

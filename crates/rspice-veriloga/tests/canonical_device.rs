@@ -22,6 +22,140 @@ use std::process::Command;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 #[test]
+fn generated_localparams_reach_residual_derivatives_and_noise() {
+    let (state, stamp, noise) = generated_parts(
+        r#"module localparam_device(p,n);
+inout p,n; electrical p,n; parameter real gain=2;
+localparam real scale=gain+1;
+analog V(p,n)<+scale*V(p,n)+white_noise(scale,"localparam");
+endmodule"#,
+        "localparam values",
+    );
+    run_generated_main("localparam values", &state, &stamp, &noise, r#"
+#[derive(Default)]
+struct Noise(f64);
+impl runtime::GeneratedNoiseVisitor for Noise {
+    fn visit(&mut self, _: usize, value: runtime::GeneratedNoiseEvaluationRef<'_>) -> bool { self.0 += value.psd; true }
+}
+let ctx = runtime::GeneratedEvalContext { voltages: &[2.0, 0.0], temperature: 300.15 };
+let mut instance = device::state::Instance::new(&[0,1]);
+for (gain, scale) in [(2.0, 3.0), (4.0, 5.0)] {
+    instance.set_parameter("gain", gain).unwrap();
+    let mut values = [0.0; 5];
+    instance.stamp(&ctx, &mut runtime::GeneratedStamper { sink: Some(&mut values) });
+    assert_eq!(values[2], 2.0 * scale);
+    assert_eq!(values[3], scale);
+    let mut noise = Noise::default();
+    instance.evaluate_noise_sources(&ctx, &mut noise).unwrap();
+    assert_eq!(noise.0, scale);
+}
+"#).unwrap();
+}
+
+#[test]
+fn generated_initialization_tracks_temperature_and_rejects_stale_noise_state() {
+    let (state, stamp, noise) = generated_parts(
+        r#"module initialized_temperature(p,n);
+inout p,n; electrical p,n;
+integer starts;
+real scale;
+analog initial begin starts=starts+1; scale=$temperature; end
+analog I(p,n)<+scale*V(p,n)+white_noise(scale,"thermal");
+endmodule"#,
+        "initialization temperature",
+    );
+    run_generated_main(
+        "initialization temperature",
+        &state,
+        &stamp,
+        &noise,
+        r#"
+struct Noise;
+impl runtime::GeneratedNoiseVisitor for Noise {
+    fn visit(&mut self, _: usize, _: runtime::GeneratedNoiseEvaluationRef<'_>) -> bool { true }
+}
+let cold = runtime::GeneratedEvalContext { voltages: &[1.0, 0.0], temperature: 300.0 };
+let hot = runtime::GeneratedEvalContext { voltages: &[1.0, 0.0], temperature: 320.0 };
+let mut instance = device::state::Instance::new(&[0,1]);
+assert!(instance.validate_checkpoint_ready().is_err());
+assert!(instance.evaluate_noise_sources(&cold, &mut Noise).is_err());
+instance.initialize_analysis(&cold);
+instance.validate_checkpoint_ready().unwrap();
+assert_eq!(&*instance.event_state_accepted, &[1.0, 300.0]);
+instance.evaluate_noise_sources(&cold, &mut Noise).unwrap();
+let checkpoint = instance.capture_persistent_state();
+assert!(instance.evaluate_noise_sources(&hot, &mut Noise).is_err());
+instance.stamp(&hot, &mut runtime::GeneratedStamper::default());
+assert_eq!(&*instance.event_state_accepted, &[2.0, 320.0]);
+instance.restore_persistent_state(&checkpoint).unwrap();
+instance.stamp(&cold, &mut runtime::GeneratedStamper::default());
+assert_eq!(&*instance.event_state_accepted, &[1.0, 300.0]);
+let invalid = runtime::GeneratedEvalContext { voltages: &[1.0, 0.0], temperature: f64::NAN };
+let mut values = [0.0];
+instance.stamp(&invalid, &mut runtime::GeneratedStamper { sink: Some(&mut values) });
+assert!(invalid.evaluation_failed());
+assert_eq!(values, [0.0]);
+assert!(instance.validate_advance_state().is_err());
+runtime::clear_evaluation_error();
+instance.initialize_analysis(&cold);
+assert!(!cold.evaluation_failed());
+"#,
+    )
+    .unwrap();
+}
+
+#[test]
+fn generated_initialization_is_persistent_and_precedes_the_numerical_body() {
+    let (state, stamp, noise) = generated_parts(
+        r#"
+module initialized(p,n);
+inout p,n; electrical p,n;
+parameter real gain=2;
+localparam real offset=gain+1;
+integer count=5;
+real scale;
+analog initial begin count=count+1; scale=offset; end
+analog begin count=count+1; I(p,n)<+count+scale*V(p,n); end
+endmodule
+"#,
+        "generated initialization",
+    );
+    run_generated_main(
+        "generated initialization",
+        &state,
+        &stamp,
+        &noise,
+        r#"
+let ctx = runtime::GeneratedEvalContext { voltages: &[2.0, 0.0], temperature: 300.15 };
+let mut instance = device::state::Instance::new(&[0,1]);
+instance.initialize_analysis(&ctx);
+assert!(!ctx.evaluation_failed());
+assert_eq!(&*instance.event_state_accepted, &[6.0, 3.0]);
+for _ in 0..2 {
+    instance.stamp(&ctx, &mut runtime::GeneratedStamper::default());
+    assert_eq!(&*instance.event_state_candidate, &[7.0, 3.0]);
+}
+instance.validate_advance_state().unwrap();
+instance.apply_validated_advance_state();
+let checkpoint = instance.capture_persistent_state();
+let rollback = instance.capture_rollback_state();
+instance.stamp(&ctx, &mut runtime::GeneratedStamper::default());
+assert_eq!(&*instance.event_state_candidate, &[8.0, 3.0]);
+instance.restore_rollback_state(&rollback);
+instance.stamp(&ctx, &mut runtime::GeneratedStamper::default());
+assert_eq!(&*instance.event_state_candidate, &[8.0, 3.0]);
+instance.set_parameter("gain", 4.0).unwrap();
+instance.stamp(&ctx, &mut runtime::GeneratedStamper::default());
+assert_eq!(&*instance.event_state_candidate, &[7.0, 5.0]);
+instance.restore_persistent_state(&checkpoint).unwrap();
+instance.stamp(&ctx, &mut runtime::GeneratedStamper::default());
+assert_eq!(&*instance.event_state_candidate, &[8.0, 3.0]);
+"#,
+    )
+    .unwrap();
+}
+
+#[test]
 fn generated_system_tasks_follow_acceptance_rollback_and_observation_boundaries() {
     let (state, stamp, noise) = generated_parts(
         r#"
@@ -4253,6 +4387,7 @@ pub mod runtime {
         pub fn report_event_control_error(&self, _operator: &'static str, _slot: usize, _source: GeneratedEventControlError) {}
         pub fn analog_tasks_enabled(&self) -> bool { TASKS_ENABLED.load(std::sync::atomic::Ordering::SeqCst) }
         pub fn evaluation_failed(&self) -> bool { EVALUATION_FAILED.load(std::sync::atomic::Ordering::SeqCst) }
+        pub fn report_initialization_error(&self, _slot: usize) { EVALUATION_FAILED.store(true, std::sync::atomic::Ordering::SeqCst); }
         pub fn report_analog_task_error(&self, _site: u32, _source: AnalogEffectError) { EVALUATION_FAILED.store(true, std::sync::atomic::Ordering::SeqCst); }
     }
 
@@ -4470,6 +4605,7 @@ pub mod runtime {
 
     #[derive(Debug, Clone, PartialEq)]
     pub enum GeneratedNoiseEvaluationError {
+        UninitializedAnalogState,
         SourceIndexOutOfRange { index: usize, count: usize },
         NonFinite { index: usize, quantity: &'static str, value: Value },
         NegativePower { index: usize, value: Value },

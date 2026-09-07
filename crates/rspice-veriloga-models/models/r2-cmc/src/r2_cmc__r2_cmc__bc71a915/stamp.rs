@@ -296,7 +296,7 @@ impl Instance {
 		let FI=0.0;
 		let FJ=0.0;
 		if A{
-		analog_finish(1, time, B);
+		analog_finish(2, time, B);
 		}
 		let G=if parameter_given[9]{
 		E
@@ -331,7 +331,7 @@ impl Instance {
 		let AD=AB+ AC;
 		let AE=AD< J;
 		if AE{
-		analog_finish(42, time, B);
+		analog_finish(43, time, B);
 		}
 		let AK=AD> J;
 		let AQ;
@@ -340,7 +340,7 @@ impl Instance {
 		let AN=(AL/ AM)* AD;
 		let AO=(AN- X)<= J;
 		if AO{
-		analog_finish(47, time, B);
+		analog_finish(48, time, B);
 		}
 		AQ=AM;
 		AR=AN;
@@ -390,7 +390,7 @@ impl Instance {
 		let BH=(W* N)+ X;
 		let BI=BH< J;
 		if BI{
-		analog_finish(72, time, B);
+		analog_finish(73, time, B);
 		}
 		let BO=BH> J;
 		let BU;
@@ -401,7 +401,7 @@ impl Instance {
 		let BQ=BP- AC;
 		let BR=BQ<= J;
 		if BR{
-		analog_finish(77, time, B);
+		analog_finish(78, time, B);
 		}
 		BU=BQ;
 		BV=BP;
@@ -454,7 +454,7 @@ impl Instance {
 		let CG=(W* N)+ X;
 		let CH=CG< J;
 		if CH{
-		analog_finish(101, time, B);
+		analog_finish(102, time, B);
 		}
 		let CN=AA* N;
 		let CO=CN+ AC;
@@ -463,7 +463,7 @@ impl Instance {
 		if CP{
 		let CQ=CO< J;
 		if CQ{
-		analog_finish(106, time, B);
+		analog_finish(107, time, B);
 		}
 		let CT=CO> J;
 		let CV;
@@ -507,7 +507,7 @@ impl Instance {
 		let DB=U> J;
 		let DD=((DA<= J)&& DB)&& DC;
 		if DD{
-		analog_finish(122, time, B);
+		analog_finish(123, time, B);
 		}
 		let DF=T> J;
 		let DI;

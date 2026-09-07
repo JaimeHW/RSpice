@@ -73,6 +73,9 @@ pub struct CompiledModel {
     /// speculative Newton evaluations from accepted-point state.
     #[serde(default)]
     pub event_state_variables: Vec<usize>,
+    /// Pure localparam slots needed before pre-simulation assignments.
+    #[serde(default)]
+    pub initialization_prologue_variables: Vec<usize>,
     /// Evaluation steps (assignments and runtime loops), executed in order
     /// before the contributions
     pub assignment_steps: Vec<AssignmentStep>,
@@ -613,6 +616,10 @@ pub enum AssignmentStep {
         body: Vec<AssignmentStep>,
     },
     Task(crate::analog_tasks::AnalogTaskCall<BytecodeProgram, crate::canonical_ir::SourceSpanRef>),
+    Initialization {
+        phase: rspice_veriloga_runtime::AnalogEvaluationPhase,
+        body: Vec<AssignmentStep>,
+    },
 }
 
 /// Location to stamp in matrix

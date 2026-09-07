@@ -478,6 +478,7 @@ impl CodeGenerator {
             num_variables: ir.variables.len(),
             variable_names: ir.variables.iter().map(|v| v.name.clone()).collect(),
             event_state_variables: ir.event_state_variables.clone(),
+            initialization_prologue_variables: ir.initialization_prologue_variables.clone(),
             assignment_steps: Vec::new(),
             noise_assignment_steps: Vec::new(),
             stamp_programs: Vec::new(),
@@ -645,6 +646,12 @@ impl CodeGenerator {
         let mut steps = Vec::with_capacity(items.len());
         for item in items {
             steps.push(match item {
+                crate::ir::IrAssignmentItem::Initialization { phase, body } => {
+                    AssignmentStep::Initialization {
+                        phase,
+                        body: self.compile_assignment_items(body, arena, emit_ctx)?,
+                    }
+                }
                 crate::ir::IrAssignmentItem::Task(task) => {
                     AssignmentStep::Task(task.try_map(task.span, |expression| {
                         self.compile_expr(arena, *expression, emit_ctx)
@@ -1978,7 +1985,10 @@ fn count_ir_assignment_items(items: &[crate::ir::IrAssignmentItem]) -> usize {
         .iter()
         .map(|item| match item {
             crate::ir::IrAssignmentItem::Assign(_) | crate::ir::IrAssignmentItem::Task(_) => 1,
-            crate::ir::IrAssignmentItem::Loop { body, .. } => 1 + count_ir_assignment_items(body),
+            crate::ir::IrAssignmentItem::Loop { body, .. }
+            | crate::ir::IrAssignmentItem::Initialization { body, .. } => {
+                1 + count_ir_assignment_items(body)
+            }
         })
         .sum()
 }
@@ -2000,7 +2010,9 @@ fn count_assignment_steps_for_timing(items: &[AssignmentStep]) -> usize {
             AssignmentStep::Assign(_)
             | AssignmentStep::AssignIndexed { .. }
             | AssignmentStep::Task(_) => 1,
-            AssignmentStep::Loop { body, .. } => 1 + count_assignment_steps_for_timing(body),
+            AssignmentStep::Loop { body, .. } | AssignmentStep::Initialization { body, .. } => {
+                1 + count_assignment_steps_for_timing(body)
+            }
         })
         .sum()
 }

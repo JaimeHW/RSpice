@@ -49,6 +49,32 @@ module va_dc_rebuild_lifecycle(p, n);
 endmodule
 "#;
 
+#[test]
+fn analog_initial_is_not_replayed_by_dc_newton_or_final_step_evaluations() {
+    let model = write_model(
+        "analog_initial",
+        r#"module va_initial_once(p,n);
+inout p,n; electrical p,n;
+integer launches;
+analog initial launches=launches+1;
+analog V(p,n)<+launches;
+endmodule"#,
+    );
+    let deck = format!(
+        "* pre-simulation lifecycle\nX1 out 0 va_initial_once\n.va \"{}\" va_initial_once\n.end\n",
+        deck_path(&model)
+    );
+    let netlist = Netlist::parse(&deck).unwrap();
+    let engine = Engine::default();
+    for _ in 0..2 {
+        let result = engine
+            .run_dc_op(&netlist)
+            .expect("initialized DC source converges");
+        assert_eq!(node_voltage(&result, "out"), 1.0);
+    }
+    let _ = std::fs::remove_file(model);
+}
+
 fn assert_rebuilt_lifecycle_values(
     points: &[(f64, rspice_core::solver::SimulationResult)],
     expected: &[f64],

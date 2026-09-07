@@ -2,11 +2,11 @@
 {
   "schema_version": 7,
   "source_tree_digest": "8df45ec06360bbd151ebdbbc41ef5fc08a914156e6d696ae626f667246bea520",
-  "generator_digest": "bee674d906a905c793744dcdd2cd2c9a3c6bbb7ff9f5fcbfe8a97a6d8febcf99",
-  "bundle_digest": "6c173008da3e2343b9133957fbd300b916d70692cdccd8ee1f9c2ffe2fc8d648",
+  "generator_digest": "6988c5e936a60d3d85b8b9af5bccdca482a3d5b74768a158602436eb93d1b223",
+  "bundle_digest": "59bacad94696c70d8c5a814bbd1e6eb183d6336c3cd98723d73b47c6ca1d55f0",
   "device_count": 43,
   "file_count": 347,
-  "source_bytes": 32927647,
+  "source_bytes": 32924765,
   "devices": [
     {
       "module_name": "DIODE_CMC",
@@ -852,7 +852,7 @@
       "feature_name": "veriloga-model-hisimsotb-va",
       "package_name": "rspice-veriloga-model-hisimsotb-va",
       "file_count": 5,
-      "source_bytes": 815123,
+      "source_bytes": 812241,
       "workspace": {
         "abi_version": 3,
         "variable_count": 1130,
@@ -1644,7 +1644,7 @@
     {
       "relative_path": "models/bsimimg/src/bsimimg__bsimimg__25eb6a31/stamp.rs",
       "bytes": 153493,
-      "blake3": "05cc0931c65906de761d53858020ac844bf5c3fc9c6b1ff3a41785e86ea29726"
+      "blake3": "b031693c2cf6a04317adc75f0c8b14fb5b48b1023d36c7d80acc7a2c2960efab"
     },
     {
       "relative_path": "models/bsimimg/src/bsimimg__bsimimg__25eb6a31/state.rs",
@@ -1764,7 +1764,7 @@
     {
       "relative_path": "models/bsimsoi-va/src/bsimsoi__bsimsoi_va__3b1f6b5e/stamp.rs",
       "bytes": 257133,
-      "blake3": "e3a10870e6d791970e3701635f786047b535592dbc552c86e98ab26a538d853b"
+      "blake3": "1ee8bee0d0e66a21a9dfa3be1aee6f436efa735210f0a9284c75aa8111526f6c"
     },
     {
       "relative_path": "models/bsimsoi-va/src/bsimsoi__bsimsoi_va__3b1f6b5e/state.rs",
@@ -2278,13 +2278,13 @@
     },
     {
       "relative_path": "models/hisimsotb-va/src/hisimsotb__hisimsotb_va__41200697/noise.rs",
-      "bytes": 312424,
-      "blake3": "9edd428cd78e14a9e95b7384f70aa784c4e0ec704ba1b5b449e14c163899acff"
+      "bytes": 311312,
+      "blake3": "b77462521add6f238004e2153a0e549ee9b021bc7d2b4a380f3d38db23e0cfc2"
     },
     {
       "relative_path": "models/hisimsotb-va/src/hisimsotb__hisimsotb_va__41200697/stamp.rs",
-      "bytes": 415843,
-      "blake3": "f5ec3b19c0e12c629e0d155aa6942db4ce659e17175e7f042be4db0f86cbd036"
+      "bytes": 414073,
+      "blake3": "68a52b66b040dfd1267d85ec3638def3c261e6455892bdd8d92dcd6a7363f73b"
     },
     {
       "relative_path": "models/hisimsotb-va/src/hisimsotb__hisimsotb_va__41200697/state.rs",
@@ -2649,7 +2649,7 @@
     {
       "relative_path": "models/r2-cmc/src/r2_cmc__r2_cmc__bc71a915/stamp.rs",
       "bytes": 14136,
-      "blake3": "ad0a3d48b6045009e89bf4d0451d53299e31f6af05c869e8b25a0afa09acad74"
+      "blake3": "cc0ee8273ff5bcf8e08a6d0f3b5620b76b15babf028d16958ad16152bd0e1cc7"
     },
     {
       "relative_path": "models/r2-cmc/src/r2_cmc__r2_cmc__bc71a915/state.rs",
@@ -2689,7 +2689,7 @@
     {
       "relative_path": "models/r2-et-cmc/src/r2_et_cmc__r2_et_cmc__a8425039/stamp.rs",
       "bytes": 19168,
-      "blake3": "0f02b02f6e79995b2c7745ab1fd868322adb7aaa72c99d2b0cb3805d4067c28b"
+      "blake3": "8faccd683db4247b05a9255a1f636e91c9bd6cb014a3dc78b7fb096a221cf7d0"
     },
     {
       "relative_path": "models/r2-et-cmc/src/r2_et_cmc__r2_et_cmc__a8425039/state.rs",

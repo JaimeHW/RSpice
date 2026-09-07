@@ -584,7 +584,9 @@ fn count_assignment_steps(steps: &[AssignmentStep]) -> usize {
             AssignmentStep::Assign(_)
             | AssignmentStep::AssignIndexed { .. }
             | AssignmentStep::Task(_) => 1,
-            AssignmentStep::Loop { body, .. } => 1 + count_assignment_steps(body),
+            AssignmentStep::Loop { body, .. } | AssignmentStep::Initialization { body, .. } => {
+                1 + count_assignment_steps(body)
+            }
         })
         .sum()
 }
@@ -1105,6 +1107,7 @@ fn run_bytecode_sweep(model: &CompiledModel, context: &mut VmContext) -> Result<
 fn execute_assignment_steps(vm: &mut Vm<'_>, steps: &[AssignmentStep]) -> Result<(), VmError> {
     for step in steps {
         match step {
+            AssignmentStep::Initialization { .. } => {}
             AssignmentStep::Task(task) => vm.execute_analog_task(task)?,
             AssignmentStep::Assign(assignment) => {
                 let value = vm.execute(&assignment.program)?;
@@ -1224,6 +1227,9 @@ fn scan_assignment_steps(
 ) {
     for step in steps {
         match step {
+            AssignmentStep::Initialization { body, .. } => {
+                scan_assignment_steps(body, scan_program)
+            }
             AssignmentStep::Task(task) => {
                 for program in task.expressions() {
                     scan_program(program);
