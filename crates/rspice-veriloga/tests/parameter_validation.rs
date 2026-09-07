@@ -3,6 +3,43 @@ mod support;
 use rspice_veriloga::device::ParameterValueError;
 use support::DeviceFixture;
 
+#[test]
+fn integer_constant_comparisons_do_not_round_distinct_operands_equal() {
+    for (left, right, expected) in [
+        (
+            "9007199254740992+1",
+            "9007199254740992",
+            [0.0, 1.0, 0.0, 0.0, 1.0, 1.0],
+        ),
+        (
+            "-(9007199254740992+1)",
+            "-9007199254740992",
+            [0.0, 1.0, 1.0, 1.0, 0.0, 0.0],
+        ),
+        // A real operand requires real arithmetic and its specified rounding.
+        (
+            "9007199254740992+1.0",
+            "9007199254740992",
+            [1.0, 0.0, 0.0, 1.0, 0.0, 1.0],
+        ),
+    ] {
+        for (operator, expected) in ["==", "!=", "<", "<=", ">", ">="].into_iter().zip(expected) {
+            let source = format!(
+                "module exact_comparison(p,n); inout p,n; electrical p,n;
+                parameter integer flag = ({left}) {operator} ({right});
+                analog I(p,n) <+ flag; endmodule"
+            );
+            let model = DeviceFixture::compile(&source);
+            let mut device = model.device("X", &[1, 0]);
+            assert_eq!(
+                device.try_evaluate().unwrap(),
+                vec![expected],
+                "({left}) {operator} ({right})"
+            );
+        }
+    }
+}
+
 fn parameter_model() -> DeviceFixture {
     DeviceFixture::compile(
         r#"

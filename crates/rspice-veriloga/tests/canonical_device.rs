@@ -141,6 +141,33 @@ endmodule
 }
 
 #[test]
+fn generated_integer_constant_comparisons_preserve_exact_defaults() {
+    let (state, stamp, noise) = generated_parts(
+        r#"
+module exact_defaults(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter integer eq = (9007199254740992 + 1) == 9007199254740992;
+    parameter integer ne = (9007199254740992 + 1) != 9007199254740992;
+    parameter integer lt = -(9007199254740992 + 1) < -9007199254740992;
+    parameter integer le = (9007199254740992 + 1) <= 9007199254740992;
+    parameter integer gt = (9007199254740992 + 1) > 9007199254740992;
+    parameter integer ge = -(9007199254740992 + 1) >= -9007199254740992;
+    parameter integer mixed = (9007199254740992 + 1) == 9007199254740992.0;
+    analog I(p, n) <+ (eq + ne + lt + le + gt + ge + mixed) * V(p, n);
+endmodule
+"#,
+        "exact integer defaults",
+    );
+    let body = r#"
+let instance = device::state::Instance::new(&[0, 1]);
+assert_eq!(instance.params.values, [0.0, 1.0, 1.0, 0.0, 1.0, 0.0, 1.0]);
+"#;
+    run_generated_main("exact integer defaults", &state, &stamp, &noise, body)
+        .unwrap_or_else(|report| panic!("generated integer defaults failed:\n{report}"));
+}
+
+#[test]
 fn generated_dependent_parameter_defaults_finalize_after_all_overrides() {
     let source = r#"
 module dependent_defaults(p, n);

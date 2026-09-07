@@ -15,6 +15,7 @@ use crate::numeric_literal::parse_integer_literal;
 use crate::source::Span;
 use crate::types::{FunctionRegistry, ParameterRange as TypedParameterRange, ValueType};
 use smol_str::SmolStr;
+use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 
 const RSPICE_LIMITED_EXP_INTRINSIC: &str = "__rspice_limited_exp";
@@ -38,6 +39,13 @@ enum ConstantValue {
 }
 
 impl ConstantValue {
+    fn numeric_order(self, other: Self) -> Option<Ordering> {
+        match (self, other) {
+            (Self::Integer(left), Self::Integer(right)) => Some(left.cmp(&right)),
+            _ => self.as_f64().partial_cmp(&other.as_f64()),
+        }
+    }
+
     fn as_exact_i64(self) -> Option<i64> {
         match self {
             Self::Integer(value) => Some(value),
@@ -6729,12 +6737,26 @@ impl SemanticAnalyzer {
                     BinaryOp::Div => Self::constant_div(l, r)?,
                     BinaryOp::Mod => Self::constant_mod(l, r)?,
                     BinaryOp::Pow => Self::constant_pow(l, r)?,
-                    BinaryOp::Eq => ConstantValue::Integer(i64::from(l.as_f64() == r.as_f64())),
-                    BinaryOp::Ne => ConstantValue::Integer(i64::from(l.as_f64() != r.as_f64())),
-                    BinaryOp::Lt => ConstantValue::Integer(i64::from(l.as_f64() < r.as_f64())),
-                    BinaryOp::Le => ConstantValue::Integer(i64::from(l.as_f64() <= r.as_f64())),
-                    BinaryOp::Gt => ConstantValue::Integer(i64::from(l.as_f64() > r.as_f64())),
-                    BinaryOp::Ge => ConstantValue::Integer(i64::from(l.as_f64() >= r.as_f64())),
+                    BinaryOp::Eq => ConstantValue::Integer(i64::from(
+                        l.numeric_order(r) == Some(Ordering::Equal),
+                    )),
+                    BinaryOp::Ne => ConstantValue::Integer(i64::from(
+                        l.numeric_order(r) != Some(Ordering::Equal),
+                    )),
+                    BinaryOp::Lt => ConstantValue::Integer(i64::from(
+                        l.numeric_order(r) == Some(Ordering::Less),
+                    )),
+                    BinaryOp::Le => ConstantValue::Integer(i64::from(matches!(
+                        l.numeric_order(r),
+                        Some(Ordering::Less | Ordering::Equal)
+                    ))),
+                    BinaryOp::Gt => ConstantValue::Integer(i64::from(
+                        l.numeric_order(r) == Some(Ordering::Greater),
+                    )),
+                    BinaryOp::Ge => ConstantValue::Integer(i64::from(matches!(
+                        l.numeric_order(r),
+                        Some(Ordering::Greater | Ordering::Equal)
+                    ))),
                     BinaryOp::And => {
                         ConstantValue::Integer(i64::from(l.is_truthy() && r.is_truthy()))
                     }
