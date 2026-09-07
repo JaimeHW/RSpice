@@ -1063,10 +1063,11 @@ module rspice_infinite_constant_probe(p, n);
 endmodule
 "#;
 
-    /// Every non-finite `PushConst` in a compiled program, however nested.
+    /// Every non-finite `PushConst` in a compiled program, however nested,
+    /// with its assigned variable when the expression writes a variable.
     fn non_finite_constants(
         steps: &[rspice_veriloga::codegen::AssignmentStep],
-    ) -> Vec<(usize, f64)> {
+    ) -> Vec<(Option<usize>, f64)> {
         fn constants(program: &rspice_veriloga::codegen::BytecodeProgram) -> Vec<f64> {
             program
                 .instructions
@@ -1088,14 +1089,30 @@ endmodule
                 rspice_veriloga::codegen::AssignmentStep::Assign(assignment) => found.extend(
                     constants(&assignment.program)
                         .into_iter()
-                        .map(|value| (assignment.var_index, value)),
+                        .map(|value| (Some(assignment.var_index), value)),
                 ),
-                rspice_veriloga::codegen::AssignmentStep::AssignIndexed { base, value, .. } => {
-                    found.extend(constants(value).into_iter().map(|value| (*base, value)));
+                rspice_veriloga::codegen::AssignmentStep::AssignIndexed {
+                    base,
+                    index,
+                    value,
+                    ..
+                } => {
+                    found.extend(constants(index).into_iter().map(|value| (None, value)));
+                    found.extend(
+                        constants(value)
+                            .into_iter()
+                            .map(|value| (Some(*base), value)),
+                    );
                 }
-                rspice_veriloga::codegen::AssignmentStep::Loop { body, .. } => {
+                rspice_veriloga::codegen::AssignmentStep::Loop { condition, body } => {
+                    found.extend(constants(condition).into_iter().map(|value| (None, value)));
                     found.extend(non_finite_constants(body));
                 }
+                rspice_veriloga::codegen::AssignmentStep::Task(task) => found.extend(
+                    task.expressions()
+                        .flat_map(constants)
+                        .map(|value| (None, value)),
+                ),
             }
         }
         found
@@ -1142,6 +1159,7 @@ endmodule
             "the module resets exactly one task variable to a non-finite sentinel, found {found:?}"
         );
         let (var_index, value) = found[0];
+        let var_index = var_index.expect("the step sentinel is assigned to a variable");
         assert_eq!(
             decoded.variable_names[var_index].as_str(),
             "$bound_step",

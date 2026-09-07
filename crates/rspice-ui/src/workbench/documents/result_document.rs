@@ -2492,6 +2492,8 @@ pub struct ResultsState {
     pub cache: DecimationCache,
     /// Derived dB/phase series cache.
     pub derived: DerivedSeries,
+    /// Exact retained history and display version behind waveform caches.
+    wave_cache_source: Option<(crate::state::RunHistoryRevision, u64)>,
     /// Fingerprint-keyed strip-model cache for the waves viewer.
     models: waves::ModelsCache,
     /// Presentation-only exact family rows selected by Visualization Studio.
@@ -2937,10 +2939,10 @@ impl ResultsState {
             .map(SourceSampleSelection::fingerprint);
         let next = selection.as_ref().map(SourceSampleSelection::fingerprint);
         if current != next {
-            self.models = waves::ModelsCache::default();
+            self.models.invalidate();
             self.expr_cache.clear();
             self.analysis_expr_cache.clear();
-            self.cache = DecimationCache::default();
+            self.cache.invalidate();
             self.derived = DerivedSeries::default();
             self.clear_cursors();
             self.hidden_family_traces.clear();
@@ -2952,8 +2954,8 @@ impl ResultsState {
         if !self.hidden_family_traces.insert(key) {
             self.hidden_family_traces.remove(&key);
         }
-        self.models = waves::ModelsCache::default();
-        self.cache = DecimationCache::default();
+        self.models.invalidate();
+        self.cache.invalidate();
         self.derived = DerivedSeries::default();
         self.clear_cursors();
     }
@@ -2980,8 +2982,8 @@ impl ResultsState {
         } else {
             self.waveform_visibility.insert(key, visible);
         }
-        self.models = waves::ModelsCache::default();
-        self.cache = DecimationCache::default();
+        self.models.invalidate();
+        self.cache.invalidate();
         self.derived = DerivedSeries::default();
         self.clear_cursors();
         visible
@@ -3021,10 +3023,27 @@ impl ResultsState {
         self.waveform_visibility
             .retain(|key, _| key.analysis != analysis);
         self.waveform_visibility.extend(desired);
-        self.models = waves::ModelsCache::default();
-        self.cache = DecimationCache::default();
+        self.models.invalidate();
+        self.cache.invalidate();
         self.derived = DerivedSeries::default();
         self.clear_cursors();
+    }
+
+    /// Both frame preparation and direct plot/readout actions cross this
+    /// boundary. A repeated display version cannot authorize cached data from
+    /// a restored history, and nested source edits cannot bypass invalidation.
+    fn synchronize_wave_caches(&mut self, simulation: &crate::state::SimulationState) {
+        let source = (simulation.runs.revision(), simulation.data_version);
+        if self.wave_cache_source.as_ref() == Some(&source) {
+            return;
+        }
+        self.wave_cache_source = Some(source);
+        self.models.invalidate();
+        self.cache.invalidate();
+        self.derived = DerivedSeries::default();
+        self.derived.ensure_version(simulation.data_version);
+        self.expr_cache.clear();
+        self.analysis_expr_cache.clear();
     }
 
     fn reconcile_expression_projection(&mut self, simulation: &crate::state::SimulationState) {
@@ -4710,6 +4729,7 @@ pub(crate) fn prepare_viewer_state(app: &mut RSpiceApp) {
     let budget = app.state.workbench.visualization_studio.tile_memory_mib;
     let results = &mut app.state.ui.results;
     results.cache.set_memory_budget_mib(budget);
+    results.synchronize_wave_caches(&app.state.simulation);
     if results.seen_version != data_version {
         results.seen_version = data_version;
         results.clear_cursors();

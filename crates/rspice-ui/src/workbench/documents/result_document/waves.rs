@@ -10,6 +10,8 @@ mod expressions;
 mod extent;
 pub(super) use extent::{FamilyEnvelopeCache, FamilyEnvelopePlan};
 pub(super) mod marker_dialog;
+mod model_cache;
+pub(super) use model_cache::{ModelsCache, cached_models};
 mod readout;
 mod viewport;
 
@@ -245,140 +247,6 @@ struct CursorDomain {
     x_dimension_key: String,
     x_label: String,
     x_unit: String,
-}
-
-/// Frame cache for the strip models. Building them clones every trace name
-/// and walks all overlay runs, and both the center view and the right panel
-/// ask for them each frame — the fingerprint covers everything the models
-/// read, so the rebuild only happens when an input actually changes.
-#[derive(Default, Clone)]
-pub(super) struct ModelsCache(Option<(u64, Arc<Vec<StripModel>>)>);
-
-impl ModelsCache {
-    /// Which generation of strip models is currently held. Anything derived
-    /// from the models keys on this rather than on the data version alone:
-    /// hiding a trace changes the models without changing the dataset.
-    pub(super) fn generation(&self) -> u64 {
-        self.0.as_ref().map_or(0, |(fingerprint, _)| *fingerprint)
-    }
-}
-
-impl std::fmt::Debug for ModelsCache {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("ModelsCache(..)")
-    }
-}
-
-/// Everything `build_models` reads: run data version, the display-run set,
-/// per-trace visibility and stored color, phase mode, and the theme palette.
-fn models_fingerprint(
-    simulation: &SimulationState,
-    viewer: super::ResultViewer,
-    phase_continuous: bool,
-    complex_display: ComplexNumberDisplay,
-    selection: Option<&SourceSampleSelection>,
-    hidden_family_traces: &HashSet<FamilyTraceVisibilityKey>,
-    waveform_visibility: &HashMap<SourceWaveformPresentationKey, bool>,
-    t: &Tokens,
-) -> u64 {
-    use std::hash::{Hash, Hasher};
-    let mut h = std::collections::hash_map::DefaultHasher::new();
-    simulation.data_version.hash(&mut h);
-    viewer.hash(&mut h);
-    phase_continuous.hash(&mut h);
-    complex_display.hash(&mut h);
-    selection
-        .map(SourceSampleSelection::fingerprint)
-        .hash(&mut h);
-    let mut hidden = hidden_family_traces.iter().copied().collect::<Vec<_>>();
-    hidden.sort_unstable_by_key(stable_hash);
-    hidden.hash(&mut h);
-    let mut visibility = waveform_visibility
-        .iter()
-        .map(|(key, visible)| (stable_hash(key), *visible))
-        .collect::<Vec<_>>();
-    visibility.sort_unstable();
-    visibility.hash(&mut h);
-    for color in &t.color.traces {
-        color.to_array().hash(&mut h);
-    }
-    for run in simulation.display_runs() {
-        run.id.hash(&mut h);
-        for analysis in &run.analyses {
-            analysis.analysis_type.hash(&mut h);
-            analysis.label.hash(&mut h);
-            analysis
-                .provenance
-                .as_ref()
-                .map(|provenance| provenance.source_instance_id())
-                .hash(&mut h);
-            analysis.waveforms.len().hash(&mut h);
-            for waveform in &analysis.waveforms {
-                waveform.visible.hash(&mut h);
-                waveform.color.hash(&mut h);
-            }
-        }
-    }
-    h.finish()
-}
-
-/// Fingerprint-cached [`build_models`]; the returned handle is cheap to
-/// clone and stays valid across later state borrows.
-pub(super) fn cached_models(
-    simulation: &SimulationState,
-    results: &mut ResultsState,
-    complex_display: ComplexNumberDisplay,
-    t: &Tokens,
-) -> Arc<Vec<StripModel>> {
-    results.reconcile_expression_projection(simulation);
-    let fp = models_fingerprint(
-        simulation,
-        results.viewer,
-        results.phase_continuous,
-        complex_display,
-        results.sample_selection.as_ref(),
-        &results.hidden_family_traces,
-        &results.waveform_visibility,
-        t,
-    );
-    if let Some((cached_fp, models)) = &results.models.0
-        && *cached_fp == fp
-    {
-        return Arc::clone(models);
-    }
-    let mut built = build_models(
-        simulation,
-        &mut results.derived,
-        t,
-        results.phase_continuous,
-        complex_display,
-        results.sample_selection.as_ref(),
-        &results.hidden_family_traces,
-    );
-    apply_waveform_visibility(
-        &mut built,
-        simulation,
-        &results.waveform_visibility,
-        &results.hidden_family_traces,
-    );
-    // Only now is it settled which traces the strip draws, so only now can
-    // its shared X extent be resolved.
-    extent::resolve_x_ranges(&mut built);
-    built.retain(|model| match results.viewer {
-        super::ResultViewer::DcSweep => model.analysis_type == AnalysisType::DcSweep,
-        super::ResultViewer::Waves => model.analysis_type.is_time_domain(),
-        super::ResultViewer::Bode => {
-            model.analysis_type.is_bode_response() || model.analysis_type.is_raw_frequency_curve()
-        }
-        super::ResultViewer::NoiseContrib => matches!(
-            model.analysis_type,
-            AnalysisType::Noise | AnalysisType::Hbnoise
-        ),
-        _ => true,
-    });
-    let models = Arc::new(built);
-    results.models.0 = Some((fp, Arc::clone(&models)));
-    models
 }
 
 /// Apply quick-view presentation overrides after constructing the immutable

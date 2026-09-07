@@ -140,12 +140,17 @@ impl Default for DecimationCache {
 }
 
 impl DecimationCache {
+    /// Discard derived samples while preserving the configured memory budget.
+    pub(crate) fn invalidate(&mut self) {
+        self.map.clear();
+        self.resident_bytes = 0;
+    }
+
     /// Drop everything if `version` differs from the cached one (new run /
     /// new analysis selection), and advance the frame tick.
     pub fn ensure_version(&mut self, version: u64) {
         if self.version != version {
-            self.map.clear();
-            self.resident_bytes = 0;
+            self.invalidate();
             self.version = version;
         }
         self.tick = self.tick.wrapping_add(1);
@@ -1030,6 +1035,39 @@ mod tests {
             columns: 512,
             rows: 320,
         }
+    }
+
+    #[test]
+    fn invalidating_retained_data_rebuilds_envelopes_without_resetting_the_budget() {
+        let mut cache = DecimationCache::default();
+        cache.set_memory_budget_mib(64);
+        let budget = cache.byte_capacity;
+        let x = [0.0, 1.0, 2.0];
+        let first = cache.series(
+            DisplayDecimation::EnvelopeExtrema,
+            1,
+            &x,
+            &[0.0, 0.0, 0.0],
+            sweep_view(0.0, 2.0),
+            false,
+            None,
+        );
+        assert!(cache.resident_bytes > 0);
+        cache.invalidate();
+        assert_eq!(cache.resident_bytes, 0);
+        assert_eq!(cache.byte_capacity, budget);
+        let next = cache.series(
+            DisplayDecimation::EnvelopeExtrema,
+            1,
+            &x,
+            &[0.0, 1.0, 0.0],
+            sweep_view(0.0, 2.0),
+            false,
+            None,
+        );
+        assert!(first.iter().all(|point| point[1] == 0.0));
+        assert!(next.iter().any(|point| point[1] == 1.0));
+        assert_eq!(cache.resident_bytes, next.len() * size_of::<[f64; 2]>());
     }
 
     /// Oracle 6: a hysteresis trace through the cache reaches an

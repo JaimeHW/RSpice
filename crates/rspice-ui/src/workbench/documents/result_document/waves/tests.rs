@@ -11,6 +11,7 @@ mod degenerate;
 mod extent;
 mod honest_axes;
 mod interaction;
+mod source_cache;
 
 #[test]
 fn the_readout_strip_stands_down_until_a_cursor_is_placed() {

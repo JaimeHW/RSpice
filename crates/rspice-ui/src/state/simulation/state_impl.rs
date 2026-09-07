@@ -665,6 +665,7 @@ impl SimulationState {
             return;
         }
         self.runs.clear();
+        self.executed_decks = ExecutedDeckArchive::default();
         self.active_run_idx = None;
         self.active_analysis_idx = None;
         self.overlay_dataset_ids.clear();
@@ -1051,6 +1052,51 @@ mod tests {
         assert_eq!(state.retained_plan_dataset_count(plan_a), 2);
         assert_eq!(state.retained_plan_dataset_count(plan_b), 2);
         assert_eq!(state.runs.len(), 4);
+    }
+
+    #[test]
+    fn clearing_run_history_releases_its_executed_decks_without_mutating_snapshots() {
+        let mut state = SimulationState::default();
+        let run = state.start_run();
+        let sequence = run.id;
+        let execution = run.execution_identity().unwrap();
+        let deck: std::sync::Arc<str> = std::sync::Arc::from("retained deck\n.end\n");
+        let storage = std::sync::Arc::downgrade(&deck);
+        state.executed_decks.retain(crate::state::ExecutedDeck {
+            run_id: sequence,
+            points: vec![crate::state::ExecutedDeckPoint {
+                label: "TT".to_owned(),
+                model_sources: Vec::new(),
+                deck,
+            }],
+        });
+        let snapshot = state.clone();
+        for worker_active in [true, false] {
+            state.is_running = worker_active;
+            state.active_execution = (!worker_active).then_some(execution);
+            state.clear_runs();
+            assert_eq!(state.runs.len(), 1);
+            assert!(
+                state
+                    .executed_decks
+                    .shares_content_with(&snapshot.executed_decks)
+            );
+        }
+        state.active_execution = None;
+        state.clear_runs();
+        assert!(state.runs.is_empty());
+        assert_eq!(state.next_run_id, sequence);
+        assert_eq!(state.executed_decks.iter().count(), 0);
+        assert!(state.executed_decks.get(sequence).is_none());
+        assert!(snapshot.executed_decks.get(sequence).is_some());
+        drop(snapshot);
+        assert!(
+            storage.upgrade().is_none(),
+            "no orphaned deck storage remains"
+        );
+        state.clear_runs();
+        assert_eq!(state.start_run().id, sequence + 1);
+        assert_eq!(state.executed_decks.iter().count(), 0);
     }
 
     #[test]

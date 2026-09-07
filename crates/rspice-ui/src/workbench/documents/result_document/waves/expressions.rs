@@ -672,6 +672,7 @@ pub(crate) fn toggle_visibility(
 /// This is the Edit → Copy consumer for the Units copied-value policy.
 pub(crate) fn copy_cursor_text(state: &mut AppState) -> Option<String> {
     let x = state.ui.results.cursors.a?;
+    state.ui.results.synchronize_wave_caches(&state.simulation);
     let presentation = state.ui.preferences.result_presentation_policy();
     let quantity_policy = state.ui.preferences.quantity_presentation_policy();
     let interpolation = cursor_interpolation(presentation.cursor_interpolation());

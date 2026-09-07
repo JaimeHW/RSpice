@@ -62,9 +62,8 @@ fn a_dc_sweep_names_the_source_the_run_actually_swept() {
 #[test]
 fn a_dc_sweep_without_a_retained_deck_keeps_the_analysis_default() {
     let mut state = swept_current_source();
+    assert_eq!(model_axis(&mut state), ("Ibias".to_owned(), "A".to_owned()));
     state.simulation.executed_decks = Default::default();
-    state.ui.results.models = Default::default();
-    state.simulation.data_version = state.simulation.data_version.wrapping_add(1);
     assert_eq!(model_axis(&mut state), ("x".to_owned(), "V".to_owned()));
 }
 
