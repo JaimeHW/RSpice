@@ -3,7 +3,7 @@
 #[cfg(test)]
 use super::state::MosfetCompanionBiasSource;
 use super::*;
-use crate::numerics::integration::LtePrefixWindow;
+use crate::numerics::integration::{LtePrefixWindow, integrated_charge_current};
 
 /// The three Meyer capacitances of one MOSFET on a candidate step:
 /// gate-source, gate-drain, gate-bulk.
@@ -1436,10 +1436,7 @@ impl Engine {
                 diode.node_anode,
                 diode.node_cathode,
             );
-            let (qd, capd) = diode.junction_charge_and_capacitance(vd);
-            if !capd.is_finite() || capd < 0.0 {
-                continue;
-            }
+            let (q_curr, _) = diode.junction_charge_and_capacitance(vd);
             // A zero-charge diode (CJO=0, TT=0) is not skipped: DIOtrunc runs
             // CKTterr on its (identically zero) charge state, which yields an
             // unconstraining limit. That is what lets a deck of chargeless
@@ -1447,18 +1444,7 @@ impl Engine {
             // flux walks alone, as ngspice steps it, instead of falling to the
             // node-voltage estimator because the diodes "reported nothing".
 
-            let (_geq, _ieq, q_curr, cq_curr) = nonlinear_charge_companion_terms(
-                &coeff,
-                dt,
-                capd,
-                vd,
-                qd,
-                BranchChargeHistory {
-                    q_prev: history.qd_prev[idx],
-                    q_prev_prev: history.qd_prev_prev[idx],
-                    cq_prev: history.cqd_prev[idx],
-                },
-            );
+            let cq_curr = integrated_charge_current(&coeff, dt, q_curr, history.branch(idx));
             let Some(branch_limit) = truncation.limit(ChargeSamples {
                 q_curr,
                 q_prev: history.qd_prev[idx],

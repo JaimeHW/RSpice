@@ -678,30 +678,10 @@ impl Engine {
         for (idx, diode) in circuit.diodes.devices.iter().enumerate() {
             let vd =
                 Self::differential_voltage(accepted_solution, diode.node_anode, diode.node_cathode);
-            diode_history.vd_prev_prev[idx] = diode_history.vd_prev[idx];
-            diode_history.vd_prev[idx] = vd;
-            let (qd, capd) = diode.junction_charge_and_capacitance(vd);
-            if capd.is_finite() && capd > 0.0 {
-                let (_geq, _ieq, qd_curr, cqd_curr) = nonlinear_charge_companion_terms(
-                    coeff,
-                    dt,
-                    capd,
-                    vd,
-                    qd,
-                    BranchChargeHistory {
-                        q_prev: diode_history.qd_prev[idx],
-                        q_prev_prev: diode_history.qd_prev_prev[idx],
-                        cq_prev: diode_history.cqd_prev[idx],
-                    },
-                );
-                diode_history.qd_prev_prev_prev[idx] = diode_history.qd_prev_prev[idx];
-                diode_history.qd_prev_prev[idx] = diode_history.qd_prev[idx];
-                diode_history.qd_prev[idx] = qd_curr;
-                diode_history.cqd_prev[idx] = cqd_curr;
-            }
+            let (qd, _) = diode.junction_charge_and_capacitance(vd);
+            diode_history.accept_branch(idx, vd, qd, coeff, dt);
         }
-        diode_history.accepted_dt_prev_prev = diode_history.accepted_dt_prev;
-        diode_history.accepted_dt_prev = dt;
+        diode_history.finish_step(dt);
 
         // Rotate whole accepted-state generations once, as ngspice rotates
         // CKTstate pointers, instead of copying two history levels for every
