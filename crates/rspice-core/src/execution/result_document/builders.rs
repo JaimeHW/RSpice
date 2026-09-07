@@ -3373,6 +3373,7 @@ impl AnalysisResultDocument {
             fundamental_frequency: result.fundamental_frequency,
             probe_instance: stability.probe_instance.clone(),
             probe_state_index: stability.probe_state_index,
+            probe_state_projection: stability.probe_state_projection.clone(),
             stability_threshold: result.stability_threshold,
             detect_subharmonics: result.detect_subharmonics,
             num_multipliers: card.num_multipliers,

@@ -620,7 +620,7 @@ fn an_authored_pstb_card_reproduces_the_spectrum_its_configuration_asks_for() {
         for value in vector {
             norm = norm.hypot(value.norm());
         }
-        let expected = (vector[stability.probe_state_index].norm() / norm).clamp(0.0, 1.0);
+        let expected = (vector[stability.probe_state_index.unwrap()].norm() / norm).clamp(0.0, 1.0);
         assert_eq!(
             stability.probe_participation[index],
             expected,
@@ -630,13 +630,32 @@ fn an_authored_pstb_card_reproduces_the_spectrum_its_configuration_asks_for() {
     }
 }
 
-/// The probe index the engine derives from the carrier's shooting-state basis
-/// and the one `CircuitData` derives from a built circuit are the same number.
-///
-/// They are two derivations of one fact, `capacitors.len() + inductor_index`,
-/// reached by different routes, and nothing but this gate stops them drifting
-/// apart. The deck deliberately carries a capacitor as well as an inductor, so
-/// a wrong offset cannot hide behind a zero-length capacitor block.
+#[test]
+fn a_direct_pstb_probe_authenticates_its_retained_circuit_and_configuration() {
+    let netlist = Netlist::parse(PSTB_RESONATOR).unwrap();
+    let engine = Engine::default();
+    let carrier = pstb_carrier(&engine, &netlist);
+    // Keep the probe name and state shape while changing its actual circuit.
+    let changed = Netlist::parse(&PSTB_RESONATOR.replace("r1 in a 50", "r1 in a 51")).unwrap();
+    let error = engine
+        .run_pstb_card_from_pss_with_abort(&changed, &pstb_card("L1"), &carrier, &NoAbort)
+        .unwrap_err();
+    assert!(
+        error.to_string().contains("semantic circuit identity"),
+        "{error}"
+    );
+    let altered = Engine::new(SimulationConfig {
+        temperature: 310.0,
+        ..Default::default()
+    });
+    let error = altered
+        .run_pstb_card_from_pss_with_abort(&netlist, &pstb_card("L1"), &carrier, &NoAbort)
+        .unwrap_err();
+    assert!(error.to_string().contains("resolved simulation"), "{error}");
+}
+
+/// In this unconstrained LC fixture both state inventories agree. Its capacitor
+/// makes a wrong current-state offset observable.
 #[test]
 fn the_basis_derived_probe_index_is_the_circuits_own_inductor_state_index() {
     let netlist = Netlist::parse(PSTB_RESONATOR).expect("deck parses");
@@ -662,11 +681,11 @@ fn the_basis_derived_probe_index_is_the_circuits_own_inductor_state_index() {
         .run_pstb_card_from_pss_with_abort(&netlist, &pstb_card("l1"), &carrier, &NoAbort)
         .expect(".PSTB runs");
 
-    assert_eq!(stability.probe_state_index, from_circuit.state_index);
+    assert_eq!(stability.probe_state_index, Some(from_circuit.state_index));
     assert_eq!(stability.probe_instance, from_circuit.canonical_name);
-    assert_eq!(basis[stability.probe_state_index], "L:L1");
+    assert_eq!(basis[stability.probe_state_index.unwrap()], "L:L1");
     assert!(
-        stability.probe_state_index < carrier.analysis().monodromy.len(),
+        stability.probe_state_index.unwrap() < carrier.analysis().monodromy.len(),
         "the resolved coordinate must index the retained monodromy"
     );
 }

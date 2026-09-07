@@ -743,7 +743,8 @@ fn pstb_measurement() -> (
         card,
         crate::engine::PeriodicStabilityResult {
             probe_instance: "L1".to_owned(),
-            probe_state_index: 1,
+            probe_state_index: Some(1),
+            probe_state_projection: vec![(1, 1.0)],
             probe_participation: vec![0.0, 1.0],
             result,
         },
@@ -1285,7 +1286,7 @@ fn monte_carlo_pss_pac_and_pnoise_documents_keep_their_typed_payloads() {
         panic!("PSTB payload");
     };
     assert_eq!(payload.probe_instance, "L1");
-    assert_eq!(payload.probe_state_index, 1);
+    assert_eq!(payload.probe_state_index, Some(1));
     assert_eq!(payload.stability_classification, PstbStabilityTag::Stable);
     assert_eq!(payload.num_unstable, 0);
     // The card asked for one multiplier; the document publishes the whole
@@ -1503,6 +1504,112 @@ fn a_version_one_document_reads_back_declaring_no_bus() {
         panic!("the transient fixture carries a transient payload");
     };
     assert!(payload.digital_buses.is_empty());
+}
+
+#[test]
+fn a_combined_pstb_current_projection_survives_persistence() {
+    let (card, mut stability) = pstb_measurement();
+    stability.probe_instance = "L3".to_owned();
+    stability.probe_state_index = None;
+    stability.probe_state_projection = vec![(0, 1.0), (1, -1.0)];
+    stability
+        .probe_participation
+        .fill(std::f64::consts::FRAC_1_SQRT_2);
+    let document =
+        AnalysisResultDocument::from_pstb(instance(AnalysisKind::Pstb), &card, &stability)
+            .unwrap()
+            .build()
+            .unwrap();
+    let json = document.to_json().unwrap();
+    let restored = AnalysisResultDocument::from_json(&json).unwrap();
+    assert_eq!(restored, document);
+    let ResultPayload::Pstb(payload) = restored.payload() else {
+        panic!("the PSTB fixture must retain a PSTB payload")
+    };
+    assert_eq!(payload.probe_state_index, None);
+    assert_eq!(payload.probe_state_projection, [(0, 1.0), (1, -1.0)]);
+    assert_eq!(
+        samples_of(&restored, "probe_mode_participation"),
+        SeriesValues::Real {
+            samples: vec![Some(std::f64::consts::FRAC_1_SQRT_2); 2]
+        }
+    );
+}
+
+#[test]
+fn legacy_pstb_documents_preserve_their_single_index_without_inventing_polarity() {
+    for version in [1, 2] {
+        let mut wire = serde_json::to_value(document_for(AnalysisResultKind::Pstb)).unwrap();
+        wire["schemaVersion"] = serde_json::json!(version);
+        wire["payload"]
+            .as_object_mut()
+            .unwrap()
+            .remove("probeStateProjection");
+        let restored = AnalysisResultDocument::from_json(&wire.to_string()).unwrap();
+        let ResultPayload::Pstb(payload) = restored.payload() else {
+            panic!("the PSTB fixture must retain a PSTB payload")
+        };
+        assert_eq!(payload.probe_state_index, Some(1));
+        assert!(payload.probe_state_projection.is_empty());
+        assert_eq!(
+            AnalysisResultDocument::from_json(&restored.to_json().unwrap()).unwrap(),
+            restored
+        );
+        // Merely changing the version cannot make new projected content an old document.
+        wire["payload"]["probeStateProjection"] = serde_json::json!([[1, -1.0]]);
+        assert!(matches!(
+            AnalysisResultDocument::from_json(&wire.to_string()),
+            Err(ResultDocumentError::Malformed {
+                location: "PSTB probe projection",
+                ..
+            })
+        ));
+    }
+}
+
+#[test]
+fn malformed_pstb_projections_are_refused_at_validation_and_decode() {
+    for (index, projection) in [
+        (None, vec![]),
+        (Some(1), vec![(0, 1.0)]),
+        (Some(0), vec![(0, 0.0)]),
+        (Some(2), vec![(2, 1.0)]),
+        (Some(2), vec![]),
+        (None, vec![(0, 1.0), (0, -1.0)]),
+        (None, vec![(1, 1.0), (0, -1.0)]),
+        (None, vec![(0, 1.0), (2, -1.0)]),
+        (Some(0), vec![(0, 1.0), (1, -1.0)]),
+    ] {
+        let mut document = document_for(AnalysisResultKind::Pstb);
+        let ResultPayload::Pstb(payload) = &mut document.payload else {
+            panic!("the PSTB fixture must retain a PSTB payload")
+        };
+        payload.probe_state_index = index;
+        payload.probe_state_projection = projection;
+        assert!(matches!(
+            document.validate(),
+            Err(ResultDocumentError::Malformed {
+                location: "PSTB probe projection",
+                ..
+            })
+        ));
+        let wire = serde_json::to_string(&document).unwrap();
+        assert!(matches!(
+            AnalysisResultDocument::from_json(&wire),
+            Err(ResultDocumentError::Malformed {
+                location: "PSTB probe projection",
+                ..
+            })
+        ));
+    }
+    for weight in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        let mut document = document_for(AnalysisResultKind::Pstb);
+        let ResultPayload::Pstb(payload) = &mut document.payload else {
+            panic!("the PSTB fixture must retain a PSTB payload")
+        };
+        payload.probe_state_projection = vec![(1, weight)];
+        assert!(document.validate().is_err());
+    }
 }
 
 #[test]
@@ -2038,7 +2145,8 @@ fn a_spectrum_with_no_applicable_mode_reports_an_empty_domain_not_a_missing_cros
         &card,
         &crate::engine::PeriodicStabilityResult {
             probe_instance: "L1".to_owned(),
-            probe_state_index: 0,
+            probe_state_index: Some(0),
+            probe_state_projection: vec![(0, 1.0)],
             probe_participation: vec![1.0],
             result,
         },

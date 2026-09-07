@@ -98,11 +98,17 @@ impl PyPstbResult {
         self.inner.probe_instance.clone()
     }
 
-    /// The probe's coordinate in the carrier's shooting-state basis, which is
-    /// what the monodromy and every mode shape are indexed by.
+    /// Single shooting coordinate proportional to the probe current, or None
+    /// when the current is a combination of coordinates.
     #[getter]
-    fn probe_state_index(&self) -> usize {
+    fn probe_state_index(&self) -> Option<usize> {
         self.inner.probe_state_index
+    }
+
+    /// Sparse physical-current projection as (shooting coordinate, signed weight).
+    #[getter]
+    fn probe_state_projection(&self) -> Vec<(usize, f64)> {
+        self.inner.probe_state_projection.clone()
     }
 
     /// Every Floquet multiplier, in canonical order: magnitude descending.

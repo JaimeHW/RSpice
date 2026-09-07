@@ -15,6 +15,20 @@ pub mod rustfft_qualification;
 
 use crate::Value;
 
+/// Neumaier compensated accumulation. Callers scale their operands when an
+/// unscaled sum could overflow; compensation recovers low-order terms lost
+/// when finite contributions of opposite sign nearly cancel.
+#[inline]
+pub(crate) fn compensated_add(sum: &mut Value, correction: &mut Value, value: Value) {
+    let next = *sum + value;
+    *correction += if sum.abs() >= value.abs() {
+        (*sum - next) + value
+    } else {
+        (value - next) + *sum
+    };
+    *sum = next;
+}
+
 /// The smallest timestep Xyce will take at `current_time`, and the scale its
 /// breakpoint comparisons are measured against.
 ///

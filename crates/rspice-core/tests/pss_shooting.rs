@@ -228,7 +228,7 @@ fn series_inductors_share_one_current_state_and_preserve_the_voltage_division() 
         let stability = Engine::default()
             .run_pstb_card_from_pss_with_abort(&netlist, &card, &point, &NoAbort)
             .expect("a dependent series winding still names a physical current probe");
-        assert_eq!(stability.probe_state_index, 0);
+        assert_eq!(stability.probe_state_index, Some(0));
         assert_eq!(stability.probe_instance, "L2");
         assert_eq!(stability.probe_participation, [1.0]);
         let changed = Netlist::parse(&format!("different carrier\nV1 in 0 SIN(0 1 1meg)\nR1 in out 2k\nL1 {first} 40u\nL2 {second} 60u\n.end\n")).unwrap();
@@ -1045,4 +1045,146 @@ i1 0 osc pulse(0 1 10u 10n 10n 1u 1)
         (amplitude - a_expected).abs() < 0.04 * a_expected,
         "limit-cycle amplitude must match the describing function: got {amplitude:.4}, want {a_expected:.4}"
     );
+}
+
+#[test]
+fn three_way_inductor_junction_uses_two_independent_currents() {
+    use num_complex::Complex64;
+    for coupling in [0.0, 0.4] {
+        let netlist = Netlist::parse(&format!("inductive KCL constraint\nV1 in 0 SIN(0 1 1meg)\nR1 in a 1k\nL1 a mid 40u\nL2 mid b 60u\nL3 mid c 120u\nR2 b 0 1k\nR3 c 0 2k\nK1 L2 L3 {coupling}\n.end\n")).unwrap();
+        let engine = Engine::default();
+        let point = engine
+            .run_pss_operating_point_with_abort(
+                &netlist,
+                PssConfig::new(F0)
+                    .with_tstab_periods(0)
+                    .with_points_per_period(512)
+                    .with_tolerance(1e-9),
+                &NoAbort,
+            )
+            .expect("a three-way KCL junction has two free winding currents");
+        assert_eq!(point.shooting_state_basis(), ["L:L1", "L:L2"]);
+        let omega = std::f64::consts::TAU * F0;
+        let mutual = coupling * (60e-6_f64 * 120e-6).sqrt();
+        // KVL after eliminating I1 = I2 + I3 gives this exact two-loop matrix.
+        let z22 = Complex64::new(2000.0, omega * 100e-6);
+        let z33 = Complex64::new(3000.0, omega * 160e-6);
+        let z23 = Complex64::new(1000.0, omega * (40e-6 + mutual));
+        let determinant = z22 * z33 - z23 * z23;
+        let i2 = (z33 - z23) / determinant;
+        let i3 = (z22 - z23) / determinant;
+        for (name, transfer) in [
+            ("a", 1.0 - 1000.0 * (i2 + i3)),
+            (
+                "mid",
+                Complex64::new(1000.0, omega * 60e-6) * i2
+                    + Complex64::new(0.0, omega * mutual) * i3,
+            ),
+            ("b", 1000.0 * i2),
+            ("c", 2000.0 * i3),
+        ] {
+            let result = &point.analysis().result;
+            let node = result
+                .node_names
+                .iter()
+                .position(|candidate| candidate.eq_ignore_ascii_case(name))
+                .unwrap();
+            for (&time, &voltage) in result.time.iter().zip(&result.waveforms[node].values) {
+                let expected =
+                    transfer.re * (omega * time).sin() + transfer.im * (omega * time).cos();
+                assert!(
+                    (voltage - expected).abs() < 0.001 * transfer.norm(),
+                    "k={coupling}, {name}, t={time:e}: {voltage:e} versus {expected:e}"
+                );
+            }
+        }
+        let card = rspice_core::netlist::PstbCard {
+            probe_instance: "L3".to_owned(),
+            max_harmonics: 4,
+            num_multipliers: 2,
+            stability_threshold: 1.0 + 1e-6,
+            detect_subharmonics: true,
+            eigenvalue_tolerance: 1e-10,
+        };
+        let stability = engine
+            .run_pstb_card_from_pss_with_abort(&netlist, &card, &point, &NoAbort)
+            .unwrap();
+        assert_eq!(stability.probe_state_index, None);
+        assert_eq!(stability.probe_state_projection, [(0, 1.0), (1, -1.0)]);
+        for (mode, &participation) in stability
+            .result
+            .multipliers
+            .iter()
+            .zip(&stability.probe_participation)
+        {
+            let vector = mode.eigenvector.as_ref().unwrap();
+            let expected = (vector[0] - vector[1]).norm()
+                / 2.0_f64.sqrt()
+                / vector[0].norm().hypot(vector[1].norm());
+            assert!((participation - expected).abs() < 1e-14);
+        }
+    }
+}
+
+#[test]
+fn coupled_series_windings_preserve_flux_and_internal_resistive_voltage_drops() {
+    use num_complex::Complex64;
+    for (second, orientation) in [("right 0", 1.0), ("0 right", -1.0)] {
+        for coupling in [0.0, 0.9] {
+            let netlist = Netlist::parse(&format!("series flux and internal resistor\nV1 in 0 SIN(0 1 1meg)\nR1 in out 100\nL1 out left 40u\nRmid left right 50\nL2 {second} 60u\nK1 L1 L2 {coupling}\n.end\n")).unwrap();
+            let engine = Engine::default();
+            let config = PssConfig::new(F0)
+                .with_tstab_periods(0)
+                .with_points_per_period(1024)
+                .with_tolerance(1e-11);
+            let point = engine
+                .run_pss_operating_point_with_abort(&netlist, config.clone(), &NoAbort)
+                .unwrap();
+            assert_eq!(point.shooting_state().len(), 1);
+            let mutual = orientation * coupling * (40e-6_f64 * 60e-6).sqrt();
+            let total_l = 100e-6 + 2.0 * mutual;
+            let omega = std::f64::consts::TAU * F0;
+            let current = 1.0 / Complex64::new(150.0, omega * total_l);
+            let right = Complex64::new(0.0, omega * (60e-6 + mutual)) * current;
+            let transfers = [
+                ("out", 1.0 - 100.0 * current),
+                ("left", right + 50.0 * current),
+                ("right", right),
+            ];
+            for (name, transfer) in transfers {
+                let result = &point.analysis().result;
+                let node = result
+                    .node_names
+                    .iter()
+                    .position(|n| n.eq_ignore_ascii_case(name))
+                    .unwrap();
+                for (&time, &voltage) in result.time.iter().zip(&result.waveforms[node].values) {
+                    let expected =
+                        transfer.re * (omega * time).sin() + transfer.im * (omega * time).cos();
+                    assert!(
+                        (voltage - expected).abs() < 0.0001 * transfer.norm(),
+                        "{name}, k={coupling}, sign={orientation}, t={time:e}"
+                    );
+                }
+            }
+            let (_, state) = engine
+                .run_pss_with_continuation_state(&netlist, config)
+                .unwrap();
+            let (continued, _) = engine
+                .run_tran_from_pss_state(&netlist, &state, 1e-6, 1e-6 / 1024.0)
+                .unwrap();
+            for (name, transfer) in transfers {
+                let node = continued
+                    .node_names
+                    .iter()
+                    .position(|n| n.eq_ignore_ascii_case(name))
+                    .unwrap();
+                for (&time, &voltage) in continued.time.iter().zip(&continued.voltages[node]) {
+                    let expected =
+                        transfer.re * (omega * time).sin() + transfer.im * (omega * time).cos();
+                    assert!((voltage - expected).abs() < 0.0001 * transfer.norm());
+                }
+            }
+        }
+    }
 }

@@ -178,6 +178,8 @@ pub(in crate::engine) struct PssCircuit {
     pub(super) diode_history: TwoTerminalChargeHistory,
     basis: PssStateBasis,
     solution_scratch: Vec<Value>,
+    current_balance: Vec<Value>,
+    initial_flux_rates: Option<usize>,
 }
 
 impl std::ops::Deref for PssCircuit {
@@ -197,6 +199,7 @@ impl PssCircuit {
     pub(in crate::engine) fn new(circuit: CircuitData) -> Self {
         let basis = PssStateBasis::new(&circuit);
         let solution_scratch = vec![0.0; circuit.matrix_size() + 1];
+        let current_balance = vec![0.0; basis.currents.workspace_size()];
         let diode_history = TwoTerminalChargeHistory::from_biases(
             circuit
                 .diodes
@@ -209,6 +212,8 @@ impl PssCircuit {
             diode_history,
             basis,
             solution_scratch,
+            current_balance,
+            initial_flux_rates: None,
         }
     }
 
@@ -270,10 +275,13 @@ impl PssCircuit {
                     - self.solution_scratch[diode.node_cathode];
                 (voltage, diode.junction_charge_and_capacitance(voltage).0)
             }));
-        for (index, coordinate) in self.basis.currents.coordinates.iter().enumerate() {
-            let current =
-                coordinate.sign * state[self.basis.voltage_branches.len() + coordinate.state];
-            circuit.inductors.i_prev[index] = current;
+        self.basis.currents.set_state(
+            &state[self.basis.voltage_branches.len()..],
+            &mut circuit.inductors.i_prev,
+            &mut self.current_balance,
+        );
+        for index in 0..circuit.inductors.len() {
+            let current = circuit.inductors.i_prev[index];
             circuit.inductors.i_prev_prev[index] = current;
             circuit.inductors.i_prev_prev_prev[index] = current;
             circuit.inductors.v_prev[index] = 0.0;
@@ -290,7 +298,7 @@ impl PssCircuit {
     /// An exact initialization constraint carries displacement current while
     /// fixing the accepted branch voltage. Adding only forest coordinates
     /// avoids redundant ideal-source loops for parallel charge branches.
-    pub(super) fn add_initial_voltage_constraints(&mut self) {
+    pub(super) fn add_initial_constraints(&mut self) {
         for index in 0..self.basis.voltage_branches.len() {
             let (pos, neg) = self.basis.voltage_nodes(&self.circuit, index);
             let value = match self.basis.voltage_branches[index] {
@@ -313,14 +321,27 @@ impl PssCircuit {
                 value,
             );
         }
+        if self.basis.currents.needs_flux_rates() {
+            let first = self.circuit.allocate_branch();
+            self.initial_flux_rates = Some(first);
+            for _ in 1..self.inductors.len() {
+                self.circuit.allocate_branch();
+            }
+        }
     }
 
     pub(super) fn initial_extra_pattern(&self) -> Vec<(usize, usize)> {
         let mut entries = Vec::new();
-        self.basis
-            .currents
-            .voltage_constraints(&self.circuit, |row, col, _| entries.push((row, col)));
+        self.basis.currents.initial_matrix(
+            &self.circuit,
+            self.initial_flux_rates,
+            |row, col, _| entries.push((row, col)),
+        );
         entries
+    }
+
+    pub(super) fn has_initial_flux_rates(&self) -> bool {
+        self.initial_flux_rates.is_some()
     }
 
     pub(super) fn stamp_initial_inductor_constraints(
@@ -328,40 +349,45 @@ impl PssCircuit {
         matrix: &mut StaticMatrix,
         rhs: &mut [Value],
     ) {
-        for &index in &self.basis.currents.representatives {
-            let row = self.num_nodes() + self.inductors.branch_indices[index] - 1;
-            matrix.add(row, row, 1.0);
+        self.basis.currents.initial_matrix(
+            &self.circuit,
+            self.initial_flux_rates,
+            |row, col, weight| matrix.add(row, col, weight),
+        );
+        for (row, index) in self
+            .basis
+            .currents
+            .current_rows(&self.circuit, self.initial_flux_rates)
+        {
             rhs[row] = self.inductors.i_prev[index];
         }
-        self.basis
-            .currents
-            .voltage_constraints(&self.circuit, |row, col, weight| {
-                matrix.add(row, col, weight)
-            });
     }
 
     pub(super) fn is_initial_current_row(&self, row: usize) -> bool {
         self.basis
             .currents
-            .representatives
-            .iter()
-            .any(|&index| row == self.num_nodes() + self.inductors.branch_indices[index] - 1)
+            .is_current_row(&self.circuit, row, self.initial_flux_rates)
     }
 
-    /// Series currents differ only by orientation, so their absolute modal
-    /// participation resolves to the same independent current coordinate.
-    pub(in crate::engine) fn inductor_probe_coordinate(
+    /// A physical winding current may be a signed sum of independent states.
+    pub(in crate::engine) fn inductor_probe_projection(
         &self,
         name: &str,
-    ) -> Option<(String, usize)> {
+    ) -> Option<(String, Vec<(usize, Value)>)> {
         let index = self
             .inductors
             .names
             .iter()
             .position(|candidate| candidate.eq_ignore_ascii_case(name))?;
+        let offset = self.basis.voltage_branches.len();
         Some((
             self.inductors.names[index].clone(),
-            self.basis.voltage_branches.len() + self.basis.currents.coordinates[index].state,
+            self.basis
+                .currents
+                .projection(index)
+                .into_iter()
+                .map(|(state, weight)| (state + offset, weight))
+                .collect(),
         ))
     }
 

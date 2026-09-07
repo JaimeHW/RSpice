@@ -2470,10 +2470,13 @@ pub struct PstbPayload {
     pub fundamental_frequency: f64,
     /// Canonical circuit spelling of the loop probe.
     pub probe_instance: String,
-    /// The probe's coordinate in the carrier's shooting-state basis, which is
-    /// the coordinate the monodromy — and therefore every mode shape — is
-    /// indexed by.
-    pub probe_state_index: usize,
+    /// Single coordinate proportional to the probe current, or `None` for a
+    /// combination of independent shooting coordinates.
+    pub probe_state_index: Option<usize>,
+    /// Sparse physical-current projection `(state index, signed weight)`.
+    /// Legacy documents omit it and use the single coordinate above.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub probe_state_projection: Vec<(usize, f64)>,
     /// Exact outer magnitude boundary the modes were classified against.
     pub stability_threshold: f64,
     /// Whether subharmonic orders were looked for. An empty
@@ -2579,6 +2582,7 @@ impl PstbPayload {
             .len()
             .saturating_mul(5)
             .saturating_add(self.subharmonics.len())
+            .saturating_add(self.probe_state_projection.len().saturating_mul(2))
     }
 
     fn validate(&self) -> Result<(), ResultDocumentError> {
@@ -2586,6 +2590,46 @@ impl PstbPayload {
         finite("PSTB fundamental frequency", self.fundamental_frequency)?;
         finite("PSTB stability threshold", self.stability_threshold)?;
         super::require_name("PSTB probe instance", &self.probe_instance)?;
+        let invalid_probe = || ResultDocumentError::Malformed {
+            location: "PSTB probe projection",
+            detail: concat!(
+                "the projection must contain finite nonzero weights at distinct ascending ",
+                "coordinates and agree with its optional single-coordinate index"
+            )
+            .to_owned(),
+        };
+        if self.probe_state_projection.is_empty() {
+            if self.probe_state_index.is_none() {
+                return Err(invalid_probe());
+            }
+        } else {
+            let single = match self.probe_state_projection.as_slice() {
+                &[(index, _)] => Some(index),
+                _ => None,
+            };
+            if self.probe_state_index != single {
+                return Err(invalid_probe());
+            }
+            let mut previous = None;
+            for &(index, weight) in &self.probe_state_projection {
+                if !weight.is_finite()
+                    || weight == 0.0
+                    || previous.is_some_and(|last| last >= index)
+                    || (!self.modes.is_empty() && index >= self.modes.len())
+                {
+                    return Err(invalid_probe());
+                }
+                previous = Some(index);
+            }
+        }
+        if !self.modes.is_empty()
+            && self
+                .probe_state_index
+                .is_some_and(|index| index >= self.modes.len())
+        {
+            return Err(invalid_probe());
+        }
+
         if self.period <= 0.0 || self.fundamental_frequency <= 0.0 {
             return Err(ResultDocumentError::Malformed {
                 location: "PSTB orbit",

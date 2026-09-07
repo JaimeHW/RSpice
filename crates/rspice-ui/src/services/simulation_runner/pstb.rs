@@ -125,7 +125,7 @@ pub struct PstbData {
     pub iterations: usize,
     /// Mode indices (1-based) for plotting.
     pub mode_indices: Vec<Value>,
-    /// Probe-local mode participation (normalized |v_i| contribution per mode).
+    /// Normalized physical-current projection into each mode shape.
     pub probe_mode_participation: Vec<Value>,
     /// Floquet multiplier magnitudes.
     pub multiplier_magnitude: Vec<Value>,
@@ -168,6 +168,7 @@ fn build_pstb_data(
     let rspice_core::engine::PeriodicStabilityResult {
         probe_instance,
         probe_state_index: _,
+        probe_state_projection: _,
         probe_participation,
         result,
     } = stability;
@@ -356,7 +357,8 @@ mod tests {
 
         PeriodicStabilityResult {
             probe_instance: "LPROBE".to_owned(),
-            probe_state_index: 0,
+            probe_state_index: Some(0),
+            probe_state_projection: vec![(0, 1.0)],
             probe_participation,
             result,
         }

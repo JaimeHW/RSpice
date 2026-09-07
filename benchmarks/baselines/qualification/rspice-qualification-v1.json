@@ -1211,7 +1211,7 @@
     },
     "result_document": {
       "schema": "rspice-analysis-result",
-      "schema_version": 2
+      "schema_version": 3
     },
     "result_document_structure_blake3": {
       "ac": "9e599f8500df0569287402b23f21260e1199c3220331a5cb8e9eace6d29e6abf",

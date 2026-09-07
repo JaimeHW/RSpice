@@ -56,6 +56,30 @@ def report_for(deck: str) -> rspice.RunReport:
     return rspice.Engine().run(parse(deck), continue_on_error=False)
 
 
+@pytest.mark.parametrize("probe, index, projection", [
+    ("L1", 0, [(0, 1.0)]),
+    ("L3", None, [(0, 1.0), (1, -1.0)]),
+])
+def test_pstb_current_projection_reaches_python_and_the_document(probe, index, projection):
+    result = report_for(
+        "* Coupled winding junction\n"
+        "V1 in 0 SIN(0 1 1meg)\nR1 in a 1k\nL1 a mid 40u\n"
+        "L2 mid b 60u\nL3 mid c 120u\nR2 b 0 1k\nR3 c 0 2k\n"
+        "K1 L2 L3 0.4\n.pss fund=1meg\n"
+        f".pstb probe={probe} maxharm=4 nmults=2\n"
+    ).pstb
+    assert result is not None
+    assert result.probe_state_index == index
+    assert result.probe_state_projection == projection
+    payload = result.document()["payload"]
+    assert payload["probeStateIndex"] == index
+    assert payload["probeStateProjection"] == [list(term) for term in projection]
+    np.testing.assert_array_equal(
+        [mode["probeParticipation"] for mode in payload["modes"]],
+        result.probe_participation,
+    )
+
+
 def deck_results():
     """One live result per family this binding publishes, with its result kind.
 
@@ -120,9 +144,9 @@ def test_every_family_publishes_the_shared_document(results):
     for kind, result in results:
         document = result.document()
         assert document["schema"] == "rspice-analysis-result", kind
-        # Version 2 is what this build writes: a transient payload may carry
-        # digital bus declarations, which a version-1 document could not.
-        assert document["schemaVersion"] == 2, kind
+        # Version 3 adds signed PSTB current projections; older readers must
+        # reject this version before trying to decode the new payload fields.
+        assert document["schemaVersion"] == 3, kind
         assert document["resultKind"] == kind, kind
         assert document["analysis"]["tag"], kind
 

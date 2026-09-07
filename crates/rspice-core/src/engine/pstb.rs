@@ -9,12 +9,11 @@
 //! the deck is planned rather than given a second entry point that cannot
 //! answer it.
 //!
-//! The probe is resolved against the carrier's own
-//! [`shooting_state_basis`](super::PssOperatingPoint::shooting_state_basis)
-//! rather than against a circuit rebuilt beside it. The basis is what the
-//! retained monodromy is indexed by, so resolving against it cannot name a
-//! coordinate the matrix does not have; a circuit is built only on the failure
-//! path, where naming the probes the deck does offer is worth the cost.
+//! The retained circuit and configuration are authenticated before resolving
+//! a probe against the carrier's own
+//! [`shooting_state_basis`](super::PssOperatingPoint::shooting_state_basis).
+//! A dependent winding current is projected through the same graph reduction
+//! that defined that basis, so its participation uses the physical current.
 
 use crate::abort_signal::AbortSignal;
 use crate::analysis::FloquetOrbitKind;
@@ -37,11 +36,14 @@ use super::{Engine, PssOperatingPoint};
 pub struct PeriodicStabilityResult {
     /// Canonical circuit spelling of the resolved loop probe.
     pub probe_instance: String,
-    /// Index of the probe's current in the carrier's shooting-state basis,
-    /// which is the coordinate the retained monodromy is indexed by.
-    pub probe_state_index: usize,
-    /// Normalized participation of the probe coordinate in each mode shape,
-    /// `|v_i| / ||v||`, over the complete spectrum in its canonical order.
+    /// Single coordinate proportional to the probe current, or `None` when
+    /// the current is a combination of independent shooting coordinates.
+    pub probe_state_index: Option<usize>,
+    /// Sparse physical-current projection `(state index, signed weight)` in
+    /// ascending index order. The monodromy uses these same coordinates.
+    pub probe_state_projection: Vec<(usize, Value)>,
+    /// Normalized projection in each mode shape, `|w.v| / (||w|| ||v||)`,
+    /// over the complete spectrum in its canonical order.
     pub probe_participation: Vec<Value>,
     /// The qualified spectrum itself.
     pub result: PstbResult,
@@ -102,11 +104,11 @@ impl Engine {
         // A resolved probe indexes a nonempty independent basis. A fully
         // prescribed reactive circuit can have an order-zero carrier, but
         // probe resolution rejects it before any modal participation is read.
-        if probe.state_index >= order {
+        if probe.projection.is_empty() || probe.projection.iter().any(|&(index, _)| index >= order)
+        {
             return Err(SimulationError::Circuit(format!(
-                "PSTB probe '{}' maps to shooting coordinate {} but the retained monodromy has \
-                 order {order}",
-                probe.canonical_name, probe.state_index
+                "PSTB probe '{}' has no valid dynamic-current projection into the retained monodromy of order {order}",
+                probe.canonical_name,
             )));
         }
 
@@ -136,7 +138,7 @@ impl Engine {
             poll_periodically(abort, index)?;
             probe_participation.push(normalized_probe_participation(
                 multiplier.eigenvector.as_deref(),
-                probe.state_index,
+                &probe.projection,
                 abort,
             )?);
         }
@@ -144,7 +146,11 @@ impl Engine {
 
         Ok(PeriodicStabilityResult {
             probe_instance: probe.canonical_name,
-            probe_state_index: probe.state_index,
+            probe_state_index: match probe.projection.as_slice() {
+                &[(index, _)] => Some(index),
+                _ => None,
+            },
+            probe_state_projection: probe.projection,
             probe_participation,
             result,
         })
@@ -156,7 +162,7 @@ impl Engine {
     /// The retained basis contains independent charge-voltage coordinates
     /// followed by inductor currents. Resolving `L:<probe>` by name remains
     /// correct when charge branches share a voltage or add diode coordinates.
-    /// Series-current aliases are resolved from an authenticated circuit when
+    /// Dependent-current projections are resolved from an authenticated circuit when
     /// the authored winding is not the representative named by the basis.
     fn resolve_pstb_probe(
         &self,
@@ -182,6 +188,13 @@ impl Engine {
             )));
         }
 
+        let engine = self.resolved_for_netlist(netlist);
+        operating_point.authenticate_for_reuse(
+            netlist,
+            &engine.config,
+            operating_point.config(),
+        )?;
+
         for (index, coordinate) in basis.iter().enumerate() {
             poll_periodically(abort, index)?;
             if let Some(name) = coordinate.strip_prefix("L:")
@@ -189,29 +202,23 @@ impl Engine {
             {
                 return Ok(ResolvedPstbProbe {
                     canonical_name: name.to_owned(),
-                    state_index: index,
+                    projection: vec![(index, 1.0)],
                 });
             }
         }
-        let engine = self.resolved_for_netlist(netlist);
         let circuit = super::pss::PssCircuit::new(engine.build_circuit_with_abort(netlist, abort)?);
         if circuit
             .inductor_probe_names()
             .iter()
             .any(|name| name.eq_ignore_ascii_case(probe_name))
         {
-            operating_point.authenticate_for_reuse(
-                netlist,
-                &engine.config,
-                operating_point.config(),
-            )?;
             operating_point.validate_shooting_basis_for_circuit(&circuit)?;
-            if let Some((canonical_name, state_index)) =
-                circuit.inductor_probe_coordinate(probe_name)
+            if let Some((canonical_name, projection)) =
+                circuit.inductor_probe_projection(probe_name)
             {
                 return Ok(ResolvedPstbProbe {
                     canonical_name,
-                    state_index,
+                    projection,
                 });
             }
         }
@@ -220,7 +227,7 @@ impl Engine {
 
     /// Name what the deck does offer when a loop probe misses.
     ///
-    /// Reuse the circuit inspected for series-current aliases to distinguish
+    /// Reuse the circuit inspected for dependent-current projections to distinguish
     /// an absent name from an existing branch that is not an inductor.
     fn pstb_probe_diagnostic(
         circuit: &CircuitData,
@@ -263,10 +270,10 @@ impl Engine {
     }
 }
 
-/// Canonical probe identity and the shooting coordinate it occupies.
+/// Canonical probe identity and its physical-current projection.
 struct ResolvedPstbProbe {
     canonical_name: String,
-    state_index: usize,
+    projection: Vec<(usize, Value)>,
 }
 
 fn validate_card(card: &PstbCard) -> Result<(), SimulationError> {
@@ -295,29 +302,19 @@ fn validate_card(card: &PstbCard) -> Result<(), SimulationError> {
     Ok(())
 }
 
-/// Normalized participation of one shooting coordinate in one mode shape.
-///
-/// `|v_i| / ||v||` with the Euclidean norm accumulated by `hypot`, so a mode
-/// whose components span many decades does not overflow on the way to a ratio
-/// that is bounded by one.
+/// A normalized physical-current observable, including junction sums. Scale
+/// both operands before their norms/dot product so finite extreme components
+/// cannot overflow an otherwise bounded, scale-invariant participation.
 fn normalized_probe_participation(
     eigenvector: Option<&[num_complex::Complex64]>,
-    state_index: usize,
+    projection: &[(usize, Value)],
     abort: &dyn AbortSignal,
 ) -> Result<Value, SimulationError> {
-    let vector = eigenvector.ok_or_else(|| {
-        SimulationError::Circuit(
-            "PSTB solver did not return a requested eigenvector; the probe's participation in \
-             the mode cannot be stated"
-                .to_owned(),
-        )
-    })?;
-    let component = vector.get(state_index).ok_or_else(|| {
-        SimulationError::Circuit(
-            "PSTB eigenvector does not contain the configured probe coordinate".to_owned(),
-        )
-    })?;
-    let mut norm = 0.0_f64;
+    let vector = eigenvector.ok_or_else(|| SimulationError::Circuit(
+        "PSTB solver did not return a requested eigenvector; the probe's participation in the mode cannot be stated".to_owned(),
+    ))?;
+    let mut scale = 0.0_f64;
+    let mut direct_norm = 0.0_f64;
     for (index, value) in vector.iter().enumerate() {
         poll_periodically(abort, index)?;
         if !value.re.is_finite() || !value.im.is_finite() {
@@ -325,14 +322,63 @@ fn normalized_probe_participation(
                 "PSTB solver returned a non-finite eigenvector".to_owned(),
             ));
         }
-        norm = norm.hypot(value.norm());
+        scale = scale.max(value.re.abs()).max(value.im.abs());
+        direct_norm = direct_norm.hypot(value.norm());
     }
-    if !norm.is_finite() || norm == 0.0 {
+    if scale == 0.0 {
         return Err(SimulationError::Circuit(
             "PSTB solver returned a zero-norm eigenvector".to_owned(),
         ));
     }
-    let ratio = component.norm() / norm;
+    if let &[(index, weight)] = projection
+        && index < vector.len()
+        && weight.is_finite()
+        && weight != 0.0
+        && scale >= Value::MIN_POSITIVE
+        && direct_norm.is_finite()
+        && direct_norm > 0.0
+    {
+        return Ok((vector[index].norm() / direct_norm).clamp(0.0, 1.0));
+    }
+    let mut norm = 0.0_f64;
+    for (index, value) in vector.iter().enumerate() {
+        poll_periodically(abort, index)?;
+        norm = norm.hypot(value.re / scale).hypot(value.im / scale);
+    }
+    let mut weight_scale = 0.0_f64;
+    for (term, &(index, weight)) in projection.iter().enumerate() {
+        poll_periodically(abort, term)?;
+        if index >= vector.len() || !weight.is_finite() {
+            return Err(SimulationError::Circuit(
+                "PSTB probe projection has an invalid coordinate or weight".to_owned(),
+            ));
+        }
+        weight_scale = weight_scale.max(weight.abs());
+    }
+    if weight_scale == 0.0 {
+        return Err(SimulationError::Circuit(
+            "PSTB probe current has no independent dynamic coordinate".to_owned(),
+        ));
+    }
+    let mut dot = num_complex::Complex64::new(0.0, 0.0);
+    let mut correction = num_complex::Complex64::new(0.0, 0.0);
+    let mut weight_norm = 0.0_f64;
+    for (term, &(index, weight)) in projection.iter().enumerate() {
+        poll_periodically(abort, term)?;
+        let weight = weight / weight_scale;
+        weight_norm = weight_norm.hypot(weight);
+        crate::numerics::compensated_add(
+            &mut dot.re,
+            &mut correction.re,
+            (vector[index].re / scale) * weight,
+        );
+        crate::numerics::compensated_add(
+            &mut dot.im,
+            &mut correction.im,
+            (vector[index].im / scale) * weight,
+        );
+    }
+    let ratio = (dot + correction).norm() / norm / weight_norm;
     if ratio.is_finite() {
         Ok(ratio.clamp(0.0, 1.0))
     } else {
@@ -377,4 +423,43 @@ fn poll_periodically(abort: &dyn AbortSignal, index: usize) -> Result<(), Simula
         ensure_not_aborted(abort)?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::abort_signal::NoAbort;
+    use num_complex::Complex64;
+
+    #[test]
+    fn physical_probe_participation_is_scale_invariant_even_at_float_extremes() {
+        for scale in [1.0, 1e308, 1e-308, f64::from_bits(1)] {
+            let vector = [Complex64::new(scale, scale), Complex64::new(scale, -scale)];
+            for projection in [vec![(0, 1.0)], vec![(0, 1.0), (1, -1.0)]] {
+                let actual =
+                    normalized_probe_participation(Some(&vector), &projection, &NoAbort).unwrap();
+                assert!(
+                    (actual - std::f64::consts::FRAC_1_SQRT_2).abs() < 4.0 * f64::EPSILON,
+                    "scale={scale:e}, participation={actual}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_junction_probe_retains_the_small_current_left_after_modal_cancellation() {
+        let vector = [
+            Complex64::new(1.0, 0.0),
+            Complex64::new(1e-20, 0.0),
+            Complex64::new(-1.0, 0.0),
+        ];
+        let actual = normalized_probe_participation(
+            Some(&vector),
+            &[(0, 1.0), (1, 1.0), (2, 1.0)],
+            &NoAbort,
+        )
+        .unwrap();
+        let expected = 1e-20 / 6.0_f64.sqrt();
+        assert!((actual / expected - 1.0).abs() < 4.0 * f64::EPSILON);
+    }
 }

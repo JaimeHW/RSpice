@@ -15,12 +15,12 @@
 //! ```text
 //! {
 //!   "schema":        "rspice-analysis-result"   fixed identifier
-//!   "schemaVersion": 1                          this build's exact version
+//!   "schemaVersion": 3                          this build's exact version
 //!   "resultKind":    "op" | "dc" | "ac" | "tran" | "noise" | "sp" |
 //!                    "port-noise" | "distortion" | "tf" | "stb" |
 //!                    "sensitivity" | "pole-zero" | "fourier" | "fft" |
 //!                    "monte-carlo" | "pss" | "pac" | "pnoise" | "hb" |
-//!                    "envelope"
+//!                    "pstb" | "envelope"
 //!   "analysis":      { "kind": <analysis tag>, "ordinal": <u32, 0-based>,
 //!                      "tag": "<kind>-<ordinal+1, 3 digits>" }
 //!   "parentAnalysis": same shape or null. Required for "fft" and "fourier",
@@ -140,6 +140,9 @@
 //!             sidebands[], conversionMatrix|null
 //! pnoise      outputNode, jitterBandwidth|null,
 //!             contributors[]                      each keeps its own offset grid
+//! pstb        probeInstance, probeStateIndex|null,
+//!             probeStateProjection[], modes[],    signed current-coordinate weights,
+//!             floquetEvidence, ...                full spectrum and qualification
 //! hb          tones[], reactiveSpectra[],
 //!             continuationLimitations[]
 //! envelope    continuation, carrier, transient     transient is the tran payload
@@ -203,24 +206,24 @@ use crate::execution::topology::TopologyFingerprint;
 pub const ANALYSIS_RESULT_DOCUMENT_SCHEMA: &str = "rspice-analysis-result";
 
 /// Schema version this build produces.
-pub const ANALYSIS_RESULT_DOCUMENT_VERSION: u32 = 2;
+pub const ANALYSIS_RESULT_DOCUMENT_VERSION: u32 = 3;
 
 /// Every schema version this build decodes, oldest first.
 ///
 /// A document in this schema is `deny_unknown_fields` throughout, so a field
 /// cannot be added to it compatibly and adding one costs a version. Version 2
-/// added exactly one: a transient payload's `digitalBuses`, the declarations
-/// that group XSPICE vector-port members back into a word. Nothing else moved,
-/// so a version-1 document is a version-2 document that declares no bus, which
-/// is what the defaulted field decodes it as — a build that only writes
-/// version 2 is not a build that has to refuse everything written before it.
-///
-/// The reverse does not hold and is not made to: a version-1 reader refuses a
-/// version-2 document outright, which is the whole reason the version moved.
-const DECODABLE_ANALYSIS_RESULT_DOCUMENT_VERSIONS: [u32; 2] = [1, 2];
+/// added transient `digitalBuses`; version 3 adds PSTB `probeStateProjection`
+/// and permits a null `probeStateIndex` for a current formed from multiple
+/// independent coordinates. Older documents retain their single index and
+/// decode with an empty projection, without inventing an unrecorded polarity.
+/// Older readers reject newer versions before decoding their fields.
+const DECODABLE_ANALYSIS_RESULT_DOCUMENT_VERSIONS: [u32; 3] = [1, 2, 3];
 
 /// First version whose transient payload may declare a digital bus.
 const FIRST_DIGITAL_BUS_DOCUMENT_VERSION: u32 = 2;
+
+/// First version whose PSTB payload may declare a physical-current projection.
+const FIRST_PSTB_PROJECTION_DOCUMENT_VERSION: u32 = 3;
 
 /// How often long validation and serialization loops poll the abort source.
 const ABORT_POLL_STRIDE: usize = 256;
@@ -465,6 +468,18 @@ impl AnalysisResultDocument {
                     "a version-{} document declares {} digital bus(es); buses arrived in version {FIRST_DIGITAL_BUS_DOCUMENT_VERSION}",
                     self.schema_version,
                     payload.digital_buses.len()
+                ),
+            });
+        }
+        if self.schema_version < FIRST_PSTB_PROJECTION_DOCUMENT_VERSION
+            && let ResultPayload::Pstb(payload) = &self.payload
+            && (!payload.probe_state_projection.is_empty() || payload.probe_state_index.is_none())
+        {
+            return Err(ResultDocumentError::Malformed {
+                location: "PSTB probe projection",
+                detail: format!(
+                    "a version-{} document declares a projected probe; projections arrived in version {FIRST_PSTB_PROJECTION_DOCUMENT_VERSION}",
+                    self.schema_version,
                 ),
             });
         }

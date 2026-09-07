@@ -82,7 +82,7 @@ impl PssAcceptedStepHistory {
 
 const PSS_KRYLOV_STATE_THRESHOLD: usize = 12;
 const PSS_KRYLOV_REL_TOL: Value = 1e-9;
-const PSS_OPERATING_POINT_IDENTITY_VERSION: u32 = 5;
+const PSS_OPERATING_POINT_IDENTITY_VERSION: u32 = 6;
 
 fn pss_identity_field(hasher: &mut blake3::Hasher, name: &str, bytes: &[u8]) {
     hasher.update(&(name.len() as u64).to_le_bytes());
@@ -2508,7 +2508,7 @@ impl Engine {
     ) -> Result<Vec<Value>, SimulationError> {
         let size = circuit.matrix_size();
         let mut initial = circuit.clone();
-        initial.add_initial_voltage_constraints();
+        initial.add_initial_constraints();
         let mut matrix =
             self.build_matrix_with_extra_pattern(&initial, &initial.initial_extra_pattern())?;
         initial.link_indices(&matrix);
@@ -3225,6 +3225,7 @@ impl Engine {
         if step.initialization {
             circuit.stamp_initial_inductor_constraints(matrix, rhs);
         }
+        let initial_flux_rates = circuit.has_initial_flux_rates();
         let PssCircuit {
             circuit,
             diode_history,
@@ -3296,14 +3297,14 @@ impl Engine {
 
             if np > 0 && br > 0 {
                 let br_idx = circuit.num_nodes() + br - 1;
-                if !initialization {
+                if !initialization || initial_flux_rates {
                     matrix.add(br_idx, np - 1, 1.0);
                 }
                 matrix.add(np - 1, br_idx, 1.0);
             }
             if nn > 0 && br > 0 {
                 let br_idx = circuit.num_nodes() + br - 1;
-                if !initialization {
+                if !initialization || initial_flux_rates {
                     matrix.add(br_idx, nn - 1, -1.0);
                 }
                 matrix.add(nn - 1, br_idx, -1.0);

@@ -71,19 +71,9 @@ struct CompensatedComplex {
 
 #[cfg(any(test, feature = "veriloga", feature = "veriloga-builtins-base"))]
 impl CompensatedComplex {
-    fn add_component(sum: &mut Value, correction: &mut Value, value: Value) {
-        let next = *sum + value;
-        if sum.abs() >= value.abs() {
-            *correction += (*sum - next) + value;
-        } else {
-            *correction += (value - next) + *sum;
-        }
-        *sum = next;
-    }
-
     fn add(&mut self, value: Complex64) {
-        Self::add_component(&mut self.sum.re, &mut self.correction.re, value.re);
-        Self::add_component(&mut self.sum.im, &mut self.correction.im, value.im);
+        crate::numerics::compensated_add(&mut self.sum.re, &mut self.correction.re, value.re);
+        crate::numerics::compensated_add(&mut self.sum.im, &mut self.correction.im, value.im);
     }
 
     fn total(self) -> Complex64 {
@@ -156,7 +146,7 @@ impl Engine {
             for (exponent, value) in totals {
                 let difference = max_exponent - exponent;
                 if difference <= 1074 {
-                    CompensatedComplex::add_component(
+                    crate::numerics::compensated_add(
                         &mut sum,
                         &mut correction,
                         value * Engine::binary_power(-difference),

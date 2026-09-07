@@ -40,13 +40,7 @@ struct CompensatedSum {
 
 impl CompensatedSum {
     fn add(&mut self, value: Value) {
-        let next = self.sum + value;
-        self.correction += if self.sum.abs() >= value.abs() {
-            (self.sum - next) + value
-        } else {
-            (value - next) + self.sum
-        };
-        self.sum = next;
+        crate::numerics::compensated_add(&mut self.sum, &mut self.correction, value);
     }
 
     fn total(self) -> Value {
