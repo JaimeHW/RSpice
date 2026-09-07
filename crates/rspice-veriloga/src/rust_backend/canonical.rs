@@ -4290,7 +4290,7 @@ impl Wants {
 /// Crate-visible rather than backend-private because it is the only
 /// charge extraction that operates on the CFG, and the native block route needs
 /// the same answer. The tree has two others and both work on flatter forms:
-/// `DeviceIR::extract_charge` peels an `IrExpr`, and
+/// `DeviceIR::extract_charge` peels an arena expression, and
 /// `jit::plan_builder::canonical_extract_reactive_charge` peels a MIR
 /// expression. Neither can see a guarded contribution, because in a CFG the
 /// guard is a block parameter rather than a `Conditional` node — which is

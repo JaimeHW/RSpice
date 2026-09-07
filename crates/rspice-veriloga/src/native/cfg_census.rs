@@ -1791,7 +1791,7 @@ struct ReactiveTally {
 /// [`stored_charges`] — the CFG-level extraction the generated backend already
 /// ships — rather than a fourth copy of the peel. It resolves the charge
 /// through block parameters, which is what a guarded contribution reaches its
-/// equation as; the `IrExpr` and MIR peels the other two routes use see a
+/// equation as; the arena and MIR peels the other two routes use see a
 /// `Conditional` node instead and cannot follow one. The sparsity table below
 /// is where that difference shows up, in the `cfg_only` column.
 ///
@@ -2251,7 +2251,7 @@ fn noise_process_values(process: &CfgNoiseProcess) -> Vec<(String, ValueId)> {
 /// # What a noise program is on each route, and why they are compared this way
 ///
 /// The bytecode route compiles one `psd_program` and one optional
-/// `exponent_program` per `CompiledNoiseSource`, out of the flat `IrExpr` the
+/// `exponent_program` per `CompiledNoiseSource`, out of the flat expression the
 /// front end extracted, and the native plan lowers exactly those two. The CFG
 /// route has the same magnitudes as ordinary values of the body — a
 /// `CfgNoiseProcess` names them — and `NoiseProcess` itself lowers to the

@@ -51,7 +51,7 @@
 //!    filters, the noise processes) and never to a state-allocating one
 //!    (`Ddt`, `Idt`, `IdtMod`, `Limit`, `CanonicalLimit`, `Cross`, `Above`,
 //!    `LastCrossing`, `Timer`): merging two of those merges two slots, two
-//!    candidates or two ordinals into one. That is why [`ExprArena::import`]
+//!    candidates or two ordinals into one. That is why [`ExprArena::push`]
 //!    deduplicates nothing.
 
 use crate::ast::{BinaryOp, UnaryOp};
@@ -861,7 +861,7 @@ pub fn pack_index(value: usize) -> u32 {
 
 /// Unpack a terminal or ordinal index from a node's `u32` slot.
 ///
-/// The four payloads [`ExprArena::import`] packs — [`Node::Voltage`],
+/// The four payloads [`pack_index`] writes — [`Node::Voltage`],
 /// [`Node::Current`], [`Node::BranchCurrent`] and [`Node::PortConnected`] —
 /// hold a `u32` where the source holds a `usize`, with `u32::MAX` standing for
 /// `expr_converter::GROUND_NODE`. Every consumer that reads one of them owes

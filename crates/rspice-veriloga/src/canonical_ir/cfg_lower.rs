@@ -626,7 +626,7 @@ fn hir_expr_is_instance_static(
             let name = name.to_ascii_lowercase();
             match (name.as_str(), args.len()) {
                 // Legacy lowering represents a validated analysis query as
-                // `IrExpr::Analysis`, which is instance-static. Require the
+                // an `arena::Node::Analysis`, which is instance-static. Require the
                 // literal query here rather than blessing arbitrary call
                 // arguments as topology controls.
                 ("analysis", count) if count > 0 => args.iter().copied().all(|argument| {
@@ -642,7 +642,7 @@ fn hir_expr_is_instance_static(
                     )
                 }),
                 // These are the calls legacy lowering converts to pure
-                // `IrExpr::Call` (or `Limexp`) values. Calls are not pure by
+                // `arena::Node::Call` (or `Limexp`) values. Calls are not pure by
                 // default in Verilog-A: ddt/idt/ddx, delays, event operators,
                 // filters, noise sources, and unknown functions all remain
                 // runtime-dependent even when their operands are parameters.

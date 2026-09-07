@@ -159,7 +159,8 @@ const REASSOCIATION_BUDGET: f64 = 1.0;
 /// that: both routes carry the module's own contribution expression and only
 /// group it differently. A Jacobian entry is not. The shipped route lowers
 /// `StampProgram::jacobian_programs`, which the front end produced with
-/// `ir.rs`'s `differentiate` over `IrExpr`; the CFG route lowers a lane of
+/// `ir.rs`'s `differentiate` over the expression arena; the CFG route lowers a
+/// lane of
 /// `canonical_ir::differentiate` over the CFG. Those are two implementations of
 /// the chain rule, and they emit algebraically equal but *structurally
 /// different* expressions — a product rule expanded in a different order, a

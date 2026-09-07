@@ -358,25 +358,22 @@ impl CodeGenerator {
     ///
     /// # The arena is the emitter's input
     ///
-    /// From here on the emitter reads an [`ExprArena`], not `IrExpr`. Every
-    /// family of trees this function compiles — the parameter default and
-    /// range programs, the assignment items, the branch equations and the
-    /// noise PSD, exponent and gain programs — is imported into one arena at
-    /// the point it is compiled, and the import is **one way by design**: the
-    /// tree is moved out of the IR, its 16-byte nodes are appended to the
-    /// arena, and the `Box` tree is dropped there and then. Nothing on this
-    /// path calls [`ExprArena::export`]; a step that finds itself exporting a
-    /// forest has been split in the place the design says never to split it.
+    /// Every family of expressions this function compiles — the parameter
+    /// default and range programs, the assignment items, the branch equations
+    /// and the noise PSD, exponent and gain programs — is already a [`NodeId`]
+    /// into [`DeviceIR::exprs`] when it arrives. There is no import and no
+    /// boxed tree anywhere in the front end to import from: the converter
+    /// writes these nodes, the differentiation core rewrites them, and this
+    /// function reads them.
     ///
     /// # Why the IR is taken by `&mut`
     ///
     /// The shadow-expanded assignment forest is the largest allocation of the
-    /// whole compile — 122 bytes per node, eighteen million nodes on
-    /// `bsimcmg` — and nothing after the assignment pass reads it. Handing it
-    /// over item by item, rather than borrowing it and dropping it whole at
-    /// the end, takes the peak from "forest plus two bytecode passes" to a
-    /// forest that is already shrinking while the first pass is written, which
-    /// is what lets the largest shipped models compile inside a 32 GB box.
+    /// whole compile — eighteen million nodes on `bsimcmg` — and nothing after
+    /// the assignment pass reads it. Taking the arena out of the IR rather
+    /// than borrowing it lets the forest be dropped with the IR while the
+    /// bytecode is still being written, which is part of what lets the largest
+    /// shipped models compile inside a 32 GB box.
     /// The generator's emission state ([`EmitContext`], the site maps, the
     /// per-emission counters) is owned by `self` and by a context built before
     /// the first take, so nothing borrows the IR across a drop.

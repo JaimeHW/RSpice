@@ -102,7 +102,7 @@ const SHIPPED_CENSUS_MODELS: usize = 43;
 /// the before column is this box's own, from the `4a53d105e` run, at 573 s
 /// with a cold build for the older sources. The census is
 /// no longer the fifteen-minute run this file's older sections describe: the
-/// `IrExpr` arena took its front end from 364.6 seconds of compile to 44.2
+/// expression arena took its front end from 364.6 seconds of compile to 44.2
 /// over the same forty-three modules.
 ///
 /// # The observable set leaving the CFG plan's roots
