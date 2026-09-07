@@ -14,7 +14,7 @@ pinned. Actionlint checks workflow syntax. Configuration tests guard coverage.
 | Desktop | Windows/macOS UI and CLI tests; OS-specific output and managed-runtime tests; native JIT execution on six OS/architecture combinations; macOS hardened-runtime checks |
 | Browser | wasm32 compilation, optimized UI/worker size budgets, Firefox Rust binding/cloud/clock tests, Chromium solver/JIT execution and workbench review/recovery |
 | Mobile | ARM64 Android and iOS portable solver/catalog compilation |
-| Feature shards | Clippy for configurations hidden by workspace feature unification; executable tests for host configurations |
+| Feature shards | Clippy and host tests for configurations hidden by workspace feature unification, including emitted WebAssembly execution in wasmi |
 | Python | Supported CPython versions including free threading; Rust binding invariants, stub validation, wheels on six native platforms, offline source-distribution installation |
 | Security | Committed dependency graph, advisory/license/source policies, expiring exceptions, PR dependency review and SBOMs |
 

@@ -573,6 +573,7 @@ class CiConfigurationTests(unittest.TestCase):
             ),
             ("rspice-conformance", "--no-default-features\n"),
             ("rspice-matrix", "--no-default-features\n"),
+            ("rspice-veriloga", "--no-default-features --features wasm-jit"),
         ):
             package, features = shard
             self.assertIn(f"package: {package}", job)

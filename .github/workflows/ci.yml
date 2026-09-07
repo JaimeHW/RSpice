@@ -687,6 +687,11 @@ jobs:
             features: --no-default-features
             target: ""
             targets: --all-targets
+          - label: Verilog-A, WebAssembly JIT on host
+            package: rspice-veriloga
+            features: --no-default-features --features wasm-jit
+            target: ""
+            targets: --all-targets
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install Rust toolchain
