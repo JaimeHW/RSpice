@@ -12,6 +12,20 @@ fn oversized_poly_dimension_returns_a_diagnostic() {
 }
 
 #[test]
+fn polynomial_expansion_is_bounded_before_expression_parsing() {
+    use rspice_core::netlist::expr::{ParamContext, prepare_behavioral_expression};
+    let expression = format!("POLY(1) TIME {}", "1 ".repeat(4096));
+    let error = prepare_behavioral_expression(&expression, &ParamContext::new())
+        .expect_err("polynomial factors must not outgrow the expression tree");
+    assert!(error.contains("stack safety limit"), "{error}");
+
+    let expression = format!("POLY(1) {} {}", "x".repeat(100_000), "1 ".repeat(32));
+    let error = prepare_behavioral_expression(&expression, &ParamContext::new())
+        .expect_err("large repeated operands must not outgrow the generated source budget");
+    assert!(error.contains("byte limit"), "{error}");
+}
+
+#[test]
 fn function_argument_duplication_respects_the_expansion_budget() {
     use rspice_core::netlist::expr::{ParamContext, prepare_behavioral_expression};
     std::thread::Builder::new()

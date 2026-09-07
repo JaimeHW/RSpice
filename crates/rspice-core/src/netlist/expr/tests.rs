@@ -2138,3 +2138,13 @@ fn behavioral_preparation_polls_abort_inside_one_large_expression() {
         "abort was not polled during preparation"
     );
 }
+
+#[test]
+fn polynomial_preparation_can_be_cancelled_before_lowering_finishes() {
+    let expression = format!("POLY(1) TIME {}", "0 ".repeat(4096));
+    let abort = CountingAbort::new(8);
+    let error = prepare_behavioral_expression_with_abort(&expression, &ParamContext::new(), &abort)
+        .expect_err("polynomial tokenization must poll cancellation");
+    assert_eq!(error, BehavioralPreparationError::Aborted);
+    assert_eq!(abort.count(), 9);
+}

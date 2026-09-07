@@ -6675,7 +6675,7 @@ fn try_controlled_source_form(
             .and_then(|s| s.trim().parse::<usize>().ok())
         {
             stream.advance();
-            return Ok(Some(ControlledSourceForm::Poly(dims)));
+            return checked_poly_form(stream, line_num, dims).map(Some);
         }
         // Split form: POLY ( 2 )
         if rest.is_empty() && matches!(stream.peek_n(1).kind, TokenKind::LParen) {
@@ -6700,7 +6700,7 @@ fn try_controlled_source_form(
                     message: "Expected ')' after POLY dimension".to_string(),
                 });
             }
-            return Ok(Some(ControlledSourceForm::Poly(dims)));
+            return checked_poly_form(stream, line_num, dims).map(Some);
         }
         return Ok(None);
     }
@@ -6720,6 +6720,24 @@ fn try_controlled_source_form(
         }
     }
     Ok(form)
+}
+
+// Validate before allocating `dims` controlling operands. A malicious dimension
+// can exceed address space even when only a handful of source tokens exist.
+fn checked_poly_form(
+    stream: &TokenStream,
+    line: usize,
+    dims: usize,
+) -> Result<ControlledSourceForm, ParseError> {
+    if dims == 0 || dims >= stream.remaining_line_tokens().len() {
+        return Err(ParseError::Syntax {
+            line,
+            message: format!(
+                "POLY({dims}) requires a positive dimension, controlling operands, and at least one coefficient"
+            ),
+        });
+    }
+    Ok(ControlledSourceForm::Poly(dims))
 }
 
 /// Collect a signed numeric list (POLY coefficients, TABLE pairs) to end of
@@ -7002,83 +7020,24 @@ fn expect_poly_controlling_pair(
 ///
 /// SPICE2 special case: a single coefficient is `p1` (a pure linear gain on
 /// the first controlling variable), not a constant.
-fn poly_expression(vars: &[String], coeffs: &[Value]) -> String {
-    fn push_monomials(
-        remaining_vars: &[String],
-        degree: usize,
-        prefix: &[(usize, usize)], // (var index offset into vars, exponent)
-        out: &mut Vec<Vec<(usize, usize)>>,
-        base_index: usize,
-    ) {
-        if remaining_vars.len() == 1 {
-            let mut term = prefix.to_vec();
-            if degree > 0 {
-                term.push((base_index, degree));
-            }
-            out.push(term);
-            return;
-        }
-        for first_exp in (0..=degree).rev() {
-            let mut term_prefix = prefix.to_vec();
-            if first_exp > 0 {
-                term_prefix.push((base_index, first_exp));
-            }
-            push_monomials(
-                &remaining_vars[1..],
-                degree - first_exp,
-                &term_prefix,
-                out,
-                base_index + 1,
-            );
-        }
-    }
-
-    if coeffs.is_empty() {
-        return "0".to_string();
-    }
+fn poly_expression(vars: &[String], coeffs: &[Value], line: usize) -> Result<String, ParseError> {
+    use crate::netlist::polynomial::{PolynomialOrdering, expand_polynomial};
+    let mut coefficients = Vec::with_capacity(coeffs.len().saturating_add(1));
     if coeffs.len() == 1 {
-        // SPICE2 rule: a lone coefficient is the linear gain on v1.
-        return format!("({})*({})", coeffs[0], vars[0]);
+        // SPICE2's lone coefficient is a linear gain, not the constant term.
+        coefficients.push("0".to_owned());
     }
-
-    // Enumerate monomials degree by degree until coefficients are exhausted.
-    let mut terms: Vec<String> = Vec::new();
-    let mut coeff_idx = 0usize;
-    let mut degree = 0usize;
-    while coeff_idx < coeffs.len() {
-        let mut monomials = Vec::new();
-        let prefix = Vec::new();
-        push_monomials(vars, degree, &prefix, &mut monomials, 0);
-        for monomial in monomials {
-            if coeff_idx >= coeffs.len() {
-                break;
-            }
-            let coeff = coeffs[coeff_idx];
-            coeff_idx += 1;
-            if coeff == 0.0 {
-                continue;
-            }
-            let mut factors = vec![format!("({})", coeff)];
-            for (var_idx, exponent) in &monomial {
-                for _ in 0..*exponent {
-                    factors.push(format!("({})", vars[*var_idx]));
-                }
-            }
-            terms.push(factors.join("*"));
-        }
-        degree += 1;
-        // Safety valve: coefficients beyond degree 8 in n vars would be a
-        // pathological deck; stop rather than loop unbounded.
-        if degree > 8 {
-            break;
-        }
-    }
-
-    if terms.is_empty() {
-        "0".to_string()
-    } else {
-        terms.join(" + ")
-    }
+    coefficients.extend(coeffs.iter().map(Value::to_string));
+    expand_polynomial(
+        vars,
+        &coefficients,
+        PolynomialOrdering::Symmetric,
+        &crate::abort_signal::NoAbort,
+    )
+    .map_err(|error| ParseError::Syntax {
+        line,
+        message: error.to_string(),
+    })
 }
 
 /// Build the clamped TABLE transfer expression.
@@ -7575,7 +7534,7 @@ fn parse_voltage_controlled_source(
             )?;
             elements.push(Element {
                 name,
-                kind: lower_behavioral(poly_expression(&vars, &coeffs), multiplicity),
+                kind: lower_behavioral(poly_expression(&vars, &coeffs, line_num)?, multiplicity),
                 nodes: vec![node_pos, node_neg],
                 provenance: crate::netlist::ElementProvenance::Authored,
             });
@@ -7941,7 +7900,7 @@ fn parse_current_controlled_source(
                     ),
                 });
             }
-            let expression = poly_expression(&vars, &coeffs);
+            let expression = poly_expression(&vars, &coeffs, line_num)?;
             let kind = if is_voltage_output {
                 ElementKind::BehavioralVoltage {
                     expression,

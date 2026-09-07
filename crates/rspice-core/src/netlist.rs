@@ -29,6 +29,7 @@ mod mutual_inductor;
 mod output_symbols;
 pub mod param_scope;
 mod parser;
+mod polynomial;
 mod remove_unused;
 pub mod source_map;
 pub(crate) mod spectre_adapter;
