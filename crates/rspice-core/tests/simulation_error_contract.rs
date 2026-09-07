@@ -317,6 +317,7 @@ fn expected_descriptor(
     use SimulationErrorCategory as Category;
     use SimulationErrorCode as Code;
     match error {
+        SimulationError::ModelFinished(_) => (Code::ModelFinished, Category::ModelControl, false),
         // The nested resource-limit configuration case is checked separately
         // above; this arm covers every other configuration failure.
         SimulationError::Configuration(SimulationConfigError::ResourceLimit(_)) => {
@@ -366,6 +367,13 @@ fn expected_descriptor(
 /// values rather than against the mapping table alone.
 fn one_of_every_variant() -> Vec<SimulationError> {
     vec![
+        SimulationError::ModelFinished(Box::new(rspice_core::ModelFinish {
+            instance: "X1".to_owned(),
+            model: "stop_at_start".to_owned(),
+            site: 0,
+            point: rspice_core::ModelFinishPoint::Initialization,
+            diagnostic_level: 1,
+        })),
         SimulationError::Configuration(SimulationConfigError::InvalidCount {
             field: "max_iterations",
             value: 0,
@@ -443,7 +451,7 @@ fn every_variant_round_trips_through_its_descriptor() {
 
     // Only the two resource-limit spellings share a code, so the sample set
     // must have produced one code per variant it contains.
-    assert_eq!(seen_codes.len(), 15, "codes covered: {seen_codes:?}");
+    assert_eq!(seen_codes.len(), 16, "codes covered: {seen_codes:?}");
 
     for category in SimulationErrorCategory::ALL {
         assert!(
