@@ -7297,10 +7297,9 @@ impl Engine {
                                 &mut circuit,
                                 netlist,
                                 element,
-                                subckt_name,
-                                params,
                                 entry,
                                 &design_connect_rules,
+                                abort,
                             )? {
                                 continue;
                             }
@@ -7333,16 +7332,20 @@ impl Engine {
                                         element.name, model.name
                                     ))
                                 })?;
-                                crate::device::veriloga::VerilogADevice::try_new_with_canonical_ir(
+                                crate::device::veriloga::VerilogADevice::try_new_with_canonical_ir_and_control(
                                     element.name.clone(),
                                     std::sync::Arc::clone(model),
                                     canonical_ir,
                                     &node_ids,
+                                    &veriloga_cache::VerilogACompileControl { abort },
                                 )
                             }
                             .map_err(|err| {
+                                if matches!(err, rspice_veriloga::vm::VmError::CompilationCancelled) {
+                                    return SimulationError::Aborted;
+                                }
                                 SimulationError::Circuit(format!(
-                                    "Verilog-A device '{}' parameter default resolution failed: {}",
+                                    "Verilog-A device '{}' construction failed: {}",
                                     element.name, err
                                 ))
                             })?;
@@ -7359,16 +7362,20 @@ impl Engine {
                                         element.name, model.name
                                     ))
                                 })?;
-                                crate::device::veriloga::VerilogADevice::try_new_with_canonical_ir(
+                                crate::device::veriloga::VerilogADevice::try_new_with_canonical_ir_and_control(
                                     element.name.clone(),
                                     std::sync::Arc::clone(model),
                                     canonical_ir,
                                     &node_ids,
+                                    &veriloga_cache::VerilogACompileControl { abort },
                                 )
                             }
                             .map_err(|err| {
+                                if matches!(err, rspice_veriloga::vm::VmError::CompilationCancelled) {
+                                    return SimulationError::Aborted;
+                                }
                                 SimulationError::Circuit(format!(
-                                    "Verilog-A device '{}' parameter default resolution failed: {}",
+                                    "Verilog-A device '{}' construction failed: {}",
                                     element.name, err
                                 ))
                             })?;
@@ -7379,11 +7386,12 @@ impl Engine {
                             ))]
                             let mut device = {
                                 match entry.canonical_ir.as_deref() {
-                                    Some(canonical_ir) => crate::device::veriloga::VerilogADevice::try_new_with_canonical_ir(
+                                    Some(canonical_ir) => crate::device::veriloga::VerilogADevice::try_new_with_canonical_ir_and_control(
                                         element.name.clone(),
                                         std::sync::Arc::clone(model),
                                         canonical_ir,
                                         &node_ids,
+                                        &veriloga_cache::VerilogACompileControl { abort },
                                     ),
                                     None
                                         if model.noise_process_schema >= 1
@@ -7402,8 +7410,11 @@ impl Engine {
                                 }
                             }
                             .map_err(|err| {
+                                if matches!(err, rspice_veriloga::vm::VmError::CompilationCancelled) {
+                                    return SimulationError::Aborted;
+                                }
                                 SimulationError::Circuit(format!(
-                                    "Verilog-A device '{}' parameter default resolution failed: {}",
+                                    "Verilog-A device '{}' construction failed: {}",
                                     element.name, err
                                 ))
                             })?;

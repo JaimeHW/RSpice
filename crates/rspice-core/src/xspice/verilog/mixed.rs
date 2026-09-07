@@ -794,6 +794,7 @@ impl MixedSignalHost {
             &runtime.canonical_ir,
             terminal_nodes,
             scheduler_limits,
+            &rspice_veriloga::NoPipelineControl,
         )
     }
 
@@ -820,6 +821,7 @@ impl MixedSignalHost {
         canonical_ir: &rspice_veriloga::canonical_ir::CanonicalIrArtifact,
         terminal_nodes: &[usize],
         scheduler_limits: SchedulerLimits,
+        control: &dyn rspice_veriloga::PipelineControl,
     ) -> Result<Self, MixedSignalError> {
         if canonical_ir.digital.is_empty() || canonical_ir.mir.equations.is_empty() {
             return Err(MixedSignalError::Compile {
@@ -834,15 +836,13 @@ impl MixedSignalHost {
         // is one more Verilog-A instance as far as the continuous half is
         // concerned, so it must not reach a different runtime than the analog
         // instance beside it would.
-        #[cfg(any(feature = "veriloga-native", feature = "veriloga-wasm-jit"))]
-        let analog = VerilogADevice::try_new_with_canonical_ir(
+        let analog = VerilogADevice::try_new_with_canonical_ir_and_control(
             instance,
             model,
             canonical_ir,
             terminal_nodes,
+            control,
         );
-        #[cfg(not(any(feature = "veriloga-native", feature = "veriloga-wasm-jit")))]
-        let analog = VerilogADevice::try_new(instance, model, terminal_nodes);
         let mut analog = analog.map_err(|error| MixedSignalError::Compile {
             detail: format!("analog device construction failed: {error}"),
         })?;

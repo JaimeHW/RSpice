@@ -1594,8 +1594,8 @@ fn deck_include_compiler_options() -> rspice_veriloga::CompilerOptions {
 }
 
 #[cfg(feature = "veriloga")]
-struct VerilogACompileControl<'a> {
-    abort: &'a dyn AbortSignal,
+pub(super) struct VerilogACompileControl<'a> {
+    pub(super) abort: &'a dyn AbortSignal,
 }
 
 #[cfg(feature = "veriloga")]

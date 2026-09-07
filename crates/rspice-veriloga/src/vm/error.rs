@@ -11,6 +11,8 @@ pub enum VmError {
     InvalidInstruction(&'static str),
     /// Native JIT compilation failed while native execution was required.
     NativeJit(String),
+    /// The caller cancelled device construction or a wait for shared native code.
+    CompilationCancelled,
     /// Browser secondary-WASM compilation or dispatch failed while WASM JIT
     /// execution was required.
     WasmJit(String),
@@ -36,6 +38,7 @@ impl std::fmt::Display for VmError {
             VmError::StackUnderflow(msg) => write!(f, "Stack underflow: {}", msg),
             VmError::InvalidInstruction(msg) => write!(f, "Invalid instruction: {}", msg),
             VmError::NativeJit(msg) => write!(f, "native JIT error: {}", msg),
+            VmError::CompilationCancelled => f.write_str("model compilation cancelled"),
             VmError::WasmJit(msg) => write!(f, "browser WASM JIT error: {msg}"),
             VmError::ParameterValue(msg) => write!(f, "parameter value error: {msg}"),
             VmError::InvalidModel(msg) => write!(f, "invalid compiled model: {msg}"),

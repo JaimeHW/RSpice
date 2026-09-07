@@ -137,10 +137,15 @@ of them preprocessor inputs: `include_paths` (searched by
 performance budget changes only whether a slow invocation is accepted and
 is excluded from compiler-contract identities.
 
-`enable_ams`, `strict_mode`, and `integration_order` are **reserved**:
-they are accepted and they participate in the compiler-contract identity
-hash, so changing one invalidates a cached compilation, but no compiler
-phase reads them yet. In particular `integration_order` does not pick the
+`enable_ams` lets the runtime compilation APIs return the analog model
+alongside a canonical digital plan. It defaults to false: callers enabling
+it must execute that plan on the event scheduler, since the analog model
+alone cannot execute digital behavior. Canonical-IR compilation can lower
+digital processes independently of this option.
+
+`strict_mode` and `integration_order` are **reserved**. They participate in
+the compiler-contract identity but currently gate no behavior.
+`integration_order` does not pick the
 `ddt`/`idt` integration rule; the engine supplies companion coefficients
 per timestep, so one compiled model serves backward Euler and Gear-2
 alike.
@@ -163,6 +168,16 @@ nodes)` and then drives it directly (no trait indirection): set parameters
 one model compile (and JIT) once. `is_using_native()` reports whether the
 JIT is active for diagnostics.
 
+Native compilation coalesces requests for the same artifact and allows up to
+two independent compilations at once, bounded by available parallelism.
+Ready cache hits do not wait for unrelated compilation. Retention is limited
+to 1,024 entries and 512 MiB of executable images by default (overridable with
+`RSPICE_VERILOGA_NATIVE_CACHE_MAX_BYTES`); one oversized image is retained to
+prevent repeated compilation. Live devices retain their images after eviction.
+The cancellable constructor, `try_new_with_canonical_ir_and_control`, lets a
+waiting caller leave without interrupting compilation needed by other callers.
+An already-started compilation finishes before its owner reports cancellation.
+
 ## Language support
 
 The supported subset, as documented in the crate docs (`src/lib.rs`) and
@@ -171,7 +186,9 @@ exercised by the test suite:
 - **Analog operators**: `ddt`, `idt`, `idtmod`, `ddx`, `limexp`,
   `absdelay`, `transition`, `slew`, `laplace_zp/zd/np/nd`,
   `zi_nd/zp/zd/np`, `last_crossing`, `$limit`, `$table_model`. The
-  integration rule for `ddt`/`idt` is not a compile-time choice; the
+  `zi_*` sample periods may depend on scalar parameters and are frozen per
+  instance when its parameters are resolved. The integration rule for
+  `ddt`/`idt` is not a compile-time choice; the
   engine supplies the companion coefficients per timestep, so the same
   compiled model runs under backward Euler or Gear-2/trapezoidal
 - **Noise**: `white_noise`, `flicker_noise`, `noise_table`,
@@ -200,17 +217,20 @@ exercised by the test suite:
 
 **Known limitations**, every one of them a compile error rather than a
 silent miscompile: `noise_table` file input (inline the `{f, p, ...}` pair
-list); parameter-dependent `zi_*` sample periods; multi-dimensional
+list); multi-dimensional
 arrays; array locals in analog functions; and `output`/`inout`
 analog-function arguments used inside conditional expressions or any other
 context that must stay free of side effects.
 
-Two constructs are accepted but inert, so they are worth knowing about:
-noise sources are always mutually uncorrelated (the trailing name argument
-is a label carried into the results, not a correlation key), and the
-no-effect system tasks (`$display`, `$write`, `$strobe`, `$monitor`,
+Distinct noise processes are uncorrelated. Reusing one process through an
+assigned expression preserves coherent contributions, including cancellation.
+The trailing name argument is a display label, not a correlation key.
+
+The system tasks (`$display`, `$write`, `$strobe`, `$monitor`,
 `$info`, `$warning`, `$error`, `$fatal`, `$finish`, `$stop`) parse and
-then do nothing, so a model cannot print from the analog block.
+are discarded with a warning. They currently neither print nor control
+simulation. This is a language-support gap; models depending on those tasks
+cannot be simulated correctly.
 
 ## Feature flags
 

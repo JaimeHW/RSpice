@@ -39,6 +39,8 @@ use crate::canonical_ir::CanonicalIrArtifact;
 ))]
 use crate::codegen::BytecodeProgram;
 use crate::codegen::{AssignmentStep, CompiledModel, Instruction, StampIndex};
+#[cfg(feature = "native")]
+use crate::native::cache::{NativeCompileCache, NativeCompileCacheKey, NativeCompileRole};
 use crate::vm::{CURRENT_PAIR_GROUND, Vm, VmAcceptedCheckpoint, VmContext, VmError};
 #[cfg(feature = "native")]
 use crate::vm::{terminal_pair_current_endpoints, terminal_pair_current_len};
@@ -807,149 +809,6 @@ impl std::fmt::Display for ParameterValueError {
 
 impl std::error::Error for ParameterValueError {}
 
-/// Content identity of one native compilation.
-///
-/// Keying on content rather than on the `Arc<CompiledModel>` address is what
-/// lets a second engine build reuse the first build's image: the runtime model
-/// cache hands back a freshly allocated `Arc` after a disk-cache hit, so
-/// pointer identity reports a miss for a model that is byte-identical.
-///
-/// The digests are carried together because the emitted image is a function of
-/// both artifacts the compiler consumes. `mir_digest` alone determines the
-/// image for artifacts produced by one compiler build, but the pair costs
-/// nothing and keeps the key honest if that ever stops being true.
-#[cfg(feature = "native")]
-#[derive(Clone)]
-enum NativeCompileCacheKey {
-    /// Internal bytecode-native contract-test cache lane. Production native
-    /// construction must compile through `CanonicalMir`. Bytecode compilation
-    /// is tied to the lifetime of the bytecode model allocation because that
-    /// lane has no canonical artifact whose digest independently authenticates
-    /// the complete compiler input.
-    #[cfg(feature = "native-bytecode-contract-tests")]
-    Bytecode {
-        source_digest: SmolStr,
-        module: SmolStr,
-        owner: std::sync::Weak<CompiledModel>,
-    },
-    CanonicalMir {
-        role: NativeCompileRole,
-        mir_digest: SmolStr,
-        source_digest: SmolStr,
-        module: SmolStr,
-        layout: CompiledModelLayoutIdentity,
-    },
-}
-
-/// What one cached image is for.
-///
-/// The two roles compile the same model from the same artifact into different
-/// code, so they are different cache entries and not one entry reused: an
-/// evaluation image holds the entries, the kernels and the assignment pass the
-/// CFG plan still needs, and an observation image holds only the pass that
-/// publishes the externally observable variables. Sharing the key would hand a
-/// readback the evaluation's image, or an evaluation a set of entries that does
-/// not exist.
-#[cfg(feature = "native")]
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum NativeCompileRole {
-    Evaluation,
-    Observation,
-}
-
-#[cfg(feature = "native")]
-impl PartialEq for NativeCompileCacheKey {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            #[cfg(feature = "native-bytecode-contract-tests")]
-            (
-                Self::Bytecode {
-                    source_digest: left_source,
-                    module: left_module,
-                    ..
-                },
-                Self::Bytecode {
-                    source_digest: right_source,
-                    module: right_module,
-                    ..
-                },
-            ) => left_source == right_source && left_module == right_module,
-            (
-                Self::CanonicalMir {
-                    role: left_role,
-                    mir_digest: left_mir,
-                    source_digest: left_source,
-                    module: left_module,
-                    layout: left_layout,
-                },
-                Self::CanonicalMir {
-                    role: right_role,
-                    mir_digest: right_mir,
-                    source_digest: right_source,
-                    module: right_module,
-                    layout: right_layout,
-                },
-            ) => {
-                left_role == right_role
-                    && left_mir == right_mir
-                    && left_source == right_source
-                    && left_module == right_module
-                    && left_layout == right_layout
-            }
-            #[cfg(feature = "native-bytecode-contract-tests")]
-            _ => false,
-        }
-    }
-}
-
-#[cfg(feature = "native")]
-impl Eq for NativeCompileCacheKey {}
-
-/// Lifetime contract for a cached native image.
-///
-/// Canonical MIR authenticates every compiler input, so its images are
-/// process-persistent and reusable across separately allocated runtime models.
-/// The internal bytecode lane has no such artifact and is allocation-scoped:
-/// its image and cached failures remain valid only while that exact
-/// `CompiledModel` allocation is alive.
-#[cfg(feature = "native")]
-enum NativeCompileCacheRetention {
-    Persistent,
-    #[cfg(feature = "native-bytecode-contract-tests")]
-    Model(std::sync::Weak<CompiledModel>),
-}
-
-#[cfg(feature = "native")]
-impl NativeCompileCacheRetention {
-    fn for_key(key: &NativeCompileCacheKey) -> Self {
-        match key {
-            #[cfg(feature = "native-bytecode-contract-tests")]
-            NativeCompileCacheKey::Bytecode { owner, .. } => Self::Model(owner.clone()),
-            NativeCompileCacheKey::CanonicalMir { .. } => Self::Persistent,
-        }
-    }
-
-    fn is_dropped(&self) -> bool {
-        match self {
-            Self::Persistent => false,
-            #[cfg(feature = "native-bytecode-contract-tests")]
-            Self::Model(owner) => owner.strong_count() == 0,
-        }
-    }
-
-    fn matches_key(&self, key: &NativeCompileCacheKey) -> bool {
-        match (self, key) {
-            (Self::Persistent, NativeCompileCacheKey::CanonicalMir { .. }) => true,
-            #[cfg(feature = "native-bytecode-contract-tests")]
-            (Self::Model(retained), NativeCompileCacheKey::Bytecode { owner, .. }) => {
-                std::sync::Weak::ptr_eq(retained, owner)
-            }
-            #[cfg(feature = "native-bytecode-contract-tests")]
-            _ => false,
-        }
-    }
-}
-
 /// Content identity of one browser-side compilation, matching
 /// [`NativeCompileCacheKey`]'s canonical lane.
 #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
@@ -960,17 +819,6 @@ struct WasmCompileCacheKey {
     module: SmolStr,
     layout: CompiledModelLayoutIdentity,
 }
-
-/// Executable-image budget for the process-wide native compilation cache.
-///
-/// Entries hold committed executable pages, so the cache is bounded by bytes
-/// rather than by entry count. Compilation failures are retained at zero cost
-/// so a failing model is not recompiled once per instance.
-#[cfg(feature = "native")]
-const NATIVE_COMPILE_CACHE_DEFAULT_MAX_BYTES: usize = 512 * 1024 * 1024;
-
-#[cfg(feature = "native")]
-const NATIVE_COMPILE_CACHE_MAX_BYTES_ENV: &str = "RSPICE_VERILOGA_NATIVE_CACHE_MAX_BYTES";
 
 /// Module names of the compilations that actually reached the backend, so
 /// tests can assert a cache hit rather than infer one from wall-clock time.
@@ -990,125 +838,6 @@ pub(crate) fn native_compile_count(module: &str) -> usize {
         .iter()
         .filter(|name| name.as_str() == module)
         .count()
-}
-
-#[cfg(feature = "native")]
-struct NativeCompileCacheEntry {
-    key: NativeCompileCacheKey,
-    retention: NativeCompileCacheRetention,
-    compiled: Result<std::sync::Arc<NativeModel>, String>,
-    image_bytes: usize,
-}
-
-#[cfg(feature = "native")]
-#[derive(Default)]
-struct NativeCompileCache {
-    /// Most-recently-used first.
-    entries: Vec<NativeCompileCacheEntry>,
-    image_bytes: usize,
-}
-
-#[cfg(feature = "native")]
-impl NativeCompileCache {
-    fn max_bytes() -> usize {
-        std::env::var(NATIVE_COMPILE_CACHE_MAX_BYTES_ENV)
-            .ok()
-            .and_then(|raw| raw.trim().parse::<usize>().ok())
-            .filter(|budget| *budget > 0)
-            .unwrap_or(NATIVE_COMPILE_CACHE_DEFAULT_MAX_BYTES)
-    }
-
-    fn get(
-        &mut self,
-        key: &NativeCompileCacheKey,
-    ) -> Option<Result<std::sync::Arc<NativeModel>, String>> {
-        self.prune_dropped_bytecode_owners();
-        let index = self
-            .entries
-            .iter()
-            .position(|entry| entry.key == *key && entry.retention.matches_key(key))?;
-        let entry = self.entries.remove(index);
-        let compiled = entry.compiled.clone();
-        self.entries.insert(0, entry);
-        self.debug_assert_image_bytes();
-        Some(compiled)
-    }
-
-    fn insert(
-        &mut self,
-        key: NativeCompileCacheKey,
-        compiled: Result<std::sync::Arc<NativeModel>, String>,
-    ) {
-        self.prune_dropped_bytecode_owners();
-        let retention = NativeCompileCacheRetention::for_key(&key);
-        let image_bytes = compiled
-            .as_ref()
-            .map_or(0, |native| native.code_size_bytes());
-        self.entries.insert(
-            0,
-            NativeCompileCacheEntry {
-                key,
-                retention,
-                compiled,
-                image_bytes,
-            },
-        );
-        self.image_bytes = self
-            .image_bytes
-            .checked_add(image_bytes)
-            .expect("native compile cache image accounting exceeds addressable memory");
-        self.evict_to(Self::max_bytes());
-        self.debug_assert_image_bytes();
-    }
-
-    /// Remove test-lane images after their bytecode model allocation has been
-    /// dropped. Canonical MIR entries deliberately have no owner and remain
-    /// reusable across model allocations and engine rebuilds.
-    fn prune_dropped_bytecode_owners(&mut self) {
-        let mut index = 0;
-        while index < self.entries.len() {
-            if self.entries[index].retention.is_dropped() {
-                let evicted = self.entries.remove(index);
-                self.image_bytes = self
-                    .image_bytes
-                    .checked_sub(evicted.image_bytes)
-                    .expect("native compile cache image accounting underflowed while pruning");
-            } else {
-                index += 1;
-            }
-        }
-        self.debug_assert_image_bytes();
-    }
-
-    fn debug_assert_image_bytes(&self) {
-        #[cfg(debug_assertions)]
-        {
-            let accounted = self.entries.iter().fold(0usize, |total, entry| {
-                total
-                    .checked_add(entry.image_bytes)
-                    .expect("native compile cache entry sizes exceed addressable memory")
-            });
-            debug_assert_eq!(
-                self.image_bytes, accounted,
-                "native compile cache executable-image accounting drifted"
-            );
-        }
-    }
-
-    /// Drop least-recently-used images until the budget is met, always keeping
-    /// the entry that was just inserted so one oversized model cannot evict
-    /// itself into an infinite recompile loop.
-    fn evict_to(&mut self, max_bytes: usize) {
-        while self.image_bytes > max_bytes && self.entries.len() > 1 {
-            let Some(evicted) = self.entries.pop() else {
-                break;
-            };
-            self.image_bytes = self
-                .image_bytes
-                .checked_sub(evicted.image_bytes)
-                .expect("native compile cache image accounting underflowed while evicting");
-        }
-    }
 }
 
 /// A Verilog-A device instance in a circuit
@@ -2654,7 +2383,7 @@ impl VerilogADevice {
         nodes: &[usize],
     ) -> Result<Self, VmError> {
         let model: std::sync::Arc<CompiledModel> = model.into();
-        Self::try_new_inner(name, model, nodes, None)
+        Self::try_new_inner(name, model, nodes, None, &crate::NoPipelineControl)
     }
 
     /// Checked constructor that compiles stamp values from canonical MIR when
@@ -2666,8 +2395,27 @@ impl VerilogADevice {
         artifact: &CanonicalIrArtifact,
         nodes: &[usize],
     ) -> Result<Self, VmError> {
+        Self::try_new_with_canonical_ir_and_control(
+            name,
+            model,
+            artifact,
+            nodes,
+            &crate::NoPipelineControl,
+        )
+    }
+
+    /// Construction with cancellation while waiting for a shared native
+    /// compilation. An already-started native compilation finishes and remains
+    /// reusable by other callers; cancellation does not discard their image.
+    pub fn try_new_with_canonical_ir_and_control(
+        name: impl Into<SmolStr>,
+        model: impl Into<std::sync::Arc<CompiledModel>>,
+        artifact: &CanonicalIrArtifact,
+        nodes: &[usize],
+        control: &dyn crate::PipelineControl,
+    ) -> Result<Self, VmError> {
         let model: std::sync::Arc<CompiledModel> = model.into();
-        Self::try_new_inner(name, model, nodes, Some(artifact))
+        Self::try_new_inner(name, model, nodes, Some(artifact), control)
     }
 
     fn try_new_inner(
@@ -2675,7 +2423,11 @@ impl VerilogADevice {
         model: std::sync::Arc<CompiledModel>,
         nodes: &[usize],
         canonical_artifact: Option<&CanonicalIrArtifact>,
+        control: &dyn crate::PipelineControl,
     ) -> Result<Self, VmError> {
+        if control.is_cancelled() {
+            return Err(VmError::CompilationCancelled);
+        }
         Self::validate_compiled_assignment_layout(model.num_variables, &model.assignment_steps)?;
         Self::validate_compiled_assignment_layout(
             model.num_variables,
@@ -2762,9 +2514,11 @@ impl VerilogADevice {
 
         #[cfg(feature = "native")]
         let native_model = match canonical_artifact {
-            Some(artifact) => Self::try_native_compile_with_canonical_ir(&model, artifact)?,
+            Some(artifact) => {
+                Self::try_native_compile_with_canonical_ir(&model, artifact, control)?
+            }
             #[cfg(feature = "native-bytecode-contract-tests")]
-            None => Self::try_native_compile(&model)?,
+            None => Self::try_native_compile(&model, control)?,
             #[cfg(not(feature = "native-bytecode-contract-tests"))]
             None => {
                 return Err(Self::missing_canonical_ir_native_error());
@@ -2817,6 +2571,9 @@ impl VerilogADevice {
         device.context.branch_current_values = vec![0.0; num_branch_unknowns];
         device.rebuild_matrix_indices();
         device.try_resolve_parameter_defaults()?;
+        if control.is_cancelled() {
+            return Err(VmError::CompilationCancelled);
+        }
         Ok(device)
     }
 
@@ -3004,12 +2761,7 @@ impl VerilogADevice {
         Ok(())
     }
 
-    /// Attempt to compile the model to native code.
-    ///
-    /// Compilations are shared process-wide per model `Arc`: a thousand
-    /// instances of one model compile once. The result (including a
-    /// failed attempt) is cached so construction stays O(1) after the
-    /// first instance.
+    /// Native construction requires the authoritative canonical artifact.
     #[cfg(all(feature = "native", not(feature = "native-bytecode-contract-tests")))]
     fn missing_canonical_ir_native_error() -> VmError {
         VmError::NativeJit(
@@ -3031,13 +2783,14 @@ impl VerilogADevice {
     #[cfg(feature = "native-bytecode-contract-tests")]
     fn try_native_compile(
         model: &std::sync::Arc<CompiledModel>,
+        control: &dyn crate::PipelineControl,
     ) -> Result<std::sync::Arc<NativeModel>, VmError> {
         let cache_key = NativeCompileCacheKey::Bytecode {
             source_digest: model.source_digest.clone(),
             module: model.name.clone(),
             owner: std::sync::Arc::downgrade(model),
         };
-        Self::try_native_compile_cached(model, cache_key, |model| {
+        Self::try_native_compile_cached(model, cache_key, control, |model| {
             crate::native::compile_native(model)
         })
     }
@@ -3046,15 +2799,16 @@ impl VerilogADevice {
     fn try_native_compile_with_canonical_ir(
         model: &std::sync::Arc<CompiledModel>,
         artifact: &CanonicalIrArtifact,
+        control: &dyn crate::PipelineControl,
     ) -> Result<std::sync::Arc<NativeModel>, VmError> {
         let cache_key = NativeCompileCacheKey::CanonicalMir {
             role: NativeCompileRole::Evaluation,
             mir_digest: artifact.mir_digest.clone(),
             source_digest: model.source_digest.clone(),
             module: model.name.clone(),
-            layout: compiled_model_layout_identity(model),
+            layout: compiled_model_layout_identity(model).0,
         };
-        Self::try_native_compile_cached(model, cache_key, |model| {
+        Self::try_native_compile_cached(model, cache_key, control, |model| {
             crate::native::compile_native_with_canonical_ir(model, artifact)
         })
     }
@@ -3076,9 +2830,9 @@ impl VerilogADevice {
             mir_digest: artifact.mir_digest.clone(),
             source_digest: model.source_digest.clone(),
             module: model.name.clone(),
-            layout: compiled_model_layout_identity(model),
+            layout: compiled_model_layout_identity(model).0,
         };
-        Self::try_native_compile_cached(model, cache_key, |model| {
+        Self::try_native_compile_cached(model, cache_key, &crate::NoPipelineControl, |model| {
             crate::native::compile_observation_image_with_canonical_ir(model, artifact)
         })
     }
@@ -3087,51 +2841,42 @@ impl VerilogADevice {
     fn try_native_compile_cached(
         model: &std::sync::Arc<CompiledModel>,
         cache_key: NativeCompileCacheKey,
+        control: &dyn crate::PipelineControl,
         compile: impl FnOnce(&CompiledModel) -> crate::native::JitResult<NativeModel>,
     ) -> Result<std::sync::Arc<NativeModel>, VmError> {
-        use std::sync::Mutex;
+        static NATIVE_CACHE: std::sync::OnceLock<NativeCompileCache> = std::sync::OnceLock::new();
+        NATIVE_CACHE
+            .get_or_init(NativeCompileCache::default)
+            .get_or_compile(cache_key, control, || {
+                #[cfg(all(test, target_arch = "x86_64"))]
+                NATIVE_COMPILE_LOG
+                    .lock()
+                    .expect("native compile log")
+                    .push(model.name.to_string());
 
-        static NATIVE_CACHE: Mutex<Option<NativeCompileCache>> = Mutex::new(None);
-
-        // The lock is held across compilation, as it always has been: two
-        // threads reaching the same uncached model would otherwise both pay
-        // the full compile and both commit an executable image.
-        let mut guard = NATIVE_CACHE.lock().unwrap_or_else(|e| e.into_inner());
-        let cache = guard.get_or_insert_with(NativeCompileCache::default);
-        if let Some(cached) = cache.get(&cache_key) {
-            return cached.map_err(VmError::NativeJit);
-        }
-
-        #[cfg(all(test, target_arch = "x86_64"))]
-        NATIVE_COMPILE_LOG
-            .lock()
-            .expect("native compile log")
-            .push(model.name.to_string());
-
-        let compiled = match compile(model.as_ref()) {
-            Ok(native) => {
-                log::info!("[JIT] Model '{}' compiled to native code", model.name);
-                #[cfg(debug_assertions)]
-                eprintln!("[JIT] Model '{}' compiled to native code", model.name);
-                Ok(std::sync::Arc::new(native))
-            }
-            Err(error) => {
-                let msg = error.to_string();
-                log::warn!(
-                    "[JIT] Native compilation failed for '{}': {}",
-                    model.name,
-                    msg
-                );
-                #[cfg(debug_assertions)]
-                eprintln!(
-                    "[JIT] Native compilation failed for '{}': {}",
-                    model.name, msg
-                );
-                Err(msg)
-            }
-        };
-        cache.insert(cache_key, compiled.clone());
-        compiled.map_err(VmError::NativeJit)
+                match compile(model.as_ref()) {
+                    Ok(native) => {
+                        log::info!("[JIT] Model '{}' compiled to native code", model.name);
+                        #[cfg(debug_assertions)]
+                        eprintln!("[JIT] Model '{}' compiled to native code", model.name);
+                        Ok(std::sync::Arc::new(native))
+                    }
+                    Err(error) => {
+                        let msg = error.to_string();
+                        log::warn!(
+                            "[JIT] Native compilation failed for '{}': {}",
+                            model.name,
+                            msg
+                        );
+                        #[cfg(debug_assertions)]
+                        eprintln!(
+                            "[JIT] Native compilation failed for '{}': {}",
+                            model.name, msg
+                        );
+                        Err(msg)
+                    }
+                }
+            })
     }
 
     /// Browser-side entry-table cache, keyed on the same content identity as
@@ -8603,13 +8348,33 @@ endmodule
             .expect("compile cache-identity canonical IR");
 
         let first = Arc::new(model.clone());
-        VerilogADevice::try_new_with_canonical_ir(
-            "XCACHE1",
-            Arc::clone(&first),
-            &artifact,
-            &[1, 0],
-        )
-        .expect("build first cache-identity device");
+        let barrier = std::sync::Barrier::new(4);
+        let images = std::thread::scope(|scope| {
+            let barrier = &barrier;
+            let jobs: Vec<_> = (0..4)
+                .map(|index| {
+                    let artifact = &artifact;
+                    let model = Arc::new(model.clone());
+                    scope.spawn(move || {
+                        barrier.wait();
+                        let mut device = VerilogADevice::try_new_with_canonical_ir(
+                            format!("XCACHE{index}"),
+                            model,
+                            artifact,
+                            &[1, 0],
+                        )
+                        .expect("build concurrent cache-identity device");
+                        device.update_voltages(&[8.0]);
+                        assert_eq!(device.try_evaluate().unwrap(), vec![2.0]);
+                        device.native_model
+                    })
+                })
+                .collect();
+            jobs.into_iter()
+                .map(|job| job.join().unwrap())
+                .collect::<Vec<_>>()
+        });
+        assert!(images.iter().all(|image| Arc::ptr_eq(image, &images[0])));
         assert_eq!(
             native_compile_count("native_cache_identity"),
             1,
@@ -8641,6 +8406,44 @@ endmodule
             1,
             "the cache must survive the last live model reference being dropped"
         );
+    }
+
+    #[test]
+    fn cancellation_after_native_compilation_keeps_the_image_for_the_next_device() {
+        struct CancelAfterNativeCompile;
+        impl crate::PipelineControl for CancelAfterNativeCompile {
+            fn is_cancelled(&self) -> bool {
+                native_compile_count("native_cancelled_constructor") > 0
+            }
+        }
+        let source = r#"
+module native_cancelled_constructor(p, n);
+inout p, n;
+electrical p, n;
+analog I(p, n) <+ V(p, n) / 4.0;
+endmodule
+"#;
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let runtime = compiler.compile_runtime(source, None).unwrap();
+        let error = VerilogADevice::try_new_with_canonical_ir_and_control(
+            "cancelled",
+            runtime.model.clone(),
+            &runtime.canonical_ir,
+            &[1, 0],
+            &CancelAfterNativeCompile,
+        )
+        .unwrap_err();
+        assert_eq!(error, VmError::CompilationCancelled);
+        let mut next = VerilogADevice::try_new_with_canonical_ir(
+            "next",
+            runtime.model,
+            &runtime.canonical_ir,
+            &[1, 0],
+        )
+        .unwrap();
+        assert_eq!(native_compile_count("native_cancelled_constructor"), 1);
+        next.update_voltages(&[8.0]);
+        assert_eq!(next.try_evaluate().unwrap(), vec![2.0]);
     }
 
     #[test]
@@ -8682,51 +8485,23 @@ endmodule
             "ordered variable slots must participate in executable cache identity"
         );
 
-        let mut cache = NativeCompileCache::default();
         let first_key = NativeCompileCacheKey::CanonicalMir {
             role: NativeCompileRole::Evaluation,
             mir_digest: "same-mir".into(),
             source_digest: model.source_digest.clone(),
             module: model.name.clone(),
-            layout: first_layout,
+            layout: first_layout.0,
         };
         let reordered_key = NativeCompileCacheKey::CanonicalMir {
             role: NativeCompileRole::Evaluation,
             mir_digest: "same-mir".into(),
             source_digest: model.source_digest.clone(),
             module: model.name.clone(),
-            layout: reordered_layout,
+            layout: reordered_layout.0,
         };
-        cache.insert(first_key, Err("first layout".into()));
         assert!(
-            cache.get(&reordered_key).is_none(),
+            first_key != reordered_key,
             "a same-source cache entry must not be reused across variable-slot layouts"
-        );
-    }
-
-    #[test]
-    fn native_compile_cache_evicts_by_image_bytes_and_keeps_the_newest_entry() {
-        let mut cache = NativeCompileCache::default();
-        for index in 0..4_u32 {
-            cache.insert(
-                NativeCompileCacheKey::CanonicalMir {
-                    role: NativeCompileRole::Evaluation,
-                    mir_digest: SmolStr::new(format!("mir{index}")),
-                    source_digest: SmolStr::new("src"),
-                    module: SmolStr::new("m"),
-                    layout: CompiledModelLayoutIdentity(blake3::hash(&index.to_le_bytes())),
-                },
-                Err(format!("failure {index}")),
-            );
-        }
-        assert_eq!(cache.entries.len(), 4, "failures cost no image bytes");
-
-        cache.image_bytes = 8;
-        cache.evict_to(0);
-        assert_eq!(
-            cache.entries.len(),
-            1,
-            "eviction must retain the most recent entry so an oversized image cannot loop"
         );
     }
 

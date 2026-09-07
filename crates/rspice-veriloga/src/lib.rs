@@ -244,9 +244,10 @@ pub struct VerilogACompiler {
 
 /// Compiler configuration options.
 ///
-/// Only the three preprocessor fields ([`include_paths`](Self::include_paths),
+/// The preprocessor fields ([`include_paths`](Self::include_paths),
 /// [`defines`](Self::defines), [`undefines`](Self::undefines)) change generated
-/// artifacts. [`performance_budget`](Self::performance_budget) is an
+/// artifacts. [`enable_ams`](Self::enable_ams) enables mixed runtime reports
+/// for hosts that execute both domains. [`performance_budget`](Self::performance_budget) is an
 /// operational policy and is deliberately excluded from artifact and compiler
 /// contract identities. The remaining fields are reserved and are folded into
 /// the compiler-contract identity.

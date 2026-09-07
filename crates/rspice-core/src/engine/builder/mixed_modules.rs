@@ -136,11 +136,17 @@ pub(super) fn try_build_mixed_signal_instance(
     circuit: &mut CircuitData,
     netlist: &crate::Netlist,
     element: &crate::netlist::Element,
-    subckt_name: &str,
-    params: &[(String, crate::netlist::ParametricValue)],
     entry: &CachedVerilogAModel,
     connect_rules: &DesignConnectRules,
+    abort: &dyn crate::abort_signal::AbortSignal,
 ) -> Result<bool, SimulationError> {
+    let crate::netlist::ElementKind::Subcircuit {
+        subckt_name,
+        params,
+    } = &element.kind
+    else {
+        return Ok(false);
+    };
     let Some(artifact) = entry.canonical_ir.as_deref() else {
         // Only a native build can reach here without an artifact, and it has
         // already refused for its own reason; an interpreter build without one
@@ -220,8 +226,12 @@ pub(super) fn try_build_mixed_signal_instance(
         artifact,
         &layout.analog_terminals,
         SchedulerLimits::default(),
+        &super::veriloga_cache::VerilogACompileControl { abort },
     )
     .map_err(|error| {
+        if abort.is_aborted() {
+            return SimulationError::Aborted;
+        }
         SimulationError::Circuit(format!(
             "mixed Verilog-AMS instance '{}' of model '{}' could not be started: {error}",
             element.name, subckt_name
