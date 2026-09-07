@@ -57,8 +57,7 @@ fn unrepresentable_spacing_is_reported_by_both_step_planners_and_dc() {
             &steps,
             StepPlanLimits::from_resource_limits(ResourceLimits::default()),
         )
-        .err()
-        .expect("STEP must reject duplicate generated points");
+        .expect_err("STEP must reject duplicate generated points");
     assert!(
         error.to_string().contains("spacing cannot be represented"),
         "{error}"
