@@ -73,11 +73,70 @@ impl Annotation {
 
 fn annotations(project: &ProjectFile) -> serde_json::Value {
     serde_json::to_value((
-        &project.result_markers,
-        &project.result_log_y_panes,
-        &project.result_expression_groups,
+        &project.result_presentation.markers,
+        &project.result_presentation.log_y_panes,
+        &project.result_presentation.expression_groups,
     ))
     .unwrap()
+}
+
+#[test]
+fn result_presentation_retains_flat_project_wire_format_and_legacy_defaults() {
+    let (mut state, key) = retained_results();
+    for annotation in Annotation::ALL {
+        annotation.add(&mut state.ui.results, &state.simulation, key);
+    }
+    let project = snapshot(&state).unwrap();
+    let wire = serde_json::to_value(&project).unwrap();
+    assert!(wire.get("result_presentation").is_none());
+    for name in [
+        "result_markers",
+        "result_log_y_panes",
+        "result_expression_groups",
+    ] {
+        assert_eq!(wire[name].as_array().unwrap().len(), 1, "{name}");
+        // Versions predating each field restore the other fields unchanged.
+        let mut legacy = wire.clone();
+        legacy.as_object_mut().unwrap().remove(name);
+        let restored: ProjectFile = serde_json::from_value(legacy.clone()).unwrap();
+        restored.validate().unwrap();
+        assert_eq!(serde_json::to_value(restored).unwrap(), legacy);
+    }
+    let text = crate::io::project_io::serialize_project_file(&project).unwrap();
+    let restored = crate::io::project_io::load_project_text(&text, None).unwrap();
+    assert_eq!(annotations(&restored), annotations(&project));
+    assert_eq!(serde_json::to_value(restored).unwrap(), wire);
+}
+
+#[test]
+fn result_log_axis_presentation_has_canonical_order_after_restore() {
+    let (mut state, key) = retained_results();
+    let units: Vec<_> = (0..16).map(|index| format!("unit-{index:02}")).collect();
+    for unit in units.iter().rev() {
+        state
+            .ui
+            .results
+            .log_y_panes
+            .insert(WavePanePresentationKey {
+                analysis: key,
+                unit: unit.clone(),
+            });
+    }
+    let presentation = state.ui.results.project_presentation(&state.simulation);
+    assert_eq!(
+        presentation
+            .log_y_panes
+            .iter()
+            .map(|pane| &pane.unit)
+            .collect::<Vec<_>>(),
+        units.iter().collect::<Vec<_>>()
+    );
+    let expected = serde_json::to_value(&presentation).unwrap();
+    crate::workbench::documents::result_document::restore_presentation(&mut state, presentation);
+    assert_eq!(
+        serde_json::to_value(state.ui.results.project_presentation(&state.simulation)).unwrap(),
+        expected
+    );
 }
 
 #[test]

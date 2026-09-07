@@ -227,6 +227,15 @@ use std::collections::{HashMap, HashSet};
 use egui::{Ui, WidgetInfo, WidgetType};
 use serde::{Deserialize, Serialize};
 
+pub(crate) use crate::state::result_presentation::{
+    AnalysisPresentationKey, AnalysisPresentationSource, TracePresentationKey,
+    WaveformPresentationKey,
+};
+pub use crate::state::result_presentation::{
+    ExprTrace, MarkerKind, ResultMarker, WavePanePresentationKey,
+};
+use crate::state::result_presentation::{ResultExpressionGroup, ResultPresentation};
+
 use super::visualization_family::SourceSampleSelection;
 use crate::analysis::eye_diagram::EyeTimebase;
 use crate::product::{AnalysisInstanceId, DatasetId, ResultDocumentId};
@@ -256,62 +265,6 @@ pub type WaveformSeriesResult = Result<WaveformSeries, String>;
 type WindowStatsKey = (u64, u64, u64);
 type WindowStats = Option<(f64, f64, f64)>;
 
-/// Stable identity of one retained analysis within one immutable dataset.
-///
-/// Current results use the exact prepared-task identity. A legacy result has
-/// no such provenance, so its run-local analysis id is safe only when paired
-/// with the immutable dataset id. Neither representation depends on vector
-/// position, which prevents presentation state from moving to another
-/// analysis when retained results are reordered.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub(crate) struct AnalysisPresentationKey {
-    dataset_id: DatasetId,
-    source: AnalysisPresentationSource,
-}
-
-/// Which authored analysis a result came from, independent of the dataset it
-/// was solved into.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub(crate) enum AnalysisPresentationSource {
-    Prepared(AnalysisInstanceId),
-    Legacy(u64),
-}
-
-impl AnalysisPresentationKey {
-    pub(crate) fn new(dataset_id: DatasetId, analysis: &AnalysisResult) -> Self {
-        let source = analysis.provenance().map_or(
-            AnalysisPresentationSource::Legacy(analysis.id),
-            |provenance| AnalysisPresentationSource::Prepared(provenance.source_instance_id()),
-        );
-        Self { dataset_id, source }
-    }
-
-    pub(crate) const fn dataset_id(self) -> DatasetId {
-        self.dataset_id
-    }
-
-    /// The authored analysis this key names, without the dataset one run of
-    /// it produced.
-    ///
-    /// Presentation decisions the reader makes about "the transient" are
-    /// about the analysis, not about the one solve of it that happened to be
-    /// on screen when they made them.
-    pub(crate) const fn authored(self) -> AnalysisPresentationSource {
-        self.source
-    }
-
-    pub(crate) fn resolve(self, run: &SimulationRun) -> Option<(usize, &AnalysisResult)> {
-        (run.dataset_id == self.dataset_id)
-            .then(|| {
-                run.analyses
-                    .iter()
-                    .enumerate()
-                    .find(|(_, analysis)| Self::new(run.dataset_id, analysis) == self)
-            })
-            .flatten()
-    }
-}
-
 /// Whether retained evidence belongs to the stable analysis authored in the
 /// simulation plan. Deterministically expanded executions (for example PVT
 /// points) have distinct execution identities and must still match their
@@ -323,25 +276,6 @@ pub(crate) fn analysis_matches_authored_source(
     analysis
         .provenance()
         .is_some_and(|provenance| provenance.authored_source_instance_id() == authored_source_id)
-}
-
-/// Stable identity of one source waveform representation inside an analysis.
-///
-/// `source_name` follows the retained waveform through reordering. `kind` and
-/// `family_group` distinguish real/imaginary, magnitude/phase, and projected
-/// family traces that intentionally share the same source waveform.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub(crate) struct TracePresentationKey {
-    source_name: String,
-    kind: u8,
-    family_group: u64,
-}
-
-/// Fully dataset-bound identity of one presented waveform.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub(crate) struct WaveformPresentationKey {
-    analysis: AnalysisPresentationKey,
-    trace: TracePresentationKey,
 }
 
 /// Stable identity of one retained source waveform whose quick-view
@@ -1323,18 +1257,6 @@ pub(crate) fn apply_pending_view_gesture(ui: &Ui, state: &mut AppState) {
     }
 }
 
-fn analysis_presentation_order_key(key: AnalysisPresentationKey) -> (uuid::Uuid, u8, [u8; 16]) {
-    let (kind, source) = match key.source {
-        AnalysisPresentationSource::Prepared(id) => (0, *id.as_uuid().as_bytes()),
-        AnalysisPresentationSource::Legacy(id) => {
-            let mut bytes = [0_u8; 16];
-            bytes[8..].copy_from_slice(&id.to_be_bytes());
-            (1, bytes)
-        }
-    };
-    (key.dataset_id.as_uuid(), kind, source)
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct ViewerAvailability {
     available: bool,
@@ -1434,19 +1356,6 @@ impl CursorTool {
     pub const fn is_armed(self) -> bool {
         self.0
     }
-}
-
-/// What a result marker asserts, and therefore how it draws.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-pub enum MarkerKind {
-    /// A freeform annotation on a sample.
-    #[default]
-    Note,
-    /// A called-out extremum or feature of the curve.
-    Peak,
-    /// A limit the design is measured against. Drawn as a limit line,
-    /// because a spec constrains the axis position, not one curve.
-    Spec,
 }
 
 impl MarkerKind {
@@ -1843,6 +1752,19 @@ pub(crate) fn marker_anchor_for(
     }
 }
 
+/// Restore authored presentation only after its datasets and visualization
+/// documents have been loaded. Exhaustive ownership covers every durable field.
+pub(crate) fn restore_presentation(state: &mut AppState, presentation: ResultPresentation) {
+    let ResultPresentation {
+        markers,
+        log_y_panes,
+        expression_groups,
+    } = presentation;
+    restore_markers(state, markers);
+    restore_log_y_panes(state, log_y_panes);
+    restore_expression_groups(state, expression_groups);
+}
+
 /// Restore the markers a project retained, dropping any whose analysis is not
 /// in the reopened datasets, and any that is only a saved projection of a
 /// marker the workspace's own visualization documents already own.
@@ -1873,6 +1795,9 @@ pub(crate) fn restore_markers(state: &mut AppState, markers: Vec<ResultMarker>) 
 /// visualization document already retains.
 fn is_document_marker_projection(state: &AppState, marker: &ResultMarker) -> bool {
     use crate::results::visualization_document::TypedValue;
+    if marker.anchor.analysis != marker.analysis {
+        return false;
+    }
     state
         .workspace
         .visualization_documents
@@ -1886,7 +1811,21 @@ fn is_document_marker_projection(state: &AppState, marker: &ResultMarker) -> boo
                 else {
                     return false;
                 };
-                trace.label == marker.trace_name
+                let Some(binding) = document
+                    .panes()
+                    .iter()
+                    .find(|pane| pane.id == trace.pane_id)
+                    .and_then(|pane| pane.binding)
+                else {
+                    return false;
+                };
+                // Equal display text is not evidence of equal ownership.
+                // Preserve annotations on another dataset, analysis, or signal.
+                binding.dataset == trace.binding
+                    && binding.dataset.dataset_id == marker.analysis.dataset_id()
+                    && binding.analysis_id == marker.analysis.retained_instance_id()
+                    && trace.source_signal() == Some(marker.anchor.trace.source_name.as_str())
+                    && trace.label == marker.trace_name
                     && retained.coordinate == TypedValue::Real(marker.x)
                     && retained.label == marker.note
                     && marker_kind_of_retained(retained.kind) == marker.kind
@@ -1915,10 +1854,7 @@ pub(crate) fn restore_log_y_panes(state: &mut AppState, panes: Vec<WavePanePrese
 /// Restore project-owned expression definitions after their immutable result
 /// datasets have been loaded. Stale groups fail closed instead of attaching
 /// their text to whichever analysis happens to occupy an old ordinal.
-pub(crate) fn restore_expression_groups(
-    state: &mut AppState,
-    groups: Vec<crate::io::ProjectResultExpressionGroup>,
-) {
+pub(crate) fn restore_expression_groups(state: &mut AppState, groups: Vec<ResultExpressionGroup>) {
     state.ui.results.analysis_exprs.clear();
     state.ui.results.exprs.clear();
     state.ui.results.expr_projection_keys.clear();
@@ -1942,28 +1878,6 @@ pub(crate) fn restore_expression_groups(
         .ui
         .results
         .reconcile_expression_projection(&state.simulation);
-}
-
-/// A user-placed marker on a waveform strip.
-///
-/// The anchor is a *signal*, not one solve of it: `y` is resampled from the
-/// trace every frame, so a marker survives zoom, pan, and retained-vector
-/// reordering without drifting onto a different dataset or curve.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ResultMarker {
-    /// Stable per-project id. Renders as `M{id}`.
-    pub id: u32,
-    /// Dataset-bound identity of the strip this marker lives on.
-    pub analysis: AnalysisPresentationKey,
-    /// Dataset-bound identity of the trace the marker rides.
-    pub anchor: WaveformPresentationKey,
-    /// Display name of the anchored trace, for the marker list.
-    pub trace_name: String,
-    /// Anchor position in the strip's X data space.
-    pub x: f64,
-    pub kind: MarkerKind,
-    /// Free text shown after the id on the tag. May be empty.
-    pub note: String,
 }
 
 /// Per-frame projection of one persistent pane's retained markers.
@@ -2066,16 +1980,6 @@ impl<'a> MarkerView<'a> {
             MarkerView::Document(marker) => format!("D{}", marker.retained_id.get()),
         }
     }
-}
-
-/// Stable identity of one unit-scoped waveform pane.
-///
-/// The analysis key retains the exact dataset identity; the unit is the pane
-/// grouping contract and remains independent of transient pane ordinals.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct WavePanePresentationKey {
-    pub analysis: AnalysisPresentationKey,
-    pub unit: String,
 }
 
 /// One horizontal measurement cursor bound to an exact waveform pane.
@@ -2773,20 +2677,6 @@ impl SelectedResultTrace {
     }
 }
 
-/// One user expression trace on a waves strip.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ExprTrace {
-    /// The calculator expression as typed ("V(out)/V(in)").
-    pub text: String,
-    /// Legend-chip visibility.
-    #[serde(default = "default_visible")]
-    pub visible: bool,
-}
-
-fn default_visible() -> bool {
-    true
-}
-
 /// State of the inline expression editor under a strip header.
 #[derive(Debug, Clone)]
 pub struct ExprEditor {
@@ -3222,6 +3112,18 @@ impl ResultsState {
             .any(|run| run.dataset_id == analysis.dataset_id())
     }
 
+    /// Capture every authored quick-view field about retained datasets.
+    pub(crate) fn project_presentation(
+        &self,
+        simulation: &crate::state::SimulationState,
+    ) -> ResultPresentation {
+        ResultPresentation {
+            markers: self.project_markers(simulation),
+            log_y_panes: self.project_log_y_panes(simulation),
+            expression_groups: self.project_expression_groups(simulation),
+        }
+    }
+
     /// The markers this project saves: the reader's own, about datasets the
     /// project still holds.
     pub(crate) fn project_markers(
@@ -3240,18 +3142,21 @@ impl ResultsState {
         &self,
         simulation: &crate::state::SimulationState,
     ) -> Vec<WavePanePresentationKey> {
-        self.log_y_panes
+        let mut panes = self
+            .log_y_panes
             .iter()
             .filter(|pane| Self::dataset_is_retained(simulation, pane.analysis))
             .cloned()
-            .collect()
+            .collect();
+        crate::state::result_presentation::canonicalize_log_y_panes(&mut panes);
+        panes
     }
 
     /// Deterministic project projection of every stable expression trace.
     pub(crate) fn project_expression_groups(
         &self,
         simulation: &crate::state::SimulationState,
-    ) -> Vec<crate::io::ProjectResultExpressionGroup> {
+    ) -> Vec<ResultExpressionGroup> {
         let mut stable = self.analysis_exprs.clone();
         if let Some(run) = simulation.active_run() {
             for (analysis_index, analysis) in run.analyses.iter().enumerate() {
@@ -3273,17 +3178,12 @@ impl ResultsState {
             .filter(|(analysis, traces)| {
                 !traces.is_empty() && Self::dataset_is_retained(simulation, **analysis)
             })
-            .map(
-                |(analysis, traces)| crate::io::ProjectResultExpressionGroup {
-                    analysis: *analysis,
-                    traces: traces.clone(),
-                },
-            )
+            .map(|(analysis, traces)| ResultExpressionGroup {
+                analysis: *analysis,
+                traces: traces.clone(),
+            })
             .collect::<Vec<_>>();
-        groups.sort_by(|left, right| {
-            analysis_presentation_order_key(left.analysis)
-                .cmp(&analysis_presentation_order_key(right.analysis))
-        });
+        groups.sort_by(|left, right| left.analysis.order_key().cmp(&right.analysis.order_key()));
         groups
     }
 

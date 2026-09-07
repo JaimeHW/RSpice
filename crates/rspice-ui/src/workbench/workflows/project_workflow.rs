@@ -1163,9 +1163,7 @@ fn apply_loaded_project_authorized(
     let mut accepted_baseline = project.clone();
     accepted_baseline.execution_context = accepted_execution_context;
     let simulation_results = project.simulation_results;
-    let result_markers = project.result_markers;
-    let result_log_y_panes = project.result_log_y_panes;
-    let result_expression_groups = project.result_expression_groups;
+    let result_presentation = project.result_presentation;
     let mut simulation_results_warning = project.simulation_results_warning;
     let workspace_migration_warning = project.workspace_migration_warning;
     state.clear_design_execution_context();
@@ -1191,12 +1189,7 @@ fn apply_loaded_project_authorized(
     // Markers are restored after the datasets they annotate, and only those
     // that still find their analysis: a marker pointing at a dataset this
     // project no longer retains would draw on nothing.
-    crate::workbench::documents::result_document::restore_markers(state, result_markers);
-    crate::workbench::documents::result_document::restore_log_y_panes(state, result_log_y_panes);
-    crate::workbench::documents::result_document::restore_expression_groups(
-        state,
-        result_expression_groups,
-    );
+    crate::workbench::documents::result_document::restore_presentation(state, result_presentation);
     if let Some(path) = origin.recent_path() {
         state.remember_recent_file(crate::workbench::app_state::RecentKind::Project, path);
     }

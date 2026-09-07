@@ -161,15 +161,17 @@ fn document_digests(
                 .map(|context| &context.model_libraries),
         )?,
     );
+    let (markers, log_y_panes, expression_groups) =
+        project.result_presentation.fingerprint_fields();
     documents.insert(
         ProjectDocumentId::ResultHistory,
         digest(&(
             &project.simulation_results,
             &project.workspace.report_documents,
             &project.workspace.visualization_documents,
-            &project.result_markers,
-            &project.result_log_y_panes,
-            &project.result_expression_groups,
+            markers,
+            log_y_panes,
+            expression_groups,
         ))?,
     );
     // The stimulus definitions ride the project document rather than a
@@ -670,6 +672,47 @@ mod tests {
             .remove(&ProjectDocumentId::ResultHistory)
             .unwrap();
         assert_ne!(baseline_digest, edited_digest);
+    }
+
+    #[test]
+    fn result_owner_preserves_existing_fingerprint_encoding() {
+        let state = AppState::default();
+        let mut project = super::super::snapshot(&state).unwrap();
+        for populated in [false, true] {
+            if populated {
+                let key = serde_json::json!({
+                    "dataset_id": "b3c6b2be-c997-4f5d-a06e-714071283df5",
+                    "source": {"Legacy": 7}
+                });
+                project.result_presentation = serde_json::from_value(serde_json::json!({
+                    "result_markers": [{
+                        "id": 3, "analysis": key,
+                        "anchor": {"analysis": key, "trace": {
+                            "source_name": "V(out)", "kind": 0, "family_group": 0
+                        }},
+                        "trace_name": "V(out)", "x": 0.125, "kind": "Note", "note": "Test"
+                    }],
+                    "result_log_y_panes": [{"analysis": key, "unit": "V"}],
+                    "result_expression_groups": [{"analysis": key, "traces": [{"text": "V(out)*2"}]}]
+                })).unwrap();
+            }
+            // This is the pre-migration six-element encoding, including three
+            // empty arrays when annotations are absent. Changing it would also
+            // change generated-netlist authority for otherwise unchanged input.
+            let legacy = digest(&(
+                &project.simulation_results,
+                &project.workspace.report_documents,
+                &project.workspace.visualization_documents,
+                &project.result_presentation.markers,
+                &project.result_presentation.log_y_panes,
+                &project.result_presentation.expression_groups,
+            ))
+            .unwrap();
+            assert_eq!(
+                document_digests(&project).unwrap()[&ProjectDocumentId::ResultHistory],
+                legacy
+            );
+        }
     }
 
     #[test]

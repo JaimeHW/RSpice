@@ -561,6 +561,37 @@ fn a_saved_projection_of_a_retained_marker_is_dropped_on_load() {
 }
 
 #[test]
+fn matching_marker_text_on_another_dataset_is_preserved_on_load() {
+    let (mut app, document_id) = persistent_transient_fixture();
+    let (analysis, anchor) = active_analysis_anchor(&mut app.state);
+    projected_pane(&mut app.state, document_id);
+    super::super::place_marker(&mut app.state, placement(analysis, &anchor, "V(out)", 0.5))
+        .expect("document marker");
+    let retained = retained_markers(&app, document_id).remove(0);
+    let mut another_run = SimulationRun::new(2);
+    another_run.add_analysis(app.state.simulation.runs[0].analyses[0].clone());
+    let another_analysis = super::super::AnalysisPresentationKey::new(
+        another_run.dataset_id,
+        &another_run.analyses[0],
+    );
+    app.state.simulation.runs.push(another_run);
+    let mut another_anchor = anchor;
+    another_anchor.analysis = another_analysis;
+    let marker = super::super::ResultMarker {
+        id: 5,
+        analysis: another_analysis,
+        anchor: another_anchor,
+        trace_name: "V(out)".to_owned(),
+        x: 0.5,
+        kind: super::super::marker_kind_of_retained(retained.kind),
+        note: retained.label,
+    };
+    super::super::restore_markers(&mut app.state, vec![marker]);
+    assert_eq!(app.state.ui.results.markers.len(), 1);
+    assert_eq!(app.state.ui.results.markers[0].analysis, another_analysis);
+}
+
+#[test]
 fn projection_carries_every_document_owned_pane_entity() {
     let (app, document_id) = persistent_transient_fixture();
     let projected = projection(&app.state, document_id).expect("document projection");

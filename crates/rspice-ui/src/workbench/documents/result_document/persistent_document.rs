@@ -1207,13 +1207,7 @@ fn resolve_binding(state: &AppState, binding: PaneDataBinding) -> Result<(usize,
 }
 
 fn analysis_identity(run: &SimulationRun, analysis: &AnalysisResult) -> AnalysisInstanceId {
-    analysis.provenance().map_or_else(
-        || {
-            let name = format!("legacy-analysis-v1/{}", analysis.id);
-            AnalysisInstanceId::from_namespace(run.dataset_id.as_uuid(), name.as_bytes())
-        },
-        |provenance| provenance.source_instance_id(),
-    )
+    super::AnalysisPresentationKey::new(run.dataset_id, analysis).retained_instance_id()
 }
 
 /// Whether the registered persistent renderer can truthfully present this

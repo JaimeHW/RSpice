@@ -31,7 +31,6 @@ pub use project_execution::{PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION, ProjectExe
 // they read alike. Nothing outside a test may reach past the context type.
 #[cfg(test)]
 pub(crate) use project_execution::{ProjectModelLibrary, persisted_active_model_section_names};
-pub(crate) use project_io::ProjectResultExpressionGroup;
 #[allow(deprecated)]
 pub use project_io::{ProjectFile, ProjectIoError, ProjectSimulationResults, load_project_file};
 pub use schematic_io::{SchematicIoError, load_schematic, save_schematic, show_save_dialog};

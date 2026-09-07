@@ -286,14 +286,7 @@ pub(crate) fn snapshot(state: &AppState) -> Result<ProjectFile, ProjectLifecycle
         simulation_results,
         execution_context,
     )
-    .with_result_markers(state.ui.results.project_markers(&state.simulation))
-    .with_result_log_y_panes(state.ui.results.project_log_y_panes(&state.simulation))
-    .with_result_expression_groups(
-        state
-            .ui
-            .results
-            .project_expression_groups(&state.simulation),
-    );
+    .with_result_presentation(state.ui.results.project_presentation(&state.simulation));
     project
         .validate()
         .map_err(|error| ProjectLifecycleError::InvalidState(error.to_string()))?;
@@ -318,9 +311,7 @@ pub(crate) fn generated_netlist_input_digest(
     project.simulation_results = ProjectSimulationResults::default();
     // Annotating a plot must never change what the netlist generator is
     // asked to produce.
-    project.result_markers = Vec::new();
-    project.result_log_y_panes = Vec::new();
-    project.result_expression_groups = Vec::new();
+    project.result_presentation = Default::default();
     project.workspace.netlist_source = None;
     project.workspace.netlist_source_path = None;
     project.workspace.netlist_document = None;
@@ -1702,17 +1693,9 @@ fn revert_document_in_place(
             state.workspace.report_documents_dirty = false;
             state.workspace.visualization_documents = baseline.workspace.visualization_documents;
             state.workspace.visualization_documents_dirty = false;
-            crate::workbench::documents::result_document::restore_markers(
+            crate::workbench::documents::result_document::restore_presentation(
                 state,
-                baseline.result_markers,
-            );
-            crate::workbench::documents::result_document::restore_log_y_panes(
-                state,
-                baseline.result_log_y_panes,
-            );
-            crate::workbench::documents::result_document::restore_expression_groups(
-                state,
-                baseline.result_expression_groups,
+                baseline.result_presentation,
             );
             state.clear_specialized_viewer_data();
         }
@@ -1952,9 +1935,7 @@ fn overlay_document(
         }
         ProjectDocumentId::ResultHistory => {
             target.simulation_results = working.simulation_results.clone();
-            target.result_markers = working.result_markers.clone();
-            target.result_log_y_panes = working.result_log_y_panes.clone();
-            target.result_expression_groups = working.result_expression_groups.clone();
+            target.result_presentation = working.result_presentation.clone();
             target.workspace.report_documents = working.workspace.report_documents.clone();
             target.workspace.visualization_documents =
                 working.workspace.visualization_documents.clone();

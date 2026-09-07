@@ -1108,14 +1108,14 @@ fn save_project_to_path_round_trips_result_markers() {
     let _ = std::fs::remove_file(&path);
 
     assert!(saved);
-    assert_eq!(loaded.result_markers.len(), 1);
-    assert_eq!(loaded.result_markers[0].note, "settling point");
+    assert_eq!(loaded.result_presentation.markers.len(), 1);
+    assert_eq!(loaded.result_presentation.markers[0].note, "settling point");
 
     let mut reopened = AppState::default();
     reopened.simulation = state.simulation.clone();
     crate::workbench::documents::result_document::restore_markers(
         &mut reopened,
-        loaded.result_markers,
+        loaded.result_presentation.markers,
     );
     assert_eq!(reopened.ui.results.markers.len(), 1);
     assert_eq!(reopened.ui.results.markers[0].note, "settling point");
@@ -1186,7 +1186,7 @@ fn save_project_to_path_round_trips_logarithmic_panes() {
 
     assert!(saved);
     assert_eq!(
-        loaded.result_log_y_panes,
+        loaded.result_presentation.log_y_panes,
         vec![pane.clone()],
         "the save carries only the pane whose analysis this project retains"
     );
@@ -1194,7 +1194,7 @@ fn save_project_to_path_round_trips_logarithmic_panes() {
     // An older file that already carries an orphan is still filtered on load.
     let mut reopened = AppState::default();
     reopened.simulation = state.simulation.clone();
-    let mut older_file = loaded.result_log_y_panes;
+    let mut older_file = loaded.result_presentation.log_y_panes;
     older_file.push(orphan);
     crate::workbench::documents::result_document::restore_log_y_panes(&mut reopened, older_file);
     assert_eq!(
@@ -1251,9 +1251,9 @@ fn save_project_to_path_round_trips_stable_expression_traces() {
     let _ = std::fs::remove_file(&path);
 
     assert!(saved);
-    assert_eq!(loaded.result_expression_groups.len(), 1);
+    assert_eq!(loaded.result_presentation.expression_groups.len(), 1);
     assert_eq!(
-        loaded.result_expression_groups[0].traces,
+        loaded.result_presentation.expression_groups[0].traces,
         vec![crate::workbench::documents::result_document::ExprTrace {
             text: "V(out) * 2".to_owned(),
             visible: true,
@@ -1264,7 +1264,7 @@ fn save_project_to_path_round_trips_stable_expression_traces() {
     reopened.simulation = state.simulation.clone();
     crate::workbench::documents::result_document::restore_expression_groups(
         &mut reopened,
-        loaded.result_expression_groups,
+        loaded.result_presentation.expression_groups,
     );
     assert_eq!(
         reopened

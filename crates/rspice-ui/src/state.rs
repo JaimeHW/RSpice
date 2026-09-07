@@ -18,6 +18,7 @@ pub(crate) mod pdk_config;
 mod physical_layout;
 mod project_sources;
 pub(crate) mod property_types;
+pub(crate) mod result_presentation;
 mod schematic;
 mod simulation;
 pub(crate) mod stimulus_library;

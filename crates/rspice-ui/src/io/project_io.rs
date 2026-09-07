@@ -267,24 +267,10 @@ pub struct ProjectFile {
     pub libraries: LibraryManager,
     #[serde(default, skip_serializing_if = "ProjectSimulationResults::is_empty")]
     pub simulation_results: ProjectSimulationResults,
-    /// Markers the reader placed on the result plots.
-    ///
-    /// They are annotations *about* the retained datasets, not part of them,
-    /// so they live beside the result document rather than inside it: a
-    /// marker must never alter a result's provenance digest.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub result_markers: Vec<ProjectResultMarker>,
-    /// Waveform panes the reader put on a logarithmic Y axis.
-    ///
-    /// The same kind of fact as a marker and kept the same way: a decision
-    /// about how to read a retained dataset, living beside the result
-    /// document rather than inside it so it cannot alter a provenance digest.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub result_log_y_panes: Vec<ProjectResultLogYPane>,
-    /// Stable, project-owned calculated waveform traces grouped by immutable
-    /// dataset and analysis identity.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub(crate) result_expression_groups: Vec<ProjectResultExpressionGroup>,
+    /// Project-owned annotations, separate from immutable numerical evidence.
+    /// Flattening preserves the existing project JSON field names.
+    #[serde(flatten)]
+    pub result_presentation: crate::state::result_presentation::ResultPresentation,
     /// Authoritative execution inputs. Absent only in projects written before
     /// project-owned simulation plans were introduced.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -300,26 +286,10 @@ pub struct ProjectFile {
     pub workspace_migration_warning: Option<String>,
 }
 
-/// One retained result marker, as written to the project.
-///
-/// The identities are the workspace's own dataset-bound presentation keys, so
-/// a marker re-attaches to the same analysis and trace after a reload however
-/// the retained analyses were reordered — and silently drops if the dataset
-/// it annotated is no longer in the project.
-pub type ProjectResultMarker = crate::workbench::documents::result_document::ResultMarker;
-pub type ProjectResultLogYPane =
-    crate::workbench::documents::result_document::WavePanePresentationKey;
-
 const MAX_PROJECT_RESULT_EXPRESSION_GROUPS: usize = 4_096;
 const MAX_PROJECT_RESULT_EXPRESSIONS_TOTAL: usize = 16_384;
 const MAX_PROJECT_RESULT_EXPRESSIONS_PER_ANALYSIS: usize = 512;
 const MAX_PROJECT_RESULT_EXPRESSION_BYTES: usize = 4_096;
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct ProjectResultExpressionGroup {
-    pub analysis: crate::workbench::documents::result_document::AnalysisPresentationKey,
-    pub traces: Vec<crate::workbench::documents::result_document::ExprTrace>,
-}
 
 impl ProjectFile {
     #[cfg(test)]
@@ -329,9 +299,7 @@ impl ProjectFile {
             workspace,
             libraries,
             simulation_results: ProjectSimulationResults::default(),
-            result_markers: Vec::new(),
-            result_log_y_panes: Vec::new(),
-            result_expression_groups: Vec::new(),
+            result_presentation: Default::default(),
             execution_context: None,
             simulation_results_warning: None,
             workspace_migration_warning: None,
@@ -349,9 +317,7 @@ impl ProjectFile {
             workspace,
             libraries,
             simulation_results,
-            result_markers: Vec::new(),
-            result_log_y_panes: Vec::new(),
-            result_expression_groups: Vec::new(),
+            result_presentation: Default::default(),
             execution_context: None,
             simulation_results_warning: None,
             workspace_migration_warning: None,
@@ -375,36 +341,20 @@ impl ProjectFile {
             workspace,
             libraries,
             simulation_results,
-            result_markers: Vec::new(),
-            result_log_y_panes: Vec::new(),
-            result_expression_groups: Vec::new(),
+            result_presentation: Default::default(),
             execution_context: Some(execution_context),
             simulation_results_warning: None,
             workspace_migration_warning: None,
         }
     }
 
-    /// Attach the reader's plot markers to a snapshot.
+    /// Attach all project-owned result annotations to a snapshot.
     #[must_use]
-    pub fn with_result_markers(mut self, markers: Vec<ProjectResultMarker>) -> Self {
-        self.result_markers = markers;
-        self
-    }
-
-    /// Attach the logarithmic-axis pane choices to a snapshot.
-    #[must_use]
-    pub fn with_result_log_y_panes(mut self, panes: Vec<ProjectResultLogYPane>) -> Self {
-        self.result_log_y_panes = panes;
-        self
-    }
-
-    /// Attach stable calculated waveform traces to a project snapshot.
-    #[must_use]
-    pub(crate) fn with_result_expression_groups(
+    pub(crate) fn with_result_presentation(
         mut self,
-        groups: Vec<ProjectResultExpressionGroup>,
+        presentation: crate::state::result_presentation::ResultPresentation,
     ) -> Self {
-        self.result_expression_groups = groups;
+        self.result_presentation = presentation;
         self
     }
 
@@ -451,15 +401,15 @@ impl ProjectFile {
     }
 
     fn validate_result_expression_groups(&self) -> Result<(), ProjectIoError> {
-        if self.result_expression_groups.len() > MAX_PROJECT_RESULT_EXPRESSION_GROUPS {
+        if self.result_presentation.expression_groups.len() > MAX_PROJECT_RESULT_EXPRESSION_GROUPS {
             return Err(ProjectIoError::InvalidData(format!(
                 "result expression group count {} exceeds the supported limit of {MAX_PROJECT_RESULT_EXPRESSION_GROUPS}",
-                self.result_expression_groups.len()
+                self.result_presentation.expression_groups.len()
             )));
         }
         let mut analyses = HashSet::new();
         let mut total = 0_usize;
-        for group in &self.result_expression_groups {
+        for group in &self.result_presentation.expression_groups {
             if !analyses.insert(group.analysis) {
                 return Err(ProjectIoError::InvalidData(
                     "result expression groups contain a duplicate stable analysis identity"
