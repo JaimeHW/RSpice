@@ -22,6 +22,85 @@ use std::process::Command;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 #[test]
+fn nodeset_capability_tracks_simulation_code_across_runtime_and_generated_models() {
+    for (body, expected) in [
+        ("analog I(p,n)<+V(p,n);", false),
+        (
+            "analog initial state=analysis(\"nodeset\"); analog I(p,n)<+state*V(p,n);",
+            false,
+        ),
+        (
+            "analog begin state=analysis(\"NODESET\"); I(p,n)<+state*V(p,n); end",
+            true,
+        ),
+        (
+            "analog begin if (analysis(\"nodeset\")) V(p,n)<+1; else I(p,n)<+V(p,n); end",
+            true,
+        ),
+        (
+            "analog begin while (analysis(\"nodeset\") && state<1) state=state+1; I(p,n)<+state*V(p,n); end",
+            true,
+        ),
+        (
+            "analog begin $finish(analysis(\"nodeset\")); I(p,n)<+V(p,n); end",
+            true,
+        ),
+        (
+            "analog initial state=analysis(\"nodeset\"); analog I(p,n)<+V(p,n)+analysis(\"nodeset\");",
+            true,
+        ),
+    ] {
+        let source = format!(
+            "module nodeset_capability(p,n); inout p,n; electrical p,n; real state; {body} endmodule"
+        );
+        let compiled = VerilogACompiler::default().compile(&source).unwrap();
+        assert_eq!(compiled.requires_nodeset_phase, expected, "{body}");
+        let (state, stamp, noise) = generated_parts(&source, "nodeset capability");
+        run_generated_main(
+            "nodeset capability",
+            &state,
+            &stamp,
+            &noise,
+            &format!("assert_eq!(device::state::Instance::REQUIRES_NODESET_PHASE, {expected});"),
+        )
+        .expect("generated nodeset capability compiles and executes");
+    }
+}
+
+#[test]
+fn generated_boolean_initializers_and_uninitialized_loop_locals_are_numeric() {
+    let (state, stamp, noise) = generated_parts(
+        r#"module initial_loop(p,n);
+inout p,n; electrical p,n; real enabled, count;
+analog initial enabled=($temperature>0);
+analog begin
+    while (V(p,n)>0 && count<1) count=count+1;
+    I(p,n)<+enabled*count*V(p,n);
+end
+endmodule"#,
+        "numeric initialization and loop entry",
+    );
+    run_generated_main(
+        "numeric initialization and loop entry",
+        &state,
+        &stamp,
+        &noise,
+        r#"
+let mut instance = device::state::Instance::new(&[0,1]);
+for (voltage, expected) in [(1.0,1.0),(-1.0,0.0)] {
+    let ctx = runtime::GeneratedEvalContext { voltages: &[voltage,0.0], temperature: 300.0 };
+    let mut sink = [0.0];
+    instance.stamp(&ctx, &mut runtime::GeneratedStamper { sink: Some(&mut sink) });
+    assert_eq!(sink[0],expected);
+    assert!(!ctx.evaluation_failed());
+    assert_eq!(&*instance.event_state_accepted, &[1.0]);
+}
+"#,
+    )
+    .expect("initialization and loop entry preserve numeric values");
+}
+
+#[test]
 fn generated_analysis_restart_is_atomic_and_clears_operator_history() {
     let (state, stamp, noise) = generated_parts(
         r#"module restart(p,n);

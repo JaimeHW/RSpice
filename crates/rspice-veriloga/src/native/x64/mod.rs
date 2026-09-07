@@ -6846,6 +6846,7 @@ endmodule
         CompiledModel {
             name: SmolStr::new("native_x64_assignment_test"),
             source_digest: SmolStr::default(),
+            requires_nodeset_phase: false,
             num_terminals: 0,
             terminal_names: Vec::new(),
             parameters: Vec::new(),

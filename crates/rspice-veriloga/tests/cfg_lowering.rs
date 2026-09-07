@@ -360,6 +360,7 @@ endmodule
     assert_eq!(inactive.value(model.event_state_candidates[0]), Some(4.0));
 
     inputs.analyses.insert("ac".into());
+    inputs.analyses.insert("__rspice_scope_ac".into());
     inputs.analyses.insert("__rspice_initial_step".into());
     let initial = evaluate_cfg(&model.function, &inputs).expect("initial-step evaluation");
     assert_eq!(initial.value(model.event_state_candidates[0]), Some(5.0));

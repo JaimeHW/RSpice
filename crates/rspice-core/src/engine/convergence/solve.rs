@@ -315,7 +315,7 @@ impl Engine {
         abort: &dyn AbortSignal,
     ) -> Result<Vec<Value>, SimulationError> {
         let node_hints = &hints.constraints;
-        if !node_hints.is_empty() {
+        if hints.has_nodesets || !node_hints.is_empty() {
             match Self::with_nodeset_phase(circuit, hints.has_nodesets, |circuit| {
                 self.solve_nonlinear_dc_startup_with_constraints_and_abort(
                     circuit,
@@ -340,7 +340,7 @@ impl Engine {
         self.solve_nonlinear_with_guess_and_abort(circuit, matrix, Some(&initial_guess), abort)
     }
 
-    /// The nodeset qualifier belongs to the temporary authored-constraint
+    /// The nodeset qualifier belongs to the temporary model/authored nodeset
     /// interval, not the generic constrained Newton solver (also used for
     /// hard `.IC` clamps and heuristic seeds). Restore equilibrium after
     /// either outcome; a restoration error must also reach the caller.
@@ -1905,7 +1905,7 @@ impl Engine {
         solution =
             Self::sanitize_initial_guess(circuit, &solution, size, circuit.num_nodes().min(size));
         let mut nodeset_startup_solution = None;
-        if !node_hints.is_empty() {
+        if hints.has_nodesets || !node_hints.is_empty() {
             match Self::with_nodeset_phase(circuit, hints.has_nodesets, |circuit| {
                 self.solve_nonlinear_transient_op_startup_with_guess_and_hints_abort(
                     circuit, matrix, time, &solution, node_hints, abort,

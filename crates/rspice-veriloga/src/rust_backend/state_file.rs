@@ -136,6 +136,7 @@ pub(super) fn generate_state_file_with_extensions(
     ddt_state_count: usize,
     idt_state_count: usize,
     one_step_dae_split_safe: bool,
+    requires_nodeset_phase: bool,
     branch_count: usize,
     accepted_state_shape_identity: [u8; 32],
     extensions: &StateFileExtensions,
@@ -421,6 +422,9 @@ pub(super) fn generate_state_file_with_extensions(
     ));
     out.push_str(&format!(
         "    pub const ONE_STEP_DAE_SPLIT_SAFE: bool = {one_step_dae_split_safe};\n"
+    ));
+    out.push_str(&format!(
+        "    pub const REQUIRES_NODESET_PHASE: bool = {requires_nodeset_phase};\n"
     ));
     out.push_str(&format!(
         "    pub const CHECKPOINT_MODEL_IDENTITY: &'static str = {checkpoint_model_identity:?};\n"

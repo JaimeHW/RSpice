@@ -24,9 +24,9 @@ pub(crate) struct StartupVoltageConstraint {
     pub voltage: Value,
 }
 
-/// Reduced startup equations and whether any effective authored `.NODESET`
-/// remains after `.IC` precedence. Hard IC clamps and internal solver seeds
-/// must not activate Verilog-AMS `analysis("nodeset")`.
+/// Reduced startup equations and whether an effective `.NODESET` or a model
+/// requests the temporary nodeset phase. Hard IC clamps and internal solver
+/// seeds alone do not activate Verilog-AMS `analysis("nodeset")`.
 #[derive(Default)]
 pub(crate) struct StartupVoltageHints {
     pub constraints: Vec<StartupVoltageConstraint>,
@@ -1376,7 +1376,7 @@ impl Engine {
         )
     }
 
-    /// Collect node-voltage hints from .NODESET and .IC directives.
+    /// Collect node-voltage hints and model-defined nodeset requirements.
     ///
     /// .IC entries override .NODESET entries for the same node.
     pub(crate) fn collect_node_voltage_hints(
@@ -1384,9 +1384,13 @@ impl Engine {
         netlist: &Netlist,
         circuit: &crate::CircuitData,
     ) -> StartupVoltageHints {
+        let model_nodesets = circuit.veriloga_requires_nodeset_phase();
         let entry = self.startup_directives(netlist);
         let Some(directives) = entry.hints(netlist) else {
-            return StartupVoltageHints::default();
+            return StartupVoltageHints {
+                has_nodesets: model_nodesets,
+                ..Default::default()
+            };
         };
         let StartupDirectives {
             netlist,
@@ -1418,7 +1422,7 @@ impl Engine {
         combined.extend(initial_conditions);
         StartupVoltageHints {
             constraints: Self::reduce_startup_constraints(&combined),
-            has_nodesets,
+            has_nodesets: has_nodesets || model_nodesets,
         }
     }
 

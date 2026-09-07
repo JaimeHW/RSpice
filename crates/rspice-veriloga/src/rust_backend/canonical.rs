@@ -153,6 +153,7 @@ pub(crate) fn generate_device_measured(
         plan.ddt_slots.len(),
         plan.idt_slots.len(),
         plan.one_step_dae_split_safe,
+        plan.requires_nodeset_phase,
         artifact.mir.branch_unknowns.len(),
         accepted_state_shape_identity,
         &state_extensions,
@@ -889,6 +890,7 @@ struct ModelPlan {
     /// Models with `idt`, nonlinear use of `ddt`, or `ddt`-dependent control
     /// flow remain on OneStep order one rather than changing their equations.
     one_step_dae_split_safe: bool,
+    requires_nodeset_phase: bool,
 }
 
 impl ModelPlan {
@@ -912,6 +914,12 @@ impl ModelPlan {
             )
         })?;
         reject_unsupported_kinds(artifact, &cfg.function)?;
+        // This CFG excludes declaration/analog initial phases. Inspect the
+        // emitted body once, rather than searching source or scanning it for
+        // every runtime instance.
+        let requires_nodeset_phase = cfg.function.values.iter().any(|value| {
+            matches!(&value.kind, CfgValueKind::Analysis(name) if name.eq_ignore_ascii_case("nodeset"))
+        });
         record_phase(
             artifact,
             measurements,
@@ -1432,6 +1440,7 @@ impl ModelPlan {
             timer_slots,
             limit_slots,
             one_step_dae_split_safe,
+            requires_nodeset_phase,
         })
     }
 
@@ -2757,6 +2766,7 @@ impl ModelPlan {
             let (body, values) = emit_body(&plan.function, &plan.outputs, &self.emit_bindings())
                 .map_err(|error| unsupported(artifact, format!("initialization body: {error}")))?;
             out.push_str(&indent(&body, 2));
+            let values = numeric_output_names(&plan.function, &plan.outputs, &values);
             for (slot, value) in values.iter().take(plan.state_count).enumerate() {
                 let _ = writeln!(
                     out,

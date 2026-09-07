@@ -267,6 +267,7 @@ mod tests {
         CompiledModel {
             name: SmolStr::new("aarch64_model_plan_test"),
             source_digest: SmolStr::default(),
+            requires_nodeset_phase: false,
             num_terminals: 0,
             terminal_names: Vec::new(),
             parameters: Vec::new(),

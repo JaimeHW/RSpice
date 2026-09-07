@@ -396,6 +396,12 @@ impl BuiltinVerilogADevices {
             .all(|device| device.kind.one_step_dae_split_safe())
     }
 
+    pub(crate) fn requires_nodeset_phase(&self) -> bool {
+        self.devices
+            .iter()
+            .any(|device| device.kind.requires_nodeset_phase())
+    }
+
     /// Earliest interior `cross`/`above` root produced by the latest complete
     /// generated-model evaluation.
     #[inline]

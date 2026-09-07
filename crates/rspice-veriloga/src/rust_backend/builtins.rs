@@ -2680,25 +2680,30 @@ fn write_registry(
     out.push_str("}\n\n");
 
     out.push_str("impl GeneratedBuiltinKind {\n");
-    out.push_str("    pub fn one_step_dae_split_safe(&self) -> bool {\n");
-    if devices.is_empty() {
-        out.push_str("        let _ = self;\n");
-        out.push_str(
-            "        unreachable!(\"empty generated Verilog-A registry has no DAE capability\")\n",
-        );
-    } else {
-        out.push_str("        match self {\n");
-        for (index, feature) in feature_names.iter().enumerate() {
-            writeln!(
-                out,
-                "            #[cfg(feature = {feature:?})]\n            Self::Device{index}(_) => {}::Instance::ONE_STEP_DAE_SPLIT_SAFE,",
-                devices[index].folder_name,
-            )?;
+    for (method, constant) in [
+        ("one_step_dae_split_safe", "ONE_STEP_DAE_SPLIT_SAFE"),
+        ("requires_nodeset_phase", "REQUIRES_NODESET_PHASE"),
+    ] {
+        writeln!(out, "    pub fn {method}(&self) -> bool {{")?;
+        if devices.is_empty() {
+            out.push_str("        let _ = self;\n");
+            out.push_str(
+                "        unreachable!(\"empty generated Verilog-A registry has no model capability\")\n",
+            );
+        } else {
+            out.push_str("        match self {\n");
+            for (index, feature) in feature_names.iter().enumerate() {
+                writeln!(
+                    out,
+                    "            #[cfg(feature = {feature:?})]\n            Self::Device{index}(_) => {}::Instance::{constant},",
+                    devices[index].folder_name,
+                )?;
+            }
+            out.push_str("            Self::__NonExhaustive(value) => match *value {},\n");
+            out.push_str("        }\n");
         }
-        out.push_str("            Self::__NonExhaustive(value) => match *value {},\n");
-        out.push_str("        }\n");
+        out.push_str("    }\n\n");
     }
-    out.push_str("    }\n\n");
     out.push_str("    pub fn transient_event_refinement_time(&self) -> Option<crate::Value> {\n");
     if devices.is_empty() {
         out.push_str("        let _ = self;\n");

@@ -163,6 +163,7 @@ impl CodeGenerator {
     /// Create a new code generator
     pub fn new() -> Self {
         Self {
+            requires_nodeset_phase: std::cell::Cell::new(false),
             laplace_filters: std::cell::RefCell::new(Vec::new()),
             laplace_sites: std::cell::RefCell::new(HashMap::new()),
             lookup_tables: std::cell::RefCell::new(Vec::new()),
@@ -396,6 +397,7 @@ impl CodeGenerator {
         self.slew_sites.borrow_mut().clear();
         self.cross_detector_count.set(0);
         self.timer_state_count.set(0);
+        self.requires_nodeset_phase.set(false);
 
         // Every expression this module emits already lives in the IR's arena.
         // It is taken out rather than borrowed so the IR's own lists can be
@@ -472,6 +474,7 @@ impl CodeGenerator {
         let mut model = CompiledModel {
             name: ir.name.clone(),
             source_digest: SmolStr::default(),
+            requires_nodeset_phase: false,
             num_terminals: ir.terminals.len(),
             terminal_names: ir.terminals.iter().map(|t| t.name.clone()).collect(),
             parameters,
@@ -628,6 +631,7 @@ impl CodeGenerator {
         model.lookup_tables = self.lookup_tables.take();
         model.zi_filters = self.zi_filters.take();
         model.zi_filter_definitions = self.zi_filter_definitions.take();
+        model.requires_nodeset_phase = self.requires_nodeset_phase.get();
 
         Ok(model)
     }
@@ -647,10 +651,10 @@ impl CodeGenerator {
         for item in items {
             steps.push(match item {
                 crate::ir::IrAssignmentItem::Initialization { phase, body } => {
-                    AssignmentStep::Initialization {
-                        phase,
-                        body: self.compile_assignment_items(body, arena, emit_ctx)?,
-                    }
+                    let before = self.requires_nodeset_phase.get();
+                    let body = self.compile_assignment_items(body, arena, emit_ctx);
+                    self.requires_nodeset_phase.set(before);
+                    AssignmentStep::Initialization { phase, body: body? }
                 }
                 crate::ir::IrAssignmentItem::Task(task) => {
                     AssignmentStep::Task(task.try_map(task.span, |expression| {
@@ -1419,6 +1423,9 @@ impl CodeGenerator {
             Node::Analysis(name) => {
                 // analysis(name) - check current analysis type
                 let name = arena.name(name);
+                if name.eq_ignore_ascii_case("nodeset") {
+                    self.requires_nodeset_phase.set(true);
+                }
                 let instruction = rspice_veriloga_runtime::analysis_query_id(name)
                     .map(Instruction::Analysis)
                     .unwrap_or(Instruction::PushConst(0.0));

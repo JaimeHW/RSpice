@@ -6501,6 +6501,10 @@ impl SemanticAnalyzer {
             }
             Expression::BranchAccess(_) => Ok(ValueType::NatureAccess),
             Expression::SystemFunction(_) => Ok(ValueType::Real),
+            // `analysis` has variadic string arguments and is validated outside
+            // the fixed-arity function registry. Its result is still numeric
+            // when used directly as a task argument or an integer operand.
+            Expression::Call(call) if call.name == "analysis" => Ok(ValueType::Integer),
             Expression::Call(call) => {
                 if let Some(sig) = self.functions.get(&call.name) {
                     Ok(sig.return_type)

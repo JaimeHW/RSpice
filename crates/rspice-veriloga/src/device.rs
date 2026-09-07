@@ -3887,6 +3887,11 @@ impl VerilogADevice {
         self.prev_discontinuity = discontinuity;
     }
 
+    /// Whether this model defines behavior for the initial nodeset solve.
+    pub fn requires_nodeset_phase(&self) -> bool {
+        self.model.requires_nodeset_phase
+    }
+
     /// The compiled module's identity, available before analysis initialization.
     pub fn model_name(&self) -> &str {
         &self.model.name

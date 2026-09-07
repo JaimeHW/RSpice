@@ -368,6 +368,27 @@ impl CircuitData {
         false
     }
 
+    /// Whether any model supplies its own initial equilibrium nodeset.
+    pub(crate) fn veriloga_requires_nodeset_phase(&self) -> bool {
+        #[cfg(feature = "veriloga")]
+        if self
+            .veriloga_devices
+            .iter()
+            .any(|device| device.requires_nodeset_phase())
+            || self
+                .mixed_signal_hosts
+                .iter()
+                .any(|host| host.requires_nodeset_phase())
+        {
+            return true;
+        }
+        #[cfg(feature = "veriloga-builtins-base")]
+        if self.generated_veriloga_devices.requires_nodeset_phase() {
+            return true;
+        }
+        false
+    }
+
     /// Whether every Verilog-A instance can participate in Xyce OneStep's
     /// order-two F/Q split without changing its model equations.
     ///

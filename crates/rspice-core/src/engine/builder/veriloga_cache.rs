@@ -245,7 +245,8 @@ use super::*;
 // canonical artifact, which cannot rely on the canonical schema check.
 // Version 45 gives global-event filters distinct physical-analysis query IDs;
 // old bytecode uses phase-sensitive predicates and must be rebuilt from source.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 45;
+// Version 46 requires the model-defined nodeset capability bit.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 46;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]

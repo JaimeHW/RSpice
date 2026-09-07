@@ -272,6 +272,98 @@ impl GeneratedBuiltinKind {
         }
     }
 
+    pub fn requires_nodeset_phase(&self) -> bool {
+        match self {
+            #[cfg(feature = "veriloga-model-diode-cmc")]
+            Self::Device0(_) => diode_cmc__diode_cmc__cdfab304::Instance::REQUIRES_NODESET_PHASE,
+            #[cfg(feature = "veriloga-model-epfl-hemt-10a")]
+            Self::Device1(_) => epfl_hemt__epfl_hemt_10a__671606cd::Instance::REQUIRES_NODESET_PHASE,
+            #[cfg(feature = "veriloga-model-juncap200")]
+            Self::Device2(_) => juncap200__juncap200__94ba75b4::Instance::REQUIRES_NODESET_PHASE,
+            #[cfg(feature = "veriloga-model-psp104tva")]
+            Self::Device3(_) => psp104t__psp104tva__0878692d::Instance::REQUIRES_NODESET_PHASE,
+            #[cfg(feature = "veriloga-model-psp104va")]
+            Self::Device4(_) => psp104__psp104va__75652357::Instance::REQUIRES_NODESET_PHASE,
+            #[cfg(feature = "veriloga-model-pspnqs104va")]
+            Self::Device5(_) => psp104_nqs__pspnqs104va__1d25ee14::Instance::REQUIRES_NODESET_PHASE,
+            #[cfg(feature = "veriloga-model-angelov")]
+            Self::Device6(_) => angelov__angelov__98b92059::Instance::REQUIRES_NODESET_PHASE,
+            #[cfg(feature = "veriloga-model-angelov-gan")]
+            Self::Device7(_) => angelov_gan__angelov_gan__98687686::Instance::REQUIRES_NODESET_PHASE,
+            #[cfg(feature = "veriloga-model-asmesd")]
+            Self::Device8(_) => asmesd__asmesd__fbe2f3a4::Instance::REQUIRES_NODESET_PHASE,
+            #[cfg(feature = "veriloga-model-asmesd-dio")]
+            Self::Device9(_) => asmesd_dio__asmesd_dio__b913dc15::Instance::REQUIRES_NODESET_PHASE,
+            #[cfg(feature = "veriloga-model-asmhemt")]
+            Self::Device10(_) => asmhemt__asmhemt__9d86ed5b::Instance::REQUIRES_NODESET_PHASE,
+            #[cfg(feature = "veriloga-model-bjt505-va")]
+            Self::Device11(_) => bjt505__bjt505_va__6ac090e2::Instance::REQUIRES_NODESET_PHASE,
+            #[cfg(feature = "veriloga-model-bjt505t-va")]
+            Self::Device12(_) => bjt505t__bjt505t_va__48d754e7::Instance::REQUIRES_NODESET_PHASE,
+            #[cfg(feature = "veriloga-model-bjtd505-va")]
+            Self::Device13(_) => bjtd505__bjtd505_va__3cb9ae22::Instance::REQUIRES_NODESET_PHASE,
+            #[cfg(feature = "veriloga-model-bjtd505t-va")]
+            Self::Device14(_) => bjtd505t__bjtd505t_va__06e24760::Instance::REQUIRES_NODESET_PHASE,
+            #[cfg(feature = "veriloga-model-bsimbulk")]
+            Self::Device15(_) => bsimbulk__bsimbulk__0f953aae::Instance::REQUIRES_NODESET_PHASE,
+            #[cfg(feature = "veriloga-model-bsimcmg-va")]
+            Self::Device16(_) => bsimcmg__bsimcmg_va__f3a4082f::Instance::REQUIRES_NODESET_PHASE,
+            #[cfg(feature = "veriloga-model-bsimimg")]
+            Self::Device17(_) => bsimimg__bsimimg__25eb6a31::Instance::REQUIRES_NODESET_PHASE,
+            #[cfg(feature = "veriloga-model-bsimsoi-18c250bc")]
+            Self::Device18(_) => bsimsoi__bsimsoi__18c250bc::Instance::REQUIRES_NODESET_PHASE,
+            #[cfg(feature = "veriloga-model-bsimsoi-e2aff994")]
+            Self::Device19(_) => bsimsoi__bsimsoi__e2aff994::Instance::REQUIRES_NODESET_PHASE,
+            #[cfg(feature = "veriloga-model-bsimsoi-va")]
+            Self::Device20(_) => bsimsoi__bsimsoi_va__3b1f6b5e::Instance::REQUIRES_NODESET_PHASE,
+            #[cfg(feature = "veriloga-model-ekv3-rf")]
+            Self::Device21(_) => ekv3__ekv3_rf__958cd2b2::Instance::REQUIRES_NODESET_PHASE,
+            #[cfg(feature = "veriloga-model-ekv-va")]
+            Self::Device22(_) => ekv26_sdext_verilog_a__ekv_va__0f1ec77e::Instance::REQUIRES_NODESET_PHASE,
+            #[cfg(feature = "veriloga-model-hicuml0va")]
+            Self::Device23(_) => hicuml0_v2p1p0__hicuml0va__91cb3377::Instance::REQUIRES_NODESET_PHASE,
+            #[cfg(feature = "veriloga-model-hicuml2va")]
+            Self::Device24(_) => hicuml2_v320__hicuml2va__25e676cf::Instance::REQUIRES_NODESET_PHASE,
+            #[cfg(feature = "veriloga-model-hisimhv-n4-va")]
+            Self::Device25(_) => hisimhv_n4__hisimhv_n4_va__69344dcf::Instance::REQUIRES_NODESET_PHASE,
+            #[cfg(feature = "veriloga-model-hisimhv-n5-va")]
+            Self::Device26(_) => hisimhv_n5__hisimhv_n5_va__89bf8539::Instance::REQUIRES_NODESET_PHASE,
+            #[cfg(feature = "veriloga-model-hisimhv-va")]
+            Self::Device27(_) => hisimhv__hisimhv_va__57d0ff0e::Instance::REQUIRES_NODESET_PHASE,
+            #[cfg(feature = "veriloga-model-hisimsoi-va-5be18005")]
+            Self::Device28(_) => hisimsoi__hisimsoi_va__5be18005::Instance::REQUIRES_NODESET_PHASE,
+            #[cfg(feature = "veriloga-model-hisimsoi-va-242bc21d")]
+            Self::Device29(_) => hisimsoi_n4__hisimsoi_va__242bc21d::Instance::REQUIRES_NODESET_PHASE,
+            #[cfg(feature = "veriloga-model-hisimsoi-va-38074d06")]
+            Self::Device30(_) => hisimsoi_n5__hisimsoi_va__38074d06::Instance::REQUIRES_NODESET_PHASE,
+            #[cfg(feature = "veriloga-model-hisimsotb-va")]
+            Self::Device31(_) => hisimsotb__hisimsotb_va__41200697::Instance::REQUIRES_NODESET_PHASE,
+            #[cfg(feature = "veriloga-model-l-utsoi-832ce87d")]
+            Self::Device32(_) => l_utsoi_102__l_utsoi__832ce87d::Instance::REQUIRES_NODESET_PHASE,
+            #[cfg(feature = "veriloga-model-l-utsoi-485e0ac9")]
+            Self::Device33(_) => l_utsoi_102_nqs__l_utsoi__485e0ac9::Instance::REQUIRES_NODESET_PHASE,
+            #[cfg(feature = "veriloga-model-mosvar")]
+            Self::Device34(_) => mosvar__mosvar__0a88ed4a::Instance::REQUIRES_NODESET_PHASE,
+            #[cfg(feature = "veriloga-model-mvsg-cmc")]
+            Self::Device35(_) => mvsg_cmc_4__mvsg_cmc__7d7f784b::Instance::REQUIRES_NODESET_PHASE,
+            #[cfg(feature = "veriloga-model-r2-cmc")]
+            Self::Device36(_) => r2_cmc__r2_cmc__bc71a915::Instance::REQUIRES_NODESET_PHASE,
+            #[cfg(feature = "veriloga-model-r2-et-cmc")]
+            Self::Device37(_) => r2_et_cmc__r2_et_cmc__a8425039::Instance::REQUIRES_NODESET_PHASE,
+            #[cfg(feature = "veriloga-model-r3-cmc")]
+            Self::Device38(_) => r3_cmc__r3_cmc__2e3554ae::Instance::REQUIRES_NODESET_PHASE,
+            #[cfg(feature = "veriloga-model-vbic13")]
+            Self::Device39(_) => vbic_3t__vbic13__aa00e2e7::Instance::REQUIRES_NODESET_PHASE,
+            #[cfg(feature = "veriloga-model-vbic13-3t-et")]
+            Self::Device40(_) => vbic_3t_et__vbic13_3t_et__bd2f63d4::Instance::REQUIRES_NODESET_PHASE,
+            #[cfg(feature = "veriloga-model-vbic13-4t")]
+            Self::Device41(_) => vbic_1p3__vbic13_4t__132cb4e0::Instance::REQUIRES_NODESET_PHASE,
+            #[cfg(feature = "veriloga-model-vbic-4t-et-cf")]
+            Self::Device42(_) => vbic_4t_et_cf__vbic_4t_et_cf__3990c5a1::Instance::REQUIRES_NODESET_PHASE,
+            Self::__NonExhaustive(value) => match *value {},
+        }
+    }
+
     pub fn transient_event_refinement_time(&self) -> Option<crate::Value> {
         match self {
             #[cfg(feature = "veriloga-model-diode-cmc")]

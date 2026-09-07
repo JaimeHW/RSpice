@@ -95,7 +95,9 @@ pub const WASM_JIT_ABI_VERSION: u32 = 9;
 /// 12 to 13 separates physical-analysis global-event filters from
 /// phase-sensitive analysis queries. Old modules must be rebuilt even though
 /// their frame layout and helper signatures remain compatible.
-pub const WASM_JIT_EMITTER_VERSION: u32 = 13;
+/// 13 to 14 supplies zero-initialized analog locals on loop/conditional entry
+/// edges before SSA merges, including paths with no explicit assignment.
+pub const WASM_JIT_EMITTER_VERSION: u32 = 14;
 
 /// Hard ceiling for one qualified shipped model's generated module.
 pub const SHIPPED_MODEL_WASM_CODE_SIZE_BUDGET_BYTES: usize = 32 * 1024 * 1024;

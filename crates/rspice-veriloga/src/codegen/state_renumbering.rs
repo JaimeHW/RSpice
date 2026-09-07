@@ -948,6 +948,7 @@ fn for_each_program_mut(model: &mut CompiledModel, visit: &mut impl FnMut(&mut B
     let CompiledModel {
         name: _,
         source_digest: _,
+        requires_nodeset_phase: _,
         num_terminals: _,
         terminal_names: _,
         parameters,

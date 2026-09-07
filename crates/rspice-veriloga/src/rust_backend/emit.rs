@@ -245,6 +245,7 @@ pub fn emit_body(
         source: String::new(),
         declared: HashSet::new(),
         loop_headers: back_edge_targets(function),
+        loop_header_exports: HashSet::new(),
         post_dominators: immediate_post_dominators(function),
         predecessor_counts: predecessor_counts(function),
         emitted: vec![false; function.values.len()],
@@ -473,6 +474,9 @@ struct Emitter<'a> {
     source: String,
     declared: HashSet<ValueId>,
     loop_headers: HashSet<BlockId>,
+    /// Header instructions read in another CFG block need bindings outside
+    /// the Rust loop. Header-local predicates retain ordinary `let` bindings.
+    loop_header_exports: HashSet<ValueId>,
     /// Immediate post-dominators, which is what a diamond's join is.
     post_dominators: Vec<Option<BlockId>>,
     /// Incoming edge count for each block. Expression-form arms must be owned
@@ -733,6 +737,45 @@ impl Emitter<'_> {
                     }
                 }
                 CfgTerminator::Return | CfgTerminator::Wait { .. } | CfgTerminator::Unset => {}
+            }
+        }
+        if !self.loop_headers.is_empty() {
+            for block in &self.function.blocks {
+                let mut read = |value: ValueId| {
+                    if self.emitted[usize::from(value)]
+                        && block_of[usize::from(value)].is_some_and(|definition| {
+                            definition != block.id && self.loop_headers.contains(&definition)
+                        })
+                    {
+                        self.loop_header_exports.insert(value);
+                    }
+                };
+                for instruction in &block.instructions {
+                    if self.emitted[usize::from(instruction.result)] {
+                        for operand in self.function.value(instruction.result).kind.operands() {
+                            read(operand);
+                        }
+                    }
+                }
+                match &block.terminator {
+                    CfgTerminator::Jump { args, .. } => args.iter().copied().for_each(&mut read),
+                    CfgTerminator::Branch {
+                        condition,
+                        then_args,
+                        else_args,
+                        ..
+                    } => {
+                        if self.effectful_branches.contains(&block.id) {
+                            read(*condition);
+                        }
+                        then_args
+                            .iter()
+                            .chain(else_args)
+                            .copied()
+                            .for_each(&mut read);
+                    }
+                    CfgTerminator::Return | CfgTerminator::Wait { .. } | CfgTerminator::Unset => {}
+                }
             }
         }
         // An output is read by the caller, which no operand list records.
@@ -1103,6 +1146,18 @@ impl Emitter<'_> {
         for param in &self.function.block(header).params.clone() {
             self.declare_mutable(*param, depth);
         }
+        // The header executes even when the first test exits the loop. Its
+        // values therefore dominate the exit in SSA, but a Rust `let` inside
+        // `loop` would hide them from downstream users. Retain their bindings
+        // outside the lexical loop and refresh them on every header visit.
+        for instruction in &self.function.block(header).instructions.clone() {
+            let value = instruction.result;
+            if self.loop_header_exports.contains(&value) && self.declared.insert(value) {
+                // Every exit passes through this header's assignment, so a
+                // synthetic zero initialization is unnecessary.
+                self.line(depth, &format!("let mut {};", self.value_name(value)));
+            }
+        }
         self.line(depth, "loop{");
         self.instructions(header, depth + 1)?;
 
@@ -1216,7 +1271,15 @@ impl Emitter<'_> {
             }
             self.line(
                 depth,
-                &format!("let {}={expression};", self.value_name(instruction.result)),
+                &format!(
+                    "{}{}={expression};",
+                    if self.declared.contains(&instruction.result) {
+                        ""
+                    } else {
+                        "let "
+                    },
+                    self.value_name(instruction.result)
+                ),
             );
             self.capture(instruction.result, depth);
         }

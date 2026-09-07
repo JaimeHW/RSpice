@@ -1099,6 +1099,19 @@ impl<'a> CfgLowerer<'a> {
         // Every residual starts at zero so an untaken branch needs no special
         // case: the join simply merges the value that was never updated.
         let zero = self.real_constant(0.0);
+        // A loop or conditional can read a local before its first assignment.
+        // Install its language-defined initial value on the entry edge before
+        // SSA creates merges: falling back to zero at a direct read cannot
+        // supply a missing incoming definition when a loop header is sealed.
+        for variable in self
+            .hir
+            .variables
+            .iter()
+            .filter(|variable| !variable.is_state)
+        {
+            self.builder
+                .write_variable(CfgVariable::Local(variable.id), entry, zero);
+        }
         let event_state_variables = self
             .hir
             .variables

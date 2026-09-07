@@ -80,9 +80,8 @@ impl Instance {
 		let BR=staged[28];
 		let EG=staged[87]!=0.0;
 		let EJ=parameters[21];
-		let FQ=0f64;
-		let FU=parameters[1];
-		let FX=parameters[41];
+		let FT=parameters[1];
+		let FW=parameters[41];
 		let J=if G{
 		let H=temperature+ parameters[2];
 		H
@@ -257,7 +256,7 @@ impl Instance {
 		FL=EI;
 		FM=EK;
 		FN=EH;
-		FP=FQ;
+		FP=A;
 		}else{
 		let EM=EF+ (F* EE);
 		let EN=EM> A;
@@ -293,38 +292,38 @@ impl Instance {
 		let FI=(ED* 0.66666666f64)/ DW;
 		let FJ=(((((-EA)* EE)/ (((AC+ EA)+ EA)* DY))* FA)+ ((FI* (DT+ (AC* DU)))* FB))+ ((FI* (DU+ (AC* DT)))* ((DO* N)* FA));
 		let FK=(-EB)* (((EC- (EE/ ((AC* EC)* DY)))* FA)+ FJ);
-		let FS=if EG{
+		let FR=if EG{
 		let FO=(-FH)- (((EJ* FL)/ (FM* FN))* FA);
 		FO
 		}else{
-		let FR=(-FH)+ ((C/ FP)* (FK+ (F* FJ)));
-		FR
+		let FQ=(-FH)+ ((C/ FP)* (FK+ (F* FJ)));
+		FQ
 		};
-		let FT=EX* ((((((staged[45]/ (((4f64* EU)* ET)* ES))* FA)+ FS)* EV)+ FB)- FG);
+		let FS=EX* ((((((staged[45]/ (((4f64* EU)* ET)* ES))* FA)+ FR)* EV)+ FB)- FG);
+		let FX;
 		let FY;
 		let FZ;
 		let GA;
 		let GB;
-		let GC;
-		if FU!=0.0{
-		let FV=(5.5224904e-23f64* J)* EY;
-		let FW=((parameters[42]* FT)* FT)/ (((staged[10]* parameters[8])* T)* parameters[13]);
-		FY=M;
-		FZ=FV;
-		GA=M;
+		if FT!=0.0{
+		let FU=(5.5224904e-23f64* J)* EY;
+		let FV=((parameters[42]* FS)* FS)/ (((staged[10]* parameters[8])* T)* parameters[13]);
+		FX=M;
+		FY=FU;
+		FZ=M;
+		GA=FV;
 		GB=FW;
-		GC=FX;
 		}else{
+		FX=A;
 		FY=A;
 		FZ=A;
 		GA=A;
 		GB=A;
-		GC=A;
 		}
-        if !(FY != 0.0) {
+        if !(FX != 0.0) {
             if !visitor.visit(0, GeneratedNoiseEvaluationRef { active: false, psd: 0.0, exponent: None, table_operands: &[] }) { return Ok(()); }
         } else {
-            let psd = FZ;
+            let psd = FY;
             if !(psd).is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 0, quantity: "psd", value: psd }); }
             let psd = psd.abs();
             let exponent: Option<f64> = None;
@@ -333,13 +332,13 @@ impl Instance {
             if !(psd).is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 0, quantity: "scaled psd", value: psd }); }
             if !visitor.visit(0, GeneratedNoiseEvaluationRef { active: true, psd, exponent, table_operands: &table_operands }) { return Ok(()); }
         }
-        if !(GA != 0.0) {
+        if !(FZ != 0.0) {
             if !visitor.visit(1, GeneratedNoiseEvaluationRef { active: false, psd: 0.0, exponent: None, table_operands: &[] }) { return Ok(()); }
         } else {
-            let psd = GB;
+            let psd = GA;
             if !(psd).is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 1, quantity: "psd", value: psd }); }
             let psd = psd.abs();
-            let exponent: Option<f64> = Some(GC);
+            let exponent: Option<f64> = Some(GB);
             if let Some(value) = exponent { if !value.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 1, quantity: "exponent", value }); } }
             let table_operands = [];
             let psd = psd * self.multiplicity;
@@ -406,10 +405,9 @@ impl Instance {
         let DJ=1.55f64;
         let DQ=1e-64f64;
         let GQ=parameters[21];
-        let HX=0f64;
-        let IB=parameters[1];
-        let IE=parameters[41];
-        let IL=L2([0f64;2]);
+        let IA=parameters[1];
+        let ID=parameters[41];
+        let IK=L2([0f64;2]);
         let D=B/ C;
         let E=(D* parameters[14]).sqrt();
         let G=E* F;
@@ -679,7 +677,7 @@ impl Instance {
         HS=GP;
         HT=GR;
         HU=GO;
-        HW=HX;
+        HW=A;
         }else{
         let GT=GM+ (R* GL);
         let GU=GT> A;
@@ -715,58 +713,58 @@ impl Instance {
         let HP=(GK* 0.66666666f64)/ GD;
         let HQ=(((((-GH)* GL)/ (((CI+ GH)+ GH)* GF))* HH)+ ((HP* (GA+ (CI* GB)))* HI))+ ((HP* (GB+ (CI* GA)))* ((FV* AF)* HH));
         let HR=(-GI)* (((GJ- (GL/ ((CI* GJ)* GF)))* HH)+ HQ);
-        let HZ=if GN{
+        let HY=if GN{
         let HV=(-HO)- (((GQ* HS)/ (HT* HU))* HH);
         HV
         }else{
-        let HY=(-HO)+ ((K/ HW)* (HR+ (R* HQ)));
-        HY
+        let HX=(-HO)+ ((K/ HW)* (HR+ (R* HQ)));
+        HX
         };
-        let IA=HE* (((((((-BT)/ (((4f64* HB)* HA)* GZ))* HH)+ HZ)* HC)+ HI)- HN);
+        let HZ=HE* (((((((-BT)/ (((4f64* HB)* HA)* GZ))* HH)+ HY)* HC)+ HI)- HN);
+        let IE;
         let IF;
         let IG;
         let IH;
         let II;
         let IJ;
-        let IK;
-        if IB!=0.0{
-        let IC=(5.5224904e-23f64* AA)* HF;
-        let ID=((parameters[42]* IA)* IA)/ (((AX* BW)* AW)* C);
-        let IM=L2([1f64,0.0])+ L2([0.0,1f64]);
-        IF=AE;
-        IG=IC;
-        IH=AE;
+        if IA!=0.0{
+        let IB=(5.5224904e-23f64* AA)* HF;
+        let IC=((parameters[42]* HZ)* HZ)/ (((AX* BW)* AW)* C);
+        let IL=L2([1f64,0.0])+ L2([0.0,1f64]);
+        IE=AE;
+        IF=IB;
+        IG=AE;
+        IH=IC;
         II=ID;
-        IJ=IE;
-        IK=IM;
+        IJ=IL;
         }else{
+        IE=A;
         IF=A;
         IG=A;
         IH=A;
         II=A;
-        IJ=A;
-        IK=IL;
+        IJ=IK;
         }
-        let IN=IK[0];
-        let IO=IK[1];
+        let IM=IJ[0];
+        let IN=IJ[1];
         let omega = core::f64::consts::TAU * frequency_hz;
-        let process_0_active = IF != 0.0;
-        let process_0_psd = (IG).abs();
+        let process_0_active = IE != 0.0;
+        let process_0_psd = (IF).abs();
         if !process_0_psd.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 0, quantity: "psd", value: process_0_psd }); }
         let process_0_exponent: Option<f64> = None;
         if let Some(value) = process_0_exponent { if !value.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 0, quantity: "exponent", value }); } }
         let process_0_table = [];
-        let process_0_gain_0 = GeneratedNoiseComplex { re: (IN) * -1.0 * self.multiplicity.sqrt(), im: omega * (0.0) * -1.0 * self.multiplicity.sqrt() };
+        let process_0_gain_0 = GeneratedNoiseComplex { re: (IM) * -1.0 * self.multiplicity.sqrt(), im: omega * (0.0) * -1.0 * self.multiplicity.sqrt() };
         if !process_0_gain_0.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFiniteGain { process: 0, injection: 0, re: process_0_gain_0.re, im: process_0_gain_0.im }); }
         let process_0_injections = [GeneratedNoiseInjectionEvaluation { descriptor: 0, gain: process_0_gain_0 }];
         if !visitor.visit_process(0, GeneratedNoiseProcessEvaluationRef { active: process_0_active, psd: process_0_psd, exponent: process_0_exponent, table_operands: &process_0_table, injections: &process_0_injections }) { return Ok(()); }
-        let process_1_active = IH != 0.0;
-        let process_1_psd = (II).abs();
+        let process_1_active = IG != 0.0;
+        let process_1_psd = (IH).abs();
         if !process_1_psd.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 1, quantity: "psd", value: process_1_psd }); }
-        let process_1_exponent: Option<f64> = Some(IJ);
+        let process_1_exponent: Option<f64> = Some(II);
         if let Some(value) = process_1_exponent { if !value.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 1, quantity: "exponent", value }); } }
         let process_1_table = [];
-        let process_1_gain_0 = GeneratedNoiseComplex { re: (IO) * -1.0 * self.multiplicity.sqrt(), im: omega * (0.0) * -1.0 * self.multiplicity.sqrt() };
+        let process_1_gain_0 = GeneratedNoiseComplex { re: (IN) * -1.0 * self.multiplicity.sqrt(), im: omega * (0.0) * -1.0 * self.multiplicity.sqrt() };
         if !process_1_gain_0.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFiniteGain { process: 1, injection: 0, re: process_1_gain_0.re, im: process_1_gain_0.im }); }
         let process_1_injections = [GeneratedNoiseInjectionEvaluation { descriptor: 1, gain: process_1_gain_0 }];
         if !visitor.visit_process(1, GeneratedNoiseProcessEvaluationRef { active: process_1_active, psd: process_1_psd, exponent: process_1_exponent, table_operands: &process_1_table, injections: &process_1_injections }) { return Ok(()); }

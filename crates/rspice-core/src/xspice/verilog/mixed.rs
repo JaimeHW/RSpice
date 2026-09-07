@@ -946,6 +946,10 @@ impl MixedSignalHost {
             .map_err(analog_error)
     }
 
+    pub(crate) fn requires_nodeset_phase(&self) -> bool {
+        self.analog.requires_nodeset_phase()
+    }
+
     pub(crate) fn set_analog_analysis_phase(
         &mut self,
         phase: rspice_veriloga_runtime::AnalogAnalysisPhase,

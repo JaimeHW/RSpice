@@ -12,6 +12,8 @@ use super::*;
 
 /// Code generator
 pub struct CodeGenerator {
+    /// Whether emitted simulation-phase code queries the nodeset phase.
+    pub(super) requires_nodeset_phase: std::cell::Cell<bool>,
     /// Collected Laplace filters
     pub(super) laplace_filters: std::cell::RefCell<Vec<StateSpaceFilter>>,
     /// Stable logical Laplace site to state-space filter slot.
@@ -57,6 +59,10 @@ pub struct CompiledModel {
     /// unrelated MIR/HIR.
     #[serde(default)]
     pub source_digest: SmolStr,
+    /// Simulation-phase code queries `analysis("nodeset")`. Initializers alone
+    /// do not request a nodeset solve. Required in serialized artifacts so an
+    /// older cache cannot silently disable model-defined nodesets.
+    pub requires_nodeset_phase: bool,
     /// Number of terminals
     pub num_terminals: usize,
     /// Terminal names

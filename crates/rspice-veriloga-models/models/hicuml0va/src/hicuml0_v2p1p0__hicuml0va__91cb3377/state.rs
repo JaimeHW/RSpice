@@ -573,6 +573,7 @@ impl Instance {
 	pub const ACCEPTED_STATE_SHAPE_IDENTITY: GeneratedVerilogAAcceptedStateShapeIdentity = GeneratedVerilogAAcceptedStateShapeIdentity::from_bytes([149, 75, 251, 160, 111, 90, 48, 175, 2, 217, 27, 42, 41, 126, 99, 35, 245, 163, 154, 52, 176, 205, 88, 73, 149, 185, 145, 174, 107, 221, 235, 123]);
 	pub const EVENT_STATE_COUNT: usize = 0;
 	pub const ONE_STEP_DAE_SPLIT_SAFE: bool = false;
+	pub const REQUIRES_NODESET_PHASE: bool = false;
 	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "540611a4dcd79a08a359411a60f2366cd1ee0f82c6cba536a3fe5aa38d491b5d";
 	pub const MAX_ANALOG_LOOP_ITERATIONS: usize = 1_000_000;
 
