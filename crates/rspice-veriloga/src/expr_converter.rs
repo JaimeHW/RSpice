@@ -2156,6 +2156,10 @@ impl<'a> ExprConverter<'a> {
         arena: &mut ExprArena,
         op: &AnalogOperator,
     ) -> CompileResult<NodeId> {
+        // Only the `native` build of the `$limit` arm writes a node; without
+        // that feature every arm here refuses, and the parameter is still part
+        // of the signature every other converter method has.
+        let _ = &arena;
         match op {
             #[cfg(feature = "native")]
             AnalogOperator::Limit { proposed, .. } => {
