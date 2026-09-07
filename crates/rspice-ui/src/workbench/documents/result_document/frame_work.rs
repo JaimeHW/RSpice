@@ -71,12 +71,16 @@ pub(crate) enum DatasetWalk {
     SParameterTraceScan,
     /// Rebuilding the retained dataset set used to prune presentation state.
     RetainedHistoryScan,
+    /// Merging retained scalar event histories and reconstructing declared buses.
+    EventOrder,
+    /// Validating the full sample grid and values of a legacy event projection.
+    EventProjectionScan,
 }
 
 impl DatasetWalk {
     /// Every variant, for reporting a complete count table.
     #[cfg(test)]
-    pub(crate) const ALL: [Self; 19] = [
+    pub(crate) const ALL: [Self; 21] = [
         Self::EvidenceValidation,
         Self::DatasetDigest,
         Self::ManifestViewModel,
@@ -96,6 +100,8 @@ impl DatasetWalk {
         Self::PhaseNoiseSpectrumScan,
         Self::SParameterTraceScan,
         Self::RetainedHistoryScan,
+        Self::EventOrder,
+        Self::EventProjectionScan,
     ];
 }
 

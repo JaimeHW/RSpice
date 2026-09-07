@@ -1,9 +1,13 @@
 //! Exact committed XSPICE digital and real-valued event history.
 
+use std::sync::Arc;
+
 use egui::{RichText, Ui};
 use egui_extras::{Column, TableBuilder};
 
-use crate::state::{AnalysisResult, AnalysisResultPayload, AnalysisType, WaveformData};
+use crate::state::{
+    AnalysisResult, AnalysisResultPayload, AnalysisType, RunHistoryRevision, WaveformData,
+};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{SegmentedWidth, chip, section_header, segmented};
@@ -14,6 +18,9 @@ use super::{AnalysisPresentationKey, SheetContext, panel_note, stat_table, well_
 
 const ROW_HEIGHT: f32 = 28.0;
 const HEADER_HEIGHT: f32 = 31.0;
+
+#[cfg(test)]
+mod source_tests;
 
 /// Where one row of the event history came from.
 ///
@@ -62,29 +69,52 @@ pub(crate) struct BusTimeline {
     refusal: Option<String>,
 }
 
-/// The merged event order for one analysis.
-///
-/// Built once per generation of one analysis rather than per frame: merging
-/// every node's schedule is O(events log events), and the answer only changes
-/// when the evidence does. The data version is part of the key for the same
-/// reason it is part of the evidence-validity memo's — a run still accepting
-/// points republishes one analysis identity with a longer history, so identity
-/// alone would freeze the sheet at whatever it held on the frame it opened.
-///
-/// The expanded set is part of the key too: showing a bus's members adds rows
-/// rather than filtering them, so the order itself differs. Expanding is a
-/// click, so rebuilding then costs what opening the sheet costs.
+/// One immutable merge of the retained schedules and declared buses.
+#[derive(Debug, Clone, PartialEq)]
+struct EventOrder {
+    exact: bool,
+    rows: Vec<EventOrderEntry>,
+    buses: Vec<BusTimeline>,
+}
+
+/// Source ownership is checked by both the sheet and the inspector. Holding
+/// the history revision prevents restored or edited results from reusing an
+/// old merge even when their dataset identity and display counter match.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct EventOrderCache {
     pub analysis: AnalysisPresentationKey,
-    pub data_version: u64,
-    /// Whether the rows are the committed schedule rather than a projection.
-    pub exact: bool,
-    pub rows: Vec<EventOrderEntry>,
-    /// Buses declared over this analysis' digital traces, in declaration order.
-    pub(super) buses: Vec<BusTimeline>,
-    /// The bus names whose member rows this order includes.
+    source: (RunHistoryRevision, u64),
     expanded: std::collections::BTreeSet<String>,
+    order: Arc<EventOrder>,
+}
+
+fn event_order(state: &mut AppState) -> Option<Arc<EventOrder>> {
+    let run = state.simulation.active_run()?;
+    let analysis = state.simulation.active_analysis()?;
+    let key = AnalysisPresentationKey::new(run.dataset_id, analysis);
+    let source = (
+        state.simulation.runs.revision(),
+        state.simulation.data_version,
+    );
+    let expanded = &state.ui.results.expanded_event_buses;
+    if let Some(cache) = &state.ui.results.event_order_cache
+        && cache.analysis == key
+        && cache.source == source
+        && &cache.expanded == expanded
+    {
+        return Some(Arc::clone(&cache.order));
+    }
+    if !analysis_is_renderable(analysis) || !super::retained_evidence_is_valid(state, key) {
+        return None;
+    }
+    let order = Arc::new(build_event_order(analysis, expanded));
+    state.ui.results.event_order_cache = Some(EventOrderCache {
+        analysis: key,
+        source,
+        expanded: expanded.clone(),
+        order: Arc::clone(&order),
+    });
+    Some(order)
 }
 
 /// One event picked out of the history.
@@ -98,6 +128,59 @@ pub(crate) struct DigitalEventSelection {
     pub source: EventSelectionSource,
     pub trace_name: String,
     pub point_index: usize,
+    time_bits: u64,
+    initial: bool,
+    value: SelectedEventValue,
+}
+
+/// Raw retained identity, independent of display radix and formatting. A bus
+/// also carries its bit mapping: an unchanged word can name different nets.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum SelectedEventValue {
+    Scalar(u64),
+    Bus {
+        label: String,
+        members: Vec<String>,
+        codes: Vec<Option<u8>>,
+    },
+}
+
+impl DigitalEventSelection {
+    fn matches(&self, row: &EventRow<'_>, buses: &[BusTimeline]) -> bool {
+        if self.source != row.source
+            || self.trace_name != row.trace_name
+            || self.point_index != row.point_index
+            || self.time_bits != row.time_s.to_bits()
+            || self.initial != row.initial
+        {
+            return false;
+        }
+        match (&self.value, &row.value) {
+            (
+                SelectedEventValue::Scalar(bits),
+                EventValue::Digital { .. } | EventValue::Real(_),
+            ) => *bits == row.value.identity(),
+            (
+                SelectedEventValue::Bus {
+                    label,
+                    members,
+                    codes,
+                },
+                EventValue::Bus(_),
+            ) => buses
+                .iter()
+                .find(|bus| bus.name == row.trace_name)
+                .is_some_and(|bus| {
+                    &bus.label == label
+                        && &bus.members == members
+                        && bus
+                            .events
+                            .get(row.point_index)
+                            .is_some_and(|(_, current)| current == codes)
+                }),
+            _ => false,
+        }
+    }
 }
 
 /// How a bus word is spelled.
@@ -330,6 +413,35 @@ struct EventRow<'a> {
 }
 
 impl EventRow<'_> {
+    /// Capture only on a selection gesture; ordinary row painting borrows
+    /// the evidence and compares it without copying the bus word or members.
+    fn selection(
+        &self,
+        analysis: AnalysisPresentationKey,
+        buses: &[BusTimeline],
+    ) -> Option<DigitalEventSelection> {
+        let value = match self.value {
+            EventValue::Bus(_) => {
+                let bus = buses.iter().find(|bus| bus.name == self.trace_name)?;
+                SelectedEventValue::Bus {
+                    label: bus.label.clone(),
+                    members: bus.members.clone(),
+                    codes: bus.events.get(self.point_index)?.1.clone(),
+                }
+            }
+            _ => SelectedEventValue::Scalar(self.value.identity()),
+        };
+        Some(DigitalEventSelection {
+            analysis,
+            source: self.source,
+            trace_name: self.trace_name.to_owned(),
+            point_index: self.point_index,
+            time_bits: self.time_s.to_bits(),
+            initial: self.initial,
+            value,
+        })
+    }
+
     const fn exact(&self) -> bool {
         matches!(
             self.source,
@@ -437,18 +549,11 @@ fn event_time_axis_is_valid(values: &[f64]) -> bool {
         && values.windows(2).all(|pair| pair[0] < pair[1])
 }
 
-fn real_event_values_are_valid(values: &[f64]) -> bool {
-    let Some(first_value) = values.iter().position(|value| value.is_finite()) else {
-        return false;
-    };
-    values[..first_value].iter().all(|value| value.is_nan())
-        && values[first_value..].iter().all(|value| value.is_finite())
-}
-
 fn waveform_is_event(waveform: &WaveformData) -> bool {
     let Some((_, digital)) = event_signal_name(&waveform.name) else {
         return false;
     };
+    super::frame_work::note(super::frame_work::DatasetWalk::EventProjectionScan);
     if waveform.x.len() != waveform.y.len() || !event_time_axis_is_valid(&waveform.x) {
         return false;
     }
@@ -459,7 +564,7 @@ fn waveform_is_event(waveform: &WaveformData) -> bool {
             .copied()
             .all(|value| logic_code(value).is_some())
     } else {
-        real_event_values_are_valid(&waveform.y)
+        waveform.y.iter().all(|value| value.is_finite())
     }
 }
 
@@ -471,7 +576,7 @@ fn waveform_is_event(waveform: &WaveformData) -> bool {
 /// until the run ends would hide evidence the result model already holds,
 /// which is exactly what the waveform sheets stopped doing when live partial
 /// analog landed.
-fn analysis_is_renderable(analysis: &AnalysisResult) -> bool {
+pub(super) fn analysis_is_renderable(analysis: &AnalysisResult) -> bool {
     (analysis.success || analysis.is_live_partial())
         && analysis.analysis_type == AnalysisType::Transient
         && (matches!(
@@ -500,8 +605,12 @@ pub(super) fn active_analysis_is_renderable(state: &AppState) -> bool {
     let Some(analysis) = state.simulation.active_analysis() else {
         return false;
     };
-    analysis_is_renderable(analysis)
-        && super::analysis_evidence_is_valid(state, run.dataset_id, analysis)
+    super::analysis_answers_structural_gate(
+        state,
+        run.dataset_id,
+        analysis,
+        super::StructuralGate::EventHistory,
+    ) && super::analysis_evidence_is_valid(state, run.dataset_id, analysis)
 }
 
 /// Reassemble every declared bus over the traces it names.
@@ -563,10 +672,9 @@ fn build_bus_timelines(
 
 fn build_event_order(
     analysis: &AnalysisResult,
-    analysis_key: AnalysisPresentationKey,
-    data_version: u64,
     expanded: &std::collections::BTreeSet<String>,
-) -> EventOrderCache {
+) -> EventOrder {
+    super::frame_work::note(super::frame_work::DatasetWalk::EventOrder);
     if let Some(AnalysisResultPayload::TransientEvents {
         digital_traces,
         real_traces,
@@ -620,13 +728,10 @@ fn build_event_order(
             }
         }
         sort_event_order(analysis, &buses, &mut rows);
-        return EventOrderCache {
-            analysis: analysis_key,
-            data_version,
+        return EventOrder {
             exact: true,
             rows,
             buses,
-            expanded: expanded.clone(),
         };
     }
 
@@ -669,13 +774,10 @@ fn build_event_order(
         }
     }
     sort_event_order(analysis, &[], &mut rows);
-    EventOrderCache {
-        analysis: analysis_key,
-        data_version,
+    EventOrder {
         exact: false,
         rows,
         buses: Vec::new(),
-        expanded: expanded.clone(),
     }
 }
 
@@ -822,13 +924,8 @@ fn event_rows_with(
     analysis: &AnalysisResult,
     radix: BusRadix,
     expanded: &std::collections::BTreeSet<String>,
-) -> (EventOrderCache, Vec<String>) {
-    let cache = build_event_order(
-        analysis,
-        AnalysisPresentationKey::new(crate::product::DatasetId::new(), analysis),
-        0,
-        expanded,
-    );
+) -> (EventOrder, Vec<String>) {
+    let cache = build_event_order(analysis, expanded);
     let rows = cache
         .rows
         .iter()
@@ -856,22 +953,20 @@ fn event_rows_with(
 /// caller of it is asking about.
 #[cfg(test)]
 fn event_rows(analysis: &AnalysisResult) -> Vec<EventRow<'_>> {
-    build_event_order(
-        analysis,
-        AnalysisPresentationKey::new(crate::product::DatasetId::new(), analysis),
-        0,
-        &std::collections::BTreeSet::new(),
-    )
-    .rows
-    .iter()
-    .copied()
-    .enumerate()
-    .filter_map(|(index, entry)| {
-        event_row_from_entry(analysis, &[], BusRadix::Binary, entry, index + 1)
-    })
-    .collect()
+    build_event_order(analysis, &std::collections::BTreeSet::new())
+        .rows
+        .iter()
+        .copied()
+        .enumerate()
+        .filter_map(|(index, entry)| {
+            event_row_from_entry(analysis, &[], BusRadix::Binary, entry, index + 1)
+        })
+        .collect()
 }
 
+/// Resolve one row after the caller has validated the history through
+/// `event_order`. Only the selected sample and its immediate predecessor are
+/// read; validating a complete legacy trace here would repeat it every frame.
 fn event_row_for_selection<'a>(
     analysis: &'a AnalysisResult,
     buses: &'a [BusTimeline],
@@ -923,9 +1018,6 @@ fn event_row_for_selection<'a>(
                 .iter()
                 .enumerate()
                 .find(|(_, waveform)| waveform.name == selection.trace_name)?;
-            if !waveform_is_event(waveform) {
-                return None;
-            }
             let (&time_s, &raw_value) = waveform
                 .x
                 .get(selection.point_index)
@@ -939,10 +1031,11 @@ fn event_row_for_selection<'a>(
             if selection.source != expected_source {
                 return None;
             }
-            let previous = waveform.y[..selection.point_index]
-                .iter()
-                .filter_map(|value| event_value(waveform, *value))
-                .next_back()
+            let previous = selection
+                .point_index
+                .checked_sub(1)
+                .and_then(|index| waveform.y.get(index))
+                .and_then(|value| event_value(waveform, *value))
                 .map(|value| value.identity());
             if previous == Some(current.identity()) {
                 return None;
@@ -970,7 +1063,8 @@ fn event_row_for_selection<'a>(
             }
         }
     };
-    event_row_from_entry(analysis, buses, radix, entry, 0)
+    let row = event_row_from_entry(analysis, buses, radix, entry, 0)?;
+    selection.matches(&row, buses).then_some(row)
 }
 
 pub fn show(ui: &mut Ui, state: &mut AppState) {
@@ -979,7 +1073,12 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             state.simulation.active_analysis().map(|analysis| {
                 (
                     AnalysisPresentationKey::new(run.dataset_id, analysis),
-                    analysis_is_renderable(analysis),
+                    super::analysis_answers_structural_gate(
+                        state,
+                        run.dataset_id,
+                        analysis,
+                        super::StructuralGate::EventHistory,
+                    ),
                 )
             })
         })
@@ -998,31 +1097,16 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         well_hint(ui, "The retained XSPICE event evidence is invalid");
         return;
     }
+    let Some(cache) = event_order(state) else {
+        return;
+    };
     let analysis = state
         .simulation
         .active_analysis()
-        .expect("active analysis was resolved above");
-
-    let data_version = state.simulation.data_version;
-    let expanded = state.ui.results.expanded_event_buses.clone();
+        .expect("active analysis resolved above");
     let radix = state.ui.results.event_bus_radix;
-    if state.ui.results.event_order_cache.as_ref().is_none_or(|c| {
-        c.analysis != analysis_key || c.data_version != data_version || c.expanded != expanded
-    }) {
-        state.ui.results.event_order_cache = Some(build_event_order(
-            analysis,
-            analysis_key,
-            data_version,
-            &expanded,
-        ));
-    }
-    let cache = state
-        .ui
-        .results
-        .event_order_cache
-        .as_ref()
-        .expect("event order cache was initialized above");
     let exact = cache.exact;
+    let expanded = &state.ui.results.expanded_event_buses;
     StripHeader::new(
         "EVENTS",
         &format!(
@@ -1103,9 +1187,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                         };
                         let is_selected = selected.as_ref().is_some_and(|selection| {
                             selection.analysis == analysis_key
-                                && selection.source == row_data.source
-                                && selection.trace_name == row_data.trace_name
-                                && selection.point_index == row_data.point_index
+                                && selection.matches(&row_data, &cache.buses)
                         });
                         row.set_selected(is_selected);
                         row.col(|ui| {
@@ -1116,12 +1198,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                                 )
                                 .clicked()
                             {
-                                requested = Some(DigitalEventSelection {
-                                    analysis: analysis_key,
-                                    source: row_data.source,
-                                    trace_name: row_data.trace_name.to_owned(),
-                                    point_index: row_data.point_index,
-                                });
+                                requested = row_data.selection(analysis_key, &cache.buses);
                             }
                         });
                         row.col(|ui| {
@@ -1287,8 +1364,11 @@ const EVENT_SELECTION_NO_DATASET: &str = "No dataset is open, so the selected ev
 const EVENT_SELECTION_UNRETAINED_ANALYSIS: &str = "The analysis this event was selected from is no longer retained in the \
      active dataset. Select an event row again.";
 const EVENT_SELECTION_OTHER_ANALYSIS: &str = "Select an event row in the active analysis.";
-const EVENT_SELECTION_UNRETAINED_ROW: &str = "The retained trace or sample this event named is no longer present in the \
-     analysis. Select an event row again.";
+const EVENT_SELECTION_UNRETAINED_ROW: &str =
+    "The selected event has changed or is no longer retained. Select an event row again.";
+const EVENT_SELECTION_OTHER_DATASET: &str =
+    "Open the dataset this event was selected from, or select an event in the current dataset.";
+const EVENT_SELECTION_INVALID_EVIDENCE: &str = "The selected analysis does not contain valid, available event evidence. Repair or replace the results to inspect this event.";
 
 /// Why the inspector cannot show the event a selection names.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1301,49 +1381,46 @@ struct EventSelectionBlock {
     stale: bool,
 }
 
-/// A selection outlives the evidence it names: closing the dataset, or
-/// re-running the analysis into a different retained shape, leaves the panel
-/// holding an identity nothing resolves. Three of those four outcomes drew an
-/// empty panel — no heading, no reason — which reads as a broken pane rather
-/// than as a selection that has expired.
+/// Resolve the selection independently of whether a sheet was painted.
+/// Navigation and invalid evidence can recover; changed or removed events
+/// require a new selection instead of silently adopting their replacements.
 fn event_selection_block(
-    state: &AppState,
+    state: &mut AppState,
     selection: &DigitalEventSelection,
 ) -> Option<EventSelectionBlock> {
     let block = |note, stale| Some(EventSelectionBlock { note, stale });
     let Some(run) = state.simulation.active_run() else {
         return block(EVENT_SELECTION_NO_DATASET, false);
     };
-    let Some((analysis_index, analysis)) = selection.analysis.resolve(run) else {
+    let Some((analysis_index, _)) = selection.analysis.resolve(run) else {
+        if state
+            .simulation
+            .runs
+            .iter()
+            .any(|run| selection.analysis.resolve(run).is_some())
+        {
+            return block(EVENT_SELECTION_OTHER_DATASET, false);
+        }
         return block(EVENT_SELECTION_UNRETAINED_ANALYSIS, true);
     };
     if state.simulation.active_analysis_idx != Some(analysis_index) {
-        return block(EVENT_SELECTION_OTHER_ANALYSIS, true);
+        return block(EVENT_SELECTION_OTHER_ANALYSIS, false);
     }
-    let radix = state.ui.results.event_bus_radix;
-    if event_row_for_selection(analysis, selected_buses(state, selection), radix, selection)
-        .is_none()
+    let Some(order) = event_order(state) else {
+        return block(EVENT_SELECTION_INVALID_EVIDENCE, false);
+    };
+    let analysis = state.simulation.active_analysis()?;
+    if event_row_for_selection(
+        analysis,
+        &order.buses,
+        state.ui.results.event_bus_radix,
+        selection,
+    )
+    .is_none()
     {
         return block(EVENT_SELECTION_UNRETAINED_ROW, true);
     }
     None
-}
-
-/// The reassembled buses of the analysis a selection names, when the sheet's
-/// cache holds them.
-///
-/// The inspector never rebuilds them: a bus is only selectable from the sheet,
-/// which builds the cache before it draws a row, so a `Bus` selection whose
-/// cache has been replaced by another analysis' resolves to nothing and the
-/// panel says the row has expired — which is what happened.
-fn selected_buses<'a>(state: &'a AppState, selection: &DigitalEventSelection) -> &'a [BusTimeline] {
-    state
-        .ui
-        .results
-        .event_order_cache
-        .as_ref()
-        .filter(|cache| cache.analysis == selection.analysis)
-        .map_or(&[][..], |cache| cache.buses.as_slice())
 }
 
 pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
@@ -1364,7 +1441,10 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         return;
     }
     let radix = state.ui.results.event_bus_radix;
-    let buses = selected_buses(state, &selection);
+    let Some(order) = event_order(state) else {
+        return;
+    };
+    let buses = &order.buses;
     let Some(event) = state
         .simulation
         .active_run()
@@ -1457,7 +1537,7 @@ fn mono(ui: &mut Ui, text: &str) -> egui::Response {
 mod tests {
     use super::*;
 
-    fn committed_events(digital: &[(f64, u8)]) -> AnalysisResultPayload {
+    pub(super) fn committed_events(digital: &[(f64, u8)]) -> AnalysisResultPayload {
         AnalysisResultPayload::TransientEvents {
             digital_traces: vec![crate::state::DigitalEventTraceEvidence {
                 node_name: "clk".to_owned(),
@@ -1498,27 +1578,6 @@ mod tests {
     }
 
     #[test]
-    fn the_event_order_remembers_which_generation_of_the_evidence_it_merged() {
-        let analysis = AnalysisResult::live_transient_partial(1, AnalysisType::Transient, "TRAN")
-            .with_result_payload(committed_events(&[(0.0, 0), (1.0e-9, 1)]));
-        let key = AnalysisPresentationKey::new(crate::product::DatasetId::new(), &analysis);
-        let first = build_event_order(&analysis, key, 7, &std::collections::BTreeSet::new());
-
-        let longer = AnalysisResult::live_transient_partial(1, AnalysisType::Transient, "TRAN")
-            .with_result_payload(committed_events(&[(0.0, 0), (1.0e-9, 1), (2.0e-9, 0)]));
-        let second = build_event_order(&longer, key, 8, &std::collections::BTreeSet::new());
-
-        assert_eq!(first.data_version, 7);
-        assert_eq!(second.data_version, 8);
-        assert_eq!(first.rows.len(), 2);
-        assert_eq!(
-            second.rows.len(),
-            3,
-            "the same analysis identity carries a longer history one generation later"
-        );
-    }
-
-    #[test]
     fn event_rows_keep_initial_value_and_only_projected_changes() {
         let waveform = WaveformData::new(
             "D(clk)",
@@ -1538,17 +1597,13 @@ mod tests {
 
     #[test]
     fn real_event_rows_preserve_projected_value_changes() {
-        let waveform = WaveformData::new(
-            "E(control)",
-            vec![0.0, 1.0, 2.0],
-            vec![f64::NAN, 0.25, 0.5],
-            "#fff",
-        );
+        let waveform = WaveformData::new("E(control)", vec![1.0, 2.0], vec![0.25, 0.5], "#fff");
         let analysis =
             AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![waveform]);
         let rows = event_rows(&analysis);
         assert_eq!(rows.len(), 2);
         assert!(rows[0].initial);
+        assert_eq!(rows[0].time_s, 1.0);
         assert!(matches!(rows[1].value, EventValue::Real(value) if value == 0.5));
     }
 
@@ -1658,15 +1713,12 @@ mod tests {
             ]);
         let analysis_key =
             AnalysisPresentationKey::new(crate::product::DatasetId::new(), &analysis);
+        let changed = event_rows(&analysis)[1]
+            .selection(analysis_key, &[])
+            .unwrap();
         let stale = DigitalEventSelection {
-            analysis: analysis_key,
-            source: EventSelectionSource::ProjectedDigital,
-            trace_name: "D(clk)".to_owned(),
             point_index: 1,
-        };
-        let changed = DigitalEventSelection {
-            point_index: 2,
-            ..stale.clone()
+            ..changed.clone()
         };
 
         assert!(event_row_for_selection(&analysis, &[], BusRadix::Binary, &stale).is_none());
@@ -1702,14 +1754,11 @@ mod tests {
 
         // No dataset at all: explained, and the selection is kept because the
         // dataset can come back.
-        let selection = DigitalEventSelection {
-            analysis: AnalysisPresentationKey::new(dataset_id, &analysis),
-            source: EventSelectionSource::ProjectedDigital,
-            trace_name: "D(clk)".to_owned(),
-            point_index: 2,
-        };
+        let selection = event_rows(&analysis)[1]
+            .selection(AnalysisPresentationKey::new(dataset_id, &analysis), &[])
+            .unwrap();
         assert_eq!(
-            event_selection_block(&state, &selection),
+            event_selection_block(&mut state, &selection),
             Some(EventSelectionBlock {
                 note: EVENT_SELECTION_NO_DATASET,
                 stale: false,
@@ -1721,7 +1770,7 @@ mod tests {
         assert!(state.simulation.select_analysis(0));
 
         // The row resolves: nothing blocks the inspector.
-        assert_eq!(event_selection_block(&state, &selection), None);
+        assert_eq!(event_selection_block(&mut state, &selection), None);
 
         // A selection naming an analysis this dataset never retained.
         let unretained = DigitalEventSelection {
@@ -1732,7 +1781,7 @@ mod tests {
             ..selection.clone()
         };
         assert_eq!(
-            event_selection_block(&state, &unretained),
+            event_selection_block(&mut state, &unretained),
             Some(EventSelectionBlock {
                 note: EVENT_SELECTION_UNRETAINED_ANALYSIS,
                 stale: true,
@@ -1745,7 +1794,7 @@ mod tests {
             ..selection.clone()
         };
         assert_eq!(
-            event_selection_block(&state, &past_the_end),
+            event_selection_block(&mut state, &past_the_end),
             Some(EventSelectionBlock {
                 note: EVENT_SELECTION_UNRETAINED_ROW,
                 stale: true,
@@ -1755,10 +1804,10 @@ mod tests {
         // A selection on a retained analysis that is not the active one.
         assert!(state.simulation.select_analysis(1));
         assert_eq!(
-            event_selection_block(&state, &selection),
+            event_selection_block(&mut state, &selection),
             Some(EventSelectionBlock {
                 note: EVENT_SELECTION_OTHER_ANALYSIS,
-                stale: true,
+                stale: false,
             })
         );
     }
@@ -1857,7 +1906,7 @@ mod bus_tests {
         )
     }
 
-    fn two_bit_counter() -> AnalysisResult {
+    pub(super) fn two_bit_counter() -> AnalysisResult {
         counter(
             &[
                 ("count#1", &[(0.0, 0), (10.0e-9, 1)]),

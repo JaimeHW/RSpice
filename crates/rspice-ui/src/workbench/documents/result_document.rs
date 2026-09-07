@@ -2121,6 +2121,8 @@ pub(crate) enum StructuralGate {
     /// S-parameter traces with per-port reference impedances; see
     /// [`smith::structure_is_renderable`].
     SParameterStructure,
+    /// Exact event histories or validated legacy event projections.
+    EventHistory,
 }
 
 /// One structural gate answered by walking the evidence, for callers that
@@ -2138,6 +2140,7 @@ pub(crate) fn structural_gate_is_answered_directly(
         StructuralGate::HarmonicSpectrum => harmonic_balance::analysis_is_renderable(analysis),
         StructuralGate::PhaseNoiseSpectrum => phase_noise::phase_noise_is_renderable(analysis),
         StructuralGate::SParameterStructure => smith::structure_is_renderable(analysis),
+        StructuralGate::EventHistory => events::analysis_is_renderable(analysis),
     }
 }
 
