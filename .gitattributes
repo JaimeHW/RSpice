@@ -60,6 +60,12 @@ crates/rspice-ui/web/python/** -text
 # whitespace policy like the rest of rspice-core.
 crates/rspice-veriloga-models/** text eol=lf
 
+# Generator source directories are hashed as exact bytes by tree_digest.
+# Match the normalized standalone inputs on Windows and Unix, including the
+# runtime ABI sources whose changes invalidate the generated bundle.
+crates/rspice-veriloga/src/** text eol=lf
+crates/rspice-veriloga-runtime/src/** text eol=lf
+
 # Vendored RSpice Cloud trees are fingerprinted by
 # tools/cloud/vendor-manifest.json (LF bytes); a CRLF checkout would fail the
 # integrity gate.
