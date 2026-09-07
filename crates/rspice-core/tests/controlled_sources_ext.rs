@@ -51,6 +51,52 @@ rl out 0 1k
 }
 
 #[test]
+fn poly_coefficients_above_degree_eight_are_not_discarded() {
+    // Only the ninth-degree coefficient is nonzero: 2^9 = 512.
+    let coefficients = format!("{}1", "0 ".repeat(9));
+    for (source, controls, expected) in [
+        ("E1", "in 0", 512.0),
+        ("G1", "in 0", -512.0),
+        ("H1", "Vsense", 512.0),
+        ("F1", "Vsense", -512.0),
+    ] {
+        let deck = format!(
+            "ninth degree polynomial\nVin in 0 2\nIin 0 sense 2\nVsense sense 0 0\n\
+             {source} out 0 POLY(1) {controls} {coefficients}\nRout out 0 1\n.end\n"
+        );
+        let actual = op_voltage(&deck, "out");
+        assert!((actual - expected).abs() < 1e-8, "{source}: {actual}");
+    }
+}
+
+#[test]
+fn poly_many_controls_with_few_coefficients_uses_bounded_work() {
+    std::thread::Builder::new()
+        .stack_size(1024 * 1024)
+        .spawn(|| {
+            let controls = "in 0 ".repeat(4096);
+            let deck = format!(
+                "wide polynomial\nVin in 0 3\nE1 out 0 POLY(4096) {controls}0 2\nRout out 0 1k\n.end\n"
+            );
+            assert!((op_voltage(&deck, "out") - 6.0).abs() < 1e-10);
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+}
+
+#[test]
+fn poly_impossible_dimensions_are_rejected_before_allocation() {
+    for name in ["E1", "G1", "H1", "F1"] {
+        for dimension in [0, usize::MAX] {
+            let deck = format!("invalid dimension\n{name} out 0 POLY({dimension}) in 0 1\n.end\n");
+            let error = Netlist::parse(&deck).expect_err("invalid dimension must be refused");
+            assert!(error.to_string().contains("POLY"), "{error}");
+        }
+    }
+}
+
+#[test]
 fn poly2_cross_term_is_a_multiplier() {
     // Coefficient layout for POLY(2): p0 p1*v1 p2*v2 p3*v1^2 p4*v1*v2 ...
     // p4 = 1 alone makes the source an analog multiplier.

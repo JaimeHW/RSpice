@@ -17,6 +17,10 @@ pub(crate) const MAX_EXPRESSION_PARSE_DEPTH: usize = 64;
 /// operator chain builds a deep tree whose cloning and destruction recurse.
 pub(crate) const MAX_EXPRESSION_TREE_DEPTH: usize = 128;
 
+/// Bound generated polynomial source before it reaches either expression
+/// parser. A short coefficient list can otherwise multiply large operands.
+pub(crate) const MAX_POLYNOMIAL_EXPANSION_BYTES: usize = 8 * 1024 * 1024;
+
 /// A resource whose configured production limit can be enforced.
 ///
 /// This enum is non-exhaustive so new analysis and frontend resource classes

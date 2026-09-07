@@ -374,7 +374,7 @@ pub(crate) fn expand_output_user_functions_with_abort(
     if !references_defined_function_with_abort(expression, params, abort)? {
         return Ok(expression.to_string());
     }
-    let expression = expand_spice_poly_expression(expression)?;
+    let expression = expand_spice_poly_expression(expression, abort)?;
     let mut probe_protector = ProbeProtector::with_protected_identifiers(protected_identifiers);
     let protected_expression = probe_protector.protect_with_abort(&expression, abort)?;
     let parsed = match parse_net_expr_with_abort(&protected_expression, abort) {
@@ -470,7 +470,7 @@ fn prepare_behavioral_expression_impl(
     if abort.is_aborted() {
         return Err(BehavioralPreparationError::Aborted);
     }
-    let expression = expand_spice_poly_expression(expression)?;
+    let expression = expand_spice_poly_expression(expression, abort)?;
     let mut probe_protector = ProbeProtector::default();
     let protected_expression = probe_protector.protect_with_abort(&expression, abort)?;
 
@@ -1264,7 +1264,15 @@ impl<'a, 'p> FunctionExpander<'a, 'p> {
                     let body_ast = if let Some(cached) = self.body_cache.get(&func_name) {
                         cached.clone()
                     } else {
-                        let expanded_body = expand_spice_poly_expression(&func_def.body)?;
+                        let expanded_body =
+                            expand_spice_poly_expression(&func_def.body, self.abort).map_err(
+                                |error| match error {
+                                    BehavioralPreparationError::Aborted => {
+                                        "behavioral expression preparation was cancelled".to_owned()
+                                    }
+                                    BehavioralPreparationError::Semantic(message) => message,
+                                },
+                            )?;
                         let protected_body = self
                             .probe_protector
                             .protect_with_abort(&expanded_body, self.abort)
@@ -1655,21 +1663,34 @@ fn is_simple_probe_reference(raw: &str) -> bool {
         })
 }
 
-fn expand_spice_poly_expression(expression: &str) -> Result<String, String> {
+fn expand_spice_poly_expression(
+    expression: &str,
+    abort: &dyn AbortSignal,
+) -> Result<String, BehavioralPreparationError> {
     let Some((dimension, tail)) = parse_spice_poly_header(expression)? else {
         return Ok(expression.to_string());
     };
 
-    let items = split_spice_poly_tail(tail);
+    let items = split_spice_poly_tail(tail, abort)?;
     if items.len() <= dimension {
         return Err(format!(
             "POLY({dimension}) requires {dimension} controlling expression(s) and at least one coefficient"
-        ));
+        ).into());
     }
 
-    let vars = items[..dimension].to_vec();
-    let coeffs = items[dimension..].to_vec();
-    ordered_spice_poly_expression(&vars, &coeffs)
+    use crate::netlist::polynomial::{
+        PolynomialExpansionError, PolynomialOrdering, expand_polynomial,
+    };
+    expand_polynomial(
+        &items[..dimension],
+        &items[dimension..],
+        PolynomialOrdering::Ordered,
+        abort,
+    )
+    .map_err(|error| match error {
+        PolynomialExpansionError::Aborted => BehavioralPreparationError::Aborted,
+        other => BehavioralPreparationError::Semantic(other.to_string()),
+    })
 }
 
 fn parse_spice_poly_header(expression: &str) -> Result<Option<(usize, &str)>, String> {
@@ -1703,12 +1724,18 @@ fn parse_spice_poly_header(expression: &str) -> Result<Option<(usize, &str)>, St
     )))
 }
 
-fn split_spice_poly_tail(tail: &str) -> Vec<String> {
+fn split_spice_poly_tail(
+    tail: &str,
+    abort: &dyn AbortSignal,
+) -> Result<Vec<String>, BehavioralPreparationError> {
     let mut items = Vec::new();
     let mut current = String::new();
     let mut depth = 0usize;
 
-    for c in tail.chars() {
+    for (index, c) in tail.chars().enumerate() {
+        if index.is_multiple_of(256) && abort.is_aborted() {
+            return Err(BehavioralPreparationError::Aborted);
+        }
         match c {
             '(' | '[' | '{' => {
                 depth += 1;
@@ -1729,7 +1756,7 @@ fn split_spice_poly_tail(tail: &str) -> Vec<String> {
     }
     push_poly_item(&mut items, &mut current);
 
-    merge_sign_tokens(items)
+    Ok(merge_sign_tokens(items))
 }
 
 fn push_poly_item(items: &mut Vec<String>, current: &mut String) {
@@ -1756,60 +1783,6 @@ fn merge_sign_tokens(items: Vec<String>) -> Vec<String> {
         }
     }
     merged
-}
-
-fn ordered_spice_poly_expression(vars: &[String], coeffs: &[String]) -> Result<String, String> {
-    if coeffs.is_empty() {
-        return Ok("0".to_string());
-    }
-
-    let mut terms = vec![format!("({})", coeffs[0])];
-    let mut coeff_idx = 1usize;
-    let mut degree = 1usize;
-
-    while coeff_idx < coeffs.len() {
-        let term_count = vars
-            .len()
-            .checked_pow(degree as u32)
-            .ok_or_else(|| format!("POLY degree {degree} overflows term count"))?;
-        for ordinal in 0..term_count {
-            if coeff_idx >= coeffs.len() {
-                break;
-            }
-            let coeff = &coeffs[coeff_idx];
-            coeff_idx += 1;
-            if coefficient_is_numeric_zero(coeff) {
-                continue;
-            }
-
-            let mut factors = Vec::with_capacity(degree + 1);
-            factors.push(format!("({coeff})"));
-            for var_index in ordered_poly_indices(vars.len(), degree, ordinal) {
-                factors.push(format!("({})", vars[var_index]));
-            }
-            terms.push(factors.join("*"));
-        }
-        degree += 1;
-    }
-
-    Ok(if terms.is_empty() {
-        "0".to_string()
-    } else {
-        terms.join(" + ")
-    })
-}
-
-fn ordered_poly_indices(var_count: usize, degree: usize, mut ordinal: usize) -> Vec<usize> {
-    let mut indices = vec![0; degree];
-    for slot in (0..degree).rev() {
-        indices[slot] = ordinal % var_count;
-        ordinal /= var_count;
-    }
-    indices
-}
-
-fn coefficient_is_numeric_zero(coeff: &str) -> bool {
-    coeff.parse::<Value>().is_ok_and(|value| value == 0.0)
 }
 
 fn is_ident_start(c: char) -> bool {
