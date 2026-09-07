@@ -22,6 +22,9 @@ The remaining-workspace selector excludes crates with dedicated lanes. Generated
 model packages and catalog utilities are qualified through the simulator and
 catalog gates instead of empty generated-crate test binaries. The WASM surface
 has its own host tests and lint lane.
+Browser download budgets measure the production `_bg.wasm` modules emitted by
+wasm-bindgen, before rebuilding the UI with qualification instrumentation.
+The Cargo linker output includes binding metadata removed before delivery.
 
 Nightly adds release-mode tests, ngspice/Xyce/GF180 corpora, full execution depth,
 panic checks, generated-model freshness, golden fingerprints, complex-step

@@ -452,6 +452,16 @@ class CiConfigurationTests(unittest.TestCase):
         self.assertIn("cargo test --locked -p rspice-wasm -p rspice-cloud-client --lib --target wasm32-unknown-unknown", job)
         self.assertEqual(job.count("--test browser_clock"), 2)
 
+    def test_browser_budgets_measure_the_delivered_bindgen_modules(self) -> None:
+        workflow = read_text(".github/workflows/ci.yml")
+        job = workflow.split("  wasm-ui-size:", 1)[1].split("  veriloga-mobile:", 1)[0]
+        for stem, step in (("rspice-ui", "UI"), ("rspice-ui-worker", "worker")):
+            budget = job.split(f"- name: Enforce browser {step} image budget", 1)[1].split("- name:", 1)[0]
+            self.assertIn(f"crates/rspice-ui/web/pkg/{stem}_bg.wasm", budget)
+        self.assertLess(job.index("Generate production browser UI bindings"), job.index("Enforce browser UI image budget"))
+        self.assertLess(job.index("Generate optimized browser worker bindings"), job.index("Enforce browser worker image budget"))
+        self.assertLess(job.index("Enforce browser UI image budget"), job.index("Build instrumented browser workbench"))
+
     def test_format_gate_covers_every_hand_written_workspace_member(self) -> None:
         """rustfmt runs over the workspace as the manifest defines it.
 
