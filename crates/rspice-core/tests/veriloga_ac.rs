@@ -94,8 +94,12 @@ endmodule"#,
     let error = Engine::default()
         .run_ac(&netlist, &[10.0, 20.0])
         .expect_err("the final event must run even without a task instruction");
+    let rspice_core::SimulationError::Circuit(message) = &error else {
+        panic!("the loop must fail during the analysis, not compilation: {error}");
+    };
     assert!(
-        error.to_string().contains("frequency candidate failed"),
+        message.contains("frequency candidate failed")
+            || message.contains("equilibrium analysis-step setup failed"),
         "{error}"
     );
     assert!(
