@@ -309,7 +309,7 @@ pub(super) fn app_showing(viewer: ResultViewer) -> RSpiceApp {
     let mut run = SimulationRun::new(1);
     run.add_analysis(analysis);
     run.lifecycle = crate::state::SimulationRunLifecycle::Completed;
-    app.state.simulation.runs = vec![run];
+    app.state.simulation.runs = vec![run].into();
     assert!(app.state.simulation.select_run(0));
     assert!(app.state.simulation.select_analysis(0));
 

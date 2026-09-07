@@ -16,7 +16,7 @@ fn state_with_analysis(analysis: AnalysisResult) -> AppState {
     let mut state = AppState::default();
     let mut run = SimulationRun::new(1);
     run.add_analysis(analysis);
-    state.simulation.runs = vec![run];
+    state.simulation.runs = vec![run].into();
     assert!(state.simulation.select_run(0));
     state
 }
@@ -38,7 +38,7 @@ fn frame_boundary_repairs_a_selector_that_drifted_from_the_open_dataset() {
     );
 
     let mut state = AppState::default();
-    state.simulation.runs = vec![first, background];
+    state.simulation.runs = vec![first, background].into();
     assert!(state.simulation.select_run(1));
     state
         .workbench
@@ -102,7 +102,7 @@ fn presentation_state_follows_analysis_identity_after_reorder() {
     let dataset_id = run.dataset_id;
     let first_key = AnalysisPresentationKey::new(dataset_id, &run.analyses[0]);
     let second_key = AnalysisPresentationKey::new(dataset_id, &run.analyses[1]);
-    state.simulation.runs = vec![run];
+    state.simulation.runs = vec![run].into();
     assert!(state.simulation.select_run(0));
 
     state.ui.results.hidden_strips.insert(first_key);
@@ -260,7 +260,7 @@ fn dc_sweep_is_a_distinct_mockup_viewer_and_waveform_projection() {
         ]),
     );
     let mut state = AppState::default();
-    state.simulation.runs = vec![run];
+    state.simulation.runs = vec![run].into();
     assert!(state.simulation.select_run(0));
 
     assert!(viewer_availability(&state, ResultViewer::Waves).available);
@@ -463,7 +463,7 @@ fn op_viewer_requires_the_selected_analysis_device_report() {
         "OP without report",
     ));
     let mut state = AppState::default();
-    state.simulation.runs = vec![run];
+    state.simulation.runs = vec![run].into();
     assert!(state.simulation.select_run(0));
 
     assert!(state.simulation.select_analysis(1));
@@ -533,7 +533,7 @@ fn the_specs_tab_speaks_for_the_active_run_and_not_the_history() {
     );
 
     let mut state = AppState::default();
-    state.simulation.runs = vec![measured, unmeasured];
+    state.simulation.runs = vec![measured, unmeasured].into();
     assert!(state.workspace.specs.is_empty());
 
     assert!(state.simulation.select_run(0));
@@ -1297,7 +1297,7 @@ fn operating_point_app(devices: usize) -> RSpiceApp {
     );
     let mut run = SimulationRun::new(1);
     run.add_analysis(analysis);
-    app.state.simulation.runs = vec![run];
+    app.state.simulation.runs = vec![run].into();
     assert!(app.state.simulation.select_run(0));
     assert!(app.state.simulation.select_analysis(0));
     app
@@ -1322,7 +1322,7 @@ fn sensitivity_app(parameters: usize) -> RSpiceApp {
     );
     let mut run = SimulationRun::new(1);
     run.add_analysis(analysis);
-    app.state.simulation.runs = vec![run];
+    app.state.simulation.runs = vec![run].into();
     assert!(app.state.simulation.select_run(0));
     assert!(app.state.simulation.select_analysis(0));
     app
@@ -1338,7 +1338,7 @@ fn manifest_app(analyses: usize) -> RSpiceApp {
             format!("TRAN {index}"),
         ));
     }
-    app.state.simulation.runs = vec![run];
+    app.state.simulation.runs = vec![run].into();
     assert!(app.state.simulation.select_run(0));
     assert!(app.state.simulation.select_analysis(0));
     app
@@ -1727,6 +1727,67 @@ fn pruning_a_run_drops_the_presentation_state_that_named_its_dataset() {
             .all(|group| group.analysis == kept),
         "a save must not carry a group about a dataset the project dropped"
     );
+}
+
+#[test]
+fn retained_history_reconciliation_skips_reads_and_tracks_edits_and_replacement() {
+    use super::frame_work::{DatasetWalk, WorkCounts};
+
+    let mut state = transient_state();
+    let analysis = active_analysis_key(&state);
+    state
+        .ui
+        .results
+        .add_marker(
+            analysis,
+            marker_anchor_for(analysis, "V(out)"),
+            "V(out)".to_owned(),
+            0.5,
+        )
+        .unwrap();
+
+    let baseline = WorkCounts::reset();
+    state
+        .ui
+        .results
+        .reconcile_retained_datasets(&state.simulation);
+    assert_eq!(baseline.since().get(DatasetWalk::RetainedHistoryScan), 1);
+    let baseline = WorkCounts::reset();
+    for _ in 0..12 {
+        state
+            .ui
+            .results
+            .reconcile_retained_datasets(&state.simulation);
+    }
+    let unchanged = state.simulation.clone();
+    state.ui.results.reconcile_retained_datasets(&unchanged);
+    assert_eq!(baseline.since().get(DatasetWalk::RetainedHistoryScan), 0);
+
+    // No manual data-version bump: mutable access to a nested run is enough.
+    state.simulation.runs[0].analyses[0]
+        .label
+        .push_str(" edited");
+    let baseline = WorkCounts::reset();
+    state
+        .ui
+        .results
+        .reconcile_retained_datasets(&state.simulation);
+    state
+        .ui
+        .results
+        .reconcile_retained_datasets(&state.simulation);
+    assert_eq!(baseline.since().get(DatasetWalk::RetainedHistoryScan), 1);
+    assert_eq!(state.ui.results.markers.len(), 1);
+
+    // Same run count and sequence, different dataset: no old annotation survives.
+    state.simulation.runs = transient_state().simulation.runs;
+    let baseline = WorkCounts::reset();
+    state
+        .ui
+        .results
+        .reconcile_retained_datasets(&state.simulation);
+    assert_eq!(baseline.since().get(DatasetWalk::RetainedHistoryScan), 1);
+    assert!(state.ui.results.markers.is_empty());
 }
 
 /// The defect this pins: the waveform sheets key their viewports by

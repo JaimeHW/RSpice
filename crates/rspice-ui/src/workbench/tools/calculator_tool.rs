@@ -208,7 +208,7 @@ mod tests {
                 ]);
         let mut run = crate::state::SimulationRun::new(1);
         run.add_analysis(analysis);
-        app.state.simulation.runs = vec![run];
+        app.state.simulation.runs = vec![run].into();
         assert!(app.state.simulation.select_run(0));
         app.state.dialogs.waveform_calculator_dialog = true;
         app.state.calculator_panel.expression = "V(out)/V(in)".to_owned();

@@ -67,7 +67,7 @@ fn sealed_results(hierarchy_map: Vec<HierarchyMapRow>) -> ProjectSimulationResul
         .expect("the fixture run seals explicitly");
 
     let mut simulation = SimulationState::default();
-    simulation.runs = vec![run];
+    simulation.runs = vec![run].into();
     simulation.next_run_id = 41;
     ProjectSimulationResults::from_state(&simulation)
 }

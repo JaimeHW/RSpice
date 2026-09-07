@@ -587,7 +587,7 @@ fn finite_goal_miss_counts_as_executed_but_not_passed() {
         );
     let mut run = SimulationRun::new(1);
     run.add_analysis(analysis);
-    app.state.simulation.runs = vec![run];
+    app.state.simulation.runs = vec![run].into();
     app.state.simulation.active_run_idx = Some(0);
 
     let coverage = verification_coverage(&app);
@@ -619,7 +619,7 @@ fn mc_sample_trail_is_visible_only_for_its_active_provenance_dataset() {
     let source_dataset_id = source.dataset_id;
     let other = SimulationRun::new(2);
     let mut simulation = SimulationState {
-        runs: vec![source, other],
+        runs: vec![source, other].into(),
         active_run_idx: Some(0),
         ..SimulationState::default()
     };
@@ -678,7 +678,7 @@ fn result_navigator_app() -> RSpiceApp {
     let mut run = SimulationRun::new(1);
     run.add_analysis(transient);
     run.add_analysis(ac);
-    app.state.simulation.runs = vec![run];
+    app.state.simulation.runs = vec![run].into();
     app.state.simulation.active_run_idx = None;
     app.state.simulation.active_analysis_idx = None;
     app

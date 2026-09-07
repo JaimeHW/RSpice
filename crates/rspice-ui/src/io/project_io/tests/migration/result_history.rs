@@ -20,7 +20,7 @@ fn project_text_load_drops_invalid_simulation_results_without_rejecting_workspac
     let mut simulation = SimulationState::default();
     let mut run = SimulationRun::new(1);
     run.add_analysis(AnalysisResult::new(1, AnalysisType::Transient, "TRAN"));
-    simulation.runs = vec![run];
+    simulation.runs = vec![run].into();
     simulation.next_run_id = 1;
     simulation.active_run_idx = Some(0);
     simulation.active_analysis_idx = Some(0);
@@ -61,7 +61,7 @@ fn project_load_clears_legacy_regression_baseline_after_result_migration() {
     seal_legacy_unattributed(&mut run);
     let baseline_id = run.run_id;
     let mut simulation = SimulationState::default();
-    simulation.runs = vec![run];
+    simulation.runs = vec![run].into();
     simulation.next_run_id = 71;
     project.simulation_results = ProjectSimulationResults::from_state(&simulation);
     project
@@ -156,7 +156,7 @@ fn project_load_authenticates_v11_noise_and_preserves_eligible_regression_baseli
     let legacy_analysis_digest = run.analyses[0].legacy_v4_result_data_digest();
     let legacy_dataset_digest = run.legacy_v4_dataset_content_digest();
     let mut simulation = SimulationState::default();
-    simulation.runs = vec![run];
+    simulation.runs = vec![run].into();
     simulation.next_run_id = 72;
     simulation.active_run_idx = Some(0);
     simulation.active_analysis_idx = Some(0);
@@ -294,7 +294,7 @@ fn project_text_load_drops_unknown_analysis_type_results_without_parse_failure()
     let mut run = SimulationRun::new(1);
     run.add_analysis(AnalysisResult::new(1, AnalysisType::Ac, "AC"));
     seal_legacy_unattributed(&mut run);
-    simulation.runs = vec![run];
+    simulation.runs = vec![run].into();
     simulation.next_run_id = 1;
     simulation.active_run_idx = Some(0);
     simulation.active_analysis_idx = Some(0);
@@ -390,7 +390,7 @@ fn project_results_v2_requires_unique_stable_run_and_dataset_ids() {
     seal_legacy_unattributed(&mut run_one);
     seal_legacy_unattributed(&mut run_two);
     let mut simulation = SimulationState::default();
-    simulation.runs = vec![run_one, run_two];
+    simulation.runs = vec![run_one, run_two].into();
     simulation.next_run_id = 2;
 
     let baseline = ProjectSimulationResults::from_state(&simulation);
@@ -434,7 +434,7 @@ fn projects_written_before_golden_baselines_restore_every_run_pruneable() {
     seal_legacy_unattributed(&mut run_two);
     let baseline_run_id = run_one.run_id;
     let mut simulation = SimulationState::default();
-    simulation.runs = vec![run_two, run_one];
+    simulation.runs = vec![run_two, run_one].into();
     simulation.next_run_id = 2;
 
     let historical = serde_json::to_string(&ProjectSimulationResults::from_state(&simulation))
@@ -483,7 +483,7 @@ fn project_results_v2_rejects_cross_bound_selection_and_active_overlay() {
     let run_one_dataset_id = run_one.dataset_id;
     let run_two_dataset_id = run_two.dataset_id;
     let mut simulation = SimulationState::default();
-    simulation.runs = vec![run_one, run_two];
+    simulation.runs = vec![run_one, run_two].into();
     simulation.next_run_id = 2;
     simulation.active_run_idx = Some(0);
     simulation.active_analysis_idx = Some(0);
@@ -1479,7 +1479,7 @@ fn results_written_before_point_attribution_load_as_unattributed() {
         &[2],
     );
     let mut simulation = SimulationState::default();
-    simulation.runs = vec![run];
+    simulation.runs = vec![run].into();
     simulation.next_run_id = 41;
 
     let mut v5 = ProjectSimulationResults::from_state(&simulation);
@@ -1553,7 +1553,7 @@ fn point_attribution_round_trips_and_cannot_masquerade_as_a_legacy_schema() {
         &[2],
     );
     let mut simulation = SimulationState::default();
-    simulation.runs = vec![run];
+    simulation.runs = vec![run].into();
     simulation.next_run_id = 42;
 
     let current = ProjectSimulationResults::from_state(&simulation);

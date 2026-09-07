@@ -441,7 +441,7 @@ mod tests {
                 .with_waveforms(vec![waveform]),
         );
         seal_legacy_unattributed(&mut run);
-        state.simulation.runs = vec![run];
+        state.simulation.runs = vec![run].into();
         state.simulation.next_run_id = 3;
         state.simulation.active_run_idx = Some(0);
         state.simulation.active_analysis_idx = Some(0);
@@ -901,7 +901,7 @@ mod tests {
             "TRAN legacy session",
         ));
         seal_legacy_unattributed(&mut run);
-        state.simulation.runs = vec![run];
+        state.simulation.runs = vec![run].into();
         state.simulation.next_run_id = 3;
         state.simulation.active_run_idx = Some(0);
         state.simulation.active_analysis_idx = Some(0);
@@ -967,7 +967,7 @@ mod tests {
                 .with_family_metadata(metadata.clone()),
         );
         seal_legacy_unattributed(&mut run);
-        state.simulation.runs = vec![run];
+        state.simulation.runs = vec![run].into();
         state.simulation.next_run_id = 1;
         state.simulation.active_run_idx = Some(0);
         state.simulation.active_analysis_idx = Some(0);
@@ -1007,7 +1007,7 @@ mod tests {
             crate::state::AnalysisResult::new(1, crate::state::AnalysisType::Transient, "TRAN")
                 .with_waveforms(vec![waveform]),
         );
-        state.simulation.runs = vec![run];
+        state.simulation.runs = vec![run].into();
         state.simulation.next_run_id = 3;
         state.simulation.active_run_idx = Some(0);
         state.simulation.active_analysis_idx = Some(0);
@@ -1068,7 +1068,7 @@ mod tests {
             crate::state::AnalysisType::Transient,
             "TRAN",
         ));
-        state.simulation.runs = vec![run];
+        state.simulation.runs = vec![run].into();
         state.simulation.next_run_id = 3;
         state.simulation.active_run_idx = Some(0);
         state.simulation.active_analysis_idx = Some(0);
@@ -1141,7 +1141,7 @@ mod tests {
             run_receipt,
         )))
         .expect("prepared run fixture seals");
-        state.simulation.runs = vec![run];
+        state.simulation.runs = vec![run].into();
         state.simulation.next_run_id = 4;
         state.simulation.active_run_idx = Some(0);
         state.simulation.active_analysis_idx = Some(0);

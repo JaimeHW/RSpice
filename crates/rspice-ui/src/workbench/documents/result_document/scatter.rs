@@ -995,7 +995,7 @@ mod tests {
         let mut run = SimulationRun::new(1);
         run.add_analysis(population_analysis(trials));
         let mut simulation = crate::state::SimulationState::default();
-        simulation.runs = vec![run];
+        simulation.runs = vec![run].into();
         assert!(simulation.select_run(0));
         assert!(simulation.select_analysis(0));
         let mut workspace = crate::state::ProjectWorkspace::default();

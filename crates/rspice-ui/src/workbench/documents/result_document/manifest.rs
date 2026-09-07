@@ -1605,7 +1605,7 @@ mod tests {
             ]),
         );
         let mut state = AppState::default();
-        state.simulation.runs = vec![run];
+        state.simulation.runs = vec![run].into();
         assert!(state.simulation.select_run(0));
         state
     }

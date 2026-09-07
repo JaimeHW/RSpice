@@ -164,7 +164,7 @@ fn attach_run(
         .expect("prepared fixture seals explicitly");
 
     let mut simulation = SimulationState::default();
-    simulation.runs = vec![run];
+    simulation.runs = vec![run].into();
     simulation.next_run_id = RUN_ID + 1;
     project.simulation_results = ProjectSimulationResults::from_state(&simulation);
 }

@@ -83,7 +83,7 @@ pub struct SimulationState {
     // =========================================================================
     /// Simulation run history (newest first, limited to
     /// [`Self::retained_dataset_limit`])
-    pub runs: Vec<SimulationRun>,
+    pub runs: crate::state::RunHistory,
 
     /// The exact deck every point of a recent run executed.
     ///

@@ -433,7 +433,7 @@ fn large_state() -> AppState {
     run.add_analysis(phase_noise_analysis());
     run.add_analysis(sparameter_analysis());
 
-    state.simulation.runs = vec![run];
+    state.simulation.runs = vec![run].into();
     assert!(state.simulation.select_run(0));
 
     let mut eye = crate::analysis::eye_diagram::EyeData::new(1.0e-9, 2);

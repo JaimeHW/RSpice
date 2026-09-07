@@ -702,7 +702,7 @@ mod tests {
             crate::state::AnalysisType::PoleZero,
             "PZ without retained evidence",
         ));
-        state.simulation.runs = vec![run];
+        state.simulation.runs = vec![run].into();
         assert!(state.simulation.select_run(0));
         assert!(
             !state.viewer_is_available(ActiveViewer::PoleZero),

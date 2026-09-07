@@ -259,7 +259,7 @@ fn project_named_with_results(path: &str) -> ProjectFile {
     );
     seal_legacy_unattributed(&mut run);
     let mut simulation = crate::state::SimulationState::default();
-    simulation.runs = vec![run];
+    simulation.runs = vec![run].into();
     simulation.next_run_id = 4;
     simulation.active_run_idx = Some(0);
     simulation.active_analysis_idx = Some(0);
@@ -284,7 +284,7 @@ fn seed_specialized_viewer_caches(state: &mut AppState) {
             .with_waveforms(vec![waveform]),
     );
     seal_legacy_unattributed(&mut run);
-    state.simulation.runs = vec![run];
+    state.simulation.runs = vec![run].into();
     state.simulation.active_run_idx = Some(0);
     state.simulation.active_analysis_idx = Some(0);
     state.simulation.next_run_id = 2;
@@ -1022,7 +1022,7 @@ fn save_project_to_path_writes_simulation_results() {
             .with_waveforms(vec![waveform]),
     );
     seal_legacy_unattributed(&mut run);
-    state.simulation.runs = vec![run];
+    state.simulation.runs = vec![run].into();
     state.simulation.next_run_id = 9;
     state.simulation.active_run_idx = Some(0);
     state.simulation.active_analysis_idx = Some(0);
@@ -1070,7 +1070,7 @@ fn save_project_to_path_round_trips_result_markers() {
             .with_waveforms(vec![waveform]),
     );
     seal_legacy_unattributed(&mut run);
-    state.simulation.runs = vec![run];
+    state.simulation.runs = vec![run].into();
     state.simulation.next_run_id = 11;
     state.simulation.active_run_idx = Some(0);
     state.simulation.active_analysis_idx = Some(0);
@@ -1150,7 +1150,7 @@ fn save_project_to_path_round_trips_logarithmic_panes() {
         ),
     );
     seal_legacy_unattributed(&mut run);
-    state.simulation.runs = vec![run];
+    state.simulation.runs = vec![run].into();
     state.simulation.next_run_id = 12;
     state.simulation.active_run_idx = Some(0);
     state.simulation.active_analysis_idx = Some(0);
@@ -1222,7 +1222,7 @@ fn save_project_to_path_round_trips_stable_expression_traces() {
             )]),
     );
     seal_legacy_unattributed(&mut run);
-    state.simulation.runs = vec![run];
+    state.simulation.runs = vec![run].into();
     state.simulation.next_run_id = 13;
     state.simulation.active_run_idx = Some(0);
     state.simulation.active_analysis_idx = Some(0);
@@ -1300,7 +1300,7 @@ fn save_project_to_path_round_trips_canonical_result_document_entities() {
             )]),
     );
     seal_legacy_unattributed(&mut run);
-    state.simulation.runs = vec![run];
+    state.simulation.runs = vec![run].into();
     state.simulation.next_run_id = 21;
     state.simulation.active_run_idx = Some(0);
     state.simulation.active_analysis_idx = Some(0);
@@ -1442,7 +1442,7 @@ fn save_project_to_path_rejects_invalid_simulation_results_without_publishing() 
         crate::state::AnalysisResult::new(1, crate::state::AnalysisType::Transient, "TRAN")
             .with_waveforms(vec![waveform]),
     );
-    state.simulation.runs = vec![run];
+    state.simulation.runs = vec![run].into();
     state.simulation.next_run_id = 10;
     state.simulation.active_run_idx = Some(0);
     state.simulation.active_analysis_idx = Some(0);

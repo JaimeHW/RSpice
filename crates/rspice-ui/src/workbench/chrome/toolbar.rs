@@ -2032,7 +2032,7 @@ mod tests {
         let revision = app.state.workspace.project.revision();
         let run = completed_prepared_run(revision, source_digest);
         let dataset_id = run.dataset_id;
-        app.state.simulation.runs = vec![run];
+        app.state.simulation.runs = vec![run].into();
         app.state.workbench.documents.activate(
             crate::workbench::state::WorkspaceDocumentId::ResultDataset(dataset_id),
         );
@@ -2049,7 +2049,7 @@ mod tests {
         let revision = app.state.workspace.project.revision();
         let run = completed_prepared_run(revision, digest(0x83));
         let dataset_id = run.dataset_id;
-        app.state.simulation.runs = vec![run];
+        app.state.simulation.runs = vec![run].into();
         app.state.workbench.documents.activate(
             crate::workbench::state::WorkspaceDocumentId::ResultDataset(dataset_id),
         );

@@ -240,7 +240,7 @@ fn exporting_the_dataset_requires_an_open_result_document() {
         ]),
     );
     let dataset_id = run.dataset_id;
-    app.state.simulation.runs = vec![run];
+    app.state.simulation.runs = vec![run].into();
     app.state.simulation.active_run_idx = Some(0);
     app.state.simulation.active_analysis_idx = Some(0);
 

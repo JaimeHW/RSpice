@@ -149,6 +149,7 @@ pub use schematic::*;
 // the tests can name an attribution's vocabulary directly.
 #[cfg(test)]
 pub use simulation::ConvergenceFailureClass;
+pub(crate) use simulation::RunHistoryRevision;
 pub use simulation::{
     AnalysisAvailability, AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload,
     AnalysisResultProvenance, AnalysisResultPvtPoint, AnalysisResultSourceDomain, AnalysisType,
@@ -169,8 +170,8 @@ pub use simulation::{
     PreparedSourceCheckReceipt, PreparedSpecification, PreparedSpecificationPolicy,
     PssFloquetMultiplierEvidence, PstbFloquetModeEvidence, PstbStabilityClassificationEvidence,
     RealEventPointEvidence, RealEventTraceEvidence, ReliabilityCheckpointEvidence,
-    ReliabilityDeviceEvidence, ReliabilityShiftEvidence, ReliabilityStressEvidence, RunRetention,
-    SavedOutputMaterializationStatus, SavedOutputReceipt, SensitivityResultMode,
+    ReliabilityDeviceEvidence, ReliabilityShiftEvidence, ReliabilityStressEvidence, RunHistory,
+    RunRetention, SavedOutputMaterializationStatus, SavedOutputReceipt, SensitivityResultMode,
     SensitivityResultRow, SharedWaveformValues, SignOffStanding, SimulationCampaignMembership,
     SimulationRun, SimulationRunIntent, SimulationRunLifecycle, SimulationRunProvenance,
     SimulationState, SoaEvaluationEvidence, SoaParameterEvidence, SoaRuleVerdictEvidence,

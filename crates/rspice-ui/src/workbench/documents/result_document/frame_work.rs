@@ -69,12 +69,14 @@ pub(crate) enum DatasetWalk {
     /// Verifying one retained S-parameter trace: every frequency and every
     /// complex coefficient behind it.
     SParameterTraceScan,
+    /// Rebuilding the retained dataset set used to prune presentation state.
+    RetainedHistoryScan,
 }
 
 impl DatasetWalk {
     /// Every variant, for reporting a complete count table.
     #[cfg(test)]
-    pub(crate) const ALL: [Self; 18] = [
+    pub(crate) const ALL: [Self; 19] = [
         Self::EvidenceValidation,
         Self::DatasetDigest,
         Self::ManifestViewModel,
@@ -93,6 +95,7 @@ impl DatasetWalk {
         Self::HarmonicSpectrumScan,
         Self::PhaseNoiseSpectrumScan,
         Self::SParameterTraceScan,
+        Self::RetainedHistoryScan,
     ];
 }
 

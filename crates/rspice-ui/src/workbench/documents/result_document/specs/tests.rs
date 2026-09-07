@@ -29,7 +29,7 @@ fn the_table_marks_the_limit_a_hop_carried_into_it() {
             rspice_core::MeasureResult::success("bandwidth_3db", 1.0e6),
         ]),
     );
-    state.simulation.runs = vec![run];
+    state.simulation.runs = vec![run].into();
     state.simulation.active_run_idx = Some(0);
     state.workspace.specs = vec![
         SpecEntry {
@@ -573,7 +573,7 @@ fn two_unmeasured_limits_on_an_immutable_run() -> AppState {
     run.lifecycle = SimulationRunLifecycle::Completed;
     run.success = true;
     run.add_analysis(AnalysisResult::new(1, AnalysisType::Ac, "ac"));
-    state.simulation.runs = vec![run];
+    state.simulation.runs = vec![run].into();
     state.simulation.active_run_idx = Some(0);
     state.workspace.specs = vec![
         SpecEntry {
@@ -1165,7 +1165,7 @@ fn the_source_button_opens_the_viewer_the_shared_map_names() {
             },
         ),
     );
-    state.simulation.runs = vec![run];
+    state.simulation.runs = vec![run].into();
     state.simulation.active_run_idx = Some(0);
     state.simulation.active_analysis_idx = Some(0);
 

@@ -2068,7 +2068,7 @@ fn seed_two_specifications(state: &mut AppState) {
                 .expect("valid test provenance"),
             ),
     );
-    state.simulation.runs = vec![run];
+    state.simulation.runs = vec![run].into();
     state.simulation.active_run_idx = Some(0);
 }
 

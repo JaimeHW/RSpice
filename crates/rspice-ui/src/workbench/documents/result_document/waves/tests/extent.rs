@@ -226,7 +226,7 @@ fn family_envelopes_are_memoized_against_the_models_that_produced_them() {
         .with_family_presentation(&manifest, &family_policy())
         .unwrap();
     let simulation = SimulationState {
-        runs: vec![active],
+        runs: vec![active].into(),
         active_run_idx: Some(0),
         active_analysis_idx: Some(0),
         ..SimulationState::default()

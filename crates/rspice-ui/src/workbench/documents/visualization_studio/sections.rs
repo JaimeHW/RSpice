@@ -1153,7 +1153,7 @@ mod tests {
                 WaveformData::new("V(out)", vec![0.0, 0.5, 1.0], vec![-1.25, 2.5, 4.0], "#0af"),
             ]),
         );
-        state.simulation.runs = vec![run];
+        state.simulation.runs = vec![run].into();
         assert!(state.simulation.select_run(0));
         assert!(state.simulation.select_analysis(0));
         state

@@ -117,7 +117,7 @@ fn selecting_a_golden_regression_baseline_pins_its_dataset_atomically() {
         AnalysisResult::new(1, AnalysisType::Ac, "candidate")
             .with_measurements(vec![rspice_core::MeasureResult::success("gain", 1.0)]),
     );
-    app.state.simulation.runs = vec![candidate, baseline];
+    app.state.simulation.runs = vec![candidate, baseline].into();
     assert!(app.state.simulation.select_run(0));
 
     commit_regression_baseline(&mut app, baseline_id).expect("baseline commits");
@@ -926,7 +926,7 @@ fn specification_editor_never_falls_through_to_an_inactive_dataset() {
     ));
     let active_dataset = active.dataset_id;
     let mut simulation = SimulationState {
-        runs: vec![inactive, active],
+        runs: vec![inactive, active].into(),
         active_run_idx: Some(1),
         ..SimulationState::default()
     };
@@ -1919,7 +1919,7 @@ fn app_retaining_reliability_evidence() -> RSpiceApp {
         soa_evidence_analysis(),
     );
     run.add_analysis(attributed(reliability_evidence_analysis()));
-    app.state.simulation.runs = vec![run];
+    app.state.simulation.runs = vec![run].into();
     assert!(app.state.simulation.select_run(0));
     app
 }

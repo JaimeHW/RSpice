@@ -1532,7 +1532,7 @@ fn production_figure_preparation_uses_the_open_dataset_not_the_global_run_select
         ]),
     );
 
-    state.simulation.runs = vec![displayed, background];
+    state.simulation.runs = vec![displayed, background].into();
     state.simulation.active_run_idx = Some(1);
     state.simulation.active_analysis_idx = Some(0);
     state.ui.results.viewer = ResultViewer::Waves;
@@ -1598,7 +1598,7 @@ fn production_manifest_hardcopy_retains_the_complete_displayed_dataset_through_w
     background
         .restore_provenance(crate::state::SimulationRunProvenance::LegacyUnattributed)
         .expect("background fixture has explicit legacy provenance");
-    state.simulation.runs = vec![displayed, background];
+    state.simulation.runs = vec![displayed, background].into();
     state.simulation.active_run_idx = Some(1);
     state.simulation.active_analysis_idx = Some(0);
     state.ui.results.viewer = ResultViewer::Manifest;
@@ -1652,7 +1652,7 @@ fn production_stacked_results_hardcopy_retains_every_displayed_analysis() {
     run.restore_provenance(crate::state::SimulationRunProvenance::LegacyUnattributed)
         .expect("terminal fixture has explicit legacy provenance");
     let dataset_id = run.dataset_id;
-    state.simulation.runs = vec![run];
+    state.simulation.runs = vec![run].into();
     state.simulation.active_run_idx = Some(0);
     state.simulation.active_analysis_idx = Some(0);
     state.ui.results.viewer = ResultViewer::Waves;
@@ -1714,7 +1714,7 @@ fn production_specs_hardcopy_judges_the_complete_dataset() {
     run.restore_provenance(crate::state::SimulationRunProvenance::LegacyUnattributed)
         .expect("terminal fixture has explicit legacy provenance");
     let dataset_id = run.dataset_id;
-    state.simulation.runs = vec![run];
+    state.simulation.runs = vec![run].into();
     state.simulation.active_run_idx = Some(0);
     state.simulation.active_analysis_idx = Some(0);
     state.workspace.specs = vec![
@@ -1833,7 +1833,7 @@ fn signed_off_specification_workspace() -> (AppState, String) {
 
     let dataset_id = run.dataset_id;
     let mut state = AppState::default();
-    state.simulation.runs = vec![run];
+    state.simulation.runs = vec![run].into();
     state.simulation.active_run_idx = Some(0);
     state.simulation.active_analysis_idx = Some(0);
     state.ui.results.viewer = ResultViewer::Specs;

@@ -576,7 +576,7 @@ mod tests {
 
         let mut run = SimulationRun::new(1);
         run.add_analysis(AnalysisResult::new(7, AnalysisType::PoleZero, "PZ 7"));
-        state.simulation.runs = vec![run];
+        state.simulation.runs = vec![run].into();
         assert!(state.simulation.select_run(0));
         assert!(active_data(&state).is_none());
 

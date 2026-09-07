@@ -820,7 +820,7 @@ mod tests {
         let stale_run = SimulationRun::new(1);
         let active_run = SimulationRun::new(2);
         let mut simulation = SimulationState::default();
-        simulation.runs = vec![stale_run.clone(), active_run];
+        simulation.runs = vec![stale_run.clone(), active_run].into();
         simulation.active_run_idx = Some(1);
         simulation
             .replace_yield_evidence(vec![result("V(out)", 23.0)], Some(provenance(&stale_run)));
@@ -1011,7 +1011,7 @@ mod tests {
         let mut run = SimulationRun::new(1);
         run.add_analysis(analysis);
         let mut state = AppState::default();
-        state.simulation.runs = vec![run];
+        state.simulation.runs = vec![run].into();
         assert!(state.simulation.select_run(0));
 
         let authority = active_monte_carlo_authority(&state, "offset")
@@ -1038,7 +1038,7 @@ mod tests {
         let mut run = SimulationRun::new(1);
         run.add_analysis(analysis);
         let mut state = AppState::default();
-        state.simulation.runs = vec![run];
+        state.simulation.runs = vec![run].into();
         assert!(state.simulation.select_run(0));
 
         assert!(active_monte_carlo_authority(&state, "gain").is_none());
@@ -1062,7 +1062,7 @@ mod tests {
         let mut run = SimulationRun::new(1);
         run.add_analysis(analysis);
         let mut state = AppState::default();
-        state.simulation.runs = vec![run];
+        state.simulation.runs = vec![run].into();
         assert!(state.simulation.select_run(0));
 
         assert!(exact_moments(&state, "gain").is_none());
@@ -1100,7 +1100,7 @@ mod tests {
         let mut run = SimulationRun::new(1);
         run.add_analysis(analysis);
         let mut state = AppState::default();
-        state.simulation.runs = vec![run];
+        state.simulation.runs = vec![run].into();
         assert!(state.simulation.select_run(0));
 
         let first = hist_plan(&mut state, "gain");

@@ -24,7 +24,7 @@ fn app_with_exact_source() -> RSpiceApp {
     ]);
     let mut run = SimulationRun::new(1);
     run.add_analysis(analysis);
-    app.state.simulation.runs = vec![run];
+    app.state.simulation.runs = vec![run].into();
     assert!(app.state.simulation.select_run(0));
     app
 }

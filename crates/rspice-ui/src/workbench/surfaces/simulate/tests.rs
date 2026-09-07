@@ -1374,7 +1374,7 @@ fn output_specifications_never_mix_measurements_across_retained_datasets() {
 
     let selected_dataset = selected.dataset_id;
     let mut simulation = SimulationState::default();
-    simulation.runs = vec![older, selected];
+    simulation.runs = vec![older, selected].into();
     simulation.active_run_idx = Some(1);
 
     let run = selected_output_dataset(&simulation).expect("selected dataset");

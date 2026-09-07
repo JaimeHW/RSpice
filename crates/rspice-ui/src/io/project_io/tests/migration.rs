@@ -15,7 +15,7 @@ fn schema_v5_migrates_to_explicit_legacy_execution_state() {
         .expect("fixture run completes");
     seal_legacy_unattributed(&mut run);
     let mut simulation = SimulationState::default();
-    simulation.runs = vec![run];
+    simulation.runs = vec![run].into();
     simulation.next_run_id = 14;
     let mut persisted = ProjectSimulationResults::from_state(&simulation);
     persisted.schema_version = SOURCE_DOMAIN_RESULTS_SCHEMA_VERSION;
@@ -52,7 +52,7 @@ fn persisted_measurement_at_schema_v17() -> ProjectSimulationResults {
     seal_legacy_unattributed(&mut run);
 
     let mut simulation = SimulationState::default();
-    simulation.runs = vec![run];
+    simulation.runs = vec![run].into();
     simulation.next_run_id = 18;
     let mut persisted = ProjectSimulationResults::from_state(&simulation);
     persisted.schema_version = PERIODIC_STABILITY_RESULTS_SCHEMA_VERSION;
@@ -217,7 +217,7 @@ fn current_projected_failvalue_results() -> ProjectSimulationResults {
     seal_legacy_unattributed(&mut run);
 
     let mut simulation = SimulationState::default();
-    simulation.runs = vec![run];
+    simulation.runs = vec![run].into();
     simulation.next_run_id = 19;
     ProjectSimulationResults::from_state(&simulation)
 }
@@ -330,7 +330,7 @@ fn run_with_waveform_unit(sequence: u64, unit: Option<&str>) -> SimulationRun {
 
 fn persisted_at_schema_v12(run: &SimulationRun) -> ProjectSimulationResults {
     let mut simulation = SimulationState::default();
-    simulation.runs = vec![run.clone()];
+    simulation.runs = vec![run.clone()].into();
     simulation.next_run_id = run.id;
     let mut persisted = ProjectSimulationResults::from_state(&simulation);
     persisted.schema_version = OPERATING_POINT_RESULTS_SCHEMA_VERSION;
@@ -408,7 +408,7 @@ fn schema_v12_rejects_samples_that_do_not_match_its_retained_digest() {
 fn a_retained_waveform_unit_survives_the_current_schema_round_trip() {
     let run = run_with_waveform_unit(34, Some("A"));
     let mut simulation = SimulationState::default();
-    simulation.runs = vec![run];
+    simulation.runs = vec![run].into();
     simulation.next_run_id = 34;
 
     let persisted = ProjectSimulationResults::from_state(&simulation);
@@ -447,7 +447,7 @@ fn persisted_pole_zero_at_schema_v15() -> ProjectSimulationResults {
     );
     seal_legacy_unattributed(&mut run);
     let mut simulation = SimulationState::default();
-    simulation.runs = vec![run];
+    simulation.runs = vec![run].into();
     simulation.next_run_id = 35;
     let mut persisted = ProjectSimulationResults::from_state(&simulation);
     persisted.schema_version = EXECUTED_DECK_RESULTS_SCHEMA_VERSION;
@@ -534,7 +534,7 @@ fn persisted_periodic_at_schema_v16(analysis_type: AnalysisType) -> ProjectSimul
     ));
     seal_legacy_unattributed(&mut run);
     let mut simulation = SimulationState::default();
-    simulation.runs = vec![run];
+    simulation.runs = vec![run].into();
     simulation.next_run_id = 351;
     let mut persisted = ProjectSimulationResults::from_state(&simulation);
     persisted.schema_version = POLE_ZERO_EVIDENCE_RESULTS_SCHEMA_VERSION;
@@ -644,7 +644,7 @@ fn schema_v13_migrates_prepared_receipts_to_an_explicit_default_specification_po
         &[analysis_kind_tag_for_plan_kind(AnalysisKind::Ac)],
     );
     let mut simulation = SimulationState::default();
-    simulation.runs = vec![run];
+    simulation.runs = vec![run].into();
     simulation.next_run_id = 35;
     let mut persisted = ProjectSimulationResults::from_state(&simulation);
     persisted.schema_version = WAVEFORM_UNIT_RESULTS_SCHEMA_VERSION;
@@ -696,7 +696,7 @@ fn schema_v13_rejects_governed_specification_fields_from_a_later_schema() {
         &[analysis_kind_tag_for_plan_kind(AnalysisKind::Ac)],
     );
     let mut simulation = SimulationState::default();
-    simulation.runs = vec![run];
+    simulation.runs = vec![run].into();
     simulation.next_run_id = 36;
     let mut smuggled = ProjectSimulationResults::from_state(&simulation);
     smuggled.schema_version = WAVEFORM_UNIT_RESULTS_SCHEMA_VERSION;
@@ -715,7 +715,7 @@ fn current_schema_requires_coherent_lifecycle_and_execution_identity() {
     let mut run = SimulationRun::new(15);
     seal_legacy_unattributed(&mut run);
     let mut simulation = SimulationState::default();
-    simulation.runs = vec![run];
+    simulation.runs = vec![run].into();
     simulation.next_run_id = 15;
     let current = ProjectSimulationResults::from_state(&simulation);
     current
@@ -771,7 +771,7 @@ fn persisted_running_and_cancelling_runs_restore_as_interrupted() {
         let expected_job_id = run.job_id;
         let expected_target = run.execution_target;
         let mut simulation = SimulationState::default();
-        simulation.runs = vec![run];
+        simulation.runs = vec![run].into();
         simulation.next_run_id = sequence;
 
         let persisted = ProjectSimulationResults::from_state(&simulation);
@@ -820,7 +820,7 @@ fn prepared_result_provenance_round_trips_two_same_kind_analyses_exactly() {
         &[2, 2],
     );
     let mut simulation = SimulationState::default();
-    simulation.runs = vec![run];
+    simulation.runs = vec![run].into();
     simulation.next_run_id = 21;
 
     let persisted = ProjectSimulationResults::from_state(&simulation);
@@ -879,7 +879,7 @@ fn manual_deck_result_provenance_round_trips_without_a_simulation_plan() {
         &[5],
     );
     let mut simulation = SimulationState::default();
-    simulation.runs = vec![run];
+    simulation.runs = vec![run].into();
     simulation.next_run_id = 29;
 
     let mut libraries = LibraryManager::with_primitives();
@@ -935,7 +935,7 @@ fn schema_v4_provenance_migrates_without_guessing_its_source_domain() {
         &[2],
     );
     let mut simulation = SimulationState::default();
-    simulation.runs = vec![run];
+    simulation.runs = vec![run].into();
     simulation.next_run_id = 30;
     let mut persisted = ProjectSimulationResults::from_state(&simulation);
     persisted.schema_version = EXPLICIT_PROVENANCE_MODE_RESULTS_SCHEMA_VERSION;
@@ -997,7 +997,7 @@ fn legacy_result_schema_truth_cannot_be_repaired_or_downgraded() {
         &[2],
     );
     let mut simulation = SimulationState::default();
-    simulation.runs = vec![run];
+    simulation.runs = vec![run].into();
     simulation.next_run_id = 33;
     let mut v4 = ProjectSimulationResults::from_state(&simulation);
     v4.schema_version = EXPLICIT_PROVENANCE_MODE_RESULTS_SCHEMA_VERSION;
@@ -1105,7 +1105,7 @@ fn legacy_result_schema_rejects_present_or_null_later_era_fields() {
         &[2],
     );
     let mut simulation = SimulationState::default();
-    simulation.runs = vec![run];
+    simulation.runs = vec![run].into();
     simulation.next_run_id = 34;
     let current = ProjectSimulationResults::from_state(&simulation);
 
@@ -1219,7 +1219,7 @@ fn failed_legacy_result_migration_is_transactional() {
     ));
     seal_legacy_unattributed(&mut run);
     let mut simulation = SimulationState::default();
-    simulation.runs = vec![run];
+    simulation.runs = vec![run].into();
     simulation.next_run_id = 35;
     let mut legacy = ProjectSimulationResults::from_state(&simulation);
     legacy.schema_version = LEGACY_SIMULATION_RESULTS_SCHEMA_VERSION;
@@ -1252,7 +1252,7 @@ fn schema_v1_result_identity_migration_is_reproducible() {
     ));
     seal_legacy_unattributed(&mut run);
     let mut simulation = SimulationState::default();
-    simulation.runs = vec![run];
+    simulation.runs = vec![run].into();
     simulation.next_run_id = 18;
     let mut first = ProjectSimulationResults::from_state(&simulation);
     first.schema_version = LEGACY_SIMULATION_RESULTS_SCHEMA_VERSION;
@@ -1324,7 +1324,7 @@ fn project_save_requires_result_provenance_to_be_closed_over_plan_or_tombstones(
         &[2],
     );
     let mut simulation = SimulationState::default();
-    simulation.runs = vec![run];
+    simulation.runs = vec![run].into();
     simulation.next_run_id = 31;
     project.simulation_results = ProjectSimulationResults::from_state(&simulation);
 
@@ -1470,7 +1470,7 @@ fn project_save_rejects_result_revision_before_source_creation() {
         &[2],
     );
     let mut simulation = SimulationState::default();
-    simulation.runs = vec![run];
+    simulation.runs = vec![run].into();
     simulation.next_run_id = 36;
     project.simulation_results = ProjectSimulationResults::from_state(&simulation);
 
@@ -1490,7 +1490,7 @@ fn v2_same_kind_results_migrate_without_guessing_source_identity() {
     run.add_analysis(AnalysisResult::new(2, AnalysisType::Ac, "AC high band"));
     seal_legacy_unattributed(&mut run);
     let mut simulation = SimulationState::default();
-    simulation.runs = vec![run];
+    simulation.runs = vec![run].into();
     simulation.next_run_id = 22;
     let mut persisted = ProjectSimulationResults::from_state(&simulation);
     persisted.schema_version = STABLE_DATASET_RESULTS_SCHEMA_VERSION;
@@ -1551,7 +1551,7 @@ fn prepared_result_provenance_validation_rejects_aliases_and_partial_history() {
         &[2, 2],
     );
     let mut simulation = SimulationState::default();
-    simulation.runs = vec![run];
+    simulation.runs = vec![run].into();
     simulation.next_run_id = 23;
     let baseline = ProjectSimulationResults::from_state(&simulation);
 
@@ -1638,7 +1638,7 @@ fn persisted_events_at_schema_v18() -> ProjectSimulationResults {
     seal_legacy_unattributed(&mut run);
 
     let mut simulation = SimulationState::default();
-    simulation.runs = vec![run];
+    simulation.runs = vec![run].into();
     simulation.next_run_id = 19;
     let mut persisted = ProjectSimulationResults::from_state(&simulation);
     persisted.schema_version = MEASUREMENT_VERIFICATION_RESULTS_SCHEMA_VERSION;

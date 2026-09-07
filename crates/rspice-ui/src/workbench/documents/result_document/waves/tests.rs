@@ -1268,7 +1268,7 @@ fn family_policy_expands_stable_styles_and_preserves_overlay_sources() {
     overlay.add_analysis(family_analysis(vec![11.0, 21.0, 31.0, 41.0, 51.0, 61.0]));
     let overlay_dataset = overlay.dataset_id;
     let simulation = SimulationState {
-        runs: vec![active, overlay],
+        runs: vec![active, overlay].into(),
         active_run_idx: Some(0),
         active_analysis_idx: Some(0),
         overlay_dataset_ids: vec![overlay_dataset],
@@ -1424,7 +1424,7 @@ fn incompatible_family_overlay_is_visibly_rejected_without_drawing_native_x() {
     overlay.add_analysis(incompatible);
     let overlay_dataset = overlay.dataset_id;
     let simulation = SimulationState {
-        runs: vec![active, overlay],
+        runs: vec![active, overlay].into(),
         active_run_idx: Some(0),
         overlay_dataset_ids: vec![overlay_dataset],
         ..SimulationState::default()
@@ -1490,7 +1490,7 @@ fn filtered_overlay_uses_typed_ast_and_ignores_excluded_duplicate_x_rows() {
     overlay.add_analysis(overlay_analysis);
     let overlay_dataset = overlay.dataset_id;
     let simulation = SimulationState {
-        runs: vec![active, overlay],
+        runs: vec![active, overlay].into(),
         active_run_idx: Some(0),
         overlay_dataset_ids: vec![overlay_dataset],
         ..SimulationState::default()
@@ -1577,7 +1577,7 @@ fn overlays_pair_two_same_kind_results_by_exact_source_instance() {
     let overlay_dataset_id = overlay.dataset_id;
 
     let mut simulation = SimulationState {
-        runs: vec![active, overlay],
+        runs: vec![active, overlay].into(),
         active_run_idx: Some(0),
         overlay_dataset_ids: vec![overlay_dataset_id],
         ..SimulationState::default()

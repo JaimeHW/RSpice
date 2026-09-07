@@ -1145,7 +1145,7 @@ mod tests {
         let mut state = AppState::default();
         let mut run = crate::state::SimulationRun::new(1);
         run.add_analysis(analysis);
-        state.simulation.runs = vec![run];
+        state.simulation.runs = vec![run].into();
         assert!(state.simulation.select_run(0));
         state
     }

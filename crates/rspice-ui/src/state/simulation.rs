@@ -17,6 +17,7 @@ mod executed_deck;
 mod family_measurements;
 mod result_digest;
 mod run;
+mod run_history;
 mod run_receipt;
 mod saved_output;
 mod specification_verdict;
@@ -68,6 +69,8 @@ pub use run::{
     ExecutionTarget, RunRetention, SimulationCampaignMembership, SimulationExecutionIdentity,
     SimulationRun, SimulationRunLifecycle,
 };
+pub use run_history::RunHistory;
+pub(crate) use run_history::RunHistoryRevision;
 pub use run_receipt::{
     HierarchyMapRow, PreparedModelQualification, PreparedModelSourceIdentity, PreparedRunReceipt,
     PreparedRunTaskReceipt, PreparedSourceCheckReceipt, PreparedSpecification,

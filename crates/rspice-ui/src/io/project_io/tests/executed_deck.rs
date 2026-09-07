@@ -67,7 +67,7 @@ fn swept_state() -> SimulationState {
     let nominal: std::sync::Arc<str> = std::sync::Arc::from(NOMINAL);
     let hot: std::sync::Arc<str> = std::sync::Arc::from(HOT);
     let mut simulation = SimulationState::default();
-    simulation.runs = vec![sealed_run(7, 0xc0)];
+    simulation.runs = vec![sealed_run(7, 0xc0)].into();
     simulation.next_run_id = 7;
     simulation.executed_decks.retain(ExecutedDeck {
         run_id: 7,

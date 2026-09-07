@@ -813,7 +813,7 @@ mod tests {
         let mut state = AppState::default();
         let mut run = SimulationRun::new(1);
         run.add_analysis(AnalysisResult::new(1, AnalysisType::Transient, "TRAN"));
-        state.simulation.runs = vec![run];
+        state.simulation.runs = vec![run].into();
         assert!(state.simulation.select_run(0));
 
         state.analysis.fft_state.window = WindowFunction::Rectangular;
@@ -869,7 +869,7 @@ mod tests {
         let mut state = AppState::default();
         let mut run = SimulationRun::new(1);
         run.add_analysis(AnalysisResult::new(1, AnalysisType::Transient, "TRAN"));
-        state.simulation.runs = vec![run];
+        state.simulation.runs = vec![run].into();
         assert!(state.simulation.select_run(0));
 
         state.analysis.fft_state.window = WindowFunction::Rectangular;

@@ -1134,7 +1134,7 @@ fn project_file_round_trips_persisted_simulation_results() {
     seal_legacy_unattributed(&mut run);
     let expected_run_id = run.run_id;
     let expected_dataset_id = run.dataset_id;
-    simulation.runs = vec![run];
+    simulation.runs = vec![run].into();
     simulation.next_run_id = 12;
     simulation.active_run_idx = Some(0);
     simulation.active_analysis_idx = Some(0);
@@ -1208,7 +1208,7 @@ fn project_file_round_trips_exact_pac_branch_current_trace() {
         AnalysisResult::new(8, AnalysisType::Ac, "PAC fixture").with_waveforms(vec![current]),
     );
     seal_legacy_unattributed(&mut run);
-    simulation.runs = vec![run];
+    simulation.runs = vec![run].into();
     simulation.active_run_idx = Some(0);
     simulation.active_analysis_idx = Some(0);
 
@@ -1264,7 +1264,7 @@ fn project_file_round_trips_exact_result_family_metadata_and_migrates_v6_absence
     );
     seal_legacy_unattributed(&mut run);
     let mut simulation = SimulationState::default();
-    simulation.runs = vec![run];
+    simulation.runs = vec![run].into();
     simulation.next_run_id = 1;
     simulation.active_run_idx = Some(0);
     simulation.active_analysis_idx = Some(0);
@@ -1340,7 +1340,7 @@ fn project_results_round_trip_sparameter_reference_impedance_authority() {
     );
     seal_legacy_unattributed(&mut run);
     let mut simulation = SimulationState::default();
-    simulation.runs = vec![run];
+    simulation.runs = vec![run].into();
     simulation.active_run_idx = Some(0);
     simulation.active_analysis_idx = Some(0);
 
@@ -1377,7 +1377,7 @@ fn retained_result_data_digests_round_trip_and_reject_sample_tampering() {
     let expected_analysis_digest = run.analyses[0].result_data_digest();
     let expected_dataset_digest = run.dataset_content_digest();
     let mut simulation = SimulationState::default();
-    simulation.runs = vec![run];
+    simulation.runs = vec![run].into();
     simulation.next_run_id = 2;
 
     let persisted = ProjectSimulationResults::from_state(&simulation);
@@ -1570,7 +1570,7 @@ fn typed_result_payloads_round_trip_and_reject_payload_tampering() {
     seal_legacy_unattributed(&mut run);
     let dataset_id = run.dataset_id;
     let mut simulation = SimulationState::default();
-    simulation.runs = vec![run];
+    simulation.runs = vec![run].into();
     simulation.next_run_id = 31;
     simulation.active_run_idx = Some(0);
     simulation.active_analysis_idx = Some(1);
@@ -1710,7 +1710,7 @@ fn schema_v8_digests_are_authenticated_before_v9_resealing() {
     );
     seal_legacy_unattributed(&mut run);
     let mut simulation = SimulationState::default();
-    simulation.runs = vec![run];
+    simulation.runs = vec![run].into();
     simulation.next_run_id = 32;
     let mut v8 = ProjectSimulationResults::from_state(&simulation);
     v8.schema_version = CONTENT_DIGEST_RESULTS_SCHEMA_VERSION;
@@ -1793,7 +1793,7 @@ fn schema_v9_digests_are_authenticated_before_current_resealing() {
     );
     seal_legacy_unattributed(&mut run);
     let mut simulation = SimulationState::default();
-    simulation.runs = vec![run];
+    simulation.runs = vec![run].into();
     simulation.next_run_id = 33;
     let mut v9 = ProjectSimulationResults::from_state(&simulation);
     v9.schema_version = TYPED_PAYLOAD_RESULTS_SCHEMA_VERSION;
@@ -1913,7 +1913,7 @@ fn schema_v10_digests_are_authenticated_before_v11_tf_resealing() {
     seal_legacy_unattributed(&mut run);
 
     let mut simulation = SimulationState::default();
-    simulation.runs = vec![run];
+    simulation.runs = vec![run].into();
     simulation.next_run_id = 34;
     let mut v10 = ProjectSimulationResults::from_state(&simulation);
     v10.schema_version = RELIABILITY_SOA_RESULTS_SCHEMA_VERSION;
@@ -2014,7 +2014,7 @@ fn schema_v7_digest_migration_is_deterministic_and_rejects_anachronistic_fields(
     );
     seal_legacy_unattributed(&mut run);
     let mut simulation = SimulationState::default();
-    simulation.runs = vec![run];
+    simulation.runs = vec![run].into();
     simulation.next_run_id = 3;
     let mut legacy = ProjectSimulationResults::from_state(&simulation);
     legacy.schema_version = FAMILY_METADATA_RESULTS_SCHEMA_VERSION;
@@ -2211,7 +2211,7 @@ m1 d g 0 0 irfmod W=0.386 L=2.5u
 
         let mut simulation = SimulationState::default();
         simulation.next_run_id = 61;
-        simulation.runs = vec![run_retaining(report.clone())];
+        simulation.runs = vec![run_retaining(report.clone())].into();
 
         let persisted = ProjectSimulationResults::from_state(&simulation);
         persisted
@@ -2276,7 +2276,7 @@ fn an_operating_point_label_outside_the_vocabulary_is_still_refused() {
     };
     let mut simulation = SimulationState::default();
     simulation.next_run_id = 61;
-    simulation.runs = vec![run_retaining(report)];
+    simulation.runs = vec![run_retaining(report)].into();
 
     let error = ProjectSimulationResults::from_state(&simulation)
         .validate()
@@ -2379,7 +2379,7 @@ q1 c b 0 qmod
 
         let mut simulation = SimulationState::default();
         simulation.next_run_id = 62;
-        simulation.runs = vec![run_retaining_noise(summary.clone())];
+        simulation.runs = vec![run_retaining_noise(summary.clone())].into();
 
         let persisted = ProjectSimulationResults::from_state(&simulation);
         persisted
@@ -2434,7 +2434,7 @@ fn a_noise_mechanism_outside_the_persistable_shape_is_still_refused() {
         };
         let mut simulation = SimulationState::default();
         simulation.next_run_id = 62;
-        simulation.runs = vec![run_retaining_noise(summary)];
+        simulation.runs = vec![run_retaining_noise(summary)].into();
 
         let error = ProjectSimulationResults::from_state(&simulation)
             .validate()

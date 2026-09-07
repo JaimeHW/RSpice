@@ -653,7 +653,7 @@ impl PreparedRetainedHardcopyWorkerPayload {
                     next_run_id: run.id,
                     active_run_idx: Some(0),
                     active_analysis_idx: (!run.analyses.is_empty()).then_some(0),
-                    runs: vec![run],
+                    runs: vec![run].into(),
                     ..Default::default()
                 };
                 Self::Results {

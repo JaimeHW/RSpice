@@ -1622,7 +1622,7 @@ mod tests {
         let transient_id = transient.dataset_id;
         let ac = retained_run_with(AnalysisType::Ac);
         let ac_id = ac.dataset_id;
-        app.state.simulation.runs = vec![transient, ac];
+        app.state.simulation.runs = vec![transient, ac].into();
 
         assert_eq!(
             first_compatible_viewer(
@@ -1647,7 +1647,7 @@ mod tests {
         let mut app = RSpiceApp::test_instance();
         let run = retained_run_with(AnalysisType::Transient);
         let dataset_id = run.dataset_id;
-        app.state.simulation.runs = vec![run];
+        app.state.simulation.runs = vec![run].into();
         let family = ResultDocumentFamily::WaveformWorksheet;
         assert!(viewer_is_creatable(
             &app.state,
@@ -1676,7 +1676,7 @@ mod tests {
         let mut app = RSpiceApp::test_instance();
         let run = retained_run_with(AnalysisType::Transient);
         let dataset_id = run.dataset_id;
-        app.state.simulation.runs = vec![run];
+        app.state.simulation.runs = vec![run].into();
         app.state.workbench.create_result_document = CreateResultDocumentDialogState {
             open: true,
             name: "Transient review".to_owned(),
@@ -1738,7 +1738,7 @@ mod tests {
         run.lifecycle = SimulationRunLifecycle::Completed;
         run.analyses.push(analysis);
         let dataset_id = run.dataset_id;
-        app.state.simulation.runs = vec![run];
+        app.state.simulation.runs = vec![run].into();
         app.state.workbench.create_result_document = CreateResultDocumentDialogState {
             open: true,
             name: "Typed OP datasheet".to_owned(),
@@ -1866,7 +1866,7 @@ mod tests {
             run.lifecycle = SimulationRunLifecycle::Completed;
             run.analyses.push(analysis);
             let dataset_id = run.dataset_id;
-            app.state.simulation.runs = vec![run];
+            app.state.simulation.runs = vec![run].into();
             app.state.workbench.create_result_document = CreateResultDocumentDialogState {
                 open: true,
                 name: format!("{viewer_id} review"),
@@ -1896,7 +1896,7 @@ mod tests {
         let mut app = RSpiceApp::test_instance();
         let run = retained_run_with(AnalysisType::Transient);
         let dataset_id = run.dataset_id;
-        app.state.simulation.runs = vec![run];
+        app.state.simulation.runs = vec![run].into();
         let draft = CreateResultDocumentDialogState {
             open: true,
             name: "Transient review".to_owned(),

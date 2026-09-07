@@ -89,7 +89,7 @@ fn sealed_rf_results(retained: usize) -> ProjectSimulationResults {
         .expect("the fixture run seals explicitly");
 
     let mut simulation = SimulationState::default();
-    simulation.runs = vec![run];
+    simulation.runs = vec![run].into();
     simulation.next_run_id = 77;
     ProjectSimulationResults::from_state(&simulation)
 }

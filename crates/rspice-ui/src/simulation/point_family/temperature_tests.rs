@@ -260,7 +260,7 @@ fn a_temperature_run_is_an_authentic_prefix_of_its_receipt_and_survives_a_projec
 
     let mut simulation = crate::state::SimulationState::default();
     simulation.next_run_id = run.id;
-    simulation.runs = vec![run];
+    simulation.runs = vec![run].into();
 
     let persisted = ProjectSimulationResults::from_state(&simulation);
     persisted

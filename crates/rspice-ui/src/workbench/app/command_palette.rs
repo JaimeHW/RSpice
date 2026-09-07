@@ -2216,7 +2216,7 @@ mod tests {
         );
         let active_dataset_id = active_run.dataset_id;
 
-        app.state.simulation.runs = vec![stale_run, active_run];
+        app.state.simulation.runs = vec![stale_run, active_run].into();
         assert!(app.state.simulation.select_run(1));
         assert!(
             app.palette_rows(

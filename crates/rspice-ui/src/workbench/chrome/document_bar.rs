@@ -1423,7 +1423,7 @@ mod tests {
             "AC",
         ));
         let dataset = first.dataset_id;
-        state.simulation.runs = vec![first];
+        state.simulation.runs = vec![first].into();
         assert!(state.simulation.select_run(0));
         assert!(state.simulation.select_analysis(1));
         let version = state.simulation.data_version;
@@ -1454,7 +1454,7 @@ mod tests {
         let first_dataset = first.dataset_id;
         let second = SimulationRun::new(2);
         let second_dataset = second.dataset_id;
-        state.simulation.runs = vec![first, second];
+        state.simulation.runs = vec![first, second].into();
         assert!(state.simulation.select_run(1));
         let documents = visible_documents(&state);
 
@@ -1492,7 +1492,7 @@ mod tests {
         let second_dataset = second.dataset_id;
         let third = SimulationRun::new(3);
         let third_dataset = third.dataset_id;
-        state.simulation.runs = vec![first, second, third];
+        state.simulation.runs = vec![first, second, third].into();
         assert!(state.simulation.select_run(0));
 
         assert!(cycle_document(&mut state, false));

@@ -184,7 +184,7 @@ fn state_with_typed_result(analysis: AnalysisResult) -> AppState {
     let mut run = SimulationRun::new(1);
     run.add_analysis(analysis);
     let mut state = AppState::default();
-    state.simulation.runs = vec![run];
+    state.simulation.runs = vec![run].into();
     state.simulation.active_run_idx = Some(0);
     state.simulation.active_analysis_idx = Some(0);
     activate_result_document(&mut state, viewer);
@@ -873,7 +873,7 @@ fn bode_export_uses_the_displayed_frequency_analysis_not_the_global_selector() {
     run.add_analysis(ac);
 
     let mut state = AppState::default();
-    state.simulation.runs = vec![run];
+    state.simulation.runs = vec![run].into();
     state.simulation.active_run_idx = Some(0);
     // Deliberately leave the simulation selector on TRAN while the Results
     // document displays Bode. Export authority is the document, not this
@@ -920,7 +920,7 @@ fn waves_export_preserves_every_displayed_analysis_and_independent_axes() {
     run.add_analysis(tran_a);
     run.add_analysis(tran_b);
     let mut state = AppState::default();
-    state.simulation.runs = vec![run];
+    state.simulation.runs = vec![run].into();
     state.simulation.active_run_idx = Some(0);
     state.simulation.active_analysis_idx = Some(0);
     activate_result_document(&mut state, crate::workbench::ResultViewer::Waves);
@@ -946,7 +946,7 @@ fn csv_export_preserves_single_analysis_axis_shape() {
     run.add_analysis(transient.clone());
 
     let mut state = AppState::default();
-    state.simulation.runs = vec![run];
+    state.simulation.runs = vec![run].into();
     state.simulation.active_run_idx = Some(0);
     state.simulation.active_analysis_idx = Some(0);
     state
@@ -976,7 +976,7 @@ fn csv_export_uses_the_displayed_analysis_without_a_global_analysis_selector() {
     run.add_analysis(transient.clone());
 
     let mut state = AppState::default();
-    state.simulation.runs = vec![run];
+    state.simulation.runs = vec![run].into();
     state.simulation.active_run_idx = Some(0);
     state
         .simulation
@@ -996,7 +996,7 @@ fn csv_export_fails_closed_when_the_active_analysis_has_no_samples() {
     run.add_analysis(AnalysisResult::new(1, AnalysisType::Transient, "Transient"));
 
     let mut state = AppState::default();
-    state.simulation.runs = vec![run];
+    state.simulation.runs = vec![run].into();
     state.simulation.active_run_idx = Some(0);
     state.simulation.active_analysis_idx = Some(0);
     activate_result_document(&mut state, crate::workbench::ResultViewer::Waves);
@@ -1021,7 +1021,7 @@ fn csv_export_rejects_single_analysis_divergent_x_axes() {
     run.add_analysis(transient);
 
     let mut state = AppState::default();
-    state.simulation.runs = vec![run];
+    state.simulation.runs = vec![run].into();
     state.simulation.active_run_idx = Some(0);
     state.simulation.active_analysis_idx = Some(0);
     activate_result_document(&mut state, crate::workbench::ResultViewer::Waves);
@@ -1057,7 +1057,7 @@ fn csv_export_ignores_divergent_axes_owned_by_an_inactive_analysis() {
     run.add_analysis(ac);
 
     let mut state = AppState::default();
-    state.simulation.runs = vec![run];
+    state.simulation.runs = vec![run].into();
     state.simulation.active_run_idx = Some(0);
     state.simulation.active_analysis_idx = Some(1);
     activate_result_document(&mut state, crate::workbench::ResultViewer::Bode);
@@ -1103,7 +1103,7 @@ fn csv_export_includes_complex_real_and_imaginary_columns() {
     run.add_analysis(ac);
 
     let mut state = AppState::default();
-    state.simulation.runs = vec![run];
+    state.simulation.runs = vec![run].into();
     state.simulation.active_run_idx = Some(0);
     state.simulation.active_analysis_idx = Some(0);
     activate_result_document(&mut state, crate::workbench::ResultViewer::Bode);
@@ -1185,7 +1185,7 @@ fn engineering_export_preference_dispatches_compatible_touchstone() {
     run.add_analysis(ac);
 
     let mut state = AppState::default();
-    state.simulation.runs = vec![run];
+    state.simulation.runs = vec![run].into();
     state.simulation.active_run_idx = Some(0);
     state.simulation.active_analysis_idx = Some(0);
     activate_result_document(&mut state, crate::workbench::ResultViewer::Smith);
@@ -1340,7 +1340,7 @@ fn incompatible_touchstone_result_is_rejected_before_save_picker() {
     run.add_analysis(transient);
 
     let mut state = AppState::default();
-    state.simulation.runs = vec![run];
+    state.simulation.runs = vec![run].into();
     state.simulation.active_run_idx = Some(0);
     state.simulation.active_analysis_idx = Some(0);
     activate_result_document(&mut state, crate::workbench::ResultViewer::Waves);
@@ -1367,7 +1367,7 @@ fn displayed_digits_never_reduce_csv_source_precision() {
     run.add_analysis(transient);
 
     let mut state = AppState::default();
-    state.simulation.runs = vec![run];
+    state.simulation.runs = vec![run].into();
     state.simulation.active_run_idx = Some(0);
     state.simulation.active_analysis_idx = Some(0);
     activate_result_document(&mut state, crate::workbench::ResultViewer::Waves);
@@ -1395,7 +1395,7 @@ fn csv_export_reports_browser_download_start_without_claiming_file_written() {
     run.add_analysis(transient.clone());
 
     let mut state = AppState::default();
-    state.simulation.runs = vec![run];
+    state.simulation.runs = vec![run].into();
     state.simulation.active_run_idx = Some(0);
     state.simulation.active_analysis_idx = Some(0);
     state
@@ -1433,7 +1433,7 @@ fn hidden_trace_state(analyses: usize) -> AppState {
         );
     }
     let mut state = AppState::default();
-    state.simulation.runs = vec![run];
+    state.simulation.runs = vec![run].into();
     state.simulation.active_run_idx = Some(0);
     state.simulation.active_analysis_idx = Some(0);
     let waveforms = state.simulation.runs[0].analyses[0].waveforms.clone();
@@ -1499,7 +1499,7 @@ fn an_operating_point_export_that_cannot_be_produced_states_why() {
         let mut run = SimulationRun::new(7);
         run.add_analysis(analysis);
         let mut state = AppState::default();
-        state.simulation.runs = vec![run];
+        state.simulation.runs = vec![run].into();
         state.simulation.active_run_idx = Some(0);
         state.simulation.active_analysis_idx = Some(0);
         activate_result_document(&mut state, crate::workbench::ResultViewer::Op);

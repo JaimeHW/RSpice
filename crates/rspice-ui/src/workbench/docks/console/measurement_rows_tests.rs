@@ -50,7 +50,7 @@ fn row_names(app: &RSpiceApp) -> Vec<String> {
 #[test]
 fn stability_margins_from_a_failed_solve_never_reach_the_measurement_table() {
     let mut app = RSpiceApp::test_instance();
-    app.state.simulation.runs = vec![ac_run()];
+    app.state.simulation.runs = vec![ac_run()].into();
     assert!(app.state.simulation.select_run(0));
     app.state.simulation.active_analysis_idx = Some(0);
 

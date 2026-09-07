@@ -599,7 +599,7 @@ mod tests {
         run.add_analysis(ac_result(second_id, "V(second)", [100.0, 10.0]));
 
         let mut state = AppState::default();
-        state.simulation.runs = vec![run];
+        state.simulation.runs = vec![run].into();
         assert!(state.simulation.select_run(0));
 
         assert!(state.simulation.select_analysis(0));
@@ -680,7 +680,7 @@ mod tests {
         );
 
         let mut state = AppState::default();
-        state.simulation.runs = vec![run];
+        state.simulation.runs = vec![run].into();
         assert!(state.simulation.select_run(0));
         let model = build_model(&mut state).expect("Bode model");
 
@@ -701,7 +701,7 @@ mod tests {
         run.add_analysis(failed);
 
         let mut state = AppState::default();
-        state.simulation.runs = vec![run];
+        state.simulation.runs = vec![run].into();
         assert!(state.simulation.select_run(0));
         assert!(state.simulation.select_analysis(0));
 
@@ -737,7 +737,7 @@ mod tests {
         run.add_analysis(AnalysisResult::new(3, AnalysisType::Transient, "TRAN"));
 
         let mut state = AppState::default();
-        state.simulation.runs = vec![run];
+        state.simulation.runs = vec![run].into();
         assert!(state.simulation.select_run(0));
 
         // The selection is a noise analysis with no ordinary spectrum: the
@@ -773,7 +773,7 @@ mod tests {
         );
 
         let mut state = AppState::default();
-        state.simulation.runs = vec![run];
+        state.simulation.runs = vec![run].into();
         assert!(state.simulation.select_run(0));
 
         // The selected PNOISE analysis holds no ordinary spectrum. Its own
@@ -813,7 +813,7 @@ mod tests {
         );
 
         let mut state = AppState::default();
-        state.simulation.runs = vec![run];
+        state.simulation.runs = vec![run].into();
         assert!(state.simulation.select_run(0));
         let model = build_noise_model(&state).expect("input-referred noise model");
         // Input-referred evidence takes the card without mixing in output

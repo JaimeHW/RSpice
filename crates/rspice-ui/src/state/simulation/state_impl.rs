@@ -675,7 +675,7 @@ impl SimulationState {
         active_analysis_sequence: Option<u64>,
         overlay_dataset_ids: Vec<DatasetId>,
     ) {
-        self.runs = runs;
+        self.runs = runs.into();
         // Loading a project must not apply the retired project-global limit to
         // a history now owned by multiple simulation plans. Each plan applies
         // its own policy when it next creates or explicitly edits retention.
@@ -1069,7 +1069,7 @@ mod tests {
         run.restore_provenance(SimulationRunProvenance::LegacyUnattributed)
             .expect("legacy fixture is explicitly classified");
         let mut state = SimulationState {
-            runs: vec![run],
+            runs: vec![run].into(),
             active_run_idx: Some(0),
             active_analysis_idx: Some(0),
             ..SimulationState::default()
@@ -1363,7 +1363,7 @@ mod tests {
         ));
         let empty_newer = SimulationRun::new(2);
         let mut state = SimulationState::default();
-        state.runs = vec![empty_newer, retained];
+        state.runs = vec![empty_newer, retained].into();
 
         assert!(state.has_results(), "run history itself is not empty");
         assert!(state.has_retained_result_dataset());
@@ -1442,7 +1442,7 @@ mod tests {
         let overlay = SimulationRun::new(2);
         let overlay_id = overlay.dataset_id;
         let mut state = SimulationState::default();
-        state.runs = vec![active, overlay];
+        state.runs = vec![active, overlay].into();
         state.active_run_idx = Some(0);
 
         assert!(!state.toggle_dataset_overlay(active_id));

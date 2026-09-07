@@ -1167,7 +1167,7 @@ fn an_executed_deck_claims_verification_only_when_it_reproduces_the_sealed_diges
     legacy
         .restore_provenance(SimulationRunProvenance::LegacyUnattributed)
         .expect("legacy history is explicitly classified");
-    unsealed.simulation.runs = vec![legacy];
+    unsealed.simulation.runs = vec![legacy].into();
     unsealed.simulation.executed_decks.retain(ExecutedDeck {
         run_id: 3,
         points: vec![point("TT 27C", SEALED)],

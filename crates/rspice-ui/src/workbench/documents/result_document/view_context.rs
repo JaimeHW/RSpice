@@ -449,7 +449,7 @@ mod tests {
         }
         let dataset_id = run.dataset_id;
         let mut state = AppState::default();
-        state.simulation.runs = vec![run];
+        state.simulation.runs = vec![run].into();
         state.simulation.active_run_idx = Some(0);
         state.simulation.active_analysis_idx = Some(0);
         state

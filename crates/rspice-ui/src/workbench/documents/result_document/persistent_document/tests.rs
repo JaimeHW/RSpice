@@ -28,7 +28,7 @@ fn persistent_transient_fixture() -> (RSpiceApp, ResultDocumentId) {
         ]),
     );
     let dataset_id = run.dataset_id;
-    app.state.simulation.runs = vec![run];
+    app.state.simulation.runs = vec![run].into();
     assert!(app.state.simulation.select_run(0));
     assert!(app.state.simulation.select_analysis(0));
     app.state.workbench.create_result_document = CreateResultDocumentDialogState {
@@ -1008,7 +1008,7 @@ fn latest_tracking_fixture() -> LatestFixture {
         "V(out)",
     );
     let dataset_id = run.dataset_id;
-    app.state.simulation.runs = vec![run];
+    app.state.simulation.runs = vec![run].into();
     assert!(app.state.simulation.select_run(0));
     assert!(app.state.simulation.select_analysis(0));
     app.state.workbench.create_result_document = CreateResultDocumentDialogState {
@@ -1396,7 +1396,7 @@ fn retained_frequency_document_restores_its_noise_projection() {
     let mut state = AppState::default();
     let mut run = SimulationRun::new(1);
     run.add_analysis(noise);
-    state.simulation.runs = vec![run];
+    state.simulation.runs = vec![run].into();
     assert!(state.simulation.select_run(0));
 
     assert_eq!(

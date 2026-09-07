@@ -2356,6 +2356,7 @@ pub struct ResultsState {
     /// The retained dataset history this presentation state was last
     /// reconciled against. Transient.
     retained_datasets: HashSet<DatasetId>,
+    retained_history_revision: Option<crate::state::RunHistoryRevision>,
     /// Device-local pane selection for each project-owned result document.
     ///
     /// Kept per document for the same reason page selection is: which pane a
@@ -3304,6 +3305,7 @@ impl ResultsState {
     /// and the next frame rebuilds what it needs, so dropping all of them
     /// here costs one rebuild and bounds the session.
     pub(crate) fn retain_datasets(&mut self, retained: &HashSet<DatasetId>) {
+        self.retained_history_revision = None;
         self.remember_marker_ids();
         let live = |analysis: AnalysisPresentationKey| retained.contains(&analysis.dataset_id());
         self.markers.retain(|marker| live(marker.analysis));
@@ -3364,19 +3366,26 @@ impl ResultsState {
     ///
     /// Pruning happens in several places inside the simulation state, which
     /// has no reach into presentation state at all. Reconciling against the
-    /// retained set here gives that one owner, and costs a comparison of a
-    /// short list unless the history actually changed.
+    /// retained set here gives that one owner. Unchanged history is checked
+    /// through its mutation revision without allocating another dataset set.
     pub(crate) fn reconcile_retained_datasets(
         &mut self,
         simulation: &crate::state::SimulationState,
     ) {
+        let revision = simulation.runs.revision();
+        if self.retained_history_revision.as_ref() == Some(&revision) {
+            return;
+        }
+        frame_work::note(frame_work::DatasetWalk::RetainedHistoryScan);
         let retained: HashSet<DatasetId> =
             simulation.runs.iter().map(|run| run.dataset_id).collect();
         if retained == self.retained_datasets {
+            self.retained_history_revision = Some(revision);
             return;
         }
         self.retain_datasets(&retained);
         self.retained_datasets = retained;
+        self.retained_history_revision = Some(revision);
     }
 
     pub(crate) fn persistent_document_pane(
