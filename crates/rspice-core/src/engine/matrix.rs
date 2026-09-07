@@ -53,6 +53,16 @@ impl Engine {
         &self,
         circuit: &CircuitData,
     ) -> Result<StaticMatrix, SimulationError> {
+        self.build_matrix_with_extra_pattern(circuit, &[])
+    }
+
+    /// Reserve extra entries for an analysis's algebraic constraints without
+    /// changing device topology or allowing stamps outside the frozen pattern.
+    pub(crate) fn build_matrix_with_extra_pattern(
+        &self,
+        circuit: &CircuitData,
+        extra_pattern: &[(usize, usize)],
+    ) -> Result<StaticMatrix, SimulationError> {
         let size = circuit.matrix_size();
         if size == 0 {
             return Err(SimulationError::Circuit("Empty circuit".to_string()));
@@ -1725,6 +1735,7 @@ impl Engine {
                     || value.eq_ignore_ascii_case("faer")
             });
         let configured_backend_is_explicit = self.config.matrix_solver.is_some();
+        triplets.extend(extra_pattern.iter().map(|&(row, col)| (row, col, 0.0)));
         let mut solver_options = SolverOptions::from_env();
         if let Some(backend) = self.config.matrix_solver {
             solver_options.real_backend = backend;

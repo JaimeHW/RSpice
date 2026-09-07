@@ -82,7 +82,7 @@ impl PssAcceptedStepHistory {
 
 const PSS_KRYLOV_STATE_THRESHOLD: usize = 12;
 const PSS_KRYLOV_REL_TOL: Value = 1e-9;
-const PSS_OPERATING_POINT_IDENTITY_VERSION: u32 = 3;
+const PSS_OPERATING_POINT_IDENTITY_VERSION: u32 = 4;
 
 fn pss_identity_field(hasher: &mut blake3::Hasher, name: &str, bytes: &[u8]) {
     hasher.update(&(name.len() as u64).to_le_bytes());
@@ -1014,7 +1014,7 @@ impl PssOperatingPointIdentity {
 pub struct PssOperatingPoint {
     config: PssConfig,
     analysis: PssAnalysisResult,
-    /// Ordered capacitor-voltage then inductor-current shooting coordinates.
+    /// Independent charge-voltage followed by current shooting coordinates.
     #[cfg_attr(feature = "veriloga", serde(default))]
     shooting_state_basis: Vec<String>,
     shooting_state: Vec<Value>,
@@ -2508,7 +2508,8 @@ impl Engine {
         let size = circuit.matrix_size();
         let mut initial = circuit.clone();
         initial.add_initial_voltage_constraints();
-        let mut matrix = self.build_matrix(&initial)?;
+        let mut matrix =
+            self.build_matrix_with_extra_pattern(&initial, &initial.initial_extra_pattern())?;
         initial.link_indices(&matrix);
         let coeff = CompanionCoefficients::for_method(
             crate::numerics::integration::IntegrationMethod::BackwardEuler,
@@ -3163,13 +3164,7 @@ impl Engine {
             .scaled_residual_inf_norm_by_row(solution, rhs, self.residual_reltol(), |row| {
                 // Initialization changes an inductor's voltage equation into
                 // a current constraint, so its absolute tolerance has amps.
-                if row < nodes
-                    || circuit
-                        .inductors
-                        .branch_indices
-                        .iter()
-                        .any(|&branch| row == nodes + branch - 1)
-                {
+                if row < nodes || circuit.is_initial_current_row(row) {
                     self.current_abstol()
                 } else {
                     self.voltage_abstol()
@@ -3224,6 +3219,11 @@ impl Engine {
         linearize_at: &[Value],
         physical_probe: bool,
     ) -> Result<(), SimulationError> {
+        matrix.clear_values();
+        rhs.fill(0.0);
+        if step.initialization {
+            circuit.stamp_initial_inductor_constraints(matrix, rhs);
+        }
         let PssCircuit {
             circuit,
             diode_history,
@@ -3235,8 +3235,6 @@ impl Engine {
             dt,
             initialization,
         } = step;
-        matrix.clear_values();
-        rhs.fill(0.0);
 
         circuit.stamp_transient_linear_direct(matrix, rhs);
 
@@ -3309,12 +3307,12 @@ impl Engine {
                 }
                 matrix.add(nn - 1, br_idx, -1.0);
             }
-            if br > 0 {
+            if br > 0 && !initialization {
                 let br_idx = circuit.num_nodes() + br - 1;
-                matrix.add(br_idx, br_idx, if initialization { 1.0 } else { -req });
+                matrix.add(br_idx, br_idx, -req);
                 // Branch row sign convention: v - r_eq*i = -v_eq (see
                 // Inductors::stamp_transient_companion).
-                rhs[br_idx] = if initialization { i_n } else { -veq };
+                rhs[br_idx] = -veq;
             }
         }
 

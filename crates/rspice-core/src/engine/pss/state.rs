@@ -3,6 +3,9 @@
 use super::*;
 use crate::numerics::integration::TwoTerminalChargeHistory;
 
+mod current;
+use current::PssCurrentBasis;
+
 #[derive(Debug, Clone, Copy)]
 enum VoltageBranch {
     Capacitor(usize),
@@ -33,6 +36,7 @@ struct ForestEdge {
 pub(super) struct PssStateBasis {
     voltage_branches: Vec<VoltageBranch>,
     forest: Vec<ForestEdge>,
+    currents: PssCurrentBasis,
 }
 
 impl PssStateBasis {
@@ -131,6 +135,7 @@ impl PssStateBasis {
         Self {
             voltage_branches,
             forest,
+            currents: PssCurrentBasis::new(circuit),
         }
     }
 
@@ -142,11 +147,10 @@ impl PssStateBasis {
                 VoltageBranch::Diode(index) => format!("D:{}", circuit.diodes.devices[index].name),
             })
             .chain(
-                circuit
-                    .inductors
-                    .names
+                self.currents
+                    .representatives
                     .iter()
-                    .map(|name| format!("L:{name}")),
+                    .map(|&index| format!("L:{}", circuit.inductors.names[index])),
             )
             .collect()
     }
@@ -209,7 +213,7 @@ impl PssCircuit {
     }
 
     pub(in crate::engine) fn state_dimension(&self) -> usize {
-        self.basis.voltage_branches.len() + self.inductors.len()
+        self.basis.voltage_branches.len() + self.basis.currents.representatives.len()
     }
 
     pub(super) fn extract_state(&self) -> Vec<Value> {
@@ -220,7 +224,13 @@ impl PssCircuit {
                 VoltageBranch::Capacitor(index) => self.capacitors.v_prev[index],
                 VoltageBranch::Diode(index) => self.diode_history.vd_prev[index],
             })
-            .chain(self.inductors.i_prev.iter().copied())
+            .chain(
+                self.basis
+                    .currents
+                    .representatives
+                    .iter()
+                    .map(|&index| self.inductors.i_prev[index]),
+            )
             .collect()
     }
 
@@ -260,10 +270,9 @@ impl PssCircuit {
                     - self.voltage_scratch[diode.node_cathode];
                 (voltage, diode.junction_charge_and_capacitance(voltage).0)
             }));
-        for (index, &current) in state[self.basis.voltage_branches.len()..]
-            .iter()
-            .enumerate()
-        {
+        for (index, coordinate) in self.basis.currents.coordinates.iter().enumerate() {
+            let current =
+                coordinate.sign * state[self.basis.voltage_branches.len() + coordinate.state];
             circuit.inductors.i_prev[index] = current;
             circuit.inductors.i_prev_prev[index] = current;
             circuit.inductors.i_prev_prev_prev[index] = current;
@@ -300,6 +309,56 @@ impl PssCircuit {
         }
     }
 
+    pub(super) fn initial_extra_pattern(&self) -> Vec<(usize, usize)> {
+        let mut entries = Vec::new();
+        self.basis
+            .currents
+            .voltage_constraints(&self.circuit, |row, col, _| entries.push((row, col)));
+        entries
+    }
+
+    pub(super) fn stamp_initial_inductor_constraints(
+        &self,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+    ) {
+        for &index in &self.basis.currents.representatives {
+            let row = self.num_nodes() + self.inductors.branch_indices[index] - 1;
+            matrix.add(row, row, 1.0);
+            rhs[row] = self.inductors.i_prev[index];
+        }
+        self.basis
+            .currents
+            .voltage_constraints(&self.circuit, |row, col, weight| {
+                matrix.add(row, col, weight)
+            });
+    }
+
+    pub(super) fn is_initial_current_row(&self, row: usize) -> bool {
+        self.basis
+            .currents
+            .representatives
+            .iter()
+            .any(|&index| row == self.num_nodes() + self.inductors.branch_indices[index] - 1)
+    }
+
+    /// Series currents differ only by orientation, so their absolute modal
+    /// participation resolves to the same independent current coordinate.
+    pub(in crate::engine) fn inductor_probe_coordinate(
+        &self,
+        name: &str,
+    ) -> Option<(String, usize)> {
+        let index = self
+            .inductors
+            .names
+            .iter()
+            .position(|candidate| candidate.eq_ignore_ascii_case(name))?;
+        Some((
+            self.inductors.names[index].clone(),
+            self.basis.voltage_branches.len() + self.basis.currents.coordinates[index].state,
+        ))
+    }
+
     /// Map an MNA solution perturbation into the same independent coordinates
     /// used by shooting and the oscillator-noise adjoint.
     pub(in crate::engine) fn project_perturbation<'a>(
@@ -313,10 +372,13 @@ impl PssCircuit {
                 voltage(pos) - voltage(neg)
             })
             .chain(
-                self.inductors
-                    .branch_indices
+                self.basis
+                    .currents
+                    .representatives
                     .iter()
-                    .map(move |&branch| solution[self.num_nodes() + branch - 1]),
+                    .map(move |&index| {
+                        solution[self.num_nodes() + self.inductors.branch_indices[index] - 1]
+                    }),
             )
     }
 }

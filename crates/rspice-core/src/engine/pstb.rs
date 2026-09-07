@@ -85,7 +85,8 @@ impl Engine {
             )));
         }
 
-        let probe = self.resolve_pstb_probe(netlist, operating_point, &card.probe_instance)?;
+        let probe =
+            self.resolve_pstb_probe(netlist, operating_point, &card.probe_instance, abort)?;
         ensure_not_aborted(abort)?;
 
         let pss = operating_point.analysis();
@@ -98,15 +99,9 @@ impl Engine {
                 ));
             }
         }
-        // A resolved probe is a coordinate of a non-empty basis, and a basis is
-        // exactly as long as the shooting state, which is exactly the order of
-        // the monodromy. So `order` is at least one by the time this runs, and
-        // an order-zero periodic map cannot reach any judgement below it: the
-        // engine will not solve a PSS for a circuit with no reactive element at
-        // all, and a retained artifact carrying an empty map necessarily
-        // carries an empty basis, which `resolve_pstb_probe` refuses above.
-        // `a_periodic_map_with_no_dynamic_state_cannot_reach_a_pstb_card` in
-        // `tests/authored_card_runners.rs` pins both halves of that.
+        // A resolved probe indexes a nonempty independent basis. A fully
+        // prescribed reactive circuit can have an order-zero carrier, but
+        // probe resolution rejects it before any modal participation is read.
         if probe.state_index >= order {
             return Err(SimulationError::Circuit(format!(
                 "PSTB probe '{}' maps to shooting coordinate {} but the retained monodromy has \
@@ -161,44 +156,34 @@ impl Engine {
     /// The retained basis contains independent charge-voltage coordinates
     /// followed by inductor currents. Resolving `L:<probe>` by name remains
     /// correct when charge branches share a voltage or add diode coordinates.
-    /// A circuit is built only to explain which probes the deck offers when
-    /// the name misses.
+    /// Series-current aliases are resolved from an authenticated circuit when
+    /// the authored winding is not the representative named by the basis.
     fn resolve_pstb_probe(
         &self,
         netlist: &Netlist,
         operating_point: &PssOperatingPoint,
         probe_instance: &str,
+        abort: &dyn AbortSignal,
     ) -> Result<ResolvedPstbProbe, SimulationError> {
         let probe_name = probe_instance.trim();
         let basis = operating_point.shooting_state_basis();
-        // A legacy identityless artifact carries no basis at all. Resolving a
-        // probe against it would silently name coordinate zero, so it is a
-        // refusal: the retained state cannot say what its own coordinates are.
-        //
-        // Naming that one cause is not an oversight, and the obvious second
-        // cause -- a circuit with genuinely no dynamic state -- cannot reach
-        // here. `Engine::pss_shooting_state_basis` builds the basis from
-        // `circuit.capacitors.names` chained with `circuit.inductors.names`,
-        // and `run_pss_with_state_and_frozen_sources_abort` refuses the solve
-        // with `PssError::NoReactiveElements` when
-        // `capacitors.len() + inductors.len()` is zero. Same two collections,
-        // so a stateless circuit never produces a carrier at all rather than
-        // producing one with an empty basis, and the only constructor that
-        // yields an empty basis is `PssOperatingPoint::try_from_parts`, which
-        // is by definition the identityless path. That is the same argument
-        // that retired the `order == 0` guard below.
-        // `a_periodic_map_with_no_dynamic_state_cannot_reach_a_pstb_card` and
-        // `a_carrier_with_no_shooting_state_basis_refuses_the_probe` in
-        // `tests/authored_card_runners.rs` pin the two halves.
+        // Fully prescribed storage has no free coordinates; transported
+        // legacy artifacts also lack a basis. Neither can name a dynamic
+        // probe, but only the latter is an authentication failure.
         if basis.is_empty() {
+            let reason = if operating_point.producer_identity().is_some() {
+                "its storage is fully prescribed and it has no independent dynamic coordinate"
+            } else {
+                "it is an unauthenticated legacy artifact"
+            };
             return Err(SimulationError::Circuit(format!(
                 "PSTB probe '{probe_name}' cannot be resolved: the retained PSS operating point \
-                 carries no shooting-state basis, which is how an unauthenticated legacy artifact \
-                 presents itself"
+                 carries no shooting-state basis: {reason}"
             )));
         }
 
         for (index, coordinate) in basis.iter().enumerate() {
+            poll_periodically(abort, index)?;
             if let Some(name) = coordinate.strip_prefix("L:")
                 && name.eq_ignore_ascii_case(probe_name)
             {
@@ -208,18 +193,37 @@ impl Engine {
                 });
             }
         }
-        Err(self.pstb_probe_diagnostic(netlist, basis, probe_name))
+        let engine = self.resolved_for_netlist(netlist);
+        let circuit = super::pss::PssCircuit::new(engine.build_circuit_with_abort(netlist, abort)?);
+        if circuit
+            .inductor_probe_names()
+            .iter()
+            .any(|name| name.eq_ignore_ascii_case(probe_name))
+        {
+            operating_point.authenticate_for_reuse(
+                netlist,
+                &engine.config,
+                operating_point.config(),
+            )?;
+            operating_point.validate_shooting_basis_for_circuit(&circuit)?;
+            if let Some((canonical_name, state_index)) =
+                circuit.inductor_probe_coordinate(probe_name)
+            {
+                return Ok(ResolvedPstbProbe {
+                    canonical_name,
+                    state_index,
+                });
+            }
+        }
+        Err(Self::pstb_probe_diagnostic(&circuit, basis, probe_name))
     }
 
     /// Name what the deck does offer when a loop probe misses.
     ///
-    /// This is the only place a circuit is built for a `.PSTB` run, and it is
-    /// built to produce a better message: the basis alone can list inductors,
-    /// but it cannot say that the name resolves to a *branch* that is not an
-    /// inductor, which is the mistake a deck author actually makes.
+    /// Reuse the circuit inspected for series-current aliases to distinguish
+    /// an absent name from an existing branch that is not an inductor.
     fn pstb_probe_diagnostic(
-        &self,
-        netlist: &Netlist,
+        circuit: &CircuitData,
         basis: &[String],
         probe_name: &str,
     ) -> SimulationError {
@@ -233,13 +237,6 @@ impl Engine {
                     .collect(),
             })
         };
-        let Ok(circuit) = self.build_circuit(netlist) else {
-            return SimulationError::Circuit(format!(
-                "PSTB probe '{probe_name}' is not an inductor current in the retained carrier. \
-                 Available inductor probes: {}",
-                inductor_probes(None)
-            ));
-        };
         match circuit.get_branch_by_name(probe_name) {
             None => SimulationError::Circuit(format!(
                 "PSTB probe '{probe_name}' was not found in branch-capable elements. Available \
@@ -251,7 +248,7 @@ impl Engine {
                     "PSTB probe '{probe_name}' resolved to branch ordinal {branch_ordinal} but is \
                      not an inductor probe. PSTB supports dynamic inductor-current probes only. \
                      Available inductor probes: {}",
-                    inductor_probes(Some(&circuit))
+                    inductor_probes(Some(circuit))
                 ))
             }
             // The name is an inductor of *this* circuit but not a coordinate

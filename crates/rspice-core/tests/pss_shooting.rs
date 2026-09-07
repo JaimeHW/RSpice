@@ -15,6 +15,92 @@ const R: f64 = 1.0e3;
 const C: f64 = 159.154943091895e-12; // RC corner ~ 1 MHz (w*RC = 1)
 
 #[test]
+fn series_inductors_share_one_current_state_and_preserve_the_voltage_division() {
+    for (first, second) in [
+        ("out mid", "mid 0"),
+        ("mid out", "mid 0"),
+        ("out mid", "0 mid"),
+    ] {
+        let netlist = Netlist::parse(&format!(
+        "series flux coordinates\nV1 in 0 SIN(0 1 1meg)\nR1 in out 1k\nL1 {first} 40u\nL2 {second} 60u\n.end\n"
+    ))
+    .unwrap();
+        let point = Engine::default()
+            .run_pss_operating_point_with_abort(
+                &netlist,
+                PssConfig::new(F0)
+                    .with_tstab_periods(0)
+                    .with_points_per_period(512)
+                    .with_tolerance(1e-9),
+                &NoAbort,
+            )
+            .expect("series inductor currents satisfy KCL and have one free coordinate");
+        assert_eq!(point.shooting_state().len(), 1);
+        let expected_multiplier = (-10.0_f64).exp();
+        assert!(
+            (point.analysis().floquet_multipliers[0].re / expected_multiplier - 1.0).abs() < 0.001
+        );
+        let result = &point.analysis().result;
+        let out = result
+            .node_names
+            .iter()
+            .position(|n| n.eq_ignore_ascii_case("out"))
+            .unwrap();
+        let mid = result
+            .node_names
+            .iter()
+            .position(|n| n.eq_ignore_ascii_case("mid"))
+            .unwrap();
+        let ratio = std::f64::consts::TAU * F0 * 100e-6 / 1e3;
+        let amplitude = ratio / (1.0 + ratio * ratio).sqrt();
+        for (index, &time) in result.time.iter().enumerate() {
+            let expected =
+                amplitude * (std::f64::consts::TAU * F0 * time + (1.0 / ratio).atan()).sin();
+            let voltage = result.waveforms[out].values[index];
+            assert!((voltage - expected).abs() < 0.002 * amplitude);
+            assert!(
+                (result.waveforms[mid].values[index] - 0.6 * voltage).abs() < 1e-8,
+                "the initial sample must retain inductive voltage division too"
+            );
+        }
+        let card = rspice_core::netlist::PstbCard {
+            probe_instance: "L2".to_owned(),
+            max_harmonics: 4,
+            num_multipliers: 1,
+            stability_threshold: 1.0 + 1e-6,
+            detect_subharmonics: true,
+            eigenvalue_tolerance: 1e-10,
+        };
+        let stability = Engine::default()
+            .run_pstb_card_from_pss_with_abort(&netlist, &card, &point, &NoAbort)
+            .expect("a dependent series winding still names a physical current probe");
+        assert_eq!(stability.probe_state_index, 0);
+        assert_eq!(stability.probe_instance, "L2");
+        assert_eq!(stability.probe_participation, [1.0]);
+        let changed = Netlist::parse(&format!("different carrier\nV1 in 0 SIN(0 1 1meg)\nR1 in out 2k\nL1 {first} 40u\nL2 {second} 60u\n.end\n")).unwrap();
+        let error = Engine::default()
+            .run_pstb_card_from_pss_with_abort(&changed, &card, &point, &NoAbort)
+            .unwrap_err();
+        assert!(error.to_string().contains("semantic circuit identity"));
+        let (_, state) = Engine::default()
+            .run_pss_with_continuation_state(&netlist, point.config().clone())
+            .unwrap();
+        let (continued, _) = Engine::default()
+            .run_tran_from_pss_state(&netlist, &state, 2e-6, 1e-6 / 1024.0)
+            .unwrap();
+        for (index, &time) in continued.time.iter().enumerate() {
+            let expected =
+                amplitude * (std::f64::consts::TAU * F0 * time + (1.0 / ratio).atan()).sin();
+            assert!((continued.voltages[out][index] - expected).abs() < 0.002 * amplitude);
+            assert!(
+                (continued.voltages[mid][index] - 0.6 * continued.voltages[out][index]).abs()
+                    < 1e-8
+            );
+        }
+    }
+}
+
+#[test]
 fn independent_charge_initialization_preserves_xyce_ic_branches_and_parallel_constraints() {
     use rspice_core::config::SpiceDialect;
     use rspice_core::engine::PssDcOperatingPointSeed;
@@ -176,6 +262,20 @@ fn prescribed_diode_voltage_is_a_constraint_not_a_spurious_shooting_state() {
         )
         .expect("a prescribed reactive voltage needs no free shooting coordinate");
     assert!(point.shooting_state().is_empty());
+    let card = rspice_core::netlist::PstbCard {
+        probe_instance: "Lmissing".to_owned(),
+        max_harmonics: 4,
+        num_multipliers: 1,
+        stability_threshold: 1.0 + 1e-6,
+        detect_subharmonics: true,
+        eigenvalue_tolerance: 1e-10,
+    };
+    let error = Engine::default()
+        .run_pstb_card_from_pss_with_abort(&netlist, &card, &point, &NoAbort)
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("no independent dynamic coordinate"));
+    assert!(!error.contains("legacy"));
     let result = &point.analysis().result;
     for (&time, &voltage) in result.time.iter().zip(&result.waveforms[0].values) {
         assert!((voltage - (-1.0 + 0.01 * (std::f64::consts::TAU * F0 * time).sin())).abs() < 1e-9);
