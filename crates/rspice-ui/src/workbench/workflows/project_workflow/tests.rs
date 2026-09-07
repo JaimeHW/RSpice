@@ -348,10 +348,13 @@ fn seed_specialized_viewer_caches(state: &mut AppState) {
         state.bind_specialized_viewer_cache(viewer, provenance);
     }
 
+    // Cached bins are present for cleanup, but the transient fixture has no
+    // retained MC population and cannot authorize the distribution viewer.
+    assert!(!state.analysis.histogram_state.is_empty());
+    assert!(!state.viewer_is_available(ActiveViewer::Histogram));
     for viewer in [
         ActiveViewer::SmithChart,
         ActiveViewer::EyeDiagram,
-        ActiveViewer::Histogram,
         ActiveViewer::BodePlot,
         ActiveViewer::Nyquist,
         ActiveViewer::Fft,
@@ -365,6 +368,7 @@ fn seed_specialized_viewer_caches(state: &mut AppState) {
 }
 
 fn assert_specialized_viewer_caches_cleared(state: &AppState) {
+    assert!(state.analysis.histogram_state.is_empty());
     assert!(
         state.analysis.pole_zero_state.is_empty(),
         "legacy pole-zero presentation cache should be cleared"

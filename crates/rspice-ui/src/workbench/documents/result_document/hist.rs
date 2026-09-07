@@ -1,11 +1,20 @@
-//! HIST — Monte-Carlo distribution: accent-tinted bins, a normal-fit
-//! overlay, the ±1σ band, and µ / spec-limit markers; distribution stats and
-//! yield in the right panel.
+//! HIST — distributions rebuilt from retained samples, with descriptive
+//! moments and specification evidence bound to the same population.
+
+#[cfg(test)]
+mod source_tests;
 
 use egui::Ui;
+use std::sync::Arc;
 
+use crate::analysis::HistogramBuilder;
+use crate::analysis::histogram::data::Histogram;
+use crate::product::DatasetId;
 use crate::services::yield_manager::{SpecLimitType, YieldResult};
-use crate::state::{AnalysisResultFamilyMetadata, MonteCarloVariableMetadata, SimulationState};
+use crate::source_revision::SourceRevision;
+use crate::state::{
+    AnalysisResultFamilyMetadata, AnalysisType, MonteCarloVariableMetadata, SimulationState,
+};
 use crate::ui::plot::{self, Axis, PlotSpec, XScale, fmt_si};
 use crate::ui::tokens::Tokens;
 use crate::ui::widgets::section_header;
@@ -79,8 +88,25 @@ struct ExactMoments {
 }
 
 fn nearly_equal(left: f64, right: f64) -> bool {
-    let scale = left.abs().max(right.abs()).max(1.0);
-    (left - right).abs() <= 128.0 * f64::EPSILON * scale
+    if left == right {
+        return left.is_finite();
+    }
+    let scale = left.abs().max(right.abs());
+    (left / scale - right / scale).abs() <= 128.0 * f64::EPSILON
+}
+
+fn compensated_sum(values: impl Iterator<Item = f64>) -> f64 {
+    let (mut sum, mut correction) = (0.0_f64, 0.0_f64);
+    for value in values {
+        let next = sum + value;
+        correction += if sum.abs() >= value.abs() {
+            (sum - next) + value
+        } else {
+            (value - next) + sum
+        };
+        sum = next;
+    }
+    sum + correction
 }
 
 fn moments_from_samples(samples: &[f64]) -> Option<ExactMoments> {
@@ -90,19 +116,29 @@ fn moments_from_samples(samples: &[f64]) -> Option<ExactMoments> {
     }
 
     let count = samples.len();
-    let mean = samples.iter().sum::<f64>() / count as f64;
-    if !mean.is_finite() {
-        return None;
-    }
-    let variance = samples
-        .iter()
-        .map(|value| (value - mean).powi(2))
-        .sum::<f64>()
-        / (count.saturating_sub(1).max(1) as f64);
-    let std_dev = variance.sqrt();
     let min = samples.iter().copied().fold(f64::INFINITY, f64::min);
     let max = samples.iter().copied().fold(f64::NEG_INFINITY, f64::max);
-    (std_dev.is_finite() && min.is_finite() && max.is_finite()).then_some(ExactMoments {
+    // Center only tightly clustered values of one sign; otherwise scaling
+    // about zero preserves small residuals in populations that span zero.
+    let anchor = if (min > 0.0 && min >= max * 0.5) || (max < 0.0 && max <= min * 0.5) {
+        samples[0]
+    } else {
+        0.0
+    };
+    let scale = (min - anchor).abs().max((max - anchor).abs());
+    let (mean, std_dev) = if scale == 0.0 {
+        (anchor, 0.0)
+    } else {
+        let normalized_mean =
+            compensated_sum(samples.iter().map(|value| (value - anchor) / scale)) / count as f64;
+        let variance = compensated_sum(
+            samples
+                .iter()
+                .map(|value| ((value - anchor) / scale - normalized_mean).powi(2)),
+        ) / count.saturating_sub(1).max(1) as f64;
+        (anchor + normalized_mean * scale, variance.sqrt() * scale)
+    };
+    (mean.is_finite() && std_dev.is_finite()).then_some(ExactMoments {
         count,
         mean,
         std_dev,
@@ -147,6 +183,11 @@ fn yield_result_is_consistent(result: &YieldResult) -> bool {
         || result.trail.len() != result.total_runs
         || result.trail.iter().filter(|passed| **passed).count() != result.pass_count
         || result.samples.len() != result.total_runs
+        || result
+            .samples
+            .iter()
+            .zip(&result.trail)
+            .any(|(sample, passed)| spec.evaluates(*sample) != *passed)
         || result
             .samples
             .iter()
@@ -197,7 +238,11 @@ fn active_monte_carlo_authority<'a>(
         return None;
     }
     let metadata = analysis.family_metadata.as_ref()?;
-    if metadata.validate_for(analysis.analysis_type).is_err() {
+    if !super::analysis_evidence_is_valid(
+        state,
+        state.simulation.active_run()?.dataset_id,
+        analysis,
+    ) {
         return None;
     }
     let AnalysisResultFamilyMetadata::MonteCarlo {
@@ -248,6 +293,9 @@ fn exact_moments(state: &AppState, histogram_name: &str) -> Option<ExactMoments>
         });
     }
 
+    if !legacy_yield_is_eligible(state) {
+        return None;
+    }
     let result = matching_yield_result(&state.simulation, histogram_name)
         .filter(|result| yield_result_is_consistent(result))?;
     moments_from_samples(&result.samples)
@@ -262,29 +310,161 @@ fn exact_moments(state: &AppState, histogram_name: &str) -> Option<ExactMoments>
 #[derive(Debug, Clone)]
 pub(super) struct HistPlan {
     version: u64,
-    histogram: String,
+    source: SourceRevision,
+    yield_source: SourceRevision,
+    dataset: Option<DatasetId>,
+    analysis: Option<super::AnalysisPresentationKey>,
+    histogram_name: String,
+    bin_count: usize,
+    range: Option<(u64, u64)>,
+    histogram: Option<Arc<Histogram>>,
     moments: Option<ExactMoments>,
     yield_is_consistent: bool,
 }
 
-/// Resolve the distribution's statistics once per (generation, histogram).
-fn hist_plan(state: &mut AppState, histogram: &str) -> std::sync::Arc<HistPlan> {
+/// Resolve bins and statistics together. Source tokens also cover nested edits,
+/// wholesale replacement and clones whose numeric generations happen to match.
+fn hist_plan(state: &AppState, histogram: &str) -> Arc<HistPlan> {
     let version = state.simulation.data_version;
-    if let Some(plan) = state.ui.results.plans.hist.as_ref()
+    let source = state.simulation.runs.revision();
+    let yield_source = state.simulation.yield_evidence.revision();
+    let dataset = state.simulation.active_run().map(|run| run.dataset_id);
+    let analysis = dataset
+        .zip(state.simulation.active_analysis())
+        .map(|(dataset, analysis)| super::AnalysisPresentationKey::new(dataset, analysis));
+    let settings = &state.analysis.histogram_state;
+    let bin_count = settings.bin_count.clamp(1, 1000);
+    let range = settings
+        .custom_range
+        .then_some((settings.custom_min.to_bits(), settings.custom_max.to_bits()));
+    if let Some(plan) = state.ui.results.plans.hist.borrow().as_ref()
         && plan.version == version
-        && plan.histogram == histogram
+        && plan.source == source
+        && plan.yield_source == yield_source
+        && plan.dataset == dataset
+        && plan.analysis == analysis
+        && plan.histogram_name == histogram
+        && plan.bin_count == bin_count
+        && plan.range == range
     {
-        return std::sync::Arc::clone(plan);
+        return Arc::clone(plan);
     }
-    let built = std::sync::Arc::new(HistPlan {
-        version,
-        histogram: histogram.to_owned(),
-        moments: exact_moments(state, histogram),
-        yield_is_consistent: matching_yield_result(&state.simulation, histogram)
-            .is_some_and(yield_result_is_consistent),
+    let authority = active_monte_carlo_authority(state, histogram);
+    let yield_result = matching_yield_result(&state.simulation, histogram);
+    let yield_is_consistent = yield_result.is_some_and(|result| {
+        if !yield_result_is_consistent(result) {
+            return false;
+        }
+        match authority {
+            Some(authority) => state
+                .simulation
+                .yield_provenance()
+                .is_some_and(|provenance| {
+                    provenance.seed == authority.seed
+                        && provenance.runs_requested == authority.runs_requested
+                        && provenance.runs_completed == authority.runs_completed
+                        && result.samples.len() == authority.variable.samples.len()
+                        && result
+                            .samples
+                            .iter()
+                            .zip(&authority.variable.samples)
+                            .all(|(a, b)| a.to_bits() == b.to_bits())
+                }),
+            None => legacy_yield_is_eligible(state),
+        }
     });
-    state.ui.results.plans.hist = Some(std::sync::Arc::clone(&built));
+    let moments = exact_moments(state, histogram);
+    let samples = authority
+        .map(|authority| authority.variable.samples.as_slice())
+        .or_else(|| {
+            yield_result
+                .filter(|_| yield_is_consistent)
+                .map(|result| result.samples.as_slice())
+        });
+    let derived = samples.and_then(|samples| {
+        let mut builder = HistogramBuilder::new().name(histogram).bin_count(bin_count);
+        if let Some((min, max)) = range {
+            let (min, max) = (f64::from_bits(min), f64::from_bits(max));
+            if !min.is_finite() || !max.is_finite() || min >= max {
+                return None;
+            }
+            builder = builder.range(min, max);
+        }
+        frame_work::note(DatasetWalk::HistMoments);
+        Some(Arc::new(builder.build(samples)))
+    });
+    let built = Arc::new(HistPlan {
+        version,
+        source,
+        yield_source,
+        dataset,
+        analysis,
+        histogram_name: histogram.to_owned(),
+        bin_count,
+        range,
+        histogram: derived,
+        moments,
+        yield_is_consistent,
+    });
+    *state.ui.results.plans.hist.borrow_mut() = Some(Arc::clone(&built));
     built
+}
+
+fn legacy_yield_is_eligible(state: &AppState) -> bool {
+    state.simulation.active_run().is_some()
+        && state.simulation.active_analysis().is_none_or(|analysis| {
+            analysis.success
+                && analysis.analysis_type == AnalysisType::MonteCarlo
+                && analysis.family_metadata.is_none()
+        })
+}
+
+/// Names come from current retained evidence, never the mutable legacy bins.
+fn histogram_names(state: &AppState) -> Vec<&str> {
+    if let Some(analysis) = state.simulation.active_analysis()
+        && analysis.family_metadata.is_some()
+    {
+        if !analysis.success
+            || !state.simulation.active_run().is_some_and(|run| {
+                super::analysis_evidence_is_valid(state, run.dataset_id, analysis)
+            })
+        {
+            return Vec::new();
+        }
+        return match &analysis.family_metadata {
+            Some(AnalysisResultFamilyMetadata::MonteCarlo { variables, .. }) => variables
+                .iter()
+                .map(|variable| variable.name.as_str())
+                .collect(),
+            _ => Vec::new(),
+        };
+    }
+    if !legacy_yield_is_eligible(state) {
+        return Vec::new();
+    }
+    state
+        .simulation
+        .yield_results_for_active_dataset()
+        .unwrap_or_default()
+        .iter()
+        .map(|result| yield_target_measurement(&result.spec.target))
+        .collect()
+}
+
+pub(super) fn histogram_is_available(state: &AppState) -> bool {
+    let names = histogram_names(state);
+    names.iter().any(|name| {
+        active_monte_carlo_authority(state, name)
+            .is_some_and(|authority| !authority.variable.samples.is_empty())
+            || (legacy_yield_is_eligible(state)
+                && matching_yield_result(&state.simulation, name)
+                    .is_some_and(|result| !result.samples.is_empty()))
+    })
+}
+
+pub(super) fn active_histogram(state: &AppState) -> Option<Arc<Histogram>> {
+    let name = selected_histogram_name(state)?;
+    hist_plan(state, &name).histogram.clone()
 }
 
 /// How one distribution is laid out on its abscissa.
@@ -310,16 +490,17 @@ struct HistAxis {
 /// is ruled around its value instead, so the reader sees a bar standing at a
 /// number rather than an empty plot.
 fn hist_axis(histogram: &crate::analysis::histogram::data::Histogram) -> HistAxis {
-    let span = histogram.data_max - histogram.data_min;
-    if span.is_finite() && span > 0.0 {
-        let pad = span * 0.06;
+    let (min, max) = histogram.range();
+    let span = max - min;
+    if min < max {
+        let pad = if span.is_finite() { span * 0.06 } else { 0.0 };
         return HistAxis {
-            x0: histogram.data_min - pad,
-            x1: histogram.data_max + pad,
+            x0: (min - pad).max(-f64::MAX),
+            x1: (max + pad).min(f64::MAX),
             degenerate_at: None,
         };
     }
-    let value = histogram.data_min;
+    let value = min;
     if !value.is_finite() {
         return HistAxis {
             x0: -1.0,
@@ -335,8 +516,8 @@ fn hist_axis(histogram: &crate::analysis::histogram::data::Histogram) -> HistAxi
         value.abs() * 1.0e-3
     };
     HistAxis {
-        x0: value - pad,
-        x1: value + pad,
+        x0: (value - pad).min(value.next_down()).max(-f64::MAX),
+        x1: (value + pad).max(value.next_up()).min(f64::MAX),
         degenerate_at: Some(value),
     }
 }
@@ -365,27 +546,32 @@ fn yield_label(result: &YieldResult, authority: Option<MonteCarloAuthority<'_>>)
     label
 }
 
-/// What the method panel says about the retained binning.
+/// What the method panel says about display binning.
 ///
 /// A collapsed distribution states that it is one: "1 retained bins" reads as
 /// a count that happens to be small, when what the reader needs to know is
 /// that the bin has no width because the measurement never moved.
 fn binning_label(histogram: &crate::analysis::histogram::data::Histogram) -> String {
     if hist_axis(histogram).degenerate_at.is_some() {
-        return "1 retained bin · zero width, every sample at one value".to_owned();
+        return "1 display bin · zero width, every sample at one value".to_owned();
     }
     let count = histogram.bins.len();
     let plural = if count == 1 { "" } else { "s" };
-    format!("{count} retained bin{plural} · selection rule unavailable")
+    format!("{count} display bin{plural} · rebuilt from exact samples")
 }
 
 /// The distribution the reader has selected, by name.
 fn selected_histogram_name(state: &AppState) -> Option<String> {
-    let hist_state = &state.analysis.histogram_state;
-    hist_state
-        .histograms
-        .get(hist_state.selected)
-        .map(|histogram| histogram.name.clone())
+    let names = histogram_names(state);
+    names
+        .get(
+            state
+                .analysis
+                .histogram_state
+                .selected
+                .min(names.len().saturating_sub(1)),
+        )
+        .map(|name| (*name).to_owned())
 }
 
 // ---------------------------------------------------------------------------
@@ -397,6 +583,40 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
 
+    let names: Vec<String> = histogram_names(state)
+        .into_iter()
+        .map(str::to_owned)
+        .collect();
+    if !names.is_empty() {
+        let settings = &mut state.analysis.histogram_state;
+        settings.selected = settings.selected.min(names.len() - 1);
+        let changed = ui
+            .horizontal_wrapped(|ui| {
+                let mut changed = false;
+                ui.label("Measure");
+                egui::ComboBox::from_id_salt("hist_measurement")
+                    .selected_text(&names[settings.selected])
+                    .show_ui(ui, |ui| {
+                        for (index, name) in names.iter().enumerate() {
+                            changed |= ui
+                                .selectable_value(&mut settings.selected, index, name)
+                                .changed();
+                        }
+                    });
+                ui.label("Bins");
+                changed |= ui
+                    .add(egui::DragValue::new(&mut settings.bin_count).range(1..=1000))
+                    .changed();
+                changed
+            })
+            .inner;
+        if changed {
+            state
+                .ui
+                .results
+                .reset_plot_view(super::ResultViewer::Hist, 0);
+        }
+    }
     let Some(name) = selected_histogram_name(state) else {
         well_hint(ui, "No distribution yet — run a Monte Carlo analysis");
         return;
@@ -404,9 +624,11 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     // Resolved before the distribution is borrowed, so the population is
     // walked once per dataset generation rather than once per frame.
     let plan = hist_plan(state, &name);
-    let hist_state = &state.analysis.histogram_state;
-    let Some(histogram) = hist_state.histograms.get(hist_state.selected) else {
-        well_hint(ui, "No distribution yet — run a Monte Carlo analysis");
+    let Some(histogram) = plan.histogram.as_deref() else {
+        well_hint(
+            ui,
+            "The selected samples, retained statistics, or display range are invalid or unavailable",
+        );
         return;
     };
     if histogram.bins.is_empty() || histogram.total_count == 0 {
@@ -451,6 +673,13 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
 
     let axis = hist_axis(histogram);
     let (x0, x1) = view.x.unwrap_or((axis.x0, axis.x1));
+    if !(x1 - x0).is_finite() || x1 <= x0 {
+        well_hint(
+            ui,
+            "The sample range exceeds the linear display range. Set a narrower range in the Distribution panel.",
+        );
+        return;
+    }
     let max_count = histogram.bins.iter().map(|b| b.count).max().unwrap_or(1) as f64;
     let y1 = (max_count * 1.18).ceil().max(4.0);
     let (y0, y1) = view.y.unwrap_or((0.0, y1));
@@ -468,10 +697,14 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     // family or goodness-of-fit evidence is retained by the result schema.
     if let Some(moments) = moments {
         if moments.std_dev > 0.0 {
-            spec.bands.push(plot::Band {
-                x0: moments.mean - moments.std_dev,
-                x1: moments.mean + moments.std_dev,
-            });
+            let band_start = (moments.mean - moments.std_dev).max(x0);
+            let band_end = (moments.mean + moments.std_dev).min(x1);
+            if band_start < band_end {
+                spec.bands.push(plot::Band {
+                    x0: band_start,
+                    x1: band_end,
+                });
+            }
         }
         spec.markers.push(plot::Marker {
             x: moments.mean,
@@ -610,7 +843,9 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         let count = degenerate_at.map_or_else(
             || {
                 bins.iter()
-                    .find(|b| x >= b.lower && x < b.upper)
+                    .find(|b| {
+                        x >= b.lower && (x < b.upper || x == histogram.range().1 && x == b.upper)
+                    })
                     .map_or(0, |b| b.count)
             },
             |_| total_count,
@@ -643,11 +878,47 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         super::panel_note(ui, "Stats appear once a Monte Carlo run is loaded.");
         return;
     };
+    section_header(ui, "Display range", None);
+    let current_range = active_histogram(state).map(|histogram| histogram.range());
+    let settings = &mut state.analysis.histogram_state;
+    let mut range_changed = ui
+        .checkbox(&mut settings.custom_range, "Custom range")
+        .changed();
+    if range_changed
+        && settings.custom_range
+        && let Some((min, max)) = current_range
+        && min < max
+    {
+        settings.custom_min = min;
+        settings.custom_max = max;
+    }
+    if settings.custom_range {
+        range_changed |= ui
+            .horizontal_wrapped(|ui| {
+                ui.label("Min");
+                let min_changed = ui
+                    .add(egui::DragValue::new(&mut settings.custom_min))
+                    .changed();
+                ui.label("Max");
+                ui.add(egui::DragValue::new(&mut settings.custom_max))
+                    .changed()
+                    || min_changed
+            })
+            .inner;
+    }
+    if range_changed {
+        state
+            .ui
+            .results
+            .reset_plot_view(super::ResultViewer::Hist, 0);
+    }
     let plan = hist_plan(state, &name);
-    let hist_state = &state.analysis.histogram_state;
-    let Some(histogram) = hist_state.histograms.get(hist_state.selected) else {
+    let Some(histogram) = plan.histogram.as_deref() else {
         section_header(ui, "Distribution", None);
-        super::panel_note(ui, "Stats appear once a Monte Carlo run is loaded.");
+        super::panel_note(
+            ui,
+            "The selected samples, retained statistics, or display range are invalid or unavailable.",
+        );
         return;
     };
 
@@ -660,6 +931,8 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
             ("Std dev", fmt_si(moments.std_dev, "", 3), true),
             ("Min", fmt_si(moments.min, "", 3), false),
             ("Max", fmt_si(moments.max, "", 3), false),
+            ("Below range", histogram.underflow.to_string(), false),
+            ("Above range", histogram.overflow.to_string(), false),
         ];
         super::stat_table(ui, &rows);
     } else {
@@ -669,7 +942,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
                 ("Measure", histogram.name.clone(), false),
                 (
                     "Exact moments",
-                    "Unavailable — source samples not retained".to_owned(),
+                    "Unavailable — retained summary disagrees with samples or moments exceed the finite range".to_owned(),
                     false,
                 ),
             ],
@@ -758,7 +1031,7 @@ mod tests {
         SimulationRun,
     };
 
-    fn result(target: &str, yield_percent: f64) -> YieldResult {
+    pub(super) fn result(target: &str, yield_percent: f64) -> YieldResult {
         let total_runs = 100;
         let pass_count = yield_percent.round() as usize;
         let mut samples = vec![1.0; pass_count];
@@ -787,7 +1060,7 @@ mod tests {
         }
     }
 
-    fn provenance(run: &SimulationRun) -> YieldAnalysisProvenance {
+    pub(super) fn provenance(run: &SimulationRun) -> YieldAnalysisProvenance {
         YieldAnalysisProvenance {
             source_run_id: run.run_id,
             source_dataset_id: run.dataset_id,
@@ -949,7 +1222,7 @@ mod tests {
     fn a_degenerate_distribution_says_its_bin_has_no_width() {
         assert_eq!(
             binning_label(&zero_variation_histogram(1.5, 40)),
-            "1 retained bin · zero width, every sample at one value"
+            "1 display bin · zero width, every sample at one value"
         );
     }
 
@@ -980,11 +1253,11 @@ mod tests {
         assert!((axis.x1 - 3.12).abs() < 1.0e-12, "{axis:?}");
         assert_eq!(
             binning_label(&histogram),
-            "2 retained bins · selection rule unavailable"
+            "2 display bins · rebuilt from exact samples"
         );
     }
 
-    fn mc_variable(name: &str) -> MonteCarloVariableMetadata {
+    pub(super) fn mc_variable(name: &str) -> MonteCarloVariableMetadata {
         MonteCarloVariableMetadata {
             name: name.to_owned(),
             samples: vec![1.0, 2.0, 3.0],
@@ -1103,11 +1376,8 @@ mod tests {
         state.simulation.runs = vec![run].into();
         assert!(state.simulation.select_run(0));
 
-        let first = hist_plan(&mut state, "gain");
-        assert!(std::sync::Arc::ptr_eq(
-            &first,
-            &hist_plan(&mut state, "gain")
-        ));
+        let first = hist_plan(&state, "gain");
+        assert!(std::sync::Arc::ptr_eq(&first, &hist_plan(&state, "gain")));
         assert_eq!(first.moments.expect("retained moments").mean, 2.0);
         // The memo is the projection it replaced.
         assert_eq!(
@@ -1118,7 +1388,7 @@ mod tests {
         );
 
         // Another distribution is another answer, at the same generation.
-        let other = hist_plan(&mut state, "offset");
+        let other = hist_plan(&state, "offset");
         assert!(!std::sync::Arc::ptr_eq(&first, &other));
 
         // A new generation of the population is a new answer.
@@ -1137,7 +1407,7 @@ mod tests {
         variables[0].max = 30.0;
         state.simulation.data_version = state.simulation.data_version.wrapping_add(1);
 
-        let after = hist_plan(&mut state, "gain");
+        let after = hist_plan(&state, "gain");
         assert_eq!(
             after.moments.expect("retained moments").mean,
             20.0,

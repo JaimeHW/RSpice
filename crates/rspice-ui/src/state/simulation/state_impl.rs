@@ -137,18 +137,23 @@ impl SimulationState {
         results: Vec<YieldResult>,
         provenance: Option<YieldAnalysisProvenance>,
     ) {
-        self.yield_provenance = if results.is_empty() { None } else { provenance };
-        self.yield_results = results;
+        self.yield_evidence.replace(results, provenance);
         self.data_version = self.data_version.wrapping_add(1);
+    }
+
+    #[must_use]
+    pub fn yield_provenance(&self) -> Option<YieldAnalysisProvenance> {
+        self.yield_evidence.provenance()
     }
 
     /// Yield evidence for one exact immutable dataset, if that dataset is the
     /// authority recorded when the evidence was calculated.
     #[must_use]
     pub fn yield_results_for_dataset(&self, dataset_id: DatasetId) -> Option<&[YieldResult]> {
-        self.yield_provenance
-            .is_some_and(|provenance| provenance.source_dataset_id == dataset_id)
-            .then_some(self.yield_results.as_slice())
+        self.runs
+            .iter()
+            .find(|run| run.dataset_id == dataset_id)
+            .and_then(|run| self.yield_evidence.for_run(run))
     }
 
     /// Yield evidence for the currently selected result dataset. Callers use
@@ -157,7 +162,7 @@ impl SimulationState {
     #[must_use]
     pub fn yield_results_for_active_dataset(&self) -> Option<&[YieldResult]> {
         self.active_run()
-            .and_then(|run| self.yield_results_for_dataset(run.dataset_id))
+            .and_then(|run| self.yield_evidence.for_run(run))
     }
 
     pub fn request_simulate_run_set(&mut self) {
@@ -957,13 +962,13 @@ impl SimulationState {
     }
 
     fn prune_yield_evidence_provenance(&mut self) {
-        let is_retained = self.yield_provenance.is_some_and(|provenance| {
+        let is_retained = self.yield_provenance().is_some_and(|provenance| {
             self.runs.iter().any(|run| {
                 run.run_id == provenance.source_run_id
                     && run.dataset_id == provenance.source_dataset_id
             })
         });
-        if self.yield_provenance.is_some() && !is_retained {
+        if self.yield_provenance().is_some() && !is_retained {
             self.replace_yield_evidence(Vec::new(), None);
         }
     }
@@ -1595,7 +1600,7 @@ mod tests {
             state.data_version, version,
             "the yield evidence was replaced at the generation its memo already describes"
         );
-        assert_eq!(state.yield_provenance, Some(provenance));
+        assert_eq!(state.yield_provenance(), Some(provenance));
         assert_eq!(provenance.seed, 19);
         assert_eq!(provenance.runs_requested, 3);
         assert_eq!(provenance.runs_completed, 2);
@@ -1613,8 +1618,8 @@ mod tests {
         assert!(state.yield_results_for_dataset(DatasetId::new()).is_none());
 
         state.replace_yield_evidence(Vec::new(), Some(provenance));
-        assert!(state.yield_results.is_empty());
-        assert_eq!(state.yield_provenance, None);
+        assert!(state.yield_evidence.results().is_empty());
+        assert_eq!(state.yield_provenance(), None);
 
         state.replace_yield_evidence(
             vec![YieldResult {
@@ -1631,7 +1636,7 @@ mod tests {
         );
         assert!(state.yield_results_for_dataset(source_dataset_id).is_some());
         assert!(state.delete_run(0));
-        assert!(state.yield_results.is_empty());
-        assert_eq!(state.yield_provenance, None);
+        assert!(state.yield_evidence.results().is_empty());
+        assert_eq!(state.yield_provenance(), None);
     }
 }

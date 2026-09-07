@@ -26,6 +26,8 @@ mod specification_verdict;
 mod state_impl;
 mod state_model;
 mod waveform;
+mod yield_evidence;
+pub use yield_evidence::YieldEvidence;
 
 pub const MAX_RUN_HISTORY: usize = 20;
 

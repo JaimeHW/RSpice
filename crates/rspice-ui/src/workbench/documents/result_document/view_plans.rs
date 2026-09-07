@@ -27,7 +27,7 @@ pub(super) struct ViewPlans {
     pub(super) envelopes: super::waves::FamilyEnvelopeCache,
     /// Descriptive statistics for the drawn distribution; see
     /// [`super::hist`].
-    pub(super) hist: Option<Arc<super::hist::HistPlan>>,
+    pub(super) hist: RefCell<Option<Arc<super::hist::HistPlan>>>,
     /// The operating-point sheet's row plan; see [`super::op_inspector`].
     pub(super) op: Option<Arc<super::op_inspector::OpPlan>>,
     /// The Monte-Carlo trial table both statistical sheets read; see
@@ -70,7 +70,7 @@ impl ViewPlans {
         manifest.is_none()
             && artifact.is_none()
             && envelopes.is_empty()
-            && hist.is_none()
+            && hist.borrow().is_none()
             && op.is_none()
             && population.is_none()
             && optimization.borrow().is_none()

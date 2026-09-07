@@ -2272,6 +2272,18 @@ pub(crate) fn analysis_evidence_is_valid(
     retained_evidence_is_valid(state, AnalysisPresentationKey::new(dataset_id, analysis))
 }
 
+/// Current retained distributions, including freshly restored runs.
+pub(crate) fn histogram_is_available(state: &AppState) -> bool {
+    hist::histogram_is_available(state)
+}
+
+/// Shared bins for the sheet and exact CSV export.
+pub(crate) fn active_histogram(
+    state: &AppState,
+) -> Option<std::sync::Arc<crate::analysis::histogram::data::Histogram>> {
+    hist::active_histogram(state)
+}
+
 /// Why one analysis' retained evidence is invalid, when it is.
 ///
 /// The verdict comes from the memo, so a sound dataset costs a map lookup; the

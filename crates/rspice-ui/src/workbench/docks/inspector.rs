@@ -2265,16 +2265,9 @@ fn verified_analysis(
 
 fn yield_details(ui: &mut Ui, app: &RSpiceApp) {
     let run = app.state.simulation.active_run();
-    let provenance = run.and_then(|run| {
-        app.state.simulation.yield_provenance.filter(|provenance| {
-            provenance.source_run_id == run.run_id && provenance.source_dataset_id == run.dataset_id
-        })
-    });
-    let results = if provenance.is_some() {
-        app.state.simulation.yield_results.as_slice()
-    } else {
-        &[]
-    };
+    let evidence = app.state.simulation.yield_results_for_active_dataset();
+    let provenance = evidence.and(app.state.simulation.yield_provenance());
+    let results = evidence.unwrap_or_default();
 
     let status = if provenance.is_some() {
         "complete"

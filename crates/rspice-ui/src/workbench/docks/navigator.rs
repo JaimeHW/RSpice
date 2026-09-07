@@ -6076,7 +6076,7 @@ fn verification_flow_presentation(
             let evidence = active_run.and_then(|run| {
                 app.state
                     .simulation
-                    .yield_provenance
+                    .yield_provenance()
                     .filter(|provenance| {
                         provenance.source_run_id == run.run_id
                             && provenance.source_dataset_id == run.dataset_id

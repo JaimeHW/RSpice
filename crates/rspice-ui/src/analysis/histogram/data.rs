@@ -32,7 +32,12 @@ impl HistogramBin {
 
     /// Bin center
     pub fn center(&self) -> f64 {
-        (self.lower + self.upper) / 2.0
+        let sum = self.lower + self.upper;
+        if sum.is_finite() {
+            sum * 0.5
+        } else {
+            self.lower * 0.5 + self.upper * 0.5
+        }
     }
 
     /// Bin width
@@ -98,14 +103,37 @@ impl Default for Histogram {
 impl Histogram {
     /// Create new empty histogram with specified range
     pub fn new(name: &str, min: f64, max: f64, bin_count: usize) -> Self {
-        let bin_count = bin_count.max(1);
-        let width = (max - min) / bin_count as f64;
+        if !min.is_finite() || !max.is_finite() || min > max {
+            return Self {
+                name: name.to_owned(),
+                ..Self::default()
+            };
+        }
+        let bin_count = if min == max { 1 } else { bin_count.max(1) };
 
         let mut bins = Vec::with_capacity(bin_count);
+        let edge = |index: usize| {
+            if index == 0 {
+                return min;
+            }
+            if index == bin_count {
+                return max;
+            }
+            let fraction = index as f64 / bin_count as f64;
+            if min.signum() == max.signum() {
+                min + (max - min) * fraction
+            } else {
+                min * (1.0 - fraction) + max * fraction
+            }
+        };
         for i in 0..bin_count {
-            let lower = min + i as f64 * width;
-            let upper = min + (i + 1) as f64 * width;
-            bins.push(HistogramBin::new(lower, upper));
+            let lower = edge(i);
+            let upper = edge(i + 1);
+            // More requested bins than representable edges must not create
+            // duplicate zero-width intervals. A point population keeps one.
+            if upper > lower || min == max {
+                bins.push(HistogramBin::new(lower, upper));
+            }
         }
 
         Self {
@@ -126,14 +154,6 @@ impl Histogram {
         )
     }
 
-    /// Bin width (assuming uniform bins)
-    pub fn bin_width(&self) -> f64 {
-        if self.bins.is_empty() {
-            return 0.0;
-        }
-        self.bins[0].width()
-    }
-
     /// Add a sample value
     pub fn add(&mut self, value: f64) {
         self.add_weighted(value, 1.0);
@@ -141,7 +161,7 @@ impl Histogram {
 
     /// Add a weighted sample
     pub fn add_weighted(&mut self, value: f64, weight: f64) {
-        if !value.is_finite() {
+        if !value.is_finite() || self.bins.is_empty() {
             return;
         }
 
@@ -157,19 +177,17 @@ impl Histogram {
             return;
         }
 
-        if value >= hist_max {
+        if value > hist_max {
             self.overflow += 1;
             return;
         }
 
-        // Find the correct bin
-        let width = self.bin_width();
-        if width <= 0.0 {
-            return;
-        }
-
-        let bin_idx = ((value - hist_min) / width) as usize;
-        let bin_idx = bin_idx.min(self.bins.len() - 1);
+        // Half-open bins, with the final upper edge included. Searching the
+        // actual edges also handles point populations and rounded tiny bins.
+        let bin_idx = self
+            .bins
+            .partition_point(|bin| bin.upper <= value)
+            .min(self.bins.len() - 1);
 
         self.bins[bin_idx].add(weight);
     }
@@ -195,14 +213,14 @@ impl Histogram {
             return vec![0.0; self.bins.len()];
         }
 
-        let mut cumulative = 0.0;
+        let mut cumulative = self.underflow as f64;
         let total = self.total_count as f64;
 
         self.bins
             .iter()
             .map(|b| {
-                cumulative += b.count as f64 / total;
-                cumulative
+                cumulative += b.count as f64;
+                cumulative / total
             })
             .collect()
     }
@@ -290,30 +308,28 @@ impl HistogramBuilder {
 
     /// Build histogram from data
     pub fn build(self, data: &[f64]) -> Histogram {
-        let valid_data: Vec<f64> = data.iter().copied().filter(|v| v.is_finite()).collect();
-
-        if valid_data.is_empty() {
+        let mut valid_data = data.iter().copied().filter(|v| v.is_finite());
+        let Some(first) = valid_data.next() else {
             return Histogram::new(&self.name, 0.0, 1.0, self.bin_count);
-        }
+        };
+        let (data_min, data_max) = valid_data.fold((first, first), |(min, max), value| {
+            (min.min(value), max.max(value))
+        });
 
         let (min, max) = if let Some((min, max)) = self.range {
             (min, max)
         } else {
-            let data_min = valid_data.iter().copied().fold(f64::MAX, f64::min);
-            let data_max = valid_data.iter().copied().fold(f64::MIN, f64::max);
-
-            // Add margin
-            let range = data_max - data_min;
-            if range < 1e-10 {
-                (data_min - 0.5, data_max + 0.5)
-            } else {
-                let margin = range * self.margin;
-                (data_min - margin, data_max + margin)
-            }
+            // Relative padding preserves pico/nano-scale populations. Equal
+            // samples remain a single point bin; extreme padding saturates.
+            let margin = data_max * self.margin - data_min * self.margin;
+            (
+                (data_min - margin).max(-f64::MAX),
+                (data_max + margin).min(f64::MAX),
+            )
         };
 
         let mut hist = Histogram::new(&self.name, min, max, self.bin_count);
-        hist.add_all(&valid_data);
+        hist.add_all(data);
         hist
     }
 }
@@ -325,6 +341,56 @@ impl HistogramBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tiny_and_constant_populations_preserve_their_scale_and_counts() {
+        let tiny = HistogramBuilder::new()
+            .bin_count(3)
+            .build(&[1e-15, 2e-15, 3e-15]);
+        assert!(tiny.range().0 > 0.0 && tiny.range().1 < 4e-15);
+        assert_eq!(
+            tiny.bins.iter().map(|bin| bin.count).collect::<Vec<_>>(),
+            vec![1, 1, 1]
+        );
+        for value in [0.0, f64::from_bits(1), 1e-15, 1.5, f64::MAX] {
+            let point = HistogramBuilder::new().build(&[value; 9]);
+            assert_eq!(point.range(), (value, value));
+            assert_eq!(point.bins.len(), 1);
+            assert_eq!(point.bins[0].count, 9);
+            assert_eq!(point.bins[0].center(), value);
+            assert_eq!((point.underflow, point.overflow), (0, 0));
+        }
+    }
+
+    #[test]
+    fn explicit_range_includes_both_endpoints_and_accounts_for_excluded_samples() {
+        let hist = HistogramBuilder::new()
+            .bin_count(2)
+            .range(0.0, 2.0)
+            .build(&[-1.0, 0.0, 1.0, 2.0, 3.0]);
+        assert_eq!((hist.underflow, hist.overflow), (1, 1));
+        assert_eq!(
+            hist.bins.iter().map(|bin| bin.count).collect::<Vec<_>>(),
+            vec![1, 2]
+        );
+        assert_eq!(hist.cdf(), vec![0.4, 0.8]);
+        assert_eq!(hist.total_count, 5);
+    }
+
+    #[test]
+    fn finite_extremes_and_adjacent_edges_do_not_overflow_or_lose_samples() {
+        for samples in [vec![-f64::MAX, 0.0, f64::MAX], vec![1.0, 1.0_f64.next_up()]] {
+            let hist = HistogramBuilder::new().bin_count(100).build(&samples);
+            assert_eq!(
+                hist.bins.iter().map(|bin| bin.count).sum::<usize>(),
+                samples.len()
+            );
+            assert!(hist.bins.iter().all(|bin| bin.lower.is_finite()
+                && bin.upper.is_finite()
+                && bin.upper > bin.lower));
+            assert_eq!(hist.cdf().last(), Some(&1.0));
+        }
+    }
 
     #[test]
     fn empty_histogram_cdf_is_finite_zero_curve() {

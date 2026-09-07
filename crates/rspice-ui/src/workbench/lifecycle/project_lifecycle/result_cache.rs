@@ -50,8 +50,7 @@ impl CachedResults {
             node_to_waveform: _,
             ground_node: _,
             cross_probe: _,
-            yield_results: _,
-            yield_provenance: _,
+            yield_evidence: _,
         } = state;
         self.history == runs.revision()
             && self.decks.shares_content_with(executed_decks)

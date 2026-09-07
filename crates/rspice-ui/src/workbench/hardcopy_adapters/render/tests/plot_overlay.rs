@@ -66,6 +66,33 @@ fn overlay_plot() -> SemanticPlot {
 }
 
 #[test]
+fn a_single_point_distribution_compiles_to_a_visible_marker() {
+    let bounds = SemanticBounds::try_new(point(0, 0), point(254_000, 142_875)).unwrap();
+    let extent = bounds.content_extent().unwrap();
+    let mapping = PrintMappingTable::default();
+    let mut compiler =
+        SemanticSceneCompiler::new(bounds, extent, &mapping, SchematicHardcopySetup::default());
+    let mut plot = overlay_plot();
+    plot.viewer = crate::workbench::ResultViewer::Hist;
+    plot.cursors.clear();
+    plot.markers.clear();
+    plot.traces[0].paths = vec![vec![point(127_000, 71_437)]];
+    plot.traces[0].source_samples = vec![(1.0f64.to_bits(), 5.0f64.to_bits())];
+    compiler.plot(&plot).unwrap();
+    assert!(
+        compiler
+            .primitives
+            .iter()
+            .any(|primitive| matches!(primitive,
+                ScenePrimitive::Circle { center, radius, stroke: Some(_), .. }
+                    if center.x == Length::from_micrometres(127_000)
+                        && center.y == Length::from_micrometres(71_437)
+                        && *radius == Length::from_micrometres(500)
+            ))
+    );
+}
+
+#[test]
 fn a_declared_marker_and_cursor_pair_compile_to_ink_at_their_positions() {
     let bounds = SemanticBounds::try_new(point(0, 0), point(254_000, 142_875)).unwrap();
     let extent = bounds.content_extent().unwrap();

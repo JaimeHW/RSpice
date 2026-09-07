@@ -570,9 +570,15 @@ pub(super) fn quick_histogram_plot(
             "Monte Carlo family metadata",
         ));
     };
-    let variable = variables.get(presentation.histogram_selected).ok_or(
-        HardcopySourceError::MissingViewerEvidence("selected Monte Carlo variable"),
-    )?;
+    let variable = variables
+        .get(
+            presentation
+                .histogram_selected
+                .min(variables.len().saturating_sub(1)),
+        )
+        .ok_or(HardcopySourceError::MissingViewerEvidence(
+            "selected Monte Carlo variable",
+        ))?;
     if variable.samples.is_empty() {
         return Err(HardcopySourceError::MissingViewerEvidence(
             "Monte Carlo samples",

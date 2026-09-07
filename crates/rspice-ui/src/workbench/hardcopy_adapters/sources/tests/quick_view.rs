@@ -294,7 +294,7 @@ fn histogram_quick_view_derives_only_from_active_monte_carlo_metadata() {
                 name: "gain".to_owned(),
                 samples: samples.clone(),
                 mean: 0.0,
-                std_dev: 2.0f64.sqrt(),
+                std_dev: 2.5f64.sqrt(),
                 min: -2.0,
                 max: 2.0,
             }],
@@ -307,12 +307,22 @@ fn histogram_quick_view_derives_only_from_active_monte_carlo_metadata() {
             .build(&[9_999.0; 20]),
     );
     state.analysis.histogram_state.bin_count = 5;
+    state.analysis.histogram_state.selected = usize::MAX;
+    let onscreen = crate::workbench::documents::result_document::active_histogram(&state).unwrap();
 
     let resolved = resolve_quick_view(&state).unwrap();
     let HardcopySemanticDocument::Plot(plot) = resolved.semantic_document() else {
         panic!("expected histogram plot")
     };
     assert_eq!(plot.traces[0].label, "gain");
+    assert_eq!(
+        plot.traces[0].source_samples,
+        onscreen
+            .bins
+            .iter()
+            .map(|bin| (bin.center().to_bits(), (bin.count as f64).to_bits()))
+            .collect::<Vec<_>>()
+    );
     let retained_count = plot.traces[0]
         .source_samples
         .iter()
@@ -325,6 +335,30 @@ fn histogram_quick_view_derives_only_from_active_monte_carlo_metadata() {
             .iter()
             .all(|(center, _)| *center != 9_999.0f64.to_bits())
     );
+    // A point population keeps its exact coordinate/count and a path that
+    // the compiler can draw as a marker, even though it has no bin width.
+    let Some(AnalysisResultFamilyMetadata::MonteCarlo { variables, .. }) = state.simulation.runs[0]
+        .analyses[0]
+        .family_metadata
+        .as_mut()
+    else {
+        unreachable!()
+    };
+    variables[0].samples.fill(1.0);
+    variables[0].mean = 1.0;
+    variables[0].std_dev = 0.0;
+    variables[0].min = 1.0;
+    variables[0].max = 1.0;
+    let resolved = resolve_quick_view(&state).unwrap();
+    let HardcopySemanticDocument::Plot(plot) = resolved.semantic_document() else {
+        unreachable!()
+    };
+    assert_eq!(
+        plot.traces[0].source_samples,
+        vec![(1.0f64.to_bits(), 5.0f64.to_bits())]
+    );
+    assert_eq!(plot.traces[0].paths.len(), 1);
+    assert_eq!(plot.traces[0].paths[0].len(), 1);
 }
 
 /// The page carries the reading, not only the samples.

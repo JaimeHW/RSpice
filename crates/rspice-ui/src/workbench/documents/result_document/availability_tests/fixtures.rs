@@ -322,7 +322,6 @@ pub(super) fn app_showing(viewer: ResultViewer) -> RSpiceApp {
         ResultViewer::Smith => {
             assert!(smith::synchronize_active_analysis(&mut app.state));
         }
-        ResultViewer::Hist => derive_histogram(&mut app),
         _ => {}
     }
 
@@ -473,12 +472,29 @@ pub(super) fn monte_carlo_population_analysis() -> AnalysisResult {
 }
 
 pub(super) fn monte_carlo_analysis() -> AnalysisResult {
-    AnalysisResult::new(1, AnalysisType::MonteCarlo, "MC").with_waveforms(vec![WaveformData::new(
-        "V(out)",
-        vec![0.0, 1.0, 2.0, 3.0],
-        vec![0.95, 1.02, 0.98, 1.05],
-        "#00aaff",
-    )])
+    AnalysisResult::new(1, AnalysisType::MonteCarlo, "MC")
+        .with_waveforms(vec![WaveformData::new(
+            "V(out)",
+            vec![0.0, 1.0, 2.0, 3.0],
+            vec![0.95, 1.02, 0.98, 1.05],
+            "#00aaff",
+        )])
+        .with_family_metadata(crate::state::AnalysisResultFamilyMetadata::MonteCarlo {
+            seed: 7,
+            runs_requested: 4,
+            runs_completed: 4,
+            failures: 0,
+            all_converged: true,
+            member_measurements: Vec::new(),
+            variables: vec![crate::state::MonteCarloVariableMetadata {
+                name: "V(out)".to_owned(),
+                samples: vec![0.95, 1.02, 0.98, 1.05],
+                mean: 1.0,
+                std_dev: (0.0058_f64 / 3.0).sqrt(),
+                min: 0.95,
+                max: 1.05,
+            }],
+        })
 }
 
 pub(super) fn transfer_function_analysis() -> AnalysisResult {
@@ -552,38 +568,4 @@ pub(super) fn derive_nyquist(app: &mut RSpiceApp) {
     );
     app.state
         .bind_specialized_viewer_cache(ActiveViewer::Nyquist, provenance);
-}
-
-pub(super) fn derive_histogram(app: &mut RSpiceApp) {
-    use crate::analysis::histogram::data::{Histogram, HistogramBin};
-
-    let counts = [2_usize, 5, 9, 4];
-    let edges = [0.90_f64, 0.95, 1.00, 1.05, 1.10];
-    let bins: Vec<HistogramBin> = counts
-        .iter()
-        .enumerate()
-        .map(|(index, count)| HistogramBin {
-            lower: edges[index],
-            upper: edges[index + 1],
-            count: *count,
-            weight: *count as f64,
-        })
-        .collect();
-    let total_count: usize = counts.iter().sum();
-    let provenance = in_flight_cache_provenance(app);
-    app.state
-        .analysis
-        .histogram_state
-        .load_histogram(Histogram {
-            name: "V(out)".to_owned(),
-            bins,
-            total_count,
-            total_weight: total_count as f64,
-            underflow: 0,
-            overflow: 0,
-            data_min: edges[0],
-            data_max: edges[edges.len() - 1],
-        });
-    app.state
-        .bind_specialized_viewer_cache(ActiveViewer::Histogram, provenance);
 }

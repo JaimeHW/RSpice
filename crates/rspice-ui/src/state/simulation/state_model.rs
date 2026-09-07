@@ -71,12 +71,8 @@ pub struct SimulationState {
     /// Populated during netlist generation, used for probe mode
     pub cross_probe: CrossProbeMapping,
 
-    /// Yield analysis results from Monte Carlo runs
-    pub yield_results: Vec<YieldResult>,
-
-    /// Stable identity of the run and dataset from which `yield_results` were
-    /// calculated. `None` means no yield evidence is currently retained.
-    pub yield_provenance: Option<YieldAnalysisProvenance>,
+    /// Atomically replaced yield population and the run that produced it.
+    pub yield_evidence: YieldEvidence,
 
     // =========================================================================
     // Multi-Run Results History (Cadence Spectre PSF-style)

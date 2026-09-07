@@ -309,12 +309,10 @@ impl AppState {
                 }
             }
             ActiveViewer::Histogram => {
-                if !self.specialized_viewer_cache_matches_active(viewer)
-                    || self.analysis.histogram_state.is_empty()
-                {
-                    ViewerCapability::unavailable("Requires histogram bins from sweep/MC data")
+                if crate::workbench::documents::result_document::histogram_is_available(self) {
+                    ViewerCapability::available("Retained Monte Carlo samples available")
                 } else {
-                    ViewerCapability::available("Active analysis histogram data loaded")
+                    ViewerCapability::unavailable("Requires retained Monte Carlo samples")
                 }
             }
             ActiveViewer::BodePlot => {
@@ -539,7 +537,8 @@ mod tests {
         let mut state = AppState::default();
         seed_result_viewers(&mut state);
         assert!(state.simulation.has_results());
-        assert!(state.viewer_is_available(ActiveViewer::Histogram));
+        // Arbitrary cached bins on an AC analysis are not MC evidence.
+        assert!(!state.viewer_is_available(ActiveViewer::Histogram));
         assert!(state.viewer_is_available(ActiveViewer::SmithChart));
         assert!(state.viewer_is_available(ActiveViewer::Fft));
 

@@ -340,12 +340,37 @@ fn csv_export_from_a_derived_sheet_publishes_what_that_sheet_draws() {
 
     // The distribution exports its bins, not the Monte-Carlo waveform.
     let mut state = state_with_typed_result(
-        AnalysisResult::new(1, AnalysisType::MonteCarlo, "MC").with_waveforms(vec![waveform(
-            "V(out)",
-            vec![0.0, 1.0],
-            vec![0.9, 1.1],
-        )]),
+        AnalysisResult::new(1, AnalysisType::MonteCarlo, "MC")
+            .with_waveforms(vec![waveform("V(out)", vec![0.0, 1.0], vec![0.9, 1.1])])
+            .with_family_metadata(crate::state::AnalysisResultFamilyMetadata::MonteCarlo {
+                seed: 7,
+                runs_requested: 3,
+                runs_completed: 3,
+                failures: 0,
+                all_converged: true,
+                member_measurements: Vec::new(),
+                variables: vec![crate::state::MonteCarloVariableMetadata {
+                    name: "V(out)".to_owned(),
+                    samples: vec![1.0, 2.0, 3.0],
+                    mean: 2.0,
+                    std_dev: 1.0,
+                    min: 1.0,
+                    max: 3.0,
+                }],
+            }),
     );
+    state.analysis.histogram_state.bin_count = 1;
+    let run = &mut state.simulation.runs[0];
+    run.restore_provenance(crate::state::SimulationRunProvenance::LegacyUnattributed)
+        .unwrap();
+    run.mark_running().unwrap();
+    run.finish_lifecycle(crate::state::SimulationRunLifecycle::Completed)
+        .unwrap();
+    state.simulation.complete_run();
+    state.simulation =
+        crate::io::project_io::ProjectSimulationResults::from_state(&state.simulation)
+            .into_simulation_state()
+            .unwrap();
     state.analysis.histogram_state.load_histogram(Histogram {
         name: "V(out)".to_owned(),
         bins: vec![HistogramBin {
@@ -368,6 +393,7 @@ fn csv_export_from_a_derived_sheet_publishes_what_that_sheet_draws() {
 
     let files = io.text_files.borrow();
     assert_eq!(files[0].0, PathBuf::from("rspice-distribution.csv"));
+    assert!(files[0].1.contains("data_max,3.00000000000000000e0,"));
     assert!(
         files[0].1.contains("bin_lower,bin_upper,count,weight"),
         "{}",

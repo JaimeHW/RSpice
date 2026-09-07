@@ -1183,7 +1183,7 @@ fn quick_result_availability(
             analysis.family_metadata.as_ref(),
             Some(AnalysisResultFamilyMetadata::MonteCarlo { variables, .. })
                 if variables
-                    .get(state.analysis.histogram_state.selected)
+                    .get(state.analysis.histogram_state.selected.min(variables.len().saturating_sub(1)))
                     .is_some_and(|variable| !variable.samples.is_empty())
         ),
         ResultViewer::Nyquist => visible_waveforms().any(|waveform| {

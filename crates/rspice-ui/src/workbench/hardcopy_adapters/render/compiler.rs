@@ -1715,7 +1715,14 @@ impl<'a> SemanticSceneCompiler<'a> {
                 )?,
             );
             for path in &trace.paths {
-                if path.len() >= 2 {
+                if let [point] = path.as_slice() {
+                    self.primitives.push(ScenePrimitive::Circle {
+                        center: self.semantic_point(*point)?,
+                        radius: Length::from_micrometres(500),
+                        stroke: Some(stroke),
+                        fill: None,
+                    });
+                } else if path.len() >= 2 {
                     self.primitives.push(ScenePrimitive::Polyline {
                         points: path
                             .iter()

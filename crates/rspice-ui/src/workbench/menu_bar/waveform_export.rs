@@ -621,11 +621,7 @@ fn fft_spectrum_csv(
 }
 
 fn histogram_bins_csv(state: &AppState) -> Option<PreparedTypedResultCsv> {
-    let histogram = state
-        .analysis
-        .histogram_state
-        .histograms
-        .get(state.analysis.histogram_state.selected)?;
+    let histogram = crate::workbench::documents::result_document::active_histogram(state)?;
     if histogram.bins.is_empty() {
         return None;
     }
