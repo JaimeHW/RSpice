@@ -41,6 +41,8 @@ use crate::{Netlist, Value};
 
 mod state;
 pub(in crate::engine) use state::PssCircuit;
+mod mesh;
+pub(in crate::engine) use mesh::PssIntegrationMesh;
 
 type AutonomousNewtonStep = (Vec<Value>, Value, Vec<Vec<Value>>);
 
@@ -92,7 +94,7 @@ impl PssAcceptedStepHistory {
 const PSS_FD_STEP: Value = 1e-8;
 const PSS_KRYLOV_STATE_THRESHOLD: usize = 12;
 const PSS_KRYLOV_REL_TOL: Value = 1e-9;
-const PSS_OPERATING_POINT_IDENTITY_VERSION: u32 = 16;
+const PSS_OPERATING_POINT_IDENTITY_VERSION: u32 = 17;
 
 fn pss_identity_field(hasher: &mut blake3::Hasher, name: &str, bytes: &[u8]) {
     hasher.update(&(name.len() as u64).to_le_bytes());
@@ -1062,11 +1064,21 @@ impl PssOperatingPoint {
     }
 
     /// Highest Fourier harmonic that can be projected without exceeding the
-    /// Nyquist limit of the retained time-domain orbit. Saved-output harmonic
+    /// sampling limit set by the largest retained time interval. Extra local
+    /// source corners do not increase the capacity of sparsely sampled phases.
+    /// Saved-output harmonic
     /// count is intentionally not part of this capacity: dependent analyses
     /// consume the authenticated orbit, not the optional display spectrum.
     pub fn spectral_harmonic_capacity(&self) -> usize {
-        self.analysis.result.time.len().saturating_sub(1) / 2
+        let time = &self.analysis.result.time;
+        let largest_phase_gap = time
+            .windows(2)
+            .map(|pair| (pair[1] - pair[0]) / self.analysis.period)
+            .fold(0.0, Value::max);
+        // Uniform knots are rounded independently. Allow their clock-rounding
+        // error without treating a dense cluster of extra knots as bandwidth.
+        let gap = (largest_phase_gap - 64.0 * Value::EPSILON).max(Value::MIN_POSITIVE);
+        ((0.5 / gap).floor() as usize).min(time.len().saturating_sub(1) / 2)
     }
 
     /// Reconstruct a retained operating point after authenticated transport.
@@ -1293,8 +1305,8 @@ impl PssOperatingPoint {
             .time
             .last()
             .expect("validated non-empty PSS time grid");
-        if first_time.abs() > period_tolerance
-            || (last_time - analysis.period).abs() > period_tolerance
+        if first_time != 0.0
+            || last_time != analysis.period
             || analysis
                 .result
                 .time
@@ -1306,23 +1318,13 @@ impl PssOperatingPoint {
             ));
         }
         let sample_count = analysis.result.time.len();
-        let grid_step = analysis.period / (sample_count - 1) as Value;
-        if analysis
-            .result
-            .time
-            .iter()
-            .enumerate()
-            .any(|(index, time)| {
-                let expected = if index + 1 == sample_count {
-                    analysis.period
-                } else {
-                    index as Value * grid_step
-                };
-                (*time - expected).abs() > period_tolerance
-            })
-        {
+        let maximum_phase_gap = 1.0 / config.points_per_period as Value;
+        if analysis.result.time.windows(2).any(|pair| {
+            (pair[1] - pair[0]) / analysis.period > maximum_phase_gap + 64.0 * Value::EPSILON
+        }) {
             return Err(SimulationError::Circuit(
-                "retained PSS orbit must use a uniform integration grid".to_owned(),
+                "retained PSS orbit has an integration gap larger than its configured grid"
+                    .to_owned(),
             ));
         }
         if analysis.result.waveforms.iter().any(|waveform| {
@@ -1518,7 +1520,14 @@ impl Engine {
                     ),
                 ));
             }
-            ensure_sampling(name, cycles, interval)?;
+            if interval == Some(0.0) {
+                return Err(PssError::InvalidConfig(format!(
+                    "PSS source '{name}' has an unrepresentable waveform interval"
+                ))
+                .into());
+            }
+            // Independent piecewise source corners are integrated explicitly.
+            ensure_sampling(name, cycles, None)?;
         }
         let behavioral = circuit
             .behavioral_sources
@@ -1901,11 +1910,17 @@ impl Engine {
             self.transient_lte_abstol(),
             lte_reference,
         );
-        for solution in &trace.solutions {
-            lte_estimator.record(solution, max_step);
+        for (index, solution) in trace.solutions.iter().enumerate() {
+            let dt = if index == 0 {
+                trace.times[1] - trace.times[0]
+            } else {
+                trace.times[index] - trace.times[index - 1]
+            };
+            lte_estimator.record(solution, dt);
         }
         let mut diode_history = circuit.diode_history.clone();
-        diode_history.restart(max_step);
+        diode_history
+            .restart(trace.times[trace.times.len() - 1] - trace.times[trace.times.len() - 2]);
         let checkpoint = TransientCheckpoint::capture_with_diode_history(
             authenticated_fingerprint,
             Some(authenticated_netlist_identity),
@@ -2138,6 +2153,8 @@ impl Engine {
             config.is_autonomous(),
             abort,
         )?;
+        circuit.integration_mesh =
+            self.pss_source_mesh(&circuit, &config, circuit.integration_steps, abort)?;
         self.ensure_result_values(
             circuit
                 .grid_steps(&config)
@@ -2145,7 +2162,7 @@ impl Engine {
                     circuit
                         .matrix_size()
                         .saturating_add(state_dimension)
-                        .saturating_add(1),
+                        .saturating_add(2),
                 )
                 .saturating_add(state_dimension.saturating_mul(state_dimension))
                 .saturating_add(state_dimension.saturating_mul(2)),
@@ -2214,6 +2231,11 @@ impl Engine {
                 PssError::InvalidConfig("PSS refinement grid size overflowed".to_owned())
             })?;
             self.ensure_pss_refinement_capacity(&circuit, steps, finer_steps)?;
+            let coarse_mesh = circuit.integration_mesh.clone();
+            circuit.integration_mesh = coarse_mesh
+                .as_ref()
+                .map(|mesh| mesh.refined(abort))
+                .transpose()?;
             circuit.integration_steps = finer_steps;
             let fine = self
                 .pss_solve_grid(
@@ -2238,6 +2260,7 @@ impl Engine {
             }
             if error <= 1.0 {
                 circuit.integration_steps = steps;
+                circuit.integration_mesh = coarse_mesh;
                 break;
             }
             coarse = fine;
@@ -2512,7 +2535,7 @@ impl Engine {
             coarse_steps
                 .saturating_add(fine_steps.saturating_mul(2))
                 .saturating_add(3)
-                .saturating_mul(circuit.matrix_size().saturating_add(2))
+                .saturating_mul(circuit.matrix_size().saturating_add(3))
                 .saturating_add(dimension.saturating_mul(dimension).saturating_mul(4))
                 .saturating_add(dimension.saturating_mul(6)),
         )
@@ -3782,7 +3805,7 @@ impl Engine {
     }
 
     /// Internal transient simulation
-    /// `fixed_grid` integrates on a uniform time grid with a deterministic
+    /// `fixed_grid` integrates on a shared, immutable time mesh with a deterministic
     /// method sequence (backward Euler first step, then the configured method;
     /// TrapGear resolves to trapezoidal on the fixed grid): the
     /// period map then varies SMOOTHLY with the initial state, which is what
@@ -3820,28 +3843,33 @@ impl Engine {
         }
         let num_nodes = circuit.num_nodes();
 
-        let fixed_steps = (tstop / max_step).round().max(1.0) as usize;
+        let fixed_steps = if fixed_grid && let Some(mesh) = &circuit.integration_mesh {
+            mesh.steps()
+        } else {
+            (tstop / max_step).round().max(1.0) as usize
+        };
         let fixed_dt = tstop / fixed_steps as Value;
 
         let initial_step = (max_step / 10.0).min(tstop / 100.0);
         let mut timestep =
             TimestepController::new(initial_step, self.config.min_timestep, max_step);
-        // Register source-waveform breakpoints (PULSE edges, PWL corners,
-        // SIN delay starts) so the integrator lands on them instead of
-        // stepping across; without this, hard-edged drives shift the PSS
-        // orbit by up to one LTE-sized step per edge.
+        // Stabilization uses adaptive breakpoint scheduling. Shooting and its
+        // derivative workers already share an immutable source-aware mesh;
+        // rebuilding the adaptive schedule cannot change those fixed steps.
         let mut breakpoints = BreakpointManager::new();
-        Self::collect_transient_source_breakpoints(
-            circuit,
-            BreakpointWindow {
-                tstop,
-                tstep_hint: max_step,
-                dialect: self.config.spice_dialect,
-            },
-            &mut breakpoints,
-            abort,
-            self.config.resource_limits.max_analysis_points,
-        )?;
+        if !fixed_grid {
+            Self::collect_transient_source_breakpoints(
+                circuit,
+                BreakpointWindow {
+                    tstop,
+                    tstep_hint: max_step,
+                    dialect: self.config.spice_dialect,
+                },
+                &mut breakpoints,
+                abort,
+                self.config.resource_limits.max_analysis_points,
+            )?;
+        }
         let mut lte_estimator =
             LteEstimator::with_tolerances(self.voltage_reltol(), self.voltage_abstol());
         let mut trapgear = TrapGearController::new();
@@ -3896,7 +3924,9 @@ impl Engine {
                 // endpoint. The final target is assigned from `tstop`
                 // directly rather than reconstructed by multiplication.
                 let next_index = fixed_index + 1;
-                let t_next = if next_index == fixed_steps {
+                let t_next = if let Some(mesh) = &circuit.integration_mesh {
+                    mesh.time(next_index, tstop)
+                } else if next_index == fixed_steps {
                     tstop
                 } else {
                     next_index as Value * fixed_dt
@@ -4703,6 +4733,29 @@ mod tests {
             PssOperatingPoint::try_from_parts(config, analysis, shooting_state).unwrap();
         assert!(operating_point.shooting_state().is_empty());
         assert_eq!(operating_point.spectral_harmonic_capacity(), 8);
+    }
+
+    #[test]
+    fn retained_local_source_corners_do_not_overstate_spectral_capacity() {
+        let (config, mut analysis, shooting_state) = retained_parts();
+        // Dense samples in the first base interval leave the other gaps intact.
+        for index in (1..=32).rev() {
+            analysis.result.time.insert(1, index as Value / 1024.0);
+            for waveform in &mut analysis.result.waveforms {
+                waveform.values.insert(1, 0.0);
+            }
+        }
+        let point = PssOperatingPoint::try_from_parts(
+            config.clone(),
+            analysis.clone(),
+            shooting_state.clone(),
+        )
+        .unwrap();
+        assert_eq!(point.spectral_harmonic_capacity(), 8);
+        analysis.result.time[40] += 0.01;
+        let error =
+            PssOperatingPoint::try_from_parts(config, analysis, shooting_state).unwrap_err();
+        assert!(error.to_string().contains("integration gap"), "{error}");
     }
 
     #[test]

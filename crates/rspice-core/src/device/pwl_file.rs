@@ -356,6 +356,17 @@ impl PwlWaveform {
             .copied()
             .map(|t| t * self.time_scale + self.time_offset)
     }
+
+    pub(crate) fn scaled_event_knot_times(
+        &self,
+        retain_flat_knots: bool,
+    ) -> impl Iterator<Item = Value> + '_ {
+        crate::numerics::pwl_event_points(
+            self.times.iter().copied().zip(self.values.iter().copied()),
+            retain_flat_knots,
+        )
+        .map(|(time, _)| time * self.time_scale + self.time_offset)
+    }
 }
 
 //=============================================================================

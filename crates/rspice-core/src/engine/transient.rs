@@ -367,7 +367,7 @@ fn capture_transient_merit_rollback(
     }
 }
 
-pub(in crate::engine) use breakpoints::BreakpointWindow;
+pub(in crate::engine) use breakpoints::{BreakpointWindow, SourceBreakpointGeometry};
 use breakpoints::{DynamicBreakpointSink, TlineArrivalEvent, TlineWaveChange};
 pub(in crate::engine) use checkpoint::CheckpointState;
 use checkpoint::{AcceptedTransientRuntime, CheckpointIdentity, CheckpointIntegrationState};
@@ -2247,7 +2247,11 @@ impl Engine {
             false,
             abort,
         )?;
-        engine.ensure_analysis_points(grid_steps)
+        let mesh = engine.pss_source_mesh(&circuit, config, grid_steps, abort)?;
+        engine.ensure_analysis_points(
+            mesh.as_ref()
+                .map_or(grid_steps, super::pss::PssIntegrationMesh::steps),
+        )
     }
 
     fn validated_transient_source_selection(
@@ -2336,6 +2340,7 @@ impl Engine {
             &mut breakpoints,
             abort,
             self.config.resource_limits.max_analysis_points,
+            SourceBreakpointGeometry::Authored,
         )?;
         Ok(breakpoints.times().to_vec())
     }

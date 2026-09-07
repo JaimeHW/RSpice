@@ -30,14 +30,11 @@ pub(crate) fn is_integral_cycle_count(cycles: Value) -> bool {
 pub(crate) fn minimum_pwl_interval(
     points: impl IntoIterator<Item = (Value, Value)>,
 ) -> Option<Value> {
-    let mut points = points.into_iter().peekable();
+    let mut points = pwl_event_points(points, false);
     let mut previous = points.next()?;
     let mut minimum: Option<Value> = None;
     let mut changes = false;
-    while let Some(point) = points.next() {
-        if point.1 == previous.1 && points.peek().is_some_and(|next| next.1 == point.1) {
-            continue;
-        }
+    for point in points {
         changes |= point.1 != previous.1;
         let interval = (point.0 - previous.0).abs();
         if interval > 0.0 && interval.is_finite() {
@@ -46,6 +43,29 @@ pub(crate) fn minimum_pwl_interval(
         previous = point;
     }
     if changes { minimum } else { None }
+}
+
+/// PWL event knots, optionally retaining every authored point. Interior knots
+/// of a constant run do not change the value or slope; retaining them as
+/// physical events can demand a meaningless tiny integration step.
+pub(crate) fn pwl_event_points(
+    points: impl IntoIterator<Item = (Value, Value)>,
+    retain_flat_knots: bool,
+) -> impl Iterator<Item = (Value, Value)> {
+    let mut points = points.into_iter().peekable();
+    let mut previous: Option<(Value, Value)> = None;
+    std::iter::from_fn(move || {
+        loop {
+            let point = points.next()?;
+            let flat = !retain_flat_knots
+                && previous.is_some_and(|previous| previous.1 == point.1)
+                && points.peek().is_some_and(|next| next.1 == point.1);
+            previous = Some(point);
+            if !flat {
+                return Some(point);
+            }
+        }
+    })
 }
 
 /// Map a PWL clock into its repeated tail. The authored endpoint is retained

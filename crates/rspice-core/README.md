@@ -389,22 +389,26 @@ Nonrepeating startup prefixes need an explicit frozen-source selection or a
 periodic source specification. Sources that prescribe winding currents also
 require a continuous waveform with finite outgoing slopes.
 
-`POINTS` sets the minimum uniform integration grid. The solver first increases
+`POINTS` sets the minimum base integration grid. The solver first increases
 it beyond the Nyquist limit of recognized source clocks and finite behavioral
 trigonometric polynomials, including products and integer powers. Resolved
-PULSE/PAT widths and PWL/table knot intervals also constrain this first grid
-so narrow authored features cannot fall between both comparison meshes. Table
+Independent PULSE/PAT edges and physical PWL/file corners are inserted directly
+into an immutable, nonuniform integration mesh shared by all shooting and
+derivative evaluations. Refinement preserves those times exactly. Behavioral
+PULSE widths and table knot intervals still constrain the base grid. Table
 coordinates require a known time rate; arbitrary circuit-dependent expressions
 do not supply that bound. It then
 solves successively doubled grids and compares the complete voltage and branch
 current waveforms at shared phases, using the engine voltage/current tolerances.
 Only a grid that agrees with its doubled grid is retained. The returned sample
-count and available harmonic capacity reflect that grid; authored source timing
+count reflects the complete mesh; harmonic capacity is limited by its largest
+time interval. Dependent spectral analyses integrate the retained samples without
+resampling away local source features. Authored source timing
 defaults still use the original `POINTS`. `MAXITER` applies to each grid solve,
 while the result reports total Newton corrections across all grids. Point and
 memory limits also apply to refinement, and cancellation remains available.
 Retained PSS operating points from earlier producer versions must be regenerated
-before dependent numerical reuse; the current producer identity is version 16.
+before dependent numerical reuse; the current producer identity is version 17.
 This convergence check supplements the shooting residual, which measures closure
 of a discrete period map. It is not a proof of resolution for all nonlinear
 expressions and devices; independent waveform and
