@@ -234,9 +234,20 @@ impl SimulationController {
         {
             waveform.name = "phase_noise".to_owned();
         }
+        // The carrier the run was actually solved against, captured from the
+        // resolved periodic dependency at dispatch -- not
+        // `config.pss_fundamental_freq`, which is the number this
+        // configuration authored. For a driven carrier the drive sets the
+        // period and the two are the same bits. For an autonomous one the
+        // shooting solver holds the period as an unknown and moves it, so the
+        // authored value is a guess the circuit never ran at: on the
+        // workspace's own oscillator fixture the guess is 1.5873e5 Hz and the
+        // carrier converges at 1.5912e5 Hz. Publishing the guess mislabels
+        // every dBc/Hz spectrum that is stated relative to it, and the result
+        // digest hashes this field, so it also mis-identifies the run.
         result.family_metadata = Some(AnalysisResultFamilyMetadata::PeriodicNoise {
             output_quantity,
-            carrier_frequency_hz: Some(config.pss_fundamental_freq),
+            carrier_frequency_hz: self.current_periodic_carrier_hz,
         });
     }
 
@@ -2078,6 +2089,10 @@ mod noise_conversion_tests {
             pnoise: Some(config),
             ..SpecExecutionOptions::default()
         });
+        // A driven carrier, where the drive sets the period and the authored
+        // and converged fundamentals are the same bits. Dispatch is what sets
+        // this in the product; these tests stand in for it.
+        controller.current_periodic_carrier_hz = Some(2.4e9);
         let sim_result = crate::simulation::SimulationResult::Noise {
             frequencies: vec![1.0e3, 1.0e6],
             output_noise: vec![-90.0, -130.0],
@@ -2150,5 +2165,158 @@ mod noise_conversion_tests {
             })
         );
         assert!(result.validate_retained_evidence().is_ok());
+    }
+
+    /// The workspace's one self-starting oscillator, solved in autonomous
+    /// shooting mode. `services/simulation_runner/pss.rs` solves the same deck
+    /// and pins that the solver moves the period off the authored guess.
+    const NEGATIVE_RESISTANCE_OSCILLATOR: &str = "* negative-resistance lc oscillator\n\
+         l1 osc 0 1u\n\
+         c1 osc 0 1u\n\
+         b1 osc 0 i=-0.05*v(osc)+0.025*v(osc)*v(osc)*v(osc)\n\
+         i1 0 osc pulse(0 1 10u 10n 10n 1u 1)\n\
+         .end\n";
+
+    /// An autonomous carrier's period is the shooting solver's unknown, so the
+    /// frequency a periodic-noise spectrum is stated against is a property of
+    /// the carrier and not of the card that asked for it. The Studio published
+    /// the authored guess: on this fixture it announced a 1.5873e5 Hz carrier
+    /// for a circuit that oscillated at 1.5912e5 Hz, 392 Hz away, and every
+    /// dBc/Hz level is stated relative to that number.
+    ///
+    /// This is the same substitution `3d6cf193e` corrected on the refusal side
+    /// of `.PAC`, where comparing the result against the guess refused every
+    /// oscillator. Here it was not refused, only mislabelled.
+    #[test]
+    fn an_oscillator_publishes_the_carrier_it_converged_at_not_the_authored_guess() {
+        use rspice_core::NoAbort;
+
+        const PERIOD_GUESS: f64 = 6.3e-6;
+        const TOLERANCE: f64 = 1.0e-6;
+        let authored = 1.0 / PERIOD_GUESS;
+
+        let netlist = rspice_core::Netlist::parse(NEGATIVE_RESISTANCE_OSCILLATOR)
+            .expect("the oscillator deck parses");
+        let mut engine_config = rspice_core::resolve_simulation_config(
+            &rspice_core::engine::SimulationConfig::default(),
+            Some(&netlist.options),
+            &rspice_core::SimulationConfigOverrides::default(),
+        );
+        engine_config.tolerance = TOLERANCE;
+        let carrier = rspice_core::engine::Engine::try_new_with_resolved_config(engine_config)
+            .expect("the periodic engine resolves")
+            .run_pss_operating_point_with_abort(
+                &netlist,
+                rspice_core::analysis::PssConfig::autonomous()
+                    .with_period_guess(PERIOD_GUESS)
+                    .with_harmonics(9)
+                    .with_tolerance(TOLERANCE)
+                    .with_max_iterations(100)
+                    .with_tstab_periods(30)
+                    .with_points_per_period(256)
+                    .with_oscillator_node("osc"),
+                &NoAbort,
+            )
+            .expect("the autonomous carrier converges");
+        let converged = carrier.analysis().result.frequency;
+        assert_ne!(
+            converged.to_bits(),
+            authored.to_bits(),
+            "the fixture only means anything while the solver moves the period"
+        );
+
+        let mut controller = SimulationController::new();
+        let mut config = crate::services::simulation_runner::PnoiseRunConfig::default();
+        config.noise_ref = crate::services::simulation_runner::PnoiseReference::Phase;
+        // What the Studio authors for an autonomous producer, and what
+        // `PeriodicStateArtifact::validate_consumer_basis` matches bit for bit:
+        // the reciprocal of the period guess, never the converged frequency.
+        config.pss_fundamental_freq = authored;
+        controller.current_spec_options = Some(SpecExecutionOptions {
+            pnoise: Some(config),
+            ..SpecExecutionOptions::default()
+        });
+        // What dispatch captures from the resolved periodic dependency.
+        controller.current_periodic_carrier_hz = Some(converged);
+
+        let sim_result = crate::simulation::SimulationResult::Noise {
+            frequencies: vec![1.0e3, 1.0e5],
+            output_noise: vec![-90.0, -130.0],
+            input_noise: None,
+            contributors: HashMap::new(),
+            summary: None,
+            measurements: Vec::new(),
+        };
+        let mut result = controller.convert_to_analysis_result_with_metadata_owned(
+            sim_result,
+            AnalysisType::Pnoise,
+            "PNOISE",
+        );
+        controller.retain_periodic_noise_result_metadata(&mut result);
+
+        assert_eq!(
+            result.family_metadata,
+            Some(AnalysisResultFamilyMetadata::PeriodicNoise {
+                output_quantity: PeriodicNoiseOutputQuantity::PhaseNoiseDbcPerHz,
+                carrier_frequency_hz: Some(converged),
+            }),
+            "the published carrier is the one the circuit oscillated at"
+        );
+        assert!(result.validate_retained_evidence().is_ok());
+    }
+
+    /// With no carrier captured, a phase-noise result is refused, not guessed.
+    ///
+    /// Every dBc/Hz level in the spectrum is stated relative to the carrier,
+    /// so a result that cannot say which carrier it was measured against is
+    /// not a weaker result -- it is an unreadable one. Publishing the authored
+    /// fundamental in its place is what made this look survivable: the field
+    /// was always populated, and always plausible, and for an oscillator
+    /// always wrong.
+    ///
+    /// Dispatch cannot actually reach this state -- `validate_for_spec`
+    /// refuses a `.PNOISE` task that carries no periodic-state artifact before
+    /// the runner is handed anything -- and this pins what happens if that
+    /// ever stops being true.
+    #[test]
+    fn phase_noise_with_no_captured_carrier_is_refused_rather_than_labelled_with_a_guess() {
+        let mut controller = SimulationController::new();
+        let mut config = crate::services::simulation_runner::PnoiseRunConfig::default();
+        config.noise_ref = crate::services::simulation_runner::PnoiseReference::Phase;
+        config.pss_fundamental_freq = 2.4e9;
+        controller.current_spec_options = Some(SpecExecutionOptions {
+            pnoise: Some(config),
+            ..SpecExecutionOptions::default()
+        });
+        // No dispatch has captured a carrier for this task.
+        assert!(controller.current_periodic_carrier_hz.is_none());
+
+        let sim_result = crate::simulation::SimulationResult::Noise {
+            frequencies: vec![1.0e3, 1.0e6],
+            output_noise: vec![-90.0, -130.0],
+            input_noise: None,
+            contributors: HashMap::new(),
+            summary: None,
+            measurements: Vec::new(),
+        };
+        let mut result = controller.convert_to_analysis_result_with_metadata_owned(
+            sim_result,
+            AnalysisType::Pnoise,
+            "PNOISE",
+        );
+        controller.retain_periodic_noise_result_metadata(&mut result);
+
+        assert_eq!(
+            result.family_metadata,
+            Some(AnalysisResultFamilyMetadata::PeriodicNoise {
+                output_quantity: PeriodicNoiseOutputQuantity::PhaseNoiseDbcPerHz,
+                carrier_frequency_hz: None,
+            }),
+            "the authored fundamental must not stand in for a carrier nothing measured"
+        );
+        assert_eq!(
+            result.validate_retained_evidence(),
+            Err("phase-noise evidence is missing its retained carrier frequency".to_owned()),
+        );
     }
 }

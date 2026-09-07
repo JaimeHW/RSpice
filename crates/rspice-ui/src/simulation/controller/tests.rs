@@ -402,6 +402,53 @@ fn no_shipped_path_fails_a_run_outside_the_sealing_helper() {
     );
 }
 
+/// The carrier a periodic-noise result publishes belongs to the task that
+/// produced it, and two structural facts are what keep it that way. Neither is
+/// visible at the line that reads the field.
+///
+/// It is captured where the task is dispatched, because the conversion reads
+/// it much later, on the completion path, and cannot tell a captured carrier
+/// from a stale one. And it is cleared wherever the rest of the current task's
+/// identity is cleared -- including at the top of every dequeue, before the
+/// dependency is resolved -- so a task that resolves no periodic dependency,
+/// or fails to resolve one, cannot publish the previous task's carrier as its
+/// own. A second capture site, or a reset list that grew without it, would
+/// break either property silently: nothing about `carrier_frequency_hz` at
+/// the point of use says which run it came from.
+#[test]
+fn the_published_periodic_carrier_is_captured_at_dispatch_and_dies_with_its_task() {
+    let production = crate::source_guard::production_half(include_str!("../controller.rs"));
+    // Split so this test's own source can neither satisfy nor trip the scan.
+    let carrier = ["current_periodic", "_carrier_hz"].concat();
+    let cleared_carrier = production
+        .matches(format!("self.{carrier} = None;").as_str())
+        .count();
+    let cleared_task = production
+        .matches("self.current_spec_options = None;")
+        .count();
+    assert!(
+        cleared_task >= 4,
+        "the task-state reset list disappeared; this guard is scanning nothing"
+    );
+    assert_eq!(
+        cleared_carrier, cleared_task,
+        "the captured carrier must be cleared everywhere the task it describes is cleared: \
+         {cleared_carrier} carrier resets against {cleared_task} task resets"
+    );
+    assert_eq!(
+        production
+            .matches(format!("self.{carrier} = dispatch").as_str())
+            .count(),
+        1,
+        "the carrier is captured once, from the resolved dependency, at the dispatch point"
+    );
+    assert_eq!(
+        production.matches(".start_prepared(").count(),
+        1,
+        "a second dispatch point would reach the conversion without capturing a carrier"
+    );
+}
+
 #[test]
 fn plan_owned_runtime_retention_enforces_authenticated_storage_ceiling() {
     let mut state = AppState::default();

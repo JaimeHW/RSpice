@@ -486,6 +486,19 @@ pub struct SimulationController {
     /// carry result semantics, such as whether PNOISE produced output PSD or
     /// dBc/Hz phase noise, across the asynchronous runner boundary.
     current_spec_options: Option<SpecExecutionOptions>,
+    /// The fundamental the periodic carrier of the active task actually
+    /// converged at, in hertz, captured from the resolved dependency at
+    /// dispatch.
+    ///
+    /// This is not the fundamental the card authored. An autonomous carrier
+    /// holds its period as the shooting solver's unknown and the solver moves
+    /// it, so the frequency a conversion or noise basis is built on is a
+    /// property of the *carrier*, not of the configuration that asked for it.
+    /// The authored guess reaches the runner as
+    /// `PnoiseRunConfig::pss_fundamental_freq` and is what
+    /// `PeriodicStateArtifact::validate_consumer_basis` matches on; it is the
+    /// wrong number to publish as the carrier a result was measured against.
+    current_periodic_carrier_hz: Option<f64>,
     /// Frozen identity of the prepared task currently owned by the runner.
     /// Captured before the authorized dispatch token is moved into the runner.
     current_provenance: Option<AnalysisResultProvenance>,
@@ -564,6 +577,7 @@ impl SimulationController {
             current_spec: None,
             current_analysis_label: None,
             current_spec_options: None,
+            current_periodic_carrier_hz: None,
             current_provenance: None,
             current_config_digest: None,
             current_effective_source_content_digest: None,
@@ -926,6 +940,7 @@ impl SimulationController {
         self.current_spec = None;
         self.current_analysis_label = None;
         self.current_spec_options = None;
+        self.current_periodic_carrier_hz = None;
         self.current_provenance = None;
         self.current_config_digest = None;
         self.current_effective_source_content_digest = None;
@@ -964,6 +979,7 @@ impl SimulationController {
         self.current_spec = None;
         self.current_analysis_label = None;
         self.current_spec_options = None;
+        self.current_periodic_carrier_hz = None;
         self.current_provenance = None;
         self.current_config_digest = None;
         self.current_effective_source_content_digest = None;
@@ -1187,6 +1203,15 @@ impl SimulationController {
             .resolve_dependency_artifacts(&self.execution_artifacts)
             .map_err(|error| SimulationError::InvalidConfig(error.to_string()))
             .and_then(|dispatch| {
+                // The carrier this task is about to be solved against, taken
+                // from the resolved artifact rather than from the request: the
+                // shooting solver moves an autonomous period off the authored
+                // guess, so only the retained result says what the basis is.
+                self.current_periodic_carrier_hz = dispatch
+                    .dependencies
+                    .periodic_state()
+                    .ok()
+                    .map(|state| state.operating_point().analysis().result.frequency);
                 let stream_transient_samples = self.current_save_policy.live_streaming_enabled()
                     && self.current_saved_output_contracts.iter().any(|contract| {
                         contract.streaming()
@@ -1673,6 +1698,7 @@ impl SimulationController {
         self.current_spec = None;
         self.current_analysis_label = None;
         self.current_spec_options = None;
+        self.current_periodic_carrier_hz = None;
         self.current_provenance = None;
         self.current_config_digest = None;
         self.current_effective_source_content_digest = None;
@@ -2369,6 +2395,7 @@ impl SimulationController {
                     self.current_spec = None;
                     self.current_analysis_label = None;
                     self.current_spec_options = None;
+                    self.current_periodic_carrier_hz = None;
                     self.current_provenance = None;
                     self.current_config_digest = None;
                     self.current_effective_source_content_digest = None;

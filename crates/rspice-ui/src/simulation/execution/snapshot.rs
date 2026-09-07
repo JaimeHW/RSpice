@@ -763,7 +763,7 @@ pub(in crate::simulation) struct AuthorizedTaskDispatch {
 #[derive(Debug)]
 pub(in crate::simulation) struct ResolvedTaskDispatch {
     dispatch: AuthorizedTaskDispatch,
-    dependencies: ResolvedExecutionDependencies,
+    pub(in crate::simulation) dependencies: ResolvedExecutionDependencies,
 }
 
 impl AuthorizedRunDispatch {
