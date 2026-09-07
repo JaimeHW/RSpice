@@ -1,25 +1,22 @@
 //! Accepted-timestep sequence goldens: the AMS compatibility invariant **I1**.
 //!
 //! I1 states: *a deck with no digital/event content produces a bit-identical
-//! accepted-timestep sequence*. Today that holds only structurally — for a
-//! pure-analog circuit `next_xspice_event_time()` returns `None`
-//! (`src/circuit/external_models.rs`) and `replace_runtime_breakpoints`
-//! clears an already-empty list (`src/numerics/integration/breakpoint.rs`) —
-//! and nothing pins it. `tests/determinism.rs` compares two runs of the *same*
-//! build, so a uniform drift in timestep control passes it unnoticed.
+//! accepted-timestep sequence* within a build. `tests/determinism.rs` compares
+//! repeated runs, so a uniform change in timestep control needs a separate
+//! comparison with a recorded build.
 //!
 //! These goldens close that hole. Each deck's accepted `(time, step_size)`
 //! sequence is checked in as bit patterns; any change to breakpoint
 //! placement, LTE control, order selection, step growth/shrink policy, or the
 //! event machinery's inertness moves the sequence and fails here. Ordinary
-//! builds compare those patterns exactly. Source-coverage builds are a
-//! deliberately different binary: LLVM inserts a counter update in every
-//! instrumented region, and the Linux instrumented nonlinear solve has been
-//! observed to move one LTE proposal by 17 ULP while preserving every
-//! accepted-point decision and the closed-form waveform. Under `cfg(coverage)`
-//! only, [`steps_match`] admits at most [`COVERAGE_MAX_ULPS`] per field. The
-//! point count and point-for-point ordering remain exact, so coverage cannot
-//! bless a different controller path.
+//! builds compare the four linear/switching fixtures exactly. The SIN-driven
+//! diode fixture uses platform math (`f64::sin`, `exp`, and `powf`), whose
+//! precision Rust does not promise across platforms or compilation settings:
+//! <https://doc.rust-lang.org/std/primitive.f64.html#method.sin>.
+//! Its cross-build comparison admits at most 2 ULP in time and 256 ULP in step
+//! size, with exact point count and point-for-point ordering. The standing
+//! `capture_is_stable_across_runs` test still requires bit-identical sequences
+//! within each build, including the diode fixture and instrumented builds.
 //!
 //! # What these goldens prove, and what they do not
 //!
@@ -79,14 +76,15 @@ const BLESS_ENV: &str = "RSPICE_BLESS_TIMESTEP_GOLDENS";
 /// Environment variables that change solver numerics under the test's feet.
 const NUMERIC_ENV_OVERRIDES: [&str; 3] = ["RSPICE_SOLVER", "RSPICE_PIVREL", "RSPICE_PIVTOL"];
 
-/// Narrow allowance for LLVM source-coverage instrumentation roundoff.
+/// Narrow, fixture-specific allowance for platform transcendental roundoff.
 ///
-/// The failing Linux coverage build differed by 2 ULP in accepted time and 17
-/// ULP in the LTE-proposed step at one point, starting from an exactly equal
-/// preceding state. Thirty-two is the smallest power-of-two ceiling above the
-/// measured proposal delta. It is used only by `cfg(coverage)`; production and
-/// ordinary test builds retain bit-exact comparison.
-const COVERAGE_MAX_ULPS: u64 = 32;
+/// GitHub run 34166331794 compared all 195 diode points: maximum differences
+/// were 1 ULP in time and 156 ULP in step, with the waveform oracle passing.
+/// An earlier instrumented build differed by 2 and 17 ULP. These are the
+/// smallest power-of-two ceilings covering that evidence. Linear fixtures
+/// receive no allowance; changing a fixture still requires the protocol above.
+const NONLINEAR_TIME_MAX_ULPS: u64 = 2;
+const NONLINEAR_STEP_MAX_ULPS: u64 = 256;
 
 /// One pure-analog transient deck whose accepted step sequence is pinned.
 struct GoldenDeck {
@@ -100,12 +98,15 @@ struct GoldenDeck {
     tstop: f64,
     /// `.TRAN` printing/ceiling step handed to the public API.
     max_step: f64,
+    /// Only a fixture with measured platform-math variation may opt in.
+    transcendental_roundoff: bool,
 }
 
 /// RC step response behind a PULSE source: pins source-breakpoint placement
 /// and the post-breakpoint restart ramp on an otherwise linear circuit.
 const RC_PULSE: GoldenDeck = GoldenDeck {
     name: "rc_pulse_breakpoints",
+    transcendental_roundoff: false,
     regime: "source breakpoints on a linear RC step response",
     deck: "\
 * I1 golden: RC step response driven by a PULSE source
@@ -124,6 +125,7 @@ rleak out 0 10meg
 /// interaction with charge-based LTE across conduction and cutoff.
 const DIODE_RECTIFIER: GoldenDeck = GoldenDeck {
     name: "diode_rectifier_lte",
+    transcendental_roundoff: true,
     regime: "nonlinear junction conduction plus charge LTE under SIN drive",
     deck: "\
 * I1 golden: half-wave diode rectifier under sinusoidal drive
@@ -143,6 +145,7 @@ cl out 0 10n
 /// the trapezoidal/Gear order switch that lightly damped resonance provokes.
 const RLC_RINGDOWN: GoldenDeck = GoldenDeck {
     name: "rlc_ringdown_oscillatory",
+    transcendental_roundoff: false,
     regime: "oscillatory LTE control and order switching on a ringing RLC",
     deck: "\
 * I1 golden: series RLC ring-down after a step kick
@@ -162,6 +165,7 @@ c1 b 0 1n
 /// discontinuity.
 const SWITCH_DISCONTINUITY: GoldenDeck = GoldenDeck {
     name: "switch_discontinuity",
+    transcendental_roundoff: false,
     regime: "hard conductance discontinuity from a switch on steep edges",
     deck: "\
 * I1 golden: switched RC load with sub-nanosecond control edges
@@ -183,6 +187,7 @@ cl out 0 100p
 /// sequence is pinned separately from the trapezoidal default.
 const RC_PULSE_GEAR: GoldenDeck = GoldenDeck {
     name: "rc_pulse_gear",
+    transcendental_roundoff: false,
     regime: "deck-selected Gear integration over the RC breakpoint deck",
     deck: "\
 * I1 golden: RC step response under .OPTIONS METHOD=GEAR
@@ -233,27 +238,18 @@ fn nonnegative_finite_ulp_distance(left_bits: u64, right_bits: u64) -> Option<u6
         .then(|| left_bits.abs_diff(right_bits))
 }
 
-fn coverage_steps_match(expected: AcceptedStep, captured: AcceptedStep) -> bool {
+fn nonlinear_steps_match(expected: AcceptedStep, captured: AcceptedStep) -> bool {
     nonnegative_finite_ulp_distance(expected.time_bits, captured.time_bits)
-        .is_some_and(|distance| distance <= COVERAGE_MAX_ULPS)
+        .is_some_and(|distance| distance <= NONLINEAR_TIME_MAX_ULPS)
         && nonnegative_finite_ulp_distance(expected.step_bits, captured.step_bits)
-            .is_some_and(|distance| distance <= COVERAGE_MAX_ULPS)
+            .is_some_and(|distance| distance <= NONLINEAR_STEP_MAX_ULPS)
 }
 
-/// Compare one accepted point under the contract of the binary being tested.
-///
-/// Exact bits remain the release invariant. LLVM's instrumented coverage
-/// binary gets only the narrow, measured ULP allowance above; it is not a
-/// shipping configuration and is independently guarded by the exact sequence
-/// length and closed-form waveform tests in this module.
-#[allow(unexpected_cfgs)] // `cargo llvm-cov` supplies this well-known cfg to instrumented builds.
-fn steps_match(expected: AcceptedStep, captured: AcceptedStep) -> bool {
-    #[cfg(coverage)]
-    {
-        coverage_steps_match(expected, captured)
-    }
-    #[cfg(not(coverage))]
-    {
+/// Compare a fixture across builds. Repeated captures in one build stay exact.
+fn steps_match(deck: &GoldenDeck, expected: AcceptedStep, captured: AcceptedStep) -> bool {
+    if deck.transcendental_roundoff {
+        nonlinear_steps_match(expected, captured)
+    } else {
         expected == captured
     }
 }
@@ -435,7 +431,7 @@ fn check(deck: &GoldenDeck) {
     let first_divergence = expected
         .iter()
         .zip(&captured)
-        .position(|(&want, &got)| !steps_match(want, got));
+        .position(|(&want, &got)| !steps_match(deck, want, got));
     if let Some(index) = first_divergence {
         // Report the whole sequence, not just its first differing bit, so a
         // cross-platform failure can be investigated without re-blessing it.
@@ -465,7 +461,7 @@ fn check(deck: &GoldenDeck) {
              golden time {:016x} ({:.17e}) step {:016x} ({:.17e})\n  \
              actual time {:016x} ({:.17e}) step {:016x} ({:.17e})\n  \
              ULP distances: time {time_ulps:?}, step {step_ulps:?}\n\
-             This is a timestep-control change, not a formatting one. Do not \
+             This exceeds the fixture's timestep comparison bound. Do not \
              re-bless without oracle evidence; see the protocol in {}.",
             deck.name,
             deck.regime,
@@ -491,49 +487,56 @@ fn check(deck: &GoldenDeck) {
     );
 }
 
-/// Pin the coverage exception to the exact evidence that introduced it, and
-/// prove it refuses the next ULP outside the documented ceiling. This is kept
-/// independent of `cfg(coverage)` so every build checks the exception itself.
+/// Pin the measured difference, invalid values, exact fixtures and both bounds.
 #[test]
-fn coverage_roundoff_allowance_is_narrow_and_ulp_bounded() {
-    let linux_coverage_golden = AcceptedStep {
-        time_bits: 0x3eb9_091c_d3ca_7796,
-        step_bits: 0x3e8a_b164_968c_9861,
+fn nonlinear_roundoff_allowance_is_narrow_and_deck_specific() {
+    let golden = AcceptedStep {
+        time_bits: 0x3ef6_e06c_0989_509b,
+        step_bits: 0x3e81_c643_b2b4_dd5b,
     };
-    let linux_coverage_actual = AcceptedStep {
-        time_bits: 0x3eb9_091c_d3ca_7794,
-        step_bits: 0x3e8a_b164_968c_9850,
+    let linux = AcceptedStep {
+        time_bits: 0x3ef6_e06c_0989_509a,
+        step_bits: 0x3e81_c643_b2b4_dcbf,
     };
     assert_eq!(
-        nonnegative_finite_ulp_distance(
-            linux_coverage_golden.time_bits,
-            linux_coverage_actual.time_bits,
-        ),
-        Some(2)
+        nonnegative_finite_ulp_distance(golden.time_bits, linux.time_bits,),
+        Some(1)
     );
     assert_eq!(
-        nonnegative_finite_ulp_distance(
-            linux_coverage_golden.step_bits,
-            linux_coverage_actual.step_bits,
-        ),
-        Some(17)
+        nonnegative_finite_ulp_distance(golden.step_bits, linux.step_bits,),
+        Some(156)
     );
-    assert!(coverage_steps_match(
-        linux_coverage_golden,
-        linux_coverage_actual
-    ));
+    assert!(steps_match(&DIODE_RECTIFIER, golden, linux));
+    for deck in GOLDEN_DECKS {
+        if !deck.transcendental_roundoff {
+            assert!(!steps_match(deck, golden, linux));
+        }
+    }
 
-    let outside = AcceptedStep {
-        time_bits: 1.0_f64.to_bits(),
-        step_bits: 1.0_f64.to_bits() + COVERAGE_MAX_ULPS + 1,
-    };
-    assert!(!coverage_steps_match(
+    for outside in [
         AcceptedStep {
-            time_bits: 1.0_f64.to_bits(),
-            step_bits: 1.0_f64.to_bits(),
+            time_bits: golden.time_bits + NONLINEAR_TIME_MAX_ULPS + 1,
+            ..golden
         },
-        outside,
-    ));
+        AcceptedStep {
+            step_bits: golden.step_bits + NONLINEAR_STEP_MAX_ULPS + 1,
+            ..golden
+        },
+        AcceptedStep {
+            time_bits: f64::NAN.to_bits(),
+            ..golden
+        },
+        AcceptedStep {
+            step_bits: f64::INFINITY.to_bits(),
+            ..golden
+        },
+        AcceptedStep {
+            time_bits: (-1.0_f64).to_bits(),
+            ..golden
+        },
+    ] {
+        assert!(!steps_match(&DIODE_RECTIFIER, golden, outside));
+    }
 }
 
 #[test]
