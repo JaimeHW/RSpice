@@ -2433,10 +2433,8 @@ impl VerilogADevice {
             model.num_variables,
             &model.noise_assignment_steps,
         )?;
-        #[cfg(all(
-            not(feature = "native"),
-            not(all(feature = "wasm-jit", target_arch = "wasm32"))
-        ))]
+        // Validate before looking up a compiled image: a cache hit skips the
+        // backend compiler, including its artifact checks.
         if let Some(artifact) = canonical_artifact {
             crate::canonical_compat::validate_canonical_artifact_identity_for_model(
                 &model, artifact,

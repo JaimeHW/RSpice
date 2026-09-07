@@ -18,6 +18,36 @@ fn compile(source: &str) -> DeviceFixture {
 }
 
 #[test]
+fn cached_device_construction_still_validates_the_supplied_artifact() {
+    let fixture = compile(
+        r#"`include "disciplines.vams"
+module cache_integrity(p,n);
+inout p,n; electrical p,n;
+analog I(p,n) <+ V(p,n)/4.0;
+endmodule"#,
+    );
+    let model = std::sync::Arc::new(fixture.model);
+    let construct = |artifact: &_| {
+        VerilogADevice::try_new_with_canonical_ir("X", model.clone(), artifact, &[1, 0])
+    };
+    let mut first = construct(&fixture.canonical_ir).unwrap();
+    first.update_voltages(&[8.0]);
+    assert_eq!(first.try_evaluate().unwrap(), vec![2.0]);
+
+    let mut stale_schema = fixture.canonical_ir.clone();
+    stale_schema.metadata.schema_version = 0;
+    assert!(construct(&stale_schema).is_err());
+
+    let mut changed_graph = fixture.canonical_ir.clone();
+    changed_graph.mir.equations.clear();
+    assert!(construct(&changed_graph).is_err());
+
+    let mut next = construct(&fixture.canonical_ir).unwrap();
+    next.update_voltages(&[12.0]);
+    assert_eq!(next.try_evaluate().unwrap(), vec![3.0]);
+}
+
+#[test]
 fn custom_flow_access_reads_the_branch_unknown() {
     for (expression, expected) in [
         ("TestQ(b)", 7.0),
