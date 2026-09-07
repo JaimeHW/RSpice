@@ -3295,7 +3295,19 @@ impl Engine {
                         }
                     }
                 }
-                Err(_) => return Ok(None),
+                Err(error @ (SolverError::OutOfMemory | SolverError::InvalidCircuit(_))) => {
+                    // A timestep retry cannot repair allocation or structural
+                    // failures. Preserve their diagnostic; the trial wrapper
+                    // restores the nonlinear/evaluator state on this path.
+                    return Err(error.into());
+                }
+                Err(
+                    SolverError::SingularMatrix
+                    | SolverError::ConvergenceFailed(_)
+                    | SolverError::Overflow
+                    | SolverError::PivotGrowth
+                    | SolverError::InaccurateSolution(_),
+                ) => return Ok(None),
             }
         }
 
@@ -4189,6 +4201,66 @@ mod tests {
             circuit.behavioral_sources.voltage_sources[0].cached_exact_constraint_at(freeze_time),
             None,
             "the exact consistency solve must not leak its rejected expression cache"
+        );
+    }
+
+    #[test]
+    fn malformed_newton_matrix_preserves_the_solver_error_and_rolls_back_the_trial() {
+        let netlist =
+            Netlist::parse("invalid PSS matrix\nB1 out 0 V=1\nR1 out 0 1k\nC1 out 0 100p\n.end\n")
+                .unwrap();
+        let engine = Engine::default();
+        let mut circuit = PssCircuit::new(engine.build_circuit(&netlist).unwrap());
+        let size = circuit.matrix_size();
+        // Keep every valid stamp slot, but give the solver a matrix whose
+        // dimension disagrees with the circuit's RHS. This is a structural
+        // failure; reducing the timestep or retrying Newton cannot repair it.
+        let triplets = (0..=size)
+            .flat_map(|row| (0..=size).map(move |column| (row, column, 0.0)))
+            .collect::<Vec<_>>();
+        let mut malformed = StaticMatrix::from_triplets(size + 1, size + 1, &triplets).unwrap();
+        circuit.link_indices(&malformed);
+        let coeff = CompanionCoefficients::for_method(IntegrationMethod::BackwardEuler);
+        let step = PssCompanionStep {
+            coeff: &coeff,
+            t_next: 1e-9,
+            dt: 1e-9,
+            initialization: false,
+        };
+        let start = vec![0.0; size];
+        let error = engine
+            .pss_newton_trial(&mut circuit, &mut malformed, step, &start, &NoAbort)
+            .expect_err(
+                "a malformed sparse solve must not be converted to ordinary nonconvergence",
+            );
+        assert!(
+            matches!(
+                error,
+                SimulationError::Solver(SolverError::InvalidCircuit(_))
+            ),
+            "{error}"
+        );
+        assert_eq!(
+            circuit.behavioral_sources.voltage_sources[0].cached_exact_constraint_at(step.t_next),
+            None
+        );
+
+        let mut fresh = PssCircuit::new(engine.build_circuit(&netlist).unwrap());
+        let mut fresh_matrix = engine.build_matrix(&fresh).unwrap();
+        fresh.link_indices(&fresh_matrix);
+        let expected = engine
+            .pss_newton_trial(&mut fresh, &mut fresh_matrix, step, &start, &NoAbort)
+            .unwrap()
+            .unwrap();
+        let mut matrix = engine.build_matrix(&circuit).unwrap();
+        circuit.link_indices(&matrix);
+        let actual = engine
+            .pss_newton_trial(&mut circuit, &mut matrix, step, &start, &NoAbort)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            actual, expected,
+            "the failed trial must not change a subsequent valid solve"
         );
     }
 
