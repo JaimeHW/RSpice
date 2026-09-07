@@ -215,17 +215,36 @@ impl VariableStatistics {
 
         let n = samples.len() as Value;
 
-        // Mean
-        let mean = samples.iter().sum::<Value>() / n;
-
-        // Standard deviation
-        let variance =
-            samples.iter().map(|x| (x - mean).powi(2)).sum::<Value>() / (n - 1.0).max(1.0);
-        let std_dev = variance.sqrt();
-
         // Min/max
         let min = samples.iter().cloned().fold(f64::INFINITY, f64::min);
         let max = samples.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+
+        // Center before scaling so tightly clustered large values retain
+        // their low bits; scale before squaring to protect extreme moments.
+        let anchor = if (min - samples[0]).is_finite() && (max - samples[0]).is_finite() {
+            samples[0]
+        } else {
+            0.0
+        };
+        let scale = (min - anchor).abs().max((max - anchor).abs());
+        let (mean, std_dev) = if scale == 0.0 {
+            (anchor, 0.0)
+        } else {
+            let normalized_mean = samples
+                .iter()
+                .map(|value| (value - anchor) / scale)
+                .sum::<Value>()
+                / n;
+            let normalized_variance = samples
+                .iter()
+                .map(|value| ((value - anchor) / scale - normalized_mean).powi(2))
+                .sum::<Value>()
+                / (n - 1.0).max(1.0);
+            (
+                anchor + normalized_mean * scale,
+                normalized_variance.sqrt() * scale,
+            )
+        };
 
         // Histogram
         let (histogram, bin_edges) = Self::compute_histogram(&samples, num_bins, min, max);
@@ -612,6 +631,23 @@ mod tests {
             s1: u64::MAX,
         };
         assert!(rng.next_gaussian().is_finite());
+    }
+
+    #[test]
+    fn statistics_preserve_representable_moments_at_extreme_scales() {
+        let constant = VariableStatistics::from_samples("constant", vec![f64::MAX; 4], 10);
+        assert_eq!(constant.mean, f64::MAX);
+        assert_eq!(constant.std_dev, 0.0);
+        let close = VariableStatistics::from_samples("close", vec![1e16, 1e16 + 2.0], 2);
+        assert_eq!(close.mean, 1e16);
+        assert!((close.std_dev - 2.0_f64.sqrt()).abs() < 1e-15);
+        for scale in [1e-300, 1e300] {
+            let statistics =
+                VariableStatistics::from_samples("scaled", vec![-scale, 0.0, scale], 10);
+            assert_eq!(statistics.mean, 0.0);
+            assert!((statistics.std_dev / scale - 1.0).abs() < 1e-15);
+            assert_eq!(statistics.histogram.iter().sum::<usize>(), 3);
+        }
     }
 
     #[test]

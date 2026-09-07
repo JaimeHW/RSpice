@@ -5582,6 +5582,28 @@ impl TransientCheckpoint {
                 available: true,
                 ..AcceptedJunctionTransientHistoryCheckpoint::default()
             }
+        } else if time.to_bits() == 0.0_f64.to_bits()
+            && circuit.bjts.is_empty()
+            && circuit
+                .diodes
+                .devices
+                .iter()
+                .all(|diode| !diode.has_charge_storage())
+        {
+            // At a synthetic origin a memoryless diode has exactly zero
+            // charge at every prior time. Seed its named, versioned history
+            // from the solved bias so PSS can hand it to ordinary TRAN.
+            let diode_history = Engine::initialize_diode_history(
+                circuit,
+                solution,
+                super::state::ReactiveHistorySeed::SolvedBias,
+            );
+            Engine::capture_accepted_junction_transient_history_checkpoint(
+                circuit,
+                &BjtTransientHistory::default(),
+                &diode_history,
+                &[],
+            )
         } else {
             AcceptedJunctionTransientHistoryCheckpoint::unavailable(
                 "checkpoint capture caller did not provide accepted BJT/diode transient histories",
@@ -11036,7 +11058,7 @@ mod tests {
     }
 
     #[test]
-    fn capture_without_runtime_histories_is_available_only_for_junction_free_circuits() {
+    fn capture_without_runtime_histories_refuses_devices_with_stored_charge() {
         let engine = Engine::default();
         let empty_netlist = Netlist::default();
         let empty = engine
@@ -11066,8 +11088,9 @@ mod tests {
         assert_eq!(diode, DiodeTransientHistory::default());
         assert!(cache.is_empty());
 
-        let diode_netlist = Netlist::parse("junction capture policy\nD1 1 0 D\n.MODEL D D\n.END\n")
-            .expect("diode policy deck parses");
+        let diode_netlist =
+            Netlist::parse("junction capture policy\nD1 1 0 D\n.MODEL D D(CJO=1p)\n.END\n")
+                .expect("diode policy deck parses");
         let diode = engine
             .build_circuit(&diode_netlist)
             .expect("diode policy circuit builds");

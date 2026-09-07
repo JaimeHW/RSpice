@@ -52,6 +52,34 @@ pub enum Expr {
     FnCall { name: String, args: Vec<Expr> },
 }
 
+impl Expr {
+    /// Check before retaining a parser- or substitution-produced tree. Cloning
+    /// and dropping this public boxed AST still use the native call stack.
+    pub(crate) fn ensure_stack_safe_depth(&self) -> Result<(), ExprError> {
+        let mut pending = vec![(self, 1)];
+        while let Some((node, depth)) = pending.pop() {
+            if depth > crate::resource::MAX_EXPRESSION_TREE_DEPTH {
+                return Err(ExprError::InvalidArgument(format!(
+                    "Expression tree exceeds the stack safety limit of {}",
+                    crate::resource::MAX_EXPRESSION_TREE_DEPTH
+                )));
+            }
+            match node {
+                Expr::BinOp { left, right, .. } => {
+                    pending.push((right, depth + 1));
+                    pending.push((left, depth + 1));
+                }
+                Expr::UnaryOp { operand, .. } => pending.push((operand, depth + 1)),
+                Expr::FnCall { args, .. } => {
+                    pending.extend(args.iter().map(|arg| (arg, depth + 1)));
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+}
+
 /// Binary operators
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinOpKind {

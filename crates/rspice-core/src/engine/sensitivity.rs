@@ -2485,6 +2485,26 @@ impl Engine {
             let plus = self.run_dc_op_with_abort(&plus_netlist, abort);
             let minus = self.run_dc_op_with_abort(&minus_netlist, abort);
             let derivative = match (plus, minus) {
+                (
+                    Err(
+                        error @ (SimulationError::Aborted
+                        | SimulationError::TimeLimitExceeded
+                        | SimulationError::ResourceLimit(_)
+                        | SimulationError::Configuration(_)),
+                    ),
+                    _,
+                )
+                | (
+                    _,
+                    Err(
+                        error @ (SimulationError::Aborted
+                        | SimulationError::TimeLimitExceeded
+                        | SimulationError::ResourceLimit(_)
+                        | SimulationError::Configuration(_)),
+                    ),
+                ) => {
+                    return Err(error);
+                }
                 (Ok(plus), Ok(minus)) => {
                     (Self::dc_sensitivity_output_value(&plus, &output)?
                         - Self::dc_sensitivity_output_value(&minus, &output)?)
@@ -2500,6 +2520,9 @@ impl Engine {
                     let plus_two = self
                         .run_dc_op_with_abort(&plus_two_netlist, abort)
                         .map_err(|plus_two_error| {
+                            if plus_two_error.is_stopped() || matches!(plus_two_error, SimulationError::ResourceLimit(_) | SimulationError::Configuration(_)) {
+                                return plus_two_error;
+                            }
                             SimulationError::Circuit(format!(
                                 "DC sensitivity '{}' failed for the negative and second positive perturbations: {}; {}",
                                 target.vector_name, minus_error, plus_two_error
@@ -2520,6 +2543,9 @@ impl Engine {
                     let minus_two = self
                         .run_dc_op_with_abort(&minus_two_netlist, abort)
                         .map_err(|minus_two_error| {
+                            if minus_two_error.is_stopped() || matches!(minus_two_error, SimulationError::ResourceLimit(_) | SimulationError::Configuration(_)) {
+                                return minus_two_error;
+                            }
                             SimulationError::Circuit(format!(
                                 "DC sensitivity '{}' failed for the positive and second negative perturbations: {}; {}",
                                 target.vector_name, plus_error, minus_two_error
@@ -2653,6 +2679,26 @@ impl Engine {
             let plus = self.run_ac_with_abort(&plus_netlist, frequencies, abort);
             let minus = self.run_ac_with_abort(&minus_netlist, frequencies, abort);
             let derivative = match (plus, minus) {
+                (
+                    Err(
+                        error @ (SimulationError::Aborted
+                        | SimulationError::TimeLimitExceeded
+                        | SimulationError::ResourceLimit(_)
+                        | SimulationError::Configuration(_)),
+                    ),
+                    _,
+                )
+                | (
+                    _,
+                    Err(
+                        error @ (SimulationError::Aborted
+                        | SimulationError::TimeLimitExceeded
+                        | SimulationError::ResourceLimit(_)
+                        | SimulationError::Configuration(_)),
+                    ),
+                ) => {
+                    return Err(error);
+                }
                 (Ok(plus), Ok(minus)) => {
                     let plus = Self::ac_sensitivity_outputs(&plus, &output, frequencies)?;
                     let minus = Self::ac_sensitivity_outputs(&minus, &output, frequencies)?;
@@ -2671,6 +2717,9 @@ impl Engine {
                     let plus_two = self
                         .run_ac_with_abort(&plus_two_netlist, frequencies, abort)
                         .map_err(|plus_two_error| {
+                            if plus_two_error.is_stopped() || matches!(plus_two_error, SimulationError::ResourceLimit(_) | SimulationError::Configuration(_)) {
+                                return plus_two_error;
+                            }
                             SimulationError::Circuit(format!(
                                 "AC sensitivity '{}' failed for the negative and second positive perturbations: {}; {}",
                                 target.vector_name, minus_error, plus_two_error
@@ -2697,6 +2746,9 @@ impl Engine {
                     let minus_two = self
                         .run_ac_with_abort(&minus_two_netlist, frequencies, abort)
                         .map_err(|minus_two_error| {
+                            if minus_two_error.is_stopped() || matches!(minus_two_error, SimulationError::ResourceLimit(_) | SimulationError::Configuration(_)) {
+                                return minus_two_error;
+                            }
                             SimulationError::Circuit(format!(
                                 "AC sensitivity '{}' failed for the positive and second negative perturbations: {}; {}",
                                 target.vector_name, plus_error, minus_two_error
@@ -2820,6 +2872,49 @@ mod tests {
     use crate::analysis::AcSensitivityOutput;
     use crate::netlist::AnalysisCommand;
     use crate::netlist::{StepCommand, StepSweep, StepTarget};
+
+    #[test]
+    fn complete_sensitivity_preserves_cancellation_during_perturbations() {
+        use crate::abort_signal::CountingAbort;
+        let netlist = Netlist::parse(
+            "sensitivity cancellation\nV1 in 0 DC 1 AC 1\nR1 in out 1k\nR2 out 0 1k\n.end\n",
+        )
+        .unwrap();
+        let engine = Engine::default();
+        for ac in [false, true] {
+            let run = |abort: &CountingAbort| {
+                let output = AcSensitivityOutput::Voltage {
+                    positive: 2,
+                    negative: None,
+                };
+                if ac {
+                    engine
+                        .run_sensitivity_ac_complete_with_abort(
+                            &netlist,
+                            output,
+                            &[1e3],
+                            &[],
+                            abort,
+                        )
+                        .map(|_| ())
+                } else {
+                    engine
+                        .run_sensitivity_dc_complete_with_abort(&netlist, output, &[], abort)
+                        .map(|_| ())
+                }
+            };
+            let baseline = CountingAbort::new(usize::MAX);
+            run(&baseline).unwrap();
+            for slice in 1..=16 {
+                let abort = CountingAbort::new((baseline.count() - 1) * slice / 16);
+                let error = run(&abort).expect_err("analysis must stop after cancellation");
+                assert!(
+                    matches!(error, crate::SimulationError::Aborted),
+                    "AC={ac}, slice={slice}: {error}"
+                );
+            }
+        }
+    }
 
     #[test]
     fn default_ac_sensitivity_resolves_femtofarad_capacitances() {

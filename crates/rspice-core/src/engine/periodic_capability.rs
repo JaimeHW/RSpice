@@ -413,7 +413,9 @@ pub(crate) const fn periodic_capability_descriptor(
             dynamic_state: Complete,
             small_signal: Complete,
             noise: Restricted(CYCLOSTATIONARY_FLICKER),
-            pss_state: Absent("diode junction/diffusion charge history"),
+            pss_state: Restricted(
+                "memoryless diodes without junction, diffusion, sidewall, or overlap charge",
+            ),
             envelope: Absent(ENVELOPE_LINEAR_SUBSET),
         },
         F::Bjt => PeriodicCapabilityDescriptor {
@@ -1208,6 +1210,19 @@ pub(in crate::engine) fn pss_state_gaps(circuit: &CircuitData) -> Vec<Capability
             Inapplicable | Complete => {}
             Absent(missing) => gaps.push(CapabilityGap::new(family, missing)),
             Restricted(_) => match family {
+                F::Diode => {
+                    if circuit
+                        .diodes
+                        .devices
+                        .iter()
+                        .any(|diode| diode.has_charge_storage())
+                    {
+                        gaps.push(CapabilityGap::new(
+                            family,
+                            "diode junction/diffusion charge history",
+                        ));
+                    }
+                }
                 F::Resistor => {
                     if circuit.resistors.thermal.iter().any(Option::is_some) {
                         gaps.push(CapabilityGap::new(
@@ -1519,7 +1534,7 @@ mod tests {
             F::Inductor => [I, C, C, I, C, A],
             F::VoltageSource | F::CurrentSource => [I, I, C, I, C, C],
             F::Vcvs | F::Vccs | F::Cccs | F::Ccvs => [I, I, C, I, C, A],
-            F::Diode => [R, C, C, R, A, A],
+            F::Diode => [R, C, C, R, R, A],
             F::Bjt => [A, C, I, A, A, A],
             F::Mosfet => [R, C, C, R, A, A],
             F::Bsim3v3 | F::Bsim4v8 => [A, R, I, A, A, A],

@@ -37,7 +37,6 @@ pub mod measurements;
 pub mod monte_carlo;
 pub mod noise;
 pub mod pac;
-pub mod parametric;
 pub mod pnoise;
 pub mod pole_zero;
 pub mod post_processing;
@@ -68,7 +67,6 @@ pub use noise::{
     is_persistable_noise_mechanism,
 };
 pub use pac::{ConversionMatrix, PacConfig, PacError, PacResult, PacSweepType};
-pub use parametric::{ParametricResults, ParametricSweep, StepSpec, StepTarget, StepType};
 pub use pole_zero::{
     Matrix as PzMatrix, PoleZeroAnalysisError, PoleZeroAnalyzer, PoleZeroConfig, PoleZeroResult,
     RootSetEvidence, SpectrumCertificate, StabilityVerdict,

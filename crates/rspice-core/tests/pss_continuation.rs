@@ -208,6 +208,29 @@ fn continuation_artifact_authenticates_external_waveform_bytes() {
 }
 
 #[test]
+fn memoryless_diode_supports_periodic_transient_continuation() {
+    let netlist = Netlist::parse(
+        "memoryless diode\nV1 in 0 SIN(-1 0.01 1meg)\nR1 in out 1k\n\
+         C1 out 0 100p\nD1 out 0 DMOD\n.model DMOD D(CJO=0 TT=0)\n.end\n",
+    )
+    .unwrap();
+    let engine = Engine::default();
+    let (_, state) = engine
+        .run_pss_with_continuation_state(&netlist, compact_pss_config())
+        .unwrap();
+    let (transient, _) = engine
+        .run_tran_from_pss_state(&netlist, &state, 1e-6, 1e-8)
+        .unwrap();
+    assert!(
+        transient
+            .voltages
+            .iter()
+            .flatten()
+            .all(|value| value.is_finite())
+    );
+}
+
+#[test]
 fn continuation_fails_closed_for_unadvanced_dynamic_state_families() {
     let engine = Engine::new(SimulationConfig::default());
 

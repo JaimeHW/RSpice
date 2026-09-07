@@ -288,6 +288,23 @@ fn monte_carlo_result() -> MonteCarloResult {
     result
 }
 
+#[test]
+fn monte_carlo_documents_validate_trial_accounting() {
+    let analysis = instance(AnalysisKind::MonteCarlo);
+    let mut result = monte_carlo_result();
+    result.num_runs = 7;
+    result.num_failures = 4;
+    result.all_converged = false;
+    assert!(AnalysisResultDocument::from_monte_carlo(analysis, &result).is_ok());
+    result.num_failures = 8;
+    assert!(AnalysisResultDocument::from_monte_carlo(analysis, &result).is_err());
+    result.num_failures = 3;
+    assert!(AnalysisResultDocument::from_monte_carlo(analysis, &result).is_err());
+    result.num_failures = 7;
+    result.variables.clear();
+    assert!(AnalysisResultDocument::from_monte_carlo(analysis, &result).is_ok());
+}
+
 fn pss_result() -> PssResult {
     let mut result = PssResult::new(1.0e-6, 1, 3);
     result.time = vec![0.0, 5.0e-7, 1.0e-6];

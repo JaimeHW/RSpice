@@ -1021,6 +1021,8 @@ impl<'a, 'p> FunctionExpander<'a, 'p> {
             ExitParameter(String, ParameterExpressionKind),
         }
 
+        expr.ensure_stack_safe_depth()
+            .map_err(|error| error.to_string())?;
         let mut tasks = vec![Task::Expand(expr.clone(), named_depth)];
         let mut values = Vec::new();
         let mut expanded_nodes = 0usize;
@@ -1237,6 +1239,11 @@ impl<'a, 'p> FunctionExpander<'a, 'p> {
                             name,
                             args: expanded_args,
                         });
+                        values
+                            .last()
+                            .expect("function was pushed")
+                            .ensure_stack_safe_depth()
+                            .map_err(|error| error.to_string())?;
                         continue;
                     };
                     if expanded_args.len() != func_def.args.len() {
@@ -1290,6 +1297,9 @@ impl<'a, 'p> FunctionExpander<'a, 'p> {
                         bindings.insert(arg_name.to_ascii_uppercase(), arg_value);
                     }
                     let substituted = substitute_function_args(&body_ast, &bindings);
+                    substituted
+                        .ensure_stack_safe_depth()
+                        .map_err(|error| error.to_string())?;
                     self.call_stack.push(func_name.clone());
                     tasks.push(Task::ExitFunction(func_name));
                     tasks.push(Task::Expand(substituted, depth + 1));
@@ -1302,6 +1312,11 @@ impl<'a, 'p> FunctionExpander<'a, 'p> {
                     debug_assert_eq!(self.parameter_stack.last(), Some(&(name, kind)));
                     self.parameter_stack.pop();
                 }
+            }
+            if let Some(value) = values.last() {
+                value
+                    .ensure_stack_safe_depth()
+                    .map_err(|error| error.to_string())?;
             }
         }
 

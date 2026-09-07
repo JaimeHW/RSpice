@@ -67,26 +67,7 @@ impl<'a> ExprParser<'a> {
     }
 
     fn checked_expr(expression: Expr) -> Result<Expr, ExprError> {
-        let mut pending = vec![(&expression, 1)];
-        while let Some((node, depth)) = pending.pop() {
-            if depth > crate::resource::MAX_EXPRESSION_TREE_DEPTH {
-                return Err(ExprError::InvalidArgument(format!(
-                    "Expression tree exceeds the stack safety limit of {}",
-                    crate::resource::MAX_EXPRESSION_TREE_DEPTH
-                )));
-            }
-            match node {
-                Expr::BinOp { left, right, .. } => {
-                    pending.push((right, depth + 1));
-                    pending.push((left, depth + 1));
-                }
-                Expr::UnaryOp { operand, .. } => pending.push((operand, depth + 1)),
-                Expr::FnCall { args, .. } => {
-                    pending.extend(args.iter().map(|arg| (arg, depth + 1)));
-                }
-                _ => {}
-            }
-        }
+        expression.ensure_stack_safe_depth()?;
         Ok(expression)
     }
 
