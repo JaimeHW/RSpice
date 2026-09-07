@@ -8,6 +8,7 @@ on:
   schedule:
     - cron: "0 6 * * *"
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
@@ -147,6 +148,7 @@ jobs:
           cargo test --locked -p rspice-conformance --release
           --test panic_gate -- --nocapture
       - name: ngspice conformance report
+        id: ngspice
         # Serial test threads: each deck spawns a case-runner subprocess with
         # a hard per-case timeout; parallel threads oversubscribe the runner
         # and trip the caps. Explicit bash enables pipefail so tee cannot hide
@@ -175,7 +177,7 @@ jobs:
           echo "failing decks: $failed (watermark allows <= $MAX_FAILING)"
           [ "$failed" -le "$MAX_FAILING" ]
       - name: Upload conformance log
-        if: always()
+        if: ${{ !cancelled() && steps.ngspice.outcome != 'skipped' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: conformance-log
@@ -245,6 +247,7 @@ jobs:
           cargo run --locked --release -p rspice-conformance
           --features veriloga-builtins --bin rspice-veriloga-golden -- verify
       - name: Gate 43-model stamp performance against hand-written reference
+        id: stamp
         # These are no-regression ratchets around the 2026-07-28 canonical
         # backend baseline. Tighten them toward the release target (1.00x
         # corpus median, 1.50x worst model); never present the ratchets
@@ -299,7 +302,7 @@ jobs:
           shipped_model_machine_code_census_digest
           -- --ignored --nocapture --test-threads=1
       - name: Upload Verilog-A stamp qualification
-        if: always()
+        if: ${{ !cancelled() && steps.stamp.outcome != 'skipped' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: veriloga-stamp-qualification

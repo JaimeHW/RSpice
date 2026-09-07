@@ -6,6 +6,7 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
@@ -158,6 +159,10 @@ jobs:
       - name: Install Rust toolchain
         run: rustup toolchain install ${{ env.RUST_TOOLCHAIN }} --profile minimal --component rustfmt --component clippy
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
+      - name: Generated built-ins are current
+        run: >-
+          cargo run --locked --profile generator -p rspice-veriloga
+          --bin rspice-veriloga-gen -- check-builtins
       - name: Check granular generated Verilog-A features
         env:
           RUSTFLAGS: -D warnings

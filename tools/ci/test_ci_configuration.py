@@ -423,6 +423,20 @@ class CiConfigurationTests(unittest.TestCase):
         self.assertIn('RSPICE_VERILOG_ORACLES_REQUIRED: "1"', step)
         self.assertIn("--test verilog_oracles", step)
 
+    def test_native_release_requires_correctness_and_conformance(self) -> None:
+        workflow = read_text(".github/workflows/native-release.yml")
+        self.assertIn("uses: ./.github/workflows/ci.yml", workflow)
+        self.assertIn("uses: ./.github/workflows/nightly.yml", workflow)
+        publish = workflow.split("  publish:", 1)[1]
+        self.assertIn("needs: [validate, test, conformance, build, supply-chain]", publish)
+        for source in ("ci", "nightly"):
+            self.assertIn("  workflow_call:", read_text(f".github/workflows/{source}.yml"))
+
+    def test_generated_model_freshness_is_a_per_change_gate(self) -> None:
+        workflow = read_text(".github/workflows/ci.yml")
+        job = workflow.split("  generated-veriloga:", 1)[1].split("  test-linux-native:", 1)[0]
+        self.assertIn("--bin rspice-veriloga-gen -- check-builtins", job)
+
     def test_all_ci_and_release_python_harnesses_are_gated(self) -> None:
         workflow = read_text(".github/workflows/ci.yml")
         for directory in ("tools/ci", "tools/release"):

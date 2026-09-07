@@ -41,6 +41,8 @@ Drawing-sheet qualification remains manual for checksummed evidence across
 seven targets. Tagged native releases and manual component releases retain
 their package, provenance, signature and immutability checks. Publishing
 workflows must not be dispatched merely to test CI.
+Native publication also requires the reusable CI and nightly qualification
+workflows to pass for the release commit; building an archive is insufficient.
 
 Browser automation currently uses Chromium. Mobile rows prove portable solver
 compilation, not a native tablet application. WebKit/Safari, Firefox, physical
