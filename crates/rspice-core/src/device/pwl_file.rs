@@ -140,14 +140,43 @@ impl PwlWaveform {
     ///
     /// Uses binary search for O(log n) performance on large waveforms.
     pub fn value_at(&self, time: Value) -> Value {
-        self.value_at_raw_time(time)
+        self.time_component::<false>(time)
     }
 
     /// Get value at specified time, repeating from `repeat_from` after the
     /// final source-time knot when requested.
     pub fn value_at_repeating(&self, time: Value, repeat_from: Option<Value>) -> Value {
         let time = self.repeated_time(time, repeat_from);
-        self.value_at_raw_time(time)
+        self.time_component::<false>(time)
+    }
+
+    /// Right-hand source slope in output units per second. A repeat boundary
+    /// with a value jump has no finite slope at its published value.
+    pub(crate) fn right_derivative_at_repeating(
+        &self,
+        time: Value,
+        repeat_from: Option<Value>,
+    ) -> Value {
+        let mut mapped = self.repeated_time(time, repeat_from);
+        if self.time_scale.is_finite()
+            && self.time_scale > Value::EPSILON
+            && let Some(start) = repeat_from.filter(|start| start.is_finite())
+        {
+            let last = self.times[self.times.len() - 1];
+            let start = start.max(self.times[0]);
+            let period = last - start;
+            if period.is_finite()
+                && period > Value::EPSILON
+                && (mapped - self.time_offset) / self.time_scale == last
+            {
+                let next = self.time_offset + start * self.time_scale;
+                if self.time_component::<false>(mapped) != self.time_component::<false>(next) {
+                    return Value::NAN;
+                }
+                mapped = next;
+            }
+        }
+        self.time_component::<true>(mapped)
     }
 
     fn repeated_time(&self, time: Value, repeat_from: Option<Value>) -> Value {
@@ -186,26 +215,30 @@ impl PwlWaveform {
         self.time_offset + repeated * self.time_scale
     }
 
-    fn value_at_raw_time(&self, time: Value) -> Value {
+    fn time_component<const DERIVATIVE: bool>(&self, time: Value) -> Value {
         let scaled_start = self.values[0] * self.value_scale + self.value_offset;
         let scaled_end = self.values.last().copied().unwrap_or(self.values[0]) * self.value_scale
             + self.value_offset;
 
         if !time.is_finite() {
-            return if time.is_sign_positive() {
+            return if DERIVATIVE {
+                0.0
+            } else if time.is_sign_positive() {
                 scaled_end
             } else {
                 scaled_start
             };
         }
         if !self.time_scale.is_finite() || self.time_scale.abs() <= Value::EPSILON {
-            return scaled_start;
+            return if DERIVATIVE { 0.0 } else { scaled_start };
         }
 
         // Apply time scaling and offset
         let t = (time - self.time_offset) / self.time_scale;
         if !t.is_finite() {
-            return if t.is_sign_positive() {
+            return if DERIVATIVE {
+                0.0
+            } else if t.is_sign_positive() {
                 scaled_end
             } else {
                 scaled_start
@@ -213,15 +246,34 @@ impl PwlWaveform {
         }
 
         // Handle edge cases
-        if t <= self.times[0] {
-            return scaled_start;
+        if t < self.times[0] || (t == self.times[0] && (!DERIVATIVE || self.time_scale < 0.0)) {
+            return if DERIVATIVE { 0.0 } else { scaled_start };
         }
-        if t >= *self.times.last().unwrap() {
-            return scaled_end;
+        if t > *self.times.last().unwrap()
+            || (t == *self.times.last().unwrap() && (!DERIVATIVE || self.time_scale > 0.0))
+        {
+            return if DERIVATIVE { 0.0 } else { scaled_end };
         }
 
         // Binary search for the interval
-        match self.times.binary_search_by(|probe| probe.total_cmp(&t)) {
+        let position = self.times.binary_search_by(|probe| probe.total_cmp(&t));
+        if DERIVATIVE {
+            let upper = match position {
+                Ok(index) if self.time_scale > 0.0 => index + 1,
+                Ok(index) | Err(index) => index,
+            };
+            if upper == 0 || upper >= self.times.len() {
+                return 0.0;
+            }
+            let dt = self.times[upper] - self.times[upper - 1];
+            return if !dt.is_finite() || dt.abs() <= Value::EPSILON {
+                0.0
+            } else {
+                ((self.values[upper] - self.values[upper - 1]) / dt) * self.value_scale
+                    / self.time_scale
+            };
+        }
+        match position {
             Ok(idx) => {
                 // Exact match
                 self.values[idx] * self.value_scale + self.value_offset
@@ -269,6 +321,23 @@ impl PwlWaveform {
     /// Last source-time knot before scaling and offset.
     pub fn last_source_time(&self) -> Value {
         self.times.last().copied().unwrap_or(0.0)
+    }
+
+    /// The interpolation's constant fallback for a sub-epsilon interval can
+    /// create a jump at its next knot. Such a waveform cannot prescribe a
+    /// regular winding current even if its scaled knot spacing looks large.
+    pub(crate) fn has_finite_segment_slopes(&self) -> bool {
+        self.times
+            .windows(2)
+            .zip(self.values.windows(2))
+            .all(|(times, values)| {
+                let dt = times[1] - times[0];
+                values[0] == values[1]
+                    || self.value_scale == 0.0
+                    || (dt > Value::EPSILON
+                        && (((values[1] - values[0]) / dt) * self.value_scale / self.time_scale)
+                            .is_finite())
+            })
     }
 
     /// Check if waveform is empty
@@ -738,6 +807,42 @@ pub fn load_pwl_file_with_limits<P: AsRef<Path>>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn outgoing_pwl_slopes_preserve_scaling_orientation_and_repeat_seams() {
+        for scale in [-2.0, 2.0] {
+            let waveform = PwlWaveform::new(vec![(0.0, 1.0), (1.0, 3.0), (2.0, 1.0)])
+                .unwrap()
+                .with_scaling(scale, -3.0, 10.0, 7.0);
+            for (raw_time, derivative) in [
+                (0.0, if scale > 0.0 { -3.0 } else { 0.0 }),
+                (0.5, -6.0 / scale),
+                (1.0, 3.0),
+                (1.5, 6.0 / scale),
+                (2.0, if scale > 0.0 { 0.0 } else { -3.0 }),
+            ] {
+                assert_eq!(
+                    waveform.right_derivative_at_repeating(10.0 + raw_time * scale, None),
+                    derivative
+                );
+            }
+            if scale > 0.0 {
+                assert_eq!(
+                    waveform.right_derivative_at_repeating(14.0, Some(0.0)),
+                    -3.0
+                );
+                assert_eq!(
+                    waveform.right_derivative_at_repeating(18.0, Some(0.0)),
+                    -3.0
+                );
+                assert!(
+                    waveform
+                        .right_derivative_at_repeating(14.0, Some(1.0))
+                        .is_nan()
+                );
+            }
+        }
+    }
     use std::fs;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
