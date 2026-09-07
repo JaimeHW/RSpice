@@ -15,6 +15,51 @@ const R: f64 = 1.0e3;
 const C: f64 = 159.154943091895e-12; // RC corner ~ 1 MHz (w*RC = 1)
 
 #[test]
+fn prescribed_dc_current_voltages_do_not_depend_on_the_companion_scale() {
+    use rspice_core::numerics::integration::IntegrationMethod;
+    let engine = Engine::default();
+    for coupled in [false, true] {
+        let secondary = if coupled {
+            "I2 0 c DC 2m\nL2 c d 200u\nR2 d 0 100\nK1 L1 L2 0.6\n"
+        } else {
+            ""
+        };
+        let netlist = Netlist::parse(&format!(
+            "prescribed DC flux scaling\nI1 0 a DC 1m\nL1 a b 100u\nR1 b 0 100\n{secondary}.end\n"
+        ))
+        .unwrap();
+        for method in [
+            IntegrationMethod::BackwardEuler,
+            IntegrationMethod::Trapezoidal,
+            IntegrationMethod::Gear2,
+            IntegrationMethod::TrapGear,
+        ] {
+            for frequency in [1e-3, 1e3, 1e9, 1e15, 1e21] {
+                let mut config = PssConfig::new(frequency)
+                    .with_tstab_periods(0)
+                    .with_points_per_period(128);
+                config.integration_method = Some(method);
+                let analysis = engine.run_pss(&netlist, config).unwrap();
+                for (node, name) in analysis.result.node_names.iter().enumerate() {
+                    let expected =
+                        if name.eq_ignore_ascii_case("a") || name.eq_ignore_ascii_case("b") {
+                            0.1
+                        } else {
+                            0.2
+                        };
+                    for &actual in &analysis.result.waveforms[node].values {
+                        assert!(
+                            (actual - expected).abs() < 1e-12,
+                            "coupled={coupled}, {method:?}, f={frequency:e}, {name}: {actual:e} vs {expected:e}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn a_source_prescribes_its_series_winding_current() {
     use rspice_core::numerics::integration::IntegrationMethod;
     let engine = Engine::default();

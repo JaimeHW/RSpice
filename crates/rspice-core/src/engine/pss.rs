@@ -82,7 +82,7 @@ impl PssAcceptedStepHistory {
 
 const PSS_KRYLOV_STATE_THRESHOLD: usize = 12;
 const PSS_KRYLOV_REL_TOL: Value = 1e-9;
-const PSS_OPERATING_POINT_IDENTITY_VERSION: u32 = 7;
+const PSS_OPERATING_POINT_IDENTITY_VERSION: u32 = 8;
 
 fn pss_identity_field(hasher: &mut blake3::Hasher, name: &str, bytes: &[u8]) {
     hasher.update(&(name.len() as u64).to_le_bytes());
@@ -3105,6 +3105,7 @@ impl Engine {
         let mut new_solution = start.to_vec();
         let mut rhs = vec![0.0; size];
         let mut proposal = Vec::with_capacity(size);
+        let correction_form = !step.initialization && !circuit.inductors.is_empty();
 
         for _iter in 0..self.config.max_iterations {
             if abort.is_aborted() {
@@ -3112,15 +3113,41 @@ impl Engine {
             }
             self.pss_stamp_system(circuit, matrix, &mut rhs, step, &new_solution, false)?;
 
-            match matrix.solve_into(&rhs, &mut proposal) {
+            let solved = if correction_form {
+                // Solving for absolute currents can erase a small winding
+                // voltage beside L*i/dt. TRAN already evaluates these rows
+                // from flux differences: use its residual to solve a Newton
+                // correction, reusing the same two RHS/proposal buffers.
+                matrix.correction_rhs_into(&rhs, &new_solution, &mut proposal)?;
+                circuit.stabilize_inductor_correction_rhs(&mut proposal, &new_solution, step)?;
+                let solved = matrix.solve_into(&proposal, &mut rhs);
+                if solved.is_ok() {
+                    for (value, &previous) in rhs.iter_mut().zip(&new_solution) {
+                        *value += previous;
+                    }
+                    if rhs.iter().any(|value| !value.is_finite()) {
+                        return Ok(None);
+                    }
+                    std::mem::swap(&mut proposal, &mut rhs);
+                }
+                solved
+            } else {
+                matrix.solve_into(&rhs, &mut proposal)
+            };
+            match solved {
                 Ok(()) => {
                     let voltage_converged = self.node_voltage_convergence_met(
                         &new_solution,
                         &proposal,
                         circuit.num_nodes(),
                     );
-                    let linearized_residual_converged =
-                        self.pss_residual_convergence_met(circuit, matrix, &proposal, &rhs, step);
+                    // The correction solve certifies A*delta against its
+                    // physical residual. The absolute companion RHS is no
+                    // longer in `rhs` on that path; certify the fresh physical
+                    // candidate below, rather than comparing unlike systems.
+                    let linearized_residual_converged = correction_form
+                        || self
+                            .pss_residual_convergence_met(circuit, matrix, &proposal, &rhs, step);
 
                     std::mem::swap(&mut new_solution, &mut proposal);
 
@@ -3150,6 +3177,22 @@ impl Engine {
                             &rhs,
                             step,
                         ) {
+                            if correction_form {
+                                matrix.correction_rhs_into(&rhs, &new_solution, &mut proposal)?;
+                                circuit.stabilize_inductor_correction_rhs(
+                                    &mut proposal,
+                                    &new_solution,
+                                    step,
+                                )?;
+                                if !self.pss_inductor_residual_convergence_met(
+                                    circuit,
+                                    &new_solution,
+                                    &proposal,
+                                    step.coeff,
+                                ) {
+                                    continue;
+                                }
+                            }
                             return Ok(Some(new_solution));
                         }
                     }
@@ -3159,6 +3202,34 @@ impl Engine {
         }
 
         Ok(None)
+    }
+
+    /// A winding's error scale is its physical voltage/flux rate, not the
+    /// arbitrarily large absolute L*i/dt terms of its companion equation.
+    fn pss_inductor_residual_convergence_met(
+        &self,
+        circuit: &PssCircuit,
+        solution: &[Value],
+        correction_rhs: &[Value],
+        coeff: &CompanionCoefficients,
+    ) -> bool {
+        let voltage = |node| if node == 0 { 0.0 } else { solution[node - 1] };
+        circuit
+            .inductors
+            .branch_indices
+            .iter()
+            .enumerate()
+            .all(|(index, &branch)| {
+                let residual = correction_rhs[circuit.num_nodes() + branch - 1];
+                let present = voltage(circuit.inductors.node_pos[index])
+                    - voltage(circuit.inductors.node_neg[index]);
+                let previous = coeff.coeff_i_n * circuit.inductors.v_prev[index];
+                let derivative = residual + present + previous;
+                let scale = present.abs().max(previous.abs()).max(derivative.abs());
+                residual.is_finite()
+                    && scale.is_finite()
+                    && residual.abs() <= self.voltage_abstol() + self.residual_reltol() * scale
+            })
     }
 
     fn pss_residual_convergence_met(
@@ -4021,6 +4092,50 @@ mod tests {
             None,
             "the exact consistency solve must not leak its rejected expression cache"
         );
+    }
+
+    #[test]
+    fn a_large_absolute_flux_companion_cannot_hide_a_physical_voltage_residual() {
+        let engine = Engine::default();
+        let netlist =
+            Netlist::parse("physical flux residual\nI1 0 a 1m\nL1 a b 100u\nR1 b 0 100\n.end\n")
+                .unwrap();
+        let mut circuit = PssCircuit::new(engine.build_circuit(&netlist).unwrap());
+        circuit.set_state(&[]).unwrap();
+        let mut matrix = engine.build_matrix(&circuit).unwrap();
+        circuit.link_indices(&matrix);
+        let mut solution = vec![0.0; circuit.matrix_size()];
+        solution[circuit.get_node_by_name("a").unwrap() - 1] = 20.0;
+        solution[circuit.get_node_by_name("b").unwrap() - 1] = 0.1;
+        solution[circuit.num_nodes() + circuit.inductors.branch_indices[0] - 1] = 1e-3;
+        let coeff = CompanionCoefficients::for_method(IntegrationMethod::BackwardEuler);
+        let step = PssCompanionStep {
+            coeff: &coeff,
+            t_next: 1e-25,
+            dt: 1e-25,
+            initialization: false,
+        };
+        let mut rhs = vec![0.0; solution.len()];
+        engine
+            .pss_stamp_system(&mut circuit, &mut matrix, &mut rhs, step, &solution, true)
+            .unwrap();
+        // The absolute matrix is backward-stable while missing almost 20 V:
+        // its inductive terms are 1e18 V. Physical DAE certification must not
+        // use those absolute-current terms as the voltage error scale.
+        assert!(engine.pss_residual_convergence_met(&circuit, &mut matrix, &solution, &rhs, step));
+        let mut correction = Vec::new();
+        matrix
+            .correction_rhs_into(&rhs, &solution, &mut correction)
+            .unwrap();
+        circuit
+            .stabilize_inductor_correction_rhs(&mut correction, &solution, step)
+            .unwrap();
+        assert!(!engine.pss_inductor_residual_convergence_met(
+            &circuit,
+            &solution,
+            &correction,
+            &coeff
+        ));
     }
 
     #[test]
