@@ -393,7 +393,7 @@ class CiConfigurationTests(unittest.TestCase):
             body = re.split(r"\n  [a-z][a-z0-9-]*:", workflow.split(f"  {job}:\n", 1)[1], maxsplit=1)[0]
             # A complete package selection includes lib, bin, integration and doc
             # tests. Restricting it to --lib previously missed UI integration tests.
-            self.assertIn(f"run: cargo test --locked -p {package}\n", body)
+            self.assertIn(f"run: cargo test --locked -p {package} --no-fail-fast\n", body)
 
         step = workflow.split("- name: Test remaining workspace crates\n", 1)[1]
         step = step.split("\n  test-ui:", 1)[0]
@@ -416,11 +416,46 @@ class CiConfigurationTests(unittest.TestCase):
         self.assertIn("shell: bash", step)  # GitHub's explicit bash shell enables pipefail.
         self.assertIn("--test ngspice_regression", step)
 
+    def test_nightly_requires_independent_verilog_oracles(self) -> None:
+        workflow = read_text(".github/workflows/nightly.yml")
+        self.assertIn("apt-get install --no-install-recommends -y iverilog verilator", workflow)
+        step = workflow.split("- name: Conformance suite unit tests (release)", 1)[1].split("- name:", 1)[0]
+        self.assertIn('RSPICE_VERILOG_ORACLES_REQUIRED: "1"', step)
+        self.assertIn("--test verilog_oracles", step)
+
+    def test_native_release_requires_correctness_and_conformance(self) -> None:
+        workflow = read_text(".github/workflows/native-release.yml")
+        self.assertIn("uses: ./.github/workflows/ci.yml", workflow)
+        self.assertIn("uses: ./.github/workflows/nightly.yml", workflow)
+        publish = workflow.split("  publish:", 1)[1]
+        self.assertIn("needs: [validate, test, conformance, build, supply-chain]", publish)
+        for source in ("ci", "nightly"):
+            self.assertIn("  workflow_call:", read_text(f".github/workflows/{source}.yml"))
+
     def test_all_ci_and_release_python_harnesses_are_gated(self) -> None:
         workflow = read_text(".github/workflows/ci.yml")
         for directory in ("tools/ci", "tools/release"):
             for path in (ROOT / directory).glob("test_*.py"):
                 self.assertIn(path.relative_to(ROOT).as_posix(), workflow)
+
+    def test_browser_only_rust_tests_have_an_executing_lane(self) -> None:
+        workflow = read_text(".github/workflows/ci.yml")
+        job = workflow.split("  wasm-tests:", 1)[1].split("  wasm-ui-size:", 1)[0]
+        self.assertIn("CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER: wasm-bindgen-test-runner", job)
+        self.assertIn("WASM_BINDGEN_USE_BROWSER: '1'", job)
+        self.assertIn("WASM_BINDGEN_USE_DEDICATED_WORKER: '1'", job)
+        self.assertIn("cargo test --locked -p rspice-wasm -p rspice-cloud-client --lib --target wasm32-unknown-unknown", job)
+        self.assertEqual(job.count("--test browser_clock"), 2)
+
+    def test_browser_budgets_measure_the_delivered_bindgen_modules(self) -> None:
+        workflow = read_text(".github/workflows/ci.yml")
+        job = workflow.split("  wasm-ui-size:", 1)[1].split("  veriloga-mobile:", 1)[0]
+        for stem, step in (("rspice-ui", "UI"), ("rspice-ui-worker", "worker")):
+            budget = job.split(f"- name: Enforce browser {step} image budget", 1)[1].split("- name:", 1)[0]
+            self.assertIn(f"crates/rspice-ui/web/pkg/{stem}_bg.wasm", budget)
+        self.assertLess(job.index("Generate production browser UI bindings"), job.index("Enforce browser UI image budget"))
+        self.assertLess(job.index("Generate optimized browser worker bindings"), job.index("Enforce browser worker image budget"))
+        self.assertLess(job.index("Enforce browser UI image budget"), job.index("Build instrumented browser workbench"))
 
     def test_format_gate_covers_every_hand_written_workspace_member(self) -> None:
         """rustfmt runs over the workspace as the manifest defines it.

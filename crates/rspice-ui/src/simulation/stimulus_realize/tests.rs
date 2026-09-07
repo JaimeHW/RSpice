@@ -331,9 +331,13 @@ fn a_random_source_says_it_has_no_waveform_until_a_run_builds_one() {
 /// the user typed.
 #[test]
 fn an_absolute_data_file_that_is_not_there_is_refused_at_the_card() {
+    let missing_file = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/testdata/missing/bridge_step.csv");
+    assert!(missing_file.is_absolute());
+    assert!(!missing_file.exists(), "fixture must name a missing file");
     let mut source = Component::new(1, ComponentType::CurrentSourcePwlFile, Point::origin());
     source.name = "I1".to_owned();
-    source.value = "C:/nowhere/bridge_step.csv".to_owned();
+    source.value = missing_file.to_string_lossy().into_owned();
 
     let error = source_spec(&source).expect_err("the card cannot be written");
     assert!(error.contains("bridge_step.csv"), "{error}");

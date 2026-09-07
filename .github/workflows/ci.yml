@@ -6,6 +6,7 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
@@ -93,7 +94,7 @@ jobs:
         run: rustup toolchain install ${{ env.RUST_TOOLCHAIN }} --profile minimal --component rustfmt --component clippy
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
       - name: Test core units, integration tests, and doctests
-        run: cargo test --locked -p rspice-core
+        run: cargo test --locked -p rspice-core --no-fail-fast
       - name: Conformance suite unit tests
         run: >-
           cargo test --locked -p rspice-conformance --lib
@@ -123,7 +124,7 @@ jobs:
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
       - name: Test remaining workspace crates
         run: >-
-          cargo test --locked --workspace
+          cargo test --locked --workspace --no-fail-fast
           --exclude rspice-core --exclude rspice-ui --exclude rspice-conformance
           --exclude rspice-python --exclude rspice-wasm
           --exclude 'rspice-veriloga-model*' --exclude 'rspice-*-catalog-dump'
@@ -140,7 +141,7 @@ jobs:
         run: rustup toolchain install ${{ env.RUST_TOOLCHAIN }} --profile minimal --component rustfmt --component clippy
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
       - name: Test UI units, integration tests, and doctests (Linux)
-        run: cargo test --locked -p rspice-ui
+        run: cargo test --locked -p rspice-ui --no-fail-fast
       - name: Test generated Verilog-A GUI contracts
         run: >-
           cargo test --locked -p rspice-ui
@@ -487,6 +488,33 @@ jobs:
           --no-default-features
           --features veriloga-model-diode-cmc,veriloga-builtins-noise
 
+  wasm-tests:
+    name: Rust tests in Chromium
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      CARGO_BUILD_JOBS: "2"
+      CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER: wasm-bindgen-test-runner
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install Rust toolchain
+        run: rustup toolchain install ${{ env.RUST_TOOLCHAIN }} --profile minimal --target wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
+      - name: Install pinned wasm-bindgen CLI
+        run: cargo install wasm-bindgen-cli --version 0.2.126 --locked
+      - name: Test browser binding and cloud transport
+        env:
+          WASM_BINDGEN_USE_BROWSER: '1'
+        run: cargo test --locked -p rspice-wasm -p rspice-cloud-client --lib --target wasm32-unknown-unknown
+      - name: Test UI clocks in a browser window
+        env:
+          WASM_BINDGEN_USE_BROWSER: '1'
+        run: cargo test --locked -p rspice-ui --target wasm32-unknown-unknown --test browser_clock
+      - name: Test UI clocks in a dedicated worker
+        env:
+          WASM_BINDGEN_USE_DEDICATED_WORKER: '1'
+        run: cargo test --locked -p rspice-ui --target wasm32-unknown-unknown --test browser_clock
+
   wasm-ui-size:
     name: Browser WASM image budgets
     runs-on: ubuntu-latest
@@ -500,10 +528,17 @@ jobs:
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
       - name: Build size-qualified browser UI image
         run: cargo build --locked --profile web-release -p rspice-ui --bin rspice-ui --target wasm32-unknown-unknown
+      - name: Install pinned wasm-bindgen CLI
+        run: cargo install wasm-bindgen-cli --version 0.2.126 --locked
+      - name: Generate production browser UI bindings
+        run: >-
+          wasm-bindgen --target web --out-name rspice-ui
+          --out-dir crates/rspice-ui/web/pkg
+          target/wasm32-unknown-unknown/web-release/rspice-ui.wasm
       - name: Enforce browser UI image budget
         run: >-
           python3 tools/ci/check_wasm_artifact_size.py
-          target/wasm32-unknown-unknown/web-release/rspice-ui.wasm
+          crates/rspice-ui/web/pkg/rspice-ui_bg.wasm
           --label rspice-ui
           --max-raw 67108864
           --max-gzip 16777216
@@ -512,31 +547,19 @@ jobs:
           cargo build --locked --profile web-release -p rspice-ui
           --bin rspice-ui-worker --features browser-worker
           --target wasm32-unknown-unknown
-      - name: Enforce browser worker image budget
-        run: >-
-          python3 tools/ci/check_wasm_artifact_size.py
-          target/wasm32-unknown-unknown/web-release/rspice-ui-worker.wasm
-          --label rspice-ui-worker
-          --max-raw 25165824
-          --max-gzip 8388608
-      - name: Install pinned wasm-bindgen CLI
-        run: cargo install wasm-bindgen-cli --version 0.2.126 --locked
-      - name: Test UI clocks in a browser window
-        env:
-          CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER: wasm-bindgen-test-runner
-          WASM_BINDGEN_USE_BROWSER: '1'
-        run: cargo test --locked -p rspice-ui --target wasm32-unknown-unknown --test browser_clock
-      - name: Test UI clocks in a dedicated worker
-        env:
-          CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER: wasm-bindgen-test-runner
-          WASM_BINDGEN_USE_DEDICATED_WORKER: '1'
-        run: cargo test --locked -p rspice-ui --target wasm32-unknown-unknown --test browser_clock
       - name: Generate optimized browser worker bindings
         run: >-
           wasm-bindgen --target web
           --out-name rspice-ui-worker
           --out-dir crates/rspice-ui/web/pkg
           target/wasm32-unknown-unknown/web-release/rspice-ui-worker.wasm
+      - name: Enforce browser worker image budget
+        run: >-
+          python3 tools/ci/check_wasm_artifact_size.py
+          crates/rspice-ui/web/pkg/rspice-ui-worker_bg.wasm
+          --label rspice-ui-worker
+          --max-raw 25165824
+          --max-gzip 8388608
       - name: Qualify browser WASM JIT solver bridge in Chromium
         run: python3 tools/ci/check_wasm_jit_browser.py
       - name: Build instrumented browser workbench

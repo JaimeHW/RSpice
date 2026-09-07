@@ -82,6 +82,20 @@ jobs:
             echo "source_date_epoch=$source_date_epoch"
           } >> "$GITHUB_OUTPUT"
 
+  test:
+    name: Qualify release correctness
+    needs: validate
+    uses: ./.github/workflows/ci.yml
+
+  conformance:
+    name: Qualify release conformance
+    needs: validate
+    uses: ./.github/workflows/nightly.yml
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+
   build:
     name: Package ${{ matrix.target }}
     needs: validate
@@ -373,7 +387,7 @@ jobs:
 
   publish:
     name: Publish verified GitHub release
-    needs: [validate, build, supply-chain]
+    needs: [validate, test, conformance, build, supply-chain]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:

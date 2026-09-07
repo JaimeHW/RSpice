@@ -3639,7 +3639,12 @@ fn native_device_executes_scalar_assignments_in_source_order() {
     // used to carry it is not emitted at all and the order under test is the
     // prelude's. The stamp below is what pins that order: a chain evaluated
     // out of order gives a different conductance.
-    assert_eq!(device.native_plan_stats().assignment_entry_points, 0);
+    // The explicit bytecode-contract feature selects the postfix planner,
+    // where the chain is carried by one assignment pass instead.
+    assert_eq!(
+        device.native_plan_stats().assignment_entry_points,
+        usize::from(cfg!(feature = "native-bytecode-contract-tests"))
+    );
 
     let (matrix, rhs) = stamp_device(&mut device, &[8.0]);
 
@@ -4853,6 +4858,8 @@ fn native_device_executes_runtime_loop_assignments_without_fallback() {
 /// The guard under test is therefore the one W-F14b gave `emit_terminator`,
 /// and this is the only place it is exercised through a device rather than
 /// through a hand-built program.
+/// With `native-bytecode-contract-tests`, the helper deliberately constructs the
+/// postfix planner instead; that configuration pins its assignment-loop guard.
 #[cfg(target_arch = "x86_64")]
 #[test]
 fn native_runtime_loop_iteration_limit_hard_fails_without_fallback() {
@@ -4869,9 +4876,9 @@ fn native_runtime_loop_iteration_limit_hard_fails_without_fallback() {
         native_contract_try_new("LOOPLIMIT1", model, &[1, 0]).expect("loop model uses native JIT");
     assert_eq!(
         device.native_plan_stats().assignment_entry_points,
-        0,
-        "the assignment-step loop is not emitted, so the only loop in this image is the block \
-         program's and the guard under test is the block program's"
+        usize::from(cfg!(feature = "native-bytecode-contract-tests")),
+        "the CFG route must exercise its block-program guard; the explicit bytecode-contract \
+         route must exercise its single assignment-step loop"
     );
     device.update_voltages(&[1.0]);
     let err = device
@@ -4894,6 +4901,8 @@ fn native_runtime_loop_iteration_limit_hard_fails_without_fallback() {
 /// now run in the block program the CFG prelude lowers rather than in an
 /// assignment-step loop, because nothing an entry reads keeps the assignment
 /// pass's copy alive.
+/// The bytecode-contract configuration separately pins its assignment-loop
+/// condition using the same voltage and diagnostic assertions.
 #[cfg(target_arch = "x86_64")]
 #[test]
 fn native_runtime_loop_condition_uses_exact_zero_truthiness() {
@@ -4911,8 +4920,9 @@ fn native_runtime_loop_condition_uses_exact_zero_truthiness() {
     assert!(negative_zero.is_using_native());
     assert_eq!(
         negative_zero.native_plan_stats().assignment_entry_points,
-        0,
-        "the condition under test is the block program's, not an assignment-step loop's"
+        usize::from(cfg!(feature = "native-bytecode-contract-tests")),
+        "the loop condition must run in the block program on the CFG route, and in the \
+         assignment pass only on the explicit bytecode-contract route"
     );
     negative_zero.update_voltages(&[1.0]);
     let currents = negative_zero

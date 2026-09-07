@@ -22,10 +22,19 @@ The remaining-workspace selector excludes crates with dedicated lanes. Generated
 model packages and catalog utilities are qualified through the simulator and
 catalog gates instead of empty generated-crate test binaries. The WASM surface
 has its own host tests and lint lane.
+Generated bundle freshness runs through `generated_output_audit` in the
+workspace tests; a second generator build solely to repeat that audit is omitted.
+Broad test commands finish the remaining test binaries after a failure so one
+broken suite does not hide independent findings.
+Browser download budgets measure the production `_bg.wasm` modules emitted by
+wasm-bindgen, before rebuilding the UI with qualification instrumentation.
+The Cargo linker output includes binding metadata removed before delivery.
 
 Nightly adds release-mode tests, ngspice/Xyce/GF180 corpora, full execution depth,
 panic checks, generated-model freshness, golden fingerprints, complex-step
 Jacobians, native device qualification, performance and shipping desktop builds.
+It installs Icarus Verilog and Verilator and requires both for independent
+digital conformance; a missing reference simulator fails the qualification.
 A failed test process fails the job even if it printed a successful subtotal.
 Performance thresholds remain enforced alongside numerical checks.
 
@@ -39,6 +48,8 @@ Drawing-sheet qualification remains manual for checksummed evidence across
 seven targets. Tagged native releases and manual component releases retain
 their package, provenance, signature and immutability checks. Publishing
 workflows must not be dispatched merely to test CI.
+Native publication also requires the reusable CI and nightly qualification
+workflows to pass for the release commit; building an archive is insufficient.
 
 Browser automation currently uses Chromium. Mobile rows prove portable solver
 compilation, not a native tablet application. WebKit/Safari, Firefox, physical
