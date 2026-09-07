@@ -2618,7 +2618,26 @@ pub struct PstbCard {
     pub stability_threshold: Value,
     /// Report modes sitting near a root of unity as subharmonic orders.
     pub detect_subharmonics: bool,
-    /// Numerical tolerance of the eigen-decomposition.
+    /// Accepted for deck compatibility; it does not reach the analyzer.
+    ///
+    /// There is no tolerance in the `.PSTB` path this could be. The spectrum
+    /// is produced by a direct eigensolve with no iteration to converge, and
+    /// the one tolerance it does carry — the qualification bound a
+    /// [`SpectrumCertificate`](crate::analysis::pole_zero::SpectrumCertificate)
+    /// is judged against — is *derived*, not chosen: `is_valid` requires it to
+    /// equal `128 * n * EPSILON` for the matrix order exactly, and a
+    /// certificate carrying any other value is invalid for pole-zero, PSS and
+    /// PSTB alike. Honouring an authored number here would mean either
+    /// weakening that shared contract or letting a deck declare a numerically
+    /// unqualified spectrum trustworthy.
+    ///
+    /// So the value is parsed, validated as a positive number, and carried no
+    /// further; `an_authored_pstb_eigentol_does_not_reach_the_analyzer` in
+    /// `tests/authored_card_runners.rs` pins that it changes nothing. Refusing
+    /// the key outright is the honest end state, but the Studio's `.PSTB`
+    /// dialog writes `eigentol=` on every line it emits and the key is part of
+    /// the worker contract and the canonical run fingerprint, so retiring it
+    /// is a cross-crate change rather than a parser edit.
     pub eigenvalue_tolerance: Value,
 }
 
@@ -2636,7 +2655,9 @@ impl PstbCard {
     pub(crate) const DEFAULT_STABILITY_THRESHOLD: Value = 1.0 + 1e-6;
     /// Whether a card that does not say reports subharmonic orders.
     pub(crate) const DEFAULT_DETECT_SUBHARMONICS: bool = true;
-    /// Eigen-decomposition tolerance when the card does not say.
+    /// Compatibility tolerance when the card does not say. The Studio's
+    /// dialog and manual-deck reader write and default to the same number, so
+    /// a line authored either way round-trips; nothing reads it downstream.
     pub(crate) const DEFAULT_EIGENVALUE_TOLERANCE: Value = 1e-10;
 }
 

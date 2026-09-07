@@ -699,6 +699,72 @@ fn a_carrier_with_no_shooting_state_basis_refuses_the_probe() {
     );
 }
 
+/// `EIGENTOL` is a compatibility key: the deck may state it, and it reaches
+/// no decision the analyzer makes.
+///
+/// The spectrum comes from a direct eigensolve — there is no iteration whose
+/// convergence a tolerance could govern — and the one tolerance the path does
+/// carry is the qualification bound on its `SpectrumCertificate`, which
+/// `is_valid` pins to exactly `128 * n * EPSILON`. So there is nothing here an
+/// authored number could honestly become, and this pins that stating one
+/// changes no published bit. If a future change gives `EIGENTOL` a meaning,
+/// this test is where that decision has to be made deliberately.
+#[test]
+fn an_authored_pstb_eigentol_does_not_reach_the_analyzer() {
+    let netlist = Netlist::parse(PSTB_RESONATOR).expect("deck parses");
+    let engine = Engine::new(SimulationConfig::default());
+    let carrier = pstb_carrier(&engine, &netlist);
+
+    let run = |tolerance: f64| {
+        let mut card = pstb_card("L1");
+        card.eigenvalue_tolerance = tolerance;
+        engine
+            .run_pstb_card_from_pss_with_abort(&netlist, &card, &carrier, &NoAbort)
+            .expect("the resonator's retained orbit has a qualified spectrum")
+    };
+
+    // Six decades apart, spanning both sides of the canonical bound.
+    let loose = run(1.0e-4);
+    let strict = run(1.0e-16);
+
+    assert_eq!(loose.probe_state_index, strict.probe_state_index);
+    assert_eq!(loose.probe_participation, strict.probe_participation);
+    assert_eq!(
+        loose.result.multipliers.len(),
+        strict.result.multipliers.len(),
+        "a tolerance the analyzer read could change how many modes qualify"
+    );
+    for (index, (left, right)) in loose
+        .result
+        .multipliers
+        .iter()
+        .zip(&strict.result.multipliers)
+        .enumerate()
+    {
+        assert_eq!(
+            left.value, right.value,
+            "multiplier {index} differs between EIGENTOL settings"
+        );
+        assert_eq!(left.is_unstable, right.is_unstable);
+    }
+    assert_eq!(
+        loose.result.min_stability_margin_db,
+        strict.result.min_stability_margin_db
+    );
+    assert_eq!(
+        loose.result.max_multiplier_magnitude,
+        strict.result.max_multiplier_magnitude
+    );
+    assert_eq!(
+        loose.result.stability_verdict,
+        strict.result.stability_verdict
+    );
+    assert_eq!(
+        loose.result.floquet_evidence,
+        strict.result.floquet_evidence
+    );
+}
+
 #[test]
 fn a_pstb_probe_that_is_not_an_inductor_current_is_refused_by_name() {
     let netlist = Netlist::parse(PSTB_RESONATOR).expect("deck parses");
