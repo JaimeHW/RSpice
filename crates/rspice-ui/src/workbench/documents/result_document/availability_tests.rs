@@ -1854,7 +1854,7 @@ fn restored_markers_keep_their_labels_and_advance_the_id_allocator() {
         note: "settling".to_owned(),
     };
 
-    restore_markers(&mut state, vec![marker]);
+    restore_markers(&mut state, vec![marker], None);
 
     assert_eq!(state.ui.results.markers.len(), 1);
     assert_eq!(state.ui.results.markers[0].note, "settling");
@@ -1911,7 +1911,7 @@ fn markers_for_absent_datasets_are_dropped_on_restore() {
         note: String::new(),
     };
 
-    restore_markers(&mut state, vec![kept, dropped]);
+    restore_markers(&mut state, vec![kept, dropped], None);
 
     assert_eq!(state.ui.results.markers.len(), 1);
     assert_eq!(state.ui.results.markers[0].id, 1);

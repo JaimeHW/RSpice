@@ -159,7 +159,7 @@ pub(crate) fn create_new_project_with(
     state.schematic = schematic;
     state.ui.schematic_snap = state.schematic.snap_engine.clone();
     state.bump_active_schematic_epoch();
-    state.clear_design_execution_context();
+    state.clear_project_execution_context();
     state.sim_setup = crate::workbench::app_state::SimSetupState::new_with_user_preferences(
         &state.ui.preferences,
     );
@@ -963,7 +963,7 @@ pub(crate) fn close_project_discard(state: &mut AppState) -> bool {
     let mut workspace = crate::state::ProjectWorkspace::new_bootstrapped(&mut libraries);
     let schematic = state.new_schematic_document();
     workspace.save_active_schematic(&schematic);
-    state.clear_design_execution_context();
+    state.clear_project_execution_context();
     state.library_manager = libraries;
     state.library_edit_locks = crate::state::ProjectLibraryLockAuthority::default();
     state.workspace = workspace;
@@ -1166,7 +1166,7 @@ fn apply_loaded_project_authorized(
     let result_presentation = project.result_presentation;
     let mut simulation_results_warning = project.simulation_results_warning;
     let workspace_migration_warning = project.workspace_migration_warning;
-    state.clear_design_execution_context();
+    state.clear_project_execution_context();
     state.library_manager = project.libraries;
     state.library_edit_locks = crate::state::ProjectLibraryLockAuthority::default();
     state.workspace = project.workspace;

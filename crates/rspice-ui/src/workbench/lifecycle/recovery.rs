@@ -673,7 +673,7 @@ pub(crate) fn open_comparison(
     };
     let comparison = build_comparison_workspace(&candidate.display_name, baseline, recovered)?;
 
-    app.state.clear_design_execution_context();
+    app.state.clear_project_execution_context();
     app.state.library_manager = comparison.libraries;
     app.state.workspace = comparison.workspace;
     app.state.schematic = comparison.active;

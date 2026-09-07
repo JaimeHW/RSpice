@@ -35,9 +35,15 @@ impl ViewerCapability {
 }
 
 impl AppState {
+    /// Replace all execution context, including project-owned marker identity.
+    pub(crate) fn clear_project_execution_context(&mut self) {
+        self.clear_design_execution_context();
+        self.ui.results.clear_project_scoped_state();
+    }
+
     /// Clear execution and viewer state tied to the previous design document.
     ///
-    /// Use when replacing the active schematic/project with unrelated design
+    /// Use when replacing the active schematic with unrelated design
     /// content. File identity and dirty state are intentionally left to the
     /// caller because open/import/new workflows each own those semantics.
     pub(crate) fn clear_design_execution_context(&mut self) {
@@ -53,7 +59,7 @@ impl AppState {
         self.ui.code_workspace = Default::default();
         self.workbench.netlist_open_documents.clear();
         self.ui.results_seen_version = 0;
-        self.ui.results.clear_project_scoped_state();
+        self.ui.results.clear_design_scoped_state();
         self.workbench.specification_editor_route_pending = false;
         self.dialogs.drc_results = None;
         self.dialogs.drc_checked_version = 0;

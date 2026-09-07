@@ -28,15 +28,18 @@ fn marker_state(id: u32) -> (AppState, AnalysisPresentationKey) {
         .unwrap();
     assert!(state.simulation.select_run(0));
     let analysis = active_analysis_key(&state);
-    state.ui.results.adopt_markers(vec![ResultMarker {
-        id,
-        analysis,
-        anchor: marker_anchor_for(analysis, "V(out)"),
-        trace_name: "V(out)".to_owned(),
-        x: 0.5,
-        kind: MarkerKind::Peak,
-        note: "Retained annotation".to_owned(),
-    }]);
+    state.ui.results.adopt_markers(
+        vec![ResultMarker {
+            id,
+            analysis,
+            anchor: marker_anchor_for(analysis, "V(out)"),
+            trace_name: "V(out)".to_owned(),
+            x: 0.5,
+            kind: MarkerKind::Peak,
+            note: "Retained annotation".to_owned(),
+        }],
+        0,
+    );
     (state, analysis)
 }
 
@@ -63,7 +66,7 @@ fn restored_maximum_marker_id_cannot_wrap_or_retarget_existing_annotations() {
     let project = marker_project(&state);
     let text = crate::io::project_io::serialize_project_file(&project).unwrap();
     let restored = crate::io::project_io::load_project_text(&text, None).unwrap();
-    restore_markers(&mut state, restored.result_presentation.markers);
+    restore_presentation(&mut state, restored.result_presentation);
     assert_eq!(place_quick(&mut state, analysis, 0.75), None);
     assert_eq!(state.ui.results.markers.len(), 1);
     assert_eq!(state.ui.results.markers[0].id, u32::MAX);
@@ -230,6 +233,7 @@ fn duplicate_ids_in_older_projects_are_repaired_without_losing_annotations() {
     let (mut state, _) = marker_state(7);
     let mut project = marker_project(&state);
     let template = project.result_presentation.markers[0].clone();
+    project.result_presentation.marker_id_high_water = None;
     project.result_presentation.markers = [0, 1, 2, 7, u32::MAX, 7, 0, u32::MAX]
         .into_iter()
         .enumerate()
@@ -285,7 +289,7 @@ fn duplicate_ids_in_older_projects_are_repaired_without_losing_annotations() {
         serde_json::to_value(normalized.result_presentation.markers).unwrap()
     );
 
-    restore_markers(&mut state, restored.result_presentation.markers);
+    restore_presentation(&mut state, restored.result_presentation);
     commit_marker_edit(
         &mut state,
         MarkerSelector::Quick(3),

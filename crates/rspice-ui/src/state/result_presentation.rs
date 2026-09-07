@@ -200,6 +200,16 @@ pub struct ResultPresentation {
         skip_serializing_if = "Vec::is_empty"
     )]
     pub markers: Vec<ResultMarker>,
+    /// Highest allocated quick-marker ID, including deleted markers. Absence
+    /// identifies older writers that also mixed document projections into this
+    /// list; current writers own quick markers separately and always publish it.
+    #[serde(
+        default,
+        rename = "result_marker_id_high_water",
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_marker_id_high_water"
+    )]
+    pub(crate) marker_id_high_water: Option<u32>,
     #[serde(
         default,
         rename = "result_log_y_panes",
@@ -213,6 +223,22 @@ pub struct ResultPresentation {
         skip_serializing_if = "Vec::is_empty"
     )]
     pub(crate) expression_groups: Vec<ResultExpressionGroup>,
+}
+
+fn deserialize_marker_id_high_water<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<u32>, D::Error> {
+    // Missing is legacy; explicit null cannot erase allocation history or
+    // opt a current marker list back into the old projection migration.
+    u32::deserialize(deserializer).map(Some)
+}
+
+/// Borrowed compatibility fields and the additional durable allocation limit.
+pub(crate) struct ResultFingerprintFields<'a> {
+    pub markers: &'a [ResultMarker],
+    pub log_y_panes: &'a [WavePanePresentationKey],
+    pub expression_groups: &'a [ResultExpressionGroup],
+    pub marker_history: Option<u32>,
 }
 
 /// Pane choices are a set, but project files and content fingerprints encode
@@ -237,6 +263,7 @@ fn deserialize_log_y_panes<'de, D: serde::Deserializer<'de>>(
 
 impl ResultPresentation {
     pub(crate) fn validate_markers(&self) -> Result<(), String> {
+        self.marker_allocation_history()?;
         let mut ids = HashSet::new();
         for marker in &self.markers {
             ResultMarker::validate_placement(marker.analysis, &marker.anchor, marker.x)?;
@@ -256,6 +283,7 @@ impl ResultPresentation {
     /// No persisted object refers to quick IDs; their edit selectors are runtime
     /// state. The loader reports this deterministic repair to the reader.
     pub(crate) fn repair_duplicate_marker_ids(&mut self) -> Result<usize, String> {
+        self.marker_allocation_history()?;
         let mut reserved = self
             .markers
             .iter()
@@ -265,47 +293,132 @@ impl ResultPresentation {
             return Ok(0);
         }
         let mut seen = HashSet::new();
-        let mut next = 1_u32;
+        let mut next = self
+            .marker_id_high_water
+            .map_or(Some(1), |highest| highest.checked_add(1));
         let mut repaired = 0;
         for marker in &mut self.markers {
             if seen.insert(marker.id) {
                 continue;
             }
-            while reserved.contains(&next) {
-                next = next
+            let mut id = next.ok_or("result marker identity space is exhausted")?;
+            while reserved.contains(&id) {
+                id = id
                     .checked_add(1)
                     .ok_or("result marker identity space is exhausted")?;
             }
-            marker.id = next;
-            reserved.insert(next);
+            marker.id = id;
+            reserved.insert(id);
+            next = id.checked_add(1);
+            if let Some(highest) = &mut self.marker_id_high_water {
+                *highest = id;
+            }
             repaired += 1;
         }
         Ok(repaired)
     }
 
-    /// Existing lifecycle fingerprints encode these as three tuple elements.
-    /// Preserve that encoding: generated-input identities also use the registry.
+    /// Only allocation history beyond the retained markers adds new logical
+    /// content. A legacy list already implies its highest retained ID, so
+    /// adopting the explicit field must not make an unchanged project dirty.
+    fn marker_allocation_history(&self) -> Result<Option<u32>, String> {
+        let retained = self
+            .markers
+            .iter()
+            .map(|marker| marker.id)
+            .max()
+            .unwrap_or(0);
+        match self.marker_id_high_water {
+            Some(highest) if highest < retained => {
+                Err("result marker allocation history is below a retained marker ID".to_owned())
+            }
+            Some(highest) if highest > retained => Ok(Some(highest)),
+            _ => Ok(None),
+        }
+    }
+
+    /// The three annotation slices retain their existing fingerprint encoding.
+    /// Only additional allocation history needs a versioned digest extension;
+    /// adopting a legacy list's implied maximum does not change its identity.
     /// Exhaustive destructuring makes a new durable field require an explicit
     /// fingerprint/migration decision instead of silently bypassing dirty state.
-    pub(crate) fn fingerprint_fields(
-        &self,
-    ) -> (
-        &[ResultMarker],
-        &[WavePanePresentationKey],
-        &[ResultExpressionGroup],
-    ) {
+    pub(crate) fn fingerprint_fields(&self) -> Result<ResultFingerprintFields<'_>, String> {
         let Self {
             markers,
+            marker_id_high_water: _,
             log_y_panes,
             expression_groups,
         } = self;
-        (markers, log_y_panes, expression_groups)
+        Ok(ResultFingerprintFields {
+            markers,
+            log_y_panes,
+            expression_groups,
+            marker_history: self.marker_allocation_history()?,
+        })
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn marker_history_field_is_optional_but_not_nullable_or_truncated() {
+        let legacy: ResultPresentation = serde_json::from_str("{}").unwrap();
+        assert_eq!(legacy.marker_id_high_water, None);
+        assert_eq!(serde_json::to_value(legacy).unwrap(), serde_json::json!({}));
+        for bad in ["null", "-1", "4294967296", "1.5", "\"7\""] {
+            let text = format!("{{\"result_marker_id_high_water\":{bad}}}");
+            assert!(
+                serde_json::from_str::<ResultPresentation>(&text).is_err(),
+                "{bad}"
+            );
+        }
+        let exhausted: ResultPresentation =
+            serde_json::from_str("{\"result_marker_id_high_water\":4294967295}").unwrap();
+        assert_eq!(exhausted.marker_id_high_water, Some(u32::MAX));
+        exhausted.validate_markers().unwrap();
+        assert_eq!(
+            serde_json::to_value(exhausted).unwrap(),
+            serde_json::json!({"result_marker_id_high_water": u32::MAX})
+        );
+    }
+
+    #[test]
+    fn duplicate_marker_recovery_respects_published_allocation_history() {
+        let key = serde_json::json!({
+            "dataset_id": "b3c6b2be-c997-4f5d-a06e-714071283df5", "source": {"Legacy": 7}
+        });
+        let marker = serde_json::json!({
+            "id": 3, "analysis": key,
+            "anchor": {"analysis": key, "trace": {"source_name": "V(out)", "kind": 0, "family_group": 0}},
+            "trace_name": "V(out)", "x": 0.5, "kind": "Note", "note": "Retained"
+        });
+        let mut presentation: ResultPresentation = serde_json::from_value(serde_json::json!({
+            "result_markers": [marker.clone(), marker], "result_marker_id_high_water": 10
+        }))
+        .unwrap();
+        let mut inconsistent = presentation.clone();
+        inconsistent.marker_id_high_water = Some(2);
+        assert!(inconsistent.validate_markers().is_err());
+        assert!(inconsistent.repair_duplicate_marker_ids().is_err());
+        let mut exhausted = presentation.clone();
+        exhausted.marker_id_high_water = Some(u32::MAX);
+        assert!(exhausted.repair_duplicate_marker_ids().is_err());
+        assert_eq!(exhausted.markers[1].id, 3);
+        assert_eq!(presentation.repair_duplicate_marker_ids().unwrap(), 1);
+        assert_eq!(
+            presentation
+                .markers
+                .iter()
+                .map(|marker| marker.id)
+                .collect::<Vec<_>>(),
+            [3, 11]
+        );
+        assert_eq!(presentation.marker_id_high_water, Some(11));
+        presentation.validate_markers().unwrap();
+        assert_eq!(presentation.repair_duplicate_marker_ids().unwrap(), 0);
+    }
 
     #[test]
     fn legacy_presentation_wire_contract_and_expression_defaults_are_preserved() {

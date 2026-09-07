@@ -1775,10 +1775,11 @@ pub(crate) fn marker_anchor_for(
 pub(crate) fn restore_presentation(state: &mut AppState, presentation: ResultPresentation) {
     let ResultPresentation {
         markers,
+        marker_id_high_water,
         log_y_panes,
         expression_groups,
     } = presentation;
-    restore_markers(state, markers);
+    restore_markers(state, markers, marker_id_high_water);
     restore_log_y_panes(state, log_y_panes);
     restore_expression_groups(state, expression_groups);
 }
@@ -1794,19 +1795,32 @@ pub(crate) fn restore_presentation(state: &mut AppState, presentation: ResultPre
 /// position, label and kind — is dropped in favour of the document's. The
 /// match is content-shaped, not id-shaped: the two stores never shared an id
 /// space that could be compared.
-pub(crate) fn restore_markers(state: &mut AppState, markers: Vec<ResultMarker>) {
+pub(crate) fn restore_markers(
+    state: &mut AppState,
+    markers: Vec<ResultMarker>,
+    high_water: Option<u32>,
+) {
+    let legacy = high_water.is_none();
+    let mut highest = high_water.unwrap_or(0);
     let retained: Vec<ResultMarker> = markers
         .into_iter()
         .filter(|marker| {
+            // Current writers explicitly own quick markers. A genuine quick
+            // annotation can match a document marker without being its old
+            // projection; migrate this ambiguity only in legacy files.
+            if legacy && is_document_marker_projection(state, marker) {
+                return false;
+            }
+            // A discarded dataset does not make its allocated labels reusable.
+            highest = highest.max(marker.id);
             state
                 .simulation
                 .runs
                 .iter()
                 .any(|run| marker.analysis.resolve(run).is_some())
         })
-        .filter(|marker| !is_document_marker_projection(state, marker))
         .collect();
-    state.ui.results.adopt_markers(retained);
+    state.ui.results.adopt_markers(retained, highest);
 }
 
 /// Whether one loaded quick marker restates a marker a project-owned
@@ -2433,6 +2447,9 @@ pub struct ResultsState {
     /// Highest allocated or restored quick-marker ID in this live project.
     /// Restoring markers can raise it; deleting markers never lowers it.
     next_marker_id: u32,
+    /// Allocation history owned by the current Results draft. Revert restores
+    /// this value while the live allocator above retains its monotonic floor.
+    marker_allocation_high_water: u32,
     /// The open marker-purpose dialog's uncommitted edit, if any.
     ///
     /// Editing is transactional: nothing reaches the marker until Apply, so
@@ -2785,15 +2802,10 @@ impl ResultsState {
         x: f64,
     ) -> Result<u32, String> {
         ResultMarker::validate_placement(analysis, &anchor, x)?;
-        let last_retained_id = self
-            .markers
-            .iter()
-            .map(|marker| marker.id)
-            .max()
-            .unwrap_or(0);
-        let id = last_retained_id.max(self.next_marker_id).checked_add(1)
+        let id = self.marker_id_high_water().max(self.next_marker_id).checked_add(1)
             .ok_or("result marker identity space is exhausted; existing markers can still be edited or removed")?;
         self.next_marker_id = id;
+        self.marker_allocation_high_water = id;
         self.markers.push(ResultMarker {
             id,
             analysis,
@@ -2812,6 +2824,7 @@ impl ResultsState {
 
     /// Remove one quick marker, and with it any open edit of it.
     pub fn remove_marker(&mut self, id: u32) {
+        self.remember_marker_ids();
         self.markers.retain(|marker| marker.id != id);
         if self
             .marker_edit
@@ -2824,15 +2837,34 @@ impl ResultsState {
 
     /// Adopt markers restored from a project, keeping the id allocator ahead
     /// of every label already in use.
-    pub(crate) fn adopt_markers(&mut self, markers: Vec<ResultMarker>) {
-        self.next_marker_id = markers
+    pub(crate) fn adopt_markers(&mut self, markers: Vec<ResultMarker>, high_water: u32) {
+        let live_high_water = self.next_marker_id.max(self.marker_id_high_water());
+        self.marker_allocation_high_water = markers
             .iter()
             .map(|marker| marker.id)
             .max()
             .unwrap_or(0)
-            .max(self.next_marker_id);
+            .max(high_water);
+        self.next_marker_id = live_high_water.max(self.marker_allocation_high_water);
         self.markers = markers;
         self.marker_edit = None;
+    }
+
+    fn marker_id_high_water(&self) -> u32 {
+        self.marker_allocation_high_water.max(
+            self.markers
+                .iter()
+                .map(|marker| marker.id)
+                .max()
+                .unwrap_or(0),
+        )
+    }
+
+    /// Retain even IDs inserted through the legacy mutable marker collection
+    /// before removing the last evidence of them.
+    fn remember_marker_ids(&mut self) {
+        self.marker_allocation_high_water = self.marker_id_high_water();
+        self.next_marker_id = self.next_marker_id.max(self.marker_allocation_high_water);
     }
 
     /// Replace the overlay with one persistent pane's retained markers.
@@ -3145,6 +3177,7 @@ impl ResultsState {
     ) -> ResultPresentation {
         ResultPresentation {
             markers: self.project_markers(simulation),
+            marker_id_high_water: Some(self.marker_id_high_water()),
             log_y_panes: self.project_log_y_panes(simulation),
             expression_groups: self.project_expression_groups(simulation),
         }
@@ -3213,7 +3246,17 @@ impl ResultsState {
         groups
     }
 
-    /// Clear result UI state that is tied to the active project/design data.
+    /// Clear design results within the same project, retaining its marker IDs.
+    pub(crate) fn clear_design_scoped_state(&mut self) {
+        self.remember_marker_ids();
+        let next_marker_id = self.next_marker_id;
+        let marker_allocation_high_water = self.marker_allocation_high_water;
+        self.clear_project_scoped_state();
+        self.next_marker_id = next_marker_id;
+        self.marker_allocation_high_water = marker_allocation_high_water;
+    }
+
+    /// Reset result UI state and identities when replacing the whole project.
     pub fn clear_project_scoped_state(&mut self) {
         let viewer = self.viewer;
         let phase_continuous = self.phase_continuous;
@@ -3261,6 +3304,7 @@ impl ResultsState {
     /// and the next frame rebuilds what it needs, so dropping all of them
     /// here costs one rebuild and bounds the session.
     pub(crate) fn retain_datasets(&mut self, retained: &HashSet<DatasetId>) {
+        self.remember_marker_ids();
         let live = |analysis: AnalysisPresentationKey| retained.contains(&analysis.dataset_id());
         self.markers.retain(|marker| live(marker.analysis));
         self.log_y_panes.retain(|pane| live(pane.analysis));

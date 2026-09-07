@@ -7,6 +7,8 @@
 //! than landing on top of it.
 
 use super::*;
+#[cfg(not(target_arch = "wasm32"))]
+mod marker_history;
 use crate::analysis::bode::BodeData;
 use crate::analysis::eye_diagram::{EyeData, EyeTrace};
 use crate::analysis::fft::{FftData, window::WindowFunction};
@@ -1114,9 +1116,9 @@ fn save_project_to_path_round_trips_result_markers() {
 
     let mut reopened = AppState::default();
     reopened.simulation = state.simulation.clone();
-    crate::workbench::documents::result_document::restore_markers(
+    crate::workbench::documents::result_document::restore_presentation(
         &mut reopened,
-        loaded.result_presentation.markers,
+        loaded.result_presentation,
     );
     assert_eq!(reopened.ui.results.markers.len(), 1);
     assert_eq!(reopened.ui.results.markers[0].note, "settling point");

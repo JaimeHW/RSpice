@@ -411,10 +411,8 @@ fn the_marker_dialog_applies_to_the_store_it_opened_on() {
     // the two identities collide as integers and can only be told apart
     // by the store they name.
     let colliding = u32::try_from(marker_id.get()).expect("a small test serial");
-    app.state
-        .ui
-        .results
-        .adopt_markers(vec![super::super::ResultMarker {
+    app.state.ui.results.adopt_markers(
+        vec![super::super::ResultMarker {
             id: colliding,
             analysis,
             anchor,
@@ -422,7 +420,9 @@ fn the_marker_dialog_applies_to_the_store_it_opened_on() {
             x: 0.9,
             kind: super::super::MarkerKind::Note,
             note: "quick".to_owned(),
-        }]);
+        }],
+        0,
+    );
 
     super::super::commit_marker_edit(
         &mut app.state,
@@ -557,10 +557,27 @@ fn a_saved_projection_of_a_retained_marker_is_dropped_on_load() {
         note: "settling".to_owned(),
     };
 
-    super::super::restore_markers(&mut app.state, vec![duplicate, genuine]);
+    super::super::restore_markers(
+        &mut app.state,
+        vec![duplicate.clone(), genuine.clone()],
+        None,
+    );
 
     assert_eq!(app.state.ui.results.markers.len(), 1);
     assert_eq!(app.state.ui.results.markers[0].note, "settling");
+
+    // Current files explicitly own quick markers. Identical annotation text
+    // and coordinates no longer identify a legacy document projection.
+    super::super::restore_presentation(
+        &mut app.state,
+        crate::state::result_presentation::ResultPresentation {
+            markers: vec![duplicate, genuine],
+            marker_id_high_water: Some(5),
+            ..Default::default()
+        },
+    );
+    assert_eq!(app.state.ui.results.markers.len(), 2);
+    assert_eq!(app.state.ui.results.markers[0].note, "overshoot");
 }
 
 #[test]
@@ -589,7 +606,7 @@ fn matching_marker_text_on_another_dataset_is_preserved_on_load() {
         kind: super::super::marker_kind_of_retained(retained.kind),
         note: retained.label,
     };
-    super::super::restore_markers(&mut app.state, vec![marker]);
+    super::super::restore_markers(&mut app.state, vec![marker], None);
     assert_eq!(app.state.ui.results.markers.len(), 1);
     assert_eq!(app.state.ui.results.markers[0].analysis, another_analysis);
 }

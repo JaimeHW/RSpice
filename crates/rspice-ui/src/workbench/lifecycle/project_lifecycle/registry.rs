@@ -8,6 +8,7 @@ use sha2::{Digest as _, Sha256};
 use crate::io::ProjectFile;
 use crate::product::ContentDigest;
 use crate::state::CellViewRef;
+use crate::state::result_presentation::ResultFingerprintFields;
 use crate::workbench::state::Workspace;
 
 #[cfg(test)]
@@ -202,18 +203,26 @@ fn document_digests(
                 .map(|context| &context.model_libraries),
         )?,
     );
-    let (markers, log_y_panes, expression_groups) =
-        project.result_presentation.fingerprint_fields();
+    let ResultFingerprintFields {
+        markers,
+        log_y_panes,
+        expression_groups,
+        marker_history,
+    } = project.result_presentation.fingerprint_fields()?;
+    let result_fields = (
+        &project.simulation_results,
+        &project.workspace.report_documents,
+        &project.workspace.visualization_documents,
+        markers,
+        log_y_panes,
+        expression_groups,
+    );
     documents.insert(
         ProjectDocumentId::ResultHistory,
-        digest(&(
-            &project.simulation_results,
-            &project.workspace.report_documents,
-            &project.workspace.visualization_documents,
-            markers,
-            log_y_panes,
-            expression_groups,
-        ))?,
+        match marker_history {
+            Some(highest) => digest(&("result-marker-allocation-v1", result_fields, highest))?,
+            None => digest(&result_fields)?,
+        },
     );
     // The stimulus definitions ride the project document rather than a
     // sidecar, so without an identity here an edited library would move the
@@ -777,6 +786,25 @@ mod tests {
             assert_eq!(
                 document_digests(&project).unwrap()[&ProjectDocumentId::ResultHistory],
                 legacy
+            );
+            let retained = project
+                .result_presentation
+                .markers
+                .iter()
+                .map(|marker| marker.id)
+                .max()
+                .unwrap_or(0);
+            project.result_presentation.marker_id_high_water = Some(retained);
+            assert_eq!(
+                document_digests(&project).unwrap()[&ProjectDocumentId::ResultHistory],
+                legacy,
+                "an explicit, implied allocation limit preserves the legacy digest"
+            );
+            project.result_presentation.marker_id_high_water = Some(retained + 1);
+            assert_ne!(
+                document_digests(&project).unwrap()[&ProjectDocumentId::ResultHistory],
+                legacy,
+                "deleted or abandoned marker identities remain document content"
             );
         }
     }
