@@ -214,11 +214,7 @@ pub(in crate::engine::builder) fn resolve_capacitor_instance_value(
             .unwrap_or(0.0);
     if tc1 != 0.0 || tc2 != 0.0 {
         let temp_ctx = crate::analysis::TemperatureContext::from_celsius(current_temp_c, tnom_c);
-        let coeffs = crate::analysis::temperature::CapacitorTempCoeffs {
-            tc1,
-            tc2,
-            ..Default::default()
-        };
+        let coeffs = crate::analysis::temperature::CapacitorTempCoeffs { tc1, tc2 };
         resolved = coeffs.scale_capacitance(resolved, &temp_ctx);
     }
 

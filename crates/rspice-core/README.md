@@ -236,6 +236,11 @@ The unused `analysis::parametric` API has been removed. SDK callers should
 migrate to the engine planner, which validates dimensions and total run counts
 before executing the same sweep path used by the frontends.
 
+The unused `JunctionTempScaling` and `MosfetTempScaling` placeholders and
+the unused `CapacitorTempCoeffs::vc1/vc2` fields have also been removed.
+Semiconductor temperature behavior belongs to each device model;
+`TemperatureContext` and the passive temperature coefficients remain available.
+
 | Analysis | Module |
 | :--- | :--- |
 | DC operating point and DC sweep | `analysis/dc.rs`, `engine/dc.rs` |
@@ -273,7 +278,7 @@ Advanced analyses, all flat under `analysis/`:
 | Pole-zero | `pole_zero.rs`, `pole_zero/` |
 | Sensitivity (DC and AC) | `sensitivity.rs` |
 | Transfer function (`.TF`) | `transfer.rs`, `transfer/` |
-| Parametric sweep (`.STEP`) | `parametric.rs`, `engine/step.rs` |
+| Parametric sweep (`.STEP`) | `netlist/ast.rs`, `engine/step.rs` |
 | Monte Carlo | `monte_carlo.rs` |
 | Process corners | `corner.rs` |
 | Periodic steady state (shooting) | `pss/`, `engine/pss.rs` |

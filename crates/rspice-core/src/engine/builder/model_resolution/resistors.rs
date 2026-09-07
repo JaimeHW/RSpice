@@ -19,7 +19,7 @@ pub(in crate::engine::builder) fn resolve_resistor_flicker_noise(
     let Some(model_def) = find_model_def(netlist, model_name) else {
         return Ok(None);
     };
-    let (eval_ctx, _, _) = resolve_resistor_eval_context(
+    let (eval_ctx, _, _) = resolve_passive_eval_context(
         netlist,
         Some(model_def),
         instance_params,
@@ -73,41 +73,6 @@ pub(in crate::engine::builder) fn resolve_resistor_flicker_noise(
     };
 
     Ok(Some((kf / eff_noise_area, af, ef)))
-}
-
-fn resolve_resistor_eval_context(
-    netlist: &Netlist,
-    model_def: Option<&crate::netlist::ModelDef>,
-    instance_params: &[(String, f64)],
-    temperature_kelvin: f64,
-) -> Result<(crate::netlist::ParamContext, f64, f64), SimulationError> {
-    let mut current_temp_c = crate::constants::kelvin_to_celsius(temperature_kelvin);
-    if let Some(temp) = instance_param(instance_params, &["TEMP"]) {
-        current_temp_c = normalize_temperature_param_to_celsius(temp);
-    } else if let Some(dtemp) = instance_param(instance_params, &["DTEMP"]) {
-        current_temp_c += dtemp;
-    }
-
-    let base_tnom_c = netlist.options.tnom.unwrap_or(27.0);
-    let Some(model_def) = model_def else {
-        let mut ctx = base_eval_context(netlist);
-        set_temperature_scalars(&mut ctx, current_temp_c, base_tnom_c);
-        crate::netlist::expr::materialize_available_parameter_expressions(&mut ctx);
-        return Ok((ctx, current_temp_c, base_tnom_c));
-    };
-
-    let initial_ctx = build_model_eval_context(netlist, model_def, current_temp_c, base_tnom_c);
-    let model_tnom_c = resolve_model_param(model_def, &["TNOM"], &initial_ctx)?
-        .map(normalize_temperature_param_to_celsius)
-        .unwrap_or(base_tnom_c);
-
-    let ctx = if (model_tnom_c - base_tnom_c).abs() > f64::EPSILON {
-        build_model_eval_context(netlist, model_def, current_temp_c, model_tnom_c)
-    } else {
-        initial_ctx
-    };
-
-    Ok((ctx, current_temp_c, model_tnom_c))
 }
 
 fn resolve_resistor_model_level(
@@ -336,7 +301,7 @@ pub(in crate::engine::builder) fn resolve_resistor_thermal_state(
     let model_def = find_model_def(netlist, model_name).ok_or_else(|| {
         SimulationError::Circuit(format!("resistor references unknown model '{model_name}'"))
     })?;
-    let (eval_ctx, temperature_celsius, _) = resolve_resistor_eval_context(
+    let (eval_ctx, temperature_celsius, _) = resolve_passive_eval_context(
         netlist,
         Some(model_def),
         instance_params,
@@ -680,7 +645,7 @@ pub(in crate::engine::builder) fn resolve_resistor_effective_parameters(
     };
 
     let (eval_ctx, current_temp_c, tnom_c) =
-        resolve_resistor_eval_context(netlist, model_def, instance_params, temperature_kelvin)?;
+        resolve_passive_eval_context(netlist, model_def, instance_params, temperature_kelvin)?;
     let uses_xyce_default = resistor_uses_xyce_default_value(instance_params);
     let resistor_level = if let (Some(model_def), Some(model_name)) = (model_def, model_name) {
         let level = resolve_resistor_model_level(element_name, model_name, model_def, &eval_ctx)?;
@@ -958,7 +923,7 @@ pub(in crate::engine::builder) fn resolve_behavioral_resistor_policy(
         None
     };
     let (_, temperature_celsius, _) =
-        resolve_resistor_eval_context(netlist, model_def, instance_params, temperature_kelvin)?;
+        resolve_passive_eval_context(netlist, model_def, instance_params, temperature_kelvin)?;
     let scale = resolve_resistor_instance_value(
         netlist,
         element_name,

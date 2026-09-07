@@ -15,29 +15,16 @@
 //! ## Resistors
 //! R(T) = R(Tnom) * (1 + TC1*(T-Tnom) + TC2*(T-Tnom)^2)
 //!
-//! ## Diodes/BJTs  
-//! - Saturation current: Is(T) = Is(Tnom) * (T/Tnom)^(XTI/N) * exp(-Eg/((N*k*T) - Eg/(N*k*Tnom)))
-//! - Thermal voltage: Vt = k*T/q
-//!
-//! ## MOSFETs
-//! - Threshold voltage shift
-//! - Mobility degradation
+//! Semiconductor temperature equations are owned by each device model.
+//! This module supplies the shared temperature context and passive scaling.
 
 use crate::Value;
-use crate::constants::{K_BOLTZMANN, Q_ELECTRON};
 
 //=============================================================================
 // Constants
 //=============================================================================
 
-/// Default nominal temperature (K) = 27°C
-pub const T_NOMINAL: Value = 300.15;
-/// Silicon bandgap at 300K (eV)
-pub const EG_SILICON: Value = 1.12;
-/// Silicon bandgap temperature coefficient
-pub const EG_ALPHA: Value = 7.02e-4;
-/// Silicon bandgap temperature reference
-pub const EG_BETA: Value = 1108.0;
+pub use crate::constants::{TEMP_REFERENCE as T_NOMINAL, thermal_voltage};
 
 //=============================================================================
 // Temperature Utilities
@@ -49,12 +36,6 @@ pub const EG_BETA: Value = 1108.0;
 // otherwise have to reach up into an analysis module for arithmetic on a
 // physical constant.
 use crate::constants::{celsius_to_kelvin, kelvin_to_celsius};
-
-/// Calculate thermal voltage Vt = kT/q
-#[inline]
-pub fn thermal_voltage(temperature_k: Value) -> Value {
-    K_BOLTZMANN * temperature_k / Q_ELECTRON
-}
 
 //=============================================================================
 // Temperature Context
@@ -148,10 +129,6 @@ impl ResistorTempCoeffs {
 /// Temperature coefficients for capacitors
 #[derive(Debug, Clone, Copy, Default)]
 pub struct CapacitorTempCoeffs {
-    /// First-order voltage coefficient
-    pub vc1: Value,
-    /// Second-order voltage coefficient
-    pub vc2: Value,
     /// First-order temperature coefficient
     pub tc1: Value,
     /// Second-order temperature coefficient
@@ -165,60 +142,3 @@ impl CapacitorTempCoeffs {
         c_nom * (1.0 + self.tc1 * dt + self.tc2 * dt * dt)
     }
 }
-
-//=============================================================================
-// Semiconductor Temperature Scaling
-//=============================================================================
-
-/// Temperature scaling for PN junctions (diodes, BJT junctions)
-#[derive(Debug, Clone, Copy)]
-pub struct JunctionTempScaling {
-    /// Emission coefficient (N)
-    pub n: Value,
-    /// Temperature exponent for Is (XTI, typically 3 for diodes)
-    pub xti: Value,
-    /// Bandgap energy at nominal temperature (eV)
-    pub eg: Value,
-}
-
-impl Default for JunctionTempScaling {
-    fn default() -> Self {
-        Self {
-            n: 1.0,
-            xti: 3.0,
-            eg: EG_SILICON,
-        }
-    }
-}
-
-impl JunctionTempScaling {}
-
-/// Temperature scaling for MOSFETs
-#[derive(Debug, Clone, Copy)]
-pub struct MosfetTempScaling {
-    /// Threshold voltage temperature coefficient (V/°C, typically -2mV/°C)
-    pub kt1: Value,
-    /// Threshold voltage temperature coefficient 2
-    pub kt1l: Value,
-    /// Mobility temperature exponent (typically 1.5-2.0)
-    pub ute: Value,
-    /// Saturation velocity temperature coefficient
-    pub at: Value,
-}
-
-impl Default for MosfetTempScaling {
-    fn default() -> Self {
-        Self {
-            kt1: -0.002, // -2mV/°C typical for silicon
-            kt1l: 0.0,
-            ute: -1.5, // Mobility ~ T^-1.5
-            at: 3.3e4,
-        }
-    }
-}
-
-impl MosfetTempScaling {}
-
-//=============================================================================
-// Tests
-//=============================================================================
