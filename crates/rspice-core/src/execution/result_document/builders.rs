@@ -2542,12 +2542,30 @@ impl AnalysisResultDocument {
             });
         }
 
-        let scalars = vec![
+        let mut scalars = vec![
             count_scalar("completed_runs", "Completed runs", result.num_runs)?,
             count_scalar("failed_runs", "Failed runs", result.num_failures)?,
             count_scalar("successful_runs", "Successful runs", successful_runs)?,
             boolean_scalar("all_converged", "All runs converged", result.all_converged)?,
         ];
+        if let Some(sampling) = result.sampling {
+            scalars.push(ResultScalar::new(
+                "sampling_seed",
+                "Sampling seed",
+                None,
+                ScalarValue::Count {
+                    value: sampling.seed,
+                },
+            )?);
+            scalars.push(ResultScalar::new(
+                "sampling_policy",
+                "Sampling policy",
+                None,
+                ScalarValue::Text {
+                    value: sampling.policy.to_owned(),
+                },
+            )?);
+        }
         Ok(Self::builder(
             analysis,
             ResultPayload::MonteCarlo(MonteCarloPayload { statistics }),

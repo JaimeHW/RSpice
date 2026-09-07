@@ -241,6 +241,13 @@ the unused `CapacitorTempCoeffs::vc1/vc2` fields have also been removed.
 Semiconductor temperature behavior belongs to each device model;
 `TemperatureContext` and the passive temperature coefficients remain available.
 
+The callback `MonteCarloRunner::run` now returns `Result`; callers must
+handle configuration, entropy, and resource errors. `run_with_abort` adds
+cooperative cancellation. Unseeded runs use host entropy on native and WASM
+targets and retain the seed and sampling-policy version in the shared result
+document. Callback sampling now uses the engine's distribution arithmetic,
+including the magnitude of negative nominal parameters; its policy is version 2.
+
 | Analysis | Module |
 | :--- | :--- |
 | DC operating point and DC sweep | `analysis/dc.rs`, `engine/dc.rs` |

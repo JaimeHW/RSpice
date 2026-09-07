@@ -277,6 +277,7 @@ num-complex.workspace = true
 libm = "0.2"
 rustfft.workspace = true
 rustc-hash.workspace = true
+getrandom = { workspace = true, features = ["wasm_js"] }
 # Pure-Rust HDF5, MIT, no C dependency. `mmap` is a default feature and is off
 # here: `io::hdf5` builds a document in memory and hands the bytes to a writer,
 # so nothing on the wasm path reaches for a file or a mapping.

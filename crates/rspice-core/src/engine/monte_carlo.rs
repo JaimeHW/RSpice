@@ -1,7 +1,7 @@
 use super::{Engine, SimulationError};
 use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::analysis::monte_carlo::{
-    Distribution, MonteCarloResult, VariableStatistics, Xorshift128Plus,
+    Distribution, MonteCarloResult, MonteCarloSampling, VariableStatistics, Xorshift128Plus,
 };
 use crate::netlist::{ElementKind, SourceSpec};
 use crate::{Netlist, Value};
@@ -32,7 +32,7 @@ pub fn apply_supply_voltage_scale_with_abort(
     abort: &dyn AbortSignal,
 ) -> Result<(), SimulationError> {
     if abort.is_aborted() {
-        return Err(SimulationError::Aborted);
+        return Err(SimulationError::from_abort(abort));
     }
     if !supply.is_finite() || supply <= 0.0 {
         return Err(SimulationError::Circuit(
@@ -54,7 +54,7 @@ pub fn apply_supply_voltage_scale_with_abort(
     let mut candidates = Vec::with_capacity(source_names.len());
     for source_name in source_names {
         if abort.is_aborted() {
-            return Err(SimulationError::Aborted);
+            return Err(SimulationError::from_abort(abort));
         }
         let trimmed = source_name.trim();
         if trimmed.is_empty()
@@ -95,7 +95,7 @@ pub fn apply_supply_voltage_scale_with_abort(
     let scale = supply / nominal;
     for index in candidates {
         if abort.is_aborted() {
-            return Err(SimulationError::Aborted);
+            return Err(SimulationError::from_abort(abort));
         }
         let ElementKind::VoltageSource(spec) = &mut netlist.elements[index].kind else {
             continue;
@@ -193,7 +193,7 @@ impl Engine {
         abort: &dyn AbortSignal,
     ) -> Result<MonteCarloResult, SimulationError> {
         if abort.is_aborted() {
-            return Err(SimulationError::Aborted);
+            return Err(SimulationError::from_abort(abort));
         }
         self.ensure_valid_configuration()?;
         if num_runs == 0 {
@@ -202,17 +202,7 @@ impl Engine {
             ));
         }
         self.ensure_batch_runs(num_runs)?;
-        let spread = match distribution {
-            Distribution::Gaussian { sigma } => sigma,
-            Distribution::Uniform { tolerance } => tolerance,
-            Distribution::WorstCase { tolerance } => tolerance,
-        };
-        if !spread.is_finite() || spread < 0.0 {
-            return Err(SimulationError::Circuit(format!(
-                "Monte Carlo spread must be finite and non-negative, got {}",
-                spread
-            )));
-        }
+        distribution.validate()?;
 
         let normalized_filter: Option<HashSet<String>> = parameter_filter.and_then(|params| {
             let normalized: HashSet<String> = params
@@ -323,13 +313,11 @@ impl Engine {
             self.ensure_result_shape(num_runs, monte_params.len())?;
             for _run in 0..num_runs {
                 if abort.is_aborted() {
-                    return Err(SimulationError::Aborted);
+                    return Err(SimulationError::from_abort(abort));
                 }
                 let variations: Vec<Value> = monte_params
                     .iter()
-                    .map(|(_, nominal)| {
-                        Self::sample_monte_carlo_value(&mut rng, *nominal, distribution)
-                    })
+                    .map(|(_, nominal)| distribution.sample(&mut rng, *nominal))
                     .collect();
                 run_variations.push(variations);
             }
@@ -420,12 +408,13 @@ impl Engine {
         if workers <= 1 {
             for run_index in 0..num_runs {
                 if abort.is_aborted() {
-                    return Err(SimulationError::Aborted);
+                    return Err(SimulationError::from_abort(abort));
                 }
                 let run_netlist = materialize_run(run_index)?;
                 let outcome = match self.run_dc_op_with_abort(&run_netlist, abort) {
                     Ok(result) => Ok(Some((result.node_voltages, result.node_names))),
                     Err(error @ SimulationError::Aborted)
+                    | Err(error @ SimulationError::TimeLimitExceeded)
                     | Err(error @ SimulationError::ResourceLimit(_))
                     | Err(error @ SimulationError::Configuration(_)) => Err(error),
                     Err(_) => Ok(None),
@@ -467,6 +456,7 @@ impl Engine {
                             let outcome = match engine.run_dc_op_with_abort(&run_netlist, abort) {
                                 Ok(result) => Ok(Some((result.node_voltages, result.node_names))),
                                 Err(error @ SimulationError::Aborted)
+                                | Err(error @ SimulationError::TimeLimitExceeded)
                                 | Err(error @ SimulationError::ResourceLimit(_))
                                 | Err(error @ SimulationError::Configuration(_)) => Err(error),
                                 Err(_) => Ok(None),
@@ -478,7 +468,7 @@ impl Engine {
             });
 
             if abort.is_aborted() {
-                return Err(SimulationError::Aborted);
+                return Err(SimulationError::from_abort(abort));
             }
 
             run_outcomes = slots
@@ -492,11 +482,21 @@ impl Engine {
         }
 
         if abort.is_aborted() {
-            return Err(SimulationError::Aborted);
+            return Err(SimulationError::from_abort(abort));
         }
 
         let run_outcomes = run_outcomes.into_iter().collect::<Result<Vec<_>, _>>()?;
-        self.monte_carlo_result_from_trials(run_outcomes.into_iter().flatten(), num_runs)
+        let mut result =
+            self.monte_carlo_result_from_trials(run_outcomes.into_iter().flatten(), num_runs)?;
+        result.sampling = Some(MonteCarloSampling {
+            seed,
+            policy: if has_spectre_statistics {
+                "spectre-coordinate-splitmix64-v1"
+            } else {
+                "parameter-xoroshiro128plus-2018-v1"
+            },
+        });
+        Ok(result)
     }
 
     fn apply_monte_carlo_environment(
@@ -505,7 +505,7 @@ impl Engine {
         abort: &dyn AbortSignal,
     ) -> Result<(), SimulationError> {
         if abort.is_aborted() {
-            return Err(SimulationError::Aborted);
+            return Err(SimulationError::from_abort(abort));
         }
         if !environment.temperature_celsius.is_finite()
             || crate::constants::celsius_to_kelvin(environment.temperature_celsius) <= 0.0
@@ -664,32 +664,8 @@ impl Engine {
             variables,
             all_converged: results.len() == requested_runs,
             num_failures: requested_runs - results.len(),
+            sampling: None,
         })
-    }
-
-    pub(in crate::engine) fn sample_monte_carlo_value(
-        rng: &mut Xorshift128Plus,
-        nominal: Value,
-        distribution: Distribution,
-    ) -> Value {
-        let magnitude = nominal.abs();
-        match distribution {
-            Distribution::Gaussian { sigma } => {
-                let sigma = sigma.abs();
-                nominal + rng.next_gaussian() * magnitude * sigma
-            }
-            Distribution::Uniform { tolerance } => {
-                let tolerance = tolerance.abs();
-                let delta = magnitude * tolerance;
-                nominal + (2.0 * rng.next_f64() - 1.0) * delta
-            }
-            Distribution::WorstCase { tolerance } => {
-                let tolerance = tolerance.abs();
-                let delta = magnitude * tolerance;
-                let sign = if (rng.next_u64() & 1) == 0 { -1.0 } else { 1.0 };
-                nominal + sign * delta
-            }
-        }
     }
 }
 

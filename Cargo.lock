@@ -5353,6 +5353,7 @@ dependencies = [
  "dirs",
  "faer",
  "flate2",
+ "getrandom 0.4.3",
  "libm",
  "log",
  "miniz_oxide 0.8.9",

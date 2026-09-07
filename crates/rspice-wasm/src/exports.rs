@@ -200,6 +200,25 @@ mod wasm_tests {
     use super::*;
     use crate::js_interop::{js_array_property, js_property};
 
+    #[wasm_bindgen_test]
+    fn monte_carlo_host_entropy_is_available_and_replayable_in_wasm() {
+        use rspice_core::analysis::{MonteCarloConfig, MonteCarloRunner, Tolerance};
+        let run = |config| {
+            let mut runner = MonteCarloRunner::new(config);
+            runner.add_component("R1", 1000.0, Tolerance::uniform(5.0));
+            runner
+                .run(|variation| Ok::<_, ()>(variation.values.clone()))
+                .expect("WASM obtains host entropy without a native clock")
+        };
+        let original = run(MonteCarloConfig::new(4));
+        let seed = original.sampling.expect("resolved seed is retained").seed;
+        let replay = run(MonteCarloConfig::new(4).with_seed(seed));
+        assert_eq!(
+            original.variables["R1"].samples,
+            replay.variables["R1"].samples
+        );
+    }
+
     const DECK: &str = "browser boundary deck\n\
 V1 in 0 PULSE(0 1 0 1n 1n 20n 40n) AC 1\n\
 R1 in out 1k\n\

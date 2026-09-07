@@ -7,18 +7,26 @@
 //! - Reproducible runs via seeding
 //!
 //! # Example
-//! ```ignore
-//! // Component definitions with tolerances:
-//! // R1 1 0 1k tol=5%     - 5% uniform tolerance
-//! // R2 2 0 1k lot=2% dev=1%  - lot-to-lot + device-to-device variation
+//! ```
+//! use rspice_core::analysis::{MonteCarloConfig, MonteCarloRunner, Tolerance};
+//! use std::collections::HashMap;
 //!
 //! let config = MonteCarloConfig::new(1000).with_seed(42);
-//! let runner = MonteCarloRunner::new(config);
-//! let results = runner.run(&netlist, |n| engine.run_tran(n, 1e-3, 100e-6));
-//! println!("Mean output: {} ± {}", results.mean("V(out)"), results.std_dev("V(out)"));
+//! let mut runner = MonteCarloRunner::new(config);
+//! runner.add_component("R1", 1000.0, Tolerance::uniform(5.0));
+//! // A callback may invoke a solver or, here, evaluate a divider analytically.
+//! let results = runner.run(|values| {
+//!     let output = 1000.0 / (values.get("R1", 1000.0) + 1000.0);
+//!     Ok::<_, std::convert::Infallible>(HashMap::from([("V(out)".to_owned(), output)]))
+//! }).unwrap();
+//! assert_eq!(results.sampling.unwrap().seed, 42);
 //! ```
 
+use super::error::SimulationError;
 use crate::Value;
+use crate::abort_signal::{AbortSignal, NoAbort};
+use crate::config::SimulationConfigError;
+use crate::resource::{ResourceKind, ResourceLimitError, ResourceLimits};
 use std::collections::{BTreeMap, HashMap};
 
 //=============================================================================
@@ -64,21 +72,35 @@ impl Distribution {
         Distribution::WorstCase { tolerance }
     }
 
-    /// Sample from this distribution using a random number generator
+    pub(crate) fn validate(self) -> Result<(), SimulationConfigError> {
+        let spread = match self {
+            Self::Gaussian { sigma } => sigma,
+            Self::Uniform { tolerance } | Self::WorstCase { tolerance } => tolerance,
+        };
+        if !spread.is_finite() || spread < 0.0 {
+            return Err(SimulationConfigError::InvalidValue {
+                field: "monte_carlo.spread",
+                value: spread,
+                requirement: "finite and non-negative",
+            });
+        }
+        Ok(())
+    }
+
+    /// Sample a validated distribution about a finite nominal value.
+    /// Relative spread scales with the nominal magnitude, including negative
+    /// parameters. Batch entry points validate inputs before calling this.
     pub fn sample(&self, rng: &mut Xorshift128Plus, nominal: Value) -> Value {
+        let magnitude = nominal.abs();
         match *self {
-            Distribution::Gaussian { sigma } => {
-                let std_dev = nominal * sigma;
-                let z = rng.next_gaussian();
-                nominal + z * std_dev
-            }
+            Distribution::Gaussian { sigma } => nominal + rng.next_gaussian() * magnitude * sigma,
             Distribution::Uniform { tolerance } => {
-                let delta = nominal * tolerance;
+                let delta = magnitude * tolerance;
                 let u = rng.next_f64();
                 nominal + (2.0 * u - 1.0) * delta
             }
             Distribution::WorstCase { tolerance } => {
-                let delta = nominal * tolerance;
+                let delta = magnitude * tolerance;
                 let sign = if (rng.next_u64() & 1) == 0 { -1.0 } else { 1.0 };
                 nominal + sign * delta
             }
@@ -138,7 +160,8 @@ pub struct MonteCarloConfig {
     /// Number of simulation runs
     pub num_runs: usize,
 
-    /// Random seed for reproducibility (None = random each time)
+    /// Random seed for reproducibility. None requests OS/browser host entropy;
+    /// the resolved seed is retained in the result for replay.
     pub seed: Option<u64>,
 
     /// Number of histogram bins for output distribution
@@ -146,6 +169,8 @@ pub struct MonteCarloConfig {
 
     /// Confidence interval percentage (95 = 95%)
     pub confidence_pct: Value,
+    /// Limits enforced before simulation and before retaining outputs.
+    pub resource_limits: ResourceLimits,
 }
 
 impl MonteCarloConfig {
@@ -156,6 +181,7 @@ impl MonteCarloConfig {
             seed: None,
             histogram_bins: 50,
             confidence_pct: 95.0,
+            resource_limits: ResourceLimits::default(),
         }
     }
 
@@ -324,6 +350,13 @@ impl VariableStatistics {
     }
 }
 
+/// Seed and versioned sampling policy needed to reproduce a batch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MonteCarloSampling {
+    pub seed: u64,
+    pub policy: &'static str,
+}
+
 /// Results from a complete Monte Carlo analysis
 #[derive(Debug, Clone)]
 pub struct MonteCarloResult {
@@ -336,6 +369,8 @@ pub struct MonteCarloResult {
     pub all_converged: bool,
     /// Number of failed runs
     pub num_failures: usize,
+    /// Absent only for externally aggregated trials with no supplied provenance.
+    pub sampling: Option<MonteCarloSampling>,
 }
 
 impl MonteCarloResult {
@@ -345,6 +380,7 @@ impl MonteCarloResult {
             variables: HashMap::new(),
             all_converged: true,
             num_failures: 0,
+            sampling: None,
         }
     }
 
@@ -371,10 +407,12 @@ impl Default for MonteCarloResult {
 }
 
 //=============================================================================
-// Random Number Generator (Xorshift128+)
+// Random Number Generator (xoroshiro128+)
 //=============================================================================
 
-/// Fast PRNG suitable for Monte Carlo simulation
+/// xoroshiro128+ (2018 transition) seeded by SplitMix64.
+///
+/// The historical public type name is retained for SDK compatibility.
 pub struct Xorshift128Plus {
     s0: u64,
     s1: u64,
@@ -493,7 +531,7 @@ impl MonteCarloRunner {
     }
 
     /// Generate variation set for one run
-    pub fn generate_variations(
+    fn generate_variations(
         &self,
         rng: &mut Xorshift128Plus,
         lot_values: &HashMap<String, Value>,
@@ -522,7 +560,7 @@ impl MonteCarloRunner {
     }
 
     /// Generate lot-level variations (once per run)
-    pub fn generate_lot_variations(&self, rng: &mut Xorshift128Plus) -> HashMap<String, Value> {
+    fn generate_lot_variations(&self, rng: &mut Xorshift128Plus) -> HashMap<String, Value> {
         let mut lot_values = HashMap::new();
 
         for (name, (nominal, tol)) in &self.tolerances {
@@ -542,32 +580,115 @@ impl MonteCarloRunner {
     ///   Takes a `&VariationSet` and returns `Result<HashMap<String, Value>, E>`
     ///
     /// # Returns
-    /// `MonteCarloResult` with statistics for all output variables
-    pub fn run<F, E>(&self, mut run_simulation: F) -> MonteCarloResult
+    /// Statistics, or a configuration, resource, or host-entropy error.
+    pub fn run<F, E>(&self, run_simulation: F) -> Result<MonteCarloResult, SimulationError>
     where
         F: FnMut(&VariationSet) -> Result<HashMap<String, Value>, E>,
     {
-        let seed = self.config.seed.unwrap_or_else(|| {
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_nanos() as u64)
-                .unwrap_or(12345)
-        });
+        self.run_with_abort(run_simulation, &NoAbort)
+    }
 
+    /// Run with cooperative cancellation between sampling and callback steps.
+    /// The callback must poll the same signal during long-running solves.
+    pub fn run_with_abort<F, E>(
+        &self,
+        mut run_simulation: F,
+        abort: &dyn AbortSignal,
+    ) -> Result<MonteCarloResult, SimulationError>
+    where
+        F: FnMut(&VariationSet) -> Result<HashMap<String, Value>, E>,
+    {
+        if abort.is_aborted() {
+            return Err(SimulationError::from_abort(abort));
+        }
+        for (field, value) in [
+            ("monte_carlo.num_runs", self.config.num_runs),
+            ("monte_carlo.histogram_bins", self.config.histogram_bins),
+        ] {
+            if value == 0 {
+                return Err(SimulationConfigError::InvalidCount { field, value }.into());
+            }
+        }
+        ResourceLimitError::ensure(
+            ResourceKind::BatchRuns,
+            self.config.num_runs,
+            self.config.resource_limits.max_batch_runs,
+        )?;
+        let histogram_values = self
+            .config
+            .histogram_bins
+            .checked_mul(2)
+            .and_then(|count| count.checked_add(1))
+            .ok_or_else(|| {
+                SimulationError::Circuit(
+                    "Monte Carlo histogram bins overflow result cardinality".to_owned(),
+                )
+            })?;
+        ResourceLimitError::ensure(
+            ResourceKind::ResultValues,
+            histogram_values,
+            self.config.resource_limits.max_result_values,
+        )?;
+        if !self.config.confidence_pct.is_finite()
+            || self.config.confidence_pct <= 0.0
+            || self.config.confidence_pct >= 100.0
+        {
+            return Err(SimulationConfigError::InvalidValue {
+                field: "monte_carlo.confidence_pct",
+                value: self.config.confidence_pct,
+                requirement: "finite and strictly between 0 and 100",
+            }
+            .into());
+        }
+        for (name, (nominal, tolerance)) in &self.tolerances {
+            if name.trim().is_empty() || !nominal.is_finite() {
+                return Err(SimulationError::Circuit(format!(
+                    "Monte Carlo component '{name}' requires a nonempty name and finite nominal value",
+                )));
+            }
+            for distribution in [tolerance.lot, tolerance.dev].into_iter().flatten() {
+                distribution.validate()?;
+            }
+        }
+        let seed = match self.config.seed {
+            Some(seed) => seed,
+            None => {
+                let mut entropy = [0; 8];
+                getrandom::fill(&mut entropy).map_err(|error| {
+                    SimulationError::Circuit(format!(
+                        "Monte Carlo could not obtain a seed from the host: {error}",
+                    ))
+                })?;
+                u64::from_le_bytes(entropy)
+            }
+        };
         let mut rng = Xorshift128Plus::new(seed);
         let mut all_outputs: HashMap<String, Vec<Value>> = HashMap::new();
         let mut output_schema: Option<Vec<String>> = None;
         let mut num_failures = 0;
+        let mut sample_values = 0usize;
 
         for _run in 0..self.config.num_runs {
+            if abort.is_aborted() {
+                return Err(SimulationError::from_abort(abort));
+            }
             // Generate lot-level variations for this run
             let lot_values = self.generate_lot_variations(&mut rng);
 
             // Generate device-level variations
             let variations = self.generate_variations(&mut rng, &lot_values);
+            if variations.values.values().any(|value| !value.is_finite()) {
+                return Err(SimulationError::Circuit(
+                    "Monte Carlo variation overflowed a finite parameter value".to_owned(),
+                ));
+            }
 
             // Run simulation
-            match run_simulation(&variations) {
+            let outcome = run_simulation(&variations);
+            if abort.is_aborted() {
+                return Err(SimulationError::from_abort(abort));
+            }
+            match outcome {
                 Ok(outputs) => {
                     let mut names = outputs.keys().cloned().collect::<Vec<_>>();
                     names.sort();
@@ -580,6 +701,16 @@ impl MonteCarloRunner {
                         num_failures += 1;
                         continue;
                     }
+                    sample_values = sample_values.saturating_add(names.len());
+                    ResourceLimitError::ensure(
+                        ResourceKind::ResultValues,
+                        sample_values.saturating_add(
+                            names
+                                .len()
+                                .saturating_mul(histogram_values.saturating_add(4)),
+                        ),
+                        self.config.resource_limits.max_result_values,
+                    )?;
                     if output_schema.is_none() {
                         output_schema = Some(names.clone());
                     }
@@ -607,12 +738,19 @@ impl MonteCarloRunner {
             })
             .collect();
 
-        MonteCarloResult {
+        if abort.is_aborted() {
+            return Err(SimulationError::from_abort(abort));
+        }
+        Ok(MonteCarloResult {
             num_runs: self.config.num_runs,
             variables,
             all_converged: num_failures == 0,
             num_failures,
-        }
+            sampling: Some(MonteCarloSampling {
+                seed,
+                policy: "component-xoroshiro128plus-2018-v2",
+            }),
+        })
     }
 }
 
@@ -667,18 +805,20 @@ mod tests {
     fn monte_carlo_rejects_a_whole_nonfinite_trial_without_shortening_variables() {
         let runner = MonteCarloRunner::new(MonteCarloConfig::new(3).with_seed(7));
         let mut run = 0;
-        let result = runner.run::<_, ()>(|_| {
-            let outputs = match run {
-                0 => HashMap::from([("gain".to_string(), 1.0), ("offset".to_string(), 2.0)]),
-                1 => HashMap::from([
-                    ("gain".to_string(), Value::NAN),
-                    ("offset".to_string(), 99.0),
-                ]),
-                _ => HashMap::from([("gain".to_string(), 3.0), ("offset".to_string(), 4.0)]),
-            };
-            run += 1;
-            Ok(outputs)
-        });
+        let result = runner
+            .run::<_, ()>(|_| {
+                let outputs = match run {
+                    0 => HashMap::from([("gain".to_string(), 1.0), ("offset".to_string(), 2.0)]),
+                    1 => HashMap::from([
+                        ("gain".to_string(), Value::NAN),
+                        ("offset".to_string(), 99.0),
+                    ]),
+                    _ => HashMap::from([("gain".to_string(), 3.0), ("offset".to_string(), 4.0)]),
+                };
+                run += 1;
+                Ok(outputs)
+            })
+            .unwrap();
 
         assert_eq!(result.num_failures, 1);
         assert!(!result.all_converged);
@@ -690,14 +830,16 @@ mod tests {
     fn monte_carlo_rejects_output_schema_drift_as_a_failed_trial() {
         let runner = MonteCarloRunner::new(MonteCarloConfig::new(2).with_seed(9));
         let mut run = 0;
-        let result = runner.run::<_, ()>(|_| {
-            run += 1;
-            Ok(if run == 1 {
-                HashMap::from([("gain".to_string(), 1.0), ("offset".to_string(), 2.0)])
-            } else {
-                HashMap::from([("gain".to_string(), 3.0)])
+        let result = runner
+            .run::<_, ()>(|_| {
+                run += 1;
+                Ok(if run == 1 {
+                    HashMap::from([("gain".to_string(), 1.0), ("offset".to_string(), 2.0)])
+                } else {
+                    HashMap::from([("gain".to_string(), 3.0)])
+                })
             })
-        });
+            .unwrap();
 
         assert_eq!(result.num_failures, 1);
         assert_eq!(result.variables["gain"].samples, vec![1.0]);

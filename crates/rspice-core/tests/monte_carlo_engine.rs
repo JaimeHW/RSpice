@@ -131,7 +131,9 @@ fn callback_sampling_is_independent_of_component_registration_order() {
                 },
             );
         }
-        runner.run(|variation| Ok::<_, ()>(variation.values.clone()))
+        runner
+            .run(|variation| Ok::<_, ()>(variation.values.clone()))
+            .unwrap()
     };
     let forward = sample(false);
     let reverse = sample(true);
@@ -141,4 +143,126 @@ fn callback_sampling_is_independent_of_component_registration_order() {
             "{name}"
         );
     }
+}
+
+#[test]
+fn callback_host_seed_can_replay_the_exact_samples() {
+    let run = |config| {
+        let mut runner = MonteCarloRunner::new(config);
+        runner.add_component("R1", -1000.0, Tolerance::uniform(5.0));
+        runner
+            .run(|variation| Ok::<_, ()>(variation.values.clone()))
+            .unwrap()
+    };
+    let original = run(MonteCarloConfig::new(12));
+    let sampling = original.sampling.expect("host seed is retained");
+    let replay = run(MonteCarloConfig::new(12).with_seed(sampling.seed));
+    assert_eq!(replay.sampling, original.sampling);
+    assert_eq!(
+        replay.variables["R1"].samples,
+        original.variables["R1"].samples
+    );
+}
+
+#[test]
+fn callback_configuration_is_rejected_before_simulation() {
+    for case in 0..6 {
+        let mut config = MonteCarloConfig::new(3).with_seed(1);
+        match case {
+            0 => config.num_runs = 0,
+            1 => config.histogram_bins = 0,
+            2 => config.histogram_bins = usize::MAX,
+            3 => config.confidence_pct = f64::NAN,
+            4 => config.resource_limits.max_batch_runs = 2,
+            _ => config.resource_limits.max_result_values = 2,
+        }
+        let runner = MonteCarloRunner::new(config);
+        assert!(
+            runner
+                .run::<_, ()>(|_| panic!("invalid configuration invoked callback"))
+                .is_err()
+        );
+    }
+    for (nominal, spread) in [(f64::NAN, 0.1), (1.0, -0.1), (1.0, f64::INFINITY)] {
+        let mut runner = MonteCarloRunner::new(MonteCarloConfig::new(3).with_seed(1));
+        runner.add_component(
+            "R1",
+            nominal,
+            Tolerance {
+                lot: None,
+                dev: Some(Distribution::Uniform { tolerance: spread }),
+            },
+        );
+        assert!(
+            runner
+                .run::<_, ()>(|_| panic!("invalid component invoked callback"))
+                .is_err()
+        );
+    }
+}
+
+#[test]
+fn callback_result_budget_accounts_for_samples_and_histograms() {
+    let mut config = MonteCarloConfig::new(4).with_seed(1);
+    config.histogram_bins = 1;
+    config.resource_limits.max_result_values = 9;
+    let runner = MonteCarloRunner::new(config);
+    let mut calls = 0;
+    let error = runner
+        .run::<_, ()>(|_| {
+            calls += 1;
+            Ok(std::collections::HashMap::from([(
+                "out".to_owned(),
+                calls as f64,
+            )]))
+        })
+        .unwrap_err();
+    assert_eq!(calls, 3);
+    assert!(matches!(
+        error,
+        rspice_core::SimulationError::ResourceLimit(_)
+    ));
+}
+
+#[test]
+fn callback_cancellation_preserves_the_deadline_reason() {
+    struct Deadline(std::sync::atomic::AtomicBool);
+    impl rspice_core::AbortSignal for Deadline {
+        fn is_aborted(&self) -> bool {
+            self.0.load(std::sync::atomic::Ordering::Relaxed)
+        }
+        fn abort_reason(&self) -> rspice_core::AbortReason {
+            rspice_core::AbortReason::TimeLimit
+        }
+    }
+    let deadline = Deadline(std::sync::atomic::AtomicBool::new(false));
+    let runner = MonteCarloRunner::new(MonteCarloConfig::new(2).with_seed(1));
+    let error = runner
+        .run_with_abort::<_, ()>(
+            |_| {
+                deadline.0.store(true, std::sync::atomic::Ordering::Relaxed);
+                Err(())
+            },
+            &deadline,
+        )
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        rspice_core::SimulationError::TimeLimitExceeded
+    ));
+    let netlist = Netlist::parse(PARAMETRIC_DIVIDER).unwrap();
+    let error = Engine::default()
+        .run_monte_carlo_with_options_and_abort(
+            &netlist,
+            2,
+            1,
+            Distribution::uniform(0.1),
+            None,
+            &deadline,
+        )
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        rspice_core::SimulationError::TimeLimitExceeded
+    ));
 }

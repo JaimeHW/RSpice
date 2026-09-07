@@ -13,7 +13,7 @@ use crate::analysis::fourier::{FourierResult, HarmonicComponent};
 use crate::analysis::harmonic_balance::{
     HbConfig, HbReactiveKind, HbReactiveSpectrum, HbResult, SpectralBranchCurrent, SpectralVoltage,
 };
-use crate::analysis::monte_carlo::{MonteCarloResult, VariableStatistics};
+use crate::analysis::monte_carlo::{MonteCarloResult, MonteCarloSampling, VariableStatistics};
 use crate::analysis::noise::{
     NoiseContribution, NoiseResult, NoiseSourceIdentity, NoiseSourceType,
     PortNoiseCorrelationResult,
@@ -303,6 +303,31 @@ fn monte_carlo_documents_validate_trial_accounting() {
     result.num_failures = 7;
     result.variables.clear();
     assert!(AnalysisResultDocument::from_monte_carlo(analysis, &result).is_ok());
+}
+
+#[test]
+fn monte_carlo_documents_retain_exact_seed_and_sampling_policy() {
+    let mut result = monte_carlo_result();
+    result.sampling = Some(MonteCarloSampling {
+        seed: u64::MAX,
+        policy: "parameter-xoroshiro128plus-2018-v1",
+    });
+    let document =
+        AnalysisResultDocument::from_monte_carlo(instance(AnalysisKind::MonteCarlo), &result)
+            .unwrap()
+            .build()
+            .unwrap();
+    let restored = AnalysisResultDocument::from_json(&document.to_json().unwrap()).unwrap();
+    assert_eq!(
+        scalar_of(&restored, "sampling_seed").value(),
+        &ScalarValue::Count { value: u64::MAX }
+    );
+    assert_eq!(
+        scalar_of(&restored, "sampling_policy").value(),
+        &ScalarValue::Text {
+            value: "parameter-xoroshiro128plus-2018-v1".to_owned()
+        }
+    );
 }
 
 fn pss_result() -> PssResult {
