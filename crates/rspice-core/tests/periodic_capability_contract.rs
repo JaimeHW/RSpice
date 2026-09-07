@@ -34,7 +34,7 @@ fn is_capability_rejection(message: &str) -> bool {
     message.contains("HB runtime does not yet support")
         || message.contains("MNA is unavailable")
         || message.contains("Pole-zero analysis does not yet support")
-        || message.contains("PSS transient continuation is unavailable")
+        || message.contains("PSS state evolution is unavailable")
         || message.contains("HB Envelope continuation is unavailable")
         || message.contains("cyclostationary colored-noise folding")
 }
@@ -254,7 +254,7 @@ c1 out 0 100p
             .expect_err("an uncaptured period-map state must fail before the periodic solve")
             .to_string();
         assert!(
-            message.contains("PSS transient continuation is unavailable"),
+            message.contains("PSS state evolution is unavailable"),
             "the period-map preflight must own this rejection: {message}"
         );
         assert!(

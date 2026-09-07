@@ -79,7 +79,7 @@ impl PssAcceptedStepHistory {
 
 const PSS_KRYLOV_STATE_THRESHOLD: usize = 12;
 const PSS_KRYLOV_REL_TOL: Value = 1e-9;
-const PSS_OPERATING_POINT_IDENTITY_VERSION: u32 = 1;
+const PSS_OPERATING_POINT_IDENTITY_VERSION: u32 = 2;
 
 fn pss_identity_field(hasher: &mut blake3::Hasher, name: &str, bytes: &[u8]) {
     hasher.update(&(name.len() as u64).to_le_bytes());
@@ -1523,7 +1523,6 @@ impl Engine {
                 netlist,
                 config,
                 &std::collections::BTreeSet::new(),
-                false,
                 Some(dc_seed),
                 abort,
             )
@@ -1598,7 +1597,6 @@ impl Engine {
                 netlist,
                 config,
                 &std::collections::BTreeSet::new(),
-                false,
                 Some(dc_seed),
                 abort,
             )?;
@@ -1719,7 +1717,6 @@ impl Engine {
                 netlist,
                 config,
                 &frozen_source_set,
-                true,
                 None,
                 abort,
             )?;
@@ -1731,7 +1728,7 @@ impl Engine {
         // The pre-solve check in `run_pss_with_state_and_frozen_sources_abort`
         // is the authoritative gate. Repeat it against the returned circuit
         // so a future refactor cannot accidentally bypass the allowlist.
-        Self::ensure_pss_continuation_state_supported(&circuit)?;
+        Self::ensure_pss_state_supported(&circuit)?;
         let mut frozen_sources = circuit
             .voltage_sources
             .names
@@ -1852,18 +1849,16 @@ impl Engine {
         engine.run_tran_resume_with_abort(netlist, &checkpoint, tstop, max_step, abort)
     }
 
-    /// Refuse a continuation whose state the shooting period map cannot carry.
+    /// Refuse any orbit whose state the shooting period map cannot carry.
     ///
     /// The blockers come from the declared `PssStateMap` capability of every
     /// family present, so a device family that gains or loses period-map state
     /// changes this answer by editing its declaration, not this function.
-    fn ensure_pss_continuation_state_supported(
-        circuit: &CircuitData,
-    ) -> Result<(), SimulationError> {
+    fn ensure_pss_state_supported(circuit: &CircuitData) -> Result<(), SimulationError> {
         match periodic_capability::summarize(&periodic_capability::pss_state_gaps(circuit)) {
             None => Ok(()),
             Some(blockers) => Err(SimulationError::Circuit(format!(
-                "PSS transient continuation is unavailable because the circuit contains {blockers}; the shooting period map advances only ordinary capacitor and inductor companion history exactly"
+                "PSS state evolution is unavailable because the circuit contains {blockers}; the shooting period map advances only ordinary capacitor and inductor companion history exactly"
             ))),
         }
     }
@@ -1952,7 +1947,6 @@ impl Engine {
             netlist,
             config,
             &std::collections::BTreeSet::new(),
-            false,
             None,
             abort,
         )
@@ -1963,7 +1957,6 @@ impl Engine {
         netlist: &Netlist,
         config: PssConfig,
         frozen_sources: &std::collections::BTreeSet<String>,
-        require_exact_continuation_state: bool,
         dc_seed: Option<&PssDcOperatingPointSeed>,
         abort: &dyn AbortSignal,
     ) -> Result<(PssAnalysisResult, CircuitData, StaticMatrix, Vec<Value>), SimulationError> {
@@ -1978,9 +1971,7 @@ impl Engine {
         Self::freeze_pss_independent_sources(&mut circuit, frozen_sources)?;
         Self::ensure_no_mixed_signal_analysis(&circuit, "PSS analysis")?;
         Self::ensure_supported_xyce_memristor_small_signal(&circuit, "PSS")?;
-        if require_exact_continuation_state {
-            Self::ensure_pss_continuation_state_supported(&circuit)?;
-        }
+        Self::ensure_pss_state_supported(&circuit)?;
         let mut matrix = self.build_matrix(&circuit)?;
         circuit.link_indices(&matrix);
 
@@ -4070,7 +4061,7 @@ mod tests {
             1.0e-9,
         ));
 
-        let error = Engine::ensure_pss_continuation_state_supported(&circuit)
+        let error = Engine::ensure_pss_state_supported(&circuit)
             .expect_err("transmission-line continuation must fail closed");
         assert!(
             error

@@ -46,6 +46,54 @@ fn dc_seed(engine: &Engine, netlist: &Netlist) -> PssDcOperatingPointSeed {
 }
 
 #[test]
+fn every_pss_entry_point_rejects_unadvanced_diode_charge() {
+    // The omitted junction charge changes this circuit's AC and transient
+    // amplitude by a factor of six. A converged memoryless orbit is invalid.
+    let netlist = Netlist::parse(
+        "diode charge\nV1 in 0 SIN(-1 0.01 1meg) AC 1\nR1 in out 1k\n\
+         Ckeep out 0 1p\nD1 out 0 dm\n.model dm D(IS=1e-30 CJO=1n M=0 TT=0)\n.end\n",
+    )
+    .unwrap();
+    let engine = Engine::default();
+    let seed = dc_seed(&engine, &netlist);
+    let routes = [
+        engine.run_pss(&netlist, compact_config()).map(|_| ()),
+        engine
+            .run_pss_operating_point_with_abort(
+                &netlist,
+                compact_config(),
+                &rspice_core::abort_signal::NoAbort,
+            )
+            .map(|_| ()),
+        engine
+            .run_pss_with_dc_seed(&netlist, compact_config(), &seed)
+            .map(|_| ()),
+        engine
+            .run_pss_operating_point_with_dc_seed(&netlist, compact_config(), &seed)
+            .map(|_| ()),
+        engine
+            .run_pss_with_continuation_state(&netlist, compact_config())
+            .map(|_| ()),
+        engine
+            .run_pss_with_frozen_source_continuation_state(&netlist, compact_config(), &[])
+            .map(|_| ()),
+    ];
+    for result in routes {
+        let message = result
+            .expect_err("unadvanced charge cannot produce a valid orbit")
+            .to_string();
+        assert!(
+            message.contains("PSS state evolution is unavailable"),
+            "{message}"
+        );
+        assert!(
+            message.contains("diode junction/diffusion charge history"),
+            "{message}"
+        );
+    }
+}
+
+#[test]
 fn seeded_pss_consumes_exact_dc_state() {
     let netlist = rc_netlist();
     let engine = Engine::new(SimulationConfig::default());
