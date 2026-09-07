@@ -32,7 +32,7 @@
 use smol_str::SmolStr;
 use std::collections::{HashMap, HashSet};
 
-use crate::disciplines::is_standard_flow_access;
+use crate::ast::AccessKind;
 
 use super::cfg::{
     CfgBinaryOp, CfgDdxAxis, CfgFunction, CfgIntegerBitwiseOp, CfgLaplaceTransfer, CfgTerminator,
@@ -1950,11 +1950,14 @@ impl<'a> CfgLowerer<'a> {
                 then_expr,
                 else_expr,
             } => self.conditional_expr(*condition, *then_expr, *else_expr),
-            HirExprKind::BranchAccess { access, pos, neg } => {
-                self.branch_access(access, pos, neg.as_deref(), span)
-            }
-            HirExprKind::NamedBranchAccess { access, name } => {
-                self.named_branch_access(access, name, span)
+            HirExprKind::BranchAccess {
+                access,
+                kind,
+                pos,
+                neg,
+            } => self.branch_access(access, *kind, pos, neg.as_deref(), span),
+            HirExprKind::NamedBranchAccess { kind, name, .. } => {
+                self.named_branch_access(*kind, name, span)
             }
             HirExprKind::SystemFunction { name, args } => self.system_function(name, args, span),
             // A dynamic operator's only spelling. `absdelay(x, d)` reaches the
@@ -2549,6 +2552,7 @@ impl<'a> CfgLowerer<'a> {
     fn branch_access(
         &mut self,
         access: &SmolStr,
+        kind: AccessKind,
         pos: &SmolStr,
         neg: Option<&str>,
         span: SourceSpanRef,
@@ -2562,7 +2566,7 @@ impl<'a> CfgLowerer<'a> {
             return self.real_constant(0.0);
         };
 
-        if is_flow_access(access.as_str()) {
+        if kind == AccessKind::Flow {
             let Some((unknown, reversed)) = self.branch_unknown_by_nodes(pos_node, neg_node) else {
                 if let Some(contributed) = self.contributed_flow(pos_node, neg_node) {
                     return contributed;
@@ -2826,7 +2830,7 @@ impl<'a> CfgLowerer<'a> {
 
     fn named_branch_access(
         &mut self,
-        access: &SmolStr,
+        kind: AccessKind,
         name: &SmolStr,
         span: SourceSpanRef,
     ) -> ValueId {
@@ -2841,7 +2845,7 @@ impl<'a> CfgLowerer<'a> {
         };
         let (pos_node, neg_node, id) = (branch.pos_node, branch.neg_node, branch.id);
 
-        if is_flow_access(access.as_str()) {
+        if kind == AccessKind::Flow {
             if let Some((unknown, reversed)) = self.branch_unknown_by_nodes(pos_node, neg_node) {
                 let flow = self.leaf(
                     LeafKey::BranchUnknownFlow(unknown),
@@ -3354,13 +3358,13 @@ impl<'a> CfgLowerer<'a> {
             .get(usize::from(probe))
             .map(|expression| expression.kind.clone());
         match kind {
-            Some(HirExprKind::BranchAccess { access, pos, neg }) => {
+            Some(HirExprKind::BranchAccess { kind, pos, neg, .. }) => {
                 let pos_node = self.endpoint(&pos, span).ok()?;
                 let neg_node = match neg {
                     Some(neg) => self.endpoint(&neg, span).ok()?,
                     None => None,
                 };
-                if !is_flow_access(&access) {
+                if kind == AccessKind::Potential {
                     return Some(CfgDdxAxis::Potential { pos_node, neg_node });
                 }
                 match self.branch_unknown_by_nodes(pos_node, neg_node) {
@@ -3374,13 +3378,13 @@ impl<'a> CfgLowerer<'a> {
                     }
                 }
             }
-            Some(HirExprKind::NamedBranchAccess { access, name }) => {
+            Some(HirExprKind::NamedBranchAccess { kind, name, .. }) => {
                 let branch = self.mir.branches.iter().find(|branch| branch.name == name);
                 let Some(branch) = branch else {
                     self.unsupported(span, format!("unknown ddx probe branch '{name}'"));
                     return None;
                 };
-                if !is_flow_access(&access) {
+                if kind == AccessKind::Potential {
                     return Some(CfgDdxAxis::Potential {
                         pos_node: branch.pos_node,
                         neg_node: branch.neg_node,
@@ -3600,10 +3604,6 @@ fn is_noise_name(name: &str) -> bool {
         name.trim_start_matches('$'),
         "white_noise" | "flicker_noise" | "noise_table" | "noise_table_log"
     )
-}
-
-fn is_flow_access(access: &str) -> bool {
-    is_standard_flow_access(access)
 }
 
 fn is_predicate(op: CfgBinaryOp) -> bool {

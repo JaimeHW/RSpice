@@ -3348,7 +3348,6 @@ impl SemanticAnalyzer {
 
         let (branch_name, is_current, declared_branch) =
             self.resolve_contribution_target(&contrib.target, module, contrib.span)?;
-        self.validate_branch_access_compatible(&contrib.target, contrib.span)?;
 
         self.validate_direct_zi_contribution(&contrib.value, contrib.span)?;
 
@@ -3564,7 +3563,6 @@ impl SemanticAnalyzer {
 
         let (branch_name, is_current, declared_branch) =
             self.resolve_contribution_target(&stmt.branch, module, stmt.span)?;
-        self.validate_branch_access_compatible(&stmt.branch, stmt.span)?;
 
         let lhs = self.lower_expression_with_side_effects(&stmt.lhs, module, sink)?;
         let rhs = self.lower_expression_with_side_effects(&stmt.rhs, module, sink)?;
@@ -3588,12 +3586,14 @@ impl SemanticAnalyzer {
         let fallback = Expression::BranchAccess(match &stmt.branch {
             BranchAccess::Nodes { pos, neg, span, .. } => BranchAccess::Nodes {
                 access: "I".into(),
+                kind: Some(AccessKind::Flow),
                 pos: pos.clone(),
                 neg: neg.clone(),
                 span: *span,
             },
             BranchAccess::Branch { name, span, .. } => BranchAccess::Branch {
                 access: "I".into(),
+                kind: Some(AccessKind::Flow),
                 name: name.clone(),
                 span: *span,
             },
@@ -3766,12 +3766,9 @@ impl SemanticAnalyzer {
         module: &AnalyzedModule,
         span: Span,
     ) -> CompileResult<(SmolStr, bool, Option<SmolStr>)> {
+        let is_current = self.resolve_branch_access_kind(target, span)? == AccessKind::Flow;
         match target {
-            BranchAccess::Nodes {
-                access, pos, neg, ..
-            } => {
-                let is_current = self.resolve_access_kind(access, span)?;
-
+            BranchAccess::Nodes { pos, neg, .. } => {
                 // V(name)/I(name) where `name` is a declared branch resolves
                 // through the branch table
                 if neg.is_none()
@@ -3801,8 +3798,7 @@ impl SemanticAnalyzer {
                     Ok((branch.into(), is_current, None))
                 }
             }
-            BranchAccess::Branch { name, access, .. } => {
-                let is_current = self.resolve_access_kind(access, span)?;
+            BranchAccess::Branch { name, .. } => {
                 match module.branches.iter().find(|b| b.name == *name) {
                     Some(branch) => {
                         let branch_str = if branch.neg_node.is_empty() {
@@ -3825,9 +3821,51 @@ impl SemanticAnalyzer {
         }
     }
 
-    /// Resolve and classify an access function. Unknown access names must
-    /// not silently become potential contributions.
-    fn resolve_access_kind(&self, access: &str, span: Span) -> CompileResult<bool> {
+    fn resolve_branch_access_kind(
+        &self,
+        access_expr: &BranchAccess,
+        span: Span,
+    ) -> CompileResult<AccessKind> {
+        let (access, pos, neg) = match access_expr {
+            BranchAccess::Nodes {
+                access, pos, neg, ..
+            } => (access.as_str(), pos.as_str(), neg.as_deref()),
+            BranchAccess::Branch { access, name, .. } => (access.as_str(), name.as_str(), None),
+        };
+        let pos_kind = self.resolve_access_with_symbol(access, pos, span)?;
+        let neg_kind = neg
+            .map(|neg| self.resolve_access_with_symbol(access, neg, span))
+            .transpose()?
+            .flatten();
+        if let (Some(pos), Some(neg)) = (pos_kind, neg_kind)
+            && pos != neg
+        {
+            return Err(CompileError::Semantic(SemanticError::new(
+                SemanticErrorKind::InvalidContribution(format!(
+                    "access function '{access}' has different physical roles at the branch endpoints"
+                )),
+                span,
+            )));
+        }
+        pos_kind
+            .or(neg_kind)
+            .or_else(|| self.disciplines.access_kind("electrical", access))
+            .ok_or_else(|| {
+                CompileError::Semantic(SemanticError::new(
+                    SemanticErrorKind::InvalidContribution(format!(
+                        "access function '{access}' has no resolved branch discipline"
+                    )),
+                    span,
+                ))
+            })
+    }
+
+    fn resolve_access_with_symbol(
+        &self,
+        access: &str,
+        name: &str,
+        span: Span,
+    ) -> CompileResult<Option<AccessKind>> {
         if self.disciplines.resolve_access(access).is_none() {
             return Err(CompileError::Semantic(SemanticError::new(
                 SemanticErrorKind::InvalidContribution(format!(
@@ -3836,47 +3874,9 @@ impl SemanticAnalyzer {
                 span,
             )));
         }
-        Ok(self.is_flow_access(access))
-    }
-
-    fn validate_branch_access_compatible(
-        &self,
-        access_expr: &BranchAccess,
-        span: Span,
-    ) -> CompileResult<()> {
-        match access_expr {
-            BranchAccess::Nodes {
-                access, pos, neg, ..
-            } => {
-                self.validate_access_compatible_with_symbol(access, pos, span)?;
-                if let Some(neg) = neg {
-                    self.validate_access_compatible_with_symbol(access, neg, span)?;
-                }
-            }
-            BranchAccess::Branch { access, name, .. } => {
-                self.validate_access_compatible_with_symbol(access, name, span)?;
-            }
-        }
-        Ok(())
-    }
-
-    fn validate_access_compatible_with_symbol(
-        &self,
-        access: &str,
-        name: &str,
-        span: Span,
-    ) -> CompileResult<()> {
-        let Some(nature) = self.disciplines.resolve_access(access) else {
-            return Err(CompileError::Semantic(SemanticError::new(
-                SemanticErrorKind::InvalidContribution(format!(
-                    "unknown access function '{access}'"
-                )),
-                span,
-            )));
-        };
         let Some(symbol) = self.symbols.lookup(name) else {
             if is_global_ground_name(name) {
-                return Ok(());
+                return Ok(None);
             }
             return Err(CompileError::Semantic(SemanticError::new(
                 SemanticErrorKind::UndeclaredSymbol { name: name.into() },
@@ -3896,16 +3896,14 @@ impl SemanticAnalyzer {
             )));
         }
         let discipline = symbol.attrs.discipline.as_deref().unwrap_or("electrical");
-        let Some(discipline_def) = self.disciplines.get_discipline(discipline) else {
+        if self.disciplines.get_discipline(discipline).is_none() {
             return Err(CompileError::Semantic(SemanticError::new(
                 SemanticErrorKind::UndefinedDiscipline(discipline.to_string()),
                 span,
             )));
-        };
-        if discipline_def.potential.as_deref() == Some(nature.name.as_str())
-            || discipline_def.flow.as_deref() == Some(nature.name.as_str())
-        {
-            return Ok(());
+        }
+        if let Some(kind) = self.disciplines.access_kind(discipline, access) {
+            return Ok(Some(kind));
         }
 
         Err(CompileError::Semantic(SemanticError::new(
@@ -3914,14 +3912,6 @@ impl SemanticAnalyzer {
             )),
             span,
         )))
-    }
-
-    /// Whether the access function refers to a flow (current-like) quantity
-    fn is_flow_access(&self, access: &str) -> bool {
-        if access == "I" {
-            return true;
-        }
-        self.disciplines.is_flow_access(access)
     }
 
     fn analyze_assignment(
@@ -4862,8 +4852,8 @@ impl SemanticAnalyzer {
                 expr.clone()
             }
             Expression::BranchAccess(access) => {
-                self.validate_branch_access_compatible(access, access.span())?;
-                expr.clone()
+                let kind = self.resolve_branch_access_kind(access, access.span())?;
+                Expression::BranchAccess(access.with_kind(kind))
             }
             Expression::Binary(b) => {
                 let left = self.lower_expression(&b.left)?;
@@ -5001,12 +4991,13 @@ impl SemanticAnalyzer {
                     });
                     let access_expr = BranchAccess::Nodes {
                         access: call.name.clone(),
+                        kind: None,
                         pos: nodes.next().unwrap(),
                         neg: nodes.next(),
                         span: call.span,
                     };
-                    self.validate_branch_access_compatible(&access_expr, call.span)?;
-                    return Ok(Expression::BranchAccess(access_expr));
+                    let kind = self.resolve_branch_access_kind(&access_expr, call.span)?;
+                    return Ok(Expression::BranchAccess(access_expr.with_kind(kind)));
                 }
 
                 if let Some(func) = self.user_functions.get(&call.name) {

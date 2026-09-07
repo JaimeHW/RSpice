@@ -7,11 +7,11 @@
 //! - System function conversion ($vt, $temperature)
 //! - Analog operator translation (ddt, idt, limexp)
 
+use crate::ast::AccessKind;
 use crate::ast::{
     AnalogOperator, ArrayLiteralElement, BinaryOp, BranchAccess, CallExpr, Expression, Identifier,
     NumberLit, SystemFunction,
 };
-use crate::disciplines::is_standard_flow_access;
 use crate::error::{CodeGenError, CodeGenErrorKind, CompileResult};
 use crate::ir::{BranchRef, DdxAxis, IrExpr, IrFunction};
 use crate::semantic::AnalyzedModule;
@@ -538,6 +538,7 @@ impl<'a> ExprConverter<'a> {
     /// is legal only when topology gives it a branch-current unknown; inferred
     /// contribution and terminal currents are dependent values, not axes.
     fn convert_ddx_probe(&self, probe: &BranchAccess) -> CompileResult<DdxAxis> {
+        let kind = Self::resolved_access_kind(probe)?;
         let unknown_node = |name: &str| {
             CodeGenError::new(CodeGenErrorKind::InvalidExpression(format!(
                 "Unknown node: {name}"
@@ -549,9 +550,7 @@ impl<'a> ExprConverter<'a> {
             )))
         };
         match probe {
-            BranchAccess::Nodes {
-                access, pos, neg, ..
-            } => {
+            BranchAccess::Nodes { pos, neg, .. } => {
                 let (pos_node, neg_node) = if neg.is_none()
                     && let Some((pos_node, neg_node)) = self.ctx.branch_nodes(pos)
                 {
@@ -565,7 +564,7 @@ impl<'a> ExprConverter<'a> {
                         .unwrap_or_else(|| self.ctx.ground());
                     (pos_node, neg_node)
                 };
-                if is_standard_flow_access(access) {
+                if kind == AccessKind::Flow {
                     let Some((ordinal, reversed)) =
                         self.ctx.branch_current_axis(pos_node, neg_node)
                     else {
@@ -582,7 +581,7 @@ impl<'a> ExprConverter<'a> {
                     })
                 }
             }
-            BranchAccess::Branch { access, name, .. } => {
+            BranchAccess::Branch { name, .. } => {
                 let (pos_node, neg_node) = if let Some(nodes) = self.ctx.branch_nodes(name) {
                     nodes
                 } else {
@@ -593,7 +592,7 @@ impl<'a> ExprConverter<'a> {
                         self.ctx.ground(),
                     )
                 };
-                if is_standard_flow_access(access) {
+                if kind == AccessKind::Flow {
                     let Some((ordinal, reversed)) =
                         self.ctx.branch_current_axis(pos_node, neg_node)
                     else {
@@ -1972,15 +1971,14 @@ impl<'a> ExprConverter<'a> {
 
     /// Convert a branch access expression
     fn convert_branch_access(&self, access: &BranchAccess) -> CompileResult<IrExpr> {
+        let kind = Self::resolved_access_kind(access)?;
         match access {
-            BranchAccess::Nodes {
-                access, pos, neg, ..
-            } => {
+            BranchAccess::Nodes { pos, neg, .. } => {
                 // A single-name access may refer to a declared named branch
                 if neg.is_none()
                     && let Some((pos_idx, neg_idx)) = self.ctx.branch_nodes(pos)
                 {
-                    return Self::access_to_ir(access, pos_idx, neg_idx);
+                    return Self::access_to_ir(kind, pos_idx, neg_idx);
                 }
 
                 let pos_idx = self.ctx.node_index(pos).ok_or_else(|| {
@@ -2003,9 +2001,9 @@ impl<'a> ExprConverter<'a> {
                     .transpose()?
                     .unwrap_or(self.ctx.ground());
 
-                Self::access_to_ir(access, pos_idx, neg_idx)
+                Self::access_to_ir(kind, pos_idx, neg_idx)
             }
-            BranchAccess::Branch { access, name, .. } => {
+            BranchAccess::Branch { name, .. } => {
                 let (pos_idx, neg_idx) = if let Some(nodes) = self.ctx.branch_nodes(name) {
                     nodes
                 } else {
@@ -2017,7 +2015,7 @@ impl<'a> ExprConverter<'a> {
                     })?;
                     (pos_idx, self.ctx.ground())
                 };
-                Self::access_to_ir(access, pos_idx, neg_idx)
+                Self::access_to_ir(kind, pos_idx, neg_idx)
             }
         }
     }
@@ -2026,13 +2024,20 @@ impl<'a> ExprConverter<'a> {
     ///
     /// Potential accesses (V, Temp, Pos, ...) read the node-pair potential;
     /// flow accesses (I, Pwr, ...) read the branch flow.
-    fn access_to_ir(access: &str, pos: usize, neg: usize) -> CompileResult<IrExpr> {
-        match access {
-            access if is_standard_flow_access(access) => Ok(IrExpr::Current(pos, neg)),
-            // All potential-natured accesses behave like V over the unified
-            // node space
-            _ => Ok(IrExpr::Voltage(pos, neg)),
+    fn access_to_ir(kind: AccessKind, pos: usize, neg: usize) -> CompileResult<IrExpr> {
+        match kind {
+            AccessKind::Flow => Ok(IrExpr::Current(pos, neg)),
+            AccessKind::Potential => Ok(IrExpr::Voltage(pos, neg)),
         }
+    }
+
+    fn resolved_access_kind(access: &BranchAccess) -> CompileResult<AccessKind> {
+        access.kind().ok_or_else(|| {
+            CodeGenError::new(CodeGenErrorKind::InvalidExpression(
+                "unresolved branch access role".into(),
+            ))
+            .into()
+        })
     }
 
     /// Convert an analog operator
@@ -2637,6 +2642,7 @@ mod tests {
             args: vec![
                 Expression::BranchAccess(BranchAccess::Nodes {
                     access: "V".into(),
+                    kind: Some(AccessKind::Potential),
                     pos: "p".into(),
                     neg: Some("n".into()),
                     span: Span::dummy(),
@@ -2792,6 +2798,7 @@ mod tests {
         let voltage = || {
             Expression::BranchAccess(BranchAccess::Nodes {
                 access: "V".into(),
+                kind: Some(AccessKind::Potential),
                 pos: "p".into(),
                 neg: Some("n".into()),
                 span: Span::dummy(),
@@ -2839,6 +2846,7 @@ mod tests {
                 number(1.0),
                 Expression::BranchAccess(BranchAccess::Nodes {
                     access: "I".into(),
+                    kind: Some(AccessKind::Flow),
                     pos: "p".into(),
                     neg: Some("n".into()),
                     span: Span::dummy(),
@@ -2869,6 +2877,7 @@ mod tests {
         let current = || {
             Expression::BranchAccess(BranchAccess::Nodes {
                 access: "I".into(),
+                kind: Some(AccessKind::Flow),
                 pos: "p".into(),
                 neg: Some("n".into()),
                 span: Span::dummy(),
@@ -2895,7 +2904,7 @@ mod tests {
     }
 
     #[test]
-    fn ddx_classifies_magnetic_mmf_as_potential_and_phi_as_flow() {
+    fn ddx_preserves_resolved_magnetic_access_roles() {
         let mut context = empty_context();
         context.node_map.insert("p".into(), 0);
         context.node_map.insert("n".into(), 1);
@@ -2909,6 +2918,11 @@ mod tests {
                     number(1.0),
                     Expression::BranchAccess(BranchAccess::Nodes {
                         access: access.into(),
+                        kind: Some(if access == "Phi" {
+                            AccessKind::Flow
+                        } else {
+                            AccessKind::Potential
+                        }),
                         pos: "p".into(),
                         neg: Some("n".into()),
                         span: Span::dummy(),

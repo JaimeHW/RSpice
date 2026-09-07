@@ -638,6 +638,13 @@ pub struct IndirectContributionStmt {
     pub span: Span,
 }
 
+/// A nature's physical role in the accessed branch's discipline.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum AccessKind {
+    Potential,
+    Flow,
+}
+
 /// Branch access: `V(a)`, `V(a, b)`, `I(a)`, `I(a, b)`, `I(<branch>)`
 #[derive(Debug, Clone)]
 pub enum BranchAccess {
@@ -645,6 +652,8 @@ pub enum BranchAccess {
     Nodes {
         /// Access function (V, I, etc.)
         access: SmolStr,
+        /// Resolved by semantic analysis, never inferred from the spelling.
+        kind: Option<AccessKind>,
         /// Positive node
         pos: SmolStr,
         /// Negative node (None for single-ended)
@@ -656,6 +665,8 @@ pub enum BranchAccess {
     Branch {
         /// Access function
         access: SmolStr,
+        /// Resolved by semantic analysis, never inferred from the spelling.
+        kind: Option<AccessKind>,
         /// Branch name
         name: SmolStr,
         /// Source span
@@ -664,6 +675,20 @@ pub enum BranchAccess {
 }
 
 impl BranchAccess {
+    pub fn kind(&self) -> Option<AccessKind> {
+        match self {
+            Self::Nodes { kind, .. } | Self::Branch { kind, .. } => *kind,
+        }
+    }
+
+    pub fn with_kind(&self, resolved: AccessKind) -> Self {
+        let mut result = self.clone();
+        match &mut result {
+            Self::Nodes { kind, .. } | Self::Branch { kind, .. } => *kind = Some(resolved),
+        }
+        result
+    }
+
     pub fn span(&self) -> Span {
         match self {
             BranchAccess::Nodes { span, .. } | BranchAccess::Branch { span, .. } => *span,

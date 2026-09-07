@@ -19,6 +19,7 @@
 
 use std::collections::{HashMap, HashSet};
 
+use crate::ast::AccessKind;
 use crate::canonical_ir::{CanonicalIrArtifact, ExprId, HirAnalogOperator, HirExprKind};
 
 use super::RustBackendError;
@@ -156,12 +157,15 @@ impl ExprEmitter<'_> {
         let value_expr = match &expression.kind {
             HirExprKind::Number { value, .. } => format_f64(*value),
             HirExprKind::Identifier { name } => self.lower_identifier(name.as_str())?,
-            HirExprKind::BranchAccess { access, pos, neg } => {
-                self.lower_branch_access(access.as_str(), pos.as_str(), neg.as_deref())?
-            }
-            HirExprKind::NamedBranchAccess { access, name } => {
-                self.lower_named_branch_access(access.as_str(), name.as_str())?
-            }
+            HirExprKind::BranchAccess {
+                kind: access,
+                pos,
+                neg,
+                ..
+            } => self.lower_branch_access(access, pos.as_str(), neg.as_deref())?,
+            HirExprKind::NamedBranchAccess {
+                kind: access, name, ..
+            } => self.lower_named_branch_access(access, name.as_str())?,
             HirExprKind::Unary { op, operand } => {
                 if op.as_str() == "Not" {
                     let condition = self.lower_condition(*operand)?;
@@ -300,7 +304,9 @@ impl ExprEmitter<'_> {
                 .is_some_and(lowered_variable_is_constant_zero)),
             // A branch current is never a known zero here: noise lowering runs
             // with no contributions in scope, so there is nothing to inspect.
-            HirExprKind::NamedBranchAccess { access, .. } if access.as_str() == "I" => Ok(false),
+            HirExprKind::NamedBranchAccess { kind: access, .. } if *access == AccessKind::Flow => {
+                Ok(false)
+            }
             HirExprKind::Unary { op, operand } if matches!(op.as_str(), "Pos" | "Neg") => {
                 self.expression_value_is_known_zero(*operand, visited)
             }
@@ -361,17 +367,17 @@ impl ExprEmitter<'_> {
 
     fn lower_branch_access(
         &self,
-        access: &str,
+        access: &AccessKind,
         pos: &str,
         neg: Option<&str>,
     ) -> Result<String, RustBackendError> {
-        if access == "I" {
+        if *access == AccessKind::Flow {
             if let Some(slot) = self.branch_current_slot_for_nodes(pos, neg)? {
                 return Ok(
                     slot.signed_value(format!("ctx.branch_current(self.branches[{}])", slot.slot))
                 );
             }
-            return Err(self.unsupported(format!("branch access '{access}' in expression")));
+            return Err(self.unsupported("flow branch access in expression".to_string()));
         }
 
         let pos = self.node_voltage_expr(pos)?;
@@ -384,10 +390,10 @@ impl ExprEmitter<'_> {
 
     fn lower_named_branch_access(
         &self,
-        access: &str,
+        access: &AccessKind,
         name: &str,
     ) -> Result<String, RustBackendError> {
-        if access == "I" {
+        if *access == AccessKind::Flow {
             if let Some(slot) = self.branch_current_unknowns.get(name) {
                 return Ok(
                     slot.signed_value(format!("ctx.branch_current(self.branches[{}])", slot.slot))
@@ -975,14 +981,21 @@ impl ExprEmitter<'_> {
             .get(usize::from(probe))
             .ok_or_else(|| self.internal(format!("ddx probe {probe} is outside MIR arena")))?;
         let (pos, neg) = match &expression.kind {
-            HirExprKind::BranchAccess { access, pos, neg } if access.as_str() != "I" => (
+            HirExprKind::BranchAccess {
+                kind: access,
+                pos,
+                neg,
+                ..
+            } if *access == AccessKind::Potential => (
                 self.node_index(pos.as_str())?,
                 neg.as_deref()
                     .map(|node| self.node_index(node))
                     .transpose()?
                     .flatten(),
             ),
-            HirExprKind::NamedBranchAccess { access, name } if access.as_str() != "I" => {
+            HirExprKind::NamedBranchAccess {
+                kind: access, name, ..
+            } if *access == AccessKind::Potential => {
                 let branch = self
                     .artifact
                     .mir

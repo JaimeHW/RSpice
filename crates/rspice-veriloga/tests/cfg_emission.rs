@@ -131,6 +131,50 @@ endmodule
 }
 
 #[test]
+fn generated_custom_flow_values_and_derivatives_match_physics() {
+    let artifact = artifact(
+        r#"
+nature TestPotential units="V"; access=TestU; abstol=1e-6; endnature
+nature TestFlow units="A"; access=TestQ; abstol=1e-12; endnature
+discipline testdisc potential TestPotential; flow TestFlow; enddiscipline
+module probe(p,n,o);
+inout p,n,o; testdisc p,n; electrical o;
+branch(p,n) b;
+analog begin TestU(b) <+ 2.0; I(o) <+ TestQ(b)*TestU(b); end
+endmodule
+"#,
+    );
+    let cfg = CfgModel::from_hir(&artifact.hir, &artifact.mir).expect("lowers");
+    let lanes = [
+        AdSeed::NodePotential(0usize.into()),
+        AdSeed::BranchUnknownFlow(0usize.into()),
+    ];
+    let mut differentiated = differentiate(&cfg.function, &lanes).expect("differentiates");
+    let output = cfg.residuals[1];
+    let wanted = vec![
+        output,
+        differentiated
+            .derivative(output, 0)
+            .expect("potential derivative"),
+        differentiated
+            .derivative(output, 1)
+            .expect("flow derivative"),
+    ];
+    let (optimized, wanted) = optimize_cfg(&differentiated.function, &wanted);
+    let (body, names) = emit_body(&optimized, &wanted, &EmitBindings::default()).expect("emits");
+    let mut bias = bias(&artifact);
+    bias.node_potentials.fill(0.0);
+    bias.node_potentials[0] = 2.0;
+    bias.branch_unknown_flows[0] = 7.0;
+    let actual = compile_and_run(
+        &scratch("custom_flow"),
+        "custom_flow",
+        &program(&body, &names, &bias),
+    );
+    assert_eq!(actual, vec![14.0, 7.0, 2.0]);
+}
+
+#[test]
 fn solver_branch_flow_ddx_emits_portably_and_matches_the_interpreter() {
     let artifact = artifact(
         r#"

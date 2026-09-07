@@ -17,6 +17,81 @@ fn compile(source: &str) -> DeviceFixture {
     DeviceFixture::compile(source)
 }
 
+#[test]
+fn custom_flow_access_reads_the_branch_unknown() {
+    for (expression, expected) in [
+        ("TestQ(b)", 7.0),
+        ("TestQ(n,p)", -7.0),
+        ("TestQ(b) * TestU(b)", 14.0),
+        ("ddx(TestQ(b)*TestQ(b), TestQ(b))", 14.0),
+        ("ddx(TestQ(b)*TestQ(b), TestQ(n,p))", -14.0),
+    ] {
+        let source = format!(
+            r#"
+`include "disciplines.vams"
+nature TestPotential units="V"; access=TestU; abstol=1e-6; endnature
+nature TestFlow units="A"; access=TestQ; abstol=1e-12; endnature
+discipline testdisc potential TestPotential; flow TestFlow; enddiscipline
+module probe(p,n,o);
+inout p,n,o; testdisc p,n; electrical o;
+branch(p,n) b;
+analog begin TestU(b) <+ 2.0; I(o) <+ {expression}; end
+endmodule
+"#
+        );
+        let fixture = compile(&source);
+        let mut device = fixture.device("X", &[1, 0, 2]);
+        device.set_branch_current_indices(&[3]);
+        device.update_all_voltages(&[2.0, 0.0, 7.0]);
+        assert_eq!(
+            device.try_evaluate().unwrap(),
+            vec![2.0, expected],
+            "{expression}"
+        );
+    }
+}
+
+#[test]
+fn the_same_nature_can_have_different_roles_in_different_disciplines() {
+    let fixture = compile(
+        r#"
+`include "disciplines.vams"
+nature Shared units="U"; access=Sense; abstol=1e-6; endnature
+discipline potential_only potential Shared; enddiscipline
+discipline flow_only flow Shared; enddiscipline
+module probe(p,n,o);
+inout p,n,o; potential_only p,n; electrical o;
+analog begin Sense(p,n) <+ 2.0; I(o) <+ Sense(p,n); end
+endmodule
+"#,
+    );
+    let mut device = fixture.device("X", &[1, 0, 2]);
+    device.set_branch_current_indices(&[3]);
+    device.update_all_voltages(&[2.0, 0.0, 7.0]);
+    assert_eq!(device.try_evaluate().unwrap(), vec![2.0, 2.0]);
+}
+
+#[test]
+fn custom_flow_read_has_the_correct_jacobian_columns() {
+    let fixture = compile(
+        r#"
+`include "disciplines.vams"
+nature TestPotential units="V"; access=TestU; abstol=1e-6; endnature
+nature TestFlow units="A"; access=TestQ; abstol=1e-12; endnature
+discipline testdisc potential TestPotential; flow TestFlow; enddiscipline
+module probe(p,n,o);
+inout p,n,o; testdisc p,n; electrical o;
+analog begin TestU(p,n) <+ 2.0; I(o) <+ TestQ(p,n)*TestU(p,n); end
+endmodule
+"#,
+    );
+    let mut device = fixture.device("X", &[1, 0, 2]);
+    device.set_branch_current_indices(&[3]);
+    let (matrix, _) = collect_stamps(&mut device, &[2.0, 0.0, 7.0]);
+    assert_eq!(matrix[&(1, 0)], 7.0, "d(output flow)/d(potential)");
+    assert_eq!(matrix[&(1, 2)], 2.0, "d(output flow)/d(branch flow)");
+}
+
 /// Collect matrix and RHS stamps into maps for inspection
 fn collect_stamps(
     device: &mut VerilogADevice,

@@ -2032,6 +2032,7 @@ impl SemanticAnalyzer {
                 access: function,
                 name,
                 span,
+                ..
             } => {
                 self.record_error_at(
                     SemanticErrorKind::UnsupportedFeature(format!(
@@ -2054,7 +2055,13 @@ impl SemanticAnalyzer {
             );
             return;
         }
-        if self.is_flow_access(function) {
+        let discipline = self
+            .symbols
+            .lookup(positive)
+            .and_then(|symbol| symbol.attrs.discipline.as_deref())
+            .unwrap_or("electrical");
+        if self.disciplines.access_kind(discipline, function) == Some(crate::ast::AccessKind::Flow)
+        {
             self.record_error_at(
                 SemanticErrorKind::UnsupportedFeature(format!(
                     "`{function}` is a flow access, and a flow has no value between analog \

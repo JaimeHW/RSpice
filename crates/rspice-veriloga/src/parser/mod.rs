@@ -2183,6 +2183,7 @@ impl<'a> Parser<'a> {
             self.expect(TokenKind::RParen)?;
             return Ok(BranchAccess::Branch {
                 access: access.into(),
+                kind: None,
                 name: name.into(),
                 span: start.extend(self.previous_span()),
             });
@@ -2198,6 +2199,7 @@ impl<'a> Parser<'a> {
 
         Ok(BranchAccess::Nodes {
             access: access.into(),
+            kind: None,
             pos: pos.into(),
             neg,
             span: start.extend(self.previous_span()),
@@ -2702,6 +2704,7 @@ impl<'a> Parser<'a> {
                             self.expect(TokenKind::RParen)?;
                             return Ok(Expression::BranchAccess(BranchAccess::Branch {
                                 access: name.into(),
+                                kind: None,
                                 name: branch.into(),
                                 span: start.extend(self.previous_span()),
                             }));
@@ -2716,6 +2719,7 @@ impl<'a> Parser<'a> {
                         self.expect(TokenKind::RParen)?;
                         return Ok(Expression::BranchAccess(BranchAccess::Nodes {
                             access: name.into(),
+                            kind: None,
                             pos: pos.into(),
                             neg,
                             span: start.extend(self.previous_span()),

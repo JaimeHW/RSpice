@@ -17,8 +17,8 @@ use smol_str::SmolStr;
 use std::collections::{HashMap, HashSet};
 
 use crate::ast::{
-    AnalogOperator, ArrayLiteralElement, BinaryOp, BranchAccess, Expression, LimiterArgument,
-    NoiseSource, PortDirection, UnaryOp,
+    AccessKind, AnalogOperator, ArrayLiteralElement, BinaryOp, BranchAccess, Expression,
+    LimiterArgument, NoiseSource, PortDirection, UnaryOp,
 };
 use crate::numeric_literal::parse_integer_literal;
 use crate::semantic::{
@@ -196,11 +196,13 @@ pub enum HirExprKind {
     },
     BranchAccess {
         access: SmolStr,
+        kind: AccessKind,
         pos: SmolStr,
         neg: Option<SmolStr>,
     },
     NamedBranchAccess {
         access: SmolStr,
+        kind: AccessKind,
         name: SmolStr,
     },
     ArrayAccess {
@@ -578,25 +580,34 @@ fn same_expression_kind(left: &HirExprKind, right: &HirExprKind) -> bool {
         (
             HirExprKind::BranchAccess {
                 access: left_access,
+                kind: left_kind,
                 pos: left_pos,
                 neg: left_neg,
             },
             HirExprKind::BranchAccess {
                 access: right_access,
+                kind: right_kind,
                 pos: right_pos,
                 neg: right_neg,
             },
-        ) => left_access == right_access && left_pos == right_pos && left_neg == right_neg,
+        ) => {
+            left_access == right_access
+                && left_kind == right_kind
+                && left_pos == right_pos
+                && left_neg == right_neg
+        }
         (
             HirExprKind::NamedBranchAccess {
                 access: left_access,
+                kind: left_kind,
                 name: left_name,
             },
             HirExprKind::NamedBranchAccess {
                 access: right_access,
+                kind: right_kind,
                 name: right_name,
             },
-        ) => left_access == right_access && left_name == right_name,
+        ) => left_access == right_access && left_kind == right_kind && left_name == right_name,
         (
             HirExprKind::SystemFunction {
                 name: left_name,
@@ -2575,12 +2586,20 @@ impl HirLowerer {
     }
 
     fn lower_branch_access_kind(&self, access: &BranchAccess) -> HirExprKind {
+        let Some(kind) = access.kind() else {
+            // A malformed analyzed module must fail validation, rather than
+            // silently assigning a physical role to an unresolved access.
+            return HirExprKind::Identifier {
+                name: "__rspice_unresolved_branch_access".into(),
+            };
+        };
         match access {
             BranchAccess::Nodes {
                 access, pos, neg, ..
             } if neg.is_none() && self.declared_branches.contains(pos) => {
                 HirExprKind::NamedBranchAccess {
                     access: access.clone(),
+                    kind,
                     name: pos.clone(),
                 }
             }
@@ -2588,17 +2607,20 @@ impl HirLowerer {
                 access, pos, neg, ..
             } => HirExprKind::BranchAccess {
                 access: access.clone(),
+                kind,
                 pos: pos.clone(),
                 neg: neg.clone(),
             },
             BranchAccess::Branch { access, name, .. } if self.declared_branches.contains(name) => {
                 HirExprKind::NamedBranchAccess {
                     access: access.clone(),
+                    kind,
                     name: name.clone(),
                 }
             }
             BranchAccess::Branch { access, name, .. } => HirExprKind::BranchAccess {
                 access: access.clone(),
+                kind,
                 pos: name.clone(),
                 neg: None,
             },

@@ -1289,7 +1289,7 @@ fn metadata_digest_is_stable_and_hex_encoded() {
     assert_ne!(digest, StableDigest::from_text("module other; endmodule"));
 
     let metadata = CanonicalMetadata::for_source("fixture", "module tiny; endmodule");
-    assert_eq!(metadata.schema_version, 13);
+    assert_eq!(metadata.schema_version, 14);
     assert_eq!(metadata.source_package.as_str(), "fixture");
     assert_eq!(metadata.source_digest.as_str(), digest.as_hex());
 }
@@ -2129,7 +2129,7 @@ fn artifact_dump_is_deterministic_and_contains_phase_summaries() {
 
     assert_eq!(first, second);
     assert!(first.contains("canonical-veriloga-ir"));
-    assert!(first.contains("schema_version=13"));
+    assert!(first.contains("schema_version=14"));
     assert!(first.contains("source_package=fixture"));
     assert!(first.contains("source_digest="));
     assert!(first.contains("source_identity="));
@@ -2838,6 +2838,7 @@ fn mir_lowering_preserves_branch_table_for_named_accesses() {
     let root_id = mir.equations[0].expression.id;
     mir.expressions[usize::from(root_id)].kind = HirExprKind::NamedBranchAccess {
         access: "V".into(),
+        kind: rspice_veriloga::ast::AccessKind::Potential,
         name: "res".into(),
     };
     mir.equations[0].expression.kind = "branch_access".into();
@@ -2971,6 +2972,7 @@ fn mir_validation_rejects_expression_named_branch_access_missing_branch() {
     let root_id = mir.equations[0].expression.id;
     mir.expressions[usize::from(root_id)].kind = HirExprKind::NamedBranchAccess {
         access: "V".into(),
+        kind: rspice_veriloga::ast::AccessKind::Potential,
         name: "missing".into(),
     };
     mir.equations[0].expression.kind = "branch_access".into();
@@ -3020,7 +3022,9 @@ fn hir_lowering_preserves_expression_tree_structure() {
     };
     assert_eq!(op.as_str(), "Div");
 
-    let HirExprKind::BranchAccess { access, pos, neg } = &hir.expressions[usize::from(*left)].kind
+    let HirExprKind::BranchAccess {
+        access, pos, neg, ..
+    } = &hir.expressions[usize::from(*left)].kind
     else {
         panic!("expected binary lhs to preserve branch access");
     };
@@ -3305,6 +3309,7 @@ fn hir_validation_rejects_unknown_named_branch_access() {
 
     hir.expressions[usize::from(root_id)].kind = HirExprKind::NamedBranchAccess {
         access: "V".into(),
+        kind: rspice_veriloga::ast::AccessKind::Potential,
         name: "missing".into(),
     };
     hir.contributions[0].expression.kind = "branch_access".into();
@@ -3487,12 +3492,12 @@ fn hir_lowering_canonicalizes_single_argument_named_branch_accesses() {
 
     assert!(hir.expressions.iter().any(|expression| matches!(
         &expression.kind,
-        HirExprKind::NamedBranchAccess { access, name }
+        HirExprKind::NamedBranchAccess { access, name, .. }
             if access.as_str() == "I" && name.as_str() == "probe"
     )));
     assert!(hir.expressions.iter().any(|expression| matches!(
         &expression.kind,
-        HirExprKind::NamedBranchAccess { access, name }
+        HirExprKind::NamedBranchAccess { access, name, .. }
             if access.as_str() == "V" && name.as_str() == "probe"
     )));
     assert!(hir.validate().is_ok());
@@ -3512,12 +3517,12 @@ fn hir_lowering_preserves_angle_bracket_terminal_current_accesses() {
     assert!(hir.branches.is_empty());
     assert!(hir.expressions.iter().any(|expression| matches!(
         &expression.kind,
-        HirExprKind::BranchAccess { access, pos, neg }
+        HirExprKind::BranchAccess { access, pos, neg, .. }
             if access.as_str() == "I" && pos.as_str() == "p" && neg.is_none()
     )));
     assert!(!hir.expressions.iter().any(|expression| matches!(
         &expression.kind,
-        HirExprKind::NamedBranchAccess { access, name }
+        HirExprKind::NamedBranchAccess { access, name, .. }
             if access.as_str() == "I" && name.as_str() == "p"
     )));
     assert!(hir.validate().is_ok());

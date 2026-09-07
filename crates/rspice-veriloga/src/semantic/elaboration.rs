@@ -1390,11 +1390,13 @@ fn rewrite_branch_access(access: &BranchAccess, scope: &ScopeMap) -> CompileResu
     Ok(match access {
         BranchAccess::Nodes {
             access,
+            kind,
             pos,
             neg,
             span,
         } => BranchAccess::Nodes {
             access: access.clone(),
+            kind: *kind,
             pos: if neg.is_none() {
                 scope
                     .branches
@@ -1411,8 +1413,14 @@ fn rewrite_branch_access(access: &BranchAccess, scope: &ScopeMap) -> CompileResu
                 .transpose()?,
             span: *span,
         },
-        BranchAccess::Branch { access, name, span } => BranchAccess::Branch {
+        BranchAccess::Branch {
+            access,
+            kind,
+            name,
+            span,
+        } => BranchAccess::Branch {
             access: access.clone(),
+            kind: *kind,
             name: scope.branches.get(name).cloned().ok_or_else(|| {
                 semantic_error(
                     SemanticErrorKind::UndeclaredSymbol { name: name.clone() },

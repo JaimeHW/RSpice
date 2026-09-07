@@ -1002,17 +1002,22 @@ fn hir_expr_kind_label(kind: &HirExprKind) -> String {
         HirExprKind::Call { name, args } => {
             format!("call name:{} args:{}", enc_str(name), join_expr_ids(args))
         }
-        HirExprKind::BranchAccess { access, pos, neg } => {
+        HirExprKind::BranchAccess {
+            access,
+            kind,
+            pos,
+            neg,
+        } => {
             format!(
-                "branch_access access:{} pos:{} neg:{}",
+                "branch_access kind:{kind:?} access:{} pos:{} neg:{}",
                 enc_str(access),
                 enc_str(pos),
                 option_smol(neg.as_ref())
             )
         }
-        HirExprKind::NamedBranchAccess { access, name } => {
+        HirExprKind::NamedBranchAccess { access, kind, name } => {
             format!(
-                "named_branch_access access:{} name:{}",
+                "named_branch_access kind:{kind:?} access:{} name:{}",
                 enc_str(access),
                 enc_str(name)
             )

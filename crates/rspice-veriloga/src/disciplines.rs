@@ -5,16 +5,9 @@
 //!
 //! These are typically included via `include "disciplines.vams"`
 
+use crate::ast::AccessKind;
 use crate::source::Span;
 use std::collections::HashMap;
-
-/// Whether one of the standard Verilog-AMS access functions names a flow
-/// quantity. Compiler backends share this table so less-common disciplines do
-/// not silently change meaning between portable and native lowering. Magnetic
-/// `Phi` is the flow access and `MMF` is the potential access.
-pub(crate) fn is_standard_flow_access(access: &str) -> bool {
-    matches!(access, "I" | "Pwr" | "F" | "Tau" | "Phi" | "Flow")
-}
 
 /// A nature defines a physical quantity (potential or flow)
 #[derive(Debug, Clone)]
@@ -100,6 +93,24 @@ pub struct DisciplineDb {
 }
 
 impl DisciplineDb {
+    /// Resolve against one discipline: the same nature may be a potential in
+    /// one discipline and a flow in another. Access-name tables cannot express
+    /// that distinction, or distinguish inherited natures sharing an accessor.
+    pub fn access_kind(&self, discipline: &str, access: &str) -> Option<AccessKind> {
+        let discipline = self.get_discipline(discipline)?;
+        let matches = |nature: &Option<String>| {
+            nature
+                .as_deref()
+                .and_then(|name| self.get_nature(name))
+                .is_some_and(|nature| nature.access == access)
+        };
+        match (matches(&discipline.potential), matches(&discipline.flow)) {
+            (true, false) => Some(AccessKind::Potential),
+            (false, true) => Some(AccessKind::Flow),
+            _ => None,
+        }
+    }
+
     /// Create a new empty database
     pub fn new() -> Self {
         Self::default()
@@ -250,17 +261,6 @@ impl DisciplineDb {
         self.natures.values().find(|n| n.access == access)
     }
 
-    /// Check whether an access function refers to a flow quantity
-    /// (current-like, e.g. I or Pwr) rather than a potential (V, Temp, ...)
-    pub fn is_flow_access(&self, access: &str) -> bool {
-        let Some(nature) = self.resolve_access(access) else {
-            return false;
-        };
-        self.disciplines
-            .values()
-            .any(|d| d.flow.as_deref() == Some(nature.name.as_str()))
-    }
-
     /// Check if two disciplines are compatible for connection
     pub fn are_compatible(&self, d1: &str, d2: &str) -> bool {
         if d1 == d2 {
@@ -282,14 +282,18 @@ impl DisciplineDb {
 
 #[cfg(test)]
 mod tests {
-    use super::{DisciplineDb, is_standard_flow_access};
+    use super::{AccessKind, DisciplineDb};
 
     #[test]
     fn magnetic_access_functions_keep_their_standard_roles() {
         let disciplines = DisciplineDb::with_standard();
-        assert!(!is_standard_flow_access("MMF"));
-        assert!(is_standard_flow_access("Phi"));
-        assert!(!disciplines.is_flow_access("MMF"));
-        assert!(disciplines.is_flow_access("Phi"));
+        assert_eq!(
+            disciplines.access_kind("magnetic", "MMF"),
+            Some(AccessKind::Potential)
+        );
+        assert_eq!(
+            disciplines.access_kind("magnetic", "Phi"),
+            Some(AccessKind::Flow)
+        );
     }
 }

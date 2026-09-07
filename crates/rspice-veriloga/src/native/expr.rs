@@ -13,6 +13,7 @@
 
 use super::{JitError, JitResult};
 use crate::array_index::checked_array_slot;
+use crate::ast::AccessKind;
 use crate::canonical_ir::state::CanonicalStateOperator;
 use crate::canonical_ir::{
     EquationId, ExprId, HirAnalogOperator, HirExprKind, HirLimiterArgument, MirEquationKind,
@@ -2631,12 +2632,15 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             HirExprKind::ArrayAccess { array, index } => {
                 self.lower_array_access(array.as_str(), *index)
             }
-            HirExprKind::BranchAccess { access, pos, neg } => {
-                self.lower_branch_access(access.as_str(), pos.as_str(), neg.as_deref())
-            }
-            HirExprKind::NamedBranchAccess { access, name } => {
-                self.lower_named_branch_access(access.as_str(), name.as_str())
-            }
+            HirExprKind::BranchAccess {
+                kind: access,
+                pos,
+                neg,
+                ..
+            } => self.lower_branch_access(access, pos.as_str(), neg.as_deref()),
+            HirExprKind::NamedBranchAccess {
+                kind: access, name, ..
+            } => self.lower_named_branch_access(access, name.as_str()),
             HirExprKind::Unary { op, operand } => self.lower_unary(op.as_str(), *operand),
             HirExprKind::Binary { op, left, right } => {
                 self.lower_binary(op.as_str(), *left, *right)
@@ -2937,7 +2941,12 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
     fn ddx_probe_projection(&self, probe: ExprId) -> JitResult<DdxProjection> {
         let expression = self.expression(probe)?;
         match &expression.kind {
-            HirExprKind::BranchAccess { access, pos, neg } if is_flow_access(access) => {
+            HirExprKind::BranchAccess {
+                kind: access,
+                pos,
+                neg,
+                ..
+            } if is_flow_access(access) => {
                 let mapping = self
                     .resolve_current_branch_runtime_mapping(pos.as_str(), neg.as_deref())?
                     .ok_or_else(|| {
@@ -2957,7 +2966,9 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                     .transpose()?
                     .flatten(),
             )),
-            HirExprKind::NamedBranchAccess { access, name } if is_flow_access(access) => {
+            HirExprKind::NamedBranchAccess {
+                kind: access, name, ..
+            } if is_flow_access(access) => {
                 let unknown = self.named_branch_unknown(name).ok_or_else(|| {
                     self.unsupported(format!(
                         "ddx flow probe I(<{name}>) requires a solver-owned branch-current unknown"
@@ -3004,15 +3015,15 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             HirExprKind::Identifier { name } => {
                 self.lower_identifier_derivative(name.as_str(), wrt)
             }
-            HirExprKind::BranchAccess { access, pos, neg } => self.lower_branch_access_derivative(
-                access.as_str(),
-                pos.as_str(),
-                neg.as_deref(),
-                wrt,
-            ),
-            HirExprKind::NamedBranchAccess { access, name } => {
-                self.lower_named_branch_access_derivative(access.as_str(), name.as_str(), wrt)
-            }
+            HirExprKind::BranchAccess {
+                kind: access,
+                pos,
+                neg,
+                ..
+            } => self.lower_branch_access_derivative(access, pos.as_str(), neg.as_deref(), wrt),
+            HirExprKind::NamedBranchAccess {
+                kind: access, name, ..
+            } => self.lower_named_branch_access_derivative(access, name.as_str(), wrt),
             HirExprKind::Unary { op, operand } => {
                 self.lower_unary_derivative(op.as_str(), *operand, wrt)
             }
@@ -3238,16 +3249,15 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             | HirExprKind::ArrayLiteral { .. }
             | HirExprKind::NoiseSource { .. } => Ok(true),
             HirExprKind::Identifier { name } => Ok(self.identifier_derivative_is_zero(name, wrt)),
-            HirExprKind::BranchAccess { access, pos, neg } => self
-                .branch_access_derivative_is_zero(
-                    access.as_str(),
-                    pos.as_str(),
-                    neg.as_deref(),
-                    wrt,
-                ),
-            HirExprKind::NamedBranchAccess { access, name } => {
-                self.named_branch_access_derivative_is_zero(access.as_str(), name.as_str(), wrt)
-            }
+            HirExprKind::BranchAccess {
+                kind: access,
+                pos,
+                neg,
+                ..
+            } => self.branch_access_derivative_is_zero(access, pos.as_str(), neg.as_deref(), wrt),
+            HirExprKind::NamedBranchAccess {
+                kind: access, name, ..
+            } => self.named_branch_access_derivative_is_zero(access, name.as_str(), wrt),
             HirExprKind::Unary { op, operand } => match op.as_str() {
                 "Pos" | "Neg" => self.expr_derivative_is_zero(*operand, wrt),
                 "Not" | "BitNot" => Ok(true),
@@ -3417,7 +3427,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
 
     fn branch_access_derivative_is_zero(
         &self,
-        access: &str,
+        access: &AccessKind,
         pos: &str,
         neg: Option<&str>,
         wrt: CanonicalDerivativeAxis,
@@ -3452,7 +3462,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
 
     fn named_branch_access_derivative_is_zero(
         &self,
-        access: &str,
+        access: &AccessKind,
         name: &str,
         wrt: CanonicalDerivativeAxis,
     ) -> JitResult<bool> {
@@ -3766,7 +3776,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
 
     fn lower_branch_access_derivative(
         &mut self,
-        access: &str,
+        access: &AccessKind,
         pos: &str,
         neg: Option<&str>,
         wrt: CanonicalDerivativeAxis,
@@ -3802,7 +3812,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
 
     fn lower_named_branch_access_derivative(
         &mut self,
-        access: &str,
+        access: &AccessKind,
         name: &str,
         wrt: CanonicalDerivativeAxis,
     ) -> JitResult<()> {
@@ -6998,7 +7008,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         Ok(())
     }
 
-    fn lower_named_branch_access(&mut self, access: &str, name: &str) -> JitResult<()> {
+    fn lower_named_branch_access(&mut self, access: &AccessKind, name: &str) -> JitResult<()> {
         if is_flow_access(access) {
             if let Some(branch_unknown) = self.named_branch_unknown(name) {
                 let mapping = self.map_canonical_branch_unknown(usize::from(branch_unknown.id))?;
@@ -7576,7 +7586,12 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         Ok(Some((base, slots.len(), lower)))
     }
 
-    fn lower_branch_access(&mut self, access: &str, pos: &str, neg: Option<&str>) -> JitResult<()> {
+    fn lower_branch_access(
+        &mut self,
+        access: &AccessKind,
+        pos: &str,
+        neg: Option<&str>,
+    ) -> JitResult<()> {
         if !is_flow_access(access) {
             let pos = self.lower_voltage_node(pos)?;
             let neg = neg
@@ -8180,8 +8195,8 @@ fn normalize_intrinsic_name(name: &str) -> String {
     name.strip_prefix('$').unwrap_or(name).to_ascii_lowercase()
 }
 
-fn is_flow_access(access: &str) -> bool {
-    crate::disciplines::is_standard_flow_access(access)
+fn is_flow_access(access: &AccessKind) -> bool {
+    *access == AccessKind::Flow
 }
 
 fn expression_kind_name(kind: &HirExprKind) -> &'static str {
@@ -9855,6 +9870,7 @@ mod tests {
     fn voltage_expr() -> Expression {
         Expression::BranchAccess(BranchAccess::Nodes {
             access: "V".into(),
+            kind: Some(AccessKind::Potential),
             pos: "p".into(),
             neg: Some("n".into()),
             span: Span::dummy(),
@@ -10494,6 +10510,7 @@ endmodule
                 op: BinaryOp::Shl,
                 left: Box::new(Expression::BranchAccess(BranchAccess::Nodes {
                     access: "V".into(),
+                    kind: Some(AccessKind::Potential),
                     pos: "p".into(),
                     neg: Some("n".into()),
                     span,

@@ -14,13 +14,10 @@ use smol_str::SmolStr;
 /// never deserialize a structurally different artifact merely because its HIR
 /// and metadata happen to repeat the same stale version number.
 ///
-/// Version 13 adds [`crate::canonical_ir::HirExecutedCorrespondence`] to the
-/// HIR: the map from each structured-body expression to the executed expression
-/// it is a second lowering of. A version-12 record carries no such map, and a
-/// consumer that read one would find every CFG operator unmapped — correct as a
-/// refusal, wrong as an answer — so a version-12 artifact is rebuilt rather than
-/// reinterpreted.
-pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 13;
+/// Version 14 records each branch access's resolved potential/flow role.
+/// Earlier artifacts inferred that role from the access name and can encode
+/// incorrect custom-discipline physics; they must be rebuilt from source.
+pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 14;
 
 /// Collision-resistant identity of one exact preprocessed source closure.
 pub fn source_identity(source_text: &str) -> String {

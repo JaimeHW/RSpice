@@ -2105,6 +2105,7 @@ impl ProcessLowerer<'_> {
                 access: function,
                 name,
                 span,
+                ..
             } => {
                 self.error(
                     format!(
