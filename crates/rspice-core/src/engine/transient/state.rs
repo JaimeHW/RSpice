@@ -298,18 +298,7 @@ impl Engine {
         bjt_history.accepted_dt_prev = accepted_dt_seed;
         bjt_history.accepted_dt_prev_prev = accepted_dt_seed;
 
-        diode_history
-            .vd_prev_prev
-            .clone_from(&diode_history.vd_prev);
-        diode_history
-            .qd_prev_prev
-            .clone_from(&diode_history.qd_prev);
-        diode_history
-            .qd_prev_prev_prev
-            .clone_from(&diode_history.qd_prev);
-        diode_history.cqd_prev.fill(0.0);
-        diode_history.accepted_dt_prev = accepted_dt_seed;
-        diode_history.accepted_dt_prev_prev = accepted_dt_seed;
+        diode_history.restart(accepted_dt_seed);
     }
 
     #[inline]
@@ -594,19 +583,7 @@ impl Engine {
         solution: &[Value],
         seed: ReactiveHistorySeed,
     ) -> DiodeTransientHistory {
-        let n = circuit.diodes.devices.len();
-        let mut history = DiodeTransientHistory {
-            vd_prev: Vec::with_capacity(n),
-            vd_prev_prev: Vec::with_capacity(n),
-            qd_prev: Vec::with_capacity(n),
-            qd_prev_prev: Vec::with_capacity(n),
-            qd_prev_prev_prev: Vec::with_capacity(n),
-            cqd_prev: Vec::with_capacity(n),
-            accepted_dt_prev: 0.0,
-            accepted_dt_prev_prev: 0.0,
-        };
-
-        for diode in &circuit.diodes.devices {
+        DiodeTransientHistory::from_biases(circuit.diodes.devices.iter().map(|diode| {
             // The diode is the one family whose `IC` is a scalar in both
             // references (`dio/dio.c:16` declares `IF_REAL`, `N_DEV_Diode.C:79`
             // a plain `addPar`): it names the junction drop directly, and
@@ -624,15 +601,8 @@ impl Engine {
             let solution = seeded.as_ref();
             let vd = Self::differential_voltage(solution, diode.node_anode, diode.node_cathode);
             let (qd, _capd) = diode.junction_charge_and_capacitance(vd);
-            history.vd_prev.push(vd);
-            history.vd_prev_prev.push(vd);
-            history.qd_prev.push(qd);
-            history.qd_prev_prev.push(qd);
-            history.qd_prev_prev_prev.push(qd);
-            history.cqd_prev.push(0.0);
-        }
-
-        history
+            (vd, qd)
+        }))
     }
 
     #[inline]
@@ -1124,7 +1094,7 @@ impl Engine {
 
             if !suppress_gate_charge && cgs.is_finite() && cgs > 0.0 {
                 let (geq, ieq, _q_curr, _cq_curr) = if let Some(charge) = jfet2_charge {
-                    Self::nonlinear_charge_companion_terms(
+                    nonlinear_charge_companion_terms(
                         coeff,
                         dt,
                         cgs,
@@ -1155,7 +1125,7 @@ impl Engine {
 
             if !suppress_gate_charge && cgd.is_finite() && cgd > 0.0 {
                 let (geq, ieq, _q_curr, _cq_curr) = if let Some(charge) = jfet2_charge {
-                    Self::nonlinear_charge_companion_terms(
+                    nonlinear_charge_companion_terms(
                         coeff,
                         dt,
                         cgd,
@@ -1311,24 +1281,14 @@ impl Engine {
             dt,
         } = stamp;
         for (idx, diode) in circuit.diodes.devices.iter().enumerate() {
+            if !diode.has_charge_storage() {
+                continue;
+            }
             let vd_raw = Self::differential_voltage(voltages, diode.node_anode, diode.node_cathode);
             let vd = diode.transient_charge_voltage(vd_raw);
             let (qd, capd) = diode.junction_charge_and_capacitance(vd);
-            if !capd.is_finite() || capd <= 0.0 {
-                continue;
-            }
-            let (geq, ieq, _q_curr, _cq_curr) = Self::nonlinear_charge_companion_terms(
-                coeff,
-                dt,
-                capd,
-                vd,
-                qd,
-                BranchChargeHistory {
-                    q_prev: history.qd_prev[idx],
-                    q_prev_prev: history.qd_prev_prev[idx],
-                    cq_prev: history.cqd_prev[idx],
-                },
-            );
+            let (geq, ieq, _q_curr, _cq_curr) =
+                nonlinear_charge_companion_terms(coeff, dt, capd, vd, qd, history.branch(idx));
             Self::stamp_two_terminal_companion_direct(matrix, rhs, &slots[idx], geq, ieq);
         }
     }
@@ -1664,7 +1624,7 @@ impl Engine {
         if body_charge_mask & 1 != 0 {
             let vbs_j = mos.body_source_charge_branch_voltage(vbs_eval);
             let (qbs_curr, cbs) = mos.body_source_junction_charge_and_capacitance_at(vbs_eval);
-            let (geq_bs, ieq_bs, _q, _cq) = Self::nonlinear_charge_companion_terms(
+            let (geq_bs, ieq_bs, _q, _cq) = nonlinear_charge_companion_terms(
                 coeff,
                 dt,
                 cbs,
@@ -1683,7 +1643,7 @@ impl Engine {
             let vbd_j = mos.body_drain_charge_branch_voltage(vds_eval, vbs_eval);
             let (qbd_curr, cbd) =
                 mos.body_drain_junction_charge_and_capacitance_at(vds_eval, vbs_eval);
-            let (geq_bd, ieq_bd, _q, _cq) = Self::nonlinear_charge_companion_terms(
+            let (geq_bd, ieq_bd, _q, _cq) = nonlinear_charge_companion_terms(
                 coeff,
                 dt,
                 cbd,
@@ -1806,7 +1766,7 @@ impl Engine {
         );
         terms[3] = (geq_ds, ieq_ds);
 
-        let (geq_bs, ieq_bs, _qbs, _cqbs) = Self::nonlinear_charge_companion_terms(
+        let (geq_bs, ieq_bs, _qbs, _cqbs) = nonlinear_charge_companion_terms(
             coeff,
             dt,
             cbs,
@@ -1820,7 +1780,7 @@ impl Engine {
         );
         terms[4] = (geq_bs, ieq_bs);
 
-        let (geq_bd, ieq_bd, _qbd, _cqbd) = Self::nonlinear_charge_companion_terms(
+        let (geq_bd, ieq_bd, _qbd, _cqbd) = nonlinear_charge_companion_terms(
             coeff,
             dt,
             cbd,
@@ -1834,7 +1794,7 @@ impl Engine {
         );
         terms[5] = (geq_bd, ieq_bd);
 
-        let (geq_d1, ieq_d1, _qd1, _cqd1) = Self::nonlinear_charge_companion_terms(
+        let (geq_d1, ieq_d1, _qd1, _cqd1) = nonlinear_charge_companion_terms(
             coeff,
             dt,
             cd1,
@@ -1858,6 +1818,61 @@ pub(super) type MosfetGateCompanionCharges = [(Value, Value); 3];
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn diode_charge_stamp_and_commit_preserve_zero_and_signed_slopes() {
+        let netlist = Netlist::parse(
+            "signed charge continuation\nR1 p 0 1k\nR2 n 0 1k\nD1 p n dm\n.model dm D\n.end\n",
+        )
+        .unwrap();
+        let engine = Engine::default();
+        let mut circuit = engine.build_circuit(&netlist).unwrap();
+        // The depletion continuation with M=-1 gives Q(V)=V-V^2/2,
+        // dQ/dV=1-V. Pin the resolved parameters to avoid temperature
+        // adjustment in this stamp-level test of the driver's branch law.
+        let diode = &mut circuit.diodes.devices[0];
+        diode.cj0 = 1.0;
+        diode.vj = 1.0;
+        diode.m = -1.0;
+        diode.fc = 0.5;
+        diode.tt = 0.0;
+        let (pos, neg) = (diode.node_anode - 1, diode.node_cathode - 1);
+        let mut matrix = engine.build_matrix(&circuit).unwrap();
+        let slots = Engine::link_diode_companion_slots(&circuit, &matrix);
+        let mut voltage = vec![0.0; circuit.matrix_size()];
+        voltage[pos] = 0.5;
+        let initial =
+            Engine::initialize_diode_history(&circuit, &voltage, ReactiveHistorySeed::SolvedBias);
+        assert_eq!(initial.qd_prev, [0.375]);
+        let coeff = CompanionCoefficients::backward_euler();
+        for vd in [1.0, 1.5] {
+            let mut history = initial.clone();
+            let mut rhs = vec![0.0; circuit.matrix_size()];
+            voltage[pos] = vd;
+            matrix.clear_values();
+            Engine::stamp_diode_transient_companions(
+                TransientCompanionStamp {
+                    circuit: &circuit,
+                    matrix: &mut matrix,
+                    rhs: &mut rhs,
+                    voltages: &voltage,
+                    coeff: &coeff,
+                    dt: 0.25,
+                },
+                &history,
+                &slots,
+            );
+            let charge = vd - 0.5 * vd * vd;
+            let current = (charge - 0.375) / 0.25;
+            let source = (1.0 - vd) / 0.25 * vd - current;
+            assert_eq!(rhs[pos], source);
+            assert_eq!(rhs[neg], -source);
+            assert_eq!(history, initial, "a trial must not commit charge");
+            history.accept_branch(0, vd, charge, &coeff, 0.25);
+            assert_eq!(history.qd_prev, [charge]);
+            assert_eq!(history.cqd_prev, [current]);
+        }
+    }
     use crate::Netlist;
 
     #[test]

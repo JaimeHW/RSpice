@@ -1,7 +1,7 @@
 //! A compact arena for Verilog-A IR expressions.
 //!
-//! [`IrExpr`] is a 120-byte enum whose children are `Box`es, which the Windows
-//! heap rounds to 128 bytes apiece. A shadow-expanded assignment forest is
+//! The front end used to build a 120-byte enum whose children were `Box`es,
+//! which the Windows heap rounds to 128 bytes apiece. A shadow-expanded assignment forest is
 //! tens of millions of those, so representation — not the derivative's node
 //! count — is what decides whether a large compact model compiles at all.
 //!
@@ -13,10 +13,10 @@
 //! any shipped assignment forest — keep today's field shapes in a side
 //! [`Heavy`] table so their bulk never widens the node.
 //!
-//! Nothing here is on the production path yet. [`ExprArena::import`] and
-//! [`ExprArena::export`] bridge losslessly to and from [`IrExpr`] so the
-//! emitter, the AD core and the producers can each be ported against a type
-//! that already exists.
+//! This is now the only expression representation the front end has: the
+//! converter writes nodes here, the differentiation core rewrites them, and
+//! the emitter reads them. The `IrExpr`/`ExprArena::import`/`ExprArena::export`
+//! bridge the port was staged across is gone with the last of its callers.
 //!
 //! # What a consumer of the arena owes
 //!
@@ -51,7 +51,7 @@
 //!    filters, the noise processes) and never to a state-allocating one
 //!    (`Ddt`, `Idt`, `IdtMod`, `Limit`, `CanonicalLimit`, `Cross`, `Above`,
 //!    `LastCrossing`, `Timer`): merging two of those merges two slots, two
-//!    candidates or two ordinals into one. That is why [`ExprArena::import`]
+//!    candidates or two ordinals into one. That is why [`ExprArena::push`]
 //!    deduplicates nothing.
 
 use crate::ast::{BinaryOp, UnaryOp};
@@ -60,8 +60,8 @@ use std::collections::HashMap;
 use std::num::NonZeroU32;
 
 use super::{
-    AbsDelaySiteId, DdxAxis, IrExpr, IrFunction, LaplaceSiteId, NoiseSiteId, SlewSiteId,
-    TransitionSiteId, ZiPolynomialDefinition, ZiSiteId,
+    AbsDelaySiteId, DdxAxis, IrFunction, LaplaceSiteId, NoiseSiteId, SlewSiteId, TransitionSiteId,
+    ZiSiteId,
 };
 
 /// Nodes per chunk, as a shift. One chunk is 1 Mi nodes = 16 MiB.
@@ -212,8 +212,9 @@ pub enum Node {
     },
     /// A call with more than two arguments, which no [`IrFunction`] has and no
     /// shipped model produces. Its arguments are `ExprArena::call_args(args)`.
-    /// It exists so [`ExprArena::import`] is total over an [`IrExpr::Call`]
-    /// whose argument list the front end never checked against an arity.
+    /// It exists because `ExprConverter::convert_call` passes an authored
+    /// argument list through without checking it against an arity, so
+    /// `sqrt(a, b, c)` is constructible and has to have a representation.
     CallSpilled {
         /// The built-in being called.
         func: IrFunction,
@@ -284,8 +285,8 @@ pub enum Node {
 
 /// Which [`Heavy`] payload a [`Node::Heavy`] carries.
 ///
-/// The names are [`IrExpr`]'s, so a variant-name trace over [`Node`] reads the
-/// same as one over [`IrExpr`].
+/// One kind per site-bearing, event, noise or filter operator, repeated inline
+/// in the node so a walk can classify one without touching the side table.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum HeavyKind {
     /// [`Heavy::AbsDelay`].
@@ -337,8 +338,8 @@ pub enum ZiPolynomial {
 
 /// The fields of one site-bearing, event, noise or filter operator.
 ///
-/// These are [`IrExpr`]'s field shapes verbatim, with `Box<IrExpr>` children
-/// replaced by [`NodeId`]. They live beside the nodes rather than inside them
+/// These are the operators' authored field shapes, with every child a
+/// [`NodeId`]. They live beside the nodes rather than inside them
 /// because the widest of them is 113 bytes and would otherwise set the size of
 /// every node in the forest, while none of them occurs in any shipped
 /// assignment forest at all.
@@ -840,7 +841,13 @@ const GROUND_INDEX: usize = usize::MAX;
 const PACKED_GROUND: u32 = u32::MAX;
 
 /// Pack a terminal or ordinal index into a node's `u32` slot.
-fn pack_index(value: usize) -> u32 {
+///
+/// The converter speaks `usize` because that is what
+/// `expr_converter::ConversionContext` resolves a node name to, and
+/// `GROUND_NODE` is `usize::MAX`; the four packed payloads hold a `u32`. This
+/// is the only way to write one, so a producer cannot cast a ground sentinel
+/// into a real terminal index by accident.
+pub fn pack_index(value: usize) -> u32 {
     if value == GROUND_INDEX {
         return PACKED_GROUND;
     }
@@ -854,7 +861,7 @@ fn pack_index(value: usize) -> u32 {
 
 /// Unpack a terminal or ordinal index from a node's `u32` slot.
 ///
-/// The four payloads [`ExprArena::import`] packs — [`Node::Voltage`],
+/// The four payloads [`pack_index`] writes — [`Node::Voltage`],
 /// [`Node::Current`], [`Node::BranchCurrent`] and [`Node::PortConnected`] —
 /// hold a `u32` where the source holds a `usize`, with `u32::MAX` standing for
 /// `expr_converter::GROUND_NODE`. Every consumer that reads one of them owes
@@ -868,869 +875,12 @@ pub fn unpack_index(value: u32) -> usize {
     }
 }
 
-impl ExprArena {
-    /// Copy an [`IrExpr`] tree into the arena and return its root.
-    ///
-    /// Children are pushed before their parent, so an imported tree occupies a
-    /// contiguous range of ids in post-order. Nothing is deduplicated: a
-    /// subtree the source cloned twice becomes two node ranges, exactly as it
-    /// is two subtrees today. Hash-consing is a separate, measured step and it
-    /// may never apply to a site-bearing or state-allocating node.
-    pub fn import(&mut self, expr: &IrExpr) -> NodeId {
-        let node = match expr {
-            IrExpr::Const(value) => Node::Const(*value),
-            IrExpr::Param(name) => {
-                let name = self.intern(name);
-                Node::Param(name)
-            }
-            IrExpr::ParamGiven(name) => {
-                let name = self.intern(name);
-                Node::ParamGiven(name)
-            }
-            IrExpr::Var(name) => {
-                let name = self.intern(name);
-                Node::Var(name)
-            }
-            IrExpr::VarIndexed {
-                array,
-                base,
-                len,
-                lower,
-                index,
-            } => {
-                let index = self.import(index);
-                let array = self.intern(array);
-                let payload = self.push_indexed(IndexedRead {
-                    array,
-                    base: *base,
-                    len: *len,
-                    lower: *lower,
-                });
-                Node::VarIndexed { payload, index }
-            }
-            IrExpr::Voltage(pos, neg) => Node::Voltage(pack_index(*pos), pack_index(*neg)),
-            IrExpr::Current(pos, neg) => Node::Current(pack_index(*pos), pack_index(*neg)),
-            IrExpr::BranchCurrent(ordinal) => Node::BranchCurrent(pack_index(*ordinal)),
-            IrExpr::Time => Node::Time,
-            IrExpr::Temperature => Node::Temperature,
-            IrExpr::Vt => Node::Vt,
-            IrExpr::Mfactor => Node::Mfactor,
-            IrExpr::PortConnected(port) => Node::PortConnected(pack_index(*port)),
-            IrExpr::Binary(op, left, right) => {
-                let left = self.import(left);
-                let right = self.import(right);
-                Node::Binary(*op, left, right)
-            }
-            IrExpr::Unary(op, inner) => {
-                let inner = self.import(inner);
-                Node::Unary(*op, inner)
-            }
-            IrExpr::Call(func, args) => {
-                let args = args.iter().map(|arg| self.import(arg)).collect::<Vec<_>>();
-                return self.push_call(*func, &args);
-            }
-            IrExpr::Ddt(inner) => {
-                let inner = self.import(inner);
-                Node::Ddt(inner)
-            }
-            IrExpr::Idt(inner, ic) => {
-                let inner = self.import(inner);
-                let ic = self.import_optional(ic);
-                Node::Idt(inner, ic)
-            }
-            IrExpr::IdtMod {
-                expr,
-                ic,
-                modulus,
-                offset,
-            } => {
-                let expr = self.import(expr);
-                let ic = self.import_optional(ic);
-                let modulus = self.import(modulus);
-                let offset = self.import_optional(offset);
-                let payload = self.push_optional_pair((ic, offset));
-                Node::IdtMod {
-                    expr,
-                    modulus,
-                    payload,
-                }
-            }
-            IrExpr::Limexp(inner) => {
-                let inner = self.import(inner);
-                Node::Limexp(inner)
-            }
-            IrExpr::Limit(inner, step) => {
-                let inner = self.import(inner);
-                let step = self.import_optional(step);
-                Node::Limit(inner, step)
-            }
-            IrExpr::CanonicalLimit(inner) => {
-                let inner = self.import(inner);
-                Node::CanonicalLimit(inner)
-            }
-            IrExpr::TableLookup {
-                input,
-                x_data,
-                y_data,
-            } => {
-                let input = self.import(input);
-                let table = self.push_table(x_data.clone(), y_data.clone());
-                Node::TableLookup { input, table }
-            }
-            IrExpr::TableDerivative {
-                input,
-                x_data,
-                y_data,
-            } => {
-                let input = self.import(input);
-                let table = self.push_table(x_data.clone(), y_data.clone());
-                Node::TableDerivative { input, table }
-            }
-            IrExpr::Ddx { expr, axis } => {
-                let expr = self.import(expr);
-                let axis = self.push_ddx_axis(*axis);
-                Node::Ddx { expr, axis }
-            }
-            IrExpr::DdtCompanion(inner) => {
-                let inner = self.import(inner);
-                Node::DdtCompanion(inner)
-            }
-            IrExpr::IdtCompanion(inner) => {
-                let inner = self.import(inner);
-                Node::IdtCompanion(inner)
-            }
-            IrExpr::Conditional(condition, then_expr, else_expr) => {
-                let condition = self.import(condition);
-                let then_expr = self.import(then_expr);
-                let else_expr = self.import(else_expr);
-                Node::Conditional(condition, then_expr, else_expr)
-            }
-            IrExpr::Analysis(name) => {
-                let name = self.intern(name);
-                Node::Analysis(name)
-            }
-            IrExpr::LastCrossing { expr, direction } => {
-                let expr = self.import(expr);
-                Node::LastCrossing {
-                    expr,
-                    direction: *direction,
-                }
-            }
-            IrExpr::AbsDelay {
-                site,
-                expr,
-                delay_time,
-                max_delay,
-            } => {
-                let expr = self.import(expr);
-                let delay_time = self.import(delay_time);
-                let max_delay = self.import_optional(max_delay);
-                return self.push_heavy(Heavy::AbsDelay {
-                    site: *site,
-                    expr,
-                    delay_time,
-                    max_delay,
-                });
-            }
-            IrExpr::AbsDelayDerivative {
-                site,
-                input,
-                input_derivative,
-                delay_time,
-                delay_derivative,
-                max_delay,
-                derivative_order,
-            } => {
-                let input = self.import(input);
-                let input_derivative = self.import(input_derivative);
-                let delay_time = self.import(delay_time);
-                let delay_derivative = self.import(delay_derivative);
-                let max_delay = self.import_optional(max_delay);
-                return self.push_heavy(Heavy::AbsDelayDerivative {
-                    site: *site,
-                    input,
-                    input_derivative,
-                    delay_time,
-                    delay_derivative,
-                    max_delay,
-                    derivative_order: *derivative_order,
-                });
-            }
-            IrExpr::Transition {
-                site,
-                expr,
-                delay,
-                rise_time,
-                fall_time,
-            } => {
-                let expr = self.import(expr);
-                let delay = self.import_optional(delay);
-                let rise_time = self.import_optional(rise_time);
-                let fall_time = self.import_optional(fall_time);
-                return self.push_heavy(Heavy::Transition {
-                    site: *site,
-                    expr,
-                    delay,
-                    rise_time,
-                    fall_time,
-                });
-            }
-            IrExpr::TransitionDerivative {
-                site,
-                input,
-                input_derivative,
-                delay,
-                rise_time,
-                fall_time,
-            } => {
-                let input = self.import(input);
-                let input_derivative = self.import(input_derivative);
-                let delay = self.import_optional(delay);
-                let rise_time = self.import_optional(rise_time);
-                let fall_time = self.import_optional(fall_time);
-                return self.push_heavy(Heavy::TransitionDerivative {
-                    site: *site,
-                    input,
-                    input_derivative,
-                    delay,
-                    rise_time,
-                    fall_time,
-                });
-            }
-            IrExpr::Slew {
-                site,
-                expr,
-                max_pos_slew,
-                max_neg_slew,
-            } => {
-                let expr = self.import(expr);
-                let max_pos_slew = self.import_optional(max_pos_slew);
-                let max_neg_slew = self.import_optional(max_neg_slew);
-                return self.push_heavy(Heavy::Slew {
-                    site: *site,
-                    expr,
-                    max_pos_slew,
-                    max_neg_slew,
-                });
-            }
-            IrExpr::SlewDerivative {
-                site,
-                input,
-                input_derivative,
-                max_pos_slew,
-                max_pos_slew_derivative,
-                max_neg_slew,
-                max_neg_slew_derivative,
-            } => {
-                let input = self.import(input);
-                let input_derivative = self.import(input_derivative);
-                let max_pos_slew = self.import_optional(max_pos_slew);
-                let max_pos_slew_derivative = self.import_optional(max_pos_slew_derivative);
-                let max_neg_slew = self.import_optional(max_neg_slew);
-                let max_neg_slew_derivative = self.import_optional(max_neg_slew_derivative);
-                return self.push_heavy(Heavy::SlewDerivative {
-                    site: *site,
-                    input,
-                    input_derivative,
-                    max_pos_slew,
-                    max_pos_slew_derivative,
-                    max_neg_slew,
-                    max_neg_slew_derivative,
-                });
-            }
-            IrExpr::Cross {
-                expr,
-                direction,
-                time_tol,
-                expr_tol,
-                enable,
-            } => {
-                let expr = self.import(expr);
-                let direction = self.import_optional(direction);
-                let time_tol = self.import_optional(time_tol);
-                let expr_tol = self.import_optional(expr_tol);
-                let enable = self.import_optional(enable);
-                return self.push_heavy(Heavy::Cross {
-                    expr,
-                    direction,
-                    time_tol,
-                    expr_tol,
-                    enable,
-                });
-            }
-            IrExpr::Above {
-                expr,
-                time_tol,
-                expr_tol,
-                enable,
-            } => {
-                let expr = self.import(expr);
-                let time_tol = self.import_optional(time_tol);
-                let expr_tol = self.import_optional(expr_tol);
-                let enable = self.import_optional(enable);
-                return self.push_heavy(Heavy::Above {
-                    expr,
-                    time_tol,
-                    expr_tol,
-                    enable,
-                });
-            }
-            IrExpr::Timer {
-                start_time,
-                period,
-                time_tol,
-                enable,
-            } => {
-                let start_time = self.import(start_time);
-                let period = self.import_optional(period);
-                let time_tol = self.import_optional(time_tol);
-                let enable = self.import_optional(enable);
-                return self.push_heavy(Heavy::Timer {
-                    start_time,
-                    period,
-                    time_tol,
-                    enable,
-                });
-            }
-            IrExpr::WhiteNoise { site, power, name } => {
-                let power = self.import(power);
-                return self.push_heavy(Heavy::WhiteNoise {
-                    site: *site,
-                    power,
-                    name: name.clone(),
-                });
-            }
-            IrExpr::FlickerNoise {
-                site,
-                power,
-                exponent,
-                name,
-            } => {
-                let power = self.import(power);
-                let exponent = self.import(exponent);
-                return self.push_heavy(Heavy::FlickerNoise {
-                    site: *site,
-                    power,
-                    exponent,
-                    name: name.clone(),
-                });
-            }
-            IrExpr::NoiseTable {
-                site,
-                points,
-                log_interp,
-                name,
-            } => {
-                return self.push_heavy(Heavy::NoiseTable {
-                    site: *site,
-                    points: points.clone(),
-                    log_interp: *log_interp,
-                    name: name.clone(),
-                });
-            }
-            IrExpr::LaplaceZP {
-                site,
-                expr,
-                zeros,
-                poles,
-                gain,
-            } => {
-                let expr = self.import(expr);
-                return self.push_heavy(Heavy::LaplaceZP {
-                    site: *site,
-                    expr,
-                    zeros: zeros.clone(),
-                    poles: poles.clone(),
-                    gain: *gain,
-                });
-            }
-            IrExpr::LaplaceND {
-                site,
-                expr,
-                numerator,
-                denominator,
-            } => {
-                let expr = self.import(expr);
-                return self.push_heavy(Heavy::LaplaceND {
-                    site: *site,
-                    expr,
-                    numerator: numerator.clone(),
-                    denominator: denominator.clone(),
-                });
-            }
-            IrExpr::LaplaceZPDerivative {
-                site,
-                expr,
-                zeros,
-                poles,
-                gain,
-            } => {
-                let expr = self.import(expr);
-                return self.push_heavy(Heavy::LaplaceZPDerivative {
-                    site: *site,
-                    expr,
-                    zeros: zeros.clone(),
-                    poles: poles.clone(),
-                    gain: *gain,
-                });
-            }
-            IrExpr::LaplaceNDDerivative {
-                site,
-                expr,
-                numerator,
-                denominator,
-            } => {
-                let expr = self.import(expr);
-                return self.push_heavy(Heavy::LaplaceNDDerivative {
-                    site: *site,
-                    expr,
-                    numerator: numerator.clone(),
-                    denominator: denominator.clone(),
-                });
-            }
-            IrExpr::ZiFilter {
-                site,
-                expr,
-                numerator,
-                denominator,
-                period,
-                transition,
-                first_transition,
-                direct_assignment,
-            } => {
-                let expr = self.import(expr);
-                let numerator = self.import_zi_polynomial(numerator);
-                let denominator = self.import_zi_polynomial(denominator);
-                let period = self.import(period);
-                let transition = self.import(transition);
-                let first_transition = self.import(first_transition);
-                return self.push_heavy(Heavy::ZiFilter {
-                    site: *site,
-                    expr,
-                    numerator,
-                    denominator,
-                    period,
-                    transition,
-                    first_transition,
-                    direct_assignment: *direct_assignment,
-                });
-            }
-            IrExpr::ZiFilterDerivative {
-                site,
-                expr,
-                numerator,
-                denominator,
-                period,
-                transition,
-                first_transition,
-                direct_assignment,
-            } => {
-                let expr = self.import(expr);
-                let numerator = self.import_zi_polynomial(numerator);
-                let denominator = self.import_zi_polynomial(denominator);
-                let period = self.import(period);
-                let transition = self.import(transition);
-                let first_transition = self.import(first_transition);
-                return self.push_heavy(Heavy::ZiFilterDerivative {
-                    site: *site,
-                    expr,
-                    numerator,
-                    denominator,
-                    period,
-                    transition,
-                    first_transition,
-                    direct_assignment: *direct_assignment,
-                });
-            }
-        };
-        self.push(node)
-    }
-
-    fn import_optional(&mut self, expr: &Option<Box<IrExpr>>) -> Option<NodeId> {
-        expr.as_ref().map(|expr| self.import(expr))
-    }
-
-    fn import_zi_polynomial(&mut self, polynomial: &ZiPolynomialDefinition) -> ZiPolynomial {
-        match polynomial {
-            ZiPolynomialDefinition::Coefficients(terms) => {
-                ZiPolynomial::Coefficients(terms.iter().map(|term| self.import(term)).collect())
-            }
-            ZiPolynomialDefinition::Roots(pairs) => ZiPolynomial::Roots(
-                pairs
-                    .iter()
-                    .map(|(real, imaginary)| (self.import(real), self.import(imaginary)))
-                    .collect(),
-            ),
-        }
-    }
-
-    /// Rebuild the [`IrExpr`] tree rooted at `id`.
-    ///
-    /// The inverse of [`ExprArena::import`] on every one of the 48 variants.
-    /// A shared subtree is written out once per path, so exporting a forest
-    /// the AD core shared is exactly as large as the same forest is today.
-    pub fn export(&self, id: NodeId) -> IrExpr {
-        match *self.node(id) {
-            Node::Const(value) => IrExpr::Const(value),
-            Node::Param(name) => IrExpr::Param(self.name(name).clone()),
-            Node::ParamGiven(name) => IrExpr::ParamGiven(self.name(name).clone()),
-            Node::Var(name) => IrExpr::Var(self.name(name).clone()),
-            Node::VarIndexed { payload, index } => {
-                let read = self.indexed(payload);
-                IrExpr::VarIndexed {
-                    array: self.name(read.array).clone(),
-                    base: read.base,
-                    len: read.len,
-                    lower: read.lower,
-                    index: self.export_boxed(index),
-                }
-            }
-            Node::Voltage(pos, neg) => IrExpr::Voltage(unpack_index(pos), unpack_index(neg)),
-            Node::Current(pos, neg) => IrExpr::Current(unpack_index(pos), unpack_index(neg)),
-            Node::BranchCurrent(ordinal) => IrExpr::BranchCurrent(unpack_index(ordinal)),
-            Node::Time => IrExpr::Time,
-            Node::Temperature => IrExpr::Temperature,
-            Node::Vt => IrExpr::Vt,
-            Node::Mfactor => IrExpr::Mfactor,
-            Node::PortConnected(port) => IrExpr::PortConnected(unpack_index(port)),
-            Node::Binary(op, left, right) => {
-                IrExpr::Binary(op, self.export_boxed(left), self.export_boxed(right))
-            }
-            Node::Unary(op, inner) => IrExpr::Unary(op, self.export_boxed(inner)),
-            Node::Call { func, a, b, .. } => IrExpr::Call(
-                func,
-                a.into_iter().chain(b).map(|arg| self.export(arg)).collect(),
-            ),
-            Node::CallSpilled { func, args } => IrExpr::Call(
-                func,
-                self.call_args(args)
-                    .iter()
-                    .map(|arg| self.export(*arg))
-                    .collect(),
-            ),
-            Node::Ddt(inner) => IrExpr::Ddt(self.export_boxed(inner)),
-            Node::Idt(inner, ic) => IrExpr::Idt(self.export_boxed(inner), self.export_optional(ic)),
-            Node::IdtMod {
-                expr,
-                modulus,
-                payload,
-            } => {
-                let (ic, offset) = self.optional_pair(payload);
-                IrExpr::IdtMod {
-                    expr: self.export_boxed(expr),
-                    ic: self.export_optional(ic),
-                    modulus: self.export_boxed(modulus),
-                    offset: self.export_optional(offset),
-                }
-            }
-            Node::Limexp(inner) => IrExpr::Limexp(self.export_boxed(inner)),
-            Node::Limit(inner, step) => {
-                IrExpr::Limit(self.export_boxed(inner), self.export_optional(step))
-            }
-            Node::CanonicalLimit(inner) => IrExpr::CanonicalLimit(self.export_boxed(inner)),
-            Node::TableLookup { input, table } => {
-                let (x_data, y_data) = self.table(table);
-                IrExpr::TableLookup {
-                    input: self.export_boxed(input),
-                    x_data: x_data.clone(),
-                    y_data: y_data.clone(),
-                }
-            }
-            Node::TableDerivative { input, table } => {
-                let (x_data, y_data) = self.table(table);
-                IrExpr::TableDerivative {
-                    input: self.export_boxed(input),
-                    x_data: x_data.clone(),
-                    y_data: y_data.clone(),
-                }
-            }
-            Node::Ddx { expr, axis } => IrExpr::Ddx {
-                expr: self.export_boxed(expr),
-                axis: self.ddx_axis(axis),
-            },
-            Node::DdtCompanion(inner) => IrExpr::DdtCompanion(self.export_boxed(inner)),
-            Node::IdtCompanion(inner) => IrExpr::IdtCompanion(self.export_boxed(inner)),
-            Node::Conditional(condition, then_expr, else_expr) => IrExpr::Conditional(
-                self.export_boxed(condition),
-                self.export_boxed(then_expr),
-                self.export_boxed(else_expr),
-            ),
-            Node::Analysis(name) => IrExpr::Analysis(self.name(name).to_string()),
-            Node::LastCrossing { expr, direction } => IrExpr::LastCrossing {
-                expr: self.export_boxed(expr),
-                direction,
-            },
-            Node::Heavy(_, id) => self.export_heavy(self.heavy(id)),
-        }
-    }
-
-    fn export_heavy(&self, heavy: &Heavy) -> IrExpr {
-        match heavy {
-            Heavy::AbsDelay {
-                site,
-                expr,
-                delay_time,
-                max_delay,
-            } => IrExpr::AbsDelay {
-                site: *site,
-                expr: self.export_boxed(*expr),
-                delay_time: self.export_boxed(*delay_time),
-                max_delay: self.export_optional(*max_delay),
-            },
-            Heavy::AbsDelayDerivative {
-                site,
-                input,
-                input_derivative,
-                delay_time,
-                delay_derivative,
-                max_delay,
-                derivative_order,
-            } => IrExpr::AbsDelayDerivative {
-                site: *site,
-                input: self.export_boxed(*input),
-                input_derivative: self.export_boxed(*input_derivative),
-                delay_time: self.export_boxed(*delay_time),
-                delay_derivative: self.export_boxed(*delay_derivative),
-                max_delay: self.export_optional(*max_delay),
-                derivative_order: *derivative_order,
-            },
-            Heavy::Transition {
-                site,
-                expr,
-                delay,
-                rise_time,
-                fall_time,
-            } => IrExpr::Transition {
-                site: *site,
-                expr: self.export_boxed(*expr),
-                delay: self.export_optional(*delay),
-                rise_time: self.export_optional(*rise_time),
-                fall_time: self.export_optional(*fall_time),
-            },
-            Heavy::TransitionDerivative {
-                site,
-                input,
-                input_derivative,
-                delay,
-                rise_time,
-                fall_time,
-            } => IrExpr::TransitionDerivative {
-                site: *site,
-                input: self.export_boxed(*input),
-                input_derivative: self.export_boxed(*input_derivative),
-                delay: self.export_optional(*delay),
-                rise_time: self.export_optional(*rise_time),
-                fall_time: self.export_optional(*fall_time),
-            },
-            Heavy::Slew {
-                site,
-                expr,
-                max_pos_slew,
-                max_neg_slew,
-            } => IrExpr::Slew {
-                site: *site,
-                expr: self.export_boxed(*expr),
-                max_pos_slew: self.export_optional(*max_pos_slew),
-                max_neg_slew: self.export_optional(*max_neg_slew),
-            },
-            Heavy::SlewDerivative {
-                site,
-                input,
-                input_derivative,
-                max_pos_slew,
-                max_pos_slew_derivative,
-                max_neg_slew,
-                max_neg_slew_derivative,
-            } => IrExpr::SlewDerivative {
-                site: *site,
-                input: self.export_boxed(*input),
-                input_derivative: self.export_boxed(*input_derivative),
-                max_pos_slew: self.export_optional(*max_pos_slew),
-                max_pos_slew_derivative: self.export_optional(*max_pos_slew_derivative),
-                max_neg_slew: self.export_optional(*max_neg_slew),
-                max_neg_slew_derivative: self.export_optional(*max_neg_slew_derivative),
-            },
-            Heavy::Cross {
-                expr,
-                direction,
-                time_tol,
-                expr_tol,
-                enable,
-            } => IrExpr::Cross {
-                expr: self.export_boxed(*expr),
-                direction: self.export_optional(*direction),
-                time_tol: self.export_optional(*time_tol),
-                expr_tol: self.export_optional(*expr_tol),
-                enable: self.export_optional(*enable),
-            },
-            Heavy::Above {
-                expr,
-                time_tol,
-                expr_tol,
-                enable,
-            } => IrExpr::Above {
-                expr: self.export_boxed(*expr),
-                time_tol: self.export_optional(*time_tol),
-                expr_tol: self.export_optional(*expr_tol),
-                enable: self.export_optional(*enable),
-            },
-            Heavy::Timer {
-                start_time,
-                period,
-                time_tol,
-                enable,
-            } => IrExpr::Timer {
-                start_time: self.export_boxed(*start_time),
-                period: self.export_optional(*period),
-                time_tol: self.export_optional(*time_tol),
-                enable: self.export_optional(*enable),
-            },
-            Heavy::WhiteNoise { site, power, name } => IrExpr::WhiteNoise {
-                site: *site,
-                power: self.export_boxed(*power),
-                name: name.clone(),
-            },
-            Heavy::FlickerNoise {
-                site,
-                power,
-                exponent,
-                name,
-            } => IrExpr::FlickerNoise {
-                site: *site,
-                power: self.export_boxed(*power),
-                exponent: self.export_boxed(*exponent),
-                name: name.clone(),
-            },
-            Heavy::NoiseTable {
-                site,
-                points,
-                log_interp,
-                name,
-            } => IrExpr::NoiseTable {
-                site: *site,
-                points: points.clone(),
-                log_interp: *log_interp,
-                name: name.clone(),
-            },
-            Heavy::LaplaceZP {
-                site,
-                expr,
-                zeros,
-                poles,
-                gain,
-            } => IrExpr::LaplaceZP {
-                site: *site,
-                expr: self.export_boxed(*expr),
-                zeros: zeros.clone(),
-                poles: poles.clone(),
-                gain: *gain,
-            },
-            Heavy::LaplaceND {
-                site,
-                expr,
-                numerator,
-                denominator,
-            } => IrExpr::LaplaceND {
-                site: *site,
-                expr: self.export_boxed(*expr),
-                numerator: numerator.clone(),
-                denominator: denominator.clone(),
-            },
-            Heavy::LaplaceZPDerivative {
-                site,
-                expr,
-                zeros,
-                poles,
-                gain,
-            } => IrExpr::LaplaceZPDerivative {
-                site: *site,
-                expr: self.export_boxed(*expr),
-                zeros: zeros.clone(),
-                poles: poles.clone(),
-                gain: *gain,
-            },
-            Heavy::LaplaceNDDerivative {
-                site,
-                expr,
-                numerator,
-                denominator,
-            } => IrExpr::LaplaceNDDerivative {
-                site: *site,
-                expr: self.export_boxed(*expr),
-                numerator: numerator.clone(),
-                denominator: denominator.clone(),
-            },
-            Heavy::ZiFilter {
-                site,
-                expr,
-                numerator,
-                denominator,
-                period,
-                transition,
-                first_transition,
-                direct_assignment,
-            } => IrExpr::ZiFilter {
-                site: *site,
-                expr: self.export_boxed(*expr),
-                numerator: self.export_zi_polynomial(numerator),
-                denominator: self.export_zi_polynomial(denominator),
-                period: self.export_boxed(*period),
-                transition: self.export_boxed(*transition),
-                first_transition: self.export_boxed(*first_transition),
-                direct_assignment: *direct_assignment,
-            },
-            Heavy::ZiFilterDerivative {
-                site,
-                expr,
-                numerator,
-                denominator,
-                period,
-                transition,
-                first_transition,
-                direct_assignment,
-            } => IrExpr::ZiFilterDerivative {
-                site: *site,
-                expr: self.export_boxed(*expr),
-                numerator: self.export_zi_polynomial(numerator),
-                denominator: self.export_zi_polynomial(denominator),
-                period: self.export_boxed(*period),
-                transition: self.export_boxed(*transition),
-                first_transition: self.export_boxed(*first_transition),
-                direct_assignment: *direct_assignment,
-            },
-        }
-    }
-
-    fn export_boxed(&self, id: NodeId) -> Box<IrExpr> {
-        Box::new(self.export(id))
-    }
-
-    fn export_optional(&self, id: Option<NodeId>) -> Option<Box<IrExpr>> {
-        id.map(|id| self.export_boxed(id))
-    }
-
-    fn export_zi_polynomial(&self, polynomial: &ZiPolynomial) -> ZiPolynomialDefinition {
-        match polynomial {
-            ZiPolynomial::Coefficients(terms) => ZiPolynomialDefinition::Coefficients(
-                terms.iter().map(|term| self.export(*term)).collect(),
-            ),
-            ZiPolynomial::Roots(pairs) => ZiPolynomialDefinition::Roots(
-                pairs
-                    .iter()
-                    .map(|(real, imaginary)| (self.export(*real), self.export(*imaginary)))
-                    .collect(),
-            ),
-        }
-    }
-}
-
 /// Hand every child slot of `node` that the generic walks descend into to `f`,
 /// in field order.
 ///
-/// This is `autodiff::visit_expr`'s and `autodiff::map_expr`'s child set,
-/// including the slots they deliberately stop at: an event, noise or
-/// companion operand is compiled into a program of its own, so no generic walk
-/// enters it. [`operator_operands`] is where those operands are reached.
+/// The child set every generic walk shares, including the slots they
+/// deliberately stop at: an event, noise or companion operand is compiled into
+/// a program of its own, so no generic walk enters it. [`operator_operands`] is where those operands are reached.
 pub fn for_each_child<F: FnMut(NodeId)>(arena: &ExprArena, node: &Node, f: &mut F) {
     let optional = |slot: Option<NodeId>, f: &mut F| {
         if let Some(child) = slot {
@@ -1988,10 +1138,9 @@ pub fn operator_operands(arena: &ExprArena, node: &Node) -> Vec<NodeId> {
 
 /// Walk the tree rooted at `id` in preorder, node before children.
 ///
-/// The arena's `visit_expr`: the same child slots in the
-/// same order, so the variant-name sequence of an imported tree is the
-/// sequence the boxed tree produces. A shared subtree is visited once per
-/// path, which is what makes the site-ordinal walks correct over an arena.
+/// A shared subtree is visited once per path, which is what makes the
+/// site-ordinal walks correct over an arena and is the whole of why nothing
+/// here memoizes by [`NodeId`].
 pub fn visit(arena: &ExprArena, id: NodeId, f: &mut impl FnMut(&Node)) {
     let node = *arena.node(id);
     f(&node);
@@ -2000,10 +1149,9 @@ pub fn visit(arena: &ExprArena, id: NodeId, f: &mut impl FnMut(&Node)) {
 
 /// Rewrite the tree rooted at `id`, appending only what changed.
 ///
-/// The arena's `map_expr`: `f` sees each node before its
-/// children and may replace it outright, in which case the replacement is
+/// `f` sees each node before its children and may replace it outright, in which case the replacement is
 /// pushed as written and its children are not walked. Otherwise the children
-/// are rewritten in the same slots `map_expr` rebuilds, and the node is pushed
+/// are rewritten in the same slots the boxed walk rebuilt, and the node is pushed
 /// again only if one of them moved — an unchanged subtree keeps its id, so a
 /// rewrite that changes nothing allocates nothing.
 ///
@@ -2018,25 +1166,51 @@ pub fn rewrite(
     if let Some(replacement) = f(arena, node) {
         return arena.push(replacement);
     }
+    rebuild_children(arena, id, node, &mut |arena, child| {
+        rewrite(arena, child, f)
+    })
+}
+
+/// Rebuild one node's children through `descend`, keeping its id if none moved.
+///
+/// This is [`rewrite`] without the replacement test: the child slots
+/// the boxed walk rebuilt, in the order it rebuilt them, with the recursion left
+/// to the caller. [`rewrite`] is this plus a closure that calls itself, and a
+/// walk whose *matched* node needs to recurse — the Laplace site-ordinal walk,
+/// which numbers an outer transfer function and then descends into its operand
+/// — needs this directly, because a closure handed to [`rewrite`] cannot call
+/// [`rewrite`] again while it is borrowed.
+///
+/// The descent rules are the ones the boxed walks had, and they are not
+/// uniform: a companion factor, a table derivative, `last_crossing` and the
+/// event and noise operators are leaves here, and a Laplace or Zi coefficient
+/// list is a slot this never enters. Anything that needs those must reach them
+/// itself, as the emitter does.
+pub fn rebuild_children(
+    arena: &mut ExprArena,
+    id: NodeId,
+    node: Node,
+    descend: &mut impl FnMut(&mut ExprArena, NodeId) -> NodeId,
+) -> NodeId {
     match node {
         Node::Binary(op, left, right) => {
-            let new_left = rewrite(arena, left, f);
-            let new_right = rewrite(arena, right, f);
+            let new_left = descend(arena, left);
+            let new_right = descend(arena, right);
             if new_left == left && new_right == right {
                 return id;
             }
             arena.push(Node::Binary(op, new_left, new_right))
         }
         Node::Unary(op, inner) => {
-            let new_inner = rewrite(arena, inner, f);
+            let new_inner = descend(arena, inner);
             if new_inner == inner {
                 return id;
             }
             arena.push(Node::Unary(op, new_inner))
         }
         Node::Call { func, argc, a, b } => {
-            let new_a = rewrite_optional(arena, a, f);
-            let new_b = rewrite_optional(arena, b, f);
+            let new_a = rebuild_optional(arena, a, descend);
+            let new_b = rebuild_optional(arena, b, descend);
             if new_a == a && new_b == b {
                 return id;
             }
@@ -2051,7 +1225,7 @@ pub fn rewrite(
             let old = arena.call_args(args).to_vec();
             let new = old
                 .iter()
-                .map(|arg| rewrite(arena, *arg, f))
+                .map(|arg| descend(arena, *arg))
                 .collect::<Vec<_>>();
             if new == old {
                 return id;
@@ -2059,45 +1233,47 @@ pub fn rewrite(
             arena.push_call(func, &new)
         }
         Node::Conditional(condition, then_expr, else_expr) => {
-            let new_condition = rewrite(arena, condition, f);
-            let new_then = rewrite(arena, then_expr, f);
-            let new_else = rewrite(arena, else_expr, f);
+            let new_condition = descend(arena, condition);
+            let new_then = descend(arena, then_expr);
+            let new_else = descend(arena, else_expr);
             if new_condition == condition && new_then == then_expr && new_else == else_expr {
                 return id;
             }
             arena.push(Node::Conditional(new_condition, new_then, new_else))
         }
-        Node::Ddt(inner) => rewrite_unary(arena, id, inner, Node::Ddt, f),
-        Node::Limexp(inner) => rewrite_unary(arena, id, inner, Node::Limexp, f),
-        Node::CanonicalLimit(inner) => rewrite_unary(arena, id, inner, Node::CanonicalLimit, f),
-        Node::Ddx { expr, axis } => {
-            rewrite_unary(arena, id, expr, |expr| Node::Ddx { expr, axis }, f)
+        Node::Ddt(inner) => rebuild_unary(arena, id, inner, Node::Ddt, descend),
+        Node::Limexp(inner) => rebuild_unary(arena, id, inner, Node::Limexp, descend),
+        Node::CanonicalLimit(inner) => {
+            rebuild_unary(arena, id, inner, Node::CanonicalLimit, descend)
         }
-        Node::TableLookup { input, table } => rewrite_unary(
+        Node::Ddx { expr, axis } => {
+            rebuild_unary(arena, id, expr, |expr| Node::Ddx { expr, axis }, descend)
+        }
+        Node::TableLookup { input, table } => rebuild_unary(
             arena,
             id,
             input,
             |input| Node::TableLookup { input, table },
-            f,
+            descend,
         ),
-        Node::VarIndexed { payload, index } => rewrite_unary(
+        Node::VarIndexed { payload, index } => rebuild_unary(
             arena,
             id,
             index,
             |index| Node::VarIndexed { payload, index },
-            f,
+            descend,
         ),
         Node::Idt(inner, second) => {
-            let new_inner = rewrite(arena, inner, f);
-            let new_second = rewrite_optional(arena, second, f);
+            let new_inner = descend(arena, inner);
+            let new_second = rebuild_optional(arena, second, descend);
             if new_inner == inner && new_second == second {
                 return id;
             }
             arena.push(Node::Idt(new_inner, new_second))
         }
         Node::Limit(inner, second) => {
-            let new_inner = rewrite(arena, inner, f);
-            let new_second = rewrite_optional(arena, second, f);
+            let new_inner = descend(arena, inner);
+            let new_second = rebuild_optional(arena, second, descend);
             if new_inner == inner && new_second == second {
                 return id;
             }
@@ -2109,10 +1285,10 @@ pub fn rewrite(
             payload,
         } => {
             let (ic, offset) = arena.optional_pair(payload);
-            let new_expr = rewrite(arena, expr, f);
-            let new_ic = rewrite_optional(arena, ic, f);
-            let new_modulus = rewrite(arena, modulus, f);
-            let new_offset = rewrite_optional(arena, offset, f);
+            let new_expr = descend(arena, expr);
+            let new_ic = rebuild_optional(arena, ic, descend);
+            let new_modulus = descend(arena, modulus);
+            let new_offset = rebuild_optional(arena, offset, descend);
             if new_expr == expr && new_ic == ic && new_modulus == modulus && new_offset == offset {
                 return id;
             }
@@ -2125,14 +1301,14 @@ pub fn rewrite(
         }
         Node::Heavy(_, heavy) => {
             let old = arena.heavy(heavy).clone();
-            let new = rewrite_heavy(arena, &old, f);
+            let new = rebuild_heavy(arena, &old, descend);
             if new == old {
                 return id;
             }
             arena.push_heavy(new)
         }
         // Leaves for the generic walks: an unchanged node keeps its id, which
-        // is the arena's spelling of `map_expr`'s `other => other.clone()`.
+        // is the arena's spelling of the boxed walk's `other => other.clone()`.
         Node::Const(_)
         | Node::Param(_)
         | Node::ParamGiven(_)
@@ -2153,32 +1329,32 @@ pub fn rewrite(
     }
 }
 
-fn rewrite_unary(
+fn rebuild_unary(
     arena: &mut ExprArena,
     id: NodeId,
     child: NodeId,
     build: impl Fn(NodeId) -> Node,
-    f: &mut impl FnMut(&mut ExprArena, Node) -> Option<Node>,
+    descend: &mut impl FnMut(&mut ExprArena, NodeId) -> NodeId,
 ) -> NodeId {
-    let new_child = rewrite(arena, child, f);
+    let new_child = descend(arena, child);
     if new_child == child {
         return id;
     }
     arena.push(build(new_child))
 }
 
-fn rewrite_optional(
+fn rebuild_optional(
     arena: &mut ExprArena,
     child: Option<NodeId>,
-    f: &mut impl FnMut(&mut ExprArena, Node) -> Option<Node>,
+    descend: &mut impl FnMut(&mut ExprArena, NodeId) -> NodeId,
 ) -> Option<NodeId> {
-    child.map(|child| rewrite(arena, child, f))
+    child.map(|child| descend(arena, child))
 }
 
-fn rewrite_heavy(
+fn rebuild_heavy(
     arena: &mut ExprArena,
     heavy: &Heavy,
-    f: &mut impl FnMut(&mut ExprArena, Node) -> Option<Node>,
+    descend: &mut impl FnMut(&mut ExprArena, NodeId) -> NodeId,
 ) -> Heavy {
     match heavy {
         Heavy::AbsDelay {
@@ -2188,9 +1364,9 @@ fn rewrite_heavy(
             max_delay,
         } => Heavy::AbsDelay {
             site: *site,
-            expr: rewrite(arena, *expr, f),
-            delay_time: rewrite(arena, *delay_time, f),
-            max_delay: rewrite_optional(arena, *max_delay, f),
+            expr: descend(arena, *expr),
+            delay_time: descend(arena, *delay_time),
+            max_delay: rebuild_optional(arena, *max_delay, descend),
         },
         Heavy::AbsDelayDerivative {
             site,
@@ -2202,11 +1378,11 @@ fn rewrite_heavy(
             derivative_order,
         } => Heavy::AbsDelayDerivative {
             site: *site,
-            input: rewrite(arena, *input, f),
-            input_derivative: rewrite(arena, *input_derivative, f),
-            delay_time: rewrite(arena, *delay_time, f),
-            delay_derivative: rewrite(arena, *delay_derivative, f),
-            max_delay: rewrite_optional(arena, *max_delay, f),
+            input: descend(arena, *input),
+            input_derivative: descend(arena, *input_derivative),
+            delay_time: descend(arena, *delay_time),
+            delay_derivative: descend(arena, *delay_derivative),
+            max_delay: rebuild_optional(arena, *max_delay, descend),
             derivative_order: *derivative_order,
         },
         Heavy::Transition {
@@ -2217,10 +1393,10 @@ fn rewrite_heavy(
             fall_time,
         } => Heavy::Transition {
             site: *site,
-            expr: rewrite(arena, *expr, f),
-            delay: rewrite_optional(arena, *delay, f),
-            rise_time: rewrite_optional(arena, *rise_time, f),
-            fall_time: rewrite_optional(arena, *fall_time, f),
+            expr: descend(arena, *expr),
+            delay: rebuild_optional(arena, *delay, descend),
+            rise_time: rebuild_optional(arena, *rise_time, descend),
+            fall_time: rebuild_optional(arena, *fall_time, descend),
         },
         Heavy::TransitionDerivative {
             site,
@@ -2231,11 +1407,11 @@ fn rewrite_heavy(
             fall_time,
         } => Heavy::TransitionDerivative {
             site: *site,
-            input: rewrite(arena, *input, f),
-            input_derivative: rewrite(arena, *input_derivative, f),
-            delay: rewrite_optional(arena, *delay, f),
-            rise_time: rewrite_optional(arena, *rise_time, f),
-            fall_time: rewrite_optional(arena, *fall_time, f),
+            input: descend(arena, *input),
+            input_derivative: descend(arena, *input_derivative),
+            delay: rebuild_optional(arena, *delay, descend),
+            rise_time: rebuild_optional(arena, *rise_time, descend),
+            fall_time: rebuild_optional(arena, *fall_time, descend),
         },
         Heavy::Slew {
             site,
@@ -2244,9 +1420,9 @@ fn rewrite_heavy(
             max_neg_slew,
         } => Heavy::Slew {
             site: *site,
-            expr: rewrite(arena, *expr, f),
-            max_pos_slew: rewrite_optional(arena, *max_pos_slew, f),
-            max_neg_slew: rewrite_optional(arena, *max_neg_slew, f),
+            expr: descend(arena, *expr),
+            max_pos_slew: rebuild_optional(arena, *max_pos_slew, descend),
+            max_neg_slew: rebuild_optional(arena, *max_neg_slew, descend),
         },
         Heavy::SlewDerivative {
             site,
@@ -2258,12 +1434,12 @@ fn rewrite_heavy(
             max_neg_slew_derivative,
         } => Heavy::SlewDerivative {
             site: *site,
-            input: rewrite(arena, *input, f),
-            input_derivative: rewrite(arena, *input_derivative, f),
-            max_pos_slew: rewrite_optional(arena, *max_pos_slew, f),
-            max_pos_slew_derivative: rewrite_optional(arena, *max_pos_slew_derivative, f),
-            max_neg_slew: rewrite_optional(arena, *max_neg_slew, f),
-            max_neg_slew_derivative: rewrite_optional(arena, *max_neg_slew_derivative, f),
+            input: descend(arena, *input),
+            input_derivative: descend(arena, *input_derivative),
+            max_pos_slew: rebuild_optional(arena, *max_pos_slew, descend),
+            max_pos_slew_derivative: rebuild_optional(arena, *max_pos_slew_derivative, descend),
+            max_neg_slew: rebuild_optional(arena, *max_neg_slew, descend),
+            max_neg_slew_derivative: rebuild_optional(arena, *max_neg_slew_derivative, descend),
         },
         Heavy::LaplaceZP {
             site,
@@ -2273,7 +1449,7 @@ fn rewrite_heavy(
             gain,
         } => Heavy::LaplaceZP {
             site: *site,
-            expr: rewrite(arena, *expr, f),
+            expr: descend(arena, *expr),
             zeros: zeros.clone(),
             poles: poles.clone(),
             gain: *gain,
@@ -2285,7 +1461,7 @@ fn rewrite_heavy(
             denominator,
         } => Heavy::LaplaceND {
             site: *site,
-            expr: rewrite(arena, *expr, f),
+            expr: descend(arena, *expr),
             numerator: numerator.clone(),
             denominator: denominator.clone(),
         },
@@ -2297,7 +1473,7 @@ fn rewrite_heavy(
             gain,
         } => Heavy::LaplaceZPDerivative {
             site: *site,
-            expr: rewrite(arena, *expr, f),
+            expr: descend(arena, *expr),
             zeros: zeros.clone(),
             poles: poles.clone(),
             gain: *gain,
@@ -2309,7 +1485,7 @@ fn rewrite_heavy(
             denominator,
         } => Heavy::LaplaceNDDerivative {
             site: *site,
-            expr: rewrite(arena, *expr, f),
+            expr: descend(arena, *expr),
             numerator: numerator.clone(),
             denominator: denominator.clone(),
         },
@@ -2324,12 +1500,12 @@ fn rewrite_heavy(
             direct_assignment,
         } => Heavy::ZiFilter {
             site: *site,
-            expr: rewrite(arena, *expr, f),
+            expr: descend(arena, *expr),
             numerator: numerator.clone(),
             denominator: denominator.clone(),
-            period: rewrite(arena, *period, f),
-            transition: rewrite(arena, *transition, f),
-            first_transition: rewrite(arena, *first_transition, f),
+            period: descend(arena, *period),
+            transition: descend(arena, *transition),
+            first_transition: descend(arena, *first_transition),
             direct_assignment: *direct_assignment,
         },
         Heavy::ZiFilterDerivative {
@@ -2343,16 +1519,16 @@ fn rewrite_heavy(
             direct_assignment,
         } => Heavy::ZiFilterDerivative {
             site: *site,
-            expr: rewrite(arena, *expr, f),
+            expr: descend(arena, *expr),
             numerator: numerator.clone(),
             denominator: denominator.clone(),
-            period: rewrite(arena, *period, f),
-            transition: rewrite(arena, *transition, f),
-            first_transition: rewrite(arena, *first_transition, f),
+            period: descend(arena, *period),
+            transition: descend(arena, *transition),
+            first_transition: descend(arena, *first_transition),
             direct_assignment: *direct_assignment,
         },
-        // Leaves for the generic walks, cloned unchanged the way `map_expr`
-        // clones them.
+        // Leaves for the generic walks, cloned unchanged the way the boxed walk
+        // cloned them.
         Heavy::Cross { .. }
         | Heavy::Above { .. }
         | Heavy::Timer { .. }
@@ -2365,8 +1541,6 @@ fn rewrite_heavy(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ir::autodiff::visit_expr;
-    use crate::ir::autodiff::visit_expr_parity_tests::one_of_every_variant;
 
     /// The leading identifier of a `Debug` rendering, which for a derived
     /// `Debug` is the variant's name.
@@ -2377,7 +1551,7 @@ mod tests {
             .collect()
     }
 
-    /// The [`IrExpr`] variant name a [`Node`] stands for.
+    /// The operator name a [`Node`] stands for.
     fn node_variant_name(node: &Node) -> String {
         match node {
             Node::Heavy(kind, _) => format!("{kind:?}"),
@@ -2399,144 +1573,28 @@ mod tests {
     }
 
     #[test]
-    fn import_then_export_reproduces_every_variant() {
-        for expr in one_of_every_variant() {
-            let mut arena = ExprArena::new();
-            let id = arena.import(&expr);
-            assert_eq!(
-                format!("{:?}", arena.export(id)),
-                format!("{expr:?}"),
-                "the arena lost something importing {expr:?}"
-            );
-        }
-    }
-
-    /// The awkward payloads the parity fixture set does not carry: a named
-    /// noise process, a `last_crossing` without a direction, a `ddx` on a
-    /// branch current, a ground terminal, and a call whose argument list is
-    /// longer than any `IrFunction`'s arity.
-    #[test]
-    fn import_then_export_reproduces_the_awkward_payloads() {
-        let site = NoiseSiteId {
-            source: 1,
-            start: 2,
-            end: 3,
-            ordinal: 4,
-        };
-        let awkward = vec![
-            IrExpr::WhiteNoise {
-                site,
-                power: Box::new(IrExpr::Const(1.0)),
-                name: Some("thermal".to_string()),
-            },
-            IrExpr::FlickerNoise {
-                site,
-                power: Box::new(IrExpr::Const(1.0)),
-                exponent: Box::new(IrExpr::Const(2.0)),
-                name: Some("flicker".to_string()),
-            },
-            IrExpr::NoiseTable {
-                site,
-                points: vec![(1.0, 2.0), (3.0, 4.0)],
-                log_interp: true,
-                name: Some("table".to_string()),
-            },
-            IrExpr::LastCrossing {
-                expr: Box::new(IrExpr::Const(1.0)),
-                direction: None,
-            },
-            IrExpr::Ddx {
-                expr: Box::new(IrExpr::Const(1.0)),
-                axis: DdxAxis::BranchCurrent {
-                    ordinal: 7,
-                    reversed: true,
-                },
-            },
-            IrExpr::Voltage(0, usize::MAX),
-            IrExpr::Current(usize::MAX, 3),
-            IrExpr::VarIndexed {
-                array: SmolStr::new("a"),
-                base: 4,
-                len: 5,
-                lower: -3,
-                index: Box::new(IrExpr::Const(1.0)),
-            },
-            IrExpr::Call(IrFunction::Min, Vec::new()),
-            IrExpr::Call(IrFunction::Min, vec![IrExpr::Const(1.0)]),
-            IrExpr::Call(
-                IrFunction::Min,
-                vec![IrExpr::Const(1.0), IrExpr::Const(2.0), IrExpr::Const(3.0)],
-            ),
-            IrExpr::LaplaceZP {
-                site: LaplaceSiteId {
-                    source: 1,
-                    start: 2,
-                    end: 3,
-                    ordinal: 4,
-                },
-                expr: Box::new(IrExpr::Const(1.0)),
-                zeros: vec![(1.0, -1.0)],
-                poles: vec![(2.0, -2.0), (3.0, -3.0)],
-                gain: 0.5,
-            },
-        ];
-        for expr in awkward {
-            let mut arena = ExprArena::new();
-            let id = arena.import(&expr);
-            assert_eq!(
-                format!("{:?}", arena.export(id)),
-                format!("{expr:?}"),
-                "the arena lost something importing {expr:?}"
-            );
-        }
-    }
-
-    #[test]
     fn a_call_of_more_than_two_arguments_spills() {
         let mut arena = ExprArena::new();
-        let expr = IrExpr::Call(
-            IrFunction::Max,
-            vec![IrExpr::Const(1.0), IrExpr::Const(2.0), IrExpr::Const(3.0)],
-        );
-        let id = arena.import(&expr);
+        let args = [1.0, 2.0, 3.0].map(|value| arena.push(Node::Const(value)));
+        let id = arena.push_call(IrFunction::Max, &args);
         assert!(matches!(arena.node(id), Node::CallSpilled { .. }));
         assert_eq!(arena.arguments(arena.node(id)).len(), 3);
-    }
-
-    #[test]
-    fn visit_walks_the_same_variants_in_the_same_order_as_visit_expr() {
-        for expr in one_of_every_variant() {
-            let mut boxed = Vec::new();
-            visit_expr(&expr, &mut |node| {
-                boxed.push(variant_name(&format!("{node:?}")));
-            });
-
-            let mut arena = ExprArena::new();
-            let id = arena.import(&expr);
-            let mut arena_names = Vec::new();
-            visit(&arena, id, &mut |node| {
-                arena_names.push(node_variant_name(node));
-            });
-
-            assert_eq!(
-                arena_names, boxed,
-                "visit disagrees with visit_expr on {expr:?}"
-            );
-        }
     }
 
     /// The slots the generic walks stop at, and the walk that reaches them.
     #[test]
     fn operator_operands_reaches_what_visit_does_not() {
         let mut arena = ExprArena::new();
-        let expr = IrExpr::Cross {
-            expr: Box::new(IrExpr::Var(SmolStr::new("monitored"))),
-            direction: Some(Box::new(IrExpr::Const(1.0))),
+        let monitored = marker(&mut arena, "monitored");
+        let direction = arena.push(Node::Const(1.0));
+        let enable = marker(&mut arena, "enabled");
+        let id = arena.push_heavy(Heavy::Cross {
+            expr: monitored,
+            direction: Some(direction),
             time_tol: None,
             expr_tol: None,
-            enable: Some(Box::new(IrExpr::Var(SmolStr::new("enabled")))),
-        };
-        let id = arena.import(&expr);
+            enable: Some(enable),
+        });
 
         let mut visited = 0;
         visit(&arena, id, &mut |_| visited += 1);
@@ -2551,18 +1609,119 @@ mod tests {
         assert_eq!(names, vec!["Var", "Const", "Var"]);
     }
 
+    /// One node of every kind, each with markers in the slots the walks enter.
+    ///
+    /// The bridge fixtures this replaces built one boxed tree of every variant
+    /// and compared a round trip; with the boxed tree gone the property worth
+    /// keeping is that [`rewrite`] is an identity on a node it does not change,
+    /// for every shape it can meet.
+    fn one_of_every_node(arena: &mut ExprArena) -> Vec<NodeId> {
+        let m = |arena: &mut ExprArena| marker(arena, "m");
+        let table = arena.push_table(vec![0.0, 1.0], vec![0.0, 1.0]);
+        let axis = arena.push_ddx_axis(DdxAxis::Potential {
+            pos: Some(0),
+            neg: None,
+        });
+        let indexed = {
+            let array = arena.intern("a");
+            arena.push_indexed(IndexedRead {
+                array,
+                base: 0,
+                len: 2,
+                lower: 0,
+            })
+        };
+        let site = TransitionSiteId {
+            source: 0,
+            start: 0,
+            end: 1,
+            ordinal: 0,
+        };
+        let mut out = Vec::new();
+        let plain = [
+            Node::Const(1.0),
+            Node::Time,
+            Node::Temperature,
+            Node::Vt,
+            Node::Mfactor,
+            Node::Voltage(0, u32::MAX),
+            Node::Current(u32::MAX, 1),
+            Node::BranchCurrent(0),
+            Node::PortConnected(0),
+        ];
+        for node in plain {
+            out.push(arena.push(node));
+        }
+        for name in ["p", "g", "v", "an"] {
+            let interned = arena.intern(name);
+            out.push(arena.push(Node::Param(interned)));
+            out.push(arena.push(Node::ParamGiven(interned)));
+            out.push(arena.push(Node::Var(interned)));
+            out.push(arena.push(Node::Analysis(interned)));
+        }
+        let one = m(arena);
+        let two = m(arena);
+        out.push(arena.push(Node::Binary(BinaryOp::Add, one, two)));
+        out.push(arena.push(Node::Unary(UnaryOp::Neg, one)));
+        out.push(arena.push(Node::Conditional(one, two, one)));
+        out.push(arena.push(Node::Ddt(one)));
+        out.push(arena.push(Node::Idt(one, Some(two))));
+        out.push(arena.push(Node::Idt(one, None)));
+        out.push(arena.push(Node::Limexp(one)));
+        out.push(arena.push(Node::Limit(one, Some(two))));
+        out.push(arena.push(Node::CanonicalLimit(one)));
+        out.push(arena.push(Node::TableLookup { input: one, table }));
+        out.push(arena.push(Node::TableDerivative { input: one, table }));
+        out.push(arena.push(Node::Ddx { expr: one, axis }));
+        out.push(arena.push(Node::DdtCompanion(one)));
+        out.push(arena.push(Node::IdtCompanion(one)));
+        out.push(arena.push(Node::LastCrossing {
+            expr: one,
+            direction: Some(1),
+        }));
+        out.push(arena.push(Node::VarIndexed {
+            payload: indexed,
+            index: one,
+        }));
+        let payload = arena.push_optional_pair((Some(one), Some(two)));
+        out.push(arena.push(Node::IdtMod {
+            expr: one,
+            modulus: two,
+            payload,
+        }));
+        out.push(arena.push_call(IrFunction::Min, &[]));
+        out.push(arena.push_call(IrFunction::Min, &[one]));
+        out.push(arena.push_call(IrFunction::Min, &[one, two]));
+        out.push(arena.push_call(IrFunction::Min, &[one, two, one]));
+        out.push(arena.push_heavy(Heavy::Transition {
+            site,
+            expr: one,
+            delay: Some(two),
+            rise_time: None,
+            fall_time: None,
+        }));
+        out.push(arena.push_heavy(Heavy::Cross {
+            expr: one,
+            direction: Some(two),
+            time_tol: None,
+            expr_tol: None,
+            enable: None,
+        }));
+        out
+    }
+
     #[test]
     fn rewrite_that_changes_nothing_returns_the_input_and_pushes_nothing() {
-        for expr in one_of_every_variant() {
-            let mut arena = ExprArena::new();
-            let id = arena.import(&expr);
+        let mut arena = ExprArena::new();
+        for id in one_of_every_node(&mut arena) {
             let before = arena.len();
             let rewritten = rewrite(&mut arena, id, &mut |_, _| None);
-            assert_eq!(rewritten, id, "rewrite moved an unchanged {expr:?}");
+            let node = *arena.node(id);
+            assert_eq!(rewritten, id, "rewrite moved an unchanged {node:?}");
             assert_eq!(
                 arena.len(),
                 before,
-                "rewrite allocated on an unchanged {expr:?}"
+                "rewrite allocated on an unchanged {node:?}"
             );
         }
     }
@@ -2592,49 +1751,70 @@ mod tests {
         assert_ne!(new_right, right);
     }
 
+    /// A shared subtree carrying a `transition`, walked twice.
+    ///
+    /// This is the property the producer stage's move onto the arena put at
+    /// risk and the reason the five site-ordinal walks recurse rather than
+    /// memoize: `x + x` over one shared node has **two** `transition` sites in
+    /// the emitted program, not one, so a walk over it must hand out two
+    /// ordinals and must not collapse them.
     #[test]
-    fn a_subtree_cloned_twice_imports_as_two_node_ranges() {
-        let shared = IrExpr::Binary(
-            BinaryOp::Mul,
-            Box::new(IrExpr::Var(SmolStr::new("x"))),
-            Box::new(IrExpr::Var(SmolStr::new("x"))),
-        );
-        let expr = IrExpr::Binary(
-            BinaryOp::Add,
-            Box::new(shared.clone()),
-            Box::new(shared.clone()),
-        );
-
+    fn a_walk_over_a_shared_subtree_unfolds_it() {
         let mut arena = ExprArena::new();
-        let id = arena.import(&expr);
+        let inner = marker(&mut arena, "x");
+        let shared = arena.push_heavy(Heavy::Transition {
+            site: TransitionSiteId {
+                source: 0,
+                start: 0,
+                end: 1,
+                ordinal: 0,
+            },
+            expr: inner,
+            delay: None,
+            rise_time: None,
+            fall_time: None,
+        });
+        let root = arena.push(Node::Binary(BinaryOp::Add, shared, shared));
 
-        // Seven nodes: four `Var`s, two `Mul`s and the `Add`. Import never
-        // deduplicates, so the cloned subtree is present twice — while the
-        // name it reads is interned once.
-        assert_eq!(arena.len(), 7);
-        let Node::Binary(_, left, right) = *arena.node(id) else {
-            panic!("the imported root is a binary node");
+        let mut seen = 0;
+        visit(&arena, root, &mut |node| {
+            if matches!(node, Node::Heavy(HeavyKind::Transition, _)) {
+                seen += 1;
+            }
+        });
+        assert_eq!(
+            seen, 2,
+            "a shared subtree is visited once per path, not once per node"
+        );
+
+        // And a rewrite gives each path its own node, which is what lets the
+        // two paths take different site ordinals.
+        let mut next = 0_u32;
+        let rewritten = rewrite(&mut arena, root, &mut |arena, node| {
+            let Node::Heavy(HeavyKind::Transition, heavy) = node else {
+                return None;
+            };
+            let mut updated = arena.heavy(heavy).clone();
+            if let Heavy::Transition { site, .. } = &mut updated {
+                site.ordinal = next;
+                next += 1;
+            }
+            let pushed = arena.push_heavy(updated);
+            Some(*arena.node(pushed))
+        });
+        assert_eq!(next, 2, "each path was numbered");
+        let Node::Binary(_, left, right) = *arena.node(rewritten) else {
+            panic!("the rewritten root is still a binary node");
         };
-        assert_ne!(left, right);
-        let Node::Binary(left_op, first, second) = *arena.node(left) else {
-            panic!("the first copy is a binary node");
+        assert_ne!(left, right, "the two paths were given separate nodes");
+        let ordinal = |id| match *arena.node(id) {
+            Node::Heavy(HeavyKind::Transition, heavy) => match arena.heavy(heavy) {
+                Heavy::Transition { site, .. } => site.ordinal,
+                other => panic!("expected a transition, found {other:?}"),
+            },
+            other => panic!("expected a transition, found {other:?}"),
         };
-        let Node::Binary(right_op, third, fourth) = *arena.node(right) else {
-            panic!("the second copy is a binary node");
-        };
-        assert_eq!(left_op, right_op);
-        for id in [first, second] {
-            assert!(![third, fourth].contains(&id), "the ranges overlap");
-        }
-        let names = [first, second, third, fourth]
-            .iter()
-            .map(|id| match arena.node(*id) {
-                Node::Var(name) => *name,
-                other => panic!("expected a variable read, found {other:?}"),
-            })
-            .collect::<Vec<_>>();
-        assert!(names.windows(2).all(|pair| pair[0] == pair[1]));
-        assert_eq!(format!("{:?}", arena.export(id)), format!("{expr:?}"));
+        assert_eq!((ordinal(left), ordinal(right)), (0, 1));
     }
 
     #[test]

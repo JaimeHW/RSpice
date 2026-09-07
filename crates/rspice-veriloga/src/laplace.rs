@@ -2002,73 +2002,84 @@ endmodule
 
     #[test]
     fn legacy_ir_laplace_nd_derivative_retains_the_primal_site_and_definition() {
-        use crate::ir::{DerivativeWrt, IrExpr, LaplaceSiteId, autodiff};
+        use crate::ir::arena::{ExprArena, Heavy, Node};
+        use crate::ir::{DerivativeWrt, LaplaceSiteId, autodiff};
 
-        let derivative = |numerator, denominator| {
-            let site = LaplaceSiteId::from_span(crate::source::Span::dummy());
-            let expression = IrExpr::LaplaceND {
-                site,
-                expr: Box::new(IrExpr::Voltage(0, usize::MAX)),
-                numerator,
-                denominator,
-            };
-            autodiff::simplify_source(autodiff::differentiate_source(
-                &expression,
-                &DerivativeWrt::Voltage(0),
-            ))
-        };
-
-        let IrExpr::LaplaceNDDerivative {
+        let arena = &mut ExprArena::new();
+        let site = LaplaceSiteId::from_span(crate::source::Span::dummy());
+        let expr = arena.push(Node::Voltage(0, u32::MAX));
+        let expression = arena.push_heavy(Heavy::LaplaceND {
             site,
+            expr,
+            numerator: vec![1.0e-310],
+            denominator: vec![1.0e-310, 1.0],
+        });
+        let raw = autodiff::differentiate(arena, expression, &DerivativeWrt::Voltage(0));
+        let derivative = autodiff::simplify(arena, raw);
+
+        let Node::Heavy(_, heavy) = *arena.node(derivative) else {
+            panic!("Laplace ND derivative must retain an explicit state-site action");
+        };
+        let Heavy::LaplaceNDDerivative {
+            site: derivative_site,
             expr,
             numerator,
             denominator,
-        } = derivative(vec![1.0e-310], vec![1.0e-310, 1.0])
+        } = arena.heavy(heavy)
         else {
             panic!("Laplace ND derivative must retain an explicit state-site action");
         };
-        assert_eq!(site, LaplaceSiteId::from_span(crate::source::Span::dummy()));
-        assert!(matches!(expr.as_ref(), IrExpr::Const(1.0)));
-        assert_eq!(numerator, vec![1.0e-310]);
-        assert_eq!(denominator, vec![1.0e-310, 1.0]);
+        assert_eq!(
+            *derivative_site,
+            LaplaceSiteId::from_span(crate::source::Span::dummy())
+        );
+        assert!(matches!(*arena.node(*expr), Node::Const(1.0)));
+        assert_eq!(*numerator, vec![1.0e-310]);
+        assert_eq!(*denominator, vec![1.0e-310, 1.0]);
     }
 
     #[test]
     fn legacy_ir_laplace_zp_derivative_retains_the_primal_site_and_definition() {
-        use crate::ir::{DerivativeWrt, IrExpr, LaplaceSiteId, autodiff};
-
-        let derivative = |zeros, poles| {
-            let site = LaplaceSiteId::from_span(crate::source::Span::dummy());
-            let expression = IrExpr::LaplaceZP {
-                site,
-                expr: Box::new(IrExpr::Voltage(0, usize::MAX)),
-                zeros,
-                poles,
-                gain: 2.0,
-            };
-            autodiff::simplify_source(autodiff::differentiate_source(
-                &expression,
-                &DerivativeWrt::Voltage(0),
-            ))
-        };
+        use crate::ir::arena::{ExprArena, Heavy, Node};
+        use crate::ir::{DerivativeWrt, LaplaceSiteId, autodiff};
 
         let zeros = vec![(-1.0, 2.0), (-1.0, -2.0)];
         let poles = vec![(-3.0, 4.0), (-3.0, -4.0)];
-        let IrExpr::LaplaceZPDerivative {
+
+        let arena = &mut ExprArena::new();
+        let site = LaplaceSiteId::from_span(crate::source::Span::dummy());
+        let expr = arena.push(Node::Voltage(0, u32::MAX));
+        let expression = arena.push_heavy(Heavy::LaplaceZP {
             site,
+            expr,
+            zeros: zeros.clone(),
+            poles: poles.clone(),
+            gain: 2.0,
+        });
+        let raw = autodiff::differentiate(arena, expression, &DerivativeWrt::Voltage(0));
+        let derivative = autodiff::simplify(arena, raw);
+
+        let Node::Heavy(_, heavy) = *arena.node(derivative) else {
+            panic!("Laplace ZP derivative must retain an explicit state-site action");
+        };
+        let Heavy::LaplaceZPDerivative {
+            site: derivative_site,
             expr,
             zeros: derivative_zeros,
             poles: derivative_poles,
             gain,
-        } = derivative(zeros.clone(), poles.clone())
+        } = arena.heavy(heavy)
         else {
             panic!("Laplace ZP derivative must retain an explicit state-site action");
         };
-        assert_eq!(site, LaplaceSiteId::from_span(crate::source::Span::dummy()));
-        assert!(matches!(expr.as_ref(), IrExpr::Const(1.0)));
-        assert_eq!(derivative_zeros, zeros);
-        assert_eq!(derivative_poles, poles);
-        assert_eq!(gain, 2.0);
+        assert_eq!(
+            *derivative_site,
+            LaplaceSiteId::from_span(crate::source::Span::dummy())
+        );
+        assert!(matches!(*arena.node(*expr), Node::Const(1.0)));
+        assert_eq!(*derivative_zeros, zeros);
+        assert_eq!(*derivative_poles, poles);
+        assert_eq!(*gain, 2.0);
     }
 
     #[cfg(not(feature = "native"))]

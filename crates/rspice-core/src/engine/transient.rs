@@ -35,11 +35,11 @@ use crate::netlist::{
     measure_output_dependencies,
 };
 use crate::numerics::integration::{
-    BreakpointManager, BreakpointStepPolicy, LteEstimator, TimestepController,
-    TransientErrorControl, TrapGearController, XyceBreakpointSpanCeiling,
-    xyce_iteration_step_accepts, xyce_iteration_step_scale,
+    BranchChargeHistory, BreakpointManager, BreakpointStepPolicy, CompanionCoefficients,
+    IntegrationMethod, LteEstimator, TimestepController, TransientErrorControl, TrapGearController,
+    XyceBreakpointSpanCeiling, nonlinear_charge_companion_terms, xyce_iteration_step_accepts,
+    xyce_iteration_step_scale,
 };
-use crate::numerics::integration::{CompanionCoefficients, IntegrationMethod};
 use crate::numerics::xyce_hard_min_timestep;
 use crate::{Netlist, Value};
 pub use post_results::{evaluate_transient_fourier_results, evaluate_transient_post_results};
@@ -380,7 +380,7 @@ use vbic::VbicSnapshotTolerances;
 mod breakpoints;
 mod checkpoint;
 mod companion_stamps;
-use companion_stamps::{BranchChargeHistory, CompactTwoTerminalStampSlots, TwoTerminalStampSlots};
+use companion_stamps::{CompactTwoTerminalStampSlots, TwoTerminalStampSlots};
 mod charge_stamper;
 use charge_stamper::StaticMatrixChargeStamper;
 mod damped_status;
@@ -13682,7 +13682,7 @@ D1 D 0 DMOD
         let q_prev_prev = 1.0;
         let dq_dv = 2.0 * v_curr;
 
-        let (geq, ieq, returned_q, cq) = Engine::nonlinear_charge_companion_terms(
+        let (geq, ieq, returned_q, cq) = nonlinear_charge_companion_terms(
             &coeff,
             dt,
             dq_dv,

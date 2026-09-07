@@ -13,51 +13,56 @@ use crate::ast::{
     NumberLit, SystemFunction,
 };
 use crate::error::{CodeGenError, CodeGenErrorKind, CompileResult};
-use crate::ir::{BranchRef, DdxAxis, IrExpr, IrFunction};
+use crate::ir::arena::{ExprArena, Heavy, IndexedRead, Node, ZiPolynomial, pack_index};
+use crate::ir::{BranchRef, DdxAxis, IrFunction, NodeId};
 use crate::semantic::AnalyzedModule;
 use num_complex::Complex64;
 use smol_str::SmolStr;
 use std::collections::HashMap;
 use std::path::Path;
 
-/// Constant-fold an IR expression (used for filter coefficients and
+/// Constant-fold an arena expression (used for filter coefficients and
 /// constant direction arguments)
-fn autodiff_fold(expr: IrExpr) -> IrExpr {
-    crate::ir::autodiff::simplify_source(expr)
+fn autodiff_fold(arena: &mut ExprArena, expr: NodeId) -> NodeId {
+    crate::ir::autodiff::simplify(arena, expr)
 }
 
-fn zi_polynomial_is_wholly_constant(definition: &crate::ir::ZiPolynomialDefinition) -> bool {
+/// The value of a node that folded to a constant, if it did.
+fn constant(arena: &ExprArena, expr: NodeId) -> Option<f64> {
+    match *arena.node(expr) {
+        Node::Const(value) => Some(value),
+        _ => None,
+    }
+}
+
+fn zi_polynomial_is_wholly_constant(arena: &ExprArena, definition: &ZiPolynomial) -> bool {
     match definition {
-        crate::ir::ZiPolynomialDefinition::Coefficients(values) => {
-            values.iter().all(|value| matches!(value, IrExpr::Const(_)))
+        ZiPolynomial::Coefficients(values) => {
+            values.iter().all(|value| constant(arena, *value).is_some())
         }
-        crate::ir::ZiPolynomialDefinition::Roots(values) => {
-            values.iter().all(|(real, imaginary)| {
-                matches!(real, IrExpr::Const(_)) && matches!(imaginary, IrExpr::Const(_))
-            })
-        }
+        ZiPolynomial::Roots(values) => values.iter().all(|(real, imaginary)| {
+            constant(arena, *real).is_some() && constant(arena, *imaginary).is_some()
+        }),
     }
 }
 
 fn zi_polynomial_scalar_count(
-    definition: &crate::ir::ZiPolynomialDefinition,
+    definition: &ZiPolynomial,
 ) -> Result<usize, crate::zfilter::ZiFilterError> {
     match definition {
-        crate::ir::ZiPolynomialDefinition::Coefficients(values) => Ok(values.len()),
-        crate::ir::ZiPolynomialDefinition::Roots(values) => {
-            values.len().checked_mul(2).ok_or_else(|| {
-                crate::zfilter::ZiFilterError::InvalidDefinition(
-                    "Zi complex-root scalar count overflows usize".into(),
-                )
-            })
-        }
+        ZiPolynomial::Coefficients(values) => Ok(values.len()),
+        ZiPolynomial::Roots(values) => values.len().checked_mul(2).ok_or_else(|| {
+            crate::zfilter::ZiFilterError::InvalidDefinition(
+                "Zi complex-root scalar count overflows usize".into(),
+            )
+        }),
     }
 }
 
 fn validate_zi_polynomial_budget(
     operator: &str,
-    numerator: &crate::ir::ZiPolynomialDefinition,
-    denominator: &crate::ir::ZiPolynomialDefinition,
+    numerator: &ZiPolynomial,
+    denominator: &ZiPolynomial,
 ) -> CompileResult<()> {
     let numerator = zi_polynomial_scalar_count(numerator).map_err(|error| {
         CodeGenError::new(CodeGenErrorKind::InvalidExpression(error.to_string()))
@@ -73,22 +78,25 @@ fn validate_zi_polynomial_budget(
 }
 
 fn expand_constant_zi_polynomial(
-    definition: &crate::ir::ZiPolynomialDefinition,
+    arena: &ExprArena,
+    definition: &ZiPolynomial,
 ) -> Result<Vec<f64>, String> {
     match definition {
-        crate::ir::ZiPolynomialDefinition::Coefficients(values) => Ok(values
+        ZiPolynomial::Coefficients(values) => Ok(values
             .iter()
-            .map(|value| match value {
-                IrExpr::Const(value) => Ok(*value),
-                _ => Err("Zi coefficient unexpectedly remained dynamic".to_string()),
+            .map(|value| {
+                constant(arena, *value)
+                    .ok_or_else(|| "Zi coefficient unexpectedly remained dynamic".to_string())
             })
             .collect::<Result<Vec<_>, _>>()?),
-        crate::ir::ZiPolynomialDefinition::Roots(values) => {
+        ZiPolynomial::Roots(values) => {
             let roots = values
                 .iter()
-                .map(|(real, imaginary)| match (real, imaginary) {
-                    (IrExpr::Const(real), IrExpr::Const(imaginary)) => Ok((*real, *imaginary)),
-                    _ => Err("Zi root unexpectedly remained dynamic".to_string()),
+                .map(|(real, imaginary)| {
+                    match (constant(arena, *real), constant(arena, *imaginary)) {
+                        (Some(real), Some(imaginary)) => Ok((real, imaginary)),
+                        _ => Err("Zi root unexpectedly remained dynamic".to_string()),
+                    }
                 })
                 .collect::<Result<Vec<_>, _>>()?;
             crate::zfilter::z_roots_to_coefficients(&roots)
@@ -100,32 +108,34 @@ fn expand_constant_zi_polynomial(
 /// at compile time. Any parameter-, variable-, or circuit-dependent operand
 /// remains deferred to the per-instance analysis-start freeze.
 fn validate_wholly_constant_zi_definition(
+    arena: &ExprArena,
     operator: &str,
-    numerator: &crate::ir::ZiPolynomialDefinition,
-    denominator: &crate::ir::ZiPolynomialDefinition,
-    period: &IrExpr,
-    first_transition: &IrExpr,
+    numerator: &ZiPolynomial,
+    denominator: &ZiPolynomial,
+    period: NodeId,
+    first_transition: NodeId,
 ) -> CompileResult<()> {
-    let (IrExpr::Const(period), IrExpr::Const(first_transition)) = (period, first_transition)
+    let (Some(period), Some(first_transition)) =
+        (constant(arena, period), constant(arena, first_transition))
     else {
         return Ok(());
     };
-    if !zi_polynomial_is_wholly_constant(numerator)
-        || !zi_polynomial_is_wholly_constant(denominator)
+    if !zi_polynomial_is_wholly_constant(arena, numerator)
+        || !zi_polynomial_is_wholly_constant(arena, denominator)
     {
         return Ok(());
     }
-    let numerator = expand_constant_zi_polynomial(numerator).map_err(|error| {
+    let numerator = expand_constant_zi_polynomial(arena, numerator).map_err(|error| {
         CodeGenError::new(CodeGenErrorKind::InvalidExpression(format!(
             "{operator} numerator: {error}"
         )))
     })?;
-    let denominator = expand_constant_zi_polynomial(denominator).map_err(|error| {
+    let denominator = expand_constant_zi_polynomial(arena, denominator).map_err(|error| {
         CodeGenError::new(CodeGenErrorKind::InvalidExpression(format!(
             "{operator} denominator: {error}"
         )))
     })?;
-    crate::zfilter::ZiFilter::new_with_timing(numerator, denominator, *period, *first_transition)
+    crate::zfilter::ZiFilter::new_with_timing(numerator, denominator, period, first_transition)
         .map(|_| ())
         .map_err(|error| {
             CodeGenError::new(CodeGenErrorKind::InvalidExpression(format!(
@@ -250,9 +260,13 @@ fn normalize_analysis_name(name: &str) -> Option<String> {
     }
 }
 
-fn analysis_expression(name: &str, args: &[Expression]) -> CompileResult<IrExpr> {
+fn analysis_expression(
+    arena: &mut ExprArena,
+    name: &str,
+    args: &[Expression],
+) -> CompileResult<NodeId> {
     validate_arg_range(name, args.len(), 1, None)?;
-    let mut queries = args.iter().map(|arg| -> CompileResult<IrExpr> {
+    let query = |arena: &mut ExprArena, arg: &Expression| -> CompileResult<NodeId> {
         let Expression::StringLit(value) = arg else {
             return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
                 "analysis() requires string arguments".into(),
@@ -260,17 +274,23 @@ fn analysis_expression(name: &str, args: &[Expression]) -> CompileResult<IrExpr>
             .into());
         };
         Ok(match normalize_analysis_name(value.value.as_str()) {
-            Some(query) => IrExpr::Analysis(query),
-            None => IrExpr::Const(0.0),
+            Some(name) => {
+                let name = arena.intern(&name);
+                arena.push(Node::Analysis(name))
+            }
+            None => arena.push(Node::Const(0.0)),
         })
-    });
-    let mut expression = queries.next().transpose()?.ok_or_else(|| {
-        CodeGenError::new(CodeGenErrorKind::InvalidExpression(
+    };
+    let Some(first) = args.first() else {
+        return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
             "analysis() requires at least one string argument".into(),
         ))
-    })?;
-    for query in queries {
-        expression = IrExpr::Binary(BinaryOp::Or, Box::new(expression), Box::new(query?));
+        .into());
+    };
+    let mut expression = query(arena, first)?;
+    for arg in &args[1..] {
+        let next = query(arena, arg)?;
+        expression = arena.push(Node::Binary(BinaryOp::Or, expression, next));
     }
     Ok(expression)
 }
@@ -494,12 +514,16 @@ impl<'a> ExprConverter<'a> {
     /// Convert the complete right-hand side of an analog contribution.
     /// Every Zi node in this expression tree is subject to the VAMS-2023
     /// section 4.5.12 strictly-positive transition-time rule.
-    pub(crate) fn convert_contribution(&self, expr: &Expression) -> CompileResult<IrExpr> {
+    pub(crate) fn convert_contribution(
+        &self,
+        arena: &mut ExprArena,
+        expr: &Expression,
+    ) -> CompileResult<NodeId> {
         Self {
             ctx: self.ctx,
             direct_zi_assignment: true,
         }
-        .convert(expr)
+        .convert(arena, expr)
     }
 
     /// Array layout (base, lower, len) by name
@@ -507,14 +531,23 @@ impl<'a> ExprConverter<'a> {
         self.ctx.array(name)
     }
 
-    fn const_cross_direction(&self, arg: &Expression, name: &str) -> CompileResult<i32> {
-        match autodiff_fold(self.convert(arg)?) {
-            IrExpr::Const(v) if matches!(v, -1.0 | 0.0 | 1.0) => Ok(v as i32),
-            IrExpr::Const(v) => Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
-                format!("{name} direction must be -1, 0, or 1, got {v}"),
-            ))
-            .into()),
-            _ => Err(
+    fn const_cross_direction(
+        &self,
+        arena: &mut ExprArena,
+        arg: &Expression,
+        name: &str,
+    ) -> CompileResult<i32> {
+        let converted = self.convert(arena, arg)?;
+        let folded = autodiff_fold(arena, converted);
+        match constant(arena, folded) {
+            Some(v) if matches!(v, -1.0 | 0.0 | 1.0) => Ok(v as i32),
+            Some(v) => Err(
+                CodeGenError::new(CodeGenErrorKind::InvalidExpression(format!(
+                    "{name} direction must be -1, 0, or 1, got {v}"
+                )))
+                .into(),
+            ),
+            None => Err(
                 CodeGenError::new(CodeGenErrorKind::InvalidExpression(format!(
                     "{name} direction argument must be a constant -1, 0, or 1"
                 )))
@@ -525,12 +558,13 @@ impl<'a> ExprConverter<'a> {
 
     fn convert_optional_argument(
         &self,
+        arena: &mut ExprArena,
         args: &[Expression],
         index: usize,
-    ) -> CompileResult<Option<Box<IrExpr>>> {
+    ) -> CompileResult<Option<NodeId>> {
         match args.get(index) {
             None | Some(Expression::NullArgument(_)) => Ok(None),
-            Some(expression) => self.convert(expression).map(Box::new).map(Some),
+            Some(expression) => self.convert(arena, expression).map(Some),
         }
     }
 
@@ -615,9 +649,9 @@ impl<'a> ExprConverter<'a> {
     }
 
     /// Convert an AST expression to an IR expression
-    pub fn convert(&self, expr: &Expression) -> CompileResult<IrExpr> {
+    pub fn convert(&self, arena: &mut ExprArena, expr: &Expression) -> CompileResult<NodeId> {
         match expr {
-            Expression::Number(num) => self.convert_number(num),
+            Expression::Number(num) => self.convert_number(arena, num),
             Expression::StringLit(_) => Err(CodeGenError::new(
                 CodeGenErrorKind::UnsupportedFeature("String literals in expressions".into()),
             )
@@ -633,19 +667,19 @@ impl<'a> ExprConverter<'a> {
                 )),
             )
             .into()),
-            Expression::Identifier(ident) => self.convert_identifier(ident),
-            Expression::SystemFunction(func) => self.convert_system_function(func),
-            Expression::Binary(binary) => self.convert_binary(binary),
-            Expression::Unary(unary) => self.convert_unary(unary),
-            Expression::Conditional(cond) => self.convert_conditional(cond),
-            Expression::Call(call) => self.convert_call(call),
+            Expression::Identifier(ident) => self.convert_identifier(arena, ident),
+            Expression::SystemFunction(func) => self.convert_system_function(arena, func),
+            Expression::Binary(binary) => self.convert_binary(arena, binary),
+            Expression::Unary(unary) => self.convert_unary(arena, unary),
+            Expression::Conditional(cond) => self.convert_conditional(arena, cond),
+            Expression::Call(call) => self.convert_call(arena, call),
             Expression::NullArgument(_) => {
                 Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
                     "null positional argument is not legal in this expression position".into(),
                 ))
                 .into())
             }
-            Expression::BranchAccess(access) => self.convert_branch_access(access),
+            Expression::BranchAccess(access) => self.convert_branch_access(arena, access),
             Expression::ArrayAccess(access) => {
                 let Some((base, lower, len)) = self.ctx.array(&access.array) else {
                     return Err(
@@ -656,14 +690,15 @@ impl<'a> ExprConverter<'a> {
                         .into(),
                     );
                 };
-                let index = self.convert(&access.index)?;
-                Ok(IrExpr::VarIndexed {
-                    array: access.array.clone(),
+                let index = self.convert(arena, &access.index)?;
+                let array = arena.intern(&access.array);
+                let payload = arena.push_indexed(IndexedRead {
+                    array,
                     base,
                     len,
                     lower,
-                    index: Box::new(index),
-                })
+                });
+                Ok(arena.push(Node::VarIndexed { payload, index }))
             }
             Expression::ArrayLiteral(_) => {
                 Err(CodeGenError::new(CodeGenErrorKind::UnsupportedFeature(
@@ -671,40 +706,46 @@ impl<'a> ExprConverter<'a> {
                 ))
                 .into())
             }
-            Expression::AnalogOperator(op) => self.convert_analog_operator(op),
-            Expression::NoiseSource(noise) => self.convert_noise_source(noise),
+            Expression::AnalogOperator(op) => self.convert_analog_operator(arena, op),
+            Expression::NoiseSource(noise) => self.convert_noise_source(arena, noise),
         }
     }
 
     /// Convert a number literal
-    fn convert_number(&self, num: &NumberLit) -> CompileResult<IrExpr> {
-        Ok(IrExpr::Const(num.value))
+    fn convert_number(&self, arena: &mut ExprArena, num: &NumberLit) -> CompileResult<NodeId> {
+        Ok(arena.push(Node::Const(num.value)))
     }
 
     /// Convert an identifier reference
-    fn convert_identifier(&self, ident: &Identifier) -> CompileResult<IrExpr> {
+    fn convert_identifier(
+        &self,
+        arena: &mut ExprArena,
+        ident: &Identifier,
+    ) -> CompileResult<NodeId> {
         let name = &ident.name;
 
         // Check if it's a parameter
         if self.ctx.param_map.contains_key(name) {
-            return Ok(IrExpr::Param(name.clone()));
+            let name = arena.intern(name);
+            return Ok(arena.push(Node::Param(name)));
         }
 
         // Check if it's a variable
         if self.ctx.var_map.contains_key(name) {
-            return Ok(IrExpr::Var(name.clone()));
+            let name = arena.intern(name);
+            return Ok(arena.push(Node::Var(name)));
         }
 
         // Check for built-in constants
         match name.as_str() {
-            "M_PI" | "P_PI" => Ok(IrExpr::Const(std::f64::consts::PI)),
-            "M_E" | "P_E" => Ok(IrExpr::Const(std::f64::consts::E)),
-            "M_LN2" => Ok(IrExpr::Const(std::f64::consts::LN_2)),
-            "M_LN10" => Ok(IrExpr::Const(std::f64::consts::LN_10)),
-            "M_LOG2E" => Ok(IrExpr::Const(std::f64::consts::LOG2_E)),
-            "M_LOG10E" => Ok(IrExpr::Const(std::f64::consts::LOG10_E)),
-            "M_SQRT2" => Ok(IrExpr::Const(std::f64::consts::SQRT_2)),
-            "inf" => Ok(IrExpr::Const(f64::INFINITY)),
+            "M_PI" | "P_PI" => Ok(arena.push(Node::Const(std::f64::consts::PI))),
+            "M_E" | "P_E" => Ok(arena.push(Node::Const(std::f64::consts::E))),
+            "M_LN2" => Ok(arena.push(Node::Const(std::f64::consts::LN_2))),
+            "M_LN10" => Ok(arena.push(Node::Const(std::f64::consts::LN_10))),
+            "M_LOG2E" => Ok(arena.push(Node::Const(std::f64::consts::LOG2_E))),
+            "M_LOG10E" => Ok(arena.push(Node::Const(std::f64::consts::LOG10_E))),
+            "M_SQRT2" => Ok(arena.push(Node::Const(std::f64::consts::SQRT_2))),
+            "inf" => Ok(arena.push(Node::Const(f64::INFINITY))),
             _ => Err(
                 CodeGenError::new(CodeGenErrorKind::InvalidExpression(format!(
                     "Unknown identifier: {}",
@@ -716,39 +757,40 @@ impl<'a> ExprConverter<'a> {
     }
 
     /// Convert a system function call
-    fn convert_system_function(&self, func: &SystemFunction) -> CompileResult<IrExpr> {
+    fn convert_system_function(
+        &self,
+        arena: &mut ExprArena,
+        func: &SystemFunction,
+    ) -> CompileResult<NodeId> {
         match func.name.as_str() {
             "$vt" | "$thermal_vt" => {
                 validate_arg_range(&func.name, func.args.len(), 0, Some(1))?;
                 if func.args.is_empty() {
                     // $vt() = kT/q at nominal temperature
-                    Ok(IrExpr::Vt)
+                    Ok(arena.push(Node::Vt))
                 } else {
                     // $vt(temp) = k*temp/q
-                    let temp_expr = self.convert(&func.args[0])?;
+                    let temp_expr = self.convert(arena, &func.args[0])?;
                     // vt = temp * (k/q) where k/q ~ 8.617e-5
-                    Ok(IrExpr::Binary(
-                        BinaryOp::Mul,
-                        Box::new(temp_expr),
-                        Box::new(IrExpr::Const(8.617333262e-5)),
-                    ))
+                    let scale = arena.push(Node::Const(8.617333262e-5));
+                    Ok(arena.push(Node::Binary(BinaryOp::Mul, temp_expr, scale)))
                 }
             }
             "$temperature" => {
                 validate_arg_range(&func.name, func.args.len(), 0, Some(0))?;
-                Ok(IrExpr::Temperature)
+                Ok(arena.push(Node::Temperature))
             }
             "$abstime" => {
                 validate_arg_range(&func.name, func.args.len(), 0, Some(0))?;
-                Ok(IrExpr::Time)
+                Ok(arena.push(Node::Time))
             }
             "$realtime" => {
                 validate_arg_range(&func.name, func.args.len(), 0, Some(0))?;
-                Ok(IrExpr::Time)
+                Ok(arena.push(Node::Time))
             }
             "$mfactor" => {
                 validate_arg_range(&func.name, func.args.len(), 0, Some(0))?;
-                Ok(IrExpr::Mfactor)
+                Ok(arena.push(Node::Mfactor))
             }
             "$simparam" => {
                 validate_arg_range(&func.name, func.args.len(), 1, Some(2))?;
@@ -765,7 +807,7 @@ impl<'a> ExprConverter<'a> {
                     }
                 };
                 if let Some(default) = func.args.get(1) {
-                    return self.convert(default);
+                    return self.convert(arena, default);
                 }
                 let value = match name {
                     "gmin" => 1e-12,
@@ -773,7 +815,7 @@ impl<'a> ExprConverter<'a> {
                     "simulatorVersion" => 1.0,
                     _ => 0.0,
                 };
-                Ok(IrExpr::Const(value))
+                Ok(arena.push(Node::Const(value)))
             }
             "$param_given" => {
                 validate_arg_range(&func.name, func.args.len(), 1, Some(1))?;
@@ -783,7 +825,8 @@ impl<'a> ExprConverter<'a> {
                     Some(Expression::Identifier(id))
                         if self.ctx.param_index(&id.name).is_some() =>
                     {
-                        Ok(IrExpr::ParamGiven(id.name.clone()))
+                        let name = arena.intern(&id.name);
+                        Ok(arena.push(Node::ParamGiven(name)))
                     }
                     _ => Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
                         "$param_given requires a parameter name argument".into(),
@@ -816,19 +859,19 @@ impl<'a> ExprConverter<'a> {
                     )))
                     .into());
                 }
-                Ok(IrExpr::PortConnected(index))
+                Ok(arena.push(Node::PortConnected(pack_index(index))))
             }
             "$limit" => {
                 validate_arg_range(&func.name, func.args.len(), 1, Some(2))?;
                 // $limit(expr) or $limit(expr, step)
                 // Bounds expression change per Newton iteration for convergence
-                let inner = self.convert(&func.args[0])?;
+                let inner = self.convert(arena, &func.args[0])?;
                 let step = if func.args.len() > 1 {
-                    Some(Box::new(self.convert(&func.args[1])?))
+                    Some(self.convert(arena, &func.args[1])?)
                 } else {
                     None
                 };
-                Ok(IrExpr::Limit(Box::new(inner), step))
+                Ok(arena.push(Node::Limit(inner, step)))
             }
             "$table_model" => {
                 validate_arg_range(&func.name, func.args.len(), 2, None)?;
@@ -837,28 +880,25 @@ impl<'a> ExprConverter<'a> {
                 // 1) Inline numeric pairs: $table_model(x, 0,0, 1,2, 2,4)
                 // 2) Inline string table: $table_model(x, "0 0; 1 2; 2 4")
                 // 3) Table file path:    $table_model(x, "table.dat")
-                let input = self.convert(&func.args[0])?;
+                let input = self.convert(arena, &func.args[0])?;
                 let (x_data, y_data) = self.parse_table_model_data(func)?;
-                Ok(IrExpr::TableLookup {
-                    input: Box::new(input),
-                    x_data,
-                    y_data,
-                })
+                let table = arena.push_table(x_data, y_data);
+                Ok(arena.push(Node::TableLookup { input, table }))
             }
             "absdelay" => {
                 validate_arg_range(&func.name, func.args.len(), 2, Some(3))?;
-                let expr = self.convert(&func.args[0])?;
-                let delay_time = self.convert(&func.args[1])?;
-                Ok(IrExpr::AbsDelay {
+                let expr = self.convert(arena, &func.args[0])?;
+                let delay_time = self.convert(arena, &func.args[1])?;
+                let max_delay = match func.args.get(2) {
+                    Some(value) => Some(self.convert(arena, value)?),
+                    None => None,
+                };
+                Ok(arena.push_heavy(Heavy::AbsDelay {
                     site: crate::ir::AbsDelaySiteId::from_span(func.span),
-                    expr: Box::new(expr),
-                    delay_time: Box::new(delay_time),
-                    max_delay: func
-                        .args
-                        .get(2)
-                        .map(|value| self.convert(value).map(Box::new))
-                        .transpose()?,
-                })
+                    expr,
+                    delay_time,
+                    max_delay,
+                }))
             }
             "transition" => {
                 // transition(expr, delay, rise_time, fall_time)
@@ -868,29 +908,29 @@ impl<'a> ExprConverter<'a> {
                     ))
                     .into());
                 }
-                let expr = self.convert(&func.args[0])?;
+                let expr = self.convert(arena, &func.args[0])?;
                 let delay = if func.args.len() > 1 {
-                    Some(Box::new(self.convert(&func.args[1])?))
+                    Some(self.convert(arena, &func.args[1])?)
                 } else {
                     None
                 };
                 let rise_time = if func.args.len() > 2 {
-                    Some(Box::new(self.convert(&func.args[2])?))
+                    Some(self.convert(arena, &func.args[2])?)
                 } else {
                     None
                 };
                 let fall_time = if func.args.len() > 3 {
-                    Some(Box::new(self.convert(&func.args[3])?))
+                    Some(self.convert(arena, &func.args[3])?)
                 } else {
                     None
                 };
-                Ok(IrExpr::Transition {
+                Ok(arena.push_heavy(Heavy::Transition {
                     site: crate::ir::TransitionSiteId::from_span(func.span),
-                    expr: Box::new(expr),
+                    expr,
                     delay,
                     rise_time,
                     fall_time,
-                })
+                }))
             }
             "slew" => {
                 // slew(expr, max_pos_slew, max_neg_slew)
@@ -900,108 +940,115 @@ impl<'a> ExprConverter<'a> {
                     ))
                     .into());
                 }
-                let expr = self.convert(&func.args[0])?;
+                let expr = self.convert(arena, &func.args[0])?;
                 let max_pos_slew = if func.args.len() > 1 {
-                    Some(Box::new(self.convert(&func.args[1])?))
+                    Some(self.convert(arena, &func.args[1])?)
                 } else {
                     None
                 };
                 let max_neg_slew = if func.args.len() > 2 {
-                    Some(Box::new(self.convert(&func.args[2])?))
+                    Some(self.convert(arena, &func.args[2])?)
                 } else {
                     None
                 };
-                Ok(IrExpr::Slew {
+                Ok(arena.push_heavy(Heavy::Slew {
                     site: crate::ir::SlewSiteId::from_span(func.span),
-                    expr: Box::new(expr),
+                    expr,
                     max_pos_slew,
                     max_neg_slew,
-                })
+                }))
             }
             "cross" => {
                 // cross(expr [, direction [, time_tol [, expr_tol [, enable]]]])
                 validate_arg_range(&func.name, func.args.len(), 1, Some(5))?;
                 validate_event_argument_dependencies("cross", &func.args)?;
-                let expr = self.convert(&func.args[0])?;
-                let direction = self.convert_optional_argument(&func.args, 1)?;
-                Ok(IrExpr::Cross {
-                    expr: Box::new(expr),
+                let expr = self.convert(arena, &func.args[0])?;
+                let direction = self.convert_optional_argument(arena, &func.args, 1)?;
+                let time_tol = self.convert_optional_argument(arena, &func.args, 2)?;
+                let expr_tol = self.convert_optional_argument(arena, &func.args, 3)?;
+                let enable = self.convert_optional_argument(arena, &func.args, 4)?;
+                Ok(arena.push_heavy(Heavy::Cross {
+                    expr,
                     direction,
-                    time_tol: self.convert_optional_argument(&func.args, 2)?,
-                    expr_tol: self.convert_optional_argument(&func.args, 3)?,
-                    enable: self.convert_optional_argument(&func.args, 4)?,
-                })
+                    time_tol,
+                    expr_tol,
+                    enable,
+                }))
             }
             "$white_noise" | "white_noise" => {
                 validate_arg_range(&func.name, func.args.len(), 1, Some(2))?;
                 // $white_noise(power, name)
-                let power = self.convert(&func.args[0])?;
+                let power = self.convert(arena, &func.args[0])?;
                 let name = optional_string_arg(&func.name, func.args.get(1), "name")?;
-                Ok(IrExpr::WhiteNoise {
+                Ok(arena.push_heavy(Heavy::WhiteNoise {
                     site: crate::ir::NoiseSiteId::from_span(func.span),
-                    power: Box::new(power),
+                    power,
                     name,
-                })
+                }))
             }
             "$flicker_noise" | "flicker_noise" => {
                 validate_arg_range(&func.name, func.args.len(), 2, Some(3))?;
                 // $flicker_noise(power, exponent, name)
-                let power = self.convert(&func.args[0])?;
-                let exponent = self.convert(&func.args[1])?;
+                let power = self.convert(arena, &func.args[0])?;
+                let exponent = self.convert(arena, &func.args[1])?;
                 let name = optional_string_arg(&func.name, func.args.get(2), "name")?;
-                Ok(IrExpr::FlickerNoise {
+                Ok(arena.push_heavy(Heavy::FlickerNoise {
                     site: crate::ir::NoiseSiteId::from_span(func.span),
-                    power: Box::new(power),
-                    exponent: Box::new(exponent),
+                    power,
+                    exponent,
                     name,
-                })
+                }))
             }
             "$noise_table" | "noise_table" | "$noise_table_log" | "noise_table_log" => {
                 validate_arg_range(&func.name, func.args.len(), 1, Some(2))?;
                 let log_interp = func.name.contains("log");
                 let name = optional_string_arg(&func.name, func.args.get(1), "name")?;
-                let points = self.noise_table_points(&func.args[0], log_interp)?;
-                Ok(IrExpr::NoiseTable {
+                let points = self.noise_table_points(arena, &func.args[0], log_interp)?;
+                Ok(arena.push_heavy(Heavy::NoiseTable {
                     site: crate::ir::NoiseSiteId::from_span(func.span),
                     points,
                     log_interp,
                     name,
-                })
+                }))
             }
-            "analysis" => analysis_expression(&func.name, &func.args),
+            "analysis" => analysis_expression(arena, &func.name, &func.args),
             "above" => {
                 validate_arg_range(&func.name, func.args.len(), 1, Some(4))?;
                 validate_event_argument_dependencies("above", &func.args)?;
-                let expr = self.convert(&func.args[0])?;
-                Ok(IrExpr::Above {
-                    expr: Box::new(expr),
-                    time_tol: self.convert_optional_argument(&func.args, 1)?,
-                    expr_tol: self.convert_optional_argument(&func.args, 2)?,
-                    enable: self.convert_optional_argument(&func.args, 3)?,
-                })
+                let expr = self.convert(arena, &func.args[0])?;
+                let time_tol = self.convert_optional_argument(arena, &func.args, 1)?;
+                let expr_tol = self.convert_optional_argument(arena, &func.args, 2)?;
+                let enable = self.convert_optional_argument(arena, &func.args, 3)?;
+                Ok(arena.push_heavy(Heavy::Above {
+                    expr,
+                    time_tol,
+                    expr_tol,
+                    enable,
+                }))
             }
             "timer" => {
                 // timer(start_time [, period [, time_tol [, enable]]])
                 validate_arg_range(&func.name, func.args.len(), 1, Some(4))?;
-                let start_time = self.convert(&func.args[0])?;
-                let optional = |index: usize| -> CompileResult<Option<Box<IrExpr>>> {
-                    func.args
-                        .get(index)
-                        .map(|expr| self.convert(expr).map(Box::new))
-                        .transpose()
+                let start_time = self.convert(arena, &func.args[0])?;
+                let optional = |arena: &mut ExprArena, index: usize| match func.args.get(index) {
+                    Some(expr) => self.convert(arena, expr).map(Some),
+                    None => Ok(None),
                 };
-                Ok(IrExpr::Timer {
-                    start_time: Box::new(start_time),
-                    period: optional(1)?,
-                    time_tol: optional(2)?,
-                    enable: optional(3)?,
-                })
+                let period = optional(arena, 1)?;
+                let time_tol = optional(arena, 2)?;
+                let enable = optional(arena, 3)?;
+                Ok(arena.push_heavy(Heavy::Timer {
+                    start_time,
+                    period,
+                    time_tol,
+                    enable,
+                }))
             }
             // The IR models real zeros/poles and numerator/denominator
             // coefficients, but this converter never parsed the coefficient
             // arrays: it discarded them and emitted a unity passthrough, so a
             // filtered contribution silently evaluated as if unfiltered.
-            // Refuse instead, matching the `IrExpr::Ddx` precedent in
+            // Refuse instead, matching the `Node::Ddx` precedent in
             // codegen/generator.rs, until the arrays are actually lowered.
             "laplace_zp" | "laplace_nd" => Err(CodeGenError::new(
                 CodeGenErrorKind::UnsupportedFeature(format!(
@@ -1022,34 +1069,42 @@ impl<'a> ExprConverter<'a> {
     }
 
     /// Convert a binary expression
-    fn convert_binary(&self, binary: &crate::ast::BinaryExpr) -> CompileResult<IrExpr> {
-        let left = self.convert(&binary.left)?;
-        let right = self.convert(&binary.right)?;
+    fn convert_binary(
+        &self,
+        arena: &mut ExprArena,
+        binary: &crate::ast::BinaryExpr,
+    ) -> CompileResult<NodeId> {
+        let left = self.convert(arena, &binary.left)?;
+        let right = self.convert(arena, &binary.right)?;
 
-        Ok(IrExpr::Binary(binary.op, Box::new(left), Box::new(right)))
+        Ok(arena.push(Node::Binary(binary.op, left, right)))
     }
 
     /// Convert a unary expression
-    fn convert_unary(&self, unary: &crate::ast::UnaryExpr) -> CompileResult<IrExpr> {
-        let operand = self.convert(&unary.operand)?;
-        Ok(IrExpr::Unary(unary.op, Box::new(operand)))
+    fn convert_unary(
+        &self,
+        arena: &mut ExprArena,
+        unary: &crate::ast::UnaryExpr,
+    ) -> CompileResult<NodeId> {
+        let operand = self.convert(arena, &unary.operand)?;
+        Ok(arena.push(Node::Unary(unary.op, operand)))
     }
 
     /// Convert a conditional expression
-    fn convert_conditional(&self, cond: &crate::ast::ConditionalExpr) -> CompileResult<IrExpr> {
-        let condition = self.convert(&cond.condition)?;
-        let then_expr = self.convert(&cond.then_expr)?;
-        let else_expr = self.convert(&cond.else_expr)?;
+    fn convert_conditional(
+        &self,
+        arena: &mut ExprArena,
+        cond: &crate::ast::ConditionalExpr,
+    ) -> CompileResult<NodeId> {
+        let condition = self.convert(arena, &cond.condition)?;
+        let then_expr = self.convert(arena, &cond.then_expr)?;
+        let else_expr = self.convert(arena, &cond.else_expr)?;
 
-        Ok(IrExpr::Conditional(
-            Box::new(condition),
-            Box::new(then_expr),
-            Box::new(else_expr),
-        ))
+        Ok(arena.push(Node::Conditional(condition, then_expr, else_expr)))
     }
 
     /// Convert a function call
-    fn convert_call(&self, call: &CallExpr) -> CompileResult<IrExpr> {
+    fn convert_call(&self, arena: &mut ExprArena, call: &CallExpr) -> CompileResult<NodeId> {
         let ir_func = match call.name.as_str() {
             "abs" => IrFunction::Abs,
             "sqrt" => IrFunction::Sqrt,
@@ -1084,8 +1139,8 @@ impl<'a> ExprConverter<'a> {
                     ))
                     .into());
                 }
-                let arg = self.convert(&call.args[0])?;
-                return Ok(IrExpr::Limexp(Box::new(arg)));
+                let arg = self.convert(arena, &call.args[0])?;
+                return Ok(arena.push(Node::Limexp(arg)));
             }
             "hypot" => {
                 // hypot(x, y) = sqrt(x^2 + y^2)
@@ -1095,29 +1150,38 @@ impl<'a> ExprConverter<'a> {
                     ))
                     .into());
                 }
-                let x = self.convert(&call.args[0])?;
-                let y = self.convert(&call.args[1])?;
-                let x_sq = IrExpr::Binary(BinaryOp::Mul, Box::new(x.clone()), Box::new(x));
-                let y_sq = IrExpr::Binary(BinaryOp::Mul, Box::new(y.clone()), Box::new(y));
-                let sum = IrExpr::Binary(BinaryOp::Add, Box::new(x_sq), Box::new(y_sq));
-                return Ok(IrExpr::Call(IrFunction::Sqrt, vec![sum]));
+                // Each operand is converted twice, once per occurrence in
+                // `x*x + y*y`. Naming one arena node twice would be a smaller
+                // forest and the same emitted program for an ordinary operand,
+                // but not for one carrying a site: `transition` and its four
+                // siblings are numbered by a walk over this output, and a
+                // shared node is one site where the boxed converter's
+                // `.clone()` made two. Converting twice is that `.clone()`,
+                // spelled on the arena.
+                let x_left = self.convert(arena, &call.args[0])?;
+                let x_right = self.convert(arena, &call.args[0])?;
+                let y_left = self.convert(arena, &call.args[1])?;
+                let y_right = self.convert(arena, &call.args[1])?;
+                let x_sq = arena.push(Node::Binary(BinaryOp::Mul, x_left, x_right));
+                let y_sq = arena.push(Node::Binary(BinaryOp::Mul, y_left, y_right));
+                let sum = arena.push(Node::Binary(BinaryOp::Add, x_sq, y_sq));
+                return Ok(arena.push_call(IrFunction::Sqrt, &[sum]));
             }
             // Analog operators, noise sources, filters, and event functions
             // arrive as plain calls; route them to their IR forms.
-            _ => return self.convert_analog_call(call),
+            _ => return self.convert_analog_call(arena, call),
         };
 
-        let args: Vec<IrExpr> = call
-            .args
-            .iter()
-            .map(|a| self.convert(a))
-            .collect::<CompileResult<Vec<_>>>()?;
+        let mut args = Vec::with_capacity(call.args.len());
+        for argument in &call.args {
+            args.push(self.convert(arena, argument)?);
+        }
 
-        Ok(IrExpr::Call(ir_func, args))
+        Ok(arena.push_call(ir_func, &args))
     }
 
     /// Convert analog operators, filters, noise sources, and event functions
-    fn convert_analog_call(&self, call: &CallExpr) -> CompileResult<IrExpr> {
+    fn convert_analog_call(&self, arena: &mut ExprArena, call: &CallExpr) -> CompileResult<NodeId> {
         let require_arg = |n: usize| -> CompileResult<&Expression> {
             call.args.get(n).ok_or_else(|| {
                 CodeGenError::new(CodeGenErrorKind::InvalidExpression(format!(
@@ -1132,53 +1196,47 @@ impl<'a> ExprConverter<'a> {
         match call.name.as_str() {
             "ddt" => {
                 validate_arg_range(&call.name, call.args.len(), 1, Some(1))?;
-                let inner = self.convert(require_arg(0)?)?;
-                Ok(IrExpr::Ddt(Box::new(inner)))
+                let inner = self.convert(arena, require_arg(0)?)?;
+                Ok(arena.push(Node::Ddt(inner)))
             }
             "idt" => {
                 validate_arg_range(&call.name, call.args.len(), 1, Some(2))?;
-                let inner = self.convert(require_arg(0)?)?;
-                let ic = call
-                    .args
-                    .get(1)
-                    .map(|e| self.convert(e))
-                    .transpose()?
-                    .map(Box::new);
-                Ok(IrExpr::Idt(Box::new(inner), ic))
+                let inner = self.convert(arena, require_arg(0)?)?;
+                let ic = match call.args.get(1) {
+                    Some(expr) => Some(self.convert(arena, expr)?),
+                    None => None,
+                };
+                Ok(arena.push(Node::Idt(inner, ic)))
             }
             "idtmod" => {
                 validate_arg_range(&call.name, call.args.len(), 1, Some(4))?;
                 // idtmod(expr [, ic [, modulus [, offset]]]) - without a
                 // modulus it degenerates to idt
-                let inner = self.convert(require_arg(0)?)?;
-                let ic = call
-                    .args
-                    .get(1)
-                    .map(|e| self.convert(e))
-                    .transpose()?
-                    .map(Box::new);
+                let inner = self.convert(arena, require_arg(0)?)?;
+                let ic = match call.args.get(1) {
+                    Some(expr) => Some(self.convert(arena, expr)?),
+                    None => None,
+                };
                 match call.args.get(2) {
                     Some(modulus) => {
-                        let modulus = Box::new(self.convert(modulus)?);
-                        let offset = call
-                            .args
-                            .get(3)
-                            .map(|e| self.convert(e))
-                            .transpose()?
-                            .map(Box::new);
-                        Ok(IrExpr::IdtMod {
-                            expr: Box::new(inner),
-                            ic,
+                        let modulus = self.convert(arena, modulus)?;
+                        let offset = match call.args.get(3) {
+                            Some(expr) => Some(self.convert(arena, expr)?),
+                            None => None,
+                        };
+                        let payload = arena.push_optional_pair((ic, offset));
+                        Ok(arena.push(Node::IdtMod {
+                            expr: inner,
                             modulus,
-                            offset,
-                        })
+                            payload,
+                        }))
                     }
-                    None => Ok(IrExpr::Idt(Box::new(inner), ic)),
+                    None => Ok(arena.push(Node::Idt(inner, ic))),
                 }
             }
             "ddx" => {
                 validate_arg_range(&call.name, call.args.len(), 2, Some(2))?;
-                let inner = self.convert(require_arg(0)?)?;
+                let inner = self.convert(arena, require_arg(0)?)?;
                 let probe = require_arg(1)?;
                 let axis = match probe {
                     Expression::BranchAccess(probe) => self.convert_ddx_probe(probe)?,
@@ -1190,198 +1248,199 @@ impl<'a> ExprConverter<'a> {
                         .into());
                     }
                 };
-                Ok(IrExpr::Ddx {
-                    expr: Box::new(inner),
-                    axis,
-                })
+                let axis = arena.push_ddx_axis(axis);
+                Ok(arena.push(Node::Ddx { expr: inner, axis }))
             }
             "absdelay" => {
                 validate_arg_range(&call.name, call.args.len(), 2, Some(3))?;
-                let expr = self.convert(require_arg(0)?)?;
-                let delay = self.convert(require_arg(1)?)?;
-                Ok(IrExpr::AbsDelay {
+                let expr = self.convert(arena, require_arg(0)?)?;
+                let delay_time = self.convert(arena, require_arg(1)?)?;
+                let max_delay = match call.args.get(2) {
+                    Some(value) => Some(self.convert(arena, value)?),
+                    None => None,
+                };
+                Ok(arena.push_heavy(Heavy::AbsDelay {
                     site: crate::ir::AbsDelaySiteId::from_span(call.span),
-                    expr: Box::new(expr),
-                    delay_time: Box::new(delay),
-                    max_delay: call
-                        .args
-                        .get(2)
-                        .map(|value| self.convert(value).map(Box::new))
-                        .transpose()?,
-                })
+                    expr,
+                    delay_time,
+                    max_delay,
+                }))
             }
             "transition" => {
                 validate_arg_range(&call.name, call.args.len(), 1, Some(5))?;
-                let expr = self.convert(require_arg(0)?)?;
-                let opt = |n: usize| -> CompileResult<Option<Box<IrExpr>>> {
-                    Ok(call
-                        .args
-                        .get(n)
-                        .map(|e| self.convert(e))
-                        .transpose()?
-                        .map(Box::new))
+                let expr = self.convert(arena, require_arg(0)?)?;
+                let opt = |arena: &mut ExprArena, n: usize| match call.args.get(n) {
+                    Some(e) => self.convert(arena, e).map(Some),
+                    None => Ok(None),
                 };
-                Ok(IrExpr::Transition {
+                let delay = opt(arena, 1)?;
+                let rise_time = opt(arena, 2)?;
+                let fall_time = opt(arena, 3)?;
+                Ok(arena.push_heavy(Heavy::Transition {
                     site: crate::ir::TransitionSiteId::from_span(call.span),
-                    expr: Box::new(expr),
-                    delay: opt(1)?,
-                    rise_time: opt(2)?,
-                    fall_time: opt(3)?,
-                })
+                    expr,
+                    delay,
+                    rise_time,
+                    fall_time,
+                }))
             }
             "slew" => {
                 validate_arg_range(&call.name, call.args.len(), 1, Some(3))?;
-                let expr = self.convert(require_arg(0)?)?;
-                let opt = |n: usize| -> CompileResult<Option<Box<IrExpr>>> {
-                    Ok(call
-                        .args
-                        .get(n)
-                        .map(|e| self.convert(e))
-                        .transpose()?
-                        .map(Box::new))
+                let expr = self.convert(arena, require_arg(0)?)?;
+                let opt = |arena: &mut ExprArena, n: usize| match call.args.get(n) {
+                    Some(e) => self.convert(arena, e).map(Some),
+                    None => Ok(None),
                 };
-                Ok(IrExpr::Slew {
+                let max_pos_slew = opt(arena, 1)?;
+                let max_neg_slew = opt(arena, 2)?;
+                Ok(arena.push_heavy(Heavy::Slew {
                     site: crate::ir::SlewSiteId::from_span(call.span),
-                    expr: Box::new(expr),
-                    max_pos_slew: opt(1)?,
-                    max_neg_slew: opt(2)?,
-                })
+                    expr,
+                    max_pos_slew,
+                    max_neg_slew,
+                }))
             }
             "cross" => {
                 validate_arg_range(&call.name, call.args.len(), 1, Some(5))?;
                 validate_event_argument_dependencies("cross", &call.args)?;
-                let expr = self.convert(require_arg(0)?)?;
-                let direction = self.convert_optional_argument(&call.args, 1)?;
-                Ok(IrExpr::Cross {
-                    expr: Box::new(expr),
+                let expr = self.convert(arena, require_arg(0)?)?;
+                let direction = self.convert_optional_argument(arena, &call.args, 1)?;
+                let time_tol = self.convert_optional_argument(arena, &call.args, 2)?;
+                let expr_tol = self.convert_optional_argument(arena, &call.args, 3)?;
+                let enable = self.convert_optional_argument(arena, &call.args, 4)?;
+                Ok(arena.push_heavy(Heavy::Cross {
+                    expr,
                     direction,
-                    time_tol: self.convert_optional_argument(&call.args, 2)?,
-                    expr_tol: self.convert_optional_argument(&call.args, 3)?,
-                    enable: self.convert_optional_argument(&call.args, 4)?,
-                })
+                    time_tol,
+                    expr_tol,
+                    enable,
+                }))
             }
             "above" => {
                 validate_arg_range(&call.name, call.args.len(), 1, Some(4))?;
                 validate_event_argument_dependencies("above", &call.args)?;
-                let expr = self.convert(require_arg(0)?)?;
-                Ok(IrExpr::Above {
-                    expr: Box::new(expr),
-                    time_tol: self.convert_optional_argument(&call.args, 1)?,
-                    expr_tol: self.convert_optional_argument(&call.args, 2)?,
-                    enable: self.convert_optional_argument(&call.args, 3)?,
-                })
+                let expr = self.convert(arena, require_arg(0)?)?;
+                let time_tol = self.convert_optional_argument(arena, &call.args, 1)?;
+                let expr_tol = self.convert_optional_argument(arena, &call.args, 2)?;
+                let enable = self.convert_optional_argument(arena, &call.args, 3)?;
+                Ok(arena.push_heavy(Heavy::Above {
+                    expr,
+                    time_tol,
+                    expr_tol,
+                    enable,
+                }))
             }
             "timer" => {
                 validate_arg_range(&call.name, call.args.len(), 1, Some(4))?;
-                let start_time = self.convert(require_arg(0)?)?;
-                let optional = |index: usize| -> CompileResult<Option<Box<IrExpr>>> {
-                    call.args
-                        .get(index)
-                        .map(|expr| self.convert(expr).map(Box::new))
-                        .transpose()
+                let start_time = self.convert(arena, require_arg(0)?)?;
+                let optional = |arena: &mut ExprArena, index: usize| match call.args.get(index) {
+                    Some(expr) => self.convert(arena, expr).map(Some),
+                    None => Ok(None),
                 };
-                Ok(IrExpr::Timer {
-                    start_time: Box::new(start_time),
-                    period: optional(1)?,
-                    time_tol: optional(2)?,
-                    enable: optional(3)?,
-                })
+                let period = optional(arena, 1)?;
+                let time_tol = optional(arena, 2)?;
+                let enable = optional(arena, 3)?;
+                Ok(arena.push_heavy(Heavy::Timer {
+                    start_time,
+                    period,
+                    time_tol,
+                    enable,
+                }))
             }
             "last_crossing" => {
                 validate_arg_range(&call.name, call.args.len(), 1, Some(2))?;
-                let expr = self.convert(require_arg(0)?)?;
-                let direction = call
-                    .args
-                    .get(1)
-                    .map(|arg| self.const_cross_direction(arg, "last_crossing"))
-                    .transpose()?;
-                Ok(IrExpr::LastCrossing {
-                    expr: Box::new(expr),
-                    direction,
-                })
+                let expr = self.convert(arena, require_arg(0)?)?;
+                let direction = match call.args.get(1) {
+                    Some(arg) => Some(self.const_cross_direction(arena, arg, "last_crossing")?),
+                    None => None,
+                };
+                Ok(arena.push(Node::LastCrossing { expr, direction }))
             }
-            "analysis" => analysis_expression(&call.name, &call.args),
+            "analysis" => analysis_expression(arena, &call.name, &call.args),
             "white_noise" => {
                 validate_arg_range(&call.name, call.args.len(), 1, Some(2))?;
-                let power = self.convert(require_arg(0)?)?;
+                let power = self.convert(arena, require_arg(0)?)?;
                 let name = optional_string_arg(&call.name, call.args.get(1), "name")?;
-                Ok(IrExpr::WhiteNoise {
+                Ok(arena.push_heavy(Heavy::WhiteNoise {
                     site: crate::ir::NoiseSiteId::from_span(call.span),
-                    power: Box::new(power),
+                    power,
                     name,
-                })
+                }))
             }
             "flicker_noise" => {
                 validate_arg_range(&call.name, call.args.len(), 2, Some(3))?;
-                let power = self.convert(require_arg(0)?)?;
-                let exponent = self.convert(require_arg(1)?)?;
+                let power = self.convert(arena, require_arg(0)?)?;
+                let exponent = self.convert(arena, require_arg(1)?)?;
                 let name = optional_string_arg(&call.name, call.args.get(2), "name")?;
-                Ok(IrExpr::FlickerNoise {
+                Ok(arena.push_heavy(Heavy::FlickerNoise {
                     site: crate::ir::NoiseSiteId::from_span(call.span),
-                    power: Box::new(power),
-                    exponent: Box::new(exponent),
+                    power,
+                    exponent,
                     name,
-                })
+                }))
             }
             "noise_table" | "noise_table_log" => {
                 validate_arg_range(&call.name, call.args.len(), 1, Some(2))?;
                 let log_interp = call.name.ends_with("log");
                 let name = optional_string_arg(&call.name, call.args.get(1), "name")?;
-                let points = self.noise_table_points(require_arg(0)?, log_interp)?;
-                Ok(IrExpr::NoiseTable {
+                let points = self.noise_table_points(arena, require_arg(0)?, log_interp)?;
+                Ok(arena.push_heavy(Heavy::NoiseTable {
                     site: crate::ir::NoiseSiteId::from_span(call.span),
                     points,
                     log_interp,
                     name,
-                })
+                }))
             }
             "laplace_nd" => {
                 validate_arg_range(&call.name, call.args.len(), 3, Some(3))?;
-                let expr = self.convert(require_arg(0)?)?;
+                let expr = self.convert(arena, require_arg(0)?)?;
                 let numerator = self.const_filter_real_array(
+                    arena,
                     require_arg(1)?,
                     "laplace_nd",
                     "numerator",
                     false,
                 )?;
                 let denominator = self.const_filter_real_array(
+                    arena,
                     require_arg(2)?,
                     "laplace_nd",
                     "denominator",
                     false,
                 )?;
                 validate_laplace_coefficients("laplace_nd", &numerator, &denominator)?;
-                Ok(IrExpr::LaplaceND {
+                Ok(arena.push_heavy(Heavy::LaplaceND {
                     site: crate::ir::LaplaceSiteId::from_span(call.span),
-                    expr: Box::new(expr),
+                    expr,
                     numerator,
                     denominator,
-                })
+                }))
             }
             "laplace_zp" => {
                 validate_arg_range(&call.name, call.args.len(), 3, Some(3))?;
-                let expr = self.convert(require_arg(0)?)?;
+                let expr = self.convert(arena, require_arg(0)?)?;
                 let zeros =
-                    self.const_complex_pairs(require_arg(1)?, "laplace_zp", "zeros", true)?;
+                    self.const_complex_pairs(arena, require_arg(1)?, "laplace_zp", "zeros", true)?;
                 let poles =
-                    self.const_complex_pairs(require_arg(2)?, "laplace_zp", "poles", false)?;
+                    self.const_complex_pairs(arena, require_arg(2)?, "laplace_zp", "poles", false)?;
                 validate_laplace_roots("laplace_zp", &zeros, &poles)?;
-                Ok(IrExpr::LaplaceZP {
+                Ok(arena.push_heavy(Heavy::LaplaceZP {
                     site: crate::ir::LaplaceSiteId::from_span(call.span),
-                    expr: Box::new(expr),
+                    expr,
                     zeros,
                     poles,
                     gain: 1.0,
-                })
+                }))
             }
             "laplace_zd" => {
                 validate_arg_range(&call.name, call.args.len(), 3, Some(3))?;
                 // zeros (pairs) + denominator coefficients: expand the
                 // zeros into a numerator polynomial
-                let expr = self.convert(require_arg(0)?)?;
+                let expr = self.convert(arena, require_arg(0)?)?;
                 let zeros =
-                    self.const_complex_pairs(require_arg(1)?, "laplace_zd", "zeros", true)?;
+                    self.const_complex_pairs(arena, require_arg(1)?, "laplace_zd", "zeros", true)?;
                 let denominator = self.const_filter_real_array(
+                    arena,
                     require_arg(2)?,
                     "laplace_zd",
                     "denominator",
@@ -1394,25 +1453,26 @@ impl<'a> ExprConverter<'a> {
                     )))
                 })?;
                 validate_laplace_coefficients("laplace_zd", &numerator, &denominator)?;
-                Ok(IrExpr::LaplaceND {
+                Ok(arena.push_heavy(Heavy::LaplaceND {
                     site: crate::ir::LaplaceSiteId::from_span(call.span),
-                    expr: Box::new(expr),
+                    expr,
                     numerator,
                     denominator,
-                })
+                }))
             }
             "laplace_np" => {
                 validate_arg_range(&call.name, call.args.len(), 3, Some(3))?;
                 // numerator coefficients + poles (pairs)
-                let expr = self.convert(require_arg(0)?)?;
+                let expr = self.convert(arena, require_arg(0)?)?;
                 let numerator = self.const_filter_real_array(
+                    arena,
                     require_arg(1)?,
                     "laplace_np",
                     "numerator",
                     false,
                 )?;
                 let poles =
-                    self.const_complex_pairs(require_arg(2)?, "laplace_np", "poles", false)?;
+                    self.const_complex_pairs(arena, require_arg(2)?, "laplace_np", "poles", false)?;
                 let denominator = crate::laplace::roots_to_polynomial(&poles).map_err(|e| {
                     CodeGenError::new(CodeGenErrorKind::InvalidExpression(format!(
                         "laplace_np poles: {}",
@@ -1420,28 +1480,30 @@ impl<'a> ExprConverter<'a> {
                     )))
                 })?;
                 validate_laplace_coefficients("laplace_np", &numerator, &denominator)?;
-                Ok(IrExpr::LaplaceND {
+                Ok(arena.push_heavy(Heavy::LaplaceND {
                     site: crate::ir::LaplaceSiteId::from_span(call.span),
-                    expr: Box::new(expr),
+                    expr,
                     numerator,
                     denominator,
-                })
+                }))
             }
             // Z-domain filters. Constant arguments are retained as programs
             // and frozen per instance at the beginning of each analysis.
             "zi_nd" | "zi_zp" | "zi_zd" | "zi_np" => {
                 validate_arg_range(&call.name, call.args.len(), 4, Some(6))?;
                 self.validate_raw_zi_operand_budget(&call.name, require_arg(1)?, require_arg(2)?)?;
-                let expr = self.convert(require_arg(0)?)?;
+                let expr = self.convert(arena, require_arg(0)?)?;
                 let (numerator, denominator) = match call.name.as_str() {
                     "zi_nd" => (
-                        crate::ir::ZiPolynomialDefinition::Coefficients(self.zi_real_array(
+                        ZiPolynomial::Coefficients(self.zi_real_array(
+                            arena,
                             require_arg(1)?,
                             "zi_nd",
                             "numerator",
                             false,
                         )?),
-                        crate::ir::ZiPolynomialDefinition::Coefficients(self.zi_real_array(
+                        ZiPolynomial::Coefficients(self.zi_real_array(
+                            arena,
                             require_arg(2)?,
                             "zi_nd",
                             "denominator",
@@ -1449,13 +1511,15 @@ impl<'a> ExprConverter<'a> {
                         )?),
                     ),
                     "zi_zp" => (
-                        crate::ir::ZiPolynomialDefinition::Roots(self.zi_complex_pairs(
+                        ZiPolynomial::Roots(self.zi_complex_pairs(
+                            arena,
                             require_arg(1)?,
                             "zi_zp",
                             "zeros",
                             true,
                         )?),
-                        crate::ir::ZiPolynomialDefinition::Roots(self.zi_complex_pairs(
+                        ZiPolynomial::Roots(self.zi_complex_pairs(
+                            arena,
                             require_arg(2)?,
                             "zi_zp",
                             "poles",
@@ -1463,13 +1527,15 @@ impl<'a> ExprConverter<'a> {
                         )?),
                     ),
                     "zi_zd" => (
-                        crate::ir::ZiPolynomialDefinition::Roots(self.zi_complex_pairs(
+                        ZiPolynomial::Roots(self.zi_complex_pairs(
+                            arena,
                             require_arg(1)?,
                             "zi_zd",
                             "zeros",
                             true,
                         )?),
-                        crate::ir::ZiPolynomialDefinition::Coefficients(self.zi_real_array(
+                        ZiPolynomial::Coefficients(self.zi_real_array(
+                            arena,
                             require_arg(2)?,
                             "zi_zd",
                             "denominator",
@@ -1477,13 +1543,15 @@ impl<'a> ExprConverter<'a> {
                         )?),
                     ),
                     _ => (
-                        crate::ir::ZiPolynomialDefinition::Coefficients(self.zi_real_array(
+                        ZiPolynomial::Coefficients(self.zi_real_array(
+                            arena,
                             require_arg(1)?,
                             "zi_np",
                             "numerator",
                             false,
                         )?),
-                        crate::ir::ZiPolynomialDefinition::Roots(self.zi_complex_pairs(
+                        ZiPolynomial::Roots(self.zi_complex_pairs(
+                            arena,
                             require_arg(2)?,
                             "zi_np",
                             "poles",
@@ -1493,7 +1561,7 @@ impl<'a> ExprConverter<'a> {
                 };
                 validate_zi_polynomial_budget(&call.name, &numerator, &denominator)?;
                 let period =
-                    self.zi_definition_arg(require_arg(3)?, &call.name, "sample period")?;
+                    self.zi_definition_arg(arena, require_arg(3)?, &call.name, "sample period")?;
                 let transition = match call.args.get(4) {
                     Some(Expression::NullArgument(_)) => {
                         return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
@@ -1501,32 +1569,33 @@ impl<'a> ExprConverter<'a> {
                         ))
                         .into());
                     }
-                    Some(value) => self.convert(value)?,
-                    None => IrExpr::Const(self.ctx.default_transition()),
+                    Some(value) => self.convert(arena, value)?,
+                    None => arena.push(Node::Const(self.ctx.default_transition())),
                 };
                 let first_transition = match call.args.get(5) {
                     Some(value) => {
-                        self.zi_definition_arg(value, &call.name, "first transition time")?
+                        self.zi_definition_arg(arena, value, &call.name, "first transition time")?
                     }
-                    None => IrExpr::Const(0.0),
+                    None => arena.push(Node::Const(0.0)),
                 };
                 validate_wholly_constant_zi_definition(
+                    arena,
                     &call.name,
                     &numerator,
                     &denominator,
-                    &period,
-                    &first_transition,
+                    period,
+                    first_transition,
                 )?;
-                Ok(IrExpr::ZiFilter {
+                Ok(arena.push_heavy(Heavy::ZiFilter {
                     site: crate::ir::ZiSiteId::from_span(call.span),
-                    expr: Box::new(expr),
+                    expr,
                     numerator,
                     denominator,
-                    period: Box::new(period),
-                    transition: Box::new(transition),
-                    first_transition: Box::new(first_transition),
+                    period,
+                    transition,
+                    first_transition,
                     direct_assignment: self.direct_zi_assignment,
-                })
+                }))
             }
             _ => Err(
                 CodeGenError::new(CodeGenErrorKind::UnsupportedFeature(format!(
@@ -1543,6 +1612,7 @@ impl<'a> ExprConverter<'a> {
     /// non-constant entries are clean unsupported errors.
     fn noise_table_points(
         &self,
+        arena: &mut ExprArena,
         arg: &Expression,
         log_interp: bool,
     ) -> CompileResult<Vec<(f64, f64)>> {
@@ -1552,7 +1622,7 @@ impl<'a> ExprConverter<'a> {
             ))
             .into());
         }
-        let flat = self.const_real_array(arg)?;
+        let flat = self.const_real_array(arena, arg)?;
         if flat.is_empty() || flat.len() % 2 != 0 {
             return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
                 "noise_table needs a non-empty, even-length {f, p, ...} list".into(),
@@ -1611,7 +1681,11 @@ impl<'a> ExprConverter<'a> {
     }
 
     /// Evaluate an array-literal argument to constant reals
-    fn const_real_array(&self, expr: &Expression) -> CompileResult<Vec<f64>> {
+    fn const_real_array(
+        &self,
+        arena: &mut ExprArena,
+        expr: &Expression,
+    ) -> CompileResult<Vec<f64>> {
         let elements: Vec<&Expression> = match expr {
             Expression::ArrayLiteral(arr) => arr
                 .elements
@@ -1634,10 +1708,11 @@ impl<'a> ExprConverter<'a> {
         elements
             .into_iter()
             .map(|e| {
-                let converted = autodiff_fold(self.convert(e)?);
-                match converted {
-                    IrExpr::Const(v) => Ok(v),
-                    _ => Err(CodeGenError::new(CodeGenErrorKind::UnsupportedFeature(
+                let argument = self.convert(arena, e)?;
+                let converted = autodiff_fold(arena, argument);
+                match constant(arena, converted) {
+                    Some(v) => Ok(v),
+                    None => Err(CodeGenError::new(CodeGenErrorKind::UnsupportedFeature(
                         "filter coefficients must be compile-time constants \
                          (parameter-dependent coefficients are not supported yet)"
                             .into(),
@@ -1652,6 +1727,7 @@ impl<'a> ExprConverter<'a> {
     /// treating a concatenation or scalar expression as an unpacked array.
     fn filter_vector_elements<'expr>(
         &self,
+        arena: &mut ExprArena,
         expression: &'expr Expression,
         operator: &str,
         role: &str,
@@ -1678,6 +1754,7 @@ impl<'a> ExprConverter<'a> {
             Expression::ArrayLiteral(array) => {
                 let mut materialized = Vec::new();
                 self.append_filter_vector_elements(
+                    arena,
                     &array.elements,
                     operator,
                     role,
@@ -1708,6 +1785,7 @@ impl<'a> ExprConverter<'a> {
 
     fn append_filter_vector_elements<'expr>(
         &self,
+        arena: &mut ExprArena,
         elements: &'expr [ArrayLiteralElement],
         operator: &str,
         role: &str,
@@ -1755,9 +1833,11 @@ impl<'a> ExprConverter<'a> {
                         )
                         .into());
                     }
-                    let count = self.filter_replication_count(replication, operator, role)?;
+                    let count =
+                        self.filter_replication_count(arena, replication, operator, role)?;
                     let mut body = Vec::new();
                     self.append_filter_vector_elements(
+                        arena,
                         &replication.elements,
                         operator,
                         role,
@@ -1808,13 +1888,16 @@ impl<'a> ExprConverter<'a> {
 
     fn filter_replication_count(
         &self,
+        arena: &mut ExprArena,
         replication: &crate::ast::ReplicationExpr,
         operator: &str,
         role: &str,
     ) -> CompileResult<usize> {
-        let value = match autodiff_fold(self.convert(&replication.count)?) {
-            IrExpr::Const(value) => value,
-            _ => {
+        let converted = self.convert(arena, &replication.count)?;
+        let folded = autodiff_fold(arena, converted);
+        let value = match constant(arena, folded) {
+            Some(value) => value,
+            None => {
                 return Err(CodeGenError::with_span(
                     CodeGenErrorKind::InvalidExpression(format!(
                         "{operator} {role} replication count must be an instance-invariant integer constant expression"
@@ -1856,32 +1939,41 @@ impl<'a> ExprConverter<'a> {
 
     fn const_filter_real_array(
         &self,
+        arena: &mut ExprArena,
         expression: &Expression,
         operator: &str,
         role: &str,
         allow_null: bool,
     ) -> CompileResult<Vec<f64>> {
-        self.filter_vector_elements(expression, operator, role, allow_null)?
-            .into_iter()
-            .map(|element| match autodiff_fold(self.convert(element)?) {
-                IrExpr::Const(value) => Ok(value),
-                _ => Err(CodeGenError::with_span(
-                    CodeGenErrorKind::UnsupportedFeature(format!(
-                        "{operator} {role} values must be compile-time constants (parameter-dependent values are not supported yet)"
-                    )),
-                    element.span(),
-                )
-                .into()),
-            })
-            .collect()
+        let elements =
+            self.filter_vector_elements(arena, expression, operator, role, allow_null)?;
+        let mut values = Vec::with_capacity(elements.len());
+        for element in elements {
+            let converted = self.convert(arena, element)?;
+            let folded = autodiff_fold(arena, converted);
+            match constant(arena, folded) {
+                Some(value) => values.push(value),
+                None => {
+                    return Err(CodeGenError::with_span(
+                        CodeGenErrorKind::UnsupportedFeature(format!(
+                            "{operator} {role} values must be compile-time constants (parameter-dependent values are not supported yet)"
+                        )),
+                        element.span(),
+                    )
+                    .into());
+                }
+            }
+        }
+        Ok(values)
     }
 
     fn zi_definition_arg(
         &self,
+        arena: &mut ExprArena,
         expression: &Expression,
         operator: &str,
         role: &str,
-    ) -> CompileResult<IrExpr> {
+    ) -> CompileResult<NodeId> {
         if matches!(expression, Expression::NullArgument(_)) {
             return Err(
                 CodeGenError::new(CodeGenErrorKind::InvalidExpression(format!(
@@ -1893,7 +1985,8 @@ impl<'a> ExprConverter<'a> {
         // VAMS-2023 §4.5.14 freezes a dynamic expression passed to a
         // constant argument at analysis start. Preserve the complete safe
         // runtime program here; lifecycle initialization evaluates it once.
-        Ok(autodiff_fold(self.convert(expression)?))
+        let converted = self.convert(arena, expression)?;
+        Ok(autodiff_fold(arena, converted))
     }
 
     fn validate_raw_zi_operand_budget(
@@ -1920,25 +2013,30 @@ impl<'a> ExprConverter<'a> {
 
     fn zi_real_array(
         &self,
+        arena: &mut ExprArena,
         expression: &Expression,
         operator: &str,
         role: &str,
         allow_null: bool,
-    ) -> CompileResult<Vec<IrExpr>> {
-        self.filter_vector_elements(expression, operator, role, allow_null)?
-            .into_iter()
-            .map(|value| self.zi_definition_arg(value, operator, role))
-            .collect()
+    ) -> CompileResult<Vec<NodeId>> {
+        let elements =
+            self.filter_vector_elements(arena, expression, operator, role, allow_null)?;
+        let mut values = Vec::with_capacity(elements.len());
+        for element in elements {
+            values.push(self.zi_definition_arg(arena, element, operator, role)?);
+        }
+        Ok(values)
     }
 
     fn zi_complex_pairs(
         &self,
+        arena: &mut ExprArena,
         expression: &Expression,
         operator: &str,
         role: &str,
         allow_null: bool,
-    ) -> CompileResult<Vec<(IrExpr, IrExpr)>> {
-        let values = self.zi_real_array(expression, operator, role, allow_null)?;
+    ) -> CompileResult<Vec<(NodeId, NodeId)>> {
+        let values = self.zi_real_array(arena, expression, operator, role, allow_null)?;
         if !values.len().is_multiple_of(2) {
             return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
                 "zi pole/zero vectors must contain (real, imaginary) pairs".into(),
@@ -1947,19 +2045,20 @@ impl<'a> ExprConverter<'a> {
         }
         Ok(values
             .chunks_exact(2)
-            .map(|pair| (pair[0].clone(), pair[1].clone()))
+            .map(|pair| (pair[0], pair[1]))
             .collect())
     }
 
     /// Evaluate an array-literal argument to constant (re, im) pairs
     fn const_complex_pairs(
         &self,
+        arena: &mut ExprArena,
         expression: &Expression,
         operator: &str,
         role: &str,
         allow_null: bool,
     ) -> CompileResult<Vec<(f64, f64)>> {
-        let values = self.const_filter_real_array(expression, operator, role, allow_null)?;
+        let values = self.const_filter_real_array(arena, expression, operator, role, allow_null)?;
         if !values.len().is_multiple_of(2) {
             return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
                 "pole/zero vectors must contain (real, imaginary) pairs".into(),
@@ -1970,7 +2069,11 @@ impl<'a> ExprConverter<'a> {
     }
 
     /// Convert a branch access expression
-    fn convert_branch_access(&self, access: &BranchAccess) -> CompileResult<IrExpr> {
+    fn convert_branch_access(
+        &self,
+        arena: &mut ExprArena,
+        access: &BranchAccess,
+    ) -> CompileResult<NodeId> {
         let kind = Self::resolved_access_kind(access)?;
         match access {
             BranchAccess::Nodes { pos, neg, .. } => {
@@ -1978,7 +2081,7 @@ impl<'a> ExprConverter<'a> {
                 if neg.is_none()
                     && let Some((pos_idx, neg_idx)) = self.ctx.branch_nodes(pos)
                 {
-                    return Self::access_to_ir(kind, pos_idx, neg_idx);
+                    return Self::access_to_ir(arena, kind, pos_idx, neg_idx);
                 }
 
                 let pos_idx = self.ctx.node_index(pos).ok_or_else(|| {
@@ -2001,7 +2104,7 @@ impl<'a> ExprConverter<'a> {
                     .transpose()?
                     .unwrap_or(self.ctx.ground());
 
-                Self::access_to_ir(kind, pos_idx, neg_idx)
+                Self::access_to_ir(arena, kind, pos_idx, neg_idx)
             }
             BranchAccess::Branch { name, .. } => {
                 let (pos_idx, neg_idx) = if let Some(nodes) = self.ctx.branch_nodes(name) {
@@ -2015,7 +2118,7 @@ impl<'a> ExprConverter<'a> {
                     })?;
                     (pos_idx, self.ctx.ground())
                 };
-                Self::access_to_ir(kind, pos_idx, neg_idx)
+                Self::access_to_ir(arena, kind, pos_idx, neg_idx)
             }
         }
     }
@@ -2024,10 +2127,17 @@ impl<'a> ExprConverter<'a> {
     ///
     /// Potential accesses (V, Temp, Pos, ...) read the node-pair potential;
     /// flow accesses (I, Pwr, ...) read the branch flow.
-    fn access_to_ir(kind: AccessKind, pos: usize, neg: usize) -> CompileResult<IrExpr> {
+    fn access_to_ir(
+        arena: &mut ExprArena,
+        kind: AccessKind,
+        pos: usize,
+        neg: usize,
+    ) -> CompileResult<NodeId> {
         match kind {
-            AccessKind::Flow => Ok(IrExpr::Current(pos, neg)),
-            AccessKind::Potential => Ok(IrExpr::Voltage(pos, neg)),
+            AccessKind::Flow => Ok(arena.push(Node::Current(pack_index(pos), pack_index(neg)))),
+            AccessKind::Potential => {
+                Ok(arena.push(Node::Voltage(pack_index(pos), pack_index(neg))))
+            }
         }
     }
 
@@ -2041,7 +2151,15 @@ impl<'a> ExprConverter<'a> {
     }
 
     /// Convert an analog operator
-    fn convert_analog_operator(&self, op: &AnalogOperator) -> CompileResult<IrExpr> {
+    fn convert_analog_operator(
+        &self,
+        arena: &mut ExprArena,
+        op: &AnalogOperator,
+    ) -> CompileResult<NodeId> {
+        // Only the `native` build of the `$limit` arm writes a node; without
+        // that feature every arm here refuses, and the parameter is still part
+        // of the signature every other converter method has.
+        let _ = &arena;
         match op {
             #[cfg(feature = "native")]
             AnalogOperator::Limit { proposed, .. } => {
@@ -2052,8 +2170,8 @@ impl<'a> ExprConverter<'a> {
                 // state slot; native construction requires every executable
                 // entry point to compile from canonical IR, so this bytecode
                 // is never a semantic fallback.
-                let proposed = self.convert(proposed)?;
-                Ok(IrExpr::CanonicalLimit(Box::new(proposed)))
+                let proposed = self.convert(arena, proposed)?;
+                Ok(arena.push(Node::CanonicalLimit(proposed)))
             }
             #[cfg(not(feature = "native"))]
             AnalogOperator::Limit { selector, .. } => Err(CodeGenError::new(
@@ -2072,7 +2190,11 @@ impl<'a> ExprConverter<'a> {
     }
 
     /// Convert a noise source
-    fn convert_noise_source(&self, noise: &crate::ast::NoiseSource) -> CompileResult<IrExpr> {
+    fn convert_noise_source(
+        &self,
+        arena: &mut ExprArena,
+        noise: &crate::ast::NoiseSource,
+    ) -> CompileResult<NodeId> {
         use crate::ast::NoiseSource;
         let process_id = match noise {
             NoiseSource::White { process_id, .. }
@@ -2089,29 +2211,36 @@ impl<'a> ExprConverter<'a> {
                 power,
                 name,
                 span,
-            } => Ok(IrExpr::WhiteNoise {
-                site: crate::ir::NoiseSiteId {
-                    ordinal: process_id,
-                    ..crate::ir::NoiseSiteId::from_span(*span)
-                },
-                power: Box::new(self.convert(power)?),
-                name: name.as_ref().map(ToString::to_string),
-            }),
+            } => {
+                let power = self.convert(arena, power)?;
+                Ok(arena.push_heavy(Heavy::WhiteNoise {
+                    site: crate::ir::NoiseSiteId {
+                        ordinal: process_id,
+                        ..crate::ir::NoiseSiteId::from_span(*span)
+                    },
+                    power,
+                    name: name.as_ref().map(ToString::to_string),
+                }))
+            }
             NoiseSource::Flicker {
                 process_id: _,
                 power,
                 exponent,
                 name,
                 span,
-            } => Ok(IrExpr::FlickerNoise {
-                site: crate::ir::NoiseSiteId {
-                    ordinal: process_id,
-                    ..crate::ir::NoiseSiteId::from_span(*span)
-                },
-                power: Box::new(self.convert(power)?),
-                exponent: Box::new(self.convert(exponent)?),
-                name: name.as_ref().map(ToString::to_string),
-            }),
+            } => {
+                let power = self.convert(arena, power)?;
+                let exponent = self.convert(arena, exponent)?;
+                Ok(arena.push_heavy(Heavy::FlickerNoise {
+                    site: crate::ir::NoiseSiteId {
+                        ordinal: process_id,
+                        ..crate::ir::NoiseSiteId::from_span(*span)
+                    },
+                    power,
+                    exponent,
+                    name: name.as_ref().map(ToString::to_string),
+                }))
+            }
             NoiseSource::Table {
                 process_id: _,
                 data,
@@ -2121,9 +2250,11 @@ impl<'a> ExprConverter<'a> {
             } => {
                 let mut flat = Vec::with_capacity(data.len());
                 for value in data {
-                    match autodiff_fold(self.convert(value)?) {
-                        IrExpr::Const(value) => flat.push(value),
-                        _ => {
+                    let converted = self.convert(arena, value)?;
+                    let folded = autodiff_fold(arena, converted);
+                    match constant(arena, folded) {
+                        Some(value) => flat.push(value),
+                        None => {
                             return Err(CodeGenError::with_span(
                                 CodeGenErrorKind::UnsupportedFeature(
                                     "noise_table entries must be compile-time constants".into(),
@@ -2169,7 +2300,7 @@ impl<'a> ExprConverter<'a> {
                     )
                     .into());
                 }
-                Ok(IrExpr::NoiseTable {
+                Ok(arena.push_heavy(Heavy::NoiseTable {
                     site: crate::ir::NoiseSiteId {
                         ordinal: process_id,
                         ..crate::ir::NoiseSiteId::from_span(*span)
@@ -2177,7 +2308,7 @@ impl<'a> ExprConverter<'a> {
                     points,
                     log_interp: *log_interp,
                     name: name.as_ref().map(ToString::to_string),
-                })
+                }))
             }
         }
     }
@@ -2480,17 +2611,34 @@ mod tests {
         }
     }
 
+    /// The axis a `ddx` node names, for a fixture that asserts on one.
+    fn ddx_axis_of(arena: &ExprArena, id: NodeId) -> DdxAxis {
+        match *arena.node(id) {
+            Node::Ddx { axis, .. } => arena.ddx_axis(axis),
+            other => panic!("expected a ddx node, found {other:?}"),
+        }
+    }
+
+    /// The heavy payload a node carries, for a fixture that asserts on one.
+    fn heavy_of(arena: &ExprArena, id: NodeId) -> Heavy {
+        match *arena.node(id) {
+            Node::Heavy(_, heavy) => arena.heavy(heavy).clone(),
+            other => panic!("expected a heavy operator, found {other:?}"),
+        }
+    }
+
     fn converted_noise_table(
         converter: &ExprConverter<'_>,
         name: &str,
         values: &[f64],
     ) -> CompileResult<(Vec<(f64, f64)>, bool)> {
-        let converted = converter.convert(&inline_noise_table(name, values))?;
-        let IrExpr::NoiseTable {
+        let arena = &mut ExprArena::new();
+        let converted = converter.convert(arena, &inline_noise_table(name, values))?;
+        let Heavy::NoiseTable {
             points, log_interp, ..
-        } = converted
+        } = heavy_of(arena, converted)
         else {
-            panic!("{name} did not lower to IrExpr::NoiseTable");
+            panic!("{name} did not lower to a noise table");
         };
         Ok((points, log_interp))
     }
@@ -2538,6 +2686,7 @@ mod tests {
     fn inline_noise_tables_reject_nonfinite_frequency_or_power() {
         let context = empty_context();
         let converter = ExprConverter::new(&context);
+        let arena = &mut ExprArena::new();
         let invalid = [
             [f64::NAN, 1.0],
             [1.0, f64::NAN],
@@ -2553,7 +2702,7 @@ mod tests {
         ] {
             for values in invalid {
                 let error = converter
-                    .convert(&inline_noise_table(name, &values))
+                    .convert(arena, &inline_noise_table(name, &values))
                     .expect_err("nonfinite noise-table point must fail")
                     .to_string();
                 assert!(
@@ -2568,11 +2717,12 @@ mod tests {
     fn inline_noise_tables_enforce_linear_and_log_domains() {
         let context = empty_context();
         let converter = ExprConverter::new(&context);
+        let arena = &mut ExprArena::new();
 
         for name in ["noise_table", "$noise_table"] {
             for values in [[-1.0, 1.0], [1.0, -1.0]] {
                 let error = converter
-                    .convert(&inline_noise_table(name, &values))
+                    .convert(arena, &inline_noise_table(name, &values))
                     .expect_err("negative linear noise-table point must fail")
                     .to_string();
                 assert!(
@@ -2585,7 +2735,7 @@ mod tests {
         for name in ["noise_table_log", "$noise_table_log"] {
             for values in [[0.0, 1.0], [1.0, 0.0], [-1.0, 1.0], [1.0, -1.0]] {
                 let error = converter
-                    .convert(&inline_noise_table(name, &values))
+                    .convert(arena, &inline_noise_table(name, &values))
                     .expect_err("nonpositive log noise-table point must fail")
                     .to_string();
                 assert!(
@@ -2600,6 +2750,7 @@ mod tests {
     fn inline_noise_tables_reject_duplicate_frequencies_after_sorting() {
         let context = empty_context();
         let converter = ExprConverter::new(&context);
+        let arena = &mut ExprArena::new();
 
         for name in [
             "noise_table",
@@ -2608,7 +2759,10 @@ mod tests {
             "$noise_table_log",
         ] {
             let error = converter
-                .convert(&inline_noise_table(name, &[10.0, 1.0, 1.0, 2.0, 10.0, 3.0]))
+                .convert(
+                    arena,
+                    &inline_noise_table(name, &[10.0, 1.0, 1.0, 2.0, 10.0, 3.0]),
+                )
                 .expect_err("duplicate noise-table frequencies must fail")
                 .to_string();
             assert!(
@@ -2620,7 +2774,7 @@ mod tests {
 
         for name in ["noise_table", "$noise_table"] {
             let error = converter
-                .convert(&inline_noise_table(name, &[-0.0, 1.0, 0.0, 2.0]))
+                .convert(arena, &inline_noise_table(name, &[-0.0, 1.0, 0.0, 2.0]))
                 .expect_err("signed zero frequencies are the same linear knot")
                 .to_string();
             assert!(
@@ -2637,6 +2791,7 @@ mod tests {
         context.node_map.insert("n".into(), 1);
         context.num_terminals = 2;
         let converter = ExprConverter::new(&context);
+        let arena = &mut ExprArena::new();
         let expression = Expression::Call(CallExpr {
             name: "transition".into(),
             args: vec![
@@ -2653,36 +2808,37 @@ mod tests {
             ],
             span: Span::dummy(),
         });
-        let mut primal = converter
-            .convert(&expression)
+        let primal = converter
+            .convert(arena, &expression)
             .expect("a transition call must convert to its dynamic operator");
         let mut next = 0;
-        crate::ir::autodiff::assign_transition_site_ordinals(&mut primal, &mut next);
-        let derivative = crate::ir::autodiff::differentiate_source(
-            &primal,
+        let primal = crate::ir::autodiff::assign_transition_site_ordinals(arena, primal, &mut next);
+        let derivative = crate::ir::autodiff::differentiate(
+            arena,
+            primal,
             &crate::ir::DerivativeWrt::Voltage(0),
         );
 
-        let IrExpr::Transition {
+        let Heavy::Transition {
             site: primal_site, ..
-        } = primal
+        } = heavy_of(arena, primal)
         else {
             panic!("a transition call must remain a primal transition carrier");
         };
-        let IrExpr::TransitionDerivative {
+        let Heavy::TransitionDerivative {
             site,
             input_derivative,
             delay,
             rise_time,
             fall_time,
             ..
-        } = derivative
+        } = heavy_of(arena, derivative)
         else {
             panic!("transition derivative must remain a runtime carrier");
         };
         assert_eq!(site, primal_site);
         assert_eq!(site.ordinal, 0);
-        assert!(matches!(*input_derivative, IrExpr::Const(1.0)));
+        assert!(matches!(*arena.node(input_derivative), Node::Const(1.0)));
         assert!(delay.is_some() && rise_time.is_some() && fall_time.is_some());
     }
 
@@ -2690,6 +2846,7 @@ mod tests {
     fn source_filter_calls_do_not_scalarize_concatenations_or_scalars() {
         let context = empty_context();
         let converter = ExprConverter::new(&context);
+        let arena = &mut ExprArena::new();
         let call = |numerator: Expression| {
             Expression::Call(CallExpr {
                 name: "laplace_nd".into(),
@@ -2699,30 +2856,29 @@ mod tests {
         };
 
         let error = converter
-            .convert(&call(vector(&[1.0], false)))
+            .convert(arena, &call(vector(&[1.0], false)))
             .expect_err("concatenation is not a coefficient vector")
             .to_string();
         assert!(error.contains("ordinary concatenation"), "got: {error}");
         assert!(error.contains("assignment pattern"), "got: {error}");
 
         let error = converter
-            .convert(&call(number(1.0)))
+            .convert(arena, &call(number(1.0)))
             .expect_err("scalar is not a coefficient vector")
             .to_string();
         assert!(error.contains("scalar expression"), "got: {error}");
 
-        assert!(matches!(
-            converter
-                .convert(&call(vector(&[1.0], true)))
-                .expect("assignment pattern is a coefficient vector"),
-            IrExpr::LaplaceND { .. }
-        ));
+        let id = converter
+            .convert(arena, &call(vector(&[1.0], true)))
+            .expect("assignment pattern is a coefficient vector");
+        assert!(matches!(heavy_of(arena, id), Heavy::LaplaceND { .. }));
     }
 
     #[test]
     fn source_filter_codegen_materializes_bounded_nested_replication() {
         let context = empty_context();
         let converter = ExprConverter::new(&context);
+        let arena = &mut ExprArena::new();
         let inner = ArrayLiteralElement::Replication(ReplicationExpr {
             count: Box::new(number(2.0)),
             elements: vec![ArrayLiteralElement::Value(number(1.0))],
@@ -2737,11 +2893,11 @@ mod tests {
             ],
             span: Span::dummy(),
         });
-        let IrExpr::LaplaceND { numerator, .. } = converter
-            .convert(&expression)
-            .expect("nested replication lowers defensively at codegen")
-        else {
-            panic!("expected Laplace IR");
+        let id = converter
+            .convert(arena, &expression)
+            .expect("nested replication lowers defensively at codegen");
+        let Heavy::LaplaceND { numerator, .. } = heavy_of(arena, id) else {
+            panic!("expected a Laplace operator");
         };
         assert_eq!(numerator, vec![1.0; 4]);
 
@@ -2755,7 +2911,7 @@ mod tests {
             span: Span::dummy(),
         });
         let error = converter
-            .convert(&oversized)
+            .convert(arena, &oversized)
             .expect_err("oversized replication fails before allocation")
             .to_string();
         assert!(error.contains("supported limit is 1020"), "{error}");
@@ -2765,27 +2921,35 @@ mod tests {
     fn idtmod_retains_all_four_wrapping_operands() {
         let context = empty_context();
         let converter = ExprConverter::new(&context);
+        let arena = &mut ExprArena::new();
         let expression = Expression::Call(CallExpr {
             name: "idtmod".into(),
             args: vec![number(1.25), number(2.5), number(3.75), number(-4.0)],
             span: Span::dummy(),
         });
 
-        let IrExpr::IdtMod {
+        let id = converter
+            .convert(arena, &expression)
+            .expect("idtmod with a modulus must retain modulo integration");
+        let Node::IdtMod {
             expr,
-            ic: Some(ic),
             modulus,
-            offset: Some(offset),
-        } = converter
-            .convert(&expression)
-            .expect("idtmod with a modulus must retain modulo integration")
+            payload,
+        } = *arena.node(id)
         else {
-            panic!("idtmod was not lowered to IrExpr::IdtMod");
+            panic!("idtmod was not lowered to a wrapping integral");
         };
-        assert!(matches!(*expr, IrExpr::Const(value) if value == 1.25));
-        assert!(matches!(*ic, IrExpr::Const(value) if value == 2.5));
-        assert!(matches!(*modulus, IrExpr::Const(value) if value == 3.75));
-        assert!(matches!(*offset, IrExpr::Const(value) if value == -4.0));
+        let (Some(ic), Some(offset)) = arena.optional_pair(payload) else {
+            panic!("idtmod must retain its initial condition and offset");
+        };
+        let value = |id| match *arena.node(id) {
+            Node::Const(value) => value,
+            other => panic!("expected a constant, found {other:?}"),
+        };
+        assert_eq!(value(expr), 1.25);
+        assert_eq!(value(ic), 2.5);
+        assert_eq!(value(modulus), 3.75);
+        assert_eq!(value(offset), -4.0);
     }
 
     #[test]
@@ -2795,6 +2959,7 @@ mod tests {
         context.node_map.insert("n".into(), 1);
         context.num_terminals = 2;
         let converter = ExprConverter::new(&context);
+        let arena = &mut ExprArena::new();
         let voltage = || {
             Expression::BranchAccess(BranchAccess::Nodes {
                 access: "V".into(),
@@ -2819,16 +2984,13 @@ mod tests {
         });
 
         let converted = converter
-            .convert(&expression)
+            .convert(arena, &expression)
             .expect("ddx potential probe must lower symbolically");
         assert!(matches!(
-            converted,
-            IrExpr::Ddx {
-                axis: DdxAxis::Potential {
-                    pos: Some(0),
-                    neg: Some(1),
-                },
-                ..
+            ddx_axis_of(arena, converted),
+            DdxAxis::Potential {
+                pos: Some(0),
+                neg: Some(1),
             }
         ));
     }
@@ -2840,6 +3002,7 @@ mod tests {
         context.node_map.insert("n".into(), 1);
         context.num_terminals = 2;
         let converter = ExprConverter::new(&context);
+        let arena = &mut ExprArena::new();
         let expression = Expression::Call(CallExpr {
             name: "ddx".into(),
             args: vec![
@@ -2856,7 +3019,7 @@ mod tests {
         });
 
         let error = converter
-            .convert(&expression)
+            .convert(arena, &expression)
             .expect_err("dependent flow must not become a ddx axis")
             .to_string();
         assert!(
@@ -2874,6 +3037,7 @@ mod tests {
         context.branch_current_map.insert((0, 1), (0, 0));
         context.num_terminals = 2;
         let converter = ExprConverter::new(&context);
+        let arena = &mut ExprArena::new();
         let current = || {
             Expression::BranchAccess(BranchAccess::Nodes {
                 access: "I".into(),
@@ -2889,16 +3053,14 @@ mod tests {
             span: Span::dummy(),
         });
 
+        let id = converter
+            .convert(arena, &expression)
+            .expect("solver branch flow is a valid ddx axis");
         assert!(matches!(
-            converter
-                .convert(&expression)
-                .expect("solver branch flow is a valid ddx axis"),
-            IrExpr::Ddx {
-                axis: DdxAxis::BranchCurrent {
-                    ordinal: 0,
-                    reversed: false,
-                },
-                ..
+            ddx_axis_of(arena, id),
+            DdxAxis::BranchCurrent {
+                ordinal: 0,
+                reversed: false,
             }
         ));
     }
@@ -2911,6 +3073,7 @@ mod tests {
         context.branch_current_map.insert((0, 1), (0, 0));
         context.num_terminals = 2;
         let converter = ExprConverter::new(&context);
+        let arena = &mut ExprArena::new();
         let ddx = |access: &str| {
             Expression::Call(CallExpr {
                 name: "ddx".into(),
@@ -2932,21 +3095,16 @@ mod tests {
             })
         };
 
+        let mmf = converter
+            .convert(arena, &ddx("MMF"))
+            .expect("MMF is a potential");
+        assert!(matches!(ddx_axis_of(arena, mmf), DdxAxis::Potential { .. }));
+        let phi = converter
+            .convert(arena, &ddx("Phi"))
+            .expect("Phi is a solver-owned magnetic flow");
         assert!(matches!(
-            converter.convert(&ddx("MMF")).expect("MMF is a potential"),
-            IrExpr::Ddx {
-                axis: DdxAxis::Potential { .. },
-                ..
-            }
-        ));
-        assert!(matches!(
-            converter
-                .convert(&ddx("Phi"))
-                .expect("Phi is a solver-owned magnetic flow"),
-            IrExpr::Ddx {
-                axis: DdxAxis::BranchCurrent { .. },
-                ..
-            }
+            ddx_axis_of(arena, phi),
+            DdxAxis::BranchCurrent { .. }
         ));
     }
 
@@ -2954,13 +3112,14 @@ mod tests {
     fn laplace_refuses_improper_and_nonconjugate_definitions() {
         let context = empty_context();
         let converter = ExprConverter::new(&context);
+        let arena = &mut ExprArena::new();
         let improper = Expression::Call(CallExpr {
             name: "laplace_nd".into(),
             args: vec![number(1.0), vector(&[1.0, 2.0], true), vector(&[0.5], true)],
             span: Span::dummy(),
         });
         let error = converter
-            .convert(&improper)
+            .convert(arena, &improper)
             .expect_err("laplace_nd must enforce proper transfer shape");
         assert!(error.to_string().contains("improper transfer function"));
 
@@ -2974,7 +3133,7 @@ mod tests {
             span: Span::dummy(),
         });
         let error = converter
-            .convert(&nonconjugate)
+            .convert(arena, &nonconjugate)
             .expect_err("laplace_zp must validate conjugate roots");
         assert!(error.to_string().contains("no conjugate partner"));
     }
@@ -2983,6 +3142,7 @@ mod tests {
     fn zi_lowers_only_a_definition_that_passes_validation() {
         let context = empty_context();
         let converter = ExprConverter::new(&context);
+        let arena = &mut ExprArena::new();
         let valid = Expression::Call(CallExpr {
             name: "zi_nd".into(),
             args: vec![
@@ -2993,10 +3153,10 @@ mod tests {
             ],
             span: Span::dummy(),
         });
-        assert!(matches!(
-            converter.convert(&valid).expect("valid zi_nd definition"),
-            IrExpr::ZiFilter { .. }
-        ));
+        let id = converter
+            .convert(arena, &valid)
+            .expect("valid zi_nd definition");
+        assert!(matches!(heavy_of(arena, id), Heavy::ZiFilter { .. }));
 
         let invalid = Expression::Call(CallExpr {
             name: "zi_nd".into(),
@@ -3009,7 +3169,7 @@ mod tests {
             span: Span::dummy(),
         });
         let error = converter
-            .convert(&invalid)
+            .convert(arena, &invalid)
             .expect_err("zi_nd must reject zero a0");
         assert!(error.to_string().contains("a0 must be nonzero"));
     }
@@ -3031,13 +3191,14 @@ mod tests {
         };
         let context = empty_context();
         let converter = ExprConverter::new(&context);
+        let arena = &mut ExprArena::new();
         let assignment = converter
-            .convert(&unit_zi(3.0))
+            .convert(arena, &unit_zi(3.0))
             .expect("assignment Zi lowers independently");
-        let IrExpr::ZiFilter {
+        let Heavy::ZiFilter {
             direct_assignment: assignment_direct,
             ..
-        } = assignment
+        } = heavy_of(arena, assignment)
         else {
             panic!("assignment expression must remain Zi");
         };
@@ -3055,22 +3216,22 @@ mod tests {
             span: Span::dummy(),
         });
         let contribution = converter
-            .convert_contribution(&wrapped)
+            .convert_contribution(arena, &wrapped)
             .expect("wrapped contribution Zi lowers independently");
-        let IrExpr::Conditional(_, then_expr, _) = contribution else {
+        let Node::Conditional(_, then_expr, _) = *arena.node(contribution) else {
             panic!("contribution wrapper must remain conditional");
         };
-        let IrExpr::Binary(_, _, contribution_zi) = then_expr.as_ref() else {
+        let Node::Binary(_, _, contribution_zi) = *arena.node(then_expr) else {
             panic!("contribution then-arm must remain arithmetic");
         };
-        let IrExpr::ZiFilter {
+        let Heavy::ZiFilter {
             direct_assignment: contribution_direct,
             ..
-        } = contribution_zi.as_ref()
+        } = heavy_of(arena, contribution_zi)
         else {
             panic!("wrapped contribution operand must remain Zi");
         };
-        assert!(*contribution_direct);
+        assert!(contribution_direct);
 
         let expression = Expression::Binary(BinaryExpr {
             op: BinaryOp::Add,
@@ -3078,19 +3239,19 @@ mod tests {
             right: Box::new(unit_zi(2.0)),
             span: Span::dummy(),
         });
-        let mut converted = converter
-            .convert(&expression)
+        let converted = converter
+            .convert(arena, &expression)
             .expect("independent zi_nd calls lower");
         let mut next = 0;
-        crate::ir::autodiff::assign_zi_site_ordinals(&mut converted, &mut next);
+        let converted = crate::ir::autodiff::assign_zi_site_ordinals(arena, converted, &mut next);
 
-        let IrExpr::Binary(_, left, right) = converted else {
+        let Node::Binary(_, left, right) = *arena.node(converted) else {
             panic!("binary expression must remain binary");
         };
-        let IrExpr::ZiFilter { site: left, .. } = left.as_ref() else {
+        let Heavy::ZiFilter { site: left, .. } = heavy_of(arena, left) else {
             panic!("left operand must remain Zi");
         };
-        let IrExpr::ZiFilter { site: right, .. } = right.as_ref() else {
+        let Heavy::ZiFilter { site: right, .. } = heavy_of(arena, right) else {
             panic!("right operand must remain Zi");
         };
         assert_ne!(left, right, "equal/dummy spans must not alias Zi state");

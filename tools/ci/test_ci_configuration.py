@@ -757,6 +757,16 @@ class CiConfigurationTests(unittest.TestCase):
             3,
             "all full-corpus Verilog-A gates need the raised test-thread stack",
         )
+        # The machine-code census is `#[ignore]`d so no lane pays its two
+        # hundred seconds, which is also how it stood red against a stale
+        # baseline without anyone seeing it: a default `cargo test` reports it
+        # as `ignored` inside a green summary. Naming it here is what makes the
+        # ignore safe -- an ignored test that no workflow runs is not a gate.
+        self.assertIn(
+            "Shipped machine code is the code that was last measured",
+            nightly_workflow,
+        )
+        self.assertIn("shipped_model_machine_code_census_digest", nightly_workflow)
         self.assertIn("--features generated-stamp -- generated-stamp", nightly_workflow)
         self.assertIn("--max-corpus-median-reference-ratio 5.75", nightly_workflow)
         self.assertIn("--max-model-reference-ratio 16.50", nightly_workflow)

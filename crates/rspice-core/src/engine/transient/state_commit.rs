@@ -590,7 +590,7 @@ impl Engine {
             jfet_history.vds_prev[idx] = vds_charge;
             if !suppress_gate_charge_history {
                 let (_geq_gs, _ieq_gs, qgs_curr, cqgs_curr) = if let Some(charge) = jfet2_charge {
-                    Self::nonlinear_charge_companion_terms(
+                    nonlinear_charge_companion_terms(
                         coeff,
                         dt,
                         cgs,
@@ -622,7 +622,7 @@ impl Engine {
                 jfet_history.cqgs_prev[idx] = cqgs_curr;
 
                 let (_geq_gd, _ieq_gd, qgd_curr, cqgd_curr) = if let Some(charge) = jfet2_charge {
-                    Self::nonlinear_charge_companion_terms(
+                    nonlinear_charge_companion_terms(
                         coeff,
                         dt,
                         cgd,
@@ -678,30 +678,10 @@ impl Engine {
         for (idx, diode) in circuit.diodes.devices.iter().enumerate() {
             let vd =
                 Self::differential_voltage(accepted_solution, diode.node_anode, diode.node_cathode);
-            diode_history.vd_prev_prev[idx] = diode_history.vd_prev[idx];
-            diode_history.vd_prev[idx] = vd;
-            let (qd, capd) = diode.junction_charge_and_capacitance(vd);
-            if capd.is_finite() && capd > 0.0 {
-                let (_geq, _ieq, qd_curr, cqd_curr) = Self::nonlinear_charge_companion_terms(
-                    coeff,
-                    dt,
-                    capd,
-                    vd,
-                    qd,
-                    BranchChargeHistory {
-                        q_prev: diode_history.qd_prev[idx],
-                        q_prev_prev: diode_history.qd_prev_prev[idx],
-                        cq_prev: diode_history.cqd_prev[idx],
-                    },
-                );
-                diode_history.qd_prev_prev_prev[idx] = diode_history.qd_prev_prev[idx];
-                diode_history.qd_prev_prev[idx] = diode_history.qd_prev[idx];
-                diode_history.qd_prev[idx] = qd_curr;
-                diode_history.cqd_prev[idx] = cqd_curr;
-            }
+            let (qd, _) = diode.junction_charge_and_capacitance(vd);
+            diode_history.accept_branch(idx, vd, qd, coeff, dt);
         }
-        diode_history.accepted_dt_prev_prev = diode_history.accepted_dt_prev;
-        diode_history.accepted_dt_prev = dt;
+        diode_history.finish_step(dt);
 
         // Rotate whole accepted-state generations once, as ngspice rotates
         // CKTstate pointers, instead of copying two history levels for every
@@ -934,7 +914,7 @@ impl Engine {
                                     let (q_exact, capacitance) =
                                         mos.body_source_junction_charge_and_capacitance_at(vbs);
                                     let (_geq, _ieq, q_curr, cq_curr) =
-                                        Self::nonlinear_charge_companion_terms(
+                                        nonlinear_charge_companion_terms(
                                             coeff,
                                             dt,
                                             capacitance,
@@ -958,7 +938,7 @@ impl Engine {
                                     let (q_exact, capacitance) =
                                         mos.body_drain_junction_charge_and_capacitance_at(vds, vbs);
                                     let (_geq, _ieq, q_curr, cq_curr) =
-                                        Self::nonlinear_charge_companion_terms(
+                                        nonlinear_charge_companion_terms(
                                             coeff,
                                             dt,
                                             capacitance,
@@ -1080,19 +1060,18 @@ impl Engine {
             if body_charge_mask & 1 != 0 {
                 let vbs_j = mos.body_source_charge_branch_voltage(vbs);
                 let (qbs_exact, cbs) = mos.body_source_junction_charge_and_capacitance_at(vbs);
-                let (_geq_bs, _ieq_bs, qbs_curr, cqbs_curr) =
-                    Self::nonlinear_charge_companion_terms(
-                        coeff,
-                        dt,
-                        cbs,
-                        vbs_j,
-                        qbs_exact,
-                        BranchChargeHistory {
-                            q_prev: mosfet_history.qbs_prev[idx],
-                            q_prev_prev: mosfet_history.qbs_prev_prev[idx],
-                            cq_prev: mosfet_history.cqbs_prev[idx],
-                        },
-                    );
+                let (_geq_bs, _ieq_bs, qbs_curr, cqbs_curr) = nonlinear_charge_companion_terms(
+                    coeff,
+                    dt,
+                    cbs,
+                    vbs_j,
+                    qbs_exact,
+                    BranchChargeHistory {
+                        q_prev: mosfet_history.qbs_prev[idx],
+                        q_prev_prev: mosfet_history.qbs_prev_prev[idx],
+                        cq_prev: mosfet_history.cqbs_prev[idx],
+                    },
+                );
                 mosfet_history.vbs_j_prev_prev[idx] = mosfet_history.vbs_j_prev[idx];
                 mosfet_history.vbs_j_prev[idx] = vbs_j;
                 mosfet_history.qbs_prev_prev[idx] = mosfet_history.qbs_prev[idx];
@@ -1103,19 +1082,18 @@ impl Engine {
             if body_charge_mask & 2 != 0 {
                 let vbd_j = mos.body_drain_charge_branch_voltage(vds, vbs);
                 let (qbd_exact, cbd) = mos.body_drain_junction_charge_and_capacitance_at(vds, vbs);
-                let (_geq_bd, _ieq_bd, qbd_curr, cqbd_curr) =
-                    Self::nonlinear_charge_companion_terms(
-                        coeff,
-                        dt,
-                        cbd,
-                        vbd_j,
-                        qbd_exact,
-                        BranchChargeHistory {
-                            q_prev: mosfet_history.qbd_prev[idx],
-                            q_prev_prev: mosfet_history.qbd_prev_prev[idx],
-                            cq_prev: mosfet_history.cqbd_prev[idx],
-                        },
-                    );
+                let (_geq_bd, _ieq_bd, qbd_curr, cqbd_curr) = nonlinear_charge_companion_terms(
+                    coeff,
+                    dt,
+                    cbd,
+                    vbd_j,
+                    qbd_exact,
+                    BranchChargeHistory {
+                        q_prev: mosfet_history.qbd_prev[idx],
+                        q_prev_prev: mosfet_history.qbd_prev_prev[idx],
+                        cq_prev: mosfet_history.cqbd_prev[idx],
+                    },
+                );
                 mosfet_history.vbd_j_prev_prev[idx] = mosfet_history.vbd_j_prev[idx];
                 mosfet_history.vbd_j_prev[idx] = vbd_j;
                 mosfet_history.qbd_prev_prev[idx] = mosfet_history.qbd_prev[idx];
@@ -1214,7 +1192,7 @@ impl Engine {
 
             vdmos_history.vbs_prev_prev[idx] = vdmos_history.vbs_prev[idx];
             vdmos_history.vbs_prev[idx] = vbs;
-            let (_geq_bs, _ieq_bs, qbs_curr, cqbs_curr) = Self::nonlinear_charge_companion_terms(
+            let (_geq_bs, _ieq_bs, qbs_curr, cqbs_curr) = nonlinear_charge_companion_terms(
                 coeff,
                 dt,
                 cbs,
@@ -1233,7 +1211,7 @@ impl Engine {
 
             vdmos_history.vbd_prev_prev[idx] = vdmos_history.vbd_prev[idx];
             vdmos_history.vbd_prev[idx] = vbd;
-            let (_geq_bd, _ieq_bd, qbd_curr, cqbd_curr) = Self::nonlinear_charge_companion_terms(
+            let (_geq_bd, _ieq_bd, qbd_curr, cqbd_curr) = nonlinear_charge_companion_terms(
                 coeff,
                 dt,
                 cbd,
@@ -1252,7 +1230,7 @@ impl Engine {
 
             vdmos_history.vd1_prev_prev[idx] = vdmos_history.vd1_prev[idx];
             vdmos_history.vd1_prev[idx] = vd1;
-            let (_geq_d1, _ieq_d1, qd1_curr, cqd1_curr) = Self::nonlinear_charge_companion_terms(
+            let (_geq_d1, _ieq_d1, qd1_curr, cqd1_curr) = nonlinear_charge_companion_terms(
                 coeff,
                 dt,
                 cd1,

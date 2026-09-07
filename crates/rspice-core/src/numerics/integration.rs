@@ -17,16 +17,21 @@
 //! describing how to discretize a derivative. Analysis *results* belong above
 //! those layers; the discretization rule does not.
 
-// Private: the four files divide the work, they do not divide the API. Every
+// Private: the files divide the work, they do not divide the API. Every
 // caller names `numerics::integration::Thing`, so a file can be split or
 // merged without moving anything's path.
 mod breakpoint;
+mod charge;
 mod companion;
 mod lte;
 mod timestep;
 
 pub(crate) use breakpoint::XYCE_BREAKPOINT_TOLERANCE;
 pub use breakpoint::{BreakpointManager, BreakpointStepPolicy};
+pub(crate) use charge::{
+    BranchChargeHistory, TwoTerminalChargeHistory, integrated_charge_current,
+    nonlinear_charge_companion_terms,
+};
 pub(crate) use companion::parse_integration_method;
 pub use companion::{CompanionCoefficients, IntegrationMethod};
 pub(crate) use lte::LtePrefixWindow;

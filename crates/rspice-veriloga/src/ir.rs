@@ -8,7 +8,8 @@ pub mod arena;
 
 use crate::ast::{BinaryOp, UnaryOp};
 use crate::error::CompileResult;
-use crate::ir::arena::{ExprArena, Heavy, IndexedRead, Node, NodeId, unpack_index};
+pub use crate::ir::arena::NodeId;
+use crate::ir::arena::{ExprArena, Heavy, HeavyKind, IndexedRead, Node, unpack_index};
 use crate::semantic::AnalyzedModule;
 use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
@@ -215,19 +216,14 @@ impl NoiseSiteId {
     }
 }
 
-#[derive(Debug, Clone)]
-pub enum ZiPolynomialDefinition {
-    Coefficients(Vec<IrExpr>),
-    Roots(Vec<(IrExpr, IrExpr)>),
-}
-
 /// Compiled device model in IR form
 ///
 /// # Every expression lives in `exprs`
 ///
 /// The assignment forest, the branch equations, their Jacobians, the noise
-/// programs and the parameter programs are [`NodeId`]s into [`Self::exprs`],
-/// not boxed [`IrExpr`] trees. That is what keeps the shadow-expanded forest —
+/// programs and the parameter programs are [`NodeId`]s into [`Self::exprs`].
+/// Nothing in the front end is a boxed tree any more — the converter writes
+/// into this arena directly. That is what keeps the shadow-expanded forest —
 /// eighteen million nodes on `bsimcmg`, fifty-three on `psp104_nqs` — at
 /// sixteen bytes a node instead of a hundred and twenty-eight, and it is what
 /// makes the derivative rules' primal copies free: a rule that used to
@@ -363,38 +359,6 @@ pub struct IndexedTarget {
     pub index: NodeId,
 }
 
-/// [`VarAssignment`] as the front end first builds it, before the arena.
-///
-/// The converter and the passes that run on its output — the site-ordinal
-/// walks, the reaching-definition splices, the branch-probe rewrite — still
-/// speak [`IrExpr`]; the whole statement list is imported into
-/// [`DeviceIR::exprs`] in one pass immediately before the shadow build, which
-/// is the point after which nothing boxed exists. These three types are that
-/// producer stage's spelling and go with [`IrExpr`] itself.
-#[derive(Debug, Clone)]
-pub struct SourceVarAssignment {
-    /// Index of variable being assigned (for indexed writes: the array's
-    /// first element)
-    pub var_index: usize,
-    /// Runtime-indexed array element write (None for scalar targets)
-    pub index: Option<SourceIndexedTarget>,
-    /// The expression to assign
-    pub expr: IrExpr,
-}
-
-/// [`IndexedTarget`] before the arena; see [`SourceVarAssignment`].
-#[derive(Debug, Clone)]
-pub struct SourceIndexedTarget {
-    /// Array name (for diagnostics and shadow naming)
-    pub array: SmolStr,
-    /// Number of elements
-    pub len: usize,
-    /// Declared lower bound
-    pub lower: i64,
-    /// Element index expression (evaluated against declared bounds)
-    pub index: IrExpr,
-}
-
 /// Array variable layout: elements occupy contiguous variable slots
 #[derive(Debug, Clone)]
 pub struct ArrayDef {
@@ -416,18 +380,6 @@ pub enum IrAssignmentItem {
     Loop {
         condition: NodeId,
         body: Vec<IrAssignmentItem>,
-    },
-}
-
-/// [`IrAssignmentItem`] before the arena; see [`SourceVarAssignment`].
-#[derive(Debug, Clone)]
-pub enum SourceAssignmentItem {
-    /// Single variable assignment
-    Assign(SourceVarAssignment),
-    /// Loop executing its body while the condition evaluates nonzero
-    Loop {
-        condition: IrExpr,
-        body: Vec<SourceAssignmentItem>,
     },
 }
 
@@ -508,286 +460,6 @@ pub enum DdxAxis {
         ordinal: usize,
         reversed: bool,
     },
-}
-
-/// IR Expression tree
-#[derive(Debug, Clone)]
-pub enum IrExpr {
-    /// Constant value
-    Const(f64),
-    /// Parameter reference
-    Param(SmolStr),
-    /// Whether a parameter was explicitly set on the instance
-    /// ($param_given)
-    ParamGiven(SmolStr),
-    /// Variable reference
-    Var(SmolStr),
-    /// Runtime-indexed array element read: element `index - lower` of the
-    /// contiguous variable run starting at `base`
-    VarIndexed {
-        /// Array name (for shadow naming)
-        array: SmolStr,
-        /// First element's variable index
-        base: usize,
-        /// Number of elements
-        len: usize,
-        /// Declared lower bound
-        lower: i64,
-        /// Element index expression
-        index: Box<IrExpr>,
-    },
-    /// Voltage at terminal pair
-    Voltage(usize, usize),
-    /// Current through branch
-    Current(usize, usize),
-    /// Branch-current unknown of a potential contribution (by ordinal)
-    BranchCurrent(usize),
-    /// Time variable
-    Time,
-    /// Temperature ($temperature)
-    Temperature,
-    /// Thermal voltage ($vt)
-    Vt,
-    /// Instance multiplicity ($mfactor): the number of parallel copies
-    /// this instance represents. The simulator scales flow contributions
-    /// automatically; reading it supports models that need fine control.
-    Mfactor,
-    /// Whether an external terminal was connected on this instance.
-    PortConnected(usize),
-    /// Binary operation
-    Binary(BinaryOp, Box<IrExpr>, Box<IrExpr>),
-    /// Unary operation
-    Unary(UnaryOp, Box<IrExpr>),
-    /// Function call
-    Call(IrFunction, Vec<IrExpr>),
-    /// Time derivative (ddt)
-    Ddt(Box<IrExpr>),
-    /// Time integral (idt)
-    Idt(Box<IrExpr>, Option<Box<IrExpr>>),
-    /// Wrapped time integral (idtmod): the integral folds into
-    /// [offset, offset + modulus)
-    IdtMod {
-        expr: Box<IrExpr>,
-        ic: Option<Box<IrExpr>>,
-        modulus: Box<IrExpr>,
-        offset: Option<Box<IrExpr>>,
-    },
-    /// Limited exponential
-    Limexp(Box<IrExpr>),
-    /// $limit function for convergence control
-    /// Bounds the expression change per Newton iteration
-    /// Args: (expression, step_limit)
-    Limit(Box<IrExpr>, Option<Box<IrExpr>>),
-    /// Non-executable legacy-IR carrier used only to allocate and correlate a
-    /// named limiter's state slot for canonical native compilation.
-    CanonicalLimit(Box<IrExpr>),
-    /// $table_model lookup table interpolation
-    /// Args: (input_expr, table_data) where table_data is (x_values, y_values)
-    TableLookup {
-        input: Box<IrExpr>,
-        x_data: Vec<f64>,
-        y_data: Vec<f64>,
-    },
-    /// absdelay - absolute transport delay
-    /// Returns the value of expr delayed by delay_time seconds
-    /// Uses a circular buffer for transient analysis
-    AbsDelay {
-        site: AbsDelaySiteId,
-        expr: Box<IrExpr>,
-        delay_time: Box<IrExpr>,
-        max_delay: Option<Box<IrExpr>>,
-    },
-    /// Exact local first-derivative action of one `absdelay` candidate.
-    /// Higher derivative orders are retained only so bytecode lowering can
-    /// reject them explicitly instead of emitting a silently wrong Hessian.
-    AbsDelayDerivative {
-        site: AbsDelaySiteId,
-        input: Box<IrExpr>,
-        input_derivative: Box<IrExpr>,
-        delay_time: Box<IrExpr>,
-        delay_derivative: Box<IrExpr>,
-        max_delay: Option<Box<IrExpr>>,
-        derivative_order: u8,
-    },
-    /// transition - piecewise-linear signal smoothing
-    /// Args: (expr, delay, rise_time, fall_time)
-    /// Smoothly transitions between values over rise/fall times
-    Transition {
-        site: TransitionSiteId,
-        expr: Box<IrExpr>,
-        delay: Option<Box<IrExpr>>,
-        rise_time: Option<Box<IrExpr>>,
-        fall_time: Option<Box<IrExpr>>,
-    },
-    /// Exact read-only local derivative action of one `transition` candidate.
-    /// Timing operands are primal-only because the LRM requires the Jacobian
-    /// action here to be the candidate's input coefficient times `d(input)`.
-    TransitionDerivative {
-        site: TransitionSiteId,
-        input: Box<IrExpr>,
-        input_derivative: Box<IrExpr>,
-        delay: Option<Box<IrExpr>>,
-        rise_time: Option<Box<IrExpr>>,
-        fall_time: Option<Box<IrExpr>>,
-    },
-    /// slew - slew rate limiting
-    /// Args: (expr, max_pos_slew, max_neg_slew)
-    /// Limits the rate of change of the signal
-    Slew {
-        site: SlewSiteId,
-        expr: Box<IrExpr>,
-        max_pos_slew: Option<Box<IrExpr>>,
-        max_neg_slew: Option<Box<IrExpr>>,
-    },
-    /// Exact local derivative action of one `slew` candidate.
-    SlewDerivative {
-        site: SlewSiteId,
-        input: Box<IrExpr>,
-        input_derivative: Box<IrExpr>,
-        max_pos_slew: Option<Box<IrExpr>>,
-        max_pos_slew_derivative: Option<Box<IrExpr>>,
-        max_neg_slew: Option<Box<IrExpr>>,
-        max_neg_slew_derivative: Option<Box<IrExpr>>,
-    },
-    /// cross - threshold crossing detection
-    /// Args: (expr, direction, time_tol, expr_tol)
-    /// Returns 1 when expr crosses zero, else 0
-    Cross {
-        expr: Box<IrExpr>,
-        direction: Option<Box<IrExpr>>, // runtime integer: +1=rising, -1=falling, 0=both
-        time_tol: Option<Box<IrExpr>>,
-        expr_tol: Option<Box<IrExpr>>,
-        enable: Option<Box<IrExpr>>,
-    },
-    /// Time of the most recent zero crossing, or -1 before any crossing.
-    LastCrossing {
-        expr: Box<IrExpr>,
-        direction: Option<i32>,
-    },
-    /// white_noise - white noise source for AC noise analysis
-    /// Args: (power, name)
-    WhiteNoise {
-        site: NoiseSiteId,
-        power: Box<IrExpr>,
-        name: Option<String>,
-    },
-    /// flicker_noise - 1/f flicker noise source
-    /// Args: (power, exponent, name)
-    FlickerNoise {
-        site: NoiseSiteId,
-        power: Box<IrExpr>,
-        exponent: Box<IrExpr>,
-        name: Option<String>,
-    },
-    /// noise_table / noise_table_log - interpolated PSD over frequency.
-    /// Points are (frequency, power) pairs sorted by frequency;
-    /// `log_interp` selects log-log interpolation.
-    NoiseTable {
-        site: NoiseSiteId,
-        points: Vec<(f64, f64)>,
-        log_interp: bool,
-        name: Option<String>,
-    },
-    /// analysis(name) - check current analysis type
-    /// Returns 1.0 if running specified analysis, else 0.0
-    Analysis(String),
-    /// above(expr, time_tol, expr_tol, enable) - rising zero-crossing event
-    /// Returns 1 initially when positive and on each subsequent rising event.
-    Above {
-        expr: Box<IrExpr>,
-        time_tol: Option<Box<IrExpr>>,
-        expr_tol: Option<Box<IrExpr>>,
-        enable: Option<Box<IrExpr>>,
-    },
-    /// timer(start, period, time_tol, enable) - time event
-    /// Returns 1 at time=start and every positive period thereafter.
-    Timer {
-        start_time: Box<IrExpr>,
-        period: Option<Box<IrExpr>>,
-        time_tol: Option<Box<IrExpr>>,
-        enable: Option<Box<IrExpr>>,
-    },
-    /// laplace_zp - s-domain filter with poles and zeros
-    /// Args: (expr, zeros, poles, k_factor)
-    LaplaceZP {
-        site: LaplaceSiteId,
-        expr: Box<IrExpr>,
-        zeros: Vec<(f64, f64)>, // (real, imag) pairs
-        poles: Vec<(f64, f64)>,
-        gain: f64,
-    },
-    /// laplace_nd - s-domain filter with num/den coefficients
-    /// Args: (expr, numerator_coeffs, denominator_coeffs)
-    LaplaceND {
-        site: LaplaceSiteId,
-        expr: Box<IrExpr>,
-        numerator: Vec<f64>, // ascending powers of s
-        denominator: Vec<f64>,
-    },
-    /// Exact Jacobian action of a coefficient-form Laplace filter. It shares
-    /// the primal site's state and applies the DC gain outside active
-    /// transient integration or the active companion-rule input gain during
-    /// it.
-    LaplaceNDDerivative {
-        site: LaplaceSiteId,
-        expr: Box<IrExpr>,
-        numerator: Vec<f64>,
-        denominator: Vec<f64>,
-    },
-    /// Exact Jacobian action of a pole-zero Laplace filter. It has the same
-    /// analysis-dependent behavior and state identity as
-    /// [`Self::LaplaceNDDerivative`].
-    LaplaceZPDerivative {
-        site: LaplaceSiteId,
-        expr: Box<IrExpr>,
-        zeros: Vec<(f64, f64)>,
-        poles: Vec<(f64, f64)>,
-        gain: f64,
-    },
-    /// zi_* - z-domain (sampled-data) filter: the input samples every
-    /// `period` seconds and the difference equation output holds between
-    /// samples. Coefficients ascend in z⁻¹.
-    ZiFilter {
-        site: ZiSiteId,
-        expr: Box<IrExpr>,
-        numerator: ZiPolynomialDefinition,
-        denominator: ZiPolynomialDefinition,
-        period: Box<IrExpr>,
-        transition: Box<IrExpr>,
-        first_transition: Box<IrExpr>,
-        direct_assignment: bool,
-    },
-    /// Exact Jacobian action of a zi filter. It uses the same schedule as the
-    /// value filter but applies H(1), b0/a0, or zero according to analysis and
-    /// whether the current point is a sample edge.
-    ZiFilterDerivative {
-        site: ZiSiteId,
-        expr: Box<IrExpr>,
-        numerator: ZiPolynomialDefinition,
-        denominator: ZiPolynomialDefinition,
-        period: Box<IrExpr>,
-        transition: Box<IrExpr>,
-        first_transition: Box<IrExpr>,
-        direct_assignment: bool,
-    },
-    /// Symbolic partial derivative with respect to a branch potential or a
-    /// solver-owned branch flow. Resolved to an explicit derivative expression
-    /// during device IR construction (where assignment chains are known).
-    Ddx { expr: Box<IrExpr>, axis: DdxAxis },
-    /// Companion-model Jacobian factor for ddt: operand / dt in transient,
-    /// zero at DC (backward Euler)
-    DdtCompanion(Box<IrExpr>),
-    /// Companion-model Jacobian factor for idt: operand * dt in transient,
-    /// zero at DC
-    IdtCompanion(Box<IrExpr>),
-    /// Slope of a lookup table evaluated at the input point
-    TableDerivative {
-        input: Box<IrExpr>,
-        x_data: Vec<f64>,
-        y_data: Vec<f64>,
-    },
-    /// Conditional
-    Conditional(Box<IrExpr>, Box<IrExpr>, Box<IrExpr>),
 }
 
 /// Built-in functions
@@ -1043,8 +715,8 @@ impl DeviceIR {
             if param.default.is_none()
                 && let Some(default_expr) = &param.default_expr
             {
-                let converted = converter.convert(default_expr)?;
-                if !Self::is_static_param_expr(&converted) {
+                let converted = converter.convert(&mut ir.exprs, default_expr)?;
+                if !Self::is_static_param_expr(&ir.exprs, converted) {
                     return Err(crate::error::CodeGenError::new(
                         crate::error::CodeGenErrorKind::InvalidExpression(format!(
                             "default of parameter '{}' must depend only on parameters",
@@ -1053,9 +725,7 @@ impl DeviceIR {
                     )
                     .into());
                 }
-                let imported = ir.exprs.import(&converted);
-                drop(converted);
-                ir.parameters[idx].default_expr = Some(imported);
+                ir.parameters[idx].default_expr = Some(converted);
             }
 
             if let Some(range) = &param.range {
@@ -1063,8 +733,8 @@ impl DeviceIR {
                                           expression: &crate::ast::Expression,
                                           label: &str|
                  -> CompileResult<NodeId> {
-                    let converted = converter.convert(expression)?;
-                    if !Self::is_range_parameter_expr(&converted) {
+                    let converted = converter.convert(arena, expression)?;
+                    if !Self::is_range_parameter_expr(arena, converted) {
                         return Err(crate::error::CodeGenError::new(
                             crate::error::CodeGenErrorKind::InvalidExpression(format!(
                                 "{label} of parameter '{}' must depend only on parameters",
@@ -1073,9 +743,7 @@ impl DeviceIR {
                         )
                         .into());
                     }
-                    let imported = arena.import(&converted);
-                    drop(converted);
-                    Ok(imported)
+                    Ok(converted)
                 };
                 let min_expr = match &range.min_expression {
                     Some(expression) => Some(convert_range_expr(
@@ -1110,25 +778,32 @@ impl DeviceIR {
         // Convert evaluation statements (assignments and runtime loops) to
         // IR, in order
         let span = crate::metrics::FineSpan::new("ir.statements");
-        let mut source_items = Vec::with_capacity(module.statements.len());
-        Self::convert_statements(&module.statements, &converter, &mut source_items)?;
+        let mut items = Vec::with_capacity(module.statements.len());
+        Self::convert_statements(&module.statements, &converter, &mut ir.exprs, &mut items)?;
         let mut zi_site_ordinal = 0_u32;
         let mut laplace_site_ordinal = 0_u32;
         let mut slew_site_ordinal = 0_u32;
         let mut transition_site_ordinal = 0_u32;
         let mut absdelay_site_ordinal = 0_u32;
-        autodiff::assign_zi_site_ordinals_in_items(&mut source_items, &mut zi_site_ordinal);
+        autodiff::assign_zi_site_ordinals_in_items(&mut ir.exprs, &mut items, &mut zi_site_ordinal);
         autodiff::assign_laplace_site_ordinals_in_items(
-            &mut source_items,
+            &mut ir.exprs,
+            &mut items,
             &mut laplace_site_ordinal,
         );
-        autodiff::assign_slew_site_ordinals_in_items(&mut source_items, &mut slew_site_ordinal);
+        autodiff::assign_slew_site_ordinals_in_items(
+            &mut ir.exprs,
+            &mut items,
+            &mut slew_site_ordinal,
+        );
         autodiff::assign_transition_site_ordinals_in_items(
-            &mut source_items,
+            &mut ir.exprs,
+            &mut items,
             &mut transition_site_ordinal,
         );
         autodiff::assign_absdelay_site_ordinals_in_items(
-            &mut source_items,
+            &mut ir.exprs,
+            &mut items,
             &mut absdelay_site_ordinal,
         );
         span.finish(&format!(
@@ -1209,15 +884,20 @@ impl DeviceIR {
         // noise process ids assigned below identical for metadata,
         // assignment shadows, and final equation gains.
         let span = crate::metrics::FineSpan::new("ir.contributions");
-        let mut converted_contribs = Vec::with_capacity(module.contributions.len());
+        let mut converted_contribs: Vec<NodeId> = Vec::with_capacity(module.contributions.len());
         for contrib in &module.contributions {
-            let mut expr = converter.convert_contribution(&contrib.expression)?;
-            autodiff::assign_zi_site_ordinals(&mut expr, &mut zi_site_ordinal);
-            autodiff::assign_laplace_site_ordinals(&mut expr, &mut laplace_site_ordinal);
-            autodiff::assign_slew_site_ordinals(&mut expr, &mut slew_site_ordinal);
-            autodiff::assign_transition_site_ordinals(&mut expr, &mut transition_site_ordinal);
-            autodiff::assign_absdelay_site_ordinals(&mut expr, &mut absdelay_site_ordinal);
-            converted_contribs.push(autodiff::rewrite_branch_probes(&expr, &branch_table));
+            let arena = &mut ir.exprs;
+            let mut expr = converter.convert_contribution(arena, &contrib.expression)?;
+            expr = autodiff::assign_zi_site_ordinals(arena, expr, &mut zi_site_ordinal);
+            expr = autodiff::assign_laplace_site_ordinals(arena, expr, &mut laplace_site_ordinal);
+            expr = autodiff::assign_slew_site_ordinals(arena, expr, &mut slew_site_ordinal);
+            expr = autodiff::assign_transition_site_ordinals(
+                arena,
+                expr,
+                &mut transition_site_ordinal,
+            );
+            expr = autodiff::assign_absdelay_site_ordinals(arena, expr, &mut absdelay_site_ordinal);
+            converted_contribs.push(autodiff::rewrite_branch_probes(arena, expr, &branch_table));
         }
         span.finish(&format!(
             "module={} contributions={}",
@@ -1252,7 +932,8 @@ impl DeviceIR {
             .map(|contribution| contribution.site)
             .collect::<Vec<_>>();
         ir.reaching_snapshots = crate::reaching_definition::insert_equation_snapshots(
-            &mut source_items,
+            &mut ir.exprs,
+            &mut items,
             &mut ir.variables,
             &ir.arrays,
             &statement_sites,
@@ -1266,13 +947,9 @@ impl DeviceIR {
         ));
 
         let span = crate::metrics::FineSpan::new("ir.noise_collect");
-        Self::collect_noise_processes_in_items(
-            &source_items,
-            &mut ir.exprs,
-            &mut ir.noise_sources,
-        )?;
+        Self::collect_noise_processes_in_items(&items, &mut ir.exprs, &mut ir.noise_sources)?;
         for expr in &converted_contribs {
-            Self::collect_noise_processes(expr, &mut ir.exprs, &mut ir.noise_sources)?;
+            Self::collect_noise_processes(*expr, &mut ir.exprs, &mut ir.noise_sources)?;
         }
         ir.noise_sources.sort_by_key(|source| source.process_id);
         for (expected, source) in ir.noise_sources.iter().enumerate() {
@@ -1296,32 +973,17 @@ impl DeviceIR {
         // contribution read the branch unknown (exact), not the inferred
         // contribution cache.
         if !branch_table.is_empty() {
-            autodiff::rewrite_branch_probes_in_items(&mut source_items, &branch_table);
+            autodiff::rewrite_branch_probes_in_items(&mut ir.exprs, &mut items, &branch_table);
         }
 
-        // The seam: from here down nothing is boxed.
-        //
-        // The statement list and the contribution expressions are moved into
-        // the arena and their `Box` trees dropped as they go, and every pass
-        // below — the shadow build above all, which expands this list by two
-        // to three orders of magnitude — appends sixteen-byte nodes instead of
-        // hundred-and-twenty-eight-byte boxes. Importing here rather than
-        // earlier keeps the producer stage (the converter, the five
-        // site-ordinal walks, the reaching-definition splices and the
-        // branch-probe rewrite) on `IrExpr`, which is step 4's to move; what
-        // matters for memory is that the *shadow* forest is never boxed, and
-        // the primal forest imported here is two to three orders of magnitude
-        // smaller than it.
-        let span = crate::metrics::FineSpan::new("ir.arena_import");
-        ir.assignments = Self::import_items(&mut ir.exprs, source_items);
-        let converted_contribs = converted_contribs
-            .into_iter()
-            .map(|expr| {
-                let id = ir.exprs.import(&expr);
-                drop(expr);
-                id
-            })
-            .collect::<Vec<NodeId>>();
+        // There is no seam any more: the converter wrote these nodes into
+        // `ir.exprs` directly, so the statement list is already the arena's and
+        // the primal forest was never boxed. `ir.exprs.len()` here is the same
+        // count the import span used to report, and it is still worth a line —
+        // it is the primal forest against which the shadow build's expansion is
+        // read.
+        let span = crate::metrics::FineSpan::new("ir.primal_forest");
+        ir.assignments = items;
         span.finish(&format!("module={} nodes={}", module.name, ir.exprs.len()));
 
         // Variables that are fixed per instance (computed purely from
@@ -1558,72 +1220,18 @@ impl DeviceIR {
         Ok(ir)
     }
 
-    /// Move one produced tree into the arena and drop its boxes there and then.
-    ///
-    /// The explicit `drop` is the point: the tree is freed the moment its
-    /// nodes are sixteen bytes wide, so the two representations never both
-    /// hold a whole forest.
-    fn import_owned(arena: &mut ExprArena, expr: IrExpr) -> NodeId {
-        let id = arena.import(&expr);
-        drop(expr);
-        id
-    }
-
-    /// Import the produced statement list, tree by tree.
-    fn import_items(
-        arena: &mut ExprArena,
-        items: Vec<SourceAssignmentItem>,
-    ) -> Vec<IrAssignmentItem> {
-        let mut out = Vec::with_capacity(items.len());
-        for item in items {
-            out.push(match item {
-                SourceAssignmentItem::Assign(assignment) => {
-                    let SourceVarAssignment {
-                        var_index,
-                        index,
-                        expr,
-                    } = assignment;
-                    let index = index.map(|target| {
-                        let SourceIndexedTarget {
-                            array,
-                            len,
-                            lower,
-                            index,
-                        } = target;
-                        IndexedTarget {
-                            array,
-                            len,
-                            lower,
-                            index: Self::import_owned(arena, index),
-                        }
-                    });
-                    IrAssignmentItem::Assign(VarAssignment {
-                        var_index,
-                        index,
-                        expr: Self::import_owned(arena, expr),
-                    })
-                }
-                SourceAssignmentItem::Loop { condition, body } => IrAssignmentItem::Loop {
-                    condition: Self::import_owned(arena, condition),
-                    body: Self::import_items(arena, body),
-                },
-            });
-        }
-        out
-    }
-
     fn collect_noise_processes_in_items(
-        items: &[SourceAssignmentItem],
+        items: &[IrAssignmentItem],
         arena: &mut ExprArena,
         out: &mut Vec<NoiseSourceDef>,
     ) -> CompileResult<()> {
         for item in items {
             match item {
-                SourceAssignmentItem::Assign(assignment) => {
-                    Self::collect_noise_processes(&assignment.expr, arena, out)?;
+                IrAssignmentItem::Assign(assignment) => {
+                    Self::collect_noise_processes(assignment.expr, arena, out)?;
                 }
-                SourceAssignmentItem::Loop { condition, body } => {
-                    Self::collect_noise_processes(condition, arena, out)?;
+                IrAssignmentItem::Loop { condition, body } => {
+                    Self::collect_noise_processes(*condition, arena, out)?;
                     Self::collect_noise_processes_in_items(body, arena, out)?;
                 }
             }
@@ -1632,16 +1240,20 @@ impl DeviceIR {
     }
 
     fn collect_noise_processes(
-        expr: &IrExpr,
+        expr: NodeId,
         arena: &mut ExprArena,
         out: &mut Vec<NoiseSourceDef>,
     ) -> CompileResult<()> {
         let mut definitions = Vec::new();
-        autodiff::collect_noise_definitions(expr, &mut definitions);
+        autodiff::collect_noise_definitions(arena, expr, &mut definitions);
         for (site, psd, exponent, table, name) in definitions {
             let process_id = site.ordinal as usize;
-            let psd = Self::import_owned(arena, psd);
-            let exponent = exponent.map(|exponent| Self::import_owned(arena, exponent));
+            // A `noise_table` publishes the constant one; every other process
+            // publishes the magnitude the converter built.
+            let psd = match psd {
+                Some(psd) => psd,
+                None => arena.push(Node::Const(1.0)),
+            };
             out.push(NoiseSourceDef {
                 site,
                 process_id,
@@ -1960,13 +1572,14 @@ impl DeviceIR {
     fn convert_statements(
         statements: &[crate::semantic::AnalyzedStatement],
         converter: &crate::expr_converter::ExprConverter,
-        out: &mut Vec<SourceAssignmentItem>,
+        arena: &mut ExprArena,
+        out: &mut Vec<IrAssignmentItem>,
     ) -> crate::error::CompileResult<()> {
         use crate::semantic::AnalyzedStatement;
         for stmt in statements {
             match stmt {
                 AnalyzedStatement::Assignment(assign) => {
-                    let expr = converter.convert(&assign.expression)?;
+                    let expr = converter.convert(arena, &assign.expression)?;
                     let index = match &assign.index {
                         Some(index_expr) => {
                             let (_base, lower, len) =
@@ -1978,26 +1591,26 @@ impl DeviceIR {
                                         )),
                                     )
                                 })?;
-                            Some(SourceIndexedTarget {
+                            Some(IndexedTarget {
                                 array: assign.target.clone(),
                                 len,
                                 lower,
-                                index: converter.convert(index_expr)?,
+                                index: converter.convert(arena, index_expr)?,
                             })
                         }
                         None => None,
                     };
-                    out.push(SourceAssignmentItem::Assign(SourceVarAssignment {
+                    out.push(IrAssignmentItem::Assign(VarAssignment {
                         var_index: assign.var_index,
                         index,
                         expr,
                     }));
                 }
                 AnalyzedStatement::Loop(loop_stmt) => {
-                    let condition = converter.convert(&loop_stmt.condition)?;
+                    let condition = converter.convert(arena, &loop_stmt.condition)?;
                     let mut body = Vec::with_capacity(loop_stmt.body.len());
-                    Self::convert_statements(&loop_stmt.body, converter, &mut body)?;
-                    out.push(SourceAssignmentItem::Loop { condition, body });
+                    Self::convert_statements(&loop_stmt.body, converter, arena, &mut body)?;
+                    out.push(IrAssignmentItem::Loop { condition, body });
                 }
             }
         }
@@ -2069,28 +1682,29 @@ impl DeviceIR {
     /// Check whether an expression depends only on parameters and constants
     /// (valid for instance-time parameter default evaluation)
     ///
-    /// This one still reads an [`IrExpr`]: a parameter program is checked as
-    /// the converter hands it over, before anything is imported. It is
-    /// [`Self::is_instance_static_expr_with_options`] with no static variables
-    /// and no `$analysis`, written out because that is the only shape it is
-    /// ever called in.
-    fn is_static_param_expr(expr: &IrExpr) -> bool {
-        let recurse = Self::is_static_param_expr;
-        match expr {
-            IrExpr::Const(_)
-            | IrExpr::Param(_)
-            | IrExpr::ParamGiven(_)
-            | IrExpr::Temperature
-            | IrExpr::Vt
-            | IrExpr::Mfactor
-            | IrExpr::PortConnected(_) => true,
+    /// It is [`Self::is_instance_static_expr_with_options`] with no static
+    /// variables and no `$analysis`, written out because that is the only shape
+    /// it is ever called in.
+    fn is_static_param_expr(arena: &ExprArena, expr: NodeId) -> bool {
+        let recurse = |child| Self::is_static_param_expr(arena, child);
+        match *arena.node(expr) {
+            Node::Const(_)
+            | Node::Param(_)
+            | Node::ParamGiven(_)
+            | Node::Temperature
+            | Node::Vt
+            | Node::Mfactor
+            | Node::PortConnected(_) => true,
             // No variable is instance-static here, so an element read is
             // static only where there is no element to read.
-            IrExpr::VarIndexed { len, index, .. } => *len == 0 && recurse(index),
-            IrExpr::Binary(_, left, right) => recurse(left) && recurse(right),
-            IrExpr::Unary(_, operand) | IrExpr::Limexp(operand) => recurse(operand),
-            IrExpr::Call(_, arguments) => arguments.iter().all(recurse),
-            IrExpr::Conditional(condition, then_expr, else_expr) => {
+            Node::VarIndexed { payload, index } => {
+                arena.indexed(payload).len == 0 && recurse(index)
+            }
+            Node::Binary(_, left, right) => recurse(left) && recurse(right),
+            Node::Unary(_, operand) | Node::Limexp(operand) => recurse(operand),
+            Node::Call { a, b, .. } => a.is_none_or(&recurse) && b.is_none_or(&recurse),
+            Node::CallSpilled { args, .. } => arena.call_args(args).iter().all(|arg| recurse(*arg)),
+            Node::Conditional(condition, then_expr, else_expr) => {
                 recurse(condition) && recurse(then_expr) && recurse(else_expr)
             }
             _ => false,
@@ -2099,14 +1713,15 @@ impl DeviceIR {
 
     /// Range constraints are evaluated during instance setup and therefore
     /// may only read final parameter values and pure numeric expressions.
-    fn is_range_parameter_expr(expr: &IrExpr) -> bool {
-        let recurse = Self::is_range_parameter_expr;
-        match expr {
-            IrExpr::Const(_) | IrExpr::Param(_) => true,
-            IrExpr::Binary(_, left, right) => recurse(left) && recurse(right),
-            IrExpr::Unary(_, operand) | IrExpr::Limexp(operand) => recurse(operand),
-            IrExpr::Call(_, arguments) => arguments.iter().all(recurse),
-            IrExpr::Conditional(condition, then_expr, else_expr) => {
+    fn is_range_parameter_expr(arena: &ExprArena, expr: NodeId) -> bool {
+        let recurse = |child| Self::is_range_parameter_expr(arena, child);
+        match *arena.node(expr) {
+            Node::Const(_) | Node::Param(_) => true,
+            Node::Binary(_, left, right) => recurse(left) && recurse(right),
+            Node::Unary(_, operand) | Node::Limexp(operand) => recurse(operand),
+            Node::Call { a, b, .. } => a.is_none_or(&recurse) && b.is_none_or(&recurse),
+            Node::CallSpilled { args, .. } => arena.call_args(args).iter().all(|arg| recurse(*arg)),
+            Node::Conditional(condition, then_expr, else_expr) => {
                 recurse(condition) && recurse(then_expr) && recurse(else_expr)
             }
             _ => false,
@@ -2422,52 +2037,66 @@ pub mod autodiff {
         });
     }
 
+    /// One noise process as the walk finds it.
+    ///
+    /// `psd` is `None` for a `noise_table`, whose magnitude is the constant
+    /// one; the caller pushes that node, because this walk borrows the arena
+    /// immutably and a shipped model has thousands of processes and one place
+    /// that needs to write.
+    pub(crate) type NoiseDefinition = (
+        NoiseSiteId,
+        Option<NodeId>,
+        Option<NodeId>,
+        Option<NoiseTableData>,
+        Option<SmolStr>,
+    );
+
     pub(crate) fn collect_noise_definitions(
-        expr: &IrExpr,
-        out: &mut Vec<(
-            NoiseSiteId,
-            IrExpr,
-            Option<IrExpr>,
-            Option<NoiseTableData>,
-            Option<SmolStr>,
-        )>,
+        arena: &ExprArena,
+        expr: NodeId,
+        out: &mut Vec<NoiseDefinition>,
     ) {
-        visit_expr(expr, &mut |node| match node {
-            IrExpr::WhiteNoise { site, power, name } => out.push((
-                *site,
-                power.as_ref().clone(),
-                None,
-                None,
-                name.as_deref().map(SmolStr::from),
-            )),
-            IrExpr::FlickerNoise {
-                site,
-                power,
-                exponent,
-                name,
-            } => out.push((
-                *site,
-                power.as_ref().clone(),
-                Some(exponent.as_ref().clone()),
-                None,
-                name.as_deref().map(SmolStr::from),
-            )),
-            IrExpr::NoiseTable {
-                site,
-                points,
-                log_interp,
-                name,
-            } => out.push((
-                *site,
-                IrExpr::Const(1.0),
-                None,
-                Some(NoiseTableData {
-                    points: points.clone(),
-                    log_interp: *log_interp,
-                }),
-                name.as_deref().map(SmolStr::from),
-            )),
-            _ => {}
+        visit(arena, expr, &mut |node| {
+            let Node::Heavy(_, heavy) = *node else {
+                return;
+            };
+            match arena.heavy(heavy) {
+                Heavy::WhiteNoise { site, power, name } => out.push((
+                    *site,
+                    Some(*power),
+                    None,
+                    None,
+                    name.as_deref().map(SmolStr::from),
+                )),
+                Heavy::FlickerNoise {
+                    site,
+                    power,
+                    exponent,
+                    name,
+                } => out.push((
+                    *site,
+                    Some(*power),
+                    Some(*exponent),
+                    None,
+                    name.as_deref().map(SmolStr::from),
+                )),
+                Heavy::NoiseTable {
+                    site,
+                    points,
+                    log_interp,
+                    name,
+                } => out.push((
+                    *site,
+                    None,
+                    None,
+                    Some(NoiseTableData {
+                        points: points.clone(),
+                        log_interp: *log_interp,
+                    }),
+                    name.as_deref().map(SmolStr::from),
+                )),
+                _ => {}
+            }
         });
     }
 
@@ -3914,41 +3543,44 @@ pub mod autodiff {
     /// (min,max) node pair to (ordinal, oriented positive node); a probe
     /// against the orientation negates.
     pub fn rewrite_branch_probes(
-        expr: &IrExpr,
+        arena: &mut ExprArena,
+        expr: NodeId,
         table: &HashMap<(usize, usize), (usize, usize)>,
-    ) -> IrExpr {
-        map_expr(expr, &mut |e| {
-            if let IrExpr::Current(p, n) = e {
-                let key = (*p.min(n), *p.max(n));
-                if let Some(&(ordinal, oriented_pos)) = table.get(&key) {
-                    let unknown = IrExpr::BranchCurrent(ordinal);
-                    return Some(if *p == oriented_pos {
-                        unknown
-                    } else {
-                        IrExpr::Unary(UnaryOp::Neg, Box::new(unknown))
-                    });
-                }
-            }
-            None
+    ) -> NodeId {
+        rewrite(arena, expr, &mut |arena, node| {
+            let Node::Current(packed_pos, packed_neg) = node else {
+                return None;
+            };
+            let pos = arena::unpack_index(packed_pos);
+            let neg = arena::unpack_index(packed_neg);
+            let key = (pos.min(neg), pos.max(neg));
+            let &(ordinal, oriented_pos) = table.get(&key)?;
+            let unknown = Node::BranchCurrent(arena::pack_index(ordinal));
+            Some(if pos == oriented_pos {
+                unknown
+            } else {
+                Node::Unary(UnaryOp::Neg, arena.push(unknown))
+            })
         })
     }
 
     /// Apply [`rewrite_branch_probes`] across an assignment-item tree
     pub fn rewrite_branch_probes_in_items(
-        items: &mut [SourceAssignmentItem],
+        arena: &mut ExprArena,
+        items: &mut [IrAssignmentItem],
         table: &HashMap<(usize, usize), (usize, usize)>,
     ) {
         for item in items {
             match item {
-                SourceAssignmentItem::Assign(assign) => {
-                    assign.expr = rewrite_branch_probes(&assign.expr, table);
+                IrAssignmentItem::Assign(assign) => {
+                    assign.expr = rewrite_branch_probes(arena, assign.expr, table);
                     if let Some(target) = &mut assign.index {
-                        target.index = rewrite_branch_probes(&target.index, table);
+                        target.index = rewrite_branch_probes(arena, target.index, table);
                     }
                 }
-                SourceAssignmentItem::Loop { condition, body } => {
-                    *condition = rewrite_branch_probes(condition, table);
-                    rewrite_branch_probes_in_items(body, table);
+                IrAssignmentItem::Loop { condition, body } => {
+                    *condition = rewrite_branch_probes(arena, *condition, table);
+                    rewrite_branch_probes_in_items(arena, body, table);
                 }
             }
         }
@@ -4077,188 +3709,6 @@ pub mod autodiff {
         }
     }
 
-    /// Read-only sibling of [`map_expr`]: the same nodes, in the same
-    /// pre-order, without rebuilding the tree.
-    ///
-    /// [`map_expr`] reconstructs every node it walks, so a caller that only
-    /// wanted to *look* at an expression paid for a full copy of it and then
-    /// dropped the copy. On a compact model whose analog block has been
-    /// expanded into a million shadow assignments that copy is the whole
-    /// program, and the passes that only inspect — collecting the names a
-    /// write reads, finding noise definitions, asking whether a subtree holds
-    /// a `ddx` at all — were each paying it.
-    ///
-    /// The match below mirrors [`map_expr`]'s child slots exactly, including
-    /// where it does *not* descend: the coefficient vectors of a Laplace or
-    /// Zi filter, and every event, noise, and companion node, are leaves in
-    /// both. `visit_expr_walks_the_same_child_slots_as_map_expr` pins that
-    /// agreement per variant, and the arms are written out rather than left
-    /// to a wildcard so a new [`IrExpr`] variant has to be classified here.
-    pub(crate) fn visit_expr(expr: &IrExpr, f: &mut impl FnMut(&IrExpr)) {
-        f(expr);
-        let mut recurse = |e: &IrExpr| visit_expr(e, f);
-        match expr {
-            IrExpr::Binary(_, left, right) => {
-                recurse(left);
-                recurse(right);
-            }
-            IrExpr::Unary(_, inner) => recurse(inner),
-            IrExpr::Call(_, args) => args.iter().for_each(recurse),
-            IrExpr::Conditional(condition, then_expr, else_expr) => {
-                recurse(condition);
-                recurse(then_expr);
-                recurse(else_expr);
-            }
-            IrExpr::Ddt(inner)
-            | IrExpr::Limexp(inner)
-            | IrExpr::CanonicalLimit(inner)
-            | IrExpr::Ddx { expr: inner, .. }
-            | IrExpr::LaplaceND { expr: inner, .. }
-            | IrExpr::LaplaceNDDerivative { expr: inner, .. }
-            | IrExpr::LaplaceZP { expr: inner, .. }
-            | IrExpr::LaplaceZPDerivative { expr: inner, .. }
-            | IrExpr::TableLookup { input: inner, .. }
-            | IrExpr::VarIndexed { index: inner, .. } => recurse(inner),
-            IrExpr::Idt(inner, second) | IrExpr::Limit(inner, second) => {
-                recurse(inner);
-                second.iter().for_each(|e| recurse(e));
-            }
-            IrExpr::IdtMod {
-                expr,
-                ic,
-                modulus,
-                offset,
-            } => {
-                recurse(expr);
-                ic.iter().for_each(|e| recurse(e));
-                recurse(modulus);
-                offset.iter().for_each(|e| recurse(e));
-            }
-            IrExpr::AbsDelay {
-                expr,
-                delay_time,
-                max_delay,
-                ..
-            } => {
-                recurse(expr);
-                recurse(delay_time);
-                max_delay.iter().for_each(|e| recurse(e));
-            }
-            IrExpr::AbsDelayDerivative {
-                input,
-                input_derivative,
-                delay_time,
-                delay_derivative,
-                max_delay,
-                ..
-            } => {
-                recurse(input);
-                recurse(input_derivative);
-                recurse(delay_time);
-                recurse(delay_derivative);
-                max_delay.iter().for_each(|e| recurse(e));
-            }
-            IrExpr::Transition {
-                expr,
-                delay,
-                rise_time,
-                fall_time,
-                ..
-            } => {
-                recurse(expr);
-                delay.iter().for_each(|e| recurse(e));
-                rise_time.iter().for_each(|e| recurse(e));
-                fall_time.iter().for_each(|e| recurse(e));
-            }
-            IrExpr::TransitionDerivative {
-                input,
-                input_derivative,
-                delay,
-                rise_time,
-                fall_time,
-                ..
-            } => {
-                recurse(input);
-                recurse(input_derivative);
-                delay.iter().for_each(|e| recurse(e));
-                rise_time.iter().for_each(|e| recurse(e));
-                fall_time.iter().for_each(|e| recurse(e));
-            }
-            IrExpr::Slew {
-                expr,
-                max_pos_slew,
-                max_neg_slew,
-                ..
-            } => {
-                recurse(expr);
-                max_pos_slew.iter().for_each(|e| recurse(e));
-                max_neg_slew.iter().for_each(|e| recurse(e));
-            }
-            IrExpr::SlewDerivative {
-                input,
-                input_derivative,
-                max_pos_slew,
-                max_pos_slew_derivative,
-                max_neg_slew,
-                max_neg_slew_derivative,
-                ..
-            } => {
-                recurse(input);
-                recurse(input_derivative);
-                max_pos_slew.iter().for_each(|e| recurse(e));
-                max_pos_slew_derivative.iter().for_each(|e| recurse(e));
-                max_neg_slew.iter().for_each(|e| recurse(e));
-                max_neg_slew_derivative.iter().for_each(|e| recurse(e));
-            }
-            IrExpr::ZiFilter {
-                expr,
-                period,
-                transition,
-                first_transition,
-                ..
-            }
-            | IrExpr::ZiFilterDerivative {
-                expr,
-                period,
-                transition,
-                first_transition,
-                ..
-            } => {
-                recurse(expr);
-                recurse(period);
-                recurse(transition);
-                recurse(first_transition);
-            }
-            // Leaves for `map_expr`, so leaves here. The event, noise and
-            // companion nodes carry operands that it never descends into,
-            // and rewriting that would change what every existing caller
-            // sees, not just what this one costs.
-            IrExpr::Const(_)
-            | IrExpr::Param(_)
-            | IrExpr::ParamGiven(_)
-            | IrExpr::Var(_)
-            | IrExpr::Voltage(..)
-            | IrExpr::Current(..)
-            | IrExpr::BranchCurrent(_)
-            | IrExpr::Time
-            | IrExpr::Temperature
-            | IrExpr::Vt
-            | IrExpr::Mfactor
-            | IrExpr::PortConnected(_)
-            | IrExpr::Analysis(_)
-            | IrExpr::Cross { .. }
-            | IrExpr::LastCrossing { .. }
-            | IrExpr::WhiteNoise { .. }
-            | IrExpr::FlickerNoise { .. }
-            | IrExpr::NoiseTable { .. }
-            | IrExpr::Above { .. }
-            | IrExpr::Timer { .. }
-            | IrExpr::DdtCompanion(_)
-            | IrExpr::IdtCompanion(_)
-            | IrExpr::TableDerivative { .. } => {}
-        }
-    }
-
     /// Whether a subtree holds a `ddx` operator.
     ///
     /// [`resolve_ddx`] rewrites through [`rewrite`], which rebuilds every node
@@ -4275,475 +3725,220 @@ pub mod autodiff {
         found
     }
 
-    /// Structurally map an IR expression bottom-up. The closure may replace
-    /// a node entirely (returning Some) before its children are visited.
-    pub(crate) fn map_expr(expr: &IrExpr, f: &mut impl FnMut(&IrExpr) -> Option<IrExpr>) -> IrExpr {
-        if let Some(replacement) = f(expr) {
-            return replacement;
-        }
-        match expr {
-            IrExpr::Binary(op, l, r) => {
-                IrExpr::Binary(*op, Box::new(map_expr(l, f)), Box::new(map_expr(r, f)))
-            }
-            IrExpr::Unary(op, e) => IrExpr::Unary(*op, Box::new(map_expr(e, f))),
-            IrExpr::Call(func, args) => {
-                IrExpr::Call(*func, args.iter().map(|a| map_expr(a, f)).collect())
-            }
-            IrExpr::Conditional(c, t, e) => IrExpr::Conditional(
-                Box::new(map_expr(c, f)),
-                Box::new(map_expr(t, f)),
-                Box::new(map_expr(e, f)),
-            ),
-            IrExpr::Ddt(e) => IrExpr::Ddt(Box::new(map_expr(e, f))),
-            IrExpr::Idt(e, ic) => IrExpr::Idt(
-                Box::new(map_expr(e, f)),
-                ic.as_ref().map(|e| Box::new(map_expr(e, f))),
-            ),
-            IrExpr::IdtMod {
-                expr,
-                ic,
-                modulus,
-                offset,
-            } => IrExpr::IdtMod {
-                expr: Box::new(map_expr(expr, f)),
-                ic: ic.as_ref().map(|e| Box::new(map_expr(e, f))),
-                modulus: Box::new(map_expr(modulus, f)),
-                offset: offset.as_ref().map(|e| Box::new(map_expr(e, f))),
-            },
-            IrExpr::Limexp(e) => IrExpr::Limexp(Box::new(map_expr(e, f))),
-            IrExpr::Limit(e, step) => IrExpr::Limit(
-                Box::new(map_expr(e, f)),
-                step.as_ref().map(|e| Box::new(map_expr(e, f))),
-            ),
-            IrExpr::CanonicalLimit(e) => IrExpr::CanonicalLimit(Box::new(map_expr(e, f))),
-            IrExpr::TableLookup {
-                input,
-                x_data,
-                y_data,
-            } => IrExpr::TableLookup {
-                input: Box::new(map_expr(input, f)),
-                x_data: x_data.clone(),
-                y_data: y_data.clone(),
-            },
-            IrExpr::AbsDelay {
-                site,
-                expr,
-                delay_time,
-                max_delay,
-            } => IrExpr::AbsDelay {
-                site: *site,
-                expr: Box::new(map_expr(expr, f)),
-                delay_time: Box::new(map_expr(delay_time, f)),
-                max_delay: max_delay.as_ref().map(|e| Box::new(map_expr(e, f))),
-            },
-            IrExpr::AbsDelayDerivative {
-                site,
-                input,
-                input_derivative,
-                delay_time,
-                delay_derivative,
-                max_delay,
-                derivative_order,
-            } => IrExpr::AbsDelayDerivative {
-                site: *site,
-                input: Box::new(map_expr(input, f)),
-                input_derivative: Box::new(map_expr(input_derivative, f)),
-                delay_time: Box::new(map_expr(delay_time, f)),
-                delay_derivative: Box::new(map_expr(delay_derivative, f)),
-                max_delay: max_delay.as_ref().map(|e| Box::new(map_expr(e, f))),
-                derivative_order: *derivative_order,
-            },
-            IrExpr::Transition {
-                site,
-                expr,
-                delay,
-                rise_time,
-                fall_time,
-            } => IrExpr::Transition {
-                site: *site,
-                expr: Box::new(map_expr(expr, f)),
-                delay: delay.as_ref().map(|e| Box::new(map_expr(e, f))),
-                rise_time: rise_time.as_ref().map(|e| Box::new(map_expr(e, f))),
-                fall_time: fall_time.as_ref().map(|e| Box::new(map_expr(e, f))),
-            },
-            IrExpr::TransitionDerivative {
-                site,
-                input,
-                input_derivative,
-                delay,
-                rise_time,
-                fall_time,
-            } => IrExpr::TransitionDerivative {
-                site: *site,
-                input: Box::new(map_expr(input, f)),
-                input_derivative: Box::new(map_expr(input_derivative, f)),
-                delay: delay.as_ref().map(|e| Box::new(map_expr(e, f))),
-                rise_time: rise_time.as_ref().map(|e| Box::new(map_expr(e, f))),
-                fall_time: fall_time.as_ref().map(|e| Box::new(map_expr(e, f))),
-            },
-            IrExpr::Slew {
-                site,
-                expr,
-                max_pos_slew,
-                max_neg_slew,
-            } => IrExpr::Slew {
-                site: *site,
-                expr: Box::new(map_expr(expr, f)),
-                max_pos_slew: max_pos_slew.as_ref().map(|e| Box::new(map_expr(e, f))),
-                max_neg_slew: max_neg_slew.as_ref().map(|e| Box::new(map_expr(e, f))),
-            },
-            IrExpr::SlewDerivative {
-                site,
-                input,
-                input_derivative,
-                max_pos_slew,
-                max_pos_slew_derivative,
-                max_neg_slew,
-                max_neg_slew_derivative,
-            } => IrExpr::SlewDerivative {
-                site: *site,
-                input: Box::new(map_expr(input, f)),
-                input_derivative: Box::new(map_expr(input_derivative, f)),
-                max_pos_slew: max_pos_slew.as_ref().map(|e| Box::new(map_expr(e, f))),
-                max_pos_slew_derivative: max_pos_slew_derivative
-                    .as_ref()
-                    .map(|e| Box::new(map_expr(e, f))),
-                max_neg_slew: max_neg_slew.as_ref().map(|e| Box::new(map_expr(e, f))),
-                max_neg_slew_derivative: max_neg_slew_derivative
-                    .as_ref()
-                    .map(|e| Box::new(map_expr(e, f))),
-            },
-            IrExpr::Ddx { expr, axis } => IrExpr::Ddx {
-                expr: Box::new(map_expr(expr, f)),
-                axis: *axis,
-            },
-            IrExpr::LaplaceND {
-                site,
-                expr,
-                numerator,
-                denominator,
-            } => IrExpr::LaplaceND {
-                site: *site,
-                expr: Box::new(map_expr(expr, f)),
-                numerator: numerator.clone(),
-                denominator: denominator.clone(),
-            },
-            IrExpr::LaplaceNDDerivative {
-                site,
-                expr,
-                numerator,
-                denominator,
-            } => IrExpr::LaplaceNDDerivative {
-                site: *site,
-                expr: Box::new(map_expr(expr, f)),
-                numerator: numerator.clone(),
-                denominator: denominator.clone(),
-            },
-            IrExpr::LaplaceZP {
-                site,
-                expr,
-                zeros,
-                poles,
-                gain,
-            } => IrExpr::LaplaceZP {
-                site: *site,
-                expr: Box::new(map_expr(expr, f)),
-                zeros: zeros.clone(),
-                poles: poles.clone(),
-                gain: *gain,
-            },
-            IrExpr::LaplaceZPDerivative {
-                site,
-                expr,
-                zeros,
-                poles,
-                gain,
-            } => IrExpr::LaplaceZPDerivative {
-                site: *site,
-                expr: Box::new(map_expr(expr, f)),
-                zeros: zeros.clone(),
-                poles: poles.clone(),
-                gain: *gain,
-            },
-            IrExpr::ZiFilter {
-                site,
-                expr,
-                numerator,
-                denominator,
-                period,
-                transition,
-                first_transition,
-                direct_assignment,
-            } => IrExpr::ZiFilter {
-                site: *site,
-                expr: Box::new(map_expr(expr, f)),
-                numerator: numerator.clone(),
-                denominator: denominator.clone(),
-                period: Box::new(map_expr(period, f)),
-                transition: Box::new(map_expr(transition, f)),
-                first_transition: Box::new(map_expr(first_transition, f)),
-                direct_assignment: *direct_assignment,
-            },
-            IrExpr::ZiFilterDerivative {
-                site,
-                expr,
-                numerator,
-                denominator,
-                period,
-                transition,
-                first_transition,
-                direct_assignment,
-            } => IrExpr::ZiFilterDerivative {
-                site: *site,
-                expr: Box::new(map_expr(expr, f)),
-                numerator: numerator.clone(),
-                denominator: denominator.clone(),
-                period: Box::new(map_expr(period, f)),
-                transition: Box::new(map_expr(transition, f)),
-                first_transition: Box::new(map_expr(first_transition, f)),
-                direct_assignment: *direct_assignment,
-            },
-            IrExpr::VarIndexed {
-                array,
-                base,
-                len,
-                lower,
-                index,
-            } => IrExpr::VarIndexed {
-                array: array.clone(),
-                base: *base,
-                len: *len,
-                lower: *lower,
-                index: Box::new(map_expr(index, f)),
-            },
-            other => other.clone(),
-        }
-    }
-
-    pub(crate) fn assign_zi_site_ordinals(expr: &mut IrExpr, next: &mut u32) {
-        *expr = map_expr(expr, &mut |node| match node {
-            IrExpr::ZiFilter {
-                site,
-                expr,
-                numerator,
-                denominator,
-                period,
-                transition,
-                first_transition,
-                direct_assignment,
-            } => {
-                let mut assigned = *site;
-                assigned.ordinal = *next;
+    /// Number the `zi_filter` sites of one tree in the order they are walked.
+    ///
+    /// # These five walks unfold, and that is the whole of their correctness
+    ///
+    /// A site's ordinal is its position in a **path** walk, not in the DAG:
+    /// where the producer names one arena node from two places, each path
+    /// through it is its own site and takes its own ordinal, exactly as the two
+    /// `Box` trees the boxed converter cloned did. That is why these recurse
+    /// through [`arena::rebuild_children`] instead of memoizing by [`NodeId`] —
+    /// a memo would hand a shared `transition` one ordinal where the emitted
+    /// program needs two, and would then renumber every site after it.
+    ///
+    /// The descent stops where the boxed `map_expr` stopped: a matched node's
+    /// children are **not** walked, so a `zi_filter` nested in another one's
+    /// operand takes no ordinal. [`assign_laplace_site_ordinals`] is the one
+    /// exception and says so.
+    pub(crate) fn assign_zi_site_ordinals(
+        arena: &mut ExprArena,
+        id: NodeId,
+        next: &mut u32,
+    ) -> NodeId {
+        let node = *arena.node(id);
+        if let Node::Heavy(HeavyKind::ZiFilter, heavy) = node {
+            let mut updated = arena.heavy(heavy).clone();
+            if let Heavy::ZiFilter { site, .. } = &mut updated {
+                site.ordinal = *next;
                 *next = next.checked_add(1).expect("Zi site ordinal overflow");
-                Some(IrExpr::ZiFilter {
-                    site: assigned,
-                    expr: expr.clone(),
-                    numerator: numerator.clone(),
-                    denominator: denominator.clone(),
-                    period: period.clone(),
-                    transition: transition.clone(),
-                    first_transition: first_transition.clone(),
-                    direct_assignment: *direct_assignment,
-                })
             }
-            _ => None,
-        });
+            return arena.push_heavy(updated);
+        }
+        arena::rebuild_children(arena, id, node, &mut |arena, child| {
+            assign_zi_site_ordinals(arena, child, next)
+        })
     }
 
     pub(crate) fn assign_zi_site_ordinals_in_items(
-        items: &mut [SourceAssignmentItem],
+        arena: &mut ExprArena,
+        items: &mut [IrAssignmentItem],
         next: &mut u32,
     ) {
         for item in items {
             match item {
-                SourceAssignmentItem::Assign(assignment) => {
-                    assign_zi_site_ordinals(&mut assignment.expr, next);
+                IrAssignmentItem::Assign(assignment) => {
+                    assignment.expr = assign_zi_site_ordinals(arena, assignment.expr, next);
                 }
-                SourceAssignmentItem::Loop { condition, body } => {
-                    assign_zi_site_ordinals(condition, next);
-                    assign_zi_site_ordinals_in_items(body, next);
+                IrAssignmentItem::Loop { condition, body } => {
+                    *condition = assign_zi_site_ordinals(arena, *condition, next);
+                    assign_zi_site_ordinals_in_items(arena, body, next);
                 }
             }
         }
     }
 
-    pub(crate) fn assign_laplace_site_ordinals(expr: &mut IrExpr, next: &mut u32) {
-        *expr = map_expr(expr, &mut |node| match node {
-            IrExpr::LaplaceND {
-                site,
-                expr,
-                numerator,
-                denominator,
-            } => {
-                let mut assigned = *site;
-                assigned.ordinal = *next;
-                *next = next.checked_add(1).expect("Laplace site ordinal overflow");
-                let mut inner = expr.as_ref().clone();
-                assign_laplace_site_ordinals(&mut inner, next);
-                Some(IrExpr::LaplaceND {
-                    site: assigned,
-                    expr: Box::new(inner),
-                    numerator: numerator.clone(),
-                    denominator: denominator.clone(),
-                })
+    /// Number the Laplace sites of one tree, descending into a numbered one.
+    ///
+    /// The one walk of the five that enters a matched node: the boxed closure
+    /// recursed into the filtered expression by hand, so a `laplace_*` nested
+    /// in another one's operand *does* take an ordinal, and takes it
+    /// immediately after its parent. The coefficient and root lists are numbers
+    /// and are not walked at all.
+    pub(crate) fn assign_laplace_site_ordinals(
+        arena: &mut ExprArena,
+        id: NodeId,
+        next: &mut u32,
+    ) -> NodeId {
+        let node = *arena.node(id);
+        if let Node::Heavy(HeavyKind::LaplaceND | HeavyKind::LaplaceZP, heavy) = node {
+            let mut updated = arena.heavy(heavy).clone();
+            match &mut updated {
+                Heavy::LaplaceND { site, expr, .. } | Heavy::LaplaceZP { site, expr, .. } => {
+                    site.ordinal = *next;
+                    *next = next.checked_add(1).expect("Laplace site ordinal overflow");
+                    *expr = assign_laplace_site_ordinals(arena, *expr, next);
+                }
+                _ => unreachable!("a Laplace kind carries a Laplace payload"),
             }
-            IrExpr::LaplaceZP {
-                site,
-                expr,
-                zeros,
-                poles,
-                gain,
-            } => {
-                let mut assigned = *site;
-                assigned.ordinal = *next;
-                *next = next.checked_add(1).expect("Laplace site ordinal overflow");
-                let mut inner = expr.as_ref().clone();
-                assign_laplace_site_ordinals(&mut inner, next);
-                Some(IrExpr::LaplaceZP {
-                    site: assigned,
-                    expr: Box::new(inner),
-                    zeros: zeros.clone(),
-                    poles: poles.clone(),
-                    gain: *gain,
-                })
-            }
-            _ => None,
-        });
+            return arena.push_heavy(updated);
+        }
+        arena::rebuild_children(arena, id, node, &mut |arena, child| {
+            assign_laplace_site_ordinals(arena, child, next)
+        })
     }
 
     pub(crate) fn assign_laplace_site_ordinals_in_items(
-        items: &mut [SourceAssignmentItem],
+        arena: &mut ExprArena,
+        items: &mut [IrAssignmentItem],
         next: &mut u32,
     ) {
         for item in items {
             match item {
-                SourceAssignmentItem::Assign(assignment) => {
-                    assign_laplace_site_ordinals(&mut assignment.expr, next);
+                IrAssignmentItem::Assign(assignment) => {
+                    assignment.expr = assign_laplace_site_ordinals(arena, assignment.expr, next);
                 }
-                SourceAssignmentItem::Loop { condition, body } => {
-                    assign_laplace_site_ordinals(condition, next);
-                    assign_laplace_site_ordinals_in_items(body, next);
+                IrAssignmentItem::Loop { condition, body } => {
+                    *condition = assign_laplace_site_ordinals(arena, *condition, next);
+                    assign_laplace_site_ordinals_in_items(arena, body, next);
                 }
             }
         }
     }
 
-    pub(crate) fn assign_slew_site_ordinals(expr: &mut IrExpr, next: &mut u32) {
-        *expr = map_expr(expr, &mut |node| match node {
-            IrExpr::Slew {
-                site,
-                expr,
-                max_pos_slew,
-                max_neg_slew,
-            } => {
-                let mut assigned = *site;
-                assigned.ordinal = *next;
+    /// Number the `slew` sites of one tree; see [`assign_zi_site_ordinals`].
+    pub(crate) fn assign_slew_site_ordinals(
+        arena: &mut ExprArena,
+        id: NodeId,
+        next: &mut u32,
+    ) -> NodeId {
+        let node = *arena.node(id);
+        if let Node::Heavy(HeavyKind::Slew, heavy) = node {
+            let mut updated = arena.heavy(heavy).clone();
+            if let Heavy::Slew { site, .. } = &mut updated {
+                site.ordinal = *next;
                 *next = next.checked_add(1).expect("slew site ordinal overflow");
-                Some(IrExpr::Slew {
-                    site: assigned,
-                    expr: expr.clone(),
-                    max_pos_slew: max_pos_slew.clone(),
-                    max_neg_slew: max_neg_slew.clone(),
-                })
             }
-            _ => None,
-        });
+            return arena.push_heavy(updated);
+        }
+        arena::rebuild_children(arena, id, node, &mut |arena, child| {
+            assign_slew_site_ordinals(arena, child, next)
+        })
     }
 
     pub(crate) fn assign_slew_site_ordinals_in_items(
-        items: &mut [SourceAssignmentItem],
+        arena: &mut ExprArena,
+        items: &mut [IrAssignmentItem],
         next: &mut u32,
     ) {
         for item in items {
             match item {
-                SourceAssignmentItem::Assign(assignment) => {
-                    assign_slew_site_ordinals(&mut assignment.expr, next);
+                IrAssignmentItem::Assign(assignment) => {
+                    assignment.expr = assign_slew_site_ordinals(arena, assignment.expr, next);
                 }
-                SourceAssignmentItem::Loop { condition, body } => {
-                    assign_slew_site_ordinals(condition, next);
-                    assign_slew_site_ordinals_in_items(body, next);
+                IrAssignmentItem::Loop { condition, body } => {
+                    *condition = assign_slew_site_ordinals(arena, *condition, next);
+                    assign_slew_site_ordinals_in_items(arena, body, next);
                 }
             }
         }
     }
 
-    pub(crate) fn assign_transition_site_ordinals(expr: &mut IrExpr, next: &mut u32) {
-        *expr = map_expr(expr, &mut |node| match node {
-            IrExpr::Transition {
-                site,
-                expr,
-                delay,
-                rise_time,
-                fall_time,
-            } => {
-                let mut assigned = *site;
-                assigned.ordinal = *next;
+    /// Number the `transition` sites of one tree; see
+    /// [`assign_zi_site_ordinals`].
+    pub(crate) fn assign_transition_site_ordinals(
+        arena: &mut ExprArena,
+        id: NodeId,
+        next: &mut u32,
+    ) -> NodeId {
+        let node = *arena.node(id);
+        if let Node::Heavy(HeavyKind::Transition, heavy) = node {
+            let mut updated = arena.heavy(heavy).clone();
+            if let Heavy::Transition { site, .. } = &mut updated {
+                site.ordinal = *next;
                 *next = next
                     .checked_add(1)
                     .expect("transition site ordinal overflow");
-                Some(IrExpr::Transition {
-                    site: assigned,
-                    expr: expr.clone(),
-                    delay: delay.clone(),
-                    rise_time: rise_time.clone(),
-                    fall_time: fall_time.clone(),
-                })
             }
-            _ => None,
-        });
+            return arena.push_heavy(updated);
+        }
+        arena::rebuild_children(arena, id, node, &mut |arena, child| {
+            assign_transition_site_ordinals(arena, child, next)
+        })
     }
 
     pub(crate) fn assign_transition_site_ordinals_in_items(
-        items: &mut [SourceAssignmentItem],
+        arena: &mut ExprArena,
+        items: &mut [IrAssignmentItem],
         next: &mut u32,
     ) {
         for item in items {
             match item {
-                SourceAssignmentItem::Assign(assignment) => {
-                    assign_transition_site_ordinals(&mut assignment.expr, next);
+                IrAssignmentItem::Assign(assignment) => {
+                    assignment.expr = assign_transition_site_ordinals(arena, assignment.expr, next);
                 }
-                SourceAssignmentItem::Loop { condition, body } => {
-                    assign_transition_site_ordinals(condition, next);
-                    assign_transition_site_ordinals_in_items(body, next);
+                IrAssignmentItem::Loop { condition, body } => {
+                    *condition = assign_transition_site_ordinals(arena, *condition, next);
+                    assign_transition_site_ordinals_in_items(arena, body, next);
                 }
             }
         }
     }
 
-    pub(crate) fn assign_absdelay_site_ordinals(expr: &mut IrExpr, next: &mut u32) {
-        *expr = map_expr(expr, &mut |node| match node {
-            IrExpr::AbsDelay {
-                site,
-                expr,
-                delay_time,
-                max_delay,
-            } => {
-                let mut assigned = *site;
-                assigned.ordinal = *next;
+    /// Number the `absdelay` sites of one tree; see
+    /// [`assign_zi_site_ordinals`].
+    pub(crate) fn assign_absdelay_site_ordinals(
+        arena: &mut ExprArena,
+        id: NodeId,
+        next: &mut u32,
+    ) -> NodeId {
+        let node = *arena.node(id);
+        if let Node::Heavy(HeavyKind::AbsDelay, heavy) = node {
+            let mut updated = arena.heavy(heavy).clone();
+            if let Heavy::AbsDelay { site, .. } = &mut updated {
+                site.ordinal = *next;
                 *next = next.checked_add(1).expect("absdelay site ordinal overflow");
-                Some(IrExpr::AbsDelay {
-                    site: assigned,
-                    expr: expr.clone(),
-                    delay_time: delay_time.clone(),
-                    max_delay: max_delay.clone(),
-                })
             }
-            _ => None,
-        });
+            return arena.push_heavy(updated);
+        }
+        arena::rebuild_children(arena, id, node, &mut |arena, child| {
+            assign_absdelay_site_ordinals(arena, child, next)
+        })
     }
 
     pub(crate) fn assign_absdelay_site_ordinals_in_items(
-        items: &mut [SourceAssignmentItem],
+        arena: &mut ExprArena,
+        items: &mut [IrAssignmentItem],
         next: &mut u32,
     ) {
         for item in items {
             match item {
-                SourceAssignmentItem::Assign(assignment) => {
-                    assign_absdelay_site_ordinals(&mut assignment.expr, next);
+                IrAssignmentItem::Assign(assignment) => {
+                    assignment.expr = assign_absdelay_site_ordinals(arena, assignment.expr, next);
                 }
-                SourceAssignmentItem::Loop { condition, body } => {
-                    assign_absdelay_site_ordinals(condition, next);
-                    assign_absdelay_site_ordinals_in_items(body, next);
+                IrAssignmentItem::Loop { condition, body } => {
+                    *condition = assign_absdelay_site_ordinals(arena, *condition, next);
+                    assign_absdelay_site_ordinals_in_items(arena, body, next);
                 }
             }
         }
@@ -4754,24 +3949,6 @@ pub mod autodiff {
     /// [`differentiate_with_shadows`] when a chain context exists)
     pub fn differentiate(arena: &mut ExprArena, expr: NodeId, wrt: &DerivativeWrt) -> NodeId {
         differentiate_with_shadows(arena, expr, wrt, &ShadowContext::default())
-    }
-
-    /// Differentiate a hand-built [`IrExpr`] fixture and read the result back
-    /// as a tree.
-    ///
-    /// Unit tests across the crate build their fixtures as [`IrExpr`], because
-    /// that is what the converter still produces, and assert on the shape of
-    /// the derivative. This crosses into the arena and back for them.
-    /// **Nothing on the production path may do this**: [`ExprArena::export`]
-    /// rebuilds boxes at a hundred and twenty-eight bytes a node, and a step
-    /// that exports a forest has been split where the design says never to
-    /// split it.
-    #[cfg(test)]
-    pub(crate) fn differentiate_source(expr: &IrExpr, wrt: &DerivativeWrt) -> IrExpr {
-        let mut arena = ExprArena::new();
-        let id = arena.import(expr);
-        let derivative = differentiate(&mut arena, id, wrt);
-        arena.export(derivative)
     }
 
     /// Differentiate an expression, chaining through shadowed variables
@@ -5686,480 +4863,47 @@ pub mod autodiff {
         }
     }
 
-    /// [`simplify`] over a produced [`IrExpr`], for the converter's constant
-    /// folding.
-    ///
-    /// The expression converter folds filter coefficients, replication counts
-    /// and constant direction arguments before anything reaches the arena, and
-    /// it is the last caller that still needs this shape. It goes with
-    /// [`IrExpr`].
-    pub fn simplify_source(expr: IrExpr) -> IrExpr {
-        match expr {
-            IrExpr::Binary(op, left, right) => {
-                let left = simplify_source(*left);
-                let right = simplify_source(*right);
-
-                // Constant folding
-                if let (IrExpr::Const(l), IrExpr::Const(r)) = (&left, &right) {
-                    return IrExpr::Const(match op {
-                        BinaryOp::Add => l + r,
-                        BinaryOp::Sub => l - r,
-                        BinaryOp::Mul => l * r,
-                        BinaryOp::Div => l / r,
-                        BinaryOp::Pow => l.powf(*r),
-                        _ => return IrExpr::Binary(op, Box::new(left), Box::new(right)),
-                    });
-                }
-
-                // Identity rules
-                match op {
-                    BinaryOp::Add => {
-                        if let IrExpr::Const(0.0) = left {
-                            return right;
-                        }
-                        if let IrExpr::Const(0.0) = right {
-                            return left;
-                        }
-                    }
-                    BinaryOp::Sub => {
-                        if let IrExpr::Const(0.0) = right {
-                            return left;
-                        }
-                    }
-                    BinaryOp::Mul => {
-                        if let IrExpr::Const(0.0) = left {
-                            return IrExpr::Const(0.0);
-                        }
-                        if let IrExpr::Const(0.0) = right {
-                            return IrExpr::Const(0.0);
-                        }
-                        if let IrExpr::Const(1.0) = left {
-                            return right;
-                        }
-                        if let IrExpr::Const(1.0) = right {
-                            return left;
-                        }
-                    }
-                    BinaryOp::Div => {
-                        if let IrExpr::Const(0.0) = left {
-                            return IrExpr::Const(0.0);
-                        }
-                        if let IrExpr::Const(1.0) = right {
-                            return left;
-                        }
-                    }
-                    _ => {}
-                }
-
-                IrExpr::Binary(op, Box::new(left), Box::new(right))
-            }
-            IrExpr::Unary(op, inner) => {
-                let inner = simplify_source(*inner);
-                if let (UnaryOp::Neg, IrExpr::Const(v)) = (op, &inner) {
-                    return IrExpr::Const(-v);
-                }
-                if let UnaryOp::Pos = op {
-                    return inner;
-                }
-                IrExpr::Unary(op, Box::new(inner))
-            }
-            IrExpr::Conditional(cond, then_expr, else_expr) => {
-                let cond = simplify_source(*cond);
-                let then_expr = simplify_source(*then_expr);
-                let else_expr = simplify_source(*else_expr);
-                if let IrExpr::Const(c) = cond {
-                    return if c != 0.0 { then_expr } else { else_expr };
-                }
-                IrExpr::Conditional(Box::new(cond), Box::new(then_expr), Box::new(else_expr))
-            }
-            IrExpr::Call(func, args) => {
-                IrExpr::Call(func, args.into_iter().map(simplify_source).collect())
-            }
-            // Companion factors of a zero derivative vanish
-            IrExpr::DdtCompanion(inner) => {
-                let inner = simplify_source(*inner);
-                if matches!(inner, IrExpr::Const(v) if v == 0.0) {
-                    return IrExpr::Const(0.0);
-                }
-                IrExpr::DdtCompanion(Box::new(inner))
-            }
-            IrExpr::IdtCompanion(inner) => {
-                let inner = simplify_source(*inner);
-                if matches!(inner, IrExpr::Const(v) if v == 0.0) {
-                    return IrExpr::Const(0.0);
-                }
-                IrExpr::IdtCompanion(Box::new(inner))
-            }
-            other => other,
-        }
-    }
-
-    #[cfg(test)]
-    pub(crate) mod visit_expr_parity_tests {
-        use super::*;
-
-        fn marker(index: usize) -> Box<IrExpr> {
-            Box::new(IrExpr::Var(SmolStr::new(format!("m{index}"))))
-        }
-
-        fn opt(index: usize) -> Option<Box<IrExpr>> {
-            Some(marker(index))
-        }
-
-        /// Names reached through [`map_expr`] — the traversal
-        /// [`visit_expr`] has to reproduce.
-        fn names_via_map(expr: &IrExpr) -> Vec<SmolStr> {
-            let mut names = Vec::new();
-            map_expr(expr, &mut |node| {
-                if let IrExpr::Var(name) = node {
-                    names.push(name.clone());
-                }
-                None
-            });
-            names
-        }
-
-        fn names_via_visit(expr: &IrExpr) -> Vec<SmolStr> {
-            let mut names = Vec::new();
-            visit_expr(expr, &mut |node| {
-                if let IrExpr::Var(name) = node {
-                    names.push(name.clone());
-                }
-            });
-            names
-        }
-
-        /// One value per [`IrExpr`] variant, with a distinctly named marker
-        /// in every operand slot the variant has — including the slots
-        /// `map_expr` deliberately does not descend into, so a visitor that
-        /// descended too far would be caught as surely as one that stopped
-        /// short.
-        ///
-        /// [`crate::ir::arena`] round-trips the same set through its bridges,
-        /// so one list keeps both representations honest about the same 48
-        /// variants.
-        pub(crate) fn one_of_every_variant() -> Vec<IrExpr> {
-            let site = ZiSiteId {
-                source: 0,
-                start: 0,
-                end: 1,
-                ordinal: 0,
-            };
-            let laplace = LaplaceSiteId {
-                source: 0,
-                start: 0,
-                end: 1,
-                ordinal: 0,
-            };
-            let slew = SlewSiteId {
-                source: 0,
-                start: 0,
-                end: 1,
-                ordinal: 0,
-            };
-            let transition = TransitionSiteId {
-                source: 0,
-                start: 0,
-                end: 1,
-                ordinal: 0,
-            };
-            let absdelay = AbsDelaySiteId {
-                source: 0,
-                start: 0,
-                end: 1,
-                ordinal: 0,
-            };
-            let noise_site = NoiseSiteId {
-                source: 0,
-                start: 0,
-                end: 1,
-                ordinal: 0,
-            };
-            vec![
-                IrExpr::Const(1.0),
-                IrExpr::Param(SmolStr::new("p")),
-                IrExpr::ParamGiven(SmolStr::new("p")),
-                IrExpr::Var(SmolStr::new("m0")),
-                IrExpr::VarIndexed {
-                    array: SmolStr::new("a"),
-                    base: 0,
-                    len: 2,
-                    lower: 0,
-                    index: marker(1),
-                },
-                IrExpr::Voltage(0, 1),
-                IrExpr::Current(0, 1),
-                IrExpr::BranchCurrent(0),
-                IrExpr::Time,
-                IrExpr::Temperature,
-                IrExpr::Vt,
-                IrExpr::Mfactor,
-                IrExpr::PortConnected(0),
-                IrExpr::Binary(BinaryOp::Add, marker(2), marker(3)),
-                IrExpr::Unary(UnaryOp::Neg, marker(4)),
-                IrExpr::Call(IrFunction::Sqrt, vec![*marker(5), *marker(6)]),
-                IrExpr::Ddt(marker(7)),
-                IrExpr::Idt(marker(8), opt(9)),
-                IrExpr::IdtMod {
-                    expr: marker(10),
-                    ic: opt(11),
-                    modulus: marker(12),
-                    offset: opt(13),
-                },
-                IrExpr::Limexp(marker(14)),
-                IrExpr::Limit(marker(15), opt(16)),
-                IrExpr::CanonicalLimit(marker(17)),
-                IrExpr::TableLookup {
-                    input: marker(18),
-                    x_data: vec![0.0],
-                    y_data: vec![0.0],
-                },
-                IrExpr::AbsDelay {
-                    site: absdelay,
-                    expr: marker(19),
-                    delay_time: marker(20),
-                    max_delay: opt(21),
-                },
-                IrExpr::AbsDelayDerivative {
-                    site: absdelay,
-                    input: marker(22),
-                    input_derivative: marker(23),
-                    delay_time: marker(24),
-                    delay_derivative: marker(25),
-                    max_delay: opt(26),
-                    derivative_order: 1,
-                },
-                IrExpr::Transition {
-                    site: transition,
-                    expr: marker(27),
-                    delay: opt(28),
-                    rise_time: opt(29),
-                    fall_time: opt(30),
-                },
-                IrExpr::TransitionDerivative {
-                    site: transition,
-                    input: marker(31),
-                    input_derivative: marker(32),
-                    delay: opt(33),
-                    rise_time: opt(34),
-                    fall_time: opt(35),
-                },
-                IrExpr::Slew {
-                    site: slew,
-                    expr: marker(36),
-                    max_pos_slew: opt(37),
-                    max_neg_slew: opt(38),
-                },
-                IrExpr::SlewDerivative {
-                    site: slew,
-                    input: marker(39),
-                    input_derivative: marker(40),
-                    max_pos_slew: opt(41),
-                    max_pos_slew_derivative: opt(42),
-                    max_neg_slew: opt(43),
-                    max_neg_slew_derivative: opt(44),
-                },
-                IrExpr::Cross {
-                    expr: marker(45),
-                    direction: opt(46),
-                    time_tol: opt(47),
-                    expr_tol: opt(48),
-                    enable: opt(49),
-                },
-                IrExpr::LastCrossing {
-                    expr: marker(50),
-                    direction: Some(1),
-                },
-                IrExpr::WhiteNoise {
-                    site: noise_site,
-                    power: marker(51),
-                    name: None,
-                },
-                IrExpr::FlickerNoise {
-                    site: noise_site,
-                    power: marker(52),
-                    exponent: marker(53),
-                    name: None,
-                },
-                IrExpr::NoiseTable {
-                    site: noise_site,
-                    points: vec![(1.0, 1.0)],
-                    log_interp: false,
-                    name: None,
-                },
-                IrExpr::Analysis("dc".to_string()),
-                IrExpr::Above {
-                    expr: marker(54),
-                    time_tol: opt(55),
-                    expr_tol: opt(56),
-                    enable: opt(57),
-                },
-                IrExpr::Timer {
-                    start_time: marker(58),
-                    period: opt(59),
-                    time_tol: opt(60),
-                    enable: opt(61),
-                },
-                IrExpr::LaplaceZP {
-                    site: laplace,
-                    expr: marker(62),
-                    zeros: Vec::new(),
-                    poles: Vec::new(),
-                    gain: 1.0,
-                },
-                IrExpr::LaplaceND {
-                    site: laplace,
-                    expr: marker(63),
-                    numerator: vec![1.0],
-                    denominator: vec![1.0],
-                },
-                IrExpr::LaplaceNDDerivative {
-                    site: laplace,
-                    expr: marker(64),
-                    numerator: vec![1.0],
-                    denominator: vec![1.0],
-                },
-                IrExpr::LaplaceZPDerivative {
-                    site: laplace,
-                    expr: marker(65),
-                    zeros: Vec::new(),
-                    poles: Vec::new(),
-                    gain: 1.0,
-                },
-                IrExpr::ZiFilter {
-                    site,
-                    expr: marker(66),
-                    numerator: ZiPolynomialDefinition::Coefficients(vec![*marker(67)]),
-                    denominator: ZiPolynomialDefinition::Roots(vec![(*marker(68), *marker(69))]),
-                    period: marker(70),
-                    transition: marker(71),
-                    first_transition: marker(72),
-                    direct_assignment: false,
-                },
-                IrExpr::ZiFilterDerivative {
-                    site,
-                    expr: marker(73),
-                    numerator: ZiPolynomialDefinition::Coefficients(vec![*marker(74)]),
-                    denominator: ZiPolynomialDefinition::Roots(vec![(*marker(75), *marker(76))]),
-                    period: marker(77),
-                    transition: marker(78),
-                    first_transition: marker(79),
-                    direct_assignment: false,
-                },
-                IrExpr::Ddx {
-                    expr: marker(80),
-                    axis: DdxAxis::Potential {
-                        pos: Some(0),
-                        neg: None,
-                    },
-                },
-                IrExpr::DdtCompanion(marker(81)),
-                IrExpr::IdtCompanion(marker(82)),
-                IrExpr::TableDerivative {
-                    input: marker(83),
-                    x_data: vec![0.0],
-                    y_data: vec![0.0],
-                },
-                IrExpr::Conditional(marker(84), marker(85), marker(86)),
-            ]
-        }
-
-        #[test]
-        fn visit_expr_walks_the_same_child_slots_as_map_expr() {
-            for expr in one_of_every_variant() {
-                assert_eq!(
-                    names_via_visit(&expr),
-                    names_via_map(&expr),
-                    "visit_expr and map_expr disagree about {expr:?}"
-                );
-            }
-        }
-
-        /// [`super::contains_ddx`] over a fixture written as a tree.
-        fn contains_ddx(expr: &IrExpr) -> bool {
-            let mut arena = ExprArena::new();
-            let id = arena.import(expr);
-            super::contains_ddx(&arena, id)
-        }
-
-        #[test]
-        fn contains_ddx_finds_an_operator_under_every_descended_slot() {
-            let ddx = IrExpr::Ddx {
-                expr: Box::new(IrExpr::Var(SmolStr::new("v"))),
-                axis: DdxAxis::BranchCurrent {
-                    ordinal: 0,
-                    reversed: false,
-                },
-            };
-            assert!(contains_ddx(&ddx));
-            assert!(contains_ddx(&IrExpr::Binary(
-                BinaryOp::Mul,
-                Box::new(IrExpr::Const(2.0)),
-                Box::new(IrExpr::Conditional(
-                    Box::new(IrExpr::Const(1.0)),
-                    Box::new(ddx.clone()),
-                    Box::new(IrExpr::Const(0.0)),
-                )),
-            )));
-            assert!(!contains_ddx(&IrExpr::Binary(
-                BinaryOp::Mul,
-                Box::new(IrExpr::Const(2.0)),
-                Box::new(IrExpr::Var(SmolStr::new("v"))),
-            )));
-            // A slot `map_expr` does not descend into is a slot
-            // `resolve_ddx` cannot rewrite, so reporting it would promise a
-            // resolution that never happens.
-            assert!(!contains_ddx(&IrExpr::WhiteNoise {
-                site: NoiseSiteId {
-                    source: 0,
-                    start: 0,
-                    end: 1,
-                    ordinal: 0,
-                },
-                power: Box::new(ddx),
-                name: None,
-            }));
-        }
-    }
-
     #[cfg(test)]
     mod tests {
         use super::*;
 
-        fn noise(process: u32) -> IrExpr {
-            IrExpr::WhiteNoise {
+        /// A `white_noise` of one process, its magnitude the constant one.
+        fn noise(arena: &mut ExprArena, process: u32) -> NodeId {
+            let power = arena.push(Node::Const(1.0));
+            arena.push_heavy(Heavy::WhiteNoise {
                 site: NoiseSiteId {
                     source: 0,
                     start: process,
                     end: process + 1,
                     ordinal: process,
                 },
-                power: Box::new(IrExpr::Const(1.0)),
+                power,
                 name: None,
-            }
+            })
         }
 
-        fn add(left: IrExpr, right: IrExpr) -> IrExpr {
-            IrExpr::Binary(BinaryOp::Add, Box::new(left), Box::new(right))
+        fn add(arena: &mut ExprArena, left: NodeId, right: NodeId) -> NodeId {
+            arena.push(Node::Binary(BinaryOp::Add, left, right))
         }
 
-        fn mul(left: IrExpr, right: IrExpr) -> IrExpr {
-            IrExpr::Binary(BinaryOp::Mul, Box::new(left), Box::new(right))
+        fn mul(arena: &mut ExprArena, left: NodeId, right: NodeId) -> NodeId {
+            arena.push(Node::Binary(BinaryOp::Mul, left, right))
         }
 
-        /// [`super::expression_noise_axes`] over a fixture written as a tree.
-        fn expression_noise_axes(
-            expr: &IrExpr,
-            deps: &HashMap<SmolStr, BTreeSet<usize>>,
-            num_processes: usize,
-        ) -> BTreeSet<usize> {
-            let mut arena = ExprArena::new();
-            let id = arena.import(expr);
-            super::expression_noise_axes(&mut arena, id, deps, num_processes)
+        fn var(arena: &mut ExprArena, name: &str) -> NodeId {
+            let name = arena.intern(name);
+            arena.push(Node::Var(name))
         }
 
+        fn constant(arena: &mut ExprArena, value: f64) -> NodeId {
+            arena.push(Node::Const(value))
+        }
+
+        /// The axes symbolic differentiation finds, which the structural walk
+        /// has to agree with.
         fn old_ad_axes(
-            expr: &IrExpr,
+            arena: &mut ExprArena,
+            expr: NodeId,
             deps: &HashMap<SmolStr, BTreeSet<usize>>,
             num_processes: usize,
         ) -> BTreeSet<usize> {
@@ -6167,17 +4911,15 @@ pub mod autodiff {
                 noise_shadowed: deps.clone(),
                 ..ShadowContext::default()
             };
-            let mut arena = ExprArena::new();
-            let id = arena.import(expr);
             (0..num_processes)
                 .filter(|process| {
                     let raw = differentiate_with_shadows(
-                        &mut arena,
-                        id,
+                        arena,
+                        expr,
                         &DerivativeWrt::Noise(*process),
                         &shadows,
                     );
-                    let derivative = simplify(&mut arena, raw);
+                    let derivative = simplify(arena, raw);
                     !matches!(*arena.node(derivative), Node::Const(value) if value == 0.0)
                 })
                 .collect()
@@ -6189,181 +4931,215 @@ pub mod autodiff {
                 (SmolStr::new("assigned"), BTreeSet::from([2usize])),
                 (SmolStr::new("samples"), BTreeSet::from([3usize])),
             ]);
-            let corpus = [
-                (
-                    "noise metadata is not a realization operand",
-                    IrExpr::WhiteNoise {
+
+            // Each fixture builds into its own arena so the two walks below
+            // read the same nodes and nothing a previous case appended is
+            // reachable from this one.
+            type Build = fn(&mut ExprArena) -> NodeId;
+            let corpus: [(&str, Build); 13] = [
+                ("noise metadata is not a realization operand", |arena| {
+                    let power = noise(arena, 1);
+                    arena.push_heavy(Heavy::WhiteNoise {
                         site: NoiseSiteId {
                             source: 0,
                             start: 0,
                             end: 1,
                             ordinal: 0,
                         },
-                        power: Box::new(noise(1)),
+                        power,
                         name: None,
-                    },
-                ),
-                (
-                    "assigned variable and direct process",
-                    add(IrExpr::Var("assigned".into()), noise(0)),
-                ),
-                (
-                    "zero multiplier removes derivative",
-                    mul(IrExpr::Const(0.0), noise(0)),
-                ),
-                (
-                    "zero power removes derivative",
-                    IrExpr::Binary(
-                        BinaryOp::Pow,
-                        Box::new(noise(0)),
-                        Box::new(IrExpr::Const(0.0)),
-                    ),
-                ),
-                (
-                    "discrete operator has zero derivative",
-                    IrExpr::Binary(BinaryOp::Gt, Box::new(noise(0)), Box::new(noise(1))),
-                ),
+                    })
+                }),
+                ("assigned variable and direct process", |arena| {
+                    let left = var(arena, "assigned");
+                    let right = noise(arena, 0);
+                    add(arena, left, right)
+                }),
+                ("zero multiplier removes derivative", |arena| {
+                    let left = constant(arena, 0.0);
+                    let right = noise(arena, 0);
+                    mul(arena, left, right)
+                }),
+                ("zero power removes derivative", |arena| {
+                    let base = noise(arena, 0);
+                    let exponent = constant(arena, 0.0);
+                    arena.push(Node::Binary(BinaryOp::Pow, base, exponent))
+                }),
+                ("discrete operator has zero derivative", |arena| {
+                    let left = noise(arena, 0);
+                    let right = noise(arena, 1);
+                    arena.push(Node::Binary(BinaryOp::Gt, left, right))
+                }),
                 (
                     "constant conditional selects one derivative branch",
-                    IrExpr::Conditional(
-                        Box::new(IrExpr::Const(0.0)),
-                        Box::new(noise(0)),
-                        Box::new(noise(1)),
-                    ),
-                ),
-                (
-                    "continuous function follows its argument",
-                    IrExpr::Call(IrFunction::Exp, vec![noise(0)]),
-                ),
-                (
-                    "pow function follows binary-pow zero-exponent semantics",
-                    IrExpr::Call(IrFunction::Pow, vec![noise(0), IrExpr::Const(0.0)]),
-                ),
-                (
-                    "atan2 removes a derivative multiplied by zero",
-                    IrExpr::Call(IrFunction::Atan2, vec![noise(0), IrExpr::Const(0.0)]),
-                ),
-                (
-                    "piecewise-constant function has zero derivative",
-                    IrExpr::Call(IrFunction::Floor, vec![noise(0)]),
-                ),
-                (
-                    "ddx is resolved before noise provenance",
-                    IrExpr::Ddx {
-                        expr: Box::new(mul(noise(1), IrExpr::Voltage(0, usize::MAX))),
-                        axis: DdxAxis::Potential {
-                            pos: Some(0),
-                            neg: None,
-                        },
+                    |arena| {
+                        let condition = constant(arena, 0.0);
+                        let then_expr = noise(arena, 0);
+                        let else_expr = noise(arena, 1);
+                        arena.push(Node::Conditional(condition, then_expr, else_expr))
                     },
                 ),
+                ("continuous function follows its argument", |arena| {
+                    let argument = noise(arena, 0);
+                    arena.push_call(IrFunction::Exp, &[argument])
+                }),
                 (
-                    "ddx can eliminate a noise-only value",
-                    IrExpr::Ddx {
-                        expr: Box::new(noise(1)),
-                        axis: DdxAxis::Potential {
-                            pos: Some(0),
-                            neg: None,
-                        },
+                    "pow function follows binary-pow zero-exponent semantics",
+                    |arena| {
+                        let base = noise(arena, 0);
+                        let exponent = constant(arena, 0.0);
+                        arena.push_call(IrFunction::Pow, &[base, exponent])
+                    },
+                ),
+                ("atan2 removes a derivative multiplied by zero", |arena| {
+                    let left = noise(arena, 0);
+                    let right = constant(arena, 0.0);
+                    arena.push_call(IrFunction::Atan2, &[left, right])
+                }),
+                ("piecewise-constant function has zero derivative", |arena| {
+                    let argument = noise(arena, 0);
+                    arena.push_call(IrFunction::Floor, &[argument])
+                }),
+                ("ddx is resolved before noise provenance", |arena| {
+                    let left = noise(arena, 1);
+                    let right = arena.push(Node::Voltage(0, u32::MAX));
+                    let expr = mul(arena, left, right);
+                    let axis = arena.push_ddx_axis(DdxAxis::Potential {
+                        pos: Some(0),
+                        neg: None,
+                    });
+                    arena.push(Node::Ddx { expr, axis })
+                }),
+                ("ddx can eliminate a noise-only value", |arena| {
+                    let expr = noise(arena, 1);
+                    let axis = arena.push_ddx_axis(DdxAxis::Potential {
+                        pos: Some(0),
+                        neg: None,
+                    });
+                    arena.push(Node::Ddx { expr, axis })
+                }),
+                (
+                    "a zero denominator must not prune numerator noise before runtime validation",
+                    |arena| {
+                        let numerator = noise(arena, 0);
+                        let denominator = constant(arena, 0.0);
+                        arena.push(Node::Binary(BinaryOp::Div, numerator, denominator))
                     },
                 ),
             ];
 
-            for (description, expr) in corpus {
-                assert_eq!(
-                    expression_noise_axes(&expr, &deps, 4),
-                    old_ad_axes(&expr, &deps, 4),
-                    "{description}"
-                );
-            }
+            for (description, build) in corpus {
+                // The singular division is asserted over one process, as it
+                // was before; every other case over four.
+                let processes = if description.starts_with("a zero denominator") {
+                    1
+                } else {
+                    4
+                };
+                let mut structural = ExprArena::new();
+                let id = build(&mut structural);
+                let structural = expression_noise_axes(&mut structural, id, &deps, processes);
 
-            let singular_division = IrExpr::Binary(
-                BinaryOp::Div,
-                Box::new(noise(0)),
-                Box::new(IrExpr::Const(0.0)),
-            );
-            assert_eq!(
-                expression_noise_axes(&singular_division, &deps, 1),
-                old_ad_axes(&singular_division, &deps, 1),
-                "a zero denominator must not prune numerator noise before runtime validation"
-            );
+                let mut symbolic = ExprArena::new();
+                let id = build(&mut symbolic);
+                let symbolic = old_ad_axes(&mut symbolic, id, &deps, processes);
+
+                assert_eq!(structural, symbolic, "{description}");
+            }
         }
 
         #[test]
         fn structural_noise_axes_follow_only_stateful_derivative_operands() {
             let deps = HashMap::from([(SmolStr::new("samples"), BTreeSet::from([3usize]))]);
-            let indexed = IrExpr::VarIndexed {
-                array: "samples".into(),
+
+            let arena = &mut ExprArena::new();
+            let index = noise(arena, 1);
+            let array = arena.intern("samples");
+            let payload = arena.push_indexed(arena::IndexedRead {
+                array,
                 base: 0,
                 len: 4,
                 lower: 0,
-                index: Box::new(noise(1)),
-            };
+            });
+            let indexed = arena.push(Node::VarIndexed { payload, index });
             assert_eq!(
-                expression_noise_axes(&indexed, &deps, 4),
+                expression_noise_axes(arena, indexed, &deps, 4),
                 BTreeSet::from([3]),
                 "runtime array reads follow the selected value, not the index"
             );
 
-            let conditional = IrExpr::Conditional(
-                Box::new(noise(0)),
-                Box::new(noise(1)),
-                Box::new(IrExpr::Var("samples".into())),
-            );
+            let arena = &mut ExprArena::new();
+            let condition = noise(arena, 0);
+            let then_expr = noise(arena, 1);
+            let else_expr = var(arena, "samples");
+            let conditional = arena.push(Node::Conditional(condition, then_expr, else_expr));
             assert_eq!(
-                expression_noise_axes(&conditional, &deps, 4),
+                expression_noise_axes(arena, conditional, &deps, 4),
                 BTreeSet::from([1, 3]),
                 "conditional predicates select a derivative branch but are not differentiated"
             );
 
-            let absdelay = IrExpr::AbsDelay {
+            let arena = &mut ExprArena::new();
+            let expr = noise(arena, 0);
+            let delay_time = noise(arena, 1);
+            let max_delay = noise(arena, 2);
+            let absdelay = arena.push_heavy(Heavy::AbsDelay {
                 site: AbsDelaySiteId {
                     source: 0,
                     start: 0,
                     end: 1,
                     ordinal: 0,
                 },
-                expr: Box::new(noise(0)),
-                delay_time: Box::new(noise(1)),
-                max_delay: Some(Box::new(noise(2))),
-            };
+                expr,
+                delay_time,
+                max_delay: Some(max_delay),
+            });
             assert_eq!(
-                expression_noise_axes(&absdelay, &deps, 4),
+                expression_noise_axes(arena, absdelay, &deps, 4),
                 BTreeSet::from([0, 1]),
                 "absdelay differentiates its value and delay, not max-delay metadata"
             );
 
-            let transition = IrExpr::Transition {
+            let arena = &mut ExprArena::new();
+            let expr = noise(arena, 0);
+            let delay = noise(arena, 1);
+            let rise_time = noise(arena, 2);
+            let fall_time = noise(arena, 3);
+            let transition = arena.push_heavy(Heavy::Transition {
                 site: TransitionSiteId {
                     source: 0,
                     start: 0,
                     end: 1,
                     ordinal: 0,
                 },
-                expr: Box::new(noise(0)),
-                delay: Some(Box::new(noise(1))),
-                rise_time: Some(Box::new(noise(2))),
-                fall_time: Some(Box::new(noise(3))),
-            };
+                expr,
+                delay: Some(delay),
+                rise_time: Some(rise_time),
+                fall_time: Some(fall_time),
+            });
             assert_eq!(
-                expression_noise_axes(&transition, &deps, 4),
+                expression_noise_axes(arena, transition, &deps, 4),
                 BTreeSet::from([0]),
                 "transition timing operands are primal-only"
             );
 
-            let slew = IrExpr::Slew {
+            let arena = &mut ExprArena::new();
+            let expr = noise(arena, 0);
+            let max_pos_slew = noise(arena, 1);
+            let max_neg_slew = noise(arena, 2);
+            let slew = arena.push_heavy(Heavy::Slew {
                 site: SlewSiteId {
                     source: 0,
                     start: 0,
                     end: 1,
                     ordinal: 0,
                 },
-                expr: Box::new(noise(0)),
-                max_pos_slew: Some(Box::new(noise(1))),
-                max_neg_slew: Some(Box::new(noise(2))),
-            };
+                expr,
+                max_pos_slew: Some(max_pos_slew),
+                max_neg_slew: Some(max_neg_slew),
+            });
             assert_eq!(
-                expression_noise_axes(&slew, &deps, 4),
+                expression_noise_axes(arena, slew, &deps, 4),
                 BTreeSet::from([0, 1, 2]),
                 "slew has derivative action through its value and rate operands"
             );

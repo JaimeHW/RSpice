@@ -18,30 +18,34 @@ struct EmitContext {
 #[cfg(test)]
 mod absdelay_derivative_tests {
     use super::*;
-    use crate::ir::{AbsDelaySiteId, DerivativeWrt, IrExpr, autodiff};
+    use crate::ir::arena::Heavy;
+    use crate::ir::{AbsDelaySiteId, DerivativeWrt, autodiff};
 
-    fn primal(site: AbsDelaySiteId, with_max: bool) -> IrExpr {
-        IrExpr::AbsDelay {
+    fn primal(arena: &mut ExprArena, site: AbsDelaySiteId, with_max: bool) -> NodeId {
+        let expr = arena.push(Node::Voltage(0, u32::MAX));
+        let delay_time = arena.push(Node::Voltage(1, u32::MAX));
+        let max_delay = with_max.then(|| arena.push(Node::Const(2.0)));
+        arena.push_heavy(Heavy::AbsDelay {
             site,
-            expr: Box::new(IrExpr::Voltage(0, usize::MAX)),
-            delay_time: Box::new(IrExpr::Voltage(1, usize::MAX)),
-            max_delay: with_max.then(|| Box::new(IrExpr::Const(2.0))),
-        }
+            expr,
+            delay_time,
+            max_delay,
+        })
     }
 
     #[test]
     fn absdelay_maxdelay_and_exact_derivative_share_one_slot() {
         let generator = CodeGenerator::new();
-        let emit_context = EmitContext {
-            parameter_indices: HashMap::new(),
-            variable_indices: HashMap::new(),
-        };
+        let emit_context = empty_emit_context();
         let site = AbsDelaySiteId::from_span(crate::source::Span::dummy());
-        let primal = primal(site, true);
-        let derivative = autodiff::differentiate_source(&primal, &DerivativeWrt::Voltage(0));
-        let derivative_program = compile_fixture(&generator, &derivative, &emit_context)
+        let arena = &mut ExprArena::new();
+        let primal = primal(arena, site, true);
+        let derivative = autodiff::differentiate(arena, primal, &DerivativeWrt::Voltage(0));
+        let derivative_program = generator
+            .compile_expr(arena, derivative, &emit_context)
             .expect("compile absdelay derivative first");
-        let primal_program = compile_fixture(&generator, &primal, &emit_context)
+        let primal_program = generator
+            .compile_expr(arena, primal, &emit_context)
             .expect("compile absdelay primal second");
 
         assert!(matches!(
@@ -58,18 +62,13 @@ mod absdelay_derivative_tests {
     #[test]
     fn absdelay_second_derivative_fails_closed() {
         let site = AbsDelaySiteId::from_span(crate::source::Span::dummy());
-        let first =
-            autodiff::differentiate_source(&primal(site, false), &DerivativeWrt::Voltage(0));
-        let second = autodiff::differentiate_source(&first, &DerivativeWrt::Voltage(0));
-        let error = compile_fixture(
-            &CodeGenerator::new(),
-            &second,
-            &EmitContext {
-                parameter_indices: HashMap::new(),
-                variable_indices: HashMap::new(),
-            },
-        )
-        .expect_err("unsupported absdelay Hessian must fail compilation");
+        let arena = &mut ExprArena::new();
+        let primal = primal(arena, site, false);
+        let first = autodiff::differentiate(arena, primal, &DerivativeWrt::Voltage(0));
+        let second = autodiff::differentiate(arena, first, &DerivativeWrt::Voltage(0));
+        let error = CodeGenerator::new()
+            .compile_expr(arena, second, &empty_emit_context())
+            .expect_err("unsupported absdelay Hessian must fail compilation");
         assert!(error.to_string().contains("higher-order derivatives"));
     }
 
@@ -359,25 +358,22 @@ impl CodeGenerator {
     ///
     /// # The arena is the emitter's input
     ///
-    /// From here on the emitter reads an [`ExprArena`], not `IrExpr`. Every
-    /// family of trees this function compiles — the parameter default and
-    /// range programs, the assignment items, the branch equations and the
-    /// noise PSD, exponent and gain programs — is imported into one arena at
-    /// the point it is compiled, and the import is **one way by design**: the
-    /// tree is moved out of the IR, its 16-byte nodes are appended to the
-    /// arena, and the `Box` tree is dropped there and then. Nothing on this
-    /// path calls [`ExprArena::export`]; a step that finds itself exporting a
-    /// forest has been split in the place the design says never to split it.
+    /// Every family of expressions this function compiles — the parameter
+    /// default and range programs, the assignment items, the branch equations
+    /// and the noise PSD, exponent and gain programs — is already a [`NodeId`]
+    /// into [`DeviceIR::exprs`] when it arrives. There is no import and no
+    /// boxed tree anywhere in the front end to import from: the converter
+    /// writes these nodes, the differentiation core rewrites them, and this
+    /// function reads them.
     ///
     /// # Why the IR is taken by `&mut`
     ///
     /// The shadow-expanded assignment forest is the largest allocation of the
-    /// whole compile — 122 bytes per node, eighteen million nodes on
-    /// `bsimcmg` — and nothing after the assignment pass reads it. Handing it
-    /// over item by item, rather than borrowing it and dropping it whole at
-    /// the end, takes the peak from "forest plus two bytecode passes" to a
-    /// forest that is already shrinking while the first pass is written, which
-    /// is what lets the largest shipped models compile inside a 32 GB box.
+    /// whole compile — eighteen million nodes on `bsimcmg` — and nothing after
+    /// the assignment pass reads it. Taking the arena out of the IR rather
+    /// than borrowing it lets the forest be dropped with the IR while the
+    /// bytecode is still being written, which is part of what lets the largest
+    /// shipped models compile inside a 32 GB box.
     /// The generator's emission state ([`EmitContext`], the site maps, the
     /// per-emission counters) is owned by `self` and by a context built before
     /// the first take, so nothing borrows the IR across a drop.
@@ -1982,21 +1978,14 @@ fn count_ir_assignment_items(items: &[crate::ir::IrAssignmentItem]) -> usize {
         .sum()
 }
 
-/// Compile one hand-built `IrExpr` fixture
-///
-/// The fixtures below still build `IrExpr` trees, because that is what the
-/// converter produces; the production path no longer crosses here at all —
-/// [`crate::ir::DeviceIR`] hands the emitter node ids. A fixture is one tree,
-/// so it gets one arena.
+/// An [`EmitContext`] with nothing named, which is what every fixture below
+/// wants.
 #[cfg(test)]
-fn compile_fixture(
-    generator: &CodeGenerator,
-    expr: &crate::ir::IrExpr,
-    emit_ctx: &EmitContext,
-) -> CompileResult<BytecodeProgram> {
-    let mut arena = ExprArena::new();
-    let id = arena.import(expr);
-    generator.compile_expr(&arena, id, emit_ctx)
+fn empty_emit_context() -> EmitContext {
+    EmitContext {
+        parameter_indices: HashMap::new(),
+        variable_indices: HashMap::new(),
+    }
 }
 
 fn count_assignment_steps_for_timing(items: &[AssignmentStep]) -> usize {
@@ -2012,39 +2001,44 @@ fn count_assignment_steps_for_timing(items: &[AssignmentStep]) -> usize {
 #[cfg(test)]
 mod laplace_derivative_tests {
     use super::*;
-    use crate::ir::{IrExpr, LaplaceSiteId};
+    use crate::ir::LaplaceSiteId;
+    use crate::ir::arena::Heavy;
 
-    fn laplace_nd(site: LaplaceSiteId, derivative: bool) -> IrExpr {
-        let expr = Box::new(IrExpr::Voltage(0, usize::MAX));
-        if derivative {
-            IrExpr::LaplaceNDDerivative {
+    fn laplace_nd(arena: &mut ExprArena, site: LaplaceSiteId, derivative: bool) -> NodeId {
+        let expr = arena.push(Node::Voltage(0, u32::MAX));
+        let numerator = vec![1.0];
+        let denominator = vec![1.0, 1.0];
+        arena.push_heavy(if derivative {
+            Heavy::LaplaceNDDerivative {
                 site,
                 expr,
-                numerator: vec![1.0],
-                denominator: vec![1.0, 1.0],
+                numerator,
+                denominator,
             }
         } else {
-            IrExpr::LaplaceND {
+            Heavy::LaplaceND {
                 site,
                 expr,
-                numerator: vec![1.0],
-                denominator: vec![1.0, 1.0],
+                numerator,
+                denominator,
             }
-        }
+        })
     }
 
     #[test]
     fn laplace_derivative_and_primal_share_a_slot_when_derivative_compiles_first() {
         let generator = CodeGenerator::new();
-        let emit_context = EmitContext {
-            parameter_indices: HashMap::new(),
-            variable_indices: HashMap::new(),
-        };
+        let emit_context = empty_emit_context();
         let site = LaplaceSiteId::from_span(crate::source::Span::dummy());
 
-        let derivative = compile_fixture(&generator, &laplace_nd(site, true), &emit_context)
+        let arena = &mut ExprArena::new();
+        let derivative_id = laplace_nd(arena, site, true);
+        let primal_id = laplace_nd(arena, site, false);
+        let derivative = generator
+            .compile_expr(arena, derivative_id, &emit_context)
             .expect("compile derivative first");
-        let primal = compile_fixture(&generator, &laplace_nd(site, false), &emit_context)
+        let primal = generator
+            .compile_expr(arena, primal_id, &emit_context)
             .expect("compile primal second");
 
         assert!(matches!(
@@ -2093,49 +2087,55 @@ endmodule
 #[cfg(test)]
 mod transition_derivative_tests {
     use super::*;
-    use crate::ir::{IrExpr, TransitionSiteId};
+    use crate::ir::TransitionSiteId;
+    use crate::ir::arena::Heavy;
 
-    fn nonconstant_rise_time() -> IrExpr {
-        IrExpr::Binary(
-            BinaryOp::Add,
-            Box::new(IrExpr::Voltage(1, usize::MAX)),
-            Box::new(IrExpr::Const(0.5)),
-        )
+    fn nonconstant_rise_time(arena: &mut ExprArena) -> NodeId {
+        let left = arena.push(Node::Voltage(1, u32::MAX));
+        let right = arena.push(Node::Const(0.5));
+        arena.push(Node::Binary(BinaryOp::Add, left, right))
     }
 
-    fn transition(site: TransitionSiteId, derivative: bool) -> IrExpr {
-        if derivative {
-            IrExpr::TransitionDerivative {
+    fn transition(arena: &mut ExprArena, site: TransitionSiteId, derivative: bool) -> NodeId {
+        let input = arena.push(Node::Voltage(0, u32::MAX));
+        let delay = Some(arena.push(Node::Const(0.25)));
+        let rise_time = Some(nonconstant_rise_time(arena));
+        let payload = if derivative {
+            let input_derivative = arena.push(Node::Const(1.0));
+            Heavy::TransitionDerivative {
                 site,
-                input: Box::new(IrExpr::Voltage(0, usize::MAX)),
-                input_derivative: Box::new(IrExpr::Const(1.0)),
-                delay: Some(Box::new(IrExpr::Const(0.25))),
-                rise_time: Some(Box::new(nonconstant_rise_time())),
+                input,
+                input_derivative,
+                delay,
+                rise_time,
                 fall_time: None,
             }
         } else {
-            IrExpr::Transition {
+            Heavy::Transition {
                 site,
-                expr: Box::new(IrExpr::Voltage(0, usize::MAX)),
-                delay: Some(Box::new(IrExpr::Const(0.25))),
-                rise_time: Some(Box::new(nonconstant_rise_time())),
+                expr: input,
+                delay,
+                rise_time,
                 fall_time: None,
             }
-        }
+        };
+        arena.push_heavy(payload)
     }
 
     #[test]
     fn transition_derivative_and_primal_share_slot_and_fall_default() {
         let generator = CodeGenerator::new();
-        let emit_context = EmitContext {
-            parameter_indices: HashMap::new(),
-            variable_indices: HashMap::new(),
-        };
+        let emit_context = empty_emit_context();
         let site = TransitionSiteId::from_span(crate::source::Span::dummy());
 
-        let derivative = compile_fixture(&generator, &transition(site, true), &emit_context)
+        let arena = &mut ExprArena::new();
+        let derivative_id = transition(arena, site, true);
+        let primal_id = transition(arena, site, false);
+        let derivative = generator
+            .compile_expr(arena, derivative_id, &emit_context)
             .expect("compile transition derivative first");
-        let primal = compile_fixture(&generator, &transition(site, false), &emit_context)
+        let primal = generator
+            .compile_expr(arena, primal_id, &emit_context)
             .expect("compile transition primal second");
 
         assert!(matches!(
@@ -2152,13 +2152,14 @@ mod transition_derivative_tests {
         // An omitted fall time re-emits the rise expression, so the slots
         // between the delay and the terminating filter instruction are the
         // rise expression's own emission twice, back to back.
-        let rise_ops: Vec<String> =
-            compile_fixture(&generator, &nonconstant_rise_time(), &emit_context)
-                .expect("compile the rise expression on its own")
-                .instructions
-                .iter()
-                .map(|instruction| format!("{instruction:?}"))
-                .collect();
+        let rise_id = nonconstant_rise_time(arena);
+        let rise_ops: Vec<String> = generator
+            .compile_expr(arena, rise_id, &emit_context)
+            .expect("compile the rise expression on its own")
+            .instructions
+            .iter()
+            .map(|instruction| format!("{instruction:?}"))
+            .collect();
         let expected: Vec<String> = rise_ops.iter().chain(rise_ops.iter()).cloned().collect();
         for (label, instructions) in [
             ("primal", &primal.instructions),
@@ -2183,41 +2184,49 @@ mod transition_derivative_tests {
 mod slew_derivative_tests {
     use super::*;
     use crate::ast::BinaryOp;
-    use crate::ir::{DerivativeWrt, IrExpr, SlewSiteId, autodiff};
+    use crate::ir::arena::Heavy;
+    use crate::ir::{DerivativeWrt, SlewSiteId, autodiff};
 
-    fn slew(site: SlewSiteId, derivative: bool) -> IrExpr {
-        if derivative {
-            IrExpr::SlewDerivative {
+    fn slew(arena: &mut ExprArena, site: SlewSiteId, derivative: bool) -> NodeId {
+        let input = arena.push(Node::Voltage(0, u32::MAX));
+        let max_pos_slew = Some(arena.push(Node::Const(2.0)));
+        let payload = if derivative {
+            let input_derivative = arena.push(Node::Const(1.0));
+            let max_pos_slew_derivative = Some(arena.push(Node::Const(0.0)));
+            Heavy::SlewDerivative {
                 site,
-                input: Box::new(IrExpr::Voltage(0, usize::MAX)),
-                input_derivative: Box::new(IrExpr::Const(1.0)),
-                max_pos_slew: Some(Box::new(IrExpr::Const(2.0))),
-                max_pos_slew_derivative: Some(Box::new(IrExpr::Const(0.0))),
+                input,
+                input_derivative,
+                max_pos_slew,
+                max_pos_slew_derivative,
                 max_neg_slew: None,
                 max_neg_slew_derivative: None,
             }
         } else {
-            IrExpr::Slew {
+            Heavy::Slew {
                 site,
-                expr: Box::new(IrExpr::Voltage(0, usize::MAX)),
-                max_pos_slew: Some(Box::new(IrExpr::Const(2.0))),
+                expr: input,
+                max_pos_slew,
                 max_neg_slew: None,
             }
-        }
+        };
+        arena.push_heavy(payload)
     }
 
     #[test]
     fn slew_derivative_and_primal_share_slot_when_derivative_compiles_first() {
         let generator = CodeGenerator::new();
-        let emit_context = EmitContext {
-            parameter_indices: HashMap::new(),
-            variable_indices: HashMap::new(),
-        };
+        let emit_context = empty_emit_context();
         let site = SlewSiteId::from_span(crate::source::Span::dummy());
 
-        let derivative = compile_fixture(&generator, &slew(site, true), &emit_context)
+        let arena = &mut ExprArena::new();
+        let derivative_id = slew(arena, site, true);
+        let primal_id = slew(arena, site, false);
+        let derivative = generator
+            .compile_expr(arena, derivative_id, &emit_context)
             .expect("compile derivative first");
-        let primal = compile_fixture(&generator, &slew(site, false), &emit_context)
+        let primal = generator
+            .compile_expr(arena, primal_id, &emit_context)
             .expect("compile primal second");
 
         assert!(matches!(
@@ -2243,21 +2252,18 @@ mod slew_derivative_tests {
     #[test]
     fn slew_without_rates_is_compiled_as_exact_passthrough_without_state() {
         let generator = CodeGenerator::new();
-        let emit_context = EmitContext {
-            parameter_indices: HashMap::new(),
-            variable_indices: HashMap::new(),
-        };
-        let program = compile_fixture(
-            &generator,
-            &IrExpr::Slew {
-                site: SlewSiteId::from_span(crate::source::Span::dummy()),
-                expr: Box::new(IrExpr::Const(3.0)),
-                max_pos_slew: None,
-                max_neg_slew: None,
-            },
-            &emit_context,
-        )
-        .expect("compile passthrough slew");
+        let emit_context = empty_emit_context();
+        let arena = &mut ExprArena::new();
+        let expr = arena.push(Node::Const(3.0));
+        let id = arena.push_heavy(Heavy::Slew {
+            site: SlewSiteId::from_span(crate::source::Span::dummy()),
+            expr,
+            max_pos_slew: None,
+            max_neg_slew: None,
+        });
+        let program = generator
+            .compile_expr(arena, id, &emit_context)
+            .expect("compile passthrough slew");
 
         assert!(matches!(
             program.instructions.as_slice(),
@@ -2269,42 +2275,48 @@ mod slew_derivative_tests {
     #[test]
     fn slew_higher_derivatives_preserve_dynamic_rate_dependence() {
         let site = SlewSiteId::from_span(crate::source::Span::dummy());
-        let voltage = IrExpr::Voltage(0, usize::MAX);
-        let nonlinear_rate =
-            IrExpr::Binary(BinaryOp::Mul, Box::new(voltage.clone()), Box::new(voltage));
-        let primal = IrExpr::Slew {
+        let arena = &mut ExprArena::new();
+        let voltage = arena.push(Node::Voltage(0, u32::MAX));
+        let nonlinear_rate = arena.push(Node::Binary(BinaryOp::Mul, voltage, voltage));
+        // Deliberately independent of the differentiation axis: the rate is
+        // the only source of the saturated-branch Jacobian.
+        let expr = arena.push(Node::Const(10.0));
+        let primal = arena.push_heavy(Heavy::Slew {
             site,
-            // Deliberately independent of the differentiation axis: the rate
-            // is the only source of the saturated-branch Jacobian.
-            expr: Box::new(IrExpr::Const(10.0)),
-            max_pos_slew: Some(Box::new(nonlinear_rate)),
+            expr,
+            max_pos_slew: Some(nonlinear_rate),
             max_neg_slew: None,
-        };
-        let first = autodiff::differentiate_source(&primal, &DerivativeWrt::Voltage(0));
-        let second = autodiff::differentiate_source(&first, &DerivativeWrt::Voltage(0));
+        });
+        let first = autodiff::differentiate(arena, primal, &DerivativeWrt::Voltage(0));
+        let second = autodiff::differentiate(arena, first, &DerivativeWrt::Voltage(0));
 
-        let IrExpr::SlewDerivative {
+        let heavy = |arena: &ExprArena, id: NodeId| match *arena.node(id) {
+            Node::Heavy(_, heavy) => arena.heavy(heavy).clone(),
+            other => panic!("expected a heavy operator, found {other:?}"),
+        };
+        let Heavy::SlewDerivative {
             input_derivative,
             max_pos_slew_derivative,
             ..
-        } = &first
+        } = heavy(arena, first)
         else {
             panic!("first slew derivative must retain a branch action");
         };
-        assert!(matches!(input_derivative.as_ref(), IrExpr::Const(0.0)));
+        assert!(matches!(*arena.node(input_derivative), Node::Const(0.0)));
         assert!(
-            !matches!(max_pos_slew_derivative.as_deref(), Some(IrExpr::Const(0.0))),
+            !matches!(
+                max_pos_slew_derivative.map(|id| *arena.node(id)),
+                Some(Node::Const(0.0))
+            ),
             "dynamic rate derivative must not be optimized to zero"
         );
-        assert!(matches!(second, IrExpr::SlewDerivative { .. }));
+        assert!(matches!(heavy(arena, second), Heavy::SlewDerivative { .. }));
 
         let generator = CodeGenerator::new();
-        let emit_context = EmitContext {
-            parameter_indices: HashMap::new(),
-            variable_indices: HashMap::new(),
-        };
-        for derivative in [&first, &second] {
-            let program = compile_fixture(&generator, derivative, &emit_context)
+        let emit_context = empty_emit_context();
+        for derivative in [first, second] {
+            let program = generator
+                .compile_expr(arena, derivative, &emit_context)
                 .expect("compile branch-exact slew derivative");
             assert!(matches!(
                 program.instructions.last(),

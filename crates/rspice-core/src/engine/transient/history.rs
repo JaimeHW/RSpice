@@ -123,20 +123,7 @@ pub(super) struct JfetTransientHistory {
     pub(super) accepted_dt_prev_prev: Value,
 }
 
-/// Junction charge history for diodes (ngspice `DIOcapCharge` state):
-/// the depletion+diffusion charge is integrated with the same companion
-/// discipline as the JFET/MOSFET gate charges.
-#[derive(Debug, Clone, Default, PartialEq)]
-pub(super) struct DiodeTransientHistory {
-    pub(super) vd_prev: Vec<Value>,
-    pub(super) vd_prev_prev: Vec<Value>,
-    pub(super) qd_prev: Vec<Value>,
-    pub(super) qd_prev_prev: Vec<Value>,
-    pub(super) qd_prev_prev_prev: Vec<Value>,
-    pub(super) cqd_prev: Vec<Value>,
-    pub(super) accepted_dt_prev: Value,
-    pub(super) accepted_dt_prev_prev: Value,
-}
+pub(super) use crate::numerics::integration::TwoTerminalChargeHistory as DiodeTransientHistory;
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(super) struct BjtTransientHistory {
@@ -168,7 +155,9 @@ pub(super) struct BjtTransientHistory {
 
 pub(super) const BJT_TRANSIENT_HISTORY_RUNTIME_TAG: &str =
     "legacy-gummel-poon-transient-history-v1";
-pub(super) const DIODE_TRANSIENT_HISTORY_RUNTIME_TAG: &str = "native-diode-transient-history-v1";
+// V1 could freeze charge history whenever the local charge slope was zero
+// or negative. That lost history cannot be reconstructed from a capture.
+pub(super) const DIODE_TRANSIENT_HISTORY_RUNTIME_TAG: &str = "native-diode-transient-history-v2";
 
 /// Versionable image of the accepted BJT/diode integration state owned by the
 /// transient engine rather than by the device instances.
@@ -1082,6 +1071,13 @@ D1 b 0 DM
                 .unwrap_err()
                 .contains("shape mismatch")
         );
+
+        let mut old_runtime = checkpoint.clone();
+        old_runtime.diode_runtime_tags[0] = "native-diode-transient-history-v1".to_string();
+        let error =
+            Engine::validate_accepted_junction_transient_history_checkpoint(&circuit, &old_runtime)
+                .unwrap_err();
+        assert!(error.contains("runtime mismatch") && error.contains("history-v1"));
 
         let mut non_finite = checkpoint.clone();
         non_finite.bjt_history.accepted_terminal_currents[0] =

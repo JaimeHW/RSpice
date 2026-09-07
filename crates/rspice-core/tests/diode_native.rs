@@ -4,6 +4,46 @@ use rspice_core::engine::{Engine, SimulationConfig, SpiceDialect};
 use rspice_core::netlist::Netlist;
 use rspice_core::solver::SimulationResult;
 
+#[test]
+fn diode_charge_only_reactive_state_matches_the_analytic_rc_response() {
+    // A reverse-biased M=0 junction has Q=CJO*V. With negligible IS, this
+    // circuit is exactly an RC low-pass with no explicit capacitor. Checking
+    // the entire waveform also checks phase and the startup charge history.
+    let tau = 1e3 * 1e-9;
+    let omega = std::f64::consts::TAU * 1e6;
+    let ratio: f64 = omega * tau;
+    let amplitude = 0.01 / (1.0 + ratio * ratio).sqrt();
+    for method in ["trap", "gear"] {
+        let netlist = Netlist::parse(&format!(
+            "diode charge RC oracle\n\
+             V1 in 0 SIN(-1 0.01 1meg)\n\
+             R1 in out 1k\n\
+             D1 out 0 dm\n\
+             .model dm D(IS=1e-30 CJO=1n M=0 TT=0)\n\
+             .options method={method}\n\
+             .tran 1n 5u\n\
+             .end\n"
+        ))
+        .expect("charge-only diode deck parses");
+        let result = Engine::default()
+            .run_tran(&netlist, 5e-6, 1e-9)
+            .expect("charge-only diode transient converges");
+        let output = result.try_voltage_waveform_named("OUT").unwrap();
+        let mut max_error = 0.0_f64;
+        for (&time, &voltage) in result.time.iter().zip(output) {
+            let phase = omega * time;
+            let expected = -1.0
+                + 0.01 / (1.0 + ratio * ratio)
+                    * (phase.sin() - ratio * phase.cos() + ratio * (-time / tau).exp());
+            max_error = max_error.max((voltage - expected).abs());
+        }
+        assert!(
+            max_error < amplitude * 0.002,
+            "{method}: maximum charge waveform error {max_error:e}, amplitude {amplitude:e}"
+        );
+    }
+}
+
 fn branch_current(result: &SimulationResult, branch: &str) -> f64 {
     result
         .branch_current_named(branch)

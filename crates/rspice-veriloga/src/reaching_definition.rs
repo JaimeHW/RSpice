@@ -57,9 +57,10 @@
 //! fails closed if the statement sites it is handed are not ascending.
 
 use crate::error::{CodeGenError, CodeGenErrorKind, CompileResult};
+use crate::ir::arena::{self, ExprArena, Heavy, Node};
 use crate::ir::{
-    ArrayDef, EquationSnapshotReads, IrExpr, ReachingSnapshotCopy, ReachingSnapshotPlan,
-    SourceAssignmentItem, SourceVarAssignment, VarDef,
+    ArrayDef, EquationSnapshotReads, IrAssignmentItem, NodeId, ReachingSnapshotCopy,
+    ReachingSnapshotPlan, VarAssignment, VarDef,
 };
 use crate::semantic::AnalogSiteId;
 use smol_str::SmolStr;
@@ -93,11 +94,12 @@ pub(crate) const SNAPSHOT_MARKER: &str = "@snap";
 /// Called between contribution conversion and `build_shadow_assignments`; see
 /// the module comment for why that window and no other.
 pub(crate) fn insert_equation_snapshots(
-    assignments: &mut Vec<SourceAssignmentItem>,
+    arena: &mut ExprArena,
+    assignments: &mut Vec<IrAssignmentItem>,
     variables: &mut Vec<VarDef>,
     arrays: &[ArrayDef],
     statement_sites: &[AnalogSiteId],
-    equations: &mut [IrExpr],
+    equations: &mut [NodeId],
     equation_sites: &[AnalogSiteId],
 ) -> CompileResult<ReachingSnapshotPlan> {
     if assignments.len() != statement_sites.len() || equations.len() != equation_sites.len() {
@@ -147,7 +149,7 @@ pub(crate) fn insert_equation_snapshots(
     // share a slot, so a model with many equations over one scratch variable
     // pays for the values it snapshots rather than the reads it makes.
     let mut snapshots: HashMap<(usize, Option<usize>), SmolStr> = HashMap::new();
-    let mut splices: Vec<(usize, SourceVarAssignment)> = Vec::new();
+    let mut splices: Vec<(usize, VarAssignment)> = Vec::new();
     let mut plan = ReachingSnapshotPlan::default();
 
     for (equation, expr) in equations.iter_mut().enumerate() {
@@ -156,7 +158,7 @@ pub(crate) fn insert_equation_snapshots(
         let site = equation_sites[equation];
         let point = statement_sites.partition_point(|statement| *statement < site);
 
-        let mut reads = variable_reads(expr);
+        let mut reads = variable_reads(arena, *expr);
         reads.sort_unstable();
         reads.dedup();
 
@@ -204,10 +206,13 @@ pub(crate) fn insert_equation_snapshots(
                     // definition can read.
                     splices.push((
                         reaching.map_or(0, |index| index + 1),
-                        SourceVarAssignment {
+                        VarAssignment {
                             var_index: variables.len() - 1,
                             index: None,
-                            expr: IrExpr::Var(name.clone()),
+                            expr: {
+                                let name = arena.intern(&name);
+                                arena.push(Node::Var(name))
+                            },
                         },
                     ));
                     snapshot
@@ -225,7 +230,7 @@ pub(crate) fn insert_equation_snapshots(
             // module and not of a hash iteration.
             reads.sort_unstable();
             plan.reads.push(EquationSnapshotReads { equation, reads });
-            *expr = rename_variable_reads(expr, &renames);
+            *expr = rename_variable_reads(arena, *expr, &renames);
         }
     }
 
@@ -238,7 +243,7 @@ pub(crate) fn insert_equation_snapshots(
     // which is the order their reading equations appear.
     splices.sort_by_key(|(point, _)| *point);
     for (point, assignment) in splices.into_iter().rev() {
-        assignments.insert(point, SourceAssignmentItem::Assign(assignment));
+        assignments.insert(point, IrAssignmentItem::Assign(assignment));
     }
     Ok(plan)
 }
@@ -262,9 +267,9 @@ fn reaching_write(writes: &HashMap<usize, Vec<usize>>, slot: usize, point: usize
 ///
 /// A runtime-indexed write names an element only at runtime, so it counts as a
 /// write to the whole declared run.
-fn record_writes(item: &SourceAssignmentItem, index: usize, out: &mut HashMap<usize, Vec<usize>>) {
+fn record_writes(item: &IrAssignmentItem, index: usize, out: &mut HashMap<usize, Vec<usize>>) {
     match item {
-        SourceAssignmentItem::Assign(assignment) => {
+        IrAssignmentItem::Assign(assignment) => {
             let span = match &assignment.index {
                 Some(target) => target.len,
                 None => 1,
@@ -276,7 +281,7 @@ fn record_writes(item: &SourceAssignmentItem, index: usize, out: &mut HashMap<us
                 }
             }
         }
-        SourceAssignmentItem::Loop { body, .. } => {
+        IrAssignmentItem::Loop { body, .. } => {
             for nested in body {
                 record_writes(nested, index, out);
             }
@@ -284,98 +289,40 @@ fn record_writes(item: &SourceAssignmentItem, index: usize, out: &mut HashMap<us
     }
 }
 
-/// The operand programs an operator owns, which the generic walk stops at.
-///
-/// `map_expr` and `visit_expr` treat every event and noise node as a leaf,
-/// because an operator's operands are compiled into programs of their own
-/// rather than into the expression holding it. Those programs are evaluated
-/// with the equation all the same — a noise magnitude is read at the operating
-/// point the residual was stamped from — so they read the same definitions and
-/// must be captured the same way. Nothing else the two walks stop at owns a
-/// sub-expression: a Laplace or Zi coefficient list is numbers, a companion is
-/// a slot ordinal.
-fn operator_operands(expr: &IrExpr) -> Vec<&IrExpr> {
-    fn optional<'a>(out: &mut Vec<&'a IrExpr>, operand: &'a Option<Box<IrExpr>>) {
-        if let Some(operand) = operand {
-            out.push(operand);
-        }
-    }
-
-    let mut operands = Vec::new();
-    match expr {
-        IrExpr::WhiteNoise { power, .. } => operands.push(power.as_ref()),
-        IrExpr::FlickerNoise {
-            power, exponent, ..
-        } => {
-            operands.push(power);
-            operands.push(exponent);
-        }
-        IrExpr::Cross {
-            expr,
-            direction,
-            time_tol,
-            expr_tol,
-            enable,
-        } => {
-            operands.push(expr);
-            optional(&mut operands, direction);
-            optional(&mut operands, time_tol);
-            optional(&mut operands, expr_tol);
-            optional(&mut operands, enable);
-        }
-        IrExpr::Above {
-            expr,
-            time_tol,
-            expr_tol,
-            enable,
-        } => {
-            operands.push(expr);
-            optional(&mut operands, time_tol);
-            optional(&mut operands, expr_tol);
-            optional(&mut operands, enable);
-        }
-        IrExpr::Timer {
-            start_time,
-            period,
-            time_tol,
-            enable,
-        } => {
-            operands.push(start_time);
-            optional(&mut operands, period);
-            optional(&mut operands, time_tol);
-            optional(&mut operands, enable);
-        }
-        IrExpr::LastCrossing { expr, .. } => operands.push(expr),
-        _ => {}
-    }
-    operands
-}
-
 /// Every variable an equation reads, operator operands included.
-fn variable_reads(expr: &IrExpr) -> Vec<SmolStr> {
+///
+/// The walk this reaches through — [`arena::operator_operands`] — is the one
+/// this module used to own: the generic walks treat every event and noise node
+/// as a leaf because an operator's operands are compiled into programs of their
+/// own rather than into the expression holding it, and those programs are
+/// evaluated with the equation all the same, so they read the same definitions
+/// and must be captured the same way.
+fn variable_reads(arena: &ExprArena, expr: NodeId) -> Vec<SmolStr> {
     /// One generic walk, queueing the operand programs it stops at.
     ///
-    /// The operands are queued by value because `visit_expr` hands its
-    /// callback a reference that may not outlive the call. They are an
-    /// operator's arguments — a noise magnitude, a crossing tolerance — so the
-    /// copy is bounded by what one operator was written with.
-    fn scan(expr: &IrExpr, reads: &mut Vec<SmolStr>, queue: &mut Vec<IrExpr>) {
-        crate::ir::autodiff::visit_expr(expr, &mut |node| {
-            match node {
-                IrExpr::Var(name) => reads.push(name.clone()),
-                IrExpr::VarIndexed { array, .. } => reads.push(array.clone()),
+    /// The operands are queued as ids now rather than by value: on the arena an
+    /// operator's magnitude is a four-byte name for a program the walk has not
+    /// entered, so the queue costs nothing and the copy the boxed walk made is
+    /// gone.
+    fn scan(arena: &ExprArena, expr: NodeId, reads: &mut Vec<SmolStr>, queue: &mut Vec<NodeId>) {
+        arena::visit(arena, expr, &mut |node| {
+            match *node {
+                Node::Var(name) => reads.push(arena.name(name).clone()),
+                Node::VarIndexed { payload, .. } => {
+                    reads.push(arena.name(arena.indexed(payload).array).clone());
+                }
                 _ => {}
             }
-            queue.extend(operator_operands(node).into_iter().cloned());
+            queue.extend(arena::operator_operands(arena, node));
         });
     }
 
     let mut reads = Vec::new();
     let mut queue = Vec::new();
-    scan(expr, &mut reads, &mut queue);
+    scan(arena, expr, &mut reads, &mut queue);
     while !queue.is_empty() {
         for operand in std::mem::take(&mut queue) {
-            scan(&operand, &mut reads, &mut queue);
+            scan(arena, operand, &mut reads, &mut queue);
         }
     }
     reads
@@ -383,75 +330,101 @@ fn variable_reads(expr: &IrExpr) -> Vec<SmolStr> {
 
 /// Replace the named variable reads with their snapshots, operator operands
 /// included.
-fn rename_variable_reads(expr: &IrExpr, renames: &HashMap<SmolStr, SmolStr>) -> IrExpr {
+///
+/// A pure rewrite, so it may share: an unchanged subtree keeps its id and a
+/// renamed one is appended once per path. The heavy operators are rebuilt by
+/// hand because [`arena::rewrite`] treats them as leaves for the same reason
+/// the boxed `map_expr` did — their operands are separate programs — and this
+/// pass is exactly the one that has to reach them.
+fn rename_variable_reads(
+    arena: &mut ExprArena,
+    expr: NodeId,
+    renames: &HashMap<SmolStr, SmolStr>,
+) -> NodeId {
     fn rename_optional(
-        operand: &Option<Box<IrExpr>>,
+        arena: &mut ExprArena,
+        operand: Option<NodeId>,
         renames: &HashMap<SmolStr, SmolStr>,
-    ) -> Option<Box<IrExpr>> {
-        operand
-            .as_ref()
-            .map(|operand| Box::new(rename_variable_reads(operand, renames)))
+    ) -> Option<NodeId> {
+        operand.map(|operand| rename_variable_reads(arena, operand, renames))
     }
 
-    crate::ir::autodiff::map_expr(expr, &mut |node| match node {
-        IrExpr::Var(name) => renames
-            .get(name)
-            .map(|snapshot| IrExpr::Var(snapshot.clone())),
-        IrExpr::WhiteNoise { site, power, name } => Some(IrExpr::WhiteNoise {
-            site: *site,
-            power: Box::new(rename_variable_reads(power, renames)),
-            name: name.clone(),
-        }),
-        IrExpr::FlickerNoise {
-            site,
-            power,
-            exponent,
-            name,
-        } => Some(IrExpr::FlickerNoise {
-            site: *site,
-            power: Box::new(rename_variable_reads(power, renames)),
-            exponent: Box::new(rename_variable_reads(exponent, renames)),
-            name: name.clone(),
-        }),
-        IrExpr::Cross {
-            expr,
-            direction,
-            time_tol,
-            expr_tol,
-            enable,
-        } => Some(IrExpr::Cross {
-            expr: Box::new(rename_variable_reads(expr, renames)),
-            direction: rename_optional(direction, renames),
-            time_tol: rename_optional(time_tol, renames),
-            expr_tol: rename_optional(expr_tol, renames),
-            enable: rename_optional(enable, renames),
-        }),
-        IrExpr::Above {
-            expr,
-            time_tol,
-            expr_tol,
-            enable,
-        } => Some(IrExpr::Above {
-            expr: Box::new(rename_variable_reads(expr, renames)),
-            time_tol: rename_optional(time_tol, renames),
-            expr_tol: rename_optional(expr_tol, renames),
-            enable: rename_optional(enable, renames),
-        }),
-        IrExpr::Timer {
-            start_time,
-            period,
-            time_tol,
-            enable,
-        } => Some(IrExpr::Timer {
-            start_time: Box::new(rename_variable_reads(start_time, renames)),
-            period: rename_optional(period, renames),
-            time_tol: rename_optional(time_tol, renames),
-            enable: rename_optional(enable, renames),
-        }),
-        IrExpr::LastCrossing { expr, direction } => Some(IrExpr::LastCrossing {
-            expr: Box::new(rename_variable_reads(expr, renames)),
-            direction: *direction,
-        }),
+    arena::rewrite(arena, expr, &mut |arena, node| match node {
+        Node::Var(name) => {
+            let snapshot = renames.get(arena.name(name))?.clone();
+            let snapshot = arena.intern(&snapshot);
+            Some(Node::Var(snapshot))
+        }
+        Node::LastCrossing { expr, direction } => {
+            let expr = rename_variable_reads(arena, expr, renames);
+            Some(Node::LastCrossing { expr, direction })
+        }
+        Node::Heavy(_, id) => {
+            let heavy = arena.heavy(id).clone();
+            let renamed = match heavy {
+                Heavy::WhiteNoise { site, power, name } => Heavy::WhiteNoise {
+                    site,
+                    power: rename_variable_reads(arena, power, renames),
+                    name,
+                },
+                Heavy::FlickerNoise {
+                    site,
+                    power,
+                    exponent,
+                    name,
+                } => Heavy::FlickerNoise {
+                    site,
+                    power: rename_variable_reads(arena, power, renames),
+                    exponent: rename_variable_reads(arena, exponent, renames),
+                    name,
+                },
+                Heavy::Cross {
+                    expr,
+                    direction,
+                    time_tol,
+                    expr_tol,
+                    enable,
+                } => Heavy::Cross {
+                    expr: rename_variable_reads(arena, expr, renames),
+                    direction: rename_optional(arena, direction, renames),
+                    time_tol: rename_optional(arena, time_tol, renames),
+                    expr_tol: rename_optional(arena, expr_tol, renames),
+                    enable: rename_optional(arena, enable, renames),
+                },
+                Heavy::Above {
+                    expr,
+                    time_tol,
+                    expr_tol,
+                    enable,
+                } => Heavy::Above {
+                    expr: rename_variable_reads(arena, expr, renames),
+                    time_tol: rename_optional(arena, time_tol, renames),
+                    expr_tol: rename_optional(arena, expr_tol, renames),
+                    enable: rename_optional(arena, enable, renames),
+                },
+                Heavy::Timer {
+                    start_time,
+                    period,
+                    time_tol,
+                    enable,
+                } => Heavy::Timer {
+                    start_time: rename_variable_reads(arena, start_time, renames),
+                    period: rename_optional(arena, period, renames),
+                    time_tol: rename_optional(arena, time_tol, renames),
+                    enable: rename_optional(arena, enable, renames),
+                },
+                // Every other heavy operator is descended into by `rewrite`
+                // itself, exactly as `map_expr` descended into it.
+                _ => return None,
+            };
+            // `push_heavy` writes the side-table entry *and* a node for it, and
+            // the replacement this closure returns is pushed again — one
+            // redundant node per renamed operator, which is `resolve_ddx`'s
+            // arrangement and for the same reason: the closure hands back a
+            // node, not an id.
+            let pushed = arena.push_heavy(renamed);
+            Some(*arena.node(pushed))
+        }
         _ => None,
     })
 }
@@ -645,24 +618,27 @@ endmodule
     /// Site order is the only fact this pass takes on trust, so it is checked.
     #[test]
     fn statement_sites_out_of_execution_order_fail_closed() {
-        let mut assignments = vec![
-            SourceAssignmentItem::Assign(SourceVarAssignment {
-                var_index: 0,
-                index: None,
-                expr: IrExpr::Const(1.0),
-            }),
-            SourceAssignmentItem::Assign(SourceVarAssignment {
-                var_index: 0,
-                index: None,
-                expr: IrExpr::Const(2.0),
-            }),
-        ];
+        let arena = &mut ExprArena::new();
+        let mut assignments = [1.0, 2.0]
+            .map(|value| {
+                let expr = arena.push(Node::Const(value));
+                IrAssignmentItem::Assign(VarAssignment {
+                    var_index: 0,
+                    index: None,
+                    expr,
+                })
+            })
+            .to_vec();
         let mut variables = vec![VarDef {
             name: "tmp".into(),
             is_state: false,
         }];
-        let mut equations = vec![IrExpr::Var("tmp".into())];
+        let mut equations = {
+            let name = arena.intern("tmp");
+            vec![arena.push(Node::Var(name))]
+        };
         let error = insert_equation_snapshots(
+            arena,
             &mut assignments,
             &mut variables,
             &[],
