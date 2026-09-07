@@ -8,7 +8,7 @@ use crate::config::ExpressionDialect;
 use std::collections::HashMap;
 
 const TWO_PI: Value = std::f64::consts::TAU;
-const EXPR_ZERO_TOLERANCE: Value = 1.0e-12;
+pub(crate) const EXPR_ZERO_TOLERANCE: Value = 1.0e-12;
 const XYCE_ATANH_EPSILON: Value = 1.0e-12;
 const XYCE_TANH_SATURATION_THRESHOLD: Value = 20.0;
 

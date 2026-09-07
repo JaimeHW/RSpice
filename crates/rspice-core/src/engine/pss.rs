@@ -111,7 +111,7 @@ impl PssAcceptedStepHistory {
 const PSS_FD_STEP: Value = 1e-8;
 const PSS_KRYLOV_STATE_THRESHOLD: usize = 12;
 const PSS_KRYLOV_REL_TOL: Value = 1e-9;
-const PSS_OPERATING_POINT_IDENTITY_VERSION: u32 = 18;
+const PSS_OPERATING_POINT_IDENTITY_VERSION: u32 = 19;
 
 fn pss_identity_field(hasher: &mut blake3::Hasher, name: &str, bytes: &[u8]) {
     hasher.update(&(name.len() as u64).to_le_bytes());
@@ -4046,11 +4046,20 @@ impl Engine {
                 integration_method,
                 trapgear.current_method(),
             );
-            if fixed_grid
-                && !first_step
-                && circuit.probe_precision_floor
-                && PssIntegrationMesh::refinement_midpoint(t, t_next).is_none()
-            {
+            let at_precision_floor = PssIntegrationMesh::refinement_midpoint(t, t_next).is_none();
+            let follows_precision_floor =
+                accepted_step_history
+                    .previous_accepted_dt
+                    .is_some_and(|previous| {
+                        PssIntegrationMesh::refinement_midpoint(t - previous, t).is_none()
+                    });
+            if fixed_grid && (at_precision_floor || follows_precision_floor) {
+                // A nearly zero event interval cannot reconstruct conjugate
+                // history reliably by differencing voltages or currents.
+                // BE crosses the event and restarts the outgoing stencil.
+                current_method = IntegrationMethod::BackwardEuler;
+            }
+            if fixed_grid && !first_step && circuit.probe_precision_floor && at_precision_floor {
                 current_method = if current_method == IntegrationMethod::BackwardEuler {
                     IntegrationMethod::Trapezoidal
                 } else {

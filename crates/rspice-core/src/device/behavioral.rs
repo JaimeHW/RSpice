@@ -7,7 +7,7 @@
 use crate::Value;
 use crate::config::ExpressionDialect;
 use crate::expr::{
-    BinaryOp, CompiledExpr, Context, Expr, Function, UnaryOp, Vm, compile,
+    BinaryOp, CompiledExpr, Context, EXPR_ZERO_TOLERANCE, Expr, Function, UnaryOp, Vm, compile,
     lookup_table_interpolate_with_derivative, normalize_expression_boundary, ordered_limit,
     ordered_sign, parse_expression_strict, real_function_pow_with_derivative,
     real_function_pwr_with_derivative, real_function_pwrs_with_derivative,
@@ -25,7 +25,6 @@ use breakpoints::expression_transient_breakpoints;
 
 const DERIVATIVE_REL_STEP: Value = 1e-6;
 const DERIVATIVE_ABS_STEP: Value = 1e-9;
-const EXPR_ZERO_TOLERANCE: Value = 1.0e-12;
 const XYCE_ATANH_EPSILON: Value = 1.0e-12;
 const XYCE_TANH_SATURATION_THRESHOLD: Value = 20.0;
 

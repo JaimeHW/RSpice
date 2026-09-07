@@ -304,3 +304,21 @@ def test_pss_local_source_mesh_survives_python_and_pickle(source):
     for waveform in (result, restored):
         assert abs(waveform.dc("out") - 1.1e-4) < 1e-7
         assert abs(waveform.voltage_at("in", 460e-12) - 1.0) < 1e-10
+
+
+@pytest.mark.parametrize("expression, expected_dc", [
+    ("if(cos(2*pi*64meg*time+0.1)>0.9999,1,0)", 0.004501619094809),
+    ("exp(-10000*(1-cos(2*pi*64meg*time+0.1)))", 0.003989472674605),
+])
+def test_pss_nonlinear_time_features_survive_python_and_pickle(expression, expected_dc):
+    result = rspice.Engine().run_pss(
+        parse(f"* Nonlinear clock feature\nB1 in 0 V={expression}\n"
+              "R1 in out 1k\nC1 out 0 159.154943091895p\n"),
+        1e6, tstab_periods=0, points_per_period=256,
+    )
+    assert result.document()["pointCount"] == result.num_points
+    restored = pickle.loads(pickle.dumps(result))
+    np.testing.assert_array_equal(restored.time, result.time)
+    np.testing.assert_array_equal(restored.voltage_waveform("out"), result.voltage_waveform("out"))
+    for waveform in (result, restored):
+        assert abs(waveform.dc("out") - expected_dc) < 1e-5

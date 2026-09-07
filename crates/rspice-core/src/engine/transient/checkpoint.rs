@@ -1161,10 +1161,10 @@ pub(crate) fn restart_checkpoint_identity(netlist: &Netlist) -> Option<String> {
 
 pub(crate) fn simulation_checkpoint_identity(config: &SimulationConfig) -> String {
     let mut hasher = blake3::Hasher::new();
-    // v6 records resolved behavioral source-event clocks, including narrow
-    // knots, signed/scaled modulo and the evaluator's waveform defaults.
+    // v7 adds nonlinear time features and actual VM switching boundaries,
+    // with periodic clock enumeration confined to its resolved phase window.
     // Earlier schedules can produce different accepted integration histories.
-    hasher.update(b"rspice-transient-resolved-config-v6\0");
+    hasher.update(b"rspice-transient-resolved-config-v7\0");
     hash_field(&mut hasher, "temperature", config.temperature.to_bits());
     hash_field(&mut hasher, "ramptime", config.ramptime.to_bits());
     hash_field(&mut hasher, "digital_delay_type", config.digital_delay_type);
