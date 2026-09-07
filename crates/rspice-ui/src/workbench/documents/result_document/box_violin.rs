@@ -92,6 +92,9 @@ struct Column {
     limit: Option<PopulationLimit>,
     measured: usize,
     passing: usize,
+    /// Capability is computed in the measured quantity, before any nonlinear
+    /// margin projection used to compare columns on a common ordinate.
+    capability: Option<f64>,
     unit: String,
     /// Whether the ordinate is a margin rather than the measured quantity.
     normalized: bool,
@@ -112,7 +115,8 @@ impl Column {
     }
 
     fn yield_percent(&self) -> Option<f64> {
-        (self.measured > 0).then(|| 100.0 * self.passing as f64 / self.measured as f64)
+        (self.limit.is_some() && !self.values.is_empty())
+            .then(|| 100.0 * self.passing as f64 / self.values.len() as f64)
     }
 
     fn limit_text(&self) -> String {
@@ -125,10 +129,10 @@ impl Column {
     fn bounds(&self) -> Vec<(f64, bool)> {
         self.limit.as_ref().map_or_else(Vec::new, |limit| {
             limit
-                .min
+                .min()
                 .map(|min| (min, true))
                 .into_iter()
-                .chain(limit.max.map(|max| (max, false)))
+                .chain(limit.max().map(|max| (max, false)))
                 .collect()
         })
     }
@@ -206,6 +210,7 @@ fn engineering_column(column: &PopulationColumn, whiskers: Whiskers) -> Option<C
         limit: limit.cloned(),
         measured: measured.len(),
         passing,
+        capability: limit.and_then(|limit| population::cpk(&measured, limit)),
         unit: column.unit.clone(),
         normalized: false,
     })
@@ -241,17 +246,14 @@ fn normalized_column(
     Some(Column {
         name: column.name.clone(),
         passing: projected.iter().filter(|margin| **margin >= 0.0).count(),
+        capability: population::cpk(&measured, limit),
         measured: projected.len(),
         values,
         sorted,
         statistics,
         // Every normalized column is bounded below at zero, and keeps the
         // spelling of the requirement it was normalized to.
-        limit: Some(PopulationLimit {
-            min: Some(0.0),
-            max: None,
-            text: limit.text.clone(),
-        }),
+        limit: Some(limit.normalized()),
         // Spelled out rather than as σ: the bundled mono face — which every
         // exact value on this sheet is set in — has no sigma glyph, and a
         // unit that paints as a missing-glyph box is worse than a word.
@@ -399,6 +401,7 @@ pub fn show(ui: &mut Ui, context: &mut SheetContext<'_>) {
         well_hint(ui, ABSENT_STATE);
         return;
     };
+    super::panel_note(ui, &plan.requirement_note);
     let sheet = context.results.box_violin.clone();
     let columns = match drawn_columns(&plan, &sheet) {
         Ok(columns) => columns,
@@ -833,6 +836,7 @@ pub fn right_panel(ui: &mut Ui, context: &mut SheetContext<'_>) {
         );
         return;
     };
+    super::panel_note(ui, &plan.requirement_note);
     let sheet = context.results.box_violin.clone();
     let columns = match drawn_columns(&plan, &sheet) {
         Ok(columns) => columns,
@@ -861,8 +865,9 @@ pub fn right_panel(ui: &mut Ui, context: &mut SheetContext<'_>) {
                 || "no requirement".to_owned(),
                 |value| {
                     format!(
-                        "{value:.2} % \u{b7} {} fail",
-                        column.measured - column.passing
+                        "{value:.2} % \u{b7} {} beyond \u{b7} {} unmeasured",
+                        column.measured - column.passing,
+                        column.values.len() - column.measured
                     )
                 },
             );
@@ -908,16 +913,13 @@ fn statistics_rows(column: &Column, plan: &PopulationPlan) -> Vec<(&'static str,
     let yield_row = column.yield_percent().map_or_else(
         || "No requirement bounds this column".to_owned(),
         |percent| {
-            population::wilson_interval(column.passing, column.measured).map_or_else(
+            population::wilson_interval(column.passing, column.values.len()).map_or_else(
                 || format!("{percent:.2} %"),
                 |(low, high)| format!("{percent:.2} % \u{b7} 95 % CI {low:.2}\u{2013}{high:.2}"),
             )
         },
     );
-    let capability = column
-        .limit
-        .as_ref()
-        .and_then(|limit| population::cpk(&column.sorted, limit));
+    let capability = column.capability;
     let worst = worst_trial(column, plan);
 
     let mut run = format!(
@@ -1114,6 +1116,53 @@ mod tests {
         }
     }
 
+    #[test]
+    fn population_contract_yield_includes_unmeasured_trials_and_requires_a_bound() {
+        let (mut simulation, mut workspace, mut results) = fixture(3);
+        if let Some(AnalysisResultFamilyMetadata::MonteCarlo {
+            member_measurements,
+            ..
+        }) = simulation.runs[0].analyses[0].family_metadata.as_mut()
+        {
+            member_measurements[0].measurements[0].passed = false;
+        }
+        workspace.specs[0].min = Some(-100.0);
+        let plan = population::plan(&mut context(&simulation, &workspace, &mut results)).unwrap();
+        let measured = &plan.columns[plan.column_index("gain_dc").unwrap()];
+        let column = engineering_column(measured, Whiskers::Tukey).unwrap();
+        assert!((column.yield_percent().unwrap() - 200.0 / 3.0).abs() < 1e-12);
+        let rows = statistics_rows(&column, &plan);
+        assert!(
+            rows.iter()
+                .any(|row| row.0 == "Yield" && row.1 == "66.67 % · 95 % CI 20.77–93.85")
+        );
+        workspace.specs.clear();
+        let plan = population::plan(&mut context(&simulation, &workspace, &mut results)).unwrap();
+        let measured = &plan.columns[plan.column_index("gain_dc").unwrap()];
+        assert!(
+            engineering_column(measured, Whiskers::Tukey)
+                .unwrap()
+                .yield_percent()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn population_contract_capability_does_not_change_with_distribution_normalization() {
+        let (simulation, workspace, mut results) = fixture(3);
+        let plan = population::plan(&mut context(&simulation, &workspace, &mut results)).unwrap();
+        let column = &plan.columns[plan.column_index("vos").unwrap()];
+        let raw = engineering_column(column, Whiskers::Tukey).unwrap();
+        let normalized = normalized_column(column, MarginScale::Sigma, Whiskers::Tukey).unwrap();
+        assert!((raw.capability.unwrap() - 0.25).abs() < 1e-12);
+        assert_eq!(normalized.capability, raw.capability);
+        assert!(
+            statistics_rows(&normalized, &plan)
+                .iter()
+                .any(|row| row.0 == "Cpk" && row.1 == "0.25")
+        );
+    }
+
     /// The all-measurements grouping draws only what a requirement bounds,
     /// because there is nothing to normalize an unbounded column to.
     #[test]
@@ -1239,7 +1288,7 @@ mod tests {
         let columns = drawn_columns(&plan, &ctx.results.box_violin).expect("one column");
 
         assert_eq!(columns[0].name, "RGAIN.r");
-        assert_eq!(columns[0].yield_percent(), Some(100.0));
+        assert_eq!(columns[0].yield_percent(), None);
         let rows = statistics_rows(&columns[0], &plan);
         let by_name = |needle: &str| {
             rows.iter()
@@ -1248,6 +1297,7 @@ mod tests {
                 .unwrap_or_else(|| panic!("no {needle} row"))
         };
         assert_eq!(by_name("Requirement"), "No requirement");
+        assert_eq!(by_name("Yield"), "No requirement bounds this column");
         assert_eq!(by_name("Cpk"), "Not defined for this requirement");
     }
 

@@ -159,6 +159,32 @@ struct Candidate {
     member: Option<super::FamilyMemberId>,
 }
 
+impl PreparedSpecification {
+    /// Whether this analysis is evidence for the retained requirement.
+    pub(crate) fn admits_analysis(&self, analysis: &AnalysisResult) -> bool {
+        analysis.provenance().is_some_and(|provenance| {
+            self.entry().scope.admits(provenance.pvt_point())
+                && self
+                    .definition()
+                    .and_then(|definition| definition.producing_analysis)
+                    .is_none_or(|expected| expected == provenance.authored_source_instance_id())
+        })
+    }
+
+    pub(crate) fn guard_band(&self) -> f64 {
+        self.definition()
+            .and_then(|definition| definition.guard_band)
+            .unwrap_or(0.0)
+    }
+
+    /// Subtract the guard band from the margin, preserving the evaluator's
+    /// operation order even when adding it to a bound would round it away.
+    pub(crate) fn signed_margin(&self, value: f64) -> Option<f64> {
+        signed_margin(self.entry().min, self.entry().max, value)
+            .map(|margin| margin - self.guard_band())
+    }
+}
+
 pub(super) fn evaluate_specifications(
     specifications: &[PreparedSpecification],
     analyses: &[AnalysisResult],
@@ -224,17 +250,14 @@ fn candidates_for(
     analyses: &[AnalysisResult],
 ) -> Vec<Candidate> {
     let spec = specification.entry();
-    let definition = specification.definition();
-    let producing_analysis = definition.and_then(|definition| definition.producing_analysis);
-    let guard_band = definition.and_then(|definition| definition.guard_band);
     analyses
         .iter()
         .filter_map(|analysis| {
             let provenance = analysis.provenance()?;
             let source_instance_id = provenance.authored_source_instance_id();
-            (spec.scope.admits(provenance.pvt_point())
-                && producing_analysis.is_none_or(|expected| expected == source_instance_id))
-            .then_some((analysis, source_instance_id))
+            specification
+                .admits_analysis(analysis)
+                .then_some((analysis, source_instance_id))
         })
         .flat_map(|(analysis, source_instance_id)| {
             let is_monte_carlo = analysis.analysis_type == AnalysisType::MonteCarlo;
@@ -244,9 +267,7 @@ fn candidates_for(
                     Candidate {
                         value,
                         measurement_passed: analysis.success && value.is_some() && measured,
-                        signed_margin: value
-                            .and_then(|value| signed_margin(spec.min, spec.max, value))
-                            .map(|margin| margin - guard_band.unwrap_or(0.0)),
+                        signed_margin: value.and_then(|value| specification.signed_margin(value)),
                         source_instance_id,
                         is_monte_carlo,
                         member,

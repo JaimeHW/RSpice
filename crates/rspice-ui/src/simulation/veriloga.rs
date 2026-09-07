@@ -1108,6 +1108,9 @@ endmodule
                     found.extend(constants(condition).into_iter().map(|value| (None, value)));
                     found.extend(non_finite_constants(body));
                 }
+                rspice_veriloga::codegen::AssignmentStep::Initialization { body, .. } => {
+                    found.extend(non_finite_constants(body));
+                }
                 rspice_veriloga::codegen::AssignmentStep::Task(task) => found.extend(
                     task.expressions()
                         .flat_map(constants)

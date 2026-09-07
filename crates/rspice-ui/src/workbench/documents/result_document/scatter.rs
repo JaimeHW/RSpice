@@ -126,7 +126,7 @@ fn axis_range(values: &[f64], column: &PopulationColumn) -> (f64, f64) {
     // A bound further than a quarter of the span outside the data would
     // squash the cloud to a line; the register still counts what is beyond it.
     if let Some(limit) = column.limit.as_ref() {
-        for bound in [limit.min, limit.max].into_iter().flatten() {
+        for bound in [limit.min(), limit.max()].into_iter().flatten() {
             if bound > high && bound - high <= span * 0.25 {
                 high = bound;
             }
@@ -272,6 +272,7 @@ pub fn show(ui: &mut Ui, context: &mut SheetContext<'_>) {
         well_hint(ui, ABSENT_STATE);
         return;
     };
+    super::panel_note(ui, &plan.requirement_note);
     let Some(pair) = active_pair(&plan, &context.results.scatter) else {
         well_hint(
             ui,
@@ -427,7 +428,7 @@ impl PaintedCloud {
     fn draw(&self, painter: &egui::Painter, mapper: &plot::PlotMapper) {
         // Requirement windows first: the violating side of each bound, washed.
         if let Some(limit) = self.x_limit.as_ref() {
-            if let Some(min) = limit.min {
+            if let Some(min) = limit.min() {
                 let right = mapper.x(min);
                 painter.rect_filled(
                     egui::Rect::from_min_max(
@@ -439,7 +440,7 @@ impl PaintedCloud {
                 );
                 self.vline(painter, mapper, right);
             }
-            if let Some(max) = limit.max {
+            if let Some(max) = limit.max() {
                 let left = mapper.x(max);
                 painter.rect_filled(
                     egui::Rect::from_min_max(
@@ -453,7 +454,7 @@ impl PaintedCloud {
             }
         }
         if let Some(limit) = self.y_limit.as_ref() {
-            if let Some(min) = limit.min {
+            if let Some(min) = limit.min() {
                 let bottom = mapper.y(min);
                 painter.rect_filled(
                     egui::Rect::from_min_max(
@@ -465,7 +466,7 @@ impl PaintedCloud {
                 );
                 self.hline(painter, mapper, bottom);
             }
-            if let Some(max) = limit.max {
+            if let Some(max) = limit.max() {
                 let top = mapper.y(max);
                 painter.rect_filled(
                     egui::Rect::from_min_max(
@@ -709,6 +710,7 @@ fn paint_hover_card(
     let status = match plan.status.get(row) {
         Some(TrialStatus::Failing) => "fails a requirement",
         Some(TrialStatus::Unmeasured) => "not measured",
+        Some(TrialStatus::NotEvaluated) => "no applicable requirement",
         _ => "pass",
     };
     let title = plan
@@ -744,6 +746,7 @@ pub fn right_panel(ui: &mut Ui, context: &mut SheetContext<'_>) {
         );
         return;
     };
+    super::panel_note(ui, &plan.requirement_note);
     let Some(pair) = active_pair(&plan, &context.results.scatter) else {
         super::panel_note(ui, "A correlation needs two retained columns.");
         return;
@@ -779,6 +782,7 @@ pub fn right_panel(ui: &mut Ui, context: &mut SheetContext<'_>) {
         let status = match plan.status.get(*row) {
             Some(TrialStatus::Failing) => "fail",
             Some(TrialStatus::Unmeasured) => "no result",
+            Some(TrialStatus::NotEvaluated) => "no requirement",
             _ => "pass",
         };
         rows.push((
@@ -1156,21 +1160,13 @@ mod tests {
             kind: ColumnKind::Measurement,
             unit: String::new(),
             values: Vec::new(),
-            limit: Some(population::PopulationLimit {
-                min: None,
-                max: Some(1.2),
-                text: String::new(),
-            }),
+            limit: Some(population::PopulationLimit::for_test(None, Some(1.2))),
         };
         let (_, high) = axis_range(&values, &near);
         assert!(high > 1.2, "the bound at 1.2 is not on the axis: {high}");
 
         let far = PopulationColumn {
-            limit: Some(population::PopulationLimit {
-                min: None,
-                max: Some(50.0),
-                text: String::new(),
-            }),
+            limit: Some(population::PopulationLimit::for_test(None, Some(50.0))),
             ..near.clone()
         };
         let (_, high) = axis_range(&values, &far);
