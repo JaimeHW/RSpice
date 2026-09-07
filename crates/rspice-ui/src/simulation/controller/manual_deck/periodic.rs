@@ -93,6 +93,26 @@ pub(super) fn parse_periodic_tasks(
         return Err(errors);
     }
 
+    // The carrier selector is read before the `.PSS` precondition below, and
+    // not inside each card's parser, because a card that names a
+    // harmonic-balance carrier is not a card that forgot its `.PSS`. Read in
+    // the old order, the deck the engine actually runs -- an `.HB` with a
+    // `FROM=HB` card and no `.PSS` at all -- was refused here for the one
+    // reason that is untrue of it, while the same card beside a `.PSS` was
+    // refused for the real one. One card, two answers, neither the whole
+    // story. `.PSTB` is deliberately absent: it has no `FROM=` key in either
+    // reader, so `from=` on one is an unknown keyword and stays one.
+    for (line, head, card) in &parsed {
+        if matches!(head.as_str(), ".pac" | ".pnoise" | ".pxf")
+            && let Err(error) = periodic_source_selector(card, &head.to_ascii_uppercase())
+        {
+            errors.push(format!("line {line}: {error}"));
+        }
+    }
+    if !errors.is_empty() {
+        return Err(errors);
+    }
+
     let pss_cards = parsed
         .iter()
         .filter(|(_, head, _)| head == ".pss")
@@ -473,7 +493,6 @@ fn parse_pac(
         reltol: optional_value(card, "reltol", reltol, params)?,
         abstol: optional_value(card, "abstol", abstol, params)?,
     };
-    periodic_source_selector(card, ".PAC")?;
     validate_frequency_contract(
         ".PAC",
         config.start_freq,
@@ -596,7 +615,6 @@ fn parse_pnoise(
         reltol,
         abstol,
     };
-    periodic_source_selector(card, ".PNOISE")?;
     if config.max_sideband < 1 {
         return Err(".PNOISE maxsideband must be at least 1".to_owned());
     }
@@ -665,7 +683,6 @@ fn parse_pxf(
         reltol: optional_value(card, "reltol", reltol, params)?,
         abstol: optional_value(card, "abstol", abstol, params)?,
     };
-    periodic_source_selector(card, ".PXF")?;
     validate_frequency_contract(
         ".PXF",
         config.start_freq,
@@ -875,8 +892,10 @@ fn periodic_source_selector(card: &ParsedCard, directive: &str) -> Result<(), St
     match unquote(value).trim().to_ascii_lowercase().as_str() {
         "pss" => Ok(()),
         "hb" => Err(format!(
-            "{directive} from=hb has no manual-deck route: a manual-deck periodic analysis binds \
-             to the .PSS operating point in the same deck"
+            "{directive} from=hb has no route in the Studio: a manual-deck periodic analysis \
+             binds to the .PSS operating point in the same deck, and no Studio runner linearizes \
+             a harmonic-balance carrier for this card. The engine does, so a deck carrying it \
+             runs on the command line; author from=pss to run it here"
         )),
         other => Err(format!("{directive} from={other:?} must be PSS")),
     }
@@ -1350,6 +1369,59 @@ mod tests {
                 studio.is_err(),
                 "the studio accepted `{card}`, which the engine refuses: {studio:?}"
             );
+        }
+    }
+
+    /// `FROM=HB` is the one card in the family the two readers answer
+    /// differently, and the difference is a limitation rather than a drift.
+    ///
+    /// The agreement test above has no case for it because it cannot: the
+    /// engine *accepts* `FROM=HB`. Core's `.PAC`, `.PNOISE` and `.PXF`
+    /// grammars all admit `FROM=PSS|HB`, the plan binds such a card to the
+    /// deck's preceding `.HB`, and the CLI runs it through
+    /// `Engine::run_pxf_card_from_hb_with_abort`. The Studio has no runner
+    /// that takes a harmonic-balance operating point for any of the three, and
+    /// a manual deck binds them to the `.PSS` in the same deck, so it refuses.
+    ///
+    /// Pinned from both sides, and in both deck shapes, because the refusal
+    /// has to say the same thing whether or not a `.PSS` happens to be present
+    /// — the deck the engine actually runs is the one with no `.PSS` at all,
+    /// and that is the shape that used to be told it was missing one.
+    #[test]
+    fn a_harmonic_balance_carrier_the_engine_accepts_is_refused_by_the_studio_alone() {
+        const CIRCUIT: &str = "periodic\nV1 in 0 SIN(0 1 1Meg)\nR1 in out 1k\nC1 out 0 1n\n";
+        const HB: &str = ".hb 1Meg\n";
+
+        for card in [
+            ".pxf dec 10 1k 1Meg input=V1 out=out from=hb",
+            ".pac dec 10 1k 1Meg input=V1 out=out from=hb",
+            ".pnoise dec 10 1 1Meg out=out from=hb",
+        ] {
+            for seed in ["", ".pss fund=1Meg\n"] {
+                let source = format!("{CIRCUIT}{HB}{seed}{card}\n.end\n");
+                let netlist = Netlist::parse(&source).unwrap_or_else(|error| {
+                    panic!("the engine accepts `{card}`; this case no longer tests what it claims: {error}")
+                });
+                rspice_core::execution::DeckPlan::from_netlist(
+                    &netlist,
+                    &rspice_core::resource::ResourceLimits::default(),
+                )
+                .unwrap_or_else(|error| {
+                    panic!("the engine binds `{card}` to the deck's .HB carrier: {error}")
+                });
+
+                let studio_circuit = Netlist::parse(&format!("{CIRCUIT}.end\n"))
+                    .expect("the fixture circuit must parse");
+                let errors = parse_periodic_tasks(&studio_circuit, &source)
+                    .expect_err("the Studio has no route for a harmonic-balance carrier");
+                assert!(
+                    errors
+                        .iter()
+                        .any(|error| error.contains("from=hb") && error.contains("command line")),
+                    "`{card}` must be refused as the carrier it names, in every deck shape, and \
+                     must say where it does run: {errors:?}"
+                );
+            }
         }
     }
 
