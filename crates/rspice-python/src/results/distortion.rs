@@ -421,7 +421,7 @@ impl PyDistortionResult {
     /// Actual first-order F1 response, aligned with `f1_frequencies`.
     #[getter]
     fn fundamental_f1(&self) -> PyResult<PyAcResult> {
-        PyAcResult::new(self.f1_frequencies.clone(), self.fundamental_f1.clone())
+        PyAcResult::new(self.fundamental_f1.clone())
     }
 
     /// Actual first-order F2 response at each F1 sweep point.
@@ -432,9 +432,7 @@ impl PyDistortionResult {
     fn fundamental_f2(&self) -> PyResult<Option<PyAcResult>> {
         self.fundamental_f2
             .as_ref()
-            .map(|rows| {
-                PyAcResult::new(rows.iter().map(|row| row.frequency).collect(), rows.clone())
-            })
+            .map(|rows| PyAcResult::new(rows.clone()))
             .transpose()
     }
 
@@ -443,10 +441,7 @@ impl PyDistortionResult {
         let product = self.parse_product(name)?;
         let rows = self.product_rows(product)?;
         self.validate_series_length(product.label(), rows)?;
-        PyAcResult::new(
-            rows.iter().map(|row| row.frequency).collect(),
-            rows.to_vec(),
-        )
+        PyAcResult::new(rows.to_vec())
     }
 
     /// |V(product)| / |V(F1)| across the F1 sweep.

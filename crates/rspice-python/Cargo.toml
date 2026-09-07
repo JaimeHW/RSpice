@@ -22,7 +22,8 @@ test = false
 doctest = false
 
 [features]
-default = []
+default = ["veriloga-native"]
+veriloga-native = ["rspice-core/veriloga-native"]
 # Extension module feature for pyo3 - required for building Python extension
 extension-module = ["pyo3/extension-module"]
 

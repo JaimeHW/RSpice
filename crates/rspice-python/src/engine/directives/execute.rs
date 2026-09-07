@@ -149,8 +149,15 @@ pub(super) fn execute(
             ));
         }
         AnalysisCommand::AcData { table_name } => {
-            let frequencies = ac_data_frequencies(net, table_name)?;
-            let result = py_engine.ac_impl(py, netlist, frequencies)?;
+            // Preserve the Python argument-error contract without maintaining
+            // a second set of table/axis rules beside the core implementation.
+            net.frequency_data_table_points(table_name)
+                .map_err(|error| crate::errors::value_error(format!("AC DATA {error}")))?;
+            let engine = py_engine.engine_for_netlist(net);
+            let (_, results) = run_interruptible(py, &py_engine.active_runs, |abort| {
+                engine.run_ac_data_with_abort(net, table_name, abort)
+            })?;
+            let result = PyAcResult::new(results)?;
             let handle = Py::new(py, identified(result, context))?;
             out.ac.push_with(handle, |handle| handle.clone_ref(py));
             out.records.push(PyAnalysisRecord::executed(

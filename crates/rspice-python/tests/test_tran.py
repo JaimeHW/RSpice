@@ -522,11 +522,8 @@ class TestRealEventNodes:
             event_transient.real_trace("not_a_node")
 
 
-# The declared word, its members, and the events the pair produce. No deck this
-# build can run declares a bus: the mixed Verilog-AMS boundary that does needs
-# the `veriloga` feature, which the Python extension does not build with. The
-# declaration therefore arrives the way a loaded file's does, through the
-# versioned pickle state and its own decoder.
+# Exercise a loaded bus declaration and its events through the versioned
+# pickle state and its decoder, independently of model compilation.
 #
 # The histories are the ones BUS-L2's `output [1:0] count` records on a `#5`
 # grid, so the word counts 00 01 10 11 and the dump below is that lane's own

@@ -1,6 +1,7 @@
 """AC analysis: name access, error discipline, sweeps, branch currents."""
 
 import math
+import pickle
 
 import numpy as np
 import pytest
@@ -151,6 +152,33 @@ class TestAcSweeps:
 
 
 class TestAcData:
+    @pytest.mark.parametrize("frequency_column", ["FREQ", "HERTZ"])
+    @pytest.mark.parametrize("route", ["direct", "deck"])
+    def test_data_rows_apply_parameters_at_each_frequency(
+        self, engine, frequency_column, route
+    ):
+        netlist = rspice.Netlist.parse(f"""* Parameter-aware AC DATA
+.param rval=1k
+V1 in 0 DC 0 AC 1
+R1 in out {{rval}}
+R2 out 0 1k
+.ac DATA=points
+.data points {frequency_column} rval
+10 1k
+20 2k
+30 3k
+.enddata
+.end
+""")
+        result = (
+            engine.run_ac_data(netlist, "points")
+            if route == "direct" else engine.run(netlist).ac
+        )
+        np.testing.assert_array_equal(result.frequencies, [10.0, 20.0, 30.0])
+        np.testing.assert_allclose(
+            result.voltage_complex("out"), [0.5, 1.0 / 3.0, 0.25], atol=1e-12
+        )
+
     def test_named_data_table_frequency_grid(self, engine):
         netlist = rspice.Netlist.parse(AC_DATA_DECK)
         result = engine.run_ac_data(netlist, "PTS")
@@ -163,5 +191,110 @@ class TestAcData:
         assert any(record.kind == "ac_data" and not record.skipped for record in report.records)
 
     def test_missing_data_table_is_rejected(self, engine, rc_lowpass):
-        with pytest.raises(ValueError, match="not found"):
+        with pytest.raises(ValueError, match="unknown.*table"):
             engine.run_ac_data(rc_lowpass, "missing")
+
+    @pytest.mark.parametrize(
+        "columns, rows, message",
+        [
+            ("voltage", "1", "no FREQ or HERTZ"),
+            ("FREQ HERTZ", "1 2", "ambiguous frequency"),
+            ("FREQ", "-1", "frequency must be positive"),
+        ],
+    )
+    def test_invalid_frequency_table_raises_value_error(
+        self, engine, columns, rows, message
+    ):
+        netlist = rspice.Netlist.parse(f"""* Invalid AC table selected by the API
+V1 in 0 AC 1
+R1 in 0 1k
+.data points {columns}
+{rows}
+.enddata
+.end
+""")
+        with pytest.raises(ValueError, match=message):
+            engine.run_ac_data(netlist, "points")
+
+
+@pytest.mark.parametrize("route", ["direct", "sweep", "deck"])
+def test_veriloga_finish_retains_only_solved_frequency_rows(engine, tmp_path, route):
+    model = tmp_path / "finish.va"
+    model.write_text("""module finish_model(p,n);
+inout p,n; electrical p,n;
+real count;
+analog begin
+    @(initial_step("ac")) count=1;
+    @(final_step("ac")) count=count+1;
+    if (analysis("ac") && !analysis("static") && count==1) $finish(1);
+    I(p,n)<+count*1e-3*V(p,n);
+end
+endmodule
+""", encoding="utf-8")
+    netlist = rspice.Netlist.parse(f"""* Retained Verilog-A AC endpoint
+V1 in 0 DC 0 AC 1
+R1 in out 1k
+X1 out 0 finish_model
+.va "{model.as_posix()}" finish_model
+.ac lin 13 10 1meg
+.end
+""")
+    if route == "direct":
+        result = engine.run_ac(netlist, np.linspace(10.0, 1e6, 13).tolist())
+    elif route == "sweep":
+        result = engine.run_ac_sweep(netlist, "lin", 13, 10.0, 1e6)
+    else:
+        result = engine.run(netlist).ac
+    np.testing.assert_array_equal(result.frequencies, [10.0])
+    assert result.num_frequencies == 1
+    np.testing.assert_allclose(result.voltage_complex("out"), [1.0 / 3.0], atol=1e-12)
+    with pytest.raises(IndexError):
+        result.magnitude_at(1, "out")
+    # Projection must describe the retained result rather than padding it to
+    # the requested thirteen frequencies.
+    document = result.document()
+    assert document["pointCount"] == 1
+    assert document["axes"][0]["values"]["values"] == [10.0]
+    restored = pickle.loads(pickle.dumps(result))
+    np.testing.assert_array_equal(restored.frequencies, [10.0])
+    np.testing.assert_allclose(restored.voltage_complex("out"), [1.0 / 3.0], atol=1e-12)
+
+
+@pytest.mark.parametrize("at_bias", [False, True])
+@pytest.mark.parametrize("route", ["direct", "deck"])
+def test_veriloga_data_finish_retains_completed_rows(engine, tmp_path, at_bias, route):
+    model = tmp_path / "data_finish.va"
+    model.write_text("""module data_finish(p,n);
+inout p,n; electrical p,n;
+parameter integer stop_now=0, at_bias=0;
+analog begin
+    if (stop_now < 0) $finish(99);
+    if (stop_now && (at_bias || !analysis("static"))) $finish(1);
+    I(p,n)<+1e-3*V(p,n);
+end
+endmodule
+""", encoding="utf-8")
+    netlist = rspice.Netlist.parse(f"""* Retain solved AC DATA prefix
+.param stop_now=0
+V1 in 0 DC 0 AC 1
+R1 in out 1k
+X1 out 0 data_finish stop_now={{stop_now}} at_bias={int(at_bias)}
+.va "{model.as_posix()}" data_finish
+.ac DATA=points
+.data points HERTZ stop_now
+10 0
+20 1
+30 -1
+.enddata
+.end
+""")
+    result = (
+        engine.run_ac_data(netlist, "points")
+        if route == "direct" else engine.run(netlist).ac
+    )
+    expected = [10.0] if at_bias else [10.0, 20.0]
+    np.testing.assert_array_equal(result.frequencies, expected)
+    np.testing.assert_allclose(
+        result.voltage_complex("out"), np.full(len(expected), 0.5), atol=1e-12
+    )
+    assert result.document()["pointCount"] == len(expected)

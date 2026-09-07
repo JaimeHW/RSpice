@@ -18,6 +18,9 @@ Python automation inside RSpice, and the two are separate.
   analysis directives, evaluates `.MEAS` statements, and
   `report.assert_passed()` turns them into a CI gate.
 - **NumPy throughout**: waveforms, spectra, and complex AC phasors as ndarrays.
+- **Runtime Verilog-A**: default builds compile `.va` models through the core
+  native backend. AC results retain the solved frequency prefix when a model
+  requests `$finish`, and AC-DATA applies each row's parameter values.
 - **Long-run controls**: resumable netlist-fingerprinted transient checkpoints
   and error-bounded compressed voltage waveforms.
 - **Export**: Touchstone v1, ngspice-compatible SPICE raw (ASCII and binary,
@@ -58,6 +61,9 @@ python -m pip install "maturin==1.15.0"
 cd crates/rspice-python
 maturin develop --release --locked
 ```
+
+The default `veriloga-native` Cargo feature enables runtime Verilog-A model
+compilation. `--no-default-features` builds the bindings without that backend.
 
 `maturin build --release --locked` produces an installable abi3 wheel for
 authorized testing and private delivery; it does not grant redistribution

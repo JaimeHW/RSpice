@@ -45,7 +45,8 @@ mod schema;
 pub(crate) use schema::validated_ac_schema;
 
 impl PyAcResult {
-    pub fn new(frequencies: Vec<f64>, results: Vec<AcResult>) -> PyResult<Self> {
+    pub fn new(results: Vec<AcResult>) -> PyResult<Self> {
+        let frequencies = results.iter().map(|point| point.frequency).collect();
         Self::checked(frequencies, results)
             .map(|mut result| {
                 result.evidence = Some(DocumentEvidence::sole(

@@ -175,63 +175,6 @@ pub(super) fn sweep_frequencies(
     })
 }
 
-pub(super) fn ac_data_frequencies(
-    netlist: &rspice_core::Netlist,
-    table_name: &str,
-) -> PyResult<Vec<f64>> {
-    let table = netlist
-        .data_tables
-        .iter()
-        .find(|table| table.name.eq_ignore_ascii_case(table_name))
-        .ok_or_else(|| {
-            crate::errors::value_error(format!("AC DATA table '{table_name}' not found"))
-        })?;
-    let frequency_column = table
-        .params
-        .iter()
-        .position(|param| param.eq_ignore_ascii_case("FREQ"))
-        .ok_or_else(|| {
-            crate::errors::value_error(format!(
-                "AC DATA table '{}' must contain a FREQ column",
-                table.name
-            ))
-        })?;
-    if table.rows.is_empty() {
-        return Err(crate::errors::value_error(format!(
-            "AC DATA table '{}' has no rows",
-            table.name
-        )));
-    }
-    let mut frequencies = Vec::with_capacity(table.rows.len());
-    for (row_index, row) in table.rows.iter().enumerate() {
-        if row.len() != table.params.len() {
-            return Err(crate::errors::value_error(format!(
-                "AC DATA table '{}' row {} has {} values, expected {}",
-                table.name,
-                row_index + 1,
-                row.len(),
-                table.params.len()
-            )));
-        }
-        let Some(&frequency) = row.get(frequency_column) else {
-            return Err(crate::errors::value_error(format!(
-                "AC DATA table '{}' row {} has no frequency column",
-                table.name,
-                row_index + 1
-            )));
-        };
-        if !frequency.is_finite() || frequency < 0.0 {
-            return Err(crate::errors::value_error(format!(
-                "AC DATA table '{}' row {} has invalid frequency {frequency}",
-                table.name,
-                row_index + 1
-            )));
-        }
-        frequencies.push(frequency);
-    }
-    Ok(frequencies)
-}
-
 /// Validate the bounds a linear `.DC` sweep needs.
 pub(super) fn require_linear_bounds(
     start: Option<f64>,
