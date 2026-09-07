@@ -501,7 +501,7 @@ fn commit_parsed_result_dataset(
     let previous_workbench = state.workbench.clone();
 
     let (run_sequence, run_id, dataset_id) = {
-        let run = state.simulation.start_run();
+        let run = state.simulation.start_imported_run()?;
         run.job_id = None;
         run.execution_target = None;
         run.label = format!("Imported · {source_name}");
@@ -509,10 +509,12 @@ fn commit_parsed_result_dataset(
         let run_sequence = run.id;
         let run_id = run.run_id;
         let dataset_id = run.dataset_id;
+        // Reading a dataset does not establish the foreign solver's lifecycle
+        // or elapsed time. Keep that absence explicit, as with other imported
+        // legacy evidence, instead of fabricating a completed native execution.
         let sealed = run
             .restore_provenance(SimulationRunProvenance::LegacyUnattributed)
-            .and_then(|()| run.mark_running())
-            .and_then(|()| run.finish_lifecycle(SimulationRunLifecycle::Completed));
+            .and_then(|()| run.restore_lifecycle(SimulationRunLifecycle::LegacyUnknown, 0.0));
         if let Err(error) = sealed {
             state.simulation = previous_simulation;
             return Err(format!("could not seal imported result history: {error}"));
@@ -2029,7 +2031,41 @@ mod tests {
     }
 
     #[test]
-    fn imported_dataset_is_completed_stable_immutable_and_selected() {
+    fn exhausted_run_sequence_retains_the_import_draft_and_existing_dataset() {
+        let mut state = loaded_project_state();
+        state.simulation.next_run_id = u64::MAX - 1;
+        apply_imported_result_dataset(&mut state, "last.csv", b"time [s],V(out) [V]\n0,0\n1,1\n")
+            .expect("the last sequence can be imported");
+        assert_eq!(state.simulation.active_run().unwrap().id, u64::MAX);
+        let baseline = crate::workbench::lifecycle::project_lifecycle::snapshot(&state).unwrap();
+        let workspace = state.workbench.workspace;
+        let document = state.workbench.documents.active(workspace).cloned();
+        stage_imported_result_dataset(&mut state, "next.csv", b"time [s],V(out) [V]\n0,2\n1,3\n")
+            .expect("reviewing a draft requires no sequence");
+        let selected = state.workbench.result_import.selected_signals.clone();
+
+        for _ in 0..2 {
+            let error = commit_result_import_draft(&mut state).unwrap_err();
+            assert!(error.contains("run sequence is exhausted"));
+            assert!(state.workbench.result_import.open);
+            assert_eq!(state.workbench.result_import.source_name, "next.csv");
+            assert_eq!(state.workbench.result_import.selected_signals, selected);
+            assert_eq!(state.workbench.workspace, workspace);
+            assert_eq!(
+                state.workbench.documents.active(workspace),
+                document.as_ref()
+            );
+            assert_eq!(
+                crate::workbench::lifecycle::project_lifecycle::snapshot(&state)
+                    .unwrap()
+                    .simulation_results,
+                baseline.simulation_results
+            );
+        }
+    }
+
+    #[test]
+    fn imported_dataset_is_unattributed_stable_immutable_and_saveable() {
         let mut state = loaded_project_state();
         assert!(
             !crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(&state),
@@ -2046,7 +2082,8 @@ mod tests {
             .simulation
             .active_run()
             .expect("imported run selected");
-        assert_eq!(run.lifecycle, SimulationRunLifecycle::Completed);
+        assert_eq!(run.lifecycle, SimulationRunLifecycle::LegacyUnknown);
+        assert_eq!(run.elapsed_time, 0.0);
         assert!(run.job_id.is_none());
         assert!(run.execution_target.is_none());
         assert!(matches!(
@@ -2077,6 +2114,20 @@ mod tests {
             crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(&state),
             "retaining external evidence must dirty canonical result history"
         );
+        let project = crate::workbench::lifecycle::project_lifecycle::snapshot(&state).unwrap();
+        let text = crate::io::project_io::serialize_project_file(&project)
+            .expect("imported evidence must be saveable");
+        let restored = crate::io::project_io::load_project_text(&text, None).unwrap();
+        assert!(restored.simulation_results_warning.is_none());
+        assert_eq!(restored.simulation_results, project.simulation_results);
+        let restored = restored.simulation_results.into_simulation_state().unwrap();
+        let run = restored.active_run().unwrap();
+        assert_eq!(run.lifecycle, SimulationRunLifecycle::LegacyUnknown);
+        assert_eq!(run.elapsed_time, 0.0);
+        assert!(run.execution_identity().is_none());
+        assert!(run.execution_target.is_none());
+        assert!(run.prepared_receipt().is_none());
+        assert_eq!(run.analyses[0].waveforms[0].y.as_slice(), [0.0, 1.0]);
     }
 
     #[test]

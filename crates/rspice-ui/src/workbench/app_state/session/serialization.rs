@@ -398,6 +398,19 @@ fn canonical_session_identity_value(value: &serde_json::Value) -> serde_json::Va
 mod tests {
     use super::*;
 
+    #[test]
+    fn cleared_run_sequence_survives_session_round_trip() {
+        let mut state = AppState::default();
+        state.simulation.next_run_id = 41;
+        assert_eq!(state.simulation.start_run().id, 42);
+        state.simulation.clear_runs();
+        let json = serde_json::to_string(&state).expect("session serializes");
+        let mut restored: AppState = serde_json::from_str(&json).expect("session restores");
+        assert!(restored.simulation.runs.is_empty());
+        assert_eq!(restored.simulation.next_run_id, 42);
+        assert_eq!(restored.simulation.start_run().id, 43);
+    }
+
     fn seal_legacy_unattributed(run: &mut crate::state::SimulationRun) {
         run.restore_provenance(crate::state::SimulationRunProvenance::LegacyUnattributed)
             .expect("legacy fixture provenance seals");

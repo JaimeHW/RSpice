@@ -1852,7 +1852,8 @@ mod tests {
         let inactive_run = {
             let run = state
                 .simulation
-                .start_prepared_run(plan_receipt(inactive_plan_id, 1));
+                .start_prepared_run(plan_receipt(inactive_plan_id, 1))
+                .unwrap();
             run.set_campaign_membership(
                 crate::state::SimulationCampaignMembership::new(
                     campaign_id,
@@ -1868,7 +1869,8 @@ mod tests {
         let active_run = {
             let run = state
                 .simulation
-                .start_prepared_run(plan_receipt(active_plan_id, 11));
+                .start_prepared_run(plan_receipt(active_plan_id, 11))
+                .unwrap();
             run.set_campaign_membership(
                 crate::state::SimulationCampaignMembership::new(
                     campaign_id,

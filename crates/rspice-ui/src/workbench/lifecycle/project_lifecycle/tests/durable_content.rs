@@ -5,6 +5,51 @@ use crate::workbench::documents::result_document::{
     AnalysisPresentationKey, ResultsState, WavePanePresentationKey, marker_anchor_for,
 };
 
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn cleared_run_sequence_is_dirty_and_survives_scoped_and_all_saves() {
+    for scope in [SaveScope::ActiveDocument, SaveScope::AllDocuments] {
+        let mut state = AppState::default();
+        state
+            .workbench
+            .activate(crate::workbench::state::Workspace::Results);
+        let path = unique_path("cleared-run-sequence");
+        save_native(
+            &mut state,
+            SaveScope::AllDocuments,
+            &path,
+            DestinationAuthority::UserSelected,
+        )
+        .unwrap();
+        let solver_input = generated_netlist_input_digest(&state).unwrap();
+        assert_eq!(state.simulation.start_run().id, 1);
+        state.simulation.clear_runs();
+        assert!(state.simulation.runs.is_empty());
+        assert!(active_document_is_dirty(&state));
+        assert_eq!(dirty_document_count(&state), 1);
+        assert_eq!(
+            generated_netlist_input_digest(&state).unwrap(),
+            solver_input
+        );
+
+        state
+            .schematic
+            .add_component(ComponentType::Resistor, Point::new(4, 4));
+        save_native(&mut state, scope, &path, DestinationAuthority::Canonical).unwrap();
+        assert!(!active_document_is_dirty(&state));
+        assert_eq!(
+            has_unsaved_changes(&state),
+            scope == SaveScope::ActiveDocument
+        );
+        let saved = crate::io::load_project_file(&path).unwrap();
+        assert_eq!(saved.simulation_results.next_run_id, 1);
+        let mut restored = saved.simulation_results.into_simulation_state().unwrap();
+        assert!(restored.runs.is_empty());
+        assert_eq!(restored.start_run().id, 2);
+        remove_project_artifacts(&path);
+    }
+}
+
 pub(super) fn retained_results() -> (AppState, AnalysisPresentationKey) {
     let mut state = AppState::default();
     let mut run = crate::state::SimulationRun::new(1);

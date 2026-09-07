@@ -145,7 +145,7 @@ fn start_prepared_run_for_active_plan(state: &mut AppState, analysis: Option<Ana
         )
     });
     let holds_analysis = analysis.is_some();
-    let run = state.simulation.start_prepared_run(receipt);
+    let run = state.simulation.start_prepared_run(receipt).unwrap();
     if let Some(analysis) = analysis {
         run.add_analysis(analysis);
     }

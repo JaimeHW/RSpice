@@ -52,6 +52,7 @@ pub struct ProjectSimulationResultsData {
     pub schema_version: u32,
     #[serde(default)]
     pub runs: Vec<ProjectSimulationRun>,
+    /// Last allocated display sequence, retained even after all runs are cleared.
     #[serde(default)]
     pub next_run_id: u64,
     /// How many datasets this project retains. Absent means the built-in
@@ -120,10 +121,10 @@ impl ProjectSimulationResultsData {
 
     pub fn from_state(state: &SimulationState) -> Self {
         if state.runs.is_empty() {
-            // A project with no results can still carry a retention decision
-            // the reader made; dropping it here would silently reset the
-            // policy the moment the history was cleared.
+            // Clearing datasets preserves both their allocation history and
+            // the project's retention decision across save and session restore.
             return Self {
+                next_run_id: state.next_run_id,
                 retained_dataset_limit: state.retained_dataset_limit,
                 ..Self::default()
             };

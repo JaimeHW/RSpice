@@ -211,6 +211,7 @@ fn result_app_with_current_out_map(split: bool) -> RSpiceApp {
     app.state
         .simulation
         .start_prepared_run(receipt)
+        .unwrap()
         .add_analysis(
             crate::state::AnalysisResult::new(
                 1,

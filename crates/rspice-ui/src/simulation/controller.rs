@@ -743,6 +743,26 @@ impl SimulationController {
         let dispatched_save_policy = dispatch.save_policy();
         let run_receipt = dispatch.prepared_run_receipt(source_domain)?;
 
+        // Allocate before changing controller queues, cross-probe mappings, or
+        // manual-deck publication state: exhaustion must leave no partial batch.
+        let run = state
+            .simulation
+            .start_prepared_run(run_receipt)
+            .map_err(|error| {
+                crate::simulation::execution::PreparationError::new(
+                    crate::simulation::execution::PreparationStage::Authorization,
+                    error,
+                )
+            })?;
+        if let Some(membership) = campaign_membership.as_ref() {
+            run.set_campaign_membership(membership.clone())
+                .expect("campaign membership was validated before run creation");
+        }
+        let run_id = run.id;
+        let execution_identity = run
+            .execution_identity()
+            .expect("current simulation runs always allocate job identity");
+
         self.pending_analyses.clear();
         self.successful_analysis_instances.clear();
         self.execution_artifacts.clear();
@@ -777,15 +797,6 @@ impl SimulationController {
             queued_names
         );
 
-        let run = state.simulation.start_prepared_run(run_receipt);
-        if let Some(membership) = campaign_membership {
-            run.set_campaign_membership(membership)
-                .expect("campaign membership was validated before run creation");
-        }
-        let run_id = run.id;
-        let execution_identity = run
-            .execution_identity()
-            .expect("current simulation runs always allocate job identity");
         if let (Some(plan_id), Some(limit)) = (
             dispatched_plan_id,
             dispatched_save_policy.retained_dataset_limit(),

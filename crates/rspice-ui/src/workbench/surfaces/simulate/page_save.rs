@@ -812,6 +812,7 @@ mod tests {
             sequences.push(
                 simulation
                     .start_prepared_run(plan_receipt(plan, byte * 16))
+                    .unwrap()
                     .id,
             );
         }

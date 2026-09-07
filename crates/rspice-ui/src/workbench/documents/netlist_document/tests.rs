@@ -1115,7 +1115,7 @@ fn an_executed_deck_claims_verification_only_when_it_reproduces_the_sealed_diges
             ],
         )
         .expect("prepared run receipt");
-        let run = state.simulation.start_prepared_run(receipt);
+        let run = state.simulation.start_prepared_run(receipt).unwrap();
         run.id
     };
 

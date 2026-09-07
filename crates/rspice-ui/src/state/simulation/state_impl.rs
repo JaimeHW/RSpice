@@ -329,28 +329,41 @@ impl SimulationState {
     // Multi-Run Results Management (Cadence Spectre PSF-style)
     // =========================================================================
 
-    /// Start a new simulation run, returning the new run
-    ///
-    /// This creates a new SimulationRun with an auto-incremented ID and
-    /// prepares it for receiving analysis results.
+    /// Allocate a fixture run without preparing a simulation.
+    #[cfg(test)]
     pub fn start_run(&mut self) -> &mut SimulationRun {
+        self.start_run_with_receipt(None)
+            .expect("fixture run sequence is available")
+    }
+
+    /// Allocate a run for external evidence; the importer seals its provenance
+    /// and payload before publishing it. Exhaustion does not mutate history.
+    pub(crate) fn start_imported_run(&mut self) -> Result<&mut SimulationRun, String> {
         self.start_run_with_receipt(None)
     }
 
     /// Start a run already sealed by the exact consumed prepared snapshot.
-    pub(crate) fn start_prepared_run(&mut self, receipt: PreparedRunReceipt) -> &mut SimulationRun {
+    /// Sequence exhaustion leaves history, selection, and retention unchanged.
+    pub(crate) fn start_prepared_run(
+        &mut self,
+        receipt: PreparedRunReceipt,
+    ) -> Result<&mut SimulationRun, String> {
         self.start_run_with_receipt(Some(receipt))
     }
 
     fn start_run_with_receipt(
         &mut self,
         receipt: Option<PreparedRunReceipt>,
-    ) -> &mut SimulationRun {
+    ) -> Result<&mut SimulationRun, String> {
+        let next_run_id = self.next_run_id.checked_add(1).ok_or_else(|| {
+            "The project run sequence is exhausted; start a new project to add another run."
+                .to_owned()
+        })?;
         let plan_scoped = receipt
             .as_ref()
             .and_then(PreparedRunReceipt::simulation_plan_id)
             .is_some();
-        self.next_run_id += 1;
+        self.next_run_id = next_run_id;
         let run = match receipt {
             Some(receipt) => SimulationRun::new_prepared(self.next_run_id, receipt),
             None => SimulationRun::new(self.next_run_id),
@@ -370,7 +383,7 @@ impl SimulationState {
         self.prune_overlay_dataset_ids();
 
         // Return mutable reference to the new run
-        &mut self.runs[0]
+        Ok(&mut self.runs[0])
     }
 
     /// Complete the current run and update legacy waveforms for compatibility
@@ -984,15 +997,54 @@ mod tests {
     }
 
     #[test]
+    fn run_sequence_allocates_the_last_value_once_and_rejects_exhaustion_atomically() {
+        let plan = crate::product::SimulationPlanId::new();
+        let mut state = SimulationState::default();
+        state.next_run_id = u64::MAX - 2;
+        let previous = state
+            .start_prepared_run(plan_receipt(plan, 1))
+            .unwrap()
+            .run_id;
+        let last = state.start_prepared_run(plan_receipt(plan, 11)).unwrap();
+        assert_eq!(last.id, u64::MAX);
+        assert_ne!(last.run_id, previous);
+        state.select_run(1);
+        state.overlay_dataset_ids.push(state.runs[0].dataset_id);
+        state.retained_dataset_limit = Some(1);
+        let revision = state.runs.revision();
+        let overlays = state.overlay_dataset_ids.clone();
+        let data_version = state.data_version;
+
+        for _ in 0..2 {
+            let error = state
+                .start_prepared_run(plan_receipt(plan, 21))
+                .unwrap_err();
+            assert!(error.contains("run sequence is exhausted"));
+            assert_eq!(state.next_run_id, u64::MAX);
+            assert_eq!(state.runs.revision(), revision);
+            assert_eq!(state.runs.len(), 2);
+            assert_eq!(state.active_run_idx, Some(1));
+            assert_eq!(state.active_run().unwrap().run_id, previous);
+            assert_eq!(state.overlay_dataset_ids, overlays);
+            assert_eq!(state.retained_dataset_limit, Some(1));
+            assert_eq!(state.data_version, data_version);
+        }
+        state.clear_runs();
+        assert!(state.start_prepared_run(plan_receipt(plan, 31)).is_err());
+        assert!(state.runs.is_empty());
+        assert_eq!(state.next_run_id, u64::MAX);
+    }
+
+    #[test]
     fn plan_retention_prunes_only_the_owning_plans_datasets() {
         let plan_a = crate::product::SimulationPlanId::new();
         let plan_b = crate::product::SimulationPlanId::new();
         let mut state = SimulationState::default();
-        state.start_prepared_run(plan_receipt(plan_a, 1));
-        state.start_prepared_run(plan_receipt(plan_b, 11));
-        state.start_prepared_run(plan_receipt(plan_a, 21));
-        state.start_prepared_run(plan_receipt(plan_b, 31));
-        state.start_prepared_run(plan_receipt(plan_a, 41));
+        state.start_prepared_run(plan_receipt(plan_a, 1)).unwrap();
+        state.start_prepared_run(plan_receipt(plan_b, 11)).unwrap();
+        state.start_prepared_run(plan_receipt(plan_a, 21)).unwrap();
+        state.start_prepared_run(plan_receipt(plan_b, 31)).unwrap();
+        state.start_prepared_run(plan_receipt(plan_a, 41)).unwrap();
 
         state.prune_plan_runs(plan_a, 2);
 
@@ -1007,7 +1059,7 @@ mod tests {
         let mut state = SimulationState::default();
         let mut sequences = Vec::new();
         for byte in [1_u8, 21, 41] {
-            let run = state.start_prepared_run(plan_receipt(plan, byte));
+            let run = state.start_prepared_run(plan_receipt(plan, byte)).unwrap();
             let sequence = run.id;
             sequences.push(sequence);
             let deck: std::sync::Arc<str> = std::sync::Arc::from(format!("run {sequence}\n.end\n"));

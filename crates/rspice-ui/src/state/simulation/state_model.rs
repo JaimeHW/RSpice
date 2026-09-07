@@ -103,7 +103,8 @@ pub struct SimulationState {
     /// difference between a retention policy and data loss.
     pub retained_dataset_limit: Option<usize>,
 
-    /// Next run ID to assign (monotonically increasing)
+    /// Last allocated display sequence; zero before the first run. The legacy
+    /// field name is retained, but allocation increments it before assigning.
     pub next_run_id: u64,
 
     /// Currently selected run index in the Results Browser

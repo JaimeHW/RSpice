@@ -3,14 +3,30 @@
 use super::*;
 
 #[test]
-fn project_simulation_results_omits_empty_history_after_cleared_runs() {
-    let mut simulation = SimulationState::default();
-    simulation.start_run();
-    simulation.clear_runs();
-
-    let results = ProjectSimulationResults::from_state(&simulation);
-
-    assert!(results.is_empty());
+fn cleared_run_sequence_survives_project_round_trip() {
+    for last_sequence in [1, 42, u64::MAX] {
+        let mut simulation = SimulationState::default();
+        simulation.next_run_id = last_sequence - 1;
+        assert_eq!(simulation.start_run().id, last_sequence);
+        simulation.clear_runs();
+        let mut libraries = LibraryManager::with_primitives();
+        let workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
+        let project = ProjectFile::new_with_simulation_results(
+            workspace,
+            libraries,
+            ProjectSimulationResults::from_state(&simulation),
+        );
+        let text = serialize_project_file(&project).expect("cleared history publishes");
+        let loaded = load_project_text(&text, None).expect("cleared history reopens");
+        assert!(loaded.simulation_results_warning.is_none());
+        assert_eq!(loaded.simulation_results.next_run_id, last_sequence);
+        let mut restored = loaded.simulation_results.into_simulation_state().unwrap();
+        assert!(restored.runs.is_empty());
+        assert_eq!(restored.next_run_id, last_sequence);
+        if last_sequence < u64::MAX {
+            assert_eq!(restored.start_run().id, last_sequence + 1);
+        }
+    }
 }
 
 #[test]

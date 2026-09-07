@@ -17,6 +17,42 @@ use crate::services::drc::DrcResult;
 static FIXTURE_NONCE: AtomicU64 = AtomicU64::new(0);
 
 #[test]
+fn exhausted_run_sequence_blocks_dispatch_without_starting_a_batch() {
+    let mut state = AppState::default();
+    state.simulation.run_intent = SimulationRunIntent::ManualDeck;
+    state.workspace.netlist_source = Some("deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_owned());
+    state.simulation.next_run_id = u64::MAX;
+    let baseline = crate::io::project_io::ProjectSimulationResults::from_state(&state.simulation);
+    let mut controller = SimulationController::new();
+    let snapshot = controller
+        .build_prepared_snapshot(&state, SimulationRunIntent::ManualDeck)
+        .expect("prepare manual run");
+    controller
+        .authorize_snapshot(snapshot)
+        .expect("authorize run");
+
+    controller.start_authorized_snapshot(&mut state);
+
+    assert_eq!(state.simulation.status, "Run blocked");
+    assert!(!controller.has_active_batch());
+    assert!(controller.runner.can_accept_prepared_task());
+    assert!(controller.cached_netlist.is_none());
+    assert!(state.simulation.active_execution.is_none());
+    assert!(state.ui.netlist.pending_manual_run_id.is_none());
+    assert_eq!(state.simulation.next_run_id, u64::MAX);
+    assert_eq!(
+        crate::io::project_io::ProjectSimulationResults::from_state(&state.simulation),
+        baseline
+    );
+    assert!(
+        state
+            .log_buffer
+            .entries()
+            .any(|message| { message.message.contains("run sequence is exhausted") })
+    );
+}
+
+#[test]
 fn spectre_model_library_ahdl_is_compiled_and_emitted_as_a_sealed_runtime_directive() {
     let mut manager = crate::state::model_library::ModelLibraryManager::new();
     let library_name = manager

@@ -89,6 +89,7 @@ fn app_with_prepared_run(origin: RunOrigin) -> RSpiceApp {
     app.state
         .simulation
         .start_prepared_run(receipt)
+        .unwrap()
         .add_analysis(
             AnalysisResult::new(1, AnalysisType::Transient, "retained TRAN").with_provenance(
                 AnalysisResultProvenance::new_with_source_domain(
