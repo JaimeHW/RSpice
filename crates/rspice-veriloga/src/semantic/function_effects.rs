@@ -129,9 +129,74 @@ impl Effects {
                 };
                 self.initialization_error
                     .get_or_insert((span, "contributions and analog events"));
+                match statement {
+                    AnalogStatement::Contribution(statement) => self.expression(&statement.value),
+                    AnalogStatement::IndirectContribution(statement) => {
+                        self.expression(&statement.lhs);
+                        self.expression(&statement.rhs);
+                    }
+                    AnalogStatement::EventControl(statement) => {
+                        self.event(&statement.event);
+                        self.statement(&statement.statement);
+                    }
+                    _ => unreachable!(),
+                }
             }
             AnalogStatement::Disable(_) => self.ordered = true,
             AnalogStatement::Null(_) => {}
+        }
+    }
+
+    fn event(&mut self, event: &EventExpr) {
+        match event {
+            EventExpr::Posedge { signal, .. } | EventExpr::Negedge { signal, .. } => {
+                self.expression(signal);
+            }
+            EventExpr::Cross {
+                signal,
+                direction,
+                time_tol,
+                expr_tol,
+                enable,
+                ..
+            } => {
+                self.expression(signal);
+                for operand in [direction, time_tol, expr_tol, enable]
+                    .into_iter()
+                    .flatten()
+                {
+                    self.expression(operand);
+                }
+            }
+            EventExpr::Above {
+                signal,
+                time_tol,
+                expr_tol,
+                enable,
+                ..
+            } => {
+                self.expression(signal);
+                for operand in [time_tol, expr_tol, enable].into_iter().flatten() {
+                    self.expression(operand);
+                }
+            }
+            EventExpr::Timer {
+                start,
+                period,
+                time_tol,
+                enable,
+                ..
+            } => {
+                self.expression(start);
+                for operand in [period, time_tol, enable].into_iter().flatten() {
+                    self.expression(operand);
+                }
+            }
+            EventExpr::Or { left, right, .. } => {
+                self.event(left);
+                self.event(right);
+            }
+            EventExpr::InitialStep { .. } | EventExpr::FinalStep { .. } => {}
         }
     }
 
@@ -205,7 +270,7 @@ pub(super) fn validate_initialization(
     for statement in statements {
         effects.statement(statement);
     }
-    validate_initialization_effects(effects, functions)
+    validate_effects(effects, functions, true)
 }
 
 pub(super) fn validate_initializer_expression(
@@ -214,17 +279,31 @@ pub(super) fn validate_initializer_expression(
 ) -> CompileResult<()> {
     let mut effects = Effects::default();
     effects.expression(expression);
-    validate_initialization_effects(effects, functions)
+    validate_effects(effects, functions, true)
 }
 
-fn validate_initialization_effects(
-    mut effects: Effects,
+/// Do not let constant folding or function inlining erase an unsupported
+/// simulation-control task. Discrete processes have their own task semantics.
+pub(super) fn validate_control_tasks(
+    statements: &[AnalogStatement],
     functions: &HashMap<SmolStr, FunctionDef>,
 ) -> CompileResult<()> {
+    let mut effects = Effects::default();
+    for statement in statements {
+        effects.statement(statement);
+    }
+    validate_effects(effects, functions, false)
+}
+
+fn validate_effects(
+    mut effects: Effects,
+    functions: &HashMap<SmolStr, FunctionDef>,
+    initialization: bool,
+) -> CompileResult<()> {
     let mut visited = HashSet::new();
-    let builtins = FunctionRegistry::new();
+    let builtins = initialization.then(FunctionRegistry::new);
     loop {
-        if let Some((span, construct)) = effects.initialization_error {
+        if initialization && let Some((span, construct)) = effects.initialization_error {
             return Err(CompileError::Semantic(SemanticError::new(
                 SemanticErrorKind::InvalidAnalogOperator(format!(
                     "{construct} are not permitted during pre-simulation initialization"
@@ -237,25 +316,40 @@ fn validate_initialization_effects(
             return Ok(());
         }
         for (name, span) in pending {
-            if !functions.contains_key(&name)
-                && (builtins
-                    .get(&name)
-                    .is_some_and(|function| function.is_analog_operator)
-                    || matches!(
-                        name.as_str(),
-                        "limexp"
-                            | "transition"
-                            | "last_crossing"
-                            | "cross"
-                            | "above"
-                            | "timer"
-                            | "zi_nd"
-                            | "zi_np"
-                            | "zi_zd"
-                            | "zi_zp"
-                            | "noise_table"
-                            | "$limit"
-                    ))
+            if matches!(name.as_str(), "$fatal" | "$stop") || (initialization && name == "$error") {
+                return Err(CompileError::Semantic(SemanticError::new(
+                    SemanticErrorKind::UnsupportedFeature(format!(
+                        "analog system task '{name}' requires simulation control that is not implemented{}",
+                        if initialization {
+                            " during pre-simulation initialization"
+                        } else {
+                            ""
+                        }
+                    )),
+                    span,
+                )));
+            }
+            if initialization
+                && !functions.contains_key(&name)
+                && (builtins.as_ref().is_some_and(|registry| {
+                    registry
+                        .get(&name)
+                        .is_some_and(|function| function.is_analog_operator)
+                }) || matches!(
+                    name.as_str(),
+                    "limexp"
+                        | "transition"
+                        | "last_crossing"
+                        | "cross"
+                        | "above"
+                        | "timer"
+                        | "zi_nd"
+                        | "zi_np"
+                        | "zi_zd"
+                        | "zi_zp"
+                        | "noise_table"
+                        | "$limit"
+                ))
             {
                 return Err(CompileError::Semantic(SemanticError::new(
                     SemanticErrorKind::InvalidAnalogOperator(format!(

@@ -3864,6 +3864,26 @@ impl VerilogADevice {
         self.context.drain_accepted_analog_tasks()
     }
 
+    /// Whether accepted calls remain to be delivered by the analysis host.
+    pub fn has_accepted_analog_tasks(&self) -> bool {
+        self.context.has_accepted_analog_tasks()
+    }
+
+    /// Deliver accepted calls with their instance identity, without cloning
+    /// names or running a numerical/observation pass.
+    pub fn visit_accepted_analog_tasks(
+        &mut self,
+        consume: &mut dyn FnMut(rspice_veriloga_runtime::AnalogTaskEvent<'_>),
+    ) {
+        for call in self.context.drain_accepted_analog_tasks() {
+            consume(rspice_veriloga_runtime::AnalogTaskEvent {
+                instance: &self.name,
+                model: &self.model.name,
+                call,
+            });
+        }
+    }
+
     /// Capture the accepted state, and nothing derived from it.
     ///
     /// The payload carries the variable array as the last evaluation left it,

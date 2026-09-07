@@ -226,11 +226,21 @@ Distinct noise processes are uncorrelated. Reusing one process through an
 assigned expression preserves coherent contributions, including cancellation.
 The trailing name argument is a display label, not a correlation key.
 
-The system tasks (`$display`, `$write`, `$strobe`, `$monitor`,
-`$info`, `$warning`, `$error`, `$fatal`, `$finish`, `$stop`) parse and
-are discarded with a warning. They currently neither print nor control
-simulation. This is a language-support gap; models depending on those tasks
-cannot be simulated correctly.
+Analog `$fatal` and `$stop` are rejected because their simulation-control
+semantics are not implemented. `$error` is also rejected during pre-simulation
+initialization, where it must prevent simulation from proceeding. These checks
+include transitive function calls and branches removed by constant folding.
+
+`$finish` calls retain their argument snapshots and execution order in a
+transactional journal. Runtime, generated, and mixed-signal device hosts can
+consume accepted calls through `CircuitData::visit_accepted_analog_tasks`.
+Engine termination, final-step delivery on early termination, and host diagnostic
+formatting remain incomplete; this transport does not establish `$finish`
+support for a complete simulation.
+
+`$display`, `$write`, `$strobe`, `$monitor`, `$info`, `$warning`, and ordinary
+analog `$error` are still discarded with a warning. They produce no runtime
+output. Models that rely on these missing task behaviors are not supported.
 
 ## Feature flags
 

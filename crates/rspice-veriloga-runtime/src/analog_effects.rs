@@ -44,6 +44,19 @@ pub struct AnalogTaskInvocation {
     pub arguments: Box<[AnalogTaskArgument]>,
 }
 
+/// One accepted call together with the instance that executed it.
+///
+/// Names are borrowed for synchronous host delivery. The call owns its
+/// argument snapshot, so retaining output never requires cloning a model or
+/// evaluating its expressions again. `call.site` identifies the authored
+/// call within this model; it is not a file line number.
+#[derive(Debug)]
+pub struct AnalogTaskEvent<'a> {
+    pub instance: &'a str,
+    pub model: &'a str,
+    pub call: AnalogTaskInvocation,
+}
+
 impl AnalogTaskInvocation {
     fn payload_bytes(&self) -> Option<usize> {
         let fixed = self

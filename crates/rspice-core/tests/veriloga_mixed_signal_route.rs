@@ -88,6 +88,49 @@ impl Drop for ModelFile {
     }
 }
 
+#[test]
+fn unsupported_analog_control_reaches_the_engine_as_a_refusal() {
+    for discrete in ["", "reg started; initial started=1;"] {
+        for (task, statement) in [
+            ("$fatal", "analog begin if (0) $fatal(1, \"invalid\"); end"),
+            ("$stop", "analog begin @(final_step) $stop; end"),
+            ("$error", "analog initial $error(\"invalid\");"),
+        ] {
+            let model = ModelFile::new(
+                "control_refusal",
+                &format!(
+                    "module control_refusal(p,n); inout p,n; electrical p,n; {discrete}\n{statement}\nanalog I(p,n)<+V(p,n); endmodule"
+                ),
+            );
+            let deck = format!(
+                "* model control cannot disappear at loading\nV1 p 0 1\nX1 p 0 control_refusal\n.va \"{}\" control_refusal\n.end\n",
+                model.deck_path()
+            );
+            let netlist = Netlist::parse(&deck).unwrap();
+            let engine = Engine::default();
+            // Repeating the load must not replace a failed compile with a
+            // cached numerical model that has lost its control statements.
+            for _ in 0..2 {
+                let error = engine
+                    .run_tran(&netlist, 1e-6, 1e-7)
+                    .unwrap_err()
+                    .to_string();
+                assert!(
+                    error.contains(task) && error.contains("requires simulation control"),
+                    "{error}"
+                );
+                if discrete.is_empty() {
+                    let error = engine.run_dc_op(&netlist).unwrap_err().to_string();
+                    assert!(
+                        error.contains(task) && error.contains("requires simulation control"),
+                        "{error}"
+                    );
+                }
+            }
+        }
+    }
+}
+
 fn run(deck: &str, tstop: f64, max_step: f64) -> TransientResult {
     let netlist = Netlist::parse(deck).expect("the deck parses");
     Engine::new(SimulationConfig::default())

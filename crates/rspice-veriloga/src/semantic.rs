@@ -1344,6 +1344,7 @@ impl SemanticAnalyzer {
 
         // Phase 12: Analyze analog block
         if let Some(block) = &module.analog_block {
+            function_effects::validate_control_tasks(&block.statements, &self.user_functions)?;
             for stmt in &block.statements {
                 self.analyze_statement(stmt, &mut analyzed, &mut statements)?;
             }
@@ -6354,15 +6355,7 @@ impl SemanticAnalyzer {
     fn is_no_effect_system_task(name: &str) -> bool {
         matches!(
             name,
-            "$display"
-                | "$error"
-                | "$fatal"
-                | "$info"
-                | "$monitor"
-                | "$stop"
-                | "$strobe"
-                | "$warning"
-                | "$write"
+            "$display" | "$error" | "$info" | "$monitor" | "$strobe" | "$warning" | "$write"
         )
     }
 

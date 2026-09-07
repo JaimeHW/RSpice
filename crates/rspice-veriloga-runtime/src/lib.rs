@@ -24,7 +24,7 @@ mod compatibility_catalog;
 
 pub use analog_effects::{
     AnalogEffectError, AnalogEffectJournal, AnalogEffectLimits, AnalogTaskArgument,
-    AnalogTaskInvocation, AnalogTaskKind,
+    AnalogTaskEvent, AnalogTaskInvocation, AnalogTaskKind,
 };
 pub use analog_lifecycle::AnalogEvaluationPhase;
 

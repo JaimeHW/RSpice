@@ -1341,7 +1341,7 @@ fn metadata_digest_is_stable_and_hex_encoded() {
     assert_ne!(digest, StableDigest::from_text("module other; endmodule"));
 
     let metadata = CanonicalMetadata::for_source("fixture", "module tiny; endmodule");
-    assert_eq!(metadata.schema_version, 21);
+    assert_eq!(metadata.schema_version, 22);
     assert_eq!(metadata.source_package.as_str(), "fixture");
     assert_eq!(metadata.source_digest.as_str(), digest.as_hex());
 }
@@ -2181,7 +2181,7 @@ fn artifact_dump_is_deterministic_and_contains_phase_summaries() {
 
     assert_eq!(first, second);
     assert!(first.contains("canonical-veriloga-ir"));
-    assert!(first.contains("schema_version=21"));
+    assert!(first.contains("schema_version=22"));
     assert!(first.contains("source_package=fixture"));
     assert!(first.contains("source_digest="));
     assert!(first.contains("source_identity="));
@@ -2329,19 +2329,24 @@ fn artifact_validation_rejects_metadata_feature_flag_mismatch() {
 
 #[test]
 fn artifact_validation_rejects_unknown_schema_even_when_hir_matches() {
-    let (mut metadata, mut hir, mir) = lower_tiny_resistor_parts();
-    metadata.schema_version += 1;
-    hir.schema_version = metadata.schema_version;
+    for adjustment in [-1_i32, 1] {
+        let (mut metadata, mut hir, mir) = lower_tiny_resistor_parts();
+        metadata.schema_version = metadata
+            .schema_version
+            .checked_add_signed(adjustment)
+            .unwrap();
+        hir.schema_version = metadata.schema_version;
 
-    let diagnostics = CanonicalIrArtifact::from_parts(metadata, hir, mir)
-        .expect_err("an unsupported schema must fail closed");
+        let diagnostics = CanonicalIrArtifact::from_parts(metadata, hir, mir)
+            .expect_err("an unsupported schema must fail closed, even when both versions agree");
 
-    assert!(diagnostics.iter().any(|diagnostic| {
-        diagnostic.phase == CompilerPhase::Artifact
-            && diagnostic
-                .message
-                .contains("unsupported canonical IR schema_version")
-    }));
+        assert!(diagnostics.iter().any(|diagnostic| {
+            diagnostic.phase == CompilerPhase::Artifact
+                && diagnostic
+                    .message
+                    .contains("unsupported canonical IR schema_version")
+        }));
+    }
 }
 
 #[test]

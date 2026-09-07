@@ -533,6 +533,13 @@ impl VmContext {
             .map_err(|error| VmError::AnalogTask(error.to_string()))
     }
 
+    /// Whether a host has accepted calls waiting for delivery.
+    pub fn has_accepted_analog_tasks(&self) -> bool {
+        self.analog_effects
+            .as_ref()
+            .is_some_and(|journal| !journal.accepted().is_empty())
+    }
+
     /// Accepted calls in execution order. Delivery consumes the calls so a
     /// checkpoint/resume cannot replay output already handled by the host.
     pub fn drain_accepted_analog_tasks(

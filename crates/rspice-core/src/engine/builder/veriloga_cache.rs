@@ -239,7 +239,11 @@ use super::*;
 // exactly the steps it always did, and the new one replays the same steps
 // through the ordinary list. Nothing in the record becomes ambiguous, so
 // rebuilding it would buy nothing.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 43;
+// Version 44 invalidates models compiled while analog $fatal, $stop, and
+// initialization $error could be discarded. Their calls cannot be recovered
+// from a cached CompiledModel. This also covers portable entries without a
+// canonical artifact, which cannot rely on the canonical schema check.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 44;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
@@ -2358,7 +2362,7 @@ endmodule
     }
 
     #[test]
-    fn disk_cache_discards_pre_event_state_records() {
+    fn disk_cache_discards_records_from_older_semantic_contracts() {
         let root = unique_test_root("stale-event-state-version");
         let source_path = root.join("model.va");
         std::fs::create_dir_all(&root).expect("create temporary cache root");
@@ -2366,25 +2370,30 @@ endmodule
         let cache_root = root.join("cache");
         let cache_path = cache_record_path_with_root(&source_path, &cache_root);
 
-        persist_model_to_disk_locked(&source_path, &entry, &cache_root)
-            .expect("persist current cache record");
-        let file = std::fs::File::open(&cache_path).expect("open current cache record");
-        let mut record: serde_json::Value =
-            serde_json::from_reader(file).expect("decode current cache record");
-        record["version"] = serde_json::Value::from(19_u32);
-        let file = std::fs::File::create(&cache_path).expect("replace cache record version");
-        serde_json::to_writer(file, &record).expect("encode stale cache record");
+        for (version, omit_canonical) in [(19_u32, false), (43, false), (43, true)] {
+            persist_model_to_disk_locked(&source_path, &entry, &cache_root)
+                .expect("persist current cache record");
+            let file = std::fs::File::open(&cache_path).expect("open current cache record");
+            let mut record: serde_json::Value =
+                serde_json::from_reader(file).expect("decode current cache record");
+            record["version"] = serde_json::Value::from(version);
+            if omit_canonical {
+                record["canonical_ir"] = serde_json::Value::Null;
+            }
+            let file = std::fs::File::create(&cache_path).expect("replace cache record version");
+            serde_json::to_writer(file, &record).expect("encode stale cache record");
 
-        assert!(
-            load_model_from_disk_locked(&source_path, &cache_root)
-                .expect("stale-version cache load is recoverable")
-                .is_none(),
-            "pre-event-state cache records must force a miss"
-        );
-        assert!(
-            !cache_path.exists(),
-            "stale-version cache record must be removed"
-        );
+            assert!(
+                load_model_from_disk_locked(&source_path, &cache_root)
+                    .expect("stale-version cache load is recoverable")
+                    .is_none(),
+                "old semantic contracts must force a miss, including portable records without IR"
+            );
+            assert!(
+                !cache_path.exists(),
+                "stale-version cache record must be removed"
+            );
+        }
 
         std::fs::remove_dir_all(root).expect("remove temporary cache root");
     }

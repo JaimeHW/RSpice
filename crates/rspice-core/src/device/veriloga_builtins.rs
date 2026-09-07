@@ -31,7 +31,7 @@ use std::sync::Arc;
 pub use rspice_veriloga_models::registry as builtins;
 
 pub use rspice_veriloga_runtime::{
-    AnalogEffectJournal, AnalogTaskArgument, AnalogTaskInvocation, AnalogTaskKind,
+    AnalogEffectJournal, AnalogTaskArgument, AnalogTaskEvent, AnalogTaskInvocation, AnalogTaskKind,
     GENERATED_PERSISTENT_STATE_VERSION, GENERATED_VERILOGA_COMPATIBILITY_CATALOG,
     GENERATED_VERILOGA_DESCRIPTOR_ABI_VERSION, GENERATED_VERILOGA_V27_COMBINED_IDENTITY_ALIASES,
     GeneratedAnalysisKind, GeneratedDdtCoefficients, GeneratedDerivative, GeneratedEvalContext,
@@ -432,6 +432,21 @@ impl BuiltinVerilogADevices {
     #[inline]
     pub(crate) fn iter(&self) -> impl Iterator<Item = &BuiltinVerilogAInstance> {
         self.devices.iter()
+    }
+
+    pub(crate) fn visit_accepted_analog_tasks(
+        &mut self,
+        consume: &mut dyn FnMut(AnalogTaskEvent<'_>),
+    ) {
+        for device in &mut self.devices {
+            device.kind.drain_analog_tasks(&mut |call| {
+                consume(AnalogTaskEvent {
+                    instance: &device.instance_name,
+                    model: device.model_name,
+                    call,
+                });
+            });
+        }
     }
 
     /// Exact current entering the first external module terminal from the
@@ -2698,12 +2713,13 @@ mod tests {
                 .contains("pending system tasks")
         );
         let mut delivered = Vec::new();
-        for device in &mut devices.devices {
-            device
-                .kind
-                .drain_analog_tasks(&mut |call| delivered.push(call));
-        }
+        devices.visit_accepted_analog_tasks(&mut |event| {
+            assert_eq!(event.model, "r2_cmc");
+            delivered.push((event.instance.to_string(), event.call));
+        });
         assert_eq!(delivered.len(), 2);
+        assert_eq!(delivered[0].0, "r1");
+        assert_eq!(delivered[1].0, "r2");
         devices.accepted_checkpoint_states().unwrap();
         devices.restore_rollback_state(reused);
         assert!(devices.accepted_checkpoint_states().is_err());

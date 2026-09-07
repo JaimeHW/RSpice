@@ -899,6 +899,27 @@ impl MixedSignalHost {
         &self.instance
     }
 
+    pub(crate) fn validate_analog_task_delivery(&self) -> Result<(), MixedSignalError> {
+        if self.trial.is_some() {
+            return Err(MixedSignalError::TrialProtocol {
+                detail: "analog task delivery requires the mixed-signal trial to be accepted or rejected".into(),
+            });
+        }
+        Ok(())
+    }
+
+    pub(crate) fn visit_accepted_analog_tasks(
+        &mut self,
+        consume: &mut dyn FnMut(rspice_veriloga_runtime::AnalogTaskEvent<'_>),
+    ) -> Result<(), MixedSignalError> {
+        self.validate_analog_task_delivery()?;
+        // A read with no pending calls must not copy a shared rollback image.
+        if self.analog.has_accepted_analog_tasks() {
+            self.analog.make_mut().visit_accepted_analog_tasks(consume);
+        }
+        Ok(())
+    }
+
     /// Every circuit node this module's matrix contributions can reach, in
     /// ascending order and without ground.
     ///

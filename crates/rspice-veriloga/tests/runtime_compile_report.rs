@@ -815,6 +815,78 @@ fn discarded_system_tasks_warn_on_a_compile_that_still_succeeds() {
 }
 
 #[test]
+fn unsupported_analog_control_tasks_cannot_be_erased_by_folding_or_inlining() {
+    for task in ["$fatal(1, \"invalid model\")", "$stop(0)"] {
+        for body in [
+            format!("analog begin {task}; I(p,n)<+1; end"),
+            format!("analog begin if (0) {task}; I(p,n)<+1; end"),
+            format!("analog begin @(final_step) {task}; I(p,n)<+1; end"),
+            format!("analog begin repeat(0) {task}; I(p,n)<+1; end"),
+            format!(
+                "analog function real f; input x; real x; begin if (0) {task}; f=x; end endfunction analog I(p,n)<+f(1);"
+            ),
+            format!(
+                "analog function real f; input x; real x; begin {task}; f=x; end endfunction analog begin @(timer(f(1))) value=1; I(p,n)<+value; end"
+            ),
+        ] {
+            let source = format!(
+                "module blocked(p,n); inout p,n; electrical p,n; real value;\n{body}\nendmodule"
+            );
+            let error = compiler()
+                .compile_runtime(&source, None)
+                .expect_err(&source);
+            let diagnostics = compile_diagnostics(&source, &error);
+            let diagnostic = diagnostics
+                .iter()
+                .find(|diagnostic| diagnostic.message.contains("requires simulation control"))
+                .unwrap_or_else(|| panic!("missing control-task refusal: {diagnostics:?}"));
+            assert_eq!(diagnostic.severity, CompileDiagnosticSeverity::Error);
+            assert_eq!(diagnostic.phase, CompileDiagnosticPhase::Semantic);
+            assert_eq!(
+                diagnostic.span.as_ref().unwrap().byte_start as usize,
+                source.find(task).unwrap(),
+                "the diagnostic must identify the authored call, including in a function"
+            );
+        }
+    }
+}
+
+#[test]
+fn initialization_errors_cannot_be_discarded_or_hidden_in_function_calls() {
+    for task in ["$error(\"invalid model\")", "$fatal(1, \"invalid model\")"] {
+        for body in [
+            format!("analog initial {task};"),
+            format!("analog initial if(0) {task};"),
+            format!(
+                "analog function real f; input x; real x; begin {task}; f=x; end endfunction analog initial value=f(1);"
+            ),
+            format!(
+                "analog function real f; input x; real x; begin if(0) {task}; f=x; end endfunction real seed=f(1);"
+            ),
+        ] {
+            let source = format!(
+                "module blocked(p,n); inout p,n; electrical p,n; real value;\n{body}\nanalog I(p,n)<+value; endmodule"
+            );
+            let error = compiler()
+                .compile_runtime(&source, None)
+                .expect_err(&source);
+            let diagnostics = compile_diagnostics(&source, &error);
+            assert!(
+                diagnostics.iter().any(|diagnostic| {
+                    diagnostic.severity == CompileDiagnosticSeverity::Error
+                        && diagnostic.message.contains("requires simulation control")
+                        && diagnostic.message.contains("pre-simulation initialization")
+                        && diagnostic.span.as_ref().is_some_and(|span| {
+                            span.byte_start as usize == source.find(task).unwrap()
+                        })
+                }),
+                "missing source-located initialization refusal: {diagnostics:?}"
+            );
+        }
+    }
+}
+
+#[test]
 fn a_source_without_discarded_constructs_carries_no_warnings() {
     let report = compiler()
         .compile_runtime(SENSOR_BRIDGE_SOURCE, Some("sensor_bridge"))
