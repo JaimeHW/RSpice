@@ -417,16 +417,19 @@ impl Engine {
                     Err(error @ SimulationError::Aborted)
                     | Err(error @ SimulationError::TimeLimitExceeded)
                     | Err(error @ SimulationError::ResourceLimit(_))
-                    | Err(error @ SimulationError::Configuration(_)) => Err(error),
+                    | Err(error @ SimulationError::Configuration(_)) => {
+                        return Err(error.with_abort_reason(abort));
+                    }
                     Err(_) => Ok(None),
                 };
                 run_outcomes.push(outcome);
             }
         } else {
             use std::sync::Mutex;
-            use std::sync::atomic::{AtomicUsize, Ordering};
+            use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
             let next = AtomicUsize::new(0);
+            let stopped = AtomicBool::new(false);
             let slots: Vec<Mutex<Option<RunOutcome>>> =
                 (0..num_runs).map(|_| Mutex::new(None)).collect();
             let mut worker_config = self.config().clone();
@@ -440,7 +443,7 @@ impl Engine {
                     scope.spawn(|| {
                         let engine = Self::new(worker_config.clone());
                         loop {
-                            if abort.is_aborted() {
+                            if stopped.load(Ordering::Acquire) || abort.is_aborted() {
                                 break;
                             }
                             let index = next.fetch_add(1, Ordering::SeqCst);
@@ -451,7 +454,8 @@ impl Engine {
                                 Ok(run_netlist) => run_netlist,
                                 Err(error) => {
                                     *slots[index].lock().expect("mc slot") = Some(Err(error));
-                                    continue;
+                                    stopped.store(true, Ordering::Release);
+                                    break;
                                 }
                             };
                             let outcome = match engine.run_dc_op_with_abort(&run_netlist, abort) {
@@ -462,31 +466,33 @@ impl Engine {
                                 | Err(error @ SimulationError::Configuration(_)) => Err(error),
                                 Err(_) => Ok(None),
                             };
+                            let fatal = outcome.is_err();
                             *slots[index].lock().expect("mc slot") = Some(outcome);
+                            if fatal {
+                                stopped.store(true, Ordering::Release);
+                                break;
+                            }
                         }
                     });
                 }
             });
 
-            if abort.is_aborted() {
-                return Err(SimulationError::from_abort(abort));
-            }
-
             run_outcomes = slots
                 .into_iter()
-                .map(|slot| {
-                    slot.into_inner()
-                        .expect("mc slot lock")
-                        .expect("every Monte Carlo slot is processed without cancellation")
-                })
+                .filter_map(|slot| slot.into_inner().expect("mc slot lock"))
                 .collect();
         }
 
+        // A fatal outcome stops scheduling immediately. Unstarted parallel
+        // slots are absent; preserve the recorded error before aggregating.
+        let run_outcomes = run_outcomes
+            .into_iter()
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| error.with_abort_reason(abort))?;
         if abort.is_aborted() {
             return Err(SimulationError::from_abort(abort));
         }
 
-        let run_outcomes = run_outcomes.into_iter().collect::<Result<Vec<_>, _>>()?;
         let mut result =
             self.monte_carlo_result_from_trials(run_outcomes.into_iter().flatten(), num_runs)?;
         result.sampling = Some(MonteCarloSampling {
