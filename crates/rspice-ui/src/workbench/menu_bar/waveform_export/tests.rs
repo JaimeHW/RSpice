@@ -1871,17 +1871,16 @@ fn a_display_label_change_does_not_move_an_exported_coordinate_id() {
         .x_signal
         .as_ref()
         .expect("a CSV export publishes its coordinate");
-    println!(
-        "PXF export coordinate: id={:?} signal_type={:?} unit={:?}; Studio axis label={:?}",
-        coordinate.name,
-        coordinate.signal_type,
-        coordinate.signal_type.default_unit(),
-        AnalysisType::Pxf.axis_info().0,
-    );
+    // The unit is pinned with the id because losing it is what the regression
+    // actually cost a reader: `SignalType::Unknown` has no unit at all.
     assert_eq!(
-        (coordinate.name.as_str(), coordinate.signal_type),
-        ("frequency", crate::io::SignalType::Frequency),
-        "a periodic transfer sweep exports a typed frequency coordinate",
+        (
+            coordinate.name.as_str(),
+            coordinate.signal_type,
+            coordinate.signal_type.default_unit(),
+        ),
+        ("frequency", crate::io::SignalType::Frequency, "Hz"),
+        "a periodic transfer sweep exports a typed frequency coordinate, in hertz",
     );
     assert_ne!(
         AnalysisType::Pxf.axis_info().0,
