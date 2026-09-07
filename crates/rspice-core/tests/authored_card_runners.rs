@@ -769,3 +769,95 @@ fn an_authored_pstb_card_honours_cancellation() {
         rspice_core::engine::SimulationError::Aborted
     ));
 }
+
+/// A `.PSTB` carrier can never carry a state-free periodic map, in either
+/// orbit policy — so the engine needs no guard against one, and the reader of
+/// `run_pstb_card_from_pss_with_abort` may take `order >= 1` as given.
+///
+/// Two independent facts close it, and this pins both because either one
+/// changing would put an order-zero map back in reach:
+///
+/// 1. The shooting solver refuses a circuit with no reactive element at all,
+///    so no *solved* carrier has an empty monodromy, driven or autonomous.
+/// 2. A *retained* carrier's monodromy is exactly as long as its shooting
+///    state, and its basis is exactly as long as that state too. An empty map
+///    therefore forces an empty basis, and a probe cannot be resolved against
+///    an empty basis — the run is refused before any judgement of the orbit.
+///
+/// The engine used to carry a refusal for the autonomous half of this and an
+/// implicit admission for the driven half. Neither branch could be reached,
+/// and the admission was the more misleading of the two: it read as a
+/// deliberate statement that a driven state-free carrier is a real answer,
+/// when no such carrier can be built.
+#[test]
+fn a_periodic_map_with_no_dynamic_state_cannot_reach_a_pstb_card() {
+    use rspice_core::analysis::PssConfig;
+
+    const NO_REACTIVE_STATE: &str = "stateless periodic deck\n\
+         vin in 0 SIN(0 1 1meg)\n\
+         r1 in out 50\n\
+         r2 out 0 1k\n\
+         .end\n";
+
+    let stateless = Netlist::parse(NO_REACTIVE_STATE).expect("deck parses");
+    let engine = Engine::new(SimulationConfig::default());
+
+    for (label, config) in [
+        (
+            "driven",
+            PssConfig::new(PSTB_FUNDAMENTAL)
+                .with_harmonics(8)
+                .with_points_per_period(64)
+                .with_tstab_periods(2),
+        ),
+        (
+            "autonomous",
+            PssConfig::autonomous()
+                .with_period_guess(1.0 / PSTB_FUNDAMENTAL)
+                .with_oscillator_node("out")
+                .with_harmonics(8)
+                .with_points_per_period(64)
+                .with_tstab_periods(2),
+        ),
+    ] {
+        let error = engine
+            .run_pss_operating_point_with_abort(&stateless, config, &NoAbort)
+            .expect_err("a circuit with no reactive element has no periodic state to shoot")
+            .to_string();
+        assert!(
+            error.contains("no capacitors or inductors"),
+            "the {label} refusal must name the missing dynamic state: {error}"
+        );
+    }
+
+    // The retained half: an order-zero map forces an order-zero basis, and a
+    // probe resolved against nothing would silently name coordinate zero.
+    let netlist = Netlist::parse(PSTB_RESONATOR).expect("deck parses");
+    let carrier = pstb_carrier(&engine, &netlist);
+    let mut state_free = carrier.analysis().clone();
+    state_free.monodromy.clear();
+    state_free.floquet_multipliers.clear();
+    state_free.result.floquet_multipliers.clear();
+    state_free.result.floquet_evidence =
+        rspice_core::analysis::FloquetSpectrumEvidence::NoDynamicModes;
+    state_free.result.trivial_floquet_multiplier_index = None;
+    state_free.is_stable = state_free.result.is_stable();
+
+    let retained = rspice_core::engine::PssOperatingPoint::try_from_parts(
+        carrier.config().clone(),
+        state_free,
+        Vec::new(),
+    )
+    .expect("an empty map with an empty shooting state is structurally valid");
+    assert!(retained.analysis().monodromy.is_empty());
+    assert!(retained.shooting_state_basis().is_empty());
+
+    let message = engine
+        .run_pstb_card_from_pss_with_abort(&netlist, &pstb_card("L1"), &retained, &NoAbort)
+        .expect_err("a carrier with no coordinates cannot answer a probe")
+        .to_string();
+    assert!(
+        message.contains("shooting-state basis"),
+        "the probe must be refused before the orbit is judged: {message}"
+    );
+}

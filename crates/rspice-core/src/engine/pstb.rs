@@ -98,7 +98,16 @@ impl Engine {
                 ));
             }
         }
-        if order > 0 && probe.state_index >= order {
+        // A resolved probe is a coordinate of a non-empty basis, and a basis is
+        // exactly as long as the shooting state, which is exactly the order of
+        // the monodromy. So `order` is at least one by the time this runs, and
+        // an order-zero periodic map cannot reach any judgement below it: the
+        // engine will not solve a PSS for a circuit with no reactive element at
+        // all, and a retained artifact carrying an empty map necessarily
+        // carries an empty basis, which `resolve_pstb_probe` refuses above.
+        // `a_periodic_map_with_no_dynamic_state_cannot_reach_a_pstb_card` in
+        // `tests/authored_card_runners.rs` pins both halves of that.
+        if probe.state_index >= order {
             return Err(SimulationError::Circuit(format!(
                 "PSTB probe '{}' maps to shooting coordinate {} but the retained monodromy has \
                  order {order}",
@@ -114,17 +123,6 @@ impl Engine {
                 "PSTB prerequisite PSS Floquet orbit contract is inconsistent".to_owned(),
             ));
         }
-        // An autonomous orbit has a free phase, so its spectrum must contain a
-        // phase mode. A state-free periodic map has no modes at all, so the two
-        // statements cannot both be true and the run refuses rather than
-        // publishing an indeterminate verdict as if it were a measurement.
-        if order == 0 && orbit_kind != FloquetOrbitKind::Driven {
-            return Err(SimulationError::Circuit(
-                "PSTB cannot judge an autonomous orbit whose periodic map has no dynamic state"
-                    .to_owned(),
-            ));
-        }
-
         let config = PstbConfig::new()
             .with_num_eigenvalues(card.num_multipliers)
             .with_orbit_kind(orbit_kind)
