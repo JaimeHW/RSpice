@@ -75,6 +75,172 @@ endmodule"#,
     let _ = std::fs::remove_file(model);
 }
 
+#[test]
+fn initialization_finish_returns_no_solution_and_does_not_cancel_or_poison_the_engine() {
+    use rspice_core::{AbortSignal, AtomicAbort, ModelFinishPoint, SimulationOutcome};
+    let model = write_model(
+        "finish_initialization",
+        r#"
+module finish_initialization(p,n);
+inout p,n; electrical p,n;
+analog initial $finish(0);
+analog I(p,n)<+V(p,n);
+endmodule"#,
+    );
+    let deck = format!(
+        "* initialization finish\nV1 out 0 2\nX1 out 0 finish_initialization\n.va \"{}\" finish_initialization\n.end\n",
+        deck_path(&model)
+    );
+    let netlist = Netlist::parse(&deck).unwrap();
+    let engine = Engine::default();
+    let abort = AtomicAbort::new();
+    for _ in 0..2 {
+        let outcome = engine
+            .run_with_outcome(&abort, |engine, signal| {
+                engine.run_dc_op_with_abort(&netlist, signal)
+            })
+            .unwrap();
+        let SimulationOutcome::Finished {
+            result: None,
+            finish,
+        } = outcome
+        else {
+            panic!("initialization must not manufacture an operating point: {outcome:?}");
+        };
+        assert_eq!(finish.model, "finish_initialization");
+        assert_eq!(finish.instance, "X1");
+        assert_eq!(finish.point, ModelFinishPoint::Initialization);
+        assert_eq!(finish.diagnostic_level, 0);
+        assert!(!abort.is_aborted());
+    }
+    assert!(matches!(
+        engine
+            .run_with_outcome(&abort, |engine, signal| engine
+                .run_tran_with_abort(&netlist, 1e-6, 1e-7, signal))
+            .unwrap(),
+        SimulationOutcome::Finished { result: None, .. }
+    ));
+    assert!(matches!(
+        engine
+            .run_with_outcome(&abort, |engine, signal| engine.run_ac_with_abort(
+                &netlist,
+                &[1e3, 1e4],
+                signal
+            ))
+            .unwrap(),
+        SimulationOutcome::Finished { result: None, .. }
+    ));
+    assert!(matches!(
+        engine
+            .run_with_outcome(&abort, |engine, signal| engine.run_noise_with_abort(
+                &netlist,
+                1,
+                &[1e3, 1e4],
+                300.15,
+                signal
+            ))
+            .unwrap(),
+        SimulationOutcome::Finished { result: None, .. }
+    ));
+    assert!(matches!(
+        engine
+            .run_with_outcome(&abort, |engine, signal| engine
+                .run_dc_sweep_with_report_and_abort(&netlist, "V1", 0.0, 2.0, 1.0, signal))
+            .unwrap(),
+        SimulationOutcome::Finished { result: None, .. }
+    ));
+    assert!(!abort.is_aborted());
+    let plain = Netlist::parse("* independent run\nV1 out 0 3\nR1 out 0 1k\n.end\n").unwrap();
+    let SimulationOutcome::Completed(result) = engine
+        .run_with_outcome(&abort, |engine, signal| {
+            engine.run_dc_op_with_abort(&plain, signal)
+        })
+        .unwrap()
+    else {
+        panic!("a later run inherited another run's finish state");
+    };
+    assert_eq!(node_voltage(&result, "out"), 3.0);
+    let _ = std::fs::remove_file(model);
+}
+
+#[test]
+fn accepted_operating_point_finish_keeps_its_solution_and_final_step() {
+    use rspice_core::{ModelFinishPoint, SimulationOutcome};
+    let model = write_model(
+        "finish_dc",
+        r#"
+module finish_dc(p,n);
+inout p,n; electrical p,n;
+integer final_count;
+analog begin
+  @(final_step("dc")) begin final_count=final_count+1; $finish(1); end
+  V(p,n)<+final_count;
+end
+endmodule"#,
+    );
+    let deck = format!(
+        "* accepted finish\nX1 out 0 finish_dc\n.va \"{}\" finish_dc\n.end\n",
+        deck_path(&model)
+    );
+    let netlist = Netlist::parse(&deck).unwrap();
+    let outcome = Engine::default()
+        .run_with_outcome(&NoAbort, |engine, signal| {
+            engine.run_dc_op_with_abort(&netlist, signal)
+        })
+        .unwrap();
+    let SimulationOutcome::Finished {
+        result: Some(result),
+        finish,
+    } = outcome
+    else {
+        panic!("an accepted finish must retain its operating point: {outcome:?}");
+    };
+    assert_eq!(finish.point, ModelFinishPoint::OperatingPoint);
+    assert_eq!(finish.diagnostic_level, 1);
+    assert_eq!(node_voltage(&result, "out"), 1.0);
+    let _ = std::fs::remove_file(model);
+}
+
+#[test]
+fn a_portless_model_can_finish_before_empty_analysis_shortcuts() {
+    use rspice_core::SimulationOutcome;
+    let model = write_model(
+        "finish_empty",
+        "module finish_empty; analog initial $finish(0); endmodule",
+    );
+    let deck = format!(
+        "* empty analog finish\nX1 finish_empty\n.va \"{}\" finish_empty\n.end\n",
+        deck_path(&model)
+    );
+    let netlist = Netlist::parse(&deck).unwrap();
+    let engine = Engine::default();
+    assert!(matches!(
+        engine
+            .run_with_outcome(&NoAbort, |engine, signal| engine
+                .run_dc_op_with_abort(&netlist, signal))
+            .unwrap(),
+        SimulationOutcome::Finished { result: None, .. }
+    ));
+    assert!(matches!(
+        engine
+            .run_with_outcome(&NoAbort, |engine, signal| engine
+                .run_tran_with_abort(&netlist, 1e-6, 1e-7, signal))
+            .unwrap(),
+        SimulationOutcome::Finished { result: None, .. }
+    ));
+    assert!(matches!(
+        engine
+            .run_with_outcome(&NoAbort, |engine, signal| engine.run_ac_with_abort(
+                &netlist,
+                &[1e3],
+                signal
+            ))
+            .unwrap(),
+        SimulationOutcome::Finished { result: None, .. }
+    ));
+    let _ = std::fs::remove_file(model);
+}
+
 fn assert_rebuilt_lifecycle_values(
     points: &[(f64, rspice_core::solver::SimulationResult)],
     expected: &[f64],

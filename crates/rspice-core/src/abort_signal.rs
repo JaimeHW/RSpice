@@ -52,6 +52,10 @@ use std::io::{self, Read};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+mod model_control;
+pub(crate) use model_control::ModelRunSignal;
+pub use model_control::{ModelFinish, ModelFinishPoint, ModelRunControl, SimulationOutcome};
+
 //=============================================================================
 // TransientSample - the observation payload
 //=============================================================================
@@ -213,6 +217,12 @@ pub enum AbortReason {
 /// - [`AtomicAbort`]: Atomic bool-based abort (for thread-safe UI integration)
 /// - [`ImmediateAbort`]: Always aborts (for testing abort paths)
 pub trait AbortSignal: Send + Sync {
+    /// Model completion belongs to the current run, independently of user
+    /// cancellation. Wrappers must forward this borrowed scope when present.
+    fn model_control(&self) -> Option<&ModelRunControl> {
+        None
+    }
+
     /// Check if an abort has been requested.
     ///
     /// Returns `true` if the simulation should stop immediately.
@@ -366,6 +376,9 @@ impl AbortSignal for Arc<AtomicBool> {
 
 /// Forward through a borrow so `&dyn AbortSignal` satisfies the trait too.
 impl<T: AbortSignal + ?Sized> AbortSignal for &T {
+    fn model_control(&self) -> Option<&ModelRunControl> {
+        (*self).model_control()
+    }
     #[inline(always)]
     fn is_aborted(&self) -> bool {
         (*self).is_aborted()
@@ -385,7 +398,10 @@ impl<T: AbortSignal + ?Sized> AbortSignal for &T {
 }
 
 /// Accept an owned, type-erased signal.
-impl AbortSignal for Box<dyn AbortSignal> {
+impl AbortSignal for Box<dyn AbortSignal + '_> {
+    fn model_control(&self) -> Option<&ModelRunControl> {
+        self.as_ref().model_control()
+    }
     #[inline(always)]
     fn is_aborted(&self) -> bool {
         self.as_ref().is_aborted()
@@ -405,7 +421,10 @@ impl AbortSignal for Box<dyn AbortSignal> {
 }
 
 /// Accept a shared, type-erased signal.
-impl AbortSignal for Arc<dyn AbortSignal> {
+impl AbortSignal for Arc<dyn AbortSignal + '_> {
+    fn model_control(&self) -> Option<&ModelRunControl> {
+        self.as_ref().model_control()
+    }
     #[inline(always)]
     fn is_aborted(&self) -> bool {
         self.as_ref().is_aborted()

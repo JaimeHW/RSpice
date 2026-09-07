@@ -138,6 +138,7 @@ pub(super) fn try_build_mixed_signal_instance(
     element: &crate::netlist::Element,
     entry: &CachedVerilogAModel,
     connect_rules: &DesignConnectRules,
+    temperature: f64,
     abort: &dyn crate::abort_signal::AbortSignal,
 ) -> Result<bool, SimulationError> {
     let crate::netlist::ElementKind::Subcircuit {
@@ -233,8 +234,15 @@ pub(super) fn try_build_mixed_signal_instance(
             return SimulationError::Aborted;
         }
         SimulationError::Circuit(format!(
-            "mixed Verilog-AMS instance '{}' of model '{}' could not be started: {error}",
+            "mixed Verilog-AMS instance '{}' of model '{}' could not be constructed: {error}",
             element.name, subckt_name
+        ))
+    })?;
+
+    host.set_temperature(temperature).map_err(|error| {
+        SimulationError::Circuit(format!(
+            "mixed Verilog-AMS instance '{}' temperature update failed: {error}",
+            element.name
         ))
     })?;
 

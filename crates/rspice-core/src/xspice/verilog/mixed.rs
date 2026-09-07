@@ -486,13 +486,13 @@ struct AnalogSolverInputs {
 }
 
 impl AnalogSolverInputs {
-    /// What [`VerilogADevice::try_begin_analysis`] leaves a transient device
+    /// What [`VerilogADevice::try_begin_analysis`] leaves a fresh device
     /// holding: `VmContext::reset_analysis_state` zeroes the time and the
     /// timestep and deactivates the integration coefficients, and neither
     /// analysis-step flag is set until a trial sets one.
-    const fn transient_start() -> Self {
+    const fn analysis_start(analysis: u8) -> Self {
         Self {
-            analysis: 2,
+            analysis,
             initial_step: false,
             final_step: false,
             time_seconds: 0.0,
@@ -735,6 +735,9 @@ pub struct MixedSignalHost {
     state: MixedState,
     /// The working vectors of the trial machinery, kept across trials.
     scratch: TrialScratch,
+    /// Digital processes start only after the circuit-wide analog initialization
+    /// barrier. This is separate from the first accepted boundary trial.
+    digital_started: bool,
     trial: Option<ActiveTrial>,
     /// Every continuous-net probe the discrete half declares, resolved to
     /// circuit nodes. Empty for a module whose processes read no analog value,
@@ -772,6 +775,8 @@ impl fmt::Debug for MixedSignalHost {
 impl MixedSignalHost {
     /// Compile and start one module. `terminal_nodes` maps analog ports to the
     /// outer solver's circuit-node ids, where `0` is ground.
+    /// An analog initialization control request is left for the caller to
+    /// consume and prevents digital startup.
     pub fn compile(
         source: &str,
         module: Option<&str>,
@@ -788,17 +793,23 @@ impl MixedSignalHost {
                 detail: error.to_string(),
             }
         })?;
-        Self::from_compiled(
+        let mut host = Self::from_compiled(
             instance,
             Arc::new(runtime.model),
             &runtime.canonical_ir,
             terminal_nodes,
             scheduler_limits,
             &rspice_veriloga::NoPipelineControl,
-        )
+        )?;
+        host.begin_analog_analysis(2)?;
+        if !host.analog.has_accepted_analog_tasks() {
+            host.start_digital_execution()?;
+        }
+        Ok(host)
     }
 
-    /// Start one module from artifacts that are already compiled and cached.
+    /// Construct one module without executing analog initializers or digital
+    /// processes. The engine starts them at the analysis initialization barrier.
     ///
     /// This is the entry the deck route takes, and [`Self::compile`] is its
     /// composition with a compiler invocation. Splitting them is what lets a
@@ -843,14 +854,9 @@ impl MixedSignalHost {
             terminal_nodes,
             control,
         );
-        let mut analog = analog.map_err(|error| MixedSignalError::Compile {
+        let analog = analog.map_err(|error| MixedSignalError::Compile {
             detail: format!("analog device construction failed: {error}"),
         })?;
-        analog
-            .try_begin_analysis(2)
-            .map_err(|error| MixedSignalError::Analog {
-                detail: format!("transient initialization failed: {error}"),
-            })?;
 
         let analog_probes = wire_analog_probes(canonical_ir, &analog)?;
 
@@ -865,14 +871,13 @@ impl MixedSignalHost {
         // a node voltage read before the first solve would give.
         let initial_probe_values = vec![0.0; analog_probes.len()];
         digital.sample_analog_potentials(&initial_probe_values);
-        digital.start()?;
         let source_digest = canonical_ir.metadata.source_digest.to_string();
         Ok(Self {
             instance: instance.to_string(),
             source_digest,
             resolution,
             analog: MixedCell::new(analog),
-            analog_inputs: AnalogSolverInputs::transient_start(),
+            analog_inputs: AnalogSolverInputs::analysis_start(2),
             state: MixedState {
                 digital: MixedCell::new(digital),
                 bridges: MixedCell::new(Bridges::default()),
@@ -886,12 +891,62 @@ impl MixedSignalHost {
                 started: false,
             },
             scratch: TrialScratch::default(),
+            digital_started: false,
             trial: None,
             analog_probes,
             boundary_buses: Vec::new(),
             max_circuit_node: terminal_nodes.iter().copied().max().unwrap_or(0),
             max_bridge_iterations,
         })
+    }
+
+    /// Reset both domains for a fresh analysis, retaining compiled code and
+    /// bridge wiring. CircuitData stages hosts before publishing this reset.
+    pub(crate) fn begin_analog_analysis(&mut self, analysis: u8) -> Result<(), MixedSignalError> {
+        self.require_idle("begin an analysis")?;
+        self.analog
+            .make_mut()
+            .try_begin_analysis(analysis)
+            .map_err(analog_error)?;
+        self.analog_inputs = AnalogSolverInputs::analysis_start(analysis);
+        self.state.digital = MixedCell::new(self.state.digital.fresh());
+        self.state.accepted_adc_voltages.fill(0.0);
+        self.state.accepted_adc_transition_times.fill(None);
+        self.state.accepted_probe_values.fill(0.0);
+        self.state.adc_history.fill(BoundaryNetHistory::default());
+        self.state.dac_history.fill(BoundaryNetHistory::default());
+        self.state.accepted_tick = 0;
+        self.state.accepted_time = 0.0;
+        self.state.started = false;
+        self.digital_started = false;
+        Ok(())
+    }
+
+    pub(crate) fn set_temperature(&mut self, temperature: f64) -> Result<(), MixedSignalError> {
+        self.require_idle("configure temperature")?;
+        self.analog
+            .make_mut()
+            .try_set_temperature(temperature)
+            .map_err(analog_error)
+    }
+
+    /// Start digital processes after every analog initializer has completed and
+    /// its accepted control calls have been handled by the analysis host.
+    pub(crate) fn start_digital_execution(&mut self) -> Result<(), MixedSignalError> {
+        self.require_idle("start digital execution")?;
+        if self.analog.has_accepted_analog_tasks() {
+            return Err(MixedSignalError::TrialProtocol {
+                detail: "analog initialization tasks must be handled before digital execution"
+                    .into(),
+            });
+        }
+        if !self.digital_started {
+            let digital = self.state.digital.make_mut();
+            digital.sample_analog_potentials(&self.state.accepted_probe_values);
+            digital.start()?;
+            self.digital_started = true;
+        }
+        Ok(())
     }
 
     /// The deck's name for this instance.
@@ -1165,6 +1220,11 @@ impl MixedSignalHost {
         final_step: bool,
         probe: bool,
     ) -> Result<(), MixedSignalError> {
+        if !self.digital_started {
+            return Err(MixedSignalError::TrialProtocol {
+                detail: "digital execution must start before a mixed trial".into(),
+            });
+        }
         self.require_idle("begin a trial")?;
         if !timestep_seconds.is_finite() || timestep_seconds < 0.0 {
             return Err(MixedSignalError::TrialProtocol {
@@ -1758,6 +1818,11 @@ impl MixedSignalHost {
 
     /// Capture a restart image. Speculative state is never checkpointable.
     pub fn checkpoint(&self) -> Result<MixedSignalCheckpoint, MixedSignalError> {
+        if !self.digital_started {
+            return Err(MixedSignalError::TrialProtocol {
+                detail: "cannot checkpoint a mixed module before digital execution starts".into(),
+            });
+        }
         if self.trial.is_some() {
             return Err(MixedSignalError::TrialProtocol {
                 detail: "cannot checkpoint an unaccepted mixed trial".into(),
@@ -1788,6 +1853,7 @@ impl MixedSignalHost {
         self.analog = checkpoint.analog.clone();
         self.analog_inputs = checkpoint.analog_inputs;
         self.state = checkpoint.state.clone();
+        self.digital_started = true;
         self.max_circuit_node = (0..self.analog.num_terminals())
             .map(|terminal| self.analog.node_for_terminal(terminal))
             .chain(
@@ -2305,6 +2371,53 @@ endmodule
             .expect("bridges settle")
         {}
         host.accept_trial().expect("accept a quiet trial");
+    }
+
+    #[test]
+    fn reinitialization_resets_both_domains_and_retains_boundary_wiring() {
+        let mut reused = host();
+        begin(&mut reused, 0);
+        settle_and_accept(&mut reused, &[0.0, 0.0, 1.0, 0.0]);
+        assert_eq!(reused.read_digital("q").unwrap(), "1");
+        assert!(reused.state.digital.next_tick().is_some());
+
+        reused.begin_analog_analysis(2).unwrap();
+        assert!(!reused.digital_started);
+        assert!(!reused.state.started);
+        assert_eq!(reused.state.accepted_time, 0.0);
+        assert!(reused.state.digital.next_tick().is_none());
+        assert!(reused.checkpoint().is_err());
+        assert!(
+            reused
+                .begin_trial(0.0, 0.0, IntegrationCoefficients::inactive(), true, false)
+                .is_err()
+        );
+        reused.start_digital_execution().unwrap();
+        assert_eq!(reused.read_digital("q").unwrap(), "0");
+        assert_eq!(reused.state.bridges.adc.len(), 1);
+        assert_eq!(reused.state.bridges.dac.len(), 1);
+        let mut fresh = host();
+        for tick in [0, 2, 3] {
+            let voltages = [0.0, 0.0, if tick == 0 { 1.0 } else { 0.0 }, 0.0];
+            for host in [&mut reused, &mut fresh] {
+                begin(host, tick);
+                settle_and_accept(host, &voltages);
+            }
+            for signal in ["q", "dac"] {
+                assert_eq!(
+                    reused.read_digital(signal).unwrap(),
+                    fresh.read_digital(signal).unwrap()
+                );
+            }
+            assert_eq!(
+                reused.state.digital.next_tick(),
+                fresh.state.digital.next_tick()
+            );
+            assert_eq!(
+                reused.analog.checkpoint_state().unwrap(),
+                fresh.analog.checkpoint_state().unwrap()
+            );
+        }
     }
 
     #[test]

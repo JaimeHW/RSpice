@@ -117,7 +117,10 @@ pub mod resource;
 pub mod simd;
 
 // Re-export primary types for convenience
-pub use abort_signal::{AbortReason, AbortSignal, AtomicAbort, NoAbort};
+pub use abort_signal::{
+    AbortReason, AbortSignal, AtomicAbort, ModelFinish, ModelFinishPoint, NoAbort,
+    SimulationOutcome,
+};
 pub use analysis::{DcAnalysis, MeasureEngine, MeasureResult};
 pub use circuit::CircuitData;
 pub use device::{Device, DeviceModel, engine_capabilities, engine_supports_capability};

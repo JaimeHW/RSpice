@@ -7299,6 +7299,7 @@ impl Engine {
                                 element,
                                 entry,
                                 &design_connect_rules,
+                                self.config.temperature,
                                 abort,
                             )? {
                                 continue;

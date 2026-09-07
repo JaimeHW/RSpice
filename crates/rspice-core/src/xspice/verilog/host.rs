@@ -491,6 +491,15 @@ impl DigitalHost {
         }
     }
 
+    /// A fresh run sharing the immutable design and retaining scheduler limits.
+    pub(crate) fn fresh(&self) -> Self {
+        Self::from_plan(
+            Arc::clone(&self.plan),
+            self.scheduler.resolution(),
+            self.scheduler.limits(),
+        )
+    }
+
     /// The signal a name refers to.
     pub(crate) fn signal(&self, name: &str) -> Result<DigitalSignalId, DigitalRunError> {
         self.plan

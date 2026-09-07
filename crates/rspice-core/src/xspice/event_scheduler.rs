@@ -978,6 +978,11 @@ impl EventScheduler {
         self.resolution
     }
 
+    #[cfg(feature = "veriloga")]
+    pub(crate) fn limits(&self) -> SchedulerLimits {
+        self.limits
+    }
+
     /// Tick of the slot most recently run, or 0 before the first slot.
     pub fn current_tick(&self) -> u64 {
         self.current_tick

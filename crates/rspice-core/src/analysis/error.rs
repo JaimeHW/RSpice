@@ -31,6 +31,8 @@ use crate::solver::SolverError;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum SimulationErrorCode {
+    /// Normal model completion reached an API that cannot return an absent result.
+    ModelFinished,
     /// The supplied [`crate::config::SimulationConfig`] violates an invariant.
     InvalidConfiguration,
     /// A configured resource budget was exceeded.
@@ -70,6 +72,7 @@ impl SimulationErrorCode {
     /// Stable snake-case representation used by API and report payloads.
     pub const fn as_str(self) -> &'static str {
         match self {
+            Self::ModelFinished => "model_finished",
             Self::InvalidConfiguration => "invalid_configuration",
             Self::ResourceLimit => "resource_limit",
             Self::CircuitError => "circuit_error",
@@ -103,6 +106,8 @@ impl std::fmt::Display for SimulationErrorCode {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum SimulationErrorCategory {
+    /// Normal model-requested termination, not a failure or user cancellation.
+    ModelControl,
     /// Invalid engine configuration.
     Configuration,
     /// Invalid authored netlist input.
@@ -137,6 +142,7 @@ impl SimulationErrorCategory {
     /// Stable snake-case representation used by API and report payloads.
     pub const fn as_str(self) -> &'static str {
         match self {
+            Self::ModelControl => "model_control",
             Self::Configuration => "configuration",
             Self::Netlist => "netlist",
             Self::Capability => "capability",
@@ -644,6 +650,10 @@ impl std::error::Error for ResultSchemaMismatchError {}
 /// Simulation errors
 #[derive(Debug, Error)]
 pub enum SimulationError {
+    /// Internal completion propagation and compatibility for result-only APIs.
+    /// `Engine::run_with_outcome` translates this into successful normal finish.
+    #[error("{0}")]
+    ModelFinished(Box<crate::ModelFinish>),
     #[error("Invalid simulation configuration: {0}")]
     Configuration(#[from] crate::config::SimulationConfigError),
 
@@ -757,6 +767,11 @@ impl SimulationError {
     /// message or duplicate knowledge of nested error variants.
     pub fn descriptor(&self) -> SimulationErrorDescriptor {
         let (code, category, retryable) = match self {
+            Self::ModelFinished(_) => (
+                SimulationErrorCode::ModelFinished,
+                SimulationErrorCategory::ModelControl,
+                false,
+            ),
             Self::Configuration(crate::config::SimulationConfigError::ResourceLimit(_))
             | Self::ResourceLimit(_) => (
                 SimulationErrorCode::ResourceLimit,

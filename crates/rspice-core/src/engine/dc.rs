@@ -772,6 +772,9 @@ impl Engine {
         abort: &dyn AbortSignal,
     ) -> Result<(SimulationResult, crate::circuit::DeviceOpReport), SimulationError> {
         let force_initial_conditions = matches!(startup, DcOpStartup::ForceInitialConditions);
+        let run_scope = crate::abort_signal::ModelRunSignal::if_needed(abort);
+        let abort: &dyn AbortSignal = run_scope.as_ref().map_or(abort, |scope| scope);
+        Self::ensure_model_run_active(abort)?;
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }
@@ -787,6 +790,7 @@ impl Engine {
         circuit
             .begin_veriloga_equilibrium_analysis(veriloga_analysis)
             .map_err(SimulationError::Circuit)?;
+        Self::deliver_initial_analog_tasks(&mut circuit, abort)?;
         let (analysis_initial_step, analysis_final_step) = if let Some(state) = &lifecycle {
             state.restore_accepted_state(&mut circuit)?;
             state.flags()?
@@ -817,6 +821,11 @@ impl Engine {
                 circuit
                     .accept_veriloga_analysis_point()
                     .map_err(SimulationError::Circuit)?;
+                Self::deliver_accepted_analog_tasks(
+                    &mut circuit,
+                    abort,
+                    crate::ModelFinishPoint::OperatingPoint,
+                )?;
             }
             return Ok((result, report));
         }
@@ -884,6 +893,11 @@ impl Engine {
             circuit
                 .accept_veriloga_analysis_point()
                 .map_err(SimulationError::Circuit)?;
+            Self::deliver_accepted_analog_tasks(
+                &mut circuit,
+                abort,
+                crate::ModelFinishPoint::OperatingPoint,
+            )?;
         }
 
         Ok((result, device_op_report))
@@ -951,6 +965,9 @@ impl Engine {
         sweep2: Option<&crate::netlist::DcSecondSweep>,
         abort: &dyn AbortSignal,
     ) -> Result<Vec<DcSweepPointResult>, SimulationError> {
+        let run_scope = crate::abort_signal::ModelRunSignal::if_needed(abort);
+        let abort: &dyn AbortSignal = run_scope.as_ref().map_or(abort, |scope| scope);
+        Self::ensure_model_run_active(abort)?;
         self.reset_convergence_quality();
         let Some(sweep2) = sweep2 else {
             return self.run_dc_sweep_spec_with_report_and_abort(
@@ -1130,6 +1147,9 @@ impl Engine {
         spec: &crate::netlist::DcSweepSpec,
         abort: &dyn AbortSignal,
     ) -> Result<Vec<DcSweepPointResult>, SimulationError> {
+        let run_scope = crate::abort_signal::ModelRunSignal::if_needed(abort);
+        let abort: &dyn AbortSignal = run_scope.as_ref().map_or(abort, |scope| scope);
+        Self::ensure_model_run_active(abort)?;
         let engine = self.resolved_for_netlist(netlist);
         let sweep_points = bounded_dc_sweep_points(&engine, spec, abort)?;
         if sweep_points.is_empty() {
@@ -1225,6 +1245,7 @@ impl Engine {
         circuit
             .begin_veriloga_dc_analysis()
             .map_err(SimulationError::Circuit)?;
+        Self::deliver_initial_analog_tasks(&mut circuit, abort)?;
         lifecycle.restore_accepted_state(&mut circuit)?;
 
         if circuit.num_nodes() == 0 {

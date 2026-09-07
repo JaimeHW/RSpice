@@ -2502,7 +2502,7 @@ impl CircuitData {
         }
     }
 
-    /// Start a fresh analysis across both Verilog-A implementations. Publish
+    /// Start a fresh analysis across runtime, generated, and mixed models. Publish
     /// the staged collections only after every instance initializes, keeping
     /// the previous trajectory intact if any initializer fails.
     pub(crate) fn begin_veriloga_analysis(&mut self, analysis: u8) -> Result<(), String> {
@@ -2539,7 +2539,17 @@ impl CircuitData {
         };
         #[cfg(feature = "veriloga")]
         {
+            let mut mixed = self.mixed_signal_hosts.clone();
+            for host in &mut mixed {
+                host.begin_analog_analysis(analysis).map_err(|error| {
+                    format!(
+                        "mixed Verilog-AMS instance '{}' analysis begin failed: {error}",
+                        host.instance_name()
+                    )
+                })?;
+            }
             self.veriloga_devices = runtime;
+            self.mixed_signal_hosts = mixed;
         }
         #[cfg(feature = "veriloga-builtins-base")]
         {

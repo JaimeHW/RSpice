@@ -2800,7 +2800,14 @@ impl Engine {
         validate_ac_frequencies(frequencies)?;
         let engine = self.resolved_for_netlist(netlist);
         engine.ensure_analysis_points(frequencies.len())?;
+        let run_scope = crate::abort_signal::ModelRunSignal::if_needed(abort);
+        let abort: &dyn AbortSignal = run_scope.as_ref().map_or(abort, |scope| scope);
+        Self::ensure_model_run_active(abort)?;
         let mut circuit = engine.build_circuit_with_abort(netlist, abort)?;
+        circuit
+            .begin_veriloga_equilibrium_analysis(1)
+            .map_err(SimulationError::Circuit)?;
+        Self::deliver_initial_analog_tasks(&mut circuit, abort)?;
         if circuit.num_nodes() == 0 && circuit.num_branches() == 0 {
             engine.ensure_result_shape(frequencies.len(), 1)?;
             return Ok(frequencies
@@ -2825,9 +2832,6 @@ impl Engine {
         }
         Self::ensure_supported_ac_dynamic_charges(&circuit)?;
         Self::ensure_no_mixed_signal_analysis(&circuit, "AC analysis")?;
-        circuit
-            .begin_veriloga_equilibrium_analysis(1)
-            .map_err(SimulationError::Circuit)?;
         circuit
             .prepare_veriloga_equilibrium_analysis_point(1, true, false)
             .map_err(SimulationError::Circuit)?;

@@ -234,9 +234,15 @@ include transitive function calls and branches removed by constant folding.
 `$finish` calls retain their argument snapshots and execution order in a
 transactional journal. Runtime, generated, and mixed-signal device hosts can
 consume accepted calls through `CircuitData::visit_accepted_analog_tasks`.
-Engine termination, final-step delivery on early termination, and host diagnostic
-formatting remain incomplete; this transport does not establish `$finish`
-support for a complete simulation.
+`Engine::run_with_outcome` reports initialization `$finish` as normal completion
+without a numerical result, and an accepted standalone DC operating-point
+`$finish` with its solution. The run's completion state is separate from caller
+cancellation and is not reused by later analyses. Mixed digital processes start
+only after the circuit-wide analog initialization barrier. Result-only engine
+APIs cannot represent an initialization finish and return `ModelFinished`.
+Accepted transient/sweep termination, final-step delivery on early termination,
+source-located diagnostic formatting, and frontend outcome handling remain
+incomplete; this does not establish full `$finish` support.
 
 `$display`, `$write`, `$strobe`, `$monitor`, `$info`, `$warning`, and ordinary
 analog `$error` are still discarded with a warning. They produce no runtime

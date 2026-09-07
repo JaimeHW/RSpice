@@ -3350,6 +3350,9 @@ impl Engine {
             }
         }
 
+        let run_scope = crate::abort_signal::ModelRunSignal::if_needed(abort);
+        let abort: &dyn AbortSignal = run_scope.as_ref().map_or(abort, |scope| scope);
+        Self::ensure_model_run_active(abort)?;
         let mut circuit = engine.build_circuit_with_abort(netlist, abort)?;
         Self::warn_xspice_mif_analysis_boundary(
             &circuit,
@@ -3368,6 +3371,7 @@ impl Engine {
         circuit
             .begin_veriloga_equilibrium_analysis(3)
             .map_err(SimulationError::Circuit)?;
+        Self::deliver_initial_analog_tasks(&mut circuit, abort)?;
         circuit
             .prepare_veriloga_equilibrium_analysis_point(3, true, false)
             .map_err(SimulationError::Circuit)?;
@@ -3862,6 +3866,9 @@ impl Engine {
         }
         let engine = self.resolved_for_netlist(netlist);
         engine.ensure_analysis_points(frequencies.len())?;
+        let run_scope = crate::abort_signal::ModelRunSignal::if_needed(abort);
+        let abort: &dyn AbortSignal = run_scope.as_ref().map_or(abort, |scope| scope);
+        Self::ensure_model_run_active(abort)?;
         let mut circuit = engine.build_circuit_with_abort(netlist, abort)?;
         let resolve_node = |name: &str| {
             circuit.get_node_by_name(name.trim()).ok_or_else(|| {
@@ -3888,6 +3895,7 @@ impl Engine {
         circuit
             .begin_veriloga_equilibrium_analysis(3)
             .map_err(SimulationError::Circuit)?;
+        Self::deliver_initial_analog_tasks(&mut circuit, abort)?;
         circuit
             .prepare_veriloga_equilibrium_analysis_point(3, true, false)
             .map_err(SimulationError::Circuit)?;

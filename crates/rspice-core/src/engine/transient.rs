@@ -3492,6 +3492,9 @@ impl Engine {
         ),
         SimulationError,
     > {
+        let run_scope = crate::abort_signal::ModelRunSignal::if_needed(abort);
+        let abort: &dyn AbortSignal = run_scope.as_ref().map_or(abort, |scope| scope);
+        Self::ensure_model_run_active(abort)?;
         let TransientRunWindow {
             tstop,
             max_step,
@@ -3550,6 +3553,16 @@ impl Engine {
         let record_xspice_event_traces = netlist.options.xspice_event_trace_save.unwrap_or(true);
         let record_device_op_traces = Self::should_record_transient_device_op_traces(netlist);
         let mut circuit = self.build_circuit_with_abort(netlist, abort)?;
+        // Pre-simulation effects also belong to models with no matrix unknowns.
+        // Run them before the empty-circuit shortcut can manufacture a trace.
+        if resume.is_none() {
+            circuit
+                .begin_veriloga_analysis(2)
+                .map_err(SimulationError::Circuit)?;
+            Self::deliver_initial_analog_tasks(&mut circuit, abort)?;
+            #[cfg(feature = "veriloga")]
+            circuit.start_mixed_digital_execution()?;
+        }
         if final_checkpoint_retention.is_retained() || !scheduled_checkpoint_times.is_empty() {
             // A deck this build understands, asking for a checkpoint it cannot
             // produce: a capability refusal, not a malformed circuit, and one
@@ -3729,11 +3742,6 @@ impl Engine {
         // Establish transient lifecycle state before the t=0 operating point.
         // UIC has no t=0 solve, so its first candidate carries the initial flag
         // below instead.
-        if resume.is_none() {
-            circuit
-                .begin_veriloga_analysis(2)
-                .map_err(SimulationError::Circuit)?;
-        }
         #[cfg(feature = "veriloga")]
         circuit
             .prepare_veriloga_timepoint(

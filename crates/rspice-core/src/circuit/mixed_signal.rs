@@ -153,6 +153,16 @@ impl CircuitData {
         self.mixed_signal_hosts.push(host);
     }
 
+    /// Begin digital execution only after the engine has delivered every
+    /// model's analog initialization effects and ruled out a requested exit.
+    pub(crate) fn start_mixed_digital_execution(&mut self) -> Result<(), SimulationError> {
+        for host in &mut self.mixed_signal_hosts {
+            let started = host.start_digital_execution();
+            named(host, started)?;
+        }
+        Ok(())
+    }
+
     /// Every circuit node the mixed modules' contributions can reach.
     pub(crate) fn mixed_signal_coupled_nodes(&self) -> impl Iterator<Item = Vec<usize>> + '_ {
         self.mixed_signal_hosts

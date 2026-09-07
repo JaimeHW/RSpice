@@ -43,6 +43,7 @@
 //! in. Every driver is now a sibling.
 
 mod ac;
+mod analog_tasks;
 mod builder;
 pub use builder::{
     ModelBinAxisRange, ModelBinCardGeometry, ModelBinCardInspection, ModelBinInspection,

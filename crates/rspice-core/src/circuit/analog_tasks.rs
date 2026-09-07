@@ -97,7 +97,7 @@ endmodule"#;
                 "analog initial",
                 "reg started; initial started=1; analog initial",
             );
-        let host = MixedSignalHost::compile(
+        let mut host = MixedSignalHost::compile(
             &mixed_source,
             None,
             "xmixed",
@@ -105,6 +105,14 @@ endmodule"#;
             SchedulerLimits::default(),
         )
         .unwrap();
+        let mut initial_calls = Vec::new();
+        host.visit_accepted_analog_tasks(&mut |event| initial_calls.push(event.call))
+            .unwrap();
+        assert_eq!(initial_calls.len(), 1);
+        assert_eq!(initial_calls[0].kind, AnalogTaskKind::Finish);
+        // This transport-level test deliberately resumes after consuming the
+        // initial call. The engine instead returns a normal finish outcome.
+        host.start_digital_execution().unwrap();
         circuit.add_mixed_signal_host(host);
         circuit.mixed_signal_hosts[0]
             .begin_trial(0.0, 0.0, IntegrationCoefficients::inactive(), true, false)
@@ -122,10 +130,7 @@ endmodule"#;
         circuit.mixed_signal_hosts[0].reject_trial().unwrap();
         assert_eq!(
             calls(&mut circuit),
-            vec![
-                ("xruntime".into(), "task_source".into(), 2, 0.0, 0),
-                ("xmixed".into(), "mixed_tasks".into(), 2, 0.0, 0),
-            ]
+            vec![("xruntime".into(), "task_source".into(), 2, 0.0, 0)]
         );
         assert!(calls(&mut circuit).is_empty());
 

@@ -89,6 +89,104 @@ impl Drop for ModelFile {
 }
 
 #[test]
+fn analog_initialization_finish_precedes_all_digital_process_execution() {
+    use rspice_core::{ModelFinishPoint, NoAbort, SimulationOutcome};
+    // This design is valid but never settles its first digital time slot.
+    // Without a prior analog finish, the scheduler must diagnose the loop.
+    let digital = "reg q; initial q=0; always #0 q=~q;";
+    let engine = Engine::default();
+    for placement in ["absent", "same", "before", "after"] {
+        let initial = if placement == "same" {
+            "analog initial $finish(0);"
+        } else {
+            ""
+        };
+        let mixed = ModelFile::new(
+            "init_barrier",
+            &format!(
+                "module init_barrier(p,n); inout p,n; electrical p,n; {digital} {initial} analog I(p,n)<+V(p,n); endmodule"
+            ),
+        );
+        let pure = ModelFile::new(
+            "pure_finish",
+            "module pure_finish(p,n); inout p,n; electrical p,n; analog initial $finish(0); analog I(p,n)<+V(p,n); endmodule",
+        );
+        let pure_card = format!(
+            "Xfinish p 0 pure_finish\n.va \"{}\" pure_finish\n",
+            pure.deck_path()
+        );
+        let mixed_card = format!(
+            "Xmixed p 0 init_barrier\n.va \"{}\" init_barrier\n",
+            mixed.deck_path()
+        );
+        let cards = match placement {
+            "before" => format!("{pure_card}{mixed_card}"),
+            "after" => format!("{mixed_card}{pure_card}"),
+            _ => mixed_card,
+        };
+        let netlist = Netlist::parse(&format!(
+            "* initialization barrier\nV1 p 0 1\n{cards}.end\n"
+        ))
+        .unwrap();
+        let outcome = engine.run_with_outcome(&NoAbort, |engine, signal| {
+            engine.run_tran_with_abort(&netlist, 1e-6, 1e-7, signal)
+        });
+        if placement == "absent" {
+            let error = outcome.expect_err("the control design must execute its non-settling loop");
+            assert!(
+                error.to_string().contains("did not settle at tick 0"),
+                "{error}"
+            );
+        } else {
+            let SimulationOutcome::Finished {
+                result: None,
+                finish,
+            } = outcome.unwrap()
+            else {
+                panic!("{placement}: initialization finish must precede the digital loop");
+            };
+            assert_eq!(finish.point, ModelFinishPoint::Initialization);
+            assert_eq!(
+                finish.instance,
+                if placement == "same" {
+                    "Xmixed"
+                } else {
+                    "Xfinish"
+                }
+            );
+        }
+    }
+}
+
+#[test]
+fn mixed_analog_initialization_uses_the_resolved_deck_temperature() {
+    use rspice_core::{NoAbort, SimulationOutcome};
+    let model = ModelFile::new(
+        "mixed_temperature",
+        "module mixed_temperature(p,n); inout p,n; electrical p,n; reg q; initial q=0; analog initial if ($temperature>350) $finish(0); analog I(p,n)<+V(p,n); endmodule",
+    );
+    let engine = Engine::default();
+    for temperature in [27, 100] {
+        let netlist = Netlist::parse(&format!(
+            "* temperature at initialization\n.temp {temperature}\nV1 p 0 1\nX1 p 0 mixed_temperature\n.va \"{}\" mixed_temperature\n.end\n", model.deck_path()
+        )).unwrap();
+        let outcome = engine
+            .run_with_outcome(&NoAbort, |engine, signal| {
+                engine.run_tran_with_abort(&netlist, 1e-9, 1e-10, signal)
+            })
+            .unwrap();
+        if temperature == 100 {
+            assert!(matches!(
+                outcome,
+                SimulationOutcome::Finished { result: None, .. }
+            ));
+        } else {
+            assert!(matches!(outcome, SimulationOutcome::Completed(_)));
+        }
+    }
+}
+
+#[test]
 fn unsupported_analog_control_reaches_the_engine_as_a_refusal() {
     for discrete in ["", "reg started; initial started=1;"] {
         for (task, statement) in [
