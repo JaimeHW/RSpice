@@ -17,7 +17,9 @@
 //!    - Check convergence
 //!    - Compute Jacobian (Monodromy - I) via finite differences
 //!    - Solve for Newton step and update `x0`
-//! 4. Build final `PssResult` with periodic waveform and harmonics
+//! 4. Qualify the solved orbit against a doubled integration grid; refine and
+//!    repeat the shooting solve if voltage or current waveforms disagree
+//! 5. Verify the retained traversal and build `PssResult` with Floquet evidence
 
 use super::{Engine, SimulationError, TransientCheckpoint, TransientResult};
 use crate::abort_signal::{AbortSignal, NoAbort};
@@ -41,6 +43,13 @@ mod state;
 pub(in crate::engine) use state::PssCircuit;
 
 type AutonomousNewtonStep = (Vec<Value>, Value, Vec<Vec<Value>>);
+
+struct PssGridSolution {
+    state: ShootingState,
+    waveform: TransientResult,
+    iterations: usize,
+    jacobian: Option<Vec<Vec<Value>>>,
+}
 
 /// Accepted-step timing state for the adaptive PSS trajectory.
 ///
@@ -80,9 +89,10 @@ impl PssAcceptedStepHistory {
     }
 }
 
+const PSS_FD_STEP: Value = 1e-8;
 const PSS_KRYLOV_STATE_THRESHOLD: usize = 12;
 const PSS_KRYLOV_REL_TOL: Value = 1e-9;
-const PSS_OPERATING_POINT_IDENTITY_VERSION: u32 = 14;
+const PSS_OPERATING_POINT_IDENTITY_VERSION: u32 = 15;
 
 fn pss_identity_field(hasher: &mut blake3::Hasher, name: &str, bytes: &[u8]) {
     hasher.update(&(name.len() as u64).to_le_bytes());
@@ -778,7 +788,7 @@ pub(crate) struct PssStateTrace {
 pub struct PssAnalysisResult {
     /// The periodic steady-state solution
     pub result: PssResult,
-    /// Number of shooting Newton iterations
+    /// Total shooting Newton corrections across solved and qualification grids.
     pub iterations: usize,
     /// Final residual norm
     pub final_residual: Value,
@@ -1056,10 +1066,7 @@ impl PssOperatingPoint {
     /// count is intentionally not part of this capacity: dependent analyses
     /// consume the authenticated orbit, not the optional display spectrum.
     pub fn spectral_harmonic_capacity(&self) -> usize {
-        self.config
-            .points_per_period
-            .min(self.analysis.result.time.len().saturating_sub(1))
-            / 2
+        self.analysis.result.time.len().saturating_sub(1) / 2
     }
 
     /// Reconstruct a retained operating point after authenticated transport.
@@ -1204,9 +1211,9 @@ impl PssOperatingPoint {
         let expected_time_samples = config.points_per_period.checked_add(1).ok_or_else(|| {
             SimulationError::Circuit("retained PSS point count overflows the platform".to_owned())
         })?;
-        if analysis.result.time.len() != expected_time_samples {
+        if analysis.result.time.len() < expected_time_samples {
             return Err(SimulationError::Circuit(format!(
-                "retained PSS orbit has {} time samples; its configured grid requires {expected_time_samples}",
+                "retained PSS orbit has {} time samples; its configured grid requires at least {expected_time_samples}",
                 analysis.result.time.len()
             )));
         }
@@ -1299,6 +1306,25 @@ impl PssOperatingPoint {
             ));
         }
         let sample_count = analysis.result.time.len();
+        let grid_step = analysis.period / (sample_count - 1) as Value;
+        if analysis
+            .result
+            .time
+            .iter()
+            .enumerate()
+            .any(|(index, time)| {
+                let expected = if index + 1 == sample_count {
+                    analysis.period
+                } else {
+                    index as Value * grid_step
+                };
+                (*time - expected).abs() > period_tolerance
+            })
+        {
+            return Err(SimulationError::Circuit(
+                "retained PSS orbit must use a uniform integration grid".to_owned(),
+            ));
+        }
         if analysis.result.waveforms.iter().any(|waveform| {
             waveform.values.len() != sample_count
                 || waveform.values.iter().any(|value| !value.is_finite())
@@ -1440,22 +1466,25 @@ impl Engine {
         points_per_period: usize,
         autonomous: bool,
         abort: &dyn AbortSignal,
-    ) -> Result<(), SimulationError> {
+    ) -> Result<usize, SimulationError> {
         if !period.is_finite() || period <= 0.0 {
             return Err(SimulationError::Circuit(
                 "PSS source period must be finite and positive".to_owned(),
             ));
         }
-        let ensure_sampling = |name: &str, cycles: Value| -> Result<(), SimulationError> {
+        let mut required_steps = points_per_period;
+        let mut ensure_sampling = |name: &str, cycles: Value| -> Result<(), SimulationError> {
             // Periodicity was certified before this check, so a nonzero
             // authored clock has an integral cycle count. Round within that
             // certificate's tolerance to avoid admitting an exact Nyquist
             // clock just because its phase arithmetic rounded downward.
             let nyquist_points = 2.0 * cycles.round();
-            if !autonomous && nyquist_points >= points_per_period as Value {
-                return Err(PssError::InvalidConfig(format!(
-                    "PSS source '{name}' reaches or exceeds the grid Nyquist limit: POINTS={points_per_period} must be greater than {nyquist_points:.0} for its authored sinusoidal clocks; increase POINTS and check waveform convergence under further grid refinement"
-                )).into());
+            while !autonomous && nyquist_points >= required_steps as Value {
+                required_steps = required_steps.checked_mul(2).filter(|steps| *steps > 0).ok_or_else(|| {
+                    PssError::InvalidConfig(format!(
+                        "PSS source '{name}' requires an unrepresentable integration grid for its authored harmonic degree {cycles:e}"
+                    ))
+                })?;
             }
             Ok(())
         };
@@ -1531,7 +1560,7 @@ impl Engine {
             }
             ensure_sampling(name, cycles)?;
         }
-        Ok(())
+        Ok(required_steps)
     }
 
     fn pss_shooting_state_basis(circuit: &CircuitData) -> Vec<String> {
@@ -1827,7 +1856,7 @@ impl Engine {
         frozen_sources.sort_by_key(|name| name.to_ascii_lowercase());
 
         let period = analysis.period;
-        let max_step = period / continuation_config.points_per_period as Value;
+        let max_step = period / circuit.grid_steps(&continuation_config) as Value;
         self.pss_set_reactive_state(&mut circuit, &shooting_state)?;
         let seed = self.pss_initial_node_solution(&mut circuit, abort)?;
         let mut trace = PssStateTrace::default();
@@ -2093,7 +2122,7 @@ impl Engine {
         {
             return Err(PssError::NoReactiveElements.into());
         }
-        Self::ensure_pss_source_contract(
+        circuit.integration_steps = Self::ensure_pss_source_contract(
             &circuit,
             config.period(),
             config.points_per_period,
@@ -2101,8 +2130,8 @@ impl Engine {
             abort,
         )?;
         self.ensure_result_values(
-            config
-                .points_per_period
+            circuit
+                .grid_steps(&config)
                 .saturating_mul(
                     circuit
                         .matrix_size()
@@ -2112,6 +2141,7 @@ impl Engine {
                 .saturating_add(state_dimension.saturating_mul(state_dimension))
                 .saturating_add(state_dimension.saturating_mul(2)),
         )?;
+        self.ensure_analysis_points(circuit.grid_steps(&config))?;
 
         // Use the exact retained operating point when one was supplied. The
         // basis check happens only after full circuit elaboration and matrix
@@ -2147,7 +2177,7 @@ impl Engine {
         // ==================================================================
         // Phase 2: Period Detection (for autonomous oscillators)
         // ==================================================================
-        let mut detected_period = if config.is_autonomous() && config.auto_period {
+        let detected_period = if config.is_autonomous() && config.auto_period {
             // Detection only seeds the Newton iteration (the period is now a
             // shooting unknown closed by the phase condition), so a low-
             // confidence detection falls back to the configured guess
@@ -2158,156 +2188,61 @@ impl Engine {
             period
         };
 
-        // ==================================================================
-        // Phase 3: Shooting Newton Loop
-        // ==================================================================
-        // Finite difference step for Jacobian computation
-        const FD_STEP: Value = 1e-8;
-
+        // Qualify the discrete orbit against a fully solved doubled grid.
+        // Source defaults remain authored by config, while the worker-owned
+        // integration_steps is shared by every perturbation on a given mesh.
+        let mut coarse = self.pss_solve_grid(
+            &mut circuit,
+            &mut matrix,
+            &config,
+            ShootingState::new(current_state, detected_period),
+            abort,
+        )?;
+        let mut iteration = coarse.iterations;
+        loop {
+            let steps = circuit.grid_steps(&config);
+            let finer_steps = steps.checked_mul(2).ok_or_else(|| {
+                PssError::InvalidConfig("PSS refinement grid size overflowed".to_owned())
+            })?;
+            self.ensure_pss_refinement_capacity(&circuit, steps, finer_steps)?;
+            circuit.integration_steps = finer_steps;
+            let fine = self
+                .pss_solve_grid(
+                    &mut circuit,
+                    &mut matrix,
+                    &config,
+                    ShootingState::new(coarse.state.x0.clone(), coarse.state.period),
+                    abort,
+                )
+                .map_err(|error| match error {
+                    SimulationError::ConvergenceFailed(count) => {
+                        SimulationError::ConvergenceFailed(iteration.saturating_add(count))
+                    }
+                    other => other,
+                })?;
+            iteration += fine.iterations;
+            let error = self.pss_grid_refinement_error(&coarse, &fine, abort)?;
+            if config.verbose {
+                log::debug!(
+                    "PSS grid {steps} -> {finer_steps}: normalized waveform error {error:.6e}"
+                );
+            }
+            if error <= 1.0 {
+                circuit.integration_steps = steps;
+                break;
+            }
+            coarse = fine;
+        }
+        let PssGridSolution {
+            state: mut shooting_state,
+            jacobian: preconditioner_jacobian,
+            ..
+        } = coarse;
+        let detected_period = shooting_state.period;
         let mut solver = ShootingNewtonSolver::new(config.tolerance, config.max_iterations)
             .with_abstol(config.abstol)
             .with_damping(config.damping_factor)
-            .with_fd_step(FD_STEP);
-
-        let mut shooting_state = ShootingState::new(current_state.clone(), detected_period);
-        let mut iteration = 0;
-        // A previously materialized Jacobian remains useful as a right
-        // preconditioner even after a matrix-free step makes it too stale for
-        // Floquet reporting.
-        let mut preconditioner_jacobian: Option<Vec<Vec<Value>>> = None;
-
-        while iteration < config.max_iterations {
-            if abort.is_aborted() {
-                return Err(SimulationError::Aborted);
-            }
-            // Simulate one period
-            self.pss_set_reactive_state(&mut circuit, &shooting_state.x0)?;
-
-            let (x_t, _) = self.pss_simulate_one_period(
-                &mut circuit,
-                &mut matrix,
-                detected_period,
-                &config,
-                abort,
-            )?;
-
-            shooting_state.x_t = x_t;
-            shooting_state.compute_residual();
-            if config.verbose {
-                log::debug!(
-                    "PSS iteration {}: period={:.6e}s residual={:.6e}",
-                    iteration,
-                    detected_period,
-                    shooting_state.residual_norm()
-                );
-            }
-
-            // Check convergence
-            if solver.check_convergence(&shooting_state) {
-                break;
-            }
-
-            // Compute Newton step using a finite-difference Jacobian whose
-            // columns integrate perturbed periods in parallel on per-worker
-            // circuit clones (pure per-column work — deterministic).
-            if config.is_autonomous() {
-                // Oscillators: the period is a Newton unknown alongside the
-                // state, closed by a Poincare phase condition.
-                let krylov_step = if shooting_state.dimension() >= PSS_KRYLOV_STATE_THRESHOLD {
-                    if let Some(jacobian) = preconditioner_jacobian.as_deref() {
-                        self.pss_compute_autonomous_newton_step_krylov(
-                            &circuit,
-                            &shooting_state,
-                            PssJacobianProbe {
-                                period: detected_period,
-                                config: &config,
-                                fd_step: FD_STEP,
-                            },
-                            jacobian,
-                            abort,
-                        )?
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                };
-                let (delta, delta_t) = if let Some(step) = krylov_step {
-                    if config.verbose {
-                        log::debug!("PSS autonomous Newton-Krylov step accepted");
-                    }
-                    step
-                } else {
-                    let (delta, delta_t, jacobian) = self.pss_compute_autonomous_newton_step(
-                        &circuit,
-                        &shooting_state,
-                        PssJacobianProbe {
-                            period: detected_period,
-                            config: &config,
-                            fd_step: FD_STEP,
-                        },
-                        abort,
-                    )?;
-                    preconditioner_jacobian = Some(jacobian);
-                    (delta, delta_t)
-                };
-                shooting_state.update_x0(&delta, solver.damping);
-                let max_dt = config.max_period_change * detected_period;
-                detected_period += (solver.damping * delta_t).clamp(-max_dt, max_dt);
-                shooting_state.period = detected_period;
-            } else {
-                let krylov_step = if shooting_state.dimension() >= PSS_KRYLOV_STATE_THRESHOLD {
-                    if let Some(jacobian) = preconditioner_jacobian.as_deref() {
-                        self.pss_compute_newton_step_krylov(
-                            &circuit,
-                            &shooting_state,
-                            PssJacobianProbe {
-                                period: detected_period,
-                                config: &config,
-                                fd_step: FD_STEP,
-                            },
-                            jacobian,
-                            abort,
-                        )?
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                };
-                let delta = if let Some(delta) = krylov_step {
-                    if config.verbose {
-                        log::debug!("PSS driven Newton-Krylov step accepted");
-                    }
-                    delta
-                } else {
-                    let (delta, jacobian) = self.pss_compute_newton_step(
-                        &circuit,
-                        &shooting_state,
-                        PssJacobianProbe {
-                            period: detected_period,
-                            config: &config,
-                            fd_step: FD_STEP,
-                        },
-                        abort,
-                    )?;
-                    preconditioner_jacobian = Some(jacobian);
-                    delta
-                };
-                shooting_state.update_x0(&delta, solver.damping);
-            }
-
-            iteration += 1;
-        }
-
-        // Check if we converged
-        if !solver.has_converged() && iteration >= config.max_iterations {
-            return Err(PssError::ConvergenceFailed {
-                iterations: iteration,
-                residual: shooting_state.residual_norm(),
-            }
-            .into());
-        }
+            .with_fd_step(PSS_FD_STEP);
 
         // ==================================================================
         // Phase 4: Build Result
@@ -2351,7 +2286,7 @@ impl Engine {
                 PssJacobianProbe {
                     period: detected_period,
                     config: &config,
-                    fd_step: FD_STEP,
+                    fd_step: PSS_FD_STEP,
                 },
                 abort,
             )?
@@ -2398,6 +2333,254 @@ impl Engine {
             matrix,
             shooting_state.x0.clone(),
         ))
+    }
+
+    /// Solve one deterministic mesh. Grid refinement happens only between
+    /// complete solves; every Jacobian/monodromy perturbation replays this mesh.
+    fn pss_solve_grid(
+        &self,
+        circuit: &mut PssCircuit,
+        matrix: &mut StaticMatrix,
+        config: &PssConfig,
+        mut shooting_state: ShootingState,
+        abort: &dyn AbortSignal,
+    ) -> Result<PssGridSolution, SimulationError> {
+        let mut solver = ShootingNewtonSolver::new(config.tolerance, config.max_iterations)
+            .with_abstol(config.abstol)
+            .with_damping(config.damping_factor)
+            .with_fd_step(PSS_FD_STEP);
+
+        let mut detected_period = shooting_state.period;
+        let mut iteration = 0;
+        // A previously materialized Jacobian remains useful as a right
+        // preconditioner even after a matrix-free step makes it too stale for
+        // Floquet reporting.
+        let mut preconditioner_jacobian: Option<Vec<Vec<Value>>> = None;
+
+        loop {
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
+            // Simulate one period
+            self.pss_set_reactive_state(circuit, &shooting_state.x0)?;
+
+            let (x_t, waveform) =
+                self.pss_simulate_one_period(circuit, matrix, detected_period, config, abort)?;
+
+            shooting_state.x_t = x_t;
+            shooting_state.compute_residual();
+            if config.verbose {
+                log::debug!(
+                    "PSS iteration {}: period={:.6e}s residual={:.6e}",
+                    iteration,
+                    detected_period,
+                    shooting_state.residual_norm()
+                );
+            }
+
+            // Check convergence
+            if solver.check_convergence(&shooting_state) {
+                return Ok(PssGridSolution {
+                    state: shooting_state,
+                    waveform,
+                    iterations: iteration,
+                    jacobian: preconditioner_jacobian,
+                });
+            }
+            if iteration >= config.max_iterations {
+                return Err(PssError::ConvergenceFailed {
+                    iterations: iteration,
+                    residual: shooting_state.residual_norm(),
+                }
+                .into());
+            }
+
+            // Compute Newton step using a finite-difference Jacobian whose
+            // columns integrate perturbed periods in parallel on per-worker
+            // circuit clones (pure per-column work — deterministic).
+            if config.is_autonomous() {
+                // Oscillators: the period is a Newton unknown alongside the
+                // state, closed by a Poincare phase condition.
+                let krylov_step = if shooting_state.dimension() >= PSS_KRYLOV_STATE_THRESHOLD {
+                    if let Some(jacobian) = preconditioner_jacobian.as_deref() {
+                        self.pss_compute_autonomous_newton_step_krylov(
+                            circuit,
+                            &shooting_state,
+                            PssJacobianProbe {
+                                period: detected_period,
+                                config,
+                                fd_step: PSS_FD_STEP,
+                            },
+                            jacobian,
+                            abort,
+                        )?
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                let (delta, delta_t) = if let Some(step) = krylov_step {
+                    if config.verbose {
+                        log::debug!("PSS autonomous Newton-Krylov step accepted");
+                    }
+                    step
+                } else {
+                    let (delta, delta_t, jacobian) = self.pss_compute_autonomous_newton_step(
+                        circuit,
+                        &shooting_state,
+                        PssJacobianProbe {
+                            period: detected_period,
+                            config,
+                            fd_step: PSS_FD_STEP,
+                        },
+                        abort,
+                    )?;
+                    preconditioner_jacobian = Some(jacobian);
+                    (delta, delta_t)
+                };
+                shooting_state.update_x0(&delta, solver.damping);
+                let max_dt = config.max_period_change * detected_period;
+                detected_period += (solver.damping * delta_t).clamp(-max_dt, max_dt);
+                shooting_state.period = detected_period;
+            } else {
+                let krylov_step = if shooting_state.dimension() >= PSS_KRYLOV_STATE_THRESHOLD {
+                    if let Some(jacobian) = preconditioner_jacobian.as_deref() {
+                        self.pss_compute_newton_step_krylov(
+                            circuit,
+                            &shooting_state,
+                            PssJacobianProbe {
+                                period: detected_period,
+                                config,
+                                fd_step: PSS_FD_STEP,
+                            },
+                            jacobian,
+                            abort,
+                        )?
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                let delta = if let Some(delta) = krylov_step {
+                    if config.verbose {
+                        log::debug!("PSS driven Newton-Krylov step accepted");
+                    }
+                    delta
+                } else {
+                    let (delta, jacobian) = self.pss_compute_newton_step(
+                        circuit,
+                        &shooting_state,
+                        PssJacobianProbe {
+                            period: detected_period,
+                            config,
+                            fd_step: PSS_FD_STEP,
+                        },
+                        abort,
+                    )?;
+                    preconditioner_jacobian = Some(jacobian);
+                    delta
+                };
+                shooting_state.update_x0(&delta, solver.damping);
+            }
+
+            iteration += 1;
+        }
+    }
+
+    fn ensure_pss_refinement_capacity(
+        &self,
+        circuit: &PssCircuit,
+        coarse_steps: usize,
+        fine_steps: usize,
+    ) -> Result<(), SimulationError> {
+        self.ensure_analysis_points(fine_steps)?;
+        // Retain the coarse orbit while solving the fine orbit, including a
+        // simultaneous derivative traversal and dense shooting workspace.
+        let dimension = circuit.state_dimension();
+        self.ensure_result_values(
+            coarse_steps
+                .saturating_add(fine_steps.saturating_mul(2))
+                .saturating_add(3)
+                .saturating_mul(circuit.matrix_size().saturating_add(2))
+                .saturating_add(dimension.saturating_mul(dimension).saturating_mul(4))
+                .saturating_add(dimension.saturating_mul(6)),
+        )
+    }
+
+    /// Compare complete solved orbits at identical phase coordinates. Fixed
+    /// meshes make the shooting derivatives smooth; adaptation is outside
+    /// Newton, and separately controls voltage and current waveform accuracy.
+    fn pss_grid_refinement_error(
+        &self,
+        coarse: &PssGridSolution,
+        fine: &PssGridSolution,
+        abort: &dyn AbortSignal,
+    ) -> Result<Value, SimulationError> {
+        let coarse = &coarse.waveform;
+        let fine = &fine.waveform;
+        if coarse.time.len() < 2
+            || fine.time.len() != 2 * (coarse.time.len() - 1) + 1
+            || coarse.voltages.len() != fine.voltages.len()
+            || coarse.branch_currents.len() != fine.branch_currents.len()
+        {
+            return Err(SimulationError::Circuit(
+                "PSS refinement trajectories have inconsistent dimensions".to_owned(),
+            ));
+        }
+        let coarse_period = *coarse.time.last().unwrap();
+        let fine_period = *fine.time.last().unwrap();
+        let period_scale = coarse_period.max(fine_period);
+        let reltol = self.voltage_reltol();
+        let mut error = (coarse_period / period_scale - fine_period / period_scale).abs() / reltol;
+        let channels = coarse
+            .voltages
+            .iter()
+            .zip(&fine.voltages)
+            .map(|pair| (pair, self.voltage_abstol()))
+            .chain(
+                coarse
+                    .branch_currents
+                    .iter()
+                    .zip(&fine.branch_currents)
+                    .map(|pair| (pair, self.current_abstol())),
+            );
+        for ((coarse_values, fine_values), abstol) in channels {
+            if coarse_values.len() != coarse.time.len() || fine_values.len() != fine.time.len() {
+                return Err(SimulationError::Circuit(
+                    "PSS refinement waveform has an inconsistent sample count".to_owned(),
+                ));
+            }
+            let mut peak: Value = 0.0;
+            for (index, &value) in coarse_values.iter().chain(fine_values).enumerate() {
+                if index & 0x3ff == 0 && abort.is_aborted() {
+                    return Err(SimulationError::Aborted);
+                }
+                if !value.is_finite() {
+                    return Err(SimulationError::Circuit(
+                        "PSS refinement waveform is non-finite".to_owned(),
+                    ));
+                }
+                peak = peak.max(value.abs());
+            }
+            let scale = peak.max(abstol);
+            let tolerance = abstol / scale + reltol * (peak / scale);
+            for (index, (&a, &b)) in coarse_values
+                .iter()
+                .zip(fine_values.iter().step_by(2))
+                .enumerate()
+            {
+                if index & 0x3ff == 0 && abort.is_aborted() {
+                    return Err(SimulationError::Aborted);
+                }
+                error = error.max((a / scale - b / scale).abs() / tolerance);
+            }
+        }
+        // A first-order method's coarse error is twice the difference to
+        // its doubled grid in the asymptotic regime. This also covers the
+        // first BE interval's current error for second-order traversals.
+        Ok(2.0 * error)
     }
 
     /// Initialize reactive element state from DC solution
@@ -2592,7 +2775,7 @@ impl Engine {
         config: &PssConfig,
         abort: &dyn AbortSignal,
     ) -> Result<(Vec<Value>, TransientResult), SimulationError> {
-        let max_step = period / config.points_per_period as f64;
+        let max_step = period / circuit.grid_steps(config) as Value;
         if config.is_autonomous() {
             Self::ensure_pss_source_contract(
                 circuit,
@@ -3661,9 +3844,12 @@ impl Engine {
             voltages: (0..num_nodes)
                 .map(|i| vec![solution.get(i).copied().unwrap_or(0.0)])
                 .collect(),
-            branch_currents: Vec::new(),
+            branch_currents: solution[num_nodes..]
+                .iter()
+                .map(|&value| vec![value])
+                .collect(),
             num_nodes,
-            branch_names: Vec::new(),
+            branch_names: circuit.branch_names_sorted(),
             node_names,
             digital_traces: Vec::new(),
             digital_buses: Vec::new(),
@@ -3674,7 +3860,7 @@ impl Engine {
         };
 
         let mut t = 0.0;
-        const MAX_ITERATIONS: usize = 100_000;
+        let max_iterations = if fixed_grid { fixed_steps } else { 100_000 };
         let mut total_iterations = 0;
         let mut first_step = true;
         let mut accepted_step_history = PssAcceptedStepHistory::default();
@@ -3686,7 +3872,7 @@ impl Engine {
         }
 
         let mut fixed_index = 0usize;
-        while t < tstop && total_iterations < MAX_ITERATIONS {
+        while t < tstop && total_iterations < max_iterations {
             if abort.is_aborted() {
                 return Err(SimulationError::Aborted);
             }
@@ -3863,8 +4049,16 @@ impl Engine {
             }
 
             result.time.push(t);
+            result.step_sizes.push(dt);
             for (i, voltages) in result.voltages.iter_mut().enumerate() {
                 voltages.push(solution.get(i).copied().unwrap_or(0.0));
+            }
+            for (values, &value) in result
+                .branch_currents
+                .iter_mut()
+                .zip(&solution[num_nodes..])
+            {
+                values.push(value);
             }
 
             if let Some(scale) = accepted_step_scale {
@@ -3880,7 +4074,7 @@ impl Engine {
             t,
             tstop,
             total_iterations,
-            MAX_ITERATIONS,
+            max_iterations,
             PssFixedGrid {
                 enabled: fixed_grid,
                 index: fixed_index,

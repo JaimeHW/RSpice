@@ -16,6 +16,63 @@ fn limits_with(update: impl FnOnce(&mut ResourceLimits)) -> ResourceLimits {
     limits
 }
 
+#[test]
+fn pss_refinement_enforces_point_and_waveform_workspace_limits() {
+    use rspice_core::abort_signal::NoAbort;
+    use rspice_core::analysis::PssConfig;
+    let netlist = Netlist::parse("PSS refinement limits\nV1 in 0 SIN(0 1 1meg)\nR1 in out 1k\nC1 out 0 159.154943091895p\n.end\n").unwrap();
+    for (kind, limits) in [
+        (
+            ResourceKind::AnalysisPoints,
+            limits_with(|limits| limits.max_analysis_points = 32),
+        ),
+        (
+            ResourceKind::ResultValues,
+            limits_with(|limits| limits.max_result_values = 1000),
+        ),
+    ] {
+        let engine = Engine::new(SimulationConfig {
+            resource_limits: limits,
+            ..Default::default()
+        });
+        let error = engine
+            .run_pss_with_abort(
+                &netlist,
+                PssConfig::new(1e6)
+                    .with_points_per_period(32)
+                    .with_tstab_periods(0),
+                &NoAbort,
+            )
+            .unwrap_err();
+        assert!(
+            matches!(error, SimulationError::ResourceLimit(ResourceLimitError { resource, requested, limit }) if resource == kind && requested > limit),
+            "{error}"
+        );
+    }
+    let aliased = Netlist::parse("PSS source mesh limits\nB1 in 0 V=sin(2*pi*64meg*time)^8\nR1 in out 1k\nC1 out 0 159.154943091895p\n.end\n").unwrap();
+    let engine = Engine::new(SimulationConfig {
+        resource_limits: limits_with(|limits| limits.max_analysis_points = 256),
+        ..Default::default()
+    });
+    for error in [
+        engine
+            .validate_pss_source_contract_with_abort(&aliased, &[], &PssConfig::new(1e6), &NoAbort)
+            .unwrap_err(),
+        engine
+            .run_pss_with_abort(
+                &aliased,
+                PssConfig::new(1e6).with_tstab_periods(0),
+                &NoAbort,
+            )
+            .unwrap_err(),
+    ] {
+        assert!(
+            matches!(error, SimulationError::ResourceLimit(ResourceLimitError { resource: ResourceKind::AnalysisPoints, requested, limit: 256 }) if requested > 1024),
+            "{error}"
+        );
+    }
+}
+
 struct TestDirectory(std::path::PathBuf);
 
 impl TestDirectory {

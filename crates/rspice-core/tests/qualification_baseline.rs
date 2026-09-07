@@ -610,7 +610,7 @@ fn gates() -> Vec<Gate> {
         unit: "polls",
         value: pss_polls as f64,
         tolerance: POLL_TOLERANCE,
-        note: "abort polls a completed periodic steady-state solve performs",
+        note: "abort polls for PSS, including a solved doubled grid for waveform accuracy qualification",
     });
     let pss = serialized(|| engine.run_pss_with_abort(&netlist, PssConfig::new(1.0e6), &NoAbort))
         .expect("the PSS fixture solves");
@@ -619,7 +619,7 @@ fn gates() -> Vec<Gate> {
         unit: "iterations",
         value: pss.iterations as f64,
         tolerance: POLL_TOLERANCE,
-        note: "shooting Newton iterations the PSS solve reports",
+        note: "total shooting Newton corrections across the retained and doubled qualification grids",
     });
 
     // --- Compression --------------------------------------------------------

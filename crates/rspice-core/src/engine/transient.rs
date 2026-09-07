@@ -2240,13 +2240,14 @@ impl Engine {
             engine.config.spice_dialect,
             engine.config.resource_limits,
         );
-        Self::ensure_pss_source_contract(
+        let grid_steps = Self::ensure_pss_source_contract(
             &circuit,
             config.period(),
             config.points_per_period,
             false,
             abort,
-        )
+        )?;
+        engine.ensure_analysis_points(grid_steps)
     }
 
     fn validated_transient_source_selection(

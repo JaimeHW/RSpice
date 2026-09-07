@@ -11,7 +11,9 @@ impl BehavioralVoltageSource {
     }
 
     pub(crate) fn max_authored_tone_cycles(&self, period: Value) -> Value {
-        max_authored_tone_cycles(&self.ast, period, &self.periodicity_context())
+        let context = self.periodicity_context();
+        max_authored_tone_cycles(&self.ast, period, &context)
+            .max(finite_fourier_degree(&self.ast, period, &context).unwrap_or(0.0))
     }
 
     fn periodicity_context(&self) -> Context<'_> {
@@ -29,7 +31,9 @@ impl BehavioralCurrentSource {
     }
 
     pub(crate) fn max_authored_tone_cycles(&self, period: Value) -> Value {
-        max_authored_tone_cycles(&self.ast, period, &self.periodicity_context())
+        let context = self.periodicity_context();
+        max_authored_tone_cycles(&self.ast, period, &context)
+            .max(finite_fourier_degree(&self.ast, period, &context).unwrap_or(0.0))
     }
 
     fn periodicity_context(&self) -> Context<'_> {
@@ -82,6 +86,108 @@ fn multiply_increment(increment: Value, scale: Value) -> Option<Value> {
     // Underflow is not proof of a zero time increment. Such a ramp can be
     // invisible over the shooting grid and still change on a longer run.
     (increment == 0.0 || scale == 0.0 || result != 0.0).then_some(result)
+}
+
+/// Constant phase increment for an affine function of time. Circuit variables
+/// and nonlinear phase modulation cannot establish a finite Fourier degree.
+fn affine_time_increment(expr: &Expr, period: Value, context: &Context<'_>) -> Option<Value> {
+    if constant_value(expr, context).is_some() {
+        return Some(0.0);
+    }
+    let increment = |expr: &Expr| affine_time_increment(expr, period, context);
+    match expr {
+        Expr::Time => Some(period),
+        Expr::Unary {
+            op: UnaryOp::Neg,
+            operand,
+        } => increment(operand).map(|value| -value),
+        Expr::Binary { op, left, right } => match op {
+            BinaryOp::Add => Some(increment(left)? + increment(right)?),
+            BinaryOp::Sub => Some(increment(left)? - increment(right)?),
+            BinaryOp::Mul => {
+                if let Some(scale) = constant_value(left, context) {
+                    multiply_increment(increment(right)?, scale)
+                } else {
+                    multiply_increment(increment(left)?, constant_value(right, context)?)
+                }
+            }
+            BinaryOp::Div => {
+                let divisor = constant_value(right, context)?;
+                (divisor != 0.0)
+                    .then(|| increment(left).map(|value| value / divisor))
+                    .flatten()
+            }
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// Upper harmonic index of a time-only trigonometric polynomial, without
+/// expanding its coefficients. Products add degrees and integer powers
+/// multiply them; looking only at the inner sine clocks misses these bands.
+/// None denotes an unknown/infinite band, never a zero-band certificate.
+fn finite_fourier_degree(expr: &Expr, period: Value, context: &Context<'_>) -> Option<Value> {
+    if constant_value(expr, context).is_some() {
+        return Some(0.0);
+    }
+    let degree = |expr: &Expr| finite_fourier_degree(expr, period, context);
+    let power = |base: &Expr, exponent: &Expr| {
+        let exponent = constant_value(exponent, context)?;
+        (exponent >= 0.0 && exponent.fract() == 0.0)
+            .then(|| degree(base).map(|value| value * exponent))
+            .flatten()
+    };
+    match expr {
+        Expr::Unary {
+            op: UnaryOp::Neg,
+            operand,
+        } => degree(operand),
+        Expr::Binary { op, left, right } => match op {
+            BinaryOp::Add | BinaryOp::Sub => Some(degree(left)?.max(degree(right)?)),
+            BinaryOp::Mul => Some(degree(left)? + degree(right)?),
+            BinaryOp::Div if constant_value(right, context).is_some_and(|value| value != 0.0) => {
+                degree(left)
+            }
+            BinaryOp::Pow => power(left, right),
+            _ => None,
+        },
+        Expr::Function { func, args } => match (func, args.as_slice()) {
+            (Function::Sin | Function::Cos, [phase]) => {
+                Some(affine_time_increment(phase, period, context)?.abs() / std::f64::consts::TAU)
+            }
+            (Function::Pow, [base, exponent])
+                if context.expression_dialect == crate::config::ExpressionDialect::Xyce
+                    || constant_value(exponent, context)
+                        .is_some_and(|value| value.rem_euclid(2.0) == 0.0) =>
+            {
+                power(base, exponent)
+            }
+            (Function::Pwr, [base, exponent])
+                if context.expression_dialect == crate::config::ExpressionDialect::Xyce
+                    || constant_value(exponent, context)
+                        .is_some_and(|value| value.rem_euclid(2.0) == 1.0) =>
+            {
+                power(base, exponent)
+            }
+            (Function::Pwrs, [base, exponent])
+                if constant_value(exponent, context)
+                    .is_some_and(|value| value.rem_euclid(2.0) == 1.0) =>
+            {
+                power(base, exponent)
+            }
+            (Function::SpiceSin, _) => {
+                let values = args
+                    .iter()
+                    .map(|arg| constant_value(arg, context))
+                    .collect::<Option<Vec<_>>>()?;
+                crate::expr::spice_waveform_is_periodic(*func, &values, period, false)
+                    .then(|| crate::expr::spice_waveform_max_tone_cycles(*func, &values, period))
+            }
+            _ => None,
+        },
+        _ => None,
+    }
 }
 
 /// Inspect authored phase increments rather than sampled values, which can
@@ -216,6 +322,43 @@ fn time_increment(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn harmonic_degree_preserves_dialect_power_semantics_and_unknown_bands() {
+        use crate::config::ExpressionDialect::{Ngspice, Xyce};
+        for (expression, ngspice_degree, xyce_degree) in [
+            ("sin(2*pi*64meg*time)^8", Some(512.0), Some(512.0)),
+            (
+                "sin(2*pi*64meg*time)*cos(2*pi*3meg*time)",
+                Some(67.0),
+                Some(67.0),
+            ),
+            ("pow(sin(2*pi*64meg*time),3)", None, Some(192.0)),
+            ("pow(sin(2*pi*64meg*time),4)", Some(256.0), Some(256.0)),
+            ("pwr(sin(2*pi*64meg*time),3)", Some(192.0), Some(192.0)),
+            ("pwr(sin(2*pi*64meg*time),4)", None, Some(256.0)),
+            ("pwrs(sin(2*pi*64meg*time),3)", Some(192.0), Some(192.0)),
+            ("pwrs(sin(2*pi*64meg*time),4)", None, None),
+            ("sin(2*pi*64meg*time)^0.5", None, None),
+            ("sin(2*pi*64meg*time)^-2", None, None),
+            ("exp(sin(2*pi*64meg*time))", None, None),
+            ("sin(2*pi*64meg*time+v(out))", None, None),
+        ] {
+            let ast = parse_expression_strict(expression).unwrap();
+            for (dialect, expected) in [(Ngspice, ngspice_degree), (Xyce, xyce_degree)] {
+                let context = Context::transient(&[], &[], 0.0).with_expression_dialect(dialect);
+                let actual = finite_fourier_degree(&ast, 1e-6, &context);
+                match (actual, expected) {
+                    (Some(actual), Some(expected)) => assert!(
+                        (actual - expected).abs() < 1e-10,
+                        "{dialect:?}: {expression}: {actual}"
+                    ),
+                    (None, None) => {}
+                    _ => panic!("{dialect:?}: {expression}: {actual:?}, expected {expected:?}"),
+                }
+            }
+        }
+    }
 
     #[test]
     fn time_shift_certificate_distinguishes_periods_aliases_and_implicit_clocks() {

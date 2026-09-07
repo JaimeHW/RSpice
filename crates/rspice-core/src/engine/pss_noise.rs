@@ -408,12 +408,26 @@ impl Engine {
 
         let (period, mut circuit, mut matrix, x0) = if let Some(operating_point) = operating_point {
             let mut circuit = self.build_circuit_with_abort(netlist, abort)?;
+            circuit.set_independent_source_context(
+                crate::circuit::SourceTimeBasis {
+                    tstep: config.period() / config.points_per_period as Value,
+                    tstop: config.period(),
+                },
+                self.config.spice_dialect,
+                self.config.resource_limits,
+            );
             Self::ensure_no_mixed_signal_analysis(&circuit, "PSS noise analysis")?;
             let matrix = self.build_matrix(&circuit)?;
             circuit.link_indices(&matrix);
             operating_point.authenticate_for_reuse(netlist, &self.config, &config)?;
             operating_point.validate_shooting_basis_for_circuit(&circuit)?;
-            let circuit = super::pss::PssCircuit::new(circuit);
+            let mut circuit = super::pss::PssCircuit::new(circuit);
+            circuit.integration_steps = operating_point
+                .analysis()
+                .result
+                .time
+                .len()
+                .saturating_sub(1);
             let state_dimension = circuit.state_dimension();
             if operating_point.shooting_state().len() != state_dimension {
                 return Err(SimulationError::Circuit(format!(
@@ -439,7 +453,7 @@ impl Engine {
         // ------------------------------------------------------------------
         let mut base = super::pss::PssStateTrace::default();
         self.pss_set_reactive_state(&mut circuit, &x0)?;
-        let max_step = period / config.points_per_period as f64;
+        let max_step = period / circuit.grid_steps(&config) as f64;
         let seed = self.pss_initial_node_solution(&mut circuit, abort)?;
         self.pss_run_tran_internal(
             &mut circuit,

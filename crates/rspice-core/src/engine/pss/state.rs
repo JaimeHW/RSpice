@@ -176,6 +176,9 @@ impl PssStateBasis {
 pub(in crate::engine) struct PssCircuit {
     pub(super) circuit: CircuitData,
     pub(super) diode_history: TwoTerminalChargeHistory,
+    /// Numerical mesh only. Authored source defaults remain in CircuitData's
+    /// SourceTimeBasis and must not change when this grid is refined.
+    pub(in crate::engine) integration_steps: usize,
     basis: PssStateBasis,
     solution_scratch: Vec<Value>,
     current_balance: Vec<Value>,
@@ -219,6 +222,7 @@ impl PssCircuit {
         Self {
             circuit,
             diode_history,
+            integration_steps: 0,
             basis,
             solution_scratch,
             current_balance,
@@ -227,6 +231,10 @@ impl PssCircuit {
             current_source_offsets,
             current_source_times: [0.0; 2],
         }
+    }
+
+    pub(in crate::engine) fn grid_steps(&self, config: &crate::analysis::PssConfig) -> usize {
+        self.integration_steps.max(config.points_per_period)
     }
 
     pub(in crate::engine) fn state_dimension(&self) -> usize {
