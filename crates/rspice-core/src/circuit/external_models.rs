@@ -2137,7 +2137,7 @@ impl CircuitData {
         let simparams = self.generated_simulation_parameters;
         matrix.with_probe_values(|probe, rhs| {
             self.generated_veriloga_devices
-                .stamp_all_with_mode(
+                .stamp_all_with_task_recording(
                     probe,
                     rhs,
                     solution,
@@ -2148,6 +2148,7 @@ impl CircuitData {
                         evaluation_mode:
                             crate::device::veriloga_builtins::GeneratedEvaluationMode::StaticProbe,
                     },
+                    true,
                 )
                 .map_err(|error| error.to_string())
         })

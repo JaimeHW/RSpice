@@ -149,6 +149,7 @@ endmodule"#,
 let ctx = runtime::GeneratedEvalContext { voltages: &[1.0,0.0], temperature: 300.0 };
 let invalid = runtime::GeneratedEvalContext { voltages: &[1.0,0.0], temperature: f64::NAN };
 let mut instance = device::state::Instance::new(&[0,1]);
+assert!(!instance.has_point_analog_tasks(), "initialization tasks do not serialize frequency sweeps");
 instance.set_parameter("gain", 4.0).unwrap();
 instance.set_multiplicity(3.0).unwrap();
 instance.begin_analysis(&ctx);
@@ -523,6 +524,7 @@ fn accept(instance: &mut device::state::Instance) -> Vec<runtime::AnalogTaskInvo
 }
 let mut instance = device::state::Instance::new(&[0, 1]);
 assert!(instance.capture_rollback_state().analog_effects.is_none());
+assert!(instance.has_point_analog_tasks(), "tasks nested inside loops require ordered point publication");
 instance.set_timepoint(1.0, 0.0, runtime::GeneratedDdtCoefficients::inactive());
 stamp(&mut instance, 1.0);
 assert_eq!(instance.drain_analog_tasks().count(), 0);

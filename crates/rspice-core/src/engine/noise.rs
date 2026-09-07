@@ -3215,6 +3215,9 @@ impl Engine {
         self.ensure_analysis_points(points.len())?;
         self.ensure_batch_runs(points.len())?;
         let override_plan = FrequencyDataOverridePlan::resolve(netlist, &points)?;
+        let run_scope = crate::abort_signal::ModelRunSignal::if_needed(abort);
+        let abort: &dyn AbortSignal = run_scope.as_ref().map_or(abort, |scope| scope);
+        Self::ensure_model_run_active(abort)?;
 
         let mut row_netlists = Vec::with_capacity(points.len());
         let mut results = Vec::with_capacity(points.len());
@@ -3229,7 +3232,7 @@ impl Engine {
                 .temp
                 .map(|celsius| celsius + 273.15)
                 .unwrap_or(default_temperature);
-            let mut row_result = self.run_noise_named_with_input_source_and_abort(
+            let mut row_result = match self.run_noise_named_with_input_source_and_abort(
                 &row_netlist,
                 output_pos,
                 output_neg,
@@ -3237,7 +3240,10 @@ impl Engine {
                 &[point.frequency],
                 temperature,
                 abort,
-            )?;
+            ) {
+                Err(SimulationError::ModelFinished(_)) if !results.is_empty() => break,
+                result => result?,
+            };
             if row_result.len() != 1 {
                 return Err(SimulationError::Circuit(format!(
                     ".NOISE DATA table '{}' row {} produced {} results, expected one",
@@ -3248,6 +3254,12 @@ impl Engine {
             }
             row_netlists.push(row_netlist);
             results.push(row_result.remove(0));
+            if abort
+                .model_control()
+                .is_some_and(|control| control.is_finished())
+            {
+                break;
+            }
         }
         Ok((row_netlists, results))
     }
@@ -3394,9 +3406,14 @@ impl Engine {
                 "XSPICE evaluation failed: {message}"
             )));
         }
-        circuit
-            .accept_veriloga_analysis_point()
-            .map_err(SimulationError::Circuit)?;
+        engine.accept_frequency_operating_point(
+            netlist,
+            &mut circuit,
+            &mut matrix,
+            &dc_solution,
+            3,
+            abort,
+        )?;
         circuit
             .finish_veriloga_equilibrium_operating_point(3)
             .map_err(SimulationError::Circuit)?;
@@ -3460,226 +3477,277 @@ impl Engine {
         }
         let mut port_adjoint = Vec::with_capacity(port_rhs.len());
 
-        for (frequency_index, &frequency) in frequencies.iter().enumerate() {
-            if abort.is_aborted() {
-                return Err(SimulationError::Aborted);
-            }
-            let final_step = frequency_index + 1 == frequencies.len();
-            let omega = 2.0 * PI * frequency;
-            circuit
-                .prepare_veriloga_frequency_analysis_point(3, final_step)
-                .map_err(SimulationError::Circuit)?;
-            circuit
-                .prepare_behavioral_small_signal_at_frequency(&dc_solution, frequency)
-                .map_err(SimulationError::Circuit)?;
-            Self::try_fill_small_signal_matrix_with_vbic_delay_mode(
-                &circuit,
-                &mut ac_matrix,
-                &dc_solution,
-                omega,
-                super::ac::SmallSignalAnalysisKind::Noise,
-                true,
-                true,
-            )?;
-            // As in ordinary noise, a final_step event may feed a generated
-            // or runtime Verilog-A noise expression. Refresh only the final
-            // public point against the accepted initial state. The analysis-
-            // local circuit has no post-sweep consumer, so the speculative
-            // final state is intentionally not accepted.
-            let final_noise_sources = if final_step && Self::has_veriloga_noise_devices(&circuit) {
-                Some(Self::try_refresh_veriloga_noise_sources(
-                    &circuit,
+        let mut solve_at_frequency =
+            |circuit: &mut CircuitData,
+             frequency: Value,
+             final_step: bool|
+             -> Result<PortNoiseCorrelationResult, SimulationError> {
+                if abort.is_aborted() {
+                    return Err(SimulationError::Aborted);
+                }
+                let omega = 2.0 * PI * frequency;
+                circuit
+                    .prepare_veriloga_frequency_analysis_point(3, final_step)
+                    .map_err(SimulationError::Circuit)?;
+                circuit
+                    .prepare_behavioral_small_signal_at_frequency(&dc_solution, frequency)
+                    .map_err(SimulationError::Circuit)?;
+                Self::try_fill_small_signal_matrix_with_vbic_delay_mode(
+                    circuit,
+                    &mut ac_matrix,
                     &dc_solution,
-                    &noise_sources,
-                    &elementary_absolute_temperatures,
-                    engine.config.spice_dialect,
-                )?)
-            } else {
-                None
-            };
-            let point_noise_sources = final_noise_sources
-                .as_ref()
-                .map_or(noise_sources.as_slice(), |sources| sources.0.as_slice());
-            let point_noise_temperatures = final_noise_sources
-                .as_ref()
-                .map_or(elementary_absolute_temperatures.as_slice(), |sources| {
-                    sources.1.as_slice()
-                });
-            let point_correlated_noise_sources = correlated_noise_sources.as_slice();
-            #[cfg(feature = "veriloga")]
-            let point_veriloga_processes = Self::try_collect_veriloga_noise_processes_at_frequency(
-                &circuit,
-                &dc_solution,
-                frequency,
-            )?;
-            #[cfg(feature = "veriloga-builtins-base")]
-            let point_generated_processes =
-                Self::try_collect_generated_veriloga_noise_processes_at_frequency(
-                    &circuit,
-                    &dc_solution,
-                    frequency,
+                    omega,
+                    super::ac::SmallSignalAnalysisKind::Noise,
+                    true,
+                    true,
                 )?;
-            let mut covariance = vec![vec![zero; num_ports]; num_ports];
-            let mut compensation = vec![vec![zero; num_ports]; num_ports];
-
-            // One adjoint solve per observed port replaces one forward solve
-            // per device-noise source. Port count is normally tiny while a
-            // transistor-level circuit can contain thousands of sources.
-            match ac_matrix.solve_many_transpose_into(&port_rhs, num_ports, &mut port_adjoint) {
-                Ok(()) => {}
-                Err(crate::solver::SolverError::InaccurateSolution(_)) if size <= 64 => {
-                    log::debug!(
-                        "sparse port-noise transpose solve failed strict backward-error certification; retrying the small complex systems with extended precision"
-                    );
-                    port_adjoint.clear();
-                    for port in 0..num_ports {
-                        let start = port * size;
-                        let extended = ac_matrix
-                            .solve_dense_extended_transpose(&port_rhs[start..start + size])
-                            .map_err(SimulationError::Solver)?;
-                        port_adjoint.extend_from_slice(&extended);
-                    }
-                }
-                Err(error) => return Err(SimulationError::Solver(error)),
-            }
-
-            let solve_transfer =
-                |node_pos: usize, node_neg: usize| -> Result<Vec<Complex64>, SimulationError> {
-                    (0..num_ports)
-                        .map(|port| {
-                            let adjoint = &port_adjoint[port * size..(port + 1) * size];
-                            Ok(Self::noise_transfer_from_adjoint(
-                                adjoint, node_pos, node_neg,
-                            ))
-                        })
-                        .collect()
-                };
-
-            debug_assert_eq!(point_noise_sources.len(), point_noise_temperatures.len());
-            for (source, &absolute_temperature) in
-                point_noise_sources.iter().zip(point_noise_temperatures)
-            {
-                if abort.is_aborted() {
-                    return Err(SimulationError::Aborted);
-                }
-                if runtime_veriloga_device_names
-                    .contains(&source.identity.device.to_ascii_lowercase())
-                    || generated_veriloga_device_names
-                        .contains(&source.identity.device.to_ascii_lowercase())
+                // As in ordinary noise, a final_step event may feed a generated
+                // or runtime Verilog-A noise expression. Refresh only the final
+                // public point against the accepted initial state. These
+                // numerical probes never accept model state or publish tasks.
+                let final_noise_sources = if final_step && Self::has_veriloga_noise_devices(circuit)
                 {
-                    continue;
-                }
-                let source_temperature =
-                    Self::elementary_noise_temperature(temperature, absolute_temperature);
-                let density = Self::evaluated_noise_density(source, frequency, source_temperature)?;
-                if density == 0.0 {
-                    continue;
-                }
-                let scale = density.sqrt();
-                let amplitude = solve_transfer(source.node_pos, source.node_neg)?
-                    .into_iter()
-                    .map(|gain| gain * scale)
-                    .collect::<Vec<_>>();
-                Self::add_port_noise_outer_product(&mut covariance, &mut compensation, &amplitude)?;
-            }
+                    Some(Self::try_refresh_veriloga_noise_sources(
+                        circuit,
+                        &dc_solution,
+                        &noise_sources,
+                        &elementary_absolute_temperatures,
+                        engine.config.spice_dialect,
+                    )?)
+                } else {
+                    None
+                };
+                let point_noise_sources = final_noise_sources
+                    .as_ref()
+                    .map_or(noise_sources.as_slice(), |sources| sources.0.as_slice());
+                let point_noise_temperatures = final_noise_sources
+                    .as_ref()
+                    .map_or(elementary_absolute_temperatures.as_slice(), |sources| {
+                        sources.1.as_slice()
+                    });
+                let point_correlated_noise_sources = correlated_noise_sources.as_slice();
+                #[cfg(feature = "veriloga")]
+                let point_veriloga_processes =
+                    Self::try_collect_veriloga_noise_processes_at_frequency(
+                        circuit,
+                        &dc_solution,
+                        frequency,
+                    )?;
+                #[cfg(feature = "veriloga-builtins-base")]
+                let point_generated_processes =
+                    Self::try_collect_generated_veriloga_noise_processes_at_frequency(
+                        circuit,
+                        &dc_solution,
+                        frequency,
+                    )?;
+                let mut covariance = vec![vec![zero; num_ports]; num_ports];
+                let mut compensation = vec![vec![zero; num_ports]; num_ports];
 
-            #[cfg(feature = "veriloga")]
-            for (instance, process) in &point_veriloga_processes {
-                let density =
-                    Self::evaluated_veriloga_process_density(instance, process, frequency)?;
-                if density == 0.0 {
-                    continue;
+                // One adjoint solve per observed port replaces one forward solve
+                // per device-noise source. Port count is normally tiny while a
+                // transistor-level circuit can contain thousands of sources.
+                match ac_matrix.solve_many_transpose_into(&port_rhs, num_ports, &mut port_adjoint) {
+                    Ok(()) => {}
+                    Err(crate::solver::SolverError::InaccurateSolution(_)) if size <= 64 => {
+                        log::debug!(
+                            "sparse port-noise transpose solve failed strict backward-error certification; retrying the small complex systems with extended precision"
+                        );
+                        port_adjoint.clear();
+                        for port in 0..num_ports {
+                            let start = port * size;
+                            let extended = ac_matrix
+                                .solve_dense_extended_transpose(&port_rhs[start..start + size])
+                                .map_err(SimulationError::Solver)?;
+                            port_adjoint.extend_from_slice(&extended);
+                        }
+                    }
+                    Err(error) => return Err(SimulationError::Solver(error)),
                 }
-                let mut amplitude_sums = (0..num_ports)
-                    .map(|_| ComplexBinAccumulator::default())
-                    .collect::<Vec<_>>();
-                for injection in &process.injections {
-                    for (slot, transfer) in solve_transfer(injection.node_pos, injection.node_neg)?
-                        .into_iter()
-                        .enumerate()
+
+                let solve_transfer =
+                    |node_pos: usize, node_neg: usize| -> Result<Vec<Complex64>, SimulationError> {
+                        (0..num_ports)
+                            .map(|port| {
+                                let adjoint = &port_adjoint[port * size..(port + 1) * size];
+                                Ok(Self::noise_transfer_from_adjoint(
+                                    adjoint, node_pos, node_neg,
+                                ))
+                            })
+                            .collect()
+                    };
+
+                debug_assert_eq!(point_noise_sources.len(), point_noise_temperatures.len());
+                for (source, &absolute_temperature) in
+                    point_noise_sources.iter().zip(point_noise_temperatures)
+                {
+                    if abort.is_aborted() {
+                        return Err(SimulationError::Aborted);
+                    }
+                    if runtime_veriloga_device_names
+                        .contains(&source.identity.device.to_ascii_lowercase())
+                        || generated_veriloga_device_names
+                            .contains(&source.identity.device.to_ascii_lowercase())
                     {
-                        Self::add_complex_bin(
-                            &mut amplitude_sums[slot],
-                            transfer * injection.gain,
-                            &process.name,
-                            frequency,
-                        )?;
+                        continue;
+                    }
+                    let source_temperature =
+                        Self::elementary_noise_temperature(temperature, absolute_temperature);
+                    let density =
+                        Self::evaluated_noise_density(source, frequency, source_temperature)?;
+                    if density == 0.0 {
+                        continue;
+                    }
+                    let scale = density.sqrt();
+                    let amplitude = solve_transfer(source.node_pos, source.node_neg)?
+                        .into_iter()
+                        .map(|gain| gain * scale)
+                        .collect::<Vec<_>>();
+                    Self::add_port_noise_outer_product(
+                        &mut covariance,
+                        &mut compensation,
+                        &amplitude,
+                    )?;
+                }
+
+                #[cfg(feature = "veriloga")]
+                for (instance, process) in &point_veriloga_processes {
+                    let density =
+                        Self::evaluated_veriloga_process_density(instance, process, frequency)?;
+                    if density == 0.0 {
+                        continue;
+                    }
+                    let mut amplitude_sums = (0..num_ports)
+                        .map(|_| ComplexBinAccumulator::default())
+                        .collect::<Vec<_>>();
+                    for injection in &process.injections {
+                        for (slot, transfer) in
+                            solve_transfer(injection.node_pos, injection.node_neg)?
+                                .into_iter()
+                                .enumerate()
+                        {
+                            Self::add_complex_bin(
+                                &mut amplitude_sums[slot],
+                                transfer * injection.gain,
+                                &process.name,
+                                frequency,
+                            )?;
+                        }
+                    }
+                    let scale = density.sqrt();
+                    let amplitude = amplitude_sums
+                        .into_iter()
+                        .map(|sum| {
+                            Self::finish_complex_bins(sum, &process.name, frequency)
+                                .map(|value| value * scale)
+                        })
+                        .collect::<Result<Vec<_>, _>>()?;
+                    Self::add_port_noise_outer_product(
+                        &mut covariance,
+                        &mut compensation,
+                        &amplitude,
+                    )?;
+                }
+
+                #[cfg(feature = "veriloga-builtins-base")]
+                for (instance, process) in &point_generated_processes {
+                    let density =
+                        Self::evaluated_generated_process_density(instance, process, frequency)?;
+                    if density == 0.0 {
+                        continue;
+                    }
+                    let scale = density.sqrt();
+                    let amplitude = (0..num_ports)
+                        .map(|port| {
+                            Self::generated_process_transfer_from_adjoint(
+                                &port_adjoint[port * size..(port + 1) * size],
+                                process,
+                                frequency,
+                            )
+                            .map(|value| value * scale)
+                        })
+                        .collect::<Result<Vec<_>, _>>()?;
+                    Self::add_port_noise_outer_product(
+                        &mut covariance,
+                        &mut compensation,
+                        &amplitude,
+                    )?;
+                }
+
+                for source in point_correlated_noise_sources {
+                    if abort.is_aborted() {
+                        return Err(SimulationError::Aborted);
+                    }
+                    let Some(densities) =
+                        Self::evaluated_correlated_noise_densities(source, frequency, temperature)?
+                    else {
+                        continue;
+                    };
+                    let first = solve_transfer(source.first.node_pos, source.first.node_neg)?;
+                    let second = solve_transfer(source.second.node_pos, source.second.node_neg)?;
+                    let first_scale = densities.first_psd.sqrt();
+                    let second_scale =
+                        Complex64::from_polar(densities.second_psd.sqrt(), densities.phase_rad);
+                    let amplitude = first
+                        .into_iter()
+                        .zip(second)
+                        .map(|(first_gain, second_gain)| {
+                            first_gain * first_scale + second_gain * second_scale
+                        })
+                        .collect::<Vec<_>>();
+                    Self::add_port_noise_outer_product(
+                        &mut covariance,
+                        &mut compensation,
+                        &amplitude,
+                    )?;
+                }
+
+                // Make the mathematical Hermitian invariant exact in the public
+                // result and remove only impossible signed zero on its diagonal.
+                // Hermitian symmetrization writes `[row][column]` and its
+                // transpose together, which are in different rows.
+                #[allow(clippy::needless_range_loop)]
+                for row in 0..num_ports {
+                    covariance[row][row] = Complex64::new(covariance[row][row].re.max(0.0), 0.0);
+                    for column in (row + 1)..num_ports {
+                        let value =
+                            (covariance[row][column] + covariance[column][row].conj()) * 0.5;
+                        covariance[row][column] = value;
+                        covariance[column][row] = value.conj();
                     }
                 }
-                let scale = density.sqrt();
-                let amplitude = amplitude_sums
-                    .into_iter()
-                    .map(|sum| {
-                        Self::finish_complex_bins(sum, &process.name, frequency)
-                            .map(|value| value * scale)
-                    })
-                    .collect::<Result<Vec<_>, _>>()?;
-                Self::add_port_noise_outer_product(&mut covariance, &mut compensation, &amplitude)?;
-            }
 
-            #[cfg(feature = "veriloga-builtins-base")]
-            for (instance, process) in &point_generated_processes {
-                let density =
-                    Self::evaluated_generated_process_density(instance, process, frequency)?;
-                if density == 0.0 {
-                    continue;
-                }
-                let scale = density.sqrt();
-                let amplitude = (0..num_ports)
-                    .map(|port| {
-                        Self::generated_process_transfer_from_adjoint(
-                            &port_adjoint[port * size..(port + 1) * size],
-                            process,
-                            frequency,
-                        )
-                        .map(|value| value * scale)
-                    })
-                    .collect::<Result<Vec<_>, _>>()?;
-                Self::add_port_noise_outer_product(&mut covariance, &mut compensation, &amplitude)?;
+                Ok(PortNoiseCorrelationResult {
+                    frequency,
+                    current_correlation: covariance,
+                })
+            };
+        let has_tasks = circuit.has_point_analog_tasks();
+        for (index, &frequency) in frequencies.iter().enumerate() {
+            let final_step = index + 1 == frequencies.len();
+            let result = if has_tasks {
+                let mut point_circuit = circuit.clone();
+                Self::solve_accepted_frequency_point(
+                    &mut point_circuit,
+                    &mut matrix,
+                    &dc_solution,
+                    super::analog_tasks::FrequencyModelPoint {
+                        analysis: 3,
+                        frequency,
+                        final_step,
+                    },
+                    abort,
+                    |point, final_step| solve_at_frequency(point, frequency, final_step),
+                )?
+            } else {
+                solve_at_frequency(&mut circuit, frequency, final_step)?
+            };
+            results.push(result);
+            if abort
+                .model_control()
+                .is_some_and(|control| control.is_finished())
+            {
+                break;
             }
-
-            for source in point_correlated_noise_sources {
-                if abort.is_aborted() {
-                    return Err(SimulationError::Aborted);
-                }
-                let Some(densities) =
-                    Self::evaluated_correlated_noise_densities(source, frequency, temperature)?
-                else {
-                    continue;
-                };
-                let first = solve_transfer(source.first.node_pos, source.first.node_neg)?;
-                let second = solve_transfer(source.second.node_pos, source.second.node_neg)?;
-                let first_scale = densities.first_psd.sqrt();
-                let second_scale =
-                    Complex64::from_polar(densities.second_psd.sqrt(), densities.phase_rad);
-                let amplitude = first
-                    .into_iter()
-                    .zip(second)
-                    .map(|(first_gain, second_gain)| {
-                        first_gain * first_scale + second_gain * second_scale
-                    })
-                    .collect::<Vec<_>>();
-                Self::add_port_noise_outer_product(&mut covariance, &mut compensation, &amplitude)?;
-            }
-
-            // Make the mathematical Hermitian invariant exact in the public
-            // result and remove only impossible signed zero on its diagonal.
-            // Hermitian symmetrization writes `[row][column]` and its
-            // transpose together, which are in different rows.
-            #[allow(clippy::needless_range_loop)]
-            for row in 0..num_ports {
-                covariance[row][row] = Complex64::new(covariance[row][row].re.max(0.0), 0.0);
-                for column in (row + 1)..num_ports {
-                    let value = (covariance[row][column] + covariance[column][row].conj()) * 0.5;
-                    covariance[row][column] = value;
-                    covariance[column][row] = value.conj();
-                }
-            }
-
-            results.push(PortNoiseCorrelationResult {
-                frequency,
-                current_correlation: covariance,
-            });
         }
 
         Ok(results)
@@ -3920,9 +3988,14 @@ impl Engine {
                 "XSPICE evaluation failed: {message}"
             )));
         }
-        circuit
-            .accept_veriloga_analysis_point()
-            .map_err(SimulationError::Circuit)?;
+        engine.accept_frequency_operating_point(
+            netlist,
+            &mut circuit,
+            &mut matrix,
+            &dc_solution,
+            3,
+            abort,
+        )?;
         circuit
             .finish_veriloga_equilibrium_operating_point(3)
             .map_err(SimulationError::Circuit)?;
@@ -4476,6 +4549,46 @@ impl Engine {
                 contributions,
             })
         };
+
+        if circuit.has_point_analog_tasks() {
+            let mut results = Vec::with_capacity(frequencies.len());
+            let mut ac_matrix = rspice_matrix::ComplexMatrix::from_real_structure(&matrix);
+            let mut rhs = vec![Complex64::new(0.0, 0.0); size];
+            let mut ac_solution = Vec::with_capacity(size);
+            let mut transfer_solution = Vec::with_capacity(size);
+            for (index, &frequency) in frequencies.iter().enumerate() {
+                let mut point_circuit = circuit.clone();
+                results.push(Self::solve_accepted_frequency_point(
+                    &mut point_circuit,
+                    &mut matrix,
+                    &dc_solution,
+                    super::analog_tasks::FrequencyModelPoint {
+                        analysis: 3,
+                        frequency,
+                        final_step: index + 1 == frequencies.len(),
+                    },
+                    abort,
+                    |point, final_step| {
+                        solve_at_frequency(
+                            point,
+                            &mut ac_matrix,
+                            &mut rhs,
+                            &mut ac_solution,
+                            &mut transfer_solution,
+                            frequency,
+                            final_step,
+                        )
+                    },
+                )?);
+                if abort
+                    .model_control()
+                    .is_some_and(|control| control.is_finished())
+                {
+                    break;
+                }
+            }
+            return Ok(results);
+        }
 
         // Frequency points are independent after the operating point. Match
         // AC's deterministic chunk scheduler: each worker owns a CircuitData

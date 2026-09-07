@@ -2750,6 +2750,8 @@ impl Instance {
 		Ok(())
 	}
 
+	pub fn has_point_analog_tasks(&self) -> bool { true }
+
 	pub fn candidate_analog_tasks(&self) -> Result<&[rspice_veriloga_runtime::AnalogTaskInvocation], String> {
 		match &self.analog_effects { Some(journal) => journal.candidate().map_err(|error| error.to_string()), None => Ok(&[]) }
 	}

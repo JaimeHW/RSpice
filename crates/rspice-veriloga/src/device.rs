@@ -3934,6 +3934,25 @@ impl VerilogADevice {
         self.context.has_accepted_analog_tasks()
     }
 
+    /// Whether a numerical point can request host effects. Initialization-only
+    /// tasks do not require ordered frequency-point evaluation.
+    pub fn has_point_analog_tasks(&self) -> bool {
+        use crate::codegen::AssignmentStep;
+        let mut pending = vec![self.model.assignment_steps.as_slice()];
+        while let Some(steps) = pending.pop() {
+            for step in steps {
+                match step {
+                    AssignmentStep::Task(_) => return true,
+                    AssignmentStep::Loop { body, .. } => pending.push(body),
+                    AssignmentStep::Initialization { .. }
+                    | AssignmentStep::Assign(_)
+                    | AssignmentStep::AssignIndexed { .. } => {}
+                }
+            }
+        }
+        false
+    }
+
     /// Deliver accepted calls with their instance identity, without cloning
     /// names or running a numerical/observation pass.
     pub fn visit_accepted_analog_tasks(

@@ -2584,6 +2584,7 @@ pub struct GeneratedEvalContext<'a> {
     analysis_final_step: bool,
     simparams: GeneratedSimulationParameters,
     evaluation_mode: GeneratedEvaluationMode,
+    record_analog_tasks: bool,
     evaluation_error: std::cell::Cell<Option<GeneratedEvaluationError>>,
 }
 
@@ -2667,6 +2668,7 @@ impl<'a> GeneratedEvalContext<'a> {
             analysis_final_step: final_step,
             simparams,
             evaluation_mode,
+            record_analog_tasks: matches!(evaluation_mode, GeneratedEvaluationMode::NewtonLimited),
             evaluation_error: std::cell::Cell::new(None),
         }
     }
@@ -2754,10 +2756,19 @@ impl<'a> GeneratedEvalContext<'a> {
         self.evaluation_error.take()
     }
 
-    /// Numerical observations must not replace or publish system-task calls.
+    /// Ordinary numerical probes do not replace or publish system-task calls.
     #[inline]
     pub fn analog_tasks_enabled(&self) -> bool {
-        matches!(self.evaluation_mode, GeneratedEvaluationMode::NewtonLimited)
+        self.record_analog_tasks
+    }
+
+    /// Record the primal body's candidate effects at an accepted-point
+    /// observation without enabling Newton limiting. Derivative and noise
+    /// probes retain their default disabled policy.
+    #[inline]
+    pub fn with_analog_task_recording(mut self, enabled: bool) -> Self {
+        self.record_analog_tasks = enabled;
+        self
     }
 
     #[inline]
@@ -8303,6 +8314,59 @@ mod fixed_lane_tests {
                 field: "companion numerator"
             })
         ));
+    }
+
+    #[test]
+    fn accepted_point_tasks_do_not_enable_newton_limiting() {
+        for (analysis, mode) in [
+            (
+                GeneratedAnalysisKind::Ac,
+                GeneratedEvaluationMode::SmallSignal,
+            ),
+            (
+                GeneratedAnalysisKind::Noise,
+                GeneratedEvaluationMode::SmallSignal,
+            ),
+            (
+                GeneratedAnalysisKind::Dc,
+                GeneratedEvaluationMode::StaticProbe,
+            ),
+            (
+                GeneratedAnalysisKind::Tran,
+                GeneratedEvaluationMode::StaticProbe,
+            ),
+        ] {
+            let probe = GeneratedEvalContext::with_analysis_step_simparams_and_mode(
+                &[0.0],
+                300.15,
+                1,
+                analysis,
+                false,
+                true,
+                GeneratedSimulationParameters::default(),
+                mode,
+            );
+            assert!(!probe.analog_tasks_enabled());
+            assert!(!probe.limiting_enabled());
+            let candidate = probe.clone().with_analog_task_recording(true);
+            assert!(candidate.analog_tasks_enabled());
+            assert!(!candidate.limiting_enabled());
+            assert_eq!(
+                candidate.dynamic_operators_enabled(),
+                probe.dynamic_operators_enabled()
+            );
+            assert!(
+                !candidate
+                    .with_analog_task_recording(false)
+                    .analog_tasks_enabled()
+            );
+            assert!(!probe.analog_tasks_enabled());
+        }
+        let newton = GeneratedEvalContext::new(&[0.0], 300.15, 1);
+        assert!(newton.analog_tasks_enabled() && newton.limiting_enabled());
+        let numerical_probe = newton.with_analog_task_recording(false);
+        assert!(!numerical_probe.analog_tasks_enabled());
+        assert!(numerical_probe.limiting_enabled());
     }
 
     #[test]

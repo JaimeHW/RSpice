@@ -10,6 +10,12 @@ pub(super) struct TransientModelCandidate {
     pub refinement_time: Option<f64>,
 }
 
+pub(super) struct FrequencyModelPoint {
+    pub analysis: u8,
+    pub frequency: f64,
+    pub final_step: bool,
+}
+
 fn finish_level(event: &AnalogTaskEvent<'_>) -> Result<u8, &'static str> {
     let [AnalogTaskArgument::Integer(level)] = event.call.arguments.as_ref() else {
         return Err("analog finish call has an invalid argument snapshot");
@@ -21,6 +27,90 @@ fn finish_level(event: &AnalogTaskEvent<'_>) -> Result<u8, &'static str> {
 }
 
 impl Engine {
+    /// Finish an AC/noise bias point before any frequency result exists. A
+    /// finish makes this both the initial and final point of the analysis;
+    /// its final equations must converge before the request is published.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn accept_frequency_operating_point(
+        &self,
+        netlist: &crate::Netlist,
+        circuit: &mut CircuitData,
+        matrix: &mut crate::solver::StaticMatrix,
+        solution: &[f64],
+        analysis: u8,
+        abort: &dyn AbortSignal,
+    ) -> Result<(), SimulationError> {
+        if circuit.has_point_analog_tasks()
+            || (solution.is_empty() && circuit.has_any_veriloga_devices())
+        {
+            Self::evaluate_analog_candidate(circuit, matrix, solution)?;
+        }
+        let pending =
+            Self::candidate_equilibrium_finish(circuit, ModelFinishPoint::OperatingPoint)?;
+        if pending.is_some() {
+            circuit
+                .prepare_veriloga_equilibrium_analysis_point(analysis, true, true)
+                .map_err(SimulationError::Circuit)?;
+            let final_solution = if solution.is_empty() {
+                Vec::new()
+            } else {
+                self.solve_dc_operating_point_with_startup_and_abort(
+                    netlist,
+                    circuit,
+                    matrix,
+                    super::core::DcOpStartup::PreviousSolution(solution),
+                    abort,
+                )?
+            };
+            Self::evaluate_analog_candidate(circuit, matrix, &final_solution)?;
+        }
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
+        circuit
+            .accept_veriloga_analysis_point()
+            .map_err(SimulationError::Circuit)?;
+        Self::publish_pending_model_finish(abort, pending)?;
+        Self::deliver_accepted_analog_tasks(circuit, abort, ModelFinishPoint::OperatingPoint)?;
+        Self::ensure_model_run_active(abort)
+    }
+
+    /// Solve and accept one point on a private copy of the bias state. The
+    /// caller invokes this in sweep order for point tasks or portless models
+    /// whose bodies are not visited by small-signal matrix assembly.
+    pub(super) fn solve_accepted_frequency_point<T>(
+        circuit: &mut CircuitData,
+        matrix: &mut crate::solver::StaticMatrix,
+        bias: &[f64],
+        point: FrequencyModelPoint,
+        abort: &dyn AbortSignal,
+        mut solve: impl FnMut(&mut CircuitData, bool) -> Result<T, SimulationError>,
+    ) -> Result<T, SimulationError> {
+        let mut result = solve(circuit, point.final_step)?;
+        circuit
+            .evaluate_frequency_analog_candidate(matrix, bias, point.analysis)
+            .map_err(SimulationError::Circuit)?;
+        let position = ModelFinishPoint::Frequency {
+            frequency: point.frequency,
+        };
+        let pending = Self::candidate_equilibrium_finish(circuit, position)?;
+        if pending.is_some() && !point.final_step {
+            result = solve(circuit, true)?;
+            circuit
+                .evaluate_frequency_analog_candidate(matrix, bias, point.analysis)
+                .map_err(SimulationError::Circuit)?;
+        }
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
+        circuit
+            .accept_veriloga_analysis_point()
+            .map_err(SimulationError::Circuit)?;
+        Self::publish_pending_model_finish(abort, pending)?;
+        Self::deliver_accepted_analog_tasks(circuit, abort, position)?;
+        Ok(result)
+    }
+
     pub(super) fn model_observation_matrix() -> Result<crate::solver::StaticMatrix, SimulationError>
     {
         // The generated stamp adapter requires a nonempty sparse workspace.

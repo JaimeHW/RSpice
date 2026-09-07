@@ -3414,6 +3414,8 @@ impl Instance {
 		Ok(())
 	}
 
+	pub fn has_point_analog_tasks(&self) -> bool { false }
+
 	pub fn candidate_analog_tasks(&self) -> Result<&[rspice_veriloga_runtime::AnalogTaskInvocation], String> {
 		Ok(&[])
 	}

@@ -4,6 +4,80 @@ use super::CircuitData;
 use rspice_veriloga_runtime::{AnalogTaskEvent, AnalogTaskKind};
 
 impl CircuitData {
+    /// Point-level host effects require publication in sweep order.
+    pub(crate) fn has_point_analog_tasks(&self) -> bool {
+        #[cfg(feature = "veriloga")]
+        if self
+            .veriloga_devices
+            .iter()
+            .any(|device| device.has_point_analog_tasks())
+        {
+            return true;
+        }
+        #[cfg(feature = "veriloga-builtins-base")]
+        if self.generated_veriloga_devices.has_point_analog_tasks() {
+            return true;
+        }
+        false
+    }
+
+    /// Refresh only the primal model bodies at the solved bias. Derivative
+    /// and noise probes never own these candidate task journals.
+    pub(crate) fn evaluate_frequency_analog_candidate(
+        &mut self,
+        matrix: &mut crate::solver::StaticMatrix,
+        solution: &[f64],
+        analysis: u8,
+    ) -> Result<(), String> {
+        #[cfg(feature = "veriloga")]
+        for device in self.veriloga_devices.iter_mut() {
+            device
+                .try_update_all_voltages(solution)
+                .and_then(|()| {
+                    device.try_evaluate_with_mode(
+                        rspice_veriloga::vm::VerilogAEvaluationMode::SmallSignal,
+                    )
+                })
+                .map_err(|error| {
+                    format!(
+                        "Verilog-A device '{}' frequency candidate failed: {error}",
+                        device.name
+                    )
+                })?;
+        }
+        #[cfg(feature = "veriloga-builtins-base")]
+        {
+            use crate::device::veriloga_builtins::{
+                GeneratedAnalysisKind, GeneratedEvaluationMode, GeneratedEvaluationRequest,
+            };
+            let analysis = match analysis {
+                1 => GeneratedAnalysisKind::Ac,
+                3 => GeneratedAnalysisKind::Noise,
+                _ => return Err("frequency candidate requires AC or noise analysis".into()),
+            };
+            let num_nodes = self.num_nodes;
+            let simparams = self.generated_simulation_parameters;
+            matrix.with_probe_values(|probe, rhs| {
+                self.generated_veriloga_devices
+                    .stamp_all_with_task_recording(
+                        probe,
+                        rhs,
+                        solution,
+                        num_nodes,
+                        GeneratedEvaluationRequest {
+                            analysis,
+                            simparams,
+                            evaluation_mode: GeneratedEvaluationMode::SmallSignal,
+                        },
+                        true,
+                    )
+                    .map_err(|error| error.to_string())
+            })?;
+        }
+        let _ = (matrix, solution, analysis);
+        Ok(())
+    }
+
     /// Inspect a solved non-mixed candidate before advancing model history.
     /// Mixed transient candidates belong to the host's committable trial and
     /// must not be inferred from its last rejected numerical probe.

@@ -661,6 +661,25 @@ impl BuiltinVerilogADevices {
         num_nodes: usize,
         request: GeneratedEvaluationRequest,
     ) -> Result<(), GeneratedVerilogAEvaluationError> {
+        let record_tasks = request.evaluation_mode == GeneratedEvaluationMode::NewtonLimited;
+        self.stamp_all_with_task_recording(matrix, rhs, voltages, num_nodes, request, record_tasks)
+    }
+
+    pub(crate) fn has_point_analog_tasks(&self) -> bool {
+        self.devices
+            .iter()
+            .any(|device| device.kind.has_point_analog_tasks())
+    }
+
+    pub(crate) fn stamp_all_with_task_recording(
+        &mut self,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        voltages: &[Value],
+        num_nodes: usize,
+        request: GeneratedEvaluationRequest,
+        record_tasks: bool,
+    ) -> Result<(), GeneratedVerilogAEvaluationError> {
         let GeneratedEvaluationRequest {
             analysis,
             simparams,
@@ -669,7 +688,7 @@ impl BuiltinVerilogADevices {
         let analysis = self.operating_point_analysis_override.unwrap_or(analysis);
         for device in &mut self.devices {
             device
-                .stamp_with_mode(
+                .stamp_with_task_recording(
                     matrix,
                     rhs,
                     voltages,
@@ -679,6 +698,7 @@ impl BuiltinVerilogADevices {
                         simparams,
                         evaluation_mode,
                     },
+                    record_tasks,
                 )
                 .map_err(|source| GeneratedVerilogAEvaluationError {
                     instance_name: device.instance_name.clone(),
@@ -1693,6 +1713,19 @@ impl BuiltinVerilogAInstance {
         num_nodes: usize,
         request: GeneratedEvaluationRequest,
     ) -> Result<(), GeneratedEvaluationError> {
+        let record_tasks = request.evaluation_mode == GeneratedEvaluationMode::NewtonLimited;
+        self.stamp_with_task_recording(matrix, rhs, voltages, num_nodes, request, record_tasks)
+    }
+
+    fn stamp_with_task_recording(
+        &mut self,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        voltages: &[Value],
+        num_nodes: usize,
+        request: GeneratedEvaluationRequest,
+        record_tasks: bool,
+    ) -> Result<(), GeneratedEvaluationError> {
         let GeneratedEvaluationRequest {
             analysis,
             simparams,
@@ -1722,7 +1755,8 @@ impl BuiltinVerilogAInstance {
             simparams,
             evaluation_mode,
         )
-        .with_analysis_phase(self.analysis_phase);
+        .with_analysis_phase(self.analysis_phase)
+        .with_analog_task_recording(record_tasks);
         // A StaticDaeProbe is a discarded F(x)-B(t) observation used by the
         // OneStep history path. It must not replace any candidate produced by
         // the preceding complete transient evaluation, including ordinary

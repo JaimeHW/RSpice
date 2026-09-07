@@ -3130,6 +3130,20 @@ fn write_registry(
         }
         out.push_str("    }\n\n");
     }
+    out.push_str("    pub fn has_point_analog_tasks(&self) -> bool {\n");
+    if devices.is_empty() {
+        out.push_str("        false\n");
+    } else {
+        out.push_str("        match self {\n");
+        for (index, feature) in feature_names.iter().enumerate() {
+            writeln!(
+                out,
+                "            #[cfg(feature = {feature:?})]\n            Self::Device{index}(device) => device.has_point_analog_tasks(),"
+            )?;
+        }
+        out.push_str("            Self::__NonExhaustive(value) => match *value {},\n        }\n");
+    }
+    out.push_str("    }\n\n");
     out.push_str("    pub fn candidate_analog_tasks(&self) -> Result<&[super::AnalogTaskInvocation], String> {\n");
     if devices.is_empty() {
         out.push_str("        let _ = self;\n        Ok(&[])\n");

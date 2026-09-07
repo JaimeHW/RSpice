@@ -55,6 +55,7 @@ pub(super) struct StateFileExtensions {
     /// detector records and therefore needs their runtime helpers imported.
     pub uses_cross_event_state: bool,
     pub uses_analog_tasks: bool,
+    pub uses_point_analog_tasks: bool,
     pub uses_initialization: bool,
     pub params_visibility: &'static str,
     pub support_types: String,
@@ -94,6 +95,7 @@ impl Default for StateFileExtensions {
         Self {
             uses_cross_event_state: false,
             uses_analog_tasks: false,
+            uses_point_analog_tasks: false,
             uses_initialization: false,
             params_visibility: "pub",
             support_types: String::new(),
@@ -595,6 +597,11 @@ pub(super) fn generate_state_file_with_extensions(
         out.push_str("        if self.analog_effects.as_ref().is_some_and(|journal| journal.has_candidate() || !journal.accepted().is_empty()) {\n            return Err(\"generated Verilog-A checkpoint requires accepted system tasks to be delivered and no candidate evaluation\".to_string());\n        }\n");
     }
     out.push_str("        Ok(())\n    }\n\n");
+    let _ = writeln!(
+        out,
+        "    pub fn has_point_analog_tasks(&self) -> bool {{ {} }}\n",
+        extensions.uses_point_analog_tasks
+    );
     out.push_str(&format!("    pub fn candidate_analog_tasks(&self) -> Result<&[{}::AnalogTaskInvocation], String> {{\n", options.runtime_path));
     if extensions.uses_analog_tasks {
         out.push_str("        match &self.analog_effects { Some(journal) => journal.candidate().map_err(|error| error.to_string()), None => Ok(&[]) }\n");

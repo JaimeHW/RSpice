@@ -3798,6 +3798,7 @@ impl ModelPlan {
     ) -> state_file::StateFileExtensions {
         let mut extensions = state_file::StateFileExtensions {
             uses_analog_tasks: self.has_analog_tasks(),
+            uses_point_analog_tasks: self.has_newton_tasks(),
             uses_initialization: !self.initialization.is_empty(),
             ..Default::default()
         };

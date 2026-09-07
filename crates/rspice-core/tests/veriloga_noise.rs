@@ -16,10 +16,126 @@
 use rspice_core::analysis::NoiseContributionProbe;
 use rspice_core::engine::{Engine, SimulationConfig};
 use rspice_core::netlist::Netlist;
+use rspice_core::{ModelFinishPoint, NoAbort, SimulationOutcome};
 use std::io::Write;
 
 const K_BOLTZMANN: f64 = 1.380649e-23;
 const T_NOM: f64 = 300.15;
+
+#[test]
+fn noise_finish_preserves_ordered_results_and_final_step_for_both_outputs() {
+    let model = write_model(
+        "accepted_finish_noise.va",
+        r#"
+module finish_noise(p,n);
+inout p,n; electrical p,n;
+parameter integer finish_op=0, finish_early=1;
+real count;
+analog begin
+    @(initial_step("noise")) begin count=1; if (finish_op) $finish(1); end
+    @(final_step("noise")) begin count=count+1; $finish(2); end
+    if (finish_early && analysis("noise") && !analysis("static") && count==1) $finish(1);
+    I(p,n)<+1e-3*V(p,n);
+    I(p,n)<+white_noise(count*1e-18,"finish_source");
+end
+endmodule"#,
+    );
+    let quiet = write_model("accepted_finish_qres.va", QUIET_RES);
+    let frequencies = [
+        10.0, 20.0, 50.0, 100.0, 200.0, 500.0, 1e3, 2e3, 5e3, 1e4, 1e5, 5e5, 1e6,
+    ];
+    for (finish_op, finish_early) in [(true, false), (false, true), (false, false)] {
+        let deck = Netlist::parse(&format!(
+            "* Accepted noise finish\nVREF in 0 DC 0 AC 1\nXLINK in out qres r=1k\nX1 out 0 finish_noise finish_op={} finish_early={}\n.va \"{quiet}\" qres\n.va \"{model}\" finish_noise\n.end\n",
+            usize::from(finish_op), usize::from(finish_early),
+        )).unwrap();
+        for workers in [1, 4] {
+            let mut config = SimulationConfig::default();
+            config.resource_limits.max_parallel_workers = workers;
+            let engine = Engine::new(config);
+            let ordinary = engine
+                .run_with_outcome(&NoAbort, |engine, signal| {
+                    engine.run_noise_named_with_input_source_and_abort(
+                        &deck,
+                        "out",
+                        None,
+                        "VREF",
+                        &frequencies,
+                        T_NOM,
+                        signal,
+                    )
+                })
+                .expect("noise finish is normal completion");
+            let port = engine
+                .run_with_outcome(&NoAbort, |engine, signal| {
+                    engine.run_port_noise_correlation_with_abort(
+                        &deck,
+                        &["VREF".into()],
+                        &frequencies,
+                        T_NOM,
+                        signal,
+                    )
+                })
+                .expect("port noise finish is normal completion");
+            let SimulationOutcome::Finished {
+                result: ordinary,
+                finish,
+            } = ordinary
+            else {
+                panic!("ordinary noise finish was discarded");
+            };
+            let SimulationOutcome::Finished {
+                result: port,
+                finish: port_finish,
+            } = port
+            else {
+                panic!("port noise finish was discarded");
+            };
+            assert_eq!(finish, port_finish);
+            if finish_op {
+                assert!(ordinary.is_none() && port.is_none());
+                assert_eq!(finish.point, ModelFinishPoint::OperatingPoint);
+                assert_eq!(finish.diagnostic_level, 1);
+                continue;
+            }
+            let ordinary = ordinary.unwrap();
+            let port = port.unwrap();
+            let count = if finish_early { 1 } else { frequencies.len() };
+            assert_eq!(ordinary.len(), count);
+            assert_eq!(port.len(), count);
+            assert_eq!(finish.diagnostic_level, if finish_early { 1 } else { 2 });
+            assert_eq!(
+                finish.point,
+                ModelFinishPoint::Frequency {
+                    frequency: frequencies[count - 1]
+                }
+            );
+            for (index, (ordinary, port)) in ordinary.iter().zip(&port).enumerate() {
+                assert_eq!(ordinary.frequency, frequencies[index]);
+                assert_eq!(port.frequency, frequencies[index]);
+                let psd = if index + 1 == count { 2e-18 } else { 1e-18 };
+                let expected_output = psd / 4e-6;
+                let expected_port = psd / 4.0;
+                assert!(
+                    (ordinary.output_noise_density - expected_output).abs()
+                        < expected_output * 1e-10
+                );
+                assert!((ordinary.input_gain_squared - 0.25).abs() < 1e-12);
+                assert!(
+                    (ordinary.input_referred_density - expected_output * 4.0).abs()
+                        < expected_output * 1e-9
+                );
+                assert!(
+                    (port.current_correlation[0][0].re - expected_port).abs()
+                        < expected_port * 1e-10
+                );
+                assert!(port.current_correlation[0][0].im.abs() < 1e-30);
+            }
+        }
+    }
+    let _ = std::fs::remove_file(model);
+    let _ = std::fs::remove_file(quiet);
+}
 
 /// Write a .va model to a temp file and return its path (forward slashes
 /// so the netlist parser keeps it intact)

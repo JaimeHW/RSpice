@@ -7,7 +7,7 @@
 #![cfg(feature = "veriloga")]
 
 use rspice_core::engine::SimulationConfig;
-use rspice_core::{Engine, Netlist};
+use rspice_core::{Engine, ModelFinishPoint, Netlist, NoAbort, SimulationOutcome};
 use std::io::Write;
 use std::path::PathBuf;
 
@@ -21,6 +21,281 @@ fn write_model(name: &str, source: &str) -> PathBuf {
 
 fn deck_path(path: &std::path::Path) -> String {
     path.display().to_string().replace('\\', "/")
+}
+
+#[test]
+fn ac_portless_finish_runs_the_analysis_lifecycle() {
+    let model = write_model(
+        "portless_finish",
+        r#"
+module portless_finish;
+parameter integer at_bias=0, bad_final=0;
+real count;
+analog begin
+    @(initial_step("ac")) begin count=1; if (at_bias) $finish(1); end
+    @(final_step("ac")) begin count=count+1; if (bad_final) $finish(99); else $finish(2); end
+    if (!analysis("static") && count==1) $finish(1);
+end
+endmodule"#,
+    );
+    for at_bias in [false, true] {
+        for bad_final in [false, true] {
+            let netlist = Netlist::parse(&format!(
+                "* Portless lifecycle\nX1 portless_finish at_bias={} bad_final={}\n.va \"{}\" portless_finish\n.end\n",
+                usize::from(at_bias), usize::from(bad_final), deck_path(&model),
+            )).unwrap();
+            let outcome = Engine::default().run_with_outcome(&NoAbort, |engine, signal| {
+                engine.run_ac_with_abort(&netlist, &[10.0, 20.0], signal)
+            });
+            if bad_final {
+                assert!(
+                    outcome.is_err(),
+                    "final-step failure must not publish successful finish: {outcome:?}"
+                );
+                continue;
+            }
+            let SimulationOutcome::Finished { result, finish } = outcome.unwrap() else {
+                panic!("portless model did not finish");
+            };
+            assert_eq!(finish.diagnostic_level, 1);
+            if at_bias {
+                assert!(result.is_none());
+                assert_eq!(finish.point, ModelFinishPoint::OperatingPoint);
+            } else {
+                let results = result.unwrap();
+                assert_eq!(results.len(), 1);
+                assert_eq!(results[0].frequency, 10.0);
+                assert!(results[0].voltages.is_empty() && results[0].currents.is_empty());
+                assert_eq!(
+                    finish.point,
+                    ModelFinishPoint::Frequency { frequency: 10.0 }
+                );
+            }
+        }
+    }
+    let _ = std::fs::remove_file(model);
+}
+
+#[test]
+fn ac_portless_final_step_errors_are_not_skipped_without_system_tasks() {
+    let model = write_model(
+        "portless_final_loop",
+        r#"
+module portless_final_loop;
+integer count;
+analog @(final_step("ac")) while ($temperature > 0) count=count+1;
+endmodule"#,
+    );
+    let netlist = Netlist::parse(&format!(
+        "* Portless final step\nX1 portless_final_loop\n.va \"{}\" portless_final_loop\n.end\n",
+        deck_path(&model),
+    ))
+    .unwrap();
+    let error = Engine::default()
+        .run_ac(&netlist, &[10.0, 20.0])
+        .expect_err("the final event must run even without a task instruction");
+    assert!(
+        error.to_string().contains("frequency candidate failed"),
+        "{error}"
+    );
+    assert!(
+        error.to_string().to_ascii_lowercase().contains("loop"),
+        "{error}"
+    );
+    let _ = std::fs::remove_file(model);
+}
+
+#[test]
+fn frequency_data_finish_retains_completed_rows_for_ac_and_noise() {
+    let model = write_model(
+        "data_finish",
+        r#"
+module data_finish(p,n);
+inout p,n; electrical p,n;
+parameter integer stop_now=0, at_bias=0;
+analog begin
+    if (stop_now < 0) $finish(99);
+    if (stop_now && (at_bias || !analysis("static"))) $finish(1);
+    I(p,n)<+1e-3*V(p,n);
+    I(p,n)<+white_noise(1e-18,"data_noise");
+end
+endmodule"#,
+    );
+    for at_bias in [false, true] {
+        let netlist = Netlist::parse(&format!(
+            "* Ordered table finish\n.param stop_now=0\nVREF in 0 DC 0 AC 1\nR1 in out 1k\nX1 out 0 data_finish stop_now={{stop_now}} at_bias={}\n.va \"{}\" data_finish\n.data finish_rows FREQ stop_now\n10 0\n20 1\n30 -1\n.enddata\n.end\n",
+            usize::from(at_bias), deck_path(&model),
+        )).unwrap();
+        let engine = Engine::default();
+        let ac = engine
+            .run_with_outcome(&NoAbort, |engine, signal| {
+                engine.run_ac_data_with_abort(&netlist, "finish_rows", signal)
+            })
+            .unwrap();
+        let noise = engine
+            .run_with_outcome(&NoAbort, |engine, signal| {
+                engine.run_noise_data_named_with_input_source_and_abort(
+                    &netlist,
+                    "out",
+                    None,
+                    "VREF",
+                    "finish_rows",
+                    300.15,
+                    signal,
+                )
+            })
+            .unwrap();
+        let SimulationOutcome::Finished {
+            result: Some((ac_rows, ac_results)),
+            finish,
+        } = ac
+        else {
+            panic!("AC table lost its prefix");
+        };
+        let SimulationOutcome::Finished {
+            result: Some((noise_rows, noise_results)),
+            finish: noise_finish,
+        } = noise
+        else {
+            panic!("noise table lost its prefix");
+        };
+        assert_eq!(finish, noise_finish);
+        let count = if at_bias { 1 } else { 2 };
+        assert_eq!(ac_rows.len(), count);
+        assert_eq!(noise_rows.len(), count);
+        assert_eq!(ac_results.len(), count);
+        assert_eq!(noise_results.len(), count);
+        assert_eq!(
+            finish.point,
+            if at_bias {
+                ModelFinishPoint::OperatingPoint
+            } else {
+                ModelFinishPoint::Frequency { frequency: 20.0 }
+            }
+        );
+        for (index, (ac, noise)) in ac_results.iter().zip(&noise_results).enumerate() {
+            assert_eq!(ac.frequency, [10.0, 20.0][index]);
+            assert_eq!(noise.frequency, ac.frequency);
+        }
+        assert_eq!(
+            engine.run_ac_data(&netlist, "finish_rows").unwrap().1.len(),
+            count
+        );
+        assert_eq!(
+            engine
+                .run_noise_data_named_with_input_source(
+                    &netlist,
+                    "out",
+                    None,
+                    "VREF",
+                    "finish_rows",
+                    300.15
+                )
+                .unwrap()
+                .1
+                .len(),
+            count
+        );
+    }
+    let _ = std::fs::remove_file(model);
+}
+
+#[test]
+fn ac_finish_in_the_operating_point_prevents_frequency_results() {
+    let model = write_model(
+        "finish_operating_point",
+        r#"module finish_operating_point(p,n);
+inout p,n; electrical p,n;
+analog begin
+    @(initial_step("ac")) $finish(1);
+    I(p,n)<+1e-3*V(p,n);
+end
+endmodule"#,
+    );
+    let netlist = Netlist::parse(&format!(
+        "* Finish in the AC bias point\nV1 in 0 DC 0 AC 1\nR1 in out 1k\nX1 out 0 finish_operating_point\n.va \"{}\" finish_operating_point\n.end\n",
+        deck_path(&model),
+    )).unwrap();
+    let outcome = Engine::default()
+        .run_with_outcome(&NoAbort, |engine, signal| {
+            engine.run_ac_with_abort(&netlist, &[1e3, 1e4], signal)
+        })
+        .expect("accepted finish is normal completion");
+    let SimulationOutcome::Finished { result, finish } = outcome else {
+        panic!("AC must honor the accepted operating-point finish");
+    };
+    assert!(result.is_none(), "no frequency point was solved");
+    assert_eq!(finish.point, ModelFinishPoint::OperatingPoint);
+    assert_eq!(finish.diagnostic_level, 1);
+    let _ = std::fs::remove_file(model);
+}
+
+#[test]
+fn ac_finish_retains_the_point_and_runs_final_step_in_sweep_order() {
+    let model = write_model(
+        "finish_frequency",
+        r#"module finish_frequency(p,n);
+inout p,n; electrical p,n;
+parameter integer finish_early=1;
+real count;
+analog begin
+    @(initial_step("ac")) count=1;
+    @(final_step("ac")) begin count=count+1; $finish(2); end
+    if (finish_early && analysis("ac") && !analysis("static") && count==1) $finish(1);
+    I(p,n)<+count*1e-3*V(p,n);
+end
+endmodule"#,
+    );
+    let frequencies = [
+        10.0, 20.0, 50.0, 100.0, 200.0, 500.0, 1e3, 2e3, 5e3, 1e4, 1e5, 5e5, 1e6,
+    ];
+    for finish_early in [true, false] {
+        let netlist = Netlist::parse(&format!(
+            "* Finish at an accepted AC point\nV1 in 0 DC 0 AC 1\nR1 in out 1k\nX1 out 0 finish_frequency finish_early={}\n.va \"{}\" finish_frequency\n.end\n",
+            usize::from(finish_early), deck_path(&model),
+        )).unwrap();
+        for workers in [1, 4] {
+            let mut config = SimulationConfig::default();
+            config.resource_limits.max_parallel_workers = workers;
+            let outcome = Engine::new(config)
+                .run_with_outcome(&NoAbort, |engine, signal| {
+                    engine.run_ac_with_abort(&netlist, &frequencies, signal)
+                })
+                .expect("accepted finish preserves the solved frequency point");
+            let SimulationOutcome::Finished {
+                result: Some(results),
+                finish,
+            } = outcome
+            else {
+                panic!("AC must publish the accepted frequency finish");
+            };
+            let expected_count = if finish_early { 1 } else { frequencies.len() };
+            assert_eq!(results.len(), expected_count);
+            assert_eq!(finish.diagnostic_level, if finish_early { 1 } else { 2 });
+            assert_eq!(
+                finish.point,
+                ModelFinishPoint::Frequency {
+                    frequency: frequencies[expected_count - 1]
+                }
+            );
+            for (index, result) in results.iter().enumerate() {
+                assert_eq!(result.frequency, frequencies[index]);
+                let output = result
+                    .node_names
+                    .iter()
+                    .position(|name| name.eq_ignore_ascii_case("out"))
+                    .unwrap();
+                let expected = if index + 1 == expected_count {
+                    1.0 / 3.0
+                } else {
+                    0.5
+                };
+                assert!((result.voltages[output].re - expected).abs() < 1e-12);
+                assert!(result.voltages[output].im.abs() < 1e-12);
+            }
+        }
+    }
+    let _ = std::fs::remove_file(model);
 }
 
 #[test]

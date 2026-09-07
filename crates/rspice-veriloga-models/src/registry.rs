@@ -2512,6 +2512,98 @@ impl GeneratedBuiltinKind {
         }
     }
 
+    pub fn has_point_analog_tasks(&self) -> bool {
+        match self {
+            #[cfg(feature = "veriloga-model-diode-cmc")]
+            Self::Device0(device) => device.has_point_analog_tasks(),
+            #[cfg(feature = "veriloga-model-epfl-hemt-10a")]
+            Self::Device1(device) => device.has_point_analog_tasks(),
+            #[cfg(feature = "veriloga-model-juncap200")]
+            Self::Device2(device) => device.has_point_analog_tasks(),
+            #[cfg(feature = "veriloga-model-psp104tva")]
+            Self::Device3(device) => device.has_point_analog_tasks(),
+            #[cfg(feature = "veriloga-model-psp104va")]
+            Self::Device4(device) => device.has_point_analog_tasks(),
+            #[cfg(feature = "veriloga-model-pspnqs104va")]
+            Self::Device5(device) => device.has_point_analog_tasks(),
+            #[cfg(feature = "veriloga-model-angelov")]
+            Self::Device6(device) => device.has_point_analog_tasks(),
+            #[cfg(feature = "veriloga-model-angelov-gan")]
+            Self::Device7(device) => device.has_point_analog_tasks(),
+            #[cfg(feature = "veriloga-model-asmesd")]
+            Self::Device8(device) => device.has_point_analog_tasks(),
+            #[cfg(feature = "veriloga-model-asmesd-dio")]
+            Self::Device9(device) => device.has_point_analog_tasks(),
+            #[cfg(feature = "veriloga-model-asmhemt")]
+            Self::Device10(device) => device.has_point_analog_tasks(),
+            #[cfg(feature = "veriloga-model-bjt505-va")]
+            Self::Device11(device) => device.has_point_analog_tasks(),
+            #[cfg(feature = "veriloga-model-bjt505t-va")]
+            Self::Device12(device) => device.has_point_analog_tasks(),
+            #[cfg(feature = "veriloga-model-bjtd505-va")]
+            Self::Device13(device) => device.has_point_analog_tasks(),
+            #[cfg(feature = "veriloga-model-bjtd505t-va")]
+            Self::Device14(device) => device.has_point_analog_tasks(),
+            #[cfg(feature = "veriloga-model-bsimbulk")]
+            Self::Device15(device) => device.has_point_analog_tasks(),
+            #[cfg(feature = "veriloga-model-bsimcmg-va")]
+            Self::Device16(device) => device.has_point_analog_tasks(),
+            #[cfg(feature = "veriloga-model-bsimimg")]
+            Self::Device17(device) => device.has_point_analog_tasks(),
+            #[cfg(feature = "veriloga-model-bsimsoi-18c250bc")]
+            Self::Device18(device) => device.has_point_analog_tasks(),
+            #[cfg(feature = "veriloga-model-bsimsoi-e2aff994")]
+            Self::Device19(device) => device.has_point_analog_tasks(),
+            #[cfg(feature = "veriloga-model-bsimsoi-va")]
+            Self::Device20(device) => device.has_point_analog_tasks(),
+            #[cfg(feature = "veriloga-model-ekv3-rf")]
+            Self::Device21(device) => device.has_point_analog_tasks(),
+            #[cfg(feature = "veriloga-model-ekv-va")]
+            Self::Device22(device) => device.has_point_analog_tasks(),
+            #[cfg(feature = "veriloga-model-hicuml0va")]
+            Self::Device23(device) => device.has_point_analog_tasks(),
+            #[cfg(feature = "veriloga-model-hicuml2va")]
+            Self::Device24(device) => device.has_point_analog_tasks(),
+            #[cfg(feature = "veriloga-model-hisimhv-n4-va")]
+            Self::Device25(device) => device.has_point_analog_tasks(),
+            #[cfg(feature = "veriloga-model-hisimhv-n5-va")]
+            Self::Device26(device) => device.has_point_analog_tasks(),
+            #[cfg(feature = "veriloga-model-hisimhv-va")]
+            Self::Device27(device) => device.has_point_analog_tasks(),
+            #[cfg(feature = "veriloga-model-hisimsoi-va-5be18005")]
+            Self::Device28(device) => device.has_point_analog_tasks(),
+            #[cfg(feature = "veriloga-model-hisimsoi-va-242bc21d")]
+            Self::Device29(device) => device.has_point_analog_tasks(),
+            #[cfg(feature = "veriloga-model-hisimsoi-va-38074d06")]
+            Self::Device30(device) => device.has_point_analog_tasks(),
+            #[cfg(feature = "veriloga-model-hisimsotb-va")]
+            Self::Device31(device) => device.has_point_analog_tasks(),
+            #[cfg(feature = "veriloga-model-l-utsoi-832ce87d")]
+            Self::Device32(device) => device.has_point_analog_tasks(),
+            #[cfg(feature = "veriloga-model-l-utsoi-485e0ac9")]
+            Self::Device33(device) => device.has_point_analog_tasks(),
+            #[cfg(feature = "veriloga-model-mosvar")]
+            Self::Device34(device) => device.has_point_analog_tasks(),
+            #[cfg(feature = "veriloga-model-mvsg-cmc")]
+            Self::Device35(device) => device.has_point_analog_tasks(),
+            #[cfg(feature = "veriloga-model-r2-cmc")]
+            Self::Device36(device) => device.has_point_analog_tasks(),
+            #[cfg(feature = "veriloga-model-r2-et-cmc")]
+            Self::Device37(device) => device.has_point_analog_tasks(),
+            #[cfg(feature = "veriloga-model-r3-cmc")]
+            Self::Device38(device) => device.has_point_analog_tasks(),
+            #[cfg(feature = "veriloga-model-vbic13")]
+            Self::Device39(device) => device.has_point_analog_tasks(),
+            #[cfg(feature = "veriloga-model-vbic13-3t-et")]
+            Self::Device40(device) => device.has_point_analog_tasks(),
+            #[cfg(feature = "veriloga-model-vbic13-4t")]
+            Self::Device41(device) => device.has_point_analog_tasks(),
+            #[cfg(feature = "veriloga-model-vbic-4t-et-cf")]
+            Self::Device42(device) => device.has_point_analog_tasks(),
+            Self::__NonExhaustive(value) => match *value {},
+        }
+    }
+
     pub fn candidate_analog_tasks(&self) -> Result<&[super::AnalogTaskInvocation], String> {
         match self {
             #[cfg(feature = "veriloga-model-diode-cmc")]

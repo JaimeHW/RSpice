@@ -2809,19 +2809,6 @@ impl Engine {
             .map_err(SimulationError::Circuit)?;
         Self::deliver_initial_analog_tasks(&mut circuit, abort)?;
         Self::ensure_no_mixed_signal_analysis(&circuit, "AC analysis")?;
-        if circuit.num_nodes() == 0 && circuit.num_branches() == 0 {
-            engine.ensure_result_shape(frequencies.len(), 1)?;
-            return Ok(frequencies
-                .iter()
-                .map(|&frequency| AcResult {
-                    frequency,
-                    node_names: Vec::new(),
-                    branch_names: Vec::new(),
-                    voltages: Vec::new(),
-                    currents: Vec::new(),
-                })
-                .collect());
-        }
         // Coupled multiconductor lines have no small-signal load (ngspice's
         // CPL registers none and its AC solve fails with a singular matrix);
         // refuse explicitly instead of returning silently dead ports.
@@ -2835,13 +2822,19 @@ impl Engine {
         circuit
             .prepare_veriloga_equilibrium_analysis_point(1, true, false)
             .map_err(SimulationError::Circuit)?;
-        let mut matrix = engine.build_matrix(&circuit)?;
+        let mut matrix = if circuit.matrix_size() == 0 {
+            Self::model_observation_matrix()?
+        } else {
+            engine.build_matrix(&circuit)?
+        };
         circuit.link_indices(&matrix);
         let ac_voltage_projection = AcVoltageConstraintProjection::new(&circuit)?;
 
         // Get DC operating point
         let has_nonlinear = circuit.has_nonlinear_devices();
-        let dc_solution = if circuit.can_use_zero_bias_for_explicit_xspice_ac() {
+        let dc_solution = if circuit.matrix_size() == 0 {
+            Vec::new()
+        } else if circuit.can_use_zero_bias_for_explicit_xspice_ac() {
             log::debug!(
                 "using zero-bias small-signal state for explicit XSPICE transmission-line AC"
             );
@@ -2849,7 +2842,7 @@ impl Engine {
         } else {
             engine.solve_dc_operating_point_with_abort(netlist, &mut circuit, &mut matrix, abort)?
         };
-        if has_nonlinear {
+        if has_nonlinear && !dc_solution.is_empty() {
             engine.try_observe_dc_operating_point(&mut circuit, &mut matrix, &dc_solution)?;
         }
         if abort.is_aborted() {
@@ -2860,9 +2853,14 @@ impl Engine {
                 "XSPICE evaluation failed: {message}"
             )));
         }
-        circuit
-            .accept_veriloga_analysis_point()
-            .map_err(SimulationError::Circuit)?;
+        engine.accept_frequency_operating_point(
+            netlist,
+            &mut circuit,
+            &mut matrix,
+            &dc_solution,
+            1,
+            abort,
+        )?;
         circuit
             .finish_veriloga_equilibrium_operating_point(1)
             .map_err(SimulationError::Circuit)?;
@@ -2927,6 +2925,15 @@ impl Engine {
             circuit
                 .prepare_veriloga_frequency_analysis_point(1, final_step)
                 .map_err(SimulationError::Circuit)?;
+            if size == 0 {
+                return Ok(AcResult {
+                    frequency: freq,
+                    node_names: Vec::new(),
+                    branch_names: Vec::new(),
+                    voltages: Vec::new(),
+                    currents: Vec::new(),
+                });
+            }
             circuit
                 .prepare_behavioral_small_signal_at_frequency(&dc_solution, freq)
                 .map_err(SimulationError::Circuit)?;
@@ -2986,6 +2993,33 @@ impl Engine {
                 currents,
             })
         };
+
+        if circuit.has_point_analog_tasks() || (size == 0 && circuit.has_any_veriloga_devices()) {
+            let mut results = Vec::with_capacity(frequencies.len());
+            let mut workspace = ComplexMatrix::from_real_structure(&matrix);
+            for (index, &frequency) in frequencies.iter().enumerate() {
+                let mut point_circuit = circuit.clone();
+                results.push(Self::solve_accepted_frequency_point(
+                    &mut point_circuit,
+                    &mut matrix,
+                    &dc_solution,
+                    super::analog_tasks::FrequencyModelPoint {
+                        analysis: 1,
+                        frequency,
+                        final_step: index + 1 == frequencies.len(),
+                    },
+                    abort,
+                    |point, final_step| solve_at_freq(point, &mut workspace, frequency, final_step),
+                )?);
+                if abort
+                    .model_control()
+                    .is_some_and(|control| control.is_finished())
+                {
+                    break;
+                }
+            }
+            return Ok(results);
+        }
 
         // Parallel sweep: every frequency point shares the same operating
         // point and matrix structure, so points are fully independent.
@@ -3081,6 +3115,9 @@ impl Engine {
         self.ensure_analysis_points(points.len())?;
         self.ensure_batch_runs(points.len())?;
         let override_plan = FrequencyDataOverridePlan::resolve(netlist, &points)?;
+        let run_scope = crate::abort_signal::ModelRunSignal::if_needed(abort);
+        let abort: &dyn AbortSignal = run_scope.as_ref().map_or(abort, |scope| scope);
+        Self::ensure_model_run_active(abort)?;
         let mut row_netlists = Vec::with_capacity(points.len());
         let mut results = Vec::with_capacity(points.len());
         for (row_index, point) in points.iter().enumerate() {
@@ -3090,7 +3127,10 @@ impl Engine {
             let row_netlist =
                 materialize_frequency_data_row_with_abort(netlist, &override_plan, point, abort)?;
             let mut row_results =
-                self.run_ac_with_abort(&row_netlist, &[point.frequency], abort)?;
+                match self.run_ac_with_abort(&row_netlist, &[point.frequency], abort) {
+                    Err(SimulationError::ModelFinished(_)) if !results.is_empty() => break,
+                    result => result?,
+                };
             if row_results.len() != 1 {
                 return Err(SimulationError::Circuit(format!(
                     ".AC DATA table '{}' row {} produced {} results, expected one",
@@ -3101,6 +3141,12 @@ impl Engine {
             }
             row_netlists.push(row_netlist);
             results.push(row_results.remove(0));
+            if abort
+                .model_control()
+                .is_some_and(|control| control.is_finished())
+            {
+                break;
+            }
         }
         Ok((row_netlists, results))
     }

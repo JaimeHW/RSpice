@@ -12,6 +12,7 @@ pub enum ModelFinishPoint {
     OperatingPoint,
     Transient { time: f64 },
     DcSweep { value: f64 },
+    Frequency { frequency: f64 },
 }
 
 /// The first accepted `$finish` request in one simulation run.
@@ -37,6 +38,9 @@ impl std::fmt::Display for ModelFinish {
             ModelFinishPoint::OperatingPoint => formatter.write_str("the operating point"),
             ModelFinishPoint::Transient { time } => write!(formatter, "transient time {time}"),
             ModelFinishPoint::DcSweep { value } => write!(formatter, "DC sweep value {value}"),
+            ModelFinishPoint::Frequency { frequency } => {
+                write!(formatter, "frequency {frequency} Hz")
+            }
         }
     }
 }
