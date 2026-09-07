@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import functools
 import http.server
+import math
 import pathlib
 import subprocess
 import shutil
@@ -14,7 +15,9 @@ import threading
 import urllib.parse
 
 EXPECTED_STAMPS = 20000
-EXPECTED_WASM_JIT_ABI_VERSION = 6
+# An independent release contract: changing the compiler ABI also requires
+# reviewing the worker qualification expectations.
+EXPECTED_WASM_JIT_ABI_VERSION = 8
 
 # The page runs on a real clock, so the runner cannot bound it with
 # --virtual-time-budget and read the DOM afterwards: a virtual clock reports a
@@ -56,10 +59,13 @@ class QualificationHandler(http.server.SimpleHTTPRequestHandler):
 def read_nanoseconds_per_stamp(reported: str | None) -> float:
     if reported is None:
         raise SystemExit("browser WASM JIT qualification reported no stamp timing")
-    nanoseconds = float(reported)
-    if nanoseconds <= 0.0:
+    try:
+        nanoseconds = float(reported)
+    except ValueError as error:
+        raise SystemExit("browser WASM JIT qualification reported an invalid stamp timing") from error
+    if not math.isfinite(nanoseconds) or nanoseconds <= 0.0:
         raise SystemExit(
-            "browser WASM JIT qualification reported a zero stamp cost, which "
+            "browser WASM JIT qualification reported a nonpositive or nonfinite stamp cost, which "
             "means the measurement did not run rather than that it was fast"
         )
     return nanoseconds

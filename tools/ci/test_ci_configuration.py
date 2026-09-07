@@ -74,6 +74,29 @@ def xyce_exclusion_fixture():
     return _XYCE_EXCLUSION_FIXTURE
 
 
+class BrowserJitGateTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        spec = importlib.util.spec_from_file_location(
+            "check_wasm_jit_browser", ROOT / "tools/ci/check_wasm_jit_browser.py"
+        )
+        assert spec is not None and spec.loader is not None
+        cls.gate = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.gate)
+
+    def test_worker_abi_matches_the_independent_release_contract(self) -> None:
+        source = read_text("crates/rspice-veriloga/src/wasm_jit/mod.rs")
+        version = re.search(r"pub const WASM_JIT_ABI_VERSION: u32 = (\d+);", source)
+        self.assertIsNotNone(version)
+        self.assertEqual(int(version.group(1)), self.gate.EXPECTED_WASM_JIT_ABI_VERSION)
+
+    def test_only_finite_positive_measurements_can_qualify(self) -> None:
+        for reported in (None, "", "invalid", "0", "-1", "NaN", "inf", "-inf"):
+            with self.subTest(reported=reported), self.assertRaises(SystemExit):
+                self.gate.read_nanoseconds_per_stamp(reported)
+        self.assertEqual(self.gate.read_nanoseconds_per_stamp("123.5"), 123.5)
+
+
 class CiConfigurationTests(unittest.TestCase):
     def test_xyce_upstream_exclusion_manifest_is_byte_exact_and_reproducible(self) -> None:
         module, _, manifest, expected = xyce_exclusion_fixture()
