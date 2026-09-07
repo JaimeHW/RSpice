@@ -1,8 +1,9 @@
 //! Bounded event scheduling in the behavioral evaluator's resolved environment.
 
-use super::periodicity::{affine_time_coordinate, constant_value, needs_time_features};
+use super::periodicity::{affine_time_coordinate, needs_time_features};
 use super::*;
 use crate::abort_signal::AbortSignal;
+use crate::expr::constant_value;
 use crate::numerics::integration::BreakpointManager;
 use crate::resource::{ResourceKind, ResourceLimitError};
 use std::collections::BTreeSet;
@@ -555,6 +556,125 @@ mod tests {
             collect(&sources("exp(cos(1e12*time))"), 1.0, usize::MAX, true),
             Err(BehavioralBreakpointError::Invalid(_))
         ));
+    }
+
+    #[test]
+    fn combined_clock_zeros_and_switching_levels_are_isolated() {
+        for scale in [1e-30, 1.0, 1e300] {
+            let phase = format!("6*pi*(time/{scale:e})+0.1");
+            let coordinate = format!("cos({phase})+0.5*cos(2*({phase}))-0.25");
+            let source = sources(&format!("exp(-1000000*({coordinate})^2)"));
+            let events = collect(&source, scale, 256, true).unwrap();
+            for cycle in 0..=3 {
+                for angle in [-std::f64::consts::FRAC_PI_3, std::f64::consts::FRAC_PI_3] {
+                    let time = ((std::f64::consts::TAU * cycle as Value + angle - 0.1)
+                        / (6.0 * std::f64::consts::PI))
+                        * scale;
+                    if time >= 0.0 && time <= scale {
+                        assert!(contains(&events, time), "missing {time:e}: {events:?}");
+                    }
+                }
+            }
+            let mut switching = sources(&format!("abs({coordinate})<0.001"));
+            let events = collect(&switching, scale, 256, true).unwrap();
+            let changes = events
+                .windows(2)
+                .filter(|pair| {
+                    pair[0].next_up() == pair[1]
+                        && switching.voltage_sources[0].evaluate(&[], pair[0]).unwrap()
+                            != switching.voltage_sources[0].evaluate(&[], pair[1]).unwrap()
+                })
+                .count();
+            assert_eq!(changes, 12, "scale={scale:e}: {events:?}");
+        }
+    }
+
+    #[test]
+    fn combined_feature_isolation_is_bounded_and_does_not_enumerate_constant_zeros() {
+        let source = sources("exp(-10000*(cos(6*pi*time)+0.5*cos(12*pi*time)-0.25)^2)");
+        let mut manager = BreakpointManager::new();
+        let abort = CountingAbort::new(100);
+        assert!(matches!(
+            source.collect_transient_breakpoints(1.0, &mut manager, &abort, 256, true),
+            Err(BehavioralBreakpointError::Aborted)
+        ));
+        assert!(manager.times().is_empty());
+        assert!(matches!(
+            collect(&source, 1.0, 3, true),
+            Err(BehavioralBreakpointError::Resource(_))
+        ));
+        assert!(
+            collect(
+                &sources("exp(cos(6*pi*time)-cos(6*pi*time))"),
+                1.0,
+                64,
+                true
+            )
+            .is_ok()
+        );
+        assert!(matches!(
+            collect(
+                &sources("exp(cos(1e12*time)+sin(1e12*time))"),
+                1.0,
+                usize::MAX,
+                true
+            ),
+            Err(BehavioralBreakpointError::Invalid(_))
+        ));
+    }
+
+    #[test]
+    fn multiple_roots_and_nonlinear_phases_remain_bounded_features() {
+        for (index, expression) in [
+            "exp(-10000*(cos(6*pi*time)+cos(12*pi*time)-2)^2)",
+            "exp(-10000*(cos(6*pi*time)+sin(6*pi*time)-sqrt(2))^2)",
+            "exp(-10000*(cos(6*pi*time+0.2*sin(6*pi*time))-0.25)^2)",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let events = collect(&sources(expression), 1.0, 512, true)
+                .unwrap_or_else(|error| panic!("{expression}: {error}"));
+            assert!(!events.is_empty(), "{expression}");
+            if index == 1 {
+                for cycle in 0..3 {
+                    let peak = (cycle as Value + 0.125) / 3.0;
+                    assert!(
+                        events
+                            .iter()
+                            .any(|time| (time - peak).abs() <= 8.0 * Value::EPSILON.sqrt()),
+                        "missing tangential peak {peak}: {events:?}"
+                    );
+                }
+            } else if index == 2 {
+                for sign in [-1.0, 1.0] {
+                    let target = (sign * 0.25_f64.acos()).rem_euclid(std::f64::consts::TAU);
+                    let mut root = target;
+                    for _ in 0..10 {
+                        root -= (root + 0.2 * root.sin() - target) / (1.0 + 0.2 * root.cos());
+                    }
+                    for cycle in 0..3 {
+                        let time = (root + std::f64::consts::TAU * cycle as Value)
+                            / (6.0 * std::f64::consts::PI);
+                        assert!(
+                            contains(&events, time),
+                            "missing phase root {time}: {events:?}"
+                        );
+                    }
+                }
+            }
+        }
+        let mut source = sources("cos(6*pi*time)>0.5*cos(12*pi*time)+0.5");
+        let events = collect(&source, 1.0, 512, true).unwrap();
+        let changes = events
+            .windows(2)
+            .filter(|pair| {
+                pair[0].next_up() == pair[1]
+                    && source.voltage_sources[0].evaluate(&[], pair[0]).unwrap()
+                        != source.voltage_sources[0].evaluate(&[], pair[1]).unwrap()
+            })
+            .count();
+        assert_eq!(changes, 12, "{events:?}");
     }
 
     #[test]

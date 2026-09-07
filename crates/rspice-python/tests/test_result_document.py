@@ -309,6 +309,8 @@ def test_pss_local_source_mesh_survives_python_and_pickle(source):
 @pytest.mark.parametrize("expression, expected_dc", [
     ("if(cos(2*pi*64meg*time+0.1)>0.9999,1,0)", 0.004501619094809),
     ("exp(-10000*(1-cos(2*pi*64meg*time+0.1)))", 0.003989472674605),
+    ("exp(-1000000*(cos(2*pi*64meg*time+0.1)+0.5*cos(2*pi*128meg*time+0.2)-0.25)^2)", 0.0003257350825830),
+    ("abs(cos(2*pi*64meg*time+0.1)+0.5*cos(2*pi*128meg*time+0.2)-0.25)<0.001", 0.000367552653101734),
 ])
 def test_pss_nonlinear_time_features_survive_python_and_pickle(expression, expected_dc):
     result = rspice.Engine().run_pss(
@@ -321,4 +323,4 @@ def test_pss_nonlinear_time_features_survive_python_and_pickle(expression, expec
     np.testing.assert_array_equal(restored.time, result.time)
     np.testing.assert_array_equal(restored.voltage_waveform("out"), result.voltage_waveform("out"))
     for waveform in (result, restored):
-        assert abs(waveform.dc("out") - expected_dc) < 1e-5
+        assert abs(waveform.dc("out") - expected_dc) < (1e-6 if expected_dc < .001 else 1e-5)

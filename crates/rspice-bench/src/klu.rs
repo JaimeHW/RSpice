@@ -11,10 +11,11 @@
 //! measured as the pathological reference row and never gated -- real circuit
 //! matrices are local, not expanders.
 //!
-//! Budgets are normalized per `(L+U) nnz` rather than absolute per-iteration,
+//! Absolute budgets are normalized per `(L+U) nnz` rather than per-iteration,
 //! because a sparse direct solve is proportional to factor nonzeros: one
-//! threshold then covers the whole size sweep. Every budget is off unless
-//! passed explicitly, so the gate cannot fail before baselines exist.
+//! threshold then covers the whole size sweep. Relative budgets compare the
+//! hot paths with full factorization on the same machine, which is useful on
+//! shared CI hardware. Every budget is off unless passed explicitly.
 
 use crate::error::BenchError;
 use clap::Args;
@@ -56,6 +57,14 @@ pub struct KluArgs {
     #[arg(long, value_name = "NS")]
     pub max_solve_ns_per_lu_nnz: Option<f64>,
 
+    /// Refactor time divided by full factorization time on the same machine.
+    #[arg(long, value_name = "RATIO")]
+    pub max_refactor_factor_ratio: Option<f64>,
+
+    /// Solve time divided by full factorization time on the same machine.
+    #[arg(long, value_name = "RATIO")]
+    pub max_solve_factor_ratio: Option<f64>,
+
     /// Fill budget as `(L+U) nnz / A nnz`. Off unless set.
     #[arg(long, value_name = "RATIO")]
     pub max_fill_ratio: Option<f64>,
@@ -74,6 +83,10 @@ pub struct KluReport {
     pub max_refactor_ns_per_lu_nnz: Option<f64>,
     /// Solve budget in effect, if any.
     pub max_solve_ns_per_lu_nnz: Option<f64>,
+    /// Same-run relative refactor budget, if any.
+    pub max_refactor_factor_ratio: Option<f64>,
+    /// Same-run relative solve budget, if any.
+    pub max_solve_factor_ratio: Option<f64>,
     /// Fill budget in effect, if any.
     pub max_fill_ratio: Option<f64>,
     /// One entry per measured pattern and size.
@@ -471,6 +484,29 @@ fn apply_budgets(case: &mut KluCase, args: &KluArgs) {
         return;
     }
     let mut failures: Vec<String> = case.failure.take().into_iter().collect();
+    for (phase, elapsed, budget) in [
+        (
+            "refactor",
+            case.refactor_ns_per_iter,
+            args.max_refactor_factor_ratio,
+        ),
+        ("solve", case.solve_ns_per_iter, args.max_solve_factor_ratio),
+    ] {
+        if let Some(budget) = budget {
+            let ratio = elapsed / case.factor_ns;
+            if !case.factor_ns.is_finite()
+                || case.factor_ns <= 0.0
+                || elapsed <= 0.0
+                || !ratio.is_finite()
+            {
+                failures.push(format!("{phase}/factor ratio has invalid timing evidence"));
+            } else if ratio > budget {
+                failures.push(format!(
+                    "{phase}/factor ratio {ratio:.4} exceeds budget {budget:.4}"
+                ));
+            }
+        }
+    }
     if let Some(budget) = args.max_refactor_ns_per_lu_nnz
         && case.refactor_ns_per_lu_nnz > budget
     {
@@ -518,6 +554,11 @@ pub fn run(args: &KluArgs) -> Result<ExitCode, BenchError> {
             args.max_refactor_ns_per_lu_nnz,
         ),
         ("--max-solve-ns-per-lu-nnz", args.max_solve_ns_per_lu_nnz),
+        (
+            "--max-refactor-factor-ratio",
+            args.max_refactor_factor_ratio,
+        ),
+        ("--max-solve-factor-ratio", args.max_solve_factor_ratio),
         ("--max-fill-ratio", args.max_fill_ratio),
     ] {
         if budget.is_some_and(|value| !value.is_finite() || value <= 0.0) {
@@ -578,6 +619,8 @@ pub fn run(args: &KluArgs) -> Result<ExitCode, BenchError> {
         samples: args.samples,
         max_refactor_ns_per_lu_nnz: args.max_refactor_ns_per_lu_nnz,
         max_solve_ns_per_lu_nnz: args.max_solve_ns_per_lu_nnz,
+        max_refactor_factor_ratio: args.max_refactor_factor_ratio,
+        max_solve_factor_ratio: args.max_solve_factor_ratio,
         max_fill_ratio: args.max_fill_ratio,
         passed: cases.iter().all(|case| case.passed),
         cases,
@@ -657,6 +700,8 @@ mod tests {
             samples: 1,
             max_refactor_ns_per_lu_nnz: None,
             max_solve_ns_per_lu_nnz: None,
+            max_refactor_factor_ratio: None,
+            max_solve_factor_ratio: None,
             max_fill_ratio: None,
             out: None,
         }
@@ -684,5 +729,56 @@ mod tests {
             run(&args),
             Err(BenchError::BenchmarkPolicy { .. })
         ));
+    }
+
+    #[test]
+    fn relative_budgets_reject_hot_path_regressions_and_invalid_evidence() {
+        let mut rng = Rng(case_seed("ladder", 8));
+        let mut baseline = bench_case("ladder", &ladder_matrix(8, &mut rng), 1, 1, true)
+            .expect("small, well-conditioned fixture");
+        // Use deterministic timing evidence; this test must never gate on the
+        // speed or timer resolution of the machine running the test harness.
+        let mut args = minimal_args();
+        args.max_refactor_factor_ratio = Some(0.5);
+        args.max_solve_factor_ratio = Some(0.25);
+        for scale in [1.0, 10.0] {
+            baseline.factor_ns = 1000.0 * scale;
+            baseline.refactor_ns_per_iter = 200.0 * scale;
+            baseline.solve_ns_per_iter = 100.0 * scale;
+            apply_budgets(&mut baseline, &args);
+            assert!(baseline.passed);
+        }
+
+        for (factor, refactor, solve) in [
+            (1000.0, 501.0, 100.0),
+            (1000.0, 200.0, 251.0),
+            (0.0, 200.0, 100.0),
+            (1000.0, -1.0, 100.0),
+            (f64::INFINITY, 200.0, 100.0),
+            (1000.0, f64::NAN, 100.0),
+        ] {
+            baseline.factor_ns = factor;
+            baseline.refactor_ns_per_iter = refactor;
+            baseline.solve_ns_per_iter = solve;
+            apply_budgets(&mut baseline, &args);
+            assert!(!baseline.passed, "invalid timing evidence passed");
+            assert!(baseline.failure.take().is_some());
+            baseline.passed = true;
+        }
+
+        for invalid in [0.0, -1.0, f64::INFINITY, f64::NAN] {
+            args.max_refactor_factor_ratio = Some(invalid);
+            assert!(matches!(
+                run(&args),
+                Err(BenchError::BenchmarkPolicy { .. })
+            ));
+            args.max_refactor_factor_ratio = None;
+            args.max_solve_factor_ratio = Some(invalid);
+            assert!(matches!(
+                run(&args),
+                Err(BenchError::BenchmarkPolicy { .. })
+            ));
+            args.max_solve_factor_ratio = None;
+        }
     }
 }

@@ -303,6 +303,14 @@ mod wasm_tests {
                 "B1 in 0 V=exp(-10000*(1-cos(2*pi*64meg*time+0.1)))",
                 0.003989472674605,
             ),
+            (
+                "B1 in 0 V=exp(-1000000*(cos(2*pi*64meg*time+0.1)+0.5*cos(2*pi*128meg*time+0.2)-0.25)^2)",
+                0.0003257350825830,
+            ),
+            (
+                "B1 in 0 V=abs(cos(2*pi*64meg*time+0.1)+0.5*cos(2*pi*128meg*time+0.2)-0.25)<0.001",
+                0.000367552653101734,
+            ),
             ("V1 in 0 PULSE(0 1 400p 10p 10p 100p 1u)", 0.00011),
             ("B1 in 0 V=spice_pulse(0,1,400p,10p,10p,100p,1u)", 0.00011),
             (
@@ -341,6 +349,8 @@ mod wasm_tests {
             let tolerance = if dc == 0.00011 || dc == 0.0011 {
                 assert!(steps < 1024, "the local source mesh must stay bounded");
                 1e-7
+            } else if dc < 0.001 {
+                1e-6
             } else if dc < 0.01 {
                 1e-5
             } else {

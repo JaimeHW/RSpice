@@ -434,7 +434,7 @@ fn generator_digest(generator_root: &Path, emit_cargo_rerun: bool) -> BuiltinRes
     for relative in GENERATOR_SOURCE_DIGEST_INPUTS {
         let path = generator_root.join(relative);
         let digest = if path.is_dir() {
-            tree_digest(&path, emit_cargo_rerun)?
+            tree_digest_with_text_policy(&path, emit_cargo_rerun, true)?
         } else if path.is_file() {
             if emit_cargo_rerun {
                 println!("cargo:rerun-if-changed={}", path.display());
@@ -1164,6 +1164,17 @@ fn update_digest_record(hasher: &mut blake3::Hasher, bytes: &[u8]) {
 }
 
 fn tree_digest(root: &Path, emit_cargo_rerun: bool) -> BuiltinResult<String> {
+    tree_digest_with_text_policy(root, emit_cargo_rerun, false)
+}
+
+/// Generator inputs are source text, just like the standalone inputs passed
+/// to `file_digest`. Model corpora retain their exact byte identity. Existing
+/// Windows checkouts may still contain CRLF after an attributes-only update.
+fn tree_digest_with_text_policy(
+    root: &Path,
+    emit_cargo_rerun: bool,
+    normalize_source_text: bool,
+) -> BuiltinResult<String> {
     let mut files = Vec::new();
     collect_tree_files(root, &mut files)?;
     files.sort();
@@ -1180,7 +1191,13 @@ fn tree_digest(root: &Path, emit_cargo_rerun: bool) -> BuiltinResult<String> {
             .replace('\\', "/");
         let bytes = fs::read(&path)?;
         update_digest_record(&mut hasher, relative.as_bytes());
-        update_digest_record(&mut hasher, &bytes);
+        if normalize_source_text {
+            let text = String::from_utf8(bytes)?;
+            let normalized = text.replace("\r\n", "\n").replace('\r', "\n");
+            update_digest_record(&mut hasher, normalized.as_bytes());
+        } else {
+            update_digest_record(&mut hasher, &bytes);
+        }
     }
 
     Ok(hasher.finalize().to_hex().to_string())
@@ -2021,6 +2038,36 @@ mod tests {
             std::process::id(),
             std::thread::current().id()
         ))
+    }
+
+    #[test]
+    fn generator_tree_digest_is_portable_without_normalizing_model_corpora() {
+        let root = temporary_registry_root("source-newlines");
+        fs::create_dir_all(&root).expect("create source fixture");
+        let source = root.join("lib.rs");
+        fs::write(&source, "fn example() {\n    let value = 1;\n}\n").unwrap();
+        let source_digest = tree_digest_with_text_policy(&root, false, true).unwrap();
+        let exact_digest = tree_digest(&root, false).unwrap();
+        assert_eq!(
+            source_digest, exact_digest,
+            "LF digests keep their identity"
+        );
+
+        fs::write(&source, "fn example() {\r\n    let value = 1;\r\n}\r\n").unwrap();
+        assert_eq!(
+            source_digest,
+            tree_digest_with_text_policy(&root, false, true).unwrap(),
+            "checkout line endings must not invalidate generator provenance"
+        );
+        assert_ne!(exact_digest, tree_digest(&root, false).unwrap());
+
+        fs::write(&source, "fn example() {\n    let value = 2;\n}\n").unwrap();
+        assert_ne!(
+            source_digest,
+            tree_digest_with_text_policy(&root, false, true).unwrap(),
+            "source changes must still invalidate generated output"
+        );
+        fs::remove_dir_all(root).unwrap();
     }
 
     fn generated_manifest_fixture(test_name: &str) -> (PathBuf, PathBuf, GeneratedBuiltinManifest) {
