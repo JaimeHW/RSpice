@@ -976,24 +976,74 @@ fn interpolate_segment(x: Value, x1: Value, y1: Value, x2: Value, y2: Value, fla
     y1 + t * (y2 - y1)
 }
 
+fn spice_waveform_parameters<const N: usize>(args: &[Value]) -> [Value; N] {
+    std::array::from_fn(|index| args.get(index).copied().unwrap_or(0.0))
+}
+
+fn spice_exp_parameters(args: &[Value]) -> [Value; 6] {
+    let mut parameters = spice_waveform_parameters(args);
+    parameters[4] = args.get(4).copied().unwrap_or(parameters[2]);
+    parameters
+}
+
+/// Certify implicit-time functions using the same resolved parameters as
+/// their evaluator. Their defaults differ from independent source cards.
+pub(crate) fn spice_waveform_is_periodic(
+    function: super::Function,
+    args: &[Value],
+    period: Value,
+    autonomous: bool,
+) -> bool {
+    use super::Function;
+    use crate::numerics::is_integral_cycle_count;
+    if args.iter().any(|value| !value.is_finite()) {
+        return false;
+    }
+    let frequency_repeats = |frequency: Value| {
+        frequency == 0.0 || (!autonomous && is_integral_cycle_count((frequency * period).abs()))
+    };
+    match function {
+        Function::SpiceSin => {
+            let [_, amplitude, frequency, delay, damping, _] = spice_waveform_parameters(args);
+            amplitude == 0.0
+                || (autonomous && delay > period)
+                || (damping == 0.0
+                    && (delay <= 0.0 || frequency == 0.0)
+                    && frequency_repeats(frequency))
+        }
+        Function::SpicePulse => {
+            let [v1, v2, delay, rise, fall, width, source_period] = spice_waveform_parameters(args);
+            v1 == v2
+                || (autonomous && delay > period)
+                || (!autonomous
+                    && rise >= 0.0
+                    && fall >= 0.0
+                    && width >= 0.0
+                    && (delay <= 0.0 || delay <= source_period - (rise + width + fall))
+                    && is_integral_cycle_count(period / source_period))
+        }
+        Function::SpiceExp => {
+            let [v1, v2, td1, _, td2, _] = spice_exp_parameters(args);
+            v1 == v2 || (autonomous && td1 > period && td2 > period)
+        }
+        Function::SpiceSffm => {
+            let [_, amplitude, carrier, modulation, signal] = spice_waveform_parameters(args);
+            amplitude == 0.0
+                || (frequency_repeats(carrier) && (modulation == 0.0 || frequency_repeats(signal)))
+        }
+        _ => false,
+    }
+}
+
 fn spice_pulse_from_args(time: Value, args: &[Value]) -> Value {
-    let v1 = args[0];
-    let v2 = args.get(1).copied().unwrap_or(0.0);
-    let delay = args.get(2).copied().unwrap_or(0.0);
-    let rise = args.get(3).copied().unwrap_or(0.0);
-    let fall = args.get(4).copied().unwrap_or(0.0);
-    let width = args.get(5).copied().unwrap_or(0.0);
+    let [v1, v2, delay, rise, fall, width, period] = spice_waveform_parameters(args);
 
     if time < delay {
         return v1;
     }
 
     let mut elapsed = time - delay;
-    if let Some(period) = args
-        .get(6)
-        .copied()
-        .filter(|period| period.is_finite() && *period > 0.0)
-    {
+    if period.is_finite() && period > 0.0 {
         elapsed = elapsed.rem_euclid(period);
     }
     if rise > 0.0 && elapsed < rise {
@@ -1015,12 +1065,8 @@ fn spice_pulse_from_args(time: Value, args: &[Value]) -> Value {
 }
 
 fn spice_sin_from_args(time: Value, args: &[Value]) -> Value {
-    let offset = args[0];
-    let amplitude = args[1];
-    let frequency = args[2];
-    let delay = args.get(3).copied().unwrap_or(0.0);
-    let damping = args.get(4).copied().unwrap_or(0.0);
-    let phase = args.get(5).copied().unwrap_or(0.0).to_radians();
+    let [offset, amplitude, frequency, delay, damping, phase] = spice_waveform_parameters(args);
+    let phase = phase.to_radians();
     let elapsed = time - delay;
 
     if elapsed <= 0.0 {
@@ -1032,12 +1078,7 @@ fn spice_sin_from_args(time: Value, args: &[Value]) -> Value {
 }
 
 fn spice_exp_from_args(time: Value, args: &[Value]) -> Value {
-    let v1 = args[0];
-    let v2 = args[1];
-    let td1 = args.get(2).copied().unwrap_or(0.0);
-    let tau1 = args.get(3).copied().unwrap_or(0.0);
-    let td2 = args.get(4).copied().unwrap_or(td1);
-    let tau2 = args.get(5).copied().unwrap_or(0.0);
+    let [v1, v2, td1, tau1, td2, tau2] = spice_exp_parameters(args);
 
     if time <= td1 {
         v1
@@ -1050,11 +1091,13 @@ fn spice_exp_from_args(time: Value, args: &[Value]) -> Value {
 }
 
 fn spice_sffm_from_args(time: Value, args: &[Value]) -> Value {
-    let offset = args[0];
-    let amplitude = args[1];
-    let carrier_freq = args.get(2).copied().unwrap_or(0.0);
-    let modulation_index = args.get(3).copied().unwrap_or(0.0);
-    let signal_freq = args.get(4).copied().unwrap_or(0.0);
+    let [
+        offset,
+        amplitude,
+        carrier_freq,
+        modulation_index,
+        signal_freq,
+    ] = spice_waveform_parameters(args);
 
     offset
         + amplitude

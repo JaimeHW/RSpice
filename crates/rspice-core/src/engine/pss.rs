@@ -82,7 +82,7 @@ impl PssAcceptedStepHistory {
 
 const PSS_KRYLOV_STATE_THRESHOLD: usize = 12;
 const PSS_KRYLOV_REL_TOL: Value = 1e-9;
-const PSS_OPERATING_POINT_IDENTITY_VERSION: u32 = 11;
+const PSS_OPERATING_POINT_IDENTITY_VERSION: u32 = 12;
 
 fn pss_identity_field(hasher: &mut blake3::Hasher, name: &str, bytes: &[u8]) {
     hasher.update(&(name.len() as u64).to_le_bytes());
@@ -1434,6 +1434,88 @@ impl PssContinuationState {
 }
 
 impl Engine {
+    pub(super) fn ensure_pss_source_periodicity(
+        circuit: &CircuitData,
+        period: Value,
+        autonomous: bool,
+        abort: &dyn AbortSignal,
+    ) -> Result<(), SimulationError> {
+        if !period.is_finite() || period <= 0.0 {
+            return Err(SimulationError::Circuit(
+                "PSS source period must be finite and positive".to_owned(),
+            ));
+        }
+        for (index, (name, periodic)) in circuit
+            .independent_source_periodicities(period, autonomous)
+            .enumerate()
+        {
+            if index & 0x1f == 0 && abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
+            if !periodic {
+                if autonomous {
+                    return Err(SimulationError::unsupported_capability(
+                        "analysis.pss.autonomous_source_waveform",
+                        format!(
+                            "autonomous PSS source '{name}' must be constant throughout the free-running orbit [0, {period:e}] s, including its outgoing endpoint; place startup kicks outside that window or use driven PSS"
+                        ),
+                    ));
+                }
+                return Err(SimulationError::unsupported_capability(
+                    "analysis.pss.driven_source_waveform",
+                    format!(
+                        "PSS source '{name}' is not certified periodic with period {period:e} s from the source time origin; its frequencies must be integer multiples of the carrier and its startup prefix must repeat"
+                    ),
+                ));
+            }
+        }
+        let behavioral = circuit
+            .behavioral_sources
+            .voltage_sources
+            .iter()
+            .map(|source| {
+                (
+                    source.name.as_str(),
+                    source.has_periodic_time_dependence(period, autonomous),
+                )
+            })
+            .chain(
+                circuit
+                    .behavioral_sources
+                    .current_sources
+                    .iter()
+                    .map(|source| {
+                        (
+                            source.name.as_str(),
+                            source.has_periodic_time_dependence(period, autonomous),
+                        )
+                    }),
+            );
+        for (index, (name, periodic)) in behavioral.enumerate() {
+            if index & 0x1f == 0 && abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
+            if !periodic {
+                return Err(SimulationError::unsupported_capability(
+                    if autonomous {
+                        "analysis.pss.autonomous_source_waveform"
+                    } else {
+                        "analysis.pss.driven_source_waveform"
+                    },
+                    format!(
+                        "PSS behavioral source '{name}' has no structural certificate for {} with period {period:e} s",
+                        if autonomous {
+                            "constant explicit-time dependence throughout the free-running orbit"
+                        } else {
+                            "time periodicity"
+                        }
+                    ),
+                ));
+            }
+        }
+        Ok(())
+    }
+
     fn pss_shooting_state_basis(circuit: &CircuitData) -> Vec<String> {
         state::PssStateBasis::new(circuit).names(circuit)
     }
@@ -1977,7 +2059,6 @@ impl Engine {
 
         let mut circuit = PssCircuit::new(circuit);
         circuit.ensure_regular_prescribed_currents(config.period())?;
-
         // Validate circuit has reactive elements
         let state_dimension = circuit.state_dimension();
         if circuit
@@ -1994,6 +2075,12 @@ impl Engine {
         {
             return Err(PssError::NoReactiveElements.into());
         }
+        Self::ensure_pss_source_periodicity(
+            &circuit,
+            config.period(),
+            config.is_autonomous(),
+            abort,
+        )?;
         self.ensure_result_values(
             config
                 .points_per_period
@@ -2488,6 +2575,7 @@ impl Engine {
     ) -> Result<(Vec<Value>, TransientResult), SimulationError> {
         let max_step = period / config.points_per_period as f64;
         if config.is_autonomous() {
+            Self::ensure_pss_source_periodicity(circuit, period, true, abort)?;
             circuit.ensure_regular_prescribed_currents(period)?;
         }
 

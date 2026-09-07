@@ -139,6 +139,35 @@ impl SourceTimeBasis {
 }
 
 impl crate::circuit::CircuitData {
+    /// Check the same resolved waveforms that stamping uses. Continuity is
+    /// qualified separately for topology constraints that require it.
+    pub(crate) fn independent_source_periodicities(
+        &self,
+        period: Value,
+        autonomous: bool,
+    ) -> impl Iterator<Item = (&str, bool)> {
+        self.voltage_sources
+            .transient_specs_named_with_pwl()
+            .map(|(name, spec, pwl)| (name, spec, pwl, self.voltage_sources.transient_context))
+            .chain(
+                self.current_sources
+                    .transient_specs_named_with_pwl()
+                    .map(|(name, spec, pwl)| {
+                        (name, spec, pwl, self.current_sources.transient_context)
+                    }),
+            )
+            .map(move |(name, spec, pwl, context)| {
+                (
+                    name,
+                    if autonomous {
+                        VoltageSources::constant_waveform_over_orbit(spec, period, context, pwl)
+                    } else {
+                        VoltageSources::periodic_waveform(spec, period, context, pwl, false)
+                    },
+                )
+            })
+    }
+
     pub(crate) fn set_independent_source_context(
         &mut self,
         basis: SourceTimeBasis,
@@ -1914,11 +1943,12 @@ impl CurrentSources {
     /// can hide a nonperiodic source or an unrepresented impulse voltage.
     pub(crate) fn has_regular_periodic_waveform(&self, index: usize, period: Value) -> bool {
         self.source_specs[index].as_ref().is_none_or(|spec| {
-            VoltageSources::regular_periodic_waveform(
+            VoltageSources::periodic_waveform(
                 spec,
                 period,
                 self.transient_context,
                 self.pwl_waveforms[index].as_deref(),
+                true,
             )
         })
     }

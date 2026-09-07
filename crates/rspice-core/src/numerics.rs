@@ -15,6 +15,15 @@ pub mod rustfft_qualification;
 
 use crate::Value;
 
+/// Authenticate an authored frequency ratio without accepting a fraction of
+/// a cycle as floating-point tolerance. Zero is a separate constant case.
+pub(crate) fn is_integral_cycle_count(cycles: Value) -> bool {
+    cycles.is_finite()
+        && cycles > 0.0
+        && (cycles - cycles.round()).abs() <= (32.0 * Value::EPSILON * cycles.max(1.0)).min(1e-10)
+        && cycles.round() >= 1.0
+}
+
 /// Neumaier compensated accumulation. Callers scale their operands when an
 /// unscaled sum could overflow; compensation recovers low-order terms lost
 /// when finite contributions of opposite sign nearly cancel.

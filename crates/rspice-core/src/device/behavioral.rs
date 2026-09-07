@@ -17,6 +17,8 @@ use crate::solver::StaticMatrix;
 use std::path::Path;
 use thiserror::Error;
 
+mod periodicity;
+
 const DERIVATIVE_REL_STEP: Value = 1e-6;
 const DERIVATIVE_ABS_STEP: Value = 1e-9;
 const EXPR_ZERO_TOLERANCE: Value = 1.0e-12;

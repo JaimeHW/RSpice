@@ -24,5 +24,5 @@ pub(crate) use power::{
     real_function_pow_with_derivative, real_function_pwr, real_function_pwr_with_derivative,
     real_function_pwrs, real_function_pwrs_with_derivative, real_pow, real_pow_with_derivative,
 };
-pub(crate) use vm::lookup_table_interpolate_with_derivative;
 pub use vm::{CompiledExpr, Context, Instruction, Vm};
+pub(crate) use vm::{lookup_table_interpolate_with_derivative, spice_waveform_is_periodic};

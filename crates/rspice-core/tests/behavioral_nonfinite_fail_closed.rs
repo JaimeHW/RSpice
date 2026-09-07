@@ -89,19 +89,33 @@ fn transient_rejects_time_activated_nonfinite_voltage_and_current_sources() {
 
 #[test]
 fn pss_rejects_time_activated_nonfinite_voltage_and_current_sources() {
-    for (source, kind, name) in source_cases("TIME*1e308*1e308") {
-        let deck = format!(
-            "behavioral {kind} PSS non-finite value\n{source}\nRLOAD out 0 1k\nCLOAD out 0 1p\n.END\n"
-        );
-        let error = Engine::new(SimulationConfig::default())
-            .run_pss(
-                &parse(&deck),
-                PssConfig::new(1.0e6)
-                    .with_harmonics(2)
-                    .with_points_per_period(8)
-                    .with_tstab_periods(0),
-            )
-            .expect_err("PSS must reject a time-activated non-finite B source");
-        assert_behavioral_error(error, kind, name);
+    // A ramp is already invalid at the source-period contract. The sinusoid
+    // passes that contract and must still fail during numerical evaluation;
+    // periodicity does not certify finite expression values.
+    for expression in ["TIME*1e308*1e308", "sin(2*pi*1meg*TIME)*1e308*1e308"] {
+        for (source, kind, name) in source_cases(expression) {
+            let deck = format!(
+                "behavioral {kind} PSS non-finite value\n{source}\nRLOAD out 0 1k\nCLOAD out 0 1p\n.END\n"
+            );
+            let error = Engine::new(SimulationConfig::default())
+                .run_pss(
+                    &parse(&deck),
+                    PssConfig::new(1.0e6)
+                        .with_harmonics(2)
+                        .with_points_per_period(8)
+                        .with_tstab_periods(0),
+                )
+                .expect_err("PSS must reject a time-activated non-finite B source");
+            if expression.starts_with("TIME") {
+                let message = error.to_string().to_ascii_lowercase();
+                assert!(
+                    message.contains("analysis.pss.driven_source_waveform"),
+                    "{message}"
+                );
+                assert!(message.contains(name), "{message}");
+            } else {
+                assert_behavioral_error(error, kind, name);
+            }
+        }
     }
 }

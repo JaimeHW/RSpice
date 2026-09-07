@@ -956,7 +956,14 @@ impl AnalysisDependencyRepairContext {
             format!("the authenticated periodic-source circuit is no longer parseable: {error}")
         })?;
         rspice_core::Engine::new(rspice_core::SimulationConfig::default())
-            .validate_periodic_source_contract(&netlist, &config.tone_sources, config.fund_freq)
+            .validate_pss_source_contract_with_abort(
+                &netlist,
+                &config.tone_sources,
+                &rspice_core::analysis::PssConfig::new(config.fund_freq)
+                    .with_points_per_period(config.points_per_period)
+                    .with_harmonics(config.num_harmonics.max(1)),
+                &rspice_core::abort_signal::NoAbort,
+            )
             .map_err(|error| format!("PSS periodic-source contract is invalid: {error}"))
     }
 
@@ -1605,7 +1612,7 @@ mod tests {
         let error = incommensurate
             .validate_pss_sources(&pss)
             .expect_err("repair cannot commit an incommensurate PSS");
-        assert!(error.contains("not an integer multiple"));
+        assert!(error.contains("frequencies must be integer multiples"));
 
         let pwl = AnalysisDependencyRepairContext::exact_periodic_sources(
             "periodic fixture\nV1 out 0 PWL(0 0 1u 1)\nR1 out 0 1k\n.end\n",
@@ -1614,7 +1621,23 @@ mod tests {
         let error = pwl
             .validate_pss_sources(&pss)
             .expect_err("repair cannot claim an unauthenticated PWL period");
-        assert!(error.contains("uses PWL"));
+        assert!(error.contains("source 'V1' is not certified periodic"));
+    }
+
+    #[test]
+    fn periodic_source_preflight_resolves_edges_from_the_drafts_actual_grid() {
+        let context = AnalysisDependencyRepairContext::exact_periodic_sources(
+            "source defaults\nV1 in 0 PULSE(0 1 0.7u 0 0 0.28u 1u)\nR1 in out 1k\nC1 out 0 1n\n.end\n",
+        ).unwrap();
+        let mut draft = PssDialogState::default();
+        draft.fund_freq = "1meg".to_owned();
+        draft.tone_sources = "V1".to_owned();
+        draft.num_harmonics = "4".to_owned();
+        for (points, periodic) in [(32, false), (512, true)] {
+            draft.points_per_period = points.to_string();
+            let result = context.validate_pss_sources(&draft);
+            assert_eq!(result.is_ok(), periodic, "{points}: {result:?}");
+        }
     }
 
     #[test]

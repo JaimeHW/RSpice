@@ -374,6 +374,20 @@ card does not redefine the PSS drive. Autonomous runs use the configured
 period guess for these defaults. Xyce SIN requires an authored frequency and
 preserves zero as zero; ngspice SIN resolves zero to the inverse stop default.
 
+Driven PSS certifies the authored periods of every independent and behavioral
+source, including RF-port tones. Matching sampled endpoints is insufficient:
+a half-integer sinusoid can return to zero with the wrong outgoing slope.
+Nonrepeating startup prefixes need an explicit frozen-source selection or a
+periodic source specification. Sources that prescribe winding currents also
+require a continuous waveform with finite outgoing slopes.
+
+Autonomous shooting repeats the quiet source window from zero to the trial
+period. Startup kicks must lie outside that entire window, including its
+outgoing endpoint; they still excite the circuit during stabilization. A
+changing source inside the window requires driven PSS. Transient continuation
+starts at time zero and reactivates later authored source events, including
+startup kicks and explicitly frozen modulation sources.
+
 **`.PAC`**, periodic small-signal AC around a periodic operating point.
 The leading sweep is the input-frequency sweep.
 
