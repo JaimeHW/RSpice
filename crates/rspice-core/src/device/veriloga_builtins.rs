@@ -31,6 +31,7 @@ use std::sync::Arc;
 pub use rspice_veriloga_models::registry as builtins;
 
 pub use rspice_veriloga_runtime::{
+    AnalogEffectJournal, AnalogTaskArgument, AnalogTaskInvocation, AnalogTaskKind,
     GENERATED_PERSISTENT_STATE_VERSION, GENERATED_VERILOGA_COMPATIBILITY_CATALOG,
     GENERATED_VERILOGA_DESCRIPTOR_ABI_VERSION, GENERATED_VERILOGA_V27_COMBINED_IDENTITY_ALIASES,
     GeneratedAnalysisKind, GeneratedDdtCoefficients, GeneratedDerivative, GeneratedEvalContext,
@@ -553,6 +554,7 @@ impl BuiltinVerilogADevices {
             let captured = device.kind.capture_rollback_state();
             state.values.clone_from(&captured.values);
             state.flags.clone_from(&captured.flags);
+            state.analog_effects.clone_from(&captured.analog_effects);
         }
         let mut offset = 0;
         for device in &self.devices {
@@ -741,6 +743,16 @@ impl BuiltinVerilogAInstance {
         let ddt_len = self.dynamic_charge_third_back.len();
         let idt_len = self.dynamic_idt_state_count;
         let rollback = self.kind.capture_rollback_state();
+        if rollback
+            .analog_effects
+            .as_ref()
+            .is_some_and(|journal| journal.has_candidate() || !journal.accepted().is_empty())
+        {
+            return Err(format!(
+                "generated Verilog-A instance '{}' ({}) has pending system tasks; checkpoint capture requires delivery at an accepted boundary",
+                self.instance_name, self.model_name
+            ));
+        }
         let candidate_offset = ddt_len.checked_add(idt_len).ok_or_else(|| {
             format!(
                 "generated Verilog-A instance '{}' state shape overflow",
@@ -2528,6 +2540,70 @@ mod tests {
                 "failed restore must not partially mutate live generated devices"
             );
         }
+    }
+
+    #[cfg(feature = "veriloga-model-r2-cmc")]
+    #[test]
+    fn generated_tasks_participate_in_rollback_acceptance_and_checkpoint_boundaries() {
+        let mut circuit = crate::CircuitData::new();
+        let mut devices = BuiltinVerilogADevices::new();
+        for name in ["r1", "r2"] {
+            devices.add(
+                instantiate_builtin(
+                    "R2_CMC",
+                    name,
+                    &["p".to_string(), "0".to_string()],
+                    &[],
+                    &crate::netlist::ParamContext::new(),
+                    &mut circuit,
+                )
+                .unwrap()
+                .unwrap(),
+            );
+        }
+        let mut reused = devices.capture_rollback_state();
+        for device in &mut devices.devices {
+            let mut state = device.kind.capture_rollback_state();
+            let journal = state.analog_effects.get_or_insert_with(Default::default);
+            journal.record_finish(1, 2.0, 0.0).unwrap();
+            device.kind.restore_rollback_state(&state);
+        }
+        devices.capture_rollback_state_into(&mut reused);
+        assert_eq!(reused, devices.capture_rollback_state());
+        let valid = devices.devices[1].kind.capture_rollback_state();
+        let mut invalid = valid.clone();
+        invalid
+            .analog_effects
+            .as_mut()
+            .unwrap()
+            .record_finish(1, 2.0, f64::NAN)
+            .unwrap_err();
+        devices.devices[1].kind.restore_rollback_state(&invalid);
+        let before = devices.capture_rollback_state();
+        assert!(devices.advance_state().is_err());
+        assert_eq!(before, devices.capture_rollback_state());
+        devices.devices[1].kind.restore_rollback_state(&valid);
+        devices.advance_state().unwrap();
+        assert!(
+            devices
+                .accepted_checkpoint_states()
+                .unwrap_err()
+                .contains("pending system tasks")
+        );
+        let mut delivered = Vec::new();
+        for device in &mut devices.devices {
+            device
+                .kind
+                .drain_analog_tasks(&mut |call| delivered.push(call));
+        }
+        assert_eq!(delivered.len(), 2);
+        devices.accepted_checkpoint_states().unwrap();
+        devices.restore_rollback_state(reused);
+        assert!(devices.accepted_checkpoint_states().is_err());
+        for device in &mut devices.devices {
+            device.kind.reset_analog_tasks();
+        }
+        devices.accepted_checkpoint_states().unwrap();
     }
 
     #[cfg(feature = "veriloga-model-diode-cmc")]

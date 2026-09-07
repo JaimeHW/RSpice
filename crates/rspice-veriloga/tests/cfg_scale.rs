@@ -311,7 +311,7 @@ fn count_regions(regions: &[HirRegion]) -> (usize, usize) {
     for region in regions {
         match region {
             HirRegion::Assignment(_) => assignments += 1,
-            HirRegion::Contribution(_) => {}
+            HirRegion::Contribution(_) | HirRegion::Task(_) => {}
             HirRegion::Conditional {
                 then_body,
                 else_body,

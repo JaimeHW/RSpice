@@ -433,6 +433,9 @@ struct CfgLowerer<'a> {
     /// Scoped mode used only by the grouped-noise metadata slicer. It never
     /// changes ordinary canonical residual lowering or its diagnostics.
     noise_metadata_only: bool,
+    /// Whether this graph owns task execution. Executable JIT plans run their
+    /// ordered assignment pass; numerical and noise slices must not replay it.
+    record_tasks: bool,
     /// Whether each noise process publishes its site magnitudes as well as its
     /// exit-merged ones. See [`CfgNoiseProcess::site`].
     noise_site_values: bool,
@@ -718,6 +721,7 @@ fn compute_instance_static_guard_conditions(hir: &HirModel) -> HashSet<ExprId> {
     ) {
         for region in regions {
             match region {
+                HirRegion::Task(_) => {}
                 HirRegion::Assignment(assignment) => {
                     let write_static = static_control
                         && hir_expr_is_instance_static(hir, assignment.expr.id, static_variables)
@@ -857,6 +861,7 @@ pub(crate) fn simparam_source_default(name: &str) -> f64 {
 /// read per instance.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct CfgLowerMode {
+    record_tasks: bool,
     /// Lower only what raw grouped-noise metadata needs.
     noise_metadata_only: bool,
     /// Publish each noise process's magnitudes as its own *site* computed them,
@@ -941,6 +946,7 @@ impl CfgLowerMode {
     /// emitted code. Flipping it is a one-word change plus a regeneration, and
     /// it is a *fix*: today those reads compile to zero.
     const GENERATED: Self = Self {
+        record_tasks: true,
         noise_metadata_only: false,
         noise_site_values: false,
         per_instance_ports: false,
@@ -950,6 +956,7 @@ impl CfgLowerMode {
     };
     #[cfg(any(feature = "native", feature = "wasm-jit"))]
     const EXECUTABLE: Self = Self {
+        record_tasks: false,
         noise_metadata_only: false,
         noise_site_values: true,
         per_instance_ports: true,
@@ -960,6 +967,7 @@ impl CfgLowerMode {
     /// Raw grouped-noise metadata is lowered for the generated backend and is
     /// part of the same frozen output, so it stays with `GENERATED` here.
     const NOISE_METADATA: Self = Self {
+        record_tasks: false,
         noise_metadata_only: true,
         noise_site_values: false,
         per_instance_ports: true,
@@ -1003,6 +1011,7 @@ impl<'a> CfgLowerer<'a> {
             noise: Vec::new(),
             noise_processes: Vec::new(),
             noise_metadata_only: mode.noise_metadata_only,
+            record_tasks: mode.record_tasks,
             noise_site_values: mode.noise_site_values,
             per_instance_ports: mode.per_instance_ports,
             lower_prologue: mode.lower_prologue,
@@ -1212,6 +1221,16 @@ impl<'a> CfgLowerer<'a> {
 
     fn region(&mut self, region: &HirRegion, dynamic_topology_ancestor: bool) {
         match region {
+            HirRegion::Task(task) => {
+                if self.record_tasks {
+                    let task = task.map(task.span, |expression| self.expr(expression.id));
+                    self.builder.push(
+                        self.block,
+                        CfgValueType::AnalogEffect,
+                        CfgValueKind::AnalogTask(task),
+                    );
+                }
+            }
             HirRegion::Assignment(assignment) => self.assignment(assignment),
             HirRegion::Contribution(contribution) => {
                 if self.noise_metadata_only {
@@ -1375,7 +1394,7 @@ impl<'a> CfgLowerer<'a> {
                         collect(else_body, out);
                     }
                     HirRegion::Loop { body, .. } => collect(body, out),
-                    HirRegion::Assignment(_) | HirRegion::Contribution(_) => {}
+                    HirRegion::Assignment(_) | HirRegion::Contribution(_) | HirRegion::Task(_) => {}
                 }
             }
         }

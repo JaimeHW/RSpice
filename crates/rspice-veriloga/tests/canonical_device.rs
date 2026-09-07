@@ -22,6 +22,97 @@ use std::process::Command;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 #[test]
+fn generated_system_tasks_follow_acceptance_rollback_and_observation_boundaries() {
+    let (state, stamp, noise) = generated_parts(
+        r#"
+module generated_tasks(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real gain = 2.0;
+    integer i;
+    analog begin
+        if (V(p, n) > 0.0) begin
+            i = 0;
+            while (i < 3) begin
+                $finish(i);
+                i = i + 1;
+            end
+        end
+        if (V(p, n) < 0.0) $finish(99);
+        I(p, n) <+ gain * V(p, n);
+    end
+endmodule
+"#,
+        "generated system tasks",
+    );
+    run_generated_main(
+        "generated system tasks",
+        &state,
+        &stamp,
+        &noise,
+        r#"
+fn stamp(instance: &mut device::state::Instance, voltage: f64) {
+    let voltages = [voltage, 0.0];
+    let ctx = runtime::GeneratedEvalContext { voltages: &voltages, temperature: 300.15 };
+    instance.stamp(&ctx, &mut runtime::GeneratedStamper::default());
+}
+fn accept(instance: &mut device::state::Instance) -> Vec<runtime::AnalogTaskInvocation> {
+    instance.validate_advance_state().unwrap();
+    instance.apply_validated_advance_state();
+    instance.drain_analog_tasks().collect()
+}
+let mut instance = device::state::Instance::new(&[0, 1]);
+assert!(instance.capture_rollback_state().analog_effects.is_none());
+instance.set_timepoint(1.0, 0.0, runtime::GeneratedDdtCoefficients::inactive());
+stamp(&mut instance, 1.0);
+assert_eq!(instance.drain_analog_tasks().count(), 0);
+assert!(instance.validate_checkpoint_ready().is_err());
+let candidate = instance.capture_rollback_state();
+runtime::set_tasks_enabled(false);
+stamp(&mut instance, -1.0);
+assert_eq!(candidate, instance.capture_rollback_state());
+runtime::set_tasks_enabled(true);
+instance.validate_advance_state().unwrap();
+instance.apply_validated_advance_state();
+assert!(instance.validate_checkpoint_ready().is_err());
+let calls = instance.drain_analog_tasks().collect::<Vec<_>>();
+assert_eq!(calls.len(), 3);
+for (level, call) in calls.iter().enumerate() {
+    assert_eq!(call.kind, runtime::AnalogTaskKind::Finish);
+    assert_eq!(call.site, calls[0].site);
+    assert_eq!(call.time, 1.0);
+    assert_eq!(&*call.arguments, &[runtime::AnalogTaskArgument::Integer(level as i64)]);
+}
+instance.validate_checkpoint_ready().unwrap();
+assert_eq!(instance.drain_analog_tasks().count(), 0);
+stamp(&mut instance, 1.0);
+stamp(&mut instance, 0.0);
+assert!(accept(&mut instance).is_empty());
+stamp(&mut instance, 1.0);
+let candidate = instance.capture_rollback_state();
+stamp(&mut instance, -1.0);
+assert!(instance.validate_advance_state().is_err());
+assert!(instance.drain_analog_tasks().next().is_none());
+instance.restore_rollback_state(&candidate);
+runtime::clear_evaluation_error();
+assert_eq!(accept(&mut instance).len(), 3);
+stamp(&mut instance, 1.0);
+instance.validate_advance_state().unwrap();
+instance.apply_validated_advance_state();
+stamp(&mut instance, 1.0);
+instance.reset_analog_tasks();
+instance.validate_checkpoint_ready().unwrap();
+assert_eq!(instance.drain_analog_tasks().count(), 0);
+let checkpoint = instance.capture_persistent_state();
+stamp(&mut instance, 1.0);
+instance.restore_persistent_state(&checkpoint).unwrap();
+instance.validate_checkpoint_ready().unwrap();
+"#,
+    )
+    .unwrap_or_else(|error| panic!("generated task lifecycle: {error}"));
+}
+
+#[test]
 fn a_generated_device_compiles_against_the_runtime_contract() {
     for (name, source) in fixtures() {
         let artifact = VerilogACompiler::default()
@@ -3214,11 +3305,18 @@ endmodule
 }
 
 /// Only what the emitted code calls, with the signatures it calls them by.
-const RUNTIME_STUB: &str = r#"
+const RUNTIME_STUB: &str = concat!(
+    r#"
 #![allow(dead_code, non_snake_case, unused_parens, unused_variables, unused_mut, unused_imports)]
 
+mod analog_effects {
+"#,
+    include_str!("../../rspice-veriloga-runtime/src/analog_effects.rs"),
+    r#"
+}
 pub mod runtime {
     pub type Value = f64;
+    pub use crate::analog_effects::*;
 
     #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
     pub struct GeneratedVerilogAAcceptedStateShapeIdentity([u8; 32]);
@@ -4076,7 +4174,13 @@ pub mod runtime {
     pub struct GeneratedVerilogARollbackState {
         pub values: Vec<Value>,
         pub flags: Vec<bool>,
+        pub analog_effects: Option<Box<AnalogEffectJournal>>,
     }
+
+    static TASKS_ENABLED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+    static EVALUATION_FAILED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    pub fn set_tasks_enabled(enabled: bool) { TASKS_ENABLED.store(enabled, std::sync::atomic::Ordering::SeqCst); }
+    pub fn clear_evaluation_error() { EVALUATION_FAILED.store(false, std::sync::atomic::Ordering::SeqCst); }
 
     static DYNAMIC_OPERATORS_ENABLED: std::sync::atomic::AtomicBool =
         std::sync::atomic::AtomicBool::new(true);
@@ -4147,6 +4251,9 @@ pub mod runtime {
         pub fn report_ddt_candidate_error(&self, _slot: usize, _source: GeneratedDdtCandidateError) {}
         pub fn report_idt_candidate_error(&self, _slot: usize, _source: GeneratedIdtCandidateError) {}
         pub fn report_event_control_error(&self, _operator: &'static str, _slot: usize, _source: GeneratedEventControlError) {}
+        pub fn analog_tasks_enabled(&self) -> bool { TASKS_ENABLED.load(std::sync::atomic::Ordering::SeqCst) }
+        pub fn evaluation_failed(&self) -> bool { EVALUATION_FAILED.load(std::sync::atomic::Ordering::SeqCst) }
+        pub fn report_analog_task_error(&self, _site: u32, _source: AnalogEffectError) { EVALUATION_FAILED.store(true, std::sync::atomic::Ordering::SeqCst); }
     }
 
     #[derive(Default)]
@@ -4371,4 +4478,5 @@ pub mod runtime {
         NonFiniteGain { process: usize, injection: usize, re: Value, im: Value },
     }
 }
-"#;
+"#
+);

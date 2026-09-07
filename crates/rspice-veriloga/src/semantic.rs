@@ -86,6 +86,7 @@ mod analyzed;
 mod digital;
 mod digital_elaborate;
 mod elaboration;
+mod function_effects;
 mod symbols;
 
 pub use analyzed::*;
@@ -105,6 +106,7 @@ pub struct SemanticAnalyzer {
     errors: Vec<SemanticError>,
     /// User-defined analog functions of the module under analysis
     user_functions: HashMap<SmolStr, FunctionDef>,
+    effectful_functions: HashSet<SmolStr>,
     /// Stack of active guard conditions (innermost last)
     guard_stack: Vec<Expression>,
     /// Structured regions being built, innermost last.
@@ -129,6 +131,7 @@ pub struct SemanticAnalyzer {
     /// for that step, so canonical lowering can pair the two lowerings of the
     /// module without reconstructing the correspondence.
     next_analog_site: u32,
+    in_analog_initial: bool,
     /// Constant parameter default values (compile-time diagnostics only:
     /// instances may override parameters, so these must never influence
     /// generated code)
@@ -197,12 +200,14 @@ impl SemanticAnalyzer {
             symbols: SymbolTable::new(),
             errors: Vec::new(),
             user_functions: HashMap::new(),
+            effectful_functions: HashSet::new(),
             guard_stack: Vec::new(),
             region_stack: vec![Vec::new()],
             subst_stack: Vec::new(),
             function_side_effects: Vec::new(),
             local_counter: 0,
             next_analog_site: 0,
+            in_analog_initial: false,
             param_consts: HashMap::new(),
             invariant_consts: HashMap::new(),
             inline_depth: 0,
@@ -500,6 +505,8 @@ impl SemanticAnalyzer {
             .iter()
             .map(|f| (f.name.clone(), f.clone()))
             .collect();
+        self.effectful_functions = function_effects::effectful_functions(&self.user_functions);
+        self.in_analog_initial = false;
         self.arrays.clear();
         self.task_vars.clear();
 
@@ -1273,11 +1280,13 @@ impl SemanticAnalyzer {
         self.analyze_digital(module, &mut analyzed);
 
         // Phase 11: analog initial runs before the main analog block
+        self.in_analog_initial = true;
         if let Some(block) = &module.analog_initial {
             for stmt in &block.statements {
                 self.analyze_statement(stmt, &mut analyzed, &mut statements)?;
             }
         }
+        self.in_analog_initial = false;
 
         // Phase 12: Analyze analog block
         if let Some(block) = &module.analog_block {
@@ -1636,10 +1645,12 @@ impl SemanticAnalyzer {
     /// Whether a call to this function *must* be lowered at a statement
     /// boundary. An output or inout argument writes a caller variable, which an
     /// expression cannot do.
-    fn function_needs_materialization(func: &FunctionDef) -> bool {
-        func.params
-            .iter()
-            .any(|param| param.direction != ParamDirection::Input)
+    fn function_needs_materialization(&self, func: &FunctionDef) -> bool {
+        self.effectful_functions.contains(&func.name)
+            || func
+                .params
+                .iter()
+                .any(|param| param.direction != ParamDirection::Input)
     }
 
     /// Whether a call to this function *should* be lowered at a statement
@@ -1654,8 +1665,8 @@ impl SemanticAnalyzer {
     /// Measured on `EPFL_HEMT_10a`, whose `core` nests three arms over five
     /// chained locals: 186,444 HIR expressions from an analog block holding 191
     /// assignments.
-    fn function_should_materialize(func: &FunctionDef) -> bool {
-        if Self::function_needs_materialization(func) {
+    fn function_should_materialize(&self, func: &FunctionDef) -> bool {
+        if self.function_needs_materialization(func) {
             return true;
         }
         // A clamped exponential is recognised and replaced by an intrinsic
@@ -2509,6 +2520,7 @@ impl SemanticAnalyzer {
             // ($strobe, $display, ...) have no effect on the device
             // equations
             AnalogStatement::Call(call) => match call.name.as_str() {
+                "$finish" => self.analyze_control_task(call, module, sink)?,
                 "$bound_step" => {
                     self.validate_system_task_arity(call, 1, Some(1))?;
                     self.analyze_bound_step(call, module, sink)?;
@@ -2528,6 +2540,43 @@ impl SemanticAnalyzer {
     }
 
     const MAX_STATIC_UNROLL_ITERATIONS: usize = 32;
+
+    fn analyze_control_task(
+        &mut self,
+        call: &CallStmt,
+        module: &mut AnalyzedModule,
+        sink: &mut Vec<AnalyzedStatement>,
+    ) -> CompileResult<()> {
+        use crate::analog_tasks::{AnalogTaskCall, AnalogTaskKind, AnalogTaskOperand};
+        self.validate_system_task_arity(call, 0, Some(1))?;
+        let diagnostic = match call.args.first() {
+            Some(argument) => self.lower_expression_with_side_effects(argument, module, sink)?,
+            None => Self::number_expr(1.0, call.span),
+        };
+        let kind = self.infer_type(&diagnostic)?;
+        if !kind.is_numeric() {
+            return Err(CompileError::Semantic(SemanticError::new(
+                SemanticErrorKind::TypeMismatch {
+                    expected: "numeric diagnostic level".into(),
+                    found: kind.to_string(),
+                    context: call.name.to_string(),
+                },
+                call.span,
+            )));
+        }
+        let mut task = AnalogTaskCall {
+            kind: AnalogTaskKind::Finish,
+            site: self.next_analog_site().0,
+            guard: None,
+            arguments: vec![AnalogTaskOperand::Integer(diagnostic)],
+            span: call.span,
+            initialization: self.in_analog_initial,
+        };
+        self.record_region(AnalyzedRegion::Task(task.clone()));
+        task.guard = self.current_guard();
+        sink.push(AnalyzedStatement::Task(task));
+        Ok(())
+    }
     const MAX_UNROLL_ITERATIONS: usize = 65536;
 
     /// Analyze a for loop: statically unroll when the bounds fold to
@@ -2801,8 +2850,9 @@ impl SemanticAnalyzer {
         module: &mut AnalyzedModule,
         sink: &mut Vec<AnalyzedStatement>,
     ) -> CompileResult<(Expression, Option<AnalogSiteId>)> {
-        // Identifiers and literals are stable by construction
-        if matches!(condition, Expression::Identifier(_) | Expression::Number(_)) {
+        // A variable can be changed by the selected arm. Only literals are
+        // intrinsically stable across execution of both flattened guards.
+        if matches!(condition, Expression::Number(_)) {
             return Ok((condition, None));
         }
 
@@ -2860,6 +2910,7 @@ impl SemanticAnalyzer {
         ) {
             for statement in statements {
                 match statement {
+                    AnalyzedStatement::Task(_) => {}
                     AnalyzedStatement::Assignment(assignment) => {
                         if assignment.index.is_some() {
                             if let Some(array) = module.arrays.get(&assignment.target) {
@@ -4172,7 +4223,7 @@ impl SemanticAnalyzer {
         let Some(func) = self.user_functions.get(&call.name).cloned() else {
             return Ok(None);
         };
-        if !Self::function_should_materialize(&func) {
+        if !self.function_should_materialize(&func) {
             return Ok(None);
         }
         if self.inline_depth >= Self::MAX_INLINE_DEPTH {
@@ -4412,12 +4463,22 @@ impl SemanticAnalyzer {
             }),
             Expression::Conditional(conditional) => {
                 if self.expression_contains_output_function_call(expr) {
-                    return Err(CompileError::Semantic(SemanticError::new(
-                        SemanticErrorKind::InvalidAnalogOperator(
-                            "analog function output/inout arguments are not supported inside conditional expressions".into(),
-                        ),
-                        conditional.span,
-                    )));
+                    let value_type = self.infer_type(expr)?;
+                    self.local_counter += 1;
+                    let name: SmolStr = format!("__conditional{}", self.local_counter).into();
+                    let var_type = if value_type == ValueType::Integer { VarType::Integer } else { VarType::Real };
+                    self.register_function_temp(module, name.clone(), var_type, conditional.span)?;
+                    let assignment = |value: &Expression| Box::new(AnalogStatement::Assignment(AssignmentStmt {
+                        target: LValue::Variable { name: name.clone(), span: conditional.span },
+                        value: value.clone(), span: conditional.span,
+                    }));
+                    self.analyze_statement(&AnalogStatement::Conditional(ConditionalStmt {
+                        condition: (*conditional.condition).clone(),
+                        then_branch: assignment(&conditional.then_expr),
+                        else_branch: Some(assignment(&conditional.else_expr)),
+                        span: conditional.span,
+                    }), module, sink)?;
+                    return Ok(Expression::Identifier(Identifier { name, span: conditional.span }));
                 }
                 Expression::Conditional(ConditionalExpr {
                     condition: Box::new(self.materialize_output_function_calls(
@@ -4440,7 +4501,7 @@ impl SemanticAnalyzer {
             }
             Expression::Call(call) => {
                 if let Some(func) = self.user_functions.get(&call.name).cloned()
-                    && Self::function_should_materialize(&func)
+                    && self.function_should_materialize(&func)
                 {
                     let args = if call.args.len() == func.params.len() {
                         call.args
@@ -4667,7 +4728,7 @@ impl SemanticAnalyzer {
             Expression::Call(call) => {
                 self.user_functions
                     .get(&call.name)
-                    .is_some_and(Self::function_needs_materialization)
+                    .is_some_and(|func| self.function_needs_materialization(func))
                     || call
                         .args
                         .iter()
@@ -5028,7 +5089,7 @@ impl SemanticAnalyzer {
                             span: call.span,
                         }));
                     }
-                    if Self::function_needs_materialization(func) {
+                    if self.function_needs_materialization(func) {
                         return Err(CompileError::Semantic(SemanticError::new(
                             SemanticErrorKind::InvalidAnalogOperator(format!(
                                 "analog function '{}': output/inout calls must be lowered at a statement boundary",
@@ -6221,7 +6282,6 @@ impl SemanticAnalyzer {
             "$display"
                 | "$error"
                 | "$fatal"
-                | "$finish"
                 | "$info"
                 | "$monitor"
                 | "$stop"

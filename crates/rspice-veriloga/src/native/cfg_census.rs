@@ -1367,6 +1367,11 @@ fn tag_assignment_steps(
     for step in steps {
         match step {
             AssignmentStep::Assign(assignment) => tag_program(tags, &assignment.program, context),
+            AssignmentStep::Task(task) => {
+                for program in task.expressions() {
+                    tag_program(tags, program, context);
+                }
+            }
             // The *value* first: `compile_assignment_items` binds the value
             // program before it compiles the index expression.
             AssignmentStep::AssignIndexed { index, value, .. } => {

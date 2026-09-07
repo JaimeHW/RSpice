@@ -345,7 +345,7 @@ fn walk_regions(
 ) {
     for region in regions {
         match region {
-            AnalyzedRegion::Assignment(_) => {}
+            AnalyzedRegion::Assignment(_) | AnalyzedRegion::Task(_) => {}
             AnalyzedRegion::Contribution(contribution) => {
                 evidence.contributions += 1;
                 let text = source_slice(source, contribution.span).to_ascii_lowercase();
@@ -466,6 +466,7 @@ fn assigned_state_targets(
     let mut assigned = BTreeSet::new();
     for region in regions {
         match region {
+            AnalyzedRegion::Task(_) => {}
             AnalyzedRegion::Assignment(assignment) => {
                 let target = assignment.target.to_string();
                 if state_variables.contains(&target) {

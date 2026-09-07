@@ -907,7 +907,7 @@ impl Instance {
 
 	pub const BRANCH_COUNT: usize = 19;
 	pub const PARAMETER_COUNT: usize = 296;
-	pub const VARIABLE_COUNT: usize = 1852;
+	pub const VARIABLE_COUNT: usize = 1892;
 	pub const DDT_STATE_COUNT: usize = 15;
 	pub const IDT_STATE_COUNT: usize = 0;
 	pub const ACCEPTED_STATE_SHAPE_IDENTITY: GeneratedVerilogAAcceptedStateShapeIdentity = GeneratedVerilogAAcceptedStateShapeIdentity::from_bytes([224, 55, 90, 199, 120, 141, 71, 164, 251, 28, 14, 9, 100, 0, 169, 241, 154, 121, 52, 155, 125, 222, 144, 44, 162, 27, 177, 179, 40, 82, 194, 49]);
@@ -957,7 +957,7 @@ impl Instance {
 		flags.extend_from_slice(&self.stamp_state.idt_initialized);
 		flags.extend_from_slice(&self.stamp_state.ddt_candidate_valid);
 		flags.extend_from_slice(&self.stamp_state.idt_candidate_valid);
-		GeneratedVerilogARollbackState { values, flags }
+		GeneratedVerilogARollbackState { values, flags, ..Default::default() }
 	}
 
 	#[doc(hidden)]
@@ -1013,6 +1013,17 @@ impl Instance {
 		rollback_flags = remaining;
 		debug_assert!(rollback_values.is_empty());
 		debug_assert!(rollback_flags.is_empty());
+	}
+
+	pub fn validate_checkpoint_ready(&self) -> Result<(), String> {
+		Ok(())
+	}
+
+	pub fn drain_analog_tasks(&mut self) -> impl Iterator<Item = rspice_veriloga_runtime::AnalogTaskInvocation> + '_ {
+		std::iter::empty()
+	}
+
+	pub fn reset_analog_tasks(&mut self) {
 	}
 
 	#[doc(hidden)]
@@ -1071,6 +1082,7 @@ impl Instance {
 		self.stamp_state.idt_initialized.copy_from_slice(&state.idt_initialized);
 		self.stamp_state.ddt_candidate_valid.fill(false);
 		self.stamp_state.idt_candidate_valid.fill(false);
+		self.reset_analog_tasks();
 		Ok(())
 	}
 

@@ -273,6 +273,7 @@ impl<S: Copy> CfgEvalSnapshot<S> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CfgEvalError {
+    AnalogEffectInNumericalEvaluation(ValueId),
     UndefinedValue(ValueId),
     UnterminatedBlock(BlockId),
     MissingInput(&'static str, usize),
@@ -317,6 +318,10 @@ pub enum CfgEvalError {
 impl std::fmt::Display for CfgEvalError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::AnalogEffectInNumericalEvaluation(value) => write!(
+                f,
+                "ordered analog task {value} reached a numerical-only evaluation"
+            ),
             Self::UndefinedValue(value) => write!(f, "{value} was read before it was defined"),
             Self::UnterminatedBlock(block) => write!(f, "{block} has no terminator"),
             Self::MissingInput(what, index) => write!(f, "no input supplied for {what} {index}"),
@@ -557,6 +562,9 @@ impl<S: CfgScalar> Evaluator<'_, S> {
             .len();
         let kind = self.function.value(id).kind.clone();
         Ok(match kind {
+            CfgValueKind::AnalogTask(_) => {
+                return Err(CfgEvalError::AnalogEffectInNumericalEvaluation(id));
+            }
             CfgValueKind::LaneSplat(constant) => vec![S::from_f64(constant); width],
             CfgValueKind::LaneWiden { input } => {
                 let source = self.read_lanes(input)?;
@@ -677,6 +685,9 @@ impl<S: CfgScalar> Evaluator<'_, S> {
     fn compute(&mut self, id: ValueId) -> Result<S, CfgEvalError> {
         let kind = self.function.value(id).kind.clone();
         Ok(match kind {
+            CfgValueKind::AnalogTask(_) => {
+                return Err(CfgEvalError::AnalogEffectInNumericalEvaluation(id));
+            }
             CfgValueKind::RealConstant(value) => S::from_f64(value),
             CfgValueKind::BooleanConstant(value) => S::from_f64(f64::from(u8::from(value))),
             // A parameter that no predecessor supplied a value for is a bug in

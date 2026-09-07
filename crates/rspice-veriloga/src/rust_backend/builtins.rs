@@ -60,6 +60,7 @@ const GENERATOR_SOURCE_DIGEST_INPUTS: &[&str] = &[
     "build.rs",
     "Cargo.toml",
     "src/lib.rs",
+    "src/analog_tasks.rs",
     "src/array_index.rs",
     "src/ast.rs",
     "src/bin",
@@ -3078,6 +3079,35 @@ fn write_registry(
     }
     out.push_str("    }\n");
     out.push('\n');
+    for (signature, expression, empty) in [
+        (
+            "reset_analog_tasks(&mut self)",
+            "device.reset_analog_tasks()",
+            "let _ = self;",
+        ),
+        (
+            "drain_analog_tasks(&mut self, consume: &mut dyn FnMut(super::AnalogTaskInvocation))",
+            "device.drain_analog_tasks().for_each(consume)",
+            "let _ = (self, consume);",
+        ),
+    ] {
+        writeln!(out, "    pub fn {signature} {{")?;
+        if devices.is_empty() {
+            writeln!(out, "        {empty}")?;
+        } else {
+            out.push_str("        match self {\n");
+            for (index, feature) in feature_names.iter().enumerate() {
+                writeln!(
+                    out,
+                    "            #[cfg(feature = {feature:?})]\n            Self::Device{index}(device) => {expression},"
+                )?;
+            }
+            out.push_str(
+                "            Self::__NonExhaustive(value) => match *value {},\n        }\n",
+            );
+        }
+        out.push_str("    }\n\n");
+    }
     out.push_str("    pub fn validate_advance_state(&self) -> Result<(), String> {\n");
     if devices.is_empty() {
         out.push_str("        let _ = self;\n");

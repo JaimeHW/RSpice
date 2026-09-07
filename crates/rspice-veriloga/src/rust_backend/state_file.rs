@@ -53,6 +53,7 @@ pub(super) struct StateFileExtensions {
     /// Whether generated state uses accepted/candidate `cross` or `above`
     /// detector records and therefore needs their runtime helpers imported.
     pub uses_cross_event_state: bool,
+    pub uses_analog_tasks: bool,
     pub params_visibility: &'static str,
     pub support_types: String,
     pub instance_fields: String,
@@ -87,6 +88,7 @@ impl Default for StateFileExtensions {
     fn default() -> Self {
         Self {
             uses_cross_event_state: false,
+            uses_analog_tasks: false,
             params_visibility: "pub",
             support_types: String::new(),
             instance_fields: String::new(),
@@ -496,7 +498,13 @@ pub(super) fn generate_state_file_with_extensions(
     out.push_str("        flags.extend_from_slice(&self.stamp_state.ddt_candidate_valid);\n");
     out.push_str("        flags.extend_from_slice(&self.stamp_state.idt_candidate_valid);\n");
     out.push_str(&extensions.rollback_capture_flags);
-    out.push_str("        GeneratedVerilogARollbackState { values, flags }\n");
+    if extensions.uses_analog_tasks {
+        out.push_str("        GeneratedVerilogARollbackState { values, flags, analog_effects: self.analog_effects.clone() }\n");
+    } else {
+        out.push_str(
+            "        GeneratedVerilogARollbackState { values, flags, ..Default::default() }\n",
+        );
+    }
     out.push_str("    }\n\n");
 
     out.push_str(
@@ -561,8 +569,29 @@ pub(super) fn generate_state_file_with_extensions(
     out.push_str("        self.stamp_state.idt_candidate_valid.copy_from_slice(field);\n");
     out.push_str("        rollback_flags = remaining;\n");
     out.push_str(&extensions.rollback_restore_fields);
+    if extensions.uses_analog_tasks {
+        out.push_str("        self.analog_effects.clone_from(&state.analog_effects);\n");
+    }
     out.push_str("        debug_assert!(rollback_values.is_empty());\n");
     out.push_str("        debug_assert!(rollback_flags.is_empty());\n");
+    out.push_str("    }\n\n");
+
+    out.push_str("    pub fn validate_checkpoint_ready(&self) -> Result<(), String> {\n");
+    if extensions.uses_analog_tasks {
+        out.push_str("        if self.analog_effects.as_ref().is_some_and(|journal| journal.has_candidate() || !journal.accepted().is_empty()) {\n            return Err(\"generated Verilog-A checkpoint requires accepted system tasks to be delivered and no candidate evaluation\".to_string());\n        }\n");
+    }
+    out.push_str("        Ok(())\n    }\n\n");
+    out.push_str(&format!("    pub fn drain_analog_tasks(&mut self) -> impl Iterator<Item = {}::AnalogTaskInvocation> + '_ {{\n", options.runtime_path));
+    if extensions.uses_analog_tasks {
+        out.push_str("        self.analog_effects.as_mut().map(|journal| journal.drain_accepted()).into_iter().flatten()\n");
+    } else {
+        out.push_str("        std::iter::empty()\n");
+    }
+    out.push_str("    }\n\n");
+    out.push_str("    pub fn reset_analog_tasks(&mut self) {\n");
+    if extensions.uses_analog_tasks {
+        out.push_str("        if let Some(journal) = self.analog_effects.as_mut() { journal.reset_analysis(); }\n");
+    }
     out.push_str("    }\n\n");
 
     out.push_str(
@@ -663,6 +692,7 @@ pub(super) fn generate_state_file_with_extensions(
     out.push_str("        self.stamp_state.ddt_candidate_valid.fill(false);\n");
     out.push_str("        self.stamp_state.idt_candidate_valid.fill(false);\n");
     out.push_str(&extensions.checkpoint_restore_fields);
+    out.push_str("        self.reset_analog_tasks();\n");
     out.push_str("        Ok(())\n");
     out.push_str("    }\n\n");
     out.push_str("    #[inline]\n");
@@ -954,6 +984,9 @@ pub(super) fn generate_state_file_with_extensions(
     out.push_str("            index += 1;\n");
     out.push_str("        }\n");
     out.push_str(&extensions.validate_advance_state);
+    if extensions.uses_analog_tasks {
+        out.push_str("        if let Some(journal) = self.analog_effects.as_ref() { journal.validate_candidate().map_err(|error| error.to_string())?; }\n");
+    }
     out.push_str("        Ok(())\n");
     out.push_str("    }\n\n");
     out.push_str("    pub fn apply_validated_advance_state(&mut self) {\n");
@@ -964,6 +997,9 @@ pub(super) fn generate_state_file_with_extensions(
         );
     }
     out.push_str(&extensions.apply_advance_state);
+    if extensions.uses_analog_tasks {
+        out.push_str("        if let Some(journal) = self.analog_effects.as_mut() { journal.apply_validated_acceptance(); }\n");
+    }
     out.push_str("        let mut index = 0usize;\n");
     out.push_str("        while index < Self::DDT_STATE_COUNT {\n");
     out.push_str("            if self.stamp_state.ddt_candidate_valid[index] {\n");

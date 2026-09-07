@@ -581,7 +581,9 @@ fn count_assignment_steps(steps: &[AssignmentStep]) -> usize {
     steps
         .iter()
         .map(|step| match step {
-            AssignmentStep::Assign(_) | AssignmentStep::AssignIndexed { .. } => 1,
+            AssignmentStep::Assign(_)
+            | AssignmentStep::AssignIndexed { .. }
+            | AssignmentStep::Task(_) => 1,
             AssignmentStep::Loop { body, .. } => 1 + count_assignment_steps(body),
         })
         .sum()
@@ -1103,6 +1105,7 @@ fn run_bytecode_sweep(model: &CompiledModel, context: &mut VmContext) -> Result<
 fn execute_assignment_steps(vm: &mut Vm<'_>, steps: &[AssignmentStep]) -> Result<(), VmError> {
     for step in steps {
         match step {
+            AssignmentStep::Task(task) => vm.execute_analog_task(task)?,
             AssignmentStep::Assign(assignment) => {
                 let value = vm.execute(&assignment.program)?;
                 vm.context.variables[assignment.var_index] = value;
@@ -1221,6 +1224,11 @@ fn scan_assignment_steps(
 ) {
     for step in steps {
         match step {
+            AssignmentStep::Task(task) => {
+                for program in task.expressions() {
+                    scan_program(program);
+                }
+            }
             AssignmentStep::Assign(assignment) => scan_program(&assignment.program),
             AssignmentStep::AssignIndexed { index, value, .. } => {
                 scan_program(index);
@@ -1354,6 +1362,7 @@ fn eval_context_from_vm_context(context: &mut VmContext) -> EvalContext {
         state_older_candidate_len: context.state_older_candidate.len(),
         prelude_slots: std::ptr::null_mut(),
         prelude_slots_len: 0,
+        analog_effects: context.analog_effects_ptr(),
     }
 }
 

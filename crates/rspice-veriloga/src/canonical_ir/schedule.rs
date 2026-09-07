@@ -1889,7 +1889,8 @@ fn leaf_class(kind: &CfgValueKind, parameter_scopes: &[ParameterScope]) -> Inval
         | CfgValueKind::DigitalCaseMatch { .. }
         | CfgValueKind::DigitalBlockingWrite { .. }
         | CfgValueKind::DigitalNonblockingWrite { .. }
-        | CfgValueKind::DigitalDriverWrite { .. } => InvalidationClass::Newton,
+        | CfgValueKind::DigitalDriverWrite { .. }
+        | CfgValueKind::AnalogTask(_) => InvalidationClass::Newton,
 
         _ => InvalidationClass::Model,
     }

@@ -142,6 +142,11 @@ fn encode_capability_imports(module: &mut Module) {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum WasmAssignment {
+    Finish {
+        site: u32,
+        guard_entry: Option<u32>,
+        argument_entry: u32,
+    },
     Direct {
         variable_index: u32,
         value_entry: u32,
@@ -1086,13 +1091,38 @@ fn emit_f64_array_store(
 fn assignment_loop_depth(assignments: &[WasmAssignment]) -> WasmJitResult<usize> {
     assignments.iter().try_fold(0_usize, |maximum, assignment| {
         let depth = match assignment {
-            WasmAssignment::Direct { .. } | WasmAssignment::Indexed { .. } => 0,
+            WasmAssignment::Direct { .. }
+            | WasmAssignment::Indexed { .. }
+            | WasmAssignment::Finish { .. } => 0,
             WasmAssignment::Loop { body, .. } => assignment_loop_depth(body)?
                 .checked_add(1)
                 .ok_or_else(|| WasmJitError::Encoding("assignment loop depth overflow".into()))?,
         };
         Ok(maximum.max(depth))
     })
+}
+
+/// The common helper ABI carries a site and at most one scalar operand for
+/// control tasks. Keep the returned value out of the error branch's stack.
+fn emit_task_helper(body: &mut Function, opcode: i32, site: u32, operand: bool, scratch: u32) {
+    body.instruction(&WasmInstruction::LocalGet(FRAME_LOCAL));
+    body.instruction(&WasmInstruction::I32Const(opcode));
+    body.instruction(&WasmInstruction::I32Const(site as i32));
+    body.instruction(&WasmInstruction::I32Const(0));
+    body.instruction(&WasmInstruction::I64Const(0));
+    if operand {
+        body.instruction(&WasmInstruction::LocalGet(FRAME_LOCAL));
+        body.instruction(&WasmInstruction::F64Load(f64_mem(FRAME_RESULT_OFFSET)));
+    } else {
+        body.instruction(&WasmInstruction::F64Const(0.0.into()));
+    }
+    for _ in 0..4 {
+        body.instruction(&WasmInstruction::F64Const(0.0.into()));
+    }
+    body.instruction(&WasmInstruction::Call(HELPER_FUNCTION_INDEX));
+    body.instruction(&WasmInstruction::LocalSet(scratch));
+    emit_return_existing_error(body);
+    body.instruction(&WasmInstruction::LocalGet(scratch));
 }
 
 fn emit_assignments(
@@ -1104,6 +1134,28 @@ fn emit_assignments(
 ) -> WasmJitResult<()> {
     for assignment in assignments {
         match assignment {
+            WasmAssignment::Finish {
+                site,
+                guard_entry,
+                argument_entry,
+            } => {
+                body.instruction(&WasmInstruction::Block(BlockType::Empty));
+                emit_task_helper(body, 460, *site, false, scratch_f64_local);
+                body.instruction(&WasmInstruction::F64Const(0.0.into()));
+                body.instruction(&WasmInstruction::F64Eq);
+                body.instruction(&WasmInstruction::BrIf(0));
+                if let Some(guard_entry) = guard_entry {
+                    emit_value_entry_call(body, *guard_entry, scalar_count)?;
+                    emit_task_helper(body, 461, *site, true, scratch_f64_local);
+                    body.instruction(&WasmInstruction::F64Const(0.0.into()));
+                    body.instruction(&WasmInstruction::F64Eq);
+                    body.instruction(&WasmInstruction::BrIf(0));
+                }
+                emit_value_entry_call(body, *argument_entry, scalar_count)?;
+                emit_task_helper(body, 462, *site, true, scratch_f64_local);
+                body.instruction(&WasmInstruction::Drop);
+                body.instruction(&WasmInstruction::End);
+            }
             WasmAssignment::Direct {
                 variable_index,
                 value_entry,
@@ -2860,6 +2912,7 @@ mod tests {
     #[derive(Default)]
     struct TestHostState {
         memory: Option<Memory>,
+        session: Option<super::super::runtime::WasmJitRuntimeSession>,
     }
 
     fn read_u32(bytes: &[u8], offset: usize) -> Option<u32> {
@@ -2869,7 +2922,7 @@ mod tests {
     }
 
     #[test]
-    fn independent_wasm_engine_executes_direct_indexed_and_loop_assignments() {
+    fn independent_wasm_engine_executes_direct_indexed_loop_and_task_assignments() {
         let seven = program(vec![NativeOp::Const(7.0)], 1);
         let index = program(vec![NativeOp::Const(1.0)], 1);
         let condition = program(vec![NativeOp::LoadVariable(4)], 1);
@@ -2891,10 +2944,27 @@ mod tests {
                 },
                 WasmAssignment::Loop {
                     condition_entry: 2,
-                    body: vec![WasmAssignment::Direct {
-                        variable_index: 4,
-                        value_entry: 3,
-                    }],
+                    body: vec![
+                        WasmAssignment::Finish {
+                            site: 20,
+                            guard_entry: Some(2),
+                            argument_entry: 2,
+                        },
+                        WasmAssignment::Direct {
+                            variable_index: 4,
+                            value_entry: 3,
+                        },
+                        WasmAssignment::Finish {
+                            site: 21,
+                            guard_entry: None,
+                            argument_entry: 2,
+                        },
+                        WasmAssignment::Finish {
+                            site: 22,
+                            guard_entry: Some(2),
+                            argument_entry: 0,
+                        },
+                    ],
                 },
             ],
         }];
@@ -2903,7 +2973,16 @@ mod tests {
 
         let engine = Engine::default();
         let module = Module::new(&engine, bytes.as_slice()).expect("compile module in wasmi");
-        let mut store = Store::new(&engine, TestHostState::default());
+        let mut context = crate::vm::VmContext::new(0);
+        context.time = 2.0;
+        context.begin_stateful_evaluation();
+        let mut store = Store::new(
+            &engine,
+            TestHostState {
+                memory: None,
+                session: Some(super::super::runtime::WasmJitRuntimeSession::new(context)),
+            },
+        );
         let memory = Memory::new(&mut store, MemoryType::new(1, None))
             .expect("allocate imported primary memory");
         store.data_mut().memory = Some(memory);
@@ -2964,13 +3043,14 @@ mod tests {
                         }
                         variables
                     };
-                    match super::super::runtime::evaluate_helper(
+                    match super::super::runtime::evaluate_helper_with_session(
                         opcode,
                         aux0,
                         aux1,
                         aux2,
                         [operand0, operand1, operand2, operand3, operand4],
                         &variables,
+                        caller.data_mut().session.as_mut(),
                     ) {
                         Ok(value) => value,
                         Err(_) => {
@@ -3039,6 +3119,32 @@ mod tests {
             })
             .collect::<Vec<_>>();
         assert_eq!(variables, vec![7.0, 0.0, 0.0, 7.0, 0.0]);
+        let context = store.data_mut().session.as_mut().unwrap().context_mut();
+        context.advance_state().unwrap();
+        let calls = context.drain_accepted_analog_tasks().collect::<Vec<_>>();
+        assert_eq!(
+            calls
+                .iter()
+                .map(|call| (call.site, call.time))
+                .collect::<Vec<_>>(),
+            vec![(20, 2.0), (21, 2.0)]
+        );
+        assert_eq!(
+            calls[0].arguments.as_ref(),
+            &[rspice_veriloga_runtime::AnalogTaskArgument::Integer(1)]
+        );
+        assert_eq!(
+            calls[1].arguments.as_ref(),
+            &[rspice_veriloga_runtime::AnalogTaskArgument::Integer(0)]
+        );
+        context.record_task_effects = false;
+        memory
+            .write(&mut store, VARIABLES_OFFSET + 4 * 8, &1.0_f64.to_le_bytes())
+            .unwrap();
+        assert_eq!(assign.call(&mut store, 0).unwrap(), WASM_JIT_STATUS_OK);
+        let context = store.data_mut().session.as_mut().unwrap().context_mut();
+        context.advance_state().unwrap();
+        assert_eq!(context.drain_accepted_analog_tasks().count(), 0);
     }
 
     #[test]

@@ -1884,6 +1884,9 @@ pub fn evaluate_generated_timer(
 pub struct GeneratedVerilogARollbackState {
     pub values: Vec<Value>,
     pub flags: Vec<bool>,
+    /// Task models retain the exact delivery and candidate state during solver
+    /// rollback. Numerical-only models leave this unallocated.
+    pub analog_effects: Option<Box<AnalogEffectJournal>>,
 }
 
 pub const GENERATED_PERSISTENT_STATE_VERSION: u32 = 4;
@@ -1919,6 +1922,10 @@ pub enum GeneratedStampLane {
 /// A recoverable failure reported while evaluating generated device code.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GeneratedEvaluationError {
+    AnalogTask {
+        site: u32,
+        source: AnalogEffectError,
+    },
     AnalogLoopLimit {
         phase: &'static str,
         iterations: usize,
@@ -1942,6 +1949,12 @@ pub enum GeneratedEvaluationError {
 impl std::fmt::Display for GeneratedEvaluationError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::AnalogTask { site, source } => {
+                write!(
+                    f,
+                    "generated Verilog-A system task at site {site} failed: {source}"
+                )
+            }
             Self::AnalogLoopLimit {
                 phase,
                 iterations,
@@ -2712,6 +2725,25 @@ impl<'a> GeneratedEvalContext<'a> {
     #[inline]
     pub fn take_evaluation_error(&self) -> Option<GeneratedEvaluationError> {
         self.evaluation_error.take()
+    }
+
+    /// Numerical observations must not replace or publish system-task calls.
+    #[inline]
+    pub fn analog_tasks_enabled(&self) -> bool {
+        matches!(self.evaluation_mode, GeneratedEvaluationMode::NewtonLimited)
+    }
+
+    #[inline]
+    pub fn evaluation_failed(&self) -> bool {
+        self.evaluation_error.get().is_some()
+    }
+
+    #[inline]
+    pub fn report_analog_task_error(&self, site: u32, source: AnalogEffectError) {
+        if self.evaluation_error.get().is_none() {
+            self.evaluation_error
+                .set(Some(GeneratedEvaluationError::AnalogTask { site, source }));
+        }
     }
 
     #[inline]

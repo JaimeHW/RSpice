@@ -381,6 +381,7 @@ pub enum IrAssignmentItem {
         condition: NodeId,
         body: Vec<IrAssignmentItem>,
     },
+    Task(crate::analog_tasks::AnalogTaskCall<NodeId, crate::canonical_ir::SourceSpanRef>),
 }
 
 /// Branch equation: represents I(p,n) <+ f(...) or V(p,n) <+ f(...)
@@ -923,6 +924,9 @@ impl DeviceIR {
             .iter()
             .map(|statement| match statement {
                 crate::semantic::AnalyzedStatement::Assignment(assignment) => assignment.site,
+                crate::semantic::AnalyzedStatement::Task(task) => {
+                    crate::semantic::AnalogSiteId(task.site)
+                }
                 crate::semantic::AnalyzedStatement::Loop(loop_statement) => loop_statement.site,
             })
             .collect::<Vec<_>>();
@@ -1227,6 +1231,11 @@ impl DeviceIR {
     ) -> CompileResult<()> {
         for item in items {
             match item {
+                IrAssignmentItem::Task(task) => {
+                    for &expression in task.expressions() {
+                        Self::collect_noise_processes(expression, arena, out)?;
+                    }
+                }
                 IrAssignmentItem::Assign(assignment) => {
                     Self::collect_noise_processes(assignment.expr, arena, out)?;
                 }
@@ -1578,6 +1587,10 @@ impl DeviceIR {
         use crate::semantic::AnalyzedStatement;
         for stmt in statements {
             match stmt {
+                AnalyzedStatement::Task(task) => out.push(IrAssignmentItem::Task(task.try_map(
+                    crate::canonical_ir::SourceSpanRef::from(task.span),
+                    |expression| converter.convert(arena, expression),
+                )?)),
                 AnalyzedStatement::Assignment(assign) => {
                     let expr = converter.convert(arena, &assign.expression)?;
                     let index = match &assign.index {
@@ -1800,6 +1813,7 @@ impl DeviceIR {
         ) {
             for item in items {
                 match item {
+                    IrAssignmentItem::Task(_) => {}
                     IrAssignmentItem::Assign(a) => {
                         out.insert(variables[a.var_index].name.clone());
                     }
@@ -1823,6 +1837,7 @@ impl DeviceIR {
             ) {
                 for item in items {
                     match item {
+                        IrAssignmentItem::Task(_) => {}
                         IrAssignmentItem::Assign(a) => {
                             if let Some(target) = &a.index {
                                 // A runtime-indexed write may land in any
@@ -2121,6 +2136,11 @@ pub mod autodiff {
     ) {
         for item in items {
             match item {
+                IrAssignmentItem::Task(task) => {
+                    for &expression in task.expressions() {
+                        collect_ddx_operand_names_in_expr(arena, expression, out);
+                    }
+                }
                 IrAssignmentItem::Assign(assign) => {
                     collect_ddx_operand_names_in_expr(arena, assign.expr, out);
                 }
@@ -2323,6 +2343,7 @@ pub mod autodiff {
     ) {
         for item in items {
             match item {
+                IrAssignmentItem::Task(_) => {}
                 IrAssignmentItem::Assign(assign) => {
                     let mask = derivative_axes(arena, assign.expr, deps, num_nodes);
                     if mask == 0 {
@@ -2470,6 +2491,7 @@ pub mod autodiff {
     ) {
         for item in items {
             match item {
+                IrAssignmentItem::Task(_) => {}
                 IrAssignmentItem::Assign(assign) => {
                     let target = match &assign.index {
                         Some(target) => target.array.clone(),
@@ -2505,6 +2527,7 @@ pub mod autodiff {
         let mut rewritten = Vec::with_capacity(items.len() * 2);
         for item in items {
             match item {
+                IrAssignmentItem::Task(task) => rewritten.push(IrAssignmentItem::Task(task)),
                 IrAssignmentItem::Assign(assign) => {
                     if let Some(target) = &assign.index {
                         // Indexed write: the shadow run receives an indexed
@@ -3297,6 +3320,7 @@ pub mod autodiff {
     ) {
         for item in items {
             match item {
+                IrAssignmentItem::Task(_) => {}
                 IrAssignmentItem::Assign(assign) => {
                     let axes = expression_noise_axes(arena, assign.expr, deps, num_processes);
                     if axes.is_empty() {
@@ -3351,6 +3375,7 @@ pub mod autodiff {
         let mut rewritten = Vec::with_capacity(items.len().saturating_mul(2));
         for item in items {
             match item {
+                IrAssignmentItem::Task(task) => rewritten.push(IrAssignmentItem::Task(task)),
                 IrAssignmentItem::Assign(assign) => {
                     let target_name = assign
                         .index
@@ -3572,6 +3597,11 @@ pub mod autodiff {
     ) {
         for item in items {
             match item {
+                IrAssignmentItem::Task(task) => {
+                    for expression in task.expressions_mut() {
+                        *expression = rewrite_branch_probes(arena, *expression, table);
+                    }
+                }
                 IrAssignmentItem::Assign(assign) => {
                     assign.expr = rewrite_branch_probes(arena, assign.expr, table);
                     if let Some(target) = &mut assign.index {
@@ -3689,6 +3719,13 @@ pub mod autodiff {
     ) {
         for item in items {
             match item {
+                IrAssignmentItem::Task(task) => {
+                    for expression in task.expressions_mut() {
+                        if contains_ddx(arena, *expression) {
+                            *expression = resolve_ddx(arena, *expression, shadows);
+                        }
+                    }
+                }
                 IrAssignmentItem::Assign(assign) => {
                     if contains_ddx(arena, assign.expr) {
                         assign.expr = resolve_ddx(arena, assign.expr, shadows);
@@ -3767,6 +3804,11 @@ pub mod autodiff {
     ) {
         for item in items {
             match item {
+                IrAssignmentItem::Task(task) => {
+                    for expression in task.expressions_mut() {
+                        *expression = assign_zi_site_ordinals(arena, *expression, next);
+                    }
+                }
                 IrAssignmentItem::Assign(assignment) => {
                     assignment.expr = assign_zi_site_ordinals(arena, assignment.expr, next);
                 }
@@ -3815,6 +3857,11 @@ pub mod autodiff {
     ) {
         for item in items {
             match item {
+                IrAssignmentItem::Task(task) => {
+                    for expression in task.expressions_mut() {
+                        *expression = assign_laplace_site_ordinals(arena, *expression, next);
+                    }
+                }
                 IrAssignmentItem::Assign(assignment) => {
                     assignment.expr = assign_laplace_site_ordinals(arena, assignment.expr, next);
                 }
@@ -3853,6 +3900,11 @@ pub mod autodiff {
     ) {
         for item in items {
             match item {
+                IrAssignmentItem::Task(task) => {
+                    for expression in task.expressions_mut() {
+                        *expression = assign_slew_site_ordinals(arena, *expression, next);
+                    }
+                }
                 IrAssignmentItem::Assign(assignment) => {
                     assignment.expr = assign_slew_site_ordinals(arena, assignment.expr, next);
                 }
@@ -3894,6 +3946,11 @@ pub mod autodiff {
     ) {
         for item in items {
             match item {
+                IrAssignmentItem::Task(task) => {
+                    for expression in task.expressions_mut() {
+                        *expression = assign_transition_site_ordinals(arena, *expression, next);
+                    }
+                }
                 IrAssignmentItem::Assign(assignment) => {
                     assignment.expr = assign_transition_site_ordinals(arena, assignment.expr, next);
                 }
@@ -3933,6 +3990,11 @@ pub mod autodiff {
     ) {
         for item in items {
             match item {
+                IrAssignmentItem::Task(task) => {
+                    for expression in task.expressions_mut() {
+                        *expression = assign_absdelay_site_ordinals(arena, *expression, next);
+                    }
+                }
                 IrAssignmentItem::Assign(assignment) => {
                     assignment.expr = assign_absdelay_site_ordinals(arena, assignment.expr, next);
                 }

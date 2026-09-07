@@ -1289,7 +1289,7 @@ fn metadata_digest_is_stable_and_hex_encoded() {
     assert_ne!(digest, StableDigest::from_text("module other; endmodule"));
 
     let metadata = CanonicalMetadata::for_source("fixture", "module tiny; endmodule");
-    assert_eq!(metadata.schema_version, 19);
+    assert_eq!(metadata.schema_version, 20);
     assert_eq!(metadata.source_package.as_str(), "fixture");
     assert_eq!(metadata.source_digest.as_str(), digest.as_hex());
 }
@@ -2129,7 +2129,7 @@ fn artifact_dump_is_deterministic_and_contains_phase_summaries() {
 
     assert_eq!(first, second);
     assert!(first.contains("canonical-veriloga-ir"));
-    assert!(first.contains("schema_version=19"));
+    assert!(first.contains("schema_version=20"));
     assert!(first.contains("source_package=fixture"));
     assert!(first.contains("source_digest="));
     assert!(first.contains("source_identity="));
@@ -3598,7 +3598,7 @@ fn hir_validation_rejects_malformed_array_contribution_and_statement_paths() {
         .iter()
         .find_map(|statement| match statement {
             HirStatement::Assignment(assignment) => Some(assignment.clone()),
-            HirStatement::Loop(_) => None,
+            HirStatement::Loop(_) | HirStatement::Task(_) => None,
         })
         .expect("assignment statement");
     invalid_assignment.target = VariableId::from(variable_count);
@@ -3751,7 +3751,7 @@ endmodule
         .iter()
         .filter(|statement| match statement {
             HirStatement::Assignment(assignment) => assignment.target == snapshot.id,
-            HirStatement::Loop(_) => false,
+            HirStatement::Loop(_) | HirStatement::Task(_) => false,
         })
         .count();
     assert_eq!(
@@ -3764,7 +3764,7 @@ endmodule
             .iter()
             .map(|region| match region {
                 HirRegion::Assignment(assignment) => usize::from(assignment.target == target),
-                HirRegion::Contribution(_) => 0,
+                HirRegion::Contribution(_) | HirRegion::Task(_) => 0,
                 HirRegion::Conditional {
                     then_body,
                     else_body,

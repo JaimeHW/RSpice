@@ -328,6 +328,9 @@ pub struct VmContext {
     /// Lazily allocated task delivery state. Pure numerical models pay only
     /// for the optional pointer and allocate no effect storage.
     analog_effects: Option<Box<rspice_veriloga_runtime::AnalogEffectJournal>>,
+    /// Numerical replay/probe passes preserve the candidate journal and may
+    /// not append calls to it. This is separate from the limiter policy.
+    pub(crate) record_task_effects: bool,
     /// Current simulation time
     pub time: f64,
     /// Temperature in Kelvin
@@ -447,6 +450,7 @@ impl Default for VmContext {
             event_state_indices: Vec::new(),
             accepted_event_variables: Vec::new(),
             analog_effects: None,
+            record_task_effects: false,
             time: 0.0,
             temperature: 300.15, // 27C default
             state_values: Vec::new(),
@@ -479,6 +483,30 @@ impl Default for VmContext {
 }
 
 impl VmContext {
+    pub(crate) fn analog_effect_journal(
+        &mut self,
+    ) -> &mut rspice_veriloga_runtime::AnalogEffectJournal {
+        self.analog_effects.get_or_insert_with(Default::default)
+    }
+
+    pub(crate) fn invalidate_task_candidate(&mut self) {
+        if self.record_task_effects {
+            self.analog_effect_journal()
+                .invalidate_candidate(rspice_veriloga_runtime::AnalogEffectError::EvaluationFailed);
+        }
+    }
+
+    #[cfg(feature = "native")]
+    pub(crate) fn analog_effects_ptr(
+        &mut self,
+    ) -> *mut Option<Box<rspice_veriloga_runtime::AnalogEffectJournal>> {
+        if self.record_task_effects {
+            &mut self.analog_effects
+        } else {
+            std::ptr::null_mut()
+        }
+    }
+
     /// Capture one analog task without producing an externally visible effect.
     /// Only circuit-wide acceptance publishes calls for host delivery.
     pub fn record_analog_task(
@@ -531,6 +559,7 @@ impl VmContext {
             event_state_indices: Vec::new(),
             accepted_event_variables: Vec::new(),
             analog_effects: None,
+            record_task_effects: false,
             time: 0.0,
             temperature: 300.15,
             state_values: Vec::new(),
@@ -579,6 +608,7 @@ impl VmContext {
             event_state_indices: Vec::new(),
             accepted_event_variables: Vec::new(),
             analog_effects: None,
+            record_task_effects: false,
             time: 0.0,
             temperature: 300.15,
             state_values: Vec::new(),
@@ -627,6 +657,7 @@ impl VmContext {
             event_state_indices: Vec::new(),
             accepted_event_variables: Vec::new(),
             analog_effects: None,
+            record_task_effects: false,
             time: 0.0,
             temperature: 300.15,
             state_values: vec![0.0; num_states],
@@ -1154,6 +1185,7 @@ impl VmContext {
     }
 
     pub(crate) fn restore_accepted_checkpoint(&mut self, checkpoint: &VmAcceptedCheckpoint) {
+        self.record_task_effects = false;
         if let Some(journal) = &mut self.analog_effects {
             journal.reset_analysis();
         }
@@ -1231,6 +1263,7 @@ impl VmContext {
     /// variables and every analog-operator history start from their
     /// language-defined zero state.
     pub(crate) fn reset_analysis_state(&mut self) {
+        self.record_task_effects = false;
         if let Some(journal) = &mut self.analog_effects {
             journal.reset_analysis();
         }
@@ -1281,8 +1314,14 @@ impl VmContext {
     /// Invalidate every speculative operator candidate before each complete
     /// device evaluation. Only candidates recreated by the final Newton pass
     /// may be committed when the point is accepted.
+    #[cfg(test)]
     pub(crate) fn begin_stateful_evaluation(&mut self) {
-        if let Some(journal) = &mut self.analog_effects {
+        self.begin_stateful_evaluation_with_tasks(true);
+    }
+
+    pub(crate) fn begin_stateful_evaluation_with_tasks(&mut self, record_tasks: bool) {
+        self.record_task_effects = record_tasks;
+        if record_tasks && let Some(journal) = &mut self.analog_effects {
             journal.discard_candidate();
         }
         for (&index, &accepted) in self

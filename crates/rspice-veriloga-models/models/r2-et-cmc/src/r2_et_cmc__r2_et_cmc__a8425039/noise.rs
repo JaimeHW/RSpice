@@ -17,7 +17,7 @@ impl Instance {
         if !self.multiplicity.is_finite() || self.multiplicity <= 0.0 {
             return Err(GeneratedNoiseEvaluationError::InvalidMultiplicity { value: self.multiplicity });
         }
-        let mut prepared = [0.0; 16];
+        let mut prepared = [0.0; 17];
         let produced = canonical_model_preprocess(
             &self.params.values,
             &self.param_given[..],
@@ -50,27 +50,27 @@ impl Instance {
         let staged = &prepared[..];
         let node_potentials = [ctx.node_voltage(self.nodes[0]), ctx.node_voltage(self.nodes[1]), ctx.node_voltage(self.nodes[2])];
 		let A=0f64;
-		let B=parameter_given[10] as u8 as f64;
-		let C=parameters[10];
-		let D=1f64;
+		let B=1f64;
+		let C=parameter_given[10] as u8 as f64;
+		let D=parameters[10];
 		let F=parameter_given[11] as u8 as f64;
 		let G=0.01f64;
-		let H=staged[5];
-		let M=staged[6]!=0.0;
-		let N=staged[8]!=0.0;
+		let H=staged[6];
+		let M=staged[7]!=0.0;
+		let N=staged[9]!=0.0;
 		let O=parameters[2];
 		let P=parameters[1];
-		let Q=staged[9]!=0.0;
+		let Q=staged[10]!=0.0;
 		let R=parameters[0];
 		let T=parameters[22];
 		let V=1e99f64;
 		let X=staged[0];
 		let AA=parameters[17];
-		let AG=staged[10]!=0.0;
-		let AH=staged[11]!=0.0;
-		let AK=staged[13]!=0.0;
-		let AV=staged[12]!=0.0;
-		let AY=staged[14]!=0.0;
+		let AG=staged[11]!=0.0;
+		let AH=staged[12]!=0.0;
+		let AK=staged[14]!=0.0;
+		let AV=staged[13]!=0.0;
+		let AY=staged[15]!=0.0;
 		let BZ=parameters[25];
 		let CI=parameters[24];
 		let CY=parameters[29];
@@ -84,15 +84,15 @@ impl Instance {
 		let FT=parameters[31];
 		let GE=parameters[32];
 		let K=if parameter_given[10]{
-		C
+		D
 		}else{
-		let E=ctx.simparam_or("scale", D);
+		let E=ctx.simparam_or("scale", B);
 		E
 		};
 		let J=if parameter_given[11]{
 		H
 		}else{
-		let I=D- (G* (ctx.simparam_or("shrink", A)));
+		let I=B- (G* (ctx.simparam_or("shrink", A)));
 		I
 		};
 		let L=(J* K)* 1e6f64;
@@ -129,7 +129,7 @@ impl Instance {
 		if Z{
 		let AB=(AA/ O)* Y;
 		let AC=AB- T;
-		let AD=D/ O;
+		let AD=B/ O;
 		BT=AC;
 		CO=O;
 		DM=AB;
@@ -205,7 +205,7 @@ impl Instance {
 		if AP{
 		let AQ=(O/ AA)* AO;
 		let AR=AQ- X;
-		let AS=D/ O;
+		let AS=B/ O;
 		BO=AR;
 		CF=AQ;
 		CS=O;
@@ -284,7 +284,7 @@ impl Instance {
 		let FD;
 		if BG{
 		let BH=AA* (BE/ BC);
-		let BI=D/ BH;
+		let BI=B/ BH;
 		CW=BH;
 		FD=BI;
 		}else{
@@ -378,16 +378,16 @@ impl Instance {
 		EM=DT;
 		EN=DX;
 		}
-		let EB=staged[1]+ (parameters[7]* node_potentials[2]);
-		let ED=EB< staged[2];
+		let EB=staged[2]+ (parameters[7]* node_potentials[2]);
+		let ED=EB< staged[3];
 		let EI;
 		if ED{
-		let EE=EC+ (((EB- EC)- D).exp());
+		let EE=EC+ (((EB- EC)- B).exp());
 		EI=EE;
 		}else{
-		let EG=EB> (EF- D);
+		let EG=EB> (EF- B);
 		let EJ=if EG{
-		let EH=EF- (((EF- EB)- D).exp());
+		let EH=EF- (((EF- EB)- B).exp());
 		EH
 		}else{
 		EB
@@ -395,18 +395,18 @@ impl Instance {
 		EI=EJ;
 		}
 		let EK=EI+ 273.15f64;
-		let EL=EK- staged[3];
-		let EO=D+ (EL* (EM+ (EL* EN)));
+		let EL=EK- staged[4];
+		let EO=B+ (EL* (EM+ (EL* EN)));
 		let EP=EO< 0.11f64;
 		let ER=if EP{
-		let EQ=G+ (0.1f64* (((10f64* (EO- G))- D).exp()));
+		let EQ=G+ (0.1f64* (((10f64* (EO- G))- B).exp()));
 		EQ
 		}else{
 		EO
 		};
 		let ES=CM* ER;
 		let FE=ET/ ER;
-		let FF=(D+ (EL* parameters[43]))* parameters[30];
+		let FF=(B+ (EL* parameters[43]))* parameters[30];
 		let FG=FF< A;
 		let FS=if FG{
 		A
@@ -414,15 +414,15 @@ impl Instance {
 		FF
 		};
 		let FH=node_potentials[0]- node_potentials[1];
-		let FI=CX&& (staged[4]!=0.0);
+		let FI=CX&& (staged[1]!=0.0);
 		let FN=if FI{
 		let FJ=FH/ CL;
 		let FK=parameters[28]* FJ;
 		let FL=parameters[26]* (FJ.abs());
-		let FM=(((D- CY)- CZ)+ (CY* ((D+ (FK* FK)).sqrt())))+ (CZ* ((D+ ((FL* FL)* FL)).powf(0.3333333333333333f64)));
+		let FM=(((B- CY)- CZ)+ (CY* ((B+ (FK* FK)).sqrt())))+ (CZ* ((B+ ((FL* FL)* FL)).powf(0.3333333333333333f64)));
 		FM
 		}else{
-		D
+		B
 		};
 		let FO=FH/ (ES* FN);
 		let FP=(parameters[6]!=0.0&& CX)&& (ET> A);
@@ -510,9 +510,9 @@ impl Instance {
         let branch_flows: [f64; 0] = [];
         let branch_unknown_flows: [f64; 0] = [];
         let A=0f64;
-        let B=parameter_given[10] as u8 as f64;
-        let C=parameters[10];
-        let D=1f64;
+        let B=1f64;
+        let C=parameter_given[10] as u8 as f64;
+        let D=parameters[10];
         let F=parameter_given[11] as u8 as f64;
         let G=0.01f64;
         let M=273.15f64;
@@ -542,16 +542,16 @@ impl Instance {
         let GH=parameters[31];
         let GS=parameters[32];
         let K=if parameter_given[10]{
-        C
+        D
         }else{
-        let E=ctx.simparam_or("scale", D);
+        let E=ctx.simparam_or("scale", B);
         E
         };
         let J=if parameter_given[11]{
-        let H=D- (G* parameters[11]);
+        let H=B- (G* parameters[11]);
         H
         }else{
-        let I=D- (G* (ctx.simparam_or("shrink", A)));
+        let I=B- (G* (ctx.simparam_or("shrink", A)));
         I
         };
         let L=(J* K)* 1e6f64;
@@ -606,7 +606,7 @@ impl Instance {
         if AL{
         let AN=(AM/ Z)* AK;
         let AO=AN- AE;
-        let AP=D/ Z;
+        let AP=B/ Z;
         CF=AO;
         DA=Z;
         DZ=AN;
@@ -685,7 +685,7 @@ impl Instance {
         if BB{
         let BC=(Z/ AM)* BA;
         let BD=BC- AI;
-        let BE=D/ Z;
+        let BE=B/ Z;
         CA=BD;
         CR=BC;
         DE=Z;
@@ -766,7 +766,7 @@ impl Instance {
         let FR;
         if BS{
         let BT=AM* (BQ/ BO);
-        let BU=D/ BT;
+        let BU=B/ BT;
         DI=BT;
         FR=BU;
         }else{
@@ -862,16 +862,16 @@ impl Instance {
         FB=EK;
         }
         let EP=O+ (EO* node_potentials[2]);
-        let ER=EP< (EQ+ D);
+        let ER=EP< (EQ+ B);
         let EW;
         if ER{
-        let ES=EQ+ (((EP- EQ)- D).exp());
+        let ES=EQ+ (((EP- EQ)- B).exp());
         EW=ES;
         }else{
-        let EU=EP> (ET- D);
+        let EU=EP> (ET- B);
         let EX;
         if EU{
-        let EV=ET- (((ET- EP)- D).exp());
+        let EV=ET- (((ET- EP)- B).exp());
         EX=EV;
         }else{
         EX=EP;
@@ -880,18 +880,18 @@ impl Instance {
         }
         let EY=EW+ M;
         let EZ=EY- N;
-        let FC=D+ (EZ* (FA+ (EZ* FB)));
+        let FC=B+ (EZ* (FA+ (EZ* FB)));
         let FD=FC< 0.11f64;
         let FF;
         if FD{
-        let FE=G+ (0.1f64* (((10f64* (FC- G))- D).exp()));
+        let FE=G+ (0.1f64* (((10f64* (FC- G))- B).exp()));
         FF=FE;
         }else{
         FF=FC;
         }
         let FG=CY* FF;
         let FS=FH/ FF;
-        let FT=(D+ (EZ* parameters[43]))* parameters[30];
+        let FT=(B+ (EZ* parameters[43]))* parameters[30];
         let FU=FT< A;
         let GG=if FU{
         A
@@ -904,10 +904,10 @@ impl Instance {
         let FX=FV/ CX;
         let FY=parameters[28]* FX;
         let FZ=parameters[26]* (FX.abs());
-        let GA=(((D- DK)- DL)+ (DK* ((D+ (FY* FY)).sqrt())))+ (DL* ((D+ ((FZ* FZ)* FZ)).powf(0.3333333333333333f64)));
+        let GA=(((B- DK)- DL)+ (DK* ((B+ (FY* FY)).sqrt())))+ (DL* ((B+ ((FZ* FZ)* FZ)).powf(0.3333333333333333f64)));
         GA
         }else{
-        D
+        B
         };
         let GC=FV/ (FG* GB);
         let GD=(parameters[6]!=0.0&& DJ)&& (FH> A);
@@ -946,7 +946,7 @@ impl Instance {
         let GT=1f64;
         let GU=1f64;
         let omega = core::f64::consts::TAU * frequency_hz;
-        let process_0_active = D != 0.0;
+        let process_0_active = B != 0.0;
         let process_0_psd = (GP).abs();
         if !process_0_psd.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 0, quantity: "psd", value: process_0_psd }); }
         let process_0_exponent: Option<f64> = None;
@@ -956,7 +956,7 @@ impl Instance {
         if !process_0_gain_0.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFiniteGain { process: 0, injection: 0, re: process_0_gain_0.re, im: process_0_gain_0.im }); }
         let process_0_injections = [GeneratedNoiseInjectionEvaluation { descriptor: 0, gain: process_0_gain_0 }];
         if !visitor.visit_process(0, GeneratedNoiseProcessEvaluationRef { active: process_0_active, psd: process_0_psd, exponent: process_0_exponent, table_operands: &process_0_table, injections: &process_0_injections }) { return Ok(()); }
-        let process_1_active = D != 0.0;
+        let process_1_active = B != 0.0;
         let process_1_psd = (GQ).abs();
         if !process_1_psd.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 1, quantity: "psd", value: process_1_psd }); }
         let process_1_exponent: Option<f64> = Some(GS);

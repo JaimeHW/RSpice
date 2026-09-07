@@ -12,6 +12,15 @@ pub(crate) fn validate_jit_coverage(model: &CompiledModel) -> JitResult<()> {
 
 fn validate_assignment_coverage(model: &CompiledModel, step: &AssignmentStep) -> JitResult<()> {
     match step {
+        AssignmentStep::Task(task) => {
+            if task.finish_operand().is_none() {
+                return Err(JitError::unsupported_native_coverage(
+                    model.name.clone(),
+                    "AnalogTask",
+                ));
+            }
+            Ok(())
+        }
         AssignmentStep::Assign(_) => Ok(()),
         AssignmentStep::AssignIndexed { base, len, .. } => {
             validate_assignment_range(model, *base, *len)

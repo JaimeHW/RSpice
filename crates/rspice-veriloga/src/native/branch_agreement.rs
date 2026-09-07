@@ -232,6 +232,7 @@ fn value_programs(plan: &crate::jit::model_plan::NativeModelPlan) -> Vec<&Native
         for assignment in assignments {
             match assignment {
                 NativeAssignment::Direct { program, .. } => out.push(program),
+                NativeAssignment::Task(task) => out.extend(task.expressions()),
                 NativeAssignment::Indexed { index, value, .. } => {
                     out.push(index);
                     out.push(value);

@@ -730,6 +730,13 @@ impl StateSlotMapping {
     fn note_assignment_pass_programs(&mut self, steps: &[AssignmentStep]) {
         for step in steps {
             match step {
+                AssignmentStep::Task(task) => {
+                    for program in task.expressions() {
+                        self.programs += 1;
+                        self.note_allocated(program);
+                        self.state_programs += usize::from(carries_state(program));
+                    }
+                }
                 AssignmentStep::Assign(assignment) => {
                     self.programs += 1;
                     self.note_allocated(&assignment.program);
@@ -762,6 +769,9 @@ impl StateSlotMapping {
 fn assignment_pass_state(steps: &[AssignmentStep], out: &mut Vec<Instruction>) {
     for step in steps {
         match step {
+            AssignmentStep::Task(task) => task
+                .expressions()
+                .for_each(|program| push_state(program, out)),
             AssignmentStep::Assign(assignment) => push_state(&assignment.program, out),
             AssignmentStep::AssignIndexed { index, value, .. } => {
                 push_state(value, out);
@@ -1176,6 +1186,7 @@ fn visit_assignment_steps_mut(
 ) {
     for step in steps.iter_mut() {
         match step {
+            AssignmentStep::Task(task) => task.expressions_mut().for_each(&mut *visit),
             AssignmentStep::Assign(assignment) => visit(&mut assignment.program),
             AssignmentStep::AssignIndexed { index, value, .. } => {
                 visit(value);

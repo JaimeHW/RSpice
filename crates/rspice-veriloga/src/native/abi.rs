@@ -304,6 +304,9 @@ pub struct EvalContext {
     pub prelude_slots: *mut f64,
     /// Length of `prelude_slots`.
     pub prelude_slots_len: usize,
+    /// Exclusive journal slot for this dispatch, or null for observations.
+    /// The slot is lazy; numerical models never allocate task storage.
+    pub analog_effects: *mut Option<Box<rspice_veriloga_runtime::AnalogEffectJournal>>,
 }
 
 impl EvalContext {
@@ -371,6 +374,7 @@ impl EvalContext {
             state_older_candidate_len: 0,
             prelude_slots: std::ptr::null_mut(),
             prelude_slots_len: 0,
+            analog_effects: std::ptr::null_mut(),
         }
     }
 
@@ -387,14 +391,71 @@ impl EvalContext {
     }
 
     pub(crate) fn record_runtime_error(&self, message: impl Into<String>) {
+        self.invalidate_task_candidate();
         self.runtime_status
             .record(NativeRuntimeErrorKind::NativeJit, message);
     }
 
     pub(crate) fn record_invalid_numeric_result(&self, message: impl Into<String>) {
+        self.invalidate_task_candidate();
         self.runtime_status
             .record(NativeRuntimeErrorKind::InvalidNumericResult, message);
     }
+
+    fn invalidate_task_candidate(&self) {
+        // SAFETY: The dispatch owns the journal slot exclusively, just like its
+        // numerical state pointers. Observational dispatches supply null.
+        if let Some(slot) = unsafe { self.analog_effects.as_mut() } {
+            slot.get_or_insert_with(Default::default)
+                .invalidate_candidate(rspice_veriloga_runtime::AnalogEffectError::EvaluationFailed);
+        }
+    }
+}
+
+/// Capture an executed `$finish` call. Machine code evaluates and guards the
+/// operand; this helper provides the shared bounded transactional delivery.
+///
+/// # Safety
+/// `ctx` and its non-null journal slot must belong to the exclusive dispatch.
+pub unsafe extern "C" fn rspice_finish_native(
+    diagnostic: f64,
+    ctx: *const EvalContext,
+    site: usize,
+) -> f64 {
+    let Some(ctx) = (unsafe { ctx.as_ref() }) else {
+        return f64::NAN;
+    };
+    let Some(slot) = (unsafe { ctx.analog_effects.as_mut() }) else {
+        return 0.0;
+    };
+    let Ok(site) = u32::try_from(site) else {
+        ctx.record_runtime_error("analog task site exceeds the supported range");
+        return f64::NAN;
+    };
+    if let Err(error) = slot
+        .get_or_insert_with(Default::default)
+        .record_finish(site, ctx.time, diagnostic)
+    {
+        ctx.record_runtime_error(format!("$finish diagnostic level {diagnostic}: {error}"));
+        return f64::NAN;
+    }
+    0.0
+}
+
+/// Validate the guard before a task's arguments are evaluated.
+///
+/// # Safety
+/// `ctx` must belong to the exclusive dispatch.
+pub unsafe extern "C" fn rspice_task_guard_native(
+    guard: f64,
+    ctx: *const EvalContext,
+    _site: usize,
+) -> f64 {
+    if guard.is_finite() {
+        return guard;
+    }
+    set_native_context_error_ptr(ctx, "analog task guard is not finite");
+    0.0
 }
 
 fn set_native_context_error(ctx: &EvalContext, message: impl Into<String>) {
@@ -2521,12 +2582,13 @@ mod tests {
         assert_eq!(offset_of!(EvalContext, state_older_candidate_len), 480);
         assert_eq!(offset_of!(EvalContext, prelude_slots), 488);
         assert_eq!(offset_of!(EvalContext, prelude_slots_len), 496);
+        assert_eq!(offset_of!(EvalContext, analog_effects), 504);
         assert_eq!(offset_of!(NativeRuntimeStatus, failed), 0);
         assert_eq!(
             NativeRuntimeStatus::failed_offset(),
             offset_of!(NativeRuntimeStatus, failed)
         );
-        assert_eq!(size_of::<EvalContext>(), 504);
+        assert_eq!(size_of::<EvalContext>(), 512);
         assert_eq!(align_of::<EvalContext>(), 8);
     }
 
@@ -2961,6 +3023,7 @@ mod tests {
             state_older_candidate_len: 0,
             prelude_slots: std::ptr::null_mut(),
             prelude_slots_len: 0,
+            analog_effects: std::ptr::null_mut(),
         };
 
         assert_eq!(

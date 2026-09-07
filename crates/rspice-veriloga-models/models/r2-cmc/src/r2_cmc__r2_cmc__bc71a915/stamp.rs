@@ -5,9 +5,9 @@ use super::state::{CanonicalModelValues, Instance, PARAMETER_MODEL_FLAGS};
 use rspice_veriloga_runtime::{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, install_generated_stage_values, L2, evaluate_generated_above, evaluate_generated_cross, evaluate_generated_timer, rspice_eval_ddt, rspice_eval_idt, rspice_limexp, rspice_limited_exp, rspice_limited_exp_derivative};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock, Weak};
-pub(super) const CANONICAL_MODEL_STAGE_SLOTS: [u32; 4] = [5, 1, 0, 4];
-pub(super) const CANONICAL_INSTANCE_STAGE_SLOTS: [u32; 10] = [8, 9, 10, 11, 2, 12, 13, 15, 14, 16];
-pub(super) const CANONICAL_TEMPERATURE_STAGE_SLOTS: [u32; 3] = [6, 7, 3];
+pub(super) const CANONICAL_MODEL_STAGE_SLOTS: [u32; 5] = [5, 6, 1, 0, 3];
+pub(super) const CANONICAL_INSTANCE_STAGE_SLOTS: [u32; 10] = [9, 10, 11, 12, 2, 13, 14, 16, 15, 17];
+pub(super) const CANONICAL_TEMPERATURE_STAGE_SLOTS: [u32; 3] = [7, 8, 4];
 
 pub(super) fn canonical_model_preprocess(
     parameters: &[f64],
@@ -16,17 +16,18 @@ pub(super) fn canonical_model_preprocess(
     staged: &[f64],
     temperature: f64,
     thermal_voltage: f64,
-) -> [f64; 4] {
-	let A=parameter_given[10] as u8 as f64;
-	let mut oB=0.0;
+) -> [f64; 5] {
+	let B=parameter_given[10] as u8 as f64;
+	let mut oC=0.0;
+	let A=parameters[14]!= 1002f64;
 	if parameter_given[10]{
-	let B=1f64- (0.01f64* parameters[10]);
-	oB=B;
+	let C=1f64- (0.01f64* parameters[10]);
+	oC=C;
 	}
-	let C=273.15f64+ parameters[15];
-	let D=parameters[34]+ 1f64;
-	let E=(parameters[28]> 0f64)|| (parameters[26]> 0f64);
-    [oB, C, D, E as u8 as f64]
+	let D=273.15f64+ parameters[15];
+	let E=parameters[34]+ 1f64;
+	let F=(parameters[28]> 0f64)|| (parameters[26]> 0f64);
+    [A as u8 as f64, oC, D, E, F as u8 as f64]
 }
 
 pub(super) fn canonical_instance_preprocess(
@@ -237,323 +238,366 @@ impl Instance {
     }
 
     pub fn stamp(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedStamper<'_>) {
+        if ctx.analog_tasks_enabled() { self.analog_effects.get_or_insert_with(Default::default).begin_evaluation(); }
         self.canonical_model_stage(ctx);
         self.canonical_instance_stage(ctx);
         self.canonical_temperature_stage(ctx);
         let parameters = &self.params.values;
         let parameter_given = &*self.param_given;
         let multiplicity = self.multiplicity;
+        let time = self.time;
+        let analog_effects = &mut self.analog_effects;
+        let mut analog_finish = |site: u32, time: f64, diagnostic: f64| {
+            if ctx.analog_tasks_enabled() {
+                if let Err(source) = analog_effects.get_or_insert_with(Default::default).record_finish(site, time, diagnostic) {
+                    ctx.report_analog_task_error(site, source);
+                }
+            }
+        };
         let staged = &*self.canonical_staged;
         let node_potentials = [ctx.node_voltage(self.nodes[0]), ctx.node_voltage(self.nodes[1])];
-		let A=parameter_given[9] as u8 as f64;
-		let B=parameters[9];
-		let C=1f64;
-		let F=parameter_given[10] as u8 as f64;
-		let G=staged[5];
-		let H=0f64;
-		let I=0.01f64;
-		let M=staged[8]!=0.0;
-		let N=staged[10]!=0.0;
-		let O=staged[11]!=0.0;
-		let P=staged[12]!=0.0;
-		let U=parameters[0];
-		let V=parameters[21];
-		let X=1e99f64;
-		let Y=parameters[1];
-		let AA=staged[2];
-		let AH=parameters[16];
-		let AI=parameters[2];
-		let AN=staged[13]!=0.0;
-		let AO=staged[14]!=0.0;
+		let A=staged[5]!=0.0;
+		let B=1f64;
+		let D=parameter_given[9] as u8 as f64;
+		let E=parameters[9];
+		let H=parameter_given[10] as u8 as f64;
+		let I=staged[6];
+		let J=0f64;
+		let K=0.01f64;
+		let O=staged[9]!=0.0;
+		let P=staged[11]!=0.0;
+		let Q=staged[12]!=0.0;
+		let R=staged[13]!=0.0;
+		let W=parameters[0];
+		let X=parameters[21];
+		let Z=1e99f64;
+		let AA=parameters[1];
+		let AC=staged[2];
+		let AL=parameters[16];
+		let AM=parameters[2];
+		let AT=staged[14]!=0.0;
 		let AU=staged[15]!=0.0;
-		let BQ=staged[16]!=0.0;
-		let CI=parameters[24];
-		let CJ=parameters[23];
-		let CP=parameters[36];
-		let CQ=parameters[37];
-		let CU=parameters[38];
-		let CW=parameters[39];
-		let DJ=staged[3];
-		let DU=parameters[27];
-		let DY=parameters[25];
-		let EE=0.3333333333333333f64;
-		let EF=parameters[28];
-		let EG=parameters[26];
-		let EJ=L2([0f64;2]);
-		let ER=0.0;
-		let ES=0.0;
-		let E=if parameter_given[9]{
-		B
+		let BA=staged[16]!=0.0;
+		let CA=staged[17]!=0.0;
+		let CW=parameters[24];
+		let CX=parameters[23];
+		let DC=staged[3]!=0.0;
+		let DG=parameters[36];
+		let DH=parameters[37];
+		let DL=parameters[38];
+		let DN=parameters[39];
+		let EA=staged[4];
+		let EL=parameters[27];
+		let EP=parameters[25];
+		let EV=0.3333333333333333f64;
+		let EW=parameters[28];
+		let EX=parameters[26];
+		let FA=L2([0f64;2]);
+		let FI=0.0;
+		let FJ=0.0;
+		if A{
+		analog_finish(1, time, B);
+		}
+		let G=if parameter_given[9]{
+		E
 		}else{
-		let D=ctx.simparam_or("scale", C);
-		D
+		let F=ctx.simparam_or("scale", B);
+		F
 		};
-		let K=if parameter_given[10]{
-		G
+		let M=if parameter_given[10]{
+		I
 		}else{
-		let J=C- (I* (ctx.simparam_or("shrink", H)));
-		J
+		let L=B- (K* (ctx.simparam_or("shrink", J)));
+		L
 		};
-		let L=(K* E)* 1e6f64;
-		let Q;
-		let R;
+		let N=(M* G)* 1e6f64;
 		let S;
 		let T;
-		if N{
-		let AC;
-		let AD;
-		let AE;
+		let U;
+		let V;
+		if P{
 		let AF;
-		if O{
-		let W=(U* L)+ V;
-		AC=H;
-		AD=H;
-		AE=H;
-		AF=W;
+		let AG;
+		let AH;
+		let AI;
+		if Q{
+		let Y=(W* N)+ X;
+		AF=J;
+		AG=J;
+		AH=J;
+		AI=Y;
 		}else{
-		let Z=Y* L;
-		let AB=Z+ AA;
-		let AG=AB> H;
-		let AL;
-		let AM;
-		if AG{
-		let AJ=(AH/ AI)* AB;
-		AL=AI;
-		AM=AJ;
-		}else{
-		let AK=(U* L)+ V;
-		AL=H;
-		AM=AK;
+		let AB=AA* N;
+		let AD=AB+ AC;
+		let AE=AD< J;
+		if AE{
+		analog_finish(42, time, B);
 		}
-		AC=Z;
-		AD=AB;
-		AE=AL;
-		AF=AM;
-		}
-		Q=AC;
-		R=AD;
-		S=AE;
-		T=AF;
-		}else{
-		let AP;
+		let AK=AD> J;
 		let AQ;
 		let AR;
-		let AS;
-		if P{
+		if AK{
+		let AN=(AL/ AM)* AD;
+		let AO=(AN- X)<= J;
+		if AO{
+		analog_finish(47, time, B);
+		}
+		AQ=AM;
+		AR=AN;
+		}else{
+		let AP=(W* N)+ X;
+		AQ=J;
+		AR=AP;
+		}
+		AF=AB;
+		AG=AD;
+		AH=AQ;
+		AI=AR;
+		}
+		S=AF;
+		T=AG;
+		U=AH;
+		V=AI;
+		}else{
 		let AV;
 		let AW;
 		let AX;
 		let AY;
-		if AN{
-		let AT=(U* L)+ V;
-		AV=H;
-		AW=H;
-		AX=H;
-		AY=AT;
-		}else{
+		if R{
+		let BB;
 		let BC;
 		let BD;
 		let BE;
-		let BF;
-		if AU{
-		let AZ=Y* L;
-		let BA=AZ+ AA;
-		BC=AZ;
-		BD=BA;
-		BE=X;
-		BF=H;
+		if AT{
+		let AZ=(W* N)+ X;
+		BB=J;
+		BC=J;
+		BD=J;
+		BE=AZ;
 		}else{
-		let BB=(U* L)+ V;
-		let BG=BB> H;
+		let BJ;
+		let BK;
 		let BL;
 		let BM;
-		let BN;
-		if BG{
-		let BH=(AI/ AH)* BB;
-		let BI=BH- AA;
-		BL=BI;
-		BM=BH;
-		BN=AI;
+		if BA{
+		let BF=AA* N;
+		let BG=BF+ AC;
+		BJ=BF;
+		BK=BG;
+		BL=Z;
+		BM=J;
 		}else{
-		let BJ=Y* L;
-		let BK=BJ+ AA;
-		BL=BJ;
-		BM=BK;
-		BN=X;
+		let BH=(W* N)+ X;
+		let BI=BH< J;
+		if BI{
+		analog_finish(72, time, B);
 		}
-		BC=BL;
-		BD=BM;
-		BE=BN;
-		BF=BB;
-		}
-		AV=BC;
-		AW=BD;
-		AX=BE;
-		AY=BF;
-		}
-		AP=AV;
-		AQ=AW;
-		AR=AX;
-		AS=AY;
-		}else{
-		let BR;
-		let BS;
-		let BT;
+		let BO=BH> J;
 		let BU;
-		if AO{
-		let BO=Y* L;
-		let BP=BO+ AA;
-		BR=BO;
-		BS=BP;
-		BT=X;
-		BU=H;
+		let BV;
+		let BW;
+		if BO{
+		let BP=(AM/ AL)* BH;
+		let BQ=BP- AC;
+		let BR=BQ<= J;
+		if BR{
+		analog_finish(77, time, B);
+		}
+		BU=BQ;
+		BV=BP;
+		BW=AM;
 		}else{
-		let BX;
-		let BY;
-		let BZ;
-		let CA;
-		if BQ{
-		let BV=(U* L)+ V;
-		BX=H;
-		BY=H;
-		BZ=H;
-		CA=BV;
+		let BS=AA* N;
+		let BT=BS+ AC;
+		BU=BS;
+		BV=BT;
+		BW=Z;
+		}
+		BJ=BU;
+		BK=BV;
+		BL=BW;
+		BM=BH;
+		}
+		BB=BJ;
+		BC=BK;
+		BD=BL;
+		BE=BM;
+		}
+		AV=BB;
+		AW=BC;
+		AX=BD;
+		AY=BE;
 		}else{
-		let BW=(U* L)+ V;
-		let CB=Y* L;
-		let CC=CB+ AA;
-		let CD=BW> H;
+		let CB;
+		let CC;
+		let CD;
 		let CE;
-		if CD{
-		let CF=CC> H;
-		let CH;
-		if CF{
-		let CG=AH* (CC/ BW);
-		CH=CG;
+		if AU{
+		let BY=AA* N;
+		let BZ=BY+ AC;
+		CB=BY;
+		CC=BZ;
+		CD=Z;
+		CE=J;
 		}else{
-		CH=H;
-		}
-		CE=CH;
+		let CI;
+		let CJ;
+		let CK;
+		let CL;
+		if CA{
+		let CF=(W* N)+ X;
+		CI=J;
+		CJ=J;
+		CK=J;
+		CL=CF;
 		}else{
-		CE=X;
+		let CG=(W* N)+ X;
+		let CH=CG< J;
+		if CH{
+		analog_finish(101, time, B);
 		}
-		BX=CB;
-		BY=CC;
-		BZ=CE;
-		CA=BW;
-		}
-		BR=BX;
-		BS=BY;
-		BT=BZ;
-		BU=CA;
-		}
-		AP=BR;
-		AQ=BS;
-		AR=BT;
-		AS=BU;
-		}
-		Q=AP;
-		R=AQ;
-		S=AR;
-		T=AS;
-		}
-		let CM=if CI!=0.0{
-		let CK=R+ CJ;
-		CK
-		}else{
-		let CL=Q+ CJ;
-		CL
-		};
-		let CN=S> H;
-		let CO=R> H;
+		let CN=AA* N;
+		let CO=CN+ AC;
+		let CP=CG> J;
 		let CR;
-		let CS;
-		if CO{
-		let CZ;
-		let DA;
-		if M{
-		let CV=CP+ (CU/ R);
-		let CX=CQ+ (CW/ R);
-		CZ=CV;
-		DA=CX;
-		}else{
-		let CY=parameters[3]!=0.0|| parameters[4]!=0.0;
-		let DD;
-		let DE;
-		if CY{
-		let DB=CP+ ((0.5f64* CU)/ R);
-		let DC=CQ+ ((0.5f64* CW)/ R);
-		DD=DB;
-		DE=DC;
-		}else{
-		DD=CP;
-		DE=CQ;
+		if CP{
+		let CQ=CO< J;
+		if CQ{
+		analog_finish(106, time, B);
 		}
-		CZ=DD;
-		DA=DE;
-		}
-		CR=CZ;
-		CS=DA;
-		}else{
-		CR=CP;
-		CS=CQ;
-		}
-		let CT=T> H;
-		let DH;
-		let DI;
+		let CT=CO> J;
+		let CV;
 		if CT{
-		let DF=CR+ (parameters[40]/ T);
-		let DG=CS+ (parameters[41]/ T);
-		DH=DF;
-		DI=DG;
+		let CU=AL* (CO/ CG);
+		CV=CU;
 		}else{
-		DH=CR;
-		DI=CS;
+		CV=J;
 		}
-		let DK=C+ (DJ* (DH+ (DJ* DI)));
-		let DL=DK< 0.11f64;
-		let DN=if DL{
-		let DM=I+ (0.1f64* (((10f64* (DK- I))- C).exp()));
-		DM
+		CR=CV;
 		}else{
-		DK
+		CR=Z;
+		}
+		CI=CN;
+		CJ=CO;
+		CK=CR;
+		CL=CG;
+		}
+		CB=CI;
+		CC=CJ;
+		CD=CK;
+		CE=CL;
+		}
+		AV=CB;
+		AW=CC;
+		AX=CD;
+		AY=CE;
+		}
+		S=AV;
+		T=AW;
+		U=AX;
+		V=AY;
+		}
+		let DA=if CW!=0.0{
+		let CY=T+ CX;
+		CY
+		}else{
+		let CZ=S+ CX;
+		CZ
 		};
-		let DO=S* DN;
-		let DP=node_potentials[0]- node_potentials[1];
-		let DQ=L2([1f64,0.0])- L2([0.0,1f64]);
-		let DR=CN&& (staged[4]!=0.0);
-		let EK;
-		let EL;
-		if DR{
-		let DS=DP/ CM;
-		let DT=DQ/ CM;
-		let DV=DU* DS;
-		let DW=(DT* DU)* DV;
-		let DX=(C+ (DV* DV)).sqrt();
-		let DZ=DY* (DS.abs());
-		let EA=(DT* ((2f64* ((DS>= 0f64) as u8 as f64))- 1f64))* DY;
-		let EB=DZ* DZ;
-		let EC=EA* DZ;
-		let ED=C+ (EB* DZ);
-		let EH=(((C- EF)- EG)+ (EF* DX))+ (EG* (ED.powf(EE)));
-		let EI=(((DW+ DW)* (1f64/ (2f64* DX)))* EF)+ (((((EC+ EC)* DZ)+ (EA* EB))* (EE* ((ED+ (((ED== 0f64) as u8 as f64)* 2.2250738585072014e-308f64)).powf(-0.6666666666666667f64))))* EG);
-		EK=EH;
-		EL=EI;
-		}else{
-		EK=C;
-		EL=EJ;
+		let DB=U> J;
+		let DD=((DA<= J)&& DB)&& DC;
+		if DD{
+		analog_finish(122, time, B);
 		}
-		let EM=DO* EK;
-		let EN=DP/ EM;
-		let EO=(DQ- ((EL* DO)* EN))/ EM;
-		let EP=EO[0];
-		let EQ=EO[1];
+		let DF=T> J;
+		let DI;
+		let DJ;
+		if DF{
+		let DQ;
+		let DR;
+		if O{
+		let DM=DG+ (DL/ T);
+		let DO=DH+ (DN/ T);
+		DQ=DM;
+		DR=DO;
+		}else{
+		let DP=parameters[3]!=0.0|| parameters[4]!=0.0;
+		let DU;
+		let DV;
+		if DP{
+		let DS=DG+ ((0.5f64* DL)/ T);
+		let DT=DH+ ((0.5f64* DN)/ T);
+		DU=DS;
+		DV=DT;
+		}else{
+		DU=DG;
+		DV=DH;
+		}
+		DQ=DU;
+		DR=DV;
+		}
+		DI=DQ;
+		DJ=DR;
+		}else{
+		DI=DG;
+		DJ=DH;
+		}
+		let DK=V> J;
+		let DY;
+		let DZ;
+		if DK{
+		let DW=DI+ (parameters[40]/ V);
+		let DX=DJ+ (parameters[41]/ V);
+		DY=DW;
+		DZ=DX;
+		}else{
+		DY=DI;
+		DZ=DJ;
+		}
+		let EB=B+ (EA* (DY+ (EA* DZ)));
+		let EC=EB< 0.11f64;
+		let EE=if EC{
+		let ED=K+ (0.1f64* (((10f64* (EB- K))- B).exp()));
+		ED
+		}else{
+		EB
+		};
+		let EF=U* EE;
+		let EG=node_potentials[0]- node_potentials[1];
+		let EH=L2([1f64,0.0])- L2([0.0,1f64]);
+		let EI=DB&& DC;
+		let FB;
+		let FC;
+		if EI{
+		let EJ=EG/ DA;
+		let EK=EH/ DA;
+		let EM=EL* EJ;
+		let EN=(EK* EL)* EM;
+		let EO=(B+ (EM* EM)).sqrt();
+		let EQ=EP* (EJ.abs());
+		let ER=(EK* ((2f64* ((EJ>= 0f64) as u8 as f64))- 1f64))* EP;
+		let ES=EQ* EQ;
+		let ET=ER* EQ;
+		let EU=B+ (ES* EQ);
+		let EY=(((B- EW)- EX)+ (EW* EO))+ (EX* (EU.powf(EV)));
+		let EZ=(((EN+ EN)* (1f64/ (2f64* EO)))* EW)+ (((((ET+ ET)* EQ)+ (ER* ES))* (EV* ((EU+ (((EU== 0f64) as u8 as f64)* 2.2250738585072014e-308f64)).powf(-0.6666666666666667f64))))* EX);
+		FB=EY;
+		FC=EZ;
+		}else{
+		FB=B;
+		FC=FA;
+		}
+		let FD=EF* FB;
+		let FE=EG/ FD;
+		let FF=(EH- ((FC* EF)* FE))/ FD;
+		let FG=FF[0];
+		let FH=FF[1];
         stamper.stamp_current_sparse_local::<2, 0>(
             Some(0),
             Some(1),
-            multiplicity * (EN),
+            multiplicity * (FE),
             [0, 1],
-            [EP, EQ],
+            [FG, FH],
             [],
             [],
             multiplicity,
@@ -561,7 +605,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(0),
             Some(1),
-            multiplicity * (ER),
+            multiplicity * (FI),
             [],
             [],
             [],
@@ -571,13 +615,14 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(0),
             Some(1),
-            multiplicity * (ES),
+            multiplicity * (FJ),
             [],
             [],
             [],
             [],
             multiplicity,
         );
+        if ctx.analog_tasks_enabled() && !ctx.evaluation_failed() { self.analog_effects.as_mut().expect("task evaluation began").complete_evaluation(); }
     }
 
     pub fn stamp_reactive(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedReactiveStamper<'_>) {

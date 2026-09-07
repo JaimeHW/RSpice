@@ -2,12 +2,14 @@
 //!
 //! An evaluation records calls in source execution order. Only acceptance
 //! publishes them to the host; another Newton evaluation replaces the candidate
-//! calls, and rejected iterations cannot print or terminate a simulation.
+//! calls. Tasks whose semantics require immediate delivery, including `$fatal`,
+//! must use the host's immediate diagnostic path instead of this journal.
 
 use std::fmt;
 
 /// The analog system task associated with a compiled call site.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum AnalogTaskKind {
     Finish,
     Stop,
@@ -77,6 +79,8 @@ impl Default for AnalogEffectLimits {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AnalogEffectError {
     InvalidTime,
+    InvalidArgument,
+    EvaluationFailed,
     CallLimit,
     ArgumentLimit,
     AllocationFailed,
@@ -86,6 +90,8 @@ impl fmt::Display for AnalogEffectError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(match self {
             Self::InvalidTime => "analog system-task execution time must be finite",
+            Self::InvalidArgument => "analog system-task argument is invalid",
+            Self::EvaluationFailed => "analog system-task candidate evaluation failed",
             Self::CallLimit => "analog system tasks exceeded the pending-call limit",
             Self::ArgumentLimit => "analog system tasks exceeded the argument-memory limit",
             Self::AllocationFailed => "could not allocate analog system-task delivery storage",
@@ -97,7 +103,7 @@ impl std::error::Error for AnalogEffectError {}
 
 /// Per-instance task journal. Cloning preserves an exact solver rollback image;
 /// resetting an analysis retires both candidate and undelivered accepted calls.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, PartialEq)]
 pub struct AnalogEffectJournal {
     limits: AnalogEffectLimits,
     candidate: Vec<AnalogTaskInvocation>,
@@ -105,6 +111,7 @@ pub struct AnalogEffectJournal {
     candidate_bytes: usize,
     accepted_bytes: usize,
     failure: Option<AnalogEffectError>,
+    evaluation_in_progress: bool,
 }
 
 impl Clone for AnalogEffectJournal {
@@ -120,11 +127,50 @@ impl Clone for AnalogEffectJournal {
             candidate_bytes: self.candidate_bytes,
             accepted_bytes: self.accepted_bytes,
             failure: self.failure,
+            evaluation_in_progress: self.evaluation_in_progress,
         }
     }
 }
 
 impl AnalogEffectJournal {
+    /// Start an evaluation whose early return must prevent acceptance. The
+    /// generated Rust evaluator completes it only after its whole body succeeds.
+    pub fn begin_evaluation(&mut self) {
+        self.discard_candidate();
+        self.evaluation_in_progress = true;
+    }
+
+    pub fn complete_evaluation(&mut self) {
+        self.evaluation_in_progress = false;
+    }
+
+    /// A task operand or surrounding numerical evaluation failed. Preserve the
+    /// first failure and prevent acceptance of an incomplete invocation stream.
+    pub fn invalidate_candidate(&mut self, error: AnalogEffectError) {
+        self.failure.get_or_insert(error);
+    }
+
+    /// Capture `$finish` using the Verilog real-to-integer conversion rule.
+    /// Every backend uses this entry point so diagnostic levels agree.
+    pub fn record_finish(
+        &mut self,
+        site: u32,
+        time: f64,
+        diagnostic: f64,
+    ) -> Result<(), AnalogEffectError> {
+        let diagnostic = diagnostic.round();
+        if !diagnostic.is_finite() || !(0.0..=2.0).contains(&diagnostic) {
+            self.invalidate_candidate(AnalogEffectError::InvalidArgument);
+            return self.validate_candidate();
+        }
+        self.record(AnalogTaskInvocation {
+            kind: AnalogTaskKind::Finish,
+            site,
+            time,
+            arguments: Box::new([AnalogTaskArgument::Integer(diagnostic as i64)]),
+        })
+    }
+
     pub fn with_limits(limits: AnalogEffectLimits) -> Self {
         Self {
             limits,
@@ -137,6 +183,7 @@ impl AnalogEffectJournal {
         self.candidate.clear();
         self.candidate_bytes = 0;
         self.failure = None;
+        self.evaluation_in_progress = false;
     }
 
     pub fn reset_analysis(&mut self) {
@@ -206,13 +253,17 @@ impl AnalogEffectJournal {
     }
 
     pub fn validate_candidate(&self) -> Result<(), AnalogEffectError> {
-        self.failure.map_or(Ok(()), Err)
+        self.failure
+            .or(self
+                .evaluation_in_progress
+                .then_some(AnalogEffectError::EvaluationFailed))
+            .map_or(Ok(()), Err)
     }
 
     /// Circuit-wide commit after validation of every participating instance.
     pub fn apply_validated_acceptance(&mut self) {
         assert!(
-            self.failure.is_none(),
+            self.validate_candidate().is_ok(),
             "task acceptance requires a valid candidate"
         );
         self.accepted.append(&mut self.candidate);
@@ -225,7 +276,7 @@ impl AnalogEffectJournal {
     }
 
     pub fn has_candidate(&self) -> bool {
-        !self.candidate.is_empty() || self.failure.is_some()
+        !self.candidate.is_empty() || self.failure.is_some() || self.evaluation_in_progress
     }
 
     /// Transfer accepted calls to the analysis host, retaining journal capacity
@@ -240,6 +291,54 @@ impl AnalogEffectJournal {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn incomplete_evaluation_cannot_be_accepted_or_lost_during_rollback() {
+        let mut journal = AnalogEffectJournal::default();
+        journal.begin_evaluation();
+        journal.record_finish(0, 1.0, 0.0).unwrap();
+        assert_eq!(
+            journal.accept_candidate(),
+            Err(AnalogEffectError::EvaluationFailed)
+        );
+        let mut restored = journal.clone();
+        assert_eq!(restored, journal);
+        assert_eq!(
+            restored.validate_candidate(),
+            Err(AnalogEffectError::EvaluationFailed)
+        );
+        restored.complete_evaluation();
+        restored.accept_candidate().unwrap();
+        assert_eq!(restored.drain_accepted().count(), 1);
+        assert!(!restored.has_candidate());
+        journal.begin_evaluation();
+        journal.complete_evaluation();
+        journal.accept_candidate().unwrap();
+        assert!(journal.accepted().is_empty());
+    }
+
+    #[test]
+    fn invalid_task_arguments_preserve_the_first_failure_until_rejection() {
+        let mut journal = AnalogEffectJournal::default();
+        journal.record_finish(0, 0.0, 0.5).unwrap();
+        assert_eq!(
+            journal.record_finish(1, 0.0, f64::NAN),
+            Err(AnalogEffectError::InvalidArgument)
+        );
+        journal.invalidate_candidate(AnalogEffectError::EvaluationFailed);
+        assert_eq!(
+            journal.accept_candidate(),
+            Err(AnalogEffectError::InvalidArgument)
+        );
+        assert!(journal.accepted().is_empty());
+        journal.discard_candidate();
+        journal.record_finish(2, 1.0, 1.5).unwrap();
+        journal.accept_candidate().unwrap();
+        assert_eq!(
+            journal.accepted()[0].arguments.as_ref(),
+            &[AnalogTaskArgument::Integer(2)]
+        );
+    }
 
     fn call(site: u32, value: i64) -> AnalogTaskInvocation {
         AnalogTaskInvocation {

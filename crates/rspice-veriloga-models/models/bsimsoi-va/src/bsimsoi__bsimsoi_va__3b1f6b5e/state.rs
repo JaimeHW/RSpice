@@ -1582,9 +1582,10 @@ pub struct Instance {
 	pub(crate) time: f64,
 	pub(crate) timestep: f64,
 	pub(crate) ddt_coefficients: GeneratedDdtCoefficients,
+	pub(crate) analog_effects: Option<Box<rspice_veriloga_runtime::AnalogEffectJournal>>,
 	pub(crate) canonical_reactive: Box<[f64; 114]>,
 	pub(crate) canonical_model_values: Option<std::sync::Arc<CanonicalModelValues>>,
-	pub(crate) canonical_staged: Box<[f64; 766]>,
+	pub(crate) canonical_staged: Box<[f64; 774]>,
 	pub(crate) canonical_instance_valid: bool,
 	pub(crate) canonical_temperature_valid: bool,
 	pub(crate) canonical_temperature: f64,
@@ -1606,6 +1607,7 @@ impl Clone for Instance {
 			time: self.time,
 			timestep: self.timestep,
 			ddt_coefficients: self.ddt_coefficients,
+			analog_effects: self.analog_effects.clone(),
 			canonical_reactive: self.canonical_reactive.clone(),
 			canonical_model_values: self.canonical_model_values.clone(),
 			canonical_staged: self.canonical_staged.clone(),
@@ -2624,7 +2626,7 @@ impl Instance {
 
 	pub const BRANCH_COUNT: usize = 9;
 	pub const PARAMETER_COUNT: usize = 996;
-	pub const VARIABLE_COUNT: usize = 1871;
+	pub const VARIABLE_COUNT: usize = 1885;
 	pub const DDT_STATE_COUNT: usize = 15;
 	pub const IDT_STATE_COUNT: usize = 0;
 	pub const ACCEPTED_STATE_SHAPE_IDENTITY: GeneratedVerilogAAcceptedStateShapeIdentity = GeneratedVerilogAAcceptedStateShapeIdentity::from_bytes([154, 14, 17, 63, 246, 255, 77, 47, 215, 57, 116, 128, 25, 226, 33, 0, 234, 137, 245, 13, 100, 61, 173, 175, 55, 51, 245, 99, 248, 128, 210, 32]);
@@ -2651,6 +2653,7 @@ impl Instance {
 			time: 0.0,
 			timestep: 0.0,
 			ddt_coefficients: GeneratedDdtCoefficients::inactive(),
+			analog_effects: None,
 			canonical_reactive: boxed_zero_f64_array(),
 			canonical_model_values: None,
 			canonical_staged: boxed_zero_f64_array(),
@@ -2680,7 +2683,7 @@ impl Instance {
 		flags.extend_from_slice(&self.stamp_state.idt_initialized);
 		flags.extend_from_slice(&self.stamp_state.ddt_candidate_valid);
 		flags.extend_from_slice(&self.stamp_state.idt_candidate_valid);
-		GeneratedVerilogARollbackState { values, flags }
+		GeneratedVerilogARollbackState { values, flags, analog_effects: self.analog_effects.clone() }
 	}
 
 	#[doc(hidden)]
@@ -2734,8 +2737,24 @@ impl Instance {
 		let (field, remaining) = rollback_flags.split_at(Self::IDT_STATE_COUNT);
 		self.stamp_state.idt_candidate_valid.copy_from_slice(field);
 		rollback_flags = remaining;
+		self.analog_effects.clone_from(&state.analog_effects);
 		debug_assert!(rollback_values.is_empty());
 		debug_assert!(rollback_flags.is_empty());
+	}
+
+	pub fn validate_checkpoint_ready(&self) -> Result<(), String> {
+		if self.analog_effects.as_ref().is_some_and(|journal| journal.has_candidate() || !journal.accepted().is_empty()) {
+			return Err("generated Verilog-A checkpoint requires accepted system tasks to be delivered and no candidate evaluation".to_string());
+		}
+		Ok(())
+	}
+
+	pub fn drain_analog_tasks(&mut self) -> impl Iterator<Item = rspice_veriloga_runtime::AnalogTaskInvocation> + '_ {
+		self.analog_effects.as_mut().map(|journal| journal.drain_accepted()).into_iter().flatten()
+	}
+
+	pub fn reset_analog_tasks(&mut self) {
+		if let Some(journal) = self.analog_effects.as_mut() { journal.reset_analysis(); }
 	}
 
 	#[doc(hidden)]
@@ -2794,6 +2813,7 @@ impl Instance {
 		self.stamp_state.idt_initialized.copy_from_slice(&state.idt_initialized);
 		self.stamp_state.ddt_candidate_valid.fill(false);
 		self.stamp_state.idt_candidate_valid.fill(false);
+		self.reset_analog_tasks();
 		Ok(())
 	}
 
@@ -4108,11 +4128,13 @@ impl Instance {
 			}
 			index += 1;
 		}
+		if let Some(journal) = self.analog_effects.as_ref() { journal.validate_candidate().map_err(|error| error.to_string())?; }
 		Ok(())
 	}
 
 	pub fn apply_validated_advance_state(&mut self) {
 		debug_assert!(self.validate_advance_state().is_ok());
+		if let Some(journal) = self.analog_effects.as_mut() { journal.apply_validated_acceptance(); }
 		let mut index = 0usize;
 		while index < Self::DDT_STATE_COUNT {
 			if self.stamp_state.ddt_candidate_valid[index] {

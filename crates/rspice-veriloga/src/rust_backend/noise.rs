@@ -1084,6 +1084,7 @@ fn emit_noise_statements(
     for (index, statement) in statements.iter().enumerate() {
         let statement_prefix = format!("{prefix}_{index}");
         match statement {
+            HirStatement::Task(_) => {}
             HirStatement::Assignment(assignment) => {
                 let Some(sources) = schedule.assignments.get(&assignment_key(assignment)) else {
                     continue;
@@ -1289,6 +1290,7 @@ fn select_statements_backward(
 ) {
     for statement in statements.iter().rev() {
         match statement {
+            HirStatement::Task(_) => {}
             HirStatement::Assignment(assignment) if live.contains(&assignment.target.index()) => {
                 selection.assignments.insert(assignment_key(assignment));
                 live.remove(&assignment.target.index());
@@ -1335,6 +1337,7 @@ fn select_statements_backward(
 fn collect_assigned_variable_ids(statements: &[HirStatement], assigned: &mut HashSet<u32>) {
     for statement in statements {
         match statement {
+            HirStatement::Task(_) => {}
             HirStatement::Assignment(assignment) => {
                 assigned.insert(assignment.target.index());
             }
@@ -1349,6 +1352,7 @@ fn assigned_variables(statements: &[HirStatement]) -> HashSet<String> {
     let mut assigned = HashSet::new();
     for statement in statements {
         match statement {
+            HirStatement::Task(_) => {}
             HirStatement::Assignment(assignment) => {
                 assigned.insert(assignment.target_name.to_string());
             }
@@ -1464,6 +1468,7 @@ fn classify_statement_replay_safety(
 ) {
     for statement in statements {
         match statement {
+            HirStatement::Task(_) => {}
             HirStatement::Assignment(assignment) => {
                 let safe = assignment.index.is_none()
                     && expr_is_instance_static(

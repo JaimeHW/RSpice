@@ -356,6 +356,7 @@ fn count_assignment_steps(model: &CompiledModel) -> usize {
         steps
             .iter()
             .map(|step| match step {
+                rspice_veriloga::codegen::AssignmentStep::Task(_) => 1,
                 rspice_veriloga::codegen::AssignmentStep::Assign(_) => 1,
                 rspice_veriloga::codegen::AssignmentStep::AssignIndexed { .. } => 1,
                 rspice_veriloga::codegen::AssignmentStep::Loop { body, .. } => {
@@ -372,6 +373,10 @@ fn count_assignment_instructions(model: &CompiledModel) -> usize {
         steps
             .iter()
             .map(|step| match step {
+                rspice_veriloga::codegen::AssignmentStep::Task(task) => task
+                    .expressions()
+                    .map(|program| program.instructions.len())
+                    .sum(),
                 rspice_veriloga::codegen::AssignmentStep::Assign(assign) => {
                     assign.program.instructions.len()
                 }

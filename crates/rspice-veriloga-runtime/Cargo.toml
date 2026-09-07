@@ -11,10 +11,12 @@ rust-version.workspace = true
 
 [features]
 default = []
+serde = ["dep:serde"]
 faer-parallel = ["rspice-matrix/faer-parallel"]
 
 [dependencies]
 rspice-matrix.workspace = true
+serde = { workspace = true, features = ["derive"], optional = true }
 
 [lib]
 doctest = false

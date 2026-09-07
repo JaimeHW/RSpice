@@ -346,6 +346,7 @@ pub struct HirLoop {
 pub enum HirStatement {
     Assignment(HirAssignment),
     Loop(HirLoop),
+    Task(crate::analog_tasks::AnalogTaskCall<HirExprRef, SourceSpanRef>),
 }
 
 /// One step of the analog block, with control flow intact.
@@ -374,6 +375,7 @@ pub enum HirRegion {
         body: Vec<HirRegion>,
         span: SourceSpanRef,
     },
+    Task(crate::analog_tasks::AnalogTaskCall<HirExprRef, SourceSpanRef>),
 }
 
 /// One run of body expression ids and the run of executed ids it names.
@@ -1718,6 +1720,18 @@ impl HirModel {
     ) {
         for statement in statements {
             match statement {
+                HirStatement::Task(task) => {
+                    if task.finish_operand().is_none() {
+                        diagnostics.push(IrDiagnostic::error(
+                            CompilerPhase::HirValidation,
+                            "invalid analog task kind or arguments",
+                            task.span,
+                        ));
+                    }
+                    for expression in task.expressions() {
+                        self.validate_expr_ref(diagnostics, "analog task operand", expression);
+                    }
+                }
                 HirStatement::Assignment(assignment) => {
                     self.validate_expr_ref(
                         diagnostics,
@@ -1768,6 +1782,7 @@ impl HirModel {
     /// correspondence ever slips, a CFG built from the body would stamp the
     /// wrong branch — so it is checked, not assumed.
     fn validate_body(&self, diagnostics: &mut Vec<IrDiagnostic>) {
+        self.validate_task_correspondence(diagnostics);
         let mut expected_contribution = 0usize;
         self.validate_regions(diagnostics, &self.body, &mut expected_contribution);
 
@@ -1783,6 +1798,98 @@ impl HirModel {
         }
     }
 
+    fn validate_task_correspondence(&self, diagnostics: &mut Vec<IrDiagnostic>) {
+        type Task = crate::analog_tasks::AnalogTaskCall<HirExprRef, SourceSpanRef>;
+        fn collect<'a>(
+            statements: &'a [HirStatement],
+            tasks: &mut HashMap<u32, &'a Task>,
+            diagnostics: &mut Vec<IrDiagnostic>,
+        ) {
+            for statement in statements {
+                match statement {
+                    HirStatement::Task(task) => {
+                        if tasks.insert(task.site, task).is_some() {
+                            diagnostics.push(IrDiagnostic::error(
+                                CompilerPhase::HirValidation,
+                                "duplicate analog task site",
+                                task.span,
+                            ));
+                        }
+                    }
+                    HirStatement::Loop(loop_) => collect(&loop_.body, tasks, diagnostics),
+                    HirStatement::Assignment(_) => {}
+                }
+            }
+        }
+        fn validate(
+            model: &HirModel,
+            regions: &[HirRegion],
+            tasks: &mut HashMap<u32, &Task>,
+            diagnostics: &mut Vec<IrDiagnostic>,
+        ) {
+            for region in regions {
+                match region {
+                    HirRegion::Task(task) => {
+                        let Some(executed) = tasks.remove(&task.site) else {
+                            diagnostics.push(IrDiagnostic::error(
+                                CompilerPhase::HirValidation,
+                                "analog task region has no unique executable site",
+                                task.span,
+                            ));
+                            continue;
+                        };
+                        let same = task.guard.is_none()
+                            && task.kind == executed.kind
+                            && task.span == executed.span
+                            && task.initialization == executed.initialization
+                            && task.arguments.len() == executed.arguments.len()
+                            && task.arguments.iter().zip(&executed.arguments).all(
+                                |(body, flat)| {
+                                    use crate::analog_tasks::AnalogTaskOperand::*;
+                                    match (body, flat) {
+                                        (Real(body), Real(flat))
+                                        | (Integer(body), Integer(flat)) => {
+                                            model.executed_correspondence.executed(body.id)
+                                                == Some(flat.id)
+                                        }
+                                        (String(body), String(flat)) => body == flat,
+                                        _ => false,
+                                    }
+                                },
+                            );
+                        if !same {
+                            diagnostics.push(IrDiagnostic::error(
+                                CompilerPhase::HirValidation,
+                                "analog task region disagrees with its executable site",
+                                task.span,
+                            ));
+                        }
+                    }
+                    HirRegion::Conditional {
+                        then_body,
+                        else_body,
+                        ..
+                    } => {
+                        validate(model, then_body, tasks, diagnostics);
+                        validate(model, else_body, tasks, diagnostics);
+                    }
+                    HirRegion::Loop { body, .. } => validate(model, body, tasks, diagnostics),
+                    HirRegion::Assignment(_) | HirRegion::Contribution(_) => {}
+                }
+            }
+        }
+        let mut tasks = HashMap::new();
+        collect(&self.statements, &mut tasks, diagnostics);
+        validate(self, &self.body, &mut tasks, diagnostics);
+        for task in tasks.values() {
+            diagnostics.push(IrDiagnostic::error(
+                CompilerPhase::HirValidation,
+                "executable analog task has no structured region",
+                task.span,
+            ));
+        }
+    }
+
     fn validate_regions(
         &self,
         diagnostics: &mut Vec<IrDiagnostic>,
@@ -1791,6 +1898,11 @@ impl HirModel {
     ) {
         for region in regions {
             match region {
+                HirRegion::Task(task) => {
+                    for expression in task.expressions() {
+                        self.validate_expr_ref(diagnostics, "analog task operand", expression);
+                    }
+                }
                 HirRegion::Assignment(assignment) => {
                     self.validate_expr_ref(
                         diagnostics,
@@ -2185,6 +2297,18 @@ fn lower_statement(
     executed_sites: &mut HashMap<AnalogSiteId, ExecutedSite>,
 ) -> HirStatement {
     match statement {
+        AnalyzedStatement::Task(task) => {
+            let lowered = task.map(SourceSpanRef::from(task.span), |expression| {
+                lowerer.lower_expr(expression)
+            });
+            let arguments = lowered
+                .expressions()
+                .skip(usize::from(lowered.guard.is_some()))
+                .map(|expression| expression.id)
+                .collect();
+            lowerer.task_arguments.insert(task.site, arguments);
+            HirStatement::Task(lowered)
+        }
         AnalyzedStatement::Assignment(assignment) => {
             let index = assignment
                 .index
@@ -2242,6 +2366,24 @@ fn lower_region(
     correspondence: &mut CorrespondenceBuilder,
 ) -> HirRegion {
     match region {
+        AnalyzedRegion::Task(task) => {
+            let arguments = lowerer
+                .task_arguments
+                .get(&task.site)
+                .cloned()
+                .unwrap_or_default();
+            let mut argument_index = 0;
+            let lowered = task.map(SourceSpanRef::from(task.span), |expression| {
+                let start = lowerer.expressions.len();
+                let lowered = lowerer.lower_expr(expression);
+                if let Some(&executed) = arguments.get(argument_index) {
+                    correspondence.pair(&lowerer.expressions, start, lowered.id, executed);
+                }
+                argument_index += 1;
+                lowered
+            });
+            HirRegion::Task(lowered)
+        }
         AnalyzedRegion::Assignment(assignment) => {
             let executed = executed_sites.get(&assignment.site).copied();
             let index = assignment.index.as_ref().map(|expr| {
@@ -2381,6 +2523,7 @@ fn lower_regions(
 #[derive(Debug, Default)]
 struct HirLowerer {
     expressions: Vec<HirExpression>,
+    task_arguments: HashMap<u32, Vec<ExprId>>,
     declared_branches: HashSet<SmolStr>,
     replication_work: usize,
 }
@@ -2389,6 +2532,7 @@ impl HirLowerer {
     fn new(declared_branches: HashSet<SmolStr>) -> Self {
         Self {
             expressions: Vec::new(),
+            task_arguments: HashMap::new(),
             declared_branches,
             replication_work: 0,
         }

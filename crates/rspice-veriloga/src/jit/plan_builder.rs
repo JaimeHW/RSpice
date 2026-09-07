@@ -2775,6 +2775,7 @@ fn mark_assignment_targets_after_a_current_read(
 
 fn bytecode_assignment_step_reads_current(step: &AssignmentStep) -> bool {
     match step {
+        AssignmentStep::Task(task) => task.expressions().any(bytecode_program_reads_current),
         AssignmentStep::Assign(assignment) => bytecode_program_reads_current(&assignment.program),
         AssignmentStep::AssignIndexed { index, value, .. } => {
             bytecode_program_reads_current(index) || bytecode_program_reads_current(value)
@@ -2796,6 +2797,7 @@ fn bytecode_program_reads_current(program: &BytecodeProgram) -> bool {
 fn mark_bytecode_assignment_targets(steps: &[AssignmentStep], targets: &mut [bool]) {
     for step in steps {
         match step {
+            AssignmentStep::Task(_) => {}
             AssignmentStep::Assign(assignment) => {
                 if let Some(target) = targets.get_mut(assignment.var_index) {
                     *target = true;
@@ -2814,6 +2816,9 @@ fn mark_bytecode_assignment_targets(steps: &[AssignmentStep], targets: &mut [boo
 
 fn native_assignment_reads_contribution_current(assignment: &NativeAssignment) -> bool {
     match assignment {
+        NativeAssignment::Task(task) => task
+            .expressions()
+            .any(native_program_reads_contribution_current),
         NativeAssignment::Direct { program, .. } => {
             native_program_reads_contribution_current(program)
         }
@@ -2841,6 +2846,11 @@ fn collect_assignment_dependencies(
 ) {
     for assignment in assignments {
         match assignment {
+            NativeAssignment::Task(task) => {
+                for program in task.expressions() {
+                    collect_assignment_program_dependencies(program, dependencies);
+                }
+            }
             NativeAssignment::Direct { program, .. } => {
                 collect_assignment_program_dependencies(program, dependencies);
             }
@@ -2935,6 +2945,13 @@ struct AssignmentShadowIndex {
 
 #[derive(Default)]
 struct AssignmentProgramCursor<'a> {
+    tasks: HashMap<
+        u32,
+        &'a crate::analog_tasks::AnalogTaskCall<
+            BytecodeProgram,
+            crate::canonical_ir::SourceSpanRef,
+        >,
+    >,
     scalar: HashMap<usize, Vec<&'a BytecodeProgram>>,
     scalar_next: HashMap<usize, usize>,
     indexed: HashMap<(usize, usize, i64), Vec<(&'a BytecodeProgram, &'a BytecodeProgram)>>,
@@ -2951,6 +2968,9 @@ impl<'a> AssignmentProgramCursor<'a> {
     fn collect_steps(&mut self, steps: &'a [AssignmentStep]) {
         for step in steps {
             match step {
+                AssignmentStep::Task(task) => {
+                    self.tasks.insert(task.site, task);
+                }
                 AssignmentStep::Assign(assignment) => {
                     self.scalar
                         .entry(assignment.var_index)
@@ -3373,6 +3393,37 @@ fn lower_canonical_assignment_statement(
     limits: NativeLoweringLimits<'_>,
 ) -> JitResult<Vec<NativeAssignment>> {
     match statement {
+        HirStatement::Task(task) => {
+            let bytecode = program_cursor.tasks.get(&task.site).ok_or_else(|| {
+                JitError::InvalidCanonicalIr {
+                    model: model.name.clone(),
+                    detail: format!("missing executable analog task site {}", task.site).into(),
+                }
+            })?;
+            let mut programs = bytecode.expressions();
+            let lowered = task.try_map(task.span, |expression| {
+                let program = programs
+                    .next()
+                    .ok_or_else(|| JitError::InvalidCanonicalIr {
+                        model: model.name.clone(),
+                        detail: "analog task operand correspondence is incomplete".into(),
+                    })?;
+                lower_canonical_assignment_expression_program(
+                    model,
+                    mir,
+                    expression.id,
+                    program,
+                    limits,
+                )
+            })?;
+            if programs.next().is_some() {
+                return Err(JitError::InvalidCanonicalIr {
+                    model: model.name.clone(),
+                    detail: "analog task has excess executable operands".into(),
+                });
+            }
+            Ok(vec![NativeAssignment::Task(lowered)])
+        }
         HirStatement::Assignment(assignment) => lower_canonical_assignment(
             model,
             hir,
@@ -4314,6 +4365,11 @@ fn native_assignment_root_is_externally_observable(name: &str) -> bool {
 fn propagate_assignment_liveness(steps: &[AssignmentStep], live: &mut [bool], changed: &mut bool) {
     for step in steps.iter().rev() {
         match step {
+            AssignmentStep::Task(task) => {
+                for program in task.expressions() {
+                    mark_program_variable_reads_changed(program, live, changed);
+                }
+            }
             AssignmentStep::Assign(assignment) => {
                 if assignment.var_index < live.len() && live[assignment.var_index] {
                     mark_program_variable_reads_changed(&assignment.program, live, changed);
@@ -4345,6 +4401,7 @@ fn filter_live_assignment_steps(steps: &[AssignmentStep], live: &[bool]) -> Vec<
     steps
         .iter()
         .filter_map(|step| match step {
+            AssignmentStep::Task(_) => Some(step.clone()),
             AssignmentStep::Assign(assignment) => (assignment.var_index < live.len()
                 && live[assignment.var_index])
                 .then(|| step.clone()),
@@ -4364,6 +4421,7 @@ fn filter_live_assignment_steps(steps: &[AssignmentStep], live: &[bool]) -> Vec<
 
 fn assignment_steps_write_live(steps: &[AssignmentStep], live: &[bool]) -> bool {
     steps.iter().any(|step| match step {
+        AssignmentStep::Task(_) => true,
         AssignmentStep::Assign(assignment) => {
             assignment.var_index < live.len() && live[assignment.var_index]
         }
@@ -4427,6 +4485,17 @@ fn lower_assignment_step_with_limits(
     limits: NativeLoweringLimits<'_>,
 ) -> JitResult<NativeAssignment> {
     match step {
+        AssignmentStep::Task(task) => Ok(NativeAssignment::Task(task.try_map(
+            task.span,
+            |program| {
+                NativeProgram::from_bytecode(
+                    model.name.clone(),
+                    EntryKind::Assignment,
+                    program,
+                    limits,
+                )
+            },
+        )?)),
         AssignmentStep::Assign(assignment) => {
             validate_assignment_target(model, assignment.var_index)?;
             let program = NativeProgram::from_bytecode(

@@ -645,6 +645,11 @@ impl CodeGenerator {
         let mut steps = Vec::with_capacity(items.len());
         for item in items {
             steps.push(match item {
+                crate::ir::IrAssignmentItem::Task(task) => {
+                    AssignmentStep::Task(task.try_map(task.span, |expression| {
+                        self.compile_expr(arena, *expression, emit_ctx)
+                    })?)
+                }
                 crate::ir::IrAssignmentItem::Assign(assign) => {
                     let program = self.compile_expr(arena, assign.expr, emit_ctx)?;
                     match assign.index {
@@ -1972,7 +1977,7 @@ fn count_ir_assignment_items(items: &[crate::ir::IrAssignmentItem]) -> usize {
     items
         .iter()
         .map(|item| match item {
-            crate::ir::IrAssignmentItem::Assign(_) => 1,
+            crate::ir::IrAssignmentItem::Assign(_) | crate::ir::IrAssignmentItem::Task(_) => 1,
             crate::ir::IrAssignmentItem::Loop { body, .. } => 1 + count_ir_assignment_items(body),
         })
         .sum()
@@ -1992,7 +1997,9 @@ fn count_assignment_steps_for_timing(items: &[AssignmentStep]) -> usize {
     items
         .iter()
         .map(|item| match item {
-            AssignmentStep::Assign(_) | AssignmentStep::AssignIndexed { .. } => 1,
+            AssignmentStep::Assign(_)
+            | AssignmentStep::AssignIndexed { .. }
+            | AssignmentStep::Task(_) => 1,
             AssignmentStep::Loop { body, .. } => 1 + count_assignment_steps_for_timing(body),
         })
         .sum()

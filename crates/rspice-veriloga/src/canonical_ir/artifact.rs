@@ -824,6 +824,14 @@ fn write_hir_expression(out: &mut String, expression: &HirExpression) {
 fn write_hir_statements(out: &mut String, prefix: &str, statements: &[HirStatement]) {
     for (index, statement) in statements.iter().enumerate() {
         match statement {
+            HirStatement::Task(task) => {
+                writeln!(
+                    out,
+                    "{prefix}[{index}]=task {}",
+                    serde_json::to_string(task).expect("HIR task serialization")
+                )
+                .expect("write to string");
+            }
             HirStatement::Assignment(assignment) => {
                 write_hir_assignment(out, &format!("{prefix}[{index}]"), assignment);
             }

@@ -5956,6 +5956,7 @@ name = "rspice-veriloga-runtime"
 version = "0.1.0"
 dependencies = [
  "rspice-matrix",
+ "serde",
 ]
 
 [[package]]

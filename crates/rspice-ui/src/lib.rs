@@ -399,8 +399,12 @@ module rspice_wasm_solver_probe(p, n);
   electrical p, n;
   parameter real gain = 2.0;
   real bias;
+  integer task_index;
   analog begin
     bias = analysis("tran") ? ($param_given(gain) ? 100.0 : 1.0) : -1000.0;
+    for (task_index = 0; task_index < 2; task_index = task_index + 1)
+      $finish(task_index);
+    if (V(p, n) < 0.0) $finish(99);
     I(p, n) <+ bias + gain * V(p, n) + ddt(V(p, n));
   end
 endmodule
@@ -593,6 +597,34 @@ pub fn rspice_ui_wasm_jit_solver_probe_artifact()
 /// Jacobian, matrix, and RHS dispatch through an installed secondary module.
 #[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
 pub fn rspice_ui_wasm_jit_run_solver_probe() -> Result<f64, String> {
+    use rspice_core::device::veriloga_builtins::{AnalogTaskArgument, AnalogTaskKind};
+
+    fn accept_tasks(
+        device: &mut rspice_veriloga::device::VerilogADevice,
+        time: f64,
+    ) -> Result<(), String> {
+        if device.drain_accepted_analog_tasks().next().is_some() {
+            return Err("WASM JIT solver probe published an unaccepted task".into());
+        }
+        device
+            .try_advance_state()
+            .map_err(|error| error.to_string())?;
+        let calls = device.drain_accepted_analog_tasks().collect::<Vec<_>>();
+        if calls.len() != 2
+            || calls.iter().enumerate().any(|(index, call)| {
+                call.kind != AnalogTaskKind::Finish
+                    || call.time != time
+                    || call.site != calls[0].site
+                    || call.arguments.as_ref() != [AnalogTaskArgument::Integer(index as i64)]
+            })
+        {
+            return Err(format!(
+                "WASM JIT solver probe task delivery mismatch: {calls:?}"
+            ));
+        }
+        Ok(())
+    }
+
     let report = compile_wasm_jit_solver_probe()?;
     let mut device = rspice_veriloga::device::VerilogADevice::try_new_with_canonical_ir(
         "WASMJITPROBE1",
@@ -617,7 +649,7 @@ pub fn rspice_ui_wasm_jit_run_solver_probe() -> Result<f64, String> {
             "WASM JIT solver probe initial current mismatch: {initial_currents:?}, expected [7.0]"
         ));
     }
-    device.advance_state();
+    accept_tasks(&mut device, 0.0)?;
     device
         .try_set_time(0.5)
         .map_err(|error| error.to_string())?;
@@ -666,6 +698,7 @@ pub fn rspice_ui_wasm_jit_run_solver_probe() -> Result<f64, String> {
             "WASM JIT solver probe stamp mismatch: matrix={matrix:?}, rhs={rhs:?}"
         ));
     }
+    accept_tasks(&mut device, 0.5)?;
     Ok(currents[0])
 }
 

@@ -211,6 +211,7 @@ pub enum AnalyzedRegion {
         body: Vec<AnalyzedRegion>,
         span: Span,
     },
+    Task(crate::analog_tasks::AnalogTaskCall<Expression, Span>),
 }
 
 /// An analyzed array variable: elements occupy contiguous slots in the
@@ -233,6 +234,7 @@ pub enum AnalyzedStatement {
     /// Loop whose bounds are only known at runtime (e.g. parameter
     /// dependent). The condition is re-evaluated before every iteration.
     Loop(AnalyzedLoop),
+    Task(crate::analog_tasks::AnalogTaskCall<Expression, Span>),
 }
 
 /// Runtime-bounded loop over assignment statements

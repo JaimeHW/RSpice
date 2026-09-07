@@ -1065,6 +1065,9 @@ pub enum CfgValueKind {
         target: DigitalWriteTarget,
         value: ValueId,
     },
+    /// Ordered analog system-task invocation. It has no numerical result and
+    /// is never a common subexpression, derivative, or reusable cached value.
+    AnalogTask(crate::analog_tasks::AnalogTaskCall<ValueId, super::SourceSpanRef>),
 }
 
 impl CfgValueKind {
@@ -1080,6 +1083,7 @@ impl CfgValueKind {
     /// all keyed on.
     pub fn is_digital(&self) -> bool {
         match self {
+            Self::AnalogTask(_) => false,
             Self::RealConstant(_)
             | Self::BooleanConstant(_)
             | Self::BlockParameter
@@ -1214,6 +1218,7 @@ impl CfgValueKind {
     /// skipped by half of them.
     pub fn operands(&self) -> Vec<ValueId> {
         match self {
+            Self::AnalogTask(task) => task.expressions().copied().collect(),
             Self::Unary { input, .. }
             | Self::Ddt { input, .. }
             | Self::Ddx { value: input, .. }
@@ -1391,6 +1396,11 @@ impl CfgValueKind {
 
     pub(crate) fn map_operands(&mut self, mut map: impl FnMut(ValueId) -> ValueId) {
         match self {
+            Self::AnalogTask(task) => {
+                for value in task.expressions_mut() {
+                    *value = map(*value);
+                }
+            }
             Self::Unary { input, .. }
             | Self::Ddt { input, .. }
             | Self::Ddx { value: input, .. }
@@ -1659,15 +1669,21 @@ pub enum CfgValueType {
     /// at the point it appears: its update is not visible until the
     /// nonblocking region flushes.
     Effect,
+    /// A continuous-domain task's position in the instruction stream. The
+    /// effect is observed through its journal, never through an SSA operand.
+    AnalogEffect,
 }
 
 impl CfgValueType {
     pub fn shape(self) -> Option<ShapeId> {
         match self {
             Self::Lanes(shape) => Some(shape),
-            Self::Real | Self::Boolean | Self::Integer | Self::FourState { .. } | Self::Effect => {
-                None
-            }
+            Self::Real
+            | Self::Boolean
+            | Self::Integer
+            | Self::FourState { .. }
+            | Self::Effect
+            | Self::AnalogEffect => None,
         }
     }
 
@@ -2449,6 +2465,9 @@ impl SsaBuilder {
     /// which of them is being asked.
     fn undefined_value(&mut self, value_type: CfgValueType) -> ValueId {
         let kind = match value_type {
+            CfgValueType::AnalogEffect => {
+                panic!("an analog effect cannot be an undefined SSA variable")
+            }
             CfgValueType::FourState { width } => {
                 CfgValueKind::FourStateConstant(digital_value::FourStateValue::splat(
                     width,

@@ -1037,6 +1037,13 @@ fn rewrite_statement(
     base: InstanceBase,
 ) -> CompileResult<AnalyzedStatement> {
     Ok(match statement {
+        AnalyzedStatement::Task(task) => {
+            let mut rewritten = task.try_map(task.span, |expression| {
+                rewrite_expression(expression, scope)
+            })?;
+            rewritten.site = base.site(AnalogSiteId(task.site))?.0;
+            AnalyzedStatement::Task(rewritten)
+        }
         AnalyzedStatement::Assignment(assignment) => {
             AnalyzedStatement::Assignment(rewrite_assignment(assignment, scope, base)?)
         }
@@ -1060,6 +1067,13 @@ fn rewrite_region(
     base: InstanceBase,
 ) -> CompileResult<AnalyzedRegion> {
     Ok(match region {
+        AnalyzedRegion::Task(task) => {
+            let mut rewritten = task.try_map(task.span, |expression| {
+                rewrite_expression(expression, scope)
+            })?;
+            rewritten.site = base.site(AnalogSiteId(task.site))?.0;
+            AnalyzedRegion::Task(rewritten)
+        }
         AnalyzedRegion::Assignment(assignment) => {
             AnalyzedRegion::Assignment(rewrite_assignment(assignment, scope, base)?)
         }

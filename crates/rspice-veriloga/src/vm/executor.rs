@@ -137,6 +137,55 @@ pub(crate) fn execute_zi_state_derivative(
 }
 
 impl<'a> Vm<'a> {
+    pub(crate) fn execute_analog_task<S>(
+        &mut self,
+        task: &crate::analog_tasks::AnalogTaskCall<BytecodeProgram, S>,
+    ) -> Result<(), VmError> {
+        let result = self.execute_analog_task_checked(task);
+        if result.is_err() {
+            self.context.invalidate_task_candidate();
+        }
+        result
+    }
+
+    fn execute_analog_task_checked<S>(
+        &mut self,
+        task: &crate::analog_tasks::AnalogTaskCall<BytecodeProgram, S>,
+    ) -> Result<(), VmError> {
+        use crate::analog_tasks::AnalogTaskKind;
+        if !self.context.record_task_effects {
+            return Ok(());
+        }
+        if let Some(guard) = &task.guard {
+            let guard = self.execute(guard)?;
+            if !guard.is_finite() {
+                return Err(VmError::AnalogTask("task guard is not finite".into()));
+            }
+            if guard == 0.0 {
+                return Ok(());
+            }
+        }
+        if task.kind != AnalogTaskKind::Finish {
+            return Err(VmError::AnalogTask(format!(
+                "task {:?} is not executable",
+                task.kind
+            )));
+        }
+        let Some(program) = task.finish_operand() else {
+            return Err(VmError::AnalogTask(
+                "$finish requires one diagnostic-level operand".into(),
+            ));
+        };
+        let diagnostic = self.execute(program)?;
+        let time = self.context.time;
+        self.context
+            .analog_effect_journal()
+            .record_finish(task.site, time, diagnostic)
+            .map_err(|error| {
+                VmError::AnalogTask(format!("$finish diagnostic level {diagnostic}: {error}"))
+            })
+    }
+
     /// Create a new VM with the given context.
     pub fn new(context: &'a mut VmContext) -> Self {
         Self {

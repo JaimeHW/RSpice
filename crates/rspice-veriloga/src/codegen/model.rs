@@ -612,6 +612,7 @@ pub enum AssignmentStep {
         condition: BytecodeProgram,
         body: Vec<AssignmentStep>,
     },
+    Task(crate::analog_tasks::AnalogTaskCall<BytecodeProgram, crate::canonical_ir::SourceSpanRef>),
 }
 
 /// Location to stamp in matrix

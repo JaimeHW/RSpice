@@ -1135,6 +1135,7 @@ impl FunctionCompiler {
         layout: AssignmentFrameLayout,
     ) -> JitResult<()> {
         match assignment {
+            NativeAssignment::Task(task) => self.emit_analog_task(task),
             NativeAssignment::Direct { var_index, program } => {
                 let result = self.emit_native_program_for_pass(program)?;
                 let source = self.materialize_location(result, DReg::D0)?;
@@ -1151,6 +1152,59 @@ impl FunctionCompiler {
                 self.emit_loop_assignment(condition, body, loop_depth, layout)
             }
         }
+    }
+
+    fn emit_analog_task(
+        &mut self,
+        task: &crate::analog_tasks::AnalogTaskCall<
+            NativeProgram,
+            crate::canonical_ir::SourceSpanRef,
+        >,
+    ) -> JitResult<()> {
+        let program = task
+            .finish_operand()
+            .ok_or_else(|| verifier_error("invalid analog task plan"))?;
+        self.encoder.ldr_x_unsigned(
+            XReg::X9,
+            self.context_register(),
+            std::mem::offset_of!(EvalContext, analog_effects),
+        )?;
+        let observation = self.encoder.cbz_placeholder(XReg::X9)?;
+        self.emit_kernel_abort_if_failed()?;
+        let inactive = if let Some(guard) = &task.guard {
+            let result = self.emit_native_program_for_pass(guard)?;
+            self.materialize_location(result, DReg::D0)?;
+            self.emit_task_helper(
+                task.site,
+                crate::native::abi::rspice_task_guard_native as *const () as usize,
+            )?;
+            self.encoder.fcmp_d_zero(DReg::D0);
+            Some(self.encoder.b_cond_placeholder(Condition::Equal))
+        } else {
+            None
+        };
+        let result = self.emit_native_program_for_pass(program)?;
+        self.materialize_location(result, DReg::D0)?;
+        self.emit_kernel_abort_if_failed()?;
+        self.emit_task_helper(
+            task.site,
+            crate::native::abi::rspice_finish_native as *const () as usize,
+        )?;
+        self.emit_kernel_abort_if_failed()?;
+        let end = self.encoder.position();
+        if let Some(inactive) = inactive {
+            self.encoder.patch_branch(inactive, end)?;
+        }
+        self.encoder.patch_branch(observation, end)
+    }
+
+    fn emit_task_helper(&mut self, site: u32, helper: usize) -> JitResult<()> {
+        self.encoder.mov_x(XReg::X0, self.context_register())?;
+        self.encoder.mov_u64(XReg::X1, u64::from(site))?;
+        self.encoder
+            .mov_u64(HOST_ABI.indirect_call_scratch, helper as u64)?;
+        self.encoder.blr(HOST_ABI.indirect_call_scratch);
+        Ok(())
     }
 
     fn emit_assignment_steps(
@@ -1176,11 +1230,11 @@ impl FunctionCompiler {
             .iter()
             .map(|assignment| match assignment {
                 NativeAssignment::Direct { var_index, program } => Ok((*var_index, program)),
-                NativeAssignment::Indexed { .. } | NativeAssignment::Loop { .. } => {
-                    Err(verifier_error(
-                        "AArch64 direct-assignment batch contains a control-flow assignment",
-                    ))
-                }
+                NativeAssignment::Indexed { .. }
+                | NativeAssignment::Loop { .. }
+                | NativeAssignment::Task(_) => Err(verifier_error(
+                    "AArch64 direct-assignment batch contains a control-flow assignment",
+                )),
             })
             .collect::<JitResult<Vec<_>>>()?;
         let ssa = AssignmentProgram::lower(&direct)?;
@@ -2989,6 +3043,12 @@ fn inspect_assignment_requirements(
     for range in shareable_batch_ranges(assignments) {
         let batch = &assignments[range];
         match &batch[0] {
+            NativeAssignment::Task(task) => {
+                requirements.requires_call_frame = true;
+                for program in task.expressions() {
+                    inspect_assignment_program(program, requirements)?;
+                }
+            }
             NativeAssignment::Direct { .. } => {
                 let direct = batch
                     .iter()
@@ -2996,11 +3056,11 @@ fn inspect_assignment_requirements(
                         NativeAssignment::Direct { var_index, program } => {
                             Ok((*var_index, program))
                         }
-                        NativeAssignment::Indexed { .. } | NativeAssignment::Loop { .. } => {
-                            Err(verifier_error(
-                                "AArch64 requirement batch contains a control-flow assignment",
-                            ))
-                        }
+                        NativeAssignment::Indexed { .. }
+                        | NativeAssignment::Loop { .. }
+                        | NativeAssignment::Task(_) => Err(verifier_error(
+                            "AArch64 requirement batch contains a control-flow assignment",
+                        )),
                     })
                     .collect::<JitResult<Vec<_>>>()?;
                 let ssa = AssignmentProgram::lower(&direct)?;

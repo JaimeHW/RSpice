@@ -200,7 +200,9 @@ impl A64ImageBuilder {
                     .iter()
                     .map(|assignment| match assignment {
                         NativeAssignment::Direct { var_index, program } => (*var_index, program),
-                        NativeAssignment::Indexed { .. } | NativeAssignment::Loop { .. } => {
+                        NativeAssignment::Indexed { .. }
+                        | NativeAssignment::Loop { .. }
+                        | NativeAssignment::Task(_) => {
                             unreachable!("shareable direct batch")
                         }
                     })
@@ -277,6 +279,12 @@ impl A64ImageBuilder {
         if let [NativeAssignment::Loop { condition, body }] = assignments {
             chunks.push(self.append_segmented_loop(condition, body, entry_kind)?);
             return Ok(());
+        }
+        if let [NativeAssignment::Task(_)] = assignments {
+            return Err(JitError::Encoding {
+                model: "aarch64".into(),
+                detail: "analog task exceeds the AArch64 function size limit".into(),
+            });
         }
         debug_assert!(assignments.len() > 1);
 

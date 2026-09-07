@@ -145,7 +145,7 @@ pub(crate) fn generate_device_measured(
     checkpoint_phase(artifact, measurements, PipelinePhase::StateEmission)?;
     let phase_started = web_time::Instant::now();
     let accepted_state_shape_identity = plan.accepted_state_shape_identity(artifact)?;
-    let state_extensions = plan.state_extensions(artifact);
+    let state_extensions = plan.state_extensions(artifact, options);
     let state = state_file::generate_state_file_with_extensions(
         artifact,
         options,
@@ -399,6 +399,11 @@ fn kernel_region_metrics(
             shape_signature(value_id)
         );
         match &value.kind {
+            CfgValueKind::AnalogTask(task) => write!(
+                out,
+                "analog-task:{}",
+                serde_json::to_string(task).expect("serializable task")
+            ),
             CfgValueKind::RealConstant(value) => write!(out, "real:{:016x}", value.to_bits()),
             CfgValueKind::BooleanConstant(value) => write!(out, "bool:{value}"),
             CfgValueKind::BlockParameter => write!(out, "block-param"),
@@ -957,6 +962,13 @@ impl ModelPlan {
         let charges = stored_charges(&mut cfg.function, &residuals);
         let mut derivative_roots = residuals.clone();
         derivative_roots.extend(charges.iter().flatten().copied());
+        // A task argument can contain ddx even though a task has no derivative.
+        // Preserve the numerical preparation required to evaluate that argument.
+        for value in &cfg.function.values {
+            if let CfgValueKind::AnalogTask(task) = &value.kind {
+                derivative_roots.extend(task.expressions().copied());
+            }
+        }
         // Only numeric stamp values need the preliminary scalar pass: the
         // packed pass differentiates those resolved readbacks again to obtain
         // their Hessian rows. A `ddx` used by an activation, branch predicate,
@@ -1115,6 +1127,11 @@ impl ModelPlan {
         wanted.extend(activations.iter().flatten().copied());
         let activation_wanted = activations.iter().flatten().count();
         wanted.extend(cfg.event_state_candidates.iter().copied());
+        // Side effects are explicit optimization roots. They remain in their
+        // source blocks, including repeated calls on loop back edges.
+        wanted.extend(cfg.function.values.iter().filter_map(|value| {
+            matches!(value.kind, CfgValueKind::AnalogTask(_)).then_some(value.id)
+        }));
         let tracked_primal = (0..cfg.function.values.len())
             .map(ValueId::from)
             .collect::<Vec<_>>();
@@ -1143,7 +1160,9 @@ impl ModelPlan {
             })
             .collect::<Vec<_>>();
         debug_assert!(mapped_activations.next().is_none());
-        let event_state_candidates = mapped[activation_end..].to_vec();
+        let event_state_end = activation_end + cfg.event_state_candidates.len();
+        let event_state_candidates = mapped[activation_end..event_state_end].to_vec();
+        let task_effects = &mapped[event_state_end..];
         conduction.drop_zeros(&function);
         reactive.drop_zeros(&function);
         let mut scalar_derivatives = 0usize;
@@ -1198,6 +1217,9 @@ impl ModelPlan {
                 outputs.len() - 1
             })
             .collect();
+        // These positions keep execution live through scheduling and emission;
+        // they produce no numerical stamp or exported device state.
+        outputs.extend(task_effects.iter().copied());
 
         let parameter_scopes: Vec<_> = artifact
             .mir
@@ -2461,6 +2483,9 @@ impl ModelPlan {
         out.push_str(
             "    pub fn stamp(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedStamper<'_>) {\n",
         );
+        if self.has_analog_tasks() {
+            out.push_str("        if ctx.analog_tasks_enabled() { self.analog_effects.get_or_insert_with(Default::default).begin_evaluation(); }\n");
+        }
         // Cleared per evaluation, so "was this device limited?" is a question
         // about *this* iteration. Only when limiting is on: with it off the flag
         // is never set, and clearing it would erase a damped step recorded by
@@ -2539,6 +2564,9 @@ impl ModelPlan {
                     values[*position]
                 );
             }
+        }
+        if self.has_analog_tasks() {
+            out.push_str("        if ctx.analog_tasks_enabled() && !ctx.evaluation_failed() { self.analog_effects.as_mut().expect(\"task evaluation began\").complete_evaluation(); }\n");
         }
         out.push_str("    }\n\n");
         Ok(())
@@ -3236,6 +3264,19 @@ impl ModelPlan {
         if wants.time {
             let _ = writeln!(out, "{pad}let time = self.time;");
         }
+        if wants.analog_tasks {
+            let _ = writeln!(
+                out,
+                "{pad}let analog_effects = &mut self.analog_effects;\n\
+                 {pad}let mut analog_finish = |site: u32, time: f64, diagnostic: f64| {{\n\
+                 {pad}    if ctx.analog_tasks_enabled() {{\n\
+                 {pad}        if let Err(source) = analog_effects.get_or_insert_with(Default::default).record_finish(site, time, diagnostic) {{\n\
+                 {pad}            ctx.report_analog_task_error(site, source);\n\
+                 {pad}        }}\n\
+                 {pad}    }}\n\
+                 {pad}}};"
+            );
+        }
         if wants.temperature {
             let _ = writeln!(out, "{pad}let temperature = ctx.temperature();");
         }
@@ -3504,8 +3545,35 @@ impl ModelPlan {
         Ok(())
     }
 
-    fn state_extensions(&self, artifact: &CanonicalIrArtifact) -> state_file::StateFileExtensions {
-        let mut extensions = state_file::StateFileExtensions::default();
+    fn has_analog_tasks(&self) -> bool {
+        self.function
+            .values
+            .iter()
+            .any(|value| matches!(value.kind, CfgValueKind::AnalogTask(_)))
+    }
+
+    fn state_extensions(
+        &self,
+        artifact: &CanonicalIrArtifact,
+        options: &RustTranspileOptions,
+    ) -> state_file::StateFileExtensions {
+        let mut extensions = state_file::StateFileExtensions {
+            uses_analog_tasks: self.has_analog_tasks(),
+            ..Default::default()
+        };
+        if extensions.uses_analog_tasks {
+            let _ = writeln!(
+                extensions.instance_fields,
+                "    pub(crate) analog_effects: Option<Box<{}::AnalogEffectJournal>>,",
+                options.runtime_path
+            );
+            extensions
+                .clone_fields
+                .push_str("            analog_effects: self.analog_effects.clone(),\n");
+            extensions
+                .new_initializers
+                .push_str("            analog_effects: None,\n");
+        }
         self.push_limit_state_fields(&mut extensions);
         self.push_event_control_state_fields(&mut extensions);
         let reactive = self.reactive.width();
@@ -4228,6 +4296,7 @@ enum Reactive {
 /// Which bindings a body actually reads.
 #[derive(Default)]
 struct Wants {
+    analog_tasks: bool,
     parameters: bool,
     parameter_given: bool,
     event_state: bool,
@@ -4252,6 +4321,10 @@ struct Wants {
 impl Wants {
     fn observe(&mut self, kind: &CfgValueKind) {
         match kind {
+            CfgValueKind::AnalogTask(_) => {
+                self.analog_tasks = true;
+                self.time = true;
+            }
             CfgValueKind::Parameter(_) => self.parameters = true,
             CfgValueKind::ParameterGiven(_) => self.parameter_given = true,
             CfgValueKind::EventState(_) => self.event_state = true,

@@ -101,6 +101,8 @@ impl<'a> SmallSignalVm<'a> {
     fn execute_assignment_steps(&mut self, steps: &[AssignmentStep]) -> Result<(), VmError> {
         for step in steps {
             match step {
+                // Linearization replays numerical assignments, not task effects.
+                AssignmentStep::Task(_) => {}
                 AssignmentStep::Assign(assignment) => {
                     let value = self.execute(&assignment.program)?;
                     let slot = self.variables.get_mut(assignment.var_index).ok_or(

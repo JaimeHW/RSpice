@@ -17,7 +17,7 @@ import urllib.parse
 EXPECTED_STAMPS = 20000
 # An independent release contract: changing the compiler ABI also requires
 # reviewing the worker qualification expectations.
-EXPECTED_WASM_JIT_ABI_VERSION = 8
+EXPECTED_WASM_JIT_ABI_VERSION = 9
 
 # The page runs on a real clock, so the runner cannot bound it with
 # --virtual-time-budget and read the DOM afterwards: a virtual clock reports a

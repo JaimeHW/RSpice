@@ -96,6 +96,9 @@ pub struct EmitBindings {
     pub limit_previous: String,
     /// Indexed as `staged[slot]` — what coarser invalidation stages cached.
     pub staged: String,
+    /// Ordered `$finish` callback `(site, time, diagnostic_level) -> ()`.
+    /// The owner journals calls and retains any task evaluation error.
+    pub analog_finish: String,
 }
 
 impl Default for EmitBindings {
@@ -111,6 +114,7 @@ impl Default for EmitBindings {
             thermal_voltage: "thermal_voltage".into(),
             multiplicity: "multiplicity".into(),
             time: "time".into(),
+            analog_finish: "analog_finish".into(),
             ddt: "ddt".into(),
             ddt_slots: HashMap::new(),
             ddt_scale: "ddt_scale".into(),
@@ -1185,6 +1189,10 @@ impl Emitter<'_> {
                 continue;
             }
             let expression = self.expression(instruction.result)?;
+            if self.function.value(instruction.result).value_type == CfgValueType::AnalogEffect {
+                self.line(depth, &format!("{expression};"));
+                continue;
+            }
             // Composite expressions are parenthesised because they are about to
             // be dropped into the middle of another expression. Constructor,
             // call, literal, and indexing forms are already atomic, so wrapping
@@ -1216,6 +1224,9 @@ impl Emitter<'_> {
     /// every iteration and what survives is the last one, which is what "the
     /// value after the loop" means.
     fn capture(&mut self, value: ValueId, depth: usize) {
+        if self.function.value(value).value_type == CfgValueType::AnalogEffect {
+            return;
+        }
         if depth <= 1 || !self.wanted.contains(&value) || self.captured.contains_key(&value) {
             return;
         }
@@ -1365,6 +1376,9 @@ impl Emitter<'_> {
     }
 
     fn zero(&self, value: ValueId) -> String {
+        if self.function.value(value).value_type == CfgValueType::AnalogEffect {
+            return "()".into();
+        }
         if self.function.value(value).value_type == CfgValueType::Boolean {
             return "false".to_string();
         }
@@ -1384,6 +1398,9 @@ impl Emitter<'_> {
     /// How a reader names `value`: its binding, or its whole expression when it
     /// was chosen for substitution.
     fn operand(&self, value: ValueId) -> String {
+        if self.function.value(value).value_type == CfgValueType::AnalogEffect {
+            return "()".into();
+        }
         match self.inlined.get(&value) {
             Some(expression) if !expression.is_empty() => expression.clone(),
             _ => self.value_name(value).to_owned(),
@@ -1438,6 +1455,7 @@ impl Emitter<'_> {
     /// Coerce an edge or output to the representation its destination expects.
     fn coerce_operand(&self, value: ValueId, target: CfgValueType) -> String {
         match target {
+            CfgValueType::AnalogEffect => self.operand(value),
             CfgValueType::Boolean => self.truth_operand(value),
             CfgValueType::Real
                 if self.function.value(value).value_type == CfgValueType::Boolean =>
@@ -1559,6 +1577,21 @@ impl Emitter<'_> {
     fn expression(&self, value: ValueId) -> Result<String, EmitError> {
         let bindings = self.bindings;
         Ok(match &self.function.value(value).kind {
+            CfgValueKind::AnalogTask(task) => {
+                let operand =
+                    task.finish_operand()
+                        .ok_or(EmitError::UnsupportedStatefulOperator {
+                            value,
+                            operator: "analog task",
+                        })?;
+                format!(
+                    "{}({}, {}, {})",
+                    bindings.analog_finish,
+                    task.site,
+                    bindings.time,
+                    self.numeric_operand(*operand)
+                )
+            }
             CfgValueKind::RealConstant(constant) => real_literal(*constant),
             CfgValueKind::BooleanConstant(constant) => {
                 if *constant {

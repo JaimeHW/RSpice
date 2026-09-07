@@ -27,10 +27,15 @@ pub(crate) enum NativeAssignment {
         condition: NativeProgram,
         body: Vec<NativeAssignment>,
     },
+    Task(crate::analog_tasks::AnalogTaskCall<NativeProgram, crate::canonical_ir::SourceSpanRef>),
 }
 
 pub(crate) fn operation_count(assignment: &NativeAssignment) -> usize {
     match assignment {
+        NativeAssignment::Task(task) => task
+            .expressions()
+            .map(|program| program.ops().len())
+            .fold(1_usize, usize::saturating_add),
         NativeAssignment::Direct { program, .. } => program.ops().len(),
         NativeAssignment::Indexed { index, value, .. } => {
             index.ops().len().saturating_add(value.ops().len())

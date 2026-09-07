@@ -6264,6 +6264,7 @@ endmodule
     ) -> Result<(), crate::vm::VmError> {
         for step in steps {
             match step {
+                AssignmentStep::Task(task) => vm.execute_analog_task(task)?,
                 AssignmentStep::Assign(assignment) => {
                     let value = vm.execute(&assignment.program)?;
                     vm.context.variables[assignment.var_index] = value;
@@ -6311,6 +6312,7 @@ endmodule
 
     fn bytecode_assignment_step_reads_current(step: &AssignmentStep) -> bool {
         match step {
+            AssignmentStep::Task(task) => task.expressions().any(bytecode_program_reads_current),
             AssignmentStep::Assign(assignment) => {
                 bytecode_program_reads_current(&assignment.program)
             }
@@ -6334,6 +6336,7 @@ endmodule
     fn mark_bytecode_assignment_targets(steps: &[AssignmentStep], targets: &mut [bool]) {
         for step in steps {
             match step {
+                AssignmentStep::Task(_) => {}
                 AssignmentStep::Assign(assignment) => {
                     if let Some(target) = targets.get_mut(assignment.var_index) {
                         *target = true;
@@ -6440,6 +6443,11 @@ endmodule
     ) {
         for step in steps {
             match step {
+                AssignmentStep::Task(task) => {
+                    for program in task.expressions() {
+                        scan_program(program);
+                    }
+                }
                 AssignmentStep::Assign(assignment) => {
                     scan_program(&assignment.program);
                 }
@@ -6572,6 +6580,7 @@ endmodule
             state_older_candidate_len: context.state_older_candidate.len(),
             prelude_slots,
             prelude_slots_len,
+            analog_effects: std::ptr::null_mut(),
         }
     }
 
@@ -6583,7 +6592,9 @@ endmodule
         steps
             .iter()
             .map(|step| match step {
-                AssignmentStep::Assign(_) | AssignmentStep::AssignIndexed { .. } => 1,
+                AssignmentStep::Assign(_)
+                | AssignmentStep::AssignIndexed { .. }
+                | AssignmentStep::Task(_) => 1,
                 AssignmentStep::Loop { body, .. } => 1 + count_assignment_steps(body),
             })
             .sum()
@@ -6992,6 +7003,7 @@ endmodule
             state_older_candidate_len: 0,
             prelude_slots,
             prelude_slots_len,
+            analog_effects: std::ptr::null_mut(),
         }
     }
 }

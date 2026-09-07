@@ -68,6 +68,7 @@ impl WasmJitRuntimeSession {
     }
 
     fn fail(&mut self, detail: impl Into<String>) -> HelperError {
+        self.context.invalidate_task_candidate();
         if self.last_error.is_none() {
             self.last_error = Some(detail.into());
         }
@@ -113,7 +114,7 @@ pub(super) fn evaluate_helper(
     evaluate_helper_with_session(opcode, aux0, aux1, aux2, operands, variables, None)
 }
 
-fn evaluate_helper_with_session(
+pub(super) fn evaluate_helper_with_session(
     opcode: i32,
     aux0: i32,
     aux1: i32,
@@ -123,6 +124,31 @@ fn evaluate_helper_with_session(
     session: Option<&mut WasmJitRuntimeSession>,
 ) -> Result<f64, HelperError> {
     match opcode {
+        460..=462 => {
+            let session = session.ok_or(HelperError::StatefulRuntimeUnavailable)?;
+            if opcode == 460 {
+                return Ok(f64::from(session.context.record_task_effects));
+            }
+            if !session.context.record_task_effects {
+                return Ok(0.0);
+            }
+            if opcode == 461 {
+                return if operands[0].is_finite() {
+                    Ok(operands[0])
+                } else {
+                    Err(session.fail("analog task guard is not finite"))
+                };
+            }
+            let time = session.context.time;
+            session
+                .context
+                .analog_effect_journal()
+                .record_finish(aux0 as u32, time, operands[0])
+                .map(|()| 0.0)
+                .map_err(|error| {
+                    session.fail(format!("$finish diagnostic level {}: {error}", operands[0]))
+                })
+        }
         1 => {
             let slot = dynamic_slot(aux0, aux1, aux2, operands[0], variables.len())?;
             variables
@@ -815,9 +841,9 @@ pub fn math2_v1(opcode: i32, left: f64, right: f64) -> f64 {
     }
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(any(test, target_arch = "wasm32"))]
 fn is_stateful_opcode(opcode: i32) -> bool {
-    matches!(opcode, 400..=429 | 432 | 440..=446)
+    matches!(opcode, 400..=429 | 432 | 440..=449 | 460..=462)
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -1013,6 +1039,20 @@ use std::mem::{align_of, size_of};
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn history_and_task_helpers_require_the_active_runtime_session() {
+        for opcode in [447, 448, 449, 460, 461, 462] {
+            assert!(
+                is_stateful_opcode(opcode),
+                "opcode {opcode} must dispatch through the session"
+            );
+            assert_eq!(
+                evaluate_helper(opcode, 0, 0, 0, [0.0; 5], &[]),
+                Err(HelperError::StatefulRuntimeUnavailable)
+            );
+        }
+    }
     use crate::vm::IntegrationCoefficients;
 
     #[test]

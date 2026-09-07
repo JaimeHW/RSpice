@@ -269,6 +269,7 @@ fn reaching_write(writes: &HashMap<usize, Vec<usize>>, slot: usize, point: usize
 /// write to the whole declared run.
 fn record_writes(item: &IrAssignmentItem, index: usize, out: &mut HashMap<usize, Vec<usize>>) {
     match item {
+        IrAssignmentItem::Task(_) => {}
         IrAssignmentItem::Assign(assignment) => {
             let span = match &assignment.index {
                 Some(target) => target.len,

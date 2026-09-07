@@ -559,7 +559,8 @@ endmodule
         .iter()
         .filter_map(|statement| match statement {
             rspice_veriloga::canonical_ir::HirStatement::Assignment(assignment) => Some(assignment),
-            rspice_veriloga::canonical_ir::HirStatement::Loop(_) => None,
+            rspice_veriloga::canonical_ir::HirStatement::Loop(_)
+            | rspice_veriloga::canonical_ir::HirStatement::Task(_) => None,
         })
         .filter(|assignment| assignment.target_name == "hit")
         .any(|assignment| {

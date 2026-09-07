@@ -89,6 +89,16 @@ fn compiled_model_layout_identity(model: &CompiledModel) -> CompiledModelLayoutI
         usize_field(hasher, steps.len());
         for step in steps {
             match step {
+                AssignmentStep::Task(task) => {
+                    hasher.update(&[3]);
+                    hasher.update(&task.site.to_le_bytes());
+                    // The serialized task includes kind, typed arguments,
+                    // guards, source identity, and execution phase.
+                    string_field(
+                        hasher,
+                        &serde_json::to_string(task).expect("serializable task"),
+                    );
+                }
                 AssignmentStep::Assign(assignment) => {
                     hasher.update(&[0]);
                     usize_field(hasher, assignment.var_index);
@@ -2595,6 +2605,18 @@ impl VerilogADevice {
                 }
 
                 match step {
+                    crate::codegen::AssignmentStep::Task(task) => {
+                        if task.kind != crate::analog_tasks::AnalogTaskKind::Finish
+                            || !matches!(
+                                task.arguments.as_slice(),
+                                [crate::analog_tasks::AnalogTaskOperand::Integer(_)]
+                            )
+                        {
+                            return Err(VmError::InvalidModel(
+                                "invalid analog task call shape".into(),
+                            ));
+                        }
+                    }
                     crate::codegen::AssignmentStep::Assign(assignment) => {
                         if assignment.var_index >= num_variables {
                             return Err(VmError::InvalidModel(format!(
@@ -2693,6 +2715,9 @@ impl VerilogADevice {
         ) {
             for step in steps {
                 match step {
+                    crate::codegen::AssignmentStep::Task(task) => {
+                        task.expressions().for_each(&mut *scan_program)
+                    }
                     crate::codegen::AssignmentStep::Assign(assignment) => {
                         scan_program(&assignment.program);
                     }
@@ -3909,6 +3934,7 @@ impl VerilogADevice {
             // context clone so lazy Zi definition freezes and state candidates
             // in assignment expressions cannot leak into accepted state.
             let mut refresh_context = self.context.clone();
+            refresh_context.record_task_effects = false;
             let context = &mut refresh_context;
             let mut vm = Vm::new(context);
             Self::run_assignment_pass(&mut vm, model, native)?;
@@ -3977,6 +4003,7 @@ impl VerilogADevice {
 
         if has_static_conditions {
             let mut refresh_context = self.context.clone();
+            refresh_context.record_task_effects = false;
             let context = &mut refresh_context;
             let mut vm = Vm::new(context);
             Self::run_assignment_pass(&mut vm, model, wasm)?;
@@ -4148,6 +4175,7 @@ impl VerilogADevice {
 
         {
             let mut refresh_context = self.context.clone();
+            refresh_context.record_task_effects = false;
             let context = &mut refresh_context;
             let mut bytecode_vm = Vm::new(context);
             // Static guards may reference instance-static variables (e.g.
@@ -4225,6 +4253,7 @@ impl VerilogADevice {
     /// after convergence, not inside the loop.
     #[cfg(feature = "native")]
     pub fn observe_variables(&mut self, artifact: &CanonicalIrArtifact) -> Result<(), VmError> {
+        self.context.record_task_effects = false;
         if self.native_model.publishes_observable_variables() {
             return Ok(());
         }
@@ -4251,6 +4280,7 @@ impl VerilogADevice {
     /// called, and the readback it serves is not on any hot path in a browser.
     #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
     pub fn observe_variables(&mut self, artifact: &CanonicalIrArtifact) -> Result<(), VmError> {
+        self.context.record_task_effects = false;
         Self::validate_observation_artifact(&self.model, artifact)?;
         let context = &mut self.context;
         if context.variables.len() < self.model.num_variables {
@@ -4470,7 +4500,7 @@ impl VerilogADevice {
         // Reactive stamping is a small-signal surface. It must never advance
         // Newton limiter history or replace the convergence result produced
         // by the nonlinear value pass.
-        self.begin_evaluation(crate::vm::VerilogAEvaluationMode::SmallSignal);
+        self.begin_observation(crate::vm::VerilogAEvaluationMode::SmallSignal);
 
         let context = &mut self.context;
         let model = &self.model;
@@ -4582,7 +4612,10 @@ impl VerilogADevice {
         // execute self-referential/event-state assignments twice at every
         // frequency point.
         let variable_seed = self.context.variables.clone();
-        self.try_evaluate_with_mode(crate::vm::VerilogAEvaluationMode::SmallSignal)?;
+        self.try_evaluate_with_task_recording(
+            crate::vm::VerilogAEvaluationMode::SmallSignal,
+            false,
+        )?;
 
         let model = &self.model;
         let matrix_indices = &self.matrix_indices;
@@ -4768,17 +4801,29 @@ impl VerilogADevice {
         &mut self,
         mode: crate::vm::VerilogAEvaluationMode,
     ) -> Result<Vec<f64>, VmError> {
+        let result = self.try_evaluate_with_task_recording(mode, true);
+        if result.is_err() {
+            self.context.invalidate_task_candidate();
+        }
+        result
+    }
+
+    fn try_evaluate_with_task_recording(
+        &mut self,
+        mode: crate::vm::VerilogAEvaluationMode,
+        record_tasks: bool,
+    ) -> Result<Vec<f64>, VmError> {
         #[cfg(feature = "native")]
         if self.native_model.evaluation_kernel_is_eligible() {
-            return self.try_evaluate_native_kernel(mode);
+            return self.try_evaluate_native_kernel(mode, record_tasks);
         }
 
         #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
         if self.wasm_jit_model.evaluation_kernel_is_eligible() {
-            return self.try_evaluate_wasm_kernel(mode);
+            return self.try_evaluate_wasm_kernel(mode, record_tasks);
         }
 
-        self.begin_evaluation(mode);
+        self.begin_evaluation_with_tasks(mode, record_tasks);
         self.context.clear_currents();
         // Pre-reserve so the currents pointer stays stable while native
         // snapshots reference it across pushes
@@ -4851,8 +4896,9 @@ impl VerilogADevice {
     fn try_evaluate_wasm_kernel(
         &mut self,
         mode: crate::vm::VerilogAEvaluationMode,
+        record_tasks: bool,
     ) -> Result<Vec<f64>, VmError> {
-        self.begin_evaluation(mode);
+        self.begin_evaluation_with_tasks(mode, record_tasks);
         let stamp_count = self.model.stamp_programs.len();
         if self.fused_program_active.len() != stamp_count {
             return Err(VmError::WasmJit(format!(
@@ -4899,8 +4945,9 @@ impl VerilogADevice {
     fn try_evaluate_native_kernel(
         &mut self,
         mode: crate::vm::VerilogAEvaluationMode,
+        record_tasks: bool,
     ) -> Result<Vec<f64>, VmError> {
-        self.begin_evaluation(mode);
+        self.begin_evaluation_with_tasks(mode, record_tasks);
         let model = &self.model;
         let native = self.native_model.as_ref();
         let stamp_count = model.stamp_programs.len();
@@ -4970,8 +5017,21 @@ impl VerilogADevice {
 
     #[inline]
     fn begin_evaluation(&mut self, mode: crate::vm::VerilogAEvaluationMode) {
+        self.begin_evaluation_with_tasks(mode, true);
+    }
+
+    fn begin_observation(&mut self, mode: crate::vm::VerilogAEvaluationMode) {
+        self.begin_evaluation_with_tasks(mode, false);
+    }
+
+    fn begin_evaluation_with_tasks(
+        &mut self,
+        mode: crate::vm::VerilogAEvaluationMode,
+        record_tasks: bool,
+    ) {
         self.context.evaluation_mode = mode;
-        self.context.begin_stateful_evaluation();
+        self.context
+            .begin_stateful_evaluation_with_tasks(record_tasks);
         if mode.limiting_enabled() {
             self.context.limiter_active = 0;
         }
@@ -5102,6 +5162,7 @@ impl VerilogADevice {
                 context.prelude_slots.as_mut_ptr()
             },
             prelude_slots_len: context.prelude_slots.len(),
+            analog_effects: context.analog_effects_ptr(),
         }
     }
 
@@ -5903,6 +5964,7 @@ impl VerilogADevice {
     ) -> Result<(), VmError> {
         for step in steps {
             match step {
+                crate::codegen::AssignmentStep::Task(task) => vm.execute_analog_task(task)?,
                 crate::codegen::AssignmentStep::Assign(assignment) => {
                     if assignment.var_index >= vm.context.variables.len() {
                         return Err(VmError::InvalidInstruction(
@@ -5967,6 +6029,7 @@ impl VerilogADevice {
     /// Checked Jacobian evaluation path for callers that can surface
     /// runtime model errors as diagnostics instead of panicking.
     pub fn try_compute_jacobian(&mut self) -> Result<Vec<JacobianEntry>, VmError> {
+        self.context.record_task_effects = false;
         // A standalone Jacobian query belongs to the current nonlinear
         // evaluation and must not erase the convergence result established by
         // its value pass or advance limiter history a second time. Canonical
@@ -6681,6 +6744,7 @@ impl VerilogADevice {
                 .any(|instruction| matches!(instruction, Instruction::PushCurrent(_, _)))
         };
         match step {
+            AssignmentStep::Task(task) => task.expressions().any(program_reads_current),
             AssignmentStep::Assign(assignment) => program_reads_current(&assignment.program),
             AssignmentStep::AssignIndexed { index, value, .. } => {
                 program_reads_current(index) || program_reads_current(value)
@@ -6714,6 +6778,7 @@ impl VerilogADevice {
         }
         fn step_targets(step: &AssignmentStep, out: &mut std::collections::HashSet<usize>) {
             match step {
+                AssignmentStep::Task(_) => {}
                 AssignmentStep::Assign(assignment) => {
                     out.insert(assignment.var_index);
                 }
@@ -6729,6 +6794,9 @@ impl VerilogADevice {
         }
         fn step_reads(step: &AssignmentStep, out: &mut std::collections::HashSet<usize>) {
             match step {
+                AssignmentStep::Task(task) => task
+                    .expressions()
+                    .for_each(|program| program_reads(program, out)),
                 AssignmentStep::Assign(assignment) => program_reads(&assignment.program, out),
                 AssignmentStep::AssignIndexed { index, value, .. } => {
                     program_reads(index, out);
@@ -6795,7 +6863,7 @@ impl VerilogADevice {
         circuit_voltages: &[f64],
     ) -> Result<Vec<EvaluatedNoiseSource>, VmError> {
         self.try_update_all_voltages(circuit_voltages)?;
-        self.begin_evaluation(crate::vm::VerilogAEvaluationMode::SmallSignal);
+        self.begin_observation(crate::vm::VerilogAEvaluationMode::SmallSignal);
 
         let context = &mut self.context;
         let model = &self.model;
@@ -6957,7 +7025,7 @@ impl VerilogADevice {
         circuit_voltages: &[f64],
     ) -> Result<(), VmError> {
         self.try_update_all_voltages(circuit_voltages)?;
-        self.begin_evaluation(crate::vm::VerilogAEvaluationMode::SmallSignal);
+        self.begin_observation(crate::vm::VerilogAEvaluationMode::SmallSignal);
         let context = &mut self.context;
         let model = &self.model;
         let program_active = &self.program_active;
@@ -7004,7 +7072,7 @@ impl VerilogADevice {
         circuit_voltages: &[f64],
     ) -> Result<(), VmError> {
         self.try_update_all_voltages(circuit_voltages)?;
-        self.begin_evaluation(crate::vm::VerilogAEvaluationMode::SmallSignal);
+        self.begin_observation(crate::vm::VerilogAEvaluationMode::SmallSignal);
         let model = &self.model;
         let split = model
             .assignment_steps
@@ -7395,7 +7463,7 @@ impl VerilogADevice {
         circuit_voltages: &[f64],
     ) -> Result<Vec<EvaluatedNoiseSource>, VmError> {
         self.try_update_all_voltages(circuit_voltages)?;
-        self.begin_evaluation(crate::vm::VerilogAEvaluationMode::SmallSignal);
+        self.begin_observation(crate::vm::VerilogAEvaluationMode::SmallSignal);
 
         let context = &mut self.context;
         let model = &self.model;

@@ -578,6 +578,9 @@ fn statement_roots(hir: &HirModel) -> Vec<ExprId> {
 /// The expressions one statement evaluates, in evaluation order.
 fn collect_statement_roots(statement: &HirStatement, roots: &mut Vec<ExprId>) {
     match statement {
+        HirStatement::Task(task) => {
+            roots.extend(task.expressions().map(|expression| expression.id))
+        }
         HirStatement::Assignment(assignment) => {
             if let Some(index) = &assignment.index {
                 roots.push(index.id);

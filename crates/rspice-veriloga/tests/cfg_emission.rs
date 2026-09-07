@@ -21,6 +21,59 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 #[test]
+fn emitted_tasks_preserve_loop_execution_and_are_not_duplicated_by_derivatives() {
+    use rspice_veriloga::canonical_ir::cfg::CfgValueKind;
+    let artifact = artifact(
+        r#"`include "disciplines.vams"
+module tasks(p,n);
+inout p,n; electrical p,n;
+integer i;
+analog begin
+i=0;
+while(i<3) begin $finish(i); i=i+1; end
+I(p,n) <+ V(p,n);
+end
+endmodule"#,
+    );
+    let cfg = CfgModel::from_hir(&artifact.hir, &artifact.mir).unwrap();
+    let effects = cfg
+        .function
+        .values
+        .iter()
+        .filter_map(|value| matches!(value.kind, CfgValueKind::AnalogTask(_)).then_some(value.id))
+        .collect::<Vec<_>>();
+    assert_eq!(effects.len(), 1);
+    let differentiated = differentiate(&cfg.function, &[AdSeed::NodePotential(0.into())]).unwrap();
+    assert_eq!(
+        differentiated
+            .function
+            .values
+            .iter()
+            .filter(|value| matches!(value.kind, CfgValueKind::AnalogTask(_)))
+            .count(),
+        1
+    );
+    let (function, effects) = optimize_cfg(&differentiated.function, &effects);
+    let (body, _) = emit_body(&function, &effects, &EmitBindings::default()).unwrap();
+    let program = format!(
+        r#"#![allow(unused_variables,unused_mut,unused_parens,dead_code)]
+{RUNTIME_PRELUDE}
+fn main() {{
+let time=2.0f64;
+let mut calls=Vec::new();
+let mut analog_finish=|_site:u32,_time:f64,level:f64| calls.push(level);
+{body}
+for level in calls {{ println!("{{:x}}",f64::to_bits(level)); }}
+}}
+"#
+    );
+    assert_eq!(
+        compile_and_run(&scratch("task-effects"), "task_effects", &program),
+        vec![0.0, 1.0, 2.0]
+    );
+}
+
+#[test]
 #[ignore = "invokes rustc on the emitted source; run with --ignored"]
 fn the_emitted_rust_reproduces_the_interpreter() {
     let directory = scratch("emission");

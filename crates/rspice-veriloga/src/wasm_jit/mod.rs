@@ -50,7 +50,7 @@ use wasmparser::{Encoding, ExternalKind, Imports, Operator, Parser, Payload, Typ
 
 /// Version of the linear-memory and helper-function contract understood by
 /// emitted modules and the browser worker.
-pub const WASM_JIT_ABI_VERSION: u32 = 8;
+pub const WASM_JIT_ABI_VERSION: u32 = 9;
 
 /// Version of the deterministic encoder. It participates in cache identity
 /// independently of the ABI because code layout may change without changing
@@ -149,6 +149,8 @@ pub enum WasmJitAssignmentExpression {
     IndexedIndex,
     IndexedValue,
     LoopCondition,
+    TaskGuard,
+    TaskArgument,
 }
 
 /// Stable semantic role of one exported scalar entry.
@@ -390,6 +392,39 @@ fn emit_model_value_module(
         for (index, assignment) in assignments.iter().enumerate() {
             path.push(u32_index(index, "assignment")?);
             match assignment {
+                NativeAssignment::Task(task) => {
+                    let program = task
+                        .finish_operand()
+                        .ok_or_else(|| WasmJitError::Encoding("invalid analog task plan".into()))?;
+                    let guard_entry = if let Some(guard) = &task.guard {
+                        let entry = u32_index(entries.len(), "scalar entry")?;
+                        entries.push(PlannedValue {
+                            program: PlanProgramRef::Postfix(guard),
+                            role: WasmJitValueRole::Assignment {
+                                phase,
+                                path: path.clone(),
+                                expression: WasmJitAssignmentExpression::TaskGuard,
+                            },
+                        });
+                        Some(entry)
+                    } else {
+                        None
+                    };
+                    let argument_entry = u32_index(entries.len(), "scalar entry")?;
+                    entries.push(PlannedValue {
+                        program: PlanProgramRef::Postfix(program),
+                        role: WasmJitValueRole::Assignment {
+                            phase,
+                            path: path.clone(),
+                            expression: WasmJitAssignmentExpression::TaskArgument,
+                        },
+                    });
+                    kernel.push(codegen::WasmAssignment::Finish {
+                        site: task.site,
+                        guard_entry,
+                        argument_entry,
+                    });
+                }
                 NativeAssignment::Direct { var_index, program } => {
                     let value_entry = u32_index(entries.len(), "scalar entry")?;
                     entries.push(PlannedValue {
@@ -740,6 +775,18 @@ fn summarize_model_plan(
         emitted_programs: &mut Vec<PlanProgramRef<'a>>,
     ) -> WasmJitResult<()> {
         match assignment {
+            NativeAssignment::Task(task) => {
+                for program in task.expressions() {
+                    include_program(
+                        PlanProgramRef::Postfix(program),
+                        programs,
+                        operations,
+                        maximum_stack_depth,
+                        emitted_programs,
+                    )?;
+                }
+                Ok(())
+            }
             NativeAssignment::Direct { program, .. } => include_program(
                 PlanProgramRef::Postfix(program),
                 programs,

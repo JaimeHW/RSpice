@@ -73,6 +73,7 @@ fn flat_assignments(m: &AnalyzedModule) -> Vec<&AnalyzedAssignment> {
             match stmt {
                 AnalyzedStatement::Assignment(a) => out.push(a),
                 AnalyzedStatement::Loop(l) => walk(&l.body, out),
+                AnalyzedStatement::Task(_) => {}
             }
         }
     }
@@ -1664,7 +1665,9 @@ fn conditional_regions(regions: &[AnalyzedRegion]) -> usize {
                 ..
             } => 1 + conditional_regions(then_body) + conditional_regions(else_body),
             AnalyzedRegion::Loop { body, .. } => conditional_regions(body),
-            AnalyzedRegion::Assignment(_) | AnalyzedRegion::Contribution(_) => 0,
+            AnalyzedRegion::Assignment(_)
+            | AnalyzedRegion::Contribution(_)
+            | AnalyzedRegion::Task(_) => 0,
         })
         .sum()
 }
@@ -1775,8 +1778,8 @@ fn nested_function_output_argument_materializes_before_outer_assignment() {
 }
 
 #[test]
-fn function_output_argument_in_conditional_expression_is_a_compile_error() {
-    let error = analyze(&module_src(
+fn function_output_argument_in_conditional_expression_preserves_control_flow() {
+    let module = analyze_one(&module_src(
         r#"
             real y, z;
             analog function real set_pair;
@@ -1790,15 +1793,8 @@ fn function_output_argument_in_conditional_expression_is_a_compile_error() {
             endfunction
             analog z = V(p, n) > 0.0 ? set_pair(y, 3.0) : 0.0;
             "#,
-    ))
-    .expect_err("conditional output-function side effects must be rejected");
-
-    assert!(
-        error
-            .to_string()
-            .contains("not supported inside conditional expressions"),
-        "unexpected error: {error}"
-    );
+    ));
+    assert_eq!(conditional_regions(&module.body), 1);
 }
 
 #[test]
@@ -2436,7 +2432,7 @@ fn a_region_assignment_carries_the_expression_as_written() {
         AnalyzedStatement::Assignment(assignment) => {
             matches!(assignment.expression, Expression::Conditional(_))
         }
-        AnalyzedStatement::Loop(_) => false,
+        AnalyzedStatement::Loop(_) | AnalyzedStatement::Task(_) => false,
     });
     assert!(
         flat_guarded,

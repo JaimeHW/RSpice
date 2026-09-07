@@ -84,6 +84,7 @@
     clippy::unnecessary_unwrap
 )]
 
+pub mod analog_tasks;
 mod array_index;
 pub mod ast;
 mod canonical_compat;

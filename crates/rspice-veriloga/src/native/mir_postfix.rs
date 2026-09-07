@@ -222,6 +222,9 @@ impl<'a, S: CfgScalar> PlanWalk<'a, S> {
 
     fn run_assignment(&mut self, assignment: &NativeAssignment) {
         match assignment {
+            NativeAssignment::Task(_) => {
+                self.refused.insert("AnalogTask");
+            }
             NativeAssignment::Direct { var_index, program } => {
                 if let Ok(value) = self.run(program)
                     && let Some(slot) = self.variables.get_mut(*var_index)

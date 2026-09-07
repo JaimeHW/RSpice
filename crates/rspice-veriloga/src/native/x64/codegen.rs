@@ -2047,6 +2047,7 @@ impl FunctionCompiler {
         loop_depth: i32,
     ) -> JitResult<()> {
         match assignment {
+            NativeAssignment::Task(task) => self.emit_analog_task(task),
             NativeAssignment::Direct { var_index, program } => {
                 self.emit_native_program(program)?;
                 self.emit_assignment_store(*var_index)
@@ -2062,6 +2063,58 @@ impl FunctionCompiler {
                 self.emit_loop_assignment(condition, body, loop_depth)
             }
         }
+    }
+
+    fn emit_analog_task(
+        &mut self,
+        task: &crate::analog_tasks::AnalogTaskCall<
+            NativeProgram,
+            crate::canonical_ir::SourceSpanRef,
+        >,
+    ) -> JitResult<()> {
+        let program = task.finish_operand().ok_or_else(|| JitError::Verifier {
+            model: MODEL.into(),
+            detail: "invalid analog task plan".into(),
+        })?;
+        self.encoder.mov_r64_m64_base_disp32(
+            Gpr::R10,
+            self.ctx_arg_reg(),
+            std::mem::offset_of!(EvalContext, analog_effects) as i32,
+        );
+        self.encoder.test_r64_r64(Gpr::R10, Gpr::R10);
+        let observation = self.encoder.jcc_rel32_placeholder(ConditionCode::Equal);
+        self.emit_kernel_abort_if_failed()?;
+        let inactive = if let Some(guard) = &task.guard {
+            self.emit_native_program(guard)?;
+            self.emit_context_filter_helper_call(
+                Xmm::Xmm0,
+                task.site as usize,
+                crate::native::abi::rspice_task_guard_native,
+            )?;
+            self.encoder.movq_r64_xmm(Gpr::R10, Xmm::Xmm0);
+            self.encoder.btr_r64_imm8(Gpr::R10, 63);
+            self.encoder.test_r64_r64(Gpr::R10, Gpr::R10);
+            let inactive = self.encoder.jcc_rel32_placeholder(ConditionCode::Equal);
+            self.depth = 0;
+            self.spilled_depth = 0;
+            Some(inactive)
+        } else {
+            None
+        };
+        self.emit_native_program(program)?;
+        self.emit_kernel_abort_if_failed()?;
+        self.emit_context_filter_helper_call(
+            Xmm::Xmm0,
+            task.site as usize,
+            crate::native::abi::rspice_finish_native,
+        )?;
+        self.depth = 0;
+        self.spilled_depth = 0;
+        self.emit_kernel_abort_if_failed()?;
+        if let Some(inactive) = inactive {
+            self.patch_rel32_to_current(inactive)?;
+        }
+        self.patch_rel32_to_current(observation)
     }
 
     fn emit_assignment_steps(
@@ -2086,13 +2139,12 @@ impl FunctionCompiler {
             .iter()
             .map(|assignment| match assignment {
                 NativeAssignment::Direct { var_index, program } => Ok((*var_index, program)),
-                NativeAssignment::Indexed { .. } | NativeAssignment::Loop { .. } => {
-                    Err(JitError::Verifier {
-                        model: MODEL.into(),
-                        detail: "x64 direct-assignment batch contains a control-flow assignment"
-                            .into(),
-                    })
-                }
+                NativeAssignment::Indexed { .. }
+                | NativeAssignment::Loop { .. }
+                | NativeAssignment::Task(_) => Err(JitError::Verifier {
+                    model: MODEL.into(),
+                    detail: "x64 direct-assignment batch contains a control-flow assignment".into(),
+                }),
             })
             .collect::<JitResult<Vec<_>>>()?;
         let assignment = AssignmentProgram::lower(&direct)?;
@@ -4714,6 +4766,7 @@ type DynamicVariableSlotHelper = unsafe extern "C" fn(f64, *mut f64, usize, i64)
 
 fn assignment_uses_helper_calls(assignment: &NativeAssignment) -> bool {
     match assignment {
+        NativeAssignment::Task(_) => true,
         NativeAssignment::Direct { program, .. } => program_uses_helper_calls(program),
         NativeAssignment::Indexed {
             len,
@@ -4736,6 +4789,11 @@ fn assignment_max_stack_depth(assignments: &[NativeAssignment]) -> usize {
     assignments
         .iter()
         .map(|assignment| match assignment {
+            NativeAssignment::Task(task) => task
+                .expressions()
+                .map(NativeProgram::max_stack_depth)
+                .max()
+                .unwrap_or(0),
             NativeAssignment::Direct { program, .. } => program.max_stack_depth(),
             NativeAssignment::Indexed { index, value, .. } => {
                 index.max_stack_depth().max(value.max_stack_depth())
@@ -4756,6 +4814,15 @@ fn assignment_allocation_requirements(
     for range in shareable_batch_ranges(assignments) {
         let batch = &assignments[range];
         match &batch[0] {
+            NativeAssignment::Task(task) => {
+                for program in task.expressions() {
+                    let ssa = X64SsaProgram::lower(program)?;
+                    let allocation = RegisterAllocation::build(&ssa, X64_VALUE_BANK)?;
+                    maximum_spill_slots = maximum_spill_slots.max(allocation.spill_slot_count());
+                    maximum_required_registers =
+                        maximum_required_registers.max(allocation.required_register_count());
+                }
+            }
             NativeAssignment::Direct { .. } => {
                 let direct = batch
                     .iter()
@@ -4763,13 +4830,13 @@ fn assignment_allocation_requirements(
                         NativeAssignment::Direct { var_index, program } => {
                             Ok((*var_index, program))
                         }
-                        NativeAssignment::Indexed { .. } | NativeAssignment::Loop { .. } => {
-                            Err(JitError::Verifier {
-                                model: MODEL.into(),
-                                detail: "x64 requirement batch contains a control-flow assignment"
-                                    .into(),
-                            })
-                        }
+                        NativeAssignment::Indexed { .. }
+                        | NativeAssignment::Loop { .. }
+                        | NativeAssignment::Task(_) => Err(JitError::Verifier {
+                            model: MODEL.into(),
+                            detail: "x64 requirement batch contains a control-flow assignment"
+                                .into(),
+                        }),
                     })
                     .collect::<JitResult<Vec<_>>>()?;
                 let assignment = AssignmentProgram::lower(&direct)?;
@@ -4807,6 +4874,7 @@ fn assignment_allocation_requirements(
 
 fn assignment_has_indexed(assignment: &NativeAssignment) -> bool {
     match assignment {
+        NativeAssignment::Task(_) => false,
         NativeAssignment::Direct { .. } => false,
         NativeAssignment::Indexed { .. } => true,
         NativeAssignment::Loop { body, .. } => body.iter().any(assignment_has_indexed),
@@ -4817,6 +4885,7 @@ fn assignment_loop_depth(assignments: &[NativeAssignment]) -> JitResult<i32> {
     let mut maximum_depth = 0_i32;
     for assignment in assignments {
         let depth = match assignment {
+            NativeAssignment::Task(_) => 0,
             NativeAssignment::Direct { .. } | NativeAssignment::Indexed { .. } => 0,
             NativeAssignment::Loop { body, .. } => {
                 assignment_loop_depth(body)?.checked_add(1).ok_or_else(|| {
@@ -13875,6 +13944,7 @@ mod tests {
             state_older_candidate_len: 0,
             prelude_slots: std::ptr::null_mut(),
             prelude_slots_len: 0,
+            analog_effects: std::ptr::null_mut(),
         }
     }
 

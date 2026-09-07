@@ -72,6 +72,11 @@ fn integration_slots(model: &CompiledModel) -> Vec<usize> {
     fn from_steps(steps: &[AssignmentStep], out: &mut Vec<usize>) {
         for step in steps {
             match step {
+                AssignmentStep::Task(task) => {
+                    for program in task.expressions() {
+                        from_program(program, out);
+                    }
+                }
                 AssignmentStep::Assign(assignment) => from_program(&assignment.program, out),
                 AssignmentStep::AssignIndexed { index, value, .. } => {
                     from_program(value, out);
