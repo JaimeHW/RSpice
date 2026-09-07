@@ -166,6 +166,25 @@ unimplemented = "deny"
 [profile.dev]
 incremental = true
 
+# Every Windows/MSVC build already links with `/DEBUG:NONE` (see
+# `.cargo/config.toml`, a LNK1328 workaround for the big release test
+# binaries), so no PDB is emitted for any target and `RUST_BACKTRACE=1` prints
+# `<unknown>` frames whatever this says. Cargo's default of `true` therefore
+# had rustc emit full CodeView info into every object and rlib for a linker
+# that discards it: `librspice_core`'s debug rlib measured 761 MB against 43 MB
+# for the largest release rlib in the workspace, and one target directory held
+# 15.4 GB of debug rlibs against 0.2 GB of release ones. Every lane worktree
+# owns a target directory, so that multiplied.
+#
+# Nothing reads the discarded information — no crate in the workspace uses
+# `backtrace::`, `Backtrace::capture` or `RUST_BACKTRACE`. To debug one target,
+# override both halves together, since setting `RUSTFLAGS` replaces the
+# config's target rustflags entirely:
+#
+#   RUSTFLAGS="-C debuginfo=2 -C link-arg=/DEBUG:FULL" \
+#     cargo test -p <crate> --test <target> --no-run
+debug = 0
+
 # Every dependency is optimized in debug builds; the workspace's own crates are
 # not, because `"*"` does not match a workspace member.
 #
@@ -232,3 +251,7 @@ strip = true
 # Faster test compilation
 [profile.test]
 incremental = true
+# For the reason `[profile.dev]` gives: the debug info this would emit is
+# discarded by `/DEBUG:NONE` at link time, and the test binaries are the
+# largest artifacts in the tree.
+debug = 0
