@@ -2010,6 +2010,52 @@ fn a_loop_with_no_crossover_records_the_absence_rather_than_zero_hertz() {
     }
 }
 
+/// The smallest stability margin is a minimum over the modes that are not the
+/// autonomous phase mode. An orbit whose spectrum holds only that phase mode
+/// leaves that set empty, and an empty set is not a crossing the orbit failed
+/// to make — nothing in a Floquet spectrum crosses anything.
+#[test]
+fn a_spectrum_with_no_applicable_mode_reports_an_empty_domain_not_a_missing_crossover() {
+    use crate::analysis::FloquetOrbitKind;
+    use crate::analysis::pstb::{PstbAnalyzer, PstbConfig};
+
+    let (card, _) = pstb_measurement();
+    let result = PstbAnalyzer::new(
+        PstbConfig::new()
+            .with_orbit_kind(FloquetOrbitKind::Autonomous)
+            .with_eigenvectors(true)
+            .with_stability_threshold(1.0 + 1e-6),
+    )
+    .analyze_monodromy_with_abort(&[vec![1.0]], 1.0e-6, &NoAbort)
+    .expect("a one-mode autonomous map has a qualified spectrum");
+    assert_eq!(
+        result.min_stability_margin_db, None,
+        "the phase mode is the only mode, so no applicable margin exists"
+    );
+
+    let document = AnalysisResultDocument::from_pstb(
+        instance(AnalysisKind::Pstb),
+        &card,
+        &crate::engine::PeriodicStabilityResult {
+            probe_instance: "L1".to_owned(),
+            probe_state_index: 0,
+            probe_participation: vec![1.0],
+            result,
+        },
+    )
+    .expect("a phase-only spectrum is a determination, not a projection failure")
+    .build()
+    .expect("document builds");
+
+    assert_eq!(
+        scalar_value_of(&document, "min_stability_margin_db"),
+        ScalarValue::Unavailable {
+            reason: ScalarUnavailability::EmptyDomain
+        },
+        "an empty set of applicable modes must not be reported as a missing crossover"
+    );
+}
+
 #[test]
 fn a_loop_that_never_leaves_unity_gain_records_a_negative_divergence() {
     let mut result = stability_result();

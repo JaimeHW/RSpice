@@ -3324,16 +3324,19 @@ impl AnalysisResultDocument {
                     decibel(),
                     margin,
                 )?,
-                // There is no applicable mode to take a margin over -- an
-                // autonomous spectrum holding only its phase mode. That is a
+                // The margin is a minimum over the modes that are not the
+                // autonomous phase mode, and that set can be empty -- a
+                // spectrum holding only its phase mode. That is a
                 // determination about the orbit, and `-inf` would report a
-                // margin the orbit does not have.
+                // margin the orbit does not have. The set being empty is not
+                // a crossing the spectrum failed to make, so it is not
+                // `NoCrossover`: nothing here crosses anything.
                 None => ResultScalar::new(
                     "min_stability_margin_db",
                     "Smallest stability margin",
                     Some(decibel()),
                     ScalarValue::Unavailable {
-                        reason: ScalarUnavailability::NoCrossover,
+                        reason: ScalarUnavailability::EmptyDomain,
                     },
                 )?,
             },

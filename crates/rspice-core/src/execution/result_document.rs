@@ -1515,6 +1515,20 @@ pub enum ScalarUnavailability {
     /// The quantity is only defined at a crossover the response never makes,
     /// so it has no value at all rather than an infinite one.
     NoCrossover,
+    /// The quantity aggregates over a set — a maximum, a minimum, an extremum
+    /// across a sweep or a spectrum — and that set is empty, so there is
+    /// nothing to aggregate rather than a crossing that failed to happen.
+    ///
+    /// Distinct from [`NoCrossover`](Self::NoCrossover) because the two say
+    /// different things to the reader. A missing crossover is a statement
+    /// about the shape of a response that was measured: it went somewhere,
+    /// just never through the level asked about. An empty domain says the
+    /// measurement had no applicable members at all — an autonomous Floquet
+    /// spectrum holding only its own phase mode, or a transfer with no finite
+    /// magnitude anywhere to take a peak over. Reporting the second as the
+    /// first sends the reader looking for a crossing in a set that has no
+    /// elements.
+    EmptyDomain,
 }
 
 impl ScalarUnavailability {
@@ -1539,6 +1553,7 @@ impl ScalarUnavailability {
             Self::PositiveInfinity => "positive_infinity",
             Self::NegativeInfinity => "negative_infinity",
             Self::NoCrossover => "no_crossover",
+            Self::EmptyDomain => "empty_domain",
         }
     }
 }
