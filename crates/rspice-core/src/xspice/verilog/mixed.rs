@@ -773,7 +773,9 @@ impl fmt::Debug for MixedSignalHost {
 }
 
 impl MixedSignalHost {
-    /// Compile and start one module. `terminal_nodes` maps analog ports to the
+    /// Compile and start one module with a discrete execution plan. Its analog
+    /// component may contain equations, procedural effects, or no work.
+    /// `terminal_nodes` maps analog ports to the
     /// outer solver's circuit-node ids, where `0` is ground.
     /// An analog initialization control request is left for the caller to
     /// consume and prevents digital startup.
@@ -834,10 +836,10 @@ impl MixedSignalHost {
         scheduler_limits: SchedulerLimits,
         control: &dyn rspice_veriloga::PipelineControl,
     ) -> Result<Self, MixedSignalError> {
-        if canonical_ir.digital.is_empty() || canonical_ir.mir.equations.is_empty() {
+        if canonical_ir.digital.is_empty() {
             return Err(MixedSignalError::Compile {
                 detail: format!(
-                    "module `{}` is not mixed: it must contain both analog equations and digital processes or drivers",
+                    "module `{}` has no digital processes or drivers for the mixed host",
                     canonical_ir.mir.module_name
                 ),
             });

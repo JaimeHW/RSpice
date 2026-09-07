@@ -935,6 +935,91 @@ fn a_discrete_port_joined_to_an_xspice_event_net_is_refused() {
 }
 
 #[test]
+fn a_digital_only_module_drives_its_analog_boundary() {
+    let model = ModelFile::new(
+        "digital_only",
+        "module digital_only(q); output q; reg q; initial q=1'b1; endmodule",
+    );
+    let netlist = Netlist::parse(&format!(
+        "* digital-only Verilog device\n.param vcc=3.3\nX1 out digital_only\nR1 out 0 1k\n.va \"{}\" digital_only\n.end\n",
+        model.deck_path(),
+    )).unwrap();
+    let result = Engine::default().run_tran(&netlist, 2e-9, 1e-10).unwrap();
+    let output = result
+        .node_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case("out"))
+        .unwrap();
+    let expected = 3.3 * 1000.0 / (1000.0 + 20.0);
+    assert!(!result.time.is_empty());
+    for &voltage in &result.voltages[output] {
+        assert!(
+            (voltage - expected).abs() < 1e-9,
+            "the 20-ohm D/A source must drive the 1-kohm load: {voltage}"
+        );
+    }
+}
+
+#[test]
+fn a_portless_mixed_initializer_finishes_without_contribution_equations() {
+    use rspice_core::{ModelFinishPoint, NoAbort, SimulationOutcome};
+    let model = ModelFile::new(
+        "portless_init",
+        "module portless_init; reg q; initial q=0; always #0 q=~q; analog initial $finish(0); endmodule",
+    );
+    let netlist = Netlist::parse(&format!(
+        "* procedural analog initialization precedes digital execution\nX1 portless_init\n.va \"{}\" portless_init\n.end\n",
+        model.deck_path(),
+    )).unwrap();
+    for ac in [false, true] {
+        let outcome = Engine::default()
+            .run_with_outcome(&NoAbort, |engine, signal| {
+                if ac {
+                    engine
+                        .run_ac_with_abort(&netlist, &[1e3], signal)
+                        .map(|_| ())
+                } else {
+                    engine
+                        .run_tran_with_abort(&netlist, 1e-9, 1e-10, signal)
+                        .map(|_| ())
+                }
+            })
+            .unwrap();
+        let SimulationOutcome::Finished {
+            result: None,
+            finish,
+        } = outcome
+        else {
+            panic!(
+                "the initializer must finish before the non-settling digital process starts: {outcome:?}"
+            );
+        };
+        assert_eq!(finish.point, ModelFinishPoint::Initialization);
+        assert_eq!(finish.diagnostic_level, 0);
+    }
+}
+
+#[test]
+fn ac_equilibrium_refuses_portless_mixed_models() {
+    let model = ModelFile::new(
+        "portless_ac",
+        "module portless_ac; reg q; initial q=0; always #1 q=~q; analog $finish(0); endmodule",
+    );
+    let netlist = Netlist::parse(&format!(
+        "* portless mixed model still requires an implemented analysis host\nX1 portless_ac\n.va \"{}\" portless_ac\n.end\n",
+        model.deck_path(),
+    )).unwrap();
+    let error = Engine::default()
+        .run_ac(&netlist, &[1e3, 1e4])
+        .expect_err("AC must not omit the portless mixed model");
+    let message = error.to_string().to_ascii_lowercase();
+    assert!(
+        message.contains("ac analysis") && message.contains("x1"),
+        "{error}"
+    );
+}
+
+#[test]
 fn a_mixed_module_is_refused_by_the_analyses_that_cannot_represent_it() {
     let model = ModelFile::new("ac_refusal", CLOCK_DIVIDER);
     let deck = format!(

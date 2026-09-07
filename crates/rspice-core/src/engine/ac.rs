@@ -2808,6 +2808,7 @@ impl Engine {
             .begin_veriloga_equilibrium_analysis(1)
             .map_err(SimulationError::Circuit)?;
         Self::deliver_initial_analog_tasks(&mut circuit, abort)?;
+        Self::ensure_no_mixed_signal_analysis(&circuit, "AC analysis")?;
         if circuit.num_nodes() == 0 && circuit.num_branches() == 0 {
             engine.ensure_result_shape(frequencies.len(), 1)?;
             return Ok(frequencies
@@ -2831,7 +2832,6 @@ impl Engine {
             ));
         }
         Self::ensure_supported_ac_dynamic_charges(&circuit)?;
-        Self::ensure_no_mixed_signal_analysis(&circuit, "AC analysis")?;
         circuit
             .prepare_veriloga_equilibrium_analysis_point(1, true, false)
             .map_err(SimulationError::Circuit)?;

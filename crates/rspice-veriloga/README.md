@@ -248,6 +248,12 @@ Accepted transient/frequency-domain termination, their early `final_step` delive
 source-located diagnostic formatting, and frontend outcome handling remain
 incomplete; this does not establish full `$finish` support.
 
+The engine's discrete host also accepts digital-only modules and analog
+procedural blocks without contribution equations. Digital boundary ports still
+use the circuit's A/D and D/A bridges, and analog initialization retains its
+ordering before digital startup. AC rejects unsupported discrete simulation
+even when a module has no ports or matrix unknowns.
+
 `$display`, `$write`, `$strobe`, `$monitor`, `$info`, `$warning`, and ordinary
 analog `$error` are still discarded with a warning. They produce no runtime
 output. Models that rely on these missing task behaviors are not supported.
