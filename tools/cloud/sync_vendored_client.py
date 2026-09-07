@@ -6,8 +6,9 @@ snapshot only through `rspice-pack`. Both live in the private RSpice-Cloud
 repository next to the API they are tested against. This workspace cannot take
 a git dependency on that repository (the dependency-source policy in deny.toml
 admits only crates.io, and every build would need repository credentials), so
-the crate closure is vendored: an exact copy of the library sources, pinned to
-the Cloud commit it was taken from.
+the crate closure is vendored from a pinned Cloud commit. The reviewed
+downstream delta in vendor.patch is applied after copying; the manifest
+records upstream bytes, patch identity and final bytes separately.
 
 Vendored trees are read-only in this repository. Behavioural authority stays
 in RSpice-Cloud, where the crates are exercised against the real API handlers;
@@ -33,6 +34,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 MANIFEST_PATH = ROOT / "tools" / "cloud" / "vendor-manifest.json"
+PATCH_RELATIVE = "tools/cloud/vendor.patch"
 
 # The vendored trust closure, in dependency order. `rspice-pack` depends on
 # nothing internal and is not reachable from the client: it is vendored on its
@@ -149,6 +151,13 @@ def admit_source(source: Path) -> str:
     return source_sha
 
 
+def apply_vendor_patch(root: Path, patch: Path) -> None:
+    """Apply the reviewed downstream delta only if its upstream context matches."""
+    command = ["git", "-c", "core.autocrlf=false", "apply", "--no-index", "--whitespace=error"]
+    subprocess.run([*command, "--check", str(patch)], cwd=root, check=True)
+    subprocess.run([*command, str(patch)], cwd=root, check=True)
+
+
 def sync(source: Path) -> int:
     if not (source / "crates").is_dir():
         raise SystemExit(f"{source} does not look like an RSpice-Cloud checkout")
@@ -160,6 +169,8 @@ def sync(source: Path) -> int:
         crate_source = source / "crates" / crate
         crate_target = ROOT / "crates" / crate
         if crate_target.exists():
+            if crate_target.resolve().parent != (ROOT / "crates").resolve():
+                raise SystemExit(f"vendored target escapes the workspace: {crate_target}")
             shutil.rmtree(crate_target)
         for path in crate_files(crate_source):
             relative = path.relative_to(crate_source)
@@ -187,10 +198,21 @@ def sync(source: Path) -> int:
     if admit_source(source) != source_sha:
         raise SystemExit("source checkout changed during vendoring; discard the partial sync and retry")
 
+    # Keep upstream identity separate from the reviewed application delta.
+    # A re-sync must replay it; merely blessing edited file hashes would lose it.
+    upstream_files = dict(sorted(recorded.items()))
+    patch = ROOT / PATCH_RELATIVE
+    apply_vendor_patch(ROOT, patch)
+    for crate in VENDORED_CRATES:
+        for path in crate_files(ROOT / "crates" / crate):
+            recorded[path.relative_to(ROOT).as_posix()] = sha256_bytes(path.read_bytes())
+
     manifest = {
         "source_repository": SOURCE_REPOSITORY,
         "source_sha": source_sha,
         "crates": list(VENDORED_CRATES),
+        "patch": {"path": PATCH_RELATIVE, "sha256": sha256_bytes(patch.read_bytes())},
+        "upstream_files": upstream_files,
         "files": dict(sorted(recorded.items())),
     }
     MANIFEST_PATH.write_text(
@@ -203,6 +225,11 @@ def sync(source: Path) -> int:
 def check() -> int:
     manifest = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
     failures: list[str] = []
+    patch = manifest.get("patch", {})
+    if patch.get("path") != PATCH_RELATIVE:
+        failures.append("missing or unexpected downstream patch identity")
+    elif sha256_bytes((ROOT / PATCH_RELATIVE).read_bytes()) != patch.get("sha256"):
+        failures.append(f"modified: {PATCH_RELATIVE}; re-sync to record the reviewed patch")
     expected = manifest["files"]
     for relative, digest in expected.items():
         path = ROOT / relative

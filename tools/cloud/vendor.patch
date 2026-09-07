@@ -1,0 +1,319 @@
+--- a/crates/rspice-cloud-domain/src/execution.rs
++++ b/crates/rspice-cloud-domain/src/execution.rs
+@@ -159,13 +159,17 @@
+         _ => return false,
+     }
+ 
+-    let expected_engine_protocol = match manifest.revision.content_digest_version {
+-        LEGACY_REVISION_CONTENT_DIGEST_VERSION if manifest.artifacts.is_empty() => 1,
+-        LEGACY_REVISION_CONTENT_DIGEST_VERSION => 2,
+-        CURRENT_REVISION_CONTENT_DIGEST_VERSION => 3,
++    // Engine protocol 4 replaced protocol 3 when the adapter moved every
++    // analysis family onto the shared typed result document. The request
++    // envelope did not change, so both pair with revision content digest 2 and
++    // retained protocol-3 execution evidence stays readable.
++    let expected_engine_protocols: &[u8] = match manifest.revision.content_digest_version {
++        LEGACY_REVISION_CONTENT_DIGEST_VERSION if manifest.artifacts.is_empty() => &[1],
++        LEGACY_REVISION_CONTENT_DIGEST_VERSION => &[2],
++        CURRENT_REVISION_CONTENT_DIGEST_VERSION => &[3, 4],
+         _ => return false,
+     };
+-    if manifest.engine_protocol_version != expected_engine_protocol {
++    if !expected_engine_protocols.contains(&manifest.engine_protocol_version) {
+         return false;
+     }
+ 
+@@ -326,6 +330,16 @@
+             assert!(!is_valid_simulation_execution_manifest(&malformed));
+         }
+ 
++        // The adapter's protocol-4 result contract shares the version-2
++        // revision digest, so both engine protocols read back; neither an
++        // older nor a newer one does.
++        let mut protocol_four = baseline.clone();
++        protocol_four["engine_protocol_version"] = json!(4);
++        assert!(is_valid_simulation_execution_manifest(&protocol_four));
++        let mut protocol_five = baseline.clone();
++        protocol_five["engine_protocol_version"] = json!(5);
++        assert!(!is_valid_simulation_execution_manifest(&protocol_five));
++
+         let mut duplicate = baseline.clone();
+         duplicate["artifacts"] = json!([
+             baseline["artifacts"][0].clone(),
+--- /dev/null
++++ b/crates/rspice-pack/README.md
+@@ -0,0 +1,91 @@
++# rspice-pack
++
++The `.rspicepack` model pack format and its trust boundary. A pack is a signed,
++immutable archive of authored SPICE model sources; this crate defines the
++container and is the only code allowed to canonicalize, sign, or verify one. The
++desktop client, the browser client, the cloud service, and the packer tool reach
++the same verdict because they run these exact functions.
++
++What it does not have is as deliberate as what it does. There is no HTTP client,
++filesystem access outside the optional `packer` feature, clock, async runtime,
++platform binding, general-purpose ZIP implementation, or random-number source in
++the portable path, so the crate compiles for `wasm32-unknown-unknown` and
++behaves identically there. `#![forbid(unsafe_code)]`.
++
++## Container
++
++```text
++manifest.json          canonical JSON, the signed document
++signature.ed25519      64 raw bytes over the exact manifest.json bytes
++models/...             authored model sources
++LICENSE, NOTICE        optional
++```
++
++Verifying one:
++
++```rust
++use rspice_pack::{Limits, Pack, verifying_key_from_hex};
++
++let key = verifying_key_from_hex(public_key_hex)?;
++let pack = Pack::verify(&archive, &key, &Limits::default())?;
++for part in &pack.manifest.parts {
++    println!("{} from {}", part.id, part.source.path);
++}
++```
++
++## Reading hostile bytes
++
++The ZIP reader is written for this format alone and refuses everything outside
++it, naming the rejected `ArchiveFeature`: zip64, encryption, masked local
++headers, trailing data descriptors, general-purpose flags, any compression
++method but DEFLATE, extra fields, comments, multiple disks, non-zero external
++attributes. Paths are validated against `validate_path` and `MAX_PATH_BYTES`
++before use, and `MANIFEST_ENTRY`/`SIGNATURE_ENTRY` are reserved.
++
++`Limits::SPEC` is a set of format constants rather than tuning knobs. A pack
++that exceeds them is invalid everywhere, so producers and consumers must agree:
++
++| Bound | Value |
++| :--- | :--- |
++| `max_archive_bytes` | 64 MiB, on the compressed bytes as received |
++| `max_expanded_bytes` | 256 MiB, checked against declared sizes *before* inflating, then re-proved per entry |
++| `max_files` | 10 000, including the manifest and signature |
++| `max_snapshot_bytes` | 32 MiB |
++
++`Limits` is injectable only so tests can prove each cap fires without
++materializing hundreds of megabytes.
++
++## The signed catalog snapshot
++
++A `Snapshot` is the signed catalog the service publishes and every client
++resolves against. Parts ride on the release rather than in the pack archive, so
++a client shelf can search the whole catalog without downloading a single pack.
++Three fields make a stale or malicious catalog detectable: `serial` orders two
++authentic catalogs so an older one cannot be replayed over a newer one,
++`expires_at` bounds how long any one of them may be believed, and `revocations`
++names releases that must be recalled even though their bytes remain downloadable
++for a project that pinned them.
++
++## The `packer` feature and binary
++
++`packer` adds filesystem walking, key generation, and the `rspice-pack`
++executable. It is off by default so verifying clients link no entropy source at
++all.
++
++```text
++rspice-pack keygen --out <secret-file>
++rspice-pack build <dir> --template <template.json> --key <secret-file> -o <pack>
++rspice-pack verify <pack> --pubkey <hex>
++```
++
++```text
++cargo run -p rspice-pack --features packer -- verify models.rspicepack --pubkey <hex>
++```
++
++## Testing
++
++```text
++cargo test -p rspice-pack --all-features
++```
++
++Licensed under the [RSpice Personal Use License](../../LICENSE).
+--- /dev/null
++++ b/crates/rspice-cloud-domain/README.md
+@@ -0,0 +1,48 @@
++# rspice-cloud-domain
++
++The vocabulary RSpice Cloud is written in: identifiers, policy enumerations,
++execution provenance, and the two versioned hashing contracts that decide when
++two things are the same thing.
++
++It is the base of the cloud dependency chain (`rspice-cloud-contract` and
++`rspice-cloud-client` sit above it) and it deliberately has no database, HTTP,
++async runtime, or platform dependency. `#![forbid(unsafe_code)]`.
++
++## What is here
++
++| Module | Contents |
++| :--- | :--- |
++| `ids` | `WorkspaceId`, `CircuitId`, `RevisionId`, `SimulationRunId`, `ShareId`, `PrincipalId`: distinct newtypes so a run id cannot be passed where a circuit id belongs |
++| `policy` | `WorkspaceRole`, `SharePermission`, `CircuitVisibility`, `EntitlementStatus`, `SimulationRunStatus` |
++| `revision` | `revision_content_digest`, the digest that gives an immutable circuit revision its identity |
++| `simulation` | `simulation_request_digest`, the digest that makes a resolved remote-simulation request cacheable and idempotent |
++| `execution` | `SimulationExecutionManifest` and its artifact, engine, and runtime-mode records: the customer-visible provenance of one run |
++
++## Versioned digests
++
++Both digest functions are stable hashing contracts, not conveniences. Changing
++what bytes feed them changes which historical revisions and runs are considered
++identical, so each carries an explicit version constant and the previous version
++is retained rather than deleted:
++
++- `CURRENT_REVISION_CONTENT_DIGEST_VERSION` /
++  `LEGACY_REVISION_CONTENT_DIGEST_VERSION`
++- `CURRENT_SIMULATION_REQUEST_DIGEST_VERSION`
++- `CURRENT_SIMULATION_EXECUTION_MANIFEST_VERSION`,
++  `LEGACY_SIMULATION_EXECUTION_MANIFEST_VERSION`, and
++  `VERIFIED_ADAPTER_SIMULATION_EXECUTION_MANIFEST_VERSION`, which marks a
++  manifest produced by the credentialless `rspice-engine-adapter` path
++
++Execution manifests are also bounded before they are believed:
++`MAX_SIMULATION_EXECUTION_MANIFEST_BYTES`,
++`MAX_SIMULATION_EXECUTION_ARTIFACTS`,
++`MAX_SIMULATION_EXECUTION_ARTIFACT_BYTES`, and `MAX_SIMULATION_ATTEMPTS` are
++checked by `is_valid_simulation_execution_manifest`.
++
++## Testing
++
++```text
++cargo test -p rspice-cloud-domain
++```
++
++Licensed under the [RSpice Personal Use License](../../LICENSE).
+--- /dev/null
++++ b/crates/rspice-cloud-contract/README.md
+@@ -0,0 +1,56 @@
++# rspice-cloud-contract
++
++The RSpice Cloud HTTP contract as Rust types. The API serializes these types and
++every Rust client deserializes these same types, so the wire format has one
++definition rather than two that drift.
++
++It sits directly on `rspice-cloud-domain` and adds no machinery: no HTTP client,
++database, async runtime, platform binding, credential handling, or secret
++storage. `#![forbid(unsafe_code)]`.
++
++## Surface
++
++`API_VERSION` is `v1` and `SERVICE_NAME` is `rspice-cloud-api`. Errors are
++problem details (`ProblemDetails`: `type`, `title`, `status`, `detail`,
++`instance`); list endpoints return a cursor-paginated `Page<T>`. Beyond that the
++types group into the resource families the service exposes:
++
++- **Identity and entitlement**: `CurrentPrincipal`, `Entitlement`,
++  `LicenseJwkSet`, license lease issuance
++- **Workspaces**: membership, roles, invitations, `AuditEvent`
++- **Circuits and revisions**: creation, update, immutable revision records
++- **Collaboration**: Automerge document sessions and live sessions with their
++  policy, participants, and join codes
++- **Artifacts**: checksum-bound direct-to-object-storage upload and download
++  sessions
++- **Simulation runs**: queueing one immutable revision and reading its status
++- **Publications**: sealed public pages and their published simulations
++- **Shares**: capability-token links to a circuit revision
++- **Model packs**: release upload and signed catalog download
++
++## Protocol constants worth knowing
++
++WebSocket subprotocols are named here so client and relay cannot disagree:
++`COLLABORATION_PROTOCOL` (`rspice.automerge.v1`) and `LIVE_SESSION_PROTOCOL`
++(`rspice.live-session.v2`). Every live-session relay frame is prefixed with a
++`LiveSessionFrameClass` byte; the relay enforces participant capability by that
++class alone and never interprets payload bytes, which is what keeps a viewer
++from sending document edits without the relay parsing Automerge.
++
++Capability tokens are exactly `CAPABILITY_TOKEN_BYTES` (32) of entropy encoded
++as `CAPABILITY_TOKEN_LENGTH` (43) base64url characters;
++`is_canonical_capability_token` rejects any other spelling of the same value.
++
++License verification keys are RSA JWKs bounded by
++`MIN_LICENSE_RSA_MODULUS_BITS` and `MAX_LICENSE_RSA_MODULUS_BITS`, with the
++exponent pinned to `LICENSE_RSA_PUBLIC_EXPONENT`. The `is_valid_license_*`
++predicates are the shared judgment, so client and service accept the same key
++sets.
++
++## Testing
++
++```text
++cargo test -p rspice-cloud-contract
++```
++
++Licensed under the [RSpice Personal Use License](../../LICENSE).
+--- /dev/null
++++ b/crates/rspice-cloud-client/README.md
+@@ -0,0 +1,70 @@
++# rspice-cloud-client
++
++The HTTP client for RSpice Cloud, for native Rust applications and browser
++WebAssembly alike. It sits directly on
++[`rspice-cloud-contract`](../rspice-cloud-contract) and re-exports it as
++`contract`, so the types on the wire have one definition.
++
++`#![forbid(unsafe_code)]`, `#![deny(missing_docs)]`.
++
++## What this client refuses to do
++
++The constraints are the design. This crate does **not**:
++
++- **own credentials**: `BearerToken<'a>` validates and *borrows* the token for
++  one request without copying or retaining it; construct it immediately before
++  the call from a platform credential store;
++- **retry mutations**: every mutating method makes exactly one network attempt
++  and returns. Retry scheduling and durable command state belong to the caller,
++  who owns the `IdempotencyKey`;
++- **accept redirects**: a redirected request is a failure, not a hop;
++- **buffer unbounded bodies**: `ClientConfig::max_response_bytes` caps every
++  response, and artifact transfers stream in chunks of at most
++  `MAX_ARTIFACT_SINK_CHUNK_BYTES`.
++
++`ClientConfig` is validated at construction, not at request time.
++`EndpointMode::Production` requires HTTPS everywhere and *distinct* origins for
++the application and for customer-controlled object bytes;
++`SharedProductionOrigin` is a rejected configuration, not a warning. Embedded
++user information in an endpoint URL is rejected outright.
++`EndpointMode::LoopbackDevelopment` relaxes the scheme only on loopback.
++
++## Idempotency
++
++Mutations that can be replayed take a validated `IdempotencyKey`: generate a
++high-entropy value once per logical mutation, persist it with the pending
++command, and reuse it only when retrying *that* command. A successful response
++must carry authenticated replay metadata from an idempotency-capable API, and
++responses are bound back to the request: a returned workspace member must match
++the exact workspace, principal, and role that were asked for.
++
++## Coverage
++
++One module per resource family: `identity`, `governance`, `workspaces`,
++`invitations`, `circuits`, `collaboration`, `live_sessions`, `artifacts`,
++`simulations`, `publications`, `shares`, `model_hub`, `licensing`, plus
++`pagination` and `transfer`.
++
++Newtypes stop malformed values before a request is made rather than after:
++`PackId`, `PackVersion`, `PublicationSlug`, `ShareToken`, `InvitationToken`,
++`PageRequest`.
++
++## Native and browser
++
++Transport is target-split. Native builds use `reqwest` with `tokio`, and add
++`native_licensing`, offline PS256 verification of license leases with pinned
++issuer and audience. WebAssembly builds use `wasm_transport` and `wasm_transfer`
++over `web-sys` and `wasm-streams`. Everything above the transport is shared, so
++the two targets cannot disagree about the protocol.
++
++## Testing
++
++```text
++cargo test -p rspice-cloud-client
++```
++
++The browser transport, transfer, clock, collaboration, governance, and share
++modules also carry `wasm_bindgen_test` cases, run under a wasm test runner
++against the `wasm32-unknown-unknown` target.
++
++Licensed under the [RSpice Personal Use License](../../LICENSE).

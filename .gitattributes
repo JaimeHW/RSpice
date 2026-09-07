@@ -69,6 +69,9 @@ crates/rspice-cloud-contract/** text eol=lf
 crates/rspice-cloud-client/** text eol=lf
 testdata/** text eol=lf
 
+# The vendor manifest fingerprints the reviewed downstream patch verbatim.
+tools/cloud/*.patch text eol=lf
+
 # The Results catalog is generated from this contract by build.rs. Pin it to LF
 # so every platform's checkout feeds the generator identical bytes.
 crates/rspice-ui/contracts/** text eol=lf
