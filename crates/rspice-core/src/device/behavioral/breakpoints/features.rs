@@ -5,8 +5,259 @@
 //! control; unknown coordinates do not acquire a resolution certificate.
 
 use super::*;
+use crate::expr::{TimeEnclosure, TimeInterval, compile_time_expression};
 
 impl EventSchedule<'_> {
+    fn isolated_levels(
+        &mut self,
+        expr: &Expr,
+        target: Value,
+        context: &Context<'_>,
+    ) -> Result<(), BehavioralBreakpointError> {
+        let window = TimeInterval {
+            lower: 0.0,
+            upper: self.tstop,
+        };
+        // A finite identical subtraction is a constant zero, not an
+        // uncountable sequence of isolated roots. Preserve nonfinite refusals.
+        if let Expr::Binary {
+            op: BinaryOp::Sub,
+            left,
+            right,
+        } = expr
+            && left == right
+        {
+            let program = compile_time_expression(left, context);
+            if TimeEnclosure::new(&program, self.tstop)
+                .and_then(|mut bounds| bounds.evaluate(window, context))
+                .is_some_and(|(value, _)| value.is_finite())
+            {
+                return Ok(());
+            }
+        }
+        let program = compile_time_expression(expr, context);
+        let Some(mut bounds) = TimeEnclosure::new(&program, self.tstop) else {
+            return Ok(());
+        };
+        let Some((value, slope)) = bounds.evaluate(window, context) else {
+            return Ok(());
+        };
+        if !value.contains(target) || (slope.lower == 0.0 && slope.upper == 0.0) {
+            return Ok(());
+        }
+        let mut vm = Vm::new();
+        let mut evaluate = |time| {
+            let value = vm.execute(&program, &Context { time, ..*context });
+            if value.is_finite() {
+                Ok(value)
+            } else {
+                Err(BehavioralBreakpointError::Invalid(
+                    "a time-coordinate value is non-finite",
+                ))
+            }
+        };
+        let mut pending = vec![window];
+        let mut operations = program.instructions.len();
+        let mut charge = || {
+            self.poll()?;
+            operations = operations.saturating_add(program.instructions.len());
+            if operations > 16_000_000 {
+                Err(BehavioralBreakpointError::Invalid(
+                    "time-feature isolation exceeds its 16000000-instruction work limit",
+                ))
+            } else {
+                Ok(())
+            }
+        };
+        // Accumulate separately while the work-budget closure borrows this
+        // schedule. The ordinary distinct-event budget remains authoritative.
+        let mut roots = BTreeSet::new();
+        while let Some(interval) = pending.pop() {
+            charge()?;
+            let (value, slope) =
+                bounds
+                    .evaluate(interval, context)
+                    .ok_or(BehavioralBreakpointError::Invalid(
+                        "a continuous time-coordinate bound is unavailable",
+                    ))?;
+            if !value.contains(target) {
+                continue;
+            }
+            if !slope.contains(0.0) {
+                let mut left = interval.lower;
+                let mut right = interval.upper;
+                charge()?;
+                let left_value = evaluate(left)?;
+                charge()?;
+                let right_value = evaluate(right)?;
+                if left_value == target {
+                    roots.insert(left.to_bits());
+                } else if right_value == target {
+                    roots.insert(right.to_bits());
+                } else if (left_value < target) != (right_value < target) {
+                    while right.to_bits() - left.to_bits() > 1 {
+                        charge()?;
+                        let midpoint = Value::from_bits(
+                            left.to_bits() + (right.to_bits() - left.to_bits()) / 2,
+                        );
+                        let value = evaluate(midpoint)?;
+                        if value == target {
+                            left = midpoint;
+                            break;
+                        }
+                        if (value < target) == (left_value < target) {
+                            left = midpoint;
+                        } else {
+                            right = midpoint;
+                        }
+                    }
+                    roots.insert(left.to_bits());
+                } else {
+                    // An endpoint may straddle the real level within its
+                    // rounded-expression enclosure. Keep it as a feature;
+                    // switching boundaries are subsequently located by VM.
+                    for time in [left, right] {
+                        charge()?;
+                        if bounds
+                            .evaluate(
+                                TimeInterval {
+                                    lower: time,
+                                    upper: time,
+                                },
+                                context,
+                            )
+                            .is_some_and(|(value, _)| value.contains(target))
+                        {
+                            roots.insert(time.to_bits());
+                        }
+                    }
+                }
+                ResourceLimitError::ensure(
+                    ResourceKind::AnalysisPoints,
+                    roots.len(),
+                    self.max_points,
+                )?;
+                continue;
+            }
+            let midpoint = interval.lower + 0.5 * (interval.upper - interval.lower);
+            // A multiple root can be indistinguishable from zero throughout
+            // a small cluster at expression rounding precision. Keep the
+            // cluster's endpoints and center as features, rather than
+            // enumerating every floating-point timestamp in the plateau.
+            // This supplies mesh geometry, not a simple-root derivative
+            // certificate; switching still uses actual one-sided VM values.
+            charge()?;
+            if let Some((point, _)) = bounds.evaluate(
+                TimeInterval {
+                    lower: midpoint,
+                    upper: midpoint,
+                },
+                context,
+            ) {
+                let uncertainty = point.upper - point.lower;
+                if uncertainty.is_finite()
+                    && uncertainty > 0.0
+                    && point.contains(target)
+                    && value.upper - value.lower <= 2.0 * uncertainty
+                {
+                    for time in [interval.lower, midpoint, interval.upper] {
+                        roots.insert(time.to_bits());
+                    }
+                    ResourceLimitError::ensure(
+                        ResourceKind::AnalysisPoints,
+                        roots.len(),
+                        self.max_points,
+                    )?;
+                    continue;
+                }
+            }
+            if midpoint == interval.lower || midpoint == interval.upper {
+                return Err(BehavioralBreakpointError::Invalid(
+                    "a grazing time feature cannot be isolated at the available time precision",
+                ));
+            }
+            pending.push(TimeInterval {
+                lower: midpoint,
+                upper: interval.upper,
+            });
+            pending.push(TimeInterval {
+                lower: interval.lower,
+                upper: midpoint,
+            });
+        }
+        for time in roots {
+            self.add(Value::from_bits(time))?;
+        }
+        Ok(())
+    }
+
+    fn nonlinear_phase_levels(
+        &mut self,
+        function: Function,
+        phase: &Expr,
+        target: Value,
+        context: &Context<'_>,
+    ) -> Result<(), BehavioralBreakpointError> {
+        let program = compile_time_expression(phase, context);
+        let Some((range, _)) = TimeEnclosure::new(&program, self.tstop).and_then(|mut bounds| {
+            bounds.evaluate(
+                TimeInterval {
+                    lower: 0.0,
+                    upper: self.tstop,
+                },
+                context,
+            )
+        }) else {
+            return Ok(());
+        };
+        if !range.is_finite() {
+            return Err(BehavioralBreakpointError::Invalid(
+                "a nonlinear phase range is not finite",
+            ));
+        }
+        let angle = if function == Function::Cos {
+            target.acos()
+        } else {
+            target.asin()
+        };
+        let phases = [
+            angle,
+            if function == Function::Cos {
+                -angle
+            } else {
+                std::f64::consts::PI - angle
+            },
+        ]
+        .map(|phase| phase.rem_euclid(std::f64::consts::TAU));
+        for (index, root) in phases.into_iter().enumerate() {
+            if index == 1 && root == phases[0] {
+                continue;
+            }
+            let first = ((range.lower - root) / std::f64::consts::TAU).ceil();
+            let last = ((range.upper - root) / std::f64::consts::TAU).floor();
+            if first.abs().max(last.abs()) >= (1_u64 << 53) as Value {
+                return Err(BehavioralBreakpointError::Invalid(
+                    "nonlinear phase cycle indices are not representable",
+                ));
+            }
+            let count = (last - first + 1.0).max(0.0);
+            if count > 1_000_000.0 {
+                return Err(BehavioralBreakpointError::Invalid(
+                    "nonlinear phase schedule exceeds its 1000000-cycle work limit",
+                ));
+            }
+            for index in 0..count as usize {
+                self.poll()?;
+                self.level(
+                    phase,
+                    std::f64::consts::TAU.mul_add(first + index as Value, root),
+                    context,
+                )?;
+            }
+        }
+        Ok(())
+    }
+
     fn trigonometric_levels(
         &mut self,
         function: Function,
@@ -79,11 +330,8 @@ impl EventSchedule<'_> {
         let mut previous = 0.0;
         while let Some(root) = roots.next() {
             self.poll()?;
-            // The first BE interval supplies the outgoing algebraic value at
-            // a seam event; no derivative history exists at time zero.
             if root == 0.0 {
                 self.add(root)?;
-                continue;
             }
             let next = roots.peek().copied().unwrap_or(self.tstop);
             let left = previous + 0.5 * (root - previous);
@@ -117,8 +365,13 @@ impl EventSchedule<'_> {
                         right = midpoint;
                     }
                 }
-                self.add(left)?;
-                self.add(right)?;
+                // An instantaneous seam uses the initial BE interval. A
+                // finite equality plateau after time zero has a distinct
+                // outgoing boundary and must be retained like any other.
+                if left != 0.0 || right != Value::from_bits(1) {
+                    self.add(left)?;
+                    self.add(right)?;
+                }
                 located = true;
             }
             if !located {
@@ -184,12 +437,16 @@ impl EventSchedule<'_> {
                         }
                         _ => {}
                     }
+                } else {
+                    self.isolated_levels(expr, target, context)?;
                 }
             }
             Expr::Function { func, args } => match (func, args.as_slice()) {
                 (Function::Sin | Function::Cos, [phase]) if (-1.0..=1.0).contains(&target) => {
                     if let Some((rate, offset)) = affine_time_coordinate(phase, context) {
                         self.trigonometric_levels(*func, rate, offset, target, 0.0)?;
+                    } else {
+                        self.nonlinear_phase_levels(*func, phase, target, context)?;
                     }
                 }
                 (Function::SpiceSin, _) => {
@@ -265,6 +522,13 @@ impl EventSchedule<'_> {
                             &levels.map(|offset| value + offset),
                             context,
                         )?;
+                    } else {
+                        let difference = Expr::Binary {
+                            op: BinaryOp::Sub,
+                            left: left.clone(),
+                            right: right.clone(),
+                        };
+                        self.discontinuities(expr, &difference, &levels, context)?;
                     }
                 }
                 BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Pow => {

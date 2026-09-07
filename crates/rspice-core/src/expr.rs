@@ -12,10 +12,12 @@ mod compiler;
 mod file_table;
 mod parser;
 mod power;
+mod time_enclosure;
 mod vm;
 
 pub use ast::{BinaryOp, Expr, Function, LookupInterpolation, LookupTable, UnaryOp};
 pub use compiler::compile;
+pub(crate) use compiler::{compile_time_expression, constant_value, function_uses_implicit_time};
 pub use file_table::{resolve_file_lookup_functions, resolve_file_lookup_functions_with_limits};
 pub use parser::{ParseError, parse_expression, parse_expression_strict};
 pub(crate) use parser::{ParseExpressionWithAbortError, parse_expression_strict_with_abort};
@@ -24,6 +26,7 @@ pub(crate) use power::{
     real_function_pow_with_derivative, real_function_pwr, real_function_pwr_with_derivative,
     real_function_pwrs, real_function_pwrs_with_derivative, real_pow, real_pow_with_derivative,
 };
+pub(crate) use time_enclosure::{TimeEnclosure, TimeInterval};
 pub use vm::{CompiledExpr, Context, Instruction, Vm};
 pub(crate) use vm::{
     EXPR_ZERO_TOLERANCE, lookup_table_interpolate_with_derivative, spice_exp_parameters,

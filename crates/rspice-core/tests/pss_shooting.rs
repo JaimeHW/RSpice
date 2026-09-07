@@ -223,6 +223,10 @@ fn nonlinear_time_features_cannot_hide_between_shooting_grids() {
         ("if(cos(2*pi*64meg*time+0.1)>0.9999,1,0)", 0),
         ("exp(-10000*(1-cos(2*pi*64meg*time+0.1)))", 1),
         ("exp(-10000*(cos(2*pi*64meg*time+0.1)-0.25)^2)", 2),
+        (
+            "exp(-1000000*(cos(2*pi*64meg*time+0.1)+0.5*cos(2*pi*128meg*time+0.2)-0.25)^2)",
+            3,
+        ),
     ] {
         // Independent linear RC convolution on one source cycle. This uses
         // exact integration of densely sampled linear forcing segments, not
@@ -236,6 +240,9 @@ fn nonlinear_time_features_cannot_hide_between_shooting_grids() {
             let cosine = (omega * time + 0.1).cos();
             if kind == 1 {
                 (-10000.0 * (1.0 - cosine)).exp()
+            } else if kind == 3 {
+                (-1000000.0 * (cosine + 0.5 * (2.0 * (omega * time + 0.1)).cos() - 0.25).powi(2))
+                    .exp()
             } else {
                 (-10000.0 * (cosine - 0.25).powi(2)).exp()
             }
@@ -284,7 +291,7 @@ fn nonlinear_time_features_cannot_hide_between_shooting_grids() {
             .unwrap_or_else(|error| panic!("{expression}: {error}"));
         let result = &point.analysis().result;
         assert!(
-            result.time.len() <= 262_145,
+            result.time.len() <= if kind == 3 { 2_000_001 } else { 262_145 },
             "{expression}: {}",
             result.time.len()
         );
@@ -300,14 +307,15 @@ fn nonlinear_time_features_cannot_hide_between_shooting_grids() {
             .position(|name| name.eq_ignore_ascii_case("out"))
             .unwrap();
         let mean = result.waveforms[output].dc(&result.time, result.period);
+        let tolerance = if kind == 3 { 1e-6 } else { 1e-5 };
         assert!(
-            (mean - expected_dc).abs() < 1e-5,
+            (mean - expected_dc).abs() < tolerance,
             "{expression}: N={}, DC {mean:e} versus {expected_dc:e}",
             result.time.len()
         );
         for (&time, &actual) in result.time.iter().zip(&result.waveforms[output].values) {
             assert!(
-                (actual - expected(time)).abs() < 1e-5,
+                (actual - expected(time)).abs() < tolerance,
                 "{expression}, t={time:e}: {actual:e} versus {:e}",
                 expected(time)
             );
@@ -333,6 +341,71 @@ fn nonlinear_time_features_cannot_hide_between_shooting_grids() {
                 );
             }
         }
+    }
+}
+
+#[test]
+fn combined_comparison_coordinates_preserve_the_complete_rc_waveform() {
+    let omega = std::f64::consts::TAU * F0 * 64.0;
+    let period = 1.0 / (F0 * 64.0);
+    let tau = R * C;
+    let threshold: f64 = 0.001;
+    // cos(phi)+0.5*cos(2*phi)-0.25 = cos(phi)^2+cos(phi)-0.75.
+    // Solve the four exact switching phases and integrate each constant
+    // forcing segment analytically, independently of the event collector.
+    let enter = ((1.0 + threshold).sqrt() - 0.5).acos();
+    let leave = ((1.0 - threshold).sqrt() - 0.5).acos();
+    let edges = [
+        enter,
+        leave,
+        std::f64::consts::TAU - leave,
+        std::f64::consts::TAU - enter,
+    ]
+    .map(|phase| (phase - 0.1) / omega);
+    let response = |time: f64, mut state: f64| {
+        let mut left = 0.0;
+        let mut forcing = 0.0;
+        for right in edges.into_iter().chain([time]) {
+            let stop = right.min(time);
+            let exponent = -(stop - left) / tau;
+            state = state * exponent.exp() - forcing * exponent.exp_m1();
+            if right >= time {
+                break;
+            }
+            left = right;
+            forcing = 1.0 - forcing;
+        }
+        state
+    };
+    let initial = response(period, 0.0) / -(-period / tau).exp_m1();
+    let expected_dc = (leave - enter) / std::f64::consts::PI;
+    let netlist = Netlist::parse(&format!(
+        "combined comparison clock\nB1 in 0 V=abs(cos(2*pi*64meg*time+0.1)+0.5*cos(2*pi*128meg*time+0.2)-0.25)<0.001\nR1 in out {R}\nC1 out 0 {C}\n.end\n"
+    )).unwrap();
+    let analysis = Engine::default()
+        .run_pss(&netlist, PssConfig::new(F0).with_tstab_periods(0))
+        .unwrap();
+    let result = &analysis.result;
+    assert!(
+        result.time.len() < 4096,
+        "switching features must resolve locally"
+    );
+    let output = result
+        .node_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case("out"))
+        .unwrap();
+    let mean = result.waveforms[output].dc(&result.time, result.period);
+    assert!(
+        (mean - expected_dc).abs() < 1e-6,
+        "DC {mean:e} versus {expected_dc:e}"
+    );
+    for (&time, &actual) in result.time.iter().zip(&result.waveforms[output].values) {
+        let expected = response(time.rem_euclid(period), initial);
+        assert!(
+            (actual - expected).abs() < 1e-6,
+            "t={time:e}: {actual:e} versus {expected:e}"
+        );
     }
 }
 

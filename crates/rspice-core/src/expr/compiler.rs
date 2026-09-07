@@ -3,16 +3,64 @@
 //! Converts expression AST into efficient bytecode for the VM.
 
 use super::ast::{BinaryOp, Expr, Function, UnaryOp};
-use super::vm::{CompiledExpr, Instruction};
+use super::vm::{CompiledExpr, Context, Instruction, Vm};
+use crate::Value;
 
 /// Compile an expression AST to bytecode
 pub fn compile(expr: &Expr) -> CompiledExpr {
     let mut program = CompiledExpr::new();
-    compile_expr(expr, &mut program);
+    compile_expr(expr, &mut program, None);
     program
 }
 
-fn compile_expr(expr: &Expr, program: &mut CompiledExpr) {
+/// Specialize time-independent subexpressions to one explicitly fixed
+/// environment. Use the ordinary VM for constants, preserving dialect and
+/// evaluation order; no floating-point algebraic reassociation is performed.
+pub(crate) fn compile_time_expression(expr: &Expr, context: &Context<'_>) -> CompiledExpr {
+    let mut program = CompiledExpr::new();
+    compile_expr(expr, &mut program, Some(context));
+    program
+}
+
+pub(crate) fn function_uses_implicit_time(function: Function) -> bool {
+    matches!(
+        function,
+        Function::Sdt
+            | Function::SpiceSin
+            | Function::SpicePulse
+            | Function::SpiceExp
+            | Function::SpiceSffm
+    )
+}
+
+fn constant_over_time(expr: &Expr) -> bool {
+    match expr {
+        Expr::Time | Expr::NodeVoltage(_) | Expr::BranchCurrent(_) | Expr::StringLiteral(_) => {
+            false
+        }
+        Expr::Unary { operand, .. } => constant_over_time(operand),
+        Expr::Binary { left, right, .. } => constant_over_time(left) && constant_over_time(right),
+        Expr::Function { func, args } => {
+            !function_uses_implicit_time(*func) && args.iter().all(constant_over_time)
+        }
+        Expr::LookupTable { input, .. } => constant_over_time(input),
+        _ => true,
+    }
+}
+
+pub(crate) fn constant_value(expr: &Expr, context: &Context<'_>) -> Option<Value> {
+    if !constant_over_time(expr) {
+        return None;
+    }
+    let value = Vm::new().execute(&compile(expr), context);
+    value.is_finite().then_some(value)
+}
+
+fn compile_expr(expr: &Expr, program: &mut CompiledExpr, context: Option<&Context<'_>>) {
+    if let Some(value) = context.and_then(|context| constant_value(expr, context)) {
+        program.instructions.push(Instruction::PushConst(value));
+        return;
+    }
     match expr {
         Expr::Const(value) => {
             program.instructions.push(Instruction::PushConst(*value));
@@ -53,15 +101,15 @@ fn compile_expr(expr: &Expr, program: &mut CompiledExpr) {
         }
 
         Expr::LookupTable { input, table } => {
-            compile_expr(input, program);
+            compile_expr(input, program, context);
             let index = program.add_lookup_table(table.clone());
             program.instructions.push(Instruction::LookupTable(index));
         }
 
         Expr::Binary { op, left, right } => {
             // Compile operands first (left-to-right)
-            compile_expr(left, program);
-            compile_expr(right, program);
+            compile_expr(left, program, context);
+            compile_expr(right, program, context);
 
             // Then the operation
             let instr = match op {
@@ -84,7 +132,7 @@ fn compile_expr(expr: &Expr, program: &mut CompiledExpr) {
         }
 
         Expr::Unary { op, operand } => {
-            compile_expr(operand, program);
+            compile_expr(operand, program, context);
 
             let instr = match op {
                 UnaryOp::Neg => Instruction::Neg,
@@ -96,7 +144,7 @@ fn compile_expr(expr: &Expr, program: &mut CompiledExpr) {
         Expr::Function { func, args } => {
             // Compile all arguments
             for arg in args {
-                compile_expr(arg, program);
+                compile_expr(arg, program, context);
             }
 
             // Push the function instruction
@@ -166,5 +214,51 @@ fn compile_expr(expr: &Expr, program: &mut CompiledExpr) {
             };
             program.instructions.push(instr);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::ExpressionDialect;
+    use crate::expr::{TimeEnclosure, parse_expression_strict};
+
+    #[test]
+    fn fixed_environment_specialization_preserves_vm_values_and_stateful_sites() {
+        let expression =
+            parse_expression_strict("cos(6*pi*time)+sqrt(2)/7+pow(-2,0.5)+temper*1e-3").unwrap();
+        for dialect in [ExpressionDialect::Ngspice, ExpressionDialect::Xyce] {
+            let context = Context::transient(&[], &[], 0.0)
+                .with_temperature(57.0)
+                .with_expression_dialect(dialect);
+            let original = compile(&expression);
+            let specialized = compile_time_expression(&expression, &context);
+            assert!(specialized.instructions.len() < original.instructions.len());
+            assert!(TimeEnclosure::new(&specialized, 1.0).is_some());
+            for time in [0.0, 0.123, 0.99, 1.0] {
+                let context = Context { time, ..context };
+                assert_eq!(
+                    Vm::new().execute(&original, &context).to_bits(),
+                    Vm::new().execute(&specialized, &context).to_bits()
+                );
+            }
+        }
+        let context = Context::transient(&[], &[], 0.0);
+        let invalid = parse_expression_strict("0*exp(1000)+time").unwrap();
+        assert!(
+            Vm::new()
+                .execute(&compile_time_expression(&invalid, &context), &context)
+                .is_nan()
+        );
+        let integral = parse_expression_strict("sdt(1)+sdt(2)").unwrap();
+        assert_eq!(compile_time_expression(&integral, &context).sdt_count, 2);
+        let sine = parse_expression_strict("spice_sin(0,1,3)").unwrap();
+        assert!(constant_value(&sine, &context).is_none());
+        assert!(
+            compile_time_expression(&sine, &context)
+                .instructions
+                .iter()
+                .any(|instruction| matches!(instruction, Instruction::SpiceSin(3)))
+        );
     }
 }

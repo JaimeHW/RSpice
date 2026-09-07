@@ -3,6 +3,7 @@
 //! property, because nonperiodic functions can alias on the entire grid.
 
 use super::*;
+use crate::expr::{constant_value, function_uses_implicit_time as implicit_time};
 use crate::numerics::is_integral_cycle_count;
 
 impl BehavioralVoltageSource {
@@ -51,42 +52,6 @@ impl BehavioralCurrentSource {
             .with_gmin(self.gmin)
             .with_expression_dialect(self.expression_dialect)
     }
-}
-
-fn implicit_time(function: Function) -> bool {
-    matches!(
-        function,
-        Function::Sdt
-            | Function::SpiceSin
-            | Function::SpicePulse
-            | Function::SpiceExp
-            | Function::SpiceSffm
-    )
-}
-
-fn constant_over_time(expr: &Expr) -> bool {
-    match expr {
-        Expr::Time | Expr::NodeVoltage(_) | Expr::BranchCurrent(_) | Expr::StringLiteral(_) => {
-            false
-        }
-        Expr::Unary { operand, .. } => constant_over_time(operand),
-        Expr::Binary { left, right, .. } => constant_over_time(left) && constant_over_time(right),
-        Expr::Function { func, args } => {
-            !implicit_time(*func) && args.iter().all(constant_over_time)
-        }
-        Expr::LookupTable { input, .. } => constant_over_time(input),
-        _ => true,
-    }
-}
-
-pub(super) fn constant_value(expr: &Expr, context: &Context<'_>) -> Option<Value> {
-    if !constant_over_time(expr) {
-        return None;
-    }
-    // Use the existing evaluator and resolved dialect/environment, including
-    // named power functions and temperature. Do not duplicate their semantics.
-    let value = Vm::new().execute(&compile(expr), context);
-    value.is_finite().then_some(value)
 }
 
 fn multiply_increment(increment: Value, scale: Value) -> Option<Value> {

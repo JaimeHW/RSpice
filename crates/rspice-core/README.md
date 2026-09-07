@@ -276,7 +276,7 @@ Checkpoint format 35 retains the step and stop defaults that determine
 independent-source waveforms. Extending a run or changing its step ceiling
 preserves those source parameters. Older checkpoints remain readable; resume
 requires fully specified source timing when the original defaults are absent.
-Resume also requires the current resolved simulation identity (v7); states
+Resume also requires the current resolved simulation identity (v8); states
 captured under previous source evaluation or behavioral event timing semantics
 must be regenerated.
 
@@ -400,11 +400,19 @@ the same mesh, including affine clocks, signed modulo, and resolved temperature
 parameters. Smooth tables and other coordinates with a known time rate retain
 their base-grid interval bounds; arbitrary circuit-dependent expressions do not
 supply that bound. Known extrema and inverse levels of nonlinear sine/cosine
-compositions expose features that could vanish on both initial grids. Comparison and
-step boundaries are located through the actual behavioral evaluator between
-adjacent representable timestamps. Transient continuation uses the same source
-feature collector. Refinement preserves source times exactly and solves
-successively finer grids, comparing the complete voltage and branch
+compositions expose features that could vanish on both initial grids. For
+continuous sums, products, regular quotients, SQR and sine/cosine compositions,
+value and normalized-time derivative enclosures of the compiled expression
+isolate levels. Nonlinear phase inversion uses those same bounds. Tangential roots are
+retained as small feature clusters at expression rounding precision. A quotient
+currently requires a nonzero denominator bound across the analysis window. The
+collector limits the number of evaluated instructions as well as its events.
+Constants use the shared compiler and VM in the resolved environment.
+Comparison and step boundaries are located through the actual behavioral
+evaluator between adjacent representable timestamps, including finite equality plateaus after
+time zero and comparisons between two time coordinates. Transient continuation
+uses the same source feature collector. Refinement preserves source times
+exactly and solves successively finer grids, comparing the complete voltage and branch
 current waveforms at shared phases, using the engine voltage/current tolerances.
 Only a grid that agrees with its refined grid is retained. Adjacent representable
 source times remain distinct. Where bisection is impossible, a separately solved
@@ -419,7 +427,7 @@ defaults still use the original `POINTS`. `MAXITER` applies to each grid solve,
 while the result reports total Newton corrections across all grids. Point and
 memory limits also apply to refinement, and cancellation remains available.
 Retained PSS operating points from earlier producer versions must be regenerated
-before dependent numerical reuse; the current producer identity is version 19.
+before dependent numerical reuse; the current producer identity is version 20.
 This convergence check supplements the shooting residual, which measures closure
 of a discrete period map. It is not a proof of resolution for all nonlinear
 expressions and devices; independent waveform and
