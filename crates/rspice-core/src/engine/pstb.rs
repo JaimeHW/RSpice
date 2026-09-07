@@ -174,6 +174,22 @@ impl Engine {
         // A legacy identityless artifact carries no basis at all. Resolving a
         // probe against it would silently name coordinate zero, so it is a
         // refusal: the retained state cannot say what its own coordinates are.
+        //
+        // Naming that one cause is not an oversight, and the obvious second
+        // cause -- a circuit with genuinely no dynamic state -- cannot reach
+        // here. `Engine::pss_shooting_state_basis` builds the basis from
+        // `circuit.capacitors.names` chained with `circuit.inductors.names`,
+        // and `run_pss_with_state_and_frozen_sources_abort` refuses the solve
+        // with `PssError::NoReactiveElements` when
+        // `capacitors.len() + inductors.len()` is zero. Same two collections,
+        // so a stateless circuit never produces a carrier at all rather than
+        // producing one with an empty basis, and the only constructor that
+        // yields an empty basis is `PssOperatingPoint::try_from_parts`, which
+        // is by definition the identityless path. That is the same argument
+        // that retired the `order == 0` guard below.
+        // `a_periodic_map_with_no_dynamic_state_cannot_reach_a_pstb_card` and
+        // `a_carrier_with_no_shooting_state_basis_refuses_the_probe` in
+        // `tests/authored_card_runners.rs` pin the two halves.
         if basis.is_empty() {
             return Err(SimulationError::Circuit(format!(
                 "PSTB probe '{probe_name}' cannot be resolved: the retained PSS operating point \
