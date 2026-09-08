@@ -20,7 +20,7 @@ R2 load 0 2k
 """
     )
     result = rspice.Engine().run_pss(
-        deck, F0, tstab_periods=0, points_per_period=256, tolerance=1e-11
+        deck, F0, tstab_periods=0, points_per_period=256
     )
     # Exact piecewise-constant state transition for (capacitor V, winding I).
     matrix = np.array(

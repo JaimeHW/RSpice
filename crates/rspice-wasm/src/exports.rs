@@ -243,8 +243,7 @@ mod wasm_tests {
                 &netlist,
                 rspice_core::analysis::PssConfig::new(1e6)
                     .with_tstab_periods(0)
-                    .with_points_per_period(256)
-                    .with_tolerance(1e-11),
+                    .with_points_per_period(256),
                 &rspice_core::abort_signal::NoAbort,
             )
             .unwrap();

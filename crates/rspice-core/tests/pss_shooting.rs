@@ -66,35 +66,39 @@ fn discontinuous_drive_preserves_the_complete_rlc_orbit() {
             )
         }
     };
-    let netlist = Netlist::parse("discontinuous RLC orbit\nB1 in 0 V=if(sin(2*pi*1meg*time+0.1)>0,1,0)\nR1 in out 1k\nC1 out 0 159p\nL1 out load 10u\nR2 load 0 2k\n.options RELTOL=1e-6 VNTOL=1e-8\n.end\n").unwrap();
-    let analysis = Engine::default()
-        .run_pss(
-            &netlist,
-            PssConfig::new(F0)
-                .with_points_per_period(256)
-                .with_tolerance(1e-11)
-                .with_tstab_periods(0),
-        )
-        .expect("source edges must preserve the winding correction below one current ULP");
-    let result = &analysis.result;
-    for (name, coordinate, scale, tolerance) in [("out", 0, 1.0, 1e-5), ("load", 1, load, 1e-5)] {
-        let node = result
-            .node_names
-            .iter()
-            .position(|n| n.eq_ignore_ascii_case(name))
-            .unwrap();
-        let waveform = &result.waveforms[node];
-        let mut max_error: f64 = 0.0;
-        for (&time, &actual) in result.time.iter().zip(&waveform.values) {
-            let expected = exact(time)[coordinate] * scale;
-            max_error = max_error.max((actual - expected).abs());
+    // Impedance scaling leaves the voltage ODE unchanged while moving the
+    // winding-current coordinate across six orders of magnitude.
+    for impedance_scale in [0.001, 1.0, 1000.0] {
+        let netlist = Netlist::parse(&format!("discontinuous RLC orbit\nB1 in 0 V=if(sin(2*pi*1meg*time+0.1)>0,1,0)\nR1 in out {:.17e}\nC1 out 0 {:.17e}\nL1 out load {:.17e}\nR2 load 0 {:.17e}\n.options RELTOL=1e-6 VNTOL=1e-8\n.end\n", R * impedance_scale, capacitance / impedance_scale, inductance * impedance_scale, load * impedance_scale)).unwrap();
+        let analysis = Engine::default()
+            .run_pss(
+                &netlist,
+                PssConfig::new(F0)
+                    .with_points_per_period(256)
+                    .with_tstab_periods(0),
+            )
+            .expect("source edges must preserve the winding correction below one current ULP");
+        let result = &analysis.result;
+        for (name, coordinate, scale, tolerance) in [("out", 0, 1.0, 1e-5), ("load", 1, load, 1e-5)]
+        {
+            let node = result
+                .node_names
+                .iter()
+                .position(|n| n.eq_ignore_ascii_case(name))
+                .unwrap();
+            let waveform = &result.waveforms[node];
+            let mut max_error: f64 = 0.0;
+            for (&time, &actual) in result.time.iter().zip(&waveform.values) {
+                let expected = exact(time)[coordinate] * scale;
+                max_error = max_error.max((actual - expected).abs());
+            }
+            assert!(
+                max_error < tolerance,
+                "{name}, impedance scale={impedance_scale}: {max_error:e}, {} samples",
+                result.time.len()
+            );
+            assert!((waveform.dc(&result.time, result.period) - 1.0 / 3.0).abs() < tolerance);
         }
-        assert!(
-            max_error < tolerance,
-            "{name}: {max_error:e}, {} samples",
-            result.time.len()
-        );
-        assert!((waveform.dc(&result.time, result.period) - 1.0 / 3.0).abs() < tolerance);
     }
 }
 
