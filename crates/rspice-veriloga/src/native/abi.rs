@@ -77,6 +77,24 @@ fn integer_operation_code(operation: IntegerBinaryOperation) -> usize {
         IntegerBinaryOperation::BitAnd => 2,
         IntegerBinaryOperation::BitOr => 3,
         IntegerBinaryOperation::BitXor => 4,
+        IntegerBinaryOperation::Arithmetic(
+            crate::integer_runtime::IntegerArithmeticOperation::Add,
+        ) => 5,
+        IntegerBinaryOperation::Arithmetic(
+            crate::integer_runtime::IntegerArithmeticOperation::Sub,
+        ) => 6,
+        IntegerBinaryOperation::Arithmetic(
+            crate::integer_runtime::IntegerArithmeticOperation::Mul,
+        ) => 7,
+        IntegerBinaryOperation::Arithmetic(
+            crate::integer_runtime::IntegerArithmeticOperation::Div,
+        ) => 8,
+        IntegerBinaryOperation::Arithmetic(
+            crate::integer_runtime::IntegerArithmeticOperation::Mod,
+        ) => 9,
+        IntegerBinaryOperation::Arithmetic(
+            crate::integer_runtime::IntegerArithmeticOperation::Pow,
+        ) => 10,
     }
 }
 
@@ -87,6 +105,24 @@ fn integer_operation_from_code(code: usize) -> Option<IntegerBinaryOperation> {
         2 => Some(IntegerBinaryOperation::BitAnd),
         3 => Some(IntegerBinaryOperation::BitOr),
         4 => Some(IntegerBinaryOperation::BitXor),
+        5 => Some(IntegerBinaryOperation::Arithmetic(
+            crate::integer_runtime::IntegerArithmeticOperation::Add,
+        )),
+        6 => Some(IntegerBinaryOperation::Arithmetic(
+            crate::integer_runtime::IntegerArithmeticOperation::Sub,
+        )),
+        7 => Some(IntegerBinaryOperation::Arithmetic(
+            crate::integer_runtime::IntegerArithmeticOperation::Mul,
+        )),
+        8 => Some(IntegerBinaryOperation::Arithmetic(
+            crate::integer_runtime::IntegerArithmeticOperation::Div,
+        )),
+        9 => Some(IntegerBinaryOperation::Arithmetic(
+            crate::integer_runtime::IntegerArithmeticOperation::Mod,
+        )),
+        10 => Some(IntegerBinaryOperation::Arithmetic(
+            crate::integer_runtime::IntegerArithmeticOperation::Pow,
+        )),
         _ => None,
     }
 }
@@ -954,7 +990,7 @@ pub unsafe extern "C" fn rspice_integer_operation_native(
                 .map_err(|error| error.to_string());
         }
 
-        if (INTEGER_BINARY_DESCRIPTOR_BASE..INTEGER_BINARY_DESCRIPTOR_BASE + 5).contains(&kind) {
+        if (INTEGER_BINARY_DESCRIPTOR_BASE..INTEGER_BINARY_DESCRIPTOR_BASE + 11).contains(&kind) {
             let operation = integer_operation_from_code(kind - INTEGER_BINARY_DESCRIPTOR_BASE)
                 .ok_or_else(|| "native integer descriptor has an invalid operation".to_string())?;
             // SAFETY: binary descriptors require exactly two operands.

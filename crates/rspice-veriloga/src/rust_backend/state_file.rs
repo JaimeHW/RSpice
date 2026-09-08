@@ -1562,7 +1562,7 @@ fn finalize_checkpoint_identity_with_compatibility(
     Ok(())
 }
 
-const GENERATED_MODEL_SEMANTICS_VERSION: u32 = 2;
+const GENERATED_MODEL_SEMANTICS_VERSION: u32 = 3;
 
 fn generated_model_semantic_identity(device: &GeneratedRustDevice) -> String {
     let mut hasher = blake3::Hasher::new();
@@ -2527,7 +2527,20 @@ fn lower_parameter_default_expr(
                 lower_parameter_default_expr(artifact, *left, parameter_fields, parameter_given)?;
             let right =
                 lower_parameter_default_expr(artifact, *right, parameter_fields, parameter_given)?;
-            if matches!(op.as_str(), "BitAnd" | "BitOr" | "BitXor" | "Shl" | "Shr") {
+            if matches!(
+                op.as_str(),
+                "BitAnd"
+                    | "BitOr"
+                    | "BitXor"
+                    | "Shl"
+                    | "Shr"
+                    | "IntAdd"
+                    | "IntSub"
+                    | "IntMul"
+                    | "IntDiv"
+                    | "IntMod"
+                    | "IntPow"
+            ) {
                 return Ok(format!(
                     "({}).map_err(|error| error.to_string())?",
                     super::expr::integer_binary_result(op.as_str(), &left, &right)

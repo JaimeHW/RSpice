@@ -1868,6 +1868,14 @@ impl Emitter<'_> {
                     operator: "zi filter",
                 });
             }
+            CfgValueKind::IntegerArithmetic { op, left, right } => {
+                let result = super::expr::integer_binary_result(
+                    &format!("Int{op:?}"),
+                    &self.numeric_operand(*left),
+                    &self.numeric_operand(*right),
+                );
+                format!("{}({result})", bindings.integer_result)
+            }
             CfgValueKind::IntegerBitwise { op, left, right } => {
                 if *op == CfgIntegerBitwiseOp::Or
                     && matches!(

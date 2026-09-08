@@ -890,6 +890,8 @@ pub enum Instruction {
     JumpIfFalse(usize),
     /// Skip this many following instructions. Generated jumps are forward only.
     Jump(usize),
+    /// Type-resolved signed 32-bit arithmetic.
+    IntegerArithmetic(crate::integer_runtime::IntegerArithmeticOperation),
 }
 
 impl CompiledModel {

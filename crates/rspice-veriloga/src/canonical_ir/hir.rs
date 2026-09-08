@@ -3019,6 +3019,18 @@ fn exact_retained_replication_count(expression: &Expression) -> Option<i64> {
             let left = evaluate(&binary.left)?;
             let right = evaluate(&binary.right)?;
             match binary.op {
+                BinaryOp::IntAdd
+                | BinaryOp::IntSub
+                | BinaryOp::IntMul
+                | BinaryOp::IntDiv
+                | BinaryOp::IntMod
+                | BinaryOp::IntPow => crate::integer_runtime::integer_arithmetic(
+                    binary.op.integer_arithmetic()?,
+                    left as f64,
+                    right as f64,
+                )
+                .ok()
+                .map(|v| v as i64),
                 BinaryOp::Add => left.checked_add(right),
                 BinaryOp::Sub => left.checked_sub(right),
                 BinaryOp::Mul => left.checked_mul(right),

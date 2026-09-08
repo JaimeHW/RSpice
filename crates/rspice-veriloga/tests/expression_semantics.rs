@@ -5,6 +5,130 @@ mod support;
 use support::DeviceFixture;
 
 #[test]
+fn integer_constants_and_defaults_agree_with_runtime_arithmetic() {
+    for (expression, expected) in [
+        ("5/2", 2.0),
+        ("-5/2", -2.0),
+        ("2147483647+1", -2147483648.0),
+        ("2**31", -2147483648.0),
+        ("2**-1", 0.0),
+        ("(-1)**-3", -1.0),
+        ("-(-2147483648)", -2147483648.0),
+        ("8.0+(1/2)", 8.0),
+        ("1/2.0", 0.5),
+        ("(64'sd1+1)+2147483647", 2147483649.0),
+        ("40'sh7fffffffff+1", -549755813888.0),
+        ("(9007199254740992+1)>9007199254740992", 1.0),
+    ] {
+        for body in [
+            format!("analog I(p,n)<+({expression});"),
+            format!("parameter real result={expression}; analog I(p,n)<+result;"),
+            format!("localparam real result={expression}; analog I(p,n)<+result;"),
+        ] {
+            let fixture = DeviceFixture::compile(&format!(
+                "module constants(p,n); inout p,n; electrical p,n; {body} endmodule"
+            ));
+            let mut device = fixture.device("X", &[1, 0]);
+            device.update_voltages(&[1.0]);
+            assert_eq!(device.try_evaluate().unwrap()[0], expected, "{body}");
+        }
+    }
+}
+
+#[test]
+fn integer_division_in_parameter_bounds_uses_the_effective_parameter_vector() {
+    let fixture = DeviceFixture::compile(
+        "module bounds(p,n); inout p,n; electrical p,n; parameter real value=2 from [0:limit/2]; parameter integer limit=5; analog I(p,n)<+value; endmodule",
+    );
+    let mut device = fixture.device("X", &[1, 0]);
+    device.try_set_parameter("value", 2.25).unwrap();
+    assert!(device.try_resolve_parameter_defaults().is_err());
+    device.try_set_parameter("limit", 6.0).unwrap();
+    device.try_resolve_parameter_defaults().unwrap();
+}
+
+#[test]
+fn integer_domain_failures_are_reported_only_for_taken_expressions() {
+    for operator in ["/", "%"] {
+        let fixture = DeviceFixture::compile(&format!(
+            "module domains(p,n); inout p,n; electrical p,n; integer a,b; analog begin a=5; b=V(p,n); I(p,n)<+(V(p,n)<0 ? 3 : a {operator} b); end endmodule"
+        ));
+        let mut device = fixture.device("X", &[1, 0]);
+        for (v, expected) in [
+            (-1.0, Some(3.0)),
+            (0.0, None),
+            (2.0, Some(if operator == "/" { 2.0 } else { 1.0 })),
+        ] {
+            device.update_voltages(&[v]);
+            let result = device.try_evaluate();
+            if let Some(expected) = expected {
+                assert_eq!(result.unwrap()[0], expected);
+            } else {
+                assert!(result.is_err(), "{operator} at {v}");
+            }
+        }
+    }
+}
+
+#[test]
+fn integer_arithmetic_keeps_its_type_inside_real_expressions() {
+    for (operator, left, right, expected) in [
+        ("/", 5.0, 2.0, 2.0),
+        ("/", -5.0, 2.0, -2.0),
+        ("/", 5.0, -2.0, -2.0),
+        ("+", 2147483647.0, 1.0, -2147483648.0),
+        ("-", -2147483648.0, 1.0, 2147483647.0),
+        ("*", 2147483647.0, 2.0, -2.0),
+        ("**", 2.0, 31.0, -2147483648.0),
+        ("**", 2.0, -1.0, 0.0),
+        ("**", -1.0, -3.0, -1.0),
+        ("**", -1.0, -2.0, 1.0),
+        ("%", -5.0, 2.0, -1.0),
+    ] {
+        let fixture = DeviceFixture::compile(&format!(
+            "module typed_arithmetic(p,q,n); inout p,q,n; electrical p,q,n; integer a,b; analog begin a=V(p,n); b=V(q,n); I(p,n)<+(a {operator} b)+0.25*V(p,n); end endmodule"
+        ));
+        let mut device = fixture.device("X", &[1, 2, 0]);
+        device.update_voltages(&[left, right]);
+        assert_eq!(
+            device.try_evaluate().unwrap()[0],
+            expected + 0.25 * left,
+            "{left} {operator} {right}"
+        );
+        let mut slope = 0.0;
+        device
+            .try_stamp(
+                &[left, right],
+                |row, column, value| {
+                    if row == 0 && column == 0 {
+                        slope += value;
+                    }
+                },
+                |_, _| {},
+            )
+            .unwrap();
+        assert_eq!(
+            slope, 0.25,
+            "integer arithmetic must not acquire a real tangent"
+        );
+    }
+}
+
+#[test]
+fn dependent_integer_division_truncates_before_real_parameter_assignment() {
+    let fixture = DeviceFixture::compile(
+        "module typed_default(p,n); inout p,n; electrical p,n; parameter integer a=5,b=2; parameter real quotient=a/b; analog I(p,n)<+quotient*V(p,n); endmodule",
+    );
+    let mut device = fixture.device("X", &[1, 0]);
+    for (numerator, expected) in [(5.0, 2.0), (-5.0, -2.0), (7.0, 3.0)] {
+        device.try_set_parameter("a", numerator).unwrap();
+        device.try_resolve_parameter_defaults().unwrap();
+        device.update_voltages(&[1.0]);
+        assert_eq!(device.try_evaluate().unwrap()[0], expected);
+    }
+}
+
+#[test]
 fn integer_function_initializers_snapshot_inputs_and_restore_block_scope() {
     let fixture = DeviceFixture::compile(
         r#"

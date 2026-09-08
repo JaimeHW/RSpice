@@ -2,7 +2,7 @@
 #![allow(dead_code, non_snake_case, unused_imports, unused_mut, unused_parens, unused_variables)]
 
 use super::state::Instance;
-use rspice_veriloga_runtime::{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, L2, L3, L4, L5, L6, L7, L8, L9, evaluate_generated_above, evaluate_generated_cross, evaluate_generated_timer, rspice_eval_ddt, rspice_eval_idt, rspice_limexp, rspice_limited_exp, rspice_limited_exp_derivative};
+use rspice_veriloga_runtime::{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, L2, L3, L4, L5, L6, L7, L8, L9, integer, evaluate_generated_above, evaluate_generated_cross, evaluate_generated_timer, rspice_eval_ddt, rspice_eval_idt, rspice_limexp, rspice_limited_exp, rspice_limited_exp_derivative};
 impl Instance {
     pub fn stamp(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedStamper<'_>) {
         let parameters = &self.params.values;
@@ -1371,7 +1371,7 @@ impl Instance {
 		let UA=FC> A;
 		let AVG;
 		if UA{
-		let UC=(-UB)* RG;
+		let UC=(ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Sub, A, UB)))* RG;
 		let UD=QS/ FC;
 		let UE=UD> CB;
 		let UH=if UE{
@@ -1383,7 +1383,7 @@ impl Instance {
 		let UI=UC* UH;
 		AVG=UI;
 		}else{
-		let UJ=(-UB)* RG;
+		let UJ=(ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Sub, A, UB)))* RG;
 		let UK=(-QS)* FC;
 		let UL=UK> CB;
 		let UO=if UL{
@@ -1400,7 +1400,7 @@ impl Instance {
 		if UR{
 		let VS;
 		if UA{
-		let US=-UB;
+		let US=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Sub, A, UB));
 		let UU=UT* FC;
 		let UV=UU> CB;
 		let UY=if UV{
@@ -1414,7 +1414,7 @@ impl Instance {
 		}else{
 		let VT;
 		if FD{
-		let VA=-UB;
+		let VA=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Sub, A, UB));
 		let VB=(-1e20f64/ FC)> CB;
 		let VE=if VB{
 		let VC=(-1e20f64/ FC).ln();
@@ -1749,7 +1749,7 @@ impl Instance {
 		let ABY=ABV* (ABQ+ CX);
 		let ACA=ABZ+ (ABX/ ((ABO+ ABJ)+ ABY));
 		let ACC=ACB+ (ABX/ ((ABP+ ABJ)+ ABY));
-		let ACD=ABV+ AK;
+		let ACD=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, ABV, AK));
 		ABV=ACD;
 		ABZ=ACA;
 		ACB=ACC;
@@ -2552,7 +2552,7 @@ impl Instance {
 		}else{
 		APN
 		};
-		let APP=-UB;
+		let APP=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Sub, A, UB));
 		let APR=(APP* APQ)* APO;
 		let FYB=(FCG* APP)* APO;
 		AYK=APR;
@@ -2573,7 +2573,7 @@ impl Instance {
 		APY=APX;
 		FCO=FWX;
 		}
-		let APZ=-UB;
+		let APZ=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Sub, A, UB));
 		let AQA=APZ* APQ;
 		let AQB=AQA* APY;
 		let FYA=((FCG* APZ)* APY)+ (FCO* AQA);
@@ -6292,7 +6292,7 @@ impl Instance {
 		let CRP=CRO/ AWW;
 		let GYK=GAR* CRP;
 		let CRQ=(AK+ CRP).sqrt();
-		let CRR=-1f64+ CRQ;
+		let CRR=AYE+ CRQ;
 		let CRS=CRN* CRR;
 		let GYL=(GAR/ AE)* CRR;
 		let GYM=L7([0.0,GYL[0],GYL[1],GYL[2],0.0,0.0,0.0])+ (((((((GYI* AIP)- L7([0.0,GYJ[0],GYJ[1],GYJ[2],0.0,0.0,0.0]))/ AWW)- L7([0.0,GYK[0],GYK[1],GYK[2],0.0,0.0,0.0]))/ AWW)* (FAT/ (FXH* CRQ)))* CRN);
@@ -8993,7 +8993,7 @@ impl Instance {
 		FRJ=HOW;
 		FRK=HOI;
 		}
-		let EBY=-UB;
+		let EBY=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Sub, A, UB));
 		let EBZ=EBY* AXO;
 		let HOX=GBC* EBY;
 		let ECA=UB* (AXI- AXO);

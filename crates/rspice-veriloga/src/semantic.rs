@@ -78,6 +78,241 @@ fn rewrite_operator_tree(
     Ok(values.pop().expect("root expression was rewritten"))
 }
 
+/// Resolve each operator while its operand types are still available. The
+/// postorder type stack makes long arithmetic chains linear to lower.
+fn resolve_integer_operator_tree(
+    expr: &Expression,
+    mut leaf: impl FnMut(&Expression) -> CompileResult<(Expression, ValueType)>,
+) -> CompileResult<Expression> {
+    let mut types: Vec<(ValueType, bool)> = Vec::new();
+    rewrite_operator_tree(expr, |node| {
+        let (expression, value_type, wide) = match node {
+            OperatorRewrite::Leaf(expression) => {
+                let (expression, value_type) = leaf(expression)?;
+                let wide = wide_integer_value(&expression);
+                (expression, value_type, wide)
+            }
+            OperatorRewrite::Binary(mut binary) => {
+                let (right, right_wide) = types.pop().expect("right operand typed");
+                let (left, left_wide) = types.pop().expect("left operand typed");
+                let common = left.common_type(right);
+                let wide = left_wide || right_wide;
+                let arithmetic = match binary.op {
+                    BinaryOp::Add => Some(BinaryOp::IntAdd),
+                    BinaryOp::Sub => Some(BinaryOp::IntSub),
+                    BinaryOp::Mul => Some(BinaryOp::IntMul),
+                    BinaryOp::Div => Some(BinaryOp::IntDiv),
+                    BinaryOp::Mod => Some(BinaryOp::IntMod),
+                    BinaryOp::Pow => Some(BinaryOp::IntPow),
+                    _ => None,
+                };
+                let integer = matches!(common, ValueType::Integer | ValueType::Boolean);
+                if let Some(op) = arithmetic
+                    && integer
+                    && !wide
+                {
+                    binary.op = op;
+                }
+                let value_type = match binary.op {
+                    BinaryOp::Eq
+                    | BinaryOp::Ne
+                    | BinaryOp::Lt
+                    | BinaryOp::Le
+                    | BinaryOp::Gt
+                    | BinaryOp::Ge
+                    | BinaryOp::And
+                    | BinaryOp::Or => ValueType::Boolean,
+                    BinaryOp::BitAnd
+                    | BinaryOp::BitOr
+                    | BinaryOp::BitXor
+                    | BinaryOp::Shl
+                    | BinaryOp::Shr => {
+                        SemanticAnalyzer::validate_integer_operator_operand(
+                            left,
+                            "left operand of bitwise or shift operator",
+                            binary.left.span(),
+                        )?;
+                        SemanticAnalyzer::validate_integer_operator_operand(
+                            right,
+                            "right operand of bitwise or shift operator",
+                            binary.right.span(),
+                        )?;
+                        ValueType::Integer
+                    }
+                    BinaryOp::IntAdd
+                    | BinaryOp::IntSub
+                    | BinaryOp::IntMul
+                    | BinaryOp::IntDiv
+                    | BinaryOp::IntMod
+                    | BinaryOp::IntPow => ValueType::Integer,
+                    _ => common,
+                };
+                let expression = Expression::Binary(binary);
+                if wide && integer {
+                    // Retain exact wide constant arithmetic until it has
+                    // collapsed, including comparisons above f64's precision.
+                    // The runtime's integer storage is explicitly signed-32.
+                    let Some(ConstantValue::Integer(value)) =
+                        SemanticAnalyzer::eval_const_value_with(&expression, &HashMap::new())
+                    else {
+                        return Err(CompileError::Semantic(SemanticError::new(
+                            SemanticErrorKind::UnsupportedFeature(
+                                "runtime analog integer arithmetic wider than 32 bits".into(),
+                            ),
+                            expression.span(),
+                        )));
+                    };
+                    let expression = folded_integer_expression(value, &expression, value_type)?;
+                    let wide = wide_integer_value(&expression);
+                    (expression, value_type, wide)
+                } else {
+                    (expression, value_type, wide && integer)
+                }
+            }
+            OperatorRewrite::Unary(unary) => {
+                let (operand_type, wide) = types.pop().expect("unary operand typed");
+                let value_type = match unary.op {
+                    UnaryOp::ToInteger | UnaryOp::BitNot => ValueType::Integer,
+                    UnaryOp::Not => ValueType::Boolean,
+                    _ => operand_type,
+                };
+                if unary.op == UnaryOp::BitNot {
+                    SemanticAnalyzer::validate_integer_operator_operand(
+                        operand_type,
+                        "operand of bitwise complement",
+                        unary.operand.span(),
+                    )?;
+                }
+                if unary.op == UnaryOp::Neg
+                    && matches!(operand_type, ValueType::Integer | ValueType::Boolean)
+                    && !wide
+                {
+                    let span = unary.span;
+                    (
+                        Expression::Binary(BinaryExpr {
+                            op: BinaryOp::IntSub,
+                            left: Box::new(exact_integer_expression(0, span)),
+                            right: unary.operand,
+                            span,
+                        }),
+                        ValueType::Integer,
+                        false,
+                    )
+                } else if wide && matches!(unary.op, UnaryOp::Neg | UnaryOp::Pos) {
+                    let expression = Expression::Unary(unary);
+                    let Some(ConstantValue::Integer(value)) =
+                        SemanticAnalyzer::eval_const_value_with(&expression, &HashMap::new())
+                    else {
+                        return Err(CompileError::Semantic(SemanticError::new(
+                            SemanticErrorKind::UnsupportedFeature(
+                                "runtime analog integer arithmetic wider than 32 bits".into(),
+                            ),
+                            expression.span(),
+                        )));
+                    };
+                    let expression = folded_integer_expression(value, &expression, value_type)?;
+                    let wide = wide_integer_value(&expression);
+                    (expression, value_type, wide)
+                } else {
+                    (Expression::Unary(unary), value_type, false)
+                }
+            }
+        };
+        types.push((value_type, wide));
+        // Fold only successful literal arithmetic. Failed operations remain
+        // executable so an untaken branch does not acquire a compile error.
+        if let Expression::Binary(binary) = &expression
+            && let Some(op) = binary.op.integer_arithmetic()
+            && let (Expression::Number(left), Expression::Number(right)) =
+                (&*binary.left, &*binary.right)
+            && let Ok(value) =
+                crate::integer_runtime::integer_arithmetic(op, left.value, right.value)
+        {
+            return Ok(exact_integer_expression(value as i64, binary.span));
+        }
+        Ok(expression)
+    })
+}
+
+fn exact_integer_expression(value: i64, span: Span) -> Expression {
+    Expression::Number(NumberLit {
+        value: value as f64,
+        raw: value.to_string().into(),
+        span,
+    })
+}
+
+fn wide_integer_value(expression: &Expression) -> bool {
+    if explicit_integer_shape(expression).is_some_and(|(width, _)| width > 32) {
+        return true;
+    }
+    match expression {
+        Expression::Number(number) => SemanticAnalyzer::integer_literal_value(number)
+            .is_some_and(|v| i32::try_from(v).is_err()),
+        Expression::Conditional(conditional) => {
+            wide_integer_value(&conditional.then_expr) || wide_integer_value(&conditional.else_expr)
+        }
+        _ => false,
+    }
+}
+
+/// Retain explicit wide-literal sizing when a constant subtree collapses.
+/// Replacing `64'sd1 + 1` by an unsized `2` would narrow its parent's operation.
+fn folded_integer_expression(
+    value: i64,
+    expression: &Expression,
+    value_type: ValueType,
+) -> CompileResult<Expression> {
+    let shape = (value_type == ValueType::Integer)
+        .then(|| explicit_integer_shape(expression))
+        .flatten();
+    let Some((width, signed)) = shape.filter(|(width, _)| *width > 32) else {
+        return Ok(exact_integer_expression(value, expression.span()));
+    };
+    let bits = if width == 64 {
+        value as u64
+    } else {
+        (value as u64) & ((1_u64 << width) - 1)
+    };
+    let raw = format!("{width}'{}h{bits:x}", if signed { "s" } else { "" });
+    let value = parse_integer_literal(&raw)
+        .map_err(|message| {
+            CompileError::Semantic(SemanticError::new(
+                SemanticErrorKind::UnsupportedFeature(message),
+                expression.span(),
+            ))
+        })?
+        .expect("integer syntax");
+    Ok(Expression::Number(NumberLit {
+        value: value as f64,
+        raw: raw.into(),
+        span: expression.span(),
+    }))
+}
+
+fn explicit_integer_shape(expression: &Expression) -> Option<(u32, bool)> {
+    match expression {
+        Expression::Number(number) => {
+            let (width, digits) = number.raw.split_once('\'')?;
+            let width = width.replace('_', "").parse().ok()?;
+            Some((width, digits.starts_with(['s', 'S'])))
+        }
+        Expression::Unary(unary) if matches!(unary.op, UnaryOp::Neg | UnaryOp::Pos) => {
+            explicit_integer_shape(&unary.operand)
+        }
+        Expression::Binary(binary) => {
+            let left = explicit_integer_shape(&binary.left);
+            let right = explicit_integer_shape(&binary.right);
+            match (left, right) {
+                (Some((lw, ls)), Some((rw, rs))) => Some((lw.max(rw), ls && rs)),
+                (Some(shape), None) | (None, Some(shape)) => Some(shape),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
 /// Numeric value retained by compile-time evaluation.
 ///
 /// Verilog-AMS arithmetic is type-sensitive: notably, `1 / 2` is integer
@@ -804,6 +1039,9 @@ impl SemanticAnalyzer {
                 None
             };
             if is_parameter_array {
+                materialized_array_default = materialized_array_default
+                    .map(|expression| self.normalize_integer_expression(&expression))
+                    .transpose()?;
                 self.validate_parameter_array_declaration(
                     param,
                     materialized_array_default.as_ref(),
@@ -880,8 +1118,13 @@ impl SemanticAnalyzer {
             // the executable default must remain symbolic. Keeping those two
             // concerns separate lets a later array bound be checked through a
             // transitive chain without baking overridable values into code.
-            let declared_default_value = param
+            let normalized_default = param
                 .default
+                .as_ref()
+                .filter(|_| !is_parameter_array)
+                .map(|expression| self.normalize_integer_expression(expression))
+                .transpose()?;
+            let declared_default_value = normalized_default
                 .as_ref()
                 .and_then(|expression| self.eval_const_value(expression));
             let declared_default = declared_default_value
@@ -964,15 +1207,9 @@ impl SemanticAnalyzer {
                 }
             }
 
-            // Parse parameter range if present
-            let range = if is_parameter_array {
-                None
-            } else {
-                param
-                    .range
-                    .as_ref()
-                    .map(|r| self.parse_range(r, &param_names))
-            };
+            // Bounds may refer to later parameters. Resolve their operator
+            // types after all scalar parameter symbols have been installed.
+            let range = None;
 
             // Declared defaults can be placeholders outside the allowed range.
             // Validate the final instance after its overrides are installed.
@@ -1002,9 +1239,7 @@ impl SemanticAnalyzer {
                 default_expr: if is_parameter_array {
                     materialized_array_default
                 } else {
-                    param
-                        .default
-                        .clone()
+                    normalized_default
                         .map(|expression| {
                             self.coerce_assignment_expression(expression, value_type)
                                 .map(|(expression, _)| expression)
@@ -1024,6 +1259,36 @@ impl SemanticAnalyzer {
                     ..Default::default()
                 },
             })?;
+        }
+
+        for (parameter, analyzed_parameter) in
+            module.parameters.iter().zip(&mut analyzed.parameters)
+        {
+            if parameter.dimensions.is_empty()
+                && let Some(range) = &parameter.range
+            {
+                let mut range = range.clone();
+                for bound in &mut range.bounds {
+                    bound.lower = bound
+                        .lower
+                        .as_ref()
+                        .map(|e| self.normalize_integer_expression(e))
+                        .transpose()?;
+                    bound.upper = bound
+                        .upper
+                        .as_ref()
+                        .map(|e| self.normalize_integer_expression(e))
+                        .transpose()?;
+                }
+                for excluded in &mut range.exclude {
+                    *excluded = self.normalize_integer_expression(excluded)?;
+                }
+                let range = self.parse_range(&range, &param_names);
+                analyzed_parameter.range = Some(range.clone());
+                if let Some(symbol) = self.symbols.lookup_mut(&parameter.name) {
+                    symbol.attrs.range = Some(range);
+                }
+            }
         }
 
         // Phase 7b: Parameter aliases (aliasparam). The target must be a
@@ -1063,6 +1328,7 @@ impl SemanticAnalyzer {
         // Pre-pass for Phase 8: seed the constant environments with
         // localparam values so array bounds may reference them (their full
         // lowering to computed variables happens in Phase 9)
+        let mut localparam_defaults = Vec::with_capacity(module.localparams.len());
         for localparam in &module.localparams {
             if !localparam.dimensions.is_empty() {
                 return Err(CompileError::Semantic(SemanticError::new(
@@ -1073,7 +1339,12 @@ impl SemanticAnalyzer {
                     localparam.span,
                 )));
             }
-            if let Some(default) = &localparam.default {
+            let default = localparam
+                .default
+                .as_ref()
+                .map(|e| self.normalize_integer_expression(e))
+                .transpose()?;
+            if let Some(default) = &default {
                 if let Some(value) = self.eval_const_value(default).and_then(|value| {
                     Self::constant_for_declared_type(value, localparam.param_type)
                 }) {
@@ -1085,6 +1356,18 @@ impl SemanticAnalyzer {
                     self.invariant_consts.insert(localparam.name.clone(), value);
                 }
             }
+            localparam_defaults.push(default);
+            self.define_symbol(Symbol {
+                name: localparam.name.clone(),
+                kind: SymbolKind::Parameter,
+                value_type: match localparam.param_type {
+                    ParamType::Real => ValueType::Real,
+                    ParamType::Integer => ValueType::Integer,
+                    ParamType::String => ValueType::String,
+                },
+                span: localparam.span,
+                attrs: Default::default(),
+            })?;
         }
 
         // Phase 8: Analyze variables
@@ -1136,14 +1419,14 @@ impl SemanticAnalyzer {
         // Phase 9: Lower localparams to computed variables. Their values may
         // depend on parameters, so they are evaluated at runtime before any
         // analog-block assignment, in declaration order.
-        for localparam in &module.localparams {
+        for (localparam, default) in module.localparams.iter().zip(&localparam_defaults) {
             let value_type = match localparam.param_type {
                 ParamType::Real => ValueType::Real,
                 ParamType::Integer => ValueType::Integer,
                 ParamType::String => ValueType::String,
             };
 
-            let Some(default) = &localparam.default else {
+            let Some(default) = default else {
                 self.record_error_at(
                     SemanticErrorKind::MissingAttribute(format!(
                         "localparam '{}' requires a value",
@@ -1153,22 +1436,6 @@ impl SemanticAnalyzer {
                 );
                 continue;
             };
-
-            if let Some(value) = self
-                .eval_const_value(default)
-                .and_then(|value| Self::constant_for_declared_type(value, localparam.param_type))
-            {
-                self.param_consts.insert(localparam.name.clone(), value);
-            }
-            // A localparam derived purely from literals (and other
-            // invariant localparams) cannot vary per instance, so it may
-            // participate in loop unrolling and other code folding
-            if let Some(value) = self
-                .eval_const_invariant_value(default)
-                .and_then(|value| Self::constant_for_declared_type(value, localparam.param_type))
-            {
-                self.invariant_consts.insert(localparam.name.clone(), value);
-            }
 
             let var_index = analyzed.variables.len();
             analyzed.variables.push(AnalyzedVariable {
@@ -1181,14 +1448,6 @@ impl SemanticAnalyzer {
                 value_type,
                 is_state: false,
             });
-
-            self.define_symbol(Symbol {
-                name: localparam.name.clone(),
-                kind: SymbolKind::Parameter,
-                value_type,
-                span: localparam.span,
-                attrs: Default::default(),
-            })?;
 
             let expression =
                 self.lower_expression_with_side_effects(default, &mut analyzed, &mut statements)?;
@@ -4115,6 +4374,7 @@ impl SemanticAnalyzer {
         expression: Expression,
         target_type: ValueType,
     ) -> CompileResult<(Expression, ValueType)> {
+        let expression = self.normalize_integer_expression(&expression)?;
         let source_type = self.infer_type(&expression)?;
         if target_type == ValueType::Integer
             && matches!(source_type, ValueType::Real | ValueType::NatureAccess)
@@ -5066,40 +5326,50 @@ impl SemanticAnalyzer {
     /// Operator chains retain their authored association and left-to-right
     /// lowering order without reserving a semantic-analysis frame per operand.
     fn lower_operator_expression(&mut self, expr: &Expression) -> CompileResult<Expression> {
-        rewrite_operator_tree(expr, |node| match node {
-            OperatorRewrite::Leaf(expression) => self.lower_non_operator_expression(expression),
-            OperatorRewrite::Binary(binary) => {
-                if matches!(
-                    binary.op,
-                    BinaryOp::BitAnd
-                        | BinaryOp::BitOr
-                        | BinaryOp::BitXor
-                        | BinaryOp::Shl
-                        | BinaryOp::Shr
-                ) {
-                    Self::validate_integer_operator_operand(
-                        self.infer_type(&binary.left)?,
-                        "left operand of bitwise or shift operator",
-                        binary.left.span(),
-                    )?;
-                    Self::validate_integer_operator_operand(
-                        self.infer_type(&binary.right)?,
-                        "right operand of bitwise or shift operator",
-                        binary.right.span(),
-                    )?;
+        resolve_integer_operator_tree(expr, |expression| {
+            let expression = self.lower_non_operator_expression(expression)?;
+            let value_type = self.infer_type(&expression)?;
+            Ok((expression, value_type))
+        })
+    }
+
+    /// Parameter/default coercion does not perform executable lowering, but
+    /// still must retain arithmetic types in every nested scalar expression.
+    fn normalize_integer_expression(&self, expr: &Expression) -> CompileResult<Expression> {
+        if let Expression::ArrayLiteral(array) = expr {
+            let mut array = array.clone();
+            for element in &mut array.elements {
+                if let ArrayLiteralElement::Value(value) = element {
+                    *value = self.normalize_integer_expression(value)?;
                 }
-                Ok(Expression::Binary(binary))
             }
-            OperatorRewrite::Unary(unary) => {
-                if unary.op == UnaryOp::BitNot {
-                    Self::validate_integer_operator_operand(
-                        self.infer_type(&unary.operand)?,
-                        "operand of bitwise complement",
-                        unary.operand.span(),
-                    )?;
+            return Ok(Expression::ArrayLiteral(array));
+        }
+        resolve_integer_operator_tree(expr, |expression| {
+            let mut expression = expression.clone();
+            match &mut expression {
+                Expression::Conditional(c) => {
+                    *c.condition = self.normalize_integer_expression(&c.condition)?;
+                    *c.then_expr = self.normalize_integer_expression(&c.then_expr)?;
+                    *c.else_expr = self.normalize_integer_expression(&c.else_expr)?;
                 }
-                Ok(Expression::Unary(unary))
+                Expression::Call(c) => {
+                    for arg in &mut c.args {
+                        *arg = self.normalize_integer_expression(arg)?;
+                    }
+                }
+                Expression::SystemFunction(c) => {
+                    for arg in &mut c.args {
+                        *arg = self.normalize_integer_expression(arg)?;
+                    }
+                }
+                Expression::ArrayAccess(a) => {
+                    *a.index = self.normalize_integer_expression(&a.index)?
+                }
+                _ => {}
             }
+            let value_type = self.infer_type(&expression)?;
+            Ok((expression, value_type))
         })
     }
 
@@ -6663,6 +6933,12 @@ impl SemanticAnalyzer {
                     let right = types.pop().expect("right operand type was inferred");
                     let left: ValueType = types.pop().expect("left operand type was inferred");
                     match binary.op {
+                        BinaryOp::IntAdd
+                        | BinaryOp::IntSub
+                        | BinaryOp::IntMul
+                        | BinaryOp::IntDiv
+                        | BinaryOp::IntMod
+                        | BinaryOp::IntPow => ValueType::Integer,
                         BinaryOp::Eq
                         | BinaryOp::Ne
                         | BinaryOp::Lt
@@ -7075,6 +7351,19 @@ impl SemanticAnalyzer {
                 let l = eval(&b.left)?;
                 let r = eval(&b.right)?;
                 Some(match b.op {
+                    BinaryOp::IntAdd
+                    | BinaryOp::IntSub
+                    | BinaryOp::IntMul
+                    | BinaryOp::IntDiv
+                    | BinaryOp::IntMod
+                    | BinaryOp::IntPow => ConstantValue::Integer(
+                        crate::integer_runtime::integer_arithmetic(
+                            b.op.integer_arithmetic()?,
+                            l.as_f64(),
+                            r.as_f64(),
+                        )
+                        .ok()? as i64,
+                    ),
                     BinaryOp::Add => Self::constant_add(l, r)?,
                     BinaryOp::Sub => Self::constant_sub(l, r)?,
                     BinaryOp::Mul => Self::constant_mul(l, r)?,

@@ -523,7 +523,7 @@ fn differentiable(kind: &CfgValueKind) -> bool {
         CfgValueKind::LastCrossing { .. } => false,
         // Bitwise and shift results are piecewise constant on the reals, so
         // they get a comparison's answer for a comparison's reason.
-        CfgValueKind::IntegerBitwise { .. } | CfgValueKind::IntegerBitwiseNot { .. } => false,
+        CfgValueKind::IntegerArithmetic { .. } | CfgValueKind::IntegerBitwise { .. } | CfgValueKind::IntegerBitwiseNot { .. } => false,
         // `ddx` is a first-order readback. Differentiating through it would
         // mean carrying second derivatives everywhere a model reports a
         // transconductance, for a term no solver reads.

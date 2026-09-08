@@ -2,7 +2,7 @@
 #![allow(dead_code, non_snake_case, unused_imports, unused_mut, unused_parens, unused_variables)]
 
 use super::state::{CanonicalModelValues, Instance, PARAMETER_MODEL_FLAGS};
-use rspice_veriloga_runtime::{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, install_generated_stage_values, L2, L3, L4, L5, L6, L7, L8, evaluate_generated_above, evaluate_generated_cross, evaluate_generated_timer, rspice_eval_ddt, rspice_eval_idt, rspice_limexp, rspice_limited_exp, rspice_limited_exp_derivative};
+use rspice_veriloga_runtime::{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, install_generated_stage_values, L2, L3, L4, L5, L6, L7, L8, integer, evaluate_generated_above, evaluate_generated_cross, evaluate_generated_timer, rspice_eval_ddt, rspice_eval_idt, rspice_limexp, rspice_limited_exp, rspice_limited_exp_derivative};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 pub(super) const CANONICAL_MODEL_STAGE_SLOTS: [u32; 155] = [0, 434, 80, 435, 436, 437, 23, 130, 66, 438, 1, 2, 446, 701, 447, 3, 311, 449, 451, 455, 456, 20, 21, 22, 457, 458, 56, 24, 483, 55, 489, 57, 58, 492, 60, 63, 65, 67, 69, 71, 73, 74, 497, 502, 75, 76, 77, 299, 503, 504, 507, 505, 78, 511, 512, 513, 81, 514, 515, 517, 86, 520, 91, 527, 528, 103, 533, 104, 105, 537, 106, 107, 108, 112, 110, 122, 136, 556, 567, 568, 569, 570, 573, 574, 576, 577, 591, 230, 139, 599, 600, 601, 142, 158, 677, 251, 250, 679, 252, 680, 681, 308, 686, 352, 345, 702, 703, 712, 714, 365, 383, 384, 726, 728, 389, 397, 400, 734, 743, 735, 736, 738, 739, 737, 740, 741, 742, 746, 744, 745, 747, 748, 749, 750, 751, 752, 753, 754, 755, 756, 757, 758, 759, 760, 761, 762, 763, 766, 767, 768, 769, 770, 771, 772, 430];
@@ -16,6 +16,7 @@ pub(super) fn canonical_model_preprocess(
     staged: &[f64],
     temperature: f64,
     thermal_voltage: f64,
+    ctx: &GeneratedEvalContext<'_>,
 ) -> [f64; 155] {
 	let B=parameters[39];
 	let C=8.85418e-12f64;
@@ -493,7 +494,7 @@ pub(super) fn canonical_model_preprocess(
 	}
 	}
 	}
-	let HJ=-CV;
+	let HJ=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Sub, AC, CV));
 	let HL=HK== 3f64;
 	let HM=BY!= BH;
 	let HO=HN== AC;
@@ -642,6 +643,7 @@ pub(super) fn canonical_instance_preprocess(
     staged: &[f64],
     temperature: f64,
     thermal_voltage: f64,
+    ctx: &GeneratedEvalContext<'_>,
 ) -> [f64; 488] {
 	let A=parameters[39];
 	let B=staged[438]!=0.0;
@@ -1320,7 +1322,7 @@ pub(super) fn canonical_instance_preprocess(
 	}
 	let KT=BI> O;
 	if KT{
-	let KV=-KU;
+	let KV=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Sub, O, KU));
 	oKV=KV;
 	let KW=JV/ BI;
 	let KY=KW> KX;
@@ -1333,14 +1335,14 @@ pub(super) fn canonical_instance_preprocess(
 	};
 	oLE=LE;
 	}else{
-	let KZ=-KU;
+	let KZ=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Sub, O, KU));
 	oKZ=KZ;
 	let LA=(-JV)* BI;
 	oLA=LA;
 	}
 	if LB{
 	if KT{
-	let LG=-KU;
+	let LG=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Sub, O, KU));
 	oLG=LG;
 	let LI=LH* BI;
 	oLI=LI;
@@ -1348,7 +1350,7 @@ pub(super) fn canonical_instance_preprocess(
 	let LJ=BI< O;
 	oLJ=LJ;
 	if LJ{
-	let LK=-KU;
+	let LK=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Sub, O, KU));
 	oLK=LK;
 	let LL=(-1e20f64/ BI)> KX;
 	oLL=LL;
@@ -1529,7 +1531,7 @@ pub(super) fn canonical_instance_preprocess(
 	let PW=PR* (PB+ G);
 	let PX=PS+ (PV/ ((OZ+ OV)+ PW));
 	let PY=PT+ (PV/ ((PA+ OV)+ PW));
-	let PZ=PR+ AV;
+	let PZ=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, PR, AV));
 	PR=PZ;
 	PS=PX;
 	PT=PY;
@@ -1844,12 +1846,12 @@ pub(super) fn canonical_instance_preprocess(
 	VV
 	};
 	oVW=VW;
-	let VX=-KU;
+	let VX=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Sub, O, KU));
 	oVX=VX;
 	}else{
 	let VT=(-JV)* BI;
 	oVT=VT;
-	let VY=-KU;
+	let VY=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Sub, O, KU));
 	oVY=VY;
 	}
 	let VZ=MG.sqrt();
@@ -3602,7 +3604,9 @@ impl Instance {
             &self.canonical_staged[..],
             ctx.temperature(),
             ctx.thermal_voltage(),
+            ctx,
         );
+        if ctx.evaluation_failed() { return; }
         let values = canonical_model_cache_intern(key, Arc::new(produced));
         self.canonical_install_model_values(values);
     }
@@ -3618,7 +3622,9 @@ impl Instance {
             &self.canonical_staged[..],
             ctx.temperature(),
             ctx.thermal_voltage(),
+            ctx,
         );
+        if ctx.evaluation_failed() { return; }
         install_generated_stage_values(&mut self.canonical_staged[..], &produced, &CANONICAL_INSTANCE_STAGE_SLOTS);
         self.canonical_instance_valid = true;
     }
@@ -3675,7 +3681,9 @@ impl Instance {
     pub fn stamp(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedStamper<'_>) {
         if ctx.analog_tasks_enabled() { self.analog_effects.get_or_insert_with(Default::default).begin_evaluation(); }
         self.canonical_model_stage(ctx);
+        if ctx.evaluation_failed() { return; }
         self.canonical_instance_stage(ctx);
+        if ctx.evaluation_failed() { return; }
         self.canonical_temperature_stage(ctx);
         self.canonical_timestep_stage(ctx);
         let parameters = &self.params.values;
@@ -7965,7 +7973,7 @@ impl Instance {
 		}else{
 		let CPB=AJY/ ER;
 		let CPC=(AN+ (((CJE* COU)/ AJY)/ AJY)).sqrt();
-		let CPD=CPB* (-1f64+ CPC);
+		let CPD=CPB* (WP+ CPC);
 		let CPE=((((COV* CJE)/ AJY)/ AJY)* (EM/ (EL* CPC)))* CPB;
 		CPF=CPD;
 		CPG=CPE;

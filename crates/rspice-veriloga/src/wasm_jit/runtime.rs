@@ -186,6 +186,7 @@ pub(super) fn evaluate_helper_with_session(
         301..=305 => integer(integer_op(opcode - 301)?, operands[0], operands[1]),
         310..=314 => integer(integer_op(opcode - 310)?, operands[0], f64::from(aux0)),
         320..=324 => integer(integer_op(opcode - 320)?, operands[0], aux2 as f64),
+        330..=335 => integer(integer_op(opcode - 330 + 5)?, operands[0], operands[1]),
         // Noise source expressions contribute only to the separately emitted
         // noise PSD/exponent entries. Their large-signal value is exactly
         // zero in the bytecode, x64, and AArch64 runtimes.
@@ -603,6 +604,24 @@ fn integer_op(code: i32) -> Result<IntegerBinaryOp, HelperError> {
         2 => Ok(IntegerBinaryOp::BitAnd),
         3 => Ok(IntegerBinaryOp::BitOr),
         4 => Ok(IntegerBinaryOp::BitXor),
+        5 => Ok(IntegerBinaryOp::Arithmetic(
+            crate::integer_runtime::IntegerArithmeticOperation::Add,
+        )),
+        6 => Ok(IntegerBinaryOp::Arithmetic(
+            crate::integer_runtime::IntegerArithmeticOperation::Sub,
+        )),
+        7 => Ok(IntegerBinaryOp::Arithmetic(
+            crate::integer_runtime::IntegerArithmeticOperation::Mul,
+        )),
+        8 => Ok(IntegerBinaryOp::Arithmetic(
+            crate::integer_runtime::IntegerArithmeticOperation::Div,
+        )),
+        9 => Ok(IntegerBinaryOp::Arithmetic(
+            crate::integer_runtime::IntegerArithmeticOperation::Mod,
+        )),
+        10 => Ok(IntegerBinaryOp::Arithmetic(
+            crate::integer_runtime::IntegerArithmeticOperation::Pow,
+        )),
         _ => Err(HelperError::InvalidOpcode),
     }
 }

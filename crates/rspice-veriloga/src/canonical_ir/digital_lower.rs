@@ -2928,6 +2928,12 @@ impl ProcessLowerer<'_> {
                 UnaryOp::BitNot | UnaryOp::Pos | UnaryOp::Neg => self.self_signed(&unary.operand),
             },
             Expression::Binary(binary) => match binary.op {
+                BinaryOp::IntAdd
+                | BinaryOp::IntSub
+                | BinaryOp::IntMul
+                | BinaryOp::IntDiv
+                | BinaryOp::IntMod
+                | BinaryOp::IntPow => true,
                 BinaryOp::BitAnd
                 | BinaryOp::BitOr
                 | BinaryOp::BitXor
@@ -3023,6 +3029,12 @@ impl ProcessLowerer<'_> {
                 UnaryOp::BitNot | UnaryOp::Pos | UnaryOp::Neg => self.self_width(&unary.operand),
             },
             Expression::Binary(binary) => match binary.op {
+                BinaryOp::IntAdd
+                | BinaryOp::IntSub
+                | BinaryOp::IntMul
+                | BinaryOp::IntDiv
+                | BinaryOp::IntMod
+                | BinaryOp::IntPow => 32,
                 BinaryOp::BitAnd
                 | BinaryOp::BitOr
                 | BinaryOp::BitXor
@@ -3345,6 +3357,18 @@ impl ProcessLowerer<'_> {
             );
         }
         let kind = match binary.op {
+            BinaryOp::IntAdd
+            | BinaryOp::IntSub
+            | BinaryOp::IntMul
+            | BinaryOp::IntDiv
+            | BinaryOp::IntMod
+            | BinaryOp::IntPow => {
+                self.error(
+                    "an internal analog integer operator cannot appear in a digital process",
+                    binary.span,
+                );
+                return self.unknown(width);
+            }
             BinaryOp::BitAnd | BinaryOp::BitOr | BinaryOp::BitXor => {
                 let op = match binary.op {
                     BinaryOp::BitAnd => BitwiseOp::And,

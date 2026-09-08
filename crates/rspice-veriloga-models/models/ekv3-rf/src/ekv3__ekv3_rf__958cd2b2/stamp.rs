@@ -2,7 +2,7 @@
 #![allow(dead_code, non_snake_case, unused_imports, unused_mut, unused_parens, unused_variables)]
 
 use super::state::{CanonicalModelValues, Instance, PARAMETER_MODEL_FLAGS};
-use rspice_veriloga_runtime::{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, install_generated_stage_values, L2, L3, L4, L5, evaluate_generated_above, evaluate_generated_cross, evaluate_generated_timer, rspice_eval_ddt, rspice_eval_idt, rspice_limexp, rspice_limited_exp, rspice_limited_exp_derivative};
+use rspice_veriloga_runtime::{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, install_generated_stage_values, L2, L3, L4, L5, integer, evaluate_generated_above, evaluate_generated_cross, evaluate_generated_timer, rspice_eval_ddt, rspice_eval_idt, rspice_limexp, rspice_limited_exp, rspice_limited_exp_derivative};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 pub(super) const CANONICAL_MODEL_STAGE_SLOTS: [u32; 42] = [150, 4, 156, 60, 5, 84, 161, 174, 0, 1, 2, 3, 19, 160, 183, 157, 22, 23, 24, 25, 184, 54, 59, 62, 81, 82, 83, 194, 195, 119, 197, 120, 121, 196, 198, 122, 123, 158, 212, 167, 213, 214];
@@ -108,6 +108,7 @@ pub(super) fn canonical_instance_preprocess(
     staged: &[f64],
     temperature: f64,
     thermal_voltage: f64,
+    ctx: &GeneratedEvalContext<'_>,
 ) -> [f64; 72] {
 	let A=parameters[2];
 	let B=2f64;
@@ -160,8 +161,8 @@ pub(super) fn canonical_instance_preprocess(
 	let mut oHM=false;
 	let mut oHU=false;
 	let mut oIQ=0.0;
-	let C=(A/ B)* B;
-	let F=D* E;
+	let C=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Mul, (ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Div, A, B))), B));
+	let F=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Mul, D, E));
 	let H=(parameters[0]* G)+ parameters[15];
 	let I=((parameters[1]/ A)* G)+ parameters[16];
 	let P=if J{
@@ -217,7 +218,7 @@ pub(super) fn canonical_instance_preprocess(
 	let AW=AV* (AP* (AU+ (((AU* AU)+ AO).sqrt())));
 	let AX=(X/ parameters[61]).ln();
 	let AY=AV* (AP* (AX+ (((AX* AX)+ AO).sqrt())));
-	let AZ=parameters[62]* ((((A- N)* parameters[63])+ N).ln());
+	let AZ=parameters[62]* ((((ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Sub, A, N)))* parameters[63])+ N).ln());
 	let BA=parameters[36]* (N+ (parameters[118]/ X));
 	let BB=parameters[37]* (N+ (parameters[119]/ X));
 	let BC=parameters[64]* (N+ (parameters[115]/ X));
@@ -373,10 +374,10 @@ pub(super) fn canonical_instance_preprocess(
 	let FC=C== A;
 	oFC=FC;
 	let FK=if FC{
-	let FI=(FH* X)* (A+ B);
+	let FI=(FH* X)* (ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, A, B)));
 	FI
 	}else{
-	let FJ=(FH* X)* (A+ N);
+	let FJ=(FH* X)* (ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, A, N)));
 	FJ
 	};
 	FE=FK;
@@ -390,10 +391,10 @@ pub(super) fn canonical_instance_preprocess(
 	let FL=C== A;
 	oFL=FL;
 	let FS=if FL{
-	let FQ=B* ((FH* (A+ B))+ X);
+	let FQ=B* ((FH* (ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, A, B))))+ X);
 	FQ
 	}else{
-	let FR=((B* FH)* (A+ N))+ X;
+	let FR=((B* FH)* (ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, A, N))))+ X;
 	FR
 	};
 	FN=FS;
@@ -410,7 +411,7 @@ pub(super) fn canonical_instance_preprocess(
 	let FY=(FH* X)* A;
 	FY
 	}else{
-	let FZ=(FH* X)* (A+ N);
+	let FZ=(FH* X)* (ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, A, N)));
 	FZ
 	};
 	FV=GA;
@@ -427,7 +428,7 @@ pub(super) fn canonical_instance_preprocess(
 	let GE=(B* FH)* A;
 	GE
 	}else{
-	let GF=((B* FH)* (A+ N))+ X;
+	let GF=((B* FH)* (ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, A, N))))+ X;
 	GF
 	};
 	GD=GG;
@@ -920,7 +921,9 @@ impl Instance {
             &self.canonical_staged[..],
             ctx.temperature(),
             ctx.thermal_voltage(),
+            ctx,
         );
+        if ctx.evaluation_failed() { return; }
         install_generated_stage_values(&mut self.canonical_staged[..], &produced, &CANONICAL_INSTANCE_STAGE_SLOTS);
         self.canonical_instance_valid = true;
     }
@@ -974,6 +977,7 @@ impl Instance {
     pub fn stamp(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedStamper<'_>) {
         self.canonical_model_stage(ctx);
         self.canonical_instance_stage(ctx);
+        if ctx.evaluation_failed() { return; }
         self.canonical_temperature_stage(ctx);
         self.canonical_timestep_stage(ctx);
         let parameters = &self.params.values;

@@ -1034,6 +1034,15 @@ impl<S: CfgScalar> Evaluator<'_, S> {
             // operator discards, and discarding it is the answer: the result is
             // piecewise constant, so its derivative is zero, which is exactly
             // what the rule pass produces for it.
+            CfgValueKind::IntegerArithmetic { op, left, right } => {
+                let result = crate::integer_runtime::integer_arithmetic(
+                    op,
+                    self.read(left)?.real(),
+                    self.read(right)?.real(),
+                )
+                .map_err(integer_operand_error)?;
+                S::from_f64(result)
+            }
             CfgValueKind::IntegerBitwise { op, left, right } => {
                 let left = self.read(left)?.real();
                 let right = self.read(right)?.real();
@@ -1131,13 +1140,11 @@ fn integer_operand_error(error: crate::integer_runtime::IntegerRuntimeError) -> 
             IntegerRuntimeError::OperandOutOfRange { .. } => {
                 "outside the signed 32-bit integer range"
             }
-            // Unreachable through a bitwise or shift operator, which divides
-            // nothing and raises nothing. Named rather than left to a
-            // catch-all, so that widening the operator set has to answer for
-            // them.
-            IntegerRuntimeError::DivisionByZero
-            | IntegerRuntimeError::ModulusByZero
-            | IntegerRuntimeError::NegativeExponent { .. } => "not a valid integer operand",
+            IntegerRuntimeError::DivisionByZero => "integer division by zero",
+            IntegerRuntimeError::ModulusByZero => "integer modulus by zero",
+            IntegerRuntimeError::ZeroToNegativePower { .. } => {
+                "zero raised to a negative integer exponent"
+            }
         },
     }
 }

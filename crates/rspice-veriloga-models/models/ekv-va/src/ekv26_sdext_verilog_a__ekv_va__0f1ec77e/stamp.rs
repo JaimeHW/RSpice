@@ -2,7 +2,7 @@
 #![allow(dead_code, non_snake_case, unused_imports, unused_mut, unused_parens, unused_variables)]
 
 use super::state::{CanonicalModelValues, Instance, PARAMETER_MODEL_FLAGS};
-use rspice_veriloga_runtime::{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, install_generated_stage_values, L2, L3, L4, evaluate_generated_above, evaluate_generated_cross, evaluate_generated_timer, rspice_eval_ddt, rspice_eval_idt, rspice_limexp, rspice_limited_exp, rspice_limited_exp_derivative};
+use rspice_veriloga_runtime::{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, install_generated_stage_values, L2, L3, L4, integer, evaluate_generated_above, evaluate_generated_cross, evaluate_generated_timer, rspice_eval_ddt, rspice_eval_idt, rspice_limexp, rspice_limited_exp, rspice_limited_exp_derivative};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 pub(super) const CANONICAL_MODEL_STAGE_SLOTS: [u32; 29] = [2, 32, 20, 21, 48, 40, 13, 80, 39, 81, 82, 83, 0, 1, 84, 4, 85, 6, 86, 8, 87, 11, 88, 89, 46, 53, 54, 94, 78];
@@ -1216,7 +1216,7 @@ impl Instance {
 		let TY=(TU* BE)/ TX;
 		let TZ=(-TU)- ((TC* (((TW* IG)+ AA)- U))- TY);
 		let UA=(TV* AV)- (((((((BF* -0.5f64)* IG)+ (IH* TW))+ BI)- L4([0.0,D[0],0.0,D[1]]))* TC)- ((((TV* BE)+ (BF* TU))- ((BF+ TA)* TY))/ TX));
-		let UB=B* Q;
+		let UB=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Mul, B, Q));
 		let UC=UB* SG;
 		let UD=SH* UB;
 		let UE=ddt(0, TL);

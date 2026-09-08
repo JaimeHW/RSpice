@@ -522,6 +522,7 @@ fn kernel_region_metrics(
             }
             CfgValueKind::Unary { op, .. } => write!(out, "unary:{op:?}"),
             CfgValueKind::Binary { op, .. } => write!(out, "binary:{op:?}"),
+            CfgValueKind::IntegerArithmetic { op, .. } => write!(out, "integer-arithmetic:{op:?}"),
             CfgValueKind::IntegerBitwise { op, .. } => write!(out, "integer-bitwise:{op:?}"),
             CfgValueKind::IntegerBitwiseNot { .. } => write!(out, "integer-bitwise-not"),
             CfgValueKind::LaneSplat(value) => {
@@ -5608,7 +5609,9 @@ fn uses_checked_integers(function: &CfgFunction) -> bool {
     function.values.iter().any(|value| {
         matches!(
             value.kind,
-            CfgValueKind::IntegerBitwise { .. } | CfgValueKind::IntegerBitwiseNot { .. }
+            CfgValueKind::IntegerArithmetic { .. }
+                | CfgValueKind::IntegerBitwise { .. }
+                | CfgValueKind::IntegerBitwiseNot { .. }
         )
     })
 }

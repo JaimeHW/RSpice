@@ -2240,6 +2240,14 @@ impl<'a> CfgLowerer<'a> {
                 self.folded_constant(*left)?,
                 self.folded_constant(*right)?,
             )),
+            CfgValueKind::IntegerArithmetic { op, left, right } => {
+                crate::integer_runtime::integer_arithmetic(
+                    *op,
+                    self.folded_constant(*left)?,
+                    self.folded_constant(*right)?,
+                )
+                .ok()
+            }
             _ => None,
         }
     }
@@ -2517,6 +2525,15 @@ impl<'a> CfgLowerer<'a> {
         right: ExprId,
         span: SourceSpanRef,
     ) -> ValueId {
+        if let Some(op) = crate::ast::BinaryOp::integer_arithmetic_from_name(op.as_str()) {
+            let left = self.expr(left);
+            let right = self.expr(right);
+            return self.builder.push(
+                self.block,
+                CfgValueType::Real,
+                CfgValueKind::IntegerArithmetic { op, left, right },
+            );
+        }
         if let Some(op) = integer_bitwise_op(op.as_str()) {
             let left = self.expr(left);
             let right = self.expr(right);

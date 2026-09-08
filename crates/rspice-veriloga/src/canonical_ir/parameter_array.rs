@@ -582,6 +582,16 @@ impl<'expressions, 'budget> ConstantEvaluator<'expressions, 'budget> {
                 let left = self.evaluate_at_depth(left, next_depth)?;
                 let right = self.evaluate_at_depth(right, next_depth)?;
                 match op.as_str() {
+                    "IntAdd" | "IntSub" | "IntMul" | "IntDiv" | "IntMod" | "IntPow" => {
+                        crate::integer_runtime::integer_arithmetic(
+                            crate::ast::BinaryOp::integer_arithmetic_from_name(&op)
+                                .expect("integer operation"),
+                            left.as_f64(),
+                            right.as_f64(),
+                        )
+                        .map(|v| ConstantValue::Integer(v as i64))
+                        .map_err(|e| e.to_string())
+                    }
                     "Add" => constant_add(left, right),
                     "Sub" => constant_sub(left, right),
                     "Mul" => constant_mul(left, right),

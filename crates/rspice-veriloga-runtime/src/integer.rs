@@ -25,14 +25,13 @@ pub enum IntegerBinaryOperation {
     BitAnd,
     BitOr,
     BitXor,
+    Arithmetic(IntegerArithmeticOperation),
 }
 
 /// Ordinary signed-32-bit arithmetic operations.
 ///
-/// This is intentionally separate from [`IntegerBinaryOperation`]. Native and
-/// WASM helper ABIs assign compact numeric codes to that existing bitwise enum;
-/// adding arithmetic variants to it would silently reinterpret those codes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum IntegerArithmeticOperation {
     Add,
     Sub,
@@ -48,7 +47,7 @@ pub enum IntegerRuntimeError {
     OperandOutOfRange { value: f64 },
     DivisionByZero,
     ModulusByZero,
-    NegativeExponent { exponent: i32 },
+    ZeroToNegativePower { exponent: i32 },
 }
 
 impl fmt::Display for IntegerRuntimeError {
@@ -63,9 +62,9 @@ impl fmt::Display for IntegerRuntimeError {
             ),
             Self::DivisionByZero => write!(f, "signed 32-bit integer division by zero"),
             Self::ModulusByZero => write!(f, "signed 32-bit integer modulus by zero"),
-            Self::NegativeExponent { exponent } => write!(
+            Self::ZeroToNegativePower { exponent } => write!(
                 f,
-                "negative signed 32-bit integer exponent {exponent} is not supported"
+                "zero raised to negative signed 32-bit integer exponent {exponent}"
             ),
         }
     }
@@ -90,6 +89,9 @@ pub fn integer_binary(
     left: f64,
     right: f64,
 ) -> Result<f64, IntegerRuntimeError> {
+    if let IntegerBinaryOperation::Arithmetic(operation) = operation {
+        return integer_arithmetic(operation, left, right);
+    }
     let left = real_to_integer(left)?;
     let value = match operation {
         IntegerBinaryOperation::BitAnd => left & real_to_integer(right)?,
@@ -111,6 +113,7 @@ pub fn integer_binary(
                 ((left as u32) >> count) as i32
             }
         }
+        IntegerBinaryOperation::Arithmetic(_) => unreachable!("arithmetic dispatched above"),
     };
     Ok(f64::from(value))
 }
@@ -165,8 +168,17 @@ fn integer_mod(left: i32, right: i32) -> Result<i32, IntegerRuntimeError> {
 }
 
 fn integer_pow(base: i32, exponent: i32) -> Result<i32, IntegerRuntimeError> {
-    let mut exponent =
-        u32::try_from(exponent).map_err(|_| IntegerRuntimeError::NegativeExponent { exponent })?;
+    // IEEE 1364-2005, table 5-6: negative integral powers truncate the
+    // reciprocal toward zero, except for the exact unit bases.
+    if exponent < 0 {
+        return match base {
+            0 => Err(IntegerRuntimeError::ZeroToNegativePower { exponent }),
+            1 => Ok(1),
+            -1 => Ok(if exponent & 1 == 0 { 1 } else { -1 }),
+            _ => Ok(0),
+        };
+    }
+    let mut exponent = exponent as u32;
     let mut base = base;
     let mut result = 1_i32;
     while exponent != 0 {
@@ -423,12 +435,27 @@ mod tests {
     }
 
     #[test]
-    fn negative_integer_exponents_fail_closed() {
-        for exponent in [i32::MIN, -2, -1] {
+    fn negative_integer_exponents_follow_the_integer_reciprocal_rules() {
+        for exponent in [i32::MIN, -3, -2, -1] {
             assert_eq!(
-                integer_arithmetic(IntegerArithmeticOperation::Pow, 2.0, f64::from(exponent)),
-                Err(IntegerRuntimeError::NegativeExponent { exponent })
+                integer_arithmetic(IntegerArithmeticOperation::Pow, 0.0, f64::from(exponent)),
+                Err(IntegerRuntimeError::ZeroToNegativePower { exponent })
             );
+            for base in [i32::MIN, -2, -1, 1, 2, i32::MAX] {
+                let expected = match base {
+                    -1 if exponent & 1 != 0 => -1.0,
+                    -1 | 1 => 1.0,
+                    _ => 0.0,
+                };
+                assert_eq!(
+                    integer_arithmetic(
+                        IntegerArithmeticOperation::Pow,
+                        f64::from(base),
+                        f64::from(exponent)
+                    ),
+                    Ok(expected)
+                );
+            }
         }
     }
 
@@ -444,8 +471,8 @@ mod tests {
                 "signed 32-bit integer modulus by zero",
             ),
             (
-                IntegerRuntimeError::NegativeExponent { exponent: -3 },
-                "negative signed 32-bit integer exponent -3 is not supported",
+                IntegerRuntimeError::ZeroToNegativePower { exponent: -3 },
+                "zero raised to negative signed 32-bit integer exponent -3",
             ),
         ] {
             assert_eq!(error.to_string(), expected);
