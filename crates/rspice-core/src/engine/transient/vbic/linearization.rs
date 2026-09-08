@@ -50,7 +50,7 @@ impl Engine {
             }
 
             let current_vrth = internal[BJT_THERMAL_STATE_INDEX];
-            let max_step = (current_vrth - minimum_vrth + 10.0).max(1.0) * 0.5;
+            let max_step = bjt.thermal_rebalance_step_limit(current_vrth);
             let step = (-residual / derivative).clamp(-max_step, max_step);
             if step.abs() < 1e-12 {
                 break;

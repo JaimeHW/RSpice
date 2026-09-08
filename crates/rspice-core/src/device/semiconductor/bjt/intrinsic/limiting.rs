@@ -318,7 +318,7 @@ impl Bjt {
         }
         let startup = if self.initial_off {
             VbicNonlinearBranchVoltages::default()
-        } else if self.self_heating_enabled() {
+        } else if self.thermal_model_enabled() {
             return None;
         } else {
             let (_vt, vcrit) = self.vbic_limiting_parameters(0.0);
@@ -388,7 +388,7 @@ impl Bjt {
                 vt,
                 vcrit,
             ),
-            vrth: if self.self_heating_enabled() {
+            vrth: if self.thermal_model_enabled() {
                 Self::limit_logarithmic_step(raw_branches.vrth, previous_branches.vrth, 100.0)
                     .max(self.minimum_thermal_rise())
             } else {
@@ -602,7 +602,7 @@ impl Bjt {
             self.limit_legacy_internal_state_to_previous(raw, previous)
         };
 
-        if self.charge_model != BjtChargeModel::Vbic && self.self_heating_enabled() {
+        if self.charge_model != BjtChargeModel::Vbic && self.thermal_model_enabled() {
             limited[IDX_VRTH] =
                 Self::limit_logarithmic_step(raw[IDX_VRTH], previous[IDX_VRTH], 100.0)
                     .max(1.0 - self.requested_temperature());
@@ -711,7 +711,7 @@ impl Bjt {
                 vt,
                 vcrit,
             ),
-            vrth: if self.self_heating_enabled() {
+            vrth: if self.thermal_model_enabled() {
                 Self::limit_logarithmic_step(state_branches.vrth, reference_branches.vrth, 100.0)
                     .max(self.minimum_thermal_rise())
             } else {
@@ -854,7 +854,7 @@ impl Bjt {
                 raw_branches.vbcp,
                 limited_branches.vbcp,
             ),
-            if self.self_heating_enabled() {
+            if self.thermal_model_enabled() {
                 Self::vbic_branch_limit_scale(
                     previous_branches.vrth,
                     raw_branches.vrth,

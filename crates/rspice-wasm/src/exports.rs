@@ -226,6 +226,30 @@ mod wasm_tests {
     }
 
     #[wasm_bindgen_test]
+    fn vbic13_clipped_thermal_ac_port_in_wasm() {
+        // The thermal current differentiates both theta and R(T(theta)).
+        // An omitted CTH must contribute exactly zero imaginary admittance.
+        for level in [11, 12] {
+            let substrate = if level == 12 { " 0" } else { "" };
+            let netlist = rspice_core::Netlist::parse(&format!("* VBIC13 thermal AC\nVth th 0 DC 74 AC 1\nQ1 0 0 0{substrate} th vm SW_ET=0\n.model vm NPN(LEVEL={level} RTH=1000 TCRTH=0.005 TMAXCLIP=100 TNOM=27)\n.temp 27\n.end\n")).unwrap();
+            let points = rspice_core::Engine::default()
+                .run_ac_with_abort(&netlist, &[1e3], &rspice_core::abort_signal::NoAbort)
+                .unwrap();
+            let point = &points[0];
+            let index = point
+                .branch_names
+                .iter()
+                .position(|name| name.eq_ignore_ascii_case("Vth"))
+                .unwrap();
+            let tail = (-2.0_f64).exp();
+            let resistance = 1000.0 * (1.0 + 0.005 * (100.0 - tail - 27.0));
+            let expected = -(1.0 / resistance - 74.0 * 5.0 * tail / resistance.powi(2));
+            assert!((point.currents[index].re - expected).abs() < 1e-12);
+            assert_eq!(point.currents[index].im, 0.0);
+        }
+    }
+
+    #[wasm_bindgen_test]
     fn vbic_charge_pss_matches_analytic_rc_in_wasm() {
         for (polarity, level) in [("NPN", 4), ("PNP", 4), ("NPN", 11), ("PNP", 11)] {
             let netlist = rspice_core::Netlist::parse(&format!("* VBIC charge PSS\nV1 in 0 SIN(0 0.1 1meg)\nR1 in out 1k\nQ1 0 out 0 0 vm\n.model vm {polarity}(LEVEL={level} IS=1e-40 IBEI=0 IBCI=0 CBEO=159p RCX=0 RCI=0 RBX=0 RBI=0 RBP=0)\n.end\n")).unwrap();

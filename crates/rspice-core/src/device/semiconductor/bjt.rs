@@ -1041,6 +1041,11 @@ pub struct Bjt {
     avc2_nominal: Value,
     /// Nominal thermal resistance before multiplicity scaling.
     rth_nominal: Value,
+    /// VBIC 1.3 thermal-resistance temperature coefficient (1/K).
+    tcrth: Value,
+    /// VBIC 1.3 exponential temperature-limit parameters (Celsius).
+    tminclip: Value,
+    tmaxclip: Value,
     /// Nominal thermal capacitance before multiplicity scaling.
     cth_nominal: Value,
     /// Optional per-instance absolute temperature override (K)
@@ -1115,9 +1120,10 @@ pub struct Bjt {
     /// Solution-vector bias `update_vbic_mna` last limited: the four terminal
     /// voltages followed by all ten raw internal state values. Re-limiting
     /// the same candidate would advance the pnjlim history twice for one
-    /// Newton iterate, so the promoted update reuses its evaluation whenever
-    /// this matches exactly.
-    mna_limited_from: Option<[Value; EXTERNAL_DIM + BJT_INTERNAL_STATE_DIM]>,
+    /// Newton iterate, so the promoted update reuses its evaluation until
+    /// stamping consumes it. The next iterate may have identical voltages
+    /// while still needing to advance the limiter toward that candidate.
+    mna_limited_from: Cell<Option<[Value; EXTERNAL_DIM + BJT_INTERNAL_STATE_DIM]>>,
     /// Whether a promoted instance still owes vbicload.c's MODEINITJCT load.
     /// Set until the first limited evaluation, which is the only one with no
     /// previous iterate to limit against.
@@ -1747,7 +1753,7 @@ impl Bjt {
             self.clear_thermal_variant_cache();
             self.reduced_linearization_cache_valid.set(false);
             self.charge_snapshot_cache_valid.set(false);
-            self.mna_limited_from = None;
+            self.mna_limited_from.set(None);
         }
     }
 
@@ -1964,6 +1970,9 @@ impl Bjt {
             rbp_nominal: 0.1,
             avc2_nominal: 0.0,
             rth_nominal: 0.0,
+            tcrth: 0.0,
+            tminclip: -100.0,
+            tmaxclip: 500.0,
             cth_nominal: 0.0,
             instance_temp: None,
             instance_dtemp: 0.0,
@@ -2014,7 +2023,7 @@ impl Bjt {
             charge_snapshot_cache: Cell::new(BjtChargeSnapshot::default()),
             charge_snapshot_cache_valid: Cell::new(false),
             mna_eval: None,
-            mna_limited_from: None,
+            mna_limited_from: Cell::new(None),
             vbic_startup_load_pending: true,
             mna_delay_branches: [BjtCurrentBranch::default(); 3],
             mna_delay_thermal: BjtCurrentBranch::default(),
@@ -2135,13 +2144,40 @@ impl Bjt {
 
     #[inline]
     fn requested_temperature(&self) -> Value {
-        self.instance_temp
-            .unwrap_or(self.ambient_temperature + self.instance_dtemp)
-            .max(1.0)
+        let raw = self
+            .instance_temp
+            .unwrap_or(self.ambient_temperature + self.instance_dtemp);
+        // VBIC 1.3 clips only after adding the thermal-node rise. Clipping
+        // ambient first changes the model when an external node offsets it.
+        if self.vbic_13 { raw } else { raw.max(1.0) }
+    }
+
+    /// Effective model temperature and derivative with respect to the raw
+    /// temperature. This is CMC CLIPB1p0, not a hard clamp: both joins have
+    /// unit slope and the tails approach the authored limits exponentially.
+    #[inline]
+    fn mapped_temperature(&self, raw_kelvin: Value) -> (Value, Value) {
+        if !self.vbic_13 {
+            return (
+                raw_kelvin.max(1.0),
+                if raw_kelvin > 1.0 { 1.0 } else { 0.0 },
+            );
+        }
+        let celsius = raw_kelvin - 273.15;
+        if celsius < self.tminclip + 1.0 {
+            let tail = (celsius - self.tminclip - 1.0).exp();
+            (self.tminclip + tail + 273.15, tail)
+        } else if celsius > self.tmaxclip - 1.0 {
+            let tail = (self.tmaxclip - celsius - 1.0).exp();
+            (self.tmaxclip - tail + 273.15, tail)
+        } else {
+            // Preserve the incoming value in the identity region.
+            (raw_kelvin, 1.0)
+        }
     }
 
     #[inline]
-    fn self_heating_enabled(&self) -> bool {
+    fn thermal_model_enabled(&self) -> bool {
         // This is structural thermal participation, including an externally
         // prescribed temperature. SW_ET must not remove the thermal F/Q rows.
         self.charge_model == BjtChargeModel::Vbic
@@ -2152,18 +2188,33 @@ impl Bjt {
     }
 
     #[inline]
-    fn thermal_conductance(&self) -> Value {
-        if !self.self_heating_enabled() {
-            return 0.0;
+    fn thermal_conductance_at(&self, rise: Value) -> (Value, Value) {
+        if !self.thermal_model_enabled() {
+            return (0.0, 0.0);
         }
-        // Xyce vbic_1p3.va retains a 1 mK/W thermal resistance floor.
-        let minimum = if self.vbic_13 { 1e-3 } else { 1e-18 };
-        self.instance_scale() / self.rth_nominal.max(minimum)
+        if !self.vbic_13 {
+            return (self.instance_scale() / self.rth_nominal.max(1e-18), 0.0);
+        }
+        let (temperature, slope) = self.mapped_temperature(self.requested_temperature() + rise);
+        let factor = 1.0 + (temperature - self.tnom) * self.tcrth;
+        let resistance = self.rth_nominal * factor;
+        // The reference gives a constant 1 mK/W branch on this side of the
+        // floor; differentiating the unclamped resistance there is incorrect.
+        if resistance <= 1e-3 {
+            return (self.instance_scale() * 1e3, 0.0);
+        }
+        let conductance = self.instance_scale() / resistance;
+        let derivative = if slope == 0.0 {
+            0.0
+        } else {
+            -conductance * (self.tcrth / factor) * slope
+        };
+        (conductance, derivative)
     }
 
     #[inline]
     pub(crate) fn thermal_capacitance(&self) -> Value {
-        if !self.self_heating_enabled() {
+        if !self.thermal_model_enabled() {
             return 0.0;
         }
         self.cth_nominal.max(0.0) * self.instance_scale()

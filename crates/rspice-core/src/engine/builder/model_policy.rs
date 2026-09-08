@@ -667,6 +667,40 @@ pub(super) fn validate_bjt_model_level(
 
     validate_bjt_model_alias_groups(element_name, model, params, expr_params, string_params)?;
 
+    for name in ["TCRTH", "TMINCLIP", "TMAXCLIP"] {
+        let authored = params.contains_key(name)
+            || expr_params
+                .iter()
+                .chain(string_params.iter())
+                .any(|(key, _)| key.eq_ignore_ascii_case(name));
+        if !authored {
+            continue;
+        }
+        if !level.is_some_and(|value| value == 11.0 || value == 12.0) {
+            return Err(SimulationError::Circuit(format!(
+                "BJT '{element_name}': model '{model}' parameter {name} requires native VBIC 1.3 LEVEL=11 or LEVEL=12"
+            )));
+        }
+        let valid = params.get(name).is_some_and(|value| {
+            value.is_finite()
+                && match name {
+                    "TMINCLIP" => (-250.0..=27.0).contains(value),
+                    "TMAXCLIP" => (27.0..=1000.0).contains(value),
+                    _ => true,
+                }
+        });
+        if !valid {
+            return Err(SimulationError::Circuit(format!(
+                "BJT '{element_name}': model '{model}' parameter {name} must be a finite scalar{}",
+                match name {
+                    "TMINCLIP" => " in [-250, 27] Celsius",
+                    "TMAXCLIP" => " in [27, 1000] Celsius",
+                    _ => "",
+                }
+            )));
+        }
+    }
+
     let native_vbic_level = level.is_some_and(is_native_vbic_bjt_level);
     reject_unsupported_vbic13_params(
         element_name,

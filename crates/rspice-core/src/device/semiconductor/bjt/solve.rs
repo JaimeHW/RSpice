@@ -101,7 +101,7 @@ impl Bjt {
         let has_rbi = Self::series_active(self.rbi);
         let has_re = Self::series_active(self.re);
         let has_rs = self.has_substrate_resistance();
-        let has_self_heat = self.self_heating_enabled();
+        let has_self_heat = self.thermal_model_enabled();
         let reuse_previous_state = self.reduced_linearization_cache_valid.get();
         let solve_vbp = self.vbic_solves_vbp();
 
@@ -171,7 +171,7 @@ impl Bjt {
                 first_guess
             } else {
                 (vc * self.ic + vb * self.ib + ve * self.ie + vs * self.isub)
-                    / self.thermal_conductance().max(1e-18)
+                    / self.thermal_conductance_at(0.0).0.max(1e-18)
             }
         } else {
             0.0
@@ -319,7 +319,7 @@ impl Bjt {
         let has_rbi = Self::series_active(self.rbi);
         let has_re = Self::series_active(self.re);
         let has_rs = self.has_substrate_resistance();
-        let has_self_heat = self.self_heating_enabled();
+        let has_self_heat = self.thermal_model_enabled();
         let solve_vbp = self.vbic_solves_vbp();
 
         let eval = self.evaluate_state(
@@ -514,12 +514,12 @@ impl Bjt {
 
     pub(super) fn thermal_sink_branch(&self, vrth: Value) -> BranchLinearization {
         let mut branch = BranchLinearization::default();
-        let gth = self.thermal_conductance();
+        let (gth, d_gth) = self.thermal_conductance_at(vrth);
         if gth <= 0.0 {
             return branch;
         }
         branch.current = gth * vrth;
-        branch.d_internal[IDX_VRTH] = gth;
+        branch.d_internal[IDX_VRTH] = gth + vrth * d_gth;
         branch
     }
 
@@ -529,7 +529,7 @@ impl Bjt {
         external: [Value; EXTERNAL_DIM],
         internal: [Value; INTERNAL_DIM],
     ) -> BranchLinearization {
-        if !self.self_heating_enabled() || !self.vbic_heat_generation {
+        if !self.thermal_model_enabled() || !self.vbic_heat_generation {
             return BranchLinearization::default();
         }
 
@@ -660,7 +660,7 @@ impl Bjt {
         vs: Value,
         internal: [Value; INTERNAL_DIM],
     ) -> Value {
-        let gth = self.thermal_conductance();
+        let gth = self.thermal_conductance_at(internal[IDX_VRTH]).0;
         if gth <= 0.0 {
             return 0.0;
         }
@@ -687,9 +687,25 @@ impl Bjt {
             / gth
     }
 
+    /// Lower bound on the raw thermal node. VBIC 1.3 limits the mapped
+    /// temperature instead, so its raw node has no lower bound.
     #[inline]
     pub(crate) fn minimum_thermal_rise(&self) -> Value {
-        1.0 - self.requested_temperature()
+        if self.vbic_13 {
+            Value::NEG_INFINITY
+        } else {
+            1.0 - self.requested_temperature()
+        }
+    }
+
+    pub(crate) fn thermal_rebalance_step_limit(&self, rise: Value) -> Value {
+        let minimum = self.minimum_thermal_rise();
+        let distance = if minimum.is_finite() {
+            rise - minimum
+        } else {
+            rise.abs() + self.requested_temperature().abs()
+        };
+        (distance + 10.0).max(1.0) * 0.5
     }
 
     pub(crate) fn vbic_dynamic_thermal_residual_and_derivative(
