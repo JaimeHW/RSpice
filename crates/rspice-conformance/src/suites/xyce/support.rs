@@ -2399,6 +2399,7 @@ impl XyceTestRunner {
         lte_reference: Option<TransientLteReference>,
     ) -> bool {
         let rspice_core::netlist::SimulationOptions {
+            spice_dialect,
             fft_mode,
             fft_accurate,
             fft_output_metrics,
@@ -2496,7 +2497,8 @@ impl XyceTestRunner {
             restart,
             scale: _,
         } = options;
-        fft_mode.is_none()
+        spice_dialect.is_none()
+            && fft_mode.is_none()
             && fft_accurate.is_none()
             && fft_output_metrics.is_none()
             && reltol.is_none()
