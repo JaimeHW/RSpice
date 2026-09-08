@@ -1083,42 +1083,36 @@ impl Bjt {
             has_rb = true;
         }
         if !has_rb {
-            let rbx = params
-                .get("RBX")
-                .copied()
-                .filter(|v| v.is_finite() && *v > 0.0)
-                .unwrap_or(0.0);
-            let rbi = params
-                .get("RBI")
-                .copied()
-                .filter(|v| v.is_finite() && *v > 0.0)
-                .unwrap_or(0.0);
-            if rbx > 0.0 || rbi > 0.0 {
-                self.rbx = rbx;
-                self.rbi = rbi;
-                self.rbx_nominal = rbx;
-                self.rbi_nominal = rbi;
-                self.rb = (rbx + rbi).max(1e-12);
+            // Zero collapses this branch; omission retains its model-family
+            // default independently of the other half of the series path.
+            for (name, value, nominal) in [
+                ("RBX", &mut self.rbx, &mut self.rbx_nominal),
+                ("RBI", &mut self.rbi, &mut self.rbi_nominal),
+            ] {
+                if let Some(&resistance) = params.get(name)
+                    && resistance.is_finite()
+                    && resistance >= 0.0
+                {
+                    *value = resistance;
+                    *nominal = resistance;
+                }
             }
+            self.rb = self.rbx + self.rbi;
         }
         if !has_rc {
-            let rcx = params
-                .get("RCX")
-                .copied()
-                .filter(|v| v.is_finite() && *v > 0.0)
-                .unwrap_or(0.0);
-            let rci = params
-                .get("RCI")
-                .copied()
-                .filter(|v| v.is_finite() && *v > 0.0)
-                .unwrap_or(0.0);
-            if rcx > 0.0 || rci > 0.0 {
-                self.rcx = rcx;
-                self.rci = rci;
-                self.rcx_nominal = rcx;
-                self.rci_nominal = rci;
-                self.rc = (rcx + rci).max(1e-12);
+            for (name, value, nominal) in [
+                ("RCX", &mut self.rcx, &mut self.rcx_nominal),
+                ("RCI", &mut self.rci, &mut self.rci_nominal),
+            ] {
+                if let Some(&resistance) = params.get(name)
+                    && resistance.is_finite()
+                    && resistance >= 0.0
+                {
+                    *value = resistance;
+                    *nominal = resistance;
+                }
             }
+            self.rc = self.rcx + self.rci;
         }
         if let Some(&v) = params.get("VO")
             && v.is_finite()
@@ -1746,6 +1740,42 @@ mod tests {
         assert_eq!(
             inherited.nonlinear_branch_gmin().to_bits(),
             1.0e-10f64.to_bits()
+        );
+    }
+
+    #[test]
+    fn vbic_series_resistance_zero_and_omission_keep_distinct_topologies() {
+        let mut collapsed = vbic_model_with(&[
+            ("RBX", 0.0),
+            ("RBI", 0.0),
+            ("RCX", 0.0),
+            ("RCI", 0.0),
+            ("RBP", 0.0),
+        ]);
+        collapsed.set_temperature(350.0);
+        collapsed
+            .assign_vbic_internal_nodes(|name| panic!("zero resistance must not allocate {name}"));
+        assert_eq!(collapsed.node_bi, collapsed.node_base);
+        assert_eq!(collapsed.node_ci, collapsed.node_collector);
+        let explicit_outer = vbic_model_with(&[("RBX", 3.0), ("RCX", 4.0)]);
+        assert_eq!(
+            [
+                explicit_outer.rbx,
+                explicit_outer.rbi,
+                explicit_outer.rcx,
+                explicit_outer.rci
+            ],
+            [3.0, 0.1, 4.0, 0.1]
+        );
+        let explicit_inner = vbic_model_with(&[("RBI", 3.0), ("RCI", 4.0)]);
+        assert_eq!(
+            [
+                explicit_inner.rbx,
+                explicit_inner.rbi,
+                explicit_inner.rcx,
+                explicit_inner.rci
+            ],
+            [0.0, 3.0, 0.0, 4.0]
         );
     }
 

@@ -375,7 +375,7 @@ use state_advanced_mos::Bsim4CompanionStep;
 use state_commit::{AcceptedReactiveSnapshots, AcceptedReactiveStep, ReactiveBreakpointScheduling};
 use state_recovery::{ForceAcceptLimits, SourceActivityRecovery};
 use step_control::{SourceActivityDeltas, StepBiasFloors};
-use vbic::VbicSnapshotTolerances;
+pub(in crate::engine) use vbic::VbicSnapshotTolerances;
 
 mod breakpoints;
 mod checkpoint;
@@ -393,11 +393,11 @@ mod restart;
 mod startup;
 mod state;
 use crate::circuit::XspiceCompanionPolicy;
-use state::{TransientCompanionStamp, TransientDeviceHistories};
+use state::TransientDeviceHistories;
+pub(in crate::engine) use state::{ReactiveHistorySeed, TransientCompanionStamp};
 mod xyce_dae;
 use state::{
     AcceptedJunctionHistoryRestart, MosfetCompanionBranchTerms, MosfetGateCompanionCharges,
-    ReactiveHistorySeed,
 };
 mod state_advanced_mos;
 mod state_commit;
@@ -435,6 +435,7 @@ pub use fft::transient_fft_window_coherent_gain;
 
 mod history;
 use history::*;
+pub(in crate::engine) use history::{BjtTransientHistory, VbicCachedSnapshotReuse};
 
 #[derive(Debug, Clone, Copy)]
 struct DerivedTransientBranchCurrent {

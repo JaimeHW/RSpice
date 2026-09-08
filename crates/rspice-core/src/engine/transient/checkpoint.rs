@@ -15,7 +15,7 @@
 //!
 //! Scope, stated precisely: accepted linear-reactive histories and
 //! solution-dependent capacitor charge/linearization state; native diode and
-//! legacy Gummel-Poon BJT limiter/evaluation state; the engine-owned
+//! legacy Gummel-Poon and promoted VBIC limiter/evaluation state; the engine-owned
 //! accepted diode/BJT charge, derivative, predictor, lead-current, timestep,
 //! and optional charge-snapshot histories; ordinary lossless scalar
 //! transmission-line delay histories; generated Verilog-A `ddt`/`idt`
@@ -28,9 +28,8 @@
 //! native compact-model, thermal, stateful capacitor-expression, nonlinear
 //! magnetic, standalone multi-winding transformer, stateful behavioral/switch,
 //! runtime Verilog-A, or generated dynamic-charge histories that do not yet
-//! have a complete versioned contract. Native VBIC's device evaluation image
-//! is versioned, but restart remains blocked pending its complete solver-state
-//! contract. Distributed LTRA/TXL and coupled-line convolution runtimes also
+//! have a complete versioned contract. Sparse solver factors and scale state
+//! preserve exact promoted VBIC continuation. Distributed LTRA/TXL and coupled-line convolution runtimes also
 //! block restart until their complete state is versioned.
 //!
 //! The canonical checkpoint representation is a versioned, line-oriented
@@ -1176,7 +1175,9 @@ pub(crate) fn simulation_checkpoint_identity(config: &SimulationConfig) -> Strin
     // v21 retains the sparse solver's numerical factorization across resumes.
     // Earlier exact proposals omitted pivot, scaling and factor-reuse state;
     // promoted PNP VBIC charge stamps also lacked physical polarity conversion.
-    hasher.update(b"rspice-transient-resolved-config-v21\0");
+    // v22 corrects VBIC resistance topology, thermal-voltage constants and
+    // convergence-history advancement for an unchanged physical candidate.
+    hasher.update(b"rspice-transient-resolved-config-v22\0");
     hash_field(&mut hasher, "temperature", config.temperature.to_bits());
     hash_field(&mut hasher, "ramptime", config.ramptime.to_bits());
     hash_field(&mut hasher, "digital_delay_type", config.digital_delay_type);
@@ -5642,7 +5643,7 @@ impl TransientCheckpoint {
         state: CheckpointState<'_>,
         lte_estimator: Option<&LteEstimator>,
     ) -> Result<Self, String> {
-        Self::capture_with_diode_history(
+        Self::capture_with_junction_history(
             fingerprint,
             netlist_identity,
             config,
@@ -5652,16 +5653,16 @@ impl TransientCheckpoint {
         )
     }
 
-    /// A periodic traversal can supply its accepted diode charge at a new
+    /// A periodic traversal can supply its accepted junction charge at a new
     /// time origin. The caller normalizes history for the order-one restart;
     /// capture still validates its device identities and every numeric lane.
-    pub(crate) fn capture_with_diode_history(
+    pub(in crate::engine) fn capture_with_junction_history(
         fingerprint: u64,
         netlist_identity: Option<String>,
         config: &SimulationConfig,
         state: CheckpointState<'_>,
         lte_estimator: Option<&LteEstimator>,
-        diode_history: Option<&crate::numerics::integration::TwoTerminalChargeHistory>,
+        junction_history: Option<AcceptedJunctionTransientHistoryCheckpoint>,
     ) -> Result<Self, String> {
         let CheckpointState {
             time,
@@ -5677,18 +5678,9 @@ impl TransientCheckpoint {
         } else {
             None
         };
-        let accepted_junction_history = if let Some(diode_history) = diode_history {
-            if !circuit.bjts.is_empty() {
-                return Err(
-                    "diode-only checkpoint capture cannot omit accepted BJT state".to_string(),
-                );
-            }
-            Engine::capture_accepted_junction_transient_history_checkpoint(
-                circuit,
-                &BjtTransientHistory::default(),
-                diode_history,
-                &[],
-            )
+        let accepted_junction_history = if let Some(history) = junction_history {
+            Engine::validate_accepted_junction_transient_history_checkpoint(circuit, &history)?;
+            history
         } else if circuit.bjts.is_empty() && circuit.diodes.is_empty() {
             AcceptedJunctionTransientHistoryCheckpoint {
                 available: true,

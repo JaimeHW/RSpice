@@ -424,7 +424,9 @@ pub(crate) const fn periodic_capability_descriptor(
             dynamic_state: Complete,
             small_signal: Inapplicable,
             noise: Absent("periodic BJT noise sources need the exact periodic BJT residual"),
-            pss_state: Absent("BJT/VBIC charge and internal-state history"),
+            pss_state: Restricted(
+                "MNA-promoted VBIC electrical charge states without self-heating or excess-phase delay",
+            ),
             envelope: Absent(ENVELOPE_LINEAR_SUBSET),
         },
         F::Mosfet => PeriodicCapabilityDescriptor {
@@ -1210,63 +1212,86 @@ pub(in crate::engine) fn pss_state_gaps(circuit: &CircuitData) -> Vec<Capability
         match capability_support(family, Cap) {
             Inapplicable | Complete => {}
             Absent(missing) => gaps.push(CapabilityGap::new(family, missing)),
-            Restricted(_) => match family {
-                F::CoupledInductorPair => {
-                    if !circuit.has_positive_definite_mutual_inductance() {
-                        gaps.push(CapabilityGap::new(
+            Restricted(_) => {
+                match family {
+                    F::Bjt => {
+                        if circuit
+                            .bjts
+                            .devices
+                            .iter()
+                            .any(|bjt| !bjt.vbic_mna_promoted())
+                        {
+                            gaps.push(CapabilityGap::new(
+                                family,
+                                "legacy Gummel-Poon BJT intrinsic charge-state constraints",
+                            ));
+                        }
+                        if circuit
+                            .bjts
+                            .devices
+                            .iter()
+                            .any(|bjt| bjt.node_rth != 0 || bjt.node_xf1 != 0 || bjt.node_xf2 != 0)
+                        {
+                            gaps.push(CapabilityGap::new(family, "VBIC thermal and excess-phase shooting-state units and constraints"));
+                        }
+                    }
+                    F::CoupledInductorPair => {
+                        if !circuit.has_positive_definite_mutual_inductance() {
+                            gaps.push(CapabilityGap::new(
                             family,
                             "coupled-inductor flux constraints: the inductance matrix must be positive definite for the current shooting basis",
                         ));
+                        }
                     }
-                }
-                F::Resistor => {
-                    if circuit.resistors.thermal.iter().any(Option::is_some) {
-                        gaps.push(CapabilityGap::new(
-                            family,
-                            "thermal resistor accepted temperature state",
-                        ));
+                    F::Resistor => {
+                        if circuit.resistors.thermal.iter().any(Option::is_some) {
+                            gaps.push(CapabilityGap::new(
+                                family,
+                                "thermal resistor accepted temperature state",
+                            ));
+                        }
                     }
-                }
-                F::Capacitor => {
-                    if circuit.capacitors.has_solution_dependent_values() {
-                        gaps.push(CapabilityGap::new(
-                            family,
-                            "solution-dependent capacitor charge/expression history",
-                        ));
+                    F::Capacitor => {
+                        if circuit.capacitors.has_solution_dependent_values() {
+                            gaps.push(CapabilityGap::new(
+                                family,
+                                "solution-dependent capacitor charge/expression history",
+                            ));
+                        }
                     }
-                }
-                F::BehavioralSource => {
-                    let has_integral = circuit
-                        .behavioral_sources
-                        .voltage_sources
-                        .iter()
-                        .any(|source| source.program.sdt_count != 0)
-                        || circuit
+                    F::BehavioralSource => {
+                        let has_integral = circuit
                             .behavioral_sources
-                            .current_sources
+                            .voltage_sources
                             .iter()
-                            .any(|source| source.program.sdt_count != 0);
-                    if has_integral {
-                        gaps.push(CapabilityGap::new(
-                            family,
-                            "behavioral-source accepted-step memory",
-                        ));
+                            .any(|source| source.program.sdt_count != 0)
+                            || circuit
+                                .behavioral_sources
+                                .current_sources
+                                .iter()
+                                .any(|source| source.program.sdt_count != 0);
+                        if has_integral {
+                            gaps.push(CapabilityGap::new(
+                                family,
+                                "behavioral-source accepted-step memory",
+                            ));
+                        }
                     }
-                }
-                F::TransmissionLine => {
-                    if circuit
-                        .tlines
-                        .iter()
-                        .any(|line| !line.is_memoryless_two_port())
-                    {
-                        gaps.push(CapabilityGap::new(
-                            family,
-                            "transmission-line delay history",
-                        ));
+                    F::TransmissionLine => {
+                        if circuit
+                            .tlines
+                            .iter()
+                            .any(|line| !line.is_memoryless_two_port())
+                        {
+                            gaps.push(CapabilityGap::new(
+                                family,
+                                "transmission-line delay history",
+                            ));
+                        }
                     }
+                    _ => {}
                 }
-                _ => {}
-            },
+            }
         }
     }
 
@@ -1531,7 +1556,7 @@ mod tests {
             F::VoltageSource | F::CurrentSource => [I, I, C, I, C, C],
             F::Vcvs | F::Vccs | F::Cccs | F::Ccvs => [I, I, C, I, C, A],
             F::Diode => [R, C, C, R, C, A],
-            F::Bjt => [A, C, I, A, A, A],
+            F::Bjt => [A, C, I, A, R, A],
             F::Mosfet => [R, C, C, R, A, A],
             F::Bsim3v3 | F::Bsim4v8 => [A, R, I, A, A, A],
             F::B3SoiDd | F::B3SoiFd | F::B3SoiPd => [A, C, I, A, A, A],
@@ -1571,6 +1596,23 @@ mod tests {
                      a device may not gain or lose advanced-analysis support silently"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn vbic_shooting_admission_keeps_unqualified_state_families_gated() {
+        for (model, supported) in [
+            ("NPN LEVEL=4", true),
+            ("PNP LEVEL=4", true),
+            ("NPN", false),
+            ("NPN LEVEL=4 TD=1n", false),
+            ("NPN LEVEL=4 SELFT=1 RTH=100 CTH=1n", false),
+        ] {
+            let netlist = crate::Netlist::parse(&format!("BJT periodic admission\nV1 c 0 1\nV2 b 0 0.7\nQ1 c b 0 vm\n.model vm {model}\n.end\n")).unwrap();
+            let circuit = crate::engine::Engine::default()
+                .build_circuit(&netlist)
+                .unwrap();
+            assert_eq!(pss_state_gaps(&circuit).is_empty(), supported, "{model}");
         }
     }
 

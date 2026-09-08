@@ -15,6 +15,105 @@ const R: f64 = 1.0e3;
 const C: f64 = 159.154943091895e-12; // RC corner ~ 1 MHz (w*RC = 1)
 
 #[test]
+fn nonlinear_vbic_charge_pss_matches_settled_ngspice46() {
+    use rspice_core::engine::SpiceDialect;
+    // Live ngspice 46, 2026-09-08, the NPN LEVEL=4 deck below with
+    // RELTOL=1e-7 VNTOL=1e-9 ABSTOL=1e-15 and .tran 0.2n 21u 19u 0.2n.
+    // Collector voltage interpolated every 1/16 period in the settled 20–21 us
+    // cycle. Xyce 7.10 LEVEL=12 agrees within 0.6 uV on the same mesh;
+    // LEVEL=11 is a different three-terminal substrate topology.
+    // Includes all seven intrinsic electrical nodes, nonlinear forward
+    // and reverse diffusion, split depletion charge, epi and substrate charge.
+    let reference = [
+        1.3981978158,
+        1.2433328436,
+        1.0637934817,
+        0.8830475405,
+        0.7315884376,
+        0.6402557219,
+        0.6336042015,
+        0.7244707505,
+        0.9056791472,
+        1.1402121144,
+        1.3656502858,
+        1.5258380514,
+        1.6057943323,
+        1.6220745688,
+        1.5901940628,
+        1.5152586291,
+        1.3981978556,
+    ];
+    for (dialect, level) in [(SpiceDialect::Ngspice, 4), (SpiceDialect::Xyce, 12)] {
+        for (polarity, sign) in [("NPN", 1.0), ("PNP", -1.0)] {
+            let netlist = Netlist::parse(&format!("VBIC PSS electrical oracle\nVcc supply 0 {}\nVb drive 0 SIN({} {} 1meg)\nRc supply c 1k\nRb drive b 100\nQ1 c b 0 0 vm\n.model vm {polarity}(LEVEL={level} IS=1e-14 IBEI=1e-16 IBCI=1e-16 RCX=10 RCI=20 RBX=10 RBI=40 RE=1 RBP=10 RS=1 CJE=10p CJC=5p CJEP=3p CJCP=2p TF=10n TR=2n QCO=10f GAMM=1e-9 ISP=1e-16 WBE=0.8)\n.options RELTOL=1e-6 VNTOL=1e-8 ABSTOL=1e-14\n.temp 27\n.end\n", 2.0*sign, 0.65*sign, 0.02*sign)).unwrap();
+            let engine = Engine::new(SimulationConfig::default().with_spice_dialect(dialect));
+            let point = engine
+                .run_pss_operating_point_with_abort(
+                    &netlist,
+                    PssConfig::new(F0)
+                        .with_points_per_period(256)
+                        .with_tstab_periods(4)
+                        .with_tolerance(1e-7),
+                    &NoAbort,
+                )
+                .unwrap_or_else(|error| panic!("{dialect:?} {polarity}: {error}"));
+            assert!(
+                point.shooting_state().len() >= 4,
+                "internal charge states must participate in shooting"
+            );
+            let result = &point.analysis().result;
+            let output = result
+                .node_names
+                .iter()
+                .position(|name| name.eq_ignore_ascii_case("c"))
+                .unwrap()
+                + 1;
+            let error = reference
+                .iter()
+                .enumerate()
+                .map(|(index, &voltage)| {
+                    (sign * result.voltage_at(output, index as f64 / 16.0 / F0) - voltage).abs()
+                })
+                .fold(0.0_f64, f64::max);
+            assert!(
+                error < 2e-4,
+                "{dialect:?} {polarity}: maximum ngspice waveform error {error:e} V"
+            );
+        }
+    }
+}
+
+#[test]
+fn prescribed_vbic_voltages_have_no_free_charge_modes() {
+    for (polarity, sign) in [("NPN", 1.0), ("PNP", -1.0)] {
+        let netlist = Netlist::parse(&format!("prescribed VBIC charges\nVc c 0 {sign}\nVb b 0 SIN({} {} 1meg)\nQ1 c b 0 vm\n.model vm {polarity}(LEVEL=4 IS=1e-14 CJE=100p CJC=20p TF=1n RCX=0 RCI=0 RBX=0 RBI=0 RE=0 RBP=0)\n.end\n", sign * 0.65, sign * 0.02)).unwrap();
+        let point = Engine::default()
+            .run_pss_operating_point_with_abort(
+                &netlist,
+                PssConfig::new(F0)
+                    .with_points_per_period(64)
+                    .with_tstab_periods(0),
+                &NoAbort,
+            )
+            .unwrap();
+        assert!(point.shooting_state().is_empty());
+        assert!(point.analysis().monodromy.is_empty());
+        let result = &point.analysis().result;
+        let base = result
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("b"))
+            .unwrap();
+        for (&time, &voltage) in result.time.iter().zip(&result.waveforms[base].values) {
+            assert!(
+                (voltage - sign * (0.65 + 0.02 * (std::f64::consts::TAU * F0 * time).sin())).abs()
+                    < 1e-10
+            );
+        }
+    }
+}
+
+#[test]
 fn discontinuous_drive_preserves_the_complete_rlc_orbit() {
     // Independent two-state solution of C*v'=(u-v)/R1-i and L*i'=v-R2*i.
     // Each half-cycle has constant forcing, so its exact state transition is

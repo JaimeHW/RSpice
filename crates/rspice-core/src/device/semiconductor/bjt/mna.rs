@@ -36,6 +36,43 @@ pub(crate) struct VbicNoiseOperatingModel {
 }
 
 impl Bjt {
+    /// Matrix-node incidence of each structurally present electrical VBIC charge.
+    /// Constant offsets in charge do not create a shooting coordinate, and
+    /// collapsed/disabled states retain no independent voltage difference.
+    pub(crate) fn vbic_electrical_charge_storage_nodes(
+        &self,
+    ) -> [Option<(NodeId, NodeId)>; BJT_DYNAMIC_CHARGE_COUNT - 3] {
+        if !self.vbic_mna_promoted() {
+            return [None; BJT_DYNAMIC_CHARGE_COUNT - 3];
+        }
+        let active = [
+            (self.cje_nominal > 0.0 && self.wbe != 0.0)
+                || (self.tf != 0.0 && self.is_nominal > 0.0),
+            self.cje_nominal > 0.0 && self.wbe != 1.0,
+            self.cjc_nominal > 0.0
+                || (self.tr != 0.0 && self.is_nominal > 0.0 && self.isrr_nominal > 0.0)
+                || (self.qco_nominal > 0.0 && self.gamm_nominal > 0.0),
+            self.qco_nominal > 0.0 && self.gamm_nominal > 0.0,
+            self.cjep_nominal > 0.0 || (self.tr != 0.0 && self.isp_nominal > 0.0),
+            self.cbeo_nominal > 0.0,
+            self.cbco_nominal > 0.0,
+            self.cjcp_nominal > 0.0 || self.ccso_nominal > 0.0,
+        ];
+        let nodes = [
+            (self.node_bi, self.node_ei),
+            (self.node_bx, self.node_ei),
+            (self.node_bi, self.node_ci),
+            (self.node_bi, self.node_cx),
+            (self.node_bx, self.node_bp),
+            (self.node_base, self.node_emitter),
+            (self.node_base, self.node_collector),
+            (self.node_si, self.node_bp),
+        ];
+        std::array::from_fn(|index| {
+            (active[index] && nodes[index].0 != nodes[index].1).then_some(nodes[index])
+        })
+    }
+
     pub(super) fn capture_promoted_vbic_checkpoint(
         &self,
     ) -> Result<AcceptedBjtNonlinearCheckpoint, String> {
@@ -624,25 +661,17 @@ impl Bjt {
         // guard and needs its own.
         let candidate = self.vbic_mna_solution_bias(voltages);
         if apply_limiting && self.mna_eval.is_some() && self.mna_limited_from == Some(candidate) {
+            // A solved voltage constraint can change only its reaction
+            // current on the next Newton iteration. Once limiting is inactive,
+            // compare the repeated evaluation against itself so the old voltage
+            // delta cannot keep this exact candidate permanently unconverged.
+            if self.vbic_mna_internal_state() == candidate[EXTERNAL_DIM..] {
+                self.remember_vbic_iteration();
+            }
             return;
         }
         self.mna_limited_from = apply_limiting.then_some(candidate);
-
-        self.vbe_prev = self.vbe;
-        self.vbc_prev = self.vbc;
-        self.vcx_prev = self.vcx;
-        self.vbi_prev = self.vbi;
-        self.vci_prev = self.vci;
-        self.vbx_prev = self.vbx;
-        self.vei_prev = self.vei;
-        self.vbp_prev = self.vbp;
-        self.vsi_prev = self.vsi;
-        self.vrth_prev = self.vrth;
-        self.ic_prev = self.ic;
-        self.ib_prev = self.ib;
-        self.ie_prev = self.ie;
-        self.isub_prev = self.isub;
-        self.intrinsic_linearization_prev = self.intrinsic_linearization;
+        self.remember_vbic_iteration();
 
         let [vc, vb, ve, vs] = [candidate[0], candidate[1], candidate[2], candidate[3]];
         let mut raw = [0.0; INTERNAL_DIM];
@@ -714,6 +743,24 @@ impl Bjt {
     /// branch system once at the limited bias.
     pub(super) fn update_vbic_mna(&mut self, voltages: &[Value]) {
         self.update_vbic_mna_from_solution(voltages, true);
+    }
+
+    fn remember_vbic_iteration(&mut self) {
+        self.vbe_prev = self.vbe;
+        self.vbc_prev = self.vbc;
+        self.vcx_prev = self.vcx;
+        self.vbi_prev = self.vbi;
+        self.vci_prev = self.vci;
+        self.vbx_prev = self.vbx;
+        self.vei_prev = self.vei;
+        self.vbp_prev = self.vbp;
+        self.vsi_prev = self.vsi;
+        self.vrth_prev = self.vrth;
+        self.ic_prev = self.ic;
+        self.ib_prev = self.ib;
+        self.ie_prev = self.ie;
+        self.isub_prev = self.isub;
+        self.intrinsic_linearization_prev = self.intrinsic_linearization;
     }
 
     /// Re-linearize directly at a static residual/validation candidate.

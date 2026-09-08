@@ -7,6 +7,24 @@ import rspice
 F0 = 1.0e6
 
 
+@pytest.mark.parametrize("polarity", ["NPN", "PNP"])
+def test_vbic_charge_pss_matches_analytic_rc(polarity):
+    deck = rspice.Netlist.parse_spice(
+        f"""* VBIC charge PSS
+V1 in 0 SIN(0 0.1 1meg)
+R1 in out 1k
+Q1 0 out 0 vm
+.model vm {polarity}(LEVEL=4 IS=1e-40 IBEI=0 IBCI=0 CBEO=159p RCX=0 RCI=0 RBX=0 RBI=0 RBP=0)
+.end
+"""
+    )
+    result = rspice.Engine().run_pss(deck, F0, points_per_period=64, tstab_periods=0)
+    phase = 2 * np.pi * F0 * result.time
+    wc = 2 * np.pi * F0 * 1e3 * 159e-12
+    expected = 0.1 * (np.sin(phase) - wc * np.cos(phase)) / (1 + wc * wc)
+    np.testing.assert_allclose(result.voltage_waveform("out"), expected, rtol=0, atol=5e-5)
+
+
 def test_discontinuous_rlc_orbit_matches_the_two_state_solution():
     deck = rspice.Netlist.parse_spice(
         """Discontinuous RLC orbit

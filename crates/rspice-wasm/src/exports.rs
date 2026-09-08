@@ -209,6 +209,37 @@ mod wasm_tests {
     use crate::js_interop::{js_array_property, js_property};
 
     #[wasm_bindgen_test]
+    fn vbic_charge_pss_matches_analytic_rc_in_wasm() {
+        for polarity in ["NPN", "PNP"] {
+            let netlist = rspice_core::Netlist::parse(&format!("* VBIC charge PSS\nV1 in 0 SIN(0 0.1 1meg)\nR1 in out 1k\nQ1 0 out 0 vm\n.model vm {polarity}(LEVEL=4 IS=1e-40 IBEI=0 IBCI=0 CBEO=159p RCX=0 RCI=0 RBX=0 RBI=0 RBP=0)\n.end\n")).unwrap();
+            let analysis = rspice_core::Engine::default()
+                .run_pss_with_abort(
+                    &netlist,
+                    rspice_core::analysis::PssConfig::new(1e6)
+                        .with_points_per_period(64)
+                        .with_tstab_periods(0),
+                    &rspice_core::abort_signal::NoAbort,
+                )
+                .unwrap();
+            let result = &analysis.result;
+            let output = result
+                .node_names
+                .iter()
+                .position(|name| name.eq_ignore_ascii_case("out"))
+                .unwrap();
+            let wc = std::f64::consts::TAU * 1e6 * 1e3 * 159e-12;
+            for (&time, &value) in result.time.iter().zip(&result.waveforms[output].values) {
+                let phase = std::f64::consts::TAU * 1e6 * time;
+                let expected = 0.1 * (phase.sin() - wc * phase.cos()) / (1.0 + wc * wc);
+                assert!(
+                    (value - expected).abs() < 5e-5,
+                    "{polarity}: t={time:e}, {value} != {expected}"
+                );
+            }
+        }
+    }
+
+    #[wasm_bindgen_test]
     fn promoted_vbic_checkpoint_continues_exactly_in_wasm() {
         use rspice_core::engine::{
             TransientCheckpoint, TransientCheckpointEncoding, TransientStartupMode,

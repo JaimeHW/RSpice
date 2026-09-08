@@ -126,7 +126,7 @@ pub(super) struct JfetTransientHistory {
 pub(super) use crate::numerics::integration::TwoTerminalChargeHistory as DiodeTransientHistory;
 
 #[derive(Debug, Clone, Default, PartialEq)]
-pub(super) struct BjtTransientHistory {
+pub(in crate::engine) struct BjtTransientHistory {
     pub(super) vbe_prev: Vec<Value>,
     pub(super) vbe_prev_prev: Vec<Value>,
     pub(super) ibe_prev: Vec<Value>,
@@ -176,7 +176,7 @@ pub(super) const DIODE_TRANSIENT_HISTORY_RUNTIME_TAG: &str = "native-diode-trans
 /// checkpoint wire code can serialize one row at a time without transposing
 /// or duplicating the in-memory payload here.
 #[derive(Debug, Clone, Default, PartialEq)]
-pub(super) struct AcceptedJunctionTransientHistoryCheckpoint {
+pub(in crate::engine) struct AcceptedJunctionTransientHistoryCheckpoint {
     pub(super) available: bool,
     pub(super) resume_blockers: Vec<String>,
     pub(super) bjt_names: Vec<String>,
@@ -241,7 +241,7 @@ pub(super) struct VbicPredictorLinearBranchState {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum VbicCachedSnapshotReuse {
+pub(in crate::engine) enum VbicCachedSnapshotReuse {
     SeedOnly,
     NewtonBypass,
 }
@@ -288,7 +288,7 @@ impl Engine {
     /// Capture the accepted engine-owned junction histories without mutating
     /// either the circuit or the runtime histories. A valid non-breakpoint
     /// capture preserves the optional per-BJT snapshot cache exactly.
-    pub(super) fn capture_accepted_junction_transient_history_checkpoint(
+    pub(in crate::engine) fn capture_accepted_junction_transient_history_checkpoint(
         circuit: &crate::circuit::CircuitData,
         bjt_history: &BjtTransientHistory,
         diode_history: &DiodeTransientHistory,
@@ -602,7 +602,7 @@ impl Engine {
     /// order-one integration epoch. The authoritative current accepted state
     /// remains exact; older generations/derivatives are flattened and the
     /// trial snapshot cache is deliberately invalidated.
-    pub(super) fn normalize_accepted_junction_transient_history_checkpoint_for_order_one(
+    pub(in crate::engine) fn normalize_accepted_junction_transient_history_checkpoint_for_order_one(
         circuit: &crate::circuit::CircuitData,
         checkpoint: &AcceptedJunctionTransientHistoryCheckpoint,
         accepted_dt_seed: Value,

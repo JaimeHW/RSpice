@@ -10,6 +10,12 @@ use current::PssCurrentBasis;
 enum VoltageBranch {
     Capacitor(usize),
     Diode(usize),
+    Bjt {
+        device: usize,
+        charge: usize,
+        pos: usize,
+        neg: usize,
+    },
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -27,7 +33,7 @@ struct ForestEdge {
     sign: Value,
 }
 
-/// A spanning forest removes redundant capacitor/diode voltage coordinates.
+/// A spanning forest removes redundant electrical charge-voltage coordinates.
 /// Independent voltage sources enter the forest first: their prescribed
 /// voltages are constraints, never shooting unknowns. The remaining branch
 /// voltages follow from this forest, including opposite terminal orientations
@@ -108,6 +114,24 @@ impl PssStateBasis {
                 voltage_branches.push(VoltageBranch::Diode(index));
             }
         }
+        for (device, bjt) in circuit.bjts.devices.iter().enumerate() {
+            for (charge, nodes) in bjt
+                .vbic_electrical_charge_storage_nodes()
+                .into_iter()
+                .enumerate()
+            {
+                if let Some((pos, neg)) = nodes
+                    && add(pos, neg, ForestValue::State(voltage_branches.len()))
+                {
+                    voltage_branches.push(VoltageBranch::Bjt {
+                        device,
+                        charge,
+                        pos,
+                        neg,
+                    });
+                }
+            }
+        }
         let mut visited = vec![false; node_count];
         let mut forest = Vec::new();
         let mut pending = Vec::new();
@@ -145,6 +169,11 @@ impl PssStateBasis {
             .map(|branch| match *branch {
                 VoltageBranch::Capacitor(index) => format!("C:{}", circuit.capacitors.names[index]),
                 VoltageBranch::Diode(index) => format!("D:{}", circuit.diodes.devices[index].name),
+                VoltageBranch::Bjt { device, charge, .. } => {
+                    const NAMES: [&str; 8] =
+                        ["qbe", "qbex", "qbc", "qbcx", "qbep", "qbeo", "qbco", "qbcp"];
+                    format!("Q:{}:{}", circuit.bjts.devices[device].name, NAMES[charge])
+                }
             })
             .chain(
                 self.currents
@@ -165,6 +194,7 @@ impl PssStateBasis {
                 let diode = &circuit.diodes.devices[index];
                 (diode.node_anode, diode.node_cathode)
             }
+            VoltageBranch::Bjt { pos, neg, .. } => (pos, neg),
         }
     }
 }
@@ -176,6 +206,8 @@ impl PssStateBasis {
 pub(in crate::engine) struct PssCircuit {
     pub(super) circuit: CircuitData,
     pub(super) diode_history: TwoTerminalChargeHistory,
+    pub(super) bjt_history: super::super::transient::BjtTransientHistory,
+    pub(super) bjt_snapshot_cache: Vec<Option<crate::device::semiconductor::BjtChargeSnapshot>>,
     /// Trial currents computed before a small Newton voltage correction is
     /// rounded into the absolute solution. Read only on accepted steps.
     pub(super) capacitor_trial_currents: Vec<Value>,
@@ -232,9 +264,17 @@ impl PssCircuit {
                 .iter()
                 .map(|diode| (0.0, diode.junction_charge_and_capacitance(0.0).0)),
         );
+        let bjt_history = Engine::initialize_bjt_history(
+            &circuit,
+            &solution_scratch[1..],
+            super::super::transient::ReactiveHistorySeed::SolvedBias,
+        );
+        let bjt_snapshot_cache = vec![None; circuit.bjts.len()];
         Self {
             circuit,
             diode_history,
+            bjt_history,
+            bjt_snapshot_cache,
             capacitor_trial_currents,
             inductor_trial_offsets,
             integration_steps: 0,
@@ -268,6 +308,9 @@ impl PssCircuit {
             .map(|branch| match *branch {
                 VoltageBranch::Capacitor(index) => self.capacitors.v_prev[index],
                 VoltageBranch::Diode(index) => self.diode_history.vd_prev[index],
+                VoltageBranch::Bjt { pos, neg, .. } => {
+                    self.solution_scratch[pos] - self.solution_scratch[neg]
+                }
             })
             .chain(
                 self.basis
@@ -338,7 +381,33 @@ impl PssCircuit {
         // accepted history generations for each shooting perturbation; a
         // prior period or derivative probe must never leak into the next.
         circuit.reset_coupled_inductor_pair_state(&self.solution_scratch[1..]);
+        self.bjt_history = Engine::initialize_bjt_history(
+            circuit,
+            &self.solution_scratch[1..],
+            super::super::transient::ReactiveHistorySeed::SolvedBias,
+        );
+        self.bjt_snapshot_cache.fill(None);
         Ok(())
+    }
+
+    pub(super) fn seed_bjt_history(&mut self, solution: &[Value]) {
+        self.solution_scratch[1..].copy_from_slice(solution);
+        self.bjt_history = Engine::initialize_bjt_history(
+            &self.circuit,
+            solution,
+            super::super::transient::ReactiveHistorySeed::SolvedBias,
+        );
+        self.bjt_snapshot_cache.fill(None);
+    }
+
+    pub(super) fn accept_node_solution(&mut self, solution: &[Value]) {
+        self.solution_scratch[1..].copy_from_slice(solution);
+    }
+
+    pub(super) fn initial_solution_guess(&self) -> Vec<Value> {
+        let mut solution = vec![0.0; self.matrix_size()];
+        solution[..self.solution_scratch.len() - 1].copy_from_slice(&self.solution_scratch[1..]);
+        solution
     }
 
     /// An exact initialization constraint carries displacement current while
@@ -355,13 +424,16 @@ impl PssCircuit {
             let value = match self.basis.voltage_branches[index] {
                 VoltageBranch::Capacitor(index) => self.capacitors.v_prev[index],
                 VoltageBranch::Diode(index) => self.diode_history.vd_prev[index],
+                VoltageBranch::Bjt { pos, neg, .. } => {
+                    self.solution_scratch[pos] - self.solution_scratch[neg]
+                }
             };
             // An IC capacitor already owns a physical current unknown. Reuse
             // it for the voltage constraint rather than leaving its original
             // row empty beside an unnecessary auxiliary branch.
             let existing_branch = match self.basis.voltage_branches[index] {
                 VoltageBranch::Capacitor(index) => self.capacitors.ic_branch_indices[index],
-                VoltageBranch::Diode(_) => None,
+                VoltageBranch::Diode(_) | VoltageBranch::Bjt { .. } => None,
             };
             let branch = existing_branch.unwrap_or_else(|| self.circuit.allocate_branch());
             self.circuit.voltage_sources.add(
@@ -638,6 +710,23 @@ impl PssCircuit {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn vbic_storage_forest_removes_constant_charge_and_parallel_coordinates() {
+        for (extra, state_names) in [
+            ("", vec!["Q:Q1:qbe"]),
+            ("C1 b 0 1p\n", vec!["C:C1"]),
+            ("Vb b 0 0.1\n", Vec::new()),
+        ] {
+            let netlist = Netlist::parse(&format!("VBIC state forest\nVc c 0 1\nR1 b 0 1k\nQ1 c b 0 vm\n.model vm NPN(LEVEL=4 CJE=10p CJC=20p CBEO=30p CBCO=40p RCX=0 RCI=0 RBX=0 RBI=0 RBP=0 QCO=1p GAMM=0 TF=0 TR=0)\n{extra}.end\n")).unwrap();
+            let mut circuit = PssCircuit::new(Engine::default().build_circuit(&netlist).unwrap());
+            assert_eq!(circuit.basis.names(&circuit), state_names);
+            let state = vec![0.1; state_names.len()];
+            circuit.set_state(&state).unwrap();
+            assert_eq!(circuit.extract_state(), state);
+            assert_eq!(circuit.clone().bjt_history, circuit.bjt_history);
+        }
+    }
 
     #[test]
     fn voltage_forest_preserves_all_charge_branches_in_a_loop() {

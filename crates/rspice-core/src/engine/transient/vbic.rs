@@ -59,7 +59,7 @@ pub(in crate::engine::transient) struct BjtExternalBias {
 
 /// The tolerances a cached VBIC snapshot is judged reusable against.
 #[derive(Clone, Copy)]
-pub(in crate::engine::transient) struct VbicSnapshotTolerances {
+pub(in crate::engine) struct VbicSnapshotTolerances {
     pub voltage_abstol: Value,
     pub reltol: Value,
 }

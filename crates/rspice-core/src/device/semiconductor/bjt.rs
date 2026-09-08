@@ -1,7 +1,7 @@
-//! BJT (Bipolar Junction Transistor) device model
+//! Native Gummel-Poon and VBIC bipolar transistor models.
 //!
-//! Implements the Ebers-Moll model for NPN and PNP transistors.
-//! Supports both large-signal DC and small-signal AC analysis.
+//! Static transport, dynamic charge, parasitic topology, temperature scaling
+//! and accepted nonlinear state for NPN and PNP devices.
 
 use crate::device::traits::{MatrixStamper, NonlinearConvergenceCriteria, NonlinearDevice};
 use crate::solver::{CscIndex, StaticMatrix};
@@ -2059,12 +2059,16 @@ impl Bjt {
 
     #[inline]
     fn thermal_voltage_at(&self, temp_k: Value) -> Value {
-        // Xyce 7.10's native device package intentionally retains the SPICE
+        // The VBIC reference equations define their own k/q pair, shared by
+        // ngspice vbicload.c/vbictemp.c and Xyce's generated VBIC13 vtv expression.
+        // Xyce 7.10's legacy native device package retains the SPICE
         // constants from N_DEV_Const.h. Best-available and ngspice modes use
         // current SI/CODATA constants; this small distinction is observable
         // in exponential junction models and is therefore part of dialect
         // compatibility rather than a unit-conversion approximation.
-        let (k_boltzmann, q_electron) = if self.xyce_compatibility {
+        let (k_boltzmann, q_electron) = if self.charge_model == BjtChargeModel::Vbic {
+            (1.380662e-23, 1.602189e-19)
+        } else if self.xyce_compatibility {
             (
                 crate::constants::XYCE_K_BOLTZMANN,
                 crate::constants::XYCE_Q_ELECTRON,

@@ -111,7 +111,7 @@ impl PssAcceptedStepHistory {
 const PSS_FD_STEP: Value = 1e-8;
 const PSS_KRYLOV_STATE_THRESHOLD: usize = 12;
 const PSS_KRYLOV_REL_TOL: Value = 1e-9;
-const PSS_OPERATING_POINT_IDENTITY_VERSION: u32 = 33;
+const PSS_OPERATING_POINT_IDENTITY_VERSION: u32 = 34;
 
 fn pss_identity_field(hasher: &mut blake3::Hasher, name: &str, bytes: &[u8]) {
     hasher.update(&(name.len() as u64).to_le_bytes());
@@ -1938,10 +1938,20 @@ impl Engine {
             };
             lte_estimator.record(solution, dt);
         }
-        let mut diode_history = circuit.diode_history.clone();
-        diode_history
-            .restart(trace.times[trace.times.len() - 1] - trace.times[trace.times.len() - 2]);
-        let checkpoint = TransientCheckpoint::capture_with_diode_history(
+        let junction_history = Self::capture_accepted_junction_transient_history_checkpoint(
+            &circuit,
+            &circuit.bjt_history,
+            &circuit.diode_history,
+            &circuit.bjt_snapshot_cache,
+        );
+        let junction_history =
+            Self::normalize_accepted_junction_transient_history_checkpoint_for_order_one(
+                &circuit,
+                &junction_history,
+                trace.times[trace.times.len() - 1] - trace.times[trace.times.len() - 2],
+            )
+            .map_err(SimulationError::Circuit)?;
+        let checkpoint = TransientCheckpoint::capture_with_junction_history(
             authenticated_fingerprint,
             Some(authenticated_netlist_identity),
             &self.config,
@@ -1952,7 +1962,7 @@ impl Engine {
                 startup_mode: crate::engine::TransientStartupMode::OperatingPoint,
             },
             Some(&lte_estimator),
-            Some(&diode_history),
+            Some(junction_history),
         )
         .map_err(SimulationError::Circuit)?;
 
@@ -2163,6 +2173,11 @@ impl Engine {
                 .devices
                 .iter()
                 .all(|diode| !diode.has_charge_storage())
+            && circuit.bjts.devices.iter().all(|bjt| {
+                bjt.vbic_electrical_charge_storage_nodes()
+                    .iter()
+                    .all(Option::is_none)
+            })
         {
             return Err(PssError::NoReactiveElements.into());
         }
@@ -2724,6 +2739,7 @@ impl Engine {
 
     /// Initialize reactive element state from DC solution
     fn pss_initialize_reactive_state(&self, circuit: &mut PssCircuit, dc_solution: &[Value]) {
+        circuit.seed_bjt_history(dc_solution);
         let PssCircuit {
             circuit,
             diode_history,
@@ -2977,7 +2993,7 @@ impl Engine {
         let coeff = CompanionCoefficients::for_method(
             crate::numerics::integration::IntegrationMethod::BackwardEuler,
         );
-        let start = vec![0.0; initial.matrix_size()];
+        let start = initial.initial_solution_guess();
 
         match self.pss_newton_trial(
             &mut initial,
@@ -2993,6 +3009,9 @@ impl Engine {
         )? {
             Some(mut solution) => {
                 solution.truncate(size);
+                // Cross-coupled device charge also depends on algebraic node
+                // biases resolved by this consistency solve.
+                circuit.seed_bjt_history(&solution);
                 Ok(solution)
             }
             None => Err(SimulationError::ConvergenceFailed(
@@ -3854,6 +3873,8 @@ impl Engine {
         let PssCircuit {
             circuit,
             diode_history,
+            bjt_history,
+            bjt_snapshot_cache,
             ..
         } = pss;
         let PssCompanionStep {
@@ -3951,6 +3972,7 @@ impl Engine {
         if circuit.has_nonlinear_devices() {
             circuit.update_nonlinear(linearize_at);
             if physical_probe {
+                circuit.update_bjt_static_linearizations(linearize_at);
                 circuit.try_stamp_static_probe_nonlinear(matrix, rhs, linearize_at)
             } else {
                 circuit.stamp_nonlinear(matrix, rhs, linearize_at)
@@ -3966,6 +3988,21 @@ impl Engine {
                 dt,
                 diode_history,
                 physical_probe,
+            );
+            Self::stamp_bjt_transient_companions(
+                super::transient::TransientCompanionStamp {
+                    circuit,
+                    matrix,
+                    rhs,
+                    voltages: linearize_at,
+                    coeff,
+                    dt,
+                },
+                bjt_history,
+                bjt_snapshot_cache,
+                super::transient::VbicCachedSnapshotReuse::SeedOnly,
+                self.voltage_abstol(),
+                self.voltage_reltol(),
             );
         }
         // B sources remain part of the physical transient equation even when
@@ -4295,6 +4332,8 @@ impl Engine {
                 let PssCircuit {
                     circuit,
                     diode_history,
+                    bjt_history,
+                    bjt_snapshot_cache,
                     ..
                 } = circuit;
                 for (index, diode) in circuit.diodes.devices.iter().enumerate() {
@@ -4303,8 +4342,21 @@ impl Engine {
                     diode_history.accept_branch(index, voltage, charge, &coeff, dt);
                 }
                 diode_history.finish_step(dt);
+                Self::accept_bjt_history(
+                    circuit,
+                    bjt_history,
+                    &new_solution,
+                    &coeff,
+                    dt,
+                    Some(bjt_snapshot_cache),
+                    super::transient::VbicSnapshotTolerances {
+                        voltage_abstol: self.voltage_abstol(),
+                        reltol: self.voltage_reltol(),
+                    },
+                )?;
             }
 
+            circuit.accept_node_solution(&new_solution);
             solution = new_solution;
             accepted_step_history.accept(dt);
             circuit.accept_source_time(t);
@@ -4390,6 +4442,70 @@ impl Engine {
 mod tests {
     use super::*;
     use crate::SimulationConfig;
+
+    #[test]
+    fn pss_vbic_charge_matches_explicit_capacitors_for_both_polarities() {
+        // All intrinsic nodes collapse onto the terminals. Zero grading
+        // exponents make the junction charges linear, so their sum has an
+        // independent ordinary-capacitor equivalent, including overlap and
+        // a redundant B-C/B-E state loop.
+        let engine = Engine::default();
+        for method in [
+            IntegrationMethod::BackwardEuler,
+            IntegrationMethod::Trapezoidal,
+            IntegrationMethod::Gear2,
+        ] {
+            for polarity in ["NPN", "PNP"] {
+                let devices = [
+                    format!(
+                        "Q1 0 out 0 vm\n.model vm {polarity}(LEVEL=4 IS=1e-40 IBEI=1e-40 IBCI=1e-40 CJE=100p CJC=20p MJE=0 MJC=0 TF=0 TR=0 CBEO=30p CBCO=9p RCX=0 RCI=0 RBX=0 RBI=0 RE=0 RBP=0 RS=0 CJEP=0 CJCP=0 CCSO=0 QCO=0 GAMM=0 ISP=0)\n"
+                    ),
+                    "C1 out 0 159p\n".to_owned(),
+                ];
+                let mut traces = Vec::new();
+                for device in devices {
+                    let netlist = Netlist::parse(&format!(
+                        "VBIC charge oracle\nV1 in 0 SIN(0 0.1 1meg)\nR1 in out 1k\n{device}.end\n"
+                    ))
+                    .unwrap();
+                    let mut circuit = PssCircuit::new(engine.build_circuit(&netlist).unwrap());
+                    assert_eq!(circuit.state_dimension(), 1);
+                    circuit.set_state(&[0.04]).unwrap();
+                    let mut matrix = engine.build_matrix(&circuit).unwrap();
+                    circuit.link_indices(&matrix);
+                    let seed = engine
+                        .pss_initial_node_solution(&mut circuit, &NoAbort)
+                        .unwrap();
+                    let mut trace = PssStateTrace::default();
+                    engine
+                        .pss_run_tran_internal(
+                            &mut circuit,
+                            &mut matrix,
+                            seed,
+                            PssTraversal {
+                                tstop: 1e-6,
+                                max_step: 1e-6 / 64.0,
+                                fixed_grid: true,
+                                integration_method: Some(method),
+                                retain_waveform: false,
+                            },
+                            Some(&mut trace),
+                            &NoAbort,
+                        )
+                        .unwrap_or_else(|error| panic!("{method:?} {polarity}: {error}"));
+                    assert_eq!(circuit.extract_state(), *trace.states.last().unwrap());
+                    traces.push(trace);
+                }
+                assert_eq!(traces[0].times, traces[1].times);
+                for (actual, expected) in traces[0].states.iter().zip(&traces[1].states) {
+                    assert!(
+                        (actual[0] - expected[0]).abs() < 1e-9,
+                        "{method:?} {polarity}: {actual:?} != {expected:?}"
+                    );
+                }
+            }
+        }
+    }
 
     #[test]
     fn state_only_traversal_preserves_recorded_physics_at_adjacent_clocks() {

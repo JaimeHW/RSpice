@@ -83,7 +83,8 @@ fn vbic13_wbe1_reverse_be_source_current_at(
     tnbbe: f64,
 ) -> f64 {
     let delta_t = temp_k - rspice_core::constants::TEMP_REFERENCE;
-    let vt = rspice_core::analysis::temperature::thermal_voltage(temp_k);
+    // VBIC13's model-defined Vtv (ngspice vbicload.c and Xyce ADMS VBIC13).
+    let vt = 1.380662e-23 * temp_k / 1.602189e-19;
     let vbbe = VBIC13_TEST_VBBE * (1.0 + delta_t * (tvbbe1 + delta_t * tvbbe2));
     let nbbe = VBIC13_TEST_NBBE * (1.0 + delta_t * tnbbe);
     let exponent = (-vbbe - vbe) / (nbbe * vt);
@@ -878,8 +879,7 @@ fn ordinary_vbic_wbe_split_deck(wbe: f64, rbx: f64, rbi: f64, vbase: f64) -> Str
 }
 
 fn vbic_ordinary_ibe_current(vbe: f64) -> (f64, f64) {
-    let vt =
-        rspice_core::analysis::temperature::thermal_voltage(rspice_core::constants::TEMP_REFERENCE);
+    let vt = 1.380662e-23 * rspice_core::constants::TEMP_REFERENCE / 1.602189e-19;
     let exp_vbe = (vbe / vt).exp();
     (1.0e-18 * (exp_vbe - 1.0), 1.0e-18 * exp_vbe / vt)
 }
