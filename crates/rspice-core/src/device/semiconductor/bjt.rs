@@ -441,7 +441,8 @@ pub(crate) struct BjtChargeSnapshot {
 }
 
 pub(crate) const BJT_ACCEPTED_NONLINEAR_RUNTIME_TAG: &str = "legacy-gummel-poon-v2";
-const VBIC_ACCEPTED_NONLINEAR_RUNTIME_TAG: &str = "promoted-vbic-v2";
+const VBIC_ACCEPTED_NONLINEAR_RUNTIME_TAG: &str = "promoted-vbic-v3";
+const VBIC_DELAY_BRANCH_COUNT: usize = 4;
 
 const BJT_ACCEPTED_SCALAR_VALUE_COUNT: usize = 62;
 const BJT_REDUCED_CHECKPOINT_VALUE_COUNT: usize = INTERNAL_DIM
@@ -477,7 +478,8 @@ pub(crate) const VBIC_ACCEPTED_NONLINEAR_STATE_VALUE_COUNT: usize = BJT_ACCEPTED
     + BJT_INTERNAL_STATE_DIM
     + 12
     + 15 * (1 + INTERNAL_DIM + EXTERNAL_DIM)
-    + (4 + BJT_DYNAMIC_CHARGE_COUNT) * BJT_CHARGE_BRANCH_CHECKPOINT_VALUE_COUNT;
+    + (VBIC_DELAY_BRANCH_COUNT + 1 + BJT_DYNAMIC_CHARGE_COUNT)
+        * BJT_CHARGE_BRANCH_CHECKPOINT_VALUE_COUNT;
 
 /// Fixed-shape wire image of one accepted legacy-GP transient charge snapshot.
 ///
@@ -1139,7 +1141,7 @@ pub struct Bjt {
     vbic_startup_load_pending: bool,
     /// Excess-phase algebraic rows (delta-iciei, ixf1, ixf2) at the limited
     /// MNA bias (TD > 0 only).
-    mna_delay_branches: [BjtCurrentBranch; 3],
+    mna_delay_branches: [BjtCurrentBranch; VBIC_DELAY_BRANCH_COUNT],
     /// Excess-phase correction to the thermal power row (TD > 0 with
     /// self-heating only).
     mna_delay_thermal: BjtCurrentBranch,
@@ -2040,7 +2042,7 @@ impl Bjt {
             mna_eval: None,
             mna_limited_from: Cell::new(None),
             vbic_startup_load_pending: true,
-            mna_delay_branches: [BjtCurrentBranch::default(); 3],
+            mna_delay_branches: [BjtCurrentBranch::default(); VBIC_DELAY_BRANCH_COUNT],
             mna_delay_thermal: BjtCurrentBranch::default(),
             mna_charge_cache: Cell::new([BjtChargeBranch::default(); BJT_DYNAMIC_CHARGE_COUNT]),
             mna_charge_cache_valid: Cell::new(false),
@@ -2696,7 +2698,7 @@ mod checkpoint_tests {
     fn versioned_bjt_checkpoint_numeric_payload_counts_are_pinned() {
         assert_eq!(BJT_ACCEPTED_NONLINEAR_STATE_VALUE_COUNT, 879);
         assert_eq!(BJT_ACCEPTED_CHARGE_SNAPSHOT_STATE_VALUE_COUNT, 449);
-        assert_eq!(VBIC_ACCEPTED_NONLINEAR_STATE_VALUE_COUNT, 573);
+        assert_eq!(VBIC_ACCEPTED_NONLINEAR_STATE_VALUE_COUNT, 592);
     }
 
     #[test]

@@ -74,6 +74,90 @@ fn vbic_overlap_capacitance_has_positive_admittance_for_both_polarities() {
 }
 
 #[test]
+fn vbic13_delayed_avalanche_heat_and_clipped_temperature_match_xyce710() {
+    for (level, kind, polarity, rise, drive_base, multiplier, expected) in [
+        (
+            11,
+            "NPN",
+            1.0,
+            20.0,
+            true,
+            1,
+            [
+                Complex64::new(-0.0055299710825809055, 0.003995971898904793),
+                Complex64::new(0.0002868746047409443, -0.00026608037701922105),
+                Complex64::new(0.009743814554519954, -0.0070067899992358774),
+            ],
+        ),
+        (
+            12,
+            "PNP",
+            -1.0,
+            74.0,
+            false,
+            3,
+            [
+                Complex64::new(3.36865683680846e-5, -2.340680248645959e-5),
+                Complex64::new(-1.2487229592166488e-6, 1.2924528759025553e-6),
+                Complex64::new(-0.002058422117792587, -0.0019261856424439548),
+            ],
+        ),
+    ] {
+        let substrate = if level == 12 { " 0" } else { "" };
+        let netlist = parse(&format!(
+            "Delayed VBIC avalanche and heat\nVc c 0 {}\nVb b 0 DC {} AC {}\nVth th 0 DC {rise} AC {}\nQ1 c b 0{substrate} th vm SW_ET=1 M={multiplier}\n\
+             .model vm {kind}(LEVEL={level} IS=1e-16 IBEI=1e-18 IBCI=1e-18 RCX=10 RCI=2 RBX=5 RBI=3 RE=1 RBP=0 RS=0 AVC1=0.05 AVC2=0.3 TAVC=0.01 TD=1n RTH=1000 TCRTH=0.005 TMAXCLIP=100 CTH=1p GMIN=1u TNOM=27)\n.temp 27\n.end\n",
+            polarity * 1.8,
+            polarity * 0.7,
+            u8::from(drive_base),
+            u8::from(!drive_base),
+        ));
+        let point = Engine::default()
+            .run_ac(&netlist, &[1e8])
+            .unwrap()
+            .pop()
+            .unwrap();
+        for (branch, expected) in ["vc", "vb", "vth"].into_iter().zip(expected) {
+            let actual = branch_current(&point, branch);
+            assert!(
+                (actual - expected).norm() < 2e-7 * expected.norm(),
+                "{level} {kind} {branch}: {actual:?} != {expected:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn vbic13_intrinsic_avalanche_uses_delayed_forward_transport() {
+    // Xyce 7.10 at 100 MHz: the BC avalanche current follows the
+    // two-pole delay, just as the collector-emitter transport does.
+    let expected = [
+        Complex64::new(-0.001774651889771782, 0.0012868112960925493),
+        Complex64::new(9.590581606050419e-5, -9.066589478545957e-5),
+    ];
+    for (kind, polarity) in [("NPN", 1.0), ("PNP", -1.0)] {
+        let netlist = parse(&format!(
+            "Delayed VBIC avalanche\nVc c 0 {}\nVb b 0 DC {} AC 1\nQ1 c b 0 vm SW_ET=0\n\
+             .model vm {kind}(LEVEL=11 IS=1e-16 IBEI=1e-18 IBCI=1e-18 RCX=10 RCI=2 RBX=5 RBI=3 RE=1 RBP=0 RS=0 AVC1=0.05 AVC2=0.3 TD=1n GMIN=1u TNOM=27)\n.temp 27\n.end\n",
+            polarity * 1.8,
+            polarity * 0.7,
+        ));
+        let point = Engine::default()
+            .run_ac(&netlist, &[1e8])
+            .unwrap()
+            .pop()
+            .unwrap();
+        for (branch, expected) in ["vc", "vb"].into_iter().zip(expected) {
+            let actual = branch_current(&point, branch);
+            assert!(
+                (actual - expected).norm() < 2e-7 * expected.norm(),
+                "{kind} {branch}: {actual:?} != {expected:?}"
+            );
+        }
+    }
+}
+
+#[test]
 fn vbic_collapsed_parasitic_base_preserves_its_junction_admittance() {
     // RBP=0 joins BP to CX; it must retain both the BEP diode and charge.
     let vt = 1.380_662e-23 * 300.15 / 1.602_189e-19;

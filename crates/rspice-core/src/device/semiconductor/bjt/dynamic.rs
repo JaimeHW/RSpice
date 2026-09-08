@@ -138,8 +138,8 @@ impl Bjt {
     pub(crate) fn vbic_delay_static_branches(
         &self,
         reduction: &BjtDynamicReduction,
-    ) -> [BjtCurrentBranch; 3] {
-        let mut branches = [BjtCurrentBranch::default(); 3];
+    ) -> [BjtCurrentBranch; VBIC_DELAY_BRANCH_COUNT] {
+        let mut branches = [BjtCurrentBranch::default(); VBIC_DELAY_BRANCH_COUNT];
         if !self.uses_vbic_dynamic_charges() || self.td <= 0.0 {
             return branches;
         }
@@ -188,8 +188,50 @@ impl Bjt {
         ixf2.d_internal[IDX_VXF1] = -1.0;
         ixf2.d_internal[IDX_VXF2] = 1.0;
         branches[2] = ixf2;
+        branches[3] = self.vbic_delayed_avalanche_branch(reduction, &delta_iciei);
 
         branches
+    }
+
+    /// VBIC 1.3 uses delayed Itxf in Igc. ngspice's older VBIC keeps
+    /// static Itzf there, so its BC branch needs no excess-phase correction.
+    fn vbic_delayed_avalanche_branch(
+        &self,
+        reduction: &BjtDynamicReduction,
+        forward: &BjtCurrentBranch,
+    ) -> BjtCurrentBranch {
+        if !self.vbic_13 || self.avc1 <= 0.0 || self.td <= 0.0 {
+            return BjtCurrentBranch::default();
+        }
+        let internal = reduction.internal_voltages;
+        let p = self.polarity();
+        let voltage = p * (internal[IDX_VBI] - internal[IDX_VCI]);
+        let factor_at = |model: &Self| {
+            model.vbic13_avalanche_factor(voltage, model.vjc, model.mjc, model.avc1, model.avc2)
+        };
+        let (factor, slope, thermal_slope) = if self.thermal_model_enabled() {
+            let rise = internal[IDX_VRTH];
+            let h = self.thermal_derivative_step(rise);
+            let (factor, slope) = self.with_temperature_variant(rise, factor_at);
+            let plus = self.with_temperature_variant(rise + h, factor_at).0;
+            let minus = self.with_temperature_variant(rise - h, factor_at).0;
+            (factor, slope, (plus - minus) / (2.0 * h))
+        } else {
+            let (factor, slope) = factor_at(self);
+            (factor, slope, 0.0)
+        };
+        // Current is physical BI -> CI; residual incidence is incoming current.
+        let mut branch = BjtCurrentBranch {
+            current: -factor * forward.current,
+            d_internal: forward.d_internal.map(|value| -factor * value),
+            pos_internal: Some(IDX_VCI),
+            neg_internal: Some(IDX_VBI),
+            ..Default::default()
+        };
+        branch.d_internal[IDX_VBI] -= p * slope * forward.current;
+        branch.d_internal[IDX_VCI] += p * slope * forward.current;
+        branch.d_internal[IDX_VRTH] -= thermal_slope * forward.current;
+        branch
     }
 
     pub(crate) fn vbic_delay_static_thermal_branch(
@@ -204,74 +246,28 @@ impl Bjt {
             return BjtCurrentBranch::default();
         }
 
-        let [_, vci, _, _, vei, _, _, _vrth, _, vxf2] = reduction.internal_voltages;
-        let p = self.polarity();
-        let transport = reduction.vbic_transport;
-        let d_p_itzf_d_vbi = transport.ditzf_dvbe_eff + transport.ditzf_dvbc_eff;
-        let d_p_itzf_d_vci = -transport.ditzf_dvbc_eff;
-        let d_p_itzf_d_vei = -transport.ditzf_dvbe_eff;
-        let d_itzf_d_vrth = reduction.vbic_d_itzf_d_vrth;
-
-        let delta_current = p * (vxf2 - transport.itzf);
-        let voltage = vci - vei;
+        let internal = reduction.internal_voltages;
+        let delayed = self.vbic_delay_static_branches(reduction);
         let mut branch = BjtCurrentBranch {
-            current: -delta_current * voltage,
             pos_internal: Some(IDX_VRTH),
             ..Default::default()
         };
-        branch.d_internal[IDX_VBI] = d_p_itzf_d_vbi * voltage;
-        branch.d_internal[IDX_VCI] = d_p_itzf_d_vci * voltage - delta_current;
-        branch.d_internal[IDX_VEI] = d_p_itzf_d_vei * voltage + delta_current;
-        branch.d_internal[IDX_VRTH] = p * d_itzf_d_vrth * voltage;
-        branch.d_internal[IDX_VXF2] = -p * voltage;
-        branch
-    }
-
-    pub(super) fn apply_vbic_excess_phase_transport(
-        &self,
-        mut reduction: BjtDynamicReduction,
-        transport: TransportChargeState,
-        d_itzf_d_vrth: Value,
-    ) -> BjtDynamicReduction {
-        if !self.uses_vbic_dynamic_charges() || self.td <= 0.0 {
-            return reduction;
+        for (current, pos, neg) in [
+            (delayed[0], IDX_VCI, IDX_VEI),
+            (delayed[3], IDX_VBI, IDX_VCI),
+        ] {
+            let voltage = internal[pos] - internal[neg];
+            branch.current -= current.current * voltage;
+            for (derivative, current_derivative) in
+                branch.d_internal.iter_mut().zip(current.d_internal)
+            {
+                *derivative -= current_derivative * voltage;
+            }
+            branch.d_internal[pos] -= current.current;
+            branch.d_internal[neg] += current.current;
         }
 
-        let p = self.polarity();
-
-        // Direct forward transport already appears in the 7-state DC Jacobian.
-        // Replace that static path with ngspice's excess-phase xf2-controlled path.
-        let d_itzf_actual_d_vbi = p * (transport.ditzf_dvbe_eff + transport.ditzf_dvbc_eff);
-        let d_itzf_actual_d_vci = -p * transport.ditzf_dvbc_eff;
-        let d_itzf_actual_d_vei = -p * transport.ditzf_dvbe_eff;
-        let d_p_itzf_d_vbi = transport.ditzf_dvbe_eff + transport.ditzf_dvbc_eff;
-        let d_p_itzf_d_vci = -transport.ditzf_dvbc_eff;
-        let d_p_itzf_d_vei = -transport.ditzf_dvbe_eff;
-
-        reduction.g_ii[IDX_VCI][IDX_VBI] += d_p_itzf_d_vbi;
-        reduction.g_ii[IDX_VCI][IDX_VCI] += d_p_itzf_d_vci;
-        reduction.g_ii[IDX_VCI][IDX_VEI] += d_p_itzf_d_vei;
-        reduction.g_ii[IDX_VCI][IDX_VRTH] += p * d_itzf_d_vrth;
-        reduction.g_ii[IDX_VCI][IDX_VXF2] -= p;
-
-        reduction.g_ii[IDX_VEI][IDX_VBI] -= d_p_itzf_d_vbi;
-        reduction.g_ii[IDX_VEI][IDX_VCI] -= d_p_itzf_d_vci;
-        reduction.g_ii[IDX_VEI][IDX_VEI] -= d_p_itzf_d_vei;
-        reduction.g_ii[IDX_VEI][IDX_VRTH] -= p * d_itzf_d_vrth;
-        reduction.g_ii[IDX_VEI][IDX_VXF2] += p;
-
-        reduction.g_ii[IDX_VXF1] = [0.0; BJT_INTERNAL_STATE_DIM];
-        reduction.g_ii[IDX_VXF1][IDX_VBI] = -d_itzf_actual_d_vbi;
-        reduction.g_ii[IDX_VXF1][IDX_VCI] = -d_itzf_actual_d_vci;
-        reduction.g_ii[IDX_VXF1][IDX_VEI] = -d_itzf_actual_d_vei;
-        reduction.g_ii[IDX_VXF1][IDX_VRTH] = -d_itzf_d_vrth;
-        reduction.g_ii[IDX_VXF1][IDX_VXF2] = 1.0;
-
-        reduction.g_ii[IDX_VXF2] = [0.0; BJT_INTERNAL_STATE_DIM];
-        reduction.g_ii[IDX_VXF2][IDX_VXF1] = -1.0;
-        reduction.g_ii[IDX_VXF2][IDX_VXF2] = 1.0;
-
-        reduction
+        branch
     }
 
     pub(super) fn build_dynamic_reduction_from_transport(
@@ -285,10 +281,18 @@ impl Bjt {
         if !self.uses_vbic_dynamic_charges() || self.td <= 0.0 {
             return reduction;
         }
+        reduction.g_ii[IDX_VXF1] = [0.0; BJT_INTERNAL_STATE_DIM];
+        reduction.g_ii[IDX_VXF2] = [0.0; BJT_INTERNAL_STATE_DIM];
+        for branch in self.vbic_delay_static_branches(&reduction) {
+            branch.accumulate_derivatives(
+                &mut reduction.g_ii,
+                &mut reduction.g_ie,
+                &mut reduction.g_ei,
+                &mut reduction.g_ee,
+            );
+        }
 
-        reduction.internal_voltages[IDX_VXF1] = transport.itzf;
-        reduction.internal_voltages[IDX_VXF2] = transport.itzf;
-        self.apply_vbic_excess_phase_transport(reduction, transport, d_itzf_d_vrth)
+        reduction
     }
 
     pub(super) fn dynamic_charge_branches_from_inputs(
@@ -564,7 +568,7 @@ impl Bjt {
         &self,
         base: BjtReducedLinearization,
     ) -> BjtChargeSnapshot {
-        let template = self.dynamic_reduction_template(base);
+        let mut template = self.dynamic_reduction_template(base);
         if !self.uses_vbic_dynamic_charges() {
             let branches = self.legacy_dynamic_charge_branches(&template);
             return BjtChargeSnapshot {
@@ -599,6 +603,7 @@ impl Bjt {
             charge_internal,
             Some(inputs),
         );
+        template.internal_voltages = charge_internal;
         let reduction =
             self.build_dynamic_reduction_from_transport(template, inputs.transport, d_itzf_d_vrth);
 
@@ -812,11 +817,7 @@ impl Bjt {
         if !self.thermal_model_enabled() {
             let inputs = self
                 .dynamic_charge_inputs(reduction.external_voltages, reduction.internal_voltages);
-            let mut reduction =
-                self.build_dynamic_reduction_from_transport(reduction, inputs.transport, 0.0);
-            reduction.internal_voltages[IDX_VXF1] = internal[IDX_VXF1];
-            reduction.internal_voltages[IDX_VXF2] = internal[IDX_VXF2];
-            return reduction;
+            return self.build_dynamic_reduction_from_transport(reduction, inputs.transport, 0.0);
         }
 
         let h = self.thermal_derivative_step(vrth);
@@ -842,14 +843,7 @@ impl Bjt {
         } else {
             0.0
         };
-        let mut reduction = self.build_dynamic_reduction_from_transport(
-            reduction,
-            base_inputs.transport,
-            d_itzf_d_vrth,
-        );
-        reduction.internal_voltages[IDX_VXF1] = internal[IDX_VXF1];
-        reduction.internal_voltages[IDX_VXF2] = internal[IDX_VXF2];
-        reduction
+        self.build_dynamic_reduction_from_transport(reduction, base_inputs.transport, d_itzf_d_vrth)
     }
 
     pub(crate) fn charge_snapshot_for_dynamic_state(
@@ -1013,6 +1007,115 @@ impl Bjt {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn vbic13_delayed_avalanche_reduction_matches_nonequilibrium_residual_derivatives() {
+        let params = [
+            ("LEVEL", 12.0),
+            ("IS", 1e-16),
+            ("IBEI", 1e-18),
+            ("IBCI", 1e-18),
+            ("RCX", 10.0),
+            ("RCI", 2.0),
+            ("RBX", 5.0),
+            ("RBI", 3.0),
+            ("RE", 1.0),
+            ("RBP", 2.0),
+            ("RS", 3.0),
+            ("RTH", 1000.0),
+            ("AVC1", 0.2),
+            ("AVC2", 0.3),
+            ("TAVC", 0.01),
+            ("TD", 1e-9),
+            ("TMAXCLIP", 100.0),
+        ]
+        .map(|(name, value)| (name.to_owned(), value))
+        .into_iter()
+        .collect();
+        for (bjt, p) in [
+            (Bjt::new_npn("q".into(), 1, 2, 3), 1.0),
+            (Bjt::new_pnp("q".into(), 1, 2, 3), -1.0),
+        ] {
+            let bjt = bjt
+                .with_params(&params)
+                .with_instance_params(&[("M".into(), 2.0)]);
+            let external = [p * 1.8, p * 0.7, 0.0, 0.0];
+            for rise in [20.0, 74.0] {
+                let state = [
+                    p * 1.79,
+                    p * 1.6,
+                    p * 0.7,
+                    p * 0.69,
+                    0.0,
+                    p * 1.7,
+                    0.0,
+                    rise,
+                    1e-4,
+                    2e-4,
+                ];
+                let evaluate = |state: [Value; BJT_INTERNAL_STATE_DIM]| {
+                    let mut reduction = bjt.dynamic_reduction_for_internal_state(
+                        external[0],
+                        external[1],
+                        external[2],
+                        external[3],
+                        state,
+                    );
+                    assert_eq!(reduction.internal_voltages[IDX_VXF2], state[IDX_VXF2]);
+                    let (static_residual, _) = bjt.intrinsic_state_residual_jacobian(
+                        external[0],
+                        external[1],
+                        external[2],
+                        external[3],
+                        state[..INTERNAL_DIM].try_into().unwrap(),
+                    );
+                    let mut residual = [0.0; BJT_INTERNAL_STATE_DIM];
+                    residual[..INTERNAL_DIM].copy_from_slice(&static_residual);
+                    let mut external_residual = [0.0; EXTERNAL_DIM];
+                    for branch in bjt.vbic_delay_static_branches(&reduction) {
+                        branch.accumulate_source(
+                            branch.current,
+                            &mut residual,
+                            &mut external_residual,
+                        );
+                    }
+                    let heat = bjt.vbic_delay_static_thermal_branch(&reduction);
+                    heat.accumulate_source(heat.current, &mut residual, &mut external_residual);
+                    heat.accumulate_derivatives(
+                        &mut reduction.g_ii,
+                        &mut reduction.g_ie,
+                        &mut reduction.g_ei,
+                        &mut reduction.g_ee,
+                    );
+                    (residual, reduction.g_ii)
+                };
+                let (_, jacobian) = evaluate(state);
+                for column in 0..BJT_INTERNAL_STATE_DIM {
+                    let h = if column == IDX_VRTH {
+                        1e-3
+                    } else if column >= IDX_VXF1 {
+                        1e-8
+                    } else {
+                        1e-6
+                    };
+                    let mut plus = state;
+                    let mut minus = state;
+                    plus[column] += h;
+                    minus[column] -= h;
+                    let plus = evaluate(plus).0;
+                    let minus = evaluate(minus).0;
+                    for row in 0..BJT_INTERNAL_STATE_DIM {
+                        let fd = (plus[row] - minus[row]) / (2.0 * h);
+                        let actual = jacobian[row][column];
+                        assert!(
+                            (fd - actual).abs() < 2e-5 * actual.abs().max(fd.abs()) + 2e-9,
+                            "p={p} rise={rise} row={row} column={column}: {actual:e} != {fd:e}"
+                        );
+                    }
+                }
+            }
+        }
+    }
 
     #[test]
     fn vbic_heat_switch_preserves_thermal_storage_and_disables_delayed_power() {

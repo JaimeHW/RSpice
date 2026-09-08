@@ -909,13 +909,17 @@ impl Bjt {
         }
 
         if self.uses_vbic_dynamic_charges() && self.td > 0.0 {
-            currents[VBIC_TRANSIENT_CONVERGENCE_ICIEI_INDEX] += delay_branches[0].current;
-            for (accumulated, &derivative) in d_currents_d_internal
-                [VBIC_TRANSIENT_CONVERGENCE_ICIEI_INDEX][..BJT_INTERNAL_STATE_DIM]
-                .iter_mut()
-                .zip(&delay_branches[0].d_internal[..BJT_INTERNAL_STATE_DIM])
-            {
-                *accumulated += derivative;
+            for (index, branch) in [
+                (VBIC_TRANSIENT_CONVERGENCE_ICIEI_INDEX, &delay_branches[0]),
+                (3, &delay_branches[3]), // Ibc includes the delayed avalanche correction.
+            ] {
+                currents[index] += branch.current;
+                for (accumulated, derivative) in d_currents_d_internal[index]
+                    .iter_mut()
+                    .zip(branch.d_internal)
+                {
+                    *accumulated += derivative;
+                }
             }
         }
 
