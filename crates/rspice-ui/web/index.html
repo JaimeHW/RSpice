@@ -197,7 +197,7 @@
     return url;
   }
 
-  function showStartupError(message) {
+  function showStartupError(message, hint = "A WebGPU-capable browser (current Chrome/Edge) is required.") {
     const el = document.getElementById("rspice_loading");
     if (!el) {
       return;
@@ -207,7 +207,7 @@
     el.replaceChildren();
     for (const text of [
       message,
-      "A WebGPU-capable browser (current Chrome/Edge) is required.",
+      hint,
     ]) {
       const paragraph = document.createElement("p");
       paragraph.className = "err";
@@ -221,17 +221,22 @@
   }
 
   function recordWorkerStartupError(message) {
+    window.__RSPICE_SIM_WORKER_READY = false;
     window.__RSPICE_SIM_WORKER_ERROR = message;
+    window.__RSPICE_WASM_JIT_CAPABILITY = null;
+    document.documentElement.removeAttribute("data-rspice-wasm-jit-solver-result");
     document.documentElement.setAttribute("data-rspice-wasm-jit-status", "error");
   }
 
   function reportSimulationWorkerStartupError(error) {
     const message = `RSpice simulation worker failed: ${errorMessage(error)}`;
     recordWorkerStartupError(message);
-    showStartupError(message);
+    showStartupError(message, "Retry engine startup from the application status bar. Reload the application if its files could not be loaded.");
   }
 
   function installSimulationWorker() {
+    window.__RSPICE_SIM_WORKER_READY = false;
+    window.__RSPICE_SIM_WORKER_ERROR = null;
     try {
       const workerUrl = executableAsset("simulation-worker.js");
       // Retain the exact page-bound URL even after an abort/error terminates
@@ -242,18 +247,23 @@
         { type: "module" },
       );
       worker.addEventListener("error", (event) => {
+        if (window.__RSPICE_SIM_WORKER !== worker) return;
         reportSimulationWorkerStartupError(
           event.message || "Browser simulation worker failed to load.",
         );
       });
       worker.addEventListener("messageerror", () => {
+        if (window.__RSPICE_SIM_WORKER !== worker) return;
         reportSimulationWorkerStartupError(
           "Browser simulation worker returned an unreadable startup message.",
         );
       });
       worker.addEventListener("message", (event) => {
+        if (window.__RSPICE_SIM_WORKER !== worker) return;
         const message = event.data || {};
         if (message.type === "ready") {
+          window.__RSPICE_SIM_WORKER_READY = true;
+          window.__RSPICE_SIM_WORKER_ERROR = null;
           window.__RSPICE_WASM_JIT_CAPABILITY = message.wasmJit || {
             available: false,
             reason: "Simulation worker omitted its WASM JIT capability report.",
@@ -290,7 +300,7 @@
     } catch (error) {
       const message = `Failed to start the RSpice simulation worker: ${errorMessage(error)}`;
       recordWorkerStartupError(message);
-      showStartupError(message);
+      showStartupError(message, "Retry engine startup from the application status bar. Reload the application if its files could not be loaded.");
       console.error(error);
     }
   }

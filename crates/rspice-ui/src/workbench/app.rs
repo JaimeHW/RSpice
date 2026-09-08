@@ -488,6 +488,14 @@ impl RSpiceApp {
         // Log startup
         log::info!("RSpice egui application initialized");
 
+        let simulation_controller = crate::simulation::SimulationController::new();
+        #[cfg(target_arch = "wasm32")]
+        let simulation_controller = {
+            let mut controller = simulation_controller;
+            let ctx = cc.egui_ctx.clone();
+            controller.set_engine_wakeup(std::sync::Arc::new(move || ctx.request_repaint()));
+            controller
+        };
         let automation_runtime_project_id = state.workspace.project.id();
         Self {
             state,
@@ -497,7 +505,7 @@ impl RSpiceApp {
             applied_theme: None,
             last_window_title: String::new(),
             symbol_library,
-            simulation_controller: crate::simulation::SimulationController::new(),
+            simulation_controller,
             #[cfg(not(target_arch = "wasm32"))]
             automation_runtime: crate::automation_runtime::NativeAutomationRuntime::discover(),
             #[cfg(target_arch = "wasm32")]

@@ -378,7 +378,7 @@ class IdeWorkerRoutingTests(unittest.TestCase):
             wasm_worker,
             re.compile(
                 r"fn\s+create_worker\(\).*?"
-                r"let\s+worker_url\s*=\s*global_worker_url\(\)\?;.*?"
+                r"let\s+worker_url\s*=\s*global_worker_url\(\)\.ok_or_else\(.*?\)\?;.*?"
                 r"new_with_options\(&worker_url,\s*&options\)",
                 re.S,
             ),
@@ -468,7 +468,7 @@ class IdeWorkerRoutingTests(unittest.TestCase):
                 self.assertIn('addEventListener("messageerror"', index)
                 self.assertIn("__RSPICE_SIM_WORKER_ERROR", index)
                 self.assertIn("function reportSimulationWorkerStartupError(error)", index)
-                self.assertIn("showStartupError(message)", index)
+                self.assertIn("showStartupError(message,", index)
                 self.assertRegex(
                     index,
                     re.compile(

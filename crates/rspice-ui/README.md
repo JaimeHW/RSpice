@@ -180,10 +180,18 @@ when automatic discovery is unsuitable.
 cargo build --locked --profile web-release -p rspice-ui --bin rspice-ui --features browser-qualification --target wasm32-unknown-unknown
 wasm-bindgen --target web --out-name rspice-ui --out-dir crates/rspice-ui/web/pkg target/wasm32-unknown-unknown/web-release/rspice-ui.wasm
 python3 tools/ci/check_browser_workbench.py --output target/workbench-qualification
+python3 tools/ci/check_browser_engine_recovery.py --web-root crates/rspice-ui/web --output target/engine-recovery-qualification
 ```
 
 Append `--software-webgpu` to use Chrome's SwiftShader WebGPU adapter for
 functional CI. This does not qualify physical GPU support or performance.
+
+The engine recovery check delays the first worker module response, queues an
+authored deck, fails that response, and retries startup through the status bar.
+It verifies terminal failure, a successful rerun, and its analytic operating
+point in a durable checkpoint. The served worker code is unchanged.
+Pass `--cancel-startup` to exercise Stop and engine restart while the initial
+worker response is still pending.
 
 Each run requires an empty output directory and creates a fresh browser profile
 and HTTP origin. It posts and resolves a review, creates an IndexedDB checkpoint,

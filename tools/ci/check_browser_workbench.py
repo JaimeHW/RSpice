@@ -256,18 +256,7 @@ def main():
                         for name in ("browser_workbench.py", "check_browser_workbench.py")},
         }
         try:
-            environment["webgpu"] = browser.call("POST", "/execute/async", {"args": [], "script": """
-                const done = arguments[arguments.length - 1];
-                navigator.gpu.requestAdapter().then(adapter => done(adapter ? {
-                    vendor: adapter.info.vendor, architecture: adapter.info.architecture,
-                    device: adapter.info.device, description: adapter.info.description
-                } : null), error => done({error: String(error)}));
-            """})
-            adapter = environment["webgpu"]
-            if not adapter or "error" in adapter:
-                raise AssertionError(f"No usable WebGPU adapter: {adapter}")
-            if args.software_webgpu and adapter["architecture"] != "swiftshader":
-                raise AssertionError(f"SwiftShader was requested but not selected: {adapter}")
+            environment["webgpu"] = browser.webgpu_adapter()
             result = run(browser)
             browser.assert_no_errors()
             (browser.output / "result.json").write_text(json.dumps(result, indent=2), encoding="utf-8")

@@ -552,12 +552,25 @@ jobs:
         run: >-
           python3 tools/ci/check_browser_workbench.py --software-webgpu
           --output "${{ runner.temp }}/rspice-workbench-${{ github.run_id }}-${{ github.run_attempt }}"
+      - name: Qualify browser engine failure and retry
+        run: >-
+          python3 tools/ci/check_browser_engine_recovery.py --software-webgpu
+          --web-root crates/rspice-ui/web
+          --output "${{ runner.temp }}/rspice-engine-recovery-${{ github.run_id }}-${{ github.run_attempt }}"
+      - name: Qualify browser cancellation during engine startup
+        run: >-
+          python3 tools/ci/check_browser_engine_recovery.py --software-webgpu --cancel-startup
+          --web-root crates/rspice-ui/web
+          --output "${{ runner.temp }}/rspice-engine-cancel-${{ github.run_id }}-${{ github.run_attempt }}"
       - name: Retain browser workbench evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: browser-workbench
-          path: ${{ runner.temp }}/rspice-workbench-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/rspice-workbench-${{ github.run_id }}-${{ github.run_attempt }}
+            ${{ runner.temp }}/rspice-engine-recovery-${{ github.run_id }}-${{ github.run_attempt }}
+            ${{ runner.temp }}/rspice-engine-cancel-${{ github.run_id }}-${{ github.run_attempt }}
           retention-days: 7
           if-no-files-found: ignore
   veriloga-mobile:

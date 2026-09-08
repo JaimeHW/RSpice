@@ -225,6 +225,33 @@ impl SimulationRunner {
         }
     }
 
+    pub(crate) fn engine_availability(&self) -> super::status::EngineAvailability {
+        #[cfg(target_arch = "wasm32")]
+        {
+            self.worker_handle.availability()
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            super::status::EngineAvailability::Ready
+        }
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn set_engine_wakeup(&mut self, wakeup: Arc<dyn Fn() + Send + Sync>) {
+        self.worker_handle.set_wakeup(wakeup);
+    }
+
+    /// Retry backend startup without queuing a simulation or disturbing a
+    /// completion that the controller still owns.
+    pub(crate) fn retry_engine_startup(&mut self) -> Result<(), SimulationError> {
+        if !self.can_accept_prepared_task() {
+            return Err(SimulationError::AlreadyRunning);
+        }
+        #[cfg(target_arch = "wasm32")]
+        self.worker_handle.retry_startup()?;
+        Ok(())
+    }
+
     /// Get current status
     pub fn status(&self) -> SimulationStatus {
         lock_progress(&self.progress, "SimulationRunner::status")

@@ -5,12 +5,25 @@ import hashlib
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import Mock
 
 from browser_workbench import WorkbenchBrowser, controls
 from check_browser_workbench import verify_checkpoint, verify_recovery_copy
 
 
 class BrowserWorkbenchTests(unittest.TestCase):
+    def test_diagnostic_collection_cannot_erase_the_original_console_failure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            browser = WorkbenchBrowser.__new__(WorkbenchBrowser)
+            browser.output = Path(directory)
+            failure = {"level": "SEVERE", "message": "original worker failure"}
+            browser.call = Mock(side_effect=[[failure], []])
+            browser.script = Mock(side_effect=[[], []])
+            for _ in range(2):
+                with self.assertRaisesRegex(AssertionError, "original worker failure"):
+                    browser.assert_no_errors()
+            self.assertEqual(json.loads((browser.output / "console.json").read_text()), [failure])
+
     def test_nested_control_transforms_preserve_exact_node_identity(self):
         root, parent, child = 2**63, 2**63 + 1, 2**63 + 2
         snapshot = {"tree": {"tree": {"root": root}, "nodes": [

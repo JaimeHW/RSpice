@@ -92,7 +92,8 @@ def key_actions(sequence):
 
 class WorkbenchBrowser:
     def __init__(self, web_root: Path, output: Path, driver: str | None = None,
-                 browser: str | None = None, software_webgpu: bool = False):
+                 browser: str | None = None, software_webgpu: bool = False,
+                 request_handler=http.server.SimpleHTTPRequestHandler):
         self.web_root = web_root.resolve()
         self.output = output.resolve()
         self.output.mkdir(parents=True, exist_ok=True)
@@ -103,6 +104,7 @@ class WorkbenchBrowser:
             raise RuntimeError("A matching ChromeDriver is required; pass --driver")
         self.browser = browser or find_chromium()
         self.software_webgpu = software_webgpu
+        self.request_handler = request_handler
         self.session = None
         self.process = None
         self.server = None
@@ -120,7 +122,7 @@ class WorkbenchBrowser:
             raise
 
     def _start(self):
-        handler = functools.partial(http.server.SimpleHTTPRequestHandler,
+        handler = functools.partial(self.request_handler,
                                     directory=str(self.web_root))
         self.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
@@ -199,6 +201,20 @@ class WorkbenchBrowser:
     def script(self, script, *args):
         return self.call("POST", "/execute/sync", {"script": script, "args": list(args)})
 
+    def webgpu_adapter(self):
+        adapter = self.call("POST", "/execute/async", {"args": [], "script": """
+            const done = arguments[arguments.length - 1];
+            navigator.gpu.requestAdapter().then(adapter => done(adapter ? {
+                vendor: adapter.info.vendor, architecture: adapter.info.architecture,
+                device: adapter.info.device, description: adapter.info.description
+            } : null), error => done({error: String(error)}));
+        """})
+        if not adapter or "error" in adapter:
+            raise AssertionError(f"No usable WebGPU adapter: {adapter}")
+        if self.software_webgpu and adapter["architecture"] != "swiftshader":
+            raise AssertionError(f"SwiftShader was requested but not selected: {adapter}")
+        return adapter
+
     def record_input(self, action, **details):
         record = {"action": action, "unix_ms": time.time_ns() // 1_000_000,
                   "monotonic_ns": time.monotonic_ns(), **details}
@@ -275,9 +291,16 @@ class WorkbenchBrowser:
         (self.output / f"{name}.json").write_text(json.dumps(snapshot, indent=2), encoding="utf-8")
         return snapshot
 
-    def assert_no_errors(self):
+    def console_entries(self):
         entries = self.call("POST", "/se/log", {"type": "browser"})
-        (self.output / "console.json").write_text(json.dumps(entries, indent=2), encoding="utf-8")
+        output = self.output / "console.json"
+        if output.exists():
+            entries = json.loads(output.read_text(encoding="utf-8")) + entries
+        output.write_text(json.dumps(entries, indent=2), encoding="utf-8")
+        return entries
+
+    def assert_no_errors(self):
+        entries = self.console_entries()
         errors = self.script("return window.__rspiceQualificationErrors || []")
         errors.extend(entry["message"] for entry in entries if entry["level"] == "SEVERE")
         if errors:

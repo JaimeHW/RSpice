@@ -2,6 +2,7 @@
 
 use egui::{Align, Frame, Layout, Panel, Sense, Ui, Vec2};
 
+use crate::simulation::status::EngineAvailability;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::workbench::RSpiceApp;
@@ -64,20 +65,27 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
             } else {
                 format!("{}%", (zoom_factor(app) * 100.0).round())
             };
-            let (engine, cancellation_pending) = simulation_engine_status(&app.state.simulation);
-            let engine_color = if cancellation_pending {
+            let availability = app.simulation_controller.engine_availability();
+            let (engine, cancellation_pending) =
+                simulation_engine_status(&app.state.simulation, &availability);
+            let engine_color = if availability.failure_reason().is_some() {
+                t.color.err
+            } else if cancellation_pending || availability == EngineAvailability::Starting {
                 t.color.warn
+            } else if availability == EngineAvailability::Restartable {
+                t.color.text_dim
             } else if app.state.simulation.has_active_execution() {
                 t.color.accent
             } else {
                 t.color.ok
             };
-            let engine_wash = if cancellation_pending {
-                semantic_wash(t.color.warn, t.mode)
-            } else if app.state.simulation.has_active_execution() {
+            let engine_wash = if availability == EngineAvailability::Ready
+                && !cancellation_pending
+                && app.state.simulation.has_active_execution()
+            {
                 t.color.accent_dim
             } else {
-                semantic_wash(t.color.ok, t.mode)
+                semantic_wash(engine_color, t.mode)
             };
             let platform = platform_label();
             let check_mark = StatusMark::Check(check_tone(app, &t));
@@ -201,7 +209,10 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                         // dataset it produced is the one thing a reader wants
                         // next, so the chip is the route to it rather than a
                         // label about it.
-                        let can_open = app.state.project_lifecycle.project_open
+                        let can_retry = (availability == EngineAvailability::Restartable || availability.failure_reason().is_some())
+                            && !app.state.simulation.has_active_execution();
+                        let can_open = availability == EngineAvailability::Ready
+                            && app.state.project_lifecycle.project_open
                             && app
                                 .state
                                 .simulation
@@ -209,13 +220,25 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                                 .is_some();
                         let engine_response = ui
                             .scope(|ui| {
-                                if !can_open {
+                                if !can_open && !can_retry {
                                     ui.disable();
                                 }
                                 status_item_sized(ui, &engine, engine_mark, true, widths[1])
                             })
                             .inner;
-                        if can_open {
+                        if can_retry {
+                            let detail = availability.failure_reason().map_or_else(
+                                || "Restart the simulation engine. This does not queue a simulation.".to_owned(),
+                                |reason| format!("{reason}\nRetry engine startup. This does not queue a simulation."),
+                            );
+                            if engine_response.on_hover_text(detail).clicked()
+                                && let Err(error) = app.simulation_controller.retry_engine_startup()
+                            {
+                                app.state.push_sim_message(crate::diagnostics::ConsoleMessage::error(
+                                    format!("Engine startup could not be retried: {error}"),
+                                ));
+                            }
+                        } else if can_open {
                             if engine_response
                                 .on_hover_text(
                                     "Open the newest retained result dataset in Results",
@@ -225,9 +248,12 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                                 crate::workbench::commands::result_navigation::open_newest_retained_run(app);
                             }
                         } else {
-                            engine_response.on_disabled_hover_text(
-                                "No run has retained a dataset yet, so there is nothing to open in Results.",
-                            );
+                            let detail = availability.failure_reason().unwrap_or(match &availability {
+                                EngineAvailability::Starting => "The simulation engine is starting. Validated Run requests wait for initialization.",
+                                EngineAvailability::Restartable => "The current execution is finishing its cancellation before the engine can restart.",
+                                _ => "No run has retained a dataset yet, so there is nothing to open in Results.",
+                            });
+                            engine_response.on_disabled_hover_text(detail);
                         }
                         if visibility.platform {
                             status_item_sized(ui, &platform, platform_mark, false, widths[2]);
@@ -401,9 +427,26 @@ fn simulation_progress_percent(progress: f64) -> u8 {
     (progress.clamp(0.0, 1.0) * 100.0).round() as u8
 }
 
-fn simulation_engine_status(simulation: &crate::state::SimulationState) -> (String, bool) {
+fn simulation_engine_status(
+    simulation: &crate::state::SimulationState,
+    availability: &EngineAvailability,
+) -> (String, bool) {
+    if availability.failure_reason().is_some() {
+        return ("Engine unavailable".to_owned(), false);
+    }
+    if *availability == EngineAvailability::Starting && !simulation.cancellation_is_pending() {
+        return ("Engine starting".to_owned(), false);
+    }
     if !simulation.has_active_execution() {
-        return ("Engine ready".to_owned(), false);
+        return (
+            if *availability == EngineAvailability::Restartable {
+                "Engine stopped"
+            } else {
+                "Engine ready"
+            }
+            .to_owned(),
+            false,
+        );
     }
     let phase = match simulation.active_execution_lifecycle() {
         Some(crate::state::SimulationRunLifecycle::Preparing) => "preparing",
@@ -1133,14 +1176,52 @@ mod tests {
         simulation.is_running = false;
 
         assert_eq!(
-            simulation_engine_status(&simulation),
+            simulation_engine_status(&simulation, &EngineAvailability::Ready),
             ("Engine preparing · 38%".to_owned(), false)
         );
 
         simulation.request_abort_active_run().unwrap();
         assert_eq!(
-            simulation_engine_status(&simulation),
+            simulation_engine_status(&simulation, &EngineAvailability::Ready),
             ("Engine stopping · 38%".to_owned(), true)
+        );
+    }
+
+    #[test]
+    fn idle_engine_status_requires_actual_backend_readiness() {
+        let simulation = crate::state::SimulationState::default();
+        for (availability, expected) in [
+            (EngineAvailability::Ready, "Engine ready"),
+            (EngineAvailability::Starting, "Engine starting"),
+            (EngineAvailability::Restartable, "Engine stopped"),
+            (
+                EngineAvailability::Unavailable("worker module missing".into()),
+                "Engine unavailable",
+            ),
+        ] {
+            assert_eq!(
+                simulation_engine_status(&simulation, &availability),
+                (expected.to_owned(), false)
+            );
+        }
+    }
+
+    #[test]
+    fn backend_startup_and_failure_do_not_advertise_running_progress() {
+        let mut simulation = crate::state::SimulationState::default();
+        let identity = simulation.start_run().execution_identity().unwrap();
+        simulation.active_execution = Some(identity);
+        simulation.progress = 0.375;
+        assert_eq!(
+            simulation_engine_status(&simulation, &EngineAvailability::Starting),
+            ("Engine starting".to_owned(), false)
+        );
+        assert_eq!(
+            simulation_engine_status(
+                &simulation,
+                &EngineAvailability::Unavailable("worker initialization failed".into())
+            ),
+            ("Engine unavailable".to_owned(), false)
         );
     }
 
