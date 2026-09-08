@@ -311,7 +311,9 @@ def test_pss_local_source_mesh_survives_python_and_pickle(source):
     ("exp(-10000*(1-cos(2*pi*64meg*time+0.1)))", 0.003989472674605),
     ("exp(-1000000*(cos(2*pi*64meg*time+0.1)+0.5*cos(2*pi*128meg*time+0.2)-0.25)^2)", 0.0003257350825830),
     ("exp(-1000000*((cos(2*pi*64meg*time+0.1)+0.5*cos(2*(2*pi*64meg*time+0.1)))/(sqr(sin(2*pi*64meg*time+0.1))+sqr(cos(2*pi*64meg*time+0.1)))-0.25)^2)", 0.0003257350825830),
+    ("exp(-1000000*((1e-310*(cos(2*pi*64meg*time+0.1)+0.5*cos(2*(2*pi*64meg*time+0.1))))/(1e-310*(sin(2*pi*64meg*time+0.1)^2+cos(2*pi*64meg*time+0.1)^2))-0.25)^2)", 0.0003257350825830),
     ("abs(cos(2*pi*64meg*time+0.1)+0.5*cos(2*pi*128meg*time+0.2)-0.25)<0.001", 0.000367552653101734),
+    ("0.5*(1-pwrs(abs(cos(2*pi*64meg*time+0.1)+0.5*cos(2*pi*128meg*time+0.2)-0.25)-0.001,0))", 0.000367552653101734),
 ])
 def test_pss_nonlinear_time_features_survive_python_and_pickle(expression, expected_dc):
     result = rspice.Engine().run_pss(

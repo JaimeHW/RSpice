@@ -8,6 +8,74 @@ use super::*;
 use crate::expr::{TimeEnclosure, TimeInterval, compile_time_expression};
 
 impl EventSchedule<'_> {
+    pub(super) fn source_expression(
+        &mut self,
+        expr: &Expr,
+        context: &Context<'_>,
+    ) -> Result<(), BehavioralBreakpointError> {
+        if !needs_time_features(expr, self.tstop, context) {
+            return self.expression(expr, context, false);
+        }
+        let program = compile_time_expression(expr, context);
+        let Some(mut bounds) = TimeEnclosure::new(&program, self.tstop) else {
+            return self.expression(expr, context, true);
+        };
+        let mut operations: usize = 0;
+        let mut is_constant = |lower, upper| -> Result<bool, BehavioralBreakpointError> {
+            self.poll()?;
+            operations = operations.saturating_add(program.instructions.len());
+            if operations > 16_000_000 {
+                return Err(BehavioralBreakpointError::Invalid(
+                    "source-feature qualification exceeds its 16000000-instruction work limit",
+                ));
+            }
+            Ok(bounds
+                .evaluate(TimeInterval { lower, upper }, context)
+                .is_some_and(|domain| {
+                    domain.continuous
+                        && domain.value.is_finite()
+                        && domain.value.lower == domain.value.upper
+                }))
+        };
+        if is_constant(0.0, self.tstop)? {
+            return Ok(());
+        }
+        // Qualify only this source's internal geometry. A flat source must
+        // never remove another source's clocks or pre-existing breakpoints.
+        let mut source = EventSchedule {
+            events: BTreeSet::new(),
+            ..*self
+        };
+        source.expression(expr, context, true)?;
+        let mut retained = BTreeSet::new();
+        let mut previous = 0.0;
+        let mut candidates = source.events.into_iter().peekable();
+        while let Some(bits) = candidates.next() {
+            let time = Value::from_bits(bits);
+            let next = candidates
+                .peek()
+                .map_or(self.tstop, |&bits| Value::from_bits(bits));
+            let mut lower = previous + 0.5 * (time - previous);
+            let mut upper = time + 0.5 * (next - time);
+            // Adjacent timestamps still require a nonzero neighborhood.
+            // This preserves an actual VM jump on either side of a clock.
+            if lower == time {
+                lower = previous;
+            }
+            if upper == time {
+                upper = next;
+            }
+            if lower == upper || !is_constant(lower, upper)? {
+                retained.insert(bits);
+            }
+            previous = time;
+        }
+        for bits in retained {
+            self.add(Value::from_bits(bits))?;
+        }
+        Ok(())
+    }
+
     fn isolated_levels(
         &mut self,
         expr: &Expr,
@@ -64,9 +132,9 @@ impl EventSchedule<'_> {
         let mut roots = BTreeSet::new();
         while let Some(interval) = pending.pop() {
             charge()?;
-            let Some((value, slope)) = bounds
+            let Some(domain) = bounds
                 .evaluate(interval, context)
-                .filter(|(value, _)| value.is_finite())
+                .filter(|bounds| bounds.value.is_finite())
             else {
                 // A denominator enclosure containing zero is uncertainty,
                 // not evidence of an absent feature or an actual pole.
@@ -74,13 +142,14 @@ impl EventSchedule<'_> {
                 subdivide_time_domain(interval, &mut pending)?;
                 continue;
             };
+            let (value, slope) = (domain.value, domain.slope);
             if identical_difference.is_some()
                 || !value.contains(target)
-                || (slope.lower == 0.0 && slope.upper == 0.0)
+                || (domain.continuous && slope.lower == 0.0 && slope.upper == 0.0)
             {
                 continue;
             }
-            if !slope.contains(0.0) {
+            if domain.continuous && !slope.contains(0.0) {
                 let mut left = interval.lower;
                 let mut right = interval.upper;
                 charge()?;
@@ -123,7 +192,7 @@ impl EventSchedule<'_> {
                                 },
                                 context,
                             )
-                            .is_some_and(|(value, _)| value.contains(target))
+                            .is_some_and(|bounds| bounds.value.contains(target))
                         {
                             roots.insert(time.to_bits());
                         }
@@ -144,21 +213,48 @@ impl EventSchedule<'_> {
             // This supplies mesh geometry, not a simple-root derivative
             // certificate; switching still uses actual one-sided VM values.
             charge()?;
-            if let Some((point, _)) = bounds.evaluate(
+            if let Some(point) = bounds.evaluate(
                 TimeInterval {
                     lower: midpoint,
                     upper: midpoint,
                 },
                 context,
             ) {
-                let uncertainty = point.upper - point.lower;
-                if uncertainty.is_finite()
+                let uncertainty = point.value.upper - point.value.lower;
+                if domain.continuous
+                    && point.continuous
+                    && uncertainty.is_finite()
                     && uncertainty > 0.0
-                    && point.contains(target)
+                    && point.value.contains(target)
                     && value.upper - value.lower <= 2.0 * uncertainty
                 {
                     for time in [interval.lower, midpoint, interval.upper] {
                         roots.insert(time.to_bits());
+                    }
+                    ResourceLimitError::ensure(
+                        ResourceKind::AnalysisPoints,
+                        roots.len(),
+                        self.max_points,
+                    )?;
+                    continue;
+                }
+            }
+            if midpoint == interval.lower || midpoint == interval.upper {
+                charge()?;
+                let left = evaluate(interval.lower)?;
+                charge()?;
+                let right = evaluate(interval.upper)?;
+                if !domain.continuous
+                    || left == target
+                    || right == target
+                    || (left < target) != (right < target)
+                {
+                    // A finite crossing between adjacent VM timestamps is
+                    // an observable feature even at a nonsmooth power branch.
+                    // Retain both sides; no smooth derivative is certified.
+                    roots.insert(interval.lower.to_bits());
+                    if interval.lower != 0.0 || interval.upper != Value::from_bits(1) {
+                        roots.insert(interval.upper.to_bits());
                     }
                     ResourceLimitError::ensure(
                         ResourceKind::AnalysisPoints,
@@ -184,7 +280,7 @@ impl EventSchedule<'_> {
         context: &Context<'_>,
     ) -> Result<(), BehavioralBreakpointError> {
         let program = compile_time_expression(phase, context);
-        let Some((range, _)) = TimeEnclosure::new(&program, self.tstop).and_then(|mut bounds| {
+        let Some(bounds) = TimeEnclosure::new(&program, self.tstop).and_then(|mut bounds| {
             bounds.evaluate(
                 TimeInterval {
                     lower: 0.0,
@@ -204,6 +300,7 @@ impl EventSchedule<'_> {
                 context,
             );
         };
+        let range = bounds.value;
         if !range.is_finite() {
             return Err(BehavioralBreakpointError::Invalid(
                 "a nonlinear phase range is not finite",
@@ -417,7 +514,7 @@ impl EventSchedule<'_> {
                                 }
                             }
                         }
-                        _ => {}
+                        _ => self.isolated_levels(expr, target, context)?,
                     }
                 } else if let Some(value) = constant_value(left, context) {
                     match op {
@@ -429,7 +526,7 @@ impl EventSchedule<'_> {
                         BinaryOp::Div if target != 0.0 => {
                             self.level(right, value / target, context)?
                         }
-                        _ => {}
+                        _ => self.isolated_levels(expr, target, context)?,
                     }
                 } else {
                     self.isolated_levels(expr, target, context)?;
@@ -477,7 +574,7 @@ impl EventSchedule<'_> {
                 (Function::Exp, [input]) if target > 0.0 => {
                     self.level(input, target.ln(), context)?
                 }
-                _ => {}
+                _ => self.isolated_levels(expr, target, context)?,
             },
             _ => {}
         }
@@ -531,6 +628,11 @@ impl EventSchedule<'_> {
                 _ => {}
             },
             Expr::Function { func, args } => match (func, args.as_slice()) {
+                (Function::Pow | Function::Pwr | Function::Pwrs, [input, exponent])
+                    if constant_value(exponent, context) == Some(0.0) =>
+                {
+                    self.discontinuities(expr, input, &[0.0], context)?;
+                }
                 (Function::Sin | Function::Cos, [_]) => {
                     for level in [-1.0, 0.0, 1.0] {
                         self.level(expr, level, context)?;

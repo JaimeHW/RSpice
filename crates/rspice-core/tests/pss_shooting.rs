@@ -231,6 +231,10 @@ fn nonlinear_time_features_cannot_hide_between_shooting_grids() {
             "exp(-1000000*((cos(2*pi*64meg*time+0.1)+0.5*cos(2*(2*pi*64meg*time+0.1)))/(sqr(sin(2*pi*64meg*time+0.1))+sqr(cos(2*pi*64meg*time+0.1)))-0.25)^2)",
             3,
         ),
+        (
+            "exp(-1000000*((1e-310*(cos(2*pi*64meg*time+0.1)+0.5*cos(2*(2*pi*64meg*time+0.1))))/(1e-310*(sin(2*pi*64meg*time+0.1)^2+cos(2*pi*64meg*time+0.1)^2))-0.25)^2)",
+            3,
+        ),
     ] {
         // Independent linear RC convolution on one source cycle. This uses
         // exact integration of densely sampled linear forcing segments, not
@@ -383,33 +387,39 @@ fn combined_comparison_coordinates_preserve_the_complete_rc_waveform() {
     };
     let initial = response(period, 0.0) / -(-period / tau).exp_m1();
     let expected_dc = (leave - enter) / std::f64::consts::PI;
-    let netlist = Netlist::parse(&format!(
-        "combined comparison clock\nB1 in 0 V=abs(cos(2*pi*64meg*time+0.1)+0.5*cos(2*pi*128meg*time+0.2)-0.25)<0.001\nR1 in out {R}\nC1 out 0 {C}\n.end\n"
-    )).unwrap();
-    let analysis = Engine::default()
-        .run_pss(&netlist, PssConfig::new(F0).with_tstab_periods(0))
+    for expression in [
+        "abs(cos(2*pi*64meg*time+0.1)+0.5*cos(2*pi*128meg*time+0.2)-0.25)<0.001",
+        "0.5*(1-pwrs(abs(cos(2*pi*64meg*time+0.1)+0.5*cos(2*pi*128meg*time+0.2)-0.25)-0.001,0))",
+    ] {
+        let netlist = Netlist::parse(&format!(
+            "combined comparison clock\nB1 in 0 V={expression}\nR1 in out {R}\nC1 out 0 {C}\n.end\n"
+        ))
         .unwrap();
-    let result = &analysis.result;
-    assert!(
-        result.time.len() < 4096,
-        "switching features must resolve locally"
-    );
-    let output = result
-        .node_names
-        .iter()
-        .position(|name| name.eq_ignore_ascii_case("out"))
-        .unwrap();
-    let mean = result.waveforms[output].dc(&result.time, result.period);
-    assert!(
-        (mean - expected_dc).abs() < 1e-6,
-        "DC {mean:e} versus {expected_dc:e}"
-    );
-    for (&time, &actual) in result.time.iter().zip(&result.waveforms[output].values) {
-        let expected = response(time.rem_euclid(period), initial);
+        let analysis = Engine::default()
+            .run_pss(&netlist, PssConfig::new(F0).with_tstab_periods(0))
+            .unwrap();
+        let result = &analysis.result;
         assert!(
-            (actual - expected).abs() < 1e-6,
-            "t={time:e}: {actual:e} versus {expected:e}"
+            result.time.len() < 4096,
+            "switching features must resolve locally"
         );
+        let output = result
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("out"))
+            .unwrap();
+        let mean = result.waveforms[output].dc(&result.time, result.period);
+        assert!(
+            (mean - expected_dc).abs() < 1e-6,
+            "DC {mean:e} versus {expected_dc:e}"
+        );
+        for (&time, &actual) in result.time.iter().zip(&result.waveforms[output].values) {
+            let expected = response(time.rem_euclid(period), initial);
+            assert!(
+                (actual - expected).abs() < 1e-6,
+                "t={time:e}: {actual:e} versus {expected:e}"
+            );
+        }
     }
 }
 

@@ -400,19 +400,11 @@ impl BehavioralSources {
         schedule.poll()?;
         for source in &self.voltage_sources {
             let context = source.periodicity_context();
-            schedule.expression(
-                &source.ast,
-                &context,
-                needs_time_features(&source.ast, tstop, &context),
-            )?;
+            schedule.source_expression(&source.ast, &context)?;
         }
         for source in &self.current_sources {
             let context = source.periodicity_context();
-            schedule.expression(
-                &source.ast,
-                &context,
-                needs_time_features(&source.ast, tstop, &context),
-            )?;
+            schedule.source_expression(&source.ast, &context)?;
         }
         schedule.poll()?;
         breakpoints.extend(schedule.events.into_iter().map(Value::from_bits));
@@ -593,56 +585,181 @@ mod tests {
     fn regular_quotient_domains_are_subdivided_before_isolating_features() {
         for scale in [1e-30, 1.0, 1e300] {
             let phase = format!("6*pi*(time/{scale:e})+0.1");
-            let denominator = format!("sqr(sin({phase}))+sqr(cos({phase}))");
-            let coordinate = format!("(cos({phase})+0.5*cos(2*({phase})))/({denominator})-0.25");
-            let events = collect(
-                &sources(&format!("exp(-1000000*({coordinate})^2)")),
-                scale,
-                512,
-                true,
-            )
-            .unwrap();
-            for cycle in 0..=3 {
-                for angle in [-std::f64::consts::FRAC_PI_3, std::f64::consts::FRAC_PI_3] {
-                    let time = (std::f64::consts::TAU * cycle as Value + angle - 0.1)
-                        / (6.0 * std::f64::consts::PI)
-                        * scale;
-                    if (0.0..=scale).contains(&time) {
-                        assert!(contains(&events, time), "missing quotient root {time:e}");
+            for (denominator, gain) in [
+                (format!("sqr(sin({phase}))+sqr(cos({phase}))"), 1.0),
+                (format!("sin({phase})^2+cos({phase})^2"), 1.0),
+                (format!("sin({phase})^2+cos({phase})^2"), 1e-310),
+                (format!("pow(sin({phase}),2)+pow(cos({phase}),2)"), 1e300),
+            ] {
+                let coordinate = format!(
+                    "({gain:e}*(cos({phase})+0.5*cos(2*({phase}))))/({gain:e}*({denominator}))-0.25"
+                );
+                let events = collect(
+                    &sources(&format!("exp(-1000000*({coordinate})^2)")),
+                    scale,
+                    512,
+                    true,
+                )
+                .unwrap();
+                for cycle in 0..=3 {
+                    for angle in [-std::f64::consts::FRAC_PI_3, std::f64::consts::FRAC_PI_3] {
+                        let time = (std::f64::consts::TAU * cycle as Value + angle - 0.1)
+                            / (6.0 * std::f64::consts::PI)
+                            * scale;
+                        if (0.0..=scale).contains(&time) {
+                            // Subnormal operand multiplication quantizes the
+                            // VM coordinate before division. Bound that input
+                            // quantization separately from clock rounding.
+                            let quantization = if gain < Value::MIN_POSITIVE {
+                                (gain.next_up() - gain) / gain * scale
+                            } else {
+                                0.0
+                            };
+                            assert!(
+                                events.iter().any(|event| (event - time).abs()
+                                    <= quantization + 16.0 * Value::EPSILON * time.abs()),
+                                "gain={gain:e}: missing quotient root {time:e}: {events:?}"
+                            );
+                        }
                     }
                 }
-            }
-            let mut switching = sources(&format!("abs({coordinate})<0.001"));
-            let events = collect(&switching, scale, 512, true).unwrap();
-            let transitions = events
-                .windows(2)
-                .filter(|pair| {
-                    pair[0].next_up() == pair[1]
-                        && switching.voltage_sources[0].evaluate(&[], pair[0]).unwrap()
-                            != switching.voltage_sources[0].evaluate(&[], pair[1]).unwrap()
-                })
-                .count();
-            assert_eq!(transitions, 12, "scale={scale:e}: {events:?}");
+                let mut switching = sources(&format!("abs({coordinate})<0.001"));
+                let events = collect(&switching, scale, 512, true).unwrap();
+                let transitions = events
+                    .windows(2)
+                    .filter(|pair| {
+                        pair[0].next_up() == pair[1]
+                            && switching.voltage_sources[0].evaluate(&[], pair[0]).unwrap()
+                                != switching.voltage_sources[0].evaluate(&[], pair[1]).unwrap()
+                    })
+                    .count();
+                assert_eq!(transitions, 12, "scale={scale:e}: {events:?}");
 
+                let events = collect(
+                    &sources(&format!(
+                        "cos(({gain:e}*({phase}))/({gain:e}*({denominator})))"
+                    )),
+                    scale,
+                    512,
+                    true,
+                )
+                .unwrap();
+                for index in 1..=6 {
+                    let time = (index as Value * std::f64::consts::PI - 0.1)
+                        / (6.0 * std::f64::consts::PI)
+                        * scale;
+                    assert!(
+                        events
+                            .iter()
+                            .any(|event| ((event - time) / scale).abs() < 1e-6),
+                        "missing quotient phase extremum {time:e}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn power_branch_transitions_and_varying_exponents_supply_features() {
+        for expression in [
+            "pow(time,2)>0.25",
+            "pwr(time-0.5,0)+0.1*sin(time)",
+            "pwrs(time-0.5,0)+0.1*sin(time)",
+        ] {
+            let mut source = sources(expression);
+            let events = collect(&source, 1.0, 128, true)
+                .unwrap_or_else(|error| panic!("{expression}: {error}"));
+            assert!(
+                events.windows(2).any(|pair| pair[0].next_up() == pair[1]
+                    && source.voltage_sources[0].evaluate(&[], pair[0]).unwrap()
+                        != source.voltage_sources[0].evaluate(&[], pair[1]).unwrap()),
+                "{expression}: {events:?}"
+            );
+            assert!(contains(&events, 0.5), "{expression}: {events:?}");
+        }
+        for expression in ["2^(sin(6*pi*time)+1)-2", "pow(cos(6*pi*time),2)-0.25"] {
+            // A sharp envelope requires geometry even when the inner
+            // coordinate itself has a known finite harmonic band.
             let events = collect(
-                &sources(&format!("cos(({phase})/({denominator}))")),
-                scale,
-                512,
+                &sources(&format!("exp(-10000*({expression})^2)")),
+                1.0,
+                256,
                 true,
             )
             .unwrap();
-            for index in 1..=6 {
-                let time = (index as Value * std::f64::consts::PI - 0.1)
-                    / (6.0 * std::f64::consts::PI)
-                    * scale;
+            for index in 1..6 {
+                let time = if expression.starts_with('2') {
+                    index as Value / 6.0
+                } else {
+                    (index as Value / 2.0 + 1.0 / 6.0) / 3.0
+                };
                 assert!(
-                    events
-                        .iter()
-                        .any(|event| ((event - time) / scale).abs() < 1e-6),
-                    "missing quotient phase extremum {time:e}"
+                    contains(&events, time),
+                    "{expression}: missing {time:e}: {events:?}"
                 );
             }
         }
+    }
+
+    #[test]
+    fn source_plateaus_discard_inactive_geometry_and_preserve_gaussian_peaks() {
+        for gain in [1.0_f64, 1e-310] {
+            let phase = "2*pi*64meg*time+0.1";
+            let expression = format!(
+                "exp(-1000000*(({gain:e}*(cos({phase})+0.5*cos(2*({phase}))))/({gain:e}*(sin({phase})^2+cos({phase})^2))-0.25)^2)"
+            );
+            let source = sources(&expression);
+            let events = collect(&source, 1e-6, 10000, true).unwrap();
+            let rate = std::f64::consts::TAU * 64e6;
+            // The numerator-zero and peak phases are the closest distinct
+            // structural features. Rounded subnormal numerator zeros must
+            // not insert neighboring clocks where the final exp is zero.
+            let separation =
+                ((0.5 * (3.0_f64.sqrt() - 1.0)).acos() - std::f64::consts::FRAC_PI_3) / rate;
+            assert!(
+                events
+                    .windows(2)
+                    .all(|pair| pair[1] - pair[0] > 0.5 * separation)
+            );
+            for cycle in 0..64 {
+                for phase in [
+                    std::f64::consts::FRAC_PI_3,
+                    5.0 * std::f64::consts::FRAC_PI_3,
+                ] {
+                    let peak = (std::f64::consts::TAU * cycle as Value + phase - 0.1) / rate;
+                    let quantization = (gain.next_up() - gain) / gain / rate;
+                    assert!(
+                        events.iter().any(|&time| (time - peak).abs()
+                            <= 16.0 * Value::EPSILON * 1e-6 + quantization),
+                        "gain={gain:e}, missing peak={peak:e}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn source_plateau_pruning_preserves_foreign_clocks_and_real_power_jumps() {
+        let mut source = sources("exp(-1000+pwrs(time-0.5,0))");
+        assert!(collect(&source, 1.0, 32, true).unwrap().is_empty());
+        source.voltage_sources.push(
+            BehavioralVoltageSource::new("B2".to_owned(), 2, 0, 2, "table(time,0,0,0.5,1,1,0)")
+                .unwrap(),
+        );
+        let sentinel = 0.25;
+        let mut manager = BreakpointManager::new_with_tolerance(Value::from_bits(1));
+        manager.extend([sentinel]);
+        source
+            .collect_transient_breakpoints(1.0, &mut manager, &NoAbort, 32, true)
+            .unwrap();
+        assert_eq!(manager.times(), &[0.0, sentinel, 0.5, 1.0]);
+        let events = collect(&sources("exp(pwrs(time-0.5,0))"), 1.0, 32, true).unwrap();
+        assert!(events.contains(&0.5));
+        assert!(
+            events
+                .iter()
+                .any(|&time| time < 0.5 && time.next_up() == 0.5)
+        );
     }
 
     #[test]
