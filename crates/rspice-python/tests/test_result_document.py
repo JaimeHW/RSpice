@@ -326,12 +326,18 @@ def test_pss_local_source_mesh_survives_python_and_pickle(source):
     ("exp(-1000000*(asinh(cos(2*pi*64meg*time+0.1))+0.5*asinh(cos(2*(2*pi*64meg*time+0.1)))-0.25)^2)", 0.00036317795605477475),
     ("exp(-1000000*(acosh(2+cos(2*pi*64meg*time+0.1))+0.5*acosh(2+cos(2*(2*pi*64meg*time+0.1)))-1.5)^2)", 0.00037163118229903647),
     ("exp(-1000000*(atanh(0.5*cos(2*pi*64meg*time+0.1))+0.5*atanh(0.5*cos(2*(2*pi*64meg*time+0.1)))-0.25)^2)", 0.000607763343389148),
+    ("exp(-1000000*(asin(0.5*cos(2*pi*64meg*time+0.1))+0.5*asin(0.5*cos(2*(2*pi*64meg*time+0.1)))-0.25)^2)", 0.0006247583059893382),
+    ("exp(-1000000*(acos(0.5*cos(2*pi*64meg*time+0.1))+0.5*acos(0.5*cos(2*(2*pi*64meg*time+0.1)))-2.1)^2)", 0.0006251590597194105),
+    ("exp(-1000000*(tan(0.5*cos(2*pi*64meg*time+0.1))+0.5*tan(0.5*cos(2*(2*pi*64meg*time+0.1)))-0.25)^2)", 0.000608698982941285),
+    ("exp(-1000000*atan2(cos(2*pi*64meg*time+0.1)+0.5*cos(2*(2*pi*64meg*time+0.1))-0.25,2)^2)", 0.0006514709387906895),
+    ("atan2(0*sin(2*pi*64meg*time+0.1),-1)", 0.0),
     ("abs(cos(2*pi*64meg*time+0.1)+0.5*cos(2*pi*128meg*time+0.2)-0.25)<0.001", 0.000367552653101734),
     ("0.5*(1-pwrs(abs(cos(2*pi*64meg*time+0.1)+0.5*cos(2*pi*128meg*time+0.2)-0.25)-0.001,0))", 0.000367552653101734),
 ])
 def test_pss_nonlinear_time_features_survive_python_and_pickle(expression, expected_dc):
+    options = ".options reltol=1e-4\n" if expected_dc == 0.0 else ""
     result = rspice.Engine().run_pss(
-        parse(f"* Nonlinear clock feature\nB1 in 0 V={expression}\n"
+        parse(f"* Nonlinear clock feature\n{options}B1 in 0 V={expression}\n"
               "R1 in out 1k\nC1 out 0 159.154943091895p\n"),
         1e6, tstab_periods=0, points_per_period=256,
     )
@@ -341,3 +347,9 @@ def test_pss_nonlinear_time_features_survive_python_and_pickle(expression, expec
     np.testing.assert_array_equal(restored.voltage_waveform("out"), result.voltage_waveform("out"))
     for waveform in (result, restored):
         assert abs(waveform.dc("out") - expected_dc) < (1e-6 if expected_dc < .001 else 1e-5)
+        if expected_dc == 0.0:
+            high = np.pi * np.tanh((1 / 64e6) / (4 * 1000 * 159.154943091895e-12))
+            values = waveform.voltage_waveform("out")
+            assert abs(np.max(values) - high) < 1e-5
+            assert abs(np.min(values) + high) < 1e-5
+            assert waveform.num_points < 8192

@@ -132,7 +132,6 @@ pub fn resolve_simulation_config(
     let mut transient_new_bp_stepping = base.transient_new_bp_stepping;
     let mut ramptime = base.ramptime;
     let mut digital_delay_type = base.digital_delay_type;
-    let mut tolerance = base.tolerance;
     let mut voltage_reltol = base.convergence_config.voltage_reltol;
     let mut voltage_abstol = base.convergence_config.voltage_abstol;
     let mut current_abstol = base.convergence_config.current_abstol;
@@ -270,7 +269,8 @@ pub fn resolve_simulation_config(
             digital_delay_type = Some(value);
         }
         if let Some(reltol) = opts.reltol {
-            tolerance = reltol;
+            // The legacy `tolerance` field supplies an absolute voltage
+            // fallback. A relative option must not change that fallback.
             voltage_reltol = reltol;
             if opts.residual_reltol.is_none() {
                 residual_reltol = reltol;
@@ -381,7 +381,6 @@ pub fn resolve_simulation_config(
         digital_delay_type = Some(value);
     }
     if let Some(reltol) = overrides.reltol {
-        tolerance = reltol;
         voltage_reltol = reltol;
     }
     if let Some(abstol) = overrides.abstol {
@@ -478,7 +477,6 @@ pub fn resolve_simulation_config(
     resolved.transient_new_bp_stepping = transient_new_bp_stepping;
     resolved.ramptime = ramptime;
     resolved.digital_delay_type = digital_delay_type;
-    resolved.tolerance = tolerance;
     resolved.convergence_config.voltage_reltol = voltage_reltol;
     resolved.convergence_config.voltage_abstol = voltage_abstol;
     resolved.convergence_config.current_abstol = current_abstol;
@@ -528,6 +526,37 @@ mod tests {
         );
         assert!(overridden.device_voltage_limiting);
         assert!(SimulationConfig::default().device_voltage_limiting);
+    }
+
+    #[test]
+    fn relative_tolerance_changes_preserve_absolute_voltage_and_current_tolerances() {
+        for absolute in [0.0, 2e-7] {
+            let mut base = SimulationConfig {
+                tolerance: 3e-6,
+                ..Default::default()
+            };
+            base.convergence_config.voltage_abstol = absolute;
+            let expected = crate::Engine::new(base.clone());
+            let options = NetlistSimulationOptions {
+                reltol: Some(1e-4),
+                ..Default::default()
+            };
+            for override_relative in [None, Some(1e-5)] {
+                let overrides = SimulationConfigOverrides {
+                    reltol: override_relative,
+                    ..Default::default()
+                };
+                let resolved = resolve_simulation_config(&base, Some(&options), &overrides);
+                let engine = crate::Engine::new(resolved);
+                assert_eq!(engine.voltage_reltol(), override_relative.unwrap_or(1e-4));
+                assert_eq!(engine.voltage_abstol(), expected.voltage_abstol());
+                assert_eq!(engine.current_abstol(), expected.current_abstol());
+                assert_eq!(
+                    engine.transient_lte_abstol(),
+                    expected.transient_lte_abstol()
+                );
+            }
+        }
     }
 
     #[test]

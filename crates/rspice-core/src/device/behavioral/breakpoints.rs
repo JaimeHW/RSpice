@@ -210,13 +210,21 @@ impl EventSchedule<'_> {
 
     fn charge_isolation_work(&self, cost: usize) -> Result<(), BehavioralBreakpointError> {
         if let Some(work) = self.isolation_work {
-            let used = work.get().saturating_add(cost);
-            work.set(used);
-            if used > 16_000_000 {
-                return Err(BehavioralBreakpointError::Invalid(
-                    "extrema branch isolation exceeds its 16000000-instruction work limit",
-                ));
-            }
+            Self::charge_feature_work(work, cost)?;
+        }
+        Ok(())
+    }
+
+    fn charge_feature_work(
+        work: &Cell<usize>,
+        cost: usize,
+    ) -> Result<(), BehavioralBreakpointError> {
+        let used = work.get().saturating_add(cost);
+        work.set(used);
+        if used > 16_000_000 {
+            return Err(BehavioralBreakpointError::Invalid(
+                "source feature qualification exceeds its 16000000-instruction work limit",
+            ));
         }
         Ok(())
     }
@@ -611,6 +619,47 @@ mod tests {
     }
 
     #[test]
+    fn circular_levels_clamps_poles_and_polar_seams_share_transient_features() {
+        for stop in [1e-30, 1.0, 1e300] {
+            for (function, target) in [
+                ("asin", 0.3_f64.asin()),
+                ("acos", 0.3_f64.acos()),
+                ("tan", 0.3_f64.tan()),
+            ] {
+                let source = sources(&format!(
+                    "exp(-1000*({function}(2*time/{stop:e}-1)-{target:e})^2)"
+                ));
+                let events = collect(&source, stop, 32, true).unwrap();
+                assert!(contains(&events, 0.65 * stop), "{function}: {events:?}");
+                assert_eq!(events, collect(&source, stop, 32, false).unwrap());
+            }
+            for squared in [false, true] {
+                let phase = if squared {
+                    format!("2*pi*(time/{stop:e})^2")
+                } else {
+                    format!("2*pi*time/{stop:e}")
+                };
+                let source = sources(&format!("tan({phase})"));
+                let events = collect(&source, stop, 32, true).unwrap();
+                for fraction in [0.25_f64, 0.75] {
+                    let expected = (if squared { fraction.sqrt() } else { fraction }) * stop;
+                    assert!(contains(&events, expected), "{phase}: {events:?}");
+                }
+                assert_eq!(events, collect(&source, stop, 32, false).unwrap());
+            }
+            for expression in [
+                format!("atan2(time/{stop:e}-0.5,-1)"),
+                format!("atan2(0*(time/{stop:e}-0.5),-1)"),
+            ] {
+                let source = sources(&expression);
+                let events = collect(&source, stop, 32, true).unwrap();
+                assert!(contains(&events, 0.5 * stop), "{expression}: {events:?}");
+                assert_eq!(events, collect(&source, stop, 32, false).unwrap());
+            }
+        }
+    }
+
+    #[test]
     fn extrema_cusp_levels_are_found_between_representable_timestamps() {
         for stop in [1e-30, 1.0, 1e300] {
             for function in ["min", "max"] {
@@ -660,7 +709,9 @@ mod tests {
             .temporal_features(&expr, &Context::transient(&[], &[], 0.0))
             .unwrap_err();
         assert!(
-            error.to_string().contains("extrema branch isolation"),
+            error
+                .to_string()
+                .contains("16000000-instruction work limit"),
             "{error}"
         );
         assert!(schedule.events.is_empty());
@@ -676,7 +727,9 @@ mod tests {
             .temporal_features(&expr, &Context::transient(&[], &[], 0.0))
             .unwrap_err();
         assert!(
-            error.to_string().contains("extrema branch isolation"),
+            error
+                .to_string()
+                .contains("16000000-instruction work limit"),
             "{error}"
         );
         assert!(schedule.events.is_empty());

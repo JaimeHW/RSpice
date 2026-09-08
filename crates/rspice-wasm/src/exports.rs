@@ -379,6 +379,23 @@ mod wasm_tests {
                 "B1 in 0 V=exp(-1000000*(atanh(0.5*cos(2*pi*64meg*time+0.1))+0.5*atanh(0.5*cos(2*(2*pi*64meg*time+0.1)))-0.25)^2)",
                 0.000607763343389148,
             ),
+            (
+                "B1 in 0 V=exp(-1000000*(asin(0.5*cos(2*pi*64meg*time+0.1))+0.5*asin(0.5*cos(2*(2*pi*64meg*time+0.1)))-0.25)^2)",
+                0.0006247583059893382,
+            ),
+            (
+                "B1 in 0 V=exp(-1000000*(acos(0.5*cos(2*pi*64meg*time+0.1))+0.5*acos(0.5*cos(2*(2*pi*64meg*time+0.1)))-2.1)^2)",
+                0.0006251590597194105,
+            ),
+            (
+                "B1 in 0 V=exp(-1000000*(tan(0.5*cos(2*pi*64meg*time+0.1))+0.5*tan(0.5*cos(2*(2*pi*64meg*time+0.1)))-0.25)^2)",
+                0.000608698982941285,
+            ),
+            (
+                "B1 in 0 V=exp(-1000000*atan2(cos(2*pi*64meg*time+0.1)+0.5*cos(2*(2*pi*64meg*time+0.1))-0.25,2)^2)",
+                0.0006514709387906895,
+            ),
+            ("B1 in 0 V=atan2(0*sin(2*pi*64meg*time+0.1),-1)", 0.0),
             ("V1 in 0 PULSE(0 1 400p 10p 10p 100p 1u)", 0.00011),
             ("B1 in 0 V=spice_pulse(0,1,400p,10p,10p,100p,1u)", 0.00011),
             (
@@ -394,8 +411,14 @@ mod wasm_tests {
                 0.0011,
             ),
         ] {
+            let polar_square = source.contains("atan2(0*sin");
+            let options = if polar_square {
+                ".options reltol=1e-4\n"
+            } else {
+                ""
+            };
             let netlist = rspice_core::Netlist::parse(&format!(
-                "WASM aliased forcing\n{source}\nR1 in out 1k\nC1 out 0 159.154943091895p\n.end\n"
+                "WASM aliased forcing\n{options}{source}\nR1 in out 1k\nC1 out 0 159.154943091895p\n.end\n"
             ))
             .unwrap();
             let analysis = rspice_core::Engine::default()
@@ -414,6 +437,16 @@ mod wasm_tests {
                 .position(|name| name.eq_ignore_ascii_case("out"))
                 .unwrap();
             let mean = result.waveforms[output].dc(&result.time, result.period);
+            if polar_square {
+                let high = std::f64::consts::PI
+                    * ((1.0 / 64e6) / (4.0 * 1000.0 * 159.154943091895e-12_f64)).tanh();
+                let values = &result.waveforms[output].values;
+                assert!(
+                    (values.iter().copied().fold(f64::NEG_INFINITY, f64::max) - high).abs() < 1e-5
+                );
+                assert!((values.iter().copied().fold(f64::INFINITY, f64::min) + high).abs() < 1e-5);
+                assert!(steps < 8192);
+            }
             let tolerance = if dc == 0.00011 || dc == 0.0011 {
                 assert!(steps < 1024, "the local source mesh must stay bounded");
                 1e-7

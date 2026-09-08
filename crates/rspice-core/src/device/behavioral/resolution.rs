@@ -126,6 +126,29 @@ impl BehavioralSources {
                         return Ok(Resolution::Qualified);
                     }
                     if !domain.continuous {
+                        if domain.vm_monotone {
+                            // A proved VM order makes equal endpoints an exact
+                            // plateau, even when outward bounds straddle a jump.
+                            charge()?;
+                            let left = vm.execute(
+                                &program,
+                                &Context {
+                                    time: interval.lower,
+                                    ..context
+                                },
+                            );
+                            charge()?;
+                            let right = vm.execute(
+                                &program,
+                                &Context {
+                                    time: interval.upper,
+                                    ..context
+                                },
+                            );
+                            if left.is_finite() && left == right {
+                                return Ok(Resolution::Qualified);
+                            }
+                        }
                         // Outward rounding at a branch boundary can include its
                         // other side. Cover all interior VM timestamps by bounds,
                         // then authenticate the two excluded endpoints directly.
@@ -256,6 +279,45 @@ mod tests {
             .voltage_sources
             .push(BehavioralVoltageSource::new("B1".to_owned(), 1, 0, 1, expression).unwrap());
         sources
+    }
+
+    #[test]
+    fn polar_zero_plateaus_preserve_events_without_repeated_rounding_subdivision() {
+        use crate::numerics::integration::BreakpointManager;
+        let sources = source("atan2(0*sin(2*pi*64*time+0.1),-1)");
+        let limits = ResourceLimits::default();
+        let mut original = BreakpointManager::new_with_tolerance(Value::from_bits(1));
+        original.extend((0..=256).map(|index| index as Value / 256.0));
+        sources
+            .collect_transient_breakpoints(
+                1.0,
+                &mut original,
+                &NoAbort,
+                limits.max_analysis_points,
+                true,
+            )
+            .unwrap();
+        let times = original.times();
+        let additions = sources
+            .refine_time_mesh(
+                times,
+                NonlinearConvergenceCriteria::default(),
+                &limits,
+                &NoAbort,
+            )
+            .unwrap();
+        let refined = additions.as_deref().unwrap_or(times);
+        assert!(
+            refined.len() < 832,
+            "{} input and {} resolved clocks",
+            times.len(),
+            refined.len()
+        );
+        assert!(times.iter().all(|time| {
+            refined
+                .binary_search_by(|value| value.total_cmp(time))
+                .is_ok()
+        }));
     }
 
     #[test]

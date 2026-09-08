@@ -202,15 +202,65 @@ fn unresolvable_source_intervals_cannot_pass_by_sharing_the_same_mesh() {
 
 #[test]
 fn nonlinear_time_features_cannot_hide_between_shooting_grids() {
-    check_nonlinear_time_features(false);
+    check_nonlinear_time_features(0..=7);
 }
 
 #[test]
 fn hyperbolic_time_features_preserve_the_complete_rc_waveform() {
-    check_nonlinear_time_features(true);
+    check_nonlinear_time_features(8..=14);
 }
 
-fn check_nonlinear_time_features(hyperbolic: bool) {
+#[test]
+fn circular_time_features_preserve_the_complete_rc_waveform() {
+    check_nonlinear_time_features(15..=18);
+}
+
+#[test]
+fn polar_signed_zero_edges_preserve_the_analytic_rc_orbit() {
+    let netlist = Netlist::parse(&format!(
+        "signed-zero polar forcing\n.options reltol=1e-4\nB1 in 0 V=atan2(0*sin(2*pi*64meg*time+0.1),-1)\nR1 in out {R}\nC1 out 0 {C}\n.end\n"
+    )).unwrap();
+    let config = PssConfig::new(F0).with_tstab_periods(0);
+    let point = Engine::default()
+        .run_pss_operating_point_with_abort(&netlist, config, &NoAbort)
+        .unwrap();
+    let result = &point.analysis().result;
+    assert!(
+        result.time.len() < 8192,
+        "signed-zero edges must resolve locally: {}",
+        result.time.len()
+    );
+    let output = result
+        .node_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case("out"))
+        .unwrap();
+    let tau = R * C;
+    let period = 1.0 / (64.0 * F0);
+    let amplitude = std::f64::consts::PI;
+    let high = amplitude * (period / (4.0 * tau)).tanh();
+    for (&time, &actual) in result.time.iter().zip(&result.waveforms[output].values) {
+        let phase = (std::f64::consts::TAU * time / period + 0.1).rem_euclid(std::f64::consts::TAU);
+        let elapsed = phase / std::f64::consts::TAU * period;
+        let expected = if elapsed < period / 2.0 {
+            amplitude - (amplitude + high) * (-elapsed / tau).exp()
+        } else {
+            -amplitude + (amplitude + high) * (-(elapsed - period / 2.0) / tau).exp()
+        };
+        assert!(
+            (actual - expected).abs() < 1e-5,
+            "t={time:e}: {actual:e} versus {expected:e}"
+        );
+    }
+    assert!(
+        result.waveforms[output]
+            .dc(&result.time, result.period)
+            .abs()
+            < 1e-6
+    );
+}
+
+fn check_nonlinear_time_features(kinds: std::ops::RangeInclusive<usize>) {
     let omega = std::f64::consts::TAU * F0 * 64.0;
     let source_period = 1.0 / (F0 * 64.0);
     let tau = R * C;
@@ -300,8 +350,24 @@ fn check_nonlinear_time_features(hyperbolic: bool) {
             "exp(-1000000*(atanh(0.5*cos(2*pi*64meg*time+0.1))+0.5*atanh(0.5*cos(2*(2*pi*64meg*time+0.1)))-0.25)^2)",
             14,
         ),
+        (
+            "exp(-1000000*(asin(0.5*cos(2*pi*64meg*time+0.1))+0.5*asin(0.5*cos(2*(2*pi*64meg*time+0.1)))-0.25)^2)",
+            15,
+        ),
+        (
+            "exp(-1000000*(acos(0.5*cos(2*pi*64meg*time+0.1))+0.5*acos(0.5*cos(2*(2*pi*64meg*time+0.1)))-2.1)^2)",
+            16,
+        ),
+        (
+            "exp(-1000000*(tan(0.5*cos(2*pi*64meg*time+0.1))+0.5*tan(0.5*cos(2*(2*pi*64meg*time+0.1)))-0.25)^2)",
+            17,
+        ),
+        (
+            "exp(-1000000*(atan2(cos(2*pi*64meg*time+0.1)+0.5*cos(2*(2*pi*64meg*time+0.1))-0.25,2))^2)",
+            18,
+        ),
     ] {
-        if (kind >= 8) != hyperbolic {
+        if !kinds.contains(&kind) {
             continue;
         }
         // Independent linear RC convolution on one source cycle. This uses
@@ -341,6 +407,12 @@ fn check_nonlinear_time_features(hyperbolic: bool) {
                     * (cosine.abs() + 0.5 * (2.0 * (omega * time + 0.1)).cos().abs() - 0.75)
                         .powi(2))
                 .exp()
+            } else if kind == 18 {
+                (-1000000.0
+                    * (cosine + 0.5 * (2.0 * (omega * time + 0.1)).cos() - 0.25)
+                        .atan2(2.0)
+                        .powi(2))
+                .exp()
             } else if kind >= 8 {
                 let (function, bias): (fn(f64) -> f64, f64) = match kind {
                     8 => (f64::atan, 0.25),
@@ -350,6 +422,9 @@ fn check_nonlinear_time_features(hyperbolic: bool) {
                     12 => (f64::asinh, 0.25),
                     13 => (|x| (2.0 + x).acosh(), 1.5),
                     14 => (|x| (0.5 * x).atanh(), 0.25),
+                    15 => (|x| (0.5 * x).asin(), 0.25),
+                    16 => (|x| (0.5 * x).acos(), 2.1),
+                    17 => (|x| (0.5 * x).tan(), 0.25),
                     _ => unreachable!(),
                 };
                 (-1000000.0

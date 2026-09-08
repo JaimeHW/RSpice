@@ -68,10 +68,16 @@ impl TimeInterval {
 
     fn add(self, other: Self) -> Self {
         if self.lower == 0.0 && self.upper == 0.0 {
-            return other;
+            return Self {
+                lower: self.lower + other.lower,
+                upper: self.upper + other.upper,
+            };
         }
         if other.lower == 0.0 && other.upper == 0.0 {
-            return self;
+            return Self {
+                lower: self.lower + other.lower,
+                upper: self.upper + other.upper,
+            };
         }
         // FastTwoSum identifies the direction of the rounding error. Keep
         // exact endpoints exact: widening 2 + [-1,1] below 1 would falsely
@@ -111,7 +117,7 @@ impl TimeInterval {
         if (self.lower == 0.0 && self.upper == 0.0 && other.is_finite())
             || (other.lower == 0.0 && other.upper == 0.0 && self.is_finite())
         {
-            return Self::ZERO;
+            return self.zero_binary(other, false);
         }
         let products = [
             self.lower * other.lower,
@@ -126,15 +132,33 @@ impl TimeInterval {
             products.into_iter().fold(Value::INFINITY, Value::min),
             products.into_iter().fold(Value::NEG_INFINITY, Value::max),
         )
-        .with_product_sign(self, other)
+        .with_product_sign(self, other, products)
     }
 
-    fn with_product_sign(mut self, left: Self, right: Self) -> Self {
-        if (left.lower >= 0.0 && right.lower >= 0.0) || (left.upper <= 0.0 && right.upper <= 0.0) {
-            self.lower = self.lower.max(0.0);
+    fn with_product_sign(mut self, left: Self, right: Self, corners: [Value; 4]) -> Self {
+        if ((left.lower >= 0.0 && right.lower >= 0.0) || (left.upper <= 0.0 && right.upper <= 0.0))
+            && self.lower <= 0.0
+        {
+            self.lower = if corners
+                .iter()
+                .any(|value| *value == 0.0 && value.is_sign_negative())
+            {
+                -0.0
+            } else {
+                0.0
+            };
         }
-        if (left.lower >= 0.0 && right.upper <= 0.0) || (left.upper <= 0.0 && right.lower >= 0.0) {
-            self.upper = self.upper.min(0.0);
+        if ((left.lower >= 0.0 && right.upper <= 0.0) || (left.upper <= 0.0 && right.lower >= 0.0))
+            && self.upper >= 0.0
+        {
+            self.upper = if corners
+                .iter()
+                .any(|value| *value == 0.0 && !value.is_sign_negative())
+            {
+                0.0
+            } else {
+                -0.0
+            };
         }
         self
     }
@@ -144,7 +168,7 @@ impl TimeInterval {
             return None;
         }
         if self.lower == 0.0 && self.upper == 0.0 && other.is_finite() {
-            return Some(Self::ZERO);
+            return Some(self.zero_binary(other, true));
         }
         // Form the quotient directly: a reciprocal can overflow even when
         // every quotient here is small and representable.
@@ -162,7 +186,7 @@ impl TimeInterval {
                 quotients.into_iter().fold(Value::INFINITY, Value::min),
                 quotients.into_iter().fold(Value::NEG_INFINITY, Value::max),
             )
-            .with_product_sign(self, other),
+            .with_product_sign(self, other, quotients),
         )
     }
 
@@ -171,6 +195,35 @@ impl TimeInterval {
             lower: self.lower.min(other.lower),
             upper: self.upper.max(other.upper),
         }
+    }
+
+    // A numeric zero can still change atan2's quadrant. Retain both zero
+    // signs when a zero product/quotient crosses the other operand's sign.
+    fn zero_binary(self, other: Self, divide: bool) -> Self {
+        let evaluate = |a: Value, b: Value| {
+            if divide {
+                if b == 0.0 { 0.0 } else { a / b }
+            } else {
+                a * b
+            }
+        };
+        let corners = [
+            evaluate(self.lower, other.lower),
+            evaluate(self.lower, other.upper),
+            evaluate(self.upper, other.lower),
+            evaluate(self.upper, other.upper),
+        ];
+        let mut lower = corners[0];
+        let mut upper = corners[0];
+        for value in corners {
+            if value.total_cmp(&lower).is_lt() {
+                lower = value;
+            }
+            if value.total_cmp(&upper).is_gt() {
+                upper = value;
+            }
+        }
+        Self { lower, upper }
     }
 
     // Transcendental endpoints include a relative libm rounding allowance
@@ -245,10 +298,19 @@ impl TimeInterval {
         };
         let first = ((self.lower - margin - shift) / std::f64::consts::PI).ceil();
         let last = ((self.upper + margin - shift) / std::f64::consts::PI).floor();
-        let mut result = Self {
-            lower: (a.min(b) - 16.0 * Value::EPSILON).max(-1.0),
-            upper: (a.max(b) + 16.0 * Value::EPSILON).min(1.0),
-        };
+        let mut result = Self::transcendental(a.min(b), a.max(b));
+        result.lower = result.lower.max(-1.0);
+        result.upper = result.upper.min(1.0);
+        // Endpoint libm error is relative to its result, including near a
+        // zero. A fixed absolute allowance would obscure entire small-time
+        // neighborhoods of atan2's branch cut. Interior extrema below still
+        // override either endpoint sign when the interval crosses one.
+        if !a.is_sign_negative() && !b.is_sign_negative() && result.lower <= 0.0 {
+            result.lower = 0.0;
+        }
+        if a.is_sign_negative() && b.is_sign_negative() && result.upper >= 0.0 {
+            result.upper = -0.0;
+        }
         if last - first >= 1.0 {
             return Self {
                 lower: -1.0,
@@ -266,6 +328,59 @@ impl TimeInterval {
     }
 }
 
+/// Order of actual finite VM results, distinguishing signed-zero order from
+/// numeric order. Only exact arithmetic propagates the stronger certificate.
+#[derive(Clone, Copy)]
+enum TimeOrder {
+    Constant,
+    Increasing,
+    Decreasing,
+    IncreasingSign,
+    DecreasingSign,
+    Unknown,
+}
+
+impl TimeOrder {
+    fn reversed(self) -> Self {
+        match self {
+            Self::Increasing => Self::Decreasing,
+            Self::Decreasing => Self::Increasing,
+            Self::IncreasingSign => Self::DecreasingSign,
+            Self::DecreasingSign => Self::IncreasingSign,
+            order => order,
+        }
+    }
+
+    fn scaled(self, negative: bool) -> Self {
+        if negative { self.reversed() } else { self }
+    }
+    fn numeric(self) -> bool {
+        matches!(self, Self::Constant | Self::Increasing | Self::Decreasing)
+    }
+    fn sign(self) -> Self {
+        match self {
+            Self::Increasing => Self::IncreasingSign,
+            Self::Decreasing => Self::DecreasingSign,
+            order => order,
+        }
+    }
+    fn zero_product(self) -> Self {
+        match self {
+            Self::IncreasingSign => Self::Increasing,
+            Self::DecreasingSign => Self::Decreasing,
+            order => order,
+        }
+    }
+    fn add(self, other: Self) -> Self {
+        match (self, other) {
+            (Self::Constant, order) | (order, Self::Constant) if order.numeric() => order,
+            (Self::Increasing, Self::Increasing) => Self::Increasing,
+            (Self::Decreasing, Self::Decreasing) => Self::Decreasing,
+            _ => Self::Unknown,
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 struct Dual {
     value: TimeInterval,
@@ -274,6 +389,7 @@ struct Dual {
     constant: bool,
     continuous: bool,
     roundoff: Value,
+    order: TimeOrder,
 }
 
 /// Bounds on one evaluation domain. Continuity is separate from a finite
@@ -283,6 +399,7 @@ pub(crate) struct TimeBounds {
     pub value: TimeInterval,
     pub slope: TimeInterval,
     pub continuous: bool,
+    pub vm_monotone: bool,
     roundoff: Value,
 }
 
@@ -326,6 +443,42 @@ impl Dual {
             constant: true,
             continuous: true,
             roundoff: 0.0,
+            order: TimeOrder::Constant,
+        }
+    }
+
+    fn zero_binary(self, other: Self, divide: bool) -> Self {
+        let value = self.value.zero_binary(other.value, divide);
+        let center = if divide {
+            if other.center == 0.0 {
+                0.0
+            } else {
+                self.center / other.center
+            }
+        } else {
+            self.center * other.center
+        };
+        let order = if self.constant {
+            other
+                .order
+                .zero_product()
+                .scaled(self.center.is_sign_negative())
+        } else if other.constant && !divide {
+            self.order
+                .zero_product()
+                .scaled(other.center.is_sign_negative())
+        } else {
+            TimeOrder::Unknown
+        };
+        let constant = value.lower.to_bits() == value.upper.to_bits();
+        Self {
+            value,
+            center,
+            slope: TimeInterval::ZERO,
+            constant,
+            continuous: true,
+            roundoff: 0.0,
+            order: if constant { TimeOrder::Constant } else { order },
         }
     }
 
@@ -341,6 +494,7 @@ impl Dual {
             constant: false,
             continuous: self.continuous && other.continuous,
             roundoff: (self.roundoff + other.roundoff + value.rounding_error(false)).next_up(),
+            order: self.order.add(other.order),
         }
     }
 
@@ -349,6 +503,7 @@ impl Dual {
             value: self.value.neg(),
             slope: self.slope.neg(),
             center: -self.center,
+            order: self.order.reversed(),
             ..self
         }
     }
@@ -360,7 +515,7 @@ impl Dual {
         if (self.value.lower == 0.0 && self.value.upper == 0.0 && other.value.is_finite())
             || (other.value.lower == 0.0 && other.value.upper == 0.0 && self.value.is_finite())
         {
-            return Self::constant(0.0);
+            return self.zero_binary(other, false);
         }
         let value = self.value.mul(other.value);
         Self {
@@ -373,6 +528,13 @@ impl Dual {
                 + propagated_error(self.value.magnitude(), other.roundoff)
                 + value.rounding_error(false))
             .next_up(),
+            order: if self.constant {
+                other.order.scaled(self.center.is_sign_negative())
+            } else if other.constant {
+                self.order.scaled(other.center.is_sign_negative())
+            } else {
+                TimeOrder::Unknown
+            },
         }
     }
 
@@ -390,6 +552,7 @@ impl Dual {
             roundoff: (propagated_error(2.0 * self.value.magnitude(), self.roundoff)
                 + value.rounding_error(false))
             .next_up(),
+            order: TimeOrder::Unknown,
         }
     }
 
@@ -400,7 +563,7 @@ impl Dual {
             return Some(Self::constant(0.0));
         }
         if self.value.lower == 0.0 && self.value.upper == 0.0 && other.value.is_finite() {
-            return Some(Self::constant(0.0));
+            return Some(self.zero_binary(other, true));
         }
         if self.constant && other.constant {
             return Some(Self::constant(self.value.lower / other.value.lower));
@@ -422,6 +585,11 @@ impl Dual {
                 + propagated_error(value.magnitude(), (other.roundoff / denominator).next_up())
                 + value.rounding_error(false))
             .next_up(),
+            order: if other.constant {
+                self.order.scaled(other.center.is_sign_negative())
+            } else {
+                TimeOrder::Unknown
+            },
         })
     }
 
@@ -459,6 +627,7 @@ impl Dual {
             center: self.center.powf(exponent.center),
             constant: false,
             roundoff: roundoff.next_up(),
+            order: TimeOrder::Unknown,
             continuous: self.continuous
                 && exponent.continuous
                 && !(self.value.contains(0.0)
@@ -559,6 +728,7 @@ impl Dual {
                             && positive.value.lower != powered.value.upper),
                     constant: false,
                     roundoff: positive.roundoff.max(powered.roundoff),
+                    order: TimeOrder::Unknown,
                 },
             });
         }
@@ -593,6 +763,16 @@ impl Dual {
             roundoff: (propagated_error(derivative.magnitude(), self.roundoff)
                 + value.rounding_error(true))
             .next_up(),
+            // A monotone VM phase traversing one sign change cannot reverse
+            // that sign. Keep this weaker proof separate from numeric value
+            // monotonicity: libm rounding need not preserve adjacent values.
+            order: if self.order.numeric() && derivative.lower >= 0.0 {
+                self.order.sign().scaled(cosine)
+            } else if self.order.numeric() && derivative.upper <= 0.0 {
+                self.order.sign().scaled(!cosine)
+            } else {
+                TimeOrder::Unknown
+            },
         }
     }
 
@@ -637,7 +817,186 @@ impl Dual {
             constant: false,
             continuous: self.continuous,
             roundoff: (roundoff + value.rounding_error(true)).next_up(),
+            order: TimeOrder::Unknown,
         }
+    }
+
+    fn circular_inverse(mut self, cosine: bool) -> Option<Self> {
+        let evaluate = |value: Value| {
+            let value = value.clamp(-1.0, 1.0);
+            if cosine { value.acos() } else { value.asin() }
+        };
+        if self.constant {
+            return Some(Self::constant(evaluate(self.value.lower)));
+        }
+        if !self.value.is_finite() {
+            return None;
+        }
+        self = self
+            .extremum(Self::constant(-1.0), true)
+            .extremum(Self::constant(1.0), false);
+        if self.constant {
+            return Some(Self::constant(evaluate(self.value.lower)));
+        }
+        let endpoints = [evaluate(self.value.lower), evaluate(self.value.upper)];
+        let value = TimeInterval::transcendental(
+            endpoints[usize::from(cosine)],
+            endpoints[usize::from(!cosine)],
+        );
+        let nearest = if self.value.contains(0.0) {
+            0.0
+        } else {
+            self.value.lower.abs().min(self.value.upper.abs())
+        };
+        let farthest = self.value.magnitude();
+        let mut first =
+            TimeInterval::transcendental((1.0 - farthest).sqrt(), (1.0 - nearest).sqrt());
+        first.lower = first.lower.max(0.0);
+        let second = TimeInterval::transcendental((1.0 + nearest).sqrt(), (1.0 + farthest).sqrt());
+        let mut slope = self
+            .slope
+            .div(first)
+            .and_then(|slope| slope.div(second))
+            .unwrap_or(TimeInterval::WHOLE);
+        if cosine {
+            slope = slope.neg();
+        }
+        // Across either clamp, |delta angle| <= pi*sqrt(|delta x|/2).
+        // Use the local derivative when it is finite; the Holder bound also
+        // covers a rounded argument at an endpoint with infinite derivative.
+        let holder = std::f64::consts::FRAC_PI_2 * std::f64::consts::SQRT_2 * self.roundoff.sqrt();
+        let holder = TimeInterval::transcendental(holder, holder).upper;
+        let local = ((self.roundoff / first.lower).next_up() / second.lower).next_up();
+        Some(Self {
+            value,
+            slope,
+            center: evaluate(self.center),
+            constant: false,
+            continuous: self.continuous,
+            roundoff: (holder.min(local) + value.rounding_error(true)).next_up(),
+            order: TimeOrder::Unknown,
+        })
+    }
+
+    fn tangent(self) -> Self {
+        if self.constant {
+            return Self::constant(self.value.lower.tan());
+        }
+        let cosine = self.value.trigonometric(true);
+        if cosine.contains(0.0) {
+            // A pole is not a finite interpolation certificate. Keep its
+            // unbounded range so an enclosing operation can still prove a
+            // bounded value; raw singular forcing cannot pass resolution.
+            return Self {
+                value: TimeInterval::WHOLE,
+                slope: TimeInterval::WHOLE,
+                center: self.center.tan(),
+                constant: false,
+                continuous: false,
+                roundoff: Value::INFINITY,
+                order: TimeOrder::Unknown,
+            };
+        }
+        let value = TimeInterval::transcendental(self.value.lower.tan(), self.value.upper.tan());
+        let slope = self
+            .slope
+            .div(cosine)
+            .and_then(|slope| slope.div(cosine))
+            .unwrap_or(TimeInterval::WHOLE);
+        let minimum = cosine.lower.abs().min(cosine.upper.abs());
+        let roundoff = ((self.roundoff / minimum).next_up() / minimum).next_up();
+        Self {
+            value,
+            slope,
+            center: self.center.tan(),
+            constant: false,
+            continuous: self.continuous,
+            roundoff: (roundoff + value.rounding_error(true)).next_up(),
+            order: TimeOrder::Unknown,
+        }
+    }
+
+    fn polar_angle(self, x: Self) -> Option<Self> {
+        let center = self.center.atan2(x.center);
+        if self.constant && x.constant {
+            return Some(Self::constant(center));
+        }
+        if !self.value.is_finite() || !x.value.is_finite() {
+            return None;
+        }
+        let zero_coordinate = self.value.lower == 0.0 && self.value.upper == 0.0;
+        if zero_coordinate
+            && self.value.lower.to_bits() == self.value.upper.to_bits()
+            && (x.value.lower > 0.0 || x.value.upper < 0.0)
+        {
+            return Some(Self::constant(self.value.lower.atan2(x.center)));
+        }
+        let origin = self.value.contains(0.0) && x.value.contains(0.0);
+        let negative_axis = x.value.lower < 0.0
+            && self.value.lower.is_sign_negative()
+            && !self.value.upper.is_sign_negative();
+        if origin || negative_axis {
+            return Some(Self {
+                value: TimeInterval::transcendental(-std::f64::consts::PI, std::f64::consts::PI),
+                slope: TimeInterval::WHOLE,
+                center,
+                constant: false,
+                continuous: false,
+                roundoff: Value::INFINITY,
+                order: if zero_coordinate && x.value.upper < 0.0 {
+                    self.order.zero_product()
+                } else {
+                    TimeOrder::Unknown
+                },
+            });
+        }
+        let corners = [
+            self.value.lower.atan2(x.value.lower),
+            self.value.lower.atan2(x.value.upper),
+            self.value.upper.atan2(x.value.lower),
+            self.value.upper.atan2(x.value.upper),
+        ];
+        let value = TimeInterval::transcendental(
+            corners.into_iter().fold(Value::INFINITY, Value::min),
+            corners.into_iter().fold(Value::NEG_INFINITY, Value::max),
+        );
+        // Normalize both coordinates together before forming the squared
+        // radius. This is invariant to extreme common voltage/current gain.
+        let scale = TimeInterval::point(self.value.magnitude().max(x.value.magnitude()));
+        let yn = self.value.div(scale)?;
+        let xn = x.value.div(scale)?;
+        let radius = yn.square().add(xn.square());
+        let slope = self
+            .slope
+            .div(scale)?
+            .mul(xn)
+            .add(x.slope.div(scale)?.mul(yn).neg())
+            .div(radius)
+            .unwrap_or(TimeInterval::WHOLE);
+        let nearest = |value: TimeInterval| {
+            if value.contains(0.0) {
+                0.0
+            } else {
+                value.lower.abs().min(value.upper.abs())
+            }
+        };
+        let distance = nearest(yn).hypot(nearest(xn));
+        let distance = TimeInterval::transcendental(distance, distance)
+            .lower
+            .max(0.0);
+        let error = ((self.roundoff / scale.lower).next_up() / distance)
+            .next_up()
+            .hypot(((x.roundoff / scale.lower).next_up() / distance).next_up());
+        let roundoff = TimeInterval::transcendental(error, error).upper;
+        Some(Self {
+            value,
+            slope,
+            center,
+            constant: false,
+            continuous: self.continuous && x.continuous,
+            roundoff: (roundoff + value.rounding_error(true)).next_up(),
+            order: TimeOrder::Unknown,
+        })
     }
 
     fn hyperbolic_or_atan(
@@ -783,6 +1142,7 @@ impl Dual {
             constant: false,
             continuous: self.continuous,
             roundoff: (roundoff + value.rounding_error(true)).next_up(),
+            order: TimeOrder::Unknown,
         })
     }
 
@@ -791,10 +1151,27 @@ impl Dual {
             return Self::constant(self.value.lower.abs());
         }
         if self.value.lower >= 0.0 {
-            return self;
+            return Self {
+                value: TimeInterval {
+                    lower: self.value.lower.abs(),
+                    upper: self.value.upper.abs(),
+                },
+                center: self.center.abs(),
+                order: TimeOrder::Unknown,
+                ..self
+            };
         }
         if self.value.upper <= 0.0 {
-            return self.neg();
+            let result = self.neg();
+            return Self {
+                value: TimeInterval {
+                    lower: result.value.lower.abs(),
+                    ..result.value
+                },
+                center: self.center.abs(),
+                order: TimeOrder::Unknown,
+                ..result
+            };
         }
         Self {
             value: TimeInterval {
@@ -803,6 +1180,7 @@ impl Dual {
             },
             slope: self.slope.union(self.slope.neg()),
             center: self.center.abs(),
+            order: TimeOrder::Unknown,
             // Absolute value is exact on finite VM values and is globally
             // 1-Lipschitz. Its corner needs no extra rounding allowance.
             ..self
@@ -821,6 +1199,19 @@ impl Dual {
         if self.constant && other.constant {
             return Self::constant(select(self.value.lower, other.value.lower));
         }
+        let mut value = TimeInterval {
+            lower: select(self.value.lower, other.value.lower),
+            upper: select(self.value.upper, other.value.upper),
+        };
+        let zero_changes_sign = value.lower == 0.0
+            && value.upper == 0.0
+            && value.lower.to_bits() != value.upper.to_bits();
+        if zero_changes_sign {
+            value = TimeInterval {
+                lower: -0.0,
+                upper: 0.0,
+            };
+        }
         let left_wins = if maximum {
             self.value.lower >= other.value.upper
         } else {
@@ -832,16 +1223,25 @@ impl Dual {
             other.value.upper <= self.value.lower
         };
         if left_wins {
-            return Self { center, ..self };
+            return Self {
+                value,
+                center,
+                constant: self.constant && !zero_changes_sign,
+                order: TimeOrder::Unknown,
+                ..self
+            };
         }
         if right_wins {
-            return Self { center, ..other };
+            return Self {
+                value,
+                center,
+                constant: other.constant && !zero_changes_sign,
+                order: TimeOrder::Unknown,
+                ..other
+            };
         }
         Self {
-            value: TimeInterval {
-                lower: select(self.value.lower, other.value.lower),
-                upper: select(self.value.upper, other.value.upper),
-            },
+            value,
             slope: self.slope.union(other.slope),
             center,
             constant: false,
@@ -849,6 +1249,7 @@ impl Dual {
             // Selection is exact and 1-Lipschitz in the maximum input error.
             // An inactive operand contributes neither slope nor error above.
             roundoff: self.roundoff.max(other.roundoff),
+            order: TimeOrder::Unknown,
         }
     }
 
@@ -880,6 +1281,7 @@ impl Dual {
             constant: false,
             continuous: self.continuous,
             roundoff: (roundoff + value.rounding_error(true)).next_up(),
+            order: TimeOrder::Unknown,
         }
     }
 
@@ -906,6 +1308,7 @@ impl Dual {
             roundoff: (propagated_error(value.magnitude(), self.roundoff)
                 + value.rounding_error(true))
             .next_up(),
+            order: TimeOrder::Unknown,
         }
     }
 
@@ -925,8 +1328,16 @@ impl Dual {
                     lower: -error,
                     upper: error,
                 });
-            let lower = self.value.lower.max(centered.lower);
-            let upper = self.value.upper.min(centered.upper);
+            let mut lower = self.value.lower.max(centered.lower);
+            let mut upper = self.value.upper.min(centered.upper);
+            // Mean-value bounds constrain numeric values, not the sign of
+            // an exact zero. Preserve that sign evidence for atan2.
+            if lower == 0.0 {
+                lower = lower.copysign(self.value.lower);
+            }
+            if upper == 0.0 {
+                upper = upper.copysign(self.value.upper);
+            }
             if lower <= upper {
                 self.value = TimeInterval { lower, upper };
             }
@@ -976,6 +1387,10 @@ impl<'a> TimeEnclosure<'a> {
                     | Instruction::Sqrt
                     | Instruction::Sin
                     | Instruction::Cos
+                    | Instruction::Tan
+                    | Instruction::Asin
+                    | Instruction::Acos
+                    | Instruction::Atan2
                     | Instruction::Atan
                     | Instruction::Sinh
                     | Instruction::Cosh
@@ -1034,6 +1449,7 @@ impl<'a> TimeEnclosure<'a> {
                     constant: false,
                     continuous: true,
                     roundoff: 0.0,
+                    order: TimeOrder::Increasing,
                 },
                 Instruction::PushFreq => Dual::constant(context.frequency),
                 Instruction::PushTemperature => Dual::constant(context.temperature),
@@ -1067,6 +1483,13 @@ impl<'a> TimeEnclosure<'a> {
                 Instruction::Sqrt => self.stack.pop()?.square_root(),
                 Instruction::Sin => self.stack.pop()?.trigonometric(false),
                 Instruction::Cos => self.stack.pop()?.trigonometric(true),
+                Instruction::Tan => self.stack.pop()?.tangent(),
+                Instruction::Asin => self.stack.pop()?.circular_inverse(false)?,
+                Instruction::Acos => self.stack.pop()?.circular_inverse(true)?,
+                Instruction::Atan2 => {
+                    let x = self.stack.pop()?;
+                    self.stack.pop()?.polar_angle(x)?
+                }
                 Instruction::Atan
                 | Instruction::Sinh
                 | Instruction::Cosh
@@ -1107,6 +1530,7 @@ impl<'a> TimeEnclosure<'a> {
                     value: value.value,
                     slope: value.slope,
                     continuous: value.continuous,
+                    vm_monotone: value.order.numeric(),
                     roundoff: value.roundoff,
                 })
             })
@@ -1118,6 +1542,72 @@ impl<'a> TimeEnclosure<'a> {
 mod tests {
     use super::*;
     use crate::expr::{Vm, compile, parse_expression_strict};
+
+    #[test]
+    fn polar_vm_order_proves_local_plateaus_without_qualifying_aliased_cycles() {
+        let context = Context::transient(&[], &[], 0.0);
+        for wave in ["sin", "cos"] {
+            for direction in [-1, 1] {
+                for zero in ["0", "-0"] {
+                    for operation in ["*", "/"] {
+                        let expression =
+                            format!("atan2({zero}{operation}{wave}({direction}*8*pi*time+0.1),-1)");
+                        let program = compile(&parse_expression_strict(&expression).unwrap());
+                        let mut bounds = TimeEnclosure::new(&program, 1.0).unwrap();
+                        let mut vm = Vm::new();
+                        assert!(
+                            !bounds
+                                .evaluate(
+                                    TimeInterval {
+                                        lower: 0.0,
+                                        upper: 1.0
+                                    },
+                                    &context
+                                )
+                                .unwrap()
+                                .vm_monotone,
+                            "{expression}"
+                        );
+                        let mut certified = 0;
+                        for index in 0..128 {
+                            let lower = index as Value / 128.0;
+                            let upper = (index + 1) as Value / 128.0;
+                            let domain = bounds
+                                .evaluate(TimeInterval { lower, upper }, &context)
+                                .unwrap();
+                            if !domain.vm_monotone {
+                                continue;
+                            }
+                            certified += 1;
+                            let values = (0..=32)
+                                .map(|sample| {
+                                    vm.execute(
+                                        &program,
+                                        &Context {
+                                            time: lower + (upper - lower) * sample as Value / 32.0,
+                                            ..context
+                                        },
+                                    )
+                                })
+                                .collect::<Vec<_>>();
+                            assert!(
+                                values.windows(2).all(|pair| pair[0] <= pair[1])
+                                    || values.windows(2).all(|pair| pair[0] >= pair[1]),
+                                "{expression} at {lower}"
+                            );
+                            if values[0] == values[32] {
+                                assert!(
+                                    values.iter().all(|value| *value == values[0]),
+                                    "{expression} at {lower}"
+                                );
+                            }
+                        }
+                        assert!(certified > 100, "{expression}: {certified}");
+                    }
+                }
+            }
+        }
+    }
 
     #[test]
     fn combined_clock_bounds_contain_vm_values_and_analytic_derivatives() {
@@ -1898,6 +2388,14 @@ mod tests {
                     "acosh(1+T)",
                     "acosh(2+cos(2*pi*T))",
                     "atanh(0.8*(2*T-1))",
+                    "asin(0.8*sin(2*pi*T))",
+                    "acos(0.8*cos(2*pi*T))",
+                    "asin(4*T-2)",
+                    "acos(4*T-2)",
+                    "tan(0.6*sin(2*pi*T))",
+                    "atan2(sin(2*pi*T),cos(2*pi*T))",
+                    "atan2(0*(T-0.5),-1)",
+                    "atan2(0/(T-0.5),-1)",
                 ] {
                     let expression = expression.replace('T', &format!("(time/{stop:e})"));
                     let program = compile(&parse_expression_strict(&expression).unwrap());
@@ -2185,6 +2683,246 @@ mod tests {
         assert_eq!(
             (sum.lower, sum.upper),
             (Value::NEG_INFINITY, Value::INFINITY)
+        );
+    }
+
+    #[test]
+    fn circular_bounds_match_chain_rules_and_remain_invariant_to_time_and_polar_gain() {
+        use crate::config::ExpressionDialect;
+        type Derivative = fn(Value) -> Value;
+        let rate = std::f64::consts::TAU;
+        let cases: [(&str, Derivative); 3] = [
+            ("asin(0.8*sin(2*pi*T))", |phase| {
+                0.8 * phase.cos() / (1.0 - (0.8 * phase.sin()).powi(2)).sqrt()
+            }),
+            ("acos(0.8*sin(2*pi*T))", |phase| {
+                -0.8 * phase.cos() / (1.0 - (0.8 * phase.sin()).powi(2)).sqrt()
+            }),
+            ("tan(0.6*sin(2*pi*T))", |phase| {
+                0.6 * phase.cos() / (0.6 * phase.sin()).cos().powi(2)
+            }),
+        ];
+        for dialect in [ExpressionDialect::Ngspice, ExpressionDialect::Xyce] {
+            let context = Context::transient(&[], &[], 0.0).with_expression_dialect(dialect);
+            for stop in [1e-300, 1.0, 1e300] {
+                let mut expressions: Vec<(String, Option<Derivative>)> = cases
+                    .iter()
+                    .map(|(expr, derivative)| (expr.to_string(), Some(*derivative)))
+                    .collect();
+                for gain in [-1e200, -1e-200, 1e-200, 1.0, 1e200] {
+                    expressions.push((
+                        format!("atan2({gain:e}*sin(2*pi*T),{gain:e}*cos(2*pi*T))"),
+                        None,
+                    ));
+                }
+                for (expression, derivative) in expressions {
+                    let expression = expression.replace('T', &format!("(time/{stop:e})"));
+                    let program = compile(&parse_expression_strict(&expression).unwrap());
+                    let mut bounds = TimeEnclosure::new(&program, stop).unwrap();
+                    let mut vm = Vm::new();
+                    for index in 0..64 {
+                        let lower = index as Value / 64.0 * stop;
+                        let upper = (index + 1) as Value / 64.0 * stop;
+                        let domain = bounds
+                            .evaluate_centered(TimeInterval { lower, upper }, &context)
+                            .unwrap();
+                        for sample in 0..=8 {
+                            let time = lower + (upper - lower) * sample as Value / 8.0;
+                            let value = vm.execute(&program, &Context { time, ..context });
+                            assert!(
+                                domain.value.contains(value),
+                                "{expression}: {value:e} outside {:?}",
+                                domain.value
+                            );
+                            let slope = derivative
+                                .map_or(rate, |derivative| rate * derivative(rate * time / stop));
+                            assert!(
+                                domain.slope.contains(slope),
+                                "{expression}: {slope:e} outside {:?}",
+                                domain.slope
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn circular_domains_preserve_vm_clamps_poles_and_signed_zero_quadrants() {
+        use crate::config::ExpressionDialect;
+        for dialect in [ExpressionDialect::Ngspice, ExpressionDialect::Xyce] {
+            let context = Context::transient(&[], &[], 0.0).with_expression_dialect(dialect);
+            for expression in ["asin(2+time)", "acos(-2-time)"] {
+                let program = compile(&parse_expression_strict(expression).unwrap());
+                let domain = TimeEnclosure::new(&program, 1.0)
+                    .unwrap()
+                    .evaluate(
+                        TimeInterval {
+                            lower: 0.0,
+                            upper: 1.0,
+                        },
+                        &context,
+                    )
+                    .unwrap();
+                let actual = Vm::new().execute(&program, &context);
+                assert_eq!((domain.value.lower, domain.value.upper), (actual, actual));
+                assert_eq!(domain.interpolation_error(1.0), 0.0);
+            }
+            for expression in [
+                "tan(pi*time)",
+                "atan2(time-0.5,-1)",
+                "atan2(0*(time-0.5),-1)",
+                "atan2(0/(time-0.5),-1)",
+            ] {
+                let program = compile(&parse_expression_strict(expression).unwrap());
+                let domain = TimeEnclosure::new(&program, 1.0)
+                    .unwrap()
+                    .evaluate_centered(
+                        TimeInterval {
+                            lower: 0.25,
+                            upper: 0.75,
+                        },
+                        &context,
+                    )
+                    .unwrap();
+                assert!(!domain.continuous, "{expression}");
+                for time in [0.25, 0.5_f64.next_down(), 0.5, 0.5_f64.next_up(), 0.75] {
+                    let actual = Vm::new().execute(&program, &Context { time, ..context });
+                    assert!(
+                        domain.value.contains(actual),
+                        "{expression}: {actual:e} outside {:?}",
+                        domain.value
+                    );
+                }
+            }
+            for (expression, negative) in [
+                ("atan2(abs(0*(time-0.5)),-1)", false),
+                ("atan2(-abs(0*(time-0.5)),-1)", true),
+            ] {
+                let program = compile(&parse_expression_strict(expression).unwrap());
+                let domain = TimeEnclosure::new(&program, 1.0)
+                    .unwrap()
+                    .evaluate_centered(
+                        TimeInterval {
+                            lower: 0.0,
+                            upper: 1.0,
+                        },
+                        &context,
+                    )
+                    .unwrap();
+                assert!(domain.continuous);
+                assert!(domain.interpolation_error(1.0) < 1e-10);
+                assert_eq!(domain.value.lower.is_sign_negative(), negative);
+                assert_eq!(domain.value.upper.is_sign_negative(), negative);
+            }
+            for expression in [
+                "atan2(0,-1)",
+                "atan2(-0,-1)",
+                "atan2(-0,0)",
+                "atan2(0,-0)",
+                "asin(-0)",
+                "acos(-0)",
+                "tan(-0)",
+            ] {
+                let program = compile(&parse_expression_strict(expression).unwrap());
+                let domain = TimeEnclosure::new(&program, 1.0)
+                    .unwrap()
+                    .evaluate(
+                        TimeInterval {
+                            lower: 0.0,
+                            upper: 1.0,
+                        },
+                        &context,
+                    )
+                    .unwrap();
+                let actual = Vm::new().execute(&program, &context);
+                assert_eq!(
+                    domain.value.lower.to_bits(),
+                    actual.to_bits(),
+                    "{expression}"
+                );
+                assert_eq!(
+                    domain.value.upper.to_bits(),
+                    actual.to_bits(),
+                    "{expression}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn polar_bounds_preserve_zero_arithmetic_and_small_time_half_planes() {
+        let context = Context::transient(&[], &[], 0.0);
+        for expression in [
+            "atan2(0-time+0,-1)",
+            "atan2(0+(-time),-1)",
+            "atan2(max(-time,0),-1)",
+            "atan2(min(time,-0),-1)",
+            "atan2(0*(time-0.5),-1)",
+            "atan2(0/(time-0.5),-1)",
+        ] {
+            let program = compile(&parse_expression_strict(expression).unwrap());
+            let mut bounds = TimeEnclosure::new(&program, 1.0).unwrap();
+            for time in [0.0, 0.5, 1.0] {
+                let domain = bounds
+                    .evaluate_centered(
+                        TimeInterval {
+                            lower: time,
+                            upper: time,
+                        },
+                        &context,
+                    )
+                    .unwrap();
+                let actual = Vm::new().execute(&program, &Context { time, ..context });
+                assert!(
+                    domain.value.contains(actual),
+                    "{expression}, {time}: {actual:e} outside {:?}",
+                    domain.value
+                );
+            }
+        }
+        for gain in [-1e200, -1.0, 1.0, 1e200] {
+            let expression = format!("atan2({gain:e}*sin(pi*time),-1)");
+            let program = compile(&parse_expression_strict(&expression).unwrap());
+            for width in [1e-300, 1e-100, 1e-20] {
+                let domain = TimeEnclosure::new(&program, 1.0)
+                    .unwrap()
+                    .evaluate_centered(
+                        TimeInterval {
+                            lower: 0.0,
+                            upper: width,
+                        },
+                        &context,
+                    )
+                    .unwrap();
+                assert!(domain.continuous, "{expression}, {width:e}");
+                for time in [0.0, width * 0.5, width] {
+                    let actual = Vm::new().execute(&program, &Context { time, ..context });
+                    assert!(
+                        domain.value.contains(actual),
+                        "{expression}: {actual:e} outside {:?}",
+                        domain.value
+                    );
+                }
+            }
+        }
+        let expression = "atan2(1e308*(1.3+0.1*time),1e308*(1.3+0.2*time))";
+        let program = compile(&parse_expression_strict(expression).unwrap());
+        let domain = TimeEnclosure::new(&program, 1.0)
+            .unwrap()
+            .evaluate_centered(
+                TimeInterval {
+                    lower: 0.5,
+                    upper: 0.50001,
+                },
+                &context,
+            )
+            .unwrap();
+        assert!(domain.slope.is_finite());
+        assert!(
+            domain.interpolation_error(0.00001) < 1e-8,
+            "a physical radius overflow must not hide local angular accuracy"
         );
     }
 }

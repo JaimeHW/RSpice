@@ -21,7 +21,8 @@ impl EventSchedule<'_> {
             return self.expression(expr, context, true);
         };
         let mut operations: usize = 0;
-        let mut is_constant = |lower, upper| -> Result<bool, BehavioralBreakpointError> {
+        let mut vm = Vm::new();
+        let mut charge = || {
             self.poll()?;
             operations = operations.saturating_add(program.instructions.len());
             if operations > 16_000_000 {
@@ -29,13 +30,39 @@ impl EventSchedule<'_> {
                     "source-feature qualification exceeds its 16000000-instruction work limit",
                 ));
             }
-            Ok(bounds
+            Ok(())
+        };
+        let mut is_constant = |lower, upper| -> Result<bool, BehavioralBreakpointError> {
+            charge()?;
+            let Some(domain) = bounds
                 .evaluate(TimeInterval { lower, upper }, context)
-                .is_some_and(|domain| {
-                    domain.continuous
-                        && domain.value.is_finite()
-                        && domain.value.lower == domain.value.upper
-                }))
+                .filter(|domain| domain.value.is_finite())
+            else {
+                return Ok(false);
+            };
+            if domain.continuous && domain.value.lower == domain.value.upper {
+                return Ok(true);
+            }
+            if !domain.vm_monotone {
+                return Ok(false);
+            }
+            charge()?;
+            let left = vm.execute(
+                &program,
+                &Context {
+                    time: lower,
+                    ..*context
+                },
+            );
+            charge()?;
+            let right = vm.execute(
+                &program,
+                &Context {
+                    time: upper,
+                    ..*context
+                },
+            );
+            Ok(left.is_finite() && left == right)
         };
         if is_constant(0.0, self.tstop)? {
             return Ok(());
@@ -358,6 +385,22 @@ impl EventSchedule<'_> {
                 context,
             )
         }) else {
+            if function == Function::Tan {
+                // sin(phase-atan(level)) locates every tangent level without
+                // treating an unrelated tangent pole as a root to isolate.
+                return self.isolated_levels(
+                    &Expr::Function {
+                        func: Function::Sin,
+                        args: vec![Expr::Binary {
+                            op: BinaryOp::Sub,
+                            left: Box::new(phase.clone()),
+                            right: Box::new(Expr::Const(target.atan())),
+                        }],
+                    },
+                    0.0,
+                    context,
+                );
+            }
             // Direct sine/cosine isolation can resolve a regular phase's
             // denominator locally when its whole-window range is unknown.
             return self.isolated_levels(
@@ -375,26 +418,35 @@ impl EventSchedule<'_> {
                 "a nonlinear phase range is not finite",
             ));
         }
-        let angle = if function == Function::Cos {
+        let cycle = if function == Function::Tan {
+            std::f64::consts::PI
+        } else {
+            std::f64::consts::TAU
+        };
+        let angle = if function == Function::Tan {
+            target.atan()
+        } else if function == Function::Cos {
             target.acos()
         } else {
             target.asin()
         };
         let phases = [
             angle,
-            if function == Function::Cos {
+            if function == Function::Tan {
+                angle
+            } else if function == Function::Cos {
                 -angle
             } else {
                 std::f64::consts::PI - angle
             },
         ]
-        .map(|phase| phase.rem_euclid(std::f64::consts::TAU));
+        .map(|phase| phase.rem_euclid(cycle));
         for (index, root) in phases.into_iter().enumerate() {
             if index == 1 && root == phases[0] {
                 continue;
             }
-            let first = ((range.lower - root) / std::f64::consts::TAU).ceil();
-            let last = ((range.upper - root) / std::f64::consts::TAU).floor();
+            let first = ((range.lower - root) / cycle).ceil();
+            let last = ((range.upper - root) / cycle).floor();
             if first.abs().max(last.abs()) >= (1_u64 << 53) as Value {
                 return Err(BehavioralBreakpointError::Invalid(
                     "nonlinear phase cycle indices are not representable",
@@ -408,11 +460,7 @@ impl EventSchedule<'_> {
             }
             for index in 0..count as usize {
                 self.poll()?;
-                self.level(
-                    phase,
-                    std::f64::consts::TAU.mul_add(first + index as Value, root),
-                    context,
-                )?;
+                self.level(phase, cycle.mul_add(first + index as Value, root), context)?;
             }
         }
         Ok(())
@@ -426,6 +474,16 @@ impl EventSchedule<'_> {
         target: Value,
         time_start: Value,
     ) -> Result<(), BehavioralBreakpointError> {
+        if function == Function::Tan {
+            return self.periodic_coordinate(
+                rate,
+                offset,
+                target.atan(),
+                std::f64::consts::PI,
+                false,
+                time_start,
+            );
+        }
         if !(-1.0..=1.0).contains(&target) {
             return Ok(());
         }
@@ -473,11 +531,40 @@ impl EventSchedule<'_> {
         for &level in levels {
             candidates.level(input, level, context)?;
         }
-        let mut roots = candidates
-            .events
-            .into_iter()
-            .map(Value::from_bits)
-            .peekable();
+        self.jump_boundaries(expr, candidates.events, context, false)
+    }
+
+    fn polar_corners(
+        &mut self,
+        expr: &Expr,
+        y: &Expr,
+        x: &Expr,
+        context: &Context<'_>,
+    ) -> Result<(), BehavioralBreakpointError> {
+        let work = Cell::new(0);
+        let mut candidates = EventSchedule {
+            events: BTreeSet::new(),
+            isolation_work: Some(self.isolation_work.unwrap_or(&work)),
+            ..*self
+        };
+        for coordinate in [y, x] {
+            candidates.level(coordinate, 0.0, context)?;
+            // A numerically zero coordinate can still change its zero sign
+            // through a product or quotient. Its internal clocks expose the
+            // candidates for the VM's actual angular branch transition.
+            candidates.expression(coordinate, context, true)?;
+        }
+        self.jump_boundaries(expr, candidates.events, context, true)
+    }
+
+    fn jump_boundaries(
+        &mut self,
+        expr: &Expr,
+        roots: BTreeSet<u64>,
+        context: &Context<'_>,
+        angular: bool,
+    ) -> Result<(), BehavioralBreakpointError> {
+        let mut roots = roots.into_iter().map(Value::from_bits).peekable();
         if roots.peek().is_none() {
             return Ok(());
         }
@@ -487,7 +574,12 @@ impl EventSchedule<'_> {
             return Ok(());
         }
         let mut vm = Vm::new();
-        let mut evaluate = |time| vm.execute(&program, &Context { time, ..*context });
+        let work = Cell::new(0);
+        let budget = self.isolation_work.unwrap_or(&work);
+        let mut evaluate = |time| -> Result<Value, BehavioralBreakpointError> {
+            Self::charge_feature_work(budget, program.instructions.len())?;
+            Ok(vm.execute(&program, &Context { time, ..*context }))
+        };
         let mut previous = 0.0;
         while let Some(root) = roots.next() {
             self.poll()?;
@@ -500,13 +592,25 @@ impl EventSchedule<'_> {
             previous = root;
             let mut located = false;
             for (mut left, mut right) in [(left, root), (root, right)] {
-                let left_value = evaluate(left);
-                let right_value = evaluate(right);
+                let left_value = evaluate(left)?;
+                let right_value = evaluate(right)?;
                 if !left_value.is_finite() || !right_value.is_finite() {
                     return Err(BehavioralBreakpointError::Invalid(
                         "a switching expression is non-finite",
                     ));
                 }
+                if angular && (left_value - right_value).abs() <= std::f64::consts::PI {
+                    continue;
+                }
+                let project = |value: Value| {
+                    if angular {
+                        if value.is_sign_negative() { -1.0 } else { 1.0 }
+                    } else {
+                        value
+                    }
+                };
+                let left_value = project(left_value);
+                let right_value = project(right_value);
                 if left_value == right_value {
                     continue;
                 }
@@ -514,13 +618,13 @@ impl EventSchedule<'_> {
                     self.poll()?;
                     let midpoint =
                         Value::from_bits(left.to_bits() + (right.to_bits() - left.to_bits()) / 2);
-                    let value = evaluate(midpoint);
+                    let value = evaluate(midpoint)?;
                     if !value.is_finite() {
                         return Err(BehavioralBreakpointError::Invalid(
                             "a switching expression is non-finite",
                         ));
                     }
-                    if value == left_value {
+                    if project(value) == left_value {
                         left = midpoint;
                     } else {
                         right = midpoint;
@@ -604,7 +708,9 @@ impl EventSchedule<'_> {
                 }
             }
             Expr::Function { func, args } => match (func, args.as_slice()) {
-                (Function::Sin | Function::Cos, [phase]) if (-1.0..=1.0).contains(&target) => {
+                (Function::Sin | Function::Cos | Function::Tan, [phase])
+                    if *func == Function::Tan || (-1.0..=1.0).contains(&target) =>
+                {
                     if let Some((rate, offset)) = affine_time_coordinate(phase, context) {
                         self.trigonometric_levels(*func, rate, offset, target, 0.0)?;
                     } else {
@@ -644,6 +750,12 @@ impl EventSchedule<'_> {
                 }
                 (Function::Exp, [input]) if target > 0.0 => {
                     self.level(input, target.ln(), context)?
+                }
+                (Function::Asin, [input]) if target.abs() <= std::f64::consts::FRAC_PI_2 => {
+                    self.level(input, target.sin(), context)?;
+                }
+                (Function::Acos, [input]) if (0.0..=std::f64::consts::PI).contains(&target) => {
+                    self.level(input, target.cos(), context)?;
                 }
                 (Function::Sinh, [input]) => self.level(input, target.asinh(), context)?,
                 (Function::Asinh, [input]) => self.level(input, target.sinh(), context)?,
@@ -810,6 +922,32 @@ impl EventSchedule<'_> {
                     for level in [-1.0, 0.0, 1.0] {
                         self.level(expr, level, context)?;
                     }
+                }
+                (Function::Tan, [phase]) => {
+                    self.level(expr, 0.0, context)?;
+                    if let Some((rate, offset)) = affine_time_coordinate(phase, context) {
+                        self.trigonometric_levels(
+                            Function::Tan,
+                            rate,
+                            offset,
+                            Value::INFINITY,
+                            0.0,
+                        )?;
+                    } else {
+                        self.nonlinear_phase_levels(
+                            Function::Tan,
+                            phase,
+                            Value::INFINITY,
+                            context,
+                        )?;
+                    }
+                }
+                (Function::Asin | Function::Acos, [input]) => {
+                    self.level(input, -1.0, context)?;
+                    self.level(input, 1.0, context)?;
+                }
+                (Function::Atan2, [y, x]) => {
+                    self.polar_corners(expr, y, x, context)?;
                 }
                 (Function::SpiceSin, _) => {
                     if let Some(values) = args

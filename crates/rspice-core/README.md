@@ -271,12 +271,15 @@ them as `--integration-method euler|trap|gear|trapgear`). Timestep control
 is LTE-based with breakpoint handling; a transient checkpoint/resume path
 exists (`engine/transient/`, exercised by `tests/transient_checkpoint.rs`
 and the CLI's `--checkpoint`/`--resume`).
+`RELTOL` and frontend relative-tolerance overrides preserve the independent
+absolute voltage/current tolerances, including the legacy absolute voltage
+fallback when `VNTOL` has not been specified.
 
 Checkpoint format 35 retains the step and stop defaults that determine
 independent-source waveforms. Extending a run or changing its step ceiling
 preserves those source parameters. Older checkpoints remain readable; resume
 requires fully specified source timing when the original defaults are absent.
-Resume also requires the current resolved simulation identity (v14); states
+Resume also requires the current resolved simulation identity (v15); states
 captured under previous source evaluation or behavioral event timing semantics
 must be regenerated.
 
@@ -448,6 +451,11 @@ features. Bounds cover hyperbolic functions, their inverses and arctangent,
 including real domains and Xyce saturation rules. Exact interval endpoints
 preserve valid domain boundaries, and scaled derivative arithmetic avoids
 avoidable intermediate overflow and underflow.
+Circular bounds cover `asin`, `acos`, `tan` and `atan2`, preserving VM clamps,
+tangent poles and signed-zero angular seams. Angular derivatives use scaled
+coordinates to avoid radius overflow or underflow. A proved VM evaluation order
+can establish an exact plateau from equal endpoint values; sampled endpoint
+equality alone cannot discard an interval or its internal events.
 Centered mean-value bounds preserve cancellation in compound source
 coordinates before subsequent operations amplify range uncertainty. This
 numerical mesh supplements physical source events. A smooth
@@ -468,7 +476,7 @@ defaults still use the original `POINTS`. `MAXITER` applies to each grid solve,
 while the result reports total Newton corrections across all grids. Point and
 memory limits also apply to refinement, and cancellation remains available.
 Retained PSS operating points from earlier producer versions must be regenerated
-before dependent numerical reuse; the current producer identity is version 27.
+before dependent numerical reuse; the current producer identity is version 28.
 This convergence check supplements the shooting residual, which measures closure
 of a discrete period map. It is not a proof of resolution for all nonlinear
 expressions and devices; independent waveform and
