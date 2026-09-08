@@ -168,8 +168,9 @@ def configuration_opening_input(browser):
     expect_value(browser.capture("configuration-filter"), query)
     browser.click("New configuration", "button", keyboard=(("a", ("\ue009",)), (name, ())))
     expect_value(browser.capture("configuration-name"), name, "Name")
-    browser.click("Cancel", "button")
-    expect_value(browser.capture("configuration-cancelled"), query)
+    returned_query = "Configuration filter after Escape"
+    browser.key_sequence((("\ue00c", ()), ("a", ("\ue009",)), (returned_query, ())))
+    expect_value(browser.capture("configuration-cancelled"), returned_query)
     browser.click("Close", "button")
 
 

@@ -357,7 +357,11 @@ impl RSpiceApp {
                 initial_focus.map_or(DialogInitialFocus::Container, DialogInitialFocus::Control),
             );
         if page == ConfigurationDialogPage::Manager {
-            dialog = dialog.flush_body();
+            // The draft can become dirty during this very input pass. Keep
+            // focus here until the fresh dirty check accepts the dismissal.
+            dialog = dialog
+                .flush_body()
+                .retain_on_cancel_focus(DialogInitialFocus::Ghost);
         }
         if discard {
             dialog = dialog.transaction_state(
@@ -398,6 +402,9 @@ impl RSpiceApp {
         });
         self.handle_configuration_body_action(action);
         if self.state.dialogs.configuration_sets.page != page {
+            if page == ConfigurationDialogPage::Manager {
+                Dialog::release_retained_focus(ctx, title);
+            }
             return;
         }
         let dirty = self
@@ -421,6 +428,7 @@ impl RSpiceApp {
                 } else if dirty && !discard {
                     self.state.dialogs.configuration_sets.discard_confirmation = true;
                 } else {
+                    Dialog::release_retained_focus(ctx, title);
                     self.state.dialogs.configuration_sets.close();
                 }
             }

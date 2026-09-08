@@ -167,8 +167,9 @@ python3 tools/ci/check_wasm_jit_browser.py
 
 The browser qualification page starts only the optimized simulation worker
 and fails unless its secondary-module ABI probe and real Verilog-A transient
-solver/Jacobian/matrix/RHS probe both pass. CI also enforces 64 MiB raw / 16
-MiB gzip limits for the UI image and 24 MiB raw / 8 MiB gzip for the worker.
+solver/Jacobian/matrix/RHS probe both pass. CI reports the raw and gzip sizes
+of the delivered production UI and worker modules before building the
+instrumented workbench. These reports do not enforce size thresholds.
 
 For the real workbench qualification, build the worker as above, then replace
 the UI bindings with the instrumented image. A WebGPU-capable Chrome installation

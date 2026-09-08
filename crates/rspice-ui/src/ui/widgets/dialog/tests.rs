@@ -718,6 +718,226 @@ fn unavailable_known_body_control_falls_back_without_editing_another_field() {
 }
 
 #[test]
+fn escape_keeps_preceding_edits_and_routes_later_input_once_to_restored_focus() {
+    let ctx = Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    ctx.options_mut(|options| options.max_passes = std::num::NonZeroUsize::new(1).unwrap());
+    let first = Id::new("escape-first-field");
+    let second = Id::new("escape-second-field");
+    let mut first_text = String::new();
+    let mut second_text = String::new();
+    let mut underlying = String::new();
+    focus_underlying_editor(&ctx, &mut underlying);
+    let mut open = true;
+    let mut render = |ui: &mut Ui| {
+        ui.add(egui::TextEdit::singleline(&mut underlying).id(underlying_id()));
+        if open {
+            let choice = Dialog::new("TEST", TEST_TITLE, "Accept")
+                .initial_focus(DialogInitialFocus::Control(first))
+                .show_with_initial_body_focus(ui.ctx(), |ui| {
+                    let response = ui.add(egui::TextEdit::singleline(&mut first_text).id(first));
+                    ui.add(egui::TextEdit::singleline(&mut second_text).id(second));
+                    Some(response.id)
+                });
+            open = choice == DialogChoice::None;
+        }
+    };
+    let _ = ctx.run_ui(raw_input(Vec::new()), &mut render);
+    ctx.memory_mut(|memory| memory.request_focus(second));
+    let _ = ctx.run_ui(raw_input(Vec::new()), &mut render);
+    let _ = ctx.run_ui(
+        raw_input(vec![
+            egui::Event::Paste("before".to_owned()),
+            key_event(Key::Escape, Modifiers::NONE),
+            egui::Event::Text("after".to_owned()),
+        ]),
+        &mut render,
+    );
+    assert_eq!(ctx.memory(|memory| memory.focused()), Some(underlying_id()));
+    let _ = ctx.run_ui(
+        raw_input(vec![egui::Event::Text(" new".to_owned())]),
+        &mut render,
+    );
+    let _ = ctx.run_ui(raw_input(Vec::new()), render);
+    assert!(!open);
+    assert_eq!(first_text, "");
+    assert_eq!(second_text, "before");
+    assert_eq!(underlying, "after new");
+}
+
+#[test]
+fn enter_before_escape_submits_before_the_later_cancellation() {
+    let ctx = Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    ctx.options_mut(|options| options.max_passes = std::num::NonZeroUsize::new(1).unwrap());
+    let mut text = String::new();
+    let field = Id::new("ordered-submit-field");
+    let mut choice = DialogChoice::None;
+    let mut render = |ui: &mut Ui| {
+        choice = Dialog::new("TEST", TEST_TITLE, "Accept")
+            .initial_focus(DialogInitialFocus::Control(field))
+            .show_with_initial_body_focus(ui.ctx(), |ui| {
+                Some(ui.add(egui::TextEdit::singleline(&mut text).id(field)).id)
+            });
+    };
+    let _ = ctx.run_ui(raw_input(Vec::new()), &mut render);
+    let escape = key_event(Key::Escape, Modifiers::NONE);
+    let after = egui::Event::Paste("later".to_owned());
+    let _ = ctx.run_ui(
+        raw_input(vec![
+            egui::Event::Paste("submitted".to_owned()),
+            key_event(Key::Enter, Modifiers::NONE),
+            escape.clone(),
+            after.clone(),
+        ]),
+        render,
+    );
+    assert_eq!(choice, DialogChoice::Primary);
+    assert_eq!(text, "submitted");
+    let _ = ctx.run_ui(raw_input(Vec::new()), |ui| {
+        assert!(ui.input(|input| input.events.is_empty()));
+    });
+    let _ = ctx.run_ui(raw_input(Vec::new()), |ui| {
+        assert_eq!(
+            ui.input(|input| input.events.clone()),
+            vec![escape.clone(), after.clone()]
+        );
+    });
+    let _ = ctx.run_ui(raw_input(Vec::new()), |ui| {
+        assert!(ui.input(|input| input.events.is_empty()));
+    });
+}
+
+#[test]
+fn escape_edits_only_the_top_dialog_and_returns_following_text_to_the_parent() {
+    let ctx = Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    ctx.options_mut(|options| options.max_passes = std::num::NonZeroUsize::new(1).unwrap());
+    let parent = Id::new("escape-parent-field");
+    let child = Id::new("escape-child-field");
+    let mut parent_text = String::new();
+    let mut child_text = String::new();
+    let mut child_open = false;
+    let mut parent_choice = DialogChoice::None;
+    let mut child_choice = DialogChoice::None;
+    for step in 0..5 {
+        if step == 1 {
+            child_open = true;
+        }
+        let events = if step == 2 {
+            vec![
+                egui::Event::Paste("child".to_owned()),
+                key_event(Key::Escape, Modifiers::NONE),
+                egui::Event::Paste("parent".to_owned()),
+            ]
+        } else {
+            Vec::new()
+        };
+        let _ = ctx.run_ui(raw_input(events), |ui| {
+            parent_choice = Dialog::new("TEST", "Parent", "Accept")
+                .initial_focus(DialogInitialFocus::BodyControl)
+                .show_with_initial_body_focus(ui.ctx(), |ui| {
+                    Some(
+                        ui.add(egui::TextEdit::singleline(&mut parent_text).id(parent))
+                            .id,
+                    )
+                });
+            if child_open {
+                child_choice = Dialog::new("TEST", "Child", "Accept")
+                    .initial_focus(DialogInitialFocus::Control(child))
+                    .show_with_initial_body_focus(ui.ctx(), |ui| {
+                        Some(
+                            ui.add(egui::TextEdit::singleline(&mut child_text).id(child))
+                                .id,
+                        )
+                    });
+                child_open = child_choice == DialogChoice::None;
+            }
+        });
+        assert_eq!(parent_choice, DialogChoice::None);
+    }
+    assert!(!child_open);
+    assert_eq!(child_choice, DialogChoice::Cancelled);
+    assert_eq!(child_text, "child");
+    assert_eq!(parent_text, "parent");
+    assert_eq!(ctx.memory(|memory| memory.focused()), Some(parent));
+}
+
+#[test]
+fn escape_continuation_does_not_revive_removed_or_disabled_focus() {
+    for removed in [false, true] {
+        let ctx = Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.options_mut(|options| options.max_passes = std::num::NonZeroUsize::new(1).unwrap());
+        let mut underlying = String::new();
+        focus_underlying_editor(&ctx, &mut underlying);
+        let _ = run_dialog(&ctx, raw_input(Vec::new()), &mut underlying, true, |_| {});
+        let (choice, _) = run_dialog(
+            &ctx,
+            raw_input(vec![
+                key_event(Key::Escape, Modifiers::NONE),
+                egui::Event::Paste("obsolete target".to_owned()),
+            ]),
+            &mut underlying,
+            true,
+            |_| {},
+        );
+        assert_eq!(choice, DialogChoice::Cancelled);
+        for _ in 0..3 {
+            let _ = ctx.run_ui(raw_input(Vec::new()), |ui| {
+                if !removed {
+                    ui.add_enabled(
+                        false,
+                        egui::TextEdit::singleline(&mut underlying).id(underlying_id()),
+                    );
+                }
+            });
+        }
+        assert_eq!(underlying, "");
+        assert_eq!(ctx.memory(|memory| memory.focused()), None);
+    }
+}
+
+#[test]
+fn escape_dismisses_an_open_popup_before_its_dialog() {
+    let ctx = Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    ctx.options_mut(|options| options.max_passes = std::num::NonZeroUsize::new(1).unwrap());
+    let popup = Id::new("dialog-escape-popup");
+    let mut underlying = String::new();
+    let body = |ui: &mut Ui| {
+        let response = ui.button("Options");
+        Popup::from_response(&response)
+            .id(popup)
+            .open_memory(None)
+            .show(|ui| {
+                ui.button("An option").clicked();
+            });
+    };
+    let _ = run_dialog(&ctx, raw_input(Vec::new()), &mut underlying, true, body);
+    Popup::open_id(&ctx, popup);
+    let _ = run_dialog(&ctx, raw_input(Vec::new()), &mut underlying, true, body);
+    assert!(Popup::is_any_open(&ctx));
+    let (choice, _) = run_dialog(
+        &ctx,
+        raw_input(vec![key_event(Key::Escape, Modifiers::NONE)]),
+        &mut underlying,
+        true,
+        body,
+    );
+    assert_eq!(choice, DialogChoice::None);
+    assert!(!Popup::is_any_open(&ctx));
+    let (choice, _) = run_dialog(
+        &ctx,
+        raw_input(vec![key_event(Key::Escape, Modifiers::NONE)]),
+        &mut underlying,
+        true,
+        body,
+    );
+    assert_eq!(choice, DialogChoice::Cancelled);
+}
+
+#[test]
 fn unavailable_initial_focus_target_falls_back_to_modal_container() {
     let ctx = Context::default();
     crate::ui::Theme::default().apply(&ctx);

@@ -199,6 +199,15 @@ fn initial_focus_keeps_inspection_only_configuration_fields_read_only() {
 
 #[test]
 fn closing_in_the_editing_frame_keeps_the_configuration_draft() {
+    editing_frame_keeps_the_configuration_draft(false);
+}
+
+#[test]
+fn escape_in_the_editing_frame_keeps_the_configuration_draft() {
+    editing_frame_keeps_the_configuration_draft(true);
+}
+
+fn editing_frame_keeps_the_configuration_draft(escape: bool) {
     let ctx = Context::default();
     crate::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
@@ -252,20 +261,55 @@ fn closing_in_the_editing_frame_keeps_the_configuration_draft() {
     };
     let _ = render(vec![egui::Event::PointerMoved(pos), pointer(true)]);
     let _ = render(vec![pointer(false)]);
-    let _ = render(vec![
-        egui::Event::Paste(" updated".to_owned()),
+    let cancellation = if escape {
+        egui::Event::Key {
+            key: egui::Key::Escape,
+            physical_key: Some(egui::Key::Escape),
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }
+    } else {
         egui::Event::AccessKitActionRequest(egui::accesskit::ActionRequest {
             action: egui::accesskit::Action::Click,
             target_tree: egui::accesskit::TreeId::ROOT,
             target_node: close_id,
             data: None,
-        }),
-    ]);
+        })
+    };
+    let mut events = vec![egui::Event::Paste(" updated".to_owned()), cancellation];
+    if escape {
+        events.push(egui::Event::Key {
+            key: egui::Key::Enter,
+            physical_key: Some(egui::Key::Enter),
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        });
+    }
+    let _ = render(events);
     let dialog = &app.state.dialogs.configuration_sets;
     assert!(dialog.open);
     assert!(dialog.discard_confirmation);
     assert!(dialog.draft.as_ref().unwrap().name.contains(" updated"));
     assert_eq!(app.state.workspace.configuration_sets, catalog);
+    if escape {
+        // Enter after Escape belongs to the newly focused discard action.
+        // It must not submit the original editor or bypass its dirty check.
+        let _ = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1280.0, 900.0),
+                )),
+                ..Default::default()
+            },
+            |ui| app.render_frame_dialogs(ui),
+        );
+        assert!(!app.state.dialogs.configuration_sets.open);
+        assert_eq!(app.state.workspace.configuration_sets, catalog);
+        assert_eq!(ctx.memory(|memory| memory.focused()), None);
+    }
 }
 
 fn definition(name: &str) -> ConfigurationSetDefinition {

@@ -31,6 +31,8 @@ use egui::{
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 
+mod keyboard;
+
 /// Mockup-owned dialog surface purpose.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DialogSize {
@@ -617,10 +619,21 @@ impl<'a> Dialog<'a> {
     /// focus to a control that explains the retained state. Dirty workflows
     /// use this for their first Escape/Cancel pass; the following pass omits
     /// this option so a confirmed dismissal restores the prior workspace
-    /// focus normally.
+    /// focus normally. Workflows that decide whether to retain the dialog
+    /// after inspecting body edits call [`Self::release_retained_focus`] if
+    /// they accept the close instead.
     pub fn retain_on_cancel_focus(mut self, target: DialogInitialFocus) -> Self {
         self.retained_cancel_focus = Some(target);
         self
+    }
+
+    /// Finish an accepted close after a workflow retained cancel focus while
+    /// checking the freshly edited draft. The title must match that dialog.
+    pub fn release_retained_focus(ctx: &Context, title: &str) {
+        let id = Id::new(("rspice.dialog", title));
+        let layer = egui::LayerId::new(Order::Foreground, id);
+        keyboard::unregister(ctx, layer);
+        restore_dialog_focus(ctx, id.with("focus-state"), id.with("move"), layer);
     }
 
     /// Disable the Enter→primary mapping — for dialogs whose body owns the
@@ -791,11 +804,14 @@ impl<'a> Dialog<'a> {
             .order(Order::Foreground)
             .fixed_pos(screen.min);
         let modal_layer = area.layer();
+        keyboard::register(ctx, modal_layer, self.interaction_enabled);
         let any_popup_open = Popup::is_any_open(ctx);
         let is_top_modal = ctx.memory_mut(|memory| {
             memory.set_modal_layer(modal_layer);
             memory.top_modal_layer() == Some(modal_layer)
         });
+        let is_top_modal =
+            keyboard::top_layer(ctx).map_or(is_top_modal, |layer| layer == modal_layer);
 
         let opened_this_pass = begin_dialog_focus(ctx, focus_state_id);
         if opened_this_pass || !focus_is_within_modal(ctx, modal_layer) {
@@ -1110,6 +1126,16 @@ impl<'a> Dialog<'a> {
             }
         }
 
+        // The intercepted Escape follows all input rendered above, including
+        // Enter or a button activation that may already have chosen an action.
+        let accept_cancel = choice == DialogChoice::None
+            && self.interaction_enabled
+            && is_top_modal
+            && !Popup::is_any_open(ctx);
+        if keyboard::cancel(ctx, modal_layer, accept_cancel) {
+            choice = DialogChoice::Cancelled;
+        }
+
         if choice != DialogChoice::None {
             // Re-measure content-height surfaces every time they are opened.
             // Keeping a previous session's height could otherwise force a
@@ -1122,6 +1148,7 @@ impl<'a> Dialog<'a> {
                 let target = rendered_focus.requested(target).unwrap_or(focus_id);
                 ctx.memory_mut(|memory| memory.request_focus(target));
             } else {
+                keyboard::unregister(ctx, modal_layer);
                 restore_dialog_focus(ctx, focus_state_id, focus_id, modal_layer);
             }
         }
@@ -1705,6 +1732,9 @@ fn restore_dialog_focus(
             memory.request_focus(prior);
         }
     });
+    if let Some(prior) = restorable {
+        keyboard::resume_focus(ctx, prior);
+    }
 }
 
 #[cfg(test)]
