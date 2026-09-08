@@ -100,6 +100,7 @@ pub fn simulation_error_to_pyerr(err: rspice_core::engine::SimulationError) -> P
 
     let attributes = simulation_error_attributes(&err);
     let error = match &err {
+        CoreSimulationError::RfPort(error) => value_error(error.to_string()),
         CoreSimulationError::ConvergenceFailed(_) => ConvergenceError::new_err(err.to_string()),
         CoreSimulationError::Aborted => CancelledError::new_err(err.to_string()),
         // An expired budget is not a cancellation, and a caller decides

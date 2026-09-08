@@ -111,6 +111,28 @@ fn assert_relative(actual: f64, expected: f64, tolerance: f64, label: &str) {
 }
 
 #[test]
+fn hierarchical_ports_export_scattering_and_dut_noise() {
+    let directory = test_dir("hierarchical_ports");
+    let deck = directory.join("ports.cir");
+    let csv = directory.join("ports.csv");
+    std::fs::write(&deck, "* Scoped P port\n.subckt generator a b params: ref=75\nP1 a b DC 0 portnum=1 z0={ref}\n.ends\nXG p1 0 generator ref=50\nR1 p1 p2 50\nV2 p2 0 DC 0 portnum=2 z0=50\n.sp lin 3 10 30 donoise\n.end\n").unwrap();
+    let output = run(&deck, Some(&csv), Some("csv"));
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let table = SpTable::read(&csv);
+    assert_eq!(table.scale, [10.0, 20.0, 30.0]);
+    for value in table.real_values("S_1_1") {
+        assert_relative(*value, 1.0 / 3.0, 1e-10, "S11");
+    }
+    for value in table.real_values("CY_A2_per_Hz_1_1") {
+        assert_relative(*value, 4.0 * 1.380649e-23 * 300.15 / 50.0, 1e-10, "Cy11");
+    }
+}
+
+#[test]
 fn model_finish_exports_complete_final_scattering_and_noise_on_the_default_stack() {
     let directory = test_dir("model_finish");
     let model = directory.join("sp_finish.va");

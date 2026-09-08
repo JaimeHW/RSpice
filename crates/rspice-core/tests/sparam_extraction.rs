@@ -16,12 +16,39 @@ use rspice_core::engine::{Engine, SimulationConfig, SimulationError};
 use rspice_core::netlist::Netlist;
 
 #[test]
+fn sp_resolves_hierarchical_ports_and_their_noise_terminations() {
+    for source in ["V", "P"] {
+        let netlist = Netlist::parse(&format!(
+            "* Hierarchical RF source\n.subckt generator a b params: reference=75\n{source}1 a b DC 0 portnum=1 z0={{reference}}\n.ends generator\nXG p 0 generator reference=50\nR1 p 0 100\n.end\n"
+        )).unwrap();
+        let run = Engine::default()
+            .run_sp_over_grid_with_abort(&netlist, &[10.0, 20.0], true, &rspice_core::NoAbort)
+            .unwrap();
+        assert_eq!(run.ports.len(), 1);
+        assert!(run.ports[0].node_pos.eq_ignore_ascii_case("p"));
+        assert_eq!(run.ports[0].z0, 50.0);
+        for (scattering, noise) in run
+            .scattering
+            .data
+            .iter()
+            .zip(run.port_noise.unwrap().points)
+        {
+            assert!((scattering.s11() - Complex64::new(1.0 / 3.0, 0.0)).norm() < 1e-12);
+            let expected = 4.0 * rspice_core::constants::K_BOLTZMANN * 300.15 / 100.0;
+            assert!((noise.current_correlation[0][0].re / expected - 1.0).abs() < 1e-12);
+        }
+    }
+}
+
+#[test]
 fn annotated_rf_impedance_is_present_in_dc_ac_and_transient() {
     for declaration in [
         "V1 p 0 DC 1 AC 3 portnum=1 z0=50",
         "P1 p 0 DC 1 AC 3 port=1 z0=50",
         "V1 p 0 DC 1 AC 3 portnum=1 z0={reference}\n.param reference=50",
+        "P1 p 0 DC {drive} AC 3 portnum=1 z0={reference}\n.param drive=1 reference=50",
         "XP p 0 source\n.subckt source a b\nV1 a b DC 1 AC 3 portnum=1 z0=50\n.ends source",
+        "XP p 0 source drive=1 reference=50\n.subckt source a b params: drive=3 reference=75\nP1 a b DC {drive} AC {3*drive} portnum=1 z0={reference}\n.ends source",
     ] {
         let netlist = Netlist::parse(&format!(
             "* Physical RF impedance\n{declaration}\nR1 p 0 100\n.end\n"

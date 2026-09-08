@@ -9,8 +9,8 @@ use super::analog_tasks::FrequencyModelState;
 use super::noise::{PreparedPortNoise, validate_port_noise_frequencies};
 use crate::abort_signal::AbortSignal;
 use crate::analysis::s_param::{
-    PortNoiseAssembly, PortNoiseAssemblyError, SMatrix, SParameterPort, SParameterResult,
-    assemble_port_noise_with_abort, collect_ports, normalize_ports, s_column_from_port_voltages,
+    PortError, PortNoiseAssembly, PortNoiseAssemblyError, SMatrix, SParameterPort,
+    SParameterResult, assemble_port_noise_with_abort, s_column_from_port_voltages,
 };
 use crate::netlist::AnalysisCommand;
 use crate::solver::ComplexMatrix;
@@ -28,7 +28,7 @@ pub struct SParameterRun {
     /// Scattering parameters over the swept grid, in the exact shape the
     /// shared S-parameter document accepts.
     pub scattering: SParameterResult,
-    /// The deck's declared ports, in port order, with the source names and
+    /// The elaborated ports, in port order, with the qualified source names and
     /// reference-impedance realizations the sweep drove them through.
     pub ports: Vec<SParameterPort>,
     /// Port-noise evidence, present only when the card requested it.
@@ -91,9 +91,17 @@ impl Engine {
         }
         let engine = self.resolved_for_netlist(netlist);
         engine.ensure_analysis_points(frequencies.len())?;
-        let ports = collect_ports(netlist).map_err(|error| {
-            SimulationError::Netlist(format!(".SP port declarations are unusable: {error}"))
-        })?;
+        let run_scope = crate::abort_signal::ModelRunSignal::if_needed(abort);
+        let abort: &dyn AbortSignal = run_scope.as_ref().map_or(abort, |scope| scope);
+        Self::ensure_model_run_active(abort)?;
+        let (circuit, rf_ports) = engine.build_circuit_with_rf_ports(netlist, abort)?;
+        if rf_ports.is_empty() {
+            return Err(PortError::NoPortsDeclared.into());
+        }
+        let ports = rf_ports
+            .iter()
+            .map(|resolved| resolved.port.clone())
+            .collect::<Vec<_>>();
         let count = ports.len();
         engine.ensure_result_shape(
             frequencies.len(),
@@ -102,32 +110,24 @@ impl Engine {
                 .saturating_mul(2)
                 .saturating_add(1),
         )?;
-        let run_scope = crate::abort_signal::ModelRunSignal::if_needed(abort);
-        let abort: &dyn AbortSignal = run_scope.as_ref().map_or(abort, |scope| scope);
-        Self::ensure_model_run_active(abort)?;
-
         // Both analyses use the same physical port circuit. Inserting Z0 only
         // for AC would bias nonlinear devices differently in the noise solve.
         // Each analysis still retains its own model phase and accepted state.
-        let mut base = netlist.clone();
-        let normalized = normalize_ports(&mut base, &ports).map_err(|error| {
-            SimulationError::Netlist(format!(".SP port normalization failed: {error}"))
-        })?;
         let PreparedAc {
             circuit: ac_bias,
             mut matrix,
             linearization,
             excitation: _,
-        } = engine.prepare_ac_analysis(&base, abort)?;
+        } = engine.prepare_ac_circuit(netlist, circuit, abort)?;
         engine.ensure_result_shape(
             frequencies.len(),
             ac_bias.matrix_size().saturating_mul(2).saturating_add(1),
         )?;
-        let excitations = normalized
+        let excitations = ports
             .iter()
             .map(|port| AcExcitation::for_port(&ac_bias, &port.source_name))
             .collect::<Result<Vec<_>, _>>()?;
-        let ground = base.ground_policy();
+        let ground = netlist.ground_policy();
         let node_id = |name: &str| {
             let name = ground.canonical_node(name);
             if name == "0" {
@@ -139,7 +139,7 @@ impl Engine {
                 ))
             })
         };
-        let nodes = normalized
+        let nodes = ports
             .iter()
             .map(|port| Ok((node_id(&port.node_pos)?, node_id(&port.node_neg)?)))
             .collect::<Result<Vec<_>, SimulationError>>()?;
@@ -155,13 +155,13 @@ impl Engine {
                 .map(|port| port.source_name.clone())
                 .collect::<Vec<_>>();
             let mut prepared = engine.prepare_port_noise_analysis(
-                &base,
+                netlist,
                 &names,
                 frequencies.len(),
                 temperature,
                 abort,
             )?;
-            prepared.use_sp_reference_planes(&base, &normalized, abort)?;
+            prepared.use_sp_reference_planes(netlist, &rf_ports, abort)?;
             let PreparedPortNoise {
                 circuit,
                 matrix,

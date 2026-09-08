@@ -32,8 +32,6 @@ use rspice_core::{Engine, SimulationConfig, SimulationConfigOverrides, resolve_s
 use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hasher};
 
-use rspice_core::analysis::s_param;
-
 use crate::abort::{ActiveRuns, run_interruptible};
 use crate::config::{PyIntegrationMethod, PySimulationConfig};
 use crate::measure;

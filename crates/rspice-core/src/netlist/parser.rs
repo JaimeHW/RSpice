@@ -67,6 +67,7 @@ pub(in crate::netlist) use chebyshev_synthesis::{ChebyshevSpec, synthesize_cheby
 use command_parsers::*;
 use commands::*;
 use conditionals::*;
+pub(in crate::netlist) use elements::lower_deferred_rf_port;
 use elements::*;
 use laplace_synthesis::*;
 use line::*;

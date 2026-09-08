@@ -79,6 +79,9 @@ impl EngineBridge {
                 SimulationError::SolverError(solver_err.to_string())
             }
             rspice_core::SimulationError::Netlist(msg) => SimulationError::ParseError(msg),
+            rspice_core::SimulationError::RfPort(error) => {
+                SimulationError::ParseError(error.to_string())
+            }
             rspice_core::SimulationError::RequestedSignalUnavailable(error) => {
                 let error = *error;
                 SimulationError::RequestedSignalUnavailable {

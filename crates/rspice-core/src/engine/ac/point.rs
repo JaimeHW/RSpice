@@ -66,7 +66,17 @@ impl Engine {
         netlist: &Netlist,
         abort: &dyn AbortSignal,
     ) -> Result<PreparedAc, SimulationError> {
-        let mut circuit = self.build_circuit_with_abort(netlist, abort)?;
+        let circuit = self.build_circuit_with_abort(netlist, abort)?;
+        self.prepare_ac_circuit(netlist, circuit, abort)
+    }
+
+    /// SP retains elaborated port metadata before initializing this same AC state.
+    pub(in crate::engine) fn prepare_ac_circuit(
+        &self,
+        netlist: &Netlist,
+        mut circuit: CircuitData,
+        abort: &dyn AbortSignal,
+    ) -> Result<PreparedAc, SimulationError> {
         circuit
             .begin_veriloga_equilibrium_analysis(1)
             .map_err(SimulationError::Circuit)?;

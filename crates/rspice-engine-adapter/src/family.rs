@@ -816,9 +816,9 @@ fn sweep_axis_unit(netlist: &Netlist, source: &str) -> SignalUnit {
         .iter()
         .find(|element| element.name.eq_ignore_ascii_case(source))
         .and_then(|element| match &element.kind {
-            ElementKind::VoltageSource(_) | ElementKind::VoltageSourceDeferred(_) => {
-                Some(SignalUnit::Volt)
-            }
+            ElementKind::VoltageSource(_)
+            | ElementKind::VoltageSourceDeferred(_)
+            | ElementKind::RfPortDeferred { .. } => Some(SignalUnit::Volt),
             ElementKind::CurrentSource(_) | ElementKind::CurrentSourceDeferred(_) => {
                 Some(SignalUnit::Ampere)
             }

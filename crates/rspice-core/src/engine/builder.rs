@@ -4624,6 +4624,22 @@ impl Engine {
         netlist: &Netlist,
         abort: &dyn AbortSignal,
     ) -> Result<CircuitData, SimulationError> {
+        self.build_circuit_with_rf_ports(netlist, abort)
+            .map(|(circuit, _)| circuit)
+    }
+
+    /// Retain RF identities from the same elaboration that constructs the circuit.
+    pub(super) fn build_circuit_with_rf_ports(
+        &self,
+        netlist: &Netlist,
+        abort: &dyn AbortSignal,
+    ) -> Result<
+        (
+            CircuitData,
+            Vec<crate::analysis::s_param::MaterializedRfPort>,
+        ),
+        SimulationError,
+    > {
         self.ensure_valid_configuration()?;
         check_build_abort(abort)?;
         check_netlist_source_resource_limits(self, netlist, abort)?;
@@ -4717,19 +4733,13 @@ impl Engine {
             }
             &effective_model_netlist
         };
-        crate::analysis::s_param::materialize_rf_ports(
+        let rf_ports = crate::analysis::s_param::materialize_rf_ports(
             netlist,
             &mut flat_elements,
             self.config.resource_limits.max_flattened_elements,
             abort,
         )
-        .map_err(|error| match error {
-            crate::analysis::s_param::PortError::Aborted => SimulationError::Aborted,
-            crate::analysis::s_param::PortError::ResourceLimit(error) => {
-                SimulationError::ResourceLimit(error)
-            }
-            other => SimulationError::Circuit(format!("RF port construction failed: {other}")),
-        })?;
+        .map_err(SimulationError::from)?;
         if !self.config.device_voltage_limiting {
             for element in &flat_elements {
                 let family = match &element.kind {
@@ -5462,6 +5472,7 @@ impl Engine {
                 }
                 ElementKind::VoltageSourceDeferred(_)
                 | ElementKind::CurrentSourceDeferred(_)
+                | ElementKind::RfPortDeferred { .. }
                 | ElementKind::PspiceChebyshev { .. } => {
                     return Err(SimulationError::Circuit(format!(
                         "Source '{}' still has unresolved parameter scope after flattening",
@@ -8802,7 +8813,7 @@ impl Engine {
         }
 
         check_build_abort(abort)?;
-        Ok(circuit)
+        Ok((circuit, rf_ports))
     }
 }
 

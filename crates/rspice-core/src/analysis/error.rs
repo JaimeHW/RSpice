@@ -678,6 +678,10 @@ pub enum SimulationError {
     #[error("Netlist error: {0}")]
     Netlist(String),
 
+    /// Invalid RF port declarations, retained for typed frontend diagnostics.
+    #[error("RF port error: {0}")]
+    RfPort(Box<super::s_param::PortError>),
+
     #[error(transparent)]
     RequestedSignalUnavailable(Box<RequestedSignalUnavailableError>),
 
@@ -703,6 +707,16 @@ pub enum SimulationError {
 impl From<RequestedSignalUnavailableError> for SimulationError {
     fn from(error: RequestedSignalUnavailableError) -> Self {
         Self::RequestedSignalUnavailable(Box::new(error))
+    }
+}
+
+impl From<super::s_param::PortError> for SimulationError {
+    fn from(error: super::s_param::PortError) -> Self {
+        match error {
+            super::s_param::PortError::Aborted => Self::Aborted,
+            super::s_param::PortError::ResourceLimit(error) => Self::ResourceLimit(error),
+            other => Self::RfPort(Box::new(other)),
+        }
     }
 }
 
@@ -819,7 +833,7 @@ impl SimulationError {
                 SimulationErrorCategory::Solver,
                 false,
             ),
-            Self::Netlist(_) => (
+            Self::Netlist(_) | Self::RfPort(_) => (
                 SimulationErrorCode::NetlistError,
                 SimulationErrorCategory::Netlist,
                 false,

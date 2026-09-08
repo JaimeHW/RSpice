@@ -1110,7 +1110,9 @@ fn validate_reduced_driver(
         // Native independent sources are useful reduced-network drivers in
         // standalone analog decks. Give them one exact pseudo-cell spelling
         // rather than accepting arbitrary *CELL metadata.
-        ElementKind::VoltageSource(_) | ElementKind::VoltageSourceDeferred(_) => "VOLTAGE_SOURCE",
+        ElementKind::VoltageSource(_)
+        | ElementKind::VoltageSourceDeferred(_)
+        | ElementKind::RfPortDeferred { .. } => "VOLTAGE_SOURCE",
         ElementKind::CurrentSource(_) | ElementKind::CurrentSourceDeferred(_) => "CURRENT_SOURCE",
         _ => {
             return Err(format!(
@@ -1151,6 +1153,7 @@ fn terminal_index(
             .or_else(|| position_in(&["A", "B"], &pin_upper)),
         ElementKind::VoltageSource(_)
         | ElementKind::VoltageSourceDeferred(_)
+        | ElementKind::RfPortDeferred { .. }
         | ElementKind::CurrentSource(_)
         | ElementKind::CurrentSourceDeferred(_) => position_in(&["1", "2"], &pin_upper)
             .or_else(|| position_in(&["P", "N"], &pin_upper))

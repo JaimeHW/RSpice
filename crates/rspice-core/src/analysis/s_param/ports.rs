@@ -34,6 +34,12 @@ pub struct SParameterPort {
     pub realization: PortRealization,
 }
 
+/// Port identity and termination resolved by the actual circuit elaboration.
+pub(crate) struct MaterializedRfPort {
+    pub port: SParameterPort,
+    pub termination: String,
+}
+
 /// How a port's reference impedance is represented in the netlist.
 ///
 /// Concise annotations are expanded during circuit construction; a lowered
@@ -316,14 +322,15 @@ fn reference_resistor(
     }
 }
 
-/// Collect and validate every `portnum`-annotated voltage source, in port order.
+/// Collect resolved top-level `portnum` annotations, in port order.
+/// The engine's SP runner resolves hierarchy and deferred parameters during construction.
 pub fn collect_ports(netlist: &Netlist) -> Result<Vec<SParameterPort>, PortError> {
     collect_element_ports(&netlist.elements, &NoAbort)
 }
 
 /// Find a lowered port's resistor and external plane from its ownership,
 /// independently of generated names or resistor orientation.
-pub(crate) fn reference_impedance_helper<'a>(
+fn reference_impedance_helper<'a>(
     elements: &'a [Element],
     source: &Element,
     z0: Value,
@@ -459,28 +466,56 @@ pub(crate) fn materialize_rf_ports(
     elements: &mut Vec<Element>,
     max_elements: usize,
     abort: &dyn AbortSignal,
-) -> Result<(), PortError> {
+) -> Result<Vec<MaterializedRfPort>, PortError> {
     let ports = match collect_element_ports(elements, abort) {
         Ok(ports) => ports,
-        Err(PortError::NoPortsDeclared) => return Ok(()),
+        Err(PortError::NoPortsDeclared) => return Ok(Vec::new()),
         Err(error) => return Err(error),
     };
     let additions = ports
         .iter()
         .filter(|port| port.realization == PortRealization::Ideal)
         .count();
-    if additions == 0 {
-        return Ok(());
-    }
     ResourceLimitError::ensure(
         ResourceKind::FlattenedElements,
         elements.len().saturating_add(additions),
         max_elements,
     )
     .map_err(PortError::ResourceLimit)?;
-    let mut names = PortNames::from_elements(netlist, elements, abort)?;
-    normalize_port_elements(elements, &ports, &mut names, abort)?;
-    Ok(())
+    let ports = if additions == 0 {
+        ports
+    } else {
+        let mut names = PortNames::from_elements(netlist, elements, abort)?;
+        normalize_port_elements(elements, &ports, &mut names, abort)?
+    };
+    let mut materialized = Vec::with_capacity(ports.len());
+    for port in ports {
+        let mut source = None;
+        for element in elements.iter() {
+            if abort.is_aborted() {
+                return Err(PortError::Aborted);
+            }
+            if element.name.eq_ignore_ascii_case(&port.source_name) {
+                source = Some(element);
+                break;
+            }
+        }
+        let source = source.ok_or_else(|| PortError::PortSourceUnusable {
+            source_name: port.source_name.clone(),
+            reason: "disappeared during construction".into(),
+        })?;
+        let termination = reference_impedance_helper(elements, source, port.z0, abort)?
+            .filter(|(_, plane)| plane.eq_ignore_ascii_case(&port.node_pos))
+            .ok_or_else(|| PortError::PortSourceUnusable {
+                source_name: port.source_name.clone(),
+                reason: "has no matching reference-impedance resistor".into(),
+            })?;
+        materialized.push(MaterializedRfPort {
+            port,
+            termination: termination.0.name.to_ascii_lowercase(),
+        });
+    }
+    Ok(materialized)
 }
 
 fn normalize_port_elements(

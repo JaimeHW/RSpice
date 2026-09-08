@@ -1262,6 +1262,7 @@ fn validate_manual_fourier_current_capability(
                 | ElementKind::JilesAthertonInductor { .. }
                 | ElementKind::VoltageSource(_)
                 | ElementKind::VoltageSourceDeferred(_)
+                | ElementKind::RfPortDeferred { .. }
                 | ElementKind::CurrentSource(_)
                 | ElementKind::CurrentSourceDeferred(_)
                 | ElementKind::Vcvs { .. }

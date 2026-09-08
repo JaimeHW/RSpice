@@ -519,6 +519,7 @@ fn dc_conduction_groups(
         ElementKind::Subcircuit { .. }
         | ElementKind::PspiceChebyshev { .. }
         | ElementKind::VoltageSourceDeferred(_)
+        | ElementKind::RfPortDeferred { .. }
         | ElementKind::CurrentSourceDeferred(_) => {
             return Err(ConnectivityAnalysisError {
                 element: element.name.clone(),
@@ -619,6 +620,7 @@ fn xyce_dc_lead_groups(element: &Element) -> Result<Vec<Vec<&str>>, Connectivity
         ElementKind::Subcircuit { .. }
         | ElementKind::PspiceChebyshev { .. }
         | ElementKind::VoltageSourceDeferred(_)
+        | ElementKind::RfPortDeferred { .. }
         | ElementKind::CurrentSourceDeferred(_) => {
             return Err(ConnectivityAnalysisError {
                 element: element.name.clone(),

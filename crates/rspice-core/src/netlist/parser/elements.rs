@@ -5906,9 +5906,37 @@ pub(super) fn parse_coupled_tlines(
     line_num: usize,
     elements: &mut Vec<Element>,
     params: &ParamContext,
+    defer_source_spec: bool,
 ) -> Result<(), ParseError> {
     if xyce_port_tail_is_present(stream, line_num) {
-        return parse_xyce_port(stream, line_num, elements, params);
+        let mut deferred = stream.clone();
+        let name = expect_element_name(&mut deferred, line_num)?;
+        let positive = expect_node(&mut deferred, line_num)?;
+        let negative = expect_node(&mut deferred, line_num)?;
+        let source = collect_deferred_source_spec(&mut deferred);
+        if !defer_source_spec {
+            let mut parsed = stream.clone();
+            match parse_xyce_port(&mut parsed, line_num, elements, params) {
+                Ok(()) => {
+                    *stream = parsed;
+                    return Ok(());
+                }
+                Err(error) if source_spec_error_can_defer(&error, &source, params) => {}
+                Err(error) => return Err(error),
+            }
+        }
+        *stream = deferred;
+        elements.push(Element {
+            name,
+            nodes: vec![positive, negative],
+            kind: ElementKind::RfPortDeferred {
+                source,
+                line: line_num,
+                multiplicity: 1.0,
+            },
+            provenance: ElementProvenance::Authored,
+        });
+        return Ok(());
     }
 
     let name = expect_element_name(stream, line_num)?;
@@ -5975,6 +6003,34 @@ fn xyce_port_tail_is_present(stream: &TokenStream, line_num: usize) -> bool {
     false
 }
 
+pub(in crate::netlist) fn lower_deferred_rf_port(
+    element: &Element,
+    source: &str,
+    line: usize,
+    params: &ParamContext,
+) -> Result<Vec<Element>, ParseError> {
+    let mut stream = TokenStream::new(tokenize(source).map_err(|error| ParseError::Syntax {
+        line,
+        message: error.to_string(),
+    })?);
+    let mut elements = Vec::with_capacity(2);
+    let [positive, negative] = element.nodes.as_slice() else {
+        return Err(ParseError::Syntax {
+            line,
+            message: format!("RF port '{}' requires two terminals", element.name),
+        });
+    };
+    parse_xyce_port_tail(
+        &mut stream,
+        line,
+        &mut elements,
+        params,
+        element.name.clone(),
+        [positive.clone(), negative.clone()],
+    )?;
+    Ok(elements)
+}
+
 fn parse_xyce_port(
     stream: &mut TokenStream,
     line_num: usize,
@@ -5985,6 +6041,24 @@ fn parse_xyce_port(
     let node_pos = expect_node(stream, line_num)?;
     let node_neg = expect_node(stream, line_num)?;
 
+    parse_xyce_port_tail(
+        stream,
+        line_num,
+        elements,
+        params,
+        name,
+        [node_pos, node_neg],
+    )
+}
+
+fn parse_xyce_port_tail(
+    stream: &mut TokenStream,
+    line_num: usize,
+    elements: &mut Vec<Element>,
+    params: &ParamContext,
+    name: String,
+    [node_pos, node_neg]: [String; 2],
+) -> Result<(), ParseError> {
     let mut z0 = 50.0;
     let mut portnum = None;
     let mut power = None;
@@ -6020,9 +6094,7 @@ fn parse_xyce_port(
                     // Large-signal drive. Xyce's own P element stops at PORT
                     // and Z0; these are ngspice's port parameters, accepted
                     // here so a schematic RF Port can author a drive without
-                    // changing spelling to the annotated form -- which would
-                    // silently move the generator from behind the reference
-                    // impedance onto the plane itself.
+                    // changing its available-power convention to ngspice's.
                     "PWR" | "POWER" => {
                         if !value.is_finite() || value < 0.0 {
                             return reject("a non-negative finite");

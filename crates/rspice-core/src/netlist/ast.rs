@@ -355,6 +355,13 @@ pub enum ElementKind {
     /// parameter scope is known.
     VoltageSourceDeferred(String),
 
+    /// A P-element whose source and impedance must use the instance parameter scope.
+    RfPortDeferred {
+        source: String,
+        line: usize,
+        multiplicity: Value,
+    },
+
     /// Current source
     CurrentSource(SourceSpec),
 
@@ -1912,6 +1919,14 @@ impl SourceSpec {
         match self {
             SourceSpec::RfPort { port, .. } => Some(port),
             SourceSpec::Distortion { inner, .. } => inner.rf_port(),
+            _ => None,
+        }
+    }
+
+    pub(super) fn rf_port_mut(&mut self) -> Option<&mut SourceRfPort> {
+        match self {
+            SourceSpec::RfPort { port, .. } => Some(port),
+            SourceSpec::Distortion { inner, .. } => inner.rf_port_mut(),
             _ => None,
         }
     }

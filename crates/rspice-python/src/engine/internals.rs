@@ -494,13 +494,6 @@ impl PyEngine {
             ));
         }
         let engine = self.engine_for_netlist(&netlist.inner);
-        // Unusable `portnum=` annotations are a mistake in the caller's deck,
-        // and this API has always reported them as ValueError. Collecting the
-        // ports here reports them that way before the runner restates the same
-        // typed failure as a SimulationError; the sweep itself — extraction,
-        // port noise, and the two-port derivation — belongs to the runner.
-        s_param::collect_ports(&netlist.inner)
-            .map_err(|error| crate::errors::value_error(error.to_string()))?;
         let run = run_interruptible(py, &self.active_runs, |abort| {
             engine.run_sp_over_grid_with_abort(&netlist.inner, &frequencies, do_noise, abort)
         })?;

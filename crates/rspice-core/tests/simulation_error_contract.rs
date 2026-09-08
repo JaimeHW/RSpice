@@ -340,7 +340,9 @@ fn expected_descriptor(
             false,
         ),
         SimulationError::Solver(_) => (Code::SolverError, Category::Solver, false),
-        SimulationError::Netlist(_) => (Code::NetlistError, Category::Netlist, false),
+        SimulationError::Netlist(_) | SimulationError::RfPort(_) => {
+            (Code::NetlistError, Category::Netlist, false)
+        }
         SimulationError::RequestedSignalUnavailable(_) => (
             Code::RequestedSignalUnavailable,
             Category::SignalUnavailable,
@@ -398,6 +400,7 @@ fn one_of_every_variant() -> Vec<SimulationError> {
         SimulationError::from(MaterializationMismatchError::PlanNetlist),
         SimulationError::Solver(SolverError::ConvergenceFailed(9)),
         SimulationError::Netlist("no analyses".to_string()),
+        SimulationError::from(rspice_core::analysis::s_param::PortError::NoPortsDeclared),
         SimulationError::requested_signal_unavailable("V(x)", "DC", None),
         SimulationError::result_schema_mismatch(
             "TRAN",

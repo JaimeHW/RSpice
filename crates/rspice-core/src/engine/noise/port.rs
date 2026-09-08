@@ -2,8 +2,7 @@
 
 use super::*;
 use crate::analysis::s_param::{
-    NetworkError, PortError, PortRealization, SParameterPort, invert_complex_matrix_with_abort,
-    reference_impedance_helper,
+    MaterializedRfPort, NetworkError, invert_complex_matrix_with_abort,
 };
 use crate::solver::{ComplexMatrix, StaticMatrix};
 
@@ -40,15 +39,9 @@ impl PreparedPortNoise {
     pub(in crate::engine) fn use_sp_reference_planes(
         &mut self,
         netlist: &Netlist,
-        ports: &[SParameterPort],
+        ports: &[MaterializedRfPort],
         abort: &dyn AbortSignal,
     ) -> Result<(), SimulationError> {
-        if !ports
-            .iter()
-            .any(|port| port.realization == PortRealization::Thevenin)
-        {
-            return Ok(());
-        }
         let ground = netlist.ground_policy();
         let node_id = |name: &str| {
             let name = ground.canonical_node(name);
@@ -61,48 +54,17 @@ impl PreparedPortNoise {
                 ))
             })
         };
-        for port in ports {
+        for resolved in ports {
             if abort.is_aborted() {
                 return Err(SimulationError::Aborted);
             }
+            let port = &resolved.port;
             self.linearization
                 .norton_nodes
                 .push((node_id(&port.node_pos)?, node_id(&port.node_neg)?));
-            if port.realization == PortRealization::Ideal {
-                continue;
-            }
-            let source = netlist
-                .elements
-                .iter()
-                .find(|element| element.name.eq_ignore_ascii_case(&port.source_name))
-                .ok_or_else(|| {
-                    SimulationError::Circuit(format!(
-                        "SP noise source '{}' was not found",
-                        port.source_name
-                    ))
-                })?;
-            let termination = reference_impedance_helper(&netlist.elements, source, port.z0, abort)
-                .map_err(|error| match error {
-                    PortError::Aborted => SimulationError::Aborted,
-                    other => {
-                        SimulationError::Circuit(format!("SP noise reference impedance: {other}"))
-                    }
-                })?;
-            let termination = termination.ok_or_else(|| {
-                SimulationError::Circuit(format!(
-                    "SP noise port '{}' has no owned reference-impedance resistor",
-                    port.source_name,
-                ))
-            })?;
-            if !termination.1.eq_ignore_ascii_case(&port.node_pos) {
-                return Err(SimulationError::Circuit(format!(
-                    "SP noise port '{}' has an inconsistent reference plane",
-                    port.source_name
-                )));
-            }
             self.linearization
                 .termination_devices
-                .insert(termination.0.name.to_ascii_lowercase());
+                .insert(resolved.termination.clone());
         }
         Ok(())
     }

@@ -1015,9 +1015,9 @@ impl Engine {
             ElementKind::Inductor { .. } | ElementKind::JilesAthertonInductor { .. } => {
                 ElementType::Inductor
             }
-            ElementKind::VoltageSource(_) | ElementKind::VoltageSourceDeferred(_) => {
-                ElementType::VoltageSource
-            }
+            ElementKind::VoltageSource(_)
+            | ElementKind::VoltageSourceDeferred(_)
+            | ElementKind::RfPortDeferred { .. } => ElementType::VoltageSource,
             ElementKind::CurrentSource(_) | ElementKind::CurrentSourceDeferred(_) => {
                 ElementType::CurrentSource
             }

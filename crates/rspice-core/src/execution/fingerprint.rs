@@ -202,9 +202,9 @@ fn element_kind_and_model(kind: &ElementKind) -> (&'static str, Option<&str>) {
         ElementKind::JilesAthertonInductor { model, .. } => {
             ("jiles-atherton-inductor", Some(model))
         }
-        ElementKind::VoltageSource(_) | ElementKind::VoltageSourceDeferred(_) => {
-            ("voltage-source", None)
-        }
+        ElementKind::VoltageSource(_)
+        | ElementKind::VoltageSourceDeferred(_)
+        | ElementKind::RfPortDeferred { .. } => ("voltage-source", None),
         ElementKind::CurrentSource(_) | ElementKind::CurrentSourceDeferred(_) => {
             ("current-source", None)
         }

@@ -45,6 +45,38 @@ def test_engine_run_executes_sp_directive():
     assert not report.records[0].skipped
 
 
+@pytest.mark.parametrize("source", ["V", "P"])
+@pytest.mark.parametrize("route", ["direct", "deck"])
+def test_hierarchical_ports_use_elaborated_reference_impedances(source, route):
+    deck = f"""* Mixed hierarchical and top-level RF ports
+.subckt generator a b params: reference=50
+{source}1 a b DC 0 portnum=1 z0={{reference}}
+.ends generator
+XG p1 0 generator reference=75
+R1 p1 p2 50
+V2 p2 0 DC 0 portnum=2 z0=50
+.sp lin 3 10 30 donoise
+.end
+"""
+    engine = rspice.Engine()
+    netlist = rspice.Netlist.parse(deck)
+    result = (
+        engine.run_s_parameters(netlist, [10.0, 20.0, 30.0], do_noise=True)
+        if route == "direct" else engine.run(netlist).s_parameters
+    )
+    assert result.frequencies.tolist() == [10.0, 20.0, 30.0]
+    assert result.reference_impedances.tolist() == [75.0, 50.0]
+    assert result.port_names[0].casefold().startswith("xg")
+    assert result.port_names[1] == "V2"
+    assert np.allclose(result.s(1, 1), 1.0 / 7.0, rtol=0.0, atol=1e-12)
+    assert np.allclose(result.s(2, 2), 3.0 / 7.0, rtol=0.0, atol=1e-12)
+    expected_s21 = 2.0 * np.sqrt(75.0 * 50.0) / 175.0
+    assert np.allclose(result.s(2, 1), expected_s21, rtol=0.0, atol=1e-12)
+    expected_noise = 4.0 * 1.380649e-23 * 300.15 / 50.0
+    assert np.allclose(result.cy(1, 1), expected_noise, rtol=1e-12, atol=0.0)
+    assert np.allclose(result.cy(1, 2), -expected_noise, rtol=1e-12, atol=0.0)
+
+
 def test_sp_noise_directive_computes_cy_and_two_port_noise_parameters():
     deck = DECK.replace(".sp lin 3 1k 100k", ".sp lin 3 1k 100k 1")
     report = rspice.Engine().run(rspice.Netlist.parse(deck))

@@ -549,6 +549,20 @@ impl<'a> Flattener<'a> {
             .map_err(ParseError::from)?;
 
         match &element.kind {
+            ElementKind::RfPortDeferred {
+                source,
+                line,
+                multiplicity,
+            } => {
+                let generated =
+                    super::parser::lower_deferred_rf_port(element, source, *line, scope)?;
+                for mut generated in generated {
+                    ensure_parse_not_aborted(abort)?;
+                    apply_element_multiplicity(&mut generated, *multiplicity);
+                    let flattened = self.remap_element(&generated, prefix, node_map);
+                    self.push_flattened_element(output, flattened)?;
+                }
+            }
             ElementKind::PspiceChebyshev {
                 source_line,
                 input_expression,
@@ -1261,6 +1275,15 @@ impl<'a> Flattener<'a> {
 
         // Remap the element kind, handling CCCS/CCVS control element names
         let new_kind = match &element.kind {
+            ElementKind::VoltageSource(spec) => {
+                let mut spec = spec.clone();
+                if let Some(port) = spec.rf_port_mut()
+                    && let Some(plane) = &mut port.reference_plane
+                {
+                    *plane = self.remap_node(plane, prefix, node_map);
+                }
+                ElementKind::VoltageSource(spec)
+            }
             ElementKind::Resistor {
                 value,
                 value_expr,
@@ -3951,6 +3974,7 @@ fn scoped_model_name(model_name: &str, element_path: &str) -> String {
 /// identical to a single one.
 fn apply_element_multiplicity(element: &mut Element, m: Value) {
     match &mut element.kind {
+        ElementKind::RfPortDeferred { multiplicity, .. } => *multiplicity *= m,
         ElementKind::Resistor {
             instance_params, ..
         }
