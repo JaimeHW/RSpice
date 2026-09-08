@@ -180,6 +180,15 @@ An already-started compilation finishes before its owner reports cancellation.
 
 ## Language support
 
+Finite nested `ddx` readbacks are supported by canonical AD and generated
+Rust. The portable evaluator allocates the derivative orders needed through
+assignments and arrays, including the extra order required by Newton's
+Jacobian. Runtime loops that feed a `ddx` result back into its own operand
+remain unsupported. Native/Wasm assignment and internal-variable readback
+passes still have higher-derivative limits; native readback explicitly rejects
+simultaneous `ddx` self-updates instead of publishing partially updated shadows.
+This is not complete Verilog-AMS support.
+
 The supported subset, as documented in the crate docs (`src/lib.rs`) and
 exercised by the test suite:
 

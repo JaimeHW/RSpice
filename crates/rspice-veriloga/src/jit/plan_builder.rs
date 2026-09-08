@@ -3170,6 +3170,15 @@ impl AssignmentShadowIndex {
                 });
         }
 
+        // Higher orders read lower-order shadows of the old value. Publish
+        // them first when an assignment updates a variable or array in place.
+        for shadows in scalar.values_mut() {
+            shadows.sort_by_key(|shadow| std::cmp::Reverse(shadow.axes.len()));
+        }
+        for shadows in arrays.values_mut() {
+            shadows.sort_by_key(|shadow| std::cmp::Reverse(shadow.axes.len()));
+        }
+
         Ok(Self {
             scalar,
             arrays,
@@ -3261,6 +3270,20 @@ fn lower_live_canonical_assignment_statements(
     policy: AssignmentRootPolicy,
 ) -> JitResult<Vec<NativeAssignment>> {
     let live = live_canonical_assignment_slots(model, mir, limits, policy)?;
+    // The portable AD pass stages simultaneous ddx self-updates. The MIR
+    // replay does not yet carry those writes; refusing a live staging slot
+    // prevents it from publishing derivatives computed from partially updated
+    // state. CFG simulation kernels that need no assignment replay still run.
+    if model.variable_names.iter().zip(&live).any(|(name, live)| {
+        *live
+            && name.starts_with("@ddx_update")
+            && !hir.variables.iter().any(|variable| variable.name == *name)
+    }) {
+        return Err(JitError::UnsupportedCanonicalOp {
+            model: model.name.clone(),
+            op: "simultaneous ddx self-update in the assignment/readback pass".into(),
+        });
+    }
     let shadow_index = AssignmentShadowIndex::for_model(model)?;
     let mut program_cursor = AssignmentProgramCursor::for_steps(&model.assignment_steps);
     let snapshots = ReachingSnapshotCopies::for_model(model)?;

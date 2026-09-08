@@ -1021,34 +1021,20 @@ impl DeviceIR {
             static_vars.len()
         ));
 
-        // Shadow liveness roots: only variables that contribution
-        // expressions (the equation Jacobians chain through them) or
-        // ddx() operands read need derivative shadows. Everything else —
-        // operating-point reporting variables above all — keeps its
-        // primal value but never costs shadow slots or updates.
-        let mut shadow_roots: HashSet<SmolStr> = HashSet::new();
-        let mut second_shadow_roots: HashSet<SmolStr> = HashSet::new();
+        // Forward AD carries precisely the derivative orders read by the
+        // equations and by ddx, including reads through mutable assignments.
+        let mut shadow_roots = HashSet::new();
         for &expr in &converted_contribs {
             autodiff::collect_var_names(&ir.exprs, expr, &mut shadow_roots);
-            autodiff::collect_ddx_operand_names_in_expr(&ir.exprs, expr, &mut second_shadow_roots);
         }
-        autodiff::collect_ddx_operand_names(&ir.exprs, &ir.assignments, &mut second_shadow_roots);
-        shadow_roots.extend(second_shadow_roots.iter().cloned());
-
-        // Forward-mode AD over the assignment sequence: build shadow
-        // assignments holding each variable's partial derivative w.r.t.
-        // every node voltage and branch-current unknown, so equation
-        // Jacobians chain through intermediate variables. Shadow updates
-        // recurse into loop bodies so loop-carried dependencies
-        // differentiate correctly.
+        autodiff::collect_ddx_operand_names(&ir.exprs, &ir.assignments, &mut shadow_roots);
         let span = crate::metrics::FineSpan::new("ir.shadow_assignments");
         let mut shadows = autodiff::build_shadow_assignments(
             &mut ir,
             num_nodes,
             num_branches,
-            &shadow_roots,
-            &second_shadow_roots,
-        );
+            &converted_contribs,
+        )?;
         span.finish(&format!(
             "module={} shadow_variables={}",
             module.name,
@@ -2077,11 +2063,6 @@ pub mod autodiff {
                 .is_some_and(|mask| mask & axis_bit(wrt, self.num_nodes) != 0)
         }
 
-        /// Dependency mask of a variable (0 when not shadowed)
-        fn axes_of(&self, name: &str) -> AxisMask {
-            self.shadowed.get(name).copied().unwrap_or(0)
-        }
-
         fn noise_axes_of(&self, name: &str) -> Option<&BTreeSet<usize>> {
             self.noise_shadowed.get(name)
         }
@@ -2582,175 +2563,330 @@ pub mod autodiff {
         }
     }
 
-    /// Interleave shadow derivative updates before each original
-    /// assignment, recursing into loop bodies so loop-carried voltage
-    /// dependencies accumulate their derivatives per iteration
+    /// Orders needed at each write, rather than a module-wide fixed jet.
+    /// A later reassignment can require fewer derivatives than an earlier one.
+    #[derive(Default)]
+    struct ShadowPlan {
+        order: usize,
+        body: Vec<ShadowPlan>,
+    }
+
+    struct ShadowDemand<'a> {
+        arena: &'a ExprArena,
+        variables: &'a [VarDef],
+        arrays: &'a [ArrayDef],
+        families: HashMap<SmolStr, SmolStr>,
+        deps: &'a HashMap<SmolStr, AxisMask>,
+        orders: HashMap<SmolStr, usize>,
+    }
+
+    impl ShadowDemand<'_> {
+        fn name(&self, name: &SmolStr) -> SmolStr {
+            self.families.get(name).unwrap_or(name).clone()
+        }
+
+        fn require(&mut self, name: SmolStr, order: usize, pending: &mut HashMap<SmolStr, usize>) {
+            let family = self.name(&name);
+            if order == 0 || self.deps.get(&family).copied().unwrap_or(0) == 0 {
+                return;
+            }
+            // Indexed reads may select any element. Keep their demands separate
+            // so a definite write kills only the overwritten element's demand.
+            if let Some(array) = self.arrays.iter().find(|array| array.name == name) {
+                let variables = self.variables;
+                for variable in &variables[array.base..array.base + array.len] {
+                    self.require(variable.name.clone(), order, pending);
+                }
+                return;
+            }
+            pending
+                .entry(name)
+                .and_modify(|old| *old = (*old).max(order))
+                .or_insert(order);
+            self.orders
+                .entry(family)
+                .and_modify(|old| *old = (*old).max(order))
+                .or_insert(order);
+        }
+
+        fn expression(
+            &mut self,
+            expr: NodeId,
+            order: usize,
+            pending: &mut HashMap<SmolStr, usize>,
+        ) {
+            let node = *self.arena.node(expr);
+            match node {
+                Node::Var(name) => self.require(self.arena.name(name).clone(), order, pending),
+                Node::VarIndexed { payload, index } => {
+                    self.require(
+                        self.arena.name(self.arena.indexed(payload).array).clone(),
+                        order,
+                        pending,
+                    );
+                    self.expression(index, 0, pending);
+                }
+                Node::Ddx { expr, .. } => self.expression(expr, order + 1, pending),
+                Node::FreezeDerivative(expr) => self.expression(expr, 0, pending),
+                Node::Conditional(condition, left, right) => {
+                    self.expression(condition, 0, pending);
+                    self.expression(left, order, pending);
+                    self.expression(right, order, pending);
+                }
+                _ => {
+                    let arena = self.arena;
+                    arena::for_each_child(arena, &node, &mut |child| {
+                        self.expression(child, order, pending);
+                    });
+                    for child in arena::operator_operands(arena, &node) {
+                        self.expression(child, order, pending);
+                    }
+                }
+            }
+        }
+
+        fn assignments(
+            &mut self,
+            items: &[IrAssignmentItem],
+            pending: &mut HashMap<SmolStr, usize>,
+            plans: &mut Vec<ShadowPlan>,
+        ) -> CompileResult<()> {
+            plans.resize_with(items.len(), ShadowPlan::default);
+            for (item, plan) in items.iter().zip(plans).rev() {
+                match item {
+                    IrAssignmentItem::Initialization { .. } => {}
+                    IrAssignmentItem::Task(task) => {
+                        for &expr in task.expressions() {
+                            self.expression(expr, 0, pending);
+                        }
+                    }
+                    IrAssignmentItem::Assign(assign) => {
+                        let target = &self.variables[assign.var_index].name;
+                        let order = if let Some(indexed) = &assign.index {
+                            let members =
+                                &self.variables[assign.var_index..assign.var_index + indexed.len];
+                            let order = members
+                                .iter()
+                                .filter_map(|member| pending.get(&member.name))
+                                .copied()
+                                .max()
+                                .unwrap_or(0);
+                            if indexed.len == 1 {
+                                pending.remove(target);
+                            }
+                            order
+                        } else {
+                            pending.remove(target).unwrap_or(0)
+                        };
+                        plan.order = plan.order.max(order);
+                        self.expression(assign.expr, order, pending);
+                        if let Some(target) = &assign.index {
+                            self.expression(target.index, 0, pending);
+                        }
+                    }
+                    IrAssignmentItem::Loop { condition, body } => {
+                        self.expression(*condition, 0, pending);
+                        let mut converged = false;
+                        // A finite dependency path crosses at most one edge per
+                        // variable before repeating. Further growth requires a
+                        // positive-order cycle (ddx of a loop-carried readback).
+                        for _ in 0..=self.variables.len() {
+                            let previous = pending.clone();
+                            self.assignments(body, pending, &mut plan.body)?;
+                            self.expression(*condition, 0, pending);
+                            for (name, order) in &previous {
+                                pending
+                                    .entry(name.clone())
+                                    .and_modify(|old| *old = (*old).max(*order))
+                                    .or_insert(*order);
+                            }
+                            if *pending == previous {
+                                converged = true;
+                                break;
+                            }
+                        }
+                        if !converged {
+                            return Err(crate::error::CodeGenError::new(
+                                crate::error::CodeGenErrorKind::InvalidExpression(
+                                    "ddx through a recursive loop dependency requires an unbounded derivative order".into(),
+                                ),
+                            ).into());
+                        }
+                    }
+                }
+            }
+            Ok(())
+        }
+    }
+
+    fn ddx_reads_target(
+        arena: &ExprArena,
+        expr: NodeId,
+        target: &SmolStr,
+        families: &HashMap<SmolStr, SmolStr>,
+    ) -> bool {
+        if !contains_ddx(arena, expr) {
+            return false;
+        }
+        let mut reads = HashSet::new();
+        collect_var_names(arena, expr, &mut reads);
+        if reads.contains(target) {
+            return true;
+        }
+        let Some(family) = families.get(target) else {
+            return false;
+        };
+        if family == target {
+            // An indexed write may alias any read from this array.
+            reads.iter().any(|name| families.get(name) == Some(family))
+        } else {
+            // A fixed-element write may alias a runtime-indexed read.
+            reads.contains(family)
+        }
+    }
+
+    fn stage_shadow_expression(
+        arena: &mut ExprArena,
+        variables: &mut Vec<VarDef>,
+        assignments: &mut Vec<IrAssignmentItem>,
+        expr: NodeId,
+    ) -> NodeId {
+        let slot = variables.len();
+        let mut name: SmolStr = format!("@ddx_update{slot}").into();
+        while variables.iter().any(|variable| variable.name == name) {
+            name = format!("{name}_").into();
+        }
+        variables.push(VarDef {
+            name: name.clone(),
+            is_state: false,
+        });
+        assignments.push(IrAssignmentItem::Assign(VarAssignment {
+            var_index: slot,
+            index: None,
+            expr,
+        }));
+        let name = arena.intern(&name);
+        arena.push(Node::Var(name))
+    }
+
+    /// Emit higher orders first so ordinary self-updates read the previous jet.
+    /// A ddx self-update also reads higher orders: stage that small group before
+    /// writing any shadow, preserving simultaneous-assignment semantics.
     fn interleave_shadows(
         arena: &mut ExprArena,
         items: Vec<IrAssignmentItem>,
-        variables: &[VarDef],
+        plans: Vec<ShadowPlan>,
+        variables: &mut Vec<VarDef>,
         shadow_index: &HashMap<SmolStr, usize>,
         ctx: &ShadowContext,
-        second_deps: &HashMap<SmolStr, AxisMask>,
+        families: &HashMap<SmolStr, SmolStr>,
         num_nodes: usize,
         num_branches: usize,
     ) -> Vec<IrAssignmentItem> {
         let mut rewritten = Vec::with_capacity(items.len() * 2);
-        for item in items {
+        for (item, plan) in items.into_iter().zip(plans) {
             match item {
-                initialization @ IrAssignmentItem::Initialization { .. } => {
-                    rewritten.push(initialization)
-                }
-                IrAssignmentItem::Task(task) => rewritten.push(IrAssignmentItem::Task(task)),
-                IrAssignmentItem::Assign(assign) => {
-                    if let Some(target) = &assign.index {
-                        // Indexed write: the shadow run receives an indexed
-                        // write of the value's derivative at the same slot,
-                        // along the array's live axes only
-                        let second_mask = second_deps.get(&target.array).copied().unwrap_or(0);
-                        if second_mask != 0 {
-                            for first in axes(num_nodes, num_branches) {
-                                if second_mask & axis_bit(&first, num_nodes) == 0 {
-                                    continue;
-                                }
-                                let raw =
-                                    differentiate_with_shadows(arena, assign.expr, &first, ctx);
-                                let first_deriv = simplify(arena, raw);
-                                let first_shadow_array =
-                                    ShadowContext::shadow_name(&target.array, &first);
-                                for second in axes(num_nodes, num_branches) {
-                                    if second_mask & axis_bit(&second, num_nodes) == 0 {
-                                        continue;
-                                    }
-                                    let raw = differentiate_with_shadows(
-                                        arena,
-                                        first_deriv,
-                                        &second,
-                                        ctx,
-                                    );
-                                    let second_deriv = simplify(arena, raw);
-                                    let second_shadow_array =
-                                        ShadowContext::shadow_name(&first_shadow_array, &second);
-                                    let shadow_base = ctx
-                                        .array_shadow_base(&first_shadow_array, &second)
-                                        .expect("second-order shadowed array has a shadow run");
-                                    rewritten.push(IrAssignmentItem::Assign(VarAssignment {
-                                        var_index: shadow_base,
-                                        index: Some(IndexedTarget {
-                                            array: second_shadow_array,
-                                            len: target.len,
-                                            lower: target.lower,
-                                            index: target.index,
-                                        }),
-                                        expr: second_deriv,
-                                    }));
-                                }
-                            }
-                        }
-                        let mask = ctx.axes_of(&target.array);
-                        if mask != 0 {
+                IrAssignmentItem::Assign(mut assign) => {
+                    let target = assign
+                        .index
+                        .as_ref()
+                        .map(|target| target.array.clone())
+                        .unwrap_or_else(|| variables[assign.var_index].name.clone());
+                    let stage = ddx_reads_target(arena, assign.expr, &target, families);
+                    if let Some(indexed) = &mut assign.index
+                        && ddx_reads_target(arena, indexed.index, &target, families)
+                    {
+                        indexed.index = stage_shadow_expression(
+                            arena,
+                            variables,
+                            &mut rewritten,
+                            indexed.index,
+                        );
+                    }
+                    let mut layer = vec![(target.clone(), assign.expr)];
+                    let mut updates = Vec::new();
+                    for _ in 0..plan.order {
+                        let mut next = Vec::new();
+                        let mut group = Vec::new();
+                        for (name, expr) in layer {
                             for wrt in axes(num_nodes, num_branches) {
-                                if mask & axis_bit(&wrt, num_nodes) == 0 {
+                                if !ctx.is_shadowed_on(&name, &wrt) {
                                     continue;
                                 }
-                                let raw = differentiate_with_shadows(arena, assign.expr, &wrt, ctx);
-                                let deriv = simplify(arena, raw);
-                                let shadow_array = ShadowContext::shadow_name(&target.array, &wrt);
-                                let shadow_base = ctx
-                                    .array_shadow_base(&target.array, &wrt)
-                                    .expect("shadowed array has a shadow run");
-                                rewritten.push(IrAssignmentItem::Assign(VarAssignment {
-                                    var_index: shadow_base,
-                                    index: Some(IndexedTarget {
-                                        array: shadow_array,
-                                        len: target.len,
-                                        lower: target.lower,
-                                        index: target.index,
-                                    }),
-                                    expr: deriv,
-                                }));
+                                let raw = differentiate_with_shadows(arena, expr, &wrt, ctx);
+                                let derivative = simplify(arena, raw);
+                                let shadow = ShadowContext::shadow_name(&name, &wrt);
+                                let (var_index, index) = match &assign.index {
+                                    Some(target) => (
+                                        ctx.array_shadow_base(&name, &wrt)
+                                            .expect("shadow array has a contiguous run"),
+                                        Some(IndexedTarget {
+                                            array: shadow.clone(),
+                                            ..target.clone()
+                                        }),
+                                    ),
+                                    None => (shadow_index[&shadow], None),
+                                };
+                                group.push(VarAssignment {
+                                    var_index,
+                                    index,
+                                    expr: derivative,
+                                });
+                                next.push((shadow, derivative));
                             }
                         }
-                        rewritten.push(IrAssignmentItem::Assign(assign));
-                        continue;
+                        updates.push(group);
+                        layer = next;
                     }
-                    let target = variables[assign.var_index].name.clone();
-                    let second_mask = second_deps.get(&target).copied().unwrap_or(0);
-                    if second_mask != 0 {
-                        for first in axes(num_nodes, num_branches) {
-                            if second_mask & axis_bit(&first, num_nodes) == 0 {
-                                continue;
-                            }
-                            let raw = differentiate_with_shadows(arena, assign.expr, &first, ctx);
-                            let first_deriv = simplify(arena, raw);
-                            let first_shadow = ShadowContext::shadow_name(&target, &first);
-                            for second in axes(num_nodes, num_branches) {
-                                if second_mask & axis_bit(&second, num_nodes) == 0 {
-                                    continue;
-                                }
-                                let raw =
-                                    differentiate_with_shadows(arena, first_deriv, &second, ctx);
-                                let second_deriv = simplify(arena, raw);
-                                let second_shadow =
-                                    ShadowContext::shadow_name(&first_shadow, &second);
-                                rewritten.push(IrAssignmentItem::Assign(VarAssignment {
-                                    var_index: shadow_index[&second_shadow],
-                                    index: None,
-                                    expr: second_deriv,
-                                }));
-                            }
+                    if stage {
+                        // The primal itself reads the old derivative shadows.
+                        assign.expr =
+                            stage_shadow_expression(arena, variables, &mut rewritten, assign.expr);
+                    }
+                    let mut writes = Vec::new();
+                    for mut update in updates.into_iter().rev().flatten() {
+                        if stage {
+                            update.expr = stage_shadow_expression(
+                                arena,
+                                variables,
+                                &mut rewritten,
+                                update.expr,
+                            );
+                            writes.push(IrAssignmentItem::Assign(update));
+                        } else {
+                            rewritten.push(IrAssignmentItem::Assign(update));
                         }
                     }
-                    let mask = ctx.axes_of(&target);
-                    if mask != 0 {
-                        for wrt in axes(num_nodes, num_branches) {
-                            if mask & axis_bit(&wrt, num_nodes) == 0 {
-                                continue;
-                            }
-                            let raw = differentiate_with_shadows(arena, assign.expr, &wrt, ctx);
-                            let deriv = simplify(arena, raw);
-                            let shadow = ShadowContext::shadow_name(&target, &wrt);
-                            rewritten.push(IrAssignmentItem::Assign(VarAssignment {
-                                var_index: shadow_index[&shadow],
-                                index: None,
-                                expr: deriv,
-                            }));
-                        }
-                    }
+                    rewritten.extend(writes);
                     rewritten.push(IrAssignmentItem::Assign(assign));
                 }
                 IrAssignmentItem::Loop { condition, body } => {
                     let body = interleave_shadows(
                         arena,
                         body,
+                        plan.body,
                         variables,
                         shadow_index,
                         ctx,
-                        second_deps,
+                        families,
                         num_nodes,
                         num_branches,
                     );
                     rewritten.push(IrAssignmentItem::Loop { condition, body });
                 }
+                other => rewritten.push(other),
             }
         }
         rewritten
     }
 
-    /// Build shadow derivative assignments for voltage-dependent variables.
-    ///
-    /// Rewrites `ir.assignments` so that each assignment to a
-    /// voltage-dependent variable is preceded by assignments computing the
-    /// variable's partial derivative w.r.t. every node voltage and
-    /// branch-current unknown. Shadow variables are appended to
-    /// `ir.variables`.
+    /// Allocate only the orders actually consumed at each reaching write.
     pub fn build_shadow_assignments(
         ir: &mut DeviceIR,
         num_nodes: usize,
         num_branches: usize,
-        shadow_roots: &HashSet<SmolStr>,
-        second_shadow_roots: &HashSet<SmolStr>,
-    ) -> ShadowContext {
+        contributions: &[NodeId],
+    ) -> CompileResult<ShadowContext> {
         let DeviceIR {
             exprs,
             assignments,
@@ -2758,12 +2894,9 @@ pub mod autodiff {
             arrays,
             ..
         } = ir;
-
-        // Fixpoint: a variable depends on an axis if any assignment to it
-        // reads a probe of that axis or another variable depending on it.
         let span = crate::metrics::FineSpan::new("ir.shadow_axis_fixpoint");
-        let mut deps: HashMap<SmolStr, AxisMask> = HashMap::new();
-        let mut axis_passes = 0_usize;
+        let mut deps = HashMap::new();
+        let mut axis_passes = 0;
         loop {
             let mut changed = false;
             axis_passes += 1;
@@ -2781,210 +2914,111 @@ pub mod autodiff {
             }
         }
         span.finish(&format!("passes={axis_passes} shadowed={}", deps.len()));
-
-        // Backward liveness: a shadow matters only when the equation
-        // Jacobians can reach it — the variable feeds a contribution (or
-        // ddx operand) directly, or feeds an assignment to a live
-        // variable. Dead shadows (operating-point reporting chains) are
-        // dropped before any slot is allocated.
         let span = crate::metrics::FineSpan::new("ir.shadow_liveness");
-        let liveness = LivenessGraph::build(exprs, assignments, variables, arrays);
-        let live = liveness.live_from(shadow_roots);
-        let second_live = liveness.live_from(second_shadow_roots);
-        span.finish(&format!(
-            "live={} second_live={}",
-            live.len(),
-            second_live.len()
-        ));
-        deps.retain(|name, _| live.contains(name) || second_live.contains(name));
-        let second_deps: HashMap<SmolStr, AxisMask> = deps
+        let families: HashMap<_, _> = arrays
             .iter()
-            .filter(|(name, _)| second_live.contains(*name))
-            .map(|(name, mask)| (name.clone(), *mask))
-            .collect();
-
-        if deps.is_empty() {
-            return ShadowContext::default();
-        }
-
-        let span = crate::metrics::FineSpan::new("ir.shadow_layout");
-
-        // Register shadow variables along each variable's live axes only:
-        // a value computed from V(g) and V(s) never varies with the drain
-        // or any branch unknown, so those slots (and their update
-        // assignments downstream) never exist. Array elements get their
-        // slots in contiguous runs (allocated below) so runtime-indexed
-        // reads and writes can address d(arr[i]) as
-        // shadow_base + (i - lower); the scalar loop must skip them.
-        let array_member: HashSet<SmolStr> = arrays
-            .iter()
-            .filter(|a| deps.get(&a.name).copied().unwrap_or(0) != 0)
-            .flat_map(|a| {
-                std::iter::once(a.name.clone()).chain(
-                    variables[a.base..a.base + a.len]
+            .flat_map(|array| {
+                std::iter::once((array.name.clone(), array.name.clone())).chain(
+                    variables[array.base..array.base + array.len]
                         .iter()
-                        .map(|v| v.name.clone()),
+                        .map(|var| (var.name.clone(), array.name.clone())),
                 )
             })
             .collect();
-        let mut shadow_index: HashMap<SmolStr, usize> = HashMap::new();
-        let mut scalar_shadow_layout = deps
-            .iter()
-            .filter(|(name, _)| !array_member.contains(*name))
-            .map(|(name, mask)| (name.clone(), *mask))
-            .collect::<Vec<_>>();
-        scalar_shadow_layout.sort_unstable_by(|(left, _), (right, _)| left.cmp(right));
-        for (name, mask) in &scalar_shadow_layout {
-            for wrt in axes(num_nodes, num_branches) {
-                if mask & axis_bit(&wrt, num_nodes) == 0 {
-                    continue;
-                }
-                let shadow = ShadowContext::shadow_name(name, &wrt);
-                shadow_index.insert(shadow.clone(), variables.len());
-                variables.push(VarDef {
-                    name: shadow,
-                    is_state: false,
-                });
-            }
-        }
-        for (name, _) in scalar_shadow_layout
-            .iter()
-            .filter(|(name, _)| second_deps.contains_key(name))
-        {
-            let mask = second_deps
-                .get(name)
-                .copied()
-                .expect("filtered scalar second-derivative layout has a dependency mask");
-            for first in axes(num_nodes, num_branches) {
-                if mask & axis_bit(&first, num_nodes) == 0 {
-                    continue;
-                }
-                let first_shadow = ShadowContext::shadow_name(name, &first);
-                for second in axes(num_nodes, num_branches) {
-                    if mask & axis_bit(&second, num_nodes) == 0 {
-                        continue;
-                    }
-                    let second_shadow = ShadowContext::shadow_name(&first_shadow, &second);
-                    shadow_index.insert(second_shadow.clone(), variables.len());
-                    variables.push(VarDef {
-                        name: second_shadow,
-                        is_state: false,
-                    });
-                }
-            }
-        }
-
-        // Contiguous shadow runs per (array, live axis)
-        let mut array_shadow_base: HashMap<SmolStr, usize> = HashMap::new();
-        let mut shadow_runs: Vec<VarDef> = Vec::new();
-        for array in arrays.iter() {
-            let mask = deps.get(&array.name).copied().unwrap_or(0);
-            if mask == 0 {
-                continue;
-            }
-            for wrt in axes(num_nodes, num_branches) {
-                if mask & axis_bit(&wrt, num_nodes) == 0 {
-                    continue;
-                }
-                let run_base = variables.len() + shadow_runs.len();
-                array_shadow_base.insert(ShadowContext::shadow_name(&array.name, &wrt), run_base);
-                for k in array.lower..array.lower + array.len as i64 {
-                    let element = format!("{}[{k}]", array.name);
-                    let shadow = ShadowContext::shadow_name(&element, &wrt);
-                    shadow_index.insert(shadow.clone(), run_base + (k - array.lower) as usize);
-                    shadow_runs.push(VarDef {
-                        name: shadow,
-                        is_state: false,
-                    });
-                }
-            }
-        }
-        for array in arrays.iter() {
-            let mask = second_deps.get(&array.name).copied().unwrap_or(0);
-            if mask == 0 {
-                continue;
-            }
-            for first in axes(num_nodes, num_branches) {
-                if mask & axis_bit(&first, num_nodes) == 0 {
-                    continue;
-                }
-                let first_shadow_array = ShadowContext::shadow_name(&array.name, &first);
-                for second in axes(num_nodes, num_branches) {
-                    if mask & axis_bit(&second, num_nodes) == 0 {
-                        continue;
-                    }
-                    let second_shadow_array =
-                        ShadowContext::shadow_name(&first_shadow_array, &second);
-                    let run_base = variables.len() + shadow_runs.len();
-                    array_shadow_base.insert(second_shadow_array, run_base);
-                    for k in array.lower..array.lower + array.len as i64 {
-                        let element = format!("{}[{k}]", array.name);
-                        let first_shadow_element = ShadowContext::shadow_name(&element, &first);
-                        let second_shadow_element =
-                            ShadowContext::shadow_name(&first_shadow_element, &second);
-                        shadow_index.insert(
-                            second_shadow_element.clone(),
-                            run_base + (k - array.lower) as usize,
-                        );
-                        shadow_runs.push(VarDef {
-                            name: second_shadow_element,
-                            is_state: false,
-                        });
-                    }
-                }
-            }
-        }
-        variables.extend(shadow_runs);
-
-        let mut shadowed = deps;
-        for (name, mask) in &second_deps {
-            if array_member.contains(name) {
-                continue;
-            }
-            for first in axes(num_nodes, num_branches) {
-                if mask & axis_bit(&first, num_nodes) == 0 {
-                    continue;
-                }
-                shadowed.insert(ShadowContext::shadow_name(name, &first), *mask);
-            }
-        }
-        for array in arrays.iter() {
-            let mask = second_deps.get(&array.name).copied().unwrap_or(0);
-            if mask == 0 {
-                continue;
-            }
-            for first in axes(num_nodes, num_branches) {
-                if mask & axis_bit(&first, num_nodes) == 0 {
-                    continue;
-                }
-                shadowed.insert(ShadowContext::shadow_name(&array.name, &first), mask);
-                for k in array.lower..array.lower + array.len as i64 {
-                    let element = format!("{}[{k}]", array.name);
-                    shadowed.insert(ShadowContext::shadow_name(&element, &first), mask);
-                }
-            }
-        }
-
-        let ctx = ShadowContext {
-            shadowed,
-            array_shadow_base,
-            num_nodes,
-            noise_shadowed: HashMap::new(),
+        let mut demand = ShadowDemand {
+            arena: exprs,
+            variables,
+            arrays,
+            families,
+            deps: &deps,
+            orders: HashMap::new(),
         };
-        span.finish(&format!("shadow_slots={}", shadow_index.len()));
+        let mut pending = HashMap::new();
+        for &expr in contributions {
+            demand.expression(expr, 1, &mut pending);
+        }
+        let mut plans = Vec::new();
+        demand.assignments(assignments, &mut pending, &mut plans)?;
+        let orders = demand.orders;
+        let families = demand.families;
+        span.finish(&format!(
+            "live={} max_order={}",
+            orders.len(),
+            orders.values().copied().max().unwrap_or(0)
+        ));
+        if orders.is_empty() {
+            return Ok(ShadowContext::default());
+        }
 
-        // Interleave shadow updates before each original assignment.
-        // Both the derivative and the original expression read the
-        // pre-assignment values, so the shadows must be written first.
+        let span = crate::metrics::FineSpan::new("ir.shadow_layout");
+        let mut ctx = ShadowContext {
+            num_nodes,
+            ..ShadowContext::default()
+        };
+        let mut shadow_index = HashMap::new();
+        let mut layout: Vec<_> = orders.into_iter().collect();
+        layout.sort_unstable_by(|(left, _), (right, _)| left.cmp(right));
+        for (name, order) in layout {
+            let mask = deps[&name];
+            let array = arrays.iter().find(|array| array.name == name);
+            let mut layer = vec![(
+                name.clone(),
+                array.map(|array| {
+                    variables[array.base..array.base + array.len]
+                        .iter()
+                        .map(|var| var.name.clone())
+                        .collect::<Vec<_>>()
+                }),
+            )];
+            for _ in 0..order {
+                let mut next = Vec::new();
+                for (name, members) in layer {
+                    ctx.shadowed.insert(name.clone(), mask);
+                    if let Some(members) = &members {
+                        for member in members {
+                            ctx.shadowed.insert(member.clone(), mask);
+                        }
+                    }
+                    for wrt in axes(num_nodes, num_branches) {
+                        if mask & axis_bit(&wrt, num_nodes) == 0 {
+                            continue;
+                        }
+                        let shadow = ShadowContext::shadow_name(&name, &wrt);
+                        let shadow_members = members.as_ref().map(|members| {
+                            ctx.array_shadow_base
+                                .insert(shadow.clone(), variables.len());
+                            members
+                                .iter()
+                                .map(|member| ShadowContext::shadow_name(member, &wrt))
+                                .collect::<Vec<_>>()
+                        });
+                        for slot_name in shadow_members
+                            .as_deref()
+                            .unwrap_or(std::slice::from_ref(&shadow))
+                        {
+                            shadow_index.insert(slot_name.clone(), variables.len());
+                            variables.push(VarDef {
+                                name: slot_name.clone(),
+                                is_state: false,
+                            });
+                        }
+                        next.push((shadow, shadow_members));
+                    }
+                }
+                layer = next;
+            }
+        }
+        span.finish(&format!("shadow_slots={}", shadow_index.len()));
         let span = crate::metrics::FineSpan::new("ir.shadow_interleave");
         let originals = std::mem::take(assignments);
         *assignments = interleave_shadows(
             exprs,
             originals,
+            plans,
             variables,
             &shadow_index,
             &ctx,
-            &second_deps,
+            &families,
             num_nodes,
             num_branches,
         );
@@ -2993,8 +3027,7 @@ pub mod autodiff {
             assignments.len(),
             exprs.len()
         ));
-
-        ctx
+        Ok(ctx)
     }
 
     #[derive(Clone, Copy)]

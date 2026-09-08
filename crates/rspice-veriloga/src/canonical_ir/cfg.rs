@@ -2324,7 +2324,7 @@ pub enum CfgValidationError {
     /// the pass says so instead of quietly contributing a zero row to the
     /// Jacobian.
     DigitalValueInDerivative(ValueId),
-    NestedDdx(ValueId),
+    RecursiveDdx(ValueId),
 }
 
 impl std::fmt::Display for CfgValidationError {
@@ -2358,9 +2358,9 @@ impl std::fmt::Display for CfgValidationError {
                 f,
                 "{value} is a discrete-domain value and cannot be differentiated"
             ),
-            Self::NestedDdx(value) => write!(
+            Self::RecursiveDdx(value) => write!(
                 f,
-                "{value} applies ddx to a value that already depends on ddx; nested ddx is not supported"
+                "{value} applies ddx through a recursive loop dependency; an unbounded derivative order is not supported"
             ),
         }
     }

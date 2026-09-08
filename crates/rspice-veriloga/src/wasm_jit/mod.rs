@@ -99,7 +99,8 @@ pub const WASM_JIT_ABI_VERSION: u32 = 9;
 /// edges before SSA merges, including paths with no explicit assignment.
 /// 14 to 15 holds coefficients outside ddt during reactive differentiation;
 /// old modules contain the spurious q * dk/dx term and must be rebuilt.
-pub const WASM_JIT_EMITTER_VERSION: u32 = 15;
+/// 15 to 16 preserves higher-order ddx and descending shadow update order.
+pub const WASM_JIT_EMITTER_VERSION: u32 = 16;
 
 /// Hard ceiling for one qualified shipped model's generated module.
 pub const SHIPPED_MODEL_WASM_CODE_SIZE_BUDGET_BYTES: usize = 32 * 1024 * 1024;
@@ -1614,29 +1615,43 @@ endmodule
             linker
                 .define(WASM_JIT_IMPORT_MODULE, WASM_JIT_MEMORY_IMPORT, memory)
                 .expect("define memory import");
+            let variable_count = report.model.num_variables;
+            assert!(
+                Self::VARIABLES as usize + variable_count * 8 <= Self::PROGRAM_ACTIVE as usize,
+                "fixture variable storage overlaps the activation region"
+            );
             linker
                 .func_wrap(
                     WASM_JIT_IMPORT_MODULE,
                     super::codegen::WASM_JIT_EVAL_HELPER_IMPORT,
-                    |mut caller: wasmi::Caller<'_, super::runtime::WasmJitRuntimeSession>,
-                     _: i32,
-                     opcode: i32,
-                     aux0: i32,
-                     aux1: i32,
-                     aux2: i64,
-                     operand0: f64,
-                     operand1: f64,
-                     operand2: f64,
-                     operand3: f64,
-                     operand4: f64|
-                     -> f64 {
+                    move |mut caller: wasmi::Caller<'_, super::runtime::WasmJitRuntimeSession>,
+                          _: i32,
+                          opcode: i32,
+                          aux0: i32,
+                          aux1: i32,
+                          aux2: i64,
+                          operand0: f64,
+                          operand1: f64,
+                          operand2: f64,
+                          operand3: f64,
+                          operand4: f64|
+                          -> f64 {
+                        let variables = if matches!(opcode, 1 | 2) {
+                            memory.data(&caller)[Self::VARIABLES as usize
+                                ..Self::VARIABLES as usize + variable_count * 8]
+                                .chunks_exact(8)
+                                .map(|bytes| f64::from_le_bytes(bytes.try_into().unwrap()))
+                                .collect::<Vec<_>>()
+                        } else {
+                            Vec::new()
+                        };
                         super::runtime::evaluate_helper_with_session(
                             opcode,
                             aux0,
                             aux1,
                             aux2,
                             [operand0, operand1, operand2, operand3, operand4],
-                            &[],
+                            &variables,
                             Some(caller.data_mut()),
                         )
                         .unwrap_or_else(|error| {
@@ -1915,6 +1930,34 @@ endmodule
                         );
                     }
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn nested_ddx_wasm_kernels_preserve_higher_order_jacobians() {
+        use super::abi::FRAME_RESULT_OFFSET;
+        for body in [
+            "analog I(p,n)<+ddx(ddx(V(p,n)*V(p,n)*V(p,n),V(p,n)),V(p,n));",
+            "real x,y; analog begin x=V(p,n)*V(p,n)*V(p,n); y=ddx(x,V(p,n)); I(p,n)<+ddx(y,V(p,n)); end",
+            "real q[2:2]; integer idx; analog begin idx=2; q[idx]=V(p,n)*V(p,n)*V(p,n); I(p,n)<+ddx(ddx(q[idx],V(p,n)),V(p,n)); end",
+        ] {
+            let source =
+                format!("module nested_wasm(p,n); inout p,n; electrical p,n; {body} endmodule");
+            let mut harness = FusedKernelHarness::for_source(&source, "nested_wasm");
+            let value_export = harness.stamp_value_export(0);
+            let jacobian_export = harness.jacobian_export(0, 0);
+            harness.reset();
+            for v in [-0.75, 0.0, 1.25] {
+                harness.write_f64(FusedKernelHarness::VOLTAGES as usize, v);
+                harness.call_assignments();
+                harness.call_prelude();
+                assert_eq!(harness.call(&value_export), 0);
+                let value = harness.read_f64(FRAME_RESULT_OFFSET as usize);
+                assert!((value - 6.0 * v).abs() < 1e-10, "{body}: {value}");
+                assert_eq!(harness.call(&jacobian_export), 0);
+                let value = harness.read_f64(FRAME_RESULT_OFFSET as usize);
+                assert!((value - 6.0).abs() < 1e-10, "{body}: {value}");
             }
         }
     }

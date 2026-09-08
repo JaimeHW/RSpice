@@ -22,8 +22,39 @@ use std::process::Command;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 #[test]
+fn generated_nested_ddx_stamps_higher_order_jacobians() {
+    for (index, body) in [
+        "analog I(p,n)<+ddx(ddx(V(p,n)*V(p,n)*V(p,n),V(p,n)),V(p,n));",
+        "real x,y; analog begin x=V(p,n)*V(p,n)*V(p,n); y=ddx(x,V(p,n)); I(p,n)<+ddx(y,V(p,n)); end",
+        "parameter integer count=3; real x; integer k; analog begin x=0; for(k=0;k<count;k=k+1) x=x+V(p,n)*V(p,n)*V(p,n); I(p,n)<+ddx(ddx(x,V(p,n)),V(p,n))/3; end",
+    ].into_iter().enumerate() {
+        let source=format!("module nested(p,n); inout p,n; electrical p,n; {body} endmodule");
+        let name=format!("generated nested ddx {index}");
+        let (state,stamp,noise)=generated_parts(&source,&name);
+        run_generated_main(&name,&state,&stamp,&noise,r#"
+let mut instance=device::state::Instance::new(&[0,1]);
+instance.finalize_parameters().unwrap();
+for v in [-0.8,0.0,1.3] {
+    let bias=[v,0.0];
+    let ctx=runtime::GeneratedEvalContext { voltages:&bias,temperature:300.0 };
+    let mut real=[0.0;12];
+    instance.stamp(&ctx,&mut runtime::GeneratedStamper { sink:Some(&mut real) });
+    assert!((real[10]-6.0).abs()<1e-10,"Jacobian: {real:?}");
+    assert!(!ctx.evaluation_failed());
+}
+"#).unwrap_or_else(|report|panic!("{body}: {report}"));
+    }
+}
+
+#[test]
 fn generated_dynamic_expressions_preserve_small_signal_chain_rules() {
     for (index, (expression, static_real, dynamic_real, imaginary)) in [
+        (
+            "ddx(ddx(ddt(V(p,n)*V(p,n)*V(p,n)),V(p,n)),V(p,n))",
+            "0.0",
+            "0.0",
+            "6.0*w",
+        ),
         ("sin(ddt(V(p,n)))", "0.0", "0.0", "w"),
         ("exp(ddt(V(p,n)))", "0.0", "0.0", "w"),
         ("sin(V(p,n)+ddt(V(p,n)))", "v.cos()", "0.0", "v.cos()*w"),
