@@ -571,6 +571,46 @@ mod tests {
     }
 
     #[test]
+    fn hyperbolic_feature_levels_and_domain_corners_share_transient_clocks() {
+        type Scalar = fn(Value) -> Value;
+        let functions: [(&str, Scalar); 7] = [
+            ("atan", Value::atan),
+            ("sinh", Value::sinh),
+            ("cosh", Value::cosh),
+            ("tanh", Value::tanh),
+            ("asinh", Value::asinh),
+            ("acosh", Value::acosh),
+            ("atanh", Value::atanh),
+        ];
+        for stop in [1e-30, 1.0, 1e300] {
+            for (name, function) in functions {
+                let offset = if name == "acosh" { 1.0 } else { -0.5 };
+                let level = function(offset + 0.3);
+                let source = sources(&format!(
+                    "exp(-1000*({name}({offset}+time/{stop:e})-{level:e})^2)"
+                ));
+                let events = collect(&source, stop, 32, true).unwrap();
+                assert!(contains(&events, 0.3 * stop), "{name}: {events:?}");
+                assert_eq!(events, collect(&source, stop, 32, false).unwrap());
+                if name == "cosh" {
+                    assert!(
+                        contains(&events, 0.7 * stop),
+                        "the other cosh branch: {events:?}"
+                    );
+                }
+            }
+            let mut source = sources(&format!("atanh(4*time/{stop:e}-2)"));
+            source.voltage_sources[0].set_expression_dialect(ExpressionDialect::Xyce);
+            let events = collect(&source, stop, 32, true).unwrap();
+            let limit = 1.0 - crate::expr::XYCE_ATANH_EPSILON;
+            for corner in [(2.0 - limit) / 4.0, (2.0 + limit) / 4.0] {
+                assert!(contains(&events, corner * stop), "Xyce atanh: {events:?}");
+            }
+            assert_eq!(events, collect(&source, stop, 32, false).unwrap());
+        }
+    }
+
+    #[test]
     fn extrema_cusp_levels_are_found_between_representable_timestamps() {
         for stop in [1e-30, 1.0, 1e300] {
             for function in ["min", "max"] {

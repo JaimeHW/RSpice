@@ -202,6 +202,15 @@ fn unresolvable_source_intervals_cannot_pass_by_sharing_the_same_mesh() {
 
 #[test]
 fn nonlinear_time_features_cannot_hide_between_shooting_grids() {
+    check_nonlinear_time_features(false);
+}
+
+#[test]
+fn hyperbolic_time_features_preserve_the_complete_rc_waveform() {
+    check_nonlinear_time_features(true);
+}
+
+fn check_nonlinear_time_features(hyperbolic: bool) {
     let omega = std::f64::consts::TAU * F0 * 64.0;
     let source_period = 1.0 / (F0 * 64.0);
     let tau = R * C;
@@ -263,7 +272,38 @@ fn nonlinear_time_features_cannot_hide_between_shooting_grids() {
             "exp(-1000000*(min(cos(2*pi*64meg*time+0.1),-cos(2*pi*64meg*time+0.1),1)+0.5*min(cos(2*(2*pi*64meg*time+0.1)),-cos(2*(2*pi*64meg*time+0.1)),1)+0.75)^2)",
             7,
         ),
+        (
+            "exp(-1000000*(atan(cos(2*pi*64meg*time+0.1))+0.5*atan(cos(2*(2*pi*64meg*time+0.1)))-0.25)^2)",
+            8,
+        ),
+        (
+            "exp(-1000000*(sinh(cos(2*pi*64meg*time+0.1))+0.5*sinh(cos(2*(2*pi*64meg*time+0.1)))-0.25)^2)",
+            9,
+        ),
+        (
+            "exp(-1000000*(cosh(cos(2*pi*64meg*time+0.1))+0.5*cosh(cos(2*(2*pi*64meg*time+0.1)))-1.7)^2)",
+            10,
+        ),
+        (
+            "exp(-1000000*(tanh(cos(2*pi*64meg*time+0.1))+0.5*tanh(cos(2*(2*pi*64meg*time+0.1)))-0.25)^2)",
+            11,
+        ),
+        (
+            "exp(-1000000*(asinh(cos(2*pi*64meg*time+0.1))+0.5*asinh(cos(2*(2*pi*64meg*time+0.1)))-0.25)^2)",
+            12,
+        ),
+        (
+            "exp(-1000000*(acosh(2+cos(2*pi*64meg*time+0.1))+0.5*acosh(2+cos(2*(2*pi*64meg*time+0.1)))-1.5)^2)",
+            13,
+        ),
+        (
+            "exp(-1000000*(atanh(0.5*cos(2*pi*64meg*time+0.1))+0.5*atanh(0.5*cos(2*(2*pi*64meg*time+0.1)))-0.25)^2)",
+            14,
+        ),
     ] {
+        if (kind >= 8) != hyperbolic {
+            continue;
+        }
         // Independent linear RC convolution on one source cycle. This uses
         // exact integration of densely sampled linear forcing segments, not
         // the shooting companion, period map or feature mesh under test.
@@ -299,6 +339,22 @@ fn nonlinear_time_features_cannot_hide_between_shooting_grids() {
             } else if kind == 7 {
                 (-1000000.0
                     * (cosine.abs() + 0.5 * (2.0 * (omega * time + 0.1)).cos().abs() - 0.75)
+                        .powi(2))
+                .exp()
+            } else if kind >= 8 {
+                let (function, bias): (fn(f64) -> f64, f64) = match kind {
+                    8 => (f64::atan, 0.25),
+                    9 => (f64::sinh, 0.25),
+                    10 => (f64::cosh, 1.7),
+                    11 => (f64::tanh, 0.25),
+                    12 => (f64::asinh, 0.25),
+                    13 => (|x| (2.0 + x).acosh(), 1.5),
+                    14 => (|x| (0.5 * x).atanh(), 0.25),
+                    _ => unreachable!(),
+                };
+                (-1000000.0
+                    * (function(cosine) + 0.5 * function((2.0 * (omega * time + 0.1)).cos())
+                        - bias)
                         .powi(2))
                 .exp()
             } else {
@@ -368,7 +424,11 @@ fn nonlinear_time_features_cannot_hide_between_shooting_grids() {
         // The absolute-value case has a 43 mV DC level, for which the default
         // voltage criterion is about 44 uV. Require 10 uV against the oracle;
         // the smaller compound responses retain their 1 uV requirement.
-        let tolerance = if (3..=6).contains(&kind) { 1e-6 } else { 1e-5 };
+        let tolerance = if (3..=6).contains(&kind) || (kind >= 8 && kind != 10) {
+            1e-6
+        } else {
+            1e-5
+        };
         assert!(
             (mean - expected_dc).abs() < tolerance,
             "{expression}: N={}, DC {mean:e} versus {expected_dc:e}",

@@ -276,7 +276,7 @@ Checkpoint format 35 retains the step and stop defaults that determine
 independent-source waveforms. Extending a run or changing its step ceiling
 preserves those source parameters. Older checkpoints remain readable; resume
 requires fully specified source timing when the original defaults are absent.
-Resume also requires the current resolved simulation identity (v13); states
+Resume also requires the current resolved simulation identity (v14); states
 captured under previous source evaluation or behavioral event timing semantics
 must be regenerated.
 
@@ -444,7 +444,11 @@ exactly. Before shooting, supported time-only sources outside a finite Fourier
 band receive local interpolation bounds from the shared value/derivative
 interpreter, including propagated VM rounding error. These bounds use the
 resolved voltage/current tolerances to concentrate points around narrow
-features. Centered mean-value bounds preserve cancellation in compound source
+features. Bounds cover hyperbolic functions, their inverses and arctangent,
+including real domains and Xyce saturation rules. Exact interval endpoints
+preserve valid domain boundaries, and scaled derivative arithmetic avoids
+avoidable intermediate overflow and underflow.
+Centered mean-value bounds preserve cancellation in compound source
 coordinates before subsequent operations amplify range uncertainty. This
 numerical mesh supplements physical source events. A smooth
 source that cannot meet these bounds at representable time precision returns
@@ -464,7 +468,7 @@ defaults still use the original `POINTS`. `MAXITER` applies to each grid solve,
 while the result reports total Newton corrections across all grids. Point and
 memory limits also apply to refinement, and cancellation remains available.
 Retained PSS operating points from earlier producer versions must be regenerated
-before dependent numerical reuse; the current producer identity is version 26.
+before dependent numerical reuse; the current producer identity is version 27.
 This convergence check supplements the shooting residual, which measures closure
 of a discrete period map. It is not a proof of resolution for all nonlinear
 expressions and devices; independent waveform and

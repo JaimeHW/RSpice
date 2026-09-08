@@ -73,7 +73,31 @@ impl TimeInterval {
         if other.lower == 0.0 && other.upper == 0.0 {
             return self;
         }
-        Self::outward(self.lower + other.lower, self.upper + other.upper)
+        // FastTwoSum identifies the direction of the rounding error. Keep
+        // exact endpoints exact: widening 2 + [-1,1] below 1 would falsely
+        // put an acosh argument outside its real domain at every extremum.
+        let directed = |a: Value, b: Value, upper: bool| {
+            let sum = a + b;
+            let error = if a.abs() >= b.abs() {
+                (a - sum) + b
+            } else {
+                (b - sum) + a
+            };
+            if upper && (error > 0.0 || !sum.is_finite()) {
+                sum.next_up()
+            } else if !upper && (error < 0.0 || !sum.is_finite()) {
+                sum.next_down()
+            } else {
+                sum
+            }
+        };
+        let lower = directed(self.lower, other.lower, false);
+        let upper = directed(self.upper, other.upper, true);
+        if lower.is_nan() || upper.is_nan() {
+            Self::WHOLE
+        } else {
+            Self { lower, upper }
+        }
     }
 
     fn neg(self) -> Self {
@@ -102,6 +126,17 @@ impl TimeInterval {
             products.into_iter().fold(Value::INFINITY, Value::min),
             products.into_iter().fold(Value::NEG_INFINITY, Value::max),
         )
+        .with_product_sign(self, other)
+    }
+
+    fn with_product_sign(mut self, left: Self, right: Self) -> Self {
+        if (left.lower >= 0.0 && right.lower >= 0.0) || (left.upper <= 0.0 && right.upper <= 0.0) {
+            self.lower = self.lower.max(0.0);
+        }
+        if (left.lower >= 0.0 && right.upper <= 0.0) || (left.upper <= 0.0 && right.lower >= 0.0) {
+            self.upper = self.upper.min(0.0);
+        }
+        self
     }
 
     fn div(self, other: Self) -> Option<Self> {
@@ -122,10 +157,13 @@ impl TimeInterval {
         if quotients.iter().any(|value| value.is_nan()) {
             return Some(Self::WHOLE);
         }
-        Some(Self::outward(
-            quotients.into_iter().fold(Value::INFINITY, Value::min),
-            quotients.into_iter().fold(Value::NEG_INFINITY, Value::max),
-        ))
+        Some(
+            Self::outward(
+                quotients.into_iter().fold(Value::INFINITY, Value::min),
+                quotients.into_iter().fold(Value::NEG_INFINITY, Value::max),
+            )
+            .with_product_sign(self, other),
+        )
     }
 
     fn union(self, other: Self) -> Self {
@@ -177,7 +215,9 @@ impl TimeInterval {
             }
         } else {
             let minimum = self.lower.abs().min(self.upper.abs());
-            Self::outward(minimum * minimum, maximum * maximum)
+            let mut value = Self::outward(minimum * minimum, maximum * maximum);
+            value.lower = value.lower.max(0.0);
+            value
         }
     }
 
@@ -600,6 +640,152 @@ impl Dual {
         }
     }
 
+    fn hyperbolic_or_atan(
+        mut self,
+        instruction: &Instruction,
+        context: &Context<'_>,
+    ) -> Option<Self> {
+        use crate::config::ExpressionDialect;
+        let xyce = context.expression_dialect == ExpressionDialect::Xyce;
+        let evaluate: fn(Value) -> Value = match instruction {
+            Instruction::Atan => Value::atan,
+            Instruction::Sinh => Value::sinh,
+            Instruction::Cosh => Value::cosh,
+            Instruction::Tanh if xyce => super::vm::xyce_tanh,
+            Instruction::Tanh => Value::tanh,
+            Instruction::Asinh => Value::asinh,
+            Instruction::Acosh => Value::acosh,
+            Instruction::Atanh if xyce => super::vm::xyce_atanh,
+            Instruction::Atanh => Value::atanh,
+            _ => return None,
+        };
+        if self.constant {
+            return Some(Self::constant(evaluate(self.value.lower)));
+        }
+        // The VM clamp propagates NaN, whereas min/max select a finite
+        // operand. An unbounded input enclosure can include invalid values
+        // such as 0*infinity and must not become a finite saturation proof.
+        if !self.value.is_finite() {
+            return None;
+        }
+        if matches!(instruction, Instruction::Atanh) && xyce {
+            let limit = 1.0 - super::vm::XYCE_ATANH_EPSILON;
+            self = self
+                .extremum(Self::constant(-limit), true)
+                .extremum(Self::constant(limit), false);
+            if self.constant {
+                return Some(Self::constant(evaluate(self.value.lower)));
+            }
+        }
+        if matches!(instruction, Instruction::Tanh) && xyce {
+            let threshold = super::vm::XYCE_TANH_SATURATION_THRESHOLD;
+            if self.value.lower > threshold || self.value.upper < -threshold {
+                return Some(Self::constant(evaluate(self.value.lower)));
+            }
+        }
+        // Undefined real domains remain unresolved. In particular, native
+        // atanh must not inherit the Xyce argument clamp.
+        if (matches!(instruction, Instruction::Acosh) && self.value.lower < 1.0)
+            || (matches!(instruction, Instruction::Atanh)
+                && (self.value.lower <= -1.0 || self.value.upper >= 1.0))
+        {
+            return None;
+        }
+        let nearest = if self.value.contains(0.0) {
+            0.0
+        } else {
+            self.value.lower.abs().min(self.value.upper.abs())
+        };
+        let farthest = self.value.magnitude();
+        let positive_range = |lower: Value, upper: Value| {
+            let mut result = TimeInterval::transcendental(lower, upper);
+            result.lower = result.lower.max(0.0);
+            result
+        };
+        let mut value = if matches!(instruction, Instruction::Cosh) {
+            let mut value = positive_range(nearest.cosh(), farthest.cosh());
+            value.lower = value.lower.max(1.0);
+            value
+        } else {
+            TimeInterval::transcendental(evaluate(self.value.lower), evaluate(self.value.upper))
+        };
+        if matches!(instruction, Instruction::Acosh) {
+            value.lower = value.lower.max(0.0);
+        } else if matches!(instruction, Instruction::Tanh) {
+            value.lower = value.lower.max(-1.0);
+            value.upper = value.upper.min(1.0);
+        }
+        // Apply reciprocal derivatives to the incoming slope by successive
+        // divisions. Squaring a large argument or forming a tiny derivative
+        // first can lose a representable normalized-time derivative.
+        let chain = |incoming: TimeInterval| -> Option<TimeInterval> {
+            Some(match instruction {
+                Instruction::Atan | Instruction::Asinh => {
+                    let norm = positive_range(nearest.hypot(1.0), farthest.hypot(1.0));
+                    let first = incoming.div(norm)?;
+                    if matches!(instruction, Instruction::Atan) {
+                        first.div(norm)?
+                    } else {
+                        first
+                    }
+                }
+                Instruction::Sinh => incoming.mul(positive_range(nearest.cosh(), farthest.cosh())),
+                Instruction::Cosh => incoming.mul(TimeInterval::transcendental(
+                    self.value.lower.sinh(),
+                    self.value.upper.sinh(),
+                )),
+                Instruction::Tanh => {
+                    // sech(x) = 2 exp(-|x|)/(1+exp(-2|x|)); this remains
+                    // useful after cosh(x) would overflow.
+                    let exponential = positive_range((-farthest).exp(), (-nearest).exp());
+                    let denominator = TimeInterval::point(1.0).add(exponential.square());
+                    incoming
+                        .mul(exponential)
+                        .div(denominator)?
+                        .mul(exponential)
+                        .div(denominator)?
+                        .mul(TimeInterval::point(4.0))
+                }
+                Instruction::Acosh => {
+                    let lower = self.value.lower;
+                    let upper = self.value.upper;
+                    incoming
+                        .div(positive_range((lower - 1.0).sqrt(), (upper - 1.0).sqrt()))?
+                        .div(positive_range((lower + 1.0).sqrt(), (upper + 1.0).sqrt()))?
+                }
+                Instruction::Atanh => incoming
+                    .div(TimeInterval::outward(1.0 - farthest, 1.0 - nearest))?
+                    .div(TimeInterval::outward(1.0 + nearest, 1.0 + farthest))?,
+                _ => return None,
+            })
+        };
+        let mut slope = chain(self.slope).unwrap_or(TimeInterval::WHOLE);
+        if matches!(instruction, Instruction::Tanh)
+            && xyce
+            && farthest > super::vm::XYCE_TANH_SATURATION_THRESHOLD
+        {
+            slope = slope.union(TimeInterval::ZERO);
+        }
+        let sensitivity = chain(TimeInterval::point(1.0))
+            .unwrap_or(TimeInterval::WHOLE)
+            .magnitude();
+        let mut roundoff = propagated_error(sensitivity, self.roundoff);
+        if matches!(instruction, Instruction::Acosh) {
+            // acosh is 1/2-Holder at one: its maximum change over delta is
+            // at most sqrt(2*delta), also when the derivative is unbounded.
+            let holder = (std::f64::consts::SQRT_2 * self.roundoff.sqrt()).next_up();
+            roundoff = roundoff.min(holder);
+        }
+        Some(Self {
+            value,
+            slope,
+            center: evaluate(self.center),
+            constant: false,
+            continuous: self.continuous,
+            roundoff: (roundoff + value.rounding_error(true)).next_up(),
+        })
+    }
+
     fn absolute(self) -> Self {
         if self.constant {
             return Self::constant(self.value.lower.abs());
@@ -790,6 +976,13 @@ impl<'a> TimeEnclosure<'a> {
                     | Instruction::Sqrt
                     | Instruction::Sin
                     | Instruction::Cos
+                    | Instruction::Atan
+                    | Instruction::Sinh
+                    | Instruction::Cosh
+                    | Instruction::Tanh
+                    | Instruction::Asinh
+                    | Instruction::Acosh
+                    | Instruction::Atanh
                     | Instruction::Exp
                     | Instruction::Ln
                     | Instruction::Log10
@@ -874,6 +1067,15 @@ impl<'a> TimeEnclosure<'a> {
                 Instruction::Sqrt => self.stack.pop()?.square_root(),
                 Instruction::Sin => self.stack.pop()?.trigonometric(false),
                 Instruction::Cos => self.stack.pop()?.trigonometric(true),
+                Instruction::Atan
+                | Instruction::Sinh
+                | Instruction::Cosh
+                | Instruction::Tanh
+                | Instruction::Asinh
+                | Instruction::Acosh
+                | Instruction::Atanh => {
+                    self.stack.pop()?.hyperbolic_or_atan(instruction, context)?
+                }
                 Instruction::Exp => self.stack.pop()?.exponential(),
                 Instruction::Ln => self.stack.pop()?.logarithm(false),
                 Instruction::Log10 => self.stack.pop()?.logarithm(true),
@@ -1688,6 +1890,14 @@ mod tests {
                     "sqr(T-0.5)",
                     "1e200*(cos(2*pi*T)+0.5*cos(4*pi*T))",
                     "sin(1e-200*(T-0.5))",
+                    "atan(1e200*(T+1))",
+                    "sinh(2*T-1)",
+                    "cosh(2*T-1)",
+                    "tanh(60*T-30)",
+                    "asinh(1e200*(T+1))",
+                    "acosh(1+T)",
+                    "acosh(2+cos(2*pi*T))",
+                    "atanh(0.8*(2*T-1))",
                 ] {
                     let expression = expression.replace('T', &format!("(time/{stop:e})"));
                     let program = compile(&parse_expression_strict(&expression).unwrap());
@@ -1705,7 +1915,7 @@ mod tests {
                         let upper = (start + width) * stop;
                         let domain = bounds
                             .evaluate_centered(TimeInterval { lower, upper }, &context)
-                            .unwrap();
+                            .unwrap_or_else(|| panic!("{expression}, {lower:e}..{upper:e}"));
                         let error = domain.interpolation_error((upper - lower) / stop);
                         let left = vm.execute(
                             &program,
@@ -1780,5 +1990,201 @@ mod tests {
                 assert!(error >= 1.0, "a smooth derivative alone misses the VM step");
             }
         }
+    }
+
+    #[test]
+    fn hyperbolic_bounds_enclose_independent_chain_rules_across_time_scales() {
+        use crate::config::ExpressionDialect;
+        type Derivative = fn(Value) -> Value;
+        let cases: [(&str, Derivative); 8] = [
+            ("atan(4*T-2)", |t| 4.0 / (1.0 + (4.0 * t - 2.0).powi(2))),
+            ("sinh(2*T-1)", |t| 2.0 * (2.0 * t - 1.0).cosh()),
+            ("cosh(2*T-1)", |t| 2.0 * (2.0 * t - 1.0).sinh()),
+            ("tanh(40*T-20)", |t| 40.0 / (40.0 * t - 20.0).cosh().powi(2)),
+            ("asinh(6*T-3)", |t| 6.0 / (6.0 * t - 3.0).hypot(1.0)),
+            ("acosh(1+4*T)", |t| 4.0 / (4.0 * t * (2.0 + 4.0 * t)).sqrt()),
+            ("atanh(0.8*(2*T-1))", |t| {
+                1.6 / (1.0 - (0.8 * (2.0 * t - 1.0)).powi(2))
+            }),
+            // The partial derivative underflows if formed before the chain.
+            ("atan(1e200*(1+T))", |t| 1e-200 / (1.0 + t).powi(2)),
+        ];
+        for dialect in [ExpressionDialect::Ngspice, ExpressionDialect::Xyce] {
+            let context = Context::transient(&[], &[], 0.0).with_expression_dialect(dialect);
+            for stop in [1e-300, 1.0, 1e300] {
+                for (expression, derivative) in cases {
+                    let expression = expression.replace('T', &format!("(time/{stop:e})"));
+                    let program = compile(&parse_expression_strict(&expression).unwrap());
+                    let mut bounds = TimeEnclosure::new(&program, stop).unwrap();
+                    let mut vm = Vm::new();
+                    for index in 0..32 {
+                        let lower = index as Value / 32.0 * stop;
+                        let upper = (index + 1) as Value / 32.0 * stop;
+                        let domain = bounds
+                            .evaluate_centered(TimeInterval { lower, upper }, &context)
+                            .unwrap_or_else(|| panic!("{expression}, {lower:e}..{upper:e}"));
+                        for sample in 0..=8 {
+                            let time = lower + (upper - lower) * sample as Value / 8.0;
+                            let actual = vm.execute(&program, &Context { time, ..context });
+                            assert!(
+                                domain.value.contains(actual),
+                                "{expression}: {actual:e} outside {:?}",
+                                domain.value
+                            );
+                            let slope = derivative(time / stop);
+                            assert!(
+                                domain.slope.contains(slope),
+                                "{expression}: {slope:e} outside {:?}",
+                                domain.slope
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn hyperbolic_domains_and_dialect_plateaus_follow_the_vm() {
+        use crate::config::ExpressionDialect;
+        for dialect in [ExpressionDialect::Ngspice, ExpressionDialect::Xyce] {
+            let context = Context::transient(&[], &[], 0.0).with_expression_dialect(dialect);
+            let program = compile(&parse_expression_strict("atanh(0*(1e308*time))").unwrap());
+            let actual = Vm::new().execute(
+                &program,
+                &Context {
+                    time: 2.0,
+                    ..context
+                },
+            );
+            if dialect == ExpressionDialect::Xyce {
+                // Xyce normalizes NaN only at the completed expression
+                // boundary; this is not the ordinary atanh plateau.
+                assert_eq!(actual.abs(), 1e50);
+            } else {
+                assert!(actual.is_nan());
+            }
+            assert!(
+                TimeEnclosure::new(&program, 2.0)
+                    .unwrap()
+                    .evaluate(
+                        TimeInterval {
+                            lower: 0.0,
+                            upper: 2.0
+                        },
+                        &context
+                    )
+                    .is_none(),
+                "a saturation clamp must not conceal invalid input"
+            );
+            let program =
+                compile(&parse_expression_strict("acosh(1+sqr(1e-200*(time+1)))").unwrap());
+            let domain = TimeEnclosure::new(&program, 1.0)
+                .unwrap()
+                .evaluate(
+                    TimeInterval {
+                        lower: 0.0,
+                        upper: 1.0,
+                    },
+                    &context,
+                )
+                .unwrap();
+            assert!(domain.value.contains(0.0));
+            assert!(domain.interpolation_error(1.0) < 1e-6);
+            for expression in [
+                "atan(-0)",
+                "sinh(-0)",
+                "cosh(0)",
+                "tanh(21)",
+                "asinh(-0)",
+                "acosh(1)",
+                "atanh(0.9)",
+            ] {
+                let program = compile(&parse_expression_strict(expression).unwrap());
+                let domain = TimeEnclosure::new(&program, 1.0)
+                    .unwrap()
+                    .evaluate(
+                        TimeInterval {
+                            lower: 0.0,
+                            upper: 1.0,
+                        },
+                        &context,
+                    )
+                    .unwrap();
+                let expected = Vm::new().execute(&program, &context).to_bits();
+                assert_eq!(domain.value.lower.to_bits(), expected, "{expression}");
+                assert_eq!(domain.value.upper.to_bits(), expected, "{expression}");
+            }
+            for expression in ["acosh(time)", "atanh(2*time)", "atanh(-2*time)"] {
+                let program = compile(&parse_expression_strict(expression).unwrap());
+                let domain = TimeEnclosure::new(&program, 1.0).unwrap().evaluate(
+                    TimeInterval {
+                        lower: 0.0,
+                        upper: 1.0,
+                    },
+                    &context,
+                );
+                if dialect == ExpressionDialect::Xyce && expression.starts_with("atanh") {
+                    assert!(domain.unwrap().value.is_finite());
+                } else {
+                    assert!(domain.is_none(), "invalid real domain: {expression}");
+                }
+            }
+            if dialect == ExpressionDialect::Xyce {
+                for expression in [
+                    "atanh(1+time)",
+                    "atanh(-1-time)",
+                    "tanh(21+time)",
+                    "tanh(-21-time)",
+                ] {
+                    let program = compile(&parse_expression_strict(expression).unwrap());
+                    let domain = TimeEnclosure::new(&program, 1.0)
+                        .unwrap()
+                        .evaluate(
+                            TimeInterval {
+                                lower: 0.0,
+                                upper: 1.0,
+                            },
+                            &context,
+                        )
+                        .unwrap();
+                    let expected = Vm::new().execute(&program, &context);
+                    assert_eq!(
+                        (domain.value.lower, domain.value.upper),
+                        (expected, expected)
+                    );
+                    assert_eq!((domain.slope.lower, domain.slope.upper), (0.0, 0.0));
+                    assert_eq!(domain.interpolation_error(1.0), 0.0);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn directed_addition_preserves_exact_domains_and_encloses_inexact_sums() {
+        let exact = TimeInterval::point(2.0).add(TimeInterval {
+            lower: -1.0,
+            upper: 1.0,
+        });
+        assert_eq!((exact.lower, exact.upper), (1.0, 3.0));
+        for sign in [-1.0, 1.0] {
+            let sum =
+                TimeInterval::point(sign).add(TimeInterval::point(sign * Value::EPSILON / 4.0));
+            let expected = if sign < 0.0 {
+                (-1.0_f64.next_up(), -1.0)
+            } else {
+                (1.0, 1.0_f64.next_up())
+            };
+            assert_eq!((sum.lower, sum.upper), expected);
+            let overflow =
+                TimeInterval::point(sign * Value::MAX).add(TimeInterval::point(sign * Value::MAX));
+            assert!(overflow.contains(sign * Value::INFINITY));
+        }
+        let sum =
+            TimeInterval::point(Value::INFINITY).add(TimeInterval::point(Value::NEG_INFINITY));
+        assert_eq!(
+            (sum.lower, sum.upper),
+            (Value::NEG_INFINITY, Value::INFINITY)
+        );
     }
 }

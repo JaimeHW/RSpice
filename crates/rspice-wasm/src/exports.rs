@@ -351,6 +351,34 @@ mod wasm_tests {
                 "B1 in 0 V=0.5*(1-pwrs(abs(cos(2*pi*64meg*time+0.1)+0.5*cos(2*pi*128meg*time+0.2)-0.25)-0.001,0))",
                 0.000367552653101734,
             ),
+            (
+                "B1 in 0 V=exp(-1000000*(atan(cos(2*pi*64meg*time+0.1))+0.5*atan(cos(2*(2*pi*64meg*time+0.1)))-0.25)^2)",
+                0.00040382551583931654,
+            ),
+            (
+                "B1 in 0 V=exp(-1000000*(sinh(cos(2*pi*64meg*time+0.1))+0.5*sinh(cos(2*(2*pi*64meg*time+0.1)))-0.25)^2)",
+                0.00028901630323141536,
+            ),
+            (
+                "B1 in 0 V=exp(-1000000*(cosh(cos(2*pi*64meg*time+0.1))+0.5*cosh(cos(2*(2*pi*64meg*time+0.1)))-1.7)^2)",
+                0.01350698003904257,
+            ),
+            (
+                "B1 in 0 V=exp(-1000000*(tanh(cos(2*pi*64meg*time+0.1))+0.5*tanh(cos(2*(2*pi*64meg*time+0.1)))-0.25)^2)",
+                0.00041029391299753326,
+            ),
+            (
+                "B1 in 0 V=exp(-1000000*(asinh(cos(2*pi*64meg*time+0.1))+0.5*asinh(cos(2*(2*pi*64meg*time+0.1)))-0.25)^2)",
+                0.00036317795605477475,
+            ),
+            (
+                "B1 in 0 V=exp(-1000000*(acosh(2+cos(2*pi*64meg*time+0.1))+0.5*acosh(2+cos(2*(2*pi*64meg*time+0.1)))-1.5)^2)",
+                0.00037163118229903647,
+            ),
+            (
+                "B1 in 0 V=exp(-1000000*(atanh(0.5*cos(2*pi*64meg*time+0.1))+0.5*atanh(0.5*cos(2*(2*pi*64meg*time+0.1)))-0.25)^2)",
+                0.000607763343389148,
+            ),
             ("V1 in 0 PULSE(0 1 400p 10p 10p 100p 1u)", 0.00011),
             ("B1 in 0 V=spice_pulse(0,1,400p,10p,10p,100p,1u)", 0.00011),
             (

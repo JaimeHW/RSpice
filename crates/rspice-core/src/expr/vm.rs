@@ -10,8 +10,8 @@ use std::collections::HashMap;
 const TWO_PI: Value = std::f64::consts::TAU;
 pub(crate) const EXPR_ZERO_TOLERANCE: Value = 1.0e-12;
 pub(crate) const LOGARITHM_MIN_ARGUMENT: Value = 1.0e-38;
-const XYCE_ATANH_EPSILON: Value = 1.0e-12;
-const XYCE_TANH_SATURATION_THRESHOLD: Value = 20.0;
+pub(crate) const XYCE_ATANH_EPSILON: Value = 1.0e-12;
+pub(crate) const XYCE_TANH_SATURATION_THRESHOLD: Value = 20.0;
 
 /// Bytecode instruction
 #[derive(Debug, Clone)]
@@ -1159,7 +1159,7 @@ fn spice_sffm_from_args(time: Value, args: &[Value]) -> Value {
             .sin()
 }
 
-fn xyce_tanh(value: Value) -> Value {
+pub(super) fn xyce_tanh(value: Value) -> Value {
     if value > XYCE_TANH_SATURATION_THRESHOLD {
         1.0
     } else if value < -XYCE_TANH_SATURATION_THRESHOLD {
@@ -1169,7 +1169,7 @@ fn xyce_tanh(value: Value) -> Value {
     }
 }
 
-fn xyce_atanh(value: Value) -> Value {
+pub(super) fn xyce_atanh(value: Value) -> Value {
     value
         .clamp(XYCE_ATANH_EPSILON - 1.0, 1.0 - XYCE_ATANH_EPSILON)
         .atanh()

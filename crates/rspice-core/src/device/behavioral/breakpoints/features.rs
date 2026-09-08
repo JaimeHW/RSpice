@@ -645,6 +645,25 @@ impl EventSchedule<'_> {
                 (Function::Exp, [input]) if target > 0.0 => {
                     self.level(input, target.ln(), context)?
                 }
+                (Function::Sinh, [input]) => self.level(input, target.asinh(), context)?,
+                (Function::Asinh, [input]) => self.level(input, target.sinh(), context)?,
+                (Function::Cosh, [input]) if target >= 1.0 => {
+                    let root = target.acosh();
+                    self.level(input, root, context)?;
+                    if root != 0.0 {
+                        self.level(input, -root, context)?;
+                    }
+                }
+                (Function::Acosh, [input]) if target >= 0.0 => {
+                    self.level(input, target.cosh(), context)?
+                }
+                (Function::Tanh, [input]) if target.abs() < 1.0 => {
+                    self.level(input, target.atanh(), context)?
+                }
+                (Function::Atanh, [input]) => self.level(input, target.tanh(), context)?,
+                (Function::Atan, [input]) if target.abs() < std::f64::consts::FRAC_PI_2 => {
+                    self.level(input, target.tan(), context)?
+                }
                 (Function::Min | Function::Max, args) => {
                     // An extremum reaches a level only through one of its
                     // operands. Isolate those candidates directly: a cusp
@@ -810,6 +829,23 @@ impl EventSchedule<'_> {
                 }
                 (Function::Ln | Function::Log10 | Function::Log, [input]) => {
                     self.level(input, crate::expr::LOGARITHM_MIN_ARGUMENT, context)?
+                }
+                (Function::Cosh, [input]) => self.level(input, 0.0, context)?,
+                (Function::Acosh, [input]) => self.level(input, 1.0, context)?,
+                (Function::Atanh, [input]) => {
+                    let limit = if context.expression_dialect == ExpressionDialect::Xyce {
+                        1.0 - crate::expr::XYCE_ATANH_EPSILON
+                    } else {
+                        1.0
+                    };
+                    self.level(input, -limit, context)?;
+                    self.level(input, limit, context)?;
+                }
+                (Function::Tanh, [input])
+                    if context.expression_dialect == ExpressionDialect::Xyce =>
+                {
+                    self.level(input, -crate::expr::XYCE_TANH_SATURATION_THRESHOLD, context)?;
+                    self.level(input, crate::expr::XYCE_TANH_SATURATION_THRESHOLD, context)?;
                 }
                 (
                     Function::Sign
