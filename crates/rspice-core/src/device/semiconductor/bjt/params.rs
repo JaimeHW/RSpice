@@ -1115,8 +1115,8 @@ impl Bjt {
         {
             self.ef = v;
         }
-        // VBIC flicker noise: KFN/AFN/BFN ride on the intrinsic B-E current
-        // (vbicnoise.c FLBENOIZ). Defaults 0/1/1 per vbicsetup.c:230-238.
+        // Defaults 0/1/1 per vbicsetup.c. Model policy validates the domain:
+        // ngspice allows finite signed exponents; VBIC 1.3 requires positive ones.
         if let Some(v) = params
             .get("KFN")
             .copied()
@@ -1124,18 +1124,10 @@ impl Bjt {
         {
             self.kfn = v;
         }
-        if let Some(v) = params
-            .get("AFN")
-            .copied()
-            .filter(|v| v.is_finite() && *v > 0.0)
-        {
+        if let Some(v) = params.get("AFN").copied().filter(|v| v.is_finite()) {
             self.afn = v;
         }
-        if let Some(v) = params
-            .get("BFN")
-            .copied()
-            .filter(|v| v.is_finite() && *v > 0.0)
-        {
+        if let Some(v) = params.get("BFN").copied().filter(|v| v.is_finite()) {
             self.bfn = v;
         }
         // VBIC aliases used in ngspice level=4 decks.

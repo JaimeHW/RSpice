@@ -1,6 +1,7 @@
 """Small-signal noise analysis (`.NOISE`)."""
 
 import math
+import pickle
 
 import pytest
 
@@ -10,6 +11,34 @@ K_BOLTZMANN = 1.380649e-23
 
 
 class TestNoise:
+    @pytest.mark.parametrize("level, expected", [(11, 3.929629740476495e-10), (12, 3.929629740665435e-10)])
+    def test_vbic13_extrinsic_flicker_and_identity(self, engine, level, expected):
+        substrate = " 0" if level == 12 else ""
+        netlist = rspice.Netlist.parse_spice(
+            f"""* VBIC extrinsic flicker
+Vcc vcc 0 3
+Rc vcc c 1k
+Vb drive 0 DC 0.7 AC 1
+Rb drive b 1k
+Vth th 0 0
+Q1 c b 0{substrate} th vm SW_ET=0 M=3
+.model vm NPN(LEVEL={level} IS=1e-16 IBEI=1e-18 IBCI=1e-18 RCX=10 RCI=2 RBX=5 RBI=3 RE=1 RBP=0 RS=0 GMIN=0 IBEIP=0 ISP=0 TNOM=27 WBE=0 KFN=1e-8 AFN=1.5 BFN=0.8)
+.temp 27
+.options gmin=0
+.end
+"""
+        )
+        point = engine.run_noise(netlist, "c", [1], temperature=300.15)[0]
+        assert point.output_noise_density == pytest.approx(expected, rel=2e-7, abs=1e-25)
+        source = next(c for c in point.contributions if c.mechanism == "FN_BEX")
+        assert source.device_name.upper() == "Q1"
+        assert source.noise_type == "Flicker"
+        restored = pickle.loads(pickle.dumps(source))
+        assert restored.mechanism == source.mechanism
+        assert restored.output_contribution == source.output_contribution
+        legacy = rspice.NoiseContribution._unpickle("Q1", "Shot", 1e-20, 10.0)
+        assert legacy.mechanism is None
+
     def test_resistor_thermal_noise_matches_theory(self, engine, rc_lowpass):
         # Output noise of R || C: S_vo(f) = 4kTR / (1 + (f/fc)^2).
         temp = 300.0

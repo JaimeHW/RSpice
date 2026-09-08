@@ -209,6 +209,32 @@ mod wasm_tests {
     use crate::js_interop::{js_array_property, js_property};
 
     #[wasm_bindgen_test]
+    fn vbic13_extrinsic_flicker_matches_xyce_in_wasm() {
+        let netlist = rspice_core::Netlist::parse(
+            "VBIC extrinsic flicker in WASM\nVcc vcc 0 3\nRc vcc c 1k\nVb drive 0 DC 0.7 AC 1\nRb drive b 1k\nVth th 0 0\nQ1 c b 0 th vm SW_ET=0 M=3\n\
+             .model vm NPN(LEVEL=11 IS=1e-16 IBEI=1e-18 IBCI=1e-18 RCX=10 RCI=2 RBX=5 RBI=3 RE=1 RBP=0 RS=0 GMIN=0 IBEIP=0 ISP=0 TNOM=27 WBE=0 KFN=1e-8 AFN=1.5 BFN=0.8)\n.temp 27\n.options gmin=0\n.end\n",
+        ).unwrap();
+        let points = rspice_core::Engine::default()
+            .run_noise_named_with_input_source_and_abort(
+                &netlist,
+                "c",
+                None,
+                "Vb",
+                &[1.0],
+                300.15,
+                &rspice_core::abort_signal::NoAbort,
+            )
+            .unwrap();
+        let expected = 3.929629740476495e-10;
+        assert!((points[0].output_noise_density - expected).abs() < 2e-7 * expected);
+        assert!(points[0].contributions.iter().any(|source| {
+            source.identity.device.eq_ignore_ascii_case("Q1")
+                && source.identity.mechanism.as_deref() == Some("FN_BEX")
+                && source.output_contribution > 0.0
+        }));
+    }
+
+    #[wasm_bindgen_test]
     fn vbic13_early_voltage_cutoff_matches_xyce_in_wasm() {
         let netlist = rspice_core::Netlist::parse(
             "VBIC Early-voltage cutoff in WASM\nVc c 0 1.8\nVb b 0 0.7\nVth th 0 DC 20 AC 1\nQ1 c b 0 th vm SW_ET=1\n\

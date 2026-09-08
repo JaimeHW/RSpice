@@ -20,21 +20,20 @@
 use super::*;
 
 /// Operating-point noise description of a promoted VBIC instance,
-/// mirroring the per-branch states vbicnoise.c reads: thermal conductances
-/// of the parasitic resistances and the shot/flicker branch currents, each
-/// with its injection node pair on the internal topology.
+/// following the selected native model's thermal conductances and shot/flicker
+/// currents, each with its injection node pair on the internal topology.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct VbicNoiseOperatingModel {
+    /// Explicit compact-model constants take precedence over dialect defaults.
+    pub physical_constants: Option<crate::analysis::noise::NoisePhysicalConstants>,
     /// VBIC 1.3 evaluates thermal noise at the local operating temperature.
     pub absolute_temperature: Option<Value>,
-    /// `(mechanism, node+, node−, conductance)` for RCX/RCI/RBX/RBI/RE/RBP.
-    pub thermal: [(&'static str, NodeId, NodeId, Value); 6],
-    /// `(mechanism, node+, node-, branch current)` for IC/IBE/IBEX/IBEP.
-    pub shot: [(&'static str, NodeId, NodeId, Value); 4],
-    /// Intrinsic B-E current and node pair for the KFN flicker source.
-    pub flicker_ibe: (NodeId, NodeId, Value),
-    /// Parasitic B-E current and node pair for the second flicker source.
-    pub flicker_ibep: (NodeId, NodeId, Value),
+    /// `(mechanism, node+, node−, conductance)`; absent sources have zero strength.
+    pub thermal: [(&'static str, NodeId, NodeId, Value); 7],
+    /// `(mechanism, node+, node-, noise current)` including model multiplicity.
+    pub shot: [(&'static str, NodeId, NodeId, Value); 5],
+    /// `(mechanism, node+, node-, current, coefficient scale)` for KFN flicker.
+    pub flicker: [(&'static str, NodeId, NodeId, Value, Value); 3],
 }
 
 impl Bjt {
@@ -380,23 +379,51 @@ impl Bjt {
         self.vbic_mna_promoted
     }
 
-    /// Noise sources of a promoted VBIC at the last updated bias, following
-    /// vbicnoise.c exactly — including its two verified quirks, because the
-    /// only validation oracle for noise spectra is the official binary and
-    /// both quirks are measurable through the parasitic capacitances at
-    /// high frequency:
-    /// - the rbp thermal source is injected across the emitter nodes
-    ///   (emitEI–emit), not its physical bp–cx branch;
-    /// - the rs thermal and iccp shot sources are computed by ngspice but
-    ///   omitted from the spectrum sum (VBICTOTNOIZ), so they are not
-    ///   produced here at all.
+    /// Noise sources at the accepted bias. VBIC 1.3 follows vbic_1p3.va;
+    /// older VBIC retains ngspice's emitter injection for RBP and its
+    /// omission of RS/Iccp and extrinsic B-E flicker from the total spectrum.
     pub(crate) fn vbic_noise_operating_model(&self) -> Option<VbicNoiseOperatingModel> {
         if !self.uses_vbic_dynamic_charges() || !self.vbic_mna_promoted() {
             return None;
         }
         let eval = self.mna_eval?;
-        let (_, g_rci) = self.irci_branch_with_self_conductance(self.vcx, self.vci, self.vbi);
+        let (g_rci, transport_current) = if self.vbic_13 {
+            self.with_temperature_variant(self.vrth, |model| {
+                let p = self.polarity();
+                let transport = model
+                    .transport_charge_state(p * (self.vbi - self.vei), p * (self.vbi - self.vci));
+                let conductance = if Self::series_active(model.rci) {
+                    // Irci already includes M. The VA noise equation multiplies
+                    // it by M again, but Gci's small-voltage floor only once.
+                    (self.m * eval.irci.current.abs() + 1e-10 / model.rci)
+                        / ((self.vcx - self.vci).abs() + 1e-10)
+                } else {
+                    0.0
+                };
+                (conductance, self.m * transport.itzf)
+            })
+        } else {
+            (
+                self.irci_branch_with_self_conductance(self.vcx, self.vci, self.vbi)
+                    .1,
+                eval.iciei.current,
+            )
+        };
+        let shot_scale = if self.vbic_13 { self.m } else { 1.0 };
+        let four_terminal_noise = self.vbic_13 && !self.vbic_three_terminal;
+        let flicker_current = |current: Value| {
+            if self.vbic_13 {
+                current
+            } else {
+                // vbicnoise.c applies N_MINLOG to the per-copy current before
+                // the exponent; zero/negative AFN therefore still emits noise.
+                current.abs().max(self.m * 1e-38)
+            }
+        };
         Some(VbicNoiseOperatingModel {
+            physical_constants: self
+                .vbic_13
+                .then_some(crate::analysis::noise::NoisePhysicalConstants::VBIC_1_3),
             absolute_temperature: self.vbic_13.then(|| {
                 self.mapped_temperature(self.requested_temperature() + self.vrth)
                     .0
@@ -429,19 +456,83 @@ impl Bjt {
                 ),
                 (
                     "RBP",
-                    self.node_ei,
-                    self.node_emitter,
+                    if self.vbic_13 {
+                        self.node_bp
+                    } else {
+                        self.node_ei
+                    },
+                    if self.vbic_13 {
+                        self.node_cx
+                    } else {
+                        self.node_emitter
+                    },
                     -eval.irbp.d_internal[IDX_VCX],
+                ),
+                (
+                    "RS",
+                    self.node_si,
+                    self.node_substrate,
+                    if four_terminal_noise {
+                        eval.irs.d_external[EXT_S]
+                    } else {
+                        0.0
+                    },
                 ),
             ],
             shot: [
-                ("IC", self.node_ci, self.node_ei, eval.iciei.current),
-                ("IBE", self.node_bi, self.node_ei, eval.ibe.current),
-                ("IBEX", self.node_bx, self.node_ei, eval.ibex.current),
-                ("IBEP", self.node_bx, self.node_bp, eval.ibep.current),
+                ("IC", self.node_ci, self.node_ei, transport_current),
+                (
+                    "IBE",
+                    self.node_bi,
+                    self.node_ei,
+                    shot_scale * eval.ibe.current,
+                ),
+                (
+                    "IBEX",
+                    self.node_bx,
+                    self.node_ei,
+                    shot_scale * eval.ibex.current,
+                ),
+                (
+                    "IBEP",
+                    self.node_bx,
+                    self.node_bp,
+                    shot_scale * eval.ibep.current,
+                ),
+                (
+                    "ICCP",
+                    self.node_bx,
+                    self.node_si,
+                    if four_terminal_noise {
+                        shot_scale * eval.iccp.current
+                    } else {
+                        0.0
+                    },
+                ),
             ],
-            flicker_ibe: (self.node_bi, self.node_ei, eval.ibe.current),
-            flicker_ibep: (self.node_bx, self.node_bp, eval.ibep.current),
+            flicker: [
+                (
+                    "FN",
+                    self.node_bi,
+                    self.node_ei,
+                    flicker_current(eval.ibe.current),
+                    1.0,
+                ),
+                (
+                    "FN_BEX",
+                    self.node_bx,
+                    self.node_ei,
+                    eval.ibex.current,
+                    if self.vbic_13 { 1.0 } else { 0.0 },
+                ),
+                (
+                    "FN_BEP",
+                    self.node_bx,
+                    self.node_bp,
+                    flicker_current(eval.ibep.current),
+                    shot_scale,
+                ),
+            ],
         })
     }
 

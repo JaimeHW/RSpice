@@ -320,7 +320,9 @@ impl Bjt {
         state.d_ifp[IDX_VCI] = -d_ifp_d_vbci_eff * p;
 
         let iikp = if self.ikp.is_finite() && self.ikp > 0.0 {
-            1.0 / self.ikp
+            // Ifp already includes AREA*M. IKP remains a nominal parameter,
+            // so normalize by the same scale before forming the base charge.
+            1.0 / self.ikp / self.instance_scale()
         } else {
             0.0
         };
@@ -628,6 +630,49 @@ impl Bjt {
 mod tests {
     use super::*;
     use std::collections::HashMap;
+
+    #[test]
+    fn vbic_parasitic_base_charge_is_independent_of_parallel_instance_count() {
+        for level in [4.0, 11.0, 12.0] {
+            for polarity in [1.0, -1.0] {
+                let params = HashMap::from([
+                    ("LEVEL".into(), level),
+                    ("ISP".into(), 1e-15),
+                    ("IKP".into(), 1e-5),
+                    ("WSP".into(), 0.6),
+                ]);
+                let make = |area, m| {
+                    let model = if polarity > 0.0 {
+                        Bjt::new_npn("q".into(), 1, 2, 0)
+                    } else {
+                        Bjt::new_pnp("q".into(), 1, 2, 0)
+                    };
+                    model
+                        .with_params(&params)
+                        .with_instance_params(&[("AREA".into(), area), ("M".into(), m)])
+                };
+                let evaluate = |model: &Bjt| {
+                    model.parasitic_transport_state(
+                        polarity * 0.7,
+                        polarity * 0.68,
+                        polarity * 0.1,
+                        polarity * 0.12,
+                        0.0,
+                    )
+                };
+                let unit = evaluate(&make(1.0, 1.0));
+                assert!(unit.qbp > 1.1, "the fixture must exercise high injection");
+                for (area, m) in [(1.0, 3.0), (2.0, 1.0), (2.0, 3.0)] {
+                    let scaled = evaluate(&make(area, m));
+                    assert!((scaled.qbp - unit.qbp).abs() < 1e-12);
+                    assert!((scaled.ifp - area * m * unit.ifp).abs() < 1e-12 * scaled.ifp.abs());
+                    for (actual, expected) in scaled.d_qbp.into_iter().zip(unit.d_qbp) {
+                        assert!((actual - expected).abs() < 1e-12 * expected.abs().max(1.0));
+                    }
+                }
+            }
+        }
+    }
 
     #[test]
     fn vbic13_extrinsic_avalanche_jacobian_includes_its_collector_current_control() {

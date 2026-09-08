@@ -474,7 +474,11 @@ impl Engine {
             }
         };
         for source in sources {
-            source.physical_constants = constants;
+            // Compact models may embed their own constants. Apply the
+            // dialect default only to sources that use the generic default.
+            if source.physical_constants == crate::analysis::noise::NoisePhysicalConstants::MODERN {
+                source.physical_constants = constants;
+            }
         }
         for source in correlated_sources {
             source.physical_constants = constants;
@@ -2714,25 +2718,16 @@ impl Engine {
             }
         }
 
-        // BJT noise. Promoted VBIC instances follow vbicnoise.c on the
-        // internal topology: thermal noise from the operating-point
-        // conductance of every parasitic resistance, shot noise on the
-        // transport and junction branch currents, and KFN flicker on the
-        // intrinsic and parasitic B-E junctions with the multiplicity
-        // folded as m·KFN·|I/m|^AFN / f^BFN (an effective coefficient of
-        // KFN·m^(1−AFN) on the m-folded branch current). Legacy GP keeps
-        // the external-node shot and KF flicker sources.
+        // Promoted VBIC exposes model-specific sources on its internal nodes.
+        // Older VBIC follows ngspice; VBIC 1.3 follows the Xyce VA definition.
+        // Legacy GP keeps its external-node shot and KF flicker sources.
         for bjt in &circuit.bjts.devices {
             if !bjt.noise_enabled() {
                 continue;
             }
             if let Some(model) = bjt.vbic_noise_operating_model() {
-                // A promoted VBIC is one bipolar with eleven mechanisms across
-                // its internal topology, not eleven devices. Folding the
-                // mechanism into the instance name -- `q1:rcx` as the device --
-                // is what a `DNO(Q1)` or `DNI(Q1,RCX)` probe cannot resolve, and
-                // it leaves the whole-device query nothing to sum over even
-                // where some spelling of it would have resolved.
+                // Each mechanism retains Q1 as its owner for DNO(Q1) and
+                // DNO(Q1,mechanism), regardless of the model's source count.
                 for (mechanism, node_pos, node_neg, conductance) in model.thermal {
                     let label = format!("{}:{mechanism}", bjt.name);
                     if let Some(resistance) =
@@ -2743,6 +2738,9 @@ impl Engine {
                                 .with_identity(crate::analysis::NoiseSourceIdentity::mechanism(
                                     &bjt.name, mechanism,
                                 ));
+                        if let Some(constants) = model.physical_constants {
+                            source = source.with_physical_constants(constants);
+                        }
                         source.temperature_offset = bjt.noise_temperature_offset;
                         if let Some(temperature) = model.absolute_temperature {
                             absolute_temperatures.insert(source.identity.clone(), temperature);
@@ -2752,12 +2750,15 @@ impl Engine {
                 }
                 for (mechanism, node_pos, node_neg, current) in model.shot {
                     if current != 0.0 {
-                        noise_sources.push(
+                        let mut source =
                             NoiseSource::shot(bjt.name.clone(), node_pos, node_neg, current)
                                 .with_identity(crate::analysis::NoiseSourceIdentity::mechanism(
                                     &bjt.name, mechanism,
-                                )),
-                        );
+                                ));
+                        if let Some(constants) = model.physical_constants {
+                            source = source.with_physical_constants(constants);
+                        }
+                        noise_sources.push(source);
                     }
                 }
                 if let Some((kfn, afn, bfn)) = bjt.vbic_flicker_noise_coefficients() {
@@ -2772,41 +2773,29 @@ impl Engine {
                         &format!("{}:FN", bjt.name),
                         kfn * m.powf(1.0 - afn),
                     )?;
-                    let (bi, ei, ibe) = model.flicker_ibe;
-                    if ibe != 0.0 {
-                        noise_sources.push(
-                            NoiseSource::flicker_with_frequency_exponent(
-                                bjt.name.clone(),
-                                bi,
-                                ei,
-                                coefficient,
-                                afn,
-                                bfn,
-                                ibe.abs(),
-                            )
-                            .with_identity(
-                                crate::analysis::NoiseSourceIdentity::mechanism(&bjt.name, "FN"),
-                            ),
-                        );
-                    }
-                    let (bx, bp, ibep) = model.flicker_ibep;
-                    if ibep != 0.0 {
-                        noise_sources.push(
-                            NoiseSource::flicker_with_frequency_exponent(
-                                bjt.name.clone(),
-                                bx,
-                                bp,
-                                coefficient,
-                                afn,
-                                bfn,
-                                ibep.abs(),
-                            )
-                            .with_identity(
-                                crate::analysis::NoiseSourceIdentity::mechanism(
-                                    &bjt.name, "FN_BEP",
+                    for (mechanism, node_pos, node_neg, current, scale) in model.flicker {
+                        if current != 0.0 && scale > 0.0 {
+                            let coefficient = Self::checked_positive_noise_parameter(
+                                &format!("{}:{mechanism}", bjt.name),
+                                coefficient * scale,
+                            )?;
+                            noise_sources.push(
+                                NoiseSource::flicker_with_frequency_exponent(
+                                    bjt.name.clone(),
+                                    node_pos,
+                                    node_neg,
+                                    coefficient,
+                                    afn,
+                                    bfn,
+                                    current.abs(),
+                                )
+                                .with_identity(
+                                    crate::analysis::NoiseSourceIdentity::mechanism(
+                                        &bjt.name, mechanism,
+                                    ),
                                 ),
-                            ),
-                        );
+                            );
+                        }
                     }
                 }
                 continue;
@@ -4939,6 +4928,8 @@ R2 out 0 1k
         let mut sources = vec![
             crate::analysis::NoiseSource::shot("Q1:IB".to_string(), 1, 0, current),
             crate::analysis::NoiseSource::thermal("R1".to_string(), 1, 0, resistance),
+            crate::analysis::NoiseSource::shot("Q2:IBE".to_string(), 1, 0, current)
+                .with_physical_constants(crate::analysis::noise::NoisePhysicalConstants::VBIC_1_3),
         ];
         let modern_shot = sources[0].spectral_density(1.0, temperature);
         assert_eq!(modern_shot, 2.0 * crate::constants::Q_ELECTRON * current);
@@ -4955,6 +4946,10 @@ R2 out 0 1k
         assert_eq!(
             sources[1].spectral_density(1.0, temperature),
             4.0 * crate::constants::XYCE_K_BOLTZMANN * temperature / resistance
+        );
+        assert_eq!(
+            sources[2].spectral_density(1.0, temperature),
+            2.0 * 1.602189e-19 * current
         );
     }
 
@@ -7201,6 +7196,98 @@ M1 D G S B N W=10u L=1u AS=0 AD=0 PS=0 PD=0
     /// sources must reproduce the official binary on a deck designed to
     /// expose them.
     #[test]
+    fn vbic13_noise_sources_match_xyce710_across_scaling_temperature_and_substrate() {
+        // Independent total and device PSDs from the Xyce 7.10 executable.
+        for (case, deck, output_name, frequencies, total, device) in [
+            (
+                "11-NPN-M3-bep",
+                "* VBIC noise source qualification\nVcc vcc 0 0.1\nRc vcc c 1k\nVb drive 0 DC 0.7 AC 1\nRb drive b 1000\nVth th 0 0\nQ1 c b 0 th vm SW_ET=0 M=3\n.model vm NPN(LEVEL=11 IS=1e-40 IBEI=0 IBCI=0 RCX=10 RCI=2 RBX=5 RBI=3 RE=1 RBP=50 RS=0 GMIN=0 IBEIP=1e-16 ISP=0 TNOM=27 KFN=1e-8 AFN=1.5 BFN=0.8)\n.temp 27\n.options gmin=0\n.noise V(c) Vb DEC 1 1 1000000.0\n.end\n",
+                "c",
+                [1.0, 1000000.0],
+                [5.5741041595232234e-11, 8.991285668942208e-16],
+                [5.574102773780323e-11, 8.8527113788829615e-16],
+            ),
+            (
+                "12-NPN-M3-clip",
+                "* VBIC noise source qualification\nVcc vcc 0 5\nRc vcc c 1k\nVb drive 0 DC 0.78 AC 1\nRb drive b 0.001\nVs s 0 0\nVth th 0 74\nQ1 c b 0 s th vm SW_ET=0 M=3\n.model vm NPN(LEVEL=12 IS=1e-16 IBEI=1e-18 IBCI=2e-17 RCX=10 RCI=60 RBX=100 RBI=400 RE=2 RBP=40 RS=20 GMIN=0 IBEIP=0 ISP=0 TNOM=27 IBEN=5e-15 IBCN=5e-15 VEF=10 VER=4 IKF=2e-3 CJE=1e-13 CJC=2e-14 CJEP=1e-13 CJCP=4e-13 VO=2 GAMM=2e-11 HRCF=2 QCO=1e-12 TF=10e-12 TR=100e-12 RTH=1000 TMAXCLIP=100 XRCI=1.5)\n.temp 27\n.options gmin=0\n.noise V(c) Vb DEC 1 100000.0 10000000.0\n.end\n",
+                "c",
+                [100000.0, 10000000.0],
+                [2.632131838494334e-18, 5.768957373961627e-19],
+                [2.624290036132224e-18, 5.737362532166412e-19],
+            ),
+            (
+                "12-PNP-M3-substrate",
+                "* VBIC noise source qualification\nVcc vcc 0 -0.1\nRc vcc c 1k\nVb drive 0 DC -0.7 AC 1\nRb drive b 1000\nVss supply 0 0.2\nRsub supply s 1k\nVth th 0 0\nQ1 c b 0 s th vm SW_ET=0 M=3\n.model vm PNP(LEVEL=12 IS=1e-40 IBEI=0 IBCI=0 RCX=10 RCI=2 RBX=5 RBI=3 RE=1 RBP=30 RS=50 GMIN=0 IBEIP=0 ISP=1e-15 TNOM=27 WSP=0.6 IKP=1e-3 CJCP=1p)\n.temp 27\n.options gmin=0\n.noise V(s) Vb DEC 1 1000.0 10000000.0\n.end\n",
+                "s",
+                [1000.0, 10000000.0],
+                [2.80802719511406e-17, 2.5038565655801452e-17],
+                [6.047645119144407e-18, 5.331328104397062e-18],
+            ),
+            (
+                "11-PNP-M3-reverse",
+                "* VBIC noise source qualification\nVcc vcc 0 0.7\nRc vcc c 1k\nVb drive 0 DC 0 AC 1\nRb drive b 1000\nVth th 0 0\nQ1 c b 0 th vm SW_ET=0 M=3\n.model vm PNP(LEVEL=11 IS=1e-16 IBEI=0 IBCI=0 RCX=10 RCI=2 RBX=5 RBI=3 RE=1 RBP=0 RS=0 GMIN=0 IBEIP=0 ISP=0 TNOM=27)\n.temp 27\n.options gmin=0\n.noise V(c) Vb DEC 1 1000.0 10000000.0\n.end\n",
+                "c",
+                [1000.0, 10000000.0],
+                [8.639766016175843e-18, 8.639766016175843e-18],
+                [4.7087138921057555e-20, 4.7087138921057555e-20],
+            ),
+        ] {
+            let netlist = Netlist::parse(deck).unwrap();
+            let engine = xyce_engine().resolved_for_netlist(&netlist);
+            let circuit = engine.build_circuit(&netlist).unwrap();
+            let output = circuit.get_node_by_name(output_name).unwrap();
+            let results = engine
+                .run_noise_with_input_source(&netlist, output, None, "Vb", &frequencies, 300.15)
+                .unwrap();
+            for (index, point) in results.iter().enumerate() {
+                let device_total: f64 = point
+                    .contributions
+                    .iter()
+                    .filter(|source| source.identity.device.eq_ignore_ascii_case("Q1"))
+                    .map(|source| source.output_contribution)
+                    .sum();
+                for (label, actual, expected) in [
+                    ("total", point.output_noise_density, total[index]),
+                    ("DNO(Q1)", device_total, device[index]),
+                ] {
+                    assert!(
+                        (actual - expected).abs() < 2e-6 * expected.abs().max(1e-30),
+                        "{case} {label} at {} Hz: {actual:e} != {expected:e}",
+                        point.frequency
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn vbic13_intrinsic_and_extrinsic_flicker_match_xyce710() {
+        for (level, wbe, expected) in [
+            (11, 0, 2.4510522096655873e-8),
+            (11, 1, 2.4649264460771407e-8),
+            (12, 0, 2.4510522097547368e-8),
+            (12, 1, 2.4649264461667945e-8),
+        ] {
+            let substrate = if level == 12 { " 0" } else { "" };
+            let netlist = Netlist::parse(&format!(
+                "VBIC B-E flicker oracle\nVcc vcc 0 3\nRc vcc c 1k\nVb drive 0 DC 0.7 AC 1\nRb drive b 1k\nQ1 c b 0{substrate} vm SW_ET=0\n\
+                 .model vm NPN(LEVEL={level} WBE={wbe} KFN=1e-8 AFN=1 BFN=1 IS=1e-16 IBEI=1e-18 IBCI=1e-18 RCX=10 RCI=2 RBX=5 RBI=3 RE=1 RBP=0 RS=0 GMIN=0 IBEIP=0 ISP=0 TNOM=27)\n.temp 27\n.options gmin=0\n.end\n"
+            )).unwrap();
+            let engine = Engine::default().resolved_for_netlist(&netlist);
+            let circuit = engine.build_circuit(&netlist).unwrap();
+            let output = circuit.get_node_by_name("c").unwrap();
+            let result = engine
+                .run_noise_with_input_source(&netlist, output, None, "Vb", &[1.0], 300.15)
+                .unwrap();
+            let actual = result[0].output_noise_density;
+            assert!(
+                (actual - expected).abs() < 2e-7 * expected,
+                "{level} WBE={wbe}: {actual:e} != {expected:e}"
+            );
+        }
+    }
+
+    #[test]
     fn vbic_parasitic_resistance_noise_matches_the_ngspice46_oracle() {
         let netlist = Netlist::parse(RB_NOISE_DECK).expect("deck parses");
         let engine = Engine::default().resolved_for_netlist(&netlist);
@@ -7253,6 +7340,34 @@ M1 D G S B N W=10u L=1u AS=0 AD=0 PS=0 PD=0
     /// i.e. an effective coefficient of `KFN·m^(1−AFN)` on the m-folded
     /// junction current. The regression deck only exercises AFN=1 (where m
     /// cancels), so the folding is pinned here at AFN≠1.
+    #[test]
+    fn ngspice_vbic_flicker_keeps_its_current_floor_and_signed_exponents() {
+        // vbicnoise.c: M*KFN*max(abs(I/M), 1e-38)^AFN/f^BFN.
+        for (afn, kfn) in [(0.0, 1e-20), (-1.0, 1e-100)] {
+            let sources = collected_noise_sources_for_deck(&format!(
+                "VBIC zero-current flicker\nVc c 0 0\nVb b 0 0\nQ1 c b 0 0 vm M=3\n\
+                 .model vm NPN(LEVEL=4 KFN={kfn} AFN={afn} BFN=-0.5 IBEI=0 IBCI=0 IBEIP=0 ISP=0 RCX=1 RCI=1 RBX=1 RBI=1 RE=1 RS=1 RBP=1)\n.end\n"
+            ));
+            for name in ["FN", "FN_BEP"] {
+                let source = sources
+                    .iter()
+                    .find(|source| source.identity.mechanism.as_deref() == Some(name))
+                    .unwrap();
+                let expected = 3.0 * kfn * (1e-38_f64).powf(afn) * 2.0;
+                let actual = source.spectral_density(4.0, 300.15);
+                assert!(
+                    (actual - expected).abs() < 1e-12 * expected,
+                    "{name}, AFN={afn}: {actual:e} != {expected:e}"
+                );
+            }
+            assert!(
+                !sources
+                    .iter()
+                    .any(|source| source.identity.mechanism.as_deref() == Some("FN_BEX"))
+            );
+        }
+    }
+
     #[test]
     fn vbic_flicker_source_follows_vbicnoise_multiplicity_folding() {
         let deck = "\

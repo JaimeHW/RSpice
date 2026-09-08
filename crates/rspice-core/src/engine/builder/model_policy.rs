@@ -675,7 +675,7 @@ pub(super) fn validate_bjt_model_level(
 
     for name in [
         "TCRTH", "TMINCLIP", "TMAXCLIP", "AVCX1", "AVCX2", "TAVCX", "MCX", "MAXEXP", "TCVEF",
-        "TCVER",
+        "TCVER", "KFN", "AFN", "BFN",
     ] {
         let authored = params.contains_key(name)
             || expr_params
@@ -685,9 +685,22 @@ pub(super) fn validate_bjt_model_level(
         if !authored {
             continue;
         }
-        if !level.is_some_and(|value| value == 11.0 || value == 12.0) {
+        let noise_parameter = matches!(name, "KFN" | "AFN" | "BFN");
+        let supported = level.is_some_and(|value| {
+            if noise_parameter {
+                is_native_vbic_bjt_level(value)
+            } else {
+                value == 11.0 || value == 12.0
+            }
+        });
+        if !supported {
             return Err(SimulationError::Circuit(format!(
-                "BJT '{element_name}': model '{model}' parameter {name} requires native VBIC 1.3 LEVEL=11 or LEVEL=12"
+                "BJT '{element_name}': model '{model}' parameter {name} requires {}",
+                if noise_parameter {
+                    "a native VBIC model"
+                } else {
+                    "native VBIC 1.3 LEVEL=11 or LEVEL=12"
+                }
             )));
         }
         let valid = params.get(name).is_some_and(|value| {
@@ -695,9 +708,12 @@ pub(super) fn validate_bjt_model_level(
                 && match name {
                     "TMINCLIP" => (-250.0..=27.0).contains(value),
                     "TMAXCLIP" => (27.0..=1000.0).contains(value),
-                    "AVCX1" | "AVCX2" => *value >= 0.0,
+                    "AVCX1" | "AVCX2" | "KFN" => *value >= 0.0,
                     "MCX" => *value > 0.0 && *value <= 1.0,
                     "MAXEXP" => *value > 0.0,
+                    "AFN" | "BFN" => {
+                        !level.is_some_and(|level| level == 11.0 || level == 12.0) || *value > 0.0
+                    }
                     _ => true,
                 }
         });
@@ -707,9 +723,11 @@ pub(super) fn validate_bjt_model_level(
                 match name {
                     "TMINCLIP" => " in [-250, 27] Celsius",
                     "TMAXCLIP" => " in [27, 1000] Celsius",
-                    "AVCX1" | "AVCX2" => " greater than or equal to zero",
+                    "AVCX1" | "AVCX2" | "KFN" => " greater than or equal to zero",
                     "MCX" => " in (0, 1]",
                     "MAXEXP" => " greater than zero",
+                    "AFN" | "BFN" if level.is_some_and(|level| level == 11.0 || level == 12.0) =>
+                        " greater than zero",
                     _ => "",
                 }
             )));

@@ -905,7 +905,7 @@ pub struct Bjt {
     pub wsp: Value,
     /// Parasitic forward emission coefficient (NFP)
     pub nfp: Value,
-    /// Parasitic knee current (IKP)
+    /// Nominal parasitic knee current (IKP), before AREA/M scaling
     pub ikp: Value,
     /// Ideal parasitic B-E saturation current (IBEIP)
     pub ibeip: Value,

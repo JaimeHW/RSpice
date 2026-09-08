@@ -763,6 +763,64 @@ fn vbic13_self_heating_switch_matches_xyce710_and_grounded_thermal_pins() {
 }
 
 #[test]
+fn vbic_parasitic_high_injection_scaling_matches_xyce710() {
+    for (multiplier, expected) in [(1, 8.470381112623551e-6), (3, 1.7782090999422936e-5)] {
+        let netlist = Netlist::parse(&format!(
+            "VBIC parasitic knee-current scaling\nVcc vcc 0 0.1\nRc vcc c 1k\nVb drive 0 0.7\nRb drive b 1k\nVss supply 0 -0.2\nRsub supply s 1k\nVth th 0 0\nQ1 c b 0 s th vm SW_ET=0 M={multiplier}\n\
+             .model vm NPN(LEVEL=12 IS=1e-40 IBEI=0 IBCI=0 RCX=10 RCI=2 RBX=5 RBI=3 RE=1 RBP=30 RS=50 GMIN=0 IBEIP=0 ISP=1e-15 TNOM=27 WSP=0.6 IKP=1e-3 CJCP=1p)\n.temp 27\n.options gmin=0\n.end\n"
+        )).unwrap();
+        let result = Engine::default().run_dc_op(&netlist).unwrap();
+        let actual = result.branch_current_named("Vss").unwrap();
+        assert!(
+            (actual - expected).abs() < 2e-7 * expected,
+            "M={multiplier}: {actual:e} != {expected:e}"
+        );
+    }
+}
+
+#[test]
+fn vbic_noise_parameters_require_finite_values_in_the_model_domain() {
+    for level in [4, 9, 11, 12, 13] {
+        for parameter in ["KFN=-1", "KFN=\"noisy\"", "AFN={1/0}"] {
+            let error = build(&op_deck(&format!(
+                ".model qmod NPN(LEVEL={level} {parameter})"
+            )))
+            .expect_err("invalid noise parameters must not silently select defaults");
+            assert!(
+                error
+                    .to_string()
+                    .contains(parameter.split('=').next().unwrap())
+            );
+        }
+        build(&op_deck(&format!(
+            ".model qmod NPN(LEVEL={level} KFN=0 AFN=1e-15 BFN=1e-15)"
+        )))
+        .unwrap();
+    }
+    for level in [4, 9, 13] {
+        build(&op_deck(&format!(
+            ".model qmod NPN(LEVEL={level} KFN=1e-20 AFN=0 BFN=-0.5)"
+        )))
+        .unwrap();
+    }
+    for level in [11, 12] {
+        for parameter in ["AFN=0", "BFN=-0.5"] {
+            build(&op_deck(&format!(
+                ".model qmod NPN(LEVEL={level} {parameter})"
+            )))
+            .expect_err("VBIC 1.3 requires positive noise exponents");
+        }
+    }
+    for level in [0, 1, 2] {
+        let error = build(&op_deck(&format!(
+            ".model qmod NPN(LEVEL={level} KFN=1e-8)"
+        )))
+        .unwrap_err();
+        assert!(error.to_string().contains("native VBIC"));
+    }
+}
+
+#[test]
 fn vbic13_early_voltage_temperature_coefficients_match_xyce710() {
     let engine = Engine::new(SimulationConfig {
         convergence_config: ConvergenceConfig {
