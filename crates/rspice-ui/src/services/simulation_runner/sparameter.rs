@@ -152,19 +152,27 @@ pub fn run_sparameter_analysis_with_source_path_and_abort(
     }
 
     ensure_not_aborted(abort)?;
-    let s = s_param::extract_s_matrix(&netlist, &ports, &frequencies, |driven| {
-        let engine = Engine::new(build_engine_config(driven, None));
-        engine
-            .run_ac_with_abort(driven, &frequencies, abort)
-            .map_err(|error| error.to_string())
-    })
-    .map_err(|error| {
-        if abort.is_aborted() {
-            ServiceRunError::Aborted
-        } else {
-            ServiceRunError::Failure(format!("S-parameter analysis error: {error}"))
+    let engine = Engine::new(build_engine_config(&netlist, None));
+    let run = engine
+        .run_sp_over_grid_with_abort(&netlist, &frequencies, false, abort)
+        .map_err(|error| ServiceRunError::from_core("S-parameter analysis error", error))?;
+    let frequencies = run
+        .scattering
+        .data
+        .iter()
+        .map(|point| point.frequency)
+        .collect::<Vec<_>>();
+    let mut s = vec![vec![Vec::with_capacity(frequencies.len()); num_ports]; num_ports];
+    for (index, point) in run.scattering.data.iter().enumerate() {
+        poll_periodically(abort, index)?;
+        for (row, traces) in s.iter_mut().enumerate() {
+            ensure_not_aborted(abort)?;
+            for (column, trace) in traces.iter_mut().enumerate() {
+                poll_periodically(abort, column)?;
+                trace.push(point.get(row + 1, column + 1));
+            }
         }
-    })?;
+    }
 
     ensure_not_aborted(abort)?;
     if frequencies.is_empty()
@@ -239,10 +247,16 @@ fn inject_configured_ports(
         netlist.elements.push(Element {
             name: source_name.clone(),
             nodes: vec![internal_node.clone(), port.node_neg.clone()],
-            kind: ElementKind::VoltageSource(SourceSpec::DcAc {
-                dc_value: 0.0,
-                ac_magnitude: 0.0,
-                ac_phase: 0.0,
+            kind: ElementKind::VoltageSource(SourceSpec::RfPort {
+                inner: Box::new(SourceSpec::Dc(0.0)),
+                port: rspice_core::netlist::SourceRfPort {
+                    portnum: index + 1,
+                    z0,
+                    power: None,
+                    frequency: None,
+                    phase: None,
+                    reference_plane: Some(port.node_pos.clone()),
+                },
             }),
             provenance: rspice_core::netlist::ElementProvenance::Authored,
         });
@@ -346,6 +360,55 @@ mod tests {
         }
     }
 
+    #[test]
+    fn accepted_model_finish_keeps_every_matrix_trace_and_the_actual_grid() {
+        let model = crate::fixture_root::canonical_temp_dir()
+            .join(format!("rspice-sp-finish-{}.va", uuid::Uuid::new_v4()));
+        std::fs::write(
+            &model,
+            r#"module sp_finish(p,n);
+inout p,n; electrical p,n;
+real conductance;
+analog begin
+    @(initial_step) conductance=0.02;
+    @(final_step) conductance=0.04;
+    if (analysis("ac") && !analysis("static")) $finish(1);
+    I(p,n)<+conductance*V(p,n);
+end
+endmodule"#,
+        )
+        .unwrap();
+        let mut config = two_port_config();
+        config.ports[1].z0 = Some(50.0);
+        let deck = format!(
+            "* Finished SP\nX1 IN OUT sp_finish\n.va \"{}\" sp_finish\n.end\n",
+            model.display().to_string().replace('\\', "/"),
+        );
+        for declared in [false, true] {
+            let source = if declared {
+                deck.replace(
+                    ".end",
+                    "V1 IN 0 AC 1 portnum=1 z0=50\nV2 OUT 0 portnum=2 z0=50\n.end",
+                )
+            } else {
+                deck.clone()
+            };
+            let result = run_sparameter_analysis_with_abort(&source, &config, &NoAbort).unwrap();
+            assert_eq!(result.frequencies, [config.start_freq]);
+            assert_eq!(result.num_ports, 2);
+            for row in 0..2 {
+                for column in 0..2 {
+                    let trace = &result.s[row][column];
+                    assert_eq!(trace.len(), 1);
+                    let expected = if row == column { 0.2 } else { 0.8 };
+                    assert!((trace[0].re - expected).abs() < 1e-10);
+                    assert!(trace[0].im.abs() < 1e-10);
+                }
+            }
+        }
+        std::fs::remove_file(model).unwrap();
+    }
+
     /// A configured port becomes a generator *behind* its reference impedance.
     ///
     /// The earlier form put a bare ideal source across the node pair, which
@@ -362,6 +425,7 @@ mod tests {
         assert_eq!(ports.len(), 2);
         assert_eq!(ports[0].z0, 50.0, "an unset port takes the run's default");
         assert_eq!(ports[1].z0, 75.0, "a port's own z0 wins");
+        assert_eq!(s_param::collect_ports(&netlist).unwrap(), ports);
 
         for (index, port) in ports.iter().enumerate() {
             assert_eq!(port.realization, s_param::PortRealization::Thevenin);
