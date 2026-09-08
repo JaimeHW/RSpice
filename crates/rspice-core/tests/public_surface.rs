@@ -710,7 +710,13 @@ use rspice_core::analysis::harmonic_balance::{
 // `AnalysisResultKind::Pstb`, `ResultPayload::Pstb` and `AnalysisCard::Pstb`
 // are enum variants; `PstbCard::DEFAULT_*` are `pub(crate)` as `PacCard`'s
 // are; the payload re-export joins the existing grouped `pub use`.
-const MAX_PUBLIC_ITEMS: usize = 5019;
+// 2026-09-08, +5 net (5,019 -> 5,024): authenticated PSP preparation adds
+// eight frontend-facing statements, consuming three existing spare slots.
+// The UI calls both Engine::prepare_psp_from_*_with_abort entries and
+// PreparedPsp::{ports, frequencies, run_with_abort}; PreparedPsp and
+// PspAnalysisResult describe that contract, with one grouped re-export.
+// These landed in f9cbfe442 without updating this ceiling.
+const MAX_PUBLIC_ITEMS: usize = 5024;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently
