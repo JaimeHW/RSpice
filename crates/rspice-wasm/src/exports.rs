@@ -209,6 +209,42 @@ mod wasm_tests {
     use crate::js_interop::{js_array_property, js_property};
 
     #[wasm_bindgen_test]
+    fn legacy_itf_scaling_preserves_input_charge_in_wasm() {
+        let vt = 300.15 * 1.380649e-23 / 1.602176634e-19_f64;
+        let forward = 1e-16 * (0.65 / vt).exp_m1();
+        let conductance = 1e-16 / vt * (0.65 / vt).exp();
+        let fraction = forward / (forward + 1e-4);
+        let extra = 3.0 * ((0.65 - 0.72) / 14.4_f64).exp() * fraction.powi(2);
+        let capacitance =
+            1e-9 * (conductance * (1.0 + extra * (3.0 - 2.0 * fraction)) + forward * extra / 14.4);
+        let expected = rspice_core::Complex64::new(
+            -3.0 * (conductance / 100.0 + 1e-16 / vt * ((0.65 - 0.72) / vt).exp()),
+            -3.0 * std::f64::consts::TAU * 1e8 * capacitance,
+        );
+        let mut config = rspice_core::SimulationConfig::default();
+        config.convergence_config.gmin_target = 0.0;
+        let engine = rspice_core::Engine::new(config);
+        for (kind, p) in [("NPN", 1.0), ("PNP", -1.0)] {
+            for instance in ["M=3", "AREA=3", "AREA=1.5 M=2"] {
+                let netlist = rspice_core::Netlist::parse(&format!(
+                    "* Legacy ITF instance scaling\nVc c 0 {}\nVb b 0 PWL(0 {} 20n {}) AC 1 DC {}\nQ1 c b 0 qm {instance}\n\
+                     .model qm {kind}(LEVEL=1 IS=1e-16 BF=100 TF=1n XTF=3 VTF=10 ITF=100u)\n.options gmin=0\n.end\n",
+                    p*0.72,p*0.65,p*0.7,p*0.65
+                )).unwrap();
+                let ac = engine
+                    .run_ac_with_abort(&netlist, &[1e8], &rspice_core::abort_signal::NoAbort)
+                    .unwrap();
+                let slot = ac[0]
+                    .branch_names
+                    .iter()
+                    .position(|name| name.eq_ignore_ascii_case("Vb"))
+                    .unwrap();
+                assert!((ac[0].currents[slot] - expected).norm() < 1e-11 * expected.norm());
+            }
+        }
+    }
+
+    #[wasm_bindgen_test]
     fn vbic_nonpositive_activation_energies_and_signed_sources_match_xyce_in_wasm() {
         for (energy, dc, ac) in [
             (

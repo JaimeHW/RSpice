@@ -124,7 +124,7 @@ impl Bjt {
             }
             arg2 = argtf;
             if self.itf > 0.0 {
-                let temp = transport.ifi / (transport.ifi + self.itf).max(1e-18);
+                let temp = self.legacy_transit_current_fraction(transport.ifi);
                 argtf *= temp * temp;
                 arg2 = argtf * (3.0 - temp - temp);
             }
@@ -167,6 +167,28 @@ impl Bjt {
             capbx: cjc_external * capbx_dep,
             qcs: -substrate_polarity * (self.cjcp * qsub_norm),
             capcs: self.cjcp * capsub_dep,
+        }
+    }
+
+    /// I / (I + ITF * AREA * M), with I already in instance current units.
+    /// Normalize the sum instead of imposing an absolute current floor.
+    fn legacy_transit_current_fraction(&self, current: Value) -> Value {
+        let scale = self.instance_scale();
+        let knee = self.itf * scale;
+        if knee.is_normal() {
+            let normalization = current.max(knee);
+            let normalized_current = current / normalization;
+            normalized_current / (normalized_current + knee / normalization)
+        } else {
+            // Avoid overflow/underflow in the scaled knee itself. When the
+            // product overflows both factors exceed one, so these divisions
+            // only decrease the finite current and cannot overflow early.
+            let ratio = (current / self.itf) / scale;
+            if ratio > 1.0 {
+                1.0 / (1.0 + 1.0 / ratio)
+            } else {
+                ratio / (1.0 + ratio)
+            }
         }
     }
 
@@ -589,6 +611,108 @@ impl Bjt {
 mod tests {
     use super::*;
     use std::collections::HashMap;
+
+    #[test]
+    fn legacy_itf_charge_and_derivatives_obey_instance_scaling() {
+        for (isat, knee, scales) in [
+            (1e-16, 1e-4, &[1e-12, 0.1, 3.0, 1e12][..]),
+            (1e-26, 1e-26, &[0.1, 3.0, 1e12][..]),
+        ] {
+            for p in [1.0, -1.0] {
+                let mut unit = if p > 0.0 {
+                    Bjt::new_npn("q".into(), 1, 2, 0)
+                } else {
+                    Bjt::new_pnp("q".into(), 1, 2, 0)
+                }
+                .with_params(&HashMap::from([
+                    ("LEVEL".into(), 1.0),
+                    ("IS".into(), isat),
+                    ("TF".into(), 1e-9),
+                    ("XTF".into(), 3.0),
+                    ("VTF".into(), 10.0),
+                    ("ITF".into(), knee),
+                    ("VAF".into(), 40.0),
+                    ("VAR".into(), 10.0),
+                ]));
+                unit.set_junction_gmin(0.0);
+                for &scale in scales {
+                    for parameter in ["M", "AREA"] {
+                        let scaled = unit
+                            .clone()
+                            .with_instance_params(&[(parameter.into(), scale)]);
+                        for (vbe, vbc) in [(0.03, -0.1), (0.7, -4.3), (0.7, 0.2)] {
+                            let reference = unit.legacy_transient_charge_state_with_vbx(
+                                p * vbe,
+                                p * vbc,
+                                0.0,
+                                0.0,
+                            );
+                            let charge = scaled.legacy_transient_charge_state_with_vbx(
+                                p * vbe,
+                                p * vbc,
+                                0.0,
+                                0.0,
+                            );
+                            for (actual, expected) in [
+                                (charge.qbe, reference.qbe),
+                                (charge.capbe, reference.capbe),
+                                (charge.capbe_vbc, reference.capbe_vbc),
+                            ] {
+                                assert!(
+                                    (actual / scale - expected).abs() < 1e-12 * expected.abs(),
+                                    "IS={isat} {parameter}={scale} p={p} bias=({vbe},{vbc}): {actual:e} != {expected:e} * scale"
+                                );
+                            }
+                            let h = 1e-7;
+                            for (column, derivative) in
+                                [charge.capbe, charge.capbe_vbc].into_iter().enumerate()
+                            {
+                                let mut hi = [p * vbe, p * vbc];
+                                let mut lo = hi;
+                                hi[column] += h;
+                                lo[column] -= h;
+                                let numeric = (scaled
+                                    .legacy_transient_charge_state_with_vbx(hi[0], hi[1], 0.0, 0.0)
+                                    .qbe
+                                    - scaled
+                                        .legacy_transient_charge_state_with_vbx(
+                                            lo[0], lo[1], 0.0, 0.0,
+                                        )
+                                        .qbe)
+                                    / (2.0 * h);
+                                assert!(
+                                    (numeric - derivative).abs() < 2e-6 * derivative.abs(),
+                                    "{parameter}={scale} p={p} column={column}: {derivative:e} != {numeric:e}"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn legacy_itf_fraction_preserves_extreme_current_ratios() {
+        let mut model = Bjt::new_npn("q".into(), 1, 2, 0);
+        for (current, itf, scale, expected) in [
+            (1e308, 1e308, 1.0, 0.5),
+            (1e308, 1e308, 4.0, 0.2),
+            (1e-3, 1e308, 4.0, 2.5e-312),
+            (1e-310, 1e-310, 1.0, 0.5),
+            (1e-310, 1e-310, 0.25, 0.8),
+            (1e-310, 1e-310, 1e-18, 1.0),
+            (0.0, 1e-310, 1e-18, 0.0),
+        ] {
+            model.itf = itf;
+            model.m = scale;
+            let actual = model.legacy_transit_current_fraction(current);
+            assert!(
+                (actual - expected).abs() <= expected.abs() * 1e-12 + f64::from_bits(1),
+                "I={current} ITF={itf} M={scale}: {actual} != {expected}"
+            );
+        }
+    }
 
     #[test]
     fn vbic_signed_transport_and_charge_jacobian_cover_reverse_bias_and_rolloff_floor() {

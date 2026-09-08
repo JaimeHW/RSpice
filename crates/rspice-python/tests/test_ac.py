@@ -27,6 +27,29 @@ FC = 1.0 / (2 * math.pi * 1e3 * 1e-6)  # RC corner: 159.155 Hz
 
 
 class TestAcBasics:
+    @pytest.mark.parametrize("instance", ["M=3", "AREA=3", "AREA=1.5 M=2"])
+    @pytest.mark.parametrize("kind, polarity", [("NPN", 1), ("PNP", -1)])
+    def test_legacy_itf_scaling_preserves_input_charge(self, instance, kind, polarity):
+        netlist = rspice.Netlist.parse_spice(f"""* Legacy ITF instance scaling
+Vc c 0 {polarity*.72}
+Vb b 0 PWL(0 {polarity*.65} 20n {polarity*.7}) AC 1 DC {polarity*.65}
+Q1 c b 0 qm {instance}
+.model qm {kind}(LEVEL=1 IS=1e-16 BF=100 TF=1n XTF=3 VTF=10 ITF=100u)
+.options gmin=0
+.end
+""")
+        engine = rspice.Engine(rspice.SimulationConfig(convergence=rspice.ConvergenceConfig(gmin_target=0)))
+        result = engine.run_ac(netlist, [1e8])
+        # Independent GP charge derivative using the SI thermal voltage.
+        vt = 300.15*1.380649e-23/1.602176634e-19
+        forward = 1e-16*math.expm1(.65/vt)
+        conductance = 1e-16/vt*math.exp(.65/vt)
+        fraction = forward/(forward+1e-4)
+        extra = 3*math.exp((.65-.72)/14.4)*fraction**2
+        capacitance = 1e-9*(conductance*(1+extra*(3-2*fraction))+forward*extra/14.4)
+        expected = complex(-3*(conductance/100+1e-16/vt*math.exp((.65-.72)/vt)), -3*2*math.pi*1e8*capacitance)
+        assert abs(result.branch_current_complex("Vb")[0]-expected) < 1e-11*abs(expected)
+
     @pytest.mark.parametrize("energy, dc, ac", [
         (0.0, [-1.8759381199128295e-05, -5.974425036580707e-06, 5.759162012220747e-06], [complex(7.475710679968615e-07, -7.2352565019688054e-06), complex(5.679107136074598e-07, 1.1568126579812277e-05), complex(-3.0678023251495346e-07, -5.895892422355515e-07)]),
         (-0.1, [-1.3203041813337315e-05, -4.205786531991028e-06, 4.052895950577105e-06], [complex(5.723237566711971e-07, -7.6979104375324e-06), complex(5.244002563240605e-07, 1.2426635278632646e-05), complex(-2.559863313225597e-07, -6.704596659558985e-07)]),

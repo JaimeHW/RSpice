@@ -1513,7 +1513,7 @@ fn parse_pwl_timing_options(
     let mut repeat_from = None;
     loop {
         skip_commas(stream);
-        if matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+        if source_numeric_args_end(stream, false) {
             break;
         }
         let TokenKind::Ident(key) = &stream.peek().kind else {
