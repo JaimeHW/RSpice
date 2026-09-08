@@ -217,6 +217,20 @@ fn circular_time_features_preserve_the_complete_rc_waveform() {
 
 #[test]
 fn bounded_tangent_compositions_preserve_the_complete_rc_waveform() {
+    check_bounded_compositions(0..=1);
+}
+
+#[test]
+fn bounded_quotient_compositions_preserve_the_complete_rc_waveform() {
+    check_bounded_compositions(2..=3);
+}
+
+#[test]
+fn bounded_power_compositions_preserve_the_complete_rc_waveform() {
+    check_bounded_compositions(4..=4);
+}
+
+fn check_bounded_compositions(cases: std::ops::RangeInclusive<usize>) {
     let rate = std::f64::consts::TAU * 64.0 * F0;
     let period = 1.0 / (128.0 * F0);
     let tau = R * C;
@@ -224,7 +238,7 @@ fn bounded_tangent_compositions_preserve_the_complete_rc_waveform() {
     let initial = bias - rate * tau + rate * period / -(-period / tau).exp_m1();
     let count = 131_072;
     // Integrate a smooth ramp between the one-sided limits at the tanh jump.
-    let (reference, _) = periodic_rc_convolution(period, tau, count, |index| {
+    let (tanh_reference, _) = periodic_rc_convolution(period, tau, count, |index| {
         if index == 0 {
             -1.0
         } else if index == count {
@@ -235,13 +249,43 @@ fn bounded_tangent_compositions_preserve_the_complete_rc_waveform() {
                 .tanh()
         }
     });
-    for function in ["atan", "tanh"] {
+    let (reciprocal_reference, _) = periodic_rc_convolution(period, tau, count, |index| {
+        if index == 0 || index == count {
+            std::f64::consts::FRAC_PI_2
+        } else {
+            (1.0 / (bias + std::f64::consts::PI * index as f64 / count as f64).cos()).atan()
+        }
+    });
+    let (power_reference, power_mean) = periodic_rc_convolution(period, tau, count, |index| {
+        if index == 0 || index == count {
+            1.0
+        } else {
+            (bias + std::f64::consts::PI * index as f64 / count as f64)
+                .tan()
+                .powi(2)
+                .tanh()
+        }
+    });
+    for (expression, kind) in [
+        ("atan(tan(2*pi*64meg*time+0.1))", 0),
+        ("tanh(tan(2*pi*64meg*time+0.1))", 1),
+        ("atan(sin(2*pi*64meg*time+0.1)/cos(2*pi*64meg*time+0.1))", 0),
+        ("atan(1/cos(2*pi*64meg*time+0.1))", 2),
+        ("tanh(tan(2*pi*64meg*time+0.1)^2)", 3),
+    ]
+    .into_iter()
+    .enumerate()
+    .filter_map(|(index, case)| cases.contains(&index).then_some(case))
+    {
+        // The squared source has a 0.61 V offset; its absolute comparison
+        // uses 10 uV at the requested 1e-4 relative tolerance.
+        let tolerance = if kind == 3 { 1e-5 } else { 1e-6 };
         let netlist = Netlist::parse(&format!(
-            "bounded tangent forcing\n.options reltol=1e-4 vntol=1e-8\nB1 in 0 V={function}(tan(2*pi*64meg*time+0.1))\nR1 in out {R}\nC1 out 0 {C}\n.end\n"
+            "bounded tangent forcing\n.options reltol=1e-4 vntol=1e-8\nB1 in 0 V={expression}\nR1 in out {R}\nC1 out 0 {C}\n.end\n"
         )).unwrap();
         let analysis = Engine::default()
             .run_pss_with_abort(&netlist, PssConfig::new(F0).with_tstab_periods(0), &NoAbort)
-            .unwrap_or_else(|error| panic!("{function}: {error}"));
+            .unwrap_or_else(|error| panic!("{expression}: {error}"));
         let result = &analysis.result;
         let output = result
             .node_names
@@ -250,25 +294,49 @@ fn bounded_tangent_compositions_preserve_the_complete_rc_waveform() {
             .unwrap();
         for (&time, &actual) in result.time.iter().zip(&result.waveforms[output].values) {
             let elapsed = (rate * time + 0.1 - bias).rem_euclid(std::f64::consts::PI) / rate;
-            let expected = if function == "atan" {
+            let expected = if kind == 0 {
                 let decay = (-elapsed / tau).exp_m1();
                 initial * (1.0 + decay) - bias * decay + rate * (elapsed + tau * decay)
             } else {
+                let reference = match kind {
+                    1 => &tanh_reference,
+                    2 => &reciprocal_reference,
+                    _ => &power_reference,
+                };
                 let position = elapsed / period * count as f64;
                 let left = (position as usize).min(count - 1);
-                reference[left] + (position - left as f64) * (reference[left + 1] - reference[left])
+                let interpolated = reference[left]
+                    + (position - left as f64) * (reference[left + 1] - reference[left]);
+                if kind == 2 {
+                    // The reciprocal forcing changes sign each half-period.
+                    // Convert the positive forcing's periodic solution into
+                    // its anti-periodic solution using the exact RC decay.
+                    let anti_initial =
+                        -reference[0] * -(-period / tau).exp_m1() / (1.0 + (-period / tau).exp());
+                    let positive =
+                        interpolated + (anti_initial - reference[0]) * (-elapsed / tau).exp();
+                    if (rate * time + 0.1 - bias).rem_euclid(std::f64::consts::TAU)
+                        < std::f64::consts::PI
+                    {
+                        positive
+                    } else {
+                        -positive
+                    }
+                } else {
+                    interpolated
+                }
             };
             assert!(
-                (actual - expected).abs() < 1e-6,
-                "{function}, t={time:e}: {actual:e} versus {expected:e}"
+                (actual - expected).abs() < tolerance,
+                "{expression}, t={time:e}: {actual:e} versus {expected:e}"
             );
         }
         assert!(
-            result.waveforms[output]
-                .dc(&result.time, result.period)
-                .abs()
-                < 1e-6,
-            "{function}"
+            (result.waveforms[output].dc(&result.time, result.period)
+                - if kind == 3 { power_mean } else { 0.0 })
+            .abs()
+                < tolerance,
+            "{expression}"
         );
     }
 }

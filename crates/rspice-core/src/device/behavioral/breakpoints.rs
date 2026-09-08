@@ -838,6 +838,28 @@ mod tests {
     }
 
     #[test]
+    fn bounded_quotient_and_power_coordinates_retain_poles() {
+        for scale in [1e-30, 1.0, 1e300] {
+            let phase = format!("6*pi*(time/{scale:e})+0.1");
+            for expression in [
+                format!("atan(1/cos({phase}))"),
+                format!("atan(sin({phase})/cos({phase}))"),
+                format!("tanh(tan({phase})^2)"),
+            ] {
+                let events = collect(&sources(&expression), scale, 512, true).unwrap();
+                for index in 0..6 {
+                    let time = ((index as Value + 0.5) * std::f64::consts::PI - 0.1)
+                        / (6.0 * std::f64::consts::PI)
+                        * scale;
+                    assert!(events.iter().any(|event|
+                        (event - time).abs() <= 32.0 * Value::EPSILON * time.abs()),
+                        "{expression}: missing internal pole {time:e}: {events:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
     fn regular_quotient_domains_are_subdivided_before_isolating_features() {
         for scale in [1e-30, 1.0, 1e300] {
             let phase = format!("6*pi*(time/{scale:e})+0.1");
@@ -1031,15 +1053,13 @@ mod tests {
             .is_ok()
         );
         assert!(collect(&sources("sin(time)/0"), 8.0, 256, true).is_ok());
-        for expression in ["sin(time)/(time-0.5)", "sin(time)/(1e-300*time)"] {
-            assert!(
-                matches!(
-                    collect(&sources(expression), 1.0, 256, true),
-                    Err(BehavioralBreakpointError::Invalid(_))
-                ),
-                "{expression}"
-            );
-        }
+        // Internal pole geometry is available independently of whether the
+        // completed physical source can obtain a finite bound.
+        assert!(collect(&sources("sin(time)/(time-0.5)"), 1.0, 256, true).is_ok());
+        assert!(matches!(
+            collect(&sources("sin(time)/(1e-300*time)"), 1.0, 256, true),
+            Err(BehavioralBreakpointError::Invalid(_) | BehavioralBreakpointError::Resource(_))
+        ));
         let source = sources(&format!("cos(time/({coordinate}))"));
         let mut manager = BreakpointManager::new();
         assert!(matches!(

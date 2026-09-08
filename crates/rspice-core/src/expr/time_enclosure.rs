@@ -592,6 +592,25 @@ impl Dual {
         if !self.value.is_finite() && !other.value.is_finite() {
             return None;
         }
+        if other.value.contains(0.0) {
+            // A quotient crossing zero is defined by the VM (zero at the
+            // denominator's exact zero), but it has no finite continuous
+            // enclosure. Preserve that distinction for bounded outer
+            // functions without admitting an indeterminate infinity ratio.
+            return Some(Self {
+                value: TimeInterval::WHOLE,
+                slope: TimeInterval::WHOLE,
+                center: if other.center == 0.0 {
+                    0.0
+                } else {
+                    self.center / other.center
+                },
+                constant: false,
+                continuous: false,
+                roundoff: Value::INFINITY,
+                order: TimeOrder::Unknown,
+            });
+        }
         let value = self.value.div(other.value)?;
         let denominator = other.value.lower.abs().min(other.value.upper.abs());
         Some(Self {
@@ -683,7 +702,10 @@ impl Dual {
                 exponent.value.lower,
             )));
         }
-        if !self.value.is_finite() || !exponent.value.is_finite() {
+        // Finite exponents have defined magnitude powers at infinite bases.
+        // Negative-base projection below still rejects invalid real domains
+        // and indeterminate products such as infinity times a zero phase.
+        if !exponent.value.is_finite() {
             return None;
         }
         // A bounded exact constant can arise from a time-dependent spelling
@@ -1582,6 +1604,10 @@ mod tests {
                     format!("atan(-tan({phase})/2)"),
                     format!("asin(tan({phase}))"),
                     format!("atan(exp(1000+sin({phase})))"),
+                    format!("atan(1/cos({phase}))"),
+                    format!("atan(sin({phase})/cos({phase}))"),
+                    format!("tanh(tan({phase})^2)"),
+                    format!("tanh(pow(tan({phase}),2))"),
                 ] {
                     let program = compile(&parse_expression_strict(&expression).unwrap());
                     let domain = TimeEnclosure::new(&program, stop)
@@ -1747,7 +1773,7 @@ mod tests {
     }
 
     #[test]
-    fn constant_bounds_follow_the_vm_and_singular_or_stateful_bounds_are_unavailable() {
+    fn constant_bounds_follow_the_vm_and_stateful_bounds_are_unavailable() {
         let expression = parse_expression_strict("sin(0.3)+2/7+temper").unwrap();
         let program = compile(&expression);
         let context = Context::transient(&[], &[], 0.0).with_temperature(-10.0);
@@ -1770,7 +1796,6 @@ mod tests {
             "v(out)+cos(time)",
             "sdt(time)",
             "spice_pulse(0,1,0,1,1,1,4)",
-            "1/(time-0.5)",
         ] {
             let program = compile(&parse_expression_strict(expression).unwrap());
             assert!(
@@ -1786,6 +1811,18 @@ mod tests {
                 "{expression}"
             );
         }
+        let program = compile(&parse_expression_strict("1/(time-0.5)").unwrap());
+        let domain = TimeEnclosure::new(&program, 1.0)
+            .unwrap()
+            .evaluate(
+                TimeInterval {
+                    lower: 0.0,
+                    upper: 1.0,
+                },
+                &context,
+            )
+            .unwrap();
+        assert!(!domain.value.is_finite() && !domain.continuous);
         let program = compile(&parse_expression_strict("0*(1e308*time)").unwrap());
         let domain = TimeEnclosure::new(&program, 2.0).unwrap().evaluate(
             TimeInterval {
@@ -2009,7 +2046,7 @@ mod tests {
                     },
                     &context
                 )
-                .is_none()
+                .is_some_and(|domain| !domain.value.is_finite() && !domain.continuous)
         );
         for index in 0..32 {
             let lower = index as Value / 32.0 * stop;

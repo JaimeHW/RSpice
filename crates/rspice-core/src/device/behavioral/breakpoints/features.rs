@@ -177,11 +177,11 @@ impl EventSchedule<'_> {
             } else {
                 vm.execute(&program, &point)
             };
-            if value.is_finite() {
+            if !value.is_nan() {
                 Ok(value)
             } else {
                 Err(BehavioralBreakpointError::Invalid(
-                    "a time-coordinate value is non-finite",
+                    "a time-coordinate value is undefined",
                 ))
             }
         };
@@ -221,7 +221,7 @@ impl EventSchedule<'_> {
                 subdivide_time_domain(interval, &mut pending)?;
                 continue;
             };
-            if !domain.value.is_finite() {
+            if !domain.value.is_finite() && (identical_difference.is_some() || operands.is_some()) {
                 let finite_operands = if let Some((left, right)) = &mut operand_bounds {
                     // The shared cost covers both operand programs.
                     charge()?;
@@ -238,6 +238,10 @@ impl EventSchedule<'_> {
                     continue;
                 }
             }
+            // Defined infinite coordinates can locate internal features of
+            // a finite outer source. Only arithmetic identities/comparisons
+            // above require finite operands; complete forcing qualification
+            // separately enforces a finite physical source waveform.
             let (value, slope) = (domain.value, domain.slope);
             if identical_difference.is_some()
                 || !value.contains(target)
@@ -345,7 +349,7 @@ impl EventSchedule<'_> {
                     || right == target
                     || (left < target) != (right < target)
                 {
-                    // A finite crossing between adjacent VM timestamps is
+                    // A defined crossing between adjacent VM timestamps is
                     // an observable feature even at a nonsmooth power branch.
                     // Retain both sides; no smooth derivative is certified.
                     roots.insert(interval.lower.to_bits());
@@ -377,13 +381,15 @@ impl EventSchedule<'_> {
     ) -> Result<(), BehavioralBreakpointError> {
         let program = compile_time_expression(phase, context);
         let Some(bounds) = TimeEnclosure::new(&program, self.tstop).and_then(|mut bounds| {
-            bounds.evaluate(
-                TimeInterval {
-                    lower: 0.0,
-                    upper: self.tstop,
-                },
-                context,
-            )
+            bounds
+                .evaluate(
+                    TimeInterval {
+                        lower: 0.0,
+                        upper: self.tstop,
+                    },
+                    context,
+                )
+                .filter(|domain| domain.value.is_finite())
         }) else {
             if function == Function::Tan {
                 // sin(phase-atan(level)) locates every tangent level without
@@ -413,11 +419,6 @@ impl EventSchedule<'_> {
             );
         };
         let range = bounds.value;
-        if !range.is_finite() {
-            return Err(BehavioralBreakpointError::Invalid(
-                "a nonlinear phase range is not finite",
-            ));
-        }
         let cycle = if function == Function::Tan {
             std::f64::consts::PI
         } else {
