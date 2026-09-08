@@ -16,8 +16,6 @@ fn extrema_values_and_derivatives_ignore_inactive_nan_and_infinite_slopes() {
             (expression.to_string(), p),
             (format!("ddx({expression},V(p))"), 1.0),
             (format!("ddx({expression},V(q))"), 0.0),
-            // Native third intrinsic derivatives remain a separate implementation gap.
-            #[cfg(not(feature = "native"))]
             (format!("ddx(ddx({expression},V(q)),V(q))"), 0.0),
         ] {
             let fixture = DeviceFixture::compile(&format!(

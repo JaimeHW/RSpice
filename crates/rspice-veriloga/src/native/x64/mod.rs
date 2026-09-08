@@ -1342,12 +1342,19 @@ mod tests {
         let metadata = artifact.metadata.clone();
         let mut hir = artifact.hir.clone();
         let mut mir = artifact.mir.clone();
-        let root = usize::from(mir.equations[0].expression.id);
+        let hir_root = usize::from(hir.contributions[0].expression.id);
+        let mir_root = usize::from(mir.equations[0].expression.id);
         let unsupported = HirExprKind::StringLiteral {
             value: "unsupported-native-expression".into(),
         };
-        hir.expressions[root].kind = unsupported.clone();
-        mir.expressions[root].kind = unsupported;
+        hir.expressions[hir_root].kind = unsupported.clone();
+        let crate::canonical_ir::hir::HirRegion::Contribution(contribution) = &mut hir.body[0]
+        else {
+            panic!("fixture has one structured contribution");
+        };
+        hir.expressions[usize::from(contribution.expression.id)].kind = unsupported.clone();
+        contribution.expression.kind = "string".into();
+        mir.expressions[mir_root].kind = unsupported;
         hir.contributions[0].expression.kind = "string".into();
         mir.equations[0].expression.kind = "string".into();
         CanonicalIrArtifact::from_parts(metadata, hir, mir)
@@ -3955,7 +3962,7 @@ endmodule
     }
 
     #[test]
-    fn compile_model_with_canonical_ir_rejects_unsupported_mir_stamp() {
+    fn compile_model_with_canonical_ir_rejects_unsupported_canonical_stamp() {
         let source = r#"
 `include "disciplines.vams"
 module native_canonical_unsupported(p, n);

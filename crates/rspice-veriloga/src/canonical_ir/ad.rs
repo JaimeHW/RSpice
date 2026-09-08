@@ -878,6 +878,44 @@ fn ddx_direction_liveness(
     }
 }
 
+/// Normalize homogeneous functions without squaring or summing raw operands.
+/// The positive scale is arbitrary: holding it fixed under differentiation
+/// preserves every derivative order and avoids cancelling abs/max derivatives.
+fn normalized_coordinates(
+    left: ValueId,
+    right: ValueId,
+    mut emit: impl FnMut(CfgValueKind) -> ValueId,
+) -> (ValueId, ValueId, ValueId) {
+    let left_abs = emit(CfgValueKind::Unary {
+        op: CfgUnaryOp::Abs,
+        input: left,
+    });
+    let right_abs = emit(CfgValueKind::Unary {
+        op: CfgUnaryOp::Abs,
+        input: right,
+    });
+    let scale = emit(CfgValueKind::Binary {
+        op: CfgBinaryOp::Max,
+        left: left_abs,
+        right: right_abs,
+    });
+    let scale = emit(CfgValueKind::Unary {
+        op: CfgUnaryOp::FreezeDerivative,
+        input: scale,
+    });
+    let left = emit(CfgValueKind::Binary {
+        op: CfgBinaryOp::Div,
+        left,
+        right: scale,
+    });
+    let right = emit(CfgValueKind::Binary {
+        op: CfgBinaryOp::Div,
+        left: right,
+        right: scale,
+    });
+    (scale, left, right)
+}
+
 /// Between remainder discontinuities, d(a % b) = da - trunc(a/b) db.
 /// Express truncation using existing scalar operations, whose derivatives are
 /// zero. The two clipped terms also avoid infinity times a zero sign mask.
@@ -1561,10 +1599,62 @@ impl<'a> ScalarDdxBuilder<'a> {
                     self.push_typed(CfgValueType::Boolean, CfgBinaryOp::Eq, selected, left);
                 self.select_derivative(takes_left, d_left, d_right)
             }
-            other => {
-                debug_assert!(is_predicate(other), "unhandled scalar derivative rule");
-                None
+            CfgBinaryOp::Hypot => {
+                if d_left.is_none() && d_right.is_none() {
+                    return None;
+                }
+                let (_, left, right) =
+                    normalized_coordinates(left, right, |kind| self.push(CfgValueType::Real, kind));
+                let magnitude = self.push_binary(CfgBinaryOp::Hypot, left, right);
+                let from_left = d_left.map(|derivative| {
+                    let factor = self.push_binary(CfgBinaryOp::Div, left, magnitude);
+                    self.push_binary(CfgBinaryOp::Mul, derivative, factor)
+                });
+                let from_right = d_right.map(|derivative| {
+                    let factor = self.push_binary(CfgBinaryOp::Div, right, magnitude);
+                    self.push_binary(CfgBinaryOp::Mul, derivative, factor)
+                });
+                match (from_left, from_right) {
+                    (Some(left), Some(right)) => {
+                        Some(self.push_binary(CfgBinaryOp::Add, left, right))
+                    }
+                    (Some(only), None) | (None, Some(only)) => Some(only),
+                    (None, None) => None,
+                }
             }
+            CfgBinaryOp::Atan2 => {
+                if d_left.is_none() && d_right.is_none() {
+                    return None;
+                }
+                let (scale, left, right) =
+                    normalized_coordinates(left, right, |kind| self.push(CfgValueType::Real, kind));
+                let numerator = match (d_left, d_right) {
+                    (Some(a), Some(b)) => {
+                        let a = self.push_binary(CfgBinaryOp::Mul, a, right);
+                        let b = self.push_binary(CfgBinaryOp::Mul, b, left);
+                        self.push_binary(CfgBinaryOp::Sub, a, b)
+                    }
+                    (Some(a), None) => self.push_binary(CfgBinaryOp::Mul, a, right),
+                    (None, Some(b)) => {
+                        let b = self.push_binary(CfgBinaryOp::Mul, b, left);
+                        self.push_unary(CfgUnaryOp::Neg, b)
+                    }
+                    (None, None) => return None,
+                };
+                let left_square = self.push_binary(CfgBinaryOp::Mul, left, left);
+                let right_square = self.push_binary(CfgBinaryOp::Mul, right, right);
+                let denominator = self.push_binary(CfgBinaryOp::Add, left_square, right_square);
+                let normalized = self.push_binary(CfgBinaryOp::Div, numerator, denominator);
+                Some(self.push_binary(CfgBinaryOp::Div, normalized, scale))
+            }
+            CfgBinaryOp::Eq
+            | CfgBinaryOp::Ne
+            | CfgBinaryOp::Lt
+            | CfgBinaryOp::Le
+            | CfgBinaryOp::Gt
+            | CfgBinaryOp::Ge
+            | CfgBinaryOp::And
+            | CfgBinaryOp::Or => None,
         }
     }
 
@@ -2748,35 +2838,35 @@ impl<'a> AdBuilder<'a> {
                     self.push_typed(CfgValueType::Boolean, CfgBinaryOp::Eq, selected, left);
                 self.select_derivative(takes_left, d_left, d_right, target)
             }
-            // `(a da + b db) / hypot(a, b)`: the gradient is the unit vector
-            // along the operands, written with one division rather than two in
-            // the same shape as the quotient rule above.
-            //
-            // It does not inherit `hypot`'s headroom, and nothing here could:
-            // the products are formed before the divide, so operands large
-            // enough that `hypot` earns its keep overflow this. The alternative
-            // costs a division per lane to move the same limit a few orders,
-            // which is not a trade worth making on every entry of every
-            // Jacobian.
             CfgBinaryOp::Hypot => {
-                let numerator = match (d_left, d_right) {
-                    (Some(d_left), Some(d_right)) => {
-                        let first = self.scale(d_left, left);
-                        let second = self.scale(d_right, right);
-                        self.lane_binary(CfgBinaryOp::Add, first, second, target)
-                    }
-                    (Some(d_left), None) => self.scale(d_left, left),
-                    (None, Some(d_right)) => self.scale(d_right, right),
-                    (None, None) => return None,
-                };
+                if d_left.is_none() && d_right.is_none() {
+                    return None;
+                }
+                let (_, left, right) =
+                    normalized_coordinates(left, right, |kind| self.push(CfgValueType::Real, kind));
                 let magnitude = self.push_binary(CfgBinaryOp::Hypot, left, right);
-                Some(self.lane_scalar(CfgBinaryOp::Div, numerator, magnitude))
+                let from_left = d_left.map(|derivative| {
+                    let factor = self.push_binary(CfgBinaryOp::Div, left, magnitude);
+                    self.scale(derivative, factor)
+                });
+                let from_right = d_right.map(|derivative| {
+                    let factor = self.push_binary(CfgBinaryOp::Div, right, magnitude);
+                    self.scale(derivative, factor)
+                });
+                match (from_left, from_right) {
+                    (Some(left), Some(right)) => {
+                        Some(self.lane_binary(CfgBinaryOp::Add, left, right, target))
+                    }
+                    (Some(only), None) | (None, Some(only)) => Some(only),
+                    (None, None) => None,
+                }
             }
-            // `(x dy - y dx) / (x² + y²)` for `atan2(y, x)`. The quadrant offset
-            // the operation carries is piecewise constant, so it differentiates
-            // to nothing and the ordinary arctangent rule is the whole answer
-            // away from the branch cut.
             CfgBinaryOp::Atan2 => {
+                if d_left.is_none() && d_right.is_none() {
+                    return None;
+                }
+                let (scale, left, right) =
+                    normalized_coordinates(left, right, |kind| self.push(CfgValueType::Real, kind));
                 let numerator = match (d_left, d_right) {
                     (Some(d_left), Some(d_right)) => {
                         let from_ordinate = self.scale(d_left, right);
@@ -2793,12 +2883,17 @@ impl<'a> AdBuilder<'a> {
                 let ordinate = self.push_binary(CfgBinaryOp::Mul, left, left);
                 let abscissa = self.push_binary(CfgBinaryOp::Mul, right, right);
                 let denominator = self.push_binary(CfgBinaryOp::Add, ordinate, abscissa);
-                Some(self.lane_scalar(CfgBinaryOp::Div, numerator, denominator))
+                let normalized = self.lane_scalar(CfgBinaryOp::Div, numerator, denominator);
+                Some(self.lane_scalar(CfgBinaryOp::Div, normalized, scale))
             }
-            other => {
-                debug_assert!(is_predicate(other), "unhandled binary derivative rule");
-                None
-            }
+            CfgBinaryOp::Eq
+            | CfgBinaryOp::Ne
+            | CfgBinaryOp::Lt
+            | CfgBinaryOp::Le
+            | CfgBinaryOp::Gt
+            | CfgBinaryOp::Ge
+            | CfgBinaryOp::And
+            | CfgBinaryOp::Or => None,
         }
     }
 

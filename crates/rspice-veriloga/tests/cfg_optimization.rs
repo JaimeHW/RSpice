@@ -14,6 +14,74 @@ use rspice_veriloga::canonical_ir::{
 use std::collections::{HashMap, HashSet};
 
 #[test]
+fn homogeneous_math_derivatives_preserve_extreme_finite_scales() {
+    for op in ["hypot", "atan2"] {
+        for derivative in 0..3 {
+            let expression = format!("{op}(V(p),V(q))");
+            let expression = match derivative {
+                1 => format!("ddx({expression},V(p))"),
+                2 => format!("ddx({expression},V(q))"),
+                _ => expression,
+            };
+            let artifact = artifact(&format!(
+                "module planar(p,q); inout p,q; electrical p,q; analog I(p)<+{expression}; endmodule"
+            ));
+            let cfg = CfgModel::from_hir(&artifact.hir, &artifact.mir).unwrap();
+            let seeds = [
+                AdSeed::NodePotential(0usize.into()),
+                AdSeed::NodePotential(1usize.into()),
+            ];
+            let mut ad = differentiate(&cfg.function, &seeds).unwrap();
+            let mut outputs = vec![cfg.residuals[0]];
+            if derivative == 0 {
+                outputs.extend(
+                    ad.derivative_row(cfg.residuals[0])
+                        .into_iter()
+                        .map(Option::unwrap),
+                );
+            }
+            let (optimized, moved) = optimize_cfg(&ad.function, &outputs);
+            for scale in [1e-200, 1.0, 1e200, 8e307] {
+                for (a, b) in [(-1.0_f64, 2.0_f64), (0.0, -2.0), (1.0, -1.0), (1.0, 1.0)] {
+                    let (p, q) = (a * scale, b * scale);
+                    let expected = if op == "hypot" {
+                        let radius = a.hypot(b);
+                        [p.hypot(q), a / radius, b / radius]
+                    } else {
+                        let square = a * a + b * b;
+                        [p.atan2(q), (b / square) / scale, (-a / square) / scale]
+                    };
+                    let expected = if derivative == 0 {
+                        &expected[..]
+                    } else {
+                        &expected[derivative..=derivative]
+                    };
+                    let mut inputs = inputs(&artifact);
+                    inputs.node_potentials[..2].copy_from_slice(&[p, q]);
+                    for (function, outputs) in [
+                        (&ad.function, outputs.as_slice()),
+                        (&optimized, moved.as_slice()),
+                    ] {
+                        let result = evaluate_cfg(function, &inputs).unwrap();
+                        for (&output, &expected) in outputs.iter().zip(expected) {
+                            let actual = result.value(output).unwrap();
+                            if expected == 0.0 {
+                                assert_eq!(actual, expected, "{expression} at {p},{q}");
+                            } else {
+                                assert!(
+                                    (actual / expected - 1.0).abs() < 1e-12,
+                                    "{expression} at {p},{q}: expected {expected}, got {actual}"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn extrema_preserve_numeric_operands_nan_and_signed_zero_order() {
     for op in ["min", "max"] {
         for expression in [

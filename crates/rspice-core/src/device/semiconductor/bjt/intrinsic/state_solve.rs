@@ -398,6 +398,42 @@ impl Bjt {
         Self::apply_thermal_derivative(&mut evaluated.iccp, plus.iccp, minus.iccp, denom);
         Self::apply_thermal_derivative(&mut evaluated.irs, plus.irs, minus.irs, denom);
         Self::apply_thermal_derivative(&mut evaluated.igcx, plus.igcx, minus.igcx, denom);
+        if !self.vbic_13 || (self.tcvef == 0.0 && self.tcver == 0.0) {
+            return evaluated;
+        }
+        let temperature_slope = self
+            .mapped_temperature(self.requested_temperature() + vrth)
+            .1;
+        self.with_temperature_variant(vrth, |model| {
+            let p = model.polarity();
+            let vbe_eff = p * (vbi - vei);
+            let vbc_eff = p * (vbi - vci);
+            let transport = model.transport_charge_state(vbe_eff, vbc_eff);
+            let early = model.vbic_early_thermal_derivatives(
+                vbe_eff,
+                vbc_eff,
+                transport,
+                temperature_slope,
+            );
+            let d_transport = p * (early.itzf - early.itzr);
+            let avalanche = if model.vbic_13 && model.avc1 > 0.0 {
+                model
+                    .vbic13_avalanche_factor(vbc_eff, model.vjc, model.mjc, model.avc1, model.avc2)
+                    .0
+            } else {
+                0.0
+            };
+            let d_ibc = -avalanche * d_transport;
+            evaluated.iciei.d_internal[IDX_VRTH] += d_transport;
+            evaluated.ibc.d_internal[IDX_VRTH] += d_ibc;
+            evaluated.linearized.dic_dvrth += d_transport - d_ibc;
+            evaluated.linearized.dib_dvrth += d_ibc;
+            evaluated.linearized.dqb_dvrth += early.qb;
+            if Self::series_active(model.rbi) {
+                evaluated.irbi.d_internal[IDX_VRTH] +=
+                    (vbx - vbi) / model.guarded_series_resistance(model.rbi) * early.qb;
+            }
+        });
         evaluated
     }
 

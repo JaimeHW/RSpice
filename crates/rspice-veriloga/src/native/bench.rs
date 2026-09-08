@@ -239,7 +239,7 @@ fn run_dense_entrypoint_case(config: NativeBenchConfig) -> Result<NativeBenchCas
     resolve_native_defaults(&model, &native, &mut native_context)?;
     resolve_bytecode_defaults(&model, &mut bytecode_context)?;
 
-    let checksum_native = run_native_sweep(&model, &native, &mut native_context)?;
+    let checksum_native = run_native_sample(&model, &native, &mut native_context, 1)?;
     let checksum_bytecode = run_bytecode_sweep(&model, &mut bytecode_context)?;
     assert_close(
         "dense native benchmark checksum",
@@ -648,9 +648,15 @@ fn run_native_sample(
     context: &mut VmContext,
     iterations: usize,
 ) -> Result<f64, String> {
+    let mut prelude_slots = vec![0.0; native.required_storage().prelude_slots];
     let mut checksum = 0.0;
     for _ in 0..iterations {
-        checksum += std::hint::black_box(run_native_sweep(model, native, context)?);
+        checksum += std::hint::black_box(run_native_sweep(
+            model,
+            native,
+            context,
+            &mut prelude_slots,
+        )?);
     }
     Ok(std::hint::black_box(checksum))
 }
@@ -937,6 +943,7 @@ fn run_native_sweep(
     model: &CompiledModel,
     native: &NativeModel,
     context: &mut VmContext,
+    prelude_slots: &mut [f64],
 ) -> Result<f64, String> {
     context.clear_currents();
     context.currents.resize(model.stamp_programs.len(), 0.0);
@@ -945,8 +952,12 @@ fn run_native_sweep(
     // pointer view as the public device path does; rebuilding it for every
     // entrypoint measures repeated host context assembly instead of JIT work.
     let mut ctx = eval_context_from_vm_context(context);
+    ctx.prelude_slots = prelude_slots.as_mut_ptr();
+    ctx.prelude_slots_len = prelude_slots.len();
     native.run_assignments(&ctx, context.variables.as_mut_ptr());
     take_native_error(&mut ctx, "assignments")?;
+    native.run_prelude(&ctx, context.variables.as_ptr());
+    take_native_error(&mut ctx, "prelude")?;
 
     let mut checksum = 0.0;
     for (stamp_index, stamp) in model.stamp_programs.iter().enumerate() {

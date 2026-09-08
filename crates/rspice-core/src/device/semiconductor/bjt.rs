@@ -131,6 +131,23 @@ struct TransportChargeState {
     ditzr_dvbc_eff: Value,
 }
 
+/// Early-voltage contribution to thermal-state derivatives. The forward
+/// charge entry differentiates If*(1+QTF*q1)/qb before transit-time modulation.
+#[derive(Debug, Clone, Copy, Default)]
+struct VbicEarlyThermalDerivatives {
+    qb: Value,
+    itzf: Value,
+    itzr: Value,
+    forward_charge: Value,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct BjtThermalVariantKey {
+    rise_bits: u64,
+    early_anchor_bits: Option<u64>,
+    resistance_branches: u16,
+}
+
 #[derive(Debug, Clone, Copy)]
 struct BaseCollectorCurrentState {
     ibc: Value,
@@ -1202,7 +1219,7 @@ pub struct Bjt {
     /// for the transient companion and AC passes.
     mna_charge_cache: Cell<[BjtChargeBranch; BJT_DYNAMIC_CHARGE_COUNT]>,
     mna_charge_cache_valid: Cell<bool>,
-    thermal_variant_cache: RefCell<Vec<(u64, u16, Box<Bjt>)>>,
+    thermal_variant_cache: RefCell<Vec<(BjtThermalVariantKey, Box<Bjt>)>>,
 }
 
 impl Bjt {
