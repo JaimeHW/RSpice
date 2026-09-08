@@ -692,6 +692,8 @@ impl RSpiceApp {
         let route = self.state.workbench.current_route();
         let layout = self.state.workbench.current_workspace_layout();
         let full_screen = self.state.workbench.full_screen;
+        let drawer = self.state.workbench.drawer;
+        let console_maximized = self.state.workbench.console_maximized;
         let active_document =
             crate::workbench::chrome::document_bar::active_document_id(&self.state);
         if let Some(window_state) = self.state.workbench.window_session.state_mut(window) {
@@ -700,6 +702,8 @@ impl RSpiceApp {
             window_state.layout = layout;
             window_state.active_document = active_document;
             window_state.full_screen = full_screen;
+            window_state.drawer = drawer;
+            window_state.console_maximized = console_maximized;
         }
     }
 
@@ -737,12 +741,19 @@ impl RSpiceApp {
                 &document,
             );
         }
+        self.state.workbench.drawer = window_state.drawer;
+        self.state.workbench.console_maximized = window_state.console_maximized;
         true
     }
 
     fn render_secondary_application_windows(&mut self, ctx: &Context) {
         let primary = self.state.workbench.window_session.primary();
         self.capture_application_window_projection(primary);
+        let secondary = self.state.workbench.window_session.secondary_window_ids();
+        if secondary.is_empty() {
+            self.state.sync_active_schematic_to_workspace();
+            return;
+        }
         let primary_state = self
             .state
             .workbench
@@ -750,7 +761,6 @@ impl RSpiceApp {
             .state(primary)
             .cloned()
             .unwrap_or_default();
-        let secondary = self.state.workbench.window_session.secondary_window_ids();
         let mut close_windows = Vec::new();
 
         for (cascade_index, window) in secondary.into_iter().enumerate() {
@@ -803,8 +813,6 @@ impl RSpiceApp {
             let _ = self.project_application_window(primary, primary_state.layout);
         }
 
-        self.state.sync_active_schematic_to_workspace();
-        let _ = self.project_application_window(primary, primary_state.layout);
         for window in close_windows {
             let _ = self.state.workbench.window_session.close_window(window);
         }
@@ -1445,6 +1453,72 @@ mod tests {
         ConfigurationSetCatalog, ConfigurationSetDefinition, Point, SchematicState,
         UnresolvedBindingPolicy,
     };
+
+    #[test]
+    fn window_rendering_preserves_primary_drawers_and_console_expansion() {
+        use crate::workbench::{commands::vocabulary::Command, state::Drawer};
+
+        let ctx = Context::default();
+        let mut app = RSpiceApp::test_instance();
+        Command::PlaceInstance.execute(&mut app);
+        assert_eq!(app.state.workbench.drawer, Some(Drawer::Navigator));
+        app.state.workbench.console_maximized = true;
+
+        for _ in 0..3 {
+            app.render_secondary_application_windows(&ctx);
+            assert_eq!(app.state.workbench.drawer, Some(Drawer::Navigator));
+            assert!(app.state.workbench.console_maximized);
+        }
+    }
+
+    #[test]
+    fn window_projection_retains_independent_transient_panels_without_persisting_them() {
+        use crate::workbench::state::{Drawer, Workspace};
+
+        let mut app = RSpiceApp::test_instance();
+        let primary = app.state.workbench.window_session.primary();
+        let layout = app.state.workbench.current_workspace_layout();
+        let secondary = app.state.workbench.window_session.create_window(
+            "Secondary design",
+            Workspace::Design,
+            layout,
+            true,
+        );
+        app.state
+            .workbench
+            .window_session
+            .state_mut(secondary)
+            .unwrap()
+            .synchronize_chrome_with_primary = true;
+        app.state.workbench.drawer = Some(Drawer::Navigator);
+        app.state.workbench.console_maximized = true;
+        app.capture_application_window_projection(primary);
+
+        assert!(app.project_application_window(secondary, layout));
+        assert_eq!(app.state.workbench.drawer, None);
+        assert!(!app.state.workbench.console_maximized);
+        app.state.workbench.drawer = Some(Drawer::Inspector);
+        app.capture_application_window_projection(secondary);
+
+        for _ in 0..3 {
+            assert!(app.project_application_window(primary, layout));
+            assert_eq!(app.state.workbench.drawer, Some(Drawer::Navigator));
+            assert!(app.state.workbench.console_maximized);
+            assert!(app.project_application_window(secondary, layout));
+            assert_eq!(app.state.workbench.drawer, Some(Drawer::Inspector));
+            assert!(!app.state.workbench.console_maximized);
+        }
+
+        let window = app.state.workbench.window_session.state(primary).unwrap();
+        let saved = serde_json::to_value(window).unwrap();
+        assert!(saved.get("drawer").is_none());
+        assert!(saved.get("console_maximized").is_none());
+        let restored: crate::workbench::lifecycle::window_session::ApplicationWindowState =
+            serde_json::from_value(saved).unwrap();
+        assert_eq!(restored.drawer, None);
+        assert!(!restored.console_maximized);
+        assert_eq!(restored.layout, window.layout);
+    }
 
     /// The application root moves by value through the same debug fixture
     /// chains as the state it embeds, on the same 2 MiB Windows test-thread

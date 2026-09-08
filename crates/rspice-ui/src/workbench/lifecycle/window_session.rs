@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::workbench::{
     SurfaceId, SurfaceRoute,
-    state::{Workspace, WorkspaceDocumentId, WorkspaceLayoutState},
+    state::{Drawer, Workspace, WorkspaceDocumentId, WorkspaceLayoutState},
 };
 
 const PRIMARY_WINDOW_VALUE: u64 = 1;
@@ -139,6 +139,12 @@ pub struct ApplicationWindowState {
     /// ordinary windowed mode and lets the active host confirm transitions.
     #[serde(skip)]
     pub full_screen: bool,
+    /// Transient panel presentation belongs to this window and is never
+    /// restored from disk or inherited through synchronized dock preferences.
+    #[serde(skip)]
+    pub(crate) drawer: Option<Drawer>,
+    #[serde(skip)]
+    pub(crate) console_maximized: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -179,6 +185,8 @@ impl Default for ApplicationWindowState {
             restore_on_launch: true,
             synchronize_chrome_with_primary: false,
             full_screen: false,
+            drawer: None,
+            console_maximized: false,
         }
     }
 }
