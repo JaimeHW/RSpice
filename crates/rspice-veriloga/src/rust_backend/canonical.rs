@@ -1031,7 +1031,7 @@ impl ModelPlan {
         // readbacks compact is important for large compact-model op-point
         // sections, whose predicates must be correct without inflating the
         // executable stamp with solver-invisible Hessians.
-        let one_step_dae_split_safe = idt_slots.is_empty()
+        let mut one_step_dae_split_safe = idt_slots.is_empty()
             && !ddt_controls_flow
             && first_order_complete
             && residuals.iter().zip(&charges).all(|(residual, charge)| {
@@ -1282,6 +1282,18 @@ impl ModelPlan {
             .map(|parameter| parameter.scope)
             .collect();
         let schedule = schedule_with_parameter_scopes(&function, &parameter_scopes);
+        // A coefficient held during AC differentiation can still vary between
+        // timepoints or Newton iterates. Its reactive primitive is not a
+        // conservative charge suitable for OneStep's F/Q history split.
+        one_step_dae_split_safe &= function.values.iter().all(|value| {
+            !matches!(
+                value.kind,
+                CfgValueKind::Unary {
+                    op: CfgUnaryOp::FreezeDerivative,
+                    ..
+                }
+            ) || schedule.class(value.id) <= InvalidationClass::Temperature
+        });
         measurements.metrics_mut().kernel_regions =
             kernel_region_metrics(artifact, &function, &schedule);
         let structural_guards = structural_guards(&function, &schedule, &parameter_scopes);
@@ -4783,7 +4795,10 @@ impl Charge {
 /// a block parameter can reach itself — from recursing forever.
 const MAX_CHARGE_MERGE_DEPTH: usize = 8;
 
-/// What a residual stores, worked out before any of it is built.
+/// A primitive whose voltage/flow derivative gives the reactive Jacobian.
+///
+/// Outside coefficients carry a derivative barrier. The primitive is not a
+/// conservative stored charge unless those coefficients are time independent.
 ///
 /// Resolution is separated from construction because a merge has to be created
 /// bottom-up: the parameter that carries a guarded charge can only be added once
@@ -4792,6 +4807,9 @@ enum Charge {
     /// A value the graph already holds — the operand of a `ddt`, or one side of
     /// an operation that carries no charge of its own.
     Value(ValueId),
+    /// A multiplier/divisor outside ddt is evaluated at the bias point but
+    /// held constant while differentiating the reactive primitive.
+    HeldCoefficient { anchor: ValueId, value: ValueId },
     /// This path stores nothing. At the top that means the contribution is not
     /// reactive at all; inside a merge it is the arm that was not taken, and
     /// inside a sum it is the conduction half.
@@ -4800,8 +4818,8 @@ enum Charge {
     Merge { block: BlockId, arms: Vec<Charge> },
     /// An operation the charge needs that the graph only has in its `ddt` form.
     ///
-    /// `I(db) <+ TYPE * ddt(QD)` stores `TYPE * QD`, and that product exists
-    /// nowhere until it is built. It is inserted directly after `anchor` — the
+    /// `I(db) <+ TYPE * ddt(QD)` projects to `held(TYPE) * QD`, and that product
+    /// exists nowhere until it is built. It is inserted directly after `anchor` — the
     /// instruction it mirrors — so its operands are in scope exactly where the
     /// original's were, without any dominance question to answer.
     Op {
@@ -4932,11 +4950,10 @@ fn resolve_charge_kind(
             Some(Charge::Value(*input))
         }
         CfgValueKind::RealConstant(constant) if *constant == 0.0 => Some(Charge::Nothing),
-        // Linear arithmetic is pushed inside the `ddt`, which is what makes a
-        // scaled or summed charge recoverable. `k * ddt(q)` stores `k * q`;
-        // `ddt(q1) + ddt(q2)` stores `q1 + q2`. Only the operations that
-        // commute with `d/dt` are followed — a product of two charges is not
-        // linear in either, so it is refused rather than approximated.
+        // Project arithmetic linear in ddt: k * ddt(q) has reactive derivative
+        // k * dq/dx, with no q * dk/dx term. Holding the outside coefficient's
+        // tangent gives that result while preserving its current bias value.
+        // Products of derivatives are nonlinear and cannot use this projection.
         CfgValueKind::Binary { op, left, right } => {
             let (op, left, right) = (*op, *left, *right);
             // An unrecovered operand must invalidate split eligibility even
@@ -4974,14 +4991,20 @@ fn resolve_charge_kind(
                     kind: Box::new(ChargeOp::Binary {
                         op,
                         left: charged_left?,
-                        right: Charge::Value(right),
+                        right: Charge::HeldCoefficient {
+                            anchor: residual,
+                            value: right,
+                        },
                     }),
                 }),
                 (CfgBinaryOp::Mul, false, true) => Some(Charge::Op {
                     anchor: residual,
                     kind: Box::new(ChargeOp::Binary {
                         op,
-                        left: Charge::Value(left),
+                        left: Charge::HeldCoefficient {
+                            anchor: residual,
+                            value: left,
+                        },
                         right: charged_right?,
                     }),
                 }),
@@ -4992,7 +5015,10 @@ fn resolve_charge_kind(
                     kind: Box::new(ChargeOp::Binary {
                         op,
                         left: charged_left?,
-                        right: Charge::Value(right),
+                        right: Charge::HeldCoefficient {
+                            anchor: residual,
+                            value: right,
+                        },
                     }),
                 }),
                 (_, false, false) => Some(Charge::Nothing),
@@ -5055,6 +5081,18 @@ fn materialise_charge(
 ) -> Option<ValueId> {
     match charge {
         Charge::Value(value) => Some(*value),
+        Charge::HeldCoefficient { anchor, value } => {
+            let held = push_value(
+                function,
+                CfgValueType::Real,
+                CfgValueKind::Unary {
+                    op: CfgUnaryOp::FreezeDerivative,
+                    input: *value,
+                },
+            );
+            insertions.push((*anchor, held));
+            Some(held)
+        }
         Charge::Nothing => None,
         Charge::Op { anchor, kind } => {
             let result = match &**kind {

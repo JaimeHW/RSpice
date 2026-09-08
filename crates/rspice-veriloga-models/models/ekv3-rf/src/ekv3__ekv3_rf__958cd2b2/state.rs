@@ -530,7 +530,7 @@ pub struct Instance {
 	pub(crate) ddt_coefficients: GeneratedDdtCoefficients,
 	pub(crate) canonical_reactive: Box<[f64; 108]>,
 	pub(crate) canonical_model_values: Option<std::sync::Arc<CanonicalModelValues>>,
-	pub(crate) canonical_staged: Box<[f64; 214]>,
+	pub(crate) canonical_staged: Box<[f64; 215]>,
 	pub(crate) canonical_instance_valid: bool,
 	pub(crate) canonical_temperature_valid: bool,
 	pub(crate) canonical_temperature: f64,
@@ -841,7 +841,7 @@ impl Instance {
 	pub const IDT_STATE_COUNT: usize = 0;
 	pub const ACCEPTED_STATE_SHAPE_IDENTITY: GeneratedVerilogAAcceptedStateShapeIdentity = GeneratedVerilogAAcceptedStateShapeIdentity::from_bytes([41, 224, 220, 78, 34, 158, 38, 247, 192, 121, 188, 182, 171, 44, 59, 115, 72, 219, 87, 73, 17, 69, 129, 251, 103, 20, 29, 248, 148, 23, 75, 10]);
 	pub const EVENT_STATE_COUNT: usize = 0;
-	pub const ONE_STEP_DAE_SPLIT_SAFE: bool = true;
+	pub const ONE_STEP_DAE_SPLIT_SAFE: bool = false;
 	pub const REQUIRES_NODESET_PHASE: bool = false;
 	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "ac67027575ade6a73c96ad02e5f7622d72c33a16c8365fa2377e51b0ecd322ed";
 	pub const MAX_ANALOG_LOOP_ITERATIONS: usize = 1_000_000;

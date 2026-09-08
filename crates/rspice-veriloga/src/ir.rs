@@ -1439,6 +1439,7 @@ impl DeviceIR {
 
         fn contains_ddt(arena: &ExprArena, id: NodeId) -> bool {
             match *arena.node(id) {
+                Node::FreezeDerivative(inner) => contains_ddt(arena, inner),
                 Node::Ddt(_) => true,
                 Node::Binary(_, left, right) => {
                     contains_ddt(arena, left) || contains_ddt(arena, right)
@@ -1521,10 +1522,12 @@ impl DeviceIR {
                     (false, false) => None,
                     (false, true) => {
                         let charge = Self::extract_charge(arena, right)?;
+                        let left = arena.push(Node::FreezeDerivative(left));
                         Some(arena.push(Node::Binary(BinaryOp::Mul, left, charge)))
                     }
                     (true, false) => {
                         let charge = Self::extract_charge(arena, left)?;
+                        let right = arena.push(Node::FreezeDerivative(right));
                         Some(arena.push(Node::Binary(BinaryOp::Mul, charge, right)))
                     }
                     (true, true) => {
@@ -1538,6 +1541,7 @@ impl DeviceIR {
             }
             Node::Binary(BinaryOp::Div, left, right) if !contains_ddt(arena, right) => {
                 let charge = Self::extract_charge(arena, left)?;
+                let right = arena.push(Node::FreezeDerivative(right));
                 Some(arena.push(Node::Binary(BinaryOp::Div, charge, right)))
             }
             Node::Unary(op @ (UnaryOp::Neg | UnaryOp::Pos), inner) => {
@@ -2236,6 +2240,7 @@ pub mod autodiff {
         let recurse = |e: NodeId| derivative_axes(arena, e, deps, num_nodes);
         let optional = |slot: Option<NodeId>| slot.map_or(0, &recurse);
         match *arena.node(expr) {
+            Node::FreezeDerivative(_) => 0,
             Node::Voltage(pos, neg) => node_bit(unpack_index(pos)) | node_bit(unpack_index(neg)),
             Node::BranchCurrent(ordinal) => axis_bit(
                 &DerivativeWrt::BranchCurrent(unpack_index(ordinal)),
@@ -3125,6 +3130,7 @@ pub mod autodiff {
             };
         }
         match *arena.node(expr) {
+            Node::FreezeDerivative(_) => {}
             Node::Var(name) => {
                 if let Some(processes) = deps.get(arena.name(name).as_str()) {
                     axes.extend(processes.iter().copied());
@@ -4147,6 +4153,7 @@ pub mod autodiff {
 
         match *arena.node(expr) {
             Node::Const(_) => constant!(0.0),
+            Node::FreezeDerivative(_) => constant!(0.0),
 
             Node::Voltage(pos, neg) => {
                 let pos = unpack_index(pos);
@@ -4870,6 +4877,16 @@ pub mod autodiff {
     /// Simplify an IR expression (constant folding, identity removal)
     pub fn simplify(arena: &mut ExprArena, expr: NodeId) -> NodeId {
         match *arena.node(expr) {
+            Node::FreezeDerivative(input) => {
+                let simplified = simplify(arena, input);
+                if matches!(arena.node(simplified), Node::Const(_)) {
+                    simplified
+                } else if simplified == input {
+                    expr
+                } else {
+                    arena.push(Node::FreezeDerivative(simplified))
+                }
+            }
             Node::Binary(op, left, right) => {
                 let simplified_left = simplify(arena, left);
                 let simplified_right = simplify(arena, right);

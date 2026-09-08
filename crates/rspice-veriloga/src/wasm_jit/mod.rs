@@ -97,7 +97,9 @@ pub const WASM_JIT_ABI_VERSION: u32 = 9;
 /// their frame layout and helper signatures remain compatible.
 /// 13 to 14 supplies zero-initialized analog locals on loop/conditional entry
 /// edges before SSA merges, including paths with no explicit assignment.
-pub const WASM_JIT_EMITTER_VERSION: u32 = 14;
+/// 14 to 15 holds coefficients outside ddt during reactive differentiation;
+/// old modules contain the spurious q * dk/dx term and must be rebuilt.
+pub const WASM_JIT_EMITTER_VERSION: u32 = 15;
 
 /// Hard ceiling for one qualified shipped model's generated module.
 pub const SHIPPED_MODEL_WASM_CODE_SIZE_BUDGET_BYTES: usize = 32 * 1024 * 1024;
@@ -1513,7 +1515,7 @@ endmodule
     struct FusedKernelHarness {
         artifact: super::WasmJitModelArtifact,
         executable: WasmJitExecutable,
-        store: wasmi::Store<()>,
+        store: wasmi::Store<super::runtime::WasmJitRuntimeSession>,
         memory: wasmi::Memory,
         instance: wasmi::Instance,
         frame: Vec<u8>,
@@ -1544,6 +1546,10 @@ endmodule
         }
 
         fn for_source(source: &str, module_name: &str) -> Self {
+            Self::for_source_with_plan(source, module_name, false)
+        }
+
+        fn for_source_with_plan(source: &str, module_name: &str, postfix: bool) -> Self {
             use std::mem::size_of;
 
             use wasmi::{Engine, Linker, Memory, MemoryType, Module, Store};
@@ -1566,8 +1572,17 @@ endmodule
             let report = VerilogACompiler::new(CompilerOptions::default())
                 .compile_runtime(source, Some(module_name))
                 .expect("compile fused-kernel model");
-            let artifact = compile_model_value_module(&report.model, &report.canonical_ir)
-                .expect("compile fused-kernel module");
+            let artifact = if postfix {
+                let plan = crate::jit::plan_builder::build_model_plan_with_canonical_ir(
+                    &report.model,
+                    &report.canonical_ir,
+                )
+                .expect("build postfix plan");
+                super::emit_model_value_module(&report.canonical_ir, &plan)
+            } else {
+                compile_model_value_module(&report.model, &report.canonical_ir)
+            }
+            .expect("compile fused-kernel module");
             let executable = WasmJitExecutable::from_artifact(&report.model, &artifact)
                 .expect("authenticate fused-kernel entry table");
             let stamp_jacobians = report
@@ -1583,7 +1598,16 @@ endmodule
             let engine = Engine::default();
             let module = Module::new(&engine, artifact.module().bytes())
                 .expect("compile fused-kernel module in independent engine");
-            let mut store = Store::new(&engine, ());
+            let state_layout = crate::canonical_ir::state::CanonicalStateLayout::from_hir(
+                &report.canonical_ir.hir,
+            );
+            let context = crate::vm::VmContext::with_states(
+                report.model.num_terminals,
+                state_layout
+                    .family_len(crate::canonical_ir::state::CanonicalStateFamily::Integration),
+            );
+            let mut store =
+                Store::new(&engine, super::runtime::WasmJitRuntimeSession::new(context));
             let memory = Memory::new(&mut store, MemoryType::new(1, None))
                 .expect("allocate imported primary memory");
             let mut linker = Linker::new(&engine);
@@ -1594,7 +1618,8 @@ endmodule
                 .func_wrap(
                     WASM_JIT_IMPORT_MODULE,
                     super::codegen::WASM_JIT_EVAL_HELPER_IMPORT,
-                    |_: i32,
+                    |mut caller: wasmi::Caller<'_, super::runtime::WasmJitRuntimeSession>,
+                     _: i32,
                      opcode: i32,
                      aux0: i32,
                      aux1: i32,
@@ -1605,15 +1630,21 @@ endmodule
                      operand3: f64,
                      operand4: f64|
                      -> f64 {
-                        super::runtime::evaluate_helper(
+                        super::runtime::evaluate_helper_with_session(
                             opcode,
                             aux0,
                             aux1,
                             aux2,
                             [operand0, operand1, operand2, operand3, operand4],
                             &[],
+                            Some(caller.data_mut()),
                         )
-                        .expect("fused-kernel helper operation")
+                        .unwrap_or_else(|error| {
+                            panic!(
+                                "fused-kernel helper {opcode}: {error:?}: {:?}",
+                                caller.data_mut().take_error()
+                            )
+                        })
                     },
                 )
                 .expect("define helper import");
@@ -1823,6 +1854,68 @@ endmodule
                 .export(WasmJitExecutableEntry::Jacobian { stamp, entry })
                 .expect("Jacobian export")
                 .to_owned()
+        }
+    }
+
+    #[test]
+    fn wasm_reactive_stamping_holds_external_derivative_coefficients_at_the_bias_point() {
+        use super::abi::FRAME_RESULT_OFFSET;
+        for (expression, capacitances) in [
+            ("V(p,n)*ddt(V(p,n))", [3.0, -2.0]),
+            ("V(c,n)*ddt(V(p,n))", [2.0, -4.0]),
+            ("ddt(V(p,n))/V(c,n)", [0.5, -0.25]),
+            ("((V(c,n)>0)?2.0:4.0)*ddt(V(p,n))", [2.0, 4.0]),
+            ("(2.0+V(c,n))*ddt(V(p,n)*V(p,n))", [24.0, 8.0]),
+        ] {
+            let source = format!(
+                "module weighted_derivative(p,n,c); inout p,n,c; electrical p,n,c; analog I(p,n)<+{expression}; endmodule"
+            );
+            let report = VerilogACompiler::default()
+                .compile_runtime(&source, Some("weighted_derivative"))
+                .unwrap();
+            // Both production CFG lowering and the canonical MIR fallback must
+            // preserve the held tangent. Execute both through an independent VM.
+            for postfix in [false, true] {
+                let mut harness = FusedKernelHarness::for_source_with_plan(
+                    &source,
+                    "weighted_derivative",
+                    postfix,
+                );
+                harness.reset();
+                for (bias, capacitance) in [[3.0, 0.0, 2.0], [-2.0, 0.0, -4.0]]
+                    .into_iter()
+                    .zip(capacitances)
+                {
+                    for (node, value) in bias.into_iter().enumerate() {
+                        harness.write_f64(
+                            FusedKernelHarness::VOLTAGES as usize + node * size_of::<f64>(),
+                            value,
+                        );
+                    }
+                    harness.call_assignments();
+                    harness.call_prelude();
+                    let entries = &report.model.stamp_programs[0].reactive_jacobians;
+                    assert!(!entries.is_empty());
+                    for (entry, derivative) in entries.iter().enumerate() {
+                        let expected = match derivative.col_axis {
+                            crate::codegen::ColumnAxis::Node(0) => capacitance,
+                            crate::codegen::ColumnAxis::Node(1) => -capacitance,
+                            _ => 0.0,
+                        };
+                        let export = harness
+                            .executable
+                            .export(WasmJitExecutableEntry::ReactiveJacobian { stamp: 0, entry })
+                            .unwrap()
+                            .to_owned();
+                        assert_eq!(harness.call(&export), 0);
+                        assert_eq!(
+                            harness.read_f64(FRAME_RESULT_OFFSET as usize),
+                            expected,
+                            "{expression}; postfix={postfix}; entry={entry}"
+                        );
+                    }
+                }
+            }
         }
     }
 

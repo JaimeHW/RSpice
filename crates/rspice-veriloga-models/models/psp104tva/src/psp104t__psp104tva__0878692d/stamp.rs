@@ -14701,7 +14701,8 @@ impl Instance {
 		let JIZ=staged[667];
 		let JLW=node_potentials[5];
 		let JMF=staged[669];
-		let JMW=0.0;
+		let JMV=0.0;
+		let JVF=0.0;
 		let JVG=0.0;
 		let JVH=0.0;
 		let JVI=0.0;
@@ -14709,7 +14710,6 @@ impl Instance {
 		let JVK=0.0;
 		let JVL=0.0;
 		let JVM=0.0;
-		let JVN=0.0;
 		let D=ctx.simparam_or("gmin", C);
 		if E{
 		if F{
@@ -25120,224 +25120,223 @@ impl Instance {
 		let JMS=JML* AD;
 		let JMT=NK* staged[670];
 		let JMU=JMT* JFR;
-		let JMV=JFU* JMT;
-		let JMX=(JMW+ JLX)+ JMD;
-		let JMY=JMU* JMX;
-		let JMZ=JMV* JMX;
-		let JNA=L6([JMZ[0],0.0,JMZ[1],JMZ[2],JMZ[3],JMZ[4]])+ ((JLZ+ JME)* JMU);
-		let JNB=JMU* JMA;
-		let JNC=JMV* JMA;
-		let JND=L6([JNC[0],0.0,JNC[1],JNC[2],JNC[3],JNC[4]])+ (JMC* JMU);
-		let JNE=IZK[0];
-		let JNF=IZK[1];
-		let JNG=IZK[2];
-		let JNH=IZK[3];
-		let JNI=IZK[4];
-		let JNJ=IZL[0];
-		let JNK=IZL[1];
-		let JNL=IZL[2];
-		let JNM=IZL[3];
-		let JNN=IZL[4];
-		let JNO=IZM[0];
-		let JNP=IZM[1];
-		let JNQ=IZM[2];
-		let JNR=IZM[3];
-		let JNS=IZM[4];
-		let JNT=IZN[0];
-		let JNU=IZN[1];
-		let JNV=IZN[2];
-		let JNW=IZN[3];
-		let JNX=IZN[4];
-		let JNY=IZO[0];
-		let JNZ=IZO[1];
-		let JOA=IZO[2];
-		let JOB=IZO[3];
-		let JOC=IZO[4];
-		let JOD=IZP[0];
-		let JOE=IZP[1];
-		let JOF=IZP[2];
-		let JOG=IZP[3];
-		let JOH=IZP[4];
-		let JOI=IZQ[0];
-		let JOJ=IZQ[1];
-		let JOK=IZQ[2];
-		let JOL=IZQ[3];
-		let JOM=IZQ[4];
-		let JON=IZR[0];
-		let JOO=IZR[1];
-		let JOP=IZR[2];
-		let JOQ=IZR[3];
-		let JOR=IZR[4];
-		let JOS=IZU[0];
-		let JOT=IZU[1];
-		let JOU=IZU[2];
-		let JOV=IZU[3];
-		let JOW=IZU[4];
-		let JOX=IZW[0];
-		let JOY=IZW[1];
-		let JOZ=IZY[0];
-		let JPA=IZY[1];
-		let JPB=IZY[2];
-		let JPC=JAA[0];
-		let JPD=JAA[1];
-		let JPE=JAA[2];
-		let JPF=JAC[0];
-		let JPG=JAC[1];
-		let JPH=JAC[2];
-		let JPI=JAC[3];
-		let JPJ=JAE[0];
-		let JPK=JAE[1];
-		let JPL=JAE[2];
-		let JPM=JAE[3];
-		let JPN=JAE[4];
-		let JPO=JAG[0];
-		let JPP=JAG[1];
-		let JPQ=JAG[2];
-		let JPR=JAG[3];
-		let JPS=JAG[4];
-		let JPT=JAG[5];
-		let JPU=JAM[0];
-		let JPV=JAM[1];
-		let JPW=JAT[0];
-		let JPX=JAT[1];
-		let JPY=JBA[0];
-		let JPZ=JBA[1];
-		let JQA=JBH[0];
-		let JQB=JBH[1];
-		let JQC=JBN[0];
-		let JQD=JBN[1];
-		let JQE=JBT[0];
-		let JQF=JBT[1];
-		let JQG=JBZ[0];
-		let JQH=JBZ[1];
-		let JQI=JCC[0];
-		let JQJ=JCC[1];
-		let JQK=JCE[0];
-		let JQL=JCE[1];
-		let JQM=JDI[0];
-		let JQN=JDI[1];
-		let JQO=JDI[2];
-		let JQP=JDI[3];
-		let JQQ=JDI[4];
-		let JQR=JDI[5];
-		let JQS=JDI[6];
-		let JQT=JDO;
-		let JQU=JDR;
-		let JQV=JEJ[0];
-		let JQW=JEJ[1];
-		let JQX=JEJ[2];
-		let JQY=JEJ[3];
-		let JQZ=JEJ[4];
-		let JRA=JEN[0];
-		let JRB=JEN[1];
-		let JRC=JEN[2];
-		let JRD=JEN[3];
-		let JRE=JEN[4];
-		let JRF=JER[0];
-		let JRG=JER[1];
-		let JRH=JER[2];
-		let JRI=JER[3];
-		let JRJ=JER[4];
-		let JRK=JEV[0];
-		let JRL=JEV[1];
-		let JRM=JEZ[0];
-		let JRN=JEZ[1];
-		let JRO=JEZ[2];
-		let JRP=JFD[0];
-		let JRQ=JFD[1];
-		let JRR=JFD[2];
-		let JRS=JFD[3];
-		let JRT=JFH[0];
-		let JRU=JFH[1];
-		let JRV=JFL[0];
-		let JRW=JFL[1];
-		let JRX=JFL[2];
-		let JRY=JFL[3];
-		let JRZ=JLZ[0];
-		let JSA=JLZ[1];
-		let JSB=JLZ[2];
-		let JSC=JLZ[3];
-		let JSD=JLZ[4];
-		let JSE=JLZ[5];
-		let JSF=JME[0];
-		let JSG=JME[1];
-		let JSH=JME[2];
-		let JSI=JME[3];
-		let JSJ=JME[4];
-		let JSK=JME[5];
-		let JSL=JMN[0];
-		let JSM=JMN[1];
-		let JSN=JMN[2];
-		let JSO=JMN[3];
-		let JSP=JMN[4];
-		let JSQ=JMN[5];
-		let JSR=JMS[0];
-		let JSS=JMS[1];
-		let JST=JMS[2];
-		let JSU=JMS[3];
-		let JSV=JMS[4];
-		let JSW=JMS[5];
-		let JSX=JNA[0];
-		let JSY=JNA[1];
-		let JSZ=JNA[2];
-		let JTA=JNA[3];
-		let JTB=JNA[4];
-		let JTC=JNA[5];
-		let JTD=JDL;
-		let JTE=JEH[0];
-		let JTF=JEH[1];
-		let JTG=JEH[2];
-		let JTH=JEH[3];
-		let JTI=JEH[4];
-		let JTJ=JEL[0];
-		let JTK=JEL[1];
-		let JTL=JEL[2];
-		let JTM=JEL[3];
-		let JTN=JEL[4];
-		let JTO=JEP[0];
-		let JTP=JEP[1];
-		let JTQ=JEP[2];
-		let JTR=JEP[3];
-		let JTS=JEP[4];
-		let JTT=JET[0];
-		let JTU=JET[1];
-		let JTV=JEX[0];
-		let JTW=JEX[1];
-		let JTX=JEX[2];
-		let JTY=JFB[0];
-		let JTZ=JFB[1];
-		let JUA=JFB[2];
-		let JUB=JFB[3];
-		let JUC=JFF[0];
-		let JUD=JFF[1];
-		let JUE=JFJ[0];
-		let JUF=JFJ[1];
-		let JUG=JFJ[2];
-		let JUH=JFJ[3];
-		let JUI=JMC[0];
-		let JUJ=JMC[1];
-		let JUK=JMC[2];
-		let JUL=JMC[3];
-		let JUM=JMC[4];
-		let JUN=JMC[5];
-		let JUO=JMP[0];
-		let JUP=JMP[1];
-		let JUQ=JMP[2];
-		let JUR=JMP[3];
-		let JUS=JMP[4];
-		let JUT=JMP[5];
-		let JUU=JMP[0];
-		let JUV=JMP[1];
-		let JUW=JMP[2];
-		let JUX=JMP[3];
-		let JUY=JMP[4];
-		let JUZ=JMP[5];
-		let JVA=JND[0];
-		let JVB=JND[1];
-		let JVC=JND[2];
-		let JVD=JND[3];
-		let JVE=JND[4];
-		let JVF=JND[5];
+		let JMW=(JMV+ JLX)+ JMD;
+		let JMX=JMU* JMW;
+		let JMY=(JFU* JMT)* JMW;
+		let JMZ=L6([JMY[0],0.0,JMY[1],JMY[2],JMY[3],JMY[4]])+ ((JLZ+ JME)* JMU);
+		let JNA=JMU;
+		let JNB=JNA* JMA;
+		let JNC=JMC* JNA;
+		let JND=IZK[0];
+		let JNE=IZK[1];
+		let JNF=IZK[2];
+		let JNG=IZK[3];
+		let JNH=IZK[4];
+		let JNI=IZL[0];
+		let JNJ=IZL[1];
+		let JNK=IZL[2];
+		let JNL=IZL[3];
+		let JNM=IZL[4];
+		let JNN=IZM[0];
+		let JNO=IZM[1];
+		let JNP=IZM[2];
+		let JNQ=IZM[3];
+		let JNR=IZM[4];
+		let JNS=IZN[0];
+		let JNT=IZN[1];
+		let JNU=IZN[2];
+		let JNV=IZN[3];
+		let JNW=IZN[4];
+		let JNX=IZO[0];
+		let JNY=IZO[1];
+		let JNZ=IZO[2];
+		let JOA=IZO[3];
+		let JOB=IZO[4];
+		let JOC=IZP[0];
+		let JOD=IZP[1];
+		let JOE=IZP[2];
+		let JOF=IZP[3];
+		let JOG=IZP[4];
+		let JOH=IZQ[0];
+		let JOI=IZQ[1];
+		let JOJ=IZQ[2];
+		let JOK=IZQ[3];
+		let JOL=IZQ[4];
+		let JOM=IZR[0];
+		let JON=IZR[1];
+		let JOO=IZR[2];
+		let JOP=IZR[3];
+		let JOQ=IZR[4];
+		let JOR=IZU[0];
+		let JOS=IZU[1];
+		let JOT=IZU[2];
+		let JOU=IZU[3];
+		let JOV=IZU[4];
+		let JOW=IZW[0];
+		let JOX=IZW[1];
+		let JOY=IZY[0];
+		let JOZ=IZY[1];
+		let JPA=IZY[2];
+		let JPB=JAA[0];
+		let JPC=JAA[1];
+		let JPD=JAA[2];
+		let JPE=JAC[0];
+		let JPF=JAC[1];
+		let JPG=JAC[2];
+		let JPH=JAC[3];
+		let JPI=JAE[0];
+		let JPJ=JAE[1];
+		let JPK=JAE[2];
+		let JPL=JAE[3];
+		let JPM=JAE[4];
+		let JPN=JAG[0];
+		let JPO=JAG[1];
+		let JPP=JAG[2];
+		let JPQ=JAG[3];
+		let JPR=JAG[4];
+		let JPS=JAG[5];
+		let JPT=JAM[0];
+		let JPU=JAM[1];
+		let JPV=JAT[0];
+		let JPW=JAT[1];
+		let JPX=JBA[0];
+		let JPY=JBA[1];
+		let JPZ=JBH[0];
+		let JQA=JBH[1];
+		let JQB=JBN[0];
+		let JQC=JBN[1];
+		let JQD=JBT[0];
+		let JQE=JBT[1];
+		let JQF=JBZ[0];
+		let JQG=JBZ[1];
+		let JQH=JCC[0];
+		let JQI=JCC[1];
+		let JQJ=JCE[0];
+		let JQK=JCE[1];
+		let JQL=JDI[0];
+		let JQM=JDI[1];
+		let JQN=JDI[2];
+		let JQO=JDI[3];
+		let JQP=JDI[4];
+		let JQQ=JDI[5];
+		let JQR=JDI[6];
+		let JQS=JDO;
+		let JQT=JDR;
+		let JQU=JEJ[0];
+		let JQV=JEJ[1];
+		let JQW=JEJ[2];
+		let JQX=JEJ[3];
+		let JQY=JEJ[4];
+		let JQZ=JEN[0];
+		let JRA=JEN[1];
+		let JRB=JEN[2];
+		let JRC=JEN[3];
+		let JRD=JEN[4];
+		let JRE=JER[0];
+		let JRF=JER[1];
+		let JRG=JER[2];
+		let JRH=JER[3];
+		let JRI=JER[4];
+		let JRJ=JEV[0];
+		let JRK=JEV[1];
+		let JRL=JEZ[0];
+		let JRM=JEZ[1];
+		let JRN=JEZ[2];
+		let JRO=JFD[0];
+		let JRP=JFD[1];
+		let JRQ=JFD[2];
+		let JRR=JFD[3];
+		let JRS=JFH[0];
+		let JRT=JFH[1];
+		let JRU=JFL[0];
+		let JRV=JFL[1];
+		let JRW=JFL[2];
+		let JRX=JFL[3];
+		let JRY=JLZ[0];
+		let JRZ=JLZ[1];
+		let JSA=JLZ[2];
+		let JSB=JLZ[3];
+		let JSC=JLZ[4];
+		let JSD=JLZ[5];
+		let JSE=JME[0];
+		let JSF=JME[1];
+		let JSG=JME[2];
+		let JSH=JME[3];
+		let JSI=JME[4];
+		let JSJ=JME[5];
+		let JSK=JMN[0];
+		let JSL=JMN[1];
+		let JSM=JMN[2];
+		let JSN=JMN[3];
+		let JSO=JMN[4];
+		let JSP=JMN[5];
+		let JSQ=JMS[0];
+		let JSR=JMS[1];
+		let JSS=JMS[2];
+		let JST=JMS[3];
+		let JSU=JMS[4];
+		let JSV=JMS[5];
+		let JSW=JMZ[0];
+		let JSX=JMZ[1];
+		let JSY=JMZ[2];
+		let JSZ=JMZ[3];
+		let JTA=JMZ[4];
+		let JTB=JMZ[5];
+		let JTC=JDL;
+		let JTD=JEH[0];
+		let JTE=JEH[1];
+		let JTF=JEH[2];
+		let JTG=JEH[3];
+		let JTH=JEH[4];
+		let JTI=JEL[0];
+		let JTJ=JEL[1];
+		let JTK=JEL[2];
+		let JTL=JEL[3];
+		let JTM=JEL[4];
+		let JTN=JEP[0];
+		let JTO=JEP[1];
+		let JTP=JEP[2];
+		let JTQ=JEP[3];
+		let JTR=JEP[4];
+		let JTS=JET[0];
+		let JTT=JET[1];
+		let JTU=JEX[0];
+		let JTV=JEX[1];
+		let JTW=JEX[2];
+		let JTX=JFB[0];
+		let JTY=JFB[1];
+		let JTZ=JFB[2];
+		let JUA=JFB[3];
+		let JUB=JFF[0];
+		let JUC=JFF[1];
+		let JUD=JFJ[0];
+		let JUE=JFJ[1];
+		let JUF=JFJ[2];
+		let JUG=JFJ[3];
+		let JUH=JMC[0];
+		let JUI=JMC[1];
+		let JUJ=JMC[2];
+		let JUK=JMC[3];
+		let JUL=JMC[4];
+		let JUM=JMC[5];
+		let JUN=JMP[0];
+		let JUO=JMP[1];
+		let JUP=JMP[2];
+		let JUQ=JMP[3];
+		let JUR=JMP[4];
+		let JUS=JMP[5];
+		let JUT=JMP[0];
+		let JUU=JMP[1];
+		let JUV=JMP[2];
+		let JUW=JMP[3];
+		let JUX=JMP[4];
+		let JUY=JMP[5];
+		let JUZ=JNC[0];
+		let JVA=JNC[1];
+		let JVB=JNC[2];
+		let JVC=JNC[3];
+		let JVD=JNC[4];
+		let JVE=JNC[5];
         if (staged[1596] != 0.0) {
             stamper.stamp_potential_branch_local(Some(1), Some(6), 0, multiplicity);
         } else {
@@ -25378,7 +25377,7 @@ impl Instance {
             Some(9),
             multiplicity * (IZC),
             [4, 6, 7, 8, 9],
-            [JNE, JNF, JNG, JNH, JNI],
+            [JND, JNE, JNF, JNG, JNH],
             [],
             [],
             multiplicity,
@@ -25388,7 +25387,7 @@ impl Instance {
             Some(7),
             multiplicity * (IZD),
             [4, 6, 7, 8, 9],
-            [JNJ, JNK, JNL, JNM, JNN],
+            [JNI, JNJ, JNK, JNL, JNM],
             [],
             [],
             multiplicity,
@@ -25398,7 +25397,7 @@ impl Instance {
             Some(7),
             multiplicity * (IZE),
             [4, 6, 7, 8, 9],
-            [JNO, JNP, JNQ, JNR, JNS],
+            [JNN, JNO, JNP, JNQ, JNR],
             [],
             [],
             multiplicity,
@@ -25408,7 +25407,7 @@ impl Instance {
             Some(8),
             multiplicity * (IZF),
             [4, 6, 7, 8, 9],
-            [JNT, JNU, JNV, JNW, JNX],
+            [JNS, JNT, JNU, JNV, JNW],
             [],
             [],
             multiplicity,
@@ -25418,7 +25417,7 @@ impl Instance {
             Some(9),
             multiplicity * (IZG),
             [4, 6, 7, 8, 9],
-            [JNY, JNZ, JOA, JOB, JOC],
+            [JNX, JNY, JNZ, JOA, JOB],
             [],
             [],
             multiplicity,
@@ -25428,7 +25427,7 @@ impl Instance {
             Some(8),
             multiplicity * (IZH),
             [4, 6, 7, 8, 9],
-            [JOD, JOE, JOF, JOG, JOH],
+            [JOC, JOD, JOE, JOF, JOG],
             [],
             [],
             multiplicity,
@@ -25438,7 +25437,7 @@ impl Instance {
             Some(8),
             multiplicity * (IZI),
             [4, 6, 7, 8, 9],
-            [JOI, JOJ, JOK, JOL, JOM],
+            [JOH, JOI, JOJ, JOK, JOL],
             [],
             [],
             multiplicity,
@@ -25448,7 +25447,7 @@ impl Instance {
             Some(7),
             multiplicity * (IZJ),
             [4, 6, 7, 8, 9],
-            [JON, JOO, JOP, JOQ, JOR],
+            [JOM, JON, JOO, JOP, JOQ],
             [],
             [],
             multiplicity,
@@ -25458,7 +25457,7 @@ impl Instance {
             Some(9),
             multiplicity * (IZT),
             [4, 6, 7, 8, 9],
-            [JOS, JOT, JOU, JOV, JOW],
+            [JOR, JOS, JOT, JOU, JOV],
             [],
             [],
             multiplicity,
@@ -25468,7 +25467,7 @@ impl Instance {
             Some(7),
             multiplicity * (IZV),
             [6, 7],
-            [JOX, JOY],
+            [JOW, JOX],
             [],
             [],
             multiplicity,
@@ -25478,7 +25477,7 @@ impl Instance {
             Some(8),
             multiplicity * (IZX),
             [6, 7, 8],
-            [JOZ, JPA, JPB],
+            [JOY, JOZ, JPA],
             [],
             [],
             multiplicity,
@@ -25488,7 +25487,7 @@ impl Instance {
             Some(9),
             multiplicity * (IZZ),
             [6, 7, 9],
-            [JPC, JPD, JPE],
+            [JPB, JPC, JPD],
             [],
             [],
             multiplicity,
@@ -25498,7 +25497,7 @@ impl Instance {
             Some(9),
             multiplicity * (JAB),
             [6, 7, 8, 9],
-            [JPF, JPG, JPH, JPI],
+            [JPE, JPF, JPG, JPH],
             [],
             [],
             multiplicity,
@@ -25508,7 +25507,7 @@ impl Instance {
             Some(7),
             multiplicity * (JAD),
             [6, 7, 8, 9, 11],
-            [JPJ, JPK, JPL, JPM, JPN],
+            [JPI, JPJ, JPK, JPL, JPM],
             [],
             [],
             multiplicity,
@@ -25518,7 +25517,7 @@ impl Instance {
             Some(8),
             multiplicity * (JAF),
             [6, 7, 8, 9, 11, 12],
-            [JPO, JPP, JPQ, JPR, JPS, JPT],
+            [JPN, JPO, JPP, JPQ, JPR, JPS],
             [],
             [],
             multiplicity,
@@ -25528,7 +25527,7 @@ impl Instance {
             Some(6),
             multiplicity * (JAL),
             [1, 6],
-            [JPU, JPV],
+            [JPT, JPU],
             [],
             [],
             multiplicity,
@@ -25558,7 +25557,7 @@ impl Instance {
             Some(7),
             multiplicity * (JAS),
             [2, 7],
-            [JPW, JPX],
+            [JPV, JPW],
             [],
             [],
             multiplicity,
@@ -25588,7 +25587,7 @@ impl Instance {
             Some(8),
             multiplicity * (JAZ),
             [0, 8],
-            [JPY, JPZ],
+            [JPX, JPY],
             [],
             [],
             multiplicity,
@@ -25618,7 +25617,7 @@ impl Instance {
             Some(10),
             multiplicity * (JBG),
             [9, 10],
-            [JQA, JQB],
+            [JPZ, JQA],
             [],
             [],
             multiplicity,
@@ -25648,7 +25647,7 @@ impl Instance {
             Some(10),
             multiplicity * (JBM),
             [10, 11],
-            [JQC, JQD],
+            [JQB, JQC],
             [],
             [],
             multiplicity,
@@ -25678,7 +25677,7 @@ impl Instance {
             Some(10),
             multiplicity * (JBS),
             [10, 12],
-            [JQE, JQF],
+            [JQD, JQE],
             [],
             [],
             multiplicity,
@@ -25708,7 +25707,7 @@ impl Instance {
             Some(10),
             multiplicity * (JBY),
             [3, 10],
-            [JQG, JQH],
+            [JQF, JQG],
             [],
             [],
             multiplicity,
@@ -25738,7 +25737,7 @@ impl Instance {
             Some(9),
             multiplicity * (JCB),
             [8, 9],
-            [JQI, JQJ],
+            [JQH, JQI],
             [],
             [],
             multiplicity,
@@ -25748,7 +25747,7 @@ impl Instance {
             Some(9),
             multiplicity * (JCD),
             [7, 9],
-            [JQK, JQL],
+            [JQJ, JQK],
             [],
             [],
             multiplicity,
@@ -25758,7 +25757,7 @@ impl Instance {
             None,
             multiplicity * (JDH),
             [0, 2, 4, 6, 7, 8, 9],
-            [JQM, JQN, JQO, JQP, JQQ, JQR, JQS],
+            [JQL, JQM, JQN, JQO, JQP, JQQ, JQR],
             [],
             [],
             multiplicity,
@@ -25768,7 +25767,7 @@ impl Instance {
             None,
             multiplicity * (JDM),
             [4],
-            [JQT],
+            [JQS],
             [],
             [],
             multiplicity,
@@ -25778,7 +25777,7 @@ impl Instance {
             None,
             multiplicity * (JDQ),
             [4],
-            [JQU],
+            [JQT],
             [],
             [],
             multiplicity,
@@ -25788,7 +25787,7 @@ impl Instance {
             Some(7),
             multiplicity * (JEI),
             [4, 6, 7, 8, 9],
-            [JQV, JQW, JQX, JQY, JQZ],
+            [JQU, JQV, JQW, JQX, JQY],
             [],
             [],
             multiplicity,
@@ -25798,7 +25797,7 @@ impl Instance {
             Some(7),
             multiplicity * (JEM),
             [4, 6, 7, 8, 9],
-            [JRA, JRB, JRC, JRD, JRE],
+            [JQZ, JRA, JRB, JRC, JRD],
             [],
             [],
             multiplicity,
@@ -25808,7 +25807,7 @@ impl Instance {
             Some(7),
             multiplicity * (JEQ),
             [4, 6, 7, 8, 9],
-            [JRF, JRG, JRH, JRI, JRJ],
+            [JRE, JRF, JRG, JRH, JRI],
             [],
             [],
             multiplicity,
@@ -25818,7 +25817,7 @@ impl Instance {
             Some(7),
             multiplicity * (JEU),
             [6, 7],
-            [JRK, JRL],
+            [JRJ, JRK],
             [],
             [],
             multiplicity,
@@ -25828,7 +25827,7 @@ impl Instance {
             Some(8),
             multiplicity * (JEY),
             [6, 7, 8],
-            [JRM, JRN, JRO],
+            [JRL, JRM, JRN],
             [],
             [],
             multiplicity,
@@ -25838,7 +25837,7 @@ impl Instance {
             Some(9),
             multiplicity * (JFC),
             [4, 6, 7, 9],
-            [JRP, JRQ, JRR, JRS],
+            [JRO, JRP, JRQ, JRR],
             [],
             [],
             multiplicity,
@@ -25848,7 +25847,7 @@ impl Instance {
             Some(7),
             multiplicity * (JFG),
             [7, 11],
-            [JRT, JRU],
+            [JRS, JRT],
             [],
             [],
             multiplicity,
@@ -25858,7 +25857,7 @@ impl Instance {
             Some(8),
             multiplicity * (JFK),
             [7, 8, 11, 12],
-            [JRV, JRW, JRX, JRY],
+            [JRU, JRV, JRW, JRX],
             [],
             [],
             multiplicity,
@@ -25866,7 +25865,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(5),
             None,
-            multiplicity * (JMW),
+            multiplicity * (JMV),
             [],
             [],
             [],
@@ -25878,7 +25877,7 @@ impl Instance {
             None,
             multiplicity * (JLX),
             [4, 5, 6, 7, 8, 9],
-            [JRZ, JSA, JSB, JSC, JSD, JSE],
+            [JRY, JRZ, JSA, JSB, JSC, JSD],
             [],
             [],
             multiplicity,
@@ -25888,7 +25887,7 @@ impl Instance {
             None,
             multiplicity * (JMD),
             [4, 5, 6, 7, 8, 9],
-            [JSF, JSG, JSH, JSI, JSJ, JSK],
+            [JSE, JSF, JSG, JSH, JSI, JSJ],
             [],
             [],
             multiplicity,
@@ -25898,7 +25897,7 @@ impl Instance {
             Some(7),
             multiplicity * (JMM),
             [4, 5, 6, 7, 8, 9],
-            [JSL, JSM, JSN, JSO, JSP, JSQ],
+            [JSK, JSL, JSM, JSN, JSO, JSP],
             [],
             [],
             multiplicity,
@@ -25908,7 +25907,7 @@ impl Instance {
             Some(8),
             multiplicity * (JMR),
             [4, 5, 6, 7, 8, 9],
-            [JSR, JSS, JST, JSU, JSV, JSW],
+            [JSQ, JSR, JSS, JST, JSU, JSV],
             [],
             [],
             multiplicity,
@@ -25916,9 +25915,19 @@ impl Instance {
         stamper.stamp_current_sparse_local::<6, 0>(
             Some(8),
             Some(7),
-            multiplicity * (JMY),
+            multiplicity * (JMX),
             [4, 5, 6, 7, 8, 9],
-            [JSX, JSY, JSZ, JTA, JTB, JTC],
+            [JSW, JSX, JSY, JSZ, JTA, JTB],
+            [],
+            [],
+            multiplicity,
+        );
+        stamper.stamp_current_sparse_local::<0, 0>(
+            Some(8),
+            Some(7),
+            multiplicity * (JVF),
+            [],
+            [],
             [],
             [],
             multiplicity,
@@ -25934,7 +25943,7 @@ impl Instance {
             multiplicity,
         );
         stamper.stamp_current_sparse_local::<0, 0>(
-            Some(8),
+            Some(6),
             Some(7),
             multiplicity * (JVH),
             [],
@@ -25945,18 +25954,8 @@ impl Instance {
         );
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(6),
-            Some(7),
-            multiplicity * (JVI),
-            [],
-            [],
-            [],
-            [],
-            multiplicity,
-        );
-        stamper.stamp_current_sparse_local::<0, 0>(
-            Some(6),
             Some(8),
-            multiplicity * (JVJ),
+            multiplicity * (JVI),
             [],
             [],
             [],
@@ -25966,7 +25965,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(11),
             Some(7),
-            multiplicity * (JVK),
+            multiplicity * (JVJ),
             [],
             [],
             [],
@@ -25976,6 +25975,16 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(12),
             Some(8),
+            multiplicity * (JVK),
+            [],
+            [],
+            [],
+            [],
+            multiplicity,
+        );
+        stamper.stamp_current_sparse_local::<0, 0>(
+            Some(8),
+            Some(7),
             multiplicity * (JVL),
             [],
             [],
@@ -25987,16 +25996,6 @@ impl Instance {
             Some(8),
             Some(7),
             multiplicity * (JVM),
-            [],
-            [],
-            [],
-            [],
-            multiplicity,
-        );
-        stamper.stamp_current_sparse_local::<0, 0>(
-            Some(8),
-            Some(7),
-            multiplicity * (JVN),
             [],
             [],
             [],
@@ -26043,84 +26042,84 @@ impl Instance {
         self.canonical_reactive[37] = JCD;
         self.canonical_reactive[38] = JDH;
         self.canonical_reactive[39] = JDK;
-        self.canonical_reactive[40] = JTD;
+        self.canonical_reactive[40] = JTC;
         self.canonical_reactive[41] = JDQ;
         self.canonical_reactive[42] = JEG;
-        self.canonical_reactive[43] = JTE;
-        self.canonical_reactive[44] = JTF;
-        self.canonical_reactive[45] = JTG;
-        self.canonical_reactive[46] = JTH;
-        self.canonical_reactive[47] = JTI;
+        self.canonical_reactive[43] = JTD;
+        self.canonical_reactive[44] = JTE;
+        self.canonical_reactive[45] = JTF;
+        self.canonical_reactive[46] = JTG;
+        self.canonical_reactive[47] = JTH;
         self.canonical_reactive[48] = JEK;
-        self.canonical_reactive[49] = JTJ;
-        self.canonical_reactive[50] = JTK;
-        self.canonical_reactive[51] = JTL;
-        self.canonical_reactive[52] = JTM;
-        self.canonical_reactive[53] = JTN;
+        self.canonical_reactive[49] = JTI;
+        self.canonical_reactive[50] = JTJ;
+        self.canonical_reactive[51] = JTK;
+        self.canonical_reactive[52] = JTL;
+        self.canonical_reactive[53] = JTM;
         self.canonical_reactive[54] = JEO;
-        self.canonical_reactive[55] = JTO;
-        self.canonical_reactive[56] = JTP;
-        self.canonical_reactive[57] = JTQ;
-        self.canonical_reactive[58] = JTR;
-        self.canonical_reactive[59] = JTS;
+        self.canonical_reactive[55] = JTN;
+        self.canonical_reactive[56] = JTO;
+        self.canonical_reactive[57] = JTP;
+        self.canonical_reactive[58] = JTQ;
+        self.canonical_reactive[59] = JTR;
         self.canonical_reactive[60] = JES;
-        self.canonical_reactive[61] = JTT;
-        self.canonical_reactive[62] = JTU;
+        self.canonical_reactive[61] = JTS;
+        self.canonical_reactive[62] = JTT;
         self.canonical_reactive[63] = JEW;
-        self.canonical_reactive[64] = JTV;
-        self.canonical_reactive[65] = JTW;
-        self.canonical_reactive[66] = JTX;
+        self.canonical_reactive[64] = JTU;
+        self.canonical_reactive[65] = JTV;
+        self.canonical_reactive[66] = JTW;
         self.canonical_reactive[67] = JFA;
-        self.canonical_reactive[68] = JTY;
-        self.canonical_reactive[69] = JTZ;
-        self.canonical_reactive[70] = JUA;
-        self.canonical_reactive[71] = JUB;
+        self.canonical_reactive[68] = JTX;
+        self.canonical_reactive[69] = JTY;
+        self.canonical_reactive[70] = JTZ;
+        self.canonical_reactive[71] = JUA;
         self.canonical_reactive[72] = JFE;
-        self.canonical_reactive[73] = JUC;
-        self.canonical_reactive[74] = JUD;
+        self.canonical_reactive[73] = JUB;
+        self.canonical_reactive[74] = JUC;
         self.canonical_reactive[75] = JFI;
-        self.canonical_reactive[76] = JUE;
-        self.canonical_reactive[77] = JUF;
-        self.canonical_reactive[78] = JUG;
-        self.canonical_reactive[79] = JUH;
-        self.canonical_reactive[80] = JMW;
+        self.canonical_reactive[76] = JUD;
+        self.canonical_reactive[77] = JUE;
+        self.canonical_reactive[78] = JUF;
+        self.canonical_reactive[79] = JUG;
+        self.canonical_reactive[80] = JMV;
         self.canonical_reactive[81] = JLX;
         self.canonical_reactive[82] = JMA;
-        self.canonical_reactive[83] = JUI;
-        self.canonical_reactive[84] = JUJ;
-        self.canonical_reactive[85] = JUK;
-        self.canonical_reactive[86] = JUL;
-        self.canonical_reactive[87] = JUM;
-        self.canonical_reactive[88] = JUN;
+        self.canonical_reactive[83] = JUH;
+        self.canonical_reactive[84] = JUI;
+        self.canonical_reactive[85] = JUJ;
+        self.canonical_reactive[86] = JUK;
+        self.canonical_reactive[87] = JUL;
+        self.canonical_reactive[88] = JUM;
         self.canonical_reactive[89] = JMO;
-        self.canonical_reactive[90] = JUO;
-        self.canonical_reactive[91] = JUP;
-        self.canonical_reactive[92] = JUQ;
-        self.canonical_reactive[93] = JUR;
-        self.canonical_reactive[94] = JUS;
-        self.canonical_reactive[95] = JUT;
+        self.canonical_reactive[90] = JUN;
+        self.canonical_reactive[91] = JUO;
+        self.canonical_reactive[92] = JUP;
+        self.canonical_reactive[93] = JUQ;
+        self.canonical_reactive[94] = JUR;
+        self.canonical_reactive[95] = JUS;
         self.canonical_reactive[96] = JMO;
-        self.canonical_reactive[97] = JUU;
-        self.canonical_reactive[98] = JUV;
-        self.canonical_reactive[99] = JUW;
-        self.canonical_reactive[100] = JUX;
-        self.canonical_reactive[101] = JUY;
-        self.canonical_reactive[102] = JUZ;
+        self.canonical_reactive[97] = JUT;
+        self.canonical_reactive[98] = JUU;
+        self.canonical_reactive[99] = JUV;
+        self.canonical_reactive[100] = JUW;
+        self.canonical_reactive[101] = JUX;
+        self.canonical_reactive[102] = JUY;
         self.canonical_reactive[103] = JNB;
-        self.canonical_reactive[104] = JVA;
-        self.canonical_reactive[105] = JVB;
-        self.canonical_reactive[106] = JVC;
-        self.canonical_reactive[107] = JVD;
-        self.canonical_reactive[108] = JVE;
-        self.canonical_reactive[109] = JVF;
-        self.canonical_reactive[110] = JVG;
-        self.canonical_reactive[111] = JVH;
-        self.canonical_reactive[112] = JVI;
-        self.canonical_reactive[113] = JVJ;
-        self.canonical_reactive[114] = JVK;
-        self.canonical_reactive[115] = JVL;
-        self.canonical_reactive[116] = JVM;
-        self.canonical_reactive[117] = JVN;
+        self.canonical_reactive[104] = JUZ;
+        self.canonical_reactive[105] = JVA;
+        self.canonical_reactive[106] = JVB;
+        self.canonical_reactive[107] = JVC;
+        self.canonical_reactive[108] = JVD;
+        self.canonical_reactive[109] = JVE;
+        self.canonical_reactive[110] = JVF;
+        self.canonical_reactive[111] = JVG;
+        self.canonical_reactive[112] = JVH;
+        self.canonical_reactive[113] = JVI;
+        self.canonical_reactive[114] = JVJ;
+        self.canonical_reactive[115] = JVK;
+        self.canonical_reactive[116] = JVL;
+        self.canonical_reactive[117] = JVM;
     }
 
     pub fn stamp_reactive(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedReactiveStamper<'_>) {

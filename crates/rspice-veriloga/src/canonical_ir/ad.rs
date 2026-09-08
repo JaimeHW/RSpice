@@ -481,7 +481,8 @@ fn differentiable(kind: &CfgValueKind) -> bool {
     match kind {
         CfgValueKind::Unary { op, .. } => !matches!(
             op,
-            CfgUnaryOp::Not
+            CfgUnaryOp::FreezeDerivative
+                | CfgUnaryOp::Not
                 | CfgUnaryOp::Floor
                 | CfgUnaryOp::Ceil
                 | CfgUnaryOp::LimitedExpDerivative
@@ -1485,6 +1486,7 @@ impl<'a> ScalarDdxBuilder<'a> {
 
     fn unary_factor(&mut self, op: CfgUnaryOp, input: ValueId) -> ValueId {
         match op {
+            CfgUnaryOp::FreezeDerivative => self.constant(0.0),
             CfgUnaryOp::Neg => self.constant(-1.0),
             CfgUnaryOp::Exp => self.push_unary(CfgUnaryOp::Exp, input),
             CfgUnaryOp::LimExp => self.push_unary(CfgUnaryOp::LimExp, input),
@@ -2691,6 +2693,7 @@ impl<'a> AdBuilder<'a> {
     /// `d(f(x)) = f'(x) * dx`; this returns `f'(x)`.
     fn unary_factor(&mut self, op: CfgUnaryOp, input: ValueId) -> ValueId {
         match op {
+            CfgUnaryOp::FreezeDerivative => self.constant(0.0),
             CfgUnaryOp::Neg => self.constant(-1.0),
             CfgUnaryOp::Exp => self.push_unary(CfgUnaryOp::Exp, input),
             // Beyond the clamp `limexp` is affine, so its slope is the value at

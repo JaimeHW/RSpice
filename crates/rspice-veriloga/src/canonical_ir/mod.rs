@@ -40,6 +40,12 @@ mod parameter_array;
 pub mod schedule;
 pub mod state;
 
+/// Internal MIR unary spelling for a value held during reactive differentiation.
+/// Source operators cannot produce it; reactive projection inserts it after
+/// canonical artifact validation.
+#[cfg(any(feature = "native", feature = "wasm-jit"))]
+pub(crate) const FROZEN_DERIVATIVE_UNARY: &str = "FreezeDerivative";
+
 pub use crate::semantic::VectorBounds;
 pub use ad::{AdFunction, AdSeed, differentiate};
 pub use artifact::CanonicalIrArtifact;

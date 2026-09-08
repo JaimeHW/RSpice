@@ -196,6 +196,9 @@ pub enum Node {
     Binary(BinaryOp, NodeId, NodeId),
     /// Unary operation.
     Unary(UnaryOp, NodeId),
+    /// Identity value with zero derivative, used for coefficients outside ddt
+    /// while constructing the reactive linearization.
+    FreezeDerivative(NodeId),
     /// Function call of at most two arguments, which is every arity
     /// [`IrFunction`] has. `argc` says how many of `a` and `b` are live and is
     /// always `a.is_some() + b.is_some()`; construct through
@@ -908,6 +911,7 @@ pub fn for_each_child<F: FnMut(NodeId)>(arena: &ExprArena, node: &Node, f: &mut 
             f(*else_expr);
         }
         Node::Ddt(inner)
+        | Node::FreezeDerivative(inner)
         | Node::Limexp(inner)
         | Node::CanonicalLimit(inner)
         | Node::Ddx { expr: inner, .. }
@@ -1242,6 +1246,9 @@ pub fn rebuild_children(
             arena.push(Node::Conditional(new_condition, new_then, new_else))
         }
         Node::Ddt(inner) => rebuild_unary(arena, id, inner, Node::Ddt, descend),
+        Node::FreezeDerivative(inner) => {
+            rebuild_unary(arena, id, inner, Node::FreezeDerivative, descend)
+        }
         Node::Limexp(inner) => rebuild_unary(arena, id, inner, Node::Limexp, descend),
         Node::CanonicalLimit(inner) => {
             rebuild_unary(arena, id, inner, Node::CanonicalLimit, descend)
@@ -1665,6 +1672,7 @@ mod tests {
         out.push(arena.push(Node::Unary(UnaryOp::Neg, one)));
         out.push(arena.push(Node::Conditional(one, two, one)));
         out.push(arena.push(Node::Ddt(one)));
+        out.push(arena.push(Node::FreezeDerivative(one)));
         out.push(arena.push(Node::Idt(one, Some(two))));
         out.push(arena.push(Node::Idt(one, None)));
         out.push(arena.push(Node::Limexp(one)));

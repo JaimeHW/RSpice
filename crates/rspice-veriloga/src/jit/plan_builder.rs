@@ -795,11 +795,13 @@ fn canonical_extract_reactive_charge(
                 (false, false) => Ok(None),
                 (false, true) => {
                     let charge = canonical_extract_reactive_charge(model, mir, right)?;
+                    let left = append_canonical_frozen_derivative(mir, left, expression.span);
                     Ok(charge
                         .map(|charge| append_canonical_binary(mir, "Mul", left, charge, expression.span)))
                 }
                 (true, false) => {
                     let charge = canonical_extract_reactive_charge(model, mir, left)?;
+                    let right = append_canonical_frozen_derivative(mir, right, expression.span);
                     Ok(charge
                         .map(|charge| append_canonical_binary(mir, "Mul", charge, right, expression.span)))
                 }
@@ -823,6 +825,7 @@ fn canonical_extract_reactive_charge(
                 });
             }
             let charge = canonical_extract_reactive_charge(model, mir, left)?;
+            let right = append_canonical_frozen_derivative(mir, right, expression.span);
             Ok(charge
                 .map(|charge| append_canonical_binary(mir, "Div", charge, right, expression.span)))
         }
@@ -2040,6 +2043,21 @@ fn canonical_expression<'a>(
             detail: format!("canonical expression {expr_id} is outside MIR expression arena")
                 .into(),
         })
+}
+
+fn append_canonical_frozen_derivative(
+    mir: &mut MirModel,
+    operand: ExprId,
+    span: SourceSpanRef,
+) -> ExprId {
+    append_canonical_expr(
+        mir,
+        HirExprKind::Unary {
+            op: crate::canonical_ir::FROZEN_DERIVATIVE_UNARY.into(),
+            operand,
+        },
+        span,
+    )
 }
 
 fn append_canonical_binary(

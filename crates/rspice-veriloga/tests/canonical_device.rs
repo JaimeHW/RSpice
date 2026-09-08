@@ -22,6 +22,44 @@ use std::process::Command;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 #[test]
+fn generated_reactive_stamping_holds_external_derivative_coefficients_at_the_bias_point() {
+    for (index, expression, capacitances, split_safe) in [
+        (0, "V(p,n)*ddt(V(p,n))", [3.0_f64, -2.0], false),
+        (1, "V(c,n)*ddt(V(p,n))", [2.0, -4.0], false),
+        (2, "ddt(V(p,n))/V(c,n)", [0.5, -0.25], false),
+        (3, "(2.0+V(c,n))*ddt(V(p,n)*V(p,n))", [24.0, 8.0], false),
+        (4, "2.0*ddt(V(p,n))", [2.0, 2.0], true),
+        (5, "gain*ddt(V(p,n))", [2.0, 2.0], true),
+        (6, "$temperature*ddt(V(p,n))", [300.15, 300.15], true),
+        (7, "$abstime*ddt(V(p,n))", [0.0, 0.0], false),
+        (8, "((V(c,n)>0)?2.0:4.0)*ddt(V(p,n))", [2.0, 4.0], false),
+    ] {
+        let source = format!(
+            "module weighted_derivative(p,n,c); inout p,n,c; electrical p,n,c; parameter real gain=2.0; analog I(p,n)<+{expression}; endmodule"
+        );
+        let name = format!("weighted derivative {index}");
+        let (state, stamp, noise) = generated_parts(&source, &name);
+        let body = format!(
+            r#"
+let mut instance = device::state::Instance::new(&[0, 1, 2]);
+instance.finalize_parameters().unwrap();
+assert_eq!(device::state::Instance::ONE_STEP_DAE_SPLIT_SAFE, {split_safe});
+for (bias, capacitance) in [[3.0, 0.0, 2.0], [-2.0, 0.0, -4.0]].into_iter().zip({capacitances:?}) {{
+let ctx = runtime::GeneratedEvalContext {{ voltages: &bias, temperature: 300.15 }};
+instance.stamp(&ctx, &mut runtime::GeneratedStamper::default());
+let mut reactive = [0.0; 3];
+instance.stamp_reactive(&ctx, &mut runtime::GeneratedReactiveStamper {{ sink: Some(&mut reactive) }});
+assert_eq!(reactive[0], capacitance, "driven-port capacitance");
+assert_eq!(reactive[2], 2.0 * capacitance.abs(), "only the driven terminal pair has a reactive derivative");
+}}
+"#,
+        );
+        run_generated_main(&name, &state, &stamp, &noise, &body)
+            .unwrap_or_else(|report| panic!("{expression}: {report}"));
+    }
+}
+
+#[test]
 fn generated_operator_chains_preserve_association_and_function_effects() {
     let chain = " + 1.0e16 + 1.0 - 1.0e16".repeat(16);
     let source = format!(
@@ -4970,6 +5008,9 @@ pub mod runtime {
                 }
                 if let Some(value) = sink.get_mut(1) {
                     *value += _branch_derivatives.iter().sum::<f64>() * _scale;
+                }
+                if let Some(value) = sink.get_mut(2) {
+                    *value += _node_derivatives.iter().map(|entry| entry.abs()).sum::<f64>() * _scale;
                 }
             }
         }

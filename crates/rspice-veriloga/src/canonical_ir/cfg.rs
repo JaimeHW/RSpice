@@ -104,6 +104,10 @@ pub enum CfgVariable {
 /// Arithmetic on one operand.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum CfgUnaryOp {
+    /// Preserve the value while holding its tangent at zero. Used only in
+    /// reactive linearization: k(x)*ddt(q(x)) contributes k(x)*dq/dx, so k
+    /// must not acquire the derivative of a fictitious stored charge k*q.
+    FreezeDerivative,
     Neg,
     Not,
     Exp,

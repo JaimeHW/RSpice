@@ -1371,6 +1371,9 @@ impl CodeGenerator {
                         .instructions
                         .push(Instruction::IdtModState(state_id));
                 }
+                Node::FreezeDerivative(inner) => {
+                    self.emit_expr(arena, inner, emit_ctx, program)?;
+                }
                 Node::DdtCompanion(inner) => {
                     // Jacobian companion factor: operand / dt (0 at DC)
                     self.emit_expr(arena, inner, emit_ctx, program)?;

@@ -40,7 +40,7 @@ impl Instance {
         if !self.multiplicity.is_finite() || self.multiplicity <= 0.0 {
             return Err(GeneratedNoiseEvaluationError::InvalidMultiplicity { value: self.multiplicity });
         }
-        let mut prepared = [0.0; 197];
+        let mut prepared = [0.0; 198];
         let produced = canonical_model_preprocess(
             &self.params.values,
             &self.param_given[..],
@@ -99,18 +99,18 @@ impl Instance {
 		let AD=staged[63];
 		let AE=staged[66];
 		let AF=staged[70];
-		let AG=staged[162]!=0.0;
+		let AG=staged[163]!=0.0;
 		let AH=staged[78];
 		let AI=staged[85];
 		let AJ=staged[59];
 		let AK=staged[58];
 		let AL=staged[60];
-		let AM=staged[164]!=0.0;
-		let AO=staged[165]!=0.0;
-		let AP=staged[166]!=0.0;
-		let AR=staged[167]!=0.0;
-		let AS=staged[168]!=0.0;
-		let AU=staged[169]!=0.0;
+		let AM=staged[165]!=0.0;
+		let AO=staged[166]!=0.0;
+		let AP=staged[167]!=0.0;
+		let AR=staged[168]!=0.0;
+		let AS=staged[169]!=0.0;
+		let AU=staged[170]!=0.0;
 		let AV=node_potentials[5];
 		let AW=node_potentials[6];
 		let AY=node_potentials[7];
@@ -128,24 +128,24 @@ impl Instance {
 		let EP=parameters[135];
 		let FJ=staged[44];
 		let FK=staged[45];
-		let FS=staged[170]!=0.0;
-		let FT=staged[171]!=0.0;
+		let FS=staged[171]!=0.0;
+		let FT=staged[172]!=0.0;
 		let FW=staged[50];
 		let GH=staged[51];
 		let GK=staged[56];
-		let GS=staged[172]!=0.0;
+		let GS=staged[173]!=0.0;
 		let GV=0.010000000000000002f64;
 		let HH=1e-4f64;
 		let HT=parameters[141];
 		let IF=staged[65];
-		let IT=staged[173]!=0.0;
+		let IT=staged[174]!=0.0;
 		let KQ=0.16666666666666666f64;
 		let KY=0.3333333333333333f64;
 		let LY=staged[90];
 		let MA=parameters[5];
-		let MB=staged[174]!=0.0;
-		let MF=staged[175]!=0.0;
-		let MP=staged[176]!=0.0;
+		let MB=staged[175]!=0.0;
+		let MF=staged[176]!=0.0;
+		let MP=staged[177]!=0.0;
 		let MR=1e-6f64;
 		let MW=staged[97];
 		let NL=0.010000000000000002f64;
@@ -163,7 +163,7 @@ impl Instance {
 		let QE=parameters[50];
 		let RB=staged[105];
 		let RD=staged[106];
-		let SN=staged[180]!=0.0;
+		let SN=staged[181]!=0.0;
 		let ST=parameters[127];
 		let SU=parameters[125];
 		let E=temperature+ parameters[0];

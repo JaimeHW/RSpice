@@ -17,7 +17,7 @@ impl Instance {
         if !self.multiplicity.is_finite() || self.multiplicity <= 0.0 {
             return Err(GeneratedNoiseEvaluationError::InvalidMultiplicity { value: self.multiplicity });
         }
-        let mut prepared = [0.0; 93];
+        let mut prepared = [0.0; 95];
         let produced = canonical_model_preprocess(
             &self.params.values,
             &self.param_given[..],
@@ -55,8 +55,8 @@ impl Instance {
 		let D=parameters[0];
 		let E=0.5f64;
 		let F=staged[39];
-		let G=staged[79]!=0.0;
-		let I=staged[80];
+		let G=staged[81]!=0.0;
+		let I=staged[82];
 		let K=staged[35];
 		let L=staged[24];
 		let M=1f64;
@@ -78,7 +78,7 @@ impl Instance {
 		let BD=1.55f64;
 		let BK=1e-64f64;
 		let BR=staged[28];
-		let EG=staged[87]!=0.0;
+		let EG=staged[89]!=0.0;
 		let EJ=parameters[21];
 		let FT=parameters[1];
 		let FW=parameters[41];

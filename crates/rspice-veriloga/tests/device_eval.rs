@@ -18,6 +18,74 @@ fn compile(source: &str) -> DeviceFixture {
 }
 
 #[test]
+fn reactive_stamping_holds_external_derivative_coefficients_at_the_bias_point() {
+    for (expression, capacitances, current, driven_derivative, control_derivative) in [
+        ("V(p,n)*ddt(V(p,n))", [3.0, -2.0], 12.0, 10.0, 0.0),
+        ("V(c,n)*ddt(V(p,n))", [2.0, -4.0], 8.0, 4.0, 4.0),
+        ("ddt(V(p,n))/V(c,n)", [0.5, -0.25], 2.0, 1.0, -1.0),
+        (
+            "((V(c,n)>0)?2.0:4.0)*ddt(V(p,n))",
+            [2.0, 4.0],
+            8.0,
+            4.0,
+            0.0,
+        ),
+        (
+            "(2.0+V(c,n))*ddt(V(p,n)*V(p,n))",
+            [24.0, 8.0],
+            64.0,
+            48.0,
+            16.0,
+        ),
+    ] {
+        let fixture = compile(&format!(
+            "module weighted_derivative(p,n,c); inout p,n,c; electrical p,n,c; analog I(p,n)<+{expression}; endmodule"
+        ));
+        let mut device = fixture.device("X", &[1, 0, 2]);
+        device.try_set_analysis_type(1).unwrap();
+        for (bias, capacitance) in [[3.0, 2.0], [-2.0, -4.0]].into_iter().zip(capacitances) {
+            let mut matrix = HashMap::new();
+            device
+                .try_stamp_reactive(&bias, |row, column, value| {
+                    *matrix.entry((row, column)).or_insert(0.0) += value;
+                })
+                .unwrap();
+            assert_eq!(
+                matrix.get(&(0, 0)).copied().unwrap_or(0.0),
+                capacitance,
+                "{expression}: {matrix:?}"
+            );
+            assert_eq!(
+                matrix.get(&(0, 1)).copied().unwrap_or(0.0),
+                0.0,
+                "a coefficient outside ddt creates no control-port capacitance: {expression}: {matrix:?}"
+            );
+        }
+
+        // The transient Newton derivative must still include dk/dx * ddt(q).
+        device.try_set_analysis_type(0).unwrap();
+        device.update_voltages(&[1.0, 4.0]);
+        assert_eq!(device.try_evaluate().unwrap(), vec![0.0]);
+        device.advance_state();
+        device.try_set_analysis_type(2).unwrap();
+        device.set_timestep(0.5);
+        device.update_voltages(&[3.0, 2.0]);
+        assert_eq!(
+            device.try_evaluate().unwrap(),
+            vec![current],
+            "{expression}"
+        );
+        let (matrix, _) = collect_stamps(&mut device, &[3.0, 2.0]);
+        assert_eq!(matrix[&(0, 0)], driven_derivative, "{expression}");
+        assert_eq!(
+            matrix.get(&(0, 1)).copied().unwrap_or(0.0),
+            control_derivative,
+            "{expression}"
+        );
+    }
+}
+
+#[test]
 fn analysis_continuation_retargets_only_matching_devices_without_initialization() {
     let fixture = compile(
         r#"module continued(p,n);

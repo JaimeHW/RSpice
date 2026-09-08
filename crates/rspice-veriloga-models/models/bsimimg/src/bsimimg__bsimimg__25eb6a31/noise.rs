@@ -26,7 +26,7 @@ impl Instance {
         if !self.multiplicity.is_finite() || self.multiplicity <= 0.0 {
             return Err(GeneratedNoiseEvaluationError::InvalidMultiplicity { value: self.multiplicity });
         }
-        let mut prepared = [0.0; 338];
+        let mut prepared = [0.0; 339];
         let produced = canonical_model_preprocess(
             &self.params.values,
             &self.param_given[..],
@@ -67,7 +67,7 @@ impl Instance {
 		let G=1e-6f64;
 		let K=staged[171];
 		let L=staged[21];
-		let M=staged[299];
+		let M=staged[300];
 		let R=staged[132];
 		let S=staged[170];
 		let T=staged[72];
@@ -81,7 +81,7 @@ impl Instance {
 		let AG=staged[7];
 		let AH=parameters[49];
 		let AI=staged[122];
-		let AK=staged[263]!=0.0;
+		let AK=staged[264]!=0.0;
 		let AL=parameters[60];
 		let AN=staged[129];
 		let AO=staged[134];
@@ -89,7 +89,7 @@ impl Instance {
 		let AQ=staged[137];
 		let AR=staged[136];
 		let AS=staged[135];
-		let AT=staged[266]!=0.0;
+		let AT=staged[267]!=0.0;
 		let AU=1e-38f64;
 		let AV=0.5f64;
 		let AW=staged[125];
@@ -97,19 +97,19 @@ impl Instance {
 		let AY=staged[235];
 		let AZ=staged[127];
 		let BA=parameters[296];
-		let BB=staged[284]!=0.0;
-		let BC=staged[285]!=0.0;
+		let BB=staged[285]!=0.0;
+		let BC=staged[286]!=0.0;
 		let BD=1e-3f64;
 		let BE=1e3f64;
-		let BG=staged[296];
+		let BG=staged[297];
 		let BH=staged[12];
 		let BK=0.25f64;
 		let BL=0.01f64;
 		let BN=staged[13];
 		let BZ=1e-4f64;
-		let CB=staged[301]!=0.0;
-		let CC=staged[297]!=0.0;
-		let CD=staged[298]!=0.0;
+		let CB=staged[302]!=0.0;
+		let CC=staged[298]!=0.0;
+		let CD=staged[299]!=0.0;
 		let CI=staged[22];
 		let CQ=0.9f64;
 		let DQ=staged[46];
@@ -121,7 +121,7 @@ impl Instance {
 		let EO=0.02f64;
 		let EY=40f64;
 		let FG=parameters[83];
-		let FO=staged[300]!=0.0;
+		let FO=staged[301]!=0.0;
 		let GC=staged[80];
 		let GF=1.60219e-19f64;
 		let GG=staged[157];
@@ -148,36 +148,36 @@ impl Instance {
 		let QP=staged[131];
 		let QQ=parameters[11];
 		let QT=staged[138];
-		let QY=staged[302]!=0.0;
+		let QY=staged[303]!=0.0;
 		let QZ=staged[139];
 		let RB=staged[141];
 		let RC=staged[140];
-		let AAJ=staged[303]!=0.0;
-		let AAM=staged[304]!=0.0;
-		let ABP=staged[305]!=0.0;
-		let ABY=staged[306]!=0.0;
+		let AAJ=staged[304]!=0.0;
+		let AAM=staged[305]!=0.0;
+		let ABP=staged[306]!=0.0;
+		let ABY=staged[307]!=0.0;
 		let ABZ=parameters[213];
-		let ACA=staged[307]!=0.0;
-		let ACI=staged[308]!=0.0;
-		let ADB=staged[309]!=0.0;
-		let ADK=staged[310]!=0.0;
-		let ADR=staged[313]!=0.0;
-		let AEK=staged[314]!=0.0;
+		let ACA=staged[308]!=0.0;
+		let ACI=staged[309]!=0.0;
+		let ADB=staged[310]!=0.0;
+		let ADK=staged[311]!=0.0;
+		let ADR=staged[314]!=0.0;
+		let AEK=staged[315]!=0.0;
 		let AEV=staged[217];
 		let AEZ=parameters[234];
 		let AFF=parameters[235];
 		let AFJ=parameters[288];
 		let AFK=parameters[289];
 		let AFL=parameters[290];
-		let AFM=staged[316]!=0.0;
-		let AFQ=staged[317]!=0.0;
-		let AFT=staged[318]!=0.0;
+		let AFM=staged[317]!=0.0;
+		let AFQ=staged[318]!=0.0;
+		let AFT=staged[319]!=0.0;
 		let AFW=parameters[292];
 		let AFY=1e10f64;
-		let AHM=staged[320]!=0.0;
-		let AHO=staged[311];
-		let AHQ=staged[312];
-		let AHT=staged[321]!=0.0;
+		let AHM=staged[321]!=0.0;
+		let AHO=staged[312];
+		let AHQ=staged[313];
+		let AHT=staged[322]!=0.0;
 		let AHX=parameters[286];
 		let H=G/ E;
 		let I=G/ F;

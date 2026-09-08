@@ -723,7 +723,7 @@ impl<const DDT: usize, const IDT: usize> StampState<DDT, IDT> {
 	}
 }
 
-pub(crate) type CanonicalModelValues = [f64; 247];
+pub(crate) type CanonicalModelValues = [f64; 250];
 pub struct Instance {
 	pub nodes: [usize; 14],
 	pub branches: [usize; 4],
@@ -738,7 +738,7 @@ pub struct Instance {
 	pub(crate) ddt_coefficients: GeneratedDdtCoefficients,
 	pub(crate) canonical_reactive: Box<[f64; 122]>,
 	pub(crate) canonical_model_values: Option<std::sync::Arc<CanonicalModelValues>>,
-	pub(crate) canonical_staged: Box<[f64; 483]>,
+	pub(crate) canonical_staged: Box<[f64; 486]>,
 	pub(crate) canonical_instance_valid: bool,
 	pub(crate) canonical_temperature_valid: bool,
 	pub(crate) canonical_temperature: f64,
@@ -1290,7 +1290,7 @@ impl Instance {
 	pub const IDT_STATE_COUNT: usize = 0;
 	pub const ACCEPTED_STATE_SHAPE_IDENTITY: GeneratedVerilogAAcceptedStateShapeIdentity = GeneratedVerilogAAcceptedStateShapeIdentity::from_bytes([40, 165, 165, 198, 44, 224, 154, 231, 103, 149, 40, 129, 197, 73, 77, 171, 151, 22, 124, 42, 249, 27, 224, 132, 151, 179, 6, 1, 177, 172, 139, 189]);
 	pub const EVENT_STATE_COUNT: usize = 0;
-	pub const ONE_STEP_DAE_SPLIT_SAFE: bool = true;
+	pub const ONE_STEP_DAE_SPLIT_SAFE: bool = false;
 	pub const REQUIRES_NODESET_PHASE: bool = false;
 	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "52a6c1fae4607aaf9f7d18efaa58337403f67a2fbb7d00e2ab558b8b65250d96";
 	pub const MAX_ANALOG_LOOP_ITERATIONS: usize = 1_000_000;
