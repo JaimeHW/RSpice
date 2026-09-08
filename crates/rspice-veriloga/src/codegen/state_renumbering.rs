@@ -1,13 +1,9 @@
 //! Renumber a compiled model's state slots from per-*emission* to per-*site*.
 //!
-//! The bytecode generator hands out a fresh scalar-state slot at each
-//! *emission* of an integration operator, and it compiles one source operator
-//! more than once: a statement is compiled twice when the module's noise replay
-//! differs from its ordinary pass (once as `assignment_steps`, again as the
-//! noise-shadowed `noise_assignment_steps`), and a contribution's operator is
-//! compiled again inside every Jacobian entry the product rule leaves it in.
-//! One canonical `ddt` site therefore owned two or more runtime records, each
-//! integrating its own copy of the history.
+//! Integration operators reuse a slot whenever bytecode emits the same arena
+//! node, including primal reads inside derivative expressions. Separate
+//! conversion passes can still create distinct arena nodes for one source
+//! site, so canonical renumbering unifies those slots across the whole model.
 //!
 //! That was survivable while exactly one route evaluated each program. It stops
 //! being survivable at the CFG flip, where the canonical route supplies
@@ -39,8 +35,9 @@
 //!   from target variable indices, and the question the renumbering actually
 //!   asks is whether the *k*-th emission of a family in the pass is the *k*-th
 //!   statement site of that family.
-//! * **equation value programs** and their **resistive derivative programs** —
-//!   the equation's expression.
+//! * **equation value programs** — the equation's expression. Derivative
+//!   programs reuse ownership established by the value program when their
+//!   repeated or pruned primal reads already name slots of that expression.
 //! * **reactive derivative programs**, **noise-source programs** and the
 //!   **`zi` definition operand programs** — no canonical root. A reactive
 //!   Jacobian is lowered from a MIR rebuilt around the extracted charge, so
@@ -399,6 +396,22 @@ impl StateSlotMapping {
 
         let mut paired = true;
         for operator in CanonicalStateOperator::ALL {
+            // Differentiation may reorder, repeat or remove primal reads.
+            // Reuse their established ownership instead of pairing those
+            // reads positionally with the original expression's whole tree.
+            if pass == Pass::EquationDerivative
+                && program
+                    .instructions
+                    .iter()
+                    .filter_map(|instruction| operator.bytecode_slot(instruction))
+                    .all(|slot| {
+                        self.map
+                            .get(&(operator.family(), slot))
+                            .is_some_and(|(site, _)| scan.sites(operator).contains(site))
+                    })
+            {
+                continue;
+            }
             match pair_canonical_state_slots(root, scan, program, operator) {
                 Ok(pairs) => {
                     for (site, emitted) in pairs {
@@ -656,19 +669,10 @@ impl StateSlotMapping {
     ///
     /// # Which emissions count
     ///
-    /// For a family the generator allocates per *emission* — `ddt`, `idt`,
-    /// `idtmod`, `$limit`, `cross`, `above`, `timer` — every state instruction
-    /// in the pass names a record of its own, so the *k*-th emission is the
-    /// *k*-th site and a length disagreement is a refusal.
-    ///
-    /// For the rest the generator allocates through a site map, and one site
-    /// answers to several instructions: a `laplace` in an assignment emits
-    /// `LaplaceState` for the value and `LaplaceStateDerivative` for each
-    /// small-signal shadow, all naming the one slot the site map gave it.
-    /// Counting instructions there would refuse a module for having a
-    /// derivative. Those families pair by *distinct slot in order of first
-    /// appearance*, which is the order the site map hands them out in and the
-    /// order the canonical walk visits the sites in.
+    /// Each site is paired with its distinct slot in first-appearance order.
+    /// Value programs and derivative shadows can address that slot repeatedly.
+    /// Families allocated by a counter have unique slots already, so the same
+    /// deduplication also preserves their original order and count.
     fn pair_assignment_pass(
         &mut self,
         layout: &CanonicalStateLayout,
@@ -694,10 +698,8 @@ impl StateSlotMapping {
                 .iter()
                 .filter_map(|instruction| operator.bytecode_slot(instruction))
                 .collect::<Vec<_>>();
-            if !operator.family().allocates_per_emission() {
-                let mut seen = HashSet::new();
-                slots.retain(|slot| seen.insert(*slot));
-            }
+            let mut seen = HashSet::new();
+            slots.retain(|slot| seen.insert(*slot));
             if sites.len() != slots.len() {
                 paired = false;
                 self.mismatches.push(format!(
@@ -1035,6 +1037,46 @@ fn for_each_program_mut(model: &mut CompiledModel, visit: &mut impl FnMut(&mut B
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn derivative_cannot_borrow_another_equations_history() {
+        let source = "module ownership(p,q); inout p,q; electrical p,q; analog begin I(q)<+ddt(V(q)); I(p)<+hypot(1+ddt(V(p)),2+ddt(V(q))); end endmodule";
+        let compiler = crate::VerilogACompiler::default();
+        let mut report = compiler.compile_runtime(source, None).unwrap();
+        let artifact = &report.canonical_ir;
+        // Rechecking valid repeated reads must be idempotent.
+        assert_eq!(
+            renumber_state_slots_to_canonical_sites(
+                &mut report.model,
+                &artifact.hir,
+                &artifact.mir,
+            )
+            .unwrap(),
+            0
+        );
+        let foreign_slot = report.model.stamp_programs[0]
+            .value_program
+            .instructions
+            .iter()
+            .find_map(|instruction| CanonicalStateOperator::Ddt.bytecode_slot(instruction))
+            .unwrap();
+        let program = &mut report.model.stamp_programs[1].jacobian_programs[0].program;
+        let instruction = program
+            .instructions
+            .iter_mut()
+            .find(|instruction| matches!(instruction, Instruction::DdtState(_)))
+            .unwrap();
+        *instruction = Instruction::DdtState(foreign_slot);
+        assert!(
+            renumber_state_slots_to_canonical_sites(
+                &mut report.model,
+                &artifact.hir,
+                &artifact.mir,
+            )
+            .is_err(),
+            "a known slot still has to belong to this equation's source sites"
+        );
+    }
 
     /// A mapping that renumbers one family and nothing else.
     fn mapping(family: CanonicalStateFamily, pairs: &[(usize, u32)]) -> StateSlotMapping {

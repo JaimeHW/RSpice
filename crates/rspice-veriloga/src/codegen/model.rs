@@ -775,6 +775,7 @@ pub enum Instruction {
     Acosh,
     Atanh,
     Atan2, // 2-argument arctangent(y, x)
+    Hypot, // Euclidean norm without raw-square overflow/underflow
     /// Rounding functions
     Floor,
     Ceil,

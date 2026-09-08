@@ -491,6 +491,7 @@ pub enum IrFunction {
     Acosh,
     Atanh,
     Atan2,
+    Hypot,
     Floor,
     Ceil,
     Min,
@@ -3285,15 +3286,12 @@ pub mod autodiff {
                     Some(inner),
                     _,
                 ) => collect!(inner),
-                (IrFunction::Atan2, 2, Some(ordinate), Some(abscissa)) => {
-                    if !is_zero!(abscissa) {
-                        collect!(ordinate);
-                    }
-                    if !is_zero!(ordinate) {
-                        collect!(abscissa);
-                    }
-                }
-                (IrFunction::Min | IrFunction::Max, 2, Some(left), Some(right)) => {
+                (
+                    IrFunction::Min | IrFunction::Max | IrFunction::Hypot | IrFunction::Atan2,
+                    2,
+                    Some(left),
+                    Some(right),
+                ) => {
                     collect!(left);
                     collect!(right);
                 }
@@ -4287,12 +4285,11 @@ pub mod autodiff {
                         binary!(BinaryOp::Add, from_left, from_right)
                     }
                     BinaryOp::Div => {
-                        // Quotient rule: d(f/g) = (f'*g - f*g') / g^2
-                        let from_left = binary!(BinaryOp::Mul, dl, right);
-                        let from_right = binary!(BinaryOp::Mul, left, dr);
-                        let num = binary!(BinaryOp::Sub, from_left, from_right);
-                        let den = binary!(BinaryOp::Mul, right, right);
-                        binary!(BinaryOp::Div, num, den)
+                        // (df - (f/g)*dg)/g avoids squaring a finite denominator.
+                        let quotient = binary!(BinaryOp::Div, left, right);
+                        let from_right = binary!(BinaryOp::Mul, quotient, dr);
+                        let num = binary!(BinaryOp::Sub, dl, from_right);
+                        binary!(BinaryOp::Div, num, right)
                     }
                     BinaryOp::Pow => {
                         // d(u^v) =
@@ -4512,18 +4509,33 @@ pub mod autodiff {
                 a: Some(y),
                 b: Some(x),
             } => {
-                // atan2(y, x): d = (x*dy - y*dx)/(x^2 + y^2)
                 let dy = differentiate!(y);
                 let dx = differentiate!(x);
+                let (scale, y, x) = normalized_coordinates(arena, y, x);
                 let from_ordinate = binary!(BinaryOp::Mul, x, dy);
                 let from_abscissa = binary!(BinaryOp::Mul, y, dx);
                 let num = binary!(BinaryOp::Sub, from_ordinate, from_abscissa);
-                let two = constant!(2.0);
-                let x_squared = binary!(BinaryOp::Pow, x, two);
-                let other_two = constant!(2.0);
-                let y_squared = binary!(BinaryOp::Pow, y, other_two);
+                let x_squared = binary!(BinaryOp::Mul, x, x);
+                let y_squared = binary!(BinaryOp::Mul, y, y);
                 let den = binary!(BinaryOp::Add, x_squared, y_squared);
-                binary!(BinaryOp::Div, num, den)
+                let normalized = binary!(BinaryOp::Div, num, den);
+                binary!(BinaryOp::Div, normalized, scale)
+            }
+            Node::Call {
+                func: IrFunction::Hypot,
+                argc: 2,
+                a: Some(left),
+                b: Some(right),
+            } => {
+                let dl = differentiate!(left);
+                let dr = differentiate!(right);
+                let (_, left, right) = normalized_coordinates(arena, left, right);
+                let magnitude = arena.push_call(IrFunction::Hypot, &[left, right]);
+                let left_factor = binary!(BinaryOp::Div, left, magnitude);
+                let right_factor = binary!(BinaryOp::Div, right, magnitude);
+                let from_left = binary!(BinaryOp::Mul, dl, left_factor);
+                let from_right = binary!(BinaryOp::Mul, dr, right_factor);
+                binary!(BinaryOp::Add, from_left, from_right)
             }
             Node::Call {
                 func: IrFunction::Pow,
@@ -4844,6 +4856,22 @@ pub mod autodiff {
             // constants in the DC Jacobian
             _ => constant!(0.0),
         }
+    }
+
+    /// A positive auxiliary scale is held fixed under AD. Homogeneous norm
+    /// and angle derivatives are independent of its value, at every order.
+    fn normalized_coordinates(
+        arena: &mut ExprArena,
+        left: NodeId,
+        right: NodeId,
+    ) -> (NodeId, NodeId, NodeId) {
+        let left_abs = arena.push_call(IrFunction::Abs, &[left]);
+        let right_abs = arena.push_call(IrFunction::Abs, &[right]);
+        let scale = arena.push_call(IrFunction::Max, &[left_abs, right_abs]);
+        let scale = arena.push(Node::FreezeDerivative(scale));
+        let left = arena.push(Node::Binary(BinaryOp::Div, left, scale));
+        let right = arena.push(Node::Binary(BinaryOp::Div, right, scale));
+        (scale, left, right)
     }
 
     /// The base the power rule's `u^(v−1)` factor is raised from: `u` itself
@@ -5190,7 +5218,7 @@ pub mod autodiff {
             // read the same nodes and nothing a previous case appended is
             // reachable from this one.
             type Build = fn(&mut ExprArena) -> NodeId;
-            let corpus: [(&str, Build); 13] = [
+            let corpus: [(&str, Build); 14] = [
                 ("noise metadata is not a realization operand", |arena| {
                     let power = noise(arena, 1);
                     arena.push_heavy(Heavy::WhiteNoise {
@@ -5245,10 +5273,15 @@ pub mod autodiff {
                         arena.push_call(IrFunction::Pow, &[base, exponent])
                     },
                 ),
-                ("atan2 removes a derivative multiplied by zero", |arena| {
+                ("atan2 retains its normalized derivative domain", |arena| {
                     let left = noise(arena, 0);
                     let right = constant(arena, 0.0);
                     arena.push_call(IrFunction::Atan2, &[left, right])
+                }),
+                ("hypot retains both noise operands", |arena| {
+                    let left = noise(arena, 0);
+                    let right = noise(arena, 1);
+                    arena.push_call(IrFunction::Hypot, &[left, right])
                 }),
                 ("piecewise-constant function has zero derivative", |arena| {
                     let argument = noise(arena, 0);

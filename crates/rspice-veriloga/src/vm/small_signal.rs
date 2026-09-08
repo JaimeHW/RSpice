@@ -521,6 +521,7 @@ impl<'a> SmallSignalVm<'a> {
             Instruction::Acosh => self.unary_real("Acosh", f64::acosh)?,
             Instruction::Atanh => self.unary_real("Atanh", f64::atanh)?,
             Instruction::Atan2 => self.binary_real("Atan2", |left, right| left.atan2(right))?,
+            Instruction::Hypot => self.binary_real("Hypot", f64::hypot)?,
             Instruction::Floor => self.unary_real("Floor", f64::floor)?,
             Instruction::Ceil => self.unary_real("Ceil", f64::ceil)?,
             Instruction::Gt => self.binary_real("Gt", |left, right| f64::from(left > right))?,

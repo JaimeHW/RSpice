@@ -10,9 +10,13 @@ use super::*;
 use crate::ir::arena::{ExprArena, Heavy, Node, NodeId, ZiPolynomial, unpack_index};
 use std::collections::HashMap;
 
+#[derive(Default)]
 struct EmitContext {
     parameter_indices: HashMap<SmolStr, usize>,
     variable_indices: HashMap<SmolStr, usize>,
+    // One arena node is one integration/limiting site, even when AD reads
+    // its primal several times. This context belongs to a single IR arena.
+    integration_sites: std::cell::RefCell<HashMap<NodeId, usize>>,
 }
 
 #[cfg(test)]
@@ -135,6 +139,14 @@ endmodule
 }
 
 impl EmitContext {
+    fn integration_slot(&self, node: NodeId, counter: &std::cell::Cell<usize>) -> usize {
+        *self
+            .integration_sites
+            .borrow_mut()
+            .entry(node)
+            .or_insert_with(|| CodeGenerator::allocate_slot(counter))
+    }
+
     fn from_ir(ir: &DeviceIR) -> Self {
         Self {
             parameter_indices: ir
@@ -149,6 +161,7 @@ impl EmitContext {
                 .enumerate()
                 .map(|(idx, var)| (var.name.clone(), idx))
                 .collect(),
+            integration_sites: Default::default(),
         }
     }
 }
@@ -1147,6 +1160,7 @@ impl CodeGenerator {
             IrFunction::Acosh => Instruction::Acosh,
             IrFunction::Atanh => Instruction::Atanh,
             IrFunction::Atan2 => Instruction::Atan2,
+            IrFunction::Hypot => Instruction::Hypot,
             // Rounding
             IrFunction::Floor => Instruction::Floor,
             IrFunction::Ceil => Instruction::Ceil,
@@ -1354,7 +1368,7 @@ impl CodeGenerator {
                     // (value - prev_value) / dt in transient, 0 at DC. The state
                     // slot records the operand so the next step has its history.
                     self.emit_expr(arena, inner, emit_ctx, program)?;
-                    let state_id = Self::allocate_slot(&self.limit_state_count);
+                    let state_id = emit_ctx.integration_slot(id, &self.limit_state_count);
                     program.instructions.push(Instruction::DdtState(state_id));
                 }
                 Node::Idt(inner, ic) => {
@@ -1366,7 +1380,7 @@ impl CodeGenerator {
                     } else {
                         program.instructions.push(Instruction::PushConst(0.0));
                     }
-                    let state_id = Self::allocate_slot(&self.limit_state_count);
+                    let state_id = emit_ctx.integration_slot(id, &self.limit_state_count);
                     program.instructions.push(Instruction::IdtState(state_id));
                 }
                 Node::IdtMod {
@@ -1385,7 +1399,7 @@ impl CodeGenerator {
                         Some(offset) => self.emit_expr(arena, offset, emit_ctx, program)?,
                         None => program.instructions.push(Instruction::PushConst(0.0)),
                     }
-                    let state_id = Self::allocate_slot(&self.limit_state_count);
+                    let state_id = emit_ctx.integration_slot(id, &self.limit_state_count);
                     program
                         .instructions
                         .push(Instruction::IdtModState(state_id));
@@ -1428,12 +1442,12 @@ impl CodeGenerator {
                         // Default step limit for pn-junction type limiting
                         program.instructions.push(Instruction::PushConst(0.7)); // ~2*Vt
                     }
-                    let state_id = Self::allocate_slot(&self.limit_state_count);
+                    let state_id = emit_ctx.integration_slot(id, &self.limit_state_count);
                     program.instructions.push(Instruction::LimitState(state_id));
                 }
                 Node::CanonicalLimit(inner) => {
                     self.emit_expr(arena, inner, emit_ctx, program)?;
-                    let state_id = Self::allocate_slot(&self.limit_state_count);
+                    let state_id = emit_ctx.integration_slot(id, &self.limit_state_count);
                     program
                         .instructions
                         .push(Instruction::CanonicalLimitState(state_id));
@@ -2026,10 +2040,7 @@ fn count_ir_assignment_items(items: &[crate::ir::IrAssignmentItem]) -> usize {
 /// wants.
 #[cfg(test)]
 fn empty_emit_context() -> EmitContext {
-    EmitContext {
-        parameter_indices: HashMap::new(),
-        variable_indices: HashMap::new(),
-    }
+    EmitContext::default()
 }
 
 fn count_assignment_steps_for_timing(items: &[AssignmentStep]) -> usize {

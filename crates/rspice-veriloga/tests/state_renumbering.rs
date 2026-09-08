@@ -175,11 +175,10 @@ fn renumbering_leaves_the_integrated_history_unchanged() {
         .compile(TWICE_EMITTED_DDT)
         .expect("bytecode-only compilation succeeds");
 
-    assert_ne!(
+    assert_eq!(
         integration_slots(&renumbered),
         integration_slots(&emitted),
-        "the two entries must disagree about the numbering or this test compares a model with \
-         itself"
+        "primal and derivative references must share one slot before renumbering too"
     );
 
     let renumbered_trajectory = ramp(&renumbered, &artifact);

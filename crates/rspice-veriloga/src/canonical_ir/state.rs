@@ -55,27 +55,12 @@
 //!
 //! ## What this numbering is *not*
 //!
-//! It is not the legacy bytecode slot. The two spaces are genuinely different
-//! sizes, and the difference is structural rather than incidental: the bytecode
-//! generator allocates a fresh scalar-state slot at each *emission* of an
-//! integration operator, and the generator compiles the same source operator
-//! more than once in two different ways. A statement is compiled twice when a
-//! module's noise replay genuinely differs from its ordinary pass — once as
-//! `assignment_steps` and again as `noise_assignment_steps`, the latter from
-//! `DeviceIR::noise_assignments` carrying noise shadows — and a contribution's
-//! operator is compiled again inside each Jacobian entry that the product rule
-//! leaves it in. One canonical `ddt` site therefore owns two or more bytecode
-//! slots. (A module whose two passes are the same — every shipped compact
-//! model — leaves `noise_assignment_steps` empty and emits its statements
-//! once; the numberings then differ only through the contributions.)
-//! [`CfgStateAllocation`] carries the measurement over the shipped corpus.
-//!
-//! So a CFG-sourced backend cannot adopt the bytecode numbering; it allocates
-//! from this layout, and the point at which shipped code does that is the point
-//! at which the accepted-state arrays are re-indexed and the runtime checkpoint
-//! state version has to move. Nothing here changes either yet:
-//! [`crate::native::expr`] still reads its slot *numbers* from the program it
-//! is lowering, and takes only the identity and the order from this module.
+//! A converted integration node now keeps its bytecode slot across derivative
+//! emissions. Separate conversion passes can still create different nodes for
+//! one source site, while other families allocate by counters or source spans.
+//! Canonical renumbering reconciles those identities before runtime execution;
+//! the CFG always allocates from this layout. Checkpoints therefore refer to
+//! source sites rather than to the number or order of emitted instructions.
 
 use std::collections::HashMap;
 
@@ -154,22 +139,15 @@ impl CanonicalStateFamily {
         !matches!(self, Self::TimerEvent)
     }
 
-    /// Whether the bytecode generator takes a fresh slot at every *emission* of
-    /// an operator in this family, rather than one per source site.
+    /// Whether repeated conversion of a source site can allocate extra slots.
     ///
-    /// The distinction is in `codegen::generator` and it is mechanical: three
-    /// families are allocated by a bare monotonic counter — `limit_state_count`
-    /// for [`Self::Integration`], `cross_detector_count` for
-    /// [`Self::CrossDetector`], `timer_state_count` for [`Self::TimerEvent`] —
-    /// so compiling one operator twice reserves two records. The rest go
-    /// through a site map (`absdelay_sites`, `transition_sites`, `slew_sites`,
-    /// `laplace_sites`, `zi_sites`) or are deduplicated by content
-    /// (`register_lookup_table`), so a second compilation of the same operator
-    /// returns the slot the first one took.
-    ///
-    /// This is what decides whether a module's per-site numbering can differ
-    /// from the generator's at all: see
-    /// [`CfgStateAllocation::agrees_with_emission_allocation`].
+    /// Integration slots are keyed by the DeviceIR arena node; repeated AD
+    /// reads reuse them, but a separate noise conversion can create another
+    /// node for the same source site. Cross and timer operators still use bare
+    /// counters. Other families use source-site maps or content deduplication.
+    /// The emission census deliberately treats the whole integration family
+    /// conservatively: its HIR input cannot predict which conversions share
+    /// an arena node. See [`CfgStateAllocation::agrees_with_emission_allocation`].
     pub fn allocates_per_emission(self) -> bool {
         matches!(
             self,
@@ -974,40 +952,13 @@ impl CfgStateAllocation {
 /// 5. every noise source: its `psd`, its `exponent`, and each injection's
 ///    `gain`.
 ///
-/// `allocate_slot` is a bare counter for three families
-/// ([`CanonicalStateFamily::allocates_per_emission`]), so an operator compiled
-/// in two of those contexts reserves two records; the other families go through
-/// a site map and reserve one however often they are compiled.
-///
-/// ## Why the contribution count is fatal on its own
-///
-/// W-D's ruling recorded the noise-assignment clone (3) and the PSD programs
-/// (5) as the re-emitting contexts. **The derivative programs in (4) are the
-/// third, and they are the one that makes a contribution-borne site unsafe by
-/// itself.** `codegen::autodiff`'s product rule is
-/// `d(l·r) = dl·r + l·dr`, which *keeps* `l` and `r`; so a contribution
-/// spelled `I(a,b) <+ f(V) * ddt(q)` differentiates to
-/// `df/dV · ddt(q) + f · ddt_companion(dq/dV)`, and the primal `ddt` is
-/// emitted again — once per Jacobian axis whose term the simplifier does not
-/// fold away. Which terms survive is `autodiff::simplify`'s answer, not a
-/// property of the HIR, so this level cannot bound it and does not pretend to:
-/// any counter-family site in a contribution answers `false`.
-///
-/// A contribution-borne site that is only ever *accumulated* — reached from the
-/// contribution root through `+`, `-` and unary sign alone — does vanish from
-/// its own derivative, because `d(ddt(q))` is a companion and carries no primal
-/// copy. Refusing those too is deliberate precision loss rather than an
-/// oversight: which terms survive is `autodiff::simplify`'s answer, and the
-/// noise PSD and injection-gain programs compile sub-expressions of the same
-/// trees under rules of their own, so a predicate that had to be right about
-/// all of them would be a second copy of the generator.
-///
-/// The loss is measured rather than assumed. Over the shipped corpus this
-/// answers `false` for thirty of the thirty-one modules whose two numberings do
-/// coincide, and `true` only for `r2_cmc`, which owns no state at all. The
-/// census `the_two_state_slot_numberings_are_censused_over_the_shipped_corpus`
-/// (`native::cfg_census`) reports that figure and asserts the soundness
-/// direction — `true` implies the counts coincide — on every module.
+/// The census is deliberately conservative. Integration nodes reuse slots
+/// within one DeviceIR arena, but separate conversions can still duplicate a
+/// source site. Cross and timer operators allocate per emission. This HIR-only
+/// check cannot predict which derivative and noise passes share converted
+/// nodes, so any affected contribution or noise replay keeps `agrees` false.
+/// The compiled-model census checks the soundness direction: a true result
+/// must imply that both allocation counts coincide.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EmissionCensus {
     /// Sites reachable from a parameter's default, bound or exclude
