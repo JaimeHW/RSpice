@@ -1868,6 +1868,17 @@ impl BuiltinVerilogAInstance {
         self.analysis_final_step = final_step;
     }
 
+    /// Accept a successfully evaluated standalone instance's candidate state.
+    ///
+    /// Call after the initial operating point before clearing `initial_step`,
+    /// so event-controlled initialization survives subsequent evaluations.
+    /// Circuit drivers validate and accept the complete collection atomically.
+    pub fn advance_state(&mut self) -> Result<(), String> {
+        self.validate_advance_state()?;
+        self.apply_validated_advance_state();
+        Ok(())
+    }
+
     #[inline]
     fn validate_advance_state(&self) -> Result<(), String> {
         self.kind.validate_advance_state()

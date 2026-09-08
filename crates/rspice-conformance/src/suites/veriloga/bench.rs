@@ -207,9 +207,10 @@ fn benchmark_model(
     let mut rhs = vec![0.0 as Value; size];
     let simparams = GeneratedSimulationParameters::new();
 
-    // One untimed stamp: it populates the model's instance- and
-    // temperature-static caches, which every later call reuses. Timing it would
-    // charge one-time setup to the steady-state cost.
+    // Initialize and accept the first operating point outside the timer.
+    // VBIC derives its temperature state in initial_step; subsequent Newton
+    // iterations must read that accepted state instead of uninitialized slots.
+    instance.set_analysis_step(true, false);
     instance
         .stamp(
             &mut matrix,
@@ -223,6 +224,10 @@ fn benchmark_model(
             model_name: model_name.to_string(),
             detail: error.to_string(),
         })?;
+
+    instance.advance_state().map_err(setup_error)?;
+    instance.set_analysis_step(false, false);
+    validate_finite_stamp(model_name, &mut matrix, &rhs)?;
 
     if !stamp_produced_contribution(&mut matrix, &rhs) {
         return Err(GeneratedStampBenchError::NoContribution {
@@ -256,6 +261,7 @@ fn benchmark_model(
                 })?;
         }
         let elapsed = started.elapsed();
+        validate_finite_stamp(model_name, &mut matrix, &rhs)?;
         per_stamp_ns.push(elapsed.as_secs_f64() * 1.0e9 / iterations as f64);
     }
 
@@ -269,6 +275,26 @@ fn benchmark_model(
         ns_per_stamp_p95: percentile(&per_stamp_ns, 0.95),
         ns_per_stamp_min: per_stamp_ns[0],
     })
+}
+
+fn validate_finite_stamp(
+    model_name: &str,
+    matrix: &mut StaticMatrix,
+    rhs: &[Value],
+) -> Result<(), GeneratedStampBenchError> {
+    if matrix
+        .values_mut()
+        .iter()
+        .chain(rhs)
+        .all(|value| value.is_finite())
+    {
+        Ok(())
+    } else {
+        Err(GeneratedStampBenchError::Evaluation {
+            model_name: model_name.to_string(),
+            detail: "matrix or RHS contains a non-finite value".to_string(),
+        })
+    }
 }
 
 /// Whether the device wrote anything the solver would see.
@@ -289,6 +315,27 @@ pub(super) fn percentile(ascending: &[f64], fraction: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[cfg(feature = "veriloga-model-vbic13")]
+    fn benchmark_initializes_vbic_before_timing_later_iterations() {
+        let results = run_generated_stamp_benchmarks(&GeneratedStampBenchConfig {
+            iterations: 3,
+            samples: 2,
+            models: vec!["vbic13".to_string()],
+        });
+        assert_eq!(results.len(), 1);
+        assert!(results[0].is_ok(), "{:?}", results[0]);
+    }
+
+    #[test]
+    fn non_finite_output_cannot_qualify_as_a_fast_stamp() {
+        let mut matrix = StaticMatrix::from_triplets(1, 1, &[(0, 0, 1.0)]).unwrap();
+        assert!(validate_finite_stamp("probe", &mut matrix, &[0.0]).is_ok());
+        assert!(validate_finite_stamp("probe", &mut matrix, &[Value::NAN]).is_err());
+        matrix.values_mut()[0] = Value::INFINITY;
+        assert!(validate_finite_stamp("probe", &mut matrix, &[0.0]).is_err());
+    }
 
     #[test]
     fn percentile_picks_nearest_rank() {
