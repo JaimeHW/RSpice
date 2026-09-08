@@ -52,7 +52,8 @@ pub use noise_params::{TwoPortNoise, derive_two_port_noise};
 pub use port_noise::PortNoiseAssembly;
 pub(crate) use port_noise::{PortNoiseAssemblyError, assemble_port_noise_with_abort};
 pub use ports::{
-    PortError, PortRealization, SParameterPort, collect_ports, normalize_ports, set_excitations,
+    PortError, PortRealization, SParameterPort, collect_ports, declare_ports_with_abort,
+    normalize_ports, set_excitations,
 };
 pub use stability::{GainAnalysis, StabilityAnalysis};
 pub use touchstone::{

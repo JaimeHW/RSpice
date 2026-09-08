@@ -780,6 +780,112 @@ fn sparam_matches_series_resistor_analytics() {
 }
 
 #[test]
+fn configured_sparam_exports_complete_model_endpoints_in_every_format() {
+    let directory = test_dir("configured_sp_finish");
+    let model = directory.join("sp_finish.va");
+    std::fs::write(
+        &model,
+        r#"module sp_finish(p,n);
+inout p,n; electrical p,n;
+parameter integer early=1;
+real conductance;
+analog begin
+    @(initial_step) conductance=0.02;
+    @(final_step) begin conductance=0.04; $finish(2); end
+    if (early && analysis("ac") && !analysis("static")) $finish(1);
+    I(p,n)<+conductance*V(p,n);
+end
+endmodule"#,
+    )
+    .unwrap();
+    let deck = directory.join("sp.cir");
+    for early in [true, false] {
+        std::fs::write(&deck, format!(
+            "* Configured asymmetric ports\nX1 p1 p2 sp_finish early={}\nRload p2 0 50\n.va \"{}\" sp_finish\n.ac lin 3 10 30\n.end\n",
+            usize::from(early), model.display().to_string().replace('\\', "/"),
+        )).unwrap();
+        let expected_frequencies = if early {
+            vec![10.0]
+        } else {
+            vec![10.0, 20.0, 30.0]
+        };
+        for format in ["csv", "json", "s2p"] {
+            let output_path = directory.join(format!("sp-{early}.{format}"));
+            let output = run_rspice(&[
+                "--quiet",
+                "run",
+                deck.to_str().unwrap(),
+                "--sparam",
+                "p1,0,p2,0",
+                "-o",
+                output_path.to_str().unwrap(),
+                "-f",
+                if format == "s2p" { "csv" } else { format },
+            ]);
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let source = std::fs::read_to_string(&output_path).unwrap();
+            let rows = if format == "json" {
+                let document: serde_json::Value = serde_json::from_str(&source).unwrap();
+                assert_eq!(document["pointCount"], expected_frequencies.len());
+                let frequencies = document["axes"][0]["values"]["values"].as_array().unwrap();
+                let signals = document["signals"].as_array().unwrap();
+                (0..expected_frequencies.len())
+                    .map(|index| {
+                        let mut values = vec![frequencies[index].as_f64().unwrap()];
+                        for name in ["s(1,1)", "s(2,1)", "s(1,2)", "s(2,2)"] {
+                            let signal = signals
+                                .iter()
+                                .find(|signal| signal["descriptor"]["canonicalName"] == name)
+                                .unwrap();
+                            let sample = &signal["values"]["samples"][index];
+                            values.push(sample["real"].as_f64().unwrap());
+                            values.push(sample["imaginary"].as_f64().unwrap());
+                        }
+                        values
+                    })
+                    .collect::<Vec<_>>()
+            } else {
+                source
+                    .lines()
+                    .filter(|line| !line.starts_with(['!', '#']) && !line.starts_with("frequency"))
+                    .map(|line| {
+                        line.split(|c: char| c == ',' || c.is_whitespace())
+                            .filter(|value| !value.is_empty())
+                            .map(|value| value.parse::<f64>().unwrap())
+                            .collect::<Vec<_>>()
+                    })
+                    .collect::<Vec<_>>()
+            };
+            assert_eq!(
+                rows.len(),
+                expected_frequencies.len(),
+                "{format}, early={early}"
+            );
+            for (index, row) in rows.iter().enumerate() {
+                assert_eq!(row.len(), 9);
+                assert_eq!(row[0], expected_frequencies[index]);
+                let expected = if index + 1 == rows.len() {
+                    [0.0, 0.5, 0.5, -0.25]
+                } else {
+                    [0.2, 0.4, 0.4, -0.2]
+                };
+                for (column, expected) in expected.iter().enumerate() {
+                    assert!(
+                        (row[2 * column + 1] - expected).abs() < 1e-10,
+                        "{format}, early={early}, row={row:?}"
+                    );
+                    assert!(row[2 * column + 2].abs() < 1e-10);
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn native_sp_card_matches_series_resistor_analytics() {
     let dir = test_dir("native_sp");
     let deck = dir.join("twoport_native_sp.cir");

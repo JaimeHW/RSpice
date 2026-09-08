@@ -1390,6 +1390,14 @@ pub(super) fn run_sparam_from_command(
         .engine
         .run_sp_with_abort(ctx.netlist, card, &crate::abort::ProcessAbort)
         .map_err(|error| map_advanced_simulation_error(ctx, "S-Parameters", error))?;
+    publish_sparam_run(ctx, &run, "sp")
+}
+
+fn publish_sparam_run(
+    ctx: &RunContext<'_>,
+    run: &rspice_core::engine::SParameterRun,
+    kind: &str,
+) -> Result<(), CliError> {
     ensure_not_cancelled(ctx)?;
 
     let frequencies = run
@@ -1418,10 +1426,10 @@ pub(super) fn run_sparam_from_command(
         }
     }
 
-    let Some(resolved) = ctx.resolve_output("sp") else {
+    let Some(resolved) = ctx.resolve_output(kind) else {
         return Ok(());
     };
-    let analysis_id = resolved.analysis("sp")?;
+    let analysis_id = resolved.analysis(kind)?;
     let output_path = &resolved.path;
     if touchstone_extension_matches(output_path, run.ports.len()) {
         if run.port_noise.is_some() {
@@ -1435,7 +1443,7 @@ pub(super) fn run_sparam_from_command(
         }
         write_touchstone_nport(output_path, &run.ports, &frequencies, &scattering)?;
     } else {
-        let signals = sparameter_export_signals(&run, &frequencies, &scattering);
+        let signals = sparameter_export_signals(run, &frequencies, &scattering, kind == "sparam");
         super::document::publish_analysis_result(
             ctx,
             output_path,
@@ -1466,7 +1474,7 @@ pub(super) fn run_sparam_from_command(
                         .map_err(|err| super::shared::map_hdf5_output_error(path, err))
                 } else {
                     super::export::complex_table(
-                        "sp",
+                        kind,
                         "S-Parameters",
                         frequencies.clone(),
                         &signals,
@@ -1533,6 +1541,7 @@ fn sparameter_export_signals(
     run: &rspice_core::engine::SParameterRun,
     frequencies: &[f64],
     scattering: &[Vec<Vec<rspice_core::Complex64>>],
+    legacy_names: bool,
 ) -> Vec<crate::commands::run_signals::ComplexSignal> {
     use crate::commands::run_signals::{ComplexSignal, SignalKind};
 
@@ -1552,11 +1561,17 @@ fn sparameter_export_signals(
 
     for (row, columns) in scattering.iter().enumerate() {
         for (column, series) in columns.iter().enumerate() {
-            push(
-                format!("S_{}_{}", row + 1, column + 1),
-                series,
-                SignalKind::Voltage,
-            );
+            let (row, column, series) = if legacy_names {
+                (column, row, &scattering[column][row])
+            } else {
+                (row, column, series)
+            };
+            let name = if legacy_names {
+                format!("S{}{}", row + 1, column + 1)
+            } else {
+                format!("S_{}_{}", row + 1, column + 1)
+            };
+            push(name, series, SignalKind::Voltage);
         }
     }
 
@@ -1677,12 +1692,9 @@ fn write_touchstone_nport(
 
 /// Two-port S-parameter extraction over the deck's `.AC` sweep.
 ///
-/// Standard matched-termination wave method: for each drive port, a source
-/// of 2 V AC behind Z0 excites the port (incident wave of 1 V) while the
-/// other port is terminated in Z0. The port voltages then read off the
-/// S-parameters directly — `Sjj = Vj − 1`, `Sij = Vi` — with no matrix
-/// inversion and no floating-port hazard. The deck supplies the bias
-/// network and sweep; its own sources must not carry AC specifications.
+/// A source behind Z0 terminates each configured reference plane. The shared SP
+/// runner supplies the bias, independent port excitations, completed grid,
+/// and scattering matrix; all exports use that same result.
 pub(super) fn run_sparam(ctx: &RunContext<'_>, ports_spec: &str, z0: f64) -> Result<(), CliError> {
     ensure_not_cancelled(ctx)?;
     if !z0.is_finite() || z0 <= 0.0 {
@@ -1727,257 +1739,29 @@ pub(super) fn run_sparam(ctx: &RunContext<'_>, ports_spec: &str, z0: f64) -> Res
     let frequencies =
         super::shared::generate_frequency_sweep(variation, points, start_freq, stop_freq)?;
 
-    let source = ctx
-        .netlist
-        .source_text
-        .as_deref()
-        .ok_or_else(|| CliError::InternalError {
-            message: "netlist source unavailable for S-parameter excitation".to_string(),
-        })?;
-    let base = ctx
-        .netlist
-        .source_path
-        .clone()
-        .unwrap_or_else(|| ctx.args.input.clone());
-
-    if !ctx.quiet {
-        println!(
-            "Running 2-port S-parameter extraction: Z0={}Ω, {} frequency points",
-            z0,
-            frequencies.len()
-        );
-    }
-
-    // One AC sweep per driven port, with the excitation network appended.
-    let drive = |drive_port: usize| -> Result<Vec<rspice_core::analysis::AcResult>, CliError> {
-        let (dp, dm) = (&port_nodes[2 * drive_port], &port_nodes[2 * drive_port + 1]);
-        let (lp, lm) = (
-            &port_nodes[2 * (1 - drive_port)],
-            &port_nodes[2 * (1 - drive_port) + 1],
-        );
-        let mut excited = String::with_capacity(source.len() + 128);
-        for line in source.lines() {
-            if line.trim().eq_ignore_ascii_case(".end") {
-                excited.push_str(&format!(
-                    "VSPDRV spdrv_node {dm} AC 2\nRSPSRC spdrv_node {dp} {z0}\nRSPLOAD {lp} {lm} {z0}\n"
-                ));
-            }
-            excited.push_str(line);
-            excited.push('\n');
-        }
-        let parse_options =
-            super::parse_options_for_run(ctx.args, ctx.engine.config().resource_limits);
-        let netlist = rspice_core::Netlist::parse_with_path_and_options_and_abort(
-            &excited,
-            &base,
-            parse_options,
-            &crate::abort::ProcessAbort,
-        )
-        .map_err(|error| match error {
-            rspice_core::netlist::ParseWithAbortError::Aborted => {
-                super::cancellation_cli_error(ctx.args.timeout)
-            }
-            rspice_core::netlist::ParseWithAbortError::Parse(error) => CliError::ParseError {
-                message: format!("S-parameter excitation: {error}"),
-                line: None,
-                suggestion: None,
-            },
-        })?;
-        ctx.engine
-            .run_ac_with_abort(&netlist, &frequencies, &crate::abort::ProcessAbort)
-            .map_err(|error| map_advanced_simulation_error(ctx, "S-Parameters", error))
-    };
-
-    let drive1 = drive(0)?;
-    let drive2 = drive(1)?;
-    ensure_not_cancelled(ctx)?;
-
-    // Differential port voltage at one sweep point.
-    let ground_policy = ctx.netlist.ground_policy();
-    let port_v = |result: &rspice_core::analysis::AcResult,
-                  plus: &str,
-                  minus: &str|
-     -> Result<rspice_core::Complex64, CliError> {
-        let lookup = |node: &str| -> Result<rspice_core::Complex64, CliError> {
-            if ground_policy.is_ground(node) {
-                return Ok(rspice_core::Complex64::new(0.0, 0.0));
-            }
-            result
-                .node_names
-                .iter()
-                .position(|name| name.eq_ignore_ascii_case(node))
-                .and_then(|index| result.voltages.get(index).copied())
-                .ok_or_else(|| CliError::SimulationError {
-                    message: format!("S-parameter port node '{node}' not found in the circuit"),
-                    analysis: Some("S-Parameters".to_string()),
-                })
-        };
-        Ok(lookup(plus)? - lookup(minus)?)
-    };
-
-    // With Vs = 2 V behind Z0, the incident wave at the driven port is 1 V:
-    // Sjj = Vj - 1, Sij = Vi.
-    let one = rspice_core::Complex64::new(1.0, 0.0);
-    let mut s11 = Vec::with_capacity(frequencies.len());
-    let mut s21 = Vec::with_capacity(frequencies.len());
-    let mut s12 = Vec::with_capacity(frequencies.len());
-    let mut s22 = Vec::with_capacity(frequencies.len());
-    for (point1, point2) in drive1.iter().zip(&drive2) {
-        ensure_not_cancelled(ctx)?;
-        s11.push(port_v(point1, &port_nodes[0], &port_nodes[1])? - one);
-        s21.push(port_v(point1, &port_nodes[2], &port_nodes[3])?);
-        s22.push(port_v(point2, &port_nodes[2], &port_nodes[3])? - one);
-        s12.push(port_v(point2, &port_nodes[0], &port_nodes[1])?);
-    }
-
-    if !ctx.quiet
-        && let (Some(first_s11), Some(first_s21)) = (s11.first(), s21.first())
-    {
-        println!(
-            "  @ {:e} Hz: |S11|={:.4} |S21|={:.4}",
-            frequencies.first().copied().unwrap_or(0.0),
-            first_s11.norm(),
-            first_s21.norm()
-        );
-    }
-
-    ensure_not_cancelled(ctx)?;
-    if let Some(resolved) = ctx.resolve_output("sparam") {
-        let analysis_id = resolved.analysis("sparam")?;
-        let output_path = &resolved.path;
-        if output_path
-            .extension()
-            .is_some_and(|ext| ext.eq_ignore_ascii_case("s2p") || ext.eq_ignore_ascii_case("snp"))
-        {
-            write_touchstone_2port(output_path, z0, &frequencies, [&s11, &s21, &s12, &s22])?;
-        } else {
-            let signal = |name: &str, values: &[rspice_core::Complex64]| {
-                crate::commands::run_signals::ComplexSignal {
-                    display_name: name.to_string(),
-                    raw_name: name.to_string(),
-                    kind: crate::commands::run_signals::SignalKind::Voltage,
-                    real: values.iter().map(|c| c.re).collect(),
-                    imag: values.iter().map(|c| c.im).collect(),
-                }
-            };
-            let signals = vec![
-                signal("S11", &s11),
-                signal("S21", &s21),
-                signal("S12", &s12),
-                signal("S22", &s22),
-            ];
-            let core_result = two_port_core_result(z0, &frequencies, [&s11, &s21, &s12, &s22]);
-            super::document::publish_analysis_result(
-                ctx,
-                output_path,
-                analysis_id,
-                super::document::complex_schema(&signals)?,
-                || {
-                    rspice_core::execution::AnalysisResultDocument::from_s_parameters(
-                        analysis_id,
-                        &core_result,
-                    )
-                },
-                |path, format| {
-                    if matches!(format, crate::cli::OutputFormat::Hdf5) {
-                        let mut data = crate::hdf5::Hdf5SimulationData::new();
-                        data.title = "S-Parameters".to_string();
-                        data.identity = Some(super::document::hdf5_identity(ctx, analysis_id)?);
-                        let mut section = crate::hdf5::Hdf5AcSection::new(frequencies.clone());
-                        for s in &signals {
-                            section.add_signal(
-                                s.display_name.clone(),
-                                s.unit_symbol(),
-                                s.real.clone(),
-                                s.imag.clone(),
-                            );
-                        }
-                        data.ac = Some(section);
-                        crate::hdf5::write_hdf5(path, &data)
-                            .map_err(|err| super::shared::map_hdf5_output_error(path, err))
-                    } else {
-                        super::export::complex_table(
-                            "sparam",
-                            "S-Parameters",
-                            frequencies.clone(),
-                            &signals,
-                        )
-                        .write(path, format)
-                    }
-                },
-            )?;
-        }
-        if !ctx.quiet {
-            println!("  S-parameters exported to: {}", output_path.display());
-        }
-    }
-
-    Ok(())
-}
-
-/// Re-assemble the `--sparam` two-port sweep into the core result type the
-/// shared document is built from.
-fn two_port_core_result(
-    z0: f64,
-    frequencies: &[f64],
-    s: [&[rspice_core::Complex64]; 4],
-) -> rspice_core::analysis::s_param::SParameterResult {
-    use rspice_core::analysis::s_param::{Port, SMatrix, SParameterResult};
-
-    // `--sparam` drives the deck's two named ports; their reference planes are
-    // not carried through this path, so the ports are identified by number.
-    let ports = (1..=2)
-        .map(|number| Port {
-            number,
-            node_pos: format!("port{number}"),
-            node_neg: "0".to_string(),
+    let mut netlist = ctx.netlist.clone();
+    let ports = (0..2)
+        .map(|index| s_param::Port {
+            number: index + 1,
+            node_pos: port_nodes[2 * index].clone(),
+            node_neg: port_nodes[2 * index + 1].clone(),
             z0,
         })
         .collect::<Vec<_>>();
-    let mut result = SParameterResult::new(z0, ports);
-    // `s` is ordered S11, S21, S12, S22, matching Touchstone two-port order.
-    let placement = [(0, 0), (1, 0), (0, 1), (1, 1)];
-    for (index, frequency) in frequencies.iter().enumerate() {
-        let mut matrix = SMatrix::new(*frequency, 2);
-        for (series, (row, column)) in s.iter().zip(placement) {
-            if let Some(value) = series.get(index) {
-                matrix.set(row, column, *value);
-            }
-        }
-        result.data.push(matrix);
-    }
-    result
-}
-
-/// Touchstone v1 two-port file (`# HZ S RI R <z0>`, S11 S21 S12 S22 order).
-fn write_touchstone_2port(
-    path: &std::path::Path,
-    z0: f64,
-    frequencies: &[f64],
-    s: [&[rspice_core::Complex64]; 4],
-) -> Result<(), CliError> {
-    publish::artifact(path, |file| {
-        writeln!(file, "! 2-port S-parameters").map_err(|e| CliError::output_error(path, e))?;
-        writeln!(file, "# HZ S RI R {z0}").map_err(|e| CliError::output_error(path, e))?;
-        let [s11, s21, s12, s22] = s;
-        for (index, freq) in frequencies.iter().enumerate() {
-            let entry = |values: &[rspice_core::Complex64]| {
-                values
-                    .get(index)
-                    .copied()
-                    .unwrap_or_else(|| rspice_core::Complex64::new(0.0, 0.0))
-            };
-            let (a, b, c, d) = (entry(s11), entry(s21), entry(s12), entry(s22));
-            writeln!(
-                file,
-                "{freq:.9e} {:.9e} {:.9e} {:.9e} {:.9e} {:.9e} {:.9e} {:.9e} {:.9e}",
-                a.re, a.im, b.re, b.im, c.re, c.im, d.re, d.im
-            )
-            .map_err(|e| CliError::output_error(path, e))?;
-        }
-        Ok(())
-    })
-    .map_err(|error| map_atomic_output_error(path, error))
+    s_param::declare_ports_with_abort(&mut netlist, &ports, &crate::abort::ProcessAbort).map_err(
+        |error| match error {
+            s_param::PortError::Aborted => super::cancellation_cli_error(ctx.args.timeout),
+            other => CliError::InvalidArgument {
+                message: other.to_string(),
+                suggestion: None,
+            },
+        },
+    )?;
+    let run = ctx
+        .engine
+        .run_sp_over_grid_with_abort(&netlist, &frequencies, false, &crate::abort::ProcessAbort)
+        .map_err(|error| map_advanced_simulation_error(ctx, "S-Parameters", error))?;
+    publish_sparam_run(ctx, &run, "sparam")
 }
 
 #[cfg(test)]

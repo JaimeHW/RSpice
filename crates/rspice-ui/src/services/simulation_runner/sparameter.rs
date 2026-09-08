@@ -15,7 +15,8 @@ use rspice_core::Value;
 use rspice_core::abort_signal::AbortSignal;
 use rspice_core::analysis::s_param;
 use rspice_core::engine::Engine;
-use rspice_core::netlist::{Element, ElementKind, SourceSpec};
+#[cfg(test)]
+use rspice_core::netlist::ElementKind;
 use std::path::Path;
 
 /// Sweep type for S-parameter analysis.
@@ -234,84 +235,21 @@ fn inject_configured_ports(
     config: &SParameterRunConfig,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<Vec<s_param::SParameterPort>> {
-    let mut ports = Vec::with_capacity(config.ports.len());
-    for (index, port) in config.ports.iter().enumerate() {
-        poll_periodically(abort, index)?;
-        let source_name =
-            unique_aux_element_name(netlist, &format!("__RSPICE_SP_PORT{}", index + 1), abort)?;
-        let resistor_name =
-            unique_aux_element_name(netlist, &format!("__RSPICE_SP_Z0_{}", index + 1), abort)?;
-        let internal_node = format!("__RSPICE_SP_PORT{}_INT", index + 1);
-        let z0 = port.z0.unwrap_or(config.z0);
-
-        netlist.elements.push(Element {
-            name: source_name.clone(),
-            nodes: vec![internal_node.clone(), port.node_neg.clone()],
-            kind: ElementKind::VoltageSource(SourceSpec::RfPort {
-                inner: Box::new(SourceSpec::Dc(0.0)),
-                port: rspice_core::netlist::SourceRfPort {
-                    portnum: index + 1,
-                    z0,
-                    power: None,
-                    frequency: None,
-                    phase: None,
-                    reference_plane: Some(port.node_pos.clone()),
-                },
-            }),
-            provenance: rspice_core::netlist::ElementProvenance::Authored,
-        });
-        netlist.elements.push(Element {
-            name: resistor_name,
-            nodes: vec![port.node_pos.clone(), internal_node],
-            kind: ElementKind::Resistor {
-                value: z0,
-                value_expr: None,
-                model: None,
-                instance_params: Vec::new(),
-                deferred_params: Vec::new(),
-            },
-            provenance: rspice_core::netlist::ElementProvenance::Authored,
-        });
-
-        ports.push(s_param::SParameterPort {
+    let ports = config
+        .ports
+        .iter()
+        .enumerate()
+        .map(|(index, port)| s_param::Port {
             number: index + 1,
-            source_name,
             node_pos: port.node_pos.clone(),
             node_neg: port.node_neg.clone(),
-            z0,
-            realization: s_param::PortRealization::Thevenin,
-        });
-    }
-    Ok(ports)
-}
-
-fn unique_aux_element_name(
-    netlist: &rspice_core::Netlist,
-    base: &str,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<String> {
-    let name_exists = |candidate: &str| -> ServiceRunResult<bool> {
-        for (index, element) in netlist.elements.iter().enumerate() {
-            poll_periodically(abort, index)?;
-            if element.name.eq_ignore_ascii_case(candidate) {
-                return Ok(true);
-            }
-        }
-        Ok(false)
-    };
-
-    if !name_exists(base)? {
-        return Ok(base.to_string());
-    }
-
-    for idx in 1.. {
-        ensure_not_aborted(abort)?;
-        let candidate = format!("{}_{}", base, idx);
-        if !name_exists(&candidate)? {
-            return Ok(candidate);
-        }
-    }
-    unreachable!("unbounded iterator should always find a unique name");
+            z0: port.z0.unwrap_or(config.z0),
+        })
+        .collect::<Vec<_>>();
+    s_param::declare_ports_with_abort(netlist, &ports, abort).map_err(|error| match error {
+        s_param::PortError::Aborted => ServiceRunError::Aborted,
+        other => ServiceRunError::Failure(other.to_string()),
+    })
 }
 
 #[cfg(test)]
@@ -379,6 +317,8 @@ endmodule"#,
         )
         .unwrap();
         let mut config = two_port_config();
+        config.ports[0].node_pos = " in ".into();
+        config.ports[1].node_pos = "out".into();
         config.ports[1].z0 = Some(50.0);
         let deck = format!(
             "* Finished SP\nX1 IN OUT sp_finish\n.va \"{}\" sp_finish\n.end\n",

@@ -13,7 +13,9 @@
 //! port 2 would produce a plausible S-matrix describing the wrong network.
 
 use crate::Value;
-use crate::netlist::{ElementKind, Netlist, SourceSpec};
+use crate::abort_signal::{AbortSignal, NoAbort};
+use crate::netlist::{Element, ElementKind, ElementProvenance, Netlist, SourceSpec};
+use std::collections::HashSet;
 
 /// One `.SP` port resolved from a netlist annotation.
 #[derive(Debug, Clone, PartialEq)]
@@ -51,6 +53,8 @@ pub enum PortRealization {
 /// Why a deck's `.SP` port declarations could not be used.
 #[derive(Debug, Clone, PartialEq)]
 pub enum PortError {
+    /// Port preparation was cancelled before publication.
+    Aborted,
     /// An annotated source had fewer than two terminals.
     MissingTerminals { source_name: String },
     /// A `z0=` annotation was not a positive, finite resistance.
@@ -72,6 +76,7 @@ pub enum PortError {
 impl std::fmt::Display for PortError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::Aborted => write!(f, "S-parameter port preparation aborted"),
             Self::MissingTerminals { source_name } => write!(
                 f,
                 "S-parameter port source '{source_name}' must have positive and negative nodes"
@@ -104,6 +109,204 @@ impl std::fmt::Display for PortError {
 }
 
 impl std::error::Error for PortError {}
+
+/// Materialize configured reference planes as terminated RF ports.
+///
+/// This is for a deck without authored RF ports. Every plane receives one
+/// zero-DC generator behind its reference impedance; source and internal node
+/// names cannot alias existing circuit names. Validation and cancellation
+/// leave the supplied netlist unchanged. The resulting annotations are the
+/// same ones consumed by the card-driven SP runner.
+pub fn declare_ports_with_abort(
+    netlist: &mut Netlist,
+    configured: &[super::Port],
+    abort: &dyn AbortSignal,
+) -> Result<Vec<SParameterPort>, PortError> {
+    if abort.is_aborted() {
+        return Err(PortError::Aborted);
+    }
+    if configured.is_empty() {
+        return Err(PortError::NoPortsDeclared);
+    }
+    match collect_ports(netlist) {
+        Ok(ports) => return Err(PortError::PortSourceUnusable {
+            source_name: ports[0].source_name.clone(),
+            reason: "already declares RF ports; use those declarations instead of adding configured ports".into(),
+        }),
+        Err(PortError::NoPortsDeclared) => {}
+        Err(error) => return Err(error),
+    }
+    let mut names = PortNames::new(netlist, abort)?;
+    let ground = netlist.ground_policy();
+    let canonical_node = |node: &str| ground.canonical_node(node.trim()).to_ascii_uppercase();
+    for (index, port) in configured.iter().enumerate() {
+        if abort.is_aborted() {
+            return Err(PortError::Aborted);
+        }
+        let source_name = format!("__RSPICE_SP_PORT{}", index + 1);
+        if port.number != index + 1 {
+            return Err(PortError::NonDensePortNumbers {
+                expected: index + 1,
+                found: port.number,
+                source_name,
+            });
+        }
+        if !port.z0.is_finite() || port.z0 <= 0.0 {
+            return Err(PortError::InvalidReferenceImpedance {
+                source_name,
+                z0: port.z0,
+            });
+        }
+        if port.node_pos.trim().is_empty() || port.node_neg.trim().is_empty() {
+            return Err(PortError::MissingTerminals { source_name });
+        }
+        names.nodes.insert(canonical_node(&port.node_pos));
+        names.nodes.insert(canonical_node(&port.node_neg));
+    }
+    let mut additions = Vec::new();
+    let mut ports = Vec::with_capacity(configured.len());
+    for port in configured {
+        let source_name = unique_name(
+            &mut names.elements,
+            &format!("__RSPICE_SP_PORT{}", port.number),
+            abort,
+        )?;
+        let resistor_name = unique_name(
+            &mut names.elements,
+            &format!("__RSPICE_SP_Z0_{}", port.number),
+            abort,
+        )?;
+        let internal = unique_name(
+            &mut names.nodes,
+            &format!("__RSPICE_SP_PORT{}_INT", port.number),
+            abort,
+        )?;
+        let node_pos = canonical_node(&port.node_pos);
+        let node_neg = canonical_node(&port.node_neg);
+        additions.push(Element {
+            name: source_name.clone(),
+            nodes: vec![internal.clone(), node_neg.clone()],
+            kind: ElementKind::VoltageSource(SourceSpec::RfPort {
+                inner: Box::new(SourceSpec::Dc(0.0)),
+                port: crate::netlist::SourceRfPort {
+                    portnum: port.number,
+                    z0: port.z0,
+                    power: None,
+                    frequency: None,
+                    phase: None,
+                    reference_plane: Some(node_pos.clone()),
+                },
+            }),
+            provenance: ElementProvenance::Authored,
+        });
+        additions.push(reference_resistor(
+            resistor_name,
+            &source_name,
+            &node_pos,
+            internal,
+            port.z0,
+        ));
+        ports.push(SParameterPort {
+            number: port.number,
+            source_name,
+            node_pos,
+            node_neg,
+            z0: port.z0,
+            realization: PortRealization::Thevenin,
+        });
+    }
+    if abort.is_aborted() {
+        return Err(PortError::Aborted);
+    }
+    netlist.elements.extend(additions);
+    Ok(ports)
+}
+
+struct PortNames {
+    elements: HashSet<String>,
+    nodes: HashSet<String>,
+}
+
+impl PortNames {
+    fn new(netlist: &Netlist, abort: &dyn AbortSignal) -> Result<Self, PortError> {
+        let mut names = Self {
+            elements: HashSet::new(),
+            nodes: HashSet::new(),
+        };
+        for element in &netlist.elements {
+            if abort.is_aborted() {
+                return Err(PortError::Aborted);
+            }
+            names.elements.insert(element.name.to_ascii_uppercase());
+            for node in &element.nodes {
+                names.nodes.insert(node.to_ascii_uppercase());
+            }
+        }
+        for node in
+            netlist
+                .global_nodes
+                .iter()
+                .map(String::as_str)
+                .chain(netlist.initial_conditions.iter().flat_map(|ic| {
+                    std::iter::once(ic.node.as_str()).chain(ic.reference.as_deref())
+                }))
+                .chain(netlist.node_sets.iter().flat_map(|hint| {
+                    std::iter::once(hint.node.as_str()).chain(hint.reference.as_deref())
+                }))
+        {
+            if abort.is_aborted() {
+                return Err(PortError::Aborted);
+            }
+            names.nodes.insert(node.to_ascii_uppercase());
+        }
+        Ok(names)
+    }
+}
+
+fn unique_name(
+    used: &mut HashSet<String>,
+    base: &str,
+    abort: &dyn AbortSignal,
+) -> Result<String, PortError> {
+    for index in 0_u64.. {
+        if abort.is_aborted() {
+            return Err(PortError::Aborted);
+        }
+        let candidate = if index == 0 {
+            base.to_owned()
+        } else {
+            format!("{base}_{index}")
+        };
+        if used.insert(candidate.to_ascii_uppercase()) {
+            return Ok(candidate);
+        }
+    }
+    unreachable!("a circuit cannot occupy every u64-suffixed helper name")
+}
+
+fn reference_resistor(
+    name: String,
+    owner: &str,
+    plane: &str,
+    internal: String,
+    z0: Value,
+) -> Element {
+    Element {
+        name,
+        nodes: vec![plane.to_owned(), internal],
+        kind: ElementKind::Resistor {
+            value: z0,
+            value_expr: None,
+            model: None,
+            instance_params: Vec::new(),
+            deferred_params: Vec::new(),
+        },
+        provenance: ElementProvenance::GeneratedPassiveHelper {
+            owner: owner.to_owned(),
+            role: crate::netlist::GeneratedPassiveHelperRole::SeriesResistance,
+        },
+    }
+}
 
 /// Collect and validate every `portnum`-annotated voltage source, in port order.
 pub fn collect_ports(netlist: &Netlist) -> Result<Vec<SParameterPort>, PortError> {
@@ -179,24 +382,23 @@ pub fn normalize_ports(
     ports: &[SParameterPort],
 ) -> Result<Vec<SParameterPort>, PortError> {
     let mut normalized = Vec::with_capacity(ports.len());
+    let mut names = PortNames::new(netlist, &NoAbort)?;
     for port in ports {
         if port.realization == PortRealization::Thevenin {
             normalized.push(port.clone());
             continue;
         }
 
-        let internal_node = format!("__RSPICE_SP_{}_PORT", port.source_name.to_ascii_uppercase());
-        let resistor_name = format!("__RSPICE_SP_{}_Z0", port.source_name.to_ascii_uppercase());
-        if netlist
-            .elements
-            .iter()
-            .any(|element| element.name.eq_ignore_ascii_case(&resistor_name))
-        {
-            return Err(PortError::PortSourceUnusable {
-                source_name: port.source_name.clone(),
-                reason: format!("collides with an existing element named '{resistor_name}'"),
-            });
-        }
+        let internal_node = unique_name(
+            &mut names.nodes,
+            &format!("__RSPICE_SP_{}_PORT", port.source_name.to_ascii_uppercase()),
+            &NoAbort,
+        )?;
+        let resistor_name = unique_name(
+            &mut names.elements,
+            &format!("__RSPICE_SP_{}_Z0", port.source_name.to_ascii_uppercase()),
+            &NoAbort,
+        )?;
 
         let element = netlist
             .elements
@@ -212,28 +414,21 @@ pub fn normalize_ports(
                 reason: "is not a voltage source".to_string(),
             });
         }
+        if element.nodes.len() < 2 {
+            return Err(PortError::MissingTerminals {
+                source_name: port.source_name.clone(),
+            });
+        }
         // The source retreats behind the new resistor; the plane keeps its
         // name, so everything already measuring this port still measures it.
         element.nodes[0] = internal_node.clone();
-
-        netlist.elements.push(crate::netlist::Element {
-            name: resistor_name,
-            kind: ElementKind::Resistor {
-                value: port.z0,
-                value_expr: None,
-                model: None,
-                instance_params: Vec::new(),
-                deferred_params: Vec::new(),
-            },
-            nodes: vec![port.node_pos.clone(), internal_node],
-            // It is exactly what the name says: a series resistance belonging
-            // to this source, so it is attributed to it rather than posing as
-            // something the user authored.
-            provenance: crate::netlist::ElementProvenance::GeneratedPassiveHelper {
-                owner: port.source_name.clone(),
-                role: crate::netlist::GeneratedPassiveHelperRole::SeriesResistance,
-            },
-        });
+        netlist.elements.push(reference_resistor(
+            resistor_name,
+            &port.source_name,
+            &port.node_pos,
+            internal_node,
+            port.z0,
+        ));
 
         normalized.push(SParameterPort {
             realization: PortRealization::Thevenin,
