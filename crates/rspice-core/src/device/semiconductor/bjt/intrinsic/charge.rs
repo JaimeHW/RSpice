@@ -158,15 +158,15 @@ impl Bjt {
         let cjc_external = self.cjc - cjc_internal;
 
         LegacyTransientChargeState {
-            qbe: p * (self.tf * qbe_diffusion_current + self.cje * qbe_dep_norm + self.cbeo * vbe),
-            capbe: (self.tf * gbe_dynamic + self.cje * capbe_dep + self.cbeo).max(0.0),
+            qbe: p * (self.tf * qbe_diffusion_current + self.cje * qbe_dep_norm) + self.cbeo * vbe,
+            capbe: self.tf * gbe_dynamic + self.cje * capbe_dep + self.cbeo,
             capbe_vbc: self.tf * geqcb_dynamic,
-            qbc: p * (self.tr * transport.iri + cjc_internal * qbc_dep_norm + self.cbco * vbc),
-            capbc: (self.tr * transport.gri + cjc_internal * capbc_dep + self.cbco).max(0.0),
+            qbc: p * (self.tr * transport.iri + cjc_internal * qbc_dep_norm) + self.cbco * vbc,
+            capbc: self.tr * transport.gri + cjc_internal * capbc_dep + self.cbco,
             qbx: p * (cjc_external * qbx_dep_norm),
-            capbx: (cjc_external * capbx_dep).max(0.0),
+            capbx: cjc_external * capbx_dep,
             qcs: -substrate_polarity * (self.cjcp * qsub_norm),
-            capcs: (self.cjcp * capsub_dep).max(0.0),
+            capcs: self.cjcp * capsub_dep,
         }
     }
 

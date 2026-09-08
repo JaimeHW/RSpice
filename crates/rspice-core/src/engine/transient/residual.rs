@@ -3522,8 +3522,11 @@ Q1 C B E 0 QN
 
     #[test]
     fn legacy_gp_snapshot_assembly_is_newton_consistent() {
-        assert_consistent(GP_BJT_DECK, IntegrationMethod::Trapezoidal, 2, 1e-10, None);
-        assert_consistent(GP_BJT_DECK, IntegrationMethod::Gear2, 2, 1e-10, None);
+        let private_base = GP_BJT_DECK.replace("BF=100", "BF=100 RB=100 RBM=0");
+        for deck in [GP_BJT_DECK, &private_base] {
+            assert_consistent(deck, IntegrationMethod::Trapezoidal, 2, 1e-10, None);
+            assert_consistent(deck, IntegrationMethod::Gear2, 2, 1e-10, None);
+        }
     }
 
     /// Spectral radius of the backward-Euler one-step map `M = I − A(dt)⁻¹G`

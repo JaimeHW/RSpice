@@ -442,6 +442,97 @@ fn level1_gummel_poon_bias_dependent_transit_time_parameters_stay_legacy() {
 }
 
 #[test]
+fn legacy_bjt_ac_preserves_negative_transport_charge_derivative() {
+    // The GP law is Qbe = TF * IS * (exp(Vbe/Vt) - 1) * (1 - Vbe/VAR).
+    // Near VAR, its derivative is negative. ngspice 46 gives I(VB).im =
+    // +4.467787e-7 A at 1 MHz for this card; clipping the slope gives zero.
+    let frequency = 1e6;
+    let vt = rspice_core::analysis::temperature::thermal_voltage(300.15);
+    let exponential = (0.71 / vt).exp();
+    let capbe =
+        1e-9 * 1e-16 * (exponential / vt * (1.0 - 0.71 / 0.72) - (exponential - 1.0) / 0.72);
+    assert!(capbe < 0.0);
+    for (kind, polarity) in [("NPN", 1.0), ("PNP", -1.0)] {
+        let bias = 0.71 * polarity;
+        let deck = format!(
+            "* Signed GP transport charge\n\
+             .options gmin=0\n\
+             vc c 0 {bias}\n\
+             vb b 0 {bias} ac 1\n\
+             q1 c b 0 qm\n\
+             .model qm {kind} (LEVEL=1 IS=1e-16 TF=1n VAR=0.72)\n\
+             .end\n"
+        );
+        assert_rel_close(
+            kind,
+            ac_branch_current(&deck, "vb", frequency).im,
+            -std::f64::consts::TAU * frequency * capbe,
+            1e-6,
+        );
+    }
+}
+
+#[test]
+fn legacy_bjt_transient_current_integrates_charge_with_negative_slope() {
+    let vt = rspice_core::analysis::temperature::thermal_voltage(300.15);
+    for (kind, polarity) in [("NPN", 1.0), ("PNP", -1.0)] {
+        let deck = format!(
+            "* GP current through a decreasing charge segment\n\
+             .options gmin=0 reltol=1e-6 abstol=1e-15 vntol=1e-12\n\
+             vc c 0 {}\n\
+             vb b 0 PWL(0 {} 20n {})\n\
+             q1 c b 0 qm\n\
+             .model qm {kind} (LEVEL=1 IS=1e-16 TF=1n VAR=0.72 BF=100)\n\
+             .tran 1n 20n\n.end\n",
+            polarity * 0.71,
+            polarity * 0.70,
+            polarity * 0.71,
+        );
+        let netlist = Netlist::parse(&deck).expect("charge ramp parses");
+        let config = rspice_core::engine::resolve_simulation_config(
+            &SimulationConfig {
+                integration_method:
+                    rspice_core::numerics::integration::IntegrationMethod::BackwardEuler,
+                ..SimulationConfig::default()
+            },
+            Some(&netlist.options),
+            &Default::default(),
+        );
+        let result = Engine::new(config)
+            .run_tran(&netlist, 20e-9, 1e-9)
+            .expect("charge ramp solves");
+        let voltage = result
+            .try_voltage_waveform_named("b")
+            .expect("base voltage");
+        let current = result
+            .try_branch_current_waveform_named("vb")
+            .expect("base source current");
+        let charge = |v: f64| {
+            polarity
+                * 1e-9
+                * 1e-16
+                * ((polarity * v / vt).exp() - 1.0)
+                * (1.0 - polarity * v / 0.72)
+        };
+        assert!(result.time.len() > 3);
+        for index in 1..result.time.len() {
+            let vbe = polarity * voltage[index];
+            let vbc = vbe - 0.71;
+            let static_base =
+                polarity * 1e-16 * (((vbe / vt).exp() - 1.0) / 100.0 + (vbc / vt).exp() - 1.0);
+            let dynamic_base = (charge(voltage[index]) - charge(voltage[index - 1]))
+                / (result.time[index] - result.time[index - 1]);
+            assert!(
+                (current[index] + static_base + dynamic_base).abs() < 1e-11,
+                "{kind} at {}: source={}, static={static_base}, dynamic={dynamic_base}",
+                result.time[index],
+                current[index],
+            );
+        }
+    }
+}
+
+#[test]
 fn xyce_dialect_uses_xyce710_bjt_thermal_voltage_constants() {
     let deck = op_deck(".model qmod NPN (IS=1e-16 BF=100)").replace(
         "* bjt level policy\n",

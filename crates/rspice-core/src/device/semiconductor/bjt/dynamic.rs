@@ -620,11 +620,10 @@ impl Bjt {
             terminal_voltage(substrate_connection_terminal) - terminal_voltage(substrate_terminal);
         let charges = self.legacy_transient_charge_state_with_vbx(vbe, vbc, vbx, vcs);
 
-        if charges.qbe.is_finite()
-            && charges.capbe.is_finite()
-            && charges.capbe_vbc.is_finite()
-            && (charges.capbe > 0.0 || charges.capbe_vbc != 0.0)
-        {
+        // Storage topology belongs to the model, not the current bias. A zero
+        // or negative local derivative still owns its accepted charge history;
+        // invalid evaluations must reach the solver instead of deleting a branch.
+        if self.tf != 0.0 || self.cje != 0.0 || self.cbeo != 0.0 {
             let mut d_internal = [0.0; BJT_INTERNAL_STATE_DIM];
             d_internal[IDX_VBI] = charges.capbe + charges.capbe_vbc;
             d_internal[IDX_VCI] = -charges.capbe_vbc;
@@ -633,7 +632,7 @@ impl Bjt {
                 Self::charge_branch(charges.qbe, d_internal, base_terminal, emitter_terminal);
         }
 
-        if charges.qbc.is_finite() && charges.capbc.is_finite() && charges.capbc > 0.0 {
+        if self.tr != 0.0 || self.cjc * self.xcjc != 0.0 || self.cbco != 0.0 {
             let mut d_internal = [0.0; BJT_INTERNAL_STATE_DIM];
             d_internal[IDX_VBI] = charges.capbc;
             d_internal[IDX_VCI] = -charges.capbc;
@@ -641,7 +640,7 @@ impl Bjt {
                 Self::charge_branch(charges.qbc, d_internal, base_terminal, collector_terminal);
         }
 
-        if charges.qbx.is_finite() && charges.capbx.is_finite() && charges.capbx > 0.0 {
+        if self.cjc * (1.0 - self.xcjc) != 0.0 {
             let mut branch = BjtChargeBranch {
                 charge: charges.qbx,
                 pos_external: Some(EXT_B),
@@ -658,7 +657,7 @@ impl Bjt {
             branches[3] = branch;
         }
 
-        if charges.qcs.is_finite() && charges.capcs.is_finite() && charges.capcs > 0.0 {
+        if self.cjcp != 0.0 {
             let mut branch = BjtChargeBranch {
                 charge: charges.qcs,
                 pos_internal: substrate_connection_terminal.0,
@@ -993,5 +992,83 @@ impl Bjt {
             terminal[EXT_E].current,
             terminal[EXT_S].current,
         ]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn legacy_overlap_charge_uses_physical_terminal_polarity() {
+        let params = [("LEVEL", 1.0), ("CBEO", 2e-12), ("CBCO", 3e-12)]
+            .map(|(name, value)| (name.to_owned(), value))
+            .into_iter()
+            .collect();
+        for bjt in [
+            Bjt::new_npn("q".into(), 1, 2, 3),
+            Bjt::new_pnp("q".into(), 1, 2, 3),
+        ] {
+            let bjt = bjt.with_params(&params);
+            assert!(!bjt.uses_vbic_dynamic_charges());
+            let charge = bjt.legacy_transient_charge_state_with_vbx(0.2, -0.5, 0.0, 0.0);
+            assert_eq!(charge.qbe, 2e-12 * 0.2);
+            assert_eq!(charge.capbe, 2e-12);
+            assert_eq!(charge.qbc, 3e-12 * -0.5);
+            assert_eq!(charge.capbc, 3e-12);
+        }
+    }
+
+    #[test]
+    fn legacy_charge_branches_preserve_signed_and_zero_slopes() {
+        for polarity in [1.0, -1.0] {
+            let params = [("LEVEL", 1.0), ("TF", 1e-9), ("VAR", 0.72)]
+                .map(|(name, value)| (name.to_owned(), value))
+                .into_iter()
+                .collect();
+            let mut bjt = if polarity > 0.0 {
+                Bjt::new_npn("q".into(), 1, 2, 3)
+            } else {
+                Bjt::new_pnp("q".into(), 1, 2, 3)
+            }
+            .with_params(&params);
+            bjt.set_junction_gmin(0.0);
+            for bias in [0.71, -1e100] {
+                let vbe = polarity * bias;
+                let charge = bjt.legacy_transient_charge_state_with_vbx(vbe, 0.0, 0.0, 0.0);
+                if bias > 0.0 {
+                    let h = 1e-7;
+                    let derivative = (bjt
+                        .legacy_transient_charge_state_with_vbx(vbe + h, 0.0, 0.0, 0.0)
+                        .qbe
+                        - bjt
+                            .legacy_transient_charge_state_with_vbx(vbe - h, 0.0, 0.0, 0.0)
+                            .qbe)
+                        / (2.0 * h);
+                    assert!(derivative < 0.0);
+                    assert!(
+                        (charge.capbe - derivative).abs() < derivative.abs() * 1e-7,
+                        "polarity={polarity}: capbe={} differs from dQ/dV={derivative}",
+                        charge.capbe
+                    );
+                } else {
+                    assert_ne!(charge.qbe, 0.0);
+                    assert_eq!(charge.capbe, 0.0);
+                }
+                let mut reduction = BjtDynamicReduction::default();
+                reduction.internal_voltages[IDX_VBI] = vbe;
+                reduction.internal_voltages[IDX_VCI] = vbe;
+                reduction.external_voltages[EXT_B] = vbe;
+                reduction.external_voltages[EXT_C] = vbe;
+                let branches = bjt.legacy_dynamic_charge_branches(&reduction);
+                assert!(
+                    branches[0].is_active(),
+                    "bias={bias}: charge branch disappeared"
+                );
+                assert_eq!(branches[0].charge, charge.qbe);
+                assert_eq!(-branches[0].d_internal[IDX_VEI], charge.capbe);
+                assert!(branches[1..].iter().all(|branch| !branch.is_active()));
+            }
+        }
     }
 }

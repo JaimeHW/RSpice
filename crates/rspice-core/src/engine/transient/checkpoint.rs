@@ -1161,10 +1161,10 @@ pub(crate) fn restart_checkpoint_identity(netlist: &Netlist) -> Option<String> {
 
 pub(crate) fn simulation_checkpoint_identity(config: &SimulationConfig) -> String {
     let mut hasher = blake3::Hasher::new();
-    // v18 preserves quotient half-lines at uncertain denominator zeros so
-    // bounded outer functions retain their finite source-domain certificate.
-    // Earlier schedules can produce different accepted integration histories.
-    hasher.update(b"rspice-transient-resolved-config-v18\0");
+    // v19 preserves legacy BJT charge branches at zero/negative slopes and
+    // corrects PNP overlap-charge polarity. Older companions and cached charge
+    // Jacobians do not represent the same accepted integration history.
+    hasher.update(b"rspice-transient-resolved-config-v19\0");
     hash_field(&mut hasher, "temperature", config.temperature.to_bits());
     hash_field(&mut hasher, "ramptime", config.ramptime.to_bits());
     hash_field(&mut hasher, "digital_delay_type", config.digital_delay_type);
@@ -10957,15 +10957,19 @@ mod tests {
             "unexpected error: {error}"
         );
 
-        let mut bad_tag = sample();
-        bad_tag.accepted_junction_history.bjt_runtime_tags[0] =
-            "future-bjt-history-v99".to_string();
-        let error = TransientCheckpoint::from_text(&bad_tag.to_text())
-            .expect_err("unknown BJT history runtime tags must fail while parsing");
-        assert!(
-            error.contains("unsupported runtime tag"),
-            "unexpected error: {error}"
-        );
+        for tag in [
+            "legacy-gummel-poon-transient-history-v1",
+            "future-bjt-history-v99",
+        ] {
+            let mut bad_tag = sample();
+            bad_tag.accepted_junction_history.bjt_runtime_tags[0] = tag.to_string();
+            let error = TransientCheckpoint::from_text(&bad_tag.to_text())
+                .expect_err("incompatible BJT history runtime tags must fail while parsing");
+            assert!(
+                error.contains("unsupported runtime tag"),
+                "unexpected error: {error}"
+            );
+        }
 
         let text = sample().to_text();
         let snapshot_header = format!(
@@ -11065,14 +11069,16 @@ mod tests {
             "unexpected error: {error}"
         );
 
-        let mut bad_tag = sample();
-        bad_tag.accepted_nonlinear_states.bjts[0].runtime_tag = "future-bjt-v99".to_string();
-        let error = TransientCheckpoint::from_text(&bad_tag.to_text())
-            .expect_err("unknown accepted BJT runtime tags must fail while parsing");
-        assert!(
-            error.contains("unsupported runtime tag"),
-            "unexpected error: {error}"
-        );
+        for tag in ["legacy-gummel-poon-v1", "future-bjt-v99"] {
+            let mut bad_tag = sample();
+            bad_tag.accepted_nonlinear_states.bjts[0].runtime_tag = tag.to_string();
+            let error = TransientCheckpoint::from_text(&bad_tag.to_text())
+                .expect_err("incompatible accepted BJT runtime tags must fail while parsing");
+            assert!(
+                error.contains("unsupported runtime tag"),
+                "unexpected error: {error}"
+            );
+        }
 
         let mut bad_count = sample();
         bad_count.accepted_nonlinear_states.bjts[0]

@@ -154,7 +154,7 @@ pub(super) struct BjtTransientHistory {
 }
 
 pub(super) const BJT_TRANSIENT_HISTORY_RUNTIME_TAG: &str =
-    "legacy-gummel-poon-transient-history-v1";
+    "legacy-gummel-poon-transient-history-v2";
 // V1 could freeze charge history whenever the local charge slope was zero
 // or negative. That lost history cannot be reconstructed from a capture.
 pub(super) const DIODE_TRANSIENT_HISTORY_RUNTIME_TAG: &str = "native-diode-transient-history-v2";

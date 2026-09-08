@@ -440,7 +440,7 @@ pub(crate) struct BjtChargeSnapshot {
     pub branches: [BjtChargeBranch; BJT_DYNAMIC_CHARGE_COUNT],
 }
 
-pub(crate) const BJT_ACCEPTED_NONLINEAR_RUNTIME_TAG: &str = "legacy-gummel-poon-v1";
+pub(crate) const BJT_ACCEPTED_NONLINEAR_RUNTIME_TAG: &str = "legacy-gummel-poon-v2";
 
 const BJT_ACCEPTED_SCALAR_VALUE_COUNT: usize = 62;
 const BJT_REDUCED_CHECKPOINT_VALUE_COUNT: usize = INTERNAL_DIM
