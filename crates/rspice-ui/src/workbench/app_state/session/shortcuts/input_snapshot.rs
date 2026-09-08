@@ -46,8 +46,12 @@ impl ShortcutInputSnapshot {
     /// event order. `InputState::consume_key` removes every logical match, so
     /// calling it once per press loses repeated strokes and can also consume
     /// a different Shift/Alt binding. Validate the whole batch before removal.
-    pub(crate) fn consume_keys(input: &mut InputState, keys: &[(Key, Modifiers)]) -> bool {
-        crate::ui::input::consume_keys(input, keys)
+    pub(crate) fn consume_keys(
+        input: &mut InputState,
+        keys: &[(Key, Modifiers)],
+        command_key_count: usize,
+    ) -> bool {
+        crate::ui::input::consume_keys(input, keys, command_key_count)
     }
 
     pub(super) fn key_presses(&self) -> &[ShortcutKeyPress] {
@@ -162,6 +166,7 @@ mod tests {
         assert!(ShortcutInputSnapshot::consume_keys(
             &mut input,
             &[(Key::S, Modifiers::COMMAND), (Key::S, Modifiers::COMMAND)],
+            2,
         ));
         assert_eq!(input.events, vec![text, release, shifted, repeat]);
     }
@@ -178,6 +183,7 @@ mod tests {
         assert!(!ShortcutInputSnapshot::consume_keys(
             &mut input,
             &[(Key::K, Modifiers::COMMAND), (Key::S, Modifiers::COMMAND)],
+            2,
         ));
         assert_eq!(input.events, events);
     }

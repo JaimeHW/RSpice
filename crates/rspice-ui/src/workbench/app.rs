@@ -1597,30 +1597,62 @@ mod tests {
             ]
         }
 
-        let ctx = Context::default();
-        crate::ui::Theme::default().apply(&ctx);
-        ctx.enable_accesskit();
-        let mut fixture = Fixture {
-            ctx,
-            app: RSpiceApp::test_instance(),
-        };
-        fixture.frame(Vec::new());
-        let output = fixture.frame(Vec::new());
-        fixture.frame(click(target(&output, "Place instance")));
-        fixture.frame(Vec::new());
-        assert_eq!(fixture.app.state.workbench.drawer, Some(Drawer::Navigator));
-        let output = fixture.frame(vec![egui::Event::Text("resistor".to_owned())]);
-        assert_eq!(fixture.app.state.workbench.placement_query, "resistor");
-        fixture.frame(click(target(&output, "Resistor")));
-        assert_eq!(fixture.app.state.workbench.drawer, None);
-        assert_eq!(
-            fixture.app.state.schematic.tool,
-            Tool::Place(ComponentType::Resistor)
-        );
-        fixture.frame(Vec::new());
-        let output = fixture.frame(Vec::new());
-        let tree = output.platform_output.accesskit_update.as_ref().unwrap();
-        assert!(
+        for via_keyboard in [true, false] {
+            let ctx = Context::default();
+            crate::ui::Theme::default().apply(&ctx);
+            ctx.enable_accesskit();
+            let mut fixture = Fixture {
+                ctx,
+                app: RSpiceApp::test_instance(),
+            };
+            fixture.frame(Vec::new());
+            let output = fixture.frame(Vec::new());
+            if via_keyboard {
+                crate::schematic::view::request_schematic_canvas_focus(&fixture.ctx);
+                let press = egui::Event::Key {
+                    key: egui::Key::I,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::SHIFT,
+                };
+                let text = egui::Event::Text("I".to_owned());
+                // Match the input adapter used by this build; browser ordering
+                // is also exercised directly by the input-boundary tests.
+                fixture.frame(if cfg!(target_arch = "wasm32") {
+                    vec![text, press]
+                } else {
+                    vec![press, text]
+                });
+                fixture.frame(vec![egui::Event::Key {
+                    key: egui::Key::I,
+                    physical_key: None,
+                    pressed: false,
+                    repeat: false,
+                    modifiers: egui::Modifiers::SHIFT,
+                }]);
+            } else {
+                fixture.frame(click(target(&output, "Place instance")));
+            }
+            fixture.frame(Vec::new());
+            assert_eq!(fixture.app.state.workbench.drawer, Some(Drawer::Navigator));
+            assert!(
+                fixture.app.state.workbench.placement_query.is_empty(),
+                "the opening shortcut must not become search text: {:?}",
+                fixture.app.state.workbench.placement_query
+            );
+            let output = fixture.frame(vec![egui::Event::Text("resistor".to_owned())]);
+            assert_eq!(fixture.app.state.workbench.placement_query, "resistor");
+            fixture.frame(click(target(&output, "Resistor")));
+            assert_eq!(fixture.app.state.workbench.drawer, None);
+            assert_eq!(
+                fixture.app.state.schematic.tool,
+                Tool::Place(ComponentType::Resistor)
+            );
+            fixture.frame(Vec::new());
+            let output = fixture.frame(Vec::new());
+            let tree = output.platform_output.accesskit_update.as_ref().unwrap();
+            assert!(
             tree.nodes
                 .iter()
                 .any(|(id, node)| *id == tree.focus && node.label() == Some("Schematic canvas")),
@@ -1630,18 +1662,19 @@ mod tests {
                 .find(|(id, _)| *id == tree.focus)
                 .map(|(_, node)| (node.label(), node.role()))
         );
-        assert!(fixture.app.state.schematic.components.is_empty());
-        fixture.frame(click(target(&output, "Schematic canvas")));
-        assert_eq!(fixture.app.state.schematic.components.len(), 1);
+            assert!(fixture.app.state.schematic.components.is_empty());
+            fixture.frame(click(target(&output, "Schematic canvas")));
+            assert_eq!(fixture.app.state.schematic.components.len(), 1);
 
-        // A new modal task supersedes a still-pending placement focus request.
-        crate::schematic::view::request_schematic_canvas_focus(&fixture.ctx);
-        Command::CommandPalette.execute(&mut fixture.app);
-        fixture.frame(Vec::new());
-        fixture.frame(Vec::new());
-        fixture.frame(vec![egui::Event::Text("help".to_owned())]);
-        assert_eq!(fixture.app.state.dialogs.command_palette.query, "help");
-        assert_eq!(fixture.app.state.schematic.components.len(), 1);
+            // A new modal task supersedes a still-pending placement focus request.
+            crate::schematic::view::request_schematic_canvas_focus(&fixture.ctx);
+            Command::CommandPalette.execute(&mut fixture.app);
+            fixture.frame(Vec::new());
+            fixture.frame(Vec::new());
+            fixture.frame(vec![egui::Event::Text("help".to_owned())]);
+            assert_eq!(fixture.app.state.dialogs.command_palette.query, "help");
+            assert_eq!(fixture.app.state.schematic.components.len(), 1);
+        }
     }
 
     /// The application root moves by value through the same debug fixture

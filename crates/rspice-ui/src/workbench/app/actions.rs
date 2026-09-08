@@ -119,8 +119,13 @@ impl RSpiceApp {
         } else {
             None
         };
-        let consumed =
-            ctx.input_mut(|input| ShortcutInputSnapshot::consume_keys(input, &resolution.consume));
+        let consumed = ctx.input_mut(|input| {
+            ShortcutInputSnapshot::consume_keys(
+                input,
+                &resolution.consume,
+                resolution.deferred_start,
+            )
+        });
         if consumed && let Some(command) = resolution.command {
             self.execute_shortcut_command(command);
             if self.state.dialogs.command_palette.open
