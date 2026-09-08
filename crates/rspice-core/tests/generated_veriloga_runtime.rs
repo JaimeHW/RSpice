@@ -10,6 +10,97 @@ use rspice_core::solver::{ComplexMatrix, StaticMatrix};
 #[cfg(feature = "veriloga-builtins")]
 use rspice_core::{CircuitData, netlist::ParamContext};
 
+#[cfg(feature = "veriloga-model-pspnqs104va")]
+#[test]
+fn generated_nqs_integrators_stamp_inverse_frequency_on_potential_rows() {
+    use rspice_core::device::veriloga_builtins::builtins::psp104_nqs__pspnqs104va__1d25ee14::Instance;
+
+    let nodes = (1..=Instance::NODE_COUNT).collect::<Vec<_>>();
+    let branches = (1..=Instance::BRANCH_COUNT).collect::<Vec<_>>();
+    let width = nodes.len() + branches.len();
+    let entries = (0..width)
+        .flat_map(|row| (0..width).map(move |column| (row, column, 0.0)))
+        .collect::<Vec<_>>();
+    let structure = StaticMatrix::from_triplets(width, width, &entries).unwrap();
+    let mut cache = GeneratedStaticStampCache::default();
+    cache.link(&structure, &nodes, &branches, nodes.len());
+    let mut matrix = ComplexMatrix::from_real_structure(&structure);
+    let mut voltages = vec![0.0; width];
+    voltages[0] = 0.1;
+    voltages[1] = 1.0;
+    for (index, name) in Instance::INTERNAL_NODE_NAMES.iter().enumerate() {
+        voltages[index + 4] = match *name {
+            "gp" => 1.0,
+            "di" => 0.1,
+            name if name.starts_with("int") => 0.01,
+            _ => 0.0,
+        };
+    }
+    let ctx = GeneratedEvalContext::with_analysis(
+        &voltages,
+        300.15,
+        nodes.len(),
+        GeneratedAnalysisKind::Ac,
+    );
+    let mut instance = Instance::new(&nodes);
+    instance.set_branch_indices(&branches);
+    instance.set_parameter("swnqs", 1.0).unwrap();
+    instance.finalize_parameters().unwrap();
+    instance.stamp(
+        &ctx,
+        &mut GeneratedStamper::new_ac_real_with_static_cache(
+            &mut matrix,
+            &voltages,
+            nodes.len(),
+            &cache,
+        ),
+    );
+    assert!(
+        !ctx.evaluation_failed(),
+        "{:?}",
+        ctx.take_evaluation_error()
+    );
+    let history = instance.capture_rollback_state();
+    let mut samples = Vec::new();
+    for omega in [1e6, 2e6] {
+        matrix.clear_values();
+        instance.stamp_reactive(
+            &ctx,
+            &mut GeneratedReactiveStamper::new_with_local_maps_and_static_cache(
+                &mut matrix,
+                &nodes,
+                &branches,
+                nodes.len(),
+                omega,
+                &cache,
+            ),
+        );
+        assert!(
+            !ctx.evaluation_failed(),
+            "{:?}",
+            ctx.take_evaluation_error()
+        );
+        samples.push(matrix.to_dense_imag());
+        assert_eq!(instance.capture_rollback_state(), history);
+    }
+    // PSP's SPLINE potential equations contain idt(-Tnorm*fk, Qp_0).
+    // Their Jacobians must scale as 1/omega. This block was entirely zero
+    // when generated AC extracted only ddt charges.
+    let mut nonzero = 0;
+    for (first_row, second_row) in samples[0].iter().zip(&samples[1]).skip(nodes.len()) {
+        for (&first, &second) in first_row.iter().zip(second_row) {
+            let doubled = 2.0 * second;
+            assert!(first.is_finite() && doubled.is_finite());
+            assert!((first - doubled).abs() <= 1e-12 * first.abs());
+            nonzero += usize::from(first != 0.0);
+        }
+    }
+    assert!(
+        nonzero > 0,
+        "NQS integrator Jacobians must reach the AC matrix"
+    );
+}
+
 #[cfg(feature = "veriloga-model-hicuml2va")]
 fn stamp_hicuml2(instance: &mut hicuml2::Instance, temperature: f64) -> (Vec<u64>, Vec<u64>) {
     const NODE_COUNT: usize = hicuml2::Instance::NODE_COUNT;

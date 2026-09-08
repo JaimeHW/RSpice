@@ -423,8 +423,8 @@ impl Instance {
 		let OL=L4([0f64;4]);
 		let OO=staged[22]!=0.0;
 		let OW=L3([0f64;3]);
-		let SA=0.0;
-		let SB=0.0;
+		let RY=0.0;
+		let RZ=0.0;
 		let B=(temperature+ A)+ parameters[45];
 		let C=B> 173.14999999999998f64;
 		let E=if C{
@@ -719,9 +719,9 @@ impl Instance {
 		let IR=IB* IO;
 		let IS=IC* IO;
 		let IT=L3([IS[0],IS[1],0.0])+ L3([0.0,0.0,((IP* IQ)* IB)]);
-		let IU=IB* IN;
-		let IV=IC* IN;
-		let IW=L3([IV[0],IV[1],0.0])+ L3([0.0,0.0,(IP* IB)]);
+		let IU=IB;
+		let IV=IU* IN;
+		let IW=IP* IU;
 		let IY=(IN.abs())/ IX;
 		let JA=Z+ (IY.powf(IZ));
 		let JB=HM/ JA;
@@ -730,7 +730,7 @@ impl Instance {
 		JI=IJ;
 		JJ=IN;
 		JK=IR;
-		JL=IU;
+		JL=IV;
 		JM=JC;
 		JN=IM;
 		JO=IP;
@@ -747,7 +747,7 @@ impl Instance {
 		JN=JE;
 		JO=JF;
 		JP=JG;
-		JQ=JG;
+		JQ=JF;
 		}
 		let JS=CH+ ((-BW)* JR);
 		let JT=L3([0.0,CI[0],CI[1]]);
@@ -1067,20 +1067,18 @@ impl Instance {
 		let RJ=PI[2];
 		let RK=PI[3];
 		let RL=PI[4];
-		let RM=JQ[0];
-		let RN=JQ[1];
-		let RO=JQ[2];
-		let RP=MH;
-		let RQ=MI;
-		let RR=MJ;
-		let RS=PC[0];
-		let RT=PC[1];
-		let RU=PC[2];
-		let RV=PG[0];
-		let RW=PG[1];
-		let RX=PG[2];
-		let RY=PG[3];
-		let RZ=PG[4];
+		let RM=JQ;
+		let RN=MH;
+		let RO=MI;
+		let RP=MJ;
+		let RQ=PC[0];
+		let RR=PC[1];
+		let RS=PC[2];
+		let RT=PG[0];
+		let RU=PG[1];
+		let RV=PG[2];
+		let RW=PG[3];
+		let RX=PG[4];
         if (staged[32] != 0.0) {
             stamper.stamp_potential_branch_local(Some(6), None, 0, multiplicity);
         } else {
@@ -1381,7 +1379,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(3),
             Some(4),
-            multiplicity * (SA),
+            multiplicity * (RY),
             [],
             [],
             [],
@@ -1391,7 +1389,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(3),
             Some(4),
-            multiplicity * (SB),
+            multiplicity * (RZ),
             [],
             [],
             [],
@@ -1402,45 +1400,43 @@ impl Instance {
         self.canonical_reactive[1] = JJ;
         self.canonical_reactive[2] = JL;
         self.canonical_reactive[3] = RM;
-        self.canonical_reactive[4] = RN;
-        self.canonical_reactive[5] = RO;
-        self.canonical_reactive[6] = staged[23];
-        self.canonical_reactive[7] = LM;
-        self.canonical_reactive[8] = LN;
-        self.canonical_reactive[9] = LV;
-        self.canonical_reactive[10] = RP;
-        self.canonical_reactive[11] = staged[24];
-        self.canonical_reactive[12] = LP;
-        self.canonical_reactive[13] = LQ;
-        self.canonical_reactive[14] = LW;
-        self.canonical_reactive[15] = RQ;
-        self.canonical_reactive[16] = LS;
-        self.canonical_reactive[17] = LX;
-        self.canonical_reactive[18] = RR;
-        self.canonical_reactive[19] = LU;
-        self.canonical_reactive[20] = staged[25];
-        self.canonical_reactive[21] = staged[26];
-        self.canonical_reactive[22] = staged[27];
-        self.canonical_reactive[23] = ML;
-        self.canonical_reactive[24] = OM;
-        self.canonical_reactive[25] = staged[28];
-        self.canonical_reactive[26] = staged[29];
-        self.canonical_reactive[27] = OX;
-        self.canonical_reactive[28] = staged[30];
-        self.canonical_reactive[29] = staged[31];
-        self.canonical_reactive[30] = OZ;
-        self.canonical_reactive[31] = PB;
+        self.canonical_reactive[4] = staged[23];
+        self.canonical_reactive[5] = LM;
+        self.canonical_reactive[6] = LN;
+        self.canonical_reactive[7] = LV;
+        self.canonical_reactive[8] = RN;
+        self.canonical_reactive[9] = staged[24];
+        self.canonical_reactive[10] = LP;
+        self.canonical_reactive[11] = LQ;
+        self.canonical_reactive[12] = LW;
+        self.canonical_reactive[13] = RO;
+        self.canonical_reactive[14] = LS;
+        self.canonical_reactive[15] = LX;
+        self.canonical_reactive[16] = RP;
+        self.canonical_reactive[17] = LU;
+        self.canonical_reactive[18] = staged[25];
+        self.canonical_reactive[19] = staged[26];
+        self.canonical_reactive[20] = staged[27];
+        self.canonical_reactive[21] = ML;
+        self.canonical_reactive[22] = OM;
+        self.canonical_reactive[23] = staged[28];
+        self.canonical_reactive[24] = staged[29];
+        self.canonical_reactive[25] = OX;
+        self.canonical_reactive[26] = staged[30];
+        self.canonical_reactive[27] = staged[31];
+        self.canonical_reactive[28] = OZ;
+        self.canonical_reactive[29] = PB;
+        self.canonical_reactive[30] = RQ;
+        self.canonical_reactive[31] = RR;
         self.canonical_reactive[32] = RS;
-        self.canonical_reactive[33] = RT;
-        self.canonical_reactive[34] = RU;
-        self.canonical_reactive[35] = PF;
+        self.canonical_reactive[33] = PF;
+        self.canonical_reactive[34] = RT;
+        self.canonical_reactive[35] = RU;
         self.canonical_reactive[36] = RV;
         self.canonical_reactive[37] = RW;
         self.canonical_reactive[38] = RX;
         self.canonical_reactive[39] = RY;
         self.canonical_reactive[40] = RZ;
-        self.canonical_reactive[41] = SA;
-        self.canonical_reactive[42] = SB;
     }
 
     pub fn stamp_reactive(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedReactiveStamper<'_>) {
@@ -1449,8 +1445,8 @@ impl Instance {
         stamper.stamp_current_reactive_indexed_dense_local(
             Some(6),
             None,
-            &[0, 1, 6],
-            &[cached[3], cached[4], cached[5]],
+            &[6],
+            &[cached[3]],
             &[],
             &[],
             multiplicity,
@@ -1459,7 +1455,7 @@ impl Instance {
             Some(2),
             None,
             &[2],
-            &[cached[10]],
+            &[cached[8]],
             &[],
             &[],
             multiplicity,
@@ -1468,7 +1464,7 @@ impl Instance {
             Some(2),
             None,
             &[2],
-            &[cached[15]],
+            &[cached[13]],
             &[],
             &[],
             multiplicity,
@@ -1477,7 +1473,7 @@ impl Instance {
             Some(5),
             None,
             &[5],
-            &[cached[18]],
+            &[cached[16]],
             &[],
             &[],
             multiplicity,
@@ -1486,7 +1482,7 @@ impl Instance {
             Some(3),
             Some(4),
             &[2, 3, 4],
-            &[cached[32], cached[33], cached[34]],
+            &[cached[30], cached[31], cached[32]],
             &[],
             &[],
             multiplicity,
@@ -1495,7 +1491,7 @@ impl Instance {
             Some(3),
             Some(4),
             &[0, 1, 2, 3, 4],
-            &[cached[36], cached[37], cached[38], cached[39], cached[40]],
+            &[cached[34], cached[35], cached[36], cached[37], cached[38]],
             &[],
             &[],
             multiplicity,

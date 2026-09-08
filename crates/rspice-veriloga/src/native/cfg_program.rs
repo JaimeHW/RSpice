@@ -913,6 +913,10 @@ impl Lowerer<'_> {
                 let overflowed = push(NativeOp::Compare(CompareOp::Gt), &[input, ceiling])?;
                 push(NativeOp::IfElse, &[overflowed, saturated, lower])
             }
+            CfgValueKind::Unary {
+                op: CfgUnaryOp::FreezeDerivative,
+                input,
+            } => self.read(lowered, *input),
             CfgValueKind::Unary { op, input } => {
                 let input = operand(*input)?;
                 let native = unary_op(*op).ok_or_else(|| {
@@ -1112,7 +1116,7 @@ fn unary_op(op: CfgUnaryOp) -> Option<NativeOp> {
         CfgUnaryOp::Exp => math(UnaryMathOp::Exp),
         CfgUnaryOp::LimExp => math(UnaryMathOp::Limexp),
         CfgUnaryOp::LimitedExp => math(UnaryMathOp::LimitedExp),
-        CfgUnaryOp::LimitedExpDerivative => None,
+        CfgUnaryOp::LimitedExpDerivative | CfgUnaryOp::FreezeDerivative => None,
         CfgUnaryOp::Ln => math(UnaryMathOp::Log),
         CfgUnaryOp::Log10 => math(UnaryMathOp::Log10),
         CfgUnaryOp::Sqrt => Some(NativeOp::Sqrt),

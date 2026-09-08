@@ -232,44 +232,21 @@ impl Engine {
                     branch,
                     Self::vbic_transient_owning_charge_ccap_sign(bjt, branch_idx),
                 )
-            } else if branch_idx == BJT_QBE_BRANCH_INDEX {
-                let capbe = -full_branch.d_internal[BJT_VEI_STATE_INDEX];
-                let capbe_vbc = -full_branch.d_internal[BJT_VCI_STATE_INDEX];
-
-                if capbe_vbc.is_finite() && capbe_vbc.abs() > 0.0 {
-                    let geqcb = charge_factor * capbe_vbc;
-                    let mut cross_branch = crate::device::semiconductor::BjtCurrentBranch {
-                        pos_internal: full_branch.pos_internal,
-                        neg_internal: full_branch.neg_internal,
-                        pos_external: full_branch.pos_external,
-                        neg_external: full_branch.neg_external,
-                        ..Default::default()
-                    };
-                    cross_branch.d_internal[BJT_VBI_STATE_INDEX] = geqcb;
-                    cross_branch.d_internal[BJT_VCI_STATE_INDEX] = -geqcb;
-                    cross_branch.accumulate_derivatives(&mut g_ii, &mut g_ie, &mut g_ei, &mut g_ee);
-                    let i_eq = cross_branch.linearization_dot(
-                        &snapshot.reduction.internal_voltages,
-                        &snapshot.reduction.external_voltages,
-                    ) - cross_branch.current;
-                    cross_branch.accumulate_source(i_eq, &mut z_i, &mut z_e);
-                }
-
-                if !capbe.is_finite() || capbe <= 0.0 {
-                    continue;
-                }
-
-                let mut owning_branch = *full_branch;
-                owning_branch.d_internal = [0.0; BJT_INTERNAL_STATE_DIM];
-                owning_branch.d_external = [0.0; BJT_EXTERNAL_STATE_DIM];
-                owning_branch.d_internal[BJT_VBI_STATE_INDEX] = capbe;
-                owning_branch.d_internal[BJT_VEI_STATE_INDEX] = -capbe;
-                (owning_branch, 1.0)
             } else {
                 if !full_branch.is_active() {
                     continue;
                 }
-                (*full_branch, 1.0)
+                // Legacy private KCL rows balance entering current, while
+                // external rows balance leaving current. Retain the complete
+                // charge gradient and reverse only the private incidence.
+                (
+                    BjtChargeBranch {
+                        pos_internal: full_branch.neg_internal,
+                        neg_internal: full_branch.pos_internal,
+                        ..*full_branch
+                    },
+                    1.0,
+                )
             };
             branch.accumulate_derivatives(&mut c_ii, &mut c_ie, &mut c_ei, &mut c_ee);
             let cq_curr = Self::jfet_companion_ccap(
@@ -381,44 +358,42 @@ impl Engine {
         let mut has_dynamic_charge = false;
 
         if qbe_branch.is_active() {
-            if charges.capbe.is_finite() && charges.capbe > 0.0 {
-                let cqbe = Self::jfet_companion_ccap(
-                    coeff,
-                    dt,
-                    charges.qbe,
-                    BranchChargeHistory {
-                        q_prev: q_prev[BJT_QBE_BRANCH_INDEX],
-                        q_prev_prev: q_prev_prev[BJT_QBE_BRANCH_INDEX],
-                        cq_prev: cq_prev[BJT_QBE_BRANCH_INDEX],
-                    },
-                );
-                let geqbe = charge_factor * charges.capbe;
-                let i_eq = geqbe
-                    * Self::legacy_bjt_internal_branch_voltage(
-                        snapshot,
-                        BJT_VBI_STATE_INDEX,
-                        BJT_VEI_STATE_INDEX,
-                    )
-                    - cqbe;
-                Self::stamp_legacy_bjt_two_terminal_companion(
-                    &qbe_branch,
+            let cqbe = Self::jfet_companion_ccap(
+                coeff,
+                dt,
+                charges.qbe,
+                BranchChargeHistory {
+                    q_prev: q_prev[BJT_QBE_BRANCH_INDEX],
+                    q_prev_prev: q_prev_prev[BJT_QBE_BRANCH_INDEX],
+                    cq_prev: cq_prev[BJT_QBE_BRANCH_INDEX],
+                },
+            );
+            let geqbe = charge_factor * charges.capbe;
+            let i_eq = geqbe
+                * Self::legacy_bjt_internal_branch_voltage(
+                    snapshot,
                     BJT_VBI_STATE_INDEX,
                     BJT_VEI_STATE_INDEX,
-                    geqbe,
-                    i_eq,
-                    VbicCompanionSystem {
-                        g_ii: &mut g_ii,
-                        g_ie: &mut g_ie,
-                        g_ei: &mut g_ei,
-                        g_ee: &mut g_ee,
-                        z_i: &mut z_i,
-                        z_e: &mut z_e,
-                    },
-                );
-                has_dynamic_charge = true;
-            }
+                )
+                - cqbe;
+            Self::stamp_legacy_bjt_two_terminal_companion(
+                &qbe_branch,
+                BJT_VBI_STATE_INDEX,
+                BJT_VEI_STATE_INDEX,
+                geqbe,
+                i_eq,
+                VbicCompanionSystem {
+                    g_ii: &mut g_ii,
+                    g_ie: &mut g_ie,
+                    g_ei: &mut g_ei,
+                    g_ee: &mut g_ee,
+                    z_i: &mut z_i,
+                    z_e: &mut z_e,
+                },
+            );
+            has_dynamic_charge = true;
 
-            if charges.capbe_vbc.is_finite() && charges.capbe_vbc.abs() > 0.0 {
+            if charges.capbe_vbc != 0.0 {
                 let geqcb = charge_factor * charges.capbe_vbc;
                 let vbc = Self::legacy_bjt_internal_branch_voltage(
                     snapshot,
@@ -445,7 +420,7 @@ impl Engine {
             }
         }
 
-        if qbc_branch.is_active() && charges.capbc.is_finite() && charges.capbc > 0.0 {
+        if qbc_branch.is_active() {
             let cqbc = Self::jfet_companion_ccap(
                 coeff,
                 dt,
@@ -482,7 +457,7 @@ impl Engine {
             has_dynamic_charge = true;
         }
 
-        if qbx_branch.is_active() && charges.capbx.is_finite() && charges.capbx > 0.0 {
+        if qbx_branch.is_active() {
             let cqbx = Self::jfet_companion_ccap(
                 coeff,
                 dt,
@@ -511,7 +486,7 @@ impl Engine {
             has_dynamic_charge = true;
         }
 
-        if qcs_branch.is_active() && charges.capcs.is_finite() && charges.capcs > 0.0 {
+        if qcs_branch.is_active() {
             let cqcs = Self::jfet_companion_ccap(
                 coeff,
                 dt,
@@ -1263,7 +1238,127 @@ impl Engine {
 
 #[cfg(test)]
 mod tests {
-    use crate::Engine;
+    use super::*;
+
+    #[test]
+    fn legacy_companion_preserves_history_at_nonpositive_charge_slopes() {
+        for (polarity, resistance) in [(1.0, 0.0), (-1.0, 0.0), (1.0, 100.0), (-1.0, 100.0)] {
+            let params = [
+                ("LEVEL", 1.0),
+                ("TF", 1e-9),
+                ("TR", 1e-9),
+                ("VAR", 0.72),
+                ("RB", resistance),
+                ("RBM", 0.0),
+            ]
+            .map(|(name, value)| (name.to_owned(), value))
+            .into_iter()
+            .collect();
+            let mut bjt = if polarity > 0.0 {
+                crate::device::Bjt::new_npn("q".into(), 1, 2, 3)
+            } else {
+                crate::device::Bjt::new_pnp("q".into(), 1, 2, 3)
+            }
+            .with_params(&params);
+            bjt.set_junction_gmin(0.0);
+            for bias in [0.71, -1e100] {
+                let vb = polarity * bias;
+                let vc = if bias > 0.0 { vb } else { 0.0 };
+                let mut internal = [0.0; BJT_INTERNAL_STATE_DIM];
+                internal[BJT_VCX_STATE_INDEX] = vc;
+                internal[BJT_VCI_STATE_INDEX] = vc;
+                internal[BJT_VBX_STATE_INDEX] = vb;
+                internal[BJT_VBI_STATE_INDEX] = vb;
+                let snapshot = bjt.charge_snapshot_for_dynamic_state(vc, vb, 0.0, 0.0, internal);
+                let q = snapshot.branches.map(|branch| branch.charge);
+                let mut previous = [0.0; BJT_DYNAMIC_CHARGE_COUNT];
+                let mut previous_previous = previous;
+                let mut current_previous = previous;
+                for index in [BJT_QBE_BRANCH_INDEX, BJT_QBC_BRANCH_INDEX] {
+                    previous[index] = polarity * 4e-12;
+                    previous_previous[index] = polarity * 3e-12;
+                    current_previous[index] = polarity * 2e-3;
+                }
+                let dt = 1e-9;
+                for (coeff, factors) in [
+                    (
+                        CompanionCoefficients::backward_euler(),
+                        [1.0, -1.0, 0.0, 0.0],
+                    ),
+                    (CompanionCoefficients::trapezoidal(), [2.0, -2.0, 0.0, -1.0]),
+                    (CompanionCoefficients::gear2(), [1.5, -2.0, 0.5, 0.0]),
+                ] {
+                    let linearization = Engine::assemble_vbic_transient_linearization(
+                        &bjt,
+                        &snapshot,
+                        VbicChargeStep {
+                            coeff: &coeff,
+                            dt,
+                            q_prev: &previous,
+                            q_prev_prev: &previous_previous,
+                            cq_prev: &current_previous,
+                        },
+                    )
+                    .expect("stored charge must retain its companion");
+                    let integrated_current = |index| {
+                        (factors[0] * q[index]
+                            + factors[1] * previous[index]
+                            + factors[2] * previous_previous[index])
+                            / dt
+                            + factors[3] * current_previous[index]
+                    };
+                    let ibe = integrated_current(BJT_QBE_BRANCH_INDEX);
+                    let ibc = integrated_current(BJT_QBC_BRANCH_INDEX);
+                    let base_terminal_current = if resistance > 0.0 { 0.0 } else { ibe + ibc };
+                    for (row, expected) in [-ibc, base_terminal_current, -ibe, 0.0]
+                        .into_iter()
+                        .enumerate()
+                    {
+                        let base = &snapshot.reduction;
+                        let actual = (0..BJT_INTERNAL_STATE_DIM)
+                            .map(|col| {
+                                (linearization.g_ei[row][col] - base.g_ei[row][col]) * internal[col]
+                            })
+                            .sum::<Value>()
+                            + (0..BJT_EXTERNAL_STATE_DIM)
+                                .map(|col| {
+                                    (linearization.g_ee[row][col] - base.g_ee[row][col])
+                                        * base.external_voltages[col]
+                                })
+                                .sum::<Value>()
+                            - (linearization.z_e[row] - base.z_e_static[row]);
+                        assert!(
+                            (actual - expected).abs() < 1e-12,
+                            "polarity={polarity}, bias={bias}, coeff={coeff:?}, row={row}: {actual} != {expected}"
+                        );
+                    }
+                    if resistance > 0.0 {
+                        let row = BJT_VBI_STATE_INDEX;
+                        let base = &snapshot.reduction;
+                        let actual = (0..BJT_INTERNAL_STATE_DIM)
+                            .map(|col| {
+                                (linearization.g_ii[row][col] - base.g_ii[row][col]) * internal[col]
+                            })
+                            .sum::<Value>()
+                            + (0..BJT_EXTERNAL_STATE_DIM)
+                                .map(|col| {
+                                    (linearization.g_ie[row][col] - base.g_ie[row][col])
+                                        * base.external_voltages[col]
+                                })
+                                .sum::<Value>()
+                            - (linearization.z_i[row] - base.z_i_static[row]);
+                        // The private base equation balances current entering
+                        // the node; external MNA rows balance current leaving it.
+                        assert!(
+                            (actual + ibe + ibc).abs() < 1e-12,
+                            "private base current has wrong orientation: {actual} versus {}",
+                            -ibe - ibc
+                        );
+                    }
+                }
+            }
+        }
+    }
 
     #[test]
     fn legacy_bjt_backend_flag_accepts_enable_and_disable_tokens() {

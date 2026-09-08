@@ -39,13 +39,13 @@
 //! 97% Newton pays for the staged loads and gets nothing back. Most compact
 //! models decline it.
 //!
-//! ## Charge storage
+//! ## Small-signal dynamics
 //!
-//! A reactive stamp writes `d(charge)/d(unknown)`, not the residual's Jacobian,
-//! so it needs the `ddt` operand rather than the `ddt` result. A contribution is
-//! reactive when its residual *is* a `ddt` — which is how MIR presents it, one
-//! equation per `<+` statement — and the charge is that operator's input,
-//! differentiated by the same pass in the same body.
+//! Linear `ddt` terms share charge derivatives with the transient Jacobian.
+//! Nonlinear expressions and nested `ddt`/`idt` operators instead retain the
+//! dynamic coefficients of that Jacobian, with primal values fixed at the
+//! operating point. Both routes compute their coefficients in the main body;
+//! frequency stamping reads the cache without replaying model histories.
 //!
 //! ## What it refuses
 //!
@@ -67,6 +67,7 @@ use crate::canonical_ir::cfg_lower::CfgModel;
 use crate::canonical_ir::cfg_opt::{
     optimize_with_control, optimize_with_control_and_tracking, optimize_with_tracking,
 };
+use crate::canonical_ir::frequency::{self, DynamicPower, FrequencyError};
 use crate::canonical_ir::schedule::{
     InvalidationClass, Stage, schedule_with_parameter_scopes, split, structural_guards,
     worth_splitting,
@@ -840,8 +841,10 @@ struct ModelPlan {
     function: CfgFunction,
     outputs: Vec<ValueId>,
     conduction: Stamps,
-    /// Empty when no contribution stores charge.
+    /// The linear-ddt fast path; empty for general frequency expressions.
     reactive: Stamps,
+    /// Dynamic Jacobian coefficients for models beyond the linear-ddt fast path.
+    frequency: Vec<FrequencyEntry>,
     /// The conduction body cut by invalidation class, or empty when the split
     /// was measured not to be worth taking for this model.
     stages: Vec<Stage>,
@@ -891,6 +894,14 @@ struct ModelPlan {
     /// flow remain on OneStep order one rather than changing their equations.
     one_step_dae_split_safe: bool,
     requires_nodeset_phase: bool,
+}
+
+struct FrequencyEntry {
+    equation: usize,
+    unknown: usize,
+    power: DynamicPower,
+    value: ValueId,
+    position: usize,
 }
 
 impl ModelPlan {
@@ -1013,8 +1024,11 @@ impl ModelPlan {
             )
         });
         let (charges, first_order_complete) = recover_stored_charges(&mut cfg.function, &residuals);
+        let general_frequency = !first_order_complete || !idt_slots.is_empty();
         let mut derivative_roots = residuals.clone();
-        derivative_roots.extend(charges.iter().flatten().copied());
+        if !general_frequency {
+            derivative_roots.extend(charges.iter().flatten().copied());
+        }
         // A task argument can contain ddx even though a task has no derivative.
         // Preserve the numerical preparation required to evaluate that argument.
         for value in &cfg.function.values {
@@ -1031,7 +1045,7 @@ impl ModelPlan {
         // readbacks compact is important for large compact-model op-point
         // sections, whose predicates must be correct without inflating the
         // executable stamp with solver-invisible Hessians.
-        let one_step_dae_split_safe = idt_slots.is_empty()
+        let mut one_step_dae_split_safe = idt_slots.is_empty()
             && !ddt_controls_flow
             && first_order_complete
             && residuals.iter().zip(&charges).all(|(residual, charge)| {
@@ -1087,10 +1101,52 @@ impl ModelPlan {
         let reactive_rows: Vec<Vec<Option<ValueId>>> = charges
             .iter()
             .map(|charge| match charge {
-                Some(charge) => differentiated.derivative_row(*charge),
-                None => Vec::new(),
+                Some(charge) if !general_frequency => differentiated.derivative_row(*charge),
+                _ => Vec::new(),
             })
             .collect();
+        let mut frequency = Vec::new();
+        if general_frequency {
+            let roots = conduction_rows
+                .iter()
+                .enumerate()
+                .flat_map(|(equation, row)| {
+                    row.iter().enumerate().filter_map(move |(unknown, value)| {
+                        (Some(unknown) != correction_lane)
+                            .then_some(*value)
+                            .flatten()
+                            .map(|value| (equation, unknown, value))
+                    })
+                })
+                .collect::<Vec<_>>();
+            let coefficients = frequency::expand(
+                &mut differentiated.function,
+                cfg.function.values.len(),
+                &roots.iter().map(|(_, _, value)| *value).collect::<Vec<_>>(),
+                measurements.control(),
+            )
+            .map_err(|error| match error {
+                FrequencyError::Cancelled(error) => RustBackendError::cancelled(
+                    artifact.metadata.source_package.as_str(),
+                    artifact.mir.module_name.as_str(),
+                    error,
+                ),
+                FrequencyError::Unsupported(error) => unsupported(artifact, error),
+            })?;
+            for ((equation, unknown, _), coefficients) in roots.into_iter().zip(coefficients) {
+                frequency.extend(
+                    coefficients
+                        .into_iter()
+                        .map(|(power, value)| FrequencyEntry {
+                            equation,
+                            unknown,
+                            power,
+                            value,
+                            position: 0,
+                        }),
+                );
+            }
+        }
         measurements.metrics_mut().differentiated_cfg =
             cfg_structure_metrics(&differentiated.function);
         record_phase(
@@ -1160,7 +1216,7 @@ impl ModelPlan {
                 reactive.rows[index].derivatives.clear();
             }
         }
-        if !charged {
+        if !charged || general_frequency {
             reactive.rows.clear();
         }
         record_phase(
@@ -1175,8 +1231,11 @@ impl ModelPlan {
         // One simplification over both, so what the two matrices share is
         // computed once.
         let mut wanted = conduction.wanted();
+        let conduction_wanted = wanted.len();
         let reactive_wanted = reactive.wanted();
         wanted.extend_from_slice(&reactive_wanted);
+        let frequency_start = wanted.len();
+        wanted.extend(frequency.iter().map(|entry| entry.value));
         let stamp_wanted = wanted.len();
         wanted.extend(activations.iter().flatten().copied());
         let activation_wanted = activations.iter().flatten().count();
@@ -1202,9 +1261,15 @@ impl ModelPlan {
                 error,
             )
         })?;
-        let conduction_wanted = stamp_wanted - reactive_wanted.len();
         conduction.remap(&mapped[..conduction_wanted]);
-        reactive.remap(&mapped[conduction_wanted..stamp_wanted]);
+        reactive.remap(&mapped[conduction_wanted..frequency_start]);
+        for (entry, value) in frequency
+            .iter_mut()
+            .zip(&mapped[frequency_start..stamp_wanted])
+        {
+            entry.value = *value;
+        }
+        frequency.retain(|entry| !matches!(function.value(entry.value).kind, CfgValueKind::RealConstant(value) if value == 0.0));
         let activation_end = stamp_wanted + activation_wanted;
         let mut mapped_activations = mapped[stamp_wanted..activation_end].iter().copied();
         let activations = activations
@@ -1255,6 +1320,10 @@ impl ModelPlan {
         let mut outputs = Vec::new();
         let conduction = Stamps::place(conduction, &mut outputs);
         let reactive = Stamps::place(reactive, &mut outputs);
+        for entry in &mut frequency {
+            entry.position = outputs.len();
+            outputs.push(entry.value);
+        }
         let activation_positions = activations
             .iter()
             .map(|activation| {
@@ -1282,6 +1351,18 @@ impl ModelPlan {
             .map(|parameter| parameter.scope)
             .collect();
         let schedule = schedule_with_parameter_scopes(&function, &parameter_scopes);
+        // A coefficient held during AC differentiation can still vary between
+        // timepoints or Newton iterates. Its reactive primitive is not a
+        // conservative charge suitable for OneStep's F/Q history split.
+        one_step_dae_split_safe &= function.values.iter().all(|value| {
+            !matches!(
+                value.kind,
+                CfgValueKind::Unary {
+                    op: CfgUnaryOp::FreezeDerivative,
+                    ..
+                }
+            ) || schedule.class(value.id) <= InvalidationClass::Temperature
+        });
         measurements.metrics_mut().kernel_regions =
             kernel_region_metrics(artifact, &function, &schedule);
         let structural_guards = structural_guards(&function, &schedule, &parameter_scopes);
@@ -1427,6 +1508,7 @@ impl ModelPlan {
             outputs,
             conduction,
             reactive,
+            frequency,
             stages,
             slots,
             node_count: artifact.mir.nodes.len(),
@@ -2264,6 +2346,9 @@ impl ModelPlan {
             "GeneratedReactiveStamper".to_string(),
             "GeneratedStamper".to_string(),
         ];
+        if !self.frequency.is_empty() {
+            runtime_support.push("GeneratedDerivative".to_string());
+        }
         if self
             .stages
             .iter()
@@ -2694,6 +2779,14 @@ impl ModelPlan {
                 );
             }
         }
+        for (index, entry) in self.frequency.iter().enumerate() {
+            let at = self.reactive.width() + index;
+            let _ = writeln!(
+                out,
+                "        self.canonical_reactive[{at}] = {};",
+                values[entry.position]
+            );
+        }
         if self.has_newton_tasks() {
             out.push_str("        if ctx.analog_tasks_enabled() && !ctx.evaluation_failed() { self.analog_effects.as_mut().expect(\"task evaluation began\").complete_evaluation(); }\n");
         }
@@ -2788,24 +2881,15 @@ impl ModelPlan {
 
     /// The reactive matrix, written from what `stamp` already worked out.
     ///
-    /// No body at all, and that is the design rather than a shortcut. Two
-    /// reasons it has to be this way:
-    ///
-    /// *Correctness.* An `eval_ddt` call reads and writes per-instance history,
-    /// so a second evaluation from here would advance the transient state a
-    /// second time for one solve. The tier being replaced avoids it by keeping
-    /// the `ddt` calls out of what it shares; keeping no body avoids it
-    /// outright.
-    ///
-    /// *Physics, and it agrees.* The reactive matrix is `d(charge)/d(unknown)`
-    /// at the operating point, and an AC sweep holds that point fixed across
-    /// every frequency. Recomputing it per point would produce the same numbers
-    /// more slowly.
+    /// First-order charge models cache C and stamp jωC. General expressions
+    /// cache the coefficients of the differentiated operator chain and compose
+    /// its full frequency response here, including real terms such as -ω².
+    /// Neither path re-evaluates a primal expression or an operator history.
     fn emit_stamp_reactive(&self, out: &mut String) -> Result<(), RustBackendError> {
         out.push_str(
             "    pub fn stamp_reactive(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedReactiveStamper<'_>) {\n",
         );
-        if self.reactive.rows.is_empty() {
+        if self.reactive.rows.is_empty() && self.frequency.is_empty() {
             out.push_str("    }\n\n");
             return Ok(());
         }
@@ -2828,6 +2912,43 @@ impl ModelPlan {
                 None,
                 out,
             )?;
+        }
+        for (index, entry) in self.frequency.iter().enumerate() {
+            let row = &self.conduction.rows[entry.equation];
+            let at = self.reactive.width() + index;
+            let (axis, unknown) = if entry.unknown < self.node_count {
+                ("node", entry.unknown)
+            } else {
+                ("branch", entry.unknown - self.node_count)
+            };
+            let real = (entry.power.ddt % 2) == (entry.power.idt % 2);
+            let _ = writeln!(
+                out,
+                "        if let Some(value) = stamper.frequency_coefficient(ctx, cached[{at}], {}, {}) {{",
+                entry.power.ddt, entry.power.idt
+            );
+            match row.kind {
+                MirEquationKind::Current => {
+                    let _ = writeln!(
+                        out,
+                        "            stamper.stamp_current_frequency_local::<{real}>({}, {}, GeneratedDerivative::{axis}({unknown}, multiplicity * value));",
+                        optional_node(row.pos),
+                        optional_node(row.neg)
+                    );
+                }
+                MirEquationKind::Potential => {
+                    let plan =
+                        self.potential_equations[entry.equation].expect("potential branch plan");
+                    let value = if plan.sign < 0 { "-value" } else { "value" };
+                    let _ = writeln!(
+                        out,
+                        "            stamper.stamp_potential_frequency_local::<{real}>({}, GeneratedDerivative::{axis}({unknown}, {value}));",
+                        plan.branch
+                    );
+                }
+                MirEquationKind::Indirect => {}
+            }
+            out.push_str("        }\n");
         }
         out.push_str("    }\n\n");
         Ok(())
@@ -3913,7 +4034,7 @@ impl ModelPlan {
         extensions
             .impl_methods
             .push_str("        Ok(())\n    }\n\n");
-        let reactive = self.reactive.width();
+        let reactive = self.reactive.width() + self.frequency.len();
         if reactive > 0 {
             extensions
                 .after_begin_analysis
@@ -4783,7 +4904,10 @@ impl Charge {
 /// a block parameter can reach itself — from recursing forever.
 const MAX_CHARGE_MERGE_DEPTH: usize = 8;
 
-/// What a residual stores, worked out before any of it is built.
+/// A primitive whose voltage/flow derivative gives the reactive Jacobian.
+///
+/// Outside coefficients carry a derivative barrier. The primitive is not a
+/// conservative stored charge unless those coefficients are time independent.
 ///
 /// Resolution is separated from construction because a merge has to be created
 /// bottom-up: the parameter that carries a guarded charge can only be added once
@@ -4792,6 +4916,9 @@ enum Charge {
     /// A value the graph already holds — the operand of a `ddt`, or one side of
     /// an operation that carries no charge of its own.
     Value(ValueId),
+    /// A multiplier/divisor outside ddt is evaluated at the bias point but
+    /// held constant while differentiating the reactive primitive.
+    HeldCoefficient { anchor: ValueId, value: ValueId },
     /// This path stores nothing. At the top that means the contribution is not
     /// reactive at all; inside a merge it is the arm that was not taken, and
     /// inside a sum it is the conduction half.
@@ -4800,8 +4927,8 @@ enum Charge {
     Merge { block: BlockId, arms: Vec<Charge> },
     /// An operation the charge needs that the graph only has in its `ddt` form.
     ///
-    /// `I(db) <+ TYPE * ddt(QD)` stores `TYPE * QD`, and that product exists
-    /// nowhere until it is built. It is inserted directly after `anchor` — the
+    /// `I(db) <+ TYPE * ddt(QD)` projects to `held(TYPE) * QD`, and that product
+    /// exists nowhere until it is built. It is inserted directly after `anchor` — the
     /// instruction it mirrors — so its operands are in scope exactly where the
     /// original's were, without any dominance question to answer.
     Op {
@@ -4932,11 +5059,10 @@ fn resolve_charge_kind(
             Some(Charge::Value(*input))
         }
         CfgValueKind::RealConstant(constant) if *constant == 0.0 => Some(Charge::Nothing),
-        // Linear arithmetic is pushed inside the `ddt`, which is what makes a
-        // scaled or summed charge recoverable. `k * ddt(q)` stores `k * q`;
-        // `ddt(q1) + ddt(q2)` stores `q1 + q2`. Only the operations that
-        // commute with `d/dt` are followed — a product of two charges is not
-        // linear in either, so it is refused rather than approximated.
+        // Project arithmetic linear in ddt: k * ddt(q) has reactive derivative
+        // k * dq/dx, with no q * dk/dx term. Holding the outside coefficient's
+        // tangent gives that result while preserving its current bias value.
+        // Products of derivatives are nonlinear and cannot use this projection.
         CfgValueKind::Binary { op, left, right } => {
             let (op, left, right) = (*op, *left, *right);
             // An unrecovered operand must invalidate split eligibility even
@@ -4974,14 +5100,20 @@ fn resolve_charge_kind(
                     kind: Box::new(ChargeOp::Binary {
                         op,
                         left: charged_left?,
-                        right: Charge::Value(right),
+                        right: Charge::HeldCoefficient {
+                            anchor: residual,
+                            value: right,
+                        },
                     }),
                 }),
                 (CfgBinaryOp::Mul, false, true) => Some(Charge::Op {
                     anchor: residual,
                     kind: Box::new(ChargeOp::Binary {
                         op,
-                        left: Charge::Value(left),
+                        left: Charge::HeldCoefficient {
+                            anchor: residual,
+                            value: left,
+                        },
                         right: charged_right?,
                     }),
                 }),
@@ -4992,7 +5124,10 @@ fn resolve_charge_kind(
                     kind: Box::new(ChargeOp::Binary {
                         op,
                         left: charged_left?,
-                        right: Charge::Value(right),
+                        right: Charge::HeldCoefficient {
+                            anchor: residual,
+                            value: right,
+                        },
                     }),
                 }),
                 (_, false, false) => Some(Charge::Nothing),
@@ -5055,6 +5190,18 @@ fn materialise_charge(
 ) -> Option<ValueId> {
     match charge {
         Charge::Value(value) => Some(*value),
+        Charge::HeldCoefficient { anchor, value } => {
+            let held = push_value(
+                function,
+                CfgValueType::Real,
+                CfgValueKind::Unary {
+                    op: CfgUnaryOp::FreezeDerivative,
+                    input: *value,
+                },
+            );
+            insertions.push((*anchor, held));
+            Some(held)
+        }
         Charge::Nothing => None,
         Charge::Op { anchor, kind } => {
             let result = match &**kind {

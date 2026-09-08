@@ -1009,24 +1009,55 @@ endmodule
 }
 
 #[test]
-fn nested_ddx_fails_closed_instead_of_truncating_higher_derivatives() {
+fn nested_ddx_preserves_the_readback_and_its_jacobian() {
+    for body in [
+        "analog I(p,n)<+ddx(ddx(V(p,n)*V(p,n)*V(p,n),V(p,n)),V(p,n));",
+        "real x,y; analog begin x=V(p,n)*V(p,n)*V(p,n); y=ddx(x,V(p,n)); I(p,n)<+ddx(y,V(p,n)); end",
+        "parameter integer count=3; real x; integer k; analog begin x=0; for(k=0;k<count;k=k+1) x=x+V(p,n)*V(p,n)*V(p,n); I(p,n)<+ddx(ddx(x,V(p,n)),V(p,n))/3; end",
+    ] {
+        let artifact = artifact(&format!(
+            "module nested_ddx(p,n); inout p,n; electrical p,n; {body} endmodule"
+        ));
+        let cfg = CfgModel::from_hir(&artifact.hir, &artifact.mir).expect("fixture must lower");
+        let lanes: Vec<_> = (0..artifact.mir.nodes.len())
+            .map(|index| AdSeed::NodePotential(index.into()))
+            .collect();
+        let mut ad =
+            differentiate(&cfg.function, &lanes).expect("finite nesting must differentiate");
+        let row = ad.derivative_row(cfg.residuals[0]);
+        let mut bias = bias_point(&artifact);
+        for voltage in [-0.8, 0.0, 1.3] {
+            bias.node_potentials[0] = voltage;
+            bias.node_potentials[1] = 0.2;
+            let snapshot = evaluate_cfg(&ad.function, &inputs(&bias)).unwrap();
+            let value = snapshot.value(cfg.residuals[0]).unwrap();
+            assert!(
+                (value - 6.0 * (voltage - 0.2)).abs() < 1e-11,
+                "{body}: {value}"
+            );
+            for (lane, expected) in [6.0, -6.0].into_iter().enumerate() {
+                let derivative = row[lane]
+                    .and_then(|entry| snapshot.value(entry))
+                    .unwrap_or(0.0);
+                assert!(
+                    (derivative - expected).abs() < 1e-11,
+                    "{body}: lane {lane}: {derivative}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn recursive_ddx_reports_unbounded_derivative_order() {
     let artifact = artifact(
-        r#"
-module nested_ddx(p, n);
-    inout p, n;
-    electrical p, n;
-    analog I(p, n) <+ ddx(ddx(V(p, n) * V(p, n) * V(p, n), V(p, n)), V(p, n));
-endmodule
-"#,
+        "module recursive_ddx(p,n); inout p,n; electrical p,n; real x; integer k; analog begin x=exp(V(p,n)); for(k=0;k<V(p,n);k=k+1) x=ddx(x,V(p,n)); I(p,n)<+x; end endmodule",
     );
-    let cfg = CfgModel::from_hir(&artifact.hir, &artifact.mir).expect("fixture must lower");
-    let lanes: Vec<AdSeed> = (0..artifact.mir.nodes.len())
-        .map(|index| AdSeed::NodePotential(index.into()))
-        .collect();
-    let error = differentiate(&cfg.function, &lanes)
-        .expect_err("nested ddx needs a higher-order jet and must fail closed")
+    let cfg = CfgModel::from_hir(&artifact.hir, &artifact.mir).unwrap();
+    let error = differentiate(&cfg.function, &[AdSeed::NodePotential(0.into())])
+        .expect_err("recursive readbacks need a loop-aware higher-order representation")
         .to_string();
-    assert!(error.contains("nested ddx is not supported"), "{error}");
+    assert!(error.contains("unbounded derivative order"), "{error}");
 }
 
 /// Packing keeps the sparsity rather than trading it away.

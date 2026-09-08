@@ -1524,12 +1524,12 @@ impl Instance {
 		let DHS=1f64;
 		let DIQ=1e9f64;
 		let DIV=staged[82];
-		let DRU=0.0;
-		let DRV=0.0;
-		let DRW=0.0;
-		let DRX=0.0;
-		let DRY=0.0;
-		let DRZ=0.0;
+		let DRM=0.0;
+		let DRN=0.0;
+		let DRO=0.0;
+		let DRP=0.0;
+		let DRQ=0.0;
+		let DRR=0.0;
 		let C=A- B;
 		let D=L2([0.0,1f64])- L2([1f64,0.0]);
 		let F=E* C;
@@ -5751,16 +5751,16 @@ impl Instance {
 		let DJH=DJC* DJG;
 		let DJI=DJD* DJG;
 		let DJJ=L5([DJI[0],DJI[1],DJI[2],DJI[3],0.0])+ L5([0.0,0.0,0.0,0.0,((DHR* DAC)* DJC)]);
-		let DJK=DJC* DHL;
-		let DJL=DJD* DHL;
-		let DJM=L5([DJL[0],DJL[1],DJL[2],DJL[3],0.0])+ L5([0.0,0.0,0.0,0.0,(DHR* DJC)]);
+		let DJK=DJC;
+		let DJL=DJK* DHL;
+		let DJM=DHR* DJK;
 		let DJN=ddt(19, DHM);
 		let DJO=DIT* DJN;
 		let DJP=DIU* DJN;
 		let DJQ=L5([DJP[0],DJP[1],DJP[2],DJP[3],0.0])+ L5([0.0,0.0,0.0,0.0,((DHS* DAC)* DIT)]);
-		let DJR=DIT* DHM;
-		let DJS=DIU* DHM;
-		let DJT=L5([DJS[0],DJS[1],DJS[2],DJS[3],0.0])+ L5([0.0,0.0,0.0,0.0,(DHS* DIT)]);
+		let DJR=DIT;
+		let DJS=DJR* DHM;
+		let DJT=DHS* DJR;
 		let DJU=-DHM;
 		let DJV=DHS* JG;
 		DHT=DJE;
@@ -5771,8 +5771,8 @@ impl Instance {
 		DHY=DHM;
 		DHZ=AL;
 		DIA=AL;
-		DIB=DJK;
-		DIC=DJR;
+		DIB=DJL;
+		DIC=DJS;
 		DID=DJF;
 		DIE=DHR;
 		DIF=DJJ;
@@ -5802,8 +5802,8 @@ impl Instance {
 		DII=DHQ;
 		DIJ=DHR;
 		DIK=DHS;
-		DIL=DHO;
-		DIM=DHP;
+		DIL=DHN;
+		DIM=DHQ;
 		}
 		let DJW=CZY[0];
 		let DJX=CZY[1];
@@ -6001,16 +6001,8 @@ impl Instance {
 		let DRH=CZQ;
 		let DRI=CZS;
 		let DRJ=CZU;
-		let DRK=DIL[0];
-		let DRL=DIL[1];
-		let DRM=DIL[2];
-		let DRN=DIL[3];
-		let DRO=DIL[4];
-		let DRP=DIM[0];
-		let DRQ=DIM[1];
-		let DRR=DIM[2];
-		let DRS=DIM[3];
-		let DRT=DIM[4];
+		let DRK=DIL;
+		let DRL=DIM;
         if (staged[229] != 0.0) {
             stamper.stamp_potential_branch_local(Some(7), Some(8), 0, multiplicity);
         } else {
@@ -6604,7 +6596,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(7),
             Some(6),
-            multiplicity * (DRU),
+            multiplicity * (DRM),
             [],
             [],
             [],
@@ -6614,7 +6606,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(5),
             Some(8),
-            multiplicity * (DRV),
+            multiplicity * (DRN),
             [],
             [],
             [],
@@ -6624,7 +6616,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(8),
             Some(5),
-            multiplicity * (DRW),
+            multiplicity * (DRO),
             [],
             [],
             [],
@@ -6634,7 +6626,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(8),
             Some(5),
-            multiplicity * (DRX),
+            multiplicity * (DRP),
             [],
             [],
             [],
@@ -6644,7 +6636,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(7),
             Some(5),
-            multiplicity * (DRY),
+            multiplicity * (DRQ),
             [],
             [],
             [],
@@ -6654,7 +6646,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(9),
             Some(5),
-            multiplicity * (DRZ),
+            multiplicity * (DRR),
             [],
             [],
             [],
@@ -6882,34 +6874,26 @@ impl Instance {
         self.canonical_reactive[98] = staged[222];
         self.canonical_reactive[99] = staged[223];
         self.canonical_reactive[100] = staged[224];
-        self.canonical_reactive[101] = DRU;
-        self.canonical_reactive[102] = DRV;
-        self.canonical_reactive[103] = DRW;
-        self.canonical_reactive[104] = DRX;
-        self.canonical_reactive[105] = DRY;
-        self.canonical_reactive[106] = DRZ;
+        self.canonical_reactive[101] = DRM;
+        self.canonical_reactive[102] = DRN;
+        self.canonical_reactive[103] = DRO;
+        self.canonical_reactive[104] = DRP;
+        self.canonical_reactive[105] = DRQ;
+        self.canonical_reactive[106] = DRR;
         self.canonical_reactive[107] = staged[225];
         self.canonical_reactive[108] = DHT;
         self.canonical_reactive[109] = DHU;
         self.canonical_reactive[110] = DIB;
         self.canonical_reactive[111] = DRK;
-        self.canonical_reactive[112] = DRL;
-        self.canonical_reactive[113] = DRM;
-        self.canonical_reactive[114] = DRN;
-        self.canonical_reactive[115] = DRO;
-        self.canonical_reactive[116] = DIC;
-        self.canonical_reactive[117] = DRP;
-        self.canonical_reactive[118] = DRQ;
-        self.canonical_reactive[119] = DRR;
-        self.canonical_reactive[120] = DRS;
-        self.canonical_reactive[121] = DRT;
-        self.canonical_reactive[122] = staged[226];
-        self.canonical_reactive[123] = DHX;
-        self.canonical_reactive[124] = DHY;
-        self.canonical_reactive[125] = staged[227];
-        self.canonical_reactive[126] = staged[228];
-        self.canonical_reactive[127] = DHZ;
-        self.canonical_reactive[128] = DIA;
+        self.canonical_reactive[112] = DIC;
+        self.canonical_reactive[113] = DRL;
+        self.canonical_reactive[114] = staged[226];
+        self.canonical_reactive[115] = DHX;
+        self.canonical_reactive[116] = DHY;
+        self.canonical_reactive[117] = staged[227];
+        self.canonical_reactive[118] = staged[228];
+        self.canonical_reactive[119] = DHZ;
+        self.canonical_reactive[120] = DIA;
     }
 
     pub fn stamp_reactive(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedReactiveStamper<'_>) {
@@ -7080,8 +7064,8 @@ impl Instance {
         stamper.stamp_current_reactive_indexed_dense_local(
             Some(8),
             Some(6),
-            &[4, 5, 6, 8, 13],
-            &[cached[111], cached[112], cached[113], cached[114], cached[115]],
+            &[13],
+            &[cached[111]],
             &[],
             &[],
             multiplicity,
@@ -7089,8 +7073,8 @@ impl Instance {
         stamper.stamp_current_reactive_indexed_dense_local(
             Some(8),
             Some(6),
-            &[4, 5, 6, 8, 14],
-            &[cached[117], cached[118], cached[119], cached[120], cached[121]],
+            &[14],
+            &[cached[113]],
             &[],
             &[],
             multiplicity,

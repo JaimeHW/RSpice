@@ -8,7 +8,7 @@ use super::*;
 /// conductance and an equivalent current. The coefficients are derived for the
 /// step, so a stamp handed one without the other would be linearizing against
 /// an integration nobody asked for.
-pub(super) struct TransientCompanionStamp<'a, 'b> {
+pub(in crate::engine) struct TransientCompanionStamp<'a, 'b> {
     pub circuit: &'a crate::circuit::CircuitData,
     pub matrix: &'a mut crate::solver::StaticMatrix,
     pub rhs: &'a mut [Value],
@@ -40,7 +40,7 @@ pub(super) struct TransientDeviceHistories<'a> {
 /// the only place either reference reads a device's instance `IC=` vector, so
 /// it is the only seed that may consume one.
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub(super) enum ReactiveHistorySeed {
+pub(in crate::engine) enum ReactiveHistorySeed {
     /// The t=0 seed of a `.TRAN ... UIC` run.
     UicStartup,
     /// A solved operating point, a resumed checkpoint, or an integration
@@ -302,7 +302,7 @@ impl Engine {
     }
 
     #[inline]
-    pub(super) fn initialize_bjt_history(
+    pub(in crate::engine) fn initialize_bjt_history(
         circuit: &crate::circuit::CircuitData,
         solution: &[Value],
         seed: ReactiveHistorySeed,
@@ -837,7 +837,7 @@ impl Engine {
     }
 
     #[inline]
-    pub(super) fn stamp_bjt_transient_companions(
+    pub(in crate::engine) fn stamp_bjt_transient_companions(
         stamp: TransientCompanionStamp<'_, '_>,
         history: &BjtTransientHistory,
         vbic_snapshot_cache: &mut [Option<BjtChargeSnapshot>],
@@ -887,12 +887,13 @@ impl Engine {
                             cq_prev: history.charge_cq_prev[idx][branch_idx],
                         },
                     );
+                    let polarity = bjt.vbic_charge_branch_polarity(branch_idx);
                     Self::stamp_vbic_mna_charge_branch(
                         &mut stamper,
                         bjt,
                         branch,
-                        charge_factor,
-                        cq,
+                        polarity * charge_factor,
+                        polarity * cq,
                         &internal,
                         &external,
                     );

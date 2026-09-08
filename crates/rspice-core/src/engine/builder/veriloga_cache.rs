@@ -246,7 +246,13 @@ use super::*;
 // Version 45 gives global-event filters distinct physical-analysis query IDs;
 // old bytecode uses phase-sensitive predicates and must be rebuilt from source.
 // Version 46 requires the model-defined nodeset capability bit.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 46;
+// Version 47 rebuilds reactive bytecode for k(x)*ddt(q(x)): old cached entries
+// differentiate k*q and retain the incorrect q*dk/dx term.
+// Version 48 rebuilds derivative shadows for finite nested ddx; older
+// portable records can silently truncate higher derivatives.
+// Version 49 rebuilds real-modulo Jacobians and noise gains: older portable
+// bytecode treats the result as constant and silently drops both slopes.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 49;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
@@ -2373,7 +2379,15 @@ endmodule
         let cache_root = root.join("cache");
         let cache_path = cache_record_path_with_root(&source_path, &cache_root);
 
-        for (version, omit_canonical) in [(19_u32, false), (43, false), (43, true)] {
+        for (version, omit_canonical) in [
+            (19_u32, false),
+            (43, false),
+            (43, true),
+            (46, false),
+            (46, true),
+            (48, false),
+            (48, true),
+        ] {
             persist_model_to_disk_locked(&source_path, &entry, &cache_root)
                 .expect("persist current cache record");
             let file = std::fs::File::open(&cache_path).expect("open current cache record");

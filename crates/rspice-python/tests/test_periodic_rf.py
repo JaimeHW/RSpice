@@ -7,6 +7,65 @@ import rspice
 F0 = 1.0e6
 
 
+@pytest.mark.parametrize("polarity", ["NPN", "PNP"])
+def test_vbic_charge_pss_matches_analytic_rc(polarity):
+    deck = rspice.Netlist.parse_spice(
+        f"""* VBIC charge PSS
+V1 in 0 SIN(0 0.1 1meg)
+R1 in out 1k
+Q1 0 out 0 vm
+.model vm {polarity}(LEVEL=4 IS=1e-40 IBEI=0 IBCI=0 CBEO=159p RCX=0 RCI=0 RBX=0 RBI=0 RBP=0)
+.end
+"""
+    )
+    result = rspice.Engine().run_pss(deck, F0, points_per_period=64, tstab_periods=0)
+    phase = 2 * np.pi * F0 * result.time
+    wc = 2 * np.pi * F0 * 1e3 * 159e-12
+    expected = 0.1 * (np.sin(phase) - wc * np.cos(phase)) / (1 + wc * wc)
+    np.testing.assert_allclose(result.voltage_waveform("out"), expected, rtol=0, atol=5e-5)
+
+
+def test_discontinuous_rlc_orbit_matches_the_two_state_solution():
+    deck = rspice.Netlist.parse_spice(
+        """Discontinuous RLC orbit
+B1 in 0 V=if(sin(2*pi*1meg*time+0.1)>0,1,0)
+R1 in out 1k
+C1 out 0 159p
+L1 out load 10u
+R2 load 0 2k
+.options RELTOL=1e-6 VNTOL=1e-8
+.end
+"""
+    )
+    result = rspice.Engine().run_pss(
+        deck, F0, tstab_periods=0, points_per_period=256
+    )
+    # Exact piecewise-constant state transition for (capacitor V, winding I).
+    matrix = np.array(
+        [[-1 / (1e3 * 159e-12), -1 / 159e-12], [1 / 10e-6, -2e3 / 10e-6]]
+    )
+    rates, basis = np.linalg.eig(matrix)
+    inverse = np.linalg.inv(basis)
+    half_period = 0.5 / F0
+    transition = (basis * np.exp(rates * half_period)) @ inverse
+    high = np.array([2 / 3, 1 / 3000])
+    rising = np.linalg.solve(np.eye(2) + transition, transition @ high)
+    phase = np.remainder(result.time + 0.1 / (2 * np.pi * F0), 1 / F0)
+    expected = np.empty((len(phase), 2))
+    on = phase < half_period
+    expected[on] = high + (
+        np.exp(np.outer(phase[on], rates)) * (inverse @ (rising - high))
+    ) @ basis.T
+    expected[~on] = (
+        np.exp(np.outer(phase[~on] - half_period, rates)) * (inverse @ (high - rising))
+    ) @ basis.T
+    for name, coordinate, scale in [("out", 0, 1), ("load", 1, 2000)]:
+        np.testing.assert_allclose(
+            result.voltage_waveform(name), expected[:, coordinate] * scale, rtol=0, atol=1e-5
+        )
+        assert result.dc(name) == pytest.approx(1 / 3, abs=1e-5)
+
+
 def parse(deck: str) -> rspice.Netlist:
     return rspice.Netlist.parse(deck)
 

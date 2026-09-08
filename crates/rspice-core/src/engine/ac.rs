@@ -1630,7 +1630,9 @@ impl Engine {
                     continue;
                 }
 
+                let polarity = bjt.vbic_charge_branch_polarity(branch_idx);
                 let mut stamp_row = |row: NodeId, sign: Value| {
+                    let sign = sign * polarity;
                     if row == 0 {
                         return;
                     }

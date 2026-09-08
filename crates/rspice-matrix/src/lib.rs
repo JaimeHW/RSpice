@@ -13,10 +13,11 @@
 mod klu;
 mod sparse;
 
-pub use klu::{KluDiagnostics, KluSolver};
+pub use klu::{KluDiagnostics, KluNumericCheckpoint, KluSolver};
 pub use sparse::{
     ComplexMatrix, ComplexTransposeBackwardErrorReport, CscIndex, CscPatternToken, SparseLuSolver,
-    StaticMatrix, TripletMatrix, analyze_complex_transpose_solution_by_entry_visitor,
+    StaticMatrix, StaticMatrixSolverCheckpoint, TripletMatrix,
+    analyze_complex_transpose_solution_by_entry_visitor,
     certify_complex_transpose_solution_by_entry_visitor,
 };
 

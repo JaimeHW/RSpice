@@ -431,7 +431,7 @@ pub struct Instance {
 	pub(crate) time: f64,
 	pub(crate) timestep: f64,
 	pub(crate) ddt_coefficients: GeneratedDdtCoefficients,
-	pub(crate) canonical_reactive: Box<[f64; 102]>,
+	pub(crate) canonical_reactive: Box<[f64; 97]>,
 }
 
 impl Clone for Instance {

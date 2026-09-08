@@ -111,7 +111,7 @@ impl PssAcceptedStepHistory {
 const PSS_FD_STEP: Value = 1e-8;
 const PSS_KRYLOV_STATE_THRESHOLD: usize = 12;
 const PSS_KRYLOV_REL_TOL: Value = 1e-9;
-const PSS_OPERATING_POINT_IDENTITY_VERSION: u32 = 30;
+const PSS_OPERATING_POINT_IDENTITY_VERSION: u32 = 34;
 
 fn pss_identity_field(hasher: &mut blake3::Hasher, name: &str, bytes: &[u8]) {
     hasher.update(&(name.len() as u64).to_le_bytes());
@@ -708,6 +708,8 @@ pub(in crate::engine) struct PssTraversal {
     pub max_step: Value,
     pub fixed_grid: bool,
     pub integration_method: Option<IntegrationMethod>,
+    /// Endpoint sensitivities and state traces need no duplicate waveform.
+    pub retain_waveform: bool,
 }
 
 fn ensure_pss_traversal_complete(
@@ -1904,6 +1906,7 @@ impl Engine {
                 max_step,
                 fixed_grid: true,
                 integration_method: continuation_config.integration_method,
+                retain_waveform: false,
             },
             Some(&mut trace),
             abort,
@@ -1935,10 +1938,20 @@ impl Engine {
             };
             lte_estimator.record(solution, dt);
         }
-        let mut diode_history = circuit.diode_history.clone();
-        diode_history
-            .restart(trace.times[trace.times.len() - 1] - trace.times[trace.times.len() - 2]);
-        let checkpoint = TransientCheckpoint::capture_with_diode_history(
+        let junction_history = Self::capture_accepted_junction_transient_history_checkpoint(
+            &circuit,
+            &circuit.bjt_history,
+            &circuit.diode_history,
+            &circuit.bjt_snapshot_cache,
+        );
+        let junction_history =
+            Self::normalize_accepted_junction_transient_history_checkpoint_for_order_one(
+                &circuit,
+                &junction_history,
+                trace.times[trace.times.len() - 1] - trace.times[trace.times.len() - 2],
+            )
+            .map_err(SimulationError::Circuit)?;
+        let checkpoint = TransientCheckpoint::capture_with_junction_history(
             authenticated_fingerprint,
             Some(authenticated_netlist_identity),
             &self.config,
@@ -1949,7 +1962,7 @@ impl Engine {
                 startup_mode: crate::engine::TransientStartupMode::OperatingPoint,
             },
             Some(&lte_estimator),
-            Some(&diode_history),
+            Some(junction_history),
         )
         .map_err(SimulationError::Circuit)?;
 
@@ -2160,6 +2173,11 @@ impl Engine {
                 .devices
                 .iter()
                 .all(|diode| !diode.has_charge_storage())
+            && circuit.bjts.devices.iter().all(|bjt| {
+                bjt.vbic_electrical_charge_storage_nodes()
+                    .iter()
+                    .all(Option::is_none)
+            })
         {
             return Err(PssError::NoReactiveElements.into());
         }
@@ -2336,8 +2354,10 @@ impl Engine {
         let PssGridSolution {
             state: mut shooting_state,
             jacobian: preconditioner_jacobian,
+            waveform: qualified_waveform,
             ..
         } = coarse;
+        drop(qualified_waveform);
         let detected_period = shooting_state.period;
         let mut solver = ShootingNewtonSolver::new(config.tolerance, config.max_iterations)
             .with_abstol(config.abstol)
@@ -2351,13 +2371,14 @@ impl Engine {
         // convergence flag alone cannot authenticate an orbit whose cached
         // state or accepted history leaks between shooting evaluations.
         self.pss_set_reactive_state(&mut circuit, &shooting_state.x0)?;
-        let (verified_final, waveform) = self.pss_simulate_one_period(
+        let (verified_final, waveform) = self.pss_simulate_one_period::<true>(
             &mut circuit,
             &mut matrix,
             detected_period,
             &config,
             abort,
         )?;
+        let waveform = waveform.expect("recorded period traversal returns its waveform");
         shooting_state.x_t = verified_final;
         shooting_state.compute_residual();
         if !solver.check_convergence(&shooting_state) {
@@ -2464,8 +2485,14 @@ impl Engine {
             // Simulate one period
             self.pss_set_reactive_state(circuit, &shooting_state.x0)?;
 
-            let (x_t, waveform) =
-                self.pss_simulate_one_period(circuit, matrix, detected_period, config, abort)?;
+            let (x_t, waveform) = self.pss_simulate_one_period::<true>(
+                circuit,
+                matrix,
+                detected_period,
+                config,
+                abort,
+            )?;
+            let waveform = waveform.expect("recorded period traversal returns its waveform");
 
             shooting_state.x_t = x_t;
             shooting_state.compute_residual();
@@ -2494,6 +2521,9 @@ impl Engine {
                 }
                 .into());
             }
+            // A nonconverged orbit is not retained while sensitivity workers
+            // integrate their state-only perturbations.
+            drop(waveform);
 
             // Compute Newton step using a finite-difference Jacobian whose
             // columns integrate perturbed periods in parallel on per-worker
@@ -2597,16 +2627,16 @@ impl Engine {
         precision_floor_probe: bool,
     ) -> Result<(), SimulationError> {
         self.ensure_analysis_points(fine_steps)?;
-        // Retain the coarse orbit while solving the fine orbit, including a
-        // simultaneous derivative traversal, mesh index map and dense shooting
+        // Derivative workers retain only endpoint state. Keep the coarse
+        // orbit, the current fine orbit, mesh/index storage and dense shooting
         // workspace. Floor qualification retains one additional solved orbit.
         let dimension = circuit.state_dimension();
         self.ensure_result_values(
             coarse_steps
                 .saturating_add(fine_steps.saturating_mul(if precision_floor_probe {
-                    3
-                } else {
                     2
+                } else {
+                    1
                 }))
                 .saturating_add(4)
                 .saturating_mul(circuit.matrix_size().saturating_add(4))
@@ -2709,6 +2739,7 @@ impl Engine {
 
     /// Initialize reactive element state from DC solution
     fn pss_initialize_reactive_state(&self, circuit: &mut PssCircuit, dc_solution: &[Value]) {
+        circuit.seed_bjt_history(dc_solution);
         let PssCircuit {
             circuit,
             diode_history,
@@ -2804,13 +2835,17 @@ impl Engine {
                     max_step,
                     fixed_grid: false,
                     integration_method: config.integration_method,
+                    retain_waveform: true,
                 },
                 None,
                 abort,
             )?;
 
             let final_state = self.pss_extract_reactive_state(circuit);
-            Ok((waveform, final_state))
+            Ok((
+                waveform.expect("stabilization requested its waveform"),
+                final_state,
+            ))
         } else {
             let initial_state = self.pss_extract_reactive_state(circuit);
 
@@ -2891,14 +2926,14 @@ impl Engine {
     }
 
     /// Simulate one complete period
-    fn pss_simulate_one_period(
+    fn pss_simulate_one_period<const RETAIN_WAVEFORM: bool>(
         &self,
         circuit: &mut PssCircuit,
         matrix: &mut StaticMatrix,
         period: Value,
         config: &PssConfig,
         abort: &dyn AbortSignal,
-    ) -> Result<(Vec<Value>, TransientResult), SimulationError> {
+    ) -> Result<(Vec<Value>, Option<TransientResult>), SimulationError> {
         let max_step = period / circuit.grid_steps(config) as Value;
         if config.is_autonomous() {
             Self::ensure_pss_source_contract(
@@ -2926,6 +2961,7 @@ impl Engine {
                 max_step,
                 fixed_grid: true,
                 integration_method: config.integration_method,
+                retain_waveform: RETAIN_WAVEFORM,
             },
             None,
             abort,
@@ -2957,7 +2993,7 @@ impl Engine {
         let coeff = CompanionCoefficients::for_method(
             crate::numerics::integration::IntegrationMethod::BackwardEuler,
         );
-        let start = vec![0.0; initial.matrix_size()];
+        let start = initial.initial_solution_guess();
 
         match self.pss_newton_trial(
             &mut initial,
@@ -2973,6 +3009,9 @@ impl Engine {
         )? {
             Some(mut solution) => {
                 solution.truncate(size);
+                // Cross-coupled device charge also depends on algebraic node
+                // biases resolved by this consistency solve.
+                circuit.seed_bjt_history(&solution);
                 Ok(solution)
             }
             None => Err(SimulationError::ConvergenceFailed(
@@ -3028,14 +3067,24 @@ impl Engine {
             let mut x_plus = x0.to_vec();
             x_plus[j] += h;
             self.pss_set_reactive_state(worker_circuit, &x_plus)?;
-            let (x_t_plus, _) =
-                self.pss_simulate_one_period(worker_circuit, worker_matrix, period, config, abort)?;
+            let (x_t_plus, _) = self.pss_simulate_one_period::<false>(
+                worker_circuit,
+                worker_matrix,
+                period,
+                config,
+                abort,
+            )?;
 
             let mut x_minus = x0.to_vec();
             x_minus[j] -= h;
             self.pss_set_reactive_state(worker_circuit, &x_minus)?;
-            let (x_t_minus, _) =
-                self.pss_simulate_one_period(worker_circuit, worker_matrix, period, config, abort)?;
+            let (x_t_minus, _) = self.pss_simulate_one_period::<false>(
+                worker_circuit,
+                worker_matrix,
+                period,
+                config,
+                abort,
+            )?;
 
             Ok((0..n)
                 .map(|i| {
@@ -3130,8 +3179,13 @@ impl Engine {
             .map(|(state, vector)| state + epsilon * vector)
             .collect::<Vec<_>>();
         self.pss_set_reactive_state(worker_circuit, &x_plus)?;
-        let (phi_plus, _) =
-            self.pss_simulate_one_period(worker_circuit, worker_matrix, period, config, abort)?;
+        let (phi_plus, _) = self.pss_simulate_one_period::<false>(
+            worker_circuit,
+            worker_matrix,
+            period,
+            config,
+            abort,
+        )?;
 
         let x_minus = x0
             .iter()
@@ -3139,8 +3193,13 @@ impl Engine {
             .map(|(state, vector)| state - epsilon * vector)
             .collect::<Vec<_>>();
         self.pss_set_reactive_state(worker_circuit, &x_minus)?;
-        let (phi_minus, _) =
-            self.pss_simulate_one_period(worker_circuit, worker_matrix, period, config, abort)?;
+        let (phi_minus, _) = self.pss_simulate_one_period::<false>(
+            worker_circuit,
+            worker_matrix,
+            period,
+            config,
+            abort,
+        )?;
 
         Ok(phi_plus
             .iter()
@@ -3225,7 +3284,7 @@ impl Engine {
         worker.link_indices(&worker_matrix);
         let mut worker_matrix = worker_matrix;
         self.pss_set_reactive_state(&mut worker, &state.x0)?;
-        let (phi_plus_t, _) = self.pss_simulate_one_period(
+        let (phi_plus_t, _) = self.pss_simulate_one_period::<false>(
             &mut worker,
             &mut worker_matrix,
             period + h_t,
@@ -3368,7 +3427,7 @@ impl Engine {
         worker.link_indices(&m);
         let mut worker_matrix = m;
         self.pss_set_reactive_state(&mut worker, &state.x0)?;
-        let (x_t_plus, _) = self.pss_simulate_one_period(
+        let (x_t_plus, _) = self.pss_simulate_one_period::<false>(
             &mut worker,
             &mut worker_matrix,
             period + h_t,
@@ -3567,10 +3626,16 @@ impl Engine {
                     step.dt,
                     step.coeff,
                 );
-                circuit.stabilize_inductor_correction_rhs(&mut proposal, &new_solution, step)?;
+                circuit.stabilize_inductor_correction_rhs(
+                    &mut proposal,
+                    &new_solution,
+                    step,
+                    false,
+                )?;
                 let solved = matrix.solve_into(&proposal, &mut rhs);
                 if solved.is_ok() {
                     circuit.capture_capacitor_trial_currents(&new_solution, &rhs, step);
+                    circuit.capture_inductor_trial_offsets(&new_solution, &rhs);
                     for (value, &previous) in rhs.iter_mut().zip(&new_solution) {
                         *value += previous;
                     }
@@ -3646,6 +3711,7 @@ impl Engine {
                                     &mut proposal,
                                     &new_solution,
                                     step,
+                                    true,
                                 )?;
                                 if !self.pss_inductor_residual_convergence_met(
                                     circuit,
@@ -3807,6 +3873,8 @@ impl Engine {
         let PssCircuit {
             circuit,
             diode_history,
+            bjt_history,
+            bjt_snapshot_cache,
             ..
         } = pss;
         let PssCompanionStep {
@@ -3904,6 +3972,7 @@ impl Engine {
         if circuit.has_nonlinear_devices() {
             circuit.update_nonlinear(linearize_at);
             if physical_probe {
+                circuit.update_bjt_static_linearizations(linearize_at);
                 circuit.try_stamp_static_probe_nonlinear(matrix, rhs, linearize_at)
             } else {
                 circuit.stamp_nonlinear(matrix, rhs, linearize_at)
@@ -3919,6 +3988,21 @@ impl Engine {
                 dt,
                 diode_history,
                 physical_probe,
+            );
+            Self::stamp_bjt_transient_companions(
+                super::transient::TransientCompanionStamp {
+                    circuit,
+                    matrix,
+                    rhs,
+                    voltages: linearize_at,
+                    coeff,
+                    dt,
+                },
+                bjt_history,
+                bjt_snapshot_cache,
+                super::transient::VbicCachedSnapshotReuse::SeedOnly,
+                self.voltage_abstol(),
+                self.voltage_reltol(),
             );
         }
         // B sources remain part of the physical transient equation even when
@@ -3966,12 +4050,13 @@ impl Engine {
         traversal: PssTraversal,
         mut trace: Option<&mut PssStateTrace>,
         abort: &dyn AbortSignal,
-    ) -> Result<TransientResult, SimulationError> {
+    ) -> Result<Option<TransientResult>, SimulationError> {
         let PssTraversal {
             tstop,
             max_step,
             fixed_grid,
             integration_method,
+            retain_waveform,
         } = traversal;
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
@@ -4019,8 +4104,7 @@ impl Engine {
             LteEstimator::with_tolerances(self.voltage_reltol(), self.voltage_abstol());
         let mut trapgear = TrapGearController::new();
 
-        let node_names = circuit.node_names_sorted();
-        let mut result = TransientResult {
+        let mut result = retain_waveform.then(|| TransientResult {
             time: vec![0.0],
             step_sizes: vec![0.0],
             voltages: (0..num_nodes)
@@ -4032,14 +4116,31 @@ impl Engine {
                 .collect(),
             num_nodes,
             branch_names: circuit.branch_names_sorted(),
-            node_names,
+            node_names: circuit.node_names_sorted(),
             digital_traces: Vec::new(),
             digital_buses: Vec::new(),
             real_traces: Vec::new(),
             device_op_traces: Vec::new(),
             store_traces: Vec::new(),
             fft_results: Vec::new(),
-        };
+        });
+        if fixed_grid && let Some(result) = &mut result {
+            self.ensure_analysis_points(fixed_steps)?;
+            self.ensure_result_values(
+                fixed_steps
+                    .saturating_add(1)
+                    .saturating_mul(circuit.matrix_size().saturating_add(2)),
+            )?;
+            for values in [&mut result.time, &mut result.step_sizes]
+                .into_iter()
+                .chain(&mut result.voltages)
+                .chain(&mut result.branch_currents)
+            {
+                values.try_reserve_exact(fixed_steps).map_err(|_| {
+                    SimulationError::Circuit("PSS waveform allocation failed".to_owned())
+                })?;
+            }
+        }
 
         let mut t = 0.0;
         let max_iterations = if fixed_grid { fixed_steps } else { 100_000 };
@@ -4231,6 +4332,8 @@ impl Engine {
                 let PssCircuit {
                     circuit,
                     diode_history,
+                    bjt_history,
+                    bjt_snapshot_cache,
                     ..
                 } = circuit;
                 for (index, diode) in circuit.diodes.devices.iter().enumerate() {
@@ -4239,8 +4342,21 @@ impl Engine {
                     diode_history.accept_branch(index, voltage, charge, &coeff, dt);
                 }
                 diode_history.finish_step(dt);
+                Self::accept_bjt_history(
+                    circuit,
+                    bjt_history,
+                    &new_solution,
+                    &coeff,
+                    dt,
+                    Some(bjt_snapshot_cache),
+                    super::transient::VbicSnapshotTolerances {
+                        voltage_abstol: self.voltage_abstol(),
+                        reltol: self.voltage_reltol(),
+                    },
+                )?;
             }
 
+            circuit.accept_node_solution(&new_solution);
             solution = new_solution;
             accepted_step_history.accept(dt);
             circuit.accept_source_time(t);
@@ -4251,17 +4367,19 @@ impl Engine {
                 tr.solutions.push(solution.clone());
             }
 
-            result.time.push(t);
-            result.step_sizes.push(dt);
-            for (i, voltages) in result.voltages.iter_mut().enumerate() {
-                voltages.push(solution.get(i).copied().unwrap_or(0.0));
-            }
-            for (values, &value) in result
-                .branch_currents
-                .iter_mut()
-                .zip(&solution[num_nodes..])
-            {
-                values.push(value);
+            if let Some(result) = &mut result {
+                result.time.push(t);
+                result.step_sizes.push(dt);
+                for (i, voltages) in result.voltages.iter_mut().enumerate() {
+                    voltages.push(solution.get(i).copied().unwrap_or(0.0));
+                }
+                for (values, &value) in result
+                    .branch_currents
+                    .iter_mut()
+                    .zip(&solution[num_nodes..])
+                {
+                    values.push(value);
+                }
             }
 
             if let Some(scale) = accepted_step_scale {
@@ -4283,7 +4401,9 @@ impl Engine {
                 index: fixed_index,
                 steps: fixed_steps,
             },
-            result.time.last().copied(),
+            result
+                .as_ref()
+                .map_or(Some(t), |result| result.time.last().copied()),
         )?;
 
         Ok(result)
@@ -4322,6 +4442,166 @@ impl Engine {
 mod tests {
     use super::*;
     use crate::SimulationConfig;
+
+    #[test]
+    fn pss_vbic_charge_matches_explicit_capacitors_for_both_polarities() {
+        // All intrinsic nodes collapse onto the terminals. Zero grading
+        // exponents make the junction charges linear, so their sum has an
+        // independent ordinary-capacitor equivalent, including overlap and
+        // a redundant B-C/B-E state loop.
+        let engine = Engine::default();
+        for method in [
+            IntegrationMethod::BackwardEuler,
+            IntegrationMethod::Trapezoidal,
+            IntegrationMethod::Gear2,
+        ] {
+            for polarity in ["NPN", "PNP"] {
+                let devices = [
+                    format!(
+                        "Q1 0 out 0 vm\n.model vm {polarity}(LEVEL=4 IS=1e-40 IBEI=1e-40 IBCI=1e-40 CJE=100p CJC=20p MJE=0 MJC=0 TF=0 TR=0 CBEO=30p CBCO=9p RCX=0 RCI=0 RBX=0 RBI=0 RE=0 RBP=0 RS=0 CJEP=0 CJCP=0 CCSO=0 QCO=0 GAMM=0 ISP=0)\n"
+                    ),
+                    "C1 out 0 159p\n".to_owned(),
+                ];
+                let mut traces = Vec::new();
+                for device in devices {
+                    let netlist = Netlist::parse(&format!(
+                        "VBIC charge oracle\nV1 in 0 SIN(0 0.1 1meg)\nR1 in out 1k\n{device}.end\n"
+                    ))
+                    .unwrap();
+                    let mut circuit = PssCircuit::new(engine.build_circuit(&netlist).unwrap());
+                    assert_eq!(circuit.state_dimension(), 1);
+                    circuit.set_state(&[0.04]).unwrap();
+                    let mut matrix = engine.build_matrix(&circuit).unwrap();
+                    circuit.link_indices(&matrix);
+                    let seed = engine
+                        .pss_initial_node_solution(&mut circuit, &NoAbort)
+                        .unwrap();
+                    let mut trace = PssStateTrace::default();
+                    engine
+                        .pss_run_tran_internal(
+                            &mut circuit,
+                            &mut matrix,
+                            seed,
+                            PssTraversal {
+                                tstop: 1e-6,
+                                max_step: 1e-6 / 64.0,
+                                fixed_grid: true,
+                                integration_method: Some(method),
+                                retain_waveform: false,
+                            },
+                            Some(&mut trace),
+                            &NoAbort,
+                        )
+                        .unwrap_or_else(|error| panic!("{method:?} {polarity}: {error}"));
+                    assert_eq!(circuit.extract_state(), *trace.states.last().unwrap());
+                    traces.push(trace);
+                }
+                assert_eq!(traces[0].times, traces[1].times);
+                for (actual, expected) in traces[0].states.iter().zip(&traces[1].states) {
+                    assert!(
+                        (actual[0] - expected[0]).abs() < 1e-9,
+                        "{method:?} {polarity}: {actual:?} != {expected:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn state_only_traversal_preserves_recorded_physics_at_adjacent_clocks() {
+        let deck = "state-only traversal\nV1 in 0 SIN(0.2 0.1 1meg)\nR1 in out 1k\nC1 out 0 159p\nD1 out 0 dm\nL1 out load 10u\nR2 load 0 2k\n.model dm D(IS=1e-14 CJO=10p TT=1n)\n";
+        let engine = Engine::default();
+        let config = PssConfig::new(1e6).with_points_per_period(64);
+        let bits = |values: &[Value]| {
+            values
+                .iter()
+                .map(|value| value.to_bits())
+                .collect::<Vec<_>>()
+        };
+        for method in [
+            IntegrationMethod::BackwardEuler,
+            IntegrationMethod::Trapezoidal,
+            IntegrationMethod::Gear2,
+        ] {
+            for (floor, mutual) in [(false, false), (true, false), (true, true)] {
+                let extra = if mutual {
+                    "L2 secondary 0 20u\nR3 secondary 0 3k\nK1 L1 L2 0.6\n"
+                } else {
+                    ""
+                };
+                let netlist = Netlist::parse(&format!("{deck}{extra}.end\n")).unwrap();
+                let mut base = PssCircuit::new(engine.build_circuit(&netlist).unwrap());
+                let initial = vec![0.0; base.state_dimension()];
+                base.set_state(&initial).unwrap();
+                let mut times = (0..=64)
+                    .map(|index| index as Value / 64.0 * config.period())
+                    .collect::<Vec<_>>();
+                if floor {
+                    times.push(times[16].next_up());
+                }
+                times.sort_by(Value::total_cmp);
+                base.integration_mesh =
+                    Some(PssIntegrationMesh::from_times(config.period(), times).unwrap());
+                let mut expected = None;
+                for retain_waveform in [true, false] {
+                    let mut circuit = base.clone();
+                    let mut matrix = engine.build_matrix(&circuit).unwrap();
+                    circuit.link_indices(&matrix);
+                    let seed = engine
+                        .pss_initial_node_solution(&mut circuit, &NoAbort)
+                        .unwrap();
+                    let mut trace = PssStateTrace::default();
+                    let waveform = engine.pss_run_tran_internal(
+                        &mut circuit,
+                        &mut matrix,
+                        seed,
+                        PssTraversal {
+                            tstop: config.period(),
+                            max_step: config.period() / 64.0,
+                            fixed_grid: true,
+                            integration_method: Some(method),
+                            retain_waveform,
+                        },
+                        Some(&mut trace),
+                        &NoAbort,
+                    );
+                    let waveform = waveform.unwrap_or_else(|error| {
+                        panic!("{method:?}, floor={floor}, mutual={mutual}, recorded={retain_waveform}: {error}")
+                    });
+                    assert_eq!(waveform.is_some(), retain_waveform);
+                    assert_eq!(trace.times.last().copied(), Some(config.period()));
+                    let samples = trace
+                        .states
+                        .iter()
+                        .chain(&trace.solutions)
+                        .map(|row| bits(row))
+                        .collect::<Vec<_>>();
+                    let history = [
+                        bits(&circuit.capacitors.v_prev),
+                        bits(&circuit.capacitors.v_prev_prev),
+                        bits(&circuit.capacitors.v_prev_prev_prev),
+                        bits(&circuit.capacitors.i_prev),
+                        bits(&circuit.capacitors.i_eq),
+                        bits(&circuit.inductors.i_prev),
+                        bits(&circuit.inductors.i_prev_prev),
+                        bits(&circuit.inductors.i_prev_prev_prev),
+                        bits(&circuit.inductors.v_prev),
+                    ];
+                    let actual = (
+                        bits(&trace.times),
+                        samples,
+                        history,
+                        circuit.diode_history.clone(),
+                    );
+                    if let Some(expected) = &expected {
+                        assert_eq!(&actual, expected);
+                    } else {
+                        expected = Some(actual);
+                    }
+                }
+            }
+        }
+    }
 
     #[test]
     fn engine_shooting_newton_linear_solve_fails_closed_on_singular_system() {
@@ -4571,6 +4851,7 @@ mod tests {
                     max_step: 1.0e-9,
                     fixed_grid: true,
                     integration_method: Some(IntegrationMethod::BackwardEuler),
+                    retain_waveform: true,
                 },
                 None,
                 &NoAbort,
@@ -4711,6 +4992,7 @@ mod tests {
                         max_step: 1e-9,
                         fixed_grid: true,
                         integration_method: Some(method),
+                        retain_waveform: true,
                     },
                     Some(&mut trace),
                     &NoAbort,
@@ -4804,7 +5086,18 @@ mod tests {
             .correction_rhs_into(&rhs, &solution, &mut correction)
             .unwrap();
         circuit
-            .stabilize_inductor_correction_rhs(&mut correction, &solution, step)
+            .stabilize_inductor_correction_rhs(&mut correction, &solution, step, false)
+            .unwrap();
+        assert!(!engine.pss_inductor_residual_convergence_met(
+            &circuit,
+            &solution,
+            &correction,
+            &coeff
+        ));
+        rhs.fill(0.0);
+        circuit.capture_inductor_trial_offsets(&solution, &rhs);
+        circuit
+            .stabilize_inductor_correction_rhs(&mut correction, &solution, step, true)
             .unwrap();
         assert!(!engine.pss_inductor_residual_convergence_met(
             &circuit,
@@ -4857,10 +5150,12 @@ mod tests {
                             max_step: 0.25e-6,
                             fixed_grid: true,
                             integration_method: Some(method),
+                            retain_waveform: true,
                         },
                         None,
                         &NoAbort,
                     )
+                    .unwrap()
                     .unwrap();
                 let output = result
                     .node_names
@@ -4922,6 +5217,7 @@ mod tests {
                     max_step: 1e-6,
                     fixed_grid: false,
                     integration_method: None,
+                    retain_waveform: true,
                 },
                 None,
                 &crate::abort_signal::CountingAbort::new(100),

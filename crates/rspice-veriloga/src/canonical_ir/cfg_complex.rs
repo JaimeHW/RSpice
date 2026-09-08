@@ -105,10 +105,14 @@ impl CfgScalar for ComplexStep {
         self.mul(rhs.reciprocal())
     }
 
-    /// Piecewise constant in the quotient, so the derivative is the dividend's.
+    /// Hold the integer quotient constant while perturbing both operands.
     fn rem(self, rhs: Self) -> Self {
-        let quotient = (self.re / rhs.re).trunc();
-        Self::new(self.re % rhs.re, self.im - quotient * rhs.im)
+        let imaginary = if rhs.im == 0.0 {
+            self.im
+        } else {
+            self.im - (self.re / rhs.re).trunc() * rhs.im
+        };
+        Self::new(self.re % rhs.re, imaginary)
     }
 
     fn powf(self, rhs: Self) -> Self {
@@ -321,6 +325,22 @@ const LIMITED_EXP_FLOOR: f64 = rspice_veriloga_runtime::LIMITED_EXP_FLOOR;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn real_modulo_complex_step_tracks_each_operand() {
+        for a in [-10.0_f64, 10.0] {
+            for b in [-3.75_f64, 3.75] {
+                let left = ComplexStep::seed(a).rem(ComplexStep::from_f64(b));
+                let right = ComplexStep::from_f64(a).rem(ComplexStep::seed(b));
+                assert_eq!(left.re, a % b);
+                assert_eq!(left.derivative(), 1.0);
+                assert_eq!(right.derivative(), -(a / b).trunc());
+            }
+        }
+        let huge = ComplexStep::seed(1.0e300).rem(ComplexStep::from_f64(1.0e-300));
+        assert_eq!(huge.derivative(), 1.0);
+        assert!(huge.re.is_finite());
+    }
 
     /// Each function checked against its derivative written out by hand, so a
     /// mistake in the complex identities cannot travel into the oracle.

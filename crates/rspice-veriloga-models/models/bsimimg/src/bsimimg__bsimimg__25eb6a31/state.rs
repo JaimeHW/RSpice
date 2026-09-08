@@ -1050,7 +1050,7 @@ impl<const DDT: usize, const IDT: usize> StampState<DDT, IDT> {
 	}
 }
 
-pub(crate) type CanonicalModelValues = [f64; 121];
+pub(crate) type CanonicalModelValues = [f64; 122];
 pub struct Instance {
 	pub nodes: [usize; 9],
 	pub branches: [usize; 5],
@@ -1066,7 +1066,7 @@ pub struct Instance {
 	pub(crate) analog_effects: Option<Box<rspice_veriloga_runtime::AnalogEffectJournal>>,
 	pub(crate) canonical_reactive: Box<[f64; 71]>,
 	pub(crate) canonical_model_values: Option<std::sync::Arc<CanonicalModelValues>>,
-	pub(crate) canonical_staged: Box<[f64; 338]>,
+	pub(crate) canonical_staged: Box<[f64; 339]>,
 	pub(crate) canonical_instance_valid: bool,
 	pub(crate) canonical_temperature_valid: bool,
 	pub(crate) canonical_temperature: f64,

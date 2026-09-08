@@ -126,7 +126,7 @@ pub(super) struct JfetTransientHistory {
 pub(super) use crate::numerics::integration::TwoTerminalChargeHistory as DiodeTransientHistory;
 
 #[derive(Debug, Clone, Default, PartialEq)]
-pub(super) struct BjtTransientHistory {
+pub(in crate::engine) struct BjtTransientHistory {
     pub(super) vbe_prev: Vec<Value>,
     pub(super) vbe_prev_prev: Vec<Value>,
     pub(super) ibe_prev: Vec<Value>,
@@ -154,7 +154,16 @@ pub(super) struct BjtTransientHistory {
 }
 
 pub(super) const BJT_TRANSIENT_HISTORY_RUNTIME_TAG: &str =
-    "legacy-gummel-poon-transient-history-v1";
+    "legacy-gummel-poon-transient-history-v2";
+pub(super) const VBIC_TRANSIENT_HISTORY_RUNTIME_TAG: &str = "promoted-vbic-transient-history-v1";
+
+fn bjt_history_runtime_tag(bjt: &crate::device::Bjt) -> &'static str {
+    if bjt.uses_vbic_dynamic_charges() && bjt.vbic_mna_promoted() {
+        VBIC_TRANSIENT_HISTORY_RUNTIME_TAG
+    } else {
+        BJT_TRANSIENT_HISTORY_RUNTIME_TAG
+    }
+}
 // V1 could freeze charge history whenever the local charge slope was zero
 // or negative. That lost history cannot be reconstructed from a capture.
 pub(super) const DIODE_TRANSIENT_HISTORY_RUNTIME_TAG: &str = "native-diode-transient-history-v2";
@@ -167,7 +176,7 @@ pub(super) const DIODE_TRANSIENT_HISTORY_RUNTIME_TAG: &str = "native-diode-trans
 /// checkpoint wire code can serialize one row at a time without transposing
 /// or duplicating the in-memory payload here.
 #[derive(Debug, Clone, Default, PartialEq)]
-pub(super) struct AcceptedJunctionTransientHistoryCheckpoint {
+pub(in crate::engine) struct AcceptedJunctionTransientHistoryCheckpoint {
     pub(super) available: bool,
     pub(super) resume_blockers: Vec<String>,
     pub(super) bjt_names: Vec<String>,
@@ -232,7 +241,7 @@ pub(super) struct VbicPredictorLinearBranchState {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum VbicCachedSnapshotReuse {
+pub(in crate::engine) enum VbicCachedSnapshotReuse {
     SeedOnly,
     NewtonBypass,
 }
@@ -279,7 +288,7 @@ impl Engine {
     /// Capture the accepted engine-owned junction histories without mutating
     /// either the circuit or the runtime histories. A valid non-breakpoint
     /// capture preserves the optional per-BJT snapshot cache exactly.
-    pub(super) fn capture_accepted_junction_transient_history_checkpoint(
+    pub(in crate::engine) fn capture_accepted_junction_transient_history_checkpoint(
         circuit: &crate::circuit::CircuitData,
         bjt_history: &BjtTransientHistory,
         diode_history: &DiodeTransientHistory,
@@ -319,10 +328,12 @@ impl Engine {
                 .iter()
                 .map(|bjt| bjt.name.clone())
                 .collect(),
-            bjt_runtime_tags: vec![
-                BJT_TRANSIENT_HISTORY_RUNTIME_TAG.to_string();
-                circuit.bjts.devices.len()
-            ],
+            bjt_runtime_tags: circuit
+                .bjts
+                .devices
+                .iter()
+                .map(|bjt| bjt_history_runtime_tag(bjt).to_string())
+                .collect(),
             bjt_history: bjt_history.clone(),
             diode_names: circuit
                 .diodes
@@ -395,15 +406,18 @@ impl Engine {
                 ));
             }
             let captured_tag = &checkpoint.bjt_runtime_tags[index];
-            if captured_tag != BJT_TRANSIENT_HISTORY_RUNTIME_TAG {
+            let expected_tag = bjt_history_runtime_tag(bjt);
+            if captured_tag != expected_tag {
                 return Err(format!(
-                    "BJT '{}' transient history runtime mismatch: captured '{captured_tag}', runtime requires '{BJT_TRANSIENT_HISTORY_RUNTIME_TAG}'",
+                    "BJT '{}' transient history runtime mismatch: captured '{captured_tag}', runtime requires '{expected_tag}'",
                     bjt.name
                 ));
             }
-            if !bjt.uses_legacy_gummel_poon() {
+            if !(bjt.uses_legacy_gummel_poon()
+                || (bjt.uses_vbic_dynamic_charges() && bjt.vbic_mna_promoted()))
+            {
                 return Err(format!(
-                    "BJT '{}' transient history is not checkpointable; only the legacy Gummel-Poon runtime has a complete history contract",
+                    "BJT '{}' transient history is not checkpointable; its runtime requires a legacy Gummel-Poon or promoted VBIC history contract",
                     bjt.name
                 ));
             }
@@ -588,7 +602,7 @@ impl Engine {
     /// order-one integration epoch. The authoritative current accepted state
     /// remains exact; older generations/derivatives are flattened and the
     /// trial snapshot cache is deliberately invalidated.
-    pub(super) fn normalize_accepted_junction_transient_history_checkpoint_for_order_one(
+    pub(in crate::engine) fn normalize_accepted_junction_transient_history_checkpoint_for_order_one(
         circuit: &crate::circuit::CircuitData,
         checkpoint: &AcceptedJunctionTransientHistoryCheckpoint,
         accepted_dt_seed: Value,

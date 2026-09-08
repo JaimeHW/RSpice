@@ -54,14 +54,15 @@ pub struct PssConfig {
     /// Default: 100
     pub max_iterations: usize,
 
-    /// Convergence tolerance for periodicity.
-    /// The solver converges when ||x(T) - x(0)|| / ||x(0)|| < tolerance.
+    /// Relative periodicity tolerance for each shooting coordinate.
+    /// Every coordinate must satisfy |x(T)-x(0)| / |x(0)| < tolerance
+    /// or the absolute criterion below; voltage and current scales are separate.
     /// Default: 1e-6 (relative)
     pub tolerance: Value,
 
     /// Absolute tolerance for small signals.
-    /// The orbit also converges when ||x(T) - x(0)|| < abstol, including
-    /// when the initial state is zero and the relative error is undefined.
+    /// A coordinate also converges when |x(T)-x(0)| < abstol, including
+    /// when its initial value is zero and relative error is undefined.
     /// Default: 1e-12
     pub abstol: Value,
 

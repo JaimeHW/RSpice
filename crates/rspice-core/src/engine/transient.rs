@@ -375,7 +375,7 @@ use state_advanced_mos::Bsim4CompanionStep;
 use state_commit::{AcceptedReactiveSnapshots, AcceptedReactiveStep, ReactiveBreakpointScheduling};
 use state_recovery::{ForceAcceptLimits, SourceActivityRecovery};
 use step_control::{SourceActivityDeltas, StepBiasFloors};
-use vbic::VbicSnapshotTolerances;
+pub(in crate::engine) use vbic::VbicSnapshotTolerances;
 
 mod breakpoints;
 mod checkpoint;
@@ -393,11 +393,11 @@ mod restart;
 mod startup;
 mod state;
 use crate::circuit::XspiceCompanionPolicy;
-use state::{TransientCompanionStamp, TransientDeviceHistories};
+use state::TransientDeviceHistories;
+pub(in crate::engine) use state::{ReactiveHistorySeed, TransientCompanionStamp};
 mod xyce_dae;
 use state::{
     AcceptedJunctionHistoryRestart, MosfetCompanionBranchTerms, MosfetGateCompanionCharges,
-    ReactiveHistorySeed,
 };
 mod state_advanced_mos;
 mod state_commit;
@@ -435,6 +435,7 @@ pub use fft::transient_fft_window_coherent_gain;
 
 mod history;
 use history::*;
+pub(in crate::engine) use history::{BjtTransientHistory, VbicCachedSnapshotReuse};
 
 #[derive(Debug, Clone, Copy)]
 struct DerivedTransientBranchCurrent {
@@ -596,6 +597,7 @@ struct ScheduledCheckpointIdentity<'a> {
 struct ScheduledCheckpointState<'a> {
     solution: &'a [Value],
     circuit: &'a crate::circuit::CircuitData,
+    matrix: &'a crate::solver::StaticMatrix,
     startup_mode: TransientStartupMode,
 }
 
@@ -3245,11 +3247,13 @@ impl Engine {
             if index.is_multiple_of(64) && abort.is_aborted() {
                 return Err(SimulationError::Aborted);
             }
-            if !bjt.uses_legacy_gummel_poon() {
+            if !(bjt.uses_legacy_gummel_poon()
+                || (bjt.uses_vbic_dynamic_charges() && bjt.vbic_mna_promoted()))
+            {
                 push(
                     TransientCheckpointBlockerSource::JunctionHistory,
                     format!(
-                        "BJT '{}' transient history is not checkpointable; only the legacy Gummel-Poon runtime has a complete history contract",
+                        "BJT '{}' transient history is not checkpointable; its runtime requires a legacy Gummel-Poon or promoted VBIC history contract",
                         bjt.name
                     ),
                 );
@@ -3316,6 +3320,7 @@ impl Engine {
         let ScheduledCheckpointState {
             solution,
             circuit,
+            matrix,
             startup_mode,
         } = state;
         let ScheduledCheckpointIdentity {
@@ -3430,6 +3435,11 @@ impl Engine {
                 dynamic_tline_breakpoints_added,
             },
             AcceptedTransientRuntime {
+                accepted_solver_state: Some(
+                    matrix
+                        .capture_solver_checkpoint()
+                        .map_err(|error| SimulationError::Circuit(error.to_string()))?,
+                ),
                 linearized_startup,
                 accepted_junction_history,
                 accepted_integration_runtime,
@@ -3661,6 +3671,7 @@ impl Engine {
                         dynamic_tline_breakpoints_added: 0,
                     },
                     AcceptedTransientRuntime {
+                        accepted_solver_state: None,
                         linearized_startup: startup_mode.is_uic(),
                         accepted_junction_history: AcceptedJunctionTransientHistoryCheckpoint {
                             available: true,
@@ -4951,6 +4962,9 @@ impl Engine {
         // histories written above with the exact checkpointed state.
         if let Some(checkpoint) = resume {
             checkpoint
+                .restore_solver_state(&mut matrix)
+                .map_err(SimulationError::Circuit)?;
+            checkpoint
                 .inject(&mut circuit)
                 .map_err(SimulationError::Circuit)?;
             pending_veriloga_event_time =
@@ -5326,6 +5340,7 @@ impl Engine {
             ScheduledCheckpointState {
                 solution: &solution,
                 circuit: &circuit,
+                matrix: &matrix,
                 startup_mode,
             },
             ScheduledCheckpointIntegration {
@@ -9024,6 +9039,7 @@ impl Engine {
                         ScheduledCheckpointState {
                             solution: &solution,
                             circuit: &circuit,
+                            matrix: &matrix,
                             startup_mode,
                         },
                         ScheduledCheckpointIntegration {
@@ -9690,6 +9706,7 @@ impl Engine {
                 ScheduledCheckpointState {
                     solution: &solution,
                     circuit: &circuit,
+                    matrix: &matrix,
                     startup_mode,
                 },
                 ScheduledCheckpointIntegration {
@@ -9910,6 +9927,11 @@ impl Engine {
                         dynamic_tline_breakpoints_added,
                     },
                     AcceptedTransientRuntime {
+                        accepted_solver_state: Some(
+                            matrix
+                                .capture_solver_checkpoint()
+                                .map_err(|error| SimulationError::Circuit(error.to_string()))?,
+                        ),
                         linearized_startup: initial_solution_mode
                             == startup::InitialSolutionMode::LinearizedSeed,
                         accepted_junction_history: final_accepted_junction_history,

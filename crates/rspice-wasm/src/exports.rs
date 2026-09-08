@@ -209,6 +209,99 @@ mod wasm_tests {
     use crate::js_interop::{js_array_property, js_property};
 
     #[wasm_bindgen_test]
+    fn vbic_charge_pss_matches_analytic_rc_in_wasm() {
+        for polarity in ["NPN", "PNP"] {
+            let netlist = rspice_core::Netlist::parse(&format!("* VBIC charge PSS\nV1 in 0 SIN(0 0.1 1meg)\nR1 in out 1k\nQ1 0 out 0 vm\n.model vm {polarity}(LEVEL=4 IS=1e-40 IBEI=0 IBCI=0 CBEO=159p RCX=0 RCI=0 RBX=0 RBI=0 RBP=0)\n.end\n")).unwrap();
+            let analysis = rspice_core::Engine::default()
+                .run_pss_with_abort(
+                    &netlist,
+                    rspice_core::analysis::PssConfig::new(1e6)
+                        .with_points_per_period(64)
+                        .with_tstab_periods(0),
+                    &rspice_core::abort_signal::NoAbort,
+                )
+                .unwrap();
+            let result = &analysis.result;
+            let output = result
+                .node_names
+                .iter()
+                .position(|name| name.eq_ignore_ascii_case("out"))
+                .unwrap();
+            let wc = std::f64::consts::TAU * 1e6 * 1e3 * 159e-12;
+            for (&time, &value) in result.time.iter().zip(&result.waveforms[output].values) {
+                let phase = std::f64::consts::TAU * 1e6 * time;
+                let expected = 0.1 * (phase.sin() - wc * phase.cos()) / (1.0 + wc * wc);
+                assert!(
+                    (value - expected).abs() < 5e-5,
+                    "{polarity}: t={time:e}, {value} != {expected}"
+                );
+            }
+        }
+    }
+
+    #[wasm_bindgen_test]
+    fn promoted_vbic_checkpoint_continues_exactly_in_wasm() {
+        use rspice_core::engine::{
+            TransientCheckpoint, TransientCheckpointEncoding, TransientStartupMode,
+        };
+        let abort = rspice_core::abort_signal::NoAbort;
+        for (kind, polarity) in [("NPN", 1.0), ("PNP", -1.0)] {
+            let netlist = rspice_core::Netlist::parse(&format!(
+            "* VBIC checkpoint in WASM\nVCC supply 0 {}\nVIN base 0 DC {} SIN({} {} 1G)\nRC supply out 1k\nRE emitter 0 100\nQ1 out base emitter 0 active\n.model active {kind} LEVEL=4 IS=1e-16 IBEI=1e-18\n+ RCX=10 RCI=60 RBX=10 RBI=40 RE=2 RS=20 RBP=40\n+ CJE=100f CJC=20f CJEP=100f CJCP=400f TF=10p TR=100p\n+ TD=20p SELFT=1 RTH=300 CTH=1p\n.end\n",
+            polarity * 3.3, polarity * 0.8, polarity * 0.8, polarity * 0.05,
+        )).unwrap();
+            let engine = rspice_core::Engine::default();
+            let (full, scheduled) = engine
+                .run_tran_checkpoint_schedule_with_startup_mode_and_abort(
+                    &netlist,
+                    0.5e-9,
+                    1e-11,
+                    TransientStartupMode::OperatingPoint,
+                    &[0.237e-9],
+                    &abort,
+                )
+                .unwrap();
+            let checkpoint = TransientCheckpoint::from_bytes(
+                &scheduled[0]
+                    .checkpoint
+                    .to_bytes_with_abort(TransientCheckpointEncoding::Packed, &abort)
+                    .unwrap(),
+            )
+            .unwrap();
+            let (resumed, _) = engine
+                .run_tran_resume_with_abort(&netlist, &checkpoint, 0.5e-9, 1e-11, &abort)
+                .unwrap();
+            let offset = full
+                .time
+                .iter()
+                .position(|time| time.to_bits() == checkpoint.time.to_bits())
+                .unwrap();
+            assert_eq!(resumed.time, full.time[offset..]);
+            assert_eq!(resumed.node_names, full.node_names);
+            for (actual, expected) in resumed
+                .voltages
+                .iter()
+                .zip(&full.voltages)
+                .chain(resumed.branch_currents.iter().zip(&full.branch_currents))
+            {
+                assert_eq!(actual.len(), expected.len() - offset);
+                for (actual, expected) in actual.iter().zip(&expected[offset..]) {
+                    assert_eq!(actual.to_bits(), expected.to_bits());
+                }
+            }
+            for state in ["rth", "xf1", "xf2"] {
+                let name = format!("Q1.__{state}.internal");
+                let column = full
+                    .node_names
+                    .iter()
+                    .position(|node| node.eq_ignore_ascii_case(&name))
+                    .unwrap();
+                assert!(full.voltages[column].iter().any(|value| value.abs() > 1e-8));
+            }
+        }
+    }
+
+    #[wasm_bindgen_test]
     fn periodic_waveform_precision_survives_wasm_time_and_amplitude_scales() {
         for frequency in [1e-300, 1e300, 1e308] {
             let period = 1.0 / frequency;
@@ -232,6 +325,34 @@ mod wasm_tests {
                 assert!((harmonics[1].magnitude / amplitude - 1.0).abs() < 2e-14);
                 assert!((harmonics[1].phase + 90.0).abs() < 2e-12);
             }
+        }
+    }
+
+    #[wasm_bindgen_test]
+    fn discontinuous_rlc_orbit_preserves_winding_flux_in_wasm() {
+        let netlist = rspice_core::Netlist::parse("WASM discontinuous RLC orbit\nB1 in 0 V=if(sin(2*pi*1meg*time+0.1)>0,1,0)\nR1 in out 1k\nC1 out 0 159p\nL1 out load 10u\nR2 load 0 2k\n.options RELTOL=1e-6 VNTOL=1e-8\n.end\n").unwrap();
+        let analysis = rspice_core::Engine::default()
+            .run_pss_with_abort(
+                &netlist,
+                rspice_core::analysis::PssConfig::new(1e6)
+                    .with_tstab_periods(0)
+                    .with_points_per_period(256),
+                &rspice_core::abort_signal::NoAbort,
+            )
+            .unwrap();
+        let result = &analysis.result;
+        // Initial values from the exact two-state exp(A*t) periodic solution;
+        // the native and Python regressions compare the complete waveform.
+        for (name, initial) in [("out", 0.09862296652380287), ("load", 0.07147347879650891)] {
+            let node = result
+                .node_names
+                .iter()
+                .position(|n| n.eq_ignore_ascii_case(name))
+                .unwrap();
+            let waveform = &result.waveforms[node];
+            assert!((waveform.values[0] - initial).abs() < 1e-5);
+            assert!((waveform.values.last().unwrap() - initial).abs() < 1e-5);
+            assert!((waveform.dc(&result.time, result.period) - 1.0 / 3.0).abs() < 1e-5);
         }
     }
 
@@ -407,6 +528,14 @@ mod wasm_tests {
                 "B1 in 0 V=tanh(tan(2*pi*64meg*time+0.1)^2)",
                 0.6084407392048392,
             ),
+            (
+                "B1 in 0 V=exp(-1/cos(2*pi*64meg*time+0.1)^2)",
+                0.15729920705028186,
+            ),
+            (
+                "B1 in 0 V=exp(-sqr(1/cos(2*pi*64meg*time+0.1)))",
+                0.15729920705028186,
+            ),
             ("V1 in 0 PULSE(0 1 400p 10p 10p 100p 1u)", 0.00011),
             ("B1 in 0 V=spice_pulse(0,1,400p,10p,10p,100p,1u)", 0.00011),
             (
@@ -423,10 +552,16 @@ mod wasm_tests {
             ),
         ] {
             let polar_square = source.contains("atan2(0*sin");
-            let bounded_tangent = ["atan(tan(", "tanh(tan(", "atan(sin(", "atan(1/cos("]
-                .iter()
-                .any(|prefix| source.contains(prefix));
-            let options = if bounded_tangent {
+            let squared_tangent = source.contains("tanh(tan(") && source.ends_with("^2)");
+            let reciprocal_exponential =
+                source.contains("exp(-1/cos(") || source.contains("exp(-sqr(1/cos(");
+            let bounded_composition = reciprocal_exponential
+                || ["atan(tan(", "tanh(tan(", "atan(sin(", "atan(1/cos("]
+                    .iter()
+                    .any(|prefix| source.contains(prefix));
+            let options = if squared_tangent {
+                ".options reltol=1e-5 vntol=1e-8\n"
+            } else if bounded_composition {
                 ".options reltol=1e-4 vntol=1e-8\n"
             } else if polar_square {
                 ".options reltol=1e-4\n"
@@ -453,9 +588,11 @@ mod wasm_tests {
                 .position(|name| name.eq_ignore_ascii_case("out"))
                 .unwrap();
             let mean = result.waveforms[output].dc(&result.time, result.period);
-            if bounded_tangent {
+            if bounded_composition {
                 // Analytic sawtooth extrema / independent RC convolution.
-                let (low, high) = if source.ends_with("^2)") {
+                let (low, high) = if reciprocal_exponential {
+                    (0.15566623240897726, 0.158933481927689)
+                } else if squared_tangent {
                     (0.6038757155372827, 0.6129976417956825)
                 } else if source.contains("atan(1/cos(") {
                     (-0.025340899420651316, 0.025340899420651316)
@@ -465,7 +602,7 @@ mod wasm_tests {
                     (-0.00597775083683904, 0.010_400_683_782_896_1)
                 };
                 let values = &result.waveforms[output].values;
-                let tolerance = if source.ends_with("^2)") { 1e-5 } else { 1e-6 };
+                let tolerance = if reciprocal_exponential { 1e-5 } else { 1e-6 };
                 assert!(
                     (values.iter().copied().fold(f64::NEG_INFINITY, f64::max) - high).abs()
                         < tolerance
@@ -484,8 +621,8 @@ mod wasm_tests {
                 assert!((values.iter().copied().fold(f64::INFINITY, f64::min) + high).abs() < 1e-5);
                 assert!(steps < 8192);
             }
-            let tolerance = if bounded_tangent {
-                if source.ends_with("^2)") { 1e-5 } else { 1e-6 }
+            let tolerance = if bounded_composition {
+                if reciprocal_exponential { 1e-5 } else { 1e-6 }
             } else if dc == 0.00011 || dc == 0.0011 {
                 assert!(steps < 1024, "the local source mesh must stay bounded");
                 1e-7

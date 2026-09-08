@@ -2255,6 +2255,7 @@ fn compact_local_name(mut ordinal: usize) -> String {
 
 fn unary(op: CfgUnaryOp, input: &str) -> String {
     match op {
+        CfgUnaryOp::FreezeDerivative => input.to_string(),
         CfgUnaryOp::Neg => format!("-{input}"),
         CfgUnaryOp::Not => format!("!({input})"),
         CfgUnaryOp::Exp => format!("{input}.exp()"),

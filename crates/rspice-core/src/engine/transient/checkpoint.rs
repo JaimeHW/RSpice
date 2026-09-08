@@ -15,7 +15,7 @@
 //!
 //! Scope, stated precisely: accepted linear-reactive histories and
 //! solution-dependent capacitor charge/linearization state; native diode and
-//! legacy Gummel-Poon BJT limiter/evaluation state; the engine-owned
+//! legacy Gummel-Poon and promoted VBIC limiter/evaluation state; the engine-owned
 //! accepted diode/BJT charge, derivative, predictor, lead-current, timestep,
 //! and optional charge-snapshot histories; ordinary lossless scalar
 //! transmission-line delay histories; generated Verilog-A `ddt`/`idt`
@@ -28,9 +28,9 @@
 //! native compact-model, thermal, stateful capacitor-expression, nonlinear
 //! magnetic, standalone multi-winding transformer, stateful behavioral/switch,
 //! runtime Verilog-A, or generated dynamic-charge histories that do not yet
-//! have a complete versioned contract. Native VBIC,
-//! distributed LTRA/TXL, and coupled-line convolution runtimes block restart
-//! more broadly until their complete state is versioned.
+//! have a complete versioned contract. Sparse solver factors and scale state
+//! preserve exact promoted VBIC continuation. Distributed LTRA/TXL and coupled-line convolution runtimes also
+//! block restart until their complete state is versioned.
 //!
 //! The canonical checkpoint representation is a versioned, line-oriented
 //! text format using Rust's shortest-round-trip float formatting, so every
@@ -38,17 +38,21 @@
 //! wraps a zlib-compressed copy of that canonical text in a versioned binary
 //! envelope with declared lengths and a BLAKE3 integrity seal.
 
+mod solver_state;
+
 use crate::Value;
 use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::circuit::{
     AcceptedNativeNonlinearCheckpointStates, CircuitData, SolutionDependentCapacitorState,
 };
+#[cfg(test)]
+use crate::device::semiconductor::BJT_ACCEPTED_NONLINEAR_RUNTIME_TAG;
 use crate::device::semiconductor::{
     AcceptedBjtChargeSnapshotCheckpoint, AcceptedBjtNonlinearCheckpoint,
     AcceptedDiodeNonlinearCheckpoint, BJT_ACCEPTED_CHARGE_SNAPSHOT_STATE_VALUE_COUNT,
-    BJT_ACCEPTED_NONLINEAR_RUNTIME_TAG, BJT_ACCEPTED_NONLINEAR_STATE_VALUE_COUNT,
-    BJT_DYNAMIC_CHARGE_COUNT, BJT_EXTERNAL_STATE_DIM, BJT_INTERNAL_STATE_DIM, BjtChargeSnapshot,
-    DIODE_ACCEPTED_NONLINEAR_RUNTIME_TAG, DiodeNonlinearState,
+    BJT_ACCEPTED_NONLINEAR_STATE_VALUE_COUNT, BJT_DYNAMIC_CHARGE_COUNT, BJT_EXTERNAL_STATE_DIM,
+    BJT_INTERNAL_STATE_DIM, BjtChargeSnapshot, DIODE_ACCEPTED_NONLINEAR_RUNTIME_TAG,
+    DiodeNonlinearState, VBIC_ACCEPTED_NONLINEAR_STATE_VALUE_COUNT,
 };
 #[cfg(feature = "veriloga")]
 use crate::device::veriloga::VerilogADeviceCheckpoint;
@@ -75,11 +79,13 @@ use crate::numerics::integration::{
     TrapGearControllerSnapshot,
 };
 use crate::xspice::{CmContextCheckpoint, XspiceInstanceCheckpoint};
+use rspice_matrix::StaticMatrixSolverCheckpoint;
 use rspice_veriloga_runtime::generated_veriloga_checkpoint_compatibility_entry;
 #[cfg(test)]
 use rspice_veriloga_runtime::{
     GENERATED_VERILOGA_COMPATIBILITY_CATALOG, GENERATED_VERILOGA_V27_COMBINED_IDENTITY_ALIASES,
 };
+use solver_state::{read_solver_state, write_solver_state};
 use std::io::Read;
 
 use super::damped_status::XyceDampedAcceptedBoundaryCheckpoint;
@@ -163,7 +169,10 @@ fn checkpoint_operation_result<T>(
 /// waveforms. Older images resume only when those defaults are irrelevant.
 /// Version 36 retains the numerical startup-recovery policy so resume never
 /// needs to repeat the operating point to select its transient controls.
-const FORMAT_VERSION: u32 = 36;
+/// Version 37 preserves sparse-solver factors, row scales and backend routing
+/// so exact continuation follows the uninterrupted numerical path.
+const FORMAT_VERSION: u32 = 37;
+const SOLVER_STATE_FORMAT_VERSION: u32 = 37;
 const SOURCE_TIME_BASIS_FORMAT_VERSION: u32 = 35;
 const XYCE_TEAM_RESISTANCE_NOISE_FORMAT_VERSION: u32 = 32;
 const SOLUTION_DEPENDENT_CAPACITOR_FORMAT_VERSION: u32 = 33;
@@ -282,6 +291,7 @@ pub(super) struct CheckpointIntegrationState<'a> {
 
 /// The accepted-step runtime a resumed run reseeds from.
 pub(super) struct AcceptedTransientRuntime {
+    pub accepted_solver_state: Option<StaticMatrixSolverCheckpoint>,
     pub linearized_startup: bool,
     pub accepted_junction_history: AcceptedJunctionTransientHistoryCheckpoint,
     pub accepted_integration_runtime: AcceptedIntegrationRuntime,
@@ -552,6 +562,7 @@ pub struct TransientCheckpoint {
     /// upgrades because only the first restores the in-flight controller.
     integration_continuation: IntegrationContinuation,
     accepted_integration_runtime: AcceptedIntegrationRuntime,
+    accepted_solver_state: Option<StaticMatrixSolverCheckpoint>,
     /// Dynamically discovered transmission-line arrivals that had not yet
     /// occurred at `time`. These are distinct from authored/source
     /// breakpoints: they arise from accepted wave changes and cannot always be
@@ -1161,10 +1172,12 @@ pub(crate) fn restart_checkpoint_identity(netlist: &Netlist) -> Option<String> {
 
 pub(crate) fn simulation_checkpoint_identity(config: &SimulationConfig) -> String {
     let mut hasher = blake3::Hasher::new();
-    // v17 resolves defined reciprocal and power coordinates through bounded
-    // compositions, including their internal pole events.
-    // Earlier schedules can produce different accepted integration histories.
-    hasher.update(b"rspice-transient-resolved-config-v17\0");
+    // v21 retains the sparse solver's numerical factorization across resumes.
+    // Earlier exact proposals omitted pivot, scaling and factor-reuse state;
+    // promoted PNP VBIC charge stamps also lacked physical polarity conversion.
+    // v22 corrects VBIC resistance topology, thermal-voltage constants and
+    // convergence-history advancement for an unchanged physical candidate.
+    hasher.update(b"rspice-transient-resolved-config-v22\0");
     hash_field(&mut hasher, "temperature", config.temperature.to_bits());
     hash_field(&mut hasher, "ramptime", config.ramptime.to_bits());
     hash_field(&mut hasher, "digital_delay_type", config.digital_delay_type);
@@ -2254,7 +2267,9 @@ fn read_accepted_bjt_nonlinear_states(
         .next()
         .ok_or_else(|| "missing 'accepted_bjt_nonlinear_states' section".to_string())?;
     let count = parse_count_header(header, "accepted_bjt_nonlinear_states")?;
-    let rows_per_state = BJT_ACCEPTED_NONLINEAR_STATE_VALUE_COUNT.saturating_add(2);
+    let rows_per_state = BJT_ACCEPTED_NONLINEAR_STATE_VALUE_COUNT
+        .min(VBIC_ACCEPTED_NONLINEAR_STATE_VALUE_COUNT)
+        .saturating_add(2);
     let maximum_count = lines.remaining() / rows_per_state;
     if count > maximum_count {
         return Err(format!(
@@ -2302,9 +2317,13 @@ fn read_accepted_bjt_nonlinear_states(
             format!("accepted BJT state row {row} is missing its state-values header")
         })?;
         let value_count = parse_count_header(values_header, "accepted_bjt_state_values")?;
-        if value_count != BJT_ACCEPTED_NONLINEAR_STATE_VALUE_COUNT {
+        let expected_count = AcceptedBjtNonlinearCheckpoint::value_count_for_runtime(runtime_tag)
+            .ok_or_else(|| {
+            format!("accepted BJT state row {row} uses unsupported runtime tag '{runtime_tag}'")
+        })?;
+        if value_count != expected_count {
             return Err(format!(
-                "accepted BJT state row {row} has {value_count} values; runtime requires {BJT_ACCEPTED_NONLINEAR_STATE_VALUE_COUNT}"
+                "accepted BJT state row {row} has {value_count} values; runtime requires {expected_count}"
             ));
         }
         let mut state_values =
@@ -2909,7 +2928,7 @@ fn validate_checkpoint_identity_vector(
     kind: &str,
     names: &[String],
     runtime_tags: &[String],
-    expected_runtime_tag: &str,
+    expected_runtime_tags: &[&str],
     budget: &mut Option<&mut CheckpointParseBudget>,
 ) -> Result<(), String> {
     if runtime_tags.len() != names.len() {
@@ -2940,7 +2959,7 @@ fn validate_checkpoint_identity_vector(
                 "accepted {kind} transient-history identity {index} has an invalid instance name"
             ));
         }
-        if runtime_tag != expected_runtime_tag {
+        if !expected_runtime_tags.contains(&runtime_tag.as_str()) {
             return Err(format!(
                 "accepted {kind} transient-history identity {index} uses unsupported runtime tag '{runtime_tag}'"
             ));
@@ -3020,7 +3039,10 @@ fn validate_accepted_junction_transient_history_numeric_state(
         "BJT",
         &checkpoint.bjt_names,
         &checkpoint.bjt_runtime_tags,
-        super::BJT_TRANSIENT_HISTORY_RUNTIME_TAG,
+        &[
+            super::BJT_TRANSIENT_HISTORY_RUNTIME_TAG,
+            super::VBIC_TRANSIENT_HISTORY_RUNTIME_TAG,
+        ],
         budget,
     )?;
     let bjt_count = checkpoint.bjt_names.len();
@@ -3133,7 +3155,7 @@ fn validate_accepted_junction_transient_history_numeric_state(
         "diode",
         &checkpoint.diode_names,
         &checkpoint.diode_runtime_tags,
-        super::DIODE_TRANSIENT_HISTORY_RUNTIME_TAG,
+        &[super::DIODE_TRANSIENT_HISTORY_RUNTIME_TAG],
         budget,
     )?;
     let diode_count = checkpoint.diode_names.len();
@@ -4892,6 +4914,13 @@ impl TransientCheckpoint {
                 }
             }
             AcceptedIntegrationRuntime::Exact(runtime) => {
+                if self.accepted_solver_state.is_none() {
+                    push(
+                        TransientCheckpointBlockerSource::Structural,
+                        "accepted sparse-solver state is unavailable for exact continuation"
+                            .to_string(),
+                    );
+                }
                 for blocker in &runtime.resume_blockers {
                     push(
                         self.accepted_runtime_blocker_source(blocker),
@@ -5135,6 +5164,15 @@ impl TransientCheckpoint {
             }
         }
 
+        if let Some(solver) = &self.accepted_solver_state {
+            if solver.klu.is_some()
+                && let Some(budget) = budget.as_deref_mut()
+            {
+                budget.charge_items::<usize>(solver.dimension, "solver factor validation marks")?;
+                budget.charge_items::<bool>(solver.dimension, "solver pivot validation marks")?;
+            }
+            solver.validate().map_err(|error| error.to_string())?;
+        }
         let capacitor_len = self.cap_v_prev.len();
         if [
             self.cap_v_prev_prev.len(),
@@ -5410,17 +5448,16 @@ impl TransientCheckpoint {
                 ));
             }
             bjt_names.push((checkpoint.instance_name.as_str(), index));
-            if checkpoint.runtime_tag != BJT_ACCEPTED_NONLINEAR_RUNTIME_TAG {
-                return Err(format!(
+            let expected_count = AcceptedBjtNonlinearCheckpoint::value_count_for_runtime(&checkpoint.runtime_tag)
+                .ok_or_else(|| format!(
                     "accepted BJT nonlinear checkpoint state {index} uses unsupported runtime tag '{}'",
                     checkpoint.runtime_tag
-                ));
-            }
-            if checkpoint.state_values.len() != BJT_ACCEPTED_NONLINEAR_STATE_VALUE_COUNT {
+                ))?;
+            if checkpoint.state_values.len() != expected_count {
                 return Err(format!(
                     "accepted BJT nonlinear checkpoint state {index} has {} values; runtime requires {}",
                     checkpoint.state_values.len(),
-                    BJT_ACCEPTED_NONLINEAR_STATE_VALUE_COUNT
+                    expected_count
                 ));
             }
             if checkpoint
@@ -5606,7 +5643,7 @@ impl TransientCheckpoint {
         state: CheckpointState<'_>,
         lte_estimator: Option<&LteEstimator>,
     ) -> Result<Self, String> {
-        Self::capture_with_diode_history(
+        Self::capture_with_junction_history(
             fingerprint,
             netlist_identity,
             config,
@@ -5616,16 +5653,16 @@ impl TransientCheckpoint {
         )
     }
 
-    /// A periodic traversal can supply its accepted diode charge at a new
+    /// A periodic traversal can supply its accepted junction charge at a new
     /// time origin. The caller normalizes history for the order-one restart;
     /// capture still validates its device identities and every numeric lane.
-    pub(crate) fn capture_with_diode_history(
+    pub(in crate::engine) fn capture_with_junction_history(
         fingerprint: u64,
         netlist_identity: Option<String>,
         config: &SimulationConfig,
         state: CheckpointState<'_>,
         lte_estimator: Option<&LteEstimator>,
-        diode_history: Option<&crate::numerics::integration::TwoTerminalChargeHistory>,
+        junction_history: Option<AcceptedJunctionTransientHistoryCheckpoint>,
     ) -> Result<Self, String> {
         let CheckpointState {
             time,
@@ -5641,18 +5678,9 @@ impl TransientCheckpoint {
         } else {
             None
         };
-        let accepted_junction_history = if let Some(diode_history) = diode_history {
-            if !circuit.bjts.is_empty() {
-                return Err(
-                    "diode-only checkpoint capture cannot omit accepted BJT state".to_string(),
-                );
-            }
-            Engine::capture_accepted_junction_transient_history_checkpoint(
-                circuit,
-                &BjtTransientHistory::default(),
-                diode_history,
-                &[],
-            )
+        let accepted_junction_history = if let Some(history) = junction_history {
+            Engine::validate_accepted_junction_transient_history_checkpoint(circuit, &history)?;
+            history
         } else if circuit.bjts.is_empty() && circuit.diodes.is_empty() {
             AcceptedJunctionTransientHistoryCheckpoint {
                 available: true,
@@ -5705,6 +5733,7 @@ impl TransientCheckpoint {
                 dynamic_tline_breakpoints_added: 0,
             },
             AcceptedTransientRuntime {
+                accepted_solver_state: None,
                 linearized_startup: startup_mode.is_uic(),
                 accepted_junction_history,
                 accepted_integration_runtime: AcceptedIntegrationRuntime::RestartNormalized(
@@ -5734,6 +5763,7 @@ impl TransientCheckpoint {
         lte_estimator: Option<&LteEstimator>,
     ) -> Result<Self, String> {
         let AcceptedTransientRuntime {
+            accepted_solver_state,
             linearized_startup,
             accepted_junction_history,
             accepted_integration_runtime,
@@ -5870,6 +5900,7 @@ impl TransientCheckpoint {
                 },
             ),
             accepted_integration_runtime,
+            accepted_solver_state,
             pending_tline_arrivals,
             dynamic_tline_breakpoints_added,
             cap_v_prev: circuit.capacitors.v_prev.clone(),
@@ -5930,6 +5961,7 @@ impl TransientCheckpoint {
         lte_estimator: Option<&LteEstimator>,
     ) -> Result<Self, String> {
         let AcceptedTransientRuntime {
+            accepted_solver_state,
             linearized_startup,
             accepted_junction_history,
             accepted_integration_runtime,
@@ -5972,6 +6004,7 @@ impl TransientCheckpoint {
                 dynamic_tline_breakpoints_added,
             },
             AcceptedTransientRuntime {
+                accepted_solver_state,
                 linearized_startup,
                 accepted_junction_history,
                 accepted_integration_runtime,
@@ -6426,6 +6459,13 @@ impl TransientCheckpoint {
     }
 
     fn validate_resume_capabilities(&self, netlist: &Netlist) -> Result<(), String> {
+        if matches!(
+            self.accepted_integration_runtime,
+            AcceptedIntegrationRuntime::Exact(_)
+        ) && self.accepted_solver_state.is_none()
+        {
+            return Err("exact transient resume requires accepted sparse-solver state; this checkpoint does not contain it".to_string());
+        }
         if !self.accepted_junction_history.resume_blockers.is_empty() {
             return Err(format!(
                 "transient checkpoint resume cannot restore unsupported accepted BJT/diode transient history: {}. Run this transient deck unsegmented.",
@@ -6769,12 +6809,32 @@ impl TransientCheckpoint {
         self.dynamic_tline_breakpoints_added
     }
 
-    /// Number of scalar trajectory values retained by this snapshot. This is
-    /// used with the transient result budget so a checkpoint schedule cannot
-    /// multiply memory without bound even when every individual snapshot is
-    /// valid.
+    pub(super) fn restore_solver_state(
+        &self,
+        matrix: &mut crate::solver::StaticMatrix,
+    ) -> Result<(), String> {
+        if let Some(solver) = &self.accepted_solver_state {
+            matrix
+                .restore_solver_checkpoint(solver)
+                .map_err(|error| error.to_string())
+        } else if matches!(
+            self.accepted_integration_runtime,
+            AcceptedIntegrationRuntime::Exact(_)
+        ) {
+            Err("exact transient resume requires accepted sparse-solver state".to_string())
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Scalar storage charged to the transient result budget, including solver caches.
     pub(crate) fn retained_value_count(&self) -> usize {
         let mut count = 8_usize
+            .saturating_add(
+                self.accepted_solver_state
+                    .as_ref()
+                    .map_or(0, StaticMatrixSolverCheckpoint::retained_value_count),
+            )
             .saturating_add(2_usize.saturating_mul(usize::from(self.source_time_basis.is_some())))
             .saturating_add(4_usize.saturating_mul(usize::from(matches!(
                 self.integration_continuation,
@@ -7099,6 +7159,7 @@ impl TransientCheckpoint {
             abort,
         )?;
         write_accepted_integration_runtime(&mut out, &self.accepted_integration_runtime, abort)?;
+        write_solver_state(&mut out, self.accepted_solver_state.as_ref(), abort)?;
         section(
             &mut out,
             "capacitors",
@@ -8032,6 +8093,11 @@ impl TransientCheckpoint {
         } else {
             AcceptedIntegrationRuntime::UnavailableLegacy
         };
+        let accepted_solver_state = if version >= SOLVER_STATE_FORMAT_VERSION {
+            read_solver_state(lines, budget)?
+        } else {
+            None
+        };
         let cap_cols = read_value_section(lines, "capacitors", 5, budget)?;
         let (
             solution_dependent_capacitor_state_available,
@@ -8369,6 +8435,7 @@ impl TransientCheckpoint {
             linearized_startup,
             integration_continuation,
             accepted_integration_runtime,
+            accepted_solver_state,
             pending_tline_arrivals,
             dynamic_tline_breakpoints_added,
             cap_v_prev: cap_iter.next().unwrap(),
@@ -9429,6 +9496,7 @@ mod tests {
 
     fn sample() -> TransientCheckpoint {
         TransientCheckpoint {
+            accepted_solver_state: Some(sample_solver_state(rspice_matrix::RealSolverBackend::Klu)),
             time: 1.2345678901234567e-6,
             solution: vec![0.5, -3.25, 1.0e-15, f64::MIN_POSITIVE, -0.0],
             netlist_fingerprint: 0xDEAD_BEEF_0123_4567,
@@ -9643,6 +9711,134 @@ mod tests {
         }
     }
 
+    fn sample_solver_state(
+        backend: rspice_matrix::RealSolverBackend,
+    ) -> StaticMatrixSolverCheckpoint {
+        let mut matrix = crate::solver::StaticMatrix::from_triplets_with_options(
+            5,
+            5,
+            &[
+                (0, 0, 2.0),
+                (1, 0, 0.125),
+                (0, 1, -0.0),
+                (1, 1, 3.0),
+                (2, 2, 4.0),
+                (3, 3, 5.0),
+                (4, 4, 6.0),
+            ],
+            rspice_matrix::SolverOptions {
+                real_backend: backend,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        matrix.solve(&[1.0, 2.0, 3.0, 4.0, 5.0]).unwrap();
+        matrix.capture_solver_checkpoint().unwrap()
+    }
+
+    #[test]
+    fn sparse_solver_checkpoint_round_trip_preserves_numeric_bits_and_retention() {
+        for backend in [
+            rspice_matrix::RealSolverBackend::Klu,
+            rspice_matrix::RealSolverBackend::Faer,
+        ] {
+            let mut checkpoint = sample();
+            checkpoint.accepted_solver_state = None;
+            let without = checkpoint.retained_value_count();
+            let state = sample_solver_state(backend);
+            let retained = state.retained_value_count();
+            checkpoint.accepted_solver_state = Some(state);
+            assert_eq!(checkpoint.retained_value_count() - without, retained);
+            let text = checkpoint.to_text();
+            for encoding in [
+                TransientCheckpointEncoding::Unpacked,
+                TransientCheckpointEncoding::Packed,
+            ] {
+                let decoded =
+                    TransientCheckpoint::from_bytes(&checkpoint.to_bytes(encoding).unwrap())
+                        .unwrap();
+                assert_eq!(decoded, checkpoint);
+                assert_eq!(
+                    decoded.to_text(),
+                    text,
+                    "including signed zero coefficients"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn sparse_solver_checkpoint_missing_legacy_state_fails_closed() {
+        let original = sample();
+        let legacy = TransientCheckpoint::from_text(&legacy_text(&original, 36)).unwrap();
+        assert!(legacy.accepted_solver_state.is_none());
+        assert!(legacy.capability().require_resumable().is_err());
+        let netlist = Netlist::parse("solver state\nR1 a 0 1k\n.end\n").unwrap();
+        assert!(
+            legacy
+                .validate_resume_capabilities(&netlist)
+                .unwrap_err()
+                .contains("sparse-solver")
+        );
+    }
+
+    #[test]
+    fn sparse_solver_checkpoint_parser_charges_cumulative_vector_storage() {
+        let state = sample_solver_state(rspice_matrix::RealSolverBackend::Klu);
+        let mut text = String::new();
+        write_solver_state(&mut text, Some(&state), &crate::abort_signal::NoAbort).unwrap();
+        let mut lines = CheckpointLines::new(&text);
+        // Each pattern vector fits independently; their combined allocation does not.
+        let mut budget = CheckpointParseBudget::new(7 * std::mem::size_of::<usize>());
+        let error = read_solver_state(&mut lines, &mut budget).unwrap_err();
+        assert!(
+            error.contains("parsed-memory limit") && error.contains("accepted_solver_row_idx"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn sparse_solver_checkpoint_rejects_malformed_wire_state() {
+        let text = sample().to_text();
+        for (from, to) in [
+            (
+                "accepted_solver_state 1 5 0",
+                "accepted_solver_state 99 5 0",
+            ),
+            (
+                "accepted_solver_state 1 5 0",
+                "accepted_solver_state 1 18446744073709551615 0",
+            ),
+            ("accepted_solver_options 1", "accepted_solver_options 99"),
+            (
+                "accepted_solver_col_ptr 6\n0\n",
+                "accepted_solver_col_ptr 6\n7\n",
+            ),
+            (
+                "accepted_solver_row_idx 7\n0\n",
+                "accepted_solver_row_idx 7\n5\n",
+            ),
+            (
+                "accepted_solver_klu_row_perm 5\n",
+                "accepted_solver_klu_row_perm 18446744073709551615\n",
+            ),
+            (
+                "accepted_solver_klu_row_scale 5\n1\n",
+                "accepted_solver_klu_row_scale 5\nNaN\n",
+            ),
+            ("accepted_solver_klu present", "accepted_solver_klu invalid"),
+            ("accepted_solver_end", "accepted_solver_end unexpected"),
+        ] {
+            assert!(text.contains(from), "fixture contains {from}");
+            assert!(
+                TransientCheckpoint::from_text(&text.replacen(from, to, 1)).is_err(),
+                "reject {to}"
+            );
+        }
+        let end = text.find("accepted_solver_end").unwrap();
+        assert!(TransientCheckpoint::from_text(&text[..end]).is_err());
+    }
+
     fn sample_without_generated_veriloga_state() -> TransientCheckpoint {
         let mut checkpoint = sample();
         checkpoint.generated_veriloga_state_available = false;
@@ -9658,6 +9854,16 @@ mod tests {
         let mut output = String::new();
         let mut lines = text.lines();
         while let Some(line) = lines.next() {
+            if version < SOLVER_STATE_FORMAT_VERSION && line.starts_with("accepted_solver_state ") {
+                if !line.ends_with(" none") {
+                    for row in lines.by_ref() {
+                        if row == "accepted_solver_end" {
+                            break;
+                        }
+                    }
+                }
+                continue;
+            }
             if version < EXACT_INTEGRATION_RUNTIME_FORMAT_VERSION
                 && line.starts_with("accepted_integration_runtime ")
             {
@@ -10957,15 +11163,19 @@ mod tests {
             "unexpected error: {error}"
         );
 
-        let mut bad_tag = sample();
-        bad_tag.accepted_junction_history.bjt_runtime_tags[0] =
-            "future-bjt-history-v99".to_string();
-        let error = TransientCheckpoint::from_text(&bad_tag.to_text())
-            .expect_err("unknown BJT history runtime tags must fail while parsing");
-        assert!(
-            error.contains("unsupported runtime tag"),
-            "unexpected error: {error}"
-        );
+        for tag in [
+            "legacy-gummel-poon-transient-history-v1",
+            "future-bjt-history-v99",
+        ] {
+            let mut bad_tag = sample();
+            bad_tag.accepted_junction_history.bjt_runtime_tags[0] = tag.to_string();
+            let error = TransientCheckpoint::from_text(&bad_tag.to_text())
+                .expect_err("incompatible BJT history runtime tags must fail while parsing");
+            assert!(
+                error.contains("unsupported runtime tag"),
+                "unexpected error: {error}"
+            );
+        }
 
         let text = sample().to_text();
         let snapshot_header = format!(
@@ -11065,14 +11275,16 @@ mod tests {
             "unexpected error: {error}"
         );
 
-        let mut bad_tag = sample();
-        bad_tag.accepted_nonlinear_states.bjts[0].runtime_tag = "future-bjt-v99".to_string();
-        let error = TransientCheckpoint::from_text(&bad_tag.to_text())
-            .expect_err("unknown accepted BJT runtime tags must fail while parsing");
-        assert!(
-            error.contains("unsupported runtime tag"),
-            "unexpected error: {error}"
-        );
+        for tag in ["legacy-gummel-poon-v1", "future-bjt-v99"] {
+            let mut bad_tag = sample();
+            bad_tag.accepted_nonlinear_states.bjts[0].runtime_tag = tag.to_string();
+            let error = TransientCheckpoint::from_text(&bad_tag.to_text())
+                .expect_err("incompatible accepted BJT runtime tags must fail while parsing");
+            assert!(
+                error.contains("unsupported runtime tag"),
+                "unexpected error: {error}"
+            );
+        }
 
         let mut bad_count = sample();
         bad_count.accepted_nonlinear_states.bjts[0]
@@ -11218,6 +11430,61 @@ mod tests {
         assert_eq!(
             target.capture_accepted_native_nonlinear_checkpoint_states(),
             expected
+        );
+    }
+
+    #[test]
+    fn mixed_gp_vbic_nonlinear_images_round_trip_and_promoted_restart_is_admitted() {
+        use crate::device::NonlinearDevice;
+        let (_, _, mut checkpoint) = native_junction_checkpoint_fixture();
+        let mut vbic = crate::device::Bjt::new_npn("QVBIC".into(), 1, 2, 0).with_params(
+            &[
+                ("LEVEL".into(), 4.0),
+                ("TD".into(), 2e-11),
+                ("SELFT".into(), 1.0),
+                ("RTH".into(), 300.0),
+                ("CTH".into(), 1e-12),
+            ]
+            .into_iter()
+            .collect(),
+        );
+        let mut node = 2;
+        vbic.assign_vbic_internal_nodes(|_| {
+            node += 1;
+            node
+        });
+        vbic.update(&vec![0.0; node]);
+        checkpoint
+            .accepted_nonlinear_states
+            .bjts
+            .push(vbic.accepted_nonlinear_checkpoint().unwrap());
+        for encoding in [
+            TransientCheckpointEncoding::Unpacked,
+            TransientCheckpointEncoding::Packed,
+        ] {
+            let decoded =
+                TransientCheckpoint::from_bytes(&checkpoint.to_bytes(encoding).unwrap()).unwrap();
+            assert_eq!(
+                decoded.accepted_nonlinear_states,
+                checkpoint.accepted_nonlinear_states
+            );
+            assert_eq!(
+                decoded.accepted_nonlinear_states.bjts[0].state_values.len(),
+                BJT_ACCEPTED_NONLINEAR_STATE_VALUE_COUNT
+            );
+            assert_eq!(
+                decoded.accepted_nonlinear_states.bjts[1].state_values.len(),
+                VBIC_ACCEPTED_NONLINEAR_STATE_VALUE_COUNT
+            );
+        }
+        let netlist = Netlist::parse("VBIC restart preflight\nV1 c 0 1\nV2 b 0 0.7\nQ1 c b 0 vm\n.model vm NPN LEVEL=4\n.end\n").unwrap();
+        let (_, captured) = Engine::default()
+            .run_tran_checkpointed(&netlist, 1e-9, 1e-11)
+            .expect("promoted VBIC has complete device, history and solver state");
+        captured.capability().require_resumable().unwrap();
+        assert_eq!(
+            captured.accepted_junction_history.bjt_runtime_tags,
+            [super::super::VBIC_TRANSIENT_HISTORY_RUNTIME_TAG]
         );
     }
 
@@ -12159,6 +12426,7 @@ mod tests {
                 dynamic_tline_breakpoints_added: 0,
             },
             AcceptedTransientRuntime {
+                accepted_solver_state: None,
                 linearized_startup: false,
                 accepted_junction_history: AcceptedJunctionTransientHistoryCheckpoint {
                     available: true,

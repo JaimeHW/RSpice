@@ -1144,6 +1144,7 @@ fn integer_operand_error(error: crate::integer_runtime::IntegerRuntimeError) -> 
 
 pub(super) fn apply_unary<S: CfgScalar>(op: CfgUnaryOp, input: S) -> S {
     match op {
+        CfgUnaryOp::FreezeDerivative => S::from_f64(input.real()),
         CfgUnaryOp::Neg => input.neg(),
         CfgUnaryOp::Not => S::from_f64(f64::from(u8::from(input.real() == 0.0))),
         CfgUnaryOp::Exp => input.exp(),

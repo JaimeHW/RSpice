@@ -336,14 +336,19 @@ def test_pss_local_source_mesh_survives_python_and_pickle(source):
     ("atan(sin(2*pi*64meg*time+0.1)/cos(2*pi*64meg*time+0.1))", 0.0),
     ("atan(1/cos(2*pi*64meg*time+0.1))", 0.0),
     ("tanh(tan(2*pi*64meg*time+0.1)^2)", 0.6084407392048392),
+    ("exp(-1/cos(2*pi*64meg*time+0.1)^2)", 0.15729920705028186),
+    ("exp(-sqr(1/cos(2*pi*64meg*time+0.1)))", 0.15729920705028186),
     ("abs(cos(2*pi*64meg*time+0.1)+0.5*cos(2*pi*128meg*time+0.2)-0.25)<0.001", 0.000367552653101734),
     ("0.5*(1-pwrs(abs(cos(2*pi*64meg*time+0.1)+0.5*cos(2*pi*128meg*time+0.2)-0.25)-0.001,0))", 0.000367552653101734),
 ])
 def test_pss_nonlinear_time_features_survive_python_and_pickle(expression, expected_dc):
-    bounded_tangent = expression.startswith(("atan(tan(", "tanh(tan(", "atan(sin(", "atan(1/cos("))
+    squared_tangent = expression.startswith("tanh(tan(") and expression.endswith("^2)")
+    reciprocal_exponential = expression.startswith(("exp(-1/cos(", "exp(-sqr(1/cos("))
+    bounded_composition = reciprocal_exponential or expression.startswith(("atan(tan(", "tanh(tan(", "atan(sin(", "atan(1/cos("))
     options = ".options reltol=1e-4\n" if expected_dc == 0.0 else ""
-    if bounded_tangent:
-        options = ".options reltol=1e-4 vntol=1e-8\n"
+    if bounded_composition:
+        reltol = 1e-5 if squared_tangent else 1e-4
+        options = f".options reltol={reltol} vntol=1e-8\n"
     result = rspice.Engine().run_pss(
         parse(f"* Nonlinear clock feature\n{options}B1 in 0 V={expression}\n"
               "R1 in out 1k\nC1 out 0 159.154943091895p\n"),
@@ -354,10 +359,12 @@ def test_pss_nonlinear_time_features_survive_python_and_pickle(expression, expec
     np.testing.assert_array_equal(restored.time, result.time)
     np.testing.assert_array_equal(restored.voltage_waveform("out"), result.voltage_waveform("out"))
     for waveform in (result, restored):
-        assert abs(waveform.dc("out") - expected_dc) < (1e-6 if expected_dc < .001 else 1e-5)
-        if bounded_tangent:
+        assert abs(waveform.dc("out") - expected_dc) < (1e-6 if squared_tangent or expected_dc < .001 else 1e-5)
+        if bounded_composition:
             # Analytic sawtooth extrema / independent one-sided RC convolution.
-            if expression.endswith("^2)"):
+            if reciprocal_exponential:
+                low, high = (0.15566623240897726, 0.158933481927689)
+            elif squared_tangent:
                 low, high = (0.6038757155372827, 0.6129976417956825)
             elif expression.startswith("atan(1/cos("):
                 low, high = (-0.025340899420651316, 0.025340899420651316)
@@ -366,7 +373,7 @@ def test_pss_nonlinear_time_features_survive_python_and_pickle(expression, expec
             else:
                 low, high = (-0.00597775083683904, 0.01040068378289610)
             values = waveform.voltage_waveform("out")
-            tolerance = 1e-5 if expression.endswith("^2)") else 1e-6
+            tolerance = 1e-5 if reciprocal_exponential else 1e-6
             assert abs(np.max(values) - high) < tolerance
             assert abs(np.min(values) - low) < tolerance
         elif expected_dc == 0.0:

@@ -14,6 +14,7 @@
 use super::{JitError, JitResult};
 use crate::array_index::checked_array_slot;
 use crate::ast::AccessKind;
+use crate::canonical_ir::FROZEN_DERIVATIVE_UNARY;
 use crate::canonical_ir::state::CanonicalStateOperator;
 use crate::canonical_ir::{
     EquationId, ExprId, HirAnalogOperator, HirExprKind, HirLimiterArgument, MirEquationKind,
@@ -3147,7 +3148,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                     self.lower_third_derivative(*operand, first, second, third)?;
                     self.append_unary(NativeOp::Neg)
                 }
-                "Not" | "BitNot" => self.push(NativeOp::Const(0.0)),
+                "Not" | "BitNot" | FROZEN_DERIVATIVE_UNARY => self.push(NativeOp::Const(0.0)),
                 _ => Err(self.unsupported(format!("third derivative of unary operator {op}"))),
             },
             HirExprKind::Binary { op, left, right } => match op.as_str() {
@@ -3157,8 +3158,19 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                     self.append_arithmetic(op.as_str())
                 }
                 "Mul" => self.lower_mul_third_derivative(*left, *right, first, second, third),
-                "Mod" | "Eq" | "Ne" | "Lt" | "Le" | "Gt" | "Ge" | "And" | "Or" | "BitAnd"
-                | "BitOr" | "BitXor" | "Shl" | "Shr" => self.push(NativeOp::Const(0.0)),
+                "Mod" => {
+                    let left_zero = self.expr_derivative_is_zero(*left, first)?
+                        || self.expr_derivative_is_zero(*left, second)?
+                        || self.expr_derivative_is_zero(*left, third)?;
+                    let right_zero = self.expr_derivative_is_zero(*right, first)?
+                        || self.expr_derivative_is_zero(*right, second)?
+                        || self.expr_derivative_is_zero(*right, third)?;
+                    self.lower_mod_derivative(*left, *right, left_zero, right_zero, |this, id| {
+                        this.lower_third_derivative(id, first, second, third)
+                    })
+                }
+                "Eq" | "Ne" | "Lt" | "Le" | "Gt" | "Ge" | "And" | "Or" | "BitAnd" | "BitOr"
+                | "BitXor" | "Shl" | "Shr" => self.push(NativeOp::Const(0.0)),
                 _ => Err(self.unsupported(format!("third derivative of binary operator {op}"))),
             },
             HirExprKind::Conditional {
@@ -3260,11 +3272,12 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             } => self.named_branch_access_derivative_is_zero(access, name.as_str(), wrt),
             HirExprKind::Unary { op, operand } => match op.as_str() {
                 "Pos" | "Neg" => self.expr_derivative_is_zero(*operand, wrt),
-                "Not" | "BitNot" => Ok(true),
+                "Not" | "BitNot" | FROZEN_DERIVATIVE_UNARY => Ok(true),
                 _ => Ok(false),
             },
             HirExprKind::Binary { op, left, right } => match op.as_str() {
-                "Add" | "Sub" | "Mul" | "Div" => Ok(self.expr_derivative_is_zero(*left, wrt)?
+                "Add" | "Sub" | "Mul" | "Div" | "Mod" => Ok(self
+                    .expr_derivative_is_zero(*left, wrt)?
                     && self.expr_derivative_is_zero(*right, wrt)?),
                 "Pow" => {
                     if self.constant_number(*right).is_some() {
@@ -3274,8 +3287,8 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                             && self.expr_derivative_is_zero(*right, wrt)?)
                     }
                 }
-                "Mod" | "Eq" | "Ne" | "Lt" | "Le" | "Gt" | "Ge" | "And" | "Or" | "BitAnd"
-                | "BitOr" | "BitXor" | "Shl" | "Shr" => Ok(true),
+                "Eq" | "Ne" | "Lt" | "Le" | "Gt" | "Ge" | "And" | "Or" | "BitAnd" | "BitOr"
+                | "BitXor" | "Shl" | "Shr" => Ok(true),
                 _ => Ok(false),
             },
             HirExprKind::Conditional {
@@ -3314,11 +3327,12 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             }
             HirExprKind::Unary { op, operand } => match op.as_str() {
                 "Pos" | "Neg" => self.expr_second_derivative_is_zero(*operand, first, second),
-                "Not" | "BitNot" => Ok(true),
+                "Not" | "BitNot" | FROZEN_DERIVATIVE_UNARY => Ok(true),
                 _ => Ok(false),
             },
             HirExprKind::Binary { op, left, right } => match op.as_str() {
-                "Add" | "Sub" => Ok(self.expr_second_derivative_is_zero(*left, first, second)?
+                "Add" | "Sub" | "Mod" => Ok(self
+                    .expr_second_derivative_is_zero(*left, first, second)?
                     && self.expr_second_derivative_is_zero(*right, first, second)?),
                 "Mul" => Ok(self.expr_second_derivative_is_zero(*left, first, second)?
                     && self.expr_second_derivative_is_zero(*right, first, second)?
@@ -3346,8 +3360,8 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                             && self.expr_derivative_is_zero(*right, second)?)
                     }
                 }
-                "Mod" | "Eq" | "Ne" | "Lt" | "Le" | "Gt" | "Ge" | "And" | "Or" | "BitAnd"
-                | "BitOr" | "BitXor" | "Shl" | "Shr" => Ok(true),
+                "Eq" | "Ne" | "Lt" | "Le" | "Gt" | "Ge" | "And" | "Or" | "BitAnd" | "BitOr"
+                | "BitXor" | "Shl" | "Shr" => Ok(true),
                 _ => Ok(false),
             },
             HirExprKind::Conditional {
@@ -3866,7 +3880,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                     self.append_unary(NativeOp::Neg)
                 }
             }
-            "Not" | "BitNot" => self.push(NativeOp::Const(0.0)),
+            "Not" | "BitNot" | FROZEN_DERIVATIVE_UNARY => self.push(NativeOp::Const(0.0)),
             _ => Err(self.unsupported(format!("ddx derivative of unary operator {op}"))),
         }
     }
@@ -3888,7 +3902,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                     self.append_unary(NativeOp::Neg)
                 }
             }
-            "Not" | "BitNot" => self.push(NativeOp::Const(0.0)),
+            "Not" | "BitNot" | FROZEN_DERIVATIVE_UNARY => self.push(NativeOp::Const(0.0)),
             _ => Err(self.unsupported(format!("second derivative of unary operator {op}"))),
         }
     }
@@ -3978,7 +3992,14 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 self.append_arithmetic("Div")
             }
             "Pow" => self.lower_pow_derivative(left, right, wrt),
-            "Mod" | "Eq" | "Ne" | "Lt" | "Le" | "Gt" | "Ge" | "And" | "Or" | "BitAnd" | "BitOr"
+            "Mod" => {
+                let left_zero = self.expr_derivative_is_zero(left, wrt)?;
+                let right_zero = self.expr_derivative_is_zero(right, wrt)?;
+                self.lower_mod_derivative(left, right, left_zero, right_zero, |this, id| {
+                    this.lower_derivative(id, wrt)
+                })
+            }
+            "Eq" | "Ne" | "Lt" | "Le" | "Gt" | "Ge" | "And" | "Or" | "BitAnd" | "BitOr"
             | "BitXor" | "Shl" | "Shr" => self.push(NativeOp::Const(0.0)),
             _ => Err(self.unsupported(format!("ddx derivative of binary operator {op}"))),
         }
@@ -4064,9 +4085,57 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             }
             "Div" => self.lower_div_second_derivative(left, right, first, second),
             "Pow" => self.lower_pow_second_derivative(left, right, first, second),
-            "Mod" | "Eq" | "Ne" | "Lt" | "Le" | "Gt" | "Ge" | "And" | "Or" | "BitAnd" | "BitOr"
+            "Mod" => {
+                let left_zero = self.expr_second_derivative_is_zero(left, first, second)?;
+                let right_zero = self.expr_second_derivative_is_zero(right, first, second)?;
+                self.lower_mod_derivative(left, right, left_zero, right_zero, |this, id| {
+                    this.lower_second_derivative(id, first, second)
+                })
+            }
+            "Eq" | "Ne" | "Lt" | "Le" | "Gt" | "Ge" | "And" | "Or" | "BitAnd" | "BitOr"
             | "BitXor" | "Shl" | "Shr" => self.push(NativeOp::Const(0.0)),
             _ => Err(self.unsupported(format!("second derivative of binary operator {op}"))),
+        }
+    }
+
+    /// Every supported derivative order of a remainder holds trunc(left/right)
+    /// constant. Omit it entirely when the divisor's derivative is zero.
+    fn lower_mod_derivative(
+        &mut self,
+        left: ExprId,
+        right: ExprId,
+        left_zero: bool,
+        right_zero: bool,
+        derivative: impl Fn(&mut Self, ExprId) -> JitResult<()>,
+    ) -> JitResult<()> {
+        if right_zero {
+            return if left_zero {
+                self.push(NativeOp::Const(0.0))
+            } else {
+                derivative(self, left)
+            };
+        }
+        if !left_zero {
+            derivative(self, left)?;
+        }
+        derivative(self, right)?;
+        for (round, clip) in [
+            (UnaryMathOp::Floor, ExtremumOp::Max),
+            (UnaryMathOp::Ceil, ExtremumOp::Min),
+        ] {
+            self.lower(left)?;
+            self.lower(right)?;
+            self.append_arithmetic("Div")?;
+            self.append_unary(NativeOp::UnaryMath(round))?;
+            self.push(NativeOp::Const(0.0))?;
+            self.append_extremum(clip)?;
+        }
+        self.append_arithmetic("Add")?;
+        self.append_arithmetic("Mul")?;
+        if left_zero {
+            self.append_unary(NativeOp::Neg)
+        } else {
+            self.append_arithmetic("Sub")
         }
     }
 
@@ -6110,7 +6179,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             HirExprKind::Unary { op, operand } => {
                 let value = self.constant_expr_value(*operand)?;
                 match op.as_str() {
-                    "Pos" => Ok(value),
+                    "Pos" | FROZEN_DERIVATIVE_UNARY => Ok(value),
                     "Neg" => Ok(-value),
                     _ => Err(self.unsupported(format!("constant coefficient unary operator {op}"))),
                 }
@@ -7796,7 +7865,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
     fn lower_unary(&mut self, op: &str, operand: ExprId) -> JitResult<()> {
         self.lower(operand)?;
         match op {
-            "Pos" => Ok(()),
+            "Pos" | FROZEN_DERIVATIVE_UNARY => Ok(()),
             "Neg" => {
                 if lower_constant_neg(&mut self.ops) {
                     Ok(())

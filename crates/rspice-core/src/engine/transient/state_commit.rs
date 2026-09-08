@@ -43,6 +43,180 @@ pub(super) struct ReactiveBreakpointScheduling<'a> {
 }
 
 impl Engine {
+    /// Commit the accepted BJT charge, predictor and terminal-current history.
+    /// Shared by ordinary transient integration and periodic traversals; trial
+    /// evaluations never call this operation.
+    pub(in crate::engine) fn accept_bjt_history(
+        circuit: &crate::circuit::CircuitData,
+        bjt_history: &mut BjtTransientHistory,
+        accepted_solution: &[Value],
+        coeff: &CompanionCoefficients,
+        dt: Value,
+        vbic_snapshots: Option<&[Option<BjtChargeSnapshot>]>,
+        tolerances: VbicSnapshotTolerances,
+    ) -> Result<(), SimulationError> {
+        let VbicSnapshotTolerances {
+            voltage_abstol,
+            reltol: voltage_reltol,
+        } = tolerances;
+        for (idx, bjt) in circuit.bjts.devices.iter().enumerate() {
+            // A failed/unsupported dynamic snapshot must never expose the
+            // preceding accepted sample's current under a new time point.
+            bjt_history.accepted_terminal_currents[idx] = None;
+            let vc = Self::node_voltage(accepted_solution, bjt.node_collector);
+            let vb = Self::node_voltage(accepted_solution, bjt.node_base);
+            let ve = Self::node_voltage(accepted_solution, bjt.node_emitter);
+            let vs = Self::node_voltage(accepted_solution, bjt.node_substrate);
+            let external = [vc, vb, ve, vs];
+            let vbe = vb - ve;
+            let vbc = vb - vc;
+            let vcs = vc - vs;
+            if bjt.vbic_mna_promoted() {
+                // Promoted VBIC: the accepted solution already carries the
+                // internal node voltages, so the charge history commits from
+                // a direct evaluation at the accepted bias.
+                let (branches, internal, _) =
+                    bjt.vbic_mna_charge_state_at_solution(accepted_solution);
+                for (branch_idx, branch) in branches.iter().enumerate() {
+                    let q_prev = bjt_history.charge_q_prev[idx][branch_idx];
+                    let q_prev_prev = bjt_history.charge_q_prev_prev[idx][branch_idx];
+                    let cq_prev = bjt_history.charge_cq_prev[idx][branch_idx];
+                    let cq_curr = Self::jfet_companion_ccap(
+                        coeff,
+                        dt,
+                        branch.charge,
+                        BranchChargeHistory {
+                            q_prev,
+                            q_prev_prev,
+                            cq_prev,
+                        },
+                    );
+                    bjt_history.charge_q_prev_prev_prev[idx][branch_idx] = q_prev_prev;
+                    bjt_history.charge_q_prev_prev[idx][branch_idx] = q_prev;
+                    bjt_history.charge_q_prev[idx][branch_idx] = branch.charge;
+                    bjt_history.charge_cq_prev[idx][branch_idx] = cq_curr;
+                }
+                bjt_history.dynamic_internal_prev_prev[idx] =
+                    bjt_history.dynamic_internal_prev[idx];
+                bjt_history.dynamic_internal_prev[idx] = internal;
+                bjt_history.vbe_prev_prev[idx] = bjt_history.vbe_prev[idx];
+                bjt_history.vbe_prev[idx] = vbe;
+                bjt_history.ibe_prev[idx] = 0.0;
+                bjt_history.vbc_prev_prev[idx] = bjt_history.vbc_prev[idx];
+                bjt_history.vbc_prev[idx] = vbc;
+                bjt_history.ibc_prev[idx] = 0.0;
+                bjt_history.vcs_prev_prev[idx] = bjt_history.vcs_prev[idx];
+                bjt_history.vcs_prev[idx] = vcs;
+                bjt_history.ics_prev[idx] = 0.0;
+                continue;
+            }
+            let snapshot_reuse_abstol = voltage_abstol.min(VBIC_HISTORY_SNAPSHOT_REUSE_ABSTOL);
+            let snapshot_reuse_reltol = voltage_reltol.min(VBIC_HISTORY_SNAPSHOT_REUSE_RELTOL);
+            let cached_snapshot = vbic_snapshots
+                .and_then(|cache| cache.get(idx))
+                .copied()
+                .flatten();
+            let Some(snapshot) = Self::resolve_vbic_snapshot_for_external_bias_with_linear_history(
+                bjt,
+                external,
+                VbicChargeStep {
+                    coeff,
+                    dt,
+                    q_prev: &bjt_history.charge_q_prev[idx],
+                    q_prev_prev: &bjt_history.charge_q_prev_prev[idx],
+                    cq_prev: &bjt_history.charge_cq_prev[idx],
+                },
+                VbicPredictorHistory {
+                    internal_prev: bjt_history.dynamic_internal_prev.get(idx),
+                    internal_prev_prev: bjt_history.dynamic_internal_prev_prev.get(idx),
+                    linear_prev: bjt_history.dynamic_linear_prev.get(idx),
+                    linear_prev_prev: bjt_history.dynamic_linear_prev_prev.get(idx),
+                    previous_dt: bjt_history.accepted_dt_prev,
+                },
+                cached_snapshot,
+                VbicCachedSnapshotReuse::SeedOnly,
+                VbicSnapshotTolerances {
+                    voltage_abstol: snapshot_reuse_abstol,
+                    reltol: snapshot_reuse_reltol,
+                },
+            ) else {
+                continue;
+            };
+            let (legacy_vbe, legacy_vbc, legacy_vbx, legacy_vcs) =
+                Self::legacy_bjt_charge_branch_voltages_with_vbx(&snapshot);
+            // Evaluate lead currents before rotating the accepted charge
+            // history: the companion uses Q[n] at this solution together
+            // with Q[n-1]/Q[n-2]/CQ[n-1]. The resulting Y*v-i_eq vector is
+            // therefore the same static-plus-displacement current that owned
+            // the converged Newton stamp.
+            bjt_history.accepted_terminal_currents[idx] =
+                Some(Self::reduced_bjt_transient_terminal_currents(
+                    bjt,
+                    &snapshot,
+                    VbicChargeStep {
+                        coeff,
+                        dt,
+                        q_prev: &bjt_history.charge_q_prev[idx],
+                        q_prev_prev: &bjt_history.charge_q_prev_prev[idx],
+                        cq_prev: &bjt_history.charge_cq_prev[idx],
+                    },
+                )?);
+            let legacy_charges = bjt.legacy_transient_charge_state_with_vbx(
+                legacy_vbe, legacy_vbc, legacy_vbx, legacy_vcs,
+            );
+            let mut charge_values = snapshot.branches.map(|branch| branch.charge);
+            charge_values[BJT_QBE_BRANCH_INDEX] = legacy_charges.qbe;
+            charge_values[BJT_QBC_BRANCH_INDEX] = legacy_charges.qbc;
+            charge_values[BJT_QBCX_BRANCH_INDEX] = legacy_charges.qbx;
+            charge_values[BJT_QBCP_BRANCH_INDEX] = legacy_charges.qcs;
+            let mut cq_currents = [0.0; BJT_DYNAMIC_CHARGE_COUNT];
+            for branch_idx in 0..BJT_DYNAMIC_CHARGE_COUNT {
+                let charge = charge_values[branch_idx];
+                let q_prev = bjt_history.charge_q_prev[idx][branch_idx];
+                let q_prev_prev = bjt_history.charge_q_prev_prev[idx][branch_idx];
+                let cq_prev = bjt_history.charge_cq_prev[idx][branch_idx];
+                let cq_curr = Self::jfet_companion_ccap(
+                    coeff,
+                    dt,
+                    charge,
+                    BranchChargeHistory {
+                        q_prev,
+                        q_prev_prev,
+                        cq_prev,
+                    },
+                );
+                bjt_history.charge_q_prev_prev_prev[idx][branch_idx] = q_prev_prev;
+                bjt_history.charge_q_prev_prev[idx][branch_idx] = q_prev;
+                bjt_history.charge_q_prev[idx][branch_idx] = charge;
+                bjt_history.charge_cq_prev[idx][branch_idx] = cq_curr;
+                cq_currents[branch_idx] = cq_curr;
+            }
+            bjt_history.dynamic_internal_prev_prev[idx] = bjt_history.dynamic_internal_prev[idx];
+            bjt_history.dynamic_internal_prev[idx] = snapshot.reduction.internal_voltages;
+            let predictor_linear = Self::vbic_predictor_linear_branch_state(
+                bjt,
+                external,
+                snapshot.reduction.internal_voltages,
+            );
+            bjt_history.dynamic_linear_prev_prev[idx] = bjt_history.dynamic_linear_prev[idx];
+            bjt_history.dynamic_linear_prev[idx] = predictor_linear;
+
+            bjt_history.vbe_prev_prev[idx] = bjt_history.vbe_prev[idx];
+            bjt_history.vbe_prev[idx] = legacy_vbe;
+            bjt_history.ibe_prev[idx] = cq_currents[BJT_QBE_BRANCH_INDEX];
+            bjt_history.vbc_prev_prev[idx] = bjt_history.vbc_prev[idx];
+            bjt_history.vbc_prev[idx] = legacy_vbc;
+            bjt_history.ibc_prev[idx] = cq_currents[BJT_QBC_BRANCH_INDEX];
+            bjt_history.vcs_prev_prev[idx] = bjt_history.vcs_prev[idx];
+            bjt_history.vcs_prev[idx] = legacy_vcs;
+            bjt_history.ics_prev[idx] = cq_currents[BJT_QBCP_BRANCH_INDEX];
+        }
+
+        bjt_history.accepted_dt_prev_prev = bjt_history.accepted_dt_prev;
+        bjt_history.accepted_dt_prev = dt;
+        Ok(())
+    }
+
     #[inline]
     fn install_cached_mosfet_gate_companion_charges(
         charges: &MosfetGateCompanionCharges,
@@ -393,161 +567,18 @@ impl Engine {
             }
         }
 
-        for (idx, bjt) in circuit.bjts.devices.iter().enumerate() {
-            // A failed/unsupported dynamic snapshot must never expose the
-            // preceding accepted sample's current under a new time point.
-            bjt_history.accepted_terminal_currents[idx] = None;
-            let vc = Self::node_voltage(accepted_solution, bjt.node_collector);
-            let vb = Self::node_voltage(accepted_solution, bjt.node_base);
-            let ve = Self::node_voltage(accepted_solution, bjt.node_emitter);
-            let vs = Self::node_voltage(accepted_solution, bjt.node_substrate);
-            let external = [vc, vb, ve, vs];
-            let vbe = vb - ve;
-            let vbc = vb - vc;
-            let vcs = vc - vs;
-            if bjt.vbic_mna_promoted() {
-                // Promoted VBIC: the accepted solution already carries the
-                // internal node voltages, so the charge history commits from
-                // a direct evaluation at the accepted bias.
-                let (branches, internal, _) =
-                    bjt.vbic_mna_charge_state_at_solution(accepted_solution);
-                for (branch_idx, branch) in branches.iter().enumerate() {
-                    let q_prev = bjt_history.charge_q_prev[idx][branch_idx];
-                    let q_prev_prev = bjt_history.charge_q_prev_prev[idx][branch_idx];
-                    let cq_prev = bjt_history.charge_cq_prev[idx][branch_idx];
-                    let cq_curr = Self::jfet_companion_ccap(
-                        coeff,
-                        dt,
-                        branch.charge,
-                        BranchChargeHistory {
-                            q_prev,
-                            q_prev_prev,
-                            cq_prev,
-                        },
-                    );
-                    bjt_history.charge_q_prev_prev_prev[idx][branch_idx] = q_prev_prev;
-                    bjt_history.charge_q_prev_prev[idx][branch_idx] = q_prev;
-                    bjt_history.charge_q_prev[idx][branch_idx] = branch.charge;
-                    bjt_history.charge_cq_prev[idx][branch_idx] = cq_curr;
-                }
-                bjt_history.dynamic_internal_prev_prev[idx] =
-                    bjt_history.dynamic_internal_prev[idx];
-                bjt_history.dynamic_internal_prev[idx] = internal;
-                bjt_history.vbe_prev_prev[idx] = bjt_history.vbe_prev[idx];
-                bjt_history.vbe_prev[idx] = vbe;
-                bjt_history.ibe_prev[idx] = 0.0;
-                bjt_history.vbc_prev_prev[idx] = bjt_history.vbc_prev[idx];
-                bjt_history.vbc_prev[idx] = vbc;
-                bjt_history.ibc_prev[idx] = 0.0;
-                bjt_history.vcs_prev_prev[idx] = bjt_history.vcs_prev[idx];
-                bjt_history.vcs_prev[idx] = vcs;
-                bjt_history.ics_prev[idx] = 0.0;
-                continue;
-            }
-            let snapshot_reuse_abstol = voltage_abstol.min(VBIC_HISTORY_SNAPSHOT_REUSE_ABSTOL);
-            let snapshot_reuse_reltol = voltage_reltol.min(VBIC_HISTORY_SNAPSHOT_REUSE_RELTOL);
-            let cached_snapshot = vbic_snapshots
-                .and_then(|cache| cache.get(idx))
-                .copied()
-                .flatten();
-            let Some(snapshot) = Self::resolve_vbic_snapshot_for_external_bias_with_linear_history(
-                bjt,
-                external,
-                VbicChargeStep {
-                    coeff,
-                    dt,
-                    q_prev: &bjt_history.charge_q_prev[idx],
-                    q_prev_prev: &bjt_history.charge_q_prev_prev[idx],
-                    cq_prev: &bjt_history.charge_cq_prev[idx],
-                },
-                VbicPredictorHistory {
-                    internal_prev: bjt_history.dynamic_internal_prev.get(idx),
-                    internal_prev_prev: bjt_history.dynamic_internal_prev_prev.get(idx),
-                    linear_prev: bjt_history.dynamic_linear_prev.get(idx),
-                    linear_prev_prev: bjt_history.dynamic_linear_prev_prev.get(idx),
-                    previous_dt: bjt_history.accepted_dt_prev,
-                },
-                cached_snapshot,
-                VbicCachedSnapshotReuse::SeedOnly,
-                VbicSnapshotTolerances {
-                    voltage_abstol: snapshot_reuse_abstol,
-                    reltol: snapshot_reuse_reltol,
-                },
-            ) else {
-                continue;
-            };
-            let (legacy_vbe, legacy_vbc, legacy_vbx, legacy_vcs) =
-                Self::legacy_bjt_charge_branch_voltages_with_vbx(&snapshot);
-            // Evaluate lead currents before rotating the accepted charge
-            // history: the companion uses Q[n] at this solution together
-            // with Q[n-1]/Q[n-2]/CQ[n-1]. The resulting Y*v-i_eq vector is
-            // therefore the same static-plus-displacement current that owned
-            // the converged Newton stamp.
-            bjt_history.accepted_terminal_currents[idx] =
-                Some(Self::reduced_bjt_transient_terminal_currents(
-                    bjt,
-                    &snapshot,
-                    VbicChargeStep {
-                        coeff,
-                        dt,
-                        q_prev: &bjt_history.charge_q_prev[idx],
-                        q_prev_prev: &bjt_history.charge_q_prev_prev[idx],
-                        cq_prev: &bjt_history.charge_cq_prev[idx],
-                    },
-                )?);
-            let legacy_charges = bjt.legacy_transient_charge_state_with_vbx(
-                legacy_vbe, legacy_vbc, legacy_vbx, legacy_vcs,
-            );
-            let mut charge_values = snapshot.branches.map(|branch| branch.charge);
-            charge_values[BJT_QBE_BRANCH_INDEX] = legacy_charges.qbe;
-            charge_values[BJT_QBC_BRANCH_INDEX] = legacy_charges.qbc;
-            charge_values[BJT_QBCX_BRANCH_INDEX] = legacy_charges.qbx;
-            charge_values[BJT_QBCP_BRANCH_INDEX] = legacy_charges.qcs;
-            let mut cq_currents = [0.0; BJT_DYNAMIC_CHARGE_COUNT];
-            for branch_idx in 0..BJT_DYNAMIC_CHARGE_COUNT {
-                let charge = charge_values[branch_idx];
-                let q_prev = bjt_history.charge_q_prev[idx][branch_idx];
-                let q_prev_prev = bjt_history.charge_q_prev_prev[idx][branch_idx];
-                let cq_prev = bjt_history.charge_cq_prev[idx][branch_idx];
-                let cq_curr = Self::jfet_companion_ccap(
-                    coeff,
-                    dt,
-                    charge,
-                    BranchChargeHistory {
-                        q_prev,
-                        q_prev_prev,
-                        cq_prev,
-                    },
-                );
-                bjt_history.charge_q_prev_prev_prev[idx][branch_idx] = q_prev_prev;
-                bjt_history.charge_q_prev_prev[idx][branch_idx] = q_prev;
-                bjt_history.charge_q_prev[idx][branch_idx] = charge;
-                bjt_history.charge_cq_prev[idx][branch_idx] = cq_curr;
-                cq_currents[branch_idx] = cq_curr;
-            }
-            bjt_history.dynamic_internal_prev_prev[idx] = bjt_history.dynamic_internal_prev[idx];
-            bjt_history.dynamic_internal_prev[idx] = snapshot.reduction.internal_voltages;
-            let predictor_linear = Self::vbic_predictor_linear_branch_state(
-                bjt,
-                external,
-                snapshot.reduction.internal_voltages,
-            );
-            bjt_history.dynamic_linear_prev_prev[idx] = bjt_history.dynamic_linear_prev[idx];
-            bjt_history.dynamic_linear_prev[idx] = predictor_linear;
-
-            bjt_history.vbe_prev_prev[idx] = bjt_history.vbe_prev[idx];
-            bjt_history.vbe_prev[idx] = legacy_vbe;
-            bjt_history.ibe_prev[idx] = cq_currents[BJT_QBE_BRANCH_INDEX];
-            bjt_history.vbc_prev_prev[idx] = bjt_history.vbc_prev[idx];
-            bjt_history.vbc_prev[idx] = legacy_vbc;
-            bjt_history.ibc_prev[idx] = cq_currents[BJT_QBC_BRANCH_INDEX];
-            bjt_history.vcs_prev_prev[idx] = bjt_history.vcs_prev[idx];
-            bjt_history.vcs_prev[idx] = legacy_vcs;
-            bjt_history.ics_prev[idx] = cq_currents[BJT_QBCP_BRANCH_INDEX];
-        }
-
-        bjt_history.accepted_dt_prev_prev = bjt_history.accepted_dt_prev;
-        bjt_history.accepted_dt_prev = dt;
+        Self::accept_bjt_history(
+            circuit,
+            bjt_history,
+            accepted_solution,
+            coeff,
+            dt,
+            vbic_snapshots,
+            VbicSnapshotTolerances {
+                voltage_abstol,
+                reltol: voltage_reltol,
+            },
+        )?;
 
         for (idx, jfet) in circuit.jfets.iter().enumerate() {
             let (vgs_eval, vgd_eval) = Self::jfet_branch_voltages(jfet, accepted_solution);

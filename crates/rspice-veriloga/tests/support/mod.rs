@@ -23,13 +23,15 @@ pub struct DeviceFixture {
 impl DeviceFixture {
     pub fn compile(source: &str) -> Self {
         let compiler = VerilogACompiler::new(CompilerOptions::default());
-        let model = compiler.compile(source).expect("compilation failed");
-        let canonical_ir = compiler
-            .compile_canonical_ir(source)
-            .expect("canonical IR compilation failed");
+        // Runtime compilation pairs both artifacts and renumbers state per
+        // source site. Separately compiled legacy bytecode retains independent
+        // derivative histories and cannot be paired with a canonical artifact.
+        let report = compiler
+            .compile_runtime(source, None)
+            .expect("runtime compilation failed");
         Self {
-            model,
-            canonical_ir,
+            model: report.model,
+            canonical_ir: report.canonical_ir,
         }
     }
 

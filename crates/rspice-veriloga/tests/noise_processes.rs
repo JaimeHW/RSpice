@@ -280,6 +280,29 @@ mod runtime {
     }
 
     #[test]
+    fn real_modulo_preserves_noise_in_either_operand() {
+        for (expression, expected) in [
+            ("(1.0+process)%3.75", 1.0),
+            ("10.0%(3.75+process)", -2.0),
+            ("(-10.0+process)%(3.75+process)", 3.0),
+        ] {
+            let mut device = device(&format!(
+                "module remainder_noise(p,n); inout p,n; electrical p,n; real process,r; analog begin process=white_noise(2.0,\"source\"); r={expression}; I(p,n)<+r; end endmodule"
+            ));
+            let processes = device
+                .try_noise_processes_at_frequency(&[0.0], 1.0e3)
+                .unwrap();
+            assert_eq!(processes.len(), 1, "{expression}");
+            assert_eq!(processes[0].psd, 2.0);
+            assert_eq!(processes[0].injections.len(), 1);
+            let gain = processes[0].injections[0].gain;
+            // Current residuals inject the negative of the authored RHS.
+            assert_eq!(gain.re, -expected, "{expression}");
+            assert_eq!(gain.im, 0.0);
+        }
+    }
+
+    #[test]
     fn raw_metadata_uses_each_call_sites_reaching_definition() {
         let mut device = device(
             r#"

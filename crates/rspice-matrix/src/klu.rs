@@ -80,6 +80,116 @@ pub struct KluDiagnostics {
     pub max_abs_pivot: Value,
 }
 
+/// Accepted numeric factors, in their original elimination order.
+///
+/// Symbolic analysis and scratch buffers are reconstructed from the live
+/// matrix. Keeping the factor-time scaling and actual L/U values preserves
+/// both an unchanged-matrix solve and subsequent values-only refactors.
+/// The enclosing sparse-solver checkpoint owns the wire-format version.
+#[derive(Debug, Clone, PartialEq)]
+pub struct KluNumericCheckpoint {
+    /// Original row at each pivot position.
+    pub row_perm: Vec<u32>,
+    /// Strict-lower CSC column boundaries.
+    pub l_col_ptr: Vec<usize>,
+    /// Strict-lower pivot-space row indices in elimination order.
+    pub l_rows: Vec<u32>,
+    /// Strict-lower coefficients; the unit diagonal is implicit.
+    pub l_values: Vec<Value>,
+    /// Upper CSC column boundaries.
+    pub u_col_ptr: Vec<usize>,
+    /// Upper pivot-space row indices, with the diagonal last in each column.
+    pub u_rows: Vec<u32>,
+    /// Upper coefficients, including the nonzero diagonal.
+    pub u_values: Vec<Value>,
+    /// Factor-time row scaling indexed by original row.
+    pub row_scale: Vec<Value>,
+    /// Retained factorization quality indicators used by later refactors.
+    pub diagnostics: KluDiagnostics,
+}
+
+impl KluNumericCheckpoint {
+    /// Validate every index used by triangular solves and values-only refactors.
+    pub fn validate(&self, dimension: usize) -> Result<(), SolverError> {
+        let invalid =
+            |detail: &str| SolverError::InvalidCircuit(format!("invalid KLU checkpoint: {detail}"));
+        let n = dimension;
+        if n == 0
+            || n > u32::MAX as usize
+            || self.row_perm.len() != n
+            || self.row_scale.len() != n
+            || n.checked_add(1) != Some(self.l_col_ptr.len())
+            || n.checked_add(1) != Some(self.u_col_ptr.len())
+        {
+            return Err(invalid("dimension mismatch"));
+        }
+        let mut seen = Vec::new();
+        resize_fallible(&mut seen, n, false)?;
+        for &row in &self.row_perm {
+            let row = row as usize;
+            if row >= n || seen[row] {
+                return Err(invalid("pivot rows are not a permutation"));
+            }
+            seen[row] = true;
+        }
+        let mut row_seen = Vec::new();
+        resize_fallible(&mut row_seen, n, usize::MAX)?;
+        for (lower, ptr, rows, values) in [
+            (true, &self.l_col_ptr, &self.l_rows, &self.l_values),
+            (false, &self.u_col_ptr, &self.u_rows, &self.u_values),
+        ] {
+            if ptr[0] != 0
+                || ptr[n] != rows.len()
+                || rows.len() != values.len()
+                || ptr.windows(2).any(|pair| pair[0] > pair[1])
+                || values.iter().any(|value| !value.is_finite())
+            {
+                return Err(invalid("factor shape or values"));
+            }
+            row_seen.fill(usize::MAX);
+            for col in 0..n {
+                let (begin, end) = (ptr[col], ptr[col + 1]);
+                if !lower
+                    && (begin == end || rows[end - 1] as usize != col || values[end - 1] == 0.0)
+                {
+                    return Err(invalid("upper diagonal must be nonzero and stored last"));
+                }
+                for &row in &rows[begin..end] {
+                    let row = row as usize;
+                    if row >= n
+                        || row_seen[row] == col
+                        || (lower && row <= col)
+                        || (!lower && row > col)
+                    {
+                        return Err(invalid("factor is not triangular or has duplicate rows"));
+                    }
+                    row_seen[row] = col;
+                }
+            }
+        }
+        let d = self.diagnostics;
+        if self
+            .row_scale
+            .iter()
+            .any(|value| !value.is_finite() || *value <= 0.0)
+            || [
+                d.reciprocal_pivot_growth,
+                d.diagonal_rcond,
+                d.min_abs_pivot,
+                d.max_abs_pivot,
+            ]
+            .iter()
+            .any(|value| !value.is_finite() || *value < 0.0)
+            || d.diagonal_rcond > 1.0
+            || d.min_abs_pivot == 0.0
+            || d.max_abs_pivot < d.min_abs_pivot
+        {
+            return Err(invalid("row scaling or numeric diagnostics"));
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Default)]
 struct FactorWorkspace {
     pinv: Vec<usize>,
@@ -188,6 +298,74 @@ pub struct KluSolver {
 }
 
 impl KluSolver {
+    pub(crate) fn capture_numeric_checkpoint(&self) -> Option<KluNumericCheckpoint> {
+        self.factored.then(|| KluNumericCheckpoint {
+            row_perm: self.row_perm.clone(),
+            l_col_ptr: self.l_col_ptr.clone(),
+            l_rows: self.l_rows.clone(),
+            l_values: self.l_vals.clone(),
+            u_col_ptr: self.u_col_ptr.clone(),
+            u_rows: self.u_rows.clone(),
+            u_values: self.u_vals.clone(),
+            row_scale: self.row_scale.clone(),
+            diagnostics: self.diagnostics,
+        })
+    }
+
+    pub(crate) fn restore_numeric_checkpoint(
+        &mut self,
+        checkpoint: &KluNumericCheckpoint,
+    ) -> Result<(), SolverError> {
+        checkpoint.validate(self.n)?;
+        if !self.is_analyzed_for(self.n) {
+            return Err(SolverError::InvalidCircuit(
+                "KLU checkpoint needs an analyzed target".into(),
+            ));
+        }
+        let n = self.n;
+        let mut inverse = Vec::new();
+        resize_fallible(&mut inverse, n, 0u32)?;
+        for (pivot, &row) in checkpoint.row_perm.iter().enumerate() {
+            inverse[row as usize] = pivot as u32;
+        }
+        let mut scatter = Vec::new();
+        reserve_for(&mut scatter, self.a_rows.len())?;
+        scatter.extend(self.a_rows.iter().map(|&row| inverse[row as usize]));
+        let mut entry_scale = Vec::new();
+        reserve_for(&mut entry_scale, self.a_rows.len())?;
+        entry_scale.extend(
+            self.a_rows
+                .iter()
+                .map(|&row| checkpoint.row_scale[row as usize]),
+        );
+        let mut reciprocal = Vec::new();
+        reserve_for(&mut reciprocal, n)?;
+        reciprocal.extend(
+            checkpoint.u_col_ptr[1..]
+                .iter()
+                .map(|&end| 1.0 / checkpoint.u_values[end - 1]),
+        );
+        let mut work = Vec::new();
+        resize_fallible(&mut work, n, 0.0)?;
+        // All shape checks and derived-buffer allocations precede mutation.
+        self.row_perm.clone_from(&checkpoint.row_perm);
+        self.l_col_ptr.clone_from(&checkpoint.l_col_ptr);
+        self.l_rows.clone_from(&checkpoint.l_rows);
+        self.l_vals.clone_from(&checkpoint.l_values);
+        self.u_col_ptr.clone_from(&checkpoint.u_col_ptr);
+        self.u_rows.clone_from(&checkpoint.u_rows);
+        self.u_vals.clone_from(&checkpoint.u_values);
+        self.row_scale.clone_from(&checkpoint.row_scale);
+        self.use_diag_recip = reciprocal.iter().all(|value| value.is_finite());
+        self.u_diag_recip = reciprocal;
+        self.a_scatter = scatter;
+        self.a_entry_scale = entry_scale;
+        self.work = work;
+        self.diagnostics = checkpoint.diagnostics;
+        self.factored = true;
+        Ok(())
+    }
+
     /// Create an empty solver. Call [`Self::analyze`] once for a pattern, then
     /// [`Self::factor`] or [`Self::refactor`] before solving.
     pub fn new() -> Self {
@@ -2236,6 +2414,25 @@ mod tests {
         values[offset(preferred_row, first_column)] = 1.0e-4;
         solver.refactor(&values).expect("safe values-only refactor");
         assert_eq!(solver.row_perm[0] as usize, preferred_row);
+
+        let checkpoint = solver.capture_numeric_checkpoint().unwrap();
+        let mut restored = KluSolver::new();
+        restored.analyze(2, &[0, 2, 4], &[0, 1, 0, 1]).unwrap();
+        restored.restore_numeric_checkpoint(&checkpoint).unwrap();
+        assert_eq!(restored.capture_numeric_checkpoint().unwrap(), checkpoint);
+        let mut expected = Vec::new();
+        let mut actual = Vec::new();
+        for scale in [1.0, 1.1, 0.9] {
+            solver.solve(&[1.3, 2.7], &mut expected).unwrap();
+            restored.solve(&[1.3, 2.7], &mut actual).unwrap();
+            assert_eq!(
+                actual.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
+                expected.iter().map(|v| v.to_bits()).collect::<Vec<_>>()
+            );
+            values[offset(preferred_row, other_column)] *= scale;
+            solver.refactor(&values).unwrap();
+            restored.refactor(&values).unwrap();
+        }
 
         solver.factor(&values).expect("fresh numeric factor");
         assert_eq!(solver.row_perm[0] as usize, alternate_row);

@@ -17,6 +17,245 @@ fn compile(source: &str) -> DeviceFixture {
     DeviceFixture::compile(source)
 }
 
+#[cfg(not(feature = "native"))]
+#[test]
+fn ddx_array_self_assignment_preserves_values_through_aliasing_indices() {
+    for (target, operand) in [("q[idx]", "q[2]"), ("q[2]", "q[idx]"), ("q[idx]", "q[idx]")] {
+        let fixture = compile(&format!(
+            "module array_self(p,n); inout p,n; electrical p,n; real q[2:3]; integer idx; analog begin idx=2; q[2]=V(p,n)*V(p,n)*V(p,n)*V(p,n); q[3]=0; {target}=ddx({operand},V(p,n)); I(p,n)<+q[2]; end endmodule"
+        ));
+        let mut device = fixture.device("X", &[1, 0]);
+        for v in [-0.75_f64, 0.0, 1.25] {
+            device.update_voltages(&[v]);
+            let current = device.try_evaluate().unwrap()[0];
+            assert!(
+                (current - 4.0 * v.powi(3)).abs() < 1e-10,
+                "{target}={operand}: {current}"
+            );
+            let (matrix, _) = collect_stamps(&mut device, &[v]);
+            assert!((matrix.get(&(0, 0)).copied().unwrap_or(0.0) - 12.0 * v * v).abs() < 1e-10);
+        }
+    }
+    let fixture = compile(
+        "module index_self(p,n); inout p,n; electrical p,n; real q[0:2]; analog begin q[0]=0.5*V(p,n)*V(p,n); q[1]=0; q[2]=0; q[ddx(q[0],V(p,n))]=1+2*V(p,n); I(p,n)<+q[0]; end endmodule",
+    );
+    let mut device = fixture.device("X", &[1, 0]);
+    for (v, current, slope) in [(0.0, 1.0, 2.0), (1.0, 0.5, 1.0), (2.0, 2.0, 2.0)] {
+        device.update_voltages(&[v]);
+        assert_eq!(device.try_evaluate().unwrap()[0], current);
+        let (matrix, _) = collect_stamps(&mut device, &[v]);
+        assert_eq!(matrix[&(0, 0)], slope);
+    }
+}
+
+#[test]
+fn ddx_self_assignment_preserves_the_primal_value_and_jacobian() {
+    let fixture = compile(
+        "module self_primal(p,n); inout p,n; electrical p,n; real x; analog begin x=V(p,n)*V(p,n)*V(p,n)*V(p,n); x=ddx(x,V(p,n)); I(p,n)<+x; end endmodule",
+    );
+    let mut device = fixture.device("X", &[1, 0]);
+    for v in [-0.75_f64, 0.0, 1.25] {
+        device.update_voltages(&[v]);
+        let current = device.try_evaluate().unwrap()[0];
+        assert!(
+            (current - 4.0 * v.powi(3)).abs() < 1e-10,
+            "at {v}: {current}"
+        );
+        let (matrix, _) = collect_stamps(&mut device, &[v]);
+        assert!((matrix.get(&(0, 0)).copied().unwrap_or(0.0) - 12.0 * v * v).abs() < 1e-10);
+    }
+}
+
+#[test]
+fn nested_ddx_array_loop_distinguishes_overwritten_elements() {
+    let fixture = compile(
+        "module array_loop(p,n); inout p,n; electrical p,n; parameter integer count=3; real q[1:2]; integer k; analog begin for(k=0;k<count;k=k+1) begin q[1]=V(p,n)*V(p,n)*V(p,n); q[2]=ddx(q[1],V(p,n)); end I(p,n)<+ddx(q[2],V(p,n)); end endmodule",
+    );
+    let mut device = fixture.device("X", &[1, 0]);
+    for v in [-0.75, 0.0, 1.25] {
+        device.update_voltages(&[v]);
+        assert!((device.try_evaluate().unwrap()[0] - 6.0 * v).abs() < 1e-10);
+        let (matrix, _) = collect_stamps(&mut device, &[v]);
+        assert!((matrix[&(0, 0)] - 6.0).abs() < 1e-10);
+    }
+}
+
+#[test]
+fn nested_ddx_observation_preserves_loop_carried_derivatives() {
+    let fixture = compile(
+        "module loop_readback(p,n); inout p,n; electrical p,n; parameter integer count=3; real x,reported; integer k; analog begin x=1; for(k=0;k<count;k=k+1) x=x*V(p,n); reported=ddx(ddx(x,V(p,n)),V(p,n)); I(p,n)<+reported; end endmodule",
+    );
+    let mut device = fixture.device("X", &[1, 0]);
+    for v in [-0.75, 0.0, 1.25] {
+        device.update_voltages(&[v]);
+        assert!((device.try_evaluate().unwrap()[0] - 6.0 * v).abs() < 1e-10);
+        fixture.observe(&mut device);
+        assert!((device.variable("reported").unwrap() - 6.0 * v).abs() < 1e-10);
+    }
+}
+
+#[cfg(feature = "native")]
+#[test]
+fn nested_ddx_readback_refuses_unimplemented_simultaneous_shadow_writes() {
+    for (tail, expected) in [
+        ("reported=ddx(x,V(p,n)); I(p,n)<+reported;", 7.5),
+        ("I(p,n)<+V(p,n);", 1.25),
+    ] {
+        let fixture = compile(&format!(
+            "module self_readback(p,n); inout p,n; electrical p,n; real x,reported; analog begin x=V(p,n)*V(p,n)*V(p,n); x=ddx(x,V(p,n)); {tail} end endmodule"
+        ));
+        let mut device = fixture.device("X", &[1, 0]);
+        device.update_voltages(&[1.25]);
+        assert_eq!(device.try_evaluate().unwrap(), vec![expected]);
+        let error = device
+            .observe_variables(&fixture.canonical_ir)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("simultaneous ddx self-update"), "{error}");
+    }
+}
+
+#[test]
+fn nested_ddx_transcendentals_and_report_only_values_keep_higher_orders() {
+    for body in [
+        "x=ddx(ddx(ddx(exp(V(p,n)),V(p,n)),V(p,n)),V(p,n));",
+        "x=exp(V(p,n)); x=ddx(x,V(p,n)); x=ddx(x,V(p,n)); x=ddx(x,V(p,n));",
+        "x=exp(V(p,n)); for(k=0;k<3;k=k+1) x=ddx(x,V(p,n));",
+    ] {
+        let fixture = compile(&format!(
+            "module transcendental(p,n); inout p,n; electrical p,n; real x, reported; integer k; analog begin {body} reported=ddx(ddx(exp(V(p,n)),V(p,n)),V(p,n)); I(p,n)<+x; end endmodule"
+        ));
+        let mut device = fixture.device("X", &[1, 0]);
+        for voltage in [-0.75_f64, 0.0, 1.25] {
+            device.update_voltages(&[voltage]);
+            let values = device.try_evaluate().unwrap();
+            assert!(
+                (values[0] - voltage.exp()).abs() < 1e-10,
+                "{body}: {values:?}"
+            );
+            let (matrix, _) = collect_stamps(&mut device, &[voltage]);
+            assert!(
+                (matrix[&(0, 0)] - voltage.exp()).abs() < 1e-10,
+                "{body}: {matrix:?}"
+            );
+            #[cfg(not(feature = "native"))]
+            {
+                fixture.observe(&mut device);
+                assert!((device.variable("reported").unwrap() - voltage.exp()).abs() < 1e-10);
+            }
+        }
+    }
+}
+
+#[test]
+fn recursive_ddx_in_a_runtime_loop_is_diagnosed() {
+    let source = "module recursive(p,n); inout p,n; electrical p,n; real x; integer k; analog begin x=exp(V(p,n)); for(k=0;k<V(p,n);k=k+1) x=ddx(x,V(p,n)); I(p,n)<+x; end endmodule";
+    let error = rspice_veriloga::VerilogACompiler::default()
+        .compile_runtime(source, None)
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("unbounded derivative order"), "{error}");
+}
+
+#[test]
+fn nested_ddx_preserves_variable_array_and_self_assignment_jacobians() {
+    for body in [
+        "analog I(p,n)<+ddx(ddx(V(p,n)*V(p,n)*V(p,n),V(p,n)),V(p,n));",
+        "real x,y; analog begin x=V(p,n)*V(p,n)*V(p,n); y=ddx(x,V(p,n)); I(p,n)<+ddx(y,V(p,n)); end",
+        "real x; analog begin x=V(p,n)*V(p,n)*V(p,n); x=ddx(x,V(p,n)); I(p,n)<+ddx(x,V(p,n)); end",
+        "real q[2:3]; integer idx; analog begin idx=2; q[idx]=V(p,n)*V(p,n)*V(p,n); I(p,n)<+ddx(ddx(q[idx],V(p,n)),V(p,n)); end",
+        "parameter integer count=3; real x; integer k; analog begin x=0; for(k=0;k<count;k=k+1) x=x+V(p,n)*V(p,n)*V(p,n); I(p,n)<+ddx(ddx(x,V(p,n)),V(p,n))/3; end",
+        "real x,y; analog begin x=V(p,n)*V(p,n)*V(p,n)*V(p,n); y=ddx(ddx(x,V(p,n)),V(p,n)); I(p,n)<+ddx(y,V(p,n))/4; end",
+    ] {
+        let fixture = compile(&format!(
+            "module nested_runtime(p,n); inout p,n; electrical p,n; {body} endmodule"
+        ));
+        let mut device = fixture.device("X", &[1, 0]);
+        for voltage in [-0.8, 0.0, 1.3] {
+            device.update_voltages(&[voltage]);
+            let values = device.try_evaluate().unwrap();
+            assert!(
+                (values[0] - 6.0 * voltage).abs() < 1e-10,
+                "{body}: {values:?}"
+            );
+            let (matrix, rhs) = collect_stamps(&mut device, &[voltage]);
+            assert!((matrix[&(0, 0)] - 6.0).abs() < 1e-10, "{body}: {matrix:?}");
+            assert!(
+                rhs.values().all(|value| value.abs() < 1e-10),
+                "{body}: {rhs:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn reactive_stamping_holds_external_derivative_coefficients_at_the_bias_point() {
+    for (expression, capacitances, current, driven_derivative, control_derivative) in [
+        ("V(p,n)*ddt(V(p,n))", [3.0, -2.0], 12.0, 10.0, 0.0),
+        ("V(c,n)*ddt(V(p,n))", [2.0, -4.0], 8.0, 4.0, 4.0),
+        ("ddt(V(p,n))/V(c,n)", [0.5, -0.25], 2.0, 1.0, -1.0),
+        (
+            "((V(c,n)>0)?2.0:4.0)*ddt(V(p,n))",
+            [2.0, 4.0],
+            8.0,
+            4.0,
+            0.0,
+        ),
+        (
+            "(2.0+V(c,n))*ddt(V(p,n)*V(p,n))",
+            [24.0, 8.0],
+            64.0,
+            48.0,
+            16.0,
+        ),
+    ] {
+        let fixture = compile(&format!(
+            "module weighted_derivative(p,n,c); inout p,n,c; electrical p,n,c; analog I(p,n)<+{expression}; endmodule"
+        ));
+        let mut device = fixture.device("X", &[1, 0, 2]);
+        device.try_set_analysis_type(1).unwrap();
+        for (bias, capacitance) in [[3.0, 2.0], [-2.0, -4.0]].into_iter().zip(capacitances) {
+            let mut matrix = HashMap::new();
+            device
+                .try_stamp_reactive(&bias, |row, column, value| {
+                    *matrix.entry((row, column)).or_insert(0.0) += value;
+                })
+                .unwrap();
+            assert_eq!(
+                matrix.get(&(0, 0)).copied().unwrap_or(0.0),
+                capacitance,
+                "{expression}: {matrix:?}"
+            );
+            assert_eq!(
+                matrix.get(&(0, 1)).copied().unwrap_or(0.0),
+                0.0,
+                "a coefficient outside ddt creates no control-port capacitance: {expression}: {matrix:?}"
+            );
+        }
+
+        // The transient Newton derivative must still include dk/dx * ddt(q).
+        device.try_set_analysis_type(0).unwrap();
+        device.update_voltages(&[1.0, 4.0]);
+        assert_eq!(device.try_evaluate().unwrap(), vec![0.0]);
+        device.advance_state();
+        device.try_set_analysis_type(2).unwrap();
+        device.set_timestep(0.5);
+        device.update_voltages(&[3.0, 2.0]);
+        assert_eq!(
+            device.try_evaluate().unwrap(),
+            vec![current],
+            "{expression}"
+        );
+        let (matrix, _) = collect_stamps(&mut device, &[3.0, 2.0]);
+        assert_eq!(matrix[&(0, 0)], driven_derivative, "{expression}");
+        assert_eq!(
+            matrix.get(&(0, 1)).copied().unwrap_or(0.0),
+            control_derivative,
+            "{expression}"
+        );
+    }
+}
+
 #[test]
 fn analysis_continuation_retargets_only_matching_devices_without_initialization() {
     let fixture = compile(
@@ -96,6 +335,14 @@ fn custom_flow_access_reads_the_branch_unknown() {
         ("TestQ(b) * TestU(b)", 14.0),
         ("ddx(TestQ(b)*TestQ(b), TestQ(b))", 14.0),
         ("ddx(TestQ(b)*TestQ(b), TestQ(n,p))", -14.0),
+        (
+            "ddx(ddx(TestQ(b)*TestQ(b)*TestU(b)*TestU(b),TestQ(b)),TestU(b))",
+            56.0,
+        ),
+        (
+            "ddx(ddx(TestQ(b)*TestQ(b)*TestU(b)*TestU(b),TestU(n,p)),TestQ(b))",
+            -56.0,
+        ),
     ] {
         let source = format!(
             r#"

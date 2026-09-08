@@ -189,11 +189,9 @@ impl ShootingNewtonSolver {
         self.iteration
     }
 
-    /// Check convergence based on residual
+    /// Require every shooting coordinate to meet its relative or absolute
+    /// tolerance. A voltage magnitude must not scale a winding-current error.
     pub fn check_convergence(&mut self, state: &ShootingState) -> bool {
-        let rel_norm = state.relative_residual_norm();
-        let abs_norm = state.residual_norm();
-
         self.converged = self.tolerance.is_finite()
             && self.tolerance > 0.0
             && self.abstol.is_finite()
@@ -207,7 +205,17 @@ impl ShootingNewtonSolver {
                 .chain(&state.x_t)
                 .chain(&state.residual)
                 .all(|x| x.is_finite())
-            && (rel_norm < self.tolerance || abs_norm < self.abstol);
+            && state
+                .x0
+                .iter()
+                .zip(&state.residual)
+                .all(|(&initial, &residual)| {
+                    // Normalize before division, as in the diagnostic L2 ratio,
+                    // preserving the single-coordinate contract at extreme scales.
+                    let scale = initial.abs().max(residual.abs());
+                    residual.abs() < self.abstol
+                        || (residual / scale).abs() / (initial / scale).abs() < self.tolerance
+                });
         self.iteration += 1;
 
         self.converged
@@ -407,6 +415,57 @@ mod tests {
         state.x_t[0] = 0.0;
         state.compute_residual();
         assert_eq!(state.relative_residual_norm(), 0.0);
+    }
+
+    #[test]
+    fn shooting_coordinates_cannot_mask_each_others_closure_errors() {
+        for current_scale in [0.001, 1.0, 1000.0] {
+            let mut state = ShootingState::new(vec![0.1, 3e-5 / current_scale], 1.0);
+            state.residual = vec![0.0, 5e-9 / current_scale];
+            state.x_t = state
+                .x0
+                .iter()
+                .zip(&state.residual)
+                .map(|(a, b)| a + b)
+                .collect();
+            assert!(!ShootingNewtonSolver::default().check_convergence(&state));
+            state.residual[1] = 1e-11 / current_scale;
+            state.x_t[1] = state.x0[1] + state.residual[1];
+            assert!(ShootingNewtonSolver::default().check_convergence(&state));
+        }
+        // Different coordinates may legitimately use different criteria.
+        let mut state = ShootingState::new(vec![1e6, 0.0], 1.0);
+        state.x_t = vec![1e6 + 0.5, 0.5e-12];
+        state.compute_residual();
+        assert!(ShootingNewtonSolver::default().check_convergence(&state));
+    }
+
+    #[test]
+    fn component_tolerances_preserve_single_state_convergence() {
+        for initial in [-1e300, -1.0, -1e-300, 0.0, 1e-300, 1.0, 1e300] {
+            for residual in [
+                0.0,
+                Value::from_bits(1),
+                1e-300,
+                5e-13,
+                1e-12,
+                1e-6,
+                1.0,
+                1e298,
+                1e308,
+            ] {
+                let mut state = ShootingState::new(vec![initial], 1.0);
+                state.residual[0] = residual;
+                state.x_t[0] = initial + residual;
+                let expected =
+                    state.relative_residual_norm() < 1e-6 || state.residual_norm() < 1e-12;
+                assert_eq!(
+                    ShootingNewtonSolver::default().check_convergence(&state),
+                    expected,
+                    "initial={initial:e}, residual={residual:e}"
+                );
+            }
+        }
     }
 
     #[test]

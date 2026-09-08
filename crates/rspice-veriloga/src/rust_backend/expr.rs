@@ -317,7 +317,7 @@ impl ExprEmitter<'_> {
             HirExprKind::Binary { op, left, right } if op.as_str() == "Mul" => Ok(self
                 .expression_value_is_known_zero(*left, &mut HashSet::new())?
                 || self.expression_value_is_known_zero(*right, &mut HashSet::new())?),
-            HirExprKind::Binary { op, left, .. } if matches!(op.as_str(), "Div" | "Mod") => {
+            HirExprKind::Binary { op, left, .. } if op.as_str() == "Div" => {
                 self.expression_value_is_known_zero(*left, &mut HashSet::new())
             }
             HirExprKind::Conditional {
@@ -1397,7 +1397,8 @@ fn binary_value(op: &str, left: &str, right: &str) -> Result<String, RustBackend
         "Sub" => Ok(sub_expr(left, right)),
         "Mul" => Ok(mul_expr(left, right)),
         "Div" => Ok(div_expr(left, right)),
-        "Mod" => Ok(mod_expr(left, right)),
+        // Even a zero numerator must evaluate its divisor: 0 % 0 is invalid.
+        "Mod" => Ok(format!("({left} % {right})")),
         "Pow" => Ok(power_value_expr(left, right)),
         _ => Err(RustBackendError::unsupported(
             "<generated>",
@@ -1450,14 +1451,6 @@ fn div_expr(left: &str, right: &str) -> String {
         left.to_string()
     } else {
         format!("({left} / {right})")
-    }
-}
-
-fn mod_expr(left: &str, right: &str) -> String {
-    if is_zero_derivative(left) {
-        "0.0".to_string()
-    } else {
-        format!("({left} % {right})")
     }
 }
 

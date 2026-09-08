@@ -8,6 +8,78 @@ use std::sync::atomic::{AtomicU64, Ordering};
 const F0: f64 = 1.0e6;
 
 #[test]
+fn vbic_periodic_charge_and_continuation_match_analytic_rc() {
+    use rspice_core::engine::{TransientCheckpoint, TransientCheckpointEncoding};
+    for polarity in ["NPN", "PNP"] {
+        let netlist = Netlist::parse(&format!("VBIC periodic charge\nV1 in 0 SIN(0 0.1 1meg)\nR1 in out 1k\nQ1 0 out 0 vm\n.model vm {polarity}(LEVEL=4 IS=1e-40 IBEI=1e-40 IBCI=1e-40 CJE=100p CJC=20p MJE=0 MJC=0 TF=0 TR=0 CBEO=30p CBCO=9p RCX=0 RCI=0 RBX=0 RBI=0 RE=0 RBP=0 RS=0 CJEP=0 CJCP=0 CCSO=0 QCO=0 GAMM=0 ISP=0)\n.end\n")).unwrap();
+        let engine = Engine::default();
+        let (analysis, state) = engine
+            .run_pss_with_continuation_state(
+                &netlist,
+                PssConfig::new(F0)
+                    .with_points_per_period(64)
+                    .with_tstab_periods(0),
+            )
+            .unwrap_or_else(|error| panic!("{polarity}: {error}"));
+        let node = |names: &[String]| {
+            names
+                .iter()
+                .position(|name| name.eq_ignore_ascii_case("out"))
+                .unwrap()
+        };
+        let exact = |time: f64| {
+            let phase = std::f64::consts::TAU * F0 * time;
+            let wc = std::f64::consts::TAU * F0 * 1e3 * 159e-12;
+            0.1 * (phase.sin() - wc * phase.cos()) / (1.0 + wc * wc)
+        };
+        for (&time, &value) in analysis
+            .result
+            .time
+            .iter()
+            .zip(&analysis.result.waveforms[node(&analysis.result.node_names)].values)
+        {
+            assert!(
+                (value - exact(time)).abs() < 5e-5,
+                "{polarity} periodic t={time:e}: {value} != {}",
+                exact(time)
+            );
+        }
+        assert_eq!(analysis.monodromy.len(), 1);
+        assert!((analysis.monodromy[0][0] - (-1e-6_f64 / (1e3 * 159e-12)).exp()).abs() < 2e-5);
+        let (continued, checkpoint) = engine
+            .run_tran_from_pss_state(&netlist, &state, 1e-6, 2e-9)
+            .unwrap();
+        for (&time, &value) in continued
+            .time
+            .iter()
+            .zip(&continued.voltages[node(&continued.node_names)])
+        {
+            assert!(
+                (value - exact(time)).abs() < 5e-5,
+                "{polarity} continuation t={time:e}: {value} != {}",
+                exact(time)
+            );
+        }
+        let (direct, _) = engine
+            .run_tran_resume(&netlist, &checkpoint, 1.2e-6, 2e-9)
+            .unwrap();
+        for encoding in [
+            TransientCheckpointEncoding::Unpacked,
+            TransientCheckpointEncoding::Packed,
+        ] {
+            let restored =
+                TransientCheckpoint::from_bytes(&checkpoint.to_bytes(encoding).unwrap()).unwrap();
+            let (resumed, _) = engine
+                .run_tran_resume(&netlist, &restored, 1.2e-6, 2e-9)
+                .unwrap();
+            assert_eq!(direct.time, resumed.time);
+            assert_eq!(direct.voltages, resumed.voltages);
+            assert_eq!(direct.branch_currents, resumed.branch_currents);
+        }
+    }
+}
+
+#[test]
 fn refined_pss_preserves_default_pulse_edges_through_checkpoint_resume() {
     use rspice_core::engine::{TransientCheckpoint, TransientCheckpointEncoding};
     let netlist = Netlist::parse("refined source defaults\nVp pulse 0 PULSE(0 1 0 0 0 0.4u 1u)\nRp pulse 0 1k\nB1 in 0 V=sin(2*pi*64meg*time)^4\nR1 in out 1k\nC1 out 0 159.154943091895p\n.end\n").unwrap();
