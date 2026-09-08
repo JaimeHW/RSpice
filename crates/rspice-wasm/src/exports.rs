@@ -236,6 +236,35 @@ mod wasm_tests {
     }
 
     #[wasm_bindgen_test]
+    fn discontinuous_rlc_orbit_preserves_winding_flux_in_wasm() {
+        let netlist = rspice_core::Netlist::parse("WASM discontinuous RLC orbit\nB1 in 0 V=if(sin(2*pi*1meg*time+0.1)>0,1,0)\nR1 in out 1k\nC1 out 0 159p\nL1 out load 10u\nR2 load 0 2k\n.options RELTOL=1e-6 VNTOL=1e-8\n.end\n").unwrap();
+        let analysis = rspice_core::Engine::default()
+            .run_pss_with_abort(
+                &netlist,
+                rspice_core::analysis::PssConfig::new(1e6)
+                    .with_tstab_periods(0)
+                    .with_points_per_period(256)
+                    .with_tolerance(1e-11),
+                &rspice_core::abort_signal::NoAbort,
+            )
+            .unwrap();
+        let result = &analysis.result;
+        // Initial values from the exact two-state exp(A*t) periodic solution;
+        // the native and Python regressions compare the complete waveform.
+        for (name, initial) in [("out", 0.09862296652380287), ("load", 0.07147347879650891)] {
+            let node = result
+                .node_names
+                .iter()
+                .position(|n| n.eq_ignore_ascii_case(name))
+                .unwrap();
+            let waveform = &result.waveforms[node];
+            assert!((waveform.values[0] - initial).abs() < 1e-5);
+            assert!((waveform.values.last().unwrap() - initial).abs() < 1e-5);
+            assert!((waveform.dc(&result.time, result.period) - 1.0 / 3.0).abs() < 1e-5);
+        }
+    }
+
+    #[wasm_bindgen_test]
     fn small_signal_shooting_closes_the_period_in_wasm() {
         let netlist = rspice_core::Netlist::parse(
             "WASM small-signal shooting\nV1 in 0 SIN(0 1u 1meg)\nR1 in out 1k\nC1 out 0 159.154943091895p\n.end\n",

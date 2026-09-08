@@ -359,6 +359,10 @@ impl PssCurrentBasis {
         Ok(())
     }
 
+    pub(super) fn winding_index(&self, branch: usize) -> usize {
+        self.winding_by_branch[branch]
+    }
+
     /// Remove q(t) from each physical I = P*x + q(t) sample before flux
     /// multiplication. Subtracting separately differentiated L*I and q loses
     /// the small ripple voltage when the prescribed current has a large bias.

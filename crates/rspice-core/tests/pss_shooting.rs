@@ -15,6 +15,90 @@ const R: f64 = 1.0e3;
 const C: f64 = 159.154943091895e-12; // RC corner ~ 1 MHz (w*RC = 1)
 
 #[test]
+fn discontinuous_drive_preserves_the_complete_rlc_orbit() {
+    // Independent two-state solution of C*v'=(u-v)/R1-i and L*i'=v-R2*i.
+    // Each half-cycle has constant forcing, so its exact state transition is
+    // exp(A*t). Solve periodic closure at the rising edge before phase shift.
+    let capacitance = 159e-12;
+    let inductance = 10e-6;
+    let load = 2e3;
+    let a: f64 = -1.0 / (R * capacitance);
+    let b: f64 = -1.0 / capacitance;
+    let c: f64 = 1.0 / inductance;
+    let d: f64 = -load / inductance;
+    let middle = (a + d) / 2.0;
+    let radius = (((a - d) / 2.0).powi(2) + b * c).sqrt();
+    let slow = middle + radius;
+    let fast = middle - radius;
+    let transition = |time: f64| {
+        let es = (slow * time).exp();
+        let ef = (fast * time).exp();
+        let divided = (es - ef) / (slow - fast);
+        [
+            [ef + (a - fast) * divided, b * divided],
+            [c * divided, ef + (d - fast) * divided],
+        ]
+    };
+    let multiply = |matrix: [[f64; 2]; 2], state: [f64; 2]| {
+        matrix.map(|row| row[0] * state[0] + row[1] * state[1])
+    };
+    let half_period = 0.5 / F0;
+    let e = transition(half_period);
+    let high = [load / (R + load), 1.0 / (R + load)];
+    let rhs = multiply(e, high);
+    let determinant = (1.0 + e[0][0]) * (1.0 + e[1][1]) - e[0][1] * e[1][0];
+    let rising = [
+        ((1.0 + e[1][1]) * rhs[0] - e[0][1] * rhs[1]) / determinant,
+        ((1.0 + e[0][0]) * rhs[1] - e[1][0] * rhs[0]) / determinant,
+    ];
+    let exact = |time: f64| {
+        let phase_time = (time + 0.1 / (std::f64::consts::TAU * F0)).rem_euclid(1.0 / F0);
+        if phase_time < half_period {
+            let transient = multiply(
+                transition(phase_time),
+                [rising[0] - high[0], rising[1] - high[1]],
+            );
+            [high[0] + transient[0], high[1] + transient[1]]
+        } else {
+            multiply(
+                transition(phase_time - half_period),
+                [high[0] - rising[0], high[1] - rising[1]],
+            )
+        }
+    };
+    let netlist = Netlist::parse("discontinuous RLC orbit\nB1 in 0 V=if(sin(2*pi*1meg*time+0.1)>0,1,0)\nR1 in out 1k\nC1 out 0 159p\nL1 out load 10u\nR2 load 0 2k\n.options RELTOL=1e-6 VNTOL=1e-8\n.end\n").unwrap();
+    let analysis = Engine::default()
+        .run_pss(
+            &netlist,
+            PssConfig::new(F0)
+                .with_points_per_period(256)
+                .with_tolerance(1e-11)
+                .with_tstab_periods(0),
+        )
+        .expect("source edges must preserve the winding correction below one current ULP");
+    let result = &analysis.result;
+    for (name, coordinate, scale, tolerance) in [("out", 0, 1.0, 1e-5), ("load", 1, load, 1e-5)] {
+        let node = result
+            .node_names
+            .iter()
+            .position(|n| n.eq_ignore_ascii_case(name))
+            .unwrap();
+        let waveform = &result.waveforms[node];
+        let mut max_error: f64 = 0.0;
+        for (&time, &actual) in result.time.iter().zip(&waveform.values) {
+            let expected = exact(time)[coordinate] * scale;
+            max_error = max_error.max((actual - expected).abs());
+        }
+        assert!(
+            max_error < tolerance,
+            "{name}: {max_error:e}, {} samples",
+            result.time.len()
+        );
+        assert!((waveform.dc(&result.time, result.period) - 1.0 / 3.0).abs() < tolerance);
+    }
+}
+
+#[test]
 fn source_intervals_reveal_pulses_between_both_initial_pss_grids() {
     let knots = [
         (0.0, 0.0),

@@ -111,7 +111,7 @@ impl PssAcceptedStepHistory {
 const PSS_FD_STEP: Value = 1e-8;
 const PSS_KRYLOV_STATE_THRESHOLD: usize = 12;
 const PSS_KRYLOV_REL_TOL: Value = 1e-9;
-const PSS_OPERATING_POINT_IDENTITY_VERSION: u32 = 31;
+const PSS_OPERATING_POINT_IDENTITY_VERSION: u32 = 32;
 
 fn pss_identity_field(hasher: &mut blake3::Hasher, name: &str, bytes: &[u8]) {
     hasher.update(&(name.len() as u64).to_le_bytes());
@@ -3607,10 +3607,16 @@ impl Engine {
                     step.dt,
                     step.coeff,
                 );
-                circuit.stabilize_inductor_correction_rhs(&mut proposal, &new_solution, step)?;
+                circuit.stabilize_inductor_correction_rhs(
+                    &mut proposal,
+                    &new_solution,
+                    step,
+                    false,
+                )?;
                 let solved = matrix.solve_into(&proposal, &mut rhs);
                 if solved.is_ok() {
                     circuit.capture_capacitor_trial_currents(&new_solution, &rhs, step);
+                    circuit.capture_inductor_trial_offsets(&new_solution, &rhs);
                     for (value, &previous) in rhs.iter_mut().zip(&new_solution) {
                         *value += previous;
                     }
@@ -3686,6 +3692,7 @@ impl Engine {
                                     &mut proposal,
                                     &new_solution,
                                     step,
+                                    true,
                                 )?;
                                 if !self.pss_inductor_residual_convergence_met(
                                     circuit,
@@ -4385,8 +4392,8 @@ mod tests {
     use crate::SimulationConfig;
 
     #[test]
-    fn state_only_traversal_preserves_recorded_physics_and_failures() {
-        let netlist = Netlist::parse("state-only traversal\nV1 in 0 SIN(0.2 0.1 1meg)\nR1 in out 1k\nC1 out 0 159p\nD1 out 0 dm\nL1 out load 10u\nR2 load 0 2k\n.model dm D(IS=1e-14 CJO=10p TT=1n)\n.end\n").unwrap();
+    fn state_only_traversal_preserves_recorded_physics_at_adjacent_clocks() {
+        let deck = "state-only traversal\nV1 in 0 SIN(0.2 0.1 1meg)\nR1 in out 1k\nC1 out 0 159p\nD1 out 0 dm\nL1 out load 10u\nR2 load 0 2k\n.model dm D(IS=1e-14 CJO=10p TT=1n)\n";
         let engine = Engine::default();
         let config = PssConfig::new(1e6).with_points_per_period(64);
         let bits = |values: &[Value]| {
@@ -4400,7 +4407,13 @@ mod tests {
             IntegrationMethod::Trapezoidal,
             IntegrationMethod::Gear2,
         ] {
-            for floor in [false, true] {
+            for (floor, mutual) in [(false, false), (true, false), (true, true)] {
+                let extra = if mutual {
+                    "L2 secondary 0 20u\nR3 secondary 0 3k\nK1 L1 L2 0.6\n"
+                } else {
+                    ""
+                };
+                let netlist = Netlist::parse(&format!("{deck}{extra}.end\n")).unwrap();
                 let mut base = PssCircuit::new(engine.build_circuit(&netlist).unwrap());
                 let initial = vec![0.0; base.state_dimension()];
                 base.set_state(&initial).unwrap();
@@ -4436,21 +4449,11 @@ mod tests {
                         Some(&mut trace),
                         &NoAbort,
                     );
-                    let outcome = match waveform {
-                        Ok(waveform) => {
-                            assert_eq!(waveform.is_some(), retain_waveform);
-                            Ok(())
-                        }
-                        // The coupled dynamic fixture can exhaust Newton at
-                        // an adjacent-clock interval. Omitting observations
-                        // must preserve that failure and its accepted prefix.
-                        Err(SimulationError::ConvergenceFailed(iterations)) if floor => {
-                            Err(iterations)
-                        }
-                        Err(error) => {
-                            panic!("{method:?}, floor={floor}, recorded={retain_waveform}: {error}")
-                        }
-                    };
+                    let waveform = waveform.unwrap_or_else(|error| {
+                        panic!("{method:?}, floor={floor}, mutual={mutual}, recorded={retain_waveform}: {error}")
+                    });
+                    assert_eq!(waveform.is_some(), retain_waveform);
+                    assert_eq!(trace.times.last().copied(), Some(config.period()));
                     let samples = trace
                         .states
                         .iter()
@@ -4469,7 +4472,6 @@ mod tests {
                         bits(&circuit.inductors.v_prev),
                     ];
                     let actual = (
-                        outcome,
                         bits(&trace.times),
                         samples,
                         history,
@@ -4968,7 +4970,18 @@ mod tests {
             .correction_rhs_into(&rhs, &solution, &mut correction)
             .unwrap();
         circuit
-            .stabilize_inductor_correction_rhs(&mut correction, &solution, step)
+            .stabilize_inductor_correction_rhs(&mut correction, &solution, step, false)
+            .unwrap();
+        assert!(!engine.pss_inductor_residual_convergence_met(
+            &circuit,
+            &solution,
+            &correction,
+            &coeff
+        ));
+        rhs.fill(0.0);
+        circuit.capture_inductor_trial_offsets(&solution, &rhs);
+        circuit
+            .stabilize_inductor_correction_rhs(&mut correction, &solution, step, true)
             .unwrap();
         assert!(!engine.pss_inductor_residual_convergence_met(
             &circuit,

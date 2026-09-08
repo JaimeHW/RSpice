@@ -179,6 +179,10 @@ pub(in crate::engine) struct PssCircuit {
     /// Trial currents computed before a small Newton voltage correction is
     /// rounded into the absolute solution. Read only on accepted steps.
     pub(super) capacitor_trial_currents: Vec<Value>,
+    /// Free winding-current offsets from the previous accepted sample,
+    /// captured before the Newton correction is rounded into absolute current.
+    /// Ephemeral: overwritten before every physical trial residual check.
+    inductor_trial_offsets: Vec<[Value; 2]>,
     /// Numerical mesh only. Authored source defaults remain in CircuitData's
     /// SourceTimeBasis and must not change when this grid is refined.
     pub(in crate::engine) integration_steps: usize,
@@ -211,6 +215,7 @@ impl std::ops::DerefMut for PssCircuit {
 impl PssCircuit {
     pub(in crate::engine) fn new(circuit: CircuitData) -> Self {
         let capacitor_trial_currents = vec![0.0; circuit.capacitors.len()];
+        let inductor_trial_offsets = vec![[0.0; 2]; circuit.inductors.len()];
         let basis = PssStateBasis::new(&circuit);
         let solution_scratch = vec![0.0; circuit.matrix_size() + 1];
         let current_balance = vec![0.0; basis.currents.workspace_size()];
@@ -231,6 +236,7 @@ impl PssCircuit {
             circuit,
             diode_history,
             capacitor_trial_currents,
+            inductor_trial_offsets,
             integration_steps: 0,
             integration_mesh: None,
             probe_precision_floor: false,
@@ -506,6 +512,32 @@ impl PssCircuit {
         }
     }
 
+    pub(super) fn capture_inductor_trial_offsets(
+        &mut self,
+        iterate: &[Value],
+        correction: &[Value],
+    ) {
+        for (index, &branch) in self.circuit.inductors.branch_indices.iter().enumerate() {
+            let row = self.circuit.num_nodes() + branch - 1;
+            let samples = [
+                iterate[row],
+                self.circuit.inductors.i_prev[index],
+                self.circuit.inductors.i_prev_prev[index],
+            ];
+            let [present, previous, older] = if self.current_source_rates.is_empty() {
+                samples
+            } else {
+                self.basis.currents.free_current_samples(
+                    branch,
+                    samples,
+                    &self.current_source_offsets,
+                )
+            };
+            self.inductor_trial_offsets[index] =
+                [(present - previous) + correction[row], older - previous];
+        }
+    }
+
     /// Evaluate winding equations from flux differences, sharing TRAN's
     /// cancellation-resistant residual and the affine forcing stamped by PSS.
     /// The caller has just stamped this same trial, so the forcing workspace
@@ -515,25 +547,39 @@ impl PssCircuit {
         rhs: &mut [Value],
         iterate: &[Value],
         step: PssCompanionStep<'_>,
+        trial: bool,
     ) -> Result<(), SimulationError> {
-        if self.current_source_rates.is_empty() {
-            self.circuit
-                .stabilize_inductor_transient_correction_rhs(rhs, iterate, step.dt, step.coeff);
-        } else {
-            self.circuit
-                .stabilize_inductor_transient_correction_rhs_with_current_map(
-                    rhs,
-                    iterate,
-                    step.dt,
-                    step.coeff,
-                    |branch, samples| {
-                        self.basis.currents.free_current_samples(
-                            branch - self.circuit.num_nodes(),
-                            samples,
-                            &self.current_source_offsets,
-                        )
-                    },
-                );
+        self.circuit
+            .stabilize_inductor_transient_correction_rhs_with_current_map(
+                rhs,
+                iterate,
+                step.dt,
+                step.coeff,
+                |branch, samples| {
+                    let branch = branch - self.circuit.num_nodes();
+                    if trial {
+                        let index = self.basis.currents.winding_index(branch);
+                        let [present, older] = self.inductor_trial_offsets[index];
+                        [present, 0.0, older]
+                    } else {
+                        let [present, previous, older] = if self.current_source_rates.is_empty() {
+                            samples
+                        } else {
+                            self.basis.currents.free_current_samples(
+                                branch,
+                                samples,
+                                &self.current_source_offsets,
+                            )
+                        };
+                        // Use the same origin in the Newton residual and
+                        // its trial certificate. Multiplying absolute
+                        // currents by L before differencing would restore
+                        // the flux-rounding error on every iteration.
+                        [present - previous, 0.0, older - previous]
+                    }
+                },
+            );
+        if !self.current_source_rates.is_empty() {
             self.basis.currents.add_flux_rhs(
                 &self.circuit,
                 |index| self.current_source_rates[index],
