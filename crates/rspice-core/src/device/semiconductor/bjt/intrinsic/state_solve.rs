@@ -296,6 +296,7 @@ impl Bjt {
             ibcp: self.ibcp_branch(vbp, vsi),
             iccp: self.iccp_branch(vbx, vbi, vci, vbp, vsi),
             irs: self.irs_branch(vs, vsi),
+            igcx: self.igcx_branch(vc, vcx, vbx),
         }
     }
 
@@ -396,6 +397,7 @@ impl Bjt {
         Self::apply_thermal_derivative(&mut evaluated.ibcp, plus.ibcp, minus.ibcp, denom);
         Self::apply_thermal_derivative(&mut evaluated.iccp, plus.iccp, minus.iccp, denom);
         Self::apply_thermal_derivative(&mut evaluated.irs, plus.irs, minus.irs, denom);
+        Self::apply_thermal_derivative(&mut evaluated.igcx, plus.igcx, minus.igcx, denom);
         evaluated
     }
 
@@ -781,7 +783,10 @@ impl Bjt {
 
         if has_rcx {
             let row = Self::sub_branches(
-                Self::add_branches(eval.ircx, eval.irbp),
+                Self::add_branches(
+                    Self::add_branches(eval.ircx, self.parasitic_base_collector_branch(&eval)),
+                    eval.igcx,
+                ),
                 if has_rci {
                     eval.irci
                 } else {
@@ -817,7 +822,7 @@ impl Bjt {
                     ),
                     eval.ibep,
                 ),
-                eval.iccp,
+                Self::add_branches(eval.iccp, eval.igcx),
             );
             residual[IDX_VBX] = row.current;
             jacobian[IDX_VBX] = row.d_internal;
@@ -954,7 +959,10 @@ impl Bjt {
 
         if has_rcx {
             let row = Self::sub_branches(
-                Self::add_branches(eval.ircx, eval.irbp),
+                Self::add_branches(
+                    Self::add_branches(eval.ircx, self.parasitic_base_collector_branch(&eval)),
+                    eval.igcx,
+                ),
                 if has_rci {
                     eval.irci
                 } else {
@@ -999,7 +1007,7 @@ impl Bjt {
                     ),
                     eval.ibep,
                 ),
-                eval.iccp,
+                Self::add_branches(eval.iccp, eval.igcx),
             );
             assign_row(
                 IDX_VBX,

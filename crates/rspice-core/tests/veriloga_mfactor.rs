@@ -115,3 +115,29 @@ endmodule
     );
     assert!((v - 0.5).abs() < 1e-12, "model-owned m: got {v}");
 }
+
+#[test]
+fn overrides_are_converted_before_dependent_defaults_and_instance_validation() {
+    let model = write_model(
+        "required_rounded_resistor.va",
+        r#"
+module required_rounded_resistor(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real r = 0.0 from (0:inf);
+    parameter integer sections = 1 from [1:inf);
+    parameter real effective_r = r * sections;
+    analog I(p, n) <+ V(p, n) / effective_r;
+endmodule
+"#,
+    );
+    let voltage = node_voltage(
+        &format!(
+            "* overrides before validation\nv1 in 0 dc 1\nR1 in out 1k\n\
+             X1 out 0 required_rounded_resistor r=1k sections=1.5 m=2\n\
+             .va \"{model}\" required_rounded_resistor\n.end\n"
+        ),
+        "out",
+    );
+    assert!((voltage - 0.5).abs() < 1e-12, "got {voltage}");
+}

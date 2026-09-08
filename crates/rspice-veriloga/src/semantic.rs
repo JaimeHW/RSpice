@@ -786,7 +786,7 @@ impl SemanticAnalyzer {
             .enumerate()
         {
             let is_parameter_array = !param.dimensions.is_empty();
-            let materialized_array_default = if is_parameter_array {
+            let mut materialized_array_default = if is_parameter_array {
                 param
                     .default
                     .as_ref()
@@ -811,6 +811,11 @@ impl SemanticAnalyzer {
                     &module.parameters,
                     &parameter_indices,
                 );
+                if param.param_type == ParamType::Integer {
+                    materialized_array_default = materialized_array_default
+                        .map(|expression| self.coerce_integer_parameter_array_default(expression))
+                        .transpose()?;
+                }
             }
             if scope == ParameterScope::Model || also_model {
                 let default_reads_instance = param.default.as_ref().is_some_and(|expression| {
@@ -879,7 +884,9 @@ impl SemanticAnalyzer {
                 .default
                 .as_ref()
                 .and_then(|expression| self.eval_const_value(expression));
-            let declared_default = declared_default_value.map(ConstantValue::as_f64);
+            let declared_default = declared_default_value
+                .and_then(|value| Self::constant_for_declared_type(value, param.param_type))
+                .map(ConstantValue::as_f64);
 
             // A default that references other parameters must stay
             // symbolic: instance overrides of those parameters change it,
@@ -895,10 +902,9 @@ impl SemanticAnalyzer {
             };
 
             if param.param_type == ParamType::Integer
-                && let Some(default) = declared_default
-                && (default.fract() != 0.0
-                    || default < f64::from(i32::MIN)
-                    || default > f64::from(i32::MAX))
+                && !default_depends_on_parameters
+                && let Some(default) = declared_default_value.map(ConstantValue::as_f64)
+                && real_to_integer(default).is_err()
             {
                 self.record_error_at(
                     SemanticErrorKind::TypeMismatch {
@@ -968,21 +974,8 @@ impl SemanticAnalyzer {
                     .map(|r| self.parse_range(r, &param_names))
             };
 
-            // Validate default against range
-            if !default_depends_on_parameters
-                && let (Some(default_val), Some(range_constraint)) = (declared_default, &range)
-                && !range_constraint.contains(default_val)
-            {
-                self.record_error_at(
-                    SemanticErrorKind::ParameterOutOfRange {
-                        name: param.name.clone(),
-                        value: default_val,
-                        range: format!("{}", range_constraint),
-                    },
-                    param.span,
-                );
-            }
-
+            // Declared defaults can be placeholders outside the allowed range.
+            // Validate the final instance after its overrides are installed.
             if let Some(value) = declared_default_value
                 .and_then(|value| Self::constant_for_declared_type(value, param.param_type))
             {
@@ -1006,7 +999,18 @@ impl SemanticAnalyzer {
                     })
                     .collect(),
                 default,
-                default_expr: materialized_array_default.or_else(|| param.default.clone()),
+                default_expr: if is_parameter_array {
+                    materialized_array_default
+                } else {
+                    param
+                        .default
+                        .clone()
+                        .map(|expression| {
+                            self.coerce_assignment_expression(expression, value_type)
+                                .map(|(expression, _)| expression)
+                        })
+                        .transpose()?
+                },
                 range: range.clone(),
             });
 
@@ -6944,7 +6948,9 @@ impl SemanticAnalyzer {
     ) -> Option<ConstantValue> {
         match declared_type {
             ParamType::Real => Some(ConstantValue::Real(value.as_f64())),
-            ParamType::Integer => Self::exact_const_i64(value.as_f64()).map(ConstantValue::Integer),
+            ParamType::Integer => real_to_integer(value.as_f64())
+                .ok()
+                .map(|value| ConstantValue::Integer(i64::from(value))),
             ParamType::String => None,
         }
     }
@@ -7932,9 +7938,7 @@ impl SemanticAnalyzer {
             );
             return false;
         }
-        if parameter.param_type == ParamType::Integer
-            && (value.fract() != 0.0 || value < f64::from(i32::MIN) || value > f64::from(i32::MAX))
-        {
+        if parameter.param_type == ParamType::Integer && real_to_integer(value).is_err() {
             self.record_error_at(
                 SemanticErrorKind::TypeMismatch {
                     expected: "32-bit integer array element".into(),
@@ -7946,6 +7950,25 @@ impl SemanticAnalyzer {
             return false;
         }
         true
+    }
+
+    fn coerce_integer_parameter_array_default(
+        &self,
+        expression: Expression,
+    ) -> CompileResult<Expression> {
+        match expression {
+            Expression::ArrayLiteral(mut array) => {
+                for element in &mut array.elements {
+                    if let ArrayLiteralElement::Value(value) = element {
+                        *value = self.coerce_integer_parameter_array_default(value.clone())?;
+                    }
+                }
+                Ok(Expression::ArrayLiteral(array))
+            }
+            value => self
+                .coerce_assignment_expression(value, ValueType::Integer)
+                .map(|(value, _)| value),
+        }
     }
 
     fn validate_parameter_array_initializer_shape(

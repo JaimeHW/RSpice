@@ -48,6 +48,71 @@ impl Bjt {
         branch
     }
 
+    /// Xyce VBIC 1.3 `avalm` and its voltage derivative, including the
+    /// finite lower bound on the effective reverse bias.
+    pub(in crate::device::semiconductor::bjt) fn vbic13_avalanche_factor(
+        &self,
+        voltage: Value,
+        potential: Value,
+        grading: Value,
+        av1: Value,
+        av2: Value,
+    ) -> (Value, Value) {
+        if av1 <= 0.0 {
+            return (0.0, 0.0);
+        }
+        let minimum = (0.02 * (av2 + 1.0)).powf(1.0 / (1.01 - grading));
+        let delta = potential - voltage - minimum;
+        let root = delta.hypot(0.1);
+        let (bias, slope) = if delta >= 0.0 {
+            (minimum + 0.5 * (root + delta), -0.5 * (1.0 + delta / root))
+        } else {
+            // Rationalize the subtraction in the forward-biased tail.
+            (
+                minimum + 0.005 / (root - delta),
+                -0.005 / (root * (root - delta)),
+            )
+        };
+        let power = grading - 1.0;
+        let argument = -av2 * bias.powf(power);
+        let argument_slope = -av2 * power * bias.powf(power - 1.0) * slope;
+        let (exponential, exponential_slope) = self.vbic_general_exp(argument);
+        (
+            av1 * bias * exponential,
+            av1 * (slope * exponential + bias * exponential_slope * argument_slope),
+        )
+    }
+
+    /// Extrinsic base-to-collector branch. This is separate from Ibc and
+    /// Ibep, and remains present as a GMIN parallel with AVCX1=0.
+    pub(in crate::device::semiconductor::bjt) fn igcx_branch(
+        &self,
+        vc: Value,
+        vcx: Value,
+        vbx: Value,
+    ) -> BranchLinearization {
+        if !self.vbic_13 {
+            return BranchLinearization::default();
+        }
+        let polarity = self.polarity();
+        let gmin = self.nonlinear_branch_gmin();
+        let (factor, slope) = self.vbic13_avalanche_factor(
+            polarity * (vbx - vcx),
+            0.0,
+            self.mcx,
+            self.avcx1,
+            self.avcx2,
+        );
+        let ircx = self.ircx_branch(vc, vcx);
+        // vbic_1p3.va uses physical Ircx here, then applies VBICtype to
+        // the completed Igcx branch, including for PNP instances.
+        let mut branch = Self::scale_branch(ircx, -polarity * factor);
+        branch.current += gmin * (vbx - vcx);
+        branch.d_internal[IDX_VBX] += gmin - ircx.current * slope;
+        branch.d_internal[IDX_VCX] -= gmin - ircx.current * slope;
+        branch
+    }
+
     pub(in crate::device::semiconductor::bjt) fn irbx_branch(
         &self,
         vb: Value,
@@ -440,8 +505,8 @@ impl Bjt {
         let vbci_eff = p * (vbi - vci);
         let vbcx_eff = p * (vbi - vcx);
 
-        let (exp_bci, dexp_bci_darg) = Self::limited_exp(vbci_eff / vt);
-        let (exp_bcx, dexp_bcx_darg) = Self::limited_exp(vbcx_eff / vt);
+        let (exp_bci, dexp_bci_darg) = self.vbic_general_exp(vbci_eff / vt);
+        let (exp_bcx, dexp_bcx_darg) = self.vbic_general_exp(vbcx_eff / vt);
         let d_exp_bci_dvbci_eff = dexp_bci_darg / vt;
         let d_exp_bcx_dvbcx_eff = dexp_bcx_darg / vt;
 
@@ -508,7 +573,11 @@ impl Bjt {
         // nonsingular when the Kull epi exponential crosses its saturation
         // knife edge (the very rows ngspice reports as singular on decks it
         // cannot solve), and gmin stepping ramps them with `CKTgmin`.
-        let gmin = self.nonlinear_branch_gmin();
+        let gmin = if self.vbic_13 {
+            0.0
+        } else {
+            self.nonlinear_branch_gmin()
+        };
         let d_irci_eff_dvrci_eff =
             d_iohm_dvrci_eff * inv_irci_scale + common * d_derf_dvrci_eff + gmin;
         let d_irci_eff_dvbci_eff =
@@ -539,6 +608,76 @@ impl Bjt {
 mod tests {
     use super::*;
     use std::collections::HashMap;
+
+    #[test]
+    fn vbic13_extrinsic_avalanche_jacobian_includes_its_collector_current_control() {
+        for level in [11.0, 12.0] {
+            for polarity in [1.0, -1.0] {
+                for resistance in [0.0, 4.0] {
+                    let params = HashMap::from([
+                        ("LEVEL".into(), level),
+                        ("RCX".into(), resistance),
+                        ("AVCX1".into(), 0.2),
+                        ("AVCX2".into(), 0.3),
+                        ("MCX".into(), 0.33),
+                        ("GMIN".into(), 1e-5),
+                    ]);
+                    let bjt = if polarity > 0.0 {
+                        Bjt::new_npn("q".into(), 1, 2, 0)
+                    } else {
+                        Bjt::new_pnp("q".into(), 1, 2, 0)
+                    }
+                    .with_params(&params)
+                    .with_instance_params(&[("M".into(), 3.0)]);
+                    assert!(
+                        bjt.rcx > 0.0,
+                        "active avalanche must retain its controlling resistor"
+                    );
+                    for bias in [-4.0, -0.7, 0.0, 0.5] {
+                        let vcx = polarity * 1.0;
+                        let vc = vcx + polarity * 0.01;
+                        let vbx = vcx + polarity * bias;
+                        let branch = bjt.igcx_branch(vc, vcx, vbx);
+                        let h = 1e-6;
+                        for (index, actual) in [
+                            (0, branch.d_external[EXT_C]),
+                            (1, branch.d_internal[IDX_VCX]),
+                            (2, branch.d_internal[IDX_VBX]),
+                        ] {
+                            let mut plus = [vc, vcx, vbx];
+                            let mut minus = plus;
+                            plus[index] += h;
+                            minus[index] -= h;
+                            let fd = (bjt.igcx_branch(plus[0], plus[1], plus[2]).current
+                                - bjt.igcx_branch(minus[0], minus[1], minus[2]).current)
+                                / (2.0 * h);
+                            assert!(
+                                (actual - fd).abs() < 2e-7 * actual.abs().max(1e-4),
+                                "level={level}, p={polarity}, R={resistance}, bias={bias}, column={index}: {actual} vs {fd}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn vbic13_extrinsic_leakage_remains_when_avalanche_is_off() {
+        for level in [4.0, 11.0, 12.0] {
+            let bjt = Bjt::new_npn("q".into(), 1, 2, 0)
+                .with_params(&HashMap::from([
+                    ("LEVEL".into(), level),
+                    ("GMIN".into(), 1e-4),
+                ]))
+                .with_instance_params(&[("M".into(), 3.0)]);
+            let branch = bjt.igcx_branch(1.2, 1.2, 0.5);
+            let conductance = if level >= 11.0 { 3e-4 } else { 0.0 };
+            assert!((branch.current - conductance * -0.7).abs() < 1e-18);
+            assert!((branch.d_internal[IDX_VBX] - conductance).abs() < 1e-18);
+            assert!((branch.d_internal[IDX_VCX] + conductance).abs() < 1e-18);
+        }
+    }
 
     #[test]
     fn legacy_gp_base_resistance_freezes_qb_jacobian_like_xyce() {

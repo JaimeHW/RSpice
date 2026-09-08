@@ -1,5 +1,20 @@
 #![cfg(feature = "veriloga-builtins-base")]
 
+#[test]
+fn selected_generated_models_construct_with_validated_defaults() {
+    use rspice_core::device::veriloga_builtins::builtins;
+
+    #[cfg(feature = "veriloga-builtins")]
+    assert_eq!(builtins::builtin_names().len(), 43);
+    for name in builtins::builtin_names() {
+        let nodes = (0..builtins::total_node_count(name).unwrap()).collect::<Vec<_>>();
+        let branches = (0..builtins::branch_count(name).unwrap()).collect::<Vec<_>>();
+        let instance = builtins::instantiate(name, &nodes, &branches, &[])
+            .unwrap_or_else(|error| panic!("{name} default construction failed: {error}"));
+        assert!(instance.is_some(), "selected model {name} must instantiate");
+    }
+}
+
 #[cfg(feature = "veriloga-model-diode-cmc")]
 use rspice_core::device::veriloga_builtins::builtins;
 

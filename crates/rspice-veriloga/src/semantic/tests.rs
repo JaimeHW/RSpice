@@ -907,14 +907,17 @@ fn named_branch_contribution_resolves_nodes() {
 }
 
 #[test]
-fn parameter_default_out_of_range_is_an_error() {
+fn parameter_default_out_of_range_is_preserved_for_instance_validation() {
     let result = analyze(&module_src(
         r#"
             parameter real r = -1.0 from (0:inf);
             analog I(p, n) <+ V(p, n) / r;
             "#,
     ));
-    assert!(result.is_err(), "out-of-range default must fail");
+    let analyzed = result.expect("declared defaults may be out-of-range placeholders");
+    let parameter = &analyzed.modules["dut"].parameters[0];
+    assert_eq!(parameter.default, Some(-1.0));
+    assert!(parameter.range.as_ref().unwrap().min_exclusive);
 }
 
 #[test]
@@ -1212,7 +1215,7 @@ fn parameter_array_bound_shifts_and_storage_limits_fail_closed() {
 fn integer_parameter_array_elements_obey_scalar_integer_contract() {
     for (declarations, expected) in [
         (
-            "parameter integer codes[0:0] = '{0.5};",
+            "parameter integer codes[0:0] = '{2147483647.5};",
             "expected 32-bit integer array element",
         ),
         (
@@ -1220,7 +1223,7 @@ fn integer_parameter_array_elements_obey_scalar_integer_contract() {
             "expected 32-bit integer array element",
         ),
         (
-            "parameter real half = 0.5; parameter integer codes[0:0] = '{half};",
+            "parameter real half = -2147483648.5; parameter integer codes[0:0] = '{half};",
             "expected 32-bit integer array element",
         ),
     ] {

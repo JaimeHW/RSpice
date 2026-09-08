@@ -21,7 +21,7 @@
 //!
 //! Production circuit-builder flows that enable native Verilog-A carry the
 //! canonical IR artifact and construct devices through
-//! `VerilogADevice::try_new_with_canonical_ir` (itself `native`-gated). The
+//! [`VerilogADevice::try_new_with_parameters_and_control`]. The
 //! direct [`VerilogADevice::try_new`](crate::device::VerilogADevice::try_new)
 //! constructor has no canonical artifact to consume, so under normal `native`
 //! builds it fails closed instead of compiling from bytecode. Bytecode-native
@@ -800,7 +800,7 @@ impl std::fmt::Display for ParameterValueError {
             Self::NonInteger { parameter, value } => {
                 write!(
                     f,
-                    "integer parameter '{parameter}' requires an exact integer, got {value}"
+                    "integer parameter '{parameter}' requires a value representable as a 32-bit signed integer, got {value}"
                 )
             }
             Self::OutOfRange {
@@ -2395,7 +2395,7 @@ impl VerilogADevice {
         nodes: &[usize],
     ) -> Result<Self, VmError> {
         let model: std::sync::Arc<CompiledModel> = model.into();
-        Self::try_new_inner(name, model, nodes, None, &crate::NoPipelineControl)
+        Self::try_new_inner(name, model, nodes, None, &[], &crate::NoPipelineControl)
     }
 
     /// Checked constructor that compiles stamp values from canonical MIR when
@@ -2427,7 +2427,20 @@ impl VerilogADevice {
         control: &dyn crate::PipelineControl,
     ) -> Result<Self, VmError> {
         let model: std::sync::Arc<CompiledModel> = model.into();
-        Self::try_new_inner(name, model, nodes, Some(artifact), control)
+        Self::try_new_inner(name, model, nodes, Some(artifact), &[], control)
+    }
+
+    /// Apply instance overrides before resolving dependent defaults and ranges.
+    /// Native and browser JIT construction requires the paired canonical artifact.
+    pub fn try_new_with_parameters_and_control(
+        name: impl Into<SmolStr>,
+        model: impl Into<std::sync::Arc<CompiledModel>>,
+        artifact: Option<&CanonicalIrArtifact>,
+        nodes: &[usize],
+        parameters: &[(&str, f64)],
+        control: &dyn crate::PipelineControl,
+    ) -> Result<Self, VmError> {
+        Self::try_new_inner(name, model.into(), nodes, artifact, parameters, control)
     }
 
     fn try_new_inner(
@@ -2435,6 +2448,7 @@ impl VerilogADevice {
         model: std::sync::Arc<CompiledModel>,
         nodes: &[usize],
         canonical_artifact: Option<&CanonicalIrArtifact>,
+        parameters: &[(&str, f64)],
         control: &dyn crate::PipelineControl,
     ) -> Result<Self, VmError> {
         if control.is_cancelled() {
@@ -2600,6 +2614,17 @@ impl VerilogADevice {
         };
         device.context.branch_current_values = vec![0.0; num_branch_unknowns];
         device.rebuild_matrix_indices();
+        for &(parameter, value) in parameters {
+            if !device
+                .try_set_parameter(parameter, value)
+                .map_err(|error| VmError::ParameterValue(error.to_string()))?
+            {
+                return Err(VmError::ParameterValue(format!(
+                    "unknown parameter '{parameter}' for model '{}'",
+                    device.model.name,
+                )));
+            }
+        }
         device.try_resolve_parameter_defaults()?;
         if control.is_cancelled() {
             return Err(VmError::CompilationCancelled);
@@ -3167,52 +3192,22 @@ impl VerilogADevice {
         name: &str,
         value: f64,
     ) -> Result<bool, ParameterValueError> {
-        // Verilog-A is case-sensitive but SPICE decks are not: prefer an
-        // exact match (parameter, then alias), then accept a
-        // case-insensitive one (industry netlists write PSP's TOXO as
-        // toxo). Aliases cannot collide with parameter names, so the
-        // ordering only arbitrates between case-insensitive candidates.
+        let index = self.model.parameter_index(name);
         let params = &self.model.parameters;
-        let index = params
-            .iter()
-            .enumerate()
-            .filter(|(_, p)| p.is_public)
-            .find_map(|(index, p)| (p.name == name).then_some(index))
-            .or_else(|| {
-                params
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, p)| p.is_public)
-                    .find_map(|(index, p)| {
-                        p.aliases
-                            .iter()
-                            .any(|a| a.as_str() == name)
-                            .then_some(index)
-                    })
-            })
-            .or_else(|| {
-                params
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, p)| p.is_public)
-                    .find_map(|(index, p)| p.name.eq_ignore_ascii_case(name).then_some(index))
-            })
-            .or_else(|| {
-                params
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, p)| p.is_public)
-                    .find_map(|(index, p)| {
-                        p.aliases
-                            .iter()
-                            .any(|a| a.eq_ignore_ascii_case(name))
-                            .then_some(index)
-                    })
-            });
         let Some(i) = index else { return Ok(false) };
         // Cross-parameter constraints are checked after all instance
         // assignments have been applied. Checking them here would make a
         // valid instance depend on the textual order of its assignments.
+        let value = if params[i].is_integer && value.is_finite() {
+            crate::integer_runtime::real_to_integer(value)
+                .map(f64::from)
+                .map_err(|_| ParameterValueError::NonInteger {
+                    parameter: params[i].name.clone(),
+                    value,
+                })?
+        } else {
+            value
+        };
         self.validate_parameter_value(i, value, false)?;
         self.context.set_param(i, value);
         self.context.mark_param_given(i);
@@ -8058,7 +8053,6 @@ pub struct DeviceBuilder {
     nodes: Vec<usize>,
     params: Vec<(String, f64)>,
     temperature: f64,
-    #[cfg(feature = "native")]
     canonical_ir: Option<CanonicalIrArtifact>,
 }
 
@@ -8071,7 +8065,6 @@ impl DeviceBuilder {
             nodes: Vec::new(),
             params: Vec::new(),
             temperature: 300.15, // 27°C
-            #[cfg(feature = "native")]
             canonical_ir: None,
         }
     }
@@ -8094,8 +8087,7 @@ impl DeviceBuilder {
         self
     }
 
-    /// Provide the canonical IR artifact required by native JIT builds.
-    #[cfg(feature = "native")]
+    /// Provide the canonical artifact used by native, browser, and noise evaluation.
     pub fn canonical_ir(mut self, artifact: CanonicalIrArtifact) -> Self {
         self.canonical_ir = Some(artifact);
         self
@@ -8117,41 +8109,28 @@ impl DeviceBuilder {
             nodes,
             params,
             temperature,
-            #[cfg(feature = "native")]
             canonical_ir,
         } = self;
 
         #[cfg(feature = "native")]
-        let mut device = {
-            let canonical_ir = canonical_ir.ok_or_else(|| {
-                VmError::NativeJit(
-                    "DeviceBuilder requires canonical IR when native JIT is enabled; no interpreter fallback"
-                        .to_string(),
-                )
-            })?;
-            VerilogADevice::try_new_with_canonical_ir(name, model, &canonical_ir, &nodes)?
-        };
-
-        #[cfg(not(feature = "native"))]
-        let mut device = VerilogADevice::try_new(name, model, &nodes)?;
-
-        device.try_set_temperature(temperature)?;
-
-        for (name, value) in params {
-            match device
-                .try_set_parameter(&name, value)
-                .map_err(|error| VmError::ParameterValue(error.to_string()))?
-            {
-                true => {}
-                false => {
-                    return Err(VmError::ParameterValue(format!(
-                        "unknown parameter '{name}' for model '{}'",
-                        device.model.name
-                    )));
-                }
-            }
+        if canonical_ir.is_none() {
+            return Err(VmError::NativeJit(
+                "DeviceBuilder requires canonical IR when native JIT is enabled; no interpreter fallback".to_string(),
+            ));
         }
-        device.try_resolve_parameter_defaults()?;
+        let parameters = params
+            .iter()
+            .map(|(name, value)| (name.as_str(), *value))
+            .collect::<Vec<_>>();
+        let mut device = VerilogADevice::try_new_with_parameters_and_control(
+            name,
+            model,
+            canonical_ir.as_ref(),
+            &nodes,
+            &parameters,
+            &crate::NoPipelineControl,
+        )?;
+        device.try_set_temperature(temperature)?;
 
         Ok(device)
     }

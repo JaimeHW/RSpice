@@ -358,7 +358,10 @@ impl Bjt {
 
         if has_rcx {
             let row = Self::sub_branches(
-                Self::add_branches(eval.ircx, eval.irbp),
+                Self::add_branches(
+                    Self::add_branches(eval.ircx, self.parasitic_base_collector_branch(&eval)),
+                    eval.igcx,
+                ),
                 if has_rci {
                     eval.irci
                 } else {
@@ -392,7 +395,7 @@ impl Bjt {
                     ),
                     eval.ibep,
                 ),
-                eval.iccp,
+                Self::add_branches(eval.iccp, eval.igcx),
             );
             jacobian[IDX_VBX][..INTERNAL_DIM].copy_from_slice(&row.d_internal[..INTERNAL_DIM]);
             external_partials[IDX_VBX] = row.d_external;
@@ -458,6 +461,20 @@ impl Bjt {
         sensitivities
     }
 
+    /// Current delivered from BP into CX. When RBP is an ideal short,
+    /// folding the BP row must carry its junction currents into CX as well.
+    #[inline]
+    pub(super) fn parasitic_base_collector_branch(
+        &self,
+        eval: &EvaluatedBjtState,
+    ) -> BranchLinearization {
+        if self.vbic_solves_vbp() {
+            eval.irbp
+        } else {
+            Self::add_branches(eval.ibep, eval.ibcp)
+        }
+    }
+
     pub(super) fn external_terminal_branches(
         &self,
         eval: EvaluatedBjtState,
@@ -477,7 +494,7 @@ impl Bjt {
                 } else {
                     collector_internal
                 },
-                eval.irbp,
+                Self::add_branches(self.parasitic_base_collector_branch(&eval), eval.igcx),
             )
         };
         let base = if Self::series_active(self.rbx) {
@@ -495,7 +512,7 @@ impl Bjt {
                     ),
                     eval.ibep,
                 ),
-                eval.iccp,
+                Self::add_branches(eval.iccp, eval.igcx),
             )
         };
         let emitter = if Self::series_active(self.re) {
@@ -525,7 +542,7 @@ impl Bjt {
 
     pub(super) fn thermal_power_branch(
         &self,
-        eval: EvaluatedBjtState,
+        mut eval: EvaluatedBjtState,
         external: [Value; EXTERNAL_DIM],
         internal: [Value; INTERNAL_DIM],
     ) -> BranchLinearization {
@@ -535,6 +552,23 @@ impl Bjt {
 
         let [vcx, vci, vbx, vbi, vei, vbp, vsi, _vrth] = internal;
         let [vc, vb, ve, vs] = external;
+        if self.vbic_13 {
+            // Xyce computes power before adding its numerical GMIN parallels.
+            // Igcx is likewise absent from the model's defined power sum.
+            let gmin = self.nonlinear_branch_gmin();
+            let remove = |branch: &mut BranchLinearization, pos: usize, neg: usize| {
+                branch.current -= gmin * (internal[pos] - internal[neg]);
+                branch.d_internal[pos] -= gmin;
+                branch.d_internal[neg] += gmin;
+            };
+            remove(&mut eval.ibe, IDX_VBI, IDX_VEI);
+            remove(&mut eval.ibex, IDX_VBX, IDX_VEI);
+            remove(&mut eval.ibc, IDX_VBI, IDX_VCI);
+            remove(&mut eval.ibep, IDX_VBX, IDX_VBP);
+            if !self.vbic_three_terminal {
+                remove(&mut eval.ibcp, IDX_VSI, IDX_VBP);
+            }
+        }
         let zero_external = [0.0; EXTERNAL_DIM];
         let mut power = BranchLinearization::default();
 
@@ -785,7 +819,7 @@ impl Bjt {
     pub(super) fn vbic_convergence_voltage_vector_for_state(
         &self,
         internal: [Value; INTERNAL_DIM],
-    ) -> [Value; 9] {
+    ) -> [Value; VBIC_TRANSIENT_CONVERGENCE_VOLTAGE_COUNT] {
         let p = self.polarity();
         let [vcx, vci, vbx, vbi, vei, vbp, vsi, _vrth] = internal;
         [
@@ -802,6 +836,7 @@ impl Bjt {
             } else {
                 p * (vsi - vbp)
             },
+            p * (vbx - vcx),
         ]
     }
 
@@ -812,10 +847,10 @@ impl Bjt {
         let [vcx, vci, vbx, vbi, vei, vbp, vsi, vrth] = internal;
         let eval = self.evaluate_state(
             BjtNodeVoltages {
-                vc: 0.0,
-                vb: 0.0,
-                ve: 0.0,
-                vs: 0.0,
+                vc: self.vc_ext,
+                vb: self.vb_ext,
+                ve: self.ve_ext,
+                vs: self.vs_ext,
                 vcx,
                 vci,
                 vbx,
@@ -828,7 +863,7 @@ impl Bjt {
         );
         [
             eval.ibe, eval.ibep, eval.iciei, eval.ibc, eval.irci, eval.irbi, eval.irbp, eval.ibcp,
-            eval.iccp, eval.ibex,
+            eval.iccp, eval.ibex, eval.igcx,
         ]
     }
 
@@ -866,7 +901,7 @@ impl Bjt {
 
         let static_branches = [
             eval.ibe, eval.ibep, eval.iciei, eval.ibc, eval.irci, eval.irbi, eval.irbp, eval.ibcp,
-            eval.iccp, eval.ibex,
+            eval.iccp, eval.ibex, eval.igcx,
         ];
         for (branch_idx, branch) in static_branches.iter().enumerate() {
             currents[branch_idx] = branch.current;
@@ -874,13 +909,17 @@ impl Bjt {
         }
 
         if self.uses_vbic_dynamic_charges() && self.td > 0.0 {
-            currents[VBIC_TRANSIENT_CONVERGENCE_ICIEI_INDEX] += delay_branches[0].current;
-            for (accumulated, &derivative) in d_currents_d_internal
-                [VBIC_TRANSIENT_CONVERGENCE_ICIEI_INDEX][..BJT_INTERNAL_STATE_DIM]
-                .iter_mut()
-                .zip(&delay_branches[0].d_internal[..BJT_INTERNAL_STATE_DIM])
-            {
-                *accumulated += derivative;
+            for (index, branch) in [
+                (VBIC_TRANSIENT_CONVERGENCE_ICIEI_INDEX, &delay_branches[0]),
+                (3, &delay_branches[3]), // Ibc includes the delayed avalanche correction.
+            ] {
+                currents[index] += branch.current;
+                for (accumulated, derivative) in d_currents_d_internal[index]
+                    .iter_mut()
+                    .zip(branch.d_internal)
+                {
+                    *accumulated += derivative;
+                }
             }
         }
 
@@ -899,6 +938,7 @@ impl Bjt {
             } else {
                 p * (vsi - vbp)
             },
+            p * (vbx - vcx),
         ];
 
         VbicTransientConvergenceState {

@@ -27,6 +27,27 @@ FC = 1.0 / (2 * math.pi * 1e3 * 1e-6)  # RC corner: 159.155 Hz
 
 
 class TestAcBasics:
+    @pytest.mark.parametrize("kind, polarity", [("NPN", 1), ("PNP", -1)])
+    def test_vbic13_delayed_avalanche_matches_xyce(self, engine, kind, polarity):
+        netlist = rspice.Netlist.parse_spice(
+            f"""* Delayed VBIC avalanche
+Vc c 0 {polarity * 1.8}
+Vb b 0 DC {polarity * 0.7} AC 1
+Q1 c b 0 vm SW_ET=0
+.model vm {kind}(LEVEL=11 IS=1e-16 IBEI=1e-18 IBCI=1e-18 RCX=10 RCI=2 RBX=5 RBI=3 RE=1 RBP=0 RS=0 AVC1=0.05 AVC2=0.3 TD=1n GMIN=1u TNOM=27)
+.temp 27
+.end
+"""
+        )
+        result = engine.run_ac(netlist, [1e8])
+        for branch, expected in [
+            ("vc", complex(-0.001774651889771782, 0.0012868112960925493)),
+            ("vb", complex(9.590581606050419e-5, -9.066589478545957e-5)),
+        ]:
+            assert result.branch_current_complex(branch)[0] == pytest.approx(
+                expected, rel=2e-7, abs=1e-14
+            )
+
     @pytest.mark.parametrize("level", [11, 12])
     def test_vbic13_clipped_thermal_admittance_without_hidden_capacitance(
         self, engine, level

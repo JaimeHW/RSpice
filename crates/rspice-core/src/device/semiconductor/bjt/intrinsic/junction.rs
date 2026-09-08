@@ -155,6 +155,23 @@ impl Bjt {
     }
 
     #[inline]
+    pub(in crate::device::semiconductor::bjt) fn vbic_general_exp(
+        &self,
+        arg: Value,
+    ) -> (Value, Value) {
+        if !self.vbic_13 {
+            return Self::limited_exp(arg);
+        }
+        let limit = self.vbic_maxexp.ln();
+        if arg < limit {
+            let value = arg.exp();
+            (value, value)
+        } else {
+            (self.vbic_maxexp * (1.0 + arg - limit), self.vbic_maxexp)
+        }
+    }
+
+    #[inline]
     pub(in crate::device::semiconductor::bjt) fn limited_exp(arg: Value) -> (Value, Value) {
         let clamped = arg.clamp(-80.0, 80.0);
         let value = clamped.exp();

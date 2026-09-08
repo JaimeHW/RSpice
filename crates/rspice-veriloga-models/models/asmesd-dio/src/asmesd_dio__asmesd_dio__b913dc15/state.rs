@@ -2,7 +2,7 @@
 #![allow(dead_code, non_snake_case, unused_parens, unused_variables)]
 
 use rspice_veriloga_runtime::{GeneratedEvalContext, GeneratedDdtCoefficients, GeneratedParameterAssignment, GeneratedParameterOrigin, GeneratedVerilogAAcceptedStateShapeIdentity, GeneratedVerilogAParameterBound as B, GeneratedVerilogAParameterDescriptor as P, GeneratedVerilogAPersistentState, GeneratedVerilogARollbackState, GeneratedVerilogATerminalDescriptor, GeneratedVerilogATerminalDirection, boxed_zero_bool_array, boxed_zero_f64_array};
-use rspice_veriloga_runtime::{GeneratedParameterBound as ParameterBound, GENERATED_PARAMETER_MAX_EXCLUSIVE_FLAG as PARAMETER_MAX_EXCLUSIVE_FLAG, GENERATED_PARAMETER_MIN_EXCLUSIVE_FLAG as PARAMETER_MIN_EXCLUSIVE_FLAG, find_generated_parameter_index as find_parameter_index, resolve_generated_parameter_bound as resolve_parameter_bound, validate_generated_finite_parameter as validate_finite_parameter, validate_generated_parameter as validate_parameter, validate_generated_parameter_bound_indices as validate_parameter_bound_indices, validate_generated_parameter_bounds as validate_parameter_bounds};
+use rspice_veriloga_runtime::{GeneratedParameterBound as ParameterBound, GENERATED_PARAMETER_MAX_EXCLUSIVE_FLAG as PARAMETER_MAX_EXCLUSIVE_FLAG, GENERATED_PARAMETER_MIN_EXCLUSIVE_FLAG as PARAMETER_MIN_EXCLUSIVE_FLAG, find_generated_parameter_index as find_parameter_index, resolve_generated_parameter_bound as resolve_parameter_bound, validate_generated_finite_parameter as validate_finite_parameter, validate_generated_parameter_bound_indices as validate_parameter_bound_indices, validate_generated_parameter_bounds as validate_parameter_bounds};
 
 #[repr(C)]
 #[derive(Copy, Clone)]
@@ -28,29 +28,16 @@ impl Parameters {
 		unsafe {
 			let ptr = boxed.as_mut_ptr();
 			std::ptr::write_bytes(ptr, 0, 1);
-			const DEFAULTS_0: [f64; 46] = [
+			const DEFAULTS: [f64; 52] = [
 				1e-17, 1.0, 0.0, 5.0, 10.0, 10.0, 0.0, 0.0,
 				0.01, 1.11, 0.0, 10.0, 1e-5, 0.0, 1e-6, 0.0,
 				0.0, 0.75, 0.33, 0.0, 0.001, 1.11, 3.0, 0.5,
 				0.5, 25.0, 1000.0, 0.0, 1.0, 1.0, 2.0, 0.0,
 				1.0, 0.0005, 0.0005, 5e-6, 1e-7, 0.0, 0.0, 2.0,
-				100.0, 0.0, 1e-5, 1.0, 1.0, 0.0,
+				100.0, 0.0, 1e-5, 1.0, 1.0, 0.0, 0.0, 5.0,
+				100.0, 2.0, 100.0, 2.0,
 			];
-			std::ptr::copy_nonoverlapping(DEFAULTS_0.as_ptr(), (*ptr).values.as_mut_ptr().add(0), 46);
-			{
-				let params = &mut *ptr;
-				params[46] = 0.001;
-				validate_parameter("minr", params[46], false, Some((0.0, "0.0")), false, None, true, &[]).expect("generated Verilog-A parameter default must satisfy declared range");
-			}
-			const DEFAULTS_1: [f64; 5] = [
-				5.0, 100.0, 2.0, 100.0, 2.0,
-			];
-			std::ptr::copy_nonoverlapping(DEFAULTS_1.as_ptr(), (*ptr).values.as_mut_ptr().add(47), 5);
-			let params = &*ptr;
-			for index in 0..PARAMETER_DISPLAY_NAMES.len() {
-				let value = read_parameter_slot(params, index);
-				validate_parameter_metadata(params, index, value).expect("generated Verilog-A parameter defaults must satisfy declared ranges");
-			}
+			std::ptr::copy_nonoverlapping(DEFAULTS.as_ptr(), (*ptr).values.as_mut_ptr(), DEFAULTS.len());
 			boxed.assume_init()
 		}
 	}
@@ -58,7 +45,12 @@ impl Parameters {
 
 impl Default for Parameters {
 	fn default() -> Self {
-		*Self::new_box()
+		let mut params = Self::new_box();
+		let given = boxed_zero_bool_array::<{ Instance::PARAMETER_COUNT }>();
+		Instance::finalize_parameter_vector(params.as_mut(), given.as_ref(), true).expect("invalid generated model parameter defaults");
+		Instance::finalize_parameter_vector(params.as_mut(), given.as_ref(), false).expect("invalid generated instance parameter defaults");
+		Instance::validate_parameter_vector(params.as_ref()).expect("invalid generated parameter defaults");
+		*params
 	}
 }
 
@@ -72,7 +64,6 @@ fn validate_parameter_scalar_metadata(index: usize, value: f64) -> Result<(), St
 	let Some(&name) = PARAMETER_DISPLAY_NAMES.get(index) else {
 		return Err(format!("generated parameter index {} is out of range", index));
 	};
-	let flags = PARAMETER_RANGE_FLAGS[index];
 	validate_finite_parameter(name, value)?;
 	if PARAMETER_INTEGER_FLAGS[index] && value.fract() != 0.0 {
 		return Err(format!("parameter '{}' must be an integer, got {}", name, value));
@@ -80,15 +71,7 @@ fn validate_parameter_scalar_metadata(index: usize, value: f64) -> Result<(), St
 	if PARAMETER_INTEGER_FLAGS[index] && (value < i32::MIN as f64 || value > i32::MAX as f64) {
 		return Err(format!("parameter '{}' must fit in a 32-bit signed integer, got {}", name, value));
 	}
-	validate_parameter_bound_indices(
-		name,
-		value,
-		flags,
-		&PARAMETER_BOUND_POOL,
-		PARAMETER_MIN_BOUNDS[index],
-		PARAMETER_MAX_BOUNDS[index],
-		PARAMETER_EXCLUDED_BOUNDS[index],
-	)
+	Ok(())
 }
 
 fn validate_parameter_metadata(
@@ -99,6 +82,15 @@ fn validate_parameter_metadata(
 	validate_parameter_scalar_metadata(index, value)?;
 	let name = PARAMETER_DISPLAY_NAMES[index];
 	let flags = PARAMETER_RANGE_FLAGS[index];
+	validate_parameter_bound_indices(
+		name,
+		value,
+		flags,
+		&PARAMETER_BOUND_POOL,
+		PARAMETER_MIN_BOUNDS[index],
+		PARAMETER_MAX_BOUNDS[index],
+		PARAMETER_EXCLUDED_BOUNDS[index],
+	)?;
 	let static_min = resolve_parameter_bound(&PARAMETER_BOUND_POOL, PARAMETER_MIN_BOUNDS[index]);
 	let static_max = resolve_parameter_bound(&PARAMETER_BOUND_POOL, PARAMETER_MAX_BOUNDS[index]);
 	let computed_min = parameter_computed_min_bound(parameters, index)?;
@@ -444,16 +436,21 @@ impl Instance {
 	pub const EVENT_STATE_COUNT: usize = 0;
 	pub const ONE_STEP_DAE_SPLIT_SAFE: bool = false;
 	pub const REQUIRES_NODESET_PHASE: bool = false;
-	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "3fd48d9c6766123a216d74ba392eb3ef4f1dbcf4cededb489584b2e0fefd7604";
+	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "1aa5cae76294e0d41d5eb3c5337ab1dfda324eb839ff89fee048c08ceb1687d1";
 	pub const MAX_ANALOG_LOOP_ITERATIONS: usize = 1_000_000;
 
 	pub fn new(nodes: &[usize]) -> Self {
-		assert_eq!(nodes.len(), Self::NODE_COUNT, "generated Verilog-A node count mismatch");
+		Self::try_new_with_parameters(nodes, &[]).expect("invalid generated Verilog-A instance defaults")
+	}
+
+	/// Resolve overrides and dependent defaults before validating the instance.
+	pub fn try_new_with_parameters(nodes: &[usize], assignments: &[GeneratedParameterAssignment<'_>]) -> Result<Self, String> {
+		if nodes.len() != Self::NODE_COUNT { return Err(format!("generated Verilog-A node count mismatch: expected {}, got {}", Self::NODE_COUNT, nodes.len())); }
 		let mut mapped = [0usize; Self::NODE_COUNT];
 		mapped.copy_from_slice(nodes);
 		let params = Parameters::new_box();
 		let model_params = params.clone();
-		Self {
+		let mut instance = Self {
 			nodes: mapped,
 			branches: [0usize; Self::BRANCH_COUNT],
 			params,
@@ -472,7 +469,9 @@ impl Instance {
 			canonical_temperature_valid: false,
 			canonical_temperature: 0.0,
 			canonical_thermal_voltage: 0.0,
-		}
+		};
+		instance.apply_parameters(assignments)?;
+		Ok(instance)
 	}
 
 	#[doc(hidden)]
@@ -677,32 +676,33 @@ impl Instance {
 			let Some(index) = parameter_index_for_name(lower.as_str()) else {
 				return Err(format!("unknown parameter '{}' for generated Verilog-A model 'asmesd_dio'", assignment.name));
 			};
-			validate_parameter_scalar_metadata(index, assignment.value)?;
+			let value = if PARAMETER_INTEGER_FLAGS[index] { f64::from(integer::real_to_integer(assignment.value).map_err(|error| format!("parameter '{}': {}", PARAMETER_DISPLAY_NAMES[index], error))?) } else { assignment.value };
+			validate_parameter_scalar_metadata(index, value)?;
 			let is_model = PARAMETER_MODEL_FLAGS[index];
 			let is_dual_scope = PARAMETER_DUAL_SCOPE_FLAGS[index];
 			match assignment.origin {
 				GeneratedParameterOrigin::DeclaredScope if is_model => {
-					params.values[index] = assignment.value;
-					model_params.values[index] = assignment.value;
+					params.values[index] = value;
+					model_params.values[index] = value;
 					param_given[index] = true;
 					model_param_given[index] = true;
 				}
 				GeneratedParameterOrigin::DeclaredScope => {
-					params.values[index] = assignment.value;
+					params.values[index] = value;
 					param_given[index] = true;
 				}
 				GeneratedParameterOrigin::ModelCard if is_model => {
-					params.values[index] = assignment.value;
-					model_params.values[index] = assignment.value;
+					params.values[index] = value;
+					model_params.values[index] = value;
 					param_given[index] = true;
 					model_param_given[index] = true;
 				}
 				GeneratedParameterOrigin::ModelCard if is_dual_scope => {
-					model_params.values[index] = assignment.value;
+					model_params.values[index] = value;
 					model_param_given[index] = true;
 				}
 				GeneratedParameterOrigin::Instance if !is_model => {
-					params.values[index] = assignment.value;
+					params.values[index] = value;
 					param_given[index] = true;
 				}
 				GeneratedParameterOrigin::ModelCard | GeneratedParameterOrigin::Instance => {
@@ -968,3 +968,4 @@ pub fn transient_timer_step_bound(&self) -> Option<f64> { None }
 	}
 
 }
+use rspice_veriloga_runtime::integer;

@@ -763,6 +763,145 @@ fn vbic13_self_heating_switch_matches_xyce710_and_grounded_thermal_pins() {
 }
 
 #[test]
+fn vbic13_avalanche_and_pushout_currents_match_xyce710() {
+    // Independent Xyce 7.10 vbic_1p3.va DC references. Its PNP Igcx
+    // polarity depends on the physical collector-resistor current.
+    for (level, kind, control, vc, parameters, expected) in [
+        (
+            11,
+            "NPN",
+            "",
+            1.8,
+            "AVCX1=0.05",
+            [-6.251124606622771e-5, 3.931202464614644e-6],
+        ),
+        (
+            11,
+            "PNP",
+            "",
+            1.8,
+            "AVCX1=0.05",
+            [5.7467919611412814e-5, 1.057088131301366e-6],
+        ),
+        (
+            12,
+            "PNP",
+            "",
+            1.8,
+            "AVCX1=0.05",
+            [5.919472910615865e-5, 1.1288947081972223e-6],
+        ),
+        (
+            12,
+            "NPN",
+            "M=3",
+            1.8,
+            "AVCX1=0.05",
+            [-0.0001931683165093576, 1.2027535570122183e-5],
+        ),
+        (
+            12,
+            "NPN",
+            "TRISE=40",
+            1.8,
+            "AVCX1=0.05 TAVCX=0.01",
+            [-0.0005742348152047687, 1.7613976968633497e-5],
+        ),
+        (
+            12,
+            "NPN",
+            "TRISE=20",
+            1.8,
+            "AVCX1=0.05 TAVCX=-0.06",
+            [-0.00020588580959210147, 1.1986467093786921e-5],
+        ),
+        (
+            12,
+            "NPN",
+            "",
+            1.8,
+            "AVCX1=0.05 MCX=1",
+            [-6.433674528014668e-5, 3.957059748605426e-6],
+        ),
+        (
+            12,
+            "NPN",
+            "",
+            1.8,
+            "AVCX1=0.05 MAXEXP=0.1",
+            [-6.273847715935601e-5, 2.3762228343031284e-6],
+        ),
+        (
+            12,
+            "NPN",
+            "TRISE=20",
+            1.8,
+            "AVC1=0.05 AVC2=0.3 TAVC=-0.06",
+            [-0.00021240015017831354, 1.7926908619094553e-5],
+        ),
+        (
+            12,
+            "NPN",
+            "",
+            0.68,
+            "GAMM=2 QCO=1p MAXEXP=0.1",
+            [-5.715927094855637e-5, -2.0270641147215227e-6],
+        ),
+    ] {
+        let polarity = if kind == "PNP" { -1.0 } else { 1.0 };
+        let substrate = if level == 12 { " 0" } else { "" };
+        let deck = format!(
+            "VBIC13 avalanche oracle\nVc c 0 {}\nVb b 0 {}\nQ1 c b 0{substrate} vm SW_ET=0 {control}\n\
+             .model vm {kind}(LEVEL={level} IS=1e-16 IBEI=1e-18 IBCI=1e-18 RCX=10 RCI=2 RBX=5 RBI=3 RE=1 RBP=0 RS=0 AVCX2=0.3 {parameters} GMIN=1e-6 TNOM=27)\n.temp 27\n.end\n",
+            polarity * vc,
+            polarity * 0.7,
+        );
+        let result = op_result(&deck);
+        for (branch, expected) in ["vc", "vb"].into_iter().zip(expected) {
+            let actual = result.branch_current_named(branch).unwrap();
+            assert!(
+                (actual - expected).abs() < 2e-7 * expected.abs(),
+                "{level} {kind} {control} {parameters} {branch}: {actual:e} != {expected:e}"
+            );
+        }
+    }
+}
+
+#[test]
+fn vbic13_junction_leakage_obeys_kcl_without_generating_heat() {
+    for level in [11, 12] {
+        for (kind, polarity) in [("NPN", 1.0), ("PNP", -1.0)] {
+            let substrate = if level == 12 { " 0" } else { "" };
+            let deck = format!(
+                "VBIC13 leakage and heat\nVc c 0 {}\nVb b 0 {}\nQ1 c b 0{substrate} vm M=3\n\
+                 .model vm {kind}(LEVEL={level} IS=1e-40 IBEI=0 IBCI=0 ISP=0 RCX=0 RCI=0 RBX=0 RBI=0 RE=0 RBP=0 RS=0 GMIN=1m RTH=1000)\n.end\n",
+                1.2 * polarity,
+                0.5 * polarity,
+            );
+            let result = op_result(&deck);
+            // The authored numerical parallels are BE, BEX, BC, BEP,
+            // BXCX, and (for LEVEL=12) BCP. The collapsed nodes make
+            // their independent KCL sum an elementary resistor network.
+            let collector = if level == 12 { 3.3 } else { 2.1 };
+            assert!(
+                (result.branch_current_named("vc").unwrap() + polarity * 0.003 * collector).abs()
+                    < 1e-11,
+                "level={level} kind={kind} Ic={:?} Ib={:?}",
+                result.branch_current_named("vc"),
+                result.branch_current_named("vb")
+            );
+            assert!(
+                (result.branch_current_named("vb").unwrap() - polarity * 0.003 * 1.1).abs() < 1e-11
+            );
+            assert!(
+                voltage(&result, "q1.__rth.internal").abs() < 1e-10,
+                "numerical junction conductance must not heat the device"
+            );
+        }
+    }
+}
+
+#[test]
 fn vbic13_temperature_dependent_self_heating_matches_xyce710() {
     // Live Xyce 7.10, 2026-09-08, at 27 C plus instance TRISE=20 K.
     for level in [11, 12] {
@@ -828,7 +967,7 @@ fn vbic13_clips_the_combined_ambient_offset_and_external_thermal_node() {
 }
 
 #[test]
-fn vbic13_thermal_temperature_parameters_reject_invalid_values_and_model_families() {
+fn vbic13_thermal_and_avalanche_parameters_reject_invalid_values_and_model_families() {
     for level in [11, 12] {
         for parameter in [
             "TMINCLIP=-251",
@@ -837,6 +976,12 @@ fn vbic13_thermal_temperature_parameters_reject_invalid_values_and_model_familie
             "TMAXCLIP=1001",
             "TCRTH={1/0}",
             "TMINCLIP=\"cold\"",
+            "AVCX1=-0.1",
+            "AVCX2=-0.1",
+            "TAVCX={1/0}",
+            "MCX=0",
+            "MCX=1.01",
+            "MAXEXP=0",
         ] {
             let error = build(&op_deck(&format!(
                 ".model qmod NPN(LEVEL={level} {parameter})"
@@ -851,6 +996,7 @@ fn vbic13_thermal_temperature_parameters_reject_invalid_values_and_model_familie
             "TMINCLIP=-250 TMAXCLIP=1000",
             "TMINCLIP=27 TMAXCLIP=27",
             "TCRTH=-0.05",
+            "AVCX1=0 AVCX2=0 TAVCX=-0.05 MCX=1 MAXEXP=0.1",
         ] {
             build(&op_deck(&format!(
                 ".model qmod NPN(LEVEL={level} {parameters})"
@@ -859,12 +1005,39 @@ fn vbic13_thermal_temperature_parameters_reject_invalid_values_and_model_familie
         }
     }
     for level in [1, 4, 9, 13] {
-        for parameter in ["TCRTH=0", "TMINCLIP=-100", "TMAXCLIP=500"] {
+        for parameter in [
+            "TCRTH=0",
+            "TMINCLIP=-100",
+            "TMAXCLIP=500",
+            "AVCX1=0",
+            "AVCX2=0",
+            "TAVCX=0",
+            "MCX=0.33",
+            "MAXEXP=1e22",
+        ] {
             let error = build(&op_deck(&format!(
                 ".model qmod NPN(LEVEL={level} {parameter})"
             )))
             .expect_err("unimplemented thermal parameter must not be silently ignored");
             assert!(error.contains("LEVEL=11 or LEVEL=12"), "{error}");
+        }
+    }
+}
+
+#[test]
+fn native_bjt_vector_parameters_are_rejected_instead_of_ignored() {
+    for level in [1, 4, 9, 11, 12] {
+        for parameter in [
+            "AVCX1=[0.1 0.2]",
+            "LEVEL=[11 12]",
+            "TCRTH=[{1+2} 0]",
+            "IS=[\"small\" \"large\"]",
+        ] {
+            let error = build(&op_deck(&format!(
+                ".model qmod NPN(LEVEL={level} {parameter})"
+            )))
+            .expect_err("native BJT vectors cannot be silently ignored");
+            assert!(error.contains("vector parameters"), "{error}");
         }
     }
 }

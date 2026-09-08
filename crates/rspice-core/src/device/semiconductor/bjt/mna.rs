@@ -107,10 +107,11 @@ impl Bjt {
         );
         let branches = self
             .mna_eval
-            .map_or([BranchLinearization::default(); 14], |eval| {
+            .map_or([BranchLinearization::default(); 15], |eval| {
                 [
                     eval.ibe, eval.ibex, eval.ibc, eval.iciei, eval.ircx, eval.irci, eval.irbx,
                     eval.irbi, eval.ire, eval.ibep, eval.irbp, eval.ibcp, eval.iccp, eval.irs,
+                    eval.igcx,
                 ]
             });
         for branch in branches {
@@ -209,7 +210,7 @@ impl Bjt {
             + EXTERNAL_DIM
             + BJT_INTERNAL_STATE_DIM
             + 12
-            + 14 * (1 + INTERNAL_DIM + EXTERNAL_DIM);
+            + 15 * (1 + INTERNAL_DIM + EXTERNAL_DIM);
         // Derive endpoint incidence from the same branch builders as the
         // runtime, without solving or replacing the captured numerical cache.
         let template = BjtDynamicReduction::default();
@@ -249,10 +250,10 @@ impl Bjt {
                     self.name
                 ));
             }
-            let expected = if branch < 4 {
+            let expected = if branch <= VBIC_DELAY_BRANCH_COUNT {
                 let expected = if flags[0] == 0.0 {
                     BjtCurrentBranch::default()
-                } else if branch < 3 {
+                } else if branch < VBIC_DELAY_BRANCH_COUNT {
                     expected_delay[branch]
                 } else {
                     expected_thermal
@@ -264,7 +265,7 @@ impl Bjt {
                     expected.neg_external,
                 ])
             } else if flags[3] != 0.0 {
-                let expected = expected_charge[branch - 4];
+                let expected = expected_charge[branch - VBIC_DELAY_BRANCH_COUNT - 1];
                 Some([
                     expected.pos_internal,
                     expected.neg_internal,
@@ -320,6 +321,7 @@ impl Bjt {
             ibcp,
             iccp,
             irs,
+            igcx,
         ] = std::array::from_fn(|_| {
             let current = values[cursor];
             cursor += 1;
@@ -345,8 +347,9 @@ impl Bjt {
             ibcp,
             iccp,
             irs,
+            igcx,
         });
-        let [delay0, delay1, delay2, thermal] = std::array::from_fn(|_| {
+        let [delay0, delay1, delay2, avalanche, thermal] = std::array::from_fn(|_| {
             let branch = Self::checkpoint_take_charge_branch(values, &mut cursor);
             BjtCurrentBranch {
                 current: branch.charge,
@@ -358,7 +361,7 @@ impl Bjt {
                 neg_external: branch.neg_external,
             }
         });
-        self.mna_delay_branches = [delay0, delay1, delay2];
+        self.mna_delay_branches = [delay0, delay1, delay2, avalanche];
         self.mna_delay_thermal = thermal;
         self.mna_charge_cache.set(std::array::from_fn(|_| {
             Self::checkpoint_take_charge_branch(values, &mut cursor)
@@ -453,13 +456,10 @@ impl Bjt {
     #[inline]
     pub(in crate::device::semiconductor::bjt) fn vbic_solves_vbp(&self) -> bool {
         Self::series_active(self.rbp)
-            || self.ibeip > 0.0
-            || self.ibenp > 0.0
-            || (!self.vbic_three_terminal && (self.ibcip > 0.0 || self.ibcnp > 0.0))
     }
 
-    /// Allocate the VBIC internal nodes per ngspice's collapse rules
-    /// (vbicsetup.c:400-525). `alloc` receives a short state suffix and must
+    /// Allocate the VBIC internal nodes using the effective series resistances.
+    /// `alloc` receives a short state suffix and must
     /// return a fresh circuit node. Collapsed states alias their parent node
     /// so each retains exactly one matrix column; disabled states (thermal
     /// without self-heating, excess phase without TD) stay at ground and all
@@ -819,7 +819,7 @@ impl Bjt {
             self.mna_delay_branches = self.vbic_delay_static_branches(&reduction);
             self.mna_delay_thermal = self.vbic_delay_static_thermal_branch(&reduction);
         } else {
-            self.mna_delay_branches = [BjtCurrentBranch::default(); 3];
+            self.mna_delay_branches = [BjtCurrentBranch::default(); VBIC_DELAY_BRANCH_COUNT];
             self.mna_delay_thermal = BjtCurrentBranch::default();
         }
     }
@@ -1120,6 +1120,14 @@ mod tests {
             ("RTH", 300.0),
         ] {
             params.insert(key.to_string(), value);
+        }
+        if level == 11.0 {
+            params.insert("AVC1".into(), 0.2);
+            params.insert("AVC2".into(), 0.3);
+            params.insert("TAVC".into(), 0.01);
+            params.insert("AVCX1".into(), 0.2);
+            params.insert("AVCX2".into(), 0.3);
+            params.insert("TAVCX".into(), 0.01);
         }
         // Diffamp cascode: collector node 1, base node 2, emitter node 3,
         // substrate tied to the collector node like the deck instances.

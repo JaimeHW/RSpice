@@ -300,6 +300,9 @@ fn promoted_vbic_thermal_and_excess_phase_checkpoints_resume_every_state_exactly
             (SpiceDialect::Xyce, 11),
         ] {
             let mut deck = deck.replace("LEVEL=4", &format!("LEVEL={level}"));
+            if level >= 11 {
+                deck = deck.replace("AVC1=2 AVC2=15", "AVC1=0.05 AVC2=0.3 TAVC=0.01");
+            }
             if level == 11 {
                 // Leave the optional thermal pin unconnected to exercise the
                 // internal thermal state instead of prescribing zero rise.
@@ -345,8 +348,8 @@ fn vbic13_clipped_thermal_state_with_tcrth_resumes_exactly() {
         let substrate = if level == 12 { " 0" } else { "" };
         let deck = format!(
             "VBIC13 clipped thermal checkpoint\nVc c 0 1.2\nVb b 0 0.5\n\
-             Vth th 0 DC 74 SIN(74 2 1Meg)\nQ1 c b 0{substrate} th vm SW_ET=0\n\
-             .model vm NPN(LEVEL={level} IS=1e-16 IBEI=1e-18 IBCI=1e-18 RCI=0 RBI=0 RTH=1000 TCRTH=0.005 TMAXCLIP=100 CTH=1f TNOM=27)\n.temp 27\n.end\n"
+             Vth th 0 DC 74 SIN(74 2 1Meg)\nQ1 c b 0{substrate} th vm SW_ET=1\n\
+             .model vm NPN(LEVEL={level} IS=1e-16 IBEI=1e-18 IBCI=1e-18 RCX=10 RBX=5 RCI=0 RBI=0 AVC1=0.05 AVC2=0.3 TAVC=0.01 TD=20n AVCX1=0.05 AVCX2=0.3 TAVCX=0.01 GMIN=1n RTH=1000 TCRTH=0.005 TMAXCLIP=100 CTH=1f TNOM=27)\n.temp 27\n.end\n"
         );
         for method in [
             IntegrationMethod::BackwardEuler,

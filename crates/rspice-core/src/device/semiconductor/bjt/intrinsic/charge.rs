@@ -317,22 +317,28 @@ impl Bjt {
             };
         }
 
-        let vl_arg = self.vjc - vbc_eff;
-        let vl_sqrt = (vl_arg * vl_arg + 0.01).sqrt().max(1e-18);
-        let vl = 0.5 * (vl_sqrt + vl_arg);
-        let dvl_dvbc_eff = 0.5 * (-vl_arg / vl_sqrt - 1.0);
+        let (avalf, davalf_dvbc_eff) = if self.vbic_13 {
+            self.vbic13_avalanche_factor(vbc_eff, self.vjc, self.mjc, self.avc1, self.avc2)
+        } else {
+            let vl_arg = self.vjc - vbc_eff;
+            let vl_sqrt = (vl_arg * vl_arg + 0.01).sqrt().max(1e-18);
+            let vl = 0.5 * (vl_sqrt + vl_arg);
+            let dvl_dvbc_eff = 0.5 * (-vl_arg / vl_sqrt - 1.0);
 
-        let power = self.mjc - 1.0;
-        let vl_safe = vl.max(1e-18);
-        let vl_power = vl_safe.powf(power);
-        let d_vl_power_dvbc_eff = power * vl_safe.powf(power - 1.0) * dvl_dvbc_eff;
+            let power = self.mjc - 1.0;
+            let vl_safe = vl.max(1e-18);
+            let vl_power = vl_safe.powf(power);
+            let d_vl_power_dvbc_eff = power * vl_safe.powf(power - 1.0) * dvl_dvbc_eff;
 
-        let avalanche_arg = -self.avc2.max(0.0) * vl_power;
-        let (avalanche_exp, d_avalanche_exp_darg) = Self::limited_exp(avalanche_arg);
-        let d_avalanche_arg_dvbc_eff = -self.avc2.max(0.0) * d_vl_power_dvbc_eff;
-        let avalf = self.avc1 * vl * avalanche_exp;
-        let davalf_dvbc_eff = self.avc1
-            * (dvl_dvbc_eff * avalanche_exp + vl * d_avalanche_exp_darg * d_avalanche_arg_dvbc_eff);
+            let avalanche_arg = -self.avc2.max(0.0) * vl_power;
+            let (avalanche_exp, d_avalanche_exp_darg) = Self::limited_exp(avalanche_arg);
+            let d_avalanche_arg_dvbc_eff = -self.avc2.max(0.0) * d_vl_power_dvbc_eff;
+            let avalf = self.avc1 * vl * avalanche_exp;
+            let davalf_dvbc_eff = self.avc1
+                * (dvl_dvbc_eff * avalanche_exp
+                    + vl * d_avalanche_exp_darg * d_avalanche_arg_dvbc_eff);
+            (avalf, davalf_dvbc_eff)
+        };
 
         let transport_minus_ibcj = transport.itzf - transport.itzr - ibcj;
         let d_transport_minus_ibcj_dvbe_eff = transport.ditzf_dvbe_eff - transport.ditzr_dvbe_eff;

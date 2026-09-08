@@ -179,10 +179,12 @@ class TestTransientValidation:
 
 
 class TestTransientCheckpoint:
+    @pytest.mark.parametrize("level", [4, 12])
     @pytest.mark.parametrize("kind,polarity", [("NPN", 1), ("PNP", -1)])
     def test_vbic_thermal_and_excess_phase_checkpoint_file_resumes_exactly(
-        self, engine, tmp_path, kind, polarity
+        self, engine, tmp_path, kind, polarity, level
     ):
+        avalanche = "AVC1=0.05 AVC2=0.3 TAVC=0.01" if level == 12 else ""
         netlist = rspice.Netlist.parse(
             f"""* VBIC checkpoint through Python
 VCC supply 0 {polarity * 3.3}
@@ -190,7 +192,7 @@ VIN base 0 DC {polarity * 0.8} SIN({polarity * 0.8} {polarity * 0.05} 1G)
 RC supply out 1k
 RE emitter 0 100
 Q1 out base emitter 0 active
-.model active {kind} LEVEL=4 IS=1e-16 IBEI=1e-18
+.model active {kind} LEVEL={level} IS=1e-16 IBEI=1e-18 {avalanche}
 + RCX=10 RCI=60 RBX=10 RBI=40 RE=2 RS=20 RBP=40
 + CJE=100f CJC=20f CJEP=100f CJCP=400f TF=10p TR=100p
 + TD=20p SELFT=1 RTH=300 CTH=1p

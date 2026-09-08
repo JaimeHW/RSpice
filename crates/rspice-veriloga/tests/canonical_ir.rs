@@ -92,6 +92,39 @@ fn analyze_fixture(
 }
 
 #[test]
+fn canonical_integer_parameter_arrays_convert_each_initializer_element() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(
+            "module rounded_array(p,n); inout p,n; electrical p,n; parameter real base=1.5; parameter integer size=base; parameter integer taps[0:size-1][0:1]='{size{'{-1.5,base}}}; analog I(p,n)<+V(p,n); endmodule",
+        )
+        .expect("integer array defaults use numeric assignment conversion");
+    let default = artifact.hir.parameters[2].default_expr.as_ref().unwrap().id;
+    let HirExprKind::ArrayLiteral { elements, .. } =
+        &artifact.hir.expressions[usize::from(default)].kind
+    else {
+        panic!("array default");
+    };
+    assert_eq!(
+        elements.len(),
+        2,
+        "array bound uses the rounded scalar default"
+    );
+    for row in elements {
+        let HirExprKind::ArrayLiteral { elements, .. } =
+            &artifact.hir.expressions[usize::from(*row)].kind
+        else {
+            panic!("array row");
+        };
+        for element in elements {
+            assert!(matches!(
+                &artifact.hir.expressions[usize::from(*element)].kind,
+                HirExprKind::Unary { op, .. } if op == "ToInteger"
+            ));
+        }
+    }
+}
+
+#[test]
 fn canonical_parameter_validation_preserves_integer_division() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(

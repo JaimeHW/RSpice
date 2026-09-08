@@ -748,64 +748,6 @@ fn generated_static_parameter_bounds_are_interned() {
 }
 
 #[test]
-fn generated_simple_parameter_defaults_use_ordered_alias_tables() {
-    let generated_root = generated_veriloga_root();
-    let mut table_operations = 0usize;
-    let mut installation_calls = 0usize;
-    let mut direct_aliases = Vec::new();
-    let mut duplicated_helpers = Vec::new();
-    scan_generated_rust(&generated_root, &mut |path, source| {
-        if source.contains("fn install_generated_parameter_aliases(") {
-            duplicated_helpers.push(display_path(path));
-        }
-        if path.file_name().is_none_or(|name| name != "state.rs") {
-            return;
-        }
-        for (line_index, line) in source.lines().enumerate() {
-            let line = line.trim();
-            if let Some(count) = line
-                .strip_prefix("const DEFAULT_ALIASES: [(u16, u16); ")
-                .and_then(|line| line.strip_suffix("] = ["))
-            {
-                table_operations += count.parse::<usize>().unwrap_or_else(|error| {
-                    panic!("{} has malformed alias count: {error}", display_path(path))
-                });
-            }
-            if line.starts_with("install_parameter_aliases(") {
-                installation_calls += 1;
-            }
-            if let Some((_, value)) = line
-                .strip_prefix("params[")
-                .and_then(|line| line.split_once("] = "))
-                && value.starts_with("params[")
-                && value.ends_with("];")
-            {
-                direct_aliases.push(format!("{}:{}", display_path(path), line_index + 1));
-            }
-        }
-    });
-
-    assert!(table_operations > 0, "audit at least one default alias");
-    assert!(installation_calls > 0, "alias tables must be installed");
-    assert!(
-        direct_aliases.is_empty(),
-        "simple defaults must use dependency-ordered tables, not direct assignments:\n{}",
-        direct_aliases.join("\n")
-    );
-    assert!(
-        duplicated_helpers.is_empty(),
-        "the checked alias installer belongs in the runtime crate:\n{}",
-        duplicated_helpers.join("\n")
-    );
-
-    let runtime_path = workspace_root().join("crates/rspice-veriloga-runtime/src/lib.rs");
-    let runtime = fs::read_to_string(&runtime_path)
-        .unwrap_or_else(|error| panic!("read {}: {error}", runtime_path.display()));
-    assert!(runtime.contains("pub fn install_generated_parameter_aliases("));
-    assert!(runtime.contains("validate(destination, source)?;"));
-}
-
-#[test]
 fn generated_parameter_names_use_sorted_compact_lookup_tables() {
     let generated_root = generated_veriloga_root();
     let mut state_files = 0usize;

@@ -319,7 +319,7 @@ fn analog_final_refusal_reports_alongside_other_semantic_errors() {
 module dropped_final_and_bad_default(p, n);
     inout p, n;
     electrical p, n;
-    parameter integer k = 1.5;
+    parameter integer k = 3e9;
     real total;
     analog final begin
         total = 1.0;
