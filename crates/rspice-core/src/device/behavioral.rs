@@ -19,6 +19,7 @@ use thiserror::Error;
 
 mod breakpoints;
 mod periodicity;
+mod resolution;
 pub(crate) use breakpoints::BehavioralBreakpointError;
 #[cfg(test)]
 use breakpoints::expression_transient_breakpoints;

@@ -235,6 +235,10 @@ fn nonlinear_time_features_cannot_hide_between_shooting_grids() {
             "exp(-1000000*((1e-310*(cos(2*pi*64meg*time+0.1)+0.5*cos(2*(2*pi*64meg*time+0.1))))/(1e-310*(sin(2*pi*64meg*time+0.1)^2+cos(2*pi*64meg*time+0.1)^2))-0.25)^2)",
             3,
         ),
+        (
+            "exp(-1000000*(exp(cos(2*pi*64meg*time+0.1))+0.5*exp(cos(2*(2*pi*64meg*time+0.1)))-1.5)^2)",
+            4,
+        ),
     ] {
         // Independent linear RC convolution on one source cycle. This uses
         // exact integration of densely sampled linear forcing segments, not
@@ -251,6 +255,10 @@ fn nonlinear_time_features_cannot_hide_between_shooting_grids() {
             } else if kind == 3 {
                 (-1000000.0 * (cosine + 0.5 * (2.0 * (omega * time + 0.1)).cos() - 0.25).powi(2))
                     .exp()
+            } else if kind == 4 {
+                (-1000000.0
+                    * (cosine.exp() + 0.5 * (2.0 * (omega * time + 0.1)).cos().exp() - 1.5).powi(2))
+                .exp()
             } else {
                 (-10000.0 * (cosine - 0.25).powi(2)).exp()
             }
@@ -315,7 +323,7 @@ fn nonlinear_time_features_cannot_hide_between_shooting_grids() {
             .position(|name| name.eq_ignore_ascii_case("out"))
             .unwrap();
         let mean = result.waveforms[output].dc(&result.time, result.period);
-        let tolerance = if kind == 3 { 1e-6 } else { 1e-5 };
+        let tolerance = if kind >= 3 { 1e-6 } else { 1e-5 };
         assert!(
             (mean - expected_dc).abs() < tolerance,
             "{expression}: N={}, DC {mean:e} versus {expected_dc:e}",

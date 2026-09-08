@@ -137,7 +137,7 @@ impl Engine {
             .filter(|(_, _, _, interval)| interval.is_some())
             .map(|(name, _, _, _)| name.to_ascii_lowercase())
             .collect::<std::collections::HashSet<_>>();
-        let mut events = BreakpointManager::new_with_tolerance(Value::from_bits(1));
+        let mut breakpoints = BreakpointManager::new_with_tolerance(Value::from_bits(1));
         Self::collect_independent_source_breakpoints(
             circuit,
             BreakpointWindow {
@@ -146,20 +146,20 @@ impl Engine {
                 dialect: self.config.spice_dialect,
             },
             Some(&selected),
-            &mut events,
+            &mut breakpoints,
             abort,
             self.config.resource_limits.max_analysis_points,
             crate::engine::transient::SourceBreakpointGeometry::PhysicalCorners,
         )?;
         circuit.behavioral_sources.collect_transient_breakpoints(
             period,
-            &mut events,
+            &mut breakpoints,
             abort,
             self.config.resource_limits.max_analysis_points,
             true,
         )?;
-        let events = events.times();
-        if events.is_empty() {
+        let events = breakpoints.times();
+        if events.is_empty() && !circuit.behavioral_sources.needs_time_resolution(period) {
             return Ok(None);
         }
         let capacity = steps
@@ -224,6 +224,22 @@ impl Engine {
                 times.push(next);
                 self.ensure_analysis_points(times.len().saturating_sub(1))?;
             }
+        }
+        // Resolution accounts for the base mesh, subdivision scratch and
+        // returned mesh together. Release the already-merged event storage.
+        drop(breakpoints);
+        if let Some(refined) = circuit.behavioral_sources.refine_time_mesh(
+            &times,
+            crate::device::NonlinearConvergenceCriteria::new(
+                self.voltage_abstol(),
+                self.current_abstol(),
+                self.voltage_reltol(),
+            ),
+            &self.config.resource_limits,
+            abort,
+        )? {
+            times = refined;
+            changed = true;
         }
         if changed {
             PssIntegrationMesh::from_times(period, times).map(Some)

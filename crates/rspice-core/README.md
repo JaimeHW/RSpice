@@ -423,7 +423,14 @@ Comparison and step boundaries are located through the actual behavioral
 evaluator between adjacent representable timestamps, including finite equality plateaus after
 time zero and comparisons between two time coordinates. Transient continuation
 uses the same source feature collector. Refinement preserves source times
-exactly and solves successively finer grids, comparing the complete voltage and branch
+exactly. Before shooting, supported time-only sources outside a finite Fourier
+band receive local interpolation bounds from the shared value/derivative
+interpreter, including propagated VM rounding error. These bounds use the
+resolved voltage/current tolerances to concentrate points around narrow
+features. This numerical mesh supplements physical source events. A smooth
+source that cannot meet these bounds at representable time precision returns
+a precision error; finite ideal jumps retain their adjacent event clocks. Shooting
+then solves successively finer grids, comparing the complete voltage and branch
 current waveforms at shared phases, using the engine voltage/current tolerances.
 Only a grid that agrees with its refined grid is retained. Adjacent representable
 source times remain distinct. Where bisection is impossible, a separately solved
@@ -438,7 +445,7 @@ defaults still use the original `POINTS`. `MAXITER` applies to each grid solve,
 while the result reports total Newton corrections across all grids. Point and
 memory limits also apply to refinement, and cancellation remains available.
 Retained PSS operating points from earlier producer versions must be regenerated
-before dependent numerical reuse; the current producer identity is version 22.
+before dependent numerical reuse; the current producer identity is version 23.
 This convergence check supplements the shooting residual, which measures closure
 of a discrete period map. It is not a proof of resolution for all nonlinear
 expressions and devices; independent waveform and

@@ -36,6 +36,26 @@ impl TimeInterval {
         self.lower.is_finite() && self.upper.is_finite()
     }
 
+    fn magnitude(self) -> Value {
+        self.lower.abs().max(self.upper.abs())
+    }
+
+    fn rounding_error(self, transcendental: bool) -> Value {
+        let magnitude = self.magnitude();
+        if !magnitude.is_finite() {
+            return Value::INFINITY;
+        }
+        // One outward ULP also covers gradual underflow. Transcendentals
+        // use the same libm allowance as their endpoint enclosures.
+        ((magnitude.next_up() - magnitude)
+            + if transcendental {
+                16.0 * Value::EPSILON * magnitude
+            } else {
+                0.0
+            })
+        .next_up()
+    }
+
     fn outward(lower: Value, upper: Value) -> Self {
         if lower.is_nan() || upper.is_nan() {
             return Self::WHOLE;
@@ -212,6 +232,7 @@ struct Dual {
     slope: TimeInterval,
     constant: bool,
     continuous: bool,
+    roundoff: Value,
 }
 
 /// Bounds on one evaluation domain. Continuity is separate from a finite
@@ -221,6 +242,38 @@ pub(crate) struct TimeBounds {
     pub value: TimeInterval,
     pub slope: TimeInterval,
     pub continuous: bool,
+    roundoff: Value,
+}
+
+impl TimeBounds {
+    /// Maximum deviation from the line through the VM endpoint values.
+    /// If a continuous derivative is in [m,M], the secant error is at most
+    /// h*(M-m)/4. The two roundoff terms cover the waveform and interpolated
+    /// endpoints. The value diameter is independently valid even at a jump.
+    pub fn interpolation_error(&self, normalized_width: Value) -> Value {
+        let diameter = (self.value.upper - self.value.lower).next_up();
+        if !self.value.is_finite() {
+            return Value::INFINITY;
+        }
+        if self.value.lower == self.value.upper {
+            return 0.0;
+        }
+        if !self.continuous || !self.slope.is_finite() {
+            return diameter;
+        }
+        // Quarter the endpoints before subtraction to avoid width overflow.
+        let quarter_width = (0.25 * self.slope.upper - 0.25 * self.slope.lower).next_up();
+        let smooth = (normalized_width.next_up() * quarter_width).next_up();
+        diameter.min((smooth + 2.0 * self.roundoff).next_up())
+    }
+}
+
+fn propagated_error(sensitivity: Value, error: Value) -> Value {
+    if error == 0.0 || sensitivity == 0.0 {
+        0.0
+    } else {
+        (sensitivity * error).next_up()
+    }
 }
 
 impl Dual {
@@ -230,6 +283,7 @@ impl Dual {
             slope: TimeInterval::ZERO,
             constant: true,
             continuous: true,
+            roundoff: 0.0,
         }
     }
 
@@ -237,11 +291,13 @@ impl Dual {
         if self.constant && other.constant {
             return Self::constant(self.value.lower + other.value.lower);
         }
+        let value = self.value.add(other.value);
         Self {
-            value: self.value.add(other.value),
+            value,
             slope: self.slope.add(other.slope),
             constant: false,
             continuous: self.continuous && other.continuous,
+            roundoff: (self.roundoff + other.roundoff + value.rounding_error(false)).next_up(),
         }
     }
 
@@ -262,11 +318,16 @@ impl Dual {
         {
             return Self::constant(0.0);
         }
+        let value = self.value.mul(other.value);
         Self {
-            value: self.value.mul(other.value),
+            value,
             slope: self.slope.mul(other.value).add(self.value.mul(other.slope)),
             constant: false,
             continuous: self.continuous && other.continuous,
+            roundoff: (propagated_error(other.value.magnitude(), self.roundoff)
+                + propagated_error(self.value.magnitude(), other.roundoff)
+                + value.rounding_error(false))
+            .next_up(),
         }
     }
 
@@ -274,11 +335,15 @@ impl Dual {
         if self.constant {
             return Self::constant(self.value.lower * self.value.lower);
         }
+        let value = self.value.square();
         Self {
-            value: self.value.square(),
+            value,
             slope: TimeInterval::point(2.0).mul(self.value).mul(self.slope),
             constant: false,
             continuous: self.continuous,
+            roundoff: (propagated_error(2.0 * self.value.magnitude(), self.roundoff)
+                + value.rounding_error(false))
+            .next_up(),
         }
     }
 
@@ -295,6 +360,7 @@ impl Dual {
             return Some(Self::constant(self.value.lower / other.value.lower));
         }
         let value = self.value.div(other.value)?;
+        let denominator = other.value.lower.abs().min(other.value.upper.abs());
         Some(Self {
             value,
             // u'/v - (u/v)*(v'/v) avoids both v^2 underflow and reciprocal
@@ -305,6 +371,10 @@ impl Dual {
                 .add(value.mul(other.slope.div(other.value)?).neg()),
             constant: false,
             continuous: self.continuous && other.continuous,
+            roundoff: ((self.roundoff / denominator).next_up()
+                + propagated_error(value.magnitude(), (other.roundoff / denominator).next_up())
+                + value.rounding_error(false))
+            .next_up(),
         })
     }
 
@@ -322,22 +392,25 @@ impl Dual {
         }
         let value = self.value.positive_power(exponent.value);
         let mut slope = TimeInterval::ZERO;
+        let mut roundoff = value.rounding_error(true);
         if !self.constant {
-            slope = exponent
-                .value
-                .mul(
-                    self.value
-                        .positive_power(exponent.value.add(TimeInterval::point(-1.0))),
-                )
-                .mul(self.slope);
+            let partial = exponent.value.mul(
+                self.value
+                    .positive_power(exponent.value.add(TimeInterval::point(-1.0))),
+            );
+            slope = partial.mul(self.slope);
+            roundoff += propagated_error(partial.magnitude(), self.roundoff);
         }
         if !exponent.constant {
-            slope = slope.add(value.mul(self.value.logarithm()).mul(exponent.slope));
+            let partial = value.mul(self.value.logarithm());
+            slope = slope.add(partial.mul(exponent.slope));
+            roundoff += propagated_error(partial.magnitude(), exponent.roundoff);
         }
         Self {
             value,
             slope,
             constant: false,
+            roundoff: roundoff.next_up(),
             continuous: self.continuous
                 && exponent.continuous
                 && !(self.value.contains(0.0)
@@ -436,6 +509,7 @@ impl Dual {
                             && exponent.value.lower == 0.0
                             && positive.value.lower != powered.value.upper),
                     constant: false,
+                    roundoff: positive.roundoff.max(powered.roundoff),
                 },
             });
         }
@@ -451,13 +525,17 @@ impl Dual {
             });
         }
         let derivative = self.value.trigonometric(!cosine);
+        let value = self.value.trigonometric(cosine);
         Self {
-            value: self.value.trigonometric(cosine),
+            value,
             slope: self
                 .slope
                 .mul(if cosine { derivative.neg() } else { derivative }),
             constant: false,
             continuous: self.continuous,
+            roundoff: (propagated_error(derivative.magnitude(), self.roundoff)
+                + value.rounding_error(true))
+            .next_up(),
         }
     }
 
@@ -480,6 +558,9 @@ impl Dual {
             slope: value.mul(self.slope),
             constant: false,
             continuous: self.continuous,
+            roundoff: (propagated_error(value.magnitude(), self.roundoff)
+                + value.rounding_error(true))
+            .next_up(),
         }
     }
 }
@@ -546,6 +627,7 @@ impl<'a> TimeEnclosure<'a> {
                     slope: TimeInterval::point(self.stop),
                     constant: false,
                     continuous: true,
+                    roundoff: 0.0,
                 },
                 Instruction::PushFreq => Dual::constant(context.frequency),
                 Instruction::PushTemperature => Dual::constant(context.temperature),
@@ -592,6 +674,7 @@ impl<'a> TimeEnclosure<'a> {
                     value: value.value,
                     slope: value.slope,
                     continuous: value.continuous,
+                    roundoff: value.roundoff,
                 })
             })
             .flatten()
@@ -1061,5 +1144,43 @@ mod tests {
             !domain.value.is_finite(),
             "a nonfinite input cannot establish a zero plateau"
         );
+    }
+
+    #[test]
+    fn secant_bounds_include_vm_roundoff_and_subnormal_quotient_quantization() {
+        let context = Context::transient(&[], &[], 0.0);
+        for (expression, lower, upper) in [
+            ("(1e16+time)-1e16", 0.9, 1.1),
+            (
+                "(1e-310*sin(time))/(1e-310*(2+cos(time)))",
+                0.5,
+                0.5 + 1e-14,
+            ),
+            ("exp(-1000000*(time-0.5)^2)", 0.5003, 0.50031),
+            ("pwrs(time-0.5,0)", 0.49, 0.51),
+        ] {
+            let program = compile(&parse_expression_strict(expression).unwrap());
+            let domain = TimeEnclosure::new(&program, 2.0)
+                .unwrap()
+                .evaluate(TimeInterval { lower, upper }, &context)
+                .unwrap();
+            let error = domain.interpolation_error((upper - lower) / 2.0);
+            let mut vm = Vm::new();
+            let mut evaluate = |time| vm.execute(&program, &Context { time, ..context });
+            let left = evaluate(lower);
+            let right = evaluate(upper);
+            for sample in 0..=64 {
+                let fraction = sample as Value / 64.0;
+                let time = lower + (upper - lower) * fraction;
+                let difference = (evaluate(time) - (left + (right - left) * fraction)).abs();
+                assert!(
+                    difference <= error,
+                    "{expression}: {difference:e} exceeds {error:e}"
+                );
+            }
+            if expression.starts_with("(1e16") {
+                assert!(error >= 1.0, "a smooth derivative alone misses the VM step");
+            }
+        }
     }
 }
