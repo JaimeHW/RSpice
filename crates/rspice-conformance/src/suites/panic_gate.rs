@@ -34,9 +34,10 @@
 //! integration test so a CI log shows the corpus size the gate actually swept
 //! rather than a bare "ok".
 
+use std::cell::RefCell;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::Path;
-use std::sync::Mutex;
+use std::sync::Once;
 use std::time::Instant;
 
 use rspice_core::ResourceLimits;
@@ -399,6 +400,7 @@ fn run_stage<T>(
     recorder: &PanicRecorder,
     body: impl FnOnce() -> Result<T, ()>,
 ) -> Result<Result<T, ()>, DeckOutcome> {
+    let _capture = PanicCapture::begin();
     catch_unwind(AssertUnwindSafe(body)).map_err(|_| DeckOutcome::Panicked {
         stage,
         message: recorder.take(),
@@ -429,42 +431,69 @@ fn collect(root: &Path, dir: &Path, extensions: &[&str], out: &mut Vec<String>) 
     }
 }
 
-/// Captures panic messages instead of printing thousands of backtraces.
-///
-/// The default hook writes every panic to standard error, which for a sweep
-/// of several thousand decks would bury the one line that matters. Installing
-/// a recorder keeps the message and its location and prints nothing; the
-/// report carries them to the failure message.
+/// Captures caught deck panics without suppressing unrelated test failures.
 pub struct PanicRecorder {
-    last: &'static Mutex<Option<String>>,
+    _private: (),
 }
 
-static LAST_PANIC: Mutex<Option<String>> = Mutex::new(None);
+thread_local! {
+    // None means normal panic handling; Some means a run_stage catch is active.
+    static CAPTURED_PANIC: RefCell<Option<Option<String>>> = const { RefCell::new(None) };
+}
+
+struct PanicCapture {
+    previous: Option<Option<String>>,
+}
+
+impl PanicCapture {
+    fn begin() -> Self {
+        Self {
+            previous: CAPTURED_PANIC.with(|last| last.replace(Some(None))),
+        }
+    }
+}
+
+impl Drop for PanicCapture {
+    fn drop(&mut self) {
+        CAPTURED_PANIC.with(|last| last.replace(self.previous.take()));
+    }
+}
 
 impl PanicRecorder {
-    /// Replace the process panic hook for the rest of this process.
+    /// Install a hook once, preserving the previous hook outside deck catches.
     ///
-    /// The gate is one test in its own binary, so the hook is not restored:
-    /// restoring it would race with the panics the sweep is still catching.
+    /// Capture is scoped to `run_stage` on the current thread. Parallel tests,
+    /// assertions after a sweep, and failures on other threads retain their
+    /// normal diagnostics. No per-test hook replacement/restoration is needed.
     pub fn install() -> Self {
-        std::panic::set_hook(Box::new(|info| {
-            let location = info
-                .location()
-                .map_or_else(|| "unknown location".to_owned(), ToString::to_string);
-            let message = info.payload_as_str().unwrap_or("<non-string payload>");
-            if let Ok(mut last) = LAST_PANIC.lock() {
-                *last = Some(format!("{message} (at {location})"));
-            }
-        }));
-        Self { last: &LAST_PANIC }
+        static INSTALL: Once = Once::new();
+        INSTALL.call_once(|| {
+            let previous = std::panic::take_hook();
+            std::panic::set_hook(Box::new(move |info| {
+                let captured = CAPTURED_PANIC.with(|last| {
+                    let mut last = last.borrow_mut();
+                    let Some(message) = last.as_mut() else {
+                        return false;
+                    };
+                    let location = info
+                        .location()
+                        .map_or_else(|| "unknown location".to_owned(), ToString::to_string);
+                    let payload = info.payload_as_str().unwrap_or("<non-string payload>");
+                    *message = Some(format!("{payload} (at {location})"));
+                    true
+                });
+                if !captured {
+                    previous(info);
+                }
+            }));
+        });
+        Self { _private: () }
     }
 
     /// The most recent panic message, consumed.
     pub fn take(&self) -> String {
-        self.last
-            .lock()
-            .ok()
-            .and_then(|mut last| last.take())
+        CAPTURED_PANIC
+            .with(|last| last.borrow_mut().as_mut().and_then(Option::take))
             .unwrap_or_else(|| "<panic message unavailable>".to_owned())
     }
 }
@@ -474,6 +503,52 @@ mod tests {
     use std::path::PathBuf;
 
     use super::*;
+
+    #[test]
+    fn recorder_preserves_unrelated_panic_diagnostics() {
+        const PROBE: &str = "RSPICE_PANIC_RECORDER_PROBE";
+        if std::env::var_os(PROBE).is_some() {
+            std::panic::set_hook(Box::new(|info| {
+                eprintln!("previous hook: {}", info.payload_as_str().unwrap());
+            }));
+            let recorder = PanicRecorder::install();
+            let _again = PanicRecorder::install();
+            let outcome = run_stage::<()>(PanicGateStage::Parse, &recorder, || {
+                assert!(
+                    std::thread::spawn(|| panic!("parallel failure"))
+                        .join()
+                        .is_err()
+                );
+                panic!("captured deck failure");
+            });
+            assert!(matches!(outcome, Err(DeckOutcome::Panicked { message, .. })
+                if message.contains("captured deck failure") && message.contains("(at ")));
+            assert!(catch_unwind(|| panic!("later failure")).is_err());
+            return;
+        }
+        // Hook replacement is process-global, so probe its forwarding in an
+        // isolated process instead of racing the rest of this test binary.
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "suites::panic_gate::tests::recorder_preserves_unrelated_panic_diagnostics",
+                "--nocapture",
+            ])
+            .env(PROBE, "1")
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(output.status.success(), "{stderr}");
+        assert!(
+            stderr.contains("previous hook: parallel failure"),
+            "{stderr}"
+        );
+        assert!(stderr.contains("previous hook: later failure"), "{stderr}");
+        assert!(
+            !stderr.contains("previous hook: captured deck failure"),
+            "{stderr}"
+        );
+    }
 
     fn temp_dir(tag: &str) -> PathBuf {
         let unique = std::time::SystemTime::now()

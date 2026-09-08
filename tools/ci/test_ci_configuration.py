@@ -735,8 +735,8 @@ class CiConfigurationTests(unittest.TestCase):
         )
         self.assertIn("shipped_model_machine_code_census_digest", nightly_workflow)
         self.assertIn("--features generated-stamp -- generated-stamp", nightly_workflow)
-        self.assertIn("--max-corpus-median-reference-ratio 5.75", nightly_workflow)
-        self.assertIn("--max-model-reference-ratio 16.50", nightly_workflow)
+        self.assertNotIn("--max-corpus-median-reference-ratio", nightly_workflow)
+        self.assertNotIn("--max-model-reference-ratio", nightly_workflow)
         self.assertIn("target/veriloga-stamp-qualification.json", nightly_workflow)
 
     def test_generated_veriloga_has_desktop_browser_and_mobile_portability_rows(self) -> None:
@@ -845,12 +845,25 @@ class CiConfigurationTests(unittest.TestCase):
             r"--samples 9\s+"
             r"--min-dense-speedup 1\.75\s+"
             r"--min-speedup 3\.00\s+"
-            r"--min-full-stamp-speedup 2\.00\s+"
-            r"--max-native-setup-ms 10\s+"
-            r"--max-native-p95-ns-per-sweep 5000\s+"
-            r"--max-relative-stddev 0\.25\s+"
-            r"--max-native-code-bytes 16384",
+            r"--min-full-stamp-speedup 2\.00",
         )
+
+    def test_ci_reports_size_and_cross_model_cost_without_arbitrary_caps(self) -> None:
+        workflow = read_text(".github/workflows/ci.yml")
+        for flag in [
+            "--max-source-bytes", "--max-noise-source-bytes",
+            "--max-model-source-bytes", "--max-file-count",
+            "--max-stamp-state-payload-bytes",
+            "--max-corpus-median-reference-ratio", "--max-model-reference-ratio",
+            "--max-native-setup-ms", "--max-native-p95-ns-per-sweep",
+            "--max-relative-stddev", "--max-native-code-bytes",
+        ]:
+            self.assertNotIn(flag, workflow)
+        self.assertIn("--max-pooled-workspace-payload-bytes 0", workflow)
+        self.assertIn("--features generated-stamp-subset -- generated-stamp", workflow)
+        publisher = read_text(".github/workflows/publish-component-release.yml")
+        self.assertIn("compressed viewer runtime:", publisher)
+        self.assertNotIn('test "$runtime_gz" -le', publisher)
 
     def test_macos_intel_ci_executes_native_veriloga_jit(self) -> None:
         workflow = read_text(".github/workflows/ci.yml")

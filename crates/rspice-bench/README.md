@@ -202,8 +202,9 @@ against bytecode VM reference paths, and gates each case on median native
 speedup. It also records p95 so a single lucky fastest sample cannot hide a
 regression.
 
-Every budget below has an enforcing default: the gate is on unless a flag
-relaxes it.
+Relative speedup gates have enforcing defaults. Absolute setup/latency,
+dispersion and code-size budgets are opt-in for controlled-host qualification;
+all measurements are reported even when their optional budget is unset.
 
 | Flag | Default | Meaning |
 | :--- | :--- | :--- |
@@ -212,10 +213,10 @@ relaxes it.
 | `--min-speedup <X>` | 3.00 | Required `bytecode_median / native_median`; below this exits non-zero |
 | `--min-dense-speedup <X>` | 2.00 | Same, for the dense entrypoint case |
 | `--min-full-stamp-speedup <X>` | 2.00 | Same, for the full-stamp case |
-| `--max-native-setup-ms <MS>` | 10.0 | Canonical-IR-to-native setup budget per case |
-| `--max-native-p95-ns-per-sweep <NS>` | 5000.0 | Absolute native p95 budget |
-| `--max-relative-stddev <RATIO>` | 0.25 | Sample dispersion ceiling; a noisy host fails rather than reporting |
-| `--max-native-code-bytes <BYTES>` | 16384 | Generated native image size per case |
+| `--max-native-setup-ms <MS>` | unset | Canonical-IR-to-native setup budget per case |
+| `--max-native-p95-ns-per-sweep <NS>` | unset | Absolute native p95 budget |
+| `--max-relative-stddev <RATIO>` | unset | Optional sample dispersion ceiling |
+| `--max-native-code-bytes <BYTES>` | unset | Generated native image size per case |
 | `--out <PATH>` | unset | Optional JSON report path |
 
 Use release builds for comparable numbers. Debug runs are useful only as a

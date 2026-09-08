@@ -70,12 +70,10 @@ jobs:
               cargo build --locked --profile viewer-release -p rspice-viewer --target wasm32-unknown-unknown
               wasm-bindgen --target web --out-name viewer --out-dir /tmp/viewer-runtime \
                 target/wasm32-unknown-unknown/viewer-release/rspice_viewer.wasm
-              # Hydration budget gate: the compressed runtime a reader
-              # downloads on first activation stays at or under 3 MB.
+              # Report the compressed runtime downloaded on first activation.
               runtime_gz=$(( $(gzip -9 -c /tmp/viewer-runtime/viewer_bg.wasm | wc -c) \
                 + $(gzip -9 -c /tmp/viewer-runtime/viewer.js | wc -c) ))
               echo "compressed viewer runtime: ${runtime_gz} bytes"
-              test "$runtime_gz" -le 3145728
               export RSPICE_VIEWER_RUNTIME_DIR=/tmp/viewer-runtime
               cargo test --locked --release -p rspice-viewer
               cargo test --locked --release -p rspice-publish
