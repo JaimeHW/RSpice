@@ -696,6 +696,12 @@ pub enum CfgValueKind {
         left: ValueId,
         right: ValueId,
     },
+    /// Checked signed 32-bit arithmetic, with a zero continuous derivative.
+    IntegerArithmetic {
+        op: crate::integer_runtime::IntegerArithmeticOperation,
+        left: ValueId,
+        right: ValueId,
+    },
     /// `&`, `|`, `^`, `<<` or `>>` on two analog `integer` operands.
     ///
     /// Its result is [`CfgValueType::Real`] because the analog half carries
@@ -1128,6 +1134,7 @@ impl CfgValueKind {
             | Self::LimitPrevious { .. }
             | Self::Unary { .. }
             | Self::Binary { .. }
+            | Self::IntegerArithmetic { .. }
             | Self::IntegerBitwise { .. }
             | Self::IntegerBitwiseNot { .. }
             | Self::LaneSplat(_)
@@ -1237,6 +1244,7 @@ impl CfgValueKind {
             } => vec![*input, *direction],
             Self::SimParam { fallback, .. } => vec![*fallback],
             Self::Binary { left, right, .. }
+            | Self::IntegerArithmetic { left, right, .. }
             | Self::IntegerBitwise { left, right, .. }
             | Self::LaneBinary { left, right, .. } => {
                 vec![*left, *right]
@@ -1422,6 +1430,7 @@ impl CfgValueKind {
             }
             Self::SimParam { fallback, .. } => *fallback = map(*fallback),
             Self::Binary { left, right, .. }
+            | Self::IntegerArithmetic { left, right, .. }
             | Self::IntegerBitwise { left, right, .. }
             | Self::LaneBinary { left, right, .. } => {
                 *left = map(*left);

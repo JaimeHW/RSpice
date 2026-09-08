@@ -320,7 +320,9 @@ impl Bjt {
         state.d_ifp[IDX_VCI] = -d_ifp_d_vbci_eff * p;
 
         let iikp = if self.ikp.is_finite() && self.ikp > 0.0 {
-            1.0 / self.ikp
+            // Ifp already includes AREA*M. IKP remains a nominal parameter,
+            // so normalize by the same scale before forming the base charge.
+            1.0 / self.ikp / self.instance_scale()
         } else {
             0.0
         };
@@ -600,7 +602,27 @@ impl Bjt {
     ) -> Value {
         // Use a small relative perturbation to keep Vrth-derivative finite
         // differences accurate for strongly temperature-sensitive currents.
-        ((self.requested_temperature() + vrth).abs().max(1.0) * 1e-6).clamp(1e-7, 1e-3)
+        let raw_temperature = self.requested_temperature() + vrth;
+        let mut step = (raw_temperature.abs().max(1.0) * 1e-6).clamp(1e-7, 1e-3);
+        if self.vbic_13 && (self.tcvef != 0.0 || self.tcver != 0.0) {
+            let (temperature, slope) = self.mapped_temperature(raw_temperature);
+            let delta_t = temperature - self.tnom.max(1.0);
+            for (nominal, coefficient) in [(self.vaf, self.tcvef), (self.var, self.tcver)] {
+                let factor = 1.0 + delta_t * coefficient;
+                if nominal * factor > 0.0 && coefficient != 0.0 && slope > 0.0 {
+                    // Resolve the reciprocal's local slope without crossing its
+                    // pole. Inactive branches are held off by derivative variants.
+                    let distance = (factor / (coefficient * slope)).abs();
+                    let local_step = distance * 1e-4;
+                    if local_step < step {
+                        // Binary steps preserve the probe separation when
+                        // added to the much larger ambient temperature.
+                        step = local_step.max(Value::MIN_POSITIVE).log2().floor().exp2();
+                    }
+                }
+            }
+        }
+        step
     }
 }
 
@@ -608,6 +630,49 @@ impl Bjt {
 mod tests {
     use super::*;
     use std::collections::HashMap;
+
+    #[test]
+    fn vbic_parasitic_base_charge_is_independent_of_parallel_instance_count() {
+        for level in [4.0, 11.0, 12.0] {
+            for polarity in [1.0, -1.0] {
+                let params = HashMap::from([
+                    ("LEVEL".into(), level),
+                    ("ISP".into(), 1e-15),
+                    ("IKP".into(), 1e-5),
+                    ("WSP".into(), 0.6),
+                ]);
+                let make = |area, m| {
+                    let model = if polarity > 0.0 {
+                        Bjt::new_npn("q".into(), 1, 2, 0)
+                    } else {
+                        Bjt::new_pnp("q".into(), 1, 2, 0)
+                    };
+                    model
+                        .with_params(&params)
+                        .with_instance_params(&[("AREA".into(), area), ("M".into(), m)])
+                };
+                let evaluate = |model: &Bjt| {
+                    model.parasitic_transport_state(
+                        polarity * 0.7,
+                        polarity * 0.68,
+                        polarity * 0.1,
+                        polarity * 0.12,
+                        0.0,
+                    )
+                };
+                let unit = evaluate(&make(1.0, 1.0));
+                assert!(unit.qbp > 1.1, "the fixture must exercise high injection");
+                for (area, m) in [(1.0, 3.0), (2.0, 1.0), (2.0, 3.0)] {
+                    let scaled = evaluate(&make(area, m));
+                    assert!((scaled.qbp - unit.qbp).abs() < 1e-12);
+                    assert!((scaled.ifp - area * m * unit.ifp).abs() < 1e-12 * scaled.ifp.abs());
+                    for (actual, expected) in scaled.d_qbp.into_iter().zip(unit.d_qbp) {
+                        assert!((actual - expected).abs() < 1e-12 * expected.abs().max(1.0));
+                    }
+                }
+            }
+        }
+    }
 
     #[test]
     fn vbic13_extrinsic_avalanche_jacobian_includes_its_collector_current_control() {

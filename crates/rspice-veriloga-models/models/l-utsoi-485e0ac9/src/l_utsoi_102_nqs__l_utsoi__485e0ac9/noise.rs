@@ -6,7 +6,7 @@ use rspice_veriloga_runtime::GeneratedEvalContext;
 pub use rspice_veriloga_runtime::{GeneratedNoiseComplex, GeneratedNoiseDescriptor, GeneratedNoiseEndpoint, GeneratedNoiseEvaluation, GeneratedNoiseEvaluationError, GeneratedNoiseEvaluationRef, GeneratedNoiseInjectionDescriptor, GeneratedNoiseInjectionEvaluation, GeneratedNoiseKind, GeneratedNoiseProcessDescriptor, GeneratedNoiseProcessEvaluationRef, GeneratedNoiseProcessVisitor, GeneratedNoiseVisitor};
 
 use super::stamp::{canonical_model_preprocess, CANONICAL_MODEL_STAGE_SLOTS, canonical_instance_preprocess, CANONICAL_INSTANCE_STAGE_SLOTS, canonical_temperature_preprocess, CANONICAL_TEMPERATURE_STAGE_SLOTS};
-use rspice_veriloga_runtime::install_generated_stage_values;
+use rspice_veriloga_runtime::{integer, install_generated_stage_values};
 pub static NOISE_SOURCES: [GeneratedNoiseDescriptor; 10] = [
     GeneratedNoiseDescriptor { mechanism: "WHITE_G_GP_RGATE", label: Some("rgate"), kind: GeneratedNoiseKind::White, equation: 12, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(1), name: "g", is_internal: false }, neg: GeneratedNoiseEndpoint { local_node: Some(9), name: "gp", is_internal: true }, table_len: 0, table_log_interp: false },
     GeneratedNoiseDescriptor { mechanism: "WHITE_S_SI_RSOURCE", label: Some("rsource"), kind: GeneratedNoiseKind::White, equation: 15, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(2), name: "s", is_internal: false }, neg: GeneratedNoiseEndpoint { local_node: Some(6), name: "si", is_internal: true }, table_len: 0, table_log_interp: false },
@@ -42,6 +42,7 @@ impl Instance {
             &prepared[..],
             ctx.temperature(),
             ctx.thermal_voltage(),
+            ctx,
         );
         install_generated_stage_values(&mut prepared[..], &produced, &CANONICAL_INSTANCE_STAGE_SLOTS);
         let produced = canonical_temperature_preprocess(
@@ -286,7 +287,7 @@ impl Instance {
 		CQG=R;
 		}else{
 		let Y=if (parameters[21]* (C/ W))>= X{(parameters[21]* (C/ W))}else{X};
-		let Z=L* W;
+		let Z=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Mul, L, W));
 		let AC=AA/ AB;
 		let AD=AA/ Y;
 		let AE=(parameters[195]* (C+ (parameters[197]* AD)))* (C+ (parameters[196]* AC));
@@ -4304,6 +4305,7 @@ impl Instance {
 		let CQA=((3.20435313e-19f64* CNS)* CNT)* (CNZ.abs());
 		let CQD=(((3.20435313e-19f64* CNS)* CNT)* ((COB- COC).abs()))+ (CNU* (3.20435313e-19f64* ((CQB+ C)* (CNV.abs()))));
 		let CQF=CIL* ((parameters[33]* CNT)* (if ((CPY/ COH)* (E* ((CPW+ G)+ (((CPX* CPX)+ BXT).sqrt()))))>= A{((CPY/ COH)* (E* ((CPW+ G)+ (((CPX* CPX)+ BXT).sqrt()))))}else{A}));
+        ctx.check_noise_evaluation()?;
         if !(CQH != 0.0) {
             if !visitor.visit(0, GeneratedNoiseEvaluationRef { active: false, psd: 0.0, exponent: None, table_operands: &[] }) { return Ok(()); }
         } else {
@@ -5085,7 +5087,7 @@ impl Instance {
         DPL=EZ;
         }else{
         let FG=if (parameters[21]* (D/ FE))>= FF{(parameters[21]* (D/ FE))}else{FF};
-        let FH=AE* FE;
+        let FH=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Mul, AE, FE));
         let FK=FI/ FJ;
         let FL=FI/ FG;
         let FM=(parameters[195]* (D+ (parameters[197]* FL)))* (D+ (parameters[196]* FK));
@@ -9828,6 +9830,7 @@ impl Instance {
         let DQX=1f64;
         let DQY=1f64;
         let DQZ=1f64;
+        ctx.check_noise_evaluation()?;
         let omega = core::f64::consts::TAU * frequency_hz;
         let process_0_active = DPM != 0.0;
         let process_0_psd = (DPN).abs();

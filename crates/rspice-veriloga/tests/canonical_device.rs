@@ -22,6 +22,37 @@ use std::process::Command;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 #[test]
+fn generated_integer_arithmetic_finalizes_defaults_before_evaluation() {
+    let (state, stamp, noise) = generated_parts(
+        "module integer_defaults(p,n); inout p,n; electrical p,n; parameter integer numerator=5, denominator=2; parameter real quotient=numerator/denominator; parameter real overflow=2147483647+1; localparam real reciprocal=2**-1; integer q; analog begin q=V(p,n); I(p,n)<+quotient+(q/denominator)+0.25*V(p,n)+reciprocal; end endmodule",
+        "integer arithmetic defaults",
+    );
+    run_generated_main(
+        "integer arithmetic defaults",
+        &state,
+        &stamp,
+        &noise,
+        r#"
+let mut instance=device::state::Instance::new(&[0,1]);
+assert_eq!(instance.params.values, [5.0,2.0,2.0,-2147483648.0]);
+instance.set_parameter("numerator", -5.0).unwrap();
+assert_eq!(instance.params.values[2], -2.0);
+let bias=[5.0,0.0];
+let ctx=runtime::GeneratedEvalContext { voltages:&bias,temperature:300.0 };
+let mut sink=[0.0;12];
+instance.stamp(&ctx,&mut runtime::GeneratedStamper { sink:Some(&mut sink) });
+assert_eq!(sink[9],1.25);
+assert_eq!(sink[10],0.25);
+let valid=instance.params.values;
+assert!(instance.set_parameter("denominator",0.0).is_err());
+assert_eq!(instance.params.values, valid);
+assert!(!ctx.evaluation_failed());
+"#,
+    )
+    .unwrap();
+}
+
+#[test]
 fn generated_integer_assignments_and_bitwise_operations_execute_shared_semantics() {
     let source = r#"
 module integer_generated(p,n);

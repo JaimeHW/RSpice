@@ -6,7 +6,7 @@ use rspice_veriloga_runtime::GeneratedEvalContext;
 pub use rspice_veriloga_runtime::{GeneratedNoiseComplex, GeneratedNoiseDescriptor, GeneratedNoiseEndpoint, GeneratedNoiseEvaluation, GeneratedNoiseEvaluationError, GeneratedNoiseEvaluationRef, GeneratedNoiseInjectionDescriptor, GeneratedNoiseInjectionEvaluation, GeneratedNoiseKind, GeneratedNoiseProcessDescriptor, GeneratedNoiseProcessEvaluationRef, GeneratedNoiseProcessVisitor, GeneratedNoiseVisitor};
 
 use super::stamp::{canonical_model_preprocess, CANONICAL_MODEL_STAGE_SLOTS, canonical_instance_preprocess, CANONICAL_INSTANCE_STAGE_SLOTS, canonical_temperature_preprocess, CANONICAL_TEMPERATURE_STAGE_SLOTS};
-use rspice_veriloga_runtime::{install_generated_stage_values, rspice_limited_exp};
+use rspice_veriloga_runtime::{integer, install_generated_stage_values, rspice_limited_exp};
 pub static NOISE_SOURCES: [GeneratedNoiseDescriptor; 14] = [
     GeneratedNoiseDescriptor { mechanism: "WHITE_S_SI_RS", label: Some("rs"), kind: GeneratedNoiseKind::White, equation: 8, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(2), name: "s", is_internal: false }, neg: GeneratedNoiseEndpoint { local_node: Some(5), name: "si", is_internal: true }, table_len: 0, table_log_interp: false },
     GeneratedNoiseDescriptor { mechanism: "WHITE_D_DI_RD", label: Some("rd"), kind: GeneratedNoiseKind::White, equation: 10, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(0), name: "d", is_internal: false }, neg: GeneratedNoiseEndpoint { local_node: Some(4), name: "di", is_internal: true }, table_len: 0, table_log_interp: false },
@@ -46,6 +46,7 @@ impl Instance {
             &prepared[..],
             ctx.temperature(),
             ctx.thermal_voltage(),
+            ctx,
         );
         install_generated_stage_values(&mut prepared[..], &produced, &CANONICAL_INSTANCE_STAGE_SLOTS);
         let produced = canonical_temperature_preprocess(
@@ -595,6 +596,7 @@ impl Instance {
 		let MM=MI* MJ;
 		let MN=((((JX* LZ)* MJ)* D)* 3.141592653589793f64)/ E;
 		let MQ=E* MP;
+        ctx.check_noise_evaluation()?;
         {
             let psd = IL;
             if !(psd).is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 0, quantity: "psd", value: psd }); }
@@ -862,7 +864,7 @@ impl Instance {
         let L=parameters[172]* K;
         let M=parameters[174]* K;
         let N=E* E;
-        let Q=(O/ P)* P;
+        let Q=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Mul, (ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Div, O, P))), P));
         let T=(parameters[0]* K)+ parameters[15];
         let U=((parameters[1]/ O)* K)+ parameters[16];
         let W=V== A;
@@ -904,7 +906,7 @@ impl Instance {
         let AZ=AX* (AR* (AY+ (((AY* AY)+ AT).sqrt())));
         let BA=(AH/ parameters[61]).ln();
         let BB=AX* (AR* (BA+ (((BA* BA)+ AT).sqrt())));
-        let BC=parameters[62]* ((((O- B)* parameters[63])+ B).ln());
+        let BC=parameters[62]* ((((ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Sub, O, B)))* parameters[63])+ B).ln());
         let BD=parameters[36]* (B+ (parameters[118]/ AH));
         let BE=parameters[37]* (B+ (parameters[119]/ AH));
         let BF=parameters[64]* (B+ (parameters[115]/ AH));
@@ -1721,6 +1723,7 @@ impl Instance {
         let WW=1f64;
         let WX=1f64;
         let WY=1f64;
+        ctx.check_noise_evaluation()?;
         let omega = core::f64::consts::TAU * frequency_hz;
         let process_0_active = B != 0.0;
         let process_0_psd = (SC).abs();

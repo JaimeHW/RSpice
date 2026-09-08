@@ -2,7 +2,7 @@
 #![allow(dead_code, non_snake_case, unused_imports, unused_mut, unused_parens, unused_variables)]
 
 use super::state::Instance;
-use rspice_veriloga_runtime::{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, L10, L11, L2, L3, L4, L5, L6, L7, L9, evaluate_generated_above, evaluate_generated_cross, evaluate_generated_timer, rspice_eval_ddt, rspice_eval_idt, rspice_limexp, rspice_limited_exp, rspice_limited_exp_derivative};
+use rspice_veriloga_runtime::{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, L10, L11, L2, L3, L4, L5, L6, L7, L9, integer, evaluate_generated_above, evaluate_generated_cross, evaluate_generated_timer, rspice_eval_ddt, rspice_eval_idt, rspice_limexp, rspice_limited_exp, rspice_limited_exp_derivative};
 impl Instance {
     pub fn stamp(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedStamper<'_>) {
         let parameters = &self.params.values;
@@ -2096,7 +2096,7 @@ impl Instance {
 		let BJM=(BHI* PC)+ L3([BJL[0],0.0,BJL[1]]);
 		let BJN=AYL* AGB;
 		let BJO=(BHL* PD)+ L6([0.0,BJN[0],0.0,0.0,0.0,BJN[1]]);
-		let AIV=-parameters[2];
+		let AIV=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Sub, A, parameters[2]));
 		let AIW=AIV* ((AIU+ (AFX* PC))+ (AGB* PD));
 		let BJP=((L11([BJK[0],BJK[1],0.0,BJK[2],BJK[3],BJK[4],BJK[5],BJK[6],BJK[7],BJK[8],BJK[9]])+ L11([0.0,0.0,BJM[0],BJM[1],0.0,0.0,0.0,0.0,BJM[2],0.0,0.0]))+ L11([0.0,0.0,0.0,BJO[0],BJO[1],BJO[2],BJO[3],BJO[4],0.0,BJO[5],0.0]))* AIV;
 		let AIX=FT* NP;

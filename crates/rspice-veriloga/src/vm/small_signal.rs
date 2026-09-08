@@ -461,6 +461,10 @@ impl<'a> SmallSignalVm<'a> {
             Instruction::ZiState(layout) => self.execute_zi(*layout, false)?,
             Instruction::ZiStateDerivative(layout) => self.execute_zi(*layout, true)?,
 
+            Instruction::IntegerArithmetic(op) => self.integer_binary(
+                IntegerBinaryOperation::Arithmetic(*op),
+                "integer arithmetic",
+            )?,
             Instruction::Add => self.binary("Add", |left, right| left + right)?,
             Instruction::Sub => self.binary("Sub", |left, right| left - right)?,
             Instruction::Mul => self.binary("Mul", |left, right| left * right)?,

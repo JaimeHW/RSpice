@@ -115,15 +115,20 @@ impl SymbolTable {
         self.scopes[self.current].symbols.get(name)
     }
 
-    pub fn mark_used(&mut self, name: &str) {
+    pub fn lookup_mut(&mut self, name: &str) -> Option<&mut Symbol> {
         let mut scope_idx = Some(self.current);
         while let Some(idx) = scope_idx {
-            let scope = &mut self.scopes[idx];
-            if let Some(sym) = scope.symbols.get_mut(name) {
-                sym.attrs.used = true;
-                return;
+            if self.scopes[idx].symbols.contains_key(name) {
+                return self.scopes[idx].symbols.get_mut(name);
             }
-            scope_idx = scope.parent;
+            scope_idx = self.scopes[idx].parent;
+        }
+        None
+    }
+
+    pub fn mark_used(&mut self, name: &str) {
+        if let Some(symbol) = self.lookup_mut(name) {
+            symbol.attrs.used = true;
         }
     }
 

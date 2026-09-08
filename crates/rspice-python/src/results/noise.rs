@@ -21,6 +21,9 @@ pub struct PyNoiseContribution {
     /// Device name generating this noise
     #[pyo3(get)]
     pub device_name: String,
+    /// Canonical mechanism within the device, such as IBE or FN_BEX.
+    #[pyo3(get)]
+    pub mechanism: Option<String>,
     /// Noise type as string (Thermal, Shot, Flicker, Burst)
     #[pyo3(get)]
     pub noise_type: String,
@@ -43,14 +46,17 @@ impl PyNoiseContribution {
 
     /// Rebuild from pickled state. Not part of the public API.
     #[staticmethod]
+    #[pyo3(signature = (device_name, noise_type, output_contribution, percentage, mechanism=None))]
     fn _unpickle(
         device_name: String,
         noise_type: String,
         output_contribution: f64,
         percentage: f64,
+        mechanism: Option<String>,
     ) -> Self {
         Self {
             device_name,
+            mechanism,
             noise_type,
             output_contribution,
             percentage,
@@ -61,7 +67,10 @@ impl PyNoiseContribution {
     fn __reduce__<'py>(
         &self,
         py: Python<'py>,
-    ) -> PyResult<(Bound<'py, PyAny>, (String, String, f64, f64))> {
+    ) -> PyResult<(
+        Bound<'py, PyAny>,
+        (String, String, f64, f64, Option<String>),
+    )> {
         Ok((
             unpickler::<Self>(py)?,
             (
@@ -69,6 +78,7 @@ impl PyNoiseContribution {
                 self.noise_type.clone(),
                 self.output_contribution,
                 self.percentage,
+                self.mechanism.clone(),
             ),
         ))
     }
@@ -157,6 +167,7 @@ impl PyNoiseResult {
             .iter()
             .map(|c| PyNoiseContribution {
                 device_name: c.identity.device.clone(),
+                mechanism: c.identity.mechanism.clone(),
                 noise_type: format!("{:?}", c.noise_type),
                 output_contribution: c.output_contribution,
                 percentage: c.percentage,

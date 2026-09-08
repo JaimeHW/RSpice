@@ -2260,6 +2260,12 @@ pub mod autodiff {
                 | BinaryOp::Ge
                 | BinaryOp::And
                 | BinaryOp::Or
+                | BinaryOp::IntAdd
+                | BinaryOp::IntSub
+                | BinaryOp::IntMul
+                | BinaryOp::IntDiv
+                | BinaryOp::IntMod
+                | BinaryOp::IntPow
                 | BinaryOp::BitAnd
                 | BinaryOp::BitOr
                 | BinaryOp::BitXor
@@ -3229,6 +3235,12 @@ pub mod autodiff {
                 | BinaryOp::Ge
                 | BinaryOp::And
                 | BinaryOp::Or
+                | BinaryOp::IntAdd
+                | BinaryOp::IntSub
+                | BinaryOp::IntMul
+                | BinaryOp::IntDiv
+                | BinaryOp::IntMod
+                | BinaryOp::IntPow
                 | BinaryOp::BitAnd
                 | BinaryOp::BitOr
                 | BinaryOp::BitXor
@@ -4345,6 +4357,12 @@ pub mod autodiff {
                     | BinaryOp::Ge
                     | BinaryOp::And
                     | BinaryOp::Or
+                    | BinaryOp::IntAdd
+                    | BinaryOp::IntSub
+                    | BinaryOp::IntMul
+                    | BinaryOp::IntDiv
+                    | BinaryOp::IntMod
+                    | BinaryOp::IntPow
                     | BinaryOp::BitAnd
                     | BinaryOp::BitOr
                     | BinaryOp::BitXor

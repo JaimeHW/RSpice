@@ -348,7 +348,7 @@ impl Bjt {
         }
 
         let h = self.thermal_derivative_step(vrth);
-        let plus = self.with_temperature_variant(vrth + h, |model| {
+        let plus = self.with_temperature_derivative_variant(vrth + h, vrth, |model| {
             model.evaluate_state_fixed_temperature(BjtNodeVoltages {
                 vc,
                 vb,
@@ -363,7 +363,7 @@ impl Bjt {
                 vsi,
             })
         });
-        let minus = self.with_temperature_variant(vrth - h, |model| {
+        let minus = self.with_temperature_derivative_variant(vrth - h, vrth, |model| {
             model.evaluate_state_fixed_temperature(BjtNodeVoltages {
                 vc,
                 vb,

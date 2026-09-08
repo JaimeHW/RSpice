@@ -213,8 +213,12 @@ impl Bjt {
             let rise = internal[IDX_VRTH];
             let h = self.thermal_derivative_step(rise);
             let (factor, slope) = self.with_temperature_variant(rise, factor_at);
-            let plus = self.with_temperature_variant(rise + h, factor_at).0;
-            let minus = self.with_temperature_variant(rise - h, factor_at).0;
+            let plus = self
+                .with_temperature_derivative_variant(rise + h, rise, factor_at)
+                .0;
+            let minus = self
+                .with_temperature_derivative_variant(rise - h, rise, factor_at)
+                .0;
             (factor, slope, (plus - minus) / (2.0 * h))
         } else {
             let (factor, slope) = factor_at(self);
@@ -530,10 +534,10 @@ impl Bjt {
                 model.dynamic_charge_inputs(external, internal)
             })
         });
-        let plus_inputs = self.with_temperature_variant(vrth + h, |model| {
+        let plus_inputs = self.with_temperature_derivative_variant(vrth + h, vrth, |model| {
             model.dynamic_charge_inputs(external, plus_internal)
         });
-        let minus_inputs = self.with_temperature_variant(vrth - h, |model| {
+        let minus_inputs = self.with_temperature_derivative_variant(vrth - h, vrth, |model| {
             model.dynamic_charge_inputs(external, minus_internal)
         });
 
@@ -550,10 +554,10 @@ impl Bjt {
         plus_bias.internal_voltages = plus_internal;
         let mut minus_bias = bias;
         minus_bias.internal_voltages = minus_internal;
-        let plus_branches = self.with_temperature_variant(vrth + h, |model| {
+        let plus_branches = self.with_temperature_derivative_variant(vrth + h, vrth, |model| {
             model.dynamic_charge_branches_from_inputs(&plus_bias, plus_inputs)
         });
-        let minus_branches = self.with_temperature_variant(vrth - h, |model| {
+        let minus_branches = self.with_temperature_derivative_variant(vrth - h, vrth, |model| {
             model.dynamic_charge_branches_from_inputs(&minus_bias, minus_inputs)
         });
         for branch_idx in 0..BJT_DYNAMIC_CHARGE_COUNT {
@@ -831,10 +835,10 @@ impl Bjt {
         let base_inputs = self.with_temperature_variant(vrth, |model| {
             model.dynamic_charge_inputs(reduction.external_voltages, internal)
         });
-        let plus_inputs = self.with_temperature_variant(vrth + h, |model| {
+        let plus_inputs = self.with_temperature_derivative_variant(vrth + h, vrth, |model| {
             model.dynamic_charge_inputs(reduction.external_voltages, plus_internal)
         });
-        let minus_inputs = self.with_temperature_variant(vrth - h, |model| {
+        let minus_inputs = self.with_temperature_derivative_variant(vrth - h, vrth, |model| {
             model.dynamic_charge_inputs(reduction.external_voltages, minus_internal)
         });
 
@@ -886,14 +890,14 @@ impl Bjt {
         plus_reduction.internal_voltages[IDX_VRTH] = vrth + h;
         let mut minus_reduction = reduction;
         minus_reduction.internal_voltages[IDX_VRTH] = vrth - h;
-        let plus_branches = self.with_temperature_variant(vrth + h, |model| {
+        let plus_branches = self.with_temperature_derivative_variant(vrth + h, vrth, |model| {
             let plus_inputs = model.dynamic_charge_inputs(
                 plus_reduction.external_voltages,
                 plus_reduction.internal_voltages,
             );
             model.dynamic_charge_branches_from_inputs(&plus_reduction, plus_inputs)
         });
-        let minus_branches = self.with_temperature_variant(vrth - h, |model| {
+        let minus_branches = self.with_temperature_derivative_variant(vrth - h, vrth, |model| {
             let minus_inputs = model.dynamic_charge_inputs(
                 minus_reduction.external_voltages,
                 minus_reduction.internal_voltages,
@@ -1012,6 +1016,10 @@ mod tests {
     fn vbic13_delayed_avalanche_reduction_matches_nonequilibrium_residual_derivatives() {
         let params = [
             ("LEVEL", 12.0),
+            ("VEF", 5.0),
+            ("VER", 3.0),
+            ("TCVEF", 0.05),
+            ("TCVER", -0.02),
             ("IS", 1e-16),
             ("IBEI", 1e-18),
             ("IBCI", 1e-18),

@@ -1259,6 +1259,14 @@ impl CodeGenerator {
                 Node::Binary(op, _, _) => {
                     program.instructions.push(match op {
                         // Arithmetic
+                        BinaryOp::IntAdd
+                        | BinaryOp::IntSub
+                        | BinaryOp::IntMul
+                        | BinaryOp::IntDiv
+                        | BinaryOp::IntMod
+                        | BinaryOp::IntPow => Instruction::IntegerArithmetic(
+                            op.integer_arithmetic().expect("integer operation"),
+                        ),
                         BinaryOp::Add => Instruction::Add,
                         BinaryOp::Sub => Instruction::Sub,
                         BinaryOp::Mul => Instruction::Mul,

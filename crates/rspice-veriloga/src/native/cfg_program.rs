@@ -931,6 +931,14 @@ impl Lowerer<'_> {
                 let right = operand(*right)?;
                 push(binary_op(*op), &[left, right])
             }
+            CfgValueKind::IntegerArithmetic { op, left, right } => {
+                let left = operand(*left)?;
+                let right = operand(*right)?;
+                push(
+                    NativeOp::IntegerBinary(super::expr::IntegerBinaryOp::Arithmetic(*op)),
+                    &[left, right],
+                )
+            }
             CfgValueKind::IntegerBitwise { op, left, right } => {
                 use super::expr::IntegerBinaryOp;
                 use crate::canonical_ir::cfg::CfgIntegerBitwiseOp;

@@ -74,6 +74,62 @@ fn vbic_overlap_capacitance_has_positive_admittance_for_both_polarities() {
 }
 
 #[test]
+fn vbic13_early_voltage_cutoff_and_thermal_derivatives_match_xyce710() {
+    // Xyce 7.10 differentiates the inactive reciprocal branch at exactly
+    // zero Early voltage; a temperature probe must not turn it back on.
+    for (level, rise, tolerance, expected) in [
+        (
+            11,
+            20.0,
+            2e-7,
+            [
+                Complex64::new(-8.663038807350953e-6, 6.275760707091533e-6),
+                Complex64::new(4.317831416641038e-7, -4.178850145275066e-7),
+                Complex64::new(-0.0008111544184809163, -0.000639322846682267),
+            ],
+        ),
+        (
+            12,
+            20.0,
+            2e-7,
+            [
+                Complex64::new(-8.6629450754821e-6, 6.275692403772111e-6),
+                Complex64::new(4.3177660764799645e-7, -4.178801743108376e-7),
+                Complex64::new(-0.0008111542711349811, -0.0006393229527764979),
+            ],
+        ),
+        (
+            11,
+            19.99999,
+            2e-6,
+            [
+                Complex64::new(5.5688894178522316e-5, -4.029266538390741e-5),
+                Complex64::new(-3.828244129547701e-6, 2.6916652185934493e-6),
+                Complex64::new(-0.0009240107317768997, -0.0005576729057381911),
+            ],
+        ),
+    ] {
+        let substrate = if level == 12 { " 0" } else { "" };
+        let netlist = parse(&format!(
+            "VBIC Early voltage cutoff\nVc c 0 1.8\nVb b 0 0.7\nVth th 0 DC {rise} AC 1\nQ1 c b 0{substrate} th vm SW_ET=1\n\
+             .model vm NPN(LEVEL={level} VEF=5 VER=3 TCVEF=-0.05 TCVER=-0.05 IS=1e-16 IBEI=1e-18 IBCI=1e-18 RCX=10 RCI=2 RBX=5 RBI=3 RE=1 RBP=0 RS=0 AVC1=0.05 AVC2=0.3 TAVC=0.01 TD=1n RTH=1000 TCRTH=0.005 TMAXCLIP=100 CTH=1p GMIN=1u TNOM=27)\n.temp 27\n.end\n"
+        ));
+        let point = Engine::default()
+            .run_ac(&netlist, &[1e8])
+            .unwrap()
+            .pop()
+            .unwrap();
+        for (branch, expected) in ["vc", "vb", "vth"].into_iter().zip(expected) {
+            let actual = branch_current(&point, branch);
+            assert!(
+                (actual - expected).norm() < tolerance * expected.norm(),
+                "{level} rise={rise} {branch}: {actual:?} != {expected:?}"
+            );
+        }
+    }
+}
+
+#[test]
 fn vbic13_delayed_avalanche_heat_and_clipped_temperature_match_xyce710() {
     for (level, kind, polarity, rise, drive_base, multiplier, expected) in [
         (
@@ -84,9 +140,9 @@ fn vbic13_delayed_avalanche_heat_and_clipped_temperature_match_xyce710() {
             true,
             1,
             [
-                Complex64::new(-0.0055299710825809055, 0.003995971898904793),
-                Complex64::new(0.0002868746047409443, -0.00026608037701922105),
-                Complex64::new(0.009743814554519954, -0.0070067899992358774),
+                Complex64::new(-0.0037142943763058055, 0.00268656085433121),
+                Complex64::new(0.00016865091916015706, -0.00017907067371343544),
+                Complex64::new(0.006562379107882372, -0.004710659636530188),
             ],
         ),
         (
@@ -97,16 +153,16 @@ fn vbic13_delayed_avalanche_heat_and_clipped_temperature_match_xyce710() {
             false,
             3,
             [
-                Complex64::new(3.36865683680846e-5, -2.340680248645959e-5),
-                Complex64::new(-1.2487229592166488e-6, 1.2924528759025553e-6),
-                Complex64::new(-0.002058422117792587, -0.0019261856424439548),
+                Complex64::new(3.458083802410476e-5, -2.3971443485324468e-5),
+                Complex64::new(-1.2882306894777684e-6, 1.321168637960378e-6),
+                Complex64::new(-0.002056839994804803, -0.001927181953865983),
             ],
         ),
     ] {
         let substrate = if level == 12 { " 0" } else { "" };
         let netlist = parse(&format!(
             "Delayed VBIC avalanche and heat\nVc c 0 {}\nVb b 0 DC {} AC {}\nVth th 0 DC {rise} AC {}\nQ1 c b 0{substrate} th vm SW_ET=1 M={multiplier}\n\
-             .model vm {kind}(LEVEL={level} IS=1e-16 IBEI=1e-18 IBCI=1e-18 RCX=10 RCI=2 RBX=5 RBI=3 RE=1 RBP=0 RS=0 AVC1=0.05 AVC2=0.3 TAVC=0.01 TD=1n RTH=1000 TCRTH=0.005 TMAXCLIP=100 CTH=1p GMIN=1u TNOM=27)\n.temp 27\n.end\n",
+             .model vm {kind}(LEVEL={level} VEF=5 VER=3 TCVEF=0.05 TCVER=-0.02 IS=1e-16 IBEI=1e-18 IBCI=1e-18 RCX=10 RCI=2 RBX=5 RBI=3 RE=1 RBP=0 RS=0 AVC1=0.05 AVC2=0.3 TAVC=0.01 TD=1n RTH=1000 TCRTH=0.005 TMAXCLIP=100 CTH=1p GMIN=1u TNOM=27)\n.temp 27\n.end\n",
             polarity * 1.8,
             polarity * 0.7,
             u8::from(drive_base),

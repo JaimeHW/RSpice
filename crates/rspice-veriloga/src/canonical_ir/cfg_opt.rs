@@ -280,6 +280,14 @@ impl Optimizer {
             CfgValueKind::Binary { op, left, right } => {
                 apply_binary(*op, self.constant(*left)?, self.constant(*right)?)
             }
+            CfgValueKind::IntegerArithmetic { op, left, right } => {
+                crate::integer_runtime::integer_arithmetic(
+                    *op,
+                    self.constant(*left)?,
+                    self.constant(*right)?,
+                )
+                .ok()?
+            }
             _ => return None,
         };
         // A folded predicate stays a predicate, so a later pass reading its type

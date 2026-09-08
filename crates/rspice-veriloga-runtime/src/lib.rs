@@ -2811,8 +2811,8 @@ impl<'a> GeneratedEvalContext<'a> {
                 }
                 IntegerRuntimeError::DivisionByZero => "division by zero",
                 IntegerRuntimeError::ModulusByZero => "modulus by zero",
-                IntegerRuntimeError::NegativeExponent { .. } => {
-                    "negative integer exponent is unsupported"
+                IntegerRuntimeError::ZeroToNegativePower { .. } => {
+                    "zero raised to a negative integer exponent"
                 }
             };
             if self.evaluation_error.get().is_none() {

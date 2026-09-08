@@ -3456,7 +3456,18 @@ impl VerilogADevice {
 
     /// Checked dependent-parameter default evaluation. A malformed or stale
     /// compiled default program must not become a numeric zero.
+    /// Failure preserves the runtime state at entry, including previously
+    /// assigned overrides, so callers can correct an override and retry.
     pub fn try_resolve_parameter_defaults(&mut self) -> Result<(), VmError> {
+        let previous = self.context.clone();
+        if let Err(error) = self.resolve_parameter_defaults_inner() {
+            self.context = previous;
+            return Err(error);
+        }
+        Ok(())
+    }
+
+    fn resolve_parameter_defaults_inner(&mut self) -> Result<(), VmError> {
         for filter in &mut self.context.zi_filters {
             filter.invalidate_definition();
         }
@@ -8525,6 +8536,65 @@ endmodule
 mod analysis_lifecycle_tests {
     use super::VerilogADevice;
     use crate::{CompilerOptions, VerilogACompiler};
+
+    #[test]
+    fn failed_parameter_finalization_restores_dependent_values_and_activation() {
+        for (declaration, contribution) in [
+            ("parameter real quotient=1.0/divisor;", "I(p,n)<+derived;"),
+            (
+                "parameter real limited=1 from [0:divisor];",
+                "I(p,n)<+derived;",
+            ),
+            ("", "if (1.0/divisor) V(p,n)<+derived;"),
+        ] {
+            let source = format!(
+                "module parameter_transaction(p,n); inout p,n; electrical p,n;
+                parameter real base=2, divisor=1;
+                parameter real derived=base*3;
+                {declaration} analog begin {contribution} end endmodule"
+            );
+            let runtime = VerilogACompiler::default()
+                .compile_runtime(&source, None)
+                .unwrap();
+            let mut device = VerilogADevice::try_new_with_canonical_ir(
+                "PARAMETERS",
+                runtime.model,
+                &runtime.canonical_ir,
+                &[1, 0],
+            )
+            .unwrap();
+            device.try_set_parameter("base", 5.0).unwrap();
+            device.try_set_parameter("divisor", 0.0).unwrap();
+            let previous = device.context.clone();
+            let previous_programs = device.program_active.clone();
+            let previous_branches = device.branch_active.clone();
+            device
+                .try_resolve_parameter_defaults()
+                .expect_err("the final vector or activation guard is invalid");
+            assert_eq!(
+                device.context.parameters, previous.parameters,
+                "failed finalization retained partial dependent values: {source}"
+            );
+            assert_eq!(device.context.param_given, previous.param_given);
+            assert_eq!(device.context.variables, previous.variables);
+            assert_eq!(
+                device.context.analysis_initialized,
+                previous.analysis_initialized
+            );
+            assert_eq!(
+                device.context.numerical_evaluation_valid,
+                previous.numerical_evaluation_valid
+            );
+            assert_eq!(device.program_active, previous_programs);
+            assert_eq!(device.branch_active, previous_branches);
+
+            // The explicit assignments remain available for correction and
+            // retry, while the previous derived value stayed at six on error.
+            device.try_set_parameter("divisor", 2.0).unwrap();
+            device.try_resolve_parameter_defaults().unwrap();
+            assert_eq!(device.context.parameters[2], 15.0);
+        }
+    }
 
     #[test]
     fn public_begin_analysis_is_failure_atomic_and_starts_with_fresh_history() {

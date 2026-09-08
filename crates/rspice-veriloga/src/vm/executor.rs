@@ -378,6 +378,9 @@ impl<'a> Vm<'a> {
             }
 
             // Binary operations
+            Instruction::IntegerArithmetic(op) => {
+                self.integer_binary_op(IntegerBinaryOperation::Arithmetic(*op))?
+            }
             Instruction::Add => self.binary_op(|a, b| a + b)?,
             Instruction::Sub => self.binary_op(|a, b| a - b)?,
             Instruction::Mul => self.binary_op(|a, b| a * b)?,

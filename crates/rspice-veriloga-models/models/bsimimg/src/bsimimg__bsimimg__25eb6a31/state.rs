@@ -1743,7 +1743,7 @@ impl Instance {
 	pub const EVENT_STATE_COUNT: usize = 0;
 	pub const ONE_STEP_DAE_SPLIT_SAFE: bool = true;
 	pub const REQUIRES_NODESET_PHASE: bool = false;
-	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "76997dbbe7ecd5c7c723cffcc2c03e51621251637c38bcc41cf1ee207b30523f";
+	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "2ffa74d1e7dea36183ba165c2a33d0f9f2f1004e0ded408c37509bdc3b87cb7e";
 	pub const MAX_ANALOG_LOOP_ITERATIONS: usize = 1_000_000;
 
 	pub fn new(nodes: &[usize]) -> Self {
@@ -2100,7 +2100,7 @@ impl Instance {
 	fn finalize_parameter_vector_chunk_0(params: &mut Parameters, param_given: &[bool; Self::PARAMETER_COUNT], model_storage: bool) -> Result<(), String> {
 		if (if model_storage { PARAMETER_MODEL_FLAGS[13] || PARAMETER_DUAL_SCOPE_FLAGS[13] } else { !PARAMETER_MODEL_FLAGS[13] }) && !param_given[13] {
 			let value = {
-				(-params[12])
+				(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Sub, 0.0, params[12])).map_err(|error| error.to_string())?
 			};
 			validate_parameter_scalar_metadata(13, value)?;
 			params.values[13] = value;
@@ -2114,7 +2114,7 @@ impl Instance {
 		}
 		if (if model_storage { PARAMETER_MODEL_FLAGS[58] || PARAMETER_DUAL_SCOPE_FLAGS[58] } else { !PARAMETER_MODEL_FLAGS[58] }) && !param_given[58] {
 			let value = {
-				if (params[13] == (-1.0)) { (params[53] + params[55]) } else { params[53] }
+				if (params[13] == -1.0) { (params[53] + params[55]) } else { params[53] }
 			};
 			validate_parameter_scalar_metadata(58, value)?;
 			params.values[58] = value;

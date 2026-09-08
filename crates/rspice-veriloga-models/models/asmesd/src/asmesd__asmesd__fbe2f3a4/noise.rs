@@ -37,23 +37,24 @@ impl Instance {
 		let AV=node_potentials[6];
 		let BE=80f64;
 		let BK=37f64;
-		let BX=parameters[8];
-		let CA=parameters[4];
-		let CJ=parameters[57];
-		let EJ=parameters[49];
-		let EK=parameters[51];
-		let EL=parameters[12];
-		let EN=parameters[66];
-		let EP=parameters[14];
-		let ET=parameters[31];
-		let EW=parameters[13];
-		let EY=parameters[67];
-		let FA=parameters[15];
-		let FG=parameters[46];
-		let GA=parameters[28];
-		let GB=parameters[27];
-		let GG=-1f64;
-		let GJ=3.2043836e-19f64;
+		let BM=-37f64;
+		let BY=parameters[8];
+		let CB=parameters[4];
+		let CK=parameters[57];
+		let EK=parameters[49];
+		let EL=parameters[51];
+		let EM=parameters[12];
+		let EO=parameters[66];
+		let EQ=parameters[14];
+		let EU=parameters[31];
+		let EX=parameters[13];
+		let EZ=parameters[67];
+		let FB=parameters[15];
+		let FD=-1f64;
+		let FI=parameters[46];
+		let GC=parameters[28];
+		let GD=parameters[27];
+		let GK=3.2043836e-19f64;
 		let B=(temperature+ node_potentials[3])+ parameters[45];
 		let C=B> 173.14999999999998f64;
 		let E=if C{
@@ -122,7 +123,7 @@ impl Instance {
 		let AX=N* (node_potentials[1]- O);
 		let AY=N* (node_potentials[2]- AV);
 		let AZ=AN> A;
-		let EB;
+		let EC;
 		if AZ{
 		let BA=AW/ (parameters[1]* Q);
 		let BB=parameters[11]* Q;
@@ -141,276 +142,276 @@ impl Instance {
 		}
 		let BJ=BH* (BI.exp());
 		let BL=BC>= BK;
-		let BT;
+		let BU;
 		if BL{
-		BT=BC;
+		BU=BC;
 		}else{
-		let BM=BC<= -37f64;
-		let BU=if BM{
-		let BN=BC.exp();
-		BN
-		}else{
-		let BO=((BC.exp())+ L).ln();
+		let BN=BC<= BM;
+		let BV=if BN{
+		let BO=BC.exp();
 		BO
+		}else{
+		let BP=((BC.exp())+ L).ln();
+		BP
 		};
-		BT=BU;
+		BU=BV;
 		}
-		let BP=BD>= BK;
-		let BV;
-		if BP{
-		BV=BD;
+		let BQ=BD>= BK;
+		let BW;
+		if BQ{
+		BW=BD;
 		}else{
-		let BQ=BD<= -37f64;
-		let BW=if BQ{
-		let BR=BD.exp();
-		BR
-		}else{
-		let BS=((BD.exp())+ L).ln();
+		let BR=BD<= BM;
+		let BX=if BR{
+		let BS=BD.exp();
 		BS
+		}else{
+		let BT=((BD.exp())+ L).ln();
+		BT
 		};
-		BV=BW;
+		BW=BX;
 		}
-		let BY=(AN* (BJ- L))- ((AR* (BT- BV))/ (L+ (BX* ((AW.abs()).powf(AT)))));
-		EB=BY;
-		}else{
-		EB=A;
-		}
-		let BZ=AO> A;
-		let EC;
-		if BZ{
-		let CB=((-1f64* AW)* CA)/ ((parameters[3]* Q)* (if (CA- AW)>= 1e-3f64{(CA- AW)}else{1e-3f64}));
-		let CC=CB> BE;
-		let CE;
-		let CF;
-		if CC{
-		let CD=L+ (CB- BE);
-		CE=CD;
-		CF=BE;
-		}else{
-		CE=L;
-		CF=CB;
-		}
-		let CG=AO* ((CE* (CF.exp()))- L);
-		EC=CG;
+		let BZ=(AN* (BJ- L))- ((AR* (BU- BW))/ (L+ (BY* ((AW.abs()).powf(AT)))));
+		EC=BZ;
 		}else{
 		EC=A;
 		}
-		let CH=AQ> A;
+		let CA=AO> A;
 		let ED;
-		if CH{
-		let CI=AW/ (AP* Q);
-		let CK=CJ* Q;
-		let CL=((-AW)- AS)/ CK;
-		let CM=(-AS)/ CK;
-		let CN=CI> BE;
-		let CP;
-		let CQ;
-		if CN{
-		let CO=L+ (CI- BE);
-		CP=CO;
-		CQ=BE;
+		if CA{
+		let CC=((-1f64* AW)* CB)/ ((parameters[3]* Q)* (if (CB- AW)>= 1e-3f64{(CB- AW)}else{1e-3f64}));
+		let CD=CC> BE;
+		let CF;
+		let CG;
+		if CD{
+		let CE=L+ (CC- BE);
+		CF=CE;
+		CG=BE;
 		}else{
-		CP=L;
-		CQ=CI;
+		CF=L;
+		CG=CC;
 		}
-		let CR=CP* (CQ.exp());
-		let CS=CL>= BK;
-		let DA;
-		if CS{
-		DA=CL;
-		}else{
-		let CT=CL<= -37f64;
-		let DB=if CT{
-		let CU=CL.exp();
-		CU
-		}else{
-		let CV=((CL.exp())+ L).ln();
-		CV
-		};
-		DA=DB;
-		}
-		let CW=CM>= BK;
-		let DC;
-		if CW{
-		DC=CM;
-		}else{
-		let CX=CM<= -37f64;
-		let DD=if CX{
-		let CY=CM.exp();
-		CY
-		}else{
-		let CZ=((CM.exp())+ L).ln();
-		CZ
-		};
-		DC=DD;
-		}
-		let DE=(AQ* (CR- L))- ((A* (DA- DC))/ (L+ (BX* ((AW.abs()).powf(AT)))));
-		ED=DE;
+		let CH=AO* ((CF* (CG.exp()))- L);
+		ED=CH;
 		}else{
 		ED=A;
 		}
-		let EF;
+		let CI=AQ> A;
+		let EE;
+		if CI{
+		let CJ=AW/ (AP* Q);
+		let CL=CK* Q;
+		let CM=((-AW)- AS)/ CL;
+		let CN=(-AS)/ CL;
+		let CO=CJ> BE;
+		let CQ;
+		let CR;
+		if CO{
+		let CP=L+ (CJ- BE);
+		CQ=CP;
+		CR=BE;
+		}else{
+		CQ=L;
+		CR=CJ;
+		}
+		let CS=CQ* (CR.exp());
+		let CT=CM>= BK;
+		let DB;
+		if CT{
+		DB=CM;
+		}else{
+		let CU=CM<= BM;
+		let DC=if CU{
+		let CV=CM.exp();
+		CV
+		}else{
+		let CW=((CM.exp())+ L).ln();
+		CW
+		};
+		DB=DC;
+		}
+		let CX=CN>= BK;
+		let DD;
+		if CX{
+		DD=CN;
+		}else{
+		let CY=CN<= BM;
+		let DE=if CY{
+		let CZ=CN.exp();
+		CZ
+		}else{
+		let DA=((CN.exp())+ L).ln();
+		DA
+		};
+		DD=DE;
+		}
+		let DF=(AQ* (CS- L))- ((A* (DB- DD))/ (L+ (BY* ((AW.abs()).powf(AT)))));
+		EE=DF;
+		}else{
+		EE=A;
+		}
+		let EG;
 		if AZ{
-		let DF=P/ (parameters[61]* Q);
-		let DG=CJ* Q;
-		let DH=((-P)- AS)/ DG;
-		let DI=(-AS)/ DG;
-		let DJ=DF> BE;
-		let DL;
+		let DG=P/ (parameters[61]* Q);
+		let DH=CK* Q;
+		let DI=((-P)- AS)/ DH;
+		let DJ=(-AS)/ DH;
+		let DK=DG> BE;
 		let DM;
-		if DJ{
-		let DK=L+ (DF- BE);
-		DL=DK;
-		DM=BE;
+		let DN;
+		if DK{
+		let DL=L+ (DG- BE);
+		DM=DL;
+		DN=BE;
 		}else{
-		DL=L;
-		DM=DF;
+		DM=L;
+		DN=DG;
 		}
-		let DN=DL* (DM.exp());
-		let DO=DH>= BK;
-		let DW;
-		if DO{
-		DW=DH;
+		let DO=DM* (DN.exp());
+		let DP=DI>= BK;
+		let DX;
+		if DP{
+		DX=DI;
 		}else{
-		let DP=DH<= -37f64;
-		let DX=if DP{
-		let DQ=DH.exp();
-		DQ
-		}else{
-		let DR=((DH.exp())+ L).ln();
+		let DQ=DI<= BM;
+		let DY=if DQ{
+		let DR=DI.exp();
 		DR
+		}else{
+		let DS=((DI.exp())+ L).ln();
+		DS
 		};
-		DW=DX;
+		DX=DY;
 		}
-		let DS=DI>= BK;
-		let DY;
-		if DS{
-		DY=DI;
+		let DT=DJ>= BK;
+		let DZ;
+		if DT{
+		DZ=DJ;
 		}else{
-		let DT=DI<= -37f64;
-		let DZ=if DT{
-		let DU=DI.exp();
-		DU
-		}else{
-		let DV=((DI.exp())+ L).ln();
+		let DU=DJ<= BM;
+		let EA=if DU{
+		let DV=DJ.exp();
 		DV
+		}else{
+		let DW=((DJ.exp())+ L).ln();
+		DW
 		};
-		DY=DZ;
+		DZ=EA;
 		}
-		let EA=(AN* (DN- L))- ((AU* (DW- DY))/ (L+ (BX* ((P.abs()).powf(AT)))));
-		EF=EA;
+		let EB=(AN* (DO- L))- ((AU* (DX- DZ))/ (L+ (BY* ((P.abs()).powf(AT)))));
+		EG=EB;
 		}else{
-		EF=A;
+		EG=A;
 		}
-		let EE=((EB- EC)/ U)+ ED;
-		let EG=(2f64* ((L- (AW* AC))- (P* Y)))/ (L+ (((L+ (4f64* ((EB* (AG* (L+ (P* parameters[81]))))+ (EF* AK)))).abs()).powf(parameters[82])));
-		let EH=EF* EG;
-		let EI=EB* EG;
-		let EM=(EL* ((S* parameters[37]).exp()))* ((L+ (((AX/ parameters[48]).abs()).powf(EJ))).powf((L/ EJ)));
-		let EO=EN* ((S* parameters[78]).exp());
-		let EQ=(EP* ((S* parameters[38]).exp()))* ((L+ (((AY/ parameters[50]).abs()).powf(EK))).powf((L/ EK)));
-		let ER=parameters[32]== L;
-		let EV=if ER{
-		let ES=EM/ (L+ (((node_potentials[8].abs())/ parameters[20]).powf(parameters[44])));
-		ES
+		let EF=((EC- ED)/ U)+ EE;
+		let EH=(2f64* ((L- (AW* AC))- (P* Y)))/ (L+ (((L+ (4f64* ((EC* (AG* (L+ (P* parameters[81]))))+ (EG* AK)))).abs()).powf(parameters[82])));
+		let EI=EG* EH;
+		let EJ=EC* EH;
+		let EN=(EM* ((S* parameters[37]).exp()))* ((L+ (((AX/ parameters[48]).abs()).powf(EK))).powf((L/ EK)));
+		let EP=EO* ((S* parameters[78]).exp());
+		let ER=(EQ* ((S* parameters[38]).exp()))* ((L+ (((AY/ parameters[50]).abs()).powf(EL))).powf((L/ EL)));
+		let ES=parameters[32]== L;
+		let EW=if ES{
+		let ET=EN/ (L+ (((node_potentials[8].abs())/ parameters[20]).powf(parameters[44])));
+		ET
 		}else{
-		EM
+		EN
 		};
-		let EU=ET== L;
-		let FI;
-		let FO;
-		let FU;
-		if EU{
-		let EX=EV+ EW;
-		let EZ=EO+ EY;
-		let FB=EQ+ FA;
-		FI=EX;
-		FO=FB;
-		FU=EZ;
+		let EV=EU== L;
+		let FK;
+		let FQ;
+		let FW;
+		if EV{
+		let EY=EW+ EX;
+		let FA=EP+ EZ;
+		let FC=ER+ FB;
+		FK=EY;
+		FQ=FC;
+		FW=FA;
 		}else{
-		FI=EV;
-		FO=EQ;
-		FU=EO;
+		FK=EW;
+		FQ=ER;
+		FW=EP;
 		}
-		let FC=5.5224904e-23f64* K;
-		let FD=(EL+ (ET* EW))/ M;
-		let FE=(EP+ (ET* FA))/ M;
-		let FF=(EN+ (ET* EY))/ M;
-		let FH=(FD> A)&& (FD>= FG);
-		let GM;
+		let FE=5.5224904e-23f64* K;
+		let FF=(EM+ (EU* EX))/ M;
+		let FG=(EQ+ (EU* FB))/ M;
+		let FH=(EO+ (EU* EZ))/ M;
+		let FJ=(FF> A)&& (FF>= FI);
 		let GN;
-		if FH{
-		let FJ=FI/ M;
-		let FK=FJ>= FG;
-		let FM=if FK{
-		let FL=FC/ FJ;
-		FL
-		}else{
-		A
-		};
-		GM=L;
-		GN=FM;
-		}else{
-		GM=A;
-		GN=A;
-		}
-		let FN=(FE> A)&& (FE>= FG);
 		let GO;
-		let GP;
-		if FN{
-		let FP=FO/ M;
-		let FQ=FP>= FG;
-		let FS=if FQ{
-		let FR=FC/ FP;
-		FR
+		if FJ{
+		let FL=FK/ M;
+		let FM=FL>= FI;
+		let FO=if FM{
+		let FN=FE/ FL;
+		FN
 		}else{
 		A
 		};
-		GO=L;
-		GP=FS;
+		GN=L;
+		GO=FO;
 		}else{
+		GN=A;
 		GO=A;
-		GP=A;
 		}
-		let FT=(FF> A)&& (FF>= FG);
+		let FP=(FG> A)&& (FG>= FI);
+		let GP;
 		let GQ;
-		let GR;
-		if FT{
-		let FV=FU/ M;
-		let FW=FV>= FG;
-		let FY=if FW{
-		let FX=FC/ FV;
-		FX
+		if FP{
+		let FR=FQ/ M;
+		let FS=FR>= FI;
+		let FU=if FS{
+		let FT=FE/ FR;
+		FT
 		}else{
 		A
 		};
-		GQ=L;
-		GR=FY;
+		GP=L;
+		GQ=FU;
 		}else{
+		GP=A;
 		GQ=A;
-		GR=A;
 		}
-		let FZ=N* EE;
-		let GC=(((GA> A)&& (GB> A)) as u8 as f64)> A;
-		let GE=if GC{
-		let GD=GB* ((EE.abs()).powf(GA));
-		GD
+		let FV=(FH> A)&& (FH>= FI);
+		let GR;
+		let GS;
+		if FV{
+		let FX=FW/ M;
+		let FY=FX>= FI;
+		let GA=if FY{
+		let FZ=FE/ FX;
+		FZ
 		}else{
 		A
 		};
-		let GF=FZ>= A;
-		let GH=if GF{
+		GR=L;
+		GS=GA;
+		}else{
+		GR=A;
+		GS=A;
+		}
+		let GB=N* EF;
+		let GE=(((GC> A)&& (GD> A)) as u8 as f64)> A;
+		let GG=if GE{
+		let GF=GD* ((EF.abs()).powf(GC));
+		GF
+		}else{
+		A
+		};
+		let GH=GB>= A;
+		let GI=if GH{
 		L
 		}else{
-		GG
+		FD
 		};
-		let GI=GH* GE;
-		let GK=GJ* (EE.abs());
-		let GL=GJ* ((EI- EH).abs());
-        if !(GM != 0.0) {
+		let GJ=GI* GG;
+		let GL=GK* (EF.abs());
+		let GM=GK* ((EJ- EI).abs());
+        if !(GN != 0.0) {
             if !visitor.visit(0, GeneratedNoiseEvaluationRef { active: false, psd: 0.0, exponent: None, table_operands: &[] }) { return Ok(()); }
         } else {
-            let psd = GN;
+            let psd = GO;
             if !(psd).is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 0, quantity: "psd", value: psd }); }
             let psd = psd.abs();
             let exponent: Option<f64> = None;
@@ -419,10 +420,10 @@ impl Instance {
             if !(psd).is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 0, quantity: "scaled psd", value: psd }); }
             if !visitor.visit(0, GeneratedNoiseEvaluationRef { active: true, psd, exponent, table_operands: &table_operands }) { return Ok(()); }
         }
-        if !(GO != 0.0) {
+        if !(GP != 0.0) {
             if !visitor.visit(1, GeneratedNoiseEvaluationRef { active: false, psd: 0.0, exponent: None, table_operands: &[] }) { return Ok(()); }
         } else {
-            let psd = GP;
+            let psd = GQ;
             if !(psd).is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 1, quantity: "psd", value: psd }); }
             let psd = psd.abs();
             let exponent: Option<f64> = None;
@@ -431,10 +432,10 @@ impl Instance {
             if !(psd).is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 1, quantity: "scaled psd", value: psd }); }
             if !visitor.visit(1, GeneratedNoiseEvaluationRef { active: true, psd, exponent, table_operands: &table_operands }) { return Ok(()); }
         }
-        if !(GQ != 0.0) {
+        if !(GR != 0.0) {
             if !visitor.visit(2, GeneratedNoiseEvaluationRef { active: false, psd: 0.0, exponent: None, table_operands: &[] }) { return Ok(()); }
         } else {
-            let psd = GR;
+            let psd = GS;
             if !(psd).is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 2, quantity: "psd", value: psd }); }
             let psd = psd.abs();
             let exponent: Option<f64> = None;
@@ -444,7 +445,7 @@ impl Instance {
             if !visitor.visit(2, GeneratedNoiseEvaluationRef { active: true, psd, exponent, table_operands: &table_operands }) { return Ok(()); }
         }
         {
-            let psd = GI;
+            let psd = GJ;
             if !(psd).is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 3, quantity: "psd", value: psd }); }
             let psd = psd.abs();
             let exponent: Option<f64> = Some(L);
@@ -455,7 +456,7 @@ impl Instance {
             if !visitor.visit(3, GeneratedNoiseEvaluationRef { active: true, psd, exponent, table_operands: &table_operands }) { return Ok(()); }
         }
         {
-            let psd = GK;
+            let psd = GL;
             if !(psd).is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 4, quantity: "psd", value: psd }); }
             let psd = psd.abs();
             let exponent: Option<f64> = None;
@@ -465,7 +466,7 @@ impl Instance {
             if !visitor.visit(4, GeneratedNoiseEvaluationRef { active: true, psd, exponent, table_operands: &table_operands }) { return Ok(()); }
         }
         {
-            let psd = GL;
+            let psd = GM;
             if !(psd).is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 5, quantity: "psd", value: psd }); }
             let psd = psd.abs();
             let exponent: Option<f64> = None;
@@ -527,29 +528,30 @@ impl Instance {
         let AV=node_potentials[6];
         let BE=80f64;
         let BK=37f64;
-        let BX=parameters[8];
-        let CA=parameters[4];
-        let CJ=parameters[57];
-        let EJ=parameters[49];
-        let EK=parameters[51];
-        let EL=parameters[12];
-        let EN=parameters[66];
-        let EP=parameters[14];
-        let ET=parameters[31];
-        let EW=parameters[13];
-        let EY=parameters[67];
-        let FA=parameters[15];
-        let FG=parameters[46];
-        let GA=parameters[28];
-        let GB=parameters[27];
-        let GG=-1f64;
-        let GJ=3.2043836e-19f64;
-        let GS=1f64;
+        let BM=-37f64;
+        let BY=parameters[8];
+        let CB=parameters[4];
+        let CK=parameters[57];
+        let EK=parameters[49];
+        let EL=parameters[51];
+        let EM=parameters[12];
+        let EO=parameters[66];
+        let EQ=parameters[14];
+        let EU=parameters[31];
+        let EX=parameters[13];
+        let EZ=parameters[67];
+        let FB=parameters[15];
+        let FD=-1f64;
+        let FI=parameters[46];
+        let GC=parameters[28];
+        let GD=parameters[27];
+        let GK=3.2043836e-19f64;
         let GT=1f64;
         let GU=1f64;
-        let GY=0f64;
+        let GV=1f64;
         let GZ=0f64;
         let HA=0f64;
+        let HB=0f64;
         let B=(temperature+ node_potentials[3])+ parameters[45];
         let C=B> 173.14999999999998f64;
         let E=if C{
@@ -618,7 +620,7 @@ impl Instance {
         let AX=N* (node_potentials[1]- O);
         let AY=N* (node_potentials[2]- AV);
         let AZ=AN> A;
-        let EB;
+        let EC;
         if AZ{
         let BA=AW/ (parameters[1]* Q);
         let BB=parameters[11]* Q;
@@ -637,345 +639,345 @@ impl Instance {
         }
         let BJ=BH* (BI.exp());
         let BL=BC>= BK;
-        let BT;
+        let BU;
         if BL{
-        BT=BC;
+        BU=BC;
         }else{
-        let BM=BC<= -37f64;
-        let BU=if BM{
-        let BN=BC.exp();
-        BN
-        }else{
-        let BO=((BC.exp())+ L).ln();
+        let BN=BC<= BM;
+        let BV=if BN{
+        let BO=BC.exp();
         BO
+        }else{
+        let BP=((BC.exp())+ L).ln();
+        BP
         };
-        BT=BU;
+        BU=BV;
         }
-        let BP=BD>= BK;
-        let BV;
-        if BP{
-        BV=BD;
+        let BQ=BD>= BK;
+        let BW;
+        if BQ{
+        BW=BD;
         }else{
-        let BQ=BD<= -37f64;
-        let BW=if BQ{
-        let BR=BD.exp();
-        BR
-        }else{
-        let BS=((BD.exp())+ L).ln();
+        let BR=BD<= BM;
+        let BX=if BR{
+        let BS=BD.exp();
         BS
+        }else{
+        let BT=((BD.exp())+ L).ln();
+        BT
         };
-        BV=BW;
+        BW=BX;
         }
-        let BY=(AN* (BJ- L))- ((AR* (BT- BV))/ (L+ (BX* ((AW.abs()).powf(AT)))));
-        EB=BY;
-        }else{
-        EB=A;
-        }
-        let BZ=AO> A;
-        let EC;
-        if BZ{
-        let CB=((-1f64* AW)* CA)/ ((parameters[3]* Q)* (if (CA- AW)>= 1e-3f64{(CA- AW)}else{1e-3f64}));
-        let CC=CB> BE;
-        let CE;
-        let CF;
-        if CC{
-        let CD=L+ (CB- BE);
-        CE=CD;
-        CF=BE;
-        }else{
-        CE=L;
-        CF=CB;
-        }
-        let CG=AO* ((CE* (CF.exp()))- L);
-        EC=CG;
+        let BZ=(AN* (BJ- L))- ((AR* (BU- BW))/ (L+ (BY* ((AW.abs()).powf(AT)))));
+        EC=BZ;
         }else{
         EC=A;
         }
-        let CH=AQ> A;
+        let CA=AO> A;
         let ED;
-        if CH{
-        let CI=AW/ (AP* Q);
-        let CK=CJ* Q;
-        let CL=((-AW)- AS)/ CK;
-        let CM=(-AS)/ CK;
-        let CN=CI> BE;
-        let CP;
-        let CQ;
-        if CN{
-        let CO=L+ (CI- BE);
-        CP=CO;
-        CQ=BE;
+        if CA{
+        let CC=((-1f64* AW)* CB)/ ((parameters[3]* Q)* (if (CB- AW)>= 1e-3f64{(CB- AW)}else{1e-3f64}));
+        let CD=CC> BE;
+        let CF;
+        let CG;
+        if CD{
+        let CE=L+ (CC- BE);
+        CF=CE;
+        CG=BE;
         }else{
-        CP=L;
-        CQ=CI;
+        CF=L;
+        CG=CC;
         }
-        let CR=CP* (CQ.exp());
-        let CS=CL>= BK;
-        let DA;
-        if CS{
-        DA=CL;
-        }else{
-        let CT=CL<= -37f64;
-        let DB=if CT{
-        let CU=CL.exp();
-        CU
-        }else{
-        let CV=((CL.exp())+ L).ln();
-        CV
-        };
-        DA=DB;
-        }
-        let CW=CM>= BK;
-        let DC;
-        if CW{
-        DC=CM;
-        }else{
-        let CX=CM<= -37f64;
-        let DD=if CX{
-        let CY=CM.exp();
-        CY
-        }else{
-        let CZ=((CM.exp())+ L).ln();
-        CZ
-        };
-        DC=DD;
-        }
-        let DE=(AQ* (CR- L))- ((A* (DA- DC))/ (L+ (BX* ((AW.abs()).powf(AT)))));
-        ED=DE;
+        let CH=AO* ((CF* (CG.exp()))- L);
+        ED=CH;
         }else{
         ED=A;
         }
-        let EF;
+        let CI=AQ> A;
+        let EE;
+        if CI{
+        let CJ=AW/ (AP* Q);
+        let CL=CK* Q;
+        let CM=((-AW)- AS)/ CL;
+        let CN=(-AS)/ CL;
+        let CO=CJ> BE;
+        let CQ;
+        let CR;
+        if CO{
+        let CP=L+ (CJ- BE);
+        CQ=CP;
+        CR=BE;
+        }else{
+        CQ=L;
+        CR=CJ;
+        }
+        let CS=CQ* (CR.exp());
+        let CT=CM>= BK;
+        let DB;
+        if CT{
+        DB=CM;
+        }else{
+        let CU=CM<= BM;
+        let DC=if CU{
+        let CV=CM.exp();
+        CV
+        }else{
+        let CW=((CM.exp())+ L).ln();
+        CW
+        };
+        DB=DC;
+        }
+        let CX=CN>= BK;
+        let DD;
+        if CX{
+        DD=CN;
+        }else{
+        let CY=CN<= BM;
+        let DE=if CY{
+        let CZ=CN.exp();
+        CZ
+        }else{
+        let DA=((CN.exp())+ L).ln();
+        DA
+        };
+        DD=DE;
+        }
+        let DF=(AQ* (CS- L))- ((A* (DB- DD))/ (L+ (BY* ((AW.abs()).powf(AT)))));
+        EE=DF;
+        }else{
+        EE=A;
+        }
+        let EG;
         if AZ{
-        let DF=P/ (parameters[61]* Q);
-        let DG=CJ* Q;
-        let DH=((-P)- AS)/ DG;
-        let DI=(-AS)/ DG;
-        let DJ=DF> BE;
-        let DL;
+        let DG=P/ (parameters[61]* Q);
+        let DH=CK* Q;
+        let DI=((-P)- AS)/ DH;
+        let DJ=(-AS)/ DH;
+        let DK=DG> BE;
         let DM;
-        if DJ{
-        let DK=L+ (DF- BE);
-        DL=DK;
-        DM=BE;
+        let DN;
+        if DK{
+        let DL=L+ (DG- BE);
+        DM=DL;
+        DN=BE;
         }else{
-        DL=L;
-        DM=DF;
+        DM=L;
+        DN=DG;
         }
-        let DN=DL* (DM.exp());
-        let DO=DH>= BK;
-        let DW;
-        if DO{
-        DW=DH;
+        let DO=DM* (DN.exp());
+        let DP=DI>= BK;
+        let DX;
+        if DP{
+        DX=DI;
         }else{
-        let DP=DH<= -37f64;
-        let DX=if DP{
-        let DQ=DH.exp();
-        DQ
-        }else{
-        let DR=((DH.exp())+ L).ln();
+        let DQ=DI<= BM;
+        let DY=if DQ{
+        let DR=DI.exp();
         DR
+        }else{
+        let DS=((DI.exp())+ L).ln();
+        DS
         };
-        DW=DX;
+        DX=DY;
         }
-        let DS=DI>= BK;
-        let DY;
-        if DS{
-        DY=DI;
+        let DT=DJ>= BK;
+        let DZ;
+        if DT{
+        DZ=DJ;
         }else{
-        let DT=DI<= -37f64;
-        let DZ=if DT{
-        let DU=DI.exp();
-        DU
-        }else{
-        let DV=((DI.exp())+ L).ln();
+        let DU=DJ<= BM;
+        let EA=if DU{
+        let DV=DJ.exp();
         DV
+        }else{
+        let DW=((DJ.exp())+ L).ln();
+        DW
         };
-        DY=DZ;
+        DZ=EA;
         }
-        let EA=(AN* (DN- L))- ((AU* (DW- DY))/ (L+ (BX* ((P.abs()).powf(AT)))));
-        EF=EA;
+        let EB=(AN* (DO- L))- ((AU* (DX- DZ))/ (L+ (BY* ((P.abs()).powf(AT)))));
+        EG=EB;
         }else{
-        EF=A;
+        EG=A;
         }
-        let EE=((EB- EC)/ U)+ ED;
-        let EG=(2f64* ((L- (AW* AC))- (P* Y)))/ (L+ (((L+ (4f64* ((EB* (AG* (L+ (P* parameters[81]))))+ (EF* AK)))).abs()).powf(parameters[82])));
-        let EH=EF* EG;
-        let EI=EB* EG;
-        let EM=(EL* ((S* parameters[37]).exp()))* ((L+ (((AX/ parameters[48]).abs()).powf(EJ))).powf((L/ EJ)));
-        let EO=EN* ((S* parameters[78]).exp());
-        let EQ=(EP* ((S* parameters[38]).exp()))* ((L+ (((AY/ parameters[50]).abs()).powf(EK))).powf((L/ EK)));
-        let ER=parameters[32]== L;
-        let EV=if ER{
-        let ES=EM/ (L+ (((node_potentials[8].abs())/ parameters[20]).powf(parameters[44])));
-        ES
+        let EF=((EC- ED)/ U)+ EE;
+        let EH=(2f64* ((L- (AW* AC))- (P* Y)))/ (L+ (((L+ (4f64* ((EC* (AG* (L+ (P* parameters[81]))))+ (EG* AK)))).abs()).powf(parameters[82])));
+        let EI=EG* EH;
+        let EJ=EC* EH;
+        let EN=(EM* ((S* parameters[37]).exp()))* ((L+ (((AX/ parameters[48]).abs()).powf(EK))).powf((L/ EK)));
+        let EP=EO* ((S* parameters[78]).exp());
+        let ER=(EQ* ((S* parameters[38]).exp()))* ((L+ (((AY/ parameters[50]).abs()).powf(EL))).powf((L/ EL)));
+        let ES=parameters[32]== L;
+        let EW=if ES{
+        let ET=EN/ (L+ (((node_potentials[8].abs())/ parameters[20]).powf(parameters[44])));
+        ET
         }else{
-        EM
+        EN
         };
-        let EU=ET== L;
-        let FI;
-        let FO;
-        let FU;
-        if EU{
-        let EX=EV+ EW;
-        let EZ=EO+ EY;
-        let FB=EQ+ FA;
-        FI=EX;
-        FO=FB;
-        FU=EZ;
+        let EV=EU== L;
+        let FK;
+        let FQ;
+        let FW;
+        if EV{
+        let EY=EW+ EX;
+        let FA=EP+ EZ;
+        let FC=ER+ FB;
+        FK=EY;
+        FQ=FC;
+        FW=FA;
         }else{
-        FI=EV;
-        FO=EQ;
-        FU=EO;
+        FK=EW;
+        FQ=ER;
+        FW=EP;
         }
-        let FC=5.5224904e-23f64* K;
-        let FD=(EL+ (ET* EW))/ M;
-        let FE=(EP+ (ET* FA))/ M;
-        let FF=(EN+ (ET* EY))/ M;
-        let FH=(FD> A)&& (FD>= FG);
-        let GM;
+        let FE=5.5224904e-23f64* K;
+        let FF=(EM+ (EU* EX))/ M;
+        let FG=(EQ+ (EU* FB))/ M;
+        let FH=(EO+ (EU* EZ))/ M;
+        let FJ=(FF> A)&& (FF>= FI);
         let GN;
-        let GV;
-        if FH{
-        let FJ=FI/ M;
-        let FK=FJ>= FG;
-        let FM=if FK{
-        let FL=FC/ FJ;
-        FL
-        }else{
-        A
-        };
-        GM=L;
-        GN=FM;
-        GV=GS;
-        }else{
-        GM=A;
-        GN=A;
-        GV=GY;
-        }
-        let FN=(FE> A)&& (FE>= FG);
         let GO;
-        let GP;
         let GW;
-        if FN{
-        let FP=FO/ M;
-        let FQ=FP>= FG;
-        let FS=if FQ{
-        let FR=FC/ FP;
-        FR
+        if FJ{
+        let FL=FK/ M;
+        let FM=FL>= FI;
+        let FO=if FM{
+        let FN=FE/ FL;
+        FN
         }else{
         A
         };
-        GO=L;
-        GP=FS;
+        GN=L;
+        GO=FO;
         GW=GT;
         }else{
+        GN=A;
         GO=A;
-        GP=A;
         GW=GZ;
         }
-        let FT=(FF> A)&& (FF>= FG);
+        let FP=(FG> A)&& (FG>= FI);
+        let GP;
         let GQ;
-        let GR;
         let GX;
-        if FT{
-        let FV=FU/ M;
-        let FW=FV>= FG;
-        let FY=if FW{
-        let FX=FC/ FV;
-        FX
+        if FP{
+        let FR=FQ/ M;
+        let FS=FR>= FI;
+        let FU=if FS{
+        let FT=FE/ FR;
+        FT
         }else{
         A
         };
-        GQ=L;
-        GR=FY;
+        GP=L;
+        GQ=FU;
         GX=GU;
         }else{
+        GP=A;
         GQ=A;
-        GR=A;
         GX=HA;
         }
-        let FZ=N* EE;
-        let GC=(((GA> A)&& (GB> A)) as u8 as f64)> A;
-        let GE=if GC{
-        let GD=GB* ((EE.abs()).powf(GA));
-        GD
+        let FV=(FH> A)&& (FH>= FI);
+        let GR;
+        let GS;
+        let GY;
+        if FV{
+        let FX=FW/ M;
+        let FY=FX>= FI;
+        let GA=if FY{
+        let FZ=FE/ FX;
+        FZ
         }else{
         A
         };
-        let GF=FZ>= A;
-        let GH=if GF{
+        GR=L;
+        GS=GA;
+        GY=GV;
+        }else{
+        GR=A;
+        GS=A;
+        GY=HB;
+        }
+        let GB=N* EF;
+        let GE=(((GC> A)&& (GD> A)) as u8 as f64)> A;
+        let GG=if GE{
+        let GF=GD* ((EF.abs()).powf(GC));
+        GF
+        }else{
+        A
+        };
+        let GH=GB>= A;
+        let GI=if GH{
         L
         }else{
-        GG
+        FD
         };
-        let GI=GH* GE;
-        let GK=GJ* (EE.abs());
-        let GL=GJ* ((EI- EH).abs());
-        let HB=GV;
+        let GJ=GI* GG;
+        let GL=GK* (EF.abs());
+        let GM=GK* ((EJ- EI).abs());
         let HC=GW;
         let HD=GX;
-        let HE=1f64;
+        let HE=GY;
         let HF=1f64;
         let HG=1f64;
+        let HH=1f64;
         let omega = core::f64::consts::TAU * frequency_hz;
-        let process_0_active = GM != 0.0;
-        let process_0_psd = (GN).abs();
+        let process_0_active = GN != 0.0;
+        let process_0_psd = (GO).abs();
         if !process_0_psd.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 0, quantity: "psd", value: process_0_psd }); }
         let process_0_exponent: Option<f64> = None;
         if let Some(value) = process_0_exponent { if !value.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 0, quantity: "exponent", value }); } }
         let process_0_table = [];
-        let process_0_gain_0 = GeneratedNoiseComplex { re: (HB) * -1.0 * self.multiplicity.sqrt(), im: omega * (0.0) * -1.0 * self.multiplicity.sqrt() };
+        let process_0_gain_0 = GeneratedNoiseComplex { re: (HC) * -1.0 * self.multiplicity.sqrt(), im: omega * (0.0) * -1.0 * self.multiplicity.sqrt() };
         if !process_0_gain_0.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFiniteGain { process: 0, injection: 0, re: process_0_gain_0.re, im: process_0_gain_0.im }); }
         let process_0_injections = [GeneratedNoiseInjectionEvaluation { descriptor: 0, gain: process_0_gain_0 }];
         if !visitor.visit_process(0, GeneratedNoiseProcessEvaluationRef { active: process_0_active, psd: process_0_psd, exponent: process_0_exponent, table_operands: &process_0_table, injections: &process_0_injections }) { return Ok(()); }
-        let process_1_active = GO != 0.0;
-        let process_1_psd = (GP).abs();
+        let process_1_active = GP != 0.0;
+        let process_1_psd = (GQ).abs();
         if !process_1_psd.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 1, quantity: "psd", value: process_1_psd }); }
         let process_1_exponent: Option<f64> = None;
         if let Some(value) = process_1_exponent { if !value.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 1, quantity: "exponent", value }); } }
         let process_1_table = [];
-        let process_1_gain_0 = GeneratedNoiseComplex { re: (HC) * -1.0 * self.multiplicity.sqrt(), im: omega * (0.0) * -1.0 * self.multiplicity.sqrt() };
+        let process_1_gain_0 = GeneratedNoiseComplex { re: (HD) * -1.0 * self.multiplicity.sqrt(), im: omega * (0.0) * -1.0 * self.multiplicity.sqrt() };
         if !process_1_gain_0.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFiniteGain { process: 1, injection: 0, re: process_1_gain_0.re, im: process_1_gain_0.im }); }
         let process_1_injections = [GeneratedNoiseInjectionEvaluation { descriptor: 1, gain: process_1_gain_0 }];
         if !visitor.visit_process(1, GeneratedNoiseProcessEvaluationRef { active: process_1_active, psd: process_1_psd, exponent: process_1_exponent, table_operands: &process_1_table, injections: &process_1_injections }) { return Ok(()); }
-        let process_2_active = GQ != 0.0;
-        let process_2_psd = (GR).abs();
+        let process_2_active = GR != 0.0;
+        let process_2_psd = (GS).abs();
         if !process_2_psd.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 2, quantity: "psd", value: process_2_psd }); }
         let process_2_exponent: Option<f64> = None;
         if let Some(value) = process_2_exponent { if !value.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 2, quantity: "exponent", value }); } }
         let process_2_table = [];
-        let process_2_gain_0 = GeneratedNoiseComplex { re: (HD) * -1.0 * self.multiplicity.sqrt(), im: omega * (0.0) * -1.0 * self.multiplicity.sqrt() };
+        let process_2_gain_0 = GeneratedNoiseComplex { re: (HE) * -1.0 * self.multiplicity.sqrt(), im: omega * (0.0) * -1.0 * self.multiplicity.sqrt() };
         if !process_2_gain_0.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFiniteGain { process: 2, injection: 0, re: process_2_gain_0.re, im: process_2_gain_0.im }); }
         let process_2_injections = [GeneratedNoiseInjectionEvaluation { descriptor: 2, gain: process_2_gain_0 }];
         if !visitor.visit_process(2, GeneratedNoiseProcessEvaluationRef { active: process_2_active, psd: process_2_psd, exponent: process_2_exponent, table_operands: &process_2_table, injections: &process_2_injections }) { return Ok(()); }
         let process_3_active = L != 0.0;
-        let process_3_psd = (GI).abs();
+        let process_3_psd = (GJ).abs();
         if !process_3_psd.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 3, quantity: "psd", value: process_3_psd }); }
         let process_3_exponent: Option<f64> = Some(L);
         if let Some(value) = process_3_exponent { if !value.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 3, quantity: "exponent", value }); } }
         let process_3_table = [];
-        let process_3_gain_0 = GeneratedNoiseComplex { re: (HE) * -1.0 * self.multiplicity.sqrt(), im: omega * (0.0) * -1.0 * self.multiplicity.sqrt() };
+        let process_3_gain_0 = GeneratedNoiseComplex { re: (HF) * -1.0 * self.multiplicity.sqrt(), im: omega * (0.0) * -1.0 * self.multiplicity.sqrt() };
         if !process_3_gain_0.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFiniteGain { process: 3, injection: 0, re: process_3_gain_0.re, im: process_3_gain_0.im }); }
         let process_3_injections = [GeneratedNoiseInjectionEvaluation { descriptor: 3, gain: process_3_gain_0 }];
         if !visitor.visit_process(3, GeneratedNoiseProcessEvaluationRef { active: process_3_active, psd: process_3_psd, exponent: process_3_exponent, table_operands: &process_3_table, injections: &process_3_injections }) { return Ok(()); }
         let process_4_active = L != 0.0;
-        let process_4_psd = (GK).abs();
+        let process_4_psd = (GL).abs();
         if !process_4_psd.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 4, quantity: "psd", value: process_4_psd }); }
         let process_4_exponent: Option<f64> = None;
         if let Some(value) = process_4_exponent { if !value.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 4, quantity: "exponent", value }); } }
         let process_4_table = [];
-        let process_4_gain_0 = GeneratedNoiseComplex { re: (HF) * -1.0 * self.multiplicity.sqrt(), im: omega * (0.0) * -1.0 * self.multiplicity.sqrt() };
+        let process_4_gain_0 = GeneratedNoiseComplex { re: (HG) * -1.0 * self.multiplicity.sqrt(), im: omega * (0.0) * -1.0 * self.multiplicity.sqrt() };
         if !process_4_gain_0.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFiniteGain { process: 4, injection: 0, re: process_4_gain_0.re, im: process_4_gain_0.im }); }
         let process_4_injections = [GeneratedNoiseInjectionEvaluation { descriptor: 4, gain: process_4_gain_0 }];
         if !visitor.visit_process(4, GeneratedNoiseProcessEvaluationRef { active: process_4_active, psd: process_4_psd, exponent: process_4_exponent, table_operands: &process_4_table, injections: &process_4_injections }) { return Ok(()); }
         let process_5_active = L != 0.0;
-        let process_5_psd = (GL).abs();
+        let process_5_psd = (GM).abs();
         if !process_5_psd.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 5, quantity: "psd", value: process_5_psd }); }
         let process_5_exponent: Option<f64> = None;
         if let Some(value) = process_5_exponent { if !value.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 5, quantity: "exponent", value }); } }
         let process_5_table = [];
-        let process_5_gain_0 = GeneratedNoiseComplex { re: (HG) * -1.0 * self.multiplicity.sqrt(), im: omega * (0.0) * -1.0 * self.multiplicity.sqrt() };
+        let process_5_gain_0 = GeneratedNoiseComplex { re: (HH) * -1.0 * self.multiplicity.sqrt(), im: omega * (0.0) * -1.0 * self.multiplicity.sqrt() };
         if !process_5_gain_0.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFiniteGain { process: 5, injection: 0, re: process_5_gain_0.re, im: process_5_gain_0.im }); }
         let process_5_injections = [GeneratedNoiseInjectionEvaluation { descriptor: 5, gain: process_5_gain_0 }];
         if !visitor.visit_process(5, GeneratedNoiseProcessEvaluationRef { active: process_5_active, psd: process_5_psd, exponent: process_5_exponent, table_operands: &process_5_table, injections: &process_5_injections }) { return Ok(()); }

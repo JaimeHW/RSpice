@@ -22,8 +22,8 @@ use crate::canonical_ir::{
 };
 use crate::codegen::{BytecodeProgram, CompiledModel, Instruction, ZiRuntimeLayout};
 use crate::integer_runtime::{
-    IntegerBinaryOperation as RuntimeIntegerBinaryOperation, integer_binary, real_to_integer,
-    shift_count,
+    IntegerArithmeticOperation, IntegerBinaryOperation as RuntimeIntegerBinaryOperation,
+    integer_binary, real_to_integer, shift_count,
 };
 use crate::vm::{CURRENT_PAIR_GROUND, terminal_pair_current_index};
 use smol_str::SmolStr;
@@ -273,6 +273,7 @@ pub(crate) enum IntegerBinaryOp {
     BitAnd,
     BitOr,
     BitXor,
+    Arithmetic(IntegerArithmeticOperation),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1651,6 +1652,7 @@ impl NativeProgram {
                 | Instruction::Shr
                 | Instruction::BitAnd
                 | Instruction::BitOr
+                | Instruction::IntegerArithmetic(_)
                 | Instruction::BitXor => {
                     pop_binary_stack(
                         model.clone(),
@@ -3248,8 +3250,9 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                         this.lower_third_derivative(id, first, second, third)
                     })
                 }
-                "Eq" | "Ne" | "Lt" | "Le" | "Gt" | "Ge" | "And" | "Or" | "BitAnd" | "BitOr"
-                | "BitXor" | "Shl" | "Shr" => self.push(NativeOp::Const(0.0)),
+                "IntAdd" | "IntSub" | "IntMul" | "IntDiv" | "IntMod" | "IntPow" | "Eq" | "Ne"
+                | "Lt" | "Le" | "Gt" | "Ge" | "And" | "Or" | "BitAnd" | "BitOr" | "BitXor"
+                | "Shl" | "Shr" => self.push(NativeOp::Const(0.0)),
                 _ => Err(self.unsupported(format!("third derivative of binary operator {op}"))),
             },
             HirExprKind::Conditional {
@@ -3366,8 +3369,9 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                             && self.expr_derivative_is_zero(*right, wrt)?)
                     }
                 }
-                "Eq" | "Ne" | "Lt" | "Le" | "Gt" | "Ge" | "And" | "Or" | "BitAnd" | "BitOr"
-                | "BitXor" | "Shl" | "Shr" => Ok(true),
+                "IntAdd" | "IntSub" | "IntMul" | "IntDiv" | "IntMod" | "IntPow" | "Eq" | "Ne"
+                | "Lt" | "Le" | "Gt" | "Ge" | "And" | "Or" | "BitAnd" | "BitOr" | "BitXor"
+                | "Shl" | "Shr" => Ok(true),
                 _ => Ok(false),
             },
             HirExprKind::Conditional {
@@ -3439,8 +3443,9 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                             && self.expr_derivative_is_zero(*right, second)?)
                     }
                 }
-                "Eq" | "Ne" | "Lt" | "Le" | "Gt" | "Ge" | "And" | "Or" | "BitAnd" | "BitOr"
-                | "BitXor" | "Shl" | "Shr" => Ok(true),
+                "IntAdd" | "IntSub" | "IntMul" | "IntDiv" | "IntMod" | "IntPow" | "Eq" | "Ne"
+                | "Lt" | "Le" | "Gt" | "Ge" | "And" | "Or" | "BitAnd" | "BitOr" | "BitXor"
+                | "Shl" | "Shr" => Ok(true),
                 _ => Ok(false),
             },
             HirExprKind::Conditional {
@@ -4082,8 +4087,9 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                     this.lower_derivative(id, wrt)
                 })
             }
-            "Eq" | "Ne" | "Lt" | "Le" | "Gt" | "Ge" | "And" | "Or" | "BitAnd" | "BitOr"
-            | "BitXor" | "Shl" | "Shr" => self.push(NativeOp::Const(0.0)),
+            "IntAdd" | "IntSub" | "IntMul" | "IntDiv" | "IntMod" | "IntPow" | "Eq" | "Ne"
+            | "Lt" | "Le" | "Gt" | "Ge" | "And" | "Or" | "BitAnd" | "BitOr" | "BitXor" | "Shl"
+            | "Shr" => self.push(NativeOp::Const(0.0)),
             _ => Err(self.unsupported(format!("ddx derivative of binary operator {op}"))),
         }
     }
@@ -4175,8 +4181,9 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                     this.lower_second_derivative(id, first, second)
                 })
             }
-            "Eq" | "Ne" | "Lt" | "Le" | "Gt" | "Ge" | "And" | "Or" | "BitAnd" | "BitOr"
-            | "BitXor" | "Shl" | "Shr" => self.push(NativeOp::Const(0.0)),
+            "IntAdd" | "IntSub" | "IntMul" | "IntDiv" | "IntMod" | "IntPow" | "Eq" | "Ne"
+            | "Lt" | "Le" | "Gt" | "Ge" | "And" | "Or" | "BitAnd" | "BitOr" | "BitXor" | "Shl"
+            | "Shr" => self.push(NativeOp::Const(0.0)),
             _ => Err(self.unsupported(format!("second derivative of binary operator {op}"))),
         }
     }
@@ -7983,7 +7990,8 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             "Pow" | "Mod" => self.append_binary_math(op),
             "Eq" | "Ne" | "Lt" | "Le" | "Gt" | "Ge" => self.append_compare(op),
             "And" | "Or" => self.append_logical(op),
-            "BitAnd" | "BitOr" | "BitXor" | "Shl" | "Shr" => self.append_integer_binary(op),
+            "BitAnd" | "BitOr" | "BitXor" | "Shl" | "Shr" | "IntAdd" | "IntSub" | "IntMul"
+            | "IntDiv" | "IntMod" | "IntPow" => self.append_integer_binary(op),
             _ => Err(self.unsupported(format!("binary operator {op}"))),
         }
     }
@@ -8091,6 +8099,12 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             "BitAnd" => IntegerBinaryOp::BitAnd,
             "BitOr" => IntegerBinaryOp::BitOr,
             "BitXor" => IntegerBinaryOp::BitXor,
+            "IntAdd" => IntegerBinaryOp::Arithmetic(IntegerArithmeticOperation::Add),
+            "IntSub" => IntegerBinaryOp::Arithmetic(IntegerArithmeticOperation::Sub),
+            "IntMul" => IntegerBinaryOp::Arithmetic(IntegerArithmeticOperation::Mul),
+            "IntDiv" => IntegerBinaryOp::Arithmetic(IntegerArithmeticOperation::Div),
+            "IntMod" => IntegerBinaryOp::Arithmetic(IntegerArithmeticOperation::Mod),
+            "IntPow" => IntegerBinaryOp::Arithmetic(IntegerArithmeticOperation::Pow),
             _ => unreachable!("append_integer_binary only accepts integer operators"),
         };
         if lower_constant_integer_binary(&mut self.ops, op)
@@ -8579,6 +8593,7 @@ fn is_parameter_default_instruction(instruction: &Instruction) -> bool {
             | Instruction::Shr
             | Instruction::BitAnd
             | Instruction::BitOr
+            | Instruction::IntegerArithmetic(_)
             | Instruction::BitXor
             | Instruction::Neg
             | Instruction::Abs
@@ -8640,6 +8655,7 @@ fn is_static_condition_instruction(instruction: &Instruction) -> bool {
             | Instruction::Shr
             | Instruction::BitAnd
             | Instruction::BitOr
+            | Instruction::IntegerArithmetic(_)
             | Instruction::BitXor
             | Instruction::Neg
             | Instruction::Abs
@@ -9338,6 +9354,7 @@ pub(crate) fn runtime_integer_operation(op: IntegerBinaryOp) -> RuntimeIntegerBi
         IntegerBinaryOp::BitAnd => RuntimeIntegerBinaryOperation::BitAnd,
         IntegerBinaryOp::BitOr => RuntimeIntegerBinaryOperation::BitOr,
         IntegerBinaryOp::BitXor => RuntimeIntegerBinaryOperation::BitXor,
+        IntegerBinaryOp::Arithmetic(op) => RuntimeIntegerBinaryOperation::Arithmetic(op),
     }
 }
 
@@ -9667,6 +9684,7 @@ fn instruction_name(instruction: &Instruction) -> &'static str {
         Instruction::BitAnd => "BitAnd",
         Instruction::BitOr => "BitOr",
         Instruction::BitXor => "BitXor",
+        Instruction::IntegerArithmetic(_) => "IntegerArithmetic",
         Instruction::Neg => "Neg",
         Instruction::Abs => "Abs",
         Instruction::Sqrt => "Sqrt",
@@ -9824,6 +9842,7 @@ fn integer_binary_op(instruction: &Instruction) -> IntegerBinaryOp {
         Instruction::BitAnd => IntegerBinaryOp::BitAnd,
         Instruction::BitOr => IntegerBinaryOp::BitOr,
         Instruction::BitXor => IntegerBinaryOp::BitXor,
+        Instruction::IntegerArithmetic(op) => IntegerBinaryOp::Arithmetic(*op),
         _ => unreachable!("integer binary lowering only accepts supported integer instructions"),
     }
 }

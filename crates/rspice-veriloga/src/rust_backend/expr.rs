@@ -1401,7 +1401,8 @@ fn negate_condition(condition: &str) -> String {
 
 fn binary_value(op: &str, left: &str, right: &str) -> Result<String, RustBackendError> {
     match op {
-        "BitAnd" | "BitOr" | "BitXor" | "Shl" | "Shr" => Ok(format!(
+        "BitAnd" | "BitOr" | "BitXor" | "Shl" | "Shr" | "IntAdd" | "IntSub" | "IntMul"
+        | "IntDiv" | "IntMod" | "IntPow" => Ok(format!(
             "ctx.integer_result({})",
             integer_binary_result(op, left, right)
         )),
@@ -1427,6 +1428,11 @@ pub(super) fn integer_cast_result(operand: &str) -> String {
 pub(super) fn integer_binary_result(op: &str, left: &str, right: &str) -> String {
     // Assignment conversion lowers to an integer OR with zero. Keep its
     // generated form as one checked conversion, without a redundant OR.
+    if let Some(op) = crate::ast::BinaryOp::integer_arithmetic_from_name(op) {
+        return format!(
+            "integer::integer_arithmetic(integer::IntegerArithmeticOperation::{op:?}, {left}, {right})"
+        );
+    }
     if op == "BitOr" && matches!(right, "0.0" | "-0.0" | "0f64" | "-0f64") {
         integer_cast_result(left)
     } else {

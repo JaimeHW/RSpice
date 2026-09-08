@@ -2,7 +2,7 @@
 #![allow(dead_code, non_snake_case, unused_imports, unused_mut, unused_parens, unused_variables)]
 
 use super::state::{CanonicalModelValues, Instance, PARAMETER_MODEL_FLAGS};
-use rspice_veriloga_runtime::{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, install_generated_stage_values, L2, L3, L4, L5, L6, L7, L8, L9, evaluate_generated_above, evaluate_generated_cross, evaluate_generated_timer, rspice_eval_ddt, rspice_eval_idt, rspice_limexp, rspice_limited_exp, rspice_limited_exp_derivative};
+use rspice_veriloga_runtime::{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, install_generated_stage_values, L2, L3, L4, L5, L6, L7, L8, L9, integer, evaluate_generated_above, evaluate_generated_cross, evaluate_generated_timer, rspice_eval_ddt, rspice_eval_idt, rspice_limexp, rspice_limited_exp, rspice_limited_exp_derivative};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 pub(super) const CANONICAL_MODEL_STAGE_SLOTS: [u32; 178] = [83, 1, 0, 61, 28, 20, 3, 9, 41, 4, 10, 39, 44, 84, 80, 81, 85, 73, 19, 86, 87, 88, 89, 90, 92, 33, 2, 95, 94, 5, 6, 7, 8, 97, 96, 11, 12, 98, 13, 14, 15, 16, 99, 17, 100, 18, 30, 24, 102, 101, 25, 27, 26, 36, 104, 103, 37, 38, 105, 40, 106, 42, 43, 110, 108, 109, 45, 46, 107, 111, 47, 112, 48, 116, 114, 115, 113, 50, 165, 164, 51, 167, 166, 52, 169, 168, 53, 171, 170, 172, 54, 173, 55, 56, 176, 174, 175, 177, 57, 178, 58, 181, 179, 180, 163, 182, 183, 184, 59, 60, 62, 72, 63, 64, 65, 66, 67, 68, 69, 70, 71, 74, 185, 186, 187, 188, 189, 190, 191, 192, 193, 194, 195, 197, 196, 198, 199, 200, 75, 76, 77, 78, 79, 201, 202, 203, 204, 205, 206, 207, 208, 209, 82, 216, 218, 220, 210, 211, 212, 213, 214, 215, 217, 219, 221, 222, 223, 224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 234];
@@ -15,6 +15,7 @@ pub(super) fn canonical_model_preprocess(
     staged: &[f64],
     temperature: f64,
     thermal_voltage: f64,
+    ctx: &GeneratedEvalContext<'_>,
 ) -> [f64; 178] {
 	let A=parameters[0];
 	let C=1.3806226e-23f64;
@@ -535,13 +536,13 @@ pub(super) fn canonical_model_preprocess(
 	}
 	let HS=parameters[29]== M;
 	if HS{
-	let HU=-HT;
+	let HU=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Sub, AQ, HT));
 	oHU=HU;
 	}else{
-	let HV=-HT;
+	let HV=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Sub, AQ, HT));
 	oHV=HV;
 	}
-	let HW=-HT;
+	let HW=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Sub, AQ, HT));
 	let HY=(HX>= FD)&& (HX> AQ);
 	let IA;
 	let IB;
@@ -1074,7 +1075,9 @@ impl Instance {
             &self.canonical_staged[..],
             ctx.temperature(),
             ctx.thermal_voltage(),
+            ctx,
         );
+        if ctx.evaluation_failed() { return; }
         let values = canonical_model_cache_intern(key, Arc::new(produced));
         self.canonical_install_model_values(values);
     }
@@ -1124,6 +1127,7 @@ impl Instance {
 
     pub fn stamp(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedStamper<'_>) {
         self.canonical_model_stage(ctx);
+        if ctx.evaluation_failed() { return; }
         self.canonical_instance_stage(ctx);
         self.canonical_temperature_stage(ctx);
         self.canonical_timestep_stage(ctx);
@@ -3821,7 +3825,7 @@ impl Instance {
 		}
 		let BMA=BCN+ BLY;
 		let BMB=BCP+ BLZ;
-		let BMC=BCO+ AW;
+		let BMC=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, BCO, AW));
 		BCM=BLY;
 		BCN=BMA;
 		BCO=BMC;

@@ -27,6 +27,28 @@ FC = 1.0 / (2 * math.pi * 1e3 * 1e-6)  # RC corner: 159.155 Hz
 
 
 class TestAcBasics:
+    def test_vbic13_early_voltage_cutoff_matches_xyce(self, engine):
+        netlist = rspice.Netlist.parse_spice(
+            """* VBIC Early-voltage cutoff
+Vc c 0 1.8
+Vb b 0 0.7
+Vth th 0 DC 20 AC 1
+Q1 c b 0 th vm SW_ET=1
+.model vm NPN(LEVEL=11 VEF=5 VER=3 TCVEF=-0.05 TCVER=-0.05 IS=1e-16 IBEI=1e-18 IBCI=1e-18 RCX=10 RCI=2 RBX=5 RBI=3 RE=1 RBP=0 RS=0 AVC1=0.05 AVC2=0.3 TAVC=0.01 TD=1n RTH=1000 TCRTH=0.005 TMAXCLIP=100 CTH=1p GMIN=1u TNOM=27)
+.temp 27
+.end
+"""
+        )
+        result = engine.run_ac(netlist, [1e8])
+        for branch, expected in [
+            ("vc", complex(-8.663038807350953e-6, 6.275760707091533e-6)),
+            ("vb", complex(4.317831416641038e-7, -4.178850145275066e-7)),
+            ("vth", complex(-0.0008111544184809163, -0.000639322846682267)),
+        ]:
+            assert result.branch_current_complex(branch)[0] == pytest.approx(
+                expected, rel=2e-7, abs=1e-14
+            )
+
     @pytest.mark.parametrize("kind, polarity", [("NPN", 1), ("PNP", -1)])
     def test_vbic13_delayed_avalanche_matches_xyce(self, engine, kind, polarity):
         netlist = rspice.Netlist.parse_spice(

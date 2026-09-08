@@ -92,6 +92,16 @@ fn analyze_fixture(
 }
 
 #[test]
+fn canonical_integer_array_constant_arithmetic_wraps_before_validation() {
+    // Unwrapped expressions exceed i32 and would be rejected by the array
+    // contract. Both element validation and subsequent scalar bounds use the
+    // same typed result.
+    VerilogACompiler::default().compile_canonical_ir(
+        "module integer_arrays(p,n); inout p,n; electrical p,n; parameter integer value=2147483647+1; parameter integer taps[0:0]='{2147483647+1}; parameter integer more[0:0]='{2**31}; parameter real fractional[0:0]='{5/2}; analog I(p,n)<+V(p,n); endmodule"
+    ).expect("integer array leaves use signed arithmetic before range validation");
+}
+
+#[test]
 fn canonical_integer_parameter_arrays_convert_each_initializer_element() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(
@@ -1374,7 +1384,7 @@ fn metadata_digest_is_stable_and_hex_encoded() {
     assert_ne!(digest, StableDigest::from_text("module other; endmodule"));
 
     let metadata = CanonicalMetadata::for_source("fixture", "module tiny; endmodule");
-    assert_eq!(metadata.schema_version, 23);
+    assert_eq!(metadata.schema_version, 24);
     assert_eq!(metadata.source_package.as_str(), "fixture");
     assert_eq!(metadata.source_digest.as_str(), digest.as_hex());
 }
@@ -2206,7 +2216,7 @@ fn artifact_dump_is_deterministic_and_contains_phase_summaries() {
 
     assert_eq!(first, second);
     assert!(first.contains("canonical-veriloga-ir"));
-    assert!(first.contains("schema_version=23"));
+    assert!(first.contains("schema_version=24"));
     assert!(first.contains("source_package=fixture"));
     assert!(first.contains("source_digest="));
     assert!(first.contains("source_identity="));

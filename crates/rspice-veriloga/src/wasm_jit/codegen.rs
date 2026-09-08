@@ -2202,7 +2202,14 @@ fn helper_descriptor(op: NativeOp) -> WasmJitResult<HelperDescriptor> {
         NativeOp::UnaryMath(kind) => descriptor.opcode = 100 + unary_math_code(kind),
         NativeOp::BinaryMath(kind) => descriptor.opcode = 200 + binary_math_code(kind),
         NativeOp::IntegerCast => descriptor.opcode = 300,
-        NativeOp::IntegerBinary(kind) => descriptor.opcode = 301 + integer_code(kind),
+        NativeOp::IntegerBinary(kind) => {
+            // 310 and 320 are already the immediate-shift/bitwise ranges.
+            descriptor.opcode = if matches!(kind, IntegerBinaryOp::Arithmetic(_)) {
+                330 + (integer_code(kind) - 5)
+            } else {
+                301 + integer_code(kind)
+            };
+        }
         NativeOp::IntegerShiftConst(kind, shift) => {
             descriptor.opcode = 310 + integer_code(kind);
             descriptor.aux0 = i32::from(shift);
@@ -2310,6 +2317,12 @@ fn integer_code(op: IntegerBinaryOp) -> i32 {
         IntegerBinaryOp::BitAnd => 2,
         IntegerBinaryOp::BitOr => 3,
         IntegerBinaryOp::BitXor => 4,
+        IntegerBinaryOp::Arithmetic(crate::integer_runtime::IntegerArithmeticOperation::Add) => 5,
+        IntegerBinaryOp::Arithmetic(crate::integer_runtime::IntegerArithmeticOperation::Sub) => 6,
+        IntegerBinaryOp::Arithmetic(crate::integer_runtime::IntegerArithmeticOperation::Mul) => 7,
+        IntegerBinaryOp::Arithmetic(crate::integer_runtime::IntegerArithmeticOperation::Div) => 8,
+        IntegerBinaryOp::Arithmetic(crate::integer_runtime::IntegerArithmeticOperation::Mod) => 9,
+        IntegerBinaryOp::Arithmetic(crate::integer_runtime::IntegerArithmeticOperation::Pow) => 10,
     }
 }
 

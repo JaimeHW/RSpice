@@ -1203,6 +1203,13 @@ pub enum BinaryOp {
     Div,
     Mod,
     Pow,
+    // Type-resolved signed integer arithmetic, inserted by semantic analysis.
+    IntAdd,
+    IntSub,
+    IntMul,
+    IntDiv,
+    IntMod,
+    IntPow,
     // Comparison
     Eq,
     Ne,
@@ -1219,6 +1226,38 @@ pub enum BinaryOp {
     BitXor,
     Shl,
     Shr,
+}
+
+impl BinaryOp {
+    pub(crate) fn integer_arithmetic_from_name(
+        name: &str,
+    ) -> Option<crate::integer_runtime::IntegerArithmeticOperation> {
+        use crate::integer_runtime::IntegerArithmeticOperation as Op;
+        Some(match name {
+            "IntAdd" => Op::Add,
+            "IntSub" => Op::Sub,
+            "IntMul" => Op::Mul,
+            "IntDiv" => Op::Div,
+            "IntMod" => Op::Mod,
+            "IntPow" => Op::Pow,
+            _ => return None,
+        })
+    }
+
+    pub(crate) fn integer_arithmetic(
+        self,
+    ) -> Option<crate::integer_runtime::IntegerArithmeticOperation> {
+        use crate::integer_runtime::IntegerArithmeticOperation as Op;
+        Some(match self {
+            Self::IntAdd => Op::Add,
+            Self::IntSub => Op::Sub,
+            Self::IntMul => Op::Mul,
+            Self::IntDiv => Op::Div,
+            Self::IntMod => Op::Mod,
+            Self::IntPow => Op::Pow,
+            _ => return None,
+        })
+    }
 }
 
 /// Unary expression

@@ -50,7 +50,7 @@ use wasmparser::{Encoding, ExternalKind, Imports, Operator, Parser, Payload, Typ
 
 /// Version of the linear-memory and helper-function contract understood by
 /// emitted modules and the browser worker.
-pub const WASM_JIT_ABI_VERSION: u32 = 9;
+pub const WASM_JIT_ABI_VERSION: u32 = 10;
 
 /// Version of the deterministic encoder. It participates in cache identity
 /// independently of the ABI because code layout may change without changing
@@ -102,7 +102,8 @@ pub const WASM_JIT_ABI_VERSION: u32 = 9;
 /// 15 to 16 preserves higher-order ddx and descending shadow update order.
 /// 18 to 19 inserts integer parameter default conversions before their use in
 /// dependent defaults and generated expressions.
-pub const WASM_JIT_EMITTER_VERSION: u32 = 19;
+/// 19 to 20 preserves signed integer arithmetic and its checked helper calls.
+pub const WASM_JIT_EMITTER_VERSION: u32 = 20;
 
 /// Hard ceiling for one qualified shipped model's generated module.
 pub const SHIPPED_MODEL_WASM_CODE_SIZE_BUDGET_BYTES: usize = 32 * 1024 * 1024;
@@ -1931,6 +1932,46 @@ endmodule
                             "{expression}; postfix={postfix}; entry={entry}"
                         );
                     }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn integer_wasm_arithmetic_preserves_values_and_zero_tangents() {
+        use super::abi::FRAME_RESULT_OFFSET;
+        for (operator, left, right, expected) in [
+            ("/", 5.0, 2.0, 2.0),
+            ("/", -5.0, 2.0, -2.0),
+            ("+", 2147483647.0, 1.0, -2147483648.0),
+            ("-", -2147483648.0, 1.0, 2147483647.0),
+            ("*", 2147483647.0, 2.0, -2.0),
+            ("**", 2.0, 31.0, -2147483648.0),
+            ("**", 2.0, -1.0, 0.0),
+            ("**", -1.0, -3.0, -1.0),
+            ("%", -5.0, 2.0, -1.0),
+        ] {
+            let source = format!(
+                "module typed_wasm(p,q,n); inout p,q,n; electrical p,q,n; integer a,b; analog begin a=V(p,n); b=V(q,n); I(p,n)<+(a {operator} b)+0.25*V(p,n); end endmodule"
+            );
+            for postfix in [false, true] {
+                let mut harness =
+                    FusedKernelHarness::for_source_with_plan(&source, "typed_wasm", postfix);
+                let value = harness.stamp_value_export(0);
+                let jacobian = harness.jacobian_export(0, 0);
+                harness.reset();
+                harness.write_f64(FusedKernelHarness::VOLTAGES as usize, left);
+                harness.write_f64(FusedKernelHarness::VOLTAGES as usize + 8, right);
+                harness.write_f64(FusedKernelHarness::VOLTAGES as usize + 16, 0.0);
+                harness.call_assignments();
+                harness.call_prelude();
+                for (export, expected) in [(&value, expected + 0.25 * left), (&jacobian, 0.25)] {
+                    assert_eq!(harness.call(export), 0);
+                    assert_eq!(
+                        harness.read_f64(FRAME_RESULT_OFFSET as usize),
+                        expected,
+                        "{left} {operator} {right}"
+                    );
                 }
             }
         }

@@ -21,6 +21,51 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 #[test]
+fn generated_integer_arithmetic_preserves_values_and_zero_tangents() {
+    for (index, (operator, left, right, expected)) in [
+        ("/", 5.0, 2.0, 2.0),
+        ("/", -5.0, 2.0, -2.0),
+        ("+", 2147483647.0, 1.0, -2147483648.0),
+        ("-", -2147483648.0, 1.0, 2147483647.0),
+        ("*", 2147483647.0, 2.0, -2.0),
+        ("**", 2.0, 31.0, -2147483648.0),
+        ("**", 2.0, -1.0, 0.0),
+        ("**", -1.0, -3.0, -1.0),
+        ("%", -5.0, 2.0, -1.0),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let artifact = artifact(&format!(
+            "module typed(p,q); inout p,q; electrical p,q; integer a,b; analog begin a=V(p); b=V(q); I(p)<+(a {operator} b)+0.25*V(p); end endmodule"
+        ));
+        let cfg = CfgModel::from_hir(&artifact.hir, &artifact.mir).expect("integer lowering");
+        let mut differentiated =
+            differentiate(&cfg.function, &[AdSeed::NodePotential(0usize.into())]).unwrap();
+        let residual = cfg.residuals[0];
+        let derivative = differentiated.derivative(residual, 0).unwrap();
+        let (function, wanted) = optimize_cfg(&differentiated.function, &[residual, derivative]);
+        let (body, names) = emit_body(&function, &wanted, &EmitBindings::default()).unwrap();
+        let mut bias = bias(&artifact);
+        bias.node_potentials[0] = left;
+        bias.node_potentials[1] = right;
+        let actual = compile_and_run(
+            &scratch("integer_arithmetic"),
+            &format!("integer_{index}"),
+            &program(&body, &names, &bias),
+        );
+        assert_eq!(
+            actual,
+            vec![expected + 0.25 * left, 0.25],
+            "{left} {operator} {right}"
+        );
+        let interpreted = evaluate_cfg(&function, &inputs(&bias)).unwrap();
+        assert_eq!(interpreted.value(wanted[0]).unwrap(), actual[0]);
+        assert_eq!(interpreted.value(wanted[1]).unwrap(), actual[1]);
+    }
+}
+
+#[test]
 fn emitted_tasks_preserve_loop_execution_and_are_not_duplicated_by_derivatives() {
     use rspice_veriloga::canonical_ir::cfg::CfgValueKind;
     let artifact = artifact(

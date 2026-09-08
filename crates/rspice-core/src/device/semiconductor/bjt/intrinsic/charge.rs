@@ -187,13 +187,14 @@ impl Bjt {
         let (qdbc, dqdbc_dvbc_eff) = self
             .vbic_depletion_charge_and_derivative(vbc_eff, self.vjc, self.mjc, self.fc, self.ajc);
 
+        let (vaf, var) = self.vbic_early_voltages();
         let q1z =
-            1.0 + if self.var.is_finite() && self.var > 0.0 {
-                qdbe / self.var
+            1.0 + if var.is_finite() && var > 0.0 {
+                qdbe / var
             } else {
                 0.0
-            } + if self.vaf.is_finite() && self.vaf > 0.0 {
-                qdbc / self.vaf
+            } + if vaf.is_finite() && vaf > 0.0 {
+                qdbc / vaf
             } else {
                 0.0
             };
@@ -202,14 +203,14 @@ impl Bjt {
         let q1 = 0.5 * (q1_sqrt + q1_shift) + 1e-4;
         let dq1_dq1z = 0.5 * (q1_shift / q1_sqrt + 1.0);
         let dq1_dvbe_eff = dq1_dq1z
-            * if self.var.is_finite() && self.var > 0.0 {
-                dqdbe_dvbe_eff / self.var
+            * if var.is_finite() && var > 0.0 {
+                dqdbe_dvbe_eff / var
             } else {
                 0.0
             };
         let dq1_dvbc_eff = dq1_dq1z
-            * if self.vaf.is_finite() && self.vaf > 0.0 {
-                dqdbc_dvbc_eff / self.vaf
+            * if vaf.is_finite() && vaf > 0.0 {
+                dqdbc_dvbc_eff / vaf
             } else {
                 0.0
             };

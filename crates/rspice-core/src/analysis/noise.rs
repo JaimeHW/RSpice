@@ -48,6 +48,12 @@ impl NoisePhysicalConstants {
         boltzmann: XYCE_K_BOLTZMANN,
         electron_charge: XYCE_Q_ELECTRON,
     };
+
+    /// Constants embedded in vbic_1p3.va, distinct from Xyce's device library.
+    pub const VBIC_1_3: Self = Self {
+        boltzmann: 1.380662e-23,
+        electron_charge: 1.602189e-19,
+    };
 }
 
 impl Default for NoisePhysicalConstants {

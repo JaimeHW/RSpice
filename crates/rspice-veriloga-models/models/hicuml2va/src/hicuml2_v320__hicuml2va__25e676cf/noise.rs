@@ -6,7 +6,7 @@ use rspice_veriloga_runtime::GeneratedEvalContext;
 pub use rspice_veriloga_runtime::{GeneratedNoiseComplex, GeneratedNoiseDescriptor, GeneratedNoiseEndpoint, GeneratedNoiseEvaluation, GeneratedNoiseEvaluationError, GeneratedNoiseEvaluationRef, GeneratedNoiseInjectionDescriptor, GeneratedNoiseInjectionEvaluation, GeneratedNoiseKind, GeneratedNoiseProcessDescriptor, GeneratedNoiseProcessEvaluationRef, GeneratedNoiseProcessVisitor, GeneratedNoiseVisitor};
 
 use super::stamp::{canonical_model_preprocess, CANONICAL_MODEL_STAGE_SLOTS, canonical_temperature_preprocess, CANONICAL_TEMPERATURE_STAGE_SLOTS};
-use rspice_veriloga_runtime::{install_generated_stage_values, rspice_limexp};
+use rspice_veriloga_runtime::{integer, install_generated_stage_values, rspice_limexp};
 pub static NOISE_SOURCES: [GeneratedNoiseDescriptor; 19] = [
     GeneratedNoiseDescriptor { mechanism: "WHITE_B_BP_RBX", label: Some("rbx"), kind: GeneratedNoiseKind::White, equation: 47, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(1), name: "b", is_internal: false }, neg: GeneratedNoiseEndpoint { local_node: Some(7), name: "bp", is_internal: true }, table_len: 0, table_log_interp: false },
     GeneratedNoiseDescriptor { mechanism: "WHITE_BP_BI_RBI", label: Some("rbi"), kind: GeneratedNoiseKind::White, equation: 48, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(7), name: "bp", is_internal: true }, neg: GeneratedNoiseEndpoint { local_node: Some(8), name: "bi", is_internal: true }, table_len: 0, table_log_interp: false },
@@ -42,6 +42,7 @@ impl Instance {
             &prepared[..],
             ctx.temperature(),
             ctx.thermal_voltage(),
+            ctx,
         );
         install_generated_stage_values(&mut prepared[..], &produced, &CANONICAL_MODEL_STAGE_SLOTS);
         let produced = canonical_temperature_preprocess(
@@ -1080,7 +1081,7 @@ impl Instance {
 		TQ=TL;
 		}
 		let TS=PX+ TQ;
-		let TT=PY+ V;
+		let TT=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, PY, V));
 		PW=TQ;
 		PX=TS;
 		PY=TT;
@@ -1502,6 +1503,7 @@ impl Instance {
 		ACT=V;
 		ACU=ABR;
 		}
+        ctx.check_noise_evaluation()?;
         if !(ABS != 0.0) {
             if !visitor.visit(0, GeneratedNoiseEvaluationRef { active: false, psd: 0.0, exponent: None, table_operands: &[] }) { return Ok(()); }
         } else {
@@ -3068,7 +3070,7 @@ impl Instance {
         YI=YD;
         }
         let YK=UP+ YI;
-        let YL=UQ+ Y;
+        let YL=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, UQ, Y));
         UO=YI;
         UP=YK;
         UQ=YL;
@@ -3566,6 +3568,7 @@ impl Instance {
         let AJV=AIP;
         let AJW=AIQ;
         let AJX=AIR;
+        ctx.check_noise_evaluation()?;
         let omega = core::f64::consts::TAU * frequency_hz;
         let process_0_active = AGM != 0.0;
         let process_0_psd = (AGN).abs();

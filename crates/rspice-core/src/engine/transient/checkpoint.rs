@@ -1181,8 +1181,8 @@ pub(crate) fn simulation_checkpoint_identity(config: &SimulationConfig) -> Strin
     // v24 restores native VBIC 1.3 thermal defaults and instance switches.
     // v25 applies VBIC 1.3 thermal-resistance scaling, temperature limits and
     // authored CTH, and scopes the limited-evaluation cache to one matrix load.
-    // v27 includes delayed VBIC 1.3 intrinsic avalanche and its heat contribution.
-    hasher.update(b"rspice-transient-resolved-config-v27\0");
+    // v29 includes VBIC parasitic knee-current scaling and 1.3 noise sources.
+    hasher.update(b"rspice-transient-resolved-config-v29\0");
     hash_field(&mut hasher, "temperature", config.temperature.to_bits());
     hash_field(&mut hasher, "ramptime", config.ramptime.to_bits());
     hash_field(&mut hasher, "digital_delay_type", config.digital_delay_type);

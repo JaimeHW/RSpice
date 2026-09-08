@@ -135,6 +135,8 @@ impl Bjt {
         self.nr = 1.0;
         self.vaf = 0.0;
         self.var = 0.0;
+        self.tcvef = 0.0;
+        self.tcver = 0.0;
         self.rb = 0.0;
         self.rc = 0.0;
         self.rbx = 0.0;
@@ -380,6 +382,20 @@ impl Bjt {
         (psiin + 2.0 * vt_safe * correction.ln()).max(1e-12)
     }
 
+    /// The public Early voltages stay nominal. Temperature variants already
+    /// carry the clipped local temperature, so evaluate the mapping once at
+    /// that temperature rather than scaling a previously mapped value.
+    pub(super) fn vbic_early_voltages(&self) -> (Value, Value) {
+        if !self.vbic_13 {
+            return (self.vaf, self.var);
+        }
+        let delta_t = self.temperature - self.tnom.max(1.0);
+        (
+            self.vaf * (1.0 + delta_t * self.tcvef),
+            self.var * (1.0 + delta_t * self.tcver),
+        )
+    }
+
     pub(super) fn refresh_operating_scaling(&mut self) {
         let temp = self.requested_temperature();
         self.refresh_operating_scaling_for(temp);
@@ -426,6 +442,40 @@ impl Bjt {
         thermal_rise: Value,
         f: impl FnOnce(&Self) -> R,
     ) -> R {
+        self.with_temperature_variant_mask(thermal_rise, 0, f)
+    }
+
+    /// Differentiate the branch selected at the anchor. When an Early
+    /// voltage is nonpositive its inverse is identically zero in the model;
+    /// a probe across the cutoff must not reactivate that contribution.
+    pub(super) fn with_temperature_derivative_variant<R>(
+        &self,
+        thermal_rise: Value,
+        anchor: Value,
+        f: impl FnOnce(&Self) -> R,
+    ) -> R {
+        let mut mask = 0;
+        if self.vbic_13 && (self.tcvef != 0.0 || self.tcver != 0.0) {
+            let temperature = self
+                .mapped_temperature(self.requested_temperature() + anchor)
+                .0;
+            let delta_t = temperature - self.tnom.max(1.0);
+            if self.tcvef != 0.0 && self.vaf * (1.0 + delta_t * self.tcvef) <= 0.0 {
+                mask |= 1;
+            }
+            if self.tcver != 0.0 && self.var * (1.0 + delta_t * self.tcver) <= 0.0 {
+                mask |= 2;
+            }
+        }
+        self.with_temperature_variant_mask(thermal_rise, mask, f)
+    }
+
+    fn with_temperature_variant_mask<R>(
+        &self,
+        thermal_rise: Value,
+        disabled_early_voltages: u8,
+        f: impl FnOnce(&Self) -> R,
+    ) -> R {
         if !self.thermal_model_enabled() {
             return f(self);
         }
@@ -433,20 +483,28 @@ impl Bjt {
         let key = thermal_rise.to_bits();
         {
             let cache = self.thermal_variant_cache.borrow();
-            if let Some((_, variant)) = cache.iter().find(|(cached_key, _)| *cached_key == key) {
+            if let Some((_, _, variant)) = cache.iter().find(|(cached_key, cached_mask, _)| {
+                *cached_key == key && *cached_mask == disabled_early_voltages
+            }) {
                 return f(variant.as_ref());
             }
         }
 
         let mut variant = self.clone_without_thermal_variant_cache();
         variant.refresh_operating_scaling_for(self.requested_temperature() + thermal_rise);
+        if disabled_early_voltages & 1 != 0 {
+            variant.vaf = 0.0;
+        }
+        if disabled_early_voltages & 2 != 0 {
+            variant.var = 0.0;
+        }
         let result = f(&variant);
 
         let mut cache = self.thermal_variant_cache.borrow_mut();
         if cache.len() >= Self::THERMAL_VARIANT_CACHE_CAPACITY {
             cache.remove(0);
         }
-        cache.push((key, Box::new(variant)));
+        cache.push((key, disabled_early_voltages, Box::new(variant)));
         result
     }
 
@@ -1057,8 +1115,8 @@ impl Bjt {
         {
             self.ef = v;
         }
-        // VBIC flicker noise: KFN/AFN/BFN ride on the intrinsic B-E current
-        // (vbicnoise.c FLBENOIZ). Defaults 0/1/1 per vbicsetup.c:230-238.
+        // Defaults 0/1/1 per vbicsetup.c. Model policy validates the domain:
+        // ngspice allows finite signed exponents; VBIC 1.3 requires positive ones.
         if let Some(v) = params
             .get("KFN")
             .copied()
@@ -1066,18 +1124,10 @@ impl Bjt {
         {
             self.kfn = v;
         }
-        if let Some(v) = params
-            .get("AFN")
-            .copied()
-            .filter(|v| v.is_finite() && *v > 0.0)
-        {
+        if let Some(v) = params.get("AFN").copied().filter(|v| v.is_finite()) {
             self.afn = v;
         }
-        if let Some(v) = params
-            .get("BFN")
-            .copied()
-            .filter(|v| v.is_finite() && *v > 0.0)
-        {
+        if let Some(v) = params.get("BFN").copied().filter(|v| v.is_finite()) {
             self.bfn = v;
         }
         // VBIC aliases used in ngspice level=4 decks.
@@ -1349,6 +1399,8 @@ impl Bjt {
                 ("AVCX1", &mut self.avcx1),
                 ("AVCX2", &mut self.avcx2_nominal),
                 ("TAVCX", &mut self.tavcx),
+                ("TCVEF", &mut self.tcvef),
+                ("TCVER", &mut self.tcver),
                 ("MCX", &mut self.mcx),
                 ("MAXEXP", &mut self.vbic_maxexp),
             ] {
@@ -1758,6 +1810,73 @@ impl Bjt {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn vbic13_thermal_derivatives_keep_inactive_early_voltages_off() {
+        for level in [11.0, 12.0] {
+            let bjt = model_with(&[
+                ("LEVEL", level),
+                ("VEF", 5.0),
+                ("VER", 3.0),
+                ("TCVEF", -0.05),
+                ("TCVER", -0.05),
+                ("RTH", 1000.0),
+            ]);
+            for _ in 0..2 {
+                let derivative = bjt.with_temperature_derivative_variant(19.999, 20.0, |model| {
+                    model.vbic_early_voltages()
+                });
+                assert_eq!(derivative, (0.0, 0.0));
+                // Physical evaluation must not reuse a derivative-only variant.
+                let physical =
+                    bjt.with_temperature_variant(19.999, |model| model.vbic_early_voltages());
+                assert!(physical.0 > 0.0 && physical.1 > 0.0);
+            }
+            let anchor = 19.99999;
+            let step = bjt.thermal_derivative_step(anchor);
+            assert!(step > 0.0 && step < 1e-7);
+            for rise in [anchor - step, anchor + step] {
+                let mapped =
+                    bjt.with_temperature_variant(rise, |model| model.vbic_early_voltages());
+                assert!(mapped.0 > 0.0 && mapped.1 > 0.0);
+            }
+            assert_eq!((bjt.vaf, bjt.var), (5.0, 3.0));
+        }
+    }
+
+    #[test]
+    fn vbic13_early_voltage_temperature_mapping_preserves_nominal_values() {
+        for level in [11.0, 12.0] {
+            let mut bjt = model_with(&[
+                ("LEVEL", level),
+                ("VEF", 5.0),
+                ("VER", 3.0),
+                ("TCVEF", 0.05),
+                ("TCVER", -0.05),
+                ("TMAXCLIP", 100.0),
+                ("RTH", 1000.0),
+            ]);
+            for (temperature, expected) in [
+                (320.15, (10.0, 0.0)),
+                (340.15, (15.0, -3.0)),
+                (300.15, (5.0, 3.0)),
+            ] {
+                bjt.set_temperature(temperature);
+                let mapped = bjt.vbic_early_voltages();
+                assert!((mapped.0 - expected.0).abs() < 1e-12);
+                assert!((mapped.1 - expected.1).abs() < 1e-12);
+                assert_eq!((bjt.vaf, bjt.var), (5.0, 3.0));
+            }
+            let delta_t = 100.0 - (-2.0_f64).exp() - 27.0;
+            for _ in 0..2 {
+                let mapped =
+                    bjt.with_temperature_variant(74.0, |variant| variant.vbic_early_voltages());
+                assert!((mapped.0 - 5.0 * (1.0 + delta_t * 0.05)).abs() < 1e-12);
+                assert!((mapped.1 - 3.0 * (1.0 - delta_t * 0.05)).abs() < 1e-12);
+            }
+            assert_eq!(bjt.vbic_early_voltages(), (5.0, 3.0));
+        }
+    }
 
     #[test]
     fn vbic13_temperature_mapping_has_exponential_tails_and_unit_slope_joins() {

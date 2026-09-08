@@ -2,7 +2,7 @@
 #![allow(dead_code, non_snake_case, unused_imports, unused_mut, unused_parens, unused_variables)]
 
 use super::state::{CanonicalModelValues, Instance, PARAMETER_MODEL_FLAGS};
-use rspice_veriloga_runtime::{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, install_generated_stage_values, L2, L3, L4, L5, L6, evaluate_generated_above, evaluate_generated_cross, evaluate_generated_timer, rspice_eval_ddt, rspice_eval_idt, rspice_limexp, rspice_limited_exp, rspice_limited_exp_derivative};
+use rspice_veriloga_runtime::{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, install_generated_stage_values, L2, L3, L4, L5, L6, integer, evaluate_generated_above, evaluate_generated_cross, evaluate_generated_timer, rspice_eval_ddt, rspice_eval_idt, rspice_limexp, rspice_limited_exp, rspice_limited_exp_derivative};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 pub(super) const CANONICAL_MODEL_STAGE_SLOTS: [u32; 244] = [0, 297, 299, 298, 300, 303, 310, 315, 306, 312, 316, 317, 304, 305, 321, 322, 323, 324, 325, 326, 1, 2, 301, 327, 3, 4, 5, 6, 7, 8, 330, 331, 333, 334, 335, 336, 337, 338, 10, 9, 12, 11, 13, 14, 15, 339, 340, 17, 16, 341, 342, 343, 19, 18, 20, 344, 345, 346, 21, 22, 23, 347, 348, 349, 350, 351, 26, 25, 24, 27, 28, 352, 353, 354, 355, 356, 33, 30, 29, 32, 31, 357, 358, 359, 360, 361, 35, 34, 36, 38, 37, 39, 40, 41, 42, 43, 44, 363, 45, 46, 302, 119, 118, 221, 56, 63, 55, 58, 57, 101, 377, 59, 60, 62, 61, 64, 65, 307, 308, 72, 75, 73, 379, 76, 309, 380, 80, 81, 381, 382, 82, 83, 85, 87, 88, 311, 91, 92, 93, 94, 97, 98, 99, 183, 184, 383, 178, 179, 102, 313, 314, 106, 112, 220, 206, 214, 218, 384, 219, 210, 385, 208, 209, 386, 207, 115, 116, 117, 120, 121, 122, 124, 123, 125, 128, 133, 132, 260, 135, 137, 391, 139, 140, 143, 144, 151, 158, 170, 174, 175, 177, 180, 181, 182, 186, 445, 446, 185, 187, 188, 189, 190, 447, 194, 448, 195, 196, 449, 450, 198, 199, 201, 202, 204, 211, 212, 213, 215, 217, 224, 453, 230, 237, 238, 454, 246, 455, 318, 319, 320, 250, 459, 460, 259, 264, 269, 463, 282, 283, 284, 285, 289, 294, 296];
@@ -1242,6 +1242,7 @@ pub(super) fn canonical_instance_preprocess(
     staged: &[f64],
     temperature: f64,
     thermal_voltage: f64,
+    ctx: &GeneratedEvalContext<'_>,
 ) -> [f64; 141] {
 	let A=staged[299]!=0.0;
 	let B=1f64;
@@ -1563,7 +1564,7 @@ pub(super) fn canonical_instance_preprocess(
 	let J=I* D;
 	let L=K* D;
 	let N=M* D;
-	let P=O* C;
+	let P=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Mul, O, C));
 	let S=Q/ R;
 	let T=Q/ F;
 	let U=(parameters[191]* (B+ (parameters[193]* T)))* (B+ (parameters[192]* S));
@@ -2760,7 +2761,9 @@ impl Instance {
             &self.canonical_staged[..],
             ctx.temperature(),
             ctx.thermal_voltage(),
+            ctx,
         );
+        if ctx.evaluation_failed() { return; }
         install_generated_stage_values(&mut self.canonical_staged[..], &produced, &CANONICAL_INSTANCE_STAGE_SLOTS);
         self.canonical_instance_valid = true;
     }
@@ -2821,6 +2824,7 @@ impl Instance {
     pub fn stamp(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedStamper<'_>) {
         self.canonical_model_stage(ctx);
         self.canonical_instance_stage(ctx);
+        if ctx.evaluation_failed() { return; }
         self.canonical_temperature_stage(ctx);
         self.canonical_timestep_stage(ctx);
         let parameters = &self.params.values;

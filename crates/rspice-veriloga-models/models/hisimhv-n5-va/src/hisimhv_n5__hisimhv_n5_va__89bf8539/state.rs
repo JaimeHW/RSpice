@@ -1924,7 +1924,7 @@ impl Instance {
 	pub const EVENT_STATE_COUNT: usize = 0;
 	pub const ONE_STEP_DAE_SPLIT_SAFE: bool = false;
 	pub const REQUIRES_NODESET_PHASE: bool = false;
-	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "8fec2f5a9853b4d0725b0511e0e993d95042a5aa5455457aac1fd972fd9cd245";
+	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "e329092a59a88ef26b2c73cfd7f87458a69a5719ea45f508f75b78fb311dcec8";
 	pub const MAX_ANALOG_LOOP_ITERATIONS: usize = 1_000_000;
 
 	pub fn new(nodes: &[usize]) -> Self {
@@ -2606,7 +2606,7 @@ impl Instance {
 		}
 		if (if model_storage { PARAMETER_MODEL_FLAGS[434] || PARAMETER_DUAL_SCOPE_FLAGS[434] } else { !PARAMETER_MODEL_FLAGS[434] }) && !param_given[434] {
 			let value = {
-				((-100.0) * params[87])
+				(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Mul, -100.0, params[87])).map_err(|error| error.to_string())?
 			};
 			validate_parameter_scalar_metadata(434, value)?;
 			params.values[434] = value;

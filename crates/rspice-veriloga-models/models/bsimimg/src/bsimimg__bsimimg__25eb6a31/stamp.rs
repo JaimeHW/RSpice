@@ -2,7 +2,7 @@
 #![allow(dead_code, non_snake_case, unused_imports, unused_mut, unused_parens, unused_variables)]
 
 use super::state::{CanonicalModelValues, Instance, PARAMETER_MODEL_FLAGS};
-use rspice_veriloga_runtime::{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, install_generated_stage_values, L2, L3, L4, L5, L6, L7, evaluate_generated_above, evaluate_generated_cross, evaluate_generated_timer, rspice_eval_ddt, rspice_eval_idt, rspice_limexp, rspice_limited_exp, rspice_limited_exp_derivative};
+use rspice_veriloga_runtime::{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, install_generated_stage_values, L2, L3, L4, L5, L6, L7, integer, evaluate_generated_above, evaluate_generated_cross, evaluate_generated_timer, rspice_eval_ddt, rspice_eval_idt, rspice_limexp, rspice_limited_exp, rspice_limited_exp_derivative};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 pub(super) const CANONICAL_MODEL_STAGE_SLOTS: [u32; 122] = [252, 253, 107, 254, 0, 1, 2, 3, 237, 263, 103, 7, 122, 264, 265, 4, 266, 5, 267, 6, 276, 278, 280, 64, 8, 284, 226, 125, 235, 62, 127, 286, 289, 292, 290, 291, 10, 9, 11, 12, 13, 14, 302, 298, 299, 17, 19, 22, 68, 63, 67, 301, 157, 83, 82, 86, 87, 101, 104, 112, 109, 108, 111, 110, 113, 114, 115, 116, 117, 118, 119, 120, 121, 128, 131, 303, 141, 150, 151, 152, 153, 154, 304, 155, 156, 305, 160, 161, 162, 165, 173, 176, 310, 182, 183, 185, 314, 198, 204, 315, 210, 316, 317, 318, 319, 321, 322, 323, 324, 325, 326, 327, 329, 330, 331, 332, 333, 334, 335, 337, 338, 243];
@@ -16,64 +16,64 @@ pub(super) fn canonical_model_preprocess(
     staged: &[f64],
     temperature: f64,
     thermal_voltage: f64,
+    ctx: &GeneratedEvalContext<'_>,
 ) -> [f64; 122] {
 	let A=parameters[12];
 	let B=1f64;
 	let D=-1f64;
 	let F=parameters[13];
-	let H=-1f64;
-	let J=parameters[59];
-	let L=0f64;
-	let T=parameters[45];
-	let V=parameters[46];
-	let X=parameters[49];
-	let AB=parameters[138];
-	let AE=parameters[188];
-	let AH=parameters[14];
-	let AK=parameters[190];
-	let AN=parameters[194];
-	let AQ=parameters[198];
-	let AW=0.3333333333333333f64;
-	let AX=0.5f64;
-	let BK=parameters[297];
-	let BQ=300.15f64;
-	let BT=4.97232e-7f64;
-	let BU=3.42537e-7f64;
-	let BW=7.45669e11f64;
-	let BX=1.16645e12f64;
-	let BZ=parameters[99];
-	let CD=parameters[55];
-	let CF=parameters[52];
-	let CP=2f64;
-	let DM=parameters[154];
-	let EA=parameters[134];
+	let I=parameters[59];
+	let K=0f64;
+	let S=parameters[45];
+	let U=parameters[46];
+	let W=parameters[49];
+	let AA=parameters[138];
+	let AD=parameters[188];
+	let AG=parameters[14];
+	let AJ=parameters[190];
+	let AM=parameters[194];
+	let AP=parameters[198];
+	let AV=0.3333333333333333f64;
+	let AW=0.5f64;
+	let BJ=parameters[297];
+	let BP=300.15f64;
+	let BS=4.97232e-7f64;
+	let BT=3.42537e-7f64;
+	let BV=7.45669e11f64;
+	let BW=1.16645e12f64;
+	let BY=parameters[99];
+	let CC=parameters[55];
+	let CE=parameters[52];
+	let CO=2f64;
+	let DL=parameters[154];
+	let DZ=parameters[134];
+	let EQ=0f64;
 	let ER=0f64;
-	let ES=0f64;
+	let ES=0.0;
 	let ET=0.0;
-	let EU=0.0;
-	let FC=0f64;
-	let FD=0.0;
+	let FB=0f64;
+	let FC=0.0;
+	let FG=0.0;
 	let FH=0.0;
-	let FI=0.0;
-	let FM=0f64;
-	let mut oAD=0.0;
-	let mut oAG=0.0;
+	let FL=0f64;
+	let mut oAC=0.0;
+	let mut oAF=0.0;
+	let mut oBE=false;
 	let mut oBF=false;
-	let mut oBG=false;
-	let mut oBN=false;
-	let mut oCI=false;
+	let mut oBM=false;
+	let mut oCH=false;
+	let mut oCI=0.0;
 	let mut oCJ=0.0;
-	let mut oCK=0.0;
-	let mut oDO=false;
+	let mut oDN=false;
+	let mut oDU=0.0;
 	let mut oDV=0.0;
-	let mut oDW=0.0;
-	let mut oEC=false;
-	let mut oEH=0.0;
+	let mut oEB=false;
+	let mut oEG=0.0;
+	let mut oEI=0.0;
 	let mut oEJ=0.0;
-	let mut oEK=0.0;
+	let mut oEM=false;
 	let mut oEN=false;
-	let mut oEO=false;
-	let mut oFL=false;
+	let mut oFK=false;
 	let C=A== B;
 	let E=if C{
 	B
@@ -81,267 +81,267 @@ pub(super) fn canonical_model_preprocess(
 	D
 	};
 	let G=F== B;
-	let I=if G{
+	let H=if G{
 	B
 	}else{
-	H
+	D
 	};
-	let K=J* 8.85418e-12f64;
-	let M=parameters[21]== L;
-	let N=-parameters[29];
-	let O=-parameters[30];
-	let P=-parameters[35];
-	let Q=-parameters[36];
-	let R=parameters[20]== B;
-	let S=R&& (parameters[317]!= L);
-	let U=3.4531302e-11f64/ T;
-	let W=3.4531302e-11f64/ V;
-	let Y=K/ X;
-	let Z=J/ 3.9f64;
-	let AA=!(parameter_given[47]);
-	let AC=AB> L;
-	if AC{
-	let AD=-AB;
-	oAD=AD;
+	let J=I* 8.85418e-12f64;
+	let L=parameters[21]== K;
+	let M=-parameters[29];
+	let N=-parameters[30];
+	let O=-parameters[35];
+	let P=-parameters[36];
+	let Q=parameters[20]== B;
+	let R=Q&& (parameters[317]!= K);
+	let T=3.4531302e-11f64/ S;
+	let V=3.4531302e-11f64/ U;
+	let X=J/ W;
+	let Y=I/ 3.9f64;
+	let Z=!(parameter_given[47]);
+	let AB=AA> K;
+	if AB{
+	let AC=-AA;
+	oAC=AC;
 	}
-	let AF=AE> L;
-	if AF{
-	let AG=-AE;
-	oAG=AG;
+	let AE=AD> K;
+	if AE{
+	let AF=-AD;
+	oAF=AF;
 	}
-	let AI=AH== B;
-	let AJ=-parameters[115];
-	let AL=AK< L;
-	let AM=if AL{
-	L
+	let AH=AG== B;
+	let AI=-parameters[115];
+	let AK=AJ< K;
+	let AL=if AK{
+	K
 	}else{
-	AK
+	AJ
 	};
-	let AO=AN< L;
-	let AP=if AO{
-	L
-	}else{
-	AN
-	};
-	let AR=AQ< L;
-	let AS=if AR{
-	L
-	}else{
-	AQ
-	};
-	let AT=X+ (Z* (T+ V));
-	let AU=parameters[267]* ((if (B+ (X/ V))>= 1e-38f64{(B+ (X/ V))}else{1e-38f64}).ln());
-	let AV=A!= B;
-	let AY=if AV{
-	AW
-	}else{
-	AX
-	};
-	let AZ=Z* T;
-	let BA=1e-8f64/ AZ;
-	let BB=(AZ* X).sqrt();
-	let BC=Z* V;
-	let BD=1e-8f64/ BC;
-	let BE=(parameters[18]!= L)&& (parameters[310]> L);
-	let BH;
-	let BI;
-	let BJ;
-	if AI{
-	let BF=AP<= L;
-	oBF=BF;
-	let BM=if BF{
-	L
-	}else{
-	AP
-	};
-	let BN=AS<= L;
-	oBN=BN;
-	let BO=if BN{
-	L
-	}else{
-	AS
-	};
-	BH=AM;
-	BI=BM;
-	BJ=BO;
-	}else{
-	let BG=AM<= L;
-	oBG=BG;
-	let BP=if BG{
-	L
+	let AN=AM< K;
+	let AO=if AN{
+	K
 	}else{
 	AM
 	};
-	BH=BP;
-	BI=AP;
-	BJ=AS;
+	let AQ=AP< K;
+	let AR=if AQ{
+	K
+	}else{
+	AP
+	};
+	let AS=W+ (Y* (S+ U));
+	let AT=parameters[267]* ((if (B+ (W/ U))>= 1e-38f64{(B+ (W/ U))}else{1e-38f64}).ln());
+	let AU=A!= B;
+	let AX=if AU{
+	AV
+	}else{
+	AW
+	};
+	let AY=Y* S;
+	let AZ=1e-8f64/ AY;
+	let BA=(AY* W).sqrt();
+	let BB=Y* U;
+	let BC=1e-8f64/ BB;
+	let BD=(parameters[18]!= K)&& (parameters[310]> K);
+	let BG;
+	let BH;
+	let BI;
+	if AH{
+	let BE=AO<= K;
+	oBE=BE;
+	let BL=if BE{
+	K
+	}else{
+	AO
+	};
+	let BM=AR<= K;
+	oBM=BM;
+	let BN=if BM{
+	K
+	}else{
+	AR
+	};
+	BG=AL;
+	BH=BL;
+	BI=BN;
+	}else{
+	let BF=AL<= K;
+	oBF=BF;
+	let BO=if BF{
+	K
+	}else{
+	AL
+	};
+	BG=BO;
+	BH=AO;
+	BI=AR;
 	}
-	let BL=BK<= L;
-	let BS=if BL{
+	let BK=BJ<= K;
+	let BR=if BK{
+	BP
+	}else{
+	let BQ=BJ+ 273.15f64;
 	BQ
-	}else{
-	let BR=BK+ 273.15f64;
-	BR
 	};
-	let BV=if C{
+	let BU=if C{
+	BS
+	}else{
 	BT
-	}else{
-	BU
 	};
-	let BY=if C{
+	let BX=if C{
+	BV
+	}else{
 	BW
-	}else{
-	BX
 	};
-	let CA=BZ* BZ;
-	let CB=(if (parameters[239]/ BZ)>= 1e-38f64{(parameters[239]/ BZ)}else{1e-38f64}).ln();
-	let CC=parameters[298]+ 273.15f64;
-	let CE=CD/ 0.051728331239999994f64;
-	let CG=CF!= L;
-	let CH=CG&& (!(parameter_given[58]));
+	let BZ=BY* BY;
+	let CA=(if (parameters[239]/ BY)>= 1e-38f64{(parameters[239]/ BY)}else{1e-38f64}).ln();
+	let CB=parameters[298]+ 273.15f64;
+	let CD=CC/ 0.051728331239999994f64;
+	let CF=CE!= K;
+	let CG=CF&& (!(parameter_given[58]));
+	if CG{
+	let CH=F== D;
+	oCH=CH;
 	if CH{
-	let CI=F== -1f64;
+	let CI=AW* CC;
 	oCI=CI;
-	if CI{
-	let CJ=AX* CD;
+	}else{
+	let CJ=AW* CC;
 	oCJ=CJ;
+	}
+	}
+	let CK=(W* (AY+ (0.375f64* W))).sqrt();
+	let CL=AY+ W;
+	let CM=(((Y* W)* S).sqrt())- CK;
+	let CN=F== D;
+	let CP=CO* V;
+	let CQ=((1.60219e-19f64* CE)* J)/ (CP* V);
+	let CR=V+ X;
+	let CS=((-V)* X)/ (CR* T);
+	let CT=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Mul, E, H));
+	let CU=T+ ((X* V)/ CR);
+	let CV=B- ((AW* W)/ (W+ BB));
+	let CW=T/ X;
+	let CX=V/ X;
+	let CY=CW* CW;
+	let CZ=CW/ (((CX* CW)+ CX)+ CW);
+	let DA=B+ CX;
+	let DB=B+ CW;
+	let DC=CX* CX;
+	let DD=CO* CY;
+	let DE=-2f64* CW;
+	let DF=-CW;
+	let DG=-2f64* CW;
+	let DH=-2f64* CW;
+	let DI=-2f64* CW;
+	let DJ=-2f64* CW;
+	let DK=0.01f64/ T;
+	let DM=(0.25f64* DL)* DL;
+	if !AH{
+	let DN=AG== K;
+	oDN=DN;
+	}
+	let DO=-2f64* CW;
+	let DP=-2f64* CW;
+	let DQ=-2f64* CW;
+	let DR=-2f64* CW;
+	let DS=-2f64* CW;
+	let DT=parameters[162]!= K;
+	if DT{
+	let DU=CO* T;
+	oDU=DU;
 	}else{
-	let CK=AX* CD;
-	oCK=CK;
-	}
-	}
-	let CL=(X* (AZ+ (0.375f64* X))).sqrt();
-	let CM=AZ+ X;
-	let CN=(((Z* X)* T).sqrt())- CL;
-	let CO=F== -1f64;
-	let CQ=CP* W;
-	let CR=((1.60219e-19f64* CF)* K)/ (CQ* W);
-	let CS=W+ Y;
-	let CT=((-W)* Y)/ (CS* U);
-	let CU=E* I;
-	let CV=U+ ((Y* W)/ CS);
-	let CW=B- ((AX* X)/ (X+ BC));
-	let CX=U/ Y;
-	let CY=W/ Y;
-	let CZ=CX* CX;
-	let DA=CX/ (((CY* CX)+ CY)+ CX);
-	let DB=B+ CY;
-	let DC=B+ CX;
-	let DD=CY* CY;
-	let DE=CP* CZ;
-	let DF=-2f64* CX;
-	let DG=-CX;
-	let DH=-2f64* CX;
-	let DI=-2f64* CX;
-	let DJ=-2f64* CX;
-	let DK=-2f64* CX;
-	let DL=0.01f64/ U;
-	let DN=(0.25f64* DM)* DM;
-	if !AI{
-	let DO=AH== L;
-	oDO=DO;
-	}
-	let DP=-2f64* CX;
-	let DQ=-2f64* CX;
-	let DR=-2f64* CX;
-	let DS=-2f64* CX;
-	let DT=-2f64* CX;
-	let DU=parameters[162]!= L;
-	if DU{
-	let DV=CP* U;
+	let DV=CO* T;
 	oDV=DV;
-	}else{
-	let DW=CP* U;
-	oDW=DW;
 	}
-	let DX=parameters[189]!= L;
-	let DY=CP* U;
-	let DZ=B+ (parameters[109].sqrt());
-	let EB=(0.25f64* EA)* EA;
-	if !AI{
-	let EC=AH== CP;
-	oEC=EC;
+	let DW=parameters[189]!= K;
+	let DX=CO* T;
+	let DY=B+ (parameters[109].sqrt());
+	let EA=(0.25f64* DZ)* DZ;
+	if !AH{
+	let EB=AG== CO;
+	oEB=EB;
 	}
-	let ED=T/ V;
-	let EE=AX* parameters[265];
-	let EF=AX* parameters[266];
-	let EG=parameters[17]!= L;
-	if EG{
-	let EH=-9.82222e11f64* BZ;
-	oEH=EH;
-	let EJ=-7.45669e11f64* BZ;
+	let EC=S/ U;
+	let ED=AW* parameters[265];
+	let EE=AW* parameters[266];
+	let EF=parameters[17]!= K;
+	if EF{
+	let EG=-9.82222e11f64* BY;
+	oEG=EG;
+	let EI=-7.45669e11f64* BY;
+	oEI=EI;
+	}
+	let EH=parameters[16]!= K;
+	if EH{
+	let EJ=(-BX)* BY;
 	oEJ=EJ;
 	}
-	let EI=parameters[16]!= L;
-	if EI{
-	let EK=(-BY)* BZ;
-	oEK=EK;
-	}
-	let EL=parameters[15]!= L;
-	let EM=((parameters[288]> L)|| (parameters[289]> L))|| (parameters[290]> L);
-	if EM{
-	let EN=parameters[287]<= L;
+	let EK=parameters[15]!= K;
+	let EL=((parameters[288]> K)|| (parameters[289]> K))|| (parameters[290]> K);
+	if EL{
+	let EM=parameters[287]<= K;
+	oEM=EM;
+	let EN=parameters[22]== B;
 	oEN=EN;
-	let EO=parameters[22]== B;
-	oEO=EO;
 	}
-	let EP=E;
-	let EQ=AH== CP;
+	let EO=E;
+	let EP=AG== CO;
+	let EU;
 	let EV;
 	let EW;
 	let EX;
 	let EY;
 	let EZ;
-	let FA;
-	if EQ{
+	if EP{
+	EU=EQ;
 	EV=ER;
-	EW=ES;
-	EX=L;
-	EY=L;
+	EW=K;
+	EX=K;
+	EY=B;
 	EZ=B;
-	FA=B;
 	}else{
-	EV=L;
-	EW=L;
+	EU=K;
+	EV=K;
+	EW=ES;
 	EX=ET;
-	EY=EU;
-	EZ=L;
-	FA=L;
+	EY=K;
+	EZ=K;
 	}
-	let FB=parameters[19]== L;
+	let FA=parameters[19]== K;
+	let FD;
 	let FE;
 	let FF;
-	let FG;
-	if FB{
+	if FA{
+	FD=FB;
+	FE=K;
+	FF=B;
+	}else{
+	FD=K;
 	FE=FC;
-	FF=L;
-	FG=B;
-	}else{
-	FE=L;
-	FF=FD;
-	FG=L;
+	FF=K;
 	}
+	let FI;
 	let FJ;
-	let FK;
-	if EG{
+	if EF{
+	FI=FG;
 	FJ=FH;
-	FK=FI;
 	}else{
-	FJ=L;
-	FK=L;
+	FI=K;
+	FJ=K;
 	}
+	let FM;
 	let FN;
-	let FO;
-	if BE{
-	let FL=AH!= CP;
-	oFL=FL;
-	FN=L;
-	FO=L;
+	if BD{
+	let FK=AG!= CO;
+	oFK=FK;
+	FM=K;
+	FN=K;
 	}else{
-	FN=FM;
-	FO=B;
+	FM=FL;
+	FN=B;
 	}
-    [C as u8 as f64, G as u8 as f64, K, M as u8 as f64, N, O, P, Q, R as u8 as f64, S as u8 as f64, U, W, Y, AA as u8 as f64, AC as u8 as f64, oAD, AF as u8 as f64, oAG, AI as u8 as f64, AJ, AL as u8 as f64, AO as u8 as f64, AR as u8 as f64, AT, AU, AV as u8 as f64, AZ, BA, BB, BC, BD, BE as u8 as f64, oBF as u8 as f64, oBN as u8 as f64, oBG as u8 as f64, BL as u8 as f64, CA, CB, BV, CC, BS, CE, CG as u8 as f64, CH as u8 as f64, oCI as u8 as f64, oCJ, oCK, E, CL, CM, CN, CO as u8 as f64, CQ, CR, I, CT, CU, CV, CW, CX, CY, CZ, DA, DB, DC, DD, DE, DF, DG, DH, DI, DJ, DK, DL, DN, oDO as u8 as f64, BH, DP, DQ, DR, DS, DT, DU as u8 as f64, oDV, oDW, DX as u8 as f64, DY, AY, DZ, EB, BI, BJ, oEC as u8 as f64, ED, EE, EF, EG as u8 as f64, oEH, oEJ, EI as u8 as f64, oEK, EL as u8 as f64, EM as u8 as f64, oEN as u8 as f64, oEO as u8 as f64, EQ as u8 as f64, FB as u8 as f64, oFL as u8 as f64, EV, EW, EX, EY, FE, FF, FJ, FK, FN, EZ, FA, FG, FO, EP]
+    [C as u8 as f64, G as u8 as f64, J, L as u8 as f64, M, N, O, P, Q as u8 as f64, R as u8 as f64, T, V, X, Z as u8 as f64, AB as u8 as f64, oAC, AE as u8 as f64, oAF, AH as u8 as f64, AI, AK as u8 as f64, AN as u8 as f64, AQ as u8 as f64, AS, AT, AU as u8 as f64, AY, AZ, BA, BB, BC, BD as u8 as f64, oBE as u8 as f64, oBM as u8 as f64, oBF as u8 as f64, BK as u8 as f64, BZ, CA, BU, CB, BR, CD, CF as u8 as f64, CG as u8 as f64, oCH as u8 as f64, oCI, oCJ, E, CK, CL, CM, CN as u8 as f64, CP, CQ, H, CS, CT, CU, CV, CW, CX, CY, CZ, DA, DB, DC, DD, DE, DF, DG, DH, DI, DJ, DK, DM, oDN as u8 as f64, BG, DO, DP, DQ, DR, DS, DT as u8 as f64, oDU, oDV, DW as u8 as f64, DX, AX, DY, EA, BH, BI, oEB as u8 as f64, EC, ED, EE, EF as u8 as f64, oEG, oEI, EH as u8 as f64, oEJ, EK as u8 as f64, EL as u8 as f64, oEM as u8 as f64, oEN as u8 as f64, EP as u8 as f64, FA as u8 as f64, oFK as u8 as f64, EU, EV, EW, EX, FD, FE, FI, FJ, FM, EY, EZ, FF, FN, EO]
 }
 
 pub(super) fn canonical_instance_preprocess(
@@ -351,6 +351,7 @@ pub(super) fn canonical_instance_preprocess(
     staged: &[f64],
     temperature: f64,
     thermal_voltage: f64,
+    ctx: &GeneratedEvalContext<'_>,
 ) -> [f64; 216] {
 	let A=staged[254]!=0.0;
 	let B=parameters[1];
@@ -820,7 +821,7 @@ pub(super) fn canonical_instance_preprocess(
 	let JY=parameters[99]* FF;
 	let JZ=(rspice_limited_exp((FE* staged[9])))/ staged[10];
 	let KB=(S* KA)* ((rspice_limited_exp((FE* ((if (parameters[239]/ JY)>= 1e-38f64{(parameters[239]/ JY)}else{1e-38f64}).ln()))))/ (JY* JY));
-	let KD=(parameters[316]* (parameters[313]+ ((S/ 3f64)/ KC)))/ ((KC* C)* (F- parameters[314]));
+	let KD=(parameters[316]* (parameters[313]+ ((S/ 3f64)/ KC)))/ ((ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Mul, KC, C)))* (F- parameters[314]));
 	let KE=KD> JK;
 	let KG=if KE{
 	let KF=AT/ KD;
@@ -954,7 +955,7 @@ pub(super) fn canonical_instance_preprocess(
 	let NJ=EL<= Q;
 	oNJ=NJ;
 	}
-	let NK=MN* C;
+	let NK=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Mul, MN, C));
 	let NL=(staged[237]!=0.0)&& (FY!= Q);
 	if NL{
 	let NM=C* FY;
@@ -1055,7 +1056,9 @@ impl Instance {
             &self.canonical_staged[..],
             ctx.temperature(),
             ctx.thermal_voltage(),
+            ctx,
         );
+        if ctx.evaluation_failed() { return; }
         let values = canonical_model_cache_intern(key, Arc::new(produced));
         self.canonical_install_model_values(values);
     }
@@ -1071,7 +1074,9 @@ impl Instance {
             &self.canonical_staged[..],
             ctx.temperature(),
             ctx.thermal_voltage(),
+            ctx,
         );
+        if ctx.evaluation_failed() { return; }
         install_generated_stage_values(&mut self.canonical_staged[..], &produced, &CANONICAL_INSTANCE_STAGE_SLOTS);
         self.canonical_instance_valid = true;
     }
@@ -1110,7 +1115,9 @@ impl Instance {
     pub fn stamp(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedStamper<'_>) {
         if ctx.analog_tasks_enabled() { self.analog_effects.get_or_insert_with(Default::default).begin_evaluation(); }
         self.canonical_model_stage(ctx);
+        if ctx.evaluation_failed() { return; }
         self.canonical_instance_stage(ctx);
+        if ctx.evaluation_failed() { return; }
         self.canonical_temperature_stage(ctx);
         self.canonical_timestep_stage(ctx);
         let parameters = &self.params.values;
