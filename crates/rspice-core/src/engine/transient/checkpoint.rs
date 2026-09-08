@@ -28,9 +28,10 @@
 //! native compact-model, thermal, stateful capacitor-expression, nonlinear
 //! magnetic, standalone multi-winding transformer, stateful behavioral/switch,
 //! runtime Verilog-A, or generated dynamic-charge histories that do not yet
-//! have a complete versioned contract. Native VBIC,
-//! distributed LTRA/TXL, and coupled-line convolution runtimes block restart
-//! more broadly until their complete state is versioned.
+//! have a complete versioned contract. Native VBIC's device evaluation image
+//! is versioned, but restart remains blocked pending its complete solver-state
+//! contract. Distributed LTRA/TXL and coupled-line convolution runtimes also
+//! block restart until their complete state is versioned.
 //!
 //! The canonical checkpoint representation is a versioned, line-oriented
 //! text format using Rust's shortest-round-trip float formatting, so every
@@ -43,12 +44,14 @@ use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::circuit::{
     AcceptedNativeNonlinearCheckpointStates, CircuitData, SolutionDependentCapacitorState,
 };
+#[cfg(test)]
+use crate::device::semiconductor::BJT_ACCEPTED_NONLINEAR_RUNTIME_TAG;
 use crate::device::semiconductor::{
     AcceptedBjtChargeSnapshotCheckpoint, AcceptedBjtNonlinearCheckpoint,
     AcceptedDiodeNonlinearCheckpoint, BJT_ACCEPTED_CHARGE_SNAPSHOT_STATE_VALUE_COUNT,
-    BJT_ACCEPTED_NONLINEAR_RUNTIME_TAG, BJT_ACCEPTED_NONLINEAR_STATE_VALUE_COUNT,
-    BJT_DYNAMIC_CHARGE_COUNT, BJT_EXTERNAL_STATE_DIM, BJT_INTERNAL_STATE_DIM, BjtChargeSnapshot,
-    DIODE_ACCEPTED_NONLINEAR_RUNTIME_TAG, DiodeNonlinearState,
+    BJT_ACCEPTED_NONLINEAR_STATE_VALUE_COUNT, BJT_DYNAMIC_CHARGE_COUNT, BJT_EXTERNAL_STATE_DIM,
+    BJT_INTERNAL_STATE_DIM, BjtChargeSnapshot, DIODE_ACCEPTED_NONLINEAR_RUNTIME_TAG,
+    DiodeNonlinearState, VBIC_ACCEPTED_NONLINEAR_STATE_VALUE_COUNT,
 };
 #[cfg(feature = "veriloga")]
 use crate::device::veriloga::VerilogADeviceCheckpoint;
@@ -1161,10 +1164,10 @@ pub(crate) fn restart_checkpoint_identity(netlist: &Netlist) -> Option<String> {
 
 pub(crate) fn simulation_checkpoint_identity(config: &SimulationConfig) -> String {
     let mut hasher = blake3::Hasher::new();
-    // v19 preserves legacy BJT charge branches at zero/negative slopes and
-    // corrects PNP overlap-charge polarity. Older companions and cached charge
-    // Jacobians do not represent the same accepted integration history.
-    hasher.update(b"rspice-transient-resolved-config-v19\0");
+    // v20 refreshes VBIC loads when only excess-phase states change and
+    // invalidates temperature variants after junction-GMIN changes. Older
+    // accepted trajectories may have used stale equations or charge caches.
+    hasher.update(b"rspice-transient-resolved-config-v20\0");
     hash_field(&mut hasher, "temperature", config.temperature.to_bits());
     hash_field(&mut hasher, "ramptime", config.ramptime.to_bits());
     hash_field(&mut hasher, "digital_delay_type", config.digital_delay_type);
@@ -2254,7 +2257,9 @@ fn read_accepted_bjt_nonlinear_states(
         .next()
         .ok_or_else(|| "missing 'accepted_bjt_nonlinear_states' section".to_string())?;
     let count = parse_count_header(header, "accepted_bjt_nonlinear_states")?;
-    let rows_per_state = BJT_ACCEPTED_NONLINEAR_STATE_VALUE_COUNT.saturating_add(2);
+    let rows_per_state = BJT_ACCEPTED_NONLINEAR_STATE_VALUE_COUNT
+        .min(VBIC_ACCEPTED_NONLINEAR_STATE_VALUE_COUNT)
+        .saturating_add(2);
     let maximum_count = lines.remaining() / rows_per_state;
     if count > maximum_count {
         return Err(format!(
@@ -2302,9 +2307,13 @@ fn read_accepted_bjt_nonlinear_states(
             format!("accepted BJT state row {row} is missing its state-values header")
         })?;
         let value_count = parse_count_header(values_header, "accepted_bjt_state_values")?;
-        if value_count != BJT_ACCEPTED_NONLINEAR_STATE_VALUE_COUNT {
+        let expected_count = AcceptedBjtNonlinearCheckpoint::value_count_for_runtime(runtime_tag)
+            .ok_or_else(|| {
+            format!("accepted BJT state row {row} uses unsupported runtime tag '{runtime_tag}'")
+        })?;
+        if value_count != expected_count {
             return Err(format!(
-                "accepted BJT state row {row} has {value_count} values; runtime requires {BJT_ACCEPTED_NONLINEAR_STATE_VALUE_COUNT}"
+                "accepted BJT state row {row} has {value_count} values; runtime requires {expected_count}"
             ));
         }
         let mut state_values =
@@ -5410,17 +5419,16 @@ impl TransientCheckpoint {
                 ));
             }
             bjt_names.push((checkpoint.instance_name.as_str(), index));
-            if checkpoint.runtime_tag != BJT_ACCEPTED_NONLINEAR_RUNTIME_TAG {
-                return Err(format!(
+            let expected_count = AcceptedBjtNonlinearCheckpoint::value_count_for_runtime(&checkpoint.runtime_tag)
+                .ok_or_else(|| format!(
                     "accepted BJT nonlinear checkpoint state {index} uses unsupported runtime tag '{}'",
                     checkpoint.runtime_tag
-                ));
-            }
-            if checkpoint.state_values.len() != BJT_ACCEPTED_NONLINEAR_STATE_VALUE_COUNT {
+                ))?;
+            if checkpoint.state_values.len() != expected_count {
                 return Err(format!(
                     "accepted BJT nonlinear checkpoint state {index} has {} values; runtime requires {}",
                     checkpoint.state_values.len(),
-                    BJT_ACCEPTED_NONLINEAR_STATE_VALUE_COUNT
+                    expected_count
                 ));
             }
             if checkpoint
@@ -11224,6 +11232,66 @@ mod tests {
         assert_eq!(
             target.capture_accepted_native_nonlinear_checkpoint_states(),
             expected
+        );
+    }
+
+    #[test]
+    fn mixed_gp_vbic_nonlinear_images_round_trip_without_admitting_vbic_restart() {
+        use crate::device::NonlinearDevice;
+        let (_, _, mut checkpoint) = native_junction_checkpoint_fixture();
+        let mut vbic = crate::device::Bjt::new_npn("QVBIC".into(), 1, 2, 0).with_params(
+            &[
+                ("LEVEL".into(), 4.0),
+                ("TD".into(), 2e-11),
+                ("SELFT".into(), 1.0),
+                ("RTH".into(), 300.0),
+                ("CTH".into(), 1e-12),
+            ]
+            .into_iter()
+            .collect(),
+        );
+        let mut node = 2;
+        vbic.assign_vbic_internal_nodes(|_| {
+            node += 1;
+            node
+        });
+        vbic.update(&vec![0.0; node]);
+        checkpoint
+            .accepted_nonlinear_states
+            .bjts
+            .push(vbic.accepted_nonlinear_checkpoint().unwrap());
+        for encoding in [
+            TransientCheckpointEncoding::Unpacked,
+            TransientCheckpointEncoding::Packed,
+        ] {
+            let decoded =
+                TransientCheckpoint::from_bytes(&checkpoint.to_bytes(encoding).unwrap()).unwrap();
+            assert_eq!(
+                decoded.accepted_nonlinear_states,
+                checkpoint.accepted_nonlinear_states
+            );
+            assert_eq!(
+                decoded.accepted_nonlinear_states.bjts[0].state_values.len(),
+                BJT_ACCEPTED_NONLINEAR_STATE_VALUE_COUNT
+            );
+            assert_eq!(
+                decoded.accepted_nonlinear_states.bjts[1].state_values.len(),
+                VBIC_ACCEPTED_NONLINEAR_STATE_VALUE_COUNT
+            );
+        }
+        let netlist = Netlist::parse("VBIC restart preflight\nV1 c 0 1\nV2 b 0 0.7\nQ1 c b 0 vm\n.model vm NPN LEVEL=4\n.end\n").unwrap();
+        let error = Engine::default()
+            .run_tran_checkpointed(&netlist, 1e-9, 1e-11)
+            .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("checkpoint capability preflight failed")
+        );
+        assert!(
+            error
+                .to_string()
+                .contains("transient history is not checkpointable")
         );
     }
 

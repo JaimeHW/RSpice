@@ -36,6 +36,291 @@ pub(crate) struct VbicNoiseOperatingModel {
 }
 
 impl Bjt {
+    pub(super) fn capture_promoted_vbic_checkpoint(
+        &self,
+    ) -> Result<AcceptedBjtNonlinearCheckpoint, String> {
+        let mut values = Vec::with_capacity(VBIC_ACCEPTED_NONLINEAR_STATE_VALUE_COUNT);
+        self.checkpoint_push_evaluation_state(&mut values);
+        values.push(self.junction_gmin);
+        values.extend([
+            u8::from(self.mna_eval.is_some()) as Value,
+            u8::from(self.mna_limited_from.is_some()) as Value,
+            u8::from(self.vbic_startup_load_pending) as Value,
+            u8::from(self.mna_charge_cache_valid.get()) as Value,
+        ]);
+        values.extend(
+            self.mna_limited_from
+                .unwrap_or([0.0; EXTERNAL_DIM + BJT_INTERNAL_STATE_DIM]),
+        );
+        Self::checkpoint_push_linearization(
+            &mut values,
+            self.mna_eval
+                .map_or_else(BjtLinearization::default, |eval| eval.linearized),
+        );
+        let branches = self
+            .mna_eval
+            .map_or([BranchLinearization::default(); 14], |eval| {
+                [
+                    eval.ibe, eval.ibex, eval.ibc, eval.iciei, eval.ircx, eval.irci, eval.irbx,
+                    eval.irbi, eval.ire, eval.ibep, eval.irbp, eval.ibcp, eval.iccp, eval.irs,
+                ]
+            });
+        for branch in branches {
+            values.push(branch.current);
+            values.extend(branch.d_internal);
+            values.extend(branch.d_external);
+        }
+        for branch in self
+            .mna_delay_branches
+            .into_iter()
+            .chain([self.mna_delay_thermal])
+        {
+            Self::checkpoint_push_charge_branch(
+                &mut values,
+                BjtChargeBranch {
+                    charge: branch.current,
+                    d_internal: branch.d_internal,
+                    d_external: branch.d_external,
+                    pos_internal: branch.pos_internal,
+                    neg_internal: branch.neg_internal,
+                    pos_external: branch.pos_external,
+                    neg_external: branch.neg_external,
+                },
+            );
+        }
+        for branch in self.mna_charge_cache.get() {
+            Self::checkpoint_push_charge_branch(&mut values, branch);
+        }
+        debug_assert_eq!(values.len(), VBIC_ACCEPTED_NONLINEAR_STATE_VALUE_COUNT);
+        let checkpoint = AcceptedBjtNonlinearCheckpoint {
+            instance_name: self.name.clone(),
+            runtime_tag: VBIC_ACCEPTED_NONLINEAR_RUNTIME_TAG.to_string(),
+            legacy_junction_limited: false,
+            reduced_linearization_valid: false,
+            previous_reduced_linearization_valid: false,
+            charge_snapshot_valid: false,
+            state_values: values,
+        };
+        self.validate_promoted_vbic_checkpoint(&checkpoint)?;
+        Ok(checkpoint)
+    }
+
+    pub(super) fn validate_promoted_vbic_checkpoint(
+        &self,
+        checkpoint: &AcceptedBjtNonlinearCheckpoint,
+    ) -> Result<(), String> {
+        if checkpoint.instance_name != self.name
+            || checkpoint.runtime_tag != VBIC_ACCEPTED_NONLINEAR_RUNTIME_TAG
+        {
+            return Err(format!(
+                "BJT '{}' promoted VBIC checkpoint instance/runtime mismatch",
+                self.name
+            ));
+        }
+        if checkpoint.state_values.len() != VBIC_ACCEPTED_NONLINEAR_STATE_VALUE_COUNT {
+            return Err(format!(
+                "BJT '{}' promoted VBIC checkpoint shape mismatch: captured {}, expected {}",
+                self.name,
+                checkpoint.state_values.len(),
+                VBIC_ACCEPTED_NONLINEAR_STATE_VALUE_COUNT
+            ));
+        }
+        if checkpoint.legacy_junction_limited
+            || checkpoint.reduced_linearization_valid
+            || checkpoint.previous_reduced_linearization_valid
+            || checkpoint.charge_snapshot_valid
+        {
+            return Err(format!(
+                "BJT '{}' promoted VBIC checkpoint contains reduced-runtime cache flags",
+                self.name
+            ));
+        }
+        let values = &checkpoint.state_values;
+        if values.iter().any(|value| !value.is_finite())
+            || values[BJT_ACCEPTED_SCALAR_VALUE_COUNT] < 0.0
+        {
+            return Err(format!(
+                "BJT '{}' promoted VBIC checkpoint contains non-finite state or invalid junction GMIN",
+                self.name
+            ));
+        }
+        let flags_start = BJT_ACCEPTED_SCALAR_VALUE_COUNT + 1;
+        let flags = &values[flags_start..flags_start + 4];
+        if flags
+            .iter()
+            .any(|value| ![0.0_f64.to_bits(), 1.0_f64.to_bits()].contains(&value.to_bits()))
+            || (flags[1] != 0.0 && flags[0] == 0.0)
+        {
+            return Err(format!(
+                "BJT '{}' promoted VBIC checkpoint contains invalid cache status",
+                self.name
+            ));
+        }
+        let branch_start = flags_start
+            + 4
+            + EXTERNAL_DIM
+            + BJT_INTERNAL_STATE_DIM
+            + 12
+            + 14 * (1 + INTERNAL_DIM + EXTERNAL_DIM);
+        // Derive endpoint incidence from the same branch builders as the
+        // runtime, without solving or replacing the captured numerical cache.
+        let template = BjtDynamicReduction::default();
+        let expected_delay = self.vbic_delay_static_branches(&template);
+        let expected_thermal = self.vbic_delay_static_thermal_branch(&template);
+        let expected_charge =
+            self.dynamic_charge_branches_from_inputs(&template, BjtDynamicChargeInputs::default());
+        for (branch, data) in values[branch_start..]
+            .chunks_exact(BJT_CHARGE_BRANCH_CHECKPOINT_VALUE_COUNT)
+            .enumerate()
+        {
+            let endpoints = &data[1 + BJT_INTERNAL_STATE_DIM + EXTERNAL_DIM..];
+            for (lane, (&value, dimension)) in endpoints
+                .iter()
+                .zip([
+                    BJT_INTERNAL_STATE_DIM,
+                    BJT_INTERNAL_STATE_DIM,
+                    EXTERNAL_DIM,
+                    EXTERNAL_DIM,
+                ])
+                .enumerate()
+            {
+                if value.to_bits() != (-1.0_f64).to_bits()
+                    && !(value >= 0.0 && value.fract() == 0.0 && value < dimension as Value)
+                {
+                    return Err(format!(
+                        "BJT '{}' promoted VBIC branch {branch} endpoint {lane} is outside its runtime topology",
+                        self.name
+                    ));
+                }
+            }
+            if (endpoints[0] >= 0.0 && endpoints[2] >= 0.0)
+                || (endpoints[1] >= 0.0 && endpoints[3] >= 0.0)
+            {
+                return Err(format!(
+                    "BJT '{}' promoted VBIC branch {branch} selects both internal and external endpoints",
+                    self.name
+                ));
+            }
+            let expected = if branch < 4 {
+                let expected = if flags[0] == 0.0 {
+                    BjtCurrentBranch::default()
+                } else if branch < 3 {
+                    expected_delay[branch]
+                } else {
+                    expected_thermal
+                };
+                Some([
+                    expected.pos_internal,
+                    expected.neg_internal,
+                    expected.pos_external,
+                    expected.neg_external,
+                ])
+            } else if flags[3] != 0.0 {
+                let expected = expected_charge[branch - 4];
+                Some([
+                    expected.pos_internal,
+                    expected.neg_internal,
+                    expected.pos_external,
+                    expected.neg_external,
+                ])
+            } else {
+                None // Invalid charge caches are overwritten before use.
+            };
+            if expected
+                .is_some_and(|expected| endpoints != expected.map(Self::checkpoint_endpoint_value))
+            {
+                return Err(format!(
+                    "BJT '{}' promoted VBIC branch {branch} endpoint topology mismatch",
+                    self.name
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    /// Restore the complete cached MNA evaluation without recomputing it.
+    /// Derivative caches can precede the current junction GMIN or limiter
+    /// policy; reconstructing them at a new bias would change the first load.
+    pub(super) fn restore_promoted_vbic_checkpoint(
+        &mut self,
+        checkpoint: &AcceptedBjtNonlinearCheckpoint,
+    ) {
+        let values = &checkpoint.state_values;
+        let mut cursor = 0;
+        self.checkpoint_restore_evaluation_state(values, &mut cursor);
+        self.junction_gmin = values[cursor];
+        self.clear_thermal_variant_cache();
+        cursor += 1;
+        let flags = Self::checkpoint_take_array::<4>(values, &mut cursor);
+        let limited_from = Self::checkpoint_take_array(values, &mut cursor);
+        self.mna_limited_from = (flags[1] != 0.0).then_some(limited_from);
+        self.vbic_startup_load_pending = flags[2] != 0.0;
+        let linearized = Self::checkpoint_take_linearization(values, &mut cursor);
+        let [
+            ibe,
+            ibex,
+            ibc,
+            iciei,
+            ircx,
+            irci,
+            irbx,
+            irbi,
+            ire,
+            ibep,
+            irbp,
+            ibcp,
+            iccp,
+            irs,
+        ] = std::array::from_fn(|_| {
+            let current = values[cursor];
+            cursor += 1;
+            BranchLinearization {
+                current,
+                d_internal: Self::checkpoint_take_array(values, &mut cursor),
+                d_external: Self::checkpoint_take_array(values, &mut cursor),
+            }
+        });
+        self.mna_eval = (flags[0] != 0.0).then_some(EvaluatedBjtState {
+            linearized,
+            ibe,
+            ibex,
+            ibc,
+            iciei,
+            ircx,
+            irci,
+            irbx,
+            irbi,
+            ire,
+            ibep,
+            irbp,
+            ibcp,
+            iccp,
+            irs,
+        });
+        let [delay0, delay1, delay2, thermal] = std::array::from_fn(|_| {
+            let branch = Self::checkpoint_take_charge_branch(values, &mut cursor);
+            BjtCurrentBranch {
+                current: branch.charge,
+                d_internal: branch.d_internal,
+                d_external: branch.d_external,
+                pos_internal: branch.pos_internal,
+                neg_internal: branch.neg_internal,
+                pos_external: branch.pos_external,
+                neg_external: branch.neg_external,
+            }
+        });
+        self.mna_delay_branches = [delay0, delay1, delay2];
+        self.mna_delay_thermal = thermal;
+        self.mna_charge_cache.set(std::array::from_fn(|_| {
+            Self::checkpoint_take_charge_branch(values, &mut cursor)
+        }));
+        self.mna_charge_cache_valid.set(flags[3] != 0.0);
+        self.reduced_linearization_cache_valid.set(false);
+        self.previous_reduced_linearization_valid = false;
+        self.charge_snapshot_cache_valid.set(false);
+        debug_assert_eq!(cursor, values.len());
+    }
+
     /// True once the builder has promoted this instance's VBIC states to MNA
     /// unknowns.
     #[inline]
@@ -301,8 +586,11 @@ impl Bjt {
     }
 
     /// This instance's whole read of a solution vector: its four terminal
-    /// voltages followed by its eight internal node voltages, before limiting.
-    fn vbic_mna_solution_bias(&self, voltages: &[Value]) -> [Value; EXTERNAL_DIM + INTERNAL_DIM] {
+    /// voltages followed by its ten internal states, before limiting.
+    fn vbic_mna_solution_bias(
+        &self,
+        voltages: &[Value],
+    ) -> [Value; EXTERNAL_DIM + BJT_INTERNAL_STATE_DIM] {
         let [vc, vb, ve, vs] = self.external_terminal_voltages(voltages);
         [
             vc,
@@ -317,6 +605,8 @@ impl Bjt {
             Self::node_voltage(voltages, self.node_bp),
             Self::node_voltage(voltages, self.node_si),
             Self::node_voltage(voltages, self.node_rth),
+            Self::node_voltage(voltages, self.node_xf1),
+            Self::node_voltage(voltages, self.node_xf2),
         ]
     }
 
@@ -356,7 +646,7 @@ impl Bjt {
 
         let [vc, vb, ve, vs] = [candidate[0], candidate[1], candidate[2], candidate[3]];
         let mut raw = [0.0; INTERNAL_DIM];
-        raw.copy_from_slice(&candidate[EXTERNAL_DIM..]);
+        raw.copy_from_slice(&candidate[EXTERNAL_DIM..EXTERNAL_DIM + INTERNAL_DIM]);
         let previous = [
             self.vcx, self.vci, self.vbx, self.vbi, self.vei, self.vbp, self.vsi, self.vrth,
         ];
@@ -403,8 +693,8 @@ impl Bjt {
         self.vbp = state[IDX_VBP];
         self.vsi = state[IDX_VSI];
         self.vrth = state[IDX_VRTH];
-        self.vxf1 = Self::node_voltage(voltages, self.node_xf1);
-        self.vxf2 = Self::node_voltage(voltages, self.node_xf2);
+        self.vxf1 = candidate[EXTERNAL_DIM + IDX_VXF1];
+        self.vxf2 = candidate[EXTERNAL_DIM + IDX_VXF2];
         self.vbe = self.vbi - self.vei;
         self.vbc = self.vbi - self.vci;
         self.ic = terminal_currents[EXT_C].current;
@@ -993,7 +1283,9 @@ mod tests {
         // candidate again, now against its own output. A junction that travels
         // further on the second pass is the whole defect.
         let mut raw = [0.0; INTERNAL_DIM];
-        raw.copy_from_slice(&bjt.vbic_mna_solution_bias(&candidate)[EXTERNAL_DIM..]);
+        raw.copy_from_slice(
+            &bjt.vbic_mna_solution_bias(&candidate)[EXTERNAL_DIM..EXTERNAL_DIM + INTERNAL_DIM],
+        );
         let mut once_internal = [0.0; INTERNAL_DIM];
         once_internal.copy_from_slice(&once[..INTERNAL_DIM]);
         let twice = bjt.limit_vbic_internal_state_to_previous(raw, once_internal);
