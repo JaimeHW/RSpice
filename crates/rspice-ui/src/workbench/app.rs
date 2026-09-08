@@ -1525,23 +1525,30 @@ mod tests {
         use crate::state::Tool;
         use crate::workbench::{commands::vocabulary::Command, state::Drawer};
 
-        fn frame(ctx: &Context, app: &mut RSpiceApp, events: Vec<egui::Event>) -> egui::FullOutput {
-            ctx.run_ui(
-                egui::RawInput {
-                    screen_rect: Some(egui::Rect::from_min_size(
-                        egui::Pos2::ZERO,
-                        egui::vec2(820.0, 1180.0),
-                    )),
-                    events,
-                    ..Default::default()
-                },
-                |ui| {
-                    app.handle_shortcuts(ui.ctx());
-                    app.render_frame_chrome(ui);
-                    app.render_secondary_application_windows(ui.ctx());
-                    app.render_frame_dialogs(ui.ctx());
-                },
-            )
+        struct Fixture {
+            ctx: Context,
+            app: RSpiceApp,
+        }
+        impl Fixture {
+            fn frame(&mut self, events: Vec<egui::Event>) -> egui::FullOutput {
+                let Self { ctx, app } = self;
+                ctx.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(820.0, 1180.0),
+                        )),
+                        events,
+                        ..Default::default()
+                    },
+                    |ui| {
+                        app.handle_shortcuts(ui.ctx());
+                        app.render_frame_chrome(ui);
+                        app.render_secondary_application_windows(ui.ctx());
+                        app.render_frame_dialogs(ui.ctx());
+                    },
+                )
+            }
         }
         fn target(output: &egui::FullOutput, label: &str) -> egui::Pos2 {
             let nodes = &output
@@ -1593,26 +1600,25 @@ mod tests {
         let ctx = Context::default();
         crate::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
-        let mut app = RSpiceApp::test_instance();
-        frame(&ctx, &mut app, Vec::new());
-        let output = frame(&ctx, &mut app, Vec::new());
-        frame(&ctx, &mut app, click(target(&output, "Place instance")));
-        frame(&ctx, &mut app, Vec::new());
-        assert_eq!(app.state.workbench.drawer, Some(Drawer::Navigator));
-        let output = frame(
-            &ctx,
-            &mut app,
-            vec![egui::Event::Text("resistor".to_owned())],
-        );
-        assert_eq!(app.state.workbench.placement_query, "resistor");
-        frame(&ctx, &mut app, click(target(&output, "Resistor")));
-        assert_eq!(app.state.workbench.drawer, None);
+        let mut fixture = Fixture {
+            ctx,
+            app: RSpiceApp::test_instance(),
+        };
+        fixture.frame(Vec::new());
+        let output = fixture.frame(Vec::new());
+        fixture.frame(click(target(&output, "Place instance")));
+        fixture.frame(Vec::new());
+        assert_eq!(fixture.app.state.workbench.drawer, Some(Drawer::Navigator));
+        let output = fixture.frame(vec![egui::Event::Text("resistor".to_owned())]);
+        assert_eq!(fixture.app.state.workbench.placement_query, "resistor");
+        fixture.frame(click(target(&output, "Resistor")));
+        assert_eq!(fixture.app.state.workbench.drawer, None);
         assert_eq!(
-            app.state.schematic.tool,
+            fixture.app.state.schematic.tool,
             Tool::Place(ComponentType::Resistor)
         );
-        frame(&ctx, &mut app, Vec::new());
-        let output = frame(&ctx, &mut app, Vec::new());
+        fixture.frame(Vec::new());
+        let output = fixture.frame(Vec::new());
         let tree = output.platform_output.accesskit_update.as_ref().unwrap();
         assert!(
             tree.nodes
@@ -1624,18 +1630,18 @@ mod tests {
                 .find(|(id, _)| *id == tree.focus)
                 .map(|(_, node)| (node.label(), node.role()))
         );
-        assert!(app.state.schematic.components.is_empty());
-        frame(&ctx, &mut app, click(target(&output, "Schematic canvas")));
-        assert_eq!(app.state.schematic.components.len(), 1);
+        assert!(fixture.app.state.schematic.components.is_empty());
+        fixture.frame(click(target(&output, "Schematic canvas")));
+        assert_eq!(fixture.app.state.schematic.components.len(), 1);
 
         // A new modal task supersedes a still-pending placement focus request.
-        crate::schematic::view::request_schematic_canvas_focus(&ctx);
-        Command::CommandPalette.execute(&mut app);
-        frame(&ctx, &mut app, Vec::new());
-        frame(&ctx, &mut app, Vec::new());
-        frame(&ctx, &mut app, vec![egui::Event::Text("help".to_owned())]);
-        assert_eq!(app.state.dialogs.command_palette.query, "help");
-        assert_eq!(app.state.schematic.components.len(), 1);
+        crate::schematic::view::request_schematic_canvas_focus(&fixture.ctx);
+        Command::CommandPalette.execute(&mut fixture.app);
+        fixture.frame(Vec::new());
+        fixture.frame(Vec::new());
+        fixture.frame(vec![egui::Event::Text("help".to_owned())]);
+        assert_eq!(fixture.app.state.dialogs.command_palette.query, "help");
+        assert_eq!(fixture.app.state.schematic.components.len(), 1);
     }
 
     /// The application root moves by value through the same debug fixture
