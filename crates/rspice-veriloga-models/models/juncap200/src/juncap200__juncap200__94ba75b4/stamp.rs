@@ -544,7 +544,7 @@ pub(super) fn canonical_instance_preprocess(
 	let Y;
 	let Z;
 	if O{
-	let S=R* (if P<= Q{P}else{Q});
+	let S=R* (if !(P).is_nan()&&(P<=Q||(Q).is_nan()){P}else{Q});
 	let V=T+ U;
 	Y=S;
 	Z=V;
@@ -556,7 +556,7 @@ pub(super) fn canonical_instance_preprocess(
 	let AD;
 	let AE;
 	if AA{
-	let AB=R* (if W<= Q{W}else{Q});
+	let AB=R* (if !(W).is_nan()&&(W<=Q||(Q).is_nan()){W}else{Q});
 	let AC=X+ U;
 	AD=AB;
 	AE=AC;
@@ -568,7 +568,7 @@ pub(super) fn canonical_instance_preprocess(
 	let AI;
 	let AJ;
 	if AF{
-	let AG=R* (if W<= P{W}else{P});
+	let AG=R* (if !(W).is_nan()&&(W<=P||(P).is_nan()){W}else{P});
 	let AH=X+ T;
 	AI=AG;
 	AJ=AH;
@@ -576,8 +576,8 @@ pub(super) fn canonical_instance_preprocess(
 	AI=Q;
 	AJ=U;
 	}
-	let AM=AL- (AK.powf((-1f64/ (if (if Y>= AD{Y}else{AD})>= AI{(if Y>= AD{Y}else{AD})}else{AI}))));
-	let AN=(if (if Z<= AE{Z}else{AE})<= AJ{(if Z<= AE{Z}else{AE})}else{AJ})- 0.05f64;
+	let AM=AL- (AK.powf((-1f64/ (if !((if !(Y).is_nan()&&(Y>=AD||(AD).is_nan()){Y}else{AD})).is_nan()&&((if !(Y).is_nan()&&(Y>=AD||(AD).is_nan()){Y}else{AD})>=AI||(AI).is_nan()){(if !(Y).is_nan()&&(Y>=AD||(AD).is_nan()){Y}else{AD})}else{AI}))));
+	let AN=(if !((if !(Z).is_nan()&&(Z<=AE||(AE).is_nan()){Z}else{AE})).is_nan()&&((if !(Z).is_nan()&&(Z<=AE||(AE).is_nan()){Z}else{AE})<=AJ||(AJ).is_nan()){(if !(Z).is_nan()&&(Z<=AE||(AE).is_nan()){Z}else{AE})}else{AJ})- 0.05f64;
 	if AO{
 	let AP=!(((O&& AA)&& AF));
 	oAP=AP;
@@ -2098,7 +2098,7 @@ pub(super) fn canonical_temperature_preprocess(
 	let mut oBES=0.0;
 	let mut oBEU=0.0;
 	let mut oBEW=0.0;
-	let B=if ((temperature+ parameters[2])+ parameters[9])>= 23.149999999999977f64{((temperature+ parameters[2])+ parameters[9])}else{23.149999999999977f64};
+	let B=if !(((temperature+ parameters[2])+ parameters[9])).is_nan()&&(((temperature+ parameters[2])+ parameters[9])>=23.149999999999977f64||(23.149999999999977f64).is_nan()){((temperature+ parameters[2])+ parameters[9])}else{23.149999999999977f64};
 	let D=B/ C;
 	let E=8.61726105451295e-5f64* B;
 	let G=F/ E;
@@ -2132,9 +2132,9 @@ pub(super) fn canonical_temperature_preprocess(
 	let AR=U* AJ;
 	let AS=U* AL;
 	let AT=U* AN;
-	let AU=if (M* I)>= E{(M* I)}else{E};
-	let AV=if (M* J)>= E{(M* J)}else{E};
-	let AW=if (M* K)>= E{(M* K)}else{E};
+	let AU=if !((M* I)).is_nan()&&((M* I)>=E||(E).is_nan()){(M* I)}else{E};
+	let AV=if !((M* J)).is_nan()&&((M* J)>=E||(E).is_nan()){(M* J)}else{E};
+	let AW=if !((M* K)).is_nan()&&((M* K)>=E||(E).is_nan()){(M* K)}else{E};
 	let AX=AU* G;
 	let AY=AV* G;
 	let AZ=AW* G;
@@ -2205,7 +2205,7 @@ pub(super) fn canonical_temperature_preprocess(
 	}else{
 	CD
 	};
-	let CP=if (if CE<= CJ{CE}else{CJ})<= CO{(if CE<= CJ{CE}else{CJ})}else{CO};
+	let CP=if !((if !(CE).is_nan()&&(CE<=CJ||(CJ).is_nan()){CE}else{CJ})).is_nan()&&((if !(CE).is_nan()&&(CE<=CJ||(CJ).is_nan()){CE}else{CJ})<=CO||(CO).is_nan()){(if !(CE).is_nan()&&(CE<=CJ||(CJ).is_nan()){CE}else{CJ})}else{CO};
 	let CQ=CP* G;
 	let CS=(CQ.abs())< CR;
 	let CV;
@@ -2243,7 +2243,7 @@ pub(super) fn canonical_temperature_preprocess(
 	}else{
 	AE
 	};
-	let DM=if (if DF<= DI{DF}else{DI})<= DL{(if DF<= DI{DF}else{DI})}else{DL};
+	let DM=if !((if !(DF).is_nan()&&(DF<=DI||(DI).is_nan()){DF}else{DI})).is_nan()&&((if !(DF).is_nan()&&(DF<=DI||(DI).is_nan()){DF}else{DI})<=DL||(DL).is_nan()){(if !(DF).is_nan()&&(DF<=DI||(DI).is_nan()){DF}else{DI})}else{DL};
 	let DO=DM* DN;
 	let DP=DM* staged[19];
 	let DS;
@@ -4921,11 +4921,11 @@ pub(super) fn canonical_temperature_preprocess(
 	BDM=BH;
 	BDN=BH;
 	}
-	let BDO=if BDL<= CR{BDL}else{CR};
+	let BDO=if !(BDL).is_nan()&&(BDL<=CR||(CR).is_nan()){BDL}else{CR};
 	let BDP=BDO.exp();
-	let BDQ=if BDM<= CR{BDM}else{CR};
+	let BDQ=if !(BDM).is_nan()&&(BDM<=CR||(CR).is_nan()){BDM}else{CR};
 	let BDR=BDQ.exp();
-	let BDS=if BDN<= CR{BDN}else{CR};
+	let BDS=if !(BDN).is_nan()&&(BDN<=CR||(CR).is_nan()){BDN}else{CR};
 	let BDT=BDS.exp();
 	DS=BDO;
 	DT=BDP;

@@ -376,7 +376,7 @@ impl Instance {
 		let FZ=FY- (H* (FO- (((FO* FO)+ FR).sqrt())));
 		let GA=DY- FZ;
 		let GB=(-FZ).exp();
-		let GD=if GC>= ((GA* GA)- (DK* (((GB+ FZ)- M)- (EB* (FZ+ M))))){GC}else{((GA* GA)- (DK* (((GB+ FZ)- M)- (EB* (FZ+ M)))))};
+		let GD=if !(GC).is_nan()&&(GC>=((GA* GA)- (DK* (((GB+ FZ)- M)- (EB* (FZ+ M)))))||(((GA* GA)- (DK* (((GB+ FZ)- M)- (EB* (FZ+ M)))))).is_nan()){GC}else{((GA* GA)- (DK* (((GB+ FZ)- M)- (EB* (FZ+ M)))))};
 		let GE=M- (FL* GB);
 		let GF=(D* GA)+ (DK* ((M- GB)- EB));
 		let GG=(DQ- FZ)+ ((GD/ DK).ln());
@@ -501,7 +501,7 @@ impl Instance {
 		let JC=JB- (H* (IS- (((IS* IS)+ FR).sqrt())));
 		let JD=HK- JC;
 		let JE=(-JC).exp();
-		let JF=if GC>= ((JD* JD)- (X* (((JE+ JC)- M)- (HM* (JC+ M))))){GC}else{((JD* JD)- (X* (((JE+ JC)- M)- (HM* (JC+ M)))))};
+		let JF=if !(GC).is_nan()&&(GC>=((JD* JD)- (X* (((JE+ JC)- M)- (HM* (JC+ M)))))||(((JD* JD)- (X* (((JE+ JC)- M)- (HM* (JC+ M)))))).is_nan()){GC}else{((JD* JD)- (X* (((JE+ JC)- M)- (HM* (JC+ M)))))};
 		let JG=M- (IQ* JE);
 		let JH=(D* JD)+ (X* ((M- JE)- HM));
 		let JI=(AD- JC)+ ((JF/ X).ln());
@@ -623,7 +623,7 @@ impl Instance {
 		let MB=MA- (H* (LR- (((LR* LR)+ FR).sqrt())));
 		let MC=KK- MB;
 		let MD=(-MB).exp();
-		let ME=if GC>= ((MC* MC)- (DK* (((MD+ MB)- M)- (EB* (MB+ M))))){GC}else{((MC* MC)- (DK* (((MD+ MB)- M)- (EB* (MB+ M)))))};
+		let ME=if !(GC).is_nan()&&(GC>=((MC* MC)- (DK* (((MD+ MB)- M)- (EB* (MB+ M)))))||(((MC* MC)- (DK* (((MD+ MB)- M)- (EB* (MB+ M)))))).is_nan()){GC}else{((MC* MC)- (DK* (((MD+ MB)- M)- (EB* (MB+ M)))))};
 		let MF=M- (LP* MD);
 		let MG=(D* MC)+ (DK* ((M- MD)- EB));
 		let MH=(DQ- MB)+ ((ME/ DK).ln());
@@ -828,7 +828,7 @@ impl Instance {
 		let QZ=QY- (H* (QP- (((QP* QP)+ FR).sqrt())));
 		let RA=PI- QZ;
 		let RB=(-QZ).exp();
-		let RC=if GC>= ((RA* RA)- (X* (((RB+ QZ)- M)- (HM* (QZ+ M))))){GC}else{((RA* RA)- (X* (((RB+ QZ)- M)- (HM* (QZ+ M)))))};
+		let RC=if !(GC).is_nan()&&(GC>=((RA* RA)- (X* (((RB+ QZ)- M)- (HM* (QZ+ M)))))||(((RA* RA)- (X* (((RB+ QZ)- M)- (HM* (QZ+ M)))))).is_nan()){GC}else{((RA* RA)- (X* (((RB+ QZ)- M)- (HM* (QZ+ M)))))};
 		let RD=M- (QN* RB);
 		let RE=(D* RA)+ (X* ((M- RB)- HM));
 		let RF=(AD- QZ)+ ((RC/ X).ln());
@@ -1836,7 +1836,7 @@ impl Instance {
 		let AX=AV+ parameters[31];
 		let AY=AW+ parameters[32];
 		let AZ=1.179f64- (AE* (9.025e-5f64+ (AE* 3.05e-7f64)));
-		let BB=(if ((((1.045f64+ (4.5e-4f64* AE))* ((0.523f64+ (0.0014f64* AE))- (1.48e-6f64* AF)))* AF)/ 9e4f64)>= BA{((((1.045f64+ (4.5e-4f64* AE))* ((0.523f64+ (0.0014f64* AE))- (1.48e-6f64* AF)))* AF)/ 9e4f64)}else{BA}).sqrt();
+		let BB=(if !(((((1.045f64+ (4.5e-4f64* AE))* ((0.523f64+ (0.0014f64* AE))- (1.48e-6f64* AF)))* AF)/ 9e4f64)).is_nan()&&(((((1.045f64+ (4.5e-4f64* AE))* ((0.523f64+ (0.0014f64* AE))- (1.48e-6f64* AF)))* AF)/ 9e4f64)>=BA||(BA).is_nan()){((((1.045f64+ (4.5e-4f64* AE))* ((0.523f64+ (0.0014f64* AE))- (1.48e-6f64* AF)))* AF)/ 9e4f64)}else{BA}).sqrt();
 		let BC=AL/ ((2.5e25f64* BB)* (BB.sqrt()));
 		let BD=E* AI;
 		let BE=AZ+ (BD* ((F* BC).ln()));
@@ -2189,7 +2189,7 @@ impl Instance {
 		let IY=IX- (U* (IN- (((IN* IN)+ IQ).sqrt())));
 		let IZ=GX- IY;
 		let JA=(-IY).exp();
-		let JC=if JB>= ((IZ* IZ)- (GJ* (((JA+ IY)- AL)- (HA* (IY+ AL))))){JB}else{((IZ* IZ)- (GJ* (((JA+ IY)- AL)- (HA* (IY+ AL)))))};
+		let JC=if !(JB).is_nan()&&(JB>=((IZ* IZ)- (GJ* (((JA+ IY)- AL)- (HA* (IY+ AL)))))||(((IZ* IZ)- (GJ* (((JA+ IY)- AL)- (HA* (IY+ AL)))))).is_nan()){JB}else{((IZ* IZ)- (GJ* (((JA+ IY)- AL)- (HA* (IY+ AL)))))};
 		let JD=AL- (IK* JA);
 		let JE=(E* IZ)+ (GJ* ((AL- JA)- HA));
 		let JF=(GP- IY)+ ((JC/ GJ).ln());
@@ -2315,7 +2315,7 @@ impl Instance {
 		let MC=MB- (U* (LS- (((LS* LS)+ IQ).sqrt())));
 		let MD=KK- MC;
 		let ME=(-MC).exp();
-		let MF=if JB>= ((MD* MD)- (BJ* (((ME+ MC)- AL)- (KM* (MC+ AL))))){JB}else{((MD* MD)- (BJ* (((ME+ MC)- AL)- (KM* (MC+ AL)))))};
+		let MF=if !(JB).is_nan()&&(JB>=((MD* MD)- (BJ* (((ME+ MC)- AL)- (KM* (MC+ AL)))))||(((MD* MD)- (BJ* (((ME+ MC)- AL)- (KM* (MC+ AL)))))).is_nan()){JB}else{((MD* MD)- (BJ* (((ME+ MC)- AL)- (KM* (MC+ AL)))))};
 		let MG=AL- (LQ* ME);
 		let MH=(E* MD)+ (BJ* ((AL- ME)- KM));
 		let MI=(BQ- MC)+ ((MF/ BJ).ln());
@@ -2437,7 +2437,7 @@ impl Instance {
 		let PB=PA- (U* (OR- (((OR* OR)+ IQ).sqrt())));
 		let PC=NK- PB;
 		let PD=(-PB).exp();
-		let PE=if JB>= ((PC* PC)- (GJ* (((PD+ PB)- AL)- (HA* (PB+ AL))))){JB}else{((PC* PC)- (GJ* (((PD+ PB)- AL)- (HA* (PB+ AL)))))};
+		let PE=if !(JB).is_nan()&&(JB>=((PC* PC)- (GJ* (((PD+ PB)- AL)- (HA* (PB+ AL)))))||(((PC* PC)- (GJ* (((PD+ PB)- AL)- (HA* (PB+ AL)))))).is_nan()){JB}else{((PC* PC)- (GJ* (((PD+ PB)- AL)- (HA* (PB+ AL)))))};
 		let PF=AL- (OP* PD);
 		let PG=(E* PC)+ (GJ* ((AL- PD)- HA));
 		let PH=(GP- PB)+ ((PE/ GJ).ln());
@@ -2642,7 +2642,7 @@ impl Instance {
 		let TZ=TY- (U* (TP- (((TP* TP)+ IQ).sqrt())));
 		let UA=SI- TZ;
 		let UB=(-TZ).exp();
-		let UC=if JB>= ((UA* UA)- (BJ* (((UB+ TZ)- AL)- (KM* (TZ+ AL))))){JB}else{((UA* UA)- (BJ* (((UB+ TZ)- AL)- (KM* (TZ+ AL)))))};
+		let UC=if !(JB).is_nan()&&(JB>=((UA* UA)- (BJ* (((UB+ TZ)- AL)- (KM* (TZ+ AL)))))||(((UA* UA)- (BJ* (((UB+ TZ)- AL)- (KM* (TZ+ AL)))))).is_nan()){JB}else{((UA* UA)- (BJ* (((UB+ TZ)- AL)- (KM* (TZ+ AL)))))};
 		let UD=AL- (TN* UB);
 		let UE=(E* UA)+ (BJ* ((AL- UB)- KM));
 		let UF=(BQ- TZ)+ ((UC/ BJ).ln());

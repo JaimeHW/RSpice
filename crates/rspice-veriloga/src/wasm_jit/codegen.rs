@@ -1821,12 +1821,9 @@ fn emit_instruction(body: &mut Function, instruction: &Instruction) -> WasmJitRe
 
 /// Lower `min`/`max` to match the reference `constant_extremum`.
 ///
-/// This cannot be `f64.min`/`f64.max` alone. WebAssembly returns a NaN when
-/// either operand is NaN, and returns the negatively-signed zero when the
-/// operands are zeros of opposite sign. Rust's `f64::min`/`f64::max` -- which
-/// the bytecode VM and both native backends evaluate -- return the non-NaN
-/// operand instead, and the x64 backend's NaN/zero fixup settles the
-/// equal-magnitude zero case by returning the left operand. Compact models
+/// This cannot be `f64.min`/`f64.max` alone: those instructions propagate NaN
+/// and order opposite signed zeros. The shared runtime instead selects the
+/// non-NaN operand and retains the left operand on numerical ties. Compact models
 /// guard divisions with `max(x, 1e-30)` constantly, so this has to agree
 /// exactly, not merely on ordinary values.
 ///

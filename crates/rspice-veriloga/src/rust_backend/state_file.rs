@@ -1536,7 +1536,7 @@ fn finalize_checkpoint_identity_with_compatibility(
     Ok(())
 }
 
-const GENERATED_MODEL_SEMANTICS_VERSION: u32 = 6;
+const GENERATED_MODEL_SEMANTICS_VERSION: u32 = 7;
 
 fn generated_model_semantic_identity(device: &GeneratedRustDevice) -> String {
     let mut hasher = blake3::Hasher::new();

@@ -154,7 +154,7 @@ impl Instance {
 		}else{
 		A
 		};
-		let X=if (temperature+ parameters[102])>= 23.149999999999977f64{(temperature+ parameters[102])}else{23.149999999999977f64};
+		let X=if !((temperature+ parameters[102])).is_nan()&&((temperature+ parameters[102])>=23.149999999999977f64||(23.149999999999977f64).is_nan()){(temperature+ parameters[102])}else{23.149999999999977f64};
 		let Y=X/ staged[0];
 		let AT=Y.powf(staged[35]);
 		let AU=staged[36]* AT;
@@ -1755,7 +1755,7 @@ impl Instance {
 		FJ
 		};
 		let FQ=273.15f64+ FP;
-		let FR=if (temperature+ parameters[102])>= 23.149999999999977f64{(temperature+ parameters[102])}else{23.149999999999977f64};
+		let FR=if !((temperature+ parameters[102])).is_nan()&&((temperature+ parameters[102])>=23.149999999999977f64||(23.149999999999977f64).is_nan()){(temperature+ parameters[102])}else{23.149999999999977f64};
 		let FS=FR/ FQ;
 		let FV=FU* FQ;
 		let FW=FL/ FV;
@@ -1802,9 +1802,9 @@ impl Instance {
 		let HM=FL/ AB;
 		let HN=FL/ AE;
 		let HO=FL/ AH;
-		let HU=if (FJ* GB)>= FX{(FJ* GB)}else{FX};
-		let HV=if (FJ* GC)>= FX{(FJ* GC)}else{FX};
-		let HW=if (FJ* GD)>= FX{(FJ* GD)}else{FX};
+		let HU=if !((FJ* GB)).is_nan()&&((FJ* GB)>=FX||(FX).is_nan()){(FJ* GB)}else{FX};
+		let HV=if !((FJ* GC)).is_nan()&&((FJ* GC)>=FX||(FX).is_nan()){(FJ* GC)}else{FX};
+		let HW=if !((FJ* GD)).is_nan()&&((FJ* GD)>=FX||(FX).is_nan()){(FJ* GD)}else{FX};
 		let HX=HU* FY;
 		let HY=HV* FY;
 		let HZ=HW* FY;
@@ -1933,7 +1933,7 @@ impl Instance {
 		}else{
 		KL
 		};
-		let KV=if (if KS<= KT{KS}else{KT})<= KU{(if KS<= KT{KS}else{KT})}else{KU};
+		let KV=if !((if !(KS).is_nan()&&(KS<=KT||(KT).is_nan()){KS}else{KT})).is_nan()&&((if !(KS).is_nan()&&(KS<=KT||(KT).is_nan()){KS}else{KT})<=KU||(KU).is_nan()){(if !(KS).is_nan()&&(KS<=KT||(KT).is_nan()){KS}else{KT})}else{KU};
 		let KW=KV* FY;
 		let KY=(KW.abs())< KX;
 		let QW;
@@ -1988,8 +1988,8 @@ impl Instance {
 		LS=GZ;
 		LW=AH;
 		}
-		let LT=if (if LQ<= LR{LQ}else{LR})<= LS{(if LQ<= LR{LQ}else{LR})}else{LS};
-		let LX=(if (if LU<= LV{LU}else{LV})<= LW{(if LU<= LV{LU}else{LV})}else{LW})- Z;
+		let LT=if !((if !(LQ).is_nan()&&(LQ<=LR||(LR).is_nan()){LQ}else{LR})).is_nan()&&((if !(LQ).is_nan()&&(LQ<=LR||(LR).is_nan()){LQ}else{LR})<=LS||(LS).is_nan()){(if !(LQ).is_nan()&&(LQ<=LR||(LR).is_nan()){LQ}else{LR})}else{LS};
+		let LX=(if !((if !(LU).is_nan()&&(LU<=LV||(LV).is_nan()){LU}else{LV})).is_nan()&&((if !(LU).is_nan()&&(LU<=LV||(LV).is_nan()){LU}else{LV})<=LW||(LW).is_nan()){(if !(LU).is_nan()&&(LU<=LV||(LV).is_nan()){LU}else{LV})}else{LW})- Z;
 		let LY=(KI+ KM)+ KP;
 		let LZ=(JZ* JK)> A;
 		let MC=if LZ{
@@ -7202,11 +7202,11 @@ impl Instance {
 		DJL=A;
 		DJO=A;
 		}
-		let DJJ=if DJI<= KX{DJI}else{KX};
+		let DJJ=if !(DJI).is_nan()&&(DJI<=KX||(KX).is_nan()){DJI}else{KX};
 		let DJK=DJJ.exp();
-		let DJM=if DJL<= KX{DJL}else{KX};
+		let DJM=if !(DJL).is_nan()&&(DJL<=KX||(KX).is_nan()){DJL}else{KX};
 		let DJN=DJM.exp();
-		let DJP=if DJO<= KX{DJO}else{KX};
+		let DJP=if !(DJO).is_nan()&&(DJO<=KX||(KX).is_nan()){DJO}else{KX};
 		let DJQ=DJP.exp();
 		DJW=DJJ;
 		DJY=DJK;

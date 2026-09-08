@@ -912,7 +912,7 @@ impl Instance {
 		let BF=((-((AU* AU)* (AS.powf((AT- E)))))* AT)* BA;
 		let BG=((-((AW* AW)* (AS.powf((AV- E)))))* AV)* BC;
 		let BH=((-((AY* AY)* (AS.powf((AX- E)))))* AX)* BE;
-		let BJ=if ((temperature+ parameters[2])+ parameters[9])>= 23.149999999999977f64{((temperature+ parameters[2])+ parameters[9])}else{23.149999999999977f64};
+		let BJ=if !(((temperature+ parameters[2])+ parameters[9])).is_nan()&&(((temperature+ parameters[2])+ parameters[9])>=23.149999999999977f64||(23.149999999999977f64).is_nan()){((temperature+ parameters[2])+ parameters[9])}else{23.149999999999977f64};
 		let BK=BJ/ F;
 		let BL=H* BJ;
 		let BM=E/ BL;
@@ -934,9 +934,9 @@ impl Instance {
 		let CC=BZ+ (BL* ((E+ (((BI- BZ)* BM).exp())).ln()));
 		let CD=CA+ (BL* ((E+ (((BI- CA)* BM).exp())).ln()));
 		let CE=CB+ (BL* ((E+ (((BI- CB)* BM).exp())).ln()));
-		let CF=if (C* BO)>= BL{(C* BO)}else{BL};
-		let CG=if (C* BP)>= BL{(C* BP)}else{BL};
-		let CH=if (C* BQ)>= BL{(C* BQ)}else{BL};
+		let CF=if !((C* BO)).is_nan()&&((C* BO)>=BL||(BL).is_nan()){(C* BO)}else{BL};
+		let CG=if !((C* BP)).is_nan()&&((C* BP)>=BL||(BL).is_nan()){(C* BP)}else{BL};
+		let CH=if !((C* BQ)).is_nan()&&((C* BQ)>=BL||(BL).is_nan()){(C* BQ)}else{BL};
 		let CI=CF* BM;
 		let CJ=CG* BM;
 		let CK=CH* BM;
@@ -1013,7 +1013,7 @@ impl Instance {
 		}else{
 		DP
 		};
-		let DZ=if (if DW<= DX{DW}else{DX})<= DY{(if DW<= DX{DW}else{DX})}else{DY};
+		let DZ=if !((if !(DW).is_nan()&&(DW<=DX||(DX).is_nan()){DW}else{DX})).is_nan()&&((if !(DW).is_nan()&&(DW<=DX||(DX).is_nan()){DW}else{DX})<=DY||(DY).is_nan()){(if !(DW).is_nan()&&(DW<=DX||(DX).is_nan()){DW}else{DX})}else{DY};
 		let EA=DZ* BM;
 		let EC=(EA.abs())< EB;
 		let FX;
@@ -1068,8 +1068,8 @@ impl Instance {
 		EW=CE;
 		FB=AK;
 		}
-		let EX=if (if EU<= EV{EU}else{EV})<= EW{(if EU<= EV{EU}else{EV})}else{EW};
-		let FC=(if (if EZ<= FA{EZ}else{FA})<= FB{(if EZ<= FA{EZ}else{FA})}else{FB})- BI;
+		let EX=if !((if !(EU).is_nan()&&(EU<=EV||(EV).is_nan()){EU}else{EV})).is_nan()&&((if !(EU).is_nan()&&(EU<=EV||(EV).is_nan()){EU}else{EV})<=EW||(EW).is_nan()){(if !(EU).is_nan()&&(EU<=EV||(EV).is_nan()){EU}else{EV})}else{EW};
+		let FC=(if !((if !(EZ).is_nan()&&(EZ<=FA||(FA).is_nan()){EZ}else{FA})).is_nan()&&((if !(EZ).is_nan()&&(EZ<=FA||(FA).is_nan()){EZ}else{FA})<=FB||(FB).is_nan()){(if !(EZ).is_nan()&&(EZ<=FA||(FA).is_nan()){EZ}else{FA})}else{FB})- BI;
 		let FE=FD== E;
 		let BOO;
 		let BOQ;
@@ -4274,11 +4274,11 @@ impl Instance {
 		BOE=A;
 		BOH=A;
 		}
-		let BOC=if BOB<= EB{BOB}else{EB};
+		let BOC=if !(BOB).is_nan()&&(BOB<=EB||(EB).is_nan()){BOB}else{EB};
 		let BOD=BOC.exp();
-		let BOF=if BOE<= EB{BOE}else{EB};
+		let BOF=if !(BOE).is_nan()&&(BOE<=EB||(EB).is_nan()){BOE}else{EB};
 		let BOG=BOF.exp();
-		let BOI=if BOH<= EB{BOH}else{EB};
+		let BOI=if !(BOH).is_nan()&&(BOH<=EB||(EB).is_nan()){BOH}else{EB};
 		let BOJ=BOI.exp();
 		BOO=BOC;
 		BOQ=BOD;

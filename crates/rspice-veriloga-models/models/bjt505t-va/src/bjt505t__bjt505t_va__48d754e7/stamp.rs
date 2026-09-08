@@ -1666,7 +1666,7 @@ impl Instance {
 		let CFL=(CFJ- (CFK* ACB))/ ACA;
 		let ACE=C/ ACD;
 		let ACF=ACC.powf(ACE);
-		let CFM=(BQM* (ACE* ((ACC+ (((ACC== BWH) as u8 as f64)* BWI)).powf((ACE- BOS)))))+ L4([((((BPJ* ACE)* BUL)/ ACD)* (ACF* (((if ACC>= BWI{ACC}else{BWI}).ln())* ((ACC> BWH) as u8 as f64)))),0.0,0.0,0.0]);
+		let CFM=(BQM* (ACE* ((ACC+ (((ACC== BWH) as u8 as f64)* BWI)).powf((ACE- BOS)))))+ L4([((((BPJ* ACE)* BUL)/ ACD)* (ACF* (((if !(ACC).is_nan()&&(ACC>=BWI||(BWI).is_nan()){ACC}else{BWI}).ln())* ((ACC> BWH) as u8 as f64)))),0.0,0.0,0.0]);
 		let ACG=ABW* ACF;
 		let CFN=L4([(CFI* ACF),0.0,0.0,0.0])+ (CFM* ABW);
 		let ACH=(C+ ACG).sqrt();

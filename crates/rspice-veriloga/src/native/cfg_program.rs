@@ -931,6 +931,16 @@ impl Lowerer<'_> {
                 let right = operand(*right)?;
                 push(binary_op(*op), &[left, right])
             }
+            CfgValueKind::Select {
+                condition,
+                then_value,
+                else_value,
+            } => {
+                let condition = operand(*condition)?;
+                let then_value = operand(*then_value)?;
+                let else_value = operand(*else_value)?;
+                push(NativeOp::IfElse, &[condition, then_value, else_value])
+            }
             CfgValueKind::IntegerArithmetic { op, left, right } => {
                 let left = operand(*left)?;
                 let right = operand(*right)?;
@@ -1504,7 +1514,8 @@ fn speculation_hazard(kind: &CfgValueKind) -> Option<&'static str> {
         | CfgValueKind::ContributedCurrent { .. }
         | CfgValueKind::NoiseProcess(_)
         | CfgValueKind::Unary { .. }
-        | CfgValueKind::Binary { .. } => None,
+        | CfgValueKind::Binary { .. }
+        | CfgValueKind::Select { .. } => None,
         CfgValueKind::BlockParameter => {
             Some("is a merge of the arms reaching it and so has no single value to move")
         }

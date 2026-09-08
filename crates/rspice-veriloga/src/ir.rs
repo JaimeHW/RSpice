@@ -4535,23 +4535,14 @@ pub mod autodiff {
                 differentiate!(as_binary)
             }
             Node::Call {
-                func: IrFunction::Min,
+                func: IrFunction::Min | IrFunction::Max,
                 argc: 2,
                 a: Some(left),
                 b: Some(right),
             } => {
-                let condition = binary!(BinaryOp::Le, left, right);
-                let dl = differentiate!(left);
-                let dr = differentiate!(right);
-                arena.push(Node::Conditional(condition, dl, dr))
-            }
-            Node::Call {
-                func: IrFunction::Max,
-                argc: 2,
-                a: Some(left),
-                b: Some(right),
-            } => {
-                let condition = binary!(BinaryOp::Ge, left, right);
+                // The selected primal identifies its tangent even when the
+                // other operand is NaN. Equal finite operands take the left.
+                let condition = binary!(BinaryOp::Eq, expr, left);
                 let dl = differentiate!(left);
                 let dr = differentiate!(right);
                 arena.push(Node::Conditional(condition, dl, dr))

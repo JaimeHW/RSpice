@@ -281,9 +281,9 @@ impl CfgZiPolynomial {
 
 /// What an SSA value is.
 ///
-/// Deliberately without a `Select`: a conditional is a [`CfgTerminator::Branch`]
-/// and a merge is a block parameter. Deliberately without loop constructs:
-/// a loop is a back edge.
+/// Source conditionals use a [`CfgTerminator::Branch`] and block parameters;
+/// loops use back edges. Selection of already computed numerical values is
+/// separate from control flow and never suppresses operand effects.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum CfgValueKind {
     RealConstant(f64),
@@ -697,6 +697,14 @@ pub enum CfgValueKind {
         op: CfgBinaryOp,
         left: ValueId,
         right: ValueId,
+    },
+    /// Choose one already evaluated value without arithmetic on the losing arm.
+    /// Both arms have the result's scalar or packed type; the condition is a
+    /// scalar Boolean. In particular, a zero mask times infinity is not a select.
+    Select {
+        condition: ValueId,
+        then_value: ValueId,
+        else_value: ValueId,
     },
     /// Checked signed 32-bit arithmetic, with a zero continuous derivative.
     IntegerArithmetic {
@@ -1136,6 +1144,7 @@ impl CfgValueKind {
             | Self::LimitPrevious { .. }
             | Self::Unary { .. }
             | Self::Binary { .. }
+            | Self::Select { .. }
             | Self::IntegerArithmetic { .. }
             | Self::IntegerBitwise { .. }
             | Self::IntegerBitwiseNot { .. }
@@ -1252,6 +1261,11 @@ impl CfgValueKind {
                 vec![*left, *right]
             }
             Self::LaneScalar { input, scalar, .. } => vec![*input, *scalar],
+            Self::Select {
+                condition,
+                then_value,
+                else_value,
+            } => vec![*condition, *then_value, *else_value],
             Self::Idt { input, ic, .. } => vec![*input, *ic],
             Self::IdtMod {
                 input,
@@ -1441,6 +1455,15 @@ impl CfgValueKind {
             Self::LaneScalar { input, scalar, .. } => {
                 *input = map(*input);
                 *scalar = map(*scalar);
+            }
+            Self::Select {
+                condition,
+                then_value,
+                else_value,
+            } => {
+                *condition = map(*condition);
+                *then_value = map(*then_value);
+                *else_value = map(*else_value);
             }
             Self::Idt { input, ic, .. } => {
                 *input = map(*input);
@@ -2040,6 +2063,22 @@ impl CfgFunction {
             let lanes = self.value_lanes(value.id);
             match &value.kind {
                 CfgValueKind::LaneSplat(_) | CfgValueKind::BlockParameter => {}
+                CfgValueKind::Select {
+                    condition,
+                    then_value,
+                    else_value,
+                } => {
+                    if self.value(*condition).value_type != CfgValueType::Boolean
+                        || self.value(*then_value).value_type != value.value_type
+                        || self.value(*else_value).value_type != value.value_type
+                        || !matches!(
+                            value.value_type,
+                            CfgValueType::Real | CfgValueType::Lanes(_)
+                        )
+                    {
+                        return Err(CfgValidationError::SelectionTypeMismatch(value.id));
+                    }
+                }
                 CfgValueKind::LaneWiden { input } => {
                     // A superset, not equality: widening is how a narrow operand
                     // reaches a merge that other arms made wider.
@@ -2326,6 +2365,7 @@ pub enum CfgValidationError {
     UndefinedValue(ValueId),
     MultiplyDefinedValue(ValueId),
     LaneShapeMismatch(ValueId),
+    SelectionTypeMismatch(ValueId),
     /// A discrete-domain value reached the derivative pass.
     ///
     /// Not an unsupported model — a compiler bug. Nothing in a four-state
@@ -2365,6 +2405,10 @@ impl std::fmt::Display for CfgValidationError {
             Self::LaneShapeMismatch(value) => {
                 write!(f, "{value} does not carry the lanes its operands do")
             }
+            Self::SelectionTypeMismatch(value) => write!(
+                f,
+                "{value} requires a Boolean condition and two operands matching its numerical type"
+            ),
             Self::DigitalValueInDerivative(value) => write!(
                 f,
                 "{value} is a discrete-domain value and cannot be differentiated"

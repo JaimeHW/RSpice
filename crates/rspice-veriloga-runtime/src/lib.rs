@@ -43,6 +43,28 @@ pub use compatibility_catalog::{
 
 pub type Value = f64;
 
+/// Numerical minimum with the compiler's explicit operand-selection contract:
+/// a number wins over NaN, equal numbers retain the left operand (including its
+/// zero sign), and two NaNs retain the right operand.
+#[inline]
+pub fn rspice_min(left: Value, right: Value) -> Value {
+    if !left.is_nan() && (left <= right || right.is_nan()) {
+        left
+    } else {
+        right
+    }
+}
+
+/// Numerical maximum with the same selection contract as [`rspice_min`].
+#[inline]
+pub fn rspice_max(left: Value, right: Value) -> Value {
+    if !left.is_nan() && (left >= right || right.is_nan()) {
+        left
+    } else {
+        right
+    }
+}
+
 /// Validate a symbolic derivative at its original expression's operating point.
 /// Both values must survive simplification even when the derivative is zero.
 #[inline]
@@ -7825,6 +7847,29 @@ impl<'a> GeneratedReactiveStamper<'a> {
 #[cfg(test)]
 mod fixed_lane_tests {
     use super::*;
+
+    #[test]
+    fn extrema_keep_selected_operand_bits() {
+        let nan = f64::from_bits(0x7ff8_0000_0000_0011);
+        for (left, right, minimum, maximum) in [
+            (1.0, 2.0, 1.0, 2.0),
+            (2.0, 1.0, 1.0, 2.0),
+            (nan, 2.0, 2.0, 2.0),
+            (2.0, nan, 2.0, 2.0),
+            (f64::NAN, nan, nan, nan),
+            (-0.0, 0.0, -0.0, -0.0),
+            (0.0, -0.0, 0.0, 0.0),
+            (
+                f64::NEG_INFINITY,
+                f64::INFINITY,
+                f64::NEG_INFINITY,
+                f64::INFINITY,
+            ),
+        ] {
+            assert_eq!(rspice_min(left, right).to_bits(), minimum.to_bits());
+            assert_eq!(rspice_max(left, right).to_bits(), maximum.to_bits());
+        }
+    }
 
     #[test]
     fn frequency_coefficients_preserve_phase_and_extreme_scaled_results() {

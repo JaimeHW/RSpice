@@ -506,8 +506,8 @@ impl<'a> SmallSignalVm<'a> {
             Instruction::Sinh => self.unary_real("Sinh", f64::sinh)?,
             Instruction::Cosh => self.unary_real("Cosh", f64::cosh)?,
             Instruction::Tanh => self.unary_real("Tanh", f64::tanh)?,
-            Instruction::Min => self.binary_real("Min", f64::min)?,
-            Instruction::Max => self.binary_real("Max", f64::max)?,
+            Instruction::Min => self.binary_real("Min", rspice_veriloga_runtime::rspice_min)?,
+            Instruction::Max => self.binary_real("Max", rspice_veriloga_runtime::rspice_max)?,
             Instruction::Limexp => {
                 self.unary_real("Limexp", rspice_veriloga_runtime::rspice_limexp)?
             }

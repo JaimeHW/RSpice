@@ -344,6 +344,15 @@ impl<'a> Scalarizer<'a> {
     fn lane_kind(&self, source: &CfgValue, lane: u32) -> JitResult<CfgValueKind> {
         Ok(match &source.kind {
             CfgValueKind::BlockParameter => CfgValueKind::BlockParameter,
+            CfgValueKind::Select {
+                condition,
+                then_value,
+                else_value,
+            } => CfgValueKind::Select {
+                condition: self.plain_of(*condition)?,
+                then_value: self.lane_of(*then_value, lane, 0)?,
+                else_value: self.lane_of(*else_value, lane, 0)?,
+            },
             CfgValueKind::LaneBinary { op, left, right } => CfgValueKind::Binary {
                 op: *op,
                 left: self.lane_of(*left, lane, 0)?,

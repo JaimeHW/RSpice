@@ -4449,7 +4449,7 @@ pub(super) fn canonical_instance_preprocess(
 	let ALN;
 	let ALO;
 	if ALD{
-	let ALH=ALG* (if ALE<= ALF{ALE}else{ALF});
+	let ALH=ALG* (if !(ALE).is_nan()&&(ALE<=ALF||(ALF).is_nan()){ALE}else{ALF});
 	let ALK=ALI+ ALJ;
 	ALN=ALH;
 	ALO=ALK;
@@ -4462,7 +4462,7 @@ pub(super) fn canonical_instance_preprocess(
 	let ALS;
 	let ALT;
 	if ALP{
-	let ALQ=ALG* (if ALL<= ALF{ALL}else{ALF});
+	let ALQ=ALG* (if !(ALL).is_nan()&&(ALL<=ALF||(ALF).is_nan()){ALL}else{ALF});
 	let ALR=ALM+ ALJ;
 	ALS=ALQ;
 	ALT=ALR;
@@ -4475,7 +4475,7 @@ pub(super) fn canonical_instance_preprocess(
 	let ALX;
 	let ALY;
 	if ALU{
-	let ALV=ALG* (if ALL<= ALE{ALL}else{ALE});
+	let ALV=ALG* (if !(ALL).is_nan()&&(ALL<=ALE||(ALE).is_nan()){ALL}else{ALE});
 	let ALW=ALM+ ALI;
 	ALX=ALV;
 	ALY=ALW;
@@ -4483,15 +4483,15 @@ pub(super) fn canonical_instance_preprocess(
 	ALX=ALF;
 	ALY=ALJ;
 	}
-	let ALZ=F- (S.powf((-1f64/ (if (if ALN>= ALS{ALN}else{ALS})>= ALX{(if ALN>= ALS{ALN}else{ALS})}else{ALX}))));
+	let ALZ=F- (S.powf((-1f64/ (if !((if !(ALN).is_nan()&&(ALN>=ALS||(ALS).is_nan()){ALN}else{ALS})).is_nan()&&((if !(ALN).is_nan()&&(ALN>=ALS||(ALS).is_nan()){ALN}else{ALS})>=ALX||(ALX).is_nan()){(if !(ALN).is_nan()&&(ALN>=ALS||(ALS).is_nan()){ALN}else{ALS})}else{ALX}))));
 	oALZ=ALZ;
-	let AMA=(if (if ALO<= ALT{ALO}else{ALT})<= ALY{(if ALO<= ALT{ALO}else{ALT})}else{ALY})- AAT;
+	let AMA=(if !((if !(ALO).is_nan()&&(ALO<=ALT||(ALT).is_nan()){ALO}else{ALT})).is_nan()&&((if !(ALO).is_nan()&&(ALO<=ALT||(ALT).is_nan()){ALO}else{ALT})<=ALY||(ALY).is_nan()){(if !(ALO).is_nan()&&(ALO<=ALT||(ALT).is_nan()){ALO}else{ALT})}else{ALY})- AAT;
 	let AMB=AKM== YM;
 	oAMB=AMB;
 	let AMK;
 	let AML;
 	if AMB{
-	let AME=ALG* (if AMC<= AMD{AMC}else{AMD});
+	let AME=ALG* (if !(AMC).is_nan()&&(AMC<=AMD||(AMD).is_nan()){AMC}else{AMD});
 	let AMH=AMF+ AMG;
 	AMK=AME;
 	AML=AMH;
@@ -4504,7 +4504,7 @@ pub(super) fn canonical_instance_preprocess(
 	let AMP;
 	let AMQ;
 	if AMM{
-	let AMN=ALG* (if AMI<= AMD{AMI}else{AMD});
+	let AMN=ALG* (if !(AMI).is_nan()&&(AMI<=AMD||(AMD).is_nan()){AMI}else{AMD});
 	let AMO=AMJ+ AMG;
 	AMP=AMN;
 	AMQ=AMO;
@@ -4517,7 +4517,7 @@ pub(super) fn canonical_instance_preprocess(
 	let AMU;
 	let AMV;
 	if AMR{
-	let AMS=ALG* (if AMI<= AMC{AMI}else{AMC});
+	let AMS=ALG* (if !(AMI).is_nan()&&(AMI<=AMC||(AMC).is_nan()){AMI}else{AMC});
 	let AMT=AMJ+ AMF;
 	AMU=AMS;
 	AMV=AMT;
@@ -4525,9 +4525,9 @@ pub(super) fn canonical_instance_preprocess(
 	AMU=AMD;
 	AMV=AMG;
 	}
-	let AMW=F- (S.powf((-1f64/ (if (if AMK>= AMP{AMK}else{AMP})>= AMU{(if AMK>= AMP{AMK}else{AMP})}else{AMU}))));
+	let AMW=F- (S.powf((-1f64/ (if !((if !(AMK).is_nan()&&(AMK>=AMP||(AMP).is_nan()){AMK}else{AMP})).is_nan()&&((if !(AMK).is_nan()&&(AMK>=AMP||(AMP).is_nan()){AMK}else{AMP})>=AMU||(AMU).is_nan()){(if !(AMK).is_nan()&&(AMK>=AMP||(AMP).is_nan()){AMK}else{AMP})}else{AMU}))));
 	oAMW=AMW;
-	let AMX=(if (if AML<= AMQ{AML}else{AMQ})<= AMV{(if AML<= AMQ{AML}else{AMQ})}else{AMV})- AAT;
+	let AMX=(if !((if !(AML).is_nan()&&(AML<=AMQ||(AMQ).is_nan()){AML}else{AMQ})).is_nan()&&((if !(AML).is_nan()&&(AML<=AMQ||(AMQ).is_nan()){AML}else{AMQ})<=AMV||(AMV).is_nan()){(if !(AML).is_nan()&&(AML<=AMQ||(AMQ).is_nan()){AML}else{AMQ})}else{AMV})- AAT;
 	if AMY{
 	let AMZ=!(((ALD&& ALP)&& ALU));
 	oAMZ=AMZ;
@@ -7778,7 +7778,7 @@ pub(super) fn canonical_temperature_preprocess(
 	let F=C- D;
 	let G=(C* 1.3806505e-23f64)/ 1.6021918e-19f64;
 	let I=H/ G;
-	let J=if C>= 23.149999999999977f64{C}else{23.149999999999977f64};
+	let J=if !(C).is_nan()&&(C>=23.149999999999977f64||(23.149999999999977f64).is_nan()){C}else{23.149999999999977f64};
 	let L=J/ K;
 	let M=8.61726105451295e-5f64* J;
 	let N=H/ M;
@@ -7812,9 +7812,9 @@ pub(super) fn canonical_temperature_preprocess(
 	let AY=AB* AQ;
 	let AZ=AB* AS;
 	let BA=AB* AU;
-	let BB=if (T* P)>= M{(T* P)}else{M};
-	let BC=if (T* Q)>= M{(T* Q)}else{M};
-	let BD=if (T* R)>= M{(T* R)}else{M};
+	let BB=if !((T* P)).is_nan()&&((T* P)>=M||(M).is_nan()){(T* P)}else{M};
+	let BC=if !((T* Q)).is_nan()&&((T* Q)>=M||(M).is_nan()){(T* Q)}else{M};
+	let BD=if !((T* R)).is_nan()&&((T* R)>=M||(M).is_nan()){(T* R)}else{M};
 	let BE=BB* N;
 	let BF=BC* N;
 	let BG=BD* N;
@@ -7888,9 +7888,9 @@ pub(super) fn canonical_temperature_preprocess(
 	let DJ=AB* DB;
 	let DK=AB* DD;
 	let DL=AB* DF;
-	let DM=if (T* CF)>= M{(T* CF)}else{M};
-	let DN=if (T* CG)>= M{(T* CG)}else{M};
-	let DO=if (T* CH)>= M{(T* CH)}else{M};
+	let DM=if !((T* CF)).is_nan()&&((T* CF)>=M||(M).is_nan()){(T* CF)}else{M};
+	let DN=if !((T* CG)).is_nan()&&((T* CG)>=M||(M).is_nan()){(T* CG)}else{M};
+	let DO=if !((T* CH)).is_nan()&&((T* CH)>=M||(M).is_nan()){(T* CH)}else{M};
 	let DP=DM* N;
 	let DQ=DN* N;
 	let DR=DO* N;
@@ -8174,7 +8174,7 @@ pub(super) fn canonical_temperature_preprocess(
 	}else{
 	KA
 	};
-	let KM=if (if KB<= KG{KB}else{KG})<= KL{(if KB<= KG{KB}else{KG})}else{KL};
+	let KM=if !((if !(KB).is_nan()&&(KB<=KG||(KG).is_nan()){KB}else{KG})).is_nan()&&((if !(KB).is_nan()&&(KB<=KG||(KG).is_nan()){KB}else{KG})<=KL||(KL).is_nan()){(if !(KB).is_nan()&&(KB<=KG||(KG).is_nan()){KB}else{KG})}else{KL};
 	let KN=KM* N;
 	let KP=(KN.abs())< KO;
 	oKP=KP;
@@ -8213,7 +8213,7 @@ pub(super) fn canonical_temperature_preprocess(
 	}else{
 	AL
 	};
-	let LJ=if (if LC<= LF{LC}else{LF})<= LI{(if LC<= LF{LC}else{LF})}else{LI};
+	let LJ=if !((if !(LC).is_nan()&&(LC<=LF||(LF).is_nan()){LC}else{LF})).is_nan()&&((if !(LC).is_nan()&&(LC<=LF||(LF).is_nan()){LC}else{LF})<=LI||(LI).is_nan()){(if !(LC).is_nan()&&(LC<=LF||(LF).is_nan()){LC}else{LF})}else{LI};
 	let LL=LJ* LK;
 	let LM=LJ* staged[115];
 	let LO=CL* LN;
@@ -8243,7 +8243,7 @@ pub(super) fn canonical_temperature_preprocess(
 	}else{
 	KA
 	};
-	let MC=if (if LR<= LW{LR}else{LW})<= MB{(if LR<= LW{LR}else{LW})}else{MB};
+	let MC=if !((if !(LR).is_nan()&&(LR<=LW||(LW).is_nan()){LR}else{LW})).is_nan()&&((if !(LR).is_nan()&&(LR<=LW||(LW).is_nan()){LR}else{LW})<=MB||(MB).is_nan()){(if !(LR).is_nan()&&(LR<=LW||(LW).is_nan()){LR}else{LW})}else{MB};
 	let MD=MC* N;
 	let ME=(MD.abs())< KO;
 	oME=ME;
@@ -8282,7 +8282,7 @@ pub(super) fn canonical_temperature_preprocess(
 	}else{
 	CW
 	};
-	let MV=if (if MO<= MR{MO}else{MR})<= MU{(if MO<= MR{MO}else{MR})}else{MU};
+	let MV=if !((if !(MO).is_nan()&&(MO<=MR||(MR).is_nan()){MO}else{MR})).is_nan()&&((if !(MO).is_nan()&&(MO<=MR||(MR).is_nan()){MO}else{MR})<=MU||(MU).is_nan()){(if !(MO).is_nan()&&(MO<=MR||(MR).is_nan()){MO}else{MR})}else{MU};
 	let MW=MV* LK;
 	let MX=MV* staged[119];
 	let NA;
@@ -10990,11 +10990,11 @@ pub(super) fn canonical_temperature_preprocess(
 	BNP=BO;
 	BNQ=BO;
 	}
-	let BNR=if BNO<= KO{BNO}else{KO};
+	let BNR=if !(BNO).is_nan()&&(BNO<=KO||(KO).is_nan()){BNO}else{KO};
 	let BNS=BNR.exp();
-	let BNT=if BNP<= KO{BNP}else{KO};
+	let BNT=if !(BNP).is_nan()&&(BNP<=KO||(KO).is_nan()){BNP}else{KO};
 	let BNU=BNT.exp();
-	let BNV=if BNQ<= KO{BNQ}else{KO};
+	let BNV=if !(BNQ).is_nan()&&(BNQ<=KO||(KO).is_nan()){BNQ}else{KO};
 	let BNW=BNV.exp();
 	let BOA;
 	let BOB;
@@ -13652,11 +13652,11 @@ pub(super) fn canonical_temperature_preprocess(
 	DMO=BO;
 	DMP=BO;
 	}
-	let DMQ=if DMN<= KO{DMN}else{KO};
+	let DMQ=if !(DMN).is_nan()&&(DMN<=KO||(KO).is_nan()){DMN}else{KO};
 	let DMR=DMQ.exp();
-	let DMS=if DMO<= KO{DMO}else{KO};
+	let DMS=if !(DMO).is_nan()&&(DMO<=KO||(KO).is_nan()){DMO}else{KO};
 	let DMT=DMS.exp();
-	let DMU=if DMP<= KO{DMP}else{KO};
+	let DMU=if !(DMP).is_nan()&&(DMP<=KO||(KO).is_nan()){DMP}else{KO};
 	let DMV=DMU.exp();
 	NA=BNR;
 	NB=BNS;
@@ -16097,7 +16097,7 @@ impl Instance {
 		let ARV=ARU.ln();
 		let ARW=ARR* GW;
 		let ARX=ARW.powf(GR);
-		let ARY=(((((AQD+ (AQB* ARP))* ARQ)* GW)+ L5([(GX* ARR),0.0,0.0,0.0,0.0]))* (GR* ((ARW+ (((ARW== BK) as u8 as f64)* BL)).powf((GR- AH)))))+ L5([(GS* (ARX* (((if ARW>= BL{ARW}else{BL}).ln())* ((ARW> BK) as u8 as f64)))),0.0,0.0,0.0,0.0]);
+		let ARY=(((((AQD+ (AQB* ARP))* ARQ)* GW)+ L5([(GX* ARR),0.0,0.0,0.0,0.0]))* (GR* ((ARW+ (((ARW== BK) as u8 as f64)* BL)).powf((GR- AH)))))+ L5([(GS* (ARX* (((if !(ARW).is_nan()&&(ARW>=BL||(BL).is_nan()){ARW}else{BL}).ln())* ((ARW> BK) as u8 as f64)))),0.0,0.0,0.0,0.0]);
 		let ARZ=DQ* HB;
 		let ASA=(ARZ* ARV).exp();
 		let ASB=(AN+ (ARX+ (HG* ASA)))+ (ARN* AQA);
@@ -16340,7 +16340,7 @@ impl Instance {
 		let AXD=ARQ* AXB;
 		let AXE=AXD* GW;
 		let AXF=AXE.powf(GR);
-		let AXG=((((AXC* ARQ)* GW)+ L5([(GX* AXD),0.0,0.0,0.0,0.0]))* (GR* ((AXE+ (((AXE== BK) as u8 as f64)* BL)).powf((GR- AH)))))+ L5([(GS* (AXF* (((if AXE>= BL{AXE}else{BL}).ln())* ((AXE> BK) as u8 as f64)))),0.0,0.0,0.0,0.0]);
+		let AXG=((((AXC* ARQ)* GW)+ L5([(GX* AXD),0.0,0.0,0.0,0.0]))* (GR* ((AXE+ (((AXE== BK) as u8 as f64)* BL)).powf((GR- AH)))))+ L5([(GS* (AXF* (((if !(AXE).is_nan()&&(AXE>=BL||(BL).is_nan()){AXE}else{BL}).ln())* ((AXE> BK) as u8 as f64)))),0.0,0.0,0.0,0.0]);
 		let AXH=AN- ARP;
 		let AXI=(AXA* AXH)- AN;
 		let AXJ=(GR* AXI)/ AXB;
@@ -16350,7 +16350,7 @@ impl Instance {
 		let AXN=-HB;
 		let AXO=AXM.powf(AXN);
 		let AXP=HG* AXO;
-		let AXQ=((AXL* (AXN* ((AXM+ (((AXM== BK) as u8 as f64)* BL)).powf((AXN- AH)))))+ L5([((HC* AE)* (AXO* (((if AXM>= BL{AXM}else{BL}).ln())* ((AXM> BK) as u8 as f64)))),0.0,0.0,0.0,0.0]))* HG;
+		let AXQ=((AXL* (AXN* ((AXM+ (((AXM== BK) as u8 as f64)* BL)).powf((AXN- AH)))))+ L5([((HC* AE)* (AXO* (((if !(AXM).is_nan()&&(AXM>=BL||(BL).is_nan()){AXM}else{BL}).ln())* ((AXM> BK) as u8 as f64)))),0.0,0.0,0.0,0.0]))* HG;
 		let AXR=L5([(HH* AXO),0.0,0.0,0.0,0.0])+ AXQ;
 		let AXS=AN/ AXM;
 		let AXT=(AXA- AN)+ AXS;
@@ -17080,7 +17080,7 @@ impl Instance {
 		let BQR=BQQ.ln();
 		let BQS=BQO* GW;
 		let BQT=BQS.powf(GR);
-		let BQU=(((((BMU+ (BMQ* ARP))* ARQ)* GW)+ L5([(GX* BQO),0.0,0.0,0.0,0.0]))* (GR* ((BQS+ (((BQS== BK) as u8 as f64)* BL)).powf((GR- AH)))))+ L5([(GS* (BQT* (((if BQS>= BL{BQS}else{BL}).ln())* ((BQS> BK) as u8 as f64)))),0.0,0.0,0.0,0.0]);
+		let BQU=(((((BMU+ (BMQ* ARP))* ARQ)* GW)+ L5([(GX* BQO),0.0,0.0,0.0,0.0]))* (GR* ((BQS+ (((BQS== BK) as u8 as f64)* BL)).powf((GR- AH)))))+ L5([(GS* (BQT* (((if !(BQS).is_nan()&&(BQS>=BL||(BL).is_nan()){BQS}else{BL}).ln())* ((BQS> BK) as u8 as f64)))),0.0,0.0,0.0,0.0]);
 		let BQV=DQ* HB;
 		let BQW=(BQV* BQR).exp();
 		let BQX=BQU+ (L5([(HH* BQW),0.0,0.0,0.0,0.0])+ (((L5([((HC* DQ)* BQR),0.0,0.0,0.0,0.0])+ ((((BMG- ((BMG+ BMC)* BQQ))/ BQP)* (AH/ BQQ))* BQV))* BQW)* HG));
@@ -18042,7 +18042,7 @@ impl Instance {
 		}
 		let CQD=JP* CQB;
 		let CQE=CQD.powf(COJ);
-		let CQF=COK* (CQE* (((if CQD>= BL{CQD}else{BL}).ln())* ((CQD> BK) as u8 as f64)));
+		let CQF=COK* (CQE* (((if !(CQD).is_nan()&&(CQD>=BL||(BL).is_nan()){CQD}else{BL}).ln())* ((CQD> BK) as u8 as f64)));
 		let CQG=((L5([(KA* CQB),0.0,0.0,0.0,0.0])+ (CQC* JP))* (COJ* ((CQD+ (((CQD== BK) as u8 as f64)* BL)).powf((COJ- AH)))))+ L5([CQF[0],0.0,CQF[1],CQF[2],CQF[3]]);
 		let CQH=COH* COI;
 		let CQI=CQH+ CQH;
@@ -18177,7 +18177,7 @@ impl Instance {
 		}
 		let CUB=JP* CTZ;
 		let CUC=CUB.powf(CRP);
-		let CUD=((L5([(KA* CTZ),0.0,0.0,0.0,0.0])+ (CUA* JP))* (CRP* ((CUB+ (((CUB== BK) as u8 as f64)* BL)).powf((CRP- AH)))))+ (CRQ* (CUC* (((if CUB>= BL{CUB}else{BL}).ln())* ((CUB> BK) as u8 as f64))));
+		let CUD=((L5([(KA* CTZ),0.0,0.0,0.0,0.0])+ (CUA* JP))* (CRP* ((CUB+ (((CUB== BK) as u8 as f64)* BL)).powf((CRP- AH)))))+ (CRQ* (CUC* (((if !(CUB).is_nan()&&(CUB>=BL||(BL).is_nan()){CUB}else{BL}).ln())* ((CUB> BK) as u8 as f64))));
 		let CUE=CRN* CRO;
 		let CUF=(BH* (CTF+ CRO))- CUC;
 		let CUG=((CRO* CRO)+ (CUF* CUC)).sqrt();
@@ -19342,7 +19342,7 @@ impl Instance {
 		let ECB=ECA.ln();
 		let ECC=EBY* GW;
 		let ECD=ECC.powf(GR);
-		let ECE=(((((EAO+ (EAM* ARP))* ARQ)* GW)+ L5([(GX* EBY),0.0,0.0,0.0,0.0]))* (GR* ((ECC+ (((ECC== BK) as u8 as f64)* BL)).powf((GR- AH)))))+ L5([(GS* (ECD* (((if ECC>= BL{ECC}else{BL}).ln())* ((ECC> BK) as u8 as f64)))),0.0,0.0,0.0,0.0]);
+		let ECE=(((((EAO+ (EAM* ARP))* ARQ)* GW)+ L5([(GX* EBY),0.0,0.0,0.0,0.0]))* (GR* ((ECC+ (((ECC== BK) as u8 as f64)* BL)).powf((GR- AH)))))+ L5([(GS* (ECD* (((if !(ECC).is_nan()&&(ECC>=BL||(BL).is_nan()){ECC}else{BL}).ln())* ((ECC> BK) as u8 as f64)))),0.0,0.0,0.0,0.0]);
 		let ECF=DQ* HB;
 		let ECG=(ECF* ECB).exp();
 		let ECH=(AN+ (ECD+ (HG* ECG)))+ (EBW* EAL);
@@ -19705,7 +19705,7 @@ impl Instance {
 		let EHC=ARQ* EHA;
 		let EHD=EHC* GW;
 		let EHE=EHD.powf(GR);
-		let EHF=((((EHB* ARQ)* GW)+ L5([(GX* EHC),0.0,0.0,0.0,0.0]))* (GR* ((EHD+ (((EHD== BK) as u8 as f64)* BL)).powf((GR- AH)))))+ L5([(GS* (EHE* (((if EHD>= BL{EHD}else{BL}).ln())* ((EHD> BK) as u8 as f64)))),0.0,0.0,0.0,0.0]);
+		let EHF=((((EHB* ARQ)* GW)+ L5([(GX* EHC),0.0,0.0,0.0,0.0]))* (GR* ((EHD+ (((EHD== BK) as u8 as f64)* BL)).powf((GR- AH)))))+ L5([(GS* (EHE* (((if !(EHD).is_nan()&&(EHD>=BL||(BL).is_nan()){EHD}else{BL}).ln())* ((EHD> BK) as u8 as f64)))),0.0,0.0,0.0,0.0]);
 		let EHG=AN- ARP;
 		let EHH=(EGZ* EHG)- AN;
 		let EHI=(GR* EHH)/ EHA;
@@ -19715,7 +19715,7 @@ impl Instance {
 		let EHM=-HB;
 		let EHN=EHL.powf(EHM);
 		let EHO=HG* EHN;
-		let EHP=((EHK* (EHM* ((EHL+ (((EHL== BK) as u8 as f64)* BL)).powf((EHM- AH)))))+ L5([((HC* AE)* (EHN* (((if EHL>= BL{EHL}else{BL}).ln())* ((EHL> BK) as u8 as f64)))),0.0,0.0,0.0,0.0]))* HG;
+		let EHP=((EHK* (EHM* ((EHL+ (((EHL== BK) as u8 as f64)* BL)).powf((EHM- AH)))))+ L5([((HC* AE)* (EHN* (((if !(EHL).is_nan()&&(EHL>=BL||(BL).is_nan()){EHL}else{BL}).ln())* ((EHL> BK) as u8 as f64)))),0.0,0.0,0.0,0.0]))* HG;
 		let EHQ=L5([(HH* EHN),0.0,0.0,0.0,0.0])+ EHP;
 		let EHR=AN/ EHL;
 		let EHS=(EGZ- AN)+ EHR;
@@ -20419,7 +20419,7 @@ impl Instance {
 		let FAC=FAB.ln();
 		let FAD=EZZ* GW;
 		let FAE=FAD.powf(GR);
-		let FAF=(((((EWN+ (EWJ* ARP))* ARQ)* GW)+ L5([(GX* EZZ),0.0,0.0,0.0,0.0]))* (GR* ((FAD+ (((FAD== BK) as u8 as f64)* BL)).powf((GR- AH)))))+ L5([(GS* (FAE* (((if FAD>= BL{FAD}else{BL}).ln())* ((FAD> BK) as u8 as f64)))),0.0,0.0,0.0,0.0]);
+		let FAF=(((((EWN+ (EWJ* ARP))* ARQ)* GW)+ L5([(GX* EZZ),0.0,0.0,0.0,0.0]))* (GR* ((FAD+ (((FAD== BK) as u8 as f64)* BL)).powf((GR- AH)))))+ L5([(GS* (FAE* (((if !(FAD).is_nan()&&(FAD>=BL||(BL).is_nan()){FAD}else{BL}).ln())* ((FAD> BK) as u8 as f64)))),0.0,0.0,0.0,0.0]);
 		let FAG=DQ* HB;
 		let FAH=(FAG* FAC).exp();
 		let FAI=FAF+ (L5([(HH* FAH),0.0,0.0,0.0,0.0])+ (((L5([((HC* DQ)* FAC),0.0,0.0,0.0,0.0])+ ((((EWB- ((EWB+ EVX)* FAB))/ FAA)* (AH/ FAB))* FAG))* FAH)* HG));

@@ -4589,7 +4589,7 @@ impl Instance {
 		let GN=GM/ G;
 		let GO=(GM* K)/ L;
 		let GP=C/ GO;
-		let GQ=if GM>= 23.149999999999977f64{GM}else{23.149999999999977f64};
+		let GQ=if !(GM).is_nan()&&(GM>=23.149999999999977f64||(23.149999999999977f64).is_nan()){GM}else{23.149999999999977f64};
 		let GR=GQ/ J;
 		let GS=M* GQ;
 		let GT=C/ GS;
@@ -4611,9 +4611,9 @@ impl Instance {
 		let HJ=HG+ (GS* ((C+ (((BT- HG)* GT).exp())).ln()));
 		let HK=HH+ (GS* ((C+ (((BT- HH)* GT).exp())).ln()));
 		let HL=HI+ (GS* ((C+ (((BT- HI)* GT).exp())).ln()));
-		let HM=if (H* GV)>= GS{(H* GV)}else{GS};
-		let HN=if (H* GW)>= GS{(H* GW)}else{GS};
-		let HO=if (H* GX)>= GS{(H* GX)}else{GS};
+		let HM=if !((H* GV)).is_nan()&&((H* GV)>=GS||(GS).is_nan()){(H* GV)}else{GS};
+		let HN=if !((H* GW)).is_nan()&&((H* GW)>=GS||(GS).is_nan()){(H* GW)}else{GS};
+		let HO=if !((H* GX)).is_nan()&&((H* GX)>=GS||(GS).is_nan()){(H* GX)}else{GS};
 		let HP=HM* GT;
 		let HQ=HN* GT;
 		let HR=HO* GT;
@@ -4657,9 +4657,9 @@ impl Instance {
 		let IW=IT+ (GS* ((C+ (((BT- IT)* GT).exp())).ln()));
 		let IX=IU+ (GS* ((C+ (((BT- IU)* GT).exp())).ln()));
 		let IY=IV+ (GS* ((C+ (((BT- IV)* GT).exp())).ln()));
-		let IZ=if (H* IH)>= GS{(H* IH)}else{GS};
-		let JA=if (H* II)>= GS{(H* II)}else{GS};
-		let JB=if (H* IJ)>= GS{(H* IJ)}else{GS};
+		let IZ=if !((H* IH)).is_nan()&&((H* IH)>=GS||(GS).is_nan()){(H* IH)}else{GS};
+		let JA=if !((H* II)).is_nan()&&((H* II)>=GS||(GS).is_nan()){(H* II)}else{GS};
+		let JB=if !((H* IJ)).is_nan()&&((H* IJ)>=GS||(GS).is_nan()){(H* IJ)}else{GS};
 		let JC=IZ* GT;
 		let JD=JA* GT;
 		let JE=JB* GT;
@@ -6743,7 +6743,7 @@ impl Instance {
 		}else{
 		AYM
 		};
-		let AYY=if (if AYV<= AYW{AYV}else{AYW})<= AYX{(if AYV<= AYW{AYV}else{AYW})}else{AYX};
+		let AYY=if !((if !(AYV).is_nan()&&(AYV<=AYW||(AYW).is_nan()){AYV}else{AYW})).is_nan()&&((if !(AYV).is_nan()&&(AYV<=AYW||(AYW).is_nan()){AYV}else{AYW})<=AYX||(AYX).is_nan()){(if !(AYV).is_nan()&&(AYV<=AYW||(AYW).is_nan()){AYV}else{AYW})}else{AYX};
 		let AYZ=AYY* GT;
 		let AZB=(AYZ.abs())< AZA;
 		let BCG;
@@ -6798,8 +6798,8 @@ impl Instance {
 		AZU=HL;
 		AZY=AU;
 		}
-		let AZV=if (if AZS<= AZT{AZS}else{AZT})<= AZU{(if AZS<= AZT{AZS}else{AZT})}else{AZU};
-		let AZZ=(if (if AZW<= AZX{AZW}else{AZX})<= AZY{(if AZW<= AZX{AZW}else{AZX})}else{AZY})- BT;
+		let AZV=if !((if !(AZS).is_nan()&&(AZS<=AZT||(AZT).is_nan()){AZS}else{AZT})).is_nan()&&((if !(AZS).is_nan()&&(AZS<=AZT||(AZT).is_nan()){AZS}else{AZT})<=AZU||(AZU).is_nan()){(if !(AZS).is_nan()&&(AZS<=AZT||(AZT).is_nan()){AZS}else{AZT})}else{AZU};
+		let AZZ=(if !((if !(AZW).is_nan()&&(AZW<=AZX||(AZX).is_nan()){AZW}else{AZX})).is_nan()&&((if !(AZW).is_nan()&&(AZW<=AZX||(AZX).is_nan()){AZW}else{AZX})<=AZY||(AZY).is_nan()){(if !(AZW).is_nan()&&(AZW<=AZX||(AZX).is_nan()){AZW}else{AZX})}else{AZY})- BT;
 		let BAB=IO* BAA;
 		let BAC=BAB> A;
 		let BAM=if BAC{
@@ -6824,7 +6824,7 @@ impl Instance {
 		}else{
 		AYM
 		};
-		let BAP=if (if BAM<= BAN{BAM}else{BAN})<= BAO{(if BAM<= BAN{BAM}else{BAN})}else{BAO};
+		let BAP=if !((if !(BAM).is_nan()&&(BAM<=BAN||(BAN).is_nan()){BAM}else{BAN})).is_nan()&&((if !(BAM).is_nan()&&(BAM<=BAN||(BAN).is_nan()){BAM}else{BAN})<=BAO||(BAO).is_nan()){(if !(BAM).is_nan()&&(BAM<=BAN||(BAN).is_nan()){BAM}else{BAN})}else{BAO};
 		let BAQ=BAP* GT;
 		let BAR=(BAQ.abs())< AZA;
 		let DLC;
@@ -6879,8 +6879,8 @@ impl Instance {
 		BBI=IY;
 		BBM=FT;
 		}
-		let BBJ=if (if BBG<= BBH{BBG}else{BBH})<= BBI{(if BBG<= BBH{BBG}else{BBH})}else{BBI};
-		let BBN=(if (if BBK<= BBL{BBK}else{BBL})<= BBM{(if BBK<= BBL{BBK}else{BBL})}else{BBM})- BT;
+		let BBJ=if !((if !(BBG).is_nan()&&(BBG<=BBH||(BBH).is_nan()){BBG}else{BBH})).is_nan()&&((if !(BBG).is_nan()&&(BBG<=BBH||(BBH).is_nan()){BBG}else{BBH})<=BBI||(BBI).is_nan()){(if !(BBG).is_nan()&&(BBG<=BBH||(BBH).is_nan()){BBG}else{BBH})}else{BBI};
+		let BBN=(if !((if !(BBK).is_nan()&&(BBK<=BBL||(BBL).is_nan()){BBK}else{BBL})).is_nan()&&((if !(BBK).is_nan()&&(BBK<=BBL||(BBL).is_nan()){BBK}else{BBL})<=BBM||(BBM).is_nan()){(if !(BBK).is_nan()&&(BBK<=BBL||(BBL).is_nan()){BBK}else{BBL})}else{BBM})- BT;
 		let BBP=BBO== C;
 		let HAZ;
 		let HBC;
@@ -10112,11 +10112,11 @@ impl Instance {
 		DKG=A;
 		DKJ=A;
 		}
-		let DKE=if DKD<= AZA{DKD}else{AZA};
+		let DKE=if !(DKD).is_nan()&&(DKD<=AZA||(AZA).is_nan()){DKD}else{AZA};
 		let DKF=DKE.exp();
-		let DKH=if DKG<= AZA{DKG}else{AZA};
+		let DKH=if !(DKG).is_nan()&&(DKG<=AZA||(AZA).is_nan()){DKG}else{AZA};
 		let DKI=DKH.exp();
-		let DKK=if DKJ<= AZA{DKJ}else{AZA};
+		let DKK=if !(DKJ).is_nan()&&(DKJ<=AZA||(AZA).is_nan()){DKJ}else{AZA};
 		let DKL=DKK.exp();
 		let DKN=-0.4f64* DKM;
 		let DKO=-0.65f64* DKM;
@@ -13305,11 +13305,11 @@ impl Instance {
 		FTE=A;
 		FTH=A;
 		}
-		let FTC=if FTB<= AZA{FTB}else{AZA};
+		let FTC=if !(FTB).is_nan()&&(FTB<=AZA||(AZA).is_nan()){FTB}else{AZA};
 		let FTD=FTC.exp();
-		let FTF=if FTE<= AZA{FTE}else{AZA};
+		let FTF=if !(FTE).is_nan()&&(FTE<=AZA||(AZA).is_nan()){FTE}else{AZA};
 		let FTG=FTF.exp();
-		let FTI=if FTH<= AZA{FTH}else{AZA};
+		let FTI=if !(FTH).is_nan()&&(FTH<=AZA||(AZA).is_nan()){FTH}else{AZA};
 		let FTJ=FTI.exp();
 		HAZ=DKE;
 		HBC=DKF;

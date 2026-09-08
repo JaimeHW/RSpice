@@ -1247,7 +1247,10 @@ pub(super) fn integer_binary_result(op: &str, left: &str, right: &str) -> String
 pub(super) fn pure_intrinsic_value(name: &str, left: &str, right: Option<&str>) -> Option<String> {
     let method = match (name, right) {
         ("pow", Some(right)) => return Some(power_value_expr(left, right)),
-        ("min" | "max" | "hypot" | "atan2", Some(right)) => {
+        ("min" | "max", Some(right)) => {
+            return Some(extremum_value_expr(left, right, name == "min"));
+        }
+        ("hypot" | "atan2", Some(right)) => {
             return Some(format!("{}.{name}({right})", f64_binary_receiver(left)));
         }
         ("abs" | "fabs", None) => "abs",
@@ -1260,6 +1263,17 @@ pub(super) fn pure_intrinsic_value(name: &str, left: &str, right: Option<&str>) 
         _ => return None,
     };
     Some(format!("{}.{method}()", f64_binary_receiver(left)))
+}
+
+/// Mirror the shared runtime's numeric-over-NaN and left-tie selection rule.
+/// Operands are already lowered values, so selection cannot repeat effects.
+pub(super) fn extremum_value_expr(left: &str, right: &str, minimum: bool) -> String {
+    let comparison = if minimum { "<=" } else { ">=" };
+    let left_receiver = f64_binary_receiver(left);
+    let right_receiver = f64_binary_receiver(right);
+    format!(
+        "if !{left_receiver}.is_nan()&&({left}{comparison}{right}||{right_receiver}.is_nan()){{{left}}}else{{{right}}}"
+    )
 }
 
 pub(super) fn power_value_expr(base: &str, exponent: &str) -> String {
@@ -1436,7 +1450,7 @@ fn negate_value(value: &str) -> String {
 }
 
 fn f64_binary_receiver(value: &str) -> String {
-    if let Some(typed) = typed_f64_literal(value) {
+    if let Some(typed) = typed_f64_literal(trim_enclosing_parentheses(value)) {
         format!("({typed})")
     } else {
         format!("({value})")

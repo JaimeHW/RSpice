@@ -254,6 +254,14 @@ fn value_powers(
             .iter()
             .flat_map(|input| at(input).iter().copied())
             .collect(),
+        CfgValueKind::Select {
+            condition,
+            then_value,
+            else_value,
+        } => {
+            independent_powers(kind, &[*condition], powers)?;
+            at(then_value).union(at(else_value)).copied().collect()
+        }
         CfgValueKind::Binary { op, left, right }
         | CfgValueKind::LaneBinary { op, left, right }
         | CfgValueKind::LaneScalar {
@@ -367,6 +375,19 @@ impl Expansion<'_> {
         let ty = value.value_type;
         let kind = match &value.kind {
             CfgValueKind::DdtScale | CfgValueKind::IdtScale => CfgValueKind::RealConstant(1.0),
+            CfgValueKind::Select {
+                condition,
+                then_value,
+                else_value,
+            } => CfgValueKind::Select {
+                condition: self.coefficient(
+                    *condition,
+                    DynamicPower::default(),
+                    CfgValueType::Boolean,
+                ),
+                then_value: self.coefficient(*then_value, power, ty),
+                else_value: self.coefficient(*else_value, power, ty),
+            },
             CfgValueKind::Binary {
                 op: CfgBinaryOp::Mul,
                 left,

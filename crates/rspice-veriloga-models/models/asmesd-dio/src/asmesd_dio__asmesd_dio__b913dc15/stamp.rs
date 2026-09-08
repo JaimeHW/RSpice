@@ -604,7 +604,7 @@ impl Instance {
 		let ES=(CI* ((EP* ((CH>= EO) as u8 as f64))- W))* (AW* ((EN+ (((EN== EO) as u8 as f64)* ER)).powf((AW- W))));
 		let EU=Z+ (ET* EQ);
 		let EV=(AO* EL)/ EU;
-		let EW=((L3([(AP* EL),0.0,0.0])+ ((DY- L3([EK,0.0,0.0]))* AO))- (((L3([0.0,ES[0],ES[1]])+ L3([(AX* (EQ* (((if EN>= ER{EN}else{ER}).ln())* ((EN> EO) as u8 as f64)))),0.0,0.0]))* ET)* EV))/ EU;
+		let EW=((L3([(AP* EL),0.0,0.0])+ ((DY- L3([EK,0.0,0.0]))* AO))- (((L3([0.0,ES[0],ES[1]])+ L3([(AX* (EQ* (((if !(EN).is_nan()&&(EN>=ER||(ER).is_nan()){EN}else{ER}).ln())* ((EN> EO) as u8 as f64)))),0.0,0.0]))* ET)* EV))/ EU;
 		let EX=(AG* EM)- EV;
 		let EY=(L3([(AH* EM),0.0,0.0])+ (DU* AG))- EW;
 		DK=EX;
@@ -618,11 +618,11 @@ impl Instance {
 		let FT;
 		if DM{
 		let FI=FH- CH;
-		let FJ=if FI>= 1e-3f64{FI}else{1e-3f64};
+		let FJ=if !(FI).is_nan()&&(FI>=1e-3f64||(1e-3f64).is_nan()){FI}else{1e-3f64};
 		let FK=(CI* -1f64)* FH;
 		let FM=FL* Q;
 		let FN=FM* FJ;
-		let FO=((CI* BE)* ((FI>= 1e-3f64) as u8 as f64))* FM;
+		let FO=(if (FJ== FI){(CI* BE)}else{L2([0f64;2])})* FM;
 		let FP=((-1f64* CH)* FH)/ FN;
 		let FQ=(L3([0.0,FK[0],FK[1]])- ((L3([((R* FL)* FJ),0.0,0.0])+ L3([0.0,FO[0],FO[1]]))* FP))/ FN;
 		let FR=FP> DH;

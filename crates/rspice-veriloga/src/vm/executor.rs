@@ -415,8 +415,8 @@ impl<'a> Vm<'a> {
             Instruction::Tanh => self.unary_op(|a| a.tanh())?,
 
             // Two-argument functions
-            Instruction::Min => self.binary_op(|a, b| a.min(b))?,
-            Instruction::Max => self.binary_op(|a, b| a.max(b))?,
+            Instruction::Min => self.binary_op(rspice_veriloga_runtime::rspice_min)?,
+            Instruction::Max => self.binary_op(rspice_veriloga_runtime::rspice_max)?,
 
             // Limited exponential for convergence: linear extrapolation
             // beyond the threshold, C0 and C1 continuous there. The threshold

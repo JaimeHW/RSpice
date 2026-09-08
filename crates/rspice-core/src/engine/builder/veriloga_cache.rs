@@ -259,7 +259,8 @@ use super::*;
 // Version 52 preserves signed integer arithmetic before real conversion.
 // Version 53 retains checked primal dependencies when resolving ddx.
 // Version 54 preserves signed zero in primal factors during differentiation.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 54;
+// Version 55 selects extrema derivatives consistently and adds CFG selection.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 55;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]

@@ -685,11 +685,8 @@ fn compare(op: CompareOp, left: f64, right: f64) -> bool {
 
 /// `min`/`max` as the backend selects them.
 ///
-/// `MINSD`/`MAXSD` return the *right* operand whenever either is a NaN, and
-/// the emitter then puts the left one back when the right was the NaN or when
-/// both operands are zero. Two consequences the ordinary reading misses: a NaN
-/// on the left wins, and the result is always one of the two operands rather
-/// than a blend — which is why a masked selection commits no rounding at all.
+/// Preserve the complete selected scalar, including its tangent. A number wins
+/// over NaN, and finite ties select the left operand like symbolic AD.
 fn extremum<S: CfgScalar>(op: ExtremumOp, left: S, right: S) -> S {
     let (a, b) = (left.real(), right.real());
     if a.is_nan() {
@@ -698,12 +695,9 @@ fn extremum<S: CfgScalar>(op: ExtremumOp, left: S, right: S) -> S {
     if b.is_nan() {
         return left;
     }
-    if a == 0.0 && b == 0.0 {
-        return left;
-    }
     let takes_left = match op {
-        ExtremumOp::Min => a < b,
-        ExtremumOp::Max => a > b,
+        ExtremumOp::Min => a <= b,
+        ExtremumOp::Max => a >= b,
     };
     if takes_left { left } else { right }
 }
