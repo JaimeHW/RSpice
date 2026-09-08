@@ -2,6 +2,8 @@ use std::env;
 use std::path::PathBuf;
 
 fn main() {
+    // Limit build-script invalidation to its actual inputs on every target.
+    println!("cargo:rerun-if-changed=build.rs");
     let target_arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
     let target_family = env::var("CARGO_CFG_TARGET_FAMILY").unwrap_or_default();
     let native_enabled = env::var_os("CARGO_FEATURE_NATIVE").is_some();
