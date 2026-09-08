@@ -7036,6 +7036,10 @@ impl SemanticAnalyzer {
                 }
                 if let Some(sym) = self.symbols.lookup(&ident.name) {
                     Ok(sym.value_type)
+                } else if ident.name == "inf" {
+                    // Keep arithmetic on an infinite range endpoint real.
+                    // Unknown would adopt the integer type of `2` in `2*inf`.
+                    Ok(ValueType::Real)
                 } else if let Some((base, _)) = ident.name.split_once('[')
                     && self.arrays.contains_key(base)
                     && let Some(sym) = self.symbols.lookup(base)
