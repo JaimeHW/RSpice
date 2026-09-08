@@ -674,7 +674,8 @@ pub(super) fn validate_bjt_model_level(
     validate_bjt_model_alias_groups(element_name, model, params, expr_params, string_params)?;
 
     for name in [
-        "TCRTH", "TMINCLIP", "TMAXCLIP", "AVCX1", "AVCX2", "TAVCX", "MCX", "MAXEXP",
+        "TCRTH", "TMINCLIP", "TMAXCLIP", "AVCX1", "AVCX2", "TAVCX", "MCX", "MAXEXP", "TCVEF",
+        "TCVER",
     ] {
         let authored = params.contains_key(name)
             || expr_params

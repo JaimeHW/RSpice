@@ -209,6 +209,39 @@ mod wasm_tests {
     use crate::js_interop::{js_array_property, js_property};
 
     #[wasm_bindgen_test]
+    fn vbic13_early_voltage_cutoff_matches_xyce_in_wasm() {
+        let netlist = rspice_core::Netlist::parse(
+            "VBIC Early-voltage cutoff in WASM\nVc c 0 1.8\nVb b 0 0.7\nVth th 0 DC 20 AC 1\nQ1 c b 0 th vm SW_ET=1\n\
+             .model vm NPN(LEVEL=11 VEF=5 VER=3 TCVEF=-0.05 TCVER=-0.05 IS=1e-16 IBEI=1e-18 IBCI=1e-18 RCX=10 RCI=2 RBX=5 RBI=3 RE=1 RBP=0 RS=0 AVC1=0.05 AVC2=0.3 TAVC=0.01 TD=1n RTH=1000 TCRTH=0.005 TMAXCLIP=100 CTH=1p GMIN=1u TNOM=27)\n.temp 27\n.end\n",
+        ).unwrap();
+        let points = rspice_core::Engine::default()
+            .run_ac_with_abort(&netlist, &[1e8], &rspice_core::abort_signal::NoAbort)
+            .unwrap();
+        let point = &points[0];
+        for (branch, expected) in [
+            (
+                "vc",
+                rspice_core::Complex64::new(-8.663038807350953e-6, 6.275760707091533e-6),
+            ),
+            (
+                "vb",
+                rspice_core::Complex64::new(4.317831416641038e-7, -4.178850145275066e-7),
+            ),
+            (
+                "vth",
+                rspice_core::Complex64::new(-0.0008111544184809163, -0.000639322846682267),
+            ),
+        ] {
+            let index = point
+                .branch_names
+                .iter()
+                .position(|name| name.eq_ignore_ascii_case(branch))
+                .unwrap();
+            assert!((point.currents[index] - expected).norm() < 2e-7 * expected.norm());
+        }
+    }
+
+    #[wasm_bindgen_test]
     fn vbic13_delayed_avalanche_matches_xyce_in_wasm() {
         for (kind, polarity) in [("NPN", 1.0), ("PNP", -1.0)] {
             let netlist = rspice_core::Netlist::parse(&format!(

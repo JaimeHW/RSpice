@@ -763,6 +763,45 @@ fn vbic13_self_heating_switch_matches_xyce710_and_grounded_thermal_pins() {
 }
 
 #[test]
+fn vbic13_early_voltage_temperature_coefficients_match_xyce710() {
+    let engine = Engine::new(SimulationConfig {
+        convergence_config: ConvergenceConfig {
+            gmin_target: 0.0,
+            ..Default::default()
+        },
+        ..Default::default()
+    });
+    for (parameters, expected) in [
+        ("", [-0.00016897815020348446, 9.283364676043807e-9]),
+        (
+            "TCVEF=0.05",
+            [-0.00015660535070869053, 8.788299217636993e-9],
+        ),
+        (
+            "TCVER=0.05",
+            [-0.00019616883263713254, 1.0369929843899738e-8],
+        ),
+        (
+            "TCVEF=-0.1 TCVER=-0.1",
+            [-0.00019170092234187925, 1.0191519968825945e-8],
+        ),
+    ] {
+        let netlist = Netlist::parse(&format!(
+            "VBIC13 Early-voltage temperature oracle\nVc c 0 1.8\nVb b 0 0.7\nQ1 c b 0 vm SW_ET=0 TRISE=20\n\
+             .model vm NPN(LEVEL=11 IS=1e-16 IBEI=1e-18 IBCI=1e-18 RCX=10 RCI=2 RBX=5 RBI=3 RE=1 RBP=0 RS=0 VEF=5 VER=3 {parameters} GMIN=1u TNOM=27)\n.temp 27\n.end\n"
+        )).unwrap();
+        let result = engine.run_dc_op(&netlist).unwrap();
+        for (branch, expected) in ["vc", "vb"].into_iter().zip(expected) {
+            let actual = result.branch_current_named(branch).unwrap();
+            assert!(
+                (actual - expected).abs() < 2e-6 * expected.abs(),
+                "{parameters} {branch}: {actual:e} != {expected:e}"
+            );
+        }
+    }
+}
+
+#[test]
 fn vbic13_avalanche_and_pushout_currents_match_xyce710() {
     // Independent Xyce 7.10 vbic_1p3.va DC references. Its PNP Igcx
     // polarity depends on the physical collector-resistor current.
@@ -967,7 +1006,7 @@ fn vbic13_clips_the_combined_ambient_offset_and_external_thermal_node() {
 }
 
 #[test]
-fn vbic13_thermal_and_avalanche_parameters_reject_invalid_values_and_model_families() {
+fn vbic13_temperature_and_avalanche_parameters_reject_invalid_values_and_model_families() {
     for level in [11, 12] {
         for parameter in [
             "TMINCLIP=-251",
@@ -982,6 +1021,8 @@ fn vbic13_thermal_and_avalanche_parameters_reject_invalid_values_and_model_famil
             "MCX=0",
             "MCX=1.01",
             "MAXEXP=0",
+            "TCVEF=\"warm\"",
+            "TCVER={1/0}",
         ] {
             let error = build(&op_deck(&format!(
                 ".model qmod NPN(LEVEL={level} {parameter})"
@@ -997,6 +1038,7 @@ fn vbic13_thermal_and_avalanche_parameters_reject_invalid_values_and_model_famil
             "TMINCLIP=27 TMAXCLIP=27",
             "TCRTH=-0.05",
             "AVCX1=0 AVCX2=0 TAVCX=-0.05 MCX=1 MAXEXP=0.1",
+            "TCVEF=0.05 TCVER=-0.1",
         ] {
             build(&op_deck(&format!(
                 ".model qmod NPN(LEVEL={level} {parameters})"
@@ -1014,6 +1056,8 @@ fn vbic13_thermal_and_avalanche_parameters_reject_invalid_values_and_model_famil
             "TAVCX=0",
             "MCX=0.33",
             "MAXEXP=1e22",
+            "TCVEF=0",
+            "TCVER=0",
         ] {
             let error = build(&op_deck(&format!(
                 ".model qmod NPN(LEVEL={level} {parameter})"

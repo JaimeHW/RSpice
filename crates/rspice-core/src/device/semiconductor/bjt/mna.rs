@@ -1122,6 +1122,8 @@ mod tests {
             params.insert(key.to_string(), value);
         }
         if level == 11.0 {
+            params.insert("TCVEF".into(), 0.05);
+            params.insert("TCVER".into(), -0.01);
             params.insert("AVC1".into(), 0.2);
             params.insert("AVC2".into(), 0.3);
             params.insert("TAVC".into(), 0.01);

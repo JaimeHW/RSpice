@@ -716,10 +716,13 @@ pub struct Bjt {
     pub vjc: Value,
     /// Forward-bias depletion-cap smoothing coefficient (FC)
     pub fc: Value,
-    /// Forward Early voltage (VAF)
+    /// Nominal forward Early voltage (VAF)
     pub vaf: Value,
-    /// Reverse Early voltage (VAR)
+    /// Nominal reverse Early voltage (VAR)
     pub var: Value,
+    /// VBIC 1.3 temperature coefficients of the forward/reverse Early voltages.
+    tcvef: Value,
+    tcver: Value,
     /// Legacy aggregate base resistance
     pub rb: Value,
     /// Legacy aggregate collector resistance
@@ -1149,7 +1152,7 @@ pub struct Bjt {
     /// for the transient companion and AC passes.
     mna_charge_cache: Cell<[BjtChargeBranch; BJT_DYNAMIC_CHARGE_COUNT]>,
     mna_charge_cache_valid: Cell<bool>,
-    thermal_variant_cache: RefCell<Vec<(u64, Box<Bjt>)>>,
+    thermal_variant_cache: RefCell<Vec<(u64, u8, Box<Bjt>)>>,
 }
 
 impl Bjt {
@@ -1826,10 +1829,12 @@ impl Bjt {
             fc: 0.9,
             vaf: 100.0,         // Forward Early voltage
             var: f64::INFINITY, // Reverse Early voltage
-            rb: 10.0,           // Base resistance
-            rc: 1.0,            // Collector resistance
-            re: 0.1,            // Emitter resistance
-            rbx: 10.0,          // Preserve legacy constant RB via RBX
+            tcvef: 0.0,
+            tcver: 0.0,
+            rb: 10.0,  // Base resistance
+            rc: 1.0,   // Collector resistance
+            re: 0.1,   // Emitter resistance
+            rbx: 10.0, // Preserve legacy constant RB via RBX
             rbi: 0.0,
             irb: 0.0,
             rcx: 1.0, // Preserve legacy constant RC via RCX
