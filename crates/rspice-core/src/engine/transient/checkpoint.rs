@@ -1186,7 +1186,9 @@ pub(crate) fn simulation_checkpoint_identity(config: &SimulationConfig) -> Strin
     // v33 retains VBIC 1.3's floored electrical resistance branches.
     // v34 differentiates the Early-voltage cutoff without collapsing thermal probes.
     // v35 preserves physical VBIC currents in operating-point correction solves.
-    hasher.update(b"rspice-transient-resolved-config-v35\0");
+    // v36 gives RBI an independent current and voltage constitutive equation.
+    // v37 preserves explicitly zero and negative VBIC activation energies.
+    hasher.update(b"rspice-transient-resolved-config-v37\0");
     hash_field(&mut hasher, "temperature", config.temperature.to_bits());
     hash_field(&mut hasher, "ramptime", config.ramptime.to_bits());
     hash_field(&mut hasher, "digital_delay_type", config.digital_delay_type);
@@ -12076,7 +12078,7 @@ mod tests {
     /// asserting current-format behaviour after two renumberings moved it into
     /// the legacy ladder.
     #[cfg(feature = "veriloga")]
-    const RUNTIME_VERILOGA_FORMAT_STATE_CONTRACTS: [(u32, u32); 20] = [
+    const RUNTIME_VERILOGA_FORMAT_STATE_CONTRACTS: [(u32, u32); 21] = [
         (17, 1),
         (18, 1),
         (19, 1),
@@ -12097,6 +12099,7 @@ mod tests {
         (34, 8),
         (35, 8),
         (36, 8),
+        (37, 8),
     ];
 
     #[cfg(feature = "veriloga")]

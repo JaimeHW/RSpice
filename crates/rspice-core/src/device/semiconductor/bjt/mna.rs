@@ -139,6 +139,7 @@ impl Bjt {
         for branch in self.mna_charge_cache.get() {
             Self::checkpoint_push_charge_branch(&mut values, branch);
         }
+        values.push(self.mna_rbi_current);
         debug_assert_eq!(values.len(), VBIC_ACCEPTED_NONLINEAR_STATE_VALUE_COUNT);
         let checkpoint = AcceptedBjtNonlinearCheckpoint {
             instance_name: self.name.clone(),
@@ -217,7 +218,7 @@ impl Bjt {
         let expected_thermal = self.vbic_delay_static_thermal_branch(&template);
         let expected_charge =
             self.dynamic_charge_branches_from_inputs(&template, BjtDynamicChargeInputs::default());
-        for (branch, data) in values[branch_start..]
+        for (branch, data) in values[branch_start..values.len() - 1]
             .chunks_exact(BJT_CHARGE_BRANCH_CHECKPOINT_VALUE_COUNT)
             .enumerate()
         {
@@ -366,6 +367,8 @@ impl Bjt {
             Self::checkpoint_take_charge_branch(values, &mut cursor)
         }));
         self.mna_charge_cache_valid.set(flags[3] != 0.0);
+        self.mna_rbi_current = values[cursor];
+        cursor += 1;
         self.reduced_linearization_cache_valid.set(false);
         self.previous_reduced_linearization_valid = false;
         self.charge_snapshot_cache_valid.set(false);
@@ -377,6 +380,58 @@ impl Bjt {
     #[inline]
     pub(crate) fn vbic_mna_promoted(&self) -> bool {
         self.vbic_mna_promoted
+    }
+
+    pub(crate) fn needs_vbic_rbi_branch(&self) -> bool {
+        self.vbic_mna_promoted() && Self::series_active(self.rbi)
+    }
+
+    pub(crate) fn assign_vbic_rbi_branch(&mut self, branch: NodeId) {
+        self.vbic_rbi_branch = Some(branch);
+    }
+
+    pub(crate) fn vbic_rbi_branch_matrix_node(&self, num_nodes: usize) -> Option<NodeId> {
+        self.vbic_rbi_branch.map(|branch| num_nodes + branch)
+    }
+
+    pub(crate) fn resolve_vbic_rbi_branch(&mut self, num_nodes: usize) {
+        self.vbic_rbi_matrix_node = self.vbic_rbi_branch_matrix_node(num_nodes).unwrap_or(0);
+    }
+
+    /// RBI/qb and its partials for the explicit-current constitutive row.
+    /// Taking ratios before multiplying keeps very large qb derivatives
+    /// from underflowing through an intermediate 1/qb^2.
+    fn vbic_rbi_resistance(
+        &self,
+        linearized: BjtLinearization,
+        vrth: Value,
+    ) -> BranchLinearization {
+        let qb = linearized.qb.max(1e-12);
+        let bare = |model: &Bjt| model.guarded_series_resistance(model.rbi);
+        let mut resistance = BranchLinearization {
+            current: self.with_temperature_variant(vrth, bare) / qb,
+            ..BranchLinearization::default()
+        };
+        if linearized.qb > 1e-12 {
+            let be = linearized.dqb_dvbe / qb;
+            let bc = linearized.dqb_dvbc / qb;
+            resistance.d_internal[IDX_VBI] = -resistance.current * (be + bc);
+            resistance.d_internal[IDX_VCI] = resistance.current * bc;
+            resistance.d_internal[IDX_VEI] = resistance.current * be;
+        }
+        if self.thermal_model_enabled() {
+            let h = self.thermal_derivative_step(vrth);
+            let plus = self.with_temperature_derivative_variant(vrth + h, vrth, bare);
+            let minus = self.with_temperature_derivative_variant(vrth - h, vrth, bare);
+            let dq_ratio = if linearized.qb > 1e-12 {
+                linearized.dqb_dvrth / qb
+            } else {
+                0.0
+            };
+            resistance.d_internal[IDX_VRTH] =
+                (-resistance.current).mul_add(dq_ratio, ((plus - minus) / (2.0 * h)) / qb);
+        }
+        resistance
     }
 
     /// Noise sources at the accepted bias. VBIC 1.3 follows vbic_1p3.va;
@@ -446,7 +501,13 @@ impl Bjt {
                     "RBI",
                     self.node_bx,
                     self.node_bi,
-                    eval.irbi.d_internal[IDX_VBX],
+                    if self.vbic_rbi_branch.is_some() {
+                        self.vbic_rbi_resistance(eval.linearized, self.vrth)
+                            .current
+                            .recip()
+                    } else {
+                        eval.irbi.d_internal[IDX_VBX]
+                    },
                 ),
                 (
                     "RE",
@@ -773,9 +834,11 @@ impl Bjt {
         // reduced-linearization cache; the promoted path returns before that
         // guard and needs its own.
         let candidate = self.vbic_mna_solution_bias(voltages);
+        let rbi_current = Self::node_voltage(voltages, self.vbic_rbi_matrix_node);
         if apply_limiting
             && self.mna_eval.is_some()
             && self.mna_limited_from.get() == Some(candidate)
+            && self.mna_rbi_current == rbi_current
         {
             // A solved voltage constraint can change only its reaction
             // current on the next Newton iteration. Once limiting is inactive,
@@ -789,6 +852,7 @@ impl Bjt {
         self.mna_limited_from
             .set(apply_limiting.then_some(candidate));
         self.remember_vbic_iteration();
+        self.mna_rbi_current = rbi_current;
 
         let [vc, vb, ve, vs] = [candidate[0], candidate[1], candidate[2], candidate[3]];
         let mut raw = [0.0; INTERNAL_DIM];
@@ -809,7 +873,7 @@ impl Bjt {
         };
         self.impose_vbic_collapse_manifold(&mut state, vc, vb, ve, vs);
 
-        let eval = self.evaluate_state(
+        let eval = self.evaluate_state_with_rbi_current(
             BjtNodeVoltages {
                 vc,
                 vb,
@@ -824,6 +888,7 @@ impl Bjt {
                 vsi: state[IDX_VSI],
             },
             state[IDX_VRTH],
+            self.vbic_rbi_branch.map(|_| rbi_current),
         );
         let terminal_currents = self.external_terminal_branches(eval);
 
@@ -1075,6 +1140,10 @@ impl Bjt {
             stamper.stamp_rhs(row_node, source);
         }
 
+        if self.vbic_rbi_matrix_node != 0 {
+            self.stamp_vbic_rbi_current(stamper, eval.linearized, &internal, &external, anchor);
+        }
+
         // Excess-phase network: algebraic xf rows plus the xf2-controlled
         // transport replacement (and its thermal power correction).
         if self.td > 0.0 {
@@ -1090,6 +1159,47 @@ impl Bjt {
                 );
             }
         }
+    }
+
+    fn stamp_vbic_rbi_current(
+        &self,
+        stamper: &mut impl MatrixStamper,
+        linearized: BjtLinearization,
+        internal: &[Value; BJT_INTERNAL_STATE_DIM],
+        external: &[Value; EXTERNAL_DIM],
+        anchor: Option<&[Value]>,
+    ) {
+        let branch = self.vbic_rbi_matrix_node;
+        let current = self.mna_rbi_current;
+        let coordinate = current - anchor.map_or(0.0, |point| Self::node_voltage(point, branch));
+        // The ordinary KCL/heat stamp already includes the evaluated current.
+        // Supply its independent column and the matching limiter offset.
+        for (node, sign) in [(self.node_bx, 1.0), (self.node_bi, -1.0)] {
+            stamper.stamp(node, branch, sign);
+            stamper.stamp_rhs(node, sign * coordinate);
+        }
+        if self.thermal_model_enabled() && self.vbic_heat_generation {
+            let derivative = -(self.vbx - self.vbi);
+            stamper.stamp(self.node_rth, branch, derivative);
+            stamper.stamp_rhs(self.node_rth, derivative * coordinate);
+        }
+
+        // Vbx - Vbi - (RBI/qb)*I = 0. The temperature and charge-control
+        // partials use the solved current, not an unresolvable voltage drop.
+        let resistance = self.vbic_rbi_resistance(linearized, self.vrth);
+        let mut equation = Self::scale_branch(resistance, -current);
+        equation.current += self.vbx - self.vbi;
+        equation.d_internal[IDX_VBX] += 1.0;
+        equation.d_internal[IDX_VBI] -= 1.0;
+        for (index, derivative) in equation.d_internal.iter().copied().enumerate() {
+            if derivative != 0.0 {
+                stamper.stamp(branch, self.vbic_internal_node(index), derivative);
+            }
+        }
+        stamper.stamp(branch, branch, -resistance.current);
+        let source = equation.source(internal[..INTERNAL_DIM].try_into().unwrap(), external)
+            - resistance.current * coordinate;
+        stamper.stamp_rhs(branch, source);
     }
 
     /// Stamp one residual-convention current branch onto the promoted rows,
@@ -1498,7 +1608,10 @@ mod tests {
 
     fn assert_promoted_stamp_matches_finite_difference_jacobian(level: Value) {
         let mut bjt = diffamp_pnp(level);
-        let n = 13;
+        bjt.set_vbic_external_thermal_node(14);
+        bjt.assign_vbic_rbi_branch(1);
+        bjt.resolve_vbic_rbi_branch(14);
+        let n = 15;
 
         // Bias near the diffamp PNP operating point with the b-c junction at
         // the saturation knife edge (vbci slightly forward, PNP polarity).
@@ -1520,6 +1633,8 @@ mod tests {
         assign(&mut v, bjt.node_ei, 3.2999);
         assign(&mut v, bjt.node_xf1, 2.05e-5);
         assign(&mut v, bjt.node_xf2, 2.05e-5);
+        assign(&mut v, bjt.node_rth, 20.0);
+        assign(&mut v, bjt.vbic_rbi_matrix_node, -1e-5);
 
         // Settle the limiter anchor at the bias so pnjlim stays inactive for
         // the FD probes. Handing the same candidate to `update` twice cannot do

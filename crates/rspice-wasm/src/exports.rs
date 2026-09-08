@@ -209,6 +209,62 @@ mod wasm_tests {
     use crate::js_interop::{js_array_property, js_property};
 
     #[wasm_bindgen_test]
+    fn vbic_nonpositive_activation_energies_and_signed_sources_match_xyce_in_wasm() {
+        for (energy, dc, ac) in [
+            (
+                0.0,
+                [
+                    -1.8759381199128295e-05,
+                    -5.974425036580707e-06,
+                    5.759162012220747e-06,
+                ],
+                [
+                    rspice_core::Complex64::new(7.475710679968615e-07, -7.2352565019688054e-06),
+                    rspice_core::Complex64::new(5.679107136074598e-07, 1.1568126579812277e-05),
+                    rspice_core::Complex64::new(-3.0678023251495346e-07, -5.895892422355515e-07),
+                ],
+            ),
+            (
+                -0.1,
+                [
+                    -1.3203041813337315e-05,
+                    -4.205786531991028e-06,
+                    4.052895950577105e-06,
+                ],
+                [
+                    rspice_core::Complex64::new(5.723237566711971e-07, -7.6979104375324e-06),
+                    rspice_core::Complex64::new(5.244002563240605e-07, 1.2426635278632646e-05),
+                    rspice_core::Complex64::new(-2.559863313225597e-07, -6.704596659558985e-07),
+                ],
+            ),
+        ] {
+            let netlist = rspice_core::Netlist::parse(&format!("* VBIC activation energies\nVc c 0 .1\nVb b 0 +.7\nVs s 0 -.4\nVth th 0 DC 30 AC 1\nQ1 c b 0 s th vm SW_ET=0 M=3\n.model vm NPN(LEVEL=12 IS=1e-16 IBEI=1e-18 IBEN=1e-14 IBCI=1e-18 IBCN=1e-14 ISP=1e-15 IBEIP=1e-18 IBENP=1e-14 IBCIP=1e-16 IBCNP=1e-14 RCX=1 RCI=1 RBX=1 RBI=5 RE=1 RBP=5 RS=1 RTH=1000 CTH=1p CJE=1p CJC=2p CJEP=1p CJCP=1p TF=1n TR=2n TD=1n GMIN=0 TNOM=27 EA={energy} EAIE={energy} EAIC={energy} EAIS={energy} EANE={energy} EANC={energy} EANS={energy} EAP={energy})\n.temp 27\n.options gmin=0\n.end\n")).unwrap();
+            let mut config = rspice_core::SimulationConfig::default();
+            config.convergence_config.gmin_target = 0.0;
+            let engine = rspice_core::Engine::new(config);
+            let operating = engine
+                .run_dc_op_with_abort(&netlist, &rspice_core::abort_signal::NoAbort)
+                .unwrap();
+            let small_signal = engine
+                .run_ac_with_abort(&netlist, &[1e8], &rspice_core::abort_signal::NoAbort)
+                .unwrap();
+            for (index, name) in ["Vc", "Vb", "Vs"].into_iter().enumerate() {
+                let actual = operating.branch_current_named(name).unwrap();
+                assert!((actual - dc[index]).abs() < 2e-6 * dc[index].abs().max(1e-12));
+                let column = small_signal[0]
+                    .branch_names
+                    .iter()
+                    .position(|branch| branch.eq_ignore_ascii_case(name))
+                    .unwrap();
+                assert!(
+                    (small_signal[0].currents[column] - ac[index]).norm()
+                        < 2e-6 * ac[index].norm().max(1e-12)
+                );
+            }
+        }
+    }
+
+    #[wasm_bindgen_test]
     fn vbic13_extrinsic_flicker_matches_xyce_in_wasm() {
         let netlist = rspice_core::Netlist::parse(
             "VBIC extrinsic flicker in WASM\nVcc vcc 0 3\nRc vcc c 1k\nVb drive 0 DC 0.7 AC 1\nRb drive b 1k\nVth th 0 0\nQ1 c b 0 th vm SW_ET=0 M=3\n\
@@ -269,33 +325,50 @@ mod wasm_tests {
 
     #[wasm_bindgen_test]
     fn vbic13_extreme_thermal_slope_retains_physical_currents_in_wasm() {
-        let netlist = rspice_core::Netlist::parse(
-            "VBIC direct residual in WASM\nVc c 0 -0.6\nVb b 0 -0.7\nVth th 0 DC 20 AC 1\nQ1 c b 0 0 th vm SW_ET=0 M=3\n\
-             .model vm PNP(LEVEL=12 IS=1e-16 IBEI=1e-18 IBCI=1e-18 ISP=0 IBEIP=0 VEF=1e15 VER=3 TCVEF=-0.049999999999999989 TCVER=-0.02 RCX=1 RCI=1 RBX=1 RBI=1 RE=1 RBP=0 RS=0 GMIN=0 TNOM=27 RTH=1000 CTH=1p CJE=1p CJC=1p TF=1n TR=2n QTF=0.3 TD=1n)\n.temp 27\n.options gmin=0\n.end\n",
-        ).unwrap();
-        let points = rspice_core::Engine::default()
-            .run_ac_with_abort(&netlist, &[1e8], &rspice_core::abort_signal::NoAbort)
-            .unwrap();
-        for (branch, expected) in [
+        for (vef, coefficient, collector, base) in [
             (
-                "vc",
+                1e15,
+                -0.049_999_999_999_999_99,
                 rspice_core::Complex64::new(-11073210790.749592, 8091064247.664278),
-            ),
-            (
-                "vb",
                 rspice_core::Complex64::new(-91165705.28041226, -9220857782.629837),
             ),
             (
-                "vth",
-                rspice_core::Complex64::new(-0.003, -0.0018849555921538759),
+                5.0,
+                -0.0499999999995,
+                rspice_core::Complex64::new(-0.0010482816638976908, 0.0007608625817640124),
+                rspice_core::Complex64::new(-4.054942295825502e-6, -0.000859797326861502),
+            ),
+            (
+                5.0,
+                -0.049_999_999_999_999_99,
+                rspice_core::Complex64::new(-0.0010482816655048935, 0.0007608625829294785),
+                rspice_core::Complex64::new(-4.0549423005197475e-6, -0.0008597973281960521),
             ),
         ] {
-            let index = points[0]
-                .branch_names
-                .iter()
-                .position(|name| name.eq_ignore_ascii_case(branch))
+            let netlist = rspice_core::Netlist::parse(&format!(
+            "VBIC direct residual in WASM\nVc c 0 -0.6\nVb b 0 -0.7\nVth th 0 DC 20 AC 1\nQ1 c b 0 0 th vm SW_ET=0 M=3\n\
+             .model vm PNP(LEVEL=12 IS=1e-16 IBEI=1e-18 IBCI=1e-18 ISP=0 IBEIP=0 VEF={vef} VER=3 TCVEF={coefficient:.18} TCVER=-0.02 RCX=1 RCI=1 RBX=1 RBI=1 RE=1 RBP=0 RS=0 GMIN=0 TNOM=27 RTH=1000 CTH=1p CJE=1p CJC=1p TF=1n TR=2n QTF=0.3 TD=1n)\n.temp 27\n.options gmin=0\n.end\n",
+        )).unwrap();
+            let mut config = rspice_core::SimulationConfig::default();
+            config.convergence_config.gmin_target = 0.0;
+            let points = rspice_core::Engine::new(config)
+                .run_ac_with_abort(&netlist, &[1e8], &rspice_core::abort_signal::NoAbort)
                 .unwrap();
-            assert!((points[0].currents[index] - expected).norm() < 2e-6 * expected.norm());
+            for (branch, expected) in [
+                ("vc", collector),
+                ("vb", base),
+                (
+                    "vth",
+                    rspice_core::Complex64::new(-0.003, -0.0018849555921538759),
+                ),
+            ] {
+                let index = points[0]
+                    .branch_names
+                    .iter()
+                    .position(|name| name.eq_ignore_ascii_case(branch))
+                    .unwrap();
+                assert!((points[0].currents[index] - expected).norm() < 2e-6 * expected.norm());
+            }
         }
     }
 

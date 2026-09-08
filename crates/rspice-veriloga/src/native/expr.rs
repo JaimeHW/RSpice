@@ -1640,7 +1640,7 @@ impl NativeProgram {
                     depth -= 1;
                     ops.push(NativeOp::CheckedValue);
                 }
-                Instruction::Atan2 | Instruction::Mod => {
+                Instruction::Atan2 | Instruction::Hypot | Instruction::Mod => {
                     pop_binary_stack(
                         model.clone(),
                         entry_kind,
@@ -3736,13 +3736,21 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                         && self.expr_derivative_is_zero(args[1], second)?)
                 }
             }
-            "min" | "max" | "atan2" | "hypot" if args.len() == 2 => Ok(self
+            "min" | "max" if args.len() == 2 => Ok(self
                 .expr_second_derivative_is_zero(args[0], first, second)?
-                && self.expr_second_derivative_is_zero(args[1], first, second)?
-                && (self.expr_derivative_is_zero(args[0], first)?
-                    || self.expr_derivative_is_zero(args[1], second)?)
-                && (self.expr_derivative_is_zero(args[0], second)?
-                    || self.expr_derivative_is_zero(args[1], first)?)),
+                && self.expr_second_derivative_is_zero(args[1], first, second)?),
+            "atan2" | "hypot" if args.len() == 2 => {
+                // Both diagonal and mixed Hessian entries can be nonzero.
+                // A missing dependence in one operand does not erase the
+                // other operand's curvature, as a product-rule test would.
+                let independent_first = self.expr_derivative_is_zero(args[0], first)?
+                    && self.expr_derivative_is_zero(args[1], first)?;
+                let independent_second = self.expr_derivative_is_zero(args[0], second)?
+                    && self.expr_derivative_is_zero(args[1], second)?;
+                Ok(self.expr_second_derivative_is_zero(args[0], first, second)?
+                    && self.expr_second_derivative_is_zero(args[1], first, second)?
+                    && (independent_first || independent_second))
+            }
             "ddx" | "table_model" | "idtmod" | "laplace_zp" | "laplace_zd" | "laplace_np"
             | "laplace_nd" | "zi_zp" | "zi_zd" | "zi_np" | "zi_nd" => Ok(false),
             _ => Ok(false),
@@ -4068,24 +4076,22 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                     self.lower(right)?;
                     return self.append_arithmetic("Div");
                 }
-                if left_zero {
-                    self.lower_derivative(right, wrt)?;
-                    self.lower(left)?;
-                    self.append_arithmetic("Mul")?;
-                    self.append_unary(NativeOp::Neg)?;
-                    self.lower_arg_square(right)?;
-                    return self.append_arithmetic("Div");
+                // dq = (dl - q*dr)/r, with q=l/r. The raw quotient
+                // rule's r*r can overflow even when dq is representable.
+                if !left_zero {
+                    self.lower_derivative(left, wrt)?;
                 }
-                self.lower_derivative(left, wrt)?;
-                self.lower(right)?;
-                self.append_arithmetic("Mul")?;
                 self.lower(left)?;
+                self.lower(right)?;
+                self.append_arithmetic("Div")?;
                 self.lower_derivative(right, wrt)?;
                 self.append_arithmetic("Mul")?;
-                self.append_arithmetic("Sub")?;
+                if left_zero {
+                    self.append_unary(NativeOp::Neg)?;
+                } else {
+                    self.append_arithmetic("Sub")?;
+                }
                 self.lower(right)?;
-                self.lower(right)?;
-                self.append_arithmetic("Mul")?;
                 self.append_arithmetic("Div")
             }
             "Pow" => self.lower_pow_derivative(left, right, wrt),
@@ -4252,42 +4258,20 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         let right_a_zero = self.expr_derivative_is_zero(right, first)?;
         let right_b_zero = self.expr_derivative_is_zero(right, second)?;
 
+        // From l=q*r: q_ab=(l_ab-q*r_ab-q_a*r_b-q_b*r_a)/r.
+        // Reuse the normalized first derivative instead of r*r, r*r*r,
+        // or 2*l, each of which can overflow independently of the result.
         let mut emitted = false;
         if !left_ab_zero {
             self.lower_second_derivative(left, first, second)?;
-            self.lower(right)?;
-            self.append_arithmetic("Div")?;
             emitted = true;
         }
-
-        let mut numerator_emitted = false;
-        if !(left_a_zero || right_b_zero) {
-            self.lower_derivative(left, first)?;
-            self.lower_derivative(right, second)?;
-            self.append_arithmetic("Mul")?;
-            numerator_emitted = true;
-        }
-        if !(left_b_zero || right_a_zero) {
-            self.lower_derivative(left, second)?;
-            self.lower_derivative(right, first)?;
-            self.append_arithmetic("Mul")?;
-            if numerator_emitted {
-                self.append_arithmetic("Add")?;
-            }
-            numerator_emitted = true;
-        }
         if !right_ab_zero {
-            self.lower_second_derivative(right, first, second)?;
             self.lower(left)?;
-            self.append_arithmetic("Mul")?;
-            if numerator_emitted {
-                self.append_arithmetic("Add")?;
-            }
-            numerator_emitted = true;
-        }
-        if numerator_emitted {
-            self.lower_arg_square(right)?;
+            self.lower(right)?;
             self.append_arithmetic("Div")?;
+            self.lower_second_derivative(right, first, second)?;
+            self.append_arithmetic("Mul")?;
             if emitted {
                 self.append_arithmetic("Sub")?;
             } else {
@@ -4295,27 +4279,26 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 emitted = true;
             }
         }
-
-        if !(right_a_zero || right_b_zero) {
-            self.lower_derivative(right, first)?;
-            self.lower_derivative(right, second)?;
-            self.append_arithmetic("Mul")?;
-            self.push(NativeOp::Const(2.0))?;
-            self.lower(left)?;
-            self.append_arithmetic("Mul")?;
-            self.append_arithmetic("Mul")?;
-            self.lower_arg_square(right)?;
-            self.lower(right)?;
-            self.append_arithmetic("Mul")?;
-            self.append_arithmetic("Div")?;
-            if emitted {
-                self.append_arithmetic("Add")?;
+        for (quotient_axis, denominator_axis, zero) in [
+            (first, second, right_b_zero || (left_a_zero && right_a_zero)),
+            (second, first, right_a_zero || (left_b_zero && right_b_zero)),
+        ] {
+            if zero {
+                continue;
             }
-            emitted = true;
+            self.lower_binary_derivative("Div", left, right, quotient_axis)?;
+            self.lower_derivative(right, denominator_axis)?;
+            self.append_arithmetic("Mul")?;
+            if emitted {
+                self.append_arithmetic("Sub")?;
+            } else {
+                self.append_unary(NativeOp::Neg)?;
+                emitted = true;
+            }
         }
-
         if emitted {
-            Ok(())
+            self.lower(right)?;
+            self.append_arithmetic("Div")
         } else {
             self.push(NativeOp::Const(0.0))
         }
@@ -5547,21 +5530,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         wrt: CanonicalDerivativeAxis,
     ) -> JitResult<()> {
         self.require_intrinsic_arity(name, args, 2)?;
-        let y = args[0];
-        let x = args[1];
-
-        self.lower(x)?;
-        self.lower_derivative(y, wrt)?;
-        self.append_arithmetic("Mul")?;
-        self.lower(y)?;
-        self.lower_derivative(x, wrt)?;
-        self.append_arithmetic("Mul")?;
-        self.append_arithmetic("Sub")?;
-
-        self.lower_arg_square(x)?;
-        self.lower_arg_square(y)?;
-        self.append_arithmetic("Add")?;
-        self.append_arithmetic("Div")
+        self.lower_angle_projection(args[0], args[1], wrt, None, true)
     }
 
     fn lower_hypot_derivative(
@@ -5571,22 +5540,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         wrt: CanonicalDerivativeAxis,
     ) -> JitResult<()> {
         self.require_intrinsic_arity(name, args, 2)?;
-        let left = args[0];
-        let right = args[1];
-
-        self.lower(left)?;
-        self.lower_derivative(left, wrt)?;
-        self.append_arithmetic("Mul")?;
-        self.lower(right)?;
-        self.lower_derivative(right, wrt)?;
-        self.append_arithmetic("Mul")?;
-        self.append_arithmetic("Add")?;
-
-        self.lower(left)?;
-        self.lower(right)?;
-        self.pop_binary("canonical hypot derivative")?;
-        self.append_binary_math_op(BinaryMathOp::Hypot)?;
-        self.append_arithmetic("Div")
+        self.lower_planar_projection(args[0], args[1], wrt, None, false, true)
     }
 
     fn lower_atan2_second_derivative(
@@ -5597,20 +5551,18 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         second: CanonicalDerivativeAxis,
     ) -> JitResult<()> {
         self.require_intrinsic_arity(name, args, 2)?;
-        let y = args[0];
-        let x = args[1];
-
-        self.lower_atan2_numerator_derivative(y, x, first, second)?;
-        self.lower_arg_square_sum(x, y)?;
-        self.append_arithmetic("Mul")?;
-        self.lower_atan2_numerator(y, x, first)?;
-        self.lower_arg_square_sum_derivative(x, y, second)?;
+        let (y, x) = (args[0], args[1]);
+        // d2(angle) = cross(d2 inputs)/r^2 - angle'1*log(r)'2
+        //             - angle'2*log(r)'1. Normalize before each projection.
+        self.lower_angle_projection(y, x, first, Some(second), true)?;
+        self.lower_angle_projection(y, x, first, None, true)?;
+        self.lower_angle_projection(y, x, second, None, false)?;
         self.append_arithmetic("Mul")?;
         self.append_arithmetic("Sub")?;
-        self.lower_arg_square_sum(x, y)?;
-        self.lower_arg_square_sum(x, y)?;
+        self.lower_angle_projection(y, x, second, None, true)?;
+        self.lower_angle_projection(y, x, first, None, false)?;
         self.append_arithmetic("Mul")?;
-        self.append_arithmetic("Div")
+        self.append_arithmetic("Sub")
     }
 
     fn lower_hypot_second_derivative(
@@ -5621,130 +5573,107 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         second: CanonicalDerivativeAxis,
     ) -> JitResult<()> {
         self.require_intrinsic_arity(name, args, 2)?;
-        let left = args[0];
-        let right = args[1];
-
-        self.lower_hypot_numerator_derivative(left, right, first, second)?;
-        self.lower_hypot_value(left, right)?;
+        let (left, right) = (args[0], args[1]);
+        // The Hessian is the outer product of the perpendicular unit vector
+        // divided by the radius. This avoids subtracting near-equal norms.
+        self.lower_planar_projection(left, right, first, Some(second), false, true)?;
+        self.lower_planar_projection(left, right, first, None, true, true)?;
+        self.lower_planar_projection(left, right, second, None, true, true)?;
         self.append_arithmetic("Mul")?;
-        self.lower_hypot_numerator(left, right, first)?;
-        self.lower_hypot_numerator(left, right, second)?;
-        self.lower_hypot_value(left, right)?;
+        self.lower_normalized_hypot(left, right)?;
         self.append_arithmetic("Div")?;
-        self.append_arithmetic("Mul")?;
-        self.append_arithmetic("Sub")?;
-        self.lower_arg_square_sum(left, right)?;
+        self.lower_planar_scale(left, right)?;
+        self.append_arithmetic("Div")?;
+        self.append_arithmetic("Add")
+    }
+
+    fn lower_planar_scale(&mut self, left: ExprId, right: ExprId) -> JitResult<()> {
+        self.lower(left)?;
+        self.append_unary(NativeOp::Abs)?;
+        self.lower(right)?;
+        self.append_unary(NativeOp::Abs)?;
+        self.append_extremum(ExtremumOp::Max)
+    }
+
+    fn lower_normalized_coordinate(
+        &mut self,
+        coordinate: ExprId,
+        left: ExprId,
+        right: ExprId,
+    ) -> JitResult<()> {
+        self.lower(coordinate)?;
+        self.lower_planar_scale(left, right)?;
         self.append_arithmetic("Div")
     }
 
-    fn lower_arg_square_sum(&mut self, left: ExprId, right: ExprId) -> JitResult<()> {
-        self.lower_arg_square(left)?;
-        self.lower_arg_square(right)?;
-        self.append_arithmetic("Add")
-    }
-
-    fn lower_arg_square_sum_derivative(
-        &mut self,
-        left: ExprId,
-        right: ExprId,
-        wrt: CanonicalDerivativeAxis,
-    ) -> JitResult<()> {
-        self.push(NativeOp::Const(2.0))?;
-        self.lower(left)?;
-        self.append_arithmetic("Mul")?;
-        self.lower_derivative(left, wrt)?;
-        self.append_arithmetic("Mul")?;
-        self.push(NativeOp::Const(2.0))?;
-        self.lower(right)?;
-        self.append_arithmetic("Mul")?;
-        self.lower_derivative(right, wrt)?;
-        self.append_arithmetic("Mul")?;
-        self.append_arithmetic("Add")
-    }
-
-    fn lower_atan2_numerator(
-        &mut self,
-        y: ExprId,
-        x: ExprId,
-        wrt: CanonicalDerivativeAxis,
-    ) -> JitResult<()> {
-        self.lower(x)?;
-        self.lower_derivative(y, wrt)?;
-        self.append_arithmetic("Mul")?;
-        self.lower(y)?;
-        self.lower_derivative(x, wrt)?;
-        self.append_arithmetic("Mul")?;
-        self.append_arithmetic("Sub")
-    }
-
-    fn lower_atan2_numerator_derivative(
-        &mut self,
-        y: ExprId,
-        x: ExprId,
-        first: CanonicalDerivativeAxis,
-        second: CanonicalDerivativeAxis,
-    ) -> JitResult<()> {
-        self.lower_derivative(x, second)?;
-        self.lower_derivative(y, first)?;
-        self.append_arithmetic("Mul")?;
-        self.lower(x)?;
-        self.lower_second_derivative(y, first, second)?;
-        self.append_arithmetic("Mul")?;
-        self.append_arithmetic("Add")?;
-        self.lower_derivative(y, second)?;
-        self.lower_derivative(x, first)?;
-        self.append_arithmetic("Mul")?;
-        self.append_arithmetic("Sub")?;
-        self.lower(y)?;
-        self.lower_second_derivative(x, first, second)?;
-        self.append_arithmetic("Mul")?;
-        self.append_arithmetic("Sub")
-    }
-
-    fn lower_hypot_value(&mut self, left: ExprId, right: ExprId) -> JitResult<()> {
-        self.lower(left)?;
-        self.lower(right)?;
-        self.pop_binary("canonical hypot value")?;
+    fn lower_normalized_hypot(&mut self, left: ExprId, right: ExprId) -> JitResult<()> {
+        self.lower_normalized_coordinate(left, left, right)?;
+        self.lower_normalized_coordinate(right, left, right)?;
+        self.pop_binary("normalized hypot")?;
         self.append_binary_math_op(BinaryMathOp::Hypot)
     }
 
-    fn lower_hypot_numerator(
+    fn lower_planar_weight(
         &mut self,
+        coordinate: ExprId,
         left: ExprId,
         right: ExprId,
-        wrt: CanonicalDerivativeAxis,
+        unit: bool,
     ) -> JitResult<()> {
-        self.lower(left)?;
-        self.lower_derivative(left, wrt)?;
-        self.append_arithmetic("Mul")?;
-        self.lower(right)?;
-        self.lower_derivative(right, wrt)?;
-        self.append_arithmetic("Mul")?;
-        self.append_arithmetic("Add")
+        self.lower_normalized_coordinate(coordinate, left, right)?;
+        if unit {
+            self.lower_normalized_hypot(left, right)?;
+            self.append_arithmetic("Div")?;
+        }
+        Ok(())
     }
 
-    fn lower_hypot_numerator_derivative(
+    /// Project input derivatives onto the radius or its perpendicular.
+    /// Unit weights keep finite large tangents from overflowing a raw dot sum.
+    fn lower_planar_projection(
         &mut self,
         left: ExprId,
         right: ExprId,
         first: CanonicalDerivativeAxis,
-        second: CanonicalDerivativeAxis,
+        second: Option<CanonicalDerivativeAxis>,
+        perpendicular: bool,
+        unit: bool,
     ) -> JitResult<()> {
-        self.lower_derivative(left, second)?;
-        self.lower_derivative(left, first)?;
+        self.lower_planar_weight(if perpendicular { right } else { left }, left, right, unit)?;
+        if let Some(second) = second {
+            self.lower_second_derivative(left, first, second)?;
+        } else {
+            self.lower_derivative(left, first)?;
+        }
         self.append_arithmetic("Mul")?;
-        self.lower(left)?;
-        self.lower_second_derivative(left, first, second)?;
+        self.lower_planar_weight(if perpendicular { left } else { right }, left, right, unit)?;
+        if let Some(second) = second {
+            self.lower_second_derivative(right, first, second)?;
+        } else {
+            self.lower_derivative(right, first)?;
+        }
         self.append_arithmetic("Mul")?;
+        self.append_arithmetic(if perpendicular { "Sub" } else { "Add" })
+    }
+
+    fn lower_angle_projection(
+        &mut self,
+        left: ExprId,
+        right: ExprId,
+        first: CanonicalDerivativeAxis,
+        second: Option<CanonicalDerivativeAxis>,
+        perpendicular: bool,
+    ) -> JitResult<()> {
+        self.lower_planar_projection(left, right, first, second, perpendicular, false)?;
+        for coordinate in [left, right] {
+            self.lower_normalized_coordinate(coordinate, left, right)?;
+            self.lower_normalized_coordinate(coordinate, left, right)?;
+            self.append_arithmetic("Mul")?;
+        }
         self.append_arithmetic("Add")?;
-        self.lower_derivative(right, second)?;
-        self.lower_derivative(right, first)?;
-        self.append_arithmetic("Mul")?;
-        self.append_arithmetic("Add")?;
-        self.lower(right)?;
-        self.lower_second_derivative(right, first, second)?;
-        self.append_arithmetic("Mul")?;
-        self.append_arithmetic("Add")
+        self.append_arithmetic("Div")?;
+        self.lower_planar_scale(left, right)?;
+        self.append_arithmetic("Div")
     }
 
     fn lower_arg_square(&mut self, arg: ExprId) -> JitResult<()> {
@@ -8622,6 +8551,7 @@ fn is_parameter_default_instruction(instruction: &Instruction) -> bool {
             | Instruction::Pow
             | Instruction::FnPow
             | Instruction::Atan2
+            | Instruction::Hypot
             | Instruction::Mod
             | Instruction::Shl
             | Instruction::Shr
@@ -8714,6 +8644,7 @@ fn is_static_condition_instruction(instruction: &Instruction) -> bool {
             | Instruction::Acosh
             | Instruction::Atanh
             | Instruction::Atan2
+            | Instruction::Hypot
             | Instruction::Floor
             | Instruction::Ceil
             | Instruction::FnPow
@@ -9744,6 +9675,7 @@ fn instruction_name(instruction: &Instruction) -> &'static str {
         Instruction::Acosh => "Acosh",
         Instruction::Atanh => "Atanh",
         Instruction::Atan2 => "Atan2",
+        Instruction::Hypot => "Hypot",
         Instruction::Floor => "Floor",
         Instruction::Ceil => "Ceil",
         Instruction::FnPow => "FnPow",
@@ -9856,6 +9788,7 @@ fn binary_math_op(instruction: &Instruction) -> BinaryMathOp {
     match instruction {
         Instruction::Pow | Instruction::FnPow => BinaryMathOp::Pow,
         Instruction::Atan2 => BinaryMathOp::Atan2,
+        Instruction::Hypot => BinaryMathOp::Hypot,
         Instruction::Mod => BinaryMathOp::Mod,
         _ => unreachable!("binary math lowering only accepts supported binary math instructions"),
     }
@@ -13596,6 +13529,7 @@ endmodule
             (Instruction::Pow, 2.25, BinaryMathOp::Pow),
             (Instruction::FnPow, 2.25, BinaryMathOp::Pow),
             (Instruction::Atan2, 2.0, BinaryMathOp::Atan2),
+            (Instruction::Hypot, 2.0, BinaryMathOp::Hypot),
             (Instruction::Mod, 2.0, BinaryMathOp::Mod),
         ];
 
@@ -13643,6 +13577,20 @@ endmodule
                 (-4.0_f64).powf(0.5),
             ),
             ("atan2", Instruction::Atan2, 0.5, 0.25, 0.5_f64.atan2(0.25)),
+            (
+                "hypot-large",
+                Instruction::Hypot,
+                1e308,
+                1e308,
+                1e308_f64.hypot(1e308),
+            ),
+            (
+                "hypot-small",
+                Instruction::Hypot,
+                1e-200,
+                -1e-200,
+                1e-200_f64.hypot(-1e-200),
+            ),
             (
                 "atan2-signed-zero",
                 Instruction::Atan2,

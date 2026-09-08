@@ -108,7 +108,9 @@ pub const WASM_JIT_ABI_VERSION: u32 = 11;
 /// 22 to 23 requires sign proofs before specializing fractional powers.
 /// 23 to 24 selects extrema tangents without inactive singular arithmetic.
 /// 24 to 25 implements scalar hypot/atan2 AD and scales their derivative rules.
-pub const WASM_JIT_EMITTER_VERSION: u32 = 25;
+/// 25 to 26 preserves Hypot bytecode and stabilizes legacy math derivatives.
+/// 26 to 27 avoids raw squares/cubes in legacy quotient derivatives.
+pub const WASM_JIT_EMITTER_VERSION: u32 = 27;
 
 /// Hard ceiling for one qualified shipped model's generated module.
 pub const SHIPPED_MODEL_WASM_CODE_SIZE_BUDGET_BYTES: usize = 32 * 1024 * 1024;
@@ -1962,54 +1964,222 @@ endmodule
                 let source = format!(
                     "module planar(p,q); inout p,q; electrical p,q; analog I(p)<+{expression}; endmodule"
                 );
-                let mut harness = FusedKernelHarness::for_source(&source, "planar");
-                let mut entries = vec![(harness.stamp_value_export(0), derivative)];
-                if derivative == 0 {
-                    let report = VerilogACompiler::default()
-                        .compile_runtime(&source, Some("planar"))
-                        .unwrap();
-                    for (index, entry) in report.model.stamp_programs[0]
-                        .jacobian_programs
-                        .iter()
-                        .enumerate()
+                for postfix in [false, true] {
+                    let mut harness =
+                        FusedKernelHarness::for_source_with_plan(&source, "planar", postfix);
+                    let mut entries = vec![(harness.stamp_value_export(0), 0)];
                     {
-                        let expected_index = match entry.col_axis {
-                            crate::codegen::ColumnAxis::Node(0) => 1,
-                            crate::codegen::ColumnAxis::Node(1) => 2,
-                            _ => panic!("unexpected planar column"),
-                        };
-                        entries.push((harness.jacobian_export(0, index), expected_index));
+                        let report = VerilogACompiler::default()
+                            .compile_runtime(&source, Some("planar"))
+                            .unwrap();
+                        for (index, entry) in report.model.stamp_programs[0]
+                            .jacobian_programs
+                            .iter()
+                            .enumerate()
+                        {
+                            let expected_index = match entry.col_axis {
+                                crate::codegen::ColumnAxis::Node(0) => 1,
+                                crate::codegen::ColumnAxis::Node(1) => 2,
+                                _ => panic!("unexpected planar column"),
+                            };
+                            entries.push((harness.jacobian_export(0, index), expected_index));
+                        }
+                    }
+                    for scale in [1e-200, 1e-100, 1.0, 1e100, 1e200, 8e307] {
+                        for (a, b) in [(-1.0_f64, 2.0_f64), (0.0, -2.0), (1.0, -1.0), (1.0, 1.0)] {
+                            let (p, q) = (a * scale, b * scale);
+                            let expected = if op == "hypot" {
+                                let r = a.hypot(b);
+                                [p.hypot(q), a / r, b / r]
+                            } else {
+                                let d = a * a + b * b;
+                                [p.atan2(q), (b / d) / scale, (-a / d) / scale]
+                            };
+                            let d = a * a + b * b;
+                            let hessian = if op == "hypot" {
+                                let r = a.hypot(b);
+                                let factor = (1.0 / (r * r * r)) / scale;
+                                [b * b * factor, -a * b * factor, a * a * factor]
+                            } else {
+                                let factor = ((1.0 / (d * d)) / scale) / scale;
+                                [
+                                    -2.0 * a * b * factor,
+                                    (a * a - b * b) * factor,
+                                    2.0 * a * b * factor,
+                                ]
+                            };
+                            let outputs = match derivative {
+                                1 => [expected[1], hessian[0], hessian[1]],
+                                2 => [expected[2], hessian[1], hessian[2]],
+                                _ => expected,
+                            };
+                            harness.reset();
+                            harness.write_f64(FusedKernelHarness::VOLTAGES as usize, p);
+                            harness.write_f64(FusedKernelHarness::VOLTAGES as usize + 8, q);
+                            harness.call_assignments();
+                            harness.call_prelude();
+                            for (entry, expected_index) in &entries {
+                                if derivative != 0
+                                    && *expected_index != 0
+                                    && !(1e-100..=1e100).contains(&scale)
+                                {
+                                    continue;
+                                }
+                                let expected = outputs[*expected_index];
+                                assert_eq!(harness.call(entry), 0, "{expression} at {p},{q}");
+                                let actual = harness.read_f64(FRAME_RESULT_OFFSET as usize);
+                                if expected == 0.0 {
+                                    assert_eq!(actual, expected);
+                                } else {
+                                    assert!(
+                                        (actual / expected - 1.0).abs() < 1e-12,
+                                        "{expression}, postfix={postfix}, entry={entry} at {p:e},{q:e}: expected {expected:e}, got {actual:e}"
+                                    );
+                                }
+                            }
+                        }
                     }
                 }
-                for scale in [1e-200, 1.0, 1e200, 8e307] {
-                    for (a, b) in [(-1.0_f64, 2.0_f64), (0.0, -2.0), (1.0, -1.0), (1.0, 1.0)] {
-                        let (p, q) = (a * scale, b * scale);
-                        let expected = if op == "hypot" {
-                            let r = a.hypot(b);
-                            [p.hypot(q), a / r, b / r]
-                        } else {
-                            let d = a * a + b * b;
-                            [p.atan2(q), (b / d) / scale, (-a / d) / scale]
+            }
+        }
+    }
+
+    #[test]
+    fn wasm_quotient_derivatives_preserve_representable_results() {
+        use super::abi::FRAME_RESULT_OFFSET;
+        for derivative in [false, true] {
+            let expression = if derivative {
+                "ddx(1e308/V(p),V(p))"
+            } else {
+                "1e308/V(p)"
+            };
+            let source = format!(
+                "module quotient(p); inout p; electrical p; analog I(p)<+{expression}; endmodule"
+            );
+            for postfix in [false, true] {
+                let mut harness =
+                    FusedKernelHarness::for_source_with_plan(&source, "quotient", postfix);
+                for p in [-1e200_f64, -1e100, 1e100, 1e200] {
+                    let q = 1e308 / p;
+                    let slope = -q / p;
+                    let curvature = (-2.0 * slope) / p;
+                    let outputs = if derivative {
+                        [slope, curvature]
+                    } else {
+                        [q, slope]
+                    };
+                    harness.reset();
+                    harness.write_f64(FusedKernelHarness::VOLTAGES as usize, p);
+                    harness.call_assignments();
+                    harness.call_prelude();
+                    for (entry, expected) in [
+                        (harness.stamp_value_export(0), outputs[0]),
+                        (harness.jacobian_export(0, 0), outputs[1]),
+                    ] {
+                        assert_eq!(harness.call(&entry), 0);
+                        let actual = harness.read_f64(FRAME_RESULT_OFFSET as usize);
+                        assert!(
+                            (actual / expected - 1.0).abs() < 1e-12,
+                            "{expression}, postfix={postfix}, {entry}, p={p:e}: expected {expected:e}, got {actual:e}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn wasm_quotient_mixed_partials_preserve_representable_results() {
+        use super::abi::FRAME_RESULT_OFFSET;
+        for derivative in 0..3 {
+            let expression = "1e200*V(p)*V(p)/(V(q)*V(q))";
+            let expression = match derivative {
+                1 => format!("ddx({expression},V(p))"),
+                2 => format!("ddx({expression},V(q))"),
+                _ => expression.into(),
+            };
+            let source = format!(
+                "module quotient(p,q); inout p,q; electrical p,q; analog I(p)<+{expression}; endmodule"
+            );
+            let report = VerilogACompiler::default()
+                .compile_runtime(&source, None)
+                .unwrap();
+            for postfix in [false, true] {
+                let mut harness =
+                    FusedKernelHarness::for_source_with_plan(&source, "quotient", postfix);
+                let mut entries = vec![(harness.stamp_value_export(0), 0)];
+                for (index, entry) in report.model.stamp_programs[0]
+                    .jacobian_programs
+                    .iter()
+                    .enumerate()
+                {
+                    let expected_index = match entry.col_axis {
+                        crate::codegen::ColumnAxis::Node(0) => 1,
+                        crate::codegen::ColumnAxis::Node(1) => 2,
+                        _ => panic!("unexpected quotient column"),
+                    };
+                    entries.push((harness.jacobian_export(0, index), expected_index));
+                }
+                for p in [-2.0, 0.0, 0.75] {
+                    for q in [-1e150, -1e100, 1e50, 1e100, 1e150] {
+                        let scale = (1e200 / q) / q;
+                        let value = scale * p * p;
+                        let dp = 2.0 * scale * p;
+                        let dq = (-2.0 * value) / q;
+                        let outputs = match derivative {
+                            1 => [dp, 2.0 * scale, (-2.0 * dp) / q],
+                            2 => [dq, (-2.0 * dp) / q, (-3.0 * dq) / q],
+                            _ => [value, dp, dq],
                         };
                         harness.reset();
                         harness.write_f64(FusedKernelHarness::VOLTAGES as usize, p);
                         harness.write_f64(FusedKernelHarness::VOLTAGES as usize + 8, q);
                         harness.call_assignments();
                         harness.call_prelude();
-                        for (entry, expected_index) in &entries {
-                            let expected = expected[*expected_index];
-                            assert_eq!(harness.call(entry), 0, "{expression} at {p},{q}");
+                        for (entry, output) in &entries {
+                            assert_eq!(harness.call(entry), 0);
                             let actual = harness.read_f64(FRAME_RESULT_OFFSET as usize);
+                            let expected = outputs[*output];
                             if expected == 0.0 {
                                 assert_eq!(actual, expected);
                             } else {
                                 assert!(
                                     (actual / expected - 1.0).abs() < 1e-12,
-                                    "{expression} at {p},{q}: expected {expected}, got {actual}"
+                                    "{expression}, postfix={postfix}, {entry}, p={p:e}, q={q:e}: expected {expected:e}, got {actual:e}"
                                 );
                             }
                         }
                     }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn wasm_hypot_shared_operand_preserves_range() {
+        use super::abi::FRAME_RESULT_OFFSET;
+        let source =
+            "module shared(p); inout p; electrical p; analog I(p)<+hypot(V(p),V(p)); endmodule";
+        for postfix in [false, true] {
+            let mut harness = FusedKernelHarness::for_source_with_plan(source, "shared", postfix);
+            for p in [-1e308_f64, 1e308, -1e-200, 1e-200] {
+                harness.reset();
+                harness.write_f64(FusedKernelHarness::VOLTAGES as usize, p);
+                harness.call_assignments();
+                harness.call_prelude();
+                for (entry, expected) in [
+                    (harness.stamp_value_export(0), p.hypot(p)),
+                    (
+                        harness.jacobian_export(0, 0),
+                        p.signum() * std::f64::consts::SQRT_2,
+                    ),
+                ] {
+                    assert_eq!(harness.call(&entry), 0);
+                    let actual = harness.read_f64(FRAME_RESULT_OFFSET as usize);
+                    assert!(
+                        (actual / expected - 1.0).abs() < 1e-12,
+                        "postfix={postfix}, {entry}, p={p:e}: expected {expected:e}, got {actual:e}"
+                    );
                 }
             }
         }

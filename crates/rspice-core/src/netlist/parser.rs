@@ -8,7 +8,10 @@
 use crate::config::ExpressionDialect;
 
 use super::data_table::data_table_parameter_name_is_valid;
-use super::expr::{eval_expression, eval_expression_complex, prepare_behavioral_expression};
+use super::expr::{
+    behavioral_expression_references_runtime_quantity, eval_expression, eval_expression_complex,
+    prepare_behavioral_expression,
+};
 use super::include::{ExpandedSource, ExpandedSourceItem};
 use super::lexer::{LexError, TokenKind, TokenStream, parse_spice_value, tokenize};
 use super::mutual_inductor::{
@@ -3265,16 +3268,24 @@ fn resolve_top_level_source_kind(
         Ok(spec) if voltage_source => Ok(ElementKind::VoltageSource(spec)),
         Ok(spec) => Ok(ElementKind::CurrentSource(spec)),
         Err(source_error) => {
-            let Some(expression) = braced_source_expression(raw_spec) else {
+            let Some(expression) = grouped_source_expression(raw_spec) else {
                 return Err(top_level_source_resolution_error(
                     element_name,
                     raw_spec,
                     source_error,
                 ));
             };
-            prepare_behavioral_expression(expression, params).map_err(|_| {
-                top_level_source_resolution_error(element_name, raw_spec, source_error)
-            })?;
+            // A failed constant value remains an error; only runtime quantities
+            // justify converting an independent source to a behavioral source.
+            if !prepare_behavioral_expression(expression, params)
+                .is_ok_and(|prepared| behavioral_expression_references_runtime_quantity(&prepared))
+            {
+                return Err(top_level_source_resolution_error(
+                    element_name,
+                    raw_spec,
+                    source_error,
+                ));
+            }
             if voltage_source {
                 Ok(ElementKind::BehavioralVoltage {
                     expression: expression.to_string(),
@@ -3294,9 +3305,13 @@ fn resolve_top_level_source_kind(
     }
 }
 
-fn braced_source_expression(raw_spec: &str) -> Option<&str> {
+pub(super) fn grouped_source_expression(raw_spec: &str) -> Option<&str> {
     let trimmed = raw_spec.trim();
-    let inner = trimmed.strip_prefix('{')?.strip_suffix('}')?.trim();
+    let inner = trimmed
+        .strip_prefix('{')
+        .and_then(|inner| inner.strip_suffix('}'))
+        .or_else(|| trimmed.strip_prefix('\'')?.strip_suffix('\''))?
+        .trim();
     (!inner.is_empty()).then_some(inner)
 }
 

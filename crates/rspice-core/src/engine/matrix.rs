@@ -260,6 +260,25 @@ impl Engine {
                         }
                     }
                 }
+                if let Some(branch) = bjt.vbic_rbi_branch_matrix_node(circuit.num_nodes()) {
+                    for node in [
+                        bjt.node_bx,
+                        bjt.node_bi,
+                        bjt.node_ci,
+                        bjt.node_ei,
+                        bjt.node_rth,
+                    ] {
+                        if node != 0 {
+                            triplets.push((branch - 1, node - 1, 0.0));
+                        }
+                    }
+                    for node in [bjt.node_bx, bjt.node_bi, bjt.node_rth] {
+                        if node != 0 {
+                            triplets.push((node - 1, branch - 1, 0.0));
+                        }
+                    }
+                    triplets.push((branch - 1, branch - 1, 0.0));
+                }
                 continue;
             }
             let c = bjt.node_collector;

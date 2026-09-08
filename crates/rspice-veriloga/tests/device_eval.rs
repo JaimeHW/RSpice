@@ -17,6 +17,206 @@ fn compile(source: &str) -> DeviceFixture {
     DeviceFixture::compile(source)
 }
 
+#[test]
+fn homogeneous_math_device_values_and_gradients_preserve_extreme_scales() {
+    for op in ["hypot", "atan2"] {
+        for derivative in 0..3 {
+            let expression = format!("{op}(V(p),V(q))");
+            let expression = match derivative {
+                1 => format!("ddx({expression},V(p))"),
+                2 => format!("ddx({expression},V(q))"),
+                _ => expression,
+            };
+            let fixture = compile(&format!(
+                "module planar(p,q); inout p,q; electrical p,q; analog I(p)<+{expression}; endmodule"
+            ));
+            let mut device = fixture.device("X", &[1, 2]);
+            for scale in [1e-200, 1e-100, 1.0, 1e100, 1e200, 8e307] {
+                for (a, b) in [(-1.0_f64, 2.0_f64), (0.0, -2.0), (1.0, -1.0), (1.0, 1.0)] {
+                    let (p, q) = (a * scale, b * scale);
+                    let expected = if op == "hypot" {
+                        let r = a.hypot(b);
+                        [p.hypot(q), a / r, b / r]
+                    } else {
+                        let d = a * a + b * b;
+                        [p.atan2(q), (b / d) / scale, (-a / d) / scale]
+                    };
+                    device.update_voltages(&[p, q]);
+                    let value = device
+                        .try_evaluate()
+                        .unwrap_or_else(|error| panic!("{expression} at {p:e},{q:e}: {error}"))[0];
+                    let mut pairs = vec![(value, expected[derivative])];
+                    // Atan2 Hessians at the smallest biases exceed f64's
+                    // range. Check both mixed partials on representable scales.
+                    if derivative == 0 || (1e-100..=1e100).contains(&scale) {
+                        let d = a * a + b * b;
+                        let hessian = if op == "hypot" {
+                            let r = a.hypot(b);
+                            let factor = (1.0 / (r * r * r)) / scale;
+                            [b * b * factor, -a * b * factor, a * a * factor]
+                        } else {
+                            let factor = ((1.0 / (d * d)) / scale) / scale;
+                            [
+                                -2.0 * a * b * factor,
+                                (a * a - b * b) * factor,
+                                2.0 * a * b * factor,
+                            ]
+                        };
+                        let slopes = match derivative {
+                            1 => [hessian[0], hessian[1]],
+                            2 => [hessian[1], hessian[2]],
+                            _ => [expected[1], expected[2]],
+                        };
+                        let (matrix, _) = collect_stamps(&mut device, &[p, q]);
+                        for (column, slope) in slopes.into_iter().enumerate() {
+                            pairs.push((matrix.get(&(0, column)).copied().unwrap_or(0.0), slope));
+                        }
+                    }
+                    for (actual, expected) in pairs {
+                        if expected == 0.0 {
+                            assert_eq!(actual, expected, "{expression} at {p:e},{q:e}");
+                        } else {
+                            assert!(
+                                (actual / expected - 1.0).abs() < 1e-12,
+                                "{expression} at {p:e},{q:e}: expected {expected:e}, got {actual:e}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn quotient_mixed_partials_preserve_representable_results() {
+    for derivative in 0..3 {
+        let expression = "1e200*V(p)*V(p)/(V(q)*V(q))";
+        let expression = match derivative {
+            1 => format!("ddx({expression},V(p))"),
+            2 => format!("ddx({expression},V(q))"),
+            _ => expression.into(),
+        };
+        let fixture = compile(&format!(
+            "module quotient(p,q); inout p,q; electrical p,q; analog I(p)<+{expression}; endmodule"
+        ));
+        let mut device = fixture.device("X", &[1, 2]);
+        for p in [-2.0, 0.0, 0.75] {
+            for q in [-1e150, -1e100, 1e50, 1e100, 1e150] {
+                let scale = (1e200 / q) / q;
+                let value = scale * p * p;
+                let dp = 2.0 * scale * p;
+                let dq = (-2.0 * value) / q;
+                let expected = match derivative {
+                    1 => [dp, 2.0 * scale, (-2.0 * dp) / q],
+                    2 => [dq, (-2.0 * dp) / q, (-3.0 * dq) / q],
+                    _ => [value, dp, dq],
+                };
+                device.update_voltages(&[p, q]);
+                let value = device.try_evaluate().unwrap()[0];
+                let (matrix, _) = collect_stamps(&mut device, &[p, q]);
+                for (actual, expected) in [
+                    value,
+                    matrix.get(&(0, 0)).copied().unwrap_or(0.0),
+                    matrix.get(&(0, 1)).copied().unwrap_or(0.0),
+                ]
+                .into_iter()
+                .zip(expected)
+                {
+                    if expected == 0.0 {
+                        assert_eq!(actual, expected);
+                    } else {
+                        assert!(
+                            (actual / expected - 1.0).abs() < 1e-12,
+                            "{expression}, p={p:e}, q={q:e}: expected {expected:e}, got {actual:e}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn hypot_shared_operand_keeps_its_large_value_and_finite_gradient() {
+    let fixture = compile(
+        "module shared(p); inout p; electrical p; analog I(p)<+hypot(V(p),V(p)); endmodule",
+    );
+    let mut device = fixture.device("X", &[1]);
+    for p in [-1e308_f64, 1e308, -1e-200, 1e-200] {
+        device.update_voltages(&[p]);
+        let value = device.try_evaluate().unwrap()[0];
+        assert!((value / p.hypot(p) - 1.0).abs() < 1e-12);
+        let (matrix, _) = collect_stamps(&mut device, &[p]);
+        let expected = p.signum() * std::f64::consts::SQRT_2;
+        assert!((matrix[&(0, 0)] / expected - 1.0).abs() < 1e-12);
+    }
+}
+
+#[test]
+fn hypot_parameter_defaults_preserve_range_after_overrides() {
+    let fixture = compile(
+        "module defaults(p); inout p; electrical p; parameter real x=1e308; parameter real r=hypot(x,x); analog I(p)<+r; endmodule",
+    );
+    let mut device = fixture.device("X", &[1]);
+    for x in [1e308_f64, -1e308, 1e-200, -1e-200] {
+        assert!(device.set_parameter("x", x));
+        device.resolve_parameter_defaults();
+        let value = device.try_evaluate().unwrap()[0];
+        assert!((value / x.hypot(x) - 1.0).abs() < 1e-12);
+    }
+}
+
+#[test]
+fn hypot_dynamic_operands_preserve_history_and_small_signal_slopes() {
+    for body in [
+        "I(p)<+hypot(1+ddt(V(p)),2+ddt(V(q)));",
+        "r=hypot(1+ddt(V(p)),2+ddt(V(q))); I(p)<+r;",
+    ] {
+        let fixture = compile(&format!(
+            "module dynamic(p,q); inout p,q; electrical p,q; real r; analog begin {body} end endmodule",
+        ));
+        let mut device = fixture.device("X", &[1, 2]);
+        device.update_voltages(&[1.0, 2.0]);
+        assert!((device.try_evaluate().unwrap()[0] - 5.0_f64.sqrt()).abs() < 1e-12);
+        device.advance_state();
+        device.set_analysis_type(2);
+        device.set_timestep(0.5);
+        // Repeated and alternate Newton candidates must use the accepted charges.
+        for (p, q) in [(2.0, 3.0), (3.0, 4.0), (2.0, 3.0)] {
+            let (x, y) = (1.0_f64 + (p - 1.0) / 0.5, 2.0_f64 + (q - 2.0) / 0.5);
+            let r = x.hypot(y);
+            device.update_voltages(&[p, q]);
+            assert!((device.try_evaluate().unwrap()[0] - r).abs() < 1e-12);
+            let (matrix, _) = collect_stamps(&mut device, &[p, q]);
+            assert!((matrix[&(0, 0)] - x / r / 0.5).abs() < 1e-12);
+            assert!((matrix[&(0, 1)] - y / r / 0.5).abs() < 1e-12);
+        }
+        device.advance_state();
+        device.update_voltages(&[3.0, 4.0]);
+        assert!((device.try_evaluate().unwrap()[0] - 5.0).abs() < 1e-12);
+
+        let mut ac = fixture.device("AC", &[1, 2]);
+        ac.set_analysis_type(1);
+        let mut entries = HashMap::new();
+        ac.try_stamp_small_signal_complex(
+            &[1.0, 2.0],
+            1.0 / std::f64::consts::TAU,
+            |row, col, re, im| {
+                let entry = entries.entry((row, col)).or_insert((0.0, 0.0));
+                entry.0 += re;
+                entry.1 += im;
+            },
+        )
+        .unwrap();
+        for column in 0..2 {
+            let (re, im) = entries[&(0, column)];
+            assert!(re.abs() < 1e-12);
+            assert!((im - (column + 1) as f64 / 5.0_f64.sqrt()).abs() < 1e-12);
+        }
+    }
+}
+
 #[cfg(not(feature = "native"))]
 #[test]
 fn ddx_array_self_assignment_preserves_values_through_aliasing_indices() {

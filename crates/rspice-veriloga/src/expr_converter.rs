@@ -1122,6 +1122,7 @@ impl<'a> ExprConverter<'a> {
             "acosh" => IrFunction::Acosh,
             "atanh" => IrFunction::Atanh,
             "atan2" => IrFunction::Atan2,
+            "hypot" => IrFunction::Hypot,
             "floor" => IrFunction::Floor,
             "ceil" => IrFunction::Ceil,
             "min" => IrFunction::Min,
@@ -1137,31 +1138,6 @@ impl<'a> ExprConverter<'a> {
                 }
                 let arg = self.convert(arena, &call.args[0])?;
                 return Ok(arena.push(Node::Limexp(arg)));
-            }
-            "hypot" => {
-                // hypot(x, y) = sqrt(x^2 + y^2)
-                if call.args.len() != 2 {
-                    return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
-                        "hypot requires 2 arguments".into(),
-                    ))
-                    .into());
-                }
-                // Each operand is converted twice, once per occurrence in
-                // `x*x + y*y`. Naming one arena node twice would be a smaller
-                // forest and the same emitted program for an ordinary operand,
-                // but not for one carrying a site: `transition` and its four
-                // siblings are numbered by a walk over this output, and a
-                // shared node is one site where the boxed converter's
-                // `.clone()` made two. Converting twice is that `.clone()`,
-                // spelled on the arena.
-                let x_left = self.convert(arena, &call.args[0])?;
-                let x_right = self.convert(arena, &call.args[0])?;
-                let y_left = self.convert(arena, &call.args[1])?;
-                let y_right = self.convert(arena, &call.args[1])?;
-                let x_sq = arena.push(Node::Binary(BinaryOp::Mul, x_left, x_right));
-                let y_sq = arena.push(Node::Binary(BinaryOp::Mul, y_left, y_right));
-                let sum = arena.push(Node::Binary(BinaryOp::Add, x_sq, y_sq));
-                return Ok(arena.push_call(IrFunction::Sqrt, &[sum]));
             }
             // Analog operators, noise sources, filters, and event functions
             // arrive as plain calls; route them to their IR forms.

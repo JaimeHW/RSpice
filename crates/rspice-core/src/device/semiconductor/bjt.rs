@@ -505,7 +505,7 @@ pub(crate) struct BjtChargeSnapshot {
 }
 
 pub(crate) const BJT_ACCEPTED_NONLINEAR_RUNTIME_TAG: &str = "legacy-gummel-poon-v2";
-const VBIC_ACCEPTED_NONLINEAR_RUNTIME_TAG: &str = "promoted-vbic-v3";
+const VBIC_ACCEPTED_NONLINEAR_RUNTIME_TAG: &str = "promoted-vbic-v4";
 const VBIC_DELAY_BRANCH_COUNT: usize = 4;
 
 const BJT_ACCEPTED_SCALAR_VALUE_COUNT: usize = 62;
@@ -536,7 +536,7 @@ pub(crate) const BJT_ACCEPTED_NONLINEAR_STATE_VALUE_COUNT: usize = BJT_ACCEPTED_
     + 2 * BJT_REDUCED_CHECKPOINT_VALUE_COUNT
     + BJT_ACCEPTED_CHARGE_SNAPSHOT_STATE_VALUE_COUNT;
 pub(crate) const VBIC_ACCEPTED_NONLINEAR_STATE_VALUE_COUNT: usize = BJT_ACCEPTED_SCALAR_VALUE_COUNT
-    + 1
+    + 2
     + 4
     + EXTERNAL_DIM
     + BJT_INTERNAL_STATE_DIM
@@ -731,6 +731,10 @@ pub struct Bjt {
     pub node_rth: NodeId,
     pub node_xf1: NodeId,
     pub node_xf2: NodeId,
+    /// Explicit RBI current avoids subtracting nearly equal base voltages
+    /// and assembling a very large qb/RBI conductance into nodal KCL.
+    vbic_rbi_branch: Option<NodeId>,
+    vbic_rbi_matrix_node: NodeId,
     /// True when the VBIC thermal rise state is supplied as an external
     /// instance terminal rather than allocated as an internal node.
     vbic_external_thermal_node: bool,
@@ -1198,6 +1202,7 @@ pub struct Bjt {
     /// Static linearization at the limited MNA bias, written by
     /// `update_vbic_mna` and consumed by the promoted stamp paths.
     mna_eval: Option<EvaluatedBjtState>,
+    mna_rbi_current: Value,
     /// Solution-vector bias `update_vbic_mna` last limited: the four terminal
     /// voltages followed by all ten raw internal state values. Re-limiting
     /// the same candidate would advance the pnjlim history twice for one
@@ -1871,6 +1876,8 @@ impl Bjt {
             node_rth: 0,
             node_xf1: 0,
             node_xf2: 0,
+            vbic_rbi_branch: None,
+            vbic_rbi_matrix_node: 0,
             vbic_external_thermal_node: false,
             vbic_mna_promoted: false,
 
@@ -2115,6 +2122,7 @@ impl Bjt {
             charge_snapshot_cache: Cell::new(BjtChargeSnapshot::default()),
             charge_snapshot_cache_valid: Cell::new(false),
             mna_eval: None,
+            mna_rbi_current: 0.0,
             mna_limited_from: Cell::new(None),
             vbic_startup_load_pending: true,
             mna_delay_branches: [BjtCurrentBranch::default(); VBIC_DELAY_BRANCH_COUNT],
@@ -2734,8 +2742,8 @@ mod checkpoint_tests {
     use super::*;
 
     #[test]
-    fn promoted_vbic_refreshes_when_only_excess_phase_states_change() {
-        let params = [("LEVEL", 4.0), ("TD", 1e-9)]
+    fn promoted_vbic_refreshes_when_only_excess_phase_or_rbi_current_changes() {
+        let params = [("LEVEL", 4.0), ("TD", 1e-9), ("RBI", 5.0)]
             .map(|(name, value)| (name.to_owned(), value))
             .into_iter()
             .collect();
@@ -2745,7 +2753,9 @@ mod checkpoint_tests {
             last_node += 1;
             last_node
         });
-        let mut solution = vec![0.0; last_node];
+        bjt.assign_vbic_rbi_branch(1);
+        bjt.resolve_vbic_rbi_branch(last_node);
+        let mut solution = vec![0.0; last_node + 1];
         solution[bjt.node_xf1 - 1] = 1e-4;
         solution[bjt.node_xf2 - 1] = 2e-4;
         bjt.update(&solution);
@@ -2769,13 +2779,18 @@ mod checkpoint_tests {
             updated.1.map(Value::to_bits),
             repeated.1.map(Value::to_bits)
         );
+        solution[last_node] = 2e-5;
+        bjt.update(&solution);
+        assert_eq!(bjt.mna_eval.unwrap().irbi.current, 2e-5);
+        bjt.update(&solution);
+        assert_eq!(bjt.mna_eval.unwrap().irbi.current, 2e-5);
     }
 
     #[test]
     fn versioned_bjt_checkpoint_numeric_payload_counts_are_pinned() {
         assert_eq!(BJT_ACCEPTED_NONLINEAR_STATE_VALUE_COUNT, 879);
         assert_eq!(BJT_ACCEPTED_CHARGE_SNAPSHOT_STATE_VALUE_COUNT, 449);
-        assert_eq!(VBIC_ACCEPTED_NONLINEAR_STATE_VALUE_COUNT, 592);
+        assert_eq!(VBIC_ACCEPTED_NONLINEAR_STATE_VALUE_COUNT, 593);
     }
 
     #[test]
@@ -2818,13 +2833,16 @@ mod checkpoint_tests {
                 last_node += 1;
                 last_node
             });
+            source.assign_vbic_rbi_branch(1);
+            source.resolve_vbic_rbi_branch(last_node);
             let mut restored = source.clone();
             let initial = source.accepted_nonlinear_checkpoint().unwrap();
             restored
                 .restore_accepted_nonlinear_checkpoint(&initial)
                 .unwrap();
             assert_eq!(restored.accepted_nonlinear_checkpoint().unwrap(), initial);
-            let mut solution = vec![0.0; last_node];
+            let mut solution = vec![0.0; last_node + 1];
+            solution[last_node] = polarity * 2e-5;
             solution[0] = polarity * 1.2;
             solution[1] = polarity * 0.7;
             let internal = [
@@ -2853,7 +2871,7 @@ mod checkpoint_tests {
                 .accepted_nonlinear_checkpoint()
                 .expect("promoted state captures");
             restored.set_junction_gmin(9e-8);
-            restored.update(&vec![0.0; last_node]);
+            restored.update(&vec![0.0; last_node + 1]);
             restored
                 .restore_accepted_nonlinear_checkpoint(&checkpoint)
                 .expect("promoted state restores");
@@ -2874,6 +2892,7 @@ mod checkpoint_tests {
                 }
                 solution[source.node_xf1 - 1] += 1e-5;
                 solution[source.node_xf2 - 1] -= 1e-5;
+                solution[last_node] += polarity * 1e-6;
                 if step > 0 {
                     solution[source.node_rth - 1] += 0.1;
                 }
@@ -2882,12 +2901,17 @@ mod checkpoint_tests {
             }
             let before = restored.accepted_nonlinear_checkpoint().unwrap();
             let branch_start = VBIC_ACCEPTED_NONLINEAR_STATE_VALUE_COUNT
+                - 1
                 - (4 + BJT_DYNAMIC_CHARGE_COUNT) * BJT_CHARGE_BRANCH_CHECKPOINT_VALUE_COUNT;
             let endpoint_start = 1 + BJT_INTERNAL_STATE_DIM + EXTERNAL_DIM;
             for (lane, value) in [
                 (BJT_ACCEPTED_SCALAR_VALUE_COUNT + 1, 0.5),
                 (BJT_ACCEPTED_SCALAR_VALUE_COUNT, -1.0),
                 (0, Value::NAN),
+                (
+                    VBIC_ACCEPTED_NONLINEAR_STATE_VALUE_COUNT - 1,
+                    Value::INFINITY,
+                ),
                 (
                     branch_start + endpoint_start,
                     BJT_INTERNAL_STATE_DIM as Value,

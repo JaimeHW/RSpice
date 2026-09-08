@@ -10548,6 +10548,66 @@ mod tests {
     }
 
     #[test]
+    fn bare_source_dc_levels_accept_signed_fractions_parameters_and_expressions() {
+        for (spelling, expected) in [
+            ("-.3", -0.3),
+            ("+.3", 0.3),
+            ("-.3m", -0.3e-3),
+            ("-.3e-2V", -0.3e-2),
+            ("- .3", -0.3),
+            ("-gain", -0.3),
+            ("+gain", 0.3),
+            ("-{gain/2}", -0.15),
+        ] {
+            for source in ["V1", "I1"] {
+                for dc_keyword in ["", "DC "] {
+                    // Unlabelled tail values are accepted like their unsigned
+                    // counterparts; the authored first value remains the DC level.
+                    let deck = format!(
+                        "signed source values\n.param gain=.3\n{source} a 0 {dc_keyword}{spelling} -.1 +.2 AC 1\n.end\n"
+                    );
+                    let netlist = Netlist::parse(&deck).unwrap();
+                    let spec = match &netlist.elements[0].kind {
+                        ElementKind::VoltageSource(spec) | ElementKind::CurrentSource(spec) => spec,
+                        _ => panic!("independent source expected"),
+                    };
+                    assert!(
+                        matches!(spec, SourceSpec::DcAc { dc_value, ac_magnitude, .. }
+                        if (*dc_value - expected).abs() < 1e-16 && *ac_magnitude == 1.0),
+                        "{deck}: {spec:?}"
+                    );
+                }
+            }
+        }
+        for value in [
+            "-",
+            "+",
+            "-.bad",
+            "{missing}",
+            "-{missing}",
+            "{1/0}",
+            "-{1/0}",
+            "1 {missing}",
+        ] {
+            assert!(
+                parser::parse_source_spec_text(value, 0, &ParamContext::new()).is_err(),
+                "{value}"
+            );
+            if let Ok(netlist) = Netlist::parse(&format!("invalid sign\nV1 a 0 {value}\n.end\n")) {
+                // Braced expressions can be deferred to the behavioral
+                // runtime, but must never silently become an independent 0 V.
+                assert!(
+                    matches!(
+                        netlist.elements[0].kind,
+                        ElementKind::BehavioralVoltage { .. }
+                    ),
+                    "{value}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn bare_source_dc_levels_accept_spice_unit_suffixes() {
         let netlist = Netlist::parse(
             "source unit suffixes\n\

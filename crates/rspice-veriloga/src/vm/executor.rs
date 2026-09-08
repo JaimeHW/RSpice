@@ -433,6 +433,7 @@ impl<'a> Vm<'a> {
             Instruction::Acosh => self.unary_op(|a| a.acosh())?,
             Instruction::Atanh => self.unary_op(|a| a.atanh())?,
             Instruction::Atan2 => self.binary_op(|y, x| y.atan2(x))?,
+            Instruction::Hypot => self.binary_op(f64::hypot)?,
 
             // Rounding functions
             Instruction::Floor => self.unary_op(|a| a.floor())?,
