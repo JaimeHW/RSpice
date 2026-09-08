@@ -792,6 +792,22 @@ mod tests {
     }
 
     #[test]
+    fn full_width_seed_survives_options_editing_and_prepared_deck_parsing() {
+        for seed in [(1_u64 << 53) + 1, u64::MAX - 1, u64::MAX] {
+            let options = SimulationOptions {
+                statistical_seed: Some(seed),
+                ..SimulationOptions::default()
+            };
+            let draft = crate::simulation::dialog::OptionsDialogState::from_options(&options);
+            let restored = draft
+                .to_options()
+                .expect("the UI supports the complete u64 seed range");
+            assert_eq!(restored.statistical_seed, Some(seed));
+            assert_eq!(parse_through_the_deck(&restored).options.seed, Some(seed));
+        }
+    }
+
+    #[test]
     fn solver_options_preserve_legal_zero_bounds_and_temperature_limits() {
         let options = SimulationOptions {
             gmin: -0.0,

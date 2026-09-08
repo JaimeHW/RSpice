@@ -1651,6 +1651,23 @@ pub(super) fn parse_options_command(
             .map(|package| format!("{package}.{key_upper}"));
 
         match (option_package.as_deref(), key_upper.as_str()) {
+            (package, "SEED" | "RNDSEED") if seed_option_applies_to_package(package) => {
+                // The parse pre-scan applies the seed before any parameter
+                // evaluation; this arm validates and records it for
+                // downstream drivers (e.g. per-run Monte-Carlo streams).
+                if let TokenKind::Ident(word) = &stream.peek().kind
+                    && word.eq_ignore_ascii_case("random")
+                {
+                    stream.advance();
+                    log::warn!(
+                        "line {line_num}: `.options seed=random` is not supported; \
+                         the existing deterministic seed is retained (set an explicit \
+                         integer seed to vary the stream)"
+                    );
+                    continue;
+                }
+                options.seed = Some(expect_seed_option(stream, line_num)?);
+            }
             (Some("FFT"), "FFT_MODE") => {
                 let value = expect_value(stream, line_num, params)?;
                 let mode = parse_usize_option("FFT.FFT_MODE", value, line_num)?;
@@ -2374,24 +2391,6 @@ pub(super) fn parse_options_command(
                 let value = expect_value(stream, line_num, params)?;
                 options.scale = Some(parse_positive_real_option("SCALE", value, line_num)?);
             }
-            (_, "SEED" | "RNDSEED") => {
-                // The parse pre-scan applies the seed before any parameter
-                // evaluation; this arm validates and records it for
-                // downstream drivers (e.g. per-run Monte-Carlo streams).
-                if let TokenKind::Ident(word) = &stream.peek().kind
-                    && word.eq_ignore_ascii_case("random")
-                {
-                    stream.advance();
-                    log::warn!(
-                        "line {line_num}: `.options seed=random` is not supported; \
-                         the deterministic default seed is used (set an explicit \
-                         integer seed to vary the stream)"
-                    );
-                    continue;
-                }
-                let value = expect_value(stream, line_num, params)?;
-                options.seed = Some(parse_seed_option(value, line_num)?);
-            }
             (_, "ITL1") => {
                 let value = expect_value(stream, line_num, params)?;
                 options.itl1 = Some(parse_usize_option("ITL1", value, line_num)?);
@@ -2577,7 +2576,7 @@ fn ignore_unknown_option(
     }
 }
 
-fn expect_option_key(
+pub(super) fn expect_option_key(
     stream: &mut TokenStream,
     line_num: usize,
 ) -> Result<(String, usize), ParseError> {
@@ -2632,6 +2631,13 @@ pub(super) fn option_package_key_is_known(key_upper: &str) -> bool {
 }
 
 fn restart_interval_schedule_starts(stream: &TokenStream, params: &ParamContext) -> bool {
+    // An assignment starts a named option even when its name also names a
+    // parameter. It cannot be one of the schedule's positional values.
+    if matches!(stream.peek().kind, TokenKind::Ident(_))
+        && matches!(stream.peek_n(1).kind, TokenKind::Equals)
+    {
+        return false;
+    }
     if let TokenKind::Ident(key) = &stream.peek().kind
         && matches!(
             key.to_ascii_uppercase().as_str(),
@@ -3324,19 +3330,54 @@ pub(super) fn parse_global_command(
     }
 }
 
-pub(super) fn parse_seed_option(value: Value, line_num: usize) -> Result<u64, ParseError> {
-    let rounded = value.round();
-    if !value.is_finite()
-        || value < 0.0
-        || (value - rounded).abs() > 1e-9
-        || rounded > u64::MAX as Value
-    {
-        return Err(ParseError::Syntax {
-            line: line_num,
-            message: format!("SEED must be a non-negative integer, found {}", value),
-        });
+/// Package-specific option sets that do not implement the global seed key
+/// must not select a random stream during the early scan either.
+pub(super) fn seed_option_applies_to_package(package: Option<&str>) -> bool {
+    !matches!(
+        package,
+        Some(
+            "FFT"
+                | "MEASURE"
+                | "HBINT"
+                | "LINSOL-HB"
+                | "NONLIN-HB"
+                | "NONLIN-TRAN"
+                | "NONLIN-TRANSIENT"
+                | "TIMEINT"
+                | "RESTART"
+        )
+    )
+}
+
+/// The pre-scan and command parser must retain the same exact integer.
+pub(super) fn parse_seed_option(literal: &str, line_num: usize) -> Result<u64, ParseError> {
+    crate::spice_number::parse_spice_u64_complete(literal).ok_or_else(|| ParseError::Syntax {
+        line: line_num,
+        message: format!(
+            "SEED requires an integer numeric literal from 0 to {}, found `{literal}`",
+            u64::MAX
+        ),
+    })
+}
+
+pub(super) fn expect_seed_option(
+    stream: &mut TokenStream,
+    line_num: usize,
+) -> Result<u64, ParseError> {
+    skip_commas(stream);
+    let (sign, offset) = match stream.peek().kind {
+        TokenKind::Plus => ("+", 1),
+        TokenKind::Minus => ("-", 1),
+        _ => ("", 0),
+    };
+    // The lexer also retains raw spelling for numeric identifiers (such as
+    // engineering notation). Never reconstruct this token from its f64 value.
+    let literal = format!("{sign}{}", stream.peek_n(offset).lexeme);
+    let value = parse_seed_option(&literal, line_num)?;
+    for _ in 0..=offset {
+        stream.advance();
     }
-    Ok(rounded as u64)
+    Ok(value)
 }
 
 pub(super) fn parse_positive_real_option(

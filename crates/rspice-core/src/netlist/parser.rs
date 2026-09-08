@@ -360,7 +360,9 @@ pub fn parse_netlist_with_options_and_abort(
     options: NetlistParseOptions,
     abort: &dyn AbortSignal,
 ) -> Result<Netlist, ParseWithAbortError> {
-    parse_netlist_impl(input, options, None, None, abort)
+    parse_with_consistent_random_seed(|seed| {
+        parse_netlist_impl(input, options, None, None, seed, abort)
+    })
 }
 
 pub(crate) fn parse_expanded_netlist_with_options_and_abort(
@@ -369,13 +371,48 @@ pub(crate) fn parse_expanded_netlist_with_options_and_abort(
     abort: &dyn AbortSignal,
 ) -> Result<Netlist, ParseWithAbortError> {
     let rendered = expanded.render();
-    parse_netlist_impl(
-        &rendered,
-        options,
-        Some(SourceEventSchedule::from_expanded(expanded)),
-        expanded.implicit_title(),
-        abort,
-    )
+    parse_with_consistent_random_seed(|seed| {
+        parse_netlist_impl(
+            &rendered,
+            options,
+            Some(SourceEventSchedule::from_expanded(expanded)),
+            expanded.implicit_title(),
+            seed,
+            abort,
+        )
+    })
+}
+
+/// The lexical seed scan is a fast hint. Only the command parser knows whether
+/// a bare SEED is an option or a positional parameter, and which conditional
+/// branches and source boundaries actually contribute options. If necessary,
+/// replay once from the same immutable source with that authoritative seed.
+/// Never return sampled parameters from a different stream than the recorded
+/// option, or loop indefinitely on a seed-dependent conditional declaration.
+fn parse_with_consistent_random_seed(
+    mut parse: impl FnMut(Option<u64>) -> Result<Netlist, ParseWithAbortError>,
+) -> Result<Netlist, ParseWithAbortError> {
+    let first = parse(None)?;
+    let seed = first
+        .options
+        .seed
+        .unwrap_or(super::expr::DEFAULT_RANDOM_SEED);
+    if first.params.random().seed() == seed {
+        return Ok(first);
+    }
+    drop(first);
+    let replay = parse(Some(seed))?;
+    if replay
+        .options
+        .seed
+        .unwrap_or(super::expr::DEFAULT_RANDOM_SEED)
+        != seed
+    {
+        return Err(ParseError::InvalidValue(
+            "SEED selection changes when statistical expressions are reseeded; move the seed option outside random-dependent conditionals".to_string(),
+        ).into());
+    }
+    Ok(replay)
 }
 
 pub(crate) fn parse_device_initial_condition_record(
@@ -405,6 +442,7 @@ fn parse_netlist_impl(
     options: NetlistParseOptions,
     mut source_schedule: Option<SourceEventSchedule>,
     implicit_title: Option<&str>,
+    seed_override: Option<u64>,
     abort: &dyn AbortSignal,
 ) -> Result<Netlist, ParseWithAbortError> {
     ensure_parse_not_aborted(abort)?;
@@ -518,13 +556,17 @@ fn parse_netlist_impl(
     // Seed the statistical expression functions before any parameter
     // evaluation so the deck behaves identically regardless of where the
     // `.options seed=` line appears.
-    if let Some(seed) = prescan_random_seed_with_abort(
-        &lines,
-        body_start,
-        allow_non_semicolon_comments,
-        xyce_syntax,
-        abort,
-    )? {
+    let seed = match seed_override {
+        Some(seed) => Some(seed),
+        None => prescan_random_seed_with_abort(
+            &lines,
+            body_start,
+            allow_non_semicolon_comments,
+            xyce_syntax,
+            abort,
+        )?,
+    };
+    if let Some(seed) = seed {
         state.params.set_random_seed(seed);
         log::info!("statistical expression functions seeded with {seed} (.options seed)");
     }
@@ -4016,6 +4058,26 @@ fn prescan_temperature_options_with_abort(
     xyce_syntax: bool,
     abort: &dyn AbortSignal,
 ) -> Result<(), ParseWithAbortError> {
+    for_each_options_line_with_abort(
+        lines,
+        body_start,
+        allow_non_semicolon_comments,
+        xyce_syntax,
+        abort,
+        |line, line_num| scan_temperature_option_line(line, line_num, state),
+    )
+}
+
+/// Seed and temperature discovery consume the same complete logical cards as
+/// each other, including values split over continuation lines.
+fn for_each_options_line_with_abort(
+    lines: &[&str],
+    body_start: usize,
+    allow_non_semicolon_comments: bool,
+    xyce_syntax: bool,
+    abort: &dyn AbortSignal,
+    mut inspect: impl FnMut(&str, usize) -> Result<(), ParseError>,
+) -> Result<(), ParseWithAbortError> {
     let mut continuation = String::new();
     let mut continuation_line = None;
     let mut in_options = false;
@@ -4047,8 +4109,7 @@ fn prescan_temperature_options_with_abort(
             let logical_line = continuation_line
                 .take()
                 .expect("non-empty .OPTIONS statement records its physical origin");
-            scan_temperature_option_line(&continuation, logical_line, state)
-                .map_err(ParseWithAbortError::from)?;
+            inspect(&continuation, logical_line).map_err(ParseWithAbortError::from)?;
             continuation.clear();
         }
 
@@ -4069,8 +4130,7 @@ fn prescan_temperature_options_with_abort(
         let logical_line = continuation_line
             .take()
             .expect("non-empty .OPTIONS statement records its physical origin");
-        scan_temperature_option_line(&continuation, logical_line, state)
-            .map_err(ParseWithAbortError::from)?;
+        inspect(&continuation, logical_line).map_err(ParseWithAbortError::from)?;
     }
 
     ensure_parse_not_aborted(abort)
@@ -4190,74 +4250,76 @@ fn prescan_random_seed_with_abort(
     abort: &dyn AbortSignal,
 ) -> Result<Option<u64>, ParseWithAbortError> {
     let mut seed = None;
-    let mut in_options = false;
-    for (index, line) in lines.iter().enumerate().skip(body_start) {
-        poll_parse_abort(abort, index)?;
-        poll_parse_text(abort, line)?;
-        let line_num = index + 1;
-        if xyce_syntax && xyce_physical_line_is_comment(line) {
-            continue;
-        }
-        let stripped = strip_inline_semicolon_comment_with_non_semicolon_comments(
-            line,
-            allow_non_semicolon_comments,
-        );
-        let trimmed = stripped.trim();
-        if trimmed.is_empty() || trimmed.starts_with('*') {
-            continue;
-        }
-
-        let upper = trimmed.to_uppercase();
-        if let Some(rest) = upper.strip_prefix('+') {
-            if !in_options {
-                continue;
-            }
-            scan_options_tokens_for_seed(rest, line_num, &mut seed)
-                .map_err(ParseWithAbortError::from)?;
-            continue;
-        }
-
-        let body = [".OPTIONS", ".OPTION", ".OPT"]
-            .iter()
-            .find_map(|prefix| upper.strip_prefix(prefix));
-        match body {
-            // Require a separator after the command word so unrelated
-            // commands starting with `.opt` are not misread.
-            Some(rest) if rest.is_empty() || rest.starts_with([' ', '\t']) => {
-                in_options = true;
-                scan_options_tokens_for_seed(rest, line_num, &mut seed)
-                    .map_err(ParseWithAbortError::from)?;
-            }
-            _ => in_options = false,
-        }
-    }
-
-    ensure_parse_not_aborted(abort)?;
+    for_each_options_line_with_abort(
+        lines,
+        body_start,
+        allow_non_semicolon_comments,
+        xyce_syntax,
+        abort,
+        |line, line_num| scan_options_tokens_for_seed(line, line_num, &mut seed),
+    )?;
     Ok(seed)
 }
 
-/// Scan one (partial) `.options` line for `seed=`/`rndseed=` assignments.
+/// Scan a complete options card using raw lexer spelling. Expressions and
+/// quoted strings are single tokens, so their contents cannot invent a seed.
 fn scan_options_tokens_for_seed(
     body: &str,
     line_num: usize,
     seed: &mut Option<u64>,
 ) -> Result<(), ParseError> {
-    // Normalize `key = value` to `key=value`, then inspect each token.
-    let collapsed: String = body.split('=').map(str::trim).collect::<Vec<_>>().join("=");
-
-    for token in collapsed.split([' ', '\t', ',']) {
-        if let Some((key, value)) = token.split_once('=') {
-            if key != "SEED" && key != "RNDSEED" {
-                continue;
+    let tokens = tokenize(body).map_err(|error| lex_to_parse_error(error, line_num))?;
+    let mut stream = TokenStream::new(tokens);
+    let mut option_package: Option<String> = None;
+    let mut follows_equals = false;
+    let mut output_positionals = false;
+    while !stream.is_eof() {
+        if follows_equals {
+            stream.advance();
+            follows_equals = false;
+            continue;
+        }
+        let TokenKind::Ident(_) = &stream.peek().kind else {
+            follows_equals = matches!(stream.advance().kind, TokenKind::Equals);
+            continue;
+        };
+        let (key, key_end) = expect_option_key(&mut stream, line_num)?;
+        let key = key.to_ascii_uppercase();
+        let has_equals = stream.consume(&TokenKind::Equals);
+        if !has_equals && option_package_key_is_known(&key) {
+            output_positionals = false;
+            option_package = Some(key);
+            continue;
+        }
+        if option_package.as_deref() == Some("OUTPUT")
+            && matches!(
+                key.as_str(),
+                "INITIAL_INTERVAL" | "INITIALINTERVAL" | "OUTPUTTIMEPOINTS"
+            )
+        {
+            output_positionals = true;
+        }
+        if (key != "SEED" && key != "RNDSEED")
+            || !seed_option_applies_to_package(option_package.as_deref())
+        {
+            follows_equals = has_equals;
+            continue;
+        }
+        if let TokenKind::Ident(value) = &stream.peek().kind
+            && value.eq_ignore_ascii_case("random")
+        {
+            stream.advance();
+            continue;
+        }
+        if has_equals || (!output_positionals && stream.peek().span.start > key_end) {
+            // Validation belongs to the gated command parser: an invalid
+            // value in an inactive branch or after .END is not an option.
+            // A bare word may instead be another option's parameter value.
+            // Only an actual following integer literal identifies this form.
+            // Scoped packages with positional schedules keep their own grammar.
+            if let Ok(value) = expect_seed_option(&mut stream, line_num) {
+                *seed = Some(value);
             }
-            if value.eq_ignore_ascii_case("RANDOM") {
-                continue;
-            }
-            let parsed = parse_spice_value(value).map_err(|_| ParseError::Syntax {
-                line: line_num,
-                message: format!("SEED must be a non-negative integer, found `{value}`"),
-            })?;
-            *seed = Some(parse_seed_option(parsed, line_num)?);
         }
     }
     Ok(())
@@ -4490,6 +4552,33 @@ mod parenthesized_subckt_port_tests {
 #[cfg(test)]
 mod cancellation_tests {
     use super::*;
+
+    #[test]
+    fn seed_reconciliation_replay_remains_cancellable() {
+        let source =
+            "seed replay\n.if 0\n.options seed=37\n.endif\n.param sample={aunif(0,1)}\n.end\n";
+        let counter = crate::abort_signal::CountingAbort::new(usize::MAX);
+        let speculative = parse_netlist_impl(
+            source,
+            NetlistParseOptions::default(),
+            None,
+            None,
+            None,
+            &counter,
+        )
+        .unwrap();
+        assert_ne!(
+            speculative.params.random().seed(),
+            super::super::expr::DEFAULT_RANDOM_SEED
+        );
+        assert_eq!(speculative.options.seed, None);
+        // Let the full initial pass finish, then abort as replay starts.
+        let abort = crate::abort_signal::CountingAbort::new(counter.count());
+        let result =
+            parse_netlist_with_options_and_abort(source, NetlistParseOptions::default(), &abort);
+        assert!(matches!(result, Err(ParseWithAbortError::Aborted)));
+        assert_eq!(abort.polls_after_abort(), 0);
+    }
 
     #[test]
     fn parser_aborts_after_multiple_internal_deck_polls() {
