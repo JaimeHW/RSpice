@@ -37,6 +37,14 @@ The four backends are not interchangeable at run time. `vm`, `native/`, and
 `rust_backend` runs offline, ahead of the build, and its output is compiled
 into `rspice-core` as ordinary Rust with this compiler absent from the link.
 
+Analog real-to-integer assignments round to nearest, with half cases away
+from zero, before automatic differentiation. Scalar and array writes,
+variable initializers, and function arguments and results share this conversion.
+The checked signed-32-bit conversion and bitwise/shift rules live in
+`rspice-veriloga-runtime::integer` and are used by the generated Rust path
+as well as the portable, native, and Wasm evaluators. This does not yet
+provide signed-32-bit wrapping for all ordinary integer arithmetic.
+
 | Module | Contents |
 | :--- | :--- |
 | `preprocessor` | `` `include ``/`` `define ``/`` `ifdef `` expansion; supplies built-in `disciplines.vams` and `constants.vams` when not found on disk; records include dependencies |

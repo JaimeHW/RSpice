@@ -25,6 +25,8 @@ use super::*;
 /// with its injection node pair on the internal topology.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct VbicNoiseOperatingModel {
+    /// VBIC 1.3 evaluates thermal noise at the local operating temperature.
+    pub absolute_temperature: Option<Value>,
     /// `(mechanism, node+, node−, conductance)` for RCX/RCI/RBX/RBI/RE/RBP.
     pub thermal: [(&'static str, NodeId, NodeId, Value); 6],
     /// `(mechanism, node+, node-, branch current)` for IC/IBE/IBEX/IBEP.
@@ -38,6 +40,10 @@ pub(crate) struct VbicNoiseOperatingModel {
 impl Bjt {
     pub(crate) fn uses_three_terminal_vbic(&self) -> bool {
         self.vbic_three_terminal
+    }
+
+    pub(crate) fn noise_enabled(&self) -> bool {
+        !self.uses_vbic_dynamic_charges() || self.vbic_noise_enabled
     }
 
     /// Matrix-node incidence of each structurally present electrical VBIC charge.
@@ -85,12 +91,13 @@ impl Bjt {
         values.push(self.junction_gmin);
         values.extend([
             u8::from(self.mna_eval.is_some()) as Value,
-            u8::from(self.mna_limited_from.is_some()) as Value,
+            u8::from(self.mna_limited_from.get().is_some()) as Value,
             u8::from(self.vbic_startup_load_pending) as Value,
             u8::from(self.mna_charge_cache_valid.get()) as Value,
         ]);
         values.extend(
             self.mna_limited_from
+                .get()
                 .unwrap_or([0.0; EXTERNAL_DIM + BJT_INTERNAL_STATE_DIM]),
         );
         Self::checkpoint_push_linearization(
@@ -294,7 +301,8 @@ impl Bjt {
         cursor += 1;
         let flags = Self::checkpoint_take_array::<4>(values, &mut cursor);
         let limited_from = Self::checkpoint_take_array(values, &mut cursor);
-        self.mna_limited_from = (flags[1] != 0.0).then_some(limited_from);
+        self.mna_limited_from
+            .set((flags[1] != 0.0).then_some(limited_from));
         self.vbic_startup_load_pending = flags[2] != 0.0;
         let linearized = Self::checkpoint_take_linearization(values, &mut cursor);
         let [
@@ -386,6 +394,10 @@ impl Bjt {
         let eval = self.mna_eval?;
         let (_, g_rci) = self.irci_branch_with_self_conductance(self.vcx, self.vci, self.vbi);
         Some(VbicNoiseOperatingModel {
+            absolute_temperature: self.vbic_13.then(|| {
+                self.mapped_temperature(self.requested_temperature() + self.vrth)
+                    .0
+            }),
             thermal: [
                 (
                     "RCX",
@@ -491,8 +503,8 @@ impl Bjt {
         } else {
             self.node_substrate
         };
-        self.node_rth = if self.self_heating_enabled() {
-            if self.vbic_external_thermal_node && self.node_rth != 0 {
+        self.node_rth = if self.thermal_model_enabled() {
+            if self.vbic_external_thermal_node {
                 self.node_rth
             } else {
                 alloc("rth")
@@ -543,7 +555,7 @@ impl Bjt {
             IDX_VEI => Self::series_active(self.re),
             IDX_VBP => self.vbic_solves_vbp(),
             IDX_VSI => self.has_substrate_resistance(),
-            IDX_VRTH => self.self_heating_enabled(),
+            IDX_VRTH => self.thermal_model_enabled(),
             _ => false,
         }
     }
@@ -627,7 +639,7 @@ impl Bjt {
         if !self.has_substrate_resistance() {
             state[IDX_VSI] = if self.vbic_three_terminal { 0.0 } else { vs };
         }
-        if !self.self_heating_enabled() {
+        if !self.thermal_model_enabled() {
             state[IDX_VRTH] = 0.0;
         }
     }
@@ -670,7 +682,10 @@ impl Bjt {
         // reduced-linearization cache; the promoted path returns before that
         // guard and needs its own.
         let candidate = self.vbic_mna_solution_bias(voltages);
-        if apply_limiting && self.mna_eval.is_some() && self.mna_limited_from == Some(candidate) {
+        if apply_limiting
+            && self.mna_eval.is_some()
+            && self.mna_limited_from.get() == Some(candidate)
+        {
             // A solved voltage constraint can change only its reaction
             // current on the next Newton iteration. Once limiting is inactive,
             // compare the repeated evaluation against itself so the old voltage
@@ -680,7 +695,8 @@ impl Bjt {
             }
             return;
         }
-        self.mna_limited_from = apply_limiting.then_some(candidate);
+        self.mna_limited_from
+            .set(apply_limiting.then_some(candidate));
         self.remember_vbic_iteration();
 
         let [vc, vb, ve, vs] = [candidate[0], candidate[1], candidate[2], candidate[3]];
@@ -867,6 +883,10 @@ impl Bjt {
         let Some(eval) = self.mna_eval else {
             return;
         };
+        // The load consumes this iterate's cached evaluation. A voltage
+        // constraint can repeat the raw candidate on the next iteration even
+        // while limiting remains active; keeping the cache then stalls it.
+        self.mna_limited_from.set(None);
         let state = IntrinsicTerminalState {
             vcx: self.vcx,
             vci: self.vci,
@@ -945,7 +965,7 @@ impl Bjt {
             for branch in &self.mna_delay_branches {
                 self.stamp_vbic_residual_branch(stamper, branch);
             }
-            if self.self_heating_enabled() {
+            if self.thermal_model_enabled() {
                 self.stamp_vbic_residual_branch(stamper, &self.mna_delay_thermal);
             }
         }
@@ -1116,6 +1136,35 @@ mod tests {
     }
 
     #[test]
+    fn vbic13_noise_uses_the_prescribed_temperature_even_with_heat_generation_off() {
+        let params = [("LEVEL", 11.0), ("RCX", 10.0), ("RTH", 100.0)]
+            .map(|(name, value)| (name.to_owned(), value))
+            .into_iter()
+            .collect();
+        let mut bjt = Bjt::new_npn("q".into(), 1, 2, 0)
+            .with_params(&params)
+            .with_instance_params(&[("SW_ET".to_string(), 0.0), ("TRISE".to_string(), 5.0)]);
+        bjt.set_vbic_external_thermal_node(3);
+        let mut next = 4;
+        bjt.assign_vbic_internal_nodes(|_| {
+            let node = next;
+            next += 1;
+            node
+        });
+        let mut v = vec![0.0; next - 1];
+        v[2] = 20.0;
+        bjt.update_vbic_mna_static_probe(&v);
+        let noise = bjt.vbic_noise_operating_model().unwrap();
+        assert_eq!(noise.absolute_temperature, Some(325.15));
+        assert!(
+            noise
+                .thermal
+                .iter()
+                .any(|(_, _, _, conductance)| *conductance > 0.0)
+        );
+    }
+
+    #[test]
     fn three_terminal_vbic_retains_parasitic_base_transport_and_diffusion_charge() {
         let params = std::collections::HashMap::from([
             ("LEVEL".to_string(), 11.0),
@@ -1159,13 +1208,13 @@ mod tests {
     #[test]
     fn external_vbic_thermal_terminal_enables_rth_without_selft() {
         let params = std::collections::HashMap::from([
-            ("LEVEL".to_string(), 11.0),
+            ("LEVEL".to_string(), 4.0),
             ("RTH".to_string(), 100.0),
         ]);
         let mut bjt = Bjt::new_npn("q1".to_string(), 1, 2, 3).with_params(&params);
 
         assert!(
-            !bjt.has_vbic_self_heating(),
+            !bjt.has_vbic_thermal_state(),
             "internal VBIC self-heating still requires SELFT when no external dt terminal is present"
         );
 
@@ -1177,7 +1226,7 @@ mod tests {
             node
         });
 
-        assert!(bjt.has_vbic_self_heating());
+        assert!(bjt.has_vbic_thermal_state());
         assert_eq!(bjt.node_rth, 4);
     }
 
@@ -1407,6 +1456,12 @@ mod tests {
             (twice[IDX_VBI] - twice[IDX_VEI] - (once[IDX_VBI] - once[IDX_VEI])).abs() > 1e-6,
             "a second limiting pass is supposed to move vbei further; the guard is what stops it"
         );
+
+        // After the matrix load, identical voltages belong to a new Newton
+        // iteration and must be allowed to advance the limited state.
+        bjt.stamp_vbic_mna(&mut DenseStamper::new(n));
+        bjt.update(&candidate);
+        assert_eq!(&bjt.vbic_mna_internal_state()[..INTERNAL_DIM], &twice);
     }
 
     /// The junction limiter is defined on branch voltages; a promoted instance

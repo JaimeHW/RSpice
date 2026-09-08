@@ -5,6 +5,7 @@ use super::state::Instance;
 use rspice_veriloga_runtime::GeneratedEvalContext;
 pub use rspice_veriloga_runtime::{GeneratedNoiseComplex, GeneratedNoiseDescriptor, GeneratedNoiseEndpoint, GeneratedNoiseEvaluation, GeneratedNoiseEvaluationError, GeneratedNoiseEvaluationRef, GeneratedNoiseInjectionDescriptor, GeneratedNoiseInjectionEvaluation, GeneratedNoiseKind, GeneratedNoiseProcessDescriptor, GeneratedNoiseProcessEvaluationRef, GeneratedNoiseProcessVisitor, GeneratedNoiseVisitor};
 
+use rspice_veriloga_runtime::integer;
 pub static NOISE_SOURCES: [GeneratedNoiseDescriptor; 8] = [
     GeneratedNoiseDescriptor { mechanism: "FLICKER_DP_SP_IFLICK", label: Some("iflick"), kind: GeneratedNoiseKind::Flicker, equation: 13, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(11), name: "dp", is_internal: true }, neg: GeneratedNoiseEndpoint { local_node: Some(12), name: "sp", is_internal: true }, table_len: 0, table_log_interp: false },
     GeneratedNoiseDescriptor { mechanism: "WHITE_N_GND_INTERNAL", label: Some("internal"), kind: GeneratedNoiseKind::White, equation: 15, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(7), name: "n", is_internal: true }, neg: GeneratedNoiseEndpoint { local_node: None, name: "0", is_internal: false }, table_len: 0, table_log_interp: false },
@@ -4465,6 +4466,7 @@ impl Instance {
 		let CKW=3.2043836e-19f64* CKN;
 		let CKX=3.2043836e-19f64* CKO;
 		let CKY=3.2043836e-19f64* CGH;
+        ctx.check_noise_evaluation()?;
         {
             let psd = CKP;
             if !(psd).is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 0, quantity: "psd", value: psd }); }
@@ -12054,7 +12056,7 @@ impl Instance {
         }
         }
         }
-        let CTJ=(CKI* K)+ (CKH* J);
+        let CTJ=ctx.integer_result(integer::real_to_integer(((CKI* K)+ (CKH* J))).map(f64::from));
         let DXH;
         let DXI;
         if CTJ!=0.0{
@@ -12067,7 +12069,7 @@ impl Instance {
         DXH=A;
         DXI=A;
         }
-        let CTN=(CKH* K)+ (CKI* J);
+        let CTN=ctx.integer_result(integer::real_to_integer(((CKH* K)+ (CKI* J))).map(f64::from));
         let DXJ;
         let DXK;
         if CTN!=0.0{
@@ -12498,6 +12500,7 @@ impl Instance {
         let FTM=1f64;
         let FTN=1f64;
         let FTO=1f64;
+        ctx.check_noise_evaluation()?;
         let omega = core::f64::consts::TAU * frequency_hz;
         let process_0_active = H != 0.0;
         let process_0_psd = (DAT).abs();

@@ -2537,6 +2537,19 @@ impl<'a> CfgLowerer<'a> {
 
     fn unary_expr(&mut self, op: &SmolStr, operand: ExprId, span: SourceSpanRef) -> ValueId {
         match op.as_str() {
+            "ToInteger" => {
+                let left = self.expr(operand);
+                let right = self.real_constant(0.0);
+                self.builder.push(
+                    self.block,
+                    CfgValueType::Real,
+                    CfgValueKind::IntegerBitwise {
+                        op: CfgIntegerBitwiseOp::Or,
+                        left,
+                        right,
+                    },
+                )
+            }
             "Pos" => self.expr(operand),
             "Neg" => {
                 let input = self.expr(operand);

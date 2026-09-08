@@ -144,7 +144,7 @@ fn op_result(deck: &str) -> rspice_core::solver::SimulationResult {
     let netlist = Netlist::parse(deck).expect("deck parses");
     Engine::new(SimulationConfig::default())
         .run_dc_op(&netlist)
-        .expect("op converges")
+        .unwrap_or_else(|error| panic!("op failed: {error}\n{deck}"))
 }
 
 fn voltage(result: &rspice_core::solver::SimulationResult, node: &str) -> f64 {
@@ -705,9 +705,233 @@ fn xyce_vbic_levels_11_and_12_use_vbic_internal_topology() {
 }
 
 #[test]
+fn vbic13_self_heating_switch_matches_xyce710_and_grounded_thermal_pins() {
+    // Live Xyce 7.10, 2026-09-08: this LEVEL=11 deck gives the following
+    // collector currents at 27 C with RTH=1000. SW_ET defaults to one.
+    for level in [11, 12] {
+        for (kind, sign) in [("NPN", 1.0), ("PNP", -1.0)] {
+            let substrate = if level == 12 { " 0" } else { "" };
+            let deck = |thermal: &str, control: &str| {
+                format!(
+                    "VBIC13 self-heating oracle\nVc c 0 {}\nVb b 0 {}\n\
+                 Q1 c b 0{substrate}{thermal} vm {control}\n\
+                 .model vm {kind}(LEVEL={level} IS=1e-16 IBEI=1e-18 IBCI=1e-18 RCI=0 RBI=0 RTH=1000 TNOM=27)\n.temp 27\n.end\n",
+                    1.2 * sign,
+                    0.7 * sign
+                )
+            };
+            for (control, current) in [
+                ("", -5.69505259e-5),
+                ("SW_ET=1", -5.69505259e-5),
+                ("SW_ET=0", -5.67002151e-5),
+            ] {
+                let result = op_result(&deck("", control));
+                assert_rel_close(
+                    "VBIC13 collector current",
+                    result.branch_current_named("vc").unwrap(),
+                    sign * current,
+                    1e-5,
+                );
+                let rise = voltage(&result, "q1.__rth.internal");
+                if control == "SW_ET=0" {
+                    assert!(rise.abs() < 1e-10);
+                } else {
+                    assert!(rise > 0.06 && rise < 0.08, "{rise}");
+                }
+            }
+            let grounded = op_result(&deck(" 0", "SW_ET=1"));
+            assert!(
+                !grounded
+                    .node_names
+                    .iter()
+                    .any(|name| name.contains(".__rth."))
+            );
+            assert_rel_close(
+                "grounded thermal pin",
+                grounded.branch_current_named("vc").unwrap(),
+                sign * -5.67002151e-5,
+                1e-5,
+            );
+            let floor = op_result(&deck("", "").replace("RTH=1000", "RTH=0"));
+            let rise = voltage(&floor, "q1.__rth.internal");
+            assert!(
+                rise > 6e-8 && rise < 8e-8,
+                "RTH=0 keeps Xyce's 1 mK/W floor: {rise}"
+            );
+        }
+    }
+}
+
+#[test]
+fn vbic13_temperature_dependent_self_heating_matches_xyce710() {
+    // Live Xyce 7.10, 2026-09-08, at 27 C plus instance TRISE=20 K.
+    for level in [11, 12] {
+        for (kind, sign) in [("NPN", 1.0), ("PNP", -1.0)] {
+            let substrate = if level == 12 { " 0" } else { "" };
+            for (coefficient, current) in [(0.0, -0.000192271208), (0.05, -0.000194956546)] {
+                let deck = format!(
+                    "VBIC13 TCRTH oracle\nVc c 0 {}\nVb b 0 {}\nQ1 c b 0{substrate} vm TRISE=20\n\
+                     .model vm {kind}(LEVEL={level} IS=1e-16 IBEI=1e-18 IBCI=1e-18 RCI=0 RBI=0 RTH=1000 TCRTH={coefficient} TNOM=27)\n.temp 27\n.end\n",
+                    1.2 * sign,
+                    0.7 * sign,
+                );
+                assert_rel_close(
+                    "TCRTH collector current",
+                    branch_current(&deck, "vc"),
+                    sign * current,
+                    1e-5,
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn vbic13_clips_the_combined_ambient_offset_and_external_thermal_node() {
+    for level in [11, 12] {
+        let substrate = if level == 12 { " 0" } else { "" };
+        for (rise, offset, expected_c) in [
+            (-78.0, 0.0, -50.0 + (-2.0_f64).exp()),
+            (74.0, 0.0, 100.0 - (-2.0_f64).exp()),
+            (-1000.0, 0.0, -50.0),
+            (1000.0, 0.0, 100.0),
+            (400.0, -400.0, 27.0),
+        ] {
+            let deck = |thermal, offset, temperature| {
+                format!(
+                    "VBIC13 effective temperature\nVc c 0 1.2\nVb b 0 0.5\nVth th 0 {thermal}\n\
+                 Q1 c b 0{substrate} th vm SW_ET=0 TRISE={offset}\n\
+                 .model vm NPN(LEVEL={level} IS=1e-16 IBEI=1e-18 IBCI=1e-18 RCI=0 RBI=0 RTH=1000 TCRTH=0.001 TMINCLIP=-50 TMAXCLIP=100 TNOM=27)\n.temp {temperature}\n.end\n"
+                )
+            };
+            let result = op_result(&deck(rise, offset, 27.0));
+            // Use wide limits so the already mapped comparison temperature
+            // passes through unchanged, including the exponential tails.
+            let equivalent = deck(0.0, 0.0, expected_c)
+                .replace("TMINCLIP=-50 TMAXCLIP=100", "TMINCLIP=-100 TMAXCLIP=500");
+            for branch in ["vc", "vb"] {
+                let actual = result.branch_current_named(branch).unwrap();
+                let expected = branch_current(&equivalent, branch);
+                assert!(
+                    (actual - expected).abs() < 1e-12 + 1e-7 * expected.abs(),
+                    "LEVEL={level} rise={rise} offset={offset} {branch}: {actual} vs {expected}"
+                );
+            }
+            assert_rel_close(
+                "thermal sink current",
+                result.branch_current_named("vth").unwrap(),
+                -rise / (1000.0 * (1.0 + 0.001 * (expected_c - 27.0))),
+                1e-9,
+            );
+        }
+    }
+}
+
+#[test]
+fn vbic13_thermal_temperature_parameters_reject_invalid_values_and_model_families() {
+    for level in [11, 12] {
+        for parameter in [
+            "TMINCLIP=-251",
+            "TMINCLIP=28",
+            "TMAXCLIP=26",
+            "TMAXCLIP=1001",
+            "TCRTH={1/0}",
+            "TMINCLIP=\"cold\"",
+        ] {
+            let error = build(&op_deck(&format!(
+                ".model qmod NPN(LEVEL={level} {parameter})"
+            )))
+            .expect_err("invalid thermal model parameter must fail closed");
+            assert!(
+                error.contains(parameter.split('=').next().unwrap()),
+                "{error}"
+            );
+        }
+        for parameters in [
+            "TMINCLIP=-250 TMAXCLIP=1000",
+            "TMINCLIP=27 TMAXCLIP=27",
+            "TCRTH=-0.05",
+        ] {
+            build(&op_deck(&format!(
+                ".model qmod NPN(LEVEL={level} {parameters})"
+            )))
+            .unwrap();
+        }
+    }
+    for level in [1, 4, 9, 13] {
+        for parameter in ["TCRTH=0", "TMINCLIP=-100", "TMAXCLIP=500"] {
+            let error = build(&op_deck(&format!(
+                ".model qmod NPN(LEVEL={level} {parameter})"
+            )))
+            .expect_err("unimplemented thermal parameter must not be silently ignored");
+            assert!(error.contains("LEVEL=11 or LEVEL=12"), "{error}");
+        }
+    }
+}
+
+#[test]
+fn vbic_temperature_offset_aliases_and_switch_validation_are_effective() {
+    let deck = "VBIC offset aliases\nVc c 0 1.2\nVb b 0 0.7\nQ1 c b 0 vm SW_ET=0\n\
+        .model vm NPN(LEVEL=11 IS=1e-16 IBEI=1e-18 IBCI=1e-18 RCI=0 RBI=0)\n.temp 27\n.end\n";
+    let warmer = branch_current(&deck.replace(".temp 27", ".temp 47"), "vc");
+    for alias in ["TRISE", "DTA", "DTEMP"] {
+        let variant = deck.replace("SW_ET=0", &format!("SW_ET=0 {alias}=20"));
+        assert_rel_close(alias, branch_current(&variant, "vc"), warmer, 1e-10);
+    }
+    for control in [
+        "SW_ET=0.5",
+        "SW_ET=2",
+        "SW_NOISE=-1",
+        "TRISE=1 DTA=2",
+        "DTEMP=1 TRISE=2",
+    ] {
+        let error =
+            build(&deck.replace("SW_ET=0", control)).expect_err("invalid control must fail closed");
+        assert!(error.contains("BJT"), "{error}");
+    }
+}
+
+#[test]
+fn vbic_noise_switch_removes_device_noise_without_changing_the_operating_point() {
+    for level in [4, 11, 12] {
+        let deck = format!(
+            "VBIC noise switch\nVcc supply 0 3.3\nVb b 0 0.7 AC 1\nRc supply c 1k\nQ1 c b 0 vm SW_NOISE=1\n.model vm NPN(LEVEL={level} IS=1e-16 IBEI=1e-18 IBCI=1e-18 RCX=10 RCI=20 RBX=10 RBI=40 RE=1 KFN=1e-14)\n.end\n"
+        );
+        let quiet = deck.replace("SW_NOISE=1", "SW_NOISE=0");
+        assert_eq!(
+            op_result(&deck).node_voltages,
+            op_result(&quiet).node_voltages
+        );
+        for (text, enabled) in [(&deck, true), (&quiet, false)] {
+            let points = Engine::default()
+                .run_noise_named_with_input_source(
+                    &Netlist::parse(text).unwrap(),
+                    "c",
+                    None,
+                    "Vb",
+                    &[1e3],
+                    300.15,
+                )
+                .unwrap();
+            let device = points[0]
+                .contributions
+                .iter()
+                .filter(|entry| entry.identity.device.eq_ignore_ascii_case("Q1"));
+            assert_eq!(
+                device.clone().any(|entry| entry.output_contribution > 0.0),
+                enabled
+            );
+            if !enabled {
+                assert_eq!(device.count(), 0);
+            }
+        }
+    }
+}
+
+#[test]
 fn three_terminal_vbic_fourth_pin_is_thermal_in_every_native_dialect() {
     let deck = "VBIC three-terminal external temperature\n\
-        Vc c 0 1.2\nVb b 0 0.7\nVdt dt 0 20\nQ1 c b 0 dt vm\n\
+        Vc c 0 1.2\nVb b 0 0.7\nVdt dt 0 20\nQ1 c b 0 dt vm SW_ET=0\n\
         .model vm NPN(LEVEL=11 IS=1e-16 IBEI=1e-18 IBCI=1e-18\n\
         + RCI=0 RBI=0 RTH=100 TNOM=27)\n.temp 27\n.end\n";
     let warmer = deck

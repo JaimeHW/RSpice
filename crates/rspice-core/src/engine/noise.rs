@@ -2723,6 +2723,9 @@ impl Engine {
         // KFN·m^(1−AFN) on the m-folded branch current). Legacy GP keeps
         // the external-node shot and KF flicker sources.
         for bjt in &circuit.bjts.devices {
+            if !bjt.noise_enabled() {
+                continue;
+            }
             if let Some(model) = bjt.vbic_noise_operating_model() {
                 // A promoted VBIC is one bipolar with eleven mechanisms across
                 // its internal topology, not eleven devices. Folding the
@@ -2741,6 +2744,9 @@ impl Engine {
                                     &bjt.name, mechanism,
                                 ));
                         source.temperature_offset = bjt.noise_temperature_offset;
+                        if let Some(temperature) = model.absolute_temperature {
+                            absolute_temperatures.insert(source.identity.clone(), temperature);
+                        }
                         noise_sources.push(source);
                     }
                 }

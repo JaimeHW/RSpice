@@ -2363,6 +2363,13 @@ impl ModelPlan {
                 .flat_map(|stage| lane_runtime_types(&stage.function)),
         );
         runtime_support.extend(lane_types);
+        if std::iter::once(&self.function)
+            .chain(self.stages.iter().map(|stage| &stage.function))
+            .chain(self.initialization.iter().map(|plan| &plan.function))
+            .any(uses_checked_integers)
+        {
+            runtime_support.push("integer".to_string());
+        }
         runtime_support.extend([
             "evaluate_generated_above".to_string(),
             "evaluate_generated_cross".to_string(),
@@ -2468,6 +2475,11 @@ impl ModelPlan {
             .collect::<Vec<_>>();
         let (body, names) = emit_body(&stage.function, &produced, &self.emit_bindings())
             .map_err(|error| unsupported(artifact, format!("{name}: {error}")))?;
+        let integer_context = if uses_checked_integers(&stage.function) {
+            "    ctx: &GeneratedEvalContext<'_>,\n"
+        } else {
+            ""
+        };
         let _ = writeln!(
             out,
             "pub(super) fn {name}(\n\
@@ -2477,6 +2489,7 @@ impl ModelPlan {
              \x20   staged: &[f64],\n\
              \x20   temperature: f64,\n\
              \x20   thermal_voltage: f64,\n\
+             {integer_context}\
              ) -> [f64; {}] {{",
             produced.len()
         );
@@ -2545,6 +2558,7 @@ impl ModelPlan {
             }
             out.push_str("        };\n");
         } else {
+            let integer_context = integer_context_argument(&stage.function);
             let _ = writeln!(
                 out,
                 "        let produced = {}(\n\
@@ -2554,9 +2568,13 @@ impl ModelPlan {
                  \x20           &self.canonical_staged[..],\n\
                  \x20           ctx.temperature(),\n\
                  \x20           ctx.thermal_voltage(),\n\
+                 {integer_context}\
                  \x20       );",
                 preprocess_fn_name(stage.class)
             );
+        }
+        if uses_checked_integers(&stage.function) {
+            out.push_str("        if ctx.evaluation_failed() { return; }\n");
         }
         if !produced.is_empty() {
             let _ = writeln!(
@@ -2674,9 +2692,13 @@ impl ModelPlan {
              \x20           self.multiplicity,\n\
              \x20           &self.canonical_staged[..],\n\
              \x20           ctx.temperature(),\n\
-             \x20           ctx.thermal_voltage(),\n\
-             \x20       );\n",
+             \x20           ctx.thermal_voltage(),\n",
         );
+        out.push_str(integer_context_argument(&stage.function));
+        out.push_str("        );\n");
+        if uses_checked_integers(&stage.function) {
+            out.push_str("        if ctx.evaluation_failed() { return; }\n");
+        }
         out.push_str(
             "        let values = canonical_model_cache_intern(key, Arc::new(produced));\n\
              \x20       self.canonical_install_model_values(values);\n\
@@ -2716,6 +2738,9 @@ impl ModelPlan {
                 continue;
             }
             let _ = writeln!(out, "        self.{}(ctx);", stage_fn_name(stage.class));
+            if uses_checked_integers(&stage.function) {
+                out.push_str("        if ctx.evaluation_failed() { return; }\n");
+            }
         }
 
         let newton = self
@@ -3006,6 +3031,9 @@ impl ModelPlan {
         let uses_math_helper =
             |helper: &str| body.contains(helper) || grouped_noise.contains(helper);
         let mut math_support = Vec::new();
+        if uses_math_helper("integer::") {
+            math_support.push("integer".to_string());
+        }
         if !shared_stages.is_empty() {
             math_support.push("install_generated_stage_values".to_string());
         }
@@ -3055,6 +3083,7 @@ impl ModelPlan {
                 noise.prepared_slots
             );
             for stage in &shared_stages {
+                let integer_context = integer_context_argument(&stage.function);
                 let _ = writeln!(
                     out,
                     "        let produced = {}(\n\
@@ -3064,6 +3093,7 @@ impl ModelPlan {
                      \x20           &prepared[..],\n\
                      \x20           ctx.temperature(),\n\
                      \x20           ctx.thermal_voltage(),\n\
+                     {integer_context}\
                      \x20       );\n\
                      \x20       install_generated_stage_values(&mut prepared[..], &produced, &{});",
                     preprocess_fn_name(stage.class),
@@ -3073,6 +3103,13 @@ impl ModelPlan {
         }
         self.emit_noise_prologue(artifact, function, &mut out);
         out.push_str(&indent(&body, 2));
+        if uses_checked_integers(function)
+            || shared_stages
+                .iter()
+                .any(|stage| uses_checked_integers(&stage.function))
+        {
+            out.push_str("        ctx.check_noise_evaluation()?;\n");
+        }
 
         for (index, source) in noise.sources.iter().enumerate() {
             // The guard is the control flow the source was written in, already
@@ -5437,16 +5474,6 @@ fn reject_unsupported_kinds(
                     ),
                 ));
             }
-            // Representable and deliberately not emitted here. Verilog-AMS
-            // defines these over signed 32-bit values with a specified rounding
-            // and an out-of-range refusal; Rust's `as` casts implement none of
-            // that, so an emitted `&` would silently be a different function.
-            CfgValueKind::IntegerBitwise { .. } | CfgValueKind::IntegerBitwiseNot { .. } => {
-                return Err(unsupported(
-                    artifact,
-                    "an analog integer bitwise or shift operator in the direct generated-Rust backend; use the VM, native JIT, or WebAssembly JIT runtime, which share the checked integer conversion",
-                ));
-            }
             _ => {}
         }
     }
@@ -5567,12 +5594,30 @@ fn truth_output(function: &CfgFunction, value: ValueId, name: &str) -> String {
 
 fn bindings() -> EmitBindings {
     EmitBindings {
+        integer_result: "ctx.integer_result".into(),
         analysis: "ctx.analysis".into(),
         simparam: "ctx.simparam_or".into(),
         cross: "rspice_cross!".into(),
         above: "rspice_above!".into(),
         timer: "rspice_timer!".into(),
         ..EmitBindings::default()
+    }
+}
+
+fn uses_checked_integers(function: &CfgFunction) -> bool {
+    function.values.iter().any(|value| {
+        matches!(
+            value.kind,
+            CfgValueKind::IntegerBitwise { .. } | CfgValueKind::IntegerBitwiseNot { .. }
+        )
+    })
+}
+
+fn integer_context_argument(function: &CfgFunction) -> &'static str {
+    if uses_checked_integers(function) {
+        "            ctx,\n"
+    } else {
+        ""
     }
 }
 

@@ -7,6 +7,25 @@ import rspice
 
 
 class TestDcOp:
+    @pytest.mark.parametrize(
+        "control, current",
+        [("", -5.69505259e-5), ("SW_ET=1", -5.69505259e-5), ("SW_ET=0", -5.67002151e-5)],
+    )
+    def test_vbic_self_heating_switch_matches_xyce(self, engine, control, current):
+        netlist = rspice.Netlist.parse_spice(
+            f"""* VBIC thermal switch
+Vc c 0 1.2
+Vb b 0 0.7
+Q1 c b 0 vm {control}
+.model vm NPN(LEVEL=11 IS=1e-16 IBEI=1e-18 IBCI=1e-18 RCI=0 RBI=0 RTH=1000 TNOM=27)
+.temp 27
+.end
+"""
+        )
+        assert engine.run_dc_op(netlist).branch_current("vc") == pytest.approx(
+            current, rel=1e-5
+        )
+
     def test_device_operating_point_report(self, engine):
         netlist = rspice.Netlist.parse(
             """* MOS operating point

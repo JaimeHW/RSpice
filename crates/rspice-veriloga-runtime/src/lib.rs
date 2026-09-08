@@ -21,6 +21,7 @@
 mod analog_effects;
 mod analog_lifecycle;
 mod compatibility_catalog;
+pub mod integer;
 
 pub use analog_effects::{
     AnalogEffectError, AnalogEffectJournal, AnalogEffectLimits, AnalogTaskArgument,
@@ -1927,6 +1928,9 @@ pub enum GeneratedStampLane {
 /// A recoverable failure reported while evaluating generated device code.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GeneratedEvaluationError {
+    Integer {
+        reason: &'static str,
+    },
     SmallSignal {
         reason: &'static str,
     },
@@ -1960,6 +1964,9 @@ pub enum GeneratedEvaluationError {
 impl std::fmt::Display for GeneratedEvaluationError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::Integer { reason } => {
+                write!(f, "generated Verilog-A integer evaluation failed: {reason}")
+            }
             Self::SmallSignal { reason } => write!(
                 f,
                 "generated Verilog-A small-signal evaluation failed: {reason}"
@@ -2193,6 +2200,9 @@ where
 /// A generated noise evaluator rejected invalid model state or output.
 #[derive(Debug, Clone, PartialEq)]
 pub enum GeneratedNoiseEvaluationError {
+    Evaluation {
+        source: GeneratedEvaluationError,
+    },
     UninitializedAnalogState,
     SourceIndexOutOfRange {
         index: usize,
@@ -2246,6 +2256,9 @@ pub enum GeneratedNoiseEvaluationError {
 impl std::fmt::Display for GeneratedNoiseEvaluationError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::Evaluation { source } => {
+                write!(f, "generated Verilog-A noise evaluation failed: {source}")
+            }
             Self::UninitializedAnalogState => {
                 f.write_str("analog initialization must complete before generated noise evaluation")
             }
@@ -2763,6 +2776,15 @@ impl<'a> GeneratedEvalContext<'a> {
         self.evaluation_error.take()
     }
 
+    /// Noise callbacks must not consume a pending evaluator failure or hide it
+    /// behind a finite PSD selected by an invalid condition.
+    #[inline]
+    pub fn check_noise_evaluation(&self) -> Result<(), GeneratedNoiseEvaluationError> {
+        self.evaluation_error.get().map_or(Ok(()), |source| {
+            Err(GeneratedNoiseEvaluationError::Evaluation { source })
+        })
+    }
+
     /// Ordinary numerical probes do not replace or publish system-task calls.
     #[inline]
     pub fn analog_tasks_enabled(&self) -> bool {
@@ -2796,6 +2818,32 @@ impl<'a> GeneratedEvalContext<'a> {
             self.evaluation_error
                 .set(Some(GeneratedEvaluationError::Initialization { slot }));
         }
+    }
+
+    /// Retain integer failures even when the result only controls a branch.
+    #[inline]
+    pub fn integer_result(&self, result: Result<Value, integer::IntegerRuntimeError>) -> Value {
+        result.unwrap_or_else(|source| {
+            use integer::IntegerRuntimeError;
+            let reason = match source {
+                IntegerRuntimeError::NonFiniteOperand { .. } => {
+                    "conversion requires a finite value"
+                }
+                IntegerRuntimeError::OperandOutOfRange { .. } => {
+                    "conversion rounds outside the signed 32-bit range"
+                }
+                IntegerRuntimeError::DivisionByZero => "division by zero",
+                IntegerRuntimeError::ModulusByZero => "modulus by zero",
+                IntegerRuntimeError::NegativeExponent { .. } => {
+                    "negative integer exponent is unsupported"
+                }
+            };
+            if self.evaluation_error.get().is_none() {
+                self.evaluation_error
+                    .set(Some(GeneratedEvaluationError::Integer { reason }));
+            }
+            Value::NAN
+        })
     }
 
     #[inline]
@@ -7827,6 +7875,41 @@ mod fixed_lane_tests {
                 Some(GeneratedEvaluationError::SmallSignal { .. })
             ));
         }
+    }
+
+    #[test]
+    fn generated_integer_errors_are_retained_until_reported() {
+        let ctx = GeneratedEvalContext::new(&[0.0], 300.15, 1);
+        assert_eq!(
+            ctx.integer_result(crate::integer::real_to_integer(-1.5).map(f64::from)),
+            -2.0
+        );
+        assert!(!ctx.evaluation_failed());
+        assert!(
+            ctx.integer_result(crate::integer::real_to_integer(2147483647.5).map(f64::from))
+                .is_nan()
+        );
+        ctx.report_initialization_error(0);
+        assert!(matches!(
+            ctx.check_noise_evaluation(),
+            Err(crate::GeneratedNoiseEvaluationError::Evaluation {
+                source: GeneratedEvaluationError::Integer { .. }
+            })
+        ));
+        assert!(matches!(
+            ctx.take_evaluation_error(),
+            Some(GeneratedEvaluationError::Integer { .. })
+        ));
+        assert!(!ctx.evaluation_failed());
+        ctx.report_initialization_error(1);
+        assert!(
+            ctx.integer_result(crate::integer::real_to_integer(f64::NAN).map(f64::from))
+                .is_nan()
+        );
+        assert_eq!(
+            ctx.take_evaluation_error(),
+            Some(GeneratedEvaluationError::Initialization { slot: 1 })
+        );
     }
 
     #[test]

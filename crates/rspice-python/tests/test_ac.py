@@ -27,6 +27,28 @@ FC = 1.0 / (2 * math.pi * 1e3 * 1e-6)  # RC corner: 159.155 Hz
 
 
 class TestAcBasics:
+    @pytest.mark.parametrize("level", [11, 12])
+    def test_vbic13_clipped_thermal_admittance_without_hidden_capacitance(
+        self, engine, level
+    ):
+        substrate = " 0" if level == 12 else ""
+        netlist = rspice.Netlist.parse(
+            f"""* VBIC13 thermal AC
+Vth th 0 DC 74 AC 1
+Q1 0 0 0{substrate} th vm SW_ET=0
+.model vm NPN(LEVEL={level} RTH=1000 TCRTH=0.005 TMAXCLIP=100 TNOM=27)
+.temp 27
+.end
+"""
+        )
+        result = engine.run_ac(netlist, [1e3])
+        tail = math.exp(-2)
+        resistance = 1000 * (1 + 0.005 * (100 - tail - 27))
+        expected = -(1 / resistance - 74 * 5 * tail / resistance**2)
+        current = result.branch_current_complex("Vth")[0]
+        assert current.real == pytest.approx(expected, abs=1e-12)
+        assert current.imag == 0
+
     def test_lowpass_rolloff(self, engine, rc_lowpass):
         freqs = np.logspace(0, 5, 11)
         ac = engine.run_ac(rc_lowpass, freqs.tolist())

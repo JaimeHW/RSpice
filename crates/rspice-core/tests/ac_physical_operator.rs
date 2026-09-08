@@ -74,6 +74,45 @@ fn vbic_overlap_capacitance_has_positive_admittance_for_both_polarities() {
 }
 
 #[test]
+fn vbic13_thermal_port_matches_temperature_dependent_rc_admittance() {
+    // SW_ET=0 isolates the thermal R/C port. Its AC conductance is
+    // d[theta/R(T)]/dtheta, not simply 1/R(T), and CTH has no hidden floor.
+    for level in [11, 12] {
+        let substrate = if level == 12 { " 0" } else { "" };
+        for (rise, coefficient, effective_c, slope) in [
+            (20.0, 0.005, 47.0, 1.0),
+            (74.0, 0.005, 100.0 - (-2.0_f64).exp(), (-2.0_f64).exp()),
+            (-78.0, 0.005, -50.0 + (-2.0_f64).exp(), (-2.0_f64).exp()),
+            (20.0, -0.1, 47.0, 1.0),
+        ] {
+            for capacitance in [0.0, 1e-15, 2e-6] {
+                let point = solve_one(&format!(
+                    "VBIC13 thermal small-signal port\nVth th 0 DC {rise} AC 1\n\
+                     Q1 0 0 0{substrate} th vm SW_ET=0 M=3\n\
+                     .model vm NPN(LEVEL={level} RTH=1000 TCRTH={coefficient} CTH={capacitance} TMINCLIP=-50 TMAXCLIP=100 TNOM=27)\n.temp 27\n.end\n"
+                ));
+                let resistance = 1000.0 * (1.0 + coefficient * (effective_c - 27.0));
+                let conductance = if resistance <= 1e-3 {
+                    3e3
+                } else {
+                    3.0 / resistance
+                        - rise * 3.0 * 1000.0 * coefficient * slope / resistance.powi(2)
+                };
+                let expected = -Complex64::new(
+                    conductance,
+                    2.0 * std::f64::consts::PI * 1e3 * capacitance * 3.0,
+                );
+                let actual = branch_current(&point, "Vth");
+                assert!(
+                    (actual - expected).norm() < 1e-10 * expected.norm().max(1e-6),
+                    "LEVEL={level} rise={rise} TCRTH={coefficient} CTH={capacitance}: {actual:?} vs {expected:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn one_ampere_through_one_hundred_teraohms_produces_one_hundred_teravolts() {
     let point = solve_one(
         "one-ampere weak-conductance transimpedance\n\

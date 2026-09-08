@@ -607,7 +607,7 @@ impl Engine {
         let mut current_residual_objective =
             Self::vbic_internal_equation_residual_objective(&polished_initial_state.3);
 
-        let max_refinements = if bjt.has_vbic_self_heating() {
+        let max_refinements = if bjt.has_vbic_thermal_state() {
             96
         } else if bjt.uses_vbic_dynamic_charges() {
             64

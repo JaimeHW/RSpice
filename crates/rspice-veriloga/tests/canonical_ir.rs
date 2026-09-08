@@ -1605,12 +1605,11 @@ endmodule
 /// This is the contract that lets the canonical level grow without moving any
 /// shipped compilation onto it: `absdelay`, `idtmod` and `last_crossing` each
 /// own accepted history that the direct generated-Rust backend has no place
-/// for, and the analog integer operators need a checked conversion Rust's `as`
-/// casts do not perform. Each lowers to its own CFG kind — that is the point of
+/// for. Each lowers to its own CFG kind — that is the point of
 /// the lane — and each is named at the refusal, so a model reaching one is sent
 /// to a runtime that implements it rather than emitted as something weaker.
 #[test]
-fn generated_rust_fails_closed_for_every_newly_representable_operator() {
+fn generated_rust_refuses_operators_without_history_support() {
     let cases = [
         (
             "absdelay",
@@ -1627,11 +1626,6 @@ fn generated_rust_fails_closed_for_every_newly_representable_operator() {
             "1.0e-9 * last_crossing(V(p, n) - 0.5, 1)",
             "last_crossing",
         ),
-        (
-            "integer_bitwise",
-            "1.0e-6 * ((mask & 6) | (mask << 1)) * V(p, n)",
-            "analog integer bitwise or shift operator",
-        ),
     ];
 
     for (name, expression, expected) in cases {
@@ -1641,7 +1635,6 @@ fn generated_rust_fails_closed_for_every_newly_representable_operator() {
 module generated_rust_{name}(p, n);
     inout p, n;
     electrical p, n;
-    parameter integer mask = 12;
     analog I(p, n) <+ {expression};
 endmodule
 "#
@@ -1657,7 +1650,6 @@ endmodule
                 rspice_veriloga::canonical_ir::CfgValueKind::AbsDelay { .. }
                     | rspice_veriloga::canonical_ir::CfgValueKind::IdtMod { .. }
                     | rspice_veriloga::canonical_ir::CfgValueKind::LastCrossing { .. }
-                    | rspice_veriloga::canonical_ir::CfgValueKind::IntegerBitwise { .. }
             )),
             "{name} must reach its own canonical kind"
         );

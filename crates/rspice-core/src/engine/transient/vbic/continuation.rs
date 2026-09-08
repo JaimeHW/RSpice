@@ -668,7 +668,7 @@ impl Engine {
                 live_seed[BJT_DELAY_XF1_STATE_INDEX] = current_internal[BJT_DELAY_XF1_STATE_INDEX];
                 live_seed[BJT_DELAY_XF2_STATE_INDEX] = current_internal[BJT_DELAY_XF2_STATE_INDEX];
             }
-            if bjt.has_vbic_self_heating() {
+            if bjt.has_vbic_thermal_state() {
                 live_seed[BJT_THERMAL_STATE_INDEX] = current_internal[BJT_THERMAL_STATE_INDEX];
             }
             bjt.limit_vbic_dynamic_internal_state_to_previous(live_seed, current_internal)
@@ -741,7 +741,7 @@ impl Engine {
                     + (current_internal[idx] - previous_internal[idx]) * continuation_scale;
             }
         }
-        if bjt.has_vbic_self_heating() {
+        if bjt.has_vbic_thermal_state() {
             seed[BJT_THERMAL_STATE_INDEX] = (current_internal[BJT_THERMAL_STATE_INDEX]
                 + (current_internal[BJT_THERMAL_STATE_INDEX]
                     - previous_internal[BJT_THERMAL_STATE_INDEX])
@@ -1538,7 +1538,7 @@ impl Engine {
             );
         }
 
-        if bjt.has_vbic_self_heating() {
+        if bjt.has_vbic_thermal_state() {
             seed_internal[BJT_THERMAL_STATE_INDEX] = Self::predict_transient_history_value(
                 history_internal_prev[BJT_THERMAL_STATE_INDEX],
                 history_internal_prev_prev.map(|history_internal_prev_prev| {

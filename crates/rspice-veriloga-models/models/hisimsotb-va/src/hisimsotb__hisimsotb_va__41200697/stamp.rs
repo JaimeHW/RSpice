@@ -2,7 +2,7 @@
 #![allow(dead_code, non_snake_case, unused_imports, unused_mut, unused_parens, unused_variables)]
 
 use super::state::Instance;
-use rspice_veriloga_runtime::{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, L10, L2, L3, L4, L5, L6, L7, L8, L9, evaluate_generated_above, evaluate_generated_cross, evaluate_generated_timer, rspice_eval_ddt, rspice_eval_idt, rspice_limexp, rspice_limited_exp, rspice_limited_exp_derivative};
+use rspice_veriloga_runtime::{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, L10, L2, L3, L4, L5, L6, L7, L8, L9, integer, evaluate_generated_above, evaluate_generated_cross, evaluate_generated_timer, rspice_eval_ddt, rspice_eval_idt, rspice_limexp, rspice_limited_exp, rspice_limited_exp_derivative};
 impl Instance {
     pub fn stamp(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedStamper<'_>) {
         let parameters = &self.params.values;
@@ -14184,8 +14184,8 @@ impl Instance {
 		let DDA=(BJ/ FL).sqrt();
 		let DDB=MF* DDA;
 		let NEA=KFL* DDA;
-		let DDH=DDF+ (DDE* DDG);
-		let DDI=DDG+ (DDE* DDF);
+		let DDH=ctx.integer_result(integer::real_to_integer((DDF+ (DDE* DDG))).map(f64::from));
+		let DDI=ctx.integer_result(integer::real_to_integer((DDG+ (DDE* DDF))).map(f64::from));
 		let DDY;
 		let JWV;
 		if DDD!=0.0{
@@ -14786,8 +14786,8 @@ impl Instance {
 		JYG=NDZ;
 		JYH=NDZ;
 		}
-		let DMV=(DMT* DDF)+ DDG;
-		let DMW=(DMT* DDG)+ DDF;
+		let DMV=ctx.integer_result(integer::real_to_integer(((DMT* DDF)+ DDG)).map(f64::from));
+		let DMW=ctx.integer_result(integer::real_to_integer(((DMT* DDG)+ DDF)).map(f64::from));
 		let DNI;
 		let JYI;
 		if DMT!=0.0{
@@ -15342,7 +15342,7 @@ impl Instance {
 		JZN=JYG;
 		JZO=JYH;
 		}
-		let DVW=(DDG* L)+ (DDF* K);
+		let DVW=ctx.integer_result(integer::real_to_integer(((DDG* L)+ (DDF* K))).map(f64::from));
 		let EAI;
 		let FKR;
 		let FKS;
@@ -15363,7 +15363,7 @@ impl Instance {
 		FKS=A;
 		JZP=NCV;
 		}
-		let DWB=(DDF* L)+ (DDG* K);
+		let DWB=ctx.integer_result(integer::real_to_integer(((DDF* L)+ (DDG* K))).map(f64::from));
 		let EAL;
 		let FKT;
 		let FKU;

@@ -51,7 +51,8 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fmt::Write;
 
 use crate::canonical_ir::cfg::{
-    CfgBinaryOp, CfgFunction, CfgTerminator, CfgUnaryOp, CfgValueKind, CfgValueType,
+    CfgBinaryOp, CfgFunction, CfgIntegerBitwiseOp, CfgTerminator, CfgUnaryOp, CfgValueKind,
+    CfgValueType,
 };
 use crate::canonical_ir::{BlockId, ValueId};
 
@@ -99,6 +100,8 @@ pub struct EmitBindings {
     /// Ordered `$finish` callback `(site, time, diagnostic_level) -> ()`.
     /// The owner journals calls and retains any task evaluation error.
     pub analog_finish: String,
+    /// Checked integer result callback; the owner retains evaluation failures.
+    pub integer_result: String,
 }
 
 impl Default for EmitBindings {
@@ -115,6 +118,7 @@ impl Default for EmitBindings {
             multiplicity: "multiplicity".into(),
             time: "time".into(),
             analog_finish: "analog_finish".into(),
+            integer_result: "integer_result".into(),
             ddt: "ddt".into(),
             ddt_slots: HashMap::new(),
             ddt_scale: "ddt_scale".into(),
@@ -173,14 +177,6 @@ pub enum EmitError {
         value: ValueId,
         operator: &'static str,
     },
-    /// An analog bitwise or shift operator.
-    ///
-    /// Representable at the canonical level and not emittable here: the
-    /// operands are `f64`s carrying `integer`s, and Verilog-AMS defines the
-    /// rounding, the 32-bit wrap and the out-of-range refusal that turn them
-    /// into one. Rust's `as` casts do none of those, so an emitted `&` would be
-    /// a different function wearing the same spelling.
-    UnsupportedIntegerOperator(ValueId),
     /// A frozen contribution-current probe reached the generated emitter.
     ///
     /// [`CfgValueKind::ContributedCurrent`] exists for a consumer that keeps
@@ -213,10 +209,6 @@ impl std::fmt::Display for EmitError {
             Self::UnsupportedStatefulOperator { value, operator } => write!(
                 f,
                 "{value} is a stateful {operator} unsupported by the direct generated-Rust runtime"
-            ),
-            Self::UnsupportedIntegerOperator(value) => write!(
-                f,
-                "{value} is an analog integer operator unsupported by the direct generated-Rust runtime"
             ),
             Self::ContributedCurrentInGeneratedEmitter(value) => write!(
                 f,
@@ -301,7 +293,14 @@ pub(super) fn lane_runtime_types(function: &CfgFunction) -> BTreeSet<String> {
 /// Generated model crates import the identical definitions from
 /// `rspice-veriloga-runtime`; this copy keeps direct-rustc emitter and benchmark
 /// programs self-contained.
-pub const RUNTIME_PRELUDE: &str = r#"
+pub const RUNTIME_PRELUDE: &str = concat!(
+    "mod integer {\n",
+    include_str!("../../../rspice-veriloga-runtime/src/integer.rs"),
+    "\n}\n",
+    r#"
+fn integer_result(result: Result<f64, integer::IntegerRuntimeError>) -> f64 {
+    result.expect("standalone generated integer evaluation must be valid")
+}
 #[inline(always)]
 fn rspice_limexp(x: f64) -> f64 {
     if x < 80.0 { x.exp() } else { (80.0f64).exp() * (x - 80.0 + 1.0) }
@@ -466,7 +465,8 @@ define_fixed_lanes!(L29, 29, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 
 define_fixed_lanes!(L30, 30, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29]);
 define_fixed_lanes!(L31, 31, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30]);
 define_fixed_lanes!(L32, 32, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31]);
-"#;
+"#
+);
 
 struct Emitter<'a> {
     function: &'a CfgFunction,
@@ -1868,8 +1868,39 @@ impl Emitter<'_> {
                     operator: "zi filter",
                 });
             }
-            CfgValueKind::IntegerBitwise { .. } | CfgValueKind::IntegerBitwiseNot { .. } => {
-                return Err(EmitError::UnsupportedIntegerOperator(value));
+            CfgValueKind::IntegerBitwise { op, left, right } => {
+                if *op == CfgIntegerBitwiseOp::Or
+                    && matches!(
+                        self.function.value(*right).kind,
+                        CfgValueKind::RealConstant(0.0)
+                    )
+                {
+                    let operand = self.numeric_operand(*left);
+                    if self.function.value(*left).value_type == CfgValueType::Boolean {
+                        return Ok(operand);
+                    }
+                    let result = super::expr::integer_cast_result(&operand);
+                    return Ok(format!("{}({result})", bindings.integer_result));
+                }
+                let left = self.numeric_operand(*left);
+                let right = self.numeric_operand(*right);
+                let operation = match op {
+                    CfgIntegerBitwiseOp::And => "BitAnd",
+                    CfgIntegerBitwiseOp::Or => "BitOr",
+                    CfgIntegerBitwiseOp::Xor => "BitXor",
+                    CfgIntegerBitwiseOp::Shl => "Shl",
+                    CfgIntegerBitwiseOp::Shr => "Shr",
+                };
+                let result = super::expr::integer_binary_result(operation, &left, &right);
+                format!("{}({result})", bindings.integer_result)
+            }
+            CfgValueKind::IntegerBitwiseNot { input } => {
+                let result = super::expr::integer_binary_result(
+                    "BitXor",
+                    &self.numeric_operand(*input),
+                    "-1.0",
+                );
+                format!("{}({result})", bindings.integer_result)
             }
             CfgValueKind::ContributedCurrent { .. } => {
                 return Err(EmitError::ContributedCurrentInGeneratedEmitter(value));

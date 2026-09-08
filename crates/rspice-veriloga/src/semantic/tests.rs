@@ -751,6 +751,9 @@ fn branch_body_cannot_perturb_its_own_guard() {
             Expression::Unary(u) => {
                 let v = eval(&u.operand, vars);
                 match u.op {
+                    UnaryOp::ToInteger => {
+                        f64::from(crate::integer_runtime::real_to_integer(v).unwrap())
+                    }
                     UnaryOp::Neg => -v,
                     UnaryOp::Pos => v,
                     UnaryOp::Not => f64::from(v == 0.0),

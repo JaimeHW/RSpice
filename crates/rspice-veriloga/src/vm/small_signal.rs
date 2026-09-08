@@ -77,8 +77,29 @@ impl<'a> SmallSignalVm<'a> {
 
     pub(crate) fn execute(&mut self, program: &BytecodeProgram) -> Result<Complex64, VmError> {
         self.stack.clear();
-        for instruction in &program.instructions {
-            self.execute_instruction(instruction)?;
+        let mut pc = 0;
+        while let Some(instruction) = program.instructions.get(pc) {
+            pc += 1;
+            let skip = match instruction {
+                Instruction::JumpIfFalse(skip) => {
+                    if self.pop_real("conditional jump")? == 0.0 {
+                        *skip
+                    } else {
+                        0
+                    }
+                }
+                Instruction::Jump(skip) => *skip,
+                _ => {
+                    self.execute_instruction(instruction)?;
+                    continue;
+                }
+            };
+            pc = pc
+                .checked_add(skip)
+                .filter(|end| *end <= program.instructions.len())
+                .ok_or(VmError::InvalidInstruction(
+                    "conditional jump is outside bytecode",
+                ))?;
         }
         let result = self
             .stack
@@ -347,6 +368,11 @@ impl<'a> SmallSignalVm<'a> {
 
     fn execute_instruction(&mut self, instruction: &Instruction) -> Result<(), VmError> {
         match instruction {
+            Instruction::JumpIfFalse(_) | Instruction::Jump(_) => {
+                return Err(VmError::InvalidInstruction(
+                    "conditional jump requires a bytecode program",
+                ));
+            }
             Instruction::PushConst(value) => self.stack.push(Complex64::new(*value, 0.0)),
             Instruction::PushParam(index) => {
                 let value = self
@@ -751,6 +777,30 @@ mod tests {
         let mut context = VmContext::new(0);
         context.analysis_type = 1;
         context
+    }
+
+    #[test]
+    fn conditional_integer_conversion_is_lazy_in_small_signal_execution() {
+        let context = ac_context();
+        let mut program = BytecodeProgram {
+            instructions: vec![
+                Instruction::PushConst(0.0),
+                Instruction::JumpIfFalse(4),
+                Instruction::PushConst(3e9),
+                Instruction::PushConst(0.0),
+                Instruction::BitOr,
+                Instruction::Jump(1),
+                Instruction::PushConst(7.0),
+            ],
+        };
+        // The false branch must neither convert the invalid integer nor leave
+        // values from the untaken arm on the expression stack.
+        let mut vm = SmallSignalVm::new(&context, 1.0).unwrap();
+        assert_eq!(vm.execute(&program).unwrap(), Complex64::new(7.0, 0.0));
+        program.instructions[0] = Instruction::PushConst(1.0);
+        assert!(vm.execute(&program).is_err());
+        program.instructions[1] = Instruction::Jump(usize::MAX);
+        assert!(vm.execute(&program).is_err());
     }
 
     #[test]

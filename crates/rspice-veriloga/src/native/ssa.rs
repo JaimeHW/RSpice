@@ -25,9 +25,7 @@
 
 #[cfg(test)]
 use crate::jit::expr::CompareOp;
-use crate::jit::expr::{
-    IntegerBinaryOp, NativeOp, NativeProgram, UnaryMathOp, native_op_stack_effect,
-};
+use crate::jit::expr::{NativeOp, NativeProgram, UnaryMathOp, native_op_stack_effect};
 use crate::jit::value_cache::{native_op_hash, native_ops_are_codegen_identical};
 use crate::jit::{JitError, JitResult};
 use std::collections::HashMap;
@@ -1811,6 +1809,17 @@ struct ArmOwner {
 }
 
 impl Program {
+    /// Preserve conditional error behavior while retaining selects for pure
+    /// numeric expressions that benefit from branchless machine code.
+    pub(crate) fn lower_executable(program: &NativeProgram) -> JitResult<Self> {
+        let lowered = Self::lower(program)?;
+        if program.needs_guarded_conditionals() {
+            lowered.with_branching_conditionals()
+        } else {
+            Ok(lowered)
+        }
+    }
+
     /// Re-express every `NativeOp::IfElse` as a real two-way branch over
     /// blocks, with the conditional's result arriving as a block parameter.
     ///
@@ -3857,7 +3866,10 @@ fn op_may_fail(op: NativeOp) -> bool {
             | NativeOp::IdtState(_)
             | NativeOp::IdtJacobian
             | NativeOp::IdtModState(_)
-            | NativeOp::IntegerBinary(IntegerBinaryOp::Shl | IntegerBinaryOp::Shr)
+            | NativeOp::IntegerCast
+            | NativeOp::IntegerBinary(_)
+            | NativeOp::IntegerShiftConst(_, _)
+            | NativeOp::IntegerBinaryConst(_, _)
     )
 }
 

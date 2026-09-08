@@ -100,7 +100,7 @@ pub const WASM_JIT_ABI_VERSION: u32 = 9;
 /// 14 to 15 holds coefficients outside ddt during reactive differentiation;
 /// old modules contain the spurious q * dk/dx term and must be rebuilt.
 /// 15 to 16 preserves higher-order ddx and descending shadow update order.
-pub const WASM_JIT_EMITTER_VERSION: u32 = 17;
+pub const WASM_JIT_EMITTER_VERSION: u32 = 18;
 
 /// Hard ceiling for one qualified shipped model's generated module.
 pub const SHIPPED_MODEL_WASM_CODE_SIZE_BUDGET_BYTES: usize = 32 * 1024 * 1024;
@@ -1930,6 +1930,56 @@ endmodule
                         );
                     }
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn integer_wasm_assignments_round_before_differentiation() {
+        use super::abi::FRAME_RESULT_OFFSET;
+        let source = "module integer_wasm(p,n); inout p,n; electrical p,n; integer q; analog begin q=V(p,n); I(p,n)<+q+0.25*V(p,n); end endmodule";
+        let mut harness = FusedKernelHarness::for_source(source, "integer_wasm");
+        let value = harness.stamp_value_export(0);
+        let jacobian = harness.jacobian_export(0, 0);
+        harness.reset();
+        for v in [-2.5_f64, -0.5, 0.49, 0.5, 1.25, 2.5] {
+            harness.write_f64(FusedKernelHarness::VOLTAGES as usize, v);
+            harness.call_assignments();
+            harness.call_prelude();
+            for (export, expected) in [(&value, v.round() + 0.25 * v), (&jacobian, 0.25)] {
+                assert_eq!(harness.call(export), 0);
+                assert_eq!(
+                    harness.read_f64(FRAME_RESULT_OFFSET as usize),
+                    expected,
+                    "at {v}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn conditional_integer_wasm_assignments_skip_invalid_untaken_values() {
+        use super::abi::FRAME_RESULT_OFFSET;
+        for declarations_and_body in [
+            "integer q; analog begin q=0; if(V(p,n)>0.0) begin if(V(p,n)<10.0) q=V(p,n); else q=3; end I(p,n)<+q; end",
+            "integer q[0:0],idx; analog begin idx=0; q[idx]=0; if(V(p,n)>0.0) begin if(V(p,n)<10.0) q[idx]=V(p,n); else q[idx]=3; end I(p,n)<+q[idx]; end",
+        ] {
+            let source = format!(
+                "module guarded_wasm(p,n); inout p,n; electrical p,n; {declarations_and_body} endmodule"
+            );
+            let mut harness = FusedKernelHarness::for_source(&source, "guarded_wasm");
+            let value = harness.stamp_value_export(0);
+            harness.reset();
+            for (v, expected) in [(1.5, 2.0), (3e9, 3.0), (-3e9, 0.0), (2.5, 3.0)] {
+                harness.write_f64(FusedKernelHarness::VOLTAGES as usize, v);
+                harness.call_assignments();
+                harness.call_prelude();
+                assert_eq!(harness.call(&value), 0, "at {v}");
+                assert_eq!(
+                    harness.read_f64(FRAME_RESULT_OFFSET as usize),
+                    expected,
+                    "at {v}"
+                );
             }
         }
     }

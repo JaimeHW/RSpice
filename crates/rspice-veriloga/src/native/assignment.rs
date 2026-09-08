@@ -80,13 +80,18 @@ pub(crate) fn shareable_batch_ranges(
     while start < assignments.len() {
         let NativeAssignment::Direct {
             var_index: first_target,
-            ..
+            program,
         } = &assignments[start]
         else {
             ranges.push(start..start + 1);
             start += 1;
             continue;
         };
+        if program.needs_guarded_conditionals() {
+            ranges.push(start..start + 1);
+            start += 1;
+            continue;
+        }
         let mut published = HashSet::new();
         published.insert(*first_target);
         let mut end = start + 1;
@@ -94,7 +99,10 @@ pub(crate) fn shareable_batch_ranges(
             let NativeAssignment::Direct { var_index, program } = &assignments[end] else {
                 break;
             };
-            if published.contains(var_index) || program_reads_any_variable(program, &published) {
+            if program.needs_guarded_conditionals()
+                || published.contains(var_index)
+                || program_reads_any_variable(program, &published)
+            {
                 break;
             }
             published.insert(*var_index);
@@ -218,5 +226,33 @@ mod tests {
             },
         ];
         assert_eq!(shareable_batch_ranges(&assignments), vec![0..1, 1..2]);
+    }
+
+    #[test]
+    fn conditional_errors_are_assignment_batch_barriers() {
+        let guarded = NativeAssignment::Direct {
+            var_index: 1,
+            program: NativeProgram::from_ops_for_test(
+                vec![
+                    NativeOp::Const(0.0),
+                    NativeOp::Const(3e9),
+                    NativeOp::IntegerCast,
+                    NativeOp::Const(2.0),
+                    NativeOp::IfElse,
+                ],
+                3,
+                Vec::new(),
+                Vec::new(),
+            ),
+        };
+        assert_eq!(
+            shareable_batch_ranges(&[
+                constant_assignment(0),
+                guarded,
+                constant_assignment(2),
+                constant_assignment(3)
+            ]),
+            vec![0..1, 1..2, 2..4]
+        );
     }
 }

@@ -272,6 +272,9 @@ pub(super) fn generate_noise_file(
         "noise_metadata_schedule",
         Some("noise_source_active_mask"),
     )?;
+    if out.contains("ctx.integer_result(") || helper_methods.contains("ctx.integer_result(") {
+        out.push_str("        ctx.check_noise_evaluation()?;\n");
+    }
     for (index, source) in artifact.noise_sources.sources.iter().enumerate() {
         writeln!(
             out,
@@ -350,6 +353,9 @@ pub(super) fn generate_noise_file(
         };
         writeln!(out, "            let psd = {scaled_psd};").expect("write multiplicity scaling");
         emit_finite_check(&mut out, index, "scaled psd", "psd", 12);
+        if out.contains("ctx.integer_result(") || helper_methods.contains("ctx.integer_result(") {
+            out.push_str("            ctx.check_noise_evaluation()?;\n");
+        }
         writeln!(
             out,
             "            if !visitor.visit({index}, GeneratedNoiseEvaluationRef {{ active: true, psd, exponent, table_operands: &table_operands }}) {{ return Ok(()); }}"
@@ -601,6 +607,7 @@ pub(super) fn grouped_noise_extension(
     )
     .expect("write grouped branch flows");
     let mut bindings = EmitBindings {
+        integer_result: "ctx.integer_result".into(),
         analysis: "ctx.analysis".into(),
         simparam: "ctx.simparam_or".into(),
         ..EmitBindings::default()
@@ -617,6 +624,9 @@ pub(super) fn grouped_noise_extension(
         &body.lines().map(str::to_owned).collect::<Vec<_>>(),
         8,
     );
+    if body.contains("ctx.integer_result(") {
+        out.push_str("        ctx.check_noise_evaluation()?;\n");
+    }
     out.push_str("        let omega = core::f64::consts::TAU * frequency_hz;\n");
     for (process_index, process) in plan.processes.iter().enumerate() {
         let active = &values[process.active];

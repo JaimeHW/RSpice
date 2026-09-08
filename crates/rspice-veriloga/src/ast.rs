@@ -1232,6 +1232,8 @@ pub struct UnaryExpr {
 /// Unary operators
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UnaryOp {
+    /// Compiler-inserted assignment conversion; never parsed as an operator.
+    ToInteger,
     Neg,    // -
     Pos,    // +
     Not,    // !

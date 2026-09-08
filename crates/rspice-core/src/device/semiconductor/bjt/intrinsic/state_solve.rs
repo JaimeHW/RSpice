@@ -114,7 +114,7 @@ impl Bjt {
             || self.ibeip > 0.0
             || self.ibenp > 0.0
             || (!self.vbic_three_terminal && (self.ibcip > 0.0 || self.ibcnp > 0.0))
-            || self.self_heating_enabled()
+            || self.thermal_model_enabled()
     }
 
     #[inline]
@@ -134,7 +134,7 @@ impl Bjt {
             } else {
                 external[EXT_S]
             },
-            if self.self_heating_enabled() {
+            if self.thermal_model_enabled() && !self.vbic_13 {
                 self.minimum_thermal_rise()
             } else {
                 0.0
@@ -342,7 +342,7 @@ impl Bjt {
             })
         });
 
-        if !self.self_heating_enabled() {
+        if !self.thermal_model_enabled() {
             return evaluated;
         }
 
@@ -580,7 +580,7 @@ impl Bjt {
     ) -> ([Value; INTERNAL_DIM], Value) {
         let (direct_state, direct_residual_norm) =
             self.solve_intrinsic_state_from_seed(vc, vb, ve, vs, state);
-        if !self.self_heating_enabled() {
+        if !self.thermal_model_enabled() {
             return (direct_state, direct_residual_norm);
         }
 
@@ -619,7 +619,7 @@ impl Bjt {
         vs: Value,
         state: [Value; INTERNAL_DIM],
     ) -> [Value; INTERNAL_DIM] {
-        if !self.self_heating_enabled() {
+        if !self.thermal_model_enabled() {
             return state;
         }
 
@@ -647,7 +647,7 @@ impl Bjt {
             }
 
             let current_vrth = current_state[IDX_VRTH];
-            let max_step = (current_vrth - minimum_vrth + 10.0).max(1.0) * 0.5;
+            let max_step = self.thermal_rebalance_step_limit(current_vrth);
             let step = (-thermal_residual / thermal_derivative).clamp(-max_step, max_step);
             if step.abs() < 1e-12 {
                 break;
@@ -711,7 +711,7 @@ impl Bjt {
         let has_rbi = Self::series_active(self.rbi);
         let has_re = Self::series_active(self.re);
         let has_rs = self.has_substrate_resistance();
-        let has_self_heat = self.self_heating_enabled();
+        let has_self_heat = self.thermal_model_enabled();
         let solve_vbp = self.vbic_solves_vbp();
 
         let [
@@ -906,7 +906,7 @@ impl Bjt {
         let has_rbi = Self::series_active(self.rbi);
         let has_re = Self::series_active(self.re);
         let has_rs = self.has_substrate_resistance();
-        let has_self_heat = self.self_heating_enabled();
+        let has_self_heat = self.thermal_model_enabled();
         let solve_vbp = self.vbic_solves_vbp();
         let (collector_d, base_d, emitter_d) = self.intrinsic_terminal_derivatives(eval.linearized);
         let collector_internal = Self::branch_from_internal(eval.linearized.ic, collector_d);
@@ -1126,7 +1126,7 @@ impl Bjt {
                 state.vcx, state.vci, state.vbx, state.vbi, state.vei, state.vbp, state.vsi,
                 state.vrth, 0.0, 0.0,
             ];
-            Some(if self.self_heating_enabled() {
+            Some(if self.thermal_model_enabled() {
                 self.with_temperature_variant(state.vrth, |model| {
                     model.dynamic_charge_inputs(external, internal)
                 })

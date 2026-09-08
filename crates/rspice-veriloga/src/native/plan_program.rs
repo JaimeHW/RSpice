@@ -273,11 +273,10 @@ impl<'a> PlanProgramRef<'a> {
     /// The block form of this entry, lifting the postfix stream when that is
     /// what it holds.
     ///
-    /// The postfix arm is the shipped route's exact lowering, unchanged: the
-    /// sum type decides which program a backend compiles, never how.
+    /// Postfix expressions retain conditional guards around fallible operations.
     pub(crate) fn lower_to_ssa(self) -> JitResult<ssa::Program> {
         match self {
-            Self::Postfix(program) => ssa::Program::lower(program),
+            Self::Postfix(program) => ssa::Program::lower_executable(program),
             Self::Blocks(program) => Ok(program.program.clone()),
         }
     }

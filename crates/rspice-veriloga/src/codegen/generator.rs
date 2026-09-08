@@ -1290,6 +1290,10 @@ impl CodeGenerator {
                 }
                 Node::Unary(op, _) => {
                     match op {
+                        crate::ast::UnaryOp::ToInteger => {
+                            program.instructions.push(Instruction::PushConst(0.0));
+                            program.instructions.push(Instruction::BitOr);
+                        }
                         crate::ast::UnaryOp::Neg => program.instructions.push(Instruction::Neg),
                         // Unary plus is the identity
                         crate::ast::UnaryOp::Pos => {}
@@ -1326,9 +1330,15 @@ impl CodeGenerator {
                 }
                 Node::Conditional(cond, then_expr, else_expr) => {
                     self.emit_expr(arena, cond, emit_ctx, program)?;
+                    let branch = program.instructions.len();
+                    program.instructions.push(Instruction::JumpIfFalse(0));
                     self.emit_expr(arena, then_expr, emit_ctx, program)?;
+                    let jump = program.instructions.len();
+                    program.instructions.push(Instruction::Jump(0));
+                    program.instructions[branch] = Instruction::JumpIfFalse(jump - branch);
                     self.emit_expr(arena, else_expr, emit_ctx, program)?;
-                    program.instructions.push(Instruction::IfElse);
+                    program.instructions[jump] =
+                        Instruction::Jump(program.instructions.len() - jump - 1);
                 }
                 Node::Ddt(inner) => {
                     // Backward-Euler time derivative with a dedicated state slot:

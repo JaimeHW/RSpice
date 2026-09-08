@@ -81,6 +81,9 @@ impl Bjt {
         self.tr = 0.0;
         self.td = 0.0;
         self.rth_nominal = 0.0;
+        self.tcrth = 0.0;
+        self.tminclip = -100.0;
+        self.tmaxclip = 500.0;
         self.cth_nominal = 0.0;
         self.rth = 0.0;
         self.cth = 0.0;
@@ -239,6 +242,9 @@ impl Bjt {
         self.tr = 0.0;
         self.td = 0.0;
         self.rth_nominal = 0.0;
+        self.tcrth = 0.0;
+        self.tminclip = -100.0;
+        self.tmaxclip = 500.0;
         self.cth_nominal = 0.0;
         self.rth = 0.0;
         self.cth = 0.0;
@@ -286,8 +292,8 @@ impl Bjt {
     }
 
     #[inline]
-    pub(crate) fn has_vbic_self_heating(&self) -> bool {
-        self.self_heating_enabled()
+    pub(crate) fn has_vbic_thermal_state(&self) -> bool {
+        self.thermal_model_enabled()
     }
 
     #[inline]
@@ -414,7 +420,7 @@ impl Bjt {
         thermal_rise: Value,
         f: impl FnOnce(&Self) -> R,
     ) -> R {
-        if !self.self_heating_enabled() {
+        if !self.thermal_model_enabled() {
             return f(self);
         }
 
@@ -427,8 +433,7 @@ impl Bjt {
         }
 
         let mut variant = self.clone_without_thermal_variant_cache();
-        variant
-            .refresh_operating_scaling_for((self.requested_temperature() + thermal_rise).max(1.0));
+        variant.refresh_operating_scaling_for(self.requested_temperature() + thermal_rise);
         let result = f(&variant);
 
         let mut cache = self.thermal_variant_cache.borrow_mut();
@@ -440,6 +445,7 @@ impl Bjt {
     }
 
     pub(super) fn refresh_operating_scaling_for(&mut self, temp: Value) {
+        let temp = self.mapped_temperature(temp).0;
         self.clear_thermal_variant_cache();
         let tnom = self.tnom.max(1.0);
         let vt = self.thermal_voltage_at(temp);
@@ -714,7 +720,7 @@ impl Bjt {
             self.legacy_junction_limited = false;
             self.reduced_linearization_cache_valid.set(false);
             self.charge_snapshot_cache_valid.set(false);
-            self.mna_limited_from = None;
+            self.mna_limited_from.set(None);
         }
     }
 
@@ -742,7 +748,7 @@ impl Bjt {
     /// thermal terminal.
     pub fn set_vbic_external_thermal_node(&mut self, thermal: NodeId) {
         self.node_rth = thermal;
-        self.vbic_external_thermal_node = thermal != 0;
+        self.vbic_external_thermal_node = true;
         self.rth = self.rth_nominal.max(0.0);
         self.cth = self.thermal_capacitance();
     }
@@ -768,6 +774,12 @@ impl Bjt {
             && params
                 .get("LEVEL")
                 .is_some_and(|level| (*level - 11.0).abs() <= 1e-9);
+        self.vbic_13 = self.charge_model == BjtChargeModel::Vbic
+            && params.get("LEVEL").is_some_and(|level| {
+                [11.0, 12.0]
+                    .iter()
+                    .any(|expected| (*level - expected).abs() <= 1e-9)
+            });
         if self.vbic_three_terminal {
             self.node_substrate = 0;
         }
@@ -1317,6 +1329,23 @@ impl Bjt {
         {
             self.td = v.max(0.0);
         }
+        if self.vbic_13 {
+            if let Some(&v) = params.get("TCRTH").filter(|v| v.is_finite()) {
+                self.tcrth = v;
+            }
+            if let Some(&v) = params
+                .get("TMINCLIP")
+                .filter(|v| (-250.0..=27.0).contains(*v))
+            {
+                self.tminclip = v;
+            }
+            if let Some(&v) = params
+                .get("TMAXCLIP")
+                .filter(|v| (27.0..=1000.0).contains(*v))
+            {
+                self.tmaxclip = v;
+            }
+        }
         if let Some(&v) = params.get("RTH")
             && v.is_finite()
         {
@@ -1483,7 +1512,7 @@ impl Bjt {
         if !has_ibei && self.charge_model == BjtChargeModel::LegacyGummelPoon {
             self.ibei_nominal = self.is_nominal / self.bf.max(1e-18);
         }
-        if self.charge_model == BjtChargeModel::Vbic && has_rth {
+        if self.charge_model == BjtChargeModel::Vbic && !self.vbic_13 && has_rth {
             // ngspice VBIC setup semantics:
             // - If RTH is provided, clamp CTH to at least 1e-12.
             if self.cth_nominal < 1e-12 {
@@ -1638,7 +1667,8 @@ impl Bjt {
     /// - `IC_VBE` / `IC_VCE`: the `IC=` vector components, read only by the
     ///   `UIC` transient startup
     /// - `TEMP`: absolute device temperature in Celsius
-    /// - `DTEMP`: temperature delta in Celsius
+    /// - `DTEMP`: temperature delta in Celsius (VBIC also accepts TRISE/DTA)
+    /// - VBIC `SW_ET` / `SW_NOISE`: heat-generation / noise switches
     pub fn with_instance_params(mut self, params: &[(String, Value)]) -> Self {
         for (name, value) in params {
             if !value.is_finite() {
@@ -1679,8 +1709,18 @@ impl Bjt {
                 continue;
             }
 
-            if name.eq_ignore_ascii_case("DTEMP") {
+            if name.eq_ignore_ascii_case("DTEMP")
+                || (self.uses_vbic_dynamic_charges()
+                    && (name.eq_ignore_ascii_case("TRISE") || name.eq_ignore_ascii_case("DTA")))
+            {
                 self.instance_dtemp = *value;
+            }
+            if self.uses_vbic_dynamic_charges() {
+                if name.eq_ignore_ascii_case("SW_ET") {
+                    self.vbic_heat_generation = *value != 0.0;
+                } else if name.eq_ignore_ascii_case("SW_NOISE") {
+                    self.vbic_noise_enabled = *value != 0.0;
+                }
             }
         }
 
@@ -1692,6 +1732,92 @@ impl Bjt {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn vbic13_temperature_mapping_has_exponential_tails_and_unit_slope_joins() {
+        for level in [11.0, 12.0] {
+            let bjt = model_with(&[("LEVEL", level), ("TMINCLIP", -50.0), ("TMAXCLIP", 100.0)]);
+            for (raw_c, expected_c, slope) in [
+                (-1000.0, -50.0, 0.0),
+                (-51.0, -50.0 + (-2.0_f64).exp(), (-2.0_f64).exp()),
+                (-49.0, -49.0, 1.0),
+                (27.0, 27.0, 1.0),
+                (99.0, 99.0, 1.0),
+                (101.0, 100.0 - (-2.0_f64).exp(), (-2.0_f64).exp()),
+                (2000.0, 100.0, 0.0),
+            ] {
+                let raw = raw_c + 273.15;
+                let (temperature, derivative) = bjt.mapped_temperature(raw);
+                assert!((temperature - (expected_c + 273.15)).abs() < 1e-12);
+                assert!((derivative - slope).abs() < 1e-12);
+                let h = 1e-5;
+                let finite_difference = (bjt.mapped_temperature(raw + h).0
+                    - bjt.mapped_temperature(raw - h).0)
+                    / (2.0 * h);
+                assert!((derivative - finite_difference).abs() < 3e-6);
+            }
+            // Mapping occurs after the thermal node offsets the raw ambient:
+            // -99.85 K + 400 K is nominal, even though ambient alone clips.
+            let offset = bjt.with_instance_params(&[("TRISE".into(), -400.0)]);
+            offset.with_temperature_variant(400.0, |model| {
+                assert!((model.temperature - 300.15).abs() < 1e-12);
+            });
+            assert!(offset.minimum_thermal_rise().is_infinite());
+            assert!(offset.thermal_rebalance_step_limit(-1000.0).is_finite());
+        }
+        let legacy = model_with(&[("LEVEL", 4.0)]);
+        assert_eq!(legacy.mapped_temperature(-10.0), (1.0, 0.0));
+        assert_eq!(legacy.mapped_temperature(900.0), (900.0, 1.0));
+    }
+
+    #[test]
+    fn vbic13_thermal_sink_jacobian_includes_resistance_and_clip_derivatives() {
+        for level in [11.0, 12.0] {
+            for coefficient in [-0.05, 0.0, 0.005, 0.05] {
+                let bjt = model_with(&[
+                    ("LEVEL", level),
+                    ("RTH", 1000.0),
+                    ("TCRTH", coefficient),
+                    ("TMINCLIP", -50.0),
+                    ("TMAXCLIP", 100.0),
+                ])
+                .with_instance_params(&[("M".into(), 3.0)]);
+                for rise in [-1000.0, -78.0, -76.0, 0.0, 20.0, 72.0, 74.0, 1000.0] {
+                    let branch = bjt.thermal_sink_branch(rise);
+                    let h = 1e-5;
+                    let fd = (bjt.thermal_sink_branch(rise + h).current
+                        - bjt.thermal_sink_branch(rise - h).current)
+                        / (2.0 * h);
+                    let actual = branch.d_internal[IDX_VRTH];
+                    assert!(
+                        (actual - fd).abs() < 2e-5 * actual.abs().max(1e-3),
+                        "level={level}, coefficient={coefficient}, rise={rise}: {actual} vs {fd}"
+                    );
+                    assert!(branch.current.is_finite());
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn vbic13_preserves_authored_thermal_capacitance_including_zero() {
+        for level in [4.0, 9.0, 11.0, 12.0] {
+            for capacitance in [None, Some(0.0), Some(1e-15), Some(2e-12)] {
+                let mut params = vec![("LEVEL", level), ("RTH", 1000.0), ("SELFT", 1.0)];
+                if let Some(value) = capacitance {
+                    params.push(("CTH", value));
+                }
+                let bjt = model_with(&params).with_instance_params(&[("M".into(), 3.0)]);
+                let authored = capacitance.unwrap_or(0.0);
+                let expected = if level < 11.0 {
+                    authored.max(1e-12)
+                } else {
+                    authored
+                };
+                assert_eq!(bjt.thermal_capacitance(), 3.0 * expected);
+            }
+        }
+    }
     use std::collections::HashMap;
 
     fn model_with(params: &[(&str, Value)]) -> Bjt {
@@ -1764,6 +1890,7 @@ mod tests {
             ("RBP", 0.0),
         ]);
         collapsed.set_temperature(350.0);
+        collapsed.set_vbic_external_thermal_node(0);
         collapsed
             .assign_vbic_internal_nodes(|name| panic!("zero resistance must not allocate {name}"));
         assert_eq!(collapsed.node_bi, collapsed.node_base);

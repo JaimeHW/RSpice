@@ -1178,7 +1178,10 @@ pub(crate) fn simulation_checkpoint_identity(config: &SimulationConfig) -> Strin
     // v22 corrects VBIC resistance topology, thermal-voltage constants and
     // convergence-history advancement for an unchanged physical candidate.
     // v23 removes the four-terminal substrate network from LEVEL=11 VBIC.
-    hasher.update(b"rspice-transient-resolved-config-v23\0");
+    // v24 restores native VBIC 1.3 thermal defaults and instance switches.
+    // v25 applies VBIC 1.3 thermal-resistance scaling, temperature limits and
+    // authored CTH, and scopes the limited-evaluation cache to one matrix load.
+    hasher.update(b"rspice-transient-resolved-config-v25\0");
     hash_field(&mut hasher, "temperature", config.temperature.to_bits());
     hash_field(&mut hasher, "ramptime", config.ramptime.to_bits());
     hash_field(&mut hasher, "digital_delay_type", config.digital_delay_type);

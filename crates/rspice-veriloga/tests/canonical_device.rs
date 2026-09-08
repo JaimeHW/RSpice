@@ -22,6 +22,191 @@ use std::process::Command;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 #[test]
+fn generated_integer_assignments_and_bitwise_operations_execute_shared_semantics() {
+    let source = r#"
+module integer_generated(p,n);
+inout p,n; electrical p,n;
+parameter integer mask=3;
+parameter integer shifted=mask<<1;
+integer q, a[0:1];
+analog function integer round_input;
+    input x; real x;
+    round_input=x;
+endfunction
+analog begin
+    q=V(p,n); a[0]=V(p,n); a[1]=-V(p,n);
+    I(p,n)<+q+a[0]-a[1]+round_input(V(p,n))+0.25*V(p,n)+shifted+(q&3)+(q^2)+(q|4)+~q+(q<<1)+(q>>1);
+end
+endmodule
+"#;
+    let name = "generated checked integers";
+    let (state, stamp, noise) = generated_parts(source, name);
+    run_generated_main(name,&state,&stamp,&noise,r#"
+let mut instance=device::state::Instance::new(&[0,1]);
+instance.finalize_parameters().unwrap();
+for v in [-2.5_f64,-1.5,-0.5,0.49,0.5,1.25,1.5,2.5] {
+    let q=v.round() as i32;
+    let expected=4.0*f64::from(q)+0.25*v+6.0+f64::from((q&3)+(q^2)+(q|4)+!q+(q<<1))+f64::from(((q as u32)>>1) as i32);
+    let bias=[v,0.0];
+    let ctx=runtime::GeneratedEvalContext { voltages:&bias,temperature:300.0 };
+    let mut real=[0.0;12];
+    instance.stamp(&ctx,&mut runtime::GeneratedStamper { sink:Some(&mut real) });
+    assert_eq!(real[9],expected,"at {v}: {real:?}");
+    assert_eq!(real[10],0.25);
+    assert!(!ctx.evaluation_failed());
+}
+"#).unwrap_or_else(|report|panic!("{report}"));
+}
+
+#[test]
+fn generated_integer_noise_conditions_cannot_hide_conversion_errors() {
+    let source = r#"module bad_integer_noise(p,n); inout p,n; electrical p,n; integer q; analog begin q=V(p,n); I(p,n)<+white_noise(q ? 1.0 : 2.0,"integer"); end endmodule"#;
+    let name = "checked integer noise condition";
+    let (state, stamp, noise) = generated_parts(source, name);
+    run_generated_main(name,&state,&stamp,&noise,r#"
+struct Capture;
+impl runtime::GeneratedNoiseVisitor for Capture {
+    fn visit(&mut self,_index:usize,_value:runtime::GeneratedNoiseEvaluationRef<'_>)->bool { true }
+}
+impl runtime::GeneratedNoiseProcessVisitor for Capture {
+    fn visit_process(&mut self,_index:usize,_value:runtime::GeneratedNoiseProcessEvaluationRef<'_>)->bool { true }
+}
+let mut instance=device::state::Instance::new(&[0,1]);
+instance.finalize_parameters().unwrap();
+for (v,fails) in [(1.5,false),(2147483647.5,true)] {
+    let bias=[v,0.0];
+    let ctx=runtime::GeneratedEvalContext { voltages:&bias,temperature:300.0 };
+    runtime::clear_evaluation_error();
+    assert_eq!(instance.evaluate_noise_sources(&ctx,&mut Capture).is_err(),fails);
+    runtime::clear_evaluation_error();
+    assert_eq!(instance.evaluate_noise_processes_at_frequency(&ctx,1.0,&mut Capture).is_err(),fails);
+}
+"#).unwrap_or_else(|report|panic!("{report}"));
+}
+
+#[test]
+fn generated_integer_preprocessing_does_not_cache_failed_conversions() {
+    for (name, declaration, rhs, configure) in [
+        (
+            "integer_model_stage",
+            "parameter real bias=2.5;",
+            "bias",
+            "instance.set_parameter(\"bias\",input).unwrap(); instance.finalize_parameters().unwrap();",
+        ),
+        ("integer_temperature_stage", "", "$temperature", ""),
+    ] {
+        let work = "g=g+sin(g);".repeat(12);
+        let source = format!(
+            "module {name}(p,n); inout p,n; electrical p,n; {declaration} integer q; real g; analog begin g={rhs}; {work} q=g; I(p,n)<+(q ? g : 2.0)*V(p,n); end endmodule"
+        );
+        let (state, stamp, noise) = generated_parts(&source, name);
+        assert!(
+            stamp.contains("_preprocess("),
+            "fixture must execute cached preprocessing"
+        );
+        run_generated_main(
+            name,
+            &state,
+            &stamp,
+            &noise,
+            &format!(
+                r#"
+let mut instance=device::state::Instance::new(&[0,1]);
+instance.finalize_parameters().unwrap();
+for input in [3000000000.0,0.49] {{
+    {configure}
+    for _ in 0..2 {{
+        runtime::clear_evaluation_error();
+        let ctx=runtime::GeneratedEvalContext {{ voltages:&[1.0,0.0],temperature:input }};
+        instance.stamp(&ctx,&mut runtime::GeneratedStamper::default());
+        assert_eq!(ctx.evaluation_failed(),input>1e9,"input {{input}}");
+    }}
+}}
+"#
+            ),
+        )
+        .unwrap_or_else(|report| panic!("{name}: {report}"));
+    }
+}
+
+#[test]
+fn generated_integer_initializers_import_the_shared_conversion() {
+    let name = "generated integer initializer";
+    let (state, stamp, noise) = generated_parts(
+        "module init_integer(p,n); inout p,n; electrical p,n; integer q=1.5; analog I(p,n)<+q+0.25*V(p,n); endmodule",
+        name,
+    );
+    run_generated_main(
+        name,
+        &state,
+        &stamp,
+        &noise,
+        r#"
+let mut instance=device::state::Instance::new(&[0,1]);
+instance.finalize_parameters().unwrap();
+let ctx=runtime::GeneratedEvalContext { voltages:&[1.0,0.0],temperature:300.0 };
+let mut values=[0.0;12];
+instance.stamp(&ctx,&mut runtime::GeneratedStamper { sink:Some(&mut values) });
+assert_eq!(values[9],2.25);
+assert_eq!(values[10],0.25);
+assert!(!ctx.evaluation_failed());
+"#,
+    )
+    .unwrap_or_else(|report| panic!("{report}"));
+}
+
+#[test]
+fn generated_integer_noise_metadata_uses_finalized_parameters_and_rounded_assignments() {
+    let source = r#"module integer_noise(p,n); inout p,n; electrical p,n; parameter integer shift=1; parameter integer mask=1<<shift; integer q; analog begin q=V(p,n); I(p,n)<+white_noise((q&3)+mask,"integer"); end endmodule"#;
+    let name = "generated integer noise";
+    let (state, stamp, noise) = generated_parts(source, name);
+    run_generated_main(name,&state,&stamp,&noise,r#"
+struct Capture(f64);
+impl runtime::GeneratedNoiseVisitor for Capture {
+    fn visit(&mut self,_index:usize,value:runtime::GeneratedNoiseEvaluationRef<'_>)->bool { self.0=value.psd; true }
+}
+let mut instance=device::state::Instance::new(&[0,1]);
+for (shift,mask) in [(1.0,2.0),(32.0,0.0)] {
+    instance.set_parameter("shift",shift).unwrap();
+    instance.finalize_parameters().unwrap();
+    for v in [-1.5_f64,0.5,2.5] {
+        let bias=[v,0.0];
+        let ctx=runtime::GeneratedEvalContext { voltages:&bias,temperature:300.0 };
+        let mut capture=Capture(f64::NAN);
+        instance.evaluate_noise_sources(&ctx,&mut capture).unwrap();
+        assert_eq!(capture.0,f64::from((v.round() as i32)&3)+mask);
+        assert!(!ctx.evaluation_failed());
+    }
+}
+"#).unwrap_or_else(|report|panic!("{report}"));
+}
+
+#[test]
+fn generated_integer_failures_survive_boolean_control_flow() {
+    let source = "module checked_integer(p,n); inout p,n; electrical p,n; integer q; analog begin q=0; if(V(p,n)>0.0) q=V(p,n); if(q) I(p,n)<+1.0; else I(p,n)<+2.0; end endmodule";
+    let name = "generated invalid integer condition";
+    let (state, stamp, noise) = generated_parts(source, name);
+    run_generated_main(
+        name,
+        &state,
+        &stamp,
+        &noise,
+        r#"
+let mut instance=device::state::Instance::new(&[0,1]);
+instance.finalize_parameters().unwrap();
+for (v,fails) in [(-2147483649.0,false),(1.5,false),(2147483647.5,true)] {
+    let bias=[v,0.0];
+    let ctx=runtime::GeneratedEvalContext { voltages:&bias,temperature:300.0 };
+    runtime::clear_evaluation_error();
+    instance.stamp(&ctx,&mut runtime::GeneratedStamper::default());
+    assert_eq!(ctx.evaluation_failed(),fails,"at {v}");
+}
+"#,
+    )
+    .unwrap_or_else(|report| panic!("{report}"));
+}
+
+#[test]
 fn generated_real_modulo_does_not_erase_invalid_noise_metadata() {
     let source = "module invalid_remainder(p,n); inout p,n; electrical p,n; analog I(p,n)<+white_noise(0.0%V(p,n),\"source\"); endmodule";
     let name = "zero numerator remainder noise metadata";
@@ -4226,6 +4411,11 @@ mod analog_effects {
     r#"
 }
 pub mod runtime {
+    pub mod integer {
+"#,
+    include_str!("../../rspice-veriloga-runtime/src/integer.rs"),
+    r#"
+    }
     pub type Value = f64;
     pub use crate::analog_effects::*;
 
@@ -5174,6 +5364,12 @@ pub mod runtime {
         pub fn report_event_control_error(&self, _operator: &'static str, _slot: usize, _source: GeneratedEventControlError) {}
         pub fn analog_tasks_enabled(&self) -> bool { TASKS_ENABLED.load(std::sync::atomic::Ordering::SeqCst) }
         pub fn evaluation_failed(&self) -> bool { EVALUATION_FAILED.load(std::sync::atomic::Ordering::SeqCst) }
+        pub fn integer_result(&self, result: Result<f64, integer::IntegerRuntimeError>) -> f64 {
+            result.unwrap_or_else(|_| { EVALUATION_FAILED.store(true, std::sync::atomic::Ordering::SeqCst); f64::NAN })
+        }
+        pub fn check_noise_evaluation(&self) -> Result<(), GeneratedNoiseEvaluationError> {
+            if self.evaluation_failed() { Err(GeneratedNoiseEvaluationError::NonFinite { index:0,quantity:"evaluation",value:f64::NAN }) } else { Ok(()) }
+        }
         pub fn report_initialization_error(&self, _slot: usize) { EVALUATION_FAILED.store(true, std::sync::atomic::Ordering::SeqCst); }
         pub fn report_analog_task_error(&self, _site: u32, _source: AnalogEffectError) { EVALUATION_FAILED.store(true, std::sync::atomic::Ordering::SeqCst); }
     }

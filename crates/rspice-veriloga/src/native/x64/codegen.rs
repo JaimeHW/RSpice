@@ -161,7 +161,7 @@ pub(crate) fn compile_value_function_artifact(
     program: &NativeProgram,
 ) -> JitResult<CompiledX64Function> {
     validate_expression_stack_depth(program.max_stack_depth())?;
-    compile_value_function_artifact_from_ssa(&X64SsaProgram::lower(program)?)
+    compile_value_function_artifact_from_ssa(&X64SsaProgram::lower_executable(program)?)
 }
 
 /// Compile one already-lowered value entry.
@@ -232,7 +232,7 @@ fn compile_assignment_function_artifact(
     program: &NativeProgram,
 ) -> JitResult<CompiledX64Function> {
     validate_expression_stack_depth(program.max_stack_depth())?;
-    let ssa = X64SsaProgram::lower(program)?;
+    let ssa = X64SsaProgram::lower_executable(program)?;
     validate_expression_stack_depth(ssa.maximum_stack_depth())?;
     let allocation = RegisterAllocation::build(&ssa, X64_VALUE_BANK)?;
     let callee_saved_xmm_count = callee_saved_xmm_count_for_allocation(&allocation);
@@ -1012,12 +1012,12 @@ impl FunctionCompiler {
     }
 
     fn emit_native_program(&mut self, program: &NativeProgram) -> JitResult<()> {
-        let ssa = X64SsaProgram::lower(program)?;
+        let ssa = X64SsaProgram::lower_executable(program)?;
         self.emit_program(&ssa)
     }
 
-    /// Emit a program the postfix lift produced, which publishes one block and
-    /// so has no back edge to guard.
+    /// Emit an acyclic expression program; conditional splitting introduces
+    /// forward branches but no back edge to guard.
     fn emit_program(&mut self, ssa: &X64SsaProgram) -> JitResult<()> {
         validate_expression_stack_depth(ssa.maximum_stack_depth())?;
         let allocation = RegisterAllocation::build(ssa, X64_VALUE_BANK)?;
@@ -2125,7 +2125,8 @@ impl FunctionCompiler {
     ) -> JitResult<()> {
         for range in shareable_batch_ranges(assignments) {
             let batch = &assignments[range];
-            if matches!(batch.first(), Some(NativeAssignment::Direct { .. })) {
+            if matches!(batch.first(), Some(NativeAssignment::Direct { program, .. }) if !program.needs_guarded_conditionals())
+            {
                 self.emit_direct_assignment_batch(batch)?;
             } else {
                 debug_assert_eq!(batch.len(), 1);
@@ -4862,12 +4863,19 @@ fn assignment_allocation_requirements(
         match &batch[0] {
             NativeAssignment::Task(task) => {
                 for program in task.expressions() {
-                    let ssa = X64SsaProgram::lower(program)?;
+                    let ssa = X64SsaProgram::lower_executable(program)?;
                     let allocation = RegisterAllocation::build(&ssa, X64_VALUE_BANK)?;
                     maximum_spill_slots = maximum_spill_slots.max(allocation.spill_slot_count());
                     maximum_required_registers =
                         maximum_required_registers.max(allocation.required_register_count());
                 }
+            }
+            NativeAssignment::Direct { program, .. } if program.needs_guarded_conditionals() => {
+                let ssa = X64SsaProgram::lower_executable(program)?;
+                let allocation = RegisterAllocation::build(&ssa, X64_VALUE_BANK)?;
+                maximum_spill_slots = maximum_spill_slots.max(allocation.spill_slot_count());
+                maximum_required_registers =
+                    maximum_required_registers.max(allocation.required_register_count());
             }
             NativeAssignment::Direct { .. } => {
                 let direct = batch
@@ -4895,7 +4903,7 @@ fn assignment_allocation_requirements(
             NativeAssignment::Indexed { index, value, .. } => {
                 debug_assert_eq!(batch.len(), 1);
                 for program in [index, value] {
-                    let ssa = X64SsaProgram::lower(program)?;
+                    let ssa = X64SsaProgram::lower_executable(program)?;
                     let allocation = RegisterAllocation::build(&ssa, X64_VALUE_BANK)?;
                     maximum_spill_slots = maximum_spill_slots.max(allocation.spill_slot_count());
                     maximum_required_registers =
@@ -4907,7 +4915,7 @@ fn assignment_allocation_requirements(
                 let (body_spills, body_registers) = assignment_allocation_requirements(body)?;
                 maximum_spill_slots = maximum_spill_slots.max(body_spills);
                 maximum_required_registers = maximum_required_registers.max(body_registers);
-                let ssa = X64SsaProgram::lower(condition)?;
+                let ssa = X64SsaProgram::lower_executable(condition)?;
                 let allocation = RegisterAllocation::build(&ssa, X64_VALUE_BANK)?;
                 maximum_spill_slots = maximum_spill_slots.max(allocation.spill_slot_count());
                 maximum_required_registers =
@@ -14692,7 +14700,7 @@ mod tests {
 
     #[test]
     fn a_branch_lowered_arm_does_not_run_the_untaken_arms_failing_load() {
-        // `condition ? variables[index] : 0.0` with an out-of-range index.
+        // `condition ? variables[index] : 7.0` with an out-of-range index.
         // The select form evaluates both arms, so the bounds check fires and
         // hard-fails the entry even when the constant arm is the one selected.
         let program = NativeProgram::from_ops_for_test(
@@ -14711,12 +14719,17 @@ mod tests {
             Vec::new(),
             Vec::new(),
         );
+        let eager = super::X64SsaProgram::lower(&program).expect("lift the eager reference");
         let select = ExecutableMemory::allocate(
-            &compile_value_function(&program).expect("compile the select form"),
+            &compile_value_function_artifact_from_ssa(&eager)
+                .expect("compile the eager select reference")
+                .bytes,
         )
         .expect("allocate select leaf");
-        let branch = ExecutableMemory::allocate(&compile_branching_value_function(&program))
-            .expect("allocate branch leaf");
+        let branch = ExecutableMemory::allocate(
+            &compile_value_function(&program).expect("compile guarded production code"),
+        )
+        .expect("allocate production leaf");
         let select = value_entry(&select);
         let branch = value_entry(&branch);
         let variables = [11.0_f64, 22.0, 33.0, 44.0];

@@ -3008,6 +3008,7 @@ fn exact_retained_replication_count(expression: &Expression) -> Option<i64> {
         Expression::Unary(unary) => {
             let value = evaluate(&unary.operand)?;
             match unary.op {
+                UnaryOp::ToInteger => i32::try_from(value).ok().map(i64::from),
                 UnaryOp::Pos => Some(value),
                 UnaryOp::Neg => value.checked_neg(),
                 UnaryOp::Not => Some(i64::from(value == 0)),

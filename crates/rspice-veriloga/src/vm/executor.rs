@@ -198,8 +198,29 @@ impl<'a> Vm<'a> {
     pub fn execute(&mut self, program: &BytecodeProgram) -> Result<f64, VmError> {
         self.stack.clear();
 
-        for instruction in &program.instructions {
-            self.execute_instruction(instruction)?;
+        let mut pc = 0;
+        while let Some(instruction) = program.instructions.get(pc) {
+            pc += 1;
+            let skip = match instruction {
+                Instruction::JumpIfFalse(skip) => {
+                    if self.pop()? == 0.0 {
+                        *skip
+                    } else {
+                        0
+                    }
+                }
+                Instruction::Jump(skip) => *skip,
+                _ => {
+                    self.execute_instruction(instruction)?;
+                    continue;
+                }
+            };
+            pc = pc
+                .checked_add(skip)
+                .filter(|end| *end <= program.instructions.len())
+                .ok_or(VmError::InvalidInstruction(
+                    "conditional jump is outside bytecode",
+                ))?;
         }
 
         self.stack
@@ -235,6 +256,11 @@ impl<'a> Vm<'a> {
     #[inline]
     pub(crate) fn execute_instruction(&mut self, instruction: &Instruction) -> Result<(), VmError> {
         match instruction {
+            Instruction::JumpIfFalse(_) | Instruction::Jump(_) => {
+                return Err(VmError::InvalidInstruction(
+                    "conditional jump requires a bytecode program",
+                ));
+            }
             Instruction::PushConst(v) => {
                 self.stack.push(*v);
             }

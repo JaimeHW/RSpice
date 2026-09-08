@@ -38,10 +38,11 @@ const ENTRY_ALIGNMENT: usize = 16;
 // function past this size is described by several `.pdata`/`.xdata` fragments,
 // which `append_windows_unwind_data` emits.
 //
-// So what is left is a preference. A postfix program over this size is cut into
-// numbered pieces behind a driver; a block program cannot be cut at an
-// arbitrary operation and is emitted whole. The common shape stays one function
-// with one unwind record, and only what cannot be cut pays for several.
+// So what is left is a preference. A single-block postfix program over this
+// size is cut into numbered pieces behind a driver. Programs with guarded
+// conditionals or explicit blocks retain their control flow and are emitted
+// whole. The common shape stays one function with one unwind record, and only
+// what cannot be cut pays for several.
 pub(crate) const A64_SEGMENT_THRESHOLD_BYTES: usize = 0x3ffff * 4;
 const A64_NOP: [u8; 4] = 0xD503_201F_u32.to_le_bytes();
 const A64_BTI_C: [u8; 4] = 0xD503_245F_u32.to_le_bytes();
@@ -145,7 +146,10 @@ impl A64ImageBuilder {
             PlanProgramRef::Blocks(program) => compile_value_function_from_ssa(program.ssa())?,
         };
         let offset = match program {
-            PlanProgramRef::Postfix(postfix) if bytes.len() > A64_SEGMENT_THRESHOLD_BYTES => {
+            PlanProgramRef::Postfix(postfix)
+                if bytes.len() > A64_SEGMENT_THRESHOLD_BYTES
+                    && !postfix.needs_guarded_conditionals() =>
+            {
                 self.append_segmented_value(postfix, entry_kind)
             }
             PlanProgramRef::Postfix(_) | PlanProgramRef::Blocks(_) => {
@@ -180,7 +184,7 @@ impl A64ImageBuilder {
                     direct_count += 1;
                     native_operations = native_operations.saturating_add(program.ops().len());
                     largest_native = largest_native.max(program.ops().len());
-                    let lowered = Program::lower(program)?;
+                    let lowered = Program::lower_executable(program)?;
                     ssa_instructions =
                         ssa_instructions.saturating_add(lowered.instructions().len());
                     largest_ssa = largest_ssa.max(lowered.instructions().len());
@@ -193,7 +197,8 @@ impl A64ImageBuilder {
             let mut operation_kinds = std::collections::BTreeMap::<&str, usize>::new();
             for range in shareable_batch_ranges(assignments) {
                 let batch = &assignments[range];
-                if !matches!(batch.first(), Some(NativeAssignment::Direct { .. })) {
+                if !matches!(batch.first(), Some(NativeAssignment::Direct { program, .. }) if !program.needs_guarded_conditionals())
+                {
                     continue;
                 }
                 let direct = batch
@@ -253,7 +258,16 @@ impl A64ImageBuilder {
         chunks: &mut Vec<CodeOffset>,
     ) -> JitResult<()> {
         let bytes = compile_assignment_pass_function(assignments)?;
-        if bytes.len() <= A64_SEGMENT_THRESHOLD_BYTES {
+        // A guarded singleton already contains real branches. Like a block
+        // value entry, it must stay whole to preserve control flow.
+        let guarded_singleton = match assignments {
+            [NativeAssignment::Direct { program, .. }] => program.needs_guarded_conditionals(),
+            [NativeAssignment::Indexed { index, value, .. }] => {
+                index.needs_guarded_conditionals() || value.needs_guarded_conditionals()
+            }
+            _ => false,
+        };
+        if bytes.len() <= A64_SEGMENT_THRESHOLD_BYTES || guarded_singleton {
             chunks.push(self.append_function(bytes, entry_kind)?);
             return Ok(());
         }
@@ -610,6 +624,65 @@ mod tests {
             0,
             "an empty pass must leave the image untouched: no entry, no padding, no RET"
         );
+    }
+
+    #[test]
+    fn large_guarded_expressions_keep_their_control_flow() {
+        use crate::native::aarch64::codegen::compile_segmented_program;
+        use crate::native::assignment::NativeAssignment;
+        use crate::native::plan_program::PlanProgramRef;
+
+        let mut ops = vec![NativeOp::LoadParam(0), NativeOp::LoadParam(1)];
+        ops.extend(std::iter::repeat_n(NativeOp::IntegerCast, 60_000));
+        ops.extend([NativeOp::Const(7.0), NativeOp::IfElse]);
+        let guarded = program(ops, 3);
+        assert!(compile_segmented_program(&guarded).is_err());
+
+        let mut image = A64ImageBuilder::new();
+        image
+            .append_value(PlanProgramRef::Postfix(&guarded), "guarded value")
+            .unwrap();
+        assert!(
+            image.image.len() > super::A64_SEGMENT_THRESHOLD_BYTES,
+            "fixture must cross the real segmentation threshold, got {} bytes",
+            image.image.len()
+        );
+        assert_eq!(
+            image.functions.len(),
+            1,
+            "value branches must remain in one function"
+        );
+        image.finish().unwrap();
+
+        for assignment in [
+            NativeAssignment::Direct {
+                var_index: 0,
+                program: guarded.clone(),
+            },
+            NativeAssignment::Indexed {
+                base: 0,
+                len: 1,
+                lower: 0,
+                index: program(vec![NativeOp::Const(0.0)], 1),
+                value: guarded,
+            },
+        ] {
+            let mut image = A64ImageBuilder::new();
+            image
+                .append_assignment_pass(&[assignment], "guarded assignment")
+                .unwrap();
+            assert!(
+                image.image.len() > super::A64_SEGMENT_THRESHOLD_BYTES,
+                "fixture must cross the real segmentation threshold, got {} bytes",
+                image.image.len()
+            );
+            assert_eq!(
+                image.functions.len(),
+                1,
+                "assignment branches must remain in one function"
+            );
+            image.finish().unwrap();
+        }
     }
 
     #[cfg(target_arch = "aarch64")]

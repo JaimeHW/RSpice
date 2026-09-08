@@ -105,7 +105,7 @@ const KERNEL_JACOBIANS_OFFSET: usize = std::mem::offset_of!(NativeStampKernelIo,
 /// conditions, stamps, Jacobians, and noise expressions.
 pub(crate) fn compile_value_function(program: &NativeProgram) -> JitResult<Vec<u8>> {
     validate_expression_stack_depth(program.max_stack_depth())?;
-    compile_value_function_from_ssa(&Program::lower(program)?)
+    compile_value_function_from_ssa(&Program::lower_executable(program)?)
 }
 
 /// Compile one already-lowered value entry.
@@ -139,7 +139,12 @@ pub(crate) struct A64SegmentedProgram {
 
 pub(crate) fn compile_segmented_program(program: &NativeProgram) -> JitResult<A64SegmentedProgram> {
     validate_expression_stack_depth(program.max_stack_depth())?;
-    let ssa = Program::lower(program)?;
+    let ssa = Program::lower_executable(program)?;
+    if !ssa.is_single_block() {
+        return Err(verifier_error(
+            "AArch64 expression segmentation requires a single block",
+        ));
+    }
     validate_expression_stack_depth(ssa.maximum_stack_depth())?;
     let mut functions =
         Vec::with_capacity(ssa.instructions().len().div_ceil(MAX_SEGMENT_INSTRUCTIONS));
@@ -301,7 +306,7 @@ pub(crate) fn compile_assignment_function(
     program: &NativeProgram,
 ) -> JitResult<Vec<u8>> {
     validate_expression_stack_depth(program.max_stack_depth())?;
-    let ssa = Program::lower(program)?;
+    let ssa = Program::lower_executable(program)?;
     validate_expression_stack_depth(ssa.maximum_stack_depth())?;
     let allocation = RegisterAllocation::build(&ssa, A64_VALUE_BANK)?;
     let frame_bytes = aligned_frame_bytes(allocation.spill_slot_count())?;
@@ -1122,9 +1127,9 @@ impl FunctionCompiler {
         program: &NativeProgram,
     ) -> JitResult<ValueLocation> {
         validate_expression_stack_depth(program.max_stack_depth())?;
-        let ssa = Program::lower(program)?;
+        let ssa = Program::lower_executable(program)?;
         let allocation = RegisterAllocation::build(&ssa, A64_VALUE_BANK)?;
-        // One block off the postfix lift: no back edge, no counter band.
+        // Acyclic expression branches need no back-edge counter band.
         self.emit_program(&ssa, &allocation, &[], BlockLoopCounters::NONE)?;
         Ok(allocation.result())
     }
@@ -1216,7 +1221,8 @@ impl FunctionCompiler {
     ) -> JitResult<()> {
         for range in shareable_batch_ranges(assignments) {
             let batch = &assignments[range];
-            if matches!(batch.first(), Some(NativeAssignment::Direct { .. })) {
+            if matches!(batch.first(), Some(NativeAssignment::Direct { program, .. }) if !program.needs_guarded_conditionals())
+            {
                 self.emit_direct_assignment_batch(batch)?;
             } else {
                 debug_assert_eq!(batch.len(), 1);
@@ -3108,6 +3114,9 @@ fn inspect_assignment_requirements(
                     inspect_assignment_program(program, requirements)?;
                 }
             }
+            NativeAssignment::Direct { program, .. } if program.needs_guarded_conditionals() => {
+                inspect_assignment_program(program, requirements)?;
+            }
             NativeAssignment::Direct { .. } => {
                 let direct = batch
                     .iter()
@@ -3163,7 +3172,7 @@ fn inspect_assignment_program(
     requirements: &mut AssignmentRequirements,
 ) -> JitResult<()> {
     validate_expression_stack_depth(program.max_stack_depth())?;
-    let ssa = Program::lower(program)?;
+    let ssa = Program::lower_executable(program)?;
     let allocation = RegisterAllocation::build(&ssa, A64_VALUE_BANK)?;
     record_assignment_allocation_trace(&ssa, &allocation, 1, requirements);
     requirements.maximum_spill_slots = requirements

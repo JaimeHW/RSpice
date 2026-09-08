@@ -2267,7 +2267,7 @@ pub mod autodiff {
                 | BinaryOp::Shr => 0,
             },
             Node::Unary(UnaryOp::Neg | UnaryOp::Pos, inner) => recurse(inner),
-            Node::Unary(UnaryOp::Not | UnaryOp::BitNot, _) => 0,
+            Node::Unary(UnaryOp::Not | UnaryOp::BitNot | UnaryOp::ToInteger, _) => 0,
             Node::Limexp(inner) | Node::Ddt(inner) => recurse(inner),
             Node::Idt(inner, _) => recurse(inner),
             Node::IdtMod { expr: inner, .. } => recurse(inner),
@@ -3236,7 +3236,7 @@ pub mod autodiff {
                 | BinaryOp::Shr => {}
             },
             Node::Unary(UnaryOp::Neg | UnaryOp::Pos, inner) => collect!(inner),
-            Node::Unary(UnaryOp::Not | UnaryOp::BitNot, _) => {}
+            Node::Unary(UnaryOp::Not | UnaryOp::BitNot | UnaryOp::ToInteger, _) => {}
             Node::Conditional(condition, then_expr, else_expr) => {
                 // The predicate selects a derivative branch but is not itself
                 // differentiated. Match `simplify`'s constant-branch fold.
@@ -4360,7 +4360,7 @@ pub mod autodiff {
             // Unary plus is the identity
             Node::Unary(UnaryOp::Pos, inner) => differentiate!(inner),
             // Logical/bitwise negation is piecewise constant
-            Node::Unary(UnaryOp::Not | UnaryOp::BitNot, _) => constant!(0.0),
+            Node::Unary(UnaryOp::Not | UnaryOp::BitNot | UnaryOp::ToInteger, _) => constant!(0.0),
 
             // d(c ? a : b) = c ? da : db
             Node::Conditional(condition, then_expr, else_expr) => {
