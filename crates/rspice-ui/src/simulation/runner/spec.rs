@@ -837,10 +837,13 @@ R2 out 0 1k\n\
     #[test]
     fn runnable_preview_hb_dependents_dispatch_from_authenticated_worker_state() {
         let netlist = "preview HB dependent dispatch\n\
-                       P1 p1 0 PORT=1 Z0=50\n\
+                       .subckt ports a b\n\
+                       P1 a 0 PORT=1 Z0=50\n\
+                       P2 b 0 PORT=2 Z0=50\n\
+                       .ends\n\
+                       XP p1 p2 ports\n\
                        R1 p1 p2 50\n\
                        C1 p1 0 1e-18\n\
-                       P2 p2 0 PORT=2 Z0=50\n\
                        VIN bias 0 0\n\
                        RNOISE bias p2 1k\n\
                        .end\n";
@@ -873,12 +876,14 @@ R2 out 0 1k\n\
         let SimulationResult::Ac {
             frequencies,
             waveforms,
+            reference_impedances_ohm,
             ..
         } = hbsp_result
         else {
             panic!("HBSP must retain the periodic S-parameter result family");
         };
         assert_eq!(frequencies.len(), 2);
+        assert_eq!(reference_impedances_ohm, Some(vec![50.0, 50.0]));
         assert!(waveforms.contains_key("S11"));
         assert!(waveforms.contains_key("S21[k=+0,m=+0]"));
 

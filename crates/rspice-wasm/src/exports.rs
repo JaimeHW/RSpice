@@ -396,6 +396,8 @@ mod wasm_tests {
                 0.0006514709387906895,
             ),
             ("B1 in 0 V=atan2(0*sin(2*pi*64meg*time+0.1),-1)", 0.0),
+            ("B1 in 0 V=atan(tan(2*pi*64meg*time+0.1))", 0.0),
+            ("B1 in 0 V=tanh(tan(2*pi*64meg*time+0.1))", 0.0),
             ("V1 in 0 PULSE(0 1 400p 10p 10p 100p 1u)", 0.00011),
             ("B1 in 0 V=spice_pulse(0,1,400p,10p,10p,100p,1u)", 0.00011),
             (
@@ -412,7 +414,10 @@ mod wasm_tests {
             ),
         ] {
             let polar_square = source.contains("atan2(0*sin");
-            let options = if polar_square {
+            let bounded_tangent = source.contains("atan(tan(") || source.contains("tanh(tan(");
+            let options = if bounded_tangent {
+                ".options reltol=1e-4 vntol=1e-8\n"
+            } else if polar_square {
                 ".options reltol=1e-4\n"
             } else {
                 ""
@@ -437,6 +442,19 @@ mod wasm_tests {
                 .position(|name| name.eq_ignore_ascii_case("out"))
                 .unwrap();
             let mean = result.waveforms[output].dc(&result.time, result.period);
+            if bounded_tangent {
+                // Analytic sawtooth extrema / independent RC convolution.
+                let (low, high) = if source.contains("atan(tan(") {
+                    (-0.006425394680575902, 0.012850531334919424)
+                } else {
+                    (-0.00597775083683904, 0.010_400_683_782_896_1)
+                };
+                let values = &result.waveforms[output].values;
+                assert!(
+                    (values.iter().copied().fold(f64::NEG_INFINITY, f64::max) - high).abs() < 1e-6
+                );
+                assert!((values.iter().copied().fold(f64::INFINITY, f64::min) - low).abs() < 1e-6);
+            }
             if polar_square {
                 let high = std::f64::consts::PI
                     * ((1.0 / 64e6) / (4.0 * 1000.0 * 159.154943091895e-12_f64)).tanh();

@@ -492,30 +492,30 @@ fn periodic_sparameter_result(
             real.push(value.re);
             imaginary.push(value.im);
         }
-        waveforms.insert(
-            name.clone(),
-            WaveformData::new_complex(
-                name,
-                clone_values_with_abort(&data.frequencies, abort)?,
-                real.clone(),
-                imaginary.clone(),
-            ),
-        );
         if path.output_sideband == 0 && path.input_sideband == 0 {
             waveforms.insert(
                 base_name.clone(),
                 WaveformData::new_complex(
                     base_name,
                     clone_values_with_abort(&data.frequencies, abort)?,
-                    real,
-                    imaginary,
+                    clone_values_with_abort(&real, abort)?,
+                    clone_values_with_abort(&imaginary, abort)?,
                 ),
             );
         }
+        waveforms.insert(
+            name.clone(),
+            WaveformData::new_complex(
+                name,
+                clone_values_with_abort(&data.frequencies, abort)?,
+                real,
+                imaginary,
+            ),
+        );
     }
     Ok(SimulationResult::Ac {
         noise_reference_temperature_kelvin: None,
-        reference_impedances_ohm: None,
+        reference_impedances_ohm: data.reference_impedances_ohm,
         frequencies: data.frequencies,
         waveforms,
         measurements: Vec::new(),

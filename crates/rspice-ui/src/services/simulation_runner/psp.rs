@@ -1,9 +1,8 @@
-//! Periodic S-parameter analysis around an authenticated shooting-PSS state.
+//! Periodic S-parameter analysis around an authenticated PSS or HB state.
 //!
-//! Each port is a physical, matched Thevenin termination present in the deck
-//! that produced the PSS orbit. PAC then supplies the complete input/output
-//! sideband conversion matrices, which are converted from port-plane voltages
-//! to power-wave scattering parameters.
+//! Ports are resolved from the elaborated producer circuit. The engine solves
+//! all port/sideband inputs together and returns the scattering matrix at the
+//! authored wave references, independently of the realized terminations.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -11,12 +10,11 @@ use std::path::Path;
 use num_complex::Complex64;
 use rspice_core::Value;
 use rspice_core::abort_signal::AbortSignal;
-use rspice_core::analysis::s_param::{self, PortRealization};
+use rspice_core::analysis::s_param;
 
 use super::error::{ensure_not_aborted, poll_periodically};
-use super::pac_pxf::{run_pac_internal_from_hb_with_abort, run_pac_internal_from_pss_with_abort};
 use super::{
-    PacFrequencySweep, PacRunConfig, SParameterPort, ServiceRunError, ServiceRunResult,
+    SParameterPort, ServiceRunError, ServiceRunResult, build_resolved_periodic_engine,
     parse_runner_netlist_with_abort,
 };
 
@@ -35,6 +33,7 @@ pub struct PspRunConfig {
     pub stop_freq: Value,
     pub points_per_unit: usize,
     pub sweep: PspSweep,
+    /// Optional port-plane assertions. An empty list discovers producer ports.
     pub ports: Vec<SParameterPort>,
     pub max_sideband: usize,
     pub mixed_mode: bool,
@@ -60,14 +59,6 @@ impl PspRunConfig {
         if self.points_per_unit == 0 {
             return Err(format!(
                 "{analysis} points per unit must be greater than zero"
-            ));
-        }
-        if self.ports.len() < 2 {
-            return Err(format!("{analysis} requires at least two configured ports"));
-        }
-        if self.max_sideband == 0 {
-            return Err(format!(
-                "{analysis} maximum sideband must be greater than zero"
             ));
         }
         if self.max_sideband > i32::MAX as usize {
@@ -104,19 +95,6 @@ impl PspRunConfig {
         }
         Ok(())
     }
-
-    fn frequency_count(&self) -> usize {
-        match self.sweep {
-            PspSweep::Linear => self.points_per_unit,
-            PspSweep::Decade => ((self.stop_freq.log10() - self.start_freq.log10())
-                * self.points_per_unit as Value)
-                .ceil() as usize,
-            PspSweep::Octave => ((self.stop_freq.log2() - self.start_freq.log2())
-                * self.points_per_unit as Value)
-                .ceil() as usize,
-        }
-        .max(1)
-    }
 }
 
 /// One power-wave conversion path in the periodic multiport matrix.
@@ -135,6 +113,8 @@ pub(crate) struct PspPath {
 pub(crate) struct PspData {
     pub frequencies: Vec<Value>,
     pub paths: Vec<PspPath>,
+    /// Authored physical-port references; mixed-mode channels need modal metadata.
+    pub reference_impedances_ohm: Option<Vec<Value>>,
 }
 
 /// Run PSP from the exact retained PSS orbit.
@@ -196,31 +176,10 @@ impl PeriodicOperatingPoint<'_> {
         }
     }
 
-    fn basis(self) -> (Value, usize, Value) {
+    fn tolerance(self) -> Value {
         match self {
-            Self::Pss(point) => {
-                let config = point.config();
-                (
-                    config.fundamental_freq,
-                    config.num_harmonics,
-                    config.tolerance,
-                )
-            }
-            Self::Hb(point) => {
-                let config = point.config();
-                (
-                    config.fundamental_freq,
-                    config.num_harmonics,
-                    config.tolerance,
-                )
-            }
-        }
-    }
-
-    fn harmonic_capacity(self) -> usize {
-        match self {
-            Self::Pss(point) => point.spectral_harmonic_capacity(),
-            Self::Hb(point) => point.spectral_harmonic_capacity(),
+            Self::Pss(point) => point.config().tolerance,
+            Self::Hb(point) => point.config().tolerance,
         }
     }
 }
@@ -239,58 +198,56 @@ fn run_periodic_sparameter_analysis(
         .validate_for(analysis)
         .map_err(ServiceRunError::Failure)?;
     let netlist = parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
-    let ports = s_param::collect_ports(&netlist).map_err(|error| {
-        ServiceRunError::Failure(format!(
-            "{analysis} requires RF Port components in the {producer} producer deck: {error}"
-        ))
-    })?;
-    if ports.len() < 2 {
-        return Err(ServiceRunError::Failure(format!(
-            "{analysis} requires at least two RF Port components in the {producer} producer deck"
-        )));
+    let engine = build_resolved_periodic_engine(
+        &netlist,
+        operating_point.tolerance(),
+        "periodic S-parameter configuration",
+    )?;
+    let max_sideband = config.max_sideband as i32;
+    let pac_config = rspice_core::analysis::pac::PacConfig {
+        sweep_start: config.start_freq,
+        sweep_stop: config.stop_freq,
+        num_points: config.points_per_unit,
+        sweep_type: match config.sweep {
+            PspSweep::Decade => rspice_core::analysis::pac::PacSweepType::Decade,
+            PspSweep::Octave => rspice_core::analysis::pac::PacSweepType::Octave,
+            PspSweep::Linear => rspice_core::analysis::pac::PacSweepType::Linear,
+        },
+        sideband_min: -max_sideband,
+        sideband_max: max_sideband,
+        reltol: config.reltol,
+        abstol: config.abstol,
+        ..Default::default()
+    };
+    let prepared = match operating_point {
+        PeriodicOperatingPoint::Pss(point) => {
+            engine.prepare_psp_from_pss_with_abort(&netlist, pac_config, point, abort)
+        }
+        PeriodicOperatingPoint::Hb(point) => {
+            engine.prepare_psp_from_hb_with_abort(&netlist, pac_config, point, abort)
+        }
     }
-    if ports
-        .iter()
-        .any(|port| port.realization != PortRealization::Thevenin)
-    {
-        return Err(ServiceRunError::Failure(format!(
-            "{analysis} ports must be physical RF Port components with their reference impedances present during {producer}"
-        )));
-    }
-    validate_declared_ports(config, &ports, analysis, producer)?;
+    .map_err(|error| ServiceRunError::from_core(analysis, error))?;
+    let ports = prepared.ports();
+    validate_declared_ports(config, ports, analysis, producer)?;
     if config.mixed_mode {
-        validate_mixed_mode_port_pairs(&ports, analysis)?;
+        validate_mixed_mode_port_pairs(ports, analysis)?;
     }
 
-    let required_periodic_harmonics = config.max_sideband.saturating_mul(2).max(8);
-    if required_periodic_harmonics > operating_point.harmonic_capacity() {
-        return Err(ServiceRunError::Failure(format!(
-            "{analysis} requires {required_periodic_harmonics} periodic harmonics for its sideband span, but the retained {producer} state has capacity {}",
-            operating_point.harmonic_capacity()
-        )));
-    }
-
-    let sideband_count = config
-        .max_sideband
-        .checked_mul(2)
-        .and_then(|value| value.checked_add(1))
-        .unwrap_or(usize::MAX);
-    let path_values = ports
+    let sideband_count = config.max_sideband * 2 + 1;
+    let path_count = ports
         .len()
         .checked_mul(ports.len())
-        .and_then(|value| value.checked_mul(sideband_count))
-        .and_then(|value| value.checked_mul(sideband_count))
-        .and_then(|value| value.checked_mul(config.frequency_count()))
-        // Each emitted complex waveform retains x, real, and imaginary.
-        .and_then(|value| value.checked_mul(3))
+        .and_then(|n| n.checked_mul(sideband_count))
+        .and_then(|n| n.checked_mul(sideband_count))
         .unwrap_or(usize::MAX);
-    let alias_values = ports
-        .len()
-        .checked_mul(ports.len())
-        .and_then(|value| value.checked_mul(config.frequency_count()))
-        .and_then(|value| value.checked_mul(3))
+    // The publisher retains x, real and imaginary values for each path and
+    // the direct (k=m=0) aliases. Count the actual, endpoint-inclusive grid.
+    let retained_values = path_count
+        .checked_add(ports.len().saturating_mul(ports.len()))
+        .and_then(|n| n.checked_mul(prepared.frequencies().len()))
+        .and_then(|n| n.checked_mul(3))
         .unwrap_or(usize::MAX);
-    let retained_values = path_values.saturating_add(alias_values);
     let result_limit = rspice_core::ResourceLimits::default().max_result_values;
     if retained_values > result_limit {
         return Err(ServiceRunError::resource_limit(
@@ -299,96 +256,37 @@ fn run_periodic_sparameter_analysis(
             result_limit,
         ));
     }
-    let pac_solve_count = ports.len().saturating_mul(ports.len());
-    let solve_limit = rspice_core::ResourceLimits::default().max_batch_runs;
-    if pac_solve_count > solve_limit {
-        return Err(ServiceRunError::resource_limit(
-            rspice_core::ResourceKind::BatchRuns,
-            pac_solve_count,
-            solve_limit,
-        ));
-    }
-
-    let (fundamental_freq, num_harmonics, tolerance) = operating_point.basis();
-    let mut frequencies: Option<Vec<Value>> = None;
-    let mut paths = Vec::with_capacity(
-        ports
-            .len()
-            .saturating_mul(ports.len())
-            .saturating_mul(sideband_count)
-            .saturating_mul(sideband_count),
-    );
-    let max_sideband = config.max_sideband as i32;
-
-    for (input_index, input_port) in ports.iter().enumerate() {
-        poll_periodically(abort, input_index)?;
-        for (output_index, output_port) in ports.iter().enumerate() {
-            poll_periodically(abort, output_index)?;
-            let pac_config = PacRunConfig {
-                pss_fundamental_freq: fundamental_freq,
-                pss_num_harmonics: num_harmonics,
-                pss_tolerance: tolerance,
-                start_freq: config.start_freq,
-                stop_freq: config.stop_freq,
-                points_per_unit: config.points_per_unit,
-                sweep: match config.sweep {
-                    PspSweep::Decade => PacFrequencySweep::Decade,
-                    PspSweep::Octave => PacFrequencySweep::Octave,
-                    PspSweep::Linear => PacFrequencySweep::Linear,
-                },
-                max_sideband,
-                input_source: input_port.source_name.clone(),
-                output_node: output_port.node_pos.clone(),
-                output_ref: Some(output_port.node_neg.clone()),
-                pac_magnitude: 1.0,
-                include_dc: true,
-                reltol: config.reltol,
-                abstol: config.abstol,
-            };
-            let pac = match operating_point {
-                PeriodicOperatingPoint::Pss(point) => {
-                    run_pac_internal_from_pss_with_abort(&netlist, &pac_config, point, abort)?
-                }
-                PeriodicOperatingPoint::Hb(point) => {
-                    run_pac_internal_from_hb_with_abort(&netlist, &pac_config, point, abort)?
-                }
-            }
-            .pac_result;
-
-            if let Some(expected) = &frequencies {
-                if expected != &pac.frequencies {
-                    return Err(ServiceRunError::Failure(
-                        "PSP port solves produced inconsistent frequency grids".to_owned(),
-                    ));
-                }
-            } else {
-                frequencies = Some(pac.frequencies.clone());
-            }
-
-            let wave_scale = 2.0 * (input_port.z0 / output_port.z0).sqrt();
-            for output_sideband in -max_sideband..=max_sideband {
-                for input_sideband in -max_sideband..=max_sideband {
-                    let mut values = Vec::with_capacity(pac.frequencies.len());
-                    for frequency_index in 0..pac.frequencies.len() {
-                        poll_periodically(abort, frequency_index)?;
-                        let mut value = pac
-                            .conversion_matrix
-                            .get(frequency_index, output_sideband, input_sideband)
-                            .map_err(|error| {
-                                ServiceRunError::Failure(format!(
-                                    "PSP conversion result is unavailable: {error}"
-                                ))
-                            })?
-                            * wave_scale;
-                        if input_index == output_index && input_sideband == output_sideband {
-                            value -= Complex64::new(1.0, 0.0);
-                        }
-                        values.push(value);
+    // Physical references cannot describe the differential/common-mode
+    // channels through the existing single-ended result metadata schema.
+    let reference_impedances_ohm =
+        (!config.mixed_mode).then(|| ports.iter().map(|port| port.z0).collect());
+    let port_count = ports.len();
+    let result = prepared
+        .run_with_abort(abort)
+        .map_err(|error| ServiceRunError::from_core(analysis, error))?;
+    let frequencies = result.data.iter().map(|matrix| matrix.frequency).collect();
+    let mut paths = Vec::with_capacity(path_count);
+    for input in 0..port_count {
+        for output in 0..port_count {
+            for (out_band, output_sideband) in
+                (result.sideband_min..=result.sideband_max).enumerate()
+            {
+                for (in_band, input_sideband) in
+                    (result.sideband_min..=result.sideband_max).enumerate()
+                {
+                    ensure_not_aborted(abort)?;
+                    let mut values = Vec::with_capacity(result.data.len());
+                    for (index, matrix) in result.data.iter().enumerate() {
+                        poll_periodically(abort, index)?;
+                        values.push(matrix.get(
+                            output * sideband_count + out_band + 1,
+                            input * sideband_count + in_band + 1,
+                        ));
                     }
                     paths.push(PspPath {
-                        output_port: output_index + 1,
-                        input_port: input_index + 1,
-                        base_name: sparameter_name(output_index + 1, input_index + 1, ports.len()),
+                        output_port: output + 1,
+                        input_port: input + 1,
+                        base_name: sparameter_name(output + 1, input + 1, port_count),
                         output_sideband,
                         input_sideband,
                         values,
@@ -397,18 +295,15 @@ fn run_periodic_sparameter_analysis(
             }
         }
     }
-
     if config.mixed_mode {
-        paths = convert_paths_to_mixed_mode(paths, ports.len(), abort)?;
+        paths = convert_paths_to_mixed_mode(paths, port_count, abort)?;
     }
-
     ensure_not_aborted(abort)?;
-    let frequencies = frequencies.ok_or_else(|| {
-        ServiceRunError::Failure(format!(
-            "{analysis} completed without producing a frequency grid"
-        ))
-    })?;
-    Ok(PspData { frequencies, paths })
+    Ok(PspData {
+        frequencies,
+        paths,
+        reference_impedances_ohm,
+    })
 }
 
 fn sparameter_name(output: usize, input: usize, port_count: usize) -> String {
@@ -572,6 +467,9 @@ fn validate_declared_ports(
     analysis: &str,
     producer: &str,
 ) -> ServiceRunResult<()> {
+    if config.ports.is_empty() {
+        return Ok(());
+    }
     if config.ports.len() != declared.len() {
         return Err(ServiceRunError::Failure(format!(
             "{analysis} setup declares {} port(s), but the {producer} producer deck contains {} RF Port component(s)",
@@ -623,6 +521,7 @@ mod tests {
     };
     use rspice_core::abort_signal::NoAbort;
     use rspice_core::analysis::PssConfig;
+    use rspice_core::analysis::s_param::PortRealization;
 
     fn config() -> PspRunConfig {
         PspRunConfig {
@@ -875,5 +774,94 @@ mod tests {
         assert!(result.paths.iter().all(|path| {
             path.output_sideband == path.input_sideband || path.values[0].norm() < 1.0e-9
         }));
+    }
+
+    fn hbsp_fixture(deck: &str) -> ServiceRunResult<PspData> {
+        let mut request = config();
+        request.start_freq = 1e4;
+        request.stop_freq = 1e4;
+        request.points_per_unit = 1;
+        request.sweep = PspSweep::Linear;
+        hbsp_fixture_request(deck, &request)
+    }
+
+    fn hbsp_fixture_request(deck: &str, request: &PspRunConfig) -> ServiceRunResult<PspData> {
+        let point = run_hb_analysis_with_abort(
+            deck,
+            &HbRunConfig {
+                tones: vec![HbToneRunConfig::new(1.0e6, 8)],
+                reltol: 2.5e-7,
+                ..HbRunConfig::default()
+            },
+            &NoAbort,
+        )?
+        .operating_point;
+        run_hbsp_analysis_from_hb_with_source_path_and_abort(
+            deck,
+            request,
+            point.as_ref(),
+            None,
+            &NoAbort,
+        )
+    }
+
+    fn assert_series_network(data: &PspData) {
+        assert_eq!(data.reference_impedances_ohm, Some(vec![50.0, 50.0]));
+        for path in &data.paths {
+            let expected = if path.output_sideband != path.input_sideband {
+                0.0
+            } else if path.output_port == path.input_port {
+                1.0 / 3.0
+            } else {
+                2.0 / 3.0
+            };
+            for value in &path.values {
+                assert!(
+                    (*value - Complex64::new(expected, 0.0)).norm() < 1e-8,
+                    "{}[{},{}]: {value}, expected {expected}",
+                    path.base_name,
+                    path.output_sideband,
+                    path.input_sideband
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn periodic_ports_resolve_after_hierarchy_elaboration() {
+        let data = hbsp_fixture("* nested RF ports\n.subckt ports a b\nP1 a 0 PORT=1 Z0=50\nP2 b 0 PORT=2 Z0=50\n.ends\nXports p1 p2 ports\nR1 p1 p2 50\nC1 p1 0 1e-18\n.end\n")
+            .expect("ports must come from the circuit consumed by HBSP");
+        assert_series_network(&data);
+    }
+
+    #[test]
+    fn periodic_ports_use_physical_terminations_and_authored_wave_references() {
+        let data = hbsp_fixture("* port multiplicity changes its physical termination\n.subckt generator p\nP1 p 0 PORT=1 Z0=50\n.ends\nX1 p1 generator M=2\nR1 p1 p2 50\nC1 p1 0 1e-18\nP2 p2 0 PORT=2 Z0=50\n.end\n")
+            .expect("HBSP retains the physical producer circuit");
+        assert_series_network(&data);
+    }
+
+    #[test]
+    fn periodic_ports_discover_single_port_and_preserve_exact_sweep_and_reference() {
+        let deck = "* one annotated hierarchical port\n.subckt source p\nV1 0 p DC 0 portnum=1 z0=75\n.ends\nX1 p source M=2\nR1 p 0 150\n.end\n";
+        let mut request = config();
+        request.ports.clear();
+        request.max_sideband = 0;
+        request.start_freq = 1e3;
+        request.stop_freq = 1e4;
+        request.points_per_unit = 2;
+        let data = hbsp_fixture_request(deck, &request).unwrap();
+        assert_eq!(data.frequencies.len(), 2);
+        assert_eq!(data.frequencies[0], 1e3);
+        assert_eq!(data.frequencies[1], 1e4);
+        assert_eq!(data.reference_impedances_ohm, Some(vec![75.0]));
+        assert_eq!(data.paths.len(), 1);
+        assert_eq!(data.paths[0].base_name, "S11");
+        assert!(
+            data.paths[0]
+                .values
+                .iter()
+                .all(|value| (*value - Complex64::new(1.0 / 3.0, 0.0)).norm() < 1e-12)
+        );
     }
 }

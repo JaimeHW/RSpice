@@ -216,6 +216,64 @@ fn circular_time_features_preserve_the_complete_rc_waveform() {
 }
 
 #[test]
+fn bounded_tangent_compositions_preserve_the_complete_rc_waveform() {
+    let rate = std::f64::consts::TAU * 64.0 * F0;
+    let period = 1.0 / (128.0 * F0);
+    let tau = R * C;
+    let bias = -std::f64::consts::FRAC_PI_2;
+    let initial = bias - rate * tau + rate * period / -(-period / tau).exp_m1();
+    let count = 131_072;
+    // Integrate a smooth ramp between the one-sided limits at the tanh jump.
+    let (reference, _) = periodic_rc_convolution(period, tau, count, |index| {
+        if index == 0 {
+            -1.0
+        } else if index == count {
+            1.0
+        } else {
+            (bias + std::f64::consts::PI * index as f64 / count as f64)
+                .tan()
+                .tanh()
+        }
+    });
+    for function in ["atan", "tanh"] {
+        let netlist = Netlist::parse(&format!(
+            "bounded tangent forcing\n.options reltol=1e-4 vntol=1e-8\nB1 in 0 V={function}(tan(2*pi*64meg*time+0.1))\nR1 in out {R}\nC1 out 0 {C}\n.end\n"
+        )).unwrap();
+        let analysis = Engine::default()
+            .run_pss_with_abort(&netlist, PssConfig::new(F0).with_tstab_periods(0), &NoAbort)
+            .unwrap_or_else(|error| panic!("{function}: {error}"));
+        let result = &analysis.result;
+        let output = result
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("out"))
+            .unwrap();
+        for (&time, &actual) in result.time.iter().zip(&result.waveforms[output].values) {
+            let elapsed = (rate * time + 0.1 - bias).rem_euclid(std::f64::consts::PI) / rate;
+            let expected = if function == "atan" {
+                let decay = (-elapsed / tau).exp_m1();
+                initial * (1.0 + decay) - bias * decay + rate * (elapsed + tau * decay)
+            } else {
+                let position = elapsed / period * count as f64;
+                let left = (position as usize).min(count - 1);
+                reference[left] + (position - left as f64) * (reference[left + 1] - reference[left])
+            };
+            assert!(
+                (actual - expected).abs() < 1e-6,
+                "{function}, t={time:e}: {actual:e} versus {expected:e}"
+            );
+        }
+        assert!(
+            result.waveforms[output]
+                .dc(&result.time, result.period)
+                .abs()
+                < 1e-6,
+            "{function}"
+        );
+    }
+}
+
+#[test]
 fn polar_signed_zero_edges_preserve_the_analytic_rc_orbit() {
     let netlist = Netlist::parse(&format!(
         "signed-zero polar forcing\n.options reltol=1e-4\nB1 in 0 V=atan2(0*sin(2*pi*64meg*time+0.1),-1)\nR1 in out {R}\nC1 out 0 {C}\n.end\n"
@@ -258,6 +316,36 @@ fn polar_signed_zero_edges_preserve_the_analytic_rc_orbit() {
             .abs()
             < 1e-6
     );
+}
+
+/// Exact linear-forcing RC integration, independent of the shooting stamps
+/// and mesh. The caller supplies the two one-sided endpoint values at a jump.
+fn periodic_rc_convolution(
+    period: f64,
+    tau: f64,
+    count: usize,
+    forcing: impl Fn(usize) -> f64,
+) -> (Vec<f64>, f64) {
+    let dt = period / count as f64;
+    let decay = (-dt / tau).exp();
+    let decay_minus_one = (-dt / tau).exp_m1();
+    let linear_area = dt + tau * decay_minus_one;
+    let mut reference = vec![0.0];
+    let mut previous = forcing(0);
+    let mut mean = 0.0;
+    for index in 1..=count {
+        let next = forcing(index);
+        let state = reference[index - 1] * decay - previous * decay_minus_one
+            + (next - previous) / dt * linear_area;
+        reference.push(state);
+        mean += 0.5 * (previous + next) / count as f64;
+        previous = next;
+    }
+    let initial = reference[count] / -(-period / tau).exp_m1();
+    for (index, value) in reference.iter_mut().enumerate() {
+        *value += initial * (-(index as f64 * dt) / tau).exp();
+    }
+    (reference, mean)
 }
 
 fn check_nonlinear_time_features(kinds: std::ops::RangeInclusive<usize>) {
@@ -375,9 +463,6 @@ fn check_nonlinear_time_features(kinds: std::ops::RangeInclusive<usize>) {
         // the shooting companion, period map or feature mesh under test.
         let count = 131_072;
         let dt = source_period / count as f64;
-        let decay = (-dt / tau).exp();
-        let decay_minus_one = (-dt / tau).exp_m1();
-        let linear_area = dt + tau * decay_minus_one;
         let forcing = |time: f64| {
             let cosine = (omega * time + 0.1).cos();
             if kind == 1 {
@@ -436,26 +521,12 @@ fn check_nonlinear_time_features(kinds: std::ops::RangeInclusive<usize>) {
                 (-10000.0 * (cosine - 0.25).powi(2)).exp()
             }
         };
-        let mut reference = Vec::new();
-        let expected_dc = if kind == 0 {
-            angle / std::f64::consts::PI
+        let (reference, expected_dc) = if kind == 0 {
+            (Vec::new(), angle / std::f64::consts::PI)
         } else {
-            reference.push(0.0);
-            let mut previous = forcing(0.0);
-            let mut mean = 0.0;
-            for index in 1..=count {
-                let next = forcing(index as f64 * dt);
-                let state = reference[index - 1] * decay - previous * decay_minus_one
-                    + (next - previous) / dt * linear_area;
-                reference.push(state);
-                mean += 0.5 * (previous + next) / count as f64;
-                previous = next;
-            }
-            let initial = reference[count] / -(-source_period / tau).exp_m1();
-            for (index, value) in reference.iter_mut().enumerate() {
-                *value += initial * (-(index as f64 * dt) / tau).exp();
-            }
-            mean
+            periodic_rc_convolution(source_period, tau, count, |index| {
+                forcing(index as f64 * dt)
+            })
         };
         let expected = |time: f64| {
             if kind == 0 {

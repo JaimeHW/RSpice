@@ -1912,7 +1912,6 @@ impl SimulationController {
                         )
                     };
                     self.retain_periodic_noise_result_metadata(&mut analysis_result);
-                    self.retain_sparameter_result_metadata(&mut analysis_result);
                     if let Some(AnalysisResultPayload::OperatingPoint {
                         effective_source_content_digest,
                         ..

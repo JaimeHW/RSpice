@@ -125,6 +125,7 @@ pub use error::{
 pub use hb::{
     EnvelopeResult, HbAnalysisResult, HbEnvelopeContinuationState, HbEnvelopeStateGuarantee,
     HbOperatingPoint, HbOperatingPointIdentity, PacAnalysisResult, PnoiseAnalysisResult,
+    PreparedPsp, PspAnalysisResult,
 };
 pub use health::EngineHealthReport;
 pub use pss::{

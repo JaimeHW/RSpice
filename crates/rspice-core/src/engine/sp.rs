@@ -473,7 +473,7 @@ pub(crate) fn card_frequency_grid(
 }
 
 /// Read the termination from the same small-signal storage used by AC stamping.
-fn termination_impedance(
+pub(super) fn termination_impedance(
     circuit: &crate::CircuitData,
     port: &MaterializedRfPort,
     abort: &dyn AbortSignal,
