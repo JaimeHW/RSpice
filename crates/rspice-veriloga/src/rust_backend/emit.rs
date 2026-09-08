@@ -56,6 +56,32 @@ use crate::canonical_ir::cfg::{
 };
 use crate::canonical_ir::{BlockId, ValueId};
 
+/// Compact lexical indentation in generated code whose string literals escape
+/// embedded newlines. These bodies are outside ordinary `rustfmt` traversal.
+pub(super) fn compact_generated_indentation(source: &str) -> String {
+    let mut compact = String::with_capacity(source.len());
+    for line in source.split_inclusive('\n') {
+        let content = line.strip_suffix('\n').unwrap_or(line);
+        let mut columns = 0usize;
+        let mut prefix_bytes = 0usize;
+        for byte in content.bytes() {
+            match byte {
+                b' ' => columns = columns.saturating_add(1),
+                b'\t' => columns = columns.saturating_add(4),
+                _ => break,
+            }
+            prefix_bytes += 1;
+        }
+        compact.extend(std::iter::repeat_n('\t', columns / 4));
+        compact.extend(std::iter::repeat_n(' ', columns % 4));
+        compact.push_str(&content[prefix_bytes..]);
+        if line.ends_with('\n') {
+            compact.push('\n');
+        }
+    }
+    compact
+}
+
 /// What the emitted body expects to find in scope.
 ///
 /// Held as names rather than baked in so the same emitter serves the generated
@@ -102,6 +128,8 @@ pub struct EmitBindings {
     pub analog_finish: String,
     /// Checked integer result callback; the owner retains evaluation failures.
     pub integer_result: String,
+    /// Checked derivative callback; the owner retains operand or derivative failures.
+    pub checked_value: String,
 }
 
 impl Default for EmitBindings {
@@ -119,6 +147,7 @@ impl Default for EmitBindings {
             time: "time".into(),
             analog_finish: "analog_finish".into(),
             integer_result: "integer_result".into(),
+            checked_value: "checked_derivative_value".into(),
             ddt: "ddt".into(),
             ddt_slots: HashMap::new(),
             ddt_scale: "ddt_scale".into(),
@@ -298,6 +327,11 @@ pub const RUNTIME_PRELUDE: &str = concat!(
     include_str!("../../../rspice-veriloga-runtime/src/integer.rs"),
     "\n}\n",
     r#"
+fn checked_derivative_value(primal: f64, derivative: f64) -> f64 {
+    assert!(primal.is_finite(), "ddx operand is not finite");
+    assert!(derivative.is_finite(), "ddx derivative is not finite");
+    derivative
+}
 fn integer_result(result: Result<f64, integer::IntegerRuntimeError>) -> f64 {
     result.expect("standalone generated integer evaluation must be valid")
 }
@@ -1914,6 +1948,16 @@ impl Emitter<'_> {
                 return Err(EmitError::ContributedCurrentInGeneratedEmitter(value));
             }
             CfgValueKind::Unary { op, input } => self.unary_expression(*op, *input),
+            CfgValueKind::Binary {
+                op: CfgBinaryOp::CheckedValue,
+                left,
+                right,
+            } => format!(
+                "{}({}, {})",
+                bindings.checked_value,
+                self.numeric_operand(*left),
+                self.numeric_operand(*right)
+            ),
             CfgValueKind::Binary { op, left, right } => self.binary_expression(*op, *left, *right),
             CfgValueKind::LaneSplat(constant) => {
                 let width = self.function.lanes_of(value).map_or(0, <[u32]>::len);
@@ -2324,6 +2368,7 @@ fn unary(op: CfgUnaryOp, input: &str) -> String {
 
 fn binary(op: CfgBinaryOp, left: &str, right: &str) -> String {
     match op {
+        CfgBinaryOp::CheckedValue => format!("checked_derivative_value({left}, {right})"),
         CfgBinaryOp::Add => format!("{left}+ {right}"),
         CfgBinaryOp::Sub => format!("{left}- {right}"),
         CfgBinaryOp::Mul => format!("{left}* {right}"),

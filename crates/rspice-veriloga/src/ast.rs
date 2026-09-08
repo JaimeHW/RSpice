@@ -1226,6 +1226,8 @@ pub enum BinaryOp {
     BitXor,
     Shl,
     Shr,
+    /// Internal AD operation: validate the left primal and return the right derivative.
+    CheckedValue,
 }
 
 impl BinaryOp {

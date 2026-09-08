@@ -1267,6 +1267,7 @@ impl CodeGenerator {
                         | BinaryOp::IntPow => Instruction::IntegerArithmetic(
                             op.integer_arithmetic().expect("integer operation"),
                         ),
+                        BinaryOp::CheckedValue => Instruction::CheckedValue,
                         BinaryOp::Add => Instruction::Add,
                         BinaryOp::Sub => Instruction::Sub,
                         BinaryOp::Mul => Instruction::Mul,

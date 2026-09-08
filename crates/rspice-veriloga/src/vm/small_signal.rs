@@ -465,6 +465,18 @@ impl<'a> SmallSignalVm<'a> {
                 IntegerBinaryOperation::Arithmetic(*op),
                 "integer arithmetic",
             )?,
+            Instruction::CheckedValue => {
+                let derivative = self.pop("ddx")?;
+                let primal = self.pop("ddx")?;
+                rspice_veriloga_runtime::checked_derivative_value(primal.re, derivative.re)
+                    .map_err(|reason| VmError::InvalidNumericResult(reason.into()))?;
+                if !primal.im.is_finite() || !derivative.im.is_finite() {
+                    return Err(VmError::InvalidNumericResult(
+                        "ddx small-signal value is not finite".into(),
+                    ));
+                }
+                self.stack.push(derivative);
+            }
             Instruction::Add => self.binary("Add", |left, right| left + right)?,
             Instruction::Sub => self.binary("Sub", |left, right| left - right)?,
             Instruction::Mul => self.binary("Mul", |left, right| left * right)?,

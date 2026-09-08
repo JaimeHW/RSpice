@@ -5,6 +5,45 @@ mod support;
 use support::DeviceFixture;
 
 #[test]
+fn ddx_checked_value_can_be_the_only_native_helper() {
+    let fixture = DeviceFixture::compile(
+        "module derivative(p); inout p; electrical p; analog I(p)<+ddx(V(p),V(p)); endmodule",
+    );
+    let mut device = fixture.device("X", &[1]);
+    device.update_voltages(&[5.0]);
+    assert_eq!(device.try_evaluate().unwrap(), vec![1.0]);
+}
+
+#[test]
+fn ddx_preserves_domain_errors_only_on_executed_paths() {
+    for (expression, valid) in [
+        ("ddx(V(p)%V(q),V(p))", 1.0),
+        ("ddx(ddx(V(p)%V(q),V(p)),V(p))", 0.0),
+        ("ddx(a/b,V(p))", 0.0),
+        ("(ddx(V(p)%V(q),V(p))>0 ? 1 : 0)", 1.0),
+    ] {
+        let fixture = DeviceFixture::compile(&format!(
+            "module derivative_domain(p,q,n); inout p,q,n; electrical p,q,n;
+            integer a,b; analog begin a=V(p); b=V(q);
+            I(p,n)<+(V(q)<0 ? 3 : {expression}); end endmodule"
+        ));
+        let mut device = fixture.device("X", &[1, 2, 0]);
+        for (denominator, expected) in [(-1.0, Some(3.0)), (0.0, None), (2.0, Some(valid))] {
+            device.update_voltages(&[5.0, denominator]);
+            let result = device.try_evaluate();
+            if let Some(expected) = expected {
+                assert_eq!(result.unwrap()[0], expected, "{expression}");
+            } else {
+                assert!(
+                    result.is_err(),
+                    "{expression} hid modulus/division by zero: {result:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn integer_constants_and_defaults_agree_with_runtime_arithmetic() {
     for (expression, expected) in [
         ("5/2", 2.0),

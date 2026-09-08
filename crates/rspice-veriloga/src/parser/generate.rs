@@ -867,6 +867,7 @@ fn constant_value(expression: &Expression, environment: &HashMap<SmolStr, i64>) 
             let right = constant_value(&binary.right, environment)?;
             let boolean = |flag: bool| Some(i64::from(flag));
             match binary.op {
+                BinaryOp::CheckedValue => None,
                 BinaryOp::IntAdd
                 | BinaryOp::IntSub
                 | BinaryOp::IntMul

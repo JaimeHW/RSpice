@@ -21,6 +21,49 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 #[test]
+fn emitted_ddx_preserves_domain_errors_through_zero_derivatives_and_predicates() {
+    for (expression, valid) in [
+        ("ddx(V(p)%V(q),V(p))", 1.0),
+        ("ddx(ddx(V(p)%V(q),V(p)),V(p))", 0.0),
+        ("(ddx(V(p)%V(q),V(p))>0 ? 1 : 0)", 1.0),
+    ] {
+        let artifact = artifact(&format!(
+            "module derivative_domain(p,q); inout p,q; electrical p,q;
+            analog I(p)<+(V(q)<0 ? 3 : {expression}); endmodule"
+        ));
+        let cfg = CfgModel::from_hir(&artifact.hir, &artifact.mir).unwrap();
+        let differentiated =
+            differentiate(&cfg.function, &[AdSeed::NodePotential(0.into())]).unwrap();
+        let (function, wanted) = optimize_cfg(&differentiated.function, &cfg.residuals);
+        let (body, names) = emit_body(&function, &wanted, &EmitBindings::default()).unwrap();
+        let guarded = format!(
+            "let checked = std::panic::catch_unwind(|| {{ {body} {} }}).unwrap_or(-99.0f64);",
+            names[0]
+        );
+        for (denominator, expected) in [(-1.0, 3.0), (0.0, -99.0), (2.0, valid)] {
+            let mut bias = bias(&artifact);
+            bias.node_potentials[0] = 5.0;
+            bias.node_potentials[1] = denominator;
+            let evaluated = evaluate_cfg(&function, &inputs(&bias));
+            if denominator == 0.0 {
+                assert!(evaluated.is_err(), "{expression}");
+            } else {
+                assert_eq!(evaluated.unwrap().value(wanted[0]).unwrap(), expected);
+            }
+            assert_eq!(
+                compile_and_run(
+                    &scratch("ddx-domain"),
+                    "ddx_domain",
+                    &program(&guarded, &["checked".into()], &bias),
+                ),
+                vec![expected],
+                "{expression} at denominator {denominator}"
+            );
+        }
+    }
+}
+
+#[test]
 fn generated_integer_arithmetic_preserves_values_and_zero_tangents() {
     for (index, (operator, left, right, expected)) in [
         ("/", 5.0, 2.0, 2.0),

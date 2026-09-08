@@ -1655,6 +1655,12 @@ impl FunctionCompiler {
             NativeOp::UnaryMath(math) => self.emit_unary_math(prepared, math)?,
             NativeOp::BinaryMath(math) => self.emit_binary_math(prepared, math)?,
             NativeOp::IntegerCast => self.emit_integer_cast(prepared)?,
+            NativeOp::CheckedValue => self.emit_operand_context_helper(
+                prepared,
+                2,
+                0,
+                crate::native::abi::rspice_checked_value_native as *const () as usize,
+            )?,
             NativeOp::IntegerBinary(integer) => self.emit_integer_binary(prepared, integer)?,
             NativeOp::IntegerShiftConst(integer, count) => {
                 self.emit_integer_shift_const(prepared, integer, count)?

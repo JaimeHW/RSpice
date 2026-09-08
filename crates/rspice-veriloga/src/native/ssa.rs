@@ -3651,6 +3651,7 @@ fn op_may_call(op: NativeOp) -> bool {
     matches!(
         op,
         NativeOp::BinaryMath(_)
+            | NativeOp::CheckedValue
             | NativeOp::IntegerCast
             | NativeOp::IntegerBinary(_)
             | NativeOp::IntegerShiftConst(_, _)
@@ -3866,6 +3867,7 @@ fn op_may_fail(op: NativeOp) -> bool {
             | NativeOp::IdtState(_)
             | NativeOp::IdtJacobian
             | NativeOp::IdtModState(_)
+            | NativeOp::CheckedValue
             | NativeOp::IntegerCast
             | NativeOp::IntegerBinary(_)
             | NativeOp::IntegerShiftConst(_, _)

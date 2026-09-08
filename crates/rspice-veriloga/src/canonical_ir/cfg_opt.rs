@@ -277,6 +277,15 @@ impl Optimizer {
         let boolean = self.values[usize::from(value)].value_type == CfgValueType::Boolean;
         let folded = match &self.values[usize::from(value)].kind {
             CfgValueKind::Unary { op, input } => apply_unary(*op, self.constant(*input)?),
+            CfgValueKind::Binary {
+                op: CfgBinaryOp::CheckedValue,
+                left,
+                right,
+            } => rspice_veriloga_runtime::checked_derivative_value(
+                self.constant(*left)?,
+                self.constant(*right)?,
+            )
+            .ok()?,
             CfgValueKind::Binary { op, left, right } => {
                 apply_binary(*op, self.constant(*left)?, self.constant(*right)?)
             }

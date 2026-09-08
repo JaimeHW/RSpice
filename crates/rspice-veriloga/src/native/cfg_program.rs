@@ -1178,6 +1178,7 @@ fn unary_op(op: CfgUnaryOp) -> Option<NativeOp> {
 
 fn binary_op(op: CfgBinaryOp) -> NativeOp {
     match op {
+        CfgBinaryOp::CheckedValue => NativeOp::CheckedValue,
         CfgBinaryOp::Add => NativeOp::Add,
         CfgBinaryOp::Sub => NativeOp::Sub,
         CfgBinaryOp::Mul => NativeOp::Mul,

@@ -1141,7 +1141,7 @@ impl<'a> ScalarDdxBuilder<'a> {
             };
             terms.push(term);
         }
-        match terms.as_slice() {
+        let derivative = match terms.as_slice() {
             [] => CfgValueKind::RealConstant(0.0),
             [only] => CfgValueKind::Binary {
                 op: CfgBinaryOp::Mul,
@@ -1154,6 +1154,15 @@ impl<'a> ScalarDdxBuilder<'a> {
                 right: *right,
             },
             _ => unreachable!("a ddx axis has at most two components"),
+        };
+        let derivative = match derivative {
+            CfgValueKind::RealConstant(value) => self.constant(value),
+            kind => self.push(CfgValueType::Real, kind),
+        };
+        CfgValueKind::Binary {
+            op: CfgBinaryOp::CheckedValue,
+            left: value,
+            right: derivative,
         }
     }
 
@@ -1431,6 +1440,7 @@ impl<'a> ScalarDdxBuilder<'a> {
         let d_left = self.derivative(left, lane);
         let d_right = self.derivative(right, lane);
         match op {
+            CfgBinaryOp::CheckedValue => d_right,
             CfgBinaryOp::Add => match (d_left, d_right) {
                 (Some(a), Some(b)) => Some(self.push_binary(CfgBinaryOp::Add, a, b)),
                 (Some(only), None) | (None, Some(only)) => Some(only),
@@ -2221,7 +2231,15 @@ impl<'a> AdBuilder<'a> {
                 }
             }
         };
-        self.values[usize::from(result)].kind = kind;
+        let derivative = match kind {
+            CfgValueKind::RealConstant(value) => self.constant(value),
+            kind => self.push(CfgValueType::Real, kind),
+        };
+        self.values[usize::from(result)].kind = CfgValueKind::Binary {
+            op: CfgBinaryOp::CheckedValue,
+            left: value,
+            right: derivative,
+        };
     }
 
     /// The scalar partial of `value` with respect to one solver unknown.
@@ -2600,6 +2618,7 @@ impl<'a> AdBuilder<'a> {
         let d_left = self.derivatives[usize::from(left)];
         let d_right = self.derivatives[usize::from(right)];
         match op {
+            CfgBinaryOp::CheckedValue => d_right,
             CfgBinaryOp::Add => match (d_left, d_right) {
                 (Some(d_left), Some(d_right)) => {
                     Some(self.lane_binary(CfgBinaryOp::Add, d_left, d_right, target))

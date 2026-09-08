@@ -26,6 +26,7 @@ pub(super) enum HelperError {
     InvalidOpcode,
     InvalidDynamicIndex,
     InvalidIntegerOperation,
+    InvalidDerivative(&'static str),
     StatefulRuntimeUnavailable,
     StatefulRuntimeFailed,
 }
@@ -180,6 +181,8 @@ pub(super) fn evaluate_helper_with_session(
             operands[0],
             operands[1],
         )),
+        340 => rspice_veriloga_runtime::checked_derivative_value(operands[0], operands[1])
+            .map_err(HelperError::InvalidDerivative),
         300 => real_to_integer(operands[0])
             .map(f64::from)
             .map_err(|_| HelperError::InvalidIntegerOperation),

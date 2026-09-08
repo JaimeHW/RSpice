@@ -2245,6 +2245,7 @@ pub mod autodiff {
             | Node::PortConnected(_)
             | Node::Analysis(_) => 0,
             Node::Binary(op, left, right) => match op {
+                BinaryOp::CheckedValue => recurse(right),
                 BinaryOp::Add
                 | BinaryOp::Sub
                 | BinaryOp::Mul
@@ -3186,6 +3187,7 @@ pub mod autodiff {
                 }
             }
             Node::Binary(op, left, right) => match op {
+                BinaryOp::CheckedValue => collect!(right),
                 BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mod => {
                     collect!(left);
                     collect!(right);
@@ -3829,7 +3831,7 @@ pub mod autodiff {
                     }
                 }
             };
-            Some(*arena.node(resolved))
+            Some(Node::Binary(BinaryOp::CheckedValue, inner, resolved))
         })
     }
 
@@ -4331,6 +4333,7 @@ pub mod autodiff {
                             }
                         }
                     }
+                    BinaryOp::CheckedValue => dr,
                     BinaryOp::Mod => {
                         // The integer quotient is locally constant even when
                         // both real operands vary: d(l % r) = dl - trunc(l/r)*dr.

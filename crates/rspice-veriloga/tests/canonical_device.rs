@@ -22,6 +22,87 @@ use std::process::Command;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 #[test]
+fn generated_ddx_preserves_domain_errors_in_stamps_and_noise() {
+    for (expression, valid_psd) in [
+        ("ddx(V(p)%V(q),V(p))", "1.0"),
+        ("ddx(ddx(V(p)%V(q),V(p)),V(p))", "2.0"),
+    ] {
+        let source = format!(
+            "module derivative_domain(p,q); inout p,q; electrical p,q; real d; analog begin
+             d=V(q)<0 ? 3 : {expression};
+             I(p)<+(d>0 ? 1 : 0)+white_noise(d>0 ? 1 : 2,\"checked\"); end endmodule"
+        );
+        let name = "checked derivative device";
+        let (state, stamp, noise) = generated_parts(&source, name);
+        let main = r#"
+struct Capture(f64);
+impl runtime::GeneratedNoiseVisitor for Capture {
+    fn visit(&mut self,_index:usize,value:runtime::GeneratedNoiseEvaluationRef<'_>)->bool { self.0=value.psd; true }
+}
+impl runtime::GeneratedNoiseProcessVisitor for Capture {
+    fn visit_process(&mut self,_index:usize,value:runtime::GeneratedNoiseProcessEvaluationRef<'_>)->bool { self.0=value.psd; true }
+}
+let mut instance=device::state::Instance::new(&[0,1]);
+instance.finalize_parameters().unwrap();
+for (q,fails) in [(-1.0,false),(0.0,true),(2.0,false)] {
+    let bias=[5.0,q];
+    let ctx=runtime::GeneratedEvalContext { voltages:&bias,temperature:300.0 };
+    runtime::clear_evaluation_error();
+    instance.stamp(&ctx,&mut runtime::GeneratedStamper::default());
+    assert_eq!(ctx.evaluation_failed(),fails,"stamp at {q}");
+    runtime::clear_evaluation_error();
+    let mut source=Capture(-1.0);
+    assert_eq!(instance.evaluate_noise_sources(&ctx,&mut source).is_err(),fails,"noise at {q}");
+    runtime::clear_evaluation_error();
+    let mut process=Capture(-1.0);
+    assert_eq!(instance.evaluate_noise_processes_at_frequency(&ctx,1.0,&mut process).is_err(),fails,"noise process at {q}");
+    if !fails {
+        let expected=if q<0.0 {1.0} else {VALID_PSD};
+        assert_eq!(source.0,expected,"noise at {q}");
+        assert_eq!(process.0,expected,"noise process at {q}");
+    }
+}
+"#.replace("VALID_PSD", valid_psd);
+        run_generated_main(name, &state, &stamp, &noise, &main)
+            .unwrap_or_else(|report| panic!("{report}"));
+    }
+}
+
+#[test]
+fn generated_ddx_preprocessing_does_not_cache_failed_operands() {
+    let work = "g=g+sin(g);".repeat(12);
+    let source = format!(
+        "module derivative_stage(p); inout p; electrical p; real g,d; analog begin
+         g=$temperature; {work} d=ddx(g%$temperature,V(p)); I(p)<+(d>0 ? 1 : 2)*V(p); end endmodule"
+    );
+    let name = "checked derivative preprocessing";
+    let (state, stamp, noise) = generated_parts(&source, name);
+    assert!(
+        stamp.contains("_preprocess("),
+        "fixture must use cached preprocessing"
+    );
+    run_generated_main(
+        name,
+        &state,
+        &stamp,
+        &noise,
+        r#"
+let mut instance=device::state::Instance::new(&[0]);
+instance.finalize_parameters().unwrap();
+for (temperature,fails) in [(0.0,true),(300.0,false),(0.0,true)] {
+    for _ in 0..2 {
+        runtime::clear_evaluation_error();
+        let ctx=runtime::GeneratedEvalContext { voltages:&[1.0],temperature };
+        instance.stamp(&ctx,&mut runtime::GeneratedStamper::default());
+        assert_eq!(ctx.evaluation_failed(),fails,"at {temperature}");
+    }
+}
+"#,
+    )
+    .unwrap_or_else(|report| panic!("{report}"));
+}
+
+#[test]
 fn generated_integer_arithmetic_finalizes_defaults_before_evaluation() {
     let (state, stamp, noise) = generated_parts(
         "module integer_defaults(p,n); inout p,n; electrical p,n; parameter integer numerator=5, denominator=2; parameter real quotient=numerator/denominator; parameter real overflow=2147483647+1; localparam real reciprocal=2**-1; integer q; analog begin q=V(p,n); I(p,n)<+quotient+(q/denominator)+0.25*V(p,n)+reciprocal; end endmodule",
@@ -5449,6 +5530,10 @@ pub mod runtime {
         pub fn evaluation_failed(&self) -> bool { EVALUATION_FAILED.load(std::sync::atomic::Ordering::SeqCst) }
         pub fn integer_result(&self, result: Result<f64, integer::IntegerRuntimeError>) -> f64 {
             result.unwrap_or_else(|_| { EVALUATION_FAILED.store(true, std::sync::atomic::Ordering::SeqCst); f64::NAN })
+        }
+        pub fn checked_derivative_value(&self, primal: f64, derivative: f64) -> f64 {
+            if primal.is_finite() && derivative.is_finite() { derivative }
+            else { EVALUATION_FAILED.store(true, std::sync::atomic::Ordering::SeqCst); f64::NAN }
         }
         pub fn check_noise_evaluation(&self) -> Result<(), GeneratedNoiseEvaluationError> {
             if self.evaluation_failed() { Err(GeneratedNoiseEvaluationError::NonFinite { index:0,quantity:"evaluation",value:f64::NAN }) } else { Ok(()) }

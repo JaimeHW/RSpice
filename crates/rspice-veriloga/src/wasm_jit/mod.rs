@@ -50,7 +50,7 @@ use wasmparser::{Encoding, ExternalKind, Imports, Operator, Parser, Payload, Typ
 
 /// Version of the linear-memory and helper-function contract understood by
 /// emitted modules and the browser worker.
-pub const WASM_JIT_ABI_VERSION: u32 = 10;
+pub const WASM_JIT_ABI_VERSION: u32 = 11;
 
 /// Version of the deterministic encoder. It participates in cache identity
 /// independently of the ABI because code layout may change without changing
@@ -103,7 +103,8 @@ pub const WASM_JIT_ABI_VERSION: u32 = 10;
 /// 18 to 19 inserts integer parameter default conversions before their use in
 /// dependent defaults and generated expressions.
 /// 19 to 20 preserves signed integer arithmetic and its checked helper calls.
-pub const WASM_JIT_EMITTER_VERSION: u32 = 20;
+/// 20 to 21 preserves ddx primal validation through symbolic differentiation.
+pub const WASM_JIT_EMITTER_VERSION: u32 = 21;
 
 /// Hard ceiling for one qualified shipped model's generated module.
 pub const SHIPPED_MODEL_WASM_CODE_SIZE_BUDGET_BYTES: usize = 32 * 1024 * 1024;
@@ -1628,7 +1629,7 @@ endmodule
                     WASM_JIT_IMPORT_MODULE,
                     super::codegen::WASM_JIT_EVAL_HELPER_IMPORT,
                     move |mut caller: wasmi::Caller<'_, super::runtime::WasmJitRuntimeSession>,
-                          _: i32,
+                          frame_offset: i32,
                           opcode: i32,
                           aux0: i32,
                           aux1: i32,
@@ -1657,11 +1658,17 @@ endmodule
                             &variables,
                             Some(caller.data_mut()),
                         )
-                        .unwrap_or_else(|error| {
-                            panic!(
-                                "fused-kernel helper {opcode}: {error:?}: {:?}",
-                                caller.data_mut().take_error()
-                            )
+                        .unwrap_or_else(|_| {
+                            // Match the primary Wasm runtime's helper failure contract.
+                            memory
+                                .write(
+                                    &mut caller,
+                                    frame_offset as usize
+                                        + super::abi::FRAME_ERROR_STATUS_OFFSET as usize,
+                                    &super::WASM_JIT_STATUS_RUNTIME_ERROR.to_le_bytes(),
+                                )
+                                .expect("write helper failure status");
+                            0.0
                         })
                     },
                 )
@@ -1930,6 +1937,56 @@ endmodule
                             harness.read_f64(FRAME_RESULT_OFFSET as usize),
                             expected,
                             "{expression}; postfix={postfix}; entry={entry}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn wasm_ddx_preserves_domain_failures_through_predicates_and_nested_derivatives() {
+        use super::abi::FRAME_RESULT_OFFSET;
+        for (expression, valid) in [
+            ("ddx(V(p)%V(q),V(p))", 1.0),
+            ("ddx(ddx(V(p)%V(q),V(p)),V(p))", 0.0),
+            ("(ddx(V(p)%V(q),V(p))>0 ? 1 : 0)", 1.0),
+            ("ddx(a/b,V(p))", 0.0),
+        ] {
+            let source = format!(
+                "module derivative_domain(p,q,n); inout p,q,n; electrical p,q,n;
+                integer a,b; analog begin a=V(p); b=V(q);
+                I(p,n)<+(V(q)<0 ? 3 : {expression}); end endmodule"
+            );
+            for postfix in [false, true] {
+                let mut harness =
+                    FusedKernelHarness::for_source_with_plan(&source, "derivative_domain", postfix);
+                let value = harness.stamp_value_export(0);
+                for (denominator, expected) in [(-1.0, Some(3.0)), (0.0, None), (2.0, Some(valid))]
+                {
+                    harness.reset();
+                    harness.write_f64(FusedKernelHarness::VOLTAGES as usize, 5.0);
+                    harness.write_f64(FusedKernelHarness::VOLTAGES as usize + 8, denominator);
+                    harness.write_f64(FusedKernelHarness::VOLTAGES as usize + 16, 0.0);
+                    let exports = [
+                        harness.artifact.assignment_export().map(str::to_owned),
+                        harness.artifact.prelude_export().map(str::to_owned),
+                        Some(value.clone()),
+                    ];
+                    let mut status = 0;
+                    for export in exports.into_iter().flatten() {
+                        status = harness.call(&export);
+                        if status != 0 {
+                            break;
+                        }
+                    }
+                    if let Some(expected) = expected {
+                        assert_eq!(status, 0, "{expression}, postfix={postfix}");
+                        assert_eq!(harness.read_f64(FRAME_RESULT_OFFSET as usize), expected);
+                    } else {
+                        assert_ne!(
+                            status, 0,
+                            "{expression} hid division by zero, postfix={postfix}"
                         );
                     }
                 }
