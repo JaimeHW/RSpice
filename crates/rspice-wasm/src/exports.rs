@@ -268,6 +268,35 @@ mod wasm_tests {
     }
 
     #[wasm_bindgen_test]
+    fn vbic13_signed_reverse_charge_and_delay_matches_xyce_in_wasm() {
+        let netlist = rspice_core::Netlist::parse(
+            "Signed VBIC reverse charge and delay in WASM\nVc c 0 -1\nVb b 0 DC 0.1 AC 1\nVth th 0 20\nQ1 c b 0 0 th vm SW_ET=0 M=3\n\
+             .model vm PNP(LEVEL=12 IS=1e-8 ISRR=0.7 IBEI=0 IBCI=0 IBEIP=0 ISP=0 RCX=1 RCI=1 RBX=1 RBI=1 RE=1 RBP=10 RS=10 GMIN=0 TNOM=27 IKF=1e-10 IKR=1e-10 QBM=1 NKF=0.4 VEF=3 VER=4 TF=2n TR=1n TD=1n QTF=0.5 XTF=10 ITF=1e-3)\n.temp 27\n.options gmin=0\n.end\n"
+        ).unwrap();
+        let points = rspice_core::Engine::default()
+            .run_ac_with_abort(&netlist, &[1e8], &rspice_core::abort_signal::NoAbort)
+            .unwrap();
+        let point = &points[0];
+        for (branch, expected) in [
+            (
+                "vc",
+                rspice_core::Complex64::new(-1.2339551736312433e-6, 1.4936538192949223e-6),
+            ),
+            (
+                "vb",
+                rspice_core::Complex64::new(-2.595701431573616e-11, -4.092821900053193e-6),
+            ),
+        ] {
+            let index = point
+                .branch_names
+                .iter()
+                .position(|name| name.eq_ignore_ascii_case(branch))
+                .unwrap();
+            assert!((point.currents[index] - expected).norm() < 2e-6 * expected.norm());
+        }
+    }
+
+    #[wasm_bindgen_test]
     fn vbic13_delayed_avalanche_matches_xyce_in_wasm() {
         for (kind, polarity) in [("NPN", 1.0), ("PNP", -1.0)] {
             let netlist = rspice_core::Netlist::parse(&format!(

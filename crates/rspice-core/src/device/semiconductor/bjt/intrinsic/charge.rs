@@ -175,10 +175,8 @@ impl Bjt {
         vbe_eff: Value,
         vbc_eff: Value,
     ) -> TransportChargeState {
-        let ifi = self.diode_current(vbe_eff, self.nf).max(0.0);
-        let iri = self
-            .diode_current_with_is(self.is * self.isrr.max(0.0), vbc_eff, self.nr)
-            .max(0.0);
+        let ifi = self.diode_current(vbe_eff, self.nf);
+        let iri = self.diode_current_with_is(self.is * self.isrr.max(0.0), vbc_eff, self.nr);
         let gfi = self.diode_conductance(vbe_eff, self.nf);
         let gri = self.diode_conductance_with_is(self.is * self.isrr.max(0.0), vbc_eff, self.nr);
 
@@ -223,37 +221,30 @@ impl Bjt {
         let nkf = self.nkf.max(1e-12);
         let (qb, dqb_dvbe_eff, dqb_dvbc_eff) = if self.qbm < 0.5 {
             let inv_nkf = 1.0 / nkf;
-            let xvar3 = q1.max(1e-18).powf(inv_nkf);
-            let dxvar3_dvbe_eff = if q1 > 0.0 {
-                xvar3 * inv_nkf * dq1_dvbe_eff / q1.max(1e-18)
-            } else {
-                0.0
-            };
-            let dxvar3_dvbc_eff = if q1 > 0.0 {
-                xvar3 * inv_nkf * dq1_dvbc_eff / q1.max(1e-18)
-            } else {
-                0.0
-            };
-            let xvar1 = (xvar3 + 4.0 * q2).max(1e-18);
+            // q1 is positive by construction (at least 1e-4).
+            let xvar3 = q1.powf(inv_nkf);
+            let dxvar3_dvbe_eff = xvar3 * inv_nkf * dq1_dvbe_eff / q1;
+            let dxvar3_dvbc_eff = xvar3 * inv_nkf * dq1_dvbc_eff / q1;
+            let xvar1 = xvar3 + 4.0 * q2;
             let dxvar1_dvbe_eff = dxvar3_dvbe_eff + 4.0 * dq2_dvbe_eff;
             let dxvar1_dvbc_eff = dxvar3_dvbc_eff + 4.0 * dq2_dvbc_eff;
-            let xvar4 = xvar1.powf(nkf);
-            let dxvar4_dvbe_eff = xvar4 * nkf * dxvar1_dvbe_eff / xvar1;
-            let dxvar4_dvbc_eff = xvar4 * nkf * dxvar1_dvbc_eff / xvar1;
+            let (xvar4, dxvar4) = self.vbic_high_injection_power(xvar1, nkf);
+            let dxvar4_dvbe_eff = dxvar4 * dxvar1_dvbe_eff;
+            let dxvar4_dvbc_eff = dxvar4 * dxvar1_dvbc_eff;
             (
-                (0.5 * (q1 + xvar4)).max(1e-12),
+                0.5 * (q1 + xvar4),
                 0.5 * (dq1_dvbe_eff + dxvar4_dvbe_eff),
                 0.5 * (dq1_dvbc_eff + dxvar4_dvbc_eff),
             )
         } else {
-            let xvar1 = (1.0 + 4.0 * q2).max(1e-18);
+            let xvar1 = 1.0 + 4.0 * q2;
             let dxvar1_dvbe_eff = 4.0 * dq2_dvbe_eff;
             let dxvar1_dvbc_eff = 4.0 * dq2_dvbc_eff;
-            let xvar2 = xvar1.powf(nkf);
-            let dxvar2_dvbe_eff = xvar2 * nkf * dxvar1_dvbe_eff / xvar1;
-            let dxvar2_dvbc_eff = xvar2 * nkf * dxvar1_dvbc_eff / xvar1;
+            let (xvar2, dxvar2) = self.vbic_high_injection_power(xvar1, nkf);
+            let dxvar2_dvbe_eff = dxvar2 * dxvar1_dvbe_eff;
+            let dxvar2_dvbc_eff = dxvar2 * dxvar1_dvbc_eff;
             (
-                (0.5 * q1 * (1.0 + xvar2)).max(1e-12),
+                0.5 * q1 * (1.0 + xvar2),
                 0.5 * (1.0 + xvar2) * dq1_dvbe_eff + 0.5 * q1 * dxvar2_dvbe_eff,
                 0.5 * (1.0 + xvar2) * dq1_dvbc_eff + 0.5 * q1 * dxvar2_dvbc_eff,
             )
@@ -524,5 +515,85 @@ impl Bjt {
                 iciei: iciei_branch,
             },
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    #[test]
+    fn vbic_signed_transport_and_charge_jacobian_cover_reverse_bias_and_rolloff_floor() {
+        for level in [4.0, 11.0, 12.0] {
+            for qbm in [0.0, 1.0] {
+                for knee in [1e-10, 1e-6] {
+                    let model = Bjt::new_npn("q".into(), 1, 2, 0).with_params(&HashMap::from([
+                        ("LEVEL".into(), level),
+                        ("IS".into(), 1e-8),
+                        ("ISRR".into(), 0.7),
+                        ("NF".into(), 1.1),
+                        ("NR".into(), 1.3),
+                        ("VEF".into(), 3.0),
+                        ("VER".into(), 4.0),
+                        ("QBM".into(), qbm),
+                        ("NKF".into(), 0.4),
+                        ("IKF".into(), knee),
+                        ("IKR".into(), knee),
+                    ]));
+                    for (vbe, vbc) in [(-0.11, -0.09), (-0.03, 0.08), (0.08, -0.03), (0.0, 0.0)] {
+                        let state = model.vbic_transport_charge_state(vbe, vbc);
+                        let expected_if = model.is * (vbe / (model.nf * model.vt)).exp_m1();
+                        let expected_ir =
+                            model.is * model.isrr * (vbc / (model.nr * model.vt)).exp_m1();
+                        assert!((state.ifi - expected_if).abs() < 1e-20);
+                        assert!((state.iri - expected_ir).abs() < 1e-20);
+                        if level >= 11.0 && knee == 1e-10 && vbe < 0.0 && vbc < 0.0 {
+                            let power = 1e-8_f64.powf(model.nkf);
+                            let expected_qb = if qbm < 0.5 {
+                                0.5 * (state.q1 + power)
+                            } else {
+                                0.5 * state.q1 * (1.0 + power)
+                            };
+                            assert_eq!(state.qb, expected_qb);
+                        }
+                        let h = 1e-7;
+                        for (column, derivatives) in [
+                            [
+                                state.dqb_dvbe_eff,
+                                state.ditzf_dvbe_eff,
+                                state.ditzr_dvbe_eff,
+                            ],
+                            [
+                                state.dqb_dvbc_eff,
+                                state.ditzf_dvbc_eff,
+                                state.ditzr_dvbc_eff,
+                            ],
+                        ]
+                        .into_iter()
+                        .enumerate()
+                        {
+                            let mut plus = [vbe, vbc];
+                            let mut minus = plus;
+                            plus[column] += h;
+                            minus[column] -= h;
+                            let plus = model.vbic_transport_charge_state(plus[0], plus[1]);
+                            let minus = model.vbic_transport_charge_state(minus[0], minus[1]);
+                            for ((hi, lo), actual) in [plus.qb, plus.itzf, plus.itzr]
+                                .into_iter()
+                                .zip([minus.qb, minus.itzf, minus.itzr])
+                                .zip(derivatives)
+                            {
+                                let fd = (hi - lo) / (2.0 * h);
+                                assert!(
+                                    (actual - fd).abs() < 2e-6 * actual.abs().max(fd.abs()) + 1e-15,
+                                    "level={level} QBM={qbm} knee={knee} bias=({vbe},{vbc}) column={column}: {actual:e} != {fd:e}"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }

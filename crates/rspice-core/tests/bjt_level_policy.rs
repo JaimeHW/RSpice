@@ -763,6 +763,38 @@ fn vbic13_self_heating_switch_matches_xyce710_and_grounded_thermal_pins() {
 }
 
 #[test]
+fn vbic13_signed_reverse_transport_matches_xyce710() {
+    // Independent Xyce 7.10 LEVEL=11/12 runs with both junctions reverse
+    // biased. Clipping Ifi/Iri to zero incorrectly makes I(Vc) vanish.
+    let engine = Engine::new(SimulationConfig {
+        convergence_config: ConvergenceConfig {
+            gmin_target: 0.0,
+            ..Default::default()
+        },
+        ..Default::default()
+    });
+    for level in [11, 12] {
+        let substrate = if level == 12 { " 0" } else { "" };
+        for (kind, p) in [("NPN", 1.0), ("PNP", -1.0)] {
+            for (m, expected) in [(1, -2.0937090356027423e-10), (3, -6.281127106808194e-10)] {
+                let netlist = Netlist::parse(&format!(
+                    "VBIC reverse transport\nVc c 0 {p}\nVb b 0 {}\nQ1 c b 0{substrate} vm SW_ET=0 M={m}\n\
+                     .model vm {kind}(LEVEL={level} IS=1e-8 IBEI=0 IBCI=0 IBEIP=0 ISP=0 RCX=1 RCI=1 RBX=1 RBI=1 RE=1 RBP=0 RS=0 GMIN=0 TNOM=27)\n.temp 27\n.options gmin=0\n.end\n",
+                    -0.1 * p
+                )).unwrap();
+                let result = engine.run_dc_op(&netlist).unwrap();
+                let actual = result.branch_current_named("Vc").unwrap();
+                assert!(
+                    (actual - p * expected).abs() < 2e-6 * expected.abs(),
+                    "LEVEL={level} {kind} M={m}: {actual:e} != {:e}",
+                    p * expected
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn vbic_parasitic_high_injection_scaling_matches_xyce710() {
     for (multiplier, expected) in [(1, 8.470381112623551e-6), (3, 1.7782090999422936e-5)] {
         let netlist = Netlist::parse(&format!(

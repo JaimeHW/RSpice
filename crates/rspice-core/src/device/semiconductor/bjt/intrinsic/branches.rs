@@ -326,10 +326,11 @@ impl Bjt {
         } else {
             0.0
         };
-        let sqrt_term = (1.0 + 4.0 * state.ifp * iikp).max(1e-18).sqrt();
-        state.qbp = (0.5 * (1.0 + sqrt_term)).max(1e-12);
+        let (sqrt_term, d_sqrt_term) =
+            self.vbic_high_injection_power(1.0 + 4.0 * state.ifp * iikp, 0.5);
+        state.qbp = 0.5 * (1.0 + sqrt_term);
         if iikp > 0.0 {
-            let d_qbp_d_ifp = iikp / sqrt_term;
+            let d_qbp_d_ifp = 2.0 * iikp * d_sqrt_term;
             for idx in 0..INTERNAL_DIM {
                 state.d_qbp[idx] = d_qbp_d_ifp * state.d_ifp[idx];
             }
@@ -630,6 +631,34 @@ impl Bjt {
 mod tests {
     use super::*;
     use std::collections::HashMap;
+
+    #[test]
+    fn vbic13_reverse_parasitic_transport_keeps_a_constant_charge_floor() {
+        for level in [11.0, 12.0] {
+            for model in [
+                Bjt::new_npn("q".into(), 1, 2, 0),
+                Bjt::new_pnp("q".into(), 1, 2, 0),
+            ] {
+                let model = model
+                    .with_params(&HashMap::from([
+                        ("LEVEL".into(), level),
+                        ("ISP".into(), 1e-8),
+                        ("IKP".into(), 1e-10),
+                        ("WSP".into(), 0.6),
+                    ]))
+                    .with_instance_params(&[("M".into(), 3.0)]);
+                let p = model.polarity();
+                for bias in [-0.100_001, -0.1, -0.099_999] {
+                    let state =
+                        model.parasitic_transport_state(p * bias, p * bias, 0.0, 0.0, p * bias);
+                    assert!(state.ifp < 0.0);
+                    assert_eq!(state.qbp, 0.500_05);
+                    assert_eq!(state.d_qbp, [0.0; INTERNAL_DIM]);
+                    assert!(state.d_ifp[IDX_VBX].abs() > 0.0);
+                }
+            }
+        }
+    }
 
     #[test]
     fn vbic_parasitic_base_charge_is_independent_of_parallel_instance_count() {

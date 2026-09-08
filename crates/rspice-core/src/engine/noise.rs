@@ -7261,6 +7261,33 @@ M1 D G S B N W=10u L=1u AS=0 AD=0 PS=0 PD=0
     }
 
     #[test]
+    fn vbic13_reverse_transport_shot_noise_matches_xyce710() {
+        for level in [11, 12] {
+            let substrate = if level == 12 { " 0" } else { "" };
+            for (kind, p) in [("NPN", 1.0), ("PNP", -1.0)] {
+                let netlist = Netlist::parse(&format!(
+                    "Signed reverse transport shot noise\nVcc vcc 0 {p}\nRc vcc c 1meg\nVb b 0 DC {} AC 1\nQ1 c b 0{substrate} vm SW_ET=0 M=3\n\
+                     .model vm {kind}(LEVEL={level} IS=1e-8 IBEI=0 IBCI=0 IBEIP=0 ISP=0 RCX=1 RCI=1 RBX=1 RBI=1 RE=1 RBP=0 RS=0 GMIN=0 TNOM=27)\n.temp 27\n.options gmin=0\n.end\n", -0.1*p
+                )).unwrap();
+                let engine = xyce_engine().resolved_for_netlist(&netlist);
+                let circuit = engine.build_circuit(&netlist).unwrap();
+                let output = circuit.get_node_by_name("c").unwrap();
+                let results = engine
+                    .run_noise_with_input_source(&netlist, output, None, "Vb", &[1e3, 1e6], 300.15)
+                    .unwrap();
+                for result in results {
+                    let expected = 4.481133081246399e-14;
+                    assert!(
+                        (result.output_noise_density - expected).abs() < 2e-6 * expected,
+                        "LEVEL={level} {kind}: {:e} != {expected:e}",
+                        result.output_noise_density
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
     fn vbic13_intrinsic_and_extrinsic_flicker_match_xyce710() {
         for (level, wbe, expected) in [
             (11, 0, 2.4510522096655873e-8),

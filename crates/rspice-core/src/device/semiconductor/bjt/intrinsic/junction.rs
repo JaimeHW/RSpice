@@ -28,7 +28,9 @@ impl Bjt {
             );
         }
 
-        if v >= -3.0 * nvt {
+        // VBIC retains the exponential under reverse bias; the cubic
+        // continuation below belongs only to the Gummel-Poon model.
+        if self.charge_model == BjtChargeModel::Vbic || v >= -3.0 * nvt {
             let exp_v = (v / nvt).exp();
             return (isat * (exp_v - 1.0), isat * exp_v / nvt);
         }
@@ -38,7 +40,7 @@ impl Bjt {
         (-isat * (1.0 + arg3), isat * 3.0 * arg3 / v)
     }
 
-    /// Diode current using ngspice's BJT reverse-bias continuation.
+    /// Diode current with the selected model's reverse-bias law.
     pub(in crate::device::semiconductor::bjt) fn diode_current_with_is(
         &self,
         isat: Value,
@@ -152,6 +154,24 @@ impl Bjt {
     #[inline]
     pub(in crate::device::semiconductor::bjt) fn series_active(resistance: Value) -> bool {
         resistance.is_finite() && resistance > 0.0
+    }
+
+    /// High-injection power and derivative with respect to its argument.
+    /// VBIC 1.3 specifies a 1e-8 floor in both qb and qbp; the derivative
+    /// of the floored contribution is zero. Retain the older model's
+    /// numerical guard without applying the 1.3 floor to that family.
+    pub(in crate::device::semiconductor::bjt) fn vbic_high_injection_power(
+        &self,
+        argument: Value,
+        exponent: Value,
+    ) -> (Value, Value) {
+        let floor = if self.vbic_13 { 1e-8 } else { 1e-18 };
+        if argument > floor {
+            let value = argument.powf(exponent);
+            (value, exponent * value / argument)
+        } else {
+            (floor.powf(exponent), 0.0)
+        }
     }
 
     #[inline]

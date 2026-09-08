@@ -343,6 +343,53 @@ fn promoted_vbic_thermal_and_excess_phase_checkpoints_resume_every_state_exactly
 }
 
 #[test]
+fn vbic13_signed_reverse_delay_states_resume_exactly() {
+    for (level, kind, p) in [(11, "NPN", 1.0), (12, "PNP", -1.0)] {
+        let substrate = if level == 12 { " 0" } else { "" };
+        let deck = format!(
+            "VBIC signed delay checkpoint\nVc c 0 {p}\nVb b 0 DC {} SIN({} {} 50Meg 0 0 90)\nQ1 c b 0{substrate} vm SW_ET=0 M=3\n\
+             .model vm {kind}(LEVEL={level} IS=1e-8 ISRR=0.7 IBEI=1e-9 IBCI=1e-9 IBEIP=0 ISP=0 RCX=1 RCI=1 RBX=1 RBI=1 RE=1 RBP=0 RS=0 GMIN=0 TNOM=27 TF=2n TR=1n TD=1n)\n.temp 27\n.options gmin=0\n.end\n",
+            0.02 * p,
+            -0.04 * p,
+            0.06 * p
+        );
+        for method in [
+            IntegrationMethod::BackwardEuler,
+            IntegrationMethod::Trapezoidal,
+            IntegrationMethod::Gear2,
+        ] {
+            let full = assert_scheduled_deck_resumes_exactly(
+                &format!("LEVEL={level} {kind} signed delay {method:?}"),
+                &deck,
+                20e-9,
+                10.237e-9,
+                20e-12,
+                SimulationConfig {
+                    integration_method: method,
+                    ..Default::default()
+                },
+            );
+            for state in ["xf1", "xf2"] {
+                let name = format!("Q1.__{state}.internal");
+                let column = full
+                    .node_names
+                    .iter()
+                    .position(|node| node.eq_ignore_ascii_case(&name))
+                    .unwrap();
+                assert!(
+                    full.voltages[column].iter().any(|value| *value < -1e-8),
+                    "{name} must retain negative transport state"
+                );
+                assert!(
+                    full.voltages[column].iter().any(|value| *value > 1e-8),
+                    "{name} must also cross into forward operation"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn vbic13_clipped_thermal_state_with_tcrth_resumes_exactly() {
     for level in [11, 12] {
         let substrate = if level == 12 { " 0" } else { "" };
