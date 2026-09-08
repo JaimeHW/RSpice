@@ -964,14 +964,18 @@ fn family_values_label(family: &AnalysisResultFamilyMetadata) -> String {
         }
         AnalysisResultFamilyMetadata::SParameter {
             reference_impedances_ohm,
+            noise_reference_temperature_kelvin,
         } => format!(
-            "{}-port S-parameter references ({})",
+            "{}-port S-parameter references ({}){}",
             reference_impedances_ohm.len(),
             reference_impedances_ohm
                 .iter()
                 .map(|value| format!("{value} ohm"))
                 .collect::<Vec<_>>()
-                .join(", ")
+                .join(", "),
+            noise_reference_temperature_kelvin.map_or_else(String::new, |temperature| {
+                format!(" / DUT Norton noise at {temperature} K; CY in A²/Hz, F and Fmin linear")
+            }),
         ),
     }
 }

@@ -401,6 +401,7 @@ fn worker_result_round_trip() {
     );
     pac_current.y_unit = "A".to_owned();
     let ac = SimulationResult::Ac {
+        noise_reference_temperature_kelvin: None,
         reference_impedances_ohm: None,
         frequencies: vec![1.0, 10.0],
         waveforms: HashMap::from([
@@ -424,8 +425,10 @@ fn worker_result_round_trip() {
             waveforms,
             measurements,
             reference_impedances_ohm,
+            noise_reference_temperature_kelvin,
         } => {
             assert_eq!(reference_impedances_ohm, None);
+            assert_eq!(noise_reference_temperature_kelvin, None);
             assert_eq!(frequencies, vec![1.0, 10.0]);
             let waveform = waveforms.get("V(out)").expect("waveform is preserved");
             assert!(waveform.is_complex);

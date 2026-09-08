@@ -271,6 +271,7 @@ impl SimulationController {
             return;
         };
         let metadata = AnalysisResultFamilyMetadata::SParameter {
+            noise_reference_temperature_kelvin: None,
             reference_impedances_ohm,
         };
         if metadata.validate_for(result.analysis_type).is_ok() {
@@ -424,6 +425,7 @@ impl SimulationController {
                 waveforms,
                 measurements,
                 reference_impedances_ohm,
+                noise_reference_temperature_kelvin,
             } => {
                 let mut result = AnalysisResult::new(1, analysis_type, label.to_string())
                     .with_waveforms(self.build_ac_waveforms_owned(frequencies, waveforms))
@@ -431,6 +433,7 @@ impl SimulationController {
                 result.family_metadata = reference_impedances_ohm.map(|reference_impedances_ohm| {
                     AnalysisResultFamilyMetadata::SParameter {
                         reference_impedances_ohm,
+                        noise_reference_temperature_kelvin,
                     }
                 });
                 result
@@ -1292,7 +1295,7 @@ impl SimulationController {
                     let magnitude_values: Vec<f64> = real
                         .iter()
                         .zip(imag.iter())
-                        .map(|(r, i)| (r * r + i * i).sqrt())
+                        .map(|(r, i)| r.hypot(*i))
                         .collect();
                     let phase = real
                         .iter()
@@ -1883,6 +1886,7 @@ mod waveform_unit_conversion_tests {
         );
         spectrum.y_unit = "V".to_owned();
         let sim_result = crate::simulation::SimulationResult::Ac {
+            noise_reference_temperature_kelvin: None,
             reference_impedances_ohm: None,
             frequencies: vec![1.0, 10.0],
             waveforms: HashMap::from([("V(out) Spectrum".to_owned(), spectrum)]),
@@ -1914,6 +1918,7 @@ mod waveform_unit_conversion_tests {
             "s",
         );
         let sim_result = crate::simulation::SimulationResult::Ac {
+            noise_reference_temperature_kelvin: None,
             reference_impedances_ohm: None,
             frequencies: vec![1.0, 10.0],
             waveforms: HashMap::from([("group_delay".to_owned(), group_delay)]),
@@ -1940,6 +1945,7 @@ mod waveform_unit_conversion_tests {
         );
         let result = SimulationController::new().convert_to_analysis_result_with_metadata_owned(
             crate::simulation::SimulationResult::Ac {
+                noise_reference_temperature_kelvin: None,
                 reference_impedances_ohm: None,
                 frequencies: vec![1.0, 10.0, 100.0],
                 waveforms: HashMap::from([("group_delay".to_owned(), group_delay)]),
@@ -1990,6 +1996,7 @@ mod waveform_unit_conversion_tests {
         // read downstream as a real unit and stop the browser and the axes
         // falling back to the accessor in the name.
         let sim_result = crate::simulation::SimulationResult::Ac {
+            noise_reference_temperature_kelvin: None,
             reference_impedances_ohm: None,
             frequencies: vec![1.0, 10.0],
             waveforms: HashMap::from([(
@@ -2156,6 +2163,68 @@ mod noise_conversion_tests {
     }
 
     #[test]
+    fn sp_noise_retains_temperature_complex_signs_and_extreme_finite_magnitudes() {
+        let controller = SimulationController::new();
+        let mut waveform = crate::simulation::WaveformData::new_complex(
+            "CY(1,2)",
+            vec![1e6, 2e6],
+            vec![-1e-200, -1e200],
+            vec![1e-200, 1e200],
+        );
+        waveform.y_unit = "A²/Hz".to_owned();
+        let simulation = crate::simulation::SimulationResult::Ac {
+            frequencies: vec![1e6, 2e6],
+            waveforms: HashMap::from([("CY(1,2)".to_owned(), waveform)]),
+            measurements: Vec::new(),
+            reference_impedances_ohm: Some(vec![50.0, 50.0]),
+            noise_reference_temperature_kelvin: Some(450.0),
+        };
+        let result = controller.convert_to_analysis_result_with_metadata_owned(
+            simulation,
+            AnalysisType::SParameter,
+            "SP",
+        );
+        assert!(result.validate_retained_evidence().is_ok());
+        let waveform = result
+            .waveforms
+            .iter()
+            .find(|waveform| waveform.name == "|CY(1,2)|")
+            .unwrap();
+        assert_eq!(waveform.unit.as_deref(), Some("A²/Hz"));
+        assert!(
+            waveform
+                .y
+                .iter()
+                .all(|value| value.is_finite() && *value > 0.0)
+        );
+        let complex = waveform.complex.as_ref().unwrap();
+        assert_eq!(complex.real.as_ref(), &[-1e-200, -1e200]);
+        assert_eq!(complex.imag.as_ref(), &[1e-200, 1e200]);
+        let mut restored = result.clone();
+        restored.family_metadata =
+            serde_json::from_str(&serde_json::to_string(&result.family_metadata).unwrap()).unwrap();
+        assert_eq!(restored.result_data_digest(), result.result_data_digest());
+        let mut changed = restored;
+        let Some(AnalysisResultFamilyMetadata::SParameter {
+            noise_reference_temperature_kelvin,
+            ..
+        }) = &mut changed.family_metadata
+        else {
+            panic!("missing noise authority")
+        };
+        *noise_reference_temperature_kelvin = Some(451.0);
+        assert_ne!(changed.result_data_digest(), result.result_data_digest());
+        *match &mut changed.family_metadata {
+            Some(AnalysisResultFamilyMetadata::SParameter {
+                noise_reference_temperature_kelvin,
+                ..
+            }) => noise_reference_temperature_kelvin,
+            _ => unreachable!(),
+        } = Some(f64::INFINITY);
+        assert!(changed.validate_retained_evidence().is_err());
+    }
+
+    #[test]
     fn sparameter_result_retains_solved_references_despite_a_stale_cached_deck() {
         let mut controller = SimulationController::new();
         controller.cached_netlist = Some(
@@ -2163,6 +2232,7 @@ mod noise_conversion_tests {
                 .to_owned(),
         );
         controller.current_spec = Some(AnalysisSpec::SParameter {
+            do_noise: false,
             start_freq: 1.0e6,
             stop_freq: 1.0e9,
             points_per_unit: 10,
@@ -2172,6 +2242,7 @@ mod noise_conversion_tests {
         });
         for references in [vec![75.0], vec![75.0, 100.0]] {
             let simulation = crate::simulation::SimulationResult::Ac {
+                noise_reference_temperature_kelvin: None,
                 frequencies: vec![1e6],
                 waveforms: HashMap::new(),
                 measurements: Vec::new(),
@@ -2186,6 +2257,7 @@ mod noise_conversion_tests {
             assert_eq!(
                 result.family_metadata,
                 Some(AnalysisResultFamilyMetadata::SParameter {
+                    noise_reference_temperature_kelvin: None,
                     reference_impedances_ohm: references,
                 })
             );

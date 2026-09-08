@@ -96,6 +96,9 @@ pub enum AnalysisResultFamilyMetadata {
     /// Smith impedance and VSWR readouts are invalid without this authority.
     SParameter {
         reference_impedances_ohm: Vec<f64>,
+        /// Absent when the SP run did not compute noise.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        noise_reference_temperature_kelvin: Option<f64>,
     },
 }
 
@@ -304,7 +307,15 @@ impl AnalysisResultFamilyMetadata {
             }
             Self::SParameter {
                 reference_impedances_ohm,
+                noise_reference_temperature_kelvin,
             } => {
+                if noise_reference_temperature_kelvin
+                    .is_some_and(|temperature| !temperature.is_finite() || temperature <= 0.0)
+                {
+                    return Err(
+                        "SP noise reference temperature must be finite and positive".to_owned()
+                    );
+                }
                 if reference_impedances_ohm.is_empty() {
                     return Err(
                         "S-parameter metadata requires at least one port impedance".to_owned()

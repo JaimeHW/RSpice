@@ -298,8 +298,8 @@ pub(super) fn nondefault_op_config() -> crate::simulation::dialog::OpConfig {
 
 #[test]
 fn browser_worker_transfer_protocol_matches_rust_transport() {
-    assert_eq!(WORKER_RESPONSE_TRANSPORT_PROTOCOL, 16);
-    assert_eq!(WORKER_REQUEST_TRANSPORT_PROTOCOL, 8);
+    assert_eq!(WORKER_RESPONSE_TRANSPORT_PROTOCOL, 17);
+    assert_eq!(WORKER_REQUEST_TRANSPORT_PROTOCOL, 9);
     let source = include_str!("../../../../web/simulation-worker.js");
     assert!(source.contains(&format!(
         "const WORKER_PROTOCOL_VERSION = {WORKER_RESPONSE_TRANSPORT_PROTOCOL};"
@@ -1082,6 +1082,7 @@ fn worker_result_payload_estimate_counts_high_volume_arrays() {
     assert_eq!(transient.estimated_numeric_payload_bytes(), 48);
 
     let ac = WorkerSimulationResult::Ac {
+        noise_reference_temperature_kelvin: None,
         reference_impedances_ohm: None,
         frequencies: vec![1.0, 10.0, 100.0],
         waveforms: vec![WorkerWaveform {
@@ -1263,6 +1264,7 @@ fn worker_transport_round_trips_ac_and_noise_buffers() {
     let ac = WorkerResponse {
         id: 10,
         outcome: WorkerOutcome::Success(Box::new(WorkerSimulationResult::Ac {
+            noise_reference_temperature_kelvin: None,
             reference_impedances_ohm: None,
             frequencies: vec![1.0, 10.0, 100.0],
             waveforms: vec![WorkerWaveform {
@@ -1308,6 +1310,7 @@ fn worker_transport_retains_and_validates_resolved_port_references() {
         let response = WorkerResponse {
             id: 19,
             outcome: WorkerOutcome::Success(Box::new(WorkerSimulationResult::Ac {
+                noise_reference_temperature_kelvin: None,
                 frequencies: vec![1e6, 2e6],
                 waveforms: Vec::new(),
                 measurements: Vec::new(),
@@ -1338,6 +1341,7 @@ fn worker_transport_retains_and_validates_resolved_port_references() {
         let response = WorkerResponse {
             id: 19,
             outcome: WorkerOutcome::Success(Box::new(WorkerSimulationResult::Ac {
+                noise_reference_temperature_kelvin: None,
                 frequencies: vec![1e6],
                 waveforms: Vec::new(),
                 measurements: Vec::new(),
@@ -1349,6 +1353,148 @@ fn worker_transport_retains_and_validates_resolved_port_references() {
                 .unwrap_err()
                 .contains("references")
         );
+    }
+}
+
+#[test]
+fn sp_noise_request_executes_and_retains_physical_results_through_worker_transport() {
+    use crate::simulation::engine_bridge::EngineBridge;
+    use crate::simulation::execution::ResolvedExecutionDependencies;
+    for port_count in [1, 2] {
+        for do_noise in [false, true] {
+            let spec = AnalysisSpec::SParameter {
+                start_freq: 1e6,
+                stop_freq: 3e6,
+                points_per_unit: 3,
+                sweep: FrequencySweep::Linear,
+                z0: 50.0,
+                ports: vec![SpPort {
+                    node_pos: "p1".into(),
+                    node_neg: "0".into(),
+                    z0: None,
+                }],
+                do_noise,
+            };
+            let worker_spec = WorkerAnalysisSpec::try_from(&spec).unwrap();
+            let worker_spec: WorkerAnalysisSpec =
+                serde_json::from_str(&serde_json::to_string(&worker_spec).unwrap()).unwrap();
+            let restored_spec = AnalysisSpec::from(worker_spec);
+            assert_eq!(restored_spec, spec);
+            let deck = if port_count == 1 {
+                "* configured one-port noise\nR1 p1 0 100\n.end\n"
+            } else {
+                "* hierarchical two-port noise\n.subckt generator p n params: ordinal=1\nP1 p n portnum={ordinal} z0=50\n.ends generator\nX1 p1 0 generator ordinal=1\nX2 p2 0 generator ordinal=2\nR1 p1 p2 100\n.end\n"
+            };
+            let result = crate::simulation::runner::spec::run_spec_request(
+                &EngineBridge::new(),
+                restored_spec,
+                SpecExecutionOptions::default(),
+                deck,
+                None,
+                &ResolvedExecutionDependencies::default(),
+                &rspice_core::NoAbort,
+            )
+            .unwrap();
+            let response = WorkerResponse {
+                id: 71,
+                outcome: WorkerOutcome::Success(Box::new(
+                    WorkerSimulationResult::try_from(result).unwrap(),
+                )),
+            };
+            if do_noise {
+                for temperature in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+                    let mut invalid = response.clone();
+                    let WorkerOutcome::Success(result) = &mut invalid.outcome else {
+                        unreachable!()
+                    };
+                    let WorkerSimulationResult::Ac {
+                        noise_reference_temperature_kelvin,
+                        ..
+                    } = result.as_mut()
+                    else {
+                        unreachable!()
+                    };
+                    *noise_reference_temperature_kelvin = Some(temperature);
+                    assert!(
+                        WorkerResponseTransport::from_response(invalid)
+                            .unwrap_err()
+                            .contains("temperature")
+                    );
+                }
+            }
+            let mut transport = WorkerResponseTransport::from_response(response).unwrap();
+            transport.response =
+                serde_json::from_str(&serde_json::to_string(&transport.response).unwrap()).unwrap();
+            let WorkerOutcome::Success(result) = transport.into_response().unwrap().outcome else {
+                panic!("noise solve failed")
+            };
+            let SimulationResult::Ac {
+                frequencies,
+                waveforms,
+                reference_impedances_ohm,
+                noise_reference_temperature_kelvin,
+                ..
+            } = SimulationResult::from(*result)
+            else {
+                panic!("expected SP data")
+            };
+            assert_eq!(frequencies, [1e6, 2e6, 3e6]);
+            assert_eq!(reference_impedances_ohm, Some(vec![50.0; port_count]));
+            if !do_noise {
+                assert_eq!(noise_reference_temperature_kelvin, None);
+                assert_eq!(waveforms.len(), port_count * port_count);
+                continue;
+            }
+            assert_eq!(noise_reference_temperature_kelvin, Some(300.15));
+            let thermal = 4.0 * rspice_core::constants::K_BOLTZMANN * 300.15 / 100.0;
+            for row in 1..=port_count {
+                for column in 1..=port_count {
+                    let waveform = &waveforms[&format!("CY({row},{column})")];
+                    assert_eq!(waveform.x_values, frequencies);
+                    assert_eq!(waveform.y_unit, "A²/Hz");
+                    let sign = if row == column { 1.0 } else { -1.0 };
+                    assert!(
+                        waveform
+                            .y_values
+                            .iter()
+                            .all(|value| (value / thermal - sign).abs() < 1e-10)
+                    );
+                    assert!(
+                        waveform
+                            .y_imag
+                            .as_ref()
+                            .unwrap()
+                            .iter()
+                            .all(|value| value.abs() < thermal * 1e-10)
+                    );
+                }
+            }
+            if port_count == 2 {
+                for (name, expected, unit) in
+                    [("Rn", 100.0, "Ω"), ("F", 3.0, "1"), ("Fmin", 1.0, "1")]
+                {
+                    let waveform = &waveforms[name];
+                    assert_eq!(waveform.y_unit, unit);
+                    assert!(
+                        waveform
+                            .y_values
+                            .iter()
+                            .all(|value| (value - expected).abs() < 1e-8),
+                        "{name}: {:?}",
+                        waveform.y_values
+                    );
+                }
+                assert_eq!(waveforms["Sopt"].y_unit, "1");
+                assert!(
+                    waveforms["Sopt"]
+                        .y_values
+                        .iter()
+                        .all(|value| (value - 1.0).abs() < 1e-8)
+                );
+            } else {
+                assert!(!waveforms.contains_key("Rn"));
+            }
+        }
     }
 }
 

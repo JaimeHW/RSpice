@@ -284,6 +284,7 @@ pub(in crate::simulation) fn manual_deck_analysis_instance_id(
 /// key-tagged and driven by the catalog. A record stating only the original
 /// nine encodes differently under `/v3` than it did under `/v2`, so the domain
 /// moves rather than letting two encodings collide inside one name.
+/// `/v4` includes the SP noise request in the typed analysis encoding.
 pub(in crate::simulation) fn analysis_config_digest(
     analysis_line: &str,
     spec: &AnalysisSpec,
@@ -291,7 +292,7 @@ pub(in crate::simulation) fn analysis_config_digest(
     options: &SpecExecutionOptions,
     numeric_override: Option<&AnalysisNumericOverride>,
 ) -> ContentDigest {
-    let mut writer = CanonicalWriter::new("rspice.analysis-config/v3");
+    let mut writer = CanonicalWriter::new("rspice.analysis-config/v4");
     writer.domain("analysis-line");
     writer.string(analysis_line);
     encode_analysis_spec(&mut writer, spec);
@@ -1068,6 +1069,7 @@ fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &AnalysisSpec) {
             sweep,
             z0,
             ports,
+            do_noise,
         } => {
             writer.f64(*start_freq);
             writer.f64(*stop_freq);
@@ -1080,6 +1082,7 @@ fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &AnalysisSpec) {
                 writer.string(&port.node_neg);
                 writer.option(port.z0.as_ref(), |w, v| w.f64(*v));
             }
+            writer.bool(*do_noise);
         }
         AnalysisSpec::Envelope {
             fundamental_freq,
@@ -1798,6 +1801,28 @@ mod tests {
             integration_mode: NoiseIntegrationMode::Enabled,
             temperature: 300.15,
         }
+    }
+
+    #[test]
+    fn sp_noise_changes_identity_even_when_the_directive_is_unchanged() {
+        let mut spec = AnalysisSpec::SParameter {
+            start_freq: 1e6,
+            stop_freq: 3e6,
+            points_per_unit: 3,
+            sweep: FrequencySweep::Linear,
+            z0: 50.0,
+            ports: Vec::new(),
+            do_noise: false,
+        };
+        let digest = |spec: &AnalysisSpec| {
+            analysis_config_digest(".sp", spec, None, &SpecExecutionOptions::default(), None)
+        };
+        let scattering = digest(&spec);
+        let AnalysisSpec::SParameter { do_noise, .. } = &mut spec else {
+            unreachable!()
+        };
+        *do_noise = true;
+        assert_ne!(scattering, digest(&spec));
     }
 
     #[test]

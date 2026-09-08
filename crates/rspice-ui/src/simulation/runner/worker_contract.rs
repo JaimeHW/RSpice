@@ -64,7 +64,7 @@ pub(crate) struct WorkerRequest {
 }
 
 #[cfg(any(target_arch = "wasm32", test))]
-pub(crate) const WORKER_REQUEST_TRANSPORT_PROTOCOL: u8 = 8;
+pub(crate) const WORKER_REQUEST_TRANSPORT_PROTOCOL: u8 = 9;
 
 /// Browser-worker request split into compact metadata and transferable
 /// floating-point buffers. The embedded request deliberately carries empty
@@ -463,6 +463,8 @@ pub(crate) enum WorkerAnalysisSpec {
         sweep: WorkerSweepType,
         z0: f64,
         ports: Vec<SpPort>,
+        #[serde(default)]
+        do_noise: bool,
     },
     Disto {
         start_freq: f64,
@@ -947,6 +949,8 @@ pub(crate) enum WorkerSimulationResult {
         measurements: Vec<WorkerMeasurement>,
         #[serde(default)]
         reference_impedances_ohm: Option<Vec<f64>>,
+        #[serde(default)]
+        noise_reference_temperature_kelvin: Option<f64>,
     },
     Pstb {
         period: f64,
@@ -1456,11 +1460,13 @@ impl WorkerSimulationResult {
                 waveforms,
                 measurements,
                 reference_impedances_ohm,
+                noise_reference_temperature_kelvin,
             } => sum_payload_bytes([
                 f64_payload_bytes(frequencies.len()),
                 waveforms_payload_bytes(waveforms),
                 measurements_payload_bytes(measurements),
                 f64_payload_bytes(reference_impedances_ohm.as_ref().map_or(0, Vec::len)),
+                f64_payload_bytes(usize::from(noise_reference_temperature_kelvin.is_some())),
             ]),
             WorkerSimulationResult::Pstb {
                 modes,
@@ -1605,9 +1611,9 @@ impl WorkerSimulationResult {
     }
 }
 
-/// 16: frequency-domain results retain resolved S-parameter reference impedances.
-/// Older workers cannot attest to the references used by circuit elaboration.
-const WORKER_RESPONSE_TRANSPORT_PROTOCOL: u8 = 16;
+/// 17: SP noise requests retain covariance, noise factors and reference temperature.
+/// Earlier workers can silently omit requested noise.
+const WORKER_RESPONSE_TRANSPORT_PROTOCOL: u8 = 17;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct WorkerResponseTransport {
@@ -1675,11 +1681,13 @@ impl TryFrom<SimulationResult> for WorkerSimulationResult {
                 waveforms,
                 measurements,
                 reference_impedances_ohm,
+                noise_reference_temperature_kelvin,
             } => Ok(Self::Ac {
                 frequencies,
                 waveforms: worker_waveforms(waveforms),
                 measurements: worker_measurements(measurements),
                 reference_impedances_ohm,
+                noise_reference_temperature_kelvin,
             }),
             SimulationResult::Pstb {
                 period,
@@ -1976,11 +1984,13 @@ impl From<WorkerSimulationResult> for SimulationResult {
                 waveforms,
                 measurements,
                 reference_impedances_ohm,
+                noise_reference_temperature_kelvin,
             } => Self::Ac {
                 frequencies,
                 waveforms: waveform_map(waveforms),
                 measurements: measure_results(measurements),
                 reference_impedances_ohm,
+                noise_reference_temperature_kelvin,
             },
             WorkerSimulationResult::Pstb {
                 period,

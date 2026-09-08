@@ -301,6 +301,7 @@ mod tests {
     #[test]
     fn hierarchical_single_port_spec_retains_the_solved_reference() {
         let spec = AnalysisSpec::SParameter {
+            do_noise: false,
             start_freq: 1e6,
             stop_freq: 3e6,
             points_per_unit: 3,
@@ -649,6 +650,7 @@ R1 out 0 {rload}\n\
         fs::write(temp.path.join("network.inc"), "R1 IN OUT 50\nR2 OUT 0 50\n")
             .expect("S-parameter include write");
         let sparameter = run(AnalysisSpec::SParameter {
+            do_noise: false,
             start_freq: 1.0e6,
             stop_freq: 1.0e7,
             points_per_unit: 1,

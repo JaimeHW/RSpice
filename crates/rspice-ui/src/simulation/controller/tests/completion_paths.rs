@@ -15,6 +15,7 @@ fn touchstone_auto_export_uses_export_workflow_io() {
     )
     .expect("valid prepared Touchstone policy");
     controller.current_spec = Some(AnalysisSpec::SParameter {
+        do_noise: false,
         start_freq: 1.0e6,
         stop_freq: 2.0e6,
         points_per_unit: 2,
@@ -127,6 +128,7 @@ fn ac_result_conversion_drops_traces_with_mismatched_frequency_shapes() {
 
     let analysis = controller.convert_to_analysis_result_with_metadata_owned(
         crate::simulation::SimulationResult::Ac {
+            noise_reference_temperature_kelvin: None,
             reference_impedances_ohm: None,
             frequencies,
             waveforms,

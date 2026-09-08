@@ -109,6 +109,7 @@ pub(super) fn structure_is_renderable(analysis: &crate::state::AnalysisResult) -
     }
     let Some(crate::state::AnalysisResultFamilyMetadata::SParameter {
         reference_impedances_ohm,
+        ..
     }) = analysis.family_metadata.as_ref()
     else {
         return false;
@@ -157,6 +158,7 @@ pub(super) fn synchronize_active_analysis(state: &mut AppState) -> bool {
     let provenance = SpecializedViewerCacheProvenance::for_analysis(run.dataset_id, analysis);
     let crate::state::AnalysisResultFamilyMetadata::SParameter {
         reference_impedances_ohm,
+        ..
     } = analysis
         .family_metadata
         .as_ref()
@@ -752,6 +754,7 @@ mod tests {
         );
         crate::state::AnalysisResult::new(id, crate::state::AnalysisType::SParameter, label)
             .with_family_metadata(crate::state::AnalysisResultFamilyMetadata::SParameter {
+                noise_reference_temperature_kelvin: None,
                 reference_impedances_ohm: vec![50.0, 50.0],
             })
             .with_waveforms(vec![waveform])

@@ -160,6 +160,7 @@ pub(super) fn quantities(analysis: &AnalysisResult) -> Vec<PolarQuantity> {
             AnalysisType::SParameter | AnalysisType::Psp | AnalysisType::Hbsp,
             Some(AnalysisResultFamilyMetadata::SParameter {
                 reference_impedances_ohm,
+                ..
             }),
         ) => Some(reference_impedances_ohm.clone()),
         _ => None,
@@ -1282,6 +1283,7 @@ mod tests {
         }
         AnalysisResult::new(1, AnalysisType::SParameter, "SP")
             .with_family_metadata(AnalysisResultFamilyMetadata::SParameter {
+                noise_reference_temperature_kelvin: None,
                 reference_impedances_ohm: vec![50.0, 50.0, 50.0, 50.0],
             })
             .with_waveforms(waveforms)
@@ -1293,6 +1295,7 @@ mod tests {
             .waveforms
             .retain(|waveform| !waveform.name.contains("dd") && !waveform.name.contains("dc"));
         analysis.family_metadata = Some(AnalysisResultFamilyMetadata::SParameter {
+            noise_reference_temperature_kelvin: None,
             reference_impedances_ohm: vec![50.0, 50.0],
         });
         analysis

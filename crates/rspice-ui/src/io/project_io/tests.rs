@@ -1322,8 +1322,9 @@ fn project_file_round_trips_exact_result_family_metadata_and_migrates_v6_absence
 }
 
 #[test]
-fn project_results_round_trip_sparameter_reference_impedance_authority() {
+fn project_results_round_trip_sp_noise_reference_authority() {
     let metadata = AnalysisResultFamilyMetadata::SParameter {
+        noise_reference_temperature_kelvin: Some(450.0),
         reference_impedances_ohm: vec![75.0, 100.0],
     };
     let mut run = SimulationRun::new(1);

@@ -847,6 +847,7 @@ fn automatic_touchstone_export_policy_captures_live_dialog_and_path_once() {
     let tasks = vec![QueuedAnalysis {
         numeric_override: None,
         spec: AnalysisSpec::SParameter {
+            do_noise: false,
             start_freq: 1.0e6,
             stop_freq: 1.0e9,
             points_per_unit: 20,

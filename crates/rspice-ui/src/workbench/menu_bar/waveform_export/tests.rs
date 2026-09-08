@@ -1194,6 +1194,52 @@ fn csv_export_includes_complex_real_and_imaginary_columns() {
 }
 
 #[test]
+fn sp_noise_csv_keeps_signed_complex_components_and_export_metadata() {
+    let analysis = AnalysisResult::new(1, AnalysisType::SParameter, "SP noise")
+        .with_family_metadata(AnalysisResultFamilyMetadata::SParameter {
+            reference_impedances_ohm: vec![50.0, 75.0],
+            noise_reference_temperature_kelvin: Some(450.0),
+        })
+        .with_waveforms(vec![
+            WaveformData::new("|CY(1,2)|", vec![1e6], vec![5e-20], "#fff")
+                .with_unit("A²/Hz")
+                .with_complex_components("CY(1,2)", vec![-3e-20], vec![4e-20]),
+            WaveformData::new("F", vec![1e6], vec![3.0], "#fff").with_unit("1"),
+        ]);
+    let prepared =
+        prepare_single_analysis_dataset(&analysis, &analysis.waveforms.iter().collect::<Vec<_>>())
+            .unwrap();
+    assert_eq!(
+        prepared.dataset.metadata["noise_reference_temperature_kelvin"],
+        "450"
+    );
+    assert_eq!(prepared.dataset.metadata["noise_covariance_unit"], "A²/Hz");
+    let csv = crate::io::WaveformWriter::new(crate::io::WaveformFormat::Csv)
+        .write_text(&prepared.dataset)
+        .unwrap();
+    assert!(csv.contains("CY(1,2)"), "{csv}");
+    let real = prepared
+        .dataset
+        .signals
+        .iter()
+        .find(|signal| signal.data == [-3e-20])
+        .expect("signed real covariance exports");
+    assert!(real.name.contains("CY(1,2)"));
+    assert_eq!(real.unit, "A²/Hz");
+    assert!(
+        prepared
+            .dataset
+            .signals
+            .iter()
+            .any(|signal| signal.data == [4e-20])
+    );
+    assert!(
+        csv.contains("-0.00000000000000000003") || csv.contains("-3e-20"),
+        "{csv}"
+    );
+}
+
+#[test]
 fn engineering_export_preference_dispatches_compatible_touchstone() {
     let frequency = vec![1.0e6, 2.0e6];
     let waveforms = ["S11", "S12", "S21", "S22"]
@@ -1212,6 +1258,7 @@ fn engineering_export_preference_dispatches_compatible_touchstone() {
         .collect::<Vec<_>>();
     let ac = AnalysisResult::new(1, AnalysisType::SParameter, "S-parameters")
         .with_family_metadata(AnalysisResultFamilyMetadata::SParameter {
+            noise_reference_temperature_kelvin: None,
             reference_impedances_ohm: vec![50.0, 75.0],
         })
         .with_waveforms(waveforms);

@@ -246,6 +246,7 @@ fn sparameter_analysis() -> AnalysisResult {
         .collect();
     AnalysisResult::new(11, AnalysisType::SParameter, "SP")
         .with_family_metadata(AnalysisResultFamilyMetadata::SParameter {
+            noise_reference_temperature_kelvin: None,
             reference_impedances_ohm: vec![50.0, 50.0],
         })
         .with_waveforms(waveforms)

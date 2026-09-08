@@ -27,6 +27,7 @@ pub(super) fn run_frequency_spec(
             sweep,
             z0,
             ports,
+            do_noise,
         } => run_sparameter(
             netlist,
             SParameterRequest {
@@ -36,6 +37,7 @@ pub(super) fn run_frequency_spec(
                 sweep,
                 z0,
                 ports,
+                do_noise,
             },
             source_path,
             abort,
@@ -118,6 +120,7 @@ struct SParameterRequest {
     sweep: FrequencySweep,
     z0: f64,
     ports: Vec<SpPort>,
+    do_noise: bool,
 }
 
 fn run_sparameter(
@@ -147,8 +150,9 @@ fn run_sparameter(
         sweep,
         z0: request.z0,
         ports: configured_ports,
+        do_noise: request.do_noise,
     };
-    let data = super::run_abort_aware_service(abort, || {
+    let run = super::run_abort_aware_service(abort, || {
         svc_runner::run_sparameter_analysis_with_source_path_and_abort(
             netlist,
             &cfg,
@@ -156,6 +160,7 @@ fn run_sparameter(
             abort,
         )
     })?;
+    let data = run.scattering;
     let mut frequencies = Vec::with_capacity(data.data.len());
     for point in &data.data {
         super::ensure_not_aborted(abort)?;
@@ -173,16 +178,71 @@ fn run_sparameter(
                 format!("S{}_{}", row + 1, col + 1)
             };
             let trace = data.data.iter().map(|point| point.get(row + 1, col + 1));
-            let waveform = complex_waveform(name.clone(), &frequencies, trace, abort)?;
+            let mut waveform = complex_waveform(name.clone(), &frequencies, trace, abort)?;
+            waveform.y_unit = "1".to_owned();
             waveforms.insert(name, waveform);
         }
     }
 
+    let noise_reference_temperature_kelvin = run
+        .port_noise
+        .as_ref()
+        .map(|noise| noise.reference_temperature_kelvin);
+    if let Some(noise) = run.port_noise {
+        for row in 0..data.num_ports {
+            for column in 0..data.num_ports {
+                let name = format!("CY({},{})", row + 1, column + 1);
+                let values = noise
+                    .points
+                    .iter()
+                    .map(|point| point.current_correlation[row][column]);
+                let mut waveform = complex_waveform(name.clone(), &frequencies, values, abort)?;
+                waveform.y_unit = "A²/Hz".to_owned();
+                waveforms.insert(name, waveform);
+            }
+        }
+        if let Some(parameters) = noise.two_port {
+            let mut resistance = Vec::with_capacity(parameters.len());
+            let mut factor = Vec::with_capacity(parameters.len());
+            let mut minimum = Vec::with_capacity(parameters.len());
+            for parameter in &parameters {
+                super::ensure_not_aborted(abort)?;
+                resistance.push(parameter.noise_resistance);
+                factor.push(parameter.noise_factor);
+                minimum.push(parameter.minimum_noise_factor);
+            }
+            for (name, unit, values) in [
+                ("Rn", "Ω", resistance),
+                ("F", "1", factor),
+                ("Fmin", "1", minimum),
+            ] {
+                insert_scalar_waveform(
+                    &mut waveforms,
+                    name.to_owned(),
+                    frequencies.clone(),
+                    values,
+                    unit,
+                    "Hz",
+                );
+            }
+            let mut optimum = complex_waveform(
+                "Sopt".to_owned(),
+                &frequencies,
+                parameters
+                    .iter()
+                    .map(|parameter| parameter.optimum_source_reflection),
+                abort,
+            )?;
+            optimum.y_unit = "1".to_owned();
+            waveforms.insert("Sopt".to_owned(), optimum);
+        }
+    }
     Ok(SimulationResult::Ac {
         frequencies,
         waveforms,
         measurements: Vec::new(),
         reference_impedances_ohm: Some(reference_impedances_ohm),
+        noise_reference_temperature_kelvin,
     })
 }
 
@@ -317,6 +377,7 @@ fn run_pac(
         .into_iter()
         .map(|trace| (trace.name, trace.unit, trace.values));
     Ok(SimulationResult::Ac {
+        noise_reference_temperature_kelvin: None,
         reference_impedances_ohm: None,
         waveforms: pac_traces_to_complex_waveforms(&data.frequencies, traces, abort)?,
         frequencies: data.frequencies,
@@ -383,6 +444,7 @@ fn run_pxf(
     // The document's own abscissa is the swept baseband offset, which is what
     // every curve above is stated against and what `AnalysisType::Pxf` names.
     Ok(SimulationResult::Ac {
+        noise_reference_temperature_kelvin: None,
         reference_impedances_ohm: None,
         frequencies: data.offset_frequencies,
         waveforms,
@@ -517,6 +579,7 @@ fn run_stb(
     }
 
     Ok(SimulationResult::Ac {
+        noise_reference_temperature_kelvin: None,
         reference_impedances_ohm: None,
         frequencies: data.frequencies,
         measurements: stb_margin_measurements(&data.margins),

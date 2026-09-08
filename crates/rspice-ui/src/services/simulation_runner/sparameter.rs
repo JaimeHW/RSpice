@@ -49,6 +49,7 @@ pub struct SParameterRunConfig {
     pub sweep: SParameterSweep,
     pub z0: Value,
     pub ports: Vec<SParameterPort>,
+    pub do_noise: bool,
 }
 
 impl SParameterRunConfig {
@@ -102,6 +103,7 @@ pub fn run_sparameter_analysis_with_abort(
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<s_param::SParameterResult> {
     run_sparameter_analysis_with_source_path_and_abort(netlist_text, config, None, abort)
+        .map(|run| run.scattering)
 }
 
 /// Run N-port S-parameter analysis with source-path resolution and
@@ -111,7 +113,7 @@ pub fn run_sparameter_analysis_with_source_path_and_abort(
     config: &SParameterRunConfig,
     source_path: Option<&Path>,
     abort: &dyn AbortSignal,
-) -> ServiceRunResult<s_param::SParameterResult> {
+) -> ServiceRunResult<rspice_core::engine::SParameterRun> {
     ensure_not_aborted(abort)?;
     config.validate().map_err(ServiceRunError::Failure)?;
     ensure_not_aborted(abort)?;
@@ -140,10 +142,16 @@ pub fn run_sparameter_analysis_with_source_path_and_abort(
     ensure_not_aborted(abort)?;
     let engine = Engine::new(build_engine_config(&netlist, None));
     let run = engine
-        .run_sp_over_grid_with_default_ports_and_abort(&netlist, &frequencies, false, &ports, abort)
+        .run_sp_over_grid_with_default_ports_and_abort(
+            &netlist,
+            &frequencies,
+            config.do_noise,
+            &ports,
+            abort,
+        )
         .map_err(|error| ServiceRunError::from_core("S-parameter analysis error", error))?;
     ensure_not_aborted(abort)?;
-    Ok(run.scattering)
+    Ok(run)
 }
 
 #[cfg(test)]
@@ -153,6 +161,7 @@ mod tests {
 
     fn invalid_config() -> SParameterRunConfig {
         SParameterRunConfig {
+            do_noise: false,
             start_freq: 0.0,
             stop_freq: 1.0,
             points_per_unit: 0,
@@ -172,6 +181,7 @@ mod tests {
 
     fn two_port_config() -> SParameterRunConfig {
         SParameterRunConfig {
+            do_noise: false,
             start_freq: 1e6,
             stop_freq: 1e9,
             points_per_unit: 1,
@@ -190,6 +200,48 @@ mod tests {
                 },
             ],
         }
+    }
+
+    #[test]
+    fn sp_noise_model_finish_keeps_scattering_and_covariance_on_the_same_final_point() {
+        let model = crate::fixture_root::canonical_temp_dir().join(format!(
+            "rspice-sp-noise-finish-{}.va",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::write(
+            &model,
+            r#"module sp_noise_finish(p,n);
+inout p,n; electrical p,n;
+real conductance;
+analog begin
+    @(initial_step) conductance=0.02;
+    @(final_step) conductance=0.04;
+    if (analysis("noise") && !analysis("static")) $finish(1);
+    I(p,n)<+conductance*V(p,n);
+    I(p,n)<+white_noise(4*1.380649e-23*$temperature*conductance,"thermal");
+end
+endmodule"#,
+        )
+        .unwrap();
+        let mut config = two_port_config();
+        config.do_noise = true;
+        config.ports[1].z0 = Some(50.0);
+        let deck = format!(
+            "* Noise finish\nX1 IN OUT sp_noise_finish\n.va \"{}\" sp_noise_finish\n.end\n",
+            model.display().to_string().replace('\\', "/")
+        );
+        let run =
+            run_sparameter_analysis_with_source_path_and_abort(&deck, &config, None, &NoAbort);
+        std::fs::remove_file(model).unwrap();
+        let run = run.unwrap();
+        assert_eq!(run.scattering.data.len(), 1);
+        assert!((run.scattering.data[0].s11().re - 0.2).abs() < 1e-10);
+        let noise = run.port_noise.unwrap();
+        assert_eq!(noise.points.len(), 1);
+        assert_eq!(noise.points[0].frequency, run.scattering.data[0].frequency);
+        let expected = 4.0 * rspice_core::constants::K_BOLTZMANN * 300.15 * 0.04;
+        assert!((noise.points[0].current_correlation[0][0].re / expected - 1.0).abs() < 1e-10);
+        assert!((noise.two_port.unwrap()[0].noise_resistance - 25.0).abs() < 1e-9);
     }
 
     #[test]

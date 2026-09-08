@@ -1248,6 +1248,7 @@ struct PreparedWaveformDataset {
 struct ExportSignalSlice<'a> {
     name: &'a str,
     signal_type: crate::io::SignalType,
+    unit: Option<&'a str>,
     x_values: &'a [f64],
     y_values: &'a [f64],
 }
@@ -1437,6 +1438,7 @@ fn prepare_single_analysis_dataset(
     let mut prepared = prepare_flat_waveform_dataset(waveforms, x_name, x_signal_type)?;
     if let Some(crate::state::AnalysisResultFamilyMetadata::SParameter {
         reference_impedances_ohm,
+        noise_reference_temperature_kelvin,
     }) = analysis.family_metadata.as_ref()
     {
         if reference_impedances_ohm.is_empty()
@@ -1465,6 +1467,16 @@ fn prepare_single_analysis_dataset(
             .dataset
             .metadata
             .insert("z0".to_owned(), reference_impedances_ohm[0].to_string());
+        if let Some(temperature) = noise_reference_temperature_kelvin {
+            prepared.dataset.metadata.insert(
+                "noise_reference_temperature_kelvin".to_owned(),
+                temperature.to_string(),
+            );
+            prepared
+                .dataset
+                .metadata
+                .insert("noise_covariance_unit".to_owned(), "A²/Hz".to_owned());
+        }
     }
     Ok(prepared)
 }
@@ -1594,6 +1606,7 @@ fn append_waveform_signal(
         ExportSignalSlice {
             name: signal_name,
             signal_type: signal_type_from_waveform_name(signal_name),
+            unit: waveform.unit.as_deref(),
             x_values: waveform.x.as_ref(),
             y_values: waveform.y.as_ref(),
         },
@@ -1608,6 +1621,7 @@ fn append_waveform_signal(
             ExportSignalSlice {
                 name: &real_name,
                 signal_type: complex_signal_type(&complex.source_name, true),
+                unit: waveform.unit.as_deref(),
                 x_values: waveform.x.as_ref(),
                 y_values: complex.real.as_ref(),
             },
@@ -1620,6 +1634,7 @@ fn append_waveform_signal(
             ExportSignalSlice {
                 name: &imag_name,
                 signal_type: complex_signal_type(&complex.source_name, false),
+                unit: waveform.unit.as_deref(),
                 x_values: waveform.x.as_ref(),
                 y_values: complex.imag.as_ref(),
             },
@@ -1635,8 +1650,13 @@ fn append_signal_values(
     signal: ExportSignalSlice<'_>,
     reference_len: usize,
 ) -> Result<(), String> {
-    let export_name = sanitize_column_label(signal.name);
+    // The writer quotes delimiters and control characters. Preserve the
+    // source identity: CY(1,2) and CY(1 2) must never become the same column.
+    let export_name = signal.name.to_owned();
     let mut export_signal = crate::io::WaveformSignal::new(&export_name, signal.signal_type);
+    if let Some(unit) = signal.unit {
+        export_signal.unit = unit.to_owned();
+    }
 
     let available_points = signal.x_values.len().min(signal.y_values.len());
     if signal.x_values.len() != signal.y_values.len() {

@@ -3474,6 +3474,7 @@ fn retained_result_artifacts(
             }
             AnalysisResultFamilyMetadata::SParameter {
                 reference_impedances_ohm,
+                ..
             } => (
                 "Port reference impedances",
                 reference_impedances_ohm.len(),

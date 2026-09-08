@@ -1907,6 +1907,7 @@ mod tests {
         )
         .expect("syntactically valid output");
         let spec = AnalysisSpec::SParameter {
+            do_noise: false,
             start_freq: 1.0e6,
             stop_freq: 1.0e9,
             points_per_unit: 10,

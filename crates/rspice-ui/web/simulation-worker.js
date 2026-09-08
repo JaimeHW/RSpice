@@ -51,8 +51,8 @@ let wasmJitCapability = {
   available: false,
   reason: "WASM JIT architecture qualification has not run.",
 };
-const WORKER_PROTOCOL_VERSION = 16;
-const WORKER_REQUEST_PROTOCOL_VERSION = 8;
+const WORKER_PROTOCOL_VERSION = 17;
+const WORKER_REQUEST_PROTOCOL_VERSION = 9;
 const HARDCOPY_PROTOCOL_VERSION = 1;
 
 function asErrorMessage(error) {

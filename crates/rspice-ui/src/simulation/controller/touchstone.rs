@@ -288,6 +288,7 @@ mod tests {
             }
         }
         crate::simulation::SimulationResult::Ac {
+            noise_reference_temperature_kelvin: None,
             reference_impedances_ohm: None,
             frequencies,
             waveforms,

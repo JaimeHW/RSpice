@@ -317,6 +317,7 @@ fn analysis_spec_round_trips_supported_variants() {
             compute_nyquist: false,
         },
         AnalysisSpec::SParameter {
+            do_noise: false,
             start_freq: 1.0,
             stop_freq: 1e9,
             points_per_unit: 10,

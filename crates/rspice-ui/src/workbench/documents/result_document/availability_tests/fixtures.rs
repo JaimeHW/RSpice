@@ -403,6 +403,7 @@ pub(super) fn sparameter_analysis() -> AnalysisResult {
         .expect("AC fixture complex components")
         .source_name = "S11".to_owned();
     analysis.with_family_metadata(crate::state::AnalysisResultFamilyMetadata::SParameter {
+        noise_reference_temperature_kelvin: None,
         reference_impedances_ohm: vec![75.0, 100.0],
     })
 }

@@ -701,6 +701,7 @@ impl SimulationController {
             },
             z0: sp_cfg.z0,
             ports,
+            do_noise: sp_cfg.do_noise,
         })
     }
 
@@ -1195,6 +1196,20 @@ mod manifest_tests {
             assert!(
                 controller.build_analysis_spec_for_index(&state, 1).is_err(),
                 "a stop time of {typed} must not reach a run"
+            );
+        }
+    }
+
+    #[test]
+    fn sp_noise_dialog_reaches_the_typed_request() {
+        let controller = SimulationController::new();
+        let mut state = AppState::default();
+        state.sim_setup.sp.port_source_idx = Some(1);
+        for requested in [false, true] {
+            state.sim_setup.sp.do_noise = requested;
+            let spec = controller.build_sp_spec(&state).unwrap();
+            assert!(
+                matches!(spec, AnalysisSpec::SParameter { do_noise, .. } if do_noise == requested)
             );
         }
     }

@@ -812,7 +812,7 @@ fn command_to_queue_item(
             points,
             start_freq,
             stop_freq,
-            do_noise: _,
+            do_noise,
         } => {
             Ok(QueuedAnalysis {
                 numeric_override: None,
@@ -825,6 +825,7 @@ fn command_to_queue_item(
                     // are resolved once by the engine when this card executes.
                     z0: 50.0,
                     ports: Vec::new(),
+                    do_noise: *do_noise,
                 },
                 config: None,
                 spec_options,
@@ -1593,6 +1594,7 @@ mod tests {
             sweep,
             z0,
             ports,
+            do_noise,
         } = &specs[0]
         else {
             panic!("expected S-parameter analysis");
@@ -1604,6 +1606,7 @@ mod tests {
         assert!((*stop_freq - 3.0e6).abs() < 1e-6);
         assert_eq!(*z0, 50.0);
         assert!(ports.is_empty(), "authored ports resolve during execution");
+        assert!(!do_noise);
         assert!(specs[0].validate().is_ok());
         let hierarchical = specs_for(
             "deck\n.subckt generator a b params: reference=75\nP1 a b portnum=1 z0={reference}\n.ends generator\nX1 p 0 generator\nR1 p 0 100\n.sp lin 3 1Meg 3Meg\n.end\n",
@@ -1612,6 +1615,11 @@ mod tests {
             matches!(&hierarchical[0], AnalysisSpec::SParameter { ports, .. } if ports.is_empty())
         );
         assert!(hierarchical[0].validate().is_ok());
+        let noisy = specs_for("deck\nP1 p 0 portnum=1\nR1 p 0 100\n.sp lin 3 1Meg 3Meg 1\n.end\n");
+        assert!(matches!(
+            noisy[0],
+            AnalysisSpec::SParameter { do_noise: true, .. }
+        ));
     }
 
     #[test]

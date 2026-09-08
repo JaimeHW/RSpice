@@ -343,6 +343,7 @@ fn parsed_result_from_draft(
     if draft.analysis_type == AnalysisType::SParameter {
         let Some(AnalysisResultFamilyMetadata::SParameter {
             reference_impedances_ohm,
+            ..
         }) = draft.family_metadata.as_ref()
         else {
             return Err(
@@ -1148,6 +1149,7 @@ fn parse_touchstone_result_dataset(
         })
         .collect::<Result<Vec<_>, _>>()?;
     let family_metadata = AnalysisResultFamilyMetadata::SParameter {
+        noise_reference_temperature_kelvin: None,
         reference_impedances_ohm,
     };
     family_metadata.validate_for(AnalysisType::SParameter)?;
@@ -1854,6 +1856,7 @@ mod tests {
         assert_eq!(
             analysis.family_metadata,
             Some(AnalysisResultFamilyMetadata::SParameter {
+                noise_reference_temperature_kelvin: None,
                 reference_impedances_ohm: vec![50.0, 75.0],
             })
         );

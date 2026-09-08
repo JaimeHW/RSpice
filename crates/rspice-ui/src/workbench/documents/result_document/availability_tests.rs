@@ -411,6 +411,7 @@ fn fourier_coefficients_feed_spectrum_and_periodic_sparameters_feed_smith() {
         let state = state_with_analysis(
             AnalysisResult::new(1, analysis_type, analysis_type.short_label())
                 .with_family_metadata(crate::state::AnalysisResultFamilyMetadata::SParameter {
+                    noise_reference_temperature_kelvin: None,
                     reference_impedances_ohm: vec![75.0, 100.0],
                 })
                 .with_waveforms(vec![

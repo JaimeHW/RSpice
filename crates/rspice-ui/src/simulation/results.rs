@@ -189,6 +189,8 @@ pub enum SimulationResult {
         measurements: Vec<rspice_core::MeasureResult>,
         /// Resolved power-wave references for SP/PSP/HBSP; absent for ordinary AC.
         reference_impedances_ohm: Option<Vec<f64>>,
+        /// Temperature qualifying SP Norton covariance and two-port noise factors.
+        noise_reference_temperature_kelvin: Option<f64>,
     },
 
     /// Authenticated periodic stability result.

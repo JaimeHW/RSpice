@@ -422,6 +422,8 @@ pub enum AnalysisSpec {
         sweep: FrequencySweep,
         z0: f64,
         ports: Vec<SpPort>,
+        #[serde(default)]
+        do_noise: bool,
     },
     /// Envelope transient analysis
     Envelope {

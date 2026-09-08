@@ -1139,6 +1139,7 @@ impl TryFrom<&AnalysisSpec> for WorkerAnalysisSpec {
                 sweep,
                 z0,
                 ports,
+                do_noise,
             } => Ok(Self::SParameter {
                 start_freq: *start_freq,
                 stop_freq: *stop_freq,
@@ -1146,6 +1147,7 @@ impl TryFrom<&AnalysisSpec> for WorkerAnalysisSpec {
                 sweep: WorkerSweepType::from(*sweep),
                 z0: *z0,
                 ports: ports.clone(),
+                do_noise: *do_noise,
             }),
             AnalysisSpec::Disto {
                 start_freq,
@@ -1497,6 +1499,7 @@ impl From<WorkerAnalysisSpec> for AnalysisSpec {
                 sweep,
                 z0,
                 ports,
+                do_noise,
             } => Self::SParameter {
                 start_freq,
                 stop_freq,
@@ -1504,6 +1507,7 @@ impl From<WorkerAnalysisSpec> for AnalysisSpec {
                 sweep: FrequencySweep::from(sweep),
                 z0,
                 ports,
+                do_noise,
             },
             WorkerAnalysisSpec::Disto {
                 start_freq,

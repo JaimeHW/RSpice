@@ -514,6 +514,7 @@ fn periodic_sparameter_result(
         }
     }
     Ok(SimulationResult::Ac {
+        noise_reference_temperature_kelvin: None,
         reference_impedances_ohm: None,
         frequencies: data.frequencies,
         waveforms,
@@ -713,6 +714,7 @@ fn run_pss_spectrum(
     }
 
     Ok(SimulationResult::Ac {
+        noise_reference_temperature_kelvin: None,
         reference_impedances_ohm: None,
         frequencies,
         waveforms,
@@ -895,6 +897,7 @@ fn run_fourier(
     );
 
     Ok(SimulationResult::Ac {
+        noise_reference_temperature_kelvin: None,
         reference_impedances_ohm: None,
         frequencies: data.frequencies,
         waveforms,
@@ -1029,6 +1032,7 @@ fn run_disto(
     }
 
     Ok(SimulationResult::Ac {
+        noise_reference_temperature_kelvin: None,
         reference_impedances_ohm: None,
         frequencies,
         waveforms,

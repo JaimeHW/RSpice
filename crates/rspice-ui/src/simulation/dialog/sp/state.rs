@@ -98,7 +98,7 @@ impl SpPortDialogState {
 }
 
 /// Dialog state with string buffers for SI-prefix input
-#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SpDialogState {
     /// Start frequency buffer
@@ -136,6 +136,12 @@ pub struct SpDialogState {
     /// Initialized flag
     #[serde(skip)]
     pub initialized: bool,
+}
+
+impl Default for SpDialogState {
+    fn default() -> Self {
+        Self::from_config(&SpConfig::default())
+    }
 }
 
 impl SpDialogState {
@@ -247,11 +253,8 @@ impl SpDialogState {
     /// The ports this analysis would run, in the order the matrix indexes them.
     fn resolve_ports(&self, design: Option<&[PlacedRfPort]>) -> Result<Vec<SpPortConfig>, String> {
         match (self.port_source(design.map_or(0, <[_]>::len)), design) {
-            // The placed `P` cards are the ports. What is built here is a
-            // description of them, not a second declaration: nothing is
-            // synthesized from it, and it exists so that everything reading the
-            // spec's port list — the Touchstone header, the saved-output bound
-            // — reads the run's real roster.
+            // Validate the visible placed-port roster. The engine resolves
+            // the complete authored circuit and returns its actual references.
             (SpPortSource::Placed, Some(placed)) => placed_port_configs(placed),
             // Placed mode with the design out of view. The roster is the
             // dispatching caller's to check; an empty table is a legitimate
@@ -280,16 +283,11 @@ impl SpDialogState {
         self.resolve_ports(Some(placed)).err()
     }
 
-    /// Initialize defaults if not already
+    /// Complete form initialization without replacing authored values.
     pub fn ensure_initialized(&mut self) {
-        if !self.initialized {
-            let port_source_idx = self.port_source_idx;
-            *self = Self::from_config(&SpConfig::default());
-            // A decoded project carries its choice on an uninitialized state,
-            // and re-initializing must not throw it away: that would drop every
-            // saved analysis back to the design's answer.
-            self.port_source_idx = port_source_idx;
-        }
+        // Defaults are assigned at construction. Decoded drafts already carry
+        // authored settings, including intentionally invalid input being edited.
+        self.initialized = true;
         self.ensure_min_ports();
     }
 }
@@ -483,8 +481,32 @@ mod tests {
         assert_eq!(decoded.port_source(1), SpPortSource::Placed);
     }
 
-    /// Re-initializing an undecoded state must not discard the choice that
-    /// came with it.
+    /// Restoring a draft must preserve its options and unfinished input.
+    #[test]
+    fn sp_noise_and_all_authored_settings_survive_draft_restoration() {
+        let mut state = SpDialogState::from_config(&SpConfig {
+            start_freq: 3e3,
+            stop_freq: 7e6,
+            num_points: 31,
+            sweep_type: SpSweepType::Linear,
+            z0: 75.0,
+            ports: vec![SpPortConfig::differential(1, "P", "N")],
+            do_noise: true,
+            touchstone_export: false,
+            touchstone_version: 1,
+        });
+        state.port_source_idx = Some(SpPortSource::AdHoc.index());
+        state.start_freq = "unfinished".into();
+        let authored = serde_json::to_value(&state).unwrap();
+        let mut restored: SpDialogState = serde_json::from_value(authored.clone()).unwrap();
+        assert!(!restored.initialized);
+        for _ in 0..3 {
+            restored.ensure_initialized();
+        }
+        assert_eq!(serde_json::to_value(&restored).unwrap(), authored);
+        assert!(restored.to_config(Some(&[])).is_err());
+    }
+
     #[test]
     fn initializing_a_decoded_state_keeps_its_chosen_source() {
         let mut state = SpDialogState {

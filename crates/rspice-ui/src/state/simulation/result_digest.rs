@@ -1219,9 +1219,18 @@ fn encode_family_metadata(
         }
         AnalysisResultFamilyMetadata::SParameter {
             reference_impedances_ohm,
+            noise_reference_temperature_kelvin,
         } => {
-            writer.u8(7);
+            // Preserve the encoding of existing scattering-only results.
+            writer.u8(if noise_reference_temperature_kelvin.is_some() {
+                8
+            } else {
+                7
+            });
             writer.f64_slice(reference_impedances_ohm);
+            if let Some(temperature) = noise_reference_temperature_kelvin {
+                writer.f64(*temperature);
+            }
         }
     }
     encode_member_measurements(writer, metadata.member_measurements());

@@ -93,6 +93,17 @@ pub(super) fn validate_worker_response_before_transport(
         return Ok(());
     };
     if let WorkerSimulationResult::Ac {
+        reference_impedances_ohm,
+        noise_reference_temperature_kelvin: Some(temperature),
+        ..
+    } = result.as_ref()
+        && (!temperature.is_finite() || *temperature <= 0.0 || reference_impedances_ohm.is_none())
+    {
+        return Err(
+            "SP worker noise requires resolved ports and a finite positive temperature".to_owned(),
+        );
+    }
+    if let WorkerSimulationResult::Ac {
         reference_impedances_ohm: Some(references),
         ..
     } = result.as_ref()
@@ -1263,6 +1274,7 @@ pub(crate) enum WorkerSimulationResultTransport {
         waveforms: Vec<WorkerWaveformTransport>,
         measurements: Vec<WorkerMeasurement>,
         reference_impedances_ohm: Option<WorkerF64Series>,
+        noise_reference_temperature_kelvin: Option<f64>,
     },
     Noise {
         frequencies: WorkerF64Series,
@@ -1473,10 +1485,12 @@ impl WorkerSimulationResultTransport {
                 waveforms,
                 measurements,
                 reference_impedances_ohm,
+                noise_reference_temperature_kelvin,
             } => Self::Ac {
                 frequencies: WorkerF64Series::from_vec(frequencies, buffers),
                 waveforms: transport_waveforms(waveforms, buffers),
                 measurements,
+                noise_reference_temperature_kelvin,
                 reference_impedances_ohm: reference_impedances_ohm
                     .map(|values| WorkerF64Series::from_vec(values, buffers)),
             },
@@ -1710,10 +1724,12 @@ impl WorkerSimulationResultTransport {
                 waveforms,
                 measurements,
                 reference_impedances_ohm,
+                noise_reference_temperature_kelvin,
             } => Ok(WorkerSimulationResult::Ac {
                 frequencies: frequencies.into_vec(buffers)?,
                 waveforms: worker_waveforms_from_transport(waveforms, buffers)?,
                 measurements,
+                noise_reference_temperature_kelvin,
                 reference_impedances_ohm: reference_impedances_ohm
                     .map(|values| values.into_vec(buffers))
                     .transpose()?,
