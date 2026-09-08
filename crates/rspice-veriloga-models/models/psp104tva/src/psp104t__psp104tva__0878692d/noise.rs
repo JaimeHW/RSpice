@@ -31,7 +31,7 @@ impl Instance {
 		if !self.multiplicity.is_finite() || self.multiplicity <= 0.0 {
 			return Err(GeneratedNoiseEvaluationError::InvalidMultiplicity { value: self.multiplicity });
 		}
-		let mut prepared = [0.0; 1602];
+		let mut prepared = [0.0; 1611];
 		let produced = canonical_model_preprocess(
 			&self.params.values,
 			&self.param_given[..],
@@ -111,7 +111,7 @@ impl Instance {
 		let AU=staged[272];
 		let AV=staged[274];
 		let AW=staged[275];
-		let AX=staged[961]!=0.0;
+		let AX=staged[962]!=0.0;
 		let AY=staged[395];
 		let AZ=staged[562];
 		let BA=staged[506];
@@ -124,19 +124,19 @@ impl Instance {
 		let BH=staged[642];
 		let BI=staged[606];
 		let BJ=parameters[0];
-		let BK=staged[726]!=0.0;
+		let BK=staged[727]!=0.0;
 		let BL=parameters[9];
-		let BM=staged[727]!=0.0;
+		let BM=staged[728]!=0.0;
 		let BS=1e-9f64;
-		let BT=staged[728]!=0.0;
-		let BV=staged[729]!=0.0;
+		let BT=staged[729]!=0.0;
+		let BV=staged[730]!=0.0;
 		let BX=1e-6f64;
-		let CD=staged[730]!=0.0;
-		let CH=staged[731]!=0.0;
-		let CM=staged[736]!=0.0;
-		let CP=staged[737]!=0.0;
-		let CR=staged[738]!=0.0;
-		let CU=staged[739]!=0.0;
+		let CD=staged[731]!=0.0;
+		let CH=staged[732]!=0.0;
+		let CM=staged[737]!=0.0;
+		let CP=staged[738]!=0.0;
+		let CR=staged[739]!=0.0;
+		let CU=staged[740]!=0.0;
 		let CW=parameters[157];
 		let CX=parameters[158];
 		let CY=parameters[159];
@@ -152,19 +152,19 @@ impl Instance {
 		let DI=parameters[184];
 		let DJ=parameters[185];
 		let DK=1e-3f64;
-		let DM=staged[768]!=0.0;
+		let DM=staged[769]!=0.0;
 		let DS=parameters[395];
 		let DU=parameters[435];
 		let DY=parameters[439];
 		let DZ=0.3333333333333333f64;
-		let EG=staged[846]!=0.0;
-		let EI=staged[847]!=0.0;
-		let EK=staged[848]!=0.0;
-		let EM=staged[862]!=0.0;
-		let EO=staged[863]!=0.0;
-		let EQ=staged[864]!=0.0;
-		let ES=staged[869]!=0.0;
-		let ET=staged[871]!=0.0;
+		let EG=staged[847]!=0.0;
+		let EI=staged[848]!=0.0;
+		let EK=staged[849]!=0.0;
+		let EM=staged[863]!=0.0;
+		let EO=staged[864]!=0.0;
+		let EQ=staged[865]!=0.0;
+		let ES=staged[870]!=0.0;
+		let ET=staged[872]!=0.0;
 		let EU=10f64;
 		let EV=staged[405];
 		let EW=staged[406];
@@ -175,16 +175,16 @@ impl Instance {
 		let FB=staged[454];
 		let FC=staged[453];
 		let FD=staged[666];
-		let FG=staged[936]!=0.0;
-		let FK=staged[937]!=0.0;
-		let FO=staged[938]!=0.0;
-		let FU=staged[951]!=0.0;
-		let FY=staged[952]!=0.0;
-		let GC=staged[953]!=0.0;
-		let GG=staged[954]!=0.0;
+		let FG=staged[937]!=0.0;
+		let FK=staged[938]!=0.0;
+		let FO=staged[939]!=0.0;
+		let FU=staged[952]!=0.0;
+		let FY=staged[953]!=0.0;
+		let GC=staged[954]!=0.0;
+		let GG=staged[955]!=0.0;
 		let GM=staged[651];
 		let GN=staged[348];
-		let GP=staged[960]!=0.0;
+		let GP=staged[961]!=0.0;
 		let GQ=staged[408];
 		let GR=4f64;
 		let GS=staged[412];
@@ -192,27 +192,27 @@ impl Instance {
 		let GU=0.25f64;
 		let GV=staged[436];
 		let GW=staged[455];
-		let GX=staged[969]!=0.0;
-		let GY=staged[971]!=0.0;
-		let GZ=staged[972]!=0.0;
+		let GX=staged[970]!=0.0;
+		let GY=staged[972]!=0.0;
+		let GZ=staged[973]!=0.0;
 		let HA=1e-10f64;
-		let HB=staged[976]!=0.0;
-		let HD=staged[977]!=0.0;
-		let HE=staged[978]!=0.0;
-		let HF=staged[979]!=0.0;
-		let HH=staged[980]!=0.0;
-		let HJ=staged[981]!=0.0;
-		let HL=staged[982]!=0.0;
-		let HN=staged[989]!=0.0;
+		let HB=staged[977]!=0.0;
+		let HD=staged[978]!=0.0;
+		let HE=staged[979]!=0.0;
+		let HF=staged[980]!=0.0;
+		let HH=staged[981]!=0.0;
+		let HJ=staged[982]!=0.0;
+		let HL=staged[983]!=0.0;
+		let HN=staged[990]!=0.0;
 		let HO=230.25850929940458f64;
 		let HP=1e-100f64;
 		let HQ=1e100f64;
 		let HR=0.2f64;
 		let HS=0.375f64;
 		let HT=parameters[29];
-		let IK=staged[1486]!=0.0;
+		let IK=staged[1487]!=0.0;
 		let JO=staged[668]!=0.0;
-		let KE=staged[1489]!=0.0;
+		let KE=staged[1490]!=0.0;
 		let KF=node_potentials[6];
 		let KG=node_potentials[7];
 		let KI=node_potentials[8];
@@ -220,9 +220,9 @@ impl Instance {
 		let KM=node_potentials[11];
 		let KO=node_potentials[12];
 		let LE=-1f64;
-		let LR=staged[1490]!=0.0;
-		let ME=staged[1491]!=0.0;
-		let NP=staged[1492]!=0.0;
+		let LR=staged[1491]!=0.0;
+		let ME=staged[1492]!=0.0;
+		let NP=staged[1493]!=0.0;
 		let NQ=1e-5f64;
 		let NT=460.51701859880916f64;
 		let NW=1e-200f64;
@@ -236,82 +236,82 @@ impl Instance {
 		let UV=staged[407];
 		let XY=-0.99f64;
 		let AFG=staged[418]!=0.0;
-		let AFH=staged[1494]!=0.0;
-		let AFI=staged[1495]!=0.0;
-		let AFJ=staged[1493]!=0.0;
+		let AFH=staged[1495]!=0.0;
+		let AFI=staged[1496]!=0.0;
+		let AFJ=staged[1494]!=0.0;
 		let AFO=staged[435];
 		let AFT=staged[437];
 		let AGO=staged[445];
-		let AHH=staged[1496]!=0.0;
+		let AHH=staged[1497]!=0.0;
 		let AHZ=staged[452];
-		let AOO=staged[1506]!=0.0;
+		let AOO=staged[1507]!=0.0;
 		let AOT=staged[507];
 		let APD=staged[511];
-		let APK=staged[1508]!=0.0;
+		let APK=staged[1509]!=0.0;
 		let APL=staged[514];
 		let APQ=staged[516];
 		let AQD=staged[519];
 		let AQN=staged[523];
-		let AQU=staged[1509]!=0.0;
+		let AQU=staged[1510]!=0.0;
 		let AQV=staged[526];
 		let ARA=staged[528];
-		let ARJ=staged[1507]!=0.0;
-		let ARP=staged[1522]!=0.0;
-		let ARS=staged[1524]!=0.0;
-		let ART=staged[1526]!=0.0;
-		let ARU=staged[1535]!=0.0;
-		let ARV=staged[1523]!=0.0;
+		let ARJ=staged[1508]!=0.0;
+		let ARP=staged[1523]!=0.0;
+		let ARS=staged[1525]!=0.0;
+		let ART=staged[1527]!=0.0;
+		let ARU=staged[1536]!=0.0;
+		let ARV=staged[1524]!=0.0;
 		let ARW=staged[560];
 		let ASW=staged[565];
-		let ATC=staged[1528]!=0.0;
-		let ATD=staged[1525]!=0.0;
-		let ATI=staged[1527]!=0.0;
-		let AUC=staged[1529]!=0.0;
-		let AVF=staged[1530]!=0.0;
-		let AVG=staged[1531]!=0.0;
-		let AVW=staged[1532]!=0.0;
-		let AWN=staged[1537]!=0.0;
-		let AWO=staged[1534]!=0.0;
-		let AWR=staged[1536]!=0.0;
-		let AXM=staged[1538]!=0.0;
-		let AYR=staged[1539]!=0.0;
-		let AYS=staged[1540]!=0.0;
-		let AZH=staged[1541]!=0.0;
-		let AZX=staged[1546]!=0.0;
-		let AZY=staged[1543]!=0.0;
-		let BAB=staged[1545]!=0.0;
-		let BAW=staged[1547]!=0.0;
-		let BCB=staged[1548]!=0.0;
-		let BCC=staged[1549]!=0.0;
-		let BDO=staged[1544]!=0.0;
+		let ATC=staged[1529]!=0.0;
+		let ATD=staged[1526]!=0.0;
+		let ATI=staged[1528]!=0.0;
+		let AUC=staged[1530]!=0.0;
+		let AVF=staged[1531]!=0.0;
+		let AVG=staged[1532]!=0.0;
+		let AVW=staged[1533]!=0.0;
+		let AWN=staged[1538]!=0.0;
+		let AWO=staged[1535]!=0.0;
+		let AWR=staged[1537]!=0.0;
+		let AXM=staged[1539]!=0.0;
+		let AYR=staged[1540]!=0.0;
+		let AYS=staged[1541]!=0.0;
+		let AZH=staged[1542]!=0.0;
+		let AZX=staged[1547]!=0.0;
+		let AZY=staged[1544]!=0.0;
+		let BAB=staged[1546]!=0.0;
+		let BAW=staged[1548]!=0.0;
+		let BCB=staged[1549]!=0.0;
+		let BCC=staged[1550]!=0.0;
+		let BDO=staged[1545]!=0.0;
 		let BDU=staged[603];
 		let BDX=staged[604];
-		let BDZ=staged[1553]!=0.0;
-		let BEA=staged[1555]!=0.0;
-		let BEB=staged[1564]!=0.0;
-		let BEC=staged[1552]!=0.0;
+		let BDZ=staged[1554]!=0.0;
+		let BEA=staged[1556]!=0.0;
+		let BEB=staged[1565]!=0.0;
+		let BEC=staged[1553]!=0.0;
 		let BED=staged[609];
 		let BFD=staged[613];
-		let BFJ=staged[1557]!=0.0;
-		let BFK=staged[1554]!=0.0;
-		let BFP=staged[1556]!=0.0;
-		let BGL=staged[1558]!=0.0;
-		let BHQ=staged[1559]!=0.0;
-		let BHR=staged[1560]!=0.0;
-		let BIH=staged[1561]!=0.0;
-		let BIY=staged[1566]!=0.0;
-		let BIZ=staged[1563]!=0.0;
-		let BJC=staged[1565]!=0.0;
-		let BJX=staged[1567]!=0.0;
-		let BLC=staged[1568]!=0.0;
-		let BLD=staged[1569]!=0.0;
-		let BLS=staged[1570]!=0.0;
-		let BMI=staged[1574]!=0.0;
-		let BMJ=staged[1572]!=0.0;
-		let BMM=staged[1573]!=0.0;
-		let BNH=staged[1575]!=0.0;
-		let BOM=staged[1576]!=0.0;
-		let BON=staged[1577]!=0.0;
+		let BFJ=staged[1558]!=0.0;
+		let BFK=staged[1555]!=0.0;
+		let BFP=staged[1557]!=0.0;
+		let BGL=staged[1559]!=0.0;
+		let BHQ=staged[1560]!=0.0;
+		let BHR=staged[1561]!=0.0;
+		let BIH=staged[1562]!=0.0;
+		let BIY=staged[1567]!=0.0;
+		let BIZ=staged[1564]!=0.0;
+		let BJC=staged[1566]!=0.0;
+		let BJX=staged[1568]!=0.0;
+		let BLC=staged[1569]!=0.0;
+		let BLD=staged[1570]!=0.0;
+		let BLS=staged[1571]!=0.0;
+		let BMI=staged[1575]!=0.0;
+		let BMJ=staged[1573]!=0.0;
+		let BMM=staged[1574]!=0.0;
+		let BNH=staged[1576]!=0.0;
+		let BOM=staged[1577]!=0.0;
+		let BON=staged[1578]!=0.0;
 		let BQM=parameters[32];
 		let BRK=parameters[34];
 		let BSD=1e-20f64;
@@ -604,7 +604,7 @@ impl Instance {
 		let IS=0.95f64* IQ;
 		let IT=(0.0025f64* IQ)* IQ;
 		let IU=IS- (D* (IT.sqrt()));
-		let IV=D* (IU- (((IU* IU)+ IT).sqrt()));
+		let IV=D* ((IU+ A)- (((IU* IU)+ IT).sqrt()));
 		let IW=D* (IQ+ IB);
 		let IX=((staged[353]+ IQ).sqrt())- IR;
 		let IY=(((staged[355]+ IQ).sqrt())- IR)- IX;
@@ -653,7 +653,7 @@ impl Instance {
 		let JY=0.95f64* JU;
 		let JZ=(0.0025f64* JU)* JU;
 		let KA=JY- (D* (JZ.sqrt()));
-		let KB=D* (KA- (((KA* KA)+ JZ).sqrt()));
+		let KB=D* ((KA+ A)- (((KA* KA)+ JZ).sqrt()));
 		let KC=(JM* JQ)/ GO;
 		let KD=((FR* GR)* E)* HU;
 		AKN=JZ;
@@ -742,7 +742,7 @@ impl Instance {
 		let LN=LM* LM;
 		let LO=(D* (LL- ((LN+ IT).sqrt())))+ IS;
 		let LP=((LO* LO)+ IT).sqrt();
-		let LQ=(LH- (D* (LO- LP)))+ IV;
+		let LQ=(LH- (D* ((LO+ A)- LP)))+ IV;
 		let LZ;
 		let MA;
 		if LR{
@@ -1727,7 +1727,7 @@ impl Instance {
 		let AHU=LZ+ (ND* ((D* AEG)- ((D* (B+ AHT)).ln())));
 		let AHV=AEU+ (staged[441]* ND);
 		let AHW=A- AHV;
-		let AHX=D* (AHV- (((AHW* AHW)+ 0.01f64).sqrt()));
+		let AHX=D* ((A+ AHV)- (((AHW* AHW)+ 0.01f64).sqrt()));
 		let AHY=(((AEU* AEU)+ BX).sqrt())* GV;
 		let AIW=if GX{
 		let AIA=AHY- AHZ;
@@ -1870,7 +1870,7 @@ impl Instance {
 		let BUZ;
 		if JO{
 		let AKP=(D* (LL- ((LN+ AKN).sqrt())))+ AKO;
-		let AKS=(LH- (D* (AKP- (((AKP* AKP)+ AKQ).sqrt()))))+ AKR;
+		let AKS=(LH- (D* ((AKP+ A)- (((AKP* AKP)+ AKQ).sqrt()))))+ AKR;
 		let AKT=AKS+ MC;
 		let AKV=AKU* (B+ ((staged[468]* (B+ (staged[467]* LK)))* (B+ (staged[469]* AKT))));
 		let AKW=B/ AKV;
@@ -2185,7 +2185,7 @@ impl Instance {
 		let BDC;
 		if ARJ{
 		let ARK=AIJ+ LH;
-		let ARL=parameters[889]* (((D* (ARK+ (((ARK* ARK)+ 1e-6f64).sqrt()))).powf(parameters[890]))- staged[555]);
+		let ARL=parameters[889]* (((D* ((ARK+ A)+ (((ARK* ARK)+ 1e-6f64).sqrt()))).powf(parameters[890]))- staged[555]);
 		let ARM=AC+ ARL;
 		let ARN=B/ ARM;
 		let ARO=AE/ (B+ (ARL/ AC));
@@ -2199,7 +2199,7 @@ impl Instance {
 		}
 		let BCH=if ARP{
 		let ARQ=AIJ+ LH;
-		let ARR=BE* (B+ (parameters[891]* (((D* (ARQ+ (((ARQ* ARQ)+ 1e-6f64).sqrt()))).powf(parameters[892]))- staged[556])));
+		let ARR=BE* (B+ (parameters[891]* (((D* ((ARQ+ A)+ (((ARQ* ARQ)+ 1e-6f64).sqrt()))).powf(parameters[892]))- staged[556])));
 		ARR
 		}else{
 		BE
@@ -2260,7 +2260,7 @@ impl Instance {
 		let ASV=D* ((AOP+ AST)- (((ASU* ASU)+ staged[564]).sqrt()));
 		let ASX=AOP- ASW;
 		let ASY=D* ((AOP+ ASW)- (((ASX* ASX)+ staged[566]).sqrt()));
-		let ASZ=D* (AOP- (((AOP* AOP)+ 4e-12f64).sqrt()));
+		let ASZ=D* ((AOP+ A)- (((AOP* AOP)+ 4e-12f64).sqrt()));
 		ATA=ASM;
 		ATE=ASV;
 		ATG=ASS;
@@ -2804,7 +2804,7 @@ impl Instance {
 		let BPN;
 		if BDO{
 		let BDP=AIJ+ LH;
-		let BDQ=staged[600]* (((D* (BDP+ (((BDP* BDP)+ 1e-6f64).sqrt()))).powf(staged[601]))- staged[602]);
+		let BDQ=staged[600]* (((D* ((BDP+ A)+ (((BDP* BDP)+ 1e-6f64).sqrt()))).powf(staged[601]))- staged[602]);
 		let BDR=AU+ BDQ;
 		let BDS=B/ BDR;
 		let BDT=AW/ (B+ (BDQ/ AU));
@@ -2819,7 +2819,7 @@ impl Instance {
 		let BDV=BDU> A;
 		let BOS=if BDV{
 		let BDW=AIJ+ LH;
-		let BDY=BI* (B+ (BDU* (((D* (BDW+ (((BDW* BDW)+ 1e-6f64).sqrt()))).powf(BDX))- (5e-4f64.powf(BDX)))));
+		let BDY=BI* (B+ (BDU* (((D* ((BDW+ A)+ (((BDW* BDW)+ 1e-6f64).sqrt()))).powf(BDX))- (5e-4f64.powf(BDX)))));
 		BDY
 		}else{
 		BI
@@ -2880,7 +2880,7 @@ impl Instance {
 		let BFC=D* ((APZ+ BFA)- (((BFB* BFB)+ staged[612]).sqrt()));
 		let BFE=APZ- BFD;
 		let BFF=D* ((APZ+ BFD)- (((BFE* BFE)+ staged[614]).sqrt()));
-		let BFG=D* (APZ- (((APZ* APZ)+ 4e-12f64).sqrt()));
+		let BFG=D* ((APZ+ A)- (((APZ* APZ)+ 4e-12f64).sqrt()));
 		BFH=BET;
 		BFL=BFC;
 		BFN=BEZ;
@@ -6967,7 +6967,7 @@ impl Instance {
 		let BCV=H* ((BBQ+ BCT)- (((BCU* BCU)+ ((ATQ* GS)* GS)).sqrt()));
 		let BCW=BBQ- AZZ;
 		let BCX=H* ((BBQ+ AZZ)- (((BCW* BCW)+ ((ATQ* N)* N)).sqrt()));
-		let BCY=H* (BBQ- (((BBQ* BBQ)+ 4e-12f64).sqrt()));
+		let BCY=H* ((BBQ+ A)- (((BBQ* BBQ)+ 4e-12f64).sqrt()));
 		BCZ=BCM;
 		BDD=BCV;
 		BDF=BCS;
@@ -7585,7 +7585,7 @@ impl Instance {
 		let BOO=H* ((BBR+ BOM)- (((BON* BON)+ ((ATQ* GS)* GS)).sqrt()));
 		let BOP=BBR- AZZ;
 		let BOQ=H* ((BBR+ AZZ)- (((BOP* BOP)+ ((ATQ* N)* N)).sqrt()));
-		let BOR=H* (BBR- (((BBR* BBR)+ 4e-12f64).sqrt()));
+		let BOR=H* ((BBR+ A)- (((BBR* BBR)+ 4e-12f64).sqrt()));
 		BOS=BOF;
 		BOW=BOO;
 		BOY=BOL;
@@ -8203,7 +8203,7 @@ impl Instance {
 		let CAH=H* ((BBS+ CAF)- (((CAG* CAG)+ ((ATQ* GS)* GS)).sqrt()));
 		let CAI=BBS- AZZ;
 		let CAJ=H* ((BBS+ AZZ)- (((CAI* CAI)+ ((ATQ* N)* N)).sqrt()));
-		let CAK=H* (BBS- (((BBS* BBS)+ 4e-12f64).sqrt()));
+		let CAK=H* ((BBS+ A)- (((BBS* BBS)+ 4e-12f64).sqrt()));
 		CAL=BZY;
 		CAP=CAH;
 		CAR=CAE;
@@ -10178,7 +10178,7 @@ impl Instance {
 		let DLR=H* ((DKN+ DLP)- (((DLQ* DLQ)+ ((ATQ* GS)* GS)).sqrt()));
 		let DLS=DKN- BBN;
 		let DLT=H* ((DKN+ BBN)- (((DLS* DLS)+ ((ATQ* N)* N)).sqrt()));
-		let DLU=H* (DKN- (((DKN* DKN)+ 4e-12f64).sqrt()));
+		let DLU=H* ((DKN+ A)- (((DKN* DKN)+ 4e-12f64).sqrt()));
 		DLV=DLI;
 		DMB=DLR;
 		DMD=DLO;
@@ -10796,7 +10796,7 @@ impl Instance {
 		let DXT=H* ((DKO+ DXR)- (((DXS* DXS)+ ((ATQ* GS)* GS)).sqrt()));
 		let DXU=DKO- BBN;
 		let DXV=H* ((DKO+ BBN)- (((DXU* DXU)+ ((ATQ* N)* N)).sqrt()));
-		let DXW=H* (DKO- (((DKO* DKO)+ 4e-12f64).sqrt()));
+		let DXW=H* ((DKO+ A)- (((DKO* DKO)+ 4e-12f64).sqrt()));
 		DXX=DXK;
 		DYB=DXT;
 		DYD=DXQ;
@@ -11414,7 +11414,7 @@ impl Instance {
 		let EJM=H* ((DKP+ EJK)- (((EJL* EJL)+ ((ATQ* GS)* GS)).sqrt()));
 		let EJN=DKP- BBN;
 		let EJO=H* ((DKP+ BBN)- (((EJN* EJN)+ ((ATQ* N)* N)).sqrt()));
-		let EJP=H* (DKP- (((DKP* DKP)+ 4e-12f64).sqrt()));
+		let EJP=H* ((DKP+ A)- (((DKP* DKP)+ 4e-12f64).sqrt()));
 		EJQ=EJD;
 		EJU=EJM;
 		EJW=EJJ;
@@ -13489,7 +13489,7 @@ impl Instance {
 		let FUQ=0.95f64* FUO;
 		let FUR=(AFM* FUO)* FUO;
 		let FUS=FUQ- (H* (FUR.sqrt()));
-		let FUT=H* (FUS- (((FUS* FUS)+ FUR).sqrt()));
+		let FUT=H* ((FUS+ A)- (((FUS* FUS)+ FUR).sqrt()));
 		let FUU=H* (FUO+ FTR);
 		let FUV=((AGZ+ FUO).sqrt())- FUP;
 		let FUW=((((AGZ+ AHA)+ FUO).sqrt())- FUP)- FUV;
@@ -13539,7 +13539,7 @@ impl Instance {
 		let FVW=0.95f64* FVS;
 		let FVX=(AFM* FVS)* FVS;
 		let FVY=FVW- (H* (FVX.sqrt()));
-		let FVZ=H* (FVY- (((FVY* FVY)+ FVX).sqrt()));
+		let FVZ=H* ((FVY+ A)- (((FVY* FVY)+ FVX).sqrt()));
 		let FWA=(FVK* FVO)/ ATE;
 		let FWB=((ASA* ATQ)* K)* FTK;
 		GWQ=FVX;
@@ -13629,7 +13629,7 @@ impl Instance {
 		let FXL=FXK* FXK;
 		let FXM=(H* (FXJ- ((FXL+ FUR).sqrt())))+ FUQ;
 		let FXN=((FXM* FXM)+ FUR).sqrt();
-		let FXO=(FXF- (H* (FXM- FXN)))+ FUT;
+		let FXO=(FXF- (H* ((FXM+ A)- FXN)))+ FUT;
 		let FXQ=(FXP!= A)&& (AGV!= C);
 		let FXY;
 		let FXZ;
@@ -14626,7 +14626,7 @@ impl Instance {
 		let GTX=FXY+ (FZC* ((H* GQG)- ((H* (C+ GTW)).ln())));
 		let GTY=GQU+ (ANU* FZC);
 		let GTZ=A- GTY;
-		let GUA=H* (GTY- (((GTZ* GTZ)+ AFI).sqrt()));
+		let GUA=H* ((A+ GTY)- (((GTZ* GTZ)+ AFI).sqrt()));
 		let GUB=(((GQU* GQU)+ KX).sqrt())* AVK;
 		let GUZ=if AVP{
 		let GUD=GUB- GUC;
@@ -14769,7 +14769,7 @@ impl Instance {
 		let IJZ;
 		if FVM{
 		let GWS=(H* (FXJ- ((FXL+ GWQ).sqrt())))+ GWR;
-		let GWV=(FXF- (H* (GWS- (((GWS* GWS)+ GWT).sqrt()))))+ GWU;
+		let GWV=(FXF- (H* ((GWS+ A)- (((GWS* GWS)+ GWT).sqrt()))))+ GWU;
 		let GWW=GWV+ FYB;
 		let GWY=GWX* (C+ ((ARB* (C+ (ARL* FXI)))* (C+ (ARH* GWW))));
 		let GWZ=C/ GWY;
@@ -15090,7 +15090,7 @@ impl Instance {
 		let HRS;
 		if HFU{
 		let HFV=GUM+ FXF;
-		let HFW=CR* (((H* (HFV+ (((HFV* HFV)+ 1e-6f64).sqrt()))).powf(CS))- (5e-4f64.powf(CS)));
+		let HFW=CR* (((H* ((HFV+ A)+ (((HFV* HFV)+ 1e-6f64).sqrt()))).powf(CS))- (5e-4f64.powf(CS)));
 		let HFX=BO+ HFW;
 		let HFY=C/ HFX;
 		let HFZ=BS/ (C+ (HFW/ BO));
@@ -15105,7 +15105,7 @@ impl Instance {
 		let HGA=CT> A;
 		let HQX=if HGA{
 		let HGB=GUM+ FXF;
-		let HGC=IG* (C+ (CT* (((H* (HGB+ (((HGB* HGB)+ 1e-6f64).sqrt()))).powf(CU))- (5e-4f64.powf(CU)))));
+		let HGC=IG* (C+ (CT* (((H* ((HGB+ A)+ (((HGB* HGB)+ 1e-6f64).sqrt()))).powf(CU))- (5e-4f64.powf(CU)))));
 		HGC
 		}else{
 		IG
@@ -15170,7 +15170,7 @@ impl Instance {
 		let HHI=H* ((HAU+ HHG)- (((HHH* HHH)+ ((ATQ* GS)* GS)).sqrt()));
 		let HHK=HAU- HHJ;
 		let HHL=H* ((HAU+ HHJ)- (((HHK* HHK)+ ((ATQ* N)* N)).sqrt()));
-		let HHM=H* (HAU- (((HAU* HAU)+ 4e-12f64).sqrt()));
+		let HHM=H* ((HAU+ A)- (((HAU* HAU)+ 4e-12f64).sqrt()));
 		HHN=HGY;
 		HHR=HHI;
 		HHT=HHF;
@@ -15738,7 +15738,7 @@ impl Instance {
 		let IEK;
 		if HSF{
 		let HSG=GUM+ FXF;
-		let HSI=HSE* (((H* (HSG+ (((HSG* HSG)+ 1e-6f64).sqrt()))).powf(HSH))- (5e-4f64.powf(HSH)));
+		let HSI=HSE* (((H* ((HSG+ A)+ (((HSG* HSG)+ 1e-6f64).sqrt()))).powf(HSH))- (5e-4f64.powf(HSH)));
 		let HSJ=GF+ HSI;
 		let HSK=C/ HSJ;
 		let HSL=GJ/ (C+ (HSI/ GF));
@@ -15753,7 +15753,7 @@ impl Instance {
 		let HSN=HSM> A;
 		let IDP=if HSN{
 		let HSO=GUM+ FXF;
-		let HSQ=JZ* (C+ (HSM* (((H* (HSO+ (((HSO* HSO)+ 1e-6f64).sqrt()))).powf(HSP))- (5e-4f64.powf(HSP)))));
+		let HSQ=JZ* (C+ (HSM* (((H* ((HSO+ A)+ (((HSO* HSO)+ 1e-6f64).sqrt()))).powf(HSP))- (5e-4f64.powf(HSP)))));
 		HSQ
 		}else{
 		JZ
@@ -15818,7 +15818,7 @@ impl Instance {
 		let HTW=H* ((HDH+ HTU)- (((HTV* HTV)+ ((ATQ* GS)* GS)).sqrt()));
 		let HTY=HDH- HTX;
 		let HTZ=H* ((HDH+ HTX)- (((HTY* HTY)+ ((ATQ* N)* N)).sqrt()));
-		let HUA=H* (HDH- (((HDH* HDH)+ 4e-12f64).sqrt()));
+		let HUA=H* ((HDH+ A)- (((HDH* HDH)+ 4e-12f64).sqrt()));
 		HUB=HTM;
 		HUF=HTW;
 		HUH=HTT;

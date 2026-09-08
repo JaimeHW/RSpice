@@ -1179,13 +1179,12 @@ impl DeviceIR {
             let equation_index = out_equations.len();
             let span = crate::metrics::FineSpan::new("ir.equation_noise_gains");
             for process in noise_sources.iter_mut() {
-                let derivative = autodiff::differentiate_with_shadows(
+                let gain = autodiff::differentiate_with_shadows(
                     exprs,
                     expr,
                     &DerivativeWrt::Noise(process.process_id),
                     &shadows,
                 );
-                let gain = autodiff::simplify(exprs, derivative);
                 if Self::is_zero(exprs, gain) {
                     continue;
                 }
@@ -1691,8 +1690,7 @@ impl DeviceIR {
             if !autodiff::mask_contains_axis(active_axes, &wrt, num_nodes) {
                 continue;
             }
-            let deriv_expr = autodiff::differentiate_with_shadows(arena, expr, &wrt, shadows);
-            let simplified = autodiff::simplify(arena, deriv_expr);
+            let simplified = autodiff::differentiate_with_shadows(arena, expr, &wrt, shadows);
 
             // Only add non-zero derivatives
             if !Self::is_zero(arena, simplified) {
@@ -2822,8 +2820,7 @@ pub mod autodiff {
                                 if !ctx.is_shadowed_on(&name, &wrt) {
                                     continue;
                                 }
-                                let raw = differentiate_with_shadows(arena, expr, &wrt, ctx);
-                                let derivative = simplify(arena, raw);
+                                let derivative = differentiate_with_shadows(arena, expr, &wrt, ctx);
                                 let shadow = ShadowContext::shadow_name(&name, &wrt);
                                 let (var_index, index) = match &assign.index {
                                     Some(target) => (
@@ -3518,8 +3515,8 @@ pub mod autodiff {
                             .collect::<Vec<_>>();
                         for process in processes {
                             let axis = DerivativeWrt::Noise(process);
-                            let raw = differentiate_with_shadows(arena, assign.expr, &axis, ctx);
-                            let derivative = simplify(arena, raw);
+                            let derivative =
+                                differentiate_with_shadows(arena, assign.expr, &axis, ctx);
                             let shadow_name = ShadowContext::shadow_name(&target_name, &axis);
                             if let Some(target) = &assign.index {
                                 let shadow_base = ctx
@@ -3764,13 +3761,7 @@ pub mod autodiff {
                     pos: Some(pos),
                     neg: None,
                 } => {
-                    let derivative = differentiate_with_shadows(
-                        arena,
-                        inner,
-                        &DerivativeWrt::Voltage(pos),
-                        shadows,
-                    );
-                    simplify(arena, derivative)
+                    differentiate_with_shadows(arena, inner, &DerivativeWrt::Voltage(pos), shadows)
                 }
                 DdxAxis::Potential {
                     pos: None,
@@ -3792,20 +3783,18 @@ pub mod autodiff {
                     pos: Some(pos),
                     neg: Some(neg),
                 } => {
-                    let from_pos = differentiate_with_shadows(
+                    let d_pos = differentiate_with_shadows(
                         arena,
                         inner,
                         &DerivativeWrt::Voltage(pos),
                         shadows,
                     );
-                    let d_pos = simplify(arena, from_pos);
-                    let from_neg = differentiate_with_shadows(
+                    let d_neg = differentiate_with_shadows(
                         arena,
                         inner,
                         &DerivativeWrt::Voltage(neg),
                         shadows,
                     );
-                    let d_neg = simplify(arena, from_neg);
                     let half = arena.push(Node::Const(0.5));
                     let difference = arena.push(Node::Binary(BinaryOp::Sub, d_pos, d_neg));
                     let scaled = arena.push(Node::Binary(BinaryOp::Mul, half, difference));
@@ -3816,13 +3805,12 @@ pub mod autodiff {
                     neg: None,
                 } => arena.push(Node::Const(0.0)),
                 DdxAxis::BranchCurrent { ordinal, reversed } => {
-                    let from_branch = differentiate_with_shadows(
+                    let derivative = differentiate_with_shadows(
                         arena,
                         inner,
                         &DerivativeWrt::BranchCurrent(ordinal),
                         shadows,
                     );
-                    let derivative = simplify(arena, from_branch);
                     if reversed {
                         let negated = arena.push(Node::Unary(UnaryOp::Neg, derivative));
                         simplify(arena, negated)
@@ -4183,6 +4171,18 @@ pub mod autodiff {
         wrt: &DerivativeWrt,
         shadows: &ShadowContext,
     ) -> NodeId {
+        let primal_len = arena.len();
+        let derivative = differentiate_raw(arena, expr, wrt, shadows);
+        simplify_from(arena, derivative, Some(primal_len))
+    }
+
+    fn differentiate_raw(
+        arena: &mut ExprArena,
+        expr: NodeId,
+        wrt: &DerivativeWrt,
+        shadows: &ShadowContext,
+    ) -> NodeId {
+        let primal_len = arena.len();
         macro_rules! constant {
             ($value:expr) => {
                 arena.push(Node::Const($value))
@@ -4195,7 +4195,7 @@ pub mod autodiff {
         }
         macro_rules! differentiate {
             ($child:expr) => {
-                differentiate_with_shadows(arena, $child, wrt, shadows)
+                differentiate_raw(arena, $child, wrt, shadows)
             };
         }
 
@@ -4337,7 +4337,7 @@ pub mod autodiff {
                     BinaryOp::Mod => {
                         // The integer quotient is locally constant even when
                         // both real operands vary: d(l % r) = dl - trunc(l/r)*dr.
-                        let dr = simplify(arena, dr);
+                        let dr = simplify_from(arena, dr, Some(primal_len));
                         if matches!(arena.node(dr), Node::Const(value) if *value == 0.0) {
                             return dl;
                         }
@@ -4946,9 +4946,19 @@ pub mod autodiff {
 
     /// Simplify an IR expression (constant folding, identity removal)
     pub fn simplify(arena: &mut ExprArena, expr: NodeId) -> NodeId {
+        simplify_from(arena, expr, None)
+    }
+
+    /// Sparse derivative zeros can erase inactive chain-rule terms, but that
+    /// algebra must never rewrite an authored primal factor. Arena indices
+    /// identify the original nodes without copying or annotating their trees.
+    fn simplify_from(arena: &mut ExprArena, expr: NodeId, primal_len: Option<u32>) -> NodeId {
+        if primal_len.is_some_and(|len| expr.index() < len) {
+            return expr;
+        }
         match *arena.node(expr) {
             Node::FreezeDerivative(input) => {
-                let simplified = simplify(arena, input);
+                let simplified = simplify_from(arena, input, primal_len);
                 if matches!(arena.node(simplified), Node::Const(_)) {
                     simplified
                 } else if simplified == input {
@@ -4958,8 +4968,8 @@ pub mod autodiff {
                 }
             }
             Node::Binary(op, left, right) => {
-                let simplified_left = simplify(arena, left);
-                let simplified_right = simplify(arena, right);
+                let simplified_left = simplify_from(arena, left, primal_len);
+                let simplified_right = simplify_from(arena, right, primal_len);
 
                 // Constant folding
                 if let (Node::Const(l), Node::Const(r)) =
@@ -4979,28 +4989,41 @@ pub mod autodiff {
                     };
                 }
 
+                // Fold explicit constant arithmetic first: a singular 0/0 is
+                // still invalid when its numerator came from differentiation.
+                let left_zero = primal_len.is_some_and(|len| simplified_left.index() >= len)
+                    && matches!(*arena.node(simplified_left), Node::Const(value) if value == 0.0);
+                let right_zero = primal_len.is_some_and(|len| simplified_right.index() >= len)
+                    && matches!(*arena.node(simplified_right), Node::Const(value) if value == 0.0);
+                match op {
+                    BinaryOp::Mul if left_zero || right_zero => {
+                        return arena.push(Node::Const(0.0));
+                    }
+                    BinaryOp::Div if left_zero => return arena.push(Node::Const(0.0)),
+                    BinaryOp::Add if left_zero => return simplified_right,
+                    BinaryOp::Add | BinaryOp::Sub if right_zero => return simplified_left,
+                    _ => {}
+                }
+
                 // Identity rules
                 match op {
                     BinaryOp::Add => {
-                        if matches!(*arena.node(simplified_left), Node::Const(v) if v == 0.0) {
+                        if matches!(*arena.node(simplified_left), Node::Const(v) if v.to_bits() == (-0.0_f64).to_bits())
+                        {
                             return simplified_right;
                         }
-                        if matches!(*arena.node(simplified_right), Node::Const(v) if v == 0.0) {
+                        if matches!(*arena.node(simplified_right), Node::Const(v) if v.to_bits() == (-0.0_f64).to_bits())
+                        {
                             return simplified_left;
                         }
                     }
                     BinaryOp::Sub => {
-                        if matches!(*arena.node(simplified_right), Node::Const(v) if v == 0.0) {
+                        if matches!(*arena.node(simplified_right), Node::Const(v) if v.to_bits() == 0)
+                        {
                             return simplified_left;
                         }
                     }
                     BinaryOp::Mul => {
-                        if matches!(*arena.node(simplified_left), Node::Const(v) if v == 0.0) {
-                            return arena.push(Node::Const(0.0));
-                        }
-                        if matches!(*arena.node(simplified_right), Node::Const(v) if v == 0.0) {
-                            return arena.push(Node::Const(0.0));
-                        }
                         if matches!(*arena.node(simplified_left), Node::Const(v) if v == 1.0) {
                             return simplified_right;
                         }
@@ -5009,9 +5032,6 @@ pub mod autodiff {
                         }
                     }
                     BinaryOp::Div => {
-                        if matches!(*arena.node(simplified_left), Node::Const(v) if v == 0.0) {
-                            return arena.push(Node::Const(0.0));
-                        }
                         if matches!(*arena.node(simplified_right), Node::Const(v) if v == 1.0) {
                             return simplified_left;
                         }
@@ -5022,7 +5042,7 @@ pub mod autodiff {
                 rebuilt_binary(arena, expr, op, simplified_left, simplified_right)
             }
             Node::Unary(op, operand) => {
-                let simplified = simplify(arena, operand);
+                let simplified = simplify_from(arena, operand, primal_len);
                 if let (UnaryOp::Neg, Node::Const(value)) = (op, *arena.node(simplified)) {
                     return arena.push(Node::Const(-value));
                 }
@@ -5035,9 +5055,9 @@ pub mod autodiff {
                 arena.push(Node::Unary(op, simplified))
             }
             Node::Conditional(condition, then_expr, else_expr) => {
-                let simplified_condition = simplify(arena, condition);
-                let simplified_then = simplify(arena, then_expr);
-                let simplified_else = simplify(arena, else_expr);
+                let simplified_condition = simplify_from(arena, condition, primal_len);
+                let simplified_then = simplify_from(arena, then_expr, primal_len);
+                let simplified_else = simplify_from(arena, else_expr, primal_len);
                 if let Node::Const(value) = *arena.node(simplified_condition) {
                     return if value != 0.0 {
                         simplified_then
@@ -5058,8 +5078,8 @@ pub mod autodiff {
                 ))
             }
             Node::Call { func, argc, a, b } => {
-                let simplified_a = a.map(|argument| simplify(arena, argument));
-                let simplified_b = b.map(|argument| simplify(arena, argument));
+                let simplified_a = a.map(|argument| simplify_from(arena, argument, primal_len));
+                let simplified_b = b.map(|argument| simplify_from(arena, argument, primal_len));
                 if simplified_a == a && simplified_b == b {
                     return expr;
                 }
@@ -5074,7 +5094,7 @@ pub mod autodiff {
                 let arguments = arena.call_args(args).to_vec();
                 let mut simplified = Vec::with_capacity(arguments.len());
                 for argument in &arguments {
-                    simplified.push(simplify(arena, *argument));
+                    simplified.push(simplify_from(arena, *argument, primal_len));
                 }
                 if simplified == arguments {
                     return expr;
@@ -5083,7 +5103,7 @@ pub mod autodiff {
             }
             // Companion factors of a zero derivative vanish
             Node::DdtCompanion(operand) => {
-                let simplified = simplify(arena, operand);
+                let simplified = simplify_from(arena, operand, primal_len);
                 if matches!(*arena.node(simplified), Node::Const(value) if value == 0.0) {
                     return arena.push(Node::Const(0.0));
                 }
@@ -5093,7 +5113,7 @@ pub mod autodiff {
                 arena.push(Node::DdtCompanion(simplified))
             }
             Node::IdtCompanion(operand) => {
-                let simplified = simplify(arena, operand);
+                let simplified = simplify_from(arena, operand, primal_len);
                 if matches!(*arena.node(simplified), Node::Const(value) if value == 0.0) {
                     return arena.push(Node::Const(0.0));
                 }

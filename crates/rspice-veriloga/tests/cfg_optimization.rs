@@ -14,6 +14,98 @@ use rspice_veriloga::canonical_ir::{
 use std::collections::{HashMap, HashSet};
 
 #[test]
+fn simplification_preserves_signed_zero_before_a_branch_cut() {
+    for (expression, apply) in [
+        ("0.0+V(p)", (|x: f64| 0.0 + x) as fn(f64) -> f64),
+        ("V(p)+0.0", |x| x + 0.0),
+        ("-0.0+V(p)", |x| -0.0 + x),
+        ("V(p)+(-0.0)", |x| x + (-0.0)),
+        ("V(p)-0.0", |x| x - 0.0),
+        ("V(p)-(-0.0)", |x| x - (-0.0)),
+    ] {
+        let artifact = artifact(&format!(
+            "module branch_cut(p); inout p; electrical p;
+             analog I(p)<+atan2({expression},-1.0); endmodule"
+        ));
+        let cfg = CfgModel::from_hir(&artifact.hir, &artifact.mir).unwrap();
+        let (optimized, residuals) = optimize_cfg(&cfg.function, &cfg.residuals);
+        for voltage in [-0.0, 0.0, -1.0, 1.0] {
+            let mut inputs = inputs(&artifact);
+            inputs.node_potentials[0] = voltage;
+            let expected = apply(voltage).atan2(-1.0);
+            for (function, residuals) in [(&cfg.function, &cfg.residuals), (&optimized, &residuals)]
+            {
+                let result = evaluate_cfg(function, &inputs).unwrap();
+                assert_eq!(
+                    result.value(residuals[0]).unwrap(),
+                    expected,
+                    "{expression} at {voltage:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn packed_simplification_preserves_both_zero_signs() {
+    use rspice_veriloga::canonical_ir::cfg::{
+        CfgBlock, CfgInstruction, CfgTerminator, CfgValue, CfgValueType,
+    };
+    let artifact = artifact("module empty(p); inout p; electrical p; endmodule");
+    let inputs = inputs(&artifact);
+    for op in [CfgBinaryOp::Add, CfgBinaryOp::Sub] {
+        for left in [-0.0_f64, 0.0] {
+            for right in [-0.0_f64, 0.0] {
+                let kinds = [
+                    CfgValueKind::LaneSplat(left),
+                    CfgValueKind::LaneSplat(right),
+                    CfgValueKind::LaneBinary {
+                        op,
+                        left: 0usize.into(),
+                        right: 1usize.into(),
+                    },
+                ];
+                let function = CfgFunction {
+                    entry: 0usize.into(),
+                    blocks: vec![CfgBlock {
+                        id: 0usize.into(),
+                        params: vec![],
+                        instructions: vec![CfgInstruction {
+                            result: 2usize.into(),
+                        }],
+                        terminator: CfgTerminator::Return,
+                    }],
+                    values: kinds
+                        .into_iter()
+                        .enumerate()
+                        .map(|(id, kind)| CfgValue {
+                            id: id.into(),
+                            kind,
+                            value_type: CfgValueType::Lanes(0usize.into()),
+                        })
+                        .collect(),
+                    shapes: vec![vec![0]],
+                };
+                function.validate().unwrap();
+                let (optimized, outputs) = optimize_cfg(&function, &[2usize.into()]);
+                optimized.validate().unwrap();
+                let expected = if op == CfgBinaryOp::Add {
+                    left + right
+                } else {
+                    left - right
+                };
+                let actual = evaluate_cfg(&optimized, &inputs).unwrap();
+                assert_eq!(
+                    actual.lanes(outputs[0]).unwrap()[0].to_bits(),
+                    expected.to_bits(),
+                    "{left:?} {op:?} {right:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn simplification_preserves_every_residual() {
     for (name, source) in fixtures() {
         let artifact = artifact(source);

@@ -29,7 +29,7 @@ impl Instance {
 		if !self.multiplicity.is_finite() || self.multiplicity <= 0.0 {
 			return Err(GeneratedNoiseEvaluationError::InvalidMultiplicity { value: self.multiplicity });
 		}
-		let mut prepared = [0.0; 215];
+		let mut prepared = [0.0; 229];
 		let produced = canonical_model_preprocess(
 			&self.params.values,
 			&self.param_given[..],
@@ -165,7 +165,7 @@ impl Instance {
 		let AU=(F* AO)/ S;
 		let AW=AK+ AT;
 		let AY=AK+ AS;
-		let AZ=staged[32]* (((J* (AW+ (((AW* AW)+ AX).sqrt()))).sqrt())+ ((J* (AY+ (((AY* AY)+ AX).sqrt()))).sqrt()));
+		let AZ=staged[32]* (((J* ((AW+ A)+ (((AW* AW)+ AX).sqrt()))).sqrt())+ ((J* ((AY+ A)+ (((AY* AY)+ AX).sqrt()))).sqrt()));
 		let BA=B- AZ;
 		let BB=AV+ (AE* ((BA- AZ)+ staged[34]));
 		let BC=staged[37]* BA;
@@ -305,7 +305,7 @@ impl Instance {
 		let FU=staged[69]* BG;
 		let FV=((BZ* FT)* FT)+ FU;
 		let FW=(FQ* FQ)+ FU;
-		let FX=(rspice_limited_exp((AH* ((((J* (FV+ (((FV* FV)+ AX).sqrt()))).sqrt())- (J* FT)).ln()))))- (rspice_limited_exp((AH* ((((J* (FW+ (((FW* FW)+ AX).sqrt()))).sqrt())- FQ).ln()))));
+		let FX=(rspice_limited_exp((AH* ((((J* ((FV+ A)+ (((FV* FV)+ AX).sqrt()))).sqrt())- (J* FT)).ln()))))- (rspice_limited_exp((AH* ((((J* ((FW+ A)+ (((FW* FW)+ AX).sqrt()))).sqrt())- FQ).ln()))));
 		let FY=FP+ (staged[70]* FX);
 		let FZ=CF> D;
 		let GS=if FZ{
@@ -377,7 +377,7 @@ impl Instance {
 		B
 		}else{
 		let HN=(EB- ED)- HM;
-		let HO=(ED- (EB- (J* (HN+ (((HN* HN)+ ((W* HM)* EB)).sqrt())))))/ (((B/ (B+ ((parameters[82]* (G.sqrt()))/ (GU+ D))))/ HK)* (B+ ((B+ (parameters[84]* G))* (rspice_limited_exp(((parameters[85]* ED)* S))))));
+		let HO=(ED- (EB- (J* ((HN+ A)+ (((HN* HN)+ ((W* HM)* EB)).sqrt())))))/ (((B/ (B+ ((parameters[82]* (G.sqrt()))/ (GU+ D))))/ HK)* (B+ ((B+ (parameters[84]* G))* (rspice_limited_exp(((parameters[85]* ED)* S))))));
 		let HP=B+ HO;
 		HP
 		};
@@ -898,14 +898,14 @@ impl Instance {
 		let AP=parameters[35]* (B+ (parameters[23]* AM));
 		let AQ=-parameters[56];
 		let AS=(AF/ parameters[57]).ln();
-		let AU=AQ* (AR* (AS+ (((AS* AS)+ AT).sqrt())));
+		let AU=AQ* (AR* ((AS+ A)+ (((AS* AS)+ AT).sqrt())));
 		let AV=(AH/ parameters[58]).ln();
-		let AW=AQ* (AR* (AV+ (((AV* AV)+ AT).sqrt())));
+		let AW=AQ* (AR* ((AV+ A)+ (((AV* AV)+ AT).sqrt())));
 		let AX=-parameters[59];
 		let AY=(AF/ parameters[60]).ln();
-		let AZ=AX* (AR* (AY+ (((AY* AY)+ AT).sqrt())));
+		let AZ=AX* (AR* ((AY+ A)+ (((AY* AY)+ AT).sqrt())));
 		let BA=(AH/ parameters[61]).ln();
-		let BB=AX* (AR* (BA+ (((BA* BA)+ AT).sqrt())));
+		let BB=AX* (AR* ((BA+ A)+ (((BA* BA)+ AT).sqrt())));
 		let BC=parameters[62]* ((((ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Sub, O, B)))* parameters[63])+ B).ln());
 		let BD=parameters[36]* (B+ (parameters[118]/ AH));
 		let BE=parameters[37]* (B+ (parameters[119]/ AH));
@@ -1061,7 +1061,7 @@ impl Instance {
 		let FI=BG+ (parameters[155]* (ES- B));
 		let FJ=(((((-EP)* EJ)* ET)+ (1.16f64- (((7.02e-4f64* EN)* EN)/ (EN+ 1108f64))))- ((1.16f64- (((7.02e-4f64* G)* G)/ (G+ 1108f64)))* ES))/ P;
 		let FK=((EB* ES)+ FJ)/ EP;
-		let FL=AR* (FK+ (((FK* FK)+ AT).sqrt()));
+		let FL=AR* ((FK+ A)+ (((FK* FK)+ AT).sqrt()));
 		let FM=(S* (DY- (BJ* EQ)))/ EP;
 		let FN=EA/ EV;
 		let FO=parameters[29]/ EV;
@@ -1128,7 +1128,7 @@ impl Instance {
 		let HJ=EL/ FN;
 		let HK=GW+ HG;
 		let HM=GW+ HF;
-		let HN=HJ* (((AR* (HK+ (((HK* HK)+ HL).sqrt()))).sqrt())+ ((AR* (HM+ (((HM* HM)+ HL).sqrt()))).sqrt()));
+		let HN=HJ* (((AR* ((HK+ A)+ (((HK* HK)+ HL).sqrt()))).sqrt())+ ((AR* ((HM+ A)+ (((HM* HM)+ HL).sqrt()))).sqrt()));
 		let HO=B- HN;
 		let HP=(EM* GQ)/ FN;
 		let HQ=HP+ HP;
@@ -1292,7 +1292,7 @@ impl Instance {
 		let NA=(EW* GL)* HZ;
 		let NB=((IV* MZ)* MZ)+ NA;
 		let NC=(MW* MW)+ NA;
-		let ND=(rspice_limited_exp((GJ* ((((AR* (NB+ (((NB* NB)+ HL).sqrt()))).sqrt())- (AR* MZ)).ln()))))- (rspice_limited_exp((GJ* ((((AR* (NC+ (((NC* NC)+ HL).sqrt()))).sqrt())- MW).ln()))));
+		let ND=(rspice_limited_exp((GJ* ((((AR* ((NB+ A)+ (((NB* NB)+ HL).sqrt()))).sqrt())- (AR* MZ)).ln()))))- (rspice_limited_exp((GJ* ((((AR* ((NC+ A)+ (((NC* NC)+ HL).sqrt()))).sqrt())- MW).ln()))));
 		let NE=MV+ (GL* ND);
 		let NF=JB> P;
 		let OA=if NF{
@@ -1366,7 +1366,7 @@ impl Instance {
 		B
 		}else{
 		let OV=(LG- LI)- OU;
-		let OW=(LI- (LG- (AR* (OV+ (((OV* OV)+ ((EW* OU)* LG)).sqrt())))))/ (((B/ (B+ ((parameters[82]* (AF.sqrt()))/ (OC+ P))))/ OS)* (B+ ((B+ (parameters[84]* AF))* (rspice_limited_exp(((parameters[85]* LI)* EP))))));
+		let OW=(LI- (LG- (AR* ((OV+ A)+ (((OV* OV)+ ((EW* OU)* LG)).sqrt())))))/ (((B/ (B+ ((parameters[82]* (AF.sqrt()))/ (OC+ P))))/ OS)* (B+ ((B+ (parameters[84]* AF))* (rspice_limited_exp(((parameters[85]* LI)* EP))))));
 		let OX=B+ OW;
 		OX
 		};

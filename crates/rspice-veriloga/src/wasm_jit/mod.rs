@@ -104,7 +104,8 @@ pub const WASM_JIT_ABI_VERSION: u32 = 11;
 /// dependent defaults and generated expressions.
 /// 19 to 20 preserves signed integer arithmetic and its checked helper calls.
 /// 20 to 21 preserves ddx primal validation through symbolic differentiation.
-pub const WASM_JIT_EMITTER_VERSION: u32 = 21;
+/// 21 to 22 preserves signed zero in primal arithmetic and derivative factors.
+pub const WASM_JIT_EMITTER_VERSION: u32 = 22;
 
 /// Hard ceiling for one qualified shipped model's generated module.
 pub const SHIPPED_MODEL_WASM_CODE_SIZE_BUDGET_BYTES: usize = 32 * 1024 * 1024;
@@ -1937,6 +1938,46 @@ endmodule
                             harness.read_f64(FRAME_RESULT_OFFSET as usize),
                             expected,
                             "{expression}; postfix={postfix}; entry={entry}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn wasm_signed_zero_factors_preserve_values_and_jacobians() {
+        use super::abi::FRAME_RESULT_OFFSET;
+        for (zero, values, apply) in [
+            (
+                "0.0*V(q)",
+                [-2.0, 2.0],
+                (|x: f64| 0.0 * x) as fn(f64) -> f64,
+            ),
+            ("0.0/V(q)", [-2.0, 2.0], |x| 0.0 / x),
+            ("0.0+V(q)", [-0.0, 0.0], |x| 0.0 + x),
+            ("V(q)-(-0.0)", [-0.0, 0.0], |x| x - (-0.0)),
+        ] {
+            let source = format!(
+                "module signed_zero(p,q); inout p,q; electrical p,q; analog I(p)<+V(p)*atan2({zero},-1.0); endmodule"
+            );
+            for postfix in [false, true] {
+                let mut harness =
+                    FusedKernelHarness::for_source_with_plan(&source, "signed_zero", postfix);
+                let value = harness.stamp_value_export(0);
+                let jacobian = harness.jacobian_export(0, 0);
+                for q in values {
+                    harness.reset();
+                    harness.write_f64(FusedKernelHarness::VOLTAGES as usize, 1.0);
+                    harness.write_f64(FusedKernelHarness::VOLTAGES as usize + 8, q);
+                    harness.call_assignments();
+                    harness.call_prelude();
+                    for export in [&value, &jacobian] {
+                        assert_eq!(harness.call(export), 0);
+                        assert_eq!(
+                            harness.read_f64(FRAME_RESULT_OFFSET as usize),
+                            apply(q).atan2(-1.0),
+                            "{zero} at {q:?}, postfix={postfix}, {export}"
                         );
                     }
                 }

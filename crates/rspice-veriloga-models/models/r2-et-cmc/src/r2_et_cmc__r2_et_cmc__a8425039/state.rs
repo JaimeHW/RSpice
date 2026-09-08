@@ -314,7 +314,7 @@ impl<const DDT: usize, const IDT: usize> StampState<DDT, IDT> {
 	}
 }
 
-pub(crate) type CanonicalModelValues = [f64; 5];
+pub(crate) type CanonicalModelValues = [f64; 7];
 pub struct Instance {
 	pub nodes: [usize; 3],
 	pub branches: [usize; 0],
@@ -330,7 +330,7 @@ pub struct Instance {
 	pub(crate) analog_effects: Option<Box<rspice_veriloga_runtime::AnalogEffectJournal>>,
 	pub(crate) canonical_reactive: Box<[f64; 8]>,
 	pub(crate) canonical_model_values: Option<std::sync::Arc<CanonicalModelValues>>,
-	pub(crate) canonical_staged: Box<[f64; 17]>,
+	pub(crate) canonical_staged: Box<[f64; 19]>,
 	pub(crate) canonical_instance_valid: bool,
 	pub(crate) canonical_temperature_valid: bool,
 	pub(crate) canonical_temperature: f64,
@@ -432,7 +432,7 @@ impl Instance {
 	pub const EVENT_STATE_COUNT: usize = 0;
 	pub const ONE_STEP_DAE_SPLIT_SAFE: bool = true;
 	pub const REQUIRES_NODESET_PHASE: bool = false;
-	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "06aec23128c59bc40f5c2a383be5b0aab1b3993eb3bbe6f7f867a9dc1f9470f4";
+	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "79830f9081a3e71f3bef65d5b27a6eb8d8ccdfb64e10e19708cd183606ed1679";
 	pub const MAX_ANALOG_LOOP_ITERATIONS: usize = 1_000_000;
 
 	pub fn new(nodes: &[usize]) -> Self {

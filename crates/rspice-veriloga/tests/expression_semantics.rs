@@ -5,6 +5,64 @@ mod support;
 use support::DeviceFixture;
 
 #[test]
+fn signed_zero_in_authored_factors_survives_differentiation() {
+    for (zero, values, apply) in [
+        (
+            "0.0*V(q)",
+            [-2.0, 2.0],
+            (|x: f64| 0.0 * x) as fn(f64) -> f64,
+        ),
+        ("0.0/V(q)", [-2.0, 2.0], |x| 0.0 / x),
+        ("0.0+V(q)", [-0.0, 0.0], |x| 0.0 + x),
+        ("V(q)-(-0.0)", [-0.0, 0.0], |x| x - (-0.0)),
+    ] {
+        for derivative in [false, true] {
+            let expression = format!("V(p)*atan2({zero},-1.0)");
+            let expression = if derivative {
+                format!("ddx({expression},V(p))")
+            } else {
+                expression
+            };
+            let fixture = DeviceFixture::compile(&format!(
+                "module signed_zero_factor(p,q,n); inout p,q,n; electrical p,q,n;
+                 analog I(p,n)<+{expression}; endmodule"
+            ));
+            let mut device = fixture.device("X", &[1, 2, 0]);
+            for q in values {
+                let expected = apply(q).atan2(-1.0);
+                device.update_voltages(&[1.0, q]);
+                assert_eq!(
+                    device.try_evaluate().unwrap()[0],
+                    expected,
+                    "{expression} at {q}"
+                );
+                if !derivative {
+                    let mut slope = 0.0;
+                    device
+                        .try_stamp(
+                            &[1.0, q],
+                            |row, column, value| {
+                                if row == 0 && column == 0 {
+                                    slope += value;
+                                }
+                            },
+                            |_, _| {},
+                        )
+                        .unwrap();
+                    assert_eq!(slope, expected, "Jacobian of {expression} at {q}");
+                    let step = 1e-5;
+                    device.update_voltages(&[1.0 + step, q]);
+                    let plus = device.try_evaluate().unwrap()[0];
+                    device.update_voltages(&[1.0 - step, q]);
+                    let minus = device.try_evaluate().unwrap()[0];
+                    assert!((slope - (plus - minus) / (2.0 * step)).abs() < 1e-9);
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn ddx_checked_value_can_be_the_only_native_helper() {
     let fixture = DeviceFixture::compile(
         "module derivative(p); inout p; electrical p; analog I(p)<+ddx(V(p),V(p)); endmodule",

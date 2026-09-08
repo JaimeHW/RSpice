@@ -497,7 +497,7 @@ impl Instance {
 		let GN=A- GM;
 		let ALT=(ALQ* AJJ)* GN;
 		let GO=((GN* GN)+ BE).sqrt();
-		let GP=BF* (GM+ GO);
+		let GP=BF* ((A+ GM)+ GO);
 		let ALU=(ALQ+ ((ALT+ ALT)* (AIB/ (AJI* GO))))* BF;
 		GU=GP;
 		AIQ=ALU;
@@ -506,7 +506,7 @@ impl Instance {
 		let ALR=ALQ* AJJ;
 		let GR=BG/ BE;
 		let GS=(GR* GQ).tanh();
-		let GT=BF* (GM+ (GQ* GS));
+		let GT=BF* ((A+ GM)+ (GQ* GS));
 		let ALS=(ALQ+ ((ALR* GS)+ (((ALR* GR)* (AIB- (GS* GS)))* GQ)))* BF;
 		GU=GT;
 		AIQ=ALS;
@@ -531,7 +531,7 @@ impl Instance {
 		let HC=A- HB;
 		let AME=(AMB* AJJ)* HC;
 		let HD=((HC* HC)+ BE).sqrt();
-		let HE=BF* (HB+ HD);
+		let HE=BF* ((A+ HB)+ HD);
 		let AMF=(AMB+ ((AME+ AME)* (AIB/ (AJI* HD))))* BF;
 		HJ=HE;
 		AIR=AMF;
@@ -540,7 +540,7 @@ impl Instance {
 		let AMC=AMB* AJJ;
 		let HG=BG/ BE;
 		let HH=(HG* HF).tanh();
-		let HI=BF* (HB+ (HF* HH));
+		let HI=BF* ((A+ HB)+ (HF* HH));
 		let AMD=(AMB+ ((AMC* HH)+ (((AMC* HG)* (AIB- (HH* HH)))* HF)))* BF;
 		HJ=HI;
 		AIR=AMD;
@@ -768,22 +768,22 @@ impl Instance {
 		let KV=BA/ KU;
 		let LA=if BD{
 		let KW=A- KV;
-		let KX=BF* (KV+ (((KW* KW)+ BE).sqrt()));
+		let KX=BF* ((A+ KV)+ (((KW* KW)+ BE).sqrt()));
 		KX
 		}else{
 		let KY=A- KV;
-		let KZ=BF* (KV+ (KY* (((BG/ BE)* KY).tanh())));
+		let KZ=BF* ((A+ KV)+ (KY* (((BG/ BE)* KY).tanh())));
 		KZ
 		};
 		let LB=BA* (C/ ((C+ (LA.powf(CY))).powf(GW)));
 		let LC=HA/ KU;
 		let LH=if BD{
 		let LD=A- LC;
-		let LE=BF* (LC+ (((LD* LD)+ BE).sqrt()));
+		let LE=BF* ((A+ LC)+ (((LD* LD)+ BE).sqrt()));
 		LE
 		}else{
 		let LF=A- LC;
-		let LG=BF* (LC+ (LF* (((BG/ BE)* LF).tanh())));
+		let LG=BF* ((A+ LC)+ (LF* (((BG/ BE)* LF).tanh())));
 		LG
 		};
 		let LI=HA* (C/ ((C+ (LH.powf(CY))).powf(GW)));
@@ -2594,7 +2594,7 @@ impl Instance {
 		let FF=A- FE;
 		let AII=(-AIF)* FF;
 		let FG=((FF* FF)+ BC).sqrt();
-		let FH=BD* (FE+ FG);
+		let FH=BD* ((A+ FE)+ FG);
 		let AIJ=(AIF+ ((AII+ AII)* (C/ (BJ* FG))))* BD;
 		FM=FH;
 		AGW=AIJ;
@@ -2603,7 +2603,7 @@ impl Instance {
 		let AIG=-AIF;
 		let FJ=BE/ BC;
 		let FK=(FJ* FI).tanh();
-		let FL=BD* (FE+ (FI* FK));
+		let FL=BD* ((A+ FE)+ (FI* FK));
 		let AIH=(AIF+ ((AIG* FK)+ (((AIG* FJ)* (C- (FK* FK)))* FI)))* BD;
 		FM=FL;
 		AGW=AIH;
@@ -2625,7 +2625,7 @@ impl Instance {
 		let FU=A- FT;
 		let AIQ=(-AIN)* FU;
 		let FV=((FU* FU)+ BC).sqrt();
-		let FW=BD* (FT+ FV);
+		let FW=BD* ((A+ FT)+ FV);
 		let AIR=(AIN+ ((AIQ+ AIQ)* (C/ (BJ* FV))))* BD;
 		GB=FW;
 		AGX=AIR;
@@ -2634,7 +2634,7 @@ impl Instance {
 		let AIO=-AIN;
 		let FY=BE/ BC;
 		let FZ=(FY* FX).tanh();
-		let GA=BD* (FT+ (FX* FZ));
+		let GA=BD* ((A+ FT)+ (FX* FZ));
 		let AIP=(AIN+ ((AIO* FZ)+ (((AIO* FY)* (C- (FZ* FZ)))* FX)))* BD;
 		GB=GA;
 		AGX=AIP;
@@ -2843,22 +2843,22 @@ impl Instance {
 		let JJ=AY/ JI;
 		let JO=if BB{
 		let JK=A- JJ;
-		let JL=BD* (JJ+ (((JK* JK)+ BC).sqrt()));
+		let JL=BD* ((A+ JJ)+ (((JK* JK)+ BC).sqrt()));
 		JL
 		}else{
 		let JM=A- JJ;
-		let JN=BD* (JJ+ (JM* (((BE/ BC)* JM).tanh())));
+		let JN=BD* ((A+ JJ)+ (JM* (((BE/ BC)* JM).tanh())));
 		JN
 		};
 		let JP=AY* (C/ ((C+ (JO.powf(CJ))).powf(FO)));
 		let JQ=FS/ JI;
 		let JV=if BB{
 		let JR=A- JQ;
-		let JS=BD* (JQ+ (((JR* JR)+ BC).sqrt()));
+		let JS=BD* ((A+ JQ)+ (((JR* JR)+ BC).sqrt()));
 		JS
 		}else{
 		let JT=A- JQ;
-		let JU=BD* (JQ+ (JT* (((BE/ BC)* JT).tanh())));
+		let JU=BD* ((A+ JQ)+ (JT* (((BE/ BC)* JT).tanh())));
 		JU
 		};
 		let JW=FS* (C/ ((C+ (JV.powf(CJ))).powf(FO)));

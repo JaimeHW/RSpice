@@ -101,7 +101,7 @@ pub(super) fn canonical_model_preprocess(
 	let AR=parameters[36]* AQ;
 	let AS=N;
 	let AX=if AT!=0.0{
-	let AW=AU+ AV;
+	let AW=O+ (AU+ AV);
 	AW
 	}else{
 	O
@@ -536,7 +536,7 @@ impl Instance {
 		let UF=ddt_scale();
 		let UK=-35f64;
 		let UO=staged[51];
-		let WM=staged[78];
+		let WL=staged[78];
 		let WQ=staged[57];
 		let WR=staged[58];
 		let WV=-40f64;
@@ -573,7 +573,7 @@ impl Instance {
 		let AAX=staged[10];
 		let AAZ=parameters[49];
 		let ABB=staged[77];
-		let ACB=staged[79];
+		let ACA=staged[79];
 		let ACF=staged[67];
 		let ACM=staged[68];
 		let C=B* (node_potentials[1]- A);
@@ -1217,8 +1217,8 @@ impl Instance {
 		let TZ=(-TU)- ((TC* (((TW* IG)+ AA)- U))- TY);
 		let UA=(TV* AV)- (((((((BF* -0.5f64)* IG)+ (IH* TW))+ BI)- L4([0.0,D[0],0.0,D[1]]))* TC)- ((((TV* BE)+ (BF* TU))- ((BF+ TA)* TY))/ TX));
 		let UB=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Mul, B, Q));
-		let UC=UB* SG;
-		let UD=SH* UB;
+		let UC=SH* UB;
+		let UD=K+ (UB* SG);
 		let UE=ddt(0, TL);
 		let UG=TM* UF;
 		let UH=ddt(1, TS);
@@ -1245,75 +1245,75 @@ impl Instance {
 		let WH;
 		let WI;
 		if UJ{
-		let UT=B* UE;
-		let UU=UG* B;
-		let UV=B;
-		let UW=UV* TL;
-		let UX=TM* UV;
-		let UY=B* UH;
-		let UZ=UI* B;
-		let VA=UV* TS;
-		let VB=TT* UV;
-		let VC=B* SR;
-		let VD=SS* B;
-		VP=UT;
-		VQ=UY;
-		VR=VC;
+		let UT=UG* B;
+		let UU=B;
+		let UV=UU* TL;
+		let UW=TM* UU;
+		let UX=K+ (B* UE);
+		let UY=UI* B;
+		let UZ=UU* TS;
+		let VA=TT* UU;
+		let VB=K+ (B* UH);
+		let VC=SS* B;
+		let VD=K+ (B* SR);
+		VP=UX;
+		VQ=VB;
+		VR=VD;
 		VS=K;
 		VT=K;
 		VU=K;
-		VV=UW;
-		VW=VA;
+		VV=UV;
+		VW=UZ;
 		VX=K;
 		VY=K;
-		VZ=UU;
-		WA=UZ;
-		WB=VD;
+		VZ=UT;
+		WA=UY;
+		WB=VC;
 		WC=KJ;
 		WD=KJ;
 		WE=KJ;
-		WF=UX;
-		WG=VB;
+		WF=UW;
+		WG=VA;
 		WH=KJ;
 		WI=KJ;
 		}else{
-		let VE=B* UE;
-		let VF=UG* B;
-		let VG=B;
-		let VH=VG* TL;
-		let VI=TM* VG;
-		let VJ=B* UH;
-		let VK=UI* B;
-		let VL=VG* TS;
-		let VM=TT* VG;
-		let VN=B* SR;
-		let VO=SS* B;
+		let VE=UG* B;
+		let VF=B;
+		let VG=VF* TL;
+		let VH=TM* VF;
+		let VI=K+ (B* UE);
+		let VJ=UI* B;
+		let VK=VF* TS;
+		let VL=TT* VF;
+		let VM=K+ (B* UH);
+		let VN=SS* B;
+		let VO=K+ (B* SR);
 		VP=K;
 		VQ=K;
 		VR=K;
-		VS=VE;
-		VT=VJ;
-		VU=VN;
+		VS=VI;
+		VT=VM;
+		VU=VO;
 		VV=K;
 		VW=K;
-		VX=VH;
-		VY=VL;
+		VX=VG;
+		VY=VK;
 		VZ=KJ;
 		WA=KJ;
 		WB=KJ;
-		WC=VF;
-		WD=VK;
-		WE=VO;
+		WC=VE;
+		WD=VJ;
+		WE=VN;
 		WF=KJ;
 		WG=KJ;
-		WH=VI;
-		WI=VM;
+		WH=VH;
+		WI=VL;
 		}
 		let WJ=ddt(2, TZ);
-		let WK=B* WJ;
-		let WL=(UA* UF)* B;
-		let WN=WM* TZ;
-		let WO=UA* WM;
+		let WK=(UA* UF)* B;
+		let WM=WL* TZ;
+		let WN=UA* WL;
+		let WO=K+ (B* WJ);
 		let WP=-G;
 		let WS=(WP* WQ)/ WR;
 		let WT=((H* AV)* WQ)/ WR;
@@ -1359,8 +1359,8 @@ impl Instance {
 		let YH=WX.exp();
 		let YJ=YI* (N- YH);
 		let YL=((((((WY* YH)* AV)* YI)* XG)+ (XH* YJ))+ (H* YK))+ (XZ- ((((((XJ/ YA)* YB)- ((H* ((YC>= XN) as u8 as f64))* YE))/ YD)* YF)* YG));
-		let YN=((((YJ* XG)+ (G* YK))+ (((XR* (XQ- N))- (XY* (XX- N)))- (YG* (YF- N))))* B)* YM;
-		let YO=(YL* B)* YM;
+		let YN=(YL* B)* YM;
+		let YO=K+ (((((YJ* XG)+ (G* YK))+ (((XR* (XQ- N))- (XY* (XX- N)))- (YG* (YF- N))))* B)* YM);
 		let YP=-E;
 		let YQ=(YP* WQ)/ WR;
 		let YR=((F* AV)* WQ)/ WR;
@@ -1406,8 +1406,8 @@ impl Instance {
 		let ZV=YV.exp();
 		let ZX=ZW* (N- ZV);
 		let ZY=((((((YW* ZV)* AV)* ZW)* ZC)+ (ZD* ZX))+ (F* YK))+ (ZP- ((((((ZF/ YA)* YB)- ((F* ((ZQ>= XN) as u8 as f64))* ZS))/ ZR)* ZT)* ZU));
-		let ZZ=((((ZX* ZC)+ (E* YK))+ (((XR* (ZJ- N))- (ZO* (ZN- N)))- (ZU* (ZT- N))))* B)* YM;
-		let AAA=(ZY* B)* YM;
+		let ZZ=(ZY* B)* YM;
+		let AAA=K+ (((((ZX* ZC)+ (E* YK))+ (((XR* (ZJ- N))- (ZO* (ZN- N)))- (ZU* (ZT- N))))* B)* YM);
 		let AAB=G> K;
 		let ABP;
 		let ABQ;
@@ -1461,10 +1461,10 @@ impl Instance {
 		let ABW=ABV* G;
 		let ABX=(((ABS+ ABT)+ ABU)* G)+ (H* ABV);
 		let ABY=ddt(3, ABW);
-		let ABZ=(ABY* B)* YM;
-		let ACA=((ABX* UF)* B)* YM;
-		let ACC=(ABW* WM)* ACB;
-		let ACD=(ABX* WM)* ACB;
+		let ABZ=((ABX* UF)* B)* YM;
+		let ACB=(ABW* WL)* ACA;
+		let ACC=(ABX* WL)* ACA;
+		let ACD=K+ ((ABY* B)* YM);
 		let ACE=E> K;
 		let ADI;
 		let ADJ;
@@ -1518,14 +1518,14 @@ impl Instance {
 		let ADP=ADO* E;
 		let ADQ=(((ADL+ ADM)+ ADN)* E)+ (F* ADO);
 		let ADR=ddt(4, ADP);
-		let ADS=(ADR* B)* YM;
-		let ADT=((ADQ* UF)* B)* YM;
-		let ADU=(ADP* WM)* ACB;
-		let ADV=(ADQ* WM)* ACB;
-		let ADW=UD[0];
-		let ADX=UD[1];
-		let ADY=UD[2];
-		let ADZ=UD[3];
+		let ADS=((ADQ* UF)* B)* YM;
+		let ADT=(ADP* WL)* ACA;
+		let ADU=(ADQ* WL)* ACA;
+		let ADV=K+ ((ADR* B)* YM);
+		let ADW=UC[0];
+		let ADX=UC[1];
+		let ADY=UC[2];
+		let ADZ=UC[3];
 		let AEA=VZ[0];
 		let AEB=VZ[1];
 		let AEC=VZ[2];
@@ -1550,18 +1550,18 @@ impl Instance {
 		let AEV=WE[1];
 		let AEW=WE[2];
 		let AEX=WE[3];
-		let AEY=WL[0];
-		let AEZ=WL[1];
-		let AFA=WL[2];
-		let AFB=WL[3];
-		let AFC=YO[0];
-		let AFD=YO[1];
-		let AFE=AAA[0];
-		let AFF=AAA[1];
-		let AFG=ACA[0];
-		let AFH=ACA[1];
-		let AFI=ADT[0];
-		let AFJ=ADT[1];
+		let AEY=WK[0];
+		let AEZ=WK[1];
+		let AFA=WK[2];
+		let AFB=WK[3];
+		let AFC=YN[0];
+		let AFD=YN[1];
+		let AFE=ZZ[0];
+		let AFF=ZZ[1];
+		let AFG=ABZ[0];
+		let AFH=ABZ[1];
+		let AFI=ADS[0];
+		let AFJ=ADS[1];
 		let AFK=WF[0];
 		let AFL=WF[1];
 		let AFM=WF[2];
@@ -1578,18 +1578,18 @@ impl Instance {
 		let AFX=WI[1];
 		let AFY=WI[2];
 		let AFZ=WI[3];
-		let AGA=WO[0];
-		let AGB=WO[1];
-		let AGC=WO[2];
-		let AGD=WO[3];
-		let AGE=ACD[0];
-		let AGF=ACD[1];
-		let AGG=ADV[0];
-		let AGH=ADV[1];
+		let AGA=WN[0];
+		let AGB=WN[1];
+		let AGC=WN[2];
+		let AGD=WN[3];
+		let AGE=ACC[0];
+		let AGF=ACC[1];
+		let AGG=ADU[0];
+		let AGH=ADU[1];
         stamper.stamp_current_sparse_local::<4, 0>(
             Some(0),
             Some(2),
-            multiplicity * (UC),
+            multiplicity * (UD),
             [0, 1, 2, 3],
             [ADW, ADX, ADY, ADZ],
             [],
@@ -1659,7 +1659,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<4, 0>(
             Some(1),
             Some(3),
-            multiplicity * (WK),
+            multiplicity * (WO),
             [0, 1, 2, 3],
             [AEY, AEZ, AFA, AFB],
             [],
@@ -1679,7 +1679,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<2, 0>(
             Some(0),
             Some(3),
-            multiplicity * (YN),
+            multiplicity * (YO),
             [0, 3],
             [AFC, AFD],
             [],
@@ -1689,7 +1689,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<2, 0>(
             Some(2),
             Some(3),
-            multiplicity * (ZZ),
+            multiplicity * (AAA),
             [2, 3],
             [AFE, AFF],
             [],
@@ -1699,7 +1699,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<2, 0>(
             Some(0),
             Some(3),
-            multiplicity * (ABZ),
+            multiplicity * (ACD),
             [0, 3],
             [AFG, AFH],
             [],
@@ -1709,14 +1709,14 @@ impl Instance {
         stamper.stamp_current_sparse_local::<2, 0>(
             Some(2),
             Some(3),
-            multiplicity * (ADS),
+            multiplicity * (ADV),
             [2, 3],
             [AFI, AFJ],
             [],
             [],
             multiplicity,
         );
-        self.canonical_reactive[0] = UC;
+        self.canonical_reactive[0] = UD;
         self.canonical_reactive[1] = VV;
         self.canonical_reactive[2] = AFK;
         self.canonical_reactive[3] = AFL;
@@ -1739,18 +1739,18 @@ impl Instance {
         self.canonical_reactive[20] = AFY;
         self.canonical_reactive[21] = AFZ;
         self.canonical_reactive[22] = VU;
-        self.canonical_reactive[23] = WN;
+        self.canonical_reactive[23] = WM;
         self.canonical_reactive[24] = AGA;
         self.canonical_reactive[25] = AGB;
         self.canonical_reactive[26] = AGC;
         self.canonical_reactive[27] = AGD;
         self.canonical_reactive[28] = staged[94];
-        self.canonical_reactive[29] = YN;
-        self.canonical_reactive[30] = ZZ;
-        self.canonical_reactive[31] = ACC;
+        self.canonical_reactive[29] = YO;
+        self.canonical_reactive[30] = AAA;
+        self.canonical_reactive[31] = ACB;
         self.canonical_reactive[32] = AGE;
         self.canonical_reactive[33] = AGF;
-        self.canonical_reactive[34] = ADU;
+        self.canonical_reactive[34] = ADT;
         self.canonical_reactive[35] = AGG;
         self.canonical_reactive[36] = AGH;
     }
