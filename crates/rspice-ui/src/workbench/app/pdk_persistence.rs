@@ -259,6 +259,7 @@ impl RSpiceApp {
         match result {
             Ok(mut restored) => {
                 let storage_status = restored.storage_status;
+                let restored_saved_configuration = restored.receipt.is_some();
                 let trust_store = restored.config.publisher_trust_store.clone();
                 let validation = restored
                     .config
@@ -280,14 +281,8 @@ impl RSpiceApp {
                     owner.phase = BrowserPdkPhase::Ready;
                 });
 
-                if let Some(warning) = storage_durability_warning(storage_status) {
-                    self.state
-                        .push_user_message(ConsoleMessage::warning(warning.to_owned()));
-                    self.state.ui.toasts.warn_with_title(
-                        ctx,
-                        "Browser PDK storage is not durable",
-                        warning,
-                    );
+                if restored_saved_configuration {
+                    emit_browser_pdk_storage_warning(self, ctx, storage_status);
                 }
                 if restored.migrated_legacy_record {
                     self.state.push_user_message(ConsoleMessage::info(
@@ -524,7 +519,7 @@ fn emit_browser_pdk_storage_warning(
         app.state
             .ui
             .toasts
-            .warn_with_title(ctx, "Browser PDK storage is not durable", warning);
+            .warn_with_title(ctx, "Back up browser PDK data", warning);
     }
 }
 
@@ -638,10 +633,10 @@ fn storage_durability_warning(status: BrowserPdkStorageStatus) -> Option<&'stati
     match status.durability {
         BrowserPdkStorageDurability::Persistent => None,
         BrowserPdkStorageDurability::BestEffort => Some(
-            "The browser denied durable origin storage. Installed PDK packages remain usable now, but the browser may evict them under storage pressure; retain the signed source packages for recovery.",
+            "Persistent browser storage has not been granted. The browser may remove saved PDK data under storage pressure; keep the source packages and a configuration backup for recovery.",
         ),
         BrowserPdkStorageDurability::Unknown => Some(
-            "The browser did not expose a durable-storage decision. Installed PDK packages remain usable now, but eviction guarantees are unknown; retain the signed source packages for recovery.",
+            "Browser storage persistence could not be determined. Keep the source packages and a configuration backup so saved PDK data can be recovered if the browser clears it.",
         ),
     }
 }

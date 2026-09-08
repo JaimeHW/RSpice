@@ -41,12 +41,12 @@ const CULL_MARGIN: f32 = 160.0;
 const EMPTY_HINT_MOBILE_BREAKPOINT: f32 = 460.0;
 const EMPTY_HINT_DESKTOP_LINES: [&str; 3] = [
     "Empty schematic",
-    "Pick a part from the left panel to place a device or source",
+    "Use Place instance to choose devices and sources",
     "File > Open project loads an existing design",
 ];
 const EMPTY_HINT_MOBILE_LINES: [&str; 4] = [
     "Empty schematic",
-    "Use Library to place devices and sources",
+    "Use Place instance to choose a component",
     "The toolbar provides wiring, labels, and probes",
     "File > Open project loads an existing design",
 ];
