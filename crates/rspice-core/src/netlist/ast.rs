@@ -1567,8 +1567,7 @@ fn logarithmic_sweep_points_controlled(
 // Source Specifications
 //=============================================================================
 
-/// RF port metadata attached to a voltage source for ngspice-compatible
-/// S-parameter analysis.
+/// RF source metadata, including the physical impedance used in every analysis.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SourceRfPort {
     /// Port number as specified by `portnum`/`port`, 1-indexed.
@@ -1586,11 +1585,11 @@ pub struct SourceRfPort {
     /// through a real reference-impedance resistor instead of driving it
     /// directly.
     ///
-    /// A `portnum=`-annotated ideal source has none: it *is* at the reference
-    /// plane, and its `z0` is a number to normalize against rather than a
-    /// component in the circuit. Xyce's `P` element has one, because it lowers
-    /// to a Thevenin generator sitting behind a physical Z0, so its own
-    /// terminal is one resistor short of the plane being measured.
+    /// Concise ngspice annotations have none; construction lowers their Z0 to
+    /// an owned series resistor. Lowered copies retain this annotation and
+    /// its ngspice power convention; port discovery follows the owned helper
+    /// back to the reference plane. An authored `P` element records its plane
+    /// here and uses the available-power convention below.
     pub reference_plane: Option<String>,
 }
 
@@ -1605,23 +1604,21 @@ impl SourceRfPort {
     /// The port's large-signal drive at `time`, or `None` if it declares none.
     ///
     /// A port that names neither a power nor a frequency is a measurement
-    /// reference only -- `portnum` and `z0` say how to normalize a scattering
-    /// measurement, not what to inject -- so it drives nothing and its source
-    /// keeps whatever waveform it was given. Naming either one turns it into a
+    /// reference only, so its generator keeps whatever waveform it was given
+    /// behind the physical Z0. Naming either one turns it into a
     /// generator, and the other then takes its default. This is the same rule
     /// ngspice applies by setting the source's function type to `PORT` from
     /// `PWR` and `FREQ` alone.
     ///
-    /// The two port spellings scale `power` differently, because they are not
-    /// the same generator. A `P` element sits behind a real `z0`, so half its
-    /// EMF drops across its own reference impedance and `power` is the
+    /// The two port spellings retain different power conventions. A `P`
+    /// element's `power` is the
     /// *available* power a matched load actually receives -- `P = E^2/(8 Z0)`,
     /// so `E = sqrt(8 P Z0)`. That is what a port means in ADS and Spectre, and
     /// what the schematic RF Port authors. An ngspice `portnum=` annotation
-    /// instead drives the reference plane directly with `sqrt(4 P Z0)`, which
-    /// is ngspice's own formula and is kept exactly so an imported deck
-    /// reproduces its numbers. Using one formula for both would put a shipped
-    /// deck 6 dB off whichever way it was written.
+    /// uses ngspice's `sqrt(4 P Z0)` generator EMF (`vsrctemp.c`). Both have
+    /// physical series impedance, so the latter supplies P/2 to a matched load.
+    /// Keep that imported convention explicit instead of changing its drive
+    /// amplitude when lowering the source topology.
     ///
     /// One deliberate divergence: ngspice converts `phase` to radians and then
     /// never reads it, so its ports always start at a cosine peak. A port phase

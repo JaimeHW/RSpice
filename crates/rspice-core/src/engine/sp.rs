@@ -106,10 +106,9 @@ impl Engine {
         let abort: &dyn AbortSignal = run_scope.as_ref().map_or(abort, |scope| scope);
         Self::ensure_model_run_active(abort)?;
 
-        // Only the AC reference-plane solve needs the Thevenin normalization.
-        // Its bias, model state, topology and factorization are shared by all
-        // excitation columns. Noise retains the original deck's bias and
-        // converts physical generator currents back to the DUT Norton plane.
+        // Both analyses use the same physical port circuit. Inserting Z0 only
+        // for AC would bias nonlinear devices differently in the noise solve.
+        // Each analysis still retains its own model phase and accepted state.
         let mut base = netlist.clone();
         let normalized = normalize_ports(&mut base, &ports).map_err(|error| {
             SimulationError::Netlist(format!(".SP port normalization failed: {error}"))
@@ -156,13 +155,13 @@ impl Engine {
                 .map(|port| port.source_name.clone())
                 .collect::<Vec<_>>();
             let mut prepared = engine.prepare_port_noise_analysis(
-                netlist,
+                &base,
                 &names,
                 frequencies.len(),
                 temperature,
                 abort,
             )?;
-            prepared.use_sp_reference_planes(netlist, &ports, abort)?;
+            prepared.use_sp_reference_planes(&base, &normalized, abort)?;
             let PreparedPortNoise {
                 circuit,
                 matrix,

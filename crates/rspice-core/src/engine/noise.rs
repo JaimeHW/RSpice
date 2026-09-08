@@ -5516,11 +5516,13 @@ r1 a 0 rmod
 
     #[test]
     fn port_noise_correlation_is_hermitian_and_matches_a_series_resistor() {
+        // Plain voltage sources are short-circuit probes. RF annotations
+        // would add physical termination resistors to this standalone circuit.
         let netlist = Netlist::parse(
             "Series resistor port-noise fixture\n\
-             V1 p1 0 0 portnum=1 z0=50\n\
+             V1 p1 0 0\n\
              R1 p1 p2 50\n\
-             V2 p2 0 0 portnum=2 z0=50\n\
+             V2 p2 0 0\n\
              .end\n",
         )
         .expect("deck parses");

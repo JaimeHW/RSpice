@@ -346,8 +346,8 @@ fn hb_dc_component_matches_the_transient_referee_on_a_rectifier() {
 /// ships one; RSpice used to unwrap the port annotation and run the `dc 0 ac 1`
 /// underneath it, so the deck produced a flat zero in transient.
 ///
-/// The amplitude is closed form: `sqrt(4 P Z0)` is the peak that delivers `P`
-/// into a matched `Z0`, so 1 mW into 100 ohms is 632.455 mV.
+/// Ngspice's generator EMF is sqrt(4 P Z0). The load sees the physical divider
+/// Rload/(Z0+Rload), including when the load is not matched.
 #[test]
 fn an_rf_port_drives_its_declared_power_into_the_transient() {
     let frequency = 1.0e9;
@@ -369,7 +369,7 @@ fn an_rf_port_drives_its_declared_power_into_the_transient() {
         .position(|n| n.eq_ignore_ascii_case("in"))
         .expect("in node");
 
-    let expected = (4.0 * 0.001 * 100.0_f64).sqrt();
+    let expected = (4.0 * 0.001 * 100.0_f64).sqrt() * 50.0 / 150.0;
     let peak = result.voltages[in_node]
         .iter()
         .fold(0.0_f64, |peak, v| peak.max(v.abs()));
@@ -418,25 +418,24 @@ fn an_rf_port_with_no_declared_drive_leaves_its_own_waveform_alone() {
         .iter()
         .fold(f64::INFINITY, |trough, v| trough.min(*v));
     assert!(
-        (peak - 1.0).abs() < 1.0e-6 && trough.abs() < 1.0e-6,
+        (peak - 0.5).abs() < 1.0e-6 && trough.abs() < 1.0e-6,
         "reference-only port should still be its own PULSE: {trough} .. {peak}"
     );
 }
 
-/// The transient must open at the drive, not step into it. ngspice's TRANOP
-/// evaluates the port waveform at `time = 0` (MODEDC covers MODETRANOP), so a
-/// port that starts at its cosine peak has an operating point at that peak.
+/// Without an explicit DC value, the operating point uses the initial RF
+/// waveform. The source impedance must also participate in that solution.
 #[test]
-fn an_rf_port_operating_point_opens_at_the_drive_rather_than_stepping_into_it() {
+fn an_rf_port_without_explicit_dc_uses_the_loaded_initial_drive() {
     let netlist = Netlist::parse(
         "* port bias continuity across the operating point\n\
-         V1 in 0 dc 0 portnum 1 z0 100 pwr 0.001 freq 1e9\n\
+         V1 in 0 portnum 1 z0 100 pwr 0.001 freq 1e9\n\
          R1 in 0 50\n\
          .end\n",
     )
     .expect("deck parses");
 
-    let expected = (4.0 * 0.001 * 100.0_f64).sqrt();
+    let expected = (4.0 * 0.001 * 100.0_f64).sqrt() * 50.0 / 150.0;
     let op = engine()
         .run_dc_op(&netlist)
         .expect("operating point solves");
@@ -452,14 +451,8 @@ fn an_rf_port_operating_point_opens_at_the_drive_rather_than_stepping_into_it() 
     );
 }
 
-/// The two port spellings are different generators, so the same `pwr` has to
-/// mean different EMFs. A `P` element sits behind a real Z0 and drops half its
-/// EMF there, so `pwr` is the available power a matched load receives -- the
-/// ADS/Spectre convention. An ngspice `portnum=` annotation drives the plane
-/// directly with ngspice's own `sqrt(4 P Z0)`.
-///
-/// Reading one formula onto both would put a deck 6 dB off whichever way it
-/// was written, so the divider below measures each against its own contract.
+/// Both port spellings have physical Z0. Preserve their documented generator
+/// conventions: available power for P and ngspice's sqrt(4 P Z0) EMF for V.
 #[test]
 fn the_two_port_spellings_scale_declared_power_to_their_own_topology() {
     let frequency = 1.0e9;
@@ -498,7 +491,7 @@ fn the_two_port_spellings_scale_declared_power_to_their_own_topology() {
         "P element delivered {watts} W into a matched load, expected 1 mW"
     );
 
-    // Annotated: ngspice drives the plane itself, undivided.
+    // Annotated: ngspice's EMF is also halved by a matched load.
     let annotated = peak(
         "* ngspice annotated port keeps ngspice's amplitude\n\
          V1 in 0 dc 0 portnum 1 z0 50 pwr 1m freq 1e9\n\
@@ -506,7 +499,7 @@ fn the_two_port_spellings_scale_declared_power_to_their_own_topology() {
          .end\n",
         "in",
     );
-    let ngspice = (4.0 * 0.001 * 50.0_f64).sqrt();
+    let ngspice = (4.0 * 0.001 * 50.0_f64).sqrt() / 2.0;
     assert!(
         (annotated - ngspice).abs() < 1.0e-3 * ngspice,
         "annotated port peak {annotated} V, expected ngspice's {ngspice} V"
@@ -592,7 +585,7 @@ fn rf_port_and_wrapped_waveform_add_before_exact_source_registration() {
 
     // SIN is -j on the cosine-referenced HB boundary. The annotated port is
     // +1 at zero phase, and sqrt(4*50u*50) = 0.1 V peak.
-    let expected = num_complex::Complex64::new(0.1, -0.1);
+    let expected = num_complex::Complex64::new(0.1, -0.1) * (1000.0 / 1050.0);
     assert!(
         (input - expected).norm() < 1.0e-14,
         "summed source phasor is {input}, expected {expected}"

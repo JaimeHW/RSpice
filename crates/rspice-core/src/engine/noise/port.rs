@@ -2,9 +2,9 @@
 
 use super::*;
 use crate::analysis::s_param::{
-    NetworkError, PortRealization, SParameterPort, invert_complex_matrix_with_abort,
+    NetworkError, PortError, PortRealization, SParameterPort, invert_complex_matrix_with_abort,
+    reference_impedance_helper,
 };
-use crate::netlist::{ElementKind, ElementProvenance, GeneratedPassiveHelperRole};
 use crate::solver::{ComplexMatrix, StaticMatrix};
 
 pub(in crate::engine) struct PreparedPortNoise {
@@ -81,43 +81,28 @@ impl PreparedPortNoise {
                         port.source_name
                     ))
                 })?;
-            let mut termination = None;
-            for element in &netlist.elements {
-                if abort.is_aborted() {
-                    return Err(SimulationError::Aborted);
-                }
-                if !matches!(&element.provenance, ElementProvenance::GeneratedPassiveHelper {
-                    owner, role: GeneratedPassiveHelperRole::SeriesResistance,
-                } if owner.eq_ignore_ascii_case(&port.source_name))
-                {
-                    continue;
-                }
-                let valid = matches!(&element.kind, ElementKind::Resistor { value, .. } if *value == port.z0)
-                    && element.nodes.len() == 2
-                    && source.nodes.first().is_some_and(|internal| {
-                        (element.nodes[0].eq_ignore_ascii_case(&port.node_pos)
-                            && element.nodes[1].eq_ignore_ascii_case(internal))
-                            || (element.nodes[1].eq_ignore_ascii_case(&port.node_pos)
-                                && element.nodes[0].eq_ignore_ascii_case(internal))
-                    });
-                if !valid
-                    || termination
-                        .replace(element.name.to_ascii_lowercase())
-                        .is_some()
-                {
-                    return Err(SimulationError::Circuit(format!(
-                        "SP noise port '{}' has an invalid reference-impedance helper",
-                        port.source_name
-                    )));
-                }
-            }
+            let termination = reference_impedance_helper(&netlist.elements, source, port.z0, abort)
+                .map_err(|error| match error {
+                    PortError::Aborted => SimulationError::Aborted,
+                    other => {
+                        SimulationError::Circuit(format!("SP noise reference impedance: {other}"))
+                    }
+                })?;
             let termination = termination.ok_or_else(|| {
                 SimulationError::Circuit(format!(
                     "SP noise port '{}' has no owned reference-impedance resistor",
                     port.source_name,
                 ))
             })?;
-            self.linearization.termination_devices.insert(termination);
+            if !termination.1.eq_ignore_ascii_case(&port.node_pos) {
+                return Err(SimulationError::Circuit(format!(
+                    "SP noise port '{}' has an inconsistent reference plane",
+                    port.source_name
+                )));
+            }
+            self.linearization
+                .termination_devices
+                .insert(termination.0.name.to_ascii_lowercase());
         }
         Ok(())
     }

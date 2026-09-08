@@ -12,9 +12,9 @@
 //! almost certainly lost port 2 to a typo, and silently relabelling port 3 as
 //! port 2 would produce a plausible S-matrix describing the wrong network.
 
-use crate::Value;
 use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::netlist::{Element, ElementKind, ElementProvenance, Netlist, SourceSpec};
+use crate::{ResourceKind, ResourceLimitError, Value};
 use std::collections::HashSet;
 
 /// One `.SP` port resolved from a netlist annotation.
@@ -36,14 +36,11 @@ pub struct SParameterPort {
 
 /// How a port's reference impedance is represented in the netlist.
 ///
-/// The distinction decides what a driven port's node voltage means, so it
-/// cannot be inferred later: an ideal source pins its node to the source value
-/// no matter what the network does, while a Thevenin generator lets the network
-/// divide against Z0 — which is the whole measurement.
+/// Concise annotations are expanded during circuit construction; a lowered
+/// netlist already contains the source's physical reference resistor.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PortRealization {
-    /// A `portnum=`-annotated ideal source sits directly at the reference
-    /// plane; `z0` is a normalization constant, not a component.
+    /// A concise `portnum=` annotation whose series Z0 still needs lowering.
     Ideal,
     /// A Thevenin generator drives the plane through a real `z0` resistor, as
     /// Xyce's `P` element does.
@@ -55,6 +52,8 @@ pub enum PortRealization {
 pub enum PortError {
     /// Port preparation was cancelled before publication.
     Aborted,
+    /// Materializing the physical port would exceed the circuit budget.
+    ResourceLimit(ResourceLimitError),
     /// An annotated source had fewer than two terminals.
     MissingTerminals { source_name: String },
     /// A `z0=` annotation was not a positive, finite resistance.
@@ -77,6 +76,7 @@ impl std::fmt::Display for PortError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Aborted => write!(f, "S-parameter port preparation aborted"),
+            Self::ResourceLimit(error) => error.fmt(f),
             Self::MissingTerminals { source_name } => write!(
                 f,
                 "S-parameter port source '{source_name}' must have positive and negative nodes"
@@ -229,11 +229,19 @@ struct PortNames {
 
 impl PortNames {
     fn new(netlist: &Netlist, abort: &dyn AbortSignal) -> Result<Self, PortError> {
+        Self::from_elements(netlist, &netlist.elements, abort)
+    }
+
+    fn from_elements(
+        netlist: &Netlist,
+        elements: &[Element],
+        abort: &dyn AbortSignal,
+    ) -> Result<Self, PortError> {
         let mut names = Self {
             elements: HashSet::new(),
             nodes: HashSet::new(),
         };
-        for element in &netlist.elements {
+        for element in elements {
             if abort.is_aborted() {
                 return Err(PortError::Aborted);
             }
@@ -310,8 +318,67 @@ fn reference_resistor(
 
 /// Collect and validate every `portnum`-annotated voltage source, in port order.
 pub fn collect_ports(netlist: &Netlist) -> Result<Vec<SParameterPort>, PortError> {
+    collect_element_ports(&netlist.elements, &NoAbort)
+}
+
+/// Find a lowered port's resistor and external plane from its ownership,
+/// independently of generated names or resistor orientation.
+pub(crate) fn reference_impedance_helper<'a>(
+    elements: &'a [Element],
+    source: &Element,
+    z0: Value,
+    abort: &dyn AbortSignal,
+) -> Result<Option<(&'a Element, &'a str)>, PortError> {
+    if source.nodes.len() < 2 {
+        return Err(PortError::MissingTerminals {
+            source_name: source.name.clone(),
+        });
+    }
+    let mut found = None;
+    for helper in elements {
+        if abort.is_aborted() {
+            return Err(PortError::Aborted);
+        }
+        if !matches!(&helper.provenance, ElementProvenance::GeneratedPassiveHelper {
+            owner, role: crate::netlist::GeneratedPassiveHelperRole::SeriesResistance,
+        } if owner.eq_ignore_ascii_case(&source.name))
+        {
+            continue;
+        }
+        let plane = if helper.nodes.len() == 2 {
+            if helper.nodes[0].eq_ignore_ascii_case(&source.nodes[0]) {
+                Some(helper.nodes[1].as_str())
+            } else if helper.nodes[1].eq_ignore_ascii_case(&source.nodes[0]) {
+                Some(helper.nodes[0].as_str())
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        if found.is_some()
+            || plane.is_none()
+            || !matches!(&helper.kind, ElementKind::Resistor { value, .. } if *value == z0)
+        {
+            return Err(PortError::PortSourceUnusable {
+                source_name: source.name.clone(),
+                reason: "has an invalid reference-impedance helper".into(),
+            });
+        }
+        found = plane.map(|plane| (helper, plane));
+    }
+    Ok(found)
+}
+
+fn collect_element_ports(
+    elements: &[Element],
+    abort: &dyn AbortSignal,
+) -> Result<Vec<SParameterPort>, PortError> {
     let mut ports = Vec::new();
-    for element in &netlist.elements {
+    for element in elements {
+        if abort.is_aborted() {
+            return Err(PortError::Aborted);
+        }
         let ElementKind::VoltageSource(spec) = &element.kind else {
             continue;
         };
@@ -333,7 +400,15 @@ pub fn collect_ports(netlist: &Netlist) -> Result<Vec<SParameterPort>, PortError
         // own terminal is the far side of the reference resistor.
         let (node_pos, realization) = match port.reference_plane.as_ref() {
             Some(plane) => (plane.clone(), PortRealization::Thevenin),
-            None => (element.nodes[0].clone(), PortRealization::Ideal),
+            None => {
+                // Lowered ngspice annotations retain their waveform convention
+                // in SourceRfPort. The owned helper identifies the true plane
+                // without mistaking its internal generator node for a new port.
+                reference_impedance_helper(elements, element, port.z0, abort)?.map_or_else(
+                    || (element.nodes[0].clone(), PortRealization::Ideal),
+                    |(_, plane)| (plane.to_owned(), PortRealization::Thevenin),
+                )
+            }
         };
         ports.push(SParameterPort {
             number: port.portnum,
@@ -366,24 +441,59 @@ pub fn collect_ports(netlist: &Netlist) -> Result<Vec<SParameterPort>, PortError
 /// Give every port a real reference impedance, so one extraction serves both
 /// declaration styles.
 ///
-/// An annotated ideal source pins its node to whatever it is driving, which
-/// tells you nothing about the network: the reflected wave has nowhere to
-/// develop. Moving that source behind a `z0` resistor turns it into the same
-/// Thevenin generator Xyce's `P` element already is, and then a port voltage
-/// carries the reflection.
-///
-/// This mutates the netlist and is meant for the analysis's own copy. The
-/// change is confined to S-parameter extraction; the deck the user wrote still
-/// means what it said under `.tran`, `.ac`, and `.op`.
+/// The same lowering runs during ordinary circuit construction: RF source
+/// impedance affects DC, AC, transient and noise as well as scattering.
 ///
 /// Returns the ports restated as Thevenin, in the same order.
 pub fn normalize_ports(
     netlist: &mut Netlist,
     ports: &[SParameterPort],
 ) -> Result<Vec<SParameterPort>, PortError> {
-    let mut normalized = Vec::with_capacity(ports.len());
     let mut names = PortNames::new(netlist, &NoAbort)?;
+    normalize_port_elements(&mut netlist.elements, ports, &mut names, &NoAbort)
+}
+
+/// Expand concise RF annotations after hierarchy and parameter resolution.
+pub(crate) fn materialize_rf_ports(
+    netlist: &Netlist,
+    elements: &mut Vec<Element>,
+    max_elements: usize,
+    abort: &dyn AbortSignal,
+) -> Result<(), PortError> {
+    let ports = match collect_element_ports(elements, abort) {
+        Ok(ports) => ports,
+        Err(PortError::NoPortsDeclared) => return Ok(()),
+        Err(error) => return Err(error),
+    };
+    let additions = ports
+        .iter()
+        .filter(|port| port.realization == PortRealization::Ideal)
+        .count();
+    if additions == 0 {
+        return Ok(());
+    }
+    ResourceLimitError::ensure(
+        ResourceKind::FlattenedElements,
+        elements.len().saturating_add(additions),
+        max_elements,
+    )
+    .map_err(PortError::ResourceLimit)?;
+    let mut names = PortNames::from_elements(netlist, elements, abort)?;
+    normalize_port_elements(elements, &ports, &mut names, abort)?;
+    Ok(())
+}
+
+fn normalize_port_elements(
+    elements: &mut Vec<Element>,
+    ports: &[SParameterPort],
+    names: &mut PortNames,
+    abort: &dyn AbortSignal,
+) -> Result<Vec<SParameterPort>, PortError> {
+    let mut normalized = Vec::with_capacity(ports.len());
     for port in ports {
+        if abort.is_aborted() {
+            return Err(PortError::Aborted);
+        }
         if port.realization == PortRealization::Thevenin {
             normalized.push(port.clone());
             continue;
@@ -392,16 +502,15 @@ pub fn normalize_ports(
         let internal_node = unique_name(
             &mut names.nodes,
             &format!("__RSPICE_SP_{}_PORT", port.source_name.to_ascii_uppercase()),
-            &NoAbort,
+            abort,
         )?;
         let resistor_name = unique_name(
             &mut names.elements,
             &format!("__RSPICE_SP_{}_Z0", port.source_name.to_ascii_uppercase()),
-            &NoAbort,
+            abort,
         )?;
 
-        let element = netlist
-            .elements
+        let element = elements
             .iter_mut()
             .find(|element| element.name.eq_ignore_ascii_case(&port.source_name))
             .ok_or_else(|| PortError::PortSourceUnusable {
@@ -422,7 +531,7 @@ pub fn normalize_ports(
         // The source retreats behind the new resistor; the plane keeps its
         // name, so everything already measuring this port still measures it.
         element.nodes[0] = internal_node.clone();
-        netlist.elements.push(reference_resistor(
+        elements.push(reference_resistor(
             resistor_name,
             &port.source_name,
             &port.node_pos,

@@ -181,6 +181,46 @@ endmodule"#,
 }
 
 #[test]
+fn sp_scattering_and_noise_share_the_nonlinear_port_bias() {
+    let model = write_model(
+        "sp_quadratic_bias",
+        r#"module sp_quadratic_bias(p,n);
+inout p,n; electrical p,n;
+analog begin
+    I(p,n) <+ 0.02*V(p,n)*V(p,n);
+    I(p,n) <+ white_noise(1e-20*V(p,n)*V(p,n), "bias");
+end
+endmodule"#,
+    );
+    // KCL: (1-v)/50 = .02 v^2, hence v=(sqrt(5)-1)/2.
+    let bias = (5.0_f64.sqrt() - 1.0) / 2.0;
+    let conductance = 0.04 * bias;
+    let expected_s = (1.0 - 50.0 * conductance) / (1.0 + 50.0 * conductance);
+    for source in ["V", "P"] {
+        let netlist = Netlist::parse(&format!(
+            "* Shared nonlinear RF bias\n{source}1 p 0 DC 1 portnum=1 z0=50\nX1 p 0 sp_quadratic_bias\n.va \"{}\" sp_quadratic_bias\n.end\n", deck_path(&model),
+        )).unwrap();
+        let result = Engine::default()
+            .run_sp_over_grid_with_abort(&netlist, &[10.0, 20.0], true, &NoAbort)
+            .unwrap();
+        for (matrix, point) in result
+            .scattering
+            .data
+            .iter()
+            .zip(result.port_noise.unwrap().points)
+        {
+            assert!((matrix.s11().re - expected_s).abs() < 1e-10);
+            assert!(
+                (point.current_correlation[0][0].re / (1e-20 * bias * bias) - 1.0).abs() < 1e-10,
+                "{source}: {}",
+                point.current_correlation[0][0]
+            );
+        }
+    }
+    let _ = std::fs::remove_file(model);
+}
+
+#[test]
 fn sp_physical_port_noise_retains_bias_and_uses_the_noise_operator() {
     let model = write_model(
         "sp_biased_noise",

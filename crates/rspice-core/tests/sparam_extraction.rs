@@ -16,6 +16,86 @@ use rspice_core::engine::{Engine, SimulationConfig, SimulationError};
 use rspice_core::netlist::Netlist;
 
 #[test]
+fn annotated_rf_impedance_is_present_in_dc_ac_and_transient() {
+    for declaration in [
+        "V1 p 0 DC 1 AC 3 portnum=1 z0=50",
+        "P1 p 0 DC 1 AC 3 port=1 z0=50",
+        "V1 p 0 DC 1 AC 3 portnum=1 z0={reference}\n.param reference=50",
+        "XP p 0 source\n.subckt source a b\nV1 a b DC 1 AC 3 portnum=1 z0=50\n.ends source",
+    ] {
+        let netlist = Netlist::parse(&format!(
+            "* Physical RF impedance\n{declaration}\nR1 p 0 100\n.end\n"
+        ))
+        .unwrap();
+        let engine = Engine::default();
+        let op = engine.run_dc_op(&netlist).unwrap();
+        let index = op
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("p"))
+            .unwrap();
+        assert!(
+            (op.node_voltages[index] - 2.0 / 3.0).abs() < 1e-12,
+            "{declaration}: {:?}",
+            op.node_voltages
+        );
+        let ac = engine.run_ac(&netlist, &[10.0]).unwrap();
+        let index = ac[0]
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("p"))
+            .unwrap();
+        assert!((ac[0].voltages[index] - Complex64::new(2.0, 0.0)).norm() < 1e-12);
+        let transient = engine.run_tran(&netlist, 1e-6, 1e-7).unwrap();
+        let index = transient
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("p"))
+            .unwrap();
+        assert!(
+            transient.voltages[index]
+                .iter()
+                .all(|voltage| (*voltage - 2.0 / 3.0).abs() < 1e-12)
+        );
+    }
+}
+
+#[test]
+fn rf_impedance_is_materialized_once_and_obeys_the_element_budget() {
+    use rspice_core::abort_signal::CountingAbort;
+    use rspice_core::analysis::s_param::normalize_ports;
+    let base =
+        Netlist::parse("* RF element budget\nV1 p 0 DC 1 portnum=1 z0=50\nR1 p 0 100\n.end\n")
+            .unwrap();
+    let mut config = SimulationConfig::default();
+    config.resource_limits.max_flattened_elements = 2;
+    let error = Engine::new(config.clone())
+        .build_circuit(&base)
+        .unwrap_err();
+    assert!(matches!(error, SimulationError::ResourceLimit(limit)
+        if limit.resource == rspice_core::ResourceKind::FlattenedElements && limit.requested == 3));
+    let mut normalized = base.clone();
+    let ports = collect_ports(&normalized).unwrap();
+    let ports = normalize_ports(&mut normalized, &ports).unwrap();
+    assert_eq!(ports, collect_ports(&normalized).unwrap());
+    assert_eq!(normalized.elements.len(), 3);
+    config.resource_limits.max_flattened_elements = 3;
+    let engine = Engine::new(config);
+    engine.build_circuit(&normalized).unwrap();
+    let counter = CountingAbort::new(usize::MAX);
+    engine.build_circuit_with_abort(&base, &counter).unwrap();
+    for threshold in 0..counter.count() {
+        let signal = CountingAbort::new(threshold);
+        let error = engine.build_circuit_with_abort(&base, &signal).unwrap_err();
+        assert!(
+            matches!(error, SimulationError::Aborted),
+            "poll {threshold}: {error}"
+        );
+        assert_eq!(signal.polls_after_abort(), 0, "poll {threshold}");
+    }
+}
+
+#[test]
 fn configured_and_normalized_ports_avoid_existing_helper_names() {
     for configured in [false, true] {
         let declarations = if configured {

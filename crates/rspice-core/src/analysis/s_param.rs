@@ -55,6 +55,7 @@ pub use ports::{
     PortError, PortRealization, SParameterPort, collect_ports, declare_ports_with_abort,
     normalize_ports, set_excitations,
 };
+pub(crate) use ports::{materialize_rf_ports, reference_impedance_helper};
 pub use stability::{GainAnalysis, StabilityAnalysis};
 pub use touchstone::{
     TouchstoneFormat, TouchstoneFrequencyUnit, TouchstoneInput, touchstone, touchstone_extension,

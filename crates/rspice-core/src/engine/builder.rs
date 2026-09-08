@@ -4717,6 +4717,19 @@ impl Engine {
             }
             &effective_model_netlist
         };
+        crate::analysis::s_param::materialize_rf_ports(
+            netlist,
+            &mut flat_elements,
+            self.config.resource_limits.max_flattened_elements,
+            abort,
+        )
+        .map_err(|error| match error {
+            crate::analysis::s_param::PortError::Aborted => SimulationError::Aborted,
+            crate::analysis::s_param::PortError::ResourceLimit(error) => {
+                SimulationError::ResourceLimit(error)
+            }
+            other => SimulationError::Circuit(format!("RF port construction failed: {other}")),
+        })?;
         if !self.config.device_voltage_limiting {
             for element in &flat_elements {
                 let family = match &element.kind {
