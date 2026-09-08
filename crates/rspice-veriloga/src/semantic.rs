@@ -1188,7 +1188,8 @@ impl SemanticAnalyzer {
 
             let expression =
                 self.lower_expression_with_side_effects(default, &mut analyzed, &mut statements)?;
-            let expr_type = self.infer_type(&expression)?;
+            let (expression, expr_type) =
+                self.coerce_assignment_expression(expression, value_type)?;
             // Prologue statements run before the analog block and have no
             // structured counterpart at all: the body starts at the `analog`
             // keyword. They are still stamped, because a site names an
@@ -1264,7 +1265,10 @@ impl SemanticAnalyzer {
                             &mut analyzed,
                             &mut declaration_statements,
                         )?;
-                        let expr_type = self.infer_type(&expression)?;
+                        let (expression, expr_type) = self.coerce_assignment_expression(
+                            expression,
+                            analyzed.variables[var_index].value_type,
+                        )?;
                         let site = self.next_analog_site();
                         let assignment = AnalyzedAssignment {
                             target: analyzed.variables[var_index].name.clone(),
@@ -1293,7 +1297,10 @@ impl SemanticAnalyzer {
                     &mut analyzed,
                     &mut declaration_statements,
                 )?;
-                let expr_type = self.infer_type(&expression)?;
+                let (expression, expr_type) = self.coerce_assignment_expression(
+                    expression,
+                    analyzed.variables[var_index].value_type,
+                )?;
                 let site = self.next_analog_site();
                 let assignment = AnalyzedAssignment {
                     target: item.name.clone(),
@@ -2212,6 +2219,8 @@ impl SemanticAnalyzer {
                         if let Some(init) = &item.init {
                             let written =
                                 self.lower_expression_with_side_effects(init, module, sink)?;
+                            let (written, _) =
+                                self.coerce_assignment_expression(written, value_type)?;
                             let expression_guard = self.active_site_guard();
                             let expression = self
                                 .apply_guard(written.clone(), Self::number_expr(0.0, item.span));
@@ -4094,6 +4103,32 @@ impl SemanticAnalyzer {
         )))
     }
 
+    /// Put implicit real-to-integer conversion into the shared expression
+    /// before guards, correspondence and AD are built. The explicit internal
+    /// operator remains distinguishable from user-authored bitwise syntax.
+    fn coerce_assignment_expression(
+        &self,
+        expression: Expression,
+        target_type: ValueType,
+    ) -> CompileResult<(Expression, ValueType)> {
+        let source_type = self.infer_type(&expression)?;
+        if target_type == ValueType::Integer
+            && matches!(source_type, ValueType::Real | ValueType::NatureAccess)
+        {
+            let span = expression.span();
+            Ok((
+                Expression::Unary(UnaryExpr {
+                    op: UnaryOp::ToInteger,
+                    operand: Box::new(expression),
+                    span,
+                }),
+                ValueType::Integer,
+            ))
+        } else {
+            Ok((expression, source_type))
+        }
+    }
+
     fn analyze_assignment(
         &mut self,
         assign: &AssignmentStmt,
@@ -4157,7 +4192,12 @@ impl SemanticAnalyzer {
         }
 
         let expression = self.lower_expression_with_side_effects(&assign.value, module, sink)?;
-        let value_type = self.infer_type(&expression)?;
+        let target_type = self
+            .symbols
+            .lookup(&symbol_name)
+            .map_or(ValueType::Unknown, |symbol| symbol.value_type);
+        let (expression, value_type) =
+            self.coerce_assignment_expression(expression, target_type)?;
 
         if let Some(sym) = self.symbols.lookup(&symbol_name)
             && !value_type.can_coerce_to(&sym.value_type)
@@ -6117,11 +6157,18 @@ impl SemanticAnalyzer {
 
         // Bind parameters and locals in a fresh substitution frame
         let mut frame = HashMap::new();
+        let mut variable_types = HashMap::new();
         let mut output_bindings = Vec::new();
         for (param, arg) in func.params.iter().zip(args.iter()) {
+            let target_type = Self::value_type_for_var_type(param.param_type);
+            variable_types.insert(param.name.clone(), target_type);
             match param.direction {
                 ParamDirection::Input => {
-                    frame.insert(param.name.clone(), self.lower_expression(arg)?);
+                    let value = self.lower_expression(arg)?;
+                    frame.insert(
+                        param.name.clone(),
+                        self.coerce_assignment_expression(value, target_type)?.0,
+                    );
                 }
                 ParamDirection::Output => {
                     let target = self.function_output_lvalue(name, param, arg)?;
@@ -6130,7 +6177,11 @@ impl SemanticAnalyzer {
                 }
                 ParamDirection::Inout => {
                     let target = self.function_output_lvalue(name, param, arg)?;
-                    frame.insert(param.name.clone(), self.lower_expression(arg)?);
+                    let value = self.lower_expression(arg)?;
+                    frame.insert(
+                        param.name.clone(),
+                        self.coerce_assignment_expression(value, target_type)?.0,
+                    );
                     output_bindings.push((param.name.clone(), target, param.span));
                 }
             }
@@ -6149,19 +6200,48 @@ impl SemanticAnalyzer {
                         item.span,
                     )));
                 }
-                let init = match &item.init {
-                    Some(init) => init.clone(),
-                    None => Self::number_expr(0.0, item.span),
-                };
-                frame.insert(item.name.clone(), init);
+                variable_types.insert(
+                    item.name.clone(),
+                    Self::value_type_for_var_type(var_decl.var_type),
+                );
+                frame.insert(item.name.clone(), Self::number_expr(0.0, item.span));
             }
         }
         // The return value accumulates in a variable named after the function
         frame.insert(func.name.clone(), Self::number_expr(0.0, span));
+        variable_types.insert(
+            func.name.clone(),
+            Self::value_type_for_var_type(func.return_type),
+        );
 
         self.subst_stack.push(frame);
         self.inline_depth += 1;
-        let result = self.exec_function_body(&func.body.statements, None);
+        let result = (|| {
+            // Bind initializers once, in declaration order, after the formal
+            // arguments are visible. Keeping raw initializer syntax in the
+            // frame would make it read later writes when a local is used.
+            for declaration in &func.locals {
+                for item in &declaration.items {
+                    if func.params.iter().any(|param| param.name == item.name) {
+                        continue;
+                    }
+                    if let Some(initializer) = &item.init {
+                        let value = self.lower_expression_without_side_effects(
+                            initializer,
+                            "analog function initializer",
+                        )?;
+                        let value = self
+                            .coerce_assignment_expression(value, variable_types[&item.name])?
+                            .0;
+                        self.subst_stack
+                            .last_mut()
+                            .expect("function frame")
+                            .insert(item.name.clone(), value);
+                    }
+                }
+            }
+            self.exec_function_body(&func.body.statements, None, &variable_types)
+        })();
         self.inline_depth -= 1;
         let frame = self.subst_stack.pop().expect("pushed above");
         result?;
@@ -6232,9 +6312,10 @@ impl SemanticAnalyzer {
         &mut self,
         statements: &[AnalogStatement],
         guard: Option<&Expression>,
+        variable_types: &HashMap<SmolStr, ValueType>,
     ) -> CompileResult<()> {
         for stmt in statements {
-            self.exec_function_statement(stmt, guard)?;
+            self.exec_function_statement(stmt, guard, variable_types)?;
         }
         Ok(())
     }
@@ -6243,6 +6324,7 @@ impl SemanticAnalyzer {
         &mut self,
         stmt: &AnalogStatement,
         guard: Option<&Expression>,
+        variable_types: &HashMap<SmolStr, ValueType>,
     ) -> CompileResult<()> {
         match stmt {
             AnalogStatement::Assignment(assign) => {
@@ -6256,6 +6338,15 @@ impl SemanticAnalyzer {
                 };
                 let value = self
                     .lower_expression_without_side_effects(&assign.value, "analog function body")?;
+                let value = self
+                    .coerce_assignment_expression(
+                        value,
+                        variable_types
+                            .get(name)
+                            .copied()
+                            .unwrap_or(ValueType::Unknown),
+                    )?
+                    .0;
                 let prev = self
                     .lookup_substitution(name)
                     .unwrap_or_else(|| Self::number_expr(0.0, *span));
@@ -6286,8 +6377,11 @@ impl SemanticAnalyzer {
                 if dynamic_condition {
                     self.dynamic_analog_operator_guard_depth += 1;
                 }
-                let then_result =
-                    self.exec_function_statement(&cond.then_branch, Some(&then_guard));
+                let then_result = self.exec_function_statement(
+                    &cond.then_branch,
+                    Some(&then_guard),
+                    variable_types,
+                );
                 if dynamic_condition {
                     self.dynamic_analog_operator_guard_depth -= 1;
                 }
@@ -6301,7 +6395,11 @@ impl SemanticAnalyzer {
                     if dynamic_condition {
                         self.dynamic_analog_operator_guard_depth += 1;
                     }
-                    let else_result = self.exec_function_statement(else_branch, Some(&else_guard));
+                    let else_result = self.exec_function_statement(
+                        else_branch,
+                        Some(&else_guard),
+                        variable_types,
+                    );
                     if dynamic_condition {
                         self.dynamic_analog_operator_guard_depth -= 1;
                     }
@@ -6339,7 +6437,11 @@ impl SemanticAnalyzer {
                     if let Some(g) = guard {
                         item_guard = Self::binary_expr(BinaryOp::And, g.clone(), item_guard);
                     }
-                    self.exec_function_statement(&item.statement, Some(&item_guard))?;
+                    self.exec_function_statement(
+                        &item.statement,
+                        Some(&item_guard),
+                        variable_types,
+                    )?;
                     prior_match = Some(match prior_match {
                         Some(prior) => Self::binary_expr(BinaryOp::Or, prior, item_match),
                         None => item_match,
@@ -6356,37 +6458,60 @@ impl SemanticAnalyzer {
                         (Some(g), None) => Some(g.clone()),
                         (None, None) => None,
                     };
-                    self.exec_function_statement(default, default_guard.as_ref())?;
+                    self.exec_function_statement(default, default_guard.as_ref(), variable_types)?;
                 }
             }
             AnalogStatement::Block(block) => {
-                // Function-internal blocks share the function frame; local
-                // declarations bind into it
-                for var_decl in &block.variables {
-                    for item in &var_decl.items {
-                        if !item.dimensions.is_empty() {
-                            return Err(CompileError::Semantic(SemanticError::new(
-                                SemanticErrorKind::UnsupportedFeature(format!(
-                                    "array local '{}' in analog function",
-                                    item.name
-                                )),
-                                item.span,
-                            )));
+                let mut scope_types = variable_types.clone();
+                let mut shadowed = Vec::new();
+                let result = (|| {
+                    for var_decl in &block.variables {
+                        for item in &var_decl.items {
+                            if !item.dimensions.is_empty() {
+                                return Err(CompileError::Semantic(SemanticError::new(
+                                    SemanticErrorKind::UnsupportedFeature(format!(
+                                        "array local '{}' in analog function",
+                                        item.name
+                                    )),
+                                    item.span,
+                                )));
+                            }
+                            let target_type = Self::value_type_for_var_type(var_decl.var_type);
+                            scope_types.insert(item.name.clone(), target_type);
+                            let previous = self
+                                .subst_stack
+                                .last_mut()
+                                .expect("function frame")
+                                .insert(item.name.clone(), Self::number_expr(0.0, item.span));
+                            shadowed.push((item.name.clone(), previous));
+                            let init = match &item.init {
+                                Some(init) => self.lower_expression_without_side_effects(
+                                    init,
+                                    "analog function body",
+                                )?,
+                                None => Self::number_expr(0.0, item.span),
+                            };
+                            let init = self.coerce_assignment_expression(init, target_type)?.0;
+                            self.subst_stack
+                                .last_mut()
+                                .expect("function frame")
+                                .insert(item.name.clone(), init);
                         }
-                        let init = match &item.init {
-                            Some(init) => self.lower_expression_without_side_effects(
-                                init,
-                                "analog function body",
-                            )?,
-                            None => Self::number_expr(0.0, item.span),
-                        };
-                        self.subst_stack
-                            .last_mut()
-                            .expect("function frame")
-                            .insert(item.name.clone(), init);
+                    }
+                    self.exec_function_body(&block.statements, guard, &scope_types)
+                })();
+                let frame = self.subst_stack.last_mut().expect("function frame");
+                for (name, previous) in shadowed.into_iter().rev() {
+                    match previous {
+                        Some(value) => {
+                            frame.insert(name, value);
+                        }
+                        None => {
+                            frame.remove(&name);
+                        }
                     }
                 }
-                self.exec_function_body(&block.statements, guard)?;
+                result?;
             }
             AnalogStatement::Null(_) => {}
             AnalogStatement::Call(call) => self.validate_no_effect_system_task(call)?,
@@ -6570,6 +6695,7 @@ impl SemanticAnalyzer {
                 Expression::Unary(unary) => {
                     let operand_type = types.pop().expect("unary operand type was inferred");
                     match unary.op {
+                        UnaryOp::ToInteger => ValueType::Integer,
                         UnaryOp::Pos | UnaryOp::Neg => operand_type,
                         UnaryOp::Not => ValueType::Boolean,
                         UnaryOp::BitNot => {
@@ -6923,6 +7049,9 @@ impl SemanticAnalyzer {
             Expression::Unary(u) => {
                 let v = eval(&u.operand)?;
                 Some(match u.op {
+                    UnaryOp::ToInteger => {
+                        ConstantValue::Integer(i64::from(real_to_integer(v.as_f64()).ok()?))
+                    }
                     UnaryOp::Neg => match v {
                         ConstantValue::Integer(value) => {
                             ConstantValue::Integer(value.checked_neg()?)

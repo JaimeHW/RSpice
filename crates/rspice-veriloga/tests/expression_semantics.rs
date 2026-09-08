@@ -5,6 +5,192 @@ mod support;
 use support::DeviceFixture;
 
 #[test]
+fn integer_function_initializers_snapshot_inputs_and_restore_block_scope() {
+    let fixture = DeviceFixture::compile(
+        r#"
+module integer_scopes(p,n);
+inout p,n; electrical p,n;
+analog function real snapshot;
+    input x; real x;
+    integer saved=x;
+    begin
+        x=x+10.0;
+        begin : inner integer saved=x; x=saved+0.25; end
+        snapshot=saved+x;
+    end
+endfunction
+analog I(p,n)<+snapshot(V(p,n));
+endmodule
+"#,
+    );
+    let mut device = fixture.device("X", &[1, 0]);
+    for v in [-1.5_f64, 0.75, 2.5] {
+        device.update_voltages(&[v]);
+        assert_eq!(
+            device.try_evaluate().unwrap()[0],
+            v.round() + (v + 10.0).round() + 0.25
+        );
+    }
+}
+
+#[test]
+fn integer_conversion_failures_are_checked_and_untaken_writes_are_skipped() {
+    let fixture = DeviceFixture::compile(
+        "module checked_integer(p,n); inout p,n; electrical p,n; integer q; analog begin q=0; if(V(p,n)>0.0) q=V(p,n); I(p,n)<+q; end endmodule",
+    );
+    let mut device = fixture.device("X", &[1, 0]);
+    for (v, fails) in [(1.5, false), (2147483647.5, true), (-2147483649.0, false)] {
+        device.update_voltages(&[v]);
+        assert_eq!(device.try_evaluate().is_err(), fails, "at {v}");
+        if !fails {
+            fixture.observe(&mut device);
+            assert_eq!(
+                device.variable("q"),
+                Some(if v > 0.0 { v.round() } else { 0.0 })
+            );
+        }
+    }
+}
+
+#[test]
+fn nested_conditional_integer_array_writes_skip_invalid_conversions() {
+    let fixture = DeviceFixture::compile(
+        "module checked_array(p,n); inout p,n; electrical p,n; integer q[0:0],idx; analog begin idx=0; q[idx]=0; if(V(p,n)>0.0) begin if(V(p,n)<10.0) q[idx]=V(p,n); else q[idx]=3.0; end I(p,n)<+q[idx]; end endmodule",
+    );
+    let mut device = fixture.device("X", &[1, 0]);
+    for (v, expected) in [(1.5, 2.0), (3e9, 3.0), (-3e9, 0.0), (2.5, 3.0)] {
+        device.update_voltages(&[v]);
+        assert_eq!(device.try_evaluate().unwrap()[0], expected, "at {v}");
+        fixture.observe(&mut device);
+    }
+}
+
+#[test]
+fn integer_assignments_round_values_and_drop_their_tangents() {
+    let fixture = DeviceFixture::compile(
+        "module integer_store(p,n); inout p,n; electrical p,n; integer rounded; real reported; analog begin rounded=V(p,n); reported=rounded+0.25*V(p,n); I(p,n)<+reported; end endmodule",
+    );
+    let mut device = fixture.device("X", &[1, 0]);
+    for v in [-2.5_f64, -1.5, -0.5, -0.49, 0.49, 0.5, 1.25, 1.5, 2.5] {
+        device.update_voltages(&[v]);
+        assert_eq!(
+            device.try_evaluate().unwrap()[0],
+            v.round() + 0.25 * v,
+            "at {v}"
+        );
+        let mut slope = 0.0;
+        device
+            .try_stamp(
+                &[v],
+                |row, col, value| {
+                    if row == 0 && col == 0 {
+                        slope += value;
+                    }
+                },
+                |_, _| {},
+            )
+            .unwrap();
+        assert_eq!(slope, 0.25, "at {v}");
+        fixture.observe(&mut device);
+        assert_eq!(device.variable("rounded"), Some(v.round()));
+    }
+}
+
+#[test]
+fn integer_array_assignments_convert_constant_and_runtime_indices() {
+    for target in ["q[-1]", "q[index]"] {
+        let fixture = DeviceFixture::compile(&format!(
+            "module integer_array(p,n); inout p,n; electrical p,n; integer q[-1:1],index; analog begin index=-1; {target}=V(p,n); I(p,n)<+q[-1]; end endmodule"
+        ));
+        let mut device = fixture.device("X", &[1, 0]);
+        for v in [-1.5_f64, 0.75, 2.5] {
+            device.update_voltages(&[v]);
+            assert_eq!(
+                device.try_evaluate().unwrap()[0],
+                v.round(),
+                "{target} at {v}"
+            );
+            let mut slope = 0.0;
+            device
+                .try_stamp(
+                    &[v],
+                    |row, col, value| {
+                        if row == 0 && col == 0 {
+                            slope += value;
+                        }
+                    },
+                    |_, _| {},
+                )
+                .unwrap();
+            assert_eq!(slope, 0.0);
+        }
+    }
+}
+
+#[test]
+fn integer_initializers_and_localparams_use_assignment_conversion() {
+    let fixture = DeviceFixture::compile(
+        "module integer_initializers(p,n); inout p,n; electrical p,n; localparam integer limit=2.5; integer startup=1.5; integer a[0:1]='{0.5,-0.5}; analog begin : scope integer local=V(p,n); I(p,n)<+startup+limit+a[0]-a[1]+local; end endmodule",
+    );
+    let mut device = fixture.device("X", &[1, 0]);
+    for v in [-1.5_f64, 0.75, 2.5] {
+        device.update_voltages(&[v]);
+        assert_eq!(device.try_evaluate().unwrap()[0], 7.0 + v.round(), "at {v}");
+    }
+}
+
+#[test]
+fn integer_function_arguments_outputs_and_returns_convert_at_each_write() {
+    let fixture = DeviceFixture::compile(
+        r#"
+module integer_function(p,n);
+inout p,n; electrical p,n;
+real out, result;
+analog function real from_integer;
+    input x; integer x;
+    from_integer=x+0.25;
+endfunction
+analog function integer to_integer;
+    input x; real x;
+    to_integer=x;
+endfunction
+analog function real output_integer;
+    input x; real x;
+    output y; integer y;
+    begin y=x; output_integer=y+0.125; end
+endfunction
+analog begin
+    result=from_integer(V(p,n))+to_integer(V(p,n))+output_integer(V(p,n),out);
+    I(p,n)<+result+out;
+end
+endmodule
+"#,
+    );
+    let mut device = fixture.device("X", &[1, 0]);
+    for v in [-1.5_f64, 0.75, 2.5] {
+        device.update_voltages(&[v]);
+        assert_eq!(
+            device.try_evaluate().unwrap()[0],
+            4.0 * v.round() + 0.375,
+            "at {v}"
+        );
+        let mut slope = 0.0;
+        device
+            .try_stamp(
+                &[v],
+                |row, col, value| {
+                    if row == 0 && col == 0 {
+                        slope += value;
+                    }
+                },
+                |_, _| {},
+            )
+            .unwrap();
+        assert_eq!(slope, 0.0);
+    }
+}
+
+#[test]
 fn real_modulo_preserves_both_operand_jacobians() {
     for body in ["I(p,n)<+V(p,n)%V(m,n);", "r=V(p,n)%V(m,n); I(p,n)<+r;"] {
         let fixture = DeviceFixture::compile(&format!(

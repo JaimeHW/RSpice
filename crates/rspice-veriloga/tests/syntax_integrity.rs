@@ -5,6 +5,36 @@ use rspice_veriloga::{
 };
 use support::DeviceFixture;
 
+#[test]
+fn analog_function_argument_types_merge_in_either_declaration_order() {
+    for declarations in [
+        "input x; integer x;",
+        "integer x; input x;",
+        "input integer x; integer x;",
+    ] {
+        let fixture = DeviceFixture::compile(&format!(
+            "module ftypes(p,n); inout p,n; electrical p,n; analog function real f; {declarations} f=x; endfunction analog I(p,n)<+f(V(p,n)); endmodule"
+        ));
+        let mut device = fixture.device("X", &[1, 0]);
+        device.update_voltages(&[1.5]);
+        assert_eq!(device.try_evaluate().unwrap()[0], 2.0, "{declarations}");
+    }
+    for declarations in [
+        "input real x; integer x;",
+        "input x; input x;",
+        "input x; real x; integer x;",
+    ] {
+        assert!(
+            VerilogACompiler::default()
+                .compile(&format!(
+                    "module bad; analog function real f; {declarations} f=x; endfunction endmodule"
+                ))
+                .is_err(),
+            "{declarations}"
+        );
+    }
+}
+
 fn assert_unsupported(source: &str, expected_context: &str) {
     let error = VerilogACompiler::new(CompilerOptions::default())
         .compile(source)

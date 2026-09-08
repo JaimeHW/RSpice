@@ -52,7 +52,7 @@ pub use rspice_veriloga_runtime::{
     generated_veriloga_accepted_state_shape_is_compatible,
     generated_veriloga_checkpoint_compatibility_entry, generated_veriloga_compatibility_entry,
     generated_veriloga_v26_compatibility_entry, generated_veriloga_wire_compatibility_entry,
-    validate_generated_veriloga_compatibility_catalog,
+    integer, validate_generated_veriloga_compatibility_catalog,
 };
 #[cfg(feature = "veriloga-builtins-base")]
 use rspice_veriloga_runtime::{GeneratedParameterAssignment, GeneratedParameterOrigin};
@@ -1411,6 +1411,7 @@ impl BuiltinVerilogAInstance {
             )
             .map_err(|source| {
                 let (index, mechanism) = match &source {
+                    GeneratedNoiseEvaluationError::Evaluation { .. } => (0, "<evaluation>"),
                     GeneratedNoiseEvaluationError::UninitializedAnalogState => {
                         (0, "<analog initialization>")
                     }
@@ -1599,6 +1600,7 @@ impl BuiltinVerilogAInstance {
             )
             .map_err(|source| {
                 let (index, mechanism) = match &source {
+                    GeneratedNoiseEvaluationError::Evaluation { .. } => (0, "<evaluation>"),
                     GeneratedNoiseEvaluationError::UninitializedAnalogState => {
                         (0, "<analog initialization>")
                     }

@@ -886,4 +886,8 @@ pub enum Instruction {
     /// Stack: `[expr, d_expr, delay_time, d_delay_time, max_delay]`
     /// -> `[d_delayed_value]`.
     AbsDelayStateDerivativeMax(usize),
+    /// Pop a condition; skip this many following instructions when it is zero.
+    JumpIfFalse(usize),
+    /// Skip this many following instructions. Generated jumps are forward only.
+    Jump(usize),
 }

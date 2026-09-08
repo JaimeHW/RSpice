@@ -855,6 +855,7 @@ fn constant_value(expression: &Expression, environment: &HashMap<SmolStr, i64>) 
         Expression::Unary(unary) => {
             let operand = constant_value(&unary.operand, environment)?;
             Some(match unary.op {
+                UnaryOp::ToInteger => i64::from(i32::try_from(operand).ok()?),
                 UnaryOp::Neg => operand.checked_neg()?,
                 UnaryOp::Pos => operand,
                 UnaryOp::Not => i64::from(operand == 0),

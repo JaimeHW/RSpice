@@ -252,7 +252,9 @@ use super::*;
 // portable records can silently truncate higher derivatives.
 // Version 49 rebuilds real-modulo Jacobians and noise gains: older portable
 // bytecode treats the result as constant and silently drops both slopes.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 49;
+// Version 50 inserts real-to-integer assignment conversions before AD and
+// preserves analog function argument types at separate declarations.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 50;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]

@@ -419,7 +419,7 @@ fn encode_model_program_set(
 fn encode_value_body(program: PlanProgramRef<'_>) -> WasmJitResult<Function> {
     match program {
         PlanProgramRef::Postfix(program) => {
-            let ssa = Program::lower(program)
+            let ssa = Program::lower_executable(program)
                 .map_err(|error| WasmJitError::Encoding(error.to_string()))?;
             encode_value_body_from_ssa(&ssa)
         }

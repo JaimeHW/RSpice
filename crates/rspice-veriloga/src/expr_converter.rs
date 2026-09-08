@@ -1077,6 +1077,12 @@ impl<'a> ExprConverter<'a> {
         unary: &crate::ast::UnaryExpr,
     ) -> CompileResult<NodeId> {
         let operand = self.convert(arena, &unary.operand)?;
+        if unary.op == crate::ast::UnaryOp::ToInteger {
+            // The IR already has a checked integer identity, with a zero
+            // tangent and an IntegerCast specialization in the JITs.
+            let zero = arena.push(Node::Const(0.0));
+            return Ok(arena.push(Node::Binary(BinaryOp::BitOr, operand, zero)));
+        }
         Ok(arena.push(Node::Unary(unary.op, operand)))
     }
 

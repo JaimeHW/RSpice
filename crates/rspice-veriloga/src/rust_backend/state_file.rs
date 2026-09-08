@@ -1172,6 +1172,9 @@ pub(super) fn generate_state_file_with_extensions(
     out.push_str("\n    }\n");
     out.push_str(&extensions.impl_methods);
     out.push_str("}\n");
+    if out.contains("integer::") {
+        out.push_str(&format!("use {}::integer;\n", options.runtime_path));
+    }
     Ok(compact_generated_indentation(&out))
 }
 
@@ -2590,11 +2593,22 @@ fn parameter_default_rust_expr(
     }
 
     if let Some(default_expr) = &parameter.default_expr {
-        return lower_parameter_default_expr(
+        let default = lower_parameter_default_expr(
             artifact,
             default_expr.id,
             parameter_fields,
             parameter_given,
+        )?;
+        return Ok(
+            if matches!(parameter_given, ParameterGivenLowering::AllFalse)
+                && default.contains("integer::")
+            {
+                format!(
+                    "(|| -> Result<f64, String> {{ Ok({default}) }})().expect(\"generated Verilog-A integer parameter default must be valid\")"
+                )
+            } else {
+                default
+            },
         );
     }
 
@@ -2689,6 +2703,14 @@ fn lower_parameter_default_expr(
                 parameter_given,
             )?;
             match op.as_str() {
+                "ToInteger" => Ok(format!(
+                    "({}).map_err(|error| error.to_string())?",
+                    super::expr::integer_cast_result(&operand)
+                )),
+                "BitNot" => Ok(format!(
+                    "({}).map_err(|error| error.to_string())?",
+                    super::expr::integer_binary_result("BitXor", &operand, "-1.0")
+                )),
                 "Neg" => Ok(format!("(-{operand})")),
                 "Pos" => Ok(format!("({operand})")),
                 "Not" => Ok(format!(
@@ -2741,6 +2763,12 @@ fn lower_parameter_default_expr(
                 lower_parameter_default_expr(artifact, *left, parameter_fields, parameter_given)?;
             let right =
                 lower_parameter_default_expr(artifact, *right, parameter_fields, parameter_given)?;
+            if matches!(op.as_str(), "BitAnd" | "BitOr" | "BitXor" | "Shl" | "Shr") {
+                return Ok(format!(
+                    "({}).map_err(|error| error.to_string())?",
+                    super::expr::integer_binary_result(op.as_str(), &left, &right)
+                ));
+            }
             let operator = match op.as_str() {
                 "Add" => "+",
                 "Sub" => "-",

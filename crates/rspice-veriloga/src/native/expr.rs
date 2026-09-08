@@ -29,6 +29,66 @@ use crate::vm::{CURRENT_PAIR_GROUND, terminal_pair_current_index};
 use smol_str::SmolStr;
 use std::collections::HashMap;
 
+/// Lift the VM's structured forward branches back to expression selects. The
+/// executable SSA lowering restores branches around operations that can fail.
+fn postfix_bytecode(
+    instructions: &[Instruction],
+) -> Result<std::borrow::Cow<'_, [Instruction]>, &'static str> {
+    if !instructions
+        .iter()
+        .any(|op| matches!(op, Instruction::JumpIfFalse(_) | Instruction::Jump(_)))
+    {
+        return Ok(std::borrow::Cow::Borrowed(instructions));
+    }
+    let mut output = Vec::with_capacity(instructions.len());
+    let mut branches: Vec<(usize, usize)> = Vec::new();
+    for pc in 0..=instructions.len() {
+        while branches.last().is_some_and(|(_, end)| *end == pc) {
+            output.push(Instruction::IfElse);
+            branches.pop();
+        }
+        let Some(instruction) = instructions.get(pc) else {
+            break;
+        };
+        match *instruction {
+            Instruction::JumpIfFalse(skip) => {
+                let else_start = (pc + 1)
+                    .checked_add(skip)
+                    .filter(|end| *end <= instructions.len() && *end > pc + 1)
+                    .ok_or("invalid conditional branch target")?;
+                let jump = else_start - 1;
+                let Instruction::Jump(else_len) = instructions[jump] else {
+                    return Err("conditional branch is missing its merge jump");
+                };
+                let end = else_start
+                    .checked_add(else_len)
+                    .filter(|end| *end <= instructions.len())
+                    .ok_or("invalid conditional merge target")?;
+                if let Some(&(parent_jump, parent_end)) = branches.last() {
+                    let limit = if pc < parent_jump {
+                        parent_jump
+                    } else {
+                        parent_end
+                    };
+                    if end > limit {
+                        return Err("conditional branches cross arm boundaries");
+                    }
+                }
+                branches.push((jump, end));
+            }
+            Instruction::Jump(skip) => {
+                if !branches.last().is_some_and(|&(jump, end)| {
+                    pc == jump && (pc + 1).checked_add(skip) == Some(end)
+                }) {
+                    return Err("unpaired conditional merge jump");
+                }
+            }
+            _ => output.push(instruction.clone()),
+        }
+    }
+    Ok(std::borrow::Cow::Owned(output))
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum EntryKind {
     Assignment,
@@ -1386,9 +1446,18 @@ impl NativeProgram {
         let mut depth = 0usize;
         let mut max_stack_depth = 0usize;
 
-        for instruction in &program.instructions {
+        let instructions = postfix_bytecode(&program.instructions)
+            .map_err(|reason| stack_error(model.clone(), entry_kind, reason.into()))?;
+        for instruction in instructions.iter() {
             validate_entry_instruction(model.clone(), entry_kind, instruction)?;
             match instruction {
+                Instruction::JumpIfFalse(_) | Instruction::Jump(_) => {
+                    return Err(stack_error(
+                        model.clone(),
+                        entry_kind,
+                        "unresolved conditional jump".into(),
+                    ));
+                }
                 Instruction::PushConst(value) => {
                     ops.push(NativeOp::Const(*value));
                     push_stack(&mut depth, &mut max_stack_depth);
@@ -2430,6 +2499,14 @@ impl NativeProgram {
         &self.ops
     }
 
+    pub(crate) fn needs_guarded_conditionals(&self) -> bool {
+        self.ops.contains(&NativeOp::IfElse)
+            && self
+                .ops
+                .iter()
+                .any(|op| crate::jit::ssa::Effects::for_op(*op).may_fail())
+    }
+
     pub(crate) fn max_stack_depth(&self) -> usize {
         self.max_stack_depth
     }
@@ -3148,7 +3225,9 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                     self.lower_third_derivative(*operand, first, second, third)?;
                     self.append_unary(NativeOp::Neg)
                 }
-                "Not" | "BitNot" | FROZEN_DERIVATIVE_UNARY => self.push(NativeOp::Const(0.0)),
+                "Not" | "BitNot" | "ToInteger" | FROZEN_DERIVATIVE_UNARY => {
+                    self.push(NativeOp::Const(0.0))
+                }
                 _ => Err(self.unsupported(format!("third derivative of unary operator {op}"))),
             },
             HirExprKind::Binary { op, left, right } => match op.as_str() {
@@ -3272,7 +3351,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             } => self.named_branch_access_derivative_is_zero(access, name.as_str(), wrt),
             HirExprKind::Unary { op, operand } => match op.as_str() {
                 "Pos" | "Neg" => self.expr_derivative_is_zero(*operand, wrt),
-                "Not" | "BitNot" | FROZEN_DERIVATIVE_UNARY => Ok(true),
+                "Not" | "BitNot" | "ToInteger" | FROZEN_DERIVATIVE_UNARY => Ok(true),
                 _ => Ok(false),
             },
             HirExprKind::Binary { op, left, right } => match op.as_str() {
@@ -3327,7 +3406,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             }
             HirExprKind::Unary { op, operand } => match op.as_str() {
                 "Pos" | "Neg" => self.expr_second_derivative_is_zero(*operand, first, second),
-                "Not" | "BitNot" | FROZEN_DERIVATIVE_UNARY => Ok(true),
+                "Not" | "BitNot" | "ToInteger" | FROZEN_DERIVATIVE_UNARY => Ok(true),
                 _ => Ok(false),
             },
             HirExprKind::Binary { op, left, right } => match op.as_str() {
@@ -3880,7 +3959,9 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                     self.append_unary(NativeOp::Neg)
                 }
             }
-            "Not" | "BitNot" | FROZEN_DERIVATIVE_UNARY => self.push(NativeOp::Const(0.0)),
+            "Not" | "BitNot" | "ToInteger" | FROZEN_DERIVATIVE_UNARY => {
+                self.push(NativeOp::Const(0.0))
+            }
             _ => Err(self.unsupported(format!("ddx derivative of unary operator {op}"))),
         }
     }
@@ -3902,7 +3983,9 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                     self.append_unary(NativeOp::Neg)
                 }
             }
-            "Not" | "BitNot" | FROZEN_DERIVATIVE_UNARY => self.push(NativeOp::Const(0.0)),
+            "Not" | "BitNot" | "ToInteger" | FROZEN_DERIVATIVE_UNARY => {
+                self.push(NativeOp::Const(0.0))
+            }
             _ => Err(self.unsupported(format!("second derivative of unary operator {op}"))),
         }
     }
@@ -6181,6 +6264,9 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 match op.as_str() {
                     "Pos" | FROZEN_DERIVATIVE_UNARY => Ok(value),
                     "Neg" => Ok(-value),
+                    "ToInteger" => crate::integer_runtime::real_to_integer(value)
+                        .map(f64::from)
+                        .map_err(|error| self.unsupported(error.to_string())),
                     _ => Err(self.unsupported(format!("constant coefficient unary operator {op}"))),
                 }
             }
@@ -7866,6 +7952,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         self.lower(operand)?;
         match op {
             "Pos" | FROZEN_DERIVATIVE_UNARY => Ok(()),
+            "ToInteger" => self.append_unary(NativeOp::IntegerCast),
             "Neg" => {
                 if lower_constant_neg(&mut self.ops) {
                     Ok(())
@@ -9641,6 +9728,8 @@ fn instruction_name(instruction: &Instruction) -> &'static str {
         Instruction::TimerState(_) => "TimerState",
         Instruction::LaplaceState(_) => "LaplaceState",
         Instruction::IfElse => "IfElse",
+        Instruction::JumpIfFalse(_) => "JumpIfFalse",
+        Instruction::Jump(_) => "Jump",
         Instruction::LaplaceStateDerivative(_) => "LaplaceStateDerivative",
     }
 }
@@ -9754,6 +9843,46 @@ mod tests {
     use crate::types::ValueType;
     use crate::{CompilerOptions, VerilogACompiler};
     use std::collections::HashMap;
+
+    #[test]
+    fn structured_bytecode_conditionals_preserve_nested_expression_order() {
+        use Instruction::{IfElse, Jump, JumpIfFalse, PushConst as C};
+        let input = [
+            C(1.0),
+            JumpIfFalse(6),
+            C(0.0),
+            JumpIfFalse(2),
+            C(2.0),
+            Jump(1),
+            C(3.0),
+            Jump(1),
+            C(4.0),
+        ];
+        assert!(matches!(
+            postfix_bytecode(&input).unwrap().as_ref(),
+            [C(1.0), C(0.0), C(2.0), C(3.0), IfElse, C(4.0), IfElse]
+        ));
+        for invalid in [
+            vec![Jump(0)],
+            vec![JumpIfFalse(usize::MAX)],
+            vec![C(0.0), JumpIfFalse(1), C(2.0)],
+            vec![C(0.0), JumpIfFalse(2), C(1.0), Jump(usize::MAX)],
+            // Inner conditional extends beyond the enclosing true arm.
+            vec![
+                C(1.0),
+                JumpIfFalse(4),
+                C(1.0),
+                JumpIfFalse(4),
+                C(2.0),
+                Jump(3),
+                C(3.0),
+                Jump(1),
+                C(4.0),
+            ],
+        ] {
+            assert!(postfix_bytecode(&invalid).is_err(), "{invalid:?}");
+        }
+    }
 
     fn limits(terminal_count: usize, internal_node_count: usize) -> NativeLoweringLimits<'static> {
         NativeLoweringLimits::new(terminal_count, internal_node_count, 8, 8, 8)

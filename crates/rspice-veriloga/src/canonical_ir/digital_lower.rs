@@ -2923,6 +2923,7 @@ impl ProcessLowerer<'_> {
                 self.self_signed(&conditional.then_expr) && self.self_signed(&conditional.else_expr)
             }
             Expression::Unary(unary) => match unary.op {
+                UnaryOp::ToInteger => true,
                 UnaryOp::Not => false,
                 UnaryOp::BitNot | UnaryOp::Pos | UnaryOp::Neg => self.self_signed(&unary.operand),
             },
@@ -3017,6 +3018,7 @@ impl ProcessLowerer<'_> {
                 .max(self.self_width(&conditional.else_expr)),
             Expression::Unary(unary) => match unary.op {
                 // Section 4.1.8: logical negation is one bit.
+                UnaryOp::ToInteger => 32,
                 UnaryOp::Not => 1,
                 UnaryOp::BitNot | UnaryOp::Pos | UnaryOp::Neg => self.self_width(&unary.operand),
             },
@@ -3248,6 +3250,13 @@ impl ProcessLowerer<'_> {
     ) -> ValueId {
         let width = context.width;
         match unary.op {
+            UnaryOp::ToInteger => {
+                self.error(
+                    "analog integer conversion reached four-state lowering",
+                    unary.span,
+                );
+                self.unknown(width)
+            }
             UnaryOp::Not => {
                 let input = self.expression(block, &unary.operand);
                 self.builder.push(

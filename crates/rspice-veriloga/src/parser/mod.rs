@@ -1453,54 +1453,35 @@ impl<'a> Parser<'a> {
 
         // Parse function body: input/output declarations, variable declarations, statements
         let mut params: Vec<FunctionParam> = Vec::new();
+        let mut explicit_types = Vec::new();
         let mut statements: Vec<AnalogStatement> = Vec::new();
         let mut local_vars: Vec<VariableDecl> = Vec::new();
 
         while !self.check(TokenKind::Endfunction) && !self.at_end() {
             match self.current().kind {
-                TokenKind::Input => {
+                TokenKind::Input | TokenKind::Output | TokenKind::Inout => {
                     let param_start = self.current_span();
+                    let direction = match self.current().kind {
+                        TokenKind::Input => ParamDirection::Input,
+                        TokenKind::Output => ParamDirection::Output,
+                        _ => ParamDirection::Inout,
+                    };
                     self.advance();
-                    // Parse type if present
-                    let param_type = self.parse_optional_var_type();
-                    // Parse names
-                    let names = self.parse_identifier_list()?;
-                    self.expect(TokenKind::Semicolon)?;
-                    for pname in names {
-                        params.push(FunctionParam {
-                            name: pname.into(),
-                            param_type,
-                            direction: ParamDirection::Input,
-                            span: param_start,
-                        });
-                    }
-                }
-                TokenKind::Output => {
-                    let param_start = self.current_span();
-                    self.advance();
+                    let explicit = self.check(TokenKind::Real) || self.check(TokenKind::Integer);
                     let param_type = self.parse_optional_var_type();
                     let names = self.parse_identifier_list()?;
                     self.expect(TokenKind::Semicolon)?;
                     for pname in names {
+                        if params.iter().any(|parameter| parameter.name == pname) {
+                            return Err(self.error(ParseErrorKind::InvalidParameter(format!(
+                                "duplicate analog function argument '{pname}'"
+                            ))));
+                        }
+                        explicit_types.push(explicit.then_some(param_type));
                         params.push(FunctionParam {
                             name: pname.into(),
                             param_type,
-                            direction: ParamDirection::Output,
-                            span: param_start,
-                        });
-                    }
-                }
-                TokenKind::Inout => {
-                    let param_start = self.current_span();
-                    self.advance();
-                    let param_type = self.parse_optional_var_type();
-                    let names = self.parse_identifier_list()?;
-                    self.expect(TokenKind::Semicolon)?;
-                    for pname in names {
-                        params.push(FunctionParam {
-                            name: pname.into(),
-                            param_type,
-                            direction: ParamDirection::Inout,
+                            direction,
                             span: param_start,
                         });
                     }
@@ -1526,6 +1507,37 @@ impl<'a> Parser<'a> {
         }
 
         self.expect(TokenKind::Endfunction)?;
+
+        // Non-ANSI argument types are separate declarations, in either order:
+        // `input x; integer x;` declares an integer input, not a real input
+        // accompanied by an unused local with the same name.
+        for declaration in &mut local_vars {
+            let mut locals = Vec::new();
+            for item in std::mem::take(&mut declaration.items) {
+                if let Some(index) = params
+                    .iter()
+                    .position(|parameter| parameter.name == item.name)
+                {
+                    if explicit_types[index].is_some_and(|value| value != declaration.var_type) {
+                        return Err(self.error(ParseErrorKind::InvalidParameter(format!(
+                            "conflicting types for analog function argument '{}'",
+                            item.name
+                        ))));
+                    }
+                    if !item.dimensions.is_empty() || item.init.is_some() {
+                        return Err(self.error(ParseErrorKind::InvalidParameter(format!(
+                            "analog function argument '{}' must be scalar and cannot have an initializer", item.name
+                        ))));
+                    }
+                    params[index].param_type = declaration.var_type;
+                    explicit_types[index] = Some(declaration.var_type);
+                } else {
+                    locals.push(item);
+                }
+            }
+            declaration.items = locals;
+        }
+        local_vars.retain(|declaration| !declaration.items.is_empty());
 
         Ok(FunctionDef {
             name: name.into(),

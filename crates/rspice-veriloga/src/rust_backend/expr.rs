@@ -1338,6 +1338,14 @@ mod tests {
 
 fn unary_value(op: &str, operand: &str) -> Result<String, RustBackendError> {
     match op {
+        "ToInteger" => Ok(format!(
+            "ctx.integer_result({})",
+            integer_cast_result(operand)
+        )),
+        "BitNot" => Ok(format!(
+            "ctx.integer_result({})",
+            integer_binary_result("BitXor", operand, "-1.0")
+        )),
         "Neg" if is_zero_derivative(operand) => Ok("0.0".to_string()),
         "Neg" => Ok(negate_value(operand)),
         "Pos" => Ok(operand.to_string()),
@@ -1393,6 +1401,10 @@ fn negate_condition(condition: &str) -> String {
 
 fn binary_value(op: &str, left: &str, right: &str) -> Result<String, RustBackendError> {
     match op {
+        "BitAnd" | "BitOr" | "BitXor" | "Shl" | "Shr" => Ok(format!(
+            "ctx.integer_result({})",
+            integer_binary_result(op, left, right)
+        )),
         "Add" => Ok(add_expr(left, right)),
         "Sub" => Ok(sub_expr(left, right)),
         "Mul" => Ok(mul_expr(left, right)),
@@ -1405,6 +1417,20 @@ fn binary_value(op: &str, left: &str, right: &str) -> Result<String, RustBackend
             "<expr>",
             format!("binary operator {op}"),
         )),
+    }
+}
+
+pub(super) fn integer_cast_result(operand: &str) -> String {
+    format!("integer::real_to_integer({operand}).map(f64::from)")
+}
+
+pub(super) fn integer_binary_result(op: &str, left: &str, right: &str) -> String {
+    // Assignment conversion lowers to an integer OR with zero. Keep its
+    // generated form as one checked conversion, without a redundant OR.
+    if op == "BitOr" && matches!(right, "0.0" | "-0.0" | "0f64" | "-0f64") {
+        integer_cast_result(left)
+    } else {
+        format!("integer::integer_binary(integer::IntegerBinaryOperation::{op}, {left}, {right})")
     }
 }
 

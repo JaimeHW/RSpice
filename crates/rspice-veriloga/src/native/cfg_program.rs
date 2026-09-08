@@ -931,6 +931,36 @@ impl Lowerer<'_> {
                 let right = operand(*right)?;
                 push(binary_op(*op), &[left, right])
             }
+            CfgValueKind::IntegerBitwise { op, left, right } => {
+                use super::expr::IntegerBinaryOp;
+                use crate::canonical_ir::cfg::CfgIntegerBitwiseOp;
+                let left = operand(*left)?;
+                if *op == CfgIntegerBitwiseOp::Or
+                    && matches!(
+                        self.function.value(*right).kind,
+                        CfgValueKind::RealConstant(0.0)
+                    )
+                {
+                    return push(NativeOp::IntegerCast, &[left]);
+                }
+                let right = operand(*right)?;
+                let op = match op {
+                    CfgIntegerBitwiseOp::And => IntegerBinaryOp::BitAnd,
+                    CfgIntegerBitwiseOp::Or => IntegerBinaryOp::BitOr,
+                    CfgIntegerBitwiseOp::Xor => IntegerBinaryOp::BitXor,
+                    CfgIntegerBitwiseOp::Shl => IntegerBinaryOp::Shl,
+                    CfgIntegerBitwiseOp::Shr => IntegerBinaryOp::Shr,
+                };
+                push(NativeOp::IntegerBinary(op), &[left, right])
+            }
+            CfgValueKind::IntegerBitwiseNot { input } => {
+                let input = operand(*input)?;
+                let mask = push(NativeOp::Const(-1.0), &[])?;
+                push(
+                    NativeOp::IntegerBinary(super::expr::IntegerBinaryOp::BitXor),
+                    &[input, mask],
+                )
+            }
             other => Err(self.refuse(format!(
                 "CFG value kind {} has no native block-model lowering",
                 kind_name(other)
