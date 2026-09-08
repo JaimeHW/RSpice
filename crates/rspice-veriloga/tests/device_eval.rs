@@ -89,6 +89,55 @@ fn homogeneous_math_device_values_and_gradients_preserve_extreme_scales() {
 }
 
 #[test]
+fn quotient_mixed_partials_preserve_representable_results() {
+    for derivative in 0..3 {
+        let expression = "1e200*V(p)*V(p)/(V(q)*V(q))";
+        let expression = match derivative {
+            1 => format!("ddx({expression},V(p))"),
+            2 => format!("ddx({expression},V(q))"),
+            _ => expression.into(),
+        };
+        let fixture = compile(&format!(
+            "module quotient(p,q); inout p,q; electrical p,q; analog I(p)<+{expression}; endmodule"
+        ));
+        let mut device = fixture.device("X", &[1, 2]);
+        for p in [-2.0, 0.0, 0.75] {
+            for q in [-1e150, -1e100, 1e50, 1e100, 1e150] {
+                let scale = (1e200 / q) / q;
+                let value = scale * p * p;
+                let dp = 2.0 * scale * p;
+                let dq = (-2.0 * value) / q;
+                let expected = match derivative {
+                    1 => [dp, 2.0 * scale, (-2.0 * dp) / q],
+                    2 => [dq, (-2.0 * dp) / q, (-3.0 * dq) / q],
+                    _ => [value, dp, dq],
+                };
+                device.update_voltages(&[p, q]);
+                let value = device.try_evaluate().unwrap()[0];
+                let (matrix, _) = collect_stamps(&mut device, &[p, q]);
+                for (actual, expected) in [
+                    value,
+                    matrix.get(&(0, 0)).copied().unwrap_or(0.0),
+                    matrix.get(&(0, 1)).copied().unwrap_or(0.0),
+                ]
+                .into_iter()
+                .zip(expected)
+                {
+                    if expected == 0.0 {
+                        assert_eq!(actual, expected);
+                    } else {
+                        assert!(
+                            (actual / expected - 1.0).abs() < 1e-12,
+                            "{expression}, p={p:e}, q={q:e}: expected {expected:e}, got {actual:e}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn hypot_shared_operand_keeps_its_large_value_and_finite_gradient() {
     let fixture = compile(
         "module shared(p); inout p; electrical p; analog I(p)<+hypot(V(p),V(p)); endmodule",

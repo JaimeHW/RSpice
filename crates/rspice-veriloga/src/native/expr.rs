@@ -4076,24 +4076,22 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                     self.lower(right)?;
                     return self.append_arithmetic("Div");
                 }
-                if left_zero {
-                    self.lower_derivative(right, wrt)?;
-                    self.lower(left)?;
-                    self.append_arithmetic("Mul")?;
-                    self.append_unary(NativeOp::Neg)?;
-                    self.lower_arg_square(right)?;
-                    return self.append_arithmetic("Div");
+                // dq = (dl - q*dr)/r, with q=l/r. The raw quotient
+                // rule's r*r can overflow even when dq is representable.
+                if !left_zero {
+                    self.lower_derivative(left, wrt)?;
                 }
-                self.lower_derivative(left, wrt)?;
-                self.lower(right)?;
-                self.append_arithmetic("Mul")?;
                 self.lower(left)?;
+                self.lower(right)?;
+                self.append_arithmetic("Div")?;
                 self.lower_derivative(right, wrt)?;
                 self.append_arithmetic("Mul")?;
-                self.append_arithmetic("Sub")?;
+                if left_zero {
+                    self.append_unary(NativeOp::Neg)?;
+                } else {
+                    self.append_arithmetic("Sub")?;
+                }
                 self.lower(right)?;
-                self.lower(right)?;
-                self.append_arithmetic("Mul")?;
                 self.append_arithmetic("Div")
             }
             "Pow" => self.lower_pow_derivative(left, right, wrt),
@@ -4260,42 +4258,20 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         let right_a_zero = self.expr_derivative_is_zero(right, first)?;
         let right_b_zero = self.expr_derivative_is_zero(right, second)?;
 
+        // From l=q*r: q_ab=(l_ab-q*r_ab-q_a*r_b-q_b*r_a)/r.
+        // Reuse the normalized first derivative instead of r*r, r*r*r,
+        // or 2*l, each of which can overflow independently of the result.
         let mut emitted = false;
         if !left_ab_zero {
             self.lower_second_derivative(left, first, second)?;
-            self.lower(right)?;
-            self.append_arithmetic("Div")?;
             emitted = true;
         }
-
-        let mut numerator_emitted = false;
-        if !(left_a_zero || right_b_zero) {
-            self.lower_derivative(left, first)?;
-            self.lower_derivative(right, second)?;
-            self.append_arithmetic("Mul")?;
-            numerator_emitted = true;
-        }
-        if !(left_b_zero || right_a_zero) {
-            self.lower_derivative(left, second)?;
-            self.lower_derivative(right, first)?;
-            self.append_arithmetic("Mul")?;
-            if numerator_emitted {
-                self.append_arithmetic("Add")?;
-            }
-            numerator_emitted = true;
-        }
         if !right_ab_zero {
-            self.lower_second_derivative(right, first, second)?;
             self.lower(left)?;
-            self.append_arithmetic("Mul")?;
-            if numerator_emitted {
-                self.append_arithmetic("Add")?;
-            }
-            numerator_emitted = true;
-        }
-        if numerator_emitted {
-            self.lower_arg_square(right)?;
+            self.lower(right)?;
             self.append_arithmetic("Div")?;
+            self.lower_second_derivative(right, first, second)?;
+            self.append_arithmetic("Mul")?;
             if emitted {
                 self.append_arithmetic("Sub")?;
             } else {
@@ -4303,27 +4279,26 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 emitted = true;
             }
         }
-
-        if !(right_a_zero || right_b_zero) {
-            self.lower_derivative(right, first)?;
-            self.lower_derivative(right, second)?;
-            self.append_arithmetic("Mul")?;
-            self.push(NativeOp::Const(2.0))?;
-            self.lower(left)?;
-            self.append_arithmetic("Mul")?;
-            self.append_arithmetic("Mul")?;
-            self.lower_arg_square(right)?;
-            self.lower(right)?;
-            self.append_arithmetic("Mul")?;
-            self.append_arithmetic("Div")?;
-            if emitted {
-                self.append_arithmetic("Add")?;
+        for (quotient_axis, denominator_axis, zero) in [
+            (first, second, right_b_zero || (left_a_zero && right_a_zero)),
+            (second, first, right_a_zero || (left_b_zero && right_b_zero)),
+        ] {
+            if zero {
+                continue;
             }
-            emitted = true;
+            self.lower_binary_derivative("Div", left, right, quotient_axis)?;
+            self.lower_derivative(right, denominator_axis)?;
+            self.append_arithmetic("Mul")?;
+            if emitted {
+                self.append_arithmetic("Sub")?;
+            } else {
+                self.append_unary(NativeOp::Neg)?;
+                emitted = true;
+            }
         }
-
         if emitted {
-            Ok(())
+            self.lower(right)?;
+            self.append_arithmetic("Div")
         } else {
             self.push(NativeOp::Const(0.0))
         }
