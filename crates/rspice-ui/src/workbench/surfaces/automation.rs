@@ -714,16 +714,13 @@ fn code_pane(
         editable,
         true,
     );
-    if crate::workbench::documents::text_editor_commands::take_find_in_source_bundle_request(
-        ui, editor_id,
-    ) && let Err(error) = crate::workbench::documents::code_workspace::open_source_search(
-        app,
-        ProjectSourceLanguage::RSpiceAutomation,
-        selected_path,
-    ) {
-        app.state
-            .push_user_message(crate::diagnostics::ConsoleMessage::error(error));
-    }
+    let search_input =
+        crate::workbench::documents::text_editor_commands::take_find_in_source_bundle_request(
+            ui, editor_id,
+        );
+    let preceding_input = search_input
+        .as_ref()
+        .map(|input| input.preceding_scope(ui.ctx()));
     let interaction = egui::Frame::new().fill(t.color.bg_inset).show(ui, |ui| {
         let debuggable = language == CodeEditorLanguage::Python;
         let interaction = if debuggable && !legacy {
@@ -874,6 +871,22 @@ fn code_pane(
     ) {
         app.state
             .push_user_message(crate::diagnostics::ConsoleMessage::error(error));
+    }
+    drop(preceding_input);
+    if let Some(input) = search_input {
+        // Bind the search to source revisions and selection after preceding edits.
+        if let Err(error) = crate::workbench::documents::code_workspace::open_source_search(
+            app,
+            ProjectSourceLanguage::RSpiceAutomation,
+            selected_path,
+        ) {
+            app.state
+                .push_user_message(crate::diagnostics::ConsoleMessage::error(error));
+        }
+        input.route(
+            ui.ctx(),
+            crate::workbench::documents::code_workspace::source_search_query_id(),
+        );
     }
 }
 

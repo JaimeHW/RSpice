@@ -16,6 +16,10 @@ use crate::workbench::RSpiceApp;
 
 use super::{CodeSourceSearchScope, CodeSourceSearchState};
 
+pub(crate) fn source_search_query_id() -> egui::Id {
+    egui::Id::new(("rspice.source-find", "query"))
+}
+
 pub(crate) const SOURCE_SEARCH_RESULT_LIMIT: usize = 500;
 pub(crate) const SOURCE_SEARCH_STREAM_LIMIT: usize = 50_000;
 pub(crate) const GENERATED_REFERENCE_PATH: &str = "rspice://generated/top-deck";

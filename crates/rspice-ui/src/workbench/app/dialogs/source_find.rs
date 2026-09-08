@@ -74,8 +74,11 @@ enum FindAction {
 impl RSpiceApp {
     pub(in crate::workbench) fn render_source_find_dialog(&mut self, ctx: &Context) {
         if self.state.ui.code_workspace.source_search.is_none() {
+            crate::ui::input::InputScope::discard(ctx, code_workspace::source_search_query_id());
             return;
         }
+        let _opening_input =
+            crate::ui::input::InputScope::enter(ctx, code_workspace::source_search_query_id());
         // Read the search once, run it once, and render from that. Re-running
         // per section would let two parts of one dialog state different counts.
         let Some(search) = self.state.ui.code_workspace.source_search.clone() else {
@@ -104,7 +107,9 @@ impl RSpiceApp {
         .size(DialogSize::SimulationWorkflow)
         .initial_height(580.0)
         .primary_on_enter(false)
-        .initial_focus(DialogInitialFocus::BodyControl);
+        .initial_focus(DialogInitialFocus::Control(
+            code_workspace::source_search_query_id(),
+        ));
         let failure = search
             .error
             .clone()
@@ -127,7 +132,7 @@ impl RSpiceApp {
         let mut action = FindAction::None;
         let choice = dialog.show_with_initial_body_focus(ctx, |ui| {
             action = find_body(ui, &mut self.state, &found, replaceable);
-            None
+            Some(code_workspace::source_search_query_id())
         });
         self.apply_find_action(action, ctx);
         if matches!(
@@ -207,10 +212,11 @@ fn find_body(
                         &messages.text(MessageId::CodeSearchActiveDocument),
                         &search.active_path,
                     );
-                    crate::workbench::design_system::property_row_input(
+                    crate::workbench::design_system::property_row_text_edit(
                         ui,
                         &messages.text(MessageId::CommonFind),
-                        &mut search.query,
+                        egui::TextEdit::singleline(&mut search.query)
+                            .id(code_workspace::source_search_query_id()),
                         false,
                     );
                     let replace_with = messages.text(MessageId::CodeSearchReplaceWith);
@@ -444,6 +450,61 @@ mod tests {
     use super::*;
 
     use crate::workbench::documents::code_workspace::CodeWorkspacePage;
+
+    #[test]
+    fn initial_focus_accepts_source_search_typing() {
+        for read_only in [false, true] {
+            let ctx = Context::default();
+            crate::ui::Theme::default().apply(&ctx);
+            ctx.options_mut(|options| options.max_passes = std::num::NonZeroUsize::new(1).unwrap());
+            let mut app = RSpiceApp::test_instance();
+            app.state.workbench.workspace = crate::workbench::state::Workspace::Netlist;
+            app.state.ui.code_workspace.page = CodeWorkspacePage::Automation;
+            if read_only {
+                app.state.workbench.safe_mode.activate(
+                    crate::workbench::state::LocalSafeModeOptions {
+                        open_project_read_only: true,
+                        ..Default::default()
+                    },
+                    "UI focus qualification".to_owned(),
+                );
+            }
+            crate::workbench::commands::vocabulary::Command::FindCodeDocument.execute(&mut app);
+            let sources = app.state.workspace.project_sources.clone();
+            let mut render = |events| {
+                let _ = ctx.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(1280.0, 800.0),
+                        )),
+                        events,
+                        ..Default::default()
+                    },
+                    |ui| app.render_frame_dialogs(ui),
+                );
+            };
+            render(vec![egui::Event::Paste("import".to_owned())]);
+            if !read_only {
+                // A later Tab must keep the chosen replacement field focused.
+                render(vec![egui::Event::Key {
+                    key: egui::Key::Tab,
+                    physical_key: Some(egui::Key::Tab),
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                }]);
+                render(vec![egui::Event::Paste("replacement".to_owned())]);
+            }
+            let search = app.state.ui.code_workspace.source_search.as_ref().unwrap();
+            assert_eq!(search.query, "import");
+            assert_eq!(
+                search.replacement,
+                if read_only { "" } else { "replacement" }
+            );
+            assert!(app.state.workspace.project_sources == sources);
+        }
+    }
 
     /// A dialog that rewrites source across a whole bundle must never resolve
     /// state by unwrapping.

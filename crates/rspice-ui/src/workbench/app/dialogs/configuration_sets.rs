@@ -17,7 +17,7 @@ use crate::workbench::design_system::{
 
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app::dialogs::review_primitives::{
-    input_field, purpose_line, read_only_field,
+    input_field, purpose_line, read_only_field, text_edit_field,
 };
 use crate::workbench::app_state::AppState;
 
@@ -42,6 +42,17 @@ pub(crate) enum ConfigurationDialogPage {
     New,
     Clone,
     Binding,
+}
+
+fn field_id(field: &str) -> egui::Id {
+    egui::Id::new(("rspice.configuration-sets", field))
+}
+
+fn name_id(page: ConfigurationDialogPage) -> egui::Id {
+    field_id(match page {
+        ConfigurationDialogPage::Clone => "clone-name",
+        _ => "new-name",
+    })
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -208,6 +219,21 @@ enum BodyAction {
 
 impl RSpiceApp {
     pub(in crate::workbench) fn render_configuration_sets_dialog(&mut self, ctx: &Context) {
+        let page = self.state.dialogs.configuration_sets.page;
+        self.render_configuration_sets_page(ctx);
+        if self.state.dialogs.configuration_sets.open
+            && self.state.dialogs.configuration_sets.page != page
+        {
+            // A page transition owns the input that follows its activating click.
+            self.render_configuration_sets_page(ctx);
+        }
+        // A refused transition cannot leave typing queued for a later opening.
+        for field in ["new-name", "clone-name"] {
+            crate::ui::input::InputScope::discard(ctx, field_id(field));
+        }
+    }
+
+    fn render_configuration_sets_page(&mut self, ctx: &Context) {
         if !self.state.dialogs.configuration_sets.open {
             return;
         }
@@ -244,6 +270,18 @@ impl RSpiceApp {
             ),
         };
         let write_allowed = !self.state.workbench.safe_mode.project_read_only();
+        let initial_focus = match page {
+            ConfigurationDialogPage::Manager => Some(field_id("filter")),
+            ConfigurationDialogPage::New | ConfigurationDialogPage::Clone if write_allowed => {
+                Some(name_id(page))
+            }
+            ConfigurationDialogPage::Binding
+                if write_allowed && self.state.dialogs.configuration_sets.draft.is_some() =>
+            {
+                Some(field_id("ordered-views"))
+            }
+            _ => None,
+        };
         let primary_enabled = write_allowed
             && match page {
                 ConfigurationDialogPage::Manager => {
@@ -298,6 +336,7 @@ impl RSpiceApp {
                                 .active_configuration_id()
                 }
             };
+        let _opening_input = initial_focus.map(|id| crate::ui::input::InputScope::enter(ctx, id));
         let discard = page == ConfigurationDialogPage::Manager
             && self.state.dialogs.configuration_sets.discard_confirmation;
         let transaction_error = self.state.dialogs.configuration_sets.error.clone();
@@ -314,7 +353,9 @@ impl RSpiceApp {
             })
             .primary_enabled(primary_enabled)
             .primary_on_enter(false)
-            .initial_focus(DialogInitialFocus::BodyControl);
+            .initial_focus(
+                initial_focus.map_or(DialogInitialFocus::Container, DialogInitialFocus::Control),
+            );
         if page == ConfigurationDialogPage::Manager {
             dialog = dialog.flush_body();
         }
@@ -333,7 +374,7 @@ impl RSpiceApp {
         }
 
         let mut action = BodyAction::None;
-        let choice = dialog.show(ctx, |ui| {
+        let choice = dialog.show_with_initial_body_focus(ctx, |ui| {
             action = configuration_body(
                 ui,
                 &mut self.state.dialogs.configuration_sets,
@@ -343,8 +384,27 @@ impl RSpiceApp {
                 &self.state.schematic,
                 write_allowed,
             );
+            if matches!(action, BodyAction::Binding)
+                || (matches!(action, BodyAction::New | BodyAction::Clone)
+                    && !self
+                        .state
+                        .dialogs
+                        .configuration_sets
+                        .dirty(&self.state.workspace.configuration_sets))
+            {
+                ui.close();
+            }
+            initial_focus
         });
         self.handle_configuration_body_action(action);
+        if self.state.dialogs.configuration_sets.page != page {
+            return;
+        }
+        let dirty = self
+            .state
+            .dialogs
+            .configuration_sets
+            .dirty(&self.state.workspace.configuration_sets);
         match choice {
             DialogChoice::Primary => self.commit_configuration_dialog_page(),
             DialogChoice::Ghost | DialogChoice::Cancelled => {
@@ -719,9 +779,36 @@ fn manager_body(
         .show(ui, |ui| {
             ui.horizontal(|ui| {
                 let available = (ui.available_width() - 190.0).max(120.0);
-                let response = ui.add_sized(
-                    vec2(available, t.metrics.ctl_h),
+                let (_, query_rect) = ui.allocate_space(vec2(available, t.metrics.ctl_h));
+                if Button::new("Clone")
+                    .enabled(dialog.selected_id.is_some() && write_allowed && !dirty)
+                    .show(ui)
+                    .clicked()
+                {
+                    action = BodyAction::Clone;
+                }
+                if Button::new("New configuration")
+                    .accent()
+                    .enabled(write_allowed && !dirty)
+                    .show(ui)
+                    .clicked()
+                {
+                    action = BodyAction::New;
+                }
+                let next_name = match action {
+                    BodyAction::New => Some(name_id(ConfigurationDialogPage::New)),
+                    BodyAction::Clone => Some(name_id(ConfigurationDialogPage::Clone)),
+                    _ => None,
+                };
+                if let Some(id) = next_name {
+                    ui.ctx()
+                        .input(crate::ui::input::InputTransition::after_activation)
+                        .route(ui.ctx(), id);
+                }
+                let response = ui.put(
+                    query_rect,
                     TextEdit::singleline(&mut dialog.query)
+                        .id(field_id("filter"))
                         .hint_text("Configuration, cell, view, or owner…")
                         .margin(Margin {
                             left: 29,
@@ -738,21 +825,6 @@ fn manager_body(
                     ),
                     t.color.text_faint,
                 );
-                if Button::new("Clone")
-                    .enabled(dialog.selected_id.is_some() && write_allowed && !dirty)
-                    .show(ui)
-                    .clicked()
-                {
-                    action = BodyAction::Clone;
-                }
-                if Button::new("New configuration")
-                    .accent()
-                    .enabled(write_allowed && !dirty)
-                    .show(ui)
-                    .clicked()
-                {
-                    action = BodyAction::New;
-                }
             });
         });
 
@@ -1340,11 +1412,12 @@ fn new_configuration_body(
 ) {
     section_header(ui, "Configuration identity", None);
     ui.add_enabled_ui(write_allowed, |ui| {
-        input_field(
+        text_edit_field(
             ui,
             "Name",
-            &mut dialog.new_name,
-            "afe_lab_rf",
+            TextEdit::singleline(&mut dialog.new_name)
+                .id(name_id(ConfigurationDialogPage::New))
+                .hint_text("afe_lab_rf"),
             None,
             "Unique project-owned configuration name",
         );
@@ -1400,11 +1473,12 @@ fn clone_configuration_body(
     {
         section_header(ui, "Configuration lineage", None);
         ui.add_enabled_ui(write_allowed, |ui| {
-            input_field(
+            text_edit_field(
                 ui,
                 "New name",
-                &mut dialog.new_name,
-                "afe_lab_postlayout",
+                TextEdit::singleline(&mut dialog.new_name)
+                    .id(name_id(ConfigurationDialogPage::Clone))
+                    .hint_text("afe_lab_postlayout"),
                 None,
                 "Unique name for the cloned configuration",
             );
@@ -1510,6 +1584,7 @@ fn binding_body(
                 &mut draft.executable_view_policy,
                 &ordered_hint,
                 ordered_rejection.as_deref(),
+                Some(field_id("ordered-views")),
             );
             comma_list_field(
                 ui,
@@ -1517,6 +1592,7 @@ fn binding_body(
                 &mut draft.stop_views,
                 &ordered_hint,
                 stops_rejection.as_deref(),
+                None,
             );
         });
         library_view_row(ui, &library_views);
@@ -1573,6 +1649,7 @@ fn binding_body(
                             &mut scoped.executable_views,
                             &ordered_hint,
                             views_rejection.as_deref(),
+                            None,
                         );
                         optional_text_field(
                             ui,
@@ -1604,6 +1681,7 @@ fn binding_body(
                                 &mut scoped.executable_views,
                                 &ordered_hint,
                                 views_rejection.as_deref(),
+                                None,
                             );
                         });
                         ui.columns(2, |columns| {
@@ -1816,13 +1894,17 @@ fn comma_list_field(
     values: &mut Vec<String>,
     hint: &str,
     rejection: Option<&str>,
+    id: Option<egui::Id>,
 ) {
     let mut text = values.join(", ");
-    if input_field(
+    let mut edit = TextEdit::singleline(&mut text).hint_text(hint);
+    if let Some(id) = id {
+        edit = edit.id(id);
+    }
+    if text_edit_field(
         ui,
         label,
-        &mut text,
-        hint,
+        edit,
         rejection,
         "Ordered comma-separated executable view names",
     )
@@ -2066,332 +2148,5 @@ fn unique_configuration_name(catalog: &ConfigurationSetCatalog, stem: &str) -> S
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn definition(name: &str) -> ConfigurationSetDefinition {
-        ConfigurationSetDefinition {
-            name: name.to_owned(),
-            root: CellViewRef::default_top(),
-            dut_path: "/top/XDUT".to_owned(),
-            executable_view_policy: vec!["schematic".to_owned()],
-            stop_views: Vec::new(),
-            unresolved_policy: UnresolvedBindingPolicy::BlockNetlist,
-            black_box_policy: ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
-            overrides: Vec::new(),
-            model_profile: ConfigurationModelProfile::ProjectRunSetSections,
-            owner: "Local project".to_owned(),
-        }
-    }
-
-    fn valid_configuration_app() -> (RSpiceApp, ConfigurationSetId) {
-        let mut app = RSpiceApp::test_instance();
-        let cell_name = "configuration_test_dut";
-        let mut cell = crate::state::Cell::new(cell_name);
-        cell.add_view(crate::state::View::new(
-            "schematic",
-            crate::state::ViewType::Schematic,
-        ));
-        if let Some(library) = app.state.library_manager.get_library_mut("work") {
-            library.add_cell(cell);
-        } else {
-            let mut library = crate::state::Library::new("work");
-            library.add_cell(cell);
-            app.state.library_manager.add_library(library);
-        }
-        let reference = CellViewRef::new("work", cell_name, "schematic");
-        let mut master = crate::state::SchematicState::default();
-        for (name, position) in [
-            ("a", crate::state::Point::new(0, 0)),
-            ("b", crate::state::Point::new(40, 0)),
-        ] {
-            let id = master.add_component(crate::state::ComponentType::Port, position);
-            master
-                .components
-                .iter_mut()
-                .find(|component| component.id == id)
-                .expect("master port")
-                .value = name.to_owned();
-        }
-        app.state
-            .workspace
-            .schematic_buffers
-            .insert(reference.key(), master);
-        let mut binding = crate::state::LibraryCellInstance::new("work", cell_name, "schematic");
-        binding.terminal_order = vec!["a".to_owned(), "b".to_owned()];
-        app.state
-            .schematic
-            .add_library_cell_component(crate::state::Point::new(20, 20), binding);
-        let mut definition = definition("Release");
-        definition.dut_path = "/top/X1".to_owned();
-        let id = app
-            .state
-            .workspace
-            .configuration_sets
-            .create(definition)
-            .expect("valid configuration");
-        (app, id)
-    }
-
-    #[test]
-    fn templates_only_advertise_bindable_view_names() {
-        for template in ConfigurationTemplate::ALL {
-            let (views, stops) = template.policy();
-            assert!(views.iter().all(|view| view_name_rejection(view).is_none()));
-            assert!(stops.iter().all(|stop| views.contains(stop)));
-        }
-    }
-
-    #[test]
-    fn a_view_policy_field_refuses_only_what_is_not_a_view_name() {
-        assert_eq!(view_policy_rejection(&comma_edit_values("spice_tt,")), None);
-        assert_eq!(
-            view_policy_rejection(&comma_edit_values("schematic_fast, spice_tt")),
-            None
-        );
-        assert!(
-            view_policy_rejection(&comma_edit_values("fast schematic"))
-                .is_some_and(|rejection| rejection.contains("fast schematic")),
-            "a name the library grammar refuses is quoted back"
-        );
-        assert!(view_name_rejection("a/b").is_some());
-        assert!(view_name_rejection("").is_some());
-    }
-
-    #[test]
-    fn the_binding_page_states_which_configured_views_the_libraries_hold() {
-        let (app, _) = valid_configuration_app();
-        let library_views = project_view_names(&app.state.library_manager);
-        assert!(library_views.iter().any(|view| view == "schematic"));
-        assert!(
-            library_views
-                .windows(2)
-                .all(|pair| pair[0].to_lowercase() <= pair[1].to_lowercase()),
-            "the offered names are ordered: {library_views:?}"
-        );
-        assert!(!library_views.iter().any(|view| view == "spice_tt"));
-    }
-
-    #[test]
-    fn generated_names_are_case_insensitively_unique() {
-        let mut catalog = ConfigurationSetCatalog::default();
-        catalog
-            .create(definition("Release"))
-            .expect("configuration");
-        assert_eq!(unique_configuration_name(&catalog, "release"), "release 2");
-    }
-
-    #[test]
-    fn hierarchy_binding_entry_opens_the_binding_page_and_requires_a_configuration() {
-        let (mut app, _) = valid_configuration_app();
-        open_configuration_binding_dialog(&mut app.state);
-        assert!(app.state.dialogs.configuration_sets.open);
-        assert_eq!(
-            app.state.dialogs.configuration_sets.page,
-            ConfigurationDialogPage::Binding
-        );
-        assert!(app.state.dialogs.configuration_sets.error.is_none());
-
-        let mut empty = RSpiceApp::test_instance();
-        open_configuration_binding_dialog(&mut empty.state);
-        assert!(empty.state.dialogs.configuration_sets.open);
-        assert_eq!(
-            empty.state.dialogs.configuration_sets.page,
-            ConfigurationDialogPage::Manager
-        );
-        assert_eq!(
-            empty.state.dialogs.configuration_sets.error.as_deref(),
-            Some("Create a configuration set before editing hierarchy bindings.")
-        );
-    }
-
-    #[test]
-    fn same_row_and_subordinate_actions_never_discard_a_dirty_draft() {
-        let mut app = RSpiceApp::test_instance();
-        let selected = app
-            .state
-            .workspace
-            .configuration_sets
-            .create(definition("Release"))
-            .expect("configuration");
-        let other = app
-            .state
-            .workspace
-            .configuration_sets
-            .create(definition("Characterization"))
-            .expect("second configuration");
-        open_configuration_sets_dialog(&mut app.state);
-        app.state
-            .dialogs
-            .configuration_sets
-            .draft
-            .as_mut()
-            .expect("draft")
-            .name = "Unsaved release".to_owned();
-
-        app.handle_configuration_body_action(BodyAction::Select(selected));
-        assert_eq!(
-            app.state
-                .dialogs
-                .configuration_sets
-                .draft
-                .as_ref()
-                .map(|draft| draft.name.as_str()),
-            Some("Unsaved release")
-        );
-
-        for action in [
-            BodyAction::New,
-            BodyAction::Clone,
-            BodyAction::Select(other),
-        ] {
-            app.handle_configuration_body_action(action);
-            assert_eq!(
-                app.state.dialogs.configuration_sets.page,
-                ConfigurationDialogPage::Manager
-            );
-            assert_eq!(
-                app.state.dialogs.configuration_sets.selected_id,
-                Some(selected)
-            );
-            assert_eq!(
-                app.state
-                    .dialogs
-                    .configuration_sets
-                    .draft
-                    .as_ref()
-                    .map(|draft| draft.name.as_str()),
-                Some("Unsaved release")
-            );
-            assert!(app.state.dialogs.configuration_sets.error.is_some());
-        }
-    }
-
-    #[test]
-    fn comma_editor_preserves_an_in_progress_trailing_entry() {
-        assert_eq!(
-            comma_edit_values("schematic,"),
-            vec!["schematic".to_owned(), String::new()]
-        );
-        assert_eq!(
-            comma_edit_values("schematic, spice"),
-            vec!["schematic".to_owned(), "spice".to_owned()]
-        );
-        assert!(comma_edit_values("  ").is_empty());
-    }
-
-    #[test]
-    fn new_configuration_requires_a_real_dut_in_the_selected_root() {
-        let mut app = RSpiceApp::test_instance();
-        let root = app.state.workspace.active_view.clone();
-        assert!(
-            default_dut_path_for_root(&app.state.workspace, &app.state.schematic, &root).is_none()
-        );
-
-        for (id, name) in [(1u64, "XB"), (2, "XA")] {
-            let mut instance = crate::state::Component::new(
-                id,
-                crate::state::ComponentType::CellInstance,
-                crate::state::Point::new(20 * i32::try_from(id).expect("small id"), 20),
-            );
-            instance.name = name.to_owned();
-            app.state.schematic.components.push(instance);
-        }
-        assert_eq!(
-            default_dut_path_for_root(&app.state.workspace, &app.state.schematic, &root).as_deref(),
-            Some("/XA"),
-            "the lowest instance name, below the implicit design root"
-        );
-    }
-
-    #[test]
-    fn the_path_fields_take_the_canonical_spelling_and_report_the_text_they_refuse() {
-        assert_eq!(instance_path_rejection("/XAFE"), None);
-        assert_eq!(instance_path_rejection("/XAFE/XBIAS"), None);
-        assert_eq!(instance_path_rejection("/"), None);
-        assert!(
-            instance_path_rejection("/XAFE/").is_some_and(|rejection| rejection.contains("/XAFE/")),
-            "an empty trailing segment is refused and quoted back"
-        );
-        assert!(
-            instance_path_rejection("XAFE").is_some_and(|rejection| rejection.contains("XAFE")),
-            "the engine spelling is refused and quoted back"
-        );
-
-        assert_eq!(instance_pattern_rejection("/XAFE"), None);
-        assert_eq!(instance_pattern_rejection("/XAFE/*"), None);
-        assert!(
-            instance_pattern_rejection("XAFE").is_some_and(|rejection| rejection.contains("XAFE"))
-        );
-        assert!(
-            instance_pattern_rejection("/XAFE/")
-                .is_some_and(|rejection| rejection.contains("/XAFE/"))
-        );
-    }
-
-    #[test]
-    fn a_new_override_starts_one_instance_below_the_design_root() {
-        assert_eq!(new_override_scope(1), "/XINSTANCE1");
-        assert_eq!(instance_pattern_rejection(&new_override_scope(2)), None);
-    }
-
-    #[test]
-    fn normalization_only_save_revalidates_without_mutating_project_authority() {
-        let (mut app, id) = valid_configuration_app();
-        open_configuration_sets_dialog(&mut app.state);
-        let revision = app.state.workspace.project.revision();
-        app.state
-            .dialogs
-            .configuration_sets
-            .draft
-            .as_mut()
-            .expect("configuration draft")
-            .name = "  Release  ".to_owned();
-
-        app.commit_configuration_update()
-            .expect("normalization-only save validates and reloads");
-
-        assert_eq!(app.state.workspace.project.revision(), revision);
-        assert_eq!(
-            app.state
-                .workspace
-                .configuration_sets
-                .find(id)
-                .expect("configuration remains")
-                .name(),
-            "Release"
-        );
-        assert_eq!(
-            app.state
-                .dialogs
-                .configuration_sets
-                .draft
-                .as_ref()
-                .map(|draft| draft.name.as_str()),
-            Some("Release")
-        );
-    }
-
-    #[test]
-    fn invalid_save_preserves_catalog_and_project_revision() {
-        let (mut app, _) = valid_configuration_app();
-        open_configuration_sets_dialog(&mut app.state);
-        let catalog = app.state.workspace.configuration_sets.clone();
-        let revision = app.state.workspace.project.revision();
-        app.state
-            .dialogs
-            .configuration_sets
-            .draft
-            .as_mut()
-            .expect("configuration draft")
-            .dut_path = "/top/XMISSING".to_owned();
-
-        let error = app
-            .commit_configuration_update()
-            .expect_err("unresolved configured DUT must block publication");
-
-        assert!(error.contains("does not exist"), "{error}");
-        assert_eq!(app.state.workspace.configuration_sets, catalog);
-        assert_eq!(app.state.workspace.project.revision(), revision);
-    }
-}
+#[path = "configuration_sets/tests.rs"]
+mod tests;

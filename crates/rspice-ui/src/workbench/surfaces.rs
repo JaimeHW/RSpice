@@ -165,7 +165,121 @@ fn register_results_split_region(ui: &mut Ui, results_rect: Rect) {
 
 #[cfg(test)]
 mod tests {
-    use super::{register_results_split_region, split_stage_rects};
+    use super::{RSpiceApp, register_results_split_region, split_stage_rects};
+    use crate::state::ProjectSourceLanguage;
+    use crate::workbench::documents::code_workspace::{self, CodeWorkspacePage};
+    use egui::Context;
+
+    #[test]
+    fn search_shortcut_handoff_preserves_the_source_editor() {
+        for language in [
+            ProjectSourceLanguage::RSpiceAutomation,
+            ProjectSourceLanguage::VerilogA,
+        ] {
+            source_editor_handoff(language, "");
+        }
+    }
+
+    #[test]
+    fn search_shortcut_handoff_binds_preceding_source_edits() {
+        for language in [
+            ProjectSourceLanguage::RSpiceAutomation,
+            ProjectSourceLanguage::VerilogA,
+        ] {
+            source_editor_handoff(language, "preceding_source_edit");
+        }
+    }
+
+    fn source_editor_handoff(language: ProjectSourceLanguage, preceding: &str) {
+        let ctx = Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.options_mut(|options| options.max_passes = std::num::NonZeroUsize::new(1).unwrap());
+        let mut app = RSpiceApp::test_instance();
+        app.state.workbench.workspace = crate::workbench::state::Workspace::Netlist;
+        app.state.ui.code_workspace.page = match language {
+            ProjectSourceLanguage::RSpiceAutomation => CodeWorkspacePage::Automation,
+            ProjectSourceLanguage::VerilogA => CodeWorkspacePage::VerilogA,
+        };
+        let owner = crate::state::ProjectSourceOwner::code_workspace(language);
+        let bundle = app
+            .state
+            .workspace
+            .project_sources
+            .bundle_for_owner(&owner)
+            .unwrap();
+        let editor_id =
+            code_workspace::source_editor_id(language, bundle.id(), bundle.root().logical_path());
+        let original = bundle.root().content().to_owned();
+        let sources = app.state.workspace.project_sources.clone();
+        let mut render = |events| {
+            let _ = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1280.0, 900.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    app.handle_shortcuts(ui);
+                    crate::workbench::surfaces::show(ui, &mut app);
+                    app.render_source_find_dialog(ui);
+                },
+            );
+        };
+        render(Vec::new());
+        render(Vec::new());
+        ctx.memory_mut(|memory| memory.request_focus(editor_id));
+        let key = |key, modifiers| egui::Event::Key {
+            key,
+            physical_key: Some(key),
+            pressed: true,
+            repeat: false,
+            modifiers,
+        };
+        render(vec![
+            egui::Event::Text(preceding.to_owned()),
+            key(
+                egui::Key::H,
+                egui::Modifiers::CTRL | egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
+            ),
+            egui::Event::Text("wrong".to_owned()),
+            key(
+                egui::Key::A,
+                egui::Modifiers::CTRL | egui::Modifiers::COMMAND,
+            ),
+            egui::Event::Paste("import".to_owned()),
+        ]);
+        let bundle = app
+            .state
+            .workspace
+            .project_sources
+            .bundle_for_owner(&owner)
+            .unwrap();
+        if preceding.is_empty() {
+            assert!(
+                app.state.workspace.project_sources == sources,
+                "search text must not edit {language:?} source code"
+            );
+        } else {
+            assert!(
+                bundle.root().content().contains(preceding),
+                "preceding {language:?} source edit was lost"
+            );
+            assert_eq!(bundle.root().content().replacen(preceding, "", 1), original);
+        }
+        let search = app
+            .state
+            .ui
+            .code_workspace
+            .source_search
+            .as_ref()
+            .expect("bundle search opened from the editor shortcut");
+        assert_eq!(search.query, "import", "{language:?} opening query");
+        assert_eq!(search.bundle_revision, bundle.revision().get());
+        assert!(code_workspace::source_search_results(&app, search).is_ok());
+    }
 
     #[test]
     fn split_stage_is_equal_zero_gap_with_one_pixel_divider() {
