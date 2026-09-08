@@ -3,6 +3,96 @@
 use super::*;
 
 #[test]
+fn keyboard_configuration_activation_does_not_insert_its_space() {
+    for label in ["New configuration", "Clone"] {
+        for key in [egui::Key::Space, egui::Key::Enter] {
+            let ctx = Context::default();
+            crate::ui::Theme::default().apply(&ctx);
+            ctx.enable_accesskit();
+            ctx.options_mut(|options| options.max_passes = std::num::NonZeroUsize::new(1).unwrap());
+            let (mut app, _) = valid_configuration_app();
+            open_configuration_sets_dialog(&mut app.state);
+            let catalog = app.state.workspace.configuration_sets.clone();
+            let mut render = |events| {
+                let output = ctx.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(1280.0, 900.0),
+                        )),
+                        events,
+                        ..Default::default()
+                    },
+                    |ui| app.render_frame_dialogs(ui),
+                );
+                (
+                    output,
+                    app.state.dialogs.configuration_sets.new_name.clone(),
+                )
+            };
+            let key_event = |key, pressed| egui::Event::Key {
+                key,
+                physical_key: Some(key),
+                pressed,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            };
+            let _ = render(Vec::new());
+            let (output, _) = render(Vec::new());
+            let tree = output.platform_output.accesskit_update.unwrap();
+            let target = tree
+                .nodes
+                .iter()
+                .find(|(_, node)| {
+                    node.role() == egui::accesskit::Role::Button && node.label() == Some(label)
+                })
+                .unwrap()
+                .0;
+            let mut focus = tree.focus;
+            for _ in 0..60 {
+                if focus == target {
+                    break;
+                }
+                let _ = render(vec![key_event(egui::Key::Tab, true)]);
+                let (output, _) = render(vec![key_event(egui::Key::Tab, false)]);
+                focus = output.platform_output.accesskit_update.unwrap().focus;
+            }
+            assert_eq!(focus, target, "Tab must reach {label}");
+            let mut events = vec![key_event(key, true)];
+            if key == egui::Key::Space {
+                let text = egui::Event::Text(" ".to_owned());
+                if cfg!(target_arch = "wasm32") {
+                    events.insert(0, text);
+                } else {
+                    events.push(text);
+                }
+            }
+            let _ = render(events);
+            let (_, name) = render(vec![key_event(key, false)]);
+            assert!(!name.is_empty(), "{label} must open its naming page");
+            assert_eq!(
+                name,
+                name.trim(),
+                "{label} {key:?} must not type into its name"
+            );
+            let (_, edited) = render(vec![
+                egui::Event::Key {
+                    key: egui::Key::A,
+                    physical_key: Some(egui::Key::A),
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::CTRL | egui::Modifiers::COMMAND,
+                },
+                egui::Event::Paste("Production bias sweep".to_owned()),
+            ]);
+            assert_eq!(edited, "Production bias sweep");
+            assert_eq!(app.state.workspace.configuration_sets, catalog);
+            assert!(app.state.dialogs.configuration_sets.query.is_empty());
+        }
+    }
+}
+
+#[test]
 fn configuration_page_handoff_keeps_immediate_name_input() {
     for label in ["New configuration", "Clone"] {
         let ctx = Context::default();

@@ -56,25 +56,33 @@ impl InputTransition {
 
     /// The continuation of an accepted pointer or keyboard button activation.
     pub(crate) fn after_activation(input: &InputState) -> Self {
-        let end = input
-            .events
-            .iter()
-            .position(|event| {
-                matches!(
-                    event,
-                    Event::PointerButton {
-                        button: egui::PointerButton::Primary,
-                        pressed: false,
-                        ..
-                    } | Event::Key {
-                        key: Key::Enter | Key::Space,
-                        pressed: true,
-                        repeat: false,
-                        ..
-                    }
-                )
-            })
-            .map_or(0, |index| index + 1);
+        Self::after_activation_with_order(input, TextEventOrder::current())
+    }
+
+    fn after_activation_with_order(input: &InputState, order: TextEventOrder) -> Self {
+        let Some(index) = input.events.iter().position(|event| {
+            matches!(
+                event,
+                Event::PointerButton {
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    ..
+                } | Event::Key {
+                    key: Key::Enter | Key::Space,
+                    pressed: true,
+                    repeat: false,
+                    ..
+                }
+            )
+        }) else {
+            return Self::remaining(input);
+        };
+        if let Event::Key { key, modifiers, .. } = input.events[index]
+            && let Some(transition) = Self::after_keys_with_order(input, &[(key, modifiers)], order)
+        {
+            return transition;
+        }
+        let end = index + 1;
         Self {
             before: input.events[..end].to_vec(),
             following: input.events[end..].to_vec(),
@@ -241,6 +249,47 @@ mod tests {
             TextEventOrder::BeforeKey => vec![text, key],
             TextEventOrder::AfterKey => vec![key, text],
         }
+    }
+
+    #[test]
+    fn button_activation_owns_space_but_preserves_surrounding_edits() {
+        for order in [TextEventOrder::BeforeKey, TextEventOrder::AfterKey] {
+            for key in [Key::Space, Key::Enter] {
+                let preceding = vec![Event::Paste("earlier edit".to_owned())];
+                let following = vec![Event::Text("configuration".to_owned())];
+                let mut input = InputState::default();
+                input.events = preceding.clone();
+                if key == Key::Space {
+                    input.events.extend(typed(key, " ", Modifiers::NONE, order));
+                } else {
+                    input.events.push(press(key, Modifiers::NONE));
+                }
+                input.events.extend(following.clone());
+                let transition = InputTransition::after_activation_with_order(&input, order);
+                assert_eq!(transition.before, preceding);
+                assert_eq!(transition.following, following);
+            }
+        }
+    }
+
+    #[test]
+    fn pointer_activation_preserves_following_space_and_missing_activation_preserves_input() {
+        let mut input = InputState::default();
+        input.events = vec![Event::Text(" ".to_owned())];
+        let transition = InputTransition::after_activation(&input);
+        assert!(transition.before.is_empty());
+        assert_eq!(transition.following, input.events);
+
+        let pointer = Event::PointerButton {
+            pos: egui::Pos2::ZERO,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: Modifiers::NONE,
+        };
+        input.events.insert(0, pointer.clone());
+        let transition = InputTransition::after_activation(&input);
+        assert_eq!(transition.before, vec![pointer]);
+        assert_eq!(transition.following, vec![Event::Text(" ".to_owned())]);
     }
 
     #[test]
