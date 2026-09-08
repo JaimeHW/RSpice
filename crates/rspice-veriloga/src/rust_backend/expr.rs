@@ -17,10 +17,10 @@
 //! from another emitted value. `ddt` and `idt` are refused: a noise expression
 //! has no state table to bind a slot in.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use crate::ast::AccessKind;
-use crate::canonical_ir::{CanonicalIrArtifact, ExprId, HirAnalogOperator, HirExprKind};
+use crate::canonical_ir::{CanonicalIrArtifact, ExprId, HirExprKind};
 
 use super::RustBackendError;
 
@@ -134,24 +134,6 @@ impl ExprEmitter<'_> {
             let lowered = self.lower_conditional(id, *condition, *then_expr, *else_expr)?;
             self.emitted.insert(id, lowered.clone());
             return Ok(lowered);
-        }
-
-        if let HirExprKind::Binary { op, left, right } = &expression.kind
-            && op.as_str() == "Mul"
-        {
-            let left_has_side_effects =
-                self.expression_has_side_effects(*left, &mut HashSet::new())?;
-            let right_has_side_effects =
-                self.expression_has_side_effects(*right, &mut HashSet::new())?;
-            if !left_has_side_effects
-                && !right_has_side_effects
-                && (self.expression_value_is_known_zero(*left, &mut HashSet::new())?
-                    || self.expression_value_is_known_zero(*right, &mut HashSet::new())?)
-            {
-                let lowered = self.zero_value();
-                self.emitted.insert(id, lowered.clone());
-                return Ok(lowered);
-            }
         }
 
         let value_expr = match &expression.kind {
@@ -270,98 +252,6 @@ impl ExprEmitter<'_> {
             Err(self.unsupported(format!(
                 "identifier '{name}' is not a parameter or scalar variable"
             )))
-        }
-    }
-
-    fn zero_value(&self) -> ExprValue {
-        ExprValue {
-            value: "0.0".to_string(),
-        }
-    }
-
-    fn expression_value_is_known_zero(
-        &self,
-        id: ExprId,
-        visited: &mut HashSet<ExprId>,
-    ) -> Result<bool, RustBackendError> {
-        if !visited.insert(id) {
-            return Ok(false);
-        }
-        let expression = self
-            .artifact
-            .mir
-            .expressions
-            .get(usize::from(id))
-            .ok_or_else(|| self.internal(format!("expression {id} is outside MIR arena")))?;
-
-        match &expression.kind {
-            HirExprKind::Number { value, .. } => Ok(*value == 0.0),
-            HirExprKind::NoiseSource { .. } => Ok(true),
-            HirExprKind::Call { name, .. } if is_noise_name(name.as_str()) => Ok(true),
-            HirExprKind::Identifier { name } => Ok(self
-                .variables
-                .get(name.as_str())
-                .is_some_and(lowered_variable_is_constant_zero)),
-            // A branch current is never a known zero here: noise lowering runs
-            // with no contributions in scope, so there is nothing to inspect.
-            HirExprKind::NamedBranchAccess { kind: access, .. } if *access == AccessKind::Flow => {
-                Ok(false)
-            }
-            HirExprKind::Unary { op, operand } if matches!(op.as_str(), "Pos" | "Neg") => {
-                self.expression_value_is_known_zero(*operand, visited)
-            }
-            HirExprKind::Binary { op, left, right } if matches!(op.as_str(), "Add" | "Sub") => Ok(
-                self.expression_value_is_known_zero(*left, &mut HashSet::new())?
-                    && self.expression_value_is_known_zero(*right, &mut HashSet::new())?,
-            ),
-            HirExprKind::Binary { op, left, right } if op.as_str() == "Mul" => Ok(self
-                .expression_value_is_known_zero(*left, &mut HashSet::new())?
-                || self.expression_value_is_known_zero(*right, &mut HashSet::new())?),
-            HirExprKind::Binary { op, left, .. } if op.as_str() == "Div" => {
-                self.expression_value_is_known_zero(*left, &mut HashSet::new())
-            }
-            HirExprKind::Conditional {
-                condition,
-                then_expr,
-                else_expr,
-            } if !self.expression_has_side_effects(*condition, &mut HashSet::new())? => Ok(self
-                .expression_value_is_known_zero(*then_expr, visited)?
-                && self.expression_value_is_known_zero(*else_expr, &mut HashSet::new())?),
-            _ => Ok(false),
-        }
-    }
-
-    fn expression_has_side_effects(
-        &self,
-        id: ExprId,
-        visited: &mut HashSet<ExprId>,
-    ) -> Result<bool, RustBackendError> {
-        if !visited.insert(id) {
-            return Ok(false);
-        }
-        let expression = self
-            .artifact
-            .mir
-            .expressions
-            .get(usize::from(id))
-            .ok_or_else(|| self.internal(format!("expression {id} is outside MIR arena")))?;
-
-        match &expression.kind {
-            HirExprKind::Call { name, .. }
-                if is_ddt_name(name.as_str()) || is_idt_name(name.as_str()) =>
-            {
-                Ok(true)
-            }
-            _ => expression_children(&expression.kind).into_iter().try_fold(
-                false,
-                |has_side_effects, child| {
-                    if has_side_effects {
-                        Ok(true)
-                    } else {
-                        self.expression_has_side_effects(child, visited)
-                    }
-                },
-            ),
         }
     }
 
@@ -658,47 +548,14 @@ impl ExprEmitter<'_> {
         let normalized = name.to_ascii_lowercase();
         let args = self.lower_intrinsic_args(&normalized, args)?;
         let value = match normalized.as_str() {
-            "abs" | "fabs" => format!("{}.abs()", f64_binary_receiver(&args[0].value)),
-            "sqrt" => format!("{}.sqrt()", f64_binary_receiver(&args[0].value)),
-            "exp" => format!("{}.exp()", f64_binary_receiver(&args[0].value)),
             "limexp" => limexp_value_expr(&args[0].value),
             "__rspice_limited_exp" => limited_exp_value_expr(&args[0].value),
-            "ln" | "log" => format!("{}.ln()", f64_binary_receiver(&args[0].value)),
-            "log10" => format!("{}.log10()", f64_binary_receiver(&args[0].value)),
-            "sin" => format!("{}.sin()", f64_binary_receiver(&args[0].value)),
-            "cos" => format!("{}.cos()", f64_binary_receiver(&args[0].value)),
-            "tan" => format!("{}.tan()", f64_binary_receiver(&args[0].value)),
-            "atan" => format!("{}.atan()", f64_binary_receiver(&args[0].value)),
-            "sinh" => format!("{}.sinh()", f64_binary_receiver(&args[0].value)),
-            "cosh" => format!("{}.cosh()", f64_binary_receiver(&args[0].value)),
-            "tanh" => format!("{}.tanh()", f64_binary_receiver(&args[0].value)),
-            "asinh" => format!("{}.asinh()", f64_binary_receiver(&args[0].value)),
-            "acosh" => format!("{}.acosh()", f64_binary_receiver(&args[0].value)),
-            "atanh" => format!("{}.atanh()", f64_binary_receiver(&args[0].value)),
-            "floor" => format!("{}.floor()", f64_binary_receiver(&args[0].value)),
-            "ceil" => format!("{}.ceil()", f64_binary_receiver(&args[0].value)),
-            "pow" => power_value_expr(&args[0].value, &args[1].value),
-            "min" => format!(
-                "{}.min({})",
-                f64_binary_receiver(&args[0].value),
-                args[1].value
-            ),
-            "max" => format!(
-                "{}.max({})",
-                f64_binary_receiver(&args[0].value),
-                args[1].value
-            ),
-            "hypot" => format!(
-                "{}.hypot({})",
-                f64_binary_receiver(&args[0].value),
-                args[1].value
-            ),
-            "atan2" => format!(
-                "{}.atan2({})",
-                f64_binary_receiver(&args[0].value),
-                args[1].value
-            ),
-            _ => return Err(self.unsupported(format!("intrinsic function '{name}'"))),
+            _ => pure_intrinsic_value(
+                &normalized,
+                &args[0].value,
+                args.get(1).map(|argument| argument.value.as_str()),
+            )
+            .ok_or_else(|| self.unsupported(format!("intrinsic function '{name}'")))?,
         };
         Ok(self.emit_value(base, value))
     }
@@ -1135,67 +992,6 @@ pub fn parameter_field_names(artifact: &CanonicalIrArtifact) -> HashMap<String, 
         .collect()
 }
 
-fn lowered_variable_is_constant_zero(variable: &LoweredVariable) -> bool {
-    is_zero_derivative(&variable.value)
-}
-
-fn expression_children(kind: &HirExprKind) -> Vec<ExprId> {
-    let mut children = Vec::new();
-    match kind {
-        HirExprKind::NullArgument
-        | HirExprKind::Number { .. }
-        | HirExprKind::StringLiteral { .. }
-        | HirExprKind::Identifier { .. }
-        | HirExprKind::BranchAccess { .. }
-        | HirExprKind::NamedBranchAccess { .. } => {}
-        HirExprKind::SystemFunction { args, .. } | HirExprKind::Call { args, .. } => {
-            children.extend(args.iter().copied());
-        }
-        HirExprKind::Binary { left, right, .. } => {
-            children.push(*left);
-            children.push(*right);
-        }
-        HirExprKind::Unary { operand, .. } => {
-            children.push(*operand);
-        }
-        HirExprKind::Conditional {
-            condition,
-            then_expr,
-            else_expr,
-        } => {
-            children.push(*condition);
-            children.push(*then_expr);
-            children.push(*else_expr);
-        }
-        HirExprKind::ArrayAccess { index, .. } => {
-            children.push(*index);
-        }
-        HirExprKind::ArrayLiteral { elements, .. } => {
-            children.extend(elements.iter().copied());
-        }
-        HirExprKind::AnalogOperator { op } => push_analog_operator_children(op, &mut children),
-        HirExprKind::NoiseSource { operands, .. } => {
-            children.extend(operands.iter().copied());
-        }
-    }
-    children
-}
-
-fn push_analog_operator_children(op: &HirAnalogOperator, children: &mut Vec<ExprId>) {
-    match op {
-        HirAnalogOperator::Limit {
-            proposed,
-            candidate,
-            type_metadata,
-            ..
-        } => {
-            children.extend([*proposed, *candidate]);
-            children.extend(type_metadata.iter().copied());
-        }
-        HirAnalogOperator::LimiterArgument { .. } => {}
-    }
-}
-
 // The two emitters below spell the thresholds as literal text because the
 // generated bundle's digest is a function of those bytes, and formatting them
 // from a constant would make the bundle hostage to how `f64` happens to
@@ -1217,73 +1013,6 @@ fn limited_exp_value_expr(arg: &str) -> String {
     format!(
         "{{ let limited_exp_arg = {arg}; if limited_exp_arg > 80.0 {{ LIMEXP_MAX * (1.0 + limited_exp_arg - 80.0) }} else if limited_exp_arg < -80.0 {{ 1.804851387e-35 }} else {{ limited_exp_arg.exp() }} }}"
     )
-}
-
-fn is_zero_derivative(derivative: &str) -> bool {
-    let derivative = strip_redundant_outer_parens(derivative.trim());
-    derivative == "0.0" || derivative == "-0.0" || product_derivative_has_zero_factor(derivative)
-}
-
-fn is_one_derivative(derivative: &str) -> bool {
-    derivative.trim() == "1.0"
-}
-
-fn is_negative_one_derivative(derivative: &str) -> bool {
-    derivative.trim() == "-1.0"
-}
-
-fn product_derivative_has_zero_factor(derivative: &str) -> bool {
-    let mut depth = 0usize;
-    let mut factor_start = 0usize;
-    let mut saw_product = false;
-    for (index, ch) in derivative.char_indices() {
-        match ch {
-            '(' => depth = depth.saturating_add(1),
-            ')' => depth = depth.saturating_sub(1),
-            '*' if depth == 0 => {
-                saw_product = true;
-                if is_zero_derivative(&derivative[factor_start..index]) {
-                    return true;
-                }
-                factor_start = index + ch.len_utf8();
-            }
-            _ => {}
-        }
-    }
-    saw_product && is_zero_derivative(&derivative[factor_start..])
-}
-
-fn strip_redundant_outer_parens(mut value: &str) -> &str {
-    loop {
-        let trimmed = value.trim();
-        let Some(inner) = trimmed
-            .strip_prefix('(')
-            .and_then(|candidate| candidate.strip_suffix(')'))
-        else {
-            return trimmed;
-        };
-        if !outer_parens_wrap_entire_expr(trimmed) {
-            return trimmed;
-        }
-        value = inner;
-    }
-}
-
-fn outer_parens_wrap_entire_expr(value: &str) -> bool {
-    let mut depth = 0usize;
-    for (index, ch) in value.char_indices() {
-        match ch {
-            '(' => depth = depth.saturating_add(1),
-            ')' => {
-                depth = depth.saturating_sub(1);
-                if depth == 0 && index + ch.len_utf8() != value.len() {
-                    return false;
-                }
-            }
-            _ => {}
-        }
-    }
-    depth == 0
 }
 
 fn trim_enclosing_parentheses(mut expr: &str) -> &str {
@@ -1319,6 +1048,81 @@ mod tests {
     use super::{binary_value, power_value_expr};
 
     #[test]
+    fn mathematical_noise_values_preserve_zero_signs_and_domains() {
+        let mut source =
+            String::from("fn main() { for x in [-2.0_f64,2.0,-0.0,0.0] { let params=[x];\n");
+        for (index, expression) in [
+            "atan2(0.0*x,-1.0)",
+            "atan2(0.0/x,-1.0)",
+            "atan2(-0.0,-1.0)",
+            "atan2(0.0+x,-1.0)",
+            "atan2(x-(-0.0),-1.0)",
+            "atan2(x>0.0 ? -0.0 : 0.0,-1.0)",
+            "0.0/(x-x)",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let artifact=crate::VerilogACompiler::default().compile_canonical_ir(&format!(
+                "module noise_value(p); inout p; electrical p; parameter real x=2.0; analog I(p)<+white_noise(4.0+({expression}),\"value\"); endmodule"
+            )).unwrap();
+            let lowered = super::lower_noise_value_expr(
+                &artifact,
+                artifact.noise_sources.sources[0].psd.id,
+                &format!("n{index}"),
+                &super::parameter_field_names(&artifact),
+                &Default::default(),
+                &Default::default(),
+            )
+            .unwrap();
+            let expected = match index {
+                0 => "(0.0*x).atan2(-1.0)",
+                1 => "(0.0/x).atan2(-1.0)",
+                2 => "(-0.0_f64).atan2(-1.0)",
+                3 => "(0.0+x).atan2(-1.0)",
+                4 => "(x-(-0.0)).atan2(-1.0)",
+                5 => "(if x>0.0 {-0.0_f64} else {0.0_f64}).atan2(-1.0)",
+                _ => "0.0/(x-x)",
+            };
+            source.push_str(&format!(
+                "{{ {} let actual={}; let expected=4.0+({expected}); assert!((expected.is_nan() && actual.is_nan()) || expected.to_bits()==actual.to_bits(),\"case {index}, x={{x:?}}, expected {{expected:?}}, got {{actual:?}}\"); }}\n",
+                lowered.lines.join("\n"),lowered.value,
+            ));
+        }
+        source.push_str("} }");
+        let directory =
+            std::env::temp_dir().join(format!("rspice-noise-math-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let input = directory.join("noise_math.rs");
+        let executable = directory
+            .join("noise_math")
+            .with_extension(std::env::consts::EXE_EXTENSION);
+        std::fs::write(&input, source).unwrap();
+        let built = std::process::Command::new("rustc")
+            .args(["--edition=2024", "-C", "debuginfo=0"])
+            .arg(&input)
+            .arg("-o")
+            .arg(&executable)
+            .output()
+            .unwrap();
+        assert!(
+            built.status.success(),
+            "{}",
+            String::from_utf8_lossy(&built.stderr)
+        );
+        let ran = std::process::Command::new(&executable).output().unwrap();
+        std::fs::remove_file(&input).unwrap();
+        std::fs::remove_file(&executable).unwrap();
+        let _ = std::fs::remove_file(executable.with_extension("pdb"));
+        std::fs::remove_dir(&directory).unwrap();
+        assert!(
+            ran.status.success(),
+            "{}",
+            String::from_utf8_lossy(&ran.stderr)
+        );
+    }
+
+    #[test]
     fn expression_backend_specializes_integer_power_values() {
         assert_eq!(power_value_expr("x", "0.0"), "1.0");
         assert_eq!(power_value_expr("x", "1.0"), "x");
@@ -1346,7 +1150,6 @@ fn unary_value(op: &str, operand: &str) -> Result<String, RustBackendError> {
             "ctx.integer_result({})",
             integer_binary_result("BitXor", operand, "-1.0")
         )),
-        "Neg" if is_zero_derivative(operand) => Ok("0.0".to_string()),
         "Neg" => Ok(negate_value(operand)),
         "Pos" => Ok(operand.to_string()),
         _ => Err(RustBackendError::unsupported(
@@ -1362,8 +1165,6 @@ fn conditional_expr(condition: &str, then_expr: &str, else_expr: &str) -> String
     let else_expr = else_expr.trim();
     if then_expr == else_expr {
         then_expr.to_string()
-    } else if is_zero_derivative(then_expr) && is_zero_derivative(else_expr) {
-        "0.0".to_string()
     } else {
         format!("if {condition} {{ {then_expr} }} else {{ {else_expr} }}")
     }
@@ -1406,10 +1207,10 @@ fn binary_value(op: &str, left: &str, right: &str) -> Result<String, RustBackend
             "ctx.integer_result({})",
             integer_binary_result(op, left, right)
         )),
-        "Add" => Ok(add_expr(left, right)),
-        "Sub" => Ok(sub_expr(left, right)),
-        "Mul" => Ok(mul_expr(left, right)),
-        "Div" => Ok(div_expr(left, right)),
+        "Add" => Ok(format!("({left} + {right})")),
+        "Sub" => Ok(format!("({left} - {right})")),
+        "Mul" => Ok(format!("({left} * {right})")),
+        "Div" => Ok(format!("({left} / {right})")),
         // Even a zero numerator must evaluate its divisor: 0 % 0 is invalid.
         "Mod" => Ok(format!("({left} % {right})")),
         "Pow" => Ok(power_value_expr(left, right)),
@@ -1440,53 +1241,28 @@ pub(super) fn integer_binary_result(op: &str, left: &str, right: &str) -> String
     }
 }
 
-fn add_expr(left: &str, right: &str) -> String {
-    if is_zero_derivative(left) {
-        right.to_string()
-    } else if is_zero_derivative(right) {
-        left.to_string()
-    } else {
-        format!("({left} + {right})")
-    }
+/// Shared value emission for mathematical noise operands and parameter defaults.
+/// The caller has lowered operands in source order; the optional second operand
+/// also checks arity without silently discarding an argument.
+pub(super) fn pure_intrinsic_value(name: &str, left: &str, right: Option<&str>) -> Option<String> {
+    let method = match (name, right) {
+        ("pow", Some(right)) => return Some(power_value_expr(left, right)),
+        ("min" | "max" | "hypot" | "atan2", Some(right)) => {
+            return Some(format!("{}.{name}({right})", f64_binary_receiver(left)));
+        }
+        ("abs" | "fabs", None) => "abs",
+        ("ln" | "log", None) => "ln",
+        (
+            "sqrt" | "exp" | "log10" | "sin" | "cos" | "tan" | "asin" | "acos" | "atan" | "sinh"
+            | "cosh" | "tanh" | "asinh" | "acosh" | "atanh" | "floor" | "ceil",
+            None,
+        ) => name,
+        _ => return None,
+    };
+    Some(format!("{}.{method}()", f64_binary_receiver(left)))
 }
 
-fn sub_expr(left: &str, right: &str) -> String {
-    if is_zero_derivative(right) {
-        left.to_string()
-    } else if is_zero_derivative(left) {
-        unary_value("Neg", right).expect("negation is supported")
-    } else {
-        format!("({left} - {right})")
-    }
-}
-
-fn mul_expr(left: &str, right: &str) -> String {
-    if is_zero_derivative(left) || is_zero_derivative(right) {
-        "0.0".to_string()
-    } else if is_one_derivative(left) {
-        right.to_string()
-    } else if is_one_derivative(right) {
-        left.to_string()
-    } else if is_negative_one_derivative(left) {
-        unary_value("Neg", right).expect("negation is supported")
-    } else if is_negative_one_derivative(right) {
-        unary_value("Neg", left).expect("negation is supported")
-    } else {
-        format!("({left} * {right})")
-    }
-}
-
-fn div_expr(left: &str, right: &str) -> String {
-    if is_zero_derivative(left) {
-        "0.0".to_string()
-    } else if is_one_derivative(right) {
-        left.to_string()
-    } else {
-        format!("({left} / {right})")
-    }
-}
-
-fn power_value_expr(base: &str, exponent: &str) -> String {
+pub(super) fn power_value_expr(base: &str, exponent: &str) -> String {
     if let Some(exponent) = integer_power_exponent_literal(exponent) {
         constant_integer_power_value_expr(base, exponent)
     } else {
@@ -1599,6 +1375,8 @@ pub(crate) fn is_intrinsic_name(name: &str) -> bool {
             | "sin"
             | "cos"
             | "tan"
+            | "asin"
+            | "acos"
             | "atan"
             | "sinh"
             | "cosh"
@@ -1646,9 +1424,7 @@ fn format_f64(value: f64) -> String {
 
 fn negate_value(value: &str) -> String {
     let value = value.trim();
-    if value == "0.0" || value == "-0.0" {
-        "0.0".to_string()
-    } else if let Some(positive) = value.strip_prefix('-') {
+    if let Some(positive) = value.strip_prefix('-') {
         if scan_numeric_literal(positive).is_some() {
             positive.to_string()
         } else {

@@ -7947,7 +7947,7 @@ pub(super) fn canonical_temperature_preprocess(
 	let Y=parameters[834]+ X;
 	let Z=parameters[835]+ X;
 	let AA=parameters[836]+ X;
-	let AB=U* (U.sqrt());
+	let AB=U.powf(1.5f64);
 	let AD=AB* ((AC* (staged[2]- (Y* W))).exp());
 	let AE=AB* ((AC* (staged[3]- (Z* W))).exp());
 	let AF=AB* ((AC* (staged[4]- (AA* W))).exp());

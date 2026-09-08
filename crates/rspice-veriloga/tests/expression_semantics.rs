@@ -15,6 +15,10 @@ fn signed_zero_in_authored_factors_survives_differentiation() {
         ("0.0/V(q)", [-2.0, 2.0], |x| 0.0 / x),
         ("0.0+V(q)", [-0.0, 0.0], |x| 0.0 + x),
         ("V(q)-(-0.0)", [-0.0, 0.0], |x| x - (-0.0)),
+        ("pow(0.0*V(q),0.5)", [-2.0, 2.0], |x| (0.0 * x).powf(0.5)),
+        ("pow(sqrt(0.0*V(q)),0.5)", [-2.0, 2.0], |x| {
+            (0.0 * x).sqrt().powf(0.5)
+        }),
     ] {
         for derivative in [false, true] {
             let expression = format!("V(p)*atan2({zero},-1.0)");

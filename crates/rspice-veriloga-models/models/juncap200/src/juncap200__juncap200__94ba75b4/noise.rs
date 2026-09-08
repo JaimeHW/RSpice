@@ -920,7 +920,7 @@ impl Instance {
 		let BO=L+ BN;
 		let BP=N+ BN;
 		let BQ=P+ BN;
-		let BR=BK* (BK.sqrt());
+		let BR=BK.powf(1.5f64);
 		let BS=BR* ((C* ((M* J)- (BO* BM))).exp());
 		let BT=BR* ((C* ((O* J)- (BP* BM))).exp());
 		let BU=BR* ((C* ((Q* J)- (BQ* BM))).exp());

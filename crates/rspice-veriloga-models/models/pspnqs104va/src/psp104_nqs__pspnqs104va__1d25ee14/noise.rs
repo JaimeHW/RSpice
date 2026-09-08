@@ -4510,7 +4510,7 @@ impl Instance {
 		let HI=W+ HH;
 		let HJ=Y+ HH;
 		let HK=AA+ HH;
-		let HL=HE* (HE.sqrt());
+		let HL=HE.powf(1.5f64);
 		let HM=HL* ((G* ((X* U)- (HI* HG))).exp());
 		let HN=HL* ((G* ((Z* U)- (HJ* HG))).exp());
 		let HO=HL* ((G* ((AB* U)- (HK* HG))).exp());

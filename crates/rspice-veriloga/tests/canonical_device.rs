@@ -22,6 +22,79 @@ use std::process::Command;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 #[test]
+fn generated_mathematical_parameter_defaults_follow_overrides_atomically() {
+    let expressions = [
+        ("abs(-x)", "(-x).abs()"),
+        ("fabs(-x)", "(-x).abs()"),
+        ("sqrt(x)", "x.sqrt()"),
+        ("exp(x)", "x.exp()"),
+        ("ln(x)", "x.ln()"),
+        ("log(x)", "x.ln()"),
+        ("log10(x)", "x.log10()"),
+        ("sin(x)", "x.sin()"),
+        ("cos(x)", "x.cos()"),
+        ("tan(x)", "x.tan()"),
+        ("asin(x/4.0)", "(x/4.0).asin()"),
+        ("acos(x/4.0)", "(x/4.0).acos()"),
+        ("atan(x)", "x.atan()"),
+        ("sinh(x)", "x.sinh()"),
+        ("cosh(x)", "x.cosh()"),
+        ("tanh(x)", "x.tanh()"),
+        ("asinh(x)", "x.asinh()"),
+        ("acosh(x)", "x.acosh()"),
+        ("atanh(x/4.0)", "(x/4.0).atanh()"),
+        ("floor(x/2.0)", "(x/2.0).floor()"),
+        ("ceil(x/2.0)", "(x/2.0).ceil()"),
+        ("pow(x,0.5)", "x.powf(0.5)"),
+        ("x**1.5", "x.powf(1.5)"),
+        ("hypot(x,2.0)", "x.hypot(2.0)"),
+        ("atan2(x,-1.0)", "x.atan2(-1.0)"),
+        ("min(x,2.0)", "x.min(2.0)"),
+        ("max(x,2.0)", "x.max(2.0)"),
+        (
+            "x>1.0 ? ln(x-1.0) : 0.0",
+            "if x>1.0 { (x-1.0).ln() } else {0.0}",
+        ),
+    ];
+    let declarations = expressions
+        .iter()
+        .enumerate()
+        .map(|(i, (expression, _))| format!("parameter real p{i}={expression};"))
+        .collect::<String>();
+    let source = format!(
+        "module math_defaults(p); inout p; electrical p; parameter real x=2.0; {declarations} analog I(p)<+p0*V(p); endmodule"
+    );
+    let expected = expressions
+        .iter()
+        .map(|(_, expected)| *expected)
+        .collect::<Vec<_>>()
+        .join(",");
+    let main = format!(
+        r#"
+let mut instance=device::state::Instance::new(&[0]);
+instance.finalize_parameters().unwrap();
+for x in [1.0_f64, 1.25, 2.0, 3.0] {{
+    instance.set_parameter("x",x).unwrap();
+    let expected=[{expected}];
+    for (i,expected) in expected.into_iter().enumerate() {{
+        let actual=instance.params.values[i+1];
+        assert!((actual-expected).abs() <= 1e-14*expected.abs().max(1.0),"parameter {{i}}, x={{x}}, expected {{expected}}, got {{actual}}");
+    }}
+}}
+let before=instance.params.values;
+let given=instance.param_given.clone();
+assert!(instance.set_parameter("x",0.0).is_err());
+assert_eq!(instance.params.values,before);
+assert_eq!(instance.param_given,given);
+"#
+    );
+    let name = "mathematical defaults";
+    let (state, stamp, noise) = generated_parts(&source, name);
+    run_generated_main(name, &state, &stamp, &noise, &main)
+        .unwrap_or_else(|report| panic!("{report}"));
+}
+
+#[test]
 fn generated_signed_zero_factors_preserve_stamps_defaults_and_noise() {
     let source = r#"
 module signed_zero(p,q);
@@ -33,7 +106,9 @@ analog begin
     if (mode==0) z=0.0*V(q);
     else if (mode==1) z=0.0/V(q);
     else if (mode==2) z=0.0+V(q);
-    else z=V(q)-(-0.0);
+    else if (mode==3) z=V(q)-(-0.0);
+    else if (mode==4) z=pow(0.0*V(q),0.5);
+    else z=pow(sqrt(0.0*V(q)),0.5);
     a=atan2(z,-1.0);
     I(p)<+V(p)*a+white_noise(4.0+a,"branch_cut");
 end
@@ -55,10 +130,10 @@ for sign in [-1.0_f64,1.0] {
     instance.set_parameter("sign",sign).unwrap();
     assert_eq!(instance.params.values[2].to_bits(), (0.0/sign).to_bits());
 }
-for mode in 0..4 {
+for mode in 0..6 {
     instance.set_parameter("mode",f64::from(mode)).unwrap();
-    for q in if mode<2 {[-2.0,2.0]} else {[-0.0,0.0]} {
-        let z:f64=match mode {0=>0.0*q,1=>0.0/q,2=>0.0+q,_=>q-(-0.0)};
+    for q in if mode==2 || mode==3 {[-0.0_f64,0.0]} else {[-2.0,2.0]} {
+        let z:f64=match mode {0=>0.0*q,1=>0.0/q,2=>0.0+q,3=>q-(-0.0),4=>(0.0*q).powf(0.5),_=>(0.0*q).sqrt().powf(0.5)};
         let expected=z.atan2(-1.0);
         let bias=[1.0,q];
         let ctx=runtime::GeneratedEvalContext { voltages:&bias,temperature:300.0 };

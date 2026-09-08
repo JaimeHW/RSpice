@@ -105,7 +105,8 @@ pub const WASM_JIT_ABI_VERSION: u32 = 11;
 /// 19 to 20 preserves signed integer arithmetic and its checked helper calls.
 /// 20 to 21 preserves ddx primal validation through symbolic differentiation.
 /// 21 to 22 preserves signed zero in primal arithmetic and derivative factors.
-pub const WASM_JIT_EMITTER_VERSION: u32 = 22;
+/// 22 to 23 requires sign proofs before specializing fractional powers.
+pub const WASM_JIT_EMITTER_VERSION: u32 = 23;
 
 /// Hard ceiling for one qualified shipped model's generated module.
 pub const SHIPPED_MODEL_WASM_CODE_SIZE_BUDGET_BYTES: usize = 32 * 1024 * 1024;
@@ -1957,6 +1958,10 @@ endmodule
             ("0.0/V(q)", [-2.0, 2.0], |x| 0.0 / x),
             ("0.0+V(q)", [-0.0, 0.0], |x| 0.0 + x),
             ("V(q)-(-0.0)", [-0.0, 0.0], |x| x - (-0.0)),
+            ("pow(0.0*V(q),0.5)", [-2.0, 2.0], |x| (0.0 * x).powf(0.5)),
+            ("pow(sqrt(0.0*V(q)),0.5)", [-2.0, 2.0], |x| {
+                (0.0 * x).sqrt().powf(0.5)
+            }),
         ] {
             let source = format!(
                 "module signed_zero(p,q); inout p,q; electrical p,q; analog I(p)<+V(p)*atan2({zero},-1.0); endmodule"
