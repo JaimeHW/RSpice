@@ -210,8 +210,8 @@ mod wasm_tests {
 
     #[wasm_bindgen_test]
     fn vbic_charge_pss_matches_analytic_rc_in_wasm() {
-        for polarity in ["NPN", "PNP"] {
-            let netlist = rspice_core::Netlist::parse(&format!("* VBIC charge PSS\nV1 in 0 SIN(0 0.1 1meg)\nR1 in out 1k\nQ1 0 out 0 vm\n.model vm {polarity}(LEVEL=4 IS=1e-40 IBEI=0 IBCI=0 CBEO=159p RCX=0 RCI=0 RBX=0 RBI=0 RBP=0)\n.end\n")).unwrap();
+        for (polarity, level) in [("NPN", 4), ("PNP", 4), ("NPN", 11), ("PNP", 11)] {
+            let netlist = rspice_core::Netlist::parse(&format!("* VBIC charge PSS\nV1 in 0 SIN(0 0.1 1meg)\nR1 in out 1k\nQ1 0 out 0 vm\n.model vm {polarity}(LEVEL={level} IS=1e-40 IBEI=0 IBCI=0 CBEO=159p RCX=0 RCI=0 RBX=0 RBI=0 RBP=0)\n.end\n")).unwrap();
             let analysis = rspice_core::Engine::default()
                 .run_pss_with_abort(
                     &netlist,

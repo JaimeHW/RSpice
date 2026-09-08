@@ -705,6 +705,73 @@ fn xyce_vbic_levels_11_and_12_use_vbic_internal_topology() {
 }
 
 #[test]
+fn three_terminal_vbic_fourth_pin_is_thermal_in_every_native_dialect() {
+    let deck = "VBIC three-terminal external temperature\n\
+        Vc c 0 1.2\nVb b 0 0.7\nVdt dt 0 20\nQ1 c b 0 dt vm\n\
+        .model vm NPN(LEVEL=11 IS=1e-16 IBEI=1e-18 IBCI=1e-18\n\
+        + RCI=0 RBI=0 RTH=100 TNOM=27)\n.temp 27\n.end\n";
+    let warmer = deck
+        .replace("Q1 c b 0 dt vm", "Q1 c b 0 vm")
+        .replace(".temp 27", ".temp 47");
+    for dialect in [SpiceDialect::Ngspice, SpiceDialect::Xyce] {
+        let config = SimulationConfig::default().with_spice_dialect(dialect);
+        assert_rel_close(
+            &format!("{dialect:?} external temperature collector current"),
+            branch_current_with_config(deck, "vc", config.clone()),
+            branch_current_with_config(&warmer, "vc", config),
+            1e-9,
+        );
+    }
+    let extra = deck.replace("Q1 c b 0 dt vm", "Q1 c b 0 0 dt vm");
+    let error = build(&extra).expect_err("LEVEL=11 must reject a fifth terminal");
+    assert!(
+        error.contains("LEVEL=11") && error.contains("fifth terminal"),
+        "{error}"
+    );
+}
+
+#[test]
+fn three_terminal_vbic_ignores_substrate_parameters_in_dc_ac_and_thermal_power() {
+    // Xyce vbic_1p3.va compiles Ibcp/Iccp/Irs/Qbcp and their power terms
+    // only under fourTerminal. Even nonzero model parameters must not create
+    // an SI node or perturb the three-terminal electrical/thermal solution.
+    for (kind, sign) in [("NPN", 1.0), ("PNP", -1.0)] {
+        for rbp in [0.0, 10.0] {
+            let deck = |substrate: &str| {
+                format!(
+                    "three-terminal VBIC substrate isolation\n\
+                 Vc c 0 {}\nVb b 0 {} AC 1\nQ1 c b 0 vm\n\
+                 .model vm {kind}(LEVEL=11 IS=1e-14 IBEI=1e-16 IBCI=1e-16\n\
+                 + RCX=10 RCI=20 RBX=10 RBI=40 RE=1 RBP={rbp} ISP=1e-15 IKP=1u\n\
+                 + CJE=10p CJC=5p CJEP=3p TF=10n TR=2n SELFT=1 RTH=300 CTH=1p\n\
+                 + {substrate})\n.end\n",
+                    0.5 * sign,
+                    0.65 * sign
+                )
+            };
+            let baseline = deck("RS=0 CJCP=0 CCSO=0 IBCIP=0 IBCNP=0");
+            let unused = deck("RS=123 CJCP=1u CCSO=2u IBCIP=1m IBCNP=2m");
+            let expected = op_result(&baseline);
+            let actual = op_result(&unused);
+            assert_eq!(expected.node_names, actual.node_names);
+            assert!(!actual.node_names.iter().any(|name| name.contains(".__si.")));
+            assert_eq!(
+                actual.node_names.iter().any(|name| name.contains(".__bp.")),
+                rbp > 0.0,
+                "ignored substrate diodes must not prevent BP collapse"
+            );
+            assert!(voltage(&actual, "q1.__rth.internal") > 1e-4);
+            assert_eq!(expected.node_voltages, actual.node_voltages);
+            assert_eq!(expected.branch_currents, actual.branch_currents);
+            assert_eq!(
+                ac_branch_current(&baseline, "vb", 1e6),
+                ac_branch_current(&unused, "vb", 1e6),
+            );
+        }
+    }
+}
+
+#[test]
 fn ngspice_vbic_level9_uses_vbic_internal_topology() {
     let deck = op_deck(
         ".model qmod NPN (LEVEL=9 IS=1e-16 IBEI=1e-18 IBCI=1e-18 RCX=1 RCI=2 RBX=1 RBI=2 RE=1)",

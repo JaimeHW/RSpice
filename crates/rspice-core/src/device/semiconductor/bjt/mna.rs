@@ -36,6 +36,10 @@ pub(crate) struct VbicNoiseOperatingModel {
 }
 
 impl Bjt {
+    pub(crate) fn uses_three_terminal_vbic(&self) -> bool {
+        self.vbic_three_terminal
+    }
+
     /// Matrix-node incidence of each structurally present electrical VBIC charge.
     /// Constant offsets in charge do not create a shooting coordinate, and
     /// collapsed/disabled states retain no independent voltage difference.
@@ -56,7 +60,7 @@ impl Bjt {
             self.cjep_nominal > 0.0 || (self.tr != 0.0 && self.isp_nominal > 0.0),
             self.cbeo_nominal > 0.0,
             self.cbco_nominal > 0.0,
-            self.cjcp_nominal > 0.0 || self.ccso_nominal > 0.0,
+            !self.vbic_three_terminal && (self.cjcp_nominal > 0.0 || self.ccso_nominal > 0.0),
         ];
         let nodes = [
             (self.node_bi, self.node_ei),
@@ -426,6 +430,11 @@ impl Bjt {
         })
     }
 
+    #[inline]
+    pub(in crate::device::semiconductor::bjt) fn has_substrate_resistance(&self) -> bool {
+        !self.vbic_three_terminal && Self::series_active(self.rs)
+    }
+
     /// True when the parasitic (bp) state carries its own KCL row; mirrors the
     /// `solve_vbp` condition of the intrinsic residual so the promoted
     /// topology and the reduced solve collapse the same states.
@@ -434,8 +443,7 @@ impl Bjt {
         Self::series_active(self.rbp)
             || self.ibeip > 0.0
             || self.ibenp > 0.0
-            || self.ibcip > 0.0
-            || self.ibcnp > 0.0
+            || (!self.vbic_three_terminal && (self.ibcip > 0.0 || self.ibcnp > 0.0))
     }
 
     /// Allocate the VBIC internal nodes per ngspice's collapse rules
@@ -476,7 +484,9 @@ impl Bjt {
         } else {
             self.node_cx
         };
-        self.node_si = if Self::series_active(self.rs) {
+        self.node_si = if self.vbic_three_terminal {
+            0
+        } else if self.has_substrate_resistance() {
             alloc("si")
         } else {
             self.node_substrate
@@ -532,7 +542,7 @@ impl Bjt {
             IDX_VBI => Self::series_active(self.rbi),
             IDX_VEI => Self::series_active(self.re),
             IDX_VBP => self.vbic_solves_vbp(),
-            IDX_VSI => Self::series_active(self.rs),
+            IDX_VSI => self.has_substrate_resistance(),
             IDX_VRTH => self.self_heating_enabled(),
             _ => false,
         }
@@ -614,8 +624,8 @@ impl Bjt {
         if !self.vbic_solves_vbp() {
             state[IDX_VBP] = state[IDX_VCX];
         }
-        if !Self::series_active(self.rs) {
-            state[IDX_VSI] = vs;
+        if !self.has_substrate_resistance() {
+            state[IDX_VSI] = if self.vbic_three_terminal { 0.0 } else { vs };
         }
         if !self.self_heating_enabled() {
             state[IDX_VRTH] = 0.0;
@@ -1050,10 +1060,10 @@ mod tests {
         }
     }
 
-    fn diffamp_pnp() -> Bjt {
+    fn diffamp_pnp(level: Value) -> Bjt {
         let mut params = std::collections::HashMap::new();
         for (key, value) in [
-            ("LEVEL", 4.0),
+            ("LEVEL", level),
             ("IS", 1e-16),
             ("IBEI", 1e-18),
             ("IBEN", 5e-15),
@@ -1106,6 +1116,47 @@ mod tests {
     }
 
     #[test]
+    fn three_terminal_vbic_retains_parasitic_base_transport_and_diffusion_charge() {
+        let params = std::collections::HashMap::from([
+            ("LEVEL".to_string(), 11.0),
+            ("RCI".to_string(), 0.0),
+            ("RBI".to_string(), 0.0),
+            ("RBP".to_string(), 100.0),
+            ("ISP".to_string(), 1e-15),
+            ("IKP".to_string(), 1e-4),
+            ("WSP".to_string(), 0.4),
+            ("TR".to_string(), 2e-9),
+            ("CJEP".to_string(), 0.0),
+            ("CJCP".to_string(), 1e-6),
+            ("RS".to_string(), 100.0),
+        ]);
+        let mut bjt = Bjt::new_npn("q1".to_string(), 1, 2, 0).with_params(&params);
+        let mut next = 3;
+        bjt.assign_vbic_internal_nodes(|_| {
+            let node = next;
+            next += 1;
+            node
+        });
+        let mut bias = vec![0.0; next - 1];
+        bias[bjt.node_collector - 1] = 0.1;
+        bias[bjt.node_base - 1] = 0.7;
+        bias[bjt.node_bp - 1] = 0.05;
+        // Independent threeTerminal equations from Xyce vbic_1p3.va:
+        // Ifp remains in both qbp (Rbp) and TR*Ifp (Qbep) without Iccp.
+        let vt = 1.380662e-23 * 300.15 / 1.602189e-19;
+        let ifp = 1e-15 * (0.4 * (0.65_f64 / vt).exp() + 0.6 * (0.6_f64 / vt).exp() - 1.0);
+        let qbp = 0.5 * (1.0 + (1.0 + 4.0 * ifp / 1e-4).sqrt());
+        assert!(qbp > 1.05);
+        let irbp = bjt.irbp_branch(0.7, 0.7, 0.1, 0.1, 0.05, 0.0);
+        assert!((irbp.current - (-0.05 / 100.0) * qbp).abs() < 1e-15);
+        let (charges, _, _) = bjt.vbic_mna_charge_state_at_solution(&bias);
+        assert!((charges[4].charge - 2e-9 * ifp).abs() < 1e-22);
+        assert!(!charges[7].is_active());
+        assert_eq!(bjt.vbic_electrical_charge_storage_nodes()[7], None);
+        assert_eq!(bjt.node_si, 0);
+    }
+
+    #[test]
     fn external_vbic_thermal_terminal_enables_rth_without_selft() {
         let params = std::collections::HashMap::from([
             ("LEVEL".to_string(), 11.0),
@@ -1136,14 +1187,22 @@ mod tests {
     /// missing Jacobian entry shows up as a first-order mismatch.
     #[test]
     fn promoted_stamp_matches_finite_difference_jacobian() {
-        let mut bjt = diffamp_pnp();
+        for level in [4.0, 11.0] {
+            assert_promoted_stamp_matches_finite_difference_jacobian(level);
+        }
+    }
+
+    fn assert_promoted_stamp_matches_finite_difference_jacobian(level: Value) {
+        let mut bjt = diffamp_pnp(level);
         let n = 13;
 
         // Bias near the diffamp PNP operating point with the b-c junction at
         // the saturation knife edge (vbci slightly forward, PNP polarity).
         let mut v = vec![0.0; n];
         let assign = |v: &mut Vec<Value>, node: NodeId, value: Value| {
-            v[node - 1] = value;
+            if node > 0 {
+                v[node - 1] = value;
+            }
         };
         assign(&mut v, bjt.node_collector, 2.6234);
         assign(&mut v, bjt.node_base, 2.6180);
@@ -1210,12 +1269,20 @@ mod tests {
     /// turns on exponentially.
     #[test]
     fn promoted_charge_branches_match_finite_difference() {
-        let bjt = diffamp_pnp();
+        for level in [4.0, 11.0] {
+            assert_promoted_charge_branches_match_finite_difference(level);
+        }
+    }
+
+    fn assert_promoted_charge_branches_match_finite_difference(level: Value) {
+        let bjt = diffamp_pnp(level);
         let n = 13;
 
         let mut v = vec![0.0; n];
         let assign = |v: &mut Vec<Value>, node: NodeId, value: Value| {
-            v[node - 1] = value;
+            if node > 0 {
+                v[node - 1] = value;
+            }
         };
         assign(&mut v, bjt.node_collector, 2.6234);
         assign(&mut v, bjt.node_base, 2.6180);
@@ -1301,7 +1368,7 @@ mod tests {
     /// allows.
     #[test]
     fn repeating_a_promoted_candidate_does_not_advance_the_limiter_twice() {
-        let mut bjt = diffamp_pnp();
+        let mut bjt = diffamp_pnp(4.0);
         let n = 13;
         // PNP: a forward B-E junction is a base below the emitter, so this step
         // opens vbei by well over tVcrit and pnjlim has to replace it.

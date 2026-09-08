@@ -434,7 +434,7 @@ impl Bjt {
             branches[6] = qbco;
         }
 
-        if self.cjcp > 0.0 || self.ccso > 0.0 {
+        if !self.vbic_three_terminal && (self.cjcp > 0.0 || self.ccso > 0.0) {
             let mut qbcp = BjtChargeBranch {
                 pos_internal: Some(IDX_VSI),
                 neg_internal: Some(IDX_VBP),

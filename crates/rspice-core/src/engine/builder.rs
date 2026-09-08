@@ -5771,7 +5771,6 @@ impl Engine {
                         .get(4)
                         .map(|n| circuit.get_or_create_node(n))
                         .unwrap_or(0);
-                    let bjt_level;
                     // Resolve polarity from model card when available.
                     let model_def = find_model_def(netlist, model);
                     let foundation_model = model_def
@@ -5902,7 +5901,6 @@ impl Engine {
                         params_map
                             .entry("TNOM".to_string())
                             .or_insert(effective_tnom);
-                        bjt_level = params_map.get("LEVEL").copied();
                         validate_bjt_model_level(
                             &element.name,
                             model,
@@ -5923,7 +5921,6 @@ impl Engine {
                         effective_params
                             .entry("TNOM".to_string())
                             .or_insert(effective_tnom);
-                        bjt_level = effective_params.get("LEVEL").copied();
                         // Fallback to embedded transistor library models when no
                         // explicit .MODEL card is present in the parsed netlist.
                         bjt = bjt.with_params(&effective_params);
@@ -5947,16 +5944,19 @@ impl Engine {
                         self.config.temperature,
                         netlist.options.tnom.unwrap_or(27.0),
                     );
-                    let xyce_vbic_external_dt = self.config.spice_dialect == SpiceDialect::Xyce
-                        && bjt.uses_vbic_dynamic_charges()
-                        && bjt_level.is_some_and(|level| bjt_level_matches(level, 11.0))
-                        && fourth_terminal != 0;
-                    let substrate = if xyce_vbic_external_dt {
+                    let three_terminal_vbic = bjt.uses_three_terminal_vbic();
+                    if three_terminal_vbic && element.nodes.len() > 4 {
+                        return Err(SimulationError::Circuit(format!(
+                            "BJT '{}' LEVEL=11 has three electrical terminals and one optional thermal terminal; a fifth terminal is not supported",
+                            element.name
+                        )));
+                    }
+                    let substrate = if three_terminal_vbic {
                         0
                     } else {
                         fourth_terminal
                     };
-                    let external_thermal = if xyce_vbic_external_dt {
+                    let external_thermal = if three_terminal_vbic {
                         fourth_terminal
                     } else {
                         fifth_terminal

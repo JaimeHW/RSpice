@@ -15,7 +15,7 @@ const R: f64 = 1.0e3;
 const C: f64 = 159.154943091895e-12; // RC corner ~ 1 MHz (w*RC = 1)
 
 #[test]
-fn nonlinear_vbic_charge_pss_matches_settled_ngspice46() {
+fn nonlinear_vbic_charge_pss_matches_settled_reference_simulators() {
     use rspice_core::engine::SpiceDialect;
     // Live ngspice 46, 2026-09-08, the NPN LEVEL=4 deck below with
     // RELTOL=1e-7 VNTOL=1e-9 ABSTOL=1e-15 and .tran 0.2n 21u 19u 0.2n.
@@ -24,7 +24,7 @@ fn nonlinear_vbic_charge_pss_matches_settled_ngspice46() {
     // LEVEL=11 is a different three-terminal substrate topology.
     // Includes all seven intrinsic electrical nodes, nonlinear forward
     // and reverse diffusion, split depletion charge, epi and substrate charge.
-    let reference = [
+    let four_terminal_reference = [
         1.3981978158,
         1.2433328436,
         1.0637934817,
@@ -43,7 +43,33 @@ fn nonlinear_vbic_charge_pss_matches_settled_ngspice46() {
         1.5152586291,
         1.3981978556,
     ];
-    for (dialect, level) in [(SpiceDialect::Ngspice, 4), (SpiceDialect::Xyce, 12)] {
+    // Xyce 7.10 LEVEL=11, same settled mesh, 2026-09-08. The three-terminal
+    // result differs by 5 mV from the four-terminal waveform, so a shared
+    // topology cannot satisfy the 0.2 mV integration-error bound.
+    let three_terminal_reference = [
+        1.3954399520,
+        1.2397637940,
+        1.0597084600,
+        0.8789465493,
+        0.7281096900,
+        0.6380552643,
+        0.6332519076,
+        0.7263252858,
+        0.9096050192,
+        1.1453053530,
+        1.3704296340,
+        1.5290815530,
+        1.6072918720,
+        1.6222274090,
+        1.5893073480,
+        1.5134234290,
+        1.3954400000,
+    ];
+    for (dialect, level, reference) in [
+        (SpiceDialect::Ngspice, 4, four_terminal_reference),
+        (SpiceDialect::Xyce, 12, four_terminal_reference),
+        (SpiceDialect::Xyce, 11, three_terminal_reference),
+    ] {
         for (polarity, sign) in [("NPN", 1.0), ("PNP", -1.0)] {
             let netlist = Netlist::parse(&format!("VBIC PSS electrical oracle\nVcc supply 0 {}\nVb drive 0 SIN({} {} 1meg)\nRc supply c 1k\nRb drive b 100\nQ1 c b 0 0 vm\n.model vm {polarity}(LEVEL={level} IS=1e-14 IBEI=1e-16 IBCI=1e-16 RCX=10 RCI=20 RBX=10 RBI=40 RE=1 RBP=10 RS=1 CJE=10p CJC=5p CJEP=3p CJCP=2p TF=10n TR=2n QCO=10f GAMM=1e-9 ISP=1e-16 WBE=0.8)\n.options RELTOL=1e-6 VNTOL=1e-8 ABSTOL=1e-14\n.temp 27\n.end\n", 2.0*sign, 0.65*sign, 0.02*sign)).unwrap();
             let engine = Engine::new(SimulationConfig::default().with_spice_dialect(dialect));
@@ -77,7 +103,7 @@ fn nonlinear_vbic_charge_pss_matches_settled_ngspice46() {
                 .fold(0.0_f64, f64::max);
             assert!(
                 error < 2e-4,
-                "{dialect:?} {polarity}: maximum ngspice waveform error {error:e} V"
+                "{dialect:?} LEVEL={level} {polarity}: maximum reference waveform error {error:e} V"
             );
         }
     }

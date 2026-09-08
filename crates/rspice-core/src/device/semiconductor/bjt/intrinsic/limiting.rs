@@ -61,7 +61,11 @@ impl Bjt {
             vbci: p * (internal[IDX_VBI] - internal[IDX_VCI]),
             vbcx: p * (internal[IDX_VBI] - internal[IDX_VCX]),
             vbep: p * (internal[IDX_VBX] - internal[IDX_VBP]),
-            vbcp: p * (internal[IDX_VSI] - internal[IDX_VBP]),
+            vbcp: if self.vbic_three_terminal {
+                0.0
+            } else {
+                p * (internal[IDX_VSI] - internal[IDX_VBP])
+            },
             vrth: internal[IDX_VRTH],
         }
     }
@@ -129,7 +133,11 @@ impl Bjt {
         } else {
             r_cx
         };
-        let r_si = series(self.rs);
+        let r_si = if self.vbic_three_terminal {
+            0.0
+        } else {
+            series(self.rs)
+        };
         [r_cx, r_ci, r_bx, r_bi, r_ei, r_bp, r_si].map(|r| 1.0 / r.max(1.0e-3))
     }
 
@@ -166,8 +174,14 @@ impl Bjt {
             limited.vbcp,
         ];
 
+        // LEVEL=11 has five limited electrical junctions and no Vbcp.
+        let branch_count = if self.vbic_three_terminal {
+            5
+        } else {
+            VBIC_LIMITED_BRANCH_DIM
+        };
         let mut residual = [0.0; VBIC_LIMITED_BRANCH_DIM];
-        for row in 0..VBIC_LIMITED_BRANCH_DIM {
+        for row in 0..branch_count {
             residual[row] = -targets[row];
             for col in 0..raw_nodes.len() {
                 residual[row] += constraints[row][col] * raw_nodes[col];
@@ -175,17 +189,15 @@ impl Bjt {
         }
 
         let mut gram = [[0.0; VBIC_LIMITED_BRANCH_DIM]; VBIC_LIMITED_BRANCH_DIM];
-        for row in 0..VBIC_LIMITED_BRANCH_DIM {
-            for col in 0..VBIC_LIMITED_BRANCH_DIM {
+        for row in 0..branch_count {
+            for col in 0..branch_count {
                 gram[row][col] = (0..raw_nodes.len())
                     .map(|idx| constraints[row][idx] * constraints[col][idx] / stiffness[idx])
                     .sum();
             }
         }
 
-        let Some(lagrange) =
-            Self::solve_small_dense_system(&gram, &residual, VBIC_LIMITED_BRANCH_DIM)
-        else {
+        let Some(lagrange) = Self::solve_small_dense_system(&gram, &residual, branch_count) else {
             let mut fallback = raw;
             fallback[IDX_VRTH] = limited.vrth;
             return fallback;
@@ -193,7 +205,7 @@ impl Bjt {
 
         let mut projected = raw;
         for node_idx in 0..raw_nodes.len() {
-            let correction = (0..VBIC_LIMITED_BRANCH_DIM)
+            let correction = (0..branch_count)
                 .map(|row| constraints[row][node_idx] * lagrange[row])
                 .sum::<Value>()
                 / stiffness[node_idx];

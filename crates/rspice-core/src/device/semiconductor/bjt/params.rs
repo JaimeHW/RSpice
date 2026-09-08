@@ -726,7 +726,11 @@ impl Bjt {
 
     /// Set optional substrate node (0 for ground/unconnected).
     pub fn set_substrate_node(&mut self, substrate: NodeId) {
-        self.node_substrate = substrate;
+        self.node_substrate = if self.vbic_three_terminal {
+            0
+        } else {
+            substrate
+        };
     }
 
     /// Use a caller-supplied node for the VBIC thermal-rise state.
@@ -760,6 +764,13 @@ impl Bjt {
         } else {
             BjtChargeModel::LegacyGummelPoon
         };
+        self.vbic_three_terminal = self.charge_model == BjtChargeModel::Vbic
+            && params
+                .get("LEVEL")
+                .is_some_and(|level| (*level - 11.0).abs() <= 1e-9);
+        if self.vbic_three_terminal {
+            self.node_substrate = 0;
+        }
         match self.charge_model {
             BjtChargeModel::LegacyGummelPoon => self.apply_legacy_spice_model_defaults(),
             BjtChargeModel::Vbic => self.apply_vbic_model_defaults(),

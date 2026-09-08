@@ -10,8 +10,8 @@ const F0: f64 = 1.0e6;
 #[test]
 fn vbic_periodic_charge_and_continuation_match_analytic_rc() {
     use rspice_core::engine::{TransientCheckpoint, TransientCheckpointEncoding};
-    for polarity in ["NPN", "PNP"] {
-        let netlist = Netlist::parse(&format!("VBIC periodic charge\nV1 in 0 SIN(0 0.1 1meg)\nR1 in out 1k\nQ1 0 out 0 vm\n.model vm {polarity}(LEVEL=4 IS=1e-40 IBEI=1e-40 IBCI=1e-40 CJE=100p CJC=20p MJE=0 MJC=0 TF=0 TR=0 CBEO=30p CBCO=9p RCX=0 RCI=0 RBX=0 RBI=0 RE=0 RBP=0 RS=0 CJEP=0 CJCP=0 CCSO=0 QCO=0 GAMM=0 ISP=0)\n.end\n")).unwrap();
+    for (polarity, level) in [("NPN", 4), ("PNP", 4), ("NPN", 11), ("PNP", 11)] {
+        let netlist = Netlist::parse(&format!("VBIC periodic charge\nV1 in 0 SIN(0 0.1 1meg)\nR1 in out 1k\nQ1 0 out 0 vm\n.model vm {polarity}(LEVEL={level} IS=1e-40 IBEI=1e-40 IBCI=1e-40 CJE=100p CJC=20p MJE=0 MJC=0 TF=0 TR=0 CBEO=30p CBCO=9p RCX=0 RCI=0 RBX=0 RBI=0 RE=0 RBP=0 RS=0 CJEP=0 CJCP=0 CCSO=0 QCO=0 GAMM=0 ISP=0)\n.end\n")).unwrap();
         let engine = Engine::default();
         let (analysis, state) = engine
             .run_pss_with_continuation_state(

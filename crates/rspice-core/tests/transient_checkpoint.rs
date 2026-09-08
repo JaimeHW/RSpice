@@ -294,7 +294,12 @@ fn promoted_vbic_thermal_and_excess_phase_checkpoints_resume_every_state_exactly
             polarity * 0.8,
             polarity * 0.05,
         );
-        for dialect in [SpiceDialect::Ngspice, SpiceDialect::Xyce] {
+        for (dialect, level) in [
+            (SpiceDialect::Ngspice, 4),
+            (SpiceDialect::Xyce, 12),
+            (SpiceDialect::Xyce, 11),
+        ] {
+            let deck = deck.replace("LEVEL=4", &format!("LEVEL={level}"));
             for method in [
                 IntegrationMethod::BackwardEuler,
                 IntegrationMethod::Trapezoidal,
