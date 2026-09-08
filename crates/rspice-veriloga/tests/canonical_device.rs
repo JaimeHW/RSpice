@@ -22,6 +22,136 @@ use std::process::Command;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 #[test]
+fn generated_dynamic_expressions_preserve_small_signal_chain_rules() {
+    for (index, (expression, static_real, dynamic_real, imaginary)) in [
+        ("sin(ddt(V(p,n)))", "0.0", "0.0", "w"),
+        ("exp(ddt(V(p,n)))", "0.0", "0.0", "w"),
+        ("sin(V(p,n)+ddt(V(p,n)))", "v.cos()", "0.0", "v.cos()*w"),
+        ("(V(p,n)+ddt(V(p,n)))*ddt(V(p,n))", "0.0", "0.0", "v*w"),
+        ("ddt(ddt(V(p,n)))", "0.0", "-w*w", "0.0"),
+        ("idt(V(p,n),0.0)", "0.0", "0.0", "-1.0/w"),
+        ("idt(idt(V(p,n),0.0),0.0)", "0.0", "-1.0/(w*w)", "0.0"),
+        ("ddt(idt(V(p,n),0.0))", "0.0", "1.0", "0.0"),
+        ("idt(ddt(V(p,n)),0.0)", "0.0", "1.0", "0.0"),
+        ("ddt(ddt(ddt(V(p,n))))", "0.0", "0.0", "-w*w*w"),
+        (
+            "sin(V(p,n)+idt(V(p,n),0.25))",
+            "(v+0.25).cos()",
+            "0.0",
+            "-(v+0.25).cos()/w",
+        ),
+        ("exp(ddt(ddt(V(p,n))))", "0.0", "-w*w", "0.0"),
+        (
+            "ddt(sin(V(p,n)+ddt(V(p,n))))",
+            "0.0",
+            "-v.cos()*w*w",
+            "v.cos()*w",
+        ),
+        ("ddx(ddt(V(p,n)*V(p,n)),V(p,n))", "0.0", "0.0", "2.0*w"),
+        (
+            "ddx(ddt(V(p,n)*V(p,n)),V(p,n))*V(p,n)",
+            "0.0",
+            "0.0",
+            "2.0*v*w",
+        ),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let source = format!(
+            "module nonlinear_dynamic(p,n); inout p,n; electrical p,n; analog I(p,n)<+{expression}; endmodule"
+        );
+        let name = format!("nonlinear dynamic chain {index}");
+        let (state, stamp, noise) = generated_parts(&source, &name);
+        let body = format!(
+            r#"
+let mut instance = device::state::Instance::new(&[0,1]);
+instance.finalize_parameters().unwrap();
+runtime::set_dynamic_operators_enabled(false);
+for v in [0.5_f64, -0.75, 1.25] {{
+let bias = [v,0.0];
+let ctx = runtime::GeneratedEvalContext {{ voltages: &bias, temperature: 123.0 }};
+let mut real = [0.0;12];
+instance.stamp(&ctx, &mut runtime::GeneratedStamper {{ sink: Some(&mut real) }});
+assert!((real[10]-({static_real})).abs()<1e-12, "static derivative: {{real:?}}");
+let history = instance.capture_rollback_state();
+for w in [0.125_f64, 1.0, 3.5, 100.0] {{
+runtime::FREQUENCY_OMEGA.store(w.to_bits(), std::sync::atomic::Ordering::SeqCst);
+let mut reactive = [0.0;6];
+instance.stamp_reactive(&ctx, &mut runtime::GeneratedReactiveStamper {{ sink: Some(&mut reactive) }});
+let expected_imaginary: f64 = {imaginary};
+let expected_real: f64 = {dynamic_real};
+assert!((reactive[0]-expected_imaginary).abs()<1e-12*(1.0+expected_imaginary.abs()), "imaginary derivative at {{v}}, {{w}}: {{reactive:?}}");
+assert!((reactive[3]-expected_real).abs()<1e-12*(1.0+expected_real.abs()), "real correction at {{v}}, {{w}}: {{reactive:?}}");
+assert_eq!(instance.capture_rollback_state(), history, "frequency evaluation changed operator history");
+assert!(!ctx.evaluation_failed());
+}}
+}}
+assert!(!device::state::Instance::ONE_STEP_DAE_SPLIT_SAFE);
+"#
+        );
+        run_generated_main(&name, &state, &stamp, &noise, &body)
+            .unwrap_or_else(|report| panic!("{expression}: {report}"));
+    }
+}
+
+#[test]
+fn generated_dynamic_coefficients_follow_loop_and_branch_merges() {
+    for (index, (body, expected)) in [
+        ("real x,y; integer k; analog begin x=ddt(V(p,n)); y=0; for(k=0;k<3;k=k+1) y=y+(k+1)*sin(x); I(p,n)<+y; end", "6.0*w"),
+        ("real x,y; analog begin x=idt(V(p,n),0.0); if(V(p,n)>0) y=sin(x); else y=2*sin(x); I(p,n)<+y; end", "if v>0.0 { -1.0/w } else { -2.0/w }"),
+    ].into_iter().enumerate() {
+        let source = format!("module dynamic_merges(p,n); inout p,n; electrical p,n; {body} endmodule");
+        let name = format!("dynamic merge {index}");
+        let (state, stamp, noise) = generated_parts(&source, &name);
+        run_generated_main(&name, &state, &stamp, &noise, &format!(r#"
+let mut instance = device::state::Instance::new(&[0,1]);
+instance.finalize_parameters().unwrap();
+runtime::set_dynamic_operators_enabled(false);
+for v in [0.5_f64, -0.75, 1.25] {{
+let bias = [v,0.0];
+let ctx = runtime::GeneratedEvalContext {{ voltages: &bias, temperature: 123.0 }};
+instance.stamp(&ctx, &mut runtime::GeneratedStamper::default());
+for w in [0.25_f64, 2.0] {{
+runtime::FREQUENCY_OMEGA.store(w.to_bits(), std::sync::atomic::Ordering::SeqCst);
+let mut response = [0.0;6];
+instance.stamp_reactive(&ctx, &mut runtime::GeneratedReactiveStamper {{ sink: Some(&mut response) }});
+let expected: f64 = {expected};
+assert!((response[0]-expected).abs()<1e-12, "{{v}}, {{w}}: {{response:?}}");
+assert_eq!(response[3], 0.0);
+assert!(!ctx.evaluation_failed());
+}}
+}}
+"#)).unwrap_or_else(|report| panic!("{body}: {report}"));
+    }
+}
+
+#[test]
+fn generated_dynamic_potential_rows_preserve_branch_orientation_and_flow_axes() {
+    let (state, stamp, noise) = generated_parts(
+        "module dynamic_branch(p,n); inout p,n; electrical p,n; analog begin V(p,n)<+0; V(n,p)<+sin(ddt(I(p,n)))+ddt(ddt(V(p,n))); end endmodule",
+        "dynamic potential orientation",
+    );
+    run_generated_main("dynamic potential orientation", &state, &stamp, &noise, r#"
+let mut instance = device::state::Instance::new(&[0,1]);
+instance.set_branch_indices(&[2,3]);
+instance.finalize_parameters().unwrap();
+runtime::set_dynamic_operators_enabled(false);
+let ctx = runtime::GeneratedEvalContext { voltages: &[0.5,0.0,0.25,100.0], temperature: 123.0 };
+instance.stamp(&ctx, &mut runtime::GeneratedStamper::default());
+for w in [0.25_f64, 2.0] {
+    runtime::FREQUENCY_OMEGA.store(w.to_bits(), std::sync::atomic::Ordering::SeqCst);
+    let mut response = [0.0;6];
+    instance.stamp_reactive(&ctx, &mut runtime::GeneratedReactiveStamper { sink: Some(&mut response) });
+    assert_eq!(response[0], 0.0);
+    assert_eq!(response[1], -w, "reversed source flow derivative: {response:?}");
+    assert_eq!(response[3], w*w, "reversed source voltage derivative: {response:?}");
+    assert!(!ctx.evaluation_failed());
+}
+"#).unwrap_or_else(|report| panic!("dynamic potential orientation: {report}"));
+}
+
+#[test]
 fn generated_reactive_stamping_holds_external_derivative_coefficients_at_the_bias_point() {
     for (index, expression, capacitances, split_safe) in [
         (0, "V(p,n)*ddt(V(p,n))", [3.0_f64, -2.0], false),
@@ -4939,6 +5069,11 @@ pub mod runtime {
             {
                 *value += _value;
             }
+            if let Some(sink) = self.sink.as_deref_mut() {
+                if let Some(value) = sink.get_mut(10) {
+                    *value += _node_indices.iter().zip(_node_derivatives).filter(|(node, _)| **node == 0).map(|(_, value)| value).sum::<f64>() * _scale;
+                }
+            }
         }
 
         pub fn stamp_potential_branch_local(
@@ -4986,12 +5121,49 @@ pub mod runtime {
         }
     }
 
+    pub static FREQUENCY_OMEGA: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1.0_f64.to_bits());
+
+    pub struct GeneratedDerivative { node: Option<usize>, value: Value }
+    impl GeneratedDerivative {
+        pub fn node(node: usize, value: Value) -> Self { Self { node: Some(node), value } }
+        pub fn branch(_branch: usize, value: Value) -> Self { Self { node: None, value } }
+    }
+
     #[derive(Default)]
     pub struct GeneratedReactiveStamper<'a> {
         pub sink: Option<&'a mut [Value]>,
     }
 
     impl GeneratedReactiveStamper<'_> {
+        pub fn frequency_coefficient(&self, ctx: &GeneratedEvalContext<'_>, coefficient: Value, ddt: u32, idt: u32) -> Option<Value> {
+            let omega = f64::from_bits(FREQUENCY_OMEGA.load(std::sync::atomic::Ordering::SeqCst));
+            if !omega.is_finite() || omega < 0.0 || (omega == 0.0 && idt > 0) {
+                ctx.report_initialization_error(0);
+                return None;
+            }
+            let power = ddt as i32 - idt as i32;
+            let value = coefficient * omega.powi(power);
+            Some(if power.rem_euclid(4) >= 2 { -value } else { value })
+        }
+
+        pub fn stamp_current_frequency_local<const REAL: bool>(&mut self, _pos: Option<usize>, _neg: Option<usize>, derivative: GeneratedDerivative) {
+            let offset = if REAL { 3 } else { 0 };
+            if let Some(sink) = self.sink.as_deref_mut() {
+                if derivative.node == Some(0) {
+                    if let Some(value) = sink.get_mut(offset) { *value += derivative.value; }
+                } else if derivative.node.is_none() {
+                    if let Some(value) = sink.get_mut(offset + 1) { *value += derivative.value; }
+                }
+                if derivative.node.is_some() {
+                    if let Some(value) = sink.get_mut(offset + 2) { *value += derivative.value.abs(); }
+                }
+            }
+        }
+
+        pub fn stamp_potential_frequency_local<const REAL: bool>(&mut self, _branch: usize, derivative: GeneratedDerivative) {
+            self.stamp_current_frequency_local::<REAL>(None, None, derivative);
+        }
+
         pub fn stamp_current_reactive_indexed_dense_local(
             &mut self,
             _pos: Option<usize>,

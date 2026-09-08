@@ -1927,6 +1927,9 @@ pub enum GeneratedStampLane {
 /// A recoverable failure reported while evaluating generated device code.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GeneratedEvaluationError {
+    SmallSignal {
+        reason: &'static str,
+    },
     Initialization {
         slot: usize,
     },
@@ -1957,6 +1960,10 @@ pub enum GeneratedEvaluationError {
 impl std::fmt::Display for GeneratedEvaluationError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::SmallSignal { reason } => write!(
+                f,
+                "generated Verilog-A small-signal evaluation failed: {reason}"
+            ),
             Self::Initialization { slot } => write!(
                 f,
                 "generated Verilog-A initialization has an invalid numeric value at slot {slot}"
@@ -2788,6 +2795,14 @@ impl<'a> GeneratedEvalContext<'a> {
         if self.evaluation_error.get().is_none() {
             self.evaluation_error
                 .set(Some(GeneratedEvaluationError::Initialization { slot }));
+        }
+    }
+
+    #[inline]
+    pub fn report_small_signal_error(&self, reason: &'static str) {
+        if self.evaluation_error.get().is_none() {
+            self.evaluation_error
+                .set(Some(GeneratedEvaluationError::SmallSignal { reason }));
         }
     }
 
@@ -5599,6 +5614,138 @@ pub struct GeneratedReactiveStamper<'a> {
 }
 
 impl<'a> GeneratedReactiveStamper<'a> {
+    /// The real or imaginary component of coefficient * (jω)^ddt * (1/jω)^idt.
+    /// Operator orders are retained separately so an integrator at zero
+    /// frequency is diagnosed even when a surrounding derivative cancels it.
+    #[inline]
+    pub fn frequency_coefficient(
+        &self,
+        ctx: &GeneratedEvalContext<'_>,
+        coefficient: Value,
+        ddt: u32,
+        idt: u32,
+    ) -> Option<Value> {
+        if ctx.evaluation_failed() {
+            return None;
+        }
+        let error = if !self.omega.is_finite() || self.omega < 0.0 {
+            Some("angular frequency must be finite and nonnegative")
+        } else if self.omega == 0.0 && idt > 0 {
+            Some("idt small-signal transfer is singular at zero frequency")
+        } else if !coefficient.is_finite() {
+            Some("non-finite frequency coefficient")
+        } else {
+            None
+        };
+        if let Some(error) = error {
+            ctx.report_small_signal_error(error);
+            return None;
+        }
+        let exponent = i64::from(ddt) - i64::from(idt);
+        let Ok(exponent) = i32::try_from(exponent) else {
+            ctx.report_small_signal_error(
+                "integration order exceeds the frequency evaluator range",
+            );
+            return None;
+        };
+        let mut value = Self::scale_frequency_coefficient(coefficient, self.omega, exponent);
+        if !value.is_finite() {
+            ctx.report_small_signal_error("frequency response overflows");
+            return None;
+        }
+        if exponent.rem_euclid(4) >= 2 {
+            value = -value;
+        }
+        Some(value)
+    }
+
+    fn scale_frequency_coefficient(value: Value, omega: Value, exponent: i32) -> Value {
+        if value == 0.0 || !value.is_finite() {
+            return value;
+        }
+        match exponent {
+            0 => return value,
+            1 => return value * omega,
+            -1 => return value / omega,
+            _ => {}
+        }
+        let factor = omega.powi(exponent);
+        if factor.is_finite() && factor != 0.0 {
+            return value * factor;
+        }
+        // Split a power that alone over/underflows, so a coefficient can
+        // bring it into range (1e-300 * (1e200)^2, for example). Halving bounds
+        // the recursion to 32 levels even for extreme operator orders.
+        let half = exponent / 2;
+        let value = Self::scale_frequency_coefficient(value, omega, half);
+        Self::scale_frequency_coefficient(value, omega, exponent - half)
+    }
+
+    /// One dynamic current Jacobian entry. REAL selects the matrix component;
+    /// the caller has already composed the frequency action and multiplicity.
+    #[inline]
+    pub fn stamp_current_frequency_local<const REAL: bool>(
+        &mut self,
+        pos: Option<usize>,
+        neg: Option<usize>,
+        derivative: GeneratedDerivative,
+    ) {
+        if derivative.value == 0.0 {
+            return;
+        }
+        let pos = pos.and_then(|node| self.node_matrix_index_local(node));
+        let neg = neg.and_then(|node| self.node_matrix_index_local(node));
+        if pos == neg {
+            return;
+        }
+        let Some(col) = self.axis_matrix_index_local(derivative.axis) else {
+            return;
+        };
+        if let Some(row) = pos {
+            self.add_frequency::<REAL>(row, col, derivative.value);
+        }
+        if let Some(row) = neg {
+            self.add_frequency::<REAL>(row, col, -derivative.value);
+        }
+    }
+
+    /// Dynamic potential-equation derivative, excluding the structural branch
+    /// incidence that the real operating-point stamp has already installed.
+    #[inline]
+    pub fn stamp_potential_frequency_local<const REAL: bool>(
+        &mut self,
+        branch: usize,
+        derivative: GeneratedDerivative,
+    ) {
+        if derivative.value == 0.0 {
+            return;
+        }
+        if let (Some(row), Some(col)) = (
+            self.branch_matrix_index_local(branch),
+            self.axis_matrix_index_local(derivative.axis),
+        ) {
+            self.add_frequency::<REAL>(row, col, -derivative.value);
+        }
+    }
+
+    #[inline]
+    fn add_frequency<const REAL: bool>(&mut self, row: usize, col: usize, value: Value) {
+        if let Some(index) = self
+            .cache
+            .and_then(|cache| cache.slot_for_matrix_indices(row, col))
+        {
+            if REAL {
+                self.matrix.stamp_direct_real(index, value);
+            } else {
+                self.matrix.stamp_direct_imag(index, value);
+            }
+        } else if REAL {
+            self.matrix.add_real(row, col, value);
+        } else {
+            self.matrix.add_imag(row, col, value);
+        }
+    }
+
     #[inline]
     pub fn new(matrix: &'a mut ComplexMatrix, num_nodes: usize, omega: Value) -> Self {
         Self {
@@ -7619,6 +7766,145 @@ impl<'a> GeneratedReactiveStamper<'a> {
 #[cfg(test)]
 mod fixed_lane_tests {
     use super::*;
+
+    #[test]
+    fn frequency_coefficients_preserve_phase_and_extreme_scaled_results() {
+        let structure = StaticMatrix::from_triplets(1, 1, &[(0, 0, 0.0)]).unwrap();
+        let mut matrix = ComplexMatrix::from_real_structure(&structure);
+        let ctx = GeneratedEvalContext::with_analysis(&[0.0], 300.15, 1, GeneratedAnalysisKind::Ac);
+        for (coefficient, omega, ddt, idt, expected) in [
+            (2.0, 4.0, 1, 0, 8.0),
+            (2.0, 4.0, 2, 0, -32.0),
+            (2.0, 4.0, 3, 0, -128.0),
+            (2.0, 4.0, 4, 0, 512.0),
+            (2.0, 4.0, 0, 1, -0.5),
+            (2.0, 4.0, 0, 2, -0.125),
+            (2.0, 4.0, 0, 3, 0.03125),
+            (2.0, 4.0, 1, 1, 2.0),
+            (1e-300, 1e200, 2, 0, -1e100),
+            (1e300, 1e-200, 2, 0, -1e-100),
+            (1e-300, 1e-200, 0, 2, -1e100),
+            (1e300, 1e200, 0, 2, -1e-100),
+            (0.0, 1e200, 2, 0, 0.0),
+            (2.0, 0.0, 2, 0, 0.0),
+        ] {
+            let stamper = GeneratedReactiveStamper::new(&mut matrix, 1, omega);
+            let actual = stamper
+                .frequency_coefficient(&ctx, coefficient, ddt, idt)
+                .unwrap();
+            assert!(
+                (actual - expected).abs() <= 2e-15 * expected.abs(),
+                "{coefficient} * (j{omega})^{ddt} / (j{omega})^{idt}: {actual} != {expected}"
+            );
+            assert!(!ctx.evaluation_failed());
+        }
+    }
+
+    #[test]
+    fn frequency_coefficients_report_singular_or_invalid_inputs() {
+        let structure = StaticMatrix::from_triplets(1, 1, &[(0, 0, 0.0)]).unwrap();
+        let mut matrix = ComplexMatrix::from_real_structure(&structure);
+        for (coefficient, omega, ddt, idt) in [
+            (1.0, 0.0, 0, 1),
+            (1.0, 0.0, 1, 1),
+            (0.0, -1.0, 1, 0),
+            (1.0, f64::NAN, 1, 0),
+            (1.0, f64::INFINITY, 1, 0),
+            (f64::NAN, 1.0, 1, 0),
+            (1.0, 1e200, 2, 0),
+            (1.0, 1.000001, 1_000_000_000, 0),
+        ] {
+            let ctx =
+                GeneratedEvalContext::with_analysis(&[0.0], 300.15, 1, GeneratedAnalysisKind::Ac);
+            let stamper = GeneratedReactiveStamper::new(&mut matrix, 1, omega);
+            assert!(
+                stamper
+                    .frequency_coefficient(&ctx, coefficient, ddt, idt)
+                    .is_none()
+            );
+            assert!(matches!(
+                ctx.take_evaluation_error(),
+                Some(GeneratedEvaluationError::SmallSignal { .. })
+            ));
+        }
+    }
+
+    #[test]
+    fn frequency_stamping_preserves_local_maps_ground_aliases_and_branch_signs() {
+        let entries = (0..4)
+            .flat_map(|row| (0..4).map(move |col| (row, col, 0.0)))
+            .collect::<Vec<_>>();
+        let structure = StaticMatrix::from_triplets(4, 4, &entries).unwrap();
+        let nodes = [2, 0, 1, 2];
+        let branches = [2, 1];
+        for cached in [false, true] {
+            let mut matrix = ComplexMatrix::from_real_structure(&structure);
+            matrix.add_real(1, 1, 1e-30);
+            let mut cache = GeneratedStaticStampCache::default();
+            cache.link(&structure, &nodes, &branches, 2);
+            let mut stamper = if cached {
+                GeneratedReactiveStamper::new_with_local_maps_and_static_cache(
+                    &mut matrix,
+                    &nodes,
+                    &branches,
+                    2,
+                    1.0,
+                    &cache,
+                )
+            } else {
+                GeneratedReactiveStamper::new_with_local_maps(
+                    &mut matrix,
+                    &nodes,
+                    &branches,
+                    2,
+                    1.0,
+                )
+            };
+            stamper.stamp_current_frequency_local::<true>(
+                Some(0),
+                Some(2),
+                GeneratedDerivative::node(2, 3.0),
+            );
+            stamper.stamp_current_frequency_local::<false>(
+                Some(0),
+                Some(2),
+                GeneratedDerivative::branch(0, 5.0),
+            );
+            stamper.stamp_potential_frequency_local::<true>(1, GeneratedDerivative::node(0, 7.0));
+            stamper
+                .stamp_potential_frequency_local::<false>(0, GeneratedDerivative::branch(1, 11.0));
+            stamper.stamp_current_frequency_local::<true>(
+                Some(0),
+                Some(3),
+                GeneratedDerivative::node(0, 13.0),
+            );
+            stamper.stamp_current_frequency_local::<false>(
+                Some(0),
+                Some(2),
+                GeneratedDerivative::node(1, 17.0),
+            );
+            assert_eq!(
+                matrix.to_dense_real(),
+                vec![
+                    vec![-3.0, 0.0, 0.0, 0.0],
+                    vec![3.0, 1e-30, 0.0, 0.0],
+                    vec![0.0, -7.0, 0.0, 0.0],
+                    vec![0.0; 4]
+                ],
+                "cached={cached}"
+            );
+            assert_eq!(
+                matrix.to_dense_imag(),
+                vec![
+                    vec![0.0, 0.0, 0.0, -5.0],
+                    vec![0.0, 0.0, 0.0, 5.0],
+                    vec![0.0; 4],
+                    vec![0.0, 0.0, -11.0, 0.0]
+                ],
+                "cached={cached}"
+            );
+        }
+    }
 
     #[test]
     fn generated_cross_checkpoint_lanes_round_trip_and_fail_closed() {

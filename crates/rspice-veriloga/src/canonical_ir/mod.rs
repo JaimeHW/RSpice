@@ -31,6 +31,7 @@ pub mod digital_eval;
 pub mod digital_lower;
 mod digital_validate;
 pub mod digital_value;
+pub(crate) mod frequency;
 pub mod hir;
 pub mod ids;
 pub mod metadata;

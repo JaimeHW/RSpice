@@ -2,11 +2,11 @@
 {
   "schema_version": 7,
   "source_tree_digest": "8df45ec06360bbd151ebdbbc41ef5fc08a914156e6d696ae626f667246bea520",
-  "generator_digest": "00f7313680a5da2257b096a5c2701313552d68dfcb0f31c41207898cf6fe335a",
-  "bundle_digest": "6a6954588046d1a539eb0a75c1ae5318a6e1be61ccd484559c3e50c5efa51147",
+  "generator_digest": "be5b25d8d3d57faa2f40cceb4acc941e622ec9bf7c3ac9dedf75bd3456523a0b",
+  "bundle_digest": "79995e025c1bb31ded6c2f72d89db1c61f9e5609f9b395d199a99c3fc3b6ca79",
   "device_count": 43,
   "file_count": 347,
-  "source_bytes": 33014959,
+  "source_bytes": 33054814,
   "devices": [
     {
       "module_name": "DIODE_CMC",
@@ -150,7 +150,7 @@
       "feature_name": "veriloga-model-pspnqs104va",
       "package_name": "rspice-veriloga-model-pspnqs104va",
       "file_count": 5,
-      "source_bytes": 1480905,
+      "source_bytes": 1520760,
       "workspace": {
         "abi_version": 3,
         "variable_count": 3438,
@@ -2608,13 +2608,13 @@
     },
     {
       "relative_path": "models/pspnqs104va/src/psp104_nqs__pspnqs104va__1d25ee14/stamp.rs",
-      "bytes": 870487,
-      "blake3": "e8f6ee7034dbc3cf2877ecae6eb0fee589c97d20f31f89b20a3be7d282fe1aae"
+      "bytes": 910342,
+      "blake3": "23c3061ce017dcf30179b977ab29c77fa9793b3740aef507f07638e3dd2979d7"
     },
     {
       "relative_path": "models/pspnqs104va/src/psp104_nqs__pspnqs104va__1d25ee14/state.rs",
       "bytes": 161128,
-      "blake3": "9d37ba24e2dfbc226e8d231268959a63745f8c84cc20587e2eaea64ecdb8dc7d"
+      "blake3": "3efbf022b491f2011df66ff48011ecb03edf163a7241a293a9b98a07d71c6f79"
     },
     {
       "relative_path": "models/r2-cmc/.rspice-veriloga-model-package",
