@@ -279,7 +279,7 @@ Checkpoint format 35 retains the step and stop defaults that determine
 independent-source waveforms. Extending a run or changing its step ceiling
 preserves those source parameters. Older checkpoints remain readable; resume
 requires fully specified source timing when the original defaults are absent.
-Resume also requires the current resolved simulation identity (v15); states
+Resume also requires the current resolved simulation identity (v16); states
 captured under previous source evaluation or behavioral event timing semantics
 must be regenerated.
 
@@ -456,6 +456,12 @@ tangent poles and signed-zero angular seams. Angular derivatives use scaled
 coordinates to avoid radius overflow or underflow. A proved VM evaluation order
 can establish an exact plateau from equal endpoint values; sampled endpoint
 equality alone cannot discard an interval or its internal events.
+Value bounds retain defined infinite ranges through bounded outer functions,
+including arctangent and hyperbolic tangent across tangent poles. Indeterminate
+operations such as zero times infinity, opposite infinities added together, or
+an infinite trigonometric argument remain unresolved before any outer clamp
+can certify the source. Unbounded derivative intervals remain separate from
+that value-domain decision.
 Centered mean-value bounds preserve cancellation in compound source
 coordinates before subsequent operations amplify range uncertainty. This
 numerical mesh supplements physical source events. A smooth
@@ -476,7 +482,7 @@ defaults still use the original `POINTS`. `MAXITER` applies to each grid solve,
 while the result reports total Newton corrections across all grids. Point and
 memory limits also apply to refinement, and cancellation remains available.
 Retained PSS operating points from earlier producer versions must be regenerated
-before dependent numerical reuse; the current producer identity is version 28.
+before dependent numerical reuse; the current producer identity is version 29.
 This convergence check supplements the shooting residual, which measures closure
 of a discrete period map. It is not a proof of resolution for all nonlinear
 expressions and devices; independent waveform and

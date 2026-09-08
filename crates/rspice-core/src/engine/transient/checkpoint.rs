@@ -1161,11 +1161,10 @@ pub(crate) fn restart_checkpoint_identity(netlist: &Netlist) -> Option<String> {
 
 pub(crate) fn simulation_checkpoint_identity(config: &SimulationConfig) -> String {
     let mut hasher = blake3::Hasher::new();
-    // v15 resolves circular/inverse time coordinates and signed-zero angular
-    // seams through shared bounds and authenticated VM boundary clocks.
-    // RELTOL no longer changes the fallback absolute voltage tolerance.
+    // v16 carries defined infinite time-coordinate ranges through bounded
+    // compositions, while refusing indeterminate arithmetic before saturation.
     // Earlier schedules can produce different accepted integration histories.
-    hasher.update(b"rspice-transient-resolved-config-v15\0");
+    hasher.update(b"rspice-transient-resolved-config-v16\0");
     hash_field(&mut hasher, "temperature", config.temperature.to_bits());
     hash_field(&mut hasher, "ramptime", config.ramptime.to_bits());
     hash_field(&mut hasher, "digital_delay_type", config.digital_delay_type);

@@ -230,8 +230,16 @@ impl TimeInterval {
     // plus an outward ULP, including at subnormal/zero results.
     fn transcendental(lower: Value, upper: Value) -> Self {
         Self::outward(
-            lower - 16.0 * Value::EPSILON * lower.abs(),
-            upper + 16.0 * Value::EPSILON * upper.abs(),
+            if lower.is_finite() {
+                lower - 16.0 * Value::EPSILON * lower.abs()
+            } else {
+                lower
+            },
+            if upper.is_finite() {
+                upper + 16.0 * Value::EPSILON * upper.abs()
+            } else {
+                upper
+            },
         )
     }
 
@@ -381,6 +389,9 @@ impl TimeOrder {
     }
 }
 
+/// A value enclosure may include infinity, but must never hide a possible
+/// NaN. Operations with an uncertain real domain return None for subdivision.
+/// Derivative intervals can still be unbounded or indeterminate independently.
 #[derive(Clone, Copy)]
 struct Dual {
     value: TimeInterval,
@@ -482,12 +493,17 @@ impl Dual {
         }
     }
 
-    fn add(self, other: Self) -> Self {
+    fn add(self, other: Self) -> Option<Self> {
         if self.constant && other.constant {
-            return Self::constant(self.value.lower + other.value.lower);
+            return Some(Self::constant(self.value.lower + other.value.lower));
+        }
+        if (self.value.lower == Value::NEG_INFINITY && other.value.upper == Value::INFINITY)
+            || (self.value.upper == Value::INFINITY && other.value.lower == Value::NEG_INFINITY)
+        {
+            return None;
         }
         let value = self.value.add(other.value);
-        Self {
+        Some(Self {
             value,
             slope: self.slope.add(other.slope),
             center: self.center + other.center,
@@ -495,7 +511,7 @@ impl Dual {
             continuous: self.continuous && other.continuous,
             roundoff: (self.roundoff + other.roundoff + value.rounding_error(false)).next_up(),
             order: self.order.add(other.order),
-        }
+        })
     }
 
     fn neg(self) -> Self {
@@ -508,17 +524,22 @@ impl Dual {
         }
     }
 
-    fn mul(self, other: Self) -> Self {
+    fn mul(self, other: Self) -> Option<Self> {
         if self.constant && other.constant {
-            return Self::constant(self.value.lower * other.value.lower);
+            return Some(Self::constant(self.value.lower * other.value.lower));
+        }
+        if (self.value.contains(0.0) && !other.value.is_finite())
+            || (other.value.contains(0.0) && !self.value.is_finite())
+        {
+            return None;
         }
         if (self.value.lower == 0.0 && self.value.upper == 0.0 && other.value.is_finite())
             || (other.value.lower == 0.0 && other.value.upper == 0.0 && self.value.is_finite())
         {
-            return self.zero_binary(other, false);
+            return Some(self.zero_binary(other, false));
         }
         let value = self.value.mul(other.value);
-        Self {
+        Some(Self {
             value,
             slope: self.slope.mul(other.value).add(self.value.mul(other.slope)),
             center: self.center * other.center,
@@ -535,7 +556,7 @@ impl Dual {
             } else {
                 TimeOrder::Unknown
             },
-        }
+        })
     }
 
     fn square(self) -> Self {
@@ -567,6 +588,9 @@ impl Dual {
         }
         if self.constant && other.constant {
             return Some(Self::constant(self.value.lower / other.value.lower));
+        }
+        if !self.value.is_finite() && !other.value.is_finite() {
+            return None;
         }
         let value = self.value.div(other.value)?;
         let denominator = other.value.lower.abs().min(other.value.upper.abs());
@@ -705,8 +729,8 @@ impl Dual {
                 Self::constant(-1.0)
             } else if context.expression_dialect == crate::config::ExpressionDialect::Xyce {
                 exponent
-                    .mul(Self::constant(std::f64::consts::PI))
-                    .trigonometric(true)
+                    .mul(Self::constant(std::f64::consts::PI))?
+                    .trigonometric(true)?
             } else if matches!(instruction, Instruction::FunctionPow) {
                 Self::constant(1.0)
             } else {
@@ -714,7 +738,7 @@ impl Dual {
                 // real domain under the ordinary power-operator contract.
                 return None;
             };
-            let powered = negative.neg().positive_power(exponent).mul(coefficient);
+            let powered = negative.neg().positive_power(exponent).mul(coefficient)?;
             result = Some(match result {
                 None => powered,
                 Some(positive) => Self {
@@ -738,17 +762,20 @@ impl Dual {
         })
     }
 
-    fn trigonometric(self, cosine: bool) -> Self {
+    fn trigonometric(self, cosine: bool) -> Option<Self> {
         if self.constant {
-            return Self::constant(if cosine {
+            return Some(Self::constant(if cosine {
                 self.value.lower.cos()
             } else {
                 self.value.lower.sin()
-            });
+            }));
+        }
+        if !self.value.is_finite() {
+            return None;
         }
         let derivative = self.value.trigonometric(!cosine);
         let value = self.value.trigonometric(cosine);
-        Self {
+        Some(Self {
             value,
             slope: self
                 .slope
@@ -773,7 +800,7 @@ impl Dual {
             } else {
                 TimeOrder::Unknown
             },
-        }
+        })
     }
 
     fn logarithm(self, base10: bool) -> Self {
@@ -829,9 +856,6 @@ impl Dual {
         if self.constant {
             return Some(Self::constant(evaluate(self.value.lower)));
         }
-        if !self.value.is_finite() {
-            return None;
-        }
         self = self
             .extremum(Self::constant(-1.0), true)
             .extremum(Self::constant(1.0), false);
@@ -878,16 +902,19 @@ impl Dual {
         })
     }
 
-    fn tangent(self) -> Self {
+    fn tangent(self) -> Option<Self> {
         if self.constant {
-            return Self::constant(self.value.lower.tan());
+            return Some(Self::constant(self.value.lower.tan()));
+        }
+        if !self.value.is_finite() {
+            return None;
         }
         let cosine = self.value.trigonometric(true);
         if cosine.contains(0.0) {
             // A pole is not a finite interpolation certificate. Keep its
             // unbounded range so an enclosing operation can still prove a
             // bounded value; raw singular forcing cannot pass resolution.
-            return Self {
+            return Some(Self {
                 value: TimeInterval::WHOLE,
                 slope: TimeInterval::WHOLE,
                 center: self.center.tan(),
@@ -895,7 +922,7 @@ impl Dual {
                 continuous: false,
                 roundoff: Value::INFINITY,
                 order: TimeOrder::Unknown,
-            };
+            });
         }
         let value = TimeInterval::transcendental(self.value.lower.tan(), self.value.upper.tan());
         let slope = self
@@ -905,7 +932,7 @@ impl Dual {
             .unwrap_or(TimeInterval::WHOLE);
         let minimum = cosine.lower.abs().min(cosine.upper.abs());
         let roundoff = ((self.roundoff / minimum).next_up() / minimum).next_up();
-        Self {
+        Some(Self {
             value,
             slope,
             center: self.center.tan(),
@@ -913,7 +940,7 @@ impl Dual {
             continuous: self.continuous,
             roundoff: (roundoff + value.rounding_error(true)).next_up(),
             order: TimeOrder::Unknown,
-        }
+        })
     }
 
     fn polar_angle(self, x: Self) -> Option<Self> {
@@ -1021,12 +1048,9 @@ impl Dual {
         if self.constant {
             return Some(Self::constant(evaluate(self.value.lower)));
         }
-        // The VM clamp propagates NaN, whereas min/max select a finite
-        // operand. An unbounded input enclosure can include invalid values
-        // such as 0*infinity and must not become a finite saturation proof.
-        if !self.value.is_finite() {
-            return None;
-        }
+        // Every incoming value excludes NaN, even when its range is
+        // unbounded. The outer function can therefore use its defined
+        // infinite limits without hiding invalid arithmetic such as 0*inf.
         if matches!(instruction, Instruction::Atanh) && xyce {
             let limit = 1.0 - super::vm::XYCE_ATANH_EPSILON;
             self = self
@@ -1463,9 +1487,9 @@ impl<'a> TimeEnclosure<'a> {
                     let right = self.stack.pop()?;
                     let left = self.stack.pop()?;
                     match instruction {
-                        Instruction::Add => left.add(right),
-                        Instruction::Sub => left.add(right.neg()),
-                        Instruction::Mul => left.mul(right),
+                        Instruction::Add => left.add(right)?,
+                        Instruction::Sub => left.add(right.neg())?,
+                        Instruction::Mul => left.mul(right)?,
                         Instruction::Div => left.div(right)?,
                         _ => return None,
                     }
@@ -1481,9 +1505,9 @@ impl<'a> TimeEnclosure<'a> {
                 Instruction::Neg => self.stack.pop()?.neg(),
                 Instruction::Abs => self.stack.pop()?.absolute(),
                 Instruction::Sqrt => self.stack.pop()?.square_root(),
-                Instruction::Sin => self.stack.pop()?.trigonometric(false),
-                Instruction::Cos => self.stack.pop()?.trigonometric(true),
-                Instruction::Tan => self.stack.pop()?.tangent(),
+                Instruction::Sin => self.stack.pop()?.trigonometric(false)?,
+                Instruction::Cos => self.stack.pop()?.trigonometric(true)?,
+                Instruction::Tan => self.stack.pop()?.tangent()?,
                 Instruction::Asin => self.stack.pop()?.circular_inverse(false)?,
                 Instruction::Acos => self.stack.pop()?.circular_inverse(true)?,
                 Instruction::Atan2 => {
@@ -1542,6 +1566,77 @@ impl<'a> TimeEnclosure<'a> {
 mod tests {
     use super::*;
     use crate::expr::{Vm, compile, parse_expression_strict};
+
+    #[test]
+    fn bounded_compositions_keep_defined_infinite_limits_and_refuse_nan() {
+        for dialect in [
+            crate::config::ExpressionDialect::Ngspice,
+            crate::config::ExpressionDialect::Xyce,
+        ] {
+            let context = Context::transient(&[], &[], 0.0).with_expression_dialect(dialect);
+            for stop in [1e-300, 1.0, 1e300] {
+                let phase = format!("pi*time/{stop:e}");
+                for expression in [
+                    format!("atan(tan({phase}))"),
+                    format!("tanh(2*tan({phase})+1)"),
+                    format!("atan(-tan({phase})/2)"),
+                    format!("asin(tan({phase}))"),
+                    format!("atan(exp(1000+sin({phase})))"),
+                ] {
+                    let program = compile(&parse_expression_strict(&expression).unwrap());
+                    let domain = TimeEnclosure::new(&program, stop)
+                        .unwrap()
+                        .evaluate(
+                            TimeInterval {
+                                lower: 0.49 * stop,
+                                upper: 0.51 * stop,
+                            },
+                            &context,
+                        )
+                        .unwrap_or_else(|| panic!("{expression}"));
+                    assert!(domain.value.is_finite(), "{expression}");
+                    let mut vm = Vm::new();
+                    for index in 0..=32 {
+                        let actual = vm.execute(
+                            &program,
+                            &Context {
+                                time: stop * (0.49 + 0.02 * index as Value / 32.0),
+                                ..context
+                            },
+                        );
+                        assert!(
+                            actual.is_finite() && domain.value.contains(actual),
+                            "{expression}: {actual} outside {:?}",
+                            domain.value
+                        );
+                    }
+                }
+            }
+            for invalid in [
+                "atan(0*exp(1000+time))",
+                "asin(0*exp(1000+time))",
+                "atanh(0*exp(1000+time))",
+                "tanh(exp(1000+time)/exp(1000+time))",
+                "tanh(exp(1000+time)-exp(1000+time))",
+                "atan(sin(exp(1000+time)))",
+                "atan(cos(exp(1000+time)))",
+                "atan(tan(exp(1000+time)))",
+            ] {
+                let program = compile(&parse_expression_strict(invalid).unwrap());
+                let domain = TimeEnclosure::new(&program, 1.0).unwrap().evaluate(
+                    TimeInterval {
+                        lower: 0.0,
+                        upper: 1.0,
+                    },
+                    &context,
+                );
+                assert!(
+                    domain.is_none(),
+                    "{invalid}: a possible NaN cannot establish a finite bound"
+                );
+            }
+        }
+    }
 
     #[test]
     fn polar_vm_order_proves_local_plateaus_without_qualifying_aliased_cycles() {
@@ -1692,19 +1787,15 @@ mod tests {
             );
         }
         let program = compile(&parse_expression_strict("0*(1e308*time)").unwrap());
-        let value = TimeEnclosure::new(&program, 2.0)
-            .unwrap()
-            .evaluate(
-                TimeInterval {
-                    lower: 0.0,
-                    upper: 2.0,
-                },
-                &context,
-            )
-            .unwrap()
-            .value;
+        let domain = TimeEnclosure::new(&program, 2.0).unwrap().evaluate(
+            TimeInterval {
+                lower: 0.0,
+                upper: 2.0,
+            },
+            &context,
+        );
         assert!(
-            !value.is_finite(),
+            domain.is_none(),
             "zero cannot conceal a potentially nonfinite intermediate"
         );
     }
@@ -2053,18 +2144,15 @@ mod tests {
             }
         }
         let program = compile(&parse_expression_strict("exp(0*(1e308*time))").unwrap());
-        let domain = TimeEnclosure::new(&program, 2.0)
-            .unwrap()
-            .evaluate(
-                TimeInterval {
-                    lower: 0.0,
-                    upper: 2.0,
-                },
-                &context,
-            )
-            .unwrap();
+        let domain = TimeEnclosure::new(&program, 2.0).unwrap().evaluate(
+            TimeInterval {
+                lower: 0.0,
+                upper: 2.0,
+            },
+            &context,
+        );
         assert!(
-            !domain.value.is_finite(),
+            domain.is_none(),
             "a nonfinite input cannot establish a zero plateau"
         );
     }
