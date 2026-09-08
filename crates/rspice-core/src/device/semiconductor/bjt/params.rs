@@ -534,12 +534,12 @@ impl Bjt {
         thermal_rise: Value,
         f: impl FnOnce(&Self) -> R,
     ) -> R {
-        self.with_temperature_variant_mask(thermal_rise, 0, f)
+        self.with_temperature_variant_mask(thermal_rise, None, 0, f)
     }
 
-    /// Differentiate the branch selected at the anchor: inactive Early
-    /// voltages and floored resistances must not cross their cutoffs during
-    /// a temperature probe.
+    /// Probe regular temperature dependencies with Early voltages frozen at
+    /// the anchor; their potentially singular slopes are differentiated
+    /// analytically. Resistance probes retain the anchor's selected branch.
     pub(super) fn with_temperature_derivative_variant<R>(
         &self,
         thermal_rise: Value,
@@ -551,13 +551,6 @@ impl Bjt {
             let temperature = self
                 .mapped_temperature(self.requested_temperature() + anchor)
                 .0;
-            let delta_t = temperature - self.tnom.max(1.0);
-            if self.tcvef != 0.0 && self.vaf * (1.0 + delta_t * self.tcvef) <= 0.0 {
-                mask |= 1;
-            }
-            if self.tcver != 0.0 && self.var * (1.0 + delta_t * self.tcver) <= 0.0 {
-                mask |= 2;
-            }
             let ratio = temperature / self.tnom.max(1.0);
             for (index, (nominal, exponent)) in self
                 .vbic_series_resistance_parameters()
@@ -571,12 +564,15 @@ impl Bjt {
                 }
             }
         }
-        self.with_temperature_variant_mask(thermal_rise, mask, f)
+        let early_anchor =
+            (self.vbic_13 && (self.tcvef != 0.0 || self.tcver != 0.0)).then_some(anchor);
+        self.with_temperature_variant_mask(thermal_rise, early_anchor, mask, f)
     }
 
     fn with_temperature_variant_mask<R>(
         &self,
         thermal_rise: Value,
+        early_anchor: Option<Value>,
         derivative_mask: u16,
         f: impl FnOnce(&Self) -> R,
     ) -> R {
@@ -584,23 +580,29 @@ impl Bjt {
             return f(self);
         }
 
-        let key = thermal_rise.to_bits();
+        let key = BjtThermalVariantKey {
+            rise_bits: thermal_rise.to_bits(),
+            early_anchor_bits: early_anchor.map(Value::to_bits),
+            resistance_branches: derivative_mask,
+        };
         {
             let cache = self.thermal_variant_cache.borrow();
-            if let Some((_, _, variant)) = cache.iter().find(|(cached_key, cached_mask, _)| {
-                *cached_key == key && *cached_mask == derivative_mask
-            }) {
+            if let Some((_, variant)) = cache.iter().find(|(cached_key, _)| *cached_key == key) {
                 return f(variant.as_ref());
             }
         }
 
         let mut variant = self.clone_without_thermal_variant_cache();
         variant.refresh_operating_scaling_for(self.requested_temperature() + thermal_rise);
-        if derivative_mask & 1 != 0 {
-            variant.vaf = 0.0;
-        }
-        if derivative_mask & 2 != 0 {
-            variant.var = 0.0;
+        if let Some(anchor) = early_anchor {
+            let temperature = self
+                .mapped_temperature(self.requested_temperature() + anchor)
+                .0;
+            let delta_t = temperature - self.tnom.max(1.0);
+            variant.vaf = (self.vaf * (1.0 + delta_t * self.tcvef)).max(0.0);
+            variant.var = (self.var * (1.0 + delta_t * self.tcver)).max(0.0);
+            variant.tcvef = 0.0;
+            variant.tcver = 0.0;
         }
         if derivative_mask >> 2 != 0 {
             let scale = variant.instance_scale();
@@ -637,7 +639,7 @@ impl Bjt {
         if cache.len() >= Self::THERMAL_VARIANT_CACHE_CAPACITY {
             cache.remove(0);
         }
-        cache.push((key, derivative_mask, Box::new(variant)));
+        cache.push((key, Box::new(variant)));
         result
     }
 
@@ -2166,12 +2168,26 @@ mod tests {
             }
             let anchor = 19.99999;
             let step = bjt.thermal_derivative_step(anchor);
-            assert!(step > 0.0 && step < 1e-7);
+            assert!(step > 1e-4);
+            let expected =
+                bjt.with_temperature_variant(anchor, |model| model.vbic_early_voltages());
             for rise in [anchor - step, anchor + step] {
-                let mapped =
-                    bjt.with_temperature_variant(rise, |model| model.vbic_early_voltages());
-                assert!(mapped.0 > 0.0 && mapped.1 > 0.0);
+                for _ in 0..2 {
+                    let frozen = bjt.with_temperature_derivative_variant(rise, anchor, |model| {
+                        model.vbic_early_voltages()
+                    });
+                    assert_eq!(frozen, expected);
+                    // Identical probe temperatures with different anchors have
+                    // different frozen parameters and must not share a cache entry.
+                    let off = bjt.with_temperature_derivative_variant(rise, 20.0, |model| {
+                        model.vbic_early_voltages()
+                    });
+                    assert_eq!(off, (0.0, 0.0));
+                }
             }
+            let physical =
+                bjt.with_temperature_variant(anchor + step, |model| model.vbic_early_voltages());
+            assert!(physical.0 < 0.0 && physical.1 < 0.0);
             assert_eq!((bjt.vaf, bjt.var), (5.0, 3.0));
         }
     }

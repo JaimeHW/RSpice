@@ -184,6 +184,48 @@ impl Bjt {
             self.vbic_junction_limits.iri,
         );
 
+        let (q1, dq1_dvbe_eff, dq1_dvbc_eff, _) = self.vbic_low_injection_charge(vbe_eff, vbc_eff);
+        let inv_rolloff_f = if self.ikf > 0.0 { 1.0 / self.ikf } else { 0.0 };
+        let inv_rolloff_r = if self.ikr > 0.0 { 1.0 / self.ikr } else { 0.0 };
+        let q2 = inv_rolloff_f * ifi + inv_rolloff_r * iri;
+        let (qb, dqb_dq1, dqb_dq2, _) = self.vbic_base_charge(q1, q2);
+        let dqb_dvbe_eff = dqb_dq1 * dq1_dvbe_eff + dqb_dq2 * inv_rolloff_f * gfi;
+        let dqb_dvbc_eff = dqb_dq1 * dq1_dvbc_eff + dqb_dq2 * inv_rolloff_r * gri;
+
+        let itzf = ifi / qb;
+        let ditzf_dvbe_eff = gfi / qb - ifi * dqb_dvbe_eff / (qb * qb);
+        let ditzf_dvbc_eff = -ifi * dqb_dvbc_eff / (qb * qb);
+        let itzr = iri / qb;
+        let ditzr_dvbe_eff = -iri * dqb_dvbe_eff / (qb * qb);
+        let ditzr_dvbc_eff = gri / qb - iri * dqb_dvbc_eff / (qb * qb);
+
+        TransportChargeState {
+            q1,
+            qb,
+            ifi,
+            iri,
+            gfi,
+            gri,
+            dq1_dvbe_eff,
+            dq1_dvbc_eff,
+            itzf,
+            itzr,
+            dqb_dvbe_eff,
+            dqb_dvbc_eff,
+            ditzf_dvbe_eff,
+            ditzf_dvbc_eff,
+            ditzr_dvbe_eff,
+            ditzr_dvbc_eff,
+        }
+    }
+
+    /// Low-injection charge and its voltage partials, plus the local-temperature
+    /// partial due only to the Early voltages (all other mappings held fixed).
+    fn vbic_low_injection_charge(
+        &self,
+        vbe_eff: Value,
+        vbc_eff: Value,
+    ) -> (Value, Value, Value, Value) {
         let (qdbe, dqdbe_dvbe_eff) = self
             .vbic_depletion_charge_and_derivative(vbe_eff, self.vje, self.mje, self.fc, self.aje);
         let (qdbc, dqdbc_dvbc_eff) = self
@@ -217,68 +259,80 @@ impl Bjt {
                 0.0
             };
 
-        let inv_rolloff_f = if self.ikf > 0.0 { 1.0 / self.ikf } else { 0.0 };
-        let inv_rolloff_r = if self.ikr > 0.0 { 1.0 / self.ikr } else { 0.0 };
-        let q2 = inv_rolloff_f * ifi + inv_rolloff_r * iri;
-        let dq2_dvbe_eff = inv_rolloff_f * gfi;
-        let dq2_dvbc_eff = inv_rolloff_r * gri;
+        let early_slope = |charge: Value, mapped: Value, nominal: Value, tc: Value| {
+            if self.vbic_13 && tc != 0.0 && mapped.is_finite() && mapped > 0.0 {
+                -(charge / mapped) * (nominal * tc / mapped)
+            } else {
+                0.0
+            }
+        };
+        let dq1_dt = dq1_dq1z
+            * (early_slope(qdbe, var, self.var, self.tcver)
+                + early_slope(qdbc, vaf, self.vaf, self.tcvef));
+        (q1, dq1_dvbe_eff, dq1_dvbc_eff, dq1_dt)
+    }
+
+    /// Returns qb, its q1/q2 partials, and qb - q1*dqb/dq1. The final
+    /// expression is evaluated without cancellation for transit-time charge.
+    fn vbic_base_charge(&self, q1: Value, q2: Value) -> (Value, Value, Value, Value) {
         let nkf = self.nkf.max(1e-12);
-        let (qb, dqb_dvbe_eff, dqb_dvbc_eff) = if self.qbm < 0.5 {
+        if self.qbm < 0.5 {
             let inv_nkf = 1.0 / nkf;
             // q1 is positive by construction (at least 1e-4).
             let xvar3 = q1.powf(inv_nkf);
-            let dxvar3_dvbe_eff = xvar3 * inv_nkf * dq1_dvbe_eff / q1;
-            let dxvar3_dvbc_eff = xvar3 * inv_nkf * dq1_dvbc_eff / q1;
             let xvar1 = xvar3 + 4.0 * q2;
-            let dxvar1_dvbe_eff = dxvar3_dvbe_eff + 4.0 * dq2_dvbe_eff;
-            let dxvar1_dvbc_eff = dxvar3_dvbc_eff + 4.0 * dq2_dvbc_eff;
             let (xvar4, dxvar4) = self.vbic_high_injection_power(xvar1, nkf);
-            let dxvar4_dvbe_eff = dxvar4 * dxvar1_dvbe_eff;
-            let dxvar4_dvbc_eff = dxvar4 * dxvar1_dvbc_eff;
             (
                 0.5 * (q1 + xvar4),
-                0.5 * (dq1_dvbe_eff + dxvar4_dvbe_eff),
-                0.5 * (dq1_dvbc_eff + dxvar4_dvbc_eff),
+                0.5 * (1.0 + dxvar4 * inv_nkf * xvar3 / q1),
+                2.0 * dxvar4,
+                if dxvar4 == 0.0 {
+                    0.5 * xvar4
+                } else {
+                    2.0 * q2 * (xvar4 / xvar1)
+                },
             )
         } else {
             let xvar1 = 1.0 + 4.0 * q2;
-            let dxvar1_dvbe_eff = 4.0 * dq2_dvbe_eff;
-            let dxvar1_dvbc_eff = 4.0 * dq2_dvbc_eff;
             let (xvar2, dxvar2) = self.vbic_high_injection_power(xvar1, nkf);
-            let dxvar2_dvbe_eff = dxvar2 * dxvar1_dvbe_eff;
-            let dxvar2_dvbc_eff = dxvar2 * dxvar1_dvbc_eff;
             (
                 0.5 * q1 * (1.0 + xvar2),
-                0.5 * (1.0 + xvar2) * dq1_dvbe_eff + 0.5 * q1 * dxvar2_dvbe_eff,
-                0.5 * (1.0 + xvar2) * dq1_dvbc_eff + 0.5 * q1 * dxvar2_dvbc_eff,
+                0.5 * (1.0 + xvar2),
+                2.0 * q1 * dxvar2,
+                0.0,
             )
+        }
+    }
+
+    pub(in crate::device::semiconductor::bjt) fn vbic_early_thermal_derivatives(
+        &self,
+        vbe_eff: Value,
+        vbc_eff: Value,
+        transport: TransportChargeState,
+        temperature_slope: Value,
+    ) -> VbicEarlyThermalDerivatives {
+        if !self.vbic_13 || (self.tcvef == 0.0 && self.tcver == 0.0) || temperature_slope == 0.0 {
+            return VbicEarlyThermalDerivatives::default();
+        }
+        let dq1_dt = self.vbic_low_injection_charge(vbe_eff, vbc_eff).3 * temperature_slope;
+        let q2 = if self.ikf > 0.0 {
+            (1.0 / self.ikf) * transport.ifi
+        } else {
+            0.0
+        } + if self.ikr > 0.0 {
+            (1.0 / self.ikr) * transport.iri
+        } else {
+            0.0
         };
-
-        let itzf = ifi / qb;
-        let ditzf_dvbe_eff = gfi / qb - ifi * dqb_dvbe_eff / (qb * qb);
-        let ditzf_dvbc_eff = -ifi * dqb_dvbc_eff / (qb * qb);
-
-        let itzr = iri / qb;
-        let ditzr_dvbe_eff = -iri * dqb_dvbe_eff / (qb * qb);
-        let ditzr_dvbc_eff = gri / qb - iri * dqb_dvbc_eff / (qb * qb);
-
-        TransportChargeState {
-            q1,
-            qb,
-            ifi,
-            iri,
-            gfi,
-            gri,
-            dq1_dvbe_eff,
-            dq1_dvbc_eff,
-            itzf,
-            itzr,
-            dqb_dvbe_eff,
-            dqb_dvbc_eff,
-            ditzf_dvbe_eff,
-            ditzf_dvbc_eff,
-            ditzr_dvbe_eff,
-            ditzr_dvbc_eff,
+        let (_, dqb_dq1, _, tail) = self.vbic_base_charge(transport.q1, q2);
+        let dqb_dt = dqb_dq1 * dq1_dt;
+        VbicEarlyThermalDerivatives {
+            qb: dqb_dt,
+            itzf: -transport.itzf * (dqb_dt / transport.qb),
+            itzr: -transport.itzr * (dqb_dt / transport.qb),
+            forward_charge: transport.ifi
+                * ((self.qtf * tail - dqb_dq1) / transport.qb)
+                * (dq1_dt / transport.qb),
         }
     }
 

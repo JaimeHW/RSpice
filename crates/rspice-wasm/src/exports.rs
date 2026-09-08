@@ -235,6 +235,39 @@ mod wasm_tests {
     }
 
     #[wasm_bindgen_test]
+    fn vbic13_near_early_cutoff_and_transit_current_scaling_in_wasm() {
+        let netlist = rspice_core::Netlist::parse(
+            "VBIC positive Early cutoff in WASM\nVc c 0 0.6\nVb b 0 0.7\nVth th 0 DC 20 AC 1\nQ1 c b 0 th vm SW_ET=1 M=3\n\
+             .model vm NPN(LEVEL=11 IS=1e-16 IBEI=1e-18 IBCI=1e-18 ISP=0 IBEIP=0 VEF=5 VER=3 TCVEF=-0.049999995000000005 TCVER=-0.02 RCX=1 RCI=1 RBX=1 RBI=1 RE=1 RBP=0 RS=0 GMIN=0 TNOM=27 RTH=1000 TMAXCLIP=100 CTH=1p CJE=1p CJC=1p TF=1n TR=2n QTF=0.3 XTF=2 VTF=2 ITF=1e-4 TD=1n QBM=0 NKF=0.4 IKF=1e-4 IKR=2e-4 AVC1=0.05 AVC2=0.3 TAVC=0.01)\n.temp 27\n.options gmin=0\n.end\n",
+        ).unwrap();
+        let points = rspice_core::Engine::default()
+            .run_ac_with_abort(&netlist, &[1e8], &rspice_core::abort_signal::NoAbort)
+            .unwrap();
+        let point = &points[0];
+        for (branch, expected) in [
+            (
+                "vc",
+                rspice_core::Complex64::new(0.001067718922411774, -0.0007753494662417362),
+            ),
+            (
+                "vb",
+                rspice_core::Complex64::new(-5.900647010104256e-6, 0.0016378819083698172),
+            ),
+            (
+                "vth",
+                rspice_core::Complex64::new(-0.0036276377668730667, -0.0014305243645007673),
+            ),
+        ] {
+            let index = point
+                .branch_names
+                .iter()
+                .position(|name| name.eq_ignore_ascii_case(branch))
+                .unwrap();
+            assert!((point.currents[index] - expected).norm() < 2e-6 * expected.norm());
+        }
+    }
+
+    #[wasm_bindgen_test]
     fn vbic13_early_voltage_cutoff_matches_xyce_in_wasm() {
         let netlist = rspice_core::Netlist::parse(
             "VBIC Early-voltage cutoff in WASM\nVc c 0 1.8\nVb b 0 0.7\nVth th 0 DC 20 AC 1\nQ1 c b 0 th vm SW_ET=1\n\

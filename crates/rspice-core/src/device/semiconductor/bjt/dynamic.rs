@@ -299,6 +299,60 @@ impl Bjt {
         reduction
     }
 
+    fn vbic_transit_time_modulation(
+        &self,
+        transport: TransportChargeState,
+        vbc_eff: Value,
+    ) -> (Value, Value, Value) {
+        let sg_if = if transport.ifi > 0.0 { 1.0 } else { 0.0 };
+        // Transport currents already include AREA*M; ITF is a nominal model
+        // current, so its ratio must use the same instance scaling.
+        let iitf = if self.itf > 0.0 {
+            1.0 / self.itf / self.instance_scale()
+        } else {
+            0.0
+        };
+        let ivtf = if self.vtf > 0.0 { 1.0 / self.vtf } else { 0.0 };
+        let sl_tf = if self.itf > 0.0 { 0.0 } else { 1.0 };
+        let r_if = transport.ifi * sg_if * iitf;
+        let dr_if_dvbe_eff = transport.gfi * sg_if * iitf;
+        let m_if = r_if / (1.0 + r_if);
+        let dm_if_dvbe_eff = dr_if_dvbe_eff / (1.0 + r_if).powi(2);
+        let (bc_exp, bc_exp_slope) = self.vbic_general_exp(vbc_eff * ivtf / 1.44);
+        let dbc_exp_dvbc_eff = bc_exp_slope * ivtf / 1.44;
+        (
+            1.0 + self.xtf * bc_exp * (sl_tf + m_if * m_if) * sg_if,
+            self.xtf * bc_exp * (2.0 * m_if * dm_if_dvbe_eff) * sg_if,
+            self.xtf * dbc_exp_dvbc_eff * (sl_tf + m_if * m_if) * sg_if,
+        )
+    }
+
+    fn vbic_dynamic_early_thermal_derivatives(
+        &self,
+        internal: [Value; BJT_INTERNAL_STATE_DIM],
+        transport: TransportChargeState,
+    ) -> (Value, Value) {
+        if !self.vbic_13 || (self.tcvef == 0.0 && self.tcver == 0.0) {
+            return (0.0, 0.0);
+        }
+        let vrth = internal[IDX_VRTH];
+        let temperature_slope = self
+            .mapped_temperature(self.requested_temperature() + vrth)
+            .1;
+        self.with_temperature_variant(vrth, |model| {
+            let vbe_eff = model.polarity() * (internal[IDX_VBI] - internal[IDX_VEI]);
+            let vbc_eff = model.polarity() * (internal[IDX_VBI] - internal[IDX_VCI]);
+            let early = model.vbic_early_thermal_derivatives(
+                vbe_eff,
+                vbc_eff,
+                transport,
+                temperature_slope,
+            );
+            let tf_mod = model.vbic_transit_time_modulation(transport, vbc_eff).0;
+            (early.itzf, model.tf * tf_mod * early.forward_charge)
+        })
+    }
+
     pub(super) fn dynamic_charge_branches_from_inputs(
         &self,
         reduction: &BjtDynamicReduction,
@@ -333,23 +387,14 @@ impl Bjt {
         let vbeo_eff = p * (vb - ve);
         let vbco_eff = p * (vb - vc);
 
-        let sg_if = if transport.ifi > 0.0 { 1.0 } else { 0.0 };
-        let iitf = if self.itf > 0.0 { 1.0 / self.itf } else { 0.0 };
-        let ivtf = if self.vtf > 0.0 { 1.0 / self.vtf } else { 0.0 };
-        let sl_tf = if self.itf > 0.0 { 0.0 } else { 1.0 };
-        let r_if = transport.ifi * sg_if * iitf;
-        let dr_if_dvbe_eff = transport.gfi * sg_if * iitf;
-        let m_if = r_if / (1.0 + r_if);
-        let dm_if_dvbe_eff = dr_if_dvbe_eff / (1.0 + r_if).powi(2);
-        let (bc_exp, bc_exp_slope) = self.vbic_general_exp(vbc_eff * ivtf / 1.44);
-        let dbc_exp_dvbc_eff = bc_exp_slope * ivtf / 1.44;
+        let (tf_mod, dtf_mod_dvbe_eff, dtf_mod_dvbc_eff) =
+            self.vbic_transit_time_modulation(transport, vbc_eff);
         let tf_base = self.tf * (1.0 + self.qtf * transport.q1);
-        let tf_mod = 1.0 + self.xtf * bc_exp * (sl_tf + m_if * m_if) * sg_if;
         let tff = tf_base * tf_mod;
-        let dtff_dvbe_eff = self.tf * self.qtf * transport.dq1_dvbe_eff * tf_mod
-            + tf_base * self.xtf * bc_exp * (2.0 * m_if * dm_if_dvbe_eff) * sg_if;
-        let dtff_dvbc_eff = self.tf * self.qtf * transport.dq1_dvbc_eff * tf_mod
-            + tf_base * self.xtf * dbc_exp_dvbc_eff * (sl_tf + m_if * m_if) * sg_if;
+        let dtff_dvbe_eff =
+            self.tf * self.qtf * transport.dq1_dvbe_eff * tf_mod + tf_base * dtf_mod_dvbe_eff;
+        let dtff_dvbc_eff =
+            self.tf * self.qtf * transport.dq1_dvbc_eff * tf_mod + tf_base * dtf_mod_dvbc_eff;
 
         let mut qbe = BjtChargeBranch {
             pos_internal: Some(IDX_VBI),
@@ -492,7 +537,7 @@ impl Bjt {
     }
 
     /// Evaluate the VBIC dynamic charge branches at an explicit bias,
-    /// including the finite-difference d/dVrth charge column and the
+    /// including the d/dVrth charge column and the
     /// excess-phase transport sensitivity when self-heating is active. Shared
     /// by the reduced charge-snapshot path and the MNA-promoted device so
     /// both stamp identical physics.
@@ -541,8 +586,10 @@ impl Bjt {
             model.dynamic_charge_inputs(external, minus_internal)
         });
 
+        let (early_itzf, early_qbe) =
+            self.vbic_dynamic_early_thermal_derivatives(internal, base_inputs.transport);
         let d_itzf_d_vrth = if self.td > 0.0 {
-            (plus_inputs.transport.itzf - minus_inputs.transport.itzf) / denom
+            (plus_inputs.transport.itzf - minus_inputs.transport.itzf) / denom + early_itzf
         } else {
             0.0
         };
@@ -565,6 +612,7 @@ impl Bjt {
                 (plus_branches[branch_idx].charge - minus_branches[branch_idx].charge) / denom;
         }
 
+        branches[0].d_internal[IDX_VRTH] += early_qbe;
         (branches, base_inputs, d_itzf_d_vrth)
     }
 
@@ -844,6 +892,9 @@ impl Bjt {
 
         let d_itzf_d_vrth = if self.td > 0.0 {
             (plus_inputs.transport.itzf - minus_inputs.transport.itzf) / denom
+                + self
+                    .vbic_dynamic_early_thermal_derivatives(internal, base_inputs.transport)
+                    .0
         } else {
             0.0
         };
@@ -868,46 +919,9 @@ impl Bjt {
             };
         }
 
-        if !self.thermal_model_enabled() {
-            let inputs = self
-                .dynamic_charge_inputs(reduction.external_voltages, reduction.internal_voltages);
-            return BjtChargeSnapshot {
-                reduction,
-                branches: self.dynamic_charge_branches_from_inputs(&reduction, inputs),
-            };
-        }
-
-        let vrth = internal[IDX_VRTH];
-        let h = self.thermal_derivative_step(vrth);
-        let denom = 2.0 * h;
-        let mut branches = self.with_temperature_variant(vrth, |model| {
-            let base_inputs = model
-                .dynamic_charge_inputs(reduction.external_voltages, reduction.internal_voltages);
-            model.dynamic_charge_branches_from_inputs(&reduction, base_inputs)
-        });
-
-        let mut plus_reduction = reduction;
-        plus_reduction.internal_voltages[IDX_VRTH] = vrth + h;
-        let mut minus_reduction = reduction;
-        minus_reduction.internal_voltages[IDX_VRTH] = vrth - h;
-        let plus_branches = self.with_temperature_derivative_variant(vrth + h, vrth, |model| {
-            let plus_inputs = model.dynamic_charge_inputs(
-                plus_reduction.external_voltages,
-                plus_reduction.internal_voltages,
-            );
-            model.dynamic_charge_branches_from_inputs(&plus_reduction, plus_inputs)
-        });
-        let minus_branches = self.with_temperature_derivative_variant(vrth - h, vrth, |model| {
-            let minus_inputs = model.dynamic_charge_inputs(
-                minus_reduction.external_voltages,
-                minus_reduction.internal_voltages,
-            );
-            model.dynamic_charge_branches_from_inputs(&minus_reduction, minus_inputs)
-        });
-        for branch_idx in 0..BJT_DYNAMIC_CHARGE_COUNT {
-            branches[branch_idx].d_internal[IDX_VRTH] =
-                (plus_branches[branch_idx].charge - minus_branches[branch_idx].charge) / denom;
-        }
+        let branches = self
+            .vbic_dynamic_charge_state_at_bias(reduction.external_voltages, internal, None)
+            .0;
 
         BjtChargeSnapshot {
             reduction,
@@ -1013,6 +1027,180 @@ mod tests {
     use super::*;
 
     #[test]
+    fn vbic_transit_time_charge_and_derivatives_scale_with_parallel_instances() {
+        for level in [4.0, 11.0, 12.0] {
+            let params = [
+                ("LEVEL", level),
+                ("IS", 1e-16),
+                ("TF", 2e-9),
+                ("QTF", 0.3),
+                ("XTF", 2.0),
+                ("ITF", 1e-4),
+                ("VTF", 2.0),
+                ("VEF", 5.0),
+                ("VER", 3.0),
+                ("IKF", 1e-4),
+                ("IKR", 2e-4),
+            ]
+            .map(|(name, value)| (name.to_owned(), value))
+            .into_iter()
+            .collect();
+            let unit = Bjt::new_npn("q".into(), 1, 2, 0).with_params(&params);
+            let external = [0.6, 0.7, 0.0, 0.0];
+            let internal = [0.6, 0.6, 0.7, 0.7, 0.0, 0.6, 0.0, 0.0, 0.0, 0.0];
+            let expected = unit
+                .vbic_dynamic_charge_state_at_bias(external, internal, None)
+                .0[0];
+            for (area, multiplicity) in [(1.0, 0.25), (1.0, 3.0), (2.0, 3.0)] {
+                let scaled = unit
+                    .clone()
+                    .with_instance_params(&[("AREA".into(), area), ("M".into(), multiplicity)]);
+                let actual = scaled
+                    .vbic_dynamic_charge_state_at_bias(external, internal, None)
+                    .0[0];
+                for (index, (actual, expected)) in std::iter::once(actual.charge)
+                    .chain(actual.d_internal)
+                    .zip(std::iter::once(expected.charge).chain(expected.d_internal))
+                    .enumerate()
+                {
+                    let normalized = actual / (area * multiplicity);
+                    // Only the regular thermal column uses a difference of
+                    // nearby charges; voltage partials are analytic.
+                    let tolerance = if index == IDX_VRTH + 1 { 2e-7 } else { 1e-12 };
+                    assert!(
+                        (normalized - expected).abs() <= tolerance * expected.abs(),
+                        "LEVEL={level} AREA={area} M={multiplicity}: {normalized:e} != {expected:e}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn vbic13_early_cutoff_keeps_current_charge_and_delay_thermal_slopes_resolvable() {
+        // With linear depletion and no rolloff, qb = 1 + Vj/VE and
+        // Qbe = TF*(QTF*If + Itzf). These closed forms remain well conditioned
+        // one floating-point step from VE=0, unlike a temperature difference.
+        for level in [11.0, 12.0] {
+            for qbm in [0.0, 1.0] {
+                for reverse in [false, true] {
+                    for factor in [1e-7, 1e-11, Value::EPSILON] {
+                        let tc = (factor - 1.0) / 20.0;
+                        let params = [
+                            ("LEVEL", level),
+                            ("IS", 1e-16),
+                            ("XIS", 0.0),
+                            ("XISR", 0.0),
+                            ("DEAR", 0.0),
+                            ("IBEI", 1e-18),
+                            ("XII", 0.0),
+                            ("MJE", 0.0),
+                            ("MJC", 0.0),
+                            ("VEF", if reverse { 0.0 } else { 5.0 }),
+                            ("VER", if reverse { 5.0 } else { 0.0 }),
+                            ("TCVEF", if reverse { 0.0 } else { tc }),
+                            ("TCVER", if reverse { tc } else { 0.0 }),
+                            ("QBM", qbm),
+                            ("QTF", 0.3),
+                            ("TF", 1e-9),
+                            ("TD", 1e-9),
+                            ("RTH", 1000.0),
+                            ("CTH", 1e-12),
+                            ("GMIN", 0.0),
+                        ]
+                        .map(|(name, value)| (name.to_owned(), value))
+                        .into_iter()
+                        .collect();
+                        for (bjt, p) in [
+                            (Bjt::new_npn("q".into(), 1, 2, 0), 1.0),
+                            (Bjt::new_pnp("q".into(), 1, 2, 0), -1.0),
+                        ] {
+                            let bjt = bjt
+                                .with_params(&params)
+                                .with_instance_params(&[("M".into(), 3.0)]);
+                            let external = [p * 0.5, p * 0.6, 0.0, 0.0];
+                            let internal = [
+                                p * 0.5,
+                                p * 0.5,
+                                p * 0.6,
+                                p * 0.6,
+                                0.0,
+                                p * 0.5,
+                                0.0,
+                                20.0,
+                                0.0,
+                                0.0,
+                            ];
+                            let (expected_if, expected_transport, expected_qbe, expected_ibe) = bjt
+                                .with_temperature_variant(20.0, |model| {
+                                    let vbe = p * (internal[IDX_VBI] - internal[IDX_VEI]);
+                                    let vbc = p * (internal[IDX_VBI] - internal[IDX_VCI]);
+                                    let junction = if reverse { vbe } else { vbc };
+                                    let ve = 5.0 * (1.0 + (model.temperature - model.tnom) * tc);
+                                    assert!(ve > 0.0);
+                                    let ratio = ve / (ve + junction);
+                                    let dratio = 5.0 * tc * junction / (ve + junction).powi(2);
+                                    let ifi = model.is * (vbe / model.vt).exp_m1();
+                                    let iri = model.is * (vbc / model.vt).exp_m1();
+                                    let dif = (ifi * model.ea - (ifi + model.is) * vbe)
+                                        / (model.vt * model.temperature);
+                                    let dir = (iri * model.ea - (iri + model.is) * vbc)
+                                        / (model.vt * model.temperature);
+                                    let forward = dif * ratio + ifi * dratio;
+                                    let transport = (dif - dir) * ratio + (ifi - iri) * dratio;
+                                    let qbe = model.tf * (model.qtf * dif + forward);
+                                    let ibe = model.ibei
+                                        * (model.eaie * (vbe / model.vt).exp_m1()
+                                            - (vbe / model.vt).exp() * vbe)
+                                        / (model.vt * model.temperature);
+                                    (forward, transport, qbe, ibe)
+                                });
+                            let (branches, _, d_itzf) =
+                                bjt.vbic_dynamic_charge_state_at_bias(external, internal, None);
+                            let evaluated = bjt.evaluate_state(
+                                BjtNodeVoltages {
+                                    vc: external[0],
+                                    vb: external[1],
+                                    ve: 0.0,
+                                    vs: 0.0,
+                                    vcx: internal[IDX_VCX],
+                                    vci: internal[IDX_VCI],
+                                    vbx: internal[IDX_VBX],
+                                    vbi: internal[IDX_VBI],
+                                    vei: 0.0,
+                                    vbp: internal[IDX_VBP],
+                                    vsi: 0.0,
+                                },
+                                20.0,
+                            );
+                            for (name, actual, expected) in [
+                                ("delay", d_itzf, expected_if),
+                                (
+                                    "transport",
+                                    evaluated.iciei.d_internal[IDX_VRTH],
+                                    p * expected_transport,
+                                ),
+                                ("base", evaluated.ibe.d_internal[IDX_VRTH], p * expected_ibe),
+                                ("charge", branches[0].d_internal[IDX_VRTH], expected_qbe),
+                                (
+                                    "thermal storage",
+                                    branches[IDX_QCTH].d_internal[IDX_VRTH],
+                                    3e-12,
+                                ),
+                            ] {
+                                assert!(
+                                    (actual - expected).abs() < 2e-7 * expected.abs(),
+                                    "LEVEL={level} QBM={qbm} reverse={reverse} factor={factor} p={p} {name}: {actual:e} != {expected:e}"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
     fn vbic13_delayed_avalanche_reduction_matches_nonequilibrium_residual_derivatives() {
         let params = [
             ("LEVEL", 12.0),
@@ -1039,6 +1227,17 @@ mod tests {
             ("AVC2", 0.3),
             ("TAVC", 0.01),
             ("TD", 1e-9),
+            ("TF", 2e-9),
+            ("QTF", 0.3),
+            ("XTF", 2.0),
+            ("ITF", 1e-4),
+            ("VTF", 2.0),
+            ("IKF", 1e-6),
+            ("IKR", 2e-6),
+            ("NKF", 0.4),
+            ("QBM", 1.0),
+            ("CJE", 1e-12),
+            ("CJC", 2e-12),
             ("TMAXCLIP", 100.0),
         ]
         .map(|(name, value)| (name.to_owned(), value))
@@ -1099,9 +1298,12 @@ mod tests {
                         &mut reduction.g_ei,
                         &mut reduction.g_ee,
                     );
-                    (residual, reduction.g_ii)
+                    let charges = bjt
+                        .vbic_dynamic_charge_state_at_bias(external, state, None)
+                        .0;
+                    (residual, reduction.g_ii, charges)
                 };
-                let (_, jacobian) = evaluate(state);
+                let (_, jacobian, charges) = evaluate(state);
                 for column in 0..BJT_INTERNAL_STATE_DIM {
                     let h = if column == IDX_VRTH {
                         1e-3
@@ -1114,14 +1316,22 @@ mod tests {
                     let mut minus = state;
                     plus[column] += h;
                     minus[column] -= h;
-                    let plus = evaluate(plus).0;
-                    let minus = evaluate(minus).0;
+                    let (plus, _, plus_charges) = evaluate(plus);
+                    let (minus, _, minus_charges) = evaluate(minus);
                     for row in 0..BJT_INTERNAL_STATE_DIM {
                         let fd = (plus[row] - minus[row]) / (2.0 * h);
                         let actual = jacobian[row][column];
                         assert!(
                             (fd - actual).abs() < 2e-5 * actual.abs().max(fd.abs()) + 2e-9,
                             "p={p} rise={rise} row={row} column={column}: {actual:e} != {fd:e}"
+                        );
+                    }
+                    for row in 0..BJT_DYNAMIC_CHARGE_COUNT {
+                        let fd = (plus_charges[row].charge - minus_charges[row].charge) / (2.0 * h);
+                        let actual = charges[row].d_internal[column];
+                        assert!(
+                            (fd - actual).abs() < 2e-5 * actual.abs().max(fd.abs()) + 1e-20,
+                            "charge p={p} rise={rise} row={row} column={column}: {actual:e} != {fd:e}"
                         );
                     }
                 }

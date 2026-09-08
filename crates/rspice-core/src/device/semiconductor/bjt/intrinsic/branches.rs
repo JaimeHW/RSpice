@@ -632,26 +632,7 @@ impl Bjt {
         // Use a small relative perturbation to keep Vrth-derivative finite
         // differences accurate for strongly temperature-sensitive currents.
         let raw_temperature = self.requested_temperature() + vrth;
-        let mut step = (raw_temperature.abs().max(1.0) * 1e-6).clamp(1e-7, 1e-3);
-        if self.vbic_13 && (self.tcvef != 0.0 || self.tcver != 0.0) {
-            let (temperature, slope) = self.mapped_temperature(raw_temperature);
-            let delta_t = temperature - self.tnom.max(1.0);
-            for (nominal, coefficient) in [(self.vaf, self.tcvef), (self.var, self.tcver)] {
-                let factor = 1.0 + delta_t * coefficient;
-                if nominal * factor > 0.0 && coefficient != 0.0 && slope > 0.0 {
-                    // Resolve the reciprocal's local slope without crossing its
-                    // pole. Inactive branches are held off by derivative variants.
-                    let distance = (factor / (coefficient * slope)).abs();
-                    let local_step = distance * 1e-4;
-                    if local_step < step {
-                        // Binary steps preserve the probe separation when
-                        // added to the much larger ambient temperature.
-                        step = local_step.max(Value::MIN_POSITIVE).log2().floor().exp2();
-                    }
-                }
-            }
-        }
-        step
+        (raw_temperature.abs().max(1.0) * 1e-6).clamp(1e-7, 1e-3)
     }
 }
 
