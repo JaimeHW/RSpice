@@ -42,7 +42,7 @@
   }
   main { max-width: 1100px; margin: 0 auto; padding: 24px 24px 64px; }
 
-  header { display: flex; align-items: center; gap: 12px; padding-bottom: 16px;
+  header { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding-bottom: 16px;
     border-bottom: 1px solid var(--border); margin-bottom: 24px; }
   .tile { width: 34px; height: 34px; border-radius: 22%; background: var(--accent);
     display: flex; align-items: center; justify-content: center; flex: none; }
@@ -54,7 +54,7 @@
     margin-left: auto; font-family: var(--mono); font-size: 11px;
     display: inline-flex; align-items: center; gap: 6px;
     border: 1px solid var(--border-strong); border-radius: var(--radius);
-    padding: 4px 10px; color: var(--text-dim);
+    padding: 4px 10px; color: var(--text-dim); white-space: nowrap;
   }
   .badge .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-faint); }
   .badge.ready .dot { background: var(--ok); }
@@ -64,11 +64,13 @@
   @media (max-width: 880px) { .grid { grid-template-columns: 1fr; } }
   .panel { background: var(--bg-panel); border: 1px solid var(--border); border-radius: 3px;
     display: flex; flex-direction: column; min-width: 0; }
-  .panel-head { display: flex; align-items: center; gap: 8px; padding: 8px 12px;
+  .panel[hidden] { display: none; }
+  .panel-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 12px;
     border-bottom: 1px solid var(--border);
     font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.12em;
     text-transform: uppercase; color: var(--text-faint); }
-  .panel-head .right { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+  .panel-head .right { margin-left: auto; display: flex; flex-wrap: wrap; gap: 8px;
+    align-items: center; justify-content: flex-end; min-width: 0; }
 
   textarea {
     width: 100%; min-height: 320px; resize: vertical;
@@ -90,7 +92,7 @@
   button {
     appearance: none; cursor: pointer; border-radius: var(--radius);
     border: 1px solid var(--border-strong); background: transparent; color: var(--text);
-    font: 500 12.5px var(--sans); padding: 6px 14px; min-height: 30px;
+    font: 500 12.5px var(--sans); padding: 6px 14px; min-height: 30px; white-space: nowrap;
     transition: background 0.16s ease, border-color 0.16s ease;
   }
   button:hover { background: var(--bg-hover); }
@@ -319,7 +321,14 @@ function firstResult(payload, resultKind) {
 
 function axisValues(entry, axisName) {
   const axis = entry.window?.axes.find(candidate => candidate.name === axisName);
-  return axis ? Array.from(axis.values.values) : [];
+  if (!(axis?.values instanceof Float64Array)) {
+    throw new Error(`Missing or invalid ${axisName} result axis`);
+  }
+  const values = Array.from(axis.values);
+  if (values.some(value => !Number.isFinite(value))) {
+    throw new Error(`Non-finite ${axisName} result axis`);
+  }
+  return values;
 }
 
 /* Pick the first named voltage that exists, else any voltage. */
@@ -406,7 +415,7 @@ function drawAcPlot(payload) {
   el("path", { d, fill: "none", stroke: "var(--trace)", "stroke-width": 1.8,
     "stroke-linejoin": "round" }, svg);
   $("plot-meta").textContent = chosen.descriptor.displayName + " magnitude (dB)";
-  return chosen.descriptor.displayName;
+  return { name: chosen.descriptor.displayName, points: frequencies.length };
 }
 
 /* ---- engine wiring ---- */
@@ -555,9 +564,10 @@ async function doAc() {
   try {
     const response = await runEngine("ac", { source: deck(), frequencies });
     if (!response) { return; }
-    const node = drawAcPlot(response.result);
+    const plotted = drawAcPlot(response.result);
+    if (!plotted) { throw new Error("No available AC voltage samples to plot"); }
     const ms = response.elapsedMs.toFixed(1);
-    log(`ac: ${frequencies.length} points for V(${node || "node"}) · solved in ${ms} ms`, "ok");
+    log(`ac: ${plotted.points} points for ${plotted.name} · solved in ${ms} ms`, "ok");
   } catch (e) { log("ac error: " + e, "err"); }
 }
 async function doTran() {
@@ -596,8 +606,12 @@ async function doTran() {
        absent sample is not interpolated over and not drawn as zero. */
     let plotted = time.length;
     for (const s of series) {
+      plotted = Math.min(plotted, s.values.length);
       const gap = s.values.findIndex(value => value === null || value === undefined);
       if (gap >= 0) { plotted = Math.min(plotted, gap); }
+    }
+    if (!series.length || plotted < 2) {
+      throw new Error("No available transient voltage samples to plot");
     }
     drawPlot(time.slice(0, plotted), series.map(s => ({ ...s, values: s.values.slice(0, plotted) })));
     const budget = entry.truncated

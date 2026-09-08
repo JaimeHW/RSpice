@@ -70,7 +70,7 @@ jobs:
       - name: WASM IDE worker tests
         run: python3 tools/ci/test_ide_worker.py
       - name: Browser module loading tests
-        run: node --test tools/ci/test_wasm_loader.mjs
+        run: node --test tools/ci/test_wasm_loader.mjs tools/ci/test_wasm_playground.mjs
       - name: Native release packager tests
         run: python3 tools/release/test_package_native.py
       - name: Managed Python runtime staging tests

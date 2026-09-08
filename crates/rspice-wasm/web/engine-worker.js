@@ -59,20 +59,25 @@ function windowPointBudget(metadata) {
 }
 
 function readHandle(handle) {
-  const metadata = handle.metadata();
-  const results = metadata.results.map((summary) => {
-    const detail = handle.resultMetadata(summary.index);
-    let window = null;
-    let truncated = false;
-    if (detail.pointCount > 0) {
-      const budget = windowPointBudget(detail);
-      const count = Math.min(detail.pointCount, budget);
-      truncated = count < detail.pointCount;
-      window = handle.readWindow(summary.index, 0, count);
-    }
-    return { summary, metadata: detail, window, truncated };
-  });
-  return { metadata, results };
+  try {
+    const metadata = handle.metadata();
+    const results = metadata.results.map((summary) => {
+      const detail = handle.resultMetadata(summary.index);
+      let window = null;
+      let truncated = false;
+      if (detail.pointCount > 0) {
+        const budget = windowPointBudget(detail);
+        const count = Math.min(detail.pointCount, budget);
+        truncated = count < detail.pointCount;
+        window = handle.readWindow(summary.index, 0, count);
+      }
+      return { summary, metadata: detail, window, truncated };
+    });
+    return { metadata, results };
+  } finally {
+    // Windows own their JavaScript arrays; release the engine's retained document.
+    handle.free();
+  }
 }
 
 async function ensureReady() {

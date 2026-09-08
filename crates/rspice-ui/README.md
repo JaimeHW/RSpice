@@ -221,7 +221,9 @@ python3 tools/ci/check_browser_release.py --web-root ../RSpice-Site/_site --outp
 ```
 
 The second gate checks actual UI startup at three emulated viewport sizes,
-playground transient solves, and Python breakpoint/evaluate/step integration.
+playground transient solves with finite rendered traces and unclipped controls,
+and Python breakpoint/evaluate/step integration. Version 2 qualification receipts
+are required; earlier receipts could accept an empty plot with a solved notice.
 It applies the packaged `_headers` policy and records screenshots, browser
 errors, and the hashes of the packaged inputs and response-header policy.
 Each case opens its own tab, preserving the application's unsaved-work guard.
