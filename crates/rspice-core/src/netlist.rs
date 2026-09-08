@@ -10239,6 +10239,46 @@ mod tests {
     }
 
     #[test]
+    fn pwl_source_timing_options_leave_following_source_terms() {
+        for source in ["V1", "I1"] {
+            for waveform in ["PWL(0 0 1m 1)", "PWL 0 0 1m 1"] {
+                for timing in ["", " TD=.1m R=0"] {
+                    for terms in [" AC 2 30 DC -1", " DC=-1 AC=2,30"] {
+                        let netlist = Netlist::parse(&format!(
+                            "PWL source order\n{source} out 0 {waveform}{timing}{terms}\n.end\n"
+                        ))
+                        .unwrap();
+                        let spec = match &netlist.elements[0].kind {
+                            ElementKind::VoltageSource(spec) | ElementKind::CurrentSource(spec) => {
+                                spec
+                            }
+                            other => panic!("unexpected source: {other:?}"),
+                        };
+                        let SourceSpec::DcAcTransient {
+                            dc_value,
+                            ac_magnitude,
+                            ac_phase,
+                            transient,
+                        } = spec
+                        else {
+                            panic!("expected DC/AC/transient source: {spec:?}");
+                        };
+                        assert_eq!(*dc_value, -1.0);
+                        assert_eq!(*ac_magnitude, 2.0);
+                        assert!((*ac_phase - 30_f64.to_radians()).abs() < 1e-15);
+                        assert!(
+                            matches!(transient.as_ref(), SourceSpec::Pwl{points, delay, repeat_from}
+                            if points == &[(0.0,0.0),(1e-3,1.0)]
+                                && *delay == if timing.is_empty() {0.0} else {1e-4}
+                                && *repeat_from == if timing.is_empty() {None} else {Some(0.0)})
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
     fn source_dc_terms_ignore_unlabeled_numeric_tail_before_keywords() {
         let netlist = Netlist::parse(
             "source unlabeled tail\n\

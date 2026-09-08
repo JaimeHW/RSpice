@@ -618,6 +618,86 @@ fn legacy_bjt_ac_preserves_negative_transport_charge_derivative() {
 }
 
 #[test]
+fn legacy_itf_scaling_matches_ac_and_transient_charge_conservation() {
+    use rspice_core::numerics::integration::IntegrationMethod;
+    let vt = rspice_core::analysis::temperature::thermal_voltage(300.15);
+    let engine = Engine::new(SimulationConfig {
+        convergence_config: ConvergenceConfig {
+            gmin_target: 0.0,
+            junction_gmin_target: 0.0,
+            voltage_reltol: 1e-9,
+            current_abstol: 1e-16,
+            voltage_abstol: 1e-12,
+            ..Default::default()
+        },
+        integration_method: IntegrationMethod::BackwardEuler,
+        // This checks each backward-Euler charge balance, independent of LTE
+        // step selection; a prescribed grid keeps the regression inexpensive.
+        locked_time_grid: Some(std::sync::Arc::new(
+            (0..=20).map(|index| f64::from(index) * 1e-9).collect(),
+        )),
+        ..Default::default()
+    });
+    let charge = |vbe: f64| {
+        let forward = 1e-16 * (vbe / vt).exp_m1();
+        let fraction = forward / (forward + 1e-4);
+        1e-9 * forward * (1.0 + 3.0 * ((vbe - 0.72) / 14.4).exp() * fraction.powi(2))
+    };
+    for (kind, p) in [("NPN", 1.0), ("PNP", -1.0)] {
+        for devices in [
+            "Q1 c b 0 qm M=3",
+            "Q1 c b 0 qm AREA=3",
+            "Q1 c b 0 qm AREA=1.5 M=2",
+            "Q1 c b 0 qm\nQ2 c b 0 qm\nQ3 c b 0 qm",
+        ] {
+            let netlist = Netlist::parse(&format!(
+                "* Legacy ITF charge conservation\nVc c 0 {}\nVb b 0 PWL(0 {} 20n {}) AC 1 DC {}\n{devices}\n\
+                 .model qm {kind}(LEVEL=1 IS=1e-16 BF=100 TF=1n XTF=3 VTF=10 ITF=100u)\n.options gmin=0\n.end\n",
+                p*0.72, p*0.65, p*0.7, p*0.65
+            )).unwrap();
+            let ac = engine.run_ac(&netlist, &[1e8]).unwrap();
+            let vb = ac[0]
+                .branch_names
+                .iter()
+                .position(|name| name.eq_ignore_ascii_case("Vb"))
+                .unwrap();
+            let forward = 1e-16 * (0.65 / vt).exp_m1();
+            let conductance = 1e-16 / vt * (0.65 / vt).exp();
+            let fraction = forward / (forward + 1e-4);
+            let extra = 3.0 * ((0.65 - 0.72) / 14.4_f64).exp() * fraction.powi(2);
+            let capacitance = 1e-9
+                * (conductance * (1.0 + extra * (3.0 - 2.0 * fraction)) + forward * extra / 14.4);
+            let expected = rspice_core::Complex64::new(
+                -3.0 * (conductance / 100.0 + 1e-16 / vt * ((0.65 - 0.72) / vt).exp()),
+                -3.0 * std::f64::consts::TAU * 1e8 * capacitance,
+            );
+            assert!(
+                (ac[0].currents[vb] - expected).norm() < 1e-11 * expected.norm(),
+                "{kind} {devices}: {:?} != {expected:?}",
+                ac[0].currents[vb]
+            );
+            let result = engine.run_tran(&netlist, 20e-9, 1e-9).unwrap();
+            let base = result.try_voltage_waveform_named("b").unwrap();
+            let current = result.try_branch_current_waveform_named("Vb").unwrap();
+            assert!(result.time.len() > 3 && *result.time.last().unwrap() >= 20e-9);
+            for index in 1..result.time.len() {
+                let vbe = p * base[index];
+                let static_base =
+                    3.0 * p * 1e-16 * ((vbe / vt).exp_m1() / 100.0 + ((vbe - 0.72) / vt).exp_m1());
+                let dynamic_base = 3.0 * p * (charge(vbe) - charge(p * base[index - 1]))
+                    / (result.time[index] - result.time[index - 1]);
+                assert!(
+                    (current[index] + static_base + dynamic_base).abs() < 1e-11,
+                    "{kind} {devices} t={}: I={} static={static_base} dynamic={dynamic_base}",
+                    result.time[index],
+                    current[index]
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn legacy_bjt_transient_current_integrates_charge_with_negative_slope() {
     let vt = rspice_core::analysis::temperature::thermal_voltage(300.15);
     for (kind, polarity) in [("NPN", 1.0), ("PNP", -1.0)] {
