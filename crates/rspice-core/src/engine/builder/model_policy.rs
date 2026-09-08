@@ -675,7 +675,7 @@ pub(super) fn validate_bjt_model_level(
 
     for name in [
         "TCRTH", "TMINCLIP", "TMAXCLIP", "AVCX1", "AVCX2", "TAVCX", "MCX", "MAXEXP", "TCVEF",
-        "TCVER", "KFN", "AFN", "BFN",
+        "TCVER", "KFN", "AFN", "BFN", "PNJMAXI",
     ] {
         let authored = params.contains_key(name)
             || expr_params
@@ -710,7 +710,7 @@ pub(super) fn validate_bjt_model_level(
                     "TMAXCLIP" => (27.0..=1000.0).contains(value),
                     "AVCX1" | "AVCX2" | "KFN" => *value >= 0.0,
                     "MCX" => *value > 0.0 && *value <= 1.0,
-                    "MAXEXP" => *value > 0.0,
+                    "MAXEXP" | "PNJMAXI" => *value > 0.0,
                     "AFN" | "BFN" => {
                         !level.is_some_and(|level| level == 11.0 || level == 12.0) || *value > 0.0
                     }
@@ -725,7 +725,7 @@ pub(super) fn validate_bjt_model_level(
                     "TMAXCLIP" => " in [27, 1000] Celsius",
                     "AVCX1" | "AVCX2" | "KFN" => " greater than or equal to zero",
                     "MCX" => " in (0, 1]",
-                    "MAXEXP" => " greater than zero",
+                    "MAXEXP" | "PNJMAXI" => " greater than zero",
                     "AFN" | "BFN" if level.is_some_and(|level| level == 11.0 || level == 12.0) =>
                         " greater than zero",
                     _ => "",

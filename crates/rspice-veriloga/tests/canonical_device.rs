@@ -22,6 +22,63 @@ use std::process::Command;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 #[test]
+fn generated_signed_zero_factors_preserve_stamps_defaults_and_noise() {
+    let source = r#"
+module signed_zero(p,q);
+inout p,q; electrical p,q;
+parameter integer mode=0;
+parameter real sign=-1, zero=0.0/sign;
+real z,a;
+analog begin
+    if (mode==0) z=0.0*V(q);
+    else if (mode==1) z=0.0/V(q);
+    else if (mode==2) z=0.0+V(q);
+    else z=V(q)-(-0.0);
+    a=atan2(z,-1.0);
+    I(p)<+V(p)*a+white_noise(4.0+a,"branch_cut");
+end
+endmodule
+"#;
+    let name = "signed zero device";
+    let (state, stamp, noise) = generated_parts(source, name);
+    run_generated_main(name, &state, &stamp, &noise, r#"
+struct Capture(f64);
+impl runtime::GeneratedNoiseVisitor for Capture {
+    fn visit(&mut self,_index:usize,value:runtime::GeneratedNoiseEvaluationRef<'_>)->bool { self.0=value.psd; true }
+}
+impl runtime::GeneratedNoiseProcessVisitor for Capture {
+    fn visit_process(&mut self,_index:usize,value:runtime::GeneratedNoiseProcessEvaluationRef<'_>)->bool { self.0=value.psd; true }
+}
+let mut instance=device::state::Instance::new(&[0,1]);
+instance.finalize_parameters().unwrap();
+for sign in [-1.0_f64,1.0] {
+    instance.set_parameter("sign",sign).unwrap();
+    assert_eq!(instance.params.values[2].to_bits(), (0.0/sign).to_bits());
+}
+for mode in 0..4 {
+    instance.set_parameter("mode",f64::from(mode)).unwrap();
+    for q in if mode<2 {[-2.0,2.0]} else {[-0.0,0.0]} {
+        let z:f64=match mode {0=>0.0*q,1=>0.0/q,2=>0.0+q,_=>q-(-0.0)};
+        let expected=z.atan2(-1.0);
+        let bias=[1.0,q];
+        let ctx=runtime::GeneratedEvalContext { voltages:&bias,temperature:300.0 };
+        let mut sink=[0.0;12];
+        instance.stamp(&ctx,&mut runtime::GeneratedStamper {sink:Some(&mut sink)});
+        assert_eq!(sink[9],expected,"value mode={mode}, q={q:?}");
+        assert_eq!(sink[10],expected,"Jacobian mode={mode}, q={q:?}");
+        let mut source=Capture(-1.0);
+        instance.evaluate_noise_sources(&ctx,&mut source).unwrap();
+        let mut process=Capture(-1.0);
+        instance.evaluate_noise_processes_at_frequency(&ctx,1.0,&mut process).unwrap();
+        assert_eq!(source.0,4.0+expected,"source mode={mode}, q={q:?}");
+        assert_eq!(process.0,4.0+expected,"process mode={mode}, q={q:?}");
+        assert!(!ctx.evaluation_failed());
+    }
+}
+"#).unwrap_or_else(|report|panic!("{report}"));
+}
+
+#[test]
 fn generated_ddx_preserves_domain_errors_in_stamps_and_noise() {
     for (expression, valid_psd) in [
         ("ddx(V(p)%V(q),V(p))", "1.0"),

@@ -5,7 +5,7 @@ use super::state::{CanonicalModelValues, Instance, PARAMETER_MODEL_FLAGS};
 use rspice_veriloga_runtime::{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, install_generated_stage_values, L2, L3, integer, evaluate_generated_above, evaluate_generated_cross, evaluate_generated_timer, rspice_eval_ddt, rspice_eval_idt, rspice_limexp, rspice_limited_exp, rspice_limited_exp_derivative};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock, Weak};
-pub(super) const CANONICAL_MODEL_STAGE_SLOTS: [u32; 5] = [5, 6, 4, 1, 3];
+pub(super) const CANONICAL_MODEL_STAGE_SLOTS: [u32; 7] = [5, 6, 4, 1, 3, 17, 18];
 pub(super) const CANONICAL_INSTANCE_STAGE_SLOTS: [u32; 11] = [7, 8, 9, 10, 0, 11, 12, 14, 13, 15, 16];
 pub(super) const CANONICAL_TEMPERATURE_STAGE_SLOTS: [u32; 1] = [2];
 
@@ -16,8 +16,10 @@ pub(super) fn canonical_model_preprocess(
     staged: &[f64],
     temperature: f64,
     thermal_voltage: f64,
-) -> [f64; 5] {
+) -> [f64; 7] {
 	let B=parameter_given[11] as u8 as f64;
+	let G=0.0;
+	let I=0.0;
 	let mut oC=0.0;
 	let A=parameters[15]!= 1002f64;
 	if parameter_given[11]{
@@ -27,7 +29,9 @@ pub(super) fn canonical_model_preprocess(
 	let D=273.15f64+ parameters[16];
 	let E=(parameters[29]> 0f64)|| (parameters[27]> 0f64);
 	let F=parameters[35]+ 1f64;
-    [A as u8 as f64, oC, D, E as u8 as f64, F]
+	let H=0f64+ G;
+	let J=0f64+ I;
+    [A as u8 as f64, oC, D, E as u8 as f64, F, H, J]
 }
 
 pub(super) fn canonical_instance_preprocess(
@@ -321,11 +325,9 @@ impl Instance {
 		let GT=parameters[29];
 		let GU=parameters[27];
 		let GX=L2([0f64;2]);
-		let HM=0f64;
-		let HP=L3([0f64;3]);
-		let HX=ddt_scale();
-		let IN=0.0;
-		let IO=0.0;
+		let HP=0f64;
+		let HS=L3([0f64;3]);
+		let IA=ddt_scale();
 		if A{
 		analog_finish(2, time, B);
 		}
@@ -716,80 +718,64 @@ impl Instance {
 		let HJ=1f64* EU;
 		let HK=FA* EV;
 		let HL=1f64* EV;
-		let HQ;
-		let HR;
-		let HS;
+		let HM=J+ HC;
 		let HT;
 		let HU;
 		let HV;
+		let HW;
+		let HX;
+		let HY;
 		if EZ!=0.0{
-		HQ=HI;
-		HR=HF;
-		HS=J;
-		HT=HJ;
-		HU=HH;
-		HV=HM;
+		let HN=J+ HI;
+		let HO=J+ HF;
+		HT=HN;
+		HU=HO;
+		HV=J;
+		HW=HJ;
+		HX=HH;
+		HY=HP;
 		}else{
-		let HN=N* FA;
-		let HO=1f64* N;
-		HQ=J;
-		HR=J;
-		HS=HN;
-		HT=HM;
-		HU=HP;
-		HV=HO;
+		let HQ=1f64* N;
+		let HR=J+ (N* FA);
+		HT=J;
+		HU=J;
+		HV=HR;
+		HW=HP;
+		HX=HS;
+		HY=HQ;
 		}
-		let HZ;
-		let IA;
-		let IB;
-		let IC;
+		let ID;
+		let IE;
+		let IF;
+		let IG;
 		if EZ!=0.0{
-		let HW=ddt(0, HK);
-		let HY=HL* HX;
-		HZ=HW;
-		IA=HK;
-		IB=HY;
-		IC=HL;
+		let HZ=ddt(0, HK);
+		let IB=HL* IA;
+		let IC=J+ HZ;
+		ID=IC;
+		IE=HK;
+		IF=IB;
+		IG=HL;
 		}else{
-		HZ=J;
-		IA=J;
-		IB=HM;
-		IC=HM;
+		ID=J;
+		IE=J;
+		IF=HP;
+		IG=HP;
 		}
-		let ID=HD[0];
-		let IE=HD[1];
-		let IF=HD[2];
-		let IG=HT;
-		let IH=HU[0];
-		let II=HU[1];
-		let IJ=HU[2];
-		let IK=HV;
-		let IL=IB;
-		let IM=IC;
+		let IH=HD[0];
+		let II=HD[1];
+		let IJ=HD[2];
+		let IK=HW;
+		let IL=HX[0];
+		let IM=HX[1];
+		let IN=HX[2];
+		let IO=HY;
+		let IP=IF;
+		let IQ=IG;
         stamper.stamp_current_sparse_local::<3, 0>(
             Some(0),
             Some(1),
-            multiplicity * (HC),
-            [0, 1, 2],
-            [ID, IE, IF],
-            [],
-            [],
-            multiplicity,
-        );
-        stamper.stamp_current_sparse_local::<1, 0>(
-            Some(2),
-            None,
-            multiplicity * (HQ),
-            [2],
-            [IG],
-            [],
-            [],
-            multiplicity,
-        );
-        stamper.stamp_current_sparse_local::<3, 0>(
-            Some(2),
-            None,
-            multiplicity * (HR),
+            multiplicity * (HM),
             [0, 1, 2],
             [IH, II, IJ],
             [],
@@ -799,9 +785,19 @@ impl Instance {
         stamper.stamp_current_sparse_local::<1, 0>(
             Some(2),
             None,
-            multiplicity * (HS),
+            multiplicity * (HT),
             [2],
             [IK],
+            [],
+            [],
+            multiplicity,
+        );
+        stamper.stamp_current_sparse_local::<3, 0>(
+            Some(2),
+            None,
+            multiplicity * (HU),
+            [0, 1, 2],
+            [IL, IM, IN],
             [],
             [],
             multiplicity,
@@ -809,9 +805,19 @@ impl Instance {
         stamper.stamp_current_sparse_local::<1, 0>(
             Some(2),
             None,
-            multiplicity * (HZ),
+            multiplicity * (HV),
             [2],
-            [IL],
+            [IO],
+            [],
+            [],
+            multiplicity,
+        );
+        stamper.stamp_current_sparse_local::<1, 0>(
+            Some(2),
+            None,
+            multiplicity * (ID),
+            [2],
+            [IP],
             [],
             [],
             multiplicity,
@@ -819,7 +825,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(0),
             Some(1),
-            multiplicity * (IN),
+            multiplicity * (staged[17]),
             [],
             [],
             [],
@@ -829,21 +835,21 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(0),
             Some(1),
-            multiplicity * (IO),
+            multiplicity * (staged[18]),
             [],
             [],
             [],
             [],
             multiplicity,
         );
-        self.canonical_reactive[0] = HC;
-        self.canonical_reactive[1] = HQ;
-        self.canonical_reactive[2] = HR;
-        self.canonical_reactive[3] = HS;
-        self.canonical_reactive[4] = IA;
-        self.canonical_reactive[5] = IM;
-        self.canonical_reactive[6] = IN;
-        self.canonical_reactive[7] = IO;
+        self.canonical_reactive[0] = HM;
+        self.canonical_reactive[1] = HT;
+        self.canonical_reactive[2] = HU;
+        self.canonical_reactive[3] = HV;
+        self.canonical_reactive[4] = IE;
+        self.canonical_reactive[5] = IQ;
+        self.canonical_reactive[6] = staged[17];
+        self.canonical_reactive[7] = staged[18];
         if ctx.analog_tasks_enabled() && !ctx.evaluation_failed() { self.analog_effects.as_mut().expect("task evaluation began").complete_evaluation(); }
     }
 

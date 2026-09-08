@@ -7,6 +7,24 @@ import rspice
 
 
 class TestDcOp:
+    @pytest.mark.parametrize("level,kind,p", [(11, "NPN", 1), (12, "PNP", -1)])
+    def test_vbic13_pnjmaxi_global_option_matches_xyce(self, engine, level, kind, p):
+        substrate = " 0" if level == 12 else ""
+        netlist = rspice.Netlist.parse_spice(
+            f"""* VBIC PNJMAXI option
+Vc c 0 {p}
+Vb b 0 {0.8*p}
+Q1 c b 0{substrate} vm SW_ET=0
+.model vm {kind}(LEVEL={level} IS=1e-16 IBEI=0 IBCI=0 IBEIP=0 ISP=0 RCX=1 RCI=1 RBX=1 RBI=1 RE=1 RBP=0 RS=0 GMIN=0 TNOM=27)
+.temp 27
+.options DEVICE PNJMAXI=1u
+.end
+"""
+        )
+        assert engine.run_dc_op(netlist).branch_current("Vc") == pytest.approx(
+            -p * 8.903669004624935e-6, rel=1e-7
+        )
+
     @pytest.mark.parametrize(
         "level, kind, polarity, currents",
         [

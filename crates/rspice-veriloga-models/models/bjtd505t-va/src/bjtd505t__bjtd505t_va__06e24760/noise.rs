@@ -708,7 +708,7 @@ impl Instance {
 		let OI=HW/ OH;
 		let OJ=HW< A;
 		let OM=if OJ{
-		let OK=OH* ((C+ (OI.exp())).ln());
+		let OK=A+ (OH* ((C+ (OI.exp())).ln()));
 		OK
 		}else{
 		let OL=HW+ (OH* ((C+ ((-OI).exp())).ln()));
@@ -945,7 +945,7 @@ impl Instance {
 		let TP=FE* (((TM+ 0.0121f64).sqrt())+ TL);
 		TP
 		};
-		let TR=TQ/ ((TK+ (TI* EA))+ TQ);
+		let TR=TQ/ ((TK+ ((TI+ A)* EA))+ TQ);
 		TS=TR;
 		}else{
 		TS=C;
@@ -2437,7 +2437,7 @@ impl Instance {
 		let OI=HW/ OH;
 		let OJ=HW< A;
 		let OM=if OJ{
-		let OK=OH* ((C+ (OI.exp())).ln());
+		let OK=A+ (OH* ((C+ (OI.exp())).ln()));
 		OK
 		}else{
 		let OL=HW+ (OH* ((C+ ((-OI).exp())).ln()));
@@ -2674,7 +2674,7 @@ impl Instance {
 		let TP=FE* (((TM+ 0.0121f64).sqrt())+ TL);
 		TP
 		};
-		let TR=TQ/ ((TK+ (TI* EA))+ TQ);
+		let TR=TQ/ ((TK+ ((TI+ A)* EA))+ TQ);
 		TS=TR;
 		}else{
 		TS=C;

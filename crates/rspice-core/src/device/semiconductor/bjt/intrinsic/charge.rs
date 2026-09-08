@@ -175,10 +175,14 @@ impl Bjt {
         vbe_eff: Value,
         vbc_eff: Value,
     ) -> TransportChargeState {
-        let ifi = self.diode_current(vbe_eff, self.nf);
-        let iri = self.diode_current_with_is(self.is * self.isrr.max(0.0), vbc_eff, self.nr);
-        let gfi = self.diode_conductance(vbe_eff, self.nf);
-        let gri = self.diode_conductance_with_is(self.is * self.isrr.max(0.0), vbc_eff, self.nr);
+        let (ifi, gfi) =
+            self.vbic_diode_iv(self.is, vbe_eff, self.nf, self.vbic_junction_limits.ifi);
+        let (iri, gri) = self.vbic_diode_iv(
+            self.is * self.isrr.max(0.0),
+            vbc_eff,
+            self.nr,
+            self.vbic_junction_limits.iri,
+        );
 
         let (qdbe, dqdbe_dvbe_eff) = self
             .vbic_depletion_charge_and_derivative(vbe_eff, self.vje, self.mje, self.fc, self.aje);
@@ -296,10 +300,12 @@ impl Bjt {
         transport: TransportChargeState,
         vbc_eff: Value,
     ) -> BaseCollectorCurrentState {
-        let ibcj = self.diode_current_with_is(self.ibci, vbc_eff, self.nci)
-            + self.diode_current_with_is(self.ibcn, vbc_eff, self.ncn);
-        let dibcj_dvbc_eff = self.diode_conductance_with_is(self.ibci, vbc_eff, self.nci)
-            + self.diode_conductance_with_is(self.ibcn, vbc_eff, self.ncn);
+        let (ibci, gbci) =
+            self.vbic_diode_iv(self.ibci, vbc_eff, self.nci, self.vbic_junction_limits.ibci);
+        let (ibcn, gbcn) =
+            self.vbic_diode_iv(self.ibcn, vbc_eff, self.ncn, self.vbic_junction_limits.ibcn);
+        let ibcj = ibci + ibcn;
+        let dibcj_dvbc_eff = gbci + gbcn;
 
         if self.avc1 <= 0.0 {
             return BaseCollectorCurrentState {
@@ -380,6 +386,11 @@ impl Bjt {
         let denom = self.nbbe * self.vt.max(1e-18);
         let afac = 1.0 / denom;
         let bias = -self.vbbe - vbe_eff;
+        if self.vbic_13 {
+            let (current, conductance) =
+                Self::vbic_scaled_exp_lina(self.ibbe, bias, denom, self.vbic_junction_limits.ibbe);
+            return (self.ibbe * self.ebbe - current, conductance);
+        }
         let model_ibbe = self.ibbe_nominal.max(1e-300);
         let max_value = denom * (self.ebbe.max(0.0) + 1.0 / model_ibbe).ln();
         let (expx, dexpx_dbias) = Self::vbic13_reverse_be_exp_lina(bias, max_value, afac);
@@ -428,26 +439,28 @@ impl Bjt {
                     + self.diode_conductance_with_is(self.iben, vbe_eff, self.nen),
             )
         } else {
-            (
-                self.diode_current_with_is(self.ibei, vbe_eff, self.nei)
-                    + self.diode_current_with_is(self.iben, vbe_eff, self.nen),
-                self.diode_conductance_with_is(self.ibei, vbe_eff, self.nei)
-                    + self.diode_conductance_with_is(self.iben, vbe_eff, self.nen),
-            )
+            let (ibei, gbei) =
+                self.vbic_diode_iv(self.ibei, vbe_eff, self.nei, self.vbic_junction_limits.ibei);
+            let (iben, gben) =
+                self.vbic_diode_iv(self.iben, vbe_eff, self.nen, self.vbic_junction_limits.iben);
+            (ibei + iben, gbei + gben)
         };
-        let ibex_normal = if self.charge_model == BjtChargeModel::Vbic {
-            (1.0 - wbe)
-                * (self.diode_current_with_is(self.ibei, vbex_eff, self.nei)
-                    + self.diode_current_with_is(self.iben, vbex_eff, self.nen))
+        let (ibex_normal, dibex_normal_dvbex) = if self.charge_model == BjtChargeModel::Vbic {
+            let (ibei, gbei) = self.vbic_diode_iv(
+                self.ibei,
+                vbex_eff,
+                self.nei,
+                self.vbic_junction_limits.ibei,
+            );
+            let (iben, gben) = self.vbic_diode_iv(
+                self.iben,
+                vbex_eff,
+                self.nen,
+                self.vbic_junction_limits.iben,
+            );
+            ((1.0 - wbe) * (ibei + iben), (1.0 - wbe) * (gbei + gben))
         } else {
-            0.0
-        };
-        let dibex_normal_dvbex = if self.charge_model == BjtChargeModel::Vbic {
-            (1.0 - wbe)
-                * (self.diode_conductance_with_is(self.ibei, vbex_eff, self.nei)
-                    + self.diode_conductance_with_is(self.iben, vbex_eff, self.nen))
-        } else {
-            0.0
+            (0.0, 0.0)
         };
         let ibe_intrinsic_breakdown = wbe * ibe_breakdown;
         let dibe_intrinsic_breakdown_dvbe = wbe * dibe_breakdown_dvbe;

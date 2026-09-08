@@ -744,7 +744,7 @@ impl Instance {
 		let LG=LF* CP;
 		let LH=B/ LG;
 		let LJ=(-(LI+ (staged[164]* JP)))* JO;
-		let LK=(BS* (LJ- (((LJ* LJ)+ 6.25e-6f64).sqrt())))+ 0.00125f64;
+		let LK=(BS* ((LJ+ A)- (((LJ* LJ)+ 6.25e-6f64).sqrt())))+ 0.00125f64;
 		let LL=(staged[166]+ (staged[165]* JP))* ((CR.powf(parameters[868]))- B);
 		let LT;
 		if LM{
@@ -859,7 +859,7 @@ impl Instance {
 		let OS=-0.010000000000000002f64/ (KR* OQ);
 		OS
 		}else{
-		let OT=BS* (OQ+ (((OQ* OQ)+ 0.0025000000000000005f64).sqrt()));
+		let OT=BS* ((OQ+ A)+ (((OQ* OQ)+ 0.0025000000000000005f64).sqrt()));
 		OT
 		};
 		let OU=((R* OM)* LG)* OE;
@@ -1047,7 +1047,7 @@ impl Instance {
 		let TK=-1e-6f64/ (KR* TI);
 		TK
 		}else{
-		let TL=BS* (TI+ (((TI* TI)+ 2.5e-7f64).sqrt()));
+		let TL=BS* ((TI+ A)+ (((TI* TI)+ 2.5e-7f64).sqrt()));
 		TL
 		};
 		let TP=TM/ TN;
@@ -1126,7 +1126,7 @@ impl Instance {
 		let VS=-0.010000000000000002f64/ (KR* VQ);
 		VS
 		}else{
-		let VT=BS* (VQ+ (((VQ* VQ)+ 0.0025000000000000005f64).sqrt()));
+		let VT=BS* ((VQ+ A)+ (((VQ* VQ)+ 0.0025000000000000005f64).sqrt()));
 		VT
 		};
 		let VU=LG* (VO+ VP);
@@ -1310,7 +1310,7 @@ impl Instance {
 		let ZV=-1e-6f64/ (KR* ZT);
 		ZV
 		}else{
-		let ZW=BS* (ZT+ (((ZT* ZT)+ 2.5e-7f64).sqrt()));
+		let ZW=BS* ((ZT+ A)+ (((ZT* ZT)+ 2.5e-7f64).sqrt()));
 		ZW
 		};
 		let ZX=OE- parameters[1102];
@@ -1338,7 +1338,7 @@ impl Instance {
 		let AAK=-0.25f64/ (KR* AAI);
 		AAK
 		}else{
-		let AAL=BS* (AAI+ (((AAI* AAI)+ 0.0625f64).sqrt()));
+		let AAL=BS* ((AAI+ A)+ (((AAI* AAI)+ 0.0625f64).sqrt()));
 		AAL
 		};
 		let AAN=B+ (AAM* parameters[1127]);
@@ -1358,7 +1358,7 @@ impl Instance {
 		let AAY=-0.0025000000000000005f64/ (KR* AAW);
 		AAY
 		}else{
-		let AAZ=BS* (AAW+ (((AAW* AAW)+ 6.250000000000001e-4f64).sqrt()));
+		let AAZ=BS* ((AAW+ A)+ (((AAW* AAW)+ 6.250000000000001e-4f64).sqrt()));
 		AAZ
 		};
 		let ABD=(B- (ABA* ((ABB.sqrt())- B)))- (ABC* IV);
@@ -1367,7 +1367,7 @@ impl Instance {
 		let ABF=-0.0025000000000000005f64/ (KR* ABD);
 		ABF
 		}else{
-		let ABG=BS* (ABD+ (((ABD* ABD)+ 6.250000000000001e-4f64).sqrt()));
+		let ABG=BS* ((ABD+ A)+ (((ABD* ABD)+ 6.250000000000001e-4f64).sqrt()));
 		ABG
 		};
 		let ABJ=ABH* ABI;
@@ -1380,7 +1380,7 @@ impl Instance {
 		let ABV=-1e-6f64/ (KR* ABT);
 		ABV
 		}else{
-		let ABW=BS* (ABT+ (((ABT* ABT)+ 2.5e-7f64).sqrt()));
+		let ABW=BS* ((ABT+ A)+ (((ABT* ABT)+ 2.5e-7f64).sqrt()));
 		ABW
 		};
 		let ABY=ABM* ((B+ (ABX.powf(ABO))).powf(ABS));
@@ -1408,7 +1408,7 @@ impl Instance {
 		let ACI=-0.0025000000000000005f64/ (KR* ACG);
 		ACI
 		}else{
-		let ACJ=BS* (ACG+ (((ACG* ACG)+ 6.250000000000001e-4f64).sqrt()));
+		let ACJ=BS* ((ACG+ A)+ (((ACG* ACG)+ 6.250000000000001e-4f64).sqrt()));
 		ACJ
 		};
 		let ACL=(B- (ABA* ((ACK.sqrt())- B)))- (ABC* IV);
@@ -1417,7 +1417,7 @@ impl Instance {
 		let ACN=-0.0025000000000000005f64/ (KR* ACL);
 		ACN
 		}else{
-		let ACO=BS* (ACL+ (((ACL* ACL)+ 6.250000000000001e-4f64).sqrt()));
+		let ACO=BS* ((ACL+ A)+ (((ACL* ACL)+ 6.250000000000001e-4f64).sqrt()));
 		ACO
 		};
 		let ACR=ACP* ACQ;
@@ -1430,7 +1430,7 @@ impl Instance {
 		let ACZ=-1e-6f64/ (KR* ACX);
 		ACZ
 		}else{
-		let ADA=BS* (ACX+ (((ACX* ACX)+ 2.5e-7f64).sqrt()));
+		let ADA=BS* ((ACX+ A)+ (((ACX* ACX)+ 2.5e-7f64).sqrt()));
 		ADA
 		};
 		let ADC=ACS* ((B+ (ADB.powf(ABO))).powf(ACW));
@@ -1910,7 +1910,7 @@ impl Instance {
 		let ANS=-0.010000000000000002f64/ (KR* ANQ);
 		ANS
 		}else{
-		let ANT=BS* (ANQ+ (((ANQ* ANQ)+ 0.0025000000000000005f64).sqrt()));
+		let ANT=BS* ((ANQ+ A)+ (((ANQ* ANQ)+ 0.0025000000000000005f64).sqrt()));
 		ANT
 		};
 		let ANV=12f64* ANJ;
@@ -2127,7 +2127,7 @@ impl Instance {
 		let ASD=-1e-6f64/ (KR* ASB);
 		ASD
 		}else{
-		let ASE=BS* (ASB+ (((ASB* ASB)+ 2.5e-7f64).sqrt()));
+		let ASE=BS* ((ASB+ A)+ (((ASB* ASB)+ 2.5e-7f64).sqrt()));
 		ASE
 		};
 		let ASG=(BS* (AQQ+ ((AQS+ 1f64).sqrt()))).sqrt();
@@ -6653,7 +6653,7 @@ impl Instance {
 		let BKM=BKL* AYB;
 		let BKN=B/ BKM;
 		let BKP=(-(BKO+ (JY* BIS)))* BIR;
-		let BKQ=(KF* (BKP- (((BKP* BKP)+ 6.25e-6f64).sqrt())))+ 0.00125f64;
+		let BKQ=(KF* ((BKP+ A)- (((BKP* BKP)+ 6.25e-6f64).sqrt())))+ 0.00125f64;
 		let BKR=((FS+ (parameters[869]/ AP))+ (FT* BIS))* ((AYD.powf(parameters[868]))- B);
 		let BKS=CV> A;
 		let BKZ;
@@ -6775,7 +6775,7 @@ impl Instance {
 		let BOC=-0.010000000000000002f64/ (BJX* BOA);
 		BOC
 		}else{
-		let BOD=KF* (BOA+ (((BOA* BOA)+ 0.0025000000000000005f64).sqrt()));
+		let BOD=KF* ((BOA+ A)+ (((BOA* BOA)+ 0.0025000000000000005f64).sqrt()));
 		BOD
 		};
 		let BOE=((AO* BNW)* BKM)* BNO;
@@ -6966,7 +6966,7 @@ impl Instance {
 		let BTC=-1e-6f64/ (BJX* BTA);
 		BTC
 		}else{
-		let BTD=KF* (BTA+ (((BTA* BTA)+ 2.5e-7f64).sqrt()));
+		let BTD=KF* ((BTA+ A)+ (((BTA* BTA)+ 2.5e-7f64).sqrt()));
 		BTD
 		};
 		let BTH=BTE/ BTF;
@@ -7049,7 +7049,7 @@ impl Instance {
 		let BVN=-0.010000000000000002f64/ (BJX* BVL);
 		BVN
 		}else{
-		let BVO=KF* (BVL+ (((BVL* BVL)+ 0.0025000000000000005f64).sqrt()));
+		let BVO=KF* ((BVL+ A)+ (((BVL* BVL)+ 0.0025000000000000005f64).sqrt()));
 		BVO
 		};
 		let BVP=BKM* (BVJ+ BVK);
@@ -7247,7 +7247,7 @@ impl Instance {
 		let BZZ=-1e-6f64/ (BJX* BZX);
 		BZZ
 		}else{
-		let CAA=KF* (BZX+ (((BZX* BZX)+ 2.5e-7f64).sqrt()));
+		let CAA=KF* ((BZX+ A)+ (((BZX* BZX)+ 2.5e-7f64).sqrt()));
 		CAA
 		};
 		let CAB=BNO- parameters[1102];
@@ -7277,7 +7277,7 @@ impl Instance {
 		let CAP=-0.25f64/ (BJX* CAN);
 		CAP
 		}else{
-		let CAQ=KF* (CAN+ (((CAN* CAN)+ 0.0625f64).sqrt()));
+		let CAQ=KF* ((CAN+ A)+ (((CAN* CAN)+ 0.0625f64).sqrt()));
 		CAQ
 		};
 		let CAS=B+ (CAR* CAL);
@@ -7300,7 +7300,7 @@ impl Instance {
 		let CBH=-0.0025000000000000005f64/ (BJX* CBF);
 		CBH
 		}else{
-		let CBI=KF* (CBF+ (((CBF* CBF)+ 6.250000000000001e-4f64).sqrt()));
+		let CBI=KF* ((CBF+ A)+ (((CBF* CBF)+ 6.250000000000001e-4f64).sqrt()));
 		CBI
 		};
 		let CBM=(B- (CBJ* ((CBK.sqrt())- B)))- (CBL* BHV);
@@ -7309,7 +7309,7 @@ impl Instance {
 		let CBO=-0.0025000000000000005f64/ (BJX* CBM);
 		CBO
 		}else{
-		let CBP=KF* (CBM+ (((CBM* CBM)+ 6.250000000000001e-4f64).sqrt()));
+		let CBP=KF* ((CBM+ A)+ (((CBM* CBM)+ 6.250000000000001e-4f64).sqrt()));
 		CBP
 		};
 		let CBS=CBQ* CBR;
@@ -7324,7 +7324,7 @@ impl Instance {
 		let CCE=-1e-6f64/ (BJX* CCC);
 		CCE
 		}else{
-		let CCF=KF* (CCC+ (((CCC* CCC)+ 2.5e-7f64).sqrt()));
+		let CCF=KF* ((CCC+ A)+ (((CCC* CCC)+ 2.5e-7f64).sqrt()));
 		CCF
 		};
 		let CCH=CBV* ((B+ (CCG.powf(CBX))).powf(CCB));
@@ -7356,7 +7356,7 @@ impl Instance {
 		let CCV=-0.0025000000000000005f64/ (BJX* CCT);
 		CCV
 		}else{
-		let CCW=KF* (CCT+ (((CCT* CCT)+ 6.250000000000001e-4f64).sqrt()));
+		let CCW=KF* ((CCT+ A)+ (((CCT* CCT)+ 6.250000000000001e-4f64).sqrt()));
 		CCW
 		};
 		let CCY=(B- (CBJ* ((CCX.sqrt())- B)))- (CBL* BHV);
@@ -7365,7 +7365,7 @@ impl Instance {
 		let CDA=-0.0025000000000000005f64/ (BJX* CCY);
 		CDA
 		}else{
-		let CDB=KF* (CCY+ (((CCY* CCY)+ 6.250000000000001e-4f64).sqrt()));
+		let CDB=KF* ((CCY+ A)+ (((CCY* CCY)+ 6.250000000000001e-4f64).sqrt()));
 		CDB
 		};
 		let CDE=CDC* CDD;
@@ -7380,7 +7380,7 @@ impl Instance {
 		let CDM=-1e-6f64/ (BJX* CDK);
 		CDM
 		}else{
-		let CDN=KF* (CDK+ (((CDK* CDK)+ 2.5e-7f64).sqrt()));
+		let CDN=KF* ((CDK+ A)+ (((CDK* CDK)+ 2.5e-7f64).sqrt()));
 		CDN
 		};
 		let CDP=CDF* ((B+ (CDO.powf(CBX))).powf(CDJ));
@@ -7930,7 +7930,7 @@ impl Instance {
 		let COV=-0.010000000000000002f64/ (BJX* COT);
 		COV
 		}else{
-		let COW=KF* (COT+ (((COT* COT)+ 0.0025000000000000005f64).sqrt()));
+		let COW=KF* ((COT+ A)+ (((COT* COT)+ 0.0025000000000000005f64).sqrt()));
 		COW
 		};
 		let COY=12f64* COM;
@@ -8172,7 +8172,7 @@ impl Instance {
 		let CTN=-1e-6f64/ (BJX* CTL);
 		CTN
 		}else{
-		let CTO=KF* (CTL+ (((CTL* CTL)+ 2.5e-7f64).sqrt()));
+		let CTO=KF* ((CTL+ A)+ (((CTL* CTL)+ 2.5e-7f64).sqrt()));
 		CTO
 		};
 		let CTQ=(KF* (CRX+ ((CRZ+ 1f64).sqrt()))).sqrt();

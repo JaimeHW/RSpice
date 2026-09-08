@@ -273,10 +273,19 @@ impl Bjt {
 
         let p = self.polarity();
         let vbep_eff = p * (vbx - vbp);
-        let ibeip = self.diode_current_with_is(self.ibeip, vbep_eff, self.nci.max(1e-12));
-        let ibenp = self.diode_current_with_is(self.ibenp, vbep_eff, self.ncn.max(1e-12));
-        let gbep = self.diode_conductance_with_is(self.ibeip, vbep_eff, self.nci.max(1e-12))
-            + self.diode_conductance_with_is(self.ibenp, vbep_eff, self.ncn.max(1e-12));
+        let (ibeip, gbeip) = self.vbic_diode_iv(
+            self.ibeip,
+            vbep_eff,
+            self.nci,
+            self.vbic_junction_limits.ibeip,
+        );
+        let (ibenp, gbenp) = self.vbic_diode_iv(
+            self.ibenp,
+            vbep_eff,
+            self.ncn,
+            self.vbic_junction_limits.ibenp,
+        );
+        let gbep = gbeip + gbenp;
 
         branch.current += p * (ibeip + ibenp);
         branch.d_internal[IDX_VBX] += gbep;
@@ -309,11 +318,22 @@ impl Bjt {
         let nfp_vt = (self.nfp.max(1e-12) * self.vt.max(1e-12)).max(1e-18);
         let vbep_eff = p * (vbx - vbp);
         let vbci_eff = p * (vbi - vci);
-        let (exp_bep, dexp_bep_darg) = Self::limited_exp(vbep_eff / nfp_vt);
-        let (exp_bci, dexp_bci_darg) = Self::limited_exp(vbci_eff / nfp_vt);
-        let d_ifp_d_vbep_eff = self.isp * self.wsp * dexp_bep_darg / nfp_vt;
-        let d_ifp_d_vbci_eff = self.isp * (1.0 - self.wsp) * dexp_bci_darg / nfp_vt;
-        state.ifp = self.isp * (self.wsp * exp_bep + (1.0 - self.wsp) * exp_bci - 1.0);
+        let diode = |v| {
+            if self.vbic_13 {
+                self.vbic_diode_iv(self.isp, v, self.nfp, self.vbic_junction_limits.ip)
+            } else {
+                let (exponential, derivative) = Self::limited_exp(v / nfp_vt);
+                (
+                    self.isp * (exponential - 1.0),
+                    self.isp * derivative / nfp_vt,
+                )
+            }
+        };
+        let (ibep, gbep) = diode(vbep_eff);
+        let (ibci, gbci) = diode(vbci_eff);
+        let d_ifp_d_vbep_eff = self.wsp * gbep;
+        let d_ifp_d_vbci_eff = (1.0 - self.wsp) * gbci;
+        state.ifp = self.wsp * ibep + (1.0 - self.wsp) * ibci;
         state.d_ifp[IDX_VBX] = d_ifp_d_vbep_eff * p;
         state.d_ifp[IDX_VBP] = -d_ifp_d_vbep_eff * p;
         state.d_ifp[IDX_VBI] = d_ifp_d_vbci_eff * p;
@@ -342,9 +362,8 @@ impl Bjt {
             return state;
         }
         let vbcp_eff = p * (vsi - vbp);
-        let (exp_bcp, dexp_bcp_darg) = Self::limited_exp(vbcp_eff / nfp_vt);
-        let d_irp_d_vbcp_eff = self.isp * dexp_bcp_darg / nfp_vt;
-        state.irp = self.isp * (exp_bcp - 1.0);
+        let (irp, d_irp_d_vbcp_eff) = diode(vbcp_eff);
+        state.irp = irp;
         state.d_irp[IDX_VSI] = d_irp_d_vbcp_eff * p;
         state.d_irp[IDX_VBP] = -d_irp_d_vbcp_eff * p;
 
@@ -408,10 +427,19 @@ impl Bjt {
 
         let p = self.polarity();
         let vbcp_eff = p * (vsi - vbp);
-        let ibcip = self.diode_current_with_is(self.ibcip, vbcp_eff, self.ncip.max(1e-12));
-        let ibcnp = self.diode_current_with_is(self.ibcnp, vbcp_eff, self.ncnp.max(1e-12));
-        let gbcp = self.diode_conductance_with_is(self.ibcip, vbcp_eff, self.ncip.max(1e-12))
-            + self.diode_conductance_with_is(self.ibcnp, vbcp_eff, self.ncnp.max(1e-12));
+        let (ibcip, gbcip) = self.vbic_diode_iv(
+            self.ibcip,
+            vbcp_eff,
+            self.ncip,
+            self.vbic_junction_limits.ibcip,
+        );
+        let (ibcnp, gbcnp) = self.vbic_diode_iv(
+            self.ibcnp,
+            vbcp_eff,
+            self.ncnp,
+            self.vbic_junction_limits.ibcnp,
+        );
+        let gbcp = gbcip + gbcnp;
 
         branch.current += p * (ibcip + ibcnp);
         branch.d_internal[IDX_VSI] += gbcp;

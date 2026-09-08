@@ -16,6 +16,24 @@ mod mna;
 mod params;
 mod solve;
 
+/// VBIC 1.3 exponential transition voltages, fixed at instance initialization.
+/// Local self-heating changes the junction slopes, not these limits.
+#[derive(Debug, Clone, Copy, Default)]
+struct VbicJunctionLimits {
+    ifi: Value,
+    iri: Value,
+    ip: Value,
+    ibei: Value,
+    iben: Value,
+    ibci: Value,
+    ibcn: Value,
+    ibeip: Value,
+    ibenp: Value,
+    ibcip: Value,
+    ibcnp: Value,
+    ibbe: Value,
+}
+
 /// BJT transistor type
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BjtType {
@@ -1053,6 +1071,9 @@ pub struct Bjt {
     mcx: Value,
     /// General exponential transition value for VBIC 1.3.
     vbic_maxexp: Value,
+    vbic_model_pnjmaxi: Option<Value>,
+    vbic_global_pnjmaxi: Value,
+    vbic_junction_limits: VbicJunctionLimits,
     /// Nominal thermal resistance before multiplicity scaling.
     rth_nominal: Value,
     /// VBIC 1.3 thermal-resistance temperature coefficient (1/K).
@@ -1991,6 +2012,9 @@ impl Bjt {
             tavcx: 0.0,
             mcx: 0.33,
             vbic_maxexp: 1e22,
+            vbic_model_pnjmaxi: None,
+            vbic_global_pnjmaxi: 1.0,
+            vbic_junction_limits: VbicJunctionLimits::default(),
             rth_nominal: 0.0,
             tcrth: 0.0,
             tminclip: -100.0,

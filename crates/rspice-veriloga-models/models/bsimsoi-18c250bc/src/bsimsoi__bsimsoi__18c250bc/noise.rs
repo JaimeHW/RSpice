@@ -3638,8 +3638,8 @@ impl Instance {
 		BLD=BLA;
 		DGX=DSL;
 		}else{
-		let BLB=-4f64* BKX;
 		let DSK=DSJ* -4f64;
+		let BLB=(-4f64* BKX)+ 0f64;
 		BLD=BLB;
 		DGX=DSK;
 		}
@@ -10331,11 +10331,11 @@ impl Instance {
 		DKX=EHR;
 		DKY=EHS;
 		}else{
-		let BLC=BLB* BKX;
 		let EHL=EHH* BLB;
 		let EHM=EHI* BLB;
 		let EHN=EHJ* BLB;
 		let EHO=EHK* BLB;
+		let BLC=(BLB* BKX)+ 0f64;
 		BLE=BLC;
 		DKV=EHL;
 		DKW=EHM;

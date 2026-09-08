@@ -323,12 +323,12 @@ impl Optimizer {
     fn is_splat(&self, value: ValueId, constant: f64) -> bool {
         matches!(
             self.values[usize::from(value)].kind,
-            CfgValueKind::LaneSplat(held) if held == constant
+            CfgValueKind::LaneSplat(held) if held.to_bits() == constant.to_bits()
         )
     }
 
     /// The operand a value is equal to, by an identity that holds for every
-    /// input including NaN and infinity.
+    /// input including signed zero, NaN and infinity.
     fn identity(&self, value: ValueId) -> Option<ValueId> {
         let (op, left, right) = match self.values[usize::from(value)].kind {
             CfgValueKind::Binary { op, left, right } => (op, left, right),
@@ -337,12 +337,13 @@ impl Optimizer {
             CfgValueKind::LaneWiden { input } => {
                 return (self.shape(input) == self.shape(value)).then_some(input);
             }
-            // The packed forms of the identities below. `x + 0` holds lane by
-            // lane for exactly the reasons it holds for a scalar.
+            // Only negative zero is an additive identity for both zero signs.
+            // Packed values obey the same arithmetic as scalar values.
             CfgValueKind::LaneBinary { op, left, right } => {
                 return match op {
-                    CfgBinaryOp::Add if self.is_splat(left, 0.0) => Some(right),
-                    CfgBinaryOp::Add | CfgBinaryOp::Sub if self.is_splat(right, 0.0) => Some(left),
+                    CfgBinaryOp::Add if self.is_splat(left, -0.0) => Some(right),
+                    CfgBinaryOp::Add if self.is_splat(right, -0.0) => Some(left),
+                    CfgBinaryOp::Sub if self.is_splat(right, 0.0) => Some(left),
                     _ => None,
                 };
             }
@@ -356,9 +357,13 @@ impl Optimizer {
         let left_constant = self.constant(left);
         let right_constant = self.constant(right);
         match op {
-            CfgBinaryOp::Add if right_constant == Some(0.0) => Some(left),
-            CfgBinaryOp::Add if left_constant == Some(0.0) => Some(right),
-            CfgBinaryOp::Sub if right_constant == Some(0.0) => Some(left),
+            CfgBinaryOp::Add if right_constant.map(f64::to_bits) == Some((-0.0_f64).to_bits()) => {
+                Some(left)
+            }
+            CfgBinaryOp::Add if left_constant.map(f64::to_bits) == Some((-0.0_f64).to_bits()) => {
+                Some(right)
+            }
+            CfgBinaryOp::Sub if right_constant.map(f64::to_bits) == Some(0) => Some(left),
             CfgBinaryOp::Mul if right_constant == Some(1.0) => Some(left),
             CfgBinaryOp::Mul if left_constant == Some(1.0) => Some(right),
             CfgBinaryOp::Div if right_constant == Some(1.0) => Some(left),

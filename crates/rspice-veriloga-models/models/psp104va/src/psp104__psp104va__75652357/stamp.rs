@@ -5,9 +5,9 @@ use super::state::{CanonicalModelValues, Instance, PARAMETER_MODEL_FLAGS};
 use rspice_veriloga_runtime::{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, install_generated_stage_values, L2, L3, L4, L5, L6, evaluate_generated_above, evaluate_generated_cross, evaluate_generated_timer, rspice_eval_ddt, rspice_eval_idt, rspice_limexp, rspice_limited_exp, rspice_limited_exp_derivative};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock, Weak};
-pub(super) const CANONICAL_MODEL_STAGE_SLOTS: [u32; 379] = [755, 0, 756, 1, 165, 169, 182, 194, 5, 6, 7, 168, 181, 193, 171, 184, 196, 167, 180, 192, 174, 177, 189, 201, 175, 187, 199, 176, 188, 200, 757, 758, 759, 761, 762, 763, 760, 17, 18, 19, 29, 275, 31, 292, 33, 309, 35, 36, 37, 30, 274, 32, 291, 34, 308, 278, 295, 312, 26, 273, 27, 290, 28, 307, 282, 285, 299, 302, 316, 319, 281, 283, 298, 300, 315, 317, 284, 301, 318, 764, 765, 766, 767, 768, 769, 702, 1006, 2, 3, 4, 8, 9, 10, 11, 12, 13, 15, 14, 16, 20, 21, 22, 23, 24, 25, 38, 39, 40, 42, 41, 44, 43, 46, 45, 47, 48, 49, 51, 50, 52, 777, 53, 54, 791, 792, 793, 794, 795, 796, 55, 56, 57, 808, 809, 810, 811, 58, 59, 60, 812, 813, 814, 815, 816, 63, 61, 62, 64, 65, 817, 818, 67, 66, 68, 69, 70, 71, 821, 72, 822, 73, 823, 824, 825, 826, 827, 828, 829, 830, 831, 832, 833, 834, 835, 836, 837, 838, 839, 840, 841, 842, 843, 844, 845, 846, 847, 848, 849, 850, 851, 852, 853, 854, 855, 856, 857, 858, 859, 860, 861, 862, 863, 864, 865, 866, 867, 868, 869, 870, 871, 872, 873, 874, 875, 877, 879, 880, 881, 876, 75, 74, 76, 77, 882, 884, 885, 886, 878, 79, 78, 80, 81, 883, 887, 888, 889, 890, 891, 892, 893, 894, 895, 896, 897, 898, 899, 900, 901, 902, 903, 904, 905, 906, 907, 908, 909, 910, 911, 912, 913, 914, 915, 88, 113, 106, 150, 121, 119, 125, 123, 127, 956, 429, 133, 964, 514, 463, 477, 476, 461, 460, 481, 149, 487, 798, 799, 547, 96, 536, 540, 539, 100, 101, 1005, 423, 435, 92, 153, 94, 95, 532, 104, 111, 134, 135, 458, 478, 462, 470, 1021, 1022, 468, 1023, 469, 146, 147, 152, 1026, 538, 1034, 1035, 1037, 154, 1038, 1040, 1063, 163, 203, 220, 268, 321, 338, 270, 271, 277, 287, 288, 294, 304, 305, 311, 385, 1047, 392, 1540, 422, 434, 440, 441, 459, 467, 474, 483, 509, 1548, 1545, 1546, 1549, 1547, 537, 545, 552, 550, 1555, 1556, 607, 1571, 608, 648, 652, 653, 655, 656, 695, 696, 698, 1628, 721, 722];
-pub(super) const CANONICAL_INSTANCE_STAGE_SLOTS: [u32; 814] = [778, 779, 780, 781, 782, 783, 784, 785, 786, 787, 788, 789, 790, 797, 801, 802, 803, 804, 805, 806, 807, 819, 820, 916, 918, 919, 82, 83, 84, 85, 86, 87, 89, 917, 920, 90, 114, 112, 800, 921, 98, 922, 923, 105, 97, 924, 925, 926, 927, 928, 929, 116, 930, 931, 932, 933, 117, 115, 934, 416, 935, 936, 417, 937, 415, 938, 413, 939, 940, 414, 941, 412, 118, 943, 122, 944, 120, 945, 126, 946, 124, 947, 128, 948, 130, 129, 949, 950, 419, 951, 420, 131, 953, 954, 428, 955, 430, 957, 958, 437, 959, 436, 960, 438, 961, 513, 962, 510, 963, 511, 965, 143, 966, 144, 967, 142, 968, 969, 148, 970, 533, 108, 971, 973, 535, 974, 534, 975, 543, 976, 977, 555, 978, 542, 979, 980, 556, 981, 982, 714, 983, 984, 985, 137, 136, 140, 986, 987, 141, 988, 139, 138, 990, 495, 991, 992, 496, 993, 494, 994, 499, 995, 996, 500, 997, 498, 998, 999, 1000, 1001, 1002, 703, 1003, 1004, 109, 1007, 432, 1008, 91, 93, 99, 1016, 1017, 1018, 102, 103, 107, 110, 132, 145, 489, 485, 151, 715, 1027, 1028, 1029, 1030, 1031, 1032, 1033, 1036, 1039, 1041, 1042, 1043, 1044, 1045, 155, 156, 157, 1052, 1053, 1054, 158, 159, 160, 161, 1060, 1061, 1062, 162, 1064, 1067, 164, 1071, 1069, 1070, 166, 170, 1072, 1073, 1077, 172, 173, 1078, 1081, 1082, 178, 1085, 1083, 1084, 179, 183, 1086, 1087, 1091, 185, 186, 1092, 1095, 1096, 190, 1099, 1097, 1098, 191, 195, 1100, 1101, 1105, 197, 198, 1106, 1109, 1110, 202, 1113, 204, 1117, 1115, 1116, 205, 206, 1118, 1119, 1123, 207, 208, 1124, 1127, 1128, 209, 1131, 1129, 1130, 210, 211, 1132, 1133, 1137, 212, 213, 1138, 1141, 1142, 214, 1145, 1143, 1144, 215, 216, 1146, 1147, 1151, 217, 218, 1152, 1155, 1156, 219, 1159, 221, 1163, 1161, 1162, 222, 223, 1164, 1165, 1169, 224, 225, 1170, 1173, 1174, 226, 1177, 1175, 1176, 227, 228, 1178, 1179, 1183, 229, 230, 1184, 1187, 1188, 231, 1191, 1189, 1190, 232, 233, 1192, 1193, 1197, 234, 235, 1198, 1201, 1202, 236, 1208, 1206, 1207, 237, 238, 1209, 1210, 1214, 239, 240, 1215, 1218, 1219, 241, 1222, 1220, 1221, 242, 243, 1223, 1224, 1228, 244, 245, 1229, 1232, 1233, 246, 1236, 1234, 1235, 247, 248, 1237, 1238, 1242, 249, 250, 1243, 1246, 1247, 251, 1253, 1251, 1252, 252, 253, 1254, 1255, 1259, 254, 255, 1260, 1263, 1264, 256, 1267, 1265, 1266, 257, 258, 1268, 1269, 1273, 259, 260, 1274, 1277, 1278, 261, 1281, 1279, 1280, 262, 263, 1282, 1283, 1287, 264, 265, 1288, 1291, 1292, 266, 267, 1301, 1304, 269, 1308, 1306, 1307, 272, 276, 1309, 1310, 1314, 279, 280, 1315, 1318, 1319, 286, 1322, 1320, 1321, 289, 293, 1323, 1324, 1328, 296, 297, 1329, 1332, 1333, 303, 1336, 1334, 1335, 306, 310, 1337, 1338, 1342, 313, 314, 1343, 1346, 1347, 320, 1350, 322, 1354, 1352, 1353, 323, 324, 1355, 1356, 1360, 325, 326, 1361, 1364, 1365, 327, 1368, 1366, 1367, 328, 329, 1369, 1370, 1374, 330, 331, 1375, 1378, 1379, 332, 1382, 1380, 1381, 333, 334, 1383, 1384, 1388, 335, 336, 1389, 1392, 1393, 337, 1396, 339, 1400, 1398, 1399, 340, 341, 1401, 1402, 1406, 342, 343, 1407, 1410, 1411, 344, 1414, 1412, 1413, 345, 346, 1415, 1416, 1420, 347, 348, 1421, 1424, 1425, 349, 1428, 1426, 1427, 350, 351, 1429, 1430, 1434, 352, 353, 1435, 1438, 1439, 354, 1445, 1443, 1444, 355, 356, 1446, 1447, 1451, 357, 358, 1452, 1455, 1456, 359, 1459, 1457, 1458, 360, 361, 1460, 1461, 1465, 362, 363, 1466, 1469, 1470, 364, 1473, 1471, 1472, 365, 366, 1474, 1475, 1479, 367, 368, 1480, 1483, 1484, 369, 1490, 1488, 1489, 370, 371, 1491, 1492, 1496, 372, 373, 1497, 1500, 1501, 374, 1504, 1502, 1503, 375, 376, 1505, 1506, 1510, 377, 378, 1511, 1514, 1515, 379, 1518, 1516, 1517, 380, 381, 1519, 1520, 1524, 382, 383, 1525, 1528, 1529, 384, 386, 1538, 397, 1539, 403, 486, 482, 442, 443, 544, 444, 521, 530, 541, 1551, 1553, 1552, 548, 1554, 553, 557, 1573, 1575, 1584, 1572, 617, 618, 1577, 1574, 1576, 621, 625, 1578, 1579, 1580, 1581, 628, 1582, 1586, 1583, 1585, 631, 635, 1587, 1588, 1589, 1590, 638, 1591, 1595, 1592, 1594, 641, 645, 1596, 1597, 1598, 1599, 1593, 654, 1600, 657, 1602, 1604, 1613, 1601, 665, 666, 1606, 1603, 1605, 669, 673, 1607, 1608, 1609, 1610, 676, 1611, 1615, 1612, 1614, 679, 683, 1616, 1617, 1618, 1619, 686, 1620, 1623, 1621, 1622, 689, 693, 1624, 1625, 1626, 1627, 704, 705, 706, 707, 708, 709, 710, 711, 712, 720, 719, 1629, 1630, 1631, 1632, 1633, 1634, 1635, 1636, 1637, 1638, 1639, 1640, 1641, 1642, 1643, 1644, 1645, 1646, 1647, 1648, 1649, 723, 724, 725, 726, 727, 728, 729, 730, 731, 732, 733, 734, 735, 736, 737, 738, 739, 740, 741, 742, 743, 744, 745, 746, 747, 748];
-pub(super) const CANONICAL_TEMPERATURE_STAGE_SLOTS: [u32; 457] = [411, 387, 770, 716, 614, 558, 622, 632, 642, 619, 629, 639, 620, 630, 640, 586, 589, 592, 587, 590, 593, 588, 591, 594, 626, 636, 646, 623, 633, 643, 771, 772, 773, 609, 670, 680, 690, 667, 677, 687, 668, 678, 688, 598, 601, 604, 599, 602, 605, 600, 603, 606, 674, 684, 694, 671, 681, 691, 774, 775, 776, 658, 942, 952, 972, 989, 449, 455, 546, 551, 445, 1009, 1010, 1012, 446, 447, 448, 450, 451, 1011, 1013, 1015, 452, 453, 454, 456, 1014, 531, 393, 394, 390, 389, 391, 475, 395, 396, 1019, 1550, 516, 515, 517, 388, 410, 409, 439, 425, 424, 426, 427, 418, 421, 431, 512, 717, 718, 1020, 479, 466, 473, 1024, 488, 1025, 484, 1046, 1048, 1049, 1050, 1051, 1055, 1056, 1057, 1058, 1059, 1065, 1066, 1068, 1074, 1075, 1076, 1079, 1080, 1088, 1089, 1090, 1093, 1094, 1102, 1103, 1104, 1107, 1108, 1111, 1112, 1114, 1120, 1121, 1122, 1125, 1126, 1134, 1135, 1136, 1139, 1140, 1148, 1149, 1150, 1153, 1154, 1157, 1158, 1160, 1166, 1167, 1168, 1171, 1172, 1180, 1181, 1182, 1185, 1186, 1194, 1195, 1196, 1199, 1200, 1203, 1204, 1205, 1211, 1212, 1213, 1216, 1217, 1225, 1226, 1227, 1230, 1231, 1239, 1240, 1241, 1244, 1245, 1248, 1249, 1250, 1256, 1257, 1258, 1261, 1262, 1270, 1271, 1272, 1275, 1276, 1284, 1285, 1286, 1289, 1290, 1293, 1295, 1296, 1297, 1298, 1294, 1299, 1300, 1302, 1303, 1305, 1311, 1312, 1313, 1316, 1317, 1325, 1326, 1327, 1330, 1331, 1339, 1340, 1341, 1344, 1345, 1348, 1349, 1351, 1357, 1358, 1359, 1362, 1363, 1371, 1372, 1373, 1376, 1377, 1385, 1386, 1387, 1390, 1391, 1394, 1395, 1397, 1403, 1404, 1405, 1408, 1409, 1417, 1418, 1419, 1422, 1423, 1431, 1432, 1433, 1436, 1437, 1440, 1441, 1442, 1448, 1449, 1450, 1453, 1454, 1462, 1463, 1464, 1467, 1468, 1476, 1477, 1478, 1481, 1482, 1485, 1486, 1487, 1493, 1494, 1495, 1498, 1499, 1507, 1508, 1509, 1512, 1513, 1521, 1522, 1523, 1526, 1527, 1530, 1532, 1533, 1534, 1535, 1531, 1536, 1537, 398, 399, 405, 404, 401, 400, 402, 407, 406, 408, 433, 1542, 1543, 1541, 457, 464, 465, 471, 472, 1544, 480, 490, 491, 492, 493, 497, 501, 502, 503, 504, 505, 507, 506, 508, 527, 522, 523, 519, 518, 520, 525, 524, 526, 528, 529, 549, 554, 559, 560, 561, 562, 563, 564, 565, 1557, 567, 566, 568, 569, 570, 571, 572, 573, 574, 575, 576, 577, 1558, 579, 578, 580, 581, 582, 647, 585, 584, 583, 1559, 1560, 1561, 1562, 1563, 1564, 697, 597, 596, 595, 1565, 1566, 1567, 1568, 1569, 1570, 611, 610, 612, 613, 615, 616, 624, 627, 634, 637, 644, 649, 650, 651, 660, 659, 661, 662, 663, 664, 672, 675, 682, 685, 692, 699, 700, 701, 713, 749, 750, 751, 752, 753, 754];
+pub(super) const CANONICAL_MODEL_STAGE_SLOTS: [u32; 388] = [756, 0, 757, 1, 165, 169, 182, 194, 5, 6, 7, 168, 181, 193, 171, 184, 196, 167, 180, 192, 174, 177, 189, 201, 175, 187, 199, 176, 188, 200, 758, 759, 760, 762, 763, 764, 761, 17, 18, 19, 29, 275, 31, 292, 33, 309, 35, 36, 37, 30, 274, 32, 291, 34, 308, 278, 295, 312, 26, 273, 27, 290, 28, 307, 282, 285, 299, 302, 316, 319, 281, 283, 298, 300, 315, 317, 284, 301, 318, 765, 766, 767, 768, 769, 770, 702, 1007, 2, 3, 4, 8, 9, 10, 11, 12, 13, 15, 14, 16, 20, 21, 22, 23, 24, 25, 38, 39, 40, 42, 41, 44, 43, 46, 45, 47, 48, 49, 51, 50, 52, 778, 53, 54, 792, 793, 794, 795, 796, 797, 55, 56, 57, 809, 810, 811, 812, 58, 59, 60, 813, 814, 815, 816, 817, 63, 61, 62, 64, 65, 818, 819, 67, 66, 68, 69, 70, 71, 822, 72, 823, 73, 824, 825, 826, 827, 828, 829, 830, 831, 832, 833, 834, 835, 836, 837, 838, 839, 840, 841, 842, 843, 844, 845, 846, 847, 848, 849, 850, 851, 852, 853, 854, 855, 856, 857, 858, 859, 860, 861, 862, 863, 864, 865, 866, 867, 868, 869, 870, 871, 872, 873, 874, 875, 876, 878, 880, 881, 882, 877, 75, 74, 76, 77, 883, 885, 886, 887, 879, 79, 78, 80, 81, 884, 888, 889, 890, 891, 892, 893, 894, 895, 896, 897, 898, 899, 900, 901, 902, 903, 904, 905, 906, 907, 908, 909, 910, 911, 912, 913, 914, 915, 916, 88, 113, 106, 150, 121, 119, 125, 123, 127, 957, 429, 133, 965, 514, 463, 477, 476, 461, 460, 481, 149, 487, 799, 800, 547, 96, 536, 540, 539, 100, 101, 1006, 423, 435, 92, 153, 94, 95, 532, 104, 111, 134, 135, 458, 478, 462, 470, 1022, 1023, 468, 1024, 469, 146, 147, 152, 1027, 538, 1035, 1036, 1038, 154, 1039, 1041, 1064, 163, 203, 220, 268, 321, 338, 270, 271, 277, 287, 288, 294, 304, 305, 311, 385, 1048, 392, 1541, 422, 434, 440, 441, 459, 467, 474, 483, 509, 1549, 1546, 1547, 1550, 1548, 537, 545, 552, 550, 1556, 1557, 607, 1572, 608, 648, 652, 653, 655, 656, 695, 696, 698, 721, 1644, 1645, 1646, 1647, 1648, 1649, 1650, 1651, 1629, 722, 723];
+pub(super) const CANONICAL_INSTANCE_STAGE_SLOTS: [u32; 814] = [779, 780, 781, 782, 783, 784, 785, 786, 787, 788, 789, 790, 791, 798, 802, 803, 804, 805, 806, 807, 808, 820, 821, 917, 919, 920, 82, 83, 84, 85, 86, 87, 89, 918, 921, 90, 114, 112, 801, 922, 98, 923, 924, 105, 97, 925, 926, 927, 928, 929, 930, 116, 931, 932, 933, 934, 117, 115, 935, 416, 936, 937, 417, 938, 415, 939, 413, 940, 941, 414, 942, 412, 118, 944, 122, 945, 120, 946, 126, 947, 124, 948, 128, 949, 130, 129, 950, 951, 419, 952, 420, 131, 954, 955, 428, 956, 430, 958, 959, 437, 960, 436, 961, 438, 962, 513, 963, 510, 964, 511, 966, 143, 967, 144, 968, 142, 969, 970, 148, 971, 533, 108, 972, 974, 535, 975, 534, 976, 543, 977, 978, 555, 979, 542, 980, 981, 556, 982, 983, 714, 984, 985, 986, 137, 136, 140, 987, 988, 141, 989, 139, 138, 991, 495, 992, 993, 496, 994, 494, 995, 499, 996, 997, 500, 998, 498, 999, 1000, 1001, 1002, 1003, 703, 1004, 1005, 109, 1008, 432, 1009, 91, 93, 99, 1017, 1018, 1019, 102, 103, 107, 110, 132, 145, 489, 485, 151, 715, 1028, 1029, 1030, 1031, 1032, 1033, 1034, 1037, 1040, 1042, 1043, 1044, 1045, 1046, 155, 156, 157, 1053, 1054, 1055, 158, 159, 160, 161, 1061, 1062, 1063, 162, 1065, 1068, 164, 1072, 1070, 1071, 166, 170, 1073, 1074, 1078, 172, 173, 1079, 1082, 1083, 178, 1086, 1084, 1085, 179, 183, 1087, 1088, 1092, 185, 186, 1093, 1096, 1097, 190, 1100, 1098, 1099, 191, 195, 1101, 1102, 1106, 197, 198, 1107, 1110, 1111, 202, 1114, 204, 1118, 1116, 1117, 205, 206, 1119, 1120, 1124, 207, 208, 1125, 1128, 1129, 209, 1132, 1130, 1131, 210, 211, 1133, 1134, 1138, 212, 213, 1139, 1142, 1143, 214, 1146, 1144, 1145, 215, 216, 1147, 1148, 1152, 217, 218, 1153, 1156, 1157, 219, 1160, 221, 1164, 1162, 1163, 222, 223, 1165, 1166, 1170, 224, 225, 1171, 1174, 1175, 226, 1178, 1176, 1177, 227, 228, 1179, 1180, 1184, 229, 230, 1185, 1188, 1189, 231, 1192, 1190, 1191, 232, 233, 1193, 1194, 1198, 234, 235, 1199, 1202, 1203, 236, 1209, 1207, 1208, 237, 238, 1210, 1211, 1215, 239, 240, 1216, 1219, 1220, 241, 1223, 1221, 1222, 242, 243, 1224, 1225, 1229, 244, 245, 1230, 1233, 1234, 246, 1237, 1235, 1236, 247, 248, 1238, 1239, 1243, 249, 250, 1244, 1247, 1248, 251, 1254, 1252, 1253, 252, 253, 1255, 1256, 1260, 254, 255, 1261, 1264, 1265, 256, 1268, 1266, 1267, 257, 258, 1269, 1270, 1274, 259, 260, 1275, 1278, 1279, 261, 1282, 1280, 1281, 262, 263, 1283, 1284, 1288, 264, 265, 1289, 1292, 1293, 266, 267, 1302, 1305, 269, 1309, 1307, 1308, 272, 276, 1310, 1311, 1315, 279, 280, 1316, 1319, 1320, 286, 1323, 1321, 1322, 289, 293, 1324, 1325, 1329, 296, 297, 1330, 1333, 1334, 303, 1337, 1335, 1336, 306, 310, 1338, 1339, 1343, 313, 314, 1344, 1347, 1348, 320, 1351, 322, 1355, 1353, 1354, 323, 324, 1356, 1357, 1361, 325, 326, 1362, 1365, 1366, 327, 1369, 1367, 1368, 328, 329, 1370, 1371, 1375, 330, 331, 1376, 1379, 1380, 332, 1383, 1381, 1382, 333, 334, 1384, 1385, 1389, 335, 336, 1390, 1393, 1394, 337, 1397, 339, 1401, 1399, 1400, 340, 341, 1402, 1403, 1407, 342, 343, 1408, 1411, 1412, 344, 1415, 1413, 1414, 345, 346, 1416, 1417, 1421, 347, 348, 1422, 1425, 1426, 349, 1429, 1427, 1428, 350, 351, 1430, 1431, 1435, 352, 353, 1436, 1439, 1440, 354, 1446, 1444, 1445, 355, 356, 1447, 1448, 1452, 357, 358, 1453, 1456, 1457, 359, 1460, 1458, 1459, 360, 361, 1461, 1462, 1466, 362, 363, 1467, 1470, 1471, 364, 1474, 1472, 1473, 365, 366, 1475, 1476, 1480, 367, 368, 1481, 1484, 1485, 369, 1491, 1489, 1490, 370, 371, 1492, 1493, 1497, 372, 373, 1498, 1501, 1502, 374, 1505, 1503, 1504, 375, 376, 1506, 1507, 1511, 377, 378, 1512, 1515, 1516, 379, 1519, 1517, 1518, 380, 381, 1520, 1521, 1525, 382, 383, 1526, 1529, 1530, 384, 386, 1539, 397, 1540, 403, 486, 482, 442, 443, 544, 444, 521, 530, 541, 1552, 1554, 1553, 548, 1555, 553, 557, 1574, 1576, 1585, 1573, 617, 618, 1578, 1575, 1577, 621, 625, 1579, 1580, 1581, 1582, 628, 1583, 1587, 1584, 1586, 631, 635, 1588, 1589, 1590, 1591, 638, 1592, 1596, 1593, 1595, 641, 645, 1597, 1598, 1599, 1600, 1594, 654, 1601, 657, 1603, 1605, 1614, 1602, 665, 666, 1607, 1604, 1606, 669, 673, 1608, 1609, 1610, 1611, 676, 1612, 1616, 1613, 1615, 679, 683, 1617, 1618, 1619, 1620, 686, 1621, 1624, 1622, 1623, 689, 693, 1625, 1626, 1627, 1628, 704, 705, 706, 707, 708, 709, 710, 711, 712, 720, 719, 1630, 1631, 1632, 1633, 1634, 1635, 1636, 1637, 1638, 1639, 1640, 1641, 1642, 1643, 1652, 1653, 1654, 1655, 1656, 1657, 1658, 724, 725, 726, 727, 728, 729, 730, 731, 732, 733, 734, 735, 736, 737, 738, 739, 740, 741, 742, 743, 744, 745, 746, 747, 748, 749];
+pub(super) const CANONICAL_TEMPERATURE_STAGE_SLOTS: [u32; 457] = [411, 387, 771, 716, 614, 558, 622, 632, 642, 619, 629, 639, 620, 630, 640, 586, 589, 592, 587, 590, 593, 588, 591, 594, 626, 636, 646, 623, 633, 643, 772, 773, 774, 609, 670, 680, 690, 667, 677, 687, 668, 678, 688, 598, 601, 604, 599, 602, 605, 600, 603, 606, 674, 684, 694, 671, 681, 691, 775, 776, 777, 658, 943, 953, 973, 990, 449, 455, 546, 551, 445, 1010, 1011, 1013, 446, 447, 448, 450, 451, 1012, 1014, 1016, 452, 453, 454, 456, 1015, 531, 393, 394, 390, 389, 391, 475, 395, 396, 1020, 1551, 516, 515, 517, 388, 410, 409, 439, 425, 424, 426, 427, 418, 421, 431, 512, 717, 718, 1021, 479, 466, 473, 1025, 488, 1026, 484, 1047, 1049, 1050, 1051, 1052, 1056, 1057, 1058, 1059, 1060, 1066, 1067, 1069, 1075, 1076, 1077, 1080, 1081, 1089, 1090, 1091, 1094, 1095, 1103, 1104, 1105, 1108, 1109, 1112, 1113, 1115, 1121, 1122, 1123, 1126, 1127, 1135, 1136, 1137, 1140, 1141, 1149, 1150, 1151, 1154, 1155, 1158, 1159, 1161, 1167, 1168, 1169, 1172, 1173, 1181, 1182, 1183, 1186, 1187, 1195, 1196, 1197, 1200, 1201, 1204, 1205, 1206, 1212, 1213, 1214, 1217, 1218, 1226, 1227, 1228, 1231, 1232, 1240, 1241, 1242, 1245, 1246, 1249, 1250, 1251, 1257, 1258, 1259, 1262, 1263, 1271, 1272, 1273, 1276, 1277, 1285, 1286, 1287, 1290, 1291, 1294, 1296, 1297, 1298, 1299, 1295, 1300, 1301, 1303, 1304, 1306, 1312, 1313, 1314, 1317, 1318, 1326, 1327, 1328, 1331, 1332, 1340, 1341, 1342, 1345, 1346, 1349, 1350, 1352, 1358, 1359, 1360, 1363, 1364, 1372, 1373, 1374, 1377, 1378, 1386, 1387, 1388, 1391, 1392, 1395, 1396, 1398, 1404, 1405, 1406, 1409, 1410, 1418, 1419, 1420, 1423, 1424, 1432, 1433, 1434, 1437, 1438, 1441, 1442, 1443, 1449, 1450, 1451, 1454, 1455, 1463, 1464, 1465, 1468, 1469, 1477, 1478, 1479, 1482, 1483, 1486, 1487, 1488, 1494, 1495, 1496, 1499, 1500, 1508, 1509, 1510, 1513, 1514, 1522, 1523, 1524, 1527, 1528, 1531, 1533, 1534, 1535, 1536, 1532, 1537, 1538, 398, 399, 405, 404, 401, 400, 402, 407, 406, 408, 433, 1543, 1544, 1542, 457, 464, 465, 471, 472, 1545, 480, 490, 491, 492, 493, 497, 501, 502, 503, 504, 505, 507, 506, 508, 527, 522, 523, 519, 518, 520, 525, 524, 526, 528, 529, 549, 554, 559, 560, 561, 562, 563, 564, 565, 1558, 567, 566, 568, 569, 570, 571, 572, 573, 574, 575, 576, 577, 1559, 579, 578, 580, 581, 582, 647, 585, 584, 583, 1560, 1561, 1562, 1563, 1564, 1565, 697, 597, 596, 595, 1566, 1567, 1568, 1569, 1570, 1571, 611, 610, 612, 613, 615, 616, 624, 627, 634, 637, 644, 649, 650, 651, 660, 659, 661, 662, 663, 664, 672, 675, 682, 685, 692, 699, 700, 701, 713, 750, 751, 752, 753, 754, 755];
 
 pub(super) fn canonical_model_preprocess(
     parameters: &[f64],
@@ -16,7 +16,7 @@ pub(super) fn canonical_model_preprocess(
     staged: &[f64],
     temperature: f64,
     thermal_voltage: f64,
-) -> [f64; 379] {
+) -> [f64; 388] {
 	let A=0f64;
 	let C=1f64;
 	let D=-1f64;
@@ -257,6 +257,15 @@ pub(super) fn canonical_model_preprocess(
 	let YV=parameters[43];
 	let ZL=parameters[45];
 	let ZS=parameters[48];
+	let AAG=0.0;
+	let AAI=0.0;
+	let AAK=0.0;
+	let AAM=0.0;
+	let AAO=0.0;
+	let AAQ=0.0;
+	let AAS=0.0;
+	let AAU=0.0;
+	let AAW=0.0;
 	let mut oBT=false;
 	let mut oCF=false;
 	let mut oCI=false;
@@ -1526,8 +1535,17 @@ pub(super) fn canonical_model_preprocess(
 	}
 	}
 	}
-	let AAG=parameters[52]> A;
-    [B as u8 as f64, F, H as u8 as f64, J, K, U, W, Y, Z, AA, AB, AE, AH, AK, AL, AM, AN, AP, AR, AT, AU, AW, AY, BA, BC, BE, BG, BH, BI, BJ, BO as u8 as f64, BQ as u8 as f64, oBT as u8 as f64, oCF as u8 as f64, oCI as u8 as f64, oCL as u8 as f64, CB as u8 as f64, FW, FX, FY, FZ, IA, GA, IB, GB, IC, ID, IE, IF, GC, IG, GE, IH, GG, II, IJ, IK, IL, GH, IM, GI, IN, GJ, IO, GK, IP, GL, IQ, GM, IR, GN, IS, GO, IT, GP, IU, IV, IW, IX, IY as u8 as f64, JA as u8 as f64, oJC as u8 as f64, oJN as u8 as f64, oJQ as u8 as f64, oJS as u8 as f64, E, JK as u8 as f64, JZ, KA, KB, KF, KG, KH, BU, oKI, BW, BX, BY, BZ, KJ, KK, KL, GU, GV, GW, KM, KN, KO, HA, HB, HC, HD, HE, HF, JD, oKP, JF, JG, JH, JI, KR as u8 as f64, KT, KU, KV as u8 as f64, KZ as u8 as f64, LD as u8 as f64, LG as u8 as f64, LJ as u8 as f64, LN as u8 as f64, oOF, oOH, oOJ, oOK as u8 as f64, oOO as u8 as f64, oOS as u8 as f64, oOV as u8 as f64, oOY, oOZ, oPC, oPD as u8 as f64, oPH as u8 as f64, oPL as u8 as f64, oPP as u8 as f64, oPT as u8 as f64, oPG, oPK, oPO, oPS, oPW, oPX as u8 as f64, oQB as u8 as f64, oQA, oQE, oQF, oQG, oQH, oQI, oQK as u8 as f64, oQL, oQN as u8 as f64, oQP, oQQ as u8 as f64, oQR as u8 as f64, oQS as u8 as f64, oQT as u8 as f64, oQU as u8 as f64, oQV as u8 as f64, oQW as u8 as f64, oQX as u8 as f64, oQY as u8 as f64, oQZ as u8 as f64, oRA as u8 as f64, oRB as u8 as f64, oRC as u8 as f64, oRD as u8 as f64, oRE as u8 as f64, oRF as u8 as f64, oRG as u8 as f64, oRH as u8 as f64, oRI as u8 as f64, oRJ as u8 as f64, oRK as u8 as f64, oRL as u8 as f64, oRM as u8 as f64, oRN as u8 as f64, oRO as u8 as f64, oRP as u8 as f64, oRQ as u8 as f64, oRR as u8 as f64, oRS as u8 as f64, oRT as u8 as f64, oRY as u8 as f64, oRZ as u8 as f64, oSA as u8 as f64, oSB as u8 as f64, oSG as u8 as f64, oSH as u8 as f64, oSI as u8 as f64, oSJ as u8 as f64, oSK as u8 as f64, oSL as u8 as f64, oSM as u8 as f64, oSN as u8 as f64, oSO as u8 as f64, oSP as u8 as f64, oSQ as u8 as f64, oSR as u8 as f64, oSS as u8 as f64, oST as u8 as f64, oSU as u8 as f64, oSV as u8 as f64, oSW as u8 as f64, oSX as u8 as f64, oSY as u8 as f64, oSZ as u8 as f64, oTA as u8 as f64, oTB as u8 as f64, oTC as u8 as f64, oTD as u8 as f64, oTL, oTO, oTR, oTU, oTE as u8 as f64, oTF as u8 as f64, oTG as u8 as f64, oTH as u8 as f64, oTI as u8 as f64, oTY, oUB, oUE, oUH, oTV as u8 as f64, oUI as u8 as f64, oUJ as u8 as f64, oUK as u8 as f64, oUL as u8 as f64, oUM as u8 as f64, oUN as u8 as f64, oUO as u8 as f64, oUP as u8 as f64, oUQ as u8 as f64, oUR as u8 as f64, oUS as u8 as f64, oUT as u8 as f64, oUU as u8 as f64, oUV as u8 as f64, oUW as u8 as f64, oUX as u8 as f64, oUY as u8 as f64, oUZ as u8 as f64, oVA as u8 as f64, oVB as u8 as f64, oVC as u8 as f64, oVD as u8 as f64, oVE as u8 as f64, oVF as u8 as f64, oVG as u8 as f64, oVH as u8 as f64, oVI as u8 as f64, oVJ as u8 as f64, oVK as u8 as f64, oVN, MV, MY, MZ, NB, NC, ND, NE, NF, WS as u8 as f64, WT, NJ, WV as u8 as f64, WW, NL, NM, NN, NO, NP, NS, NT, NV, LM, LQ, NX, NZ, OA, OB, OC, XE, XF, XH as u8 as f64, XK, XS, XT, WX, XU, XV, XJ, oXX, oXY, XZ, YA as u8 as f64, YB, YD, YE, YF, YG as u8 as f64, YJ as u8 as f64, WY, YM as u8 as f64, WZ, YP, YQ, XA, YR as u8 as f64, YU, YW as u8 as f64, YY as u8 as f64, ZA as u8 as f64, YX, ZB as u8 as f64, ZC as u8 as f64, oZE as u8 as f64, oZF, oZG, oZH, oZI, oZJ, oZK, HH, HI, HJ, HK, HL, HM, HN, HO, HP, HQ, ZD as u8 as f64, ZM as u8 as f64, ZN as u8 as f64, XQ, XR, ZO as u8 as f64, ZP as u8 as f64, YL, YO, YI, XB, ZQ as u8 as f64, ZR as u8 as f64, ZT as u8 as f64, oZU as u8 as f64, oZW as u8 as f64, ZV as u8 as f64, YT, ZX as u8 as f64, XC, ZY as u8 as f64, oZZ as u8 as f64, oAAA as u8 as f64, oAAC, oAAD as u8 as f64, oAAF, CA, HR, HS, HT, HU, HV, HW, JJ, AAG as u8 as f64, oAAB, oAAE]
+	let AAH=A+ AAG;
+	let AAJ=A+ AAI;
+	let AAL=A+ AAK;
+	let AAN=A+ AAM;
+	let AAP=A+ AAO;
+	let AAR=A+ AAQ;
+	let AAT=A+ AAS;
+	let AAV=A+ AAU;
+	let AAX=A+ AAW;
+	let AAY=parameters[52]> A;
+    [B as u8 as f64, F, H as u8 as f64, J, K, U, W, Y, Z, AA, AB, AE, AH, AK, AL, AM, AN, AP, AR, AT, AU, AW, AY, BA, BC, BE, BG, BH, BI, BJ, BO as u8 as f64, BQ as u8 as f64, oBT as u8 as f64, oCF as u8 as f64, oCI as u8 as f64, oCL as u8 as f64, CB as u8 as f64, FW, FX, FY, FZ, IA, GA, IB, GB, IC, ID, IE, IF, GC, IG, GE, IH, GG, II, IJ, IK, IL, GH, IM, GI, IN, GJ, IO, GK, IP, GL, IQ, GM, IR, GN, IS, GO, IT, GP, IU, IV, IW, IX, IY as u8 as f64, JA as u8 as f64, oJC as u8 as f64, oJN as u8 as f64, oJQ as u8 as f64, oJS as u8 as f64, E, JK as u8 as f64, JZ, KA, KB, KF, KG, KH, BU, oKI, BW, BX, BY, BZ, KJ, KK, KL, GU, GV, GW, KM, KN, KO, HA, HB, HC, HD, HE, HF, JD, oKP, JF, JG, JH, JI, KR as u8 as f64, KT, KU, KV as u8 as f64, KZ as u8 as f64, LD as u8 as f64, LG as u8 as f64, LJ as u8 as f64, LN as u8 as f64, oOF, oOH, oOJ, oOK as u8 as f64, oOO as u8 as f64, oOS as u8 as f64, oOV as u8 as f64, oOY, oOZ, oPC, oPD as u8 as f64, oPH as u8 as f64, oPL as u8 as f64, oPP as u8 as f64, oPT as u8 as f64, oPG, oPK, oPO, oPS, oPW, oPX as u8 as f64, oQB as u8 as f64, oQA, oQE, oQF, oQG, oQH, oQI, oQK as u8 as f64, oQL, oQN as u8 as f64, oQP, oQQ as u8 as f64, oQR as u8 as f64, oQS as u8 as f64, oQT as u8 as f64, oQU as u8 as f64, oQV as u8 as f64, oQW as u8 as f64, oQX as u8 as f64, oQY as u8 as f64, oQZ as u8 as f64, oRA as u8 as f64, oRB as u8 as f64, oRC as u8 as f64, oRD as u8 as f64, oRE as u8 as f64, oRF as u8 as f64, oRG as u8 as f64, oRH as u8 as f64, oRI as u8 as f64, oRJ as u8 as f64, oRK as u8 as f64, oRL as u8 as f64, oRM as u8 as f64, oRN as u8 as f64, oRO as u8 as f64, oRP as u8 as f64, oRQ as u8 as f64, oRR as u8 as f64, oRS as u8 as f64, oRT as u8 as f64, oRY as u8 as f64, oRZ as u8 as f64, oSA as u8 as f64, oSB as u8 as f64, oSG as u8 as f64, oSH as u8 as f64, oSI as u8 as f64, oSJ as u8 as f64, oSK as u8 as f64, oSL as u8 as f64, oSM as u8 as f64, oSN as u8 as f64, oSO as u8 as f64, oSP as u8 as f64, oSQ as u8 as f64, oSR as u8 as f64, oSS as u8 as f64, oST as u8 as f64, oSU as u8 as f64, oSV as u8 as f64, oSW as u8 as f64, oSX as u8 as f64, oSY as u8 as f64, oSZ as u8 as f64, oTA as u8 as f64, oTB as u8 as f64, oTC as u8 as f64, oTD as u8 as f64, oTL, oTO, oTR, oTU, oTE as u8 as f64, oTF as u8 as f64, oTG as u8 as f64, oTH as u8 as f64, oTI as u8 as f64, oTY, oUB, oUE, oUH, oTV as u8 as f64, oUI as u8 as f64, oUJ as u8 as f64, oUK as u8 as f64, oUL as u8 as f64, oUM as u8 as f64, oUN as u8 as f64, oUO as u8 as f64, oUP as u8 as f64, oUQ as u8 as f64, oUR as u8 as f64, oUS as u8 as f64, oUT as u8 as f64, oUU as u8 as f64, oUV as u8 as f64, oUW as u8 as f64, oUX as u8 as f64, oUY as u8 as f64, oUZ as u8 as f64, oVA as u8 as f64, oVB as u8 as f64, oVC as u8 as f64, oVD as u8 as f64, oVE as u8 as f64, oVF as u8 as f64, oVG as u8 as f64, oVH as u8 as f64, oVI as u8 as f64, oVJ as u8 as f64, oVK as u8 as f64, oVN, MV, MY, MZ, NB, NC, ND, NE, NF, WS as u8 as f64, WT, NJ, WV as u8 as f64, WW, NL, NM, NN, NO, NP, NS, NT, NV, LM, LQ, NX, NZ, OA, OB, OC, XE, XF, XH as u8 as f64, XK, XS, XT, WX, XU, XV, XJ, oXX, oXY, XZ, YA as u8 as f64, YB, YD, YE, YF, YG as u8 as f64, YJ as u8 as f64, WY, YM as u8 as f64, WZ, YP, YQ, XA, YR as u8 as f64, YU, YW as u8 as f64, YY as u8 as f64, ZA as u8 as f64, YX, ZB as u8 as f64, ZC as u8 as f64, oZE as u8 as f64, oZF, oZG, oZH, oZI, oZJ, oZK, HH, HI, HJ, HK, HL, HM, HN, HO, HP, HQ, ZD as u8 as f64, ZM as u8 as f64, ZN as u8 as f64, XQ, XR, ZO as u8 as f64, ZP as u8 as f64, YL, YO, YI, XB, ZQ as u8 as f64, ZR as u8 as f64, ZT as u8 as f64, oZU as u8 as f64, oZW as u8 as f64, ZV as u8 as f64, YT, ZX as u8 as f64, XC, ZY as u8 as f64, oZZ as u8 as f64, oAAA as u8 as f64, oAAC, oAAD as u8 as f64, oAAF, CA, HR, HS, HT, HU, HV, HW, JJ, AAH, AAJ, AAL, AAN, AAP, AAR, AAT, AAV, AAX, AAY as u8 as f64, oAAB, oAAE]
 }
 
 pub(super) fn canonical_instance_preprocess(
@@ -1538,10 +1556,10 @@ pub(super) fn canonical_instance_preprocess(
     temperature: f64,
     thermal_voltage: f64,
 ) -> [f64; 814] {
-	let A=staged[758]!=0.0;
-	let B=staged[760]!=0.0;
-	let C=staged[765]!=0.0;
-	let D=staged[777]!=0.0;
+	let A=staged[759]!=0.0;
+	let B=staged[761]!=0.0;
+	let C=staged[766]!=0.0;
+	let D=staged[778]!=0.0;
 	let E=parameters[9];
 	let F=1f64;
 	let K=1e-9f64;
@@ -1603,7 +1621,7 @@ pub(super) fn canonical_instance_preprocess(
 	let DP=parameters[134];
 	let DQ=parameters[135];
 	let DR=parameters[136];
-	let DS=staged[799];
+	let DS=staged[800];
 	let DT=parameters[139];
 	let DU=parameters[140];
 	let DV=parameters[141];
@@ -1642,116 +1660,116 @@ pub(super) fn canonical_instance_preprocess(
 	let IL=1e20f64;
 	let JZ=1e-15f64;
 	let KD=parameters[256];
-	let MY=staged[823]!=0.0;
-	let NB=staged[824]!=0.0;
-	let NE=staged[825]!=0.0;
-	let NH=staged[826]!=0.0;
-	let NK=staged[827]!=0.0;
+	let MY=staged[824]!=0.0;
+	let NB=staged[825]!=0.0;
+	let NE=staged[826]!=0.0;
+	let NH=staged[827]!=0.0;
+	let NK=staged[828]!=0.0;
 	let NM=parameters[223];
-	let NO=staged[828]!=0.0;
-	let NR=staged[829]!=0.0;
-	let NU=staged[830]!=0.0;
+	let NO=staged[829]!=0.0;
+	let NR=staged[830]!=0.0;
+	let NU=staged[831]!=0.0;
 	let NW=parameters[236];
-	let NY=staged[831]!=0.0;
+	let NY=staged[832]!=0.0;
 	let OA=parameters[237];
-	let OC=staged[832]!=0.0;
-	let OF=staged[833]!=0.0;
+	let OC=staged[833]!=0.0;
+	let OF=staged[834]!=0.0;
 	let OH=parameters[244];
-	let OJ=staged[834]!=0.0;
+	let OJ=staged[835]!=0.0;
 	let OL=parameters[243];
-	let ON=staged[835]!=0.0;
+	let ON=staged[836]!=0.0;
 	let OP=parameters[245];
-	let OR=staged[836]!=0.0;
-	let OU=staged[837]!=0.0;
+	let OR=staged[837]!=0.0;
+	let OU=staged[838]!=0.0;
 	let OW=parameters[250];
-	let OY=staged[838]!=0.0;
+	let OY=staged[839]!=0.0;
 	let PA=parameters[249];
-	let PC=staged[839]!=0.0;
-	let PF=staged[840]!=0.0;
+	let PC=staged[840]!=0.0;
+	let PF=staged[841]!=0.0;
 	let PH=parameters[255];
-	let PJ=staged[841]!=0.0;
+	let PJ=staged[842]!=0.0;
 	let PL=parameters[254];
-	let PN=staged[842]!=0.0;
-	let PQ=staged[843]!=0.0;
-	let PT=staged[844]!=0.0;
-	let PW=staged[845]!=0.0;
+	let PN=staged[843]!=0.0;
+	let PQ=staged[844]!=0.0;
+	let PT=staged[845]!=0.0;
+	let PW=staged[846]!=0.0;
 	let PY=parameters[273];
-	let QA=staged[846]!=0.0;
-	let QD=staged[847]!=0.0;
+	let QA=staged[847]!=0.0;
+	let QD=staged[848]!=0.0;
 	let QF=parameters[281];
-	let QH=staged[848]!=0.0;
-	let QK=staged[849]!=0.0;
-	let QN=staged[850]!=0.0;
+	let QH=staged[849]!=0.0;
+	let QK=staged[850]!=0.0;
+	let QN=staged[851]!=0.0;
 	let QP=parameters[291];
-	let QR=staged[851]!=0.0;
+	let QR=staged[852]!=0.0;
 	let QT=parameters[292];
-	let QV=staged[852]!=0.0;
+	let QV=staged[853]!=0.0;
 	let QX=parameters[293];
-	let QZ=staged[853]!=0.0;
-	let RC=staged[854]!=0.0;
-	let RF=staged[855]!=0.0;
+	let QZ=staged[854]!=0.0;
+	let RC=staged[855]!=0.0;
+	let RF=staged[856]!=0.0;
 	let RH=parameters[303];
-	let RJ=staged[856]!=0.0;
+	let RJ=staged[857]!=0.0;
 	let RL=parameters[304];
-	let RN=staged[857]!=0.0;
-	let RQ=staged[858]!=0.0;
-	let RT=staged[859]!=0.0;
-	let RW=staged[860]!=0.0;
-	let RZ=staged[861]!=0.0;
-	let SC=staged[862]!=0.0;
+	let RN=staged[858]!=0.0;
+	let RQ=staged[859]!=0.0;
+	let RT=staged[860]!=0.0;
+	let RW=staged[861]!=0.0;
+	let RZ=staged[862]!=0.0;
+	let SC=staged[863]!=0.0;
 	let SE=parameters[324];
-	let SG=staged[863]!=0.0;
-	let SJ=staged[864]!=0.0;
-	let SM=staged[865]!=0.0;
-	let SP=staged[866]!=0.0;
-	let SS=staged[867]!=0.0;
-	let SV=staged[868]!=0.0;
+	let SG=staged[864]!=0.0;
+	let SJ=staged[865]!=0.0;
+	let SM=staged[866]!=0.0;
+	let SP=staged[867]!=0.0;
+	let SS=staged[868]!=0.0;
+	let SV=staged[869]!=0.0;
 	let SX=parameters[336];
-	let SZ=staged[869]!=0.0;
-	let TC=staged[870]!=0.0;
-	let TF=staged[871]!=0.0;
+	let SZ=staged[870]!=0.0;
+	let TC=staged[871]!=0.0;
+	let TF=staged[872]!=0.0;
 	let TH=parameters[348];
-	let TJ=staged[872]!=0.0;
+	let TJ=staged[873]!=0.0;
 	let TL=parameters[349];
-	let TN=staged[873]!=0.0;
-	let TQ=staged[874]!=0.0;
-	let TT=staged[875]!=0.0;
-	let TW=staged[876]!=0.0;
-	let TY=staged[878]!=0.0;
-	let UB=staged[883]!=0.0;
-	let UF=staged[887]!=0.0;
-	let UI=staged[888]!=0.0;
-	let UL=staged[889]!=0.0;
-	let UO=staged[890]!=0.0;
-	let UR=staged[891]!=0.0;
-	let UU=staged[892]!=0.0;
-	let UX=staged[893]!=0.0;
-	let VA=staged[894]!=0.0;
-	let VD=staged[895]!=0.0;
-	let VG=staged[896]!=0.0;
-	let VJ=staged[897]!=0.0;
-	let VM=staged[898]!=0.0;
-	let VP=staged[899]!=0.0;
+	let TN=staged[874]!=0.0;
+	let TQ=staged[875]!=0.0;
+	let TT=staged[876]!=0.0;
+	let TW=staged[877]!=0.0;
+	let TY=staged[879]!=0.0;
+	let UB=staged[884]!=0.0;
+	let UF=staged[888]!=0.0;
+	let UI=staged[889]!=0.0;
+	let UL=staged[890]!=0.0;
+	let UO=staged[891]!=0.0;
+	let UR=staged[892]!=0.0;
+	let UU=staged[893]!=0.0;
+	let UX=staged[894]!=0.0;
+	let VA=staged[895]!=0.0;
+	let VD=staged[896]!=0.0;
+	let VG=staged[897]!=0.0;
+	let VJ=staged[898]!=0.0;
+	let VM=staged[899]!=0.0;
+	let VP=staged[900]!=0.0;
 	let VR=parameters[397];
-	let VT=staged[900]!=0.0;
-	let VW=staged[901]!=0.0;
-	let VZ=staged[902]!=0.0;
-	let WC=staged[903]!=0.0;
-	let WF=staged[904]!=0.0;
-	let WI=staged[905]!=0.0;
-	let WL=staged[906]!=0.0;
-	let WO=staged[907]!=0.0;
+	let VT=staged[901]!=0.0;
+	let VW=staged[902]!=0.0;
+	let VZ=staged[903]!=0.0;
+	let WC=staged[904]!=0.0;
+	let WF=staged[905]!=0.0;
+	let WI=staged[906]!=0.0;
+	let WL=staged[907]!=0.0;
+	let WO=staged[908]!=0.0;
 	let WQ=parameters[425];
-	let WS=staged[908]!=0.0;
+	let WS=staged[909]!=0.0;
 	let WU=parameters[426];
-	let WW=staged[909]!=0.0;
-	let WZ=staged[910]!=0.0;
+	let WW=staged[910]!=0.0;
+	let WZ=staged[911]!=0.0;
 	let XB=parameters[431];
-	let XD=staged[911]!=0.0;
+	let XD=staged[912]!=0.0;
 	let XF=parameters[430];
-	let XH=staged[912]!=0.0;
-	let XK=staged[913]!=0.0;
-	let XN=staged[914]!=0.0;
+	let XH=staged[913]!=0.0;
+	let XK=staged[914]!=0.0;
+	let XN=staged[915]!=0.0;
 	let XQ=parameters[2];
 	let XR=0f64;
 	let XS=parameters[3];
@@ -1777,11 +1795,11 @@ pub(super) fn canonical_instance_preprocess(
 	let AHK=1.0447941624768001e-10f64;
 	let AHS=5e24f64;
 	let AHV=staged[100];
-	let AJF=staged[1035]!=0.0;
+	let AJF=staged[1036]!=0.0;
 	let AJG=parameters[14];
-	let AJJ=staged[1037]!=0.0;
-	let AJW=staged[1038]!=0.0;
-	let AKE=staged[1040]!=0.0;
+	let AJJ=staged[1038]!=0.0;
+	let AJW=staged[1039]!=0.0;
+	let AKE=staged[1041]!=0.0;
 	let AKT=parameters[825];
 	let AKU=parameters[826];
 	let AKV=0.9f64;
@@ -1795,7 +1813,7 @@ pub(super) fn canonical_instance_preprocess(
 	let ALV=staged[28];
 	let ALX=staged[29];
 	let ALY=staged[26];
-	let AMN=staged[1063]!=0.0;
+	let AMN=staged[1064]!=0.0;
 	let AMR=staged[163];
 	let AMV=staged[165];
 	let AMY=parameters[833];
@@ -1877,11 +1895,11 @@ pub(super) fn canonical_instance_preprocess(
 	let BKU=staged[338];
 	let BNY=-1.000000082740371e-11f64;
 	let BQX=-5.000000413701855e-12f64;
-	let BUC=staged[1545]!=0.0;
-	let BUD=staged[1546]!=0.0;
-	let BUE=staged[1549]!=0.0;
+	let BUC=staged[1546]!=0.0;
+	let BUD=staged[1547]!=0.0;
+	let BUE=staged[1550]!=0.0;
 	let BUL=staged[96];
-	let BUO=staged[1555]!=0.0;
+	let BUO=staged[1556]!=0.0;
 	let BUY=1f64;
 	let BVI=staged[169];
 	let BVY=staged[182];
@@ -1893,19 +1911,19 @@ pub(super) fn canonical_instance_preprocess(
 	let BYT=staged[309];
 	let BYX=parameters[32];
 	let BZA=0.0;
-	let BZB=0f64;
-	let BZG=0.0;
-	let BZH=0f64;
-	let BZM=0.0;
-	let BZN=0f64;
-	let BZS=0.0;
-	let BZT=0f64;
-	let BZY=0.0;
-	let BZZ=0f64;
-	let CAE=0.0;
-	let CAF=0f64;
-	let CAK=0.0;
+	let BZC=0f64;
+	let BZH=0.0;
+	let BZJ=0f64;
+	let BZO=0.0;
+	let BZQ=0f64;
+	let BZV=0.0;
+	let BZX=0f64;
+	let CAC=0.0;
+	let CAE=0f64;
+	let CAJ=0.0;
 	let CAL=0f64;
+	let CAQ=0.0;
+	let CAS=0f64;
 	let mut oG=false;
 	let mut oBS=false;
 	let mut oIR=false;
@@ -2508,12 +2526,12 @@ pub(super) fn canonical_instance_preprocess(
 	let mut oBYU=false;
 	let mut oBYV=0.0;
 	let mut oBYZ=0.0;
-	let mut oBZF=0.0;
-	let mut oBZL=0.0;
-	let mut oBZR=0.0;
-	let mut oBZX=0.0;
-	let mut oCAD=0.0;
-	let mut oCAJ=0.0;
+	let mut oBZG=0.0;
+	let mut oBZN=0.0;
+	let mut oBZU=0.0;
+	let mut oCAB=0.0;
+	let mut oCAI=0.0;
+	let mut oCAP=0.0;
 	let H;
 	let I;
 	if D{
@@ -4484,7 +4502,7 @@ pub(super) fn canonical_instance_preprocess(
 	}
 	let AMU=AMR- ALP;
 	let AMW=N* ((AMR+ ALP)- (((AMU* AMU)+ ((AGX* AMV)* AMV)).sqrt()));
-	let AMX=N* (AMR- (((AMR* AMR)+ 4e-12f64).sqrt()));
+	let AMX=N* ((AMR+ XR)- (((AMR* AMR)+ 4e-12f64).sqrt()));
 	AMP=AMW;
 	AMQ=AMX;
 	}else{
@@ -4700,7 +4718,7 @@ pub(super) fn canonical_instance_preprocess(
 	}
 	let ARG=ARD- ALP;
 	let ARH=N* ((ARD+ ALP)- (((ARG* ARG)+ ((AGX* AMV)* AMV)).sqrt()));
-	let ARI=N* (ARD- (((ARD* ARD)+ 4e-12f64).sqrt()));
+	let ARI=N* ((ARD+ XR)- (((ARD* ARD)+ 4e-12f64).sqrt()));
 	ARB=ARH;
 	ARC=ARI;
 	}else{
@@ -4916,7 +4934,7 @@ pub(super) fn canonical_instance_preprocess(
 	}
 	let AUI=AUF- ALP;
 	let AUJ=N* ((AUF+ ALP)- (((AUI* AUI)+ ((AGX* AMV)* AMV)).sqrt()));
-	let AUK=N* (AUF- (((AUF* AUF)+ 4e-12f64).sqrt()));
+	let AUK=N* ((AUF+ XR)- (((AUF* AUF)+ 4e-12f64).sqrt()));
 	AUD=AUJ;
 	AUE=AUK;
 	}else{
@@ -5556,7 +5574,7 @@ pub(super) fn canonical_instance_preprocess(
 	}
 	let BDM=BDJ- AMM;
 	let BDN=N* ((BDJ+ AMM)- (((BDM* BDM)+ ((AGX* AMV)* AMV)).sqrt()));
-	let BDO=N* (BDJ- (((BDJ* BDJ)+ 4e-12f64).sqrt()));
+	let BDO=N* ((BDJ+ XR)- (((BDJ* BDJ)+ 4e-12f64).sqrt()));
 	BDH=BDN;
 	BDI=BDO;
 	}else{
@@ -5772,7 +5790,7 @@ pub(super) fn canonical_instance_preprocess(
 	}
 	let BHV=BHS- AMM;
 	let BHW=N* ((BHS+ AMM)- (((BHV* BHV)+ ((AGX* AMV)* AMV)).sqrt()));
-	let BHX=N* (BHS- (((BHS* BHS)+ 4e-12f64).sqrt()));
+	let BHX=N* ((BHS+ XR)- (((BHS* BHS)+ 4e-12f64).sqrt()));
 	BHQ=BHW;
 	BHR=BHX;
 	}else{
@@ -5988,7 +6006,7 @@ pub(super) fn canonical_instance_preprocess(
 	}
 	let BKX=BKU- AMM;
 	let BKY=N* ((BKU+ AMM)- (((BKX* BKX)+ ((AGX* AMV)* AMV)).sqrt()));
-	let BKZ=N* (BKU- (((BKU* BKU)+ 4e-12f64).sqrt()));
+	let BKZ=N* ((BKU+ XR)- (((BKU* BKU)+ 4e-12f64).sqrt()));
 	BKS=BKY;
 	BKT=BKZ;
 	}else{
@@ -7004,96 +7022,88 @@ pub(super) fn canonical_instance_preprocess(
 	}
 	let BYW=staged[702]* AGH;
 	let BYY=BYW* BYX;
-	let BZC;
 	let BZD;
 	let BZE;
+	let BZF;
 	if AIE{
 	let BYZ=(AGH* BYX)* AIG;
 	oBYZ=BYZ;
-	BZC=BZA;
-	BZD=XR;
-	BZE=XR;
-	}else{
-	BZC=XR;
+	let BZB=XR+ BZA;
 	BZD=BZB;
-	BZE=F;
+	BZE=XR;
+	BZF=XR;
+	}else{
+	BZD=XR;
+	BZE=BZC;
+	BZF=F;
 	}
-	let BZI;
-	let BZJ;
 	let BZK;
+	let BZL;
+	let BZM;
 	if AIH{
-	let BZF=(AGH* BYX)* AIJ;
-	oBZF=BZF;
-	BZI=BZG;
-	BZJ=XR;
+	let BZG=(AGH* BYX)* AIJ;
+	oBZG=BZG;
+	let BZI=XR+ BZH;
+	BZK=BZI;
+	BZL=XR;
+	BZM=XR;
+	}else{
 	BZK=XR;
-	}else{
-	BZI=XR;
-	BZJ=BZH;
-	BZK=F;
+	BZL=BZJ;
+	BZM=F;
 	}
-	let BZO;
-	let BZP;
-	let BZQ;
+	let BZR;
+	let BZS;
+	let BZT;
 	if AIK{
-	let BZL=(AGH* BYX)* AIM;
-	oBZL=BZL;
-	BZO=BZM;
-	BZP=XR;
-	BZQ=XR;
+	let BZN=(AGH* BYX)* AIM;
+	oBZN=BZN;
+	let BZP=XR+ BZO;
+	BZR=BZP;
+	BZS=XR;
+	BZT=XR;
 	}else{
-	BZO=XR;
-	BZP=BZN;
-	BZQ=F;
+	BZR=XR;
+	BZS=BZQ;
+	BZT=F;
 	}
-	let BZU;
-	let BZV;
-	let BZW;
-	if AIN{
-	let BZR=(AGH* BYX)* AIP;
-	oBZR=BZR;
-	BZU=BZS;
-	BZV=XR;
-	BZW=XR;
-	}else{
-	BZU=XR;
-	BZV=BZT;
-	BZW=F;
-	}
+	let BZY;
+	let BZZ;
 	let CAA;
-	let CAB;
-	let CAC;
-	if AIQ{
-	let BZX=(AGH* BYX)* AIS;
-	oBZX=BZX;
-	CAA=BZY;
-	CAB=XR;
-	CAC=XR;
-	}else{
+	if AIN{
+	let BZU=(AGH* BYX)* AIP;
+	oBZU=BZU;
+	let BZW=XR+ BZV;
+	BZY=BZW;
+	BZZ=XR;
 	CAA=XR;
-	CAB=BZZ;
-	CAC=F;
+	}else{
+	BZY=XR;
+	BZZ=BZX;
+	CAA=F;
 	}
+	let CAF;
 	let CAG;
 	let CAH;
-	let CAI;
-	if AIT{
-	let CAD=(AGH* BYX)* AIV;
-	oCAD=CAD;
-	CAG=CAE;
-	CAH=XR;
-	CAI=XR;
-	}else{
+	if AIQ{
+	let CAB=(AGH* BYX)* AIS;
+	oCAB=CAB;
+	let CAD=XR+ CAC;
+	CAF=CAD;
 	CAG=XR;
-	CAH=CAF;
-	CAI=F;
+	CAH=XR;
+	}else{
+	CAF=XR;
+	CAG=CAE;
+	CAH=F;
 	}
 	let CAM;
 	let CAN;
 	let CAO;
-	if AIW{
-	let CAJ=(AGH* BYX)* AIY;
-	oCAJ=CAJ;
+	if AIT{
+	let CAI=(AGH* BYX)* AIV;
+	oCAI=CAI;
+	let CAK=XR+ CAJ;
 	CAM=CAK;
 	CAN=XR;
 	CAO=XR;
@@ -7102,10 +7112,25 @@ pub(super) fn canonical_instance_preprocess(
 	CAN=CAL;
 	CAO=F;
 	}
-	let CAP=BYW* parameters[33];
-	let CAQ=(AGH* BYX).sqrt();
-	let CAR=CAQ* N;
-    [oG as u8 as f64, L as u8 as f64, R as u8 as f64, AB as u8 as f64, AF as u8 as f64, AP as u8 as f64, AT as u8 as f64, AX as u8 as f64, BA as u8 as f64, BE as u8 as f64, BH as u8 as f64, BJ as u8 as f64, BM as u8 as f64, oBS as u8 as f64, oIR as u8 as f64, oIV as u8 as f64, oIZ as u8 as f64, oJD as u8 as f64, oJJ as u8 as f64, oJU as u8 as f64, oKA as u8 as f64, oLS as u8 as f64, oMG as u8 as f64, oXU as u8 as f64, oYH as u8 as f64, oYU as u8 as f64, oYY, oZB, oZC, oPP, oRB, oTX, oWH, oYD as u8 as f64, oZN as u8 as f64, oAAH, FC, FD, IM as u8 as f64, oAAK as u8 as f64, AAL, AAM as u8 as f64, AAP as u8 as f64, AAQ, FH, AAR as u8 as f64, AAU as u8 as f64, oAAW as u8 as f64, AAY as u8 as f64, oABA as u8 as f64, ABC as u8 as f64, ABE, ABF as u8 as f64, oABG as u8 as f64, ABI as u8 as f64, oABK as u8 as f64, ABL, FO, ABM as u8 as f64, ABO, ABP as u8 as f64, oABQ as u8 as f64, ABR, ABS as u8 as f64, ABU, ABV as u8 as f64, ABW, ABX as u8 as f64, oABY as u8 as f64, ABZ, ACA as u8 as f64, ACC, FV, ACD as u8 as f64, ACE, ACF as u8 as f64, ACG, ACH as u8 as f64, ACI, ACJ as u8 as f64, ACK, ACL as u8 as f64, ACM, ACN as u8 as f64, ACO, GC, ACP as u8 as f64, oACQ as u8 as f64, ACS, ACT as u8 as f64, ACW, GF, ACX as u8 as f64, oACY as u8 as f64, ADA, ADB as u8 as f64, ADE, ADF as u8 as f64, ADH as u8 as f64, ADI, ADJ as u8 as f64, ADK, ADL as u8 as f64, ADM, ADN as u8 as f64, ADO, ADP as u8 as f64, ADQ, ADR as u8 as f64, ADS, ADT as u8 as f64, ADU, ADV as u8 as f64, ADW, ADX as u8 as f64, GT, ADZ as u8 as f64, AEB as u8 as f64, GW, AED as u8 as f64, AEE, GZ, AEF as u8 as f64, AEH as u8 as f64, HC, AEJ as u8 as f64, AEK, AEL as u8 as f64, AEM, AEN as u8 as f64, AEP as u8 as f64, AEQ, AER as u8 as f64, AES, AET as u8 as f64, AEV as u8 as f64, AEW, AEX as u8 as f64, AEZ as u8 as f64, AFA, AFB as u8 as f64, AFC as u8 as f64, AFD as u8 as f64, HP, HQ, HR, AFE as u8 as f64, oAFF as u8 as f64, AFG, AFH as u8 as f64, AFJ, HU, AFK as u8 as f64, AFL, AFM as u8 as f64, oAFN as u8 as f64, AFO, AFP as u8 as f64, AFR, AFS as u8 as f64, AFT, AFU as u8 as f64, oAFV as u8 as f64, AFW, AFX as u8 as f64, AFZ, AGA as u8 as f64, AGB as u8 as f64, AGC as u8 as f64, AGD as u8 as f64, AGG as u8 as f64, AGH, AGQ as u8 as f64, oAGR as u8 as f64, AGS, AHA as u8 as f64, AHC, AHH as u8 as f64, AHL, AHM, AHN, AHO as u8 as f64, oAHQ as u8 as f64, oAHT as u8 as f64, oAHW, oAHX, AHY, AHZ, AIA, AGJ, AIB, AIC, AGL, AID, AIE as u8 as f64, AIH as u8 as f64, AIK as u8 as f64, AIN as u8 as f64, AIQ as u8 as f64, AIT as u8 as f64, AIW as u8 as f64, oAJH as u8 as f64, oAJX as u8 as f64, oAKG as u8 as f64, oAKI as u8 as f64, oAKK as u8 as f64, oAKM as u8 as f64, oAKO as u8 as f64, AJY, AJZ, AKA, oAKS as u8 as f64, oALE as u8 as f64, oALJ as u8 as f64, oALO, AKB, AKC, AKD, oALQ as u8 as f64, oAMB as u8 as f64, oAMG as u8 as f64, oAML, oAMO as u8 as f64, oAMS as u8 as f64, oAMT, oANA as u8 as f64, oANB as u8 as f64, oANC as u8 as f64, oAND, oANF, oANG as u8 as f64, oANI as u8 as f64, oANJ as u8 as f64, oANS, oANT, oANM as u8 as f64, oANV as u8 as f64, oANY as u8 as f64, oANW, oAOL as u8 as f64, oAOM as u8 as f64, oAON as u8 as f64, oAOO, oAOQ, oAOR as u8 as f64, oAOT as u8 as f64, oAOU as u8 as f64, oAPC, oAPD, oAOW as u8 as f64, oAPE as u8 as f64, oAPH as u8 as f64, oAPF, oAPU as u8 as f64, oAPV as u8 as f64, oAPW as u8 as f64, oAPX, oAPZ, oAQA as u8 as f64, oAQC as u8 as f64, oAQD as u8 as f64, oAQL, oAQM, oAQF as u8 as f64, oAQN as u8 as f64, oAQQ as u8 as f64, oAQO, oARE as u8 as f64, oARF, oARJ as u8 as f64, oARK as u8 as f64, oARL as u8 as f64, oARM, oARN, oARO as u8 as f64, oARP as u8 as f64, oARQ as u8 as f64, oARV, oARW, oARR as u8 as f64, oARX as u8 as f64, oARZ as u8 as f64, oARY, oASH as u8 as f64, oASI as u8 as f64, oASJ as u8 as f64, oASK, oASL, oASM as u8 as f64, oASN as u8 as f64, oASO as u8 as f64, oAST, oASU, oASP as u8 as f64, oASV as u8 as f64, oASX as u8 as f64, oASW, oATF as u8 as f64, oATG as u8 as f64, oATH as u8 as f64, oATI, oATJ, oATK as u8 as f64, oATL as u8 as f64, oATM as u8 as f64, oATR, oATS, oATN as u8 as f64, oATT as u8 as f64, oATV as u8 as f64, oATU, oAUG as u8 as f64, oAUH, oAUL as u8 as f64, oAUM as u8 as f64, oAUN as u8 as f64, oAUO, oAUP, oAUQ as u8 as f64, oAUR as u8 as f64, oAUS as u8 as f64, oAUX, oAUY, oAUT as u8 as f64, oAUZ as u8 as f64, oAVB as u8 as f64, oAVA, oAVJ as u8 as f64, oAVK as u8 as f64, oAVL as u8 as f64, oAVM, oAVN, oAVO as u8 as f64, oAVP as u8 as f64, oAVQ as u8 as f64, oAVV, oAVW, oAVR as u8 as f64, oAVX as u8 as f64, oAVZ as u8 as f64, oAVY, oAWH as u8 as f64, oAWI as u8 as f64, oAWJ as u8 as f64, oAWK, oAWL, oAWM as u8 as f64, oAWN as u8 as f64, oAWO as u8 as f64, oAWT, oAWU, oAWP as u8 as f64, oAWV as u8 as f64, oAWX as u8 as f64, oAWW, oAXK as u8 as f64, oAXL as u8 as f64, oAXM as u8 as f64, oAXN, oAXO, oAXP as u8 as f64, oAXQ as u8 as f64, oAXR as u8 as f64, oAXW, oAXX, oAXS as u8 as f64, oAXY as u8 as f64, oAYA as u8 as f64, oAXZ, oAYI as u8 as f64, oAYJ as u8 as f64, oAYK as u8 as f64, oAYL, oAYM, oAYN as u8 as f64, oAYO as u8 as f64, oAYP as u8 as f64, oAYU, oAYV, oAYQ as u8 as f64, oAYW as u8 as f64, oAYY as u8 as f64, oAYX, oAZG as u8 as f64, oAZH as u8 as f64, oAZI as u8 as f64, oAZJ, oAZK, oAZL as u8 as f64, oAZM as u8 as f64, oAZN as u8 as f64, oAZS, oAZT, oAZO as u8 as f64, oAZU as u8 as f64, oAZW as u8 as f64, oAZV, oBAK as u8 as f64, oBAL as u8 as f64, oBAM as u8 as f64, oBAN, oBAO, oBAP as u8 as f64, oBAQ as u8 as f64, oBAR as u8 as f64, oBAW, oBAX, oBAS as u8 as f64, oBAY as u8 as f64, oBBA as u8 as f64, oBAZ, oBBI as u8 as f64, oBBJ as u8 as f64, oBBK as u8 as f64, oBBL, oBBM, oBBN as u8 as f64, oBBO as u8 as f64, oBBP as u8 as f64, oBBU, oBBV, oBBQ as u8 as f64, oBBW as u8 as f64, oBBY as u8 as f64, oBBX, oBCG as u8 as f64, oBCH as u8 as f64, oBCI as u8 as f64, oBCJ, oBCK, oBCL as u8 as f64, oBCM as u8 as f64, oBCN as u8 as f64, oBCS, oBCT, oBCO as u8 as f64, oBCU as u8 as f64, oBCW as u8 as f64, oBCV, oBDF, oBDG as u8 as f64, oBDK as u8 as f64, oBDL, oBDR as u8 as f64, oBDS as u8 as f64, oBDT as u8 as f64, oBDU, oBDW, oBDX as u8 as f64, oBDZ as u8 as f64, oBEA as u8 as f64, oBEI, oBEJ, oBEC as u8 as f64, oBEK as u8 as f64, oBEN as u8 as f64, oBEL, oBFA as u8 as f64, oBFB as u8 as f64, oBFC as u8 as f64, oBFD, oBFF, oBFG as u8 as f64, oBFI as u8 as f64, oBFJ as u8 as f64, oBFR, oBFS, oBFL as u8 as f64, oBFT as u8 as f64, oBFW as u8 as f64, oBFU, oBGJ as u8 as f64, oBGK as u8 as f64, oBGL as u8 as f64, oBGM, oBGO, oBGP as u8 as f64, oBGR as u8 as f64, oBGS as u8 as f64, oBHA, oBHB, oBGU as u8 as f64, oBHC as u8 as f64, oBHF as u8 as f64, oBHD, oBHT as u8 as f64, oBHU, oBHY as u8 as f64, oBHZ as u8 as f64, oBIA as u8 as f64, oBIB, oBIC, oBID as u8 as f64, oBIE as u8 as f64, oBIF as u8 as f64, oBIK, oBIL, oBIG as u8 as f64, oBIM as u8 as f64, oBIO as u8 as f64, oBIN, oBIW as u8 as f64, oBIX as u8 as f64, oBIY as u8 as f64, oBIZ, oBJA, oBJB as u8 as f64, oBJC as u8 as f64, oBJD as u8 as f64, oBJI, oBJJ, oBJE as u8 as f64, oBJK as u8 as f64, oBJM as u8 as f64, oBJL, oBJU as u8 as f64, oBJV as u8 as f64, oBJW as u8 as f64, oBJX, oBJY, oBJZ as u8 as f64, oBKA as u8 as f64, oBKB as u8 as f64, oBKG, oBKH, oBKC as u8 as f64, oBKI as u8 as f64, oBKK as u8 as f64, oBKJ, oBKV as u8 as f64, oBKW, oBLA as u8 as f64, oBLB as u8 as f64, oBLC as u8 as f64, oBLD, oBLE, oBLF as u8 as f64, oBLG as u8 as f64, oBLH as u8 as f64, oBLM, oBLN, oBLI as u8 as f64, oBLO as u8 as f64, oBLQ as u8 as f64, oBLP, oBLY as u8 as f64, oBLZ as u8 as f64, oBMA as u8 as f64, oBMB, oBMC, oBMD as u8 as f64, oBME as u8 as f64, oBMF as u8 as f64, oBMK, oBML, oBMG as u8 as f64, oBMM as u8 as f64, oBMO as u8 as f64, oBMN, oBMW as u8 as f64, oBMX as u8 as f64, oBMY as u8 as f64, oBMZ, oBNA, oBNB as u8 as f64, oBNC as u8 as f64, oBND as u8 as f64, oBNI, oBNJ, oBNE as u8 as f64, oBNK as u8 as f64, oBNM as u8 as f64, oBNL, oBNZ as u8 as f64, oBOA as u8 as f64, oBOB as u8 as f64, oBOC, oBOD, oBOE as u8 as f64, oBOF as u8 as f64, oBOG as u8 as f64, oBOL, oBOM, oBOH as u8 as f64, oBON as u8 as f64, oBOP as u8 as f64, oBOO, oBOX as u8 as f64, oBOY as u8 as f64, oBOZ as u8 as f64, oBPA, oBPB, oBPC as u8 as f64, oBPD as u8 as f64, oBPE as u8 as f64, oBPJ, oBPK, oBPF as u8 as f64, oBPL as u8 as f64, oBPN as u8 as f64, oBPM, oBPV as u8 as f64, oBPW as u8 as f64, oBPX as u8 as f64, oBPY, oBPZ, oBQA as u8 as f64, oBQB as u8 as f64, oBQC as u8 as f64, oBQH, oBQI, oBQD as u8 as f64, oBQJ as u8 as f64, oBQL as u8 as f64, oBQK, oBQY as u8 as f64, oBQZ as u8 as f64, oBRA as u8 as f64, oBRB, oBRC, oBRD as u8 as f64, oBRE as u8 as f64, oBRF as u8 as f64, oBRK, oBRL, oBRG as u8 as f64, oBRM as u8 as f64, oBRO as u8 as f64, oBRN, oBRW as u8 as f64, oBRX as u8 as f64, oBRY as u8 as f64, oBRZ, oBSA, oBSB as u8 as f64, oBSC as u8 as f64, oBSD as u8 as f64, oBSI, oBSJ, oBSE as u8 as f64, oBSK as u8 as f64, oBSM as u8 as f64, oBSL, oBSU as u8 as f64, oBSV as u8 as f64, oBSW as u8 as f64, oBSX, oBSY, oBSZ as u8 as f64, oBTA as u8 as f64, oBTB as u8 as f64, oBTG, oBTH, oBTC as u8 as f64, oBTI as u8 as f64, oBTK as u8 as f64, oBTJ, oBTS, BTT as u8 as f64, oBTU, BTV as u8 as f64, oBTW, BTX as u8 as f64, BTY as u8 as f64, BTZ as u8 as f64, BUA as u8 as f64, AGM, BUB as u8 as f64, oBUF, oBUG, AGN, BUH as u8 as f64, oBUJ as u8 as f64, BUI as u8 as f64, oBUM, BUK as u8 as f64, oBUN, AGO, oBUP as u8 as f64, oBUQ as u8 as f64, oBUR as u8 as f64, oBUS as u8 as f64, AKQ, oBUT, oBUU as u8 as f64, oBUV as u8 as f64, oBUW as u8 as f64, oBUX, oBVA, oBVB as u8 as f64, oBVC as u8 as f64, oBVE as u8 as f64, oBVF as u8 as f64, oBVH, oBVJ as u8 as f64, oBVL as u8 as f64, oBVM as u8 as f64, oBVN as u8 as f64, oBVO, oBVQ, oBVR as u8 as f64, oBVS as u8 as f64, oBVU as u8 as f64, oBVV as u8 as f64, oBVX, oBVZ as u8 as f64, oBWB as u8 as f64, oBWC as u8 as f64, oBWE as u8 as f64, oBWF, oBWH, oBWI as u8 as f64, oBWJ as u8 as f64, oBWL as u8 as f64, oBWO as u8 as f64, oBWD as u8 as f64, oBWS, oBWT as u8 as f64, oBWW, oBWX as u8 as f64, oBWY as u8 as f64, oBWZ as u8 as f64, oBXA as u8 as f64, AKR, oBXB, oBXC as u8 as f64, oBXD as u8 as f64, oBXE as u8 as f64, oBXF, oBXH, oBXI as u8 as f64, oBXJ as u8 as f64, oBXL as u8 as f64, oBXM as u8 as f64, oBXO, oBXQ as u8 as f64, oBXS as u8 as f64, oBXT as u8 as f64, oBXU as u8 as f64, oBXV, oBXX, oBXY as u8 as f64, oBXZ as u8 as f64, oBYB as u8 as f64, oBYC as u8 as f64, oBYE, oBYG as u8 as f64, oBYI as u8 as f64, oBYJ as u8 as f64, oBYK as u8 as f64, oBYL, oBYN, oBYO as u8 as f64, oBYP as u8 as f64, oBYR as u8 as f64, oBYU as u8 as f64, BYY, oBYZ, oBZF, oBZL, oBZR, oBZX, oCAD, oCAJ, CAP, CAQ, CAR, BZC, BZD, BZI, BZJ, BZO, BZP, BZU, BZV, CAA, CAB, CAG, CAH, CAM, CAN, BZE, BZK, BZQ, BZW, CAC, CAI, CAO, oBUZ, oBVD, oBVG, oBVK, oBVP, oBVT, oBVW, oBWA, oBWG, oBWK, oBWM, oBWP, oBWR, oBWV, oBXG, oBXK, oBXN, oBXR, oBXW, oBYA, oBYD, oBYH, oBYM, oBYQ, oBYS, oBYV]
+	let CAT;
+	let CAU;
+	let CAV;
+	if AIW{
+	let CAP=(AGH* BYX)* AIY;
+	oCAP=CAP;
+	let CAR=XR+ CAQ;
+	CAT=CAR;
+	CAU=XR;
+	CAV=XR;
+	}else{
+	CAT=XR;
+	CAU=CAS;
+	CAV=F;
+	}
+	let CAW=BYW* parameters[33];
+	let CAX=(AGH* BYX).sqrt();
+	let CAY=CAX* N;
+    [oG as u8 as f64, L as u8 as f64, R as u8 as f64, AB as u8 as f64, AF as u8 as f64, AP as u8 as f64, AT as u8 as f64, AX as u8 as f64, BA as u8 as f64, BE as u8 as f64, BH as u8 as f64, BJ as u8 as f64, BM as u8 as f64, oBS as u8 as f64, oIR as u8 as f64, oIV as u8 as f64, oIZ as u8 as f64, oJD as u8 as f64, oJJ as u8 as f64, oJU as u8 as f64, oKA as u8 as f64, oLS as u8 as f64, oMG as u8 as f64, oXU as u8 as f64, oYH as u8 as f64, oYU as u8 as f64, oYY, oZB, oZC, oPP, oRB, oTX, oWH, oYD as u8 as f64, oZN as u8 as f64, oAAH, FC, FD, IM as u8 as f64, oAAK as u8 as f64, AAL, AAM as u8 as f64, AAP as u8 as f64, AAQ, FH, AAR as u8 as f64, AAU as u8 as f64, oAAW as u8 as f64, AAY as u8 as f64, oABA as u8 as f64, ABC as u8 as f64, ABE, ABF as u8 as f64, oABG as u8 as f64, ABI as u8 as f64, oABK as u8 as f64, ABL, FO, ABM as u8 as f64, ABO, ABP as u8 as f64, oABQ as u8 as f64, ABR, ABS as u8 as f64, ABU, ABV as u8 as f64, ABW, ABX as u8 as f64, oABY as u8 as f64, ABZ, ACA as u8 as f64, ACC, FV, ACD as u8 as f64, ACE, ACF as u8 as f64, ACG, ACH as u8 as f64, ACI, ACJ as u8 as f64, ACK, ACL as u8 as f64, ACM, ACN as u8 as f64, ACO, GC, ACP as u8 as f64, oACQ as u8 as f64, ACS, ACT as u8 as f64, ACW, GF, ACX as u8 as f64, oACY as u8 as f64, ADA, ADB as u8 as f64, ADE, ADF as u8 as f64, ADH as u8 as f64, ADI, ADJ as u8 as f64, ADK, ADL as u8 as f64, ADM, ADN as u8 as f64, ADO, ADP as u8 as f64, ADQ, ADR as u8 as f64, ADS, ADT as u8 as f64, ADU, ADV as u8 as f64, ADW, ADX as u8 as f64, GT, ADZ as u8 as f64, AEB as u8 as f64, GW, AED as u8 as f64, AEE, GZ, AEF as u8 as f64, AEH as u8 as f64, HC, AEJ as u8 as f64, AEK, AEL as u8 as f64, AEM, AEN as u8 as f64, AEP as u8 as f64, AEQ, AER as u8 as f64, AES, AET as u8 as f64, AEV as u8 as f64, AEW, AEX as u8 as f64, AEZ as u8 as f64, AFA, AFB as u8 as f64, AFC as u8 as f64, AFD as u8 as f64, HP, HQ, HR, AFE as u8 as f64, oAFF as u8 as f64, AFG, AFH as u8 as f64, AFJ, HU, AFK as u8 as f64, AFL, AFM as u8 as f64, oAFN as u8 as f64, AFO, AFP as u8 as f64, AFR, AFS as u8 as f64, AFT, AFU as u8 as f64, oAFV as u8 as f64, AFW, AFX as u8 as f64, AFZ, AGA as u8 as f64, AGB as u8 as f64, AGC as u8 as f64, AGD as u8 as f64, AGG as u8 as f64, AGH, AGQ as u8 as f64, oAGR as u8 as f64, AGS, AHA as u8 as f64, AHC, AHH as u8 as f64, AHL, AHM, AHN, AHO as u8 as f64, oAHQ as u8 as f64, oAHT as u8 as f64, oAHW, oAHX, AHY, AHZ, AIA, AGJ, AIB, AIC, AGL, AID, AIE as u8 as f64, AIH as u8 as f64, AIK as u8 as f64, AIN as u8 as f64, AIQ as u8 as f64, AIT as u8 as f64, AIW as u8 as f64, oAJH as u8 as f64, oAJX as u8 as f64, oAKG as u8 as f64, oAKI as u8 as f64, oAKK as u8 as f64, oAKM as u8 as f64, oAKO as u8 as f64, AJY, AJZ, AKA, oAKS as u8 as f64, oALE as u8 as f64, oALJ as u8 as f64, oALO, AKB, AKC, AKD, oALQ as u8 as f64, oAMB as u8 as f64, oAMG as u8 as f64, oAML, oAMO as u8 as f64, oAMS as u8 as f64, oAMT, oANA as u8 as f64, oANB as u8 as f64, oANC as u8 as f64, oAND, oANF, oANG as u8 as f64, oANI as u8 as f64, oANJ as u8 as f64, oANS, oANT, oANM as u8 as f64, oANV as u8 as f64, oANY as u8 as f64, oANW, oAOL as u8 as f64, oAOM as u8 as f64, oAON as u8 as f64, oAOO, oAOQ, oAOR as u8 as f64, oAOT as u8 as f64, oAOU as u8 as f64, oAPC, oAPD, oAOW as u8 as f64, oAPE as u8 as f64, oAPH as u8 as f64, oAPF, oAPU as u8 as f64, oAPV as u8 as f64, oAPW as u8 as f64, oAPX, oAPZ, oAQA as u8 as f64, oAQC as u8 as f64, oAQD as u8 as f64, oAQL, oAQM, oAQF as u8 as f64, oAQN as u8 as f64, oAQQ as u8 as f64, oAQO, oARE as u8 as f64, oARF, oARJ as u8 as f64, oARK as u8 as f64, oARL as u8 as f64, oARM, oARN, oARO as u8 as f64, oARP as u8 as f64, oARQ as u8 as f64, oARV, oARW, oARR as u8 as f64, oARX as u8 as f64, oARZ as u8 as f64, oARY, oASH as u8 as f64, oASI as u8 as f64, oASJ as u8 as f64, oASK, oASL, oASM as u8 as f64, oASN as u8 as f64, oASO as u8 as f64, oAST, oASU, oASP as u8 as f64, oASV as u8 as f64, oASX as u8 as f64, oASW, oATF as u8 as f64, oATG as u8 as f64, oATH as u8 as f64, oATI, oATJ, oATK as u8 as f64, oATL as u8 as f64, oATM as u8 as f64, oATR, oATS, oATN as u8 as f64, oATT as u8 as f64, oATV as u8 as f64, oATU, oAUG as u8 as f64, oAUH, oAUL as u8 as f64, oAUM as u8 as f64, oAUN as u8 as f64, oAUO, oAUP, oAUQ as u8 as f64, oAUR as u8 as f64, oAUS as u8 as f64, oAUX, oAUY, oAUT as u8 as f64, oAUZ as u8 as f64, oAVB as u8 as f64, oAVA, oAVJ as u8 as f64, oAVK as u8 as f64, oAVL as u8 as f64, oAVM, oAVN, oAVO as u8 as f64, oAVP as u8 as f64, oAVQ as u8 as f64, oAVV, oAVW, oAVR as u8 as f64, oAVX as u8 as f64, oAVZ as u8 as f64, oAVY, oAWH as u8 as f64, oAWI as u8 as f64, oAWJ as u8 as f64, oAWK, oAWL, oAWM as u8 as f64, oAWN as u8 as f64, oAWO as u8 as f64, oAWT, oAWU, oAWP as u8 as f64, oAWV as u8 as f64, oAWX as u8 as f64, oAWW, oAXK as u8 as f64, oAXL as u8 as f64, oAXM as u8 as f64, oAXN, oAXO, oAXP as u8 as f64, oAXQ as u8 as f64, oAXR as u8 as f64, oAXW, oAXX, oAXS as u8 as f64, oAXY as u8 as f64, oAYA as u8 as f64, oAXZ, oAYI as u8 as f64, oAYJ as u8 as f64, oAYK as u8 as f64, oAYL, oAYM, oAYN as u8 as f64, oAYO as u8 as f64, oAYP as u8 as f64, oAYU, oAYV, oAYQ as u8 as f64, oAYW as u8 as f64, oAYY as u8 as f64, oAYX, oAZG as u8 as f64, oAZH as u8 as f64, oAZI as u8 as f64, oAZJ, oAZK, oAZL as u8 as f64, oAZM as u8 as f64, oAZN as u8 as f64, oAZS, oAZT, oAZO as u8 as f64, oAZU as u8 as f64, oAZW as u8 as f64, oAZV, oBAK as u8 as f64, oBAL as u8 as f64, oBAM as u8 as f64, oBAN, oBAO, oBAP as u8 as f64, oBAQ as u8 as f64, oBAR as u8 as f64, oBAW, oBAX, oBAS as u8 as f64, oBAY as u8 as f64, oBBA as u8 as f64, oBAZ, oBBI as u8 as f64, oBBJ as u8 as f64, oBBK as u8 as f64, oBBL, oBBM, oBBN as u8 as f64, oBBO as u8 as f64, oBBP as u8 as f64, oBBU, oBBV, oBBQ as u8 as f64, oBBW as u8 as f64, oBBY as u8 as f64, oBBX, oBCG as u8 as f64, oBCH as u8 as f64, oBCI as u8 as f64, oBCJ, oBCK, oBCL as u8 as f64, oBCM as u8 as f64, oBCN as u8 as f64, oBCS, oBCT, oBCO as u8 as f64, oBCU as u8 as f64, oBCW as u8 as f64, oBCV, oBDF, oBDG as u8 as f64, oBDK as u8 as f64, oBDL, oBDR as u8 as f64, oBDS as u8 as f64, oBDT as u8 as f64, oBDU, oBDW, oBDX as u8 as f64, oBDZ as u8 as f64, oBEA as u8 as f64, oBEI, oBEJ, oBEC as u8 as f64, oBEK as u8 as f64, oBEN as u8 as f64, oBEL, oBFA as u8 as f64, oBFB as u8 as f64, oBFC as u8 as f64, oBFD, oBFF, oBFG as u8 as f64, oBFI as u8 as f64, oBFJ as u8 as f64, oBFR, oBFS, oBFL as u8 as f64, oBFT as u8 as f64, oBFW as u8 as f64, oBFU, oBGJ as u8 as f64, oBGK as u8 as f64, oBGL as u8 as f64, oBGM, oBGO, oBGP as u8 as f64, oBGR as u8 as f64, oBGS as u8 as f64, oBHA, oBHB, oBGU as u8 as f64, oBHC as u8 as f64, oBHF as u8 as f64, oBHD, oBHT as u8 as f64, oBHU, oBHY as u8 as f64, oBHZ as u8 as f64, oBIA as u8 as f64, oBIB, oBIC, oBID as u8 as f64, oBIE as u8 as f64, oBIF as u8 as f64, oBIK, oBIL, oBIG as u8 as f64, oBIM as u8 as f64, oBIO as u8 as f64, oBIN, oBIW as u8 as f64, oBIX as u8 as f64, oBIY as u8 as f64, oBIZ, oBJA, oBJB as u8 as f64, oBJC as u8 as f64, oBJD as u8 as f64, oBJI, oBJJ, oBJE as u8 as f64, oBJK as u8 as f64, oBJM as u8 as f64, oBJL, oBJU as u8 as f64, oBJV as u8 as f64, oBJW as u8 as f64, oBJX, oBJY, oBJZ as u8 as f64, oBKA as u8 as f64, oBKB as u8 as f64, oBKG, oBKH, oBKC as u8 as f64, oBKI as u8 as f64, oBKK as u8 as f64, oBKJ, oBKV as u8 as f64, oBKW, oBLA as u8 as f64, oBLB as u8 as f64, oBLC as u8 as f64, oBLD, oBLE, oBLF as u8 as f64, oBLG as u8 as f64, oBLH as u8 as f64, oBLM, oBLN, oBLI as u8 as f64, oBLO as u8 as f64, oBLQ as u8 as f64, oBLP, oBLY as u8 as f64, oBLZ as u8 as f64, oBMA as u8 as f64, oBMB, oBMC, oBMD as u8 as f64, oBME as u8 as f64, oBMF as u8 as f64, oBMK, oBML, oBMG as u8 as f64, oBMM as u8 as f64, oBMO as u8 as f64, oBMN, oBMW as u8 as f64, oBMX as u8 as f64, oBMY as u8 as f64, oBMZ, oBNA, oBNB as u8 as f64, oBNC as u8 as f64, oBND as u8 as f64, oBNI, oBNJ, oBNE as u8 as f64, oBNK as u8 as f64, oBNM as u8 as f64, oBNL, oBNZ as u8 as f64, oBOA as u8 as f64, oBOB as u8 as f64, oBOC, oBOD, oBOE as u8 as f64, oBOF as u8 as f64, oBOG as u8 as f64, oBOL, oBOM, oBOH as u8 as f64, oBON as u8 as f64, oBOP as u8 as f64, oBOO, oBOX as u8 as f64, oBOY as u8 as f64, oBOZ as u8 as f64, oBPA, oBPB, oBPC as u8 as f64, oBPD as u8 as f64, oBPE as u8 as f64, oBPJ, oBPK, oBPF as u8 as f64, oBPL as u8 as f64, oBPN as u8 as f64, oBPM, oBPV as u8 as f64, oBPW as u8 as f64, oBPX as u8 as f64, oBPY, oBPZ, oBQA as u8 as f64, oBQB as u8 as f64, oBQC as u8 as f64, oBQH, oBQI, oBQD as u8 as f64, oBQJ as u8 as f64, oBQL as u8 as f64, oBQK, oBQY as u8 as f64, oBQZ as u8 as f64, oBRA as u8 as f64, oBRB, oBRC, oBRD as u8 as f64, oBRE as u8 as f64, oBRF as u8 as f64, oBRK, oBRL, oBRG as u8 as f64, oBRM as u8 as f64, oBRO as u8 as f64, oBRN, oBRW as u8 as f64, oBRX as u8 as f64, oBRY as u8 as f64, oBRZ, oBSA, oBSB as u8 as f64, oBSC as u8 as f64, oBSD as u8 as f64, oBSI, oBSJ, oBSE as u8 as f64, oBSK as u8 as f64, oBSM as u8 as f64, oBSL, oBSU as u8 as f64, oBSV as u8 as f64, oBSW as u8 as f64, oBSX, oBSY, oBSZ as u8 as f64, oBTA as u8 as f64, oBTB as u8 as f64, oBTG, oBTH, oBTC as u8 as f64, oBTI as u8 as f64, oBTK as u8 as f64, oBTJ, oBTS, BTT as u8 as f64, oBTU, BTV as u8 as f64, oBTW, BTX as u8 as f64, BTY as u8 as f64, BTZ as u8 as f64, BUA as u8 as f64, AGM, BUB as u8 as f64, oBUF, oBUG, AGN, BUH as u8 as f64, oBUJ as u8 as f64, BUI as u8 as f64, oBUM, BUK as u8 as f64, oBUN, AGO, oBUP as u8 as f64, oBUQ as u8 as f64, oBUR as u8 as f64, oBUS as u8 as f64, AKQ, oBUT, oBUU as u8 as f64, oBUV as u8 as f64, oBUW as u8 as f64, oBUX, oBVA, oBVB as u8 as f64, oBVC as u8 as f64, oBVE as u8 as f64, oBVF as u8 as f64, oBVH, oBVJ as u8 as f64, oBVL as u8 as f64, oBVM as u8 as f64, oBVN as u8 as f64, oBVO, oBVQ, oBVR as u8 as f64, oBVS as u8 as f64, oBVU as u8 as f64, oBVV as u8 as f64, oBVX, oBVZ as u8 as f64, oBWB as u8 as f64, oBWC as u8 as f64, oBWE as u8 as f64, oBWF, oBWH, oBWI as u8 as f64, oBWJ as u8 as f64, oBWL as u8 as f64, oBWO as u8 as f64, oBWD as u8 as f64, oBWS, oBWT as u8 as f64, oBWW, oBWX as u8 as f64, oBWY as u8 as f64, oBWZ as u8 as f64, oBXA as u8 as f64, AKR, oBXB, oBXC as u8 as f64, oBXD as u8 as f64, oBXE as u8 as f64, oBXF, oBXH, oBXI as u8 as f64, oBXJ as u8 as f64, oBXL as u8 as f64, oBXM as u8 as f64, oBXO, oBXQ as u8 as f64, oBXS as u8 as f64, oBXT as u8 as f64, oBXU as u8 as f64, oBXV, oBXX, oBXY as u8 as f64, oBXZ as u8 as f64, oBYB as u8 as f64, oBYC as u8 as f64, oBYE, oBYG as u8 as f64, oBYI as u8 as f64, oBYJ as u8 as f64, oBYK as u8 as f64, oBYL, oBYN, oBYO as u8 as f64, oBYP as u8 as f64, oBYR as u8 as f64, oBYU as u8 as f64, BYY, oBYZ, oBZG, oBZN, oBZU, oCAB, oCAI, oCAP, CAW, CAX, CAY, BZD, BZE, BZK, BZL, BZR, BZS, BZY, BZZ, CAF, CAG, CAM, CAN, CAT, CAU, BZF, BZM, BZT, CAA, CAH, CAO, CAV, oBUZ, oBVD, oBVG, oBVK, oBVP, oBVT, oBVW, oBWA, oBWG, oBWK, oBWM, oBWP, oBWR, oBWV, oBXG, oBXK, oBXN, oBXR, oBXW, oBYA, oBYD, oBYH, oBYM, oBYQ, oBYS, oBYV]
 }
 
 pub(super) fn canonical_temperature_preprocess(
@@ -7116,8 +7141,8 @@ pub(super) fn canonical_temperature_preprocess(
     temperature: f64,
     thermal_voltage: f64,
 ) -> [f64; 457] {
-	let A=staged[758]!=0.0;
-	let B=staged[765]!=0.0;
+	let A=staged[759]!=0.0;
+	let B=staged[766]!=0.0;
 	let D=staged[0];
 	let H=1f64;
 	let O=1e-3f64;
@@ -7140,66 +7165,66 @@ pub(super) fn canonical_temperature_preprocess(
 	let DL=staged[31];
 	let DN=staged[33];
 	let EN=staged[49];
-	let EX=staged[777]!=0.0;
+	let EX=staged[778]!=0.0;
 	let EY=parameters[81];
 	let EZ=parameters[98];
-	let FA=staged[798];
+	let FA=staged[799];
 	let FB=parameters[166];
-	let FG=staged[916]!=0.0;
+	let FG=staged[917]!=0.0;
 	let FH=staged[85];
 	let FI=staged[89];
 	let FJ=staged[86];
 	let FK=staged[87];
-	let FP=staged[917]!=0.0;
-	let FQ=staged[918]!=0.0;
+	let FP=staged[918]!=0.0;
+	let FQ=staged[919]!=0.0;
 	let FW=parameters[788];
 	let FY=staged[88];
 	let GD=staged[90];
-	let GO=staged[1005]!=0.0;
+	let GO=staged[1006]!=0.0;
 	let HF=0.25f64;
 	let HN=3f64;
 	let IB=4e-26f64;
 	let IK=staged[100];
-	let IM=staged[1016]!=0.0;
+	let IM=staged[1017]!=0.0;
 	let IR=0.6666666666666666f64;
 	let IY=0.95f64;
 	let JA=0.0025f64;
 	let KO=staged[141];
-	let LW=staged[1040]!=0.0;
+	let LW=staged[1041]!=0.0;
 	let LX=staged[155];
 	let NO=parameters[815];
 	let NQ=1e8f64;
 	let NS=staged[156];
 	let NX=staged[157];
 	let OE=230.25850929940458f64;
-	let OJ=staged[1052]!=0.0;
+	let OJ=staged[1053]!=0.0;
 	let OK=0.3333333333333333f64;
 	let OL=1e-100f64;
 	let OO=1e100f64;
-	let OT=staged[1053]!=0.0;
-	let OW=staged[1054]!=0.0;
+	let OT=staged[1054]!=0.0;
+	let OW=staged[1055]!=0.0;
 	let PA=0.1f64;
 	let PD=staged[159];
 	let PI=staged[160];
 	let PN=staged[161];
-	let PY=staged[1060]!=0.0;
-	let QF=staged[1061]!=0.0;
-	let QI=staged[1062]!=0.0;
-	let QO=staged[1063]!=0.0;
-	let QP=staged[1064]!=0.0;
+	let PY=staged[1061]!=0.0;
+	let QF=staged[1062]!=0.0;
+	let QI=staged[1063]!=0.0;
+	let QO=staged[1064]!=0.0;
+	let QP=staged[1065]!=0.0;
 	let RU=staged[163];
-	let SJ=staged[1067]!=0.0;
+	let SJ=staged[1068]!=0.0;
 	let SX=4f64;
-	let TA=staged[1069]!=0.0;
-	let TI=staged[1070]!=0.0;
-	let TO=staged[1071]!=0.0;
+	let TA=staged[1070]!=0.0;
+	let TI=staged[1071]!=0.0;
+	let TO=staged[1072]!=0.0;
 	let TS=staged[167];
 	let TW=staged[168];
 	let TZ=parameters[833];
 	let UB=staged[169];
 	let UD=0.666666666666667f64;
-	let UK=staged[1072]!=0.0;
-	let UM=staged[1073]!=0.0;
+	let UK=staged[1073]!=0.0;
+	let UM=staged[1074]!=0.0;
 	let UR=0.375f64;
 	let UX=0.5178164370971076f64;
 	let VG=0.29214664f64;
@@ -7208,230 +7233,230 @@ pub(super) fn canonical_temperature_preprocess(
 	let VN=parameters[838];
 	let VZ=parameters[844];
 	let WF=parameters[29];
-	let WI=staged[1083]!=0.0;
-	let WQ=staged[1084]!=0.0;
-	let WW=staged[1085]!=0.0;
+	let WI=staged[1084]!=0.0;
+	let WQ=staged[1085]!=0.0;
+	let WW=staged[1086]!=0.0;
 	let XA=staged[180];
 	let XE=staged[181];
 	let XH=parameters[834];
 	let XJ=staged[182];
-	let XR=staged[1086]!=0.0;
-	let XT=staged[1087]!=0.0;
+	let XR=staged[1087]!=0.0;
+	let XT=staged[1088]!=0.0;
 	let YP=parameters[839];
 	let ZB=parameters[845];
-	let ZJ=staged[1097]!=0.0;
-	let ZS=staged[1098]!=0.0;
-	let ZY=staged[1099]!=0.0;
+	let ZJ=staged[1098]!=0.0;
+	let ZS=staged[1099]!=0.0;
+	let ZY=staged[1100]!=0.0;
 	let AAC=staged[192];
 	let AAG=staged[193];
 	let AAJ=parameters[835];
 	let AAL=staged[194];
-	let AAT=staged[1100]!=0.0;
-	let AAV=staged[1101]!=0.0;
+	let AAT=staged[1101]!=0.0;
+	let AAV=staged[1102]!=0.0;
 	let ABR=parameters[840];
 	let ACD=parameters[846];
 	let ACK=staged[203];
-	let ACZ=staged[1113]!=0.0;
-	let ADP=staged[1115]!=0.0;
-	let ADX=staged[1116]!=0.0;
-	let AED=staged[1117]!=0.0;
-	let AEU=staged[1118]!=0.0;
-	let AEW=staged[1119]!=0.0;
-	let AGK=staged[1129]!=0.0;
-	let AGS=staged[1130]!=0.0;
-	let AGY=staged[1131]!=0.0;
-	let AHP=staged[1132]!=0.0;
-	let AHR=staged[1133]!=0.0;
-	let AJF=staged[1143]!=0.0;
-	let AJO=staged[1144]!=0.0;
-	let AJU=staged[1145]!=0.0;
-	let AKL=staged[1146]!=0.0;
-	let AKN=staged[1147]!=0.0;
+	let ACZ=staged[1114]!=0.0;
+	let ADP=staged[1116]!=0.0;
+	let ADX=staged[1117]!=0.0;
+	let AED=staged[1118]!=0.0;
+	let AEU=staged[1119]!=0.0;
+	let AEW=staged[1120]!=0.0;
+	let AGK=staged[1130]!=0.0;
+	let AGS=staged[1131]!=0.0;
+	let AGY=staged[1132]!=0.0;
+	let AHP=staged[1133]!=0.0;
+	let AHR=staged[1134]!=0.0;
+	let AJF=staged[1144]!=0.0;
+	let AJO=staged[1145]!=0.0;
+	let AJU=staged[1146]!=0.0;
+	let AKL=staged[1147]!=0.0;
+	let AKN=staged[1148]!=0.0;
 	let AMA=staged[220];
-	let AMP=staged[1159]!=0.0;
-	let ANF=staged[1161]!=0.0;
-	let ANN=staged[1162]!=0.0;
-	let ANT=staged[1163]!=0.0;
-	let AOK=staged[1164]!=0.0;
-	let AOM=staged[1165]!=0.0;
-	let AQA=staged[1175]!=0.0;
-	let AQI=staged[1176]!=0.0;
-	let AQO=staged[1177]!=0.0;
-	let ARF=staged[1178]!=0.0;
-	let ARH=staged[1179]!=0.0;
-	let ASV=staged[1189]!=0.0;
-	let ATE=staged[1190]!=0.0;
-	let ATK=staged[1191]!=0.0;
-	let AUB=staged[1192]!=0.0;
-	let AUD=staged[1193]!=0.0;
+	let AMP=staged[1160]!=0.0;
+	let ANF=staged[1162]!=0.0;
+	let ANN=staged[1163]!=0.0;
+	let ANT=staged[1164]!=0.0;
+	let AOK=staged[1165]!=0.0;
+	let AOM=staged[1166]!=0.0;
+	let AQA=staged[1176]!=0.0;
+	let AQI=staged[1177]!=0.0;
+	let AQO=staged[1178]!=0.0;
+	let ARF=staged[1179]!=0.0;
+	let ARH=staged[1180]!=0.0;
+	let ASV=staged[1190]!=0.0;
+	let ATE=staged[1191]!=0.0;
+	let ATK=staged[1192]!=0.0;
+	let AUB=staged[1193]!=0.0;
+	let AUD=staged[1194]!=0.0;
 	let AWE=true;
-	let AWU=staged[1206]!=0.0;
-	let AXC=staged[1207]!=0.0;
-	let AXI=staged[1208]!=0.0;
-	let AXZ=staged[1209]!=0.0;
-	let AYB=staged[1210]!=0.0;
-	let AZP=staged[1220]!=0.0;
-	let AZX=staged[1221]!=0.0;
-	let BAD=staged[1222]!=0.0;
-	let BAU=staged[1223]!=0.0;
-	let BAW=staged[1224]!=0.0;
-	let BCK=staged[1234]!=0.0;
-	let BCT=staged[1235]!=0.0;
-	let BCZ=staged[1236]!=0.0;
-	let BDQ=staged[1237]!=0.0;
-	let BDS=staged[1238]!=0.0;
+	let AWU=staged[1207]!=0.0;
+	let AXC=staged[1208]!=0.0;
+	let AXI=staged[1209]!=0.0;
+	let AXZ=staged[1210]!=0.0;
+	let AYB=staged[1211]!=0.0;
+	let AZP=staged[1221]!=0.0;
+	let AZX=staged[1222]!=0.0;
+	let BAD=staged[1223]!=0.0;
+	let BAU=staged[1224]!=0.0;
+	let BAW=staged[1225]!=0.0;
+	let BCK=staged[1235]!=0.0;
+	let BCT=staged[1236]!=0.0;
+	let BCZ=staged[1237]!=0.0;
+	let BDQ=staged[1238]!=0.0;
+	let BDS=staged[1239]!=0.0;
 	let BFF=0.2f64;
 	let BFU=true;
-	let BGK=staged[1251]!=0.0;
-	let BGS=staged[1252]!=0.0;
-	let BGY=staged[1253]!=0.0;
-	let BHP=staged[1254]!=0.0;
-	let BHR=staged[1255]!=0.0;
-	let BJF=staged[1265]!=0.0;
-	let BJN=staged[1266]!=0.0;
-	let BJT=staged[1267]!=0.0;
-	let BKK=staged[1268]!=0.0;
-	let BKM=staged[1269]!=0.0;
-	let BMA=staged[1279]!=0.0;
-	let BMQ=staged[1280]!=0.0;
-	let BMW=staged[1281]!=0.0;
-	let BNN=staged[1282]!=0.0;
-	let BNP=staged[1283]!=0.0;
+	let BGK=staged[1252]!=0.0;
+	let BGS=staged[1253]!=0.0;
+	let BGY=staged[1254]!=0.0;
+	let BHP=staged[1255]!=0.0;
+	let BHR=staged[1256]!=0.0;
+	let BJF=staged[1266]!=0.0;
+	let BJN=staged[1267]!=0.0;
+	let BJT=staged[1268]!=0.0;
+	let BKK=staged[1269]!=0.0;
+	let BKM=staged[1270]!=0.0;
+	let BMA=staged[1280]!=0.0;
+	let BMQ=staged[1281]!=0.0;
+	let BMW=staged[1282]!=0.0;
+	let BNN=staged[1283]!=0.0;
+	let BNP=staged[1284]!=0.0;
 	let BQY=1e-21f64;
 	let BQZ=staged[267];
-	let BRM=staged[1301]!=0.0;
+	let BRM=staged[1302]!=0.0;
 	let BRN=staged[268];
-	let BSC=staged[1304]!=0.0;
-	let BSS=staged[1306]!=0.0;
-	let BTA=staged[1307]!=0.0;
-	let BTG=staged[1308]!=0.0;
+	let BSC=staged[1305]!=0.0;
+	let BSS=staged[1307]!=0.0;
+	let BTA=staged[1308]!=0.0;
+	let BTG=staged[1309]!=0.0;
 	let BTK=staged[273];
 	let BTO=staged[274];
 	let BTR=staged[270];
 	let BTT=staged[275];
-	let BUB=staged[1309]!=0.0;
-	let BUD=staged[1310]!=0.0;
+	let BUB=staged[1310]!=0.0;
+	let BUD=staged[1311]!=0.0;
 	let BUZ=staged[271];
 	let BVL=staged[277];
-	let BVT=staged[1320]!=0.0;
-	let BWB=staged[1321]!=0.0;
-	let BWH=staged[1322]!=0.0;
+	let BVT=staged[1321]!=0.0;
+	let BWB=staged[1322]!=0.0;
+	let BWH=staged[1323]!=0.0;
 	let BWL=staged[290];
 	let BWP=staged[291];
 	let BWS=staged[287];
 	let BWU=staged[292];
-	let BXC=staged[1323]!=0.0;
-	let BXE=staged[1324]!=0.0;
+	let BXC=staged[1324]!=0.0;
+	let BXE=staged[1325]!=0.0;
 	let BYA=staged[288];
 	let BYM=staged[294];
-	let BYU=staged[1334]!=0.0;
-	let BZD=staged[1335]!=0.0;
-	let BZJ=staged[1336]!=0.0;
+	let BYU=staged[1335]!=0.0;
+	let BZD=staged[1336]!=0.0;
+	let BZJ=staged[1337]!=0.0;
 	let BZN=staged[307];
 	let BZR=staged[308];
 	let BZU=staged[304];
 	let BZW=staged[309];
-	let CAE=staged[1337]!=0.0;
-	let CAG=staged[1338]!=0.0;
+	let CAE=staged[1338]!=0.0;
+	let CAG=staged[1339]!=0.0;
 	let CBC=staged[305];
 	let CBO=staged[311];
 	let CBV=staged[321];
-	let CCK=staged[1350]!=0.0;
-	let CDA=staged[1352]!=0.0;
-	let CDI=staged[1353]!=0.0;
-	let CDO=staged[1354]!=0.0;
-	let CEF=staged[1355]!=0.0;
-	let CEH=staged[1356]!=0.0;
-	let CFV=staged[1366]!=0.0;
-	let CGD=staged[1367]!=0.0;
-	let CGJ=staged[1368]!=0.0;
-	let CHA=staged[1369]!=0.0;
-	let CHC=staged[1370]!=0.0;
-	let CIQ=staged[1380]!=0.0;
-	let CIZ=staged[1381]!=0.0;
-	let CJF=staged[1382]!=0.0;
-	let CJW=staged[1383]!=0.0;
-	let CJY=staged[1384]!=0.0;
+	let CCK=staged[1351]!=0.0;
+	let CDA=staged[1353]!=0.0;
+	let CDI=staged[1354]!=0.0;
+	let CDO=staged[1355]!=0.0;
+	let CEF=staged[1356]!=0.0;
+	let CEH=staged[1357]!=0.0;
+	let CFV=staged[1367]!=0.0;
+	let CGD=staged[1368]!=0.0;
+	let CGJ=staged[1369]!=0.0;
+	let CHA=staged[1370]!=0.0;
+	let CHC=staged[1371]!=0.0;
+	let CIQ=staged[1381]!=0.0;
+	let CIZ=staged[1382]!=0.0;
+	let CJF=staged[1383]!=0.0;
+	let CJW=staged[1384]!=0.0;
+	let CJY=staged[1385]!=0.0;
 	let CLL=staged[338];
-	let CMA=staged[1396]!=0.0;
-	let CMQ=staged[1398]!=0.0;
-	let CMY=staged[1399]!=0.0;
-	let CNE=staged[1400]!=0.0;
-	let CNV=staged[1401]!=0.0;
-	let CNX=staged[1402]!=0.0;
-	let CPL=staged[1412]!=0.0;
-	let CPT=staged[1413]!=0.0;
-	let CPZ=staged[1414]!=0.0;
-	let CQQ=staged[1415]!=0.0;
-	let CQS=staged[1416]!=0.0;
-	let CSG=staged[1426]!=0.0;
-	let CSP=staged[1427]!=0.0;
-	let CSV=staged[1428]!=0.0;
-	let CTM=staged[1429]!=0.0;
-	let CTO=staged[1430]!=0.0;
+	let CMA=staged[1397]!=0.0;
+	let CMQ=staged[1399]!=0.0;
+	let CMY=staged[1400]!=0.0;
+	let CNE=staged[1401]!=0.0;
+	let CNV=staged[1402]!=0.0;
+	let CNX=staged[1403]!=0.0;
+	let CPL=staged[1413]!=0.0;
+	let CPT=staged[1414]!=0.0;
+	let CPZ=staged[1415]!=0.0;
+	let CQQ=staged[1416]!=0.0;
+	let CQS=staged[1417]!=0.0;
+	let CSG=staged[1427]!=0.0;
+	let CSP=staged[1428]!=0.0;
+	let CSV=staged[1429]!=0.0;
+	let CTM=staged[1430]!=0.0;
+	let CTO=staged[1431]!=0.0;
 	let CVO=true;
-	let CWE=staged[1443]!=0.0;
-	let CWM=staged[1444]!=0.0;
-	let CWS=staged[1445]!=0.0;
-	let CXJ=staged[1446]!=0.0;
-	let CXL=staged[1447]!=0.0;
-	let CYZ=staged[1457]!=0.0;
-	let CZH=staged[1458]!=0.0;
-	let CZN=staged[1459]!=0.0;
-	let DAE=staged[1460]!=0.0;
-	let DAG=staged[1461]!=0.0;
-	let DBU=staged[1471]!=0.0;
-	let DCD=staged[1472]!=0.0;
-	let DCJ=staged[1473]!=0.0;
-	let DDA=staged[1474]!=0.0;
-	let DDC=staged[1475]!=0.0;
+	let CWE=staged[1444]!=0.0;
+	let CWM=staged[1445]!=0.0;
+	let CWS=staged[1446]!=0.0;
+	let CXJ=staged[1447]!=0.0;
+	let CXL=staged[1448]!=0.0;
+	let CYZ=staged[1458]!=0.0;
+	let CZH=staged[1459]!=0.0;
+	let CZN=staged[1460]!=0.0;
+	let DAE=staged[1461]!=0.0;
+	let DAG=staged[1462]!=0.0;
+	let DBU=staged[1472]!=0.0;
+	let DCD=staged[1473]!=0.0;
+	let DCJ=staged[1474]!=0.0;
+	let DDA=staged[1475]!=0.0;
+	let DDC=staged[1476]!=0.0;
 	let DFC=true;
-	let DFS=staged[1488]!=0.0;
-	let DGA=staged[1489]!=0.0;
-	let DGG=staged[1490]!=0.0;
-	let DGX=staged[1491]!=0.0;
-	let DGZ=staged[1492]!=0.0;
-	let DIN=staged[1502]!=0.0;
-	let DIV=staged[1503]!=0.0;
-	let DJB=staged[1504]!=0.0;
-	let DJS=staged[1505]!=0.0;
-	let DJU=staged[1506]!=0.0;
-	let DLI=staged[1516]!=0.0;
-	let DLQ=staged[1517]!=0.0;
-	let DLW=staged[1518]!=0.0;
-	let DMN=staged[1519]!=0.0;
-	let DMP=staged[1520]!=0.0;
+	let DFS=staged[1489]!=0.0;
+	let DGA=staged[1490]!=0.0;
+	let DGG=staged[1491]!=0.0;
+	let DGX=staged[1492]!=0.0;
+	let DGZ=staged[1493]!=0.0;
+	let DIN=staged[1503]!=0.0;
+	let DIV=staged[1504]!=0.0;
+	let DJB=staged[1505]!=0.0;
+	let DJS=staged[1506]!=0.0;
+	let DJU=staged[1507]!=0.0;
+	let DLI=staged[1517]!=0.0;
+	let DLQ=staged[1518]!=0.0;
+	let DLW=staged[1519]!=0.0;
+	let DMN=staged[1520]!=0.0;
+	let DMP=staged[1521]!=0.0;
 	let DPY=staged[386];
-	let DQL=staged[1538]!=0.0;
-	let DQO=staged[1539]!=0.0;
+	let DQL=staged[1539]!=0.0;
+	let DQO=staged[1540]!=0.0;
 	let DQZ=staged[440]!=0.0;
 	let DRC=staged[463];
-	let DRM=staged[1545]!=0.0;
-	let DRN=staged[1546]!=0.0;
-	let DRO=staged[1548]!=0.0;
-	let DRP=staged[1549]!=0.0;
-	let DSC=staged[1552]!=0.0;
-	let DSD=staged[1554]!=0.0;
-	let DSG=staged[1555]!=0.0;
+	let DRM=staged[1546]!=0.0;
+	let DRN=staged[1547]!=0.0;
+	let DRO=staged[1549]!=0.0;
+	let DRP=staged[1550]!=0.0;
+	let DSC=staged[1553]!=0.0;
+	let DSD=staged[1555]!=0.0;
+	let DSG=staged[1556]!=0.0;
 	let DSQ=1f64;
-	let DTI=staged[1572]!=0.0;
-	let DTL=staged[1573]!=0.0;
-	let DTN=staged[1575]!=0.0;
-	let DTO=staged[1577]!=0.0;
-	let DTQ=staged[1579]!=0.0;
-	let DTS=staged[1584]!=0.0;
-	let DTT=staged[1586]!=0.0;
-	let DTV=staged[1588]!=0.0;
-	let DTX=staged[1595]!=0.0;
-	let DTZ=staged[1601]!=0.0;
-	let DUC=staged[1602]!=0.0;
-	let DUE=staged[1604]!=0.0;
-	let DUF=staged[1606]!=0.0;
-	let DUH=staged[1608]!=0.0;
-	let DUJ=staged[1613]!=0.0;
-	let DUK=staged[1615]!=0.0;
-	let DUM=staged[1617]!=0.0;
-	let DUO=staged[1623]!=0.0;
+	let DTI=staged[1573]!=0.0;
+	let DTL=staged[1574]!=0.0;
+	let DTN=staged[1576]!=0.0;
+	let DTO=staged[1578]!=0.0;
+	let DTQ=staged[1580]!=0.0;
+	let DTS=staged[1585]!=0.0;
+	let DTT=staged[1587]!=0.0;
+	let DTV=staged[1589]!=0.0;
+	let DTX=staged[1596]!=0.0;
+	let DTZ=staged[1602]!=0.0;
+	let DUC=staged[1603]!=0.0;
+	let DUE=staged[1605]!=0.0;
+	let DUF=staged[1607]!=0.0;
+	let DUH=staged[1609]!=0.0;
+	let DUJ=staged[1614]!=0.0;
+	let DUK=staged[1616]!=0.0;
+	let DUM=staged[1618]!=0.0;
+	let DUO=staged[1624]!=0.0;
 	let mut oHC=false;
 	let mut oHP=false;
 	let mut oHU=false;
@@ -8075,7 +8100,7 @@ pub(super) fn canonical_temperature_preprocess(
 	let IZ=IY* IV;
 	let JB=(JA* IV)* IV;
 	let JC=IZ- (AC* (JB.sqrt()));
-	let JD=AC* (JC- (((JC* JC)+ JB).sqrt()));
+	let JD=AC* ((JC+ BX)- (((JC* JC)+ JB).sqrt()));
 	let JE=AC* (IV+ M);
 	let JF=((staged[105]+ IV).sqrt())- IX;
 	let JG=(((staged[107]+ IV).sqrt())- IX)- JF;
@@ -8103,7 +8128,7 @@ pub(super) fn canonical_temperature_preprocess(
 	let JR=IY* JP;
 	let JS=(JA* JP)* JP;
 	let JT=JR- (AC* (JS.sqrt()));
-	let JU=AC* (JT- (((JT* JT)+ JS).sqrt()));
+	let JU=AC* ((JT+ BX)- (((JT* JT)+ JS).sqrt()));
 	let JV=(staged[114]+ ((staged[112]* F)* (H+ (staged[113]* F))))+ parameters[15];
 	let JW=staged[116]* ((staged[115]* L).exp());
 	let JX=staged[117]/ K;
@@ -8149,7 +8174,7 @@ pub(super) fn canonical_temperature_preprocess(
 	let LG=IY* LC;
 	let LH=(JA* LC)* LC;
 	let LI=LG- (AC* (LH.sqrt()));
-	let LJ=AC* (LI- (((LI* LI)+ LH).sqrt()));
+	let LJ=AC* ((LI+ BX)- (((LI* LI)+ LH).sqrt()));
 	KR=LH;
 	KS=LG;
 	KT=LH;
@@ -14269,9 +14294,9 @@ impl Instance {
         let produced: [f64; 1] = {
             let multiplicity = self.multiplicity;
             let staged = &*self.canonical_staged;
-			let A=staged[777]!=0.0;
-			let B=staged[916]!=0.0;
-			let C=staged[918]!=0.0;
+			let A=staged[778]!=0.0;
+			let B=staged[917]!=0.0;
+			let C=staged[919]!=0.0;
 			if A{
 			if B{
 			loop{
@@ -14323,27 +14348,27 @@ impl Instance {
                 0.0
             }
         };
-		let A=staged[758]!=0.0;
-		let B=staged[765]!=0.0;
+		let A=staged[759]!=0.0;
+		let B=staged[766]!=0.0;
 		let C=0f64;
-		let E=staged[777]!=0.0;
-		let F=staged[916]!=0.0;
-		let G=staged[918]!=0.0;
-		let H=staged[1006]!=0.0;
+		let E=staged[778]!=0.0;
+		let F=staged[917]!=0.0;
+		let G=staged[919]!=0.0;
+		let H=staged[1007]!=0.0;
 		let I=staged[718]!=0.0;
-		let J=staged[1021]!=0.0;
-		let K=staged[1022]!=0.0;
-		let L=staged[1023]!=0.0;
-		let M=staged[1026]!=0.0;
-		let N=staged[1027]!=0.0;
-		let O=staged[1028]!=0.0;
-		let P=staged[1029]!=0.0;
-		let Q=staged[1030]!=0.0;
-		let R=staged[1031]!=0.0;
-		let S=staged[1032]!=0.0;
-		let T=staged[1033]!=0.0;
-		let U=staged[1040]!=0.0;
-		let V=staged[1047]!=0.0;
+		let J=staged[1022]!=0.0;
+		let K=staged[1023]!=0.0;
+		let L=staged[1024]!=0.0;
+		let M=staged[1027]!=0.0;
+		let N=staged[1028]!=0.0;
+		let O=staged[1029]!=0.0;
+		let P=staged[1030]!=0.0;
+		let Q=staged[1031]!=0.0;
+		let R=staged[1032]!=0.0;
+		let S=staged[1033]!=0.0;
+		let T=staged[1034]!=0.0;
+		let U=staged[1041]!=0.0;
+		let V=staged[1048]!=0.0;
 		let W=node_potentials[5];
 		let X=node_potentials[6];
 		let Z=1f64;
@@ -14362,7 +14387,7 @@ impl Instance {
 		let CU=1f64;
 		let DE=staged[389];
 		let DG=0.5f64;
-		let DO=staged[1538]!=0.0;
+		let DO=staged[1539]!=0.0;
 		let DS=staged[393];
 		let DV=staged[394];
 		let DX=2f64;
@@ -14370,7 +14395,7 @@ impl Instance {
 		let ED=staged[398];
 		let EH=staged[399];
 		let EM=L3([0f64;3]);
-		let EZ=staged[1539]!=0.0;
+		let EZ=staged[1540]!=0.0;
 		let FE=staged[401];
 		let FF=staged[403];
 		let FM=staged[405];
@@ -14388,7 +14413,7 @@ impl Instance {
 		let HY=staged[415];
 		let ID=staged[416];
 		let IF=staged[417];
-		let IW=staged[1540]!=0.0;
+		let IW=staged[1541]!=0.0;
 		let JC=0.3333333333333333f64;
 		let JG=1e-100f64;
 		let JL=1e-5f64;
@@ -14441,7 +14466,7 @@ impl Instance {
 		let BEX=staged[434];
 		let BFK=staged[435];
 		let BGO=staged[438];
-		let BHN=staged[1541]!=0.0;
+		let BHN=staged[1542]!=0.0;
 		let BIF=staged[439];
 		let BIP=staged[449];
 		let BIX=staged[455];
@@ -14449,10 +14474,10 @@ impl Instance {
 		let BJF=L2([0f64;2]);
 		let BJG=L3([0f64;3]);
 		let BJP=staged[440]!=0.0;
-		let BJQ=staged[1542]!=0.0;
+		let BJQ=staged[1543]!=0.0;
 		let BKB=staged[441]!=0.0;
 		let BKE=staged[458];
-		let BKJ=staged[1543]!=0.0;
+		let BKJ=staged[1544]!=0.0;
 		let BKK=staged[459];
 		let BKS=staged[460];
 		let BKU=staged[462];
@@ -14461,7 +14486,7 @@ impl Instance {
 		let BLT=staged[465];
 		let BLV=0.5405405405405405f64;
 		let BLX=staged[466];
-		let BMS=staged[1544]!=0.0;
+		let BMS=staged[1545]!=0.0;
 		let BMT=staged[467];
 		let BNB=staged[468];
 		let BND=staged[470];
@@ -14492,14 +14517,14 @@ impl Instance {
 		let CEL=staged[505];
 		let CJK=staged[508];
 		let CJT=staged[510];
-		let CJZ=staged[1545]!=0.0;
+		let CJZ=staged[1546]!=0.0;
 		let CKB=staged[511];
 		let CKF=staged[512];
 		let CKQ=staged[513];
 		let CKV=staged[514];
-		let CLW=staged[1546]!=0.0;
-		let CNF=staged[1547]!=0.0;
-		let CNG=staged[1548]!=0.0;
+		let CLW=staged[1547]!=0.0;
+		let CNF=staged[1548]!=0.0;
+		let CNG=staged[1549]!=0.0;
 		let CPM=staged[515];
 		let CQE=staged[519];
 		let CQG=staged[521];
@@ -14510,42 +14535,42 @@ impl Instance {
 		let CST=staged[528];
 		let CVC=-1f64;
 		let DQX=staged[529];
-		let DRU=staged[1550];
+		let DRU=staged[1551];
 		let DXF=-0.99f64;
 		let EOG=-0.16666666666666666f64;
 		let EOH=staged[532];
 		let EOJ=staged[533];
-		let EPN=staged[1551]!=0.0;
+		let EPN=staged[1552]!=0.0;
 		let ESP=staged[543];
 		let ESS=staged[544];
-		let ESV=staged[1552]!=0.0;
+		let ESV=staged[1553]!=0.0;
 		let ESW=staged[537];
 		let ETK=staged[539];
-		let EUC=staged[1553]!=0.0;
+		let EUC=staged[1554]!=0.0;
 		let EUN=staged[540];
 		let EWA=staged[541];
 		let EWB=staged[542];
 		let EXC=staged[96];
-		let EXI=staged[1554]!=0.0;
+		let EXI=staged[1555]!=0.0;
 		let EXS=staged[549];
 		let EZB=staged[555];
 		let EZE=staged[556];
 		let EZH=staged[557];
 		let EZT=staged[554];
-		let FAX=staged[1555]!=0.0;
+		let FAX=staged[1556]!=0.0;
 		let FAY=L5([0f64;5]);
 		let FAZ=L6([0f64;6]);
 		let FBA=L2([0f64;2]);
 		let FBB=L4([0f64;4]);
 		let FBT=staged[558];
-		let FBX=staged[1556]!=0.0;
+		let FBX=staged[1557]!=0.0;
 		let FCR=staged[559];
 		let FCV=staged[561];
 		let FCY=staged[562];
 		let FDC=staged[560];
 		let FDM=staged[563];
 		let FDQ=staged[565];
-		let FDT=staged[1557]!=0.0;
+		let FDT=staged[1558]!=0.0;
 		let FDU=staged[564];
 		let FEB=staged[566];
 		let FES=staged[568];
@@ -14557,47 +14582,47 @@ impl Instance {
 		let FFU=staged[572];
 		let FGE=staged[575];
 		let FGI=staged[577];
-		let FGL=staged[1558]!=0.0;
+		let FGL=staged[1559]!=0.0;
 		let FGM=staged[576];
 		let FGT=staged[578];
 		let FHF=staged[584];
-		let FHN=staged[1559]!=0.0;
+		let FHN=staged[1560]!=0.0;
 		let FHR=staged[580];
 		let FHV=staged[582];
 		let FHY=staged[581];
-		let FIF=staged[1560]!=0.0;
-		let FII=staged[1561]!=0.0;
+		let FIF=staged[1561]!=0.0;
+		let FII=staged[1562]!=0.0;
 		let FIJ=staged[586];
 		let FIN=staged[169];
 		let FIS=staged[587];
 		let FIT=staged[588];
-		let FIW=staged[1562]!=0.0;
-		let FIZ=staged[1563]!=0.0;
+		let FIW=staged[1563]!=0.0;
+		let FIZ=staged[1564]!=0.0;
 		let FJA=staged[589];
 		let FJE=staged[182];
 		let FJJ=staged[590];
 		let FJK=staged[591];
-		let FJN=staged[1564]!=0.0;
+		let FJN=staged[1565]!=0.0;
 		let FJR=staged[596];
-		let FJZ=staged[1565]!=0.0;
+		let FJZ=staged[1566]!=0.0;
 		let FKA=staged[592];
 		let FKE=staged[194];
 		let FKJ=staged[593];
 		let FKK=staged[594];
-		let FKN=staged[1566]!=0.0;
+		let FKN=staged[1567]!=0.0;
 		let FKO=L2([0f64;2]);
-		let FKR=staged[1567]!=0.0;
+		let FKR=staged[1568]!=0.0;
 		let FKS=staged[598];
 		let FKW=staged[275];
 		let FLB=staged[599];
 		let FLC=staged[600];
-		let FLF=staged[1568]!=0.0;
-		let FLI=staged[1569]!=0.0;
+		let FLF=staged[1569]!=0.0;
+		let FLI=staged[1570]!=0.0;
 		let FLJ=staged[601];
 		let FLN=staged[292];
 		let FLS=staged[602];
 		let FLT=staged[603];
-		let FLW=staged[1570]!=0.0;
+		let FLW=staged[1571]!=0.0;
 		let FME=staged[604];
 		let FMI=staged[309];
 		let FMN=staged[605];
@@ -14607,21 +14632,21 @@ impl Instance {
 		let FNA=parameters[855];
 		let FNF=staged[200];
 		let FNI=staged[199];
-		let FNP=staged[1571]!=0.0;
+		let FNP=staged[1572]!=0.0;
 		let FNV=parameters[868];
 		let FNW=parameters[867];
 		let FNX=staged[609];
-		let FOC=staged[1572]!=0.0;
+		let FOC=staged[1573]!=0.0;
 		let FOM=staged[612];
-		let FPC=staged[1573]!=0.0;
+		let FPC=staged[1574]!=0.0;
 		let FPG=staged[613];
 		let FQZ=staged[614];
 		let FRR=staged[617];
 		let FSB=staged[619];
-		let FSE=staged[1574]!=0.0;
-		let FSR=staged[1575]!=0.0;
-		let FSY=staged[1576]!=0.0;
-		let FTJ=staged[1577]!=0.0;
+		let FSE=staged[1575]!=0.0;
+		let FSR=staged[1576]!=0.0;
+		let FSY=staged[1577]!=0.0;
+		let FTJ=staged[1578]!=0.0;
 		let FTP=staged[621];
 		let FTW=staged[167];
 		let FUA=parameters[824];
@@ -14629,8 +14654,8 @@ impl Instance {
 		let FUJ=staged[622];
 		let FUM=parameters[833];
 		let FUQ=staged[623];
-		let FVI=staged[1578]!=0.0;
-		let FVL=staged[1579]!=0.0;
+		let FVI=staged[1579]!=0.0;
+		let FVL=staged[1580]!=0.0;
 		let FVQ=staged[625];
 		let FVZ=0.375f64;
 		let FWC=staged[626];
@@ -14640,24 +14665,24 @@ impl Instance {
 		let FXQ=0.43792457880372104f64;
 		let FXY=0.886226925452758f64;
 		let FYB=parameters[838];
-		let FYS=staged[1580]!=0.0;
-		let FYV=staged[1581]!=0.0;
+		let FYS=staged[1581]!=0.0;
+		let FYV=staged[1582]!=0.0;
 		let FYW=parameters[821];
 		let FZE=staged[171];
 		let FZG=staged[5];
 		let FZT=parameters[844];
 		let GAO=parameters[29];
-		let GAS=staged[1582]!=0.0;
+		let GAS=staged[1583]!=0.0;
 		let GAT=parameters[856];
 		let GAV=staged[174];
 		let GAW=staged[176];
 		let GBB=staged[175];
 		let GBZ=parameters[30];
 		let GCC=staged[629];
-		let GCF=staged[1583]!=0.0;
-		let GCS=staged[1584]!=0.0;
-		let GCZ=staged[1585]!=0.0;
-		let GDK=staged[1586]!=0.0;
+		let GCF=staged[1584]!=0.0;
+		let GCS=staged[1585]!=0.0;
+		let GCZ=staged[1586]!=0.0;
+		let GDK=staged[1587]!=0.0;
 		let GDQ=staged[631];
 		let GDX=staged[180];
 		let GEB=parameters[825];
@@ -14665,30 +14690,30 @@ impl Instance {
 		let GEK=staged[632];
 		let GEN=parameters[834];
 		let GER=staged[633];
-		let GFJ=staged[1587]!=0.0;
-		let GFM=staged[1588]!=0.0;
+		let GFJ=staged[1588]!=0.0;
+		let GFM=staged[1589]!=0.0;
 		let GFR=staged[635];
 		let GGC=staged[636];
 		let GHU=0.886226925452758f64;
 		let GHX=parameters[839];
-		let GIO=staged[1589]!=0.0;
-		let GIR=staged[1590]!=0.0;
+		let GIO=staged[1590]!=0.0;
+		let GIR=staged[1591]!=0.0;
 		let GIS=parameters[822];
 		let GJA=staged[184];
 		let GJC=staged[6];
 		let GJP=parameters[845];
-		let GKN=staged[1591]!=0.0;
+		let GKN=staged[1592]!=0.0;
 		let GKO=parameters[857];
 		let GKQ=staged[188];
 		let GKV=staged[187];
 		let GLV=staged[639];
-		let GLY=staged[1592]!=0.0;
+		let GLY=staged[1593]!=0.0;
 		let GML=staged[155];
 		let GMM=staged[156];
 		let GMO=staged[157];
-		let GMR=staged[1593]!=0.0;
-		let GMY=staged[1594]!=0.0;
-		let GNJ=staged[1595]!=0.0;
+		let GMR=staged[1594]!=0.0;
+		let GMY=staged[1595]!=0.0;
+		let GNJ=staged[1596]!=0.0;
 		let GNP=staged[641];
 		let GNW=staged[192];
 		let GOA=parameters[826];
@@ -14696,20 +14721,20 @@ impl Instance {
 		let GOJ=staged[642];
 		let GOM=parameters[835];
 		let GOQ=staged[643];
-		let GPI=staged[1596]!=0.0;
-		let GPL=staged[1597]!=0.0;
+		let GPI=staged[1597]!=0.0;
+		let GPL=staged[1598]!=0.0;
 		let GPQ=staged[645];
 		let GQB=staged[646];
 		let GRT=0.886226925452758f64;
 		let GRW=parameters[840];
-		let GSN=staged[1598]!=0.0;
+		let GSN=staged[1599]!=0.0;
 		let GSR=parameters[823];
 		let GSZ=staged[196];
 		let GTB=staged[7];
 		let GTR=parameters[846];
 		let GUQ=parameters[858];
 		let GVT=parameters[863];
-		let GVV=staged[1599]!=0.0;
+		let GVV=staged[1600]!=0.0;
 		let GVY=parameters[864];
 		let GWF=staged[647];
 		let GXW=staged[648];
@@ -14721,20 +14746,20 @@ impl Instance {
 		let GZC=staged[315];
 		let GZH=staged[318];
 		let GZK=staged[317];
-		let GZR=staged[1600]!=0.0;
+		let GZR=staged[1601]!=0.0;
 		let GZX=staged[656];
 		let GZY=staged[655];
 		let GZZ=staged[658];
-		let HAE=staged[1601]!=0.0;
+		let HAE=staged[1602]!=0.0;
 		let HAO=staged[661];
-		let HBJ=staged[1602]!=0.0;
+		let HBJ=staged[1603]!=0.0;
 		let HBN=staged[662];
 		let HDX=staged[665];
 		let HEQ=staged[667];
-		let HET=staged[1603]!=0.0;
-		let HFG=staged[1604]!=0.0;
-		let HFR=staged[1605]!=0.0;
-		let HGC=staged[1606]!=0.0;
+		let HET=staged[1604]!=0.0;
+		let HFG=staged[1605]!=0.0;
+		let HFR=staged[1606]!=0.0;
+		let HGC=staged[1607]!=0.0;
 		let HGI=staged[669];
 		let HGP=staged[273];
 		let HGT=staged[29];
@@ -14742,27 +14767,27 @@ impl Instance {
 		let HHC=staged[670];
 		let HHF=staged[270];
 		let HHJ=staged[671];
-		let HIB=staged[1607]!=0.0;
-		let HIE=staged[1608]!=0.0;
+		let HIB=staged[1608]!=0.0;
+		let HIE=staged[1609]!=0.0;
 		let HIJ=staged[673];
 		let HIU=staged[674];
 		let HKM=0.886226925452758f64;
 		let HKP=staged[271];
-		let HLG=staged[1609]!=0.0;
-		let HLJ=staged[1610]!=0.0;
+		let HLG=staged[1610]!=0.0;
+		let HLJ=staged[1611]!=0.0;
 		let HLK=staged[26];
 		let HLS=staged[278];
 		let HLU=staged[35];
 		let HMH=staged[277];
-		let HNF=staged[1611]!=0.0;
+		let HNF=staged[1612]!=0.0;
 		let HNG=staged[282];
 		let HNI=staged[284];
 		let HNN=staged[283];
 		let HON=staged[677];
-		let HOQ=staged[1612]!=0.0;
-		let HPD=staged[1613]!=0.0;
-		let HPK=staged[1614]!=0.0;
-		let HPV=staged[1615]!=0.0;
+		let HOQ=staged[1613]!=0.0;
+		let HPD=staged[1614]!=0.0;
+		let HPK=staged[1615]!=0.0;
+		let HPV=staged[1616]!=0.0;
 		let HQB=staged[679];
 		let HQI=staged[290];
 		let HQM=staged[31];
@@ -14770,29 +14795,29 @@ impl Instance {
 		let HQV=staged[680];
 		let HQY=staged[287];
 		let HRC=staged[681];
-		let HRU=staged[1616]!=0.0;
-		let HRX=staged[1617]!=0.0;
+		let HRU=staged[1617]!=0.0;
+		let HRX=staged[1618]!=0.0;
 		let HSC=staged[683];
 		let HSN=staged[684];
 		let HUF=0.886226925452758f64;
 		let HUI=staged[288];
-		let HUZ=staged[1618]!=0.0;
-		let HVC=staged[1619]!=0.0;
+		let HUZ=staged[1619]!=0.0;
+		let HVC=staged[1620]!=0.0;
 		let HVD=staged[27];
 		let HVL=staged[295];
 		let HVN=staged[36];
 		let HWA=staged[294];
-		let HWY=staged[1620]!=0.0;
+		let HWY=staged[1621]!=0.0;
 		let HWZ=staged[299];
 		let HXB=staged[301];
 		let HXG=staged[300];
 		let HYG=staged[687];
-		let HYJ=staged[1621]!=0.0;
+		let HYJ=staged[1622]!=0.0;
 		let HYO=staged[159];
 		let HYP=staged[160];
 		let HYR=staged[161];
-		let HZA=staged[1622]!=0.0;
-		let HZL=staged[1623]!=0.0;
+		let HZA=staged[1623]!=0.0;
+		let HZL=staged[1624]!=0.0;
 		let HZR=staged[689];
 		let HZY=staged[307];
 		let IAC=staged[33];
@@ -14800,21 +14825,21 @@ impl Instance {
 		let IAL=staged[690];
 		let IAO=staged[304];
 		let IAS=staged[691];
-		let IBK=staged[1624]!=0.0;
-		let IBN=staged[1625]!=0.0;
+		let IBK=staged[1625]!=0.0;
+		let IBN=staged[1626]!=0.0;
 		let IBS=staged[693];
 		let ICD=staged[694];
 		let IDV=0.886226925452758f64;
 		let IDY=staged[305];
 		let IEP=L5([0f64;5]);
-		let IEQ=staged[1626]!=0.0;
+		let IEQ=staged[1627]!=0.0;
 		let IEU=staged[28];
 		let IFC=staged[312];
 		let IFE=staged[37];
 		let IFU=staged[311];
 		let IGT=staged[316];
 		let IHW=staged[695];
-		let IHY=staged[1627]!=0.0;
+		let IHY=staged[1628]!=0.0;
 		let IIB=staged[696];
 		let III=staged[697];
 		let IJZ=staged[698];
@@ -14842,23 +14867,14 @@ impl Instance {
 		let IOL=L2([0f64;2]);
 		let IPG=staged[712];
 		let IPK=ddt_scale();
-		let IRD=0.08333333333333333f64;
-		let IRO=1e-20f64;
-		let ISG=staged[717];
-		let ITB=staged[714];
-		let IUB=staged[715];
-		let IUH=staged[716];
-		let IWX=node_potentials[4];
-		let IXG=staged[719];
-		let IXW=0.0;
-		let JEW=0.0;
-		let JEX=0.0;
-		let JEY=0.0;
-		let JEZ=0.0;
-		let JFA=0.0;
-		let JFB=0.0;
-		let JFC=0.0;
-		let JFD=0.0;
+		let IRL=0.08333333333333333f64;
+		let IRW=1e-20f64;
+		let ISO=staged[717];
+		let ITJ=staged[714];
+		let IUJ=staged[715];
+		let IUP=staged[716];
+		let IXF=node_potentials[4];
+		let IXQ=staged[719];
 		let D=ctx.simparam_or("gmin", C);
 		if E{
 		if F{
@@ -14986,7 +15002,7 @@ impl Instance {
 		let DK=((DI* DI)+ DE).sqrt();
 		let DL=(DJ+ DJ)* (CU/ (CT* DK));
 		let DM=CL- ((DH- DL)* DG);
-		let DN=(CH- (DG* (DI- DK)))+ staged[391];
+		let DN=(CH- (DG* ((DI+ C)- DK)))+ staged[391];
 		let EN;
 		let EO;
 		let EP;
@@ -17306,7 +17322,7 @@ impl Instance {
 		let BQQ=C- BQO;
 		let BQR=(BQP* AL)* BQQ;
 		let BQS=((BQQ* BQQ)+ 0.01f64).sqrt();
-		let BQT=DG* (BQO- BQS);
+		let BQT=DG* ((C+ BQO)- BQS);
 		let BQU=(BQP- ((BQR+ BQR)* (CU/ (CT* BQS))))* DG;
 		let BQV=AJF* AIP;
 		let BQW=((AIP* AIP)+ MX).sqrt();
@@ -17724,7 +17740,7 @@ impl Instance {
 		let CAU=CAS* CAT;
 		let CAV=((CAT* CAT)+ staged[492]).sqrt();
 		let CAW=CL- ((CAS- ((CAU+ CAU)* (CU/ (CT* CAV))))* DG);
-		let CAX=(CH- (DG* (CAT- CAV)))+ staged[493];
+		let CAX=(CH- (DG* ((CAT+ C)- CAV)))+ staged[493];
 		let CAY=CAX+ EU;
 		let CAZ=CAW+ EX;
 		let CBC=CBB* (CF+ (CBA* CW));
@@ -18201,7 +18217,7 @@ impl Instance {
 		let CPQ=CPO* CPP;
 		let CPR=((CPP* CPP)+ CPM).sqrt();
 		let CPS=CL- ((CPO- ((CPQ+ CPQ)* (CU/ (CT* CPR))))* DG);
-		let CPT=(CH- (DG* (CPP- CPR)))+ staged[517];
+		let CPT=(CH- (DG* ((CPP+ C)- CPR)))+ staged[517];
 		CPU=CPT;
 		CPV=CPP;
 		CPW=CPS;
@@ -21029,7 +21045,7 @@ impl Instance {
 		}else{
 		let FIM=CF- (FHL* FIJ);
 		let FIO=FIM.powf(FIN);
-		let FIP=((FHM* FIJ)* AL)* (FIN* ((FIM+ (((FIM== AGN) as u8 as f64)* AGO)).powf(staged[749])));
+		let FIP=((FHM* FIJ)* AL)* (FIN* ((FIM+ (((FIM== AGN) as u8 as f64)* AGO)).powf(staged[750])));
 		FIQ=FIO;
 		FIR=FIP;
 		}
@@ -21054,7 +21070,7 @@ impl Instance {
 		}else{
 		let FJD=CF- (FHL* FJA);
 		let FJF=FJD.powf(FJE);
-		let FJG=((FHM* FJA)* AL)* (FJE* ((FJD+ (((FJD== AGN) as u8 as f64)* AGO)).powf(staged[750])));
+		let FJG=((FHM* FJA)* AL)* (FJE* ((FJD+ (((FJD== AGN) as u8 as f64)* AGO)).powf(staged[751])));
 		FJH=FJF;
 		FJI=FJG;
 		}
@@ -21079,7 +21095,7 @@ impl Instance {
 		}else{
 		let FKD=CF- (FHL* FKA);
 		let FKF=FKD.powf(FKE);
-		let FKG=((FHM* FKA)* AL)* (FKE* ((FKD+ (((FKD== AGN) as u8 as f64)* AGO)).powf(staged[751])));
+		let FKG=((FHM* FKA)* AL)* (FKE* ((FKD+ (((FKD== AGN) as u8 as f64)* AGO)).powf(staged[752])));
 		FKH=FKF;
 		FKI=FKG;
 		}
@@ -21112,7 +21128,7 @@ impl Instance {
 		}else{
 		let FKV=CF- (FJX* FKS);
 		let FKX=FKV.powf(FKW);
-		let FKY=((FJY* FKS)* AL)* (FKW* ((FKV+ (((FKV== AGN) as u8 as f64)* AGO)).powf(staged[752])));
+		let FKY=((FJY* FKS)* AL)* (FKW* ((FKV+ (((FKV== AGN) as u8 as f64)* AGO)).powf(staged[753])));
 		FKZ=FKX;
 		FLA=FKY;
 		}
@@ -21137,7 +21153,7 @@ impl Instance {
 		}else{
 		let FLM=CF- (FJX* FLJ);
 		let FLO=FLM.powf(FLN);
-		let FLP=((FJY* FLJ)* AL)* (FLN* ((FLM+ (((FLM== AGN) as u8 as f64)* AGO)).powf(staged[753])));
+		let FLP=((FJY* FLJ)* AL)* (FLN* ((FLM+ (((FLM== AGN) as u8 as f64)* AGO)).powf(staged[754])));
 		FLQ=FLO;
 		FLR=FLP;
 		}
@@ -21162,7 +21178,7 @@ impl Instance {
 		}else{
 		let FMH=CF- (FJX* FME);
 		let FMJ=FMH.powf(FMI);
-		let FMK=((FJY* FME)* AL)* (FMI* ((FMH+ (((FMH== AGN) as u8 as f64)* AGO)).powf(staged[754])));
+		let FMK=((FJY* FME)* AL)* (FMI* ((FMH+ (((FMH== AGN) as u8 as f64)* AGO)).powf(staged[755])));
 		FML=FMJ;
 		FMM=FMK;
 		}
@@ -21207,9 +21223,9 @@ impl Instance {
 		let FMS=L4([CM[0],CM[1],CM[2],0.0])+ L4([0.0,CL[0],CL[1],CL[2]]);
 		let FMT=FMS* FMR;
 		let FMU=((FMR* FMR)+ 1e-6f64).sqrt();
-		let FMV=DG* (FMR+ FMU);
+		let FMV=DG* ((FMR+ C)+ FMU);
 		let FMY=FMX* ((FMV.powf(FMW))- staged[607]);
-		let FMZ=(((FMS+ ((FMT+ FMT)* (CU/ (CT* FMU))))* DG)* (FMW* ((FMV+ (((FMV== AGN) as u8 as f64)* AGO)).powf(staged[721]))))* FMX;
+		let FMZ=(((FMS+ ((FMT+ FMT)* (CU/ (CT* FMU))))* DG)* (FMW* ((FMV+ (((FMV== AGN) as u8 as f64)* AGO)).powf(staged[722]))))* FMX;
 		let FNB=FNA+ FMY;
 		let FNC=CF/ FNB;
 		let FND=((FMZ* FNC)* AL)/ FNB;
@@ -21237,9 +21253,9 @@ impl Instance {
 		let FNR=L4([CM[0],CM[1],CM[2],0.0])+ L4([0.0,CL[0],CL[1],CL[2]]);
 		let FNS=FNR* FNQ;
 		let FNT=((FNQ* FNQ)+ 1e-6f64).sqrt();
-		let FNU=DG* (FNQ+ FNT);
+		let FNU=DG* ((FNQ+ C)+ FNT);
 		let FNY=FNX* (CF+ (FNW* ((FNU.powf(FNV))- staged[608])));
-		let FNZ=((((FNR+ ((FNS+ FNS)* (CU/ (CT* FNT))))* DG)* (FNV* ((FNU+ (((FNU== AGN) as u8 as f64)* AGO)).powf(staged[722]))))* FNW)* FNX;
+		let FNZ=((((FNR+ ((FNS+ FNS)* (CU/ (CT* FNT))))* DG)* (FNV* ((FNU+ (((FNU== AGN) as u8 as f64)* AGO)).powf(staged[723]))))* FNW)* FNX;
 		FOA=FNY;
 		FOB=FNZ;
 		}else{
@@ -21378,7 +21394,7 @@ impl Instance {
 		let FRW=(BI- ((FRT+ FRT)* (CU/ (CT* FRU))))* DG;
 		let FRX=BI* BD;
 		let FRY=((BD* BD)+ 4e-12f64).sqrt();
-		let FRZ=DG* (BD- FRY);
+		let FRZ=DG* ((BD+ C)- FRY);
 		let FSA=(BI- ((FRX+ FRX)* (CU/ (CT* FRY))))* DG;
 		FOO=FPT;
 		FOP=FRP;
@@ -21494,7 +21510,7 @@ impl Instance {
 		}else{
 		let FTZ=FSS* FTW;
 		let FUB=FTZ.powf(FUA);
-		let FUC=(FST* FTW)* (FUA* ((FTZ+ (((FTZ== AGN) as u8 as f64)* AGO)).powf(staged[723])));
+		let FUC=(FST* FTW)* (FUA* ((FTZ+ (((FTZ== AGN) as u8 as f64)* AGO)).powf(staged[724])));
 		FUD=FUB;
 		FUE=FUC;
 		}
@@ -21551,7 +21567,7 @@ impl Instance {
 		}else{
 		let FVP=CF+ (FUR* FVG);
 		let FVR=FVP.powf(FVQ);
-		let FVS=((FUS* FVG)+ (FVH* FUR))* (FVQ* ((FVP+ (((FVP== AGN) as u8 as f64)* AGO)).powf(staged[724])));
+		let FVS=((FUS* FVG)+ (FVH* FUR))* (FVQ* ((FVP+ (((FVP== AGN) as u8 as f64)* AGO)).powf(staged[725])));
 		FVT=FVR;
 		FVU=FVS;
 		}
@@ -21669,7 +21685,7 @@ impl Instance {
 		}else{
 		let FYZ=(FYW- FOS)* FTW;
 		let FZA=FYZ.powf(FUA);
-		let FZB=((FOZ* AL)* FTW)* (FUA* ((FYZ+ (((FYZ== AGN) as u8 as f64)* AGO)).powf(staged[725])));
+		let FZB=((FOZ* AL)* FTW)* (FUA* ((FYZ+ (((FYZ== AGN) as u8 as f64)* AGO)).powf(staged[726])));
 		FZC=FZA;
 		FZD=FZB;
 		}
@@ -21778,7 +21794,7 @@ impl Instance {
 		}else{
 		let GBU=CF- (FOU* FIJ);
 		let GBV=GBU.powf(FIN);
-		let GBW=((FPB* FIJ)* AL)* (FIN* ((GBU+ (((GBU== AGN) as u8 as f64)* AGO)).powf(staged[726])));
+		let GBW=((FPB* FIJ)* AL)* (FIN* ((GBU+ (((GBU== AGN) as u8 as f64)* AGO)).powf(staged[727])));
 		GBX=GBV;
 		GBY=GBW;
 		}
@@ -21881,7 +21897,7 @@ impl Instance {
 		}else{
 		let GEA=GCT* GDX;
 		let GEC=GEA.powf(GEB);
-		let GED=(GCU* GDX)* (GEB* ((GEA+ (((GEA== AGN) as u8 as f64)* AGO)).powf(staged[727])));
+		let GED=(GCU* GDX)* (GEB* ((GEA+ (((GEA== AGN) as u8 as f64)* AGO)).powf(staged[728])));
 		GEE=GEC;
 		GEF=GED;
 		}
@@ -21938,7 +21954,7 @@ impl Instance {
 		}else{
 		let GFQ=CF+ (GES* GFH);
 		let GFS=GFQ.powf(GFR);
-		let GFT=((GET* GFH)+ (GFI* GES))* (GFR* ((GFQ+ (((GFQ== AGN) as u8 as f64)* AGO)).powf(staged[728])));
+		let GFT=((GET* GFH)+ (GFI* GES))* (GFR* ((GFQ+ (((GFQ== AGN) as u8 as f64)* AGO)).powf(staged[729])));
 		GFU=GFS;
 		GFV=GFT;
 		}
@@ -22056,7 +22072,7 @@ impl Instance {
 		}else{
 		let GIV=(GIS- FOS)* GDX;
 		let GIW=GIV.powf(GEB);
-		let GIX=((FOZ* AL)* GDX)* (GEB* ((GIV+ (((GIV== AGN) as u8 as f64)* AGO)).powf(staged[729])));
+		let GIX=((FOZ* AL)* GDX)* (GEB* ((GIV+ (((GIV== AGN) as u8 as f64)* AGO)).powf(staged[730])));
 		GIY=GIW;
 		GIZ=GIX;
 		}
@@ -22165,7 +22181,7 @@ impl Instance {
 		}else{
 		let GLO=CF- (FOU* FJA);
 		let GLP=GLO.powf(FJE);
-		let GLQ=((FPB* FJA)* AL)* (FJE* ((GLO+ (((GLO== AGN) as u8 as f64)* AGO)).powf(staged[730])));
+		let GLQ=((FPB* FJA)* AL)* (FJE* ((GLO+ (((GLO== AGN) as u8 as f64)* AGO)).powf(staged[731])));
 		GLR=GLP;
 		GLS=GLQ;
 		}
@@ -22268,7 +22284,7 @@ impl Instance {
 		}else{
 		let GNZ=GMS* GNW;
 		let GOB=GNZ.powf(GOA);
-		let GOC=(GMT* GNW)* (GOA* ((GNZ+ (((GNZ== AGN) as u8 as f64)* AGO)).powf(staged[731])));
+		let GOC=(GMT* GNW)* (GOA* ((GNZ+ (((GNZ== AGN) as u8 as f64)* AGO)).powf(staged[732])));
 		GOD=GOB;
 		GOE=GOC;
 		}
@@ -22325,7 +22341,7 @@ impl Instance {
 		}else{
 		let GPP=CF+ (GOR* GPG);
 		let GPR=GPP.powf(GPQ);
-		let GPS=((GOS* GPG)+ (GPH* GOR))* (GPQ* ((GPP+ (((GPP== AGN) as u8 as f64)* AGO)).powf(staged[732])));
+		let GPS=((GOS* GPG)+ (GPH* GOR))* (GPQ* ((GPP+ (((GPP== AGN) as u8 as f64)* AGO)).powf(staged[733])));
 		GPT=GPR;
 		GPU=GPS;
 		}
@@ -22443,7 +22459,7 @@ impl Instance {
 		}else{
 		let GSU=(GSR- FOS)* GNW;
 		let GSV=GSU.powf(GOA);
-		let GSW=((FOZ* AL)* GNW)* (GOA* ((GSU+ (((GSU== AGN) as u8 as f64)* AGO)).powf(staged[733])));
+		let GSW=((FOZ* AL)* GNW)* (GOA* ((GSU+ (((GSU== AGN) as u8 as f64)* AGO)).powf(staged[734])));
 		GSX=GSV;
 		GSY=GSW;
 		}
@@ -22664,7 +22680,7 @@ impl Instance {
 		}else{
 		let GYM=CF- (FOU* FKA);
 		let GYN=GYM.powf(FKE);
-		let GYO=((FPB* FKA)* AL)* (FKE* ((GYM+ (((GYM== AGN) as u8 as f64)* AGO)).powf(staged[734])));
+		let GYO=((FPB* FKA)* AL)* (FKE* ((GYM+ (((GYM== AGN) as u8 as f64)* AGO)).powf(staged[735])));
 		GYP=GYN;
 		GYQ=GYO;
 		}
@@ -22700,9 +22716,9 @@ impl Instance {
 		let GYU=L4([CM[0],CM[1],CM[2],0.0])+ L4([0.0,CL[0],CL[1],CL[2]]);
 		let GYV=GYU* GYT;
 		let GYW=((GYT* GYT)+ 1e-6f64).sqrt();
-		let GYX=DG* (GYT+ GYW);
+		let GYX=DG* ((GYT+ C)+ GYW);
 		let GZA=GYZ* ((GYX.powf(GYY))- staged[654]);
-		let GZB=(((GYU+ ((GYV+ GYV)* (CU/ (CT* GYW))))* DG)* (GYY* ((GYX+ (((GYX== AGN) as u8 as f64)* AGO)).powf(staged[735]))))* GYZ;
+		let GZB=(((GYU+ ((GYV+ GYV)* (CU/ (CT* GYW))))* DG)* (GYY* ((GYX+ (((GYX== AGN) as u8 as f64)* AGO)).powf(staged[736]))))* GYZ;
 		let GZD=GZC+ GZA;
 		let GZE=CF/ GZD;
 		let GZF=((GZB* GZE)* AL)/ GZD;
@@ -22730,9 +22746,9 @@ impl Instance {
 		let GZT=L4([CM[0],CM[1],CM[2],0.0])+ L4([0.0,CL[0],CL[1],CL[2]]);
 		let GZU=GZT* GZS;
 		let GZV=((GZS* GZS)+ 1e-6f64).sqrt();
-		let GZW=DG* (GZS+ GZV);
+		let GZW=DG* ((GZS+ C)+ GZV);
 		let HAA=GZZ* (CF+ (GZY* ((GZW.powf(GZX))- staged[657])));
-		let HAB=((((GZT+ ((GZU+ GZU)* (CU/ (CT* GZV))))* DG)* (GZX* ((GZW+ (((GZW== AGN) as u8 as f64)* AGO)).powf(staged[736]))))* GZY)* GZZ;
+		let HAB=((((GZT+ ((GZU+ GZU)* (CU/ (CT* GZV))))* DG)* (GZX* ((GZW+ (((GZW== AGN) as u8 as f64)* AGO)).powf(staged[737]))))* GZY)* GZZ;
 		HAC=HAA;
 		HAD=HAB;
 		}else{
@@ -22871,7 +22887,7 @@ impl Instance {
 		let HEC=(BJ- ((HDZ+ HDZ)* (CU/ (CT* HEA))))* DG;
 		let HED=BJ* BE;
 		let HEE=((BE* BE)+ 4e-12f64).sqrt();
-		let HEF=DG* (BE- HEE);
+		let HEF=DG* ((BE+ C)- HEE);
 		let HEG=(BJ- ((HED+ HED)* (CU/ (CT* HEE))))* DG;
 		let HEH=L4([0.0,HBX[0],0.0,HBX[1]]);
 		let HEI=L4([0.0,HDW[0],0.0,HDW[1]]);
@@ -23005,7 +23021,7 @@ impl Instance {
 		}else{
 		let HGS=HFL* HGP;
 		let HGU=HGS.powf(HGT);
-		let HGV=(HFM* HGP)* (HGT* ((HGS+ (((HGS== AGN) as u8 as f64)* AGO)).powf(staged[737])));
+		let HGV=(HFM* HGP)* (HGT* ((HGS+ (((HGS== AGN) as u8 as f64)* AGO)).powf(staged[738])));
 		HGW=HGU;
 		HGX=HGV;
 		}
@@ -23062,7 +23078,7 @@ impl Instance {
 		}else{
 		let HII=CF+ (HHK* HHZ);
 		let HIK=HII.powf(HIJ);
-		let HIL=((HHL* HHZ)+ (HIA* HHK))* (HIJ* ((HII+ (((HII== AGN) as u8 as f64)* AGO)).powf(staged[738])));
+		let HIL=((HHL* HHZ)+ (HIA* HHK))* (HIJ* ((HII+ (((HII== AGN) as u8 as f64)* AGO)).powf(staged[739])));
 		HIM=HIK;
 		HIN=HIL;
 		}
@@ -23180,7 +23196,7 @@ impl Instance {
 		}else{
 		let HLN=(HLK- HAZ)* HGP;
 		let HLO=HLN.powf(HGT);
-		let HLP=((HBG* AL)* HGP)* (HGT* ((HLN+ (((HLN== AGN) as u8 as f64)* AGO)).powf(staged[739])));
+		let HLP=((HBG* AL)* HGP)* (HGT* ((HLN+ (((HLN== AGN) as u8 as f64)* AGO)).powf(staged[740])));
 		HLQ=HLO;
 		HLR=HLP;
 		}
@@ -23289,7 +23305,7 @@ impl Instance {
 		}else{
 		let HOG=CF- (HBB* FKS);
 		let HOH=HOG.powf(FKW);
-		let HOI=((HBI* FKS)* AL)* (FKW* ((HOG+ (((HOG== AGN) as u8 as f64)* AGO)).powf(staged[740])));
+		let HOI=((HBI* FKS)* AL)* (FKW* ((HOG+ (((HOG== AGN) as u8 as f64)* AGO)).powf(staged[741])));
 		HOJ=HOH;
 		HOK=HOI;
 		}
@@ -23392,7 +23408,7 @@ impl Instance {
 		}else{
 		let HQL=HPE* HQI;
 		let HQN=HQL.powf(HQM);
-		let HQO=(HPF* HQI)* (HQM* ((HQL+ (((HQL== AGN) as u8 as f64)* AGO)).powf(staged[741])));
+		let HQO=(HPF* HQI)* (HQM* ((HQL+ (((HQL== AGN) as u8 as f64)* AGO)).powf(staged[742])));
 		HQP=HQN;
 		HQQ=HQO;
 		}
@@ -23449,7 +23465,7 @@ impl Instance {
 		}else{
 		let HSB=CF+ (HRD* HRS);
 		let HSD=HSB.powf(HSC);
-		let HSE=((HRE* HRS)+ (HRT* HRD))* (HSC* ((HSB+ (((HSB== AGN) as u8 as f64)* AGO)).powf(staged[742])));
+		let HSE=((HRE* HRS)+ (HRT* HRD))* (HSC* ((HSB+ (((HSB== AGN) as u8 as f64)* AGO)).powf(staged[743])));
 		HSF=HSD;
 		HSG=HSE;
 		}
@@ -23567,7 +23583,7 @@ impl Instance {
 		}else{
 		let HVG=(HVD- HAZ)* HQI;
 		let HVH=HVG.powf(HQM);
-		let HVI=((HBG* AL)* HQI)* (HQM* ((HVG+ (((HVG== AGN) as u8 as f64)* AGO)).powf(staged[743])));
+		let HVI=((HBG* AL)* HQI)* (HQM* ((HVG+ (((HVG== AGN) as u8 as f64)* AGO)).powf(staged[744])));
 		HVJ=HVH;
 		HVK=HVI;
 		}
@@ -23676,7 +23692,7 @@ impl Instance {
 		}else{
 		let HXZ=CF- (HBB* FLJ);
 		let HYA=HXZ.powf(FLN);
-		let HYB=((HBI* FLJ)* AL)* (FLN* ((HXZ+ (((HXZ== AGN) as u8 as f64)* AGO)).powf(staged[744])));
+		let HYB=((HBI* FLJ)* AL)* (FLN* ((HXZ+ (((HXZ== AGN) as u8 as f64)* AGO)).powf(staged[745])));
 		HYC=HYA;
 		HYD=HYB;
 		}
@@ -23763,7 +23779,7 @@ impl Instance {
 		}else{
 		let IAB=HYU* HZY;
 		let IAD=IAB.powf(IAC);
-		let IAE=(HYV* HZY)* (IAC* ((IAB+ (((IAB== AGN) as u8 as f64)* AGO)).powf(staged[745])));
+		let IAE=(HYV* HZY)* (IAC* ((IAB+ (((IAB== AGN) as u8 as f64)* AGO)).powf(staged[746])));
 		IAF=IAD;
 		IAG=IAE;
 		}
@@ -23820,7 +23836,7 @@ impl Instance {
 		}else{
 		let IBR=CF+ (IAT* IBI);
 		let IBT=IBR.powf(IBS);
-		let IBU=((IAU* IBI)+ (IBJ* IAT))* (IBS* ((IBR+ (((IBR== AGN) as u8 as f64)* AGO)).powf(staged[746])));
+		let IBU=((IAU* IBI)+ (IBJ* IAT))* (IBS* ((IBR+ (((IBR== AGN) as u8 as f64)* AGO)).powf(staged[747])));
 		IBV=IBT;
 		IBW=IBU;
 		}
@@ -23938,7 +23954,7 @@ impl Instance {
 		}else{
 		let IEX=(IEU- HAZ)* HZY;
 		let IEY=IEX.powf(IAC);
-		let IEZ=((HBG* AL)* HZY)* (IAC* ((IEX+ (((IEX== AGN) as u8 as f64)* AGO)).powf(staged[747])));
+		let IEZ=((HBG* AL)* HZY)* (IAC* ((IEX+ (((IEX== AGN) as u8 as f64)* AGO)).powf(staged[748])));
 		IFA=IEY;
 		IFB=IEZ;
 		}
@@ -24160,7 +24176,7 @@ impl Instance {
 		}else{
 		let IKQ=CF- (HBB* FME);
 		let IKR=IKQ.powf(FMI);
-		let IKS=((HBI* FME)* AL)* (FMI* ((IKQ+ (((IKQ== AGN) as u8 as f64)* AGO)).powf(staged[748])));
+		let IKS=((HBI* FME)* AL)* (FMI* ((IKQ+ (((IKQ== AGN) as u8 as f64)* AGO)).powf(staged[749])));
 		IKT=IKR;
 		IKU=IKS;
 		}
@@ -24247,78 +24263,78 @@ impl Instance {
 		let IMH;
 		if FBS{
 		let ILA=(IKX* IKY)* IKZ;
-		let ILB=ILA* CJX;
-		let ILC=CJY* ILA;
-		let ILD=ILA* (BHI+ CCX);
-		let ILE=(BHL+ CCY)* ILA;
-		let ILF=ILA* BJR;
-		let ILG=BJW* ILA;
-		let ILH=ILA* BJS;
-		let ILI=BJX* ILA;
-		ILS=ILB;
-		ILT=ILD;
-		ILU=ILF;
-		ILV=ILH;
+		let ILB=CJY* ILA;
+		let ILC=C+ (ILA* CJX);
+		let ILD=(BHL+ CCY)* ILA;
+		let ILE=C+ (ILA* (BHI+ CCX));
+		let ILF=BJW* ILA;
+		let ILG=C+ (ILA* BJR);
+		let ILH=BJX* ILA;
+		let ILI=C+ (ILA* BJS);
+		ILS=ILC;
+		ILT=ILE;
+		ILU=ILG;
+		ILV=ILI;
 		ILW=C;
 		ILX=C;
 		ILY=C;
 		ILZ=C;
-		IMA=ILC;
-		IMB=ILE;
-		IMC=ILG;
-		IMD=ILI;
+		IMA=ILB;
+		IMB=ILD;
+		IMC=ILF;
+		IMD=ILH;
 		IME=GS;
 		IMF=GS;
 		IMG=GS;
 		IMH=GS;
 		}else{
 		let ILJ=(IKX* IKY)* IKZ;
-		let ILK=ILJ* CJX;
-		let ILL=CJY* ILJ;
-		let ILM=ILJ* (BHI+ CCX);
-		let ILN=(BHL+ CCY)* ILJ;
-		let ILO=ILJ* BJR;
-		let ILP=BJW* ILJ;
-		let ILQ=ILJ* BJS;
-		let ILR=BJX* ILJ;
+		let ILK=CJY* ILJ;
+		let ILL=C+ (ILJ* CJX);
+		let ILM=(BHL+ CCY)* ILJ;
+		let ILN=C+ (ILJ* (BHI+ CCX));
+		let ILO=BJW* ILJ;
+		let ILP=C+ (ILJ* BJR);
+		let ILQ=BJX* ILJ;
+		let ILR=C+ (ILJ* BJS);
 		ILS=C;
 		ILT=C;
 		ILU=C;
 		ILV=C;
-		ILW=ILK;
-		ILX=ILM;
-		ILY=ILO;
-		ILZ=ILQ;
+		ILW=ILL;
+		ILX=ILN;
+		ILY=ILP;
+		ILZ=ILR;
 		IMA=GS;
 		IMB=GS;
 		IMC=GS;
 		IMD=GS;
-		IME=ILL;
-		IMF=ILN;
-		IMG=ILP;
-		IMH=ILR;
+		IME=ILK;
+		IMF=ILM;
+		IMG=ILO;
+		IMH=ILQ;
 		}
-		let IMJ=IMI* BJT;
-		let IMK=BJY* IMI;
-		let IML=IMI* BJU;
-		let IMM=BJZ* IMI;
-		let IMN=IMI* BJV;
-		let IMO=BKA* IMI;
-		let IMP=IMI* BYA;
-		let IMQ=BYC* IMI;
-		let IMR=IMI* BYB;
-		let IMS=BYD* IMI;
-		let IMT=IMI* FBC;
-		let IMU=FBK* IMI;
-		let IMV=IMI* FBD;
-		let IMW=FBL* IMI;
+		let IMJ=BJY* IMI;
+		let IMK=C+ (IMI* BJT);
+		let IML=BJZ* IMI;
+		let IMM=C+ (IMI* BJU);
+		let IMN=BKA* IMI;
+		let IMO=C+ (IMI* BJV);
+		let IMP=BYC* IMI;
+		let IMQ=C+ (IMI* BYA);
+		let IMR=BYD* IMI;
+		let IMS=C+ (IMI* BYB);
+		let IMT=FBK* IMI;
+		let IMU=C+ (IMI* FBC);
+		let IMV=FBL* IMI;
+		let IMW=C+ (IMI* FBD);
 		let INB;
 		let INC;
 		if N{
-		let IMY=IMX* (node_potentials[1]- W);
-		let IMZ=(L2([1f64,0.0])- L2([0.0,1f64]))* IMX;
-		INB=IMY;
-		INC=IMZ;
+		let IMY=(L2([1f64,0.0])- L2([0.0,1f64]))* IMX;
+		let IMZ=C+ (IMX* (node_potentials[1]- W));
+		INB=IMZ;
+		INC=IMY;
 		}else{
 		INB=C;
 		INC=INA;
@@ -24326,10 +24342,10 @@ impl Instance {
 		let INH;
 		let INI;
 		if O{
-		let INE=IND* (node_potentials[2]- X);
-		let INF=(L2([1f64,0.0])- L2([0.0,Z]))* IND;
-		INH=INE;
-		INI=INF;
+		let INE=(L2([1f64,0.0])- L2([0.0,Z]))* IND;
+		let INF=C+ (IND* (node_potentials[2]- X));
+		INH=INF;
+		INI=INE;
 		}else{
 		INH=C;
 		INI=ING;
@@ -24337,10 +24353,10 @@ impl Instance {
 		let INN;
 		let INO;
 		if P{
-		let INK=INJ* (node_potentials[0]- AB);
-		let INL=(L2([1f64,0.0])- L2([0.0,AD]))* INJ;
-		INN=INK;
-		INO=INL;
+		let INK=(L2([1f64,0.0])- L2([0.0,AD]))* INJ;
+		let INL=C+ (INJ* (node_potentials[0]- AB));
+		INN=INL;
+		INO=INK;
 		}else{
 		INN=C;
 		INO=INM;
@@ -24348,10 +24364,10 @@ impl Instance {
 		let INU;
 		let INV;
 		if Q{
-		let INR=INQ* (AF- INP);
-		let INS=(L2([AH,0.0])- L2([0.0,1f64]))* INQ;
-		INU=INR;
-		INV=INS;
+		let INR=(L2([AH,0.0])- L2([0.0,1f64]))* INQ;
+		let INS=C+ (INQ* (AF- INP));
+		INU=INS;
+		INV=INR;
 		}else{
 		INU=C;
 		INV=INT;
@@ -24359,10 +24375,10 @@ impl Instance {
 		let IOA;
 		let IOB;
 		if R{
-		let INX=INW* (AJ- INP);
-		let INY=(L2([0.0,1f64])- L2([1f64,0.0]))* INW;
-		IOA=INX;
-		IOB=INY;
+		let INX=(L2([0.0,1f64])- L2([1f64,0.0]))* INW;
+		let INY=C+ (INW* (AJ- INP));
+		IOA=INY;
+		IOB=INX;
 		}else{
 		IOA=C;
 		IOB=INZ;
@@ -24370,10 +24386,10 @@ impl Instance {
 		let IOG;
 		let IOH;
 		if S{
-		let IOD=IOC* (AN- INP);
-		let IOE=(L2([0.0,1f64])- L2([1f64,0.0]))* IOC;
-		IOG=IOD;
-		IOH=IOE;
+		let IOD=(L2([0.0,1f64])- L2([1f64,0.0]))* IOC;
+		let IOE=C+ (IOC* (AN- INP));
+		IOG=IOE;
+		IOH=IOD;
 		}else{
 		IOG=C;
 		IOH=IOF;
@@ -24381,19 +24397,19 @@ impl Instance {
 		let IOM;
 		let ION;
 		if T{
-		let IOJ=IOI* (node_potentials[3]- INP);
-		let IOK=(L2([1f64,0.0])- L2([0.0,1f64]))* IOI;
-		IOM=IOJ;
-		ION=IOK;
+		let IOJ=(L2([1f64,0.0])- L2([0.0,1f64]))* IOI;
+		let IOK=C+ (IOI* (node_potentials[3]- INP));
+		IOM=IOK;
+		ION=IOJ;
 		}else{
 		IOM=C;
 		ION=IOL;
 		}
 		let IOO=IKZ* D;
-		let IOP=IOO* (AB- AF);
-		let IOQ=(L2([AD,0.0])- L2([0.0,AH]))* IOO;
-		let IOR=IOO* (X- AF);
-		let IOS=(L2([Z,0.0])- L2([0.0,AH]))* IOO;
+		let IOP=(L2([AD,0.0])- L2([0.0,AH]))* IOO;
+		let IOQ=C+ (IOO* (AB- AF));
+		let IOR=(L2([Z,0.0])- L2([0.0,AH]))* IOO;
+		let IOS=C+ (IOO* (X- AF));
 		let IOT=-((ESJ+ ESK)+ ESL);
 		let IOU=((ESM+ ESN)+ ESO)* AL;
 		let IOV=EZF+ ESQ;
@@ -24418,53 +24434,53 @@ impl Instance {
 		let IPI=ESM* IPG;
 		let IPJ=ddt(0, IPH);
 		let IPL=IPI* IPK;
-		let IPM=IPG* ESK;
-		let IPN=ESN* IPG;
-		let IPO=ddt(1, IPM);
-		let IPP=IPN* IPK;
-		let IPQ=IPG* IPE;
-		let IPR=IPF* IPG;
-		let IPS=ddt(2, IPQ);
-		let IPT=IPR* IPK;
-		let IPU=IPG* IOV;
-		let IPV=IOW* IPG;
-		let IPW=ddt(3, IPU);
-		let IPX=IPV* IPK;
-		let IPY=IPG* IOX;
-		let IPZ=IOY* IPG;
-		let IQA=ddt(4, IPY);
-		let IQB=IPZ* IPK;
-		let IQC=IPG* EZC;
-		let IQD=EZD* IPG;
-		let IQE=ddt(5, IQC);
+		let IPM=C+ IPJ;
+		let IPN=IPG* ESK;
+		let IPO=ESN* IPG;
+		let IPP=ddt(1, IPN);
+		let IPQ=IPO* IPK;
+		let IPR=C+ IPP;
+		let IPS=IPG* IPE;
+		let IPT=IPF* IPG;
+		let IPU=ddt(2, IPS);
+		let IPV=IPT* IPK;
+		let IPW=C+ IPU;
+		let IPX=IPG* IOV;
+		let IPY=IOW* IPG;
+		let IPZ=ddt(3, IPX);
+		let IQA=IPY* IPK;
+		let IQB=C+ IPZ;
+		let IQC=IPG* IOX;
+		let IQD=IOY* IPG;
+		let IQE=ddt(4, IQC);
 		let IQF=IQD* IPK;
-		let IQG=IPG* IOZ;
-		let IQH=IPA* IPG;
-		let IQI=ddt(6, IQG);
-		let IQJ=IQH* IPK;
-		let IQK=IPG* IPB;
-		let IQL=IPC* IPG;
-		let IQM=ddt(7, IQK);
-		let IQN=IQL* IPK;
-		let IQO=EOM* CMH;
-		let IQP=(EON* CMH)+ (CMY* EOM);
-		let IQQ=PI&& (staged[713]!=0.0);
-		let IQR;
-		let IQS;
-		let IQT;
-		let IQU;
-		let IQV;
-		let IQW;
-		if IQQ{
-		let IQX=IKZ> C;
-		let IRQ;
-		let IRR;
-		let IRS;
-		let IRT;
-		let IRU;
-		let IRV;
-		let IRW;
-		let IRX;
+		let IQG=C+ IQE;
+		let IQH=IPG* EZC;
+		let IQI=EZD* IPG;
+		let IQJ=ddt(5, IQH);
+		let IQK=IQI* IPK;
+		let IQL=C+ IQJ;
+		let IQM=IPG* IOZ;
+		let IQN=IPA* IPG;
+		let IQO=ddt(6, IQM);
+		let IQP=IQN* IPK;
+		let IQQ=C+ IQO;
+		let IQR=IPG* IPB;
+		let IQS=IPC* IPG;
+		let IQT=ddt(7, IQR);
+		let IQU=IQS* IPK;
+		let IQV=C+ IQT;
+		let IQW=EOM* CMH;
+		let IQX=(EON* CMH)+ (CMY* EOM);
+		let IQY=PI&& (staged[713]!=0.0);
+		let IQZ;
+		let IRA;
+		let IRB;
+		let IRC;
+		let IRD;
+		let IRE;
+		if IQY{
+		let IRF=IKZ> C;
 		let IRY;
 		let IRZ;
 		let ISA;
@@ -24473,509 +24489,519 @@ impl Instance {
 		let ISD;
 		let ISE;
 		let ISF;
-		if IQX{
-		let IQY=AIJ/ AIH;
-		let IQZ=(AIZ- (AIX* IQY))/ AIH;
-		let IRA=AII/ AIJ;
-		let IRB=(AIY- (AIZ* IRA))/ AIJ;
-		let IRC=AID/ IQY;
-		let IRE=IRD* IRC;
-		let IRF=((AIT- (IQZ* IRC))/ IQY)* IRD;
-		let IRG=IRE* IRE;
-		let IRH=IRF* IRE;
-		let IRI=IRH+ IRH;
-		let IRJ=IQY/ BHH;
-		let IRK=(IQZ- (BHK* IRJ))/ BHH;
-		let IRL=IRJ- CF;
-		let IRM=CF- (SK* (IRL* IRG));
-		let IRN=(((IRK* IRG)+ (IRI* IRL))* SK)* AL;
-		let IRP=IRM> IRO;
+		let ISG;
+		let ISH;
 		let ISI;
 		let ISJ;
-		if IRP{
-		ISI=IRM;
-		ISJ=IRN;
+		let ISK;
+		let ISL;
+		let ISM;
+		let ISN;
+		if IRF{
+		let IRG=AIJ/ AIH;
+		let IRH=(AIZ- (AIX* IRG))/ AIH;
+		let IRI=AII/ AIJ;
+		let IRJ=(AIY- (AIZ* IRI))/ AIJ;
+		let IRK=AID/ IRG;
+		let IRM=IRL* IRK;
+		let IRN=((AIT- (IRH* IRK))/ IRG)* IRL;
+		let IRO=IRM* IRM;
+		let IRP=IRN* IRM;
+		let IRQ=IRP+ IRP;
+		let IRR=IRG/ BHH;
+		let IRS=(IRH- (BHK* IRR))/ BHH;
+		let IRT=IRR- CF;
+		let IRU=CF- (SK* (IRT* IRO));
+		let IRV=(((IRS* IRO)+ (IRQ* IRT))* SK)* AL;
+		let IRX=IRU> IRW;
+		let ISQ;
+		let ISR;
+		if IRX{
+		ISQ=IRU;
+		ISR=IRV;
 		}else{
-		ISI=IRO;
-		ISJ=GS;
+		ISQ=IRW;
+		ISR=GS;
 		}
-		let ISK=ISI* ISI;
-		let ISL=ISJ* ISI;
-		let ISM=CF/ ISK;
-		let ISN=(((ISL+ ISL)* ISM)* AL)/ ISK;
-		let ISO=BIF* AIJ;
-		let ISP=ISO* BHJ;
-		let ISQ=((AIZ* BIF)* BHJ)+ (BHM* ISO);
-		let ISR=CF+ IRA;
-		let ISS=ISR* IRG;
-		let IST=(IRA+ (SK* IRG))- (24f64* (ISS* IRL));
-		let ISU=(IRB+ (IRI* SK))- (((((IRB* IRG)+ (IRI* ISR))* IRL)+ (IRK* ISS))* 24f64);
-		let ISV=IST> VH;
-		let ISW;
-		let ISX;
-		if ISV{
-		ISW=IST;
-		ISX=ISU;
+		let ISS=ISQ* ISQ;
+		let IST=ISR* ISQ;
+		let ISU=CF/ ISS;
+		let ISV=(((IST+ IST)* ISU)* AL)/ ISS;
+		let ISW=BIF* AIJ;
+		let ISX=ISW* BHJ;
+		let ISY=((AIZ* BIF)* BHJ)+ (BHM* ISW);
+		let ISZ=CF+ IRI;
+		let ITA=ISZ* IRO;
+		let ITB=(IRI+ (SK* IRO))- (24f64* (ITA* IRT));
+		let ITC=(IRJ+ (IRQ* SK))- (((((IRJ* IRO)+ (IRQ* ISZ))* IRT)+ (IRS* ITA))* 24f64);
+		let ITD=ITB> VH;
+		let ITE;
+		let ITF;
+		if ITD{
+		ITE=ITB;
+		ITF=ITC;
 		}else{
-		ISW=VH;
-		ISX=GS;
+		ITE=VH;
+		ITF=GS;
 		}
-		let ISY=ISP* ISM;
-		let ISZ=ISY* ISW;
-		let ITA=(((ISQ* ISM)+ (ISN* ISP))* ISW)+ (ISX* ISY);
-		let ITC=ITB> C;
-		let ITK;
-		let ITL;
-		let ITM;
-		let ITN;
-		if ITC{
-		let ITD=AIO/ AIM;
-		let ITE=(AJE- (AJC* ITD))/ AIM;
-		let ITF=ITD* ITD;
-		let ITG=ITE* ITD;
-		let ITH=ITF* AID;
-		let ITI=ITH* AID;
-		let ITJ=((((ITG+ ITG)* AID)+ (AIT* ITF))* AID)+ (AIT* ITH);
+		let ITG=ISX* ISU;
+		let ITH=ITG* ITE;
+		let ITI=(((ISY* ISU)+ (ISV* ISX))* ITE)+ (ITF* ITG);
+		let ITK=ITJ> C;
+		let ITS;
 		let ITT;
 		let ITU;
+		let ITV;
+		if ITK{
+		let ITL=AIO/ AIM;
+		let ITM=(AJE- (AJC* ITL))/ AIM;
+		let ITN=ITL* ITL;
+		let ITO=ITM* ITL;
+		let ITP=ITN* AID;
+		let ITQ=ITP* AID;
+		let ITR=((((ITO+ ITO)* AID)+ (AIT* ITN))* AID)+ (AIT* ITP);
+		let IUB;
+		let IUC;
 		if H{
-		let ITQ=CF+ (ITD* AID);
-		let ITR=ITI/ ITQ;
-		let ITS=(ITJ- (((ITE* AID)+ (AIT* ITD))* ITR))/ ITQ;
-		ITT=ITR;
-		ITU=ITS;
+		let ITY=CF+ (ITL* AID);
+		let ITZ=ITQ/ ITY;
+		let IUA=(ITR- (((ITM* AID)+ (AIT* ITL))* ITZ))/ ITY;
+		IUB=ITZ;
+		IUC=IUA;
 		}else{
-		ITT=ITI;
-		ITU=ITJ;
+		IUB=ITQ;
+		IUC=ITR;
 		}
-		let ITV=(CF+ (DX* ITT)).sqrt();
-		let ITW=CF+ ITV;
-		let ITX=DG* (AIM* ITW);
-		let ITY=ITX* ISI;
-		let ITZ=AIM/ ITY;
-		let IUA=(AJC- ((((((AJC* ITW)+ (((ITU* DX)* (CU/ (CT* ITV)))* AIM))* DG)* ISI)+ (ISJ* ITX))* ITZ))/ ITY;
-		let IUC=IUB* BHI;
-		let IUD=IUC* AIA;
-		let IUE=IUD* ITZ;
-		let IUF=IUE* ITZ;
-		let IUG=((((((BHL* IUB)* AIA)+ (AIQ* IUC))* ITZ)+ (IUA* IUD))* ITZ)+ (IUA* IUE);
-		let IUI=ISZ+ (IUF/ IUH);
-		let IUJ=ITA+ (IUG/ IUH);
-		ITK=IUI;
-		ITL=IUF;
-		ITM=IUJ;
-		ITN=IUG;
+		let IUD=(CF+ (DX* IUB)).sqrt();
+		let IUE=CF+ IUD;
+		let IUF=DG* (AIM* IUE);
+		let IUG=IUF* ISQ;
+		let IUH=AIM/ IUG;
+		let IUI=(AJC- ((((((AJC* IUE)+ (((IUC* DX)* (CU/ (CT* IUD)))* AIM))* DG)* ISQ)+ (ISR* IUF))* IUH))/ IUG;
+		let IUK=IUJ* BHI;
+		let IUL=IUK* AIA;
+		let IUM=IUL* IUH;
+		let IUN=IUM* IUH;
+		let IUO=((((((BHL* IUJ)* AIA)+ (AIQ* IUK))* IUH)+ (IUI* IUL))* IUH)+ (IUI* IUM);
+		let IUQ=ITH+ (IUN/ IUP);
+		let IUR=ITI+ (IUO/ IUP);
+		ITS=IUQ;
+		ITT=IUN;
+		ITU=IUR;
+		ITV=IUO;
 		}else{
-		ITK=ISZ;
-		ITL=C;
-		ITM=ITA;
-		ITN=GS;
+		ITS=ITH;
+		ITT=C;
+		ITU=ITI;
+		ITV=GS;
 		}
-		let ITO=(ISG* ITK).sqrt();
-		let ITP=(ITM* ISG)* (CU/ (CT* ITO));
-		IRQ=IRA;
-		IRR=IRG;
-		IRS=IRL;
-		IRT=ISM;
-		IRU=ISP;
-		IRV=IRE;
-		IRW=ITL;
-		IRX=ITO;
-		IRY=IRB;
-		IRZ=IRI;
-		ISA=IRK;
-		ISB=ISN;
-		ISC=ISQ;
-		ISD=IRF;
-		ISE=ITN;
-		ISF=ITP;
+		let ITW=(ISO* ITS).sqrt();
+		let ITX=(ITU* ISO)* (CU/ (CT* ITW));
+		IRY=IRI;
+		IRZ=IRO;
+		ISA=IRT;
+		ISB=ISU;
+		ISC=ISX;
+		ISD=IRM;
+		ISE=ITT;
+		ISF=ITW;
+		ISG=IRJ;
+		ISH=IRQ;
+		ISI=IRS;
+		ISJ=ISV;
+		ISK=ISY;
+		ISL=IRN;
+		ISM=ITV;
+		ISN=ITX;
 		}else{
-		IRQ=C;
-		IRR=C;
-		IRS=C;
-		IRT=C;
-		IRU=C;
-		IRV=C;
-		IRW=C;
-		IRX=C;
-		IRY=GS;
-		IRZ=GS;
-		ISA=GS;
-		ISB=GS;
-		ISC=GS;
-		ISD=GS;
-		ISE=GS;
-		ISF=GS;
+		IRY=C;
+		IRZ=C;
+		ISA=C;
+		ISB=C;
+		ISC=C;
+		ISD=C;
+		ISE=C;
+		ISF=C;
+		ISG=GS;
+		ISH=GS;
+		ISI=GS;
+		ISJ=GS;
+		ISK=GS;
+		ISL=GS;
+		ISM=GS;
+		ISN=GS;
 		}
-		let ISH=(((parameters[50]== CF)&& (ISG> C))&& IQX)&& (parameters[33]> C);
-		let IUT;
-		let IUU;
-		let IUV;
-		let IUW;
-		let IUX;
-		let IUY;
-		if ISH{
-		let IUK=SK* IRR;
-		let IUL=IRZ* SK;
-		let IUM=(IRQ+ ADZ)- IUK;
-		let IUN=(IRY- IUL)* IRR;
-		let IUO=(IRQ+ CF)- IUK;
-		let IUP=IRR* IUO;
-		let IUQ=((IRQ/ SK)- (IRR* IUM))- (1.6f64* (IUP* IRS));
-		let IUR=((IRY/ SK)- ((IRZ* IUM)+ IUN))- (((((IRZ* IUO)+ IUN)* IRS)+ (ISA* IUP))* 1.6f64);
-		let IUS=IUQ> VH;
-		let IUZ;
-		let IVA;
-		if IUS{
-		IUZ=IUQ;
-		IVA=IUR;
+		let ISP=(((parameters[50]== CF)&& (ISO> C))&& IRF)&& (parameters[33]> C);
+		let IVB;
+		let IVC;
+		let IVD;
+		let IVE;
+		let IVF;
+		let IVG;
+		if ISP{
+		let IUS=SK* IRZ;
+		let IUT=ISH* SK;
+		let IUU=(IRY+ ADZ)- IUS;
+		let IUV=(ISG- IUT)* IRZ;
+		let IUW=(IRY+ CF)- IUS;
+		let IUX=IRZ* IUW;
+		let IUY=((IRY/ SK)- (IRZ* IUU))- (1.6f64* (IUX* ISA));
+		let IUZ=((ISG/ SK)- ((ISH* IUU)+ IUV))- (((((ISH* IUW)+ IUV)* ISA)+ (ISI* IUX))* 1.6f64);
+		let IVA=IUY> VH;
+		let IVH;
+		let IVI;
+		if IVA{
+		IVH=IUY;
+		IVI=IUZ;
 		}else{
-		IUZ=VH;
-		IVA=GS;
+		IVH=VH;
+		IVI=GS;
 		}
-		let IVB=IRT/ IRU;
-		let IVC=IVB* IUZ;
-		let IVD=(((ISB- (ISC* IVB))/ IRU)* IUZ)+ (IVA* IVB);
-		let IVE=IRT* IRV;
-		let IVF=(IRQ+ (19.2f64* IRR))- (SK* (IRQ* IRR));
-		let IVG=(CF- IUK)- (IVF* IRS);
-		let IVH=IVE* IVG;
-		let IVI=(((ISB* IRV)+ (ISD* IRT))* IVG)+ (((IUL* AL)- ((((IRY+ (IRZ* 19.2f64))- (((IRY* IRR)+ (IRZ* IRQ))* SK))* IRS)+ (ISA* IVF)))* IVE);
-		let IVJ=EOY* EOY;
-		let IVK=EPD* EOY;
-		let IVL=IVJ* EOM;
-		let IVM=EOZ* EOZ;
-		let IVN=EPE* EOZ;
-		let IVO=(IVL* CMH)/ IVM;
-		let IVP=((((((IVK+ IVK)* EOM)+ (EON* IVJ))* CMH)+ (CMY* IVL))- ((IVN+ IVN)* IVO))/ IVM;
-		let IVQ=ITB> C;
-		let IWD;
-		let IWE;
-		let IWF;
-		let IWG;
-		if IVQ{
-		let IVR=CF+ IUK;
-		let IVS=SK* IRU;
-		let IVT=(IVS* IRU)* IUH;
-		let IVU=(IRW* IVR)/ IVT;
-		let IVV=IVC+ IVU;
-		let IVW=IVD+ ((((ISE* IVR)+ (IUL* IRW))- (((((ISC* SK)* IRU)+ (ISC* IVS))* IUH)* IVU))/ IVT);
-		let IVX=IRW* IRV;
-		let IVY=CF+ IRS;
-		let IVZ=IRU* IUH;
-		let IWA=(IVX* IVY)/ IVZ;
-		let IWB=IVH- IWA;
-		let IWC=IVI- ((((((ISE* IRV)+ (ISD* IRW))* IVY)+ (ISA* IVX))- ((ISC* IUH)* IWA))/ IVZ);
-		IWD=IVV;
-		IWE=IWB;
-		IWF=IVW;
-		IWG=IWC;
-		}else{
-		IWD=IVC;
-		IWE=IVH;
-		IWF=IVD;
-		IWG=IVI;
-		}
-		let IWH=ISG/ IWD;
-		let IWI=IWH.sqrt();
-		let IWJ=(((IWF* IWH)* AL)/ IWD)* (CU/ (CT* IWI));
-		let IWK=IRX<= C;
+		let IVJ=ISB/ ISC;
+		let IVK=IVJ* IVH;
+		let IVL=(((ISJ- (ISK* IVJ))/ ISC)* IVH)+ (IVI* IVJ);
+		let IVM=ISB* ISD;
+		let IVN=(IRY+ (19.2f64* IRZ))- (SK* (IRY* IRZ));
+		let IVO=(CF- IUS)- (IVN* ISA);
+		let IVP=IVM* IVO;
+		let IVQ=(((ISJ* ISD)+ (ISL* ISB))* IVO)+ (((IUT* AL)- ((((ISG+ (ISH* 19.2f64))- (((ISG* IRZ)+ (ISH* IRY))* SK))* ISA)+ (ISI* IVN)))* IVM);
+		let IVR=EOY* EOY;
+		let IVS=EPD* EOY;
+		let IVT=IVR* EOM;
+		let IVU=EOZ* EOZ;
+		let IVV=EPE* EOZ;
+		let IVW=(IVT* CMH)/ IVU;
+		let IVX=((((((IVS+ IVS)* EOM)+ (EON* IVR))* CMH)+ (CMY* IVT))- ((IVV+ IVV)* IVW))/ IVU;
+		let IVY=ITJ> C;
+		let IWL;
+		let IWM;
 		let IWN;
 		let IWO;
-		if IWK{
-		IWN=C;
-		IWO=GS;
+		if IVY{
+		let IVZ=CF+ IUS;
+		let IWA=SK* ISC;
+		let IWB=(IWA* ISC)* IUP;
+		let IWC=(ISE* IVZ)/ IWB;
+		let IWD=IVK+ IWC;
+		let IWE=IVL+ ((((ISM* IVZ)+ (IUT* ISE))- (((((ISK* SK)* ISC)+ (ISK* IWA))* IUP)* IWC))/ IWB);
+		let IWF=ISE* ISD;
+		let IWG=CF+ ISA;
+		let IWH=ISC* IUP;
+		let IWI=(IWF* IWG)/ IWH;
+		let IWJ=IVP- IWI;
+		let IWK=IVQ- ((((((ISM* ISD)+ (ISL* ISE))* IWG)+ (ISI* IWF))- ((ISK* IUP)* IWI))/ IWH);
+		IWL=IWD;
+		IWM=IWJ;
+		IWN=IWE;
+		IWO=IWK;
 		}else{
-		let IWL=(IWE* IWI)/ IRX;
-		let IWM=(((IWG* IWI)+ (IWJ* IWE))- (ISF* IWL))/ IRX;
-		IWN=IWL;
-		IWO=IWM;
+		IWL=IVK;
+		IWM=IVP;
+		IWN=IVL;
+		IWO=IVQ;
 		}
-		let IWP=IWN> C;
-		let IWR;
-		let IWS;
-		if IWP{
-		let IWQ=IWN< CF;
+		let IWP=ISO/ IWL;
+		let IWQ=IWP.sqrt();
+		let IWR=(((IWN* IWP)* AL)/ IWL)* (CU/ (CT* IWQ));
+		let IWS=ISF<= C;
 		let IWV;
 		let IWW;
-		if IWQ{
-		IWV=IWN;
-		IWW=IWO;
-		}else{
-		IWV=CF;
+		if IWS{
+		IWV=C;
 		IWW=GS;
-		}
-		IWR=IWV;
-		IWS=IWW;
 		}else{
-		IWR=C;
-		IWS=GS;
+		let IWT=(IWM* IWQ)/ ISF;
+		let IWU=(((IWO* IWQ)+ (IWR* IWM))- (ISN* IWT))/ ISF;
+		IWV=IWT;
+		IWW=IWU;
 		}
-		let IWT=(IWR* IRX)/ IWI;
-		let IWU=(((IWS* IRX)+ (ISF* IWR))- (IWJ* IWT))/ IWI;
-		IUT=IWD;
-		IUU=IVO;
-		IUV=IWT;
-		IUW=IWF;
-		IUX=IVP;
-		IUY=IWU;
+		let IWX=IWV> C;
+		let IWZ;
+		let IXA;
+		if IWX{
+		let IWY=IWV< CF;
+		let IXD;
+		let IXE;
+		if IWY{
+		IXD=IWV;
+		IXE=IWW;
 		}else{
-		IUT=VH;
-		IUU=IQO;
-		IUV=C;
-		IUW=GS;
-		IUX=IQP;
-		IUY=GS;
+		IXD=CF;
+		IXE=GS;
 		}
-		IQR=IUT;
-		IQS=IUU;
-		IQT=IUV;
-		IQU=IUW;
-		IQV=IUX;
-		IQW=IUY;
+		IWZ=IXD;
+		IXA=IXE;
 		}else{
-		IQR=VH;
-		IQS=IQO;
-		IQT=C;
-		IQU=GS;
-		IQV=IQP;
-		IQW=GS;
+		IWZ=C;
+		IXA=GS;
 		}
-		let IWY=IWX/ IQR;
-		let IWZ=IQU* IWY;
-		let IXA=(L5([1f64,0.0,0.0,0.0,0.0])- L5([0.0,IWZ[0],IWZ[1],IWZ[2],IWZ[3]]))/ IQR;
-		let IXB=IQS* IWX;
-		let IXC=IQV* IWX;
-		let IXD=L5([0.0,IXC[0],IXC[1],IXC[2],IXC[3]])+ L5([(1f64* IQS),0.0,0.0,0.0,0.0]);
-		let IXE=ddt(8, IXB);
-		let IXF=IXD* IPK;
-		let IXH=IXG* IQS;
-		let IXI=IXH* IWX;
-		let IXJ=(IQV* IXG)* IWX;
-		let IXK=L5([0.0,IXJ[0],IXJ[1],IXJ[2],IXJ[3]])+ L5([(1f64* IXH),0.0,0.0,0.0,0.0]);
-		let IXL=ddt(9, IXI);
-		let IXM=IXK* IPK;
-		let IXN=-IXL;
-		let IXO=IXM* AL;
-		let IXP=-IXI;
-		let IXQ=IXK* AL;
-		let IXR=ddt(10, IXI);
-		let IXS=-IXR;
-		let IXT=IXM* AL;
-		let IXU=CJ* staged[720];
-		let IXV=IXU* IQT;
-		let IXX=(IXW+ IWY)+ IXE;
-		let IXY=IXV* IXX;
-		let IXZ=(IQW* IXU)* IXX;
-		let IYA=L5([0.0,IXZ[0],IXZ[1],IXZ[2],IXZ[3]])+ ((IXA+ IXF)* IXV);
-		let IYB=IXV;
-		let IYC=IYB* IXB;
-		let IYD=IXD* IYB;
-		let IYE=IMA[0];
-		let IYF=IMA[1];
-		let IYG=IMA[2];
-		let IYH=IMA[3];
-		let IYI=IMB[0];
-		let IYJ=IMB[1];
-		let IYK=IMB[2];
-		let IYL=IMB[3];
-		let IYM=IMC[0];
-		let IYN=IMC[1];
-		let IYO=IMC[2];
-		let IYP=IMC[3];
-		let IYQ=IMD[0];
-		let IYR=IMD[1];
-		let IYS=IMD[2];
-		let IYT=IMD[3];
-		let IYU=IME[0];
-		let IYV=IME[1];
-		let IYW=IME[2];
-		let IYX=IME[3];
-		let IYY=IMF[0];
-		let IYZ=IMF[1];
-		let IZA=IMF[2];
-		let IZB=IMF[3];
-		let IZC=IMG[0];
-		let IZD=IMG[1];
-		let IZE=IMG[2];
-		let IZF=IMG[3];
-		let IZG=IMH[0];
-		let IZH=IMH[1];
-		let IZI=IMH[2];
-		let IZJ=IMH[3];
-		let IZK=IMK[0];
-		let IZL=IMK[1];
-		let IZM=IMK[2];
-		let IZN=IMK[3];
-		let IZO=IMM[0];
-		let IZP=IMM[1];
-		let IZQ=IMO[0];
-		let IZR=IMO[1];
-		let IZS=IMO[2];
-		let IZT=IMQ[0];
-		let IZU=IMQ[1];
-		let IZV=IMQ[2];
-		let IZW=IMS[0];
-		let IZX=IMS[1];
-		let IZY=IMS[2];
-		let IZZ=IMS[3];
-		let JAA=IMU[0];
-		let JAB=IMU[1];
-		let JAC=IMU[2];
-		let JAD=IMU[3];
-		let JAE=IMU[4];
-		let JAF=IMW[0];
-		let JAG=IMW[1];
-		let JAH=IMW[2];
-		let JAI=IMW[3];
-		let JAJ=IMW[4];
-		let JAK=IMW[5];
-		let JAL=INC[0];
-		let JAM=INC[1];
-		let JAN=INI[0];
-		let JAO=INI[1];
-		let JAP=INO[0];
-		let JAQ=INO[1];
-		let JAR=INV[0];
-		let JAS=INV[1];
-		let JAT=IOB[0];
-		let JAU=IOB[1];
-		let JAV=IOH[0];
-		let JAW=IOH[1];
-		let JAX=ION[0];
-		let JAY=ION[1];
-		let JAZ=IOQ[0];
-		let JBA=IOQ[1];
-		let JBB=IOS[0];
-		let JBC=IOS[1];
-		let JBD=IPL[0];
-		let JBE=IPL[1];
-		let JBF=IPL[2];
-		let JBG=IPL[3];
-		let JBH=IPP[0];
-		let JBI=IPP[1];
-		let JBJ=IPP[2];
-		let JBK=IPP[3];
-		let JBL=IPT[0];
-		let JBM=IPT[1];
-		let JBN=IPT[2];
-		let JBO=IPT[3];
-		let JBP=IPX[0];
-		let JBQ=IPX[1];
-		let JBR=IQB[0];
-		let JBS=IQB[1];
-		let JBT=IQB[2];
-		let JBU=IQF[0];
-		let JBV=IQF[1];
-		let JBW=IQF[2];
-		let JBX=IQJ[0];
-		let JBY=IQJ[1];
-		let JBZ=IQN[0];
-		let JCA=IQN[1];
-		let JCB=IQN[2];
-		let JCC=IQN[3];
-		let JCD=IXA[0];
-		let JCE=IXA[1];
-		let JCF=IXA[2];
-		let JCG=IXA[3];
-		let JCH=IXA[4];
-		let JCI=IXF[0];
-		let JCJ=IXF[1];
-		let JCK=IXF[2];
-		let JCL=IXF[3];
-		let JCM=IXF[4];
-		let JCN=IXO[0];
-		let JCO=IXO[1];
-		let JCP=IXO[2];
-		let JCQ=IXO[3];
-		let JCR=IXO[4];
-		let JCS=IXT[0];
-		let JCT=IXT[1];
-		let JCU=IXT[2];
-		let JCV=IXT[3];
-		let JCW=IXT[4];
-		let JCX=IYA[0];
-		let JCY=IYA[1];
-		let JCZ=IYA[2];
-		let JDA=IYA[3];
-		let JDB=IYA[4];
-		let JDC=IPI[0];
-		let JDD=IPI[1];
-		let JDE=IPI[2];
-		let JDF=IPI[3];
-		let JDG=IPN[0];
-		let JDH=IPN[1];
-		let JDI=IPN[2];
-		let JDJ=IPN[3];
-		let JDK=IPR[0];
-		let JDL=IPR[1];
-		let JDM=IPR[2];
-		let JDN=IPR[3];
-		let JDO=IPV[0];
-		let JDP=IPV[1];
-		let JDQ=IPZ[0];
-		let JDR=IPZ[1];
-		let JDS=IPZ[2];
-		let JDT=IQD[0];
-		let JDU=IQD[1];
-		let JDV=IQD[2];
-		let JDW=IQH[0];
-		let JDX=IQH[1];
-		let JDY=IQL[0];
-		let JDZ=IQL[1];
-		let JEA=IQL[2];
-		let JEB=IQL[3];
-		let JEC=IXD[0];
-		let JED=IXD[1];
-		let JEE=IXD[2];
-		let JEF=IXD[3];
-		let JEG=IXD[4];
-		let JEH=IXQ[0];
-		let JEI=IXQ[1];
-		let JEJ=IXQ[2];
-		let JEK=IXQ[3];
-		let JEL=IXQ[4];
-		let JEM=IXQ[0];
-		let JEN=IXQ[1];
-		let JEO=IXQ[2];
-		let JEP=IXQ[3];
-		let JEQ=IXQ[4];
-		let JER=IYD[0];
-		let JES=IYD[1];
-		let JET=IYD[2];
-		let JEU=IYD[3];
-		let JEV=IYD[4];
-        if (staged[1643] != 0.0) {
+		let IXB=(IWZ* ISF)/ IWQ;
+		let IXC=(((IXA* ISF)+ (ISN* IWZ))- (IWR* IXB))/ IWQ;
+		IVB=IWL;
+		IVC=IVW;
+		IVD=IXB;
+		IVE=IWN;
+		IVF=IVX;
+		IVG=IXC;
+		}else{
+		IVB=VH;
+		IVC=IQW;
+		IVD=C;
+		IVE=GS;
+		IVF=IQX;
+		IVG=GS;
+		}
+		IQZ=IVB;
+		IRA=IVC;
+		IRB=IVD;
+		IRC=IVE;
+		IRD=IVF;
+		IRE=IVG;
+		}else{
+		IQZ=VH;
+		IRA=IQW;
+		IRB=C;
+		IRC=GS;
+		IRD=IQX;
+		IRE=GS;
+		}
+		let IXG=IXF/ IQZ;
+		let IXH=IRC* IXG;
+		let IXI=(L5([1f64,0.0,0.0,0.0,0.0])- L5([0.0,IXH[0],IXH[1],IXH[2],IXH[3]]))/ IQZ;
+		let IXJ=C+ IXG;
+		let IXK=IRA* IXF;
+		let IXL=IRD* IXF;
+		let IXM=L5([0.0,IXL[0],IXL[1],IXL[2],IXL[3]])+ L5([(1f64* IRA),0.0,0.0,0.0,0.0]);
+		let IXN=ddt(8, IXK);
+		let IXO=IXM* IPK;
+		let IXP=C+ IXN;
+		let IXR=IXQ* IRA;
+		let IXS=IXR* IXF;
+		let IXT=(IRD* IXQ)* IXF;
+		let IXU=L5([0.0,IXT[0],IXT[1],IXT[2],IXT[3]])+ L5([(1f64* IXR),0.0,0.0,0.0,0.0]);
+		let IXV=ddt(9, IXS);
+		let IXW=IXU* IPK;
+		let IXX=IXW* AL;
+		let IXY=-IXS;
+		let IXZ=IXU* AL;
+		let IYA=C+ (-IXV);
+		let IYB=ddt(10, IXS);
+		let IYC=IXW* AL;
+		let IYD=C+ (-IYB);
+		let IYE=CJ* staged[720];
+		let IYF=IYE* IRB;
+		let IYG=(staged[721]+ IXJ)+ IXP;
+		let IYH=(IRE* IYE)* IYG;
+		let IYI=L5([0.0,IYH[0],IYH[1],IYH[2],IYH[3]])+ ((IXI+ IXO)* IYF);
+		let IYJ=IYF;
+		let IYK=IYJ* IXK;
+		let IYL=IXM* IYJ;
+		let IYM=C+ (IYF* IYG);
+		let IYN=IMA[0];
+		let IYO=IMA[1];
+		let IYP=IMA[2];
+		let IYQ=IMA[3];
+		let IYR=IMB[0];
+		let IYS=IMB[1];
+		let IYT=IMB[2];
+		let IYU=IMB[3];
+		let IYV=IMC[0];
+		let IYW=IMC[1];
+		let IYX=IMC[2];
+		let IYY=IMC[3];
+		let IYZ=IMD[0];
+		let IZA=IMD[1];
+		let IZB=IMD[2];
+		let IZC=IMD[3];
+		let IZD=IME[0];
+		let IZE=IME[1];
+		let IZF=IME[2];
+		let IZG=IME[3];
+		let IZH=IMF[0];
+		let IZI=IMF[1];
+		let IZJ=IMF[2];
+		let IZK=IMF[3];
+		let IZL=IMG[0];
+		let IZM=IMG[1];
+		let IZN=IMG[2];
+		let IZO=IMG[3];
+		let IZP=IMH[0];
+		let IZQ=IMH[1];
+		let IZR=IMH[2];
+		let IZS=IMH[3];
+		let IZT=IMJ[0];
+		let IZU=IMJ[1];
+		let IZV=IMJ[2];
+		let IZW=IMJ[3];
+		let IZX=IML[0];
+		let IZY=IML[1];
+		let IZZ=IMN[0];
+		let JAA=IMN[1];
+		let JAB=IMN[2];
+		let JAC=IMP[0];
+		let JAD=IMP[1];
+		let JAE=IMP[2];
+		let JAF=IMR[0];
+		let JAG=IMR[1];
+		let JAH=IMR[2];
+		let JAI=IMR[3];
+		let JAJ=IMT[0];
+		let JAK=IMT[1];
+		let JAL=IMT[2];
+		let JAM=IMT[3];
+		let JAN=IMT[4];
+		let JAO=IMV[0];
+		let JAP=IMV[1];
+		let JAQ=IMV[2];
+		let JAR=IMV[3];
+		let JAS=IMV[4];
+		let JAT=IMV[5];
+		let JAU=INC[0];
+		let JAV=INC[1];
+		let JAW=INI[0];
+		let JAX=INI[1];
+		let JAY=INO[0];
+		let JAZ=INO[1];
+		let JBA=INV[0];
+		let JBB=INV[1];
+		let JBC=IOB[0];
+		let JBD=IOB[1];
+		let JBE=IOH[0];
+		let JBF=IOH[1];
+		let JBG=ION[0];
+		let JBH=ION[1];
+		let JBI=IOP[0];
+		let JBJ=IOP[1];
+		let JBK=IOR[0];
+		let JBL=IOR[1];
+		let JBM=IPL[0];
+		let JBN=IPL[1];
+		let JBO=IPL[2];
+		let JBP=IPL[3];
+		let JBQ=IPQ[0];
+		let JBR=IPQ[1];
+		let JBS=IPQ[2];
+		let JBT=IPQ[3];
+		let JBU=IPV[0];
+		let JBV=IPV[1];
+		let JBW=IPV[2];
+		let JBX=IPV[3];
+		let JBY=IQA[0];
+		let JBZ=IQA[1];
+		let JCA=IQF[0];
+		let JCB=IQF[1];
+		let JCC=IQF[2];
+		let JCD=IQK[0];
+		let JCE=IQK[1];
+		let JCF=IQK[2];
+		let JCG=IQP[0];
+		let JCH=IQP[1];
+		let JCI=IQU[0];
+		let JCJ=IQU[1];
+		let JCK=IQU[2];
+		let JCL=IQU[3];
+		let JCM=IXI[0];
+		let JCN=IXI[1];
+		let JCO=IXI[2];
+		let JCP=IXI[3];
+		let JCQ=IXI[4];
+		let JCR=IXO[0];
+		let JCS=IXO[1];
+		let JCT=IXO[2];
+		let JCU=IXO[3];
+		let JCV=IXO[4];
+		let JCW=IXX[0];
+		let JCX=IXX[1];
+		let JCY=IXX[2];
+		let JCZ=IXX[3];
+		let JDA=IXX[4];
+		let JDB=IYC[0];
+		let JDC=IYC[1];
+		let JDD=IYC[2];
+		let JDE=IYC[3];
+		let JDF=IYC[4];
+		let JDG=IYI[0];
+		let JDH=IYI[1];
+		let JDI=IYI[2];
+		let JDJ=IYI[3];
+		let JDK=IYI[4];
+		let JDL=IPI[0];
+		let JDM=IPI[1];
+		let JDN=IPI[2];
+		let JDO=IPI[3];
+		let JDP=IPO[0];
+		let JDQ=IPO[1];
+		let JDR=IPO[2];
+		let JDS=IPO[3];
+		let JDT=IPT[0];
+		let JDU=IPT[1];
+		let JDV=IPT[2];
+		let JDW=IPT[3];
+		let JDX=IPY[0];
+		let JDY=IPY[1];
+		let JDZ=IQD[0];
+		let JEA=IQD[1];
+		let JEB=IQD[2];
+		let JEC=IQI[0];
+		let JED=IQI[1];
+		let JEE=IQI[2];
+		let JEF=IQN[0];
+		let JEG=IQN[1];
+		let JEH=IQS[0];
+		let JEI=IQS[1];
+		let JEJ=IQS[2];
+		let JEK=IQS[3];
+		let JEL=IXM[0];
+		let JEM=IXM[1];
+		let JEN=IXM[2];
+		let JEO=IXM[3];
+		let JEP=IXM[4];
+		let JEQ=IXZ[0];
+		let JER=IXZ[1];
+		let JES=IXZ[2];
+		let JET=IXZ[3];
+		let JEU=IXZ[4];
+		let JEV=IXZ[0];
+		let JEW=IXZ[1];
+		let JEX=IXZ[2];
+		let JEY=IXZ[3];
+		let JEZ=IXZ[4];
+		let JFA=IYL[0];
+		let JFB=IYL[1];
+		let JFC=IYL[2];
+		let JFD=IYL[3];
+		let JFE=IYL[4];
+        if (staged[1652] != 0.0) {
             stamper.stamp_potential_branch_local(Some(1), Some(5), 0, multiplicity);
         } else {
             stamper.stamp_inactive_potential_branch_local(0);
         }
-        if (staged[1644] != 0.0) {
+        if (staged[1653] != 0.0) {
             stamper.stamp_potential_branch_local(Some(2), Some(6), 1, multiplicity);
         } else {
             stamper.stamp_inactive_potential_branch_local(1);
         }
-        if (staged[1645] != 0.0) {
+        if (staged[1654] != 0.0) {
             stamper.stamp_potential_branch_local(Some(0), Some(7), 2, multiplicity);
         } else {
             stamper.stamp_inactive_potential_branch_local(2);
         }
-        if (staged[1646] != 0.0) {
+        if (staged[1655] != 0.0) {
             stamper.stamp_potential_branch_local(Some(8), Some(9), 3, multiplicity);
         } else {
             stamper.stamp_inactive_potential_branch_local(3);
         }
-        if (staged[1647] != 0.0) {
+        if (staged[1656] != 0.0) {
             stamper.stamp_potential_branch_local(Some(10), Some(9), 4, multiplicity);
         } else {
             stamper.stamp_inactive_potential_branch_local(4);
         }
-        if (staged[1648] != 0.0) {
+        if (staged[1657] != 0.0) {
             stamper.stamp_potential_branch_local(Some(11), Some(9), 5, multiplicity);
         } else {
             stamper.stamp_inactive_potential_branch_local(5);
         }
-        if (staged[1649] != 0.0) {
+        if (staged[1658] != 0.0) {
             stamper.stamp_potential_branch_local(Some(3), Some(9), 6, multiplicity);
         } else {
             stamper.stamp_inactive_potential_branch_local(6);
@@ -24985,7 +25011,7 @@ impl Instance {
             Some(8),
             multiplicity * (ILS),
             [5, 6, 7, 8],
-            [IYE, IYF, IYG, IYH],
+            [IYN, IYO, IYP, IYQ],
             [],
             [],
             multiplicity,
@@ -24995,7 +25021,7 @@ impl Instance {
             Some(6),
             multiplicity * (ILT),
             [5, 6, 7, 8],
-            [IYI, IYJ, IYK, IYL],
+            [IYR, IYS, IYT, IYU],
             [],
             [],
             multiplicity,
@@ -25005,7 +25031,7 @@ impl Instance {
             Some(6),
             multiplicity * (ILU),
             [5, 6, 7, 8],
-            [IYM, IYN, IYO, IYP],
+            [IYV, IYW, IYX, IYY],
             [],
             [],
             multiplicity,
@@ -25015,7 +25041,7 @@ impl Instance {
             Some(7),
             multiplicity * (ILV),
             [5, 6, 7, 8],
-            [IYQ, IYR, IYS, IYT],
+            [IYZ, IZA, IZB, IZC],
             [],
             [],
             multiplicity,
@@ -25025,7 +25051,7 @@ impl Instance {
             Some(8),
             multiplicity * (ILW),
             [5, 6, 7, 8],
-            [IYU, IYV, IYW, IYX],
+            [IZD, IZE, IZF, IZG],
             [],
             [],
             multiplicity,
@@ -25035,7 +25061,7 @@ impl Instance {
             Some(7),
             multiplicity * (ILX),
             [5, 6, 7, 8],
-            [IYY, IYZ, IZA, IZB],
+            [IZH, IZI, IZJ, IZK],
             [],
             [],
             multiplicity,
@@ -25045,7 +25071,7 @@ impl Instance {
             Some(7),
             multiplicity * (ILY),
             [5, 6, 7, 8],
-            [IZC, IZD, IZE, IZF],
+            [IZL, IZM, IZN, IZO],
             [],
             [],
             multiplicity,
@@ -25055,7 +25081,7 @@ impl Instance {
             Some(6),
             multiplicity * (ILZ),
             [5, 6, 7, 8],
-            [IZG, IZH, IZI, IZJ],
+            [IZP, IZQ, IZR, IZS],
             [],
             [],
             multiplicity,
@@ -25063,9 +25089,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<4, 0>(
             Some(5),
             Some(8),
-            multiplicity * (IMJ),
+            multiplicity * (IMK),
             [5, 6, 7, 8],
-            [IZK, IZL, IZM, IZN],
+            [IZT, IZU, IZV, IZW],
             [],
             [],
             multiplicity,
@@ -25073,9 +25099,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<2, 0>(
             Some(5),
             Some(6),
-            multiplicity * (IML),
+            multiplicity * (IMM),
             [5, 6],
-            [IZO, IZP],
+            [IZX, IZY],
             [],
             [],
             multiplicity,
@@ -25083,9 +25109,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<3, 0>(
             Some(5),
             Some(7),
-            multiplicity * (IMN),
+            multiplicity * (IMO),
             [5, 6, 7],
-            [IZQ, IZR, IZS],
+            [IZZ, JAA, JAB],
             [],
             [],
             multiplicity,
@@ -25093,9 +25119,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<3, 0>(
             Some(6),
             Some(8),
-            multiplicity * (IMP),
+            multiplicity * (IMQ),
             [5, 6, 8],
-            [IZT, IZU, IZV],
+            [JAC, JAD, JAE],
             [],
             [],
             multiplicity,
@@ -25103,9 +25129,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<4, 0>(
             Some(7),
             Some(8),
-            multiplicity * (IMR),
+            multiplicity * (IMS),
             [5, 6, 7, 8],
-            [IZW, IZX, IZY, IZZ],
+            [JAF, JAG, JAH, JAI],
             [],
             [],
             multiplicity,
@@ -25113,9 +25139,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<5, 0>(
             Some(10),
             Some(6),
-            multiplicity * (IMT),
+            multiplicity * (IMU),
             [5, 6, 7, 8, 10],
-            [JAA, JAB, JAC, JAD, JAE],
+            [JAJ, JAK, JAL, JAM, JAN],
             [],
             [],
             multiplicity,
@@ -25123,9 +25149,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<6, 0>(
             Some(11),
             Some(7),
-            multiplicity * (IMV),
+            multiplicity * (IMW),
             [5, 6, 7, 8, 10, 11],
-            [JAF, JAG, JAH, JAI, JAJ, JAK],
+            [JAO, JAP, JAQ, JAR, JAS, JAT],
             [],
             [],
             multiplicity,
@@ -25135,7 +25161,7 @@ impl Instance {
             Some(5),
             multiplicity * (INB),
             [1, 5],
-            [JAL, JAM],
+            [JAU, JAV],
             [],
             [],
             multiplicity,
@@ -25143,17 +25169,17 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(1),
             Some(5),
-            multiplicity * (staged[1629]),
+            multiplicity * (staged[1630]),
             [],
             [],
             [],
             [],
             multiplicity,
         );
-        if staged[1643] != 0.0 {
+        if staged[1652] != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
             0,
-            staged[1630],
+            staged[1631],
             [],
             [],
             [],
@@ -25165,7 +25191,7 @@ impl Instance {
             Some(6),
             multiplicity * (INH),
             [2, 6],
-            [JAN, JAO],
+            [JAW, JAX],
             [],
             [],
             multiplicity,
@@ -25173,17 +25199,17 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(2),
             Some(6),
-            multiplicity * (staged[1631]),
+            multiplicity * (staged[1632]),
             [],
             [],
             [],
             [],
             multiplicity,
         );
-        if staged[1644] != 0.0 {
+        if staged[1653] != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
             1,
-            staged[1632],
+            staged[1633],
             [],
             [],
             [],
@@ -25195,7 +25221,7 @@ impl Instance {
             Some(7),
             multiplicity * (INN),
             [0, 7],
-            [JAP, JAQ],
+            [JAY, JAZ],
             [],
             [],
             multiplicity,
@@ -25203,17 +25229,17 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(0),
             Some(7),
-            multiplicity * (staged[1633]),
+            multiplicity * (staged[1634]),
             [],
             [],
             [],
             [],
             multiplicity,
         );
-        if staged[1645] != 0.0 {
+        if staged[1654] != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
             2,
-            staged[1634],
+            staged[1635],
             [],
             [],
             [],
@@ -25225,7 +25251,7 @@ impl Instance {
             Some(9),
             multiplicity * (INU),
             [8, 9],
-            [JAR, JAS],
+            [JBA, JBB],
             [],
             [],
             multiplicity,
@@ -25233,17 +25259,17 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(8),
             Some(9),
-            multiplicity * (staged[1635]),
+            multiplicity * (staged[1636]),
             [],
             [],
             [],
             [],
             multiplicity,
         );
-        if staged[1646] != 0.0 {
+        if staged[1655] != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
             3,
-            staged[1636],
+            staged[1637],
             [],
             [],
             [],
@@ -25255,7 +25281,7 @@ impl Instance {
             Some(9),
             multiplicity * (IOA),
             [9, 10],
-            [JAT, JAU],
+            [JBC, JBD],
             [],
             [],
             multiplicity,
@@ -25263,17 +25289,17 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(10),
             Some(9),
-            multiplicity * (staged[1637]),
+            multiplicity * (staged[1638]),
             [],
             [],
             [],
             [],
             multiplicity,
         );
-        if staged[1647] != 0.0 {
+        if staged[1656] != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
             4,
-            staged[1638],
+            staged[1639],
             [],
             [],
             [],
@@ -25285,7 +25311,7 @@ impl Instance {
             Some(9),
             multiplicity * (IOG),
             [9, 11],
-            [JAV, JAW],
+            [JBE, JBF],
             [],
             [],
             multiplicity,
@@ -25293,17 +25319,17 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(11),
             Some(9),
-            multiplicity * (staged[1639]),
+            multiplicity * (staged[1640]),
             [],
             [],
             [],
             [],
             multiplicity,
         );
-        if staged[1648] != 0.0 {
+        if staged[1657] != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
             5,
-            staged[1640],
+            staged[1641],
             [],
             [],
             [],
@@ -25315,7 +25341,7 @@ impl Instance {
             Some(9),
             multiplicity * (IOM),
             [3, 9],
-            [JAX, JAY],
+            [JBG, JBH],
             [],
             [],
             multiplicity,
@@ -25323,17 +25349,17 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(3),
             Some(9),
-            multiplicity * (staged[1641]),
+            multiplicity * (staged[1642]),
             [],
             [],
             [],
             [],
             multiplicity,
         );
-        if staged[1649] != 0.0 {
+        if staged[1658] != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
             6,
-            staged[1642],
+            staged[1643],
             [],
             [],
             [],
@@ -25343,9 +25369,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<2, 0>(
             Some(7),
             Some(8),
-            multiplicity * (IOP),
+            multiplicity * (IOQ),
             [7, 8],
-            [JAZ, JBA],
+            [JBI, JBJ],
             [],
             [],
             multiplicity,
@@ -25353,9 +25379,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<2, 0>(
             Some(6),
             Some(8),
-            multiplicity * (IOR),
+            multiplicity * (IOS),
             [6, 8],
-            [JBB, JBC],
+            [JBK, JBL],
             [],
             [],
             multiplicity,
@@ -25363,9 +25389,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<4, 0>(
             Some(5),
             Some(6),
-            multiplicity * (IPJ),
+            multiplicity * (IPM),
             [5, 6, 7, 8],
-            [JBD, JBE, JBF, JBG],
+            [JBM, JBN, JBO, JBP],
             [],
             [],
             multiplicity,
@@ -25373,29 +25399,29 @@ impl Instance {
         stamper.stamp_current_sparse_local::<4, 0>(
             Some(8),
             Some(6),
-            multiplicity * (IPO),
+            multiplicity * (IPR),
             [5, 6, 7, 8],
-            [JBH, JBI, JBJ, JBK],
+            [JBQ, JBR, JBS, JBT],
             [],
             [],
             multiplicity,
         );
         stamper.stamp_current_sparse_local::<4, 0>(
             Some(7),
-            Some(6),
-            multiplicity * (IPS),
-            [5, 6, 7, 8],
-            [JBL, JBM, JBN, JBO],
-            [],
-            [],
-            multiplicity,
-        );
-        stamper.stamp_current_sparse_local::<2, 0>(
-            Some(5),
             Some(6),
             multiplicity * (IPW),
+            [5, 6, 7, 8],
+            [JBU, JBV, JBW, JBX],
+            [],
+            [],
+            multiplicity,
+        );
+        stamper.stamp_current_sparse_local::<2, 0>(
+            Some(5),
+            Some(6),
+            multiplicity * (IQB),
             [5, 6],
-            [JBP, JBQ],
+            [JBY, JBZ],
             [],
             [],
             multiplicity,
@@ -25403,9 +25429,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<3, 0>(
             Some(5),
             Some(7),
-            multiplicity * (IQA),
+            multiplicity * (IQG),
             [5, 6, 7],
-            [JBR, JBS, JBT],
+            [JCA, JCB, JCC],
             [],
             [],
             multiplicity,
@@ -25413,9 +25439,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<3, 0>(
             Some(5),
             Some(8),
-            multiplicity * (IQE),
+            multiplicity * (IQL),
             [5, 6, 8],
-            [JBU, JBV, JBW],
+            [JCD, JCE, JCF],
             [],
             [],
             multiplicity,
@@ -25423,9 +25449,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<2, 0>(
             Some(10),
             Some(6),
-            multiplicity * (IQI),
+            multiplicity * (IQQ),
             [6, 10],
-            [JBX, JBY],
+            [JCG, JCH],
             [],
             [],
             multiplicity,
@@ -25433,9 +25459,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<4, 0>(
             Some(11),
             Some(7),
-            multiplicity * (IQM),
+            multiplicity * (IQV),
             [6, 7, 10, 11],
-            [JBZ, JCA, JCB, JCC],
+            [JCI, JCJ, JCK, JCL],
             [],
             [],
             multiplicity,
@@ -25443,7 +25469,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(4),
             None,
-            multiplicity * (IXW),
+            multiplicity * (staged[721]),
             [],
             [],
             [],
@@ -25453,9 +25479,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<5, 0>(
             Some(4),
             None,
-            multiplicity * (IWY),
+            multiplicity * (IXJ),
             [4, 5, 6, 7, 8],
-            [JCD, JCE, JCF, JCG, JCH],
+            [JCM, JCN, JCO, JCP, JCQ],
             [],
             [],
             multiplicity,
@@ -25463,9 +25489,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<5, 0>(
             Some(4),
             None,
-            multiplicity * (IXE),
+            multiplicity * (IXP),
             [4, 5, 6, 7, 8],
-            [JCI, JCJ, JCK, JCL, JCM],
+            [JCR, JCS, JCT, JCU, JCV],
             [],
             [],
             multiplicity,
@@ -25473,9 +25499,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<5, 0>(
             Some(5),
             Some(6),
-            multiplicity * (IXN),
+            multiplicity * (IYA),
             [4, 5, 6, 7, 8],
-            [JCN, JCO, JCP, JCQ, JCR],
+            [JCW, JCX, JCY, JCZ, JDA],
             [],
             [],
             multiplicity,
@@ -25483,9 +25509,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<5, 0>(
             Some(5),
             Some(7),
-            multiplicity * (IXS),
+            multiplicity * (IYD),
             [4, 5, 6, 7, 8],
-            [JCS, JCT, JCU, JCV, JCW],
+            [JDB, JDC, JDD, JDE, JDF],
             [],
             [],
             multiplicity,
@@ -25493,9 +25519,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<5, 0>(
             Some(7),
             Some(6),
-            multiplicity * (IXY),
+            multiplicity * (IYM),
             [4, 5, 6, 7, 8],
-            [JCX, JCY, JCZ, JDA, JDB],
+            [JDG, JDH, JDI, JDJ, JDK],
             [],
             [],
             multiplicity,
@@ -25503,7 +25529,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(7),
             Some(6),
-            multiplicity * (JEW),
+            multiplicity * (staged[1644]),
             [],
             [],
             [],
@@ -25513,7 +25539,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(7),
             Some(6),
-            multiplicity * (JEX),
+            multiplicity * (staged[1645]),
             [],
             [],
             [],
@@ -25523,7 +25549,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(5),
             Some(6),
-            multiplicity * (JEY),
+            multiplicity * (staged[1646]),
             [],
             [],
             [],
@@ -25533,7 +25559,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(5),
             Some(7),
-            multiplicity * (JEZ),
+            multiplicity * (staged[1647]),
             [],
             [],
             [],
@@ -25543,7 +25569,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(10),
             Some(6),
-            multiplicity * (JFA),
+            multiplicity * (staged[1648]),
             [],
             [],
             [],
@@ -25553,7 +25579,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(11),
             Some(7),
-            multiplicity * (JFB),
+            multiplicity * (staged[1649]),
             [],
             [],
             [],
@@ -25563,7 +25589,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(7),
             Some(6),
-            multiplicity * (JFC),
+            multiplicity * (staged[1650]),
             [],
             [],
             [],
@@ -25573,7 +25599,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(7),
             Some(6),
-            multiplicity * (JFD),
+            multiplicity * (staged[1651]),
             [],
             [],
             [],
@@ -25588,104 +25614,104 @@ impl Instance {
         self.canonical_reactive[5] = ILX;
         self.canonical_reactive[6] = ILY;
         self.canonical_reactive[7] = ILZ;
-        self.canonical_reactive[8] = IMJ;
-        self.canonical_reactive[9] = IML;
-        self.canonical_reactive[10] = IMN;
-        self.canonical_reactive[11] = IMP;
-        self.canonical_reactive[12] = IMR;
-        self.canonical_reactive[13] = IMT;
-        self.canonical_reactive[14] = IMV;
+        self.canonical_reactive[8] = IMK;
+        self.canonical_reactive[9] = IMM;
+        self.canonical_reactive[10] = IMO;
+        self.canonical_reactive[11] = IMQ;
+        self.canonical_reactive[12] = IMS;
+        self.canonical_reactive[13] = IMU;
+        self.canonical_reactive[14] = IMW;
         self.canonical_reactive[15] = INB;
-        self.canonical_reactive[16] = staged[1629];
-        self.canonical_reactive[17] = staged[1630];
+        self.canonical_reactive[16] = staged[1630];
+        self.canonical_reactive[17] = staged[1631];
         self.canonical_reactive[18] = INH;
-        self.canonical_reactive[19] = staged[1631];
-        self.canonical_reactive[20] = staged[1632];
+        self.canonical_reactive[19] = staged[1632];
+        self.canonical_reactive[20] = staged[1633];
         self.canonical_reactive[21] = INN;
-        self.canonical_reactive[22] = staged[1633];
-        self.canonical_reactive[23] = staged[1634];
+        self.canonical_reactive[22] = staged[1634];
+        self.canonical_reactive[23] = staged[1635];
         self.canonical_reactive[24] = INU;
-        self.canonical_reactive[25] = staged[1635];
-        self.canonical_reactive[26] = staged[1636];
+        self.canonical_reactive[25] = staged[1636];
+        self.canonical_reactive[26] = staged[1637];
         self.canonical_reactive[27] = IOA;
-        self.canonical_reactive[28] = staged[1637];
-        self.canonical_reactive[29] = staged[1638];
+        self.canonical_reactive[28] = staged[1638];
+        self.canonical_reactive[29] = staged[1639];
         self.canonical_reactive[30] = IOG;
-        self.canonical_reactive[31] = staged[1639];
-        self.canonical_reactive[32] = staged[1640];
+        self.canonical_reactive[31] = staged[1640];
+        self.canonical_reactive[32] = staged[1641];
         self.canonical_reactive[33] = IOM;
-        self.canonical_reactive[34] = staged[1641];
-        self.canonical_reactive[35] = staged[1642];
-        self.canonical_reactive[36] = IOP;
-        self.canonical_reactive[37] = IOR;
+        self.canonical_reactive[34] = staged[1642];
+        self.canonical_reactive[35] = staged[1643];
+        self.canonical_reactive[36] = IOQ;
+        self.canonical_reactive[37] = IOS;
         self.canonical_reactive[38] = IPH;
-        self.canonical_reactive[39] = JDC;
-        self.canonical_reactive[40] = JDD;
-        self.canonical_reactive[41] = JDE;
-        self.canonical_reactive[42] = JDF;
-        self.canonical_reactive[43] = IPM;
-        self.canonical_reactive[44] = JDG;
-        self.canonical_reactive[45] = JDH;
-        self.canonical_reactive[46] = JDI;
-        self.canonical_reactive[47] = JDJ;
-        self.canonical_reactive[48] = IPQ;
-        self.canonical_reactive[49] = JDK;
-        self.canonical_reactive[50] = JDL;
-        self.canonical_reactive[51] = JDM;
-        self.canonical_reactive[52] = JDN;
-        self.canonical_reactive[53] = IPU;
-        self.canonical_reactive[54] = JDO;
-        self.canonical_reactive[55] = JDP;
-        self.canonical_reactive[56] = IPY;
-        self.canonical_reactive[57] = JDQ;
-        self.canonical_reactive[58] = JDR;
-        self.canonical_reactive[59] = JDS;
-        self.canonical_reactive[60] = IQC;
-        self.canonical_reactive[61] = JDT;
-        self.canonical_reactive[62] = JDU;
-        self.canonical_reactive[63] = JDV;
-        self.canonical_reactive[64] = IQG;
-        self.canonical_reactive[65] = JDW;
-        self.canonical_reactive[66] = JDX;
-        self.canonical_reactive[67] = IQK;
-        self.canonical_reactive[68] = JDY;
-        self.canonical_reactive[69] = JDZ;
-        self.canonical_reactive[70] = JEA;
-        self.canonical_reactive[71] = JEB;
-        self.canonical_reactive[72] = IXW;
-        self.canonical_reactive[73] = IWY;
-        self.canonical_reactive[74] = IXB;
-        self.canonical_reactive[75] = JEC;
-        self.canonical_reactive[76] = JED;
-        self.canonical_reactive[77] = JEE;
-        self.canonical_reactive[78] = JEF;
-        self.canonical_reactive[79] = JEG;
-        self.canonical_reactive[80] = IXP;
-        self.canonical_reactive[81] = JEH;
-        self.canonical_reactive[82] = JEI;
-        self.canonical_reactive[83] = JEJ;
-        self.canonical_reactive[84] = JEK;
-        self.canonical_reactive[85] = JEL;
-        self.canonical_reactive[86] = IXP;
-        self.canonical_reactive[87] = JEM;
-        self.canonical_reactive[88] = JEN;
-        self.canonical_reactive[89] = JEO;
-        self.canonical_reactive[90] = JEP;
-        self.canonical_reactive[91] = JEQ;
-        self.canonical_reactive[92] = IYC;
-        self.canonical_reactive[93] = JER;
-        self.canonical_reactive[94] = JES;
-        self.canonical_reactive[95] = JET;
-        self.canonical_reactive[96] = JEU;
-        self.canonical_reactive[97] = JEV;
-        self.canonical_reactive[98] = JEW;
-        self.canonical_reactive[99] = JEX;
-        self.canonical_reactive[100] = JEY;
-        self.canonical_reactive[101] = JEZ;
-        self.canonical_reactive[102] = JFA;
-        self.canonical_reactive[103] = JFB;
-        self.canonical_reactive[104] = JFC;
-        self.canonical_reactive[105] = JFD;
+        self.canonical_reactive[39] = JDL;
+        self.canonical_reactive[40] = JDM;
+        self.canonical_reactive[41] = JDN;
+        self.canonical_reactive[42] = JDO;
+        self.canonical_reactive[43] = IPN;
+        self.canonical_reactive[44] = JDP;
+        self.canonical_reactive[45] = JDQ;
+        self.canonical_reactive[46] = JDR;
+        self.canonical_reactive[47] = JDS;
+        self.canonical_reactive[48] = IPS;
+        self.canonical_reactive[49] = JDT;
+        self.canonical_reactive[50] = JDU;
+        self.canonical_reactive[51] = JDV;
+        self.canonical_reactive[52] = JDW;
+        self.canonical_reactive[53] = IPX;
+        self.canonical_reactive[54] = JDX;
+        self.canonical_reactive[55] = JDY;
+        self.canonical_reactive[56] = IQC;
+        self.canonical_reactive[57] = JDZ;
+        self.canonical_reactive[58] = JEA;
+        self.canonical_reactive[59] = JEB;
+        self.canonical_reactive[60] = IQH;
+        self.canonical_reactive[61] = JEC;
+        self.canonical_reactive[62] = JED;
+        self.canonical_reactive[63] = JEE;
+        self.canonical_reactive[64] = IQM;
+        self.canonical_reactive[65] = JEF;
+        self.canonical_reactive[66] = JEG;
+        self.canonical_reactive[67] = IQR;
+        self.canonical_reactive[68] = JEH;
+        self.canonical_reactive[69] = JEI;
+        self.canonical_reactive[70] = JEJ;
+        self.canonical_reactive[71] = JEK;
+        self.canonical_reactive[72] = staged[721];
+        self.canonical_reactive[73] = IXJ;
+        self.canonical_reactive[74] = IXK;
+        self.canonical_reactive[75] = JEL;
+        self.canonical_reactive[76] = JEM;
+        self.canonical_reactive[77] = JEN;
+        self.canonical_reactive[78] = JEO;
+        self.canonical_reactive[79] = JEP;
+        self.canonical_reactive[80] = IXY;
+        self.canonical_reactive[81] = JEQ;
+        self.canonical_reactive[82] = JER;
+        self.canonical_reactive[83] = JES;
+        self.canonical_reactive[84] = JET;
+        self.canonical_reactive[85] = JEU;
+        self.canonical_reactive[86] = IXY;
+        self.canonical_reactive[87] = JEV;
+        self.canonical_reactive[88] = JEW;
+        self.canonical_reactive[89] = JEX;
+        self.canonical_reactive[90] = JEY;
+        self.canonical_reactive[91] = JEZ;
+        self.canonical_reactive[92] = IYK;
+        self.canonical_reactive[93] = JFA;
+        self.canonical_reactive[94] = JFB;
+        self.canonical_reactive[95] = JFC;
+        self.canonical_reactive[96] = JFD;
+        self.canonical_reactive[97] = JFE;
+        self.canonical_reactive[98] = staged[1644];
+        self.canonical_reactive[99] = staged[1645];
+        self.canonical_reactive[100] = staged[1646];
+        self.canonical_reactive[101] = staged[1647];
+        self.canonical_reactive[102] = staged[1648];
+        self.canonical_reactive[103] = staged[1649];
+        self.canonical_reactive[104] = staged[1650];
+        self.canonical_reactive[105] = staged[1651];
     }
 
     pub fn stamp_reactive(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedReactiveStamper<'_>) {

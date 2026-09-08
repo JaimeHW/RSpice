@@ -1457,7 +1457,7 @@ impl<const DDT: usize, const IDT: usize> StampState<DDT, IDT> {
 	}
 }
 
-pub(crate) type CanonicalModelValues = [f64; 282];
+pub(crate) type CanonicalModelValues = [f64; 283];
 pub struct Instance {
 	pub nodes: [usize; 14],
 	pub branches: [usize; 12],
@@ -1472,7 +1472,7 @@ pub struct Instance {
 	pub(crate) ddt_coefficients: GeneratedDdtCoefficients,
 	pub(crate) canonical_reactive: Box<[f64; 216]>,
 	pub(crate) canonical_model_values: Option<std::sync::Arc<CanonicalModelValues>>,
-	pub(crate) canonical_staged: Box<[f64; 1107]>,
+	pub(crate) canonical_staged: Box<[f64; 1108]>,
 	pub(crate) canonical_instance_valid: bool,
 	pub(crate) canonical_temperature_valid: bool,
 	pub(crate) canonical_temperature: f64,
@@ -2924,7 +2924,7 @@ impl Instance {
 	pub const EVENT_STATE_COUNT: usize = 0;
 	pub const ONE_STEP_DAE_SPLIT_SAFE: bool = true;
 	pub const REQUIRES_NODESET_PHASE: bool = false;
-	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "bc2eeb6ad8620a030bc0b87a5961c52d6627b55614bb3581f188e4d9cba94806";
+	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "e8b675137cc1e7e243564c3e088e9125f7d12c0aa74d57d00c6a88bba62491ba";
 	pub const MAX_ANALOG_LOOP_ITERATIONS: usize = 1_000_000;
 
 	pub fn new(nodes: &[usize]) -> Self {

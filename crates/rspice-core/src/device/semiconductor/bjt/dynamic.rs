@@ -1016,6 +1016,7 @@ mod tests {
     fn vbic13_delayed_avalanche_reduction_matches_nonequilibrium_residual_derivatives() {
         let params = [
             ("LEVEL", 12.0),
+            ("PNJMAXI", 1e-9),
             ("NF", 1.1),
             ("NR", 1.2),
             ("TNF", 0.001),

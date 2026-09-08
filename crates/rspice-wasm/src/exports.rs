@@ -268,6 +268,19 @@ mod wasm_tests {
     }
 
     #[wasm_bindgen_test]
+    fn vbic13_pnjmaxi_global_option_matches_xyce_in_wasm() {
+        let netlist = rspice_core::Netlist::parse(
+            "VBIC PNJMAXI in WASM\nVc c 0 -1\nVb b 0 -0.8\nQ1 c b 0 0 vm SW_ET=0\n\
+             .model vm PNP(LEVEL=12 IS=1e-16 IBEI=0 IBCI=0 IBEIP=0 ISP=0 RCX=1 RCI=1 RBX=1 RBI=1 RE=1 RBP=0 RS=0 GMIN=0 TNOM=27)\n.temp 27\n.options DEVICE PNJMAXI=1u\n.end\n",
+        ).unwrap();
+        let result = rspice_core::Engine::default()
+            .run_dc_op_with_abort(&netlist, &rspice_core::abort_signal::NoAbort)
+            .unwrap();
+        let current = result.branch_current_named("Vc").unwrap();
+        assert!((current - 8.903669004624935e-6).abs() < 1e-12);
+    }
+
+    #[wasm_bindgen_test]
     fn vbic_tnf_thermal_derivative_matches_xyce_in_wasm() {
         let netlist = rspice_core::Netlist::parse(
             "VBIC TNF thermal derivative in WASM\nVc c 0 -1.8\nVb b 0 -0.7\nVth th 0 DC 20 AC 1\nQ1 c b 0 0 th vm SW_ET=1 M=3 TRISE=20\n\

@@ -16,7 +16,7 @@ impl Instance {
 		if !self.multiplicity.is_finite() || self.multiplicity <= 0.0 {
 			return Err(GeneratedNoiseEvaluationError::InvalidMultiplicity { value: self.multiplicity });
 		}
-		let mut prepared = [0.0; 503];
+		let mut prepared = [0.0; 504];
 		let produced = canonical_model_preprocess(
 			&self.params.values,
 			&self.param_given[..],
@@ -245,7 +245,7 @@ impl Instance {
 		let DB=B* ((AS+ CZ)- (((DA* DA)+ staged[156]).sqrt()));
 		let DC=AS- AO;
 		let DD=B* ((AS+ AO)- (((DC* DC)+ staged[158]).sqrt()));
-		let DE=B* (AS- (((AS* AS)+ 4e-12f64).sqrt()));
+		let DE=B* ((AS+ A)- (((AS* AS)+ 4e-12f64).sqrt()));
 		DF=CS;
 		DJ=DB;
 		DL=CY;
@@ -1144,7 +1144,7 @@ impl Instance {
 		let GM=C* ((FG+ GK)- (((GL* GL)+ ((FL* BL)* BL)).sqrt()));
 		let GN=FG- FC;
 		let GO=C* ((FG+ FC)- (((GN* GN)+ ((FL* I)* I)).sqrt()));
-		let GP=C* (FG- (((FG* FG)+ 4e-12f64).sqrt()));
+		let GP=C* ((FG+ A)- (((FG* FG)+ 4e-12f64).sqrt()));
 		GQ=GD;
 		GW=GM;
 		GY=GJ;
@@ -1762,7 +1762,7 @@ impl Instance {
 		let SO=C* ((FH+ SM)- (((SN* SN)+ ((FL* BL)* BL)).sqrt()));
 		let SP=FH- FC;
 		let SQ=C* ((FH+ FC)- (((SP* SP)+ ((FL* I)* I)).sqrt()));
-		let SR=C* (FH- (((FH* FH)+ 4e-12f64).sqrt()));
+		let SR=C* ((FH+ A)- (((FH* FH)+ 4e-12f64).sqrt()));
 		SS=SF;
 		SW=SO;
 		SY=SL;
@@ -2380,7 +2380,7 @@ impl Instance {
 		let AEH=C* ((FI+ AEF)- (((AEG* AEG)+ ((FL* BL)* BL)).sqrt()));
 		let AEI=FI- FC;
 		let AEJ=C* ((FI+ FC)- (((AEI* AEI)+ ((FL* I)* I)).sqrt()));
-		let AEK=C* (FI- (((FI* FI)+ 4e-12f64).sqrt()));
+		let AEK=C* ((FI+ A)- (((FI* FI)+ 4e-12f64).sqrt()));
 		AEL=ADY;
 		AEP=AEH;
 		AER=AEE;
@@ -4431,7 +4431,7 @@ impl Instance {
 		let BRK=C* ((BOK+ BRI)- (((BRJ* BRJ)+ ((FL* BL)* BL)).sqrt()));
 		let BRL=BOK- FC;
 		let BRM=C* ((BOK+ FC)- (((BRL* BRL)+ ((FL* I)* I)).sqrt()));
-		let BRN=C* (BOK- (((BOK* BOK)+ 4e-12f64).sqrt()));
+		let BRN=C* ((BOK+ A)- (((BOK* BOK)+ 4e-12f64).sqrt()));
 		BRO=BRB;
 		BRS=BRK;
 		BRU=BRH;

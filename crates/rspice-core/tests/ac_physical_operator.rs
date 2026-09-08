@@ -510,3 +510,69 @@ fn frequency_activated_behavioral_voltage_identity_is_singular() {
          .END\n",
     );
 }
+
+#[test]
+fn vbic13_pnjmaxi_all_junctions_match_xyce710_dc_and_ac() {
+    // Independent Xyce 7.10: different saturation currents in every junction,
+    // active IKF/IKR/IKP rolloff, M=3, TRISE and a driven thermal terminal.
+    for (level, expected_dc, expected_ac) in [
+        (
+            11,
+            [
+                0.0006780911623027872,
+                -0.0008715674576252999,
+                0.0,
+                -0.0590799710590033,
+            ],
+            [
+                Complex64::new(0.0011866741027589229, 0.002958788230962209),
+                Complex64::new(-0.0017459812824673904, -0.00296024496477361),
+                Complex64::new(0.0, 0.0),
+                Complex64::new(-0.00032629244303326096, -0.0018838180623807796),
+            ],
+        ),
+        (
+            12,
+            [
+                0.0010942286843618383,
+                -0.0008668472207152475,
+                -0.0004208624407979479,
+                -0.0585801295584971,
+            ],
+            [
+                Complex64::new(0.0012095912965754297, 0.0029581042907695734),
+                Complex64::new(-0.0017953891091435636, -0.0029600985063590974),
+                Complex64::new(2.65031740606827e-05, 5.37512843421898e-07),
+                Complex64::new(-0.0003084636587386225, -0.0018841134824596002),
+            ],
+        ),
+    ] {
+        let substrate = if level == 12 { " s" } else { "" };
+        for (kind, p) in [("NPN", 1.0), ("PNP", -1.0)] {
+            let netlist = parse(&format!(
+                "VBIC PNJMAXI all junctions\nVc c 0 {}\nVb b 0 DC {} AC {p}\nVs s 0 {p}\nVth th 0 DC 20 AC 1\nQ1 c b 0{substrate} th vm SW_ET=1 M=3 TRISE=20\n\
+                 .model vm {kind}(LEVEL={level} IS=1e-16 NF=1.1 NR=1.2 ISRR=0.7 TNF=0.001 XISR=1.8 DEAR=0.1 IBEI=1e-17 IBEN=1e-12 NEN=1.5 IBCI=2e-17 IBCN=2e-12 NCN=1.5 IBEIP=3e-17 IBENP=3e-12 IBCIP=4e-17 IBCNP=4e-12 NCNP=1.5 ISP=2e-16 WSP=0.4 WBE=0.6 RCX=1 RCI=1 RBX=1 RBI=1 RE=1 RBP=1 RS=1 GMIN=0 TNOM=27 PNJMAXI=1e-6 RTH=1000 CTH=1p TD=1n TF=1n TR=2n IKF=1e-7 IKR=2e-7 IKP=2e-7 NKF=0.4)\n.temp 27\n.options gmin=0\n.end\n",
+                -0.2 * p,
+                0.9 * p,
+            ));
+            let engine = Engine::default();
+            let dc = engine.run_dc_op(&netlist).unwrap();
+            let ac = engine.run_ac(&netlist, &[1e8]).unwrap().pop().unwrap();
+            for (i, (branch, sign)) in [("Vc", p), ("Vb", p), ("Vs", p), ("Vth", 1.0)]
+                .into_iter()
+                .enumerate()
+            {
+                let current = dc.branch_current_named(branch).unwrap();
+                assert!(
+                    (current - sign * expected_dc[i]).abs() < 2e-6 * expected_dc[i].abs() + 1e-14,
+                    "LEVEL={level} {kind} DC {branch}: {current}"
+                );
+                let current = branch_current(&ac, branch);
+                assert!(
+                    (current - sign * expected_ac[i]).norm() < 2e-6 * expected_ac[i].norm() + 1e-14,
+                    "LEVEL={level} {kind} AC {branch}: {current}"
+                );
+            }
+        }
+    }
+}

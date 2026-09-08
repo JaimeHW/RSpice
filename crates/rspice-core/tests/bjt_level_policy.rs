@@ -12,6 +12,57 @@ const VBIC13_TEST_NBBE: f64 = 5.0;
 const VBIC13_TEST_IBBE: f64 = 1e-9;
 const VBIC13_TEST_VBE: f64 = -2.4;
 
+#[test]
+fn vbic13_pnjmaxi_matches_xyce_and_model_overrides_global_option() {
+    // Xyce 7.10 LEVEL=11/12, all five active series resistors = 1 ohm.
+    for level in [11, 12] {
+        let substrate = if level == 12 { " 0" } else { "" };
+        for (kind, p) in [("NPN", 1.0), ("PNP", -1.0)] {
+            for (model, option, expected) in [
+                ("PNJMAXI=1u", "", -8.903669004624935e-6),
+                ("", ".options PNJMAXI=1u", -8.903669004624935e-6),
+                ("", ".options DEVICE PNJMAXI=1u", -8.903669004624935e-6),
+                ("PNJMAXI=1", ".options PNJMAXI=1u", -0.002462218732912948),
+            ] {
+                let deck = format!(
+                    "PNJMAXI precedence\nVc c 0 {p}\nVb b 0 {}\nQ1 c b 0{substrate} vm SW_ET=0\n\
+                     .model vm {kind}(LEVEL={level} IS=1e-16 IBEI=0 IBCI=0 IBEIP=0 ISP=0 RCX=1 RCI=1 RBX=1 RBI=1 RE=1 RBP=0 RS=0 {model} GMIN=0 TNOM=27)\n\
+                     .temp 27\n.options gmin=0\n{option}\n.op\n.end\n",
+                    0.8 * p,
+                );
+                assert_rel_close(
+                    &format!("LEVEL={level} {kind} {model} {option}"),
+                    branch_current(&deck, "vc"),
+                    p * expected,
+                    1e-7,
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn pnjmaxi_rejects_invalid_values_and_unsupported_model_families() {
+    for value in ["0", "-1", "{1/0}", "\"invalid\""] {
+        for scope in ["", "DEVICE "] {
+            let deck = format!("PNJMAXI validation\n.options {scope}PNJMAXI={value}\n.end\n");
+            assert!(Netlist::parse(&deck).is_err(), "{deck}");
+        }
+        let deck = op_deck(&format!(".model qmod NPN(LEVEL=11 PNJMAXI={value})"));
+        assert!(run(&deck).is_err(), "{deck}");
+    }
+    for level in [1, 4, 9, 13] {
+        let deck = op_deck(&format!(".model qmod NPN(LEVEL={level} PNJMAXI=1u)"));
+        let error = run(&deck).expect_err("PNJMAXI must not silently affect another model family");
+        assert!(error.contains("PNJMAXI"), "{error}");
+    }
+    let mut netlist = Netlist::parse(&op_deck(".model qmod NPN(LEVEL=11)")).unwrap();
+    for value in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+        netlist.options.device_pnjmaxi = Some(value);
+        assert!(Engine::default().build_circuit(&netlist).is_err());
+    }
+}
+
 fn op_deck(model_line: &str) -> String {
     format!(
         "* bjt level policy\n\

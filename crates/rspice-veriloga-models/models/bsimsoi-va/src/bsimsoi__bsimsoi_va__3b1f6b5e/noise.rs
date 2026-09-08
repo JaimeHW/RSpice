@@ -31,7 +31,7 @@ impl Instance {
 		if !self.multiplicity.is_finite() || self.multiplicity <= 0.0 {
 			return Err(GeneratedNoiseEvaluationError::InvalidMultiplicity { value: self.multiplicity });
 		}
-		let mut prepared = [0.0; 775];
+		let mut prepared = [0.0; 781];
 		let produced = canonical_model_preprocess(
 			&self.params.values,
 			&self.param_given[..],
@@ -2233,8 +2233,8 @@ impl Instance {
 		AIW=AIT;
 		BXV=CHL;
 		}else{
-		let AIU=-4f64* AIQ;
 		let CHK=CHJ* -4f64;
+		let AIU=(-4f64* AIQ)+ 0f64;
 		AIW=AIU;
 		BXV=CHK;
 		}
@@ -7985,11 +7985,11 @@ impl Instance {
 		CYV=DQR;
 		CYW=DQS;
 		}else{
-		let BGR=BGQ* BGM;
 		let DQL=DQH* BGQ;
 		let DQM=DQI* BGQ;
 		let DQN=DQJ* BGQ;
 		let DQO=DQK* BGQ;
+		let BGR=(BGQ* BGM)+ 0f64;
 		BGT=BGR;
 		CYT=DQL;
 		CYU=DQM;

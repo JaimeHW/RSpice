@@ -18,7 +18,7 @@ impl Instance {
 		if !self.multiplicity.is_finite() || self.multiplicity <= 0.0 {
 			return Err(GeneratedNoiseEvaluationError::InvalidMultiplicity { value: self.multiplicity });
 		}
-		let mut prepared = [0.0; 817];
+		let mut prepared = [0.0; 820];
 		let produced = canonical_model_preprocess(
 			&self.params.values,
 			&self.param_given[..],
@@ -734,7 +734,7 @@ impl Instance {
 		let NB=V* ((CI+ MZ)- (((NA* NA)+ staged[205]).sqrt()));
 		let NC=CI- BQ;
 		let ND=V* ((CI+ BQ)- (((NC* NC)+ staged[207]).sqrt()));
-		let NE=V* (CI- (((CI* CI)+ 4e-12f64).sqrt()));
+		let NE=V* ((CI+ A)- (((CI* CI)+ 4e-12f64).sqrt()));
 		NF=MI;
 		NJ=NB;
 		NL=MY;
@@ -2549,7 +2549,7 @@ impl Instance {
 		let WK=FJ* ((MV+ WI)- (((WJ* WJ)+ ((MK* FX)* FX)).sqrt()));
 		let WL=MV- LX;
 		let WM=FJ* ((MV+ LX)- (((WL* WL)+ ((MK* FV)* FV)).sqrt()));
-		let WN=FJ* (MV- (((MV* MV)+ 4e-12f64).sqrt()));
+		let WN=FJ* ((MV+ A)- (((MV* MV)+ 4e-12f64).sqrt()));
 		WO=VR;
 		WS=WK;
 		WU=WH;
@@ -3553,7 +3553,7 @@ impl Instance {
 		let AQI=FJ* ((MW+ AQG)- (((AQH* AQH)+ ((MK* FX)* FX)).sqrt()));
 		let AQJ=MW- LX;
 		let AQK=FJ* ((MW+ LX)- (((AQJ* AQJ)+ ((MK* FV)* FV)).sqrt()));
-		let AQL=FJ* (MW- (((MW* MW)+ 4e-12f64).sqrt()));
+		let AQL=FJ* ((MW+ A)- (((MW* MW)+ 4e-12f64).sqrt()));
 		AQM=APP;
 		AQQ=AQI;
 		AQS=AQF;
@@ -4557,7 +4557,7 @@ impl Instance {
 		let BJZ=FJ* ((MX+ BJX)- (((BJY* BJY)+ ((MK* FX)* FX)).sqrt()));
 		let BKA=MX- LX;
 		let BKB=FJ* ((MX+ LX)- (((BKA* BKA)+ ((MK* FV)* FV)).sqrt()));
-		let BKC=FJ* (MX- (((MX* MX)+ 4e-12f64).sqrt()));
+		let BKC=FJ* ((MX+ A)- (((MX* MX)+ 4e-12f64).sqrt()));
 		BKD=BJG;
 		BKH=BJZ;
 		BKJ=BJW;
@@ -7781,7 +7781,7 @@ impl Instance {
 		let DVB=FJ* ((DJR+ DUZ)- (((DVA* DVA)+ ((MK* FX)* FX)).sqrt()));
 		let DVC=DJR- LX;
 		let DVD=FJ* ((DJR+ LX)- (((DVC* DVC)+ ((MK* FV)* FV)).sqrt()));
-		let DVE=FJ* (DJR- (((DJR* DJR)+ 4e-12f64).sqrt()));
+		let DVE=FJ* ((DJR+ A)- (((DJR* DJR)+ 4e-12f64).sqrt()));
 		DVF=DUI;
 		DVJ=DVB;
 		DVL=DUY;

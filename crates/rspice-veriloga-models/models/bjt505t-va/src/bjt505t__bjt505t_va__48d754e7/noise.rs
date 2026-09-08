@@ -748,7 +748,7 @@ impl Instance {
 		let PC=HZ/ PB;
 		let PD=HZ< A;
 		let PG=if PD{
-		let PE=PB* ((C+ (PC.exp())).ln());
+		let PE=A+ (PB* ((C+ (PC.exp())).ln()));
 		PE
 		}else{
 		let PF=HZ+ (PB* ((C+ ((-PC).exp())).ln()));
@@ -2589,7 +2589,7 @@ impl Instance {
 		let PC=HZ/ PB;
 		let PD=HZ< A;
 		let PG=if PD{
-		let PE=PB* ((C+ (PC.exp())).ln());
+		let PE=A+ (PB* ((C+ (PC.exp())).ln()));
 		PE
 		}else{
 		let PF=HZ+ (PB* ((C+ ((-PC).exp())).ln()));

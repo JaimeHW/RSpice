@@ -237,16 +237,16 @@ impl Instance {
 		let CE=CC> CD;
 		let CN;
 		if CE{
-		let CG=H* (CC+ (((CC* CC)+ CF).sqrt()));
+		let CG=A+ (H* (CC+ (((CC* CC)+ CF).sqrt())));
 		CN=CG;
 		}else{
 		let CH=A- CC;
 		let CI=CH> CD;
 		let CM=if CI{
-		let CJ=(H* CF)/ (CH+ (((CH* CH)+ CF).sqrt()));
+		let CJ=A+ ((H* CF)/ (CH+ (((CH* CH)+ CF).sqrt())));
 		CJ
 		}else{
-		let CL=H* (CC+ ((CK+ CF).sqrt()));
+		let CL=A+ (H* (CC+ ((CK+ CF).sqrt())));
 		CL
 		};
 		CN=CM;
@@ -2049,16 +2049,16 @@ impl Instance {
 		let FB=EZ> FA;
 		let FK;
 		if FB{
-		let FD=U* (EZ+ (((EZ* EZ)+ FC).sqrt()));
+		let FD=A+ (U* (EZ+ (((EZ* EZ)+ FC).sqrt())));
 		FK=FD;
 		}else{
 		let FE=A- EZ;
 		let FF=FE> FA;
 		let FJ=if FF{
-		let FG=(U* FC)/ (FE+ (((FE* FE)+ FC).sqrt()));
+		let FG=A+ ((U* FC)/ (FE+ (((FE* FE)+ FC).sqrt())));
 		FG
 		}else{
-		let FI=U* (EZ+ ((FH+ FC).sqrt()));
+		let FI=A+ (U* (EZ+ ((FH+ FC).sqrt())));
 		FI
 		};
 		FK=FJ;

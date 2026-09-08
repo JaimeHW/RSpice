@@ -1882,6 +1882,11 @@ pub(super) fn parse_options_command(
                     line_num,
                 )?);
             }
+            (Some("DEVICE") | None, "PNJMAXI") => {
+                let value = expect_value(stream, line_num, params)?;
+                options.device_pnjmaxi =
+                    Some(parse_positive_real_option("PNJMAXI", value, line_num)?);
+            }
             (Some("DEVICE"), "B3SOIGMINSCALING" | "B3SOI_GMIN_SCALING") => {
                 options.b3soi_gmin_scaling =
                     Some(parse_boolean_option(stream, line_num, params, has_equals)?);
@@ -8670,18 +8675,23 @@ mod tests {
 
     #[test]
     fn device_minimum_defaults_parse_and_merge() {
-        let netlist = Netlist::parse(&deck_with_options(".options device minres=1 mincap=1nf"))
-            .expect("scoped Xyce MINRES/MINCAP parse");
+        let netlist = Netlist::parse(&deck_with_options(
+            ".options device minres=1 mincap=1nf pnjmaxi=1u",
+        ))
+        .expect("scoped Xyce MINRES/MINCAP parse");
         assert_eq!(netlist.options.device_min_resistance, Some(1.0));
         assert_eq!(netlist.options.device_min_capacitance, Some(1.0e-9));
+        assert_eq!(netlist.options.device_pnjmaxi, Some(1.0e-6));
 
         let mut merged = crate::netlist::SimulationOptions {
             device_min_resistance: Some(2.0),
+            device_pnjmaxi: Some(1.0),
             ..crate::netlist::SimulationOptions::default()
         };
         merged.merge(&netlist.options);
         assert_eq!(merged.device_min_resistance, Some(1.0));
         assert_eq!(merged.device_min_capacitance, Some(1.0e-9));
+        assert_eq!(merged.device_pnjmaxi, Some(1.0e-6));
     }
 
     #[test]

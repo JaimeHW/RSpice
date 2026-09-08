@@ -5,7 +5,7 @@ use super::state::{CanonicalModelValues, Instance, PARAMETER_MODEL_FLAGS};
 use rspice_veriloga_runtime::{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, install_generated_stage_values, L2, evaluate_generated_above, evaluate_generated_cross, evaluate_generated_timer, rspice_eval_ddt, rspice_eval_idt, rspice_limexp, rspice_limited_exp, rspice_limited_exp_derivative};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock, Weak};
-pub(super) const CANONICAL_MODEL_STAGE_SLOTS: [u32; 5] = [5, 6, 1, 0, 3];
+pub(super) const CANONICAL_MODEL_STAGE_SLOTS: [u32; 7] = [5, 6, 1, 0, 3, 18, 19];
 pub(super) const CANONICAL_INSTANCE_STAGE_SLOTS: [u32; 10] = [9, 10, 11, 12, 2, 13, 14, 16, 15, 17];
 pub(super) const CANONICAL_TEMPERATURE_STAGE_SLOTS: [u32; 3] = [7, 8, 4];
 
@@ -16,8 +16,10 @@ pub(super) fn canonical_model_preprocess(
     staged: &[f64],
     temperature: f64,
     thermal_voltage: f64,
-) -> [f64; 5] {
+) -> [f64; 7] {
 	let B=parameter_given[10] as u8 as f64;
+	let G=0.0;
+	let I=0.0;
 	let mut oC=0.0;
 	let A=parameters[14]!= 1002f64;
 	if parameter_given[10]{
@@ -27,7 +29,9 @@ pub(super) fn canonical_model_preprocess(
 	let D=273.15f64+ parameters[15];
 	let E=parameters[34]+ 1f64;
 	let F=(parameters[28]> 0f64)|| (parameters[26]> 0f64);
-    [A as u8 as f64, oC, D, E, F as u8 as f64]
+	let H=0f64+ G;
+	let J=0f64+ I;
+    [A as u8 as f64, oC, D, E, F as u8 as f64, H, J]
 }
 
 pub(super) fn canonical_instance_preprocess(
@@ -293,8 +297,6 @@ impl Instance {
 		let EW=parameters[28];
 		let EX=parameters[26];
 		let FA=L2([0f64;2]);
-		let FI=0.0;
-		let FJ=0.0;
 		if A{
 		analog_finish(2, time, B);
 		}
@@ -590,14 +592,15 @@ impl Instance {
 		let FD=EF* FB;
 		let FE=EG/ FD;
 		let FF=(EH- ((FC* EF)* FE))/ FD;
-		let FG=FF[0];
-		let FH=FF[1];
+		let FG=J+ FE;
+		let FH=FF[0];
+		let FI=FF[1];
         stamper.stamp_current_sparse_local::<2, 0>(
             Some(0),
             Some(1),
-            multiplicity * (FE),
+            multiplicity * (FG),
             [0, 1],
-            [FG, FH],
+            [FH, FI],
             [],
             [],
             multiplicity,
@@ -605,7 +608,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(0),
             Some(1),
-            multiplicity * (FI),
+            multiplicity * (staged[18]),
             [],
             [],
             [],
@@ -615,7 +618,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(0),
             Some(1),
-            multiplicity * (FJ),
+            multiplicity * (staged[19]),
             [],
             [],
             [],

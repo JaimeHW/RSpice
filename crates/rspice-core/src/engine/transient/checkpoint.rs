@@ -1182,7 +1182,8 @@ pub(crate) fn simulation_checkpoint_identity(config: &SimulationConfig) -> Strin
     // v25 applies VBIC 1.3 thermal-resistance scaling, temperature limits and
     // authored CTH, and scopes the limited-evaluation cache to one matrix load.
     // v31 maps VBIC saturation currents from nominal emission coefficients.
-    hasher.update(b"rspice-transient-resolved-config-v31\0");
+    // v32 implements VBIC 1.3 PNJMAXI and per-junction expLinA transitions.
+    hasher.update(b"rspice-transient-resolved-config-v32\0");
     hash_field(&mut hasher, "temperature", config.temperature.to_bits());
     hash_field(&mut hasher, "ramptime", config.ramptime.to_bits());
     hash_field(&mut hasher, "digital_delay_type", config.digital_delay_type);

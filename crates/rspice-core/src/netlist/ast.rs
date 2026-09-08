@@ -4408,6 +4408,9 @@ pub struct SimulationOptions {
     /// model parameters declared with the device `MIN_CAP` default policy.
     /// The value applies only when the model card omits that parameter.
     pub device_min_capacitance: Option<Value>,
+    /// Positive PN-junction exponential continuation current (A).
+    /// Native VBIC 1.3 model PNJMAXI overrides this device option.
+    pub device_pnjmaxi: Option<Value>,
     /// Xyce `.options device b3soigminscaling=...`: when enabled, BSIMSOI3
     /// receives `GMIN * 1e-6` in its terminal GMIN branches. Xyce enables this
     /// by default and decks may set it to zero to request the full GMIN.
@@ -4660,6 +4663,9 @@ impl SimulationOptions {
         }
         if other.device_min_capacitance.is_some() {
             self.device_min_capacitance = other.device_min_capacitance;
+        }
+        if other.device_pnjmaxi.is_some() {
+            self.device_pnjmaxi = other.device_pnjmaxi;
         }
         if other.b3soi_gmin_scaling.is_some() {
             self.b3soi_gmin_scaling = other.b3soi_gmin_scaling;
