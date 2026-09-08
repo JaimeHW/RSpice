@@ -6,6 +6,7 @@ use crate::abort_signal::AbortSignal;
 use crate::expr::constant_value;
 use crate::numerics::integration::BreakpointManager;
 use crate::resource::{ResourceKind, ResourceLimitError};
+use std::cell::Cell;
 use std::collections::BTreeSet;
 
 mod features;
@@ -144,6 +145,9 @@ struct EventSchedule<'a> {
     abort: &'a dyn AbortSignal,
     max_points: usize,
     physical_corners: bool,
+    // All candidate crossings of one n-ary extremum share an instruction
+    // budget, including recursive level isolation and temporary schedules.
+    isolation_work: Option<&'a Cell<usize>>,
     // Nonnegative finite event times have the same bit and numeric ordering.
     // One ordered union avoids quadratic Vec insertion for interleaved clocks.
     events: BTreeSet<u64>,
@@ -202,6 +206,19 @@ impl EventSchedule<'_> {
         } else {
             Ok(())
         }
+    }
+
+    fn charge_isolation_work(&self, cost: usize) -> Result<(), BehavioralBreakpointError> {
+        if let Some(work) = self.isolation_work {
+            let used = work.get().saturating_add(cost);
+            work.set(used);
+            if used > 16_000_000 {
+                return Err(BehavioralBreakpointError::Invalid(
+                    "extrema branch isolation exceeds its 16000000-instruction work limit",
+                ));
+            }
+        }
+        Ok(())
     }
 
     fn add(&mut self, time: Value) -> Result<(), BehavioralBreakpointError> {
@@ -396,6 +413,7 @@ impl BehavioralSources {
             abort,
             max_points,
             physical_corners,
+            isolation_work: None,
         };
         schedule.poll()?;
         for source in &self.voltage_sources {
@@ -419,6 +437,7 @@ pub(super) fn expression_transient_breakpoints(expr: &Expr, tstop: Value) -> Vec
         abort: &crate::abort_signal::NoAbort,
         max_points: usize::MAX,
         physical_corners: false,
+        isolation_work: None,
         events: BTreeSet::new(),
     };
     schedule
@@ -530,6 +549,119 @@ mod tests {
             assert!(collect(&plateau, stop, 16, true).unwrap().is_empty());
             assert!(collect(&plateau, stop, 16, false).unwrap().is_empty());
         }
+    }
+
+    #[test]
+    fn nary_extrema_find_active_corners_and_remove_clamped_intersections() {
+        for stop in [1e-30, 1.0, 1e300] {
+            for (function, plateau) in [("min", 0.3), ("max", 0.7)] {
+                let source = sources(&format!(
+                    "{function}(time/{stop:e},1-time/{stop:e},{plateau})"
+                ));
+                let events = collect(&source, stop, 16, true).unwrap();
+                assert!(contains(&events, 0.3 * stop), "{function}: {events:?}");
+                assert!(contains(&events, 0.7 * stop), "{function}: {events:?}");
+                assert!(
+                    !contains(&events, 0.5 * stop),
+                    "the clamped intersection is inactive: {events:?}"
+                );
+                assert_eq!(events, collect(&source, stop, 16, false).unwrap());
+            }
+        }
+    }
+
+    #[test]
+    fn extrema_cusp_levels_are_found_between_representable_timestamps() {
+        for stop in [1e-30, 1.0, 1e300] {
+            for function in ["min", "max"] {
+                let phase = format!("2*pi*(time/{stop:e})+0.1");
+                let source = sources(&format!(
+                    "exp(-10000*{function}(cos({phase}),-cos({phase}))^2)"
+                ));
+                let events = collect(&source, stop, 64, true).unwrap();
+                for cycle in [0.25, 0.75] {
+                    let peak = (cycle - 0.1 / std::f64::consts::TAU) * stop;
+                    assert!(contains(&events, peak), "{function}: {events:?}");
+                }
+                assert_eq!(events, collect(&source, stop, 64, false).unwrap());
+            }
+        }
+    }
+
+    #[test]
+    fn extrema_crossings_do_not_overflow_finite_opposing_operands() {
+        for stop in [1e-30, 1.0, 1e300] {
+            for function in ["min", "max"] {
+                let operand = format!("1e308*(2*(time/{stop:e})-1)");
+                let source = sources(&format!("{function}({operand},-({operand}))"));
+                let events = collect(&source, stop, 32, true).unwrap();
+                assert!(contains(&events, 0.5 * stop), "{function}: {events:?}");
+                assert_eq!(events, collect(&source, stop, 32, false).unwrap());
+            }
+        }
+    }
+
+    #[test]
+    fn extrema_crossings_share_work_limits_and_preserve_failed_collection() {
+        let work = Cell::new(16_000_000 - 1024);
+        let mut schedule = EventSchedule {
+            tstop: 1.0,
+            abort: &NoAbort,
+            max_points: 1024,
+            physical_corners: true,
+            isolation_work: Some(&work),
+            events: BTreeSet::new(),
+        };
+        let expr = crate::expr::parse_expression_strict(
+            "max(sin(8*pi*time),cos(6*pi*time),0.5*sin(2*pi*time))",
+        )
+        .unwrap();
+        let error = schedule
+            .temporal_features(&expr, &Context::transient(&[], &[], 0.0))
+            .unwrap_err();
+        assert!(
+            error.to_string().contains("extrema branch isolation"),
+            "{error}"
+        );
+        assert!(schedule.events.is_empty());
+
+        // Operand-level candidates must share the same aggregate budget,
+        // including analytically invertible clocks that need no bisection.
+        work.set(16_000_000 - 8);
+        let expr = crate::expr::parse_expression_strict(
+            "sqr(max(sin(8*pi*time),cos(6*pi*time),sin(2*pi*time)))",
+        )
+        .unwrap();
+        let error = schedule
+            .temporal_features(&expr, &Context::transient(&[], &[], 0.0))
+            .unwrap_err();
+        assert!(
+            error.to_string().contains("extrema branch isolation"),
+            "{error}"
+        );
+        assert!(schedule.events.is_empty());
+
+        let args = (0..1500)
+            .map(|index| format!("sin(time+{index})"))
+            .collect::<Vec<_>>()
+            .join(",");
+        let source = sources(&format!("max({args})"));
+        let mut manager = BreakpointManager::new();
+        manager.add(0.173);
+        let error = source
+            .collect_transient_breakpoints(1.0, &mut manager, &NoAbort, 1024, true)
+            .unwrap_err();
+        assert!(error.to_string().contains("1000000-pair"), "{error}");
+        assert_eq!(manager.times(), &[0.173]);
+
+        let repeated = std::iter::repeat_n("time", 1500)
+            .collect::<Vec<_>>()
+            .join(",");
+        assert!(
+            collect(&sources(&format!("max({repeated})")), 1.0, 16, true)
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]

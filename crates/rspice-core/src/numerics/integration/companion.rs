@@ -206,6 +206,35 @@ impl CompanionCoefficients {
         ieq
     }
 
+    /// Evaluate capacitor current from voltage differences before timestep
+    /// scaling. This avoids subtracting large absolute Norton companions.
+    pub(crate) fn capacitor_current(
+        &self,
+        capacitance: Value,
+        dt: Value,
+        voltage: Value,
+        voltage_prev: Value,
+        voltage_prev_prev: Value,
+        current_prev: Value,
+    ) -> Value {
+        let mut difference = self.coeff_g * (voltage - voltage_prev);
+        if self.needs_two_history {
+            difference += self.coeff_v_n_minus_1 * (voltage_prev - voltage_prev_prev);
+        }
+        let scale = capacitance / dt;
+        let mut current = if capacitance == 0.0 || difference == 0.0 {
+            0.0
+        } else if scale.is_finite() && scale != 0.0 {
+            scale * difference
+        } else {
+            capacitance * (difference / dt)
+        };
+        if self.coeff_i_n != 0.0 {
+            current -= self.coeff_i_n * current_prev;
+        }
+        current
+    }
+
     /// Calculate equivalent resistance for an inductor
     #[inline]
     pub(crate) fn inductor_req(&self, inductance: Value, dt: Value) -> Value {
@@ -319,6 +348,33 @@ pub(crate) fn parse_integration_method(spelling: &str) -> Option<IntegrationMeth
 #[cfg(test)]
 mod companion_coefficients_tests {
     use super::*;
+
+    #[test]
+    fn centered_capacitor_current_preserves_affine_history_and_extreme_scales() {
+        for coefficients in [
+            CompanionCoefficients::backward_euler(),
+            CompanionCoefficients::trapezoidal(),
+            CompanionCoefficients::gear2_variable_step(2.0, 1.0),
+            CompanionCoefficients::trapezoidal_with_xmu(0.49).unwrap(),
+        ] {
+            let current = coefficients.capacitor_current(0.25, 2.0, 13.0, 7.0, 4.0, 0.75);
+            assert!((current - 0.75).abs() <= 4.0 * Value::EPSILON);
+        }
+        for scale in [2.0_f64.powi(-900), 2.0_f64.powi(900)] {
+            for voltage in [2.0_f64.powi(-600), 2.0_f64.powi(600)] {
+                assert_eq!(
+                    CompanionCoefficients::backward_euler()
+                        .capacitor_current(scale, scale, voltage, 0.0, 0.0, 0.0),
+                    voltage
+                );
+            }
+        }
+        assert_eq!(
+            CompanionCoefficients::trapezoidal()
+                .capacitor_current(1e200, 1e-200, 1.0, 1.0, 1.0, 0.125),
+            -0.125
+        );
+    }
 
     #[test]
     fn variable_step_gear2_reduces_to_fixed_bdf2_for_equal_steps() {

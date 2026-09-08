@@ -100,12 +100,56 @@ impl EventSchedule<'_> {
             None
         };
         let program = compile_time_expression(identical_difference.unwrap_or(expr), context);
+        self.charge_isolation_work(program.instructions.len())?;
         let Some(mut bounds) = TimeEnclosure::new(&program, self.tstop) else {
             return Ok(());
         };
+        // A zero of a-b is exactly a==b for finite VM operands. Compare the
+        // operands directly: their subtraction can overflow while both
+        // sources and their branch crossing remain perfectly finite.
+        let operands = if target == 0.0
+            && identical_difference.is_none()
+            && let Expr::Binary {
+                op: BinaryOp::Sub,
+                left,
+                right,
+            } = expr
+        {
+            let left = compile_time_expression(left, context);
+            let right = compile_time_expression(right, context);
+            self.charge_isolation_work(
+                left.instructions
+                    .len()
+                    .saturating_add(right.instructions.len()),
+            )?;
+            Some((left, right))
+        } else {
+            None
+        };
+        let mut operand_bounds = operands.as_ref().and_then(|(left, right)| {
+            Some((
+                TimeEnclosure::new(left, self.tstop)?,
+                TimeEnclosure::new(right, self.tstop)?,
+            ))
+        });
         let mut vm = Vm::new();
         let mut evaluate = |time| {
-            let value = vm.execute(&program, &Context { time, ..*context });
+            let point = Context { time, ..*context };
+            let value = if let Some((left, right)) = &operands {
+                let a = vm.execute(left, &point);
+                let b = vm.execute(right, &point);
+                if !a.is_finite() || !b.is_finite() {
+                    Value::NAN
+                } else if a < b {
+                    -1.0
+                } else if a > b {
+                    1.0
+                } else {
+                    0.0
+                }
+            } else {
+                vm.execute(&program, &point)
+            };
             if value.is_finite() {
                 Ok(value)
             } else {
@@ -116,9 +160,20 @@ impl EventSchedule<'_> {
         };
         let mut pending = vec![window];
         let mut operations: usize = 0;
+        // Direct comparisons evaluate both operands even when compilation of
+        // the difference reused a sibling. Charge enough for either route.
+        let evaluation_cost = operands
+            .as_ref()
+            .map_or(program.instructions.len(), |(a, b)| {
+                program
+                    .instructions
+                    .len()
+                    .max(a.instructions.len().saturating_add(b.instructions.len()))
+            });
         let mut charge = || {
             self.poll()?;
-            operations = operations.saturating_add(program.instructions.len());
+            self.charge_isolation_work(evaluation_cost)?;
+            operations = operations.saturating_add(evaluation_cost);
             if operations > 16_000_000 {
                 Err(BehavioralBreakpointError::Invalid(
                     "time-feature isolation exceeds its 16000000-instruction work limit",
@@ -132,16 +187,30 @@ impl EventSchedule<'_> {
         let mut roots = BTreeSet::new();
         while let Some(interval) = pending.pop() {
             charge()?;
-            let Some(domain) = bounds
-                .evaluate(interval, context)
-                .filter(|bounds| bounds.value.is_finite())
-            else {
+            let Some(domain) = bounds.evaluate(interval, context) else {
                 // A denominator enclosure containing zero is uncertainty,
                 // not evidence of an absent feature or an actual pole.
                 // Resolve its domain with the same bounded subdivision.
                 subdivide_time_domain(interval, &mut pending)?;
                 continue;
             };
+            if !domain.value.is_finite() {
+                let finite_operands = if let Some((left, right)) = &mut operand_bounds {
+                    // The shared cost covers both operand programs.
+                    charge()?;
+                    left.evaluate(interval, context)
+                        .is_some_and(|bounds| bounds.value.is_finite())
+                        && right
+                            .evaluate(interval, context)
+                            .is_some_and(|bounds| bounds.value.is_finite())
+                } else {
+                    false
+                };
+                if !finite_operands {
+                    subdivide_time_domain(interval, &mut pending)?;
+                    continue;
+                }
+            }
             let (value, slope) = (domain.value, domain.slope);
             if identical_difference.is_some()
                 || !value.contains(target)
@@ -398,6 +467,7 @@ impl EventSchedule<'_> {
             abort: self.abort,
             max_points: self.max_points,
             physical_corners: self.physical_corners,
+            isolation_work: self.isolation_work,
             events: BTreeSet::new(),
         };
         for &level in levels {
@@ -482,6 +552,7 @@ impl EventSchedule<'_> {
         context: &Context<'_>,
     ) -> Result<(), BehavioralBreakpointError> {
         self.poll()?;
+        self.charge_isolation_work(1)?;
         if !target.is_finite() {
             return Ok(());
         }
@@ -574,9 +645,92 @@ impl EventSchedule<'_> {
                 (Function::Exp, [input]) if target > 0.0 => {
                     self.level(input, target.ln(), context)?
                 }
+                (Function::Min | Function::Max, args) => {
+                    // An extremum reaches a level only through one of its
+                    // operands. Isolate those candidates directly: a cusp
+                    // of the envelope need not have an exact VM zero or a
+                    // sign change at adjacent representable timestamps.
+                    let work = Cell::new(0);
+                    let mut levels = EventSchedule {
+                        events: BTreeSet::new(),
+                        isolation_work: Some(self.isolation_work.unwrap_or(&work)),
+                        ..*self
+                    };
+                    for arg in args {
+                        levels.poll()?;
+                        levels.charge_isolation_work(
+                            compile_time_expression(arg, context).instructions.len(),
+                        )?;
+                        levels.level(arg, target, context)?;
+                    }
+                    for bits in levels.events {
+                        self.add(Value::from_bits(bits))?;
+                    }
+                }
                 _ => self.isolated_levels(expr, target, context)?,
             },
             _ => {}
+        }
+        Ok(())
+    }
+
+    fn extrema_corners(
+        &mut self,
+        args: &[Expr],
+        context: &Context<'_>,
+    ) -> Result<(), BehavioralBreakpointError> {
+        if args.len() < 2 || args[1..].iter().all(|arg| arg == &args[0]) {
+            return Ok(());
+        }
+        // Pairwise equality contains every possible change of active branch.
+        // Bound this enumeration before cloning any operand trees.
+        if args.len().saturating_mul(args.len() - 1) / 2 > 1_000_000 {
+            return Err(BehavioralBreakpointError::Invalid(
+                "extrema branch enumeration exceeds its 1000000-pair work limit",
+            ));
+        }
+        let work = Cell::new(0);
+        let mut corners = EventSchedule {
+            events: BTreeSet::new(),
+            isolation_work: Some(self.isolation_work.unwrap_or(&work)),
+            ..*self
+        };
+        let mut operand_work = 0_usize;
+        for arg in args {
+            corners.poll()?;
+            let cost = compile_time_expression(arg, context).instructions.len();
+            corners.charge_isolation_work(cost)?;
+            operand_work = operand_work.saturating_add(cost);
+        }
+        // Each operand participates in n-1 pairs. Reserve the tree-copy work
+        // as well as charging actual root evaluations to the shared budget.
+        corners.charge_isolation_work(operand_work.saturating_mul(args.len() - 1))?;
+        for (index, left) in args.iter().enumerate() {
+            for right in &args[index + 1..] {
+                corners.poll()?;
+                corners.charge_isolation_work(1)?;
+                if left == right {
+                    continue;
+                }
+                if let Some(value) = constant_value(right, context) {
+                    corners.level(left, value, context)?;
+                } else if let Some(value) = constant_value(left, context) {
+                    corners.level(right, value, context)?;
+                } else {
+                    corners.level(
+                        &Expr::Binary {
+                            op: BinaryOp::Sub,
+                            left: Box::new(left.clone()),
+                            right: Box::new(right.clone()),
+                        },
+                        0.0,
+                        context,
+                    )?;
+                }
+            }
+        }
+        for bits in corners.events {
+            self.add(Value::from_bits(bits))?;
         }
         Ok(())
     }
@@ -677,12 +831,8 @@ impl EventSchedule<'_> {
                         context,
                     )?;
                 }
-                (Function::Min | Function::Max, [left, right]) => {
-                    if let Some(value) = constant_value(right, context) {
-                        self.level(left, value, context)?;
-                    } else if let Some(value) = constant_value(left, context) {
-                        self.level(right, value, context)?;
-                    }
+                (Function::Min | Function::Max, args) => {
+                    self.extrema_corners(args, context)?;
                 }
                 _ => {}
             },

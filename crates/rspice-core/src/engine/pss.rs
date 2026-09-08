@@ -111,7 +111,7 @@ impl PssAcceptedStepHistory {
 const PSS_FD_STEP: Value = 1e-8;
 const PSS_KRYLOV_STATE_THRESHOLD: usize = 12;
 const PSS_KRYLOV_REL_TOL: Value = 1e-9;
-const PSS_OPERATING_POINT_IDENTITY_VERSION: u32 = 25;
+const PSS_OPERATING_POINT_IDENTITY_VERSION: u32 = 26;
 
 fn pss_identity_field(hasher: &mut blake3::Hasher, name: &str, bytes: &[u8]) {
     hasher.update(&(name.len() as u64).to_le_bytes());
@@ -3535,23 +3535,42 @@ impl Engine {
         let mut new_solution = start.to_vec();
         let mut rhs = vec![0.0; size];
         let mut proposal = Vec::with_capacity(size);
-        let correction_form = !step.initialization && !circuit.inductors.is_empty();
+        let correction_form = !step.initialization
+            && (!circuit.inductors.is_empty() || !circuit.capacitors.is_empty());
 
         for _iter in 0..self.config.max_iterations {
             if abort.is_aborted() {
                 return Err(SimulationError::Aborted);
             }
-            self.pss_stamp_system(circuit, matrix, &mut rhs, step, &new_solution, false)?;
+            if correction_form {
+                self.pss_stamp_non_norton_system(
+                    circuit,
+                    matrix,
+                    &mut rhs,
+                    step,
+                    &new_solution,
+                    false,
+                )?;
+            } else {
+                self.pss_stamp_system(circuit, matrix, &mut rhs, step, &new_solution, false)?;
+            }
 
             let solved = if correction_form {
-                // Solving for absolute currents can erase a small winding
-                // voltage beside L*i/dt. TRAN already evaluates these rows
-                // from flux differences: use its residual to solve a Newton
-                // correction, reusing the same two RHS/proposal buffers.
+                // Form the static residual before adding large C/dt terms.
+                // Charge/flux differences then supply reactive corrections
+                // without cancelling absolute companion values.
                 matrix.correction_rhs_into(&rhs, &new_solution, &mut proposal)?;
+                circuit.capacitors.stamp_transient_norton_correction(
+                    matrix,
+                    &mut proposal,
+                    &new_solution,
+                    step.dt,
+                    step.coeff,
+                );
                 circuit.stabilize_inductor_correction_rhs(&mut proposal, &new_solution, step)?;
                 let solved = matrix.solve_into(&proposal, &mut rhs);
                 if solved.is_ok() {
+                    circuit.capture_capacitor_trial_currents(&new_solution, &rhs, step);
                     for (value, &previous) in rhs.iter_mut().zip(&new_solution) {
                         *value += previous;
                     }
@@ -3592,14 +3611,28 @@ impl Engine {
                         // A solved Newton linearization is not a proof of the
                         // physical DAE. Restamp F and Q at the candidate bias,
                         // bypassing limiter companions, before accepting it.
-                        self.pss_stamp_system(
-                            circuit,
-                            matrix,
-                            &mut rhs,
-                            step,
-                            &new_solution,
-                            true,
-                        )?;
+                        if correction_form {
+                            self.pss_stamp_non_norton_system(
+                                circuit,
+                                matrix,
+                                &mut rhs,
+                                step,
+                                &new_solution,
+                                true,
+                            )?;
+                            circuit
+                                .capacitors
+                                .stamp_norton_currents(&mut rhs, &circuit.capacitor_trial_currents);
+                        } else {
+                            self.pss_stamp_system(
+                                circuit,
+                                matrix,
+                                &mut rhs,
+                                step,
+                                &new_solution,
+                                true,
+                            )?;
+                        }
                         if self.pss_residual_convergence_met(
                             circuit,
                             matrix,
@@ -3745,6 +3778,26 @@ impl Engine {
         linearize_at: &[Value],
         physical_probe: bool,
     ) -> Result<(), SimulationError> {
+        self.pss_stamp_non_norton_system(pss, matrix, rhs, step, linearize_at, physical_probe)?;
+        if !step.initialization {
+            // The common capacitor loader includes its explicit branches,
+            // which were already loaded above. Add only Norton companions.
+            pss.capacitors
+                .stamp_transient_norton_companions(matrix, rhs, step.dt, step.coeff);
+        }
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn pss_stamp_non_norton_system(
+        &self,
+        pss: &mut PssCircuit,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        step: PssCompanionStep<'_>,
+        linearize_at: &[Value],
+        physical_probe: bool,
+    ) -> Result<(), SimulationError> {
         matrix.clear_values();
         rhs.fill(0.0);
         if step.initialization {
@@ -3793,7 +3846,7 @@ impl Engine {
         if !initialization {
             circuit
                 .capacitors
-                .stamp_transient_companion(matrix, rhs, dt, coeff, num_nodes);
+                .stamp_transient_branch_companions(matrix, rhs, dt, coeff, num_nodes);
         } else {
             // Only independent voltage constraints carry reactions in this
             // initialization solve. Dependent IC-capacitor current slots are
@@ -4105,8 +4158,9 @@ impl Engine {
 
             // Update capacitor history with the same companion that built this
             // step. IC capacitors own a solved physical-current branch;
-            // ordinary capacitors retain the Norton reconstruction.
+            // Norton currents retain the unrounded Newton correction.
             {
+                let trial_currents = &circuit.capacitor_trial_currents;
                 let circuit = &mut circuit.circuit;
                 for (cap_idx, cap) in circuit.capacitors.stamps.iter().enumerate() {
                     let np = cap.pp.row;
@@ -4126,9 +4180,7 @@ impl Engine {
                     {
                         new_solution[num_nodes + branch_ordinal - 1]
                     } else {
-                        let capacitance = circuit.capacitors.capacitances[cap_idx];
-                        let geq = coeff.capacitor_geq(capacitance, dt);
-                        geq * v_new - i_eq
+                        trial_currents[cap_idx]
                     };
                     circuit.capacitors.i_eq[cap_idx] = i_eq;
                     circuit.capacitors.v_prev_prev_prev[cap_idx] =
@@ -4760,6 +4812,87 @@ mod tests {
             &correction,
             &coeff
         ));
+    }
+
+    #[test]
+    fn tiny_pss_intervals_preserve_capacitor_current_and_the_outgoing_stencil() {
+        for method in [
+            IntegrationMethod::BackwardEuler,
+            IntegrationMethod::Trapezoidal,
+        ] {
+            for bias in [0.0, 1e6] {
+                let input = bias + 0.1;
+                let initial = bias + 0.05;
+                let netlist = Netlist::parse(&format!(
+                    "capacitor precision\nV1 in 0 {input:.17e}\nR1 in out 1k\nC1 out 0 1n\n.end\n"
+                ))
+                .unwrap();
+                let engine = Engine::default();
+                let mut circuit = PssCircuit::new(engine.build_circuit(&netlist).unwrap());
+                let mut matrix = engine.build_matrix(&circuit).unwrap();
+                circuit.link_indices(&matrix);
+                engine
+                    .pss_set_reactive_state(&mut circuit, &[initial])
+                    .unwrap();
+                let start = engine
+                    .pss_initial_node_solution(&mut circuit, &NoAbort)
+                    .unwrap();
+                let corner = 0.2e-6_f64;
+                let times = vec![
+                    0.0,
+                    corner,
+                    Value::from_bits(corner.to_bits() + 8),
+                    0.5e-6,
+                    1e-6,
+                ];
+                circuit.integration_mesh =
+                    Some(PssIntegrationMesh::from_times(1e-6, times.clone()).unwrap());
+                let result = engine
+                    .pss_run_tran_internal(
+                        &mut circuit,
+                        &mut matrix,
+                        start,
+                        PssTraversal {
+                            tstop: 1e-6,
+                            max_step: 0.25e-6,
+                            fixed_grid: true,
+                            integration_method: Some(method),
+                        },
+                        None,
+                        &NoAbort,
+                    )
+                    .unwrap();
+                let output = result
+                    .node_names
+                    .iter()
+                    .position(|name| name.eq_ignore_ascii_case("out"))
+                    .unwrap();
+                let tolerance = 32.0 * Value::EPSILON * (bias + 1.0);
+                let mut expected = initial;
+                for (index, pair) in times.windows(2).enumerate() {
+                    let dt = pair[1] - pair[0];
+                    // Exact discrete RC solution, written as a small increment
+                    // so the oracle does not cancel absolute companion terms.
+                    let fraction = if index == 0 || method == IntegrationMethod::BackwardEuler {
+                        dt / (1e-6 + dt)
+                    } else {
+                        2.0 * dt / (2e-6 + dt)
+                    };
+                    expected += fraction * (input - expected);
+                    assert!(
+                        (result.voltages[output][index + 1] - expected).abs() <= tolerance,
+                        "{method:?}, bias={bias}, step={index}: actual={} expected={expected}",
+                        result.voltages[output][index + 1]
+                    );
+                }
+                let current = (input - expected) / 1e3;
+                assert!(
+                    (circuit.capacitors.i_prev[0] - current).abs() <= tolerance / 1e3,
+                    "{method:?}, bias={bias}: current {} versus {current}",
+                    circuit.capacitors.i_prev[0]
+                );
+            }
+        }
     }
 
     #[test]

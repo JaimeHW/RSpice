@@ -408,42 +408,52 @@ mod tests {
     }
 
     #[test]
-    fn absolute_multiple_root_sources_resolve_with_the_existing_work_budget() {
+    fn multiple_root_sources_resolve_with_the_existing_work_budget() {
         use crate::numerics::integration::BreakpointManager;
 
         for cycles in [1, 64] {
-            let sources = source(&format!(
-                "exp(-1000000*(abs(cos(2*pi*{cycles}*time+0.1))+0.5*abs(cos(2*(2*pi*{cycles}*time+0.1)))-0.75)^2)"
-            ));
-            let limits = ResourceLimits::default();
-            let mut original = BreakpointManager::new_with_tolerance(Value::from_bits(1));
-            original.extend((0..=4 * cycles).map(|index| index as Value / (4 * cycles) as Value));
-            sources
-                .collect_transient_breakpoints(
-                    1.0,
-                    &mut original,
-                    &NoAbort,
-                    limits.max_analysis_points,
-                    true,
-                )
-                .unwrap();
-            let times = original.times();
-            let refined = sources
-                .refine_time_mesh(
-                    times,
-                    NonlinearConvergenceCriteria::default(),
-                    &limits,
-                    &NoAbort,
-                )
-                .unwrap_or_else(|error| {
-                    panic!("{cycles} cycles, {} input clocks: {error}", times.len())
-                })
-                .unwrap();
-            assert!(times.iter().all(|time| {
-                refined
-                    .binary_search_by(|value| value.total_cmp(time))
-                    .is_ok()
-            }));
+            let phase = format!("2*pi*{cycles}*time+0.1");
+            for expression in [
+                format!("exp(-1000000*(abs(cos({phase}))+0.5*abs(cos(2*({phase})))-0.75)^2)"),
+                format!(
+                    "exp(-1000000*(max(cos({phase}),-cos({phase}))+0.5*max(cos(2*({phase})),-cos(2*({phase})))-0.75)^2)"
+                ),
+                format!(
+                    "exp(-1000000*(min(cos({phase}),-cos({phase}),1)+0.5*min(cos(2*({phase})),-cos(2*({phase})),1)+0.75)^2)"
+                ),
+            ] {
+                let sources = source(&expression);
+                let limits = ResourceLimits::default();
+                let mut original = BreakpointManager::new_with_tolerance(Value::from_bits(1));
+                original
+                    .extend((0..=4 * cycles).map(|index| index as Value / (4 * cycles) as Value));
+                sources
+                    .collect_transient_breakpoints(
+                        1.0,
+                        &mut original,
+                        &NoAbort,
+                        limits.max_analysis_points,
+                        true,
+                    )
+                    .unwrap();
+                let times = original.times();
+                let refined = sources
+                    .refine_time_mesh(
+                        times,
+                        NonlinearConvergenceCriteria::default(),
+                        &limits,
+                        &NoAbort,
+                    )
+                    .unwrap_or_else(|error| {
+                        panic!("{expression}, {} input clocks: {error}", times.len())
+                    })
+                    .unwrap();
+                assert!(times.iter().all(|time| {
+                    refined
+                        .binary_search_by(|value| value.total_cmp(time))
+                        .is_ok()
+                }));
+            }
         }
     }
 

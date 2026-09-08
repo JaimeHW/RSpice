@@ -336,6 +336,14 @@ mod wasm_tests {
                 0.04282819034132224,
             ),
             (
+                "B1 in 0 V=exp(-1000000*(max(cos(2*pi*64meg*time+0.1),-cos(2*pi*64meg*time+0.1))+0.5*max(cos(2*(2*pi*64meg*time+0.1)),-cos(2*(2*pi*64meg*time+0.1)))-0.75)^2)",
+                0.04282819034132224,
+            ),
+            (
+                "B1 in 0 V=exp(-1000000*(min(cos(2*pi*64meg*time+0.1),-cos(2*pi*64meg*time+0.1),1)+0.5*min(cos(2*(2*pi*64meg*time+0.1)),-cos(2*(2*pi*64meg*time+0.1)),1)+0.75)^2)",
+                0.04282819034132224,
+            ),
+            (
                 "B1 in 0 V=abs(cos(2*pi*64meg*time+0.1)+0.5*cos(2*pi*128meg*time+0.2)-0.25)<0.001",
                 0.000367552653101734,
             ),

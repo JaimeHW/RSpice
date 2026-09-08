@@ -1626,6 +1626,39 @@ impl Capacitors {
         coeff: &CompanionCoefficients,
         num_nodes: usize,
     ) {
+        self.stamp_transient_companions::<true, true>(matrix, rhs, dt, coeff, num_nodes);
+    }
+
+    /// Stamp only capacitors with an explicit physical-current unknown.
+    pub(crate) fn stamp_transient_branch_companions(
+        &self,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        dt: Value,
+        coeff: &CompanionCoefficients,
+        num_nodes: usize,
+    ) {
+        self.stamp_transient_companions::<false, true>(matrix, rhs, dt, coeff, num_nodes);
+    }
+
+    pub(crate) fn stamp_transient_norton_companions(
+        &self,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        dt: Value,
+        coeff: &CompanionCoefficients,
+    ) {
+        self.stamp_transient_companions::<true, false>(matrix, rhs, dt, coeff, 0);
+    }
+
+    fn stamp_transient_companions<const NORTON: bool, const BRANCH: bool>(
+        &self,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        dt: Value,
+        coeff: &CompanionCoefficients,
+        num_nodes: usize,
+    ) {
         for (i, stamp) in self.stamps.iter().enumerate() {
             if self
                 .value_expressions
@@ -1639,6 +1672,9 @@ impl Capacitors {
             let geq = coeff.capacitor_geq(self.capacitances[i], dt);
 
             if let Some(branch_ordinal) = self.ic_branch_indices[i] {
+                if !BRANCH {
+                    continue;
+                }
                 // The Xyce IC branch is the capacitor's physical lead current,
                 // so make it the terminal-KCL current instead of recovering an
                 // observer from `geq*V - i_eq`.  The latter subtracts two very
@@ -1717,7 +1753,7 @@ impl Capacitors {
                     }
                     rhs[num_nodes + branch_ordinal - 1] = -i_eq;
                 }
-            } else {
+            } else if NORTON {
                 // Compute the Norton history source only when this capacitor
                 // actually uses the Norton terminal stamp.
                 let i_eq = coeff.capacitor_ieq(
@@ -1734,6 +1770,54 @@ impl Capacitors {
                 if stamp.nn.row != 0 {
                     rhs[stamp.nn.row - 1] -= i_eq;
                 }
+            }
+        }
+    }
+
+    /// Add Norton Jacobians and physical current residuals to a system that
+    /// already describes Newton corrections for the remaining devices.
+    pub(crate) fn stamp_transient_norton_correction(
+        &self,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        iterate: &[Value],
+        dt: Value,
+        coeff: &CompanionCoefficients,
+    ) {
+        let voltage = |node| if node == 0 { 0.0 } else { iterate[node - 1] };
+        for (index, stamp) in self.stamps.iter().enumerate() {
+            if self.ic_branch_indices[index].is_some() || self.value_expression(index).is_some() {
+                continue;
+            }
+            let current = coeff.capacitor_current(
+                self.capacitances[index],
+                dt,
+                voltage(stamp.pp.row) - voltage(stamp.nn.row),
+                self.v_prev[index],
+                self.v_prev_prev[index],
+                self.i_prev[index],
+            );
+            stamp.stamp_direct(matrix, coeff.capacitor_geq(self.capacitances[index], dt));
+            if stamp.pp.row != 0 {
+                rhs[stamp.pp.row - 1] -= current;
+            }
+            if stamp.nn.row != 0 {
+                rhs[stamp.nn.row - 1] += current;
+            }
+        }
+    }
+
+    /// Use independently retained physical currents for a residual probe.
+    pub(crate) fn stamp_norton_currents(&self, rhs: &mut [Value], currents: &[Value]) {
+        for (index, stamp) in self.stamps.iter().enumerate() {
+            if self.ic_branch_indices[index].is_some() || self.value_expression(index).is_some() {
+                continue;
+            }
+            if stamp.pp.row != 0 {
+                rhs[stamp.pp.row - 1] -= currents[index];
+            }
+            if stamp.nn.row != 0 {
+                rhs[stamp.nn.row - 1] += currents[index];
             }
         }
     }

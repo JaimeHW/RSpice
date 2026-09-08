@@ -1161,10 +1161,10 @@ pub(crate) fn restart_checkpoint_identity(netlist: &Netlist) -> Option<String> {
 
 pub(crate) fn simulation_checkpoint_identity(config: &SimulationConfig) -> String {
     let mut hasher = blake3::Hasher::new();
-    // v12 resolves square-root and absolute-value features and their
-    // clamp/cusp geometry through shared time-expression bounds.
+    // v13 resolves n-ary extrema and their active-branch corners through
+    // shared time-expression bounds and bounded branch isolation.
     // Earlier schedules can produce different accepted integration histories.
-    hasher.update(b"rspice-transient-resolved-config-v12\0");
+    hasher.update(b"rspice-transient-resolved-config-v13\0");
     hash_field(&mut hasher, "temperature", config.temperature.to_bits());
     hash_field(&mut hasher, "ramptime", config.ramptime.to_bits());
     hash_field(&mut hasher, "digital_delay_type", config.digital_delay_type);

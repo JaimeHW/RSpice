@@ -276,7 +276,7 @@ Checkpoint format 35 retains the step and stop defaults that determine
 independent-source waveforms. Extending a run or changing its step ceiling
 preserves those source parameters. Older checkpoints remain readable; resume
 requires fully specified source timing when the original defaults are absent.
-Resume also requires the current resolved simulation identity (v12); states
+Resume also requires the current resolved simulation identity (v13); states
 captured under previous source evaluation or behavioral event timing semantics
 must be regenerated.
 
@@ -420,6 +420,16 @@ their roots and receive the same local interpolation qualification.
 Square-root and absolute-value bounds preserve the evaluator's zero clamp and
 continuous cusps. Square-root rounding error is bounded across zero without
 requiring a finite derivative there.
+Multi-argument `min` and `max` bounds retain the possible active slopes, discard
+proven inactive branches and preserve continuous corners. Candidate branch
+crossings share a bounded isolation budget; excessive pair enumeration fails
+before copying operand trees. Duplicate operands do not create crossings.
+Time-only compilation reuses an already evaluated stateless sibling from the
+VM stack, preserving arithmetic order and each independent integral occurrence.
+Shooting solves capacitor corrections from voltage differences and retains
+the physical current before adding a small correction to the absolute voltage.
+Physical KCL checks use those currents, avoiding cancellation of large Norton
+companions on very short event intervals. The fixed source mesh is preserved.
 Continuity is tracked separately from derivative bounds; signed zero powers
 retain their branch transitions and do not certify a smooth constant map.
 Internal source features are discarded only when the complete expression is
@@ -454,7 +464,7 @@ defaults still use the original `POINTS`. `MAXITER` applies to each grid solve,
 while the result reports total Newton corrections across all grids. Point and
 memory limits also apply to refinement, and cancellation remains available.
 Retained PSS operating points from earlier producer versions must be regenerated
-before dependent numerical reuse; the current producer identity is version 25.
+before dependent numerical reuse; the current producer identity is version 26.
 This convergence check supplements the shooting residual, which measures closure
 of a discrete period map. It is not a proof of resolution for all nonlinear
 expressions and devices; independent waveform and

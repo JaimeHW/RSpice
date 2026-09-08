@@ -20,6 +20,8 @@ pub enum Instruction {
     PushConst(Value),
     /// Push time variable
     PushTime,
+    /// Duplicate the current top value without reevaluating its expression.
+    Dup,
     /// Push frequency variable
     PushFreq,
     /// Push circuit temperature (degrees Celsius)
@@ -292,6 +294,7 @@ impl Vm {
             match instr {
                 Instruction::PushConst(v) => self.stack.push(*v),
                 Instruction::PushTime => self.stack.push(ctx.time),
+                Instruction::Dup => self.stack.push(self.stack.last().copied().unwrap_or(0.0)),
                 Instruction::PushFreq => self.stack.push(ctx.frequency),
                 Instruction::PushTemperature => self.stack.push(ctx.temperature),
                 Instruction::PushThermalVoltage => {

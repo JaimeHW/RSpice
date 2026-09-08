@@ -56,6 +56,25 @@ pub(crate) fn constant_value(expr: &Expr, context: &Context<'_>) -> Option<Value
     value.is_finite().then_some(value)
 }
 
+/// Reuse an already evaluated sibling without changing arithmetic order or
+/// adding a cache. Callers exclude siblings with independent SDT state.
+fn reuse_top(expr: &Expr, previous: &Expr, program: &mut CompiledExpr) -> bool {
+    if expr == previous {
+        program.instructions.push(Instruction::Dup);
+        return true;
+    }
+    if let Expr::Unary { op, operand } = expr
+        && reuse_top(operand, previous, program)
+    {
+        program.instructions.push(match op {
+            UnaryOp::Neg => Instruction::Neg,
+            UnaryOp::Not => Instruction::Not,
+        });
+        return true;
+    }
+    false
+}
+
 fn compile_expr(expr: &Expr, program: &mut CompiledExpr, context: Option<&Context<'_>>) {
     if let Some(value) = context.and_then(|context| constant_value(expr, context)) {
         program.instructions.push(Instruction::PushConst(value));
@@ -108,8 +127,12 @@ fn compile_expr(expr: &Expr, program: &mut CompiledExpr, context: Option<&Contex
 
         Expr::Binary { op, left, right } => {
             // Compile operands first (left-to-right)
+            let states = program.sdt_count;
             compile_expr(left, program, context);
-            compile_expr(right, program, context);
+            if context.is_none() || states != program.sdt_count || !reuse_top(right, left, program)
+            {
+                compile_expr(right, program, context);
+            }
 
             // Then the operation
             let instr = match op {
@@ -143,8 +166,13 @@ fn compile_expr(expr: &Expr, program: &mut CompiledExpr, context: Option<&Contex
 
         Expr::Function { func, args } => {
             // Compile all arguments
+            let mut previous = None;
             for arg in args {
-                compile_expr(arg, program, context);
+                let states = program.sdt_count;
+                if previous.is_none_or(|previous| !reuse_top(arg, previous, program)) {
+                    compile_expr(arg, program, context);
+                }
+                previous = (context.is_some() && states == program.sdt_count).then_some(arg);
             }
 
             // Push the function instruction
@@ -222,6 +250,47 @@ mod tests {
     use super::*;
     use crate::config::ExpressionDialect;
     use crate::expr::{TimeEnclosure, parse_expression_strict};
+
+    #[test]
+    fn fixed_environment_reuses_stateless_siblings_bit_exactly() {
+        for dialect in [ExpressionDialect::Ngspice, ExpressionDialect::Xyce] {
+            let context = Context::transient(&[], &[], 0.0).with_expression_dialect(dialect);
+            for expression in [
+                "max(cos(time),-cos(time))",
+                "min(cos(time),-cos(time),1)",
+                "cos(time)-cos(time)",
+                "time*(-time)",
+                "max(exp(time),-exp(time))",
+                "max(0*exp(time),-(0*exp(time)))",
+                "pow(time,-time)",
+            ] {
+                let expression = parse_expression_strict(expression).unwrap();
+                let original = compile(&expression);
+                let specialized = compile_time_expression(&expression, &context);
+                assert!(
+                    specialized
+                        .instructions
+                        .iter()
+                        .any(|i| matches!(i, Instruction::Dup))
+                );
+                for time in [-1000.0, -1.0, -0.0, 0.0, 0.123, 1.0, 1000.0] {
+                    let point = Context { time, ..context };
+                    let expected = Vm::new().execute(&original, &point);
+                    let actual = Vm::new().execute(&specialized, &point);
+                    if expected.is_nan() {
+                        assert!(actual.is_nan());
+                    } else {
+                        assert_eq!(actual.to_bits(), expected.to_bits(), "{expression:?}");
+                    }
+                }
+            }
+            for expression in ["sdt(time)+sdt(time)", "max(sdt(time),-sdt(time))"] {
+                let expression = parse_expression_strict(expression).unwrap();
+                let specialized = compile_time_expression(&expression, &context);
+                assert_eq!(specialized.sdt_count, 2);
+            }
+        }
+    }
 
     #[test]
     fn fixed_environment_specialization_preserves_vm_values_and_stateful_sites() {

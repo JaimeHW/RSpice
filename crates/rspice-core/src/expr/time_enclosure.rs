@@ -623,6 +623,49 @@ impl Dual {
         }
     }
 
+    fn extremum(self, other: Self, maximum: bool) -> Self {
+        let select = |left: Value, right: Value| {
+            if maximum {
+                left.max(right)
+            } else {
+                left.min(right)
+            }
+        };
+        let center = select(self.center, other.center);
+        if self.constant && other.constant {
+            return Self::constant(select(self.value.lower, other.value.lower));
+        }
+        let left_wins = if maximum {
+            self.value.lower >= other.value.upper
+        } else {
+            self.value.upper <= other.value.lower
+        };
+        let right_wins = if maximum {
+            other.value.lower >= self.value.upper
+        } else {
+            other.value.upper <= self.value.lower
+        };
+        if left_wins {
+            return Self { center, ..self };
+        }
+        if right_wins {
+            return Self { center, ..other };
+        }
+        Self {
+            value: TimeInterval {
+                lower: select(self.value.lower, other.value.lower),
+                upper: select(self.value.upper, other.value.upper),
+            },
+            slope: self.slope.union(other.slope),
+            center,
+            constant: false,
+            continuous: self.continuous && other.continuous,
+            // Selection is exact and 1-Lipschitz in the maximum input error.
+            // An inactive operand contributes neither slope nor error above.
+            roundoff: self.roundoff.max(other.roundoff),
+        }
+    }
+
     fn square_root(self) -> Self {
         if self.constant || self.value.upper <= 0.0 {
             return Self::constant(self.value.lower.max(0.0).sqrt());
@@ -729,6 +772,7 @@ impl<'a> TimeEnclosure<'a> {
                 instruction,
                 Instruction::PushConst(_)
                     | Instruction::PushTime
+                    | Instruction::Dup
                     | Instruction::PushFreq
                     | Instruction::PushTemperature
                     | Instruction::PushThermalVoltage
@@ -751,6 +795,8 @@ impl<'a> TimeEnclosure<'a> {
                     | Instruction::Log10
                     | Instruction::Log
                     | Instruction::Sqr
+                    | Instruction::Min(_)
+                    | Instruction::Max(_)
             )
         }) {
             return None;
@@ -787,6 +833,7 @@ impl<'a> TimeEnclosure<'a> {
         for instruction in &self.program.instructions {
             let mut value = match instruction {
                 Instruction::PushConst(value) => Dual::constant(*value),
+                Instruction::Dup => *self.stack.last()?,
                 Instruction::PushTime => Dual {
                     value: time,
                     slope: TimeInterval::point(self.stop),
@@ -834,6 +881,14 @@ impl<'a> TimeEnclosure<'a> {
                     context.expression_dialect == crate::config::ExpressionDialect::Xyce,
                 ),
                 Instruction::Sqr => self.stack.pop()?.square(),
+                Instruction::Min(count) | Instruction::Max(count) => {
+                    let start = self.stack.len().checked_sub(*count)?;
+                    let mut values = self.stack.drain(start..);
+                    let first = values.next()?;
+                    values.fold(first, |left, right| {
+                        left.extremum(right, matches!(instruction, Instruction::Max(_)))
+                    })
+                }
                 _ => return None,
             };
             if value.value.lower.is_nan() || value.value.upper.is_nan() {
@@ -1491,6 +1546,119 @@ mod tests {
         assert_eq!((domain.value.lower, domain.value.upper), (0.0, 0.0));
         assert!(domain.continuous);
         assert_eq!(domain.interpolation_error(1.0), 0.0);
+    }
+
+    #[test]
+    fn nary_extrema_enclose_active_slopes_corners_and_hidden_branches() {
+        let context = Context::transient(&[], &[], 0.0);
+        for maximum in [false, true] {
+            let function = if maximum { "max" } else { "min" };
+            for stop in [1e-300, 1.0, 1e300] {
+                for gain in [-1e200, -1e-200, 1e-200, 1e200] {
+                    let expression = format!(
+                        "{function}({gain:e}*(time/{stop:e}),{gain:e}*(1-time/{stop:e}),{gain:e}*0.3)"
+                    );
+                    let program = compile(&parse_expression_strict(&expression).unwrap());
+                    let mut bounds = TimeEnclosure::new(&program, stop).unwrap();
+                    let mut vm = Vm::new();
+                    for interval in 0..16 {
+                        let lower = stop * (interval as Value / 17.0);
+                        let upper = stop * ((interval + 2) as Value / 17.0);
+                        for centered in [false, true] {
+                            let domain = bounds
+                                .evaluate_internal(
+                                    TimeInterval { lower, upper },
+                                    &context,
+                                    centered,
+                                )
+                                .unwrap();
+                            let error = domain.interpolation_error((upper - lower) / stop);
+                            assert!(domain.continuous);
+                            let left = vm.execute(
+                                &program,
+                                &Context {
+                                    time: lower,
+                                    ..context
+                                },
+                            );
+                            let right = vm.execute(
+                                &program,
+                                &Context {
+                                    time: upper,
+                                    ..context
+                                },
+                            );
+                            for sample in 0..=32 {
+                                let fraction = sample as Value / 32.0;
+                                let time = lower + fraction * (upper - lower);
+                                let actual = vm.execute(&program, &Context { time, ..context });
+                                let phase = time / stop;
+                                let candidates = [
+                                    (gain * phase, gain),
+                                    (gain * (1.0 - phase), -gain),
+                                    (gain * 0.3, 0.0),
+                                ];
+                                let chosen = candidates
+                                    .iter()
+                                    .copied()
+                                    .reduce(|left, right| {
+                                        if (maximum && right.0 > left.0)
+                                            || (!maximum && right.0 < left.0)
+                                        {
+                                            right
+                                        } else {
+                                            left
+                                        }
+                                    })
+                                    .unwrap();
+                                assert!(domain.value.contains(actual), "{expression}: {actual:e}");
+                                if candidates
+                                    .iter()
+                                    .filter(|candidate| candidate.0 == chosen.0)
+                                    .count()
+                                    == 1
+                                {
+                                    assert!(
+                                        domain.slope.contains(chosen.1),
+                                        "{expression}, t={time:e}: {:?} excludes {}",
+                                        domain.slope,
+                                        chosen.1
+                                    );
+                                }
+                                assert!(
+                                    (actual - (left + fraction * (right - left))).abs() <= error,
+                                    "{expression}, t={time:e}: secant error exceeds {error:e}"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+            let expression = if maximum {
+                "max(pwrs(time-0.5,0),2,3)"
+            } else {
+                "min(pwrs(time-0.5,0),-2,-3)"
+            };
+            let program = compile(&parse_expression_strict(expression).unwrap());
+            let domain = TimeEnclosure::new(&program, 1.0)
+                .unwrap()
+                .evaluate_centered(
+                    TimeInterval {
+                        lower: 0.0,
+                        upper: 1.0,
+                    },
+                    &context,
+                )
+                .unwrap();
+            let expected = if maximum { 3.0 } else { -3.0 };
+            assert_eq!(
+                (domain.value.lower, domain.value.upper),
+                (expected, expected)
+            );
+            assert_eq!((domain.slope.lower, domain.slope.upper), (0.0, 0.0));
+            assert!(domain.continuous);
+            assert_eq!(domain.interpolation_error(1.0), 0.0);
+        }
     }
 
     #[test]

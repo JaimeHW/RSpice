@@ -176,6 +176,9 @@ impl PssStateBasis {
 pub(in crate::engine) struct PssCircuit {
     pub(super) circuit: CircuitData,
     pub(super) diode_history: TwoTerminalChargeHistory,
+    /// Trial currents computed before a small Newton voltage correction is
+    /// rounded into the absolute solution. Read only on accepted steps.
+    pub(super) capacitor_trial_currents: Vec<Value>,
     /// Numerical mesh only. Authored source defaults remain in CircuitData's
     /// SourceTimeBasis and must not change when this grid is refined.
     pub(in crate::engine) integration_steps: usize,
@@ -207,6 +210,7 @@ impl std::ops::DerefMut for PssCircuit {
 
 impl PssCircuit {
     pub(in crate::engine) fn new(circuit: CircuitData) -> Self {
+        let capacitor_trial_currents = vec![0.0; circuit.capacitors.len()];
         let basis = PssStateBasis::new(&circuit);
         let solution_scratch = vec![0.0; circuit.matrix_size() + 1];
         let current_balance = vec![0.0; basis.currents.workspace_size()];
@@ -226,6 +230,7 @@ impl PssCircuit {
         Self {
             circuit,
             diode_history,
+            capacitor_trial_currents,
             integration_steps: 0,
             integration_mesh: None,
             probe_precision_floor: false,
@@ -467,6 +472,38 @@ impl PssCircuit {
 
     pub(super) fn accept_source_time(&mut self, time: Value) {
         self.current_source_times = [time, self.current_source_times[0]];
+    }
+
+    pub(super) fn capture_capacitor_trial_currents(
+        &mut self,
+        iterate: &[Value],
+        correction: &[Value],
+        step: PssCompanionStep<'_>,
+    ) {
+        let caps = &self.circuit.capacitors;
+        let voltage = |values: &[Value], node| if node == 0 { 0.0 } else { values[node - 1] };
+        for (index, stamp) in caps.stamps.iter().enumerate() {
+            self.capacitor_trial_currents[index] =
+                if let Some(branch) = caps.ic_branch_indices[index] {
+                    let row = self.circuit.num_nodes() + branch - 1;
+                    iterate[row] + correction[row]
+                } else {
+                    let present = step.coeff.capacitor_current(
+                        caps.capacitances[index],
+                        step.dt,
+                        voltage(iterate, stamp.pp.row) - voltage(iterate, stamp.nn.row),
+                        caps.v_prev[index],
+                        caps.v_prev_prev[index],
+                        caps.i_prev[index],
+                    );
+                    step.coeff
+                        .capacitor_geq(caps.capacitances[index], step.dt)
+                        .mul_add(
+                            voltage(correction, stamp.pp.row) - voltage(correction, stamp.nn.row),
+                            present,
+                        )
+                };
+        }
     }
 
     /// Evaluate winding equations from flux differences, sharing TRAN's
