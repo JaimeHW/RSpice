@@ -5,6 +5,26 @@ use super::compose::*;
 use super::external_change::*;
 
 #[test]
+fn dialect_detection_uses_active_body_records_and_export_headers() {
+    use crate::state::NetlistSourceDialect;
+    for title in [".control", ".alter", ".probe", ".end"] {
+        let source = format!("{title}\nV1 out 0 1\n.op\n.end; done\n.control\n");
+        assert_eq!(
+            super::staging::detect_netlist_dialect(&source).0,
+            NetlistSourceDialect::RSpice
+        );
+    }
+    assert_eq!(
+        super::staging::detect_netlist_dialect("deck\n.control; script\nop\n.endc; done\n.end\n").0,
+        NetlistSourceDialect::Spice3Ngspice
+    );
+    assert_eq!(
+        super::staging::detect_netlist_dialect("simulator lang=spice; exported\n.op\n.end\n").0,
+        NetlistSourceDialect::Spectre
+    );
+}
+
+#[test]
 fn narrow_override_reaches_execution_before_the_first_commented_termination() {
     let base = ".end\r\nR1 1 0 1k\r\n.end; first\r\n.end\r\n";
     let source =

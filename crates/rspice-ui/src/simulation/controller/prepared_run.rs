@@ -1415,6 +1415,12 @@ impl SimulationController {
         } else {
             source.to_owned()
         };
+        let descriptor = owned_active
+            .then_some(state.workspace.netlist_descriptor.as_ref())
+            .flatten();
+        let owned_materialized =
+            manual_deck::adapt_owned_execution_profile(descriptor, &owned_materialized)
+                .map_err(|error| PreparationError::new(PreparationStage::SourceChecks, error))?;
         let has_project_technology = state.project_technology_in_effect();
         let sealed_models = if has_project_technology {
             state.seal_project_execution_model_sources()
@@ -1472,6 +1478,11 @@ impl SimulationController {
             &state.workspace.project.include_search_chain(),
             &sealed_models,
         )?;
+        let expanded = manual_deck::bind_execution_profile(
+            descriptor.and_then(|descriptor| descriptor.execution_profile),
+            expanded,
+        )
+        .map_err(|error| PreparationError::new(PreparationStage::SourceChecks, error))?;
         reject_unresolved_device_models(&expanded, has_project_technology)?;
         let project_model_sources = prepared_project_model_sources(state, &expanded)?;
         let project_veriloga_runtimes = project_veriloga_runtimes_referenced_by(state, &expanded)?

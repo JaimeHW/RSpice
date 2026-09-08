@@ -14,6 +14,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use super::occurrence_outputs::{OccurrenceNets, effective_plan_saved_outputs};
 
 use crate::services::drc::DrcResult;
+use crate::workbench::{
+    documents::code_workspace::compile_project_bundle_receipt, examples::load_example,
+    lifecycle::project_lifecycle, workflows::netlist_workflow::apply_imported_netlist,
+};
 static FIXTURE_NONCE: AtomicU64 = AtomicU64::new(0);
 
 #[test]
@@ -543,7 +547,7 @@ fn technology_free_runnable_state() -> AppState {
             dimension.enabled = false;
         }
     }
-    crate::workbench::examples::load_example("Voltage Divider", &mut state.schematic);
+    load_example("Voltage Divider", &mut state.schematic);
     let mut drc = DrcResult::new();
     drc.completed = true;
     state.dialogs.drc_results = Some(drc);
@@ -993,8 +997,7 @@ fn campaign_freezes_distinct_plan_members_without_switching_the_live_editor() {
         1
     );
 
-    let project = crate::workbench::lifecycle::project_lifecycle::snapshot(&state)
-        .expect("campaign member project snapshot");
+    let project = project_lifecycle::snapshot(&state).expect("campaign member project snapshot");
     let json = crate::io::project_io::serialize_project_file(&project)
         .expect("campaign member serializes");
     let loaded =
@@ -1280,12 +1283,8 @@ fn case_altered_project_veriloga_key_is_rejected_before_dispatch() {
             crate::state::ProjectSourceLanguage::VerilogA,
         ))
         .expect("installed project source bundle");
-    let receipt = crate::workbench::documents::code_workspace::compile_project_bundle_receipt(
-        state.workspace.project.id(),
-        bundle,
-        None,
-    )
-    .expect("compile project Verilog-A source");
+    let receipt = compile_project_bundle_receipt(state.workspace.project.id(), bundle, None)
+        .expect("compile project Verilog-A source");
     state.ui.code_workspace.veriloga.receipt = Some(receipt);
 
     let bundle = state
@@ -1872,6 +1871,105 @@ fn manual_deck_state(deck: &str) -> AppState {
     state.simulation.run_intent = SimulationRunIntent::ManualDeck;
     state.workspace.netlist_source = Some(deck.to_owned());
     state
+}
+
+#[test]
+fn reviewed_foreign_profile_is_applied_when_the_owned_deck_is_prepared() {
+    let source = "reviewed export\nsimulator lang=spice\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n";
+    let mut state = manual_deck_state(source);
+    assert!(apply_imported_netlist(
+        &mut state,
+        source.to_owned(),
+        None,
+        "reviewed.cir",
+    ));
+    let descriptor = state.workspace.netlist_descriptor.as_mut().unwrap();
+    descriptor.imported_dialect = Some(crate::state::NetlistSourceDialect::Spectre);
+    descriptor.execution_profile = Some(crate::state::NetlistExecutionProfile::SpectreSpiceV1);
+    descriptor.compatibility_reviewed = true;
+    let mut controller = SimulationController::new();
+    controller
+        .validate_manual_deck_document(&state)
+        .expect("the accepted adapter must also reach run preparation");
+    let dispatch = controller
+        .consume_snapshot_for_dispatch(&mut state)
+        .expect("validated source dispatches");
+    assert_eq!(dispatch.manual_source(), Some(source));
+    let parsed =
+        rspice_core::Netlist::parse(dispatch.executable_netlist()).expect("prepared source parses");
+    assert_eq!(parsed.elements.len(), 2);
+    assert_eq!(parsed.analyses.len(), 1);
+    assert!(
+        dispatch
+            .executable_netlist()
+            .contains("presentation directive: simulator lang=spice")
+    );
+}
+
+#[test]
+fn an_unreviewed_owned_profile_cannot_acquire_a_manual_execution_permit() {
+    let source = "quarantined\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n";
+    let mut state = manual_deck_state(source);
+    assert!(apply_imported_netlist(
+        &mut state,
+        source.to_owned(),
+        None,
+        "quarantined.cir",
+    ));
+    let descriptor = state.workspace.netlist_descriptor.as_mut().unwrap();
+    descriptor.imported_dialect = Some(crate::state::NetlistSourceDialect::Spice3Ngspice);
+    descriptor.execution_profile = None;
+    descriptor.compatibility_reviewed = false;
+    let mut controller = SimulationController::new();
+    assert!(controller.validate_manual_deck_document(&state).is_err());
+    assert!(controller.pending_prepared_run.is_none());
+}
+
+#[test]
+fn reviewed_ngspice_profile_binds_engine_defaults_and_revalidates_edits() {
+    let source = "reviewed control\nV1 out 0 1\nR1 out 0 1k\n.control; analyses\nop; harmless note\n.endc\n.end\n";
+    let mut state = manual_deck_state(source);
+    assert!(apply_imported_netlist(
+        &mut state,
+        source.to_owned(),
+        None,
+        "reviewed.cir"
+    ));
+    let descriptor = state.workspace.netlist_descriptor.as_mut().unwrap();
+    descriptor.imported_dialect = Some(crate::state::NetlistSourceDialect::Spice3Ngspice);
+    descriptor.execution_profile = Some(crate::state::NetlistExecutionProfile::Spice3NgspiceV2);
+    descriptor.compatibility_reviewed = true;
+    let mut controller = SimulationController::new();
+    controller.validate_manual_deck_document(&state).unwrap();
+    let dispatch = controller
+        .consume_snapshot_for_dispatch(&mut state)
+        .unwrap();
+    assert_eq!(dispatch.manual_source(), Some(source));
+    assert!(
+        dispatch
+            .executable_netlist()
+            .contains("RSpice execution profile: spice3-ngspice/2")
+    );
+    let parsed = rspice_core::Netlist::parse(dispatch.executable_netlist()).unwrap();
+    let config = crate::simulation::dialog::SimulationOptions::default()
+        .resolve_simulation_config(Some(&parsed.options));
+    assert_eq!(config.spice_dialect, rspice_core::SpiceDialect::Ngspice);
+    assert_eq!(
+        config.resolved_jfet_level2_model(),
+        rspice_core::SpiceDialect::Ngspice.default_jfet_level2_model()
+    );
+    for edit in [
+        source.replace("op; harmless note", "wrdata out.txt v(out)"),
+        source.replace(
+            ".control; analyses",
+            ".OPTIONS RSPICE_DIALECT=XYCE\n.control",
+        ),
+        source.replace(".control; analyses", ".unsupported_card\n.control"),
+    ] {
+        state.workspace.netlist_source = Some(edit);
+        assert!(controller.validate_manual_deck_document(&state).is_err());
+        assert!(controller.pending_prepared_run.is_none());
+    }
 }
 
 #[test]

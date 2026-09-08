@@ -405,7 +405,10 @@ pub fn resolve_simulation_config(
     if let Some(enabled) = overrides.device_voltage_limiting {
         device_voltage_limiting = enabled;
     }
-    if let Some(dialect) = overrides.spice_dialect {
+    if let Some(dialect) = overrides
+        .spice_dialect
+        .or_else(|| netlist_options.and_then(|options| options.spice_dialect))
+    {
         resolved = resolved.with_spice_dialect(dialect);
         if base.transient_lte_reference.is_none()
             && netlist_options.is_none_or(|options| options.transient_lte_reference.is_none())
@@ -839,6 +842,59 @@ mod tests {
             resolved.transient_lte_reference,
             Some(TransientLteReference::SignalGlobal)
         );
+    }
+
+    #[test]
+    fn portable_deck_dialect_resolves_defaults_and_preserves_override_precedence() {
+        for (name, dialect) in [
+            ("best_available", SpiceDialect::BestAvailable),
+            ("ngspice", SpiceDialect::Ngspice),
+            ("xyce", SpiceDialect::Xyce),
+        ] {
+            let netlist = crate::Netlist::parse(&format!(
+                "portable policy\n.options rspice_dialect={name}\n.end\n"
+            ))
+            .unwrap();
+            assert!(netlist.diagnostics.is_empty());
+            assert_eq!(netlist.options.spice_dialect, Some(dialect));
+            let resolved = resolve_simulation_config(
+                &SimulationConfig::default(),
+                Some(&netlist.options),
+                &SimulationConfigOverrides::default(),
+            );
+            assert_eq!(resolved.spice_dialect, dialect);
+            assert_eq!(
+                resolved.resolved_jfet_level2_model(),
+                dialect.default_jfet_level2_model()
+            );
+            assert_eq!(
+                resolved.transient_lte_reference,
+                Some(dialect.default_transient_lte_reference())
+            );
+            let overridden = resolve_simulation_config(
+                &SimulationConfig::default(),
+                Some(&netlist.options),
+                &SimulationConfigOverrides {
+                    spice_dialect: Some(SpiceDialect::Ngspice),
+                    transient_lte_reference: Some(TransientLteReference::SignalGlobal),
+                    ..Default::default()
+                },
+            );
+            assert_eq!(overridden.spice_dialect, SpiceDialect::Ngspice);
+            assert_eq!(
+                overridden.transient_lte_reference,
+                Some(TransientLteReference::SignalGlobal)
+            );
+        }
+        for value in ["", "typo", "1", "{1}"] {
+            assert!(
+                crate::Netlist::parse(&format!(
+                    "invalid policy\n.options rspice_dialect={value}\n.end\n"
+                ))
+                .is_err(),
+                "{value}"
+            );
+        }
     }
 
     #[test]

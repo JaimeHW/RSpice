@@ -16,6 +16,71 @@ use crate::services::simulation_runner::{
 
 mod periodic;
 
+/// Apply the reviewed source contract before model binding or include parsing.
+pub(super) fn adapt_owned_execution_profile<'a>(
+    descriptor: Option<&crate::state::OwnedNetlistDescriptor>,
+    source: &'a str,
+) -> Result<std::borrow::Cow<'a, str>, String> {
+    let Some(descriptor) = descriptor else {
+        return Ok(std::borrow::Cow::Borrowed(source));
+    };
+    if descriptor.execution_profile_review_required() {
+        return Err("Review this deck's execution profile before running it.".to_owned());
+    }
+    let Some(profile) = descriptor.execution_profile else {
+        return Ok(std::borrow::Cow::Borrowed(source));
+    };
+    if profile.source_dialect() != descriptor.imported_dialect.unwrap_or_default() {
+        return Err(
+            "The deck's execution profile does not match its reviewed source dialect.".to_owned(),
+        );
+    }
+    let adapted = profile.adapt_source(source)?;
+    profile.validate_executable_source(&adapted)?;
+    Ok(adapted)
+}
+
+/// Validate the sealed dependency closure and bind compatibility into the
+/// executable source. All analysis drivers and workers resolve these options
+/// through the same core configuration pipeline; the authored deck is retained.
+pub(super) fn bind_execution_profile(
+    profile: Option<crate::state::NetlistExecutionProfile>,
+    source: String,
+) -> Result<String, String> {
+    let Some(profile) = profile else {
+        return Ok(source);
+    };
+    profile.validate_executable_source(&source)?;
+    let parsed = Netlist::parse(&source).map_err(|error| error.to_string())?;
+    profile.validate_parsed_netlist(&parsed)?;
+    if let Some(diagnostic) = parsed.diagnostics.iter().find(|diagnostic| {
+        crate::state::NetlistExecutionProfile::diagnostic_is_semantic_loss(&diagnostic.code)
+    }) {
+        return Err(format!(
+            "Parser diagnostic {} at line {}: {}",
+            diagnostic.code, diagnostic.line, diagnostic.message
+        ));
+    }
+    rspice_core::netlist::validate_output_symbols(&parsed).map_err(|error| error.to_string())?;
+    if profile == crate::state::NetlistExecutionProfile::RSpiceCanonicalV1 {
+        return Ok(source);
+    }
+    let dialect = match profile.spice_dialect() {
+        rspice_core::SpiceDialect::BestAvailable => "BEST_AVAILABLE",
+        rspice_core::SpiceDialect::Ngspice => "NGSPICE",
+        rspice_core::SpiceDialect::Xyce => "XYCE",
+    };
+    Ok(
+        crate::services::simulation_runner::splice_before_terminal_end_card(
+            &source,
+            &format!(
+                "* RSpice execution profile: {}\n.OPTIONS RSPICE_DIALECT={dialect}",
+                profile.id()
+            ),
+        ),
+    )
+}
+
 pub(super) fn build_manual_deck_queue(
     state: &AppState,
     source: &str,

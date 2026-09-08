@@ -22,7 +22,26 @@ pub(super) fn detect_netlist_dialect(
     let mut ads = 0usize;
     let mut evidence = Vec::new();
     for (line_index, raw) in source.lines().take(500_000).enumerate() {
-        let line = raw.trim().to_ascii_lowercase();
+        let line = rspice_core::netlist::strip_spice_inline_comment(
+            raw,
+            rspice_core::config::ExpressionDialect::Ngspice,
+        )
+        .trim()
+        .to_ascii_lowercase();
+        if line_index != 0
+            && rspice_core::netlist::is_spice_end_card(
+                raw,
+                rspice_core::config::ExpressionDialect::Ngspice,
+            )
+        {
+            break;
+        }
+        // Export metadata can occupy the title, but ordinary command-like
+        // titles provide no evidence about executable SPICE body syntax.
+        if line_index == 0 && !line.starts_with("simulator lang=") && !line.starts_with("options ")
+        {
+            continue;
+        }
         let (score, description) = if line.starts_with("simulator lang=")
             || line.starts_with("ahdl_include")
             || line.starts_with("saveoptions ")
@@ -161,13 +180,10 @@ pub(super) fn validate_import_candidate(
                 // A control command the engine promoted is not a loss, so the
                 // import is blocked by the commands that were actually
                 // ignored rather than by the presence of a block.
-                let semantic_loss = matches!(
-                    diagnostic.code.as_str(),
-                    "unknown-option"
-                        | "unsupported-dot-command"
-                        | "control-command-dropped"
-                        | "invalid-option-defaulted"
-                );
+                let semantic_loss =
+                    crate::state::NetlistExecutionProfile::diagnostic_is_semantic_loss(
+                        &diagnostic.code,
+                    );
                 issues.push(NetlistImportIssue {
                     severity: if semantic_loss {
                         NetlistImportIssueSeverity::Blocking

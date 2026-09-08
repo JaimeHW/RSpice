@@ -1651,6 +1651,23 @@ pub(super) fn parse_options_command(
             .map(|package| format!("{package}.{key_upper}"));
 
         match (option_package.as_deref(), key_upper.as_str()) {
+            (None, "RSPICE_DIALECT") => {
+                let dialect = match &stream.peek().kind {
+                    TokenKind::Ident(name) => match name.to_ascii_uppercase().as_str() {
+                        "BEST_AVAILABLE" => Some(crate::config::SpiceDialect::BestAvailable),
+                        "NGSPICE" => Some(crate::config::SpiceDialect::Ngspice),
+                        "XYCE" => Some(crate::config::SpiceDialect::Xyce),
+                        _ => None,
+                    },
+                    _ => None,
+                }
+                .ok_or_else(|| ParseError::Syntax {
+                    line: line_num,
+                    message: "RSPICE_DIALECT expects BEST_AVAILABLE, NGSPICE, or XYCE".to_owned(),
+                })?;
+                stream.advance();
+                options.spice_dialect = Some(dialect);
+            }
             (package, "SEED" | "RNDSEED") if seed_option_applies_to_package(package) => {
                 // The parse pre-scan applies the seed before any parameter
                 // evaluation; this arm validates and records it for

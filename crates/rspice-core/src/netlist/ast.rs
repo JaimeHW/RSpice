@@ -4100,6 +4100,10 @@ impl XyceFftMode {
 /// All fields are optional - unspecified values use engine defaults.
 #[derive(Debug, Clone, Default)]
 pub struct SimulationOptions {
+    /// RSpice `.OPTIONS RSPICE_DIALECT=BEST_AVAILABLE|NGSPICE|XYCE` selects
+    /// device and numerical compatibility defaults, independently of the
+    /// expression syntax chosen when parsing the deck.
+    pub spice_dialect: Option<crate::config::SpiceDialect>,
     /// Xyce `.OPTIONS FFT FFT_MODE=0|1` compatibility selection. Omission is
     /// mode 0: symmetric windows and normalized magnitudes by default.
     pub fft_mode: Option<XyceFftMode>,

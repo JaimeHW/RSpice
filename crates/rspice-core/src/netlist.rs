@@ -2010,7 +2010,7 @@ impl Netlist {
     ) -> Result<(String, Vec<ParseDiagnostic>, Vec<ControlCommandRecord>), ParseWithAbortError>
     {
         let mut walk = ControlRegionWalk::default();
-        for (line_index, line) in input.lines().enumerate() {
+        for (line_index, line) in input.lines().enumerate().skip(1) {
             poll_parse_abort(abort, line_index)?;
             walk.observe(line, line_index + 1, None);
         }
@@ -2046,6 +2046,11 @@ impl Netlist {
 
         for (line_index, line) in input.lines().enumerate() {
             poll_parse_abort(abort, line_index)?;
+            if line_index == 0 {
+                result.push_str(line);
+                result.push('\n');
+                continue;
+            }
             let line_num = line_index + 1;
             let trimmed = line.trim();
             let head = trimmed.split_whitespace().next().unwrap_or("");
@@ -2115,6 +2120,8 @@ impl Netlist {
         ParseWithAbortError,
     > {
         let implicit_title = expanded.implicit_title().map(str::to_owned);
+        let has_explicit_title = implicit_title.is_none();
+        let mut title_pending = has_explicit_title;
         let mut walk = ControlRegionWalk::default();
         for (index, item) in expanded.items.iter().enumerate() {
             poll_parse_abort(abort, index)?;
@@ -2122,6 +2129,9 @@ impl Netlist {
                 continue;
             };
             poll_parse_text(abort, text)?;
+            if std::mem::take(&mut title_pending) {
+                continue;
+            }
             walk.observe(text, origin.line, Some(origin));
         }
         let (promoted, dispositions) = walk.finish();
@@ -2143,11 +2153,18 @@ impl Netlist {
         let mut in_control = false;
         let mut opened_at = None;
         let mut inserted = false;
+        let mut title_pending = has_explicit_title;
         for (index, item) in expanded.items.into_iter().enumerate() {
             poll_parse_abort(abort, index)?;
             match item {
                 include::ExpandedSourceItem::Line { text, origin } => {
                     poll_parse_text(abort, &text)?;
+                    if std::mem::take(&mut title_pending) {
+                        output
+                            .items
+                            .push(include::ExpandedSourceItem::Line { text, origin });
+                        continue;
+                    }
                     let trimmed = text.trim();
                     let head = trimmed.split_whitespace().next().unwrap_or("");
                     if head.eq_ignore_ascii_case(".control") {
@@ -9611,6 +9628,22 @@ mod tests {
             stripped, "deck\n* .control\n* tran 1n 100n\n* .endc\n.end\n",
             "the sanitize-only entry point never appends a promoted directive"
         );
+    }
+
+    #[test]
+    fn control_preprocessing_preserves_command_like_root_titles() {
+        for title in [".control", ".endc", ".end"] {
+            let source = format!("{title}\nV1 out 0 1\nR1 out 0 1k\n.control\nop\n.endc\n.end\n");
+            let memory = Netlist::parse(&source).unwrap();
+            let mapped =
+                Netlist::parse_with_path(&source, std::path::Path::new("title.cir")).unwrap();
+            for parsed in [memory, mapped] {
+                assert_eq!(parsed.title, title);
+                assert_eq!(parsed.elements.len(), 2);
+                assert_eq!(parsed.analyses.len(), 1);
+                assert_eq!(parsed.control_dispositions.len(), 1);
+            }
+        }
     }
 
     #[test]

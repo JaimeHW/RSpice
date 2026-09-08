@@ -97,12 +97,18 @@ pub fn is_spice_end_card(line: &str, dialect: ExpressionDialect) -> bool {
     if dialect == ExpressionDialect::Xyce && xyce_physical_line_is_comment(line) {
         return false;
     }
+    strip_spice_inline_comment(line, dialect)
+        .trim()
+        .eq_ignore_ascii_case(".end")
+}
+
+/// Remove an inline SPICE comment using the parser's quote and dialect rules.
+/// This does not classify full-line comments or the root deck's title record.
+pub fn strip_spice_inline_comment(line: &str, dialect: ExpressionDialect) -> &str {
     strip_inline_semicolon_comment_with_non_semicolon_comments(
         line,
         dialect != ExpressionDialect::Xyce,
     )
-    .trim()
-    .eq_ignore_ascii_case(".end")
 }
 
 #[cfg(test)]
