@@ -180,9 +180,6 @@ impl RSpiceApp {
             .ghost_enabled(!pending)
             .primary_enabled(primary_enabled)
             .initial_focus(DialogInitialFocus::BodyControl);
-        if self.state.dialogs.check_and_save.dirty && !discard_confirm {
-            dialog = dialog.retain_on_cancel_focus(DialogInitialFocus::Ghost);
-        }
         if discard_confirm {
             dialog = dialog.transaction_state(
                 DialogTransactionTone::Error,
@@ -226,7 +223,7 @@ impl RSpiceApp {
             .cloned();
         let mut note_changed = false;
         let mut repair_requested = false;
-        let choice = dialog.show_with_initial_body_focus(ctx, |ui| {
+        let mut response = dialog.show_transaction(ctx, |ui| {
             let response = check_and_save_body(
                 ui,
                 &report,
@@ -248,13 +245,16 @@ impl RSpiceApp {
         if let Some(instance) = repair_instance.filter(|_| repair_requested) {
             self.repair_stale_instance_interface(&instance);
         }
-        match choice {
+        match response.choice {
             DialogChoice::Primary if save_receipt.is_some() => {
                 self.state.dialogs.check_and_save.close();
             }
             DialogChoice::Primary => self.commit_check_and_save(),
             DialogChoice::Ghost | DialogChoice::Cancelled => {
                 self.state.dialogs.check_and_save.attempt_close();
+                if self.state.dialogs.check_and_save.open {
+                    response.retain_cancel_focus(DialogInitialFocus::Ghost);
+                }
             }
             DialogChoice::Secondary | DialogChoice::None => {}
         }

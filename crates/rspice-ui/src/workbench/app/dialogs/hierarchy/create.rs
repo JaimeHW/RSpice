@@ -96,7 +96,6 @@ impl RSpiceApp {
         }
         let validation = validate_draft(&self.state);
         let discard_confirm = self.state.dialogs.create_hierarchy.discard_confirm;
-        let retain_dirty_cancel = self.state.dialogs.create_hierarchy.dirty && !discard_confirm;
         let table_rows = self.state.dialogs.create_hierarchy.ports.len().max(1) as f32;
         let mut dialog = Dialog::new(EYEBROW, TITLE, PRIMARY)
             .size(DialogSize::Transaction)
@@ -119,9 +118,6 @@ impl RSpiceApp {
             .primary_on_enter(false)
             .initial_focus(DialogInitialFocus::BodyControl)
             .description(DESCRIPTION);
-        if retain_dirty_cancel {
-            dialog = dialog.retain_on_cancel_focus(DialogInitialFocus::Ghost);
-        }
         if discard_confirm {
             dialog = dialog.transaction_state(
                 DialogTransactionTone::Error,
@@ -136,10 +132,10 @@ impl RSpiceApp {
             );
         }
 
-        let choice = dialog.show_with_initial_body_focus(ctx, |ui| {
+        let mut response = dialog.show_transaction(ctx, |ui| {
             Some(hierarchy_body(ui, &mut self.state.dialogs.create_hierarchy))
         });
-        match choice {
+        match response.choice {
             DialogChoice::Primary => {
                 if let Err(error) = commit_create_hierarchy(&mut self.state) {
                     self.state.dialogs.create_hierarchy.validation_error = Some(error.clone());
@@ -148,6 +144,9 @@ impl RSpiceApp {
             }
             DialogChoice::Ghost | DialogChoice::Cancelled => {
                 self.state.dialogs.create_hierarchy.attempt_close();
+                if self.state.dialogs.create_hierarchy.open {
+                    response.retain_cancel_focus(DialogInitialFocus::Ghost);
+                }
             }
             DialogChoice::Secondary | DialogChoice::None => {}
         }

@@ -76,9 +76,6 @@ impl RSpiceApp {
             .initial_focus(DialogInitialFocus::BodyControl)
             .ghost(if discard_confirm { "Discard changes" } else { "Cancel" })
             .primary_enabled(phase == ParameterFormPhase::Review || diagnostics.is_empty());
-        if self.state.dialogs.symbol_parameter_form.dirty && !discard_confirm {
-            dialog = dialog.retain_on_cancel_focus(DialogInitialFocus::Ghost);
-        }
         if discard_confirm {
             dialog = dialog.transaction_state(
                 DialogTransactionTone::Error,
@@ -100,7 +97,7 @@ impl RSpiceApp {
         }
 
         let mut changed = false;
-        let choice = dialog.show_with_initial_body_focus(ctx, |ui| {
+        let mut response = dialog.show_transaction(ctx, |ui| {
             let id = match phase {
                 ParameterFormPhase::Review => form_review_body(
                     ui,
@@ -121,7 +118,7 @@ impl RSpiceApp {
             self.state.dialogs.symbol_parameter_form.discard_confirm = false;
             self.state.dialogs.symbol_parameter_form.validation_error = None;
         }
-        match choice {
+        match response.choice {
             DialogChoice::Primary if phase == ParameterFormPhase::Review => {
                 self.state.dialogs.symbol_parameter_form.phase = ParameterFormPhase::Designer;
             }
@@ -131,6 +128,7 @@ impl RSpiceApp {
                     && !self.state.dialogs.symbol_parameter_form.discard_confirm
                 {
                     self.state.dialogs.symbol_parameter_form.discard_confirm = true;
+                    response.retain_cancel_focus(DialogInitialFocus::Ghost);
                 } else {
                     self.state.dialogs.symbol_parameter_form.close_and_discard();
                 }

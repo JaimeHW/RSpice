@@ -180,7 +180,6 @@ impl RSpiceApp {
         );
         self.state.dialogs.array_selection.validation_field_mask = validation_field_mask;
         let discard_confirm = self.state.dialogs.array_selection.discard_confirm;
-        let retain_dirty_cancel = self.state.dialogs.array_selection.dirty && !discard_confirm;
         let has_transaction = discard_confirm || validation_title.is_some();
         let mut dialog = Dialog::new(EYEBROW, TITLE, PRIMARY)
             .description(DESCRIPTION)
@@ -202,9 +201,6 @@ impl RSpiceApp {
             .primary_enabled(validation.can_commit())
             .primary_on_enter(false)
             .initial_focus(DialogInitialFocus::BodyControl);
-        if retain_dirty_cancel {
-            dialog = dialog.retain_on_cancel_focus(DialogInitialFocus::Ghost);
-        }
         if discard_confirm {
             dialog = dialog.transaction_state(
                 DialogTransactionTone::Error,
@@ -215,7 +211,7 @@ impl RSpiceApp {
             dialog = dialog.transaction_state(DialogTransactionTone::Error, title, INVALID_DETAIL);
         }
         let mut first_invalid_focus = None;
-        let choice = dialog.show_with_initial_body_focus(ctx, |ui| {
+        let mut response = dialog.show_transaction(ctx, |ui| {
             let workflow = array_dialog_body(
                 ui,
                 &validation,
@@ -227,12 +223,12 @@ impl RSpiceApp {
             Some(workflow.initial)
         });
         if request_first_invalid_focus
-            && choice == DialogChoice::None
+            && response.choice == DialogChoice::None
             && let Some(field) = first_invalid_focus
         {
             ctx.memory_mut(|memory| memory.request_focus(field));
         }
-        match choice {
+        match response.choice {
             DialogChoice::Primary => {
                 if validate_draft(&self.state).can_commit() {
                     let radial_center = if self.state.dialogs.array_selection.kind
@@ -254,6 +250,9 @@ impl RSpiceApp {
             }
             DialogChoice::Ghost | DialogChoice::Cancelled => {
                 self.state.dialogs.array_selection.attempt_close();
+                if self.state.dialogs.array_selection.open {
+                    response.retain_cancel_focus(DialogInitialFocus::Ghost);
+                }
             }
             DialogChoice::None | DialogChoice::Secondary => {}
         }

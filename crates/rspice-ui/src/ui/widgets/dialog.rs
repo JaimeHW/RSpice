@@ -494,6 +494,51 @@ impl DialogRenderedFocus {
     }
 }
 
+/// A rendered transaction whose cancellation focus is finalized on drop.
+/// The caller can inspect the freshly edited draft before retaining focus
+/// for a discard confirmation. Accepted cancellation restores the original
+/// focus automatically, including on early returns.
+pub(crate) struct DialogResponse {
+    pub(crate) choice: DialogChoice,
+    cancel_focus: Option<DialogCancelFocus>,
+}
+
+struct DialogCancelFocus {
+    ctx: Context,
+    state_id: Id,
+    container_id: Id,
+    layer: egui::LayerId,
+    rendered: DialogRenderedFocus,
+    retained_target: Option<DialogInitialFocus>,
+}
+
+impl DialogResponse {
+    /// Keep the cancelled dialog open and focus its confirmation control.
+    /// Call only after applying the workflow's current close policy.
+    pub(crate) fn retain_cancel_focus(&mut self, target: DialogInitialFocus) {
+        if let Some(focus) = &mut self.cancel_focus {
+            focus.retained_target = Some(target);
+        }
+    }
+}
+
+impl Drop for DialogResponse {
+    fn drop(&mut self) {
+        if let Some(focus) = self.cancel_focus.take() {
+            if let Some(target) = focus.retained_target {
+                let target = focus
+                    .rendered
+                    .requested(target)
+                    .unwrap_or(focus.container_id);
+                focus.ctx.memory_mut(|memory| memory.request_focus(target));
+            } else {
+                keyboard::unregister(&focus.ctx, focus.layer);
+                restore_dialog_focus(&focus.ctx, focus.state_id, focus.container_id, focus.layer);
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 struct DialogHeaderOutput {
     closed: bool,
@@ -546,7 +591,6 @@ pub struct Dialog<'a> {
     note_only_footer: bool,
     header_visible: bool,
     initial_focus: DialogInitialFocus,
-    retained_cancel_focus: Option<DialogInitialFocus>,
     initial_height: Option<f32>,
     fixed_height: Option<f32>,
 }
@@ -581,7 +625,6 @@ impl<'a> Dialog<'a> {
             note_only_footer: false,
             header_visible: true,
             initial_focus: DialogInitialFocus::Container,
-            retained_cancel_focus: None,
             initial_height: None,
             fixed_height: None,
         }
@@ -613,27 +656,6 @@ impl<'a> Dialog<'a> {
     pub fn initial_focus(mut self, target: DialogInitialFocus) -> Self {
         self.initial_focus = target;
         self
-    }
-
-    /// Keep a dialog transaction open after its first cancel choice and move
-    /// focus to a control that explains the retained state. Dirty workflows
-    /// use this for their first Escape/Cancel pass; the following pass omits
-    /// this option so a confirmed dismissal restores the prior workspace
-    /// focus normally. Workflows that decide whether to retain the dialog
-    /// after inspecting body edits call [`Self::release_retained_focus`] if
-    /// they accept the close instead.
-    pub fn retain_on_cancel_focus(mut self, target: DialogInitialFocus) -> Self {
-        self.retained_cancel_focus = Some(target);
-        self
-    }
-
-    /// Finish an accepted close after a workflow retained cancel focus while
-    /// checking the freshly edited draft. The title must match that dialog.
-    pub fn release_retained_focus(ctx: &Context, title: &str) {
-        let id = Id::new(("rspice.dialog", title));
-        let layer = egui::LayerId::new(Order::Foreground, id);
-        keyboard::unregister(ctx, layer);
-        restore_dialog_focus(ctx, id.with("focus-state"), id.with("move"), layer);
     }
 
     /// Disable the Enter→primary mapping — for dialogs whose body owns the
@@ -769,10 +791,22 @@ impl<'a> Dialog<'a> {
     /// supplied by [`DialogInitialFocus::Control`]. Subsequent renders preserve
     /// the user's current focus.
     pub fn show_with_initial_body_focus(
-        mut self,
+        self,
         ctx: &Context,
         body: impl FnOnce(&mut Ui) -> Option<Id>,
     ) -> DialogChoice {
+        self.show_transaction(ctx, body).choice
+    }
+
+    /// Show a workflow that decides whether to accept cancellation after
+    /// processing body edits. Keep the response local to this render call;
+    /// dropping it completes cancellation focus handling. Other choices
+    /// restore focus immediately, before the caller handles their action.
+    pub(crate) fn show_transaction(
+        mut self,
+        ctx: &Context,
+        body: impl FnOnce(&mut Ui) -> Option<Id>,
+    ) -> DialogResponse {
         let t = Tokens::get(ctx);
         let c = t.color;
         let screen = ctx.content_rect();
@@ -1136,24 +1170,31 @@ impl<'a> Dialog<'a> {
             choice = DialogChoice::Cancelled;
         }
 
+        let mut cancel_focus = None;
         if choice != DialogChoice::None {
             // Re-measure content-height surfaces every time they are opened.
             // Keeping a previous session's height could otherwise force a
             // later workflow state into an unnecessarily short scroll area.
             ctx.data_mut(|data| data.remove_temp::<f32>(measured_height_id));
-            let retained_target = matches!(choice, DialogChoice::Ghost | DialogChoice::Cancelled)
-                .then_some(self.retained_cancel_focus)
-                .flatten();
-            if let Some(target) = retained_target {
-                let target = rendered_focus.requested(target).unwrap_or(focus_id);
-                ctx.memory_mut(|memory| memory.request_focus(target));
+            if matches!(choice, DialogChoice::Ghost | DialogChoice::Cancelled) {
+                cancel_focus = Some(DialogCancelFocus {
+                    ctx: ctx.clone(),
+                    state_id: focus_state_id,
+                    container_id: focus_id,
+                    layer: modal_layer,
+                    rendered: rendered_focus,
+                    retained_target: None,
+                });
             } else {
                 keyboard::unregister(ctx, modal_layer);
                 restore_dialog_focus(ctx, focus_state_id, focus_id, modal_layer);
             }
         }
 
-        choice
+        DialogResponse {
+            choice,
+            cancel_focus,
+        }
     }
 
     /// Header strip; returns `true` when the close control fired.

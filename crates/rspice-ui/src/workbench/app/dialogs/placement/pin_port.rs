@@ -100,7 +100,7 @@ impl RSpiceApp {
                 "Cancel"
             })
             .primary_enabled(can_commit)
-            .initial_focus(DialogInitialFocus::BodyControl);
+            .initial_focus(DialogInitialFocus::Control(field_id("Name")));
         if discard_confirm {
             dialog = dialog.transaction_state(
                 DialogTransactionTone::Error,
@@ -109,7 +109,7 @@ impl RSpiceApp {
             );
         }
 
-        let choice = dialog.show_with_initial_body_focus(ctx, |ui| {
+        let mut response = dialog.show_transaction(ctx, |ui| {
             workflow_body(
                 ui,
                 validation_message.as_deref(),
@@ -117,7 +117,7 @@ impl RSpiceApp {
             )
         });
 
-        match choice {
+        match response.choice {
             DialogChoice::Primary => {
                 // Revalidate the post-edit frame. Enter must never publish a
                 // contract made invalid by the same frame's text edit.
@@ -131,6 +131,9 @@ impl RSpiceApp {
             }
             DialogChoice::Ghost | DialogChoice::Cancelled => {
                 self.state.dialogs.pin_port.attempt_close();
+                if self.state.dialogs.pin_port.open {
+                    response.retain_cancel_focus(DialogInitialFocus::Ghost);
+                }
             }
             DialogChoice::None | DialogChoice::Secondary => {}
         }
@@ -387,6 +390,10 @@ fn section_status(ui: &mut Ui, status: &str) {
     );
 }
 
+fn field_id(label: &str) -> egui::Id {
+    egui::Id::new(("rspice.pin-port", label))
+}
+
 fn input_field(ui: &mut Ui, label: &str, value: &mut String, hint: &str) -> Response {
     let t = Tokens::get(ui.ctx());
     ui.vertical(|ui| {
@@ -399,6 +406,7 @@ fn input_field(ui: &mut Ui, label: &str, value: &mut String, hint: &str) -> Resp
         let response = ui.add_sized(
             Vec2::new(ui.available_width(), t.metrics.ctl_h),
             TextEdit::singleline(value)
+                .id(field_id(label))
                 .font(egui::TextStyle::Monospace)
                 .hint_text(hint)
                 .margin(egui::Margin::symmetric(8, 4)),
@@ -676,6 +684,28 @@ mod tests {
             app.state.schematic.topology_version(),
             app.state.workspace.active_view.display_path(),
         );
+    }
+
+    #[test]
+    fn opening_input_reaches_the_pin_name_field() {
+        let ctx = Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let mut app = RSpiceApp::test_instance();
+        open_dialog(&mut app);
+        let events = vec![
+            egui::Event::Key {
+                key: egui::Key::A,
+                physical_key: Some(egui::Key::A),
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::CTRL | egui::Modifiers::COMMAND,
+            },
+            egui::Event::Paste("BUSY".into()),
+        ];
+        let _ = ctx.run_ui(dialog_input(events), |ctx| app.render_pin_port_dialog(ctx));
+        assert_eq!(app.state.dialogs.pin_port.name, "BUSY");
+        assert!(app.state.dialogs.pin_port.dirty);
+        assert!(app.state.schematic.pending_port.is_none());
     }
 
     #[test]

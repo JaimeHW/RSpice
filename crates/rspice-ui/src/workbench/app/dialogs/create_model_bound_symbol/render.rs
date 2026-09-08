@@ -25,8 +25,6 @@ impl RSpiceApp {
 
         let validation = validate_create_symbol_draft(&self.state);
         let discard_confirm = self.state.dialogs.create_model_bound_symbol.discard_confirm;
-        let retain_dirty_cancel =
-            self.state.dialogs.create_model_bound_symbol.dirty && !discard_confirm;
         let pin_count = self.state.dialogs.create_model_bound_symbol.pins.len();
         let footer_hint = format!(
             "{} pin{} \u{00b7} atomic library revision",
@@ -46,9 +44,6 @@ impl RSpiceApp {
             .primary_enabled(validation.is_ok())
             .primary_on_enter(false)
             .initial_focus(DialogInitialFocus::BodyControl);
-        if retain_dirty_cancel {
-            dialog = dialog.retain_on_cancel_focus(DialogInitialFocus::Ghost);
-        }
         if discard_confirm {
             dialog = dialog.transaction_state(
                 DialogTransactionTone::Error,
@@ -69,13 +64,13 @@ impl RSpiceApp {
             );
         }
 
-        let choice = dialog.show_with_initial_body_focus(ctx, |ui| {
+        let mut response = dialog.show_transaction(ctx, |ui| {
             Some(create_symbol_body(
                 ui,
                 &mut self.state.dialogs.create_model_bound_symbol,
             ))
         });
-        match choice {
+        match response.choice {
             DialogChoice::Primary => {
                 if let Err(error) = commit_create_model_bound_symbol(&mut self.state) {
                     self.state
@@ -87,6 +82,9 @@ impl RSpiceApp {
             }
             DialogChoice::Ghost | DialogChoice::Cancelled => {
                 self.state.dialogs.create_model_bound_symbol.attempt_close();
+                if self.state.dialogs.create_model_bound_symbol.open {
+                    response.retain_cancel_focus(DialogInitialFocus::Ghost);
+                }
             }
             DialogChoice::Secondary | DialogChoice::None => {}
         }

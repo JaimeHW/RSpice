@@ -258,7 +258,7 @@ impl RSpiceApp {
         }
 
         let mut edited = false;
-        let choice = dialog.show_with_initial_body_focus(ctx, |ui| {
+        let mut response = dialog.show_transaction(ctx, |ui| {
             let draft = self
                 .state
                 .dialogs
@@ -281,7 +281,7 @@ impl RSpiceApp {
             self.state.dialogs.object_properties.mark_edited();
         }
 
-        match choice {
+        match response.choice {
             DialogChoice::Primary => {
                 let Some(draft) = self.state.dialogs.object_properties.draft.as_ref() else {
                     return;
@@ -329,6 +329,9 @@ impl RSpiceApp {
             }
             DialogChoice::Ghost | DialogChoice::Cancelled => {
                 self.state.dialogs.object_properties.attempt_close();
+                if self.state.dialogs.object_properties.open {
+                    response.retain_cancel_focus(DialogInitialFocus::Ghost);
+                }
             }
             DialogChoice::None | DialogChoice::Secondary => {}
         }

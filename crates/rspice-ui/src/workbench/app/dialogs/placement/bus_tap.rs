@@ -107,7 +107,7 @@ impl RSpiceApp {
                 "Cancel"
             })
             .primary_enabled(can_commit)
-            .initial_focus(DialogInitialFocus::BodyControl);
+            .initial_focus(DialogInitialFocus::Control(field_id("Bus")));
         if discard_confirm {
             dialog = dialog.transaction_state(
                 DialogTransactionTone::Error,
@@ -115,7 +115,7 @@ impl RSpiceApp {
                 DISCARD_DETAIL,
             );
         }
-        let choice = dialog.show_with_initial_body_focus(ctx, |ui| {
+        let mut response = dialog.show_transaction(ctx, |ui| {
             schematic_workflow_body(
                 ui,
                 &preview,
@@ -125,7 +125,7 @@ impl RSpiceApp {
             )
         });
 
-        match choice {
+        match response.choice {
             DialogChoice::Primary => {
                 // The footer follows the body in the same immediate-mode
                 // frame. Re-parse the post-edit draft so Enter can never
@@ -142,6 +142,9 @@ impl RSpiceApp {
             }
             DialogChoice::Ghost | DialogChoice::Cancelled => {
                 self.state.dialogs.bus_tap.attempt_close();
+                if self.state.dialogs.bus_tap.open {
+                    response.retain_cancel_focus(DialogInitialFocus::Ghost);
+                }
             }
             DialogChoice::None | DialogChoice::Secondary => {}
         }
@@ -688,6 +691,10 @@ fn typed_fields(ui: &mut Ui, draft: &mut BusTapDialogState) -> (Option<egui::Id>
     (focus, edited)
 }
 
+fn field_id(label: &str) -> egui::Id {
+    egui::Id::new(("rspice.bus-tap", label))
+}
+
 fn input_with_example(ui: &mut Ui, label: &str, value: &mut String, example: &str) -> Response {
     let t = Tokens::get(ui.ctx());
     ui.vertical(|ui| {
@@ -700,6 +707,7 @@ fn input_with_example(ui: &mut Ui, label: &str, value: &mut String, example: &st
         let response = ui.add_sized(
             Vec2::new(ui.available_width(), t.metrics.ctl_h),
             TextEdit::singleline(value)
+                .id(field_id(label))
                 .font(egui::TextStyle::Monospace)
                 .hint_text(example)
                 .margin(egui::Margin::symmetric(8, 4)),
@@ -783,6 +791,72 @@ mod tests {
             repeat: false,
             modifiers: egui::Modifiers::NONE,
         }
+    }
+
+    fn replace_text(value: &str) -> Vec<egui::Event> {
+        vec![
+            egui::Event::Key {
+                key: egui::Key::A,
+                physical_key: Some(egui::Key::A),
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::CTRL | egui::Modifiers::COMMAND,
+            },
+            egui::Event::Paste(value.to_owned()),
+        ]
+    }
+
+    #[test]
+    fn opening_input_reaches_the_bus_field() {
+        let ctx = Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let mut app = RSpiceApp::test_instance();
+        app.state.dialogs.bus_tap.open();
+
+        let _ = ctx.run_ui(dialog_input(replace_text("DATA[31:0]")), |ctx| {
+            app.render_bus_tap_dialog(ctx)
+        });
+
+        assert_eq!(app.state.dialogs.bus_tap.bus, "DATA[31:0]");
+        assert!(app.state.dialogs.bus_tap.dirty);
+        assert!(app.state.schematic.pending_bus_tap.is_none());
+    }
+
+    #[test]
+    fn edited_cancel_then_enter_discards_and_restores_workspace_focus() {
+        let ctx = Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let mut app = RSpiceApp::test_instance();
+        let workspace_id = egui::Id::new("bus-tap-test-workspace");
+        let mut workspace_text = "workspace".to_owned();
+        let mut render = |events, body: &mut dyn FnMut(&Context)| {
+            let _ = ctx.run_ui(dialog_input(events), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    ui.add(egui::TextEdit::singleline(&mut workspace_text).id(workspace_id));
+                });
+                body(ctx);
+            });
+        };
+        render(Vec::new(), &mut |ctx| app.render_bus_tap_dialog(ctx));
+        ctx.memory_mut(|memory| memory.request_focus(workspace_id));
+        app.state.dialogs.bus_tap.open();
+        render(Vec::new(), &mut |ctx| app.render_bus_tap_dialog(ctx));
+
+        let mut events = replace_text("DATA[31:0]");
+        events.extend([key_event(egui::Key::Escape), key_event(egui::Key::Enter)]);
+        render(events, &mut |ctx| app.render_bus_tap_dialog(ctx));
+        assert_eq!(app.state.dialogs.bus_tap.bus, "DATA[31:0]");
+        assert!(app.state.dialogs.bus_tap.discard_confirm);
+        assert!(app.state.dialogs.bus_tap.open);
+        for _ in 0..4 {
+            render(Vec::new(), &mut |ctx| app.render_bus_tap_dialog(ctx));
+        }
+
+        assert!(!app.state.dialogs.bus_tap.open);
+        assert!(app.state.schematic.pending_bus_tap.is_none());
+        assert_eq!(app.state.schematic.tool, Tool::Select);
+        assert_eq!(ctx.memory(|memory| memory.focused()), Some(workspace_id));
+        assert_eq!(workspace_text, "workspace");
     }
 
     #[test]

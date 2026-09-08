@@ -244,7 +244,6 @@ impl RSpiceApp {
         let project = self.state.workspace.project.display_name().to_owned();
         let revision = self.state.workspace.project.revision().get().to_string();
         let discard_confirm = self.state.dialogs.replace_instance.discard_confirm;
-        let retain_dirty_cancel = self.state.dialogs.replace_instance.dirty && !discard_confirm;
         let validation_error = validation.error().map(str::to_owned);
         let has_transaction = discard_confirm || validation_error.is_some();
         let mut dialog = Dialog::new(EYEBROW, TITLE, PRIMARY)
@@ -267,9 +266,6 @@ impl RSpiceApp {
             })
             .primary_enabled(validation.can_commit())
             .initial_focus(DialogInitialFocus::BodyControl);
-        if retain_dirty_cancel {
-            dialog = dialog.retain_on_cancel_focus(DialogInitialFocus::Ghost);
-        }
         if discard_confirm {
             dialog = dialog.transaction_state(
                 DialogTransactionTone::Error,
@@ -287,7 +283,7 @@ impl RSpiceApp {
         let catalog = instance_catalog(&self.state);
         let evidence = replacement_evidence(&validation);
         let mut replacement_changed = false;
-        let choice = dialog.show_with_initial_body_focus(ctx, |ui| {
+        let mut response = dialog.show_transaction(ctx, |ui| {
             let focus = replacement_body(
                 ui,
                 &self.state.dialogs.replace_instance.current,
@@ -305,10 +301,13 @@ impl RSpiceApp {
         if replacement_changed {
             self.state.dialogs.replace_instance.mark_edited();
         }
-        match choice {
+        match response.choice {
             DialogChoice::Primary => self.commit_instance_replacement(ctx),
             DialogChoice::Ghost | DialogChoice::Cancelled => {
                 self.state.dialogs.replace_instance.attempt_close();
+                if self.state.dialogs.replace_instance.open {
+                    response.retain_cancel_focus(DialogInitialFocus::Ghost);
+                }
             }
             DialogChoice::None | DialogChoice::Secondary => {}
         }

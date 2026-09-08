@@ -156,7 +156,7 @@ impl RSpiceApp {
             "Cancel"
         })
         .primary_enabled(validation.can_commit())
-        .initial_focus(DialogInitialFocus::BodyControl);
+        .initial_focus(DialogInitialFocus::Control(egui::Id::new(FIELD_ID)));
         if discard_confirm {
             dialog = dialog.transaction_state(
                 DialogTransactionTone::Error,
@@ -168,7 +168,7 @@ impl RSpiceApp {
         let anchor = self.state.dialogs.net_label_placement.anchor;
         let grid_pitch = self.state.schematic.document_policy.grid_pitch;
         let naming_policy = self.state.schematic.document_policy.net_naming;
-        let choice = dialog.show_with_initial_body_focus(ctx, |ui| {
+        let mut response = dialog.show_transaction(ctx, |ui| {
             let (focus, changed) = dialog_body(
                 ui,
                 anchor,
@@ -185,7 +185,7 @@ impl RSpiceApp {
             self.state.dialogs.net_label_placement.mark_edited();
         }
 
-        match choice {
+        match response.choice {
             DialogChoice::Primary => {
                 // Revalidate after this frame's text edit so Enter can never
                 // publish a candidate that became invalid in the same pass.
@@ -233,6 +233,9 @@ impl RSpiceApp {
             }
             DialogChoice::Ghost | DialogChoice::Cancelled => {
                 self.state.dialogs.net_label_placement.attempt_close();
+                if self.state.dialogs.net_label_placement.open {
+                    response.retain_cancel_focus(DialogInitialFocus::Ghost);
+                }
             }
             DialogChoice::None | DialogChoice::Secondary => {}
         }
@@ -336,7 +339,7 @@ fn dialog_body(
         ui.add_sized(
             Vec2::new(ui.available_width(), t.metrics.ctl_h),
             TextEdit::singleline(&mut draft.name)
-                .id_source(FIELD_ID)
+                .id(egui::Id::new(FIELD_ID))
                 .font(egui::TextStyle::Monospace)
                 .hint_text("for example: vout or DATA[7]")
                 .margin(egui::Margin::symmetric(8, 4)),
@@ -484,6 +487,29 @@ mod tests {
     fn open_connector_at(app: &mut RSpiceApp, anchor: Point) {
         app.state.schematic.tool = Tool::OffSheetConnector;
         assert!(open_net_label_placement(&mut app.state, anchor));
+    }
+
+    #[test]
+    fn opening_input_reaches_the_name_field_for_both_placement_kinds() {
+        for connector in [false, true] {
+            let ctx = Context::default();
+            crate::ui::Theme::default().apply(&ctx);
+            let mut app = RSpiceApp::test_instance();
+            if connector {
+                open_connector_at(&mut app, Point::origin());
+            } else {
+                open_at(&mut app, Point::origin());
+            }
+            let _ = ctx.run_ui(
+                dialog_input(vec![egui::Event::Paste("BUSY".into())]),
+                |ctx| {
+                    app.render_net_label_dialog(ctx);
+                },
+            );
+            assert_eq!(app.state.dialogs.net_label_placement.name, "BUSY");
+            assert!(app.state.dialogs.net_label_placement.dirty);
+            assert!(app.state.schematic.net_labels.is_empty());
+        }
     }
 
     #[test]

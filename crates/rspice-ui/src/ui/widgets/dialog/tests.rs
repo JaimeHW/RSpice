@@ -335,22 +335,6 @@ fn catalog_body_and_note_footer_are_explicit_opt_ins() {
 }
 
 #[test]
-fn retained_cancel_focus_is_an_explicit_one_pass_contract() {
-    let retained = Dialog::new("Test", TEST_TITLE, "Accept")
-        .ghost("Discard changes")
-        .retain_on_cancel_focus(DialogInitialFocus::Ghost);
-    assert_eq!(
-        retained.retained_cancel_focus,
-        Some(DialogInitialFocus::Ghost)
-    );
-    assert!(
-        Dialog::new("Test", TEST_TITLE, "Accept")
-            .retained_cancel_focus
-            .is_none()
-    );
-}
-
-#[test]
 fn retained_cancel_focus_moves_escape_to_discard_then_confirm_restores_workspace() {
     let ctx = Context::default();
     crate::ui::Theme::default().apply(&ctx);
@@ -370,7 +354,6 @@ fn retained_cancel_focus_moves_escape_to_discard_then_confirm_restores_workspace
         choice = Dialog::new("TEST", TEST_TITLE, "Accept")
             .description(TEST_DESCRIPTION)
             .ghost("Discard changes")
-            .retain_on_cancel_focus(DialogInitialFocus::Ghost)
             .show(ctx, |ui| {
                 ui.label("Dirty dialog");
             });
@@ -386,13 +369,15 @@ fn retained_cancel_focus_moves_escape_to_discard_then_confirm_restores_workspace
                         .desired_width(240.0),
                 );
             });
-            choice = Dialog::new("TEST", TEST_TITLE, "Accept")
+            let mut response = Dialog::new("TEST", TEST_TITLE, "Accept")
                 .description(TEST_DESCRIPTION)
                 .ghost("Discard changes")
-                .retain_on_cancel_focus(DialogInitialFocus::Ghost)
-                .show(ctx, |ui| {
+                .show_transaction(ctx, |ui| {
                     ui.label("Dirty dialog");
+                    None
                 });
+            choice = response.choice;
+            response.retain_cancel_focus(DialogInitialFocus::Ghost);
         },
     );
     assert_eq!(choice, DialogChoice::Cancelled);

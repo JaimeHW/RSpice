@@ -4,6 +4,69 @@ use super::operations::variant_connectivity_difference_count;
 use super::*;
 
 #[test]
+fn subflow_edit_and_escape_preserve_fresh_changes_and_reset_discard_confirmation() {
+    for confirmed_before_edit in [false, true] {
+        let ctx = Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let mut app = RSpiceApp::test_instance();
+        let catalog = app.state.workspace.design_management.clone();
+        open_design_management_dialog(&mut app.state);
+        assert!(app.state.dialogs.design_management.open);
+        app.state.dialogs.design_management.reset_inputs_for_page(
+            DesignManagementPage::NewSheet,
+            None,
+            None,
+        );
+        let raw_input = |events| egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1_100.0, 850.0),
+            )),
+            events,
+            ..Default::default()
+        };
+        let _ = ctx.run_ui(raw_input(Vec::new()), |ctx| {
+            app.render_design_management_dialog(ctx);
+        });
+        app.state.dialogs.design_management.discard_confirmation = confirmed_before_edit;
+        let key = |key, modifiers| egui::Event::Key {
+            key,
+            physical_key: Some(key),
+            pressed: true,
+            repeat: false,
+            modifiers,
+        };
+        let _ = ctx.run_ui(
+            raw_input(vec![
+                key(
+                    egui::Key::A,
+                    egui::Modifiers::CTRL | egui::Modifiers::COMMAND,
+                ),
+                egui::Event::Paste("Newly edited sheet".into()),
+                key(egui::Key::Escape, egui::Modifiers::NONE),
+                key(egui::Key::Enter, egui::Modifiers::NONE),
+            ]),
+            |ctx| app.render_design_management_dialog(ctx),
+        );
+        let draft = &app.state.dialogs.design_management;
+        assert_eq!(draft.page, DesignManagementPage::NewSheet);
+        assert_eq!(draft.inputs.sheet_name, "Newly edited sheet");
+        assert!(draft.discard_confirmation);
+        assert!(draft.subflow_dirty());
+
+        let _ = ctx.run_ui(raw_input(Vec::new()), |ctx| {
+            app.render_design_management_dialog(ctx);
+        });
+        assert_eq!(
+            app.state.dialogs.design_management.page,
+            DesignManagementPage::Manager
+        );
+        assert!(!app.state.dialogs.design_management.discard_confirmation);
+        assert_eq!(app.state.workspace.design_management, catalog);
+    }
+}
+
+#[test]
 fn probe_ids_participate_in_sheet_governance_and_selected_authority() {
     let mut schematic = crate::state::SchematicState::default();
     schematic.probes.push(

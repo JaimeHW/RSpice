@@ -339,6 +339,7 @@ impl RSpiceApp {
         let _opening_input = initial_focus.map(|id| crate::ui::input::InputScope::enter(ctx, id));
         let discard = page == ConfigurationDialogPage::Manager
             && self.state.dialogs.configuration_sets.discard_confirmation;
+        let discard_baseline = discard.then(|| self.state.dialogs.configuration_sets.draft.clone());
         let transaction_error = self.state.dialogs.configuration_sets.error.clone();
         let mut dialog = Dialog::new(eyebrow, title, primary)
             .description(description)
@@ -357,11 +358,7 @@ impl RSpiceApp {
                 initial_focus.map_or(DialogInitialFocus::Container, DialogInitialFocus::Control),
             );
         if page == ConfigurationDialogPage::Manager {
-            // The draft can become dirty during this very input pass. Keep
-            // focus here until the fresh dirty check accepts the dismissal.
-            dialog = dialog
-                .flush_body()
-                .retain_on_cancel_focus(DialogInitialFocus::Ghost);
+            dialog = dialog.flush_body();
         }
         if discard {
             dialog = dialog.transaction_state(
@@ -378,7 +375,7 @@ impl RSpiceApp {
         }
 
         let mut action = BodyAction::None;
-        let choice = dialog.show_with_initial_body_focus(ctx, |ui| {
+        let mut response = dialog.show_transaction(ctx, |ui| {
             action = configuration_body(
                 ui,
                 &mut self.state.dialogs.configuration_sets,
@@ -402,17 +399,19 @@ impl RSpiceApp {
         });
         self.handle_configuration_body_action(action);
         if self.state.dialogs.configuration_sets.page != page {
-            if page == ConfigurationDialogPage::Manager {
-                Dialog::release_retained_focus(ctx, title);
-            }
             return;
+        }
+        if let Some(baseline) = discard_baseline
+            && baseline != self.state.dialogs.configuration_sets.draft
+        {
+            self.state.dialogs.configuration_sets.discard_confirmation = false;
         }
         let dirty = self
             .state
             .dialogs
             .configuration_sets
             .dirty(&self.state.workspace.configuration_sets);
-        match choice {
+        match response.choice {
             DialogChoice::Primary => self.commit_configuration_dialog_page(),
             DialogChoice::Ghost | DialogChoice::Cancelled => {
                 if page != ConfigurationDialogPage::Manager {
@@ -425,10 +424,10 @@ impl RSpiceApp {
                             .configuration_sets
                             .load_selected(&self.state.workspace.configuration_sets);
                     }
-                } else if dirty && !discard {
+                } else if dirty && !self.state.dialogs.configuration_sets.discard_confirmation {
                     self.state.dialogs.configuration_sets.discard_confirmation = true;
+                    response.retain_cancel_focus(DialogInitialFocus::Ghost);
                 } else {
-                    Dialog::release_retained_focus(ctx, title);
                     self.state.dialogs.configuration_sets.close();
                 }
             }

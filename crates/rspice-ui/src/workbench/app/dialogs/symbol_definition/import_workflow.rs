@@ -62,9 +62,6 @@ impl RSpiceApp {
             .initial_focus(DialogInitialFocus::BodyControl)
             .ghost(if discard_confirm { "Discard changes" } else { "Cancel" })
             .primary_enabled(primary_enabled);
-        if self.state.dialogs.symbol_import.dirty && !discard_confirm {
-            dialog = dialog.retain_on_cancel_focus(DialogInitialFocus::Ghost);
-        }
         if discard_confirm {
             dialog = dialog.transaction_state(
                 DialogTransactionTone::Error,
@@ -81,7 +78,7 @@ impl RSpiceApp {
 
         let mut browse = false;
         let mut changed = false;
-        let choice = dialog.show_with_initial_body_focus(ctx, |ui| {
+        let mut response = dialog.show_transaction(ctx, |ui| {
             let first = import_body(
                 ui,
                 &mut self.state.dialogs.symbol_import,
@@ -101,13 +98,14 @@ impl RSpiceApp {
             self.state.dialogs.symbol_import.discard_confirm = false;
             self.state.dialogs.symbol_import.validation_error = None;
         }
-        match choice {
+        match response.choice {
             DialogChoice::Primary => self.commit_symbol_import(),
             DialogChoice::Ghost | DialogChoice::Cancelled => {
                 if self.state.dialogs.symbol_import.dirty
                     && !self.state.dialogs.symbol_import.discard_confirm
                 {
                     self.state.dialogs.symbol_import.discard_confirm = true;
+                    response.retain_cancel_focus(DialogInitialFocus::Ghost);
                 } else {
                     self.state.dialogs.symbol_import.close_and_discard();
                 }

@@ -13,13 +13,13 @@ impl RSpiceApp {
         }
         let page = self.state.dialogs.design_management.page;
         let manager_dirty = self.state.dialogs.design_management.dirty();
-        let subflow_dirty = self.state.dialogs.design_management.subflow_dirty();
-        let dirty = if page == DesignManagementPage::Manager {
-            manager_dirty
-        } else {
-            subflow_dirty
-        };
         let discard = self.state.dialogs.design_management.discard_confirmation;
+        // A new edit invalidates a previously displayed discard confirmation.
+        // Capture its exact subject only while that confirmation is visible.
+        let discard_baseline = discard.then(|| {
+            let draft = &self.state.dialogs.design_management;
+            (draft.inputs.clone(), draft.draft.clone())
+        });
         let validation = validate_design_management_page(&self.state, page);
         let write_allowed = !self.state.workbench.safe_mode.project_read_only();
         let primary_enabled = write_allowed
@@ -63,9 +63,6 @@ impl RSpiceApp {
             .primary_on_enter(false)
             .initial_focus(DialogInitialFocus::BodyControl)
             .body_scroll_offset(&mut body_scroll_offset);
-        if dirty && !discard {
-            dialog = dialog.retain_on_cancel_focus(DialogInitialFocus::Ghost);
-        }
         let drawing_sheet_personal = self
             .state
             .ui
@@ -89,7 +86,7 @@ impl RSpiceApp {
         }
 
         let mut body_action = DesignManagementBodyAction::None;
-        let choice = dialog.show_with_initial_body_focus(ctx, |ui| {
+        let mut response = dialog.show_transaction(ctx, |ui| {
             let response = if page == DesignManagementPage::Manager {
                 body_action = design_management_manager_body(
                     ui,
@@ -114,8 +111,19 @@ impl RSpiceApp {
             response.map(|response| response.id)
         });
         self.state.dialogs.design_management.body_scroll_offset = body_scroll_offset;
+        if let Some((inputs, catalog)) = discard_baseline {
+            let draft = &mut self.state.dialogs.design_management;
+            if inputs != draft.inputs || catalog != draft.draft {
+                draft.discard_confirmation = false;
+            }
+        }
         self.handle_design_management_body_action(body_action);
-        match choice {
+        if !self.state.dialogs.design_management.open
+            || self.state.dialogs.design_management.page != page
+        {
+            return;
+        }
+        match response.choice {
             DialogChoice::Primary => {
                 let result = if page == DesignManagementPage::Manager {
                     self.publish_design_management_draft()
@@ -127,8 +135,14 @@ impl RSpiceApp {
                 }
             }
             DialogChoice::Ghost | DialogChoice::Cancelled => {
-                if dirty && !discard {
+                let dirty = if page == DesignManagementPage::Manager {
+                    self.state.dialogs.design_management.dirty()
+                } else {
+                    self.state.dialogs.design_management.subflow_dirty()
+                };
+                if dirty && !self.state.dialogs.design_management.discard_confirmation {
                     self.state.dialogs.design_management.discard_confirmation = true;
+                    response.retain_cancel_focus(DialogInitialFocus::Ghost);
                 } else if page == DesignManagementPage::Manager {
                     self.state.dialogs.design_management.close_and_discard();
                     crate::workbench::app::close_design_management_dialog_route(&mut self.state);

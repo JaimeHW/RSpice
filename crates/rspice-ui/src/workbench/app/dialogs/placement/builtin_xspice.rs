@@ -48,14 +48,14 @@ impl RSpiceApp {
             );
         }
 
-        let choice = dialog.show_with_initial_body_focus(ctx, |ui| {
+        let mut response = dialog.show_transaction(ctx, |ui| {
             vector_width_form(
                 ui,
                 &mut self.state.dialogs.builtin_xspice_placement,
                 validation_error.as_deref(),
             )
         });
-        match choice {
+        match response.choice {
             DialogChoice::Primary => match materialize_draft(self) {
                 Ok(binding) => {
                     let label = format!("{}/{}", binding.library, binding.cell);
@@ -76,7 +76,10 @@ impl RSpiceApp {
                 }
             },
             DialogChoice::Ghost | DialogChoice::Cancelled => {
-                self.state.dialogs.builtin_xspice_placement.attempt_close()
+                self.state.dialogs.builtin_xspice_placement.attempt_close();
+                if self.state.dialogs.builtin_xspice_placement.open {
+                    response.retain_cancel_focus(DialogInitialFocus::Ghost);
+                }
             }
             DialogChoice::None | DialogChoice::Secondary => {}
         }

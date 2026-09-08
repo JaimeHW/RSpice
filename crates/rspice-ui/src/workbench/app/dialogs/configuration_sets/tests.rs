@@ -199,15 +199,19 @@ fn initial_focus_keeps_inspection_only_configuration_fields_read_only() {
 
 #[test]
 fn closing_in_the_editing_frame_keeps_the_configuration_draft() {
-    editing_frame_keeps_the_configuration_draft(false);
+    for prior_confirmation in [false, true] {
+        editing_frame_keeps_the_configuration_draft(false, prior_confirmation);
+    }
 }
 
 #[test]
 fn escape_in_the_editing_frame_keeps_the_configuration_draft() {
-    editing_frame_keeps_the_configuration_draft(true);
+    for prior_confirmation in [false, true] {
+        editing_frame_keeps_the_configuration_draft(true, prior_confirmation);
+    }
 }
 
-fn editing_frame_keeps_the_configuration_draft(escape: bool) {
+fn editing_frame_keeps_the_configuration_draft(escape: bool, prior_confirmation: bool) {
     let ctx = Context::default();
     crate::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
@@ -215,6 +219,11 @@ fn editing_frame_keeps_the_configuration_draft(escape: bool) {
     let (mut app, _) = valid_configuration_app();
     open_configuration_sets_dialog(&mut app.state);
     let catalog = app.state.workspace.configuration_sets.clone();
+    if prior_confirmation {
+        let dialog = &mut app.state.dialogs.configuration_sets;
+        dialog.draft.as_mut().unwrap().name.push_str(" prior edit");
+        dialog.discard_confirmation = true;
+    }
     let mut render = |events| {
         ctx.run_ui(
             egui::RawInput {
@@ -235,7 +244,13 @@ fn editing_frame_keeps_the_configuration_draft(escape: bool) {
         .nodes
         .iter()
         .find(|(_, node)| {
-            node.role() == egui::accesskit::Role::Button && node.label() == Some("Close")
+            node.role() == egui::accesskit::Role::Button
+                && node.label()
+                    == Some(if prior_confirmation {
+                        "Discard changes"
+                    } else {
+                        "Close"
+                    })
         })
         .expect("Close action")
         .0;

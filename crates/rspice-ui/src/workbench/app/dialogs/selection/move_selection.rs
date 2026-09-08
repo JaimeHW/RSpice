@@ -103,7 +103,7 @@ impl RSpiceApp {
                 DISCARD_DETAIL,
             );
         }
-        let choice = dialog.show_with_initial_body_focus(ctx, |ui| {
+        let mut response = dialog.show_transaction(ctx, |ui| {
             workflow_body(
                 ui,
                 &summary,
@@ -112,7 +112,7 @@ impl RSpiceApp {
                 &mut self.state.dialogs.move_selection,
             )
         });
-        match choice {
+        match response.choice {
             DialogChoice::Primary => {
                 if validate_draft(&self.state).can_commit() {
                     self.state.dialogs.move_selection.arm();
@@ -127,6 +127,9 @@ impl RSpiceApp {
             }
             DialogChoice::Ghost | DialogChoice::Cancelled => {
                 self.state.dialogs.move_selection.attempt_close();
+                if self.state.dialogs.move_selection.open {
+                    response.retain_cancel_focus(DialogInitialFocus::Ghost);
+                }
             }
             DialogChoice::None | DialogChoice::Secondary => {}
         }
