@@ -91,7 +91,7 @@ impl Bjt {
                 vbi: vb,
                 vei: ve,
                 vbp: vc,
-                vsi: vs,
+                vsi: if self.vbic_three_terminal { 0.0 } else { vs },
                 vrth: 0.0,
             };
         }
@@ -100,7 +100,7 @@ impl Bjt {
         let has_rbx = Self::series_active(self.rbx);
         let has_rbi = Self::series_active(self.rbi);
         let has_re = Self::series_active(self.re);
-        let has_rs = Self::series_active(self.rs);
+        let has_rs = self.has_substrate_resistance();
         let has_self_heat = self.self_heating_enabled();
         let reuse_previous_state = self.reduced_linearization_cache_valid.get();
         let solve_vbp = self.vbic_solves_vbp();
@@ -140,7 +140,9 @@ impl Bjt {
         } else {
             ve
         };
-        let mut vsi = if reuse_previous_state {
+        let mut vsi = if self.vbic_three_terminal {
+            0.0
+        } else if reuse_previous_state {
             self.vsi
         } else if has_rs {
             vs - self.isub * self.rs.max(0.0)
@@ -283,7 +285,7 @@ impl Bjt {
             vei = ve;
         }
         if !has_rs {
-            vsi = vs;
+            vsi = if self.vbic_three_terminal { 0.0 } else { vs };
         }
         if !solve_vbp {
             vbp = vcx;
@@ -316,7 +318,7 @@ impl Bjt {
         let has_rbx = Self::series_active(self.rbx);
         let has_rbi = Self::series_active(self.rbi);
         let has_re = Self::series_active(self.re);
-        let has_rs = Self::series_active(self.rs);
+        let has_rs = self.has_substrate_resistance();
         let has_self_heat = self.self_heating_enabled();
         let solve_vbp = self.vbic_solves_vbp();
 
@@ -430,7 +432,9 @@ impl Bjt {
             external_partials[IDX_VSI] = row.d_external;
         } else {
             jacobian[IDX_VSI][IDX_VSI] = 1.0;
-            external_partials[IDX_VSI][EXT_S] = -1.0;
+            if !self.vbic_three_terminal {
+                external_partials[IDX_VSI][EXT_S] = -1.0;
+            }
         }
 
         if has_self_heat {
@@ -499,7 +503,7 @@ impl Bjt {
         } else {
             Self::sub_branches(emitter_internal, eval.ibex)
         };
-        let substrate = if Self::series_active(self.rs) {
+        let substrate = if self.has_substrate_resistance() {
             eval.irs
         } else {
             Self::sub_branches(eval.ibcp, eval.iccp)
@@ -777,7 +781,11 @@ impl Bjt {
             p * (vcx - vci),
             p * (vbx - vbi),
             p * (vbp - vcx),
-            p * (vsi - vbp),
+            if self.vbic_three_terminal {
+                0.0
+            } else {
+                p * (vsi - vbp)
+            },
         ]
     }
 
@@ -870,7 +878,11 @@ impl Bjt {
             p * (vcx - vci),
             p * (vbx - vbi),
             p * (vbp - vcx),
-            p * (vsi - vbp),
+            if self.vbic_three_terminal {
+                0.0
+            } else {
+                p * (vsi - vbp)
+            },
         ];
 
         VbicTransientConvergenceState {

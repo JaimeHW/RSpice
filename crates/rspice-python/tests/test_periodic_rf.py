@@ -8,13 +8,14 @@ F0 = 1.0e6
 
 
 @pytest.mark.parametrize("polarity", ["NPN", "PNP"])
-def test_vbic_charge_pss_matches_analytic_rc(polarity):
+@pytest.mark.parametrize("level", [4, 11])
+def test_vbic_charge_pss_matches_analytic_rc(polarity, level):
     deck = rspice.Netlist.parse_spice(
         f"""* VBIC charge PSS
 V1 in 0 SIN(0 0.1 1meg)
 R1 in out 1k
 Q1 0 out 0 vm
-.model vm {polarity}(LEVEL=4 IS=1e-40 IBEI=0 IBCI=0 CBEO=159p RCX=0 RCI=0 RBX=0 RBI=0 RBP=0)
+.model vm {polarity}(LEVEL={level} IS=1e-40 IBEI=0 IBCI=0 CBEO=159p RCX=0 RCI=0 RBX=0 RBI=0 RBP=0)
 .end
 """
     )

@@ -244,8 +244,6 @@ impl Bjt {
         let nfp_vt = (self.nfp.max(1e-12) * self.vt.max(1e-12)).max(1e-18);
         let vbep_eff = p * (vbx - vbp);
         let vbci_eff = p * (vbi - vci);
-        let vbcp_eff = p * (vsi - vbp);
-
         let (exp_bep, dexp_bep_darg) = Self::limited_exp(vbep_eff / nfp_vt);
         let (exp_bci, dexp_bci_darg) = Self::limited_exp(vbci_eff / nfp_vt);
         let d_ifp_d_vbep_eff = self.isp * self.wsp * dexp_bep_darg / nfp_vt;
@@ -270,6 +268,12 @@ impl Bjt {
             }
         }
 
+        // Three-terminal VBIC still uses Ifp and qbp in Qbep and Rbp,
+        // but has no reverse parasitic transport or substrate terminal.
+        if self.vbic_three_terminal {
+            return state;
+        }
+        let vbcp_eff = p * (vsi - vbp);
         let (exp_bcp, dexp_bcp_darg) = Self::limited_exp(vbcp_eff / nfp_vt);
         let d_irp_d_vbcp_eff = self.isp * dexp_bcp_darg / nfp_vt;
         state.irp = self.isp * (exp_bcp - 1.0);
@@ -317,10 +321,11 @@ impl Bjt {
         // The substrate junction is a VBIC parasitic branch. Legacy
         // Gummel-Poon BJT cards expose no substrate diode current; Xyce's
         // legacy BJT load keeps the substrate lead current identically zero.
+        // Three-terminal VBIC also omits this branch, including its GMIN.
         // Do not let the VBIC CKTgmin parallel leak through the collapsed
         // three-terminal legacy topology, where it would double-count the
         // collector/base reverse-junction GMIN and alter source currents.
-        if self.charge_model == BjtChargeModel::LegacyGummelPoon {
+        if self.charge_model == BjtChargeModel::LegacyGummelPoon || self.vbic_three_terminal {
             return branch;
         }
         // ngspice vbicload.c stamps the `CKTgmin` parallel on Vbcp
@@ -355,7 +360,7 @@ impl Bjt {
         vsi: Value,
     ) -> BranchLinearization {
         let mut branch = BranchLinearization::default();
-        if self.isp <= 0.0 {
+        if self.isp <= 0.0 || self.vbic_three_terminal {
             return branch;
         }
 
@@ -379,7 +384,7 @@ impl Bjt {
         vsi: Value,
     ) -> BranchLinearization {
         let mut branch = BranchLinearization::default();
-        if !Self::series_active(self.rs) {
+        if !self.has_substrate_resistance() {
             return branch;
         }
 

@@ -621,6 +621,9 @@ pub struct Bjt {
     pub bjt_type: BjtType,
     pub substrate_topology: BjtSubstrateTopology,
     charge_model: BjtChargeModel,
+    /// Xyce LEVEL=11 omits the electrical substrate network; its optional
+    /// fourth terminal is thermal. Other native VBIC levels retain four terminals.
+    vbic_three_terminal: bool,
 
     // Node connections
     pub node_collector: NodeId,
@@ -1755,6 +1758,7 @@ impl Bjt {
             bjt_type,
             substrate_topology: BjtSubstrateTopology::default_for_type(bjt_type),
             charge_model: BjtChargeModel::LegacyGummelPoon,
+            vbic_three_terminal: false,
             node_collector: collector,
             node_base: base,
             node_emitter: emitter,
@@ -2412,7 +2416,7 @@ impl NonlinearDevice for Bjt {
             if !Self::series_active(self.re) {
                 anchor[EXT_E] = state.vei;
             }
-            if !Self::series_active(self.rs) {
+            if !self.has_substrate_resistance() {
                 anchor[EXT_S] = state.vsi;
             }
         } else if self.charge_model == BjtChargeModel::LegacyGummelPoon
@@ -2434,7 +2438,7 @@ impl NonlinearDevice for Bjt {
             if !Self::series_active(self.re) {
                 anchor[EXT_E] = state.vei;
             }
-            if !Self::series_active(self.rs) {
+            if !self.has_substrate_resistance() {
                 anchor[EXT_S] = state.vsi;
             }
         }
