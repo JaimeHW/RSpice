@@ -597,8 +597,24 @@ impl Dual {
             // denominator's exact zero), but it has no finite continuous
             // enclosure. Preserve that distinction for bounded outer
             // functions without admitting an indeterminate infinity ratio.
+            let corners = [
+                (self.value.lower, other.value.lower),
+                (self.value.lower, other.value.upper),
+                (self.value.upper, other.value.lower),
+                (self.value.upper, other.value.upper),
+            ]
+            .map(|(numerator, denominator)| {
+                if denominator == 0.0 {
+                    0.0
+                } else {
+                    numerator / denominator
+                }
+            });
             return Some(Self {
-                value: TimeInterval::WHOLE,
+                // Retain an authenticated half-line, including the VM's
+                // +0 at exact denominator zeros. Losing this sign prevents
+                // exp of a nonpositive reciprocal from proving its bound.
+                value: TimeInterval::WHOLE.with_product_sign(self.value, other.value, corners),
                 slope: TimeInterval::WHOLE,
                 center: if other.center == 0.0 {
                     0.0
@@ -1590,6 +1606,75 @@ mod tests {
     use crate::expr::{Vm, compile, parse_expression_strict};
 
     #[test]
+    fn zero_denominator_enclosures_preserve_quotient_signs_and_vm_positive_zero() {
+        for dialect in [
+            crate::config::ExpressionDialect::Ngspice,
+            crate::config::ExpressionDialect::Xyce,
+        ] {
+            let context = Context::transient(&[], &[], 0.0).with_expression_dialect(dialect);
+            for numerator in [-1e300_f64, -1e-300, -0.0, 0.0, 1e-300, 1e300] {
+                for sign in [-1.0, 1.0] {
+                    let expression = format!("({numerator:e})/({sign:e}*sqr(time-0.5))");
+                    let program = compile(&parse_expression_strict(&expression).unwrap());
+                    let domain = TimeEnclosure::new(&program, 1.0)
+                        .unwrap()
+                        .evaluate(
+                            TimeInterval {
+                                lower: 0.49,
+                                upper: 0.51,
+                            },
+                            &context,
+                        )
+                        .unwrap();
+                    assert!(domain.value.contains(0.0), "{expression}");
+                    if numerator * sign > 0.0 {
+                        assert_eq!(domain.value.lower, 0.0, "{expression}");
+                    } else if numerator * sign < 0.0 {
+                        assert_eq!(
+                            domain.value.upper.to_bits(),
+                            0.0_f64.to_bits(),
+                            "{expression}"
+                        );
+                    }
+                    let mut vm = Vm::new();
+                    for index in 0..=32 {
+                        let actual = vm.execute(
+                            &program,
+                            &Context {
+                                time: 0.49 + 0.02 * index as Value / 32.0,
+                                ..context
+                            },
+                        );
+                        assert!(
+                            domain.value.contains(actual),
+                            "{expression}: {actual} outside {:?}",
+                            domain.value
+                        );
+                        if actual == 0.0 {
+                            assert!(
+                                domain.value.lower.total_cmp(&actual).is_le()
+                                    && domain.value.upper.total_cmp(&actual).is_ge(),
+                                "{expression}: lost zero sign"
+                            );
+                        }
+                    }
+                    assert_eq!(
+                        vm.execute(
+                            &program,
+                            &Context {
+                                time: 0.5,
+                                ..context
+                            }
+                        )
+                        .to_bits(),
+                        0.0_f64.to_bits()
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
     fn bounded_compositions_keep_defined_infinite_limits_and_refuse_nan() {
         for dialect in [
             crate::config::ExpressionDialect::Ngspice,
@@ -1608,6 +1693,7 @@ mod tests {
                     format!("atan(sin({phase})/cos({phase}))"),
                     format!("tanh(tan({phase})^2)"),
                     format!("tanh(pow(tan({phase}),2))"),
+                    format!("exp(-1/cos({phase})^2)"),
                 ] {
                     let program = compile(&parse_expression_strict(&expression).unwrap());
                     let domain = TimeEnclosure::new(&program, stop)

@@ -407,6 +407,14 @@ mod wasm_tests {
                 "B1 in 0 V=tanh(tan(2*pi*64meg*time+0.1)^2)",
                 0.6084407392048392,
             ),
+            (
+                "B1 in 0 V=exp(-1/cos(2*pi*64meg*time+0.1)^2)",
+                0.15729920705028186,
+            ),
+            (
+                "B1 in 0 V=exp(-sqr(1/cos(2*pi*64meg*time+0.1)))",
+                0.15729920705028186,
+            ),
             ("V1 in 0 PULSE(0 1 400p 10p 10p 100p 1u)", 0.00011),
             ("B1 in 0 V=spice_pulse(0,1,400p,10p,10p,100p,1u)", 0.00011),
             (
@@ -423,10 +431,16 @@ mod wasm_tests {
             ),
         ] {
             let polar_square = source.contains("atan2(0*sin");
-            let bounded_tangent = ["atan(tan(", "tanh(tan(", "atan(sin(", "atan(1/cos("]
-                .iter()
-                .any(|prefix| source.contains(prefix));
-            let options = if bounded_tangent {
+            let squared_tangent = source.contains("tanh(tan(") && source.ends_with("^2)");
+            let reciprocal_exponential =
+                source.contains("exp(-1/cos(") || source.contains("exp(-sqr(1/cos(");
+            let bounded_composition = reciprocal_exponential
+                || ["atan(tan(", "tanh(tan(", "atan(sin(", "atan(1/cos("]
+                    .iter()
+                    .any(|prefix| source.contains(prefix));
+            let options = if squared_tangent {
+                ".options reltol=1e-5 vntol=1e-8\n"
+            } else if bounded_composition {
                 ".options reltol=1e-4 vntol=1e-8\n"
             } else if polar_square {
                 ".options reltol=1e-4\n"
@@ -453,9 +467,11 @@ mod wasm_tests {
                 .position(|name| name.eq_ignore_ascii_case("out"))
                 .unwrap();
             let mean = result.waveforms[output].dc(&result.time, result.period);
-            if bounded_tangent {
+            if bounded_composition {
                 // Analytic sawtooth extrema / independent RC convolution.
-                let (low, high) = if source.ends_with("^2)") {
+                let (low, high) = if reciprocal_exponential {
+                    (0.15566623240897726, 0.158933481927689)
+                } else if squared_tangent {
                     (0.6038757155372827, 0.6129976417956825)
                 } else if source.contains("atan(1/cos(") {
                     (-0.025340899420651316, 0.025340899420651316)
@@ -465,7 +481,7 @@ mod wasm_tests {
                     (-0.00597775083683904, 0.010_400_683_782_896_1)
                 };
                 let values = &result.waveforms[output].values;
-                let tolerance = if source.ends_with("^2)") { 1e-5 } else { 1e-6 };
+                let tolerance = if reciprocal_exponential { 1e-5 } else { 1e-6 };
                 assert!(
                     (values.iter().copied().fold(f64::NEG_INFINITY, f64::max) - high).abs()
                         < tolerance
@@ -484,8 +500,8 @@ mod wasm_tests {
                 assert!((values.iter().copied().fold(f64::INFINITY, f64::min) + high).abs() < 1e-5);
                 assert!(steps < 8192);
             }
-            let tolerance = if bounded_tangent {
-                if source.ends_with("^2)") { 1e-5 } else { 1e-6 }
+            let tolerance = if bounded_composition {
+                if reciprocal_exponential { 1e-5 } else { 1e-6 }
             } else if dc == 0.00011 || dc == 0.0011 {
                 assert!(steps < 1024, "the local source mesh must stay bounded");
                 1e-7

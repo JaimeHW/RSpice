@@ -230,6 +230,11 @@ fn bounded_power_compositions_preserve_the_complete_rc_waveform() {
     check_bounded_compositions(4..=4);
 }
 
+#[test]
+fn bounded_reciprocal_exponentials_preserve_the_complete_rc_waveform() {
+    check_bounded_compositions(5..=6);
+}
+
 fn check_bounded_compositions(cases: std::ops::RangeInclusive<usize>) {
     let rate = std::f64::consts::TAU * 64.0 * F0;
     let period = 1.0 / (128.0 * F0);
@@ -266,22 +271,37 @@ fn check_bounded_compositions(cases: std::ops::RangeInclusive<usize>) {
                 .tanh()
         }
     });
+    let (exponential_reference, exponential_mean) =
+        periodic_rc_convolution(period, tau, count, |index| {
+            if index == 0 || index == count {
+                0.0
+            } else {
+                (-1.0
+                    / (bias + std::f64::consts::PI * index as f64 / count as f64)
+                        .cos()
+                        .powi(2))
+                .exp()
+            }
+        });
     for (expression, kind) in [
         ("atan(tan(2*pi*64meg*time+0.1))", 0),
         ("tanh(tan(2*pi*64meg*time+0.1))", 1),
         ("atan(sin(2*pi*64meg*time+0.1)/cos(2*pi*64meg*time+0.1))", 0),
         ("atan(1/cos(2*pi*64meg*time+0.1))", 2),
         ("tanh(tan(2*pi*64meg*time+0.1)^2)", 3),
+        ("exp(-1/cos(2*pi*64meg*time+0.1)^2)", 4),
+        ("exp(-sqr(1/cos(2*pi*64meg*time+0.1)))", 4),
     ]
     .into_iter()
     .enumerate()
     .filter_map(|(index, case)| cases.contains(&index).then_some(case))
     {
-        // The squared source has a 0.61 V offset; its absolute comparison
-        // uses 10 uV at the requested 1e-4 relative tolerance.
-        let tolerance = if kind == 3 { 1e-5 } else { 1e-6 };
+        // The squared source now fits the ordinary result budget at tighter
+        // accuracy; derivative probes must not retain discarded waveforms.
+        let tolerance = if kind == 4 { 1e-5 } else { 1e-6 };
+        let reltol = if kind == 3 { 1e-5 } else { 1e-4 };
         let netlist = Netlist::parse(&format!(
-            "bounded tangent forcing\n.options reltol=1e-4 vntol=1e-8\nB1 in 0 V={expression}\nR1 in out {R}\nC1 out 0 {C}\n.end\n"
+            "bounded tangent forcing\n.options reltol={reltol} vntol=1e-8\nB1 in 0 V={expression}\nR1 in out {R}\nC1 out 0 {C}\n.end\n"
         )).unwrap();
         let analysis = Engine::default()
             .run_pss_with_abort(&netlist, PssConfig::new(F0).with_tstab_periods(0), &NoAbort)
@@ -301,7 +321,8 @@ fn check_bounded_compositions(cases: std::ops::RangeInclusive<usize>) {
                 let reference = match kind {
                     1 => &tanh_reference,
                     2 => &reciprocal_reference,
-                    _ => &power_reference,
+                    3 => &power_reference,
+                    _ => &exponential_reference,
                 };
                 let position = elapsed / period * count as f64;
                 let left = (position as usize).min(count - 1);
@@ -333,7 +354,11 @@ fn check_bounded_compositions(cases: std::ops::RangeInclusive<usize>) {
         }
         assert!(
             (result.waveforms[output].dc(&result.time, result.period)
-                - if kind == 3 { power_mean } else { 0.0 })
+                - match kind {
+                    3 => power_mean,
+                    4 => exponential_mean,
+                    _ => 0.0,
+                })
             .abs()
                 < tolerance,
             "{expression}"
