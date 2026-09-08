@@ -6006,6 +6006,13 @@ impl Engine {
                                 element.name, suffix
                             ))
                         });
+                        if bjt.needs_vbic_rbi_branch() {
+                            let branch = circuit.allocate_branch_named(&format!(
+                                "{}.__irbi.internal",
+                                element.name
+                            ));
+                            bjt.assign_vbic_rbi_branch(branch);
+                        }
                     } else if bjt.uses_legacy_gummel_poon() {
                         if bjt.rcx.is_finite() && bjt.rcx > 0.0 {
                             let cint_name = format!("{}.__cint", element.name);

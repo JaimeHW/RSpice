@@ -314,70 +314,39 @@ impl Bjt {
         voltages: BjtNodeVoltages,
         vrth: Value,
     ) -> EvaluatedBjtState {
+        self.evaluate_state_with_rbi_current(voltages, vrth, None)
+    }
+
+    pub(in crate::device::semiconductor::bjt) fn evaluate_state_with_rbi_current(
+        &self,
+        voltages: BjtNodeVoltages,
+        vrth: Value,
+        rbi_current: Option<Value>,
+    ) -> EvaluatedBjtState {
         let BjtNodeVoltages {
-            vc,
-            vb,
-            ve,
-            vs,
-            vcx,
-            vci,
-            vbx,
-            vbi,
-            vei,
-            vbp,
-            vsi,
+            vci, vbx, vbi, vei, ..
         } = voltages;
-        let mut evaluated = self.with_temperature_variant(vrth, |model| {
-            model.evaluate_state_fixed_temperature(BjtNodeVoltages {
-                vc,
-                vb,
-                ve,
-                vs,
-                vcx,
-                vci,
-                vbx,
-                vbi,
-                vei,
-                vbp,
-                vsi,
-            })
-        });
+        let evaluate = |model: &Bjt| {
+            let mut state = model.evaluate_state_fixed_temperature(voltages);
+            if let Some(current) = rbi_current {
+                // Its independent current column is stamped by the MNA
+                // owner; all voltage/temperature partials here hold I fixed.
+                state.irbi = BranchLinearization {
+                    current,
+                    ..BranchLinearization::default()
+                };
+            }
+            state
+        };
+        let mut evaluated = self.with_temperature_variant(vrth, evaluate);
 
         if !self.thermal_model_enabled() {
             return evaluated;
         }
 
         let h = self.thermal_derivative_step(vrth);
-        let plus = self.with_temperature_derivative_variant(vrth + h, vrth, |model| {
-            model.evaluate_state_fixed_temperature(BjtNodeVoltages {
-                vc,
-                vb,
-                ve,
-                vs,
-                vcx,
-                vci,
-                vbx,
-                vbi,
-                vei,
-                vbp,
-                vsi,
-            })
-        });
-        let minus = self.with_temperature_derivative_variant(vrth - h, vrth, |model| {
-            model.evaluate_state_fixed_temperature(BjtNodeVoltages {
-                vc,
-                vb,
-                ve,
-                vs,
-                vcx,
-                vci,
-                vbx,
-                vbi,
-                vei,
-                vbp,
-                vsi,
-            })
-        });
+        let plus = self.with_temperature_derivative_variant(vrth + h, vrth, evaluate);
+        let minus = self.with_temperature_derivative_variant(vrth - h, vrth, evaluate);
         let denom = 2.0 * h;
 
         evaluated.linearized.dic_dvrth = (plus.linearized.ic - minus.linearized.ic) / denom;
@@ -429,7 +398,7 @@ impl Bjt {
             evaluated.linearized.dic_dvrth += d_transport - d_ibc;
             evaluated.linearized.dib_dvrth += d_ibc;
             evaluated.linearized.dqb_dvrth += early.qb;
-            if Self::series_active(model.rbi) {
+            if rbi_current.is_none() && Self::series_active(model.rbi) {
                 evaluated.irbi.d_internal[IDX_VRTH] +=
                     (vbx - vbi) / model.guarded_series_resistance(model.rbi) * early.qb;
             }

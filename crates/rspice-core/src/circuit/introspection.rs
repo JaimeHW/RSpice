@@ -1072,6 +1072,9 @@ impl CircuitData {
         // Nonlinear devices
         self.diodes.link_all(matrix);
         self.bjts.link_all(matrix);
+        for bjt in &mut self.bjts.devices {
+            bjt.resolve_vbic_rbi_branch(num_nodes);
+        }
         self.mosfets.link_all(matrix);
         for dev in &mut self.b3soi.devices {
             dev.resolve_instance_ic_branches(num_nodes);
