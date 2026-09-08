@@ -162,6 +162,7 @@ pub(crate) enum NativeOp {
     ExtremumConstLhs(ExtremumOp, f64),
     UnaryMath(UnaryMathOp),
     BinaryMath(BinaryMathOp),
+    CheckedValue,
     IntegerCast,
     IntegerBinary(IntegerBinaryOp),
     IntegerShiftConst(IntegerBinaryOp, u8),
@@ -1634,6 +1635,11 @@ impl NativeProgram {
                     }
                     ops.push(NativeOp::BinaryMath(BinaryMathOp::Pow));
                 }
+                Instruction::CheckedValue => {
+                    pop_binary_stack(model.clone(), entry_kind, "CheckedValue", depth)?;
+                    depth -= 1;
+                    ops.push(NativeOp::CheckedValue);
+                }
                 Instruction::Atan2 | Instruction::Mod => {
                     pop_binary_stack(
                         model.clone(),
@@ -2905,6 +2911,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
     }
 
     fn lower_ddx_projection(&mut self, expr: ExprId, probe: ExprId) -> JitResult<()> {
+        self.lower(expr)?;
         match self.ddx_probe_projection(probe)? {
             DdxProjection::Potential(pos, neg) => {
                 if let Some(pos) = pos {
@@ -2929,7 +2936,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 }
             }
         }
-        Ok(())
+        self.append_checked_value()
     }
 
     fn lower_ddx_projection_derivative(
@@ -2938,6 +2945,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         probe: ExprId,
         wrt: CanonicalDerivativeAxis,
     ) -> JitResult<()> {
+        self.lower(expr)?;
         match self.ddx_probe_projection(probe)? {
             DdxProjection::Potential(pos, neg) => {
                 if let Some(pos) = pos {
@@ -2966,7 +2974,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 }
             }
         }
-        Ok(())
+        self.append_checked_value()
     }
 
     fn lower_ddx_projection_second_derivative(
@@ -2976,6 +2984,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         first: CanonicalDerivativeAxis,
         second: CanonicalDerivativeAxis,
     ) -> JitResult<()> {
+        self.lower(expr)?;
         match self.ddx_probe_projection(probe)? {
             DdxProjection::Potential(pos, neg) => {
                 if let Some(pos) = pos {
@@ -3015,7 +3024,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 }
             }
         }
-        Ok(())
+        self.append_checked_value()
     }
 
     fn ddx_probe_projection(&self, probe: ExprId) -> JitResult<DdxProjection> {
@@ -7986,6 +7995,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         self.lower(left)?;
         self.lower(right)?;
         match op {
+            "CheckedValue" => self.append_checked_value(),
             "Add" | "Sub" | "Mul" | "Div" => self.append_arithmetic(op),
             "Pow" | "Mod" => self.append_binary_math(op),
             "Eq" | "Ne" | "Lt" | "Le" | "Gt" | "Ge" => self.append_compare(op),
@@ -7994,6 +8004,12 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             | "IntDiv" | "IntMod" | "IntPow" => self.append_integer_binary(op),
             _ => Err(self.unsupported(format!("binary operator {op}"))),
         }
+    }
+
+    fn append_checked_value(&mut self) -> JitResult<()> {
+        self.pop_binary("checked derivative")?;
+        self.ops.push(NativeOp::CheckedValue);
+        Ok(())
     }
 
     fn append_arithmetic(&mut self, op: &str) -> JitResult<()> {
@@ -8476,6 +8492,7 @@ fn is_parameter_default_op(op: &NativeOp) -> bool {
             | NativeOp::UnaryMath(_)
             | NativeOp::BinaryMath(_)
             | NativeOp::IntegerCast
+            | NativeOp::CheckedValue
             | NativeOp::IntegerBinary(_)
             | NativeOp::IntegerShiftConst(_, _)
             | NativeOp::IntegerBinaryConst(_, _)
@@ -8538,6 +8555,7 @@ pub(crate) fn native_op_name(op: &NativeOp) -> &'static str {
         NativeOp::ExtremumConstLhs(_, _) => "ExtremumConstLhs",
         NativeOp::UnaryMath(_) => "UnaryMath",
         NativeOp::BinaryMath(_) => "BinaryMath",
+        NativeOp::CheckedValue => "CheckedValue",
         NativeOp::IntegerCast => "IntegerCast",
         NativeOp::IntegerBinary(_) => "IntegerBinary",
         NativeOp::IntegerShiftConst(_, _) => "IntegerShiftConst",
@@ -9516,6 +9534,7 @@ pub(crate) fn native_op_stack_effect(op: &NativeOp) -> (usize, usize) {
         | NativeOp::Logical(LogicalOp::And | LogicalOp::Or)
         | NativeOp::Extremum(_)
         | NativeOp::BinaryMath(_)
+        | NativeOp::CheckedValue
         | NativeOp::IntegerBinary(_)
         | NativeOp::LimiterStore(_)
         | NativeOp::LimitState(_)
@@ -9684,6 +9703,7 @@ fn instruction_name(instruction: &Instruction) -> &'static str {
         Instruction::BitAnd => "BitAnd",
         Instruction::BitOr => "BitOr",
         Instruction::BitXor => "BitXor",
+        Instruction::CheckedValue => "CheckedValue",
         Instruction::IntegerArithmetic(_) => "IntegerArithmetic",
         Instruction::Neg => "Neg",
         Instruction::Abs => "Abs",

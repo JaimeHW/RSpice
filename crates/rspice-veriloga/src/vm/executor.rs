@@ -381,6 +381,13 @@ impl<'a> Vm<'a> {
             Instruction::IntegerArithmetic(op) => {
                 self.integer_binary_op(IntegerBinaryOperation::Arithmetic(*op))?
             }
+            Instruction::CheckedValue => {
+                let derivative = self.pop()?;
+                let primal = self.pop()?;
+                let value = rspice_veriloga_runtime::checked_derivative_value(primal, derivative)
+                    .map_err(|reason| VmError::InvalidNumericResult(reason.into()))?;
+                self.stack.push(value);
+            }
             Instruction::Add => self.binary_op(|a, b| a + b)?,
             Instruction::Sub => self.binary_op(|a, b| a - b)?,
             Instruction::Mul => self.binary_op(|a, b| a * b)?,

@@ -892,6 +892,9 @@ pub enum Instruction {
     Jump(usize),
     /// Type-resolved signed 32-bit arithmetic.
     IntegerArithmetic(crate::integer_runtime::IntegerArithmeticOperation),
+    /// Validate the primal and derivative, retaining failures through comparisons.
+    /// Stack: `[primal, derivative] -> [derivative]`.
+    CheckedValue,
 }
 
 impl CompiledModel {

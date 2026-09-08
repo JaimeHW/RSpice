@@ -273,6 +273,9 @@ impl<S: Copy> CfgEvalSnapshot<S> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CfgEvalError {
+    InvalidDerivative {
+        reason: &'static str,
+    },
     AnalogEffectInNumericalEvaluation(ValueId),
     UndefinedValue(ValueId),
     UnterminatedBlock(BlockId),
@@ -318,6 +321,9 @@ pub enum CfgEvalError {
 impl std::fmt::Display for CfgEvalError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::InvalidDerivative { reason } => {
+                write!(f, "derivative evaluation failed: {reason}")
+            }
             Self::AnalogEffectInNumericalEvaluation(value) => write!(
                 f,
                 "ordered analog task {value} reached a numerical-only evaluation"
@@ -1026,6 +1032,10 @@ impl<S: CfgScalar> Evaluator<'_, S> {
             CfgValueKind::Binary { op, left, right } => {
                 let left = self.read(left)?;
                 let right = self.read(right)?;
+                if op == CfgBinaryOp::CheckedValue {
+                    rspice_veriloga_runtime::checked_derivative_value(left.real(), right.real())
+                        .map_err(|reason| CfgEvalError::InvalidDerivative { reason })?;
+                }
                 apply_binary(op, left, right)
             }
             // Evaluated on the real part alone, which is what makes it the same
@@ -1215,6 +1225,7 @@ fn laplace_dc_gain(id: ValueId, transfer: &CfgLaplaceTransfer) -> Result<f64, Cf
 pub(super) fn apply_binary<S: CfgScalar>(op: CfgBinaryOp, left: S, right: S) -> S {
     let predicate = |holds: bool| S::from_f64(f64::from(u8::from(holds)));
     match op {
+        CfgBinaryOp::CheckedValue => right,
         CfgBinaryOp::Add => left.add(right),
         CfgBinaryOp::Sub => left.sub(right),
         CfgBinaryOp::Mul => left.mul(right),

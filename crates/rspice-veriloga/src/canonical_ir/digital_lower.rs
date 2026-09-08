@@ -2928,7 +2928,8 @@ impl ProcessLowerer<'_> {
                 UnaryOp::BitNot | UnaryOp::Pos | UnaryOp::Neg => self.self_signed(&unary.operand),
             },
             Expression::Binary(binary) => match binary.op {
-                BinaryOp::IntAdd
+                BinaryOp::CheckedValue
+                | BinaryOp::IntAdd
                 | BinaryOp::IntSub
                 | BinaryOp::IntMul
                 | BinaryOp::IntDiv
@@ -3029,7 +3030,8 @@ impl ProcessLowerer<'_> {
                 UnaryOp::BitNot | UnaryOp::Pos | UnaryOp::Neg => self.self_width(&unary.operand),
             },
             Expression::Binary(binary) => match binary.op {
-                BinaryOp::IntAdd
+                BinaryOp::CheckedValue
+                | BinaryOp::IntAdd
                 | BinaryOp::IntSub
                 | BinaryOp::IntMul
                 | BinaryOp::IntDiv
@@ -3357,7 +3359,8 @@ impl ProcessLowerer<'_> {
             );
         }
         let kind = match binary.op {
-            BinaryOp::IntAdd
+            BinaryOp::CheckedValue
+            | BinaryOp::IntAdd
             | BinaryOp::IntSub
             | BinaryOp::IntMul
             | BinaryOp::IntDiv

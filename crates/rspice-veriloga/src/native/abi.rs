@@ -45,6 +45,32 @@ fn event_integer_operand(name: &str, value: f64) -> Result<i32, String> {
     Ok(converted)
 }
 
+/// Validate two operands supplied by a checked-derivative native instruction.
+///
+/// # Safety
+/// `operands` must contain two readable f64 values and `ctx` must be a live,
+/// exclusively dispatched evaluation frame, as for the other operand helpers.
+#[unsafe(export_name = "rspice_checked_value_native")]
+pub unsafe extern "C" fn rspice_checked_value_native(
+    operands: *const f64,
+    ctx: *const EvalContext,
+    _descriptor: usize,
+) -> f64 {
+    if operands.is_null() {
+        set_native_context_error_ptr(ctx, "checked derivative received null operands");
+        return 0.0;
+    }
+    // SAFETY: the instruction supplies the two operands required by this ABI.
+    let (primal, derivative) = unsafe { (*operands, *operands.add(1)) };
+    match rspice_veriloga_runtime::checked_derivative_value(primal, derivative) {
+        Ok(value) => value,
+        Err(reason) => {
+            set_native_context_error_ptr(ctx, reason);
+            0.0
+        }
+    }
+}
+
 pub(crate) fn integer_binary_descriptor(operation: IntegerBinaryOperation) -> usize {
     INTEGER_BINARY_DESCRIPTOR_BASE + integer_operation_code(operation)
 }

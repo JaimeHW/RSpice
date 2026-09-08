@@ -6933,6 +6933,7 @@ impl SemanticAnalyzer {
                     let right = types.pop().expect("right operand type was inferred");
                     let left: ValueType = types.pop().expect("left operand type was inferred");
                     match binary.op {
+                        BinaryOp::CheckedValue => ValueType::Real,
                         BinaryOp::IntAdd
                         | BinaryOp::IntSub
                         | BinaryOp::IntMul
@@ -7351,6 +7352,7 @@ impl SemanticAnalyzer {
                 let l = eval(&b.left)?;
                 let r = eval(&b.right)?;
                 Some(match b.op {
+                    BinaryOp::CheckedValue => return None,
                     BinaryOp::IntAdd
                     | BinaryOp::IntSub
                     | BinaryOp::IntMul

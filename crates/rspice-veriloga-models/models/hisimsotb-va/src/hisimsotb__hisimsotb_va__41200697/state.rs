@@ -565,7 +565,7 @@ pub struct Instance {
 	pub(crate) time: f64,
 	pub(crate) timestep: f64,
 	pub(crate) ddt_coefficients: GeneratedDdtCoefficients,
-	pub(crate) canonical_reactive: Box<[f64; 82]>,
+	pub(crate) canonical_reactive: Box<[f64; 86]>,
 }
 
 impl Clone for Instance {
@@ -938,7 +938,7 @@ impl Instance {
 	pub const EVENT_STATE_COUNT: usize = 0;
 	pub const ONE_STEP_DAE_SPLIT_SAFE: bool = true;
 	pub const REQUIRES_NODESET_PHASE: bool = false;
-	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "adcbfe4878f2e94efea9dbd4ff22fbfec703cafb26a3e2423dad3e50f1d0999a";
+	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "bb3ac6e8fd831c0546941e7d6926c7835525c092b14b4ab218da191fed9f454c";
 	pub const MAX_ANALOG_LOOP_ITERATIONS: usize = 1_000_000;
 
 	pub fn new(nodes: &[usize]) -> Self {

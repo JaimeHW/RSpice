@@ -27,6 +27,47 @@ FC = 1.0 / (2 * math.pi * 1e3 * 1e-6)  # RC corner: 159.155 Hz
 
 
 class TestAcBasics:
+    @pytest.mark.parametrize("level", [11, 12])
+    def test_vbic_tnf_thermal_derivative_matches_xyce(self, engine, level):
+        substrate = " 0" if level == 12 else ""
+        netlist = rspice.Netlist.parse_spice(f"""* VBIC TNF thermal derivative
+Vc c 0 1.8
+Vb b 0 0.7
+Vth th 0 DC 20 AC 1
+Q1 c b 0{substrate} th vm SW_ET=1 M=3 TRISE=20
+.model vm NPN(LEVEL={level} IS=1e-16 NF=1.1 NR=1.2 ISRR=0.7 TNF=0.001 XISR=1.8 DEAR=0.1 IBEI=1e-18 IBCI=1e-18 IBEIP=0 ISP=0 RCX=10 RCI=2 RBX=5 RBI=3 RE=1 RBP=0 RS=0 GMIN=0 TNOM=27 RTH=1000 CTH=1p TD=1n TF=1n TR=2n)
+.temp 27
+.options gmin=0
+.end
+""")
+        result = engine.run_ac(netlist, [1e8])
+        for branch, expected in [
+            ("vc", complex(-1.084013990699429e-6, 7.885275583603683e-7)),
+            ("vb", complex(-8.501427197947536e-7, -9.013856542434545e-7)),
+            ("vth", complex(-0.0029974552824991404, -0.0018863758535638618)),
+        ]:
+            assert result.branch_current_complex(branch)[0] == pytest.approx(expected, rel=2e-6, abs=1e-15)
+
+    @pytest.mark.parametrize("level", [11, 12])
+    def test_vbic13_signed_reverse_charge_and_delay_matches_xyce(self, engine, level):
+        substrate = " 0" if level == 12 else ""
+        netlist = rspice.Netlist.parse_spice(f"""* Signed VBIC reverse charge and delay
+Vc c 0 1
+Vb b 0 DC -0.1 AC 1
+Vth th 0 20
+Q1 c b 0{substrate} th vm SW_ET=0 M=3
+.model vm NPN(LEVEL={level} IS=1e-8 ISRR=0.7 IBEI=0 IBCI=0 IBEIP=0 ISP=0 RCX=1 RCI=1 RBX=1 RBI=1 RE=1 RBP=10 RS=10 GMIN=0 TNOM=27 IKF=1e-10 IKR=1e-10 QBM=1 NKF=0.4 VEF=3 VER=4 TF=2n TR=1n TD=1n QTF=0.5 XTF=10 ITF=1e-3)
+.temp 27
+.options gmin=0
+.end
+""")
+        result = engine.run_ac(netlist, [1e8])
+        for branch, expected in [
+            ("vc", complex(-1.2339551736312433e-6, 1.4936538192949223e-6)),
+            ("vb", complex(-2.595701431573616e-11, -4.092821900053193e-6)),
+        ]:
+            assert result.branch_current_complex(branch)[0] == pytest.approx(expected, rel=2e-6, abs=1e-15)
+
     def test_vbic13_early_voltage_cutoff_matches_xyce(self, engine):
         netlist = rspice.Netlist.parse_spice(
             """* VBIC Early-voltage cutoff

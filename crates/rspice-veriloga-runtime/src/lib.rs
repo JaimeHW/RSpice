@@ -43,6 +43,19 @@ pub use compatibility_catalog::{
 
 pub type Value = f64;
 
+/// Validate a symbolic derivative at its original expression's operating point.
+/// Both values must survive simplification even when the derivative is zero.
+#[inline]
+pub fn checked_derivative_value(primal: Value, derivative: Value) -> Result<Value, &'static str> {
+    if !primal.is_finite() {
+        Err("ddx operand is not finite")
+    } else if !derivative.is_finite() {
+        Err("ddx derivative is not finite")
+    } else {
+        Ok(derivative)
+    }
+}
+
 /// Version of the immutable catalog contract emitted beside generated models.
 ///
 /// This is intentionally independent of checkpoint and stamp-workspace
@@ -1905,6 +1918,9 @@ pub enum GeneratedStampLane {
 /// A recoverable failure reported while evaluating generated device code.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GeneratedEvaluationError {
+    Derivative {
+        reason: &'static str,
+    },
     Integer {
         reason: &'static str,
     },
@@ -1941,6 +1957,12 @@ pub enum GeneratedEvaluationError {
 impl std::fmt::Display for GeneratedEvaluationError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::Derivative { reason } => {
+                write!(
+                    f,
+                    "generated Verilog-A derivative evaluation failed: {reason}"
+                )
+            }
             Self::Integer { reason } => {
                 write!(f, "generated Verilog-A integer evaluation failed: {reason}")
             }
@@ -2795,6 +2817,18 @@ impl<'a> GeneratedEvalContext<'a> {
             self.evaluation_error
                 .set(Some(GeneratedEvaluationError::Initialization { slot }));
         }
+    }
+
+    /// Retain derivative failures even when the result only controls a branch.
+    #[inline]
+    pub fn checked_derivative_value(&self, primal: Value, derivative: Value) -> Value {
+        checked_derivative_value(primal, derivative).unwrap_or_else(|reason| {
+            if self.evaluation_error.get().is_none() {
+                self.evaluation_error
+                    .set(Some(GeneratedEvaluationError::Derivative { reason }));
+            }
+            Value::NAN
+        })
     }
 
     /// Retain integer failures even when the result only controls a branch.
@@ -7852,6 +7886,29 @@ mod fixed_lane_tests {
                 Some(GeneratedEvaluationError::SmallSignal { .. })
             ));
         }
+    }
+
+    #[test]
+    fn generated_derivative_errors_survive_predicates_and_preserve_the_first_failure() {
+        let ctx = GeneratedEvalContext::new(&[0.0], 300.15, 1);
+        assert_eq!(ctx.checked_derivative_value(5.0, 0.0), 0.0);
+        assert!(!ctx.evaluation_failed());
+        for (primal, derivative) in [(f64::NAN, 1.0), (5.0, f64::INFINITY)] {
+            let positive = ctx.checked_derivative_value(primal, derivative) > 0.0;
+            assert!(!positive);
+            assert!(ctx.evaluation_failed());
+            ctx.report_initialization_error(0);
+            assert!(matches!(
+                ctx.take_evaluation_error(),
+                Some(GeneratedEvaluationError::Derivative { .. })
+            ));
+        }
+        ctx.report_initialization_error(1);
+        ctx.checked_derivative_value(f64::INFINITY, 0.0);
+        assert_eq!(
+            ctx.take_evaluation_error(),
+            Some(GeneratedEvaluationError::Initialization { slot: 1 })
+        );
     }
 
     #[test]

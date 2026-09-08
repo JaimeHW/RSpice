@@ -1016,6 +1016,9 @@ mod tests {
     fn vbic13_delayed_avalanche_reduction_matches_nonequilibrium_residual_derivatives() {
         let params = [
             ("LEVEL", 12.0),
+            ("NF", 1.1),
+            ("NR", 1.2),
+            ("TNF", 0.001),
             ("VEF", 5.0),
             ("VER", 3.0),
             ("TCVEF", 0.05),
@@ -1046,7 +1049,7 @@ mod tests {
         ] {
             let bjt = bjt
                 .with_params(&params)
-                .with_instance_params(&[("M".into(), 2.0)]);
+                .with_instance_params(&[("M".into(), 2.0), ("TRISE".into(), 20.0)]);
             let external = [p * 1.8, p * 0.7, 0.0, 0.0];
             for rise in [20.0, 74.0] {
                 let state = [

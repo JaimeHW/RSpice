@@ -257,7 +257,8 @@ use super::*;
 // Version 51 converts integer parameter defaults before dependent expressions
 // and leaves placeholder range validation to final instance construction.
 // Version 52 preserves signed integer arithmetic before real conversion.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 52;
+// Version 53 retains checked primal dependencies when resolving ddx.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 53;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]

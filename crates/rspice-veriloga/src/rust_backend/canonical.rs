@@ -1162,14 +1162,8 @@ impl ModelPlan {
         // Every read-out is taken, so the function has stopped growing and the
         // noise slice can be cut from it.
         //
-        // The primal body first, and the differentiated one only if that fails.
-        // A magnitude wants no derivative, so cutting from the primal is what
-        // keeps the slice to the arithmetic the powers actually name — but
-        // `ddx` is a symbolic derivative only the AD pass resolves, and six
-        // shipped models read one inside a noise power. Measured both ways over
-        // the corpus: always-primal costs those six 5.4 MB of fallback, and
-        // always-differentiated costs the other 35 more than it saves the six,
-        // because the AD pass leaves bookkeeping the magnitudes can reach.
+        // Slice the primal first. If a noise power or its branch predicate
+        // needs a symbolic readback, use the body that AD has resolved.
         let mut noise = plan_noise(artifact, &cfg, &cfg.function)
             .ok()
             .or_else(|| plan_noise(artifact, &cfg, &differentiated.function).ok());
@@ -1977,9 +1971,8 @@ pub(crate) enum NoiseDecline {
     /// how wide its table is.
     Shape { index: usize },
     /// A magnitude reads a `ddt` — which would advance per-instance transient
-    /// history while a noise analysis merely reads it — or an unresolved `ddx`,
-    /// which is what sends the module round again against the differentiated
-    /// body.
+    /// history while a noise analysis merely reads it — or an unresolved `ddx`
+    /// that requires the differentiated body.
     LiveStateOperator,
 }
 
@@ -2079,9 +2072,8 @@ fn plan_noise(
     for (index, value) in function.values.iter_mut().enumerate() {
         // `ddt` reads and writes per-instance history, and a magnitude that
         // reached one would advance the transient state while the noise
-        // analysis merely read it. A `ddx` is unresolved, which only happens in
-        // the primal body — declining on one is what sends the model round
-        // again against the differentiated function.
+        // analysis merely read it. A live `ddx` requires the differentiated
+        // body, including readbacks that select a noise-power branch.
         if !matches!(
             value.kind,
             CfgValueKind::Ddt { .. } | CfgValueKind::Ddx { .. }
@@ -2125,8 +2117,8 @@ pub(crate) fn noise_plan_decline(
     plan_noise(artifact, cfg, function).err()
 }
 
-/// Every value `roots` can read, following a block parameter back through the
-/// terminators that supply it.
+/// Every value the optimized slice can read, including retained branch
+/// predicates and block parameters supplied by incoming terminators.
 fn reachable(function: &CfgFunction, roots: &[ValueId]) -> Vec<bool> {
     let mut declared: HashMap<ValueId, (usize, usize)> = HashMap::new();
     for (block, data) in function.blocks.iter().enumerate() {
@@ -2137,6 +2129,16 @@ fn reachable(function: &CfgFunction, roots: &[ValueId]) -> Vec<bool> {
 
     let mut live = vec![false; function.values.len()];
     let mut work: Vec<ValueId> = roots.to_vec();
+    // An arm may jump to a merge whose incoming terminator no longer carries
+    // the predicate that selected the arm. All retained predicates affect
+    // execution of this optimized slice, even across those intermediate jumps.
+    work.extend(function.blocks.iter().filter_map(|block| {
+        if let CfgTerminator::Branch { condition, .. } = block.terminator {
+            Some(condition)
+        } else {
+            None
+        }
+    }));
     while let Some(value) = work.pop() {
         if std::mem::replace(&mut live[usize::from(value)], true) {
             continue;
@@ -2367,7 +2369,7 @@ impl ModelPlan {
         if std::iter::once(&self.function)
             .chain(self.stages.iter().map(|stage| &stage.function))
             .chain(self.initialization.iter().map(|plan| &plan.function))
-            .any(uses_checked_integers)
+            .any(uses_checked_operations)
         {
             runtime_support.push("integer".to_string());
         }
@@ -2476,7 +2478,7 @@ impl ModelPlan {
             .collect::<Vec<_>>();
         let (body, names) = emit_body(&stage.function, &produced, &self.emit_bindings())
             .map_err(|error| unsupported(artifact, format!("{name}: {error}")))?;
-        let integer_context = if uses_checked_integers(&stage.function) {
+        let integer_context = if uses_checked_operations(&stage.function) {
             "    ctx: &GeneratedEvalContext<'_>,\n"
         } else {
             ""
@@ -2574,7 +2576,7 @@ impl ModelPlan {
                 preprocess_fn_name(stage.class)
             );
         }
-        if uses_checked_integers(&stage.function) {
+        if uses_checked_operations(&stage.function) {
             out.push_str("        if ctx.evaluation_failed() { return; }\n");
         }
         if !produced.is_empty() {
@@ -2697,7 +2699,7 @@ impl ModelPlan {
         );
         out.push_str(integer_context_argument(&stage.function));
         out.push_str("        );\n");
-        if uses_checked_integers(&stage.function) {
+        if uses_checked_operations(&stage.function) {
             out.push_str("        if ctx.evaluation_failed() { return; }\n");
         }
         out.push_str(
@@ -2739,7 +2741,7 @@ impl ModelPlan {
                 continue;
             }
             let _ = writeln!(out, "        self.{}(ctx);", stage_fn_name(stage.class));
-            if uses_checked_integers(&stage.function) {
+            if uses_checked_operations(&stage.function) {
                 out.push_str("        if ctx.evaluation_failed() { return; }\n");
             }
         }
@@ -3104,10 +3106,10 @@ impl ModelPlan {
         }
         self.emit_noise_prologue(artifact, function, &mut out);
         out.push_str(&indent(&body, 2));
-        if uses_checked_integers(function)
+        if uses_checked_operations(function)
             || shared_stages
                 .iter()
-                .any(|stage| uses_checked_integers(&stage.function))
+                .any(|stage| uses_checked_operations(&stage.function))
         {
             out.push_str("        ctx.check_noise_evaluation()?;\n");
         }
@@ -3223,7 +3225,7 @@ impl ModelPlan {
 
         Ok(GeneratedRustFile {
             relative_path: "noise.rs".to_string(),
-            contents: out,
+            contents: super::emit::compact_generated_indentation(&out),
         })
     }
 
@@ -5596,6 +5598,7 @@ fn truth_output(function: &CfgFunction, value: ValueId, name: &str) -> String {
 fn bindings() -> EmitBindings {
     EmitBindings {
         integer_result: "ctx.integer_result".into(),
+        checked_value: "ctx.checked_derivative_value".into(),
         analysis: "ctx.analysis".into(),
         simparam: "ctx.simparam_or".into(),
         cross: "rspice_cross!".into(),
@@ -5605,11 +5608,14 @@ fn bindings() -> EmitBindings {
     }
 }
 
-fn uses_checked_integers(function: &CfgFunction) -> bool {
+fn uses_checked_operations(function: &CfgFunction) -> bool {
     function.values.iter().any(|value| {
         matches!(
             value.kind,
-            CfgValueKind::IntegerArithmetic { .. }
+            CfgValueKind::Binary {
+                op: CfgBinaryOp::CheckedValue,
+                ..
+            } | CfgValueKind::IntegerArithmetic { .. }
                 | CfgValueKind::IntegerBitwise { .. }
                 | CfgValueKind::IntegerBitwiseNot { .. }
         )
@@ -5617,7 +5623,7 @@ fn uses_checked_integers(function: &CfgFunction) -> bool {
 }
 
 fn integer_context_argument(function: &CfgFunction) -> &'static str {
-    if uses_checked_integers(function) {
+    if uses_checked_operations(function) {
         "            ctx,\n"
     } else {
         ""

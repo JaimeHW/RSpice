@@ -1228,6 +1228,8 @@ impl FunctionCompiler {
                     NativeOp::UnaryMath(op) => self.emit_unary_math(op)?,
                     NativeOp::BinaryMath(op) => self.emit_binary_math(op)?,
                     NativeOp::IntegerCast => self.emit_integer_cast()?,
+                    NativeOp::CheckedValue => self
+                        .emit_checked_binary(0, crate::native::abi::rspice_checked_value_native)?,
                     NativeOp::IntegerBinary(op) => self.emit_integer_binary(op)?,
                     NativeOp::IntegerShiftConst(op, count) => {
                         self.emit_integer_shift_const(op, count)?
@@ -3041,11 +3043,22 @@ impl FunctionCompiler {
     }
 
     fn emit_integer_binary(&mut self, op: IntegerBinaryOp) -> JitResult<()> {
+        self.emit_checked_binary(
+            integer_binary_descriptor(runtime_integer_operation(op)),
+            rspice_integer_operation_native,
+        )
+    }
+
+    fn emit_checked_binary(
+        &mut self,
+        descriptor: usize,
+        helper: OperandContextFilterHelper,
+    ) -> JitResult<()> {
         if self.depth < 2 {
             return Err(JitError::Encoding {
                 model: MODEL.into(),
                 detail: format!(
-                    "integer binary op requires stack depth 2, found {}",
+                    "checked binary op requires stack depth 2, found {}",
                     self.depth
                 )
                 .into(),
@@ -3053,12 +3066,7 @@ impl FunctionCompiler {
         }
 
         let left = self.register_stack[self.depth - 2];
-        self.emit_operand_context_filter_helper_call(
-            left,
-            2,
-            integer_binary_descriptor(runtime_integer_operation(op)),
-            rspice_integer_operation_native,
-        );
+        self.emit_operand_context_filter_helper_call(left, 2, descriptor, helper);
         self.drop_stack_values(1)?;
         Ok(())
     }

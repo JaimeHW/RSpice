@@ -18,6 +18,7 @@ use crate::canonical_ir::{
     CanonicalIrArtifact, CanonicalValueType, ExprId, HirExprKind, HirPort, MirParameterSlot,
 };
 
+use super::emit::compact_generated_indentation;
 use super::expr::comparison_operator;
 
 use super::{GeneratedRustDevice, RustBackendError, RustTranspileOptions};
@@ -1406,33 +1407,6 @@ fn collect_canonical_parameter_default_references(
     Ok(())
 }
 
-/// Generated device bodies are deliberately outside ordinary `rustfmt`
-/// traversal. Use tabs for their lexical indentation so cold metadata does not
-/// spend three redundant bytes at every four-column nesting level.
-fn compact_generated_indentation(source: &str) -> String {
-    let mut compact = String::with_capacity(source.len());
-    for line in source.split_inclusive('\n') {
-        let content = line.strip_suffix('\n').unwrap_or(line);
-        let mut columns = 0usize;
-        let mut prefix_bytes = 0usize;
-        for byte in content.bytes() {
-            match byte {
-                b' ' => columns = columns.saturating_add(1),
-                b'\t' => columns = columns.saturating_add(4),
-                _ => break,
-            }
-            prefix_bytes += 1;
-        }
-        compact.extend(std::iter::repeat_n('\t', columns / 4));
-        compact.extend(std::iter::repeat_n(' ', columns % 4));
-        compact.push_str(&content[prefix_bytes..]);
-        if line.ends_with('\n') {
-            compact.push('\n');
-        }
-    }
-    compact
-}
-
 const CHECKPOINT_IDENTITY_PLACEHOLDER: &str =
     "0000000000000000000000000000000000000000000000000000000000000000";
 
@@ -1562,7 +1536,7 @@ fn finalize_checkpoint_identity_with_compatibility(
     Ok(())
 }
 
-const GENERATED_MODEL_SEMANTICS_VERSION: u32 = 3;
+const GENERATED_MODEL_SEMANTICS_VERSION: u32 = 4;
 
 fn generated_model_semantic_identity(device: &GeneratedRustDevice) -> String {
     let mut hasher = blake3::Hasher::new();

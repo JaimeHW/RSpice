@@ -2741,9 +2741,13 @@ impl Engine {
                         if let Some(constants) = model.physical_constants {
                             source = source.with_physical_constants(constants);
                         }
-                        source.temperature_offset = bjt.noise_temperature_offset;
                         if let Some(temperature) = model.absolute_temperature {
                             absolute_temperatures.insert(source.identity.clone(), temperature);
+                        } else {
+                            // VBIC 1.3's absolute temperature already includes
+                            // TRISE and its thermal port. Only older models use
+                            // the ngspice analysis-temperature offset here.
+                            source.temperature_offset = bjt.noise_temperature_offset;
                         }
                         noise_sources.push(source);
                     }
@@ -7254,6 +7258,63 @@ M1 D G S B N W=10u L=1u AS=0 AD=0 PS=0 PD=0
                         (actual - expected).abs() < 2e-6 * expected.abs().max(1e-30),
                         "{case} {label} at {} Hz: {actual:e} != {expected:e}",
                         point.frequency
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn vbic_tnf_noise_temperature_counts_the_instance_offset_once() {
+        for level in [11, 12] {
+            let substrate = if level == 12 { " 0" } else { "" };
+            let netlist = Netlist::parse(&format!(
+                "VBIC local temperature noise\nVcc vcc 0 3\nRc vcc c 1k\nVb b 0 DC 0.7 AC 1\nVth th 0 20\nQ1 c b 0{substrate} th vm SW_ET=0 M=3 TRISE=20\n\
+                 .model vm NPN(LEVEL={level} IS=1e-16 NF=1.1 NR=1.2 ISRR=0.7 TNF=0.001 XISR=1.8 DEAR=0.1 IBEI=1e-18 IBCI=1e-18 IBEIP=0 ISP=0 RCX=10 RCI=2 RBX=5 RBI=3 RE=1 RBP=0 RS=0 GMIN=0 TNOM=27 KFN=1e-8 AFN=1.5 BFN=0.8)\n.temp 27\n.options gmin=0\n.end\n"
+            )).unwrap();
+            let engine = xyce_engine().resolved_for_netlist(&netlist);
+            let circuit = engine.build_circuit(&netlist).unwrap();
+            let output = circuit.get_node_by_name("c").unwrap();
+            let results = engine
+                .run_noise_with_input_source(&netlist, output, None, "Vb", &[1.0, 1e6], 300.15)
+                .unwrap();
+            for (point, (total, device)) in results.iter().zip([
+                (7.961087277005437e-15, 7.944511522077318e-15),
+                (6.504582886700624e-17, 4.847007393888768e-17),
+            ]) {
+                let device_total: f64 = point
+                    .contributions
+                    .iter()
+                    .filter(|source| source.identity.device.eq_ignore_ascii_case("Q1"))
+                    .map(|source| source.output_contribution)
+                    .sum();
+                assert!((point.output_noise_density - total).abs() < 2e-6 * total);
+                assert!((device_total - device).abs() < 2e-6 * device);
+            }
+        }
+    }
+
+    #[test]
+    fn vbic13_reverse_transport_shot_noise_matches_xyce710() {
+        for level in [11, 12] {
+            let substrate = if level == 12 { " 0" } else { "" };
+            for (kind, p) in [("NPN", 1.0), ("PNP", -1.0)] {
+                let netlist = Netlist::parse(&format!(
+                    "Signed reverse transport shot noise\nVcc vcc 0 {p}\nRc vcc c 1meg\nVb b 0 DC {} AC 1\nQ1 c b 0{substrate} vm SW_ET=0 M=3\n\
+                     .model vm {kind}(LEVEL={level} IS=1e-8 IBEI=0 IBCI=0 IBEIP=0 ISP=0 RCX=1 RCI=1 RBX=1 RBI=1 RE=1 RBP=0 RS=0 GMIN=0 TNOM=27)\n.temp 27\n.options gmin=0\n.end\n", -0.1*p
+                )).unwrap();
+                let engine = xyce_engine().resolved_for_netlist(&netlist);
+                let circuit = engine.build_circuit(&netlist).unwrap();
+                let output = circuit.get_node_by_name("c").unwrap();
+                let results = engine
+                    .run_noise_with_input_source(&netlist, output, None, "Vb", &[1e3, 1e6], 300.15)
+                    .unwrap();
+                for result in results {
+                    let expected = 4.481133081246399e-14;
+                    assert!(
+                        (result.output_noise_density - expected).abs() < 2e-6 * expected,
+                        "LEVEL={level} {kind}: {:e} != {expected:e}",
+                        result.output_noise_density
                     );
                 }
             }

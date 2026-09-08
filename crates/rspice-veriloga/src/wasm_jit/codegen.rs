@@ -2201,6 +2201,7 @@ fn helper_descriptor(op: NativeOp) -> WasmJitResult<HelperDescriptor> {
         }
         NativeOp::UnaryMath(kind) => descriptor.opcode = 100 + unary_math_code(kind),
         NativeOp::BinaryMath(kind) => descriptor.opcode = 200 + binary_math_code(kind),
+        NativeOp::CheckedValue => descriptor.opcode = 340,
         NativeOp::IntegerCast => descriptor.opcode = 300,
         NativeOp::IntegerBinary(kind) => {
             // 310 and 320 are already the immediate-shift/bitwise ranges.
