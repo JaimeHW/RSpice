@@ -12,14 +12,13 @@ use std::sync::Arc;
 use crate::product::ProcessCorner;
 use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision, SimulationPlanId};
 use crate::services::simulation_runner::splice_before_terminal_end_card;
-use crate::simulation::controller::QueuedAnalysis;
-use crate::simulation::multi_run::AnalysisSpec;
 use crate::simulation::netlist_gen::EmissionRow;
 use crate::simulation::output_contract::{
     PreparedSavedOutput, output_kind_tag, policy_tag, precision_tag, streaming_tag,
 };
 use crate::simulation::plan::AnalysisNumericOverride;
 use crate::simulation::run_set::{RunSetDimensionKind, RunSetState};
+use crate::simulation::{controller::QueuedAnalysis, multi_run::AnalysisSpec};
 use crate::state::{
     HierarchyMapRow, Point, PreparedModelSourceIdentity, PreparedSourceCheckReceipt,
     PreparedSpecification, PreparedSpecificationPolicy, SimulationRunIntent,
