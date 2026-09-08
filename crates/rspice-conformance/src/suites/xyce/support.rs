@@ -2472,6 +2472,7 @@ impl XyceTestRunner {
             device_min_resistance: _,
             device_min_capacitance: _,
             device_voltage_limiting,
+            device_pnjmaxi,
             device_debug_level,
             device_separate_load,
             linsol_tr_partition,
@@ -2519,6 +2520,7 @@ impl XyceTestRunner {
             && timeint_timesteps_reversal.is_none()
             && timeint_debug_level.is_none()
             && device_voltage_limiting.is_none()
+            && device_pnjmaxi.is_none()
             && device_debug_level.is_none()
             && device_separate_load.is_none()
             && linsol_tr_partition.is_none()
