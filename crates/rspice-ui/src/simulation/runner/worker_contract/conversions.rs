@@ -1270,7 +1270,14 @@ pub(crate) fn worker_response_transport_value(
         &JsValue::from_str("protocolVersion"),
         &JsValue::from_f64(f64::from(transport.protocol)),
     )?;
-    let response = serde_wasm_bindgen::to_value(&transport.response)
+    // Result identities and Monte Carlo seeds use the complete u64 range.
+    // Structured clone carries BigInt exactly; the default JS-number encoder
+    // rejects otherwise valid results above 2^53 - 1.
+    let response = transport
+        .response
+        .serialize(
+            &serde_wasm_bindgen::Serializer::new().serialize_large_number_types_as_bigints(true),
+        )
         .map_err(|error| JsValue::from_str(&error.to_string()))?;
     js_sys::Reflect::set(&message, &JsValue::from_str("response"), &response)?;
 

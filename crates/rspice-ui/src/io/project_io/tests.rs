@@ -6,6 +6,10 @@
 //! assert a specific refusal, not just a successful round trip.
 
 use super::*;
+use crate::simulation::{
+    dialog::{DampingStrategy, IntegrationMethod, MatrixSolver},
+    plan::{AnalysisDraft, AnalysisKind},
+};
 use crate::state::{
     AnalysisResult, AnalysisResultProvenance, AnalysisType, Cell, CellViewRef, LayoutEdit,
     LayoutInstance, LayoutObjectId, LayoutOrientation, LayoutPoint, LayoutTransform, OpenCellView,
@@ -414,7 +418,6 @@ fn project_run_round_trip_recomputes_and_rejects_tampered_specification_verdicts
 }
 
 fn project_with_execution_context() -> ProjectFile {
-    use crate::simulation::dialog::{DampingStrategy, IntegrationMethod, MatrixSolver};
     use crate::state::model_library::{DeviceModel, ModelLibrary, ModelLibraryManager, ModelType};
     use crate::workbench::simulation_analysis_tabs::{TAB_AC, TAB_NOISE, TAB_TRANSIENT};
 
@@ -1100,7 +1103,6 @@ fn unfinished_analysis_drafts_are_project_data_not_file_corruption() {
 
 #[test]
 fn monte_carlo_project_restore_distinguishes_legacy_default_from_explicit_zero() {
-    use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
     let project = project_with_execution_context();
     let serialized = serialize_project_file(&project).unwrap();
     for (field, text, expected) in [
