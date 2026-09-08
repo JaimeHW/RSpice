@@ -268,6 +268,26 @@ mod wasm_tests {
     }
 
     #[wasm_bindgen_test]
+    fn vbic13_resistance_floor_preserves_small_currents_in_wasm() {
+        let netlist = rspice_core::Netlist::parse(
+            "VBIC resistance floor precision in WASM\nVc c 0 -1.8\nVb b 0 -0.65\nVth th 0 20\nQ1 c b 0 0 th vm SW_ET=1 M=3 TRISE=20\n\
+             .model vm PNP(LEVEL=12 IS=1e-16 NF=1.1 NR=1.2 ISRR=0.7 TNF=0.001 PNJMAXI=1n XISR=1.8 DEAR=0.1 IBEI=1e-18 IBCI=1e-18 IBEIP=0 ISP=0 RCX=0 RCI=0 RBX=0 RBI=0 RE=0 RBP=0 RS=0 GMIN=0 TNOM=27 RTH=1000 CTH=1p TD=1n TF=1n TR=2n)\n.temp 27\n.options gmin=0\n.end\n",
+        ).unwrap();
+        let mut config = rspice_core::SimulationConfig::default();
+        config.convergence_config.gmin_target = 0.0;
+        let result = rspice_core::Engine::new(config)
+            .run_dc_op_with_abort(&netlist, &rspice_core::abort_signal::NoAbort)
+            .unwrap();
+        for (branch, expected) in [
+            ("Vc", 7.045_220_149_350_812e-8),
+            ("Vb", 8.783310826230572e-8),
+        ] {
+            let actual = result.branch_current_named(branch).unwrap();
+            assert!((actual - expected).abs() < 1e-7 * expected);
+        }
+    }
+
+    #[wasm_bindgen_test]
     fn vbic13_pnjmaxi_global_option_matches_xyce_in_wasm() {
         let netlist = rspice_core::Netlist::parse(
             "VBIC PNJMAXI in WASM\nVc c 0 -1\nVb b 0 -0.8\nQ1 c b 0 0 vm SW_ET=0\n\

@@ -105,6 +105,39 @@ impl Engine {
         matrix: &mut StaticMatrix,
         rhs: &[Value],
         denominator_floors: Option<&[Value]>,
+        anchor: Option<&[Value]>,
+        correction_rhs: &mut Vec<Value>,
+        solution: &mut Vec<Value>,
+    ) -> Result<(), SimulationError> {
+        let solve_rhs = if let Some(anchor) = anchor {
+            matrix.correction_rhs_into(rhs, anchor, correction_rhs)?;
+            correction_rhs.as_slice()
+        } else {
+            rhs
+        };
+        Self::solve_dc_linearization_system(matrix, solve_rhs, denominator_floors, solution)?;
+        if let Some(anchor) = anchor {
+            for (value, previous) in solution.iter_mut().zip(anchor) {
+                *value += previous;
+            }
+        }
+        Ok(())
+    }
+
+    pub(in crate::engine) fn requires_vbic_correction_form(circuit: &CircuitData) -> bool {
+        // A milliohm branch can connect nearly equal voltages while carrying
+        // nanoamperes. Preserve those small currents by solving for increments.
+        circuit
+            .bjts
+            .devices
+            .iter()
+            .any(|bjt| bjt.vbic_mna_promoted())
+    }
+
+    fn solve_dc_linearization_system(
+        matrix: &mut StaticMatrix,
+        rhs: &[Value],
+        denominator_floors: Option<&[Value]>,
         solution: &mut Vec<Value>,
     ) -> Result<(), SimulationError> {
         match matrix.solve_into(rhs, solution) {
@@ -600,6 +633,8 @@ impl Engine {
 
         let mut rhs = vec![0.0; size];
         let mut new_solution = Vec::with_capacity(size);
+        let mut correction_rhs = Vec::new();
+        let uses_vbic_correction = Self::requires_vbic_correction_form(circuit);
         let solve_denominator_floors = Self::dc_solve_denominator_floors(circuit, size);
         let gmin_floor = self.dc_nodal_gmin_floor(circuit);
         let max_iterations = self.continuation_iteration_budget(1, 64);
@@ -620,6 +655,8 @@ impl Engine {
                 matrix,
                 &rhs,
                 solve_denominator_floors.as_deref(),
+                uses_vbic_correction.then_some(solution.as_slice()),
+                &mut correction_rhs,
                 &mut new_solution,
             )?;
             Self::clamp_solution_to_physical_bounds(circuit, &mut new_solution, node_count);
@@ -718,6 +755,8 @@ impl Engine {
         }
         let mut rhs = vec![0.0; size];
         let mut raw_solution = Vec::with_capacity(size);
+        let mut correction_rhs = Vec::new();
+        let uses_vbic_correction = Self::requires_vbic_correction_form(circuit);
         let solve_denominator_floors = Self::dc_solve_denominator_floors(circuit, size);
         // Newton-Raphson iteration
         let mut hit_voltage_limit = false;
@@ -788,6 +827,8 @@ impl Engine {
                 matrix,
                 &rhs,
                 solve_denominator_floors.as_deref(),
+                uses_vbic_correction.then_some(solution.as_slice()),
+                &mut correction_rhs,
                 &mut raw_solution,
             ) {
                 Ok(()) => {}
@@ -1517,6 +1558,8 @@ impl Engine {
 
         let mut rhs = vec![0.0; size];
         let mut new_solution = Vec::with_capacity(size);
+        let mut correction_rhs = Vec::new();
+        let uses_vbic_correction = Self::requires_vbic_correction_form(circuit);
         let max_iterations = self.continuation_iteration_budget(1, 64);
 
         for iteration in 0..max_iterations {
@@ -1543,9 +1586,20 @@ impl Engine {
             )?;
             Self::apply_node_voltage_constraints(circuit, matrix, &mut rhs, node_hints, &solution)?;
 
-            matrix
-                .solve_into(&rhs, &mut new_solution)
-                .map_err(SimulationError::Solver)?;
+            if uses_vbic_correction {
+                Self::solve_dc_linearization(
+                    matrix,
+                    &rhs,
+                    None,
+                    Some(&solution),
+                    &mut correction_rhs,
+                    &mut new_solution,
+                )?;
+            } else {
+                matrix
+                    .solve_into(&rhs, &mut new_solution)
+                    .map_err(SimulationError::Solver)?;
+            }
             Self::clamp_solution_to_physical_bounds(circuit, &mut new_solution, node_count);
             Self::enforce_node_voltage_hints(circuit, matrix, &mut new_solution, node_hints);
 
@@ -1932,6 +1986,8 @@ impl Engine {
             circuit.requires_conservative_solution_damping();
         let mut rhs = vec![0.0; size];
         let mut raw_solution = Vec::with_capacity(size);
+        let mut correction_rhs = Vec::new();
+        let uses_vbic_correction = Self::requires_vbic_correction_form(circuit);
         let mut damping_state = NewtonDampingState::default();
         let junction_owns_steps = Self::junction_limiting_owns_newton_steps(circuit)
             || self.b3soi_limiter_owns_global_damping(circuit);
@@ -1981,7 +2037,19 @@ impl Engine {
                 &solution,
             )?;
 
-            match matrix.solve_into(&rhs, &mut raw_solution) {
+            let solve_result = if uses_vbic_correction {
+                matrix
+                    .correction_rhs_into(&rhs, &solution, &mut correction_rhs)
+                    .and_then(|()| matrix.solve_into(&correction_rhs, &mut raw_solution))
+                    .map(|()| {
+                        for (value, previous) in raw_solution.iter_mut().zip(&solution) {
+                            *value += previous;
+                        }
+                    })
+            } else {
+                matrix.solve_into(&rhs, &mut raw_solution)
+            };
+            match solve_result {
                 Ok(()) => {}
                 Err(err)
                     if !use_transient_current_seed

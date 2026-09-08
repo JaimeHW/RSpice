@@ -1034,17 +1034,15 @@ impl Bjt {
         for row in 0..EXTERNAL_DIM {
             let row_node = external_nodes[row];
             let branch = terminal_currents[row];
-            let mut source = -branch.current;
-            for col in 0..INTERNAL_DIM {
-                if branch.d_internal[col] != 0.0 {
-                    stamper.stamp(row_node, internal_nodes[col], branch.d_internal[col]);
-                    source += branch.d_internal[col] * internal[col];
+            let source = branch.source(&internal, &external);
+            for (&node, &derivative) in internal_nodes.iter().zip(&branch.d_internal) {
+                if derivative != 0.0 {
+                    stamper.stamp(row_node, node, derivative);
                 }
             }
-            for col in 0..EXTERNAL_DIM {
-                if branch.d_external[col] != 0.0 {
-                    stamper.stamp(row_node, external_nodes[col], branch.d_external[col]);
-                    source += branch.d_external[col] * external[col];
+            for (&node, &derivative) in external_nodes.iter().zip(&branch.d_external) {
+                if derivative != 0.0 {
+                    stamper.stamp(row_node, node, derivative);
                 }
             }
             stamper.stamp_rhs(row_node, source);
@@ -1290,6 +1288,13 @@ mod tests {
         let mut bias = vec![0.0; next - 1];
         bias[bjt.node_collector - 1] = 0.1;
         bias[bjt.node_base - 1] = 0.7;
+        // VBIC 1.3 retains these internal nodes through its resistance floor.
+        for node in [bjt.node_cx, bjt.node_ci] {
+            bias[node - 1] = 0.1;
+        }
+        for node in [bjt.node_bx, bjt.node_bi] {
+            bias[node - 1] = 0.7;
+        }
         bias[bjt.node_bp - 1] = 0.05;
         // Independent threeTerminal equations from Xyce vbic_1p3.va:
         // Ifp remains in both qbp (Rbp) and TR*Ifp (Qbep) without Iccp.

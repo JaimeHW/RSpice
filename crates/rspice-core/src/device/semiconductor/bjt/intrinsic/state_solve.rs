@@ -942,19 +942,7 @@ impl Bjt {
                           source: &mut [Value; INTERNAL_DIM]| {
             jacobian[row_idx] = row.d_internal;
             external_partials[row_idx] = row.d_external;
-            source[row_idx] = row
-                .d_internal
-                .iter()
-                .zip(internal.iter())
-                .map(|(d, v)| d * v)
-                .sum::<Value>()
-                + row
-                    .d_external
-                    .iter()
-                    .zip(external.iter())
-                    .map(|(d, v)| d * v)
-                    .sum::<Value>()
-                - row.current;
+            source[row_idx] = row.source(&internal, &external);
         };
 
         if has_rcx {

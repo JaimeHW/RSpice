@@ -5220,6 +5220,7 @@ impl Engine {
         let mut new_solution = solution.clone();
         let mut linear_solution = Vec::with_capacity(size);
         let mut correction_rhs = Vec::with_capacity(size);
+        let uses_vbic_correction = Self::requires_vbic_correction_form(&circuit);
         // Newton phase accounting is debug-only. In normal production runs
         // every DiagnosticTimer below avoids the underlying clock query.
         let diagnostic_timing_enabled = log::log_enabled!(log::Level::Debug);
@@ -6710,12 +6711,15 @@ impl Engine {
                 // Xyce's DampedNewton linear system solves for a Newton search
                 // direction on every topology.  NOX, native, and ngspice keep
                 // their established algebra except where an inductor or the
-                // direct Xyce DAE path already requires correction form.
-                let solve_produces_correction = transient_newton_uses_correction_form(
-                    direct_correction_rhs.is_some(),
-                    uses_inductor_correction,
-                    uses_xyce_damped_solver,
-                );
+                // direct Xyce DAE path already requires correction form. VBIC
+                // also requires increments to retain small lead currents through
+                // its large series conductances.
+                let solve_produces_correction = uses_vbic_correction
+                    || transient_newton_uses_correction_form(
+                        direct_correction_rhs.is_some(),
+                        uses_inductor_correction,
+                        uses_xyce_damped_solver,
+                    );
                 let mut solved_weighted_correction_norm = None;
                 let solve_result: Result<(), rspice_matrix::SolverError> = if let Some(direct_rhs) =
                     direct_correction_rhs

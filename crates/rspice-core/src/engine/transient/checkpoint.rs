@@ -1183,7 +1183,8 @@ pub(crate) fn simulation_checkpoint_identity(config: &SimulationConfig) -> Strin
     // authored CTH, and scopes the limited-evaluation cache to one matrix load.
     // v31 maps VBIC saturation currents from nominal emission coefficients.
     // v32 implements VBIC 1.3 PNJMAXI and per-junction expLinA transitions.
-    hasher.update(b"rspice-transient-resolved-config-v32\0");
+    // v33 retains VBIC 1.3's floored electrical resistance branches.
+    hasher.update(b"rspice-transient-resolved-config-v33\0");
     hash_field(&mut hasher, "temperature", config.temperature.to_bits());
     hash_field(&mut hasher, "ramptime", config.ramptime.to_bits());
     hash_field(&mut hasher, "digital_delay_type", config.digital_delay_type);

@@ -355,10 +355,13 @@ impl Engine {
 
             let denominator_floors = Self::dc_solve_denominator_floors(circuit, rhs.len());
             let mut next_solution = Vec::with_capacity(rhs.len());
+            let mut correction_rhs = Vec::new();
             if Self::solve_dc_linearization(
                 probe,
                 rhs,
                 denominator_floors.as_deref(),
+                Self::requires_vbic_correction_form(circuit).then_some(solution),
+                &mut correction_rhs,
                 &mut next_solution,
             )
             .is_err()
@@ -398,10 +401,13 @@ impl Engine {
 
         let denominator_floors = Self::dc_solve_denominator_floors(circuit, rhs.len());
         let mut next_solution = Vec::with_capacity(rhs.len());
+        let mut correction_rhs = Vec::new();
         if Self::solve_dc_linearization(
             probe,
             rhs,
             denominator_floors.as_deref(),
+            Self::requires_vbic_correction_form(circuit).then_some(solution),
+            &mut correction_rhs,
             &mut next_solution,
         )
         .is_err()

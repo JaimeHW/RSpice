@@ -313,13 +313,19 @@ fn vbic13_intrinsic_avalanche_uses_delayed_forward_transport() {
 }
 
 #[test]
-fn vbic_collapsed_parasitic_base_preserves_its_junction_admittance() {
-    // RBP=0 joins BP to CX; it must retain both the BEP diode and charge.
+fn vbic_zero_parasitic_resistance_preserves_its_junction_admittance() {
+    // Older VBIC collapses RBP=0. VBIC 1.3 retains RBX, RBP, and RCX
+    // at 1mOhm each in series with the BEP diode and charge.
     let vt = 1.380_662e-23 * 300.15 / 1.602_189e-19;
     let conductance = 1e-15 * (0.2_f64 / vt).exp() / vt;
     let capacitance = 1e-8 / (1.0_f64 - 0.2 / 0.75).powf(0.33);
     let expected = Complex64::new(conductance, std::f64::consts::TAU * 1e3 * capacitance);
     for level in [4, 11, 12] {
+        let expected = if level >= 11 {
+            expected / (1.0 + 3e-3 * expected)
+        } else {
+            expected
+        };
         for (kind, polarity) in [("NPN", 1.0), ("PNP", -1.0)] {
             let substrate = if level == 11 { "" } else { " 0" };
             let point = solve_one(&format!(
@@ -336,11 +342,12 @@ fn vbic_collapsed_parasitic_base_preserves_its_junction_admittance() {
                 -expected
             );
             assert!((collector - expected).norm() < 1e-8 * expected.norm());
-            assert!(
-                !point
+            assert_eq!(
+                point
                     .node_names
                     .iter()
-                    .any(|name| name.eq_ignore_ascii_case("Q1.__bp.internal"))
+                    .any(|name| name.eq_ignore_ascii_case("Q1.__bp.internal")),
+                level >= 11,
             );
         }
     }
@@ -375,9 +382,19 @@ fn vbic13_extrinsic_avalanche_thermal_derivative_matches_xyce710() {
 
 #[test]
 fn vbic13_maxexp_controls_forward_diffusion_capacitance() {
-    // With unit base charge and VTF=0, Qbe = TF*(1+2*expLin(0))*If.
-    // Driving the base directly exposes its differential capacitance.
+    // With constant base charge and VTF=0, Qbe = TF*(1+2*expLin(0))*If/qb.
+    // Include the 1mOhm emitter and two base resistance floors in the
+    // operating bias and small-signal degeneration.
     let vt = 1.380_662e-23 * 300.15 / 1.602_189e-19;
+    let qb = 0.5 * (((1.0_f64 - 1e-4).powi(2) + 1e-8).sqrt() + 1.0 - 1e-4) + 1e-4;
+    let mut vbe = 0.7_f64;
+    for _ in 0..4 {
+        vbe = 0.7 - 1e-3 * 1e-16 * (vbe / vt).exp() / qb;
+    }
+    let gm = 1e-16 * (vbe / vt).exp() / (vt * qb);
+    let tf = 1e-9 * (1.0 + 2.0 * 0.1 * (1.0 - 0.1_f64.ln()));
+    let yq = Complex64::new(0.0, std::f64::consts::TAU * 1e3 * gm * tf);
+    let expected = -yq / (1.0 + 1e-3 * gm + 1e-3 * (2.0 + 1.0 / qb) * yq);
     for level in [11, 12] {
         for (kind, polarity) in [("NPN", 1.0), ("PNP", -1.0)] {
             let substrate = if level == 12 { " 0" } else { "" };
@@ -387,10 +404,7 @@ fn vbic13_maxexp_controls_forward_diffusion_capacitance() {
                 polarity * 1.8,
                 polarity * 0.7,
             ));
-            let gm = 1e-16 * (0.7_f64 / vt).exp() / vt;
-            let tf = 1e-9 * (1.0 + 2.0 * 0.1 * (1.0 - 0.1_f64.ln()));
-            let expected = -std::f64::consts::TAU * 1e3 * gm * tf;
-            assert!((branch_current(&point, "vb").im - expected).abs() < 1e-8 * expected.abs());
+            assert!((branch_current(&point, "vb").im - expected.im).abs() < 1e-8 * expected.norm());
         }
     }
 }

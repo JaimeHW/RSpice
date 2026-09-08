@@ -8,6 +8,39 @@ import rspice
 
 class TestDcOp:
     @pytest.mark.parametrize("level,kind,p", [(11, "NPN", 1), (12, "PNP", -1)])
+    def test_vbic13_resistance_floor_preserves_small_currents(self, level, kind, p):
+        substrate = " 0" if level == 12 else ""
+        netlist = rspice.Netlist.parse_spice(
+            f"""* VBIC resistance floor current precision
+Vc c 0 {1.8*p}
+Vb b 0 SIN({0.65*p} {0.04*p} 50Meg)
+Vth th 0 SIN(20 5 50Meg)
+Q1 c b 0{substrate} th vm SW_ET=1 M=3 TRISE=20
+.model vm {kind}(LEVEL={level} IS=1e-16 NF=1.1 NR=1.2 ISRR=0.7 TNF=0.001 PNJMAXI=1n XISR=1.8 DEAR=0.1 IBEI=1e-18 IBCI=1e-18 IBEIP=0 ISP=0 RCX=0 RCI=0 RBX=0 RBI=0 RE=0 RBP=0 RS=0 GMIN=0 TNOM=27 RTH=1000 CTH=1p TD=1n TF=1n TR=2n)
+.temp 27
+.options gmin=0
+.options reltol=1e-8 abstol=1e-14
+.end
+"""
+        )
+        engine = rspice.Engine(rspice.SimulationConfig(
+            integration_method=rspice.IntegrationMethod.GEAR2,
+            convergence=rspice.ConvergenceConfig(gmin_target=0)
+        ))
+        result = engine.run_dc_op(netlist)
+        # Independently solved with 70-digit Decimal arithmetic and Xyce 7.10.
+        for branch, current in [("Vc", -7.0452201493508116e-8), ("Vb", -8.783310826230572e-8)]:
+            assert result.branch_current(branch) == pytest.approx(p*current, rel=1e-7, abs=0)
+        transient = engine.run_tran(netlist, stop_time=2e-8, max_step=2e-12)
+        assert transient.branch_current_waveform("Vc")[0] == pytest.approx(
+            -p*7.0452201493508116e-8, rel=1e-7, abs=0
+        )
+        # Xyce Gear2, also checked with the reference maximum step halved.
+        assert transient.branch_current_waveform("Vb")[-1] == pytest.approx(
+            -p*9.760116458338403e-8, rel=1e-5, abs=0
+        )
+
+    @pytest.mark.parametrize("level,kind,p", [(11, "NPN", 1), (12, "PNP", -1)])
     def test_vbic13_pnjmaxi_global_option_matches_xyce(self, engine, level, kind, p):
         substrate = " 0" if level == 12 else ""
         netlist = rspice.Netlist.parse_spice(
