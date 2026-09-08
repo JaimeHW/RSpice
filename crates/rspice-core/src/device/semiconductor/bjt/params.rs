@@ -742,7 +742,7 @@ impl Bjt {
     /// thermal terminal.
     pub fn set_vbic_external_thermal_node(&mut self, thermal: NodeId) {
         self.node_rth = thermal;
-        self.vbic_external_thermal_node = thermal != 0;
+        self.vbic_external_thermal_node = true;
         self.rth = self.rth_nominal.max(0.0);
         self.cth = self.thermal_capacitance();
     }
@@ -768,6 +768,12 @@ impl Bjt {
             && params
                 .get("LEVEL")
                 .is_some_and(|level| (*level - 11.0).abs() <= 1e-9);
+        self.vbic_13 = self.charge_model == BjtChargeModel::Vbic
+            && params.get("LEVEL").is_some_and(|level| {
+                [11.0, 12.0]
+                    .iter()
+                    .any(|expected| (*level - expected).abs() <= 1e-9)
+            });
         if self.vbic_three_terminal {
             self.node_substrate = 0;
         }
@@ -1638,7 +1644,8 @@ impl Bjt {
     /// - `IC_VBE` / `IC_VCE`: the `IC=` vector components, read only by the
     ///   `UIC` transient startup
     /// - `TEMP`: absolute device temperature in Celsius
-    /// - `DTEMP`: temperature delta in Celsius
+    /// - `DTEMP`: temperature delta in Celsius (VBIC also accepts TRISE/DTA)
+    /// - VBIC `SW_ET` / `SW_NOISE`: heat-generation / noise switches
     pub fn with_instance_params(mut self, params: &[(String, Value)]) -> Self {
         for (name, value) in params {
             if !value.is_finite() {
@@ -1679,8 +1686,18 @@ impl Bjt {
                 continue;
             }
 
-            if name.eq_ignore_ascii_case("DTEMP") {
+            if name.eq_ignore_ascii_case("DTEMP")
+                || (self.uses_vbic_dynamic_charges()
+                    && (name.eq_ignore_ascii_case("TRISE") || name.eq_ignore_ascii_case("DTA")))
+            {
                 self.instance_dtemp = *value;
+            }
+            if self.uses_vbic_dynamic_charges() {
+                if name.eq_ignore_ascii_case("SW_ET") {
+                    self.vbic_heat_generation = *value != 0.0;
+                } else if name.eq_ignore_ascii_case("SW_NOISE") {
+                    self.vbic_noise_enabled = *value != 0.0;
+                }
             }
         }
 
@@ -1764,6 +1781,7 @@ mod tests {
             ("RBP", 0.0),
         ]);
         collapsed.set_temperature(350.0);
+        collapsed.set_vbic_external_thermal_node(0);
         collapsed
             .assign_vbic_internal_nodes(|name| panic!("zero resistance must not allocate {name}"));
         assert_eq!(collapsed.node_bi, collapsed.node_base);

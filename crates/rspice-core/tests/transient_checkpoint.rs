@@ -299,7 +299,12 @@ fn promoted_vbic_thermal_and_excess_phase_checkpoints_resume_every_state_exactly
             (SpiceDialect::Xyce, 12),
             (SpiceDialect::Xyce, 11),
         ] {
-            let deck = deck.replace("LEVEL=4", &format!("LEVEL={level}"));
+            let mut deck = deck.replace("LEVEL=4", &format!("LEVEL={level}"));
+            if level == 11 {
+                // Leave the optional thermal pin unconnected to exercise the
+                // internal thermal state instead of prescribing zero rise.
+                deck = deck.replace("Q1 out base emitter 0 active", "Q1 out base emitter active");
+            }
             for method in [
                 IntegrationMethod::BackwardEuler,
                 IntegrationMethod::Trapezoidal,

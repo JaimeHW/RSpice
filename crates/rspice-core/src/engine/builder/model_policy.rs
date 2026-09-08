@@ -715,6 +715,39 @@ pub(super) fn validate_bjt_model_level(
     Ok(())
 }
 
+pub(super) fn validate_bjt_instance_controls(
+    element_name: &str,
+    vbic: bool,
+    params: &[(String, f64)],
+) -> Result<(), SimulationError> {
+    let mut temperature_offset = false;
+    for (name, value) in params {
+        let switch = name.eq_ignore_ascii_case("SW_ET") || name.eq_ignore_ascii_case("SW_NOISE");
+        let vbic_offset = name.eq_ignore_ascii_case("TRISE") || name.eq_ignore_ascii_case("DTA");
+        if (switch || vbic_offset)
+            && (!vbic || !value.is_finite() || (switch && *value != 0.0 && *value != 1.0))
+        {
+            return Err(SimulationError::Circuit(format!(
+                "BJT '{element_name}': {name}={value} requires a native VBIC model and {}",
+                if switch {
+                    "a binary value (0 or 1)"
+                } else {
+                    "a finite temperature offset"
+                }
+            )));
+        }
+        if vbic && (vbic_offset || name.eq_ignore_ascii_case("DTEMP")) {
+            if temperature_offset {
+                return Err(SimulationError::Circuit(format!(
+                    "BJT '{element_name}': specify only one of the temperature-offset aliases TRISE, DTEMP, DTA"
+                )));
+            }
+            temperature_offset = true;
+        }
+    }
+    Ok(())
+}
+
 fn validate_bjt_model_alias_groups(
     element_name: &str,
     model: &str,

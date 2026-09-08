@@ -624,6 +624,11 @@ pub struct Bjt {
     /// Xyce LEVEL=11 omits the electrical substrate network; its optional
     /// fourth terminal is thermal. Other native VBIC levels retain four terminals.
     vbic_three_terminal: bool,
+    /// Native Xyce VBIC 1.3 variants (LEVEL=11/12) keep a thermal equation
+    /// even with RTH=0 or SW_ET=0; SW_ET controls only generated heat.
+    vbic_13: bool,
+    vbic_heat_generation: bool,
+    vbic_noise_enabled: bool,
 
     // Node connections
     pub node_collector: NodeId,
@@ -1759,6 +1764,9 @@ impl Bjt {
             substrate_topology: BjtSubstrateTopology::default_for_type(bjt_type),
             charge_model: BjtChargeModel::LegacyGummelPoon,
             vbic_three_terminal: false,
+            vbic_13: false,
+            vbic_heat_generation: true,
+            vbic_noise_enabled: true,
             node_collector: collector,
             node_base: base,
             node_emitter: emitter,
@@ -2134,12 +2142,13 @@ impl Bjt {
 
     #[inline]
     fn self_heating_enabled(&self) -> bool {
+        // This is structural thermal participation, including an externally
+        // prescribed temperature. SW_ET must not remove the thermal F/Q rows.
         self.charge_model == BjtChargeModel::Vbic
-            && self.rth_nominal > 0.0
-            // The shipped ngspice VBIC regression decks include `RTH` on several
-            // level-4 models whose reference outputs match the non-self-heated
-            // solution unless `SELFT` is explicitly enabled.
-            && (self.vbic_external_thermal_node || (self.selft_given && self.selft >= 0.5))
+            && (self.vbic_13
+                || (self.rth_nominal > 0.0
+                    && (self.vbic_external_thermal_node
+                        || (self.selft_given && self.selft >= 0.5))))
     }
 
     #[inline]
@@ -2147,7 +2156,9 @@ impl Bjt {
         if !self.self_heating_enabled() {
             return 0.0;
         }
-        self.instance_scale() / self.rth_nominal.max(1e-18)
+        // Xyce vbic_1p3.va retains a 1 mK/W thermal resistance floor.
+        let minimum = if self.vbic_13 { 1e-3 } else { 1e-18 };
+        self.instance_scale() / self.rth_nominal.max(minimum)
     }
 
     #[inline]

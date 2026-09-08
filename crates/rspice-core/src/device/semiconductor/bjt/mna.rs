@@ -25,6 +25,8 @@ use super::*;
 /// with its injection node pair on the internal topology.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct VbicNoiseOperatingModel {
+    /// VBIC 1.3 evaluates thermal noise at the local operating temperature.
+    pub absolute_temperature: Option<Value>,
     /// `(mechanism, node+, node−, conductance)` for RCX/RCI/RBX/RBI/RE/RBP.
     pub thermal: [(&'static str, NodeId, NodeId, Value); 6],
     /// `(mechanism, node+, node-, branch current)` for IC/IBE/IBEX/IBEP.
@@ -38,6 +40,10 @@ pub(crate) struct VbicNoiseOperatingModel {
 impl Bjt {
     pub(crate) fn uses_three_terminal_vbic(&self) -> bool {
         self.vbic_three_terminal
+    }
+
+    pub(crate) fn noise_enabled(&self) -> bool {
+        !self.uses_vbic_dynamic_charges() || self.vbic_noise_enabled
     }
 
     /// Matrix-node incidence of each structurally present electrical VBIC charge.
@@ -386,6 +392,9 @@ impl Bjt {
         let eval = self.mna_eval?;
         let (_, g_rci) = self.irci_branch_with_self_conductance(self.vcx, self.vci, self.vbi);
         Some(VbicNoiseOperatingModel {
+            absolute_temperature: self
+                .vbic_13
+                .then(|| (self.requested_temperature() + self.vrth).max(1.0)),
             thermal: [
                 (
                     "RCX",
@@ -492,7 +501,7 @@ impl Bjt {
             self.node_substrate
         };
         self.node_rth = if self.self_heating_enabled() {
-            if self.vbic_external_thermal_node && self.node_rth != 0 {
+            if self.vbic_external_thermal_node {
                 self.node_rth
             } else {
                 alloc("rth")
@@ -1116,6 +1125,35 @@ mod tests {
     }
 
     #[test]
+    fn vbic13_noise_uses_the_prescribed_temperature_even_with_heat_generation_off() {
+        let params = [("LEVEL", 11.0), ("RCX", 10.0), ("RTH", 100.0)]
+            .map(|(name, value)| (name.to_owned(), value))
+            .into_iter()
+            .collect();
+        let mut bjt = Bjt::new_npn("q".into(), 1, 2, 0)
+            .with_params(&params)
+            .with_instance_params(&[("SW_ET".to_string(), 0.0), ("TRISE".to_string(), 5.0)]);
+        bjt.set_vbic_external_thermal_node(3);
+        let mut next = 4;
+        bjt.assign_vbic_internal_nodes(|_| {
+            let node = next;
+            next += 1;
+            node
+        });
+        let mut v = vec![0.0; next - 1];
+        v[2] = 20.0;
+        bjt.update_vbic_mna_static_probe(&v);
+        let noise = bjt.vbic_noise_operating_model().unwrap();
+        assert_eq!(noise.absolute_temperature, Some(325.15));
+        assert!(
+            noise
+                .thermal
+                .iter()
+                .any(|(_, _, _, conductance)| *conductance > 0.0)
+        );
+    }
+
+    #[test]
     fn three_terminal_vbic_retains_parasitic_base_transport_and_diffusion_charge() {
         let params = std::collections::HashMap::from([
             ("LEVEL".to_string(), 11.0),
@@ -1159,7 +1197,7 @@ mod tests {
     #[test]
     fn external_vbic_thermal_terminal_enables_rth_without_selft() {
         let params = std::collections::HashMap::from([
-            ("LEVEL".to_string(), 11.0),
+            ("LEVEL".to_string(), 4.0),
             ("RTH".to_string(), 100.0),
         ]);
         let mut bjt = Bjt::new_npn("q1".to_string(), 1, 2, 3).with_params(&params);

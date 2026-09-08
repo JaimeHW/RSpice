@@ -196,7 +196,11 @@ impl Bjt {
         &self,
         reduction: &BjtDynamicReduction,
     ) -> BjtCurrentBranch {
-        if !self.uses_vbic_dynamic_charges() || self.td <= 0.0 || !self.self_heating_enabled() {
+        if !self.uses_vbic_dynamic_charges()
+            || self.td <= 0.0
+            || !self.self_heating_enabled()
+            || !self.vbic_heat_generation
+        {
             return BjtCurrentBranch::default();
         }
 
@@ -1009,6 +1013,41 @@ impl Bjt {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn vbic_heat_switch_preserves_thermal_storage_and_disables_delayed_power() {
+        let params = [
+            ("LEVEL", 11.0),
+            ("RTH", 100.0),
+            ("CTH", 1e-12),
+            ("TD", 2e-11),
+        ]
+        .map(|(name, value)| (name.to_owned(), value))
+        .into_iter()
+        .collect();
+        let active = Bjt::new_npn("q".into(), 1, 2, 3).with_params(&params);
+        let quiet = active
+            .clone()
+            .with_instance_params(&[("SW_ET".to_string(), 0.0)]);
+        let mut reduction = BjtDynamicReduction::default();
+        reduction.internal_voltages[IDX_VCI] = 1.2;
+        reduction.internal_voltages[IDX_VXF2] = 2e-4;
+        reduction.vbic_transport.itzf = 1e-4;
+        let delayed_power = active.vbic_delay_static_thermal_branch(&reduction);
+        assert!((delayed_power.current + 1.2e-4).abs() < 1e-18);
+        assert!(
+            !quiet
+                .vbic_delay_static_thermal_branch(&reduction)
+                .is_active()
+        );
+        assert_eq!(quiet.thermal_sink_branch(20.0).current, 0.2);
+        assert_eq!(quiet.thermal_capacitance(), 1e-12);
+        let delayed_current = quiet.vbic_delay_static_branches(&reduction);
+        assert_eq!(
+            delayed_current[0].current,
+            active.vbic_delay_static_branches(&reduction)[0].current
+        );
+    }
 
     #[test]
     fn legacy_overlap_charge_uses_physical_terminal_polarity() {

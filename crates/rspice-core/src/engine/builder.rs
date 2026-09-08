@@ -5936,6 +5936,11 @@ impl Engine {
                         )));
                     }
 
+                    validate_bjt_instance_controls(
+                        &element.name,
+                        bjt.uses_vbic_dynamic_charges(),
+                        instance_params,
+                    )?;
                     bjt = bjt.with_instance_params(instance_params);
                     bjt.set_xyce_compatibility(self.config.spice_dialect == SpiceDialect::Xyce);
                     bjt.set_voltage_limiting_enabled(self.config.device_voltage_limiting);
@@ -5962,7 +5967,9 @@ impl Engine {
                         fifth_terminal
                     };
                     bjt.set_substrate_node(substrate);
-                    if bjt.uses_vbic_dynamic_charges() && external_thermal != 0 {
+                    let thermal_pin_present =
+                        element.nodes.len() >= if three_terminal_vbic { 4 } else { 5 };
+                    if bjt.uses_vbic_dynamic_charges() && thermal_pin_present {
                         bjt.set_vbic_external_thermal_node(external_thermal);
                     }
 

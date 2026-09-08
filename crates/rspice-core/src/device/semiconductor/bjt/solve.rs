@@ -529,7 +529,7 @@ impl Bjt {
         external: [Value; EXTERNAL_DIM],
         internal: [Value; INTERNAL_DIM],
     ) -> BranchLinearization {
-        if !self.self_heating_enabled() {
+        if !self.self_heating_enabled() || !self.vbic_heat_generation {
             return BranchLinearization::default();
         }
 
