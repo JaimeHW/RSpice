@@ -2276,3 +2276,40 @@ fn the_authorized_run_receipt_seals_the_decks_hierarchy_map() {
         "the receipt seals the deck's own map rather than a second derivation"
     );
 }
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn reviewed_spectre_header_survives_path_based_dependency_expansion() {
+    let directory = fixture_dir("reviewed-spectre-header");
+    let source = "simulator lang=spice\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n";
+    let profile = crate::state::NetlistExecutionProfile::SpectreSpiceV1;
+    for extension in ["cir", "scs"] {
+        let path = directory.join(format!("export.{extension}"));
+        fs::write(&path, source).unwrap();
+        let adapted = profile.adapt_source(source).unwrap();
+        let parsed = rspice_core::Netlist::parse_with_path(&adapted, &path).unwrap();
+        profile.validate_parsed_netlist(&parsed).unwrap();
+        let mut state = manual_deck_state(source);
+        assert!(apply_imported_netlist(
+            &mut state,
+            source.to_owned(),
+            Some(path),
+            "export"
+        ));
+        let descriptor = state.workspace.netlist_descriptor.as_mut().unwrap();
+        descriptor.imported_dialect = Some(crate::state::NetlistSourceDialect::Spectre);
+        descriptor.execution_profile = Some(profile);
+        descriptor.compatibility_reviewed = true;
+        let mut controller = SimulationController::new();
+        controller.validate_manual_deck_document(&state).unwrap();
+        let dispatch = controller
+            .consume_snapshot_for_dispatch(&mut state)
+            .unwrap();
+        assert_eq!(dispatch.manual_source(), Some(source));
+        let parsed = rspice_core::Netlist::parse(dispatch.executable_netlist()).unwrap();
+        assert_eq!(parsed.elements.len(), 2);
+        assert_eq!(parsed.analyses.len(), 1);
+        assert_eq!(parsed.options.spice_dialect, Some(profile.spice_dialect()));
+    }
+    fs::remove_dir_all(directory).unwrap();
+}

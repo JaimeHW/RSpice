@@ -50,7 +50,7 @@ pub(super) fn bind_execution_profile(
     let Some(profile) = profile else {
         return Ok(source);
     };
-    profile.validate_executable_source(&source)?;
+    profile.validate_resolved_source(&source)?;
     let parsed = Netlist::parse(&source).map_err(|error| error.to_string())?;
     profile.validate_parsed_netlist(&parsed)?;
     if let Some(diagnostic) = parsed.diagnostics.iter().find(|diagnostic| {

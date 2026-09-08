@@ -107,9 +107,6 @@ impl NetlistExecutionProfile {
     }
 
     fn validate_profile_source(self, source: &str, executable: bool) -> Result<(), String> {
-        if self == Self::Spice3NgspiceV2 {
-            return visit_ngspice_v2_source(source, |_, _, _, _| {});
-        }
         let marker_name = match self {
             Self::HspiceDeclarativeV1 => {
                 Some("qualified .OPTION POST or .PROTECT/.UNPROTECT marker")
@@ -141,7 +138,7 @@ impl NetlistExecutionProfile {
                 },
             )?;
         }
-        self.validate_source_commands(source)
+        self.validate_resolved_source(source)
     }
 
     /// Diagnostics that make a reviewed source semantically incomplete.
@@ -184,7 +181,13 @@ impl NetlistExecutionProfile {
         Ok(())
     }
 
-    fn validate_source_commands(self, source: &str) -> Result<(), String> {
+    /// Includes may change the root's presentation receipts. Its provenance
+    /// was checked before expansion; the resolved body must still obey the
+    /// profile's executable-command restrictions.
+    pub(crate) fn validate_resolved_source(self, source: &str) -> Result<(), String> {
+        if self == Self::Spice3NgspiceV2 {
+            return visit_ngspice_v2_source(source, |_, _, _, _| {});
+        }
         if matches!(self, Self::PspiceDeclarativeV1 | Self::PspiceDeclarativeV2)
             && let Some(line) = pspice_file_backed_pwl_line(source)
         {
