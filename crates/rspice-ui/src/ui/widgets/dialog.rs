@@ -752,8 +752,9 @@ impl<'a> Dialog<'a> {
 
     /// Show the dialog and let its body identify the exact control to focus on
     /// first. The returned id is used only when
-    /// [`DialogInitialFocus::BodyControl`] is selected and only on the opening
-    /// pass; subsequent renders preserve the user's current focus.
+    /// [`DialogInitialFocus::BodyControl`] is selected, or to confirm the id
+    /// supplied by [`DialogInitialFocus::Control`]. Subsequent renders preserve
+    /// the user's current focus.
     pub fn show_with_initial_body_focus(
         mut self,
         ctx: &Context,

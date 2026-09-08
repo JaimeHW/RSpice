@@ -1205,6 +1205,21 @@ pub fn property_row_input_with_hint(
     hint: &str,
     invalid: bool,
 ) -> Response {
+    property_row_text_edit(
+        ui,
+        label,
+        egui::TextEdit::singleline(value).hint_text(hint),
+        invalid,
+    )
+}
+
+/// Editable property row with caller-owned identity and single-line editor options.
+pub(crate) fn property_row_text_edit(
+    ui: &mut Ui,
+    label: &str,
+    edit: egui::TextEdit<'_>,
+    invalid: bool,
+) -> Response {
     let t = Tokens::get(ui.ctx());
     let width = ui.available_width().max(1.0);
     let (label_column, gap, value_column) = property_row_columns(width);
@@ -1231,13 +1246,10 @@ pub fn property_row_input_with_hint(
             rect.center().y + t.metrics.ctl_h * 0.5,
         ),
     );
-    let mut edit = egui::TextEdit::singleline(value)
+    let mut edit = edit
         .font(egui::TextStyle::Monospace)
         .margin(egui::Margin::symmetric(8, 4))
         .desired_width(value_column);
-    if !hint.is_empty() {
-        edit = edit.hint_text(hint);
-    }
     if invalid {
         edit = edit.text_color(t.color.err);
     }

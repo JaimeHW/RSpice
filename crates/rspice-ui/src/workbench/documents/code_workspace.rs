@@ -61,7 +61,7 @@ pub(crate) use source_files::{
 };
 pub(crate) use source_search::{
     CodeSourceSearchResults, SOURCE_SEARCH_RESULT_LIMIT, commit_source_search_replace,
-    open_active_source_search, open_source_search, source_search_results,
+    open_active_source_search, open_source_search, source_search_query_id, source_search_results,
 };
 pub(crate) use veriloga::{
     SelectedVerilogASource, active_veriloga_file_path, commit_veriloga_compile_dialog,

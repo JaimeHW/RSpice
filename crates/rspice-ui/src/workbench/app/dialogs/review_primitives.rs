@@ -114,13 +114,28 @@ pub(crate) fn input_field(
     error: Option<&str>,
     description: &str,
 ) -> Response {
+    text_edit_field(
+        ui,
+        label,
+        TextEdit::singleline(value).hint_text(hint),
+        error,
+        description,
+    )
+}
+
+/// A compact input whose caller supplies its stable identity and editor options.
+pub(crate) fn text_edit_field(
+    ui: &mut Ui,
+    label: &str,
+    edit: TextEdit<'_>,
+    error: Option<&str>,
+    description: &str,
+) -> Response {
     field_label(ui, label, |ui| {
         let t = Tokens::get(ui.ctx());
         let response = ui.add_sized(
             Vec2::new(ui.available_width(), t.metrics.ctl_h),
-            TextEdit::singleline(value)
-                .font(egui::TextStyle::Monospace)
-                .hint_text(hint)
+            edit.font(egui::TextStyle::Monospace)
                 .margin(egui::Margin::symmetric(8, 4)),
         );
         configure_field_validation(ui, &response, label, error, description);

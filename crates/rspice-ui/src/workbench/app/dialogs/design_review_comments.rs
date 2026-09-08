@@ -168,6 +168,10 @@ pub(crate) fn open_design_review_comments(state: &mut AppState) {
     };
 }
 
+fn reply_id() -> egui::Id {
+    egui::Id::new(("rspice.design-review", "reply"))
+}
+
 impl RSpiceApp {
     pub(in crate::workbench) fn render_design_review_comments_dialog(&mut self, ctx: &Context) {
         if !self.state.dialogs.design_review_comments.open {
@@ -185,6 +189,8 @@ impl RSpiceApp {
             && !self.state.active_view_read_only()
             && !self.state.workbench.safe_mode.project_read_only();
         let selected = selected_review_note(&self.state).cloned();
+        let reply_focus =
+            (write_allowed && stale.is_none() && selected.is_some()).then_some(reply_id());
         let evidence = evidence_candidates(&self.state);
         let primary_enabled = write_allowed
             && stale.is_none()
@@ -207,7 +213,7 @@ impl RSpiceApp {
             .ghost("Close")
             .primary_enabled(primary_enabled)
             .primary_on_enter(false)
-            .initial_focus(DialogInitialFocus::BodyControl)
+            .initial_focus(reply_focus.map_or(DialogInitialFocus::Container, DialogInitialFocus::Control))
             .body_scroll_offset(&mut body_scroll_offset);
         let transaction_error = self
             .state
@@ -242,7 +248,7 @@ impl RSpiceApp {
                 write_allowed && stale.is_none(),
                 &mut self.state.dialogs.design_review_comments,
             );
-            None
+            reply_focus
         });
         self.state.dialogs.design_review_comments.body_scroll_offset = body_scroll_offset;
         self.handle_design_review_action(action);
@@ -790,6 +796,7 @@ fn review_thread_detail(
     ui.add_enabled(
         write_allowed,
         TextEdit::multiline(&mut dialog.reply)
+            .id(reply_id())
             .desired_rows(3)
             .desired_width(f32::INFINITY)
             .hint_text("Add review evidence, mention a teammate, or record a decision\u{2026}"),
@@ -1031,6 +1038,77 @@ mod tests {
             "Confirm model",
         )
         .unwrap()
+    }
+
+    #[test]
+    fn initial_focus_accepts_review_reply_typing() {
+        let ctx = Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.options_mut(|options| options.max_passes = std::num::NonZeroUsize::new(1).unwrap());
+        let mut app = RSpiceApp::test_instance();
+        app.state.schematic.design_notes.push(review_note(1));
+        crate::workbench::commands::vocabulary::Command::ReviewComments.execute(&mut app);
+        let notes = app.state.schematic.design_notes.clone();
+        let _ = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1280.0, 800.0),
+                )),
+                events: vec![egui::Event::Paste("Check the bias point".to_owned())],
+                ..Default::default()
+            },
+            |ui| app.render_frame_dialogs(ui),
+        );
+        assert_eq!(
+            app.state.dialogs.design_review_comments.reply,
+            "Check the bias point"
+        );
+        assert_eq!(app.state.schematic.design_notes, notes);
+    }
+
+    #[test]
+    fn initial_focus_rejects_unavailable_review_reply() {
+        for case in ["read-only", "stale", "empty"] {
+            let ctx = Context::default();
+            crate::ui::Theme::default().apply(&ctx);
+            ctx.options_mut(|options| options.max_passes = std::num::NonZeroUsize::new(1).unwrap());
+            let mut app = RSpiceApp::test_instance();
+            if case != "empty" {
+                app.state.schematic.design_notes.push(review_note(1));
+            }
+            open_design_review_comments(&mut app.state);
+            if case == "read-only" {
+                app.state.workbench.safe_mode.activate(
+                    crate::workbench::state::LocalSafeModeOptions {
+                        open_project_read_only: true,
+                        ..Default::default()
+                    },
+                    "UI focus qualification".to_owned(),
+                );
+            }
+            if case == "stale" {
+                app.state.schematic.design_notes.push(review_note(2));
+            }
+            let notes = app.state.schematic.design_notes.clone();
+            let _ = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1280.0, 800.0),
+                    )),
+                    events: vec![egui::Event::Paste("Must not become a reply".to_owned())],
+                    ..Default::default()
+                },
+                |ui| app.render_frame_dialogs(ui),
+            );
+            assert!(
+                app.state.dialogs.design_review_comments.reply.is_empty(),
+                "{case}"
+            );
+            assert!(!ctx.memory(|memory| memory.has_focus(reply_id())), "{case}");
+            assert_eq!(app.state.schematic.design_notes, notes);
+        }
     }
 
     #[test]

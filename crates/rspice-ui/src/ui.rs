@@ -18,6 +18,7 @@
 pub(crate) mod accessibility;
 pub(crate) mod fonts;
 pub(crate) mod icons;
+pub(crate) mod input;
 pub(crate) mod palette;
 pub(crate) mod plot;
 // Test-only, and at this layer because it depends on nothing above it: a

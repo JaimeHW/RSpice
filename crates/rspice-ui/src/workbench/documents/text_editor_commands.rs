@@ -525,19 +525,25 @@ pub(crate) fn take_source_language_tools_request(ui: &Ui, editor_id: Id) -> bool
 
 /// Consume a bundle-search request from the shared editor command surface or
 /// the conventional desktop shortcut while this editor owns focus.
-pub(crate) fn take_find_in_source_bundle_request(ui: &Ui, editor_id: Id) -> bool {
+pub(crate) fn take_find_in_source_bundle_request(
+    ui: &Ui,
+    editor_id: Id,
+) -> Option<crate::ui::input::InputTransition> {
     let queued = ui.ctx().data_mut(|data| {
         data.remove_temp::<bool>(editor_id.with("find-in-source-bundle"))
             .unwrap_or(false)
     });
-    let shortcut = ui.ctx().memory(|memory| memory.has_focus(editor_id))
-        && ui.ctx().input_mut(|input| {
-            input.consume_shortcut(&KeyboardShortcut::new(
-                Modifiers::COMMAND | Modifiers::SHIFT,
-                Key::H,
-            ))
-        });
-    queued || shortcut
+    if ui.ctx().memory(|memory| memory.has_focus(editor_id))
+        && let Some(input) = ui.ctx().input(|input| {
+            crate::ui::input::InputTransition::after_shortcut(
+                input,
+                KeyboardShortcut::new(Modifiers::COMMAND | Modifiers::SHIFT, Key::H),
+            )
+        })
+    {
+        return Some(input);
+    }
+    queued.then(|| ui.ctx().input(crate::ui::input::InputTransition::remaining))
 }
 
 pub(crate) fn queue_reveal_line(context: &egui::Context, editor_id: Id, line: usize) {

@@ -111,7 +111,7 @@ impl RSpiceApp {
         }
         let palette_input = if resolution.command == Some(ShortcutCommand::CommandPalette) {
             ctx.input(|input| {
-                ShortcutInputSnapshot::partition_after_keys(
+                crate::ui::input::InputTransition::after_keys(
                     input,
                     &resolution.consume[..resolution.deferred_start],
                 )
@@ -124,9 +124,9 @@ impl RSpiceApp {
         if consumed && let Some(command) = resolution.command {
             self.execute_shortcut_command(command);
             if self.state.dialogs.command_palette.open
-                && let Some((before, following)) = palette_input
+                && let Some(input) = palette_input
             {
-                super::command_palette::route_opening_input(ctx, before, following);
+                super::command_palette::route_opening_input(ctx, input);
                 self.state.shortcut_resolver.reset();
             }
         }

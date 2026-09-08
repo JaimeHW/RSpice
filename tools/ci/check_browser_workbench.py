@@ -30,9 +30,7 @@ def create_and_resolve_review(browser):
     browser.click("Arm text tool", "button")
     browser.click("Schematic canvas", "canvas")
     browser.keys("\ue00c")
-    choose_command(browser, "Review comments")
-    browser.click("", "multilineTextInput")
-    browser.keys(REVIEW_BODY)
+    choose_command(browser, "Review comments", keyboard=((REVIEW_BODY, ()),))
     posted_start = time.time_ns() // 1_000_000
     browser.click("Publish review update", "button")
     browser.capture("review-posted")
@@ -137,7 +135,7 @@ def verify_recovery_copy(project, recovered, filename):
         raise AssertionError("Recovery changed content beyond the new identity and destination")
 
 
-def choose_command(browser, label, *, input_burst=False):
+def choose_command(browser, label, *, input_burst=False, keyboard=()):
     if input_burst:
         browser.key_sequence((("k", ("\ue009",)), ("wrong", ()), ("a", ("\ue009",)), (label, ())))
         snapshot = browser.capture("palette-input-burst")
@@ -154,7 +152,25 @@ def choose_command(browser, label, *, input_burst=False):
         browser.keys(label)
     wait_for(lambda: any(control["label"] == label and control["role"] == "listBoxOption"
                         for control in controls(browser.snapshot())), f"the {label!r} command")
-    browser.click(label, "listBoxOption")
+    browser.click(label, "listBoxOption", keyboard=keyboard)
+
+
+def configuration_opening_input(browser):
+    query, name = "Browser configuration filter", "Browser configuration draft"
+    choose_command(browser, "Configuration sets", keyboard=((query, ()),))
+
+    def expect_value(snapshot, value, label=None):
+        fields = [control for control in controls(snapshot) if control["role"] == "textInput"
+                  and control["value"] == value and (label is None or control["label"] == label)]
+        if len(fields) != 1:
+            raise AssertionError(f"Configuration opening input was lost or misdirected: {value!r}")
+
+    expect_value(browser.capture("configuration-filter"), query)
+    browser.click("New configuration", "button", keyboard=(("a", ("\ue009",)), (name, ())))
+    expect_value(browser.capture("configuration-name"), name, "Name")
+    browser.click("Cancel", "button")
+    expect_value(browser.capture("configuration-cancelled"), query)
+    browser.click("Close", "button")
 
 
 def run(browser):
@@ -173,6 +189,7 @@ def run(browser):
     wait_for(ready, "the real workbench and simulation worker", 120)
     browser.capture("startup")
     browser.click("Schematic canvas", "canvas")
+    configuration_opening_input(browser)
     review_intervals = create_and_resolve_review(browser)
     choose_command(browser, "Open recovery center")
     wait_for(lambda: any(control["label"] == "Checkpoint now…"
@@ -209,6 +226,7 @@ def run(browser):
                         for control in controls(browser.snapshot())), "revision history")
     browser.capture("revision-history")
     return {"startup": "passed", "checkpoint_export": "passed", "revision_history": "opened",
+            "configuration_opening_input": "passed",
             "review_post_and_resolution": "passed", "review_intervals_ms": review_intervals,
             "checkpoint": manifest, "export": exported.name, "project_version": project["version"]}
 
