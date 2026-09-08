@@ -471,9 +471,8 @@ impl AnalysisSpec {
                 if *z0 <= 0.0 {
                     return Err("S-parameter z0 must be > 0".to_string());
                 }
-                if ports.len() < 2 {
-                    return Err("S-parameter requires at least two ports".to_string());
-                }
+                // An empty list uses the deck's authored ports; the engine
+                // validates the final count after hierarchy and parameters resolve.
                 for (idx, port) in ports.iter().enumerate() {
                     if port.node_pos.trim().is_empty() {
                         return Err(format!(

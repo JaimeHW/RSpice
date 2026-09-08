@@ -4624,7 +4624,7 @@ impl Engine {
         netlist: &Netlist,
         abort: &dyn AbortSignal,
     ) -> Result<CircuitData, SimulationError> {
-        self.build_circuit_with_rf_ports(netlist, abort)
+        self.build_circuit_with_rf_ports(netlist, &[], abort)
             .map(|(circuit, _)| circuit)
     }
 
@@ -4632,6 +4632,7 @@ impl Engine {
     pub(super) fn build_circuit_with_rf_ports(
         &self,
         netlist: &Netlist,
+        default_ports: &[crate::analysis::s_param::Port],
         abort: &dyn AbortSignal,
     ) -> Result<
         (
@@ -4736,6 +4737,7 @@ impl Engine {
         let rf_ports = crate::analysis::s_param::materialize_rf_ports(
             netlist,
             &mut flat_elements,
+            default_ports,
             self.config.resource_limits.max_flattened_elements,
             abort,
         )

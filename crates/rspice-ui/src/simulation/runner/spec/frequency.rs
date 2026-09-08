@@ -156,6 +156,12 @@ fn run_sparameter(
             abort,
         )
     })?;
+    let mut frequencies = Vec::with_capacity(data.data.len());
+    for point in &data.data {
+        super::ensure_not_aborted(abort)?;
+        frequencies.push(point.frequency);
+    }
+    let reference_impedances_ohm = data.ports.iter().map(|port| port.z0).collect();
     let mut waveforms = HashMap::new();
     for row in 0..data.num_ports {
         super::ensure_not_aborted(abort)?;
@@ -166,16 +172,17 @@ fn run_sparameter(
             } else {
                 format!("S{}_{}", row + 1, col + 1)
             };
-            let trace = &data.s[row][col];
-            let waveform = complex_waveform(name.clone(), &data.frequencies, trace, abort)?;
+            let trace = data.data.iter().map(|point| point.get(row + 1, col + 1));
+            let waveform = complex_waveform(name.clone(), &frequencies, trace, abort)?;
             waveforms.insert(name, waveform);
         }
     }
 
     Ok(SimulationResult::Ac {
-        frequencies: data.frequencies,
+        frequencies,
         waveforms,
         measurements: Vec::new(),
+        reference_impedances_ohm: Some(reference_impedances_ohm),
     })
 }
 
@@ -310,6 +317,7 @@ fn run_pac(
         .into_iter()
         .map(|trace| (trace.name, trace.unit, trace.values));
     Ok(SimulationResult::Ac {
+        reference_impedances_ohm: None,
         waveforms: pac_traces_to_complex_waveforms(&data.frequencies, traces, abort)?,
         frequencies: data.frequencies,
         measurements: Vec::new(),
@@ -358,7 +366,7 @@ fn run_pxf(
     let transfer = complex_waveform(
         transfer_name.clone(),
         &data.offset_frequencies,
-        &data.transfer,
+        data.transfer.iter().copied(),
         abort,
     )?;
     waveforms.insert(transfer_name, transfer);
@@ -375,6 +383,7 @@ fn run_pxf(
     // The document's own abscissa is the swept baseband offset, which is what
     // every curve above is stated against and what `AnalysisType::Pxf` names.
     Ok(SimulationResult::Ac {
+        reference_impedances_ohm: None,
         frequencies: data.offset_frequencies,
         waveforms,
         measurements: Vec::new(),
@@ -508,6 +517,7 @@ fn run_stb(
     }
 
     Ok(SimulationResult::Ac {
+        reference_impedances_ohm: None,
         frequencies: data.frequencies,
         measurements: stb_margin_measurements(&data.margins),
         waveforms,
@@ -856,7 +866,7 @@ fn insert_group_delay(
 fn complex_waveform(
     name: String,
     frequencies: &[f64],
-    values: &[num_complex::Complex64],
+    values: impl ExactSizeIterator<Item = num_complex::Complex64>,
     abort: &dyn AbortSignal,
 ) -> Result<WaveformData, SimulationError> {
     let mut real = Vec::with_capacity(values.len());

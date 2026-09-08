@@ -257,9 +257,9 @@ impl WaveformWriter {
             }
         }
 
-        if max_port < 2 {
+        if max_port == 0 {
             return Err(
-                "Touchstone export requires at least a 2-port S-parameter matrix".to_string(),
+                "Touchstone export requires at least a 1-port S-parameter matrix".to_string(),
             );
         }
 

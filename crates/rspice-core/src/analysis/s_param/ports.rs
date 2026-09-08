@@ -142,7 +142,19 @@ pub fn declare_ports_with_abort(
         Err(PortError::NoPortsDeclared) => {}
         Err(error) => return Err(error),
     }
-    let mut names = PortNames::new(netlist, abort)?;
+    let (additions, ports) =
+        configured_port_elements(netlist, &netlist.elements, configured, abort)?;
+    netlist.elements.extend(additions);
+    Ok(ports)
+}
+
+fn configured_port_elements(
+    netlist: &Netlist,
+    elements: &[Element],
+    configured: &[super::Port],
+    abort: &dyn AbortSignal,
+) -> Result<(Vec<Element>, Vec<SParameterPort>), PortError> {
+    let mut names = PortNames::from_elements(netlist, elements, abort)?;
     let ground = netlist.ground_policy();
     let canonical_node = |node: &str| ground.canonical_node(node.trim()).to_ascii_uppercase();
     for (index, port) in configured.iter().enumerate() {
@@ -224,8 +236,7 @@ pub fn declare_ports_with_abort(
     if abort.is_aborted() {
         return Err(PortError::Aborted);
     }
-    netlist.elements.extend(additions);
-    Ok(ports)
+    Ok((additions, ports))
 }
 
 struct PortNames {
@@ -464,12 +475,27 @@ pub fn normalize_ports(
 pub(crate) fn materialize_rf_ports(
     netlist: &Netlist,
     elements: &mut Vec<Element>,
+    default_ports: &[super::Port],
     max_elements: usize,
     abort: &dyn AbortSignal,
 ) -> Result<Vec<MaterializedRfPort>, PortError> {
     let ports = match collect_element_ports(elements, abort) {
         Ok(ports) => ports,
-        Err(PortError::NoPortsDeclared) => return Ok(Vec::new()),
+        Err(PortError::NoPortsDeclared) if default_ports.is_empty() => return Ok(Vec::new()),
+        Err(PortError::NoPortsDeclared) => {
+            ResourceLimitError::ensure(
+                ResourceKind::FlattenedElements,
+                elements
+                    .len()
+                    .saturating_add(default_ports.len().saturating_mul(2)),
+                max_elements,
+            )
+            .map_err(PortError::ResourceLimit)?;
+            let (additions, ports) =
+                configured_port_elements(netlist, elements, default_ports, abort)?;
+            elements.extend(additions);
+            ports
+        }
         Err(error) => return Err(error),
     };
     let additions = ports

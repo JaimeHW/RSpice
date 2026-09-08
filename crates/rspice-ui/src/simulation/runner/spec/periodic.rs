@@ -514,6 +514,7 @@ fn periodic_sparameter_result(
         }
     }
     Ok(SimulationResult::Ac {
+        reference_impedances_ohm: None,
         frequencies: data.frequencies,
         waveforms,
         measurements: Vec::new(),
@@ -712,6 +713,7 @@ fn run_pss_spectrum(
     }
 
     Ok(SimulationResult::Ac {
+        reference_impedances_ohm: None,
         frequencies,
         waveforms,
         measurements: Vec::new(),
@@ -893,6 +895,7 @@ fn run_fourier(
     );
 
     Ok(SimulationResult::Ac {
+        reference_impedances_ohm: None,
         frequencies: data.frequencies,
         waveforms,
         measurements: Vec::new(),
@@ -1026,6 +1029,7 @@ fn run_disto(
     }
 
     Ok(SimulationResult::Ac {
+        reference_impedances_ohm: None,
         frequencies,
         waveforms,
         measurements: Vec::new(),

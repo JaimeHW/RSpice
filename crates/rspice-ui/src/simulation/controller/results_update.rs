@@ -100,6 +100,7 @@ impl SimulationController {
                 frequencies,
                 waveforms,
                 measurements,
+                ..
             } => {
                 self.populate_ac_post_views(state, frequencies, waveforms);
 

@@ -3,20 +3,15 @@
 //! Sweeps frequency and extracts the scattering matrix between the declared
 //! ports, with the port impedances the run configuration sets.
 
-#![allow(clippy::needless_range_loop)]
-
-use super::error::{ensure_not_aborted, poll_periodically};
+use super::error::ensure_not_aborted;
 use super::{
     ServiceRunError, ServiceRunResult, build_engine_config, generate_freq_points_with_abort,
     parse_runner_netlist_with_abort,
 };
-use num_complex::Complex64;
 use rspice_core::Value;
 use rspice_core::abort_signal::AbortSignal;
 use rspice_core::analysis::s_param;
 use rspice_core::engine::Engine;
-#[cfg(test)]
-use rspice_core::netlist::ElementKind;
 use std::path::Path;
 
 /// Sweep type for S-parameter analysis.
@@ -99,23 +94,13 @@ impl SParameterRunConfig {
     }
 }
 
-/// N-port S-parameter analysis output.
-#[derive(Debug, Clone)]
-pub struct SParameterData {
-    pub frequencies: Vec<Value>,
-    /// Number of ports in the solved network.
-    pub num_ports: usize,
-    /// S-parameter matrix traces indexed as [row][col][frequency_index], 0-based.
-    pub s: Vec<Vec<Vec<Complex64>>>,
-}
-
 /// Test-only convenience wrapper without a source path.
 #[cfg(test)]
 pub fn run_sparameter_analysis_with_abort(
     netlist_text: &str,
     config: &SParameterRunConfig,
     abort: &dyn AbortSignal,
-) -> ServiceRunResult<SParameterData> {
+) -> ServiceRunResult<s_param::SParameterResult> {
     run_sparameter_analysis_with_source_path_and_abort(netlist_text, config, None, abort)
 }
 
@@ -126,12 +111,12 @@ pub fn run_sparameter_analysis_with_source_path_and_abort(
     config: &SParameterRunConfig,
     source_path: Option<&Path>,
     abort: &dyn AbortSignal,
-) -> ServiceRunResult<SParameterData> {
+) -> ServiceRunResult<s_param::SParameterResult> {
     ensure_not_aborted(abort)?;
     config.validate().map_err(ServiceRunError::Failure)?;
     ensure_not_aborted(abort)?;
 
-    let parsed_netlist = parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
+    let netlist = parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
 
     let frequencies = generate_freq_points_with_abort(
         config.start_freq,
@@ -141,100 +126,6 @@ pub fn run_sparameter_analysis_with_source_path_and_abort(
         abort,
     )?;
 
-    let mut netlist = parsed_netlist;
-    let ports = resolve_ports(&mut netlist, config, abort)?;
-    let num_ports = ports.len();
-    if num_ports < 2 {
-        return Err(ServiceRunError::Failure(
-            "S-parameter analysis requires at least 2 ports: place RF Port components or name \
-             the port nodes in the analysis setup"
-                .to_string(),
-        ));
-    }
-
-    ensure_not_aborted(abort)?;
-    let engine = Engine::new(build_engine_config(&netlist, None));
-    let run = engine
-        .run_sp_over_grid_with_abort(&netlist, &frequencies, false, abort)
-        .map_err(|error| ServiceRunError::from_core("S-parameter analysis error", error))?;
-    let frequencies = run
-        .scattering
-        .data
-        .iter()
-        .map(|point| point.frequency)
-        .collect::<Vec<_>>();
-    let mut s = vec![vec![Vec::with_capacity(frequencies.len()); num_ports]; num_ports];
-    for (index, point) in run.scattering.data.iter().enumerate() {
-        poll_periodically(abort, index)?;
-        for (row, traces) in s.iter_mut().enumerate() {
-            ensure_not_aborted(abort)?;
-            for (column, trace) in traces.iter_mut().enumerate() {
-                poll_periodically(abort, column)?;
-                trace.push(point.get(row + 1, column + 1));
-            }
-        }
-    }
-
-    ensure_not_aborted(abort)?;
-    if frequencies.is_empty()
-        || frequencies
-            .iter()
-            .any(|frequency| !frequency.is_finite() || *frequency <= 0.0)
-        || frequencies.windows(2).any(|pair| pair[1] <= pair[0])
-        || s.len() != num_ports
-        || s.iter().any(|row| {
-            row.len() != num_ports
-                || row.iter().any(|trace| {
-                    trace.len() != frequencies.len()
-                        || trace
-                            .iter()
-                            .any(|value| !value.re.is_finite() || !value.im.is_finite())
-                })
-        })
-    {
-        return Err(ServiceRunError::Failure(
-            "S-parameter solver returned an invalid frequency grid or matrix payload".to_owned(),
-        ));
-    }
-    Ok(SParameterData {
-        frequencies,
-        num_ports,
-        s,
-    })
-}
-
-/// The ports this run measures, materializing them into the netlist if the deck
-/// does not declare its own.
-///
-/// A design drawn with RF Port components carries its ports in the deck, and
-/// those win: they hold the authored port numbers and reference impedances, and
-/// each is already a generator behind a real Z0. Only a deck that declares
-/// nothing falls back to the configuration's node list, which is how a plain
-/// schematic gets S-parameters without placing anything.
-fn resolve_ports(
-    netlist: &mut rspice_core::Netlist,
-    config: &SParameterRunConfig,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<Vec<s_param::SParameterPort>> {
-    ensure_not_aborted(abort)?;
-    match s_param::collect_ports(netlist) {
-        Ok(declared) => Ok(declared),
-        Err(s_param::PortError::NoPortsDeclared) => inject_configured_ports(netlist, config, abort),
-        Err(error) => Err(ServiceRunError::Failure(error.to_string())),
-    }
-}
-
-/// Add a generator behind a reference impedance at each configured node pair.
-///
-/// The pair is what a port is. An earlier version put a bare ideal source across
-/// the node pair instead, which pins the node to the source value and leaves no
-/// reflection to measure — and would have shorted out the reference impedance of
-/// any port the deck had declared for itself.
-fn inject_configured_ports(
-    netlist: &mut rspice_core::Netlist,
-    config: &SParameterRunConfig,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<Vec<s_param::SParameterPort>> {
     let ports = config
         .ports
         .iter()
@@ -246,10 +137,13 @@ fn inject_configured_ports(
             z0: port.z0.unwrap_or(config.z0),
         })
         .collect::<Vec<_>>();
-    s_param::declare_ports_with_abort(netlist, &ports, abort).map_err(|error| match error {
-        s_param::PortError::Aborted => ServiceRunError::Aborted,
-        other => ServiceRunError::Failure(other.to_string()),
-    })
+    ensure_not_aborted(abort)?;
+    let engine = Engine::new(build_engine_config(&netlist, None));
+    let run = engine
+        .run_sp_over_grid_with_default_ports_and_abort(&netlist, &frequencies, false, &ports, abort)
+        .map_err(|error| ServiceRunError::from_core("S-parameter analysis error", error))?;
+    ensure_not_aborted(abort)?;
+    Ok(run.scattering)
 }
 
 #[cfg(test)]
@@ -334,15 +228,15 @@ endmodule"#,
                 deck.clone()
             };
             let result = run_sparameter_analysis_with_abort(&source, &config, &NoAbort).unwrap();
-            assert_eq!(result.frequencies, [config.start_freq]);
+            assert_eq!(result.data.len(), 1);
+            assert_eq!(result.data[0].frequency, config.start_freq);
             assert_eq!(result.num_ports, 2);
             for row in 0..2 {
                 for column in 0..2 {
-                    let trace = &result.s[row][column];
-                    assert_eq!(trace.len(), 1);
+                    let value = result.data[0].get(row + 1, column + 1);
                     let expected = if row == column { 0.2 } else { 0.8 };
-                    assert!((trace[0].re - expected).abs() < 1e-10);
-                    assert!(trace[0].im.abs() < 1e-10);
+                    assert!((value.re - expected).abs() < 1e-10);
+                    assert!(value.im.abs() < 1e-10);
                 }
             }
         }
@@ -356,38 +250,19 @@ endmodule"#,
     /// there is no reflected wave to measure.
     #[test]
     fn configured_ports_are_injected_behind_their_reference_impedance() {
-        let mut netlist =
-            rspice_core::Netlist::parse("* divider\nR1 IN OUT 50\nR2 OUT 0 50\n.end\n")
-                .expect("deck parses");
-        let ports = inject_configured_ports(&mut netlist, &two_port_config(), &NoAbort)
-            .expect("ports inject");
-
-        assert_eq!(ports.len(), 2);
-        assert_eq!(ports[0].z0, 50.0, "an unset port takes the run's default");
-        assert_eq!(ports[1].z0, 75.0, "a port's own z0 wins");
-        assert_eq!(s_param::collect_ports(&netlist).unwrap(), ports);
-
-        for (index, port) in ports.iter().enumerate() {
-            assert_eq!(port.realization, s_param::PortRealization::Thevenin);
-            let internal = format!("__RSPICE_SP_PORT{}_INT", index + 1);
-            let source = netlist
-                .elements
-                .iter()
-                .find(|element| element.name == port.source_name)
-                .expect("generator present");
-            assert_eq!(
-                source.nodes,
-                vec![internal.clone(), port.node_neg.clone()],
-                "the generator must sit behind the reference impedance"
-            );
-            assert!(
-                netlist.elements.iter().any(|element| matches!(
-                    &element.kind,
-                    ElementKind::Resistor { value, .. } if *value == port.z0
-                ) && element.nodes
-                    == vec![port.node_pos.clone(), internal.clone()]),
-                "the reference impedance must reach the port node"
-            );
+        let result = run_sparameter_analysis_with_abort(
+            "* divider\nR1 IN OUT 50\n.end\n",
+            &two_port_config(),
+            &NoAbort,
+        )
+        .unwrap();
+        assert_eq!(result.ports.len(), 2);
+        assert_eq!(result.ports[0].z0, 50.0);
+        assert_eq!(result.ports[1].z0, 75.0);
+        for point in result.data {
+            assert!((point.s11().re - 75.0 / 175.0).abs() < 1e-12);
+            assert!((point.s22().re - 25.0 / 175.0).abs() < 1e-12);
+            assert!((point.s21().re - 2.0 * (50.0_f64 * 75.0).sqrt() / 175.0).abs() < 1e-12);
         }
     }
 
@@ -395,23 +270,19 @@ endmodule"#,
     /// generator onto a port node would shunt the one already there.
     #[test]
     fn a_deck_with_its_own_ports_is_not_given_injected_ones() {
-        let mut netlist = rspice_core::Netlist::parse(
-            "* p elements\nP1 IN 0 PORT=1 Z0=50 AC 1\nR1 IN OUT 50\nP2 OUT 0 PORT=2 Z0=75\n.end\n",
-        )
-        .expect("deck parses");
-        let before = netlist.elements.len();
-
-        let ports =
-            resolve_ports(&mut netlist, &two_port_config(), &NoAbort).expect("ports resolve");
-
-        assert_eq!(netlist.elements.len(), before, "nothing was injected");
-        assert_eq!(
-            ports
-                .iter()
-                .map(|port| port.source_name.as_str())
-                .collect::<Vec<_>>(),
-            ["P1", "P2"]
-        );
-        assert_eq!(ports[1].z0, 75.0, "the deck's z0 wins over the dialog's");
+        for declaration in [
+            "P1 p 0 PORT=1 Z0=75",
+            "X1 p 0 generator\n.subckt generator a b params: reference=75\nP1 a b portnum=1 z0={reference}\n.ends generator",
+        ] {
+            let deck = format!("* declared single port\n{declaration}\nR1 p 0 100\n.end\n");
+            // The configured planes do not even occur in this circuit.
+            let result =
+                run_sparameter_analysis_with_abort(&deck, &two_port_config(), &NoAbort).unwrap();
+            assert_eq!(result.num_ports, 1);
+            assert_eq!(result.ports[0].z0, 75.0);
+            for point in result.data {
+                assert!((point.s11().re - 1.0 / 7.0).abs() < 1e-12);
+            }
+        }
     }
 }

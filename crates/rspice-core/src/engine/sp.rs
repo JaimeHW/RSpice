@@ -78,6 +78,27 @@ impl Engine {
         do_noise: bool,
         abort: &dyn AbortSignal,
     ) -> Result<SParameterRun, SimulationError> {
+        self.run_sp_over_grid_with_default_ports_and_abort(
+            netlist,
+            frequencies,
+            do_noise,
+            &[],
+            abort,
+        )
+    }
+
+    /// Run SP, using configured planes only if the elaborated circuit declares no RF ports.
+    /// Authored ports take precedence, including scoped and hierarchical declarations.
+    /// Port discovery, configured helper insertion and device construction share one
+    /// elaboration and statistical sequence. The returned ports are authoritative.
+    pub fn run_sp_over_grid_with_default_ports_and_abort(
+        &self,
+        netlist: &Netlist,
+        frequencies: &[Value],
+        do_noise: bool,
+        default_ports: &[crate::analysis::s_param::Port],
+        abort: &dyn AbortSignal,
+    ) -> Result<SParameterRun, SimulationError> {
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }
@@ -95,7 +116,8 @@ impl Engine {
         let run_scope = crate::abort_signal::ModelRunSignal::if_needed(abort);
         let abort: &dyn AbortSignal = run_scope.as_ref().map_or(abort, |scope| scope);
         Self::ensure_model_run_active(abort)?;
-        let (circuit, rf_ports) = engine.build_circuit_with_rf_ports(netlist, abort)?;
+        let (circuit, rf_ports) =
+            engine.build_circuit_with_rf_ports(netlist, default_ports, abort)?;
         if rf_ports.is_empty() {
             return Err(PortError::NoPortsDeclared.into());
         }
@@ -114,6 +136,7 @@ impl Engine {
         // Both analyses use the same physical port circuit. Inserting Z0 only
         // for AC would bias nonlinear devices differently in the noise solve.
         // Each analysis still retains its own model phase and accepted state.
+        let noise_circuit = do_noise.then(|| circuit.clone());
         let PreparedAc {
             circuit: ac_bias,
             mut matrix,
@@ -158,28 +181,30 @@ impl Engine {
             engine.config().temperature,
             crate::constants::celsius_to_kelvin,
         );
-        let (noise_bias, mut noise_matrix, noise_linearization) = if do_noise {
-            let names = ports
-                .iter()
-                .map(|port| port.source_name.clone())
-                .collect::<Vec<_>>();
-            let mut prepared = engine.prepare_port_noise_analysis(
-                netlist,
-                &names,
-                frequencies.len(),
-                temperature,
-                abort,
-            )?;
-            prepared.use_sp_reference_planes(netlist, &rf_ports, abort)?;
-            let PreparedPortNoise {
-                circuit,
-                matrix,
-                linearization,
-            } = prepared;
-            (Some(circuit), Some(matrix), Some(linearization))
-        } else {
-            (None, None, None)
-        };
+        let (noise_bias, mut noise_matrix, noise_linearization) =
+            if let Some(circuit) = noise_circuit {
+                let names = ports
+                    .iter()
+                    .map(|port| port.source_name.clone())
+                    .collect::<Vec<_>>();
+                let mut prepared = engine.prepare_port_noise_circuit(
+                    netlist,
+                    Some(circuit),
+                    &names,
+                    frequencies.len(),
+                    temperature,
+                    abort,
+                )?;
+                prepared.use_sp_reference_planes(netlist, &rf_ports, abort)?;
+                let PreparedPortNoise {
+                    circuit,
+                    matrix,
+                    linearization,
+                } = prepared;
+                (Some(circuit), Some(matrix), Some(linearization))
+            } else {
+                (None, None, None)
+            };
         let has_tasks = ac_bias.has_point_analog_tasks()
             || noise_bias
                 .as_ref()

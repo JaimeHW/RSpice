@@ -127,6 +127,7 @@ fn ac_result_conversion_drops_traces_with_mismatched_frequency_shapes() {
 
     let analysis = controller.convert_to_analysis_result_with_metadata_owned(
         crate::simulation::SimulationResult::Ac {
+            reference_impedances_ohm: None,
             frequencies,
             waveforms,
             measurements: Vec::new(),

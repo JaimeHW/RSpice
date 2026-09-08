@@ -256,6 +256,11 @@ impl SimulationController {
     /// in execution; a plain SP setup falls back to its explicitly configured
     /// ports and default impedance only when the deck declares none.
     pub(super) fn retain_sparameter_result_metadata(&self, result: &mut AnalysisResult) {
+        // SP carries its actual elaborated references in the result. Never
+        // reconstruct or overwrite that authority from a mutable cached deck.
+        if result.family_metadata.is_some() || result.analysis_type == AnalysisType::SParameter {
+            return;
+        }
         if !matches!(
             result.analysis_type,
             AnalysisType::SParameter | AnalysisType::Psp | AnalysisType::Hbsp
@@ -282,9 +287,6 @@ impl SimulationController {
         }
 
         match self.current_spec.as_ref()? {
-            AnalysisSpec::SParameter { z0, ports, .. } if ports.len() >= 2 => {
-                Some(ports.iter().map(|port| port.z0.unwrap_or(*z0)).collect())
-            }
             AnalysisSpec::Psp { ports, .. } | AnalysisSpec::Hbsp { ports, .. }
                 if ports.len() >= 2 && ports.iter().all(|port| port.z0.is_some()) =>
             {
@@ -421,9 +423,18 @@ impl SimulationController {
                 frequencies,
                 waveforms,
                 measurements,
-            } => AnalysisResult::new(1, analysis_type, label.to_string())
-                .with_waveforms(self.build_ac_waveforms_owned(frequencies, waveforms))
-                .with_measurements(measurements),
+                reference_impedances_ohm,
+            } => {
+                let mut result = AnalysisResult::new(1, analysis_type, label.to_string())
+                    .with_waveforms(self.build_ac_waveforms_owned(frequencies, waveforms))
+                    .with_measurements(measurements);
+                result.family_metadata = reference_impedances_ohm.map(|reference_impedances_ohm| {
+                    AnalysisResultFamilyMetadata::SParameter {
+                        reference_impedances_ohm,
+                    }
+                });
+                result
+            }
 
             SimulationResult::Pstb {
                 period,
@@ -1872,6 +1883,7 @@ mod waveform_unit_conversion_tests {
         );
         spectrum.y_unit = "V".to_owned();
         let sim_result = crate::simulation::SimulationResult::Ac {
+            reference_impedances_ohm: None,
             frequencies: vec![1.0, 10.0],
             waveforms: HashMap::from([("V(out) Spectrum".to_owned(), spectrum)]),
             measurements: Vec::new(),
@@ -1902,6 +1914,7 @@ mod waveform_unit_conversion_tests {
             "s",
         );
         let sim_result = crate::simulation::SimulationResult::Ac {
+            reference_impedances_ohm: None,
             frequencies: vec![1.0, 10.0],
             waveforms: HashMap::from([("group_delay".to_owned(), group_delay)]),
             measurements: Vec::new(),
@@ -1927,6 +1940,7 @@ mod waveform_unit_conversion_tests {
         );
         let result = SimulationController::new().convert_to_analysis_result_with_metadata_owned(
             crate::simulation::SimulationResult::Ac {
+                reference_impedances_ohm: None,
                 frequencies: vec![1.0, 10.0, 100.0],
                 waveforms: HashMap::from([("group_delay".to_owned(), group_delay)]),
                 measurements: Vec::new(),
@@ -1976,6 +1990,7 @@ mod waveform_unit_conversion_tests {
         // read downstream as a real unit and stop the browser and the axes
         // falling back to the accessor in the name.
         let sim_result = crate::simulation::SimulationResult::Ac {
+            reference_impedances_ohm: None,
             frequencies: vec![1.0, 10.0],
             waveforms: HashMap::from([(
                 "V(out)".to_owned(),
@@ -2141,10 +2156,11 @@ mod noise_conversion_tests {
     }
 
     #[test]
-    fn sparameter_result_retains_declared_nondefault_port_impedances() {
+    fn sparameter_result_retains_solved_references_despite_a_stale_cached_deck() {
         let mut controller = SimulationController::new();
         controller.cached_netlist = Some(
-            "* non-default RF reference impedances\nP1 IN 0 PORT=1 Z0=75 AC 1\nR1 IN OUT 50\nP2 OUT 0 PORT=2 Z0=100\n.end\n".to_owned(),
+            "* stale deck\nP1 IN 0 PORT=1 Z0=50 AC 1\nR1 IN OUT 50\nP2 OUT 0 PORT=2 Z0=50\n.end\n"
+                .to_owned(),
         );
         controller.current_spec = Some(AnalysisSpec::SParameter {
             start_freq: 1.0e6,
@@ -2154,17 +2170,27 @@ mod noise_conversion_tests {
             z0: 50.0,
             ports: Vec::new(),
         });
-        let mut result = AnalysisResult::new(1, AnalysisType::SParameter, "SP");
-
-        controller.retain_sparameter_result_metadata(&mut result);
-
-        assert_eq!(
-            result.family_metadata,
-            Some(AnalysisResultFamilyMetadata::SParameter {
-                reference_impedances_ohm: vec![75.0, 100.0],
-            })
-        );
-        assert!(result.validate_retained_evidence().is_ok());
+        for references in [vec![75.0], vec![75.0, 100.0]] {
+            let simulation = crate::simulation::SimulationResult::Ac {
+                frequencies: vec![1e6],
+                waveforms: HashMap::new(),
+                measurements: Vec::new(),
+                reference_impedances_ohm: Some(references.clone()),
+            };
+            let mut result = controller.convert_to_analysis_result_with_metadata_owned(
+                simulation,
+                AnalysisType::SParameter,
+                "SP",
+            );
+            controller.retain_sparameter_result_metadata(&mut result);
+            assert_eq!(
+                result.family_metadata,
+                Some(AnalysisResultFamilyMetadata::SParameter {
+                    reference_impedances_ohm: references,
+                })
+            );
+            assert!(result.validate_retained_evidence().is_ok());
+        }
     }
 
     /// The workspace's one self-starting oscillator, solved in autonomous

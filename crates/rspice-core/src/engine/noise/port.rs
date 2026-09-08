@@ -167,6 +167,26 @@ impl Engine {
         temperature: Value,
         abort: &dyn AbortSignal,
     ) -> Result<PreparedPortNoise, SimulationError> {
+        self.prepare_port_noise_circuit(
+            netlist,
+            None,
+            port_sources,
+            frequency_count,
+            temperature,
+            abort,
+        )
+    }
+
+    /// Reuse an uninitialized elaborated circuit while retaining noise's own bias lifecycle.
+    pub(in crate::engine) fn prepare_port_noise_circuit(
+        &self,
+        netlist: &Netlist,
+        circuit: Option<CircuitData>,
+        port_sources: &[String],
+        frequency_count: usize,
+        temperature: Value,
+        abort: &dyn AbortSignal,
+    ) -> Result<PreparedPortNoise, SimulationError> {
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }
@@ -195,7 +215,10 @@ impl Engine {
             }
         }
         Self::ensure_model_run_active(abort)?;
-        let mut circuit = self.build_circuit_with_abort(netlist, abort)?;
+        let mut circuit = match circuit {
+            Some(circuit) => circuit,
+            None => self.build_circuit_with_abort(netlist, abort)?,
+        };
         Self::warn_xspice_mif_analysis_boundary(
             &circuit,
             "SP noise",

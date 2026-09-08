@@ -77,12 +77,13 @@ impl SimulationController {
         z0_by_port: &[f64],
         touchstone_version: usize,
     ) -> Result<WaveformDataset, String> {
-        let (frequencies, waveforms) = match result {
+        let (frequencies, waveforms, references) = match result {
             crate::simulation::SimulationResult::Ac {
                 frequencies,
                 waveforms,
+                reference_impedances_ohm,
                 ..
-            } => (frequencies, waveforms),
+            } => (frequencies, waveforms, reference_impedances_ohm.as_deref()),
             _ => return Err("result is not frequency-domain S-parameter data".to_string()),
         };
         if frequencies.is_empty() {
@@ -108,9 +109,10 @@ impl SimulationController {
             }
             max_port = max_port.max(row).max(col);
         }
-        if max_port < 2 {
+        if max_port == 0 {
             return Err("no complete S-parameter matrix waveforms found".to_string());
         }
+        let z0_by_port = references.unwrap_or(z0_by_port);
         let port_references = if z0_by_port.is_empty() {
             vec![z0; max_port]
         } else if z0_by_port.len() == max_port {
@@ -286,22 +288,14 @@ mod tests {
             }
         }
         crate::simulation::SimulationResult::Ac {
+            reference_impedances_ohm: None,
             frequencies,
             waveforms,
             measurements: Vec::new(),
         }
     }
 
-    /// The export takes its per-port reference impedances from the analysis
-    /// spec's port table, and the matrix from the solved result. When a design
-    /// declares its own `P` ports the solver measures those and the spec's
-    /// table is whatever the S-parameter form happens to hold, so the two
-    /// counts can differ — and this is what that costs: the whole export is
-    /// refused after a run that succeeded.
-    ///
-    /// Pinned rather than fixed here. The repair is upstream, where the spec's
-    /// port table is derived from the ports the design places instead of being
-    /// authored beside them.
+    /// Legacy results without retained references must validate their fallback table.
     #[test]
     fn a_port_table_shorter_than_the_solved_matrix_refuses_the_export() {
         let error = SimulationController::build_touchstone_dataset(
@@ -317,9 +311,7 @@ mod tests {
         assert_eq!(error, "expected 3 per-port reference values, got 2");
     }
 
-    /// And when the counts agree by coincidence, the table's numbers are
-    /// exported as the network's reference impedances whatever the deck's own
-    /// ports were normalized to.
+    /// A legacy result may use an explicitly supplied complete reference table.
     #[test]
     fn a_port_table_that_fits_supplies_the_exported_reference_impedances() {
         let dataset = SimulationController::build_touchstone_dataset(
@@ -334,5 +326,38 @@ mod tests {
             dataset.metadata.get("z0_ports").map(String::as_str),
             Some("50,75")
         );
+    }
+
+    #[test]
+    fn solved_references_override_stale_configuration_including_single_port_exports() {
+        for count in [1, 3] {
+            let mut result = matrix_result(count);
+            let references = (0..count)
+                .map(|index| 75.0 + 25.0 * index as f64)
+                .collect::<Vec<_>>();
+            let crate::simulation::SimulationResult::Ac {
+                reference_impedances_ohm,
+                ..
+            } = &mut result
+            else {
+                unreachable!()
+            };
+            *reference_impedances_ohm = Some(references.clone());
+            let dataset =
+                SimulationController::build_touchstone_dataset(&result, 50.0, &[50.0, 50.0], 2)
+                    .unwrap();
+            assert_eq!(dataset.metadata["num_ports"], count.to_string());
+            assert_eq!(
+                dataset.metadata["z0_ports"],
+                references
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join(",")
+            );
+            WaveformWriter::new(WaveformFormat::Touchstone)
+                .write_text(&dataset)
+                .expect("the retained port matrix exports");
+        }
     }
 }

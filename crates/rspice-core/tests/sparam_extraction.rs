@@ -16,6 +16,74 @@ use rspice_core::engine::{Engine, SimulationConfig, SimulationError};
 use rspice_core::netlist::Netlist;
 
 #[test]
+fn configured_ports_are_resolved_after_hierarchy_and_shared_with_noise() {
+    let defaults = [Port::single_ended(1, "p", 50.0)];
+    for declaration in [
+        "",
+        "XG p 0 generator\n.subckt generator a b params: reference=75\nP1 a b portnum=1 z0={reference}\n.ends generator\n",
+    ] {
+        let netlist =
+            Netlist::parse(&format!("* RF fallback\n{declaration}R1 p 0 100\n.end\n")).unwrap();
+        let run = Engine::default()
+            .run_sp_over_grid_with_default_ports_and_abort(
+                &netlist,
+                &[10.0, 20.0],
+                true,
+                &defaults,
+                &rspice_core::NoAbort,
+            )
+            .unwrap();
+        let expected_z0 = if declaration.is_empty() { 50.0 } else { 75.0 };
+        assert_eq!(run.ports.len(), 1);
+        assert_eq!(run.ports[0].z0, expected_z0);
+        for point in run.scattering.data {
+            let expected = (100.0 - expected_z0) / (100.0 + expected_z0);
+            assert!((point.s11() - Complex64::new(expected, 0.0)).norm() < 1e-12);
+        }
+        let expected_noise = 4.0 * rspice_core::constants::K_BOLTZMANN * 300.15 / 100.0;
+        for point in run.port_noise.unwrap().points {
+            assert!((point.current_correlation[0][0].re / expected_noise - 1.0).abs() < 1e-12);
+        }
+    }
+}
+
+#[test]
+fn configured_port_fallback_obeys_element_limits_and_cancellation() {
+    use rspice_core::abort_signal::CountingAbort;
+    let netlist = Netlist::parse("* RF fallback\nR1 p 0 100\n.end\n").unwrap();
+    let ports = [Port::single_ended(1, "p", 50.0)];
+    let mut config = SimulationConfig::default();
+    config.resource_limits.max_flattened_elements = 2;
+    assert!(matches!(
+        Engine::new(config).run_sp_over_grid_with_default_ports_and_abort(
+            &netlist,
+            &[10.0],
+            false,
+            &ports,
+            &rspice_core::NoAbort,
+        ),
+        Err(SimulationError::ResourceLimit(_))
+    ));
+    let engine = Engine::default();
+    let count = CountingAbort::new(usize::MAX);
+    engine
+        .run_sp_over_grid_with_default_ports_and_abort(&netlist, &[10.0], true, &ports, &count)
+        .unwrap();
+    for threshold in 0..count.count() {
+        let abort = CountingAbort::new(threshold);
+        let error = engine
+            .run_sp_over_grid_with_default_ports_and_abort(&netlist, &[10.0], true, &ports, &abort)
+            .unwrap_err();
+        assert!(
+            matches!(error, SimulationError::Aborted),
+            "poll {threshold}: {error}"
+        );
+        assert_eq!(abort.polls_after_abort(), 0, "poll {threshold}");
+    }
+    assert_eq!(netlist.elements.len(), 1);
+}
+
+#[test]
 fn multiplied_rf_terminations_preserve_bias_noise_and_declared_reference() {
     for deferred in [false, true] {
         for multiplicity in [0.5, 2.0, 4.0] {

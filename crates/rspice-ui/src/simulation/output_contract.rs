@@ -428,9 +428,10 @@ fn validate_static_contract_semantics(
     }
     let (output_port, input_port) = parse_rf_port(&output.source_expression)?;
     let port_count = match spec {
-        AnalysisSpec::SParameter { ports, .. }
-        | AnalysisSpec::Hbsp { ports, .. }
-        | AnalysisSpec::Psp { ports, .. } => ports.len(),
+        // SP's configured ports are a fallback. Authored hierarchical ports
+        // may replace them, so only the solved circuit can establish this bound.
+        AnalysisSpec::SParameter { .. } => return Ok(()),
+        AnalysisSpec::Hbsp { ports, .. } | AnalysisSpec::Psp { ports, .. } => ports.len(),
         _ => {
             return Err(format!(
                 "saved output '{}' requires an RF-port analysis",
@@ -455,6 +456,7 @@ fn semantic_status(
     analyses: &[(AnalysisInstanceId, &AnalysisSpec)],
 ) -> SavedOutputSemanticStatus {
     if output.kind == SavedOutputKind::RfPortQuantity {
+        let mut requires_elaboration = false;
         for contract in contracts {
             let Some((_, spec)) = analyses
                 .iter()
@@ -470,6 +472,12 @@ fn semantic_status(
             if let Err(reason) = validate_static_contract_semantics(output, spec) {
                 return SavedOutputSemanticStatus::Invalid { reason };
             }
+            requires_elaboration |= matches!(spec, AnalysisSpec::SParameter { .. });
+        }
+        if requires_elaboration {
+            return SavedOutputSemanticStatus::RuntimeBound {
+                reason: "RF port indices are bound to the elaborated circuit and its retained scattering traces".to_owned(),
+            };
         }
         return SavedOutputSemanticStatus::Valid {
             detail: "RF port indices resolve to configured ports in every compatible analysis"
@@ -1091,10 +1099,22 @@ fn resolve_contract_waveform(
         }
         SavedOutputKind::RfPortQuantity => {
             let (output, input) = parse_rf_port(&contract.source_expression)?;
-            let compact = format!("S{output}{input}");
-            clone_named_waveform(waveforms, &compact, &contract.name).or_else(|_| {
-                clone_named_waveform(waveforms, &contract.source_expression, &contract.name)
-            })
+            let separated = format!("S{output}_{input}");
+            clone_named_waveform(waveforms, &separated, &contract.name)
+                .or_else(|error| {
+                    if output <= 9 && input <= 9 {
+                        clone_named_waveform(
+                            waveforms,
+                            &format!("S{output}{input}"),
+                            &contract.name,
+                        )
+                    } else {
+                        Err(error)
+                    }
+                })
+                .or_else(|_| {
+                    clone_named_waveform(waveforms, &contract.source_expression, &contract.name)
+                })
         }
     }
 }
@@ -1875,11 +1895,11 @@ mod tests {
     }
 
     #[test]
-    fn preflight_rejects_rf_port_outside_prepared_port_set() {
+    fn sp_port_bounds_and_multi_digit_indices_bind_to_the_retained_circuit() {
         let output = SavedOutput::new(
             SavedOutputKind::RfPortQuantity,
             "forward_gain",
-            "S(3,1)",
+            "S(10,1)",
             SavedOutputCompatibility::AllCompatibleAnalyses,
             SavedOutputPolicy::EveryAcceptedPoint,
             SavedOutputPrecision::FullSourcePrecision,
@@ -1908,7 +1928,38 @@ mod tests {
         let report = preflight_saved_output(&output, [(AnalysisInstanceId::new(), &spec)]);
         assert!(matches!(
             report.semantic_status(),
-            SavedOutputSemanticStatus::Invalid { reason } if reason.contains("2 configured ports")
+            SavedOutputSemanticStatus::RuntimeBound { reason } if reason.contains("elaborated circuit")
+        ));
+        let contract = PreparedSavedOutput::prepare(&output, AnalysisInstanceId::new(), &spec)
+            .unwrap()
+            .unwrap();
+        let source = WaveformData::new("S10_1", vec![1e6], vec![0.5], "#fff")
+            .with_complex_components("S10_1", vec![0.5], vec![-0.1]);
+        let mut analysis =
+            AnalysisResult::new(1, AnalysisType::SParameter, "SP").with_waveforms(vec![source]);
+        materialize_saved_outputs(&mut analysis, std::slice::from_ref(&contract));
+        assert!(matches!(
+            analysis.saved_output_receipts[0].status,
+            SavedOutputMaterializationStatus::Materialized {
+                sample_count: 1,
+                ..
+            }
+        ));
+        assert_eq!(analysis.waveforms[1].name, "forward_gain");
+        assert_eq!(
+            analysis.waveforms[1]
+                .complex
+                .as_ref()
+                .unwrap()
+                .imag
+                .as_ref(),
+            &[-0.1]
+        );
+        let mut missing = AnalysisResult::new(1, AnalysisType::SParameter, "SP");
+        materialize_saved_outputs(&mut missing, &[contract]);
+        assert!(matches!(
+            missing.saved_output_receipts[0].status,
+            SavedOutputMaterializationStatus::Unavailable { .. }
         ));
     }
 }

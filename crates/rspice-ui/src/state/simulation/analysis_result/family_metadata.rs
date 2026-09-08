@@ -305,9 +305,9 @@ impl AnalysisResultFamilyMetadata {
             Self::SParameter {
                 reference_impedances_ohm,
             } => {
-                if reference_impedances_ohm.len() < 2 {
+                if reference_impedances_ohm.is_empty() {
                     return Err(
-                        "S-parameter metadata requires at least two port impedances".to_owned()
+                        "S-parameter metadata requires at least one port impedance".to_owned()
                     );
                 }
                 if reference_impedances_ohm

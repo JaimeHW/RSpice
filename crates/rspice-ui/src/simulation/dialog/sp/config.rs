@@ -148,10 +148,10 @@ impl SpConfig {
 
     /// Validate configuration
     pub fn validate(&self) -> Result<(), String> {
-        if self.start_freq <= 0.0 {
+        if !self.start_freq.is_finite() || self.start_freq <= 0.0 {
             return Err("Start frequency must be positive".to_string());
         }
-        if self.stop_freq <= 0.0 {
+        if !self.stop_freq.is_finite() || self.stop_freq <= 0.0 {
             return Err("Stop frequency must be positive".to_string());
         }
         if self.start_freq >= self.stop_freq {
@@ -160,16 +160,12 @@ impl SpConfig {
         if self.num_points == 0 {
             return Err("Number of points must be at least 1".to_string());
         }
-        if self.z0 <= 0.0 {
+        if !self.z0.is_finite() || self.z0 <= 0.0 {
             return Err("Reference impedance Z0 must be positive".to_string());
         }
         // An empty table is legitimate: a design drawn with RF Port components
         // declares its ports in the deck, and typing them again here would be
-        // a second place for them to disagree. A partly filled table is not —
-        // one port is a table someone stopped filling in.
-        if self.ports.len() == 1 {
-            return Err("S-parameter analysis requires at least 2 ports".to_string());
-        }
+        // a second place for them to disagree. One port measures reflection.
 
         for port in &self.ports {
             if port.node_pos.is_empty() {
@@ -179,7 +175,7 @@ impl SpConfig {
                 ));
             }
             if let Some(pz0) = port.z0
-                && pz0 <= 0.0
+                && (!pz0.is_finite() || pz0 <= 0.0)
             {
                 return Err(format!("Port {} impedance must be positive", port.number));
             }

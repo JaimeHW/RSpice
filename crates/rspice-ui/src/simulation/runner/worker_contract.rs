@@ -945,6 +945,8 @@ pub(crate) enum WorkerSimulationResult {
         frequencies: Vec<f64>,
         waveforms: Vec<WorkerWaveform>,
         measurements: Vec<WorkerMeasurement>,
+        #[serde(default)]
+        reference_impedances_ohm: Option<Vec<f64>>,
     },
     Pstb {
         period: f64,
@@ -1453,10 +1455,12 @@ impl WorkerSimulationResult {
                 frequencies,
                 waveforms,
                 measurements,
+                reference_impedances_ohm,
             } => sum_payload_bytes([
                 f64_payload_bytes(frequencies.len()),
                 waveforms_payload_bytes(waveforms),
                 measurements_payload_bytes(measurements),
+                f64_payload_bytes(reference_impedances_ohm.as_ref().map_or(0, Vec::len)),
             ]),
             WorkerSimulationResult::Pstb {
                 modes,
@@ -1601,11 +1605,9 @@ impl WorkerSimulationResult {
     }
 }
 
-/// 15 (2026-09-06): a transient's event history carries its digital bus
-/// declarations. The field defaults, so a protocol-14 payload still decodes
-/// as one declaring no bus; the number moves anyway, because the version is
-/// what says which side may be trusted to have looked for the table at all.
-const WORKER_RESPONSE_TRANSPORT_PROTOCOL: u8 = 15;
+/// 16: frequency-domain results retain resolved S-parameter reference impedances.
+/// Older workers cannot attest to the references used by circuit elaboration.
+const WORKER_RESPONSE_TRANSPORT_PROTOCOL: u8 = 16;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct WorkerResponseTransport {
@@ -1672,10 +1674,12 @@ impl TryFrom<SimulationResult> for WorkerSimulationResult {
                 frequencies,
                 waveforms,
                 measurements,
+                reference_impedances_ohm,
             } => Ok(Self::Ac {
                 frequencies,
                 waveforms: worker_waveforms(waveforms),
                 measurements: worker_measurements(measurements),
+                reference_impedances_ohm,
             }),
             SimulationResult::Pstb {
                 period,
@@ -1971,10 +1975,12 @@ impl From<WorkerSimulationResult> for SimulationResult {
                 frequencies,
                 waveforms,
                 measurements,
+                reference_impedances_ohm,
             } => Self::Ac {
                 frequencies,
                 waveforms: waveform_map(waveforms),
                 measurements: measure_results(measurements),
+                reference_impedances_ohm,
             },
             WorkerSimulationResult::Pstb {
                 period,

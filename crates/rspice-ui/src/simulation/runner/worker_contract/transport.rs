@@ -92,6 +92,24 @@ pub(super) fn validate_worker_response_before_transport(
     let WorkerOutcome::Success(result) = &response.outcome else {
         return Ok(());
     };
+    if let WorkerSimulationResult::Ac {
+        reference_impedances_ohm: Some(references),
+        ..
+    } = result.as_ref()
+    {
+        if references.is_empty()
+            || references
+                .iter()
+                .any(|value| !value.is_finite() || *value <= 0.0)
+        {
+            return Err(
+                "S-parameter worker references must be nonempty, finite and positive".to_owned(),
+            );
+        }
+        if references.len() > MAX_WORKER_F64_VALUES {
+            return Err("S-parameter worker reference count exceeds the payload limit".to_owned());
+        }
+    }
     if let WorkerSimulationResult::Hb {
         frequencies,
         waveforms,
@@ -1244,6 +1262,7 @@ pub(crate) enum WorkerSimulationResultTransport {
         frequencies: WorkerF64Series,
         waveforms: Vec<WorkerWaveformTransport>,
         measurements: Vec<WorkerMeasurement>,
+        reference_impedances_ohm: Option<WorkerF64Series>,
     },
     Noise {
         frequencies: WorkerF64Series,
@@ -1453,10 +1472,13 @@ impl WorkerSimulationResultTransport {
                 frequencies,
                 waveforms,
                 measurements,
+                reference_impedances_ohm,
             } => Self::Ac {
                 frequencies: WorkerF64Series::from_vec(frequencies, buffers),
                 waveforms: transport_waveforms(waveforms, buffers),
                 measurements,
+                reference_impedances_ohm: reference_impedances_ohm
+                    .map(|values| WorkerF64Series::from_vec(values, buffers)),
             },
             WorkerSimulationResult::Noise {
                 frequencies,
@@ -1687,10 +1709,14 @@ impl WorkerSimulationResultTransport {
                 frequencies,
                 waveforms,
                 measurements,
+                reference_impedances_ohm,
             } => Ok(WorkerSimulationResult::Ac {
                 frequencies: frequencies.into_vec(buffers)?,
                 waveforms: worker_waveforms_from_transport(waveforms, buffers)?,
                 measurements,
+                reference_impedances_ohm: reference_impedances_ohm
+                    .map(|values| values.into_vec(buffers))
+                    .transpose()?,
             }),
             Self::Noise {
                 frequencies,

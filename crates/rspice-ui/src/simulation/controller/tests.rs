@@ -260,6 +260,7 @@ fn synthetic_sparameter_result() -> crate::simulation::SimulationResult {
     }
 
     crate::simulation::SimulationResult::Ac {
+        reference_impedances_ohm: None,
         frequencies,
         waveforms,
         measurements: Vec::new(),

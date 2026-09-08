@@ -298,7 +298,7 @@ pub(super) fn nondefault_op_config() -> crate::simulation::dialog::OpConfig {
 
 #[test]
 fn browser_worker_transfer_protocol_matches_rust_transport() {
-    assert_eq!(WORKER_RESPONSE_TRANSPORT_PROTOCOL, 15);
+    assert_eq!(WORKER_RESPONSE_TRANSPORT_PROTOCOL, 16);
     assert_eq!(WORKER_REQUEST_TRANSPORT_PROTOCOL, 8);
     let source = include_str!("../../../../web/simulation-worker.js");
     assert!(source.contains(&format!(
@@ -1082,6 +1082,7 @@ fn worker_result_payload_estimate_counts_high_volume_arrays() {
     assert_eq!(transient.estimated_numeric_payload_bytes(), 48);
 
     let ac = WorkerSimulationResult::Ac {
+        reference_impedances_ohm: None,
         frequencies: vec![1.0, 10.0, 100.0],
         waveforms: vec![WorkerWaveform {
             name: "V(out)".to_string(),
@@ -1262,6 +1263,7 @@ fn worker_transport_round_trips_ac_and_noise_buffers() {
     let ac = WorkerResponse {
         id: 10,
         outcome: WorkerOutcome::Success(Box::new(WorkerSimulationResult::Ac {
+            reference_impedances_ohm: None,
             frequencies: vec![1.0, 10.0, 100.0],
             waveforms: vec![WorkerWaveform {
                 name: "V(out)".to_string(),
@@ -1298,6 +1300,56 @@ fn worker_transport_round_trips_ac_and_noise_buffers() {
         noise_transport.into_response().expect("noise reconstructs"),
         noise
     );
+}
+
+#[test]
+fn worker_transport_retains_and_validates_resolved_port_references() {
+    for references in [vec![75.0], vec![75.0, 100.0]] {
+        let response = WorkerResponse {
+            id: 19,
+            outcome: WorkerOutcome::Success(Box::new(WorkerSimulationResult::Ac {
+                frequencies: vec![1e6, 2e6],
+                waveforms: Vec::new(),
+                measurements: Vec::new(),
+                reference_impedances_ohm: Some(references.clone()),
+            })),
+        };
+        let mut transport = WorkerResponseTransport::from_response(response.clone()).unwrap();
+        assert_eq!(transport.buffers.last(), Some(&references));
+        let metadata = serde_json::to_string(&transport.response).unwrap();
+        transport.response = serde_json::from_str(&metadata).unwrap();
+        assert_eq!(transport.clone().into_response().unwrap(), response);
+        let restored = match transport.clone().into_response().unwrap().outcome {
+            WorkerOutcome::Success(result) => SimulationResult::from(*result),
+            other => panic!("expected success: {other:?}"),
+        };
+        assert!(
+            matches!(restored, SimulationResult::Ac { reference_impedances_ohm: Some(actual), .. } if actual == references)
+        );
+        transport.buffers.last_mut().unwrap()[0] = -1.0;
+        assert!(
+            transport
+                .into_response()
+                .unwrap_err()
+                .contains("references")
+        );
+    }
+    for references in [vec![], vec![0.0], vec![f64::NAN], vec![f64::INFINITY]] {
+        let response = WorkerResponse {
+            id: 19,
+            outcome: WorkerOutcome::Success(Box::new(WorkerSimulationResult::Ac {
+                frequencies: vec![1e6],
+                waveforms: Vec::new(),
+                measurements: Vec::new(),
+                reference_impedances_ohm: Some(references),
+            })),
+        };
+        assert!(
+            WorkerResponseTransport::from_response(response)
+                .unwrap_err()
+                .contains("references")
+        );
+    }
 }
 
 #[test]

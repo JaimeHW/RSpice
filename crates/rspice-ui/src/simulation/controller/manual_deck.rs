@@ -5,7 +5,6 @@
 //! workspace configured.
 
 use super::*;
-use rspice_core::analysis::s_param;
 use rspice_core::netlist::{
     AnalysisCommand, ElementKind, FreqVariation, Netlist, PoleZeroAnalysisType,
     PoleZeroTransferType, StepCommand, StepTarget,
@@ -588,23 +587,6 @@ fn ac_sweep(variation: FreqVariation) -> AcSweepType {
     }
 }
 
-/// Resolve the deck's `.SP` ports into the UI's port shape.
-///
-/// Discovery and validation live in `rspice_core`; this only projects the
-/// shared port type onto the runner's own, so the GUI, the CLI, and the Python
-/// bindings cannot disagree about which ports a deck declares.
-fn collect_sparameter_ports(netlist: &Netlist) -> Result<Vec<SpPort>, String> {
-    let ports = s_param::collect_ports(netlist).map_err(|error| error.to_string())?;
-    Ok(ports
-        .into_iter()
-        .map(|port| SpPort {
-            node_pos: port.node_pos,
-            node_neg: port.node_neg,
-            z0: Some(port.z0),
-        })
-        .collect())
-}
-
 fn pz_transfer_name(transfer_type: PoleZeroTransferType) -> String {
     match transfer_type {
         PoleZeroTransferType::Voltage => "VOL",
@@ -832,8 +814,6 @@ fn command_to_queue_item(
             stop_freq,
             do_noise: _,
         } => {
-            let ports = collect_sparameter_ports(netlist)?;
-            let z0 = ports.first().and_then(|port| port.z0).unwrap_or(50.0);
             Ok(QueuedAnalysis {
                 numeric_override: None,
                 spec: AnalysisSpec::SParameter {
@@ -841,8 +821,10 @@ fn command_to_queue_item(
                     stop_freq: *stop_freq,
                     points_per_unit: *points,
                     sweep: frequency_sweep(*variation),
-                    z0,
-                    ports,
+                    // Authored ports, including hierarchy and scoped parameters,
+                    // are resolved once by the engine when this card executes.
+                    z0: 50.0,
+                    ports: Vec::new(),
                 },
                 config: None,
                 spec_options,
@@ -1621,13 +1603,15 @@ mod tests {
         assert!((*start_freq - 1.0e6).abs() < 1e-6);
         assert!((*stop_freq - 3.0e6).abs() < 1e-6);
         assert_eq!(*z0, 50.0);
-        assert_eq!(ports.len(), 2);
-        assert_eq!(ports[0].node_pos, "IN");
-        assert_eq!(ports[0].node_neg, "0");
-        assert_eq!(ports[0].z0, Some(50.0));
-        assert_eq!(ports[1].node_pos, "OUT");
-        assert_eq!(ports[1].node_neg, "0");
-        assert_eq!(ports[1].z0, Some(75.0));
+        assert!(ports.is_empty(), "authored ports resolve during execution");
+        assert!(specs[0].validate().is_ok());
+        let hierarchical = specs_for(
+            "deck\n.subckt generator a b params: reference=75\nP1 a b portnum=1 z0={reference}\n.ends generator\nX1 p 0 generator\nR1 p 0 100\n.sp lin 3 1Meg 3Meg\n.end\n",
+        );
+        assert!(
+            matches!(&hierarchical[0], AnalysisSpec::SParameter { ports, .. } if ports.is_empty())
+        );
+        assert!(hierarchical[0].validate().is_ok());
     }
 
     #[test]

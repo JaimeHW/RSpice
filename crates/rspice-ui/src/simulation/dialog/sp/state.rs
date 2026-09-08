@@ -7,19 +7,11 @@ use crate::simulation::placed_sources::{PlacedRfPort, duplicate_port_numbers};
 
 /// Where an S-parameter run's ports come from.
 ///
-/// A port is a Z0 plane the run drives and measures, and there are two places a
-/// design can declare one. The schematic places `RF Port` components, which the
-/// netlist generator emits as `P` cards; the analysis form can instead name node
-/// pairs, which the runner materializes as Thevenin generators behind Z0 when —
-/// and only when — the deck declares none of its own
-/// (`services::simulation_runner::sparameter::resolve_ports`).
-///
-/// Both at once is not a third mode, it is the ambiguity this switch exists to
-/// end. The deck's own ports always win at the solver, so an ad-hoc table
-/// standing beside placed ports never reaches the network; what it does reach is
-/// everything downstream that reads the spec's port list as the run's identity —
-/// the Touchstone header's reference impedances and the saved-output contract's
-/// `S(i,j)` bound. One truth, chosen here.
+/// The schematic places RF Port components, or this form names node pairs.
+/// The engine resolves authored ports during circuit elaboration and uses
+/// configured pairs only when that circuit declares none. Solved references
+/// travel with the result and qualify Touchstone export and impedance readouts.
+/// This choice controls which configuration the form edits and validates.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum SpPortSource {
     /// The `RF Port` components the design places. Their `P` cards are the
@@ -156,7 +148,7 @@ impl SpDialogState {
     }
 
     fn ensure_min_ports(&mut self) {
-        while self.ports.len() < 2 {
+        if self.ports.is_empty() {
             let node = Self::default_port_node(self.ports.len());
             self.ports.push(SpPortDialogState::single_ended(node));
         }
@@ -173,10 +165,6 @@ impl SpDialogState {
         if port_states.is_empty() {
             port_states.push(SpPortDialogState::single_ended("IN"));
             port_states.push(SpPortDialogState::single_ended("OUT"));
-        }
-        while port_states.len() < 2 {
-            let node = Self::default_port_node(port_states.len());
-            port_states.push(SpPortDialogState::single_ended(node));
         }
 
         Self {
@@ -315,8 +303,8 @@ impl SpDialogState {
 /// matrix with no defined meaning, and picking a winner would report the
 /// network the user did not draw.
 fn placed_port_configs(placed: &[PlacedRfPort]) -> Result<Vec<SpPortConfig>, String> {
-    if placed.len() < 2 {
-        return Err(too_few_placed_ports(placed.len()));
+    if placed.is_empty() {
+        return Err(no_placed_ports());
     }
     let duplicates = duplicate_port_numbers(placed);
     if !duplicates.is_empty() {
@@ -376,16 +364,10 @@ fn join_words(words: impl IntoIterator<Item = String>) -> String {
     }
 }
 
-fn too_few_placed_ports(count: usize) -> String {
-    if count == 0 {
-        "This analysis reads the design's RF ports and the sheet places none. Place RF Port \
+fn no_placed_ports() -> String {
+    "This analysis reads the design's RF ports and the sheet places none. Place RF Port \
          components, or set Ports to Ad-hoc node ports and name the port nodes here."
-            .to_owned()
-    } else {
-        "An S-parameter run needs at least 2 ports and the sheet places 1. Place a second RF \
-         Port component, or set Ports to Ad-hoc node ports and name the port nodes here."
-            .to_owned()
-    }
+        .to_owned()
 }
 
 fn duplicate_placed_port_numbers(placed: &[PlacedRfPort], duplicates: &[u32]) -> String {
@@ -615,10 +597,40 @@ mod tests {
         assert!(error.contains("Ad-hoc node ports"), "{error}");
 
         let one = placed(&[("P1", "port=1")]);
-        let error = state
+        let config = state
             .to_config(Some(&one))
-            .expect_err("one placed port is no matrix");
-        assert!(error.contains("at least 2 ports"), "{error}");
+            .expect("one placed port measures reflection");
+        assert_eq!(config.ports.len(), 1);
+    }
+
+    #[test]
+    fn a_single_ad_hoc_port_survives_form_initialization_and_config_round_trip() {
+        let mut state = dialog();
+        choosing(&mut state, SpPortSource::AdHoc);
+        state.ports.truncate(1);
+        state.ports[0].node_pos = "SENSE".into();
+        for _ in 0..3 {
+            state.ensure_initialized();
+            assert_eq!(state.ports.len(), 1);
+        }
+        let config = state.to_config(Some(&[])).unwrap();
+        let restored = SpDialogState::from_config(&config);
+        assert_eq!(restored.ports.len(), 1);
+        assert_eq!(restored.ports[0].node_pos, "SENSE");
+        for invalid in [f64::NAN, f64::INFINITY] {
+            let mut bad = config.clone();
+            bad.z0 = invalid;
+            assert!(bad.validate().is_err());
+            bad = config.clone();
+            bad.start_freq = invalid;
+            assert!(bad.validate().is_err());
+            bad = config.clone();
+            bad.stop_freq = invalid;
+            assert!(bad.validate().is_err());
+            bad = config.clone();
+            bad.ports[0].z0 = Some(invalid);
+            assert!(bad.validate().is_err());
+        }
     }
 
     /// A caller that cannot see the design must not refuse a placed-mode

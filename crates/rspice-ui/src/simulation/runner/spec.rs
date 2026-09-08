@@ -298,6 +298,42 @@ mod tests {
         ContentDigest::from_bytes([byte; 32])
     }
 
+    #[test]
+    fn hierarchical_single_port_spec_retains_the_solved_reference() {
+        let spec = AnalysisSpec::SParameter {
+            start_freq: 1e6,
+            stop_freq: 3e6,
+            points_per_unit: 3,
+            sweep: crate::simulation::multi_run::FrequencySweep::Linear,
+            z0: 50.0,
+            ports: Vec::new(),
+        };
+        assert!(spec.validate().is_ok());
+        let result = run_spec_request(
+            &EngineBridge::new(), spec, SpecExecutionOptions::default(),
+            "* Scoped single port\n.subckt generator a b params: reference=75\nP1 a b portnum=1 z0={reference}\n.ends generator\nX1 p 0 generator\nR1 p 0 100\n.end\n",
+            None, &ResolvedExecutionDependencies::default(), &rspice_core::NoAbort,
+        ).unwrap();
+        let SimulationResult::Ac {
+            frequencies,
+            waveforms,
+            reference_impedances_ohm,
+            ..
+        } = result
+        else {
+            panic!("SP must retain frequency-domain data");
+        };
+        assert_eq!(frequencies, [1e6, 2e6, 3e6]);
+        assert_eq!(reference_impedances_ohm, Some(vec![75.0]));
+        assert_eq!(waveforms.len(), 1);
+        assert!(
+            waveforms["S11"]
+                .y_values
+                .iter()
+                .all(|value| (*value - 1.0 / 7.0).abs() < 1e-12)
+        );
+    }
+
     fn hb_producer_spec() -> AnalysisSpec {
         AnalysisSpec::HarmonicBalance {
             tones: vec![HbToneSpec::new(1.0e6, 8)],

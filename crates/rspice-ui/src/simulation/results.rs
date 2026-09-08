@@ -187,6 +187,8 @@ pub enum SimulationResult {
         waveforms: HashMap<String, WaveformData>,
         /// Evaluated `.MEAS AC` results (against magnitude data).
         measurements: Vec<rspice_core::MeasureResult>,
+        /// Resolved power-wave references for SP/PSP/HBSP; absent for ordinary AC.
+        reference_impedances_ohm: Option<Vec<f64>>,
     },
 
     /// Authenticated periodic stability result.
