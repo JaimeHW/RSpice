@@ -276,7 +276,7 @@ Checkpoint format 35 retains the step and stop defaults that determine
 independent-source waveforms. Extending a run or changing its step ceiling
 preserves those source parameters. Older checkpoints remain readable; resume
 requires fully specified source timing when the original defaults are absent.
-Resume also requires the current resolved simulation identity (v9); states
+Resume also requires the current resolved simulation identity (v10); states
 captured under previous source evaluation or behavioral event timing semantics
 must be regenerated.
 
@@ -401,7 +401,7 @@ parameters. Smooth tables and other coordinates with a known time rate retain
 their base-grid interval bounds; arbitrary circuit-dependent expressions do not
 supply that bound. Known extrema and inverse levels of nonlinear sine/cosine
 compositions expose features that could vanish on both initial grids. For
-continuous sums, products, regular quotients, SQR and sine/cosine compositions,
+continuous sums, products, regular quotients, powers, SQR, exponential and sine/cosine compositions,
 value and normalized-time derivative enclosures of the compiled expression
 isolate levels. Nonlinear phase inversion uses those same bounds. Tangential roots are
 retained as small feature clusters at expression rounding precision. Uncertain
@@ -410,6 +410,15 @@ unresolved domains report a precision or work-limit error. The VM's exact
 zero-denominator rule is preserved for known zero denominators. The
 collector limits the number of evaluated instructions as well as its events.
 Constants use the shared compiler and VM in the resolved environment.
+Quotient bounds use direct division and scaled derivatives to avoid reciprocal
+overflow. Power bounds preserve the evaluator's operator and named-function
+dialect rules, including varying exponents and Xyce's real projection.
+Continuity is tracked separately from derivative bounds; signed zero powers
+retain their branch transitions and do not certify a smooth constant map.
+Internal source features are discarded only when the complete expression is
+proven finite and constant over a nonzero neighborhood. This removes inactive
+geometry on exact exponential-underflow plateaus without merging close clocks
+or discarding another source's events or authored table and pulse corners.
 Comparison and step boundaries are located through the actual behavioral
 evaluator between adjacent representable timestamps, including finite equality plateaus after
 time zero and comparisons between two time coordinates. Transient continuation
@@ -429,7 +438,7 @@ defaults still use the original `POINTS`. `MAXITER` applies to each grid solve,
 while the result reports total Newton corrections across all grids. Point and
 memory limits also apply to refinement, and cancellation remains available.
 Retained PSS operating points from earlier producer versions must be regenerated
-before dependent numerical reuse; the current producer identity is version 21.
+before dependent numerical reuse; the current producer identity is version 22.
 This convergence check supplements the shooting residual, which measures closure
 of a discrete period map. It is not a proof of resolution for all nonlinear
 expressions and devices; independent waveform and
