@@ -1520,6 +1520,124 @@ mod tests {
         assert_eq!(restored.layout, window.layout);
     }
 
+    #[test]
+    fn portrait_toolbar_shelf_search_and_canvas_placement_work_across_frames() {
+        use crate::state::Tool;
+        use crate::workbench::{commands::vocabulary::Command, state::Drawer};
+
+        fn frame(ctx: &Context, app: &mut RSpiceApp, events: Vec<egui::Event>) -> egui::FullOutput {
+            ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(820.0, 1180.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    app.handle_shortcuts(ui.ctx());
+                    app.render_frame_chrome(ui);
+                    app.render_secondary_application_windows(ui.ctx());
+                    app.render_frame_dialogs(ui.ctx());
+                },
+            )
+        }
+        fn target(output: &egui::FullOutput, label: &str) -> egui::Pos2 {
+            let nodes = &output
+                .platform_output
+                .accesskit_update
+                .as_ref()
+                .unwrap()
+                .nodes;
+            let bounds = nodes
+                .iter()
+                .find_map(|(_, node)| {
+                    node.label()
+                        .is_some_and(|name| name.starts_with(label))
+                        .then(|| node.bounds())
+                        .flatten()
+                })
+                .unwrap_or_else(|| {
+                    panic!(
+                        "missing {label}: {:?}",
+                        nodes
+                            .iter()
+                            .filter_map(|(_, node)| node.label())
+                            .collect::<Vec<_>>()
+                    )
+                });
+            egui::pos2(
+                ((bounds.x0 + bounds.x1) * 0.5) as f32,
+                ((bounds.y0 + bounds.y1) * 0.5) as f32,
+            )
+        }
+        fn click(at: egui::Pos2) -> Vec<egui::Event> {
+            vec![
+                egui::Event::PointerMoved(at),
+                egui::Event::PointerButton {
+                    pos: at,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+                egui::Event::PointerButton {
+                    pos: at,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ]
+        }
+
+        let ctx = Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        let mut app = RSpiceApp::test_instance();
+        frame(&ctx, &mut app, Vec::new());
+        let output = frame(&ctx, &mut app, Vec::new());
+        frame(&ctx, &mut app, click(target(&output, "Place instance")));
+        frame(&ctx, &mut app, Vec::new());
+        assert_eq!(app.state.workbench.drawer, Some(Drawer::Navigator));
+        let output = frame(
+            &ctx,
+            &mut app,
+            vec![egui::Event::Text("resistor".to_owned())],
+        );
+        assert_eq!(app.state.workbench.placement_query, "resistor");
+        frame(&ctx, &mut app, click(target(&output, "Resistor")));
+        assert_eq!(app.state.workbench.drawer, None);
+        assert_eq!(
+            app.state.schematic.tool,
+            Tool::Place(ComponentType::Resistor)
+        );
+        frame(&ctx, &mut app, Vec::new());
+        let output = frame(&ctx, &mut app, Vec::new());
+        let tree = output.platform_output.accesskit_update.as_ref().unwrap();
+        assert!(
+            tree.nodes
+                .iter()
+                .any(|(id, node)| *id == tree.focus && node.label() == Some("Schematic canvas")),
+            "the canvas receives keyboard focus after selection; focused node: {:?}",
+            tree.nodes
+                .iter()
+                .find(|(id, _)| *id == tree.focus)
+                .map(|(_, node)| (node.label(), node.role()))
+        );
+        assert!(app.state.schematic.components.is_empty());
+        frame(&ctx, &mut app, click(target(&output, "Schematic canvas")));
+        assert_eq!(app.state.schematic.components.len(), 1);
+
+        // A new modal task supersedes a still-pending placement focus request.
+        crate::schematic::view::request_schematic_canvas_focus(&ctx);
+        Command::CommandPalette.execute(&mut app);
+        frame(&ctx, &mut app, Vec::new());
+        frame(&ctx, &mut app, Vec::new());
+        frame(&ctx, &mut app, vec![egui::Event::Text("help".to_owned())]);
+        assert_eq!(app.state.dialogs.command_palette.query, "help");
+        assert_eq!(app.state.schematic.components.len(), 1);
+    }
+
     /// The application root moves by value through the same debug fixture
     /// chains as the state it embeds, on the same 2 MiB Windows test-thread
     /// stacks, so its own inline members (controllers, runtimes) carry the

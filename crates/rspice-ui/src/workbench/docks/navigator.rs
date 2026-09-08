@@ -396,10 +396,16 @@ pub(super) fn panel_search(
         // The clear control lives inside the field's own right inset, so the
         // text column gives way to it rather than running underneath it.
         let clearable = !query.is_empty();
+        let field_id = ui.make_persistent_id(id);
+        // A drawer first measures an invisible area. Retain its focus request
+        // until the field can receive input, then focus before processing text.
+        if ui.is_visible() && std::mem::take(focus_pending) {
+            ui.memory_mut(|memory| memory.request_focus(field_id));
+        }
         let response = ui.add_sized(
             [field_width, t.metrics.ctl_h],
             egui::TextEdit::singleline(query)
-                .id_salt(id)
+                .id(field_id)
                 .hint_text(placeholder)
                 .font(theme::sans(tokens::FS_1, FontWeight::Regular))
                 .margin(egui::Margin {
@@ -442,9 +448,6 @@ pub(super) fn panel_search(
         }
         enter_rows = response.has_focus()
             && ui.input_mut(|input| input.consume_key(Modifiers::NONE, Key::ArrowDown));
-        if std::mem::take(focus_pending) {
-            response.request_focus();
-        }
     });
     ui.add_space(8.0);
     enter_rows
@@ -2529,10 +2532,14 @@ fn results_browser_toolbar(
         ui.add_space(PANEL_SEARCH_MARGIN_X);
         let field_width = panel_search_field_width(ui.available_width() + PANEL_SEARCH_MARGIN_X);
         let placeholder = "Find canonical name, path, unit, or type…";
+        let field_id = ui.make_persistent_id("workbench.navigator.filter");
+        if ui.is_visible() && std::mem::take(&mut app.state.workbench.focus_navigator_search) {
+            ui.memory_mut(|memory| memory.request_focus(field_id));
+        }
         let response = ui.add_sized(
             [field_width, t.metrics.ctl_h],
             egui::TextEdit::singleline(app.state.workbench.navigator_trees.filter_mut(workspace))
-                .id_salt("workbench.navigator.filter")
+                .id(field_id)
                 .hint_text(placeholder)
                 .font(theme::sans(tokens::FS_1, FontWeight::Regular))
                 .margin(egui::Margin {
@@ -2554,9 +2561,6 @@ fn results_browser_toolbar(
             ),
             t.color.text_faint,
         );
-        if std::mem::take(&mut app.state.workbench.focus_navigator_search) {
-            response.request_focus();
-        }
     });
     if show_quantity_facets {
         // The producing analysis, on its own row. Every analysis the session

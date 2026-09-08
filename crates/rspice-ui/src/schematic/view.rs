@@ -92,6 +92,45 @@ pub(crate) fn request_schematic_canvas_focus(ctx: &egui::Context) {
     ctx.memory_mut(|memory| {
         memory.request_focus(egui::Id::new(SCHEMATIC_CANVAS_INTERACTION_ID));
     });
+    let key = schematic_canvas_focus_request_id(ctx);
+    let frame = ctx.cumulative_frame_nr();
+    ctx.data_mut(|data| data.insert_temp(key, frame));
+    ctx.request_repaint();
+}
+
+fn schematic_canvas_focus_request_id(ctx: &egui::Context) -> egui::Id {
+    egui::Id::new((
+        SCHEMATIC_CANVAS_INTERACTION_ID,
+        "focus-request",
+        ctx.viewport_id(),
+    ))
+}
+
+fn apply_schematic_canvas_focus_request(ui: &Ui, state: &AppState) {
+    let ctx = ui.ctx();
+    let key = schematic_canvas_focus_request_id(ctx);
+    let Some(requested_frame) = ctx.data(|data| data.get_temp::<u64>(key)) else {
+        return;
+    };
+    // egui retains the dismissed modal's input floor for one more frame.
+    // Retry through its retirement, without retaining a request across tasks
+    // or taking focus from a new dialog or drawer.
+    let cancelled = ctx.cumulative_frame_nr().saturating_sub(requested_frame) > 2
+        || state.application_modal_open()
+        || state.workbench.drawer.is_some();
+    let available = ui.is_visible()
+        && ui.is_enabled()
+        && ui.memory(|memory| memory.is_above_modal_layer(ui.layer_id()));
+    if cancelled || available {
+        ctx.data_mut(|data| data.remove::<u64>(key));
+        if !cancelled {
+            ctx.memory_mut(|memory| {
+                memory.request_focus(egui::Id::new(SCHEMATIC_CANVAS_INTERACTION_ID))
+            });
+        }
+    } else {
+        ctx.request_repaint();
+    }
 }
 
 #[derive(Default)]
@@ -1039,6 +1078,7 @@ pub fn render_schematic_view(
             .center_view_on(target, available.width() as f64, available.height() as f64);
     }
 
+    apply_schematic_canvas_focus_request(ui, state);
     let response = ui.interact(
         available,
         egui::Id::new(SCHEMATIC_CANVAS_INTERACTION_ID),

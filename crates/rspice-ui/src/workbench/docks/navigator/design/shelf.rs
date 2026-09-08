@@ -573,12 +573,7 @@ fn arm_library_part(
     ctx: &egui::Context,
 ) {
     let armed = state.schematic.arm_pack_part(placement);
-    crate::schematic::view::request_schematic_canvas_focus(ctx);
-    state.ui.toasts.success(
-        ctx,
-        "Component placement armed",
-        format!("{armed} will snap to the schematic grid."),
-    );
+    finish_shelf_placement(state, ctx, &armed);
 }
 
 /// Raises the pack confirmation for one shelf part.
@@ -1503,6 +1498,7 @@ pub(super) fn place_builtin_xspice(
                 .iter()
                 .any(|port| port.maximum.is_none_or(|maximum| maximum != port.minimum)) =>
         {
+            state.workbench.close_drawer();
             state.dialogs.builtin_xspice_placement.open(
                 descriptor.stable_id,
                 descriptor.display_name,
@@ -1815,12 +1811,7 @@ pub(super) fn arm_primitive(app: &mut RSpiceApp, kind: ComponentType, ctx: &egui
     let state = &mut app.state;
     state.schematic.pending_library_cell = None;
     state.schematic.arm_tool(Tool::Place(kind));
-    state.ui.toasts.success(
-        ctx,
-        "Component placement armed",
-        format!("{} will snap to the schematic grid.", kind.display_name()),
-    );
-    crate::schematic::view::request_schematic_canvas_focus(ctx);
+    finish_shelf_placement(state, ctx, kind.display_name());
 }
 
 /// Arms one library cell for placement.
@@ -1837,6 +1828,12 @@ fn arm_cell(
     state
         .schematic
         .arm_tool(Tool::Place(ComponentType::CellInstance));
+    finish_shelf_placement(state, ctx, &label);
+}
+
+fn finish_shelf_placement(state: &mut AppState, ctx: &egui::Context, label: &str) {
+    // Selecting a part releases the compact shelf's modal input ownership.
+    state.workbench.close_drawer();
     state.ui.toasts.success(
         ctx,
         "Component placement armed",

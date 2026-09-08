@@ -623,6 +623,7 @@ fn a_code_model_with_open_port_widths_asks_before_it_arms() {
         "and asks nothing"
     );
 
+    app.state.workbench.drawer = Some(crate::workbench::state::Drawer::Navigator);
     assert!(
         place_builtin_xspice(&mut app.state, open.stable_id).is_none(),
         "{} cannot be armed until its widths are chosen",
@@ -636,6 +637,11 @@ fn a_code_model_with_open_port_widths_asks_before_it_arms() {
         app.state.dialogs.builtin_xspice_placement.stable_id, open.stable_id,
         "for the model the row named"
     );
+    assert_eq!(
+        app.state.workbench.drawer, None,
+        "the configuration dialog takes input from the shelf"
+    );
+    assert!(app.state.workbench.navigator_visible);
 }
 
 // -------------------------------------------------- shelf pinning and recents
@@ -650,6 +656,64 @@ fn a_code_model_with_open_port_widths_asks_before_it_arms() {
 struct ShelfHarness {
     ctx: egui::Context,
     app: RSpiceApp,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn shelf_selection_returns_to_canvas_without_hiding_desktop_dock() {
+    use crate::workbench::state::Drawer;
+
+    let builtin = engine_only_xspice_devices()
+        .iter()
+        .find(|descriptor| {
+            builtin_xspice_library_binding(descriptor).is_ok()
+                && builtin_xspice_vector_ports(descriptor).is_ok_and(|ports| ports.is_empty())
+        })
+        .expect("a fixed-port built-in is available");
+    for (entry, label, tool) in [
+        (
+            ShelfEntry::Primitive(ComponentType::Resistor),
+            "Resistor",
+            Tool::Place(ComponentType::Resistor),
+        ),
+        (
+            ShelfEntry::BuiltinXspice(builtin.stable_id.to_owned()),
+            builtin.display_name,
+            Tool::Place(ComponentType::CellInstance),
+        ),
+        (
+            ShelfEntry::LibraryPart("RSPICE_ZENER".to_owned()),
+            "RSPICE_ZENER",
+            Tool::Place(ComponentType::Diode),
+        ),
+    ] {
+        for drawer in [Some(Drawer::Navigator), None] {
+            let mut shelf = ShelfHarness::opened();
+            shelf
+                .app
+                .state
+                .model_library_manager
+                .add_library(retained_model_library("proving_parts"));
+            shelf.app.state.workbench.drawer = drawer;
+            shelf.app.state.workbench.navigator_visible = true;
+            if !is_pinned(&shelf.app.state, &entry) {
+                toggle_pin(&mut shelf.app.state, &entry);
+            }
+            let mut shelf = shelf.settled();
+            let (_, runs) = shelf.frame(Vec::new());
+            let row = run_rect(&runs, label).expect("the pinned part is rendered");
+            let _ = shelf.frame(click_events(row.center()));
+            assert_eq!(shelf.app.state.schematic.tool, tool, "{label}");
+            assert_eq!(
+                shelf.app.state.workbench.drawer, None,
+                "{label}: the canvas must be reachable after selection"
+            );
+            assert!(
+                shelf.app.state.workbench.navigator_visible,
+                "desktop dock preference must survive {label} placement"
+            );
+        }
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
