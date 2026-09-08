@@ -941,6 +941,27 @@ impl Bjt {
         [[Value; EXTERNAL_DIM]; INTERNAL_DIM],
         [Value; INTERNAL_DIM],
     ) {
+        let internal = [
+            state.vcx, state.vci, state.vbx, state.vbi, state.vei, state.vbp, state.vsi, state.vrth,
+        ];
+        let external = [vc, vb, ve, vs];
+        self.internal_kcl_linearization_from_eval_with_source(state, eval, external, |row| {
+            row.source(&internal, &external)
+        })
+    }
+
+    pub(in crate::device::semiconductor::bjt) fn internal_kcl_linearization_from_eval_with_source(
+        &self,
+        state: IntrinsicTerminalState,
+        eval: EvaluatedBjtState,
+        external: [Value; EXTERNAL_DIM],
+        source_for_branch: impl Fn(BranchLinearization) -> Value,
+    ) -> (
+        [[Value; INTERNAL_DIM]; INTERNAL_DIM],
+        [[Value; EXTERNAL_DIM]; INTERNAL_DIM],
+        [Value; INTERNAL_DIM],
+    ) {
+        let [vc, vb, ve, vs] = external;
         let has_rcx = Self::series_active(self.rcx);
         let has_rci = Self::series_active(self.rci);
         let has_rbx = Self::series_active(self.rbx);
@@ -967,10 +988,6 @@ impl Bjt {
         let mut jacobian = [[0.0; INTERNAL_DIM]; INTERNAL_DIM];
         let mut external_partials = [[0.0; EXTERNAL_DIM]; INTERNAL_DIM];
         let mut source = [0.0; INTERNAL_DIM];
-        let internal = [
-            state.vcx, state.vci, state.vbx, state.vbi, state.vei, state.vbp, state.vsi, state.vrth,
-        ];
-        let external = [vc, vb, ve, vs];
         let assign_row = |row_idx: usize,
                           row: BranchLinearization,
                           jacobian: &mut [[Value; INTERNAL_DIM]; INTERNAL_DIM],
@@ -978,7 +995,7 @@ impl Bjt {
                           source: &mut [Value; INTERNAL_DIM]| {
             jacobian[row_idx] = row.d_internal;
             external_partials[row_idx] = row.d_external;
-            source[row_idx] = row.source(&internal, &external);
+            source[row_idx] = source_for_branch(row);
         };
 
         if has_rcx {

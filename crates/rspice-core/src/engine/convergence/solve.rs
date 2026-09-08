@@ -101,32 +101,11 @@ impl Engine {
         (!circuit.behavioral_sources.is_empty()).then(|| vec![1.0; size])
     }
 
-    pub(in crate::engine::convergence) fn solve_dc_linearization(
-        matrix: &mut StaticMatrix,
-        rhs: &[Value],
-        denominator_floors: Option<&[Value]>,
-        anchor: Option<&[Value]>,
-        correction_rhs: &mut Vec<Value>,
-        solution: &mut Vec<Value>,
-    ) -> Result<(), SimulationError> {
-        let solve_rhs = if let Some(anchor) = anchor {
-            matrix.correction_rhs_into(rhs, anchor, correction_rhs)?;
-            correction_rhs.as_slice()
-        } else {
-            rhs
-        };
-        Self::solve_dc_linearization_system(matrix, solve_rhs, denominator_floors, solution)?;
-        if let Some(anchor) = anchor {
-            for (value, previous) in solution.iter_mut().zip(anchor) {
-                *value += previous;
-            }
-        }
-        Ok(())
-    }
-
     pub(in crate::engine) fn requires_vbic_correction_form(circuit: &CircuitData) -> bool {
         // A milliohm branch can connect nearly equal voltages while carrying
         // nanoamperes. Preserve those small currents by solving for increments.
+        // Thermal derivatives near an Early-voltage cutoff can also make
+        // absolute companions too large to retain physical branch currents.
         circuit
             .bjts
             .devices
@@ -134,7 +113,21 @@ impl Engine {
             .any(|bjt| bjt.vbic_mna_promoted())
     }
 
-    fn solve_dc_linearization_system(
+    pub(in crate::engine::convergence) fn solve_direct_dc_correction(
+        matrix: &mut StaticMatrix,
+        rhs: &[Value],
+        denominator_floors: Option<&[Value]>,
+        anchor: &[Value],
+        solution: &mut Vec<Value>,
+    ) -> Result<(), SimulationError> {
+        Self::solve_dc_linearization_system(matrix, rhs, denominator_floors, solution)?;
+        for (value, previous) in solution.iter_mut().zip(anchor) {
+            *value += previous;
+        }
+        Ok(())
+    }
+
+    pub(in crate::engine::convergence) fn solve_dc_linearization_system(
         matrix: &mut StaticMatrix,
         rhs: &[Value],
         denominator_floors: Option<&[Value]>,
@@ -407,6 +400,41 @@ impl Engine {
         node_hints: &[StartupVoltageConstraint],
         reference_solution: &[Value],
     ) -> Result<(), SimulationError> {
+        Self::apply_node_voltage_constraints_at(
+            circuit,
+            matrix,
+            rhs,
+            node_hints,
+            reference_solution,
+            false,
+        )
+    }
+
+    fn apply_node_voltage_correction_constraints(
+        circuit: &CircuitData,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        node_hints: &[StartupVoltageConstraint],
+        reference_solution: &[Value],
+    ) -> Result<(), SimulationError> {
+        Self::apply_node_voltage_constraints_at(
+            circuit,
+            matrix,
+            rhs,
+            node_hints,
+            reference_solution,
+            true,
+        )
+    }
+
+    fn apply_node_voltage_constraints_at(
+        circuit: &CircuitData,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        node_hints: &[StartupVoltageConstraint],
+        reference_solution: &[Value],
+        correction: bool,
+    ) -> Result<(), SimulationError> {
         let first_current_column = circuit.num_nodes();
         for constraint in node_hints {
             let (node_id, reference_id, voltage) =
@@ -437,7 +465,16 @@ impl Engine {
                     .copied()
                     .unwrap_or(0.0)
             };
-            rhs[row] = diagonal * (reference + voltage);
+            rhs[row] = if correction {
+                diagonal * (reference + voltage - reference_solution[row])
+                    - matrix.row_product_from_column(
+                        row,
+                        first_current_column,
+                        reference_solution,
+                    )?
+            } else {
+                diagonal * (reference + voltage)
+            };
         }
         Ok(())
     }
@@ -558,6 +595,35 @@ impl Engine {
         let result = matrix.with_probe_values(|probe, rhs| -> Result<bool, SimulationError> {
             Self::stamp_nodal_gmin(circuit, probe, gmin_floor);
             circuit.stamp_dc_direct(probe, rhs);
+            if Self::requires_vbic_correction_form(circuit) {
+                let mut correction_rhs = Vec::new();
+                self.try_stamp_operating_point_correction(
+                    circuit,
+                    probe,
+                    rhs,
+                    OperatingPointProbe {
+                        solution,
+                        time: 0.0,
+                        analysis: crate::xspice::AnalysisType::DcOp,
+                        junction_gmin,
+                    },
+                    true,
+                    &mut correction_rhs,
+                )?;
+                Self::apply_node_voltage_correction_constraints(
+                    circuit,
+                    probe,
+                    &mut correction_rhs,
+                    node_hints,
+                    solution,
+                )?;
+                return Ok(self.direct_probe_correction_converged(
+                    circuit,
+                    probe,
+                    solution,
+                    &correction_rhs,
+                ));
+            }
             self.try_stamp_static_probe_nonlinear_devices_for_dc_with_junction_gmin(
                 circuit,
                 probe,
@@ -598,7 +664,8 @@ impl Engine {
                     circuit, probe, rhs, time, nodal_gmin, false,
                 );
             }
-            self.try_stamp_static_probe_nonlinear_devices_for_operating_point(
+            let mut correction_rhs = Vec::new();
+            self.try_stamp_operating_point_newton_system(
                 circuit,
                 probe,
                 rhs,
@@ -608,7 +675,15 @@ impl Engine {
                     analysis: crate::xspice::AnalysisType::Transient,
                     junction_gmin,
                 },
+                true,
+                &mut correction_rhs,
             )?;
+            if Self::requires_vbic_correction_form(circuit) {
+                Self::apply_node_voltage_correction_constraints(
+                    circuit, probe, rhs, node_hints, solution,
+                )?;
+                return Ok(self.direct_probe_correction_converged(circuit, probe, solution, rhs));
+            }
             Self::apply_node_voltage_constraints(circuit, probe, rhs, node_hints, solution)?;
             Ok(self.residual_probe_fixed_point_converged(circuit, probe, solution, rhs))
         });
@@ -648,17 +723,44 @@ impl Engine {
             rhs.fill(0.0);
             Self::stamp_nodal_gmin(circuit, matrix, gmin_floor);
             circuit.stamp_dc_direct(matrix, &mut rhs);
-            self.try_stamp_nonlinear_devices_for_dc(circuit, matrix, &mut rhs, &solution)?;
-            Self::apply_node_voltage_constraints(circuit, matrix, &mut rhs, node_hints, &solution)?;
-
-            Self::solve_dc_linearization(
+            self.try_stamp_operating_point_newton_system(
+                circuit,
                 matrix,
-                &rhs,
-                solve_denominator_floors.as_deref(),
-                uses_vbic_correction.then_some(solution.as_slice()),
+                &mut rhs,
+                OperatingPointProbe {
+                    solution: &solution,
+                    time: 0.0,
+                    analysis: crate::xspice::AnalysisType::DcOp,
+                    junction_gmin: self
+                        .effective_device_junction_gmin(self.config.convergence_config.gmin_target),
+                },
+                false,
                 &mut correction_rhs,
-                &mut new_solution,
             )?;
+            Self::apply_node_voltage_constraints_at(
+                circuit,
+                matrix,
+                &mut rhs,
+                node_hints,
+                &solution,
+                uses_vbic_correction,
+            )?;
+            if uses_vbic_correction {
+                Self::solve_direct_dc_correction(
+                    matrix,
+                    &rhs,
+                    solve_denominator_floors.as_deref(),
+                    &solution,
+                    &mut new_solution,
+                )?;
+            } else {
+                Self::solve_dc_linearization_system(
+                    matrix,
+                    &rhs,
+                    solve_denominator_floors.as_deref(),
+                    &mut new_solution,
+                )?;
+            }
             Self::clamp_solution_to_physical_bounds(circuit, &mut new_solution, node_count);
             Self::enforce_node_voltage_hints(circuit, matrix, &mut new_solution, node_hints);
 
@@ -756,6 +858,7 @@ impl Engine {
         let mut rhs = vec![0.0; size];
         let mut raw_solution = Vec::with_capacity(size);
         let mut correction_rhs = Vec::new();
+        let mut linearized_delta = Vec::new();
         let uses_vbic_correction = Self::requires_vbic_correction_form(circuit);
         let solve_denominator_floors = Self::dc_solve_denominator_floors(circuit, size);
         // Newton-Raphson iteration
@@ -820,17 +923,37 @@ impl Engine {
             Self::stamp_nodal_gmin(circuit, matrix, gmin_floor);
             // Stamp linear devices
             circuit.stamp_dc_direct(matrix, &mut rhs);
-            // Update nonlinear/behavioral/XSPICE devices with current solution and stamp
-            self.try_stamp_nonlinear_devices_for_dc(circuit, matrix, &mut rhs, &solution)?;
-            // Solve linearized system
-            match Self::solve_dc_linearization(
+            self.try_stamp_operating_point_newton_system(
+                circuit,
                 matrix,
-                &rhs,
-                solve_denominator_floors.as_deref(),
-                uses_vbic_correction.then_some(solution.as_slice()),
+                &mut rhs,
+                OperatingPointProbe {
+                    solution: &solution,
+                    time: 0.0,
+                    analysis: crate::xspice::AnalysisType::DcOp,
+                    junction_gmin: self
+                        .effective_device_junction_gmin(self.config.convergence_config.gmin_target),
+                },
+                false,
                 &mut correction_rhs,
-                &mut raw_solution,
-            ) {
+            )?;
+            let solve_result = if uses_vbic_correction {
+                Self::solve_direct_dc_correction(
+                    matrix,
+                    &rhs,
+                    solve_denominator_floors.as_deref(),
+                    &solution,
+                    &mut raw_solution,
+                )
+            } else {
+                Self::solve_dc_linearization_system(
+                    matrix,
+                    &rhs,
+                    solve_denominator_floors.as_deref(),
+                    &mut raw_solution,
+                )
+            };
+            match solve_result {
                 Ok(()) => {}
                 Err(err) => {
                     direct_solver_error = Some(err);
@@ -910,8 +1033,18 @@ impl Engine {
                 node_count,
                 iteration,
             );
-            let linearized_residual_converged =
-                self.residual_convergence_met(circuit, matrix, new_solution, &rhs);
+            let linearized_residual_converged = if uses_vbic_correction {
+                linearized_delta.clear();
+                linearized_delta.extend(
+                    new_solution
+                        .iter()
+                        .zip(&solution)
+                        .map(|(next, old)| next - old),
+                );
+                self.residual_convergence_met(circuit, matrix, &linearized_delta, &rhs)
+            } else {
+                self.residual_convergence_met(circuit, matrix, new_solution, &rhs)
+            };
             // Device convergence must be checked at the candidate iterate, not the prior iterate.
             self.update_device_states_for_dc(circuit, new_solution);
             let device_converged = circuit.nonlinear_converged(self.device_convergence_criteria());
@@ -1018,7 +1151,41 @@ impl Engine {
         // run pays one residual pass and then discards it, because the
         // attribution is only recorded where the failure is actually
         // returned.
-        let newton_failure = self.newton_failure_sites(circuit, matrix, &solution, &rhs);
+        let newton_failure = if uses_vbic_correction {
+            // The last Newton RHS describes increments at the preceding
+            // iterate. Re-evaluate physical currents at the abort iterate
+            // before attributing a failed KCL equation.
+            let snapshot = circuit.nonlinear_state_snapshot();
+            let failure = matrix.with_probe_values(|probe, rhs| {
+                Self::stamp_nodal_gmin(circuit, probe, gmin_floor);
+                circuit.stamp_dc_direct(probe, rhs);
+                if self
+                    .try_stamp_operating_point_newton_system(
+                        circuit,
+                        probe,
+                        rhs,
+                        OperatingPointProbe {
+                            solution: &solution,
+                            time: 0.0,
+                            analysis: crate::xspice::AnalysisType::DcOp,
+                            junction_gmin: self.effective_device_junction_gmin(
+                                self.config.convergence_config.gmin_target,
+                            ),
+                        },
+                        true,
+                        &mut correction_rhs,
+                    )
+                    .is_err()
+                {
+                    return (Vec::new(), 0);
+                }
+                self.newton_failure_sites(circuit, probe, &solution, rhs, true)
+            });
+            circuit.restore_nonlinear_state(snapshot);
+            failure
+        } else {
+            self.newton_failure_sites(circuit, matrix, &solution, &rhs, false)
+        };
 
         // Log diagnostic information when falling back to convergence aids.
         if let Some(err) = direct_solver_error.as_ref() {
@@ -1573,7 +1740,7 @@ impl Engine {
             Self::stamp_transient_operating_point_linear(
                 circuit, matrix, &mut rhs, time, gmin_floor, false,
             );
-            self.try_stamp_nonlinear_devices_for_operating_point(
+            self.try_stamp_operating_point_newton_system(
                 circuit,
                 matrix,
                 &mut rhs,
@@ -1583,18 +1750,20 @@ impl Engine {
                     analysis: crate::xspice::AnalysisType::Transient,
                     junction_gmin,
                 },
+                false,
+                &mut correction_rhs,
             )?;
-            Self::apply_node_voltage_constraints(circuit, matrix, &mut rhs, node_hints, &solution)?;
+            Self::apply_node_voltage_constraints_at(
+                circuit,
+                matrix,
+                &mut rhs,
+                node_hints,
+                &solution,
+                uses_vbic_correction,
+            )?;
 
             if uses_vbic_correction {
-                Self::solve_dc_linearization(
-                    matrix,
-                    &rhs,
-                    None,
-                    Some(&solution),
-                    &mut correction_rhs,
-                    &mut new_solution,
-                )?;
+                Self::solve_direct_dc_correction(matrix, &rhs, None, &solution, &mut new_solution)?;
             } else {
                 matrix
                     .solve_into(&rhs, &mut new_solution)
@@ -2018,7 +2187,7 @@ impl Engine {
                     circuit, matrix, &mut rhs, time, gmin_floor, false,
                 );
             }
-            self.try_stamp_nonlinear_devices_for_operating_point(
+            self.try_stamp_operating_point_newton_system(
                 circuit,
                 matrix,
                 &mut rhs,
@@ -2028,26 +2197,24 @@ impl Engine {
                     analysis: crate::xspice::AnalysisType::Transient,
                     junction_gmin,
                 },
+                false,
+                &mut correction_rhs,
             )?;
-            Self::apply_node_voltage_constraints(
+            Self::apply_node_voltage_constraints_at(
                 circuit,
                 matrix,
                 &mut rhs,
                 node_constraints,
                 &solution,
+                uses_vbic_correction,
             )?;
 
             let solve_result = if uses_vbic_correction {
-                matrix
-                    .correction_rhs_into(&rhs, &solution, &mut correction_rhs)
-                    .and_then(|()| matrix.solve_into(&correction_rhs, &mut raw_solution))
-                    .map(|()| {
-                        for (value, previous) in raw_solution.iter_mut().zip(&solution) {
-                            *value += previous;
-                        }
-                    })
+                Self::solve_direct_dc_correction(matrix, &rhs, None, &solution, &mut raw_solution)
             } else {
-                matrix.solve_into(&rhs, &mut raw_solution)
+                matrix
+                    .solve_into(&rhs, &mut raw_solution)
+                    .map_err(SimulationError::Solver)
             };
             match solve_result {
                 Ok(()) => {}
@@ -2069,7 +2236,7 @@ impl Engine {
                     continue;
                 }
                 Err(err) => {
-                    return Err(SimulationError::Solver(err));
+                    return Err(err);
                 }
             }
             let mut damped_solution;
@@ -2193,6 +2360,171 @@ impl Engine {
         }
 
         Err(SimulationError::ConvergenceFailed(tranop_max_iterations))
+    }
+}
+
+#[cfg(test)]
+mod correction_constraint_tests {
+    use super::*;
+
+    #[test]
+    fn steep_vbic_thermal_slope_converges_through_startup_and_corrector_paths() {
+        use crate::engine::convergence::fallback::CorrectorSeedMode;
+        use crate::netlist::Netlist;
+        let netlist = Netlist::parse(
+            "VBIC direct-residual startup\nVc c 0 0.6\nVb b 0 0.7\nVth th 0 20\nQ1 c b 0 th vm SW_ET=0 M=3\n\
+             .model vm NPN(LEVEL=11 IS=1e-16 IBEI=1e-18 IBCI=1e-18 ISP=0 IBEIP=0 VEF=1e15 VER=3 TCVEF=-0.049999999999999989 TCVER=-0.02 RCX=1 RCI=1 RBX=1 RBI=1 RE=1 RBP=0 RS=0 GMIN=0 TNOM=27 RTH=1000 CTH=1p CJE=1p CJC=1p TF=1n TR=2n QTF=0.3 TD=1n)\n.temp 27\n.options gmin=0\n.end\n",
+        ).unwrap();
+        for route in [
+            "dc startup",
+            "transient startup",
+            "transient op",
+            "limited",
+            "static",
+            "gmin",
+        ] {
+            let engine = Engine::default().resolved_for_netlist(&netlist);
+            let mut circuit = engine.build_circuit(&netlist).unwrap();
+            let mut matrix = engine.build_matrix(&circuit).unwrap();
+            circuit.link_indices(&matrix);
+            let zero = vec![0.0; circuit.matrix_size()];
+            let constraints = [StartupVoltageConstraint {
+                positive: circuit.get_node_by_name("th").unwrap(),
+                negative: 0,
+                voltage: 20.0,
+            }];
+            let solution = match route {
+                "dc startup" => engine.solve_nonlinear_dc_startup_with_constraints_and_abort(
+                    &mut circuit,
+                    &mut matrix,
+                    &zero,
+                    &constraints,
+                    &crate::NoAbort,
+                ),
+                "transient startup" => engine
+                    .solve_nonlinear_transient_op_startup_with_guess_and_hints_abort(
+                        &mut circuit,
+                        &mut matrix,
+                        0.0,
+                        &zero,
+                        &constraints,
+                        &crate::NoAbort,
+                    ),
+                "transient op" => engine
+                    .solve_nonlinear_transient_op_with_node_hints_and_abort(
+                        &mut circuit,
+                        &mut matrix,
+                        0.0,
+                        &StartupVoltageHints {
+                            constraints: Vec::new(),
+                            has_nodesets: false,
+                        },
+                        &[],
+                        &crate::NoAbort,
+                    )
+                    .map(|point| point.values),
+                "gmin" => engine.gmin_stepping_nonlinear_with_abort(
+                    &mut circuit,
+                    &mut matrix,
+                    &zero,
+                    &crate::NoAbort,
+                ),
+                _ => engine
+                    .solve_scaled_nonlinear_corrector_with_seed_mode(
+                        &mut circuit,
+                        &mut matrix,
+                        1.0,
+                        CorrectorRun {
+                            initial_solution: &zero,
+                            damping_state: &mut NewtonDampingState::default(),
+                            max_iterations: 100,
+                        },
+                        &crate::NoAbort,
+                        if route == "limited" {
+                            CorrectorSeedMode::Limited
+                        } else {
+                            CorrectorSeedMode::StaticProbeEveryIteration
+                        },
+                    )
+                    .map(|(solution, converged, _)| {
+                        assert!(converged, "{route} must converge");
+                        solution
+                    }),
+            }
+            .unwrap_or_else(|error| panic!("{route}: {error}"));
+            let [_, _, _, _, _, ci, _, bi, ei, ..] =
+                circuit.bjts.devices[0].vbic_mna_coupling_nodes();
+            // Independently solved with 80-digit arithmetic; these intrinsic
+            // voltages also determine the series and terminal DC currents.
+            for (node, expected) in [
+                (ci, 0.599810987178337),
+                (bi, 0.6999971642386433),
+                (ei, 0.00009639710807916378),
+            ] {
+                assert!(
+                    (solution[node - 1] - expected).abs() < 2e-12,
+                    "{route} node {node}: {} != {expected}",
+                    solution[node - 1]
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn voltage_correction_clamps_retain_small_branch_currents() {
+        let mut circuit = CircuitData::new();
+        let a = circuit.get_or_create_node("a");
+        let b = circuit.get_or_create_node("b");
+        let mut matrix = StaticMatrix::from_triplets(
+            2,
+            4,
+            &[
+                (0, 0, 2.0),
+                (0, 1, -2.0),
+                (0, 2, 1.0),
+                (0, 3, -1.0),
+                (1, 0, -2.0),
+                (1, 1, 2.0),
+            ],
+        )
+        .unwrap();
+        let anchor = [0.7, 0.3, 1e-10, 2e-10];
+        let constraints = [
+            StartupVoltageConstraint {
+                positive: a,
+                negative: 0,
+                voltage: 0.7,
+            },
+            StartupVoltageConstraint {
+                positive: b,
+                negative: a,
+                voltage: -0.2,
+            },
+        ];
+        let mut rhs = [123.0, 456.0];
+        Engine::apply_node_voltage_correction_constraints(
+            &circuit,
+            &mut matrix,
+            &mut rhs,
+            &constraints,
+            &anchor,
+        )
+        .unwrap();
+        assert_eq!(
+            rhs[0], 1e-10,
+            "held branch currents must survive the stiff clamp"
+        );
+        assert!((rhs[1] - 0.2).abs() < 1e-15);
+        assert_eq!(
+            matrix.row_product_from_column(0, 2, &anchor).unwrap(),
+            -1e-10
+        );
+        assert_eq!(
+            matrix
+                .row_product_from_column(1, 0, &[1.0, 0.0, 0.0, 0.0])
+                .unwrap(),
+            0.0
+        );
     }
 }
 

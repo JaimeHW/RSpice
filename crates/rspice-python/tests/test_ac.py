@@ -27,6 +27,28 @@ FC = 1.0 / (2 * math.pi * 1e3 * 1e-6)  # RC corner: 159.155 Hz
 
 
 class TestAcBasics:
+    @pytest.mark.parametrize("level, kind, polarity", [(11, "NPN", 1), (12, "PNP", -1)])
+    def test_vbic13_extreme_thermal_slope_retains_physical_currents(self, engine, level, kind, polarity):
+        substrate = " 0" if level == 12 else ""
+        netlist = rspice.Netlist.parse_spice(f"""* VBIC direct physical residual
+Vc c 0 {polarity * 0.6}
+Vb b 0 {polarity * 0.7}
+Vth th 0 DC 20 AC 1
+Q1 c b 0{substrate} th vm SW_ET=0 M=3
+.model vm {kind}(LEVEL={level} IS=1e-16 IBEI=1e-18 IBCI=1e-18 ISP=0 IBEIP=0 VEF=1e15 VER=3 TCVEF=-0.049999999999999989 TCVER=-0.02 RCX=1 RCI=1 RBX=1 RBI=1 RE=1 RBP=0 RS=0 GMIN=0 TNOM=27 RTH=1000 CTH=1p CJE=1p CJC=1p TF=1n TR=2n QTF=0.3 TD=1n)
+.temp 27
+.options gmin=0
+.end
+""")
+        result = engine.run_ac(netlist, [1e8])
+        # Independent 80-digit evaluation; Xyce agrees within 2e-14.
+        for branch, expected in [
+            ("vc", polarity * complex(11073210790.749592, -8091064247.664278)),
+            ("vb", polarity * complex(91165705.28041226, 9220857782.629837)),
+            ("vth", complex(-0.003, -0.0018849555921538759)),
+        ]:
+            assert result.branch_current_complex(branch)[0] == pytest.approx(expected, rel=2e-6)
+
     @pytest.mark.parametrize("level", [11, 12])
     @pytest.mark.parametrize("kind, polarity", [("NPN", 1), ("PNP", -1)])
     def test_vbic13_near_early_cutoff_with_transit_current_scaling(self, engine, level, kind, polarity):

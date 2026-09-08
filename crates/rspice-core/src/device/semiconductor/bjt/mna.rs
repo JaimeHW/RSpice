@@ -971,6 +971,22 @@ impl Bjt {
         &self,
         stamper: &mut impl MatrixStamper,
     ) {
+        self.stamp_vbic_mna_at(stamper, None);
+    }
+
+    /// Stamp J and -F directly for a Newton correction at `anchor`. If the
+    /// cached evaluation was junction-limited, retain J*(limited-anchor).
+    /// This avoids subtracting large absolute-voltage companions to recover
+    /// small physical currents at steep thermal slopes.
+    pub(crate) fn stamp_vbic_mna_correction(
+        &self,
+        stamper: &mut impl MatrixStamper,
+        anchor: &[Value],
+    ) {
+        self.stamp_vbic_mna_at(stamper, Some(anchor));
+    }
+
+    fn stamp_vbic_mna_at(&self, stamper: &mut impl MatrixStamper, anchor: Option<&[Value]>) {
         let Some(eval) = self.mna_eval else {
             return;
         };
@@ -989,10 +1005,8 @@ impl Bjt {
             vrth: self.vrth,
         };
         let [vc, vb, ve, vs] = self.vbic_mna_external_state();
-        let internal = [
-            self.vcx, self.vci, self.vbx, self.vbi, self.vei, self.vbp, self.vsi, self.vrth,
-        ];
-        let external = [vc, vb, ve, vs];
+        let mut internal = self.vbic_mna_internal_state();
+        let mut external = [vc, vb, ve, vs];
         let internal_nodes: [NodeId; INTERNAL_DIM] = [
             self.node_cx,
             self.node_ci,
@@ -1004,11 +1018,24 @@ impl Bjt {
             self.node_rth,
         ];
         let external_nodes = self.external_terminal_nodes();
+        if let Some(anchor) = anchor {
+            for (index, voltage) in internal.iter_mut().enumerate() {
+                *voltage -= Self::node_voltage(anchor, self.vbic_internal_node(index));
+            }
+            for (voltage, node) in external.iter_mut().zip(external_nodes) {
+                *voltage -= Self::node_voltage(anchor, node);
+            }
+        }
+        let static_internal = internal[..INTERNAL_DIM].try_into().unwrap();
 
         // Active internal KCL rows (residual orientation, flipped onto the
         // MNA leaving-current convention).
-        let (g_ii, g_ie, z_i) =
-            self.internal_kcl_linearization_from_eval(state, eval, vc, vb, ve, vs);
+        let (g_ii, g_ie, z_i) = self.internal_kcl_linearization_from_eval_with_source(
+            state,
+            eval,
+            [vc, vb, ve, vs],
+            |row| row.source(static_internal, &external),
+        );
         for row in 0..INTERNAL_DIM {
             if !self.vbic_internal_row_active(row) {
                 continue;
@@ -1034,7 +1061,7 @@ impl Bjt {
         for row in 0..EXTERNAL_DIM {
             let row_node = external_nodes[row];
             let branch = terminal_currents[row];
-            let source = branch.source(&internal, &external);
+            let source = branch.source(static_internal, &external);
             for (&node, &derivative) in internal_nodes.iter().zip(&branch.d_internal) {
                 if derivative != 0.0 {
                     stamper.stamp(row_node, node, derivative);
@@ -1052,10 +1079,15 @@ impl Bjt {
         // transport replacement (and its thermal power correction).
         if self.td > 0.0 {
             for branch in &self.mna_delay_branches {
-                self.stamp_vbic_residual_branch(stamper, branch);
+                self.stamp_vbic_residual_branch(stamper, branch, &internal, &external);
             }
             if self.thermal_model_enabled() {
-                self.stamp_vbic_residual_branch(stamper, &self.mna_delay_thermal);
+                self.stamp_vbic_residual_branch(
+                    stamper,
+                    &self.mna_delay_thermal,
+                    &internal,
+                    &external,
+                );
             }
         }
     }
@@ -1066,14 +1098,14 @@ impl Bjt {
         &self,
         stamper: &mut impl MatrixStamper,
         branch: &BjtCurrentBranch,
+        internal: &[Value; BJT_INTERNAL_STATE_DIM],
+        external: &[Value; EXTERNAL_DIM],
     ) {
         if !branch.is_active() {
             return;
         }
-        let internal = self.vbic_mna_internal_state();
-        let external = self.vbic_mna_external_state();
         let external_nodes = self.external_terminal_nodes();
-        let source = branch.linearization_dot(&internal, &external) - branch.current;
+        let source = branch.linearization_dot(internal, external) - branch.current;
 
         let mut stamp_side = |row_node: NodeId, sign: Value| {
             if row_node == 0 {
@@ -1232,6 +1264,123 @@ mod tests {
             node
         });
         bjt
+    }
+
+    #[test]
+    fn vbic_direct_correction_retains_currents_at_a_steep_thermal_cutoff() {
+        let coefficient = (Value::EPSILON - 1.0) / 20.0;
+        for level in [11.0, 12.0] {
+            for (model, p) in [
+                (Bjt::new_npn("q".into(), 1, 2, 0), 1.0),
+                (Bjt::new_pnp("q".into(), 1, 2, 0), -1.0),
+            ] {
+                let params = [
+                    ("LEVEL", level),
+                    ("VEF", 1e15),
+                    ("VER", 3.0),
+                    ("TCVEF", coefficient),
+                    ("TCVER", -0.02),
+                    ("IS", 1e-16),
+                    ("IBEI", 1e-18),
+                    ("IBCI", 1e-18),
+                    ("RCX", 1.0),
+                    ("RCI", 1.0),
+                    ("RBX", 1.0),
+                    ("RBI", 1.0),
+                    ("RE", 1.0),
+                    ("RTH", 1000.0),
+                    ("TD", 1e-9),
+                    ("GMIN", 0.0),
+                ]
+                .map(|(name, value)| (name.to_owned(), value))
+                .into_iter()
+                .collect();
+                let mut bjt = model
+                    .with_params(&params)
+                    .with_instance_params(&[("M".into(), 3.0)]);
+                bjt.set_vbic_external_thermal_node(3);
+                let mut next = 4;
+                bjt.assign_vbic_internal_nodes(|_| {
+                    let node = next;
+                    next += 1;
+                    node
+                });
+                let mut bias = vec![0.0; next - 1];
+                bias[0] = p * 0.6;
+                bias[1] = p * 0.7;
+                bias[2] = 20.0;
+                for (index, value) in [0.6, 0.5998, 0.7, 0.69999, 0.0001, 0.6, 0.0]
+                    .into_iter()
+                    .enumerate()
+                {
+                    let node = bjt.vbic_internal_node(index);
+                    if node != 0 {
+                        bias[node - 1] = p * value;
+                    }
+                }
+                bias[bjt.node_xf1 - 1] = 1e-4;
+                bias[bjt.node_xf2 - 1] = 2e-4;
+                bjt.update_vbic_mna_static_probe(&bias);
+                let internal = bjt.vbic_mna_internal_state();
+                let (physical, _) = bjt.intrinsic_state_residual_jacobian(
+                    bias[0],
+                    bias[1],
+                    0.0,
+                    0.0,
+                    internal[..INTERNAL_DIM].try_into().unwrap(),
+                );
+                let mut expected = vec![0.0; bias.len()];
+                for (index, value) in physical.into_iter().enumerate() {
+                    if bjt.vbic_internal_row_active(index) {
+                        expected[bjt.vbic_internal_node(index) - 1] +=
+                            Bjt::vbic_residual_row_sign(index) * value;
+                    }
+                }
+                for (node, branch) in bjt
+                    .external_terminal_nodes()
+                    .into_iter()
+                    .zip(bjt.external_terminal_branches(bjt.mna_eval.unwrap()))
+                {
+                    if node != 0 {
+                        expected[node - 1] += branch.current;
+                    }
+                }
+                for branch in bjt
+                    .mna_delay_branches
+                    .iter()
+                    .chain([&bjt.mna_delay_thermal])
+                {
+                    for (index, sign) in [(branch.pos_internal, 1.0), (branch.neg_internal, -1.0)] {
+                        if let Some(index) = index {
+                            let node = bjt.vbic_internal_node(index);
+                            if node != 0 {
+                                expected[node - 1] +=
+                                    sign * Bjt::vbic_residual_row_sign(index) * branch.current;
+                            }
+                        }
+                    }
+                }
+                let mut direct = DenseStamper::new(bias.len());
+                bjt.stamp_vbic_mna_correction(&mut direct, &bias);
+                for (row, (&rhs, &physical)) in direct.b.iter().zip(&expected).enumerate() {
+                    assert!(
+                        (rhs + physical).abs() < 1e-12 * physical.abs() + 1e-15,
+                        "LEVEL={level} p={p} row={row}: {:e} != {physical:e}",
+                        -rhs
+                    );
+                }
+                let mut companion = DenseStamper::new(bias.len());
+                bjt.stamp_vbic_mna(&mut companion);
+                assert_eq!(direct.a, companion.a);
+                assert!(
+                    companion
+                        .residual(&bias)
+                        .iter()
+                        .zip(expected)
+                        .any(|(actual, expected)| (actual - expected).abs() > 1e-5)
+                );
+            }
+        }
     }
 
     #[test]

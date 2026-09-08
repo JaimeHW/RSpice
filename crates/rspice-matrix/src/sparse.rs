@@ -1859,6 +1859,38 @@ impl StaticMatrix {
         &mut self.values
     }
 
+    /// Dot one row with a vector, considering columns at or beyond `first`.
+    /// Extended accumulation preserves small branch-current terms when the
+    /// retained terms of a constrained MNA row nearly cancel.
+    pub fn row_product_from_column(
+        &self,
+        row: usize,
+        first: usize,
+        vector: &[Value],
+    ) -> Result<Value, SolverError> {
+        self.check_stamping_error()?;
+        if row >= self.nrows || first > self.ncols || vector.len() != self.ncols {
+            return Err(SolverError::InvalidCircuit(
+                "Partial row product dimensions do not match the matrix".into(),
+            ));
+        }
+        let (mut hi, mut lo) = (0.0, 0.0);
+        for position in self.residual_layout.row_ptr[row]..self.residual_layout.row_ptr[row + 1] {
+            let column = self.residual_layout.col_idx[position];
+            if column >= first {
+                let coefficient = self.values[self.residual_layout.csc_idx[position]];
+                let product = coefficient * vector[column];
+                dd_add(
+                    &mut hi,
+                    &mut lo,
+                    product,
+                    coefficient.mul_add(vector[column], -product),
+                );
+            }
+        }
+        Ok(hi + lo)
+    }
+
     /// Compute infinity norm of the scaled residual `A*x-b`.
     ///
     /// Each row is normalized with a SPICE-like tolerance scale:
@@ -2041,7 +2073,116 @@ impl StaticMatrix {
         Ok(())
     }
 
+    /// Scale an explicitly evaluated residual without forming `A*x-b`.
+    /// `rounding_point` supplies coordinates whose representational error can
+    /// affect the residual; callers can set other coordinates to zero. As in
+    /// the affine residual norm, the gross product contributes only an IEEE
+    /// rounding floor, never the full nonlinear relative tolerance.
+    pub fn scaled_explicit_residual_inf_norm_by_row<F>(
+        &self,
+        residual: &[Value],
+        rounding_point: &[Value],
+        reltol: Value,
+        row_abstol: F,
+    ) -> Result<Value, SolverError>
+    where
+        F: FnMut(usize) -> Value,
+    {
+        let mut norm: Value = 0.0;
+        self.visit_scaled_explicit_residuals(
+            residual,
+            rounding_point,
+            reltol,
+            self.nrows,
+            row_abstol,
+            |_, value| norm = norm.max(value),
+        )?;
+        Ok(norm)
+    }
+
+    /// Return the individually scaled explicit residuals for a row prefix.
+    /// This uses the same coordinate-rounding floor as the infinity norm.
+    pub fn scaled_explicit_residual_norms_by_row_prefix<F>(
+        &self,
+        residual: &[Value],
+        rounding_point: &[Value],
+        reltol: Value,
+        row_count: usize,
+        row_abstol: F,
+    ) -> Result<Vec<Value>, SolverError>
+    where
+        F: FnMut(usize) -> Value,
+    {
+        let mut norms = vec![0.0; row_count.min(self.nrows)];
+        self.visit_scaled_explicit_residuals(
+            residual,
+            rounding_point,
+            reltol,
+            norms.len(),
+            row_abstol,
+            |row, value| norms[row] = value,
+        )?;
+        Ok(norms)
+    }
+
+    fn visit_scaled_explicit_residuals(
+        &self,
+        residual: &[Value],
+        rounding_point: &[Value],
+        reltol: Value,
+        row_count: usize,
+        mut row_abstol: impl FnMut(usize) -> Value,
+        mut visit: impl FnMut(usize, Value),
+    ) -> Result<(), SolverError> {
+        self.check_stamping_error()?;
+        if residual.len() != self.nrows || rounding_point.len() != self.ncols {
+            return Err(SolverError::InvalidCircuit(
+                "Explicit residual dimensions do not match the matrix".into(),
+            ));
+        }
+        if residual
+            .iter()
+            .chain(rounding_point)
+            .any(|value| !value.is_finite())
+        {
+            for row in 0..row_count {
+                visit(row, Value::INFINITY);
+            }
+            return Ok(());
+        }
+        let reltol = if reltol.is_finite() && reltol > 0.0 {
+            reltol
+        } else {
+            1e-3
+        };
+        for (row, value) in residual.iter().take(row_count).enumerate() {
+            let mut gross = 0.0;
+            for position in self.residual_layout.row_ptr[row]..self.residual_layout.row_ptr[row + 1]
+            {
+                gross += (self.values[self.residual_layout.csc_idx[position]]
+                    * rounding_point[self.residual_layout.col_idx[position]])
+                    .abs();
+            }
+            if !gross.is_finite() {
+                visit(row, Value::INFINITY);
+                continue;
+            }
+            let abstol = row_abstol(row);
+            let abstol = if abstol.is_finite() && abstol > 0.0 {
+                abstol
+            } else {
+                1e-12
+            };
+            let scale = abstol + 256.0 * Value::EPSILON * gross + reltol * value.abs();
+            visit(row, value.abs() / scale);
+        }
+        Ok(())
+    }
+
     /// Compute the unscaled infinity norm of `A*x-b` without allocating.
+    ///
+    /// See [`Self::scaled_explicit_residual_inf_norm_by_row`] when the physical
+    /// residual is available without reconstructing an affine companion.
     pub fn raw_residual_inf_norm(
         &self,
         solution: &[Value],
@@ -6506,6 +6647,74 @@ mod tests {
         let correction = matrix.correction_rhs(&[0.0], &[1.0, 1.0, 1.0]).unwrap();
 
         assert_eq!(correction, vec![-1.0]);
+    }
+
+    #[test]
+    fn explicit_residual_keeps_only_the_selected_coordinate_rounding_floor() {
+        let matrix =
+            StaticMatrix::from_triplets(1, 3, &[(0, 0, 1e6), (0, 1, -1e6), (0, 2, 1e12)]).unwrap();
+        let norm = |residual: Value| {
+            matrix
+                .scaled_explicit_residual_inf_norm_by_row(
+                    &[residual],
+                    &[0.7, 0.7, 0.0],
+                    1e-3,
+                    |_| 1e-12,
+                )
+                .unwrap()
+        };
+        assert!(
+            norm(5e-11) < 1.0,
+            "allow voltage-rounding noise in a stiff resistor"
+        );
+        assert!(
+            norm(1e-4) > 1.0,
+            "a large omitted companion must not hide physical disequilibrium"
+        );
+        assert!(norm(Value::NAN).is_infinite());
+        assert_eq!(
+            matrix
+                .scaled_explicit_residual_norms_by_row_prefix(
+                    &[1e-4],
+                    &[0.7, 0.7, 0.0],
+                    1e-3,
+                    1,
+                    |_| 1e-12
+                )
+                .unwrap(),
+            vec![norm(1e-4)],
+        );
+        assert!(
+            matrix
+                .scaled_explicit_residual_inf_norm_by_row(&[], &[0.0; 3], 1e-3, |_| 1e-12)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn partial_row_product_preserves_retained_branch_current_cancellation() {
+        let matrix = StaticMatrix::from_triplets(
+            1,
+            4,
+            &[(0, 0, 1e20), (0, 1, -1e16), (0, 2, 1.0), (0, 3, 1e16)],
+        )
+        .unwrap();
+        let solution = [2.0, 1.0, 1.0, 1.0];
+        assert_eq!(
+            matrix.row_product_from_column(0, 1, &solution).unwrap(),
+            1.0
+        );
+        assert_eq!(
+            matrix.row_product_from_column(0, 4, &solution).unwrap(),
+            0.0
+        );
+        assert!(matrix.row_product_from_column(1, 1, &solution).is_err());
+        assert!(matrix.row_product_from_column(0, 5, &solution).is_err());
+        assert!(
+            matrix
+                .row_product_from_column(0, 1, &solution[..3])
+                .is_err()
+        );
     }
 
     #[test]

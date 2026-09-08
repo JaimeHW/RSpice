@@ -204,6 +204,9 @@ impl Engine {
         };
         let mut rhs = vec![0.0; solution.len()];
         let mut raw_solution = Vec::with_capacity(solution.len());
+        let mut correction_rhs = Vec::new();
+        let uses_vbic_correction = Self::requires_vbic_correction_form(circuit);
+        let solve_denominator_floors = Self::dc_solve_denominator_floors(circuit, solution.len());
 
         for iter in 0..max_iterations {
             if Self::should_abort_iteration(abort, iter) {
@@ -217,19 +220,39 @@ impl Engine {
             let node_count = circuit.num_nodes().min(solution.len());
 
             circuit.stamp_dc_direct_scaled(matrix, &mut rhs, source_scale);
-            if matches!(
+            let static_probe = matches!(
                 seed_mode,
                 CorrectorSeedMode::StaticJfetEveryIteration
                     | CorrectorSeedMode::StaticProbeEveryIteration
-            ) {
-                self.try_stamp_static_probe_nonlinear_devices_for_dc(
-                    circuit, matrix, &mut rhs, &solution,
-                )?;
+            );
+            self.try_stamp_operating_point_newton_system(
+                circuit,
+                matrix,
+                &mut rhs,
+                OperatingPointProbe {
+                    solution: &solution,
+                    time: 0.0,
+                    analysis: crate::xspice::AnalysisType::DcOp,
+                    junction_gmin: self
+                        .effective_device_junction_gmin(self.config.convergence_config.gmin_target),
+                },
+                static_probe,
+                &mut correction_rhs,
+            )?;
+            let solve_result = if uses_vbic_correction {
+                Self::solve_direct_dc_correction(
+                    matrix,
+                    &rhs,
+                    solve_denominator_floors.as_deref(),
+                    &solution,
+                    &mut raw_solution,
+                )
             } else {
-                self.try_stamp_nonlinear_devices_for_dc(circuit, matrix, &mut rhs, &solution)?;
-            }
-
-            match matrix.solve_into(&rhs, &mut raw_solution) {
+                matrix
+                    .solve_into(&rhs, &mut raw_solution)
+                    .map_err(SimulationError::Solver)
+            };
+            match solve_result {
                 Ok(()) => {}
                 Err(_) => return Ok((solution, false, used_iterations)),
             }
