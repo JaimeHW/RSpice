@@ -328,6 +328,115 @@ pub fn parse_source_spec_text(
     parse_source_spec(&mut stream, line_num, params)
 }
 
+/// Inspect an independent source's declared data-file dependency, including
+/// deferred statistical or trial-dependent waveforms. Numeric values are not
+/// evaluated; the parser's waveform registry and PWL filename grammar determine
+/// ownership. This is a dependency query, not numerical waveform validation.
+pub fn independent_source_file_dependency(
+    kind: &ElementKind,
+) -> Result<Option<std::borrow::Cow<'_, str>>, ParseError> {
+    match kind {
+        ElementKind::VoltageSource(spec) | ElementKind::CurrentSource(spec) => {
+            Ok(spec.file_dependency().map(std::borrow::Cow::Borrowed))
+        }
+        ElementKind::VoltageSourceDeferred(raw) | ElementKind::CurrentSourceDeferred(raw) => {
+            deferred_source_file_dependency(raw).map(|path| path.map(std::borrow::Cow::Owned))
+        }
+        _ => Ok(None),
+    }
+}
+
+fn deferred_source_file_dependency(raw: &str) -> Result<Option<String>, ParseError> {
+    let tokens = tokenize(raw).map_err(|error| lex_to_parse_error(error, 0))?;
+    let mut stream = TokenStream::new(tokens);
+    loop {
+        skip_commas(&mut stream);
+        if matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+            return Ok(None);
+        }
+        let keyword = match &stream.peek().kind {
+            TokenKind::Ident(name) => Some(name.to_ascii_uppercase()),
+            _ => None,
+        };
+        match keyword.as_deref() {
+            Some("PWL") => {
+                stream.advance();
+                let has_paren = stream.consume(&TokenKind::LParen);
+                if !matches!(&stream.peek().kind, TokenKind::Ident(name) if name.eq_ignore_ascii_case("FILE"))
+                {
+                    return Ok(None);
+                }
+                stream.advance();
+                stream.consume(&TokenKind::Equals);
+                return parse_pwl_file_path(&mut stream, 0, has_paren).map(Some);
+            }
+            // A source has one transient waveform. PWL/FILE names inside a
+            // different waveform's samples cannot declare a second waveform.
+            Some(name) if transient_source_parser(name).is_some() => return Ok(None),
+            Some("DC") => {
+                stream.advance();
+                skip_commas(&mut stream);
+                let had_equals = stream.consume(&TokenKind::Equals);
+                if had_equals || !dc_term_is_omitted(&stream) {
+                    skip_source_value_syntax(&mut stream)?;
+                }
+            }
+            Some(name @ ("AC" | "DISTOF1" | "DISTOF2")) => {
+                stream.advance();
+                skip_commas(&mut stream);
+                if name == "AC" {
+                    stream.consume(&TokenKind::Equals);
+                }
+                for _ in 0..2 {
+                    skip_commas(&mut stream);
+                    if source_distortion_annotation_end(&stream) {
+                        break;
+                    }
+                    skip_source_value_syntax(&mut stream)?;
+                }
+            }
+            Some(name) if is_source_port_annotation_keyword(name) => {
+                stream.advance();
+                skip_commas(&mut stream);
+                stream.consume(&TokenKind::Equals);
+                skip_source_value_syntax(&mut stream)?;
+            }
+            Some(name)
+                if is_xyce_ignored_source_instance_parameter(name)
+                    && matches!(stream.peek_n(1).kind, TokenKind::Equals) =>
+            {
+                stream.advance();
+                stream.advance();
+                skip_commas(&mut stream);
+                if !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+                    stream.advance();
+                }
+            }
+            _ => skip_source_value_syntax(&mut stream)?,
+        }
+    }
+}
+
+/// The scalar token grammar accepted by `expect_value`, without parameter
+/// lookup or expression evaluation. Braced/quoted expressions are one lexer
+/// token, so keyword-like variable names inside them never become source cards.
+fn skip_source_value_syntax(stream: &mut TokenStream) -> Result<(), ParseError> {
+    skip_commas(stream);
+    if matches!(stream.peek().kind, TokenKind::Plus | TokenKind::Minus) {
+        stream.advance();
+    }
+    match &stream.peek().kind {
+        TokenKind::Number(_) | TokenKind::Ident(_) | TokenKind::Expression(_) => {
+            stream.advance();
+            Ok(())
+        }
+        token => Err(ParseError::Syntax {
+            line: 0,
+            message: format!("Expected a source value token, found {token}"),
+        }),
+    }
+}
+
 fn parse_distortion_source_annotation(
     stream: &mut TokenStream,
     line_num: usize,
@@ -390,27 +499,12 @@ fn source_distortion_annotation_end(stream: &TokenStream) -> bool {
 }
 
 fn is_source_level_keyword(keyword: &str) -> bool {
-    matches!(
-        keyword.to_ascii_uppercase().as_str(),
-        "DC" | "AC"
-            | "PULSE"
-            | "SIN"
-            | "SINE"
-            | "PWL"
-            | "PAT"
-            | "EXP"
-            | "SFFM"
-            | "AM"
-            | "TRNOISE"
-            | "DISTOF1"
-            | "DISTOF2"
-            | "PORT"
-            | "PORTNUM"
-            | "Z0"
-            | "PWR"
-            | "FREQ"
-            | "PHASE"
-    )
+    transient_source_parser(keyword).is_some()
+        || is_source_port_annotation_keyword(keyword)
+        || matches!(
+            keyword.to_ascii_uppercase().as_str(),
+            "DC" | "AC" | "DISTOF1" | "DISTOF2"
+        )
 }
 
 fn is_source_port_annotation_keyword(keyword: &str) -> bool {
@@ -539,6 +633,24 @@ fn dc_term_is_omitted(stream: &TokenStream) -> bool {
     }
 }
 
+type TransientSourceParser =
+    fn(&mut TokenStream, usize, &ParamContext) -> Result<SourceSpec, ParseError>;
+
+fn transient_source_parser(keyword: &str) -> Option<TransientSourceParser> {
+    Some(match keyword.to_ascii_uppercase().as_str() {
+        "PULSE" => parse_pulse_spec,
+        "SIN" | "SINE" => parse_sin_spec,
+        "PWL" => parse_pwl_spec,
+        "PAT" => parse_pat_spec,
+        "EXP" => parse_exp_spec,
+        "SFFM" => parse_sffm_spec,
+        "AM" => parse_am_spec,
+        "TRNOISE" => parse_trnoise_spec,
+        "TRRANDOM" => parse_trrandom_spec,
+        _ => return None,
+    })
+}
+
 fn parse_transient_source_spec_keyword(
     stream: &mut TokenStream,
     line_num: usize,
@@ -548,50 +660,11 @@ fn parse_transient_source_spec_keyword(
     let TokenKind::Ident(keyword) = &stream.peek().kind else {
         return Ok(None);
     };
-
-    match keyword.to_uppercase().as_str() {
-        "PULSE" => {
-            stream.advance();
-            parse_pulse_spec(stream, line_num, params).map(Some)
-        }
-        "SIN" => {
-            stream.advance();
-            parse_sin_spec(stream, line_num, params).map(Some)
-        }
-        "SINE" => {
-            stream.advance();
-            parse_sin_spec(stream, line_num, params).map(Some)
-        }
-        "PWL" => {
-            stream.advance();
-            parse_pwl_spec(stream, line_num, params).map(Some)
-        }
-        "PAT" => {
-            stream.advance();
-            parse_pat_spec(stream, line_num, params).map(Some)
-        }
-        "EXP" => {
-            stream.advance();
-            parse_exp_spec(stream, line_num, params).map(Some)
-        }
-        "SFFM" => {
-            stream.advance();
-            parse_sffm_spec(stream, line_num, params).map(Some)
-        }
-        "AM" => {
-            stream.advance();
-            parse_am_spec(stream, line_num, params).map(Some)
-        }
-        "TRNOISE" => {
-            stream.advance();
-            parse_trnoise_spec(stream, line_num, params).map(Some)
-        }
-        "TRRANDOM" => {
-            stream.advance();
-            parse_trrandom_spec(stream, line_num, params).map(Some)
-        }
-        _ => Ok(None),
-    }
+    let Some(parser) = transient_source_parser(keyword) else {
+        return Ok(None);
+    };
+    stream.advance();
+    parser(stream, line_num, params).map(Some)
 }
 
 /// Parse TRNOISE(NA NT NALPHA NAMP [RTSAM RTSCAPT RTSEMT]).
@@ -1629,6 +1702,68 @@ fn is_xyce_ignored_source_instance_parameter(keyword: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn source_file_dependencies_do_not_evaluate_deferred_values() {
+        for (raw, expected) in [
+            ("PWL FILE \"wave.csv\"", Some("wave.csv")),
+            (
+                "DC {unbound + agauss(0,1,1)} AC {magnitude} {phase} PWL(FILE=\"wave.csv\" TD={delay})",
+                Some("wave.csv"),
+            ),
+            ("DC=pwl PWL FILE \"wave.csv\"", Some("wave.csv")),
+            (
+                "DISTOF1 magnitude angle PORTNUM port_index PWL FILE \"wave;file.csv\"",
+                Some("wave;file.csv"),
+            ),
+            ("PWL 0 0 pwl file", None),
+            ("PWL(0 file pwl file)", None),
+            ("DC=file PWL(0 0 1 {file})", None),
+            ("SIN 0 file pwl file", None),
+            ("TRRANDOM 1 rate 0 pwl file", None),
+            ("{function(pwl,file)}", None),
+        ] {
+            for kind in [
+                ElementKind::VoltageSourceDeferred(raw.to_owned()),
+                ElementKind::CurrentSourceDeferred(raw.to_owned()),
+            ] {
+                assert_eq!(
+                    independent_source_file_dependency(&kind)
+                        .unwrap_or_else(|error| panic!("{raw}: {error}"))
+                        .as_deref(),
+                    expected,
+                    "{raw}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn source_file_inspection_agrees_with_resolved_waveform_grammar() {
+        let mut params = ParamContext::new();
+        params.set("file", 1.0);
+        params.set("pwl", 2.0);
+        for raw in [
+            "PWL FILE \"wave.csv\"",
+            "DC=pwl PWL(FILE=\"wave.csv\")",
+            "DC 1 AC 1 PWL FILE \"wave.csv\" DISTOF1 1 PORTNUM 1",
+            "PWL 0 0 pwl file",
+            "SIN 0 file pwl file",
+            "TRRANDOM 1 1 0 pwl file",
+            "DC TRRANDOM(1 1 0 2 1)",
+            "DC {file} PWL(0 0 1 {pwl})",
+        ] {
+            let spec = parse_source_spec_text(raw, 0, &params)
+                .unwrap_or_else(|error| panic!("{raw}: {error}"));
+            let resolved = ElementKind::VoltageSource(spec);
+            let deferred = ElementKind::VoltageSourceDeferred(raw.to_owned());
+            assert_eq!(
+                independent_source_file_dependency(&deferred).unwrap(),
+                independent_source_file_dependency(&resolved).unwrap(),
+                "{raw}"
+            );
+        }
+    }
 
     #[test]
     fn trnoise_accepts_zero_alpha_as_ngspice_white_endpoint() {

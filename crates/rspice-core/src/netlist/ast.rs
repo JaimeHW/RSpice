@@ -1913,6 +1913,24 @@ pub enum SourceSpec {
 }
 
 impl SourceSpec {
+    /// File read when this waveform is instantiated, including wrapped DC/AC,
+    /// distortion and RF-port specifications. Inspect after scope resolution
+    /// when the source card contains deferred parameter expressions.
+    pub(crate) fn file_dependency(&self) -> Option<&str> {
+        match self {
+            Self::PwlFile { path, .. } => Some(path),
+            Self::Distortion { inner, .. }
+            | Self::RfPort { inner, .. }
+            | Self::DcTransient {
+                transient: inner, ..
+            }
+            | Self::DcAcTransient {
+                transient: inner, ..
+            } => inner.file_dependency(),
+            _ => None,
+        }
+    }
+
     /// Return RF-port metadata when this source has ngspice `portnum`
     /// annotations.
     pub fn rf_port(&self) -> Option<&SourceRfPort> {

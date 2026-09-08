@@ -1231,6 +1231,43 @@ fn generated_model_section_is_expanded_and_retained_before_dispatch() {
 }
 
 #[test]
+fn prepared_waveforms_distinguish_inline_names_from_file_inputs() {
+    let inline = [
+        "V1 file 0 PWL(0 0 1 1)\nR1 file 0 1k",
+        ".param file=1 simulation=2\nV1 out 0 PWL(0 0 1 {file})\nR1 out 0 1k",
+        ".param pwl=1 file=2\nV1 out 0 PWL 0 0 pwl file\nR1 out 0 1k",
+        ".subckt source out params: file=1\nV1 out 0 PWL(0 0 1 {file})\n.ends\nX1 out source file=2\nR1 out 0 1k",
+    ];
+    for body in inline {
+        let source = format!("PWL FILE notes\n{body}\n.op\n.end\n");
+        let state = manual_deck_state(&source);
+        SimulationController::new()
+            .build_prepared_snapshot(&state, SimulationRunIntent::ManualDeck)
+            .unwrap_or_else(|error| panic!("{source}: {error}"));
+    }
+    for body in [
+        "V1 out 0 PWL FILE \"unsealed.csv\"",
+        "V1 out 0 DC 1 AC 1 PWL(FILE=\"unsealed.csv\") DISTOF1 1",
+        ".subckt source out params: dcval=1\nV1 out 0 DC {dcval} PWL\n+ FILE=\"unsealed.csv\"\n.ends\nX1 out source dcval=2",
+    ] {
+        let source = format!("deck\n{body}\nR1 out 0 1k\n.op\n.end\n");
+        let state = manual_deck_state(&source);
+        let error = SimulationController::new()
+            .build_prepared_snapshot(&state, SimulationRunIntent::ManualDeck)
+            .expect_err("a real file dependency cannot reach dispatch");
+        assert_eq!(
+            error.stage(),
+            PreparationStage::SourceChecks,
+            "{source}: {error}"
+        );
+        assert!(
+            error.message().contains("file-backed PWL source"),
+            "{source}: {error}"
+        );
+    }
+}
+
+#[test]
 fn every_runtime_external_input_category_fails_closed() {
     let cases = [
         ".include model.lib",
@@ -1253,7 +1290,7 @@ fn every_runtime_external_input_category_fails_closed() {
     ];
 
     for line in cases {
-        let Err(error) = reject_deferred_external_sources(line) else {
+        let Err(error) = reject_deferred_external_sources(&format!("deck\n{line}\n.end\n")) else {
             panic!("unsealed runtime input must be rejected: {line}");
         };
         assert_eq!(error.stage(), PreparationStage::SourceChecks, "{line}");
@@ -1480,6 +1517,86 @@ fn benign_continuations_remain_accepted() {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn statistical_deferred_file_waveforms_are_rejected_before_dispatch() {
+    let directory = fixture_dir("statistical-waveform-files");
+    fs::write(
+        directory.join("statistics.scs"),
+        "simulator lang=spectre\nstatistics {\nprocess {\nvary level dist=gauss std=0.1\n}\n}\n",
+    )
+    .unwrap();
+    let path = directory.join("deck.cir");
+    for (waveform, file_backed) in [
+        ("PWL(0 0 1 {level})", false),
+        ("PWL FILE \"unsealed.csv\"", true),
+    ] {
+        let source = format!(
+            "deck\n.param level=1\n.include \"statistics.scs\"\nV1 out 0 DC {{level}} {waveform}\nR1 out 0 1k\n.op\n.end\n"
+        );
+        fs::write(&path, &source).unwrap();
+        let mut state = manual_deck_state(&source);
+        state.workspace.netlist_source_path = Some(path.clone());
+        let result = SimulationController::new()
+            .build_prepared_snapshot(&state, SimulationRunIntent::ManualDeck);
+        if file_backed {
+            let error = result.expect_err("statistical deferral cannot hide an input file");
+            assert_eq!(error.stage(), PreparationStage::SourceChecks);
+            assert!(
+                error.message().contains("file-backed PWL source"),
+                "{error}"
+            );
+        } else {
+            result.expect("statistical inline waveforms remain executable");
+        }
+    }
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn corner_waveforms_are_checked_after_materialization_and_scope_resolution() {
+    use crate::services::simulation_runner::{CornerModelBinding, CornerProcess, CornerRunConfig};
+
+    let root = "deck\n.param file=2\nX1 out source level=3\nR1 out 0 1k\n.op\n.end\n";
+    for (waveform, file_backed) in [
+        ("PWL(0 0 1 {file})", false),
+        ("PWL\n+ FILE=\"late.csv\"", true),
+    ] {
+        let task = QueuedAnalysis {
+            numeric_override: None,
+            spec: AnalysisSpec::Corner,
+            config: None,
+            spec_options: SpecExecutionOptions {
+                corner: Some(CornerRunConfig {
+                    process_corners: vec![CornerProcess::FF],
+                    model_bindings: vec![CornerModelBinding {
+                        process: CornerProcess::FF,
+                        source_label: "foundry.lib [FF]".to_owned(),
+                        section: Some("FF".to_owned()),
+                        materialized_model_cards: format!(
+                            ".subckt source out params: level=1\nV1 out 0 DC {{level}} {waveform}\n.ends\n"
+                        ),
+                    }],
+                    ..CornerRunConfig::default()
+                }),
+                ..SpecExecutionOptions::default()
+            },
+            analysis_line: ".corner".to_owned(),
+        };
+        let result = reject_deferred_corner_model_sources(&[task], root);
+        if file_backed {
+            let error = result.expect_err("corner-local data files must be sealed");
+            assert_eq!(error.stage(), PreparationStage::ModelBindings);
+            assert!(
+                error.message().contains("file-backed PWL source"),
+                "{error}"
+            );
+        } else {
+            result.expect("inline corner waveforms may use root and instance parameters");
+        }
+    }
+}
+
 #[test]
 fn every_materialized_corner_binding_is_audited_before_dispatch() {
     use crate::services::simulation_runner::{CornerModelBinding, CornerProcess, CornerRunConfig};
@@ -1506,7 +1623,7 @@ fn every_materialized_corner_binding_is_audited_before_dispatch() {
         analysis_line: ".corner".to_owned(),
     };
 
-    let error = reject_deferred_corner_model_sources(&[task])
+    let error = reject_deferred_corner_model_sources(&[task], "deck\n.op\n.end\n")
         .expect_err("non-reference corner source must be sealed");
     assert_eq!(error.stage(), PreparationStage::ModelBindings);
     assert!(error.message().contains("foundry.lib [FF]"));

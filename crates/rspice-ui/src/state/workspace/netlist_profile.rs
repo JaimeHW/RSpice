@@ -158,7 +158,7 @@ impl NetlistExecutionProfile {
     /// the resolved AST before calling the source executable.
     pub fn validate_parsed_netlist(self, netlist: &rspice_core::Netlist) -> Result<(), String> {
         if matches!(self, Self::PspiceDeclarativeV1 | Self::PspiceDeclarativeV2)
-            && let Some((element, path)) = parsed_file_backed_pwl(netlist)
+            && let Some((element, path)) = parsed_file_backed_pwl(netlist)?
         {
             return Err(format!(
                 "profile {} rejects unsealed file-backed PWL input on element '{}' ({})",
@@ -187,14 +187,6 @@ impl NetlistExecutionProfile {
     pub(crate) fn validate_resolved_source(self, source: &str) -> Result<(), String> {
         if self == Self::Spice3NgspiceV2 {
             return visit_ngspice_v2_source(source, |_, _, _, _| {});
-        }
-        if matches!(self, Self::PspiceDeclarativeV1 | Self::PspiceDeclarativeV2)
-            && let Some(line) = pspice_file_backed_pwl_line(source)
-        {
-            return Err(format!(
-                "profile {} rejects unsealed file-backed PWL input on line {line}",
-                self.id()
-            ));
         }
         let rejected = source
             .lines()
@@ -508,87 +500,39 @@ fn is_pspice_v2_extended_source_line(line: &str) -> bool {
         || compact.contains("value_scale_factor=")
 }
 
-/// Return the first physical line of a PSpice logical source card that combines
-/// `PWL` with `FILE`. Continuation folding matters because Capture commonly
-/// emits `PWL` on the element line and `+ FILE "..."` on the next line.
-fn pspice_file_backed_pwl_line(source: &str) -> Option<usize> {
-    let mut logical = String::new();
-    let mut first_line = 0usize;
-
-    let classify = |logical: &str| {
-        let tokens = logical
-            .to_ascii_lowercase()
-            .split(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
-            .filter(|token| !token.is_empty())
-            .map(str::to_owned)
-            .collect::<Vec<_>>();
-        tokens.iter().any(|token| token == "pwl") && tokens.iter().any(|token| token == "file")
-    };
-
-    for (index, raw) in source
-        .lines()
-        .enumerate()
-        .skip(1)
-        .take_while(|(_, raw)| !is_spice_end_card(raw, ExpressionDialect::Ngspice))
-    {
-        let line = index + 1;
-        let trimmed = code(raw);
-        if trimmed.is_empty() || trimmed.starts_with('*') {
-            continue;
-        }
-        if let Some(continuation) = trimmed.strip_prefix('+') {
-            if !logical.is_empty() {
-                logical.push(' ');
-                logical.push_str(continuation.trim_start());
+fn parsed_file_backed_pwl(
+    netlist: &rspice_core::Netlist,
+) -> Result<Option<(String, String)>, String> {
+    fn elements(
+        elements: &[rspice_core::netlist::Element],
+    ) -> Result<Option<(String, String)>, String> {
+        for element in elements {
+            if let Some(path) =
+                rspice_core::netlist::independent_source_file_dependency(&element.kind)
+                    .map_err(|error| error.to_string())?
+            {
+                return Ok(Some((element.name.clone(), path.into_owned())));
             }
-            continue;
         }
-        if !logical.is_empty() && classify(&logical) {
-            return Some(first_line);
-        }
-        logical.clear();
-        logical.push_str(trimmed);
-        first_line = line;
+        Ok(None)
     }
-    (!logical.is_empty() && classify(&logical)).then_some(first_line)
-}
-
-fn parsed_file_backed_pwl(netlist: &rspice_core::Netlist) -> Option<(String, String)> {
-    fn source_path(spec: &rspice_core::netlist::SourceSpec) -> Option<&str> {
-        match spec {
-            rspice_core::netlist::SourceSpec::PwlFile { path, .. } => Some(path),
-            rspice_core::netlist::SourceSpec::Distortion { inner, .. }
-            | rspice_core::netlist::SourceSpec::RfPort { inner, .. }
-            | rspice_core::netlist::SourceSpec::DcTransient {
-                transient: inner, ..
-            }
-            | rspice_core::netlist::SourceSpec::DcAcTransient {
-                transient: inner, ..
-            } => source_path(inner),
-            _ => None,
-        }
-    }
-
-    fn elements(elements: &[rspice_core::netlist::Element]) -> Option<(String, String)> {
-        elements.iter().find_map(|element| {
-            let spec = match &element.kind {
-                rspice_core::netlist::ElementKind::VoltageSource(spec)
-                | rspice_core::netlist::ElementKind::CurrentSource(spec) => spec,
-                _ => return None,
-            };
-            source_path(spec).map(|path| (element.name.clone(), path.to_owned()))
-        })
-    }
-
     fn subcircuits(
         definitions: &[rspice_core::netlist::SubcircuitDef],
-    ) -> Option<(String, String)> {
-        definitions.iter().find_map(|definition| {
-            elements(&definition.elements).or_else(|| subcircuits(&definition.nested_subcircuits))
-        })
+    ) -> Result<Option<(String, String)>, String> {
+        for definition in definitions {
+            if let Some(dependency) = elements(&definition.elements)? {
+                return Ok(Some(dependency));
+            }
+            if let Some(dependency) = subcircuits(&definition.nested_subcircuits)? {
+                return Ok(Some(dependency));
+            }
+        }
+        Ok(None)
     }
-
-    elements(&netlist.elements).or_else(|| subcircuits(&netlist.subcircuits))
+    if let Some(dependency) = elements(&netlist.elements)? {
+        return Ok(Some(dependency));
+    }
+    subcircuits(&netlist.subcircuits)
 }
 
 fn is_profile_adapter_receipt(

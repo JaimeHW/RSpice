@@ -1,5 +1,8 @@
 //! Netlist workflow tests.
 
+#[cfg(not(target_arch = "wasm32"))]
+mod vendor_profiles;
+
 use super::bundle::*;
 use super::compose::*;
 use super::external_change::*;

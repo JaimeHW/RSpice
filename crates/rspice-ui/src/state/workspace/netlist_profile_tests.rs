@@ -3,6 +3,43 @@
 use super::NetlistExecutionProfile;
 
 #[test]
+fn profile_validation_checks_deferred_file_waveforms_before_admission() {
+    let profile = NetlistExecutionProfile::PspiceDeclarativeV2;
+    for (waveform, file_backed) in [
+        ("DC {level} PWL(0 0 1 {level})", false),
+        ("DC {level} PWL\n+ FILE=\"unsealed.csv\"", true),
+    ] {
+        let source = format!(
+            "deck\n.probe V(out)\n.subckt source out params: level=1\nV1 out 0 {waveform}\n.ends\nX1 out source level=2\nR1 out 0 1k\n.op\n.end\n"
+        );
+        let adapted = profile.adapt_source(&source).unwrap();
+        let parsed = rspice_core::Netlist::parse(&adapted).unwrap();
+        let result = profile.validate_parsed_netlist(&parsed);
+        if file_backed {
+            let error = result.expect_err("resolved file inputs cannot be admitted");
+            assert!(error.contains("unsealed file-backed PWL"), "{error}");
+        } else {
+            result.expect("scope-resolved inline samples remain valid");
+        }
+    }
+}
+
+#[test]
+fn inline_pwl_sources_may_use_file_as_a_node_or_parameter_name() {
+    for source in [
+        "deck\n.probe V(file)\nV1 file 0 PWL(0 0 1 1)\nR1 file 0 1k\n.op\n.end\n",
+        "deck\n.probe V(out)\n.param file=1\nV1 out 0 PWL(0 0 1 {file})\nR1 out 0 1k\n.op\n.end\n",
+    ] {
+        let profile = NetlistExecutionProfile::PspiceDeclarativeV2;
+        let adapted = profile
+            .adapt_source(source)
+            .expect("inline samples do not name a dependency");
+        let parsed = rspice_core::Netlist::parse(&adapted).unwrap();
+        profile.validate_parsed_netlist(&parsed).unwrap();
+    }
+}
+
+#[test]
 fn export_headers_and_quoted_semicolons_survive_adaptation() {
     for (profile, header) in [
         (
@@ -42,9 +79,11 @@ fn pwl_mentions_in_titles_and_comments_do_not_create_external_dependencies() {
         .adapt_source(source)
         .unwrap();
     let file_source = "deck\n.probe V(out)\nV1 out 0 PWL\n+ FILE \"external.txt\"\n.op\n.end\n";
+    let profile = NetlistExecutionProfile::PspiceDeclarativeV2;
+    let adapted = profile.adapt_source(file_source).unwrap();
     assert!(
-        NetlistExecutionProfile::PspiceDeclarativeV2
-            .adapt_source(file_source)
+        profile
+            .validate_parsed_netlist(&rspice_core::Netlist::parse(&adapted).unwrap())
             .is_err()
     );
 }

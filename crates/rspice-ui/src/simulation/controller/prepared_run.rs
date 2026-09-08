@@ -26,7 +26,7 @@ mod dependency_expansion;
 pub(crate) mod occurrence_outputs;
 mod periodic_sources;
 
-use dependency_expansion::expand_manual_dependencies;
+use dependency_expansion::{expand_manual_dependencies, validated_executable_hierarchy};
 use occurrence_outputs::{effective_plan_capture, projection_occurrence_nets};
 use periodic_sources::validate_prepared_periodic_sources;
 
@@ -1187,7 +1187,6 @@ impl SimulationController {
                 "No runnable analyses were selected",
             ));
         }
-        reject_deferred_corner_model_sources(tasks.iter().map(PreparedTask::queued_analysis))?;
 
         let run_set_config = state
             .sim_setup
@@ -1286,6 +1285,10 @@ impl SimulationController {
         )?;
         validate_prepared_periodic_sources(&tasks, &netlist)?;
         reject_unresolved_device_models(&netlist, has_project_technology)?;
+        reject_deferred_corner_model_sources(
+            tasks.iter().map(PreparedTask::queued_analysis),
+            &netlist,
+        )?;
         let project_model_sources = prepared_project_model_sources(state, &netlist)?;
 
         let source_digest = generated_executable_source_digest(&netlist);
@@ -1502,7 +1505,10 @@ impl SimulationController {
             state.workspace.project.revision(),
             queued_tasks,
         )?;
-        reject_deferred_corner_model_sources(tasks.iter().map(PreparedTask::queued_analysis))?;
+        reject_deferred_corner_model_sources(
+            tasks.iter().map(PreparedTask::queued_analysis),
+            &expanded,
+        )?;
         let analysis_config_digests = tasks
             .iter()
             .map(PreparedTask::config_digest)
@@ -2328,7 +2334,8 @@ fn contains_external_include_directive(source: &str) -> bool {
 
 #[cfg(test)]
 fn reject_deferred_external_sources(netlist: &str) -> Result<(), PreparationError> {
-    reject_deferred_external_sources_with_project_runtimes(netlist, &Default::default())
+    reject_deferred_external_sources_with_project_runtimes(netlist, &Default::default())?;
+    validated_executable_hierarchy(netlist).map(|_| ())
 }
 
 fn reject_deferred_external_sources_with_project_runtimes(
@@ -2393,6 +2400,7 @@ fn executable_logical_lines(source: &str) -> Vec<(usize, String)> {
 
 fn reject_deferred_corner_model_sources<'a>(
     tasks: impl IntoIterator<Item = &'a QueuedAnalysis>,
+    executable_netlist: &str,
 ) -> Result<(), PreparationError> {
     for task in tasks {
         let Some(corner) = task.spec_options.corner.as_ref() else {
@@ -2412,6 +2420,28 @@ fn reject_deferred_corner_model_sources<'a>(
                     ));
                 }
             }
+        }
+        if corner.model_bindings.is_empty() {
+            continue;
+        }
+        for &process in &corner.process_corners {
+            // Use the runner's own composition so root parameters and active
+            // subcircuit instances resolve against this corner's actual cards.
+            let source = crate::services::simulation_runner::materialize_corner_process_source(
+                executable_netlist,
+                corner,
+                process,
+                &rspice_core::abort_signal::NoAbort,
+            )
+            .map_err(|error| {
+                PreparationError::new(PreparationStage::ModelBindings, error.to_string())
+            })?;
+            validated_executable_hierarchy(&source).map_err(|error| {
+                PreparationError::new(
+                    PreparationStage::ModelBindings,
+                    format!("Materialized {process:?} corner source failed validation: {error}"),
+                )
+            })?;
         }
     }
     Ok(())
@@ -2438,9 +2468,13 @@ fn deferred_external_source_reason(line: &str) -> Option<&'static str> {
         .chars()
         .filter(|character| !character.is_whitespace())
         .collect::<String>();
-    if ["file", "input_file", "state_file", "process_file"]
-        .iter()
-        .any(|name| contains_parameter_assignment(&lower, name))
+    // File/provider assignments belong to code-model declarations or instances;
+    // identically named numeric parameters do not open external resources.
+    let code_model = directive == ".model" || directive.starts_with('a');
+    if code_model
+        && ["file", "input_file", "state_file", "process_file"]
+            .iter()
+            .any(|name| contains_parameter_assignment(&lower, name))
     {
         return Some("file-backed element or code-model parameter");
     }
@@ -2448,15 +2482,12 @@ fn deferred_external_source_reason(line: &str) -> Option<&'static str> {
         .split(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
         .filter(|token| !token.is_empty())
         .collect::<Vec<_>>();
-    if lower.contains("pwl") && tokens.contains(&"file") {
-        return Some("file-backed PWL source");
-    }
     if matches!(directive, ".measure" | ".meas") && tokens.contains(&"file") {
         return Some("file-backed measurement reference");
     }
     // `simulation` is the d_cosim shared-library/provider selector and may be
     // supplied either on its model or as an instance override.
-    if contains_parameter_assignment(&lower, "simulation") {
+    if code_model && contains_parameter_assignment(&lower, "simulation") {
         return Some("external co-simulation runtime");
     }
     const FILE_LOOKUPS: [&str; 16] = [
@@ -2488,51 +2519,11 @@ fn deferred_external_source_reason(line: &str) -> Option<&'static str> {
 }
 
 fn executable_source_portion(line: &str) -> &str {
-    let line = line.trim();
-    if line.starts_with('*') {
-        return "";
-    }
-
-    let mut in_single_quote = false;
-    let mut in_double_quote = false;
-    let mut escaped = false;
-    let mut previous = None;
-    let mut characters = line.char_indices().peekable();
-
-    while let Some((index, character)) = characters.next() {
-        if escaped {
-            escaped = false;
-            previous = Some(character);
-            continue;
-        }
-
-        match character {
-            '\\' if in_single_quote || in_double_quote => escaped = true,
-            '\'' if !in_double_quote => in_single_quote = !in_single_quote,
-            '"' if !in_single_quote => in_double_quote = !in_double_quote,
-            ';' if !in_single_quote && !in_double_quote => {
-                return line[..index].trim_end();
-            }
-            '$' if !in_single_quote && !in_double_quote => {
-                if characters
-                    .peek()
-                    .is_none_or(|(_, next)| next.is_whitespace())
-                {
-                    return line[..index].trim_end();
-                }
-            }
-            '/' if !in_single_quote && !in_double_quote => {
-                if matches!(characters.peek(), Some((_, '/')))
-                    && previous.is_none_or(char::is_whitespace)
-                {
-                    return line[..index].trim_end();
-                }
-            }
-            _ => {}
-        }
-        previous = Some(character);
-    }
-    line
+    rspice_core::netlist::strip_spice_inline_comment(
+        line,
+        rspice_core::config::ExpressionDialect::Ngspice,
+    )
+    .trim()
 }
 
 fn contains_parameter_assignment(line: &str, parameter: &str) -> bool {
@@ -2602,19 +2593,7 @@ fn prepared_project_model_sources(
     state: &AppState,
     executable_netlist: &str,
 ) -> Result<Vec<crate::state::PreparedModelSourceIdentity>, PreparationError> {
-    let parsed = rspice_core::netlist::parse_netlist(executable_netlist).map_err(|error| {
-        PreparationError::new(
-            PreparationStage::ModelBindings,
-            format!("Executable source cannot authenticate project model use: {error}"),
-        )
-    })?;
-    let flattened =
-        rspice_core::netlist::flatten_netlist_with_models(&parsed).map_err(|error| {
-            PreparationError::new(
-                PreparationStage::ModelBindings,
-                format!("Executable hierarchy cannot authenticate project model use: {error}"),
-            )
-        })?;
+    let (parsed, flattened) = validated_executable_hierarchy(executable_netlist)?;
     let referenced_names = flattened
         .elements
         .iter()

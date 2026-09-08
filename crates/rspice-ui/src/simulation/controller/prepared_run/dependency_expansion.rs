@@ -1,4 +1,4 @@
-//! Sealing one manually authored deck's host dependencies.
+//! Sealing host dependencies and validating resolved source waveforms.
 //!
 //! This is the only place a manual deck's `.include`, `.inc` and `.lib`
 //! directives are resolved against the host filesystem before a run, so it is
@@ -70,4 +70,41 @@ pub(super) fn expand_manual_dependencies(
             processor.resolved_dependencies().to_vec(),
         ))
     }
+}
+
+/// Resolve the same waveform grammar and instance parameters the engine uses
+/// before any dispatch proof is built. File-backed waveforms require sealing;
+/// their node or parameter names cannot identify a dependency by themselves.
+pub(super) fn validated_executable_hierarchy(
+    executable_netlist: &str,
+) -> Result<(rspice_core::Netlist, rspice_core::netlist::FlattenedNetlist), PreparationError> {
+    let parsed = rspice_core::netlist::parse_netlist(executable_netlist).map_err(|error| {
+        PreparationError::new(
+            PreparationStage::ModelBindings,
+            format!("Executable source cannot authenticate project model use: {error}"),
+        )
+    })?;
+    let flattened =
+        rspice_core::netlist::flatten_netlist_with_models(&parsed).map_err(|error| {
+            PreparationError::new(
+                PreparationStage::ModelBindings,
+                format!("Executable hierarchy cannot authenticate project model use: {error}"),
+            )
+        })?;
+    for element in &flattened.elements {
+        let dependency = rspice_core::netlist::independent_source_file_dependency(&element.kind)
+            .map_err(|error| {
+                PreparationError::new(PreparationStage::SourceChecks, error.to_string())
+            })?;
+        if let Some(path) = dependency {
+            return Err(PreparationError::new(
+                PreparationStage::SourceChecks,
+                format!(
+                    "Executable netlist contains an unsealed external dependency (file-backed PWL source) on element '{}': {path}",
+                    element.name
+                ),
+            ));
+        }
+    }
+    Ok((parsed, flattened))
 }

@@ -716,7 +716,12 @@ use rspice_core::analysis::harmonic_balance::{
 // PreparedPsp::{ports, frequencies, run_with_abort}; PreparedPsp and
 // PspAnalysisResult describe that contract, with one grouped re-export.
 // These landed in f9cbfe442 without updating this ceiling.
-const MAX_PUBLIC_ITEMS: usize = 5024;
+// 2026-09-08, +3 (5,024 -> 5,027): the UI calls is_spice_end_card,
+// strip_spice_inline_comment, and independent_source_file_dependency to use
+// the core's source contract during preparation and import. The first two
+// landed without an allowance. The source accessor and VBIC_1_3 preset are
+// core-only helpers and remain pub(crate), so they consume no public slots.
+const MAX_PUBLIC_ITEMS: usize = 5027;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently
