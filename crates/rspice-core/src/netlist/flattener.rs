@@ -21,7 +21,7 @@ use super::expr::{
 };
 use super::hierarchy_path::HierarchyPath;
 use super::param_scope::ParamResolver;
-use super::parser::parse_source_spec_text;
+use super::parser::{grouped_source_expression, parse_source_spec_text};
 use super::remove_unused::filter_elements_with_abort as filter_removeunused_elements_with_abort;
 use super::{
     DeviceInitialConditionDirective, DeviceInitialConditionError, DeviceInitialConditionSource,
@@ -2613,20 +2613,21 @@ impl<'a> Flattener<'a> {
             Ok(spec) if voltage_source => Ok(ElementKind::VoltageSource(spec)),
             Ok(spec) => Ok(ElementKind::CurrentSource(spec)),
             Err(source_error) => {
-                let trimmed = raw_spec.trim();
-                let expression = trimmed
-                    .strip_prefix('{')
-                    .and_then(|inner| inner.strip_suffix('}'))
-                    .map(str::trim)
-                    .filter(|inner| !inner.is_empty())
-                    .ok_or_else(|| {
-                        ParseError::InvalidValue(format!(
-                            "source specification for element '{}' could not be resolved: {}",
-                            element_path, source_error
-                        ))
-                    })?;
+                let resolution_error = || {
+                    ParseError::InvalidValue(format!(
+                        "source specification for element '{}' could not be resolved: {}",
+                        element_path, source_error
+                    ))
+                };
+                let expression =
+                    grouped_source_expression(raw_spec).ok_or_else(resolution_error)?;
                 let expression =
                     self.prepare_scoped_behavioral_expression(expression, scope, element_path)?;
+                // Preserve constant-evaluation failures such as division by zero
+                // instead of handing them to the runtime evaluator's domain rules.
+                if !behavioral_expression_references_runtime_quantity(&expression) {
+                    return Err(resolution_error());
+                }
                 if voltage_source {
                     Ok(ElementKind::BehavioralVoltage {
                         expression,

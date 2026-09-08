@@ -1180,51 +1180,45 @@ impl Bjt {
             self.eans = v;
             self.eap = v;
         }
+        // VBIC declares these activation energies without a lower bound.
+        // Explicit zero/negative values must also override an EG fallback.
         if let Some(&v) = params.get("EA")
             && v.is_finite()
-            && v > 0.0
         {
             self.ea = v;
         }
         if let Some(&v) = params.get("EAIE")
             && v.is_finite()
-            && v > 0.0
         {
             self.eaie = v;
         }
         if let Some(&v) = params.get("EAIC")
             && v.is_finite()
-            && v > 0.0
         {
             self.eaic = v;
         }
         if let Some(&v) = params.get("EANE")
             && v.is_finite()
-            && v > 0.0
         {
             self.eane = v;
         }
         if let Some(&v) = params.get("EANC")
             && v.is_finite()
-            && v > 0.0
         {
             self.eanc = v;
         }
         if let Some(&v) = params.get("EAIS")
             && v.is_finite()
-            && v > 0.0
         {
             self.eais = v;
         }
         if let Some(&v) = params.get("EANS")
             && v.is_finite()
-            && v > 0.0
         {
             self.eans = v;
         }
         if let Some(&v) = params.get("EAP")
             && v.is_finite()
-            && v > 0.0
         {
             self.eap = v;
         }
@@ -2083,6 +2077,83 @@ mod tests {
                     assert_ne!(model.intrinsic_linearization.ic, cold_intrinsic);
                 } else {
                     assert_ne!(model.operating_point_currents(), cold);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn vbic_zero_and_negative_activation_energies_preserve_temperature_laws() {
+        let energies = ["EA", "EAIE", "EAIC", "EAIS", "EANE", "EANC", "EANS", "EAP"];
+        for level in [4.0, 9.0, 11.0, 12.0] {
+            for (selected, &selected_name) in energies.iter().enumerate() {
+                for energy in [0.0, -0.1] {
+                    let mut params = vec![
+                        ("LEVEL", level),
+                        ("EG", 0.8),
+                        (selected_name, energy),
+                        ("IS", 1e-16),
+                        ("IBEI", 2e-17),
+                        ("IBCI", 3e-17),
+                        ("IBCIP", 4e-17),
+                        ("IBEN", 5e-17),
+                        ("IBCN", 6e-17),
+                        ("IBCNP", 7e-17),
+                        ("ISP", 8e-17),
+                        ("IBEIP", 9e-17),
+                        ("IBENP", 1e-16),
+                        ("TNOM", 27.0),
+                    ];
+                    // Non-unit emission coefficients distinguish each law's
+                    // activation/exponent divisor, including the parasitic BJT.
+                    params.extend([
+                        ("NF", 1.1),
+                        ("NEI", 1.2),
+                        ("NCI", 1.3),
+                        ("NCIP", 1.4),
+                        ("NEN", 1.5),
+                        ("NCN", 1.6),
+                        ("NCNP", 1.7),
+                        ("NFP", 1.8),
+                    ]);
+                    let mut model = model_with(&params);
+                    let stored = [
+                        model.ea, model.eaie, model.eaic, model.eais, model.eane, model.eanc,
+                        model.eans, model.eap,
+                    ];
+                    for (index, value) in stored.into_iter().enumerate() {
+                        assert_eq!(value, if selected == index { energy } else { 0.8 });
+                    }
+                    for temperature in [280.15, 330.15] {
+                        model.set_temperature(temperature);
+                        let ratio = temperature / 300.15;
+                        let laws = [
+                            (model.is, 1e-16, model.nf_nominal, 0),
+                            (model.ibei, 2e-17, model.nei, 1),
+                            (model.ibci, 3e-17, model.nci, 2),
+                            (model.ibcip, 4e-17, model.ncip, 3),
+                            (model.iben, 5e-17, model.nen, 4),
+                            (model.ibcn, 6e-17, model.ncn, 5),
+                            (model.ibcnp, 7e-17, model.ncnp, 6),
+                            (model.isp, 8e-17, model.nfp, 7),
+                            (model.ibeip, 9e-17, model.nci, 2),
+                            (model.ibenp, 1e-16, model.ncn, 5),
+                        ];
+                        for (actual, nominal, emission, index) in laws {
+                            // Independent source equation: I0 * (T/Tnom)^(3/n)
+                            // * exp(E/n * (1/Tnom - 1/T)/k).
+                            let expected = nominal
+                                * ratio.powf(3.0 / emission)
+                                * (stored[index] / emission * (1.0 / 300.15 - 1.0 / temperature)
+                                    / (model.vt / temperature))
+                                    .exp();
+                            assert!(
+                                (actual - expected).abs() < expected.abs() * 1e-13,
+                                "LEVEL={level} {}={energy}, T={temperature}, law={index}: {actual:e} != {expected:e}",
+                                selected_name
+                            );
+                        }
+                    }
                 }
             }
         }

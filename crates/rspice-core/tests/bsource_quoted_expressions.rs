@@ -27,6 +27,60 @@ fn xyce_engine() -> Engine {
 }
 
 #[test]
+fn grouped_independent_sources_keep_dynamic_expressions_and_reject_invalid_values() {
+    for (source, sign) in [("V1", 1.0), ("I1", -1.0)] {
+        for (expression, scoped) in [
+            ("{time*gain}", false),
+            ("'time*gain'", false),
+            ("{time*gain}", true),
+            ("'time*gain'", true),
+        ] {
+            let source_card = format!("{source} out 0 {expression}\n");
+            let body = if scoped {
+                format!(
+                    "X1 out cell gain=1e3\n.subckt cell out params: gain=2e3\n{source_card}.ends cell\n"
+                )
+            } else {
+                format!("{source_card}.param gain=1e3\n")
+            };
+            let netlist =
+                Netlist::parse(&format!("dynamic source\n{body}R1 out 0 1\n.end\n")).unwrap();
+            let result = Engine::default().run_tran(&netlist, 1e-3, 1e-4).unwrap();
+            let index = result
+                .node_names
+                .iter()
+                .position(|name| name.eq_ignore_ascii_case("out"))
+                .unwrap();
+            for (&time, &voltage) in result.time.iter().zip(&result.voltages[index]) {
+                assert!(
+                    (voltage - sign * time * 1e3).abs() < 1e-9,
+                    "{source} {expression} t={time}: {voltage}"
+                );
+            }
+            assert!(result.time.last().copied().unwrap() >= 1e-3);
+        }
+        for expression in ["{missing}", "{1/0}", "'missing'", "'1/0'", "{exp(1e9)}"] {
+            for scoped in [false, true] {
+                let source_card = format!("{source} out 0 {expression}\n");
+                let body = if scoped {
+                    format!("X1 out cell\n.subckt cell out\n{source_card}.ends cell\n")
+                } else {
+                    source_card
+                };
+                if let Ok(netlist) =
+                    Netlist::parse(&format!("invalid source\n{body}R1 out 0 1\n.end\n"))
+                {
+                    assert!(
+                        Engine::default().run_dc_op(&netlist).is_err(),
+                        "{source} {expression}, scoped={scoped}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn both_expression_parsers_treat_single_quotes_as_grouping() {
     let value = eval_expression("'1 + 2' * 3", &ParamContext::new())
         .expect("netlist expression parser accepts quoted groups");

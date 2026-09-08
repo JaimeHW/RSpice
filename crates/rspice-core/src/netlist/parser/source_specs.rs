@@ -107,30 +107,27 @@ pub(super) fn parse_source_spec(
             }
             TokenKind::Ident(s) => s.to_uppercase(),
             _ => {
-                // A bare leading value is the DC level.
-                if dc_value.is_none()
-                    && ac_terms.is_none()
+                // A bare leading value is the DC level; later unlabelled
+                // values are ignored. A value-shaped token commits to the
+                // fallible reader so a bad expression cannot become DC zero.
+                if ac_terms.is_none()
                     && transient.is_none()
-                    && let Some(v) = try_value(stream, params)
+                    && matches!(
+                        stream.peek().kind,
+                        TokenKind::Number(_)
+                            | TokenKind::Expression(_)
+                            | TokenKind::Plus
+                            | TokenKind::Minus
+                    )
                 {
-                    if !v.is_finite() {
-                        return Err(non_finite_source_value_error(line_num, "DC", "value", v));
-                    }
-                    dc_value = Some(v);
-                    continue;
-                }
-                if dc_value.is_some()
-                    && ac_terms.is_none()
-                    && transient.is_none()
-                    && let Some(v) = try_value(stream, params)
-                {
-                    if !v.is_finite() {
-                        return Err(non_finite_source_value_error(
-                            line_num,
-                            "source tail",
-                            "value",
-                            v,
-                        ));
+                    let context = if dc_value.is_none() {
+                        "DC"
+                    } else {
+                        "source tail"
+                    };
+                    let v = expect_finite_source_value(stream, line_num, params, context, "value")?;
+                    if dc_value.is_none() {
+                        dc_value = Some(v);
                     }
                     continue;
                 }

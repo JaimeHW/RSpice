@@ -13,6 +13,99 @@ const VBIC13_TEST_IBBE: f64 = 1e-9;
 const VBIC13_TEST_VBE: f64 = -2.4;
 
 #[test]
+fn vbic_nonpositive_activation_energies_match_xyce710_dc_and_ac() {
+    use rspice_core::Complex64;
+    // Xyce 7.10, separately captured DC and 100 MHz thermal-drive AC.
+    // All eight nonpositive energies change both saturation-current and
+    // depletion-potential temperature laws, including the substrate network.
+    let engine = Engine::new(SimulationConfig {
+        convergence_config: ConvergenceConfig {
+            gmin_target: 0.0,
+            ..Default::default()
+        },
+        ..Default::default()
+    });
+    for (level, energy, dc, ac) in [
+        (
+            11,
+            0.0,
+            [-1.8760646788795922e-05, -2.1527723643669423e-07, 0.0],
+            [
+                Complex64::new(7.516482992238466e-07, -7.827908174974698e-06),
+                Complex64::new(2.5718191767056676e-07, 1.1571599175275925e-05),
+                Complex64::new(0.0, 0.0),
+            ],
+        ),
+        (
+            12,
+            0.0,
+            [
+                -1.8759381199128295e-05,
+                -5.974425036580707e-06,
+                5.759162012220747e-06,
+            ],
+            [
+                Complex64::new(7.475710679968615e-07, -7.2352565019688054e-06),
+                Complex64::new(5.679107136074598e-07, 1.1568126579812277e-05),
+                Complex64::new(-3.0678023251495346e-07, -5.895892422355515e-07),
+            ],
+        ),
+        (
+            11,
+            -0.1,
+            [-1.3203668688194347e-05, -1.5289766582438167e-07, 0.0],
+            [
+                Complex64::new(5.763336343616682e-07, -8.370708593818644e-06),
+                Complex64::new(2.6448041761346957e-07, 1.2429299779533612e-05),
+                Complex64::new(0.0, 0.0),
+            ],
+        ),
+        (
+            12,
+            -0.1,
+            [
+                -1.3203041813337315e-05,
+                -4.205786531991028e-06,
+                4.052895950577105e-06,
+            ],
+            [
+                Complex64::new(5.723237566711971e-07, -7.6979104375324e-06),
+                Complex64::new(5.244002563240605e-07, 1.2426635278632646e-05),
+                Complex64::new(-2.559863313225597e-07, -6.704596659558985e-07),
+            ],
+        ),
+    ] {
+        for (kind, p) in [("NPN", 1.0), ("PNP", -1.0)] {
+            let substrate = if level == 12 { " s" } else { "" };
+            let netlist = Netlist::parse(&format!(
+                "* VBIC activation energies\nVc c 0 {}\nVb b 0 {}\nVs s 0 {}\nVth th 0 DC 30 AC 1\nQ1 c b 0{substrate} th vm SW_ET=0 M=3\n\
+                 .model vm {kind}(LEVEL={level} IS=1e-16 IBEI=1e-18 IBEN=1e-14 IBCI=1e-18 IBCN=1e-14 ISP=1e-15 IBEIP=1e-18 IBENP=1e-14 IBCIP=1e-16 IBCNP=1e-14 RCX=1 RCI=1 RBX=1 RBI=5 RE=1 RBP=5 RS=1 RTH=1000 CTH=1p CJE=1p CJC=2p CJEP=1p CJCP=1p TF=1n TR=2n TD=1n GMIN=0 TNOM=27 EA={energy} EAIE={energy} EAIC={energy} EAIS={energy} EANE={energy} EANC={energy} EANS={energy} EAP={energy})\n.temp 27\n.options gmin=0\n.end\n",
+                 p*0.1, p*0.7, p*(-0.4)
+            )).unwrap();
+            let operating = engine.run_dc_op(&netlist).unwrap();
+            let small_signal = engine.run_ac(&netlist, &[1e8]).unwrap();
+            for (index, name) in ["Vc", "Vb", "Vs"].into_iter().enumerate() {
+                let actual = operating.branch_current_named(name).unwrap();
+                assert!(
+                    (actual - p * dc[index]).abs() < 2e-6 * dc[index].abs().max(1e-12),
+                    "{level} {kind} EA={energy} I({name})={actual:e}"
+                );
+                let column = small_signal[0]
+                    .branch_names
+                    .iter()
+                    .position(|branch| branch.eq_ignore_ascii_case(name))
+                    .unwrap();
+                let actual = small_signal[0].currents[column];
+                assert!(
+                    (actual - p * ac[index]).norm() < 2e-6 * ac[index].norm().max(1e-12),
+                    "{level} {kind} EA={energy} AC I({name})={actual:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn vbic13_pnjmaxi_matches_xyce_and_model_overrides_global_option() {
     // Xyce 7.10 LEVEL=11/12, all five active series resistors = 1 ohm.
     for level in [11, 12] {

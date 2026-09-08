@@ -209,6 +209,62 @@ mod wasm_tests {
     use crate::js_interop::{js_array_property, js_property};
 
     #[wasm_bindgen_test]
+    fn vbic_nonpositive_activation_energies_and_signed_sources_match_xyce_in_wasm() {
+        for (energy, dc, ac) in [
+            (
+                0.0,
+                [
+                    -1.8759381199128295e-05,
+                    -5.974425036580707e-06,
+                    5.759162012220747e-06,
+                ],
+                [
+                    rspice_core::Complex64::new(7.475710679968615e-07, -7.2352565019688054e-06),
+                    rspice_core::Complex64::new(5.679107136074598e-07, 1.1568126579812277e-05),
+                    rspice_core::Complex64::new(-3.0678023251495346e-07, -5.895892422355515e-07),
+                ],
+            ),
+            (
+                -0.1,
+                [
+                    -1.3203041813337315e-05,
+                    -4.205786531991028e-06,
+                    4.052895950577105e-06,
+                ],
+                [
+                    rspice_core::Complex64::new(5.723237566711971e-07, -7.6979104375324e-06),
+                    rspice_core::Complex64::new(5.244002563240605e-07, 1.2426635278632646e-05),
+                    rspice_core::Complex64::new(-2.559863313225597e-07, -6.704596659558985e-07),
+                ],
+            ),
+        ] {
+            let netlist = rspice_core::Netlist::parse(&format!("* VBIC activation energies\nVc c 0 .1\nVb b 0 +.7\nVs s 0 -.4\nVth th 0 DC 30 AC 1\nQ1 c b 0 s th vm SW_ET=0 M=3\n.model vm NPN(LEVEL=12 IS=1e-16 IBEI=1e-18 IBEN=1e-14 IBCI=1e-18 IBCN=1e-14 ISP=1e-15 IBEIP=1e-18 IBENP=1e-14 IBCIP=1e-16 IBCNP=1e-14 RCX=1 RCI=1 RBX=1 RBI=5 RE=1 RBP=5 RS=1 RTH=1000 CTH=1p CJE=1p CJC=2p CJEP=1p CJCP=1p TF=1n TR=2n TD=1n GMIN=0 TNOM=27 EA={energy} EAIE={energy} EAIC={energy} EAIS={energy} EANE={energy} EANC={energy} EANS={energy} EAP={energy})\n.temp 27\n.options gmin=0\n.end\n")).unwrap();
+            let mut config = rspice_core::SimulationConfig::default();
+            config.convergence_config.gmin_target = 0.0;
+            let engine = rspice_core::Engine::new(config);
+            let operating = engine
+                .run_dc_op_with_abort(&netlist, &rspice_core::abort_signal::NoAbort)
+                .unwrap();
+            let small_signal = engine
+                .run_ac_with_abort(&netlist, &[1e8], &rspice_core::abort_signal::NoAbort)
+                .unwrap();
+            for (index, name) in ["Vc", "Vb", "Vs"].into_iter().enumerate() {
+                let actual = operating.branch_current_named(name).unwrap();
+                assert!((actual - dc[index]).abs() < 2e-6 * dc[index].abs().max(1e-12));
+                let column = small_signal[0]
+                    .branch_names
+                    .iter()
+                    .position(|branch| branch.eq_ignore_ascii_case(name))
+                    .unwrap();
+                assert!(
+                    (small_signal[0].currents[column] - ac[index]).norm()
+                        < 2e-6 * ac[index].norm().max(1e-12)
+                );
+            }
+        }
+    }
+
+    #[wasm_bindgen_test]
     fn vbic13_extrinsic_flicker_matches_xyce_in_wasm() {
         let netlist = rspice_core::Netlist::parse(
             "VBIC extrinsic flicker in WASM\nVcc vcc 0 3\nRc vcc c 1k\nVb drive 0 DC 0.7 AC 1\nRb drive b 1k\nVth th 0 0\nQ1 c b 0 th vm SW_ET=0 M=3\n\

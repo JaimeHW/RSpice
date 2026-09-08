@@ -27,6 +27,29 @@ FC = 1.0 / (2 * math.pi * 1e3 * 1e-6)  # RC corner: 159.155 Hz
 
 
 class TestAcBasics:
+    @pytest.mark.parametrize("energy, dc, ac", [
+        (0.0, [-1.8759381199128295e-05, -5.974425036580707e-06, 5.759162012220747e-06], [complex(7.475710679968615e-07, -7.2352565019688054e-06), complex(5.679107136074598e-07, 1.1568126579812277e-05), complex(-3.0678023251495346e-07, -5.895892422355515e-07)]),
+        (-0.1, [-1.3203041813337315e-05, -4.205786531991028e-06, 4.052895950577105e-06], [complex(5.723237566711971e-07, -7.6979104375324e-06), complex(5.244002563240605e-07, 1.2426635278632646e-05), complex(-2.559863313225597e-07, -6.704596659558985e-07)]),
+    ])
+    def test_vbic_nonpositive_activation_energies_match_xyce(self, energy, dc, ac):
+        netlist = rspice.Netlist.parse_spice(f"""* VBIC activation energies and signed source values
+Vc c 0 .1
+Vb b 0 +.7
+Vs s 0 -.4
+Vth th 0 DC 30 AC 1
+Q1 c b 0 s th vm SW_ET=0 M=3
+.model vm NPN(LEVEL=12 IS=1e-16 IBEI=1e-18 IBEN=1e-14 IBCI=1e-18 IBCN=1e-14 ISP=1e-15 IBEIP=1e-18 IBENP=1e-14 IBCIP=1e-16 IBCNP=1e-14 RCX=1 RCI=1 RBX=1 RBI=5 RE=1 RBP=5 RS=1 RTH=1000 CTH=1p CJE=1p CJC=2p CJEP=1p CJCP=1p TF=1n TR=2n TD=1n GMIN=0 TNOM=27 EA={energy} EAIE={energy} EAIC={energy} EAIS={energy} EANE={energy} EANC={energy} EANS={energy} EAP={energy})
+.temp 27
+.options gmin=0
+.end
+""")
+        engine = rspice.Engine(rspice.SimulationConfig(convergence=rspice.ConvergenceConfig(gmin_target=0)))
+        operating = engine.run_dc_op(netlist)
+        small_signal = engine.run_ac(netlist, [1e8])
+        for index, name in enumerate(["Vc", "Vb", "Vs"]):
+            assert abs(operating.branch_current(name)-dc[index]) < 2e-6*max(abs(dc[index]), 1e-12)
+            assert abs(small_signal.branch_current_complex(name)[0]-ac[index]) < 2e-6*max(abs(ac[index]), 1e-12)
+
     @pytest.mark.parametrize("vef, coefficient, collector, base", [
         (1e15, -0.049999999999999989,
          complex(11073210790.749592, -8091064247.664278),
