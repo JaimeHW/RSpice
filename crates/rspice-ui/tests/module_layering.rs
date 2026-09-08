@@ -1315,7 +1315,7 @@ fn source_files_have_no_byte_order_mark() {
 /// `helpers::infer_primary_{source_name,output_node}_with_abort` went too:
 /// both took a first-or-last element off a solved deck, and the offer needs a
 /// *sole* source or it has nothing to offer.
-const MAX_LINT_SUPPRESSIONS: usize = 55;
+const MAX_LINT_SUPPRESSIONS: usize = 54;
 
 /// The crate does not accumulate lint suppressions.
 #[test]
