@@ -3,6 +3,52 @@
 use super::*;
 
 impl Bjt {
+    /// Current and its exact voltage derivative using VBIC 1.3 expLinA.
+    /// Older families keep their existing junction law.
+    pub(in crate::device::semiconductor::bjt) fn vbic_diode_iv(
+        &self,
+        isat: Value,
+        v: Value,
+        n: Value,
+        limit: Value,
+    ) -> (Value, Value) {
+        if !self.vbic_13 {
+            return self.diode_iv_with_is(isat, v, n);
+        }
+        if isat <= 0.0 {
+            return (0.0, 0.0);
+        }
+        let nvt = n * self.vt;
+        let (current, conductance) = Self::vbic_scaled_exp_lina(isat, v, nvt, limit);
+        if v < limit && (v / nvt).abs() < 0.5 {
+            (isat * (v / nvt).exp_m1(), conductance)
+        } else {
+            (current - isat, conductance)
+        }
+    }
+
+    pub(in crate::device::semiconductor::bjt) fn vbic_scaled_exp_lina(
+        isat: Value,
+        v: Value,
+        nvt: Value,
+        limit: Value,
+    ) -> (Value, Value) {
+        let arg = v.min(limit) / nvt;
+        // Combine the scale in log space only when exp(arg) would overflow
+        // before multiplication by a small saturation current.
+        let exponential_current = if arg > 700.0 {
+            (isat.ln() + arg).exp()
+        } else {
+            isat * arg.exp()
+        };
+        let conductance = exponential_current / nvt;
+        if v < limit {
+            (exponential_current, conductance)
+        } else {
+            (exponential_current + conductance * (v - limit), conductance)
+        }
+    }
+
     /// Get polarity multiplier (+1 for NPN, -1 for PNP)
     pub(in crate::device::semiconductor::bjt) fn polarity(&self) -> Value {
         match self.bjt_type {
@@ -201,5 +247,37 @@ impl Bjt {
             0.0
         };
         (value, slope)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    #[test]
+    fn vbic13_pnjmaxi_preserves_zero_and_subnormal_saturation_currents() {
+        for isat in [0.0, 1e-40, 1e-320] {
+            let bjt = Bjt::new_npn("q".into(), 1, 2, 0).with_params(&HashMap::from([
+                ("LEVEL".into(), 11.0),
+                ("IS".into(), isat),
+                ("PNJMAXI".into(), 1e-6),
+            ]));
+            let voltage = bjt.vbic_junction_limits.ifi + bjt.vt;
+            let state = bjt.vbic_transport_charge_state(voltage, 0.0);
+            if isat == 0.0 {
+                assert_eq!((state.ifi, state.gfi), (0.0, 0.0));
+                continue;
+            }
+            // One thermal voltage past the 1uA transition, the continued
+            // current is 2uA, even when exp(V/VT) alone would overflow.
+            assert!((state.ifi - 2e-6).abs() < 1e-17, "IS={isat}: {}", state.ifi);
+            assert!((state.gfi * bjt.vt - 1e-6).abs() < 1e-17);
+            let h = 1e-6;
+            let fd = (bjt.vbic_transport_charge_state(voltage + h, 0.0).ifi
+                - bjt.vbic_transport_charge_state(voltage - h, 0.0).ifi)
+                / (2.0 * h);
+            assert!((fd - state.gfi).abs() < 1e-8 * state.gfi);
+        }
     }
 }

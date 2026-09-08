@@ -396,7 +396,7 @@ fn vbic13_clipped_thermal_state_with_tcrth_resumes_exactly() {
         let deck = format!(
             "VBIC13 clipped thermal checkpoint\nVc c 0 1.2\nVb b 0 0.5\n\
              Vth th 0 DC 74 SIN(74 2 1Meg)\nQ1 c b 0{substrate} th vm SW_ET=1 TRISE=20\n\
-             .model vm NPN(LEVEL={level} VEF=5 VER=3 TCVEF=0.05 TCVER=-0.02 IS=1e-16 NF=1.1 NR=1.2 TNF=0.001 IBEI=1e-18 IBCI=1e-18 RCX=10 RBX=5 RCI=0 RBI=0 AVC1=0.05 AVC2=0.3 TAVC=0.01 TD=20n AVCX1=0.05 AVCX2=0.3 TAVCX=0.01 GMIN=1n RTH=1000 TCRTH=0.005 TMAXCLIP=100 CTH=1f TNOM=27)\n.temp 27\n.end\n"
+             .model vm NPN(LEVEL={level} VEF=5 VER=3 TCVEF=0.05 TCVER=-0.02 IS=1e-16 NF=1.1 NR=1.2 TNF=0.001 PNJMAXI=1n IBEI=1e-18 IBCI=1e-18 RCX=10 RBX=5 RCI=0 RBI=0 AVC1=0.05 AVC2=0.3 TAVC=0.01 TD=20n AVCX1=0.05 AVCX2=0.3 TAVCX=0.01 GMIN=1n RTH=1000 TCRTH=0.005 TMAXCLIP=100 CTH=1f TNOM=27)\n.temp 27\n.end\n"
         );
         for method in [
             IntegrationMethod::BackwardEuler,

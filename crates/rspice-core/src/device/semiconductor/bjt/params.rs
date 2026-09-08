@@ -217,6 +217,7 @@ impl Bjt {
         self.tavcx = 0.0;
         self.mcx = 0.33;
         self.vbic_maxexp = 1e22;
+        self.vbic_model_pnjmaxi = None;
         self.avc2 = 0.0;
         self.isp_nominal = 0.0;
         self.isp = 0.0;
@@ -399,6 +400,83 @@ impl Bjt {
     pub(super) fn refresh_operating_scaling(&mut self) {
         let temp = self.requested_temperature();
         self.refresh_operating_scaling_for(temp);
+        if self.vbic_13 {
+            self.refresh_vbic_junction_limits();
+        }
+    }
+
+    pub(crate) fn set_vbic_pnjmaxi(&mut self, value: Value) {
+        self.vbic_global_pnjmaxi = value;
+        self.refresh_operating_scaling();
+    }
+
+    fn refresh_vbic_junction_limits(&mut self) {
+        // vbic_1p3.va initializeInstance: use the clipped ambient + TRISE,
+        // nominal emission coefficients and rolloff currents, independent of M.
+        // Thermal variants call refresh_operating_scaling_for directly and
+        // therefore retain these initialization voltages.
+        let imax = self.vbic_model_pnjmaxi.unwrap_or(self.vbic_global_pnjmaxi);
+        let ratio = self.temperature / self.tnom.max(1.0);
+        let vt = self.vt;
+        let scaled = |isat, exponent, energy, emission| {
+            Self::vbic_temp_scaled_current(isat, ratio, vt, exponent, energy, emission)
+        };
+        // Compute log(1 + target/isat) without overflowing the ratio or
+        // rounding a small positive ratio to zero.
+        let limit = |isat: Value, emission: Value, log_target: Value| {
+            if isat <= 0.0 {
+                return 0.0;
+            }
+            let x = log_target - isat.ln();
+            emission * vt * (x.max(0.0) + (-x.abs()).exp().ln_1p())
+        };
+        let log_imax = imax.ln();
+        let transport_target = |ik: Value| {
+            if ik > 0.0 && imax > ik {
+                (0.5_f64.ln() + log_imax + self.nkf * (4.0_f64.ln() - ik.ln())) / (1.0 - self.nkf)
+            } else {
+                log_imax
+            }
+        };
+        let is = scaled(self.is_nominal, self.xis, self.ea, self.nf_nominal);
+        let isrr = scaled(self.isrr_nominal, self.xisr, self.dear, self.nr_nominal);
+        let base_limit = |isat, exponent, energy, emission| {
+            limit(scaled(isat, exponent, energy, emission), emission, log_imax)
+        };
+        let ibbe = if self.ibbe_nominal > 0.0 {
+            let nvt = self.nbbe_nominal * vt;
+            let a = -self.vbbe_nominal / nvt;
+            let b = log_imax - self.ibbe_nominal.ln();
+            nvt * (a.max(b) + (-(a - b).abs()).exp().ln_1p())
+        } else {
+            0.0
+        };
+        self.vbic_junction_limits = VbicJunctionLimits {
+            ifi: limit(is, self.nf_nominal, transport_target(self.ikf_nominal)),
+            iri: limit(
+                is * isrr,
+                self.nr_nominal,
+                transport_target(self.ikr_nominal),
+            ),
+            ip: limit(
+                scaled(self.isp_nominal, self.xis, self.eap, self.nfp),
+                self.nfp,
+                if self.ikp > 0.0 && imax > self.ikp {
+                    2.0 * log_imax - self.ikp.ln()
+                } else {
+                    log_imax
+                },
+            ),
+            ibei: base_limit(self.ibei_nominal, self.xii, self.eaie, self.nei),
+            iben: base_limit(self.iben_nominal, self.xin, self.eane, self.nen),
+            ibci: base_limit(self.ibci_nominal, self.xii, self.eaic, self.nci),
+            ibcn: base_limit(self.ibcn_nominal, self.xin, self.eanc, self.ncn),
+            ibeip: base_limit(self.ibeip_nominal, self.xii, self.eaic, self.nci),
+            ibenp: base_limit(self.ibenp_nominal, self.xin, self.eanc, self.ncn),
+            ibcip: base_limit(self.ibcip_nominal, self.xii, self.eais, self.ncip),
+            ibcnp: base_limit(self.ibcnp_nominal, self.xin, self.eans, self.ncnp),
+            ibbe,
+        };
     }
 
     #[inline]
@@ -695,7 +773,11 @@ impl Bjt {
         self.temperature = temp;
         self.bf = (self.bf_nominal * beta_scale).max(1e-18);
         self.br = (self.br_nominal * beta_scale).max(1e-18);
-        self.is = (is_temp * scale).max(1e-30);
+        self.is = if self.vbic_13 {
+            is_temp * scale
+        } else {
+            (is_temp * scale).max(1e-30)
+        };
         self.nf = nf_temp.max(1e-12);
         self.nr = nr_temp.max(1e-12);
         // Xyce's VBIC equations multiply every completed current branch by
@@ -1413,6 +1495,10 @@ impl Bjt {
             self.td = v.max(0.0);
         }
         if self.vbic_13 {
+            self.vbic_model_pnjmaxi = params
+                .get("PNJMAXI")
+                .copied()
+                .filter(|value| value.is_finite() && *value > 0.0);
             for (name, destination) in [
                 ("AVCX1", &mut self.avcx1),
                 ("AVCX2", &mut self.avcx2_nominal),

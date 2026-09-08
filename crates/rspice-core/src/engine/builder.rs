@@ -4686,6 +4686,19 @@ impl Engine {
             .map_err(|error| map_build_parse_error("output validation", error))?;
         check_build_abort(abort)?;
         let mut circuit = CircuitData::new();
+        if netlist
+            .options
+            .device_pnjmaxi
+            .is_some_and(|value| !value.is_finite() || value <= 0.0)
+        {
+            return Err(SimulationError::Circuit(
+                "DEVICE.PNJMAXI must be a finite scalar greater than zero".into(),
+            ));
+        }
+        #[cfg(feature = "veriloga-builtins-base")]
+        circuit
+            .generated_simulation_parameters
+            .set_pnjmaxi(netlist.options.device_pnjmaxi);
         circuit.global_shunt_conductance = self.nodal_shunt_conductance();
         circuit.b3soi_gmin_scale = if self.config.b3soi_gmin_scaling {
             1.0e-6
@@ -5941,6 +5954,7 @@ impl Engine {
                     bjt = bjt.with_instance_params(instance_params);
                     bjt.set_xyce_compatibility(self.config.spice_dialect == SpiceDialect::Xyce);
                     bjt.set_voltage_limiting_enabled(self.config.device_voltage_limiting);
+                    bjt.set_vbic_pnjmaxi(netlist.options.device_pnjmaxi.unwrap_or(1.0));
                     bjt.set_temperature(self.config.temperature);
                     bjt.refresh_noise_temperature_offset(
                         self.config.temperature,
@@ -8746,6 +8760,21 @@ impl Engine {
 mod tests {
     use super::*;
     use crate::SimulationConfig;
+
+    #[cfg(feature = "veriloga-builtins-base")]
+    #[test]
+    fn pnjmaxi_option_reaches_generated_model_simparams() {
+        for option in [None, Some(1e-6)] {
+            let mut netlist = Netlist::parse("PNJMAXI context\nR1 out 0 1k\n.end\n").unwrap();
+            netlist.options.device_pnjmaxi = option;
+            let mut circuit = Engine::default().build_circuit(&netlist).unwrap();
+            circuit.generated_simulation_parameters.set_gmin(1e-9);
+            assert_eq!(
+                circuit.generated_simulation_parameters.get("pnjmaxi"),
+                option
+            );
+        }
+    }
 
     #[test]
     fn generated_auto_bridge_decks_inherit_resource_limits() {
