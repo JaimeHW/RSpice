@@ -485,12 +485,12 @@ impl Instance {
 		let JY=B+ (DR* FD);
 		let JZ=DR* FH;
 		let KB=J* JZ;
-		let KC=(((AG* ((DN+ (DM* EX))+ EY))+ ((JZ* JZ)* BZ))+ ((BZ* (JZ+ B))* FC))+ ((((((JZ- B)* 0.125f64)* DS)* FH)* FF)* ((if KA>= (((DQ- KB)/ (FB- KB)).abs()){KA}else{(((DQ- KB)/ (FB- KB)).abs())}).ln()));
+		let KC=(((AG* ((DN+ (DM* EX))+ EY))+ ((JZ* JZ)* BZ))+ ((BZ* (JZ+ B))* FC))+ ((((((JZ- B)* 0.125f64)* DS)* FH)* FF)* ((if !(KA).is_nan()&&(KA>=(((DQ- KB)/ (FB- KB)).abs())||((((DQ- KB)/ (FB- KB)).abs())).is_nan()){KA}else{(((DQ- KB)/ (FB- KB)).abs())}).ln()));
 		let KD=JX* ((D/ ((JY* JY)* FF))* KC);
 		let KE=(HJ* FD)/ CL;
 		let ME;
 		if KF{
-		let KG=(parameters[99]* ((parameters[101]* ((if KA>= (KE.abs()){KA}else{(KE.abs())}).ln())).exp()))/ ((I* C)* AI);
+		let KG=(parameters[99]* ((parameters[101]* ((if !(KA).is_nan()&&(KA>=(KE.abs())||((KE.abs())).is_nan()){KA}else{(KE.abs())}).ln())).exp()))/ ((I* C)* AI);
 		ME=KG;
 		}else{
 		let KH=(R* H)* HH;
@@ -503,7 +503,7 @@ impl Instance {
 		let KN=B+ (KL* FD);
 		let KO=(KL* FH)/ (D* KN);
 		let KP=KK/ D;
-		let KQ=((((B/ ((D* FH)* FH))* (FH/ ((KN* KN)* KN)))* ((if KA>= ((DQ- KO)/ (FB- KO)){KA}else{((DQ- KO)/ (FB- KO))}).ln()))+ (KK/ (EC+ EX)))+ (KP* KP);
+		let KQ=((((B/ ((D* FH)* FH))* (FH/ ((KN* KN)* KN)))* ((if !(KA).is_nan()&&(KA>=((DQ- KO)/ (FB- KO))||(((DQ- KO)/ (FB- KO))).is_nan()){KA}else{((DQ- KO)/ (FB- KO))}).ln()))+ (KK/ (EC+ EX)))+ (KP* KP);
 		KQ
 		}else{
 		A
@@ -1596,13 +1596,13 @@ impl Instance {
 		let TS=B+ (KR* MJ);
 		let TT=KR* MN;
 		let TV=AR* TT;
-		let TW=(((GI* ((KN+ (KM* MD))+ ME))+ ((TT* TT)* IV))+ ((IV* (TT+ B))* MI))+ ((((((TT- B)* 0.125f64)* KS)* MN)* ML)* ((if TU>= (((KQ- TV)/ (MH- TV)).abs()){TU}else{(((KQ- TV)/ (MH- TV)).abs())}).ln()));
+		let TW=(((GI* ((KN+ (KM* MD))+ ME))+ ((TT* TT)* IV))+ ((IV* (TT+ B))* MI))+ ((((((TT- B)* 0.125f64)* KS)* MN)* ML)* ((if !(TU).is_nan()&&(TU>=(((KQ- TV)/ (MH- TV)).abs())||((((KQ- TV)/ (MH- TV)).abs())).is_nan()){TU}else{(((KQ- TV)/ (MH- TV)).abs())}).ln()));
 		let TX=TR* ((P/ ((TS* TS)* ML))* TW);
 		let TY=(OR* MJ)/ JI;
 		let TZ=parameters[98]== A;
 		let VY;
 		if TZ{
-		let UA=(parameters[99]* ((parameters[101]* ((if TU>= (TY.abs()){TU}else{(TY.abs())}).ln())).exp()))/ ((AJ* C)* GO);
+		let UA=(parameters[99]* ((parameters[101]* ((if !(TU).is_nan()&&(TU>=(TY.abs())||((TY.abs())).is_nan()){TU}else{(TY.abs())}).ln())).exp()))/ ((AJ* C)* GO);
 		VY=UA;
 		}else{
 		let UB=(EO* AI)* OP;
@@ -1615,7 +1615,7 @@ impl Instance {
 		let UH=B+ (UF* MJ);
 		let UI=(UF* MN)/ (P* UH);
 		let UJ=UE/ P;
-		let UK=((((B/ ((P* MN)* MN))* (MN/ ((UH* UH)* UH)))* ((if TU>= ((KQ- UI)/ (MH- UI)){TU}else{((KQ- UI)/ (MH- UI))}).ln()))+ (UE/ (LH+ MD)))+ (UJ* UJ);
+		let UK=((((B/ ((P* MN)* MN))* (MN/ ((UH* UH)* UH)))* ((if !(TU).is_nan()&&(TU>=((KQ- UI)/ (MH- UI))||(((KQ- UI)/ (MH- UI))).is_nan()){TU}else{((KQ- UI)/ (MH- UI))}).ln()))+ (UE/ (LH+ MD)))+ (UJ* UJ);
 		UK
 		}else{
 		A

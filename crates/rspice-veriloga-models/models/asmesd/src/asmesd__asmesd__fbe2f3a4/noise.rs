@@ -81,7 +81,7 @@ impl Instance {
 		let R=K/ (parameters[25]+ 273.15f64);
 		let S=R.ln();
 		let T=(parameters[77]* S).exp();
-		let U=(parameters[52]* T)* (L+ (parameters[79]* ((-(if P<= A{P}else{A})).powf(parameters[80]))));
+		let U=(parameters[52]* T)* (L+ (parameters[79]* ((-(if !(P).is_nan()&&(P<=A||(A).is_nan()){P}else{A})).powf(parameters[80]))));
 		let W=V> A;
 		let Y=if W{
 		let X=L/ V;
@@ -179,7 +179,7 @@ impl Instance {
 		let CA=AO> A;
 		let ED;
 		if CA{
-		let CC=((-1f64* AW)* CB)/ ((parameters[3]* Q)* (if (CB- AW)>= 1e-3f64{(CB- AW)}else{1e-3f64}));
+		let CC=((-1f64* AW)* CB)/ ((parameters[3]* Q)* (if !((CB- AW)).is_nan()&&((CB- AW)>=1e-3f64||(1e-3f64).is_nan()){(CB- AW)}else{1e-3f64}));
 		let CD=CC> BE;
 		let CF;
 		let CG;
@@ -578,7 +578,7 @@ impl Instance {
 		let R=K/ (parameters[25]+ 273.15f64);
 		let S=R.ln();
 		let T=(parameters[77]* S).exp();
-		let U=(parameters[52]* T)* (L+ (parameters[79]* ((-(if P<= A{P}else{A})).powf(parameters[80]))));
+		let U=(parameters[52]* T)* (L+ (parameters[79]* ((-(if !(P).is_nan()&&(P<=A||(A).is_nan()){P}else{A})).powf(parameters[80]))));
 		let W=V> A;
 		let Y=if W{
 		let X=L/ V;
@@ -676,7 +676,7 @@ impl Instance {
 		let CA=AO> A;
 		let ED;
 		if CA{
-		let CC=((-1f64* AW)* CB)/ ((parameters[3]* Q)* (if (CB- AW)>= 1e-3f64{(CB- AW)}else{1e-3f64}));
+		let CC=((-1f64* AW)* CB)/ ((parameters[3]* Q)* (if !((CB- AW)).is_nan()&&((CB- AW)>=1e-3f64||(1e-3f64).is_nan()){(CB- AW)}else{1e-3f64}));
 		let CD=CC> BE;
 		let CF;
 		let CG;

@@ -4553,7 +4553,7 @@ impl Instance {
 		GW
 		};
 		let HA=5.522602e-23f64* GM;
-		let HB=if GM>= 23.149999999999977f64{GM}else{23.149999999999977f64};
+		let HB=if !(GM).is_nan()&&(GM>=23.149999999999977f64||(23.149999999999977f64).is_nan()){GM}else{23.149999999999977f64};
 		let HC=HB/ J;
 		let HD=M* HB;
 		let HE=C/ HD;
@@ -4575,9 +4575,9 @@ impl Instance {
 		let HU=HR+ (HD* ((C+ (((BT- HR)* HE).exp())).ln()));
 		let HV=HS+ (HD* ((C+ (((BT- HS)* HE).exp())).ln()));
 		let HW=HT+ (HD* ((C+ (((BT- HT)* HE).exp())).ln()));
-		let HX=if (H* HG)>= HD{(H* HG)}else{HD};
-		let HY=if (H* HH)>= HD{(H* HH)}else{HD};
-		let HZ=if (H* HI)>= HD{(H* HI)}else{HD};
+		let HX=if !((H* HG)).is_nan()&&((H* HG)>=HD||(HD).is_nan()){(H* HG)}else{HD};
+		let HY=if !((H* HH)).is_nan()&&((H* HH)>=HD||(HD).is_nan()){(H* HH)}else{HD};
+		let HZ=if !((H* HI)).is_nan()&&((H* HI)>=HD||(HD).is_nan()){(H* HI)}else{HD};
 		let IA=HX* HE;
 		let IB=HY* HE;
 		let IC=HZ* HE;
@@ -4621,9 +4621,9 @@ impl Instance {
 		let JH=JE+ (HD* ((C+ (((BT- JE)* HE).exp())).ln()));
 		let JI=JF+ (HD* ((C+ (((BT- JF)* HE).exp())).ln()));
 		let JJ=JG+ (HD* ((C+ (((BT- JG)* HE).exp())).ln()));
-		let JK=if (H* IS)>= HD{(H* IS)}else{HD};
-		let JL=if (H* IT)>= HD{(H* IT)}else{HD};
-		let JM=if (H* IU)>= HD{(H* IU)}else{HD};
+		let JK=if !((H* IS)).is_nan()&&((H* IS)>=HD||(HD).is_nan()){(H* IS)}else{HD};
+		let JL=if !((H* IT)).is_nan()&&((H* IT)>=HD||(HD).is_nan()){(H* IT)}else{HD};
+		let JM=if !((H* IU)).is_nan()&&((H* IU)>=HD||(HD).is_nan()){(H* IU)}else{HD};
 		let JN=JK* HE;
 		let JO=JL* HE;
 		let JP=JM* HE;
@@ -6834,7 +6834,7 @@ impl Instance {
 		}else{
 		BBB
 		};
-		let BBN=if (if BBK<= BBL{BBK}else{BBL})<= BBM{(if BBK<= BBL{BBK}else{BBL})}else{BBM};
+		let BBN=if !((if !(BBK).is_nan()&&(BBK<=BBL||(BBL).is_nan()){BBK}else{BBL})).is_nan()&&((if !(BBK).is_nan()&&(BBK<=BBL||(BBL).is_nan()){BBK}else{BBL})<=BBM||(BBM).is_nan()){(if !(BBK).is_nan()&&(BBK<=BBL||(BBL).is_nan()){BBK}else{BBL})}else{BBM};
 		let BBO=BBN* HE;
 		let BBQ=(BBO.abs())< BBP;
 		let BEV;
@@ -6889,8 +6889,8 @@ impl Instance {
 		BCJ=HW;
 		BCN=AU;
 		}
-		let BCK=if (if BCH<= BCI{BCH}else{BCI})<= BCJ{(if BCH<= BCI{BCH}else{BCI})}else{BCJ};
-		let BCO=(if (if BCL<= BCM{BCL}else{BCM})<= BCN{(if BCL<= BCM{BCL}else{BCM})}else{BCN})- BT;
+		let BCK=if !((if !(BCH).is_nan()&&(BCH<=BCI||(BCI).is_nan()){BCH}else{BCI})).is_nan()&&((if !(BCH).is_nan()&&(BCH<=BCI||(BCI).is_nan()){BCH}else{BCI})<=BCJ||(BCJ).is_nan()){(if !(BCH).is_nan()&&(BCH<=BCI||(BCI).is_nan()){BCH}else{BCI})}else{BCJ};
+		let BCO=(if !((if !(BCL).is_nan()&&(BCL<=BCM||(BCM).is_nan()){BCL}else{BCM})).is_nan()&&((if !(BCL).is_nan()&&(BCL<=BCM||(BCM).is_nan()){BCL}else{BCM})<=BCN||(BCN).is_nan()){(if !(BCL).is_nan()&&(BCL<=BCM||(BCM).is_nan()){BCL}else{BCM})}else{BCN})- BT;
 		let BCQ=IZ* BCP;
 		let BCR=BCQ> A;
 		let BDB=if BCR{
@@ -6915,7 +6915,7 @@ impl Instance {
 		}else{
 		BBB
 		};
-		let BDE=if (if BDB<= BDC{BDB}else{BDC})<= BDD{(if BDB<= BDC{BDB}else{BDC})}else{BDD};
+		let BDE=if !((if !(BDB).is_nan()&&(BDB<=BDC||(BDC).is_nan()){BDB}else{BDC})).is_nan()&&((if !(BDB).is_nan()&&(BDB<=BDC||(BDC).is_nan()){BDB}else{BDC})<=BDD||(BDD).is_nan()){(if !(BDB).is_nan()&&(BDB<=BDC||(BDC).is_nan()){BDB}else{BDC})}else{BDD};
 		let BDF=BDE* HE;
 		let BDG=(BDF.abs())< BBP;
 		let DNR;
@@ -6970,8 +6970,8 @@ impl Instance {
 		BDX=JJ;
 		BEB=FT;
 		}
-		let BDY=if (if BDV<= BDW{BDV}else{BDW})<= BDX{(if BDV<= BDW{BDV}else{BDW})}else{BDX};
-		let BEC=(if (if BDZ<= BEA{BDZ}else{BEA})<= BEB{(if BDZ<= BEA{BDZ}else{BEA})}else{BEB})- BT;
+		let BDY=if !((if !(BDV).is_nan()&&(BDV<=BDW||(BDW).is_nan()){BDV}else{BDW})).is_nan()&&((if !(BDV).is_nan()&&(BDV<=BDW||(BDW).is_nan()){BDV}else{BDW})<=BDX||(BDX).is_nan()){(if !(BDV).is_nan()&&(BDV<=BDW||(BDW).is_nan()){BDV}else{BDW})}else{BDX};
+		let BEC=(if !((if !(BDZ).is_nan()&&(BDZ<=BEA||(BEA).is_nan()){BDZ}else{BEA})).is_nan()&&((if !(BDZ).is_nan()&&(BDZ<=BEA||(BEA).is_nan()){BDZ}else{BEA})<=BEB||(BEB).is_nan()){(if !(BDZ).is_nan()&&(BDZ<=BEA||(BEA).is_nan()){BDZ}else{BEA})}else{BEB})- BT;
 		let BEE=BED== C;
 		let HAW;
 		let HAZ;
@@ -10203,11 +10203,11 @@ impl Instance {
 		DMV=A;
 		DMY=A;
 		}
-		let DMT=if DMS<= BBP{DMS}else{BBP};
+		let DMT=if !(DMS).is_nan()&&(DMS<=BBP||(BBP).is_nan()){DMS}else{BBP};
 		let DMU=DMT.exp();
-		let DMW=if DMV<= BBP{DMV}else{BBP};
+		let DMW=if !(DMV).is_nan()&&(DMV<=BBP||(BBP).is_nan()){DMV}else{BBP};
 		let DMX=DMW.exp();
-		let DMZ=if DMY<= BBP{DMY}else{BBP};
+		let DMZ=if !(DMY).is_nan()&&(DMY<=BBP||(BBP).is_nan()){DMY}else{BBP};
 		let DNA=DMZ.exp();
 		let DNC=-0.4f64* DNB;
 		let DND=-0.65f64* DNB;
@@ -13396,11 +13396,11 @@ impl Instance {
 		FVT=A;
 		FVW=A;
 		}
-		let FVR=if FVQ<= BBP{FVQ}else{BBP};
+		let FVR=if !(FVQ).is_nan()&&(FVQ<=BBP||(BBP).is_nan()){FVQ}else{BBP};
 		let FVS=FVR.exp();
-		let FVU=if FVT<= BBP{FVT}else{BBP};
+		let FVU=if !(FVT).is_nan()&&(FVT<=BBP||(BBP).is_nan()){FVT}else{BBP};
 		let FVV=FVU.exp();
-		let FVX=if FVW<= BBP{FVW}else{BBP};
+		let FVX=if !(FVW).is_nan()&&(FVW<=BBP||(BBP).is_nan()){FVW}else{BBP};
 		let FVY=FVX.exp();
 		HAW=DMT;
 		HAZ=DMU;

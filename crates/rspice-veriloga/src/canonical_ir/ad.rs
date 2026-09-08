@@ -394,7 +394,12 @@ fn lane_liveness_with_control(
                     CfgValueKind::Unary { input, .. } | CfgValueKind::Ddt { input, .. } => {
                         changed |= live.union_from(value.id, *input);
                     }
-                    CfgValueKind::Binary { left, right, .. } => {
+                    CfgValueKind::Binary { left, right, .. }
+                    | CfgValueKind::Select {
+                        then_value: left,
+                        else_value: right,
+                        ..
+                    } => {
                         changed |= live.union_from(value.id, *left);
                         changed |= live.union_from(value.id, *right);
                     }
@@ -491,7 +496,8 @@ fn differentiable(kind: &CfgValueKind) -> bool {
         // `$limit` is differentiable, but [`lane_liveness`] answers it ahead of
         // this rather than through it: its lanes are `proposed`'s plus the
         // correction lane, not every operand's.
-        CfgValueKind::Ddt { .. }
+        CfgValueKind::Select { .. }
+        | CfgValueKind::Ddt { .. }
         | CfgValueKind::Idt { .. }
         // The wrapped integral takes the unwrapped one's rule: the fold is a
         // translation by a whole number of periods, and a constant offset has
@@ -849,6 +855,14 @@ fn ddx_direction_liveness(
                     input_derivative, ..
                 } => {
                     changed |= needed.union_from(*input_derivative, value.id);
+                }
+                CfgValueKind::Select {
+                    then_value,
+                    else_value,
+                    ..
+                } => {
+                    changed |= needed.union_from(*then_value, value.id);
+                    changed |= needed.union_from(*else_value, value.id);
                 }
                 CfgValueKind::Binary { left, right, op } if !is_predicate(*op) => {
                     changed |= needed.union_from(*left, value.id);
@@ -1213,6 +1227,15 @@ impl<'a> ScalarDdxBuilder<'a> {
                 Some(self.push_binary(CfgBinaryOp::Mul, derivative, factor))
             }
             CfgValueKind::Binary { op, left, right } => self.binary_rule(*op, *left, *right, lane),
+            CfgValueKind::Select {
+                condition,
+                then_value,
+                else_value,
+            } => self.select_derivative(
+                *condition,
+                self.derivative(*then_value, lane),
+                self.derivative(*else_value, lane),
+            ),
             CfgValueKind::Ddt { input, .. } => {
                 let derivative = self.derivative(*input, lane)?;
                 let scale = self.ddt_scale();
@@ -1530,43 +1553,40 @@ impl<'a> ScalarDdxBuilder<'a> {
                     None => self.push_unary(CfgUnaryOp::Neg, scaled),
                 })
             }
-            // A selection, written as a mask over both arms.
-            //
-            // `db + (da - db)*c` is the same algebra in three operations rather
-            // than four, and it is not the same number: with `c = 1` it
-            // evaluates `db + fl(da - db)`, whose error is `2*u*|db|` against a
-            // result of `|da|`. Where the losing arm's derivative is orders
-            // above the winner's — which is what a `max` guarding a compact
-            // model's floor is for — that is not rounding but the whole answer:
-            // `da = 1`, `db = 1e17` returns zero. The masked form below is
-            // exact for `c` in `{0, 1}`, because `x*1` and `x + 0` are exact.
             CfgBinaryOp::Min | CfgBinaryOp::Max => {
-                let comparison = if op == CfgBinaryOp::Min {
-                    CfgBinaryOp::Le
-                } else {
-                    CfgBinaryOp::Ge
-                };
-                let takes_left = self.push_typed(CfgValueType::Boolean, comparison, left, right);
-                match (d_left, d_right) {
-                    (Some(a), Some(b)) => {
-                        let takes_right = self.push_binary(CfgBinaryOp::Sub, self.one, takes_left);
-                        let from_left = self.push_binary(CfgBinaryOp::Mul, a, takes_left);
-                        let from_right = self.push_binary(CfgBinaryOp::Mul, b, takes_right);
-                        Some(self.push_binary(CfgBinaryOp::Add, from_left, from_right))
-                    }
-                    (Some(a), None) => Some(self.push_binary(CfgBinaryOp::Mul, a, takes_left)),
-                    (None, Some(b)) => {
-                        let takes_right = self.push_binary(CfgBinaryOp::Sub, self.one, takes_left);
-                        Some(self.push_binary(CfgBinaryOp::Mul, b, takes_right))
-                    }
-                    (None, None) => None,
-                }
+                // Compare with the selected primal: the numeric operand wins
+                // over NaN and equal finite operands select the left tangent.
+                let selected = self.push_binary(op, left, right);
+                let takes_left =
+                    self.push_typed(CfgValueType::Boolean, CfgBinaryOp::Eq, selected, left);
+                self.select_derivative(takes_left, d_left, d_right)
             }
             other => {
                 debug_assert!(is_predicate(other), "unhandled scalar derivative rule");
                 None
             }
         }
+    }
+
+    fn select_derivative(
+        &mut self,
+        condition: ValueId,
+        left: Option<ValueId>,
+        right: Option<ValueId>,
+    ) -> Option<ValueId> {
+        if left.is_none() && right.is_none() {
+            return None;
+        }
+        let then_value = self.or_zero(left);
+        let else_value = self.or_zero(right);
+        Some(self.push(
+            CfgValueType::Real,
+            CfgValueKind::Select {
+                condition,
+                then_value,
+                else_value,
+            },
+        ))
     }
 
     fn unary_factor(&mut self, op: CfgUnaryOp, input: ValueId) -> ValueId {
@@ -2338,6 +2358,16 @@ impl<'a> AdBuilder<'a> {
             CfgValueKind::Binary { op, left, right } => {
                 self.binary_rule(*op, *left, *right, target)
             }
+            CfgValueKind::Select {
+                condition,
+                then_value,
+                else_value,
+            } => self.select_derivative(
+                *condition,
+                self.derivatives[usize::from(*then_value)],
+                self.derivatives[usize::from(*else_value)],
+                target,
+            ),
             // Not another `ddt`: a second one would claim a second state slot
             // for a quantity with no history of its own. The companion form's
             // coefficient multiplies the input's derivative instead.
@@ -2713,34 +2743,10 @@ impl<'a> AdBuilder<'a> {
                 })
             }
             CfgBinaryOp::Min | CfgBinaryOp::Max => {
-                let comparison = if matches!(op, CfgBinaryOp::Min) {
-                    CfgBinaryOp::Le
-                } else {
-                    CfgBinaryOp::Ge
-                };
-                let takes_left = self.push_typed(CfgValueType::Boolean, comparison, left, right);
-                match (d_left, d_right) {
-                    // Masked over both arms rather than blended. The scalar
-                    // rule above carries the reason: `db + (da - db)*c` loses
-                    // the winner's derivative whenever the loser's is orders
-                    // larger, and a `max` against a floor is exactly that
-                    // shape.
-                    (Some(d_left), Some(d_right)) => {
-                        let one = self.one;
-                        let takes_right = self.push_binary(CfgBinaryOp::Sub, one, takes_left);
-                        let from_left = self.scale(d_left, takes_left);
-                        let from_right = self.scale(d_right, takes_right);
-                        Some(self.lane_binary(CfgBinaryOp::Add, from_left, from_right, target))
-                    }
-                    (Some(d_left), None) => Some(self.scale(d_left, takes_left)),
-                    // db + c*(0 - db) is db*(1 - c).
-                    (None, Some(d_right)) => {
-                        let one = self.one;
-                        let takes_right = self.push_binary(CfgBinaryOp::Sub, one, takes_left);
-                        Some(self.scale(d_right, takes_right))
-                    }
-                    (None, None) => None,
-                }
+                let selected = self.push_binary(op, left, right);
+                let takes_left =
+                    self.push_typed(CfgValueType::Boolean, CfgBinaryOp::Eq, selected, left);
+                self.select_derivative(takes_left, d_left, d_right, target)
             }
             // `(a da + b db) / hypot(a, b)`: the gradient is the unit vector
             // along the operands, written with one division rather than two in
@@ -2794,6 +2800,30 @@ impl<'a> AdBuilder<'a> {
                 None
             }
         }
+    }
+
+    fn select_derivative(
+        &mut self,
+        condition: ValueId,
+        left: Option<ValueId>,
+        right: Option<ValueId>,
+        target: ShapeId,
+    ) -> Option<ValueId> {
+        if left.is_none() && right.is_none() {
+            return None;
+        }
+        let then_value = self.or_zero_lanes(left, target);
+        let then_value = self.widen(then_value, target);
+        let else_value = self.or_zero_lanes(right, target);
+        let else_value = self.widen(else_value, target);
+        Some(self.push(
+            CfgValueType::Lanes(target),
+            CfgValueKind::Select {
+                condition,
+                then_value,
+                else_value,
+            },
+        ))
     }
 
     /// `d(f(x)) = f'(x) * dx`; this returns `f'(x)`.

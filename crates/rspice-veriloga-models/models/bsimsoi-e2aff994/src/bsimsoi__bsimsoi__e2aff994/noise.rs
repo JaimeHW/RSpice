@@ -339,19 +339,19 @@ impl Instance {
 		let CR=G* CL;
 		let CS=(parameters[107]* (CO* (CO.sqrt())))* (rspice_limited_exp(((CQ/ staged[62])- (CQ/ CR))));
 		let DD=if CD{
-		let CT=(if (AX/ CS)>= BX{(AX/ CS)}else{BX}).ln();
+		let CT=(if !((AX/ CS)).is_nan()&&((AX/ CS)>=BX||(BX).is_nan()){(AX/ CS)}else{BX}).ln();
 		let CU=((CT* CT)+ J).sqrt();
 		CU
 		}else{
-		let CV=(if (AX/ CS)>= BX{(AX/ CS)}else{BX}).ln();
+		let CV=(if !((AX/ CS)).is_nan()&&((AX/ CS)>=BX||(BX).is_nan()){(AX/ CS)}else{BX}).ln();
 		CV
 		};
 		let CFN=if CD{
-		let CW=(if (staged[64]/ (CS* CS))>= BX{(staged[64]/ (CS* CS))}else{BX}).ln();
+		let CW=(if !((staged[64]/ (CS* CS))).is_nan()&&((staged[64]/ (CS* CS))>=BX||(BX).is_nan()){(staged[64]/ (CS* CS))}else{BX}).ln();
 		let CX=((CW* CW)+ J).sqrt();
 		CX
 		}else{
-		let CY=(if (staged[65]/ (CS* CS))>= BX{(staged[65]/ (CS* CS))}else{BX}).ln();
+		let CY=(if !((staged[65]/ (CS* CS))).is_nan()&&((staged[65]/ (CS* CS))>=BX||(BX).is_nan()){(staged[65]/ (CS* CS))}else{BX}).ln();
 		CY
 		};
 		let AQM=if CZ{
@@ -360,7 +360,7 @@ impl Instance {
 		}else{
 		A
 		};
-		let DE=if ((DC+ (CL* DD))+ P)>= DC{((DC+ (CL* DD))+ P)}else{DC};
+		let DE=if !(((DC+ (CL* DD))+ P)).is_nan()&&(((DC+ (CL* DD))+ P)>=DC||(DC).is_nan()){((DC+ (CL* DD))+ P)}else{DC};
 		let DF=DE.sqrt();
 		let DI=CO- B;
 		let DJ=B+ (parameters[1031]* DI);
@@ -447,7 +447,7 @@ impl Instance {
 		let EY=staged[103]* (BA* (EX+ (((EX* EX)+ 4e-6f64).sqrt())));
 		let EZ=(B+ (staged[104]* CP))- J;
 		let FA=staged[105]* (BA* (EZ+ (((EZ* EZ)+ 4e-6f64).sqrt())));
-		let FB=rspice_limited_exp((staged[112]* ((if CO>= BX{CO}else{BX}).ln())));
+		let FB=rspice_limited_exp((staged[112]* ((if !(CO).is_nan()&&(CO>=BX||(BX).is_nan()){CO}else{BX}).ln())));
 		let FC=(B+ (staged[113]* CP))- J;
 		let FD=staged[114]* (BA* (FC+ (((FC* FC)+ 4e-6f64).sqrt())));
 		let FE=(B+ (staged[115]* CP))- J;
@@ -620,7 +620,7 @@ impl Instance {
 		let JO=rspice_limited_exp(JL);
 		JO
 		};
-		let JQ=(-JE)* ((if (H/ (H+ (staged[168]* (B+ JP))))>= BX{(H/ (H+ (staged[168]* (B+ JP))))}else{BX}).ln());
+		let JQ=(-JE)* ((if !((H/ (H+ (staged[168]* (B+ JP))))).is_nan()&&((H/ (H+ (staged[168]* (B+ JP))))>=BX||(BX).is_nan()){(H/ (H+ (staged[168]* (B+ JP))))}else{BX}).ln());
 		JR=JQ;
 		}else{
 		JR=A;
@@ -708,7 +708,7 @@ impl Instance {
 		let LD=KY- LC;
 		let LE=(LD* LD)+ (KQ* (LC+ B));
 		let LF=(G* LD)- KQ;
-		let LG=((if (LE/ KQ)>= BX{(LE/ KQ)}else{BX}).ln())- LC;
+		let LG=((if !((LE/ KQ)).is_nan()&&((LE/ KQ)>=BX||(BX).is_nan()){(LE/ KQ)}else{BX}).ln())- LC;
 		let LH=LE+ LF;
 		let LI=LF* LF;
 		let LJ=(LH* LH)+ (LG* ((BA* LI)- LE));
@@ -775,7 +775,7 @@ impl Instance {
 		let NF=NA- NE;
 		let NG=(NF* NF)+ (KF* (NE+ B));
 		let NH=(G* NF)- KF;
-		let NI=(-NE)+ ((if (NG* KG)>= BX{(NG* KG)}else{BX}).ln());
+		let NI=(-NE)+ ((if !((NG* KG)).is_nan()&&((NG* KG)>=BX||(BX).is_nan()){(NG* KG)}else{BX}).ln());
 		let NJ=NG+ NH;
 		let NK=NH* NH;
 		let NL=(NJ* NJ)+ (NI* ((BA* NK)- NG));
@@ -802,9 +802,9 @@ impl Instance {
 		let OF=OC* OC;
 		let OG=B/ (G+ OF);
 		let OH=OF* OG;
-		let OJ=if OI>= ((OD* OD)- (KF* (((OE+ OC)- B)- (MM* ((OC+ B)+ OH))))){OI}else{((OD* OD)- (KF* (((OE+ OC)- B)- (MM* ((OC+ B)+ OH)))))};
+		let OJ=if !(OI).is_nan()&&(OI>=((OD* OD)- (KF* (((OE+ OC)- B)- (MM* ((OC+ B)+ OH)))))||(((OD* OD)- (KF* (((OE+ OC)- B)- (MM* ((OC+ B)+ OH)))))).is_nan()){OI}else{((OD* OD)- (KF* (((OE+ OC)- B)- (MM* ((OC+ B)+ OH)))))};
 		let OK=(G* OD)+ (KF* ((B- OE)- (MM* (B+ (BR* ((OC* OG)* OG))))));
-		let OL=(ML- OC)+ ((if (OJ/ KF)>= BX{(OJ/ KF)}else{BX}).ln());
+		let OL=(ML- OC)+ ((if !((OJ/ KF)).is_nan()&&((OJ/ KF)>=BX||(BX).is_nan()){(OJ/ KF)}else{BX}).ln());
 		let OM=OJ+ OK;
 		let ON=OK* OK;
 		let OO=OJ* (B- (BA* (KF* (OE- (MM* ((((BT* OG)- (NR* OH))* OG)* OG))))));
@@ -847,7 +847,7 @@ impl Instance {
 		};
 		let PQ=PP+ PL;
 		let PR=PP* PN;
-		let PS=(((PQ* PQ)/ ((ML- PG)+ ((if (PP* KG)>= BX{(PP* KG)}else{BX}).ln())))+ (BA* PM))- PR;
+		let PS=(((PQ* PQ)/ ((ML- PG)+ ((if !((PP* KG)).is_nan()&&((PP* KG)>=BX||(BX).is_nan()){(PP* KG)}else{BX}).ln())))+ (BA* PM))- PR;
 		let PT=PG+ ((PQ* PP)/ (PS+ (((PL* PQ)/ PS)* ((DP* PM)- PR))));
 		let PU=rspice_limited_exp((PT- ML));
 		let PV=JV- PT;
@@ -875,7 +875,7 @@ impl Instance {
 		let QI=QE- QH;
 		let QJ=(QI* QI)+ (KF* (QH+ B));
 		let QK=(G* QI)- KF;
-		let QL=(-QH)+ ((if (QJ* KG)>= BX{(QJ* KG)}else{BX}).ln());
+		let QL=(-QH)+ ((if !((QJ* KG)).is_nan()&&((QJ* KG)>=BX||(BX).is_nan()){(QJ* KG)}else{BX}).ln());
 		let QM=QJ+ QK;
 		let QN=QK* QK;
 		let QO=(QM* QM)+ (QL* ((BA* QN)- QJ));
@@ -902,9 +902,9 @@ impl Instance {
 		let RJ=RG* RG;
 		let RK=B/ (G+ RJ);
 		let RL=RJ* RK;
-		let RM=if OI>= ((RH* RH)- (KF* (((RI+ RG)- B)- (MM* ((RG+ B)+ RL))))){OI}else{((RH* RH)- (KF* (((RI+ RG)- B)- (MM* ((RG+ B)+ RL)))))};
+		let RM=if !(OI).is_nan()&&(OI>=((RH* RH)- (KF* (((RI+ RG)- B)- (MM* ((RG+ B)+ RL)))))||(((RH* RH)- (KF* (((RI+ RG)- B)- (MM* ((RG+ B)+ RL)))))).is_nan()){OI}else{((RH* RH)- (KF* (((RI+ RG)- B)- (MM* ((RG+ B)+ RL)))))};
 		let RN=(G* RH)+ (KF* ((B- RI)- (MM* (B+ (BR* ((RG* RK)* RK))))));
-		let RO=(ML- RG)+ ((if (RM/ KF)>= BX{(RM/ KF)}else{BX}).ln());
+		let RO=(ML- RG)+ ((if !((RM/ KF)).is_nan()&&((RM/ KF)>=BX||(BX).is_nan()){(RM/ KF)}else{BX}).ln());
 		let RP=RM+ RN;
 		let RQ=RN* RN;
 		let RR=RM* (B- (BA* (KF* (RI- (MM* ((((BT* RK)- (NR* RL))* RK)* RK))))));
@@ -1200,7 +1200,7 @@ impl Instance {
 		let XX=XV* JE;
 		let XY=1e-8f64/ IL;
 		let YC=YA+ (YB* HH);
-		let YE=B+ ((YC* ((XY* (XX+ (DQ* XW))).powf(EE)))+ (YD/ (rspice_limited_exp((XZ* ((if (BA* (B+ (XW/ XX)))>= BX{(BA* (B+ (XW/ XX)))}else{BX}).ln()))))));
+		let YE=B+ ((YC* ((XY* (XX+ (DQ* XW))).powf(EE)))+ (YD/ (rspice_limited_exp((XZ* ((if !((BA* (B+ (XW/ XX)))).is_nan()&&((BA* (B+ (XW/ XX)))>=BX||(BX).is_nan()){(BA* (B+ (XW/ XX)))}else{BX}).ln()))))));
 		let YF=YE- B;
 		let YG=BA* ((YE+ B)+ (((YF* YF)+ 5.625e-7f64).sqrt()));
 		let YH=B/ (((I* 1e6f64).powf(R))* F);
@@ -1276,7 +1276,7 @@ impl Instance {
 		let AAH=AAD- AAG;
 		let AAI=(AAH* AAH)+ (KF* (AAG+ B));
 		let AAJ=(G* AAH)- KF;
-		let AAK=(-AAG)+ ((if (AAI* KG)>= BX{(AAI* KG)}else{BX}).ln());
+		let AAK=(-AAG)+ ((if !((AAI* KG)).is_nan()&&((AAI* KG)>=BX||(BX).is_nan()){(AAI* KG)}else{BX}).ln());
 		let AAL=AAI+ AAJ;
 		let AAM=AAJ* AAJ;
 		let AAN=(AAL* AAL)+ (AAK* ((BA* AAM)- AAI));
@@ -1303,9 +1303,9 @@ impl Instance {
 		let ABG=ABD* ABD;
 		let ABH=B/ (G+ ABG);
 		let ABI=ABG* ABH;
-		let ABJ=if OI>= ((ABE* ABE)- (KF* (((ABF+ ABD)- B)- (ZT* ((ABD+ B)+ ABI))))){OI}else{((ABE* ABE)- (KF* (((ABF+ ABD)- B)- (ZT* ((ABD+ B)+ ABI)))))};
+		let ABJ=if !(OI).is_nan()&&(OI>=((ABE* ABE)- (KF* (((ABF+ ABD)- B)- (ZT* ((ABD+ B)+ ABI)))))||(((ABE* ABE)- (KF* (((ABF+ ABD)- B)- (ZT* ((ABD+ B)+ ABI)))))).is_nan()){OI}else{((ABE* ABE)- (KF* (((ABF+ ABD)- B)- (ZT* ((ABD+ B)+ ABI)))))};
 		let ABK=(G* ABE)+ (KF* ((B- ABF)- (ZT* (B+ (BR* ((ABD* ABH)* ABH))))));
-		let ABL=(ZR- ABD)+ ((if (ABJ/ KF)>= BX{(ABJ/ KF)}else{BX}).ln());
+		let ABL=(ZR- ABD)+ ((if !((ABJ/ KF)).is_nan()&&((ABJ/ KF)>=BX||(BX).is_nan()){(ABJ/ KF)}else{BX}).ln());
 		let ABM=ABJ+ ABK;
 		let ABN=ABK* ABK;
 		let ABO=ABJ* (B- (BA* (KF* (ABF- (ZT* ((((BT* ABH)- (NR* ABI))* ABH)* ABH))))));
@@ -1348,7 +1348,7 @@ impl Instance {
 		};
 		let ACQ=ACP+ ACL;
 		let ACR=ACP* ACN;
-		let ACS=(((ACQ* ACQ)/ ((ZR- ACG)+ ((if (ACP* KG)>= BX{(ACP* KG)}else{BX}).ln())))+ (BA* ACM))- ACR;
+		let ACS=(((ACQ* ACQ)/ ((ZR- ACG)+ ((if !((ACP* KG)).is_nan()&&((ACP* KG)>=BX||(BX).is_nan()){(ACP* KG)}else{BX}).ln())))+ (BA* ACM))- ACR;
 		let ACT=ACG+ ((ACQ* ACP)/ (ACS+ (((ACL* ACQ)/ ACS)* ((DP* ACM)- ACR))));
 		let ACU=rspice_limited_exp((ACT- ZR));
 		let ACV=JV- ACT;
@@ -1376,7 +1376,7 @@ impl Instance {
 		let ADI=ADE- ADH;
 		let ADJ=(ADI* ADI)+ (KF* (ADH+ B));
 		let ADK=(G* ADI)- KF;
-		let ADL=(-ADH)+ ((if (ADJ* KG)>= BX{(ADJ* KG)}else{BX}).ln());
+		let ADL=(-ADH)+ ((if !((ADJ* KG)).is_nan()&&((ADJ* KG)>=BX||(BX).is_nan()){(ADJ* KG)}else{BX}).ln());
 		let ADM=ADJ+ ADK;
 		let ADN=ADK* ADK;
 		let ADO=(ADM* ADM)+ (ADL* ((BA* ADN)- ADJ));
@@ -1403,9 +1403,9 @@ impl Instance {
 		let AEH=AEE* AEE;
 		let AEI=B/ (G+ AEH);
 		let AEJ=AEH* AEI;
-		let AEK=if OI>= ((AEF* AEF)- (KF* (((AEG+ AEE)- B)- (ZT* ((AEE+ B)+ AEJ))))){OI}else{((AEF* AEF)- (KF* (((AEG+ AEE)- B)- (ZT* ((AEE+ B)+ AEJ)))))};
+		let AEK=if !(OI).is_nan()&&(OI>=((AEF* AEF)- (KF* (((AEG+ AEE)- B)- (ZT* ((AEE+ B)+ AEJ)))))||(((AEF* AEF)- (KF* (((AEG+ AEE)- B)- (ZT* ((AEE+ B)+ AEJ)))))).is_nan()){OI}else{((AEF* AEF)- (KF* (((AEG+ AEE)- B)- (ZT* ((AEE+ B)+ AEJ)))))};
 		let AEL=(G* AEF)+ (KF* ((B- AEG)- (ZT* (B+ (BR* ((AEE* AEI)* AEI))))));
-		let AEM=(ZR- AEE)+ ((if (AEK/ KF)>= BX{(AEK/ KF)}else{BX}).ln());
+		let AEM=(ZR- AEE)+ ((if !((AEK/ KF)).is_nan()&&((AEK/ KF)>=BX||(BX).is_nan()){(AEK/ KF)}else{BX}).ln());
 		let AEN=AEK+ AEL;
 		let AEO=AEL* AEL;
 		let AEP=AEK* (B- (BA* (KF* (AEG- (ZT* ((((BT* AEI)- (NR* AEJ))* AEI)* AEI))))));
@@ -1767,7 +1767,7 @@ impl Instance {
 		let ANR=JE* ((KF* ANN)/ (ANO+ ANQ));
 		let ANS=ANQ* JE;
 		let ANT=ANO* JE;
-		let ANU=B+ ((YC* ((XY* (ANS+ (DQ* ANR))).powf(EE)))+ (YD/ (rspice_limited_exp((XZ* ((if (BA* (B+ (ANR/ ANS)))>= BX{(BA* (B+ (ANR/ ANS)))}else{BX}).ln()))))));
+		let ANU=B+ ((YC* ((XY* (ANS+ (DQ* ANR))).powf(EE)))+ (YD/ (rspice_limited_exp((XZ* ((if !((BA* (B+ (ANR/ ANS)))).is_nan()&&((BA* (B+ (ANR/ ANS)))>=BX||(BX).is_nan()){(BA* (B+ (ANR/ ANS)))}else{BX}).ln()))))));
 		let ANV=ANU- B;
 		let ANW=BA* ((ANU+ B)+ (((ANV* ANV)+ 5.625e-7f64).sqrt()));
 		let ANX=(YQ/ (YR/ ANW))* H;
@@ -1808,7 +1808,7 @@ impl Instance {
 		let AOR=(AOL* (B+ ((AON* ANR)/ ANX)))/ AOP;
 		AOR
 		};
-		let AOT=B+ (AOS* ((if (B+ ((AOC/ AOS)/ AOK))>= BX{(B+ ((AOC/ AOS)/ AOK))}else{BX}).ln()));
+		let AOT=B+ (AOS* ((if !((B+ ((AOC/ AOS)/ AOK))).is_nan()&&((B+ ((AOC/ AOS)/ AOK))>=BX||(BX).is_nan()){(B+ ((AOC/ AOS)/ AOK))}else{BX}).ln()));
 		APA=AOT;
 		}else{
 		let AOU=AON< A;
@@ -1935,7 +1935,7 @@ impl Instance {
 		let ARK=(BA* ((ARI+ B)- (((ARJ* ARJ)+ 2.5e-5f64).sqrt())))+ 0.0025f64;
 		let ARL=ARG/ (AQL+ FF);
 		let ARM=B+ ((FD* ARL)* ARL);
-		let ARN=rspice_limited_exp((-(FH/ (((if A>= (FJ+ ((FL* ARG)* ARG)){A}else{(FJ+ ((FL* ARG)* ARG))})* AQL)+ ARF))));
+		let ARN=rspice_limited_exp((-(FH/ (((if !(A).is_nan()&&(A>=(FJ+ ((FL* ARG)* ARG))||((FJ+ ((FL* ARG)* ARG))).is_nan()){A}else{(FJ+ ((FL* ARG)* ARG))})* AQL)+ ARF))));
 		let ARO=APZ* AQK;
 		let ARQ=(ARP* (B+ (BA* ((AQI* ARO)* ARO))))- DK;
 		let ARR=ANR+ (JE* ARP);
@@ -2055,7 +2055,7 @@ impl Instance {
 		if ATX{
 		let ATY=HI* CM;
 		let ATZ=(GJ* CM)- (staged[364]* CM);
-		let AUA=(if (parameters[141]/ CS)>= BX{(parameters[141]/ CS)}else{BX}).ln();
+		let AUA=(if !((parameters[141]/ CS)).is_nan()&&((parameters[141]/ CS)>=BX||(BX).is_nan()){(parameters[141]/ CS)}else{BX}).ln();
 		let AUB=((staged[365]* CM).sqrt())/ E;
 		let AUC=(GU* CM)- (K* CM);
 		let AUD=B/ AUB;
@@ -2084,7 +2084,7 @@ impl Instance {
 		let AUW=AUS- AUV;
 		let AUX=(AUW* AUW)+ (AUL* (AUV+ B));
 		let AUY=(G* AUW)- AUL;
-		let AUZ=((if (AUX/ AUL)>= BX{(AUX/ AUL)}else{BX}).ln())- AUV;
+		let AUZ=((if !((AUX/ AUL)).is_nan()&&((AUX/ AUL)>=BX||(BX).is_nan()){(AUX/ AUL)}else{BX}).ln())- AUV;
 		let AVA=AUX+ AUY;
 		let AVB=AUY* AUY;
 		let AVC=(AVA* AVA)+ (AUZ* ((BA* AVB)- AUX));
@@ -2151,7 +2151,7 @@ impl Instance {
 		let AWU=AWQ- AWT;
 		let AWV=(AWU* AWU)+ (AUE* (AWT+ B));
 		let AWW=(G* AWU)- AUE;
-		let AWX=(-AWT)+ ((if (AWV* AUF)>= BX{(AWV* AUF)}else{BX}).ln());
+		let AWX=(-AWT)+ ((if !((AWV* AUF)).is_nan()&&((AWV* AUF)>=BX||(BX).is_nan()){(AWV* AUF)}else{BX}).ln());
 		let AWY=AWV+ AWW;
 		let AWZ=AWW* AWW;
 		let AXA=(AWY* AWY)+ (AWX* ((BA* AWZ)- AWV));
@@ -2178,9 +2178,9 @@ impl Instance {
 		let AXT=AXQ* AXQ;
 		let AXU=B/ (G+ AXT);
 		let AXV=AXT* AXU;
-		let AXW=if OI>= ((AXR* AXR)- (AUE* (((AXS+ AXQ)- B)- (AWF* ((AXQ+ B)+ AXV))))){OI}else{((AXR* AXR)- (AUE* (((AXS+ AXQ)- B)- (AWF* ((AXQ+ B)+ AXV)))))};
+		let AXW=if !(OI).is_nan()&&(OI>=((AXR* AXR)- (AUE* (((AXS+ AXQ)- B)- (AWF* ((AXQ+ B)+ AXV)))))||(((AXR* AXR)- (AUE* (((AXS+ AXQ)- B)- (AWF* ((AXQ+ B)+ AXV)))))).is_nan()){OI}else{((AXR* AXR)- (AUE* (((AXS+ AXQ)- B)- (AWF* ((AXQ+ B)+ AXV)))))};
 		let AXX=(G* AXR)+ (AUE* ((B- AXS)- (AWF* (B+ (BR* ((AXQ* AXU)* AXU))))));
-		let AXY=(AWE- AXQ)+ ((if (AXW/ AUE)>= BX{(AXW/ AUE)}else{BX}).ln());
+		let AXY=(AWE- AXQ)+ ((if !((AXW/ AUE)).is_nan()&&((AXW/ AUE)>=BX||(BX).is_nan()){(AXW/ AUE)}else{BX}).ln());
 		let AXZ=AXW+ AXX;
 		let AYA=AXX* AXX;
 		let AYB=AXW* (B- (BA* (AUE* (AXS- (AWF* ((((BT* AXU)- (NR* AXV))* AXU)* AXU))))));
@@ -2223,7 +2223,7 @@ impl Instance {
 		};
 		let AZD=AZC+ AYY;
 		let AZE=AZC* AZA;
-		let AZF=(((AZD* AZD)/ ((AWE- AYT)+ ((if (AZC* AUF)>= BX{(AZC* AUF)}else{BX}).ln())))+ (BA* AYZ))- AZE;
+		let AZF=(((AZD* AZD)/ ((AWE- AYT)+ ((if !((AZC* AUF)).is_nan()&&((AZC* AUF)>=BX||(BX).is_nan()){(AZC* AUF)}else{BX}).ln())))+ (BA* AYZ))- AZE;
 		let AZG=AYT+ ((AZD* AZC)/ (AZF+ (((AYY* AZD)/ AZF)* ((DP* AYZ)- AZE))));
 		let AZH=rspice_limited_exp((AZG- AWE));
 		let AZI=ATZ- AZG;
@@ -2251,7 +2251,7 @@ impl Instance {
 		let AZV=AZR- AZU;
 		let AZW=(AZV* AZV)+ (AUE* (AZU+ B));
 		let AZX=(G* AZV)- AUE;
-		let AZY=(-AZU)+ ((if (AZW* AUF)>= BX{(AZW* AUF)}else{BX}).ln());
+		let AZY=(-AZU)+ ((if !((AZW* AUF)).is_nan()&&((AZW* AUF)>=BX||(BX).is_nan()){(AZW* AUF)}else{BX}).ln());
 		let AZZ=AZW+ AZX;
 		let BAA=AZX* AZX;
 		let BAB=(AZZ* AZZ)+ (AZY* ((BA* BAA)- AZW));
@@ -2278,9 +2278,9 @@ impl Instance {
 		let BAU=BAR* BAR;
 		let BAV=B/ (G+ BAU);
 		let BAW=BAU* BAV;
-		let BAX=if OI>= ((BAS* BAS)- (AUE* (((BAT+ BAR)- B)- (AWF* ((BAR+ B)+ BAW))))){OI}else{((BAS* BAS)- (AUE* (((BAT+ BAR)- B)- (AWF* ((BAR+ B)+ BAW)))))};
+		let BAX=if !(OI).is_nan()&&(OI>=((BAS* BAS)- (AUE* (((BAT+ BAR)- B)- (AWF* ((BAR+ B)+ BAW)))))||(((BAS* BAS)- (AUE* (((BAT+ BAR)- B)- (AWF* ((BAR+ B)+ BAW)))))).is_nan()){OI}else{((BAS* BAS)- (AUE* (((BAT+ BAR)- B)- (AWF* ((BAR+ B)+ BAW)))))};
 		let BAY=(G* BAS)+ (AUE* ((B- BAT)- (AWF* (B+ (BR* ((BAR* BAV)* BAV))))));
-		let BAZ=(AWE- BAR)+ ((if (BAX/ AUE)>= BX{(BAX/ AUE)}else{BX}).ln());
+		let BAZ=(AWE- BAR)+ ((if !((BAX/ AUE)).is_nan()&&((BAX/ AUE)>=BX||(BX).is_nan()){(BAX/ AUE)}else{BX}).ln());
 		let BBA=BAX+ BAY;
 		let BBB=BAY* BAY;
 		let BBC=BAX* (B- (BA* (AUE* (BAT- (AWF* ((((BT* BAV)- (NR* BAW))* BAV)* BAV))))));
@@ -2552,7 +2552,7 @@ impl Instance {
 		let BHA=AUB* (BGZ.sqrt());
 		let BHB=((AUE* BGW)* CL)/ ((AUB* ((BGZ+ BGW).sqrt()))+ BHA);
 		let BHC=BHA* CL;
-		let BHD=((YA+ (YB* HJ))* (((1e-8f64/ IL)* (BHC+ (DQ* BHB))).powf(EE)))+ (YD/ (rspice_limited_exp((XZ* ((if (BA* (B+ (BHB/ BHC)))>= BX{(BA* (B+ (BHB/ BHC)))}else{BX}).ln())))));
+		let BHD=((YA+ (YB* HJ))* (((1e-8f64/ IL)* (BHC+ (DQ* BHB))).powf(EE)))+ (YD/ (rspice_limited_exp((XZ* ((if !((BA* (B+ (BHB/ BHC)))).is_nan()&&((BA* (B+ (BHB/ BHC)))>=BX||(BX).is_nan()){(BA* (B+ (BHB/ BHC)))}else{BX}).ln())))));
 		let BHE=B+ BHD;
 		let BHF=BHE- B;
 		let BHG=BA* ((BHE+ B)+ (((BHF* BHF)+ 5.625e-7f64).sqrt()));
@@ -2630,7 +2630,7 @@ impl Instance {
 		let BJA=BIW- BIZ;
 		let BJB=(BJA* BJA)+ (AUE* (BIZ+ B));
 		let BJC=(G* BJA)- AUE;
-		let BJD=(-BIZ)+ ((if (BJB* AUF)>= BX{(BJB* AUF)}else{BX}).ln());
+		let BJD=(-BIZ)+ ((if !((BJB* AUF)).is_nan()&&((BJB* AUF)>=BX||(BX).is_nan()){(BJB* AUF)}else{BX}).ln());
 		let BJE=BJB+ BJC;
 		let BJF=BJC* BJC;
 		let BJG=(BJE* BJE)+ (BJD* ((BA* BJF)- BJB));
@@ -2657,9 +2657,9 @@ impl Instance {
 		let BJZ=BJW* BJW;
 		let BKA=B/ (G+ BJZ);
 		let BKB=BJZ* BKA;
-		let BKC=if OI>= ((BJX* BJX)- (AUE* (((BJY+ BJW)- B)- (BIM* ((BJW+ B)+ BKB))))){OI}else{((BJX* BJX)- (AUE* (((BJY+ BJW)- B)- (BIM* ((BJW+ B)+ BKB)))))};
+		let BKC=if !(OI).is_nan()&&(OI>=((BJX* BJX)- (AUE* (((BJY+ BJW)- B)- (BIM* ((BJW+ B)+ BKB)))))||(((BJX* BJX)- (AUE* (((BJY+ BJW)- B)- (BIM* ((BJW+ B)+ BKB)))))).is_nan()){OI}else{((BJX* BJX)- (AUE* (((BJY+ BJW)- B)- (BIM* ((BJW+ B)+ BKB)))))};
 		let BKD=(G* BJX)+ (AUE* ((B- BJY)- (BIM* (B+ (BR* ((BJW* BKA)* BKA))))));
-		let BKE=(BIK- BJW)+ ((if (BKC/ AUE)>= BX{(BKC/ AUE)}else{BX}).ln());
+		let BKE=(BIK- BJW)+ ((if !((BKC/ AUE)).is_nan()&&((BKC/ AUE)>=BX||(BX).is_nan()){(BKC/ AUE)}else{BX}).ln());
 		let BKF=BKC+ BKD;
 		let BKG=BKD* BKD;
 		let BKH=BKC* (B- (BA* (AUE* (BJY- (BIM* ((((BT* BKA)- (NR* BKB))* BKA)* BKA))))));
@@ -2702,7 +2702,7 @@ impl Instance {
 		};
 		let BLJ=BLI+ BLE;
 		let BLK=BLI* BLG;
-		let BLL=(((BLJ* BLJ)/ ((BIK- BKZ)+ ((if (BLI* AUF)>= BX{(BLI* AUF)}else{BX}).ln())))+ (BA* BLF))- BLK;
+		let BLL=(((BLJ* BLJ)/ ((BIK- BKZ)+ ((if !((BLI* AUF)).is_nan()&&((BLI* AUF)>=BX||(BX).is_nan()){(BLI* AUF)}else{BX}).ln())))+ (BA* BLF))- BLK;
 		let BLM=BKZ+ ((BLJ* BLI)/ (BLL+ (((BLE* BLJ)/ BLL)* ((DP* BLF)- BLK))));
 		let BLN=rspice_limited_exp((BLM- BIK));
 		let BLO=ATZ- BLM;
@@ -2730,7 +2730,7 @@ impl Instance {
 		let BMB=BLX- BMA;
 		let BMC=(BMB* BMB)+ (AUE* (BMA+ B));
 		let BMD=(G* BMB)- AUE;
-		let BME=(-BMA)+ ((if (BMC* AUF)>= BX{(BMC* AUF)}else{BX}).ln());
+		let BME=(-BMA)+ ((if !((BMC* AUF)).is_nan()&&((BMC* AUF)>=BX||(BX).is_nan()){(BMC* AUF)}else{BX}).ln());
 		let BMF=BMC+ BMD;
 		let BMG=BMD* BMD;
 		let BMH=(BMF* BMF)+ (BME* ((BA* BMG)- BMC));
@@ -2757,9 +2757,9 @@ impl Instance {
 		let BNA=BMX* BMX;
 		let BNB=B/ (G+ BNA);
 		let BNC=BNA* BNB;
-		let BND=if OI>= ((BMY* BMY)- (AUE* (((BMZ+ BMX)- B)- (BIM* ((BMX+ B)+ BNC))))){OI}else{((BMY* BMY)- (AUE* (((BMZ+ BMX)- B)- (BIM* ((BMX+ B)+ BNC)))))};
+		let BND=if !(OI).is_nan()&&(OI>=((BMY* BMY)- (AUE* (((BMZ+ BMX)- B)- (BIM* ((BMX+ B)+ BNC)))))||(((BMY* BMY)- (AUE* (((BMZ+ BMX)- B)- (BIM* ((BMX+ B)+ BNC)))))).is_nan()){OI}else{((BMY* BMY)- (AUE* (((BMZ+ BMX)- B)- (BIM* ((BMX+ B)+ BNC)))))};
 		let BNE=(G* BMY)+ (AUE* ((B- BMZ)- (BIM* (B+ (BR* ((BMX* BNB)* BNB))))));
-		let BNF=(BIK- BMX)+ ((if (BND/ AUE)>= BX{(BND/ AUE)}else{BX}).ln());
+		let BNF=(BIK- BMX)+ ((if !((BND/ AUE)).is_nan()&&((BND/ AUE)>=BX||(BX).is_nan()){(BND/ AUE)}else{BX}).ln());
 		let BNG=BND+ BNE;
 		let BNH=BNE* BNE;
 		let BNI=BND* (B- (BA* (AUE* (BMZ- (BIM* ((((BT* BNB)- (NR* BNC))* BNB)* BNB))))));
@@ -3321,7 +3321,7 @@ impl Instance {
 		if CAD{
 		CBL=A;
 		}else{
-		let CAE=DH* ((if (((AST/ DH)+ CAC)/ CAB)>= BX{(((AST/ DH)+ CAC)/ CAB)}else{BX}).ln());
+		let CAE=DH* ((if !((((AST/ DH)+ CAC)/ CAB)).is_nan()&&((((AST/ DH)+ CAC)/ CAB)>=BX||(BX).is_nan()){(((AST/ DH)+ CAC)/ CAB)}else{BX}).ln());
 		let CAF=CAE< A;
 		let CBM=if CAF{
 		A
@@ -3349,7 +3349,7 @@ impl Instance {
 		let CBD=H- (G* CBC);
 		let CBE=CBD* CBD;
 		let CBJ=(((CAH* CBG)* CAL)* CAN)/ C;
-		let CBK=(CAQ/ ((CBF* E)* CBE))* (((CAS* ((if ((CBJ+ CAG)/ CAW)>= BX{((CBJ+ CAG)/ CAW)}else{BX}).ln()))+ (CAT* (CBJ- CAP)))+ ((BA* CAU)* ((CBJ* CBJ)- (CAP* CAP))));
+		let CBK=(CAQ/ ((CBF* E)* CBE))* (((CAS* ((if !(((CBJ+ CAG)/ CAW)).is_nan()&&(((CBJ+ CAG)/ CAW)>=BX||(BX).is_nan()){((CBJ+ CAG)/ CAW)}else{BX}).ln()))+ (CAT* (CBJ- CAP)))+ ((BA* CAU)* ((CBJ* CBJ)- (CAP* CAP))));
 		let CBN=CBK+ ((((CAR/ (((CBF* CBE)* I)* F))* CBL)* CAV)/ CAX);
 		let CBO=((CAY/ (((((I* F)* CBD)* CBF)* CAG)* CAG))* ASE)* ASE;
 		let CBP=CBO+ CBN;
@@ -3490,7 +3490,7 @@ impl Instance {
 		let DTA;
 		let DTO;
 		if CEG{
-		let CEH=if ((DC+ (CL* ((if (AO/ CS)>= BX{(AO/ CS)}else{BX}).ln())))+ P)>= DC{((DC+ (CL* ((if (AO/ CS)>= BX{(AO/ CS)}else{BX}).ln())))+ P)}else{DC};
+		let CEH=if !(((DC+ (CL* ((if !((AO/ CS)).is_nan()&&((AO/ CS)>=BX||(BX).is_nan()){(AO/ CS)}else{BX}).ln())))+ P)).is_nan()&&(((DC+ (CL* ((if !((AO/ CS)).is_nan()&&((AO/ CS)>=BX||(BX).is_nan()){(AO/ CS)}else{BX}).ln())))+ P)>=DC||(DC).is_nan()){((DC+ (CL* ((if !((AO/ CS)).is_nan()&&((AO/ CS)>=BX||(BX).is_nan()){(AO/ CS)}else{BX}).ln())))+ P)}else{DC};
 		let CEI=B+ (AU* DI);
 		let CEK=CEH- HH;
 		let CEL=CEK- FZ;
@@ -3537,7 +3537,7 @@ impl Instance {
 		let CFS=rspice_limited_exp(CFQ);
 		CFS
 		};
-		let CFU=(-CES)* ((if (H/ (H+ (staged[432]* (B+ CFT))))>= BX{(H/ (H+ (staged[432]* (B+ CFT))))}else{BX}).ln());
+		let CFU=(-CES)* ((if !((H/ (H+ (staged[432]* (B+ CFT))))).is_nan()&&((H/ (H+ (staged[432]* (B+ CFT))))>=BX||(BX).is_nan()){(H/ (H+ (staged[432]* (B+ CFT))))}else{BX}).ln());
 		CFV=CFU;
 		}else{
 		CFV=A;
@@ -3571,7 +3571,7 @@ impl Instance {
 		let CGU=CGQ- CGT;
 		let CGV=(CGU* CGU)+ (CGJ* (CGT+ B));
 		let CGW=(G* CGU)- CGJ;
-		let CGX=((if (CGV/ CGJ)>= BX{(CGV/ CGJ)}else{BX}).ln())- CGT;
+		let CGX=((if !((CGV/ CGJ)).is_nan()&&((CGV/ CGJ)>=BX||(BX).is_nan()){(CGV/ CGJ)}else{BX}).ln())- CGT;
 		let CGY=CGV+ CGW;
 		let CGZ=CGW* CGW;
 		let CHA=(CGY* CGY)+ (CGX* ((BA* CGZ)- CGV));
@@ -3635,7 +3635,7 @@ impl Instance {
 		let CIQ=CIM- CIP;
 		let CIR=(CIQ* CIQ)+ (CGC* (CIP+ B));
 		let CIS=(G* CIQ)- CGC;
-		let CIT=(-CIP)+ ((if (CIR* CGD)>= BX{(CIR* CGD)}else{BX}).ln());
+		let CIT=(-CIP)+ ((if !((CIR* CGD)).is_nan()&&((CIR* CGD)>=BX||(BX).is_nan()){(CIR* CGD)}else{BX}).ln());
 		let CIU=CIR+ CIS;
 		let CIV=CIS* CIS;
 		let CIW=(CIU* CIU)+ (CIT* ((BA* CIV)- CIR));
@@ -3662,9 +3662,9 @@ impl Instance {
 		let CJP=CJM* CJM;
 		let CJQ=B/ (G+ CJP);
 		let CJR=CJP* CJQ;
-		let CJS=if OI>= ((CJN* CJN)- (CGC* (((CJO+ CJM)- B)- (CID* ((CJM+ B)+ CJR))))){OI}else{((CJN* CJN)- (CGC* (((CJO+ CJM)- B)- (CID* ((CJM+ B)+ CJR)))))};
+		let CJS=if !(OI).is_nan()&&(OI>=((CJN* CJN)- (CGC* (((CJO+ CJM)- B)- (CID* ((CJM+ B)+ CJR)))))||(((CJN* CJN)- (CGC* (((CJO+ CJM)- B)- (CID* ((CJM+ B)+ CJR)))))).is_nan()){OI}else{((CJN* CJN)- (CGC* (((CJO+ CJM)- B)- (CID* ((CJM+ B)+ CJR)))))};
 		let CJT=(G* CJN)+ (CGC* ((B- CJO)- (CID* (B+ (BR* ((CJM* CJQ)* CJQ))))));
-		let CJU=(CIC- CJM)+ ((if (CJS/ CGC)>= BX{(CJS/ CGC)}else{BX}).ln());
+		let CJU=(CIC- CJM)+ ((if !((CJS/ CGC)).is_nan()&&((CJS/ CGC)>=BX||(BX).is_nan()){(CJS/ CGC)}else{BX}).ln());
 		let CJV=CJS+ CJT;
 		let CJW=CJT* CJT;
 		let CJX=CJS* (B- (BA* (CGC* (CJO- (CID* ((((BT* CJQ)- (NR* CJR))* CJQ)* CJQ))))));
@@ -3707,7 +3707,7 @@ impl Instance {
 		};
 		let CKZ=CKY+ CKU;
 		let CLA=CKY* CKW;
-		let CLB=(((CKZ* CKZ)/ ((CIC- CKP)+ ((if (CKY* CGD)>= BX{(CKY* CGD)}else{BX}).ln())))+ (BA* CKV))- CLA;
+		let CLB=(((CKZ* CKZ)/ ((CIC- CKP)+ ((if !((CKY* CGD)).is_nan()&&((CKY* CGD)>=BX||(BX).is_nan()){(CKY* CGD)}else{BX}).ln())))+ (BA* CKV))- CLA;
 		let CLC=CKP+ ((CKZ* CKY)/ (CLB+ (((CKU* CKZ)/ CLB)* ((DP* CKV)- CLA))));
 		let CLD=rspice_limited_exp((CLC- CIC));
 		let CLE=CFY- CLC;
@@ -3735,7 +3735,7 @@ impl Instance {
 		let CLR=CLN- CLQ;
 		let CLS=(CLR* CLR)+ (CGC* (CLQ+ B));
 		let CLT=(G* CLR)- CGC;
-		let CLU=(-CLQ)+ ((if (CLS* CGD)>= BX{(CLS* CGD)}else{BX}).ln());
+		let CLU=(-CLQ)+ ((if !((CLS* CGD)).is_nan()&&((CLS* CGD)>=BX||(BX).is_nan()){(CLS* CGD)}else{BX}).ln());
 		let CLV=CLS+ CLT;
 		let CLW=CLT* CLT;
 		let CLX=(CLV* CLV)+ (CLU* ((BA* CLW)- CLS));
@@ -3762,9 +3762,9 @@ impl Instance {
 		let CMQ=CMN* CMN;
 		let CMR=B/ (G+ CMQ);
 		let CMS=CMQ* CMR;
-		let CMT=if OI>= ((CMO* CMO)- (CGC* (((CMP+ CMN)- B)- (CID* ((CMN+ B)+ CMS))))){OI}else{((CMO* CMO)- (CGC* (((CMP+ CMN)- B)- (CID* ((CMN+ B)+ CMS)))))};
+		let CMT=if !(OI).is_nan()&&(OI>=((CMO* CMO)- (CGC* (((CMP+ CMN)- B)- (CID* ((CMN+ B)+ CMS)))))||(((CMO* CMO)- (CGC* (((CMP+ CMN)- B)- (CID* ((CMN+ B)+ CMS)))))).is_nan()){OI}else{((CMO* CMO)- (CGC* (((CMP+ CMN)- B)- (CID* ((CMN+ B)+ CMS)))))};
 		let CMU=(G* CMO)+ (CGC* ((B- CMP)- (CID* (B+ (BR* ((CMN* CMR)* CMR))))));
-		let CMV=(CIC- CMN)+ ((if (CMT/ CGC)>= BX{(CMT/ CGC)}else{BX}).ln());
+		let CMV=(CIC- CMN)+ ((if !((CMT/ CGC)).is_nan()&&((CMT/ CGC)>=BX||(BX).is_nan()){(CMT/ CGC)}else{BX}).ln());
 		let CMW=CMT+ CMU;
 		let CMX=CMU* CMU;
 		let CMY=CMT* (B- (BA* (CGC* (CMP- (CID* ((((BT* CMR)- (NR* CMS))* CMR)* CMR))))));
@@ -4046,7 +4046,7 @@ impl Instance {
 		let CSQ=JV< A;
 		let CSX=if CSQ{
 		let CSR=(JV- CSP)/ JX;
-		let CSS=-((if ((B- CSP)+ (CSR* CSR))>= BX{((B- CSP)+ (CSR* CSR))}else{BX}).ln());
+		let CSS=-((if !(((B- CSP)+ (CSR* CSR))).is_nan()&&(((B- CSP)+ (CSR* CSR))>=BX||(BX).is_nan()){((B- CSP)+ (CSR* CSR))}else{BX}).ln());
 		CSS
 		}else{
 		let CST=rspice_limited_exp((-CSP));
@@ -4063,7 +4063,7 @@ impl Instance {
 		let CTD=(B+ (JX/ CTC))/ JX;
 		let CTE=CSX- (G* CSM);
 		let CTF=CTE- JT;
-		let CTG=CTF- ((if ((BR* CTD)* CTB)>= BX{((BR* CTD)* CTB)}else{BX}).ln());
+		let CTG=CTF- ((if !(((BR* CTD)* CTB)).is_nan()&&(((BR* CTD)* CTB)>=BX||(BX).is_nan()){((BR* CTD)* CTB)}else{BX}).ln());
 		let CTK=BA* ((CTG- CTH)- (((CTG* (CTG+ CTI))+ CTJ).sqrt()));
 		let CTL=CTK<= -68f64;
 		let CUJ;
@@ -4085,17 +4085,17 @@ impl Instance {
 		};
 		CTT=CTU;
 		}
-		let CTV=CTT* (((B+ CTF)- CTK)- ((if ((G* CTD)* (((CTT* G)* CTD)+ CTC))>= BX{((G* CTD)* (((CTT* G)* CTD)+ CTC))}else{BX}).ln()));
+		let CTV=CTT* (((B+ CTF)- CTK)- ((if !(((G* CTD)* (((CTT* G)* CTD)+ CTC))).is_nan()&&(((G* CTD)* (((CTT* G)* CTD)+ CTC))>=BX||(BX).is_nan()){((G* CTD)* (((CTT* G)* CTD)+ CTC))}else{BX}).ln()));
 		CUJ=CTV;
 		}else{
 		let CTW=rspice_limited_exp(CTK);
 		let CTX=G* CTW;
 		let CTY=CTX* CTD;
 		let CTZ=CTD+ (B/ CTB);
-		let CUA=CTW- (((CTX+ ((if (CTY* (CTY+ CTC))>= BX{(CTY* (CTY+ CTC))}else{BX}).ln()))- CTF)/ ((G+ (B/ CTW))+ (CTZ/ ((CTD* CTW)+ CTB))));
+		let CUA=CTW- (((CTX+ ((if !((CTY* (CTY+ CTC))).is_nan()&&((CTY* (CTY+ CTC))>=BX||(BX).is_nan()){(CTY* (CTY+ CTC))}else{BX}).ln()))- CTF)/ ((G+ (B/ CTW))+ (CTZ/ ((CTD* CTW)+ CTB))));
 		let CUB=G* CUA;
 		let CUC=CUB* CTD;
-		let CUD=(CUB+ ((if (CUC* (CUC+ CTC))>= BX{(CUC* (CUC+ CTC))}else{BX}).ln()))- CTF;
+		let CUD=(CUB+ ((if !((CUC* (CUC+ CTC))).is_nan()&&((CUC* (CUC+ CTC))>=BX||(BX).is_nan()){(CUC* (CUC+ CTC))}else{BX}).ln()))- CTF;
 		let CUE=B/ CUA;
 		let CUF=(CTD* CUA)+ CTB;
 		let CUG=CTZ/ CUF;
@@ -4265,7 +4265,7 @@ impl Instance {
 		}
 		let CYJ=G* CYI;
 		let CYK=(CYJ* CUN)* KC;
-		let CYL=(CTE- (CYJ+ ((if (CYK* (CYK+ (JX/ CUQ)))>= BX{(CYK* (CYK+ (JX/ CUQ)))}else{BX}).ln())))* JE;
+		let CYL=(CTE- (CYJ+ ((if !((CYK* (CYK+ (JX/ CUQ)))).is_nan()&&((CYK* (CYK+ (JX/ CUQ)))>=BX||(BX).is_nan()){(CYK* (CYK+ (JX/ CUQ)))}else{BX}).ln())))* JE;
 		let CYS=if CYM{
 		B
 		}else{
@@ -4284,7 +4284,7 @@ impl Instance {
 		let CYY=G* CYX;
 		let CYZ=(B+ (JX/ CYY))/ JX;
 		let CZA=CTE- ((CYW+ GZ)* JF);
-		let CZB=CZA- ((if ((BR* CYZ)* CYX)>= BX{((BR* CYZ)* CYX)}else{BX}).ln());
+		let CZB=CZA- ((if !(((BR* CYZ)* CYX)).is_nan()&&(((BR* CYZ)* CYX)>=BX||(BX).is_nan()){((BR* CYZ)* CYX)}else{BX}).ln());
 		let CZC=BA* ((CZB- CTH)- (((CZB* (CZB+ CTI))+ CTJ).sqrt()));
 		let CZD=CZC<= -68f64;
 		let DAB;
@@ -4306,17 +4306,17 @@ impl Instance {
 		};
 		CZL=CZM;
 		}
-		let CZN=CZL* (((B+ CZA)- CZC)- ((if ((G* CYZ)* (((CZL* G)* CYZ)+ CYY))>= BX{((G* CYZ)* (((CZL* G)* CYZ)+ CYY))}else{BX}).ln()));
+		let CZN=CZL* (((B+ CZA)- CZC)- ((if !(((G* CYZ)* (((CZL* G)* CYZ)+ CYY))).is_nan()&&(((G* CYZ)* (((CZL* G)* CYZ)+ CYY))>=BX||(BX).is_nan()){((G* CYZ)* (((CZL* G)* CYZ)+ CYY))}else{BX}).ln()));
 		DAB=CZN;
 		}else{
 		let CZO=rspice_limited_exp(CZC);
 		let CZP=G* CZO;
 		let CZQ=CZP* CYZ;
 		let CZR=CYZ+ (B/ CYX);
-		let CZS=CZO- (((CZP+ ((if (CZQ* (CZQ+ CYY))>= BX{(CZQ* (CZQ+ CYY))}else{BX}).ln()))- CZA)/ ((G+ (B/ CZO))+ (CZR/ ((CYZ* CZO)+ CYX))));
+		let CZS=CZO- (((CZP+ ((if !((CZQ* (CZQ+ CYY))).is_nan()&&((CZQ* (CZQ+ CYY))>=BX||(BX).is_nan()){(CZQ* (CZQ+ CYY))}else{BX}).ln()))- CZA)/ ((G+ (B/ CZO))+ (CZR/ ((CYZ* CZO)+ CYX))));
 		let CZT=G* CZS;
 		let CZU=CZT* CYZ;
-		let CZV=(CZT+ ((if (CZU* (CZU+ CYY))>= BX{(CZU* (CZU+ CYY))}else{BX}).ln()))- CZA;
+		let CZV=(CZT+ ((if !((CZU* (CZU+ CYY))).is_nan()&&((CZU* (CZU+ CYY))>=BX||(BX).is_nan()){(CZU* (CZU+ CYY))}else{BX}).ln()))- CZA;
 		let CZW=B/ CZS;
 		let CZX=(CYZ* CZS)+ CYX;
 		let CZY=CZR/ CZX;
@@ -4380,7 +4380,7 @@ impl Instance {
 		let DBN=(AOL* (B+ ((AON* DAR)/ DAW)))/ DBL;
 		DBN
 		};
-		let DBP=B+ (DBO* ((if (B+ ((DBA/ DBO)/ DBI))>= BX{(B+ ((DBA/ DBO)/ DBI))}else{BX}).ln()));
+		let DBP=B+ (DBO* ((if !((B+ ((DBA/ DBO)/ DBI))).is_nan()&&((B+ ((DBA/ DBO)/ DBI))>=BX||(BX).is_nan()){(B+ ((DBA/ DBO)/ DBI))}else{BX}).ln()));
 		DBW=DBP;
 		}else{
 		let DBQ=AON< A;
@@ -4480,7 +4480,7 @@ impl Instance {
 		let DDM=DDL- B;
 		let DDN=DAF/ (DAK+ FF);
 		let DDO=B+ ((FD* DDN)* DDN);
-		let DDP=rspice_limited_exp((-(FH/ (((if A>= (FJ+ ((FL* DAF)* DAF)){A}else{(FJ+ ((FL* DAF)* DAF))})* DAK)+ DDJ))));
+		let DDP=rspice_limited_exp((-(FH/ (((if !(A).is_nan()&&(A>=(FJ+ ((FL* DAF)* DAF))||((FJ+ ((FL* DAF)* DAF))).is_nan()){A}else{(FJ+ ((FL* DAF)* DAF))})* DAK)+ DDJ))));
 		let DDS=YR/ ((DAU* DCU)* DDQ);
 		let DDU=(((((((((DDT* DAE)* DDS)* I)/ H)* E)* JE)* JE)* (DAF* DAH))* DCJ)/ ((BA* ((DDL+ B)- (((DDM* DDM)+ 2.5e-5f64).sqrt())))+ 0.0025f64);
 		let DDV=((DDU* DDO)* DDP)* parameters[26];
@@ -4657,7 +4657,7 @@ impl Instance {
 		if DHE{
 		DKP=A;
 		}else{
-		let DHF=DH* ((if (((DBA/ DH)+ CAC)/ DHD)>= BX{(((DBA/ DH)+ CAC)/ DHD)}else{BX}).ln());
+		let DHF=DH* ((if !((((DBA/ DH)+ CAC)/ DHD)).is_nan()&&((((DBA/ DH)+ CAC)/ DHD)>=BX||(BX).is_nan()){(((DBA/ DH)+ CAC)/ DHD)}else{BX}).ln());
 		let DHG=DHF< A;
 		let DKQ=if DHG{
 		A
@@ -4704,7 +4704,7 @@ impl Instance {
 		let DIC=DHX< A;
 		let DIJ=if DIC{
 		let DID=(DHX- DIB)/ DHY;
-		let DIE=-((if ((B- DIB)+ (DID* DID))>= BX{((B- DIB)+ (DID* DID))}else{BX}).ln());
+		let DIE=-((if !(((B- DIB)+ (DID* DID))).is_nan()&&(((B- DIB)+ (DID* DID))>=BX||(BX).is_nan()){((B- DIB)+ (DID* DID))}else{BX}).ln());
 		DIE
 		}else{
 		let DIF=rspice_limited_exp((-DIB));
@@ -4720,7 +4720,7 @@ impl Instance {
 		let DIO=G* DIN;
 		let DIP=(B+ (DHY/ DIO))/ DHY;
 		let DIQ=(DIJ- (G* DHZ))- JT;
-		let DIR=DIQ- ((if ((BR* DIP)* DIN)>= BX{((BR* DIP)* DIN)}else{BX}).ln());
+		let DIR=DIQ- ((if !(((BR* DIP)* DIN)).is_nan()&&(((BR* DIP)* DIN)>=BX||(BX).is_nan()){((BR* DIP)* DIN)}else{BX}).ln());
 		let DIS=BA* ((DIR- CTH)- (((DIR* (DIR+ CTI))+ CTJ).sqrt()));
 		let DIT=DIS<= -68f64;
 		let DJX;
@@ -4742,17 +4742,17 @@ impl Instance {
 		};
 		DJB=DJC;
 		}
-		let DJD=DJB* (((B+ DIQ)- DIS)- ((if ((G* DIP)* (((DJB* G)* DIP)+ DIO))>= BX{((G* DIP)* (((DJB* G)* DIP)+ DIO))}else{BX}).ln()));
+		let DJD=DJB* (((B+ DIQ)- DIS)- ((if !(((G* DIP)* (((DJB* G)* DIP)+ DIO))).is_nan()&&(((G* DIP)* (((DJB* G)* DIP)+ DIO))>=BX||(BX).is_nan()){((G* DIP)* (((DJB* G)* DIP)+ DIO))}else{BX}).ln()));
 		DJX=DJD;
 		}else{
 		let DJE=rspice_limited_exp(DIS);
 		let DJF=G* DJE;
 		let DJG=DJF* DIP;
 		let DJH=DIP+ (B/ DIN);
-		let DJI=DJE- (((DJF+ ((if (DJG* (DJG+ DIO))>= BX{(DJG* (DJG+ DIO))}else{BX}).ln()))- DIQ)/ ((G+ (B/ DJE))+ (DJH/ ((DIP* DJE)+ DIN))));
+		let DJI=DJE- (((DJF+ ((if !((DJG* (DJG+ DIO))).is_nan()&&((DJG* (DJG+ DIO))>=BX||(BX).is_nan()){(DJG* (DJG+ DIO))}else{BX}).ln()))- DIQ)/ ((G+ (B/ DJE))+ (DJH/ ((DIP* DJE)+ DIN))));
 		let DJJ=G* DJI;
 		let DJK=DJJ* DIP;
-		let DJL=(DJJ+ ((if (DJK* (DJK+ DIO))>= BX{(DJK* (DJK+ DIO))}else{BX}).ln()))- DIQ;
+		let DJL=(DJJ+ ((if !((DJK* (DJK+ DIO))).is_nan()&&((DJK* (DJK+ DIO))>=BX||(BX).is_nan()){(DJK* (DJK+ DIO))}else{BX}).ln()))- DIQ;
 		let DJM=B/ DJI;
 		let DJN=(DIP* DJI)+ DIN;
 		let DJO=DJH/ DJN;
@@ -4785,7 +4785,7 @@ impl Instance {
 		let DKK=(DHK* DKB)/ C;
 		let DKM=(H- (G* DKL))- DJS;
 		let DKN=DKM* DKM;
-		let DKO=(DHM/ ((CBF* E)* DKN))* (((CAS* ((if ((DKK+ DHI)/ DHQ)>= BX{((DKK+ DHI)/ DHQ)}else{BX}).ln()))+ (CAT* (DKK- DHL)))+ ((BA* CAU)* ((DKK* DKK)- (DHL* DHL))));
+		let DKO=(DHM/ ((CBF* E)* DKN))* (((CAS* ((if !(((DKK+ DHI)/ DHQ)).is_nan()&&(((DKK+ DHI)/ DHQ)>=BX||(BX).is_nan()){((DKK+ DHI)/ DHQ)}else{BX}).ln()))+ (CAT* (DKK- DHL)))+ ((BA* CAU)* ((DKK* DKK)- (DHL* DHL))));
 		let DKR=DKO+ ((((DHO/ (((CBF* DKN)* I)* F))* DKP)* DHP)/ DHR);
 		let DKS=((DHS/ (((((I* F)* DKM)* CBF)* DHI)* DHI))* DDV)* DDV;
 		let DKT=DKS+ DKR;
@@ -4826,7 +4826,7 @@ impl Instance {
 		let DLF=H- (G* DLE);
 		let DLG=DLF* DLF;
 		let DLH=(((DHK* CUJ)* DDP)* DDO)/ C;
-		let DLI=(DHM/ ((CBF* E)* DLG))* (((CAS* ((if ((DLH+ DHI)/ DHQ)>= BX{((DLH+ DHI)/ DHQ)}else{BX}).ln()))+ (CAT* (DLH- DHL)))+ ((BA* CAU)* ((DLH* DLH)- (DHL* DHL))));
+		let DLI=(DHM/ ((CBF* E)* DLG))* (((CAS* ((if !(((DLH+ DHI)/ DHQ)).is_nan()&&(((DLH+ DHI)/ DHQ)>=BX||(BX).is_nan()){((DLH+ DHI)/ DHQ)}else{BX}).ln()))+ (CAT* (DLH- DHL)))+ ((BA* CAU)* ((DLH* DLH)- (DHL* DHL))));
 		let DLJ=DLI+ ((((DHO/ (((CBF* DLG)* I)* F))* DKP)* DHP)/ DHR);
 		let DLK=((DHS/ (((((I* F)* DLF)* CBF)* DHI)* DHI))* DDV)* DDV;
 		let DLL=DLK+ DLJ;
@@ -4974,8 +4974,8 @@ impl Instance {
 		let DXI;
 		let DXK;
 		if DNH{
-		let DNI=(if (AO/ CS)>= BX{(AO/ CS)}else{BX}).ln();
-		let DNJ=if ((DC+ (CL* DNI))+ P)>= DC{((DC+ (CL* DNI))+ P)}else{DC};
+		let DNI=(if !((AO/ CS)).is_nan()&&((AO/ CS)>=BX||(BX).is_nan()){(AO/ CS)}else{BX}).ln();
+		let DNJ=if !(((DC+ (CL* DNI))+ P)).is_nan()&&(((DC+ (CL* DNI))+ P)>=DC||(DC).is_nan()){((DC+ (CL* DNI))+ P)}else{DC};
 		let DNK=B+ (AU* DI);
 		let DNL=DNJ- HH;
 		let DNM=DNL- FZ;
@@ -5015,7 +5015,7 @@ impl Instance {
 		let DOL=DOG< A;
 		let DOS=if DOL{
 		let DOM=(DOG- DOK)/ DOH;
-		let DON=-((if ((B- DOK)+ (DOM* DOM))>= BX{((B- DOK)+ (DOM* DOM))}else{BX}).ln());
+		let DON=-((if !(((B- DOK)+ (DOM* DOM))).is_nan()&&(((B- DOK)+ (DOM* DOM))>=BX||(BX).is_nan()){((B- DOK)+ (DOM* DOM))}else{BX}).ln());
 		DON
 		}else{
 		let DOO=rspice_limited_exp((-DOK));
@@ -5032,7 +5032,7 @@ impl Instance {
 		let DOY=(B+ (DOH/ DOX))/ DOH;
 		let DOZ=DOS- (G* DOI);
 		let DPA=DOZ- DNU;
-		let DPB=DPA- ((if ((BR* DOY)* DOW)>= BX{((BR* DOY)* DOW)}else{BX}).ln());
+		let DPB=DPA- ((if !(((BR* DOY)* DOW)).is_nan()&&(((BR* DOY)* DOW)>=BX||(BX).is_nan()){((BR* DOY)* DOW)}else{BX}).ln());
 		let DPC=BA* ((DPB- CTH)- (((DPB* (DPB+ CTI))+ CTJ).sqrt()));
 		let DPD=DPC<= -68f64;
 		let DQC;
@@ -5054,17 +5054,17 @@ impl Instance {
 		};
 		DPL=DPM;
 		}
-		let DPN=DPL* (((B+ DPA)- DPC)- ((if ((G* DOY)* (((DPL* G)* DOY)+ DOX))>= BX{((G* DOY)* (((DPL* G)* DOY)+ DOX))}else{BX}).ln()));
+		let DPN=DPL* (((B+ DPA)- DPC)- ((if !(((G* DOY)* (((DPL* G)* DOY)+ DOX))).is_nan()&&(((G* DOY)* (((DPL* G)* DOY)+ DOX))>=BX||(BX).is_nan()){((G* DOY)* (((DPL* G)* DOY)+ DOX))}else{BX}).ln()));
 		DQC=DPN;
 		}else{
 		let DPO=rspice_limited_exp(DPC);
 		let DPP=G* DPO;
 		let DPQ=DPP* DOY;
 		let DPR=DOY+ (B/ DOW);
-		let DPS=DPO- (((DPP+ ((if (DPQ* (DPQ+ DOX))>= BX{(DPQ* (DPQ+ DOX))}else{BX}).ln()))- DPA)/ ((G+ (B/ DPO))+ (DPR/ ((DOY* DPO)+ DOW))));
+		let DPS=DPO- (((DPP+ ((if !((DPQ* (DPQ+ DOX))).is_nan()&&((DPQ* (DPQ+ DOX))>=BX||(BX).is_nan()){(DPQ* (DPQ+ DOX))}else{BX}).ln()))- DPA)/ ((G+ (B/ DPO))+ (DPR/ ((DOY* DPO)+ DOW))));
 		let DPT=G* DPS;
 		let DPU=DPT* DOY;
-		let DPV=(DPT+ ((if (DPU* (DPU+ DOX))>= BX{(DPU* (DPU+ DOX))}else{BX}).ln()))- DPA;
+		let DPV=(DPT+ ((if !((DPU* (DPU+ DOX))).is_nan()&&((DPU* (DPU+ DOX))>=BX||(BX).is_nan()){(DPU* (DPU+ DOX))}else{BX}).ln()))- DPA;
 		let DPW=B/ DPS;
 		let DPX=(DOY* DPS)+ DOW;
 		let DPY=DPR/ DPX;
@@ -5078,7 +5078,7 @@ impl Instance {
 		let DQF=G* DQE;
 		let DQG=(B+ (DOH/ DQF))/ DOH;
 		let DQH=DOZ- (((HA* ((B+ (((HA/ (BA* ((DQD+ A)+ (((DQD* DQD)+ 2.5e-7f64).sqrt()))))+ J).powf(CYU))).powf(CYV)))+ GZ)* DNS);
-		let DQI=DQH- ((if ((BR* DQG)* DQE)>= BX{((BR* DQG)* DQE)}else{BX}).ln());
+		let DQI=DQH- ((if !(((BR* DQG)* DQE)).is_nan()&&(((BR* DQG)* DQE)>=BX||(BX).is_nan()){((BR* DQG)* DQE)}else{BX}).ln());
 		let DQJ=BA* ((DQI- CTH)- (((DQI* (DQI+ CTI))+ CTJ).sqrt()));
 		let DQK=DQJ<= -68f64;
 		let DRI;
@@ -5100,17 +5100,17 @@ impl Instance {
 		};
 		DQS=DQT;
 		}
-		let DQU=DQS* (((B+ DQH)- DQJ)- ((if ((G* DQG)* (((DQS* G)* DQG)+ DQF))>= BX{((G* DQG)* (((DQS* G)* DQG)+ DQF))}else{BX}).ln()));
+		let DQU=DQS* (((B+ DQH)- DQJ)- ((if !(((G* DQG)* (((DQS* G)* DQG)+ DQF))).is_nan()&&(((G* DQG)* (((DQS* G)* DQG)+ DQF))>=BX||(BX).is_nan()){((G* DQG)* (((DQS* G)* DQG)+ DQF))}else{BX}).ln()));
 		DRI=DQU;
 		}else{
 		let DQV=rspice_limited_exp(DQJ);
 		let DQW=G* DQV;
 		let DQX=DQW* DQG;
 		let DQY=DQG+ (B/ DQE);
-		let DQZ=DQV- (((DQW+ ((if (DQX* (DQX+ DQF))>= BX{(DQX* (DQX+ DQF))}else{BX}).ln()))- DQH)/ ((G+ (B/ DQV))+ (DQY/ ((DQG* DQV)+ DQE))));
+		let DQZ=DQV- (((DQW+ ((if !((DQX* (DQX+ DQF))).is_nan()&&((DQX* (DQX+ DQF))>=BX||(BX).is_nan()){(DQX* (DQX+ DQF))}else{BX}).ln()))- DQH)/ ((G+ (B/ DQV))+ (DQY/ ((DQG* DQV)+ DQE))));
 		let DRA=G* DQZ;
 		let DRB=DRA* DQG;
-		let DRC=(DRA+ ((if (DRB* (DRB+ DQF))>= BX{(DRB* (DRB+ DQF))}else{BX}).ln()))- DQH;
+		let DRC=(DRA+ ((if !((DRB* (DRB+ DQF))).is_nan()&&((DRB* (DRB+ DQF))>=BX||(BX).is_nan()){(DRB* (DRB+ DQF))}else{BX}).ln()))- DQH;
 		let DRD=B/ DQZ;
 		let DRE=(DQG* DQZ)+ DQE;
 		let DRF=DQY/ DRE;
@@ -5133,7 +5133,7 @@ impl Instance {
 		let DRX=(DRW* DRI)/ C;
 		let DRY=DRX+ DRV;
 		let DRZ=(DRW* DQC)/ C;
-		let DSA=((((4.112737976006692e-57f64* CL)* (DRO.abs()))* DDS)/ DRL)* (((DRQ* ((if ((DRZ+ DRV)/ DRY)>= BX{((DRZ+ DRV)/ DRY)}else{BX}).ln()))+ (DRR* (DRZ- DRX)))+ ((BA* DRS)* ((DRZ* DRZ)- (DRX* DRX))));
+		let DSA=((((4.112737976006692e-57f64* CL)* (DRO.abs()))* DDS)/ DRL)* (((DRQ* ((if !(((DRZ+ DRV)/ DRY)).is_nan()&&(((DRZ+ DRV)/ DRY)>=BX||(BX).is_nan()){((DRZ+ DRV)/ DRY)}else{BX}).ln()))+ (DRR* (DRZ- DRX)))+ ((BA* DRS)* ((DRZ* DRZ)- (DRX* DRX))));
 		let DSB=(((((DHN* DRO)* DRO)/ (((CBF* (DRU* DRU))* CSL)* F))* DKP)* ((DRQ+ (DRR* DRX))+ ((DRS* DRX)* DRX)))/ (DRY* DRY);
 		let DSC=DSA+ DSB;
 		let DSD=((((DRQ* C)* CL)/ (((((CSL* F)* DRU)* CBF)* DRV)* DRV))* DRO)* DRO;
@@ -6191,10 +6191,10 @@ impl Instance {
 		MI=A;
 		NV=A;
 		}
-		let IZ=(B+ ((parameters[80]* (if ((BJ.powf(IW))- (BL.powf(IW)))>= A{((BJ.powf(IW))- (BL.powf(IW)))}else{A}))+ (parameters[82]* (if ((BJ.powf(IX))- (BL.powf(IX)))>= A{((BJ.powf(IX))- (BL.powf(IX)))}else{A}))))+ ((parameters[84]* (if ((BK.powf(IY))- (BM.powf(IY)))>= A{((BK.powf(IY))- (BM.powf(IY)))}else{A}))+ (parameters[86]* (BN.powf(parameters[87]))));
+		let IZ=(B+ ((parameters[80]* (if !(((BJ.powf(IW))- (BL.powf(IW)))).is_nan()&&(((BJ.powf(IW))- (BL.powf(IW)))>=A||(A).is_nan()){((BJ.powf(IW))- (BL.powf(IW)))}else{A}))+ (parameters[82]* (if !(((BJ.powf(IX))- (BL.powf(IX)))).is_nan()&&(((BJ.powf(IX))- (BL.powf(IX)))>=A||(A).is_nan()){((BJ.powf(IX))- (BL.powf(IX)))}else{A}))))+ ((parameters[84]* (if !(((BK.powf(IY))- (BM.powf(IY)))).is_nan()&&(((BK.powf(IY))- (BM.powf(IY)))>=A||(A).is_nan()){((BK.powf(IY))- (BM.powf(IY)))}else{A}))+ (parameters[86]* (BN.powf(parameters[87]))));
 		let JA=CW* IZ;
-		let JD=CZ* ((B+ (parameters[237]* (if ((BJ.powf(JB))- (BL.powf(JB)))>= A{((BJ.powf(JB))- (BL.powf(JB)))}else{A})))+ ((parameters[239]* (if ((BK.powf(JC))- (BM.powf(JC)))>= A{((BK.powf(JC))- (BM.powf(JC)))}else{A}))+ (parameters[241]* (BN.powf(parameters[242])))));
-		let JF=B+ (parameters[282]* (if ((BJ.powf(JE))- (BL.powf(JE)))>= A{((BJ.powf(JE))- (BL.powf(JE)))}else{A}));
+		let JD=CZ* ((B+ (parameters[237]* (if !(((BJ.powf(JB))- (BL.powf(JB)))).is_nan()&&(((BJ.powf(JB))- (BL.powf(JB)))>=A||(A).is_nan()){((BJ.powf(JB))- (BL.powf(JB)))}else{A})))+ ((parameters[239]* (if !(((BK.powf(JC))- (BM.powf(JC)))).is_nan()&&(((BK.powf(JC))- (BM.powf(JC)))>=A||(A).is_nan()){((BK.powf(JC))- (BM.powf(JC)))}else{A}))+ (parameters[241]* (BN.powf(parameters[242])))));
+		let JF=B+ (parameters[282]* (if !(((BJ.powf(JE))- (BL.powf(JE)))).is_nan()&&(((BJ.powf(JE))- (BL.powf(JE)))>=A||(A).is_nan()){((BJ.powf(JE))- (BL.powf(JE)))}else{A}));
 		let JG=DI* JF;
 		let OA;
 		let OB;
@@ -6207,7 +6207,7 @@ impl Instance {
 		OA=JJ;
 		OB=JH;
 		}
-		let JM=DM* (B+ (parameters[289]* (if ((BJ.powf(JL))- (BL.powf(JL)))>= A{((BJ.powf(JL))- (BL.powf(JL)))}else{A})));
+		let JM=DM* (B+ (parameters[289]* (if !(((BJ.powf(JL))- (BL.powf(JL)))).is_nan()&&(((BJ.powf(JL))- (BL.powf(JL)))>=A||(A).is_nan()){((BJ.powf(JL))- (BL.powf(JL)))}else{A})));
 		let JN=parameters[24]* EK;
 		let JO=parameters[42]!= B;
 		let OF;
@@ -6217,7 +6217,7 @@ impl Instance {
 		let OG;
 		let AZH;
 		if JQ{
-		let JS=B- (JR* (if ((BJ.powf(JP))- (BL.powf(JP)))>= A{((BJ.powf(JP))- (BL.powf(JP)))}else{A}));
+		let JS=B- (JR* (if !(((BJ.powf(JP))- (BL.powf(JP)))).is_nan()&&(((BJ.powf(JP))- (BL.powf(JP)))>=A||(A).is_nan()){((BJ.powf(JP))- (BL.powf(JP)))}else{A}));
 		let JT=JN* JS;
 		let AZI=if II{
 		let JV=JU* JS;
@@ -6254,7 +6254,7 @@ impl Instance {
 		OF=KB;
 		AZG=AZK;
 		}
-		let KF=(B+ (parameters[349]* (if ((BJ.powf(KD))- (BL.powf(KD)))>= A{((BJ.powf(KD))- (BL.powf(KD)))}else{A})))+ ((parameters[351]* (if ((BK.powf(KE))- (BM.powf(KE)))>= A{((BK.powf(KE))- (BM.powf(KE)))}else{A}))+ (parameters[353]* (BN.powf(parameters[354]))));
+		let KF=(B+ (parameters[349]* (if !(((BJ.powf(KD))- (BL.powf(KD)))).is_nan()&&(((BJ.powf(KD))- (BL.powf(KD)))>=A||(A).is_nan()){((BJ.powf(KD))- (BL.powf(KD)))}else{A})))+ ((parameters[351]* (if !(((BK.powf(KE))- (BM.powf(KE)))).is_nan()&&(((BK.powf(KE))- (BM.powf(KE)))>=A||(A).is_nan()){((BK.powf(KE))- (BM.powf(KE)))}else{A}))+ (parameters[353]* (BN.powf(parameters[354]))));
 		let KG=EL* KF;
 		let AZM=if II{
 		let KI=KH* KF;
@@ -6262,8 +6262,8 @@ impl Instance {
 		}else{
 		KH
 		};
-		let KL=EN* ((B+ (parameters[366]* (if ((BJ.powf(KJ))- (BL.powf(KJ)))>= A{((BJ.powf(KJ))- (BL.powf(KJ)))}else{A})))+ ((parameters[368]* (if ((BK.powf(KK))- (BM.powf(KK)))>= A{((BK.powf(KK))- (BM.powf(KK)))}else{A}))+ (parameters[370]* (BN.powf(parameters[371])))));
-		let KN=B+ (parameters[373]* (if ((BJ.powf(KM))- (BL.powf(KM)))>= A{((BJ.powf(KM))- (BL.powf(KM)))}else{A}));
+		let KL=EN* ((B+ (parameters[366]* (if !(((BJ.powf(KJ))- (BL.powf(KJ)))).is_nan()&&(((BJ.powf(KJ))- (BL.powf(KJ)))>=A||(A).is_nan()){((BJ.powf(KJ))- (BL.powf(KJ)))}else{A})))+ ((parameters[368]* (if !(((BK.powf(KK))- (BM.powf(KK)))).is_nan()&&(((BK.powf(KK))- (BM.powf(KK)))>=A||(A).is_nan()){((BK.powf(KK))- (BM.powf(KK)))}else{A}))+ (parameters[370]* (BN.powf(parameters[371])))));
+		let KN=B+ (parameters[373]* (if !(((BJ.powf(KM))- (BL.powf(KM)))).is_nan()&&(((BJ.powf(KM))- (BL.powf(KM)))>=A||(A).is_nan()){((BJ.powf(KM))- (BL.powf(KM)))}else{A}));
 		let KO=EM* KN;
 		let AZQ=if II{
 		let KQ=KP* KN;
@@ -6271,7 +6271,7 @@ impl Instance {
 		}else{
 		KP
 		};
-		let KT=(B+ (parameters[391]* (if ((BJ.powf(KR))- (BL.powf(KR)))>= A{((BJ.powf(KR))- (BL.powf(KR)))}else{A})))+ ((parameters[393]* (if ((BK.powf(KS))- (BM.powf(KS)))>= A{((BK.powf(KS))- (BM.powf(KS)))}else{A}))+ (parameters[395]* (BN.powf(parameters[396]))));
+		let KT=(B+ (parameters[391]* (if !(((BJ.powf(KR))- (BL.powf(KR)))).is_nan()&&(((BJ.powf(KR))- (BL.powf(KR)))>=A||(A).is_nan()){((BJ.powf(KR))- (BL.powf(KR)))}else{A})))+ ((parameters[393]* (if !(((BK.powf(KS))- (BM.powf(KS)))).is_nan()&&(((BK.powf(KS))- (BM.powf(KS)))>=A||(A).is_nan()){((BK.powf(KS))- (BM.powf(KS)))}else{A}))+ (parameters[395]* (BN.powf(parameters[396]))));
 		let KU=EP* KT;
 		let AZO=if II{
 		let KW=KV* KT;
@@ -6279,7 +6279,7 @@ impl Instance {
 		}else{
 		KV
 		};
-		let KY=if ((BJ.powf(KX))- (BL.powf(KX)))>= A{((BJ.powf(KX))- (BL.powf(KX)))}else{A};
+		let KY=if !(((BJ.powf(KX))- (BL.powf(KX)))).is_nan()&&(((BJ.powf(KX))- (BL.powf(KX)))>=A||(A).is_nan()){((BJ.powf(KX))- (BL.powf(KX)))}else{A};
 		let KZ=EH* KY;
 		let AYF=if II{
 		let LB=LA* KY;
@@ -6287,8 +6287,8 @@ impl Instance {
 		}else{
 		LA
 		};
-		let LD=EI* (if ((BJ.powf(LC))- (BL.powf(LC)))>= A{((BJ.powf(LC))- (BL.powf(LC)))}else{A});
-		let LF=B+ (parameters[531]* (if ((BJ.powf(LE))- (BL.powf(LE)))>= A{((BJ.powf(LE))- (BL.powf(LE)))}else{A}));
+		let LD=EI* (if !(((BJ.powf(LC))- (BL.powf(LC)))).is_nan()&&(((BJ.powf(LC))- (BL.powf(LC)))>=A||(A).is_nan()){((BJ.powf(LC))- (BL.powf(LC)))}else{A});
+		let LF=B+ (parameters[531]* (if !(((BJ.powf(LE))- (BL.powf(LE)))).is_nan()&&(((BJ.powf(LE))- (BL.powf(LE)))>=A||(A).is_nan()){((BJ.powf(LE))- (BL.powf(LE)))}else{A}));
 		let LG=FB* LF;
 		let BFW=if II{
 		let LI=LH* LF;
@@ -6296,17 +6296,17 @@ impl Instance {
 		}else{
 		LH
 		};
-		let LL=if (EJ* (B+ (parameters[313]* (if ((BJ.powf(LJ))- (BL.powf(LJ)))>= A{((BJ.powf(LJ))- (BL.powf(LJ)))}else{A}))))<= LK{(EJ* (B+ (parameters[313]* (if ((BJ.powf(LJ))- (BL.powf(LJ)))>= A{((BJ.powf(LJ))- (BL.powf(LJ)))}else{A}))))}else{LK};
-		let LN=FH* (B+ (parameters[549]* (if ((BJ.powf(LM))- (BL.powf(LM)))>= A{((BJ.powf(LM))- (BL.powf(LM)))}else{A})));
-		let LP=B+ (parameters[405]* (if ((BJ.powf(LO))- (BL.powf(LO)))>= A{((BJ.powf(LO))- (BL.powf(LO)))}else{A}));
-		let LQ=if (EQ* LP)>= A{(EQ* LP)}else{A};
+		let LL=if !((EJ* (B+ (parameters[313]* (if !(((BJ.powf(LJ))- (BL.powf(LJ)))).is_nan()&&(((BJ.powf(LJ))- (BL.powf(LJ)))>=A||(A).is_nan()){((BJ.powf(LJ))- (BL.powf(LJ)))}else{A}))))).is_nan()&&((EJ* (B+ (parameters[313]* (if !(((BJ.powf(LJ))- (BL.powf(LJ)))).is_nan()&&(((BJ.powf(LJ))- (BL.powf(LJ)))>=A||(A).is_nan()){((BJ.powf(LJ))- (BL.powf(LJ)))}else{A}))))<=LK||(LK).is_nan()){(EJ* (B+ (parameters[313]* (if !(((BJ.powf(LJ))- (BL.powf(LJ)))).is_nan()&&(((BJ.powf(LJ))- (BL.powf(LJ)))>=A||(A).is_nan()){((BJ.powf(LJ))- (BL.powf(LJ)))}else{A}))))}else{LK};
+		let LN=FH* (B+ (parameters[549]* (if !(((BJ.powf(LM))- (BL.powf(LM)))).is_nan()&&(((BJ.powf(LM))- (BL.powf(LM)))>=A||(A).is_nan()){((BJ.powf(LM))- (BL.powf(LM)))}else{A})));
+		let LP=B+ (parameters[405]* (if !(((BJ.powf(LO))- (BL.powf(LO)))).is_nan()&&(((BJ.powf(LO))- (BL.powf(LO)))>=A||(A).is_nan()){((BJ.powf(LO))- (BL.powf(LO)))}else{A}));
+		let LQ=if !((EQ* LP)).is_nan()&&((EQ* LP)>=A||(A).is_nan()){(EQ* LP)}else{A};
 		let BFY=if II{
-		let LS=if (LR* LP)>= A{(LR* LP)}else{A};
+		let LS=if !((LR* LP)).is_nan()&&((LR* LP)>=A||(A).is_nan()){(LR* LP)}else{A};
 		LS
 		}else{
 		LR
 		};
-		let LV=(B+ (parameters[299]* (if ((BJ.powf(LT))- (BL.powf(LT)))>= A{((BJ.powf(LT))- (BL.powf(LT)))}else{A})))+ ((parameters[301]* (if ((BK.powf(LU))- (BM.powf(LU)))>= A{((BK.powf(LU))- (BM.powf(LU)))}else{A}))+ (parameters[303]* (BN.powf(parameters[304]))));
+		let LV=(B+ (parameters[299]* (if !(((BJ.powf(LT))- (BL.powf(LT)))).is_nan()&&(((BJ.powf(LT))- (BL.powf(LT)))>=A||(A).is_nan()){((BJ.powf(LT))- (BL.powf(LT)))}else{A})))+ ((parameters[301]* (if !(((BK.powf(LU))- (BM.powf(LU)))).is_nan()&&(((BK.powf(LU))- (BM.powf(LU)))>=A||(A).is_nan()){((BK.powf(LU))- (BM.powf(LU)))}else{A}))+ (parameters[303]* (BN.powf(parameters[304]))));
 		let LW=FJ* LV;
 		let BAB=if II{
 		let LY=LX* LV;
@@ -6314,15 +6314,15 @@ impl Instance {
 		}else{
 		LX
 		};
-		let MA=B+ (parameters[487]* (if ((BJ.powf(LZ))- (BL.powf(LZ)))>= A{((BJ.powf(LZ))- (BL.powf(LZ)))}else{A}));
-		let MC=if (FN* MA)>= MB{(FN* MA)}else{MB};
+		let MA=B+ (parameters[487]* (if !(((BJ.powf(LZ))- (BL.powf(LZ)))).is_nan()&&(((BJ.powf(LZ))- (BL.powf(LZ)))>=A||(A).is_nan()){((BJ.powf(LZ))- (BL.powf(LZ)))}else{A}));
+		let MC=if !((FN* MA)).is_nan()&&((FN* MA)>=MB||(MB).is_nan()){(FN* MA)}else{MB};
 		let BGA=if II{
-		let ME=if (MD* MA)>= MB{(MD* MA)}else{MB};
+		let ME=if !((MD* MA)).is_nan()&&((MD* MA)>=MB||(MB).is_nan()){(MD* MA)}else{MB};
 		ME
 		}else{
 		MD
 		};
-		let MG=B+ (parameters[502]* (if ((BJ.powf(MF))- (BL.powf(MF)))>= A{((BJ.powf(MF))- (BL.powf(MF)))}else{A}));
+		let MG=B+ (parameters[502]* (if !(((BJ.powf(MF))- (BL.powf(MF)))).is_nan()&&(((BJ.powf(MF))- (BL.powf(MF)))>=A||(A).is_nan()){((BJ.powf(MF))- (BL.powf(MF)))}else{A}));
 		let MH=FA* MG;
 		let BAJ=if II{
 		let MJ=MI* MG;
@@ -6335,12 +6335,12 @@ impl Instance {
 		let MM=GQ* ((B+ (parameters[729]* BJ))+ (parameters[730]* BK));
 		let MN=parameters[723]* (B+ (parameters[731]* BJ));
 		let MO=parameters[29]== B;
-		let MR=CT* ((B+ (parameters[123]* (if ((BJ.powf(MP))- (BL.powf(MP)))>= A{((BJ.powf(MP))- (BL.powf(MP)))}else{A})))+ ((parameters[125]* (if ((BK.powf(MQ))- (BM.powf(MQ)))>= A{((BK.powf(MQ))- (BM.powf(MQ)))}else{A}))+ (parameters[127]* (BN.powf(parameters[128])))));
-		let MU=ED* ((B+ (parameters[209]* (if ((BJ.powf(MS))- (BL.powf(MS)))>= A{((BJ.powf(MS))- (BL.powf(MS)))}else{A})))+ ((parameters[211]* (if ((BK.powf(MT))- (BM.powf(MT)))>= A{((BK.powf(MT))- (BM.powf(MT)))}else{A}))+ (parameters[213]* (BN.powf(parameters[214])))));
-		let MX=EE* ((B+ (parameters[1197]* (if ((BJ.powf(MV))- (BL.powf(MV)))>= A{((BJ.powf(MV))- (BL.powf(MV)))}else{A})))+ ((parameters[1199]* (if ((BK.powf(MW))- (BM.powf(MW)))>= A{((BK.powf(MW))- (BM.powf(MW)))}else{A}))+ (parameters[1201]* (BN.powf(parameters[1202])))));
-		let NA=EC* ((B+ (parameters[219]* (if ((BJ.powf(MY))- (BL.powf(MY)))>= A{((BJ.powf(MY))- (BL.powf(MY)))}else{A})))+ ((parameters[221]* (if ((BK.powf(MZ))- (BM.powf(MZ)))>= A{((BK.powf(MZ))- (BM.powf(MZ)))}else{A}))+ (parameters[223]* (BN.powf(parameters[224])))));
-		let ND=HW* ((B+ (parameters[1266]* (if ((BJ.powf(NB))- (BL.powf(NB)))>= A{((BJ.powf(NB))- (BL.powf(NB)))}else{A})))+ ((parameters[1268]* (if ((BK.powf(NC))- (BM.powf(NC)))>= A{((BK.powf(NC))- (BM.powf(NC)))}else{A}))+ (parameters[1270]* (BN.powf(parameters[1271])))));
-		let NF=EU* (B+ (parameters[447]* (if ((BJ.powf(NE))- (BL.powf(NE)))>= A{((BJ.powf(NE))- (BL.powf(NE)))}else{A})));
+		let MR=CT* ((B+ (parameters[123]* (if !(((BJ.powf(MP))- (BL.powf(MP)))).is_nan()&&(((BJ.powf(MP))- (BL.powf(MP)))>=A||(A).is_nan()){((BJ.powf(MP))- (BL.powf(MP)))}else{A})))+ ((parameters[125]* (if !(((BK.powf(MQ))- (BM.powf(MQ)))).is_nan()&&(((BK.powf(MQ))- (BM.powf(MQ)))>=A||(A).is_nan()){((BK.powf(MQ))- (BM.powf(MQ)))}else{A}))+ (parameters[127]* (BN.powf(parameters[128])))));
+		let MU=ED* ((B+ (parameters[209]* (if !(((BJ.powf(MS))- (BL.powf(MS)))).is_nan()&&(((BJ.powf(MS))- (BL.powf(MS)))>=A||(A).is_nan()){((BJ.powf(MS))- (BL.powf(MS)))}else{A})))+ ((parameters[211]* (if !(((BK.powf(MT))- (BM.powf(MT)))).is_nan()&&(((BK.powf(MT))- (BM.powf(MT)))>=A||(A).is_nan()){((BK.powf(MT))- (BM.powf(MT)))}else{A}))+ (parameters[213]* (BN.powf(parameters[214])))));
+		let MX=EE* ((B+ (parameters[1197]* (if !(((BJ.powf(MV))- (BL.powf(MV)))).is_nan()&&(((BJ.powf(MV))- (BL.powf(MV)))>=A||(A).is_nan()){((BJ.powf(MV))- (BL.powf(MV)))}else{A})))+ ((parameters[1199]* (if !(((BK.powf(MW))- (BM.powf(MW)))).is_nan()&&(((BK.powf(MW))- (BM.powf(MW)))>=A||(A).is_nan()){((BK.powf(MW))- (BM.powf(MW)))}else{A}))+ (parameters[1201]* (BN.powf(parameters[1202])))));
+		let NA=EC* ((B+ (parameters[219]* (if !(((BJ.powf(MY))- (BL.powf(MY)))).is_nan()&&(((BJ.powf(MY))- (BL.powf(MY)))>=A||(A).is_nan()){((BJ.powf(MY))- (BL.powf(MY)))}else{A})))+ ((parameters[221]* (if !(((BK.powf(MZ))- (BM.powf(MZ)))).is_nan()&&(((BK.powf(MZ))- (BM.powf(MZ)))>=A||(A).is_nan()){((BK.powf(MZ))- (BM.powf(MZ)))}else{A}))+ (parameters[223]* (BN.powf(parameters[224])))));
+		let ND=HW* ((B+ (parameters[1266]* (if !(((BJ.powf(NB))- (BL.powf(NB)))).is_nan()&&(((BJ.powf(NB))- (BL.powf(NB)))>=A||(A).is_nan()){((BJ.powf(NB))- (BL.powf(NB)))}else{A})))+ ((parameters[1268]* (if !(((BK.powf(NC))- (BM.powf(NC)))).is_nan()&&(((BK.powf(NC))- (BM.powf(NC)))>=A||(A).is_nan()){((BK.powf(NC))- (BM.powf(NC)))}else{A}))+ (parameters[1270]* (BN.powf(parameters[1271])))));
+		let NF=EU* (B+ (parameters[447]* (if !(((BJ.powf(NE))- (BL.powf(NE)))).is_nan()&&(((BJ.powf(NE))- (BL.powf(NE)))>=A||(A).is_nan()){((BJ.powf(NE))- (BL.powf(NE)))}else{A})));
 		let NG=FR* (B+ (BJ* parameters[1036]));
 		let NH=FS* (B+ (BJ* parameters[1041]));
 		let NI=FU* (B+ (BJ* parameters[1050]));
@@ -6351,13 +6351,13 @@ impl Instance {
 		let AVI;
 		let AVL;
 		if NM{
-		let NO=ER* (B+ (parameters[461]* (if ((BJ.powf(NN))- (BL.powf(NN)))>= A{((BJ.powf(NN))- (BL.powf(NN)))}else{A})));
-		let NQ=ES* (B+ (parameters[471]* (if ((BJ.powf(NP))- (BL.powf(NP)))>= A{((BJ.powf(NP))- (BL.powf(NP)))}else{A})));
+		let NO=ER* (B+ (parameters[461]* (if !(((BJ.powf(NN))- (BL.powf(NN)))).is_nan()&&(((BJ.powf(NN))- (BL.powf(NN)))>=A||(A).is_nan()){((BJ.powf(NN))- (BL.powf(NN)))}else{A})));
+		let NQ=ES* (B+ (parameters[471]* (if !(((BJ.powf(NP))- (BL.powf(NP)))).is_nan()&&(((BJ.powf(NP))- (BL.powf(NP)))>=A||(A).is_nan()){((BJ.powf(NP))- (BL.powf(NP)))}else{A})));
 		AVG=NO;
 		AVI=NQ;
 		AVL=EY;
 		}else{
-		let NS=EY* (B+ (parameters[478]* (if ((BJ.powf(NR))- (BL.powf(NR)))>= A{((BJ.powf(NR))- (BL.powf(NR)))}else{A})));
+		let NS=EY* (B+ (parameters[478]* (if !(((BJ.powf(NR))- (BL.powf(NR)))).is_nan()&&(((BJ.powf(NR))- (BL.powf(NR)))>=A||(A).is_nan()){((BJ.powf(NR))- (BL.powf(NR)))}else{A})));
 		AVG=ER;
 		AVI=ES;
 		AVL=NS;
@@ -6476,7 +6476,7 @@ impl Instance {
 		let PW;
 		let QV;
 		if PB{
-		let PC=AT* (if ((W- B)/ AT)>= A{((W- B)/ AT)}else{A});
+		let PC=AT* (if !(((W- B)/ AT)).is_nan()&&(((W- B)/ AT)>=A||(A).is_nan()){((W- B)/ AT)}else{A});
 		PI=PC;
 		PM=PC;
 		PW=B;
@@ -6488,13 +6488,13 @@ impl Instance {
 		let PX;
 		let QW;
 		if PE{
-		let PF=AT* (if ((W/ AT)- B)>= A{((W/ AT)- B)}else{A});
+		let PF=AT* (if !(((W/ AT)- B)).is_nan()&&(((W/ AT)- B)>=A||(A).is_nan()){((W/ AT)- B)}else{A});
 		PJ=W;
 		PN=PF;
 		PX=A;
 		QW=AT;
 		}else{
-		let PG=AT* (if ((W/ AT)- B)>= A{((W/ AT)- B)}else{A});
+		let PG=AT* (if !(((W/ AT)- B)).is_nan()&&(((W/ AT)- B)>=A||(A).is_nan()){((W/ AT)- B)}else{A});
 		PJ=PG;
 		PN=W;
 		PX=AT;
@@ -7575,7 +7575,7 @@ impl Instance {
 		let AFS;
 		let AGO;
 		if AEZ{
-		let AFA=AT* (if ((W- B)/ AT)>= A{((W- B)/ AT)}else{A});
+		let AFA=AT* (if !(((W- B)/ AT)).is_nan()&&(((W- B)/ AT)>=A||(A).is_nan()){((W- B)/ AT)}else{A});
 		AFF=AFA;
 		AFJ=AFA;
 		AFS=B;
@@ -7587,13 +7587,13 @@ impl Instance {
 		let AFT;
 		let AGP;
 		if AFB{
-		let AFC=AT* (if ((W/ AT)- B)>= A{((W/ AT)- B)}else{A});
+		let AFC=AT* (if !(((W/ AT)- B)).is_nan()&&(((W/ AT)- B)>=A||(A).is_nan()){((W/ AT)- B)}else{A});
 		AFG=W;
 		AFK=AFC;
 		AFT=A;
 		AGP=AT;
 		}else{
-		let AFD=AT* (if ((W/ AT)- B)>= A{((W/ AT)- B)}else{A});
+		let AFD=AT* (if !(((W/ AT)- B)).is_nan()&&(((W/ AT)- B)>=A||(A).is_nan()){((W/ AT)- B)}else{A});
 		AFG=AFD;
 		AFK=W;
 		AFT=AT;
@@ -8744,8 +8744,8 @@ impl Instance {
 		CRU=AVR;
 		}
 		let AVT=M* GU;
-		let AVW=(rspice_limited_exp((GX* ((if (AVU/ M)>= AVV{(AVU/ M)}else{AVV}).ln()))))/ (M* M);
-		let AVX=(rspice_limited_exp((GX* ((if (AVU/ AVT)>= AVV{(AVU/ AVT)}else{AVV}).ln()))))/ (AVT* AVT);
+		let AVW=(rspice_limited_exp((GX* ((if !((AVU/ M)).is_nan()&&((AVU/ M)>=AVV||(AVV).is_nan()){(AVU/ M)}else{AVV}).ln()))))/ (M* M);
+		let AVX=(rspice_limited_exp((GX* ((if !((AVU/ AVT)).is_nan()&&((AVU/ AVT)>=AVV||(AVV).is_nan()){(AVU/ AVT)}else{AVV}).ln()))))/ (AVT* AVT);
 		let AWA=if F{
 		AVY
 		}else{
@@ -8800,29 +8800,29 @@ impl Instance {
 		let AXG=AT* AXA;
 		let AXH=(parameters[107]* (AXD* (AXD.sqrt())))* (rspice_limited_exp(((AXF/ (AT* (D* AXC)))- (AXF/ AXG))));
 		let AXS=if AWN{
-		let AXI=(if (JA/ AXH)>= AVV{(JA/ AXH)}else{AVV}).ln();
+		let AXI=(if !((JA/ AXH)).is_nan()&&((JA/ AXH)>=AVV||(AVV).is_nan()){(JA/ AXH)}else{AVV}).ln();
 		let AXJ=((AXI* AXI)+ BI).sqrt();
 		AXJ
 		}else{
-		let AXK=(if (JA/ AXH)>= AVV{(JA/ AXH)}else{AVV}).ln();
+		let AXK=(if !((JA/ AXH)).is_nan()&&((JA/ AXH)>=AVV||(AVV).is_nan()){(JA/ AXH)}else{AVV}).ln();
 		AXK
 		};
 		let EFQ=if AWN{
-		let AXL=(if ((HK* CV)/ (AXH* AXH))>= AVV{((HK* CV)/ (AXH* AXH))}else{AVV}).ln();
+		let AXL=(if !(((HK* CV)/ (AXH* AXH))).is_nan()&&(((HK* CV)/ (AXH* AXH))>=AVV||(AVV).is_nan()){((HK* CV)/ (AXH* AXH))}else{AVV}).ln();
 		let AXM=((AXL* AXL)+ BI).sqrt();
 		AXM
 		}else{
-		let AXN=(if ((HK* CV)/ (AXH* AXH))>= AVV{((HK* CV)/ (AXH* AXH))}else{AVV}).ln();
+		let AXN=(if !(((HK* CV)/ (AXH* AXH))).is_nan()&&(((HK* CV)/ (AXH* AXH))>=AVV||(AVV).is_nan()){((HK* CV)/ (AXH* AXH))}else{AVV}).ln();
 		AXN
 		};
 		let AXO=CX> A;
 		let CPO=if AXO{
-		let AXQ=(((ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Sub, A, AXP)))* AXA)* ((if (CX/ CV)>= AVV{(CX/ CV)}else{AVV}).ln()))+ parameters[5];
+		let AXQ=(((ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Sub, A, AXP)))* AXA)* ((if !((CX/ CV)).is_nan()&&((CX/ CV)>=AVV||(AVV).is_nan()){(CX/ CV)}else{AVV}).ln()))+ parameters[5];
 		AXQ
 		}else{
 		A
 		};
-		let AXT=if ((AXR+ (AXA* AXS))+ EG)>= AXR{((AXR+ (AXA* AXS))+ EG)}else{AXR};
+		let AXT=if !(((AXR+ (AXA* AXS))+ EG)).is_nan()&&(((AXR+ (AXA* AXS))+ EG)>=AXR||(AXR).is_nan()){((AXR+ (AXA* AXS))+ EG)}else{AXR};
 		let AXU=AXT.sqrt();
 		let AXV=AT* J;
 		let AXW=C* JA;
@@ -8921,7 +8921,7 @@ impl Instance {
 		let BAM=HB* (LK* (BAL+ (((BAL* BAL)+ 4e-6f64).sqrt())));
 		let BAN=(B+ (HE* AXE))- BI;
 		let BAO=HD* (LK* (BAN+ (((BAN* BAN)+ 4e-6f64).sqrt())));
-		let BAP=rspice_limited_exp((GA* ((if AXD>= AVV{AXD}else{AVV}).ln())));
+		let BAP=rspice_limited_exp((GA* ((if !(AXD).is_nan()&&(AXD>=AVV||(AVV).is_nan()){AXD}else{AVV}).ln())));
 		let BAQ=(B+ (HH* AXE))- BI;
 		let BAR=HF* (LK* (BAQ+ (((BAQ* BAQ)+ 4e-6f64).sqrt())));
 		let BAT=(B+ (HI* AXE))- BI;
@@ -9215,7 +9215,7 @@ impl Instance {
 		let BIC=rspice_limited_exp(BHZ);
 		BIC
 		};
-		let BIE=(-BHS)* ((if (AU/ (AU+ (DQ* (B+ BID))))>= AVV{(AU/ (AU+ (DQ* (B+ BID))))}else{AVV}).ln());
+		let BIE=(-BHS)* ((if !((AU/ (AU+ (DQ* (B+ BID))))).is_nan()&&((AU/ (AU+ (DQ* (B+ BID))))>=AVV||(AVV).is_nan()){(AU/ (AU+ (DQ* (B+ BID))))}else{AVV}).ln());
 		BIF=BIE;
 		}else{
 		BIF=A;
@@ -9324,7 +9324,7 @@ impl Instance {
 		let BJT=BJO- BJS;
 		let BJU=(BJT* BJT)+ (BJG* (BJS+ B));
 		let BJV=(AT* BJT)- BJG;
-		let BJW=((if (BJU/ BJG)>= AVV{(BJU/ BJG)}else{AVV}).ln())- BJS;
+		let BJW=((if !((BJU/ BJG)).is_nan()&&((BJU/ BJG)>=AVV||(AVV).is_nan()){(BJU/ BJG)}else{AVV}).ln())- BJS;
 		let BJX=BJU+ BJV;
 		let BJY=BJV* BJV;
 		let BJZ=(BJX* BJX)+ (BJW* ((LK* BJY)- BJU));
@@ -9394,7 +9394,7 @@ impl Instance {
 		let BLX=BLS- BLW;
 		let BLY=(BLX* BLX)+ (BIV* (BLW+ B));
 		let BLZ=(AT* BLX)- BIV;
-		let BMA=(-BLW)+ ((if (BLY* BIW)>= AVV{(BLY* BIW)}else{AVV}).ln());
+		let BMA=(-BLW)+ ((if !((BLY* BIW)).is_nan()&&((BLY* BIW)>=AVV||(AVV).is_nan()){(BLY* BIW)}else{AVV}).ln());
 		let BMB=BLY+ BLZ;
 		let BMC=BLZ* BLZ;
 		let BMD=(BMB* BMB)+ (BMA* ((LK* BMC)- BLY));
@@ -9421,9 +9421,9 @@ impl Instance {
 		let BMX=BMU* BMU;
 		let BMY=B/ (AT+ BMX);
 		let BMZ=BMX* BMY;
-		let BNB=if BNA>= ((BMV* BMV)- (BIV* (((BMW+ BMU)- B)- (BLC* ((BMU+ B)+ BMZ))))){BNA}else{((BMV* BMV)- (BIV* (((BMW+ BMU)- B)- (BLC* ((BMU+ B)+ BMZ)))))};
+		let BNB=if !(BNA).is_nan()&&(BNA>=((BMV* BMV)- (BIV* (((BMW+ BMU)- B)- (BLC* ((BMU+ B)+ BMZ)))))||(((BMV* BMV)- (BIV* (((BMW+ BMU)- B)- (BLC* ((BMU+ B)+ BMZ)))))).is_nan()){BNA}else{((BMV* BMV)- (BIV* (((BMW+ BMU)- B)- (BLC* ((BMU+ B)+ BMZ)))))};
 		let BNC=(AT* BMV)+ (BIV* ((B- BMW)- (BLC* (B+ (QB* ((BMU* BMY)* BMY))))));
-		let BND=(BLB- BMU)+ ((if (BNB/ BIV)>= AVV{(BNB/ BIV)}else{AVV}).ln());
+		let BND=(BLB- BMU)+ ((if !((BNB/ BIV)).is_nan()&&((BNB/ BIV)>=AVV||(AVV).is_nan()){(BNB/ BIV)}else{AVV}).ln());
 		let BNE=BNB+ BNC;
 		let BNF=BNC* BNC;
 		let BNG=BNB* (B- (LK* (BIV* (BMW- (BLC* ((((QM* BMY)- (BMJ* BMZ))* BMY)* BMY))))));
@@ -9466,7 +9466,7 @@ impl Instance {
 		};
 		let BOI=BOH+ BOD;
 		let BOJ=BOH* BOF;
-		let BOK=(((BOI* BOI)/ ((BLB- BNY)+ ((if (BOH* BIW)>= AVV{(BOH* BIW)}else{AVV}).ln())))+ (LK* BOE))- BOJ;
+		let BOK=(((BOI* BOI)/ ((BLB- BNY)+ ((if !((BOH* BIW)).is_nan()&&((BOH* BIW)>=AVV||(AVV).is_nan()){(BOH* BIW)}else{AVV}).ln())))+ (LK* BOE))- BOJ;
 		let BOL=BNY+ ((BOI* BOH)/ (BOK+ (((BOD* BOI)/ BOK)* ((AYI* BOE)- BOJ))));
 		let BOM=rspice_limited_exp((BOL- BLB));
 		let BON=BIL- BOL;
@@ -9494,7 +9494,7 @@ impl Instance {
 		let BPA=BOW- BOZ;
 		let BPB=(BPA* BPA)+ (BIV* (BOZ+ B));
 		let BPC=(AT* BPA)- BIV;
-		let BPD=(-BOZ)+ ((if (BPB* BIW)>= AVV{(BPB* BIW)}else{AVV}).ln());
+		let BPD=(-BOZ)+ ((if !((BPB* BIW)).is_nan()&&((BPB* BIW)>=AVV||(AVV).is_nan()){(BPB* BIW)}else{AVV}).ln());
 		let BPE=BPB+ BPC;
 		let BPF=BPC* BPC;
 		let BPG=(BPE* BPE)+ (BPD* ((LK* BPF)- BPB));
@@ -9521,9 +9521,9 @@ impl Instance {
 		let BQB=BPY* BPY;
 		let BQC=B/ (AT+ BQB);
 		let BQD=BQB* BQC;
-		let BQE=if BNA>= ((BPZ* BPZ)- (BIV* (((BQA+ BPY)- B)- (BLC* ((BPY+ B)+ BQD))))){BNA}else{((BPZ* BPZ)- (BIV* (((BQA+ BPY)- B)- (BLC* ((BPY+ B)+ BQD)))))};
+		let BQE=if !(BNA).is_nan()&&(BNA>=((BPZ* BPZ)- (BIV* (((BQA+ BPY)- B)- (BLC* ((BPY+ B)+ BQD)))))||(((BPZ* BPZ)- (BIV* (((BQA+ BPY)- B)- (BLC* ((BPY+ B)+ BQD)))))).is_nan()){BNA}else{((BPZ* BPZ)- (BIV* (((BQA+ BPY)- B)- (BLC* ((BPY+ B)+ BQD)))))};
 		let BQF=(AT* BPZ)+ (BIV* ((B- BQA)- (BLC* (B+ (QB* ((BPY* BQC)* BQC))))));
-		let BQG=(BLB- BPY)+ ((if (BQE/ BIV)>= AVV{(BQE/ BIV)}else{AVV}).ln());
+		let BQG=(BLB- BPY)+ ((if !((BQE/ BIV)).is_nan()&&((BQE/ BIV)>=AVV||(AVV).is_nan()){(BQE/ BIV)}else{AVV}).ln());
 		let BQH=BQE+ BQF;
 		let BQI=BQF* BQF;
 		let BQJ=BQE* (B- (LK* (BIV* (BQA- (BLC* ((((QM* BQC)- (BMJ* BQD))* BQC)* BQC))))));
@@ -9821,7 +9821,7 @@ impl Instance {
 		let BWU=BWS* BHS;
 		let BWW=BWV/ BGT;
 		let BXA=BWY+ (BWZ* BFL);
-		let BXC=B+ ((BXA* ((BWW* (BWU+ (AYM* BWT))).powf(AZF)))+ (BXB/ (rspice_limited_exp((BWX* ((if (LK* (B+ (BWT/ BWU)))>= AVV{(LK* (B+ (BWT/ BWU)))}else{AVV}).ln()))))));
+		let BXC=B+ ((BXA* ((BWW* (BWU+ (AYM* BWT))).powf(AZF)))+ (BXB/ (rspice_limited_exp((BWX* ((if !((LK* (B+ (BWT/ BWU)))).is_nan()&&((LK* (B+ (BWT/ BWU)))>=AVV||(AVV).is_nan()){(LK* (B+ (BWT/ BWU)))}else{AVV}).ln()))))));
 		let BXD=BXC- B;
 		let BXE=LK* ((BXC+ B)+ (((BXD* BXD)+ 5.625e-7f64).sqrt()));
 		let BXG=B/ (((AY* BXF).powf(EV))* W);
@@ -9897,7 +9897,7 @@ impl Instance {
 		let BZI=BZE- BZH;
 		let BZJ=(BZI* BZI)+ (BIV* (BZH+ B));
 		let BZK=(AT* BZI)- BIV;
-		let BZL=(-BZH)+ ((if (BZJ* BIW)>= AVV{(BZJ* BIW)}else{AVV}).ln());
+		let BZL=(-BZH)+ ((if !((BZJ* BIW)).is_nan()&&((BZJ* BIW)>=AVV||(AVV).is_nan()){(BZJ* BIW)}else{AVV}).ln());
 		let BZM=BZJ+ BZK;
 		let BZN=BZK* BZK;
 		let BZO=(BZM* BZM)+ (BZL* ((LK* BZN)- BZJ));
@@ -9924,9 +9924,9 @@ impl Instance {
 		let CAH=CAE* CAE;
 		let CAI=B/ (AT+ CAH);
 		let CAJ=CAH* CAI;
-		let CAK=if BNA>= ((CAF* CAF)- (BIV* (((CAG+ CAE)- B)- (BYU* ((CAE+ B)+ CAJ))))){BNA}else{((CAF* CAF)- (BIV* (((CAG+ CAE)- B)- (BYU* ((CAE+ B)+ CAJ)))))};
+		let CAK=if !(BNA).is_nan()&&(BNA>=((CAF* CAF)- (BIV* (((CAG+ CAE)- B)- (BYU* ((CAE+ B)+ CAJ)))))||(((CAF* CAF)- (BIV* (((CAG+ CAE)- B)- (BYU* ((CAE+ B)+ CAJ)))))).is_nan()){BNA}else{((CAF* CAF)- (BIV* (((CAG+ CAE)- B)- (BYU* ((CAE+ B)+ CAJ)))))};
 		let CAL=(AT* CAF)+ (BIV* ((B- CAG)- (BYU* (B+ (QB* ((CAE* CAI)* CAI))))));
-		let CAM=(BYS- CAE)+ ((if (CAK/ BIV)>= AVV{(CAK/ BIV)}else{AVV}).ln());
+		let CAM=(BYS- CAE)+ ((if !((CAK/ BIV)).is_nan()&&((CAK/ BIV)>=AVV||(AVV).is_nan()){(CAK/ BIV)}else{AVV}).ln());
 		let CAN=CAK+ CAL;
 		let CAO=CAL* CAL;
 		let CAP=CAK* (B- (LK* (BIV* (CAG- (BYU* ((((QM* CAI)- (BMJ* CAJ))* CAI)* CAI))))));
@@ -9969,7 +9969,7 @@ impl Instance {
 		};
 		let CBR=CBQ+ CBM;
 		let CBS=CBQ* CBO;
-		let CBT=(((CBR* CBR)/ ((BYS- CBH)+ ((if (CBQ* BIW)>= AVV{(CBQ* BIW)}else{AVV}).ln())))+ (LK* CBN))- CBS;
+		let CBT=(((CBR* CBR)/ ((BYS- CBH)+ ((if !((CBQ* BIW)).is_nan()&&((CBQ* BIW)>=AVV||(AVV).is_nan()){(CBQ* BIW)}else{AVV}).ln())))+ (LK* CBN))- CBS;
 		let CBU=CBH+ ((CBR* CBQ)/ (CBT+ (((CBM* CBR)/ CBT)* ((AYI* CBN)- CBS))));
 		let CBV=rspice_limited_exp((CBU- BYS));
 		let CBW=BIL- CBU;
@@ -9997,7 +9997,7 @@ impl Instance {
 		let CCJ=CCF- CCI;
 		let CCK=(CCJ* CCJ)+ (BIV* (CCI+ B));
 		let CCL=(AT* CCJ)- BIV;
-		let CCM=(-CCI)+ ((if (CCK* BIW)>= AVV{(CCK* BIW)}else{AVV}).ln());
+		let CCM=(-CCI)+ ((if !((CCK* BIW)).is_nan()&&((CCK* BIW)>=AVV||(AVV).is_nan()){(CCK* BIW)}else{AVV}).ln());
 		let CCN=CCK+ CCL;
 		let CCO=CCL* CCL;
 		let CCP=(CCN* CCN)+ (CCM* ((LK* CCO)- CCK));
@@ -10024,9 +10024,9 @@ impl Instance {
 		let CDI=CDF* CDF;
 		let CDJ=B/ (AT+ CDI);
 		let CDK=CDI* CDJ;
-		let CDL=if BNA>= ((CDG* CDG)- (BIV* (((CDH+ CDF)- B)- (BYU* ((CDF+ B)+ CDK))))){BNA}else{((CDG* CDG)- (BIV* (((CDH+ CDF)- B)- (BYU* ((CDF+ B)+ CDK)))))};
+		let CDL=if !(BNA).is_nan()&&(BNA>=((CDG* CDG)- (BIV* (((CDH+ CDF)- B)- (BYU* ((CDF+ B)+ CDK)))))||(((CDG* CDG)- (BIV* (((CDH+ CDF)- B)- (BYU* ((CDF+ B)+ CDK)))))).is_nan()){BNA}else{((CDG* CDG)- (BIV* (((CDH+ CDF)- B)- (BYU* ((CDF+ B)+ CDK)))))};
 		let CDM=(AT* CDG)+ (BIV* ((B- CDH)- (BYU* (B+ (QB* ((CDF* CDJ)* CDJ))))));
-		let CDN=(BYS- CDF)+ ((if (CDL/ BIV)>= AVV{(CDL/ BIV)}else{AVV}).ln());
+		let CDN=(BYS- CDF)+ ((if !((CDL/ BIV)).is_nan()&&((CDL/ BIV)>=AVV||(AVV).is_nan()){(CDL/ BIV)}else{AVV}).ln());
 		let CDO=CDL+ CDM;
 		let CDP=CDM* CDM;
 		let CDQ=CDL* (B- (LK* (BIV* (CDH- (BYU* ((((QM* CDJ)- (BMJ* CDK))* CDJ)* CDJ))))));
@@ -10388,7 +10388,7 @@ impl Instance {
 		let CMS=BHS* ((BIV* CMO)/ (CMP+ CMR));
 		let CMT=CMR* BHS;
 		let CMU=CMP* BHS;
-		let CMV=B+ ((BXA* ((BWW* (CMT+ (AYM* CMS))).powf(AZF)))+ (BXB/ (rspice_limited_exp((BWX* ((if (LK* (B+ (CMS/ CMT)))>= AVV{(LK* (B+ (CMS/ CMT)))}else{AVV}).ln()))))));
+		let CMV=B+ ((BXA* ((BWW* (CMT+ (AYM* CMS))).powf(AZF)))+ (BXB/ (rspice_limited_exp((BWX* ((if !((LK* (B+ (CMS/ CMT)))).is_nan()&&((LK* (B+ (CMS/ CMT)))>=AVV||(AVV).is_nan()){(LK* (B+ (CMS/ CMT)))}else{AVV}).ln()))))));
 		let CMW=CMV- B;
 		let CMX=LK* ((CMV+ B)+ (((CMW* CMW)+ 5.625e-7f64).sqrt()));
 		let CMY=(BXR/ (BXS/ CMX))* AU;
@@ -10429,7 +10429,7 @@ impl Instance {
 		let CNS=(CNM* (B+ ((CNO* CMS)/ CMY)))/ CNQ;
 		CNS
 		};
-		let CNU=B+ (CNT* ((if (B+ ((CND/ CNT)/ CNL))>= AVV{(B+ ((CND/ CNT)/ CNL))}else{AVV}).ln()));
+		let CNU=B+ (CNT* ((if !((B+ ((CND/ CNT)/ CNL))).is_nan()&&((B+ ((CND/ CNT)/ CNL))>=AVV||(AVV).is_nan()){(B+ ((CND/ CNT)/ CNL))}else{AVV}).ln()));
 		COB=CNU;
 		}else{
 		let CNV=CNO< A;
@@ -10556,7 +10556,7 @@ impl Instance {
 		let CQQ=(LK* ((CQO+ B)- (((CQP* CQP)+ 2.5e-5f64).sqrt())))+ 0.0025f64;
 		let CQR=CQM/ (CPN+ BAU);
 		let CQS=B+ ((BAR* CQR)* CQR);
-		let CQT=rspice_limited_exp((-(BAW/ (((if A>= (BAY+ ((BBA* CQM)* CQM)){A}else{(BAY+ ((BBA* CQM)* CQM))})* CPN)+ CQL))));
+		let CQT=rspice_limited_exp((-(BAW/ (((if !(A).is_nan()&&(A>=(BAY+ ((BBA* CQM)* CQM))||((BAY+ ((BBA* CQM)* CQM))).is_nan()){A}else{(BAY+ ((BBA* CQM)* CQM))})* CPN)+ CQL))));
 		let CQU=CPB* CPM;
 		let CQW=(CQV* (B+ (LK* ((CPK* CQU)* CQU))))- AYB;
 		let CQX=CMS+ (BHS* CQV);
@@ -10679,7 +10679,7 @@ impl Instance {
 		if CTG{
 		let CTH=BFM* AXB;
 		let CTI=(BEL* AXB)- ((parameters[140]+ BIG)* AXB);
-		let CTJ=(if (NY/ AXH)>= AVV{(NY/ AXH)}else{AVV}).ln();
+		let CTJ=(if !((NY/ AXH)).is_nan()&&((NY/ AXH)>=AVV||(AVV).is_nan()){(NY/ AXH)}else{AVV}).ln();
 		let CTK=((((3.204352924e-19f64* J)* NY)* AXB).sqrt())/ N;
 		let CTL=(BEW* AXB)- (CU* AXB);
 		let CTM=B/ CTK;
@@ -10708,7 +10708,7 @@ impl Instance {
 		let CUF=CUB- CUE;
 		let CUG=(CUF* CUF)+ (CTU* (CUE+ B));
 		let CUH=(AT* CUF)- CTU;
-		let CUI=((if (CUG/ CTU)>= AVV{(CUG/ CTU)}else{AVV}).ln())- CUE;
+		let CUI=((if !((CUG/ CTU)).is_nan()&&((CUG/ CTU)>=AVV||(AVV).is_nan()){(CUG/ CTU)}else{AVV}).ln())- CUE;
 		let CUJ=CUG+ CUH;
 		let CUK=CUH* CUH;
 		let CUL=(CUJ* CUJ)+ (CUI* ((LK* CUK)- CUG));
@@ -10776,7 +10776,7 @@ impl Instance {
 		let CWE=CWA- CWD;
 		let CWF=(CWE* CWE)+ (CTN* (CWD+ B));
 		let CWG=(AT* CWE)- CTN;
-		let CWH=(-CWD)+ ((if (CWF* CTO)>= AVV{(CWF* CTO)}else{AVV}).ln());
+		let CWH=(-CWD)+ ((if !((CWF* CTO)).is_nan()&&((CWF* CTO)>=AVV||(AVV).is_nan()){(CWF* CTO)}else{AVV}).ln());
 		let CWI=CWF+ CWG;
 		let CWJ=CWG* CWG;
 		let CWK=(CWI* CWI)+ (CWH* ((LK* CWJ)- CWF));
@@ -10803,9 +10803,9 @@ impl Instance {
 		let CXD=CXA* CXA;
 		let CXE=B/ (AT+ CXD);
 		let CXF=CXD* CXE;
-		let CXG=if BNA>= ((CXB* CXB)- (CTN* (((CXC+ CXA)- B)- (CVO* ((CXA+ B)+ CXF))))){BNA}else{((CXB* CXB)- (CTN* (((CXC+ CXA)- B)- (CVO* ((CXA+ B)+ CXF)))))};
+		let CXG=if !(BNA).is_nan()&&(BNA>=((CXB* CXB)- (CTN* (((CXC+ CXA)- B)- (CVO* ((CXA+ B)+ CXF)))))||(((CXB* CXB)- (CTN* (((CXC+ CXA)- B)- (CVO* ((CXA+ B)+ CXF)))))).is_nan()){BNA}else{((CXB* CXB)- (CTN* (((CXC+ CXA)- B)- (CVO* ((CXA+ B)+ CXF)))))};
 		let CXH=(AT* CXB)+ (CTN* ((B- CXC)- (CVO* (B+ (QB* ((CXA* CXE)* CXE))))));
-		let CXI=(CVN- CXA)+ ((if (CXG/ CTN)>= AVV{(CXG/ CTN)}else{AVV}).ln());
+		let CXI=(CVN- CXA)+ ((if !((CXG/ CTN)).is_nan()&&((CXG/ CTN)>=AVV||(AVV).is_nan()){(CXG/ CTN)}else{AVV}).ln());
 		let CXJ=CXG+ CXH;
 		let CXK=CXH* CXH;
 		let CXL=CXG* (B- (LK* (CTN* (CXC- (CVO* ((((QM* CXE)- (BMJ* CXF))* CXE)* CXE))))));
@@ -10848,7 +10848,7 @@ impl Instance {
 		};
 		let CYN=CYM+ CYI;
 		let CYO=CYM* CYK;
-		let CYP=(((CYN* CYN)/ ((CVN- CYD)+ ((if (CYM* CTO)>= AVV{(CYM* CTO)}else{AVV}).ln())))+ (LK* CYJ))- CYO;
+		let CYP=(((CYN* CYN)/ ((CVN- CYD)+ ((if !((CYM* CTO)).is_nan()&&((CYM* CTO)>=AVV||(AVV).is_nan()){(CYM* CTO)}else{AVV}).ln())))+ (LK* CYJ))- CYO;
 		let CYQ=CYD+ ((CYN* CYM)/ (CYP+ (((CYI* CYN)/ CYP)* ((AYI* CYJ)- CYO))));
 		let CYR=rspice_limited_exp((CYQ- CVN));
 		let CYS=CTI- CYQ;
@@ -10876,7 +10876,7 @@ impl Instance {
 		let CZF=CZB- CZE;
 		let CZG=(CZF* CZF)+ (CTN* (CZE+ B));
 		let CZH=(AT* CZF)- CTN;
-		let CZI=(-CZE)+ ((if (CZG* CTO)>= AVV{(CZG* CTO)}else{AVV}).ln());
+		let CZI=(-CZE)+ ((if !((CZG* CTO)).is_nan()&&((CZG* CTO)>=AVV||(AVV).is_nan()){(CZG* CTO)}else{AVV}).ln());
 		let CZJ=CZG+ CZH;
 		let CZK=CZH* CZH;
 		let CZL=(CZJ* CZJ)+ (CZI* ((LK* CZK)- CZG));
@@ -10903,9 +10903,9 @@ impl Instance {
 		let DAE=DAB* DAB;
 		let DAF=B/ (AT+ DAE);
 		let DAG=DAE* DAF;
-		let DAH=if BNA>= ((DAC* DAC)- (CTN* (((DAD+ DAB)- B)- (CVO* ((DAB+ B)+ DAG))))){BNA}else{((DAC* DAC)- (CTN* (((DAD+ DAB)- B)- (CVO* ((DAB+ B)+ DAG)))))};
+		let DAH=if !(BNA).is_nan()&&(BNA>=((DAC* DAC)- (CTN* (((DAD+ DAB)- B)- (CVO* ((DAB+ B)+ DAG)))))||(((DAC* DAC)- (CTN* (((DAD+ DAB)- B)- (CVO* ((DAB+ B)+ DAG)))))).is_nan()){BNA}else{((DAC* DAC)- (CTN* (((DAD+ DAB)- B)- (CVO* ((DAB+ B)+ DAG)))))};
 		let DAI=(AT* DAC)+ (CTN* ((B- DAD)- (CVO* (B+ (QB* ((DAB* DAF)* DAF))))));
-		let DAJ=(CVN- DAB)+ ((if (DAH/ CTN)>= AVV{(DAH/ CTN)}else{AVV}).ln());
+		let DAJ=(CVN- DAB)+ ((if !((DAH/ CTN)).is_nan()&&((DAH/ CTN)>=AVV||(AVV).is_nan()){(DAH/ CTN)}else{AVV}).ln());
 		let DAK=DAH+ DAI;
 		let DAL=DAI* DAI;
 		let DAM=DAH* (B- (LK* (CTN* (DAD- (CVO* ((((QM* DAF)- (BMJ* DAG))* DAF)* DAF))))));
@@ -11177,7 +11177,7 @@ impl Instance {
 		let DGK=CTK* (DGJ.sqrt());
 		let DGL=((CTN* DGG)* AXA)/ ((CTK* ((DGJ+ DGG).sqrt()))+ DGK);
 		let DGM=DGK* AXA;
-		let DGN=((BWY+ (BWZ* BFN))* (((BWV/ BGT)* (DGM+ (AYM* DGL))).powf(AZF)))+ (BXB/ (rspice_limited_exp((BWX* ((if (LK* (B+ (DGL/ DGM)))>= AVV{(LK* (B+ (DGL/ DGM)))}else{AVV}).ln())))));
+		let DGN=((BWY+ (BWZ* BFN))* (((BWV/ BGT)* (DGM+ (AYM* DGL))).powf(AZF)))+ (BXB/ (rspice_limited_exp((BWX* ((if !((LK* (B+ (DGL/ DGM)))).is_nan()&&((LK* (B+ (DGL/ DGM)))>=AVV||(AVV).is_nan()){(LK* (B+ (DGL/ DGM)))}else{AVV}).ln())))));
 		let DGO=B+ DGN;
 		let DGP=DGO- B;
 		let DGQ=LK* ((DGO+ B)+ (((DGP* DGP)+ 5.625e-7f64).sqrt()));
@@ -11255,7 +11255,7 @@ impl Instance {
 		let DIK=DIG- DIJ;
 		let DIL=(DIK* DIK)+ (CTN* (DIJ+ B));
 		let DIM=(AT* DIK)- CTN;
-		let DIN=(-DIJ)+ ((if (DIL* CTO)>= AVV{(DIL* CTO)}else{AVV}).ln());
+		let DIN=(-DIJ)+ ((if !((DIL* CTO)).is_nan()&&((DIL* CTO)>=AVV||(AVV).is_nan()){(DIL* CTO)}else{AVV}).ln());
 		let DIO=DIL+ DIM;
 		let DIP=DIM* DIM;
 		let DIQ=(DIO* DIO)+ (DIN* ((LK* DIP)- DIL));
@@ -11282,9 +11282,9 @@ impl Instance {
 		let DJJ=DJG* DJG;
 		let DJK=B/ (AT+ DJJ);
 		let DJL=DJJ* DJK;
-		let DJM=if BNA>= ((DJH* DJH)- (CTN* (((DJI+ DJG)- B)- (DHW* ((DJG+ B)+ DJL))))){BNA}else{((DJH* DJH)- (CTN* (((DJI+ DJG)- B)- (DHW* ((DJG+ B)+ DJL)))))};
+		let DJM=if !(BNA).is_nan()&&(BNA>=((DJH* DJH)- (CTN* (((DJI+ DJG)- B)- (DHW* ((DJG+ B)+ DJL)))))||(((DJH* DJH)- (CTN* (((DJI+ DJG)- B)- (DHW* ((DJG+ B)+ DJL)))))).is_nan()){BNA}else{((DJH* DJH)- (CTN* (((DJI+ DJG)- B)- (DHW* ((DJG+ B)+ DJL)))))};
 		let DJN=(AT* DJH)+ (CTN* ((B- DJI)- (DHW* (B+ (QB* ((DJG* DJK)* DJK))))));
-		let DJO=(DHU- DJG)+ ((if (DJM/ CTN)>= AVV{(DJM/ CTN)}else{AVV}).ln());
+		let DJO=(DHU- DJG)+ ((if !((DJM/ CTN)).is_nan()&&((DJM/ CTN)>=AVV||(AVV).is_nan()){(DJM/ CTN)}else{AVV}).ln());
 		let DJP=DJM+ DJN;
 		let DJQ=DJN* DJN;
 		let DJR=DJM* (B- (LK* (CTN* (DJI- (DHW* ((((QM* DJK)- (BMJ* DJL))* DJK)* DJK))))));
@@ -11327,7 +11327,7 @@ impl Instance {
 		};
 		let DKT=DKS+ DKO;
 		let DKU=DKS* DKQ;
-		let DKV=(((DKT* DKT)/ ((DHU- DKJ)+ ((if (DKS* CTO)>= AVV{(DKS* CTO)}else{AVV}).ln())))+ (LK* DKP))- DKU;
+		let DKV=(((DKT* DKT)/ ((DHU- DKJ)+ ((if !((DKS* CTO)).is_nan()&&((DKS* CTO)>=AVV||(AVV).is_nan()){(DKS* CTO)}else{AVV}).ln())))+ (LK* DKP))- DKU;
 		let DKW=DKJ+ ((DKT* DKS)/ (DKV+ (((DKO* DKT)/ DKV)* ((AYI* DKP)- DKU))));
 		let DKX=rspice_limited_exp((DKW- DHU));
 		let DKY=CTI- DKW;
@@ -11355,7 +11355,7 @@ impl Instance {
 		let DLL=DLH- DLK;
 		let DLM=(DLL* DLL)+ (CTN* (DLK+ B));
 		let DLN=(AT* DLL)- CTN;
-		let DLO=(-DLK)+ ((if (DLM* CTO)>= AVV{(DLM* CTO)}else{AVV}).ln());
+		let DLO=(-DLK)+ ((if !((DLM* CTO)).is_nan()&&((DLM* CTO)>=AVV||(AVV).is_nan()){(DLM* CTO)}else{AVV}).ln());
 		let DLP=DLM+ DLN;
 		let DLQ=DLN* DLN;
 		let DLR=(DLP* DLP)+ (DLO* ((LK* DLQ)- DLM));
@@ -11382,9 +11382,9 @@ impl Instance {
 		let DMK=DMH* DMH;
 		let DML=B/ (AT+ DMK);
 		let DMM=DMK* DML;
-		let DMN=if BNA>= ((DMI* DMI)- (CTN* (((DMJ+ DMH)- B)- (DHW* ((DMH+ B)+ DMM))))){BNA}else{((DMI* DMI)- (CTN* (((DMJ+ DMH)- B)- (DHW* ((DMH+ B)+ DMM)))))};
+		let DMN=if !(BNA).is_nan()&&(BNA>=((DMI* DMI)- (CTN* (((DMJ+ DMH)- B)- (DHW* ((DMH+ B)+ DMM)))))||(((DMI* DMI)- (CTN* (((DMJ+ DMH)- B)- (DHW* ((DMH+ B)+ DMM)))))).is_nan()){BNA}else{((DMI* DMI)- (CTN* (((DMJ+ DMH)- B)- (DHW* ((DMH+ B)+ DMM)))))};
 		let DMO=(AT* DMI)+ (CTN* ((B- DMJ)- (DHW* (B+ (QB* ((DMH* DML)* DML))))));
-		let DMP=(DHU- DMH)+ ((if (DMN/ CTN)>= AVV{(DMN/ CTN)}else{AVV}).ln());
+		let DMP=(DHU- DMH)+ ((if !((DMN/ CTN)).is_nan()&&((DMN/ CTN)>=AVV||(AVV).is_nan()){(DMN/ CTN)}else{AVV}).ln());
 		let DMQ=DMN+ DMO;
 		let DMR=DMO* DMO;
 		let DMS=DMN* (B- (LK* (CTN* (DMJ- (DHW* ((((QM* DML)- (BMJ* DMM))* DML)* DML))))));
@@ -11973,7 +11973,7 @@ impl Instance {
 		if EAA{
 		EBI=A;
 		}else{
-		let EAB=AXY* ((if (((CSA/ AXY)+ DZZ)/ DZY)>= AVV{(((CSA/ AXY)+ DZZ)/ DZY)}else{AVV}).ln());
+		let EAB=AXY* ((if !((((CSA/ AXY)+ DZZ)/ DZY)).is_nan()&&((((CSA/ AXY)+ DZZ)/ DZY)>=AVV||(AVV).is_nan()){(((CSA/ AXY)+ DZZ)/ DZY)}else{AVV}).ln());
 		let EAC=EAB< A;
 		let EBJ=if EAC{
 		A
@@ -12003,7 +12003,7 @@ impl Instance {
 		let EBA=AU- (AT* EAZ);
 		let EBB=EBA* EBA;
 		let EBG=(((EAE* EBD)* EAI)* EAK)/ C;
-		let EBH=(EAN/ ((EBC* N)* EBB))* (((EAP* ((if ((EBG+ EAD)/ EAT)>= AVV{((EBG+ EAD)/ EAT)}else{AVV}).ln()))+ (EAQ* (EBG- EAM)))+ ((LK* EAR)* ((EBG* EBG)- (EAM* EAM))));
+		let EBH=(EAN/ ((EBC* N)* EBB))* (((EAP* ((if !(((EBG+ EAD)/ EAT)).is_nan()&&(((EBG+ EAD)/ EAT)>=AVV||(AVV).is_nan()){((EBG+ EAD)/ EAT)}else{AVV}).ln()))+ (EAQ* (EBG- EAM)))+ ((LK* EAR)* ((EBG* EBG)- (EAM* EAM))));
 		let EBK=EBH+ ((((EAO/ (((EBC* EBB)* AY)* W))* EBI)* EAS)/ EAU);
 		let EBL=((EAV/ (((((AY* W)* EBA)* EBC)* EAD)* EAD))* CRK)* CRK;
 		let EBM=EBL+ EBK;
@@ -12178,7 +12178,7 @@ impl Instance {
 		let FUK;
 		let FUY;
 		if EEI{
-		let EEJ=if ((AXR+ (AXA* ((if (HK/ AXH)>= AVV{(HK/ AXH)}else{AVV}).ln())))+ EG)>= AXR{((AXR+ (AXA* ((if (HK/ AXH)>= AVV{(HK/ AXH)}else{AVV}).ln())))+ EG)}else{AXR};
+		let EEJ=if !(((AXR+ (AXA* ((if !((HK/ AXH)).is_nan()&&((HK/ AXH)>=AVV||(AVV).is_nan()){(HK/ AXH)}else{AVV}).ln())))+ EG)).is_nan()&&(((AXR+ (AXA* ((if !((HK/ AXH)).is_nan()&&((HK/ AXH)>=AVV||(AVV).is_nan()){(HK/ AXH)}else{AVV}).ln())))+ EG)>=AXR||(AXR).is_nan()){((AXR+ (AXA* ((if !((HK/ AXH)).is_nan()&&((HK/ AXH)>=AVV||(AVV).is_nan()){(HK/ AXH)}else{AVV}).ln())))+ EG)}else{AXR};
 		let EEK=B+ (HU* AXZ);
 		let EEM=EEJ- BFL;
 		let EEN=EEM- BDL;
@@ -12227,7 +12227,7 @@ impl Instance {
 		let EFV=rspice_limited_exp(EFT);
 		EFV
 		};
-		let EFX=(-EEV)* ((if (AU/ (AU+ (DR* (B+ EFW))))>= AVV{(AU/ (AU+ (DR* (B+ EFW))))}else{AVV}).ln());
+		let EFX=(-EEV)* ((if !((AU/ (AU+ (DR* (B+ EFW))))).is_nan()&&((AU/ (AU+ (DR* (B+ EFW))))>=AVV||(AVV).is_nan()){(AU/ (AU+ (DR* (B+ EFW))))}else{AVV}).ln());
 		EFY=EFX;
 		}else{
 		EFY=A;
@@ -12261,7 +12261,7 @@ impl Instance {
 		let EHB=EGX- EHA;
 		let EHC=(EHB* EHB)+ (EGQ* (EHA+ B));
 		let EHD=(AT* EHB)- EGQ;
-		let EHE=((if (EHC/ EGQ)>= AVV{(EHC/ EGQ)}else{AVV}).ln())- EHA;
+		let EHE=((if !((EHC/ EGQ)).is_nan()&&((EHC/ EGQ)>=AVV||(AVV).is_nan()){(EHC/ EGQ)}else{AVV}).ln())- EHA;
 		let EHF=EHC+ EHD;
 		let EHG=EHD* EHD;
 		let EHH=(EHF* EHF)+ (EHE* ((LK* EHG)- EHC));
@@ -12326,7 +12326,7 @@ impl Instance {
 		let EIZ=EIV- EIY;
 		let EJA=(EIZ* EIZ)+ (EGJ* (EIY+ B));
 		let EJB=(AT* EIZ)- EGJ;
-		let EJC=(-EIY)+ ((if (EJA* EGK)>= AVV{(EJA* EGK)}else{AVV}).ln());
+		let EJC=(-EIY)+ ((if !((EJA* EGK)).is_nan()&&((EJA* EGK)>=AVV||(AVV).is_nan()){(EJA* EGK)}else{AVV}).ln());
 		let EJD=EJA+ EJB;
 		let EJE=EJB* EJB;
 		let EJF=(EJD* EJD)+ (EJC* ((LK* EJE)- EJA));
@@ -12353,9 +12353,9 @@ impl Instance {
 		let EJY=EJV* EJV;
 		let EJZ=B/ (AT+ EJY);
 		let EKA=EJY* EJZ;
-		let EKB=if BNA>= ((EJW* EJW)- (EGJ* (((EJX+ EJV)- B)- (EIK* ((EJV+ B)+ EKA))))){BNA}else{((EJW* EJW)- (EGJ* (((EJX+ EJV)- B)- (EIK* ((EJV+ B)+ EKA)))))};
+		let EKB=if !(BNA).is_nan()&&(BNA>=((EJW* EJW)- (EGJ* (((EJX+ EJV)- B)- (EIK* ((EJV+ B)+ EKA)))))||(((EJW* EJW)- (EGJ* (((EJX+ EJV)- B)- (EIK* ((EJV+ B)+ EKA)))))).is_nan()){BNA}else{((EJW* EJW)- (EGJ* (((EJX+ EJV)- B)- (EIK* ((EJV+ B)+ EKA)))))};
 		let EKC=(AT* EJW)+ (EGJ* ((B- EJX)- (EIK* (B+ (QB* ((EJV* EJZ)* EJZ))))));
-		let EKD=(EIJ- EJV)+ ((if (EKB/ EGJ)>= AVV{(EKB/ EGJ)}else{AVV}).ln());
+		let EKD=(EIJ- EJV)+ ((if !((EKB/ EGJ)).is_nan()&&((EKB/ EGJ)>=AVV||(AVV).is_nan()){(EKB/ EGJ)}else{AVV}).ln());
 		let EKE=EKB+ EKC;
 		let EKF=EKC* EKC;
 		let EKG=EKB* (B- (LK* (EGJ* (EJX- (EIK* ((((QM* EJZ)- (BMJ* EKA))* EJZ)* EJZ))))));
@@ -12398,7 +12398,7 @@ impl Instance {
 		};
 		let ELI=ELH+ ELD;
 		let ELJ=ELH* ELF;
-		let ELK=(((ELI* ELI)/ ((EIJ- EKY)+ ((if (ELH* EGK)>= AVV{(ELH* EGK)}else{AVV}).ln())))+ (LK* ELE))- ELJ;
+		let ELK=(((ELI* ELI)/ ((EIJ- EKY)+ ((if !((ELH* EGK)).is_nan()&&((ELH* EGK)>=AVV||(AVV).is_nan()){(ELH* EGK)}else{AVV}).ln())))+ (LK* ELE))- ELJ;
 		let ELL=EKY+ ((ELI* ELH)/ (ELK+ (((ELD* ELI)/ ELK)* ((AYI* ELE)- ELJ))));
 		let ELM=rspice_limited_exp((ELL- EIJ));
 		let ELN=EGC- ELL;
@@ -12426,7 +12426,7 @@ impl Instance {
 		let EMA=ELW- ELZ;
 		let EMB=(EMA* EMA)+ (EGJ* (ELZ+ B));
 		let EMC=(AT* EMA)- EGJ;
-		let EMD=(-ELZ)+ ((if (EMB* EGK)>= AVV{(EMB* EGK)}else{AVV}).ln());
+		let EMD=(-ELZ)+ ((if !((EMB* EGK)).is_nan()&&((EMB* EGK)>=AVV||(AVV).is_nan()){(EMB* EGK)}else{AVV}).ln());
 		let EME=EMB+ EMC;
 		let EMF=EMC* EMC;
 		let EMG=(EME* EME)+ (EMD* ((LK* EMF)- EMB));
@@ -12453,9 +12453,9 @@ impl Instance {
 		let EMZ=EMW* EMW;
 		let ENA=B/ (AT+ EMZ);
 		let ENB=EMZ* ENA;
-		let ENC=if BNA>= ((EMX* EMX)- (EGJ* (((EMY+ EMW)- B)- (EIK* ((EMW+ B)+ ENB))))){BNA}else{((EMX* EMX)- (EGJ* (((EMY+ EMW)- B)- (EIK* ((EMW+ B)+ ENB)))))};
+		let ENC=if !(BNA).is_nan()&&(BNA>=((EMX* EMX)- (EGJ* (((EMY+ EMW)- B)- (EIK* ((EMW+ B)+ ENB)))))||(((EMX* EMX)- (EGJ* (((EMY+ EMW)- B)- (EIK* ((EMW+ B)+ ENB)))))).is_nan()){BNA}else{((EMX* EMX)- (EGJ* (((EMY+ EMW)- B)- (EIK* ((EMW+ B)+ ENB)))))};
 		let END=(AT* EMX)+ (EGJ* ((B- EMY)- (EIK* (B+ (QB* ((EMW* ENA)* ENA))))));
-		let ENE=(EIJ- EMW)+ ((if (ENC/ EGJ)>= AVV{(ENC/ EGJ)}else{AVV}).ln());
+		let ENE=(EIJ- EMW)+ ((if !((ENC/ EGJ)).is_nan()&&((ENC/ EGJ)>=AVV||(AVV).is_nan()){(ENC/ EGJ)}else{AVV}).ln());
 		let ENF=ENC+ END;
 		let ENG=END* END;
 		let ENH=ENC* (B- (LK* (EGJ* (EMY- (EIK* ((((QM* ENA)- (BMJ* ENB))* ENA)* ENA))))));
@@ -12755,7 +12755,7 @@ impl Instance {
 		let ESZ=BIL< A;
 		let ETG=if ESZ{
 		let ETA=(BIL- ESY)/ BIN;
-		let ETB=-((if ((B- ESY)+ (ETA* ETA))>= AVV{((B- ESY)+ (ETA* ETA))}else{AVV}).ln());
+		let ETB=-((if !(((B- ESY)+ (ETA* ETA))).is_nan()&&(((B- ESY)+ (ETA* ETA))>=AVV||(AVV).is_nan()){((B- ESY)+ (ETA* ETA))}else{AVV}).ln());
 		ETB
 		}else{
 		let ETC=rspice_limited_exp((-ESY));
@@ -12773,7 +12773,7 @@ impl Instance {
 		let ETM=(B+ ETL)/ BIN;
 		let ETN=ETG- (AT* ESV);
 		let ETO=ETN- BII;
-		let ETP=ETO- ((if ((QB* ETM)* ETK)>= AVV{((QB* ETM)* ETK)}else{AVV}).ln());
+		let ETP=ETO- ((if !(((QB* ETM)* ETK)).is_nan()&&(((QB* ETM)* ETK)>=AVV||(AVV).is_nan()){((QB* ETM)* ETK)}else{AVV}).ln());
 		let ETT=LK* ((ETP- ETQ)- (((ETP* (ETP+ ETR))+ ETS).sqrt()));
 		let ETU=ETT<= -68f64;
 		let EUV;
@@ -12796,7 +12796,7 @@ impl Instance {
 		EUC=EUD;
 		}
 		let EUE=((EUC* AT)* ETM)+ FZB;
-		let EUF=EUC* (((B+ ETO)- ETT)- ((if ((AT* ETM)* EUE)>= AVV{((AT* ETM)* EUE)}else{AVV}).ln()));
+		let EUF=EUC* (((B+ ETO)- ETT)- ((if !(((AT* ETM)* EUE)).is_nan()&&(((AT* ETM)* EUE)>=AVV||(AVV).is_nan()){((AT* ETM)* EUE)}else{AVV}).ln()));
 		EUV=EUF;
 		}else{
 		let EUG=rspice_limited_exp(ETT);
@@ -12804,11 +12804,11 @@ impl Instance {
 		let EUI=EUH* ETM;
 		let EUJ=EUI+ FZB;
 		let EUK=ETM+ (B/ ETK);
-		let EUL=EUG- (((EUH+ ((if (EUI* EUJ)>= AVV{(EUI* EUJ)}else{AVV}).ln()))- ETO)/ ((AT+ (B/ EUG))+ (EUK/ ((ETM* EUG)+ ETK))));
+		let EUL=EUG- (((EUH+ ((if !((EUI* EUJ)).is_nan()&&((EUI* EUJ)>=AVV||(AVV).is_nan()){(EUI* EUJ)}else{AVV}).ln()))- ETO)/ ((AT+ (B/ EUG))+ (EUK/ ((ETM* EUG)+ ETK))));
 		let EUM=AT* EUL;
 		let EUN=EUM* ETM;
 		let EUO=EUN+ FZB;
-		let EUP=(EUM+ ((if (EUN* EUO)>= AVV{(EUN* EUO)}else{AVV}).ln()))- ETO;
+		let EUP=(EUM+ ((if !((EUN* EUO)).is_nan()&&((EUN* EUO)>=AVV||(AVV).is_nan()){(EUN* EUO)}else{AVV}).ln()))- ETO;
 		let EUQ=B/ EUL;
 		let EUR=(ETM* EUL)+ ETK;
 		let EUS=EUK/ EUR;
@@ -12981,7 +12981,7 @@ impl Instance {
 		}
 		let EYV=AT* EYU;
 		let EYW=(EYV* EUZ)* BIS;
-		let EYX=(ETN- (EYV+ ((if (EYW* (EYW+ (BIN/ EVC)))>= AVV{(EYW* (EYW+ (BIN/ EVC)))}else{AVV}).ln())))* BHS;
+		let EYX=(ETN- (EYV+ ((if !((EYW* (EYW+ (BIN/ EVC)))).is_nan()&&((EYW* (EYW+ (BIN/ EVC)))>=AVV||(AVV).is_nan()){(EYW* (EYW+ (BIN/ EVC)))}else{AVV}).ln())))* BHS;
 		let EYY=(BYE== A)&& (BYF== A);
 		let EZE=if EYY{
 		B
@@ -13002,7 +13002,7 @@ impl Instance {
 		let EZK=BIN/ FZC;
 		let EZL=(B+ EZK)/ BIN;
 		let EZM=ETN- ((EZI+ BFB)* BHT);
-		let EZN=EZM- ((if ((QB* EZL)* EZJ)>= AVV{((QB* EZL)* EZJ)}else{AVV}).ln());
+		let EZN=EZM- ((if !(((QB* EZL)* EZJ)).is_nan()&&(((QB* EZL)* EZJ)>=AVV||(AVV).is_nan()){((QB* EZL)* EZJ)}else{AVV}).ln());
 		let EZO=LK* ((EZN- ETQ)- (((EZN* (EZN+ ETR))+ ETS).sqrt()));
 		let EZP=EZO<= -68f64;
 		let FAQ;
@@ -13025,7 +13025,7 @@ impl Instance {
 		EZX=EZY;
 		}
 		let EZZ=((EZX* AT)* EZL)+ FZC;
-		let FAA=EZX* (((B+ EZM)- EZO)- ((if ((AT* EZL)* EZZ)>= AVV{((AT* EZL)* EZZ)}else{AVV}).ln()));
+		let FAA=EZX* (((B+ EZM)- EZO)- ((if !(((AT* EZL)* EZZ)).is_nan()&&(((AT* EZL)* EZZ)>=AVV||(AVV).is_nan()){((AT* EZL)* EZZ)}else{AVV}).ln()));
 		FAQ=FAA;
 		}else{
 		let FAB=rspice_limited_exp(EZO);
@@ -13033,11 +13033,11 @@ impl Instance {
 		let FAD=FAC* EZL;
 		let FAE=FAD+ FZC;
 		let FAF=EZL+ (B/ EZJ);
-		let FAG=FAB- (((FAC+ ((if (FAD* FAE)>= AVV{(FAD* FAE)}else{AVV}).ln()))- EZM)/ ((AT+ (B/ FAB))+ (FAF/ ((EZL* FAB)+ EZJ))));
+		let FAG=FAB- (((FAC+ ((if !((FAD* FAE)).is_nan()&&((FAD* FAE)>=AVV||(AVV).is_nan()){(FAD* FAE)}else{AVV}).ln()))- EZM)/ ((AT+ (B/ FAB))+ (FAF/ ((EZL* FAB)+ EZJ))));
 		let FAH=AT* FAG;
 		let FAI=FAH* EZL;
 		let FAJ=FAI+ FZC;
-		let FAK=(FAH+ ((if (FAI* FAJ)>= AVV{(FAI* FAJ)}else{AVV}).ln()))- EZM;
+		let FAK=(FAH+ ((if !((FAI* FAJ)).is_nan()&&((FAI* FAJ)>=AVV||(AVV).is_nan()){(FAI* FAJ)}else{AVV}).ln()))- EZM;
 		let FAL=B/ FAG;
 		let FAM=(EZL* FAG)+ EZJ;
 		let FAN=FAF/ FAM;
@@ -13103,7 +13103,7 @@ impl Instance {
 		let FCC=(CNM* (B+ ((CNO* FBG)/ FBL)))/ FCA;
 		FCC
 		};
-		let FCE=B+ (FCD* ((if (B+ ((FBP/ FCD)/ FBX))>= AVV{(B+ ((FBP/ FCD)/ FBX))}else{AVV}).ln()));
+		let FCE=B+ (FCD* ((if !((B+ ((FBP/ FCD)/ FBX))).is_nan()&&((B+ ((FBP/ FCD)/ FBX))>=AVV||(AVV).is_nan()){(B+ ((FBP/ FCD)/ FBX))}else{AVV}).ln()));
 		FCL=FCE;
 		}else{
 		let FCF=CNO< A;
@@ -13213,7 +13213,7 @@ impl Instance {
 		let FEC=FEB- B;
 		let FED=FAU/ (FAZ+ BAU);
 		let FEE=B+ ((BAR* FED)* FED);
-		let FEF=rspice_limited_exp((-(BAW/ (((if A>= (BAY+ ((BBA* FAU)* FAU)){A}else{(BAY+ ((BBA* FAU)* FAU))})* FAZ)+ FDZ))));
+		let FEF=rspice_limited_exp((-(BAW/ (((if !(A).is_nan()&&(A>=(BAY+ ((BBA* FAU)* FAU))||((BAY+ ((BBA* FAU)* FAU))).is_nan()){A}else{(BAY+ ((BBA* FAU)* FAU))})* FAZ)+ FDZ))));
 		let FEI=BXS/ ((FBJ* FDK)* FEG);
 		let FEJ=AT* W;
 		let FEK=(((((((((FEJ* FAT)* FEI)* AY)/ AU)* N)* BHS)* BHS)* (FAU* FAW))* FCZ)/ ((LK* ((FEB+ B)- (((FEC* FEC)+ 2.5e-5f64).sqrt())))+ 0.0025f64);
@@ -13432,7 +13432,7 @@ impl Instance {
 		if FID{
 		FLR=A;
 		}else{
-		let FIE=AXY* ((if (((FBP/ AXY)+ DZZ)/ FIC)>= AVV{(((FBP/ AXY)+ DZZ)/ FIC)}else{AVV}).ln());
+		let FIE=AXY* ((if !((((FBP/ AXY)+ DZZ)/ FIC)).is_nan()&&((((FBP/ AXY)+ DZZ)/ FIC)>=AVV||(AVV).is_nan()){(((FBP/ AXY)+ DZZ)/ FIC)}else{AVV}).ln());
 		let FIF=FIE< A;
 		let FLS=if FIF{
 		A
@@ -13489,7 +13489,7 @@ impl Instance {
 		let FJE=FIY< A;
 		let FJL=if FJE{
 		let FJF=(FIY- FJD)/ FJA;
-		let FJG=-((if ((B- FJD)+ (FJF* FJF))>= AVV{((B- FJD)+ (FJF* FJF))}else{AVV}).ln());
+		let FJG=-((if !(((B- FJD)+ (FJF* FJF))).is_nan()&&(((B- FJD)+ (FJF* FJF))>=AVV||(AVV).is_nan()){((B- FJD)+ (FJF* FJF))}else{AVV}).ln());
 		FJG
 		}else{
 		let FJH=rspice_limited_exp((-FJD));
@@ -13505,7 +13505,7 @@ impl Instance {
 		let FJQ=AT* FJP;
 		let FJR=(B+ (FJA/ FJQ))/ FJA;
 		let FJS=(FJL- (AT* FJB))- BII;
-		let FJT=FJS- ((if ((QB* FJR)* FJP)>= AVV{((QB* FJR)* FJP)}else{AVV}).ln());
+		let FJT=FJS- ((if !(((QB* FJR)* FJP)).is_nan()&&(((QB* FJR)* FJP)>=AVV||(AVV).is_nan()){((QB* FJR)* FJP)}else{AVV}).ln());
 		let FJU=LK* ((FJT- ETQ)- (((FJT* (FJT+ ETR))+ ETS).sqrt()));
 		let FJV=FJU<= -68f64;
 		let FKZ;
@@ -13527,17 +13527,17 @@ impl Instance {
 		};
 		FKD=FKE;
 		}
-		let FKF=FKD* (((B+ FJS)- FJU)- ((if ((AT* FJR)* (((FKD* AT)* FJR)+ FJQ))>= AVV{((AT* FJR)* (((FKD* AT)* FJR)+ FJQ))}else{AVV}).ln()));
+		let FKF=FKD* (((B+ FJS)- FJU)- ((if !(((AT* FJR)* (((FKD* AT)* FJR)+ FJQ))).is_nan()&&(((AT* FJR)* (((FKD* AT)* FJR)+ FJQ))>=AVV||(AVV).is_nan()){((AT* FJR)* (((FKD* AT)* FJR)+ FJQ))}else{AVV}).ln()));
 		FKZ=FKF;
 		}else{
 		let FKG=rspice_limited_exp(FJU);
 		let FKH=AT* FKG;
 		let FKI=FKH* FJR;
 		let FKJ=FJR+ (B/ FJP);
-		let FKK=FKG- (((FKH+ ((if (FKI* (FKI+ FJQ))>= AVV{(FKI* (FKI+ FJQ))}else{AVV}).ln()))- FJS)/ ((AT+ (B/ FKG))+ (FKJ/ ((FJR* FKG)+ FJP))));
+		let FKK=FKG- (((FKH+ ((if !((FKI* (FKI+ FJQ))).is_nan()&&((FKI* (FKI+ FJQ))>=AVV||(AVV).is_nan()){(FKI* (FKI+ FJQ))}else{AVV}).ln()))- FJS)/ ((AT+ (B/ FKG))+ (FKJ/ ((FJR* FKG)+ FJP))));
 		let FKL=AT* FKK;
 		let FKM=FKL* FJR;
-		let FKN=(FKL+ ((if (FKM* (FKM+ FJQ))>= AVV{(FKM* (FKM+ FJQ))}else{AVV}).ln()))- FJS;
+		let FKN=(FKL+ ((if !((FKM* (FKM+ FJQ))).is_nan()&&((FKM* (FKM+ FJQ))>=AVV||(AVV).is_nan()){(FKM* (FKM+ FJQ))}else{AVV}).ln()))- FJS;
 		let FKO=B/ FKK;
 		let FKP=(FJR* FKK)+ FJP;
 		let FKQ=FKJ/ FKP;
@@ -13571,7 +13571,7 @@ impl Instance {
 		let FLM=(FIJ* FLD)/ C;
 		let FLO=(AU- (AT* FLN))- FKU;
 		let FLP=FLO* FLO;
-		let FLQ=(FIL/ ((EBC* N)* FLP))* (((EAP* ((if ((FLM+ FIH)/ FIP)>= AVV{((FLM+ FIH)/ FIP)}else{AVV}).ln()))+ (EAQ* (FLM- FIK)))+ ((LK* EAR)* ((FLM* FLM)- (FIK* FIK))));
+		let FLQ=(FIL/ ((EBC* N)* FLP))* (((EAP* ((if !(((FLM+ FIH)/ FIP)).is_nan()&&(((FLM+ FIH)/ FIP)>=AVV||(AVV).is_nan()){((FLM+ FIH)/ FIP)}else{AVV}).ln()))+ (EAQ* (FLM- FIK)))+ ((LK* EAR)* ((FLM* FLM)- (FIK* FIK))));
 		let FLT=FLQ+ ((((FIN/ (((EBC* FLP)* AY)* W))* FLR)* FIO)/ FIQ);
 		let FLU=((FIR/ (((((AY* W)* FLO)* EBC)* FIH)* FIH))* FEL)* FEL;
 		let FLV=FLU+ FLT;
@@ -13616,7 +13616,7 @@ impl Instance {
 		let FMH=AU- (AT* FMG);
 		let FMI=FMH* FMH;
 		let FMJ=(((FIJ* EUV)* FEF)* FEE)/ C;
-		let FMK=(FIL/ ((EBC* N)* FMI))* (((EAP* ((if ((FMJ+ FIH)/ FIP)>= AVV{((FMJ+ FIH)/ FIP)}else{AVV}).ln()))+ (EAQ* (FMJ- FIK)))+ ((LK* EAR)* ((FMJ* FMJ)- (FIK* FIK))));
+		let FMK=(FIL/ ((EBC* N)* FMI))* (((EAP* ((if !(((FMJ+ FIH)/ FIP)).is_nan()&&(((FMJ+ FIH)/ FIP)>=AVV||(AVV).is_nan()){((FMJ+ FIH)/ FIP)}else{AVV}).ln()))+ (EAQ* (FMJ- FIK)))+ ((LK* EAR)* ((FMJ* FMJ)- (FIK* FIK))));
 		let FML=FMK+ ((((FIN/ (((EBC* FMI)* AY)* W))* FLR)* FIO)/ FIQ);
 		let FMM=((FIR/ (((((AY* W)* FMH)* EBC)* FIH)* FIH))* FEL)* FEL;
 		let FMN=FMM+ FML;
@@ -13801,8 +13801,8 @@ impl Instance {
 		let FYU;
 		let GBO;
 		if FOJ{
-		let FOK=(if (HK/ AXH)>= AVV{(HK/ AXH)}else{AVV}).ln();
-		let FOL=if ((AXR+ (AXA* FOK))+ EG)>= AXR{((AXR+ (AXA* FOK))+ EG)}else{AXR};
+		let FOK=(if !((HK/ AXH)).is_nan()&&((HK/ AXH)>=AVV||(AVV).is_nan()){(HK/ AXH)}else{AVV}).ln();
+		let FOL=if !(((AXR+ (AXA* FOK))+ EG)).is_nan()&&(((AXR+ (AXA* FOK))+ EG)>=AXR||(AXR).is_nan()){((AXR+ (AXA* FOK))+ EG)}else{AXR};
 		let FOM=B+ (HU* AXZ);
 		let FON=FOL- BFL;
 		let FOO=FON- BDL;
@@ -13842,7 +13842,7 @@ impl Instance {
 		let FPN=FPI< A;
 		let FPU=if FPN{
 		let FPO=(FPI- FPM)/ FPJ;
-		let FPP=-((if ((B- FPM)+ (FPO* FPO))>= AVV{((B- FPM)+ (FPO* FPO))}else{AVV}).ln());
+		let FPP=-((if !(((B- FPM)+ (FPO* FPO))).is_nan()&&(((B- FPM)+ (FPO* FPO))>=AVV||(AVV).is_nan()){((B- FPM)+ (FPO* FPO))}else{AVV}).ln());
 		FPP
 		}else{
 		let FPQ=rspice_limited_exp((-FPM));
@@ -13860,7 +13860,7 @@ impl Instance {
 		let FQA=(B+ FPZ)/ FPJ;
 		let FQB=FPU- (AT* FPK);
 		let FQC=FQB- FOW;
-		let FQD=FQC- ((if ((QB* FQA)* FPY)>= AVV{((QB* FQA)* FPY)}else{AVV}).ln());
+		let FQD=FQC- ((if !(((QB* FQA)* FPY)).is_nan()&&(((QB* FQA)* FPY)>=AVV||(AVV).is_nan()){((QB* FQA)* FPY)}else{AVV}).ln());
 		let FQE=LK* ((FQD- ETQ)- (((FQD* (FQD+ ETR))+ ETS).sqrt()));
 		let FQF=FQE<= -68f64;
 		let FRH;
@@ -13883,7 +13883,7 @@ impl Instance {
 		FQN=FQO;
 		}
 		let FQP=((FQN* AT)* FQA)+ FZD;
-		let FQQ=FQN* (((B+ FQC)- FQE)- ((if ((AT* FQA)* FQP)>= AVV{((AT* FQA)* FQP)}else{AVV}).ln()));
+		let FQQ=FQN* (((B+ FQC)- FQE)- ((if !(((AT* FQA)* FQP)).is_nan()&&(((AT* FQA)* FQP)>=AVV||(AVV).is_nan()){((AT* FQA)* FQP)}else{AVV}).ln()));
 		FRH=FQQ;
 		}else{
 		let FQR=rspice_limited_exp(FQE);
@@ -13891,11 +13891,11 @@ impl Instance {
 		let FQT=FQS* FQA;
 		let FQU=FQT+ FZD;
 		let FQV=FQA+ (B/ FPY);
-		let FQW=FQR- (((FQS+ ((if (FQT* FQU)>= AVV{(FQT* FQU)}else{AVV}).ln()))- FQC)/ ((AT+ (B/ FQR))+ (FQV/ ((FQA* FQR)+ FPY))));
+		let FQW=FQR- (((FQS+ ((if !((FQT* FQU)).is_nan()&&((FQT* FQU)>=AVV||(AVV).is_nan()){(FQT* FQU)}else{AVV}).ln()))- FQC)/ ((AT+ (B/ FQR))+ (FQV/ ((FQA* FQR)+ FPY))));
 		let FQX=AT* FQW;
 		let FQY=FQX* FQA;
 		let FQZ=FQY+ FZD;
-		let FRA=(FQX+ ((if (FQY* FQZ)>= AVV{(FQY* FQZ)}else{AVV}).ln()))- FQC;
+		let FRA=(FQX+ ((if !((FQY* FQZ)).is_nan()&&((FQY* FQZ)>=AVV||(AVV).is_nan()){(FQY* FQZ)}else{AVV}).ln()))- FQC;
 		let FRB=B/ FQW;
 		let FRC=(FQA* FQW)+ FPY;
 		let FRD=FQV/ FRC;
@@ -13910,7 +13910,7 @@ impl Instance {
 		let FRK=FPJ/ FZE;
 		let FRL=(B+ FRK)/ FPJ;
 		let FRM=FQB- (((BFC* ((B+ (((BFC/ (LK* ((FRI+ A)+ (((FRI* FRI)+ 2.5e-7f64).sqrt()))))+ BI).powf(EZG))).powf(EZH)))+ BFB)* FOU);
-		let FRN=FRM- ((if ((QB* FRL)* FRJ)>= AVV{((QB* FRL)* FRJ)}else{AVV}).ln());
+		let FRN=FRM- ((if !(((QB* FRL)* FRJ)).is_nan()&&(((QB* FRL)* FRJ)>=AVV||(AVV).is_nan()){((QB* FRL)* FRJ)}else{AVV}).ln());
 		let FRO=LK* ((FRN- ETQ)- (((FRN* (FRN+ ETR))+ ETS).sqrt()));
 		let FRP=FRO<= -68f64;
 		let FSQ;
@@ -13933,7 +13933,7 @@ impl Instance {
 		FRX=FRY;
 		}
 		let FRZ=((FRX* AT)* FRL)+ FZE;
-		let FSA=FRX* (((B+ FRM)- FRO)- ((if ((AT* FRL)* FRZ)>= AVV{((AT* FRL)* FRZ)}else{AVV}).ln()));
+		let FSA=FRX* (((B+ FRM)- FRO)- ((if !(((AT* FRL)* FRZ)).is_nan()&&(((AT* FRL)* FRZ)>=AVV||(AVV).is_nan()){((AT* FRL)* FRZ)}else{AVV}).ln()));
 		FSQ=FSA;
 		}else{
 		let FSB=rspice_limited_exp(FRO);
@@ -13941,11 +13941,11 @@ impl Instance {
 		let FSD=FSC* FRL;
 		let FSE=FSD+ FZE;
 		let FSF=FRL+ (B/ FRJ);
-		let FSG=FSB- (((FSC+ ((if (FSD* FSE)>= AVV{(FSD* FSE)}else{AVV}).ln()))- FRM)/ ((AT+ (B/ FSB))+ (FSF/ ((FRL* FSB)+ FRJ))));
+		let FSG=FSB- (((FSC+ ((if !((FSD* FSE)).is_nan()&&((FSD* FSE)>=AVV||(AVV).is_nan()){(FSD* FSE)}else{AVV}).ln()))- FRM)/ ((AT+ (B/ FSB))+ (FSF/ ((FRL* FSB)+ FRJ))));
 		let FSH=AT* FSG;
 		let FSI=FSH* FRL;
 		let FSJ=FSI+ FZE;
-		let FSK=(FSH+ ((if (FSI* FSJ)>= AVV{(FSI* FSJ)}else{AVV}).ln()))- FRM;
+		let FSK=(FSH+ ((if !((FSI* FSJ)).is_nan()&&((FSI* FSJ)>=AVV||(AVV).is_nan()){(FSI* FSJ)}else{AVV}).ln()))- FRM;
 		let FSL=B/ FSG;
 		let FSM=(FRL* FSG)+ FRJ;
 		let FSN=FSF/ FSM;
@@ -13968,7 +13968,7 @@ impl Instance {
 		let FTF=(FTE* FSQ)/ C;
 		let FTG=FTF+ FTD;
 		let FTH=(FTE* FRH)/ C;
-		let FTI=((((4.112737976006692e-57f64* AXA)* (FSW.abs()))* FEI)/ FST)* (((FSY* ((if ((FTH+ FTD)/ FTG)>= AVV{((FTH+ FTD)/ FTG)}else{AVV}).ln()))+ (FSZ* (FTH- FTF)))+ ((LK* FTA)* ((FTH* FTH)- (FTF* FTF))));
+		let FTI=((((4.112737976006692e-57f64* AXA)* (FSW.abs()))* FEI)/ FST)* (((FSY* ((if !(((FTH+ FTD)/ FTG)).is_nan()&&(((FTH+ FTD)/ FTG)>=AVV||(AVV).is_nan()){((FTH+ FTD)/ FTG)}else{AVV}).ln()))+ (FSZ* (FTH- FTF)))+ ((LK* FTA)* ((FTH* FTH)- (FTF* FTF))));
 		let FTJ=(((((FIM* FSW)* FSW)/ (((EBC* (FTC* FTC))* ESU)* W))* FLR)* ((FSY+ (FSZ* FTF))+ ((FTA* FTF)* FTF)))/ (FTG* FTG);
 		let FTK=FTI+ FTJ;
 		let FTL=((((FSY* C)* AXA)/ (((((ESU* W)* FTC)* EBC)* FTD)* FTD))* FSW)* FSW;

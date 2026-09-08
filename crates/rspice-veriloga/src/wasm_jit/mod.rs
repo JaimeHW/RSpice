@@ -106,7 +106,8 @@ pub const WASM_JIT_ABI_VERSION: u32 = 11;
 /// 20 to 21 preserves ddx primal validation through symbolic differentiation.
 /// 21 to 22 preserves signed zero in primal arithmetic and derivative factors.
 /// 22 to 23 requires sign proofs before specializing fractional powers.
-pub const WASM_JIT_EMITTER_VERSION: u32 = 23;
+/// 23 to 24 selects extrema tangents without inactive singular arithmetic.
+pub const WASM_JIT_EMITTER_VERSION: u32 = 24;
 
 /// Hard ceiling for one qualified shipped model's generated module.
 pub const SHIPPED_MODEL_WASM_CODE_SIZE_BUDGET_BYTES: usize = 32 * 1024 * 1024;
@@ -1947,6 +1948,69 @@ endmodule
     }
 
     #[test]
+    fn wasm_extrema_select_numeric_values_and_derivatives() {
+        use super::abi::FRAME_RESULT_OFFSET;
+        for (expression, p) in [
+            ("max(V(p),sqrt(V(q)))", 1.0),
+            ("max(sqrt(V(q)),V(p))", 1.0),
+            ("min(V(p),sqrt(V(q)))", -1.0),
+            ("min(sqrt(V(q)),V(p))", -1.0),
+        ] {
+            for (expression, expected) in [
+                (expression.to_string(), p),
+                (format!("ddx({expression},V(p))"), 1.0),
+                (format!("ddx({expression},V(q))"), 0.0),
+            ] {
+                let source = format!(
+                    "module extrema(p,q); inout p,q; electrical p,q; analog I(p)<+{expression}; endmodule"
+                );
+                let report = VerilogACompiler::default()
+                    .compile_runtime(&source, Some("extrema"))
+                    .unwrap();
+                for postfix in [false, true] {
+                    let mut harness =
+                        FusedKernelHarness::for_source_with_plan(&source, "extrema", postfix);
+                    let value = harness.stamp_value_export(0);
+                    let mut entries = vec![(value, expected)];
+                    if !expression.starts_with("ddx") {
+                        for (index, entry) in report.model.stamp_programs[0]
+                            .jacobian_programs
+                            .iter()
+                            .enumerate()
+                        {
+                            let expected = match entry.col_axis {
+                                crate::codegen::ColumnAxis::Node(0) => 1.0,
+                                crate::codegen::ColumnAxis::Node(1) => 0.0,
+                                _ => panic!("unexpected extrema column"),
+                            };
+                            entries.push((harness.jacobian_export(0, index), expected));
+                        }
+                    }
+                    for q in [-1.0, 0.0] {
+                        harness.reset();
+                        harness.write_f64(FusedKernelHarness::VOLTAGES as usize, p);
+                        harness.write_f64(FusedKernelHarness::VOLTAGES as usize + 8, q);
+                        harness.call_assignments();
+                        harness.call_prelude();
+                        for (entry, expected) in &entries {
+                            assert_eq!(
+                                harness.call(entry),
+                                0,
+                                "{expression}, q={q}, postfix={postfix}, entry={entry}"
+                            );
+                            assert_eq!(
+                                harness.read_f64(FRAME_RESULT_OFFSET as usize),
+                                *expected,
+                                "{expression}, q={q}, postfix={postfix}, entry={entry}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
     fn wasm_signed_zero_factors_preserve_values_and_jacobians() {
         use super::abi::FRAME_RESULT_OFFSET;
         for (zero, values, apply) in [
@@ -1998,6 +2062,8 @@ endmodule
             ("ddx(ddx(V(p)%V(q),V(p)),V(p))", 0.0),
             ("(ddx(V(p)%V(q),V(p))>0 ? 1 : 0)", 1.0),
             ("ddx(a/b,V(p))", 0.0),
+            ("min(ddx(0.0/V(q),V(p))+V(p),V(p))", 5.0),
+            ("max(ddx(0.0/V(q),V(p))+V(p),V(p))", 5.0),
         ] {
             let source = format!(
                 "module derivative_domain(p,q,n); inout p,q,n; electrical p,q,n;

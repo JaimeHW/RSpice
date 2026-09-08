@@ -609,8 +609,8 @@ impl Instance {
 		let RRZ=L2([0f64;2]);
 		let RSA=L2([0f64;2]);
 		let RSD=L2([0f64;2]);
-		let RTG=L3([0f64;3]);
-		let RTO=L3([0f64;3]);
+		let RTF=L3([0f64;3]);
+		let RTM=L3([0f64;3]);
 		let RUD=L3([0f64;3]);
 		let RUE=L4([0f64;4]);
 		let SEA=L16([0f64;16]);
@@ -15986,12 +15986,12 @@ impl Instance {
 		let RSL=(L2([0.0,1f64])- L2([LAA,0.0]))* IOI;
 		let IOL=(AH+ (IOK* IOK)).sqrt();
 		let IOM=(AG* IOK)/ IOL;
-		let IOP=ZS* (if ION<= (IOO/ (CD* IOK)){ION}else{(IOO/ (CD* IOK))});
+		let IOP=ZS* (if !(ION).is_nan()&&(ION<=(IOO/ (CD* IOK))||((IOO/ (CD* IOK))).is_nan()){ION}else{(IOO/ (CD* IOK))});
 		let IOQ=(ZS* IOO)- (IOP* IOM);
-		let IOR=if IOQ>= A{IOQ}else{A};
+		let IOR=if !(IOQ).is_nan()&&(IOQ>=A||(A).is_nan()){IOQ}else{A};
 		let IOS=INW- AE;
 		let IOT=IOR* IOS;
-		let RSM=((((((MYF* IOK)- ((MYH* (KZU/ (MYB* IOL)))* IOM))/ IOL)* IOP)* MYX)* ((IOQ>= A) as u8 as f64))* IOS;
+		let RSM=(if (IOR== IOQ){(((((MYF* IOK)- ((MYH* (KZU/ (MYB* IOL)))* IOM))/ IOL)* IOP)* MYX)}else{NAF})* IOS;
 		let RSN=(L2([0.0,1f64])- L2([KZZ,0.0]))* IOR;
 		let RSO=L3([RSM[0],RSM[1],0.0])+ L3([RSN[0],0.0,RSN[1]]);
 		let RSP=L4([RSO[0],0.0,RSO[1],RSO[2]]);
@@ -16006,12 +16006,12 @@ impl Instance {
 		let RSF=(L2([LAE,0.0])- L2([0.0,LAA]))* IOU;
 		let IOW=(AH+ (IOK* IOK)).sqrt();
 		let IOX=(AG* IOK)/ IOW;
-		let IOY=ZS* (if ION<= (IOO/ (CD* IOK)){ION}else{(IOO/ (CD* IOK))});
+		let IOY=ZS* (if !(ION).is_nan()&&(ION<=(IOO/ (CD* IOK))||((IOO/ (CD* IOK))).is_nan()){ION}else{(IOO/ (CD* IOK))});
 		let IOZ=(ZS* IOO)- (IOY* IOX);
-		let IPA=if IOZ>= A{IOZ}else{A};
+		let IPA=if !(IOZ).is_nan()&&(IOZ>=A||(A).is_nan()){IOZ}else{A};
 		let IPB=CG- AE;
 		let IPC=IPA* IPB;
-		let RSG=((((((MYF* IOK)- ((MYH* (KZU/ (MYB* IOW)))* IOX))/ IOW)* IOY)* MYX)* ((IOZ>= A) as u8 as f64))* IPB;
+		let RSG=(if (IPA== IOZ){(((((MYF* IOK)- ((MYH* (KZU/ (MYB* IOW)))* IOX))/ IOW)* IOY)* MYX)}else{NAF})* IPB;
 		let RSH=(L2([0.0,LAE])- L2([KZZ,0.0]))* IPA;
 		let RSI=L3([RSG[0],0.0,RSG[1]])+ L3([RSH[0],RSH[1],0.0]);
 		let RSJ=L4([RSI[0],RSI[1],RSI[2],0.0]);
@@ -16051,8 +16051,8 @@ impl Instance {
 		let RTD=(((NDO* IQA)* IQB)* IPZ)* ZS;
 		let RTE=RST- RSS;
 		let IQD=(AE- T)- (parameters[280]+ (LB* IPW));
-		let IQE=if IQD>= A{IQD}else{A};
-		let RTF=(L3([RTE[0],RTE[1],0.0])- L3([0.0,0.0,(NDO* IPW)]))* ((IQD>= A) as u8 as f64);
+		let IQE=if !(IQD).is_nan()&&(IQD>=A||(A).is_nan()){IQD}else{A};
+		let RTG=if (IQE== IQD){(L3([RTE[0],RTE[1],0.0])- L3([0.0,0.0,(NDO* IPW)]))}else{RTF};
 		let IQF=IQC> A;
 		let IRW;
 		let MCZ;
@@ -16063,7 +16063,7 @@ impl Instance {
 		if IQG{
 		let IQH=IPY* AN;
 		let IQI=IQE/ IQH;
-		let RTJ=(RTF- L3([0.0,0.0,(((RTC* AN)+ (MYJ* IPY))* IQI)]))/ IQH;
+		let RTJ=(RTG- L3([0.0,0.0,(((RTC* AN)+ (MYJ* IPY))* IQI)]))/ IQH;
 		let IQJ=IQI> YW;
 		let IQL;
 		let IQM;
@@ -16074,11 +16074,11 @@ impl Instance {
 		IQL=IQK;
 		IQM=YW;
 		MDB=RTJ;
-		MDC=RTG;
+		MDC=RTF;
 		}else{
 		IQL=B;
 		IQM=IQI;
-		MDB=RTG;
+		MDB=RTF;
 		MDC=RTJ;
 		}
 		let IQN=IQM.exp();
@@ -16090,7 +16090,7 @@ impl Instance {
 		}else{
 		let IQQ=IPY* AN;
 		let IQR=IQE/ IQQ;
-		let RTH=(RTF- L3([0.0,0.0,(((RTC* AN)+ (MYJ* IPY))* IQR)]))/ IQQ;
+		let RTH=(RTG- L3([0.0,0.0,(((RTC* AN)+ (MYJ* IPY))* IQR)]))/ IQQ;
 		let IQS=IQR> YW;
 		let IQU;
 		let IQV;
@@ -16101,11 +16101,11 @@ impl Instance {
 		IQU=IQT;
 		IQV=YW;
 		MDD=RTH;
-		MDE=RTG;
+		MDE=RTF;
 		}else{
 		IQU=B;
 		IQV=IQR;
-		MDD=RTG;
+		MDD=RTF;
 		MDE=RTH;
 		}
 		let IQW=IQV.exp();
@@ -16119,14 +16119,14 @@ impl Instance {
 		MCZ=MDA;
 		}else{
 		IRW=A;
-		MCZ=RTG;
+		MCZ=RTF;
 		}
 		let RTL=RSW- RSV;
 		let IQZ=(AF- T)- IPP;
-		let IRA=if IQZ>= A{IQZ}else{A};
-		let RTM=(L3([RTL[0],RTL[1],0.0])- L3([0.0,0.0,RSZ]))* ((IQZ>= A) as u8 as f64);
+		let IRA=if !(IQZ).is_nan()&&(IQZ>=A||(A).is_nan()){IQZ}else{A};
+		let RTN=if (IRA== IQZ){(L3([RTL[0],RTL[1],0.0])- L3([0.0,0.0,RSZ]))}else{RTM};
 		let IRB=ZS* IPV;
-		let RTN=RTB* ZS;
+		let RTO=RTB* ZS;
 		let IRC=IRB> A;
 		let IRZ;
 		let MDF;
@@ -16137,7 +16137,7 @@ impl Instance {
 		if IRD{
 		let IRE=IPR* AN;
 		let IRF=IRA/ IRE;
-		let RTR=(RTM- L3([0.0,0.0,(((RTA* AN)+ (MYJ* IPR))* IRF)]))/ IRE;
+		let RTR=(RTN- L3([0.0,0.0,(((RTA* AN)+ (MYJ* IPR))* IRF)]))/ IRE;
 		let IRG=IRF> YW;
 		let IRI;
 		let IRJ;
@@ -16148,23 +16148,23 @@ impl Instance {
 		IRI=IRH;
 		IRJ=YW;
 		MDH=RTR;
-		MDI=RTO;
+		MDI=RTM;
 		}else{
 		IRI=B;
 		IRJ=IRF;
-		MDH=RTO;
+		MDH=RTM;
 		MDI=RTR;
 		}
 		let IRK=IRJ.exp();
 		let IRL=(IRI* IRK)- B;
 		let IRM=IRB* IRL;
-		let RTS=L3([0.0,0.0,(RTN* IRL)])+ (((MDH* IRK)+ ((MDI* IRK)* IRI))* IRB);
+		let RTS=L3([0.0,0.0,(RTO* IRL)])+ (((MDH* IRK)+ ((MDI* IRK)* IRI))* IRB);
 		ISA=IRM;
 		MDG=RTS;
 		}else{
 		let IRN=IPR* AN;
 		let IRO=IRA/ IRN;
-		let RTP=(RTM- L3([0.0,0.0,(((RTA* AN)+ (MYJ* IPR))* IRO)]))/ IRN;
+		let RTP=(RTN- L3([0.0,0.0,(((RTA* AN)+ (MYJ* IPR))* IRO)]))/ IRN;
 		let IRP=IRO> YW;
 		let IRR;
 		let IRS;
@@ -16175,17 +16175,17 @@ impl Instance {
 		IRR=IRQ;
 		IRS=YW;
 		MDJ=RTP;
-		MDK=RTO;
+		MDK=RTM;
 		}else{
 		IRR=B;
 		IRS=IRO;
-		MDJ=RTO;
+		MDJ=RTM;
 		MDK=RTP;
 		}
 		let IRT=IRS.exp();
 		let IRU=(IRR* IRT)- B;
 		let IRV=IRB* IRU;
-		let RTQ=L3([0.0,0.0,(RTN* IRU)])+ (((MDJ* IRT)+ ((MDK* IRT)* IRR))* IRB);
+		let RTQ=L3([0.0,0.0,(RTO* IRU)])+ (((MDJ* IRT)+ ((MDK* IRT)* IRR))* IRB);
 		ISA=IRV;
 		MDG=RTQ;
 		}
@@ -16193,7 +16193,7 @@ impl Instance {
 		MDF=MDG;
 		}else{
 		IRZ=A;
-		MDF=RTO;
+		MDF=RTM;
 		}
 		let RTT=MCZ* ZN;
 		let IRY=A+ (ZN* IRW);

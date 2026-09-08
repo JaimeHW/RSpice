@@ -1536,7 +1536,7 @@ impl Instance {
 		let BXU=(BXS- (BXT* ZT))/ ZS;
 		let ZW=C/ ZV;
 		let ZX=ZU.powf(ZW);
-		let BXV=(BKA* (ZW* ((ZU+ (((ZU== BPL) as u8 as f64)* BPM)).powf((ZW- BIK)))))+ L4([((((BJA* ZW)* BNT)/ ZV)* (ZX* (((if ZU>= BPM{ZU}else{BPM}).ln())* ((ZU> BPL) as u8 as f64)))),0.0,0.0,0.0]);
+		let BXV=(BKA* (ZW* ((ZU+ (((ZU== BPL) as u8 as f64)* BPM)).powf((ZW- BIK)))))+ L4([((((BJA* ZW)* BNT)/ ZV)* (ZX* (((if !(ZU).is_nan()&&(ZU>=BPM||(BPM).is_nan()){ZU}else{BPM}).ln())* ((ZU> BPL) as u8 as f64)))),0.0,0.0,0.0]);
 		let ZY=ZO* ZX;
 		let BXW=L4([(BXR* ZX),0.0,0.0,0.0])+ (BXV* ZO);
 		let ZZ=(C+ ZY).sqrt();

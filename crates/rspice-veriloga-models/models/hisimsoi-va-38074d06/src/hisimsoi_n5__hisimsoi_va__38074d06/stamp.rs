@@ -29002,7 +29002,7 @@ impl Instance {
 		}else{
 		let GZZ=GZD- C;
 		let HAA=GZY.powf(GZZ);
-		let ABBF=(SNT* (GZZ* ((GZY+ (((GZY== SUA) as u8 as f64)* SUB)).powf((GZZ- PQS)))))+ L5([0.0,0.0,0.0,0.0,(ABAY* (HAA* (((if GZY>= SUB{GZY}else{SUB}).ln())* ((GZY> SUA) as u8 as f64))))]);
+		let ABBF=(SNT* (GZZ* ((GZY+ (((GZY== SUA) as u8 as f64)* SUB)).powf((GZZ- PQS)))))+ L5([0.0,0.0,0.0,0.0,(ABAY* (HAA* (((if !(GZY).is_nan()&&(GZY>=SUB||(SUB).is_nan()){GZY}else{SUB}).ln())* ((GZY> SUA) as u8 as f64))))]);
 		HAC=HAA;
 		SNV=ABBF;
 		}
@@ -29033,7 +29033,7 @@ impl Instance {
 		let HAJ=-1f64/ GZD;
 		let HAK=HAJ- C;
 		let HAL=HAD.powf(HAK);
-		let ABBH=(ABBG* (HAK* ((HAD+ (((HAD== SUA) as u8 as f64)* SUB)).powf((HAK- PQS)))))+ L5([0.0,0.0,0.0,0.0,((((ABAY* HAJ)* STO)/ GZD)* (HAL* (((if HAD>= SUB{HAD}else{SUB}).ln())* ((HAD> SUA) as u8 as f64))))]);
+		let ABBH=(ABBG* (HAK* ((HAD+ (((HAD== SUA) as u8 as f64)* SUB)).powf((HAK- PQS)))))+ L5([0.0,0.0,0.0,0.0,((((ABAY* HAJ)* STO)/ GZD)* (HAL* (((if !(HAD).is_nan()&&(HAD>=SUB||(SUB).is_nan()){HAD}else{SUB}).ln())* ((HAD> SUA) as u8 as f64))))]);
 		let HAM=HAD* HAL;
 		let ABBI=(ABBG* HAL)+ (ABBH* HAD);
 		HAO=HAM;
@@ -29174,7 +29174,7 @@ impl Instance {
 		}else{
 		let HCJ=HBT- C;
 		let HCK=HCI.powf(HCJ);
-		let ABBY=(SOC* (HCJ* ((HCI+ (((HCI== SUA) as u8 as f64)* SUB)).powf((HCJ- PQS)))))+ L5([0.0,0.0,0.0,0.0,(ABBR* (HCK* (((if HCI>= SUB{HCI}else{SUB}).ln())* ((HCI> SUA) as u8 as f64))))]);
+		let ABBY=(SOC* (HCJ* ((HCI+ (((HCI== SUA) as u8 as f64)* SUB)).powf((HCJ- PQS)))))+ L5([0.0,0.0,0.0,0.0,(ABBR* (HCK* (((if !(HCI).is_nan()&&(HCI>=SUB||(SUB).is_nan()){HCI}else{SUB}).ln())* ((HCI> SUA) as u8 as f64))))]);
 		HCM=HCK;
 		SOE=ABBY;
 		}
@@ -29205,7 +29205,7 @@ impl Instance {
 		let HCT=-1f64/ HBT;
 		let HCU=HCT- C;
 		let HCV=HCN.powf(HCU);
-		let ABCA=(ABBZ* (HCU* ((HCN+ (((HCN== SUA) as u8 as f64)* SUB)).powf((HCU- PQS)))))+ L5([0.0,0.0,0.0,0.0,((((ABBR* HCT)* STO)/ HBT)* (HCV* (((if HCN>= SUB{HCN}else{SUB}).ln())* ((HCN> SUA) as u8 as f64))))]);
+		let ABCA=(ABBZ* (HCU* ((HCN+ (((HCN== SUA) as u8 as f64)* SUB)).powf((HCU- PQS)))))+ L5([0.0,0.0,0.0,0.0,((((ABBR* HCT)* STO)/ HBT)* (HCV* (((if !(HCN).is_nan()&&(HCN>=SUB||(SUB).is_nan()){HCN}else{SUB}).ln())* ((HCN> SUA) as u8 as f64))))]);
 		let HCW=HCN* HCV;
 		let ABCB=(ABBZ* HCV)+ (ABCA* HCN);
 		HCY=HCW;

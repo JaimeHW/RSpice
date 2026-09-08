@@ -850,7 +850,7 @@ impl Instance {
 		let JG=JE* JF;
 		let JH=(parameters[111]* (H+ (parameters[112]/ (BW.powf(parameters[113])))))+ (JG* JF);
 		let JI=IU.powf(JH);
-		let KFB=(KEW* (JH* (KEZ.powf((JH- IMP)))))+ ((((KEW* JE)* JF)+ (KEW* JG))* (JI* (((if IU>= KEY{IU}else{KEY}).ln())* ((IU> KEX) as u8 as f64))));
+		let KFB=(KEW* (JH* (KEZ.powf((JH- IMP)))))+ ((((KEW* JE)* JF)+ (KEW* JG))* (JI* (((if !(IU).is_nan()&&(IU>=KEY||(KEY).is_nan()){IU}else{KEY}).ln())* ((IU> KEX) as u8 as f64))));
 		let JK=JI/ JJ;
 		let KFC=KFB/ JJ;
 		let JM=JI/ JL;
@@ -16158,7 +16158,7 @@ impl Instance {
 		}else{
 		let EGQ=EFW- H;
 		let EGR=EGP.powf(EGQ);
-		let NQN=(KCE* (EGQ* ((EGP+ (((EGP== KEX) as u8 as f64)* KEY)).powf((EGQ- IMP)))))+ L3([0.0,(NQG* (EGR* (((if EGP>= KEY{EGP}else{KEY}).ln())* ((EGP> KEX) as u8 as f64)))),0.0]);
+		let NQN=(KCE* (EGQ* ((EGP+ (((EGP== KEX) as u8 as f64)* KEY)).powf((EGQ- IMP)))))+ L3([0.0,(NQG* (EGR* (((if !(EGP).is_nan()&&(EGP>=KEY||(KEY).is_nan()){EGP}else{KEY}).ln())* ((EGP> KEX) as u8 as f64)))),0.0]);
 		EGT=EGR;
 		KCG=NQN;
 		}
@@ -16189,7 +16189,7 @@ impl Instance {
 		let EHA=-1f64/ EFW;
 		let EHB=EHA- H;
 		let EHC=EGU.powf(EHB);
-		let NQP=(NQO* (EHB* ((EGU+ (((EGU== KEX) as u8 as f64)* KEY)).powf((EHB- IMP)))))+ L3([0.0,((((NQG* EHA)* KEG)/ EFW)* (EHC* (((if EGU>= KEY{EGU}else{KEY}).ln())* ((EGU> KEX) as u8 as f64)))),0.0]);
+		let NQP=(NQO* (EHB* ((EGU+ (((EGU== KEX) as u8 as f64)* KEY)).powf((EHB- IMP)))))+ L3([0.0,((((NQG* EHA)* KEG)/ EFW)* (EHC* (((if !(EGU).is_nan()&&(EGU>=KEY||(KEY).is_nan()){EGU}else{KEY}).ln())* ((EGU> KEX) as u8 as f64)))),0.0]);
 		let EHD=EGU* EHC;
 		let NQQ=(NQO* EHC)+ (NQP* EGU);
 		EHF=EHD;
@@ -16290,7 +16290,7 @@ impl Instance {
 		}else{
 		let EIO=EIA- H;
 		let EIP=EIN.powf(EIO);
-		let NRD=(KCM* (EIO* ((EIN+ (((EIN== KEX) as u8 as f64)* KEY)).powf((EIO- IMP)))))+ L3([0.0,(NQW* (EIP* (((if EIN>= KEY{EIN}else{KEY}).ln())* ((EIN> KEX) as u8 as f64)))),0.0]);
+		let NRD=(KCM* (EIO* ((EIN+ (((EIN== KEX) as u8 as f64)* KEY)).powf((EIO- IMP)))))+ L3([0.0,(NQW* (EIP* (((if !(EIN).is_nan()&&(EIN>=KEY||(KEY).is_nan()){EIN}else{KEY}).ln())* ((EIN> KEX) as u8 as f64)))),0.0]);
 		EIR=EIP;
 		KCO=NRD;
 		}
@@ -16321,7 +16321,7 @@ impl Instance {
 		let EIY=-1f64/ EIA;
 		let EIZ=EIY- H;
 		let EJA=EIS.powf(EIZ);
-		let NRF=(NRE* (EIZ* ((EIS+ (((EIS== KEX) as u8 as f64)* KEY)).powf((EIZ- IMP)))))+ L3([0.0,((((NQW* EIY)* KEG)/ EIA)* (EJA* (((if EIS>= KEY{EIS}else{KEY}).ln())* ((EIS> KEX) as u8 as f64)))),0.0]);
+		let NRF=(NRE* (EIZ* ((EIS+ (((EIS== KEX) as u8 as f64)* KEY)).powf((EIZ- IMP)))))+ L3([0.0,((((NQW* EIY)* KEG)/ EIA)* (EJA* (((if !(EIS).is_nan()&&(EIS>=KEY||(KEY).is_nan()){EIS}else{KEY}).ln())* ((EIS> KEX) as u8 as f64)))),0.0]);
 		let EJB=EIS* EJA;
 		let NRG=(NRE* EJA)+ (NRF* EIS);
 		EJD=EJB;

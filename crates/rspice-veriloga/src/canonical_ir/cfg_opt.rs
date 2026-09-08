@@ -331,6 +331,10 @@ impl Optimizer {
     /// input including signed zero, NaN and infinity.
     fn identity(&self, value: ValueId) -> Option<ValueId> {
         let (op, left, right) = match self.values[usize::from(value)].kind {
+            // Select reads all three already evaluated operands. Even equal
+            // arms must retain a predicate carrying a checked ddx dependency;
+            // replacing it with one arm would erase that check during DCE.
+            CfgValueKind::Select { .. } => return None,
             CfgValueKind::Binary { op, left, right } => (op, left, right),
             // A widen that changes nothing, which replacements can produce even
             // though the derivative pass never emits one.
@@ -586,6 +590,11 @@ impl Optimizer {
                 CseKey::LaneScalar(op, input, scalar, shape?)
             }
             CfgValueKind::LaneExtract { input, lane } => CseKey::LaneExtract(input, lane),
+            CfgValueKind::Select {
+                condition,
+                then_value,
+                else_value,
+            } => CseKey::Select(condition, then_value, else_value),
             _ => return None,
         })
     }
@@ -916,6 +925,7 @@ enum CseKey {
     LaneBinary(CfgBinaryOp, ValueId, ValueId, ShapeId),
     LaneScalar(CfgBinaryOp, ValueId, ValueId, ShapeId),
     LaneExtract(ValueId, u32),
+    Select(ValueId, ValueId, ValueId),
 }
 
 fn is_commutative(op: CfgBinaryOp) -> bool {
@@ -923,8 +933,6 @@ fn is_commutative(op: CfgBinaryOp) -> bool {
         op,
         CfgBinaryOp::Add
             | CfgBinaryOp::Mul
-            | CfgBinaryOp::Min
-            | CfgBinaryOp::Max
             | CfgBinaryOp::Eq
             | CfgBinaryOp::Ne
             | CfgBinaryOp::And

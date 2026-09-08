@@ -1959,6 +1959,16 @@ impl Emitter<'_> {
                 self.numeric_operand(*right)
             ),
             CfgValueKind::Binary { op, left, right } => self.binary_expression(*op, *left, *right),
+            CfgValueKind::Select {
+                condition,
+                then_value,
+                else_value,
+            } => format!(
+                "if {}{{{}}}else{{{}}}",
+                self.operand(*condition),
+                self.operand(*then_value),
+                self.operand(*else_value)
+            ),
             CfgValueKind::LaneSplat(constant) => {
                 let width = self.function.lanes_of(value).map_or(0, <[u32]>::len);
                 if width == 1 {
@@ -2377,13 +2387,8 @@ fn binary(op: CfgBinaryOp, left: &str, right: &str) -> String {
         CfgBinaryOp::Pow => format!("{left}.powf({right})"),
         CfgBinaryOp::Hypot => format!("{left}.hypot({right})"),
         CfgBinaryOp::Atan2 => format!("{left}.atan2({right})"),
-        // Written out rather than `f64::min`, which disagrees with the
-        // interpreter when one operand is NaN: it returns the other, this
-        // returns whichever the comparison selects. Two backends that differ on
-        // NaN differ exactly where a model has already gone wrong and where the
-        // difference is hardest to trace.
-        CfgBinaryOp::Min => format!("if {left}<= {right}{{{left}}}else{{{right}}}"),
-        CfgBinaryOp::Max => format!("if {left}>= {right}{{{left}}}else{{{right}}}"),
+        CfgBinaryOp::Min => super::expr::extremum_value_expr(left, right, true),
+        CfgBinaryOp::Max => super::expr::extremum_value_expr(left, right, false),
         CfgBinaryOp::Eq => format!("{left}== {right}"),
         CfgBinaryOp::Ne => format!("{left}!= {right}"),
         CfgBinaryOp::Lt => format!("{left}< {right}"),

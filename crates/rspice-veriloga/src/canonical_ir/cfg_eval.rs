@@ -601,6 +601,18 @@ impl<S: CfgScalar> Evaluator<'_, S> {
                     .map(|lane| apply_binary(op, lane, scalar))
                     .collect()
             }
+            CfgValueKind::Select {
+                condition,
+                then_value,
+                else_value,
+            } => {
+                let selected = if self.read(condition)?.real() != 0.0 {
+                    then_value
+                } else {
+                    else_value
+                };
+                self.read_lanes(selected)?
+            }
             // The CFG interpreter is a static/DC oracle: a transport delay whose
             // input is not moving reproduces it exactly, so its packed Jacobian
             // action is the input's own. The delay's own derivative multiplies
@@ -1029,6 +1041,18 @@ impl<S: CfgScalar> Evaluator<'_, S> {
                 let input = self.read(input)?;
                 apply_unary(op, input)
             }
+            CfgValueKind::Select {
+                condition,
+                then_value,
+                else_value,
+            } => {
+                let selected = if self.read(condition)?.real() != 0.0 {
+                    then_value
+                } else {
+                    else_value
+                };
+                self.read(selected)?
+            }
             CfgValueKind::Binary { op, left, right } => {
                 let left = self.read(left)?;
                 let right = self.read(right)?;
@@ -1237,14 +1261,14 @@ pub(super) fn apply_binary<S: CfgScalar>(op: CfgBinaryOp, left: S, right: S) -> 
         // Selecting rather than computing keeps the derivative on the operand
         // that actually won, which is what a hand-written `fmin` does too.
         CfgBinaryOp::Min => {
-            if left.real() <= right.real() {
+            if !left.real().is_nan() && (left.real() <= right.real() || right.real().is_nan()) {
                 left
             } else {
                 right
             }
         }
         CfgBinaryOp::Max => {
-            if left.real() >= right.real() {
+            if !left.real().is_nan() && (left.real() >= right.real() || right.real().is_nan()) {
                 left
             } else {
                 right

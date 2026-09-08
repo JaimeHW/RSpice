@@ -150,7 +150,7 @@ impl Instance {
 		let BA=S> A;
 		let BJ;
 		if BA{
-		let BC=((-1f64* Z)* BB)/ ((parameters[3]* N)* (if (BB- Z)>= 1e-3f64{(BB- Z)}else{1e-3f64}));
+		let BC=((-1f64* Z)* BB)/ ((parameters[3]* N)* (if !((BB- Z)).is_nan()&&((BB- Z)>=1e-3f64||(1e-3f64).is_nan()){(BB- Z)}else{1e-3f64}));
 		let BD=BC> AH;
 		let BF;
 		let BG;
@@ -432,7 +432,7 @@ impl Instance {
 		let BA=S> A;
 		let BJ;
 		if BA{
-		let BC=((-1f64* Z)* BB)/ ((parameters[3]* N)* (if (BB- Z)>= 1e-3f64{(BB- Z)}else{1e-3f64}));
+		let BC=((-1f64* Z)* BB)/ ((parameters[3]* N)* (if !((BB- Z)).is_nan()&&((BB- Z)>=1e-3f64||(1e-3f64).is_nan()){(BB- Z)}else{1e-3f64}));
 		let BD=BC> AH;
 		let BF;
 		let BG;

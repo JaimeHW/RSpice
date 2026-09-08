@@ -35776,7 +35776,7 @@ impl Instance {
 		let IYB=IYA* HRC;
 		let BAXK=((((BAXJ* HRC)+ (AZVP* IYA))* HXB)+ (AZXU* IYB))+ ((((((((AQUS* QO)* IXG)+ BAXH)* PJ)* IWZ)+ (((BAWN- (AREZ* IWZ))/ IWY)* IXR))* IWK)+ (BAWO* IXS));
 		let IYC=((IYB* HXB)+ (IXS* IWK))+ (IXX* IXY);
-		let BAXL=BAXK+ ((((L5([(((ANWK* (IXP* (((if IXI>= AVYD{IXI}else{AVYD}).ln())* ((IXI> AVYC) as u8 as f64))))* GI)* IXT),0.0,0.0,0.0,0.0])+ (AQUT* IXQ))* IXW)* IXY)+ L5([0.0,BAXI[0],0.0,BAXI[1],0.0]));
+		let BAXL=BAXK+ ((((L5([(((ANWK* (IXP* (((if !(IXI).is_nan()&&(IXI>=AVYD||(AVYD).is_nan()){IXI}else{AVYD}).ln())* ((IXI> AVYC) as u8 as f64))))* GI)* IXT),0.0,0.0,0.0,0.0])+ (AQUT* IXQ))* IXW)* IXY)+ L5([0.0,BAXI[0],0.0,BAXI[1],0.0]));
 		let IYD=BD!= A;
 		let IZG;
 		let RRN;
@@ -75312,7 +75312,7 @@ impl Instance {
 		}else{
 		let TPS=TPO- B;
 		let TPT=TPR.powf(TPS);
-		let BNRM=(AVRU* (TPS* ((TPR+ (((TPR== AVYC) as u8 as f64)* AVYD)).powf((TPS- ANUY)))))+ L3([0.0,(AVRR* (TPT* (((if TPR>= AVYD{TPR}else{AVYD}).ln())* ((TPR> AVYC) as u8 as f64)))),0.0]);
+		let BNRM=(AVRU* (TPS* ((TPR+ (((TPR== AVYC) as u8 as f64)* AVYD)).powf((TPS- ANUY)))))+ L3([0.0,(AVRR* (TPT* (((if !(TPR).is_nan()&&(TPR>=AVYD||(AVYD).is_nan()){TPR}else{AVYD}).ln())* ((TPR> AVYC) as u8 as f64)))),0.0]);
 		TPV=TPT;
 		AVRW=BNRM;
 		}
@@ -75350,7 +75350,7 @@ impl Instance {
 		let TQD=-1f64/ TPO;
 		let TQE=TQD- B;
 		let TQF=TPW.powf(TQE);
-		let BNRP=(BNRO* (TQE* ((TPW+ (((TPW== AVYC) as u8 as f64)* AVYD)).powf((TQE- ANUY)))))+ L3([0.0,((((AVRR* TQD)* AVWR)/ TPO)* (TQF* (((if TPW>= AVYD{TPW}else{AVYD}).ln())* ((TPW> AVYC) as u8 as f64)))),0.0]);
+		let BNRP=(BNRO* (TQE* ((TPW+ (((TPW== AVYC) as u8 as f64)* AVYD)).powf((TQE- ANUY)))))+ L3([0.0,((((AVRR* TQD)* AVWR)/ TPO)* (TQF* (((if !(TPW).is_nan()&&(TPW>=AVYD||(AVYD).is_nan()){TPW}else{AVYD}).ln())* ((TPW> AVYC) as u8 as f64)))),0.0]);
 		TQG=TQF;
 		AVRZ=BNRP;
 		}
@@ -75636,7 +75636,7 @@ impl Instance {
 		}else{
 		let TUK=TUF- B;
 		let TUL=TUJ.powf(TUK);
-		let BNSZ=(AVSP* (TUK* ((TUJ+ (((TUJ== AVYC) as u8 as f64)* AVYD)).powf((TUK- ANUY)))))+ L5([0.0,(AVSI* (TUL* (((if TUJ>= AVYD{TUJ}else{AVYD}).ln())* ((TUJ> AVYC) as u8 as f64)))),0.0,0.0,0.0]);
+		let BNSZ=(AVSP* (TUK* ((TUJ+ (((TUJ== AVYC) as u8 as f64)* AVYD)).powf((TUK- ANUY)))))+ L5([0.0,(AVSI* (TUL* (((if !(TUJ).is_nan()&&(TUJ>=AVYD||(AVYD).is_nan()){TUJ}else{AVYD}).ln())* ((TUJ> AVYC) as u8 as f64)))),0.0,0.0,0.0]);
 		TUN=TUL;
 		AVSR=BNSZ;
 		}
@@ -75674,7 +75674,7 @@ impl Instance {
 		let TUV=-1f64/ TUF;
 		let TUW=TUV- B;
 		let TUX=TUO.powf(TUW);
-		let BNTC=(BNTB* (TUW* ((TUO+ (((TUO== AVYC) as u8 as f64)* AVYD)).powf((TUW- ANUY)))))+ L5([0.0,((((AVSI* TUV)* AVWR)/ TUF)* (TUX* (((if TUO>= AVYD{TUO}else{AVYD}).ln())* ((TUO> AVYC) as u8 as f64)))),0.0,0.0,0.0]);
+		let BNTC=(BNTB* (TUW* ((TUO+ (((TUO== AVYC) as u8 as f64)* AVYD)).powf((TUW- ANUY)))))+ L5([0.0,((((AVSI* TUV)* AVWR)/ TUF)* (TUX* (((if !(TUO).is_nan()&&(TUO>=AVYD||(AVYD).is_nan()){TUO}else{AVYD}).ln())* ((TUO> AVYC) as u8 as f64)))),0.0,0.0,0.0]);
 		TUY=TUX;
 		AVSU=BNTC;
 		}

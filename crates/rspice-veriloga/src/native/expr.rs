@@ -4831,9 +4831,17 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             }
             "min" | "max" => {
                 self.require_intrinsic_arity(name, args, 2)?;
+                self.lower_extremum_intrinsic(
+                    name,
+                    args,
+                    if normalized == "min" {
+                        ExtremumOp::Min
+                    } else {
+                        ExtremumOp::Max
+                    },
+                )?;
                 self.lower(args[0])?;
-                self.lower(args[1])?;
-                self.append_compare(if normalized == "min" { "Le" } else { "Ge" })?;
+                self.append_compare("Eq")?;
                 self.lower_derivative(args[0], wrt)?;
                 self.lower_derivative(args[1], wrt)?;
                 self.append_ifelse()
@@ -5115,9 +5123,17 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             }
             "min" | "max" => {
                 self.require_intrinsic_arity(name, args, 2)?;
+                self.lower_extremum_intrinsic(
+                    name,
+                    args,
+                    if normalized == "min" {
+                        ExtremumOp::Min
+                    } else {
+                        ExtremumOp::Max
+                    },
+                )?;
                 self.lower(args[0])?;
-                self.lower(args[1])?;
-                self.append_compare(if normalized == "min" { "Le" } else { "Ge" })?;
+                self.append_compare("Eq")?;
                 self.lower_second_derivative(args[0], first, second)?;
                 self.lower_second_derivative(args[1], first, second)?;
                 self.append_ifelse()
@@ -9343,8 +9359,8 @@ fn constant_logical(op: LogicalOp, left: f64, right: f64) -> bool {
 
 pub(crate) fn constant_extremum(op: ExtremumOp, left: f64, right: f64) -> f64 {
     match op {
-        ExtremumOp::Min => left.min(right),
-        ExtremumOp::Max => left.max(right),
+        ExtremumOp::Min => rspice_veriloga_runtime::rspice_min(left, right),
+        ExtremumOp::Max => rspice_veriloga_runtime::rspice_max(left, right),
     }
 }
 

@@ -940,6 +940,7 @@ fn validate_linear_noise_routing(
             continue;
         }
         let valid = match &value.kind {
+            CfgValueKind::Select { condition, .. } => !depends(*condition),
             CfgValueKind::Ddt { input, .. } => !dynamic_dependent[usize::from(*input)],
             CfgValueKind::NoiseProcess(_)
             | CfgValueKind::BlockParameter

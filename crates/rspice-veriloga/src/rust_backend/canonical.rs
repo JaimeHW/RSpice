@@ -522,6 +522,7 @@ fn kernel_region_metrics(
             }
             CfgValueKind::Unary { op, .. } => write!(out, "unary:{op:?}"),
             CfgValueKind::Binary { op, .. } => write!(out, "binary:{op:?}"),
+            CfgValueKind::Select { .. } => write!(out, "select"),
             CfgValueKind::IntegerArithmetic { op, .. } => write!(out, "integer-arithmetic:{op:?}"),
             CfgValueKind::IntegerBitwise { op, .. } => write!(out, "integer-bitwise:{op:?}"),
             CfgValueKind::IntegerBitwiseNot { .. } => write!(out, "integer-bitwise-not"),

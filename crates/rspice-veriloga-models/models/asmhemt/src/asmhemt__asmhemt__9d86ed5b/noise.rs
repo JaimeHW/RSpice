@@ -1032,7 +1032,7 @@ impl Instance {
 		let AAU;
 		if TV{
 		let TW=KB/ KE;
-		let TX=((parameters[265]/ (((if KF>= 1e-10f64{KF}else{1e-10f64})* DS)* DS))* (((((((((5.522438177818063e-23f64* AB)* DU)* DT)* KC)* CL)* DU)* DT)* KC)* CL))* (TW* TW);
+		let TX=((parameters[265]/ (((if !(KF).is_nan()&&(KF>=1e-10f64||(1e-10f64).is_nan()){KF}else{1e-10f64})* DS)* DS))* (((((((((5.522438177818063e-23f64* AB)* DU)* DT)* KC)* CL)* DU)* DT)* KC)* CL))* (TW* TW);
 		let TY=JW* JW;
 		let TZ=HH* HH;
 		let UA=(TX* (((EF* JY)+ (((TY* JW)- (TZ* HH))/ AY))- (DZ* (TY- TZ))))* KH;
@@ -1391,12 +1391,12 @@ impl Instance {
 		let YI;
 		if XX{
 		let XZ=(KJ* XY)* (XW- Y);
-		let YD=(if ((KJ* YC)- ((KJ* (if YB<= (YC/ (AR* YA)){YB}else{(YC/ (AR* YA))}))* ((Z* YA)/ ((AA+ (YA* YA)).sqrt()))))>= A{((KJ* YC)- ((KJ* (if YB<= (YC/ (AR* YA)){YB}else{(YC/ (AR* YA))}))* ((Z* YA)/ ((AA+ (YA* YA)).sqrt()))))}else{A})* (XW- X);
+		let YD=(if !(((KJ* YC)- ((KJ* (if !(YB).is_nan()&&(YB<=(YC/ (AR* YA))||((YC/ (AR* YA))).is_nan()){YB}else{(YC/ (AR* YA))}))* ((Z* YA)/ ((AA+ (YA* YA)).sqrt()))))).is_nan()&&(((KJ* YC)- ((KJ* (if !(YB).is_nan()&&(YB<=(YC/ (AR* YA))||((YC/ (AR* YA))).is_nan()){YB}else{(YC/ (AR* YA))}))* ((Z* YA)/ ((AA+ (YA* YA)).sqrt()))))>=A||(A).is_nan()){((KJ* YC)- ((KJ* (if !(YB).is_nan()&&(YB<=(YC/ (AR* YA))||((YC/ (AR* YA))).is_nan()){YB}else{(YC/ (AR* YA))}))* ((Z* YA)/ ((AA+ (YA* YA)).sqrt()))))}else{A})* (XW- X);
 		YH=YD;
 		YI=XZ;
 		}else{
 		let YE=(KJ* XY)* (AT- Y);
-		let YF=(if ((KJ* YC)- ((KJ* (if YB<= (YC/ (AR* YA)){YB}else{(YC/ (AR* YA))}))* ((Z* YA)/ ((AA+ (YA* YA)).sqrt()))))>= A{((KJ* YC)- ((KJ* (if YB<= (YC/ (AR* YA)){YB}else{(YC/ (AR* YA))}))* ((Z* YA)/ ((AA+ (YA* YA)).sqrt()))))}else{A})* (AT- X);
+		let YF=(if !(((KJ* YC)- ((KJ* (if !(YB).is_nan()&&(YB<=(YC/ (AR* YA))||((YC/ (AR* YA))).is_nan()){YB}else{(YC/ (AR* YA))}))* ((Z* YA)/ ((AA+ (YA* YA)).sqrt()))))).is_nan()&&(((KJ* YC)- ((KJ* (if !(YB).is_nan()&&(YB<=(YC/ (AR* YA))||((YC/ (AR* YA))).is_nan()){YB}else{(YC/ (AR* YA))}))* ((Z* YA)/ ((AA+ (YA* YA)).sqrt()))))>=A||(A).is_nan()){((KJ* YC)- ((KJ* (if !(YB).is_nan()&&(YB<=(YC/ (AR* YA))||((YC/ (AR* YA))).is_nan()){YB}else{(YC/ (AR* YA))}))* ((Z* YA)/ ((AA+ (YA* YA)).sqrt()))))}else{A})* (AT- X);
 		YH=YF;
 		YI=YE;
 		}
@@ -1408,10 +1408,10 @@ impl Instance {
 		let ABC;
 		let ABD;
 		if YN{
-		let ZN=if YK>= 1e-22f64{YK}else{1e-22f64};
-		let ZO=if YM>= 1e-22f64{YM}else{1e-22f64};
+		let ZN=if !(YK).is_nan()&&(YK>=1e-22f64||(1e-22f64).is_nan()){YK}else{1e-22f64};
+		let ZO=if !(YM).is_nan()&&(YM>=1e-22f64||(1e-22f64).is_nan()){YM}else{1e-22f64};
 		let ZR=(((((ZM* YO)* CL)* (B/ ZN))* (B- (YK/ ZO)))+ ((ZM+ ((ZP* YO)* CL))* ((ZN/ ZO).ln())))+ ((ZP+ ((ZQ* YO)* CL))* (YM- YK));
-		let ZS=((((((YO* DU)* DU)* DU)/ ((KJ* DS)* DS))* (KF* KF))* ((DS/ ((JZ+ YO)* (if JY>= 1e-12f64{JY}else{1e-12f64})))/ (CL* CL)))* (ZR+ ((ZQ/ AR)* ((YK* YK)- (YM* YM))));
+		let ZS=((((((YO* DU)* DU)* DU)/ ((KJ* DS)* DS))* (KF* KF))* ((DS/ ((JZ+ YO)* (if !(JY).is_nan()&&(JY>=1e-12f64||(1e-12f64).is_nan()){JY}else{1e-12f64})))/ (CL* CL)))* (ZR+ ((ZQ/ AR)* ((YK* YK)- (YM* YM))));
 		let ZU=if KQ{
 		let ZT=-ZS;
 		ZT
@@ -2594,7 +2594,7 @@ impl Instance {
 		let ABQ;
 		if TV{
 		let TW=KB/ KE;
-		let TX=((parameters[265]/ (((if KF>= 1e-10f64{KF}else{1e-10f64})* DS)* DS))* (((((((((5.522438177818063e-23f64* AB)* DU)* DT)* KC)* CL)* DU)* DT)* KC)* CL))* (TW* TW);
+		let TX=((parameters[265]/ (((if !(KF).is_nan()&&(KF>=1e-10f64||(1e-10f64).is_nan()){KF}else{1e-10f64})* DS)* DS))* (((((((((5.522438177818063e-23f64* AB)* DU)* DT)* KC)* CL)* DU)* DT)* KC)* CL))* (TW* TW);
 		let TY=JW* JW;
 		let TZ=HH* HH;
 		let UA=(TX* (((EF* JY)+ (((TY* JW)- (TZ* HH))/ AY))- (DZ* (TY- TZ))))* KH;
@@ -2993,12 +2993,12 @@ impl Instance {
 		let YI;
 		if XX{
 		let XZ=(KJ* XY)* (XW- Y);
-		let YD=(if ((KJ* YC)- ((KJ* (if YB<= (YC/ (AR* YA)){YB}else{(YC/ (AR* YA))}))* ((Z* YA)/ ((AA+ (YA* YA)).sqrt()))))>= A{((KJ* YC)- ((KJ* (if YB<= (YC/ (AR* YA)){YB}else{(YC/ (AR* YA))}))* ((Z* YA)/ ((AA+ (YA* YA)).sqrt()))))}else{A})* (XW- X);
+		let YD=(if !(((KJ* YC)- ((KJ* (if !(YB).is_nan()&&(YB<=(YC/ (AR* YA))||((YC/ (AR* YA))).is_nan()){YB}else{(YC/ (AR* YA))}))* ((Z* YA)/ ((AA+ (YA* YA)).sqrt()))))).is_nan()&&(((KJ* YC)- ((KJ* (if !(YB).is_nan()&&(YB<=(YC/ (AR* YA))||((YC/ (AR* YA))).is_nan()){YB}else{(YC/ (AR* YA))}))* ((Z* YA)/ ((AA+ (YA* YA)).sqrt()))))>=A||(A).is_nan()){((KJ* YC)- ((KJ* (if !(YB).is_nan()&&(YB<=(YC/ (AR* YA))||((YC/ (AR* YA))).is_nan()){YB}else{(YC/ (AR* YA))}))* ((Z* YA)/ ((AA+ (YA* YA)).sqrt()))))}else{A})* (XW- X);
 		YH=YD;
 		YI=XZ;
 		}else{
 		let YE=(KJ* XY)* (AT- Y);
-		let YF=(if ((KJ* YC)- ((KJ* (if YB<= (YC/ (AR* YA)){YB}else{(YC/ (AR* YA))}))* ((Z* YA)/ ((AA+ (YA* YA)).sqrt()))))>= A{((KJ* YC)- ((KJ* (if YB<= (YC/ (AR* YA)){YB}else{(YC/ (AR* YA))}))* ((Z* YA)/ ((AA+ (YA* YA)).sqrt()))))}else{A})* (AT- X);
+		let YF=(if !(((KJ* YC)- ((KJ* (if !(YB).is_nan()&&(YB<=(YC/ (AR* YA))||((YC/ (AR* YA))).is_nan()){YB}else{(YC/ (AR* YA))}))* ((Z* YA)/ ((AA+ (YA* YA)).sqrt()))))).is_nan()&&(((KJ* YC)- ((KJ* (if !(YB).is_nan()&&(YB<=(YC/ (AR* YA))||((YC/ (AR* YA))).is_nan()){YB}else{(YC/ (AR* YA))}))* ((Z* YA)/ ((AA+ (YA* YA)).sqrt()))))>=A||(A).is_nan()){((KJ* YC)- ((KJ* (if !(YB).is_nan()&&(YB<=(YC/ (AR* YA))||((YC/ (AR* YA))).is_nan()){YB}else{(YC/ (AR* YA))}))* ((Z* YA)/ ((AA+ (YA* YA)).sqrt()))))}else{A})* (AT- X);
 		YH=YF;
 		YI=YE;
 		}
@@ -3011,10 +3011,10 @@ impl Instance {
 		let ABD;
 		let ACB;
 		if YN{
-		let ZN=if YK>= 1e-22f64{YK}else{1e-22f64};
-		let ZO=if YM>= 1e-22f64{YM}else{1e-22f64};
+		let ZN=if !(YK).is_nan()&&(YK>=1e-22f64||(1e-22f64).is_nan()){YK}else{1e-22f64};
+		let ZO=if !(YM).is_nan()&&(YM>=1e-22f64||(1e-22f64).is_nan()){YM}else{1e-22f64};
 		let ZR=(((((ZM* YO)* CL)* (B/ ZN))* (B- (YK/ ZO)))+ ((ZM+ ((ZP* YO)* CL))* ((ZN/ ZO).ln())))+ ((ZP+ ((ZQ* YO)* CL))* (YM- YK));
-		let ZS=((((((YO* DU)* DU)* DU)/ ((KJ* DS)* DS))* (KF* KF))* ((DS/ ((JZ+ YO)* (if JY>= 1e-12f64{JY}else{1e-12f64})))/ (CL* CL)))* (ZR+ ((ZQ/ AR)* ((YK* YK)- (YM* YM))));
+		let ZS=((((((YO* DU)* DU)* DU)/ ((KJ* DS)* DS))* (KF* KF))* ((DS/ ((JZ+ YO)* (if !(JY).is_nan()&&(JY>=1e-12f64||(1e-12f64).is_nan()){JY}else{1e-12f64})))/ (CL* CL)))* (ZR+ ((ZQ/ AR)* ((YK* YK)- (YM* YM))));
 		let ZU=if KQ{
 		let ZT=-ZS;
 		ZT

@@ -22,6 +22,49 @@ use std::process::Command;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 #[test]
+fn generated_extrema_select_values_tangents_and_noise() {
+    for (expression, p) in [
+        ("max(V(p),sqrt(V(q)))", 1.0),
+        ("max(sqrt(V(q)),V(p))", 1.0),
+        ("min(V(p),sqrt(V(q)))", -1.0),
+        ("min(sqrt(V(q)),V(p))", -1.0),
+    ] {
+        let source = format!(
+            "module extrema(p,q); inout p,q; electrical p,q; parameter integer derivative=0; real a; analog begin a={expression}; if (derivative==1) a=ddx(a,V(p)); else if (derivative==2) a=ddx(a,V(q)); else if (derivative==3) a=ddx(ddx(a,V(q)),V(q)); I(p)<+a+white_noise(4.0+a,\"selected\"); end endmodule"
+        );
+        let (state, stamp, noise) = generated_parts(&source, "extrema device");
+        let main = r#"
+struct Capture(f64);
+impl runtime::GeneratedNoiseVisitor for Capture {
+    fn visit(&mut self,_index:usize,value:runtime::GeneratedNoiseEvaluationRef<'_>)->bool { self.0=value.psd; true }
+}
+let mut instance=device::state::Instance::new(&[0,1]);
+instance.finalize_parameters().unwrap();
+for derivative in 0..4 {
+    instance.set_parameter("derivative",f64::from(derivative)).unwrap();
+    let expected=match derivative {0=>P,1=>1.0,_=>0.0};
+    for q in [-1.0,0.0] {
+        runtime::clear_evaluation_error();
+        let bias=[P,q];
+        let ctx=runtime::GeneratedEvalContext {voltages:&bias,temperature:300.0};
+        let mut sink=[0.0;12];
+        instance.stamp(&ctx,&mut runtime::GeneratedStamper {sink:Some(&mut sink)});
+        assert_eq!(sink[9],expected,"value, derivative={derivative}, q={q}");
+        assert_eq!(sink[10],if derivative==0 {1.0} else {0.0},"p tangent, derivative={derivative}, q={q}");
+        assert_eq!(sink[11],0.0,"q tangent, derivative={derivative}, q={q}");
+        let mut capture=Capture(-1.0);
+        instance.evaluate_noise_sources(&ctx,&mut capture).unwrap();
+        assert_eq!(capture.0,4.0+expected);
+        assert!(!ctx.evaluation_failed());
+    }
+}
+"#.replace("P", &format!("{p:.1}"));
+        run_generated_main("extrema device", &state, &stamp, &noise, &main)
+            .unwrap_or_else(|report| panic!("{report}"));
+    }
+}
+
+#[test]
 fn generated_mathematical_parameter_defaults_follow_overrides_atomically() {
     let expressions = [
         ("abs(-x)", "(-x).abs()"),
@@ -51,6 +94,10 @@ fn generated_mathematical_parameter_defaults_follow_overrides_atomically() {
         ("atan2(x,-1.0)", "x.atan2(-1.0)"),
         ("min(x,2.0)", "x.min(2.0)"),
         ("max(x,2.0)", "x.max(2.0)"),
+        ("min(x,sqrt(-1.0))", "x"),
+        ("min(sqrt(-1.0),x)", "x"),
+        ("max(x,sqrt(-1.0))", "x"),
+        ("max(sqrt(-1.0),x)", "x"),
         (
             "x>1.0 ? ln(x-1.0) : 0.0",
             "if x>1.0 { (x-1.0).ln() } else {0.0}",
@@ -101,6 +148,7 @@ module signed_zero(p,q);
 inout p,q; electrical p,q;
 parameter integer mode=0;
 parameter real sign=-1, zero=0.0/sign;
+parameter real minimum=min(zero,0.0), maximum=max(zero,0.0);
 real z,a;
 analog begin
     if (mode==0) z=0.0*V(q);
@@ -108,7 +156,9 @@ analog begin
     else if (mode==2) z=0.0+V(q);
     else if (mode==3) z=V(q)-(-0.0);
     else if (mode==4) z=pow(0.0*V(q),0.5);
-    else z=pow(sqrt(0.0*V(q)),0.5);
+    else if (mode==5) z=pow(sqrt(0.0*V(q)),0.5);
+    else if (mode==6) z=min(0.0*V(q),-0.0);
+    else z=max(0.0*V(q),-0.0);
     a=atan2(z,-1.0);
     I(p)<+V(p)*a+white_noise(4.0+a,"branch_cut");
 end
@@ -129,11 +179,13 @@ instance.finalize_parameters().unwrap();
 for sign in [-1.0_f64,1.0] {
     instance.set_parameter("sign",sign).unwrap();
     assert_eq!(instance.params.values[2].to_bits(), (0.0/sign).to_bits());
+    assert_eq!(instance.params.values[3].to_bits(), (0.0/sign).to_bits());
+    assert_eq!(instance.params.values[4].to_bits(), (0.0/sign).to_bits());
 }
-for mode in 0..6 {
+for mode in 0..8 {
     instance.set_parameter("mode",f64::from(mode)).unwrap();
     for q in if mode==2 || mode==3 {[-0.0_f64,0.0]} else {[-2.0,2.0]} {
-        let z:f64=match mode {0=>0.0*q,1=>0.0/q,2=>0.0+q,3=>q-(-0.0),4=>(0.0*q).powf(0.5),_=>(0.0*q).sqrt().powf(0.5)};
+        let z:f64=match mode {0|6|7=>0.0*q,1=>0.0/q,2=>0.0+q,3=>q-(-0.0),4=>(0.0*q).powf(0.5),_=>(0.0*q).sqrt().powf(0.5)};
         let expected=z.atan2(-1.0);
         let bias=[1.0,q];
         let ctx=runtime::GeneratedEvalContext { voltages:&bias,temperature:300.0 };
@@ -158,6 +210,8 @@ fn generated_ddx_preserves_domain_errors_in_stamps_and_noise() {
     for (expression, valid_psd) in [
         ("ddx(V(p)%V(q),V(p))", "1.0"),
         ("ddx(ddx(V(p)%V(q),V(p)),V(p))", "2.0"),
+        ("min(ddx(0.0/V(q),V(p))+V(p),V(p))", "1.0"),
+        ("max(ddx(0.0/V(q),V(p))+V(p),V(p))", "1.0"),
     ] {
         let source = format!(
             "module derivative_domain(p,q); inout p,q; electrical p,q; real d; analog begin
@@ -583,6 +637,24 @@ for v in [-0.8,0.0,1.3] {
 #[test]
 fn generated_dynamic_expressions_preserve_small_signal_chain_rules() {
     for (index, (expression, static_real, dynamic_real, imaginary)) in [
+        (
+            "max(V(p,n)+ddt(V(p,n)),0.0)",
+            "if v>0.0 {1.0} else {0.0}",
+            "0.0",
+            "if v>0.0 {w} else {0.0}",
+        ),
+        (
+            "min(V(p,n)+idt(V(p,n),0.0),0.0)",
+            "if v<0.0 {1.0} else {0.0}",
+            "0.0",
+            "if v<0.0 {-1.0/w} else {0.0}",
+        ),
+        (
+            "ddx(max(V(p,n)*V(p,n)*V(p,n)+ddt(V(p,n)*V(p,n)*V(p,n)),1.0),V(p,n))",
+            "if v>1.0 {6.0*v} else {0.0}",
+            "0.0",
+            "if v>1.0 {6.0*v*w} else {0.0}",
+        ),
         (
             "ddx(ddx(ddt(V(p,n)*V(p,n)*V(p,n)),V(p,n)),V(p,n))",
             "0.0",
@@ -5704,6 +5776,9 @@ pub mod runtime {
             if let Some(sink) = self.sink.as_deref_mut() {
                 if let Some(value) = sink.get_mut(10) {
                     *value += _node_indices.iter().zip(_node_derivatives).filter(|(node, _)| **node == 0).map(|(_, value)| value).sum::<f64>() * _scale;
+                }
+                if let Some(value) = sink.get_mut(11) {
+                    *value += _node_indices.iter().zip(_node_derivatives).filter(|(node, _)| **node == 1).map(|(_, value)| value).sum::<f64>() * _scale;
                 }
             }
         }

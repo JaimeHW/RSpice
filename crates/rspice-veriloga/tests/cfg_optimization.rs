@@ -14,6 +14,166 @@ use rspice_veriloga::canonical_ir::{
 use std::collections::{HashMap, HashSet};
 
 #[test]
+fn extrema_preserve_numeric_operands_nan_and_signed_zero_order() {
+    for op in ["min", "max"] {
+        for expression in [
+            format!("{op}(V(p),sqrt(V(q)))"),
+            format!("{op}(sqrt(V(q)),V(p))"),
+            format!("atan2({op}(V(p),V(q)),-1.0)-atan2({op}(V(q),V(p)),-1.0)"),
+        ] {
+            let artifact = artifact(&format!(
+                "module extrema(p,q); inout p,q; electrical p,q; analog I(p)<+{expression}; endmodule"
+            ));
+            let cfg = CfgModel::from_hir(&artifact.hir, &artifact.mir).unwrap();
+            let (optimized, outputs) = optimize_cfg(&cfg.function, &cfg.residuals);
+            let mut inputs = inputs(&artifact);
+            let expected = if expression.starts_with("atan2") {
+                inputs.node_potentials[..2].copy_from_slice(&[-0.0, 0.0]);
+                -2.0 * std::f64::consts::PI
+            } else {
+                inputs.node_potentials[..2].copy_from_slice(&[1.0, -1.0]);
+                1.0
+            };
+            for (function, outputs) in [(&cfg.function, &cfg.residuals), (&optimized, &outputs)] {
+                let actual = evaluate_cfg(function, &inputs)
+                    .unwrap()
+                    .value(outputs[0])
+                    .unwrap();
+                assert_eq!(actual, expected, "{expression}");
+            }
+        }
+    }
+}
+
+#[test]
+fn extrema_derivative_only_optimization_retains_checked_predicates() {
+    let artifact = artifact(
+        "module checked_extrema(p,q); inout p,q; electrical p,q; analog I(p)<+min(ddx(0.0/V(q),V(p))+V(p),V(p)); endmodule",
+    );
+    let cfg = CfgModel::from_hir(&artifact.hir, &artifact.mir).unwrap();
+    let mut ad = differentiate(&cfg.function, &[AdSeed::NodePotential(0usize.into())]).unwrap();
+    let output = ad.derivative(cfg.residuals[0], 0).unwrap();
+    let (optimized, outputs) = optimize_cfg(&ad.function, &[output]);
+    for q in [0.0, 1.0] {
+        let mut inputs = inputs(&artifact);
+        inputs.node_potentials[..2].copy_from_slice(&[1.0, q]);
+        for (function, output) in [(&ad.function, output), (&optimized, outputs[0])] {
+            let result = evaluate_cfg(function, &inputs);
+            if q == 0.0 {
+                assert!(
+                    result.is_err(),
+                    "derivative-only extrema erased checked primal: {result:?}"
+                );
+            } else {
+                assert_eq!(result.unwrap().value(output).unwrap(), 1.0);
+            }
+        }
+    }
+}
+
+#[test]
+fn extrema_select_the_left_tangent_on_finite_ties() {
+    for op in ["min", "max"] {
+        for (left, right, bias, expected) in [
+            ("V(p)", "2.0*V(q)", [2.0, 1.0], [1.0_f64, 0.0]),
+            ("-0.0*V(p)", "0.0*V(q)", [1.0, 1.0], [-0.0, 0.0]),
+        ] {
+            let artifact = artifact(&format!(
+                "module tie(p,q); inout p,q; electrical p,q; analog I(p)<+{op}({left},{right}); endmodule"
+            ));
+            let cfg = CfgModel::from_hir(&artifact.hir, &artifact.mir).unwrap();
+            let seeds = [
+                AdSeed::NodePotential(0usize.into()),
+                AdSeed::NodePotential(1usize.into()),
+            ];
+            let mut ad = differentiate(&cfg.function, &seeds).unwrap();
+            let outputs = [
+                ad.derivative(cfg.residuals[0], 0).unwrap(),
+                ad.derivative(cfg.residuals[0], 1).unwrap(),
+            ];
+            for operand in 0..3 {
+                let mut invalid = ad.function.clone();
+                let selection = invalid
+                    .values
+                    .iter_mut()
+                    .find(|value| matches!(value.kind, CfgValueKind::Select { .. }))
+                    .unwrap();
+                let id = selection.id;
+                if let CfgValueKind::Select {
+                    condition,
+                    then_value,
+                    else_value,
+                } = &mut selection.kind
+                {
+                    *[condition, then_value, else_value][operand] = cfg.residuals[0];
+                }
+                assert_eq!(invalid.validate(),Err(rspice_veriloga::canonical_ir::cfg::CfgValidationError::SelectionTypeMismatch(id)));
+            }
+            let (optimized, moved) = optimize_cfg(&ad.function, &outputs);
+            let mut inputs = inputs(&artifact);
+            inputs.node_potentials[..2].copy_from_slice(&bias);
+            for (function, outputs) in [
+                (&ad.function, outputs.as_slice()),
+                (&optimized, moved.as_slice()),
+            ] {
+                let values = evaluate_cfg(function, &inputs).unwrap();
+                for (&output, expected) in outputs.iter().zip(expected) {
+                    assert_eq!(
+                        values.value(output).unwrap().to_bits(),
+                        expected.to_bits(),
+                        "{op}({left},{right}), value={output}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn extrema_select_derivatives_without_inactive_singular_arithmetic() {
+    for (expression, p) in [
+        ("max(V(p),sqrt(V(q)))", 1.0),
+        ("max(sqrt(V(q)),V(p))", 1.0),
+        ("min(V(p),sqrt(V(q)))", -1.0),
+        ("min(sqrt(V(q)),V(p))", -1.0),
+    ] {
+        let artifact = artifact(&format!(
+            "module extrema_derivative(p,q); inout p,q; electrical p,q; analog I(p)<+{expression}; endmodule"
+        ));
+        let cfg = CfgModel::from_hir(&artifact.hir, &artifact.mir).unwrap();
+        let seeds = [
+            AdSeed::NodePotential(0usize.into()),
+            AdSeed::NodePotential(1usize.into()),
+        ];
+        let mut ad = differentiate(&cfg.function, &seeds).unwrap();
+        let outputs = [
+            cfg.residuals[0],
+            ad.derivative(cfg.residuals[0], 0).unwrap(),
+            ad.derivative(cfg.residuals[0], 1).unwrap(),
+        ];
+        let (optimized, moved) = optimize_cfg(&ad.function, &outputs);
+        for q in [-1.0, 0.0] {
+            let mut inputs = inputs(&artifact);
+            inputs.node_potentials[..2].copy_from_slice(&[p, q]);
+            for (function, outputs) in [
+                (&ad.function, outputs.as_slice()),
+                (&optimized, moved.as_slice()),
+            ] {
+                function.validate().unwrap();
+                let result = evaluate_cfg(function, &inputs).unwrap();
+                for (&output, expected) in outputs.iter().zip([p, 1.0, 0.0]) {
+                    assert_eq!(
+                        result.value(output).unwrap(),
+                        expected,
+                        "{expression}, q={q}, value={output}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn fractional_power_rewrites_preserve_branch_cuts_and_infinite_limits() {
     for exponent in [0.5_f64, 1.5] {
         for (base, apply) in [

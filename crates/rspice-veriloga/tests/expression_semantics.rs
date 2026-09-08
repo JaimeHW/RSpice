@@ -5,6 +5,38 @@ mod support;
 use support::DeviceFixture;
 
 #[test]
+fn extrema_values_and_derivatives_ignore_inactive_nan_and_infinite_slopes() {
+    for (expression, p) in [
+        ("max(V(p),sqrt(V(q)))", 1.0),
+        ("max(sqrt(V(q)),V(p))", 1.0),
+        ("min(V(p),sqrt(V(q)))", -1.0),
+        ("min(sqrt(V(q)),V(p))", -1.0),
+    ] {
+        for (expression, expected) in [
+            (expression.to_string(), p),
+            (format!("ddx({expression},V(p))"), 1.0),
+            (format!("ddx({expression},V(q))"), 0.0),
+            // Native third intrinsic derivatives remain a separate implementation gap.
+            #[cfg(not(feature = "native"))]
+            (format!("ddx(ddx({expression},V(q)),V(q))"), 0.0),
+        ] {
+            let fixture = DeviceFixture::compile(&format!(
+                "module extrema(p,q,n); inout p,q,n; electrical p,q,n; analog I(p,n)<+{expression}; endmodule"
+            ));
+            let mut device = fixture.device("X", &[1, 2, 0]);
+            for q in [-1.0, 0.0] {
+                device.update_voltages(&[p, q]);
+                assert_eq!(
+                    device.try_evaluate().unwrap()[0],
+                    expected,
+                    "{expression}, q={q}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn signed_zero_in_authored_factors_survives_differentiation() {
     for (zero, values, apply) in [
         (
@@ -82,6 +114,8 @@ fn ddx_preserves_domain_errors_only_on_executed_paths() {
         ("ddx(V(p)%V(q),V(p))", 1.0),
         ("ddx(ddx(V(p)%V(q),V(p)),V(p))", 0.0),
         ("ddx(a/b,V(p))", 0.0),
+        ("min(ddx(0.0/V(q),V(p))+V(p),V(p))", 5.0),
+        ("max(ddx(0.0/V(q),V(p))+V(p),V(p))", 5.0),
         ("(ddx(V(p)%V(q),V(p))>0 ? 1 : 0)", 1.0),
     ] {
         let fixture = DeviceFixture::compile(&format!(
