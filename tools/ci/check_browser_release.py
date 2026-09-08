@@ -9,6 +9,7 @@ import os
 import fnmatch
 from pathlib import Path
 import re
+import subprocess
 import urllib.parse
 
 from browser_workbench import WorkbenchBrowser, wait_for
@@ -91,6 +92,16 @@ def capture(browser, name, state):
     (browser.output / f"{name}.png").write_bytes(base64.b64decode(image, validate=True))
 
 
+def open_page(browser, url, width, height):
+    # Startup cases are independent pages. Retain earlier tabs instead of
+    # navigating away from an unsaved project or bypassing its unload guard.
+    context = browser.call("POST", "/window/new", {"type": "tab"})
+    browser.call("POST", "/window", {"handle": context["handle"]})
+    browser.cdp("Emulation.setDeviceMetricsOverride", {
+        "width": width, "height": height, "deviceScaleFactor": 1, "mobile": False})
+    browser.navigate(url)
+
+
 def release_inputs(root):
     inputs = {"_headers": hashlib.sha256((root / "_headers").read_bytes()).hexdigest()}
     for path in sorted([*(root / "ide").rglob("*"), *(root / "play").rglob("*")]):
@@ -115,6 +126,9 @@ def main():
         raise ValueError("release must name an immutable IDE asset cohort")
     inputs = release_inputs(args.web_root)
     report = {"build": build, "inputs": inputs, "viewports": [],
+              "qualification_source_sha": subprocess.check_output(
+                  ["git", "-C", str(Path(__file__).resolve().parents[2]), "rev-parse", "HEAD"],
+                  text=True).strip(),
               "scope": "UI startup at emulated viewports, playground solves, and Python debugger integration",
               "software_webgpu": args.software_webgpu,
               "harness": {name: hashlib.sha256(Path(__file__).with_name(name).read_bytes()).hexdigest()
@@ -126,9 +140,7 @@ def main():
             report["browser"] = browser.capabilities
             asset_url = f"{browser.origin}/ide/assets/{identity}/"
             for label, width, height in (("desktop", 1280, 900), ("portrait", 820, 1180), ("compact", 390, 844)):
-                browser.cdp("Emulation.setDeviceMetricsOverride", {
-                    "width": width, "height": height, "deviceScaleFactor": 1, "mobile": False})
-                browser.navigate(browser.origin + "/ide/")
+                open_page(browser, browser.origin + "/ide/", width, height)
 
                 def ready():
                     state = read_startup(browser)
@@ -141,7 +153,7 @@ def main():
                 browser.assert_no_errors()
                 capture(browser, label, state)
                 report["viewports"].append({"label": label, **state})
-                browser.navigate(browser.origin + "/play/")
+                open_page(browser, browser.origin + "/play/", width, height)
                 wait_for(lambda: browser.script("""
                     return document.body.innerText.includes('worker ready') &&
                         document.body.innerText.includes('solved in');
@@ -149,8 +161,8 @@ def main():
                 browser.assert_no_errors()
                 capture(browser, label + "-playground", {"body": browser.script("return document.body.innerText")})
             report["webgpu"] = browser.webgpu_adapter()
-            browser.navigate(browser.origin + AUTOMATION_PAGE + "?" + urllib.parse.urlencode(
-                {"worker": asset_url + "automation-worker.js"}))
+            open_page(browser, browser.origin + AUTOMATION_PAGE + "?" + urllib.parse.urlencode(
+                {"worker": asset_url + "automation-worker.js"}), 1280, 900)
             automation = wait_for(lambda: browser.script(
                 "return window.RSPICE_AUTOMATION_DEBUGGER_QUALIFICATION || null"),
                 "packaged Python debugger qualification", timeout=150)

@@ -224,6 +224,9 @@ The second gate checks actual UI startup at three emulated viewport sizes,
 playground transient solves, and Python breakpoint/evaluate/step integration.
 It applies the packaged `_headers` policy and records screenshots, browser
 errors, and the hashes of the packaged inputs and response-header policy.
+Each case opens its own tab, preserving the application's unsaved-work guard.
+The report records the qualification-tool revision separately from the artifact's
+build revision, so a harness correction can recheck unchanged release bytes.
 It does not qualify physical tablet input, accessibility, or the full engineering
 workflow; the instrumented workbench and device qualification remain separate.
 
