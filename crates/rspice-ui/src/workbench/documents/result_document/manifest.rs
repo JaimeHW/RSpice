@@ -974,7 +974,9 @@ fn family_values_label(family: &AnalysisResultFamilyMetadata) -> String {
                 .collect::<Vec<_>>()
                 .join(", "),
             noise_reference_temperature_kelvin.map_or_else(String::new, |temperature| {
-                format!(" / DUT Norton noise at {temperature} K; CY in A²/Hz, F and Fmin linear")
+                format!(
+                    " / noise source reference {temperature} K; noise factors linear, Rn in ohms"
+                )
             }),
         ),
     }

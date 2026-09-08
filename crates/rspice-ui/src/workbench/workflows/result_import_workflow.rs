@@ -22,7 +22,7 @@ use std::sync::Arc;
 #[path = "result_import_adapters.rs"]
 mod adapters;
 
-type ComplexComponentColumns = (Option<Vec<f64>>, Option<Vec<f64>>);
+type ComplexComponentColumns<T = Vec<f64>> = (Option<T>, Option<T>);
 
 pub(crate) const RESULT_DATASET_FILTER: (&str, &[&str]) = (
     "Result dataset",
@@ -327,17 +327,22 @@ fn parsed_result_from_draft(
         return Err("Select at least one signal to import.".to_owned());
     }
     if waveforms.iter().any(|waveform| {
-        waveform.x.len() != draft.sample_count || waveform.y.len() != draft.sample_count
+        waveform.x.len() != waveform.y.len()
+            || (!touchstone && waveform.x.len() != draft.sample_count)
     }) {
         return Err("A selected signal no longer matches the detected coordinate grid.".to_owned());
     }
     if matches!(
         draft.analysis_type,
         AnalysisType::Ac | AnalysisType::SParameter
-    ) && waveforms
-        .first()
-        .is_some_and(|waveform| waveform.x.iter().any(|frequency| *frequency <= 0.0))
-    {
+    ) && waveforms.iter().any(|waveform| {
+        waveform.x.is_empty()
+            || waveform
+                .x
+                .iter()
+                .any(|frequency| !frequency.is_finite() || *frequency <= 0.0)
+            || waveform.x.windows(2).any(|pair| pair[0] >= pair[1])
+    }) {
         return Err("Frequency coordinates must all be greater than zero.".to_owned());
     }
     if draft.analysis_type == AnalysisType::SParameter {
@@ -351,7 +356,9 @@ fn parsed_result_from_draft(
             );
         };
         if reference_impedances_ohm.is_empty()
-            || waveforms.iter().any(|waveform| waveform.complex.is_none())
+            || waveforms.iter().any(|waveform| {
+                waveform.complex.is_none() && !matches!(waveform.name.as_str(), "Fmin" | "Rn")
+            })
         {
             return Err("Touchstone import contains incomplete complex network data.".to_owned());
         }
@@ -1090,8 +1097,27 @@ fn parse_touchstone_result_dataset(
         .as_ref()
         .ok_or_else(|| "Touchstone source has no frequency axis".to_owned())?;
     let coordinate = Arc::new(x.data.clone());
-    let mut components: BTreeMap<String, ComplexComponentColumns> = BTreeMap::new();
+    let mut components: BTreeMap<String, ComplexComponentColumns<crate::io::WaveformSignal>> =
+        BTreeMap::new();
+    let mut waveforms = Vec::new();
     for signal in dataset.signals {
+        if matches!(signal.name.as_str(), "Fmin" | "Rn") {
+            let axis = signal
+                .x_values
+                .map(Arc::new)
+                .unwrap_or_else(|| Arc::clone(&coordinate));
+            if signal.data.len() != axis.len() {
+                return Err(format!(
+                    "Touchstone noise parameter {} does not match its frequency grid",
+                    signal.name
+                ));
+            }
+            let mut waveform =
+                WaveformData::new(signal.name, axis, signal.data, trace_color(waveforms.len()));
+            waveform.unit = Some(signal.unit);
+            waveforms.push(waveform);
+            continue;
+        }
         let (base, imaginary) = if let Some(base) = signal.name.strip_suffix("_RE") {
             (base, false)
         } else if let Some(base) = signal.name.strip_suffix("_IM") {
@@ -1102,26 +1128,36 @@ fn parse_touchstone_result_dataset(
                 signal.name
             ));
         };
-        let entry = components.entry(base.to_owned()).or_default();
+        let base = base.to_owned();
+        let entry = components.entry(base.clone()).or_default();
         let slot = if imaginary {
             &mut entry.1
         } else {
             &mut entry.0
         };
-        if slot.replace(signal.data).is_some() {
+        if slot.replace(signal).is_some() {
             return Err(format!("Touchstone source repeats component '{base}'"));
         }
     }
-    let mut waveforms = Vec::with_capacity(components.len());
-    for (index, (name, (real, imaginary))) in components.into_iter().enumerate() {
+    for (name, (real, imaginary)) in components {
         let real = real.ok_or_else(|| format!("Touchstone source is missing {name}_RE"))?;
         let imaginary =
             imaginary.ok_or_else(|| format!("Touchstone source is missing {name}_IM"))?;
-        if real.len() != coordinate.len() || imaginary.len() != coordinate.len() {
+        let axis = real
+            .x_values
+            .map(Arc::new)
+            .unwrap_or_else(|| Arc::clone(&coordinate));
+        let imaginary_axis = imaginary.x_values.as_deref().unwrap_or(&coordinate);
+        if real.data.len() != axis.len()
+            || imaginary.data.len() != axis.len()
+            || imaginary_axis != axis.as_slice()
+        {
             return Err(format!(
                 "Touchstone parameter {name} does not match the frequency grid"
             ));
         }
+        let real = real.data;
+        let imaginary = imaginary.data;
         let magnitude = real
             .iter()
             .zip(&imaginary)
@@ -1130,11 +1166,12 @@ fn parse_touchstone_result_dataset(
         waveforms.push(
             WaveformData::new(
                 format!("|{name}|"),
-                Arc::clone(&coordinate),
+                axis,
                 magnitude,
-                trace_color(index),
+                trace_color(waveforms.len()),
             )
-            .with_complex_components(name, real, imaginary),
+            .with_complex_components(name, real, imaginary)
+            .with_unit("1"),
         );
     }
     let reference_impedances_ohm = dataset
@@ -1149,7 +1186,15 @@ fn parse_touchstone_result_dataset(
         })
         .collect::<Result<Vec<_>, _>>()?;
     let family_metadata = AnalysisResultFamilyMetadata::SParameter {
-        noise_reference_temperature_kelvin: None,
+        noise_reference_temperature_kelvin: dataset
+            .metadata
+            .get("noise_reference_temperature_kelvin")
+            .map(|value| {
+                value
+                    .parse::<f64>()
+                    .map_err(|_| "Invalid Touchstone noise reference temperature".to_owned())
+            })
+            .transpose()?,
         reference_impedances_ohm,
     };
     family_metadata.validate_for(AnalysisType::SParameter)?;
@@ -1161,7 +1206,14 @@ fn parse_touchstone_result_dataset(
         waveforms,
         family_metadata: Some(family_metadata),
         delimiter: 0,
-        notes: Vec::new(),
+        notes: if dataset
+            .metadata
+            .contains_key("noise_reference_temperature_kelvin")
+        {
+            vec!["Noise parameters use the conventional 290 K source reference. This does not establish the device temperature. The independently sampled noise sweep is retained without interpolation.".into()]
+        } else {
+            Vec::new()
+        },
         event_payload: None,
     })
 }
@@ -1868,6 +1920,58 @@ mod tests {
         assert_eq!(
             state.workbench.result_import.source_format_id, "",
             "successful commit discards the runtime import draft"
+        );
+    }
+
+    #[test]
+    fn touchstone_noise_import_commits_independent_axes_and_persists_units() {
+        let mut state = loaded_project_state();
+        apply_imported_result_dataset(&mut state, "noise.ts", b"[Version] 2.0\n# MHz S RI R 75\n[Number of Ports] 2\n[Two-Port Data Order] 21_12\n[Number of Frequencies] 2\n[Number of Noise Frequencies] 1\n[Reference] 25 100\n[Network Data]\n1 0 0 1 0 0 0 0 0\n3 0 0 1 0 0 0 0 0\n[Noise Data]\n2 3 0 0 15\n[End]\n").unwrap();
+        let analysis = &state.simulation.runs.last().unwrap().analyses[0];
+        analysis.validate_retained_evidence().unwrap();
+        assert_eq!(analysis.waveforms.len(), 7);
+        let rn = analysis
+            .waveforms
+            .iter()
+            .find(|waveform| waveform.name == "Rn")
+            .unwrap();
+        assert_eq!(rn.x.as_slice(), [2e6]);
+        assert_eq!(rn.y.as_slice(), [15.0]);
+        assert_eq!(rn.unit.as_deref(), Some("Ω"));
+        let gamma = analysis
+            .waveforms
+            .iter()
+            .find(|waveform| waveform.name == "|Sopt|")
+            .unwrap();
+        assert!((gamma.complex.as_ref().unwrap().real[0] - 0.5).abs() < 1e-14);
+        let network = analysis
+            .waveforms
+            .iter()
+            .find(|waveform| waveform.name == "|S21|")
+            .unwrap();
+        assert_eq!(network.x.as_slice(), [1e6, 3e6]);
+        let project = crate::workbench::lifecycle::project_lifecycle::snapshot(&state).unwrap();
+        let text = crate::io::project_io::serialize_project_file(&project).unwrap();
+        let project = crate::io::project_io::load_project_text(&text, None).unwrap();
+        assert!(project.simulation_results_warning.is_none());
+        let simulation = project.simulation_results.into_simulation_state().unwrap();
+        let restored = &simulation.active_run().unwrap().analyses[0];
+        restored.validate_retained_evidence().unwrap();
+        assert_eq!(
+            restored.family_metadata,
+            Some(AnalysisResultFamilyMetadata::SParameter {
+                reference_impedances_ohm: vec![25.0, 100.0],
+                noise_reference_temperature_kelvin: Some(290.0),
+            })
+        );
+        assert_eq!(
+            restored
+                .waveforms
+                .iter()
+                .find(|waveform| waveform.name == "Rn")
+                .unwrap()
+                .x,
+            rn.x
         );
     }
 

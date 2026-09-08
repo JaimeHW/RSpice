@@ -1206,9 +1206,12 @@ fn sp_noise_csv_keeps_signed_complex_components_and_export_metadata() {
                 .with_complex_components("CY(1,2)", vec![-3e-20], vec![4e-20]),
             WaveformData::new("F", vec![1e6], vec![3.0], "#fff").with_unit("1"),
         ]);
-    let prepared =
-        prepare_single_analysis_dataset(&analysis, &analysis.waveforms.iter().collect::<Vec<_>>())
-            .unwrap();
+    let prepared = prepare_single_analysis_dataset(
+        &analysis,
+        &analysis.waveforms.iter().collect::<Vec<_>>(),
+        false,
+    )
+    .unwrap();
     assert_eq!(
         prepared.dataset.metadata["noise_reference_temperature_kelvin"],
         "450"
@@ -1237,6 +1240,51 @@ fn sp_noise_csv_keeps_signed_complex_components_and_export_metadata() {
         csv.contains("-0.00000000000000000003") || csv.contains("-3e-20"),
         "{csv}"
     );
+}
+
+#[test]
+fn touchstone_noise_retained_export_preserves_independent_grid() {
+    let mut analysis = AnalysisResult::new(1, AnalysisType::SParameter, "SP noise")
+        .with_family_metadata(AnalysisResultFamilyMetadata::SParameter {
+            reference_impedances_ohm: vec![75.0, 100.0],
+            noise_reference_temperature_kelvin: Some(290.0),
+        });
+    for name in ["S11", "S12", "S21", "S22"] {
+        analysis.waveforms.push(
+            WaveformData::new(format!("|{name}|"), vec![1e6, 3e6], vec![0.5; 2], "#fff")
+                .with_complex_components(name, vec![0.5; 2], vec![0.0; 2]),
+        );
+    }
+    analysis.waveforms.extend([
+        WaveformData::new("Fmin", vec![2e6], vec![2.0], "#fff").with_unit("1"),
+        WaveformData::new("Rn", vec![2e6], vec![15.0], "#fff").with_unit("Ω"),
+        WaveformData::new("|Sopt|", vec![2e6], vec![0.5], "#fff")
+            .with_complex_components("Sopt", vec![0.0], vec![-0.5])
+            .with_unit("1"),
+    ]);
+    let waveforms = analysis.waveforms.iter().collect::<Vec<_>>();
+    let dataset = prepare_single_analysis_dataset(&analysis, &waveforms, true)
+        .unwrap()
+        .dataset;
+    let text = crate::io::WaveformWriter::new(crate::io::WaveformFormat::Touchstone)
+        .write_text(&dataset)
+        .unwrap();
+    let restored =
+        crate::io::waveform_io::read_touchstone_bytes("noise.ts", text.as_bytes()).unwrap();
+    assert_eq!(
+        restored.get_signal("Rn").unwrap().x_values.as_deref(),
+        Some([2e6].as_slice())
+    );
+    assert!((restored.get_signal("Sopt_IM").unwrap().data[0] + 0.5).abs() < 1e-14);
+    assert!(prepare_single_analysis_dataset(&analysis, &waveforms, false).is_err());
+    let network_only = analysis.waveforms[..4].iter().collect::<Vec<_>>();
+    let dataset = prepare_single_analysis_dataset(&analysis, &network_only, true)
+        .unwrap()
+        .dataset;
+    let text = crate::io::WaveformWriter::new(crate::io::WaveformFormat::Touchstone)
+        .write_text(&dataset)
+        .unwrap();
+    assert!(!text.contains("[Noise Data]"));
 }
 
 #[test]

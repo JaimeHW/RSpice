@@ -1,13 +1,11 @@
 //! Fail-closed Touchstone v1/v2 S-parameter reader.
 //!
 //! The reader accepts real/imaginary, magnitude/angle, and dB/angle network
-//! data. Unsupported v2 constructs (mixed-mode and noise blocks) are rejected
-//! explicitly so they can never be mistaken for ordinary network records.
+//! data and independent two-port noise sweeps. Unsupported mixed-mode data
+//! is rejected explicitly so it cannot be mistaken for single-ended records.
 
-use super::{SignalType, WaveformDataset, WaveformSignal};
+use super::{MAX_TOUCHSTONE_PORTS, SignalType, WaveformDataset, WaveformSignal};
 use std::path::Path;
-
-const MAX_TOUCHSTONE_PORTS: usize = 64;
 
 #[derive(Debug, Clone, Copy)]
 enum DataFormat {
@@ -54,6 +52,9 @@ pub(crate) fn read_touchstone_bytes(
     let mut declared_two_port_order = None;
     let mut declared_ports = ports_from_extension(source_name);
     let mut declared_frequencies = None;
+    let mut declared_noise_frequencies = None;
+    let mut noise_records = Vec::new();
+    let mut in_noise = false;
     let mut reference_values = None;
     // `[Reference]` arguments may span several lines, so the values collected
     // so far are held here until one per port has been read.
@@ -103,17 +104,27 @@ pub(crate) fn read_touchstone_bytes(
             }
         }
         if trimmed.starts_with('#') {
+            if saw_network_data || !numeric_tokens.is_empty() {
+                return Err(format!(
+                    "Touchstone line {line_number}: option line follows network data"
+                ));
+            }
             options = parse_option_line(trimmed, line_number)?;
             continue;
         }
         if trimmed.starts_with('[') {
             let (section, value) = parse_section_line(trimmed, line_number)?;
+            if saw_network_data && !matches!(section.as_str(), "noise data" | "end") {
+                return Err(format!(
+                    "Touchstone line {line_number}: [{section}] must precede network data"
+                ));
+            }
             match section.as_str() {
                 "version" => {
                     let parsed = value.parse::<f64>().map_err(|_| {
                         format!("Touchstone line {line_number}: invalid [Version] '{value}'")
                     })?;
-                    if !parsed.is_finite() || !(1.0..3.0).contains(&parsed) {
+                    if !matches!(parsed, 1.0 | 2.0 | 2.1) {
                         return Err(format!(
                             "Touchstone line {line_number}: unsupported [Version] '{value}'"
                         ));
@@ -199,10 +210,31 @@ pub(crate) fn read_touchstone_bytes(
                         "Touchstone line {line_number}: mixed-mode Touchstone import is not available in this build"
                     ));
                 }
-                "noise data" | "number of noise frequencies" => {
-                    return Err(format!(
-                        "Touchstone line {line_number}: Touchstone noise-data import is not available in this build"
-                    ));
+                "number of noise frequencies" => {
+                    if version < 2 || declared_noise_frequencies.is_some() {
+                        return Err(format!(
+                            "Touchstone line {line_number}: [Number of Noise Frequencies] requires v2 and may appear only once"
+                        ));
+                    }
+                    declared_noise_frequencies = Some(parse_positive_usize(
+                        value,
+                        line_number,
+                        "[Number of Noise Frequencies]",
+                    )?);
+                }
+                "noise data" => {
+                    if version < 2
+                        || in_noise
+                        || !saw_network_data
+                        || numeric_tokens.is_empty()
+                        || declared_noise_frequencies.is_none()
+                        || !value.is_empty()
+                    {
+                        return Err(format!(
+                            "Touchstone line {line_number}: [Noise Data] requires a preceding network sweep and noise frequency count, and may appear only once without arguments"
+                        ));
+                    }
+                    in_noise = true;
                 }
                 "end" => {
                     if !value.is_empty() {
@@ -226,12 +258,33 @@ pub(crate) fn read_touchstone_bytes(
                 "Touchstone line {line_number}: numeric data precedes [Network Data]"
             ));
         }
-        for token in trimmed.split_whitespace().filter(|token| *token != "+") {
-            numeric_tokens.push(parse_numeric_token(token).ok_or_else(|| {
-                format!(
-                    "Touchstone line {line_number}: expected a finite numeric token, got '{token}'"
-                )
-            })?);
+        let values = trimmed
+            .split_whitespace()
+            .filter(|token| *token != "+")
+            .map(|token| {
+                parse_numeric_token(token).ok_or_else(|| {
+                    format!("Touchstone line {line_number}: expected a finite numeric token, got '{token}'")
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        // V1 marks the noise boundary by restarting the frequency sweep.
+        // Only a complete two-port record can precede a five-column noise line.
+        if version == 1
+            && !in_noise
+            && values.len() == 5
+            && declared_ports.is_none_or(|ports| ports == 2)
+            && !numeric_tokens.is_empty()
+            && numeric_tokens.len().is_multiple_of(9)
+            && values[0] <= numeric_tokens[numeric_tokens.len() - 9]
+        {
+            in_noise = true;
+            declared_ports = Some(2);
+        }
+        if in_noise {
+            let record: [f64; 5] = values.try_into().map_err(|_| format!("Touchstone line {line_number}: a noise record requires exactly five values on one line"))?;
+            noise_records.push(record);
+        } else {
+            numeric_tokens.extend(values);
         }
     }
     if let Some(values) = pending_reference.take() {
@@ -253,6 +306,22 @@ pub(crate) fn read_touchstone_bytes(
     if num_ports == 0 || num_ports > MAX_TOUCHSTONE_PORTS {
         return Err(format!(
             "Touchstone port count {num_ports} is outside the supported range 1..={MAX_TOUCHSTONE_PORTS}"
+        ));
+    }
+    if declared_noise_frequencies.is_some() && noise_records.is_empty() {
+        return Err(
+            "Touchstone noise frequency count requires a nonempty [Noise Data] block".into(),
+        );
+    }
+    if !noise_records.is_empty() && num_ports != 2 {
+        return Err("Touchstone noise data requires exactly two ports".into());
+    }
+    if let Some(expected) = declared_noise_frequencies
+        && expected != noise_records.len()
+    {
+        return Err(format!(
+            "Touchstone [Number of Noise Frequencies]={expected} but parsed {} records",
+            noise_records.len()
         ));
     }
     // The keyword is required of a two-port file and permitted of no other
@@ -386,6 +455,14 @@ pub(crate) fn read_touchstone_bytes(
             dataset.add_signal(imag);
         }
     }
+    super::touchstone_noise::append_noise_signals(
+        &mut dataset,
+        &noise_records,
+        options.frequency_scale_hz,
+        options.reference_ohms,
+        reference_by_port[0],
+        version,
+    )?;
     Ok(dataset)
 }
 

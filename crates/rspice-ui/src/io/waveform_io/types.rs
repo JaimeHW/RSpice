@@ -51,6 +51,9 @@ pub struct WaveformSignal {
     pub unit: String,
     /// Data values
     pub data: Vec<f64>,
+    /// Optional coordinates for a signal sampled separately from the dataset axis.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub x_values: Option<Vec<f64>>,
 }
 
 /// Type of signal
@@ -89,6 +92,7 @@ impl WaveformSignal {
             signal_type,
             unit: signal_type.default_unit().to_string(),
             data: Vec::new(),
+            x_values: None,
         }
     }
 

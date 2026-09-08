@@ -77,13 +77,19 @@ impl SimulationController {
         z0_by_port: &[f64],
         touchstone_version: usize,
     ) -> Result<WaveformDataset, String> {
-        let (frequencies, waveforms, references) = match result {
+        let (frequencies, waveforms, references, noise_temperature) = match result {
             crate::simulation::SimulationResult::Ac {
                 frequencies,
                 waveforms,
                 reference_impedances_ohm,
+                noise_reference_temperature_kelvin,
                 ..
-            } => (frequencies, waveforms, reference_impedances_ohm.as_deref()),
+            } => (
+                frequencies,
+                waveforms,
+                reference_impedances_ohm.as_deref(),
+                *noise_reference_temperature_kelvin,
+            ),
             _ => return Err("result is not frequency-domain S-parameter data".to_string()),
         };
         if frequencies.is_empty() {
@@ -190,6 +196,37 @@ impl SimulationController {
             }
         }
 
+        if let Some(temperature) = noise_temperature {
+            dataset.metadata.insert(
+                "noise_reference_temperature_kelvin".into(),
+                temperature.to_string(),
+            );
+            for name in ["Fmin", "Rn", "Sopt"] {
+                let waveform = waveforms.get(name).ok_or_else(|| format!("Touchstone noise export requires two-port {name} data; use a result bundle for full port-noise covariance"))?;
+                if waveform.y_values.len() != frequencies.len() {
+                    return Err(format!(
+                        "Touchstone noise waveform {name} does not match the frequency grid"
+                    ));
+                }
+                if name == "Sopt" {
+                    if waveform
+                        .y_imag
+                        .as_ref()
+                        .is_none_or(|values| values.len() != frequencies.len())
+                    {
+                        return Err(
+                            "Touchstone noise export requires both complete Sopt components".into(),
+                        );
+                    }
+                    Self::push_complex_signal_pair(&mut dataset, name, waveform)?;
+                } else {
+                    let mut signal = WaveformSignal::new(name, SignalType::Unknown);
+                    signal.unit = if name == "Rn" { "Ω" } else { "1" }.into();
+                    signal.data = waveform.y_values.clone();
+                    dataset.add_signal(signal);
+                }
+            }
+        }
         Ok(dataset)
     }
 
@@ -297,6 +334,52 @@ mod tests {
     }
 
     /// Legacy results without retained references must validate their fallback table.
+    #[test]
+    fn touchstone_noise_automatic_export_uses_retained_temperature_and_ports() {
+        let mut result = matrix_result(2);
+        let crate::simulation::SimulationResult::Ac {
+            frequencies,
+            waveforms,
+            reference_impedances_ohm,
+            noise_reference_temperature_kelvin,
+            ..
+        } = &mut result
+        else {
+            unreachable!()
+        };
+        *reference_impedances_ohm = Some(vec![75.0, 100.0]);
+        *noise_reference_temperature_kelvin = Some(580.0);
+        for (name, value, imaginary) in [
+            ("Fmin", 2.0, None),
+            ("Rn", 15.0, None),
+            ("Sopt", 0.0, Some(vec![-0.5; 2])),
+        ] {
+            waveforms.insert(
+                name.into(),
+                WaveformData {
+                    name: name.into(),
+                    x_values: frequencies.clone(),
+                    y_values: vec![value; 2],
+                    y_unit: if name == "Rn" { "Ω" } else { "1" }.into(),
+                    is_complex: imaginary.is_some(),
+                    y_imag: imaginary,
+                },
+            );
+        }
+        let dataset =
+            SimulationController::build_touchstone_dataset(&result, 50.0, &[50.0, 50.0], 2)
+                .unwrap();
+        let text = WaveformWriter::new(WaveformFormat::Touchstone)
+            .write_text(&dataset)
+            .unwrap();
+        assert!(text.contains("[Number of Noise Frequencies] 2"));
+        let imported =
+            crate::io::waveform_io::read_touchstone_bytes("noise.ts", text.as_bytes()).unwrap();
+        assert_eq!(imported.metadata["z0_ports"], "75,100");
+        assert_eq!(imported.get_signal("Rn").unwrap().data, [30.0; 2]);
+        assert!((imported.get_signal("Fmin").unwrap().data[0] - 3.0).abs() < 1e-14);
+    }
+
     #[test]
     fn a_port_table_shorter_than_the_solved_matrix_refuses_the_export() {
         let error = SimulationController::build_touchstone_dataset(

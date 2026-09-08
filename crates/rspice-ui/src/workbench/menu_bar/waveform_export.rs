@@ -342,7 +342,14 @@ pub(crate) fn action_export_csv_with_io(
         return;
     }
 
-    let prepared = match prepare_waveform_dataset(state, &displayed) {
+    let prepared = match prepare_waveform_dataset(
+        state,
+        &displayed,
+        matches!(
+            export_format,
+            TabularExportFormat::TouchstoneWhereCompatible
+        ),
+    ) {
         Ok(prepared) => prepared,
         Err(message) => {
             state.push_user_message(crate::diagnostics::ConsoleMessage::warning(message));
@@ -1311,6 +1318,7 @@ fn failed_run_refusal(run: &crate::state::SimulationRun) -> Option<String> {
 fn prepare_waveform_dataset(
     state: &AppState,
     displayed: &crate::workbench::documents::result_document::view_context::ResolvedResultView,
+    touchstone: bool,
 ) -> Result<PreparedWaveformDataset, String> {
     if displayed.analysis_indices.is_empty() {
         return Err(displayed
@@ -1325,7 +1333,7 @@ fn prepare_waveform_dataset(
     if waveforms.is_empty() && !analysis.waveforms.is_empty() {
         return Err(ALL_TRACES_HIDDEN_MESSAGE.to_owned());
     }
-    prepare_single_analysis_dataset(analysis, &waveforms)
+    prepare_single_analysis_dataset(analysis, &waveforms, touchstone)
 }
 
 /// Long-form export for a viewer that is displaying more than one analysis.
@@ -1433,9 +1441,15 @@ fn append_long_form_component(
 fn prepare_single_analysis_dataset(
     analysis: &crate::state::AnalysisResult,
     waveforms: &[&crate::state::WaveformData],
+    touchstone: bool,
 ) -> Result<PreparedWaveformDataset, String> {
     let (x_name, x_signal_type) = axis_signal_for_analysis_type(analysis.analysis_type);
-    let mut prepared = prepare_flat_waveform_dataset(waveforms, x_name, x_signal_type)?;
+    let mut prepared =
+        if touchstone && analysis.analysis_type == crate::state::AnalysisType::SParameter {
+            prepare_touchstone_waveform_dataset(waveforms)?
+        } else {
+            prepare_flat_waveform_dataset(waveforms, x_name, x_signal_type)?
+        };
     if let Some(crate::state::AnalysisResultFamilyMetadata::SParameter {
         reference_impedances_ohm,
         noise_reference_temperature_kelvin,
@@ -1467,18 +1481,67 @@ fn prepare_single_analysis_dataset(
             .dataset
             .metadata
             .insert("z0".to_owned(), reference_impedances_ohm[0].to_string());
-        if let Some(temperature) = noise_reference_temperature_kelvin {
+        if let Some(temperature) = noise_reference_temperature_kelvin
+            && (!touchstone
+                || waveforms.iter().any(|waveform| {
+                    matches!(waveform.name.as_str(), "Fmin" | "Rn" | "F")
+                        || waveform.complex.as_ref().is_some_and(|complex| {
+                            complex.source_name == "Sopt" || complex.source_name.starts_with("CY(")
+                        })
+                }))
+        {
             prepared.dataset.metadata.insert(
                 "noise_reference_temperature_kelvin".to_owned(),
                 temperature.to_string(),
             );
-            prepared
-                .dataset
-                .metadata
-                .insert("noise_covariance_unit".to_owned(), "A²/Hz".to_owned());
+            if waveforms.iter().any(|waveform| {
+                waveform
+                    .complex
+                    .as_ref()
+                    .is_some_and(|complex| complex.source_name.starts_with("CY("))
+            }) {
+                prepared
+                    .dataset
+                    .metadata
+                    .insert("noise_covariance_unit".to_owned(), "A²/Hz".to_owned());
+            }
         }
     }
     Ok(prepared)
+}
+
+fn prepare_touchstone_waveform_dataset(
+    waveforms: &[&crate::state::WaveformData],
+) -> Result<PreparedWaveformDataset, String> {
+    let network = waveforms
+        .iter()
+        .find(|waveform| {
+            waveform.complex.as_ref().is_some_and(|complex| {
+                complex.source_name.starts_with('S') && complex.source_name != "Sopt"
+            })
+        })
+        .ok_or("Touchstone export requires complex S-parameter network traces")?;
+    let mut dataset = crate::io::WaveformDataset::new("S-Parameter");
+    let mut axis = crate::io::WaveformSignal::new("frequency", crate::io::SignalType::Frequency);
+    axis.data = network.x.as_ref().clone();
+    dataset.set_x(axis);
+    let mut warnings = Vec::new();
+    for waveform in waveforms {
+        let first = dataset.signals.len();
+        append_waveform_signal(
+            &mut dataset,
+            &mut warnings,
+            &waveform.name,
+            waveform,
+            waveform.x.len(),
+        )?;
+        if waveform.x != network.x {
+            for signal in &mut dataset.signals[first..] {
+                signal.x_values = Some(waveform.x.as_ref().clone());
+            }
+        }
+    }
+    Ok(PreparedWaveformDataset { dataset, warnings })
 }
 
 fn prepare_flat_waveform_dataset(

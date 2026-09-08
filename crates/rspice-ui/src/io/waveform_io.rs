@@ -13,6 +13,9 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+const MAX_TOUCHSTONE_PORTS: usize = 64;
+
+mod touchstone_noise;
 mod touchstone_reader;
 mod types;
 mod writer;
