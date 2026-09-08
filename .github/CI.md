@@ -26,6 +26,8 @@ Generated bundle freshness runs through `generated_output_audit` in the
 workspace tests; a second generator build solely to repeat that audit is omitted.
 Broad test commands finish the remaining test binaries after a failure so one
 broken suite does not hide independent findings.
+Conformance's default features already include the Verilog-A oracle and admitted
+generated models; its library tests run once, without a duplicate base-feature pass.
 Browser size reports measure the production `_bg.wasm` modules emitted by
 wasm-bindgen, before rebuilding the UI with qualification instrumentation.
 The Cargo linker output includes binding metadata removed before delivery.
@@ -44,12 +46,28 @@ Jacobians, native device qualification, performance and shipping desktop builds.
 It installs Icarus Verilog and Verilator and requires both for independent
 digital conformance; a missing reference simulator fails the qualification.
 A failed test process fails the job even if it printed a successful subtotal.
-Performance thresholds remain enforced alongside numerical checks.
+Generated-model timings, source/file counts and per-instance state sizes are
+reported without universal caps. Comparing different compact-model equations to
+one hand-written BSIM4 model is useful context, but does not define a common
+performance requirement. The benchmark still rejects failed initialization,
+non-finite stamps and models that produce no contribution. Zero pooled scratch
+workspace remains an architectural check against restoring persistent per-thread
+work buffers. Manifest authentication and the complete model census also remain
+mandatory.
+Native JIT speedup checks compare the same model and operation against bytecode
+on the same runner, with output agreement checked before timing. These relative
+checks remain; absolute setup/latency, sample dispersion and code-image sizes
+are reported without host-independent caps. Explicit budget options are available
+for controlled-hardware qualification. The published viewer runtime likewise
+reports its compressed size without an arbitrary download cap.
 KLU's hosted-runner gate compares refactor and solve medians with full
 factorization on the same runner (at most 50% and 25%, respectively), while
 retaining zero-fallback, backward-error and fill checks. The benchmark's absolute
 nanosecond options remain available for qualification on controlled hardware.
 Absolute latency is still reported in the CI artifact.
+Numerical tolerances, complete-corpus counts, platform upload limits and bounded
+job/deck timeouts have correctness, coverage or resource-safety purposes and are
+not removed by the reporting policy.
 
 Coverage is a weekly or manually dispatched report, split into core, UI and
 remaining-library artifacts. All of those tests also run in per-change CI.

@@ -136,6 +136,38 @@ mod tests {
     }
 
     #[test]
+    fn native_host_budgets_are_opt_in_and_explicit_values_are_preserved() {
+        let cli = Cli::try_parse_from(["rspice-bench", "native-jit"]).unwrap();
+        let BenchCommand::NativeJit(args) = cli.command else {
+            panic!("native-jit command expected");
+        };
+        assert_eq!(args.max_native_setup_ms, None);
+        assert_eq!(args.max_native_p95_ns_per_sweep, None);
+        assert_eq!(args.max_relative_stddev, None);
+        assert_eq!(args.max_native_code_bytes, None);
+        let cli = Cli::try_parse_from([
+            "rspice-bench",
+            "native-jit",
+            "--max-native-setup-ms",
+            "10",
+            "--max-native-p95-ns-per-sweep",
+            "5000",
+            "--max-relative-stddev",
+            "0.25",
+            "--max-native-code-bytes",
+            "16384",
+        ])
+        .unwrap();
+        let BenchCommand::NativeJit(args) = cli.command else {
+            panic!("native-jit command expected");
+        };
+        assert_eq!(args.max_native_setup_ms, Some(10.0));
+        assert_eq!(args.max_native_p95_ns_per_sweep, Some(5000.0));
+        assert_eq!(args.max_relative_stddev, Some(0.25));
+        assert_eq!(args.max_native_code_bytes, Some(16384));
+    }
+
+    #[test]
     fn klu_sizes_accept_a_comma_separated_sweep() {
         let cli = Cli::try_parse_from(["rspice-bench", "klu", "--sizes", "64,256"])
             .expect("comma-separated sizes parse");

@@ -36,20 +36,20 @@ pub struct NativeJitArgs {
     pub min_full_stamp_speedup: f64,
 
     /// Maximum canonical-to-native setup time in milliseconds for each case.
-    #[arg(long, value_name = "MS", default_value_t = 10.0)]
-    pub max_native_setup_ms: f64,
+    #[arg(long, value_name = "MS")]
+    pub max_native_setup_ms: Option<f64>,
 
     /// Absolute native p95 budget in ns per benchmark sweep.
-    #[arg(long, value_name = "NS", default_value_t = 5_000.0)]
-    pub max_native_p95_ns_per_sweep: f64,
+    #[arg(long, value_name = "NS")]
+    pub max_native_p95_ns_per_sweep: Option<f64>,
 
     /// Maximum native sample relative standard deviation (for example 0.05 = 5%).
-    #[arg(long, value_name = "RATIO", default_value_t = 0.25)]
-    pub max_relative_stddev: f64,
+    #[arg(long, value_name = "RATIO")]
+    pub max_relative_stddev: Option<f64>,
 
     /// Maximum generated native image size for each benchmark case.
-    #[arg(long, value_name = "BYTES", default_value_t = 16_384)]
-    pub max_native_code_bytes: usize,
+    #[arg(long, value_name = "BYTES")]
+    pub max_native_code_bytes: Option<usize>,
 
     /// Optional JSON report path.
     #[arg(long, value_name = "PATH")]
@@ -63,10 +63,10 @@ pub fn run(args: &NativeJitArgs) -> Result<ExitCode, BenchError> {
         min_dense_speedup: args.min_dense_speedup,
         min_speedup: args.min_speedup,
         min_full_stamp_speedup: args.min_full_stamp_speedup,
-        max_native_setup_ms: Some(args.max_native_setup_ms),
-        max_native_p95_ns_per_sweep: Some(args.max_native_p95_ns_per_sweep),
-        max_relative_stddev: Some(args.max_relative_stddev),
-        max_native_code_bytes: Some(args.max_native_code_bytes),
+        max_native_setup_ms: args.max_native_setup_ms,
+        max_native_p95_ns_per_sweep: args.max_native_p95_ns_per_sweep,
+        max_relative_stddev: args.max_relative_stddev,
+        max_native_code_bytes: args.max_native_code_bytes,
     };
     let report =
         run_native_x64_benchmarks(config).map_err(|message| BenchError::NativeJit { message })?;

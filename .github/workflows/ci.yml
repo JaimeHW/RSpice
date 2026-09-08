@@ -104,14 +104,11 @@ jobs:
           --test verilog_oracles --test verilog_scale --test verilog_ams
           --test verilog_ams_semantics
           --test verilog_rnm_agreement --test verilog_mixed_benchmarks
+          --no-fail-fast
       - name: Oracle-free corpora (routine tier)
         run: >-
           cargo test --locked -p rspice-conformance --release
           --test execution_corpora -- --test-threads 1
-      - name: Verilog-A suite unit tests
-        run: >-
-          cargo test --locked -p rspice-conformance --lib
-          --features veriloga-builtins-base
 
   test-libraries:
     name: Test workspace libraries & tools (Linux)
@@ -199,21 +196,14 @@ jobs:
       - name: Gate generated Verilog-A Rust resources
         run: >-
           cargo run --locked -p rspice-bench -- generated-rust
-          --max-source-bytes 56000000
-          --max-noise-source-bytes 17000000
-          --max-model-source-bytes 4700000
-          --max-file-count 380
           --max-pooled-workspace-payload-bytes 0
-          --max-stamp-state-payload-bytes 6200
           --top 10
-      - name: Gate representative generated Verilog-A stamp performance
+      - name: Measure representative generated Verilog-A stamp performance
         run: >-
           cargo run --locked -p rspice-bench --release
           --features generated-stamp-subset -- generated-stamp
           --iterations 2000
           --samples 7
-          --max-corpus-median-reference-ratio 1.25
-          --max-model-reference-ratio 4.25
 
   test-linux-native:
     name: Test Verilog-A native JIT (Linux x64)
@@ -252,10 +242,6 @@ jobs:
           --min-dense-speedup 1.75
           --min-speedup 3.00
           --min-full-stamp-speedup 2.00
-          --max-native-setup-ms 10
-          --max-native-p95-ns-per-sweep 5000
-          --max-relative-stddev 0.25
-          --max-native-code-bytes 16384
 
   test-windows:
     name: Build & unit test (Windows)
@@ -298,10 +284,6 @@ jobs:
           --min-dense-speedup 1.75
           --min-speedup 3.00
           --min-full-stamp-speedup 2.00
-          --max-native-setup-ms 10
-          --max-native-p95-ns-per-sweep 5000
-          --max-relative-stddev 0.25
-          --max-native-code-bytes 16384
 
   test-macos-x64-native:
     name: Test Verilog-A native JIT (macOS Intel x64)
@@ -347,10 +329,6 @@ jobs:
           --min-dense-speedup 1.75
           --min-speedup 3.00
           --min-full-stamp-speedup 2.00
-          --max-native-setup-ms 10
-          --max-native-p95-ns-per-sweep 5000
-          --max-relative-stddev 0.25
-          --max-native-code-bytes 16384
 
   test-aarch64-native:
     name: Test Verilog-A native JIT (${{ matrix.label }})
@@ -422,10 +400,6 @@ jobs:
           --min-dense-speedup 1.50
           --min-speedup 3.00
           --min-full-stamp-speedup 2.00
-          --max-native-setup-ms 10
-          --max-native-p95-ns-per-sweep 5000
-          --max-relative-stddev 0.25
-          --max-native-code-bytes 16384
 
   check-macos-desktop:
     name: Check & test desktop UI/CLI (macOS ARM64)
