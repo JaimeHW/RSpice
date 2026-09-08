@@ -242,7 +242,7 @@ def main():
                         help="Use SwiftShader for functional CI, without qualifying physical GPU support")
     args = parser.parse_args()
     inputs = {}
-    for name in ("index.html", "simulation-worker.js", "automation-worker.js",
+    for name in ("index.html", "simulation-worker.js", "automation-worker.js", "wasm-loader.js",
                  "pkg/rspice-ui.js", "pkg/rspice-ui_bg.wasm",
                  "pkg/rspice-ui-worker.js", "pkg/rspice-ui-worker_bg.wasm"):
         data = (args.web_root / name).read_bytes()

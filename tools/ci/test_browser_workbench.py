@@ -5,13 +5,75 @@ import hashlib
 from pathlib import Path
 import tempfile
 import unittest
+import functools
+import http.server
+import threading
+import urllib.request
 from unittest.mock import Mock
 
 from browser_workbench import WorkbenchBrowser, controls
 from check_browser_workbench import verify_checkpoint, verify_recovery_copy
+from check_browser_release import ReleaseHandler, startup_ready, verify_worker_urls
+from check_wasm_jit_browser import qualification_worker
 
 
 class BrowserWorkbenchTests(unittest.TestCase):
+    def test_packaged_headers_apply_to_real_and_virtual_browser_pages(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "_headers").write_text("/*\n  Content-Security-Policy: script-src 'self' 'wasm-unsafe-eval'\n/assets/*\n  Cache-Control: public, max-age=3600\n", encoding="utf-8")
+            (root / "assets").mkdir()
+            (root / "assets/probe.js").write_text("export const probe = true;", encoding="utf-8")
+            handler = functools.partial(ReleaseHandler, directory=str(root))
+            with http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler) as server:
+                for path, cached in (("/assets/probe.js?v=1", True), ("/__rspice_qualification__/automation.html", False)):
+                    thread = threading.Thread(target=server.handle_request)
+                    thread.start()
+                    try:
+                        with urllib.request.urlopen(f"http://127.0.0.1:{server.server_port}{path}", timeout=5) as response:
+                            self.assertEqual(response.headers["Content-Security-Policy"], "script-src 'self' 'wasm-unsafe-eval'")
+                            self.assertEqual(response.headers.get("Cache-Control"), "public, max-age=3600" if cached else None)
+                    finally:
+                        thread.join(timeout=5)
+
+    def test_static_canvas_is_not_successful_application_startup(self):
+        ready = {"canvas": True, "loading": False, "worker_ready": True}
+        self.assertTrue(startup_ready(ready))
+        for changed in ({"canvas": False}, {"loading": True}, {"worker_ready": False}):
+            self.assertFalse(startup_ready({**ready, **changed}))
+        with self.assertRaisesRegex(AssertionError, "startup failed"):
+            startup_ready({**ready, "error": "startup failed"})
+
+    def test_release_workers_share_the_exact_packaged_cohort(self):
+        base = "https://example.test/ide/assets/" + "a" * 64 + "/"
+        state = {"simulation_worker": base + "simulation-worker.js",
+                 "automation_worker": base + "automation-worker.js"}
+        verify_worker_urls(state, base)
+        for key in state:
+            for value in (None, state[key].replace("/ide/assets/", "/assets/"),
+                          state[key].replace("a" * 64, "b" * 64)):
+                with self.assertRaises(AssertionError):
+                    verify_worker_urls({**state, key: value}, base)
+
+    def test_worker_qualification_finds_development_and_immutable_modules(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for prefix, compressed in (("", False), ("ide/assets/" + "a" * 64, True)):
+                assets = root / prefix
+                package = assets if compressed else assets / "pkg"
+                package.mkdir(parents=True, exist_ok=True)
+                worker = assets / "simulation-worker.js"
+                wasm = package / ("rspice-ui-worker_bg.wasm.gz" if compressed else "rspice-ui-worker_bg.wasm")
+                for path in (worker, assets / "wasm-loader.js", package / "rspice-ui-worker.js", wasm):
+                    path.write_bytes(b"fixture")
+                relative = worker.relative_to(root)
+                self.assertEqual(qualification_worker(root, str(relative)), relative)
+                wasm.unlink()
+                with self.assertRaisesRegex(ValueError, "missing"):
+                    qualification_worker(root, str(relative))
+            with self.assertRaisesRegex(ValueError, "inside the served tree"):
+                qualification_worker(root, "../simulation-worker.js")
+
     def test_diagnostic_collection_cannot_erase_the_original_console_failure(self):
         with tempfile.TemporaryDirectory() as directory:
             browser = WorkbenchBrowser.__new__(WorkbenchBrowser)

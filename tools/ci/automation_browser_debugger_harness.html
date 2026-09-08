@@ -2,11 +2,12 @@
 <html lang="en">
 <meta charset="utf-8">
 <title>RSpice browser Automation debugger qualification</title>
+<link rel="icon" href="data:,">
 <body>
 <pre id="result">running</pre>
 <script type="module">
 const result = document.querySelector("#result");
-const protocol = { major: 1, minor: 3 };
+const protocol = { major: 1, minor: 4 };
 const bytes = (hex) => Array.from(hex.match(/../g), pair => Number.parseInt(pair, 16));
 const environmentDigest = bytes("d445b1443965be4e6b1b191ee023176dbd35430ac3cd00603458384ea03b8518");
 const ids = {
@@ -76,7 +77,12 @@ const breakpoint = {
   enabled: true,
   kind: { kind: "stop" },
 };
-const worker = new Worker("/crates/rspice-ui/web/automation-worker.js", { type: "module" });
+const workerUrl = new URL(
+  new URL(location.href).searchParams.get("worker") || "/crates/rspice-ui/web/automation-worker.js",
+  location.href,
+);
+if (workerUrl.origin !== location.origin) throw new Error("Qualification worker must use this origin.");
+const worker = new Worker(workerUrl, { type: "module" });
 const events = [];
 let sessionId = null;
 let phase = "await-entry";
@@ -214,11 +220,11 @@ send(1, {
   snapshot,
   limits: {
     wall_time_ms: 60000,
-    cpu_time_ms: 30000,
-    memory_bytes: 268435456,
+    cpu_time_ms: 60000,
+    memory_bytes: 2147483648,
     output_bytes: 1048576,
     artifact_bytes: 1048576,
-    max_tasks: 16,
+    max_tasks: 1,
     max_stack_depth: 256,
   },
   breakpoints: [breakpoint],

@@ -8,6 +8,7 @@ import functools
 import http.server
 import math
 import pathlib
+import re
 import subprocess
 import shutil
 import tempfile
@@ -45,6 +46,15 @@ class QualificationHandler(http.server.SimpleHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802 - http.server's spelling
         parsed = urllib.parse.urlparse(self.path)
+        if parsed.path == "/wasm-jit-qualification.html":
+            source = pathlib.Path(__file__).resolve().parents[2] / "crates/rspice-ui/web/wasm-jit-qualification.html"
+            payload = source.read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+            return
         if parsed.path != VERDICT_PATH:
             super().do_GET()
             return
@@ -95,6 +105,22 @@ def find_chromium() -> str:
     raise SystemExit("Chrome/Chromium is required for the browser WASM JIT qualification")
 
 
+def qualification_worker(web_root: pathlib.Path, worker_path: str) -> pathlib.Path:
+    web_root = web_root.resolve()
+    worker = (web_root / worker_path).resolve()
+    if not worker.is_relative_to(web_root):
+        raise ValueError("qualification worker must stay inside the served tree")
+    release = worker.parent.parent.name == "assets" and re.fullmatch(r"[0-9a-f]{64}", worker.parent.name)
+    package = worker.parent if release else worker.parent / "pkg"
+    required = (worker, worker.parent / "wasm-loader.js",
+                package / "rspice-ui-worker.js",
+                package / ("rspice-ui-worker_bg.wasm.gz" if release else "rspice-ui-worker_bg.wasm"))
+    missing = [str(path) for path in required if not path.is_file()]
+    if missing:
+        raise ValueError("browser WASM JIT qualification is missing: " + ", ".join(missing))
+    return worker.relative_to(web_root)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -102,24 +128,21 @@ def main() -> None:
         type=pathlib.Path,
         default=pathlib.Path("crates/rspice-ui/web"),
     )
+    parser.add_argument("--worker-path", default="simulation-worker.js",
+                        help="worker relative to the served tree, including an immutable release directory")
     args = parser.parse_args()
     web_root = args.web_root.resolve()
-    required = (
-        web_root / "wasm-jit-qualification.html",
-        web_root / "simulation-worker.js",
-        web_root / "pkg" / "rspice-ui-worker.js",
-        web_root / "pkg" / "rspice-ui-worker_bg.wasm",
-    )
-    missing = [str(path) for path in required if not path.is_file()]
-    if missing:
-        raise SystemExit("browser WASM JIT qualification is missing: " + ", ".join(missing))
+    try:
+        worker = qualification_worker(web_root, args.worker_path)
+    except ValueError as error:
+        raise SystemExit(str(error)) from error
 
     handler = functools.partial(QualificationHandler, directory=str(web_root))
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     qualification_query = urllib.parse.urlencode(
-        {"expectedAbi": EXPECTED_WASM_JIT_ABI_VERSION}
+        {"expectedAbi": EXPECTED_WASM_JIT_ABI_VERSION, "worker": "/" + worker.as_posix()}
     )
     url = (
         f"http://127.0.0.1:{server.server_port}/wasm-jit-qualification.html"

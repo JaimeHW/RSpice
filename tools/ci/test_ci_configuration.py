@@ -995,10 +995,12 @@ class CiConfigurationTests(unittest.TestCase):
             workflow,
         )
         self.assertIn(
-            "cargo build --locked --profile web-release -p rspice-ui --bin rspice-ui --target wasm32-unknown-unknown",
+            "cargo build --locked --profile web-release -p rspice-ui --bin rspice-ui --features generated-veriloga-catalog --target wasm32-unknown-unknown",
             workflow,
         )
-        self.assertIn("--bin rspice-ui-worker --features browser-worker", workflow)
+        self.assertIn("--bin rspice-ui-worker --features browser-worker,generated-veriloga-catalog", workflow)
+        self.assertIn("--bin rspice-ui --features browser-qualification,generated-veriloga-catalog", workflow)
+        self.assertIn("node --test tools/ci/test_wasm_loader.mjs", workflow)
         self.assertIn("tools/ci/check_wasm_artifact_size.py", workflow)
         self.assertGreaterEqual(
             workflow.count("RUSTFLAGS: -D warnings"),

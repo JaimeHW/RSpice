@@ -14,7 +14,11 @@
     new URL(location.href).searchParams.get("expectedAbi") || "",
     10,
   );
-  const workerUrl = new URL("./simulation-worker.js", import.meta.url);
+  const workerUrl = new URL(
+    new URL(location.href).searchParams.get("worker") || "./simulation-worker.js",
+    location.href,
+  );
+  if (workerUrl.origin !== location.origin) throw new Error("Qualification worker must use this origin.");
   workerUrl.searchParams.set("v", `qualification-${Date.now()}`);
   const worker = new Worker(workerUrl, { type: "module" });
   const timeout = setTimeout(() => finish("timeout", "Worker qualification timed out."), 60000);

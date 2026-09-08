@@ -151,15 +151,15 @@ Run these commands from the workspace root:
 
 ```bash
 # Desktop application (binary name: rspice-ui)
-cargo run -p rspice-ui --release
+cargo run -p rspice-ui --release --features generated-veriloga-catalog
 
 # Unit tests (inline #[cfg(test)] modules across the crate)
 cargo test -p rspice-ui
 
 # Browser release images are deliberately built separately so Cargo feature
 # unification cannot pull worker execution paths back into the UI image.
-cargo build --locked --profile web-release -p rspice-ui --bin rspice-ui --target wasm32-unknown-unknown
-cargo build --locked --profile web-release -p rspice-ui --bin rspice-ui-worker --features browser-worker --target wasm32-unknown-unknown
+cargo build --locked --profile web-release -p rspice-ui --bin rspice-ui --features generated-veriloga-catalog --target wasm32-unknown-unknown
+cargo build --locked --profile web-release -p rspice-ui --bin rspice-ui-worker --features browser-worker,generated-veriloga-catalog --target wasm32-unknown-unknown
 wasm-bindgen --target web --out-name rspice-ui --out-dir crates/rspice-ui/web/pkg target/wasm32-unknown-unknown/web-release/rspice-ui.wasm
 wasm-bindgen --target web --out-name rspice-ui-worker --out-dir crates/rspice-ui/web/pkg target/wasm32-unknown-unknown/web-release/rspice-ui-worker.wasm
 python3 tools/ci/check_wasm_jit_browser.py
@@ -177,7 +177,7 @@ and a matching ChromeDriver are required; `--browser` and `--driver` select them
 when automatic discovery is unsuitable.
 
 ```bash
-cargo build --locked --profile web-release -p rspice-ui --bin rspice-ui --features browser-qualification --target wasm32-unknown-unknown
+cargo build --locked --profile web-release -p rspice-ui --bin rspice-ui --features browser-qualification,generated-veriloga-catalog --target wasm32-unknown-unknown
 wasm-bindgen --target web --out-name rspice-ui --out-dir crates/rspice-ui/web/pkg target/wasm32-unknown-unknown/web-release/rspice-ui.wasm
 python3 tools/ci/check_browser_workbench.py --output target/workbench-qualification
 python3 tools/ci/check_browser_engine_recovery.py --web-root crates/rspice-ui/web --output target/engine-recovery-qualification
@@ -207,9 +207,31 @@ it does not provide a production accessibility bridge. CI runs the harness's
 integrity regressions and the workbench sequence with software WebGPU, retaining
 the evidence on success or failure. Hardware and device qualification remain separate.
 
+The site assembler packages the two bindings and compressed modules together with
+`simulation-worker.js`, `wasm-loader.js`, `automation-worker.js`, and the pinned
+`python/` runtime in one content-addressed directory. The client owns decompression
+and worker routing; assembly only stamps the origin-rooted `/ide/assets/<hash>`
+path. The Python worker starts on demand using that same page-bound identity.
+
+Qualify the assembled production tree with a matching Chrome/ChromeDriver:
+
+```bash
+python3 tools/ci/check_wasm_jit_browser.py --web-root ../RSpice-Site/_site --worker-path ide/assets/<hash>/simulation-worker.js
+python3 tools/ci/check_browser_release.py --web-root ../RSpice-Site/_site --output target/browser-release-qualification
+```
+
+The second gate checks actual UI startup at three emulated viewport sizes,
+playground transient solves, and Python breakpoint/evaluate/step integration.
+It applies the packaged `_headers` policy and records screenshots, browser
+errors, and the hashes of the packaged inputs and response-header policy.
+It does not qualify physical tablet input, accessibility, or the full engineering
+workflow; the instrumented workbench and device qualification remain separate.
+
 The default test suite is self-contained. Parity checks against the separately
 governed `rspice-workbench-host` mockup sources are `#[ignore]`d, because that
-tree is a different repository and is not part of this checkout. Run them
+tree is a different repository and is not part of this checkout. Fixture example
+names are checked for internal consistency; shipping capability labels and
+implemented result formats are owned by the in-tree catalog and its tests. Run them
 explicitly, optionally pointing `RSPICE_MOCKUP_ROOT` at the checkout:
 
 ```bash

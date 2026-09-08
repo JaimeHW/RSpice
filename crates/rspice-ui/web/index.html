@@ -183,8 +183,8 @@
   function executableAsset(name) {
     const path = IS_RELEASE
       ? `${RELEASE_ASSET_ROOT}/${name}`
-      : name === "simulation-worker.js"
-        ? "./simulation-worker.js"
+      : name === "simulation-worker.js" || name === "automation-worker.js" || name === "wasm-loader.js"
+        ? `./${name}`
         : `./pkg/${name}`;
     // The OIDC callback may load this same entrypoint at a nested route. All
     // release and development assets are origin-rooted so that callback paths
@@ -305,6 +305,8 @@
     }
   }
 
+  // The Python runtime starts on demand; its URL stays bound to this page's assets.
+  window.__RSPICE_AUTOMATION_WORKER_URL = executableAsset("automation-worker.js").href;
   installSimulationWorker();
 
   // Give the canvas its real backing store before eframe's first paint.
@@ -335,11 +337,15 @@
     canvas.height = Math.round(canvas.clientHeight * ratio);
   }
 
-  const wasmModule = executableAsset("rspice-ui_bg.wasm");
-  import(executableAsset("rspice-ui.js").href)
-    .then(({ default: init }) => {
+  const wasmModule = executableAsset(IS_RELEASE ? "rspice-ui_bg.wasm.gz" : "rspice-ui_bg.wasm");
+  Promise.all([
+    import(executableAsset("rspice-ui.js").href),
+    import(executableAsset("wasm-loader.js").href),
+  ])
+    .then(async ([{ default: init }, { loadWasm }]) => {
+      const module_or_path = await loadWasm(wasmModule);
       sizeCanvasForFirstPaint();
-      return init({ module_or_path: wasmModule });
+      return init({ module_or_path });
     })
     .catch((e) => {
       showStartupError(`Failed to load the RSpice module: ${errorMessage(e)}`);

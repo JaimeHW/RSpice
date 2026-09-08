@@ -149,8 +149,11 @@ class IdeWorkerRoutingTests(unittest.TestCase):
                     'import(executableAsset("rspice-ui-worker.js").href)', worker
                 )
                 self.assertIn(
-                    'executableAsset("rspice-ui-worker_bg.wasm")', worker
+                    '"rspice-ui-worker_bg.wasm"', worker
                 )
+                self.assertIn('"rspice-ui-worker_bg.wasm.gz"', worker)
+                self.assertIn('import(executableAsset("wasm-loader.js").href)', worker)
+                self.assertIn('await loadWasm(wasmModule)', worker)
                 self.assertIn("runRspiceUiWorkerRequest", worker)
                 self.assertRegex(
                     worker, re.compile(r'postMessage\(\{\s*type: "ready"', re.S)
@@ -344,9 +347,12 @@ class IdeWorkerRoutingTests(unittest.TestCase):
                 for asset in (
                     "simulation-worker.js",
                     "rspice-ui.js",
-                    "rspice-ui_bg.wasm",
+                    "wasm-loader.js",
+                    "automation-worker.js",
                 ):
                     self.assertIn(f'executableAsset("{asset}")', index)
+                self.assertIn('executableAsset(IS_RELEASE ? "rspice-ui_bg.wasm.gz" : "rspice-ui_bg.wasm")', index)
+                self.assertIn('await loadWasm(wasmModule)', index)
                 self.assertIn(
                     "window.__RSPICE_SIM_WORKER_URL = workerUrl.href", index
                 )
@@ -358,9 +364,8 @@ class IdeWorkerRoutingTests(unittest.TestCase):
                 self.assertIn(
                     'import(executableAsset("rspice-ui-worker.js").href)', worker
                 )
-                self.assertIn(
-                    'executableAsset("rspice-ui-worker_bg.wasm")', worker
-                )
+                self.assertRegex(worker, re.compile(
+                    r'executableAsset\(\s*immutableReleaseAsset \? "rspice-ui-worker_bg.wasm.gz" : "rspice-ui-worker_bg.wasm"', re.S))
 
         main = MAIN.read_text(encoding="utf-8")
         self.assertRegex(

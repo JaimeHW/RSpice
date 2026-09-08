@@ -129,6 +129,14 @@ def runtime_digest() -> str:
 
 
 class BrowserAutomationRuntimeAssets(unittest.TestCase):
+    def test_browser_shell_installs_the_pinned_lazy_worker_url(self):
+        source = (WEB / "index.html").read_text(encoding="utf-8")
+        self.assertIn(
+            'window.__RSPICE_AUTOMATION_WORKER_URL = executableAsset("automation-worker.js").href;',
+            source,
+        )
+        self.assertIn('name === "automation-worker.js"', source)
+
     @classmethod
     def setUpClass(cls) -> None:
         cls.manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))

@@ -6,7 +6,7 @@ const developmentAssetVersion =
   workerUrl.searchParams.get("v") || `worker-${Date.now()}`;
 
 function executableAsset(name) {
-  const path = immutableReleaseAsset ? `./${name}` : `./pkg/${name}`;
+  const path = immutableReleaseAsset || name === "wasm-loader.js" ? `./${name}` : `./pkg/${name}`;
   const url = new URL(path, import.meta.url);
   if (!immutableReleaseAsset) {
     url.searchParams.set("v", developmentAssetVersion);
@@ -403,9 +403,14 @@ function dispatchWasmJitEntry(cacheKey, exportName, frameOffset) {
 }
 
 async function initializeWorkerModule() {
-  const module = await import(executableAsset("rspice-ui-worker.js").href);
-  const wasmModule = executableAsset("rspice-ui-worker_bg.wasm");
-  const wasmExports = await module.default({ module_or_path: wasmModule });
+  const [module, { loadWasm }] = await Promise.all([
+    import(executableAsset("rspice-ui-worker.js").href),
+    import(executableAsset("wasm-loader.js").href),
+  ]);
+  const wasmModule = executableAsset(
+    immutableReleaseAsset ? "rspice-ui-worker_bg.wasm.gz" : "rspice-ui-worker_bg.wasm",
+  );
+  const wasmExports = await module.default({ module_or_path: await loadWasm(wasmModule) });
   primaryWasmExports = wasmExports;
   workerModule = module;
   if (typeof module.runRspiceUiWorkerRequest !== "function") {
