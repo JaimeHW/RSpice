@@ -209,6 +209,12 @@ impl Bjt {
         self.ncn = 2.0;
         self.avc1 = 0.0;
         self.avc2_nominal = 0.0;
+        self.avcx1 = 0.0;
+        self.avcx2_nominal = 0.0;
+        self.avcx2 = 0.0;
+        self.tavcx = 0.0;
+        self.mcx = 0.33;
+        self.vbic_maxexp = 1e22;
         self.avc2 = 0.0;
         self.isp_nominal = 0.0;
         self.isp = 0.0;
@@ -628,7 +634,13 @@ impl Bjt {
         // Xyce's legacy GP model has no temperature coefficient for IRB
         // (JRB/IOB are aliases), so retain the nominal current threshold.
         self.irb = self.irb_nominal.max(0.0);
-        self.rcx = (rcx_temp / scale).max(0.0);
+        // Igcx is controlled by the current through RCX. Preserve Xyce's
+        // finite branch even for authored RCX=0 when avalanche needs it.
+        self.rcx = if self.vbic_13 && self.avcx1 > 0.0 {
+            rcx_temp.max(1e-3) / scale
+        } else {
+            (rcx_temp / scale).max(0.0)
+        };
         self.rci = (rci_temp / scale).max(0.0);
         self.vje = vje_temp;
         self.vjc = vjc_temp;
@@ -687,11 +699,14 @@ impl Bjt {
         self.ibcnp = (ibcnp_temp * scale).max(0.0);
         self.rs = (rs_temp / scale).max(0.0);
         self.rbp = (rbp_temp / scale).max(0.0);
-        self.avc2 = if avc2_temp.is_finite() {
+        self.avc2 = if self.vbic_13 {
+            avc2_temp
+        } else if avc2_temp.is_finite() {
             avc2_temp.max(0.0)
         } else {
             self.avc2_nominal
         };
+        self.avcx2 = self.avcx2_nominal * (1.0 + delta_t * self.tavcx);
         self.rth = self.rth_nominal.max(0.0);
         self.cth = self.thermal_capacitance();
     }
@@ -1330,6 +1345,17 @@ impl Bjt {
             self.td = v.max(0.0);
         }
         if self.vbic_13 {
+            for (name, destination) in [
+                ("AVCX1", &mut self.avcx1),
+                ("AVCX2", &mut self.avcx2_nominal),
+                ("TAVCX", &mut self.tavcx),
+                ("MCX", &mut self.mcx),
+                ("MAXEXP", &mut self.vbic_maxexp),
+            ] {
+                if let Some(&value) = params.get(name).filter(|value| value.is_finite()) {
+                    *destination = value;
+                }
+            }
             if let Some(&v) = params.get("TCRTH").filter(|v| v.is_finite()) {
                 self.tcrth = v;
             }

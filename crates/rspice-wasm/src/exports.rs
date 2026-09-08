@@ -209,6 +209,40 @@ mod wasm_tests {
     use crate::js_interop::{js_array_property, js_property};
 
     #[wasm_bindgen_test]
+    fn vbic13_extrinsic_avalanche_matches_xyce_in_wasm() {
+        for (level, kind, polarity, expected) in [
+            (
+                11,
+                "NPN",
+                1.0,
+                [-6.251124606622771e-5, 3.931202464614644e-6],
+            ),
+            (
+                12,
+                "PNP",
+                -1.0,
+                [5.919472910615865e-5, 1.1288947081972223e-6],
+            ),
+        ] {
+            let substrate = if level == 12 { " 0" } else { "" };
+            let netlist = rspice_core::Netlist::parse(&format!(
+                "VBIC13 avalanche in WASM\nVc c 0 {}\nVb b 0 {}\nQ1 c b 0{substrate} vm SW_ET=0\n\
+                 .model vm {kind}(LEVEL={level} IS=1e-16 IBEI=1e-18 IBCI=1e-18 RCX=10 RCI=2 RBX=5 RBI=3 RE=1 RBP=0 RS=0 AVCX1=0.05 AVCX2=0.3 GMIN=1e-6 TNOM=27)\n.temp 27\n.end\n",
+                polarity * 1.8, polarity * 0.7,
+            )).unwrap();
+            let result = rspice_core::Engine::default()
+                .run_dc_op_with_abort(&netlist, &rspice_core::abort_signal::NoAbort)
+                .unwrap();
+            for (branch, expected) in ["vc", "vb"].into_iter().zip(expected) {
+                assert!(
+                    (result.branch_current_named(branch).unwrap() - expected).abs()
+                        < 2e-7 * expected.abs()
+                );
+            }
+        }
+    }
+
+    #[wasm_bindgen_test]
     fn vbic_self_heating_switch_matches_xyce_in_wasm() {
         for (control, current) in [
             ("", -5.69505259e-5),

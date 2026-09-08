@@ -8,6 +8,31 @@ import rspice
 
 class TestDcOp:
     @pytest.mark.parametrize(
+        "level, kind, polarity, currents",
+        [
+            (11, "NPN", 1, [-6.251124606622771e-5, 3.931202464614644e-6]),
+            (12, "PNP", -1, [5.919472910615865e-5, 1.1288947081972223e-6]),
+        ],
+    )
+    def test_vbic13_extrinsic_avalanche_matches_xyce(
+        self, engine, level, kind, polarity, currents
+    ):
+        substrate = " 0" if level == 12 else ""
+        netlist = rspice.Netlist.parse_spice(
+            f"""* VBIC13 extrinsic avalanche
+Vc c 0 {polarity * 1.8}
+Vb b 0 {polarity * 0.7}
+Q1 c b 0{substrate} vm SW_ET=0
+.model vm {kind}(LEVEL={level} IS=1e-16 IBEI=1e-18 IBCI=1e-18 RCX=10 RCI=2 RBX=5 RBI=3 RE=1 RBP=0 RS=0 AVCX1=0.05 AVCX2=0.3 GMIN=1e-6 TNOM=27)
+.temp 27
+.end
+"""
+        )
+        result = engine.run_dc_op(netlist)
+        for branch, current in zip(("vc", "vb"), currents):
+            assert result.branch_current(branch) == pytest.approx(current, rel=2e-7)
+
+    @pytest.mark.parametrize(
         "control, current",
         [("", -5.69505259e-5), ("SW_ET=1", -5.69505259e-5), ("SW_ET=0", -5.67002151e-5)],
     )

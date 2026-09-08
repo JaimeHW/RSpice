@@ -5863,13 +5863,6 @@ impl Engine {
                                 )));
                             }
                         }
-                        validate_bjt_model_level(
-                            &element.name,
-                            model,
-                            &params_map,
-                            &device_model.expr_params,
-                            &device_model.string_params,
-                        )?;
                     }
 
                     let mut bjt = match resolved_bjt_type {
@@ -5907,6 +5900,10 @@ impl Engine {
                             &params_map,
                             &device_model.expr_params,
                             &device_model.string_params,
+                            !device_model.string_vector_params.is_empty()
+                                || !device_model.real_vector_params.is_empty()
+                                || !device_model.real_vector_expr_params.is_empty()
+                                || !device_model.integer_vector_params.is_empty(),
                         )?;
                         bjt = bjt.with_params(&params_map);
                     } else if let Some(card) = foundation_model {

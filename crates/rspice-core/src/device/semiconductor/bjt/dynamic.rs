@@ -31,8 +31,8 @@ impl Bjt {
         let vbci_eff = p * (vbi - vci);
         let vbcx_eff = p * (vbi - vcx);
 
-        let (exp_bci, dexp_bci_darg) = Self::limited_exp(vbci_eff / vt);
-        let (exp_bcx, dexp_bcx_darg) = Self::limited_exp(vbcx_eff / vt);
+        let (exp_bci, dexp_bci_darg) = self.vbic_general_exp(vbci_eff / vt);
+        let (exp_bcx, dexp_bcx_darg) = self.vbic_general_exp(vbcx_eff / vt);
         let d_exp_bci_dv = dexp_bci_darg / vt;
         let d_exp_bcx_dv = dexp_bcx_darg / vt;
 
@@ -333,7 +333,7 @@ impl Bjt {
         let dr_if_dvbe_eff = transport.gfi * sg_if * iitf;
         let m_if = r_if / (1.0 + r_if);
         let dm_if_dvbe_eff = dr_if_dvbe_eff / (1.0 + r_if).powi(2);
-        let (bc_exp, bc_exp_slope) = Self::limited_exp(vbc_eff * ivtf / 1.44);
+        let (bc_exp, bc_exp_slope) = self.vbic_general_exp(vbc_eff * ivtf / 1.44);
         let dbc_exp_dvbc_eff = bc_exp_slope * ivtf / 1.44;
         let tf_base = self.tf * (1.0 + self.qtf * transport.q1);
         let tf_mod = 1.0 + self.xtf * bc_exp * (sl_tf + m_if * m_if) * sg_if;

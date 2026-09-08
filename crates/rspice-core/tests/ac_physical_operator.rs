@@ -74,6 +74,89 @@ fn vbic_overlap_capacitance_has_positive_admittance_for_both_polarities() {
 }
 
 #[test]
+fn vbic_collapsed_parasitic_base_preserves_its_junction_admittance() {
+    // RBP=0 joins BP to CX; it must retain both the BEP diode and charge.
+    let vt = 1.380_662e-23 * 300.15 / 1.602_189e-19;
+    let conductance = 1e-15 * (0.2_f64 / vt).exp() / vt;
+    let capacitance = 1e-8 / (1.0_f64 - 0.2 / 0.75).powf(0.33);
+    let expected = Complex64::new(conductance, std::f64::consts::TAU * 1e3 * capacitance);
+    for level in [4, 11, 12] {
+        for (kind, polarity) in [("NPN", 1.0), ("PNP", -1.0)] {
+            let substrate = if level == 11 { "" } else { " 0" };
+            let point = solve_one(&format!(
+                "Collapsed VBIC parasitic junction\nVc c 0 {}\nVb b 0 DC {} AC 1\nQ1 c b 0{substrate} vm\n\
+                 .model vm {kind}(LEVEL={level} IS=1e-40 IBEI=0 IBCI=0 ISP=0 IBEIP=1e-15 CJEP=10n PC=0.75 MC=0.33 RCX=0 RCI=0 RBX=0 RBI=0 RE=0 RBP=0 RS=0 GMIN=0 TNOM=27)\n.temp 27\n.options gmin=0\n.end\n",
+                polarity * -0.1,
+                polarity * 0.1,
+            ));
+            let base = branch_current(&point, "vb");
+            let collector = branch_current(&point, "vc");
+            assert!(
+                (base + expected).norm() < 1e-8 * expected.norm(),
+                "{level} {kind}: {base:?} != {:?}",
+                -expected
+            );
+            assert!((collector - expected).norm() < 1e-8 * expected.norm());
+            assert!(
+                !point
+                    .node_names
+                    .iter()
+                    .any(|name| name.eq_ignore_ascii_case("Q1.__bp.internal"))
+            );
+        }
+    }
+}
+
+#[test]
+fn vbic13_extrinsic_avalanche_thermal_derivative_matches_xyce710() {
+    for (level, kind, expected) in [
+        (11, "NPN", [-1.108942174568846e-5, 3.050645763975771e-7]),
+        (11, "PNP", [1.0242380896211347e-5, 4.874652997592307e-7]),
+        (12, "NPN", [-1.1089201183715468e-5, 3.048295550222748e-7]),
+        (12, "PNP", [1.0242370251186067e-5, 4.872579221019698e-7]),
+    ] {
+        let polarity = if kind == "PNP" { -1.0 } else { 1.0 };
+        let substrate = if level == 12 { " 0" } else { "" };
+        let point = solve_one(&format!(
+            "VBIC13 avalanche thermal AC\nVc c 0 {}\nVb b 0 {}\nVth th 0 DC 20 AC 1\nQ1 c b 0{substrate} th vm SW_ET=0\n\
+             .model vm {kind}(LEVEL={level} IS=1e-16 IBEI=1e-18 IBCI=1e-18 RCX=10 RCI=2 RBX=5 RBI=3 RE=1 RBP=0 RS=0 AVCX1=0.05 AVCX2=0.3 TAVCX=0.01 RTH=1000 GMIN=1e-6 TNOM=27)\n.temp 27\n.end\n",
+            polarity * 1.8,
+            polarity * 0.7,
+        ));
+        for (branch, expected) in ["vc", "vb"].into_iter().zip(expected) {
+            let actual = branch_current(&point, branch);
+            assert!(
+                (actual.re - expected).abs() < 2e-7 * expected.abs(),
+                "{level} {kind} {branch}: {actual:?} != {expected:e}"
+            );
+            assert_eq!(actual.im, 0.0);
+        }
+    }
+}
+
+#[test]
+fn vbic13_maxexp_controls_forward_diffusion_capacitance() {
+    // With unit base charge and VTF=0, Qbe = TF*(1+2*expLin(0))*If.
+    // Driving the base directly exposes its differential capacitance.
+    let vt = 1.380_662e-23 * 300.15 / 1.602_189e-19;
+    for level in [11, 12] {
+        for (kind, polarity) in [("NPN", 1.0), ("PNP", -1.0)] {
+            let substrate = if level == 12 { " 0" } else { "" };
+            let point = solve_one(&format!(
+                "VBIC13 limited diffusion charge\nVc c 0 {}\nVb b 0 DC {} AC 1\nQ1 c b 0{substrate} vm SW_ET=0\n\
+                 .model vm {kind}(LEVEL={level} IS=1e-16 IBEI=0 IBCI=0 ISP=0 RCX=0 RCI=0 RBX=0 RBI=0 RE=0 RBP=0 RS=0 GMIN=0 TF=1n XTF=2 MAXEXP=0.1 TNOM=27)\n.temp 27\n.end\n",
+                polarity * 1.8,
+                polarity * 0.7,
+            ));
+            let gm = 1e-16 * (0.7_f64 / vt).exp() / vt;
+            let tf = 1e-9 * (1.0 + 2.0 * 0.1 * (1.0 - 0.1_f64.ln()));
+            let expected = -std::f64::consts::TAU * 1e3 * gm * tf;
+            assert!((branch_current(&point, "vb").im - expected).abs() < 1e-8 * expected.abs());
+        }
+    }
+}
+
+#[test]
 fn vbic13_thermal_port_matches_temperature_dependent_rc_admittance() {
     // SW_ET=0 isolates the thermal R/C port. Its AC conductance is
     // d[theta/R(T)]/dtheta, not simply 1/R(T), and CTH has no hidden floor.

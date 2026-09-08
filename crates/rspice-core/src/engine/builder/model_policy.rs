@@ -638,7 +638,13 @@ pub(super) fn validate_bjt_model_level(
     params: &HashMap<String, f64>,
     expr_params: &[(String, String)],
     string_params: &[(String, String)],
+    has_vector_params: bool,
 ) -> Result<(), SimulationError> {
+    if has_vector_params {
+        return Err(SimulationError::Circuit(format!(
+            "BJT '{element_name}': model '{model}' contains vector parameters; native BJT model parameters must be scalars"
+        )));
+    }
     for (name, expr) in expr_params {
         if name.eq_ignore_ascii_case("LEVEL") {
             return Err(SimulationError::Circuit(format!(
@@ -667,7 +673,9 @@ pub(super) fn validate_bjt_model_level(
 
     validate_bjt_model_alias_groups(element_name, model, params, expr_params, string_params)?;
 
-    for name in ["TCRTH", "TMINCLIP", "TMAXCLIP"] {
+    for name in [
+        "TCRTH", "TMINCLIP", "TMAXCLIP", "AVCX1", "AVCX2", "TAVCX", "MCX", "MAXEXP",
+    ] {
         let authored = params.contains_key(name)
             || expr_params
                 .iter()
@@ -686,6 +694,9 @@ pub(super) fn validate_bjt_model_level(
                 && match name {
                     "TMINCLIP" => (-250.0..=27.0).contains(value),
                     "TMAXCLIP" => (27.0..=1000.0).contains(value),
+                    "AVCX1" | "AVCX2" => *value >= 0.0,
+                    "MCX" => *value > 0.0 && *value <= 1.0,
+                    "MAXEXP" => *value > 0.0,
                     _ => true,
                 }
         });
@@ -695,6 +706,9 @@ pub(super) fn validate_bjt_model_level(
                 match name {
                     "TMINCLIP" => " in [-250, 27] Celsius",
                     "TMAXCLIP" => " in [27, 1000] Celsius",
+                    "AVCX1" | "AVCX2" => " greater than or equal to zero",
+                    "MCX" => " in (0, 1]",
+                    "MAXEXP" => " greater than zero",
                     _ => "",
                 }
             )));
@@ -1761,7 +1775,7 @@ mod tests {
     fn bjt_policy_rejects_redundant_aliases_before_model_construction() {
         let params = diode_params(&[("VAF", 50.0), ("VBF", 75.0)]);
 
-        let err = validate_bjt_model_level("Q1", "QMOD", &params, &[], &[])
+        let err = validate_bjt_model_level("Q1", "QMOD", &params, &[], &[], false)
             .expect_err("Xyce rejects multiple names for one BJT model quantity");
         let message = err.to_string();
         assert!(

@@ -181,8 +181,8 @@ struct BranchLinearization {
 pub(crate) const BJT_DYNAMIC_CHARGE_COUNT: usize = 11;
 pub(crate) const BJT_INTERNAL_STATE_DIM: usize = DYNAMIC_INTERNAL_DIM;
 pub(crate) const BJT_EXTERNAL_STATE_DIM: usize = EXTERNAL_DIM;
-pub(crate) const VBIC_TRANSIENT_CONVERGENCE_BRANCH_COUNT: usize = 10;
-pub(crate) const VBIC_TRANSIENT_CONVERGENCE_VOLTAGE_COUNT: usize = 9;
+pub(crate) const VBIC_TRANSIENT_CONVERGENCE_BRANCH_COUNT: usize = 11;
+pub(crate) const VBIC_TRANSIENT_CONVERGENCE_VOLTAGE_COUNT: usize = 10;
 pub(crate) const VBIC_TRANSIENT_CONVERGENCE_ICIEI_INDEX: usize = 2;
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -441,7 +441,7 @@ pub(crate) struct BjtChargeSnapshot {
 }
 
 pub(crate) const BJT_ACCEPTED_NONLINEAR_RUNTIME_TAG: &str = "legacy-gummel-poon-v2";
-const VBIC_ACCEPTED_NONLINEAR_RUNTIME_TAG: &str = "promoted-vbic-v1";
+const VBIC_ACCEPTED_NONLINEAR_RUNTIME_TAG: &str = "promoted-vbic-v2";
 
 const BJT_ACCEPTED_SCALAR_VALUE_COUNT: usize = 62;
 const BJT_REDUCED_CHECKPOINT_VALUE_COUNT: usize = INTERNAL_DIM
@@ -476,7 +476,7 @@ pub(crate) const VBIC_ACCEPTED_NONLINEAR_STATE_VALUE_COUNT: usize = BJT_ACCEPTED
     + EXTERNAL_DIM
     + BJT_INTERNAL_STATE_DIM
     + 12
-    + 14 * (1 + INTERNAL_DIM + EXTERNAL_DIM)
+    + 15 * (1 + INTERNAL_DIM + EXTERNAL_DIM)
     + (4 + BJT_DYNAMIC_CHARGE_COUNT) * BJT_CHARGE_BRANCH_CHECKPOINT_VALUE_COUNT;
 
 /// Fixed-shape wire image of one accepted legacy-GP transient charge snapshot.
@@ -537,6 +537,7 @@ struct EvaluatedBjtState {
     ibcp: BranchLinearization,
     iccp: BranchLinearization,
     irs: BranchLinearization,
+    igcx: BranchLinearization,
 }
 
 type BjtRowCoefficients = [Value; EXTERNAL_DIM];
@@ -1039,6 +1040,14 @@ pub struct Bjt {
     rbp_nominal: Value,
     /// Nominal weak avalanche parameter 2 before temperature scaling.
     avc2_nominal: Value,
+    /// VBIC 1.3 extrinsic base-collector avalanche parameters.
+    avcx1: Value,
+    avcx2_nominal: Value,
+    avcx2: Value,
+    tavcx: Value,
+    mcx: Value,
+    /// General exponential transition value for VBIC 1.3.
+    vbic_maxexp: Value,
     /// Nominal thermal resistance before multiplicity scaling.
     rth_nominal: Value,
     /// VBIC 1.3 thermal-resistance temperature coefficient (1/K).
@@ -1142,7 +1151,7 @@ pub struct Bjt {
 }
 
 impl Bjt {
-    const VBIC_CONVERGENCE_BRANCH_COUNT: usize = 10;
+    const VBIC_CONVERGENCE_BRANCH_COUNT: usize = 11;
     const THERMAL_VARIANT_CACHE_CAPACITY: usize = 4;
 
     #[inline]
@@ -1969,6 +1978,12 @@ impl Bjt {
             rs_nominal: 0.0,
             rbp_nominal: 0.1,
             avc2_nominal: 0.0,
+            avcx1: 0.0,
+            avcx2_nominal: 0.0,
+            avcx2: 0.0,
+            tavcx: 0.0,
+            mcx: 0.33,
+            vbic_maxexp: 1e22,
             rth_nominal: 0.0,
             tcrth: 0.0,
             tminclip: -100.0,
@@ -2113,7 +2128,7 @@ impl Bjt {
     /// the engine-supplied circuit junction GMIN directly.
     #[inline]
     fn nonlinear_branch_gmin(&self) -> Value {
-        if self.xyce_compatibility && self.charge_model == BjtChargeModel::Vbic {
+        if self.vbic_13 || (self.xyce_compatibility && self.charge_model == BjtChargeModel::Vbic) {
             self.vbic_model_gmin.unwrap_or(self.junction_gmin) * self.instance_scale()
         } else {
             self.junction_gmin
@@ -2681,7 +2696,7 @@ mod checkpoint_tests {
     fn versioned_bjt_checkpoint_numeric_payload_counts_are_pinned() {
         assert_eq!(BJT_ACCEPTED_NONLINEAR_STATE_VALUE_COUNT, 879);
         assert_eq!(BJT_ACCEPTED_CHARGE_SNAPSHOT_STATE_VALUE_COUNT, 449);
-        assert_eq!(VBIC_ACCEPTED_NONLINEAR_STATE_VALUE_COUNT, 560);
+        assert_eq!(VBIC_ACCEPTED_NONLINEAR_STATE_VALUE_COUNT, 573);
     }
 
     #[test]
