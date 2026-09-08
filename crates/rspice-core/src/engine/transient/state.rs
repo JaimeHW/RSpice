@@ -887,12 +887,13 @@ impl Engine {
                             cq_prev: history.charge_cq_prev[idx][branch_idx],
                         },
                     );
+                    let polarity = bjt.vbic_charge_branch_polarity(branch_idx);
                     Self::stamp_vbic_mna_charge_branch(
                         &mut stamper,
                         bjt,
                         branch,
-                        charge_factor,
-                        cq,
+                        polarity * charge_factor,
+                        polarity * cq,
                         &internal,
                         &external,
                     );

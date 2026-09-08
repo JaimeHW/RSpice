@@ -196,15 +196,16 @@ fn out_index(result: &rspice_core::engine::TransientResult) -> usize {
         .expect("out node present")
 }
 
-fn assert_scheduled_xspice_deck_resumes_exactly(
+fn assert_scheduled_deck_resumes_exactly(
     label: &str,
     deck: &str,
     tstop: f64,
     split: f64,
     step: f64,
-) {
+    config: SimulationConfig,
+) -> rspice_core::engine::TransientResult {
     let netlist = Netlist::parse(deck).unwrap_or_else(|err| panic!("{label} deck parses: {err}"));
-    let engine = Engine::new(SimulationConfig::default());
+    let engine = Engine::new(config);
 
     // Capture inside the baseline run so observing the checkpoint does not
     // introduce a new endpoint or perturb its adaptive accepted grid.
@@ -229,11 +230,9 @@ fn assert_scheduled_xspice_deck_resumes_exactly(
         .iter()
         .position(|time| time.to_bits() == checkpoint.time.to_bits())
         .unwrap_or_else(|| panic!("{label} checkpoint is an accepted baseline point"));
-    let full_out = out_index(&full);
     let (second, _) = engine
         .run_tran_resume(&netlist, &checkpoint, tstop, step)
         .unwrap_or_else(|err| panic!("{label} resumed segment completes: {err}"));
-    let second_out = out_index(&second);
 
     assert_eq!(
         second.time.len(),
@@ -252,16 +251,81 @@ fn assert_scheduled_xspice_deck_resumes_exactly(
             "{label} accepted grid differs at suffix row {row}"
         );
     }
-    for (row, (&actual, &expected)) in second.voltages[second_out]
-        .iter()
-        .zip(&full.voltages[full_out][baseline_index..])
-        .enumerate()
-    {
-        assert_eq!(
-            actual.to_bits(),
-            expected.to_bits(),
-            "{label} output differs at suffix row {row}: expected {expected:.17e}, got {actual:.17e}"
+    assert_eq!(second.node_names, full.node_names);
+    assert_eq!(second.branch_names, full.branch_names);
+    for (actual_columns, expected_columns) in [
+        (&second.voltages, &full.voltages),
+        (&second.branch_currents, &full.branch_currents),
+    ] {
+        assert_eq!(actual_columns.len(), expected_columns.len());
+        for (column, (actual, expected)) in actual_columns.iter().zip(expected_columns).enumerate()
+        {
+            assert_eq!(actual.len(), full.time.len() - baseline_index);
+            for (row, (&actual, &expected)) in
+                actual.iter().zip(&expected[baseline_index..]).enumerate()
+            {
+                assert_eq!(
+                    actual.to_bits(),
+                    expected.to_bits(),
+                    "{label} column {column} differs at suffix row {row}"
+                );
+            }
+        }
+    }
+    full
+}
+
+#[test]
+fn promoted_vbic_thermal_and_excess_phase_checkpoints_resume_every_state_exactly() {
+    for (kind, polarity) in [("NPN", 1.0), ("PNP", -1.0)] {
+        let deck = format!(
+            "VBIC and GP mixed-runtime checkpoint\n\
+             VCC supply 0 {}\n\
+             VIN base 0 DC {} SIN({} {} 1G)\n\
+             RC supply out 1k\nRE emitter 0 100\n\
+             Q1 out base emitter 0 active\nQ2 out base emitter 0 legacy\n\
+             .model active {kind} LEVEL=4 IS=1e-16 IBEI=1e-18 IBEN=5e-15 IBCI=2e-17 IBCN=5e-15 ISP=1e-15\n\
+             + RCX=10 RCI=60 RBX=10 RBI=40 RE=2 RS=20 RBP=40 VEF=10 VER=4 IKF=2m ITF=80m\n\
+             + XTF=20 IKR=200u IKP=200u CJE=100f CJC=20f CJEP=100f CJCP=400f VO=2\n\
+             + GAMM=2e-11 HRCF=2 QCO=1p AVC1=2 AVC2=15 TF=10p TR=100p TD=20p SELFT=1 RTH=300 CTH=1p\n\
+             .model legacy {kind} LEVEL=1 IS=1e-20 BF=100 CJE=1f\n.end\n",
+            polarity * 3.3,
+            polarity * 0.8,
+            polarity * 0.8,
+            polarity * 0.05,
         );
+        for dialect in [SpiceDialect::Ngspice, SpiceDialect::Xyce] {
+            for method in [
+                IntegrationMethod::BackwardEuler,
+                IntegrationMethod::Trapezoidal,
+                IntegrationMethod::Gear2,
+            ] {
+                let full = assert_scheduled_deck_resumes_exactly(
+                    &format!("{kind} {dialect:?} {method:?}"),
+                    &deck,
+                    0.5e-9,
+                    0.237e-9,
+                    1e-11,
+                    SimulationConfig {
+                        spice_dialect: dialect,
+                        integration_method: method,
+                        ..Default::default()
+                    },
+                );
+                for state in ["rth", "xf1", "xf2"] {
+                    let name = format!("Q1.__{state}.internal");
+                    let column = full
+                        .node_names
+                        .iter()
+                        .position(|node| node.eq_ignore_ascii_case(&name))
+                        .unwrap_or_else(|| panic!("{name} must be present"));
+                    assert!(
+                        full.voltages[column].iter().any(|value| value.abs() > 1e-8),
+                        "{kind} {dialect:?} {method:?}: {state} must be active"
+                    );
+                }
+            }
+        }
     }
 }
 
@@ -1114,23 +1178,25 @@ fn resume_requires_a_later_stop_time() {
 
 #[test]
 fn stateless_xspice_checkpoint_resume_tracks_unsegmented_gain() {
-    assert_scheduled_xspice_deck_resumes_exactly(
+    assert_scheduled_deck_resumes_exactly(
         "stateless XSPICE gain",
         XSPICE_GAIN_DECK,
         40e-9,
         20e-9,
         TAU_STEP,
+        SimulationConfig::default(),
     );
 }
 
 #[test]
 fn stateful_xspice_checkpoint_resume_tracks_unsegmented_integrator() {
-    assert_scheduled_xspice_deck_resumes_exactly(
+    assert_scheduled_deck_resumes_exactly(
         "stateful XSPICE integrator",
         XSPICE_INTEGRATOR_DECK,
         40e-9,
         20e-9,
         TAU_STEP,
+        SimulationConfig::default(),
     );
 }
 
@@ -1203,7 +1269,14 @@ rload out 0 1k
     ];
 
     for (label, deck, tstop, split, step) in cases {
-        assert_scheduled_xspice_deck_resumes_exactly(label, deck, tstop, split, step);
+        assert_scheduled_deck_resumes_exactly(
+            label,
+            deck,
+            tstop,
+            split,
+            step,
+            SimulationConfig::default(),
+        );
     }
 }
 

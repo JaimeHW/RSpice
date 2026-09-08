@@ -155,6 +155,15 @@ pub(super) struct BjtTransientHistory {
 
 pub(super) const BJT_TRANSIENT_HISTORY_RUNTIME_TAG: &str =
     "legacy-gummel-poon-transient-history-v2";
+pub(super) const VBIC_TRANSIENT_HISTORY_RUNTIME_TAG: &str = "promoted-vbic-transient-history-v1";
+
+fn bjt_history_runtime_tag(bjt: &crate::device::Bjt) -> &'static str {
+    if bjt.uses_vbic_dynamic_charges() && bjt.vbic_mna_promoted() {
+        VBIC_TRANSIENT_HISTORY_RUNTIME_TAG
+    } else {
+        BJT_TRANSIENT_HISTORY_RUNTIME_TAG
+    }
+}
 // V1 could freeze charge history whenever the local charge slope was zero
 // or negative. That lost history cannot be reconstructed from a capture.
 pub(super) const DIODE_TRANSIENT_HISTORY_RUNTIME_TAG: &str = "native-diode-transient-history-v2";
@@ -319,10 +328,12 @@ impl Engine {
                 .iter()
                 .map(|bjt| bjt.name.clone())
                 .collect(),
-            bjt_runtime_tags: vec![
-                BJT_TRANSIENT_HISTORY_RUNTIME_TAG.to_string();
-                circuit.bjts.devices.len()
-            ],
+            bjt_runtime_tags: circuit
+                .bjts
+                .devices
+                .iter()
+                .map(|bjt| bjt_history_runtime_tag(bjt).to_string())
+                .collect(),
             bjt_history: bjt_history.clone(),
             diode_names: circuit
                 .diodes
@@ -395,15 +406,18 @@ impl Engine {
                 ));
             }
             let captured_tag = &checkpoint.bjt_runtime_tags[index];
-            if captured_tag != BJT_TRANSIENT_HISTORY_RUNTIME_TAG {
+            let expected_tag = bjt_history_runtime_tag(bjt);
+            if captured_tag != expected_tag {
                 return Err(format!(
-                    "BJT '{}' transient history runtime mismatch: captured '{captured_tag}', runtime requires '{BJT_TRANSIENT_HISTORY_RUNTIME_TAG}'",
+                    "BJT '{}' transient history runtime mismatch: captured '{captured_tag}', runtime requires '{expected_tag}'",
                     bjt.name
                 ));
             }
-            if !bjt.uses_legacy_gummel_poon() {
+            if !(bjt.uses_legacy_gummel_poon()
+                || (bjt.uses_vbic_dynamic_charges() && bjt.vbic_mna_promoted()))
+            {
                 return Err(format!(
-                    "BJT '{}' transient history is not checkpointable; only the legacy Gummel-Poon runtime has a complete history contract",
+                    "BJT '{}' transient history is not checkpointable; its runtime requires a legacy Gummel-Poon or promoted VBIC history contract",
                     bjt.name
                 ));
             }

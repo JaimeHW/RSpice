@@ -224,6 +224,119 @@ impl MatrixStampError {
     }
 }
 
+/// Portable state of a real sparse solver between accepted solves.
+///
+/// The exact CSC pattern and resolved options identify the target. KLU's
+/// retained elimination state is stored directly; faer's deterministic numeric
+/// factorization is reconstructed from its last factored input. Scratch space
+/// and the matrix's current stamp values are not part of this image.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StaticMatrixSolverCheckpoint {
+    /// Numeric and symbolic reconstruction contract version.
+    pub version: u32,
+    /// Square system dimension.
+    pub dimension: usize,
+    /// Native CSC column boundaries, including the terminal nonzero count.
+    pub col_ptr: Vec<usize>,
+    /// Native CSC row indices in strict ascending order within each column.
+    pub row_idx: Vec<usize>,
+    /// Fully resolved factorization and backend policies.
+    pub options: SolverOptions,
+    /// Auto routing has permanently rejected KLU for this pattern's fill.
+    pub klu_auto_rejected: bool,
+    /// Current KLU factors, including their retained row scales.
+    pub klu: Option<crate::KluNumericCheckpoint>,
+    /// Native matrix values represented by `klu`; empty when KLU is unfactored.
+    pub klu_factored_values: Vec<Value>,
+    /// Last native input factored by faer, if its numeric cache is populated.
+    pub faer_factored_values: Option<Vec<Value>>,
+}
+
+impl StaticMatrixSolverCheckpoint {
+    /// Scalar storage charged to an embedding application's checkpoint budget.
+    pub fn retained_value_count(&self) -> usize {
+        let mut count = 12usize
+            .saturating_add(self.col_ptr.len())
+            .saturating_add(self.row_idx.len())
+            .saturating_add(self.klu_factored_values.len())
+            .saturating_add(self.faer_factored_values.as_ref().map_or(0, Vec::len));
+        if let Some(klu) = &self.klu {
+            for len in [
+                4,
+                klu.row_perm.len(),
+                klu.l_col_ptr.len(),
+                klu.l_rows.len(),
+                klu.l_values.len(),
+                klu.u_col_ptr.len(),
+                klu.u_rows.len(),
+                klu.u_values.len(),
+                klu.row_scale.len(),
+            ] {
+                count = count.saturating_add(len);
+            }
+        }
+        count
+    }
+
+    /// Validate shapes, indices and numeric values before accepting a wire image.
+    pub fn validate(&self) -> Result<(), SolverError> {
+        let invalid = |detail: &str| {
+            SolverError::InvalidCircuit(format!("invalid sparse-solver checkpoint: {detail}"))
+        };
+        let n = self.dimension;
+        if self.version != 1
+            || n == 0
+            || n > u32::MAX as usize
+            || n.checked_add(1) != Some(self.col_ptr.len())
+            || self.col_ptr[0] != 0
+            || self.col_ptr[n] != self.row_idx.len()
+            || self.col_ptr.windows(2).any(|pair| pair[0] > pair[1])
+        {
+            return Err(invalid("version or CSC shape"));
+        }
+        for column in self.col_ptr.windows(2) {
+            let rows = &self.row_idx[column[0]..column[1]];
+            if rows.iter().any(|&row| row >= n) || rows.windows(2).any(|pair| pair[0] >= pair[1]) {
+                return Err(invalid("CSC rows are not canonical"));
+            }
+        }
+        let options = self.options;
+        if !options.pivot_tolerance.is_finite()
+            || options.pivot_tolerance <= 0.0
+            || options.pivot_tolerance > 1.0
+            || !options.absolute_pivot_tolerance.is_finite()
+            || options.absolute_pivot_tolerance < 0.0
+            || (self.klu_auto_rejected
+                && (self.klu.is_some() || options.real_backend != RealSolverBackend::Auto))
+        {
+            return Err(invalid("solver policy"));
+        }
+        match &self.klu {
+            Some(klu) => {
+                klu.validate(n)?;
+                if self.klu_factored_values.len() != self.row_idx.len() {
+                    return Err(invalid("KLU value-cache shape"));
+                }
+            }
+            None if !self.klu_factored_values.is_empty() => {
+                return Err(invalid("orphan KLU value cache"));
+            }
+            None => {}
+        }
+        if self
+            .klu_factored_values
+            .iter()
+            .any(|value| !value.is_finite())
+            || self.faer_factored_values.as_ref().is_some_and(|values| {
+                values.len() != self.row_idx.len() || values.iter().any(|value| !value.is_finite())
+            })
+        {
+            return Err(invalid("factor input values"));
+        }
+        Ok(())
+    }
+}
+
 /// Pre-built matrix structure with static topology
 ///
 /// This is the critical optimization: we build the structure once during
@@ -1368,6 +1481,114 @@ impl StaticMatrix {
     #[inline]
     pub const fn solver_options(&self) -> SolverOptions {
         self.solver_options
+    }
+
+    /// Capture the retained numerical state without changing any solve policy.
+    pub fn capture_solver_checkpoint(&self) -> Result<StaticMatrixSolverCheckpoint, SolverError> {
+        self.check_stamping_error()?;
+        if self.nrows != self.ncols {
+            return Err(SolverError::InvalidCircuit(
+                "solver checkpoint requires a square matrix".into(),
+            ));
+        }
+        let klu = self
+            .klu
+            .as_ref()
+            .and_then(crate::KluSolver::capture_numeric_checkpoint);
+        let checkpoint = StaticMatrixSolverCheckpoint {
+            version: 1,
+            dimension: self.nrows,
+            col_ptr: self.csc.col_ptr().to_vec(),
+            row_idx: self.csc.row_idx().to_vec(),
+            options: self.solver_options,
+            klu_factored_values: if klu.is_some() {
+                self.klu_factored_values.clone()
+            } else {
+                Vec::new()
+            },
+            klu,
+            klu_auto_rejected: self.klu_auto_rejected,
+            faer_factored_values: self
+                .lu
+                .as_ref()
+                .filter(|lu| !lu.factored_values.is_empty())
+                .map(|lu| lu.factored_values.clone()),
+        };
+        checkpoint.validate()?;
+        Ok(checkpoint)
+    }
+
+    /// Check the full target pattern and resolved policy without mutating it.
+    pub fn validate_solver_checkpoint(
+        &self,
+        checkpoint: &StaticMatrixSolverCheckpoint,
+    ) -> Result<(), SolverError> {
+        checkpoint.validate()?;
+        if self.nrows != checkpoint.dimension
+            || self.ncols != checkpoint.dimension
+            || self.csc.col_ptr() != checkpoint.col_ptr
+            || self.csc.row_idx() != checkpoint.row_idx
+            || self.solver_options != checkpoint.options
+        {
+            return Err(SolverError::InvalidCircuit(
+                "sparse-solver checkpoint target pattern or policy mismatch".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Restore solver caches atomically, retaining the target's stamp values and tokens.
+    pub fn restore_solver_checkpoint(
+        &mut self,
+        checkpoint: &StaticMatrixSolverCheckpoint,
+    ) -> Result<(), SolverError> {
+        self.validate_solver_checkpoint(checkpoint)?;
+        // Build replacement workspaces separately: malformed factors, allocation
+        // failures or failed reconstruction leave the live matrix unchanged.
+        let triplets: Vec<_> = checkpoint
+            .col_ptr
+            .windows(2)
+            .enumerate()
+            .flat_map(|(col, range)| {
+                checkpoint.row_idx[range[0]..range[1]]
+                    .iter()
+                    .map(move |&row| (row, col, 0.0))
+            })
+            .collect();
+        let mut restored = Self::from_triplets_with_options(
+            self.nrows,
+            self.ncols,
+            &triplets,
+            self.solver_options,
+        )?;
+        if let Some(values) = &checkpoint.faer_factored_values {
+            restored.values.copy_from_slice(values);
+            restored.solve_faer_into(&vec![0.0; self.nrows], &mut Vec::new())?;
+        }
+        if let Some(numeric) = &checkpoint.klu {
+            let mut backend = crate::KluSolver::new();
+            configure_klu_backend(&mut backend, checkpoint.options)?;
+            let (col_ptr, row_idx, _) = prepare_klu_input(
+                checkpoint.options.circuit_lu_orientation,
+                &restored.csc,
+                &restored.residual_layout,
+                &checkpoint.klu_factored_values,
+                &mut restored.klu_oriented_values,
+                true,
+            );
+            backend.analyze(self.nrows, col_ptr, row_idx)?;
+            backend.restore_numeric_checkpoint(numeric)?;
+            restored.klu = Some(backend);
+            restored
+                .klu_factored_values
+                .clone_from(&checkpoint.klu_factored_values);
+        }
+        self.lu = restored.lu;
+        self.klu = restored.klu;
+        self.klu_factored_values = restored.klu_factored_values;
+        self.klu_oriented_values = restored.klu_oriented_values;
+        self.klu_auto_rejected = checkpoint.klu_auto_rejected;
+        Ok(())
     }
 
     /// Change the backend used by subsequent solves. Existing workspaces are
@@ -5676,6 +5897,166 @@ fn solve_gauss_extended(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn solver_checkpoint_preserves_reuse_refactor_and_transpose_results() {
+        let native = SolverOptions::default();
+        for options in [
+            native,
+            SolverOptions {
+                real_backend: RealSolverBackend::Klu,
+                ..native
+            },
+            SolverOptions {
+                real_backend: RealSolverBackend::Faer,
+                ..native
+            },
+            amesos_klu_options(),
+        ] {
+            for row_scale in [1.0, 1e-250] {
+                let entries = [
+                    (0, 0, 3.0 * row_scale),
+                    (1, 0, 5.0),
+                    (0, 1, row_scale),
+                    (1, 1, 2.0),
+                    (1, 2, 7.0),
+                    (2, 2, 11.0),
+                ];
+                let rhs = [13.0 * row_scale, 17.0, 19.0];
+                let mut source =
+                    StaticMatrix::from_triplets_with_options(3, 3, &entries, options).unwrap();
+                source.solve(&rhs).unwrap();
+                // Capture after values-only refactor, when reconstructing a fresh
+                // numeric pivot sequence can give a different continuation.
+                source.values_mut()[0] *= 0.91;
+                source.solve(&rhs).unwrap();
+                let checkpoint = source.capture_solver_checkpoint().unwrap();
+                let mut restored =
+                    StaticMatrix::from_triplets_with_options(3, 3, &entries, options).unwrap();
+                let target_values = restored.values.clone();
+                let token = restored.pattern_id;
+                restored.restore_solver_checkpoint(&checkpoint).unwrap();
+                assert_eq!(restored.values, target_values);
+                assert_eq!(restored.pattern_id, token);
+                assert_eq!(restored.capture_solver_checkpoint().unwrap(), checkpoint);
+                restored.values.copy_from_slice(&source.values);
+                for scale in [1.0, 1.01, 0.99] {
+                    source.values[0] *= scale;
+                    restored.values.copy_from_slice(&source.values);
+                    for transpose in [false, true] {
+                        let expected = if transpose {
+                            source.solve_transpose(&rhs)
+                        } else {
+                            source.solve(&rhs)
+                        }
+                        .unwrap();
+                        let actual = if transpose {
+                            restored.solve_transpose(&rhs)
+                        } else {
+                            restored.solve(&rhs)
+                        }
+                        .unwrap();
+                        assert_eq!(
+                            actual
+                                .iter()
+                                .map(|value| value.to_bits())
+                                .collect::<Vec<_>>(),
+                            expected
+                                .iter()
+                                .map(|value| value.to_bits())
+                                .collect::<Vec<_>>(),
+                            "{options:?}, row scale {row_scale}, change {scale}, transpose {transpose}"
+                        );
+                    }
+                    assert_eq!(
+                        restored.capture_solver_checkpoint().unwrap(),
+                        source.capture_solver_checkpoint().unwrap()
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn solver_checkpoint_preserves_auto_fallback_routing() {
+        let n = 512;
+        let triplets: Vec<_> = (0..n)
+            .flat_map(|col| {
+                (0..9).map(move |offset| {
+                    (
+                        (col + offset) % n,
+                        col,
+                        if offset == 0 { 20.0 } else { 0.125 },
+                    )
+                })
+            })
+            .collect();
+        let options = SolverOptions {
+            real_backend: RealSolverBackend::Auto,
+            ..Default::default()
+        };
+        let mut source =
+            StaticMatrix::from_triplets_with_options(n, n, &triplets, options).unwrap();
+        let rhs: Vec<_> = (0..n)
+            .map(|row| (row as Value + 1.0) / n as Value)
+            .collect();
+        source.solve(&rhs).unwrap();
+        let checkpoint = source.capture_solver_checkpoint().unwrap();
+        assert!(checkpoint.klu_auto_rejected);
+        assert!(checkpoint.klu.is_none());
+        assert!(checkpoint.faer_factored_values.is_some());
+        let mut restored =
+            StaticMatrix::from_triplets_with_options(n, n, &triplets, options).unwrap();
+        restored.restore_solver_checkpoint(&checkpoint).unwrap();
+        for delta in [0.0, 0.25] {
+            source.add(0, 0, delta);
+            restored.add(0, 0, delta);
+            let expected = source.solve(&rhs).unwrap();
+            let actual = restored.solve(&rhs).unwrap();
+            assert!(
+                expected
+                    .iter()
+                    .zip(actual)
+                    .all(|(a, b)| a.to_bits() == b.to_bits())
+            );
+            assert!(restored.klu_auto_rejected);
+        }
+    }
+
+    #[test]
+    fn solver_checkpoint_rejects_malformed_state_without_changing_live_factors() {
+        let mut matrix = StaticMatrix::from_triplets_with_options(
+            2,
+            2,
+            &[(0, 0, 3.0), (1, 0, 1.0), (0, 1, 2.0), (1, 1, 4.0)],
+            SolverOptions::default(),
+        )
+        .unwrap();
+        let expected = matrix.solve(&[5.0, 6.0]).unwrap();
+        let checkpoint = matrix.capture_solver_checkpoint().unwrap();
+        for fault in 0..8 {
+            let mut invalid = checkpoint.clone();
+            match fault {
+                0 => invalid.version += 1,
+                1 => invalid.col_ptr[1] = usize::MAX,
+                2 => invalid.row_idx[0] = invalid.dimension,
+                3 => invalid.options.real_backend = RealSolverBackend::Faer,
+                4 => {
+                    invalid.klu.as_mut().unwrap().row_perm[0] =
+                        invalid.klu.as_ref().unwrap().row_perm[1]
+                }
+                5 => *invalid.klu.as_mut().unwrap().u_values.last_mut().unwrap() = 0.0,
+                6 => invalid.klu.as_mut().unwrap().row_scale[0] = Value::NAN,
+                _ => invalid.klu_factored_values.pop().map(|_| ()).unwrap(),
+            }
+            assert!(
+                matrix.restore_solver_checkpoint(&invalid).is_err(),
+                "fault {fault}"
+            );
+            assert_eq!(matrix.capture_solver_checkpoint().unwrap(), checkpoint);
+            assert_eq!(matrix.solve(&[5.0, 6.0]).unwrap(), expected);
+        }
+    }
     use num_complex::Complex64;
 
     /// The triplet entries, the right-hand side, and the expected solution.

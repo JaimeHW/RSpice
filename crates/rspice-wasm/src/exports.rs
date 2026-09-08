@@ -209,6 +209,68 @@ mod wasm_tests {
     use crate::js_interop::{js_array_property, js_property};
 
     #[wasm_bindgen_test]
+    fn promoted_vbic_checkpoint_continues_exactly_in_wasm() {
+        use rspice_core::engine::{
+            TransientCheckpoint, TransientCheckpointEncoding, TransientStartupMode,
+        };
+        let abort = rspice_core::abort_signal::NoAbort;
+        for (kind, polarity) in [("NPN", 1.0), ("PNP", -1.0)] {
+            let netlist = rspice_core::Netlist::parse(&format!(
+            "* VBIC checkpoint in WASM\nVCC supply 0 {}\nVIN base 0 DC {} SIN({} {} 1G)\nRC supply out 1k\nRE emitter 0 100\nQ1 out base emitter 0 active\n.model active {kind} LEVEL=4 IS=1e-16 IBEI=1e-18\n+ RCX=10 RCI=60 RBX=10 RBI=40 RE=2 RS=20 RBP=40\n+ CJE=100f CJC=20f CJEP=100f CJCP=400f TF=10p TR=100p\n+ TD=20p SELFT=1 RTH=300 CTH=1p\n.end\n",
+            polarity * 3.3, polarity * 0.8, polarity * 0.8, polarity * 0.05,
+        )).unwrap();
+            let engine = rspice_core::Engine::default();
+            let (full, scheduled) = engine
+                .run_tran_checkpoint_schedule_with_startup_mode_and_abort(
+                    &netlist,
+                    0.5e-9,
+                    1e-11,
+                    TransientStartupMode::OperatingPoint,
+                    &[0.237e-9],
+                    &abort,
+                )
+                .unwrap();
+            let checkpoint = TransientCheckpoint::from_bytes(
+                &scheduled[0]
+                    .checkpoint
+                    .to_bytes_with_abort(TransientCheckpointEncoding::Packed, &abort)
+                    .unwrap(),
+            )
+            .unwrap();
+            let (resumed, _) = engine
+                .run_tran_resume_with_abort(&netlist, &checkpoint, 0.5e-9, 1e-11, &abort)
+                .unwrap();
+            let offset = full
+                .time
+                .iter()
+                .position(|time| time.to_bits() == checkpoint.time.to_bits())
+                .unwrap();
+            assert_eq!(resumed.time, full.time[offset..]);
+            assert_eq!(resumed.node_names, full.node_names);
+            for (actual, expected) in resumed
+                .voltages
+                .iter()
+                .zip(&full.voltages)
+                .chain(resumed.branch_currents.iter().zip(&full.branch_currents))
+            {
+                assert_eq!(actual.len(), expected.len() - offset);
+                for (actual, expected) in actual.iter().zip(&expected[offset..]) {
+                    assert_eq!(actual.to_bits(), expected.to_bits());
+                }
+            }
+            for state in ["rth", "xf1", "xf2"] {
+                let name = format!("Q1.__{state}.internal");
+                let column = full
+                    .node_names
+                    .iter()
+                    .position(|node| node.eq_ignore_ascii_case(&name))
+                    .unwrap();
+                assert!(full.voltages[column].iter().any(|value| value.abs() > 1e-8));
+            }
+        }
+    }
+
+    #[wasm_bindgen_test]
     fn periodic_waveform_precision_survives_wasm_time_and_amplitude_scales() {
         for frequency in [1e-300, 1e300, 1e308] {
             let period = 1.0 / frequency;

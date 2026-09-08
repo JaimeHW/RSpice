@@ -179,6 +179,46 @@ class TestTransientValidation:
 
 
 class TestTransientCheckpoint:
+    @pytest.mark.parametrize("kind,polarity", [("NPN", 1), ("PNP", -1)])
+    def test_vbic_thermal_and_excess_phase_checkpoint_file_resumes_exactly(
+        self, engine, tmp_path, kind, polarity
+    ):
+        netlist = rspice.Netlist.parse(
+            f"""* VBIC checkpoint through Python
+VCC supply 0 {polarity * 3.3}
+VIN base 0 DC {polarity * 0.8} SIN({polarity * 0.8} {polarity * 0.05} 1G)
+RC supply out 1k
+RE emitter 0 100
+Q1 out base emitter 0 active
+.model active {kind} LEVEL=4 IS=1e-16 IBEI=1e-18
++ RCX=10 RCI=60 RBX=10 RBI=40 RE=2 RS=20 RBP=40
++ CJE=100f CJC=20f CJEP=100f CJCP=400f TF=10p TR=100p
++ TD=20p SELFT=1 RTH=300 CTH=1p
+.end
+"""
+        )
+        _, checkpoint = engine.run_tran_checkpointed(
+            netlist, stop_time=0.237e-9, max_step=1e-11
+        )
+        path = tmp_path / "vbic.checkpoint"
+        checkpoint.save(path)
+        loaded = rspice.TransientCheckpoint.load(path)
+        expected, _ = engine.resume_tran(
+            netlist, checkpoint, stop_time=0.5e-9, max_step=1e-11
+        )
+        actual, _ = engine.resume_tran(
+            netlist, loaded, stop_time=0.5e-9, max_step=1e-11
+        )
+        assert np.array_equal(actual.time.view(np.uint64), expected.time.view(np.uint64))
+        assert actual.node_names == expected.node_names
+        for name in actual.node_names:
+            assert np.array_equal(
+                actual.voltage_waveform(name).view(np.uint64),
+                expected.voltage_waveform(name).view(np.uint64),
+            ), name
+        for state in ("rth", "xf1", "xf2"):
+            assert np.max(np.abs(actual.voltage_waveform(f"Q1.__{state}.internal"))) > 1e-8
+
     def test_unresumable_checkpoint_is_refused_during_run_preflight(self, engine):
         netlist = rspice.Netlist.parse(
             """* checkpoint capability blocker

@@ -55,6 +55,25 @@ fn assert_solver_singular(deck: &str) {
 }
 
 #[test]
+fn vbic_overlap_capacitance_has_positive_admittance_for_both_polarities() {
+    // With transport and junction capacitances negligible, Cbeo and the
+    // authored resistor form an ordinary 1 ms RC low-pass for either BJT type.
+    let expected = Complex64::new(1.0, 0.0) / Complex64::new(1.0, 2.0 * std::f64::consts::PI);
+    for kind in ["NPN", "PNP"] {
+        let point = solve_one(&format!(
+            "VBIC overlap-capacitance orientation\n\
+             V1 in 0 DC 0 AC 1\nR1 in out 1k\nQ1 0 out 0 qmod\n\
+             .model qmod {kind} LEVEL=4 IS=1e-30 IBEI=0 IBEN=0 IBCI=0 IBCN=0 ISP=0 CBEO=1u\n.end\n"
+        ));
+        let actual = voltage(&point, "out");
+        assert!(
+            (actual - expected).norm() < 1e-8,
+            "{kind} overlap capacitor must produce the passive RC response: {actual:?}, expected {expected:?}"
+        );
+    }
+}
+
+#[test]
 fn one_ampere_through_one_hundred_teraohms_produces_one_hundred_teravolts() {
     let point = solve_one(
         "one-ampere weak-conductance transimpedance\n\

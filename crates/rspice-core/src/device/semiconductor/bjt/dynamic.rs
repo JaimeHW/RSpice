@@ -3,6 +3,17 @@
 use super::*;
 
 impl Bjt {
+    /// Convert model-oriented VBIC charge and its voltage gradients to a
+    /// physical branch current. Thermal and delay states are polarity independent.
+    #[inline]
+    pub(crate) fn vbic_charge_branch_polarity(&self, branch: usize) -> Value {
+        if branch < IDX_QCTH {
+            self.polarity()
+        } else {
+            1.0
+        }
+    }
+
     pub(super) fn epi_charge_state(&self, vcx: Value, vci: Value, vbi: Value) -> EpiChargeState {
         let mut state = EpiChargeState {
             kbci: 1.0,

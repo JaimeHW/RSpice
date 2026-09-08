@@ -442,7 +442,7 @@ impl Engine {
                     bjt.node_emitter,
                     bjt.node_substrate,
                 ];
-                for branch in branches.iter() {
+                for (branch_idx, branch) in branches.iter().enumerate() {
                     if !branch.is_active() {
                         continue;
                     }
@@ -451,7 +451,9 @@ impl Engine {
                     // in small-signal analysis (vbicacld.c XQxf stamps), and
                     // its CEamp pole set carries the corresponding xf Bessel
                     // pair at (-3 +- j*sqrt(3))/(2*TD).
+                    let polarity = bjt.vbic_charge_branch_polarity(branch_idx);
                     let mut stamp_row = |row: crate::NodeId, sign: Value| {
+                        let sign = sign * polarity;
                         let Some(row_idx) = Self::optional_system_index(row) else {
                             return;
                         };
@@ -916,6 +918,19 @@ mod tests {
                     && (actual.im - expected.im).abs() <= 1.0e-8 * scale,
                 "actual={actual}, expected={expected}"
             );
+        }
+    }
+
+    #[test]
+    fn vbic_overlap_capacitance_produces_a_stable_pole_for_both_polarities() {
+        for kind in ["NPN", "PNP"] {
+            let netlist = Netlist::parse(&format!(
+                "VBIC passive RC pole\nR1 out 0 1k\nQ1 0 out 0 qmod\n\
+                 .model qmod {kind} LEVEL=4 IS=1e-30 IBEI=0 IBEN=0 IBCI=0 IBCN=0 ISP=0 CBEO=1u\n.end\n"
+            )).unwrap();
+            let result = Engine::default().run_pz(&netlist, 1, 1).unwrap();
+            assert_roots_close(&result.poles, &[crate::Complex64::new(-1_000.0, 0.0)]);
+            assert!(result.zeros.is_empty());
         }
     }
 
