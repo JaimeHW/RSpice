@@ -87,6 +87,68 @@ pub fn parse_veriloga_source_directive(line: &str) -> Option<VerilogAInclude> {
     line::parse_veriloga_directive(line)
 }
 
+/// Whether one SPICE body record is a terminal `.end` card.
+///
+/// Uses the parser's dialect-specific comment rules, including semicolons
+/// immediately after the directive. Callers scanning root source must exclude
+/// its title record; included model-card fragments have no title to exclude.
+/// This classifies a physical record and does not validate surrounding scopes.
+pub fn is_spice_end_card(line: &str, dialect: ExpressionDialect) -> bool {
+    if dialect == ExpressionDialect::Xyce && xyce_physical_line_is_comment(line) {
+        return false;
+    }
+    strip_inline_semicolon_comment_with_non_semicolon_comments(
+        line,
+        dialect != ExpressionDialect::Xyce,
+    )
+    .trim()
+    .eq_ignore_ascii_case(".end")
+}
+
+#[cfg(test)]
+mod end_card_tests {
+    use super::*;
+
+    #[test]
+    fn end_card_recognition_matches_dialect_termination() {
+        for dialect in [ExpressionDialect::Ngspice, ExpressionDialect::Xyce] {
+            for terminal in [".end", ".END;done", ".end ; done"] {
+                assert!(is_spice_end_card(terminal, dialect));
+                let parsed = Netlist::parse_with_options(
+                    &format!("title\nR1 1 0 1k\n{terminal}\nR2 2 0 2k\n"),
+                    NetlistParseOptions {
+                        expression_dialect: dialect,
+                        ..Default::default()
+                    },
+                )
+                .expect("terminal card stops the circuit");
+                assert_eq!(parsed.elements.len(), 1, "{dialect:?}: {terminal}");
+            }
+            for non_terminal in [
+                ".ends cell",
+                ".endc",
+                ".endl TT",
+                ".enddata",
+                "*.end",
+                "+ .end",
+                ".end trailing",
+                ".end$node",
+                ".end//node",
+                ".end ';quoted'",
+            ] {
+                assert!(
+                    !is_spice_end_card(non_terminal, dialect),
+                    "{dialect:?}: {non_terminal}"
+                );
+            }
+        }
+        for terminal in [".end $ done", ".end //done", "  .end", "\t.end"] {
+            assert!(is_spice_end_card(terminal, ExpressionDialect::Ngspice));
+            assert!(!is_spice_end_card(terminal, ExpressionDialect::Xyce));
+        }
+    }
+}
+
 type MeasureStatement = crate::netlist::measure::MeasureStatement;
 
 //=============================================================================

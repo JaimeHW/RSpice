@@ -749,23 +749,17 @@ pub fn project_veriloga_directive(source_key: &str, module_name: &str) -> String
 
 pub fn append_project_veriloga_directive(source: &mut String, source_key: &str, module_name: &str) {
     let directive = project_veriloga_directive(source_key, module_name);
-    if source
+    let end = crate::services::simulation_runner::terminal_end_card_offset(source)
+        .unwrap_or(source.len());
+    if source[..end]
         .lines()
+        .skip(1)
         .any(|line| line.trim().eq_ignore_ascii_case(&directive))
     {
         return;
     }
-    let end = source
-        .lines()
-        .enumerate()
-        .find_map(|(index, line)| line.trim().eq_ignore_ascii_case(".end").then_some(index));
-    let retained_trailing_newline = source.ends_with('\n');
-    let mut lines = source.lines().map(str::to_owned).collect::<Vec<_>>();
-    lines.insert(end.unwrap_or(lines.len()), directive);
-    *source = lines.join("\n");
-    if retained_trailing_newline || !source.is_empty() {
-        source.push('\n');
-    }
+    *source =
+        crate::services::simulation_runner::splice_before_terminal_end_card(source, &directive);
 }
 
 /// Seal the compiled model as the JSON string the runtime carries.
@@ -893,6 +887,33 @@ fn model_library_virtual_compile_limits() -> rspice_veriloga::VirtualCompileLimi
 #[cfg(test)]
 mod tests {
     use super::{PreparedVerilogARuntime, project_virtual_compile_limits};
+
+    #[test]
+    fn projected_veriloga_cards_reach_the_parser_before_commented_termination() {
+        for title in [".end", ".veriloga \"sealed.va\" device", "title"] {
+            for terminal in [".end; done", ".END // done", ".end"] {
+                let mut source = format!("{title}\r\nR1 1 0 1k\r\n{terminal}\r\n");
+                super::append_project_veriloga_directive(&mut source, "sealed.va", "device");
+                super::append_project_veriloga_directive(&mut source, "sealed.va", "device");
+                let parsed = rspice_core::Netlist::parse(&source).expect("projected deck parses");
+                assert_eq!(parsed.title, title, "{source}");
+                assert_eq!(parsed.veriloga_includes.len(), 1, "{source}");
+                assert_eq!(
+                    parsed.veriloga_includes[0].model_name.as_deref(),
+                    Some("device")
+                );
+                assert!(
+                    source.starts_with(&format!("{title}\r\nR1 1 0 1k\r\n")),
+                    "{source:?}"
+                );
+            }
+        }
+        let mut source = "title\n.end; done\n.veriloga \"sealed.va\" device\n".to_owned();
+        super::append_project_veriloga_directive(&mut source, "sealed.va", "device");
+        let parsed =
+            rspice_core::Netlist::parse(&source).expect("a tail directive is not executable");
+        assert_eq!(parsed.veriloga_includes.len(), 1, "{source}");
+    }
 
     /// Constants whose shortest decimal form `serde_json` does *not* parse back
     /// exactly unless the `float_roundtrip` feature is on. `1.3806505e-23` is

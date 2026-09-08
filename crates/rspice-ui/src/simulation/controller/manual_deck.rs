@@ -559,9 +559,7 @@ fn command_name(command: &AnalysisCommand) -> &'static str {
 }
 
 pub(super) fn compose_manual_deck_source(source: &str) -> String {
-    let has_end = source
-        .lines()
-        .any(|line| line.trim_start().eq_ignore_ascii_case(".end"));
+    let has_end = crate::services::simulation_runner::terminal_end_card_offset(source).is_some();
     if has_end {
         source.to_string()
     } else if source.ends_with('\n') {
@@ -1932,6 +1930,11 @@ Rload out 0 {rload}\n\
     #[test]
     fn manual_deck_adds_end_only_when_missing() {
         assert_eq!(compose_manual_deck_source("deck\n.op"), "deck\n.op\n.end\n");
+        assert_eq!(compose_manual_deck_source(".end\n.op"), ".end\n.op\n.end\n");
+        for terminal in [".end; done", ".END // done", ".end $ done", ".end   "] {
+            let source = format!("deck\r\n.op\r\n{terminal}\r\n");
+            assert_eq!(compose_manual_deck_source(&source), source);
+        }
     }
 
     #[test]

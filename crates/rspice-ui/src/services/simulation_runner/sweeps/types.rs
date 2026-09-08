@@ -98,7 +98,10 @@ impl CornerModelBinding {
             ));
         }
         for line in self.materialized_model_cards.lines() {
-            if line.trim().eq_ignore_ascii_case(".end") {
+            if rspice_core::netlist::is_spice_end_card(
+                line,
+                rspice_core::config::ExpressionDialect::Ngspice,
+            ) {
                 return Err(format!(
                     "Corner model binding '{label}' contains a terminal .end card"
                 ));
@@ -712,6 +715,26 @@ mod tests {
         config
             .validate()
             .expect("an explicit list states each point in full, so there is nothing to pair");
+    }
+
+    #[test]
+    fn binding_rejects_commented_terminal_cards_including_the_first_record() {
+        for terminal in [".end; done", ".END // done", " .end $ done", ".end"] {
+            for cards in [terminal.to_owned(), format!(".model fast D\n{terminal}")] {
+                let binding = CornerModelBinding {
+                    process: CornerProcess::FF,
+                    source_label: "models.lib [ff]".to_owned(),
+                    section: Some("ff".to_owned()),
+                    materialized_model_cards: cards,
+                };
+                assert!(
+                    binding
+                        .validate()
+                        .expect_err("model payloads cannot terminate the deck")
+                        .contains("terminal .end")
+                );
+            }
+        }
     }
 
     #[test]

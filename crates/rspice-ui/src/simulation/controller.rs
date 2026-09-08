@@ -74,7 +74,6 @@ mod results_update;
 pub(crate) mod spice_value;
 mod touchstone;
 mod transient_post;
-pub(super) use analysis_commands::splice_before_terminal_end_card;
 pub(crate) use transient_post::{DerivedViewerLoadState, build_eye_from_waveform};
 
 use self::live_transient::LiveTransientAccumulator;

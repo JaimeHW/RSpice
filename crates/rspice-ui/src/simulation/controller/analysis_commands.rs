@@ -6,38 +6,7 @@
 
 use super::*;
 
-fn is_terminal_end_card(line: &str) -> bool {
-    line.split_whitespace()
-        .next()
-        .is_some_and(|directive| directive.eq_ignore_ascii_case(".end"))
-}
-
-/// Insert a block of cards immediately before the deck's terminal `.end`.
-///
-/// Anything after `.end` is not part of the circuit, so a card appended to the
-/// file would parse as nothing at all. A deck without a terminal `.end` takes
-/// the block at its foot. The trailing newline of the original is preserved so
-/// splicing twice does not change how the deck ends.
-pub(in crate::simulation) fn splice_before_terminal_end_card(netlist: &str, block: &str) -> String {
-    if block.is_empty() {
-        return netlist.to_owned();
-    }
-    let mut lines: Vec<String> = netlist.lines().map(str::to_owned).collect();
-    let insertion_idx = lines
-        .iter()
-        .position(|line| is_terminal_end_card(line))
-        .unwrap_or(lines.len());
-    lines.splice(
-        insertion_idx..insertion_idx,
-        block.lines().map(str::to_owned),
-    );
-
-    let mut merged = lines.join("\n");
-    if netlist.ends_with('\n') {
-        merged.push('\n');
-    }
-    merged
-}
+use crate::services::simulation_runner::splice_before_terminal_end_card;
 
 impl SimulationController {
     /// The engine directive one draft emits, against an already-projected
@@ -749,13 +718,37 @@ mod tests {
     }
 
     #[test]
-    fn terminal_end_matching_accepts_annotations_but_not_longer_directives() {
-        assert!(!is_terminal_end_card(".ends child"));
-        assert!(!is_terminal_end_card(".endc"));
-        assert!(!is_terminal_end_card(".endl TT"));
-        assert!(is_terminal_end_card("  .END  "));
-        assert!(is_terminal_end_card(".end ; terminal comment"));
-        assert!(is_terminal_end_card(".END $ terminal comment"));
+    fn generated_cards_preserve_end_titles_and_reach_the_parser() {
+        for title in [".end", "ordinary title"] {
+            for terminal in [".end; done", ".END // done", ".end $ done", ".end"] {
+                let deck = format!("{title}\r\nR1 1 0 1k\r\n{terminal}\r\n");
+                let options = crate::simulation::dialog::SimulationOptions {
+                    reltol: 0.012345,
+                    ..Default::default()
+                };
+                let configured =
+                    SimulationController::apply_simulation_options_to_netlist(&deck, &options);
+                let bound = SimulationController::apply_reference_model_bindings_to_netlist(
+                    &configured,
+                    &[".model sealed D (IS=1e-12)".to_owned()],
+                );
+                let parsed = rspice_core::Netlist::parse(&bound).expect("composed deck parses");
+                assert_eq!(parsed.title, title, "{bound}");
+                assert_eq!(parsed.options.reltol, Some(0.012345), "{bound}");
+                assert!(
+                    parsed
+                        .models
+                        .iter()
+                        .any(|model| model.name.eq_ignore_ascii_case("sealed")),
+                    "{bound}"
+                );
+                assert!(
+                    bound.starts_with(&format!("{title}\r\nR1 1 0 1k\r\n")),
+                    "{bound:?}"
+                );
+                assert!(bound.ends_with(&format!("{terminal}\r\n")), "{bound:?}");
+            }
+        }
     }
 
     #[test]

@@ -140,36 +140,15 @@ fn inject_model_cards_with_abort(
     if model_cards.is_empty() {
         return Ok(source.to_owned());
     }
-    let mut lines = Vec::new();
-    for (index, line) in source.lines().enumerate() {
-        poll_periodically(abort, index)?;
-        lines.push(line.to_owned());
-    }
-    let mut insertion_idx = lines.len();
-    for (index, line) in lines.iter().enumerate() {
-        poll_periodically(abort, index)?;
-        if line
-            .split_whitespace()
-            .next()
-            .is_some_and(|directive| directive.eq_ignore_ascii_case(".end"))
-        {
-            insertion_idx = index;
-            break;
-        }
-    }
-    let mut copied_cards = Vec::with_capacity(model_cards.len());
+    let mut block = String::new();
     for (index, card) in model_cards.iter().enumerate() {
         poll_periodically(abort, index)?;
-        copied_cards.push(card.clone());
+        if index > 0 {
+            block.push('\n');
+        }
+        block.push_str(card);
     }
-    lines.splice(insertion_idx..insertion_idx, copied_cards);
-    ensure_not_aborted(abort)?;
-    let mut merged = lines.join("\n");
-    if source.ends_with('\n') {
-        merged.push('\n');
-    }
-    ensure_not_aborted(abort)?;
-    Ok(merged)
+    super::super::helpers::splice_before_terminal_end_card_with_abort(source, &block, abort)
 }
 
 #[cfg(test)]
@@ -197,6 +176,24 @@ mod tests {
     impl AbortSignal for AbortOnPoll {
         fn is_aborted(&self) -> bool {
             self.polls.fetch_add(1, Ordering::Relaxed) + 1 >= self.abort_on
+        }
+    }
+
+    #[test]
+    fn corner_cards_reach_the_parser_after_an_end_title_and_before_annotations() {
+        for terminal in [".end; done", ".END // done", ".end"] {
+            let source = format!(".end\r\nR1 1 0 1k\r\n{terminal}\r\n");
+            let bound = inject_model_cards(&source, &[".model selected D (IS=1e-12)".to_owned()]);
+            let parsed = rspice_core::Netlist::parse(&bound).expect("corner deck parses");
+            assert_eq!(parsed.title, ".end", "{bound}");
+            assert!(
+                parsed
+                    .models
+                    .iter()
+                    .any(|model| model.name.eq_ignore_ascii_case("selected")),
+                "{bound}"
+            );
+            assert!(bound.starts_with(".end\r\nR1 1 0 1k\r\n"), "{bound:?}");
         }
     }
 

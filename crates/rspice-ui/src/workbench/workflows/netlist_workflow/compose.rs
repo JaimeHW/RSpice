@@ -112,23 +112,10 @@ pub(super) fn strip_selected_cards(source: &str, remove: impl Fn(&str) -> bool) 
 }
 
 pub(super) fn insert_before_end(base: &str, override_source: &str) -> Result<String, String> {
-    let lines = base.lines().collect::<Vec<_>>();
-    let end = lines
-        .iter()
-        .rposition(|line| {
-            line.split_whitespace()
-                .next()
-                .is_some_and(|head| head.eq_ignore_ascii_case(".end"))
-        })
-        .ok_or_else(|| "Retained generated base has no .end terminator.".to_owned())?;
-    let mut result = lines[..end].join("\n");
-    if !result.ends_with('\n') {
-        result.push('\n');
+    if crate::services::simulation_runner::terminal_end_card_offset(base).is_none() {
+        return Err("Retained generated base has no .end terminator.".to_owned());
     }
-    result.push_str(override_source.trim_end());
-    result.push('\n');
-    result.push_str(&lines[end..].join("\n"));
-    Ok(result)
+    Ok(crate::services::simulation_runner::splice_before_terminal_end_card(base, override_source))
 }
 
 pub(super) fn is_analysis_directive(head: &str) -> bool {

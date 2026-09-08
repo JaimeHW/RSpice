@@ -5,6 +5,19 @@ use super::compose::*;
 use super::external_change::*;
 
 #[test]
+fn narrow_override_reaches_execution_before_the_first_commented_termination() {
+    let base = ".end\r\nR1 1 0 1k\r\n.end; first\r\n.end\r\n";
+    let source =
+        insert_before_end(base, ".options reltol=0.012345").expect("base has a terminator");
+    let parsed = rspice_core::Netlist::parse(&source).expect("composed source parses");
+    assert_eq!(parsed.title, ".end");
+    assert_eq!(parsed.options.reltol, Some(0.012345), "{source}");
+    assert!(source.starts_with(".end\r\nR1 1 0 1k\r\n"), "{source:?}");
+    assert!(source.ends_with(".end; first\r\n.end\r\n"), "{source:?}");
+    assert!(insert_before_end(".end\nR1 1 0 1k", ".op").is_err());
+}
+
+#[test]
 fn netlist_import_and_conflict_resolution_have_no_panic_shortcuts() {
     for source in [
         include_str!("staging.rs"),
@@ -997,7 +1010,7 @@ fn parameter_option_override_retains_base_and_appends_override_before_end() {
 
     assert_eq!(
         composed,
-        "* generated\n.option reltol=1e-3\n.param gain=10\n.include \"models/a.lib\"\n.lib \"models/b.lib\" TT\n+ section=fast\nV1 out 0 1\nR1 out 0 1k\n.op\n.measure op vout FIND V(out)\n.save V(out)\n* project corner\n.param gain=22\n+ trim=0.5\n.options method=gear\n.temp 85\n.end"
+        "* generated\n.option reltol=1e-3\n.param gain=10\n.include \"models/a.lib\"\n.lib \"models/b.lib\" TT\n+ section=fast\nV1 out 0 1\nR1 out 0 1k\n.op\n.measure op vout FIND V(out)\n.save V(out)\n* project corner\n.param gain=22\n+ trim=0.5\n.options method=gear\n.temp 85\n.end\n"
     );
 }
 

@@ -13,6 +13,81 @@ use rspice_core::netlist::{ElementKind, FreqVariation, StatisticalParamMode};
 use super::error::{ensure_not_aborted, poll_periodically};
 use super::{ServiceRunError, ServiceRunResult};
 
+/// Locate the first executable `.end` in a title-bearing SPICE deck.
+/// The UI's generated and materialized execution decks use Ngspice syntax.
+pub(crate) fn terminal_end_card_offset(source: &str) -> Option<usize> {
+    terminal_end_card_offset_with_abort(source, &rspice_core::NoAbort)
+        .expect("NoAbort source scanning cannot be cancelled")
+}
+
+fn terminal_end_card_offset_with_abort(
+    source: &str,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<Option<usize>> {
+    ensure_not_aborted(abort)?;
+    let mut offset = 0;
+    for (index, line) in source.split_inclusive('\n').enumerate() {
+        poll_periodically(abort, index)?;
+        if index > 0
+            && rspice_core::netlist::is_spice_end_card(
+                line,
+                rspice_core::config::ExpressionDialect::Ngspice,
+            )
+        {
+            return Ok(Some(offset));
+        }
+        offset += line.len();
+    }
+    ensure_not_aborted(abort)?;
+    Ok(None)
+}
+
+/// Insert generated cards before the first `.end`, or at EOF when absent.
+/// Authored bytes remain unchanged. New records use the first line's newline
+/// convention, and the original trailing-newline choice is retained.
+pub(crate) fn splice_before_terminal_end_card(source: &str, block: &str) -> String {
+    splice_before_terminal_end_card_with_abort(source, block, &rspice_core::NoAbort)
+        .expect("NoAbort card insertion cannot be cancelled")
+}
+
+pub(super) fn splice_before_terminal_end_card_with_abort(
+    source: &str,
+    block: &str,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<String> {
+    ensure_not_aborted(abort)?;
+    if block.is_empty() {
+        return Ok(source.to_owned());
+    }
+    let end = terminal_end_card_offset_with_abort(source, abort)?.unwrap_or(source.len());
+    let newline = if source
+        .find('\n')
+        .is_some_and(|index| source[..index].ends_with('\r'))
+    {
+        "\r\n"
+    } else {
+        "\n"
+    };
+    let (prefix, suffix) = source.split_at(end);
+    let mut result = String::with_capacity(source.len() + block.len() + 2 * newline.len());
+    result.push_str(prefix);
+    // An empty root still needs its blank title before executable cards.
+    if !prefix.ends_with('\n') {
+        result.push_str(newline);
+    }
+    for (index, line) in block.lines().enumerate() {
+        poll_periodically(abort, index)?;
+        result.push_str(line);
+        result.push_str(newline);
+    }
+    if suffix.is_empty() && !source.ends_with('\n') {
+        result.truncate(result.len() - newline.len());
+    }
+    result.push_str(suffix);
+    ensure_not_aborted(abort)?;
+    Ok(result)
+}
+
 pub(crate) fn parse_runner_netlist_with_abort(
     netlist_text: &str,
     source_path: Option<&Path>,
@@ -307,6 +382,47 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use super::*;
+
+    #[test]
+    fn generated_card_insertion_retains_body_records_and_optional_termination() {
+        for source in [
+            "",
+            ".end",
+            ".end\n",
+            "μ title\r\nR1 1 0 1k",
+            "μ title\r\nR1 1 0 1k\n.end; done\r\nignored tail",
+        ] {
+            let composed = splice_before_terminal_end_card(
+                source,
+                ".param selected=7\n.options reltol=0.012345",
+            );
+            let parsed = rspice_core::Netlist::parse(&composed).expect("inserted cards execute");
+            assert_eq!(parsed.params.get("selected"), Some(7.0), "{composed:?}");
+            assert_eq!(parsed.options.reltol, Some(0.012345), "{composed:?}");
+            assert_eq!(parsed.title, source.lines().next().unwrap_or_default());
+            assert_eq!(composed.ends_with('\n'), source.ends_with('\n'));
+            let end = terminal_end_card_offset(source).unwrap_or(source.len());
+            assert!(composed.starts_with(&source[..end]), "{composed:?}");
+            assert!(composed.ends_with(&source[end..]), "{composed:?}");
+            assert_eq!(splice_before_terminal_end_card(source, ""), source);
+        }
+    }
+
+    #[test]
+    fn generated_card_insertion_cancels_during_source_and_payload_scans() {
+        let source = format!("title\n{}\n.end\n", "* comment\n".repeat(256));
+        let source_abort = AbortOnPoll::new(5);
+        assert!(matches!(
+            splice_before_terminal_end_card_with_abort(&source, ".op", &source_abort),
+            Err(ServiceRunError::Aborted)
+        ));
+        let block = "* model payload\n".repeat(256);
+        let payload_abort = AbortOnPoll::new(6);
+        assert!(matches!(
+            splice_before_terminal_end_card_with_abort("title\n.end\n", &block, &payload_abort),
+            Err(ServiceRunError::Aborted)
+        ));
+    }
 
     struct AbortOnPoll {
         abort_on: usize,
