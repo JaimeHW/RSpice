@@ -251,52 +251,6 @@ impl SimulationController {
         });
     }
 
-    /// Retain the exact power-wave reference impedances that qualify an
-    /// SP/PSP/HBSP result. Declared RF ports win for the same reason they win
-    /// in execution; a plain SP setup falls back to its explicitly configured
-    /// ports and default impedance only when the deck declares none.
-    pub(super) fn retain_sparameter_result_metadata(&self, result: &mut AnalysisResult) {
-        // SP carries its actual elaborated references in the result. Never
-        // reconstruct or overwrite that authority from a mutable cached deck.
-        if result.family_metadata.is_some() || result.analysis_type == AnalysisType::SParameter {
-            return;
-        }
-        if !matches!(
-            result.analysis_type,
-            AnalysisType::SParameter | AnalysisType::Psp | AnalysisType::Hbsp
-        ) {
-            return;
-        }
-        let Some(reference_impedances_ohm) = self.sparameter_reference_impedances() else {
-            return;
-        };
-        let metadata = AnalysisResultFamilyMetadata::SParameter {
-            noise_reference_temperature_kelvin: None,
-            reference_impedances_ohm,
-        };
-        if metadata.validate_for(result.analysis_type).is_ok() {
-            result.family_metadata = Some(metadata);
-        }
-    }
-
-    fn sparameter_reference_impedances(&self) -> Option<Vec<f64>> {
-        if let Some(netlist_text) = self.cached_netlist.as_deref()
-            && let Ok(netlist) = rspice_core::Netlist::parse(netlist_text)
-            && let Ok(ports) = rspice_core::analysis::s_param::collect_ports(&netlist)
-        {
-            return Some(ports.into_iter().map(|port| port.z0).collect());
-        }
-
-        match self.current_spec.as_ref()? {
-            AnalysisSpec::Psp { ports, .. } | AnalysisSpec::Hbsp { ports, .. }
-                if ports.len() >= 2 && ports.iter().all(|port| port.z0.is_some()) =>
-            {
-                Some(ports.iter().filter_map(|port| port.z0).collect())
-            }
-            _ => None,
-        }
-    }
-
     pub(super) fn convert_to_analysis_result_owned(
         &self,
         sim_result: crate::simulation::SimulationResult,
@@ -2240,7 +2194,12 @@ mod noise_conversion_tests {
             z0: 50.0,
             ports: Vec::new(),
         });
-        for references in [vec![75.0], vec![75.0, 100.0]] {
+        for (analysis_type, references) in [
+            (AnalysisType::SParameter, vec![75.0]),
+            (AnalysisType::SParameter, vec![75.0, 100.0]),
+            (AnalysisType::Psp, vec![75.0]),
+            (AnalysisType::Hbsp, vec![75.0, 100.0]),
+        ] {
             let simulation = crate::simulation::SimulationResult::Ac {
                 noise_reference_temperature_kelvin: None,
                 frequencies: vec![1e6],
@@ -2248,12 +2207,11 @@ mod noise_conversion_tests {
                 measurements: Vec::new(),
                 reference_impedances_ohm: Some(references.clone()),
             };
-            let mut result = controller.convert_to_analysis_result_with_metadata_owned(
+            let result = controller.convert_to_analysis_result_with_metadata_owned(
                 simulation,
-                AnalysisType::SParameter,
-                "SP",
+                analysis_type,
+                "network",
             );
-            controller.retain_sparameter_result_metadata(&mut result);
             assert_eq!(
                 result.family_metadata,
                 Some(AnalysisResultFamilyMetadata::SParameter {

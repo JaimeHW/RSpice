@@ -1266,9 +1266,14 @@ fn validate_qpss(draft: &QpssDraft) -> Option<String> {
 fn validate_periodic_network(draft: &PeriodicNetworkDraft) -> Option<String> {
     (|| {
         validate_sweep(&draft.sweep)?;
-        parse_positive_usize(&draft.max_sideband, "maximum sideband")?;
-        if draft.ports.len() < 2 {
-            return Err("at least two network ports are required".to_owned());
+        if draft
+            .max_sideband
+            .trim()
+            .parse::<u32>()
+            .ok()
+            .is_none_or(|value| value > i32::MAX as u32)
+        {
+            return Err("maximum sideband must be an integer from 0 to 2147483647".to_owned());
         }
         for (index, port) in draft.ports.iter().enumerate() {
             if port.node_pos.trim().is_empty() || port.node_neg.trim().is_empty() {
@@ -1884,7 +1889,7 @@ mod tests {
         assert!(validate_qpss(&qpss).is_some());
 
         let mut network = PeriodicNetworkDraft::default();
-        network.ports.clear();
+        network.ports[0].node_pos.clear();
         assert!(validate_periodic_network(&network).is_some());
 
         let mut psp = PeriodicNetworkDraft::default();
@@ -1907,5 +1912,19 @@ mod tests {
         let mut mismatch = DcMismatchDraft::default();
         mismatch.include_mismatch = false;
         assert!(validate_dc_mismatch(&mismatch).is_some());
+    }
+
+    #[test]
+    fn periodic_network_draft_accepts_discovery_single_ports_and_zero_sideband() {
+        let mut draft = PeriodicNetworkDraft::default();
+        draft.max_sideband = "0".to_owned();
+        draft.ports.truncate(1);
+        assert!(validate_periodic_network(&draft).is_none());
+        draft.ports.clear();
+        assert!(validate_periodic_network(&draft).is_none());
+        for invalid in ["-1", "1.5", "2147483648"] {
+            draft.max_sideband = invalid.to_owned();
+            assert!(validate_periodic_network(&draft).is_some());
+        }
     }
 }

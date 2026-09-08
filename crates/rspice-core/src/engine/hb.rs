@@ -33,7 +33,9 @@ use std::collections::BTreeSet;
 mod drive;
 mod envelope_result;
 mod pac;
+mod periodic_ac;
 mod pnoise;
+mod psp;
 #[cfg(test)]
 mod retained_auth_tests;
 mod stamping;
@@ -42,6 +44,7 @@ mod state;
 pub use envelope_result::EnvelopeResult;
 pub use pac::PacAnalysisResult;
 pub use pnoise::PnoiseAnalysisResult;
+pub use psp::{PreparedPsp, PspAnalysisResult};
 pub use state::{HbEnvelopeContinuationState, HbEnvelopeStateGuarantee};
 
 const HB_OPERATING_POINT_IDENTITY_VERSION: u32 = 2;

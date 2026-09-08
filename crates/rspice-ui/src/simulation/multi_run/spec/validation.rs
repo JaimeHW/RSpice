@@ -1060,11 +1060,8 @@ fn validate_periodic_network(
     max_sideband: usize,
 ) -> Result<(), String> {
     validate_frequency_sweep(start, stop, points)?;
-    if ports.len() < 2 || max_sideband == 0 {
-        return Err(
-            "periodic network analysis requires at least two ports and positive max_sideband"
-                .to_owned(),
-        );
+    if max_sideband > i32::MAX as usize {
+        return Err("periodic network maximum sideband exceeds the engine index range".to_owned());
     }
     for (index, port) in ports.iter().enumerate() {
         if port.node_pos.trim().is_empty() || port.node_neg.trim().is_empty() {

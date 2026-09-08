@@ -168,31 +168,6 @@ pub(crate) fn run_pac_internal_from_pss_with_abort(
     run_pac_internal_impl(netlist, config, Some(operating_point), abort)
 }
 
-pub(crate) fn run_pac_internal_from_hb_with_abort(
-    netlist: &rspice_core::Netlist,
-    config: &PacRunConfig,
-    operating_point: &rspice_core::engine::HbOperatingPoint,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<PacInternalResult> {
-    ensure_not_aborted(abort)?;
-    config.validate().map_err(ServiceRunError::Failure)?;
-
-    let engine = build_resolved_periodic_engine(
-        netlist,
-        config.pss_tolerance,
-        "PAC resolved producer configuration is invalid",
-    )?;
-    let pac_config = build_core_pac_config(config)?;
-    let pac_result = engine
-        .run_pac_from_hb_with_abort(netlist, pac_config, operating_point, abort)
-        .map_err(|error| ServiceRunError::from_core("PAC error", error))?
-        .result;
-    // The engine builds the conversion basis on the carrier's fundamental, not
-    // on this configuration's; see `carrier_fundamental` below.
-    let carrier_fundamental = operating_point.config().fundamental_freq;
-    finish_pac_internal(pac_result, config, carrier_fundamental, abort)
-}
-
 fn run_pac_internal_impl(
     netlist: &rspice_core::Netlist,
     config: &PacRunConfig,

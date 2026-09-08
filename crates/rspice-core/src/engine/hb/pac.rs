@@ -7,11 +7,12 @@
 //! `offset + k*f0`. See `harmonic_balance::solver::periodic_ac` for the
 //! conversion-matrix formulation.
 
+use super::periodic_ac::{PacOperatingPoint, PeriodicAcOutput, PreparedPeriodicAc};
 use super::*;
 use crate::abort_signal::{AbortSignal, NoAbort};
+use crate::analysis::HbError as AnalysisHbError;
 use crate::analysis::harmonic_balance::{PeriodicAcExcitation, PeriodicSidebandWindow};
 use crate::analysis::pac::{PacConfig, PacResult};
-use crate::analysis::{HbConfig, HbError as AnalysisHbError, HbSolverState};
 
 /// PAC analysis result with convergence info
 #[derive(Debug)]
@@ -23,11 +24,6 @@ pub struct PacAnalysisResult {
     pub fundamental_freq: Value,
     /// Whether the operating-point solve converged
     pub converged: bool,
-}
-
-enum PacOperatingPoint<'a> {
-    Shooting(&'a super::super::PssOperatingPoint),
-    HarmonicBalance(&'a HbOperatingPoint),
 }
 
 pub(super) struct PacInputPort {
@@ -168,250 +164,29 @@ impl Engine {
         operating_point: Option<PacOperatingPoint<'_>>,
         abort: &dyn AbortSignal,
     ) -> Result<PacAnalysisResult, SimulationError> {
-        if abort.is_aborted() {
-            return Err(SimulationError::Aborted);
-        }
-        if let Some(operating_point) = &operating_point {
-            config.fundamental_freq = match operating_point {
-                PacOperatingPoint::Shooting(point) => point.analysis().result.frequency,
-                PacOperatingPoint::HarmonicBalance(point) => point.config().fundamental_freq,
-            };
-        }
-        if !config.fundamental_freq.is_finite() || config.fundamental_freq <= 0.0 {
-            return Err(SimulationError::Circuit(
-                "PAC requires a positive fundamental frequency".to_string(),
-            ));
-        }
-        config
-            .validate()
-            .map_err(|e| SimulationError::Circuit(format!("Invalid PAC config: {e}")))?;
-        let frequency_count = config.frequency_point_count().map_err(|error| {
-            SimulationError::Circuit(format!("Invalid PAC frequency sweep: {error}"))
-        })?;
-        self.ensure_analysis_points(frequency_count)?;
-        let sideband_count = config.num_sidebands();
-        self.ensure_analysis_points(sideband_count)?;
-        let result_record_count = frequency_count.checked_mul(sideband_count).ok_or_else(|| {
-            SimulationError::Circuit(format!(
-                "PAC result grid {frequency_count} frequencies x {sideband_count} sidebands overflows this platform"
-            ))
-        })?;
-        self.ensure_analysis_points(result_record_count)?;
-
-        // The operating point needs enough harmonics that every conversion
-        // coupling G[k-m] over the sideband span exists, with headroom for
-        // the drive itself. Compute in i64 so extreme public i32 bounds
-        // cannot overflow before the resource policy rejects them.
-        let span = usize::try_from(
-            (i64::from(config.sideband_max) - i64::from(config.sideband_min)).unsigned_abs(),
-        )
-        .unwrap_or(usize::MAX);
-        let extreme = usize::try_from(
-            i64::from(config.sideband_min)
-                .unsigned_abs()
-                .max(i64::from(config.sideband_max).unsigned_abs()),
-        )
-        .unwrap_or(usize::MAX);
-        let op_harmonics = span.max(extreme).max(8);
-        self.ensure_analysis_points(op_harmonics.saturating_add(1))?;
-        if let Some(operating_point) = &operating_point
-            && op_harmonics
-                > match operating_point {
-                    PacOperatingPoint::Shooting(point) => point.spectral_harmonic_capacity(),
-                    PacOperatingPoint::HarmonicBalance(point) => point.spectral_harmonic_capacity(),
-                }
-        {
-            let capacity = match operating_point {
-                PacOperatingPoint::Shooting(point) => point.spectral_harmonic_capacity(),
-                PacOperatingPoint::HarmonicBalance(point) => point.spectral_harmonic_capacity(),
-            };
-            return Err(SimulationError::Circuit(format!(
-                "PAC requires {op_harmonics} periodic harmonics for its sideband span, but the retained periodic state has capacity {}",
-                capacity
-            )));
-        }
-
-        let mut hb_config = match &operating_point {
-            Some(PacOperatingPoint::HarmonicBalance(point)) => point.config().clone(),
-            _ => HbConfig::new(config.fundamental_freq)
-                .with_harmonics(op_harmonics)
-                .with_oversample(4),
-        };
-        // PAC's tolerances govern the nonlinear periodic operating point.
-        // The subsequent sideband systems use deterministic direct solves and
-        // therefore have no iterative tolerance of their own.
-        if !matches!(operating_point, Some(PacOperatingPoint::HarmonicBalance(_))) {
-            hb_config.tolerance = config.reltol;
-            hb_config.abstol = config.abstol;
-        }
-        let hb_config = self.hb_config_for_netlist(netlist, hb_config)?;
-        self.hb_validate_config(&hb_config)?;
-        if let Some(PacOperatingPoint::HarmonicBalance(point)) = &operating_point {
-            point.authenticate_for_reuse(netlist, &self.config, &hb_config)?;
-        }
-        if let Some(PacOperatingPoint::Shooting(point)) = &operating_point {
-            point.authenticate_for_reuse(netlist, &self.config, point.config())?;
-        }
-
         let input_name = config
             .input_source
             .clone()
             .ok_or_else(|| SimulationError::Circuit("PAC requires an input source".to_string()))?;
 
-        let circuit = self.build_circuit_with_abort(netlist, abort)?;
-        let num_nodes = circuit.num_nodes();
-        if num_nodes == 0 {
-            return Err(SimulationError::Circuit("Circuit has no nodes".to_string()));
-        }
-        let periodic_branches = circuit
-            .num_branches()
-            .checked_add(Self::hb_periodic_extra_branch_count(&circuit)?)
-            .ok_or_else(|| {
-                SimulationError::Circuit(
-                    "PAC canonical and distributed-network branch count overflows this platform"
-                        .to_string(),
-                )
-            })?;
-        let periodic_unknowns = num_nodes.checked_add(periodic_branches).ok_or_else(|| {
-            SimulationError::Circuit(
-                "PAC periodic node and branch count overflows this platform".to_string(),
-            )
-        })?;
-        let lifted_unknowns = periodic_unknowns.checked_mul(sideband_count).ok_or_else(|| {
-            SimulationError::Circuit(format!(
-                "PAC lifted dimension {periodic_unknowns} MNA unknowns x {sideband_count} sidebands overflows this platform"
-            ))
-        })?;
-        self.ensure_matrix_unknowns(lifted_unknowns)?;
-        let spectra_complex_values = result_record_count
-            .checked_mul(periodic_unknowns)
-            .ok_or_else(|| {
-                SimulationError::Circuit(format!(
-                    "PAC retained MNA grid {result_record_count} records x {periodic_unknowns} node/branch unknowns overflows this platform"
-                ))
-            })?;
-        let conversion_values = if config.output_node.is_some() {
-            frequency_count
-                .checked_mul(sideband_count)
-                .and_then(|value| value.checked_mul(sideband_count))
-                .ok_or_else(|| {
-                    SimulationError::Circuit(format!(
-                        "PAC conversion grid {frequency_count} x {sideband_count} x {sideband_count} overflows this platform"
-                    ))
-                })?
-        } else {
-            0
-        };
-        let retained_complex_values = spectra_complex_values
-            .checked_add(conversion_values)
-            .ok_or_else(|| {
-                SimulationError::Circuit(
-                    "PAC retained complex-value count overflows usize".to_string(),
-                )
-            })?;
-        let retained_scalar_values = retained_complex_values.checked_mul(2).ok_or_else(|| {
-            SimulationError::Circuit("PAC retained scalar-value count overflows usize".to_string())
-        })?;
-        self.ensure_result_values(retained_scalar_values)?;
-        if let Some(summary) =
-            periodic_capability::summarize(&periodic_capability::periodic_residual_gaps(&circuit))
-        {
-            return Err(HbError::UnsupportedNonlinearDevices(summary).into());
-        }
-        if let Some(summary) =
-            periodic_capability::summarize(&periodic_capability::periodic_descriptor_gaps(&circuit))
-        {
-            return Err(SimulationError::unsupported_capability(
-                "analysis.pac.periodic_mna",
-                format!(
-                    "PAC exact periodic MNA is unavailable because the circuit contains {summary}"
-                ),
-            ));
-        }
-
-        let drive_tones = Self::hb_collect_drive_tones(&hb_config)?;
-
-        let mut solver = HbSolver::try_new(hb_config.clone(), num_nodes).map_err(|error| {
-            SimulationError::Circuit(format!("PAC solver construction failed: {error}"))
-        })?;
-        let node_names = self.hb_build_node_names(&circuit, num_nodes);
-        solver.set_node_names(node_names.clone());
-
-        // Use one canonical exact-MNA solver for both the large-signal
-        // operating point and its periodic small-signal linearization. The
-        // authored source spectra must be registered before the canonical
-        // V/L/R branch map so its voltage-source descriptors retain the same
-        // large-signal constraints Newton solves. Keeping one registry also
-        // makes branch identity drift between the producer and consumer
-        // structurally impossible.
-        self.hb_stamp_resistors(&circuit, &mut solver);
-        self.hb_stamp_capacitors(&circuit, &mut solver);
-        self.hb_stamp_voltage_sources(&circuit, &mut solver, &hb_config, &drive_tones)?;
-        self.hb_stamp_periodic_mna_branches(&circuit, &mut solver)?;
-        self.hb_stamp_current_sources(&circuit, &mut solver, &hb_config, &drive_tones)?;
-
-        let has_nonlinear = periodic_capability::has_exact_periodic_nonlinear_devices(&circuit);
-        if has_nonlinear {
-            self.hb_stamp_supported_nonlinear_devices(&circuit, &mut solver, num_nodes);
-        }
-        let branch_names = solver.try_periodic_mna_branch_names().map_err(|error| {
-            SimulationError::Circuit(format!(
-                "PAC branch-result metadata construction failed: {error}"
-            ))
-        })?;
-
-        if let Some(PacOperatingPoint::HarmonicBalance(point)) = &operating_point {
-            point.authenticate_for_reuse(netlist, &self.config, &hb_config)?;
-        }
-        if let Some(PacOperatingPoint::Shooting(point)) = &operating_point {
-            point.authenticate_for_reuse(netlist, &self.config, point.config())?;
-        }
-
-        let solve_operating_point = operating_point.is_none();
-        let mut state = if let Some(operating_point) = operating_point {
-            match operating_point {
-                PacOperatingPoint::Shooting(point) => {
-                    self.hb_state_from_pss_operating_point(point, &hb_config, &node_names, abort)?
-                }
-                PacOperatingPoint::HarmonicBalance(point) => {
-                    point.to_solver_state(&node_names, &branch_names)?
-                }
-            }
-        } else {
-            HbSolverState::new(num_nodes, op_harmonics)
-        };
+        let PreparedPeriodicAc {
+            circuit,
+            mut solver,
+            state,
+            node_names,
+            branch_names,
+            lifted_unknowns,
+            ..
+        } = self.prepare_periodic_ac(
+            netlist,
+            &mut config,
+            operating_point,
+            PeriodicAcOutput::NodeSpectra,
+            abort,
+        )?;
+        let num_nodes = node_names.len();
         let branch_count = branch_names.len();
-        state
-            .try_prepare_mna_branches(branch_count, hb_config.num_harmonics)
-            .map_err(|error| {
-                SimulationError::Circuit(format!(
-                    "PAC operating-point MNA state construction failed: {error}"
-                ))
-            })?;
-        if solve_operating_point {
-            if has_nonlinear {
-                solver
-                    .solve_newton_with_abort(&mut state, abort)
-                    .map_err(|e| match e {
-                        crate::analysis::HbError::Aborted => SimulationError::Aborted,
-                        _ => SimulationError::Circuit(format!(
-                            "PAC operating-point solve failed: {e}"
-                        )),
-                    })?;
-            } else {
-                if abort.is_aborted() {
-                    return Err(SimulationError::Aborted);
-                }
-                solver.solve_linear(&mut state).map_err(|e| {
-                    SimulationError::Circuit(format!("PAC operating-point solve failed: {e}"))
-                })?;
-            }
-        }
-        if num_nodes.checked_add(branch_count) != Some(periodic_unknowns) {
-            return Err(SimulationError::Circuit(format!(
-                "PAC periodic solver exposes {num_nodes} nodes and {branch_count} branches, but resource qualification used {periodic_unknowns} MNA unknowns"
-            )));
-        }
+        let sideband_count = config.num_sidebands();
 
         // Resolve the named source to an exact unit small-signal excitation.
         let input_port = Self::pac_input_port(&circuit, &input_name, num_nodes)?;
