@@ -131,9 +131,6 @@ fn finite_value(source: &str, value: f64) -> Result<f64, ParseError> {
 /// dividing, and the mantissa keeps every digit the shortest round-trip
 /// representation needs rather than being truncated to six decimals.
 pub fn format_si_value(v: f64) -> String {
-    if v == 0.0 {
-        return "0".to_string();
-    }
     if !v.is_finite() {
         return format!("{v}");
     }
@@ -250,6 +247,8 @@ mod tests {
     #[test]
     fn formatting_and_parsing_round_trip_every_option_magnitude_exactly() {
         let values = [
+            0.0,
+            -0.0,
             1e-3,
             1e-6,
             1e-9,

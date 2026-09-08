@@ -105,8 +105,8 @@ impl OptionsDialogState {
             bypass_abstol: format_si_value(opts.bypass_abstol),
             min_timestep: format_si_value(opts.min_timestep),
             max_timestep: format_si_value(opts.max_timestep),
-            temp: format!("{:.1}", opts.temp),
-            tnom: format!("{:.1}", opts.tnom),
+            temp: opts.temp.to_string(),
+            tnom: opts.tnom.to_string(),
         }
     }
 

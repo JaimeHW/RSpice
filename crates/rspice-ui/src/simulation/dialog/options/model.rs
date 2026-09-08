@@ -12,10 +12,7 @@ const fn default_trtol() -> f64 {
     7.0
 }
 
-/// Complete simulation options matching Cadence Spectre.
-///
-/// These options control all aspects of simulation accuracy, convergence,
-/// and performance. Default values match industry-standard SPICE defaults.
+/// Solver tolerances, limits, and numerical policies authored by a simulation plan.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(from = "PersistedSimulationOptions")]
 pub struct SimulationOptions {
@@ -438,7 +435,7 @@ mod tests {
 
         assert_eq!(
             options.to_spice_options(),
-            ".OPTIONS\n+ PIVTOL=1.00e-13\n+ ITL4=6\n+ MAXTIMESTEP=1.00e-3\n.OPTIONS TIMEINT\n+ MINTIMESTEP=2.00e-18"
+            ".OPTIONS\n+ PIVTOL=1e-13\n+ ITL4=6\n+ MAXTIMESTEP=1e-3\n.OPTIONS TIMEINT\n+ MINTIMESTEP=2e-18"
         );
         assert_eq!(resolve_through_the_deck(&options).min_timestep, 2.0e-18);
     }
@@ -795,15 +792,176 @@ mod tests {
     }
 
     #[test]
-    fn spice_export_preserves_nondefault_pivot_controls() {
+    fn solver_options_preserve_legal_zero_bounds_and_temperature_limits() {
         let options = SimulationOptions {
-            pivrel: 0.25,
-            pivtol: 2.0e-14,
+            gmin: -0.0,
+            bypass_enabled: true,
+            bypass_reltol: -0.0,
+            bypass_abstol: -0.0,
+            pivrel: 1.0,
+            temp: (-273.15_f64).next_up(),
+            tnom: (-273.15_f64).next_up(),
             ..SimulationOptions::default()
         };
-        let text = options.to_spice_options();
-        assert!(text.contains("PIVREL=2.50e-1"));
-        assert!(text.contains("PIVTOL=2.00e-14"));
+        options
+            .validate()
+            .expect("these boundary values are allowed");
+        let draft = crate::simulation::dialog::OptionsDialogState::from_options(&options);
+        let restored = draft.to_options().unwrap();
+        let parsed = parse_through_the_deck(&restored).options;
+        for (name, authored, restored, parsed) in [
+            ("GMIN", options.gmin, restored.gmin, parsed.gmin.unwrap()),
+            (
+                "BYPASSRELTOL",
+                options.bypass_reltol,
+                restored.bypass_reltol,
+                parsed.bypass_reltol.unwrap(),
+            ),
+            (
+                "BYPASSABSTOL",
+                options.bypass_abstol,
+                restored.bypass_abstol,
+                parsed.bypass_abstol.unwrap(),
+            ),
+            ("TEMP", options.temp, restored.temp, parsed.temp.unwrap()),
+            ("TNOM", options.tnom, restored.tnom, parsed.tnom.unwrap()),
+        ] {
+            assert_eq!(
+                restored.to_bits(),
+                authored.to_bits(),
+                "{name} changed in the editor"
+            );
+            assert_eq!(
+                parsed.to_bits(),
+                authored.to_bits(),
+                "{name} changed in the deck"
+            );
+        }
+    }
+
+    #[test]
+    fn solver_options_preserve_full_precision_through_the_deck() {
+        let options = SimulationOptions {
+            reltol: 1.234_567_891_234e-5,
+            residual_reltol: 2.345_678_912_345e-5,
+            abstol: 3.456_789_123_456e-13,
+            iabstol: 4.567_891_234_567e-13,
+            vntol: 5.678_912_345_678e-7,
+            chgtol: 6.789_123_456_789e-15,
+            pivrel: 0.123_456_789,
+            pivtol: 1.234_567_891_234e-14,
+            gmin: 9.123_456_789_123e-13,
+            min_timestep: 1.234_567_891_234e-18,
+            max_timestep: 1.234_567_891_234e-4,
+            transient_lte_reltol: Some(1.234_567_891_234e-7),
+            transient_lte_abstol: Some(2.345_678_912_345e-11),
+            bypass_enabled: true,
+            bypass_reltol: 3.456_789_123_456e-4,
+            bypass_abstol: 4.567_891_234_567e-7,
+            temp: 27.123_456_789,
+            tnom: -40.123_456_789,
+            ..SimulationOptions::default()
+        };
+        options.validate().unwrap();
+        let netlist = parse_through_the_deck(&options);
+        let resolved = resolve_through_the_deck(&options);
+        for (name, authored, parsed) in [
+            ("RELTOL", options.reltol, netlist.options.reltol.unwrap()),
+            (
+                "RESIDUAL_RELTOL",
+                options.residual_reltol,
+                netlist.options.residual_reltol.unwrap(),
+            ),
+            ("ABSTOL", options.abstol, netlist.options.abstol.unwrap()),
+            ("IABSTOL", options.iabstol, netlist.options.iabstol.unwrap()),
+            ("VNTOL", options.vntol, netlist.options.vntol.unwrap()),
+            ("CHGTOL", options.chgtol, netlist.options.chgtol.unwrap()),
+            ("GMIN", options.gmin, netlist.options.gmin.unwrap()),
+            ("PIVREL", options.pivrel, resolved.matrix_pivot_tolerance),
+            (
+                "PIVTOL",
+                options.pivtol,
+                resolved.matrix_absolute_pivot_tolerance,
+            ),
+            ("MINTIMESTEP", options.min_timestep, resolved.min_timestep),
+            ("MAXTIMESTEP", options.max_timestep, resolved.max_timestep),
+            (
+                "TIMEINT RELTOL",
+                options.transient_lte_reltol.unwrap(),
+                resolved.transient_lte_reltol.unwrap(),
+            ),
+            (
+                "TIMEINT ABSTOL",
+                options.transient_lte_abstol.unwrap(),
+                resolved.transient_lte_abstol.unwrap(),
+            ),
+            (
+                "BYPASSRELTOL",
+                options.bypass_reltol,
+                resolved.bypass_config.reltol,
+            ),
+            (
+                "BYPASSABSTOL",
+                options.bypass_abstol,
+                resolved.bypass_config.abstol,
+            ),
+            ("TEMP", options.temp, netlist.options.temp.unwrap()),
+            ("TNOM", options.tnom, netlist.options.tnom.unwrap()),
+        ] {
+            assert_eq!(
+                parsed.to_bits(),
+                authored.to_bits(),
+                "{name} was rounded in the prepared deck"
+            );
+        }
+        assert_eq!(resolved.temperature, options.temp_kelvin());
+    }
+
+    #[test]
+    fn solver_options_preserve_changes_adjacent_to_defaults() {
+        let default = SimulationOptions::default();
+        let options = SimulationOptions {
+            reltol: default.reltol.next_up(),
+            residual_reltol: default.residual_reltol.next_up(),
+            abstol: default.abstol.next_up(),
+            iabstol: default.iabstol.next_up(),
+            vntol: default.vntol.next_up(),
+            chgtol: default.chgtol.next_up(),
+            gmin: default.gmin.next_up(),
+            temp: default.temp.next_up(),
+            tnom: default.tnom.next_up(),
+            bypass_enabled: true,
+            bypass_reltol: default.bypass_reltol.next_up(),
+            bypass_abstol: default.bypass_abstol.next_up(),
+            ..default
+        };
+        options.validate().unwrap();
+        let parsed = parse_through_the_deck(&options).options;
+        for (name, authored, parsed) in [
+            ("RELTOL", options.reltol, parsed.reltol),
+            (
+                "RESIDUAL_RELTOL",
+                options.residual_reltol,
+                parsed.residual_reltol,
+            ),
+            ("ABSTOL", options.abstol, parsed.abstol),
+            ("IABSTOL", options.iabstol, parsed.iabstol),
+            ("VNTOL", options.vntol, parsed.vntol),
+            ("CHGTOL", options.chgtol, parsed.chgtol),
+            ("GMIN", options.gmin, parsed.gmin),
+            ("TEMP", options.temp, parsed.temp),
+            ("TNOM", options.tnom, parsed.tnom),
+            ("BYPASSRELTOL", options.bypass_reltol, parsed.bypass_reltol),
+            ("BYPASSABSTOL", options.bypass_abstol, parsed.bypass_abstol),
+        ] {
+            let parsed =
+                parsed.unwrap_or_else(|| panic!("{name} was omitted despite an authored change"));
+            assert_eq!(
+                parsed.to_bits(),
+                authored.to_bits(),
+                "{name} lost the authored change"
+            );
+        }
     }
 }
 
@@ -1044,56 +1202,57 @@ impl SimulationOptions {
         sim_config
     }
 
-    /// Validate all options.
+    /// Validate the options before they become an effective solver policy.
     pub fn validate(&self) -> Result<(), Vec<ValidationError>> {
         let mut errors = Vec::new();
-
-        if self.reltol <= 0.0 {
-            errors.push(ValidationError::InvalidTolerance("reltol", self.reltol));
-        }
-        if self.residual_reltol <= 0.0 {
-            errors.push(ValidationError::InvalidTolerance(
-                "residual_reltol",
-                self.residual_reltol,
-            ));
-        }
-        if self.vntol <= 0.0 {
-            errors.push(ValidationError::InvalidTolerance("vntol", self.vntol));
-        }
-        if self.abstol <= 0.0 {
-            errors.push(ValidationError::InvalidTolerance("abstol", self.abstol));
-        }
-        if self.iabstol <= 0.0 {
-            errors.push(ValidationError::InvalidTolerance("iabstol", self.iabstol));
-        }
-        if self.chgtol <= 0.0 {
-            errors.push(ValidationError::InvalidTolerance("chgtol", self.chgtol));
+        for (name, value) in [
+            ("reltol", self.reltol),
+            ("residual_reltol", self.residual_reltol),
+            ("vntol", self.vntol),
+            ("abstol", self.abstol),
+            ("iabstol", self.iabstol),
+            ("chgtol", self.chgtol),
+            ("pivtol", self.pivtol),
+            ("trtol", self.trtol),
+        ] {
+            if !value.is_finite() || value <= 0.0 {
+                errors.push(ValidationError::InvalidTolerance(name, value));
+            }
         }
         if !self.pivrel.is_finite() || self.pivrel <= 0.0 || self.pivrel > 1.0 {
-            errors.push(ValidationError::InvalidTolerance("pivrel", self.pivrel));
+            errors.push(ValidationError::InvalidPivotRelative(self.pivrel));
         }
-        if !self.pivtol.is_finite() || self.pivtol <= 0.0 {
-            errors.push(ValidationError::InvalidTolerance("pivtol", self.pivtol));
+        for (name, value) in [
+            ("gmin", self.gmin),
+            ("bypass_reltol", self.bypass_reltol),
+            ("bypass_abstol", self.bypass_abstol),
+        ] {
+            if !value.is_finite() || value < 0.0 {
+                errors.push(ValidationError::InvalidNonNegative(name, value));
+            }
         }
-
-        if self.itl1 == 0 {
-            errors.push(ValidationError::InvalidIteration("itl1", self.itl1));
+        for (name, value) in [
+            ("transient_lte_reltol", self.transient_lte_reltol),
+            ("transient_lte_abstol", self.transient_lte_abstol),
+        ] {
+            if let Some(value) = value
+                && (!value.is_finite() || value <= 0.0)
+            {
+                errors.push(ValidationError::InvalidTolerance(name, value));
+            }
         }
-        if self.itl4 == 0 {
-            errors.push(ValidationError::InvalidIteration("itl4", self.itl4));
+        for (name, value) in [("itl1", self.itl1), ("itl4", self.itl4)] {
+            if value == 0 {
+                errors.push(ValidationError::InvalidIteration(name, value));
+            }
         }
-
-        if self.min_timestep <= 0.0 {
-            errors.push(ValidationError::InvalidTimestep(
-                "min_timestep",
-                self.min_timestep,
-            ));
-        }
-        if self.max_timestep <= 0.0 {
-            errors.push(ValidationError::InvalidTimestep(
-                "max_timestep",
-                self.max_timestep,
-            ));
+        for (name, value) in [
+            ("min_timestep", self.min_timestep),
+            ("max_timestep", self.max_timestep),
+        ] {
+            if !value.is_finite() || value <= 0.0 {
+                errors.push(ValidationError::InvalidTimestep(name, value));
+            }
         }
         if self.min_timestep >= self.max_timestep {
             errors.push(ValidationError::TimestepOrder(
@@ -1101,14 +1260,11 @@ impl SimulationOptions {
                 self.max_timestep,
             ));
         }
-
-        if self.temp <= -273.15 {
-            errors.push(ValidationError::InvalidTemperature("temp", self.temp));
+        for (name, value) in [("temp", self.temp), ("tnom", self.tnom)] {
+            if !value.is_finite() || value <= -273.15 {
+                errors.push(ValidationError::InvalidTemperature(name, value));
+            }
         }
-        if self.tnom < -273.15 {
-            errors.push(ValidationError::InvalidTemperature("tnom", self.tnom));
-        }
-
         if errors.is_empty() {
             Ok(())
         } else {
@@ -1116,36 +1272,38 @@ impl SimulationOptions {
         }
     }
 
-    /// Export as SPICE .options string.
+    /// Export as SPICE .options string without rounding authored values.
+    /// Exact default comparisons also preserve changes smaller than a
+    /// display tolerance; these bytes are solver input.
     pub fn to_spice_options(&self) -> String {
         let mut lines = vec![".OPTIONS".to_string()];
         let default = Self::default();
 
-        if (self.reltol - default.reltol).abs() > 1e-15 {
-            lines.push(format!("+ RELTOL={:.2e}", self.reltol));
+        if self.reltol != default.reltol {
+            lines.push(format!("+ RELTOL={:e}", self.reltol));
         }
-        if (self.residual_reltol - default.residual_reltol).abs() > 1e-15 {
-            lines.push(format!("+ RESIDUAL_RELTOL={:.2e}", self.residual_reltol));
+        if self.residual_reltol != default.residual_reltol {
+            lines.push(format!("+ RESIDUAL_RELTOL={:e}", self.residual_reltol));
         }
-        if (self.abstol - default.abstol).abs() > 1e-20 {
-            lines.push(format!("+ ABSTOL={:.2e}", self.abstol));
+        if self.abstol != default.abstol {
+            lines.push(format!("+ ABSTOL={:e}", self.abstol));
         }
-        if (self.vntol - default.vntol).abs() > 1e-12 {
-            lines.push(format!("+ VNTOL={:.2e}", self.vntol));
+        if self.vntol != default.vntol {
+            lines.push(format!("+ VNTOL={:e}", self.vntol));
         }
-        if (self.iabstol - default.iabstol).abs() > 1e-20 {
-            lines.push(format!("+ IABSTOL={:.2e}", self.iabstol));
+        if self.iabstol != default.iabstol {
+            lines.push(format!("+ IABSTOL={:e}", self.iabstol));
         }
-        if (self.chgtol - default.chgtol).abs() > 1e-22 {
-            lines.push(format!("+ CHGTOL={:.2e}", self.chgtol));
+        if self.chgtol != default.chgtol {
+            lines.push(format!("+ CHGTOL={:e}", self.chgtol));
         }
         if self.pivrel.to_bits() != default.pivrel.to_bits() {
-            lines.push(format!("+ PIVREL={:.2e}", self.pivrel));
+            lines.push(format!("+ PIVREL={:e}", self.pivrel));
         }
         // The product policy's default is deliberately non-zero while the
         // core fallback is zero. Always state it so the ledger and solve
         // cannot disagree when the user leaves this field untouched.
-        lines.push(format!("+ PIVTOL={:.2e}", self.pivtol));
+        lines.push(format!("+ PIVTOL={:e}", self.pivtol));
         if self.itl1 != default.itl1 {
             lines.push(format!("+ ITL1={}", self.itl1));
         }
@@ -1165,14 +1323,14 @@ impl SimulationOptions {
         if self.method != default.method {
             lines.push(format!("+ METHOD={}", self.method.spice_name()));
         }
-        if (self.temp - default.temp).abs() > 0.01 {
-            lines.push(format!("+ TEMP={:.2}", self.temp));
+        if self.temp != default.temp {
+            lines.push(format!("+ TEMP={}", self.temp));
         }
-        if (self.tnom - default.tnom).abs() > 0.01 {
-            lines.push(format!("+ TNOM={:.2}", self.tnom));
+        if self.tnom != default.tnom {
+            lines.push(format!("+ TNOM={}", self.tnom));
         }
-        if (self.gmin - default.gmin).abs() > 1e-20 {
-            lines.push(format!("+ GMIN={:.2e}", self.gmin));
+        if self.gmin != default.gmin {
+            lines.push(format!("+ GMIN={:e}", self.gmin));
         }
         if self.gmin_stepping != default.gmin_stepping {
             lines.push(format!("+ GMINSTEPPING={}", u8::from(self.gmin_stepping)));
@@ -1200,11 +1358,11 @@ impl SimulationOptions {
             lines.push(format!("+ BYPASS={}", u8::from(self.bypass_enabled)));
         }
         if self.bypass_enabled {
-            if (self.bypass_reltol - default.bypass_reltol).abs() > 1e-15 {
-                lines.push(format!("+ BYPASSRELTOL={:.2e}", self.bypass_reltol));
+            if self.bypass_reltol != default.bypass_reltol {
+                lines.push(format!("+ BYPASSRELTOL={:e}", self.bypass_reltol));
             }
-            if (self.bypass_abstol - default.bypass_abstol).abs() > 1e-12 {
-                lines.push(format!("+ BYPASSABSTOL={:.2e}", self.bypass_abstol));
+            if self.bypass_abstol != default.bypass_abstol {
+                lines.push(format!("+ BYPASSABSTOL={:e}", self.bypass_abstol));
             }
         }
         if self.damping != default.damping {
@@ -1218,7 +1376,7 @@ impl SimulationOptions {
         // record; stating the plan's ceiling under that key would make one of
         // the two bounds unstatable.
         // The core fallback is unbounded; Studio's product policy is not.
-        lines.push(format!("+ MAXTIMESTEP={:.2e}", self.max_timestep));
+        lines.push(format!("+ MAXTIMESTEP={:e}", self.max_timestep));
 
         // The parser's package selector stays in force for the rest of the
         // `.OPTIONS` command it appears on, so a scoped key placed among the
@@ -1226,14 +1384,14 @@ impl SimulationOptions {
         // integrator's settings therefore get their own card.
         let mut timeint = Vec::new();
         if let Some(reltol) = self.transient_lte_reltol {
-            timeint.push(format!("+ RELTOL={reltol:.2e}"));
+            timeint.push(format!("+ RELTOL={reltol:e}"));
         }
         if let Some(abstol) = self.transient_lte_abstol {
-            timeint.push(format!("+ ABSTOL={abstol:.2e}"));
+            timeint.push(format!("+ ABSTOL={abstol:e}"));
         }
         // The product floor is lower than the core fallback and therefore
         // must be stated even for the untouched shipping policy.
-        timeint.push(format!("+ MINTIMESTEP={:.2e}", self.min_timestep));
+        timeint.push(format!("+ MINTIMESTEP={:e}", self.min_timestep));
         if !timeint.is_empty() {
             // A card whose only content is the global header states nothing,
             // and would re-scope nothing either; drop it rather than emit it.

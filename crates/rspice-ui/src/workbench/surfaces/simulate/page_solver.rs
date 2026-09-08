@@ -303,6 +303,13 @@ pub(super) fn commit_options_transaction(
     app: &mut RSpiceApp,
     options: &SimulationOptions,
 ) -> Result<bool, String> {
+    options.validate().map_err(|errors| {
+        errors
+            .into_iter()
+            .map(|error| error.to_string())
+            .collect::<Vec<_>>()
+            .join(" · ")
+    })?;
     let current_bytes = serde_json::to_vec(&app.state.sim_setup.options)
         .map_err(|error| format!("Could not compare the current solver options: {error}"))?;
     let requested_bytes = serde_json::to_vec(options)

@@ -13,6 +13,7 @@ mod plan_removal;
 mod press_sweep;
 mod registry_honesty;
 mod settings_switch;
+mod solver_options;
 
 use egui::{Rect, vec2};
 
@@ -287,15 +288,12 @@ fn the_bypass_voltage_floor_commits_through_the_pages_own_channel() {
 
     assert!(app.state.sim_setup.options.bypass_enabled);
     assert_eq!(app.state.sim_setup.options.bypass_abstol, 4e-9);
-    assert!(
-        app.state
-            .sim_setup
-            .options
-            .to_spice_options()
-            .contains("BYPASSABSTOL=4.00e-9"),
-        "{}",
-        app.state.sim_setup.options.to_spice_options()
+    let deck = crate::simulation::SimulationController::apply_simulation_options_to_netlist(
+        "bypass options\nV1 1 0 1\nR1 1 0 1k\n.op\n.end\n",
+        &app.state.sim_setup.options,
     );
+    let parsed = rspice_core::netlist::parse_netlist(&deck).expect("the committed options parse");
+    assert_eq!(parsed.options.bypass_abstol, Some(4e-9));
 }
 
 /// The run-space page states its declaration, its cost and its composition.

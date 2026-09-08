@@ -459,9 +459,9 @@ impl SimSetupState {
             temperature_celsius,
         };
         self.options.temp = temperature_celsius;
-        self.options_draft.temp = format_temperature(temperature_celsius);
+        self.options_draft.temp = temperature_celsius.to_string();
         self.op.ensure_initialized();
-        self.op.temperature = format_temperature(temperature_celsius);
+        self.op.temperature = temperature_celsius.to_string();
         Ok(())
     }
 
@@ -490,7 +490,7 @@ impl SimSetupState {
         self.options = options.clone();
         self.reference_pvt.temperature_celsius = options.temp;
         self.op.ensure_initialized();
-        self.op.temperature = format_temperature(options.temp);
+        self.op.temperature = options.temp.to_string();
     }
 
     /// One-line mono summary of an analysis configuration, for list rows.
@@ -838,17 +838,6 @@ fn default_global_run_set() -> crate::simulation::run_set::RunSetState {
     crate::simulation::run_set::RunSetState::reference_only()
 }
 
-fn format_temperature(value: f64) -> String {
-    if value.fract().abs() < f64::EPSILON {
-        format!("{value:.0}")
-    } else {
-        format!("{value:.6}")
-            .trim_end_matches('0')
-            .trim_end_matches('.')
-            .to_owned()
-    }
-}
-
 fn deserialize_analysis_set<'de, D>(deserializer: D) -> Result<HashSet<usize>, D::Error>
 where
     D: serde::Deserializer<'de>,
@@ -897,6 +886,29 @@ mod tests {
         assert!(!restored.hysteresis);
         assert_eq!(restored.source, "VIN");
         assert_eq!(restored.stop, "5");
+    }
+
+    #[test]
+    fn solver_options_reference_pvt_preserves_full_precision() {
+        let mut setup = SimSetupState::new();
+        for temperature in [27.123_456_789, -40.123_456_789, 27.0_f64.next_up()] {
+            setup
+                .set_reference_pvt(ProcessCorner::FF, temperature)
+                .unwrap();
+            assert_eq!(
+                setup.reference_pvt.temperature_celsius.to_bits(),
+                temperature.to_bits()
+            );
+            assert_eq!(setup.options.temp.to_bits(), temperature.to_bits());
+            assert_eq!(
+                setup.options_draft.temp.parse::<f64>().unwrap().to_bits(),
+                temperature.to_bits()
+            );
+            assert_eq!(
+                setup.op.temperature.parse::<f64>().unwrap().to_bits(),
+                temperature.to_bits()
+            );
+        }
     }
 
     #[test]
