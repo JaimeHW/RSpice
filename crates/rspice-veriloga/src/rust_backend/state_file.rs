@@ -1536,7 +1536,7 @@ fn finalize_checkpoint_identity_with_compatibility(
     Ok(())
 }
 
-const GENERATED_MODEL_SEMANTICS_VERSION: u32 = 5;
+const GENERATED_MODEL_SEMANTICS_VERSION: u32 = 6;
 
 fn generated_model_semantic_identity(device: &GeneratedRustDevice) -> String {
     let mut hasher = blake3::Hasher::new();
@@ -2501,6 +2501,9 @@ fn lower_parameter_default_expr(
                 lower_parameter_default_expr(artifact, *left, parameter_fields, parameter_given)?;
             let right =
                 lower_parameter_default_expr(artifact, *right, parameter_fields, parameter_given)?;
+            if op.as_str() == "Pow" {
+                return Ok(super::expr::power_value_expr(&left, &right));
+            }
             if matches!(
                 op.as_str(),
                 "BitAnd"
@@ -2627,6 +2630,35 @@ fn lower_parameter_default_expr(
                 ));
             };
             lower_parameter_default_expr(artifact, *fallback, parameter_fields, parameter_given)
+        }
+        HirExprKind::Call { name, args } => {
+            let operands = args
+                .iter()
+                .map(|argument| {
+                    lower_parameter_default_expr(
+                        artifact,
+                        *argument,
+                        parameter_fields,
+                        parameter_given,
+                    )
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let value = match operands.as_slice() {
+                [left] => super::expr::pure_intrinsic_value(&name.to_ascii_lowercase(), left, None),
+                [left, right] => {
+                    super::expr::pure_intrinsic_value(&name.to_ascii_lowercase(), left, Some(right))
+                }
+                _ => None,
+            };
+            value.ok_or_else(|| {
+                unsupported(
+                    artifact,
+                    format!(
+                        "parameter default function '{name}' with {} argument(s)",
+                        args.len()
+                    ),
+                )
+            })
         }
         other => Err(unsupported(
             artifact,

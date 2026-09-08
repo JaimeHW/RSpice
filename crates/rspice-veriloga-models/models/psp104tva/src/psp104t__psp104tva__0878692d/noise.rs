@@ -4597,7 +4597,7 @@ impl Instance {
 		let GV=Q+ GU;
 		let GW=S+ GU;
 		let GX=U+ GU;
-		let GY=GR* (GR.sqrt());
+		let GY=GR.powf(1.5f64);
 		let GZ=GY* ((H* ((R* O)- (GV* GT))).exp());
 		let HA=GY* ((H* ((T* O)- (GW* GT))).exp());
 		let HB=GY* ((H* ((V* O)- (GX* GT))).exp());

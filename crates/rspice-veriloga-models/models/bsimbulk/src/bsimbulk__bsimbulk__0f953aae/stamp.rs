@@ -10935,7 +10935,7 @@ impl Instance {
 		let EAM=EAL* EAI;
 		let EAN=(DZM* EAK)* EAI;
 		let EAO=EAJ* EAL;
-		let EAP=EAM.sqrt();
+		let EAP=EAM.powf(CW);
 		let EAQ=(L9([0.0,0.0,EAN[0],EAN[1],EAN[2],EAN[3],EAN[4],EAN[5],EAN[6]])+ L9([EAO[0],EAO[1],EAO[2],EAO[3],EAO[4],0.0,EAO[5],EAO[6],EAO[7]]))* (CW* ((EAM+ (((EAM== DR) as u8 as f64)* DS)).powf(-0.5f64)));
 		let EAT=EAS* AOI;
 		let EAU=(AOJ* EAR)+ (((AOJ* EAS)* AOI)+ (AOJ* EAT));

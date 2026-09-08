@@ -14,6 +14,50 @@ use rspice_veriloga::canonical_ir::{
 use std::collections::{HashMap, HashSet};
 
 #[test]
+fn fractional_power_rewrites_preserve_branch_cuts_and_infinite_limits() {
+    for exponent in [0.5_f64, 1.5] {
+        for (base, apply) in [
+            ("V(p)", (|x: f64| x) as fn(f64) -> f64),
+            ("sqrt(V(p))", |x| x.sqrt()),
+            ("abs(V(p))", |x| x.abs()),
+            ("max(sqrt(-1.0),V(p))", |x| x),
+            ("1.0/sqrt(V(p))", |x| 1.0 / x.sqrt()),
+            ("sqrt(V(p))/2.0", |x| x.sqrt() / 2.0),
+            ("sqrt(V(p))+sqrt(V(p))", |x| x.sqrt() + x.sqrt()),
+            ("sqrt(V(p))*sqrt(V(p))", |x| x.sqrt() * x.sqrt()),
+            ("V(p)*V(p)", |x| x * x),
+            ("exp(V(p))", |x| x.exp()),
+            ("max(V(p),0.0)", |x| if x >= 0.0 { x } else { 0.0 }),
+        ] {
+            let artifact = artifact(&format!(
+                "module fractional_power(p); inout p; electrical p;
+                 analog I(p)<+atan2(pow({base},{exponent}),-1.0); endmodule"
+            ));
+            let cfg = CfgModel::from_hir(&artifact.hir, &artifact.mir).unwrap();
+            let (optimized, residuals) = optimize_cfg(&cfg.function, &cfg.residuals);
+            for voltage in [f64::NEG_INFINITY, -1.0, -0.0, 0.0, 1.0, f64::INFINITY] {
+                let mut inputs = inputs(&artifact);
+                inputs.node_potentials[0] = voltage;
+                let expected = apply(voltage).powf(exponent).atan2(-1.0);
+                for (function, residuals) in
+                    [(&cfg.function, &cfg.residuals), (&optimized, &residuals)]
+                {
+                    let actual = evaluate_cfg(function, &inputs)
+                        .unwrap()
+                        .value(residuals[0])
+                        .unwrap();
+                    assert!(
+                        (expected.is_nan() && actual.is_nan())
+                            || expected.to_bits() == actual.to_bits(),
+                        "pow({base},{exponent}) at {voltage:?} before atan2: expected {expected:?}, got {actual:?}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn simplification_preserves_signed_zero_before_a_branch_cut() {
     for (expression, apply) in [
         ("0.0+V(p)", (|x: f64| 0.0 + x) as fn(f64) -> f64),

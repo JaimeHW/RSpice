@@ -2106,7 +2106,7 @@ pub(super) fn canonical_temperature_preprocess(
 	let I=parameters[24]+ H;
 	let J=parameters[25]+ H;
 	let K=parameters[26]+ H;
-	let L=D* (D.sqrt());
+	let L=D.powf(1.5f64);
 	let N=L* ((M* (staged[1]- (I* G))).exp());
 	let O=L* ((M* (staged[2]- (J* G))).exp());
 	let P=L* ((M* (staged[3]- (K* G))).exp());

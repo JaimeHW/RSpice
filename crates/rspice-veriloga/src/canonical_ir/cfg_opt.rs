@@ -394,10 +394,14 @@ impl Optimizer {
             self.values[usize::from(value)].kind = CfgValueKind::RealConstant(1.0);
             return true;
         }
-        if exponent == 0.5 {
+        if exponent == 0.5 && self.nonnegative_or_nan(base, &mut 64) {
+            // pow(-0, 0.5) is +0, while sqrt(-0) retains the negative sign.
+            // The sign proof excludes -infinity, whose half power is +infinity
+            // rather than sqrt(-infinity)'s NaN.
+            let root = self.push_unary(emitted, CfgUnaryOp::Sqrt, base);
             self.values[usize::from(value)].kind = CfgValueKind::Unary {
-                op: CfgUnaryOp::Sqrt,
-                input: base,
+                op: CfgUnaryOp::Abs,
+                input: root,
             };
             return true;
         }
@@ -410,7 +414,7 @@ impl Optimizer {
             };
             return true;
         }
-        if exponent == 1.5 {
+        if exponent == 1.5 && self.nonnegative_or_nan(base, &mut 64) {
             let root = self.push_unary(emitted, CfgUnaryOp::Sqrt, base);
             self.values[usize::from(value)].kind = CfgValueKind::Binary {
                 op: CfgBinaryOp::Mul,
@@ -437,6 +441,70 @@ impl Optimizer {
             right: base,
         };
         true
+    }
+
+    /// A small, bounded sign proof for fractional-power specialization. Unknown
+    /// parameters, probes and merges keep powf; no runtime guard or extra IR
+    /// operation is needed for them. Both zero signs and NaN are admitted.
+    fn nonnegative_or_nan(&self, value: ValueId, remaining: &mut usize) -> bool {
+        if *remaining == 0 {
+            return false;
+        }
+        *remaining -= 1;
+        match self.values[usize::from(value)].kind {
+            CfgValueKind::RealConstant(value) => value >= 0.0 || value.is_nan(),
+            CfgValueKind::BooleanConstant(_) => true,
+            CfgValueKind::Unary { op, input } => match op {
+                CfgUnaryOp::Abs
+                | CfgUnaryOp::Sqrt
+                | CfgUnaryOp::Exp
+                | CfgUnaryOp::LimExp
+                | CfgUnaryOp::LimitedExp
+                | CfgUnaryOp::Cosh
+                | CfgUnaryOp::Not => true,
+                CfgUnaryOp::FreezeDerivative => self.nonnegative_or_nan(input, remaining),
+                _ => false,
+            },
+            CfgValueKind::Binary { op, left, right } => match op {
+                CfgBinaryOp::Hypot
+                | CfgBinaryOp::Eq
+                | CfgBinaryOp::Ne
+                | CfgBinaryOp::Lt
+                | CfgBinaryOp::Le
+                | CfgBinaryOp::Gt
+                | CfgBinaryOp::Ge
+                | CfgBinaryOp::And
+                | CfgBinaryOp::Or => true,
+                CfgBinaryOp::Mul if left == right => true,
+                CfgBinaryOp::Pow => self.constant(right).is_some_and(|exponent| {
+                    exponent.is_finite() && (exponent.fract() != 0.0 || exponent % 2.0 == 0.0)
+                }),
+                CfgBinaryOp::CheckedValue => self.nonnegative_or_nan(right, remaining),
+                // A denominator known only to be nonnegative can be -0;
+                // a positive numerator divided by it produces -infinity.
+                CfgBinaryOp::Div
+                    if self.constant(right).is_some_and(|constant| {
+                        constant >= 0.0 && !constant.is_sign_negative()
+                    }) =>
+                {
+                    self.nonnegative_or_nan(left, remaining)
+                }
+                CfgBinaryOp::Max
+                    if [left, right].into_iter().any(|operand| {
+                        self.constant(operand)
+                            .is_some_and(|constant| constant >= 0.0)
+                    }) =>
+                {
+                    true
+                }
+                CfgBinaryOp::Add | CfgBinaryOp::Mul | CfgBinaryOp::Min | CfgBinaryOp::Max => {
+                    self.nonnegative_or_nan(left, remaining)
+                        && self.nonnegative_or_nan(right, remaining)
+                }
+                _ => false,
+            },
+            _ => false,
+        }
     }
 
     /// Merge values that compute the same thing, where one dominates the other.
