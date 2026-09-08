@@ -216,9 +216,8 @@ use super::{JitError, JitResult};
 use crate::canonical_ir::cfg_lower::CfgModel;
 use crate::canonical_ir::cfg_lower::CfgNoiseProcess;
 use crate::canonical_ir::{
-    AdSeed, CanonicalIrArtifact, CfgBinaryOp, CfgBlock, CfgFunction, CfgInstruction,
-    CfgStateAllocation, CfgTerminator, CfgValueKind, MirModel, ValueId, differentiate,
-    prune_cfg_to_outputs,
+    AdSeed, CanonicalIrArtifact, CfgBlock, CfgFunction, CfgInstruction, CfgStateAllocation,
+    CfgTerminator, CfgValueKind, MirModel, ValueId, differentiate, prune_cfg_to_outputs,
 };
 use crate::codegen::state_renumbering::StateSlotMapping;
 use crate::codegen::{ColumnAxis, CompiledModel};
@@ -243,19 +242,6 @@ pub(crate) enum CfgPlanRefusal {
     StateAllocation,
     /// The derivative pass refused the body.
     Differentiate,
-    /// The body contains an operation the CFG derivative pass has no rule for.
-    ///
-    /// Checked *before* differentiating rather than reported by it, because the
-    /// pass does not report it: `binary_factor`'s scalar fallthrough in
-    /// [`crate::canonical_ir`]'s `ad` module is a `debug_assert!` over
-    /// `is_predicate` and a `None` result, so a hole there panics a debug build
-    /// and silently yields a zero derivative in a release one. A zero Jacobian
-    /// entry that should not be zero is precisely the silently-wrong class this
-    /// program refuses, and taking the postfix plan for the module is the only
-    /// answer available until the scalar rules exist.
-    ///
-    /// See [`DERIVATIVE_RULE_HOLES`] for the list and the rules that empty it.
-    DerivativeRuleMissing,
     /// The lane scalarizer refused the differentiated body.
     Scalarize,
     /// A value the plan needs has no scalar after lane scalarization.
@@ -315,7 +301,6 @@ impl CfgPlanRefusal {
             Self::CfgLowering => "cfg-lowering",
             Self::StateAllocation => "state-allocation",
             Self::Differentiate => "differentiate",
-            Self::DerivativeRuleMissing => "derivative-rule-missing",
             Self::Scalarize => "scalarize",
             Self::NoScalar => "no-scalar",
             Self::Lowering => "lowering",
@@ -580,49 +565,6 @@ pub(crate) fn derivative_seeds(cfg: &CfgModel, mir: &MirModel) -> (Vec<AdSeed>, 
         .collect();
     let correction = limits.then(|| seeds.len() - 1);
     (seeds, correction)
-}
-
-/// The binary operations the CFG derivative pass's *scalar* rules omit.
-///
-/// The pass has two rule sets. Its lane rules carry both of these already, and
-/// carry them correctly:
-///
-/// ```text
-/// d hypot(x, y) = (x·dx + y·dy) / hypot(x, y)
-/// d atan2(y, x) = (x·dy − y·dx) / (x² + y²)
-/// ```
-///
-/// Its scalar rules do not, and say so only in a debug build: `binary_factor`'s
-/// fallthrough asserts the operation is a predicate and otherwise returns
-/// `None`, which a release build reads as "the derivative is zero". The plan
-/// route reaches the scalar rules, so a `ddx` over either operation compiles to
-/// a Jacobian entry that is wrong rather than absent.
-///
-/// So this list exists to keep a wrong Jacobian out of a shipped plan, not to
-/// describe a limitation anybody intends to keep: the two rules are already
-/// written a thousand lines further down the same file, and the scalar cases
-/// are the same algebra without the lane plumbing. Adding them empties this
-/// list, and [`a_module_the_derivative_pass_has_no_rule_for_falls_back`] is what
-/// notices — it fails by *building* the module, which is the day the list and
-/// the refusal class both come out.
-///
-/// No shipped model reaches this — a search of the forty-three-module tree
-/// finds neither operation — so the generated-Rust backend, which runs the same
-/// pass, emits nothing that depends on the hole today.
-const DERIVATIVE_RULE_HOLES: &[CfgBinaryOp] = &[CfgBinaryOp::Hypot, CfgBinaryOp::Atan2];
-
-/// The first operation of `function` the derivative pass has no rule for.
-fn derivative_rule_hole(function: &CfgFunction) -> Option<CfgBinaryOp> {
-    function.values.iter().find_map(|value| match value.kind {
-        CfgValueKind::Binary { op, .. }
-        | CfgValueKind::LaneBinary { op, .. }
-        | CfgValueKind::LaneScalar { op, .. }
-            if DERIVATIVE_RULE_HOLES.contains(&op) =>
-        {
-            Some(op)
-        }
-        _ => None,
-    })
 }
 
 /// Which of a noise process's two magnitudes the plan entry holds.
@@ -999,11 +941,11 @@ fn constant_zero_program() -> JitResult<Program> {
 
 /// Build the CFG route's plan for `model`, or say why it cannot be built.
 ///
-/// The postfix plan is built first and kept: it validates the canonical
-/// artifact against the compiled model, and its assignment passes, parameter
-/// defaults, static conditions and published current pairs are the CFG plan's
-/// too. Only the program-bearing value fields are replaced — `stamp_values`,
-/// `jacobians`, `reactive_jacobians`, `noise_psd` and `noise_exponents`.
+/// Shared setup validates the artifact and builds assignment passes, parameter
+/// defaults, static conditions and published current pairs. Residual and
+/// Jacobian programs are deferred to CFG lowering, avoiding discarded postfix
+/// derivatives and their restrictions on derivative order. Noise programs are
+/// replaced below; the complete plan is validated before it can execute.
 ///
 /// # There is no noise scope
 ///
@@ -1071,12 +1013,6 @@ pub(crate) fn build_model_plan_from_canonical_cfg(
         )
     })?;
 
-    if let Some(op) = derivative_rule_hole(&cfg.function) {
-        return Err(refuse(
-            CfgPlanRefusal::DerivativeRuleMissing,
-            format!("the CFG derivative pass has no rule for {op:?}"),
-        ));
-    }
     let (seeds, correction_lane) = derivative_seeds(&cfg, &artifact.mir);
     let mut differentiated = differentiate(&cfg.function, &seeds)
         .map_err(|error| refuse(CfgPlanRefusal::Differentiate, format!("{error:?}")))?;
@@ -1623,13 +1559,10 @@ pub(crate) fn build_model_plan_from_canonical_cfg(
 /// rejected step (2.0 against 1.0), and `hypot`/`atan2` under a `ddx`, where the
 /// scalar derivative rules fall through to a zero.
 ///
-/// Every one of them but the last was *closed* rather than screened, and
-/// [`a_closed_divergence_takes_the_cfg_route`] is where they moved to.
-/// `hypot`/`atan2` is not on that list because it is not a divergence: neither
-/// route computes a wrong number for it, the CFG route simply has no rule and
-/// refuses, which is [`DERIVATIVE_RULE_HOLES`]. The pattern each followed is the
-/// same one: the divergence was a lowering decision one route had and the other
-/// did not, and the fix was to give the CFG route the same decision.
+/// These divergences are covered by [`a_closed_divergence_takes_the_cfg_route`]
+/// and the mathematical derivative tests. Scalar and packed AD both implement
+/// `hypot` and `atan2`, including nested derivatives. Their binary-operator
+/// matches are exhaustive so a new operation cannot silently get zero tangents.
 ///
 /// * `$port_connected` folded to `1.0` because the generated backend builds
 ///   every instance it evaluates. It is a runtime leaf for a backend that
@@ -1848,6 +1781,28 @@ endmodule
             .compile_canonical_ir(source)
             .expect("compile canonical IR");
         (model, artifact)
+    }
+
+    #[test]
+    fn nested_mathematical_derivatives_take_the_cfg_plan() {
+        for expression in [
+            "max(V(p,n),sqrt(V(q,n)))",
+            "sin(V(p,n))",
+            "pow(V(p,n),3.5)",
+            "(2.0+V(p,n))/(1.0+V(p,n))",
+            "hypot(V(p,n),2.0)",
+            "atan2(V(p,n),2.0)",
+        ] {
+            let report = VerilogACompiler::default().compile_runtime(&format!(
+                "module nested_math(p,q,n); inout p,q,n; electrical p,q,n; analog I(p,n)<+ddx(ddx({expression},V(p,n)),V(p,n)); endmodule"
+            ), None).unwrap();
+            build_model_plan_from_canonical_cfg(&report.model, &report.canonical_ir)
+                .unwrap_or_else(|error| panic!("{expression}: {error:?}"));
+            let (plan, refusal) =
+                build_default_model_plan_reported(&report.model, &report.canonical_ir).unwrap();
+            assert!(refusal.is_none(), "{expression}: {refusal:?}");
+            plan.validate_shape(&report.model).unwrap();
+        }
     }
 
     fn forms(plan: &NativeModelPlan) -> Vec<(&'static str, &'static str)> {
@@ -2069,14 +2024,9 @@ endmodule
         );
     }
 
-    /// `hypot` under a `ddx` is differentiable and the CFG pass has no rule for
-    /// it, so the module falls back rather than taking a zero derivative.
-    ///
-    /// This test fails by *building* the module, which is what it is for: the
-    /// day [`DERIVATIVE_RULE_HOLES`] gains the two rules, this says so instead
-    /// of quietly continuing to refuse a module it no longer needs to.
+    /// Both coordinates depend on the probe, so both tangents must survive.
     #[test]
-    fn a_module_the_derivative_pass_has_no_rule_for_falls_back() {
+    fn hypot_with_two_dependent_operands_takes_the_cfg_plan() {
         let source = r#"
 module cfg_plan_no_rule(p, n);
   inout p, n;
@@ -2087,14 +2037,8 @@ endmodule
         let (model, artifact) = compile(source);
         let (plan, refused) =
             build_default_model_plan_reported(&model, &artifact).expect("the default plan builds");
-        let refused = refused.expect(
-            "the CFG derivative pass has no rule for hypot, so a module differentiating one \
-             cannot take the CFG route",
-        );
-        assert_eq!(refused.class, CfgPlanRefusal::DerivativeRuleMissing);
-        for (field, form) in forms(&plan) {
-            assert_eq!(form, "postfix", "a refused module's {field} stay postfix");
-        }
+        assert!(refused.is_none(), "{refused:?}");
+        plan.validate_shape(&model).unwrap();
     }
 
     /// A construct that *was* a known divergence and no longer is takes the CFG

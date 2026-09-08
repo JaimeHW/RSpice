@@ -148,6 +148,84 @@ fn nested_ddx_transcendentals_and_report_only_values_keep_higher_orders() {
 }
 
 #[test]
+fn nested_ddx_mathematical_values_and_jacobians_follow_analytic_derivatives() {
+    for (expression, expected) in [
+        (
+            "sin(V(p,n))",
+            (|x: f64| [-x.sin(), -x.cos()]) as fn(f64) -> [f64; 2],
+        ),
+        ("cos(V(p,n))", |x| [-x.cos(), x.sin()]),
+        ("exp(V(p,n))", |x| [x.exp(), x.exp()]),
+        ("sqrt(V(p,n))", |x| {
+            [-0.25 / x.powf(1.5), 0.375 / x.powf(2.5)]
+        }),
+        ("ln(V(p,n))", |x| [-1.0 / x.powi(2), 2.0 / x.powi(3)]),
+        ("pow(V(p,n),3.5)", |x| {
+            [8.75 * x.powf(1.5), 13.125 * x.sqrt()]
+        }),
+        ("V(p,n)**3.5", |x| [8.75 * x.powf(1.5), 13.125 * x.sqrt()]),
+        ("(2.0+V(p,n))/(1.0+V(p,n))", |x| {
+            [2.0 / (1.0 + x).powi(3), -6.0 / (1.0 + x).powi(4)]
+        }),
+        ("min(V(p,n)*V(p,n)*V(p,n),0.5)", |x| {
+            if x * x * x < 0.5 {
+                [6.0 * x, 6.0]
+            } else {
+                [0.0, 0.0]
+            }
+        }),
+        ("max(V(p,n)*V(p,n)*V(p,n),0.5)", |x| {
+            if x * x * x > 0.5 {
+                [6.0 * x, 6.0]
+            } else {
+                [0.0, 0.0]
+            }
+        }),
+        ("hypot(V(p,n),2.0)", |x| {
+            [
+                4.0 / (x * x + 4.0).powf(1.5),
+                -12.0 * x / (x * x + 4.0).powf(2.5),
+            ]
+        }),
+        ("atan2(V(p,n),2.0)", |x| {
+            [
+                -4.0 * x / (x * x + 4.0).powi(2),
+                (12.0 * x * x - 16.0) / (x * x + 4.0).powi(3),
+            ]
+        }),
+        ("hypot(V(p,n),V(p,n)+3.0)", |x| {
+            let d = 2.0 * x * x + 6.0 * x + 9.0;
+            [9.0 / d.powf(1.5), -27.0 * (2.0 * x + 3.0) / d.powf(2.5)]
+        }),
+        ("atan2(V(p,n),V(p,n)+3.0)", |x| {
+            let d = 2.0 * x * x + 6.0 * x + 9.0;
+            let dp = 4.0 * x + 6.0;
+            [
+                -3.0 * dp / d.powi(2),
+                6.0 * dp * dp / d.powi(3) - 12.0 / d.powi(2),
+            ]
+        }),
+    ] {
+        let fixture = compile(&format!(
+            "module nested_math(p,n); inout p,n; electrical p,n; analog I(p,n)<+ddx(ddx({expression},V(p,n)),V(p,n)); endmodule"
+        ));
+        let mut device = fixture.device("X", &[1, 0]);
+        for voltage in [0.25, 0.75, 1.25, 3.0, 5.0] {
+            device.update_voltages(&[voltage]);
+            let current = device.try_evaluate().unwrap()[0];
+            let (matrix, _) = collect_stamps(&mut device, &[voltage]);
+            let jacobian = matrix.get(&(0, 0)).copied().unwrap_or(0.0);
+            for (actual, expected) in [current, jacobian].into_iter().zip(expected(voltage)) {
+                assert!(
+                    (actual - expected).abs() <= 1e-10 * expected.abs().max(1.0),
+                    "{expression}, V={voltage}: expected {expected}, got {actual}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn recursive_ddx_in_a_runtime_loop_is_diagnosed() {
     let source = "module recursive(p,n); inout p,n; electrical p,n; real x; integer k; analog begin x=exp(V(p,n)); for(k=0;k<V(p,n);k=k+1) x=ddx(x,V(p,n)); I(p,n)<+x; end endmodule";
     let error = rspice_veriloga::VerilogACompiler::default()

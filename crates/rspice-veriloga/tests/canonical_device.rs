@@ -22,6 +22,48 @@ use std::process::Command;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 #[test]
+fn generated_homogeneous_math_preserves_values_and_derivatives_across_scales() {
+    for op in ["hypot", "atan2"] {
+        for derivative in 0..3 {
+            let expression = format!("{op}(V(p),V(q))");
+            let expression = match derivative {
+                1 => format!("ddx({expression},V(p))"),
+                2 => format!("ddx({expression},V(q))"),
+                _ => expression,
+            };
+            let source = format!(
+                "module planar(p,q); inout p,q; electrical p,q; analog I(p)<+{expression}; endmodule"
+            );
+            let (state, stamp, noise) = generated_parts(&source, &expression);
+            let main=r#"
+let mut instance=device::state::Instance::new(&[0,1]);
+instance.finalize_parameters().unwrap();
+let scales=if DERIVATIVE==0 { [1e-200,1.0,1e200] } else { [1e-100,1.0,1e100] };
+for scale in scales {
+    for (a,b) in [(-1.0_f64,2.0_f64),(0.0,-2.0),(1.0,-1.0),(1.0,1.0)] {
+        let (p,q)=(a*scale,b*scale);
+        let expected=if HYPOT { let r=a.hypot(b); [p.hypot(q),a/r,b/r] }
+                     else { let d=a*a+b*b; [p.atan2(q),(b/d)/scale,(-a/d)/scale] };
+        let bias=[p,q];
+        let ctx=runtime::GeneratedEvalContext {voltages:&bias,temperature:300.0};
+        let mut sink=[0.0;12];
+        instance.stamp(&ctx,&mut runtime::GeneratedStamper {sink:Some(&mut sink)});
+        let pairs=if DERIVATIVE==0 {vec![(sink[9],expected[0]),(sink[10],expected[1]),(sink[11],expected[2])]}
+                  else {vec![(sink[9],expected[DERIVATIVE])]};
+        for (actual,expected) in pairs {
+            if expected==0.0 {assert_eq!(actual,expected);} else {assert!((actual/expected-1.0).abs()<1e-12,"{p},{q}: expected {expected}, got {actual}");}
+        }
+        assert!(!ctx.evaluation_failed());
+    }
+}
+"#.replace("DERIVATIVE",&derivative.to_string()).replace("HYPOT",if op=="hypot" {"true"} else {"false"});
+            run_generated_main(&expression, &state, &stamp, &noise, &main)
+                .unwrap_or_else(|report| panic!("{report}"));
+        }
+    }
+}
+
+#[test]
 fn generated_extrema_select_values_tangents_and_noise() {
     for (expression, p) in [
         ("max(V(p),sqrt(V(q)))", 1.0),
@@ -610,6 +652,43 @@ for v in [-3.0_f64,-0.75,0.5,1.25] {{
 }
 
 #[test]
+fn generated_nested_ddx_mathematical_jacobians_include_both_operands() {
+    for (op, second, third) in [
+        ("hypot", "9.0/d.powf(1.5)", "-27.0*(2.0*v+3.0)/d.powf(2.5)"),
+        (
+            "atan2",
+            "-3.0*dp/d.powi(2)",
+            "6.0*dp*dp/d.powi(3)-12.0/d.powi(2)",
+        ),
+    ] {
+        let source = format!(
+            "module nested_math(p,n); inout p,n; electrical p,n; analog I(p,n)<+ddx(ddx({op}(V(p,n),V(p,n)+3.0),V(p,n)),V(p,n)); endmodule"
+        );
+        let (state, stamp, noise) = generated_parts(&source, op);
+        let main = format!(
+            r#"
+let mut instance=device::state::Instance::new(&[0,1]);
+instance.finalize_parameters().unwrap();
+for v in [0.25_f64,0.75,1.25,3.0,5.0] {{
+    let d=2.0*v*v+6.0*v+9.0;
+    let dp=4.0*v+6.0;
+    let bias=[v,0.0];
+    let ctx=runtime::GeneratedEvalContext {{voltages:&bias,temperature:300.0}};
+    let mut sink=[0.0;12];
+    instance.stamp(&ctx,&mut runtime::GeneratedStamper {{sink:Some(&mut sink)}});
+    for (actual,expected) in [(sink[9],{second}),(sink[10],{third})] {{
+        assert!((actual/expected-1.0).abs()<1e-11,"V={{v}}: expected {{expected}}, got {{actual}}");
+    }}
+    assert!(!ctx.evaluation_failed());
+}}
+"#
+        );
+        run_generated_main(op, &state, &stamp, &noise, &main)
+            .unwrap_or_else(|report| panic!("{report}"));
+    }
+}
+
+#[test]
 fn generated_nested_ddx_stamps_higher_order_jacobians() {
     for (index, body) in [
         "analog I(p,n)<+ddx(ddx(V(p,n)*V(p,n)*V(p,n),V(p,n)),V(p,n));",
@@ -660,6 +739,32 @@ fn generated_dynamic_expressions_preserve_small_signal_chain_rules() {
             "0.0",
             "0.0",
             "6.0*w",
+        ),
+        (
+            "hypot(V(p,n)+ddt(V(p,n)),2.0)",
+            "v/v.hypot(2.0)",
+            "0.0",
+            "v/v.hypot(2.0)*w",
+        ),
+        (
+            "atan2(V(p,n)+idt(V(p,n),0.0),2.0)",
+            "2.0/(v*v+4.0)",
+            "0.0",
+            "-2.0/(v*v+4.0)/w",
+        ),
+        // ddx(f(V+ddt(V)),V)=f'(V+ddt(V))*(1+s). Linearizing the
+        // remaining f' adds another (1+s), giving f''*(1+2s+s*s).
+        (
+            "ddx(hypot(V(p,n)+ddt(V(p,n)),2.0),V(p,n))",
+            "4.0/(v*v+4.0).powf(1.5)",
+            "-4.0/(v*v+4.0).powf(1.5)*w*w",
+            "8.0/(v*v+4.0).powf(1.5)*w",
+        ),
+        (
+            "ddx(atan2(V(p,n)+ddt(V(p,n)),2.0),V(p,n))",
+            "-4.0*v/(v*v+4.0).powi(2)",
+            "4.0*v/(v*v+4.0).powi(2)*w*w",
+            "-8.0*v/(v*v+4.0).powi(2)*w",
         ),
         ("sin(ddt(V(p,n)))", "0.0", "0.0", "w"),
         ("exp(ddt(V(p,n)))", "0.0", "0.0", "w"),

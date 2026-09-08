@@ -86,11 +86,10 @@ pub(crate) fn build_model_plan_with_canonical_ir(
 ///
 /// This is the plan
 /// [`build_model_plan_from_canonical_cfg`](crate::jit::cfg_plan_builder::build_model_plan_from_canonical_cfg)
-/// starts from and then replaces the value entries of. It is not a second
-/// route: the entries, dependencies and shape validation are the same lowering,
-/// and the only difference is that the assignments the CFG plan's entries will
-/// never read are not lowered. A module the CFG route then refuses does not
-/// keep this plan — the fallback rebuilds the postfix one.
+/// uses for shared setup. Residual and Jacobian entries and their read sets
+/// remain empty until that constructor supplies them and validates the complete
+/// plan. Assignments are rooted on what the CFG plan actually reads. A refused
+/// CFG module rebuilds the complete postfix plan through the other constructor.
 pub(crate) fn build_model_plan_with_canonical_ir_for_cfg(
     model: &CompiledModel,
     artifact: &CanonicalIrArtifact,
@@ -299,119 +298,128 @@ fn build_model_plan_inner(
         );
         static_conditions.push(static_condition);
 
-        let value_limits = base_limits
-            .with_available_current_pairs(&available_current_pairs)
-            .with_prior_current_probes(&prior_current_probes);
-        let value = PlanProgram::Postfix(lower_stamp_value_program(
-            model,
-            canonical_mir,
-            stamp_index,
-            &stamp.value_program,
-            value_limits,
-        )?);
-        stamp_value_current_dependencies.push(value.current_pair_dependencies().to_vec());
-        stamp_value_prior_current_dependencies.push(value.prior_current_dependencies().to_vec());
-        stamp_value_branch_unknown_dependencies.push(value.branch_unknown_dependencies().to_vec());
-        stamp_values.push(value);
-
-        let mut jacobian_current_pairs = available_current_pairs.clone();
-        if let Some((pos, neg)) = infer_current_terminal_pair(stamp) {
-            push_current_pair_indices(
-                model,
-                &mut jacobian_current_pairs,
-                model.num_terminals,
-                pos,
-                neg,
-            )?;
-        }
-        let mut jacobian_prior_current_probes = prior_current_probes.clone();
-        if stamp.branch_ordinal.is_none()
-            && let Some((pos, neg)) = infer_current_unified_pair(model, stamp)
-        {
-            push_prior_current_probe_aliases(
-                &mut jacobian_prior_current_probes,
-                stamp_index,
-                pos,
-                neg,
-            );
-        }
-        let jacobian_limits = base_limits
-            .with_available_current_pairs(&jacobian_current_pairs)
-            .with_prior_current_probes(&jacobian_prior_current_probes);
-        let jacobian_table_lookup_slots = match canonical_mir {
-            Some(mir) => canonical_table_lookup_slots_for_equation(
-                model.name.clone(),
-                mir,
-                canonical_equation_id(model, stamp_index)?,
-                &stamp.value_program,
-            )?,
-            None => Vec::new(),
-        };
-        let mut stamp_jacobians = Vec::with_capacity(stamp.jacobian_programs.len());
-        let mut stamp_jacobian_current_dependencies =
-            Vec::with_capacity(stamp.jacobian_programs.len());
-        let mut stamp_jacobian_prior_current_dependencies =
-            Vec::with_capacity(stamp.jacobian_programs.len());
-        let mut stamp_jacobian_branch_unknown_dependencies =
-            Vec::with_capacity(stamp.jacobian_programs.len());
-        for jacobian in &stamp.jacobian_programs {
-            let program = PlanProgram::Postfix(lower_jacobian_program(
+        // The CFG constructor supplies these entries and their read sets.
+        // Lowering discarded postfix entries would both duplicate compilation
+        // and impose their derivative-order limits on the CFG backend.
+        if !matches!(policy, AssignmentRootPolicy::CfgPreludeSlots) {
+            let value_limits = base_limits
+                .with_available_current_pairs(&available_current_pairs)
+                .with_prior_current_probes(&prior_current_probes);
+            let value = PlanProgram::Postfix(lower_stamp_value_program(
                 model,
                 canonical_mir,
                 stamp_index,
-                jacobian,
-                jacobian_limits,
-                &jacobian_table_lookup_slots,
+                &stamp.value_program,
+                value_limits,
             )?);
-            stamp_jacobian_current_dependencies.push(program.current_pair_dependencies().to_vec());
-            stamp_jacobian_prior_current_dependencies
-                .push(program.prior_current_dependencies().to_vec());
-            stamp_jacobian_branch_unknown_dependencies
-                .push(program.branch_unknown_dependencies().to_vec());
-            stamp_jacobians.push(program);
-        }
-        jacobians.push(stamp_jacobians);
-        jacobian_current_dependencies.push(stamp_jacobian_current_dependencies);
-        jacobian_prior_current_dependencies.push(stamp_jacobian_prior_current_dependencies);
-        jacobian_branch_unknown_dependencies.push(stamp_jacobian_branch_unknown_dependencies);
+            stamp_value_current_dependencies.push(value.current_pair_dependencies().to_vec());
+            stamp_value_prior_current_dependencies
+                .push(value.prior_current_dependencies().to_vec());
+            stamp_value_branch_unknown_dependencies
+                .push(value.branch_unknown_dependencies().to_vec());
+            stamp_values.push(value);
 
-        let canonical_reactive_mir = match canonical_mir {
-            Some(mir) if !stamp.reactive_jacobians.is_empty() => Some(canonical_reactive_mir(
-                model,
-                mir,
-                canonical_equation_id(model, stamp_index)?,
-            )?),
-            _ => None,
-        };
-        let mut stamp_reactive_jacobians = Vec::with_capacity(stamp.reactive_jacobians.len());
-        let mut stamp_reactive_jacobian_current_dependencies =
-            Vec::with_capacity(stamp.reactive_jacobians.len());
-        let mut stamp_reactive_jacobian_prior_current_dependencies =
-            Vec::with_capacity(stamp.reactive_jacobians.len());
-        let mut stamp_reactive_jacobian_branch_unknown_dependencies =
-            Vec::with_capacity(stamp.reactive_jacobians.len());
-        for reactive_jacobian in &stamp.reactive_jacobians {
-            let program = PlanProgram::Postfix(lower_reactive_jacobian_program(
-                model,
-                canonical_reactive_mir.as_ref(),
-                stamp_index,
-                reactive_jacobian,
-                base_limits,
-            )?);
-            stamp_reactive_jacobian_current_dependencies
-                .push(program.current_pair_dependencies().to_vec());
-            stamp_reactive_jacobian_prior_current_dependencies
-                .push(program.prior_current_dependencies().to_vec());
-            stamp_reactive_jacobian_branch_unknown_dependencies
-                .push(program.branch_unknown_dependencies().to_vec());
-            stamp_reactive_jacobians.push(program);
+            let mut jacobian_current_pairs = available_current_pairs.clone();
+            if let Some((pos, neg)) = infer_current_terminal_pair(stamp) {
+                push_current_pair_indices(
+                    model,
+                    &mut jacobian_current_pairs,
+                    model.num_terminals,
+                    pos,
+                    neg,
+                )?;
+            }
+            let mut jacobian_prior_current_probes = prior_current_probes.clone();
+            if stamp.branch_ordinal.is_none()
+                && let Some((pos, neg)) = infer_current_unified_pair(model, stamp)
+            {
+                push_prior_current_probe_aliases(
+                    &mut jacobian_prior_current_probes,
+                    stamp_index,
+                    pos,
+                    neg,
+                );
+            }
+            let jacobian_limits = base_limits
+                .with_available_current_pairs(&jacobian_current_pairs)
+                .with_prior_current_probes(&jacobian_prior_current_probes);
+            let jacobian_table_lookup_slots = match canonical_mir {
+                Some(mir) => canonical_table_lookup_slots_for_equation(
+                    model.name.clone(),
+                    mir,
+                    canonical_equation_id(model, stamp_index)?,
+                    &stamp.value_program,
+                )?,
+                None => Vec::new(),
+            };
+            let mut stamp_jacobians = Vec::with_capacity(stamp.jacobian_programs.len());
+            let mut stamp_jacobian_current_dependencies =
+                Vec::with_capacity(stamp.jacobian_programs.len());
+            let mut stamp_jacobian_prior_current_dependencies =
+                Vec::with_capacity(stamp.jacobian_programs.len());
+            let mut stamp_jacobian_branch_unknown_dependencies =
+                Vec::with_capacity(stamp.jacobian_programs.len());
+            for jacobian in &stamp.jacobian_programs {
+                let program = PlanProgram::Postfix(lower_jacobian_program(
+                    model,
+                    canonical_mir,
+                    stamp_index,
+                    jacobian,
+                    jacobian_limits,
+                    &jacobian_table_lookup_slots,
+                )?);
+                stamp_jacobian_current_dependencies
+                    .push(program.current_pair_dependencies().to_vec());
+                stamp_jacobian_prior_current_dependencies
+                    .push(program.prior_current_dependencies().to_vec());
+                stamp_jacobian_branch_unknown_dependencies
+                    .push(program.branch_unknown_dependencies().to_vec());
+                stamp_jacobians.push(program);
+            }
+            jacobians.push(stamp_jacobians);
+            jacobian_current_dependencies.push(stamp_jacobian_current_dependencies);
+            jacobian_prior_current_dependencies.push(stamp_jacobian_prior_current_dependencies);
+            jacobian_branch_unknown_dependencies.push(stamp_jacobian_branch_unknown_dependencies);
+
+            let canonical_reactive_mir = match canonical_mir {
+                Some(mir) if !stamp.reactive_jacobians.is_empty() => Some(canonical_reactive_mir(
+                    model,
+                    mir,
+                    canonical_equation_id(model, stamp_index)?,
+                )?),
+                _ => None,
+            };
+            let mut stamp_reactive_jacobians = Vec::with_capacity(stamp.reactive_jacobians.len());
+            let mut stamp_reactive_jacobian_current_dependencies =
+                Vec::with_capacity(stamp.reactive_jacobians.len());
+            let mut stamp_reactive_jacobian_prior_current_dependencies =
+                Vec::with_capacity(stamp.reactive_jacobians.len());
+            let mut stamp_reactive_jacobian_branch_unknown_dependencies =
+                Vec::with_capacity(stamp.reactive_jacobians.len());
+            for reactive_jacobian in &stamp.reactive_jacobians {
+                let program = PlanProgram::Postfix(lower_reactive_jacobian_program(
+                    model,
+                    canonical_reactive_mir.as_ref(),
+                    stamp_index,
+                    reactive_jacobian,
+                    base_limits,
+                )?);
+                stamp_reactive_jacobian_current_dependencies
+                    .push(program.current_pair_dependencies().to_vec());
+                stamp_reactive_jacobian_prior_current_dependencies
+                    .push(program.prior_current_dependencies().to_vec());
+                stamp_reactive_jacobian_branch_unknown_dependencies
+                    .push(program.branch_unknown_dependencies().to_vec());
+                stamp_reactive_jacobians.push(program);
+            }
+            reactive_jacobians.push(stamp_reactive_jacobians);
+            reactive_jacobian_current_dependencies
+                .push(stamp_reactive_jacobian_current_dependencies);
+            reactive_jacobian_prior_current_dependencies
+                .push(stamp_reactive_jacobian_prior_current_dependencies);
+            reactive_jacobian_branch_unknown_dependencies
+                .push(stamp_reactive_jacobian_branch_unknown_dependencies);
         }
-        reactive_jacobians.push(stamp_reactive_jacobians);
-        reactive_jacobian_current_dependencies.push(stamp_reactive_jacobian_current_dependencies);
-        reactive_jacobian_prior_current_dependencies
-            .push(stamp_reactive_jacobian_prior_current_dependencies);
-        reactive_jacobian_branch_unknown_dependencies
-            .push(stamp_reactive_jacobian_branch_unknown_dependencies);
 
         if let Some((pos, neg)) = infer_current_terminal_pair(stamp) {
             push_current_pair_indices(
@@ -557,7 +565,11 @@ fn build_model_plan_inner(
             AssignmentRootPolicy::ObservationPass => NativeAssignmentCoverage::ObservableVariables,
         },
     };
-    plan.validate_shape(model)?;
+    // The CFG caller installs every deferred entry before validating the
+    // completed plan. Empty entry vectors cannot be executed as a valid plan.
+    if !matches!(policy, AssignmentRootPolicy::CfgPreludeSlots) {
+        plan.validate_shape(model)?;
+    }
     Ok(plan)
 }
 
