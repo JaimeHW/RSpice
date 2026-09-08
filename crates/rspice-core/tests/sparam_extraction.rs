@@ -16,6 +16,73 @@ use rspice_core::engine::{Engine, SimulationConfig, SimulationError};
 use rspice_core::netlist::Netlist;
 
 #[test]
+fn multiplied_rf_terminations_preserve_bias_noise_and_declared_reference() {
+    for deferred in [false, true] {
+        for multiplicity in [0.5, 2.0, 4.0] {
+            let resistance = if deferred { "{reference}" } else { "50" };
+            let netlist = Netlist::parse(&format!(
+                "* Multiplied RF source\n.subckt generator a b params: reference=50\nP1 a b DC 1 portnum=1 z0={resistance}\n.ends generator\nXG p 0 generator M={multiplicity}\nR1 p 0 100\n.end\n"
+            )).unwrap();
+            let engine = Engine::default();
+            let bias = engine.run_dc_op(&netlist).unwrap();
+            let index = bias
+                .node_names
+                .iter()
+                .position(|name| name.eq_ignore_ascii_case("p"))
+                .unwrap();
+            let expected_bias = 100.0 / (100.0 + 50.0 / multiplicity);
+            assert!((bias.node_voltages[index] - expected_bias).abs() < 1e-12);
+            let run = engine
+                .run_sp_over_grid_with_abort(&netlist, &[10.0, 20.0], true, &rspice_core::NoAbort)
+                .unwrap();
+            assert_eq!(run.ports[0].z0, 50.0);
+            assert_eq!(run.scattering.ports[0].z0, 50.0);
+            for point in run.scattering.data {
+                assert!(
+                    (point.s11() - Complex64::new(1.0 / 3.0, 0.0)).norm() < 1e-12,
+                    "deferred={deferred}, M={multiplicity}, S11={}",
+                    point.s11()
+                );
+            }
+            let expected_noise = 4.0 * rspice_core::constants::K_BOLTZMANN * 300.15 / 100.0;
+            for point in run.port_noise.unwrap().points {
+                assert!((point.current_correlation[0][0].re / expected_noise - 1.0).abs() < 1e-12);
+            }
+        }
+    }
+}
+
+#[test]
+fn unequal_multiplied_rf_ports_measure_an_ideal_through() {
+    use rspice_core::abort_signal::CountingAbort;
+    let netlist = Netlist::parse(
+        "* Through with unequal physical and reference impedances\n.subckt generator a b params: number=1 reference=50\nP1 a b portnum={number} z0={reference}\n.ends generator\nX1 p 0 generator M=2 number=1 reference=50\nX2 q 0 generator M=0.5 number=2 reference=75\nVTHRU p q 0\n.end\n"
+    ).unwrap();
+    let count = CountingAbort::new(usize::MAX);
+    let engine = Engine::default();
+    let run = engine
+        .run_sp_over_grid_with_abort(&netlist, &[10.0], false, &count)
+        .unwrap();
+    let point = &run.scattering.data[0];
+    assert!((point.s11().re - 0.2).abs() < 1e-12);
+    assert!((point.s22().re + 0.2).abs() < 1e-12);
+    let transmission = 2.0 * (50.0_f64 * 75.0).sqrt() / 125.0;
+    assert!((point.s21() - Complex64::new(transmission, 0.0)).norm() < 1e-12);
+    assert!((point.s12() - point.s21()).norm() < 1e-12);
+    for threshold in 0..count.count() {
+        let abort = CountingAbort::new(threshold);
+        let error = engine
+            .run_sp_over_grid_with_abort(&netlist, &[10.0], false, &abort)
+            .unwrap_err();
+        assert!(
+            matches!(error, SimulationError::Aborted),
+            "poll {threshold}: {error}"
+        );
+        assert_eq!(abort.polls_after_abort(), 0, "poll {threshold}");
+    }
+}
+
+#[test]
 fn sp_resolves_hierarchical_ports_and_their_noise_terminations() {
     for source in ["V", "P"] {
         let netlist = Netlist::parse(&format!(

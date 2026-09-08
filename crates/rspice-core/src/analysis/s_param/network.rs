@@ -249,7 +249,28 @@ pub fn s_column_from_port_voltages(
             if row == excited {
                 voltages[row] * 2.0 - Complex64::new(1.0, 0.0)
             } else {
-                voltages[row] * 2.0 * (excited_z0 / reference_impedances[row]).sqrt()
+                let source_scale = excited_z0.sqrt();
+                let port_scale = reference_impedances[row].sqrt();
+                let ratio = source_scale / port_scale;
+                let scale = |value: Value| {
+                    if value == 0.0 {
+                        return value;
+                    }
+                    let result = value * 2.0 * ratio;
+                    if ratio.is_normal() && result.is_normal() {
+                        return result;
+                    }
+                    // Preserve finite waves when an intermediate ratio or
+                    // product overflows/underflows. Keep the common path cheap.
+                    let (value, value_exp) = libm::frexp(value);
+                    let (source, source_exp) = libm::frexp(source_scale);
+                    let (port, port_exp) = libm::frexp(port_scale);
+                    libm::scalbn(
+                        value * (source / port),
+                        value_exp + source_exp - port_exp + 1,
+                    )
+                };
+                Complex64::new(scale(voltages[row].re), scale(voltages[row].im))
             }
         })
         .collect::<Vec<_>>();
@@ -263,6 +284,89 @@ pub fn s_column_from_port_voltages(
         )));
     }
     Ok(column)
+}
+
+/// Renormalize real power waves directly, including ideal open/short circuits.
+/// With u = sqrt(R/Z), v = sqrt(Z/R), D = (u+v)/2 and C = (u-v)/2:
+/// a_new = D a_old + C b_old, b_new = C a_old + D b_old.
+/// Thus S_new = (C + D S_old) (D + C S_old)^-1. The diagonal is
+/// evaluated through (1+S) and (1-S) to retain extreme open/short references.
+pub(super) fn renormalize_with_abort(
+    scattering: &mut [Vec<Complex64>],
+    from: &[Value],
+    to: &[Value],
+    abort: &dyn AbortSignal,
+) -> Result<(), NetworkError> {
+    let size = scattering.len();
+    if size == 0 || scattering.iter().any(|row| row.len() != size) {
+        return Err(NetworkError::MalformedAdmittance {
+            rows: size,
+            impedances: to.len(),
+        });
+    }
+    for references in [from, to] {
+        if references.len() != size {
+            return Err(NetworkError::MalformedAdmittance {
+                rows: size,
+                impedances: references.len(),
+            });
+        }
+        for (port, &z0) in references.iter().enumerate() {
+            if !z0.is_finite() || z0 <= 0.0 {
+                return Err(NetworkError::InvalidReferenceImpedance { port, z0 });
+            }
+        }
+    }
+    let mut incident = vec![vec![Complex64::ZERO; size]; size];
+    let mut reflected = vec![vec![Complex64::ZERO; size]; size];
+    for row in 0..size {
+        if row % ABORT_POLL_STRIDE == 0 && abort.is_aborted() {
+            return Err(NetworkError::Aborted);
+        }
+        let u = 0.5 * (from[row].sqrt() / to[row].sqrt());
+        let v = 0.5 * (to[row].sqrt() / from[row].sqrt());
+        for column in 0..size {
+            let s = scattering[row][column];
+            if !s.re.is_finite() || !s.im.is_finite() {
+                return Err(NetworkError::NonFiniteMatrixEntry { row, column });
+            }
+            if row == column {
+                let voltage = (Complex64::ONE + s) * u;
+                let current = (Complex64::ONE - s) * v;
+                incident[row][column] = voltage + current;
+                reflected[row][column] = voltage - current;
+            } else {
+                incident[row][column] = s * (u - v);
+                reflected[row][column] = s * (u + v);
+            }
+        }
+    }
+    let inverse = invert_complex_matrix_with_abort(&incident, abort)?
+        .ok_or(NetworkError::SingularNormalization)?;
+    for (row, output) in scattering.iter_mut().enumerate() {
+        if row % ABORT_POLL_STRIDE == 0 && abort.is_aborted() {
+            return Err(NetworkError::Aborted);
+        }
+        for (column, entry) in output.iter_mut().enumerate() {
+            let mut sum = Complex64::ZERO;
+            let mut correction = Complex64::ZERO;
+            for (inner, values) in inverse.iter().enumerate() {
+                let term = reflected[row][inner] * values[column] - correction;
+                let next = sum + term;
+                correction = (next - sum) - term;
+                sum = next;
+            }
+            if !sum.re.is_finite() || !sum.im.is_finite() {
+                return Err(NetworkError::NumericalFailure(format!(
+                    "scattering renormalization overflowed at ({}, {})",
+                    row + 1,
+                    column + 1
+                )));
+            }
+            *entry = sum;
+        }
+    }
+    Ok(())
 }
 
 /// Convert scattering parameters back to an N-port admittance matrix.
@@ -412,6 +516,123 @@ pub fn s_from_y_with_abort(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn renormalization_matches_a_complex_series_impedance() {
+        let impedance = Complex64::new(30.0, 17.0);
+        let series = |references: [Value; 2]| {
+            let [z1, z2] = references;
+            let total = impedance + z1 + z2;
+            let transmission = 2.0 * z1.sqrt() * z2.sqrt() / total;
+            vec![
+                vec![(impedance + z2 - z1) / total, transmission],
+                vec![transmission, (impedance + z1 - z2) / total],
+            ]
+        };
+        let old = [25.0, 150.0];
+        let new = [50.0, 75.0];
+        let mut actual = series(old);
+        renormalize_with_abort(&mut actual, &old, &new, &NoAbort).unwrap();
+        let expected = series(new);
+        for row in 0..2 {
+            for column in 0..2 {
+                assert!((actual[row][column] - expected[row][column]).norm() < 1e-14);
+            }
+        }
+    }
+
+    #[test]
+    fn renormalization_preserves_ideal_opens_and_shorts_at_extreme_references() {
+        for reflection in [-1.0, 1.0] {
+            for (from, to) in [(50.0, 75.0), (1e-250, 1e250), (1e250, 1e-250)] {
+                let mut matrix = vec![vec![Complex64::new(reflection, 0.0)]];
+                renormalize_with_abort(&mut matrix, &[from], &[to], &NoAbort).unwrap();
+                assert!((matrix[0][0].re - reflection).abs() < 1e-14);
+                assert_eq!(matrix[0][0].im, 0.0);
+            }
+        }
+    }
+
+    #[test]
+    fn renormalization_rejects_invalid_inputs_and_preserves_cancellation() {
+        use crate::abort_signal::CountingAbort;
+        let input = vec![vec![Complex64::new(0.6, 0.1)]];
+        for invalid in [0.0, -1.0, Value::NAN, Value::INFINITY] {
+            for (old, new) in [(invalid, 50.0), (50.0, invalid)] {
+                assert!(matches!(
+                    renormalize_with_abort(&mut input.clone(), &[old], &[new], &NoAbort),
+                    Err(NetworkError::InvalidReferenceImpedance { .. })
+                ));
+            }
+        }
+        assert!(matches!(
+            renormalize_with_abort(&mut input.clone(), &[], &[50.0], &NoAbort),
+            Err(NetworkError::MalformedAdmittance { .. })
+        ));
+        assert!(matches!(
+            renormalize_with_abort(
+                &mut [vec![Complex64::new(Value::NAN, 0.0)]],
+                &[25.0],
+                &[50.0],
+                &NoAbort
+            ),
+            Err(NetworkError::NonFiniteMatrixEntry { .. })
+        ));
+        assert!(matches!(
+            renormalize_with_abort(
+                &mut [vec![Complex64::new(1.25, 0.0)]],
+                &[1.0],
+                &[9.0],
+                &NoAbort
+            ),
+            Err(NetworkError::SingularNormalization)
+        ));
+        let count = CountingAbort::new(usize::MAX);
+        renormalize_with_abort(&mut input.clone(), &[25.0], &[50.0], &count).unwrap();
+        for threshold in 0..count.count() {
+            let abort = CountingAbort::new(threshold);
+            assert_eq!(
+                renormalize_with_abort(&mut input.clone(), &[25.0], &[50.0], &abort),
+                Err(NetworkError::Aborted)
+            );
+            assert_eq!(abort.polls_after_abort(), 0);
+        }
+    }
+
+    #[test]
+    fn wave_extraction_avoids_overflow_in_impedance_ratio() {
+        let column = s_column_from_port_voltages(
+            &[Complex64::new(0.5, 0.0), Complex64::new(1e-200, 0.0)],
+            0,
+            &[1e200, 1e-200],
+        )
+        .unwrap();
+        assert_eq!(column[0], Complex64::ZERO);
+        assert!((column[1].re - 2.0).abs() < 1e-14);
+        for (source, port, voltage, expected) in [
+            (
+                libm::scalbn(1.0, 1000),
+                Value::from_bits(1),
+                libm::scalbn(1.0, -1000),
+                libm::scalbn(1.0, 38),
+            ),
+            (
+                Value::from_bits(1),
+                libm::scalbn(1.0, 1000),
+                libm::scalbn(1.0, 1000),
+                libm::scalbn(1.0, -36),
+            ),
+            (1.0, 4.0, libm::scalbn(1.0, 1023), libm::scalbn(1.0, 1023)),
+        ] {
+            let column = s_column_from_port_voltages(
+                &[Complex64::new(0.5, 0.0), Complex64::new(voltage, -voltage)],
+                0,
+                &[source, port],
+            )
+            .unwrap();
+            assert_eq!(column[1], Complex64::new(expected, -expected));
+        }
+    }
 
     /// Closed form for a series resistance bridging two ports.
     ///

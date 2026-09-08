@@ -9,8 +9,9 @@ use super::analog_tasks::FrequencyModelState;
 use super::noise::{PreparedPortNoise, validate_port_noise_frequencies};
 use crate::abort_signal::AbortSignal;
 use crate::analysis::s_param::{
-    PortError, PortNoiseAssembly, PortNoiseAssemblyError, SMatrix, SParameterPort,
-    SParameterResult, assemble_port_noise_with_abort, s_column_from_port_voltages,
+    MaterializedRfPort, NetworkError, PortError, PortNoiseAssembly, PortNoiseAssemblyError,
+    SMatrix, SParameterPort, SParameterResult, assemble_port_noise_with_abort,
+    s_column_from_port_voltages,
 };
 use crate::netlist::AnalysisCommand;
 use crate::solver::ComplexMatrix;
@@ -144,6 +145,14 @@ impl Engine {
             .map(|port| Ok((node_id(&port.node_pos)?, node_id(&port.node_neg)?)))
             .collect::<Result<Vec<_>, SimulationError>>()?;
         let impedances = ports.iter().map(|port| port.z0).collect::<Vec<_>>();
+        // Hierarchical multiplicity can change a physical port resistor. Read
+        // the realized AC termination, then express the measured waves at the
+        // authored reference; changing the resistor would also change bias.
+        let terminations = rf_ports
+            .iter()
+            .map(|port| termination_impedance(&ac_bias, port, abort))
+            .collect::<Result<Vec<_>, _>>()?;
+        let renormalize = terminations != impedances;
         let reference_impedance = impedances[0];
         let temperature = netlist.options.temp.map_or(
             engine.config().temperature,
@@ -213,13 +222,16 @@ impl Engine {
                     for &(positive, negative) in &nodes {
                         voltages.push(voltage(positive)? - voltage(negative)?);
                     }
-                    let values = s_column_from_port_voltages(&voltages, column, &impedances)
-                        .map_err(|error| {
-                            SimulationError::Circuit(format!(".SP wave conversion failed: {error}"))
-                        })?;
+                    let values = s_column_from_port_voltages(&voltages, column, &terminations)
+                        .map_err(map_wave_error)?;
                     for (row, value) in values.into_iter().enumerate() {
                         matrix.set(row + 1, column + 1, value);
                     }
+                }
+                if renormalize {
+                    matrix
+                        .renormalize_with_abort(&terminations, &impedances, abort)
+                        .map_err(map_wave_error)?;
                 }
                 let noise = if let Some((solver, (circuit, workspace))) =
                     noise_linearization.as_ref().zip(noise_point)
@@ -435,8 +447,59 @@ pub(crate) fn card_frequency_grid(
         })
 }
 
-/// Cancellation stays cancellation: an abort caught inside the port-noise
-/// assembly must not reach the caller dressed up as a defect in their circuit.
+/// Read the termination from the same small-signal storage used by AC stamping.
+fn termination_impedance(
+    circuit: &crate::CircuitData,
+    port: &MaterializedRfPort,
+    abort: &dyn AbortSignal,
+) -> Result<Value, SimulationError> {
+    let validate = |resistance: Value| {
+        if resistance.is_finite() && resistance > 0.0 {
+            Ok(resistance)
+        } else {
+            Err(SimulationError::Circuit(format!(
+                "SP port '{}' has invalid realized termination resistance {resistance}",
+                port.port.source_name
+            )))
+        }
+    };
+    for (index, name) in circuit.resistors.names.iter().enumerate() {
+        if index % 256 == 0 && abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
+        if name.eq_ignore_ascii_case(&port.termination) {
+            let conductance = circuit.resistors.small_signal_conductance(index);
+            // Preserve the exact reference when it produced this same stamp;
+            // reciprocal rounding alone must not trigger a dense conversion.
+            return validate(if conductance == port.port.z0.recip() {
+                port.port.z0
+            } else {
+                conductance.recip()
+            });
+        }
+    }
+    for (index, name) in circuit.resistor_branches.names.iter().enumerate() {
+        if index % 256 == 0 && abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
+        if name.eq_ignore_ascii_case(&port.termination) {
+            return validate(circuit.resistor_branches.small_signal_resistances[index]);
+        }
+    }
+    Err(SimulationError::Circuit(format!(
+        "SP port '{}' is missing its realized termination '{}'",
+        port.port.source_name, port.termination
+    )))
+}
+
+fn map_wave_error(error: NetworkError) -> SimulationError {
+    match error {
+        NetworkError::Aborted => SimulationError::Aborted,
+        error => SimulationError::Circuit(format!(".SP wave conversion failed: {error}")),
+    }
+}
+
+/// Preserve cancellation caught inside port-noise assembly.
 fn map_port_noise_error(error: PortNoiseAssemblyError) -> SimulationError {
     match error {
         PortNoiseAssemblyError::Aborted => SimulationError::Aborted,

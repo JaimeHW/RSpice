@@ -52,6 +52,16 @@ pub struct SMatrix {
 }
 
 impl SMatrix {
+    /// Change real power-wave references without requiring a finite Y or Z matrix.
+    pub(crate) fn renormalize_with_abort(
+        &mut self,
+        from: &[Value],
+        to: &[Value],
+        abort: &dyn crate::abort_signal::AbortSignal,
+    ) -> Result<(), NetworkError> {
+        network::renormalize_with_abort(&mut self.data, from, to, abort)
+    }
+
     /// Create empty S-matrix for N ports
     pub fn new(frequency: Value, num_ports: usize) -> Self {
         Self {
