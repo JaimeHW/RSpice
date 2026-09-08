@@ -74,7 +74,7 @@ fst-reader = "0.17"
 matfile = "0.5"
 npyz = { version = "0.9", features = ["complex"] }
 rustyhdf5 = { version = "1.93", default-features = false }
-zip = { version = "7.2", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+zip = { version = "8.6", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 thiserror.workspace = true
 sha2 = "0.10"
 regex = "1.12"
