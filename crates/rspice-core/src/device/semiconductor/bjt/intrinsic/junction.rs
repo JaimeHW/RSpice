@@ -202,6 +202,20 @@ impl Bjt {
         resistance.is_finite() && resistance > 0.0
     }
 
+    /// The VBIC 1.3 physical floor is already applied before M scaling;
+    /// a second numerical floor here would corrupt large parallel instances.
+    #[inline]
+    pub(in crate::device::semiconductor::bjt) fn guarded_series_resistance(
+        &self,
+        resistance: Value,
+    ) -> Value {
+        if self.vbic_13 {
+            resistance
+        } else {
+            resistance.max(1e-12)
+        }
+    }
+
     /// High-injection power and derivative with respect to its argument.
     /// VBIC 1.3 specifies a 1e-8 floor in both qb and qbp; the derivative
     /// of the floored contribution is zero. Retain the older model's

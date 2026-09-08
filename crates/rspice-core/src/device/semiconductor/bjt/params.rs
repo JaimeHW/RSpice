@@ -353,6 +353,20 @@ impl Bjt {
         nominal * r_t.max(1e-18).powf(temp_exponent)
     }
 
+    /// The order also identifies electrical resistance branches in the
+    /// temperature-derivative cache mask (floored bits 2..8, active bits 9..15).
+    pub(super) fn vbic_series_resistance_parameters(&self) -> [(Value, Value); 7] {
+        [
+            (self.rcx_nominal, self.xrcx),
+            (self.rci_nominal, self.xrci),
+            (self.rbx_nominal, self.xrbx),
+            (self.rbi_nominal, self.xrbi),
+            (self.re_nominal, self.xre),
+            (self.rbp_nominal, self.xrbp),
+            (self.rs_nominal, self.xrs),
+        ]
+    }
+
     #[inline]
     pub(super) fn vbic_log_exp_difference(x: Value) -> Value {
         if x > 40.0 {
@@ -523,9 +537,9 @@ impl Bjt {
         self.with_temperature_variant_mask(thermal_rise, 0, f)
     }
 
-    /// Differentiate the branch selected at the anchor. When an Early
-    /// voltage is nonpositive its inverse is identically zero in the model;
-    /// a probe across the cutoff must not reactivate that contribution.
+    /// Differentiate the branch selected at the anchor: inactive Early
+    /// voltages and floored resistances must not cross their cutoffs during
+    /// a temperature probe.
     pub(super) fn with_temperature_derivative_variant<R>(
         &self,
         thermal_rise: Value,
@@ -533,7 +547,7 @@ impl Bjt {
         f: impl FnOnce(&Self) -> R,
     ) -> R {
         let mut mask = 0;
-        if self.vbic_13 && (self.tcvef != 0.0 || self.tcver != 0.0) {
+        if self.vbic_13 {
             let temperature = self
                 .mapped_temperature(self.requested_temperature() + anchor)
                 .0;
@@ -544,6 +558,18 @@ impl Bjt {
             if self.tcver != 0.0 && self.var * (1.0 + delta_t * self.tcver) <= 0.0 {
                 mask |= 2;
             }
+            let ratio = temperature / self.tnom.max(1.0);
+            for (index, (nominal, exponent)) in self
+                .vbic_series_resistance_parameters()
+                .into_iter()
+                .enumerate()
+            {
+                if nominal > 0.0 && exponent != 0.0 {
+                    let floored =
+                        Self::vbic_temp_scaled_resistance(nominal, ratio, exponent) <= 1e-3;
+                    mask |= 1 << (index + if floored { 2 } else { 9 });
+                }
+            }
         }
         self.with_temperature_variant_mask(thermal_rise, mask, f)
     }
@@ -551,7 +577,7 @@ impl Bjt {
     fn with_temperature_variant_mask<R>(
         &self,
         thermal_rise: Value,
-        disabled_early_voltages: u8,
+        derivative_mask: u16,
         f: impl FnOnce(&Self) -> R,
     ) -> R {
         if !self.thermal_model_enabled() {
@@ -562,7 +588,7 @@ impl Bjt {
         {
             let cache = self.thermal_variant_cache.borrow();
             if let Some((_, _, variant)) = cache.iter().find(|(cached_key, cached_mask, _)| {
-                *cached_key == key && *cached_mask == disabled_early_voltages
+                *cached_key == key && *cached_mask == derivative_mask
             }) {
                 return f(variant.as_ref());
             }
@@ -570,11 +596,40 @@ impl Bjt {
 
         let mut variant = self.clone_without_thermal_variant_cache();
         variant.refresh_operating_scaling_for(self.requested_temperature() + thermal_rise);
-        if disabled_early_voltages & 1 != 0 {
+        if derivative_mask & 1 != 0 {
             variant.vaf = 0.0;
         }
-        if disabled_early_voltages & 2 != 0 {
+        if derivative_mask & 2 != 0 {
             variant.var = 0.0;
+        }
+        if derivative_mask >> 2 != 0 {
+            let scale = variant.instance_scale();
+            let parameters = variant.vbic_series_resistance_parameters();
+            let ratio = variant.temperature / variant.tnom.max(1.0);
+            for (index, resistance) in [
+                &mut variant.rcx,
+                &mut variant.rci,
+                &mut variant.rbx,
+                &mut variant.rbi,
+                &mut variant.re,
+                &mut variant.rbp,
+                &mut variant.rs,
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                if derivative_mask & (1 << (index + 2)) != 0 {
+                    *resistance = 1e-3 / scale;
+                } else if derivative_mask & (1 << (index + 9)) != 0 {
+                    // Continue the active expression across the floor only
+                    // for derivatives, as an analytic branch derivative does.
+                    // Shrinking the probe at the join can lose its separation
+                    // when added to the much larger absolute temperature.
+                    let (nominal, exponent) = parameters[index];
+                    *resistance =
+                        Self::vbic_temp_scaled_resistance(nominal, ratio, exponent) / scale;
+                }
+            }
         }
         let result = f(&variant);
 
@@ -582,7 +637,7 @@ impl Bjt {
         if cache.len() >= Self::THERMAL_VARIANT_CACHE_CAPACITY {
             cache.remove(0);
         }
-        cache.push((key, disabled_early_voltages, Box::new(variant)));
+        cache.push((key, derivative_mask, Box::new(variant)));
         result
     }
 
@@ -786,20 +841,18 @@ impl Bjt {
         // current and charge parameters are already multiplied by `scale`
         // below.  The same inverse-area rule is the classic BJT instance
         // contract and keeps legacy AREA/M behavior physically consistent.
-        self.re = (re_temp / scale).max(0.0);
-        self.rbx = (rbx_temp / scale).max(0.0);
-        self.rbi = (rbi_temp / scale).max(0.0);
+        // VBIC 1.3 keeps every electrical resistance branch present. Its
+        // physical 1 mOhm floor is applied after temperature mapping and
+        // before multiplicity. Older families retain their zero-R topology.
+        let resistance_floor = if self.vbic_13 { 1e-3 } else { 0.0 };
+        self.re = re_temp.max(resistance_floor) / scale;
+        self.rbx = rbx_temp.max(resistance_floor) / scale;
+        self.rbi = rbi_temp.max(resistance_floor) / scale;
         // Xyce's legacy GP model has no temperature coefficient for IRB
         // (JRB/IOB are aliases), so retain the nominal current threshold.
         self.irb = self.irb_nominal.max(0.0);
-        // Igcx is controlled by the current through RCX. Preserve Xyce's
-        // finite branch even for authored RCX=0 when avalanche needs it.
-        self.rcx = if self.vbic_13 && self.avcx1 > 0.0 {
-            rcx_temp.max(1e-3) / scale
-        } else {
-            (rcx_temp / scale).max(0.0)
-        };
-        self.rci = (rci_temp / scale).max(0.0);
+        self.rcx = rcx_temp.max(resistance_floor) / scale;
+        self.rci = rci_temp.max(resistance_floor) / scale;
         self.vje = vje_temp;
         self.vjc = vjc_temp;
         self.ps = ps_temp;
@@ -855,8 +908,8 @@ impl Bjt {
         self.ibenp = (ibenp_temp * scale).max(0.0);
         self.ibcip = (ibcip_temp * scale).max(0.0);
         self.ibcnp = (ibcnp_temp * scale).max(0.0);
-        self.rs = (rs_temp / scale).max(0.0);
-        self.rbp = (rbp_temp / scale).max(0.0);
+        self.rs = rs_temp.max(resistance_floor) / scale;
+        self.rbp = rbp_temp.max(resistance_floor) / scale;
         self.avc2 = if self.vbic_13 {
             avc2_temp
         } else if avc2_temp.is_finite() {
@@ -1952,38 +2005,83 @@ mod tests {
                 let mut bias = vec![0.0; 16];
                 bias[0] = 1.8;
                 bias[1] = 0.7;
-                model.update(&bias);
-                let cold = model.operating_point_currents();
-                let cold_charge = model.charge_snapshot(1.8, 0.7, 0.0, 0.0);
                 if promoted {
-                    model.vbic_mna_charge_state();
+                    for node in [model.node_cx, model.node_ci, model.node_bp] {
+                        bias[node - 1] = 1.8;
+                    }
+                    for node in [model.node_bx, model.node_bi] {
+                        bias[node - 1] = 0.7;
+                    }
                 }
+                let charges = |bjt: &Bjt| {
+                    if promoted {
+                        // Exercise the cache used by the promoted MNA path,
+                        // at its prescribed internal voltages, without a
+                        // separate reduced internal operating-point solve.
+                        bjt.vbic_mna_charge_state().0
+                    } else {
+                        bjt.charge_snapshot(1.8, 0.7, 0.0, 0.0).branches
+                    }
+                };
+                if promoted {
+                    model.update_vbic_mna_static_probe(&bias);
+                } else {
+                    model.update(&bias);
+                }
+                let cold = model.operating_point_currents();
+                let cold_intrinsic = model.intrinsic_linearization.ic;
+                let cold_charge = charges(&model);
                 model.set_temperature(340.15);
                 let mut fresh = make();
                 fresh.set_temperature(340.15);
-                fresh.update(&bias);
+                if promoted {
+                    fresh.update_vbic_mna_static_probe(&bias);
+                } else {
+                    fresh.update(&bias);
+                }
                 // Read-only charge requests must also reject the cold cache,
                 // without requiring an intervening nonlinear update.
-                let charge = model.charge_snapshot(1.8, 0.7, 0.0, 0.0);
-                let expected_charge = fresh.charge_snapshot(1.8, 0.7, 0.0, 0.0);
-                for (actual, expected) in
-                    charge.branches.iter().zip(expected_charge.branches.iter())
-                {
+                let charge = charges(&model);
+                let expected_charge = charges(&fresh);
+                for (actual, expected) in charge.iter().zip(expected_charge.iter()) {
                     assert_eq!(
                         actual.charge, expected.charge,
                         "LEVEL={level} promoted={promoted}"
                     );
                 }
                 if level != 1.0 {
-                    assert_ne!(charge.branches[0].charge, cold_charge.branches[0].charge);
+                    assert_ne!(charge[0].charge, cold_charge[0].charge);
                 }
                 model.update(&bias);
-                assert_eq!(
-                    model.operating_point_currents(),
-                    fresh.operating_point_currents(),
-                    "LEVEL={level} promoted={promoted}"
-                );
-                assert_ne!(model.operating_point_currents(), cold);
+                let actual = model.operating_point_currents();
+                let expected = fresh.operating_point_currents();
+                if level >= 11.0 && !promoted {
+                    // The resistance floors add privately solved unknowns.
+                    // Warm and fresh Newton seeds can leave femtoampere KCL
+                    // residuals; cache invalidation must agree within 10 fA.
+                    for (actual, expected) in [actual.0, actual.1, actual.2]
+                        .into_iter()
+                        .zip([expected.0, expected.1, expected.2])
+                    {
+                        assert!(
+                            (actual - expected).abs() < 1e-14,
+                            "LEVEL={level}: {actual:e} != {expected:e}"
+                        );
+                    }
+                } else {
+                    assert_eq!(actual, expected, "LEVEL={level} promoted={promoted}");
+                }
+                if promoted {
+                    // Prescribed equal prime/lead voltages carry zero series
+                    // current; temperature changes the intrinsic junctions.
+                    assert_eq!(
+                        model.intrinsic_linearization.ic,
+                        fresh.intrinsic_linearization.ic
+                    );
+                    assert_ne!(model.intrinsic_linearization.ic, cold_intrinsic);
+                } else {
+                    assert_ne!(model.operating_point_currents(), cold);
+                }
             }
         }
     }
@@ -2212,7 +2310,7 @@ mod tests {
             .iter()
             .map(|(key, value)| ((*key).to_string(), *value))
             .collect::<HashMap<_, _>>();
-        params.insert("LEVEL".to_string(), 11.0);
+        params.entry("LEVEL".to_string()).or_insert(11.0);
         let mut bjt = Bjt::new_npn("q1".to_string(), 1, 2, 3);
         bjt.xyce_compatibility = true;
         bjt.with_params(&params)
@@ -2260,8 +2358,9 @@ mod tests {
     }
 
     #[test]
-    fn vbic_series_resistance_zero_and_omission_keep_distinct_topologies() {
+    fn older_vbic_series_resistance_zero_and_omission_keep_distinct_topologies() {
         let mut collapsed = vbic_model_with(&[
+            ("LEVEL", 4.0),
             ("RBX", 0.0),
             ("RBI", 0.0),
             ("RCX", 0.0),
@@ -2274,7 +2373,7 @@ mod tests {
             .assign_vbic_internal_nodes(|name| panic!("zero resistance must not allocate {name}"));
         assert_eq!(collapsed.node_bi, collapsed.node_base);
         assert_eq!(collapsed.node_ci, collapsed.node_collector);
-        let explicit_outer = vbic_model_with(&[("RBX", 3.0), ("RCX", 4.0)]);
+        let explicit_outer = vbic_model_with(&[("LEVEL", 4.0), ("RBX", 3.0), ("RCX", 4.0)]);
         assert_eq!(
             [
                 explicit_outer.rbx,
@@ -2284,7 +2383,7 @@ mod tests {
             ],
             [3.0, 0.1, 4.0, 0.1]
         );
-        let explicit_inner = vbic_model_with(&[("RBI", 3.0), ("RCI", 4.0)]);
+        let explicit_inner = vbic_model_with(&[("LEVEL", 4.0), ("RBI", 3.0), ("RCI", 4.0)]);
         assert_eq!(
             [
                 explicit_inner.rbx,
@@ -2294,6 +2393,80 @@ mod tests {
             ],
             [0.0, 3.0, 0.0, 4.0]
         );
+    }
+
+    #[test]
+    fn vbic13_resistance_floor_retains_topology_and_parallel_scaling() {
+        for level in [11.0, 12.0] {
+            for resistance in [0.0, 1e-4, 1e-3] {
+                for multiplicity in [1.0, 3.0, 1e12] {
+                    let mut bjt = vbic_model_with(&[
+                        ("LEVEL", level),
+                        ("RCX", resistance),
+                        ("RCI", resistance),
+                        ("RBX", resistance),
+                        ("RBI", resistance),
+                        ("RE", resistance),
+                        ("RBP", resistance),
+                        ("RS", resistance),
+                    ])
+                    .with_instance_params(&[("M".into(), multiplicity)]);
+                    bjt.set_vbic_external_thermal_node(0);
+                    let mut nodes = 0;
+                    bjt.assign_vbic_internal_nodes(|_| {
+                        nodes += 1;
+                        nodes + 4
+                    });
+                    assert_eq!(nodes, if level == 11.0 { 6 } else { 7 });
+                    assert_ne!(bjt.node_bi, bjt.node_base);
+                    assert_ne!(bjt.node_ci, bjt.node_collector);
+                    let current = bjt.ire_branch(0.01, 0.0).current;
+                    assert!((current / multiplicity - 10.0).abs() < 1e-12);
+                    for value in [bjt.rcx, bjt.rci, bjt.rbx, bjt.rbi, bjt.re, bjt.rbp, bjt.rs] {
+                        assert!((value * multiplicity - 1e-3).abs() < 1e-18);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn vbic13_resistance_floor_thermal_derivative_selects_the_anchor_branch() {
+        for exponent in [-2.0, 2.0] {
+            for factor in [
+                0.999999,
+                1.0 - Value::EPSILON,
+                1.0,
+                1.0 + Value::EPSILON,
+                1.000001,
+                2.0,
+            ] {
+                let bjt = vbic_model_with(&[("RE", 1e-3 * factor), ("XRE", exponent)])
+                    .with_instance_params(&[("M".into(), 3.0)]);
+                let h = bjt.thermal_derivative_step(0.0);
+                let physical = bjt.with_temperature_variant(h, |v| v.ire_branch(0.01, 0.0).current);
+                let plus = bjt.with_temperature_derivative_variant(h, 0.0, |v| {
+                    v.ire_branch(0.01, 0.0).current
+                });
+                let minus = bjt.with_temperature_derivative_variant(-h, 0.0, |v| {
+                    v.ire_branch(0.01, 0.0).current
+                });
+                let derivative = (plus - minus) / (2.0 * h);
+                let expected = if factor <= 1.0 {
+                    0.0
+                } else {
+                    -bjt.ire_branch(0.01, 0.0).current * exponent / bjt.temperature
+                };
+                assert!(
+                    (derivative - expected).abs() < 1e-5 * expected.abs() + 1e-10,
+                    "factor={factor} exponent={exponent} h={h}: {derivative} vs {expected}"
+                );
+                assert_eq!(
+                    physical,
+                    bjt.with_temperature_variant(h, |v| v.ire_branch(0.01, 0.0).current)
+                );
+            }
+        }
     }
 
     #[test]

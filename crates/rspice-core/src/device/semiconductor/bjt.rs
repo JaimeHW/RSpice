@@ -196,6 +196,35 @@ struct BranchLinearization {
     d_external: [Value; EXTERNAL_DIM],
 }
 
+impl BranchLinearization {
+    /// Form J*v-I without losing small junction currents to the products
+    /// of a large series conductance and absolute terminal voltages.
+    fn source(&self, internal: &[Value; INTERNAL_DIM], external: &[Value; EXTERNAL_DIM]) -> Value {
+        let mut sum = -self.current;
+        let mut tail = 0.0;
+        for (&derivative, &voltage) in self
+            .d_internal
+            .iter()
+            .zip(internal)
+            .chain(self.d_external.iter().zip(external))
+        {
+            if derivative == 0.0 {
+                continue;
+            }
+            let product = derivative * voltage;
+            let product_error = derivative.mul_add(voltage, -product);
+            let next = sum + product;
+            let addend = next - sum;
+            let error = (sum - (next - addend)) + (product - addend);
+            let carry = tail + product_error + error;
+            let refined = next + carry;
+            tail = carry - (refined - next);
+            sum = refined;
+        }
+        sum + tail
+    }
+}
+
 pub(crate) const BJT_DYNAMIC_CHARGE_COUNT: usize = 11;
 pub(crate) const BJT_INTERNAL_STATE_DIM: usize = DYNAMIC_INTERNAL_DIM;
 pub(crate) const BJT_EXTERNAL_STATE_DIM: usize = EXTERNAL_DIM;
@@ -1173,7 +1202,7 @@ pub struct Bjt {
     /// for the transient companion and AC passes.
     mna_charge_cache: Cell<[BjtChargeBranch; BJT_DYNAMIC_CHARGE_COUNT]>,
     mna_charge_cache_valid: Cell<bool>,
-    thermal_variant_cache: RefCell<Vec<(u64, u8, Box<Bjt>)>>,
+    thermal_variant_cache: RefCell<Vec<(u64, u16, Box<Bjt>)>>,
 }
 
 impl Bjt {

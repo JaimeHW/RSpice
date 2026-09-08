@@ -41,7 +41,7 @@ impl Bjt {
             return branch;
         }
 
-        let g = 1.0 / self.rcx.max(1e-12);
+        let g = 1.0 / self.guarded_series_resistance(self.rcx);
         branch.current = g * (vc - vcx);
         branch.d_internal[IDX_VCX] = -g;
         branch.d_external[0] = g;
@@ -123,7 +123,7 @@ impl Bjt {
             return branch;
         }
 
-        let g = 1.0 / self.rbx.max(1e-12);
+        let g = 1.0 / self.guarded_series_resistance(self.rbx);
         branch.current = g * (vb - vbx);
         branch.d_internal[IDX_VBX] = -g;
         branch.d_external[1] = g;
@@ -140,7 +140,7 @@ impl Bjt {
             return branch;
         }
 
-        let g = 1.0 / self.re.max(1e-12);
+        let g = 1.0 / self.guarded_series_resistance(self.re);
         branch.current = g * (ve - vei);
         branch.d_internal[IDX_VEI] = -g;
         branch.d_external[2] = g;
@@ -158,7 +158,7 @@ impl Bjt {
             return branch;
         }
 
-        let rb = self.rbi.max(1e-12);
+        let rb = self.guarded_series_resistance(self.rbi);
         let vrbi = vbx - vbi;
         if self.charge_model == BjtChargeModel::LegacyGummelPoon {
             // Xyce's legacy GP load evaluates the bias-dependent base
@@ -385,7 +385,7 @@ impl Bjt {
         }
 
         let parasitic = self.parasitic_transport_state(vbx, vbi, vci, vbp, vsi);
-        let rbp = self.rbp.max(1e-12);
+        let rbp = self.guarded_series_resistance(self.rbp);
         let vrbp = vbp - vcx;
         let scale = vrbp / rbp;
 
@@ -484,7 +484,7 @@ impl Bjt {
             return branch;
         }
 
-        let g = 1.0 / self.rs.max(1e-12);
+        let g = 1.0 / self.guarded_series_resistance(self.rs);
         branch.current = g * (vs - vsi);
         branch.d_internal[IDX_VSI] = -g;
         branch.d_external[EXT_S] = g;
@@ -519,7 +519,7 @@ impl Bjt {
 
         let p = self.polarity();
         let vt = self.vt.max(1e-12);
-        let rci = self.rci.max(1e-12);
+        let rci = self.guarded_series_resistance(self.rci);
         let gamm = self.gamm.max(0.0);
         let ivo = if self.vo.is_finite() && self.vo > 0.0 {
             1.0 / self.vo

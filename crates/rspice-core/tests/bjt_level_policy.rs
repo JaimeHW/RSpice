@@ -1074,8 +1074,22 @@ fn vbic13_avalanche_and_pushout_currents_match_xyce710() {
 }
 
 #[test]
-fn vbic13_junction_leakage_obeys_kcl_without_generating_heat() {
-    for level in [11, 12] {
+fn vbic13_junction_leakage_obeys_kcl_and_only_heats_series_resistances() {
+    // Independent 60-digit solution of the passive leakage/resistance network.
+    for (level, collector, base, heat) in [
+        (
+            11,
+            -0.006_299_966_400_242_4,
+            0.0032999652003276,
+            7.639915280834608e-6,
+        ),
+        (
+            12,
+            -0.009899932800544497,
+            0.0032999508005375976,
+            1.8679743602997705e-5,
+        ),
+    ] {
         for (kind, polarity) in [("NPN", 1.0), ("PNP", -1.0)] {
             let substrate = if level == 12 { " 0" } else { "" };
             let deck = format!(
@@ -1086,22 +1100,19 @@ fn vbic13_junction_leakage_obeys_kcl_without_generating_heat() {
             );
             let result = op_result(&deck);
             // The authored numerical parallels are BE, BEX, BC, BEP,
-            // BXCX, and (for LEVEL=12) BCP. The collapsed nodes make
-            // their independent KCL sum an elementary resistor network.
-            let collector = if level == 12 { 3.3 } else { 2.1 };
+            // BXCX, and (for LEVEL=12) BCP. They do not generate heat
+            // themselves; their current through the 1mOhm physical series
+            // resistances does. The thermal resistance is RTH/M.
             assert!(
-                (result.branch_current_named("vc").unwrap() + polarity * 0.003 * collector).abs()
-                    < 1e-11,
+                (result.branch_current_named("vc").unwrap() - polarity * collector).abs() < 1e-11,
                 "level={level} kind={kind} Ic={:?} Ib={:?}",
                 result.branch_current_named("vc"),
                 result.branch_current_named("vb")
             );
+            assert!((result.branch_current_named("vb").unwrap() - polarity * base).abs() < 1e-11);
             assert!(
-                (result.branch_current_named("vb").unwrap() - polarity * 0.003 * 1.1).abs() < 1e-11
-            );
-            assert!(
-                voltage(&result, "q1.__rth.internal").abs() < 1e-10,
-                "numerical junction conductance must not heat the device"
+                (voltage(&result, "q1.__rth.internal") - heat).abs() < 1e-10,
+                "heat must include only the physical series resistances"
             );
         }
     }
@@ -1363,10 +1374,9 @@ fn three_terminal_vbic_ignores_substrate_parameters_in_dc_ac_and_thermal_power()
             let actual = op_result(&unused);
             assert_eq!(expected.node_names, actual.node_names);
             assert!(!actual.node_names.iter().any(|name| name.contains(".__si.")));
-            assert_eq!(
+            assert!(
                 actual.node_names.iter().any(|name| name.contains(".__bp.")),
-                rbp > 0.0,
-                "ignored substrate diodes must not prevent BP collapse"
+                "VBIC 1.3 retains BP through the resistance floor"
             );
             assert!(voltage(&actual, "q1.__rth.internal") > 1e-4);
             assert_eq!(expected.node_voltages, actual.node_voltages);
@@ -1865,5 +1875,55 @@ fn legacy_bjt_levels_still_run() {
     ] {
         let deck = op_deck(model_line);
         run(&deck).unwrap_or_else(|err| panic!("{model_line} must remain legacy GP: {err}"));
+    }
+}
+
+#[test]
+fn vbic13_zero_resistance_floor_matches_xyce710() {
+    // Xyce keeps the full resistance network even with every value authored 0.
+    for level in [11, 12] {
+        for (kind, p) in [("NPN", 1.0), ("PNP", -1.0)] {
+            let substrate = if level == 12 { " 0" } else { "" };
+            let deck = format!(
+                "VBIC resistance floors\nVc c 0 {p}\nVb b 0 {}\nQ1 c b 0{substrate} vm SW_ET=0\n\
+                 .model vm {kind}(LEVEL={level} IS=1e-16 IBEI=0 IBCI=0 IBEIP=0 ISP=0 RCX=0 RCI=0 RBX=0 RBI=0 RE=0 RBP=0 RS=0 GMIN=0 TNOM=27)\n.temp 27\n.op\n.end\n",
+                0.8 * p,
+            );
+            assert_rel_close(
+                "VBIC resistance floor I(Vc)",
+                branch_current(&deck, "Vc"),
+                p * -0.0027078454711413234,
+                1e-7,
+            );
+        }
+    }
+}
+
+#[test]
+fn vbic13_resistance_floor_preserves_small_current_precision() {
+    // A 70-digit Decimal solution of the VBIC equations agrees with Xyce
+    // to 4e-22 A; 1mOhm series branches must not inject picoampere errors.
+    for level in [11, 12] {
+        for (kind, p) in [("NPN", 1.0), ("PNP", -1.0)] {
+            let substrate = if level == 12 { " 0" } else { "" };
+            let deck = format!(
+                "VBIC small currents through resistance floors\nVc c 0 {}\nVb b 0 {}\nVth th 0 20\nQ1 c b 0{substrate} th vm SW_ET=1 M=3 TRISE=20\n\
+                 .model vm {kind}(LEVEL={level} IS=1e-16 NF=1.1 NR=1.2 ISRR=0.7 TNF=0.001 PNJMAXI=1n XISR=1.8 DEAR=0.1 IBEI=1e-18 IBCI=1e-18 IBEIP=0 ISP=0 RCX=0 RCI=0 RBX=0 RBI=0 RE=0 RBP=0 RS=0 GMIN=0 TNOM=27 RTH=1000 CTH=1p TD=1n TF=1n TR=2n)\n.temp 27\n.options gmin=0\n.op\n.end\n",
+                1.8 * p,
+                0.65 * p,
+            );
+            let result = op_result(&deck);
+            for (branch, expected) in [
+                ("Vc", -7.045_220_149_350_812e-8),
+                ("Vb", -8.783310826230572e-8),
+            ] {
+                let actual = result.branch_current_named(branch).unwrap();
+                assert!(
+                    (actual - p * expected).abs() < 1e-7 * expected.abs(),
+                    "LEVEL={level} {kind} {branch}: {actual:e} != {:e}",
+                    p * expected
+                );
+            }
+        }
     }
 }

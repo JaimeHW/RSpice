@@ -44,8 +44,49 @@ fn vbic_periodic_charge_and_continuation_match_analytic_rc() {
                 exact(time)
             );
         }
-        assert_eq!(analysis.monodromy.len(), 1);
-        assert!((analysis.monodromy[0][0] - (-1e-6_f64 / (1e3 * 159e-12)).exp()).abs() < 2e-5);
+        // VBIC 1.3's resistance floors retain separate BE/BC charge modes.
+        // Independent 65-digit poles of the resulting passive RC network;
+        // compare the actual BE-first/TRAP period map, including its small
+        // fast-mode remnants, rather than assuming ideal shorts.
+        let modes = if level == 11 { 3 } else { 1 };
+        assert_eq!(analysis.monodromy.len(), modes);
+        let mut multipliers = analysis.floquet_multipliers.clone();
+        multipliers.sort_by(|a, b| b.norm().total_cmp(&a.norm()));
+        assert_eq!(multipliers.len(), modes);
+        let poles = if level == 11 {
+            vec![
+                -6.289298324578039e6,
+                -1.1834562758609295e13,
+                -2.1530841221033938e13,
+            ]
+        } else {
+            vec![-1.0 / (1e3 * 159e-12)]
+        };
+        let mut expected: Vec<f64> =
+            poles
+                .into_iter()
+                .map(|pole| {
+                    analysis.result.time.windows(2).enumerate().fold(
+                        1.0,
+                        |value, (index, times)| {
+                            let z = pole * (times[1] - times[0]);
+                            value
+                                * if index == 0 {
+                                    1.0 / (1.0 - z)
+                                } else {
+                                    (1.0 + z / 2.0) / (1.0 - z / 2.0)
+                                }
+                        },
+                    )
+                })
+                .collect();
+        expected.sort_by(|a, b| b.abs().total_cmp(&a.abs()));
+        for (actual, expected) in multipliers.iter().zip(expected) {
+            assert!(
+                (actual - expected).norm() < 2e-5,
+                "{polarity} LEVEL={level}: {actual:?} != {expected:e}"
+            );
+        }
         let (continued, checkpoint) = engine
             .run_tran_from_pss_state(&netlist, &state, 1e-6, 2e-9)
             .unwrap();
