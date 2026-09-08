@@ -763,6 +763,32 @@ fn vbic13_self_heating_switch_matches_xyce710_and_grounded_thermal_pins() {
 }
 
 #[test]
+fn vbic_tnf_offsets_and_thermal_ports_match_xyce710() {
+    for level in [11, 12] {
+        let substrate = if level == 12 { " 0" } else { "" };
+        for (kind, p) in [("NPN", 1.0), ("PNP", -1.0)] {
+            for (offset, rise, expected) in [
+                (20, 0, -2.7689488024311438e-5),
+                (0, 20, -2.7689488024311438e-5),
+                (20, 20, -5.0209303851805147e-5),
+            ] {
+                let netlist = Netlist::parse(&format!(
+                    "VBIC nominal emission coefficient scaling\nVc c 0 {}\nVb b 0 {}\nVth th 0 {rise}\nQ1 c b 0{substrate} th vm SW_ET=0 M=3 TRISE={offset}\n\
+                     .model vm {kind}(LEVEL={level} IS=1e-16 NF=1.1 NR=1.2 ISRR=0.7 TNF=0.001 IBEI=1e-18 IBCI=1e-18 IBEIP=0 ISP=0 RCX=10 RCI=2 RBX=5 RBI=3 RE=1 RBP=0 RS=0 GMIN=0 TNOM=27)\n.temp 27\n.options gmin=0\n.end\n", p*1.8,p*0.7
+                )).unwrap();
+                let result = Engine::default().run_dc_op(&netlist).unwrap();
+                let actual = result.branch_current_named("Vc").unwrap();
+                assert!(
+                    (actual - p * expected).abs() < 2e-7 * expected.abs(),
+                    "LEVEL={level} {kind} TRISE={offset} thermal={rise}: {actual:e} != {:e}",
+                    p * expected
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn vbic13_signed_reverse_transport_matches_xyce710() {
     // Independent Xyce 7.10 LEVEL=11/12 runs with both junctions reverse
     // biased. Clipping Ifi/Iri to zero incorrectly makes I(Vc) vanish.

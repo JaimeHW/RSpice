@@ -184,6 +184,60 @@ fn vbic13_delayed_avalanche_heat_and_clipped_temperature_match_xyce710() {
 }
 
 #[test]
+fn vbic_tnf_thermal_derivatives_match_xyce710() {
+    for (tnf, collector, base, expected) in [
+        (
+            -0.001,
+            -0.5,
+            0.1,
+            [
+                Complex64::new(2.8129342311083413e-7, 3.1081440800174e-7),
+                Complex64::new(-3.378869297428202e-8, -3.1098483294827837e-7),
+                Complex64::new(-0.0029998561029066935, -0.0018849556961110332),
+            ],
+        ),
+        (
+            0.001,
+            1.8,
+            0.7,
+            [
+                Complex64::new(-1.084013990699429e-6, 7.885275583603683e-7),
+                Complex64::new(-8.501427197947536e-7, -9.013856542434545e-7),
+                Complex64::new(-0.0029974552824991404, -0.0018863758535638618),
+            ],
+        ),
+    ] {
+        for level in [11, 12] {
+            let substrate = if level == 12 { " 0" } else { "" };
+            for (kind, p) in [("NPN", 1.0), ("PNP", -1.0)] {
+                let netlist = parse(&format!(
+                    "VBIC TNF thermal derivative\nVc c 0 {}\nVb b 0 {}\nVth th 0 DC 20 AC 1\nQ1 c b 0{substrate} th vm SW_ET=1 M=3 TRISE=20\n\
+                     .model vm {kind}(LEVEL={level} IS=1e-16 NF=1.1 NR=1.2 ISRR=0.7 TNF={tnf} XISR=1.8 DEAR=0.1 IBEI=1e-18 IBCI=1e-18 IBEIP=0 ISP=0 RCX=10 RCI=2 RBX=5 RBI=3 RE=1 RBP=0 RS=0 GMIN=0 TNOM=27 RTH=1000 CTH=1p TD=1n TF=1n TR=2n)\n.temp 27\n.options gmin=0\n.end\n",
+                    p * collector,
+                    p * base
+                ));
+                let point = Engine::default()
+                    .run_ac(&netlist, &[1e8])
+                    .unwrap()
+                    .pop()
+                    .unwrap();
+                for ((branch, polarity), expected) in [("Vc", p), ("Vb", p), ("Vth", 1.0)]
+                    .into_iter()
+                    .zip(expected)
+                {
+                    let actual = branch_current(&point, branch);
+                    assert!(
+                        (actual - polarity * expected).norm() < 2e-6 * expected.norm(),
+                        "LEVEL={level} {kind} TNF={tnf} {branch}: {actual:?} != {:?}",
+                        polarity * expected
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn vbic13_reverse_charge_and_delay_match_xyce710() {
     // Independent 100 MHz Xyce 7.10 currents with signed transport,
     // a local temperature rise and both forms of the active qb floor.

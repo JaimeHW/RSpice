@@ -268,6 +268,39 @@ mod wasm_tests {
     }
 
     #[wasm_bindgen_test]
+    fn vbic_tnf_thermal_derivative_matches_xyce_in_wasm() {
+        let netlist = rspice_core::Netlist::parse(
+            "VBIC TNF thermal derivative in WASM\nVc c 0 -1.8\nVb b 0 -0.7\nVth th 0 DC 20 AC 1\nQ1 c b 0 0 th vm SW_ET=1 M=3 TRISE=20\n\
+             .model vm PNP(LEVEL=12 IS=1e-16 NF=1.1 NR=1.2 ISRR=0.7 TNF=0.001 XISR=1.8 DEAR=0.1 IBEI=1e-18 IBCI=1e-18 IBEIP=0 ISP=0 RCX=10 RCI=2 RBX=5 RBI=3 RE=1 RBP=0 RS=0 GMIN=0 TNOM=27 RTH=1000 CTH=1p TD=1n TF=1n TR=2n)\n.temp 27\n.options gmin=0\n.end\n"
+        ).unwrap();
+        let points = rspice_core::Engine::default()
+            .run_ac_with_abort(&netlist, &[1e8], &rspice_core::abort_signal::NoAbort)
+            .unwrap();
+        let point = &points[0];
+        for (branch, expected) in [
+            (
+                "vc",
+                rspice_core::Complex64::new(1.084013990699429e-6, -7.885275583603683e-7),
+            ),
+            (
+                "vb",
+                rspice_core::Complex64::new(8.501427197947536e-7, 9.013856542434545e-7),
+            ),
+            (
+                "vth",
+                rspice_core::Complex64::new(-0.0029974552824991404, -0.0018863758535638618),
+            ),
+        ] {
+            let index = point
+                .branch_names
+                .iter()
+                .position(|name| name.eq_ignore_ascii_case(branch))
+                .unwrap();
+            assert!((point.currents[index] - expected).norm() < 2e-6 * expected.norm());
+        }
+    }
+
+    #[wasm_bindgen_test]
     fn vbic13_signed_reverse_charge_and_delay_matches_xyce_in_wasm() {
         let netlist = rspice_core::Netlist::parse(
             "Signed VBIC reverse charge and delay in WASM\nVc c 0 -1\nVb b 0 DC 0.1 AC 1\nVth th 0 20\nQ1 c b 0 0 th vm SW_ET=0 M=3\n\

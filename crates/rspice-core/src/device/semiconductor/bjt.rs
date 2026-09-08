@@ -2062,7 +2062,9 @@ impl Bjt {
 
     #[inline]
     fn cache_matches_external_biases(&self, vc: Value, vb: Value, ve: Value, vs: Value) -> bool {
-        Self::same_cached_bias(vc, self.vc_ext)
+        (self.reduced_linearization_cache_valid.get()
+            || (self.vbic_mna_promoted && self.mna_eval.is_some()))
+            && Self::same_cached_bias(vc, self.vc_ext)
             && Self::same_cached_bias(vb, self.vb_ext)
             && Self::same_cached_bias(ve, self.ve_ext)
             && Self::same_cached_bias(vs, self.vs_ext)

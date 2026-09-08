@@ -511,6 +511,14 @@ impl Bjt {
     pub(super) fn refresh_operating_scaling_for(&mut self, temp: Value) {
         let temp = self.mapped_temperature(temp).0;
         self.clear_thermal_variant_cache();
+        // A temperature or instance-parameter change changes the equations
+        // even if every terminal voltage stays fixed on the next load.
+        self.reduced_linearization_cache_valid.set(false);
+        self.previous_reduced_linearization_valid = false;
+        self.charge_snapshot_cache_valid.set(false);
+        self.mna_limited_from.set(None);
+        self.mna_eval = None;
+        self.mna_charge_cache_valid.set(false);
         let tnom = self.tnom.max(1.0);
         let vt = self.thermal_voltage_at(temp);
         let ratio = (temp / tnom).max(1e-12);
@@ -525,7 +533,17 @@ impl Bjt {
         let is_temp = if legacy_model {
             self.is_nominal * legacy_is_factor
         } else {
-            Self::vbic_temp_scaled_current(self.is_nominal, ratio, vt, self.xis, self.ea, self.nf)
+            // Saturation-current mapping uses nominal emission coefficients;
+            // TNF adjusts the junction slope separately. Reusing nf/nr here
+            // makes the result depend on previous temperature refreshes.
+            Self::vbic_temp_scaled_current(
+                self.is_nominal,
+                ratio,
+                vt,
+                self.xis,
+                self.ea,
+                self.nf_nominal,
+            )
         };
         let scale = self.instance_scale();
         let isrr_temp = Self::vbic_temp_scaled_current(
@@ -534,7 +552,7 @@ impl Bjt {
             vt,
             self.xisr,
             self.dear,
-            self.nr,
+            self.nr_nominal,
         );
         let gamm_ratio_term = ratio.powf(self.xis);
         let gamm_energy_term = (-self.ea * (1.0 - ratio) / vt.max(1e-18)).clamp(-80.0, 80.0);
@@ -1810,6 +1828,136 @@ impl Bjt {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn temperature_refresh_invalidates_bjt_currents_and_charges_at_unchanged_bias() {
+        for level in [1.0, 4.0, 11.0, 12.0] {
+            for promoted in [false, true] {
+                if promoted && level == 1.0 {
+                    continue;
+                }
+                let make = || {
+                    let mut model = model_with(&[
+                        ("LEVEL", level),
+                        ("IS", 1e-16),
+                        ("TF", 1e-9),
+                        ("CJE", 1e-12),
+                        ("RCX", 0.0),
+                        ("RCI", 0.0),
+                        ("RBX", 0.0),
+                        ("RBI", 0.0),
+                        ("RE", 0.0),
+                        ("RBP", 0.0),
+                        ("RS", 0.0),
+                    ])
+                    .with_instance_params(&[("SW_ET".into(), 0.0)]);
+                    model.set_voltage_limiting_enabled(false);
+                    if promoted {
+                        let mut next = 4;
+                        model.assign_vbic_internal_nodes(|_| {
+                            let node = next;
+                            next += 1;
+                            node
+                        });
+                    }
+                    model
+                };
+                let mut model = make();
+                let mut bias = vec![0.0; 16];
+                bias[0] = 1.8;
+                bias[1] = 0.7;
+                model.update(&bias);
+                let cold = model.operating_point_currents();
+                let cold_charge = model.charge_snapshot(1.8, 0.7, 0.0, 0.0);
+                if promoted {
+                    model.vbic_mna_charge_state();
+                }
+                model.set_temperature(340.15);
+                let mut fresh = make();
+                fresh.set_temperature(340.15);
+                fresh.update(&bias);
+                // Read-only charge requests must also reject the cold cache,
+                // without requiring an intervening nonlinear update.
+                let charge = model.charge_snapshot(1.8, 0.7, 0.0, 0.0);
+                let expected_charge = fresh.charge_snapshot(1.8, 0.7, 0.0, 0.0);
+                for (actual, expected) in
+                    charge.branches.iter().zip(expected_charge.branches.iter())
+                {
+                    assert_eq!(
+                        actual.charge, expected.charge,
+                        "LEVEL={level} promoted={promoted}"
+                    );
+                }
+                if level != 1.0 {
+                    assert_ne!(charge.branches[0].charge, cold_charge.branches[0].charge);
+                }
+                model.update(&bias);
+                assert_eq!(
+                    model.operating_point_currents(),
+                    fresh.operating_point_currents(),
+                    "LEVEL={level} promoted={promoted}"
+                );
+                assert_ne!(model.operating_point_currents(), cold);
+            }
+        }
+    }
+
+    #[test]
+    fn vbic_tnf_scaling_is_idempotent_and_uses_nominal_emission_coefficients() {
+        let signature = |model: &Bjt| [model.is, model.isrr, model.nf, model.nr];
+        for level in [4.0, 11.0, 12.0] {
+            for tnf in [-0.001, 0.001] {
+                let mut bjt = model_with(&[
+                    ("LEVEL", level),
+                    ("IS", 1e-16),
+                    ("ISRR", 0.7),
+                    ("NF", 1.1),
+                    ("NR", 1.2),
+                    ("TNF", tnf),
+                    ("XIS", 3.0),
+                    ("XISR", 1.8),
+                    ("EA", 1.12),
+                    ("DEAR", 0.1),
+                    ("RTH", 1000.0),
+                    ("SELFT", 1.0),
+                ])
+                .with_instance_params(&[("M".into(), 3.0), ("DTEMP".into(), 20.0)]);
+                for temperature in [320.15, 340.15, 280.15, 300.15] {
+                    bjt.set_temperature(temperature);
+                    let ratio = bjt.temperature / 300.15;
+                    let dt = bjt.temperature - 300.15;
+                    let expected = [
+                        3e-16
+                            * ratio.powf(3.0 / 1.1)
+                            * (-1.12 * (1.0 - ratio) / (bjt.vt * 1.1)).exp(),
+                        0.7 * ratio.powf(1.8 / 1.2) * (-0.1 * (1.0 - ratio) / (bjt.vt * 1.2)).exp(),
+                        1.1 * (1.0 + dt * tnf),
+                        1.2 * (1.0 + dt * tnf),
+                    ];
+                    let first = signature(&bjt);
+                    for (actual, expected) in first.into_iter().zip(expected) {
+                        assert!(
+                            (actual - expected).abs() < 1e-13 * expected.abs(),
+                            "LEVEL={level} TNF={tnf} T={temperature}: {actual:e} != {expected:e}"
+                        );
+                    }
+                    for _ in 0..3 {
+                        bjt.set_temperature(temperature);
+                        assert_eq!(signature(&bjt), first);
+                    }
+                    // Cached thermal variants and direct temperature mapping
+                    // must agree independently of previous evaluation order.
+                    let mut direct = bjt.clone_without_thermal_variant_cache();
+                    direct.refresh_operating_scaling_for(bjt.requested_temperature() + 15.0);
+                    for _ in 0..2 {
+                        let actual = bjt.with_temperature_variant(15.0, signature);
+                        assert_eq!(actual, signature(&direct));
+                        assert_eq!(signature(&bjt), first);
+                    }
+                }
+            }
+        }
+    }
 
     #[test]
     fn vbic13_thermal_derivatives_keep_inactive_early_voltages_off() {
