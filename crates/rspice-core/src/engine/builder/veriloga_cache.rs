@@ -250,7 +250,9 @@ use super::*;
 // differentiate k*q and retain the incorrect q*dk/dx term.
 // Version 48 rebuilds derivative shadows for finite nested ddx; older
 // portable records can silently truncate higher derivatives.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 48;
+// Version 49 rebuilds real-modulo Jacobians and noise gains: older portable
+// bytecode treats the result as constant and silently drops both slopes.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 49;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
@@ -2383,8 +2385,8 @@ endmodule
             (43, true),
             (46, false),
             (46, true),
-            (47, false),
-            (47, true),
+            (48, false),
+            (48, true),
         ] {
             persist_model_to_disk_locked(&source_path, &entry, &cache_root)
                 .expect("persist current cache record");

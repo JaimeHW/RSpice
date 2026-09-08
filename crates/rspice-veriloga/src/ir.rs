@@ -2245,12 +2245,14 @@ pub mod autodiff {
             | Node::PortConnected(_)
             | Node::Analysis(_) => 0,
             Node::Binary(op, left, right) => match op {
-                BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Pow => {
-                    recurse(left) | recurse(right)
-                }
+                BinaryOp::Add
+                | BinaryOp::Sub
+                | BinaryOp::Mul
+                | BinaryOp::Div
+                | BinaryOp::Pow
+                | BinaryOp::Mod => recurse(left) | recurse(right),
                 // Piecewise-constant results: derivative identically zero
-                BinaryOp::Mod
-                | BinaryOp::Eq
+                BinaryOp::Eq
                 | BinaryOp::Ne
                 | BinaryOp::Lt
                 | BinaryOp::Le
@@ -3178,7 +3180,7 @@ pub mod autodiff {
                 }
             }
             Node::Binary(op, left, right) => match op {
-                BinaryOp::Add | BinaryOp::Sub => {
+                BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mod => {
                     collect!(left);
                     collect!(right);
                 }
@@ -3219,8 +3221,7 @@ pub mod autodiff {
                 }
                 // These operators are piecewise constant under the Jacobian
                 // convention used by `differentiate_with_shadows`.
-                BinaryOp::Mod
-                | BinaryOp::Eq
+                BinaryOp::Eq
                 | BinaryOp::Ne
                 | BinaryOp::Lt
                 | BinaryOp::Le
@@ -4318,10 +4319,25 @@ pub mod autodiff {
                             }
                         }
                     }
+                    BinaryOp::Mod => {
+                        // The integer quotient is locally constant even when
+                        // both real operands vary: d(l % r) = dl - trunc(l/r)*dr.
+                        let dr = simplify(arena, dr);
+                        if matches!(arena.node(dr), Node::Const(value) if *value == 0.0) {
+                            return dl;
+                        }
+                        let quotient = binary!(BinaryOp::Div, left, right);
+                        let zero = constant!(0.0);
+                        let negative = binary!(BinaryOp::Lt, quotient, zero);
+                        let ceil = arena.push_call(IrFunction::Ceil, &[quotient]);
+                        let floor = arena.push_call(IrFunction::Floor, &[quotient]);
+                        let whole = arena.push(Node::Conditional(negative, ceil, floor));
+                        let scaled = binary!(BinaryOp::Mul, whole, dr);
+                        binary!(BinaryOp::Sub, dl, scaled)
+                    }
                     // Piecewise-constant or discontinuous operators are treated
                     // as zero derivative in the DC Jacobian.
-                    BinaryOp::Mod
-                    | BinaryOp::Eq
+                    BinaryOp::Eq
                     | BinaryOp::Ne
                     | BinaryOp::Lt
                     | BinaryOp::Le

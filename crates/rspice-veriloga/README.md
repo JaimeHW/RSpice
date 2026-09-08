@@ -189,6 +189,10 @@ passes still have higher-derivative limits; native readback explicitly rejects
 simultaneous `ddx` self-updates instead of publishing partially updated shadows.
 This is not complete Verilog-AMS support.
 
+Real `%` uses remainder semantics. Away from its discontinuities, Jacobians,
+`ddx` readbacks and noise gains follow `da - trunc(a/b)*db` for `a % b`.
+A constant divisor does not require forming the quotient for differentiation.
+
 The supported subset, as documented in the crate docs (`src/lib.rs`) and
 exercised by the test suite:
 

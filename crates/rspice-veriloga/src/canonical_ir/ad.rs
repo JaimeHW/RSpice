@@ -850,13 +850,6 @@ fn ddx_direction_liveness(
                 } => {
                     changed |= needed.union_from(*input_derivative, value.id);
                 }
-                CfgValueKind::Binary {
-                    op: CfgBinaryOp::Mod,
-                    left,
-                    ..
-                } => {
-                    changed |= needed.union_from(*left, value.id);
-                }
                 CfgValueKind::Binary { left, right, op } if !is_predicate(*op) => {
                     changed |= needed.union_from(*left, value.id);
                     changed |= needed.union_from(*right, value.id);
@@ -869,6 +862,45 @@ fn ddx_direction_liveness(
         }
         check_cancelled(control)?;
     }
+}
+
+/// Between remainder discontinuities, d(a % b) = da - trunc(a/b) db.
+/// Express truncation using existing scalar operations, whose derivatives are
+/// zero. The two clipped terms also avoid infinity times a zero sign mask.
+fn truncated_quotient(
+    left: ValueId,
+    right: ValueId,
+    zero: ValueId,
+    mut emit: impl FnMut(CfgValueKind) -> ValueId,
+) -> ValueId {
+    let quotient = emit(CfgValueKind::Binary {
+        op: CfgBinaryOp::Div,
+        left,
+        right,
+    });
+    let floor = emit(CfgValueKind::Unary {
+        op: CfgUnaryOp::Floor,
+        input: quotient,
+    });
+    let ceil = emit(CfgValueKind::Unary {
+        op: CfgUnaryOp::Ceil,
+        input: quotient,
+    });
+    let positive = emit(CfgValueKind::Binary {
+        op: CfgBinaryOp::Max,
+        left: floor,
+        right: zero,
+    });
+    let negative = emit(CfgValueKind::Binary {
+        op: CfgBinaryOp::Min,
+        left: ceil,
+        right: zero,
+    });
+    emit(CfgValueKind::Binary {
+        op: CfgBinaryOp::Add,
+        left: positive,
+        right: negative,
+    })
 }
 
 fn ddx_axis_seeds(axis: CfgDdxAxis) -> Vec<AdSeed> {
@@ -1474,7 +1506,20 @@ impl<'a> ScalarDdxBuilder<'a> {
                     (None, None) => None,
                 }
             }
-            CfgBinaryOp::Mod => d_left,
+            CfgBinaryOp::Mod => {
+                let Some(d_right) = d_right else {
+                    return d_left;
+                };
+                let zero = self.constant(0.0);
+                let quotient = truncated_quotient(left, right, zero, |kind| {
+                    self.push(CfgValueType::Real, kind)
+                });
+                let scaled = self.push_binary(CfgBinaryOp::Mul, quotient, d_right);
+                Some(match d_left {
+                    Some(d_left) => self.push_binary(CfgBinaryOp::Sub, d_left, scaled),
+                    None => self.push_unary(CfgUnaryOp::Neg, scaled),
+                })
+            }
             // A selection, written as a mask over both arms.
             //
             // `db + (da - db)*c` is the same algebra in three operations rather
@@ -2634,8 +2679,20 @@ impl<'a> AdBuilder<'a> {
                     (None, None) => None,
                 }
             }
-            // `a % b` moves with `a` between the discontinuities.
-            CfgBinaryOp::Mod => d_left,
+            CfgBinaryOp::Mod => {
+                let Some(d_right) = d_right else {
+                    return d_left;
+                };
+                let zero = self.constant(0.0);
+                let quotient = truncated_quotient(left, right, zero, |kind| {
+                    self.push(CfgValueType::Real, kind)
+                });
+                let scaled = self.scale(d_right, quotient);
+                Some(match d_left {
+                    Some(d_left) => self.lane_binary(CfgBinaryOp::Sub, d_left, scaled, target),
+                    None => self.negate(scaled),
+                })
+            }
             CfgBinaryOp::Min | CfgBinaryOp::Max => {
                 let comparison = if matches!(op, CfgBinaryOp::Min) {
                     CfgBinaryOp::Le

@@ -22,6 +22,111 @@ use std::process::Command;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 #[test]
+fn generated_real_modulo_does_not_erase_invalid_noise_metadata() {
+    let source = "module invalid_remainder(p,n); inout p,n; electrical p,n; analog I(p,n)<+white_noise(0.0%V(p,n),\"source\"); endmodule";
+    let name = "zero numerator remainder noise metadata";
+    let (state, stamp, noise) = generated_parts(source, name);
+    run_generated_main(
+        name,
+        &state,
+        &stamp,
+        &noise,
+        r#"
+struct Capture;
+impl runtime::GeneratedNoiseVisitor for Capture {
+    fn visit(&mut self,_index:usize,_value:runtime::GeneratedNoiseEvaluationRef<'_>)->bool { true }
+}
+let mut instance=device::state::Instance::new(&[0,1]);
+instance.finalize_parameters().unwrap();
+for v in [1.0,0.0] {
+    let bias=[v,0.0];
+    let ctx=runtime::GeneratedEvalContext { voltages:&bias,temperature:300.0 };
+    let result=instance.evaluate_noise_sources(&ctx,&mut Capture);
+    assert_eq!(result.is_err(),v==0.0,"0 % {v}: {result:?}");
+}
+"#,
+    )
+    .unwrap_or_else(|report| panic!("{report}"));
+}
+
+#[test]
+fn generated_real_modulo_preserves_reactive_jacobians() {
+    let source = "module reactive_remainder(p,n); inout p,n; electrical p,n; analog I(p,n)<+ddt(V(p,n)%(2.0+V(p,n))); endmodule";
+    let name = "generated reactive real modulo";
+    let (state, stamp, noise) = generated_parts(source, name);
+    run_generated_main(name,&state,&stamp,&noise,r#"
+let mut instance=device::state::Instance::new(&[0,1]);
+instance.finalize_parameters().unwrap();
+runtime::set_dynamic_operators_enabled(false);
+for v in [-2.75_f64,-0.75,0.5,1.25] {
+    let bias=[v,0.0];
+    let ctx=runtime::GeneratedEvalContext { voltages:&bias,temperature:300.0 };
+    instance.stamp(&ctx,&mut runtime::GeneratedStamper::default());
+    let mut reactive=[0.0;6];
+    instance.stamp_reactive(&ctx,&mut runtime::GeneratedReactiveStamper { sink:Some(&mut reactive) });
+    // This first-order interface reports capacitance; the solver applies j*w.
+    assert_eq!(reactive[0],1.0-(v/(2.0+v)).trunc());
+    assert!(!ctx.evaluation_failed());
+}
+"#).unwrap_or_else(|report|panic!("{report}"));
+}
+
+#[test]
+fn generated_real_modulo_preserves_values_and_derivatives() {
+    for (index, (expression, expected_value, expected_slope)) in [
+        (
+            "(10.0+V(p,n)*V(p,n)*V(p,n))%(2.0+V(p,n)*V(p,n)*V(p,n))",
+            "a%b",
+            "(1.0-q)*3.0*v*v",
+        ),
+        (
+            "ddx((10.0+V(p,n)*V(p,n)*V(p,n))%(2.0+V(p,n)*V(p,n)*V(p,n)),V(p,n))",
+            "(1.0-q)*3.0*v*v",
+            "(1.0-q)*6.0*v",
+        ),
+        (
+            "ddx(ddx((10.0+V(p,n)*V(p,n)*V(p,n))%(2.0+V(p,n)*V(p,n)*V(p,n)),V(p,n)),V(p,n))",
+            "(1.0-q)*6.0*v",
+            "(1.0-q)*6.0",
+        ),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let name = format!("generated real modulo {index}");
+        let source = format!(
+            "module remainder(p,n); inout p,n; electrical p,n; analog I(p,n)<+{expression}; endmodule"
+        );
+        let (state, stamp, noise) = generated_parts(&source, &name);
+        run_generated_main(
+            &name,
+            &state,
+            &stamp,
+            &noise,
+            &format!(
+                r#"
+let mut instance=device::state::Instance::new(&[0,1]);
+instance.finalize_parameters().unwrap();
+for v in [-3.0_f64,-0.75,0.5,1.25] {{
+    let bias=[v,0.0];
+    let a=10.0+v*v*v;
+    let b=2.0+v*v*v;
+    let q=(a/b).trunc();
+    let ctx=runtime::GeneratedEvalContext {{ voltages:&bias,temperature:300.0 }};
+    let mut real=[0.0;12];
+    instance.stamp(&ctx,&mut runtime::GeneratedStamper {{ sink:Some(&mut real) }});
+    assert!((real[9]-({expected_value})).abs()<1e-10,"value: {{real:?}}");
+    assert!((real[10]-({expected_slope})).abs()<1e-10,"Jacobian: {{real:?}}");
+    assert!(!ctx.evaluation_failed());
+}}
+"#
+            ),
+        )
+        .unwrap_or_else(|report| panic!("{expression}: {report}"));
+    }
+}
+
+#[test]
 fn generated_nested_ddx_stamps_higher_order_jacobians() {
     for (index, body) in [
         "analog I(p,n)<+ddx(ddx(V(p,n)*V(p,n)*V(p,n),V(p,n)),V(p,n));",

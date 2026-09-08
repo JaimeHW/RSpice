@@ -100,7 +100,7 @@ pub const WASM_JIT_ABI_VERSION: u32 = 9;
 /// 14 to 15 holds coefficients outside ddt during reactive differentiation;
 /// old modules contain the spurious q * dk/dx term and must be rebuilt.
 /// 15 to 16 preserves higher-order ddx and descending shadow update order.
-pub const WASM_JIT_EMITTER_VERSION: u32 = 16;
+pub const WASM_JIT_EMITTER_VERSION: u32 = 17;
 
 /// Hard ceiling for one qualified shipped model's generated module.
 pub const SHIPPED_MODEL_WASM_CODE_SIZE_BUDGET_BYTES: usize = 32 * 1024 * 1024;
@@ -1929,6 +1929,53 @@ endmodule
                             "{expression}; postfix={postfix}; entry={entry}"
                         );
                     }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn real_modulo_wasm_kernels_preserve_values_and_derivatives() {
+        use super::abi::FRAME_RESULT_OFFSET;
+        for (body, order) in [
+            (
+                "I(p,n)<+(10.0+V(p,n)*V(p,n)*V(p,n))%(2.0+V(p,n)*V(p,n)*V(p,n));",
+                0,
+            ),
+            (
+                "r=(10.0+V(p,n)*V(p,n)*V(p,n))%(2.0+V(p,n)*V(p,n)*V(p,n)); I(p,n)<+ddx(r,V(p,n));",
+                1,
+            ),
+            (
+                "I(p,n)<+ddx(ddx((10.0+V(p,n)*V(p,n)*V(p,n))%(2.0+V(p,n)*V(p,n)*V(p,n)),V(p,n)),V(p,n));",
+                2,
+            ),
+        ] {
+            let source = format!(
+                "module remainder_wasm(p,n); inout p,n; electrical p,n; real r; analog begin {body} end endmodule"
+            );
+            let mut harness = FusedKernelHarness::for_source(&source, "remainder_wasm");
+            let value_export = harness.stamp_value_export(0);
+            let jacobian_export = harness.jacobian_export(0, 0);
+            harness.reset();
+            for v in [-3.0_f64, -0.75, 0.5, 1.25] {
+                let a = 10.0 + v * v * v;
+                let b = 2.0 + v * v * v;
+                let scale = 1.0 - (a / b).trunc();
+                let derivatives = [a % b, scale * 3.0 * v * v, scale * 6.0 * v, scale * 6.0];
+                harness.write_f64(FusedKernelHarness::VOLTAGES as usize, v);
+                harness.call_assignments();
+                harness.call_prelude();
+                for (export, expected) in [
+                    (&value_export, derivatives[order]),
+                    (&jacobian_export, derivatives[order + 1]),
+                ] {
+                    assert_eq!(harness.call(export), 0);
+                    let actual = harness.read_f64(FRAME_RESULT_OFFSET as usize);
+                    assert!(
+                        (actual - expected).abs() < 1e-10,
+                        "{body} at {v}: {actual} != {expected}"
+                    );
                 }
             }
         }
