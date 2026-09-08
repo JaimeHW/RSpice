@@ -12,6 +12,57 @@ use crate::workbench::app_state::AppState;
 const LEGACY_SESSION_PROJECT_ID_NAMESPACE: uuid::Uuid =
     uuid::Uuid::from_u128(0x655d_ae12_6cdd_5971_b7d8_aafe_02b6_b367);
 
+impl AppState {
+    /// Restore eframe's RON session, including receipts emitted before their
+    /// writer and independently recoverable decoder shared a wire format.
+    pub(crate) fn restore_eframe_session(storage: &dyn eframe::Storage) -> Option<Self> {
+        let text = storage.get_string(eframe::APP_KEY)?;
+        Self::from_session_ron(&text)
+            .inspect_err(|error| log::warn!("Failed to restore RSpice session: {error}"))
+            .ok()
+    }
+
+    fn from_session_ron(text: &str) -> Result<Self, ron::error::SpannedError> {
+        let migrated = migrate_legacy_browser_receipt(text);
+        ron::from_str(migrated.as_deref().unwrap_or(text))
+    }
+}
+
+fn migrate_legacy_browser_receipt(text: &str) -> Option<String> {
+    use crate::workbench::lifecycle::project_lifecycle::BrowserBindingReceipt;
+
+    // Borrow only this field. Other domains are skipped without building an
+    // untyped tree of the entire, potentially deeply nested working session.
+    #[derive(serde::Deserialize)]
+    struct Envelope<'a> {
+        #[serde(default, borrow)]
+        browser_project_binding_receipt: Option<&'a ron::value::RawValue>,
+    }
+    let envelope: Envelope<'_> = ron::from_str(text).ok()?;
+    let raw = envelope.browser_project_binding_receipt?;
+    if ron::from_str::<serde_json::Value>(raw.get_ron())
+        .ok()
+        .and_then(|value| serde_json::from_value::<BrowserBindingReceipt>(value).ok())
+        .is_some()
+    {
+        return None;
+    }
+    // A missing, malformed or future backend never acquires authority by
+    // inference. Successful decoding still requires the normal canonical
+    // identity, generation, digest and permission checks after startup.
+    let receipt = raw.into_rust::<BrowserBindingReceipt>().ok()?;
+    let replacement = ron::to_string(&serde_json::to_value(receipt).ok()?).ok()?;
+    let raw = raw.get_ron();
+    let start = (raw.as_ptr() as usize).checked_sub(text.as_ptr() as usize)?;
+    let end = start.checked_add(raw.len())?;
+    if text.get(start..end)? != raw {
+        return None;
+    }
+    let mut migrated = text.to_owned();
+    migrated.replace_range(start..end, &replacement);
+    Some(migrated)
+}
+
 impl serde::Serialize for AppState {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -63,6 +114,16 @@ impl serde::Serialize for AppState {
                     "session execution context could not be encoded: {error}"
                 ))
             })?;
+        // The independently recoverable receipt decoder reads a JSON value.
+        // Preserve that same wire representation in RON: a typed unit enum
+        // otherwise becomes `()` when the decoder visits it as an untyped
+        // value, losing which browser backend owns the canonical project.
+        let browser_receipt = self
+            .browser_project_binding_receipt
+            .as_ref()
+            .map(serde_json::to_value)
+            .transpose()
+            .map_err(<S::Error as serde::ser::Error>::custom)?;
         let field_count = if simulation_results.is_empty() { 9 } else { 10 };
         let mut state = serializer.serialize_struct("AppState", field_count)?;
         state.serialize_field("project_workspace", &self.workspace)?;
@@ -79,10 +140,7 @@ impl serde::Serialize for AppState {
             "native_project_binding_receipt",
             &self.native_project_binding_receipt,
         )?;
-        state.serialize_field(
-            "browser_project_binding_receipt",
-            &self.browser_project_binding_receipt,
-        )?;
+        state.serialize_field("browser_project_binding_receipt", &browser_receipt)?;
         if !simulation_results.is_empty() {
             state.serialize_field("simulation_results", &simulation_results)?;
         }
@@ -481,20 +539,39 @@ mod tests {
 
     #[test]
     fn session_round_trip_preserves_exact_browser_binding_receipt() {
-        let mut state = AppState::default();
-        let receipt = crate::workbench::lifecycle::project_lifecycle::BrowserBindingReceipt {
-            binding_id: uuid::Uuid::from_u128(0xc23c_8916_2865_430a_a612_ecbb_111b_3ce1),
-            project_id: state.workspace.project.id().to_string(),
-            accepted_generation: 23,
-            accepted_digest: "ab".repeat(32).parse().expect("valid digest fixture"),
-            backend: crate::workbench::lifecycle::project_lifecycle::BrowserBindingBackend::Opfs,
+        use crate::workbench::lifecycle::project_lifecycle::{
+            BrowserBindingBackend, BrowserBindingReceipt,
         };
-        state.browser_project_binding_receipt = Some(receipt.clone());
-
-        let json = serde_json::to_string(&state).expect("session serializes");
-        let restored: AppState = serde_json::from_str(&json).expect("session deserializes");
-
-        assert_eq!(restored.browser_project_binding_receipt, Some(receipt));
+        for backend in [
+            BrowserBindingBackend::Opfs,
+            BrowserBindingBackend::ExternalFile,
+        ] {
+            let mut state = AppState::default();
+            let receipt = BrowserBindingReceipt {
+                binding_id: uuid::Uuid::from_u128(0xc23c_8916_2865_430a_a612_ecbb_111b_3ce1),
+                project_id: state.workspace.project.id().to_string(),
+                accepted_generation: 23,
+                accepted_digest: "ab".repeat(32).parse().expect("valid digest fixture"),
+                backend,
+            };
+            state.browser_project_binding_receipt = Some(receipt.clone());
+            let json = serde_json::to_string(&state).expect("JSON session serializes");
+            let ron = ron::to_string(&state).expect("eframe RON session serializes");
+            for (format, restored) in [
+                ("JSON", serde_json::from_str::<AppState>(&json).unwrap()),
+                ("RON", ron::from_str::<AppState>(&ron).unwrap()),
+            ] {
+                assert_eq!(
+                    restored.browser_project_binding_receipt.as_ref(),
+                    Some(&receipt),
+                    "{backend:?} authority must survive {format} session recovery"
+                );
+                assert_eq!(
+                    restored.workspace.project.id(),
+                    state.workspace.project.id()
+                );
+            }
+        }
     }
 
     #[test]
@@ -508,9 +585,96 @@ mod tests {
         state.native_project_binding_receipt = Some(receipt.clone());
 
         let json = serde_json::to_string(&state).expect("session serializes");
-        let restored: AppState = serde_json::from_str(&json).expect("session deserializes");
+        let ron = ron::to_string(&state).expect("eframe RON session serializes");
+        for restored in [
+            serde_json::from_str::<AppState>(&json).unwrap(),
+            ron::from_str::<AppState>(&ron).unwrap(),
+        ] {
+            assert_eq!(
+                restored.native_project_binding_receipt.as_ref(),
+                Some(&receipt)
+            );
+        }
+    }
 
-        assert_eq!(restored.native_project_binding_receipt, Some(receipt));
+    #[test]
+    fn legacy_browser_receipt_migration_preserves_documents_and_exact_authority() {
+        use crate::workbench::lifecycle::project_lifecycle::{
+            BrowserBindingBackend, BrowserBindingReceipt,
+        };
+        #[derive(serde::Serialize)]
+        struct LegacySession<'a> {
+            project_workspace: &'a crate::state::ProjectWorkspace,
+            browser_project_binding_receipt: Option<&'a BrowserBindingReceipt>,
+        }
+        for backend in [
+            BrowserBindingBackend::Opfs,
+            BrowserBindingBackend::ExternalFile,
+        ] {
+            let mut state = AppState::default();
+            state
+                .workspace
+                .project
+                .rename("Legacy saved circuit")
+                .unwrap();
+            state.schematic.add_component(
+                crate::state::ComponentType::Resistor,
+                crate::state::Point::new(17, 29),
+            );
+            state.workspace.save_active_schematic(&state.schematic);
+            let receipt = BrowserBindingReceipt {
+                binding_id: uuid::Uuid::from_u128(0xc23c_8916_2865_430a_a612_ecbb_111b_3ce1),
+                project_id: state.workspace.project.id().to_string(),
+                accepted_generation: 23,
+                accepted_digest: "ab".repeat(32).parse().unwrap(),
+                backend,
+            };
+            let legacy = ron::to_string(&LegacySession {
+                project_workspace: &state.workspace,
+                browser_project_binding_receipt: Some(&receipt),
+            })
+            .unwrap();
+            let migrated = migrate_legacy_browser_receipt(&legacy).unwrap();
+            assert!(migrate_legacy_browser_receipt(&migrated).is_none());
+            let restored = AppState::from_session_ron(&legacy).unwrap();
+            assert_eq!(
+                restored.browser_project_binding_receipt.as_ref(),
+                Some(&receipt)
+            );
+            assert_eq!(
+                restored.workspace.project.id(),
+                state.workspace.project.id()
+            );
+            assert_eq!(restored.workspace.project.name(), "Legacy saved circuit");
+            assert_eq!(restored.schematic.components, state.schematic.components);
+            assert!(
+                !restored
+                    .log_buffer
+                    .entries()
+                    .any(|entry| entry.message.contains("browser project binding receipt"))
+            );
+
+            if backend == BrowserBindingBackend::Opfs {
+                for invalid in ["future_backend", "42"] {
+                    let corrupted = legacy.replace("backend:opfs", &format!("backend:{invalid}"));
+                    assert_ne!(corrupted, legacy);
+                    assert!(migrate_legacy_browser_receipt(&corrupted).is_none());
+                    let recovered = AppState::from_session_ron(&corrupted).unwrap();
+                    assert!(recovered.browser_project_binding_receipt.is_none());
+                    assert_eq!(
+                        recovered.workspace.project.id(),
+                        state.workspace.project.id()
+                    );
+                    assert_eq!(recovered.schematic.components, state.schematic.components);
+                    assert!(
+                        recovered
+                            .log_buffer
+                            .entries()
+                            .any(|entry| entry.message.contains("browser project binding receipt"))
+                    );
+                }
+            }
+        }
     }
 
     #[test]

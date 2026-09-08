@@ -408,7 +408,7 @@ impl RSpiceApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         // Load persisted state if available
         let mut state: AppState = if let Some(storage) = cc.storage {
-            eframe::get_value(storage, eframe::APP_KEY).unwrap_or_default()
+            AppState::restore_eframe_session(storage).unwrap_or_default()
         } else {
             AppState::default()
         };
@@ -2292,7 +2292,7 @@ mod tests {
         let expected = AppState::default();
         let mut storage = MemoryStorage::default();
         eframe::set_value(&mut storage, eframe::APP_KEY, &expected);
-        let restored: AppState = eframe::get_value(&storage, eframe::APP_KEY)
+        let restored = AppState::restore_eframe_session(&storage)
             .expect("RSpice must be able to restore a session it just saved");
 
         assert_eq!(
