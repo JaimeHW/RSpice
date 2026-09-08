@@ -479,8 +479,8 @@ fn console_tab_lane_reserves_every_visible_trailing_action() {
     }
 }
 
-/// Render the Console page and collect the text it painted.
-fn painted_console(state: &mut AppState) -> String {
+/// Collect text from the same rendering path used by the console and its header.
+fn painted_console_body(mut render: impl FnMut(&mut egui::Ui)) -> String {
     fn collect(shape: &egui::epaint::Shape, rendered: &mut String) {
         match shape {
             egui::epaint::Shape::Text(text) => {
@@ -507,7 +507,7 @@ fn painted_console(state: &mut AppState) -> String {
             ..Default::default()
         },
         |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| console(ui, state));
+            egui::CentralPanel::default().show(ctx, |ui| render(ui));
         },
     );
     let mut rendered = String::new();
@@ -515,6 +515,37 @@ fn painted_console(state: &mut AppState) -> String {
         collect(&clipped.shape, &mut rendered);
     }
     rendered
+}
+
+#[test]
+fn run_outcome_header_uses_selected_history_lifecycle() {
+    use crate::state::SimulationRunLifecycle as Lifecycle;
+
+    let mut observed = Vec::new();
+    let mut expected = Vec::new();
+    for (lifecycle, label) in [
+        (Lifecycle::Completed, "completed"),
+        (Lifecycle::Failed, "failed"),
+        (Lifecycle::Aborted, "cancelled"),
+        (Lifecycle::Interrupted, "interrupted"),
+        (Lifecycle::LegacyUnknown, "legacy status unknown"),
+    ] {
+        let mut app = RSpiceApp::test_instance();
+        let historical = app.state.simulation.start_run();
+        historical.label = "Historical operating point".to_owned();
+        historical.success = lifecycle == Lifecycle::Completed;
+        historical.restore_lifecycle(lifecycle, 1.25).unwrap();
+        app.state.simulation.start_run().mark_running().unwrap();
+        app.state.simulation.runs[0]
+            .finish_lifecycle(Lifecycle::Completed)
+            .unwrap();
+        app.state.simulation.active_run_idx = Some(1);
+        observed.push(painted_console_body(|ui| console_context(ui, &app)));
+        expected.push(format!(
+            "Selected result · Historical operating point · {label} · 1.25 s elapsed\n"
+        ));
+    }
+    assert_eq!(observed, expected);
 }
 
 /// A narrowed console shows only the producer's entries, says how much of
@@ -541,7 +572,7 @@ fn a_producer_filter_narrows_the_console_and_states_what_it_hid() {
             "gain",
         ));
 
-    let rendered = painted_console(&mut app.state);
+    let rendered = painted_console_body(|ui| console(ui, &mut app.state));
     assert!(
         rendered.contains("PRODUCER · gain · 1 of 2 entries"),
         "the strip must state the producer and how much of the log it keeps:\n{rendered}"
@@ -581,7 +612,7 @@ fn an_unmatched_producer_says_why_the_console_looks_empty() {
             "V(out)",
         ));
 
-    let rendered = painted_console(&mut app.state);
+    let rendered = painted_console_body(|ui| console(ui, &mut app.state));
     assert!(
         rendered.contains("No console entry names V(out)"),
         "{rendered}"

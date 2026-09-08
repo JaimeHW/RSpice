@@ -228,28 +228,29 @@ pub fn show(root: &mut egui::Ui, app: &mut RSpiceApp) {
 /// rather than reading the log, so the offer is bound to a run identity
 /// instead of to the wording of a message.
 fn announce_run_completion(ctx: &Context, app: &mut RSpiceApp) {
+    use crate::state::SimulationRunLifecycle as Lifecycle;
+    use crate::ui::widgets::ToastKind;
+
     let Some(newest) = app.state.simulation.runs.first() else {
         app.state.ui.observed_newest_run = None;
         return;
     };
     let (run_id, terminal) = (newest.id, newest.lifecycle.is_terminal());
-    let (retained, success) = (newest.analyses.len(), newest.success);
+    let (retained, lifecycle) = (newest.analyses.len(), newest.lifecycle);
     let previously_running = app.state.ui.observed_newest_run == Some((run_id, false));
     app.state.ui.observed_newest_run = Some((run_id, terminal));
     if !terminal || !previously_running {
         return;
     }
 
-    let kind = if success {
-        crate::ui::widgets::ToastKind::Success
-    } else {
-        crate::ui::widgets::ToastKind::Error
+    let (kind, outcome) = match lifecycle {
+        Lifecycle::Completed => (ToastKind::Success, "complete"),
+        Lifecycle::Failed => (ToastKind::Error, "failed"),
+        Lifecycle::Aborted => (ToastKind::Warn, "cancelled"),
+        Lifecycle::Interrupted => (ToastKind::Warn, "interrupted"),
+        _ => return,
     };
-    let title = if success {
-        format!("Run {run_id} complete")
-    } else {
-        format!("Run {run_id} completed with errors")
-    };
+    let title = format!("Run {run_id} {outcome}");
     let category = crate::ui::widgets::NotificationCategory::Job;
     if retained == 0 {
         // Nothing to open, so nothing is offered. A control that arrives at
@@ -674,6 +675,46 @@ mod tests {
     /// already holds a finished run must not claim one just completed — and
     /// the notice that is raised has to carry the dataset it announces.
     #[test]
+    fn run_outcome_notices_distinguish_failure_cancellation_and_interruption() {
+        use crate::state::{AnalysisResult, AnalysisType, SimulationRunLifecycle as Lifecycle};
+        use crate::ui::widgets::{NotificationAction, ToastKind};
+
+        let mut observed = Vec::new();
+        let mut expected = Vec::new();
+        for retained in [false, true] {
+            for (lifecycle, title, kind) in [
+                (Lifecycle::Failed, "Run 1 failed", ToastKind::Error),
+                (Lifecycle::Aborted, "Run 1 cancelled", ToastKind::Warn),
+                (Lifecycle::Interrupted, "Run 1 interrupted", ToastKind::Warn),
+            ] {
+                let ctx = Context::default();
+                let mut app = RSpiceApp::test_instance();
+                let run = app.state.simulation.start_run();
+                if retained {
+                    run.add_analysis(AnalysisResult::new(1, AnalysisType::Transient, "partial"));
+                }
+                run.lifecycle = Lifecycle::Running;
+                announce_run_completion(&ctx, &mut app);
+                app.state.simulation.runs[0].success = false;
+                app.state.simulation.runs[0]
+                    .finish_lifecycle(lifecycle)
+                    .unwrap();
+                announce_run_completion(&ctx, &mut app);
+                announce_run_completion(&ctx, &mut app);
+                let activity = app.state.ui.toasts.activity();
+                assert_eq!(activity.len(), 1, "one terminal transition, one notice");
+                observed.push((activity[0].title().to_owned(), activity[0].kind()));
+                expected.push((title.to_owned(), kind));
+                assert_eq!(
+                    activity[0].action(),
+                    retained.then_some(NotificationAction::OpenRunInResults { run_sequence: 1 })
+                );
+            }
+        }
+        assert_eq!(observed, expected);
+    }
+
+    #[test]
     fn a_run_is_announced_when_it_finishes_and_offers_the_dataset_it_made() {
         use crate::state::{AnalysisResult, AnalysisType, SimulationRunLifecycle};
         use crate::ui::widgets::NotificationAction;
@@ -823,7 +864,7 @@ mod tests {
                 .map(|record| record.title())
                 .collect::<Vec<_>>()
         );
-        assert_eq!(activity[0].title(), "Run 1 completed with errors");
+        assert_eq!(activity[0].title(), "Run 1 failed");
         assert_eq!(
             activity[0].action(),
             None,

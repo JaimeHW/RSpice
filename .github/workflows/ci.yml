@@ -57,6 +57,8 @@ jobs:
           "$GOBIN/actionlint" .github/workflows/*.yml
       - name: CI configuration tests
         run: python3 tools/ci/test_ci_configuration.py
+      - name: UI incremental build identity regressions
+        run: python3 tools/ci/test_ui_build_identity.py
       - name: Browser artifact reporting regression tests
         run: python3 tools/ci/test_wasm_artifact_size.py
       - name: Browser workbench harness regressions

@@ -464,8 +464,10 @@ fn console_context(ui: &mut Ui, app: &RSpiceApp) {
             || "No retained result selected".to_owned(),
             |run| {
                 format!(
-                    "Latest result · {} · completed in {:.2} s",
-                    run.label, run.elapsed_time
+                    "Selected result · {} · {} · {:.2} s elapsed",
+                    run.label,
+                    run_lifecycle_label(run.lifecycle),
+                    run.elapsed_time
                 )
             },
         )
