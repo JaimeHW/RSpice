@@ -239,6 +239,14 @@ fn nonlinear_time_features_cannot_hide_between_shooting_grids() {
             "exp(-1000000*(exp(cos(2*pi*64meg*time+0.1))+0.5*exp(cos(2*(2*pi*64meg*time+0.1)))-1.5)^2)",
             4,
         ),
+        (
+            "exp(-1000000*(ln(2+cos(2*pi*64meg*time+0.1))+0.5*ln(2+cos(2*(2*pi*64meg*time+0.1)))-1.5)^2)",
+            5,
+        ),
+        (
+            "exp(-1000000*(2.302585092994046*(log10(2+cos(2*pi*64meg*time+0.1))+0.5*log10(2+cos(2*(2*pi*64meg*time+0.1))))-1.5)^2)",
+            5,
+        ),
     ] {
         // Independent linear RC convolution on one source cycle. This uses
         // exact integration of densely sampled linear forcing segments, not
@@ -258,6 +266,12 @@ fn nonlinear_time_features_cannot_hide_between_shooting_grids() {
             } else if kind == 4 {
                 (-1000000.0
                     * (cosine.exp() + 0.5 * (2.0 * (omega * time + 0.1)).cos().exp() - 1.5).powi(2))
+                .exp()
+            } else if kind == 5 {
+                (-1000000.0
+                    * ((2.0 + cosine).ln() + 0.5 * (2.0 + (2.0 * (omega * time + 0.1)).cos()).ln()
+                        - 1.5)
+                        .powi(2))
                 .exp()
             } else {
                 (-10000.0 * (cosine - 0.25).powi(2)).exp()

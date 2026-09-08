@@ -276,7 +276,7 @@ Checkpoint format 35 retains the step and stop defaults that determine
 independent-source waveforms. Extending a run or changing its step ceiling
 preserves those source parameters. Older checkpoints remain readable; resume
 requires fully specified source timing when the original defaults are absent.
-Resume also requires the current resolved simulation identity (v10); states
+Resume also requires the current resolved simulation identity (v11); states
 captured under previous source evaluation or behavioral event timing semantics
 must be regenerated.
 
@@ -413,6 +413,10 @@ Constants use the shared compiler and VM in the resolved environment.
 Quotient bounds use direct division and scaled derivatives to avoid reciprocal
 overflow. Power bounds preserve the evaluator's operator and named-function
 dialect rules, including varying exponents and Xyce's real projection.
+Logarithmic bounds cover `ln`, `log10`, and dialect-dependent `log`, preserving
+the evaluator's input floor and locating its derivative corner. Exact clamped
+plateaus hide internal source geometry; active logarithmic coordinates retain
+their roots and receive the same local interpolation qualification.
 Continuity is tracked separately from derivative bounds; signed zero powers
 retain their branch transitions and do not certify a smooth constant map.
 Internal source features are discarded only when the complete expression is
@@ -445,7 +449,7 @@ defaults still use the original `POINTS`. `MAXITER` applies to each grid solve,
 while the result reports total Newton corrections across all grids. Point and
 memory limits also apply to refinement, and cancellation remains available.
 Retained PSS operating points from earlier producer versions must be regenerated
-before dependent numerical reuse; the current producer identity is version 23.
+before dependent numerical reuse; the current producer identity is version 24.
 This convergence check supplements the shooting residual, which measures closure
 of a discrete period map. It is not a proof of resolution for all nonlinear
 expressions and devices; independent waveform and

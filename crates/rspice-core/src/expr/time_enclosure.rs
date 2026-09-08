@@ -5,7 +5,7 @@
 //! derivative is with respect to normalized analysis time, avoiding an
 //! unnecessary reciprocal of extremely small or large physical periods.
 
-use super::{CompiledExpr, Context, Instruction};
+use super::{CompiledExpr, Context, Instruction, LOGARITHM_MIN_ARGUMENT};
 use crate::Value;
 
 #[derive(Clone, Copy, Debug)]
@@ -539,6 +539,49 @@ impl Dual {
         }
     }
 
+    fn logarithm(self, base10: bool) -> Self {
+        let evaluate = |argument: Value| {
+            let argument = argument.max(LOGARITHM_MIN_ARGUMENT);
+            if base10 {
+                argument.log10()
+            } else {
+                argument.ln()
+            }
+        };
+        if self.constant || self.value.upper <= LOGARITHM_MIN_ARGUMENT {
+            // The input floor is an exact VM plateau, even across an input
+            // jump. It must not retain the hidden input's slope or roundoff.
+            return Self::constant(evaluate(self.value.lower));
+        }
+        let argument = TimeInterval {
+            lower: self.value.lower.max(LOGARITHM_MIN_ARGUMENT),
+            upper: self.value.upper,
+        };
+        let value =
+            TimeInterval::transcendental(evaluate(argument.lower), evaluate(argument.upper));
+        // Divide directly before changing logarithm base. A denominator
+        // square or the reciprocal of physical analysis time is unnecessary.
+        let mut slope = self.slope.div(argument).unwrap_or(TimeInterval::WHOLE);
+        let mut roundoff = (self.roundoff / argument.lower).next_up();
+        if base10 {
+            let factor =
+                TimeInterval::transcendental(std::f64::consts::LOG10_E, std::f64::consts::LOG10_E);
+            slope = slope.mul(factor);
+            roundoff = propagated_error(factor.upper, roundoff);
+        }
+        if self.value.lower <= LOGARITHM_MIN_ARGUMENT {
+            // The floor transition is continuous with a derivative corner.
+            slope = slope.union(TimeInterval::ZERO);
+        }
+        Self {
+            value,
+            slope,
+            constant: false,
+            continuous: self.continuous,
+            roundoff: (roundoff + value.rounding_error(true)).next_up(),
+        }
+    }
+
     fn exponential(self) -> Self {
         if self.constant {
             return Self::constant(self.value.lower.exp());
@@ -605,6 +648,9 @@ impl<'a> TimeEnclosure<'a> {
                     | Instruction::Sin
                     | Instruction::Cos
                     | Instruction::Exp
+                    | Instruction::Ln
+                    | Instruction::Log10
+                    | Instruction::Log
                     | Instruction::Sqr
             )
         }) {
@@ -660,6 +706,11 @@ impl<'a> TimeEnclosure<'a> {
                 Instruction::Sin => self.stack.pop()?.trigonometric(false),
                 Instruction::Cos => self.stack.pop()?.trigonometric(true),
                 Instruction::Exp => self.stack.pop()?.exponential(),
+                Instruction::Ln => self.stack.pop()?.logarithm(false),
+                Instruction::Log10 => self.stack.pop()?.logarithm(true),
+                Instruction::Log => self.stack.pop()?.logarithm(
+                    context.expression_dialect == crate::config::ExpressionDialect::Xyce,
+                ),
                 Instruction::Sqr => self.stack.pop()?.square(),
                 _ => return None,
             };
@@ -1144,6 +1195,97 @@ mod tests {
             !domain.value.is_finite(),
             "a nonfinite input cannot establish a zero plateau"
         );
+    }
+
+    #[test]
+    fn logarithm_bounds_match_vm_floors_dialects_and_normalized_derivatives() {
+        use crate::config::ExpressionDialect;
+
+        for dialect in [ExpressionDialect::Ngspice, ExpressionDialect::Xyce] {
+            let context = Context {
+                expression_dialect: dialect,
+                ..Context::transient(&[], &[], 0.0)
+            };
+            for function in ["ln", "log10", "log"] {
+                let base10 = function == "log10"
+                    || (function == "log" && dialect == ExpressionDialect::Xyce);
+                for stop in [1e-300, 1.0, 1e300] {
+                    for scale in [1e-310, 1e-38, 1.0, 1e300] {
+                        // Cross the VM's input floor, including negative values.
+                        let expression = format!("{function}({scale:e}*(4*(time/{stop:e})-2))");
+                        let program = compile(&parse_expression_strict(&expression).unwrap());
+                        let mut bounds = TimeEnclosure::new(&program, stop).unwrap();
+                        let mut vm = Vm::new();
+                        for interval in 0..16 {
+                            let lower = stop * (interval as Value / 16.0);
+                            let upper = stop * ((interval + 1) as Value / 16.0);
+                            let domain = bounds
+                                .evaluate(TimeInterval { lower, upper }, &context)
+                                .unwrap();
+                            assert!(domain.continuous);
+                            let error = domain.interpolation_error((upper - lower) / stop);
+                            let left = vm.execute(
+                                &program,
+                                &Context {
+                                    time: lower,
+                                    ..context
+                                },
+                            );
+                            let right = vm.execute(
+                                &program,
+                                &Context {
+                                    time: upper,
+                                    ..context
+                                },
+                            );
+                            for sample in 0..=32 {
+                                let fraction = sample as Value / 32.0;
+                                let time = lower + fraction * (upper - lower);
+                                let actual = vm.execute(&program, &Context { time, ..context });
+                                let argument = scale * (4.0 * (time / stop) - 2.0);
+                                let derivative = if argument <= 1e-38 {
+                                    0.0
+                                } else {
+                                    4.0 * (scale / argument)
+                                        / if base10 { std::f64::consts::LN_10 } else { 1.0 }
+                                };
+                                assert!(domain.value.contains(actual), "{expression}: {actual:e}");
+                                assert!(
+                                    domain.slope.contains(derivative),
+                                    "{expression}: {derivative:e} outside {:?}",
+                                    domain.slope
+                                );
+                                assert!(
+                                    (actual - (left + fraction * (right - left))).abs() <= error,
+                                    "{expression}: secant error exceeds {error:e}"
+                                );
+                            }
+                        }
+                    }
+                }
+                let program = compile(
+                    &parse_expression_strict(&format!("{function}(-2+pwrs(time-0.5,0))")).unwrap(),
+                );
+                let domain = TimeEnclosure::new(&program, 1.0)
+                    .unwrap()
+                    .evaluate(
+                        TimeInterval {
+                            lower: 0.0,
+                            upper: 1.0,
+                        },
+                        &context,
+                    )
+                    .unwrap();
+                let actual = Vm::new().execute(&program, &context);
+                assert_eq!((domain.value.lower, domain.value.upper), (actual, actual));
+                assert_eq!((domain.slope.lower, domain.slope.upper), (0.0, 0.0));
+                assert!(
+                    domain.continuous,
+                    "the floor hides the internal jump exactly"
+                );
+                assert_eq!(domain.interpolation_error(1.0), 0.0);
+            }
+        }
     }
 
     #[test]

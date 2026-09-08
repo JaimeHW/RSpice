@@ -654,6 +654,9 @@ impl EventSchedule<'_> {
                 (Function::Abs | Function::Sqr | Function::Uramp, [input]) => {
                     self.level(input, 0.0, context)?
                 }
+                (Function::Ln | Function::Log10 | Function::Log, [input]) => {
+                    self.level(input, crate::expr::LOGARITHM_MIN_ARGUMENT, context)?
+                }
                 (
                     Function::Sign
                     | Function::Ustep

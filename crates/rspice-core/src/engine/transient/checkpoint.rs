@@ -1161,10 +1161,10 @@ pub(crate) fn restart_checkpoint_identity(netlist: &Netlist) -> Option<String> {
 
 pub(crate) fn simulation_checkpoint_identity(config: &SimulationConfig) -> String {
     let mut hasher = blake3::Hasher::new();
-    // v10 resolves power/exponential features and scaled quotient bounds,
-    // distinguishing branch jumps from roots and inactive source plateaus.
+    // v11 resolves logarithmic features, including the VM input-floor corner
+    // and dialect-specific log base, through shared time-expression bounds.
     // Earlier schedules can produce different accepted integration histories.
-    hasher.update(b"rspice-transient-resolved-config-v10\0");
+    hasher.update(b"rspice-transient-resolved-config-v11\0");
     hash_field(&mut hasher, "temperature", config.temperature.to_bits());
     hash_field(&mut hasher, "ramptime", config.ramptime.to_bits());
     hash_field(&mut hasher, "digital_delay_type", config.digital_delay_type);

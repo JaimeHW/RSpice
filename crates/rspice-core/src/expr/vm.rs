@@ -9,6 +9,7 @@ use std::collections::HashMap;
 
 const TWO_PI: Value = std::f64::consts::TAU;
 pub(crate) const EXPR_ZERO_TOLERANCE: Value = 1.0e-12;
+pub(crate) const LOGARITHM_MIN_ARGUMENT: Value = 1.0e-38;
 const XYCE_ATANH_EPSILON: Value = 1.0e-12;
 const XYCE_TANH_SATURATION_THRESHOLD: Value = 20.0;
 
@@ -363,14 +364,14 @@ impl Vm {
                     let dialect = ctx.expression_dialect;
                     self.unary_op(|a| {
                         if dialect == ExpressionDialect::Xyce {
-                            a.max(1e-38).log10()
+                            a.max(LOGARITHM_MIN_ARGUMENT).log10()
                         } else {
-                            a.max(1e-38).ln()
+                            a.max(LOGARITHM_MIN_ARGUMENT).ln()
                         }
                     });
                 }
-                Instruction::Ln => self.unary_op(|a| a.max(1e-38).ln()),
-                Instruction::Log10 => self.unary_op(|a| a.max(1e-38).log10()),
+                Instruction::Ln => self.unary_op(|a| a.max(LOGARITHM_MIN_ARGUMENT).ln()),
+                Instruction::Log10 => self.unary_op(|a| a.max(LOGARITHM_MIN_ARGUMENT).log10()),
                 Instruction::Sin => self.unary_op(|a| a.sin()),
                 Instruction::Cos => self.unary_op(|a| a.cos()),
                 Instruction::Tan => self.unary_op(|a| a.tan()),
