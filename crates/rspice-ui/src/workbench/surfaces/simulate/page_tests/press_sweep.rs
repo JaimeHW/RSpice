@@ -541,11 +541,12 @@ const DEAD_CONTROLS: &[&str] = &[];
 
 /// How many presses the segmented-selection arm excuses.
 ///
-/// Two, and both are a row that already announces itself as the selection: the
-/// analysis stack's selected instance, and the plan manager's active plan.
-/// Neither is named here because both announce a fresh identity every time the
-/// fixture is built.
-const HELD_SELECTION_CEILING: usize = 2;
+/// Three: the analysis stack's selected instance, the plan manager's active
+/// plan, and the solver's Balanced preset. The first two announce a fresh
+/// identity per fixture. The solver entry is also asserted by name below.
+/// Consistent temperature buffers make reselecting Balanced a true no-op;
+/// previously it needlessly rewrote the reference-temperature spelling.
+const HELD_SELECTION_CEILING: usize = 3;
 
 /// Presses whose whole product leaves this process.
 ///
@@ -581,6 +582,7 @@ const MODAL_OPENERS_FLOOR: usize = 7;
 const SEGMENTS_AND_MODALS_PER_SURFACE: &[(&str, usize, usize)] = &[
     ("Analyses/Transient", 1, 4),
     ("Analyses/Stb", 0, 1),
+    ("Solver", 1, 0),
     ("Variables", 0, 1),
     ("Save", 0, 1),
     ("plan manager", 1, 0),
@@ -758,7 +760,7 @@ fn press_every_control_on(index: usize, surface: &str) {
     let mut misdirected = Vec::new();
     let mut unseeable = Vec::new();
     let mut stuck = Vec::new();
-    let mut held = 0usize;
+    let mut held = Vec::new();
     let mut opened = 0usize;
     let mut pressed = 0usize;
     for (target, _) in &plan.targets {
@@ -767,7 +769,7 @@ fn press_every_control_on(index: usize, surface: &str) {
         pressed += 1;
         match press.answer {
             Answer::Handled => {}
-            Answer::HeldItsSelection => held += 1,
+            Answer::HeldItsSelection => held.push(entry.clone()),
             Answer::Dead => {
                 if PRESSES_THIS_HARNESS_CANNOT_SEE.contains(&entry.as_str()) {
                     unseeable.push(entry.clone());
@@ -830,11 +832,19 @@ fn press_every_control_on(index: usize, surface: &str) {
         "{surface} pressed {pressed} controls, against {pressed_floor} when it was measured; it \
          has stopped reaching controls it claims to cover"
     );
+    if surface == "Solver" {
+        assert_eq!(
+            held,
+            ["Solver: Button \"Balanced\""],
+            "only the already-selected solver preset may hold its selection without mutation"
+        );
+    }
     assert!(
-        held <= held_ceiling,
-        "{held} of {surface}'s presses were excused as a live segment holding its selection, \
+        held.len() <= held_ceiling,
+        "{} of {surface}'s presses were excused as a live segment holding its selection, \
          against a measured {held_ceiling}; that arm is a carve-out for segmented controls, not \
-         a place for dead ones to hide"
+         a place for dead ones to hide: {held:?}",
+        held.len()
     );
     assert!(
         opened >= modal_floor,
