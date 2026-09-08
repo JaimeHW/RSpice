@@ -247,6 +247,14 @@ fn nonlinear_time_features_cannot_hide_between_shooting_grids() {
             "exp(-1000000*(2.302585092994046*(log10(2+cos(2*pi*64meg*time+0.1))+0.5*log10(2+cos(2*(2*pi*64meg*time+0.1))))-1.5)^2)",
             5,
         ),
+        (
+            "exp(-1000000*(sqrt(2+cos(2*pi*64meg*time+0.1))+0.5*sqrt(2+cos(2*(2*pi*64meg*time+0.1)))-2.4)^2)",
+            6,
+        ),
+        (
+            "exp(-1000000*(abs(cos(2*pi*64meg*time+0.1))+0.5*abs(cos(2*(2*pi*64meg*time+0.1)))-0.75)^2)",
+            7,
+        ),
     ] {
         // Independent linear RC convolution on one source cycle. This uses
         // exact integration of densely sampled linear forcing segments, not
@@ -271,6 +279,18 @@ fn nonlinear_time_features_cannot_hide_between_shooting_grids() {
                 (-1000000.0
                     * ((2.0 + cosine).ln() + 0.5 * (2.0 + (2.0 * (omega * time + 0.1)).cos()).ln()
                         - 1.5)
+                        .powi(2))
+                .exp()
+            } else if kind == 6 {
+                (-1000000.0
+                    * ((2.0 + cosine).sqrt()
+                        + 0.5 * (2.0 + (2.0 * (omega * time + 0.1)).cos()).sqrt()
+                        - 2.4)
+                        .powi(2))
+                .exp()
+            } else if kind == 7 {
+                (-1000000.0
+                    * (cosine.abs() + 0.5 * (2.0 * (omega * time + 0.1)).cos().abs() - 0.75)
                         .powi(2))
                 .exp()
             } else {
@@ -337,7 +357,10 @@ fn nonlinear_time_features_cannot_hide_between_shooting_grids() {
             .position(|name| name.eq_ignore_ascii_case("out"))
             .unwrap();
         let mean = result.waveforms[output].dc(&result.time, result.period);
-        let tolerance = if kind >= 3 { 1e-6 } else { 1e-5 };
+        // The absolute-value case has a 43 mV DC level, for which the default
+        // voltage criterion is about 44 uV. Require 10 uV against the oracle;
+        // the smaller compound responses retain their 1 uV requirement.
+        let tolerance = if (3..=6).contains(&kind) { 1e-6 } else { 1e-5 };
         assert!(
             (mean - expected_dc).abs() < tolerance,
             "{expression}: N={}, DC {mean:e} versus {expected_dc:e}",

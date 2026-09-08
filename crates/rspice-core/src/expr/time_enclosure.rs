@@ -230,6 +230,7 @@ impl TimeInterval {
 struct Dual {
     value: TimeInterval,
     slope: TimeInterval,
+    center: Value,
     constant: bool,
     continuous: bool,
     roundoff: Value,
@@ -281,6 +282,7 @@ impl Dual {
         Self {
             value: TimeInterval::point(value),
             slope: TimeInterval::ZERO,
+            center: value,
             constant: true,
             continuous: true,
             roundoff: 0.0,
@@ -295,6 +297,7 @@ impl Dual {
         Self {
             value,
             slope: self.slope.add(other.slope),
+            center: self.center + other.center,
             constant: false,
             continuous: self.continuous && other.continuous,
             roundoff: (self.roundoff + other.roundoff + value.rounding_error(false)).next_up(),
@@ -305,6 +308,7 @@ impl Dual {
         Self {
             value: self.value.neg(),
             slope: self.slope.neg(),
+            center: -self.center,
             ..self
         }
     }
@@ -322,6 +326,7 @@ impl Dual {
         Self {
             value,
             slope: self.slope.mul(other.value).add(self.value.mul(other.slope)),
+            center: self.center * other.center,
             constant: false,
             continuous: self.continuous && other.continuous,
             roundoff: (propagated_error(other.value.magnitude(), self.roundoff)
@@ -339,6 +344,7 @@ impl Dual {
         Self {
             value,
             slope: TimeInterval::point(2.0).mul(self.value).mul(self.slope),
+            center: self.center * self.center,
             constant: false,
             continuous: self.continuous,
             roundoff: (propagated_error(2.0 * self.value.magnitude(), self.roundoff)
@@ -363,6 +369,7 @@ impl Dual {
         let denominator = other.value.lower.abs().min(other.value.upper.abs());
         Some(Self {
             value,
+            center: self.center / other.center,
             // u'/v - (u/v)*(v'/v) avoids both v^2 underflow and reciprocal
             // overflow. Each quotient is independently enclosed.
             slope: self
@@ -409,6 +416,7 @@ impl Dual {
         Self {
             value,
             slope,
+            center: self.center.powf(exponent.center),
             constant: false,
             roundoff: roundoff.next_up(),
             continuous: self.continuous
@@ -503,6 +511,7 @@ impl Dual {
                 Some(positive) => Self {
                     value: positive.value.union(powered.value),
                     slope: positive.slope.union(powered.slope),
+                    center: evaluate(self.center, exponent.center),
                     continuous: positive.continuous
                         && powered.continuous
                         && !(exponent.constant
@@ -513,7 +522,10 @@ impl Dual {
                 },
             });
         }
-        result
+        result.map(|power| Self {
+            center: evaluate(self.center, exponent.center),
+            ..power
+        })
     }
 
     fn trigonometric(self, cosine: bool) -> Self {
@@ -531,6 +543,11 @@ impl Dual {
             slope: self
                 .slope
                 .mul(if cosine { derivative.neg() } else { derivative }),
+            center: if cosine {
+                self.center.cos()
+            } else {
+                self.center.sin()
+            },
             constant: false,
             continuous: self.continuous,
             roundoff: (propagated_error(derivative.magnitude(), self.roundoff)
@@ -576,6 +593,61 @@ impl Dual {
         Self {
             value,
             slope,
+            center: evaluate(self.center),
+            constant: false,
+            continuous: self.continuous,
+            roundoff: (roundoff + value.rounding_error(true)).next_up(),
+        }
+    }
+
+    fn absolute(self) -> Self {
+        if self.constant {
+            return Self::constant(self.value.lower.abs());
+        }
+        if self.value.lower >= 0.0 {
+            return self;
+        }
+        if self.value.upper <= 0.0 {
+            return self.neg();
+        }
+        Self {
+            value: TimeInterval {
+                lower: 0.0,
+                upper: self.value.magnitude(),
+            },
+            slope: self.slope.union(self.slope.neg()),
+            center: self.center.abs(),
+            // Absolute value is exact on finite VM values and is globally
+            // 1-Lipschitz. Its corner needs no extra rounding allowance.
+            ..self
+        }
+    }
+
+    fn square_root(self) -> Self {
+        if self.constant || self.value.upper <= 0.0 {
+            return Self::constant(self.value.lower.max(0.0).sqrt());
+        }
+        let mut value =
+            TimeInterval::transcendental(self.value.lower.max(0.0).sqrt(), self.value.upper.sqrt());
+        value.lower = value.lower.max(0.0);
+        // The square root is continuous at the VM's zero floor, with an
+        // unbounded derivative. Value bounds still qualify a small cusp.
+        let slope = self
+            .slope
+            .mul(TimeInterval::point(0.5))
+            .div(value)
+            .unwrap_or(TimeInterval::WHOLE);
+        // |sqrt(max(x,0))-sqrt(max(y,0))| <= sqrt(|x-y|), including
+        // across zero. This avoids an infinite roundoff estimate at a cusp.
+        let mut roundoff =
+            TimeInterval::transcendental(self.roundoff.sqrt(), self.roundoff.sqrt()).upper;
+        if value.lower > 0.0 {
+            roundoff = roundoff.min(((0.5 * self.roundoff).next_up() / value.lower).next_up());
+        }
+        Self {
+            value,
+            slope,
+            center: self.center.max(0.0).sqrt(),
             constant: false,
             continuous: self.continuous,
             roundoff: (roundoff + value.rounding_error(true)).next_up(),
@@ -599,11 +671,36 @@ impl Dual {
         Self {
             value,
             slope: value.mul(self.slope),
+            center: self.center.exp(),
             constant: false,
             continuous: self.continuous,
             roundoff: (propagated_error(value.magnitude(), self.roundoff)
                 + value.rounding_error(true))
             .next_up(),
+        }
+    }
+
+    fn tighten_centered(&mut self, radius: Value) {
+        if !self.constant && self.continuous && self.center.is_finite() && self.slope.is_finite() {
+            // The midpoint VM value and every other VM value differ from
+            // their continuous counterparts by at most the propagated error.
+            // Intersect the ordinary range with a centered mean-value bound
+            // before a following operation can amplify interval dependency.
+            let error = (2.0 * self.roundoff).next_up();
+            let centered = TimeInterval::point(self.center)
+                .add(self.slope.mul(TimeInterval {
+                    lower: -radius,
+                    upper: radius,
+                }))
+                .add(TimeInterval {
+                    lower: -error,
+                    upper: error,
+                });
+            let lower = self.value.lower.max(centered.lower);
+            let upper = self.value.upper.min(centered.upper);
+            if lower <= upper {
+                self.value = TimeInterval { lower, upper };
+            }
         }
     }
 }
@@ -645,6 +742,8 @@ impl<'a> TimeEnclosure<'a> {
                     | Instruction::Pwr
                     | Instruction::Pwrs
                     | Instruction::Neg
+                    | Instruction::Abs
+                    | Instruction::Sqrt
                     | Instruction::Sin
                     | Instruction::Cos
                     | Instruction::Exp
@@ -664,13 +763,34 @@ impl<'a> TimeEnclosure<'a> {
     }
 
     pub fn evaluate(&mut self, time: TimeInterval, context: &Context<'_>) -> Option<TimeBounds> {
+        self.evaluate_internal(time, context, false)
+    }
+
+    pub fn evaluate_centered(
+        &mut self,
+        time: TimeInterval,
+        context: &Context<'_>,
+    ) -> Option<TimeBounds> {
+        self.evaluate_internal(time, context, true)
+    }
+
+    fn evaluate_internal(
+        &mut self,
+        time: TimeInterval,
+        context: &Context<'_>,
+        centered: bool,
+    ) -> Option<TimeBounds> {
+        let center = time.lower + 0.5 * (time.upper - time.lower);
+        let radius =
+            (((center - time.lower).abs().max((time.upper - center).abs())) / self.stop).next_up();
         self.stack.clear();
         for instruction in &self.program.instructions {
-            let value = match instruction {
+            let mut value = match instruction {
                 Instruction::PushConst(value) => Dual::constant(*value),
                 Instruction::PushTime => Dual {
                     value: time,
                     slope: TimeInterval::point(self.stop),
+                    center,
                     constant: false,
                     continuous: true,
                     roundoff: 0.0,
@@ -703,6 +823,8 @@ impl<'a> TimeEnclosure<'a> {
                     base.power(exponent, instruction, context)?
                 }
                 Instruction::Neg => self.stack.pop()?.neg(),
+                Instruction::Abs => self.stack.pop()?.absolute(),
+                Instruction::Sqrt => self.stack.pop()?.square_root(),
                 Instruction::Sin => self.stack.pop()?.trigonometric(false),
                 Instruction::Cos => self.stack.pop()?.trigonometric(true),
                 Instruction::Exp => self.stack.pop()?.exponential(),
@@ -716,6 +838,9 @@ impl<'a> TimeEnclosure<'a> {
             };
             if value.value.lower.is_nan() || value.value.upper.is_nan() {
                 return None;
+            }
+            if centered {
+                value.tighten_centered(radius);
             }
             self.stack.push(value);
         }
@@ -1289,6 +1414,166 @@ mod tests {
     }
 
     #[test]
+    fn square_root_and_absolute_bounds_preserve_clamps_cusps_and_vm_roundoff() {
+        let context = Context::transient(&[], &[], 0.0);
+        for function in ["sqrt", "abs"] {
+            for stop in [1e-300, 1.0, 1e300] {
+                for scale in [-1e300, -1.0, -1e-310, 1e-310, 1.0, 1e300] {
+                    let expression = format!("{function}({scale:e}*(4*(time/{stop:e})-2))");
+                    let program = compile(&parse_expression_strict(&expression).unwrap());
+                    let mut bounds = TimeEnclosure::new(&program, stop).unwrap();
+                    let mut vm = Vm::new();
+                    for interval in 0..16 {
+                        // Overlap windows so a cusp also lies inside a window.
+                        let lower = stop * (interval as Value / 17.0);
+                        let upper = stop * ((interval + 2) as Value / 17.0);
+                        let domain = bounds
+                            .evaluate(TimeInterval { lower, upper }, &context)
+                            .unwrap();
+                        assert!(domain.continuous);
+                        let error = domain.interpolation_error((upper - lower) / stop);
+                        let left = vm.execute(
+                            &program,
+                            &Context {
+                                time: lower,
+                                ..context
+                            },
+                        );
+                        let right = vm.execute(
+                            &program,
+                            &Context {
+                                time: upper,
+                                ..context
+                            },
+                        );
+                        for sample in 0..=32 {
+                            let fraction = sample as Value / 32.0;
+                            let time = lower + fraction * (upper - lower);
+                            let actual = vm.execute(&program, &Context { time, ..context });
+                            let argument = scale * (4.0 * (time / stop) - 2.0);
+                            let derivative = if function == "abs" {
+                                if argument == 0.0 {
+                                    0.0
+                                } else {
+                                    argument.signum() * (4.0 * scale)
+                                }
+                            } else if argument > 0.0 {
+                                (2.0 * scale) / argument.sqrt()
+                            } else {
+                                0.0
+                            };
+                            assert!(domain.value.contains(actual), "{expression}: {actual:e}");
+                            assert!(
+                                domain.slope.contains(derivative),
+                                "{expression}: {derivative:e} outside {:?}",
+                                domain.slope
+                            );
+                            assert!(
+                                (actual - (left + fraction * (right - left))).abs() <= error,
+                                "{expression}: secant error exceeds {error:e}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        let program = compile(&parse_expression_strict("sqrt(-2+pwrs(time-0.5,0))").unwrap());
+        let domain = TimeEnclosure::new(&program, 1.0)
+            .unwrap()
+            .evaluate(
+                TimeInterval {
+                    lower: 0.0,
+                    upper: 1.0,
+                },
+                &context,
+            )
+            .unwrap();
+        assert_eq!((domain.value.lower, domain.value.upper), (0.0, 0.0));
+        assert!(domain.continuous);
+        assert_eq!(domain.interpolation_error(1.0), 0.0);
+    }
+
+    #[test]
+    fn centered_bounds_enclose_vm_values_and_secants_through_cancellation_and_branches() {
+        use crate::config::ExpressionDialect;
+
+        for dialect in [ExpressionDialect::Ngspice, ExpressionDialect::Xyce] {
+            let context = Context {
+                expression_dialect: dialect,
+                ..Context::transient(&[], &[], 0.0)
+            };
+            for stop in [1e-30, 1.0, 1e300] {
+                for expression in [
+                    "(1e16+T)-1e16",
+                    "(1e-310*sin(T))/(1e-310*(2+cos(T)))",
+                    "exp(-1000000*(abs(cos(2*pi*T+0.1))+0.5*abs(cos(4*pi*T+0.2))-0.75)^2)",
+                    "exp(-1000000*(sqrt(2+cos(2*pi*T+0.1))+0.5*sqrt(2+cos(4*pi*T+0.2))-2.4)^2)",
+                    "exp(-1000000*(ln(2+cos(2*pi*T+0.1))+0.5*log10(2+cos(4*pi*T+0.2))-0.7)^2)",
+                    "sqrt(T-0.5)",
+                    "sqrt(1e16+T)-sqrt(1e16)",
+                    "abs(T-0.5)",
+                    "log(1e-38*(4*T-2))",
+                    "exp(pwrs(T-0.5,0))",
+                    "pow(-1-T,0.2+T)",
+                    "pwr(T-0.5,1.5)",
+                    "pwrs(T-0.5,2)",
+                    "sqr(T-0.5)",
+                    "1e200*(cos(2*pi*T)+0.5*cos(4*pi*T))",
+                    "sin(1e-200*(T-0.5))",
+                ] {
+                    let expression = expression.replace('T', &format!("(time/{stop:e})"));
+                    let program = compile(&parse_expression_strict(&expression).unwrap());
+                    let mut bounds = TimeEnclosure::new(&program, stop).unwrap();
+                    let mut vm = Vm::new();
+                    for (start, width) in [
+                        (0.0, 1.0),
+                        (0.1, 0.05),
+                        (0.15, 1e-5),
+                        (0.5 - 1e-5, 2e-5),
+                        (0.7, 1e-10),
+                        (0.9, 0.1),
+                    ] {
+                        let lower = start * stop;
+                        let upper = (start + width) * stop;
+                        let domain = bounds
+                            .evaluate_centered(TimeInterval { lower, upper }, &context)
+                            .unwrap();
+                        let error = domain.interpolation_error((upper - lower) / stop);
+                        let left = vm.execute(
+                            &program,
+                            &Context {
+                                time: lower,
+                                ..context
+                            },
+                        );
+                        let right = vm.execute(
+                            &program,
+                            &Context {
+                                time: upper,
+                                ..context
+                            },
+                        );
+                        for sample in 0..=64 {
+                            let fraction = sample as Value / 64.0;
+                            let time = lower + fraction * (upper - lower);
+                            let actual = vm.execute(&program, &Context { time, ..context });
+                            assert!(
+                                domain.value.contains(actual),
+                                "{dialect:?}, {expression}, t={time:e}: {actual:e} outside {:?}",
+                                domain.value
+                            );
+                            assert!(
+                                (actual - (left + fraction * (right - left))).abs() <= error,
+                                "{dialect:?}, {expression}, t={time:e}: secant error exceeds {error:e}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
     fn secant_bounds_include_vm_roundoff_and_subnormal_quotient_quantization() {
         let context = Context::transient(&[], &[], 0.0);
         for (expression, lower, upper) in [
@@ -1300,6 +1585,9 @@ mod tests {
             ),
             ("exp(-1000000*(time-0.5)^2)", 0.5003, 0.50031),
             ("pwrs(time-0.5,0)", 0.49, 0.51),
+            ("sqrt(1e16+time)-sqrt(1e16)", 0.9, 1.1),
+            ("sqrt(time-0.5)", 0.5_f64.next_down(), 0.5_f64.next_up()),
+            ("abs((1e16+time)-1e16)", 0.9, 1.1),
         ] {
             let program = compile(&parse_expression_strict(expression).unwrap());
             let domain = TimeEnclosure::new(&program, 2.0)

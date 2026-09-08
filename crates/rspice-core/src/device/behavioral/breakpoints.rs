@@ -518,6 +518,21 @@ mod tests {
     }
 
     #[test]
+    fn square_root_floor_and_absolute_corners_preserve_shared_source_events() {
+        for stop in [1e-30, 1.0, 1e300] {
+            for function in ["sqrt", "abs"] {
+                let source = sources(&format!("{function}(time/{stop:e}-0.3)"));
+                let events = collect(&source, stop, 16, true).unwrap();
+                assert!(contains(&events, 0.3 * stop), "{function}: {events:?}");
+                assert_eq!(events, collect(&source, stop, 16, false).unwrap());
+            }
+            let plateau = sources(&format!("sqrt(-2+pwrs(time/{stop:e}-0.5,0))"));
+            assert!(collect(&plateau, stop, 16, true).unwrap().is_empty());
+            assert!(collect(&plateau, stop, 16, false).unwrap().is_empty());
+        }
+    }
+
+    #[test]
     fn pss_switching_events_bracket_the_actual_vm_boundary() {
         for (expression, transitions) in [
             ("if(cos(6*pi*time+0.1)>0.9999,1,0)", 6),

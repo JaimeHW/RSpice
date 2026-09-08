@@ -106,7 +106,7 @@ impl BehavioralSources {
                 |interval: TimeInterval| -> Result<Resolution, BehavioralBreakpointError> {
                     charge()?;
                     let Some(domain) = bounds
-                        .evaluate(interval, &context)
+                        .evaluate_centered(interval, &context)
                         .filter(|domain| domain.value.is_finite())
                     else {
                         return Ok(Resolution::NeedsSubdivision);
@@ -404,6 +404,46 @@ mod tests {
                 (actual - 0.5 * (left + right)).abs()
                     <= criteria.current_abs + criteria.rel * actual.abs()
             );
+        }
+    }
+
+    #[test]
+    fn absolute_multiple_root_sources_resolve_with_the_existing_work_budget() {
+        use crate::numerics::integration::BreakpointManager;
+
+        for cycles in [1, 64] {
+            let sources = source(&format!(
+                "exp(-1000000*(abs(cos(2*pi*{cycles}*time+0.1))+0.5*abs(cos(2*(2*pi*{cycles}*time+0.1)))-0.75)^2)"
+            ));
+            let limits = ResourceLimits::default();
+            let mut original = BreakpointManager::new_with_tolerance(Value::from_bits(1));
+            original.extend((0..=4 * cycles).map(|index| index as Value / (4 * cycles) as Value));
+            sources
+                .collect_transient_breakpoints(
+                    1.0,
+                    &mut original,
+                    &NoAbort,
+                    limits.max_analysis_points,
+                    true,
+                )
+                .unwrap();
+            let times = original.times();
+            let refined = sources
+                .refine_time_mesh(
+                    times,
+                    NonlinearConvergenceCriteria::default(),
+                    &limits,
+                    &NoAbort,
+                )
+                .unwrap_or_else(|error| {
+                    panic!("{cycles} cycles, {} input clocks: {error}", times.len())
+                })
+                .unwrap();
+            assert!(times.iter().all(|time| {
+                refined
+                    .binary_search_by(|value| value.total_cmp(time))
+                    .is_ok()
+            }));
         }
     }
 

@@ -651,7 +651,7 @@ impl EventSchedule<'_> {
                         }
                     }
                 }
-                (Function::Abs | Function::Sqr | Function::Uramp, [input]) => {
+                (Function::Abs | Function::Sqr | Function::Sqrt | Function::Uramp, [input]) => {
                     self.level(input, 0.0, context)?
                 }
                 (Function::Ln | Function::Log10 | Function::Log, [input]) => {
