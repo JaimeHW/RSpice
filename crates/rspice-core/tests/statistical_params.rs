@@ -482,3 +482,204 @@ fn seed_context_sealed_include_replay_preserves_circuit_and_shared_draws() {
     assert_eq!(parsed.elements[0].name, "R1");
     assert_eq!(parsed.source_path.as_ref(), Some(&root));
 }
+
+mod direct_mc_seed_regressions {
+    use rspice_core::netlist::{AnalysisCommand, Netlist};
+
+    fn recorded_seed(source: &str) -> u64 {
+        let parsed = Netlist::parse(source).expect(source);
+        let AnalysisCommand::MonteCarlo(command) = &parsed.analyses[0] else {
+            panic!("missing Monte Carlo command");
+        };
+        command.seed.expect("authored seed")
+    }
+
+    #[test]
+    fn full_width_literals_are_not_rounded() {
+        for seed in [0, (1_u64 << 53) + 1, u64::MAX - 1, u64::MAX] {
+            let source = format!("MC seed\n.mc 2 seed {seed}\n.end\n");
+            assert_eq!(recorded_seed(&source), seed, "{source}");
+        }
+    }
+
+    #[test]
+    fn overflow_and_fractional_literals_are_rejected() {
+        for literal in [
+            "18446744073709551616",
+            "18446744073709551617",
+            "9007199254740993.5",
+            "1.0000000000001",
+            "-1",
+        ] {
+            let source = format!("MC seed\n.mc 2 seed {literal}\n.end\n");
+            assert!(
+                Netlist::parse(&source).is_err(),
+                "invalid seed accepted: {literal}"
+            );
+        }
+    }
+
+    #[test]
+    fn engineering_and_decimal_notation_are_exact() {
+        for (literal, seed) in [
+            (".1k", 100),
+            ("1e3k", 1_000_000),
+            ("9007199254740.993k", (1_u64 << 53) + 1),
+            ("1.8446744073709551615e19", u64::MAX),
+        ] {
+            let source = format!("MC seed\n.mc 2 seed {literal}\n.end\n");
+            assert_eq!(recorded_seed(&source), seed, "{literal}");
+        }
+    }
+
+    #[test]
+    fn existing_parameter_and_expression_inputs_remain_supported() {
+        for (input, expected) in [("base", 37), ("{base+5}", 42), ("'base+5'", 42)] {
+            let source = format!("MC seed\n.param base=37\n.mc 2 seed {input}\n.end\n");
+            assert_eq!(recorded_seed(&source), expected, "{input}");
+        }
+    }
+
+    #[test]
+    fn evaluated_seeds_must_also_be_in_range() {
+        for value in ["18446744073709551616", "-1", "0.5"] {
+            let source = format!("MC seed\n.param base={value}\n.mc 2 seed base\n.end\n");
+            assert!(
+                Netlist::parse(&source).is_err(),
+                "invalid evaluated seed accepted: {value}"
+            );
+        }
+    }
+
+    #[test]
+    fn wrapped_literals_and_optional_equals_preserve_full_width() {
+        for spelling in [
+            "{18446744073709551615}",
+            "'18446744073709551615'",
+            "1.8446744073709551615e19",
+        ] {
+            assert_eq!(
+                recorded_seed(&format!("MC seed\n.mc 2 seed={spelling}\n.end\n")),
+                u64::MAX
+            );
+        }
+        assert_eq!(recorded_seed("MC seed\n.mc 2 seed - {-37}\n.end\n"), 37);
+    }
+
+    #[test]
+    fn run_counts_reject_fractional_values_and_overflow() {
+        for count in ["0", "-1", "1.0000000000001", "18446744073709551616"] {
+            let source = format!("MC runs\n.mc {count}\n.end\n");
+            assert!(
+                Netlist::parse(&source).is_err(),
+                "invalid count accepted: {count}"
+            );
+        }
+    }
+
+    #[test]
+    fn run_counts_respect_the_callers_analysis_point_limit() {
+        use rspice_core::netlist::NetlistParseOptions;
+        let mut options = NetlistParseOptions::default();
+        options.resource_limits.max_analysis_points = 2;
+        Netlist::parse_with_options("MC runs\n.param count=2\n.mc count\n.end\n", options).unwrap();
+        let error = Netlist::parse_with_options("MC runs\n.mc 3\n.end\n", options)
+            .expect_err("MC must honor the same configured point limit as other analyses");
+        assert!(
+            matches!(error, rspice_core::netlist::ParseError::ResourceLimit(_)),
+            "{error}"
+        );
+    }
+}
+
+#[test]
+fn runtime_seed_override_preserves_source_and_controls_all_parameter_draws() {
+    use rspice_core::netlist::{
+        NetlistParseOptions,
+        expr::{ParamContext, eval_expression},
+    };
+    let source = "runtime seed\n.param first={aunif(0,1)}\n.options seed=7\n.if 0\n.options seed=99\n.endif\n.param second={aunif(0,1)}\n.end ; done\n";
+    for seed in [0, (1_u64 << 53) + 1, u64::MAX] {
+        let parsed = Netlist::parse_with_options(
+            source,
+            NetlistParseOptions {
+                statistical_seed: Some(seed),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(parsed.source_text.as_deref(), Some(source));
+        assert_eq!(parsed.options.seed, Some(seed));
+        let mut context = ParamContext::new();
+        context.set_random_seed(seed);
+        for name in ["first", "second"] {
+            assert_eq!(
+                parsed.params.get(name).unwrap().to_bits(),
+                eval_expression("aunif(0,1)", &context).unwrap().to_bits()
+            );
+        }
+    }
+}
+
+#[test]
+fn runtime_seed_override_does_not_hide_invalid_authored_seed_options() {
+    use rspice_core::netlist::NetlistParseOptions;
+    let options = NetlistParseOptions {
+        statistical_seed: Some(37),
+        ..Default::default()
+    };
+    assert!(
+        Netlist::parse_with_options("invalid option\n.options seed=1.5\n.end\n", options).is_err()
+    );
+    assert!(
+        Netlist::parse_with_options("unclosed conditional\n.if 0\n.end\n.endif\n", options)
+            .is_err()
+    );
+    let empty = Netlist::parse_with_options("", options).unwrap();
+    assert_eq!(empty.options.seed, Some(37));
+    assert_eq!(empty.params.random().seed(), 37);
+}
+
+#[test]
+fn runtime_seed_override_reaches_sealed_includes() {
+    use rspice_core::abort_signal::NoAbort;
+    use rspice_core::netlist::{NetlistParseOptions, SealedSourceBundle, SealedSourceEdge};
+
+    let root = std::env::temp_dir().join("rspice-runtime-seed-root.cir");
+    let child = root.with_file_name("rspice-runtime-seed-child.inc");
+    let source =
+        "runtime seed\n.options seed=7\n.include child.inc\n.param second={aunif(0,1)}\n.end\n";
+    let include = ".options seed=11\n.param first={aunif(0,1)}\nR1 1 0 1k\n";
+    let bundle = SealedSourceBundle::try_new_with_edges(
+        [
+            (root.clone(), source.to_owned()),
+            (child.clone(), include.to_owned()),
+        ],
+        [SealedSourceEdge {
+            owner: root.clone(),
+            requested_path: "child.inc".to_owned(),
+            target: child,
+        }],
+    )
+    .unwrap();
+    let options = NetlistParseOptions {
+        statistical_seed: Some(u64::MAX),
+        ..Default::default()
+    };
+    let parsed = Netlist::parse_with_path_and_sealed_sources_and_options_and_abort(
+        source, &root, bundle, options, &NoAbort,
+    )
+    .unwrap();
+    let direct = Netlist::parse_with_options(
+        "direct seed\n.param first={aunif(0,1)} second={aunif(0,1)}\n.end\n",
+        options,
+    )
+    .unwrap();
+    for name in ["first", "second"] {
+        assert_eq!(parsed.params.get(name), direct.params.get(name));
+    }
+    assert_eq!(parsed.options.seed, Some(u64::MAX));
+    assert_eq!(parsed.source_text.as_deref(), Some(source));
+    assert_eq!(parsed.source_path.as_ref(), Some(&root));
+    assert_eq!(parsed.elements[0].name, "R1");
+}

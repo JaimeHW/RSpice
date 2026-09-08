@@ -285,9 +285,12 @@ pub(crate) fn run_statistical_monte_carlo_with_environment_and_source_path_and_a
     for trial in 0..runs {
         poll_periodically(abort, trial)?;
         let seed = trial_seed(base_seed, trial);
-        let deck = with_statistical_seed(netlist_text, seed);
-        let mut trial_netlist =
-            parse_runner_netlist_with_statistical_sampling_and_abort(&deck, source_path, abort)?;
+        let mut trial_netlist = parse_runner_netlist_with_statistical_sampling_and_abort(
+            netlist_text,
+            source_path,
+            seed,
+            abort,
+        )?;
         if let Some(temperature_celsius) = temperature_celsius {
             super::apply_run_environment(
                 &mut trial_netlist,
@@ -455,25 +458,6 @@ fn validate_monte_carlo_data(data: &MonteCarloData) -> ServiceRunResult<()> {
         }
     }
     Ok(())
-}
-
-/// Give a deck one statistical seed of our choosing.
-///
-/// The parser pre-scans every `.options`/`.option`/`.opt` card for `seed=` and
-/// keeps the last one it reads, so a card spliced in ahead of the terminal
-/// `.end` overrides whatever the deck or the plan's own options block asked
-/// for. Nothing else in the deck is touched.
-fn with_statistical_seed(netlist_text: &str, seed: u64) -> String {
-    let card = format!(".options seed={seed}");
-    let mut lines: Vec<&str> = netlist_text.lines().collect();
-    let terminal_end = lines
-        .iter()
-        .rposition(|line| line.trim().eq_ignore_ascii_case(".end"));
-    match terminal_end {
-        Some(index) => lines.insert(index, &card),
-        None => lines.push(&card),
-    }
-    lines.join("\n") + "\n"
 }
 
 /// Expand one base seed into a well-separated per-trial seed.
@@ -690,27 +674,58 @@ R2 out 0 1k
     }
 
     #[test]
-    fn the_seed_card_is_spliced_ahead_of_the_terminal_end() {
-        let deck = with_statistical_seed(NO_STATISTICS_DECK, 41);
-        let lines: Vec<&str> = deck.lines().collect();
+    fn trial_seed_override_preserves_the_authored_source() {
+        let parsed = parse_runner_netlist_with_statistical_sampling_and_abort(
+            NO_STATISTICS_DECK,
+            None,
+            41,
+            &NoAbort,
+        )
+        .unwrap();
+        assert_eq!(parsed.source_text.as_deref(), Some(NO_STATISTICS_DECK));
+        assert_eq!(parsed.options.seed, Some(41));
+    }
 
-        let seed_line = lines
-            .iter()
-            .position(|line| line.trim() == ".options seed=41")
-            .expect("the seed card is present");
-        let end_line = lines
-            .iter()
-            .position(|line| line.trim().eq_ignore_ascii_case(".end"))
-            .expect("the terminal end card survives");
-        assert!(seed_line < end_line);
-        // Every original line is still there, in order.
-        assert!(lines.contains(&"R1 in out 1k"));
+    #[test]
+    fn trial_seed_override_handles_annotated_end_and_preserves_the_title() {
+        for (title, ending) in [
+            ("seeded trial", ".end ; done"),
+            ("seeded trial", ".END $ done"),
+            ("seeded trial", ".end\n.options seed=99\n.end"),
+            ("seeded trial", ".end; done"),
+            ("seeded trial", ".if 0\n.options seed=99\n.endif\n.end"),
+            (".end", ".end"),
+        ] {
+            let source =
+                format!("{title}\n.options seed=7\n.param sample={{aunif(0,1)}}\n{ending}\n");
+            let parsed = parse_runner_netlist_with_statistical_sampling_and_abort(
+                &source, None, 41, &NoAbort,
+            )
+            .unwrap();
+            assert_eq!(parsed.title, title);
+            assert_eq!(parsed.options.seed, Some(41), "{source}");
+            assert_eq!(parsed.params.random().seed(), 41, "{source}");
+            assert_eq!(parsed.source_text.as_deref(), Some(source.as_str()));
+        }
+    }
+
+    #[test]
+    fn annotated_termination_preserves_each_trials_distribution() {
+        let ordinary = run_statistical(STATISTICAL_PARAMETER_DECK).unwrap();
+        let annotated =
+            run_statistical(&STATISTICAL_PARAMETER_DECK.replace(".end", ".end ; circuit end"))
+                .unwrap();
+        assert_eq!(samples(&ordinary, "V(out)"), samples(&annotated, "V(out)"));
     }
 
     #[test]
     fn a_deck_without_a_terminal_end_still_receives_the_seed() {
-        let deck = with_statistical_seed("title\nV1 in 0 1\n", 9);
-        assert!(deck.lines().any(|line| line.trim() == ".options seed=9"));
+        let source = "title\nV1 in 0 1\n";
+        let parsed =
+            parse_runner_netlist_with_statistical_sampling_and_abort(source, None, 9, &NoAbort)
+                .unwrap();
+        assert_eq!(parsed.options.seed, Some(9));
+        assert_eq!(parsed.source_text.as_deref(), Some(source));
     }
 
     #[test]
@@ -794,9 +809,8 @@ R2 out 0 1k
     /// recorded seed reproduces the numbers recorded against it, with no
     /// reference to the trials before it.
     ///
-    /// This driver reseeds per trial by splicing `.options seed=` into the deck
-    /// text and reparsing, rather than rewinding a stream shared across the
-    /// analysis. That is what makes a single trial re-runnable in isolation:
+    /// This driver reparses each trial with an explicit seed override. That
+    /// makes a single trial re-runnable in isolation:
     /// each trial's draws are a pure function of its own seed. A change that
     /// made trial N depend on the trials before it would leave the distribution
     /// reproducible and break this.
@@ -817,10 +831,13 @@ R2 out 0 1k
 
             // Re-run this one trial exactly as the driver would have, without
             // running any other.
-            let deck = with_statistical_seed(MODEL_CARD_STATISTICS_DECK, seed);
-            let netlist =
-                parse_runner_netlist_with_statistical_sampling_and_abort(&deck, None, &NoAbort)
-                    .expect("the trial deck reparses");
+            let netlist = parse_runner_netlist_with_statistical_sampling_and_abort(
+                MODEL_CARD_STATISTICS_DECK,
+                None,
+                seed,
+                &NoAbort,
+            )
+            .expect("the trial deck reparses");
             let engine = Engine::new(build_engine_config(&netlist, None));
             let solved = engine
                 .run_dc_op_with_abort(&netlist, &NoAbort)

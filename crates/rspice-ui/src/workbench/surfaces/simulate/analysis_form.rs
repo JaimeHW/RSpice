@@ -1701,7 +1701,8 @@ pub(super) fn form(
             use crate::simulation::dialog::McVariationSource;
 
             input_row(ui, "Samples", &mut setup.num_runs);
-            input_row(ui, "Seed", &mut setup.seed);
+            input_row(ui, "Seed", &mut setup.seed)
+                .on_hover_text("An integer from 0 to 18446744073709551615. Leave blank to use the repeatable default seed.");
             choice_row(
                 ui,
                 "From",

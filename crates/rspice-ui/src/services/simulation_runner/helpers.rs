@@ -36,6 +36,7 @@ pub(crate) fn parse_runner_netlist_with_resource_limits_and_abort(
         netlist_text,
         source_path,
         StatisticalParamMode::Nominal,
+        None,
         resource_limits,
         abort,
     )
@@ -44,12 +45,14 @@ pub(crate) fn parse_runner_netlist_with_resource_limits_and_abort(
 pub(crate) fn parse_runner_netlist_with_statistical_sampling_and_abort(
     netlist_text: &str,
     source_path: Option<&Path>,
+    seed: u64,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<rspice_core::Netlist> {
     parse_runner_netlist_with_mode_resource_limits_and_abort(
         netlist_text,
         source_path,
         StatisticalParamMode::Sample,
+        Some(seed),
         rspice_core::ResourceLimits::default(),
         abort,
     )
@@ -59,12 +62,14 @@ fn parse_runner_netlist_with_mode_resource_limits_and_abort(
     netlist_text: &str,
     source_path: Option<&Path>,
     statistical_mode: StatisticalParamMode,
+    statistical_seed: Option<u64>,
     resource_limits: rspice_core::ResourceLimits,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<rspice_core::Netlist> {
     ensure_not_aborted(abort)?;
     let options = rspice_core::netlist::NetlistParseOptions {
         statistical_mode,
+        statistical_seed,
         resource_limits,
         ..Default::default()
     };
@@ -475,6 +480,7 @@ mod tests {
         let sampled = parse_runner_netlist_with_statistical_sampling_and_abort(
             source,
             None,
+            7,
             &rspice_core::NoAbort,
         )
         .expect("statistical Monte Carlo trial parses");

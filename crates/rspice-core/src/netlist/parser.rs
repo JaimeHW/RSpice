@@ -97,6 +97,9 @@ type MeasureStatement = crate::netlist::measure::MeasureStatement;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct NetlistParseOptions {
     pub statistical_mode: StatisticalParamMode,
+    /// Runtime seed override, applied before parameter evaluation and retained
+    /// in the effective netlist options without rewriting authored source.
+    pub statistical_seed: Option<u64>,
     pub expression_dialect: ExpressionDialect,
     pub parameter_redefinition_policy: ParameterRedefinitionPolicy,
     pub parameter_redefinition_diagnostic_policy: ParameterRedefinitionDiagnosticPolicy,
@@ -108,6 +111,7 @@ impl Default for NetlistParseOptions {
     fn default() -> Self {
         Self {
             statistical_mode: StatisticalParamMode::Sample,
+            statistical_seed: None,
             expression_dialect: ExpressionDialect::Ngspice,
             parameter_redefinition_policy: ParameterRedefinitionPolicy::UseLast,
             parameter_redefinition_diagnostic_policy: ParameterRedefinitionDiagnosticPolicy::Silent,
@@ -466,6 +470,10 @@ fn parse_netlist_impl(
 
     if original_lines.is_empty() {
         let mut netlist = Netlist::default();
+        if let Some(seed) = options.statistical_seed {
+            netlist.params.set_random_seed(seed);
+            netlist.options.seed = Some(seed);
+        }
         if let Some(title) = implicit_title {
             netlist.title = title.to_owned();
         }
@@ -556,7 +564,7 @@ fn parse_netlist_impl(
     // Seed the statistical expression functions before any parameter
     // evaluation so the deck behaves identically regardless of where the
     // `.options seed=` line appears.
-    let seed = match seed_override {
+    let seed = match options.statistical_seed.or(seed_override) {
         Some(seed) => Some(seed),
         None => prescan_random_seed_with_abort(
             &lines,
@@ -803,6 +811,9 @@ fn parse_netlist_impl(
         }
     }
 
+    if let Some(seed) = options.statistical_seed {
+        state.options.seed = Some(seed);
+    }
     if let Some(policy) = state.options.remove_unused.clone() {
         apply_remove_unused_policy_with_abort(
             &mut state.elements,

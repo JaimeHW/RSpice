@@ -382,6 +382,7 @@ impl Engine {
 
         let parse_options = crate::netlist::NetlistParseOptions {
             statistical_mode: netlist.params.statistical_mode(),
+            statistical_seed: Some(netlist.params.random().seed()),
             expression_dialect: netlist.params.expression_dialect(),
             parameter_redefinition_policy: netlist.params.parameter_redefinition_policy(),
             parameter_redefinition_diagnostic_policy: netlist
@@ -2872,6 +2873,31 @@ mod tests {
     use crate::analysis::AcSensitivityOutput;
     use crate::netlist::AnalysisCommand;
     use crate::netlist::{StepCommand, StepSweep, StepTarget};
+
+    #[test]
+    fn parameter_replay_preserves_the_runtime_statistical_seed() {
+        let source = "seeded sensitivity\n.options seed=7\n.param p=1k draw={aunif(0,1)}\nV1 in 0 1\nR1 in out {p}\nR2 out 0 {1k+draw}\n.end\n";
+        let original = Netlist::parse_with_options(
+            source,
+            crate::netlist::NetlistParseOptions {
+                statistical_seed: Some(u64::MAX),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let (replayed, references) = Engine::create_perturbed_netlist_multi_with_abort(
+            &original,
+            &[("p".to_owned(), 2000.0)],
+            &crate::abort_signal::NoAbort,
+        )
+        .unwrap();
+        assert_eq!(references, 1);
+        assert_eq!(replayed.params.get("p"), Some(2000.0));
+        assert_eq!(replayed.params.get("draw"), original.params.get("draw"));
+        assert_eq!(replayed.params.random().seed(), u64::MAX);
+        assert_eq!(replayed.options.seed, Some(u64::MAX));
+        assert!(original.source_text.as_deref().unwrap().contains("seed=7"));
+    }
 
     #[test]
     fn complete_sensitivity_preserves_cancellation_during_perturbations() {

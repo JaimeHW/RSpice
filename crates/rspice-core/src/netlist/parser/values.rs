@@ -1945,6 +1945,77 @@ pub(super) fn expect_value(
     }
 }
 
+/// Read an exact integer literal, including a constant wrapped as an expression.
+/// The lexer retains spelling even when its numeric payload has rounded to f64.
+pub(super) fn expect_u64_literal(
+    stream: &mut TokenStream,
+    line_num: usize,
+    field: &str,
+) -> Result<u64, ParseError> {
+    skip_commas(stream);
+    let offset = usize::from(matches!(
+        stream.peek().kind,
+        TokenKind::Plus | TokenKind::Minus
+    ));
+    let token = stream.peek_n(offset);
+    let raw = match &token.kind {
+        TokenKind::Expression(expression) => expression.trim(),
+        _ => token.lexeme.as_str(),
+    };
+    let negative = matches!(stream.peek().kind, TokenKind::Minus) ^ raw.starts_with('-');
+    let magnitude = raw.strip_prefix(['+', '-']).unwrap_or(raw);
+    let literal = format!("{}{magnitude}", if negative { "-" } else { "" });
+    let value = crate::spice_number::parse_spice_u64_complete(&literal).ok_or_else(|| {
+        ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "{field} requires an integer numeric literal from 0 to {}, found `{literal}`",
+                u64::MAX
+            ),
+        }
+    })?;
+    for _ in 0..=offset {
+        stream.advance();
+    }
+    Ok(value)
+}
+
+/// Preserve literal precision while retaining the ordinary parameter/expression
+/// grammar. Computed values are already f64; reject any fraction or value at
+/// 2^64 before casting, since u64::MAX rounds up to that excluded endpoint.
+pub(super) fn expect_u64_value(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+    field: &str,
+) -> Result<u64, ParseError> {
+    skip_commas(stream);
+    let offset = usize::from(matches!(
+        stream.peek().kind,
+        TokenKind::Plus | TokenKind::Minus
+    ));
+    let literal = match &stream.peek_n(offset).kind {
+        TokenKind::Number(_) => true,
+        TokenKind::Ident(name) => params.get(name).is_none() && parse_spice_value(name).is_ok(),
+        TokenKind::Expression(expression) => parse_spice_value(expression.trim()).is_ok(),
+        _ => false,
+    };
+    if literal {
+        return expect_u64_literal(stream, line_num, field);
+    }
+    let value = expect_value(stream, line_num, params)?;
+    if !(0.0..(u64::MAX as Value)).contains(&value) || value.fract() != 0.0 {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "{field} requires an integer from 0 to {}, evaluated to {value}",
+                u64::MAX
+            ),
+        });
+    }
+    Ok(value as u64)
+}
+
 pub(super) fn try_value(stream: &mut TokenStream, params: &ParamContext) -> Option<Value> {
     skip_commas(stream);
     try_value_unsigned(stream, params)

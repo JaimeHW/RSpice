@@ -1054,7 +1054,7 @@ fn unfinished_analysis_drafts_are_project_data_not_file_corruption() {
     let mut value: serde_json::Value = serde_json::from_str(&json).expect("valid JSON");
     serialized_analysis_instance_mut(&mut value, "tran")["draft"]["draft"]["stop"] =
         serde_json::json!("unfinished(");
-    serialized_analysis_instance_mut(&mut value, "mc")["draft"]["draft"]["seed"] =
+    serialized_analysis_instance_mut(&mut value, "mc")["draft"]["draft"]["explicit_seed"] =
         serde_json::json!("not-an-integer-yet");
 
     let loaded = load_project_text(&value.to_string(), None)
@@ -1096,6 +1096,43 @@ fn unfinished_analysis_drafts_are_project_data_not_file_corruption() {
         ),)
             .is_some()
     );
+}
+
+#[test]
+fn monte_carlo_project_restore_distinguishes_legacy_default_from_explicit_zero() {
+    use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
+    let project = project_with_execution_context();
+    let serialized = serialize_project_file(&project).unwrap();
+    for (field, text, expected) in [
+        ("seed", "0", None),
+        ("seed", "7", Some(7)),
+        ("explicit_seed", "0", Some(0)),
+        ("explicit_seed", "18446744073709551615", Some(u64::MAX)),
+    ] {
+        let mut value: serde_json::Value = serde_json::from_str(&serialized).unwrap();
+        let draft = serialized_analysis_instance_mut(&mut value, "mc")["draft"]["draft"]
+            .as_object_mut()
+            .unwrap();
+        // This fixture's inactive MC editor starts empty. Supply a runnable
+        // analysis before testing which random stream survives project load.
+        draft.insert("num_runs".to_owned(), serde_json::json!("2"));
+        draft.insert("variation_pct".to_owned(), serde_json::json!("5"));
+        draft.remove("explicit_seed");
+        draft.insert(field.to_owned(), serde_json::json!(text));
+        let loaded = load_project_text(&value.to_string(), None).unwrap();
+        let context = loaded.execution_context.unwrap();
+        let stable = context.simulation_plan.stable_analysis_plan().unwrap();
+        let instance = stable
+            .instances()
+            .iter()
+            .find(|instance| instance.kind() == AnalysisKind::MonteCarlo)
+            .unwrap();
+        let AnalysisDraft::MonteCarlo(mut draft) = instance.draft().clone() else {
+            panic!("wrong draft");
+        };
+        draft.ensure_initialized();
+        assert_eq!(draft.to_config().unwrap().seed, expected, "{field}={text}");
+    }
 }
 
 #[test]

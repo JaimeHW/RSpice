@@ -309,7 +309,7 @@ pub(super) fn parse_command(
             analyses.push(AnalysisCommand::Step(step_cmd));
         }
         ".MC" => {
-            let mc_cmd = parse_mc_command(stream, line_num, params)?;
+            let mc_cmd = parse_mc_command(stream, line_num, params, max_analysis_points)?;
             analyses.push(AnalysisCommand::MonteCarlo(mc_cmd));
         }
         ".TEMP" => {
@@ -3349,35 +3349,11 @@ pub(super) fn seed_option_applies_to_package(package: Option<&str>) -> bool {
     )
 }
 
-/// The pre-scan and command parser must retain the same exact integer.
-pub(super) fn parse_seed_option(literal: &str, line_num: usize) -> Result<u64, ParseError> {
-    crate::spice_number::parse_spice_u64_complete(literal).ok_or_else(|| ParseError::Syntax {
-        line: line_num,
-        message: format!(
-            "SEED requires an integer numeric literal from 0 to {}, found `{literal}`",
-            u64::MAX
-        ),
-    })
-}
-
 pub(super) fn expect_seed_option(
     stream: &mut TokenStream,
     line_num: usize,
 ) -> Result<u64, ParseError> {
-    skip_commas(stream);
-    let (sign, offset) = match stream.peek().kind {
-        TokenKind::Plus => ("+", 1),
-        TokenKind::Minus => ("-", 1),
-        _ => ("", 0),
-    };
-    // The lexer also retains raw spelling for numeric identifiers (such as
-    // engineering notation). Never reconstruct this token from its f64 value.
-    let literal = format!("{sign}{}", stream.peek_n(offset).lexeme);
-    let value = parse_seed_option(&literal, line_num)?;
-    for _ in 0..=offset {
-        stream.advance();
-    }
-    Ok(value)
+    expect_u64_literal(stream, line_num, "SEED")
 }
 
 pub(super) fn parse_positive_real_option(

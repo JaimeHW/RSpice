@@ -210,18 +210,18 @@ impl SimulationController {
             .to_config()
             .map_err(|e| format!("invalid Monte Carlo settings: {}", e))?;
 
-        let dist_keyword = match mc_cfg.distribution {
-            crate::simulation::dialog::mc::McDistribution::Gaussian => "GAUSS",
-            crate::simulation::dialog::mc::McDistribution::Uniform => "UNIFORM",
-            crate::simulation::dialog::mc::McDistribution::WorstCase => "WORSTCASE",
-        };
-        let relative_spread = (mc_cfg.variation_pct / 100.0).abs();
-        let mut cmd = format!(
-            ".mc {} DIST {} SPREAD {:.12e}",
-            mc_cfg.num_runs, dist_keyword, relative_spread
-        );
-        if mc_cfg.seed > 0 {
-            cmd.push_str(&format!(" SEED {}", mc_cfg.seed));
+        let mut cmd = format!(".mc {}", mc_cfg.num_runs);
+        if mc_cfg.variation_source.uses_stated_spread() {
+            let dist_keyword = match mc_cfg.distribution {
+                crate::simulation::dialog::mc::McDistribution::Gaussian => "GAUSS",
+                crate::simulation::dialog::mc::McDistribution::Uniform => "UNIFORM",
+                crate::simulation::dialog::mc::McDistribution::WorstCase => "WORSTCASE",
+            };
+            let relative_spread = mc_cfg.variation_pct / 100.0;
+            cmd.push_str(&format!(" DIST {dist_keyword} SPREAD {relative_spread}"));
+        }
+        if let Some(seed) = mc_cfg.seed {
+            cmd.push_str(&format!(" SEED {seed}"));
         }
         Ok(cmd)
     }
@@ -522,6 +522,74 @@ const fn manifest_spec_kind(spec: &AnalysisSpec) -> Option<crate::simulation::pl
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn monte_carlo_seed_draft_reaches_the_engine_at_full_width_including_zero() {
+        for seed in [
+            0_u64,
+            (1_u64 << 32) + 1,
+            (1_u64 << 53) + 1,
+            u64::MAX - 1,
+            u64::MAX,
+        ] {
+            let mut state = AppState::default();
+            state.sim_setup.mc.ensure_initialized();
+            state.sim_setup.mc.seed = seed.to_string();
+            let command = SimulationController::default()
+                .build_monte_carlo_command(&state)
+                .expect("all u64 seeds are authorable");
+            let netlist =
+                rspice_core::netlist::Netlist::parse(&format!("MC seed\n{command}\n.end\n"))
+                    .unwrap();
+            let rspice_core::netlist::AnalysisCommand::MonteCarlo(mc) = &netlist.analyses[0] else {
+                panic!("missing MC command")
+            };
+            assert_eq!(mc.seed, Some(seed), "{command}");
+        }
+    }
+
+    #[test]
+    fn monte_carlo_spread_preserves_the_computed_engine_value() {
+        let mut state = AppState::default();
+        state.sim_setup.mc.ensure_initialized();
+        state.sim_setup.mc.variation_pct = "1.234567891234567".to_owned();
+        let command = SimulationController::default()
+            .build_monte_carlo_command(&state)
+            .unwrap();
+        let netlist =
+            rspice_core::netlist::Netlist::parse(&format!("MC spread\n{command}\n.end\n")).unwrap();
+        let rspice_core::netlist::AnalysisCommand::MonteCarlo(mc) = &netlist.analyses[0] else {
+            panic!("missing MC command")
+        };
+        assert_eq!(
+            mc.relative_spread.to_bits(),
+            (1.234567891234567_f64 / 100.0).to_bits(),
+            "{command}"
+        );
+    }
+
+    #[test]
+    fn monte_carlo_deck_statistics_preserve_inactive_buffers_without_emitting_them() {
+        let mut state = AppState::default();
+        state.sim_setup.mc.ensure_initialized();
+        state.sim_setup.mc.variation_source_idx = 1;
+        state.sim_setup.mc.variation_pct = "unfinished(".to_owned();
+        state.sim_setup.mc.distribution_idx = usize::MAX;
+        let command = SimulationController::default()
+            .build_monte_carlo_command(&state)
+            .unwrap();
+        assert!(!command.contains("DIST"), "{command}");
+        assert!(!command.contains("SPREAD"), "{command}");
+        assert!(!command.contains("SEED"), "{command}");
+        assert_eq!(state.sim_setup.mc.variation_pct, "unfinished(");
+        assert_eq!(state.sim_setup.mc.distribution_idx, usize::MAX);
+        state.sim_setup.mc.variation_source_idx = 0;
+        assert!(
+            SimulationController::default()
+                .build_monte_carlo_command(&state)
+                .is_err()
+        );
+    }
 
     /// The directive builder is the one path every surface takes, so it is
     /// where a stale probe reference has to be caught. Checking only in the

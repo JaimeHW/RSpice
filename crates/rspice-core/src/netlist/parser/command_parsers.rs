@@ -1097,18 +1097,25 @@ pub(super) fn parse_mc_command(
     stream: &mut TokenStream,
     line_num: usize,
     params: &ParamContext,
+    max_analysis_points: usize,
 ) -> Result<MonteCarloCommand, ParseError> {
-    let runs_raw = expect_value(stream, line_num, params)?;
-    if !runs_raw.is_finite() || runs_raw < 1.0 || (runs_raw.fract().abs() > 1e-12) {
+    let runs = expect_u64_value(stream, line_num, params, ".MC run count")?;
+    if runs == 0 {
         return Err(ParseError::Syntax {
             line: line_num,
-            message: format!(
-                "Invalid .MC run count '{}': expected positive integer",
-                runs_raw
-            ),
+            message: ".MC run count must be at least 1".to_owned(),
         });
     }
-    let mut command = MonteCarloCommand::new(runs_raw as usize);
+    let runs = usize::try_from(runs).map_err(|_| ParseError::Syntax {
+        line: line_num,
+        message: format!(".MC run count {runs} exceeds this platform's supported range"),
+    })?;
+    crate::resource::ResourceLimitError::ensure(
+        crate::resource::ResourceKind::AnalysisPoints,
+        runs,
+        max_analysis_points,
+    )?;
+    let mut command = MonteCarloCommand::new(runs);
 
     let parse_distribution = |s: &str| -> Option<MonteCarloDistribution> {
         match s.to_ascii_uppercase().as_str() {
@@ -1123,17 +1130,8 @@ pub(super) fn parse_mc_command(
         let keyword = expect_ident(stream, line_num)?;
         match keyword.as_str() {
             "SEED" => {
-                let seed_raw = expect_value(stream, line_num, params)?;
-                if !seed_raw.is_finite() || seed_raw < 0.0 || (seed_raw.fract().abs() > 1e-12) {
-                    return Err(ParseError::Syntax {
-                        line: line_num,
-                        message: format!(
-                            "Invalid .MC seed '{}': expected non-negative integer",
-                            seed_raw
-                        ),
-                    });
-                }
-                command.seed = Some(seed_raw as u64);
+                stream.consume(&TokenKind::Equals);
+                command.seed = Some(expect_u64_value(stream, line_num, params, ".MC SEED")?);
             }
             "DIST" | "DISTRIBUTION" => {
                 let dist = expect_ident(stream, line_num)?;
