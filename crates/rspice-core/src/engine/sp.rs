@@ -1,19 +1,20 @@
 //! The `.SP` runner: one scattering sweep, and optionally its port noise.
 //!
-//! Every piece of this existed already — port collection, excitation, the
-//! wave-to-scattering conversion, the port-noise covariance solve, the
-//! two-port noise derivation — but no `Engine::run_*` method put them
-//! together, so each frontend assembled the S-matrix itself. That is four
-//! places deciding what a `.SP` card means, and it is why the browser API and
-//! the engine adapter refused the family outright rather than guess.
+//! Each frequency shares its AC bias and factorization across port drives.
+//! Model completion accepts all scattering columns and optional port noise
+//! together, including any required final-step re-evaluation.
 
+use super::ac::{AcExcitation, PreparedAc};
+use super::analog_tasks::FrequencyModelState;
+use super::noise::{PreparedPortNoise, validate_port_noise_frequencies};
 use crate::abort_signal::AbortSignal;
 use crate::analysis::s_param::{
-    ExtractError, PortNoiseAssembly, PortNoiseAssemblyError, SMatrix, SParameterPort,
-    SParameterResult, assemble_port_noise_with_abort, collect_ports, extract_s_matrix_with_abort,
+    PortNoiseAssembly, PortNoiseAssemblyError, SMatrix, SParameterPort, SParameterResult,
+    assemble_port_noise_with_abort, collect_ports, normalize_ports, s_column_from_port_voltages,
 };
 use crate::netlist::AnalysisCommand;
-use crate::{Netlist, Value};
+use crate::solver::ComplexMatrix;
+use crate::{Complex64, Netlist, Value};
 
 use super::{Engine, SimulationError};
 
@@ -84,38 +85,298 @@ impl Engine {
                 ".SP requires at least one sweep frequency".to_owned(),
             ));
         }
-        self.ensure_analysis_points(frequencies.len())?;
+        super::ac::validate_ac_frequencies(frequencies)?;
+        if do_noise {
+            validate_port_noise_frequencies(frequencies)?;
+        }
+        let engine = self.resolved_for_netlist(netlist);
+        engine.ensure_analysis_points(frequencies.len())?;
         let ports = collect_ports(netlist).map_err(|error| {
             SimulationError::Netlist(format!(".SP port declarations are unusable: {error}"))
         })?;
-        // The complete complex port cube can be larger than any individual
-        // AC result. Bound it before extraction allocates its storage.
-        self.ensure_result_shape(
+        let count = ports.len();
+        engine.ensure_result_shape(
             frequencies.len(),
-            ports
-                .len()
-                .saturating_mul(ports.len())
+            count
+                .saturating_mul(count)
                 .saturating_mul(2)
                 .saturating_add(1),
         )?;
+        let run_scope = crate::abort_signal::ModelRunSignal::if_needed(abort);
+        let abort: &dyn AbortSignal = run_scope.as_ref().map_or(abort, |scope| scope);
+        Self::ensure_model_run_active(abort)?;
 
-        let cube = extract_s_matrix_with_abort(
-            netlist,
-            &ports,
-            frequencies,
-            |driven| self.run_ac_with_abort(driven, frequencies, abort),
-            abort,
-        )
-        .map_err(map_extract_error)?;
-        if abort.is_aborted() {
-            return Err(SimulationError::Aborted);
-        }
+        // Only the AC reference-plane solve needs the Thevenin normalization.
+        // Its bias, model state, topology and factorization are shared by all
+        // excitation columns. The original sources still define Norton Cy.
+        let mut base = netlist.clone();
+        let normalized = normalize_ports(&mut base, &ports).map_err(|error| {
+            SimulationError::Netlist(format!(".SP port normalization failed: {error}"))
+        })?;
+        let PreparedAc {
+            circuit: ac_bias,
+            mut matrix,
+            linearization,
+            excitation: _,
+        } = engine.prepare_ac_analysis(&base, abort)?;
+        engine.ensure_result_shape(
+            frequencies.len(),
+            ac_bias.matrix_size().saturating_mul(2).saturating_add(1),
+        )?;
+        let excitations = normalized
+            .iter()
+            .map(|port| AcExcitation::for_port(&ac_bias, &port.source_name))
+            .collect::<Result<Vec<_>, _>>()?;
+        let ground = base.ground_policy();
+        let node_id = |name: &str| {
+            let name = ground.canonical_node(name);
+            if name == "0" {
+                return Ok(0);
+            }
+            ac_bias.get_node_by_name(name).ok_or_else(|| {
+                SimulationError::Circuit(format!(
+                    "SP reference-plane node '{name}' is not in the solved circuit"
+                ))
+            })
+        };
+        let nodes = normalized
+            .iter()
+            .map(|port| Ok((node_id(&port.node_pos)?, node_id(&port.node_neg)?)))
+            .collect::<Result<Vec<_>, SimulationError>>()?;
+        let impedances = ports.iter().map(|port| port.z0).collect::<Vec<_>>();
+        let reference_impedance = impedances[0];
+        let temperature = netlist.options.temp.map_or(
+            engine.config().temperature,
+            crate::constants::celsius_to_kelvin,
+        );
+        let (noise_bias, mut noise_matrix, noise_linearization) = if do_noise {
+            let names = ports
+                .iter()
+                .map(|port| port.source_name.clone())
+                .collect::<Vec<_>>();
+            let PreparedPortNoise {
+                circuit,
+                matrix,
+                linearization,
+            } = engine.prepare_port_noise_analysis(
+                netlist,
+                &names,
+                frequencies.len(),
+                temperature,
+                abort,
+            )?;
+            (Some(circuit), Some(matrix), Some(linearization))
+        } else {
+            (None, None, None)
+        };
+        let has_tasks = ac_bias.has_point_analog_tasks()
+            || noise_bias
+                .as_ref()
+                .is_some_and(|circuit| circuit.has_point_analog_tasks());
+        let solve_point =
+            |ac_point: &mut crate::CircuitData,
+             ac_workspace: &mut ComplexMatrix,
+             noise_point: Option<(
+                &mut crate::CircuitData,
+                &mut super::noise::PortNoiseWorkspace,
+            )>,
+             frequency: Value,
+             final_step: bool|
+             -> Result<(SMatrix, Option<PortNoiseAssembly>), SimulationError> {
+                linearization.prepare_frequency(
+                    ac_point,
+                    ac_workspace,
+                    frequency,
+                    final_step,
+                    abort,
+                )?;
+                let mut matrix = SMatrix::new(frequency, count);
+                let mut voltages = Vec::with_capacity(count);
+                for (column, excitation) in excitations.iter().enumerate() {
+                    if abort.is_aborted() {
+                        return Err(SimulationError::Aborted);
+                    }
+                    let solution = linearization.solve(ac_workspace, excitation, abort)?;
+                    let voltage = |node: usize| -> Result<Complex64, SimulationError> {
+                        if node == 0 {
+                            return Ok(Complex64::new(0.0, 0.0));
+                        }
+                        solution.get(node - 1).copied().ok_or_else(|| {
+                            SimulationError::Circuit(format!(
+                                "SP reference-plane node {node} is outside the solved system"
+                            ))
+                        })
+                    };
+                    voltages.clear();
+                    for &(positive, negative) in &nodes {
+                        voltages.push(voltage(positive)? - voltage(negative)?);
+                    }
+                    let values = s_column_from_port_voltages(&voltages, column, &impedances)
+                        .map_err(|error| {
+                            SimulationError::Circuit(format!(".SP wave conversion failed: {error}"))
+                        })?;
+                    for (row, value) in values.into_iter().enumerate() {
+                        matrix.set(row + 1, column + 1, value);
+                    }
+                }
+                let noise = if let Some((solver, (circuit, workspace))) =
+                    noise_linearization.as_ref().zip(noise_point)
+                {
+                    let point = solver.solve(circuit, workspace, frequency, final_step, abort)?;
+                    // Derive and validate noise parameters before model control
+                    // can be published for this point.
+                    Some(
+                        assemble_port_noise_with_abort(
+                            &ports,
+                            std::slice::from_ref(&matrix),
+                            count,
+                            vec![point],
+                            temperature,
+                            abort,
+                        )
+                        .map_err(map_port_noise_error)?,
+                    )
+                } else {
+                    None
+                };
+                Ok((matrix, noise))
+            };
 
-        let count = ports.len();
-        let reference_impedance = ports
-            .first()
-            .map(|port| port.z0)
-            .ok_or_else(|| SimulationError::Netlist(".SP found no declared ports".to_owned()))?;
+        // All excitations at a frequency share one factorization. Independent
+        // frequencies still use the configured pool when no model tasks can
+        // terminate the run. Each worker retains its own numerical caches.
+        #[cfg(feature = "parallel")]
+        let parallel_points = {
+            let workers = engine.parallel_worker_count(frequencies.len());
+            if !has_tasks && frequencies.len() >= 10 && workers > 1 {
+                use rayon::prelude::*;
+                let chunk_len = frequencies.len().div_ceil(workers);
+                let work = frequencies
+                    .chunks(chunk_len)
+                    .enumerate()
+                    .map(|(chunk_index, chunk)| {
+                        let noise = noise_bias
+                            .as_ref()
+                            .zip(noise_matrix.as_ref())
+                            .zip(noise_linearization.as_ref())
+                            .map(|((bias, matrix), solver)| {
+                                (bias.clone(), solver.workspace(matrix))
+                            });
+                        (
+                            ac_bias.clone(),
+                            ComplexMatrix::from_real_structure(&matrix),
+                            noise,
+                            chunk_index * chunk_len,
+                            chunk,
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                let chunks = engine.install_parallel(|| {
+                    work.into_par_iter()
+                        .map(|(mut circuit, mut workspace, mut noise, start, chunk)| {
+                            chunk
+                                .iter()
+                                .enumerate()
+                                .map(|(offset, &frequency)| {
+                                    solve_point(
+                                        &mut circuit,
+                                        &mut workspace,
+                                        noise
+                                            .as_mut()
+                                            .map(|(circuit, workspace)| (circuit, workspace)),
+                                        frequency,
+                                        start + offset + 1 == frequencies.len(),
+                                    )
+                                })
+                                .collect::<Result<Vec<_>, SimulationError>>()
+                        })
+                        .collect::<Result<Vec<_>, SimulationError>>()
+                })??;
+                Some(chunks.into_iter().flatten().collect::<Vec<_>>())
+            } else {
+                None
+            }
+        };
+        #[cfg(not(feature = "parallel"))]
+        let parallel_points: Option<Vec<(SMatrix, Option<PortNoiseAssembly>)>> = None;
+
+        let points = if let Some(points) = parallel_points {
+            points
+        } else {
+            let mut ac_workspace = ComplexMatrix::from_real_structure(&matrix);
+            let mut noise_workspace = noise_linearization
+                .as_ref()
+                .zip(noise_matrix.as_ref())
+                .map(|(linearization, matrix)| linearization.workspace(matrix));
+            let mut ac_point = ac_bias.clone();
+            let mut noise_point = noise_bias.clone();
+            let mut points = Vec::with_capacity(frequencies.len());
+            for (index, &frequency) in frequencies.iter().enumerate() {
+                if abort.is_aborted() {
+                    return Err(SimulationError::Aborted);
+                }
+                let final_step = index + 1 == frequencies.len();
+                let point = if has_tasks {
+                    if index > 0 {
+                        ac_point.clone_from(&ac_bias);
+                        noise_point.clone_from(&noise_bias);
+                    }
+                    let mut states = vec![FrequencyModelState {
+                        circuit: &mut ac_point,
+                        matrix: &mut matrix,
+                        bias: &linearization.bias,
+                        analysis: 1,
+                    }];
+                    if let (Some(circuit), Some(matrix), Some(linearization)) = (
+                        noise_point.as_mut(),
+                        noise_matrix.as_mut(),
+                        noise_linearization.as_ref(),
+                    ) {
+                        states.push(FrequencyModelState {
+                            circuit,
+                            matrix,
+                            bias: &linearization.bias,
+                            analysis: 3,
+                        });
+                    }
+                    Self::solve_accepted_frequency_group(
+                        &mut states,
+                        frequency,
+                        final_step,
+                        abort,
+                        |states, final_step| {
+                            let (ac, noise) = states.split_at_mut(1);
+                            solve_point(
+                                ac[0].circuit,
+                                &mut ac_workspace,
+                                noise
+                                    .first_mut()
+                                    .map(|state| &mut *state.circuit)
+                                    .zip(noise_workspace.as_mut()),
+                                frequency,
+                                final_step,
+                            )
+                        },
+                    )?
+                } else {
+                    solve_point(
+                        &mut ac_point,
+                        &mut ac_workspace,
+                        noise_point.as_mut().zip(noise_workspace.as_mut()),
+                        frequency,
+                        final_step,
+                    )?
+                };
+                points.push(point);
+                if abort
+                    .model_control()
+                    .is_some_and(|control| control.is_finished())
+                {
+                    break;
+                }
+            }
+            points
+        };
         let mut scattering = SParameterResult::new(
             reference_impedance,
             ports
@@ -128,58 +389,21 @@ impl Engine {
                 })
                 .collect(),
         );
-        for (index, frequency) in frequencies.iter().enumerate() {
-            if index.is_multiple_of(16) && abort.is_aborted() {
-                return Err(SimulationError::Aborted);
-            }
-            let mut matrix = SMatrix::new(*frequency, count);
-            for row in 0..count {
-                for column in 0..count {
-                    let value = cube
-                        .get(row)
-                        .and_then(|entries| entries.get(column))
-                        .and_then(|series| series.get(index))
-                        .copied()
-                        .ok_or_else(|| {
-                            SimulationError::Circuit(format!(
-                                "the extracted S-matrix has no entry S({},{}) at point {}",
-                                row + 1,
-                                column + 1,
-                                index + 1
-                            ))
-                        })?;
-                    matrix.set(row + 1, column + 1, value);
+        let mut port_noise: Option<PortNoiseAssembly> = None;
+        for (point, noise) in points {
+            scattering.add(point);
+            if let Some(mut point_noise) = noise {
+                if let Some(all) = &mut port_noise {
+                    all.points.append(&mut point_noise.points);
+                    if let (Some(all), Some(point)) = (&mut all.two_port, &mut point_noise.two_port)
+                    {
+                        all.append(point);
+                    }
+                } else {
+                    port_noise = Some(point_noise);
                 }
             }
-            scattering.add(matrix);
         }
-
-        let port_noise = if do_noise {
-            let temperature = netlist.options.temp.map_or(
-                self.config().temperature,
-                crate::constants::celsius_to_kelvin,
-            );
-            let sources = ports
-                .iter()
-                .map(|port| port.source_name.clone())
-                .collect::<Vec<_>>();
-            let points = self.run_port_noise_correlation_with_abort(
-                netlist,
-                &sources,
-                frequencies,
-                temperature,
-                abort,
-            )?;
-            // Grid alignment, covariance shape and the two-port derivation are
-            // one core operation with one validity policy; the runner does not
-            // re-check them beside it.
-            Some(
-                assemble_port_noise_with_abort(&ports, &scattering, points, temperature, abort)
-                    .map_err(map_port_noise_error)?,
-            )
-        } else {
-            None
-        };
 
         Ok(SParameterRun {
             scattering,
@@ -215,14 +439,6 @@ fn map_port_noise_error(error: PortNoiseAssemblyError) -> SimulationError {
     match error {
         PortNoiseAssemblyError::Aborted => SimulationError::Aborted,
         other => SimulationError::Circuit(other.to_string()),
-    }
-}
-
-fn map_extract_error(error: ExtractError<SimulationError>) -> SimulationError {
-    match error {
-        ExtractError::AcSolve(error) => error,
-        ExtractError::Aborted => SimulationError::Aborted,
-        other => SimulationError::Circuit(format!(".SP extraction failed: {other}")),
     }
 }
 

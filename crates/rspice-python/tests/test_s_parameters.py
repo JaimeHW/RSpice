@@ -62,6 +62,48 @@ def test_direct_sp_noise_api_computes_standard_noise_outputs():
     _assert_series_resistor_noise(result, 50.0)
 
 
+@pytest.mark.parametrize("route", ["direct", "deck"])
+@pytest.mark.parametrize("phase", ["ac", "noise"])
+@pytest.mark.parametrize("early", [False, True])
+def test_model_finish_retains_complete_final_scattering_and_noise(tmp_path, route, phase, early):
+    model = tmp_path / "sp_finish.va"
+    model.write_text(f"""module sp_finish(p,n);
+inout p,n; electrical p,n;
+real conductance;
+analog begin
+    @(initial_step) conductance=0.02;
+    @(final_step) begin
+        conductance=0.04;
+        if (analysis("{phase}")) $finish(2);
+    end
+    if ({int(early)} && analysis("{phase}") && !analysis("static")) $finish(1);
+    I(p,n)<+conductance*V(p,n);
+    I(p,n)<+white_noise(4*1.380649e-23*$temperature*conductance,"thermal");
+end
+endmodule
+""", encoding="utf-8")
+    deck = DECK.replace("R1 p1 p2 50", f"X1 p1 p2 sp_finish\n.va \"{model.as_posix()}\" sp_finish")
+    netlist = rspice.Netlist.parse(deck.replace(".sp lin 3 1k 100k", ".sp lin 3 10 30 donoise"))
+    engine = rspice.Engine()
+    result = (
+        engine.run_s_parameters(netlist, [10.0, 20.0, 30.0], do_noise=True)
+        if route == "direct" else engine.run(netlist).s_parameters
+    )
+    expected_frequencies = [10.0] if early else [10.0, 20.0, 30.0]
+    np.testing.assert_array_equal(result.frequencies, expected_frequencies)
+    assert result.num_points == len(expected_frequencies)
+    resistance = np.full(len(expected_frequencies), 50.0)
+    resistance[-1] = 25.0
+    for row in [1, 2]:
+        for column in [1, 2]:
+            numerator = resistance if row == column else 100.0
+            np.testing.assert_allclose(result.s(row, column), numerator / (100.0 + resistance), atol=1e-12)
+            sign = 1.0 if row == column else -1.0
+            np.testing.assert_allclose(result.cy(row, column), sign * 4 * 1.380649e-23 * 300.15 / resistance, atol=1e-30)
+    np.testing.assert_allclose(result.noise_resistance, resistance, atol=1e-10)
+    assert result.document()["pointCount"] == len(expected_frequencies)
+
+
 def _assert_series_resistor_noise(result, resistance):
     assert result.has_noise
     assert result.has_two_port_noise_parameters

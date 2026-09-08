@@ -111,6 +111,56 @@ fn assert_relative(actual: f64, expected: f64, tolerance: f64, label: &str) {
 }
 
 #[test]
+fn model_finish_exports_complete_final_scattering_and_noise_on_the_default_stack() {
+    let directory = test_dir("model_finish");
+    let model = directory.join("sp_finish.va");
+    std::fs::write(
+        &model,
+        r#"module sp_finish(p,n);
+inout p,n; electrical p,n;
+real conductance;
+analog begin
+    @(initial_step) conductance=0.02;
+    @(final_step) conductance=0.04;
+    if (analysis("ac") && !analysis("static")) $finish(1);
+    I(p,n)<+conductance*V(p,n);
+    I(p,n)<+white_noise(4*1.380649e-23*$temperature*conductance,"thermal");
+end
+endmodule"#,
+    )
+    .unwrap();
+    let deck = directory.join("sp.cir");
+    std::fs::write(&deck, format!(
+        "* Finished SP\nV1 p1 0 AC 1 portnum=1 z0=50\nV2 p2 0 portnum=2 z0=50\nX1 p1 p2 sp_finish\n.va \"{}\" sp_finish\n.sp lin 3 10 30 donoise\n.end\n",
+        model.display().to_string().replace('\\', "/"),
+    )).unwrap();
+    let path = directory.join("sp.csv");
+    let output = run(&deck, Some(&path), Some("csv"));
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let table = SpTable::read(&path);
+    assert_eq!(table.scale, [10.0]);
+    for (name, expected) in [
+        ("S_1_1", 0.2),
+        ("S_2_2", 0.2),
+        ("S_1_2", 0.8),
+        ("S_2_1", 0.8),
+    ] {
+        assert_relative(table.real_values(name)[0], expected, 1e-10, name);
+    }
+    let expected = 4.0 * 1.380649e-23 * 300.15 * 0.04;
+    assert_relative(
+        table.real_values("CY_A2_per_Hz_1_1")[0],
+        expected,
+        1e-10,
+        "final noise",
+    );
+}
+
+#[test]
 fn keyword_noise_exports_physical_covariance_and_two_port_parameters() {
     let dir = test_dir("oracle");
     let path = dir.join("sp.csv");

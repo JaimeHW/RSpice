@@ -67,6 +67,155 @@ endmodule"#,
 }
 
 #[test]
+fn sp_frequency_finish_retains_every_port_and_noise_at_the_final_state() {
+    let frequencies = (1..=13)
+        .map(|index| f64::from(index) * 10.0)
+        .collect::<Vec<_>>();
+    let model = write_model(
+        "sp_frequency_finish",
+        r#"module sp_frequency_finish(p,n);
+inout p,n; electrical p,n;
+parameter integer finish_phase=1, finish_early=1;
+real count;
+analog begin
+    @(initial_step) count=1;
+    @(final_step) begin
+        count=count+1;
+        if ((finish_phase==1 && analysis("ac")) ||
+            (finish_phase==3 && analysis("noise"))) $finish(2);
+    end
+    if (finish_early && !analysis("static") && count==1 &&
+        ((finish_phase==1 && analysis("ac")) ||
+         (finish_phase==3 && analysis("noise")))) $finish(1);
+    I(p,n)<+count*0.02*V(p,n);
+    I(p,n)<+white_noise(4*1.380649e-23*$temperature*count*0.02, "thermal");
+end
+endmodule"#,
+    );
+    for (phase, do_noise) in [(0, false), (1, false), (0, true), (1, true), (3, true)] {
+        for early in [false, true] {
+            let netlist = Netlist::parse(&format!(
+                "* Atomic SP frequency point\nV1 p1 0 AC 1 portnum=1 z0=50\nV2 p2 0 AC 0 portnum=2 z0=50\nX1 p1 p2 sp_frequency_finish finish_phase={phase} finish_early={}\n.va \"{}\" sp_frequency_finish\n.end\n",
+                usize::from(early), deck_path(&model),
+            )).unwrap();
+            let mut config = SimulationConfig::default();
+            config.resource_limits.max_parallel_workers = 4;
+            let outcome = Engine::new(config)
+                .run_with_outcome(&NoAbort, |engine, signal| {
+                    engine.run_sp_over_grid_with_abort(&netlist, &frequencies, do_noise, signal)
+                })
+                .unwrap_or_else(|error| {
+                    panic!("phase={phase}, early={early}, noise={do_noise}: {error}")
+                });
+            let requested_finish = phase != 0;
+            let expected_points = if requested_finish && early {
+                1
+            } else {
+                frequencies.len()
+            };
+            let run = match outcome {
+                SimulationOutcome::Completed(run) => {
+                    assert!(!requested_finish);
+                    run
+                }
+                SimulationOutcome::Finished { result, finish } => {
+                    assert!(requested_finish);
+                    assert_eq!(finish.diagnostic_level, if early { 1 } else { 2 });
+                    assert_eq!(
+                        finish.point,
+                        ModelFinishPoint::Frequency {
+                            frequency: if early { 10.0 } else { 130.0 },
+                        }
+                    );
+                    result.expect("a completed SP frequency contains every excitation")
+                }
+            };
+            assert_eq!(run.scattering.data.len(), expected_points);
+            assert_eq!(run.port_noise.is_some(), do_noise);
+            for (index, matrix) in run.scattering.data.iter().enumerate() {
+                let final_point = index + 1 == expected_points;
+                let resistance = if final_point { 25.0 } else { 50.0 };
+                let reflection = resistance / (100.0 + resistance);
+                let transmission = 100.0 / (100.0 + resistance);
+                for (actual, expected) in [
+                    (matrix.s11(), reflection),
+                    (matrix.s22(), reflection),
+                    (matrix.s12(), transmission),
+                    (matrix.s21(), transmission),
+                ] {
+                    assert!(
+                        (actual.re - expected).abs() < 1e-10 && actual.im.abs() < 1e-10,
+                        "phase={phase}, early={early}, noise={do_noise}, point={index}: {actual} versus {expected}"
+                    );
+                }
+                if let Some(noise) = &run.port_noise {
+                    assert_eq!(noise.points.len(), expected_points);
+                    let point = &noise.points[index];
+                    assert_eq!(point.frequency, matrix.frequency);
+                    let expected_psd = 4.0 * 1.380649e-23 * 300.15 / resistance;
+                    for row in 0..2 {
+                        for column in 0..2 {
+                            let sign = if row == column { 1.0 } else { -1.0 };
+                            let actual = point.current_correlation[row][column];
+                            assert!(
+                                (actual.re / expected_psd - sign).abs() < 1e-10
+                                    && actual.im.abs() < 1e-30,
+                                "phase={phase}, early={early}, point={index}, Cy({row},{column})={actual}, PSD={expected_psd}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+    let _ = std::fs::remove_file(model);
+}
+
+#[test]
+fn sp_noise_failure_does_not_publish_a_pending_ac_finish() {
+    let model = write_model(
+        "sp_failed_final_noise",
+        r#"module sp_failed_final_noise(p,n);
+inout p,n; electrical p,n;
+parameter integer bad_task=0, early=1;
+real psd;
+analog begin
+    @(initial_step) psd=1e-22;
+    @(final_step) begin
+        if (analysis("ac")) $finish(2);
+        if (analysis("noise")) begin
+            if (bad_task) $finish(99);
+            else psd=-1;
+        end
+    end
+    if (early && analysis("ac") && !analysis("static")) $finish(1);
+    I(p,n)<+0.02*V(p,n);
+    I(p,n)<+white_noise(psd, "thermal");
+end
+endmodule"#,
+    );
+    for bad_task in [false, true] {
+        for early in [false, true] {
+            let netlist = Netlist::parse(&format!(
+                "* Failed SP transaction\nV1 p1 0 AC 1 portnum=1 z0=50\nV2 p2 0 AC 0 portnum=2 z0=50\nX1 p1 p2 sp_failed_final_noise bad_task={} early={}\n.va \"{}\" sp_failed_final_noise\n.end\n",
+                usize::from(bad_task), usize::from(early), deck_path(&model),
+            )).unwrap();
+            let outcome = Engine::default().run_with_outcome(&NoAbort, |engine, signal| {
+                let result =
+                    engine.run_sp_over_grid_with_abort(&netlist, &[10.0, 20.0], true, signal);
+                assert!(signal.model_control().unwrap().finish().is_none());
+                result
+            });
+            assert!(
+                matches!(outcome, Err(rspice_core::SimulationError::Circuit(_))),
+                "bad_task={bad_task}, early={early}: {outcome:?}"
+            );
+        }
+    }
+    let _ = std::fs::remove_file(model);
+}
+
+#[test]
 fn ac_portless_finish_runs_the_analysis_lifecycle() {
     let model = write_model(
         "portless_finish",
@@ -112,6 +261,93 @@ endmodule"#,
                 assert_eq!(
                     finish.point,
                     ModelFinishPoint::Frequency { frequency: 10.0 }
+                );
+            }
+        }
+    }
+    let _ = std::fs::remove_file(model);
+}
+
+#[test]
+fn sp_task_free_parallel_points_share_the_bias_and_global_final_boundary() {
+    let model = write_model(
+        "sp_passive_parallel",
+        r#"module sp_passive_parallel(p,n);
+inout p,n; electrical p,n;
+real conductance;
+analog begin
+    @(initial_step) conductance=0.02;
+    @(final_step) conductance=0.04;
+    I(p,n)<+conductance*V(p,n);
+    I(p,n)<+white_noise(4*1.380649e-23*$temperature*conductance, "thermal");
+end
+endmodule"#,
+    );
+    let netlist = Netlist::parse(&format!(
+        "* Parallel SP with independent columns\nV1 p1 0 AC 7 portnum=1 z0=50\nV2 p2 0 AC 9 portnum=2 z0=50\nIextra p1 p2 AC 11\nVextra aux 0 AC 100\nRextra aux 0 1k\nC1 p1 p2 1u\nX1 p1 p2 sp_passive_parallel\n.va \"{}\" sp_passive_parallel\n.end\n",
+        deck_path(&model),
+    )).unwrap();
+    let frequencies = (1..=25)
+        .map(|index| f64::from(index) * 10.0)
+        .collect::<Vec<_>>();
+    for do_noise in [false, true] {
+        let runs = [1, 4].map(|workers| {
+            let mut config = SimulationConfig::default();
+            config.resource_limits.max_parallel_workers = workers;
+            Engine::new(config)
+                .run_sp_over_grid_with_abort(&netlist, &frequencies, do_noise, &NoAbort)
+                .unwrap()
+        });
+        for (index, &frequency) in frequencies.iter().enumerate() {
+            let conductance = if index + 1 == frequencies.len() {
+                0.04
+            } else {
+                0.02
+            };
+            let impedance = rspice_core::Complex64::new(1.0, 0.0)
+                / rspice_core::Complex64::new(
+                    conductance,
+                    2.0 * std::f64::consts::PI * frequency * 1e-6,
+                );
+            let denominator = rspice_core::Complex64::new(100.0, 0.0) + impedance;
+            let reflection = impedance / denominator;
+            let transmission = rspice_core::Complex64::new(100.0, 0.0) / denominator;
+            for run in &runs {
+                assert_eq!(run.scattering.data.len(), frequencies.len());
+                let matrix = &run.scattering.data[index];
+                assert_eq!(matrix.frequency, frequency);
+                for (actual, expected) in [
+                    (matrix.s11(), reflection),
+                    (matrix.s22(), reflection),
+                    (matrix.s12(), transmission),
+                    (matrix.s21(), transmission),
+                ] {
+                    assert!(
+                        (actual - expected).norm() < 1e-10,
+                        "point={index}: {actual} vs {expected}"
+                    );
+                }
+                if do_noise {
+                    let noise = &run.port_noise.as_ref().unwrap().points;
+                    assert_eq!(noise.len(), frequencies.len());
+                    let expected = 4.0 * 1.380649e-23 * 300.15 * conductance;
+                    assert!(
+                        (noise[index].current_correlation[0][0].re / expected - 1.0).abs() < 1e-10
+                    );
+                }
+            }
+            for row in 1..=2 {
+                for column in 1..=2 {
+                    assert_eq!(
+                        runs[0].scattering.data[index].get(row, column),
+                        runs[1].scattering.data[index].get(row, column)
+                    );
+                }
+            }
+            if do_noise {
+                assert_eq!(
+                    runs[0].port_noise.as_ref().unwrap().points[index].current_correlation,
+                    runs[1].port_noise.as_ref().unwrap().points[index].current_correlation
                 );
             }
         }

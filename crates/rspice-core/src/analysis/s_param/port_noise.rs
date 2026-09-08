@@ -23,6 +23,8 @@ use crate::abort_signal::AbortSignal;
 use crate::analysis::noise::PortNoiseCorrelationResult;
 use crate::{Complex64, Value};
 
+use super::matrix::SMatrix;
+#[cfg(test)]
 use super::matrix::SParameterResult;
 use super::network::y_from_s;
 use super::noise_params::{TwoPortNoise, derive_two_port_noise};
@@ -117,7 +119,14 @@ pub(crate) fn assemble_port_noise(
     points: Vec<PortNoiseCorrelationResult>,
     temperature: Value,
 ) -> Result<PortNoiseAssembly, PortNoiseAssemblyError> {
-    assemble_port_noise_with_abort(ports, scattering, points, temperature, &NoAbort)
+    assemble_port_noise_with_abort(
+        ports,
+        &scattering.data,
+        scattering.num_ports,
+        points,
+        temperature,
+        &NoAbort,
+    )
 }
 
 /// Validate one port-noise sweep against its scattering sweep and derive the
@@ -129,7 +138,8 @@ pub(crate) fn assemble_port_noise(
 /// solver calls.
 pub(crate) fn assemble_port_noise_with_abort(
     ports: &[SParameterPort],
-    scattering: &SParameterResult,
+    scattering: &[SMatrix],
+    scattering_ports: usize,
     points: Vec<PortNoiseCorrelationResult>,
     temperature: Value,
     abort: &dyn AbortSignal,
@@ -141,25 +151,25 @@ pub(crate) fn assemble_port_noise_with_abort(
     if count == 0 {
         return Err(PortNoiseAssemblyError::NoPorts);
     }
-    if scattering.data.is_empty() || points.is_empty() {
+    if scattering.is_empty() || points.is_empty() {
         return Err(PortNoiseAssemblyError::NoFrequencies);
     }
     if !temperature.is_finite() || temperature <= 0.0 {
         return Err(PortNoiseAssemblyError::Temperature { temperature });
     }
-    if scattering.data.len() != points.len() {
+    if scattering.len() != points.len() {
         return Err(PortNoiseAssemblyError::ScatteringMismatch {
-            scattering: scattering.data.len(),
+            scattering: scattering.len(),
             noise: points.len(),
         });
     }
-    if scattering.num_ports != count {
+    if scattering_ports != count {
         return Err(PortNoiseAssemblyError::PortCountMismatch {
             ports: count,
-            scattering_ports: scattering.num_ports,
+            scattering_ports,
         });
     }
-    for (index, (matrix, point)) in scattering.data.iter().zip(&points).enumerate() {
+    for (index, (matrix, point)) in scattering.iter().zip(&points).enumerate() {
         if index.is_multiple_of(64) && abort.is_aborted() {
             return Err(PortNoiseAssemblyError::Aborted);
         }
@@ -213,7 +223,7 @@ pub(crate) fn assemble_port_noise_with_abort(
 /// that is not finite and physical.
 fn derive_two_port_sweep(
     ports: &[SParameterPort],
-    scattering: &SParameterResult,
+    scattering: &[SMatrix],
     points: &[PortNoiseCorrelationResult],
     temperature: Value,
     abort: &dyn AbortSignal,
@@ -225,7 +235,7 @@ fn derive_two_port_sweep(
         return Err(PortNoiseAssemblyError::NoPorts);
     };
     let mut derived = Vec::with_capacity(points.len());
-    for (index, (matrix, point)) in scattering.data.iter().zip(points).enumerate() {
+    for (index, (matrix, point)) in scattering.iter().zip(points).enumerate() {
         if index.is_multiple_of(16) && abort.is_aborted() {
             return Err(PortNoiseAssemblyError::Aborted);
         }
@@ -495,7 +505,8 @@ mod tests {
         assert_eq!(
             refused(assemble_port_noise_with_abort(
                 &ports,
-                &scattering,
+                &scattering.data,
+                scattering.num_ports,
                 points,
                 temperature,
                 &ImmediateAbort,

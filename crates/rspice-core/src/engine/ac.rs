@@ -18,6 +18,9 @@ use crate::{CircuitData, Complex64, Netlist, NodeId, Value};
 use std::collections::VecDeque;
 use std::f64::consts::PI;
 
+mod point;
+pub(super) use point::{AcExcitation, PreparedAc};
+
 const BJT_DELAY_XF1_BRANCH_INDEX: usize = BJT_DYNAMIC_CHARGE_COUNT - 2;
 const BJT_DELAY_XF2_BRANCH_INDEX: usize = BJT_DYNAMIC_CHARGE_COUNT - 1;
 const AC_CONSTRAINT_BACKWARD_ERROR_FACTOR: Value = 64.0;
@@ -102,6 +105,15 @@ struct AcVoltageConstraintProjection {
 
 impl AcVoltageConstraintProjection {
     fn new(circuit: &CircuitData) -> Result<Self, SimulationError> {
+        Self::with_excitation(circuit, |index| {
+            circuit.voltage_sources.ac_excitation(index)
+        })
+    }
+
+    fn with_excitation(
+        circuit: &CircuitData,
+        excitation: impl Fn(usize) -> Complex64,
+    ) -> Result<Self, SimulationError> {
         let num_nodes = circuit.num_nodes();
         let sources = &circuit.voltage_sources;
         let mut parents = (0..=num_nodes).collect::<Vec<_>>();
@@ -132,7 +144,7 @@ impl AcVoltageConstraintProjection {
                 ))
                 .into());
             }
-            let target = sources.ac_excitation(index);
+            let target = excitation(index);
             if !complex_is_finite(target) {
                 return Err(SolverError::Overflow.into());
             }
@@ -2803,113 +2815,19 @@ impl Engine {
         let run_scope = crate::abort_signal::ModelRunSignal::if_needed(abort);
         let abort: &dyn AbortSignal = run_scope.as_ref().map_or(abort, |scope| scope);
         Self::ensure_model_run_active(abort)?;
-        let mut circuit = engine.build_circuit_with_abort(netlist, abort)?;
-        circuit
-            .begin_veriloga_equilibrium_analysis(1)
-            .map_err(SimulationError::Circuit)?;
-        Self::deliver_initial_analog_tasks(&mut circuit, abort)?;
-        Self::ensure_no_mixed_signal_analysis(&circuit, "AC analysis")?;
-        // Coupled multiconductor lines have no small-signal load (ngspice's
-        // CPL registers none and its AC solve fails with a singular matrix);
-        // refuse explicitly instead of returning silently dead ports.
-        if !circuit.coupled_tlines.is_empty() {
-            return Err(SimulationError::unsupported_capability(
-                "analysis.ac.device.coupled_transmission_line",
-                "AC analysis does not support coupled multiconductor (CPL) transmission lines",
-            ));
-        }
-        Self::ensure_supported_ac_dynamic_charges(&circuit)?;
-        circuit
-            .prepare_veriloga_equilibrium_analysis_point(1, true, false)
-            .map_err(SimulationError::Circuit)?;
-        let mut matrix = if circuit.matrix_size() == 0 {
-            Self::model_observation_matrix()?
-        } else {
-            engine.build_matrix(&circuit)?
-        };
-        circuit.link_indices(&matrix);
-        let ac_voltage_projection = AcVoltageConstraintProjection::new(&circuit)?;
-
-        // Get DC operating point
-        let has_nonlinear = circuit.has_nonlinear_devices();
-        let dc_solution = if circuit.matrix_size() == 0 {
-            Vec::new()
-        } else if circuit.can_use_zero_bias_for_explicit_xspice_ac() {
-            log::debug!(
-                "using zero-bias small-signal state for explicit XSPICE transmission-line AC"
-            );
-            vec![0.0; circuit.matrix_size()]
-        } else {
-            engine.solve_dc_operating_point_with_abort(netlist, &mut circuit, &mut matrix, abort)?
-        };
-        if has_nonlinear && !dc_solution.is_empty() {
-            engine.try_observe_dc_operating_point(&mut circuit, &mut matrix, &dc_solution)?;
-        }
-        if abort.is_aborted() {
-            return Err(SimulationError::Aborted);
-        }
-        if let Some(message) = circuit.take_xspice_evaluation_error() {
-            return Err(SimulationError::Circuit(format!(
-                "XSPICE evaluation failed: {message}"
-            )));
-        }
-        engine.accept_frequency_operating_point(
-            netlist,
-            &mut circuit,
-            &mut matrix,
-            &dc_solution,
-            1,
-            abort,
-        )?;
-        circuit
-            .finish_veriloga_equilibrium_operating_point(1)
-            .map_err(SimulationError::Circuit)?;
-        circuit.refresh_jiles_atherton_inductances(&dc_solution);
-        if has_nonlinear {
-            // Align stateful nonlinear models (limited junction voltages,
-            // operating region) with the final converged operating point.
-            Self::prepare_small_signal_state(&mut circuit, &dc_solution)?;
-        } else {
-            // Behavioral source caches may still be present on an otherwise
-            // linear circuit.
-            circuit
-                .prepare_behavioral_small_signal(&dc_solution)
-                .map_err(SimulationError::Circuit)?;
-        }
+        let PreparedAc {
+            mut circuit,
+            mut matrix,
+            linearization,
+            excitation,
+        } = engine.prepare_ac_analysis(netlist, abort)?;
+        let dc_solution = &linearization.bias;
 
         let num_nodes = circuit.num_nodes();
         let size = circuit.matrix_size();
         engine.ensure_result_shape(frequencies.len(), size.saturating_mul(2).saturating_add(1))?;
         let node_names = circuit.node_names_sorted();
         let branch_names = circuit.branch_names_sorted();
-        let ac_solve_denominator_floor = if ac_voltage_projection.is_empty() {
-            None
-        } else {
-            let mut floors = vec![0.0; size];
-            for &branch_ordinal in &circuit.voltage_sources.branch_indices {
-                let branch = circuit.get_branch_matrix_index(branch_ordinal);
-                let row = branch.checked_sub(1).ok_or_else(|| {
-                    SolverError::InvalidCircuit(
-                        "independent voltage source has no AC equation row".to_string(),
-                    )
-                })?;
-                let Some(floor) = floors.get_mut(row) else {
-                    return Err(SolverError::InvalidCircuit(
-                        "independent voltage-source AC equation lies outside the solved system"
-                            .to_string(),
-                    )
-                    .into());
-                };
-                // Homogeneous ideal-source rows can carry only roundoff-scale
-                // leakage before their exact post-solve projection. Give
-                // those known voltage equations the same one-volt coordinate
-                // floor as the projection validator; every other MNA row
-                // remains under the strict componentwise solve certificate.
-                *floor = 1.0;
-            }
-            Some(floors)
-        };
-
         // Closure to solve at a single frequency. Takes the circuit as a
         // parameter so the parallel path below can hand each worker its own
         // clone (device-evaluation caches are Cell-based and not Sync).
@@ -2918,63 +2836,13 @@ impl Engine {
                              freq: Value,
                              final_step: bool|
          -> Result<AcResult, SimulationError> {
-            if abort.is_aborted() {
-                return Err(SimulationError::Aborted);
-            }
+            linearization.prepare_frequency(circuit, ac_matrix, freq, final_step, abort)?;
             let omega = 2.0 * PI * freq;
-            circuit
-                .prepare_veriloga_frequency_analysis_point(1, final_step)
-                .map_err(SimulationError::Circuit)?;
-            if size == 0 {
-                return Ok(AcResult {
-                    frequency: freq,
-                    node_names: Vec::new(),
-                    branch_names: Vec::new(),
-                    voltages: Vec::new(),
-                    currents: Vec::new(),
-                });
-            }
-            circuit
-                .prepare_behavioral_small_signal_at_frequency(&dc_solution, freq)
-                .map_err(SimulationError::Circuit)?;
-            Self::try_fill_small_signal_matrix_with_vbic_delay_mode(
-                circuit,
-                ac_matrix,
-                &dc_solution,
-                omega,
-                SmallSignalAnalysisKind::Ac,
-                true,
-                true,
-            )?;
-            let rhs = Self::build_ac_excitation_rhs(circuit);
-            let sparse_solution = match ac_solve_denominator_floor.as_deref() {
-                Some(floor) => ac_matrix.solve_with_row_denominator_floors(&rhs, floor),
-                None => ac_matrix.solve(&rhs),
+            let solution = if size == 0 {
+                Vec::new()
+            } else {
+                linearization.solve(ac_matrix, &excitation, abort)?
             };
-            let mut solution = match sparse_solution {
-                Ok(solution) => solution,
-                Err(SolverError::InaccurateSolution(_)) if rhs.len() <= 64 => {
-                    log::debug!(
-                        "sparse AC solve failed strict backward-error certification; retrying the small complex system with extended precision"
-                    );
-                    ac_matrix
-                        .solve_dense_extended(&rhs)
-                        .map_err(SimulationError::Solver)?
-                }
-                Err(error) => return Err(SimulationError::Solver(error)),
-            };
-            if abort.is_aborted() {
-                return Err(SimulationError::Aborted);
-            }
-            if !ac_voltage_projection.is_empty() {
-                ac_voltage_projection.project(&mut solution)?;
-                ac_matrix
-                    .certify_solution(&solution, &rhs)
-                    .map_err(SimulationError::Solver)?;
-                if abort.is_aborted() {
-                    return Err(SimulationError::Aborted);
-                }
-            }
 
             let mut currents = if size > num_nodes {
                 solution[num_nodes..].to_vec()
@@ -3002,7 +2870,7 @@ impl Engine {
                 results.push(Self::solve_accepted_frequency_point(
                     &mut point_circuit,
                     &mut matrix,
-                    &dc_solution,
+                    dc_solution,
                     super::analog_tasks::FrequencyModelPoint {
                         analysis: 1,
                         frequency,
@@ -3152,7 +3020,7 @@ impl Engine {
     }
 }
 
-fn validate_ac_frequencies(frequencies: &[Value]) -> Result<(), SimulationError> {
+pub(super) fn validate_ac_frequencies(frequencies: &[Value]) -> Result<(), SimulationError> {
     if frequencies.is_empty() {
         return Err(SimulationError::Circuit(
             "AC analysis requires at least one frequency point".to_string(),

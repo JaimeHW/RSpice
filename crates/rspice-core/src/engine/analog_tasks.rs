@@ -16,6 +16,15 @@ pub(super) struct FrequencyModelPoint {
     pub final_step: bool,
 }
 
+/// One analysis state participating in a complete frequency point. SP keeps
+/// AC and noise identities separate while accepting their common endpoint.
+pub(super) struct FrequencyModelState<'a> {
+    pub circuit: &'a mut CircuitData,
+    pub matrix: &'a mut crate::solver::StaticMatrix,
+    pub bias: &'a [f64],
+    pub analysis: u8,
+}
+
 fn finish_level(event: &AnalogTaskEvent<'_>) -> Result<u8, &'static str> {
     let [AnalogTaskArgument::Integer(level)] = event.call.arguments.as_ref() else {
         return Err("analog finish call has an invalid argument snapshot");
@@ -86,28 +95,64 @@ impl Engine {
         abort: &dyn AbortSignal,
         mut solve: impl FnMut(&mut CircuitData, bool) -> Result<T, SimulationError>,
     ) -> Result<T, SimulationError> {
-        let mut result = solve(circuit, point.final_step)?;
-        circuit
-            .evaluate_frequency_analog_candidate(matrix, bias, point.analysis)
-            .map_err(SimulationError::Circuit)?;
-        let position = ModelFinishPoint::Frequency {
-            frequency: point.frequency,
+        Self::solve_accepted_frequency_group(
+            &mut [FrequencyModelState {
+                circuit,
+                matrix,
+                bias,
+                analysis: point.analysis,
+            }],
+            point.frequency,
+            point.final_step,
+            abort,
+            |states, final_step| solve(states[0].circuit, final_step),
+        )
+    }
+
+    /// Finish every numerical projection before observing tasks. A finish in
+    /// either SP phase makes both phases final; no phase can publish control
+    /// while another still holds an unvalidated candidate.
+    pub(super) fn solve_accepted_frequency_group<T>(
+        states: &mut [FrequencyModelState<'_>],
+        frequency: f64,
+        final_step: bool,
+        abort: &dyn AbortSignal,
+        mut solve: impl FnMut(&mut [FrequencyModelState<'_>], bool) -> Result<T, SimulationError>,
+    ) -> Result<T, SimulationError> {
+        let position = ModelFinishPoint::Frequency { frequency };
+        let observe = |states: &mut [FrequencyModelState<'_>]| {
+            let mut first = None;
+            for state in states {
+                state
+                    .circuit
+                    .evaluate_frequency_analog_candidate(state.matrix, state.bias, state.analysis)
+                    .map_err(SimulationError::Circuit)?;
+                let pending = Self::candidate_equilibrium_finish(state.circuit, position)?;
+                if first.is_none() {
+                    first = pending;
+                }
+            }
+            Ok::<_, SimulationError>(first)
         };
-        let pending = Self::candidate_equilibrium_finish(circuit, position)?;
-        if pending.is_some() && !point.final_step {
-            result = solve(circuit, true)?;
-            circuit
-                .evaluate_frequency_analog_candidate(matrix, bias, point.analysis)
-                .map_err(SimulationError::Circuit)?;
+        let mut result = solve(states, final_step)?;
+        let pending = observe(states)?;
+        if pending.is_some() && !final_step {
+            result = solve(states, true)?;
+            observe(states)?;
         }
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }
-        circuit
-            .accept_veriloga_analysis_point()
-            .map_err(SimulationError::Circuit)?;
+        for state in states.iter_mut() {
+            state
+                .circuit
+                .accept_veriloga_analysis_point()
+                .map_err(SimulationError::Circuit)?;
+        }
         Self::publish_pending_model_finish(abort, pending)?;
-        Self::deliver_accepted_analog_tasks(circuit, abort, position)?;
+        for state in states {
+            Self::deliver_accepted_analog_tasks(state.circuit, abort, position)?;
+        }
         Ok(result)
     }
 
