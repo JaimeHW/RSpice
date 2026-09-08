@@ -4,6 +4,42 @@ use rspice_veriloga::device::ParameterValueError;
 use support::DeviceFixture;
 
 #[test]
+fn integer_parameter_defaults_and_overrides_use_numeric_assignment_conversion() {
+    let model = DeviceFixture::compile(
+        "module rounded_parameters(p,n); inout p,n; electrical p,n; parameter real input_value=1.5; parameter integer fixed=-1.5, derived=input_value; analog I(p,n)<+fixed+derived; endmodule",
+    );
+    let mut device = model.device("X", &[1, 0]);
+    assert_eq!(device.try_evaluate().unwrap()[0], 0.0);
+    for value in [-2.5_f64, -0.5, 0.49, 0.5, 1.5, 2.5] {
+        assert_eq!(device.try_set_parameter("fixed", value), Ok(true));
+        assert_eq!(device.try_set_parameter("input_value", value), Ok(true));
+        device.try_resolve_parameter_defaults().unwrap();
+        assert_eq!(device.try_evaluate().unwrap()[0], 2.0 * value.round());
+    }
+}
+
+#[test]
+fn instance_overrides_precede_default_range_validation() {
+    let model = DeviceFixture::compile(
+        "module required_parameter(p,n); inout p,n; electrical p,n; parameter real gain=0 from (0:inf); parameter integer derived=1.0/gain; analog I(p,n)<+derived*gain*V(p,n); endmodule",
+    );
+    let builder = rspice_veriloga::device::DeviceBuilder::new(model.model.clone(), "X")
+        .nodes(&[1, 0])
+        .param("gain", 2.0);
+    #[cfg(feature = "native")]
+    let builder = builder.canonical_ir(model.canonical_ir.clone());
+    let mut device = builder
+        .try_build()
+        .expect("a valid final instance overrides the placeholder default");
+    device.update_voltages(&[3.0]);
+    assert_eq!(device.try_evaluate().unwrap()[0], 6.0);
+    assert!(
+        model.try_device("INVALID", &[1, 0]).is_err(),
+        "the unoverridden instance remains invalid"
+    );
+}
+
+#[test]
 fn integer_constant_comparisons_do_not_round_distinct_operands_equal() {
     for (left, right, expected) in [
         (
@@ -130,11 +166,11 @@ fn checked_parameter_assignment_rejects_invalid_values_without_mutation() {
     let mut device = model.device("A1", &[1, 0]);
 
     assert_eq!(device.try_set_parameter("missing", 1.0), Ok(false));
-    assert_eq!(device.try_set_parameter("count", 4.0), Ok(true));
+    assert_eq!(device.try_set_parameter("count", 3.5), Ok(true));
 
     assert!(matches!(
         device.try_set_parameter("count", 2.5),
-        Err(ParameterValueError::NonInteger { .. })
+        Err(ParameterValueError::Excluded { .. })
     ));
     assert!(matches!(
         device.try_set_parameter("count", 3.0),

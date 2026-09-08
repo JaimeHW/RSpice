@@ -254,7 +254,9 @@ use super::*;
 // bytecode treats the result as constant and silently drops both slopes.
 // Version 50 inserts real-to-integer assignment conversions before AD and
 // preserves analog function argument types at separate declarations.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 50;
+// Version 51 converts integer parameter defaults before dependent expressions
+// and leaves placeholder range validation to final instance construction.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 51;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]

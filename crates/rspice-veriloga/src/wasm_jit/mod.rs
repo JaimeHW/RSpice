@@ -100,7 +100,9 @@ pub const WASM_JIT_ABI_VERSION: u32 = 9;
 /// 14 to 15 holds coefficients outside ddt during reactive differentiation;
 /// old modules contain the spurious q * dk/dx term and must be rebuilt.
 /// 15 to 16 preserves higher-order ddx and descending shadow update order.
-pub const WASM_JIT_EMITTER_VERSION: u32 = 18;
+/// 18 to 19 inserts integer parameter default conversions before their use in
+/// dependent defaults and generated expressions.
+pub const WASM_JIT_EMITTER_VERSION: u32 = 19;
 
 /// Hard ceiling for one qualified shipped model's generated module.
 pub const SHIPPED_MODEL_WASM_CODE_SIZE_BUDGET_BYTES: usize = 32 * 1024 * 1024;

@@ -1213,6 +1213,72 @@ assert_eq!(instance.params.values, [0.0, 1.0, 1.0, 0.0, 1.0, 0.0, 1.0]);
 }
 
 #[test]
+fn generated_integer_parameters_round_defaults_and_atomic_overrides() {
+    let (state, stamp, noise) = generated_parts(
+        "module rounded_parameters(p,n); inout p,n; electrical p,n; parameter real input_value=1.5; parameter integer fixed=-1.5, derived=input_value; analog I(p,n)<+(fixed+derived)*V(p,n); endmodule",
+        "rounded parameters",
+    );
+    let body = r#"
+use runtime::GeneratedParameterAssignment as Assignment;
+let mut instance = device::state::Instance::new(&[0, 1]);
+assert_eq!(instance.params.values, [1.5, -2.0, 2.0]);
+assert_eq!(device::state::Parameters::default().values, instance.params.values);
+for value in [-2.5_f64, -0.5, 0.49, 0.5, 1.5, 2.5] {
+    instance.apply_parameters(&[
+        Assignment::for_declared_scope("fixed", value),
+        Assignment::for_declared_scope("input_value", value),
+    ]).unwrap();
+    assert_eq!(instance.params.values, [value, value.round(), value.round()]);
+    let bias = [3.0, 0.0];
+    let ctx = runtime::GeneratedEvalContext { voltages: &bias, temperature: 300.0 };
+    let mut sink = [0.0; 12];
+    instance.stamp(&ctx, &mut runtime::GeneratedStamper { sink: Some(&mut sink) });
+    assert_eq!(sink[9], 6.0 * value.round());
+    assert_eq!(sink[10], 2.0 * value.round());
+}
+let valid = instance.params.values;
+for invalid in [f64::NAN, f64::INFINITY, 2147483647.5, -2147483648.5] {
+    assert!(instance.apply_parameters(&[
+        Assignment::for_declared_scope("input_value", 10.0),
+        Assignment::for_declared_scope("fixed", invalid),
+    ]).is_err());
+    assert_eq!(instance.params.values, valid);
+}
+"#;
+    run_generated_main("rounded parameters", &state, &stamp, &noise, body)
+        .unwrap_or_else(|report| panic!("generated parameter conversion failed:\n{report}"));
+}
+
+#[test]
+fn generated_parameter_construction_validates_the_final_instance() {
+    let (state, stamp, noise) = generated_parts(
+        "module required_parameters(p,n); inout p,n; electrical p,n; parameter real width=0 from (0:inf); parameter integer sections=1.5; parameter integer derived=sections/width; parameter real alias=width; (* type = \"instance\", xyceAlsoModel = \"yes\" *) parameter real dual=width-2 from (0:inf); analog I(p,n)<+derived*alias*V(p,n); endmodule",
+        "required parameters",
+    );
+    let body = r#"
+use runtime::GeneratedParameterAssignment as Assignment;
+assert!(device::state::Instance::try_new_with_parameters(&[0, 1], &[]).is_err());
+let mut instance = device::state::Instance::try_new_with_parameters(&[0, 1], &[
+    Assignment::for_declared_scope("width", 2.0),
+    Assignment::for_declared_scope("sections", 4.5),
+    Assignment::new("dual", 3.0, runtime::GeneratedParameterOrigin::Instance),
+]).unwrap();
+assert_eq!(instance.params.values, [2.0, 5.0, 3.0, 2.0, 3.0]);
+let valid = instance.params.values;
+assert!(instance.set_parameter("width", 0.0).is_err());
+assert_eq!(instance.params.values, valid);
+let bias = [3.0, 0.0];
+let ctx = runtime::GeneratedEvalContext { voltages: &bias, temperature: 300.0 };
+let mut sink = [0.0; 12];
+instance.stamp(&ctx, &mut runtime::GeneratedStamper { sink: Some(&mut sink) });
+assert_eq!(sink[9], 18.0);
+assert_eq!(sink[10], 6.0);
+"#;
+    run_generated_main("required parameters", &state, &stamp, &noise, body)
+        .unwrap_or_else(|report| panic!("generated parameter construction failed:\n{report}"));
+}
+
+#[test]
 fn generated_dependent_parameter_defaults_finalize_after_all_overrides() {
     let source = r#"
 module dependent_defaults(p, n);
@@ -4711,20 +4777,6 @@ pub mod runtime {
         for (&value, &slot) in values.iter().zip(slots) {
             destination[slot as usize] = value;
         }
-    }
-
-    pub fn install_generated_parameter_aliases(
-        values: &mut [f64],
-        aliases: &[(u16, u16)],
-        validate: fn(usize, f64) -> Result<(), String>,
-    ) -> Result<(), String> {
-        for &(destination, source) in aliases {
-            let value = values[usize::from(source)];
-            let destination = usize::from(destination);
-            values[destination] = value;
-            validate(destination, value)?;
-        }
-        Ok(())
     }
 
     pub fn find_generated_parameter_index(

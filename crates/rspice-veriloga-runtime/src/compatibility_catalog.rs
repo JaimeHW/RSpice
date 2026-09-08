@@ -12,6 +12,8 @@ pub struct GeneratedVerilogACompatibilityCatalogEntry {
     pub public_model_name: &'static str,
     pub source_identity: &'static str,
     pub target_descriptor_abi_version: u32,
+    /// Compiler semantics authenticated when this migration was qualified.
+    pub target_compiler_semantics_version: u32,
     pub semantic_identity: &'static str,
     pub accepted_state_shape_identity: &'static str,
     /// Previously emitted shape identities whose payload schema was audited
@@ -38,6 +40,7 @@ const fn entry(
         public_model_name,
         source_identity,
         target_descriptor_abi_version: 3,
+        target_compiler_semantics_version: 1,
         semantic_identity,
         accepted_state_shape_identity,
         accepted_state_shape_identity_aliases,

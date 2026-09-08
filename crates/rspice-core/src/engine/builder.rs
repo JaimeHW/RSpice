@@ -7393,105 +7393,10 @@ impl Engine {
                                 });
                             }
 
-                            #[cfg(feature = "veriloga-native")]
-                            let mut device = {
-                                let canonical_ir = entry.canonical_ir.as_deref().ok_or_else(|| {
-                                    SimulationError::Circuit(format!(
-                                        "Verilog-A device '{}' native JIT requires canonical IR for model '{}' (no interpreter fallback)",
-                                        element.name, model.name
-                                    ))
-                                })?;
-                                crate::device::veriloga::VerilogADevice::try_new_with_canonical_ir_and_control(
-                                    element.name.clone(),
-                                    std::sync::Arc::clone(model),
-                                    canonical_ir,
-                                    &node_ids,
-                                    &veriloga_cache::VerilogACompileControl { abort },
-                                )
-                            }
-                            .map_err(|err| {
-                                if matches!(err, rspice_veriloga::vm::VmError::CompilationCancelled) {
-                                    return SimulationError::Aborted;
-                                }
-                                SimulationError::Circuit(format!(
-                                    "Verilog-A device '{}' construction failed: {}",
-                                    element.name, err
-                                ))
-                            })?;
-
-                            #[cfg(all(
-                                not(feature = "veriloga-native"),
-                                feature = "veriloga-wasm-jit",
-                                target_arch = "wasm32"
-                            ))]
-                            let mut device = {
-                                let canonical_ir = entry.canonical_ir.as_deref().ok_or_else(|| {
-                                    SimulationError::Circuit(format!(
-                                        "Verilog-A device '{}' browser WASM JIT requires canonical IR for model '{}' (no interpreter fallback)",
-                                        element.name, model.name
-                                    ))
-                                })?;
-                                crate::device::veriloga::VerilogADevice::try_new_with_canonical_ir_and_control(
-                                    element.name.clone(),
-                                    std::sync::Arc::clone(model),
-                                    canonical_ir,
-                                    &node_ids,
-                                    &veriloga_cache::VerilogACompileControl { abort },
-                                )
-                            }
-                            .map_err(|err| {
-                                if matches!(err, rspice_veriloga::vm::VmError::CompilationCancelled) {
-                                    return SimulationError::Aborted;
-                                }
-                                SimulationError::Circuit(format!(
-                                    "Verilog-A device '{}' construction failed: {}",
-                                    element.name, err
-                                ))
-                            })?;
-
-                            #[cfg(all(
-                                not(feature = "veriloga-native"),
-                                not(all(feature = "veriloga-wasm-jit", target_arch = "wasm32"))
-                            ))]
-                            let mut device = {
-                                match entry.canonical_ir.as_deref() {
-                                    Some(canonical_ir) => crate::device::veriloga::VerilogADevice::try_new_with_canonical_ir_and_control(
-                                        element.name.clone(),
-                                        std::sync::Arc::clone(model),
-                                        canonical_ir,
-                                        &node_ids,
-                                        &veriloga_cache::VerilogACompileControl { abort },
-                                    ),
-                                    None
-                                        if model.noise_process_schema >= 1
-                                            && !model.noise_sources.is_empty() =>
-                                    {
-                                        Err(rspice_veriloga::vm::VmError::InvalidModel(format!(
-                                            "Verilog-A device '{}' grouped-noise model '{}' requires canonical IR",
-                                            element.name, model.name
-                                        )))
-                                    }
-                                    None => crate::device::veriloga::VerilogADevice::try_new(
-                                        element.name.clone(),
-                                        std::sync::Arc::clone(model),
-                                        &node_ids,
-                                    ),
-                                }
-                            }
-                            .map_err(|err| {
-                                if matches!(err, rspice_veriloga::vm::VmError::CompilationCancelled) {
-                                    return SimulationError::Aborted;
-                                }
-                                SimulationError::Circuit(format!(
-                                    "Verilog-A device '{}' construction failed: {}",
-                                    element.name, err
-                                ))
-                            })?;
-
-                            // Allocate global circuit node indices for internal Verilog-A nodes.
-                            bind_veriloga_solver_unknowns(&mut circuit, &element.name, &mut device)
-                                .map_err(SimulationError::Circuit)?;
-
+                            // Resolve overrides before construction: range constraints apply
+                            // to the complete instance, including dependent defaults.
+                            let mut overrides = Vec::with_capacity(params.len());
+                            let mut multiplicity = None;
                             for (name, value) in params {
                                 let resolved = match value {
                                     crate::netlist::ParametricValue::Resolved(v) => *v,
@@ -7515,40 +7420,54 @@ impl Engine {
                                         )));
                                     }
                                 };
-                                // `m=` on an instance whose model does not
-                                // declare an m parameter is the standard
-                                // parallel-multiplicity ($mfactor); models
-                                // declaring their own m keep handling it
-                                let matched =
-                                    device.try_set_parameter(name, resolved).map_err(|error| {
-                                        SimulationError::Circuit(format!(
-                                            "Verilog-A device '{}' rejected parameter '{}': {}",
-                                            element.name, name, error
-                                        ))
-                                    })?;
-                                if !matched && name.eq_ignore_ascii_case("m") {
+                                // Model-owned names and aliases take precedence over $mfactor.
+                                if name.eq_ignore_ascii_case("m")
+                                    && model.parameter_index(name).is_none()
+                                {
                                     if !resolved.is_finite() || resolved <= 0.0 {
                                         return Err(SimulationError::Circuit(format!(
                                             "Verilog-A device '{}' multiplicity must be a positive finite value, got {}",
                                             element.name, resolved
                                         )));
                                     }
-                                    device.set_multiplicity(resolved);
-                                } else if !matched {
-                                    return Err(SimulationError::Circuit(format!(
-                                        "Verilog-A device '{}' model '{}' has no parameter named '{}'",
-                                        element.name, subckt_name, name
-                                    )));
+                                    multiplicity = Some(resolved);
+                                } else {
+                                    overrides.push((name.as_str(), resolved));
                                 }
                             }
-                            // Dependent parameter defaults must see the instance
-                            // overrides applied above
-                            device.try_resolve_parameter_defaults().map_err(|err| {
+                            if entry.canonical_ir.is_none()
+                                && model.noise_process_schema >= 1
+                                && !model.noise_sources.is_empty()
+                            {
+                                return Err(SimulationError::Circuit(format!(
+                                    "Verilog-A device '{}' grouped-noise model '{}' requires canonical IR",
+                                    element.name, model.name
+                                )));
+                            }
+                            let mut device = crate::device::veriloga::VerilogADevice::try_new_with_parameters_and_control(
+                                element.name.clone(),
+                                std::sync::Arc::clone(model),
+                                entry.canonical_ir.as_deref(),
+                                &node_ids,
+                                &overrides,
+                                &veriloga_cache::VerilogACompileControl { abort },
+                            )
+                            .map_err(|err| {
+                                if matches!(err, rspice_veriloga::vm::VmError::CompilationCancelled) {
+                                    return SimulationError::Aborted;
+                                }
                                 SimulationError::Circuit(format!(
-                                    "Verilog-A device '{}' parameter default resolution failed: {}",
+                                    "Verilog-A device '{}' construction failed: {}",
                                     element.name, err
                                 ))
                             })?;
+
+                            // Allocate global circuit node indices for internal Verilog-A nodes.
+                            bind_veriloga_solver_unknowns(&mut circuit, &element.name, &mut device)
+                                .map_err(SimulationError::Circuit)?;
+                            if let Some(multiplicity) = multiplicity {
+                                device.set_multiplicity(multiplicity);
+                            }
                             device
                                 .try_set_temperature(self.config.temperature)
                                 .map_err(|err| {

@@ -2728,14 +2728,20 @@ mod tests {
                 diode_catalog.accepted_state_shape_identity_aliases[0],
             )
             .expect("audited previous DIODE_CMC shape");
-        devices
-            .restore_checkpoint_states(&previous_shape)
-            .expect("authenticated payload-compatible shape alias restores");
-        assert_eq!(
-            devices.checkpoint_states()[0].state,
-            previous_shape[0].state,
-            "shape migration preserves the complete accepted payload"
+        assert!(
+            devices.restore_checkpoint_states(&previous_shape).is_err(),
+            "a shape alias qualified under old compiler semantics cannot authenticate the current model"
         );
+        assert_eq!(devices.checkpoint_states(), baseline);
+        let mut previous_semantics = baseline.clone();
+        previous_semantics[0].model_identity = diode_catalog.semantic_identity.to_string();
+        assert!(
+            devices
+                .restore_checkpoint_states(&previous_semantics)
+                .is_err(),
+            "matching source and payload shape do not authorize old compiler semantics"
+        );
+        assert_eq!(devices.checkpoint_states(), baseline);
 
         let mut invalid_cases = Vec::new();
         invalid_cases.push(Vec::new());

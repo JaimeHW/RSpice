@@ -2373,7 +2373,7 @@ mod tests {
             "{registry}"
         );
         assert!(
-            registry.contains("instance.apply_parameters(&device_params)?;"),
+            registry.contains("::Instance::try_new_with_parameters(nodes, &device_params)?"),
             "{registry}"
         );
         assert!(
@@ -3363,12 +3363,7 @@ fn write_registry(
                 "        #[cfg(feature = {feature:?})]\n        {:?} => {{",
                 registry_name.to_ascii_uppercase()
             )?;
-            writeln!(
-                out,
-                "            let mut instance = Box::new({}::Instance::new(nodes));",
-                device.folder_name
-            )?;
-            out.push_str("            instance.set_branch_indices(branches);\n");
+
             out.push_str("            let mut device_params = Vec::with_capacity(params.len());\n");
             out.push_str("            let mut multiplicity = None;\n");
             out.push_str("            for assignment in params {\n");
@@ -3386,7 +3381,12 @@ fn write_registry(
             out.push_str("                    device_params.push(*assignment);\n");
             out.push_str("                }\n");
             out.push_str("            }\n");
-            out.push_str("            instance.apply_parameters(&device_params)?;\n");
+            writeln!(
+                out,
+                "            let mut instance = Box::new({}::Instance::try_new_with_parameters(nodes, &device_params)?);",
+                device.folder_name
+            )?;
+            out.push_str("            instance.set_branch_indices(branches);\n");
             out.push_str("            if let Some(multiplicity) = multiplicity {\n");
             out.push_str("                instance.set_multiplicity(multiplicity)?;\n");
             out.push_str("            }\n");

@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use smol_str::SmolStr;
 
-use crate::integer_runtime::{IntegerBinaryOperation, integer_binary};
+use crate::integer_runtime::{IntegerBinaryOperation, integer_binary, real_to_integer};
 use crate::numeric_literal::{exact_integer_as_f64, parse_integer_literal};
 use crate::semantic::{MAX_PARAMETER_ARRAY_ELEMENTS, MAX_PARAMETER_ARRAY_RANK};
 
@@ -555,6 +555,9 @@ impl<'expressions, 'budget> ConstantEvaluator<'expressions, 'budget> {
             HirExprKind::Unary { op, operand } => {
                 let value = self.evaluate_at_depth(operand, next_depth)?;
                 match op.as_str() {
+                    "ToInteger" => real_to_integer(value.as_f64())
+                        .map(|value| ConstantValue::Integer(i64::from(value)))
+                        .map_err(|error| error.to_string()),
                     "Neg" => match value {
                         ConstantValue::Integer(value) => value
                             .checked_neg()

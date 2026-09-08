@@ -601,29 +601,6 @@ pub fn install_generated_stage_values(destination: &mut [f64], values: &[f64], s
     }
 }
 
-/// Apply dependency-ordered generated parameter-default aliases.
-///
-/// Validation runs immediately after every copy, before a later alias may read
-/// the destination, preserving Verilog-A declaration-order semantics.
-#[doc(hidden)]
-pub fn install_generated_parameter_aliases(
-    values: &mut [f64],
-    aliases: &[(u16, u16)],
-    validate: fn(usize, f64) -> Result<(), String>,
-) -> Result<(), String> {
-    for &(destination, source) in aliases {
-        let source = *values
-            .get(usize::from(source))
-            .expect("generated parameter-alias source is outside parameter storage");
-        let destination = usize::from(destination);
-        *values
-            .get_mut(destination)
-            .expect("generated parameter-alias destination is outside parameter storage") = source;
-        validate(destination, source)?;
-    }
-    Ok(())
-}
-
 /// Look up a lower-case generated parameter name in parallel sorted tables.
 #[doc(hidden)]
 pub fn find_generated_parameter_index(
@@ -8970,43 +8947,6 @@ mod fixed_lane_tests {
     #[should_panic(expected = "generated stage slot is outside canonical storage")]
     fn generated_stage_installation_rejects_out_of_range_slots() {
         install_generated_stage_values(&mut [0.0; 2], &[1.0], &[2]);
-    }
-
-    #[test]
-    fn generated_parameter_aliases_are_ordered_and_validated_after_each_copy() {
-        fn validate(index: usize, value: f64) -> Result<(), String> {
-            if matches!(index, 2 | 3) && value == 3.5 {
-                Ok(())
-            } else {
-                Err(format!("unexpected alias {index}={value}"))
-            }
-        }
-
-        let mut values = [3.5, 0.0, 0.0, 0.0];
-        install_generated_parameter_aliases(&mut values, &[(2, 0), (3, 2)], validate)
-            .expect("alias chain");
-        assert_eq!(values, [3.5, 0.0, 3.5, 3.5]);
-    }
-
-    #[test]
-    fn generated_parameter_aliases_stop_before_later_operations_on_validation_error() {
-        fn reject_first(_: usize, _: f64) -> Result<(), String> {
-            Err("invalid default".to_string())
-        }
-
-        let mut values = [2.0, 0.0, 0.0];
-        assert_eq!(
-            install_generated_parameter_aliases(&mut values, &[(1, 0), (2, 1)], reject_first),
-            Err("invalid default".to_string())
-        );
-        assert_eq!(values, [2.0, 2.0, 0.0]);
-    }
-
-    #[test]
-    #[should_panic(expected = "generated parameter-alias source is outside parameter storage")]
-    fn generated_parameter_aliases_reject_out_of_range_sources() {
-        install_generated_parameter_aliases(&mut [0.0; 1], &[(0, 1)], |_, _| Ok(()))
-            .expect("validation does not fail");
     }
 
     #[test]

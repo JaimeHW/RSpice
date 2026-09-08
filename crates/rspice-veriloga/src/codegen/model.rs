@@ -891,3 +891,52 @@ pub enum Instruction {
     /// Skip this many following instructions. Generated jumps are forward only.
     Jump(usize),
 }
+
+impl CompiledModel {
+    /// Resolve a public parameter or alias, preferring exact spelling before
+    /// the case-insensitive spelling used by SPICE instance assignments.
+    pub fn parameter_index(&self, name: &str) -> Option<usize> {
+        // Verilog-A is case-sensitive but SPICE decks are not: prefer an
+        // exact match (parameter, then alias), then accept a
+        // case-insensitive one (industry netlists write PSP's TOXO as
+        // toxo). Aliases cannot collide with parameter names, so the
+        // ordering only arbitrates between case-insensitive candidates.
+        let params = &self.parameters;
+        params
+            .iter()
+            .enumerate()
+            .filter(|(_, p)| p.is_public)
+            .find_map(|(index, p)| (p.name == name).then_some(index))
+            .or_else(|| {
+                params
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, p)| p.is_public)
+                    .find_map(|(index, p)| {
+                        p.aliases
+                            .iter()
+                            .any(|a| a.as_str() == name)
+                            .then_some(index)
+                    })
+            })
+            .or_else(|| {
+                params
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, p)| p.is_public)
+                    .find_map(|(index, p)| p.name.eq_ignore_ascii_case(name).then_some(index))
+            })
+            .or_else(|| {
+                params
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, p)| p.is_public)
+                    .find_map(|(index, p)| {
+                        p.aliases
+                            .iter()
+                            .any(|a| a.eq_ignore_ascii_case(name))
+                            .then_some(index)
+                    })
+            })
+    }
+}
