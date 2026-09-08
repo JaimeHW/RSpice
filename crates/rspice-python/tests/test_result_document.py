@@ -333,11 +333,14 @@ def test_pss_local_source_mesh_survives_python_and_pickle(source):
     ("atan2(0*sin(2*pi*64meg*time+0.1),-1)", 0.0),
     ("atan(tan(2*pi*64meg*time+0.1))", 0.0),
     ("tanh(tan(2*pi*64meg*time+0.1))", 0.0),
+    ("atan(sin(2*pi*64meg*time+0.1)/cos(2*pi*64meg*time+0.1))", 0.0),
+    ("atan(1/cos(2*pi*64meg*time+0.1))", 0.0),
+    ("tanh(tan(2*pi*64meg*time+0.1)^2)", 0.6084407392048392),
     ("abs(cos(2*pi*64meg*time+0.1)+0.5*cos(2*pi*128meg*time+0.2)-0.25)<0.001", 0.000367552653101734),
     ("0.5*(1-pwrs(abs(cos(2*pi*64meg*time+0.1)+0.5*cos(2*pi*128meg*time+0.2)-0.25)-0.001,0))", 0.000367552653101734),
 ])
 def test_pss_nonlinear_time_features_survive_python_and_pickle(expression, expected_dc):
-    bounded_tangent = expression.startswith(("atan(tan(", "tanh(tan("))
+    bounded_tangent = expression.startswith(("atan(tan(", "tanh(tan(", "atan(sin(", "atan(1/cos("))
     options = ".options reltol=1e-4\n" if expected_dc == 0.0 else ""
     if bounded_tangent:
         options = ".options reltol=1e-4 vntol=1e-8\n"
@@ -354,10 +357,18 @@ def test_pss_nonlinear_time_features_survive_python_and_pickle(expression, expec
         assert abs(waveform.dc("out") - expected_dc) < (1e-6 if expected_dc < .001 else 1e-5)
         if bounded_tangent:
             # Analytic sawtooth extrema / independent one-sided RC convolution.
-            low, high = (-0.006425394680575902, 0.012850531334919424) if expression.startswith("atan(") else (-0.00597775083683904, 0.01040068378289610)
+            if expression.endswith("^2)"):
+                low, high = (0.6038757155372827, 0.6129976417956825)
+            elif expression.startswith("atan(1/cos("):
+                low, high = (-0.025340899420651316, 0.025340899420651316)
+            elif expression.startswith("atan("):
+                low, high = (-0.006425394680575902, 0.012850531334919424)
+            else:
+                low, high = (-0.00597775083683904, 0.01040068378289610)
             values = waveform.voltage_waveform("out")
-            assert abs(np.max(values) - high) < 1e-6
-            assert abs(np.min(values) - low) < 1e-6
+            tolerance = 1e-5 if expression.endswith("^2)") else 1e-6
+            assert abs(np.max(values) - high) < tolerance
+            assert abs(np.min(values) - low) < tolerance
         elif expected_dc == 0.0:
             high = np.pi * np.tanh((1 / 64e6) / (4 * 1000 * 159.154943091895e-12))
             values = waveform.voltage_waveform("out")

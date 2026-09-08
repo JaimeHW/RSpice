@@ -1161,10 +1161,10 @@ pub(crate) fn restart_checkpoint_identity(netlist: &Netlist) -> Option<String> {
 
 pub(crate) fn simulation_checkpoint_identity(config: &SimulationConfig) -> String {
     let mut hasher = blake3::Hasher::new();
-    // v16 carries defined infinite time-coordinate ranges through bounded
-    // compositions, while refusing indeterminate arithmetic before saturation.
+    // v17 resolves defined reciprocal and power coordinates through bounded
+    // compositions, including their internal pole events.
     // Earlier schedules can produce different accepted integration histories.
-    hasher.update(b"rspice-transient-resolved-config-v16\0");
+    hasher.update(b"rspice-transient-resolved-config-v17\0");
     hash_field(&mut hasher, "temperature", config.temperature.to_bits());
     hash_field(&mut hasher, "ramptime", config.ramptime.to_bits());
     hash_field(&mut hasher, "digital_delay_type", config.digital_delay_type);

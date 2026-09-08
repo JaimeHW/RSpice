@@ -413,15 +413,20 @@ mod tests {
             ),
             Err(BehavioralBreakpointError::Aborted)
         ));
-        assert!(matches!(
-            source("exp(1/(time-0.5))").refine_time_mesh(
-                &original,
-                NonlinearConvergenceCriteria::default(),
-                &ResourceLimits::default(),
-                &NoAbort
-            ),
-            Err(BehavioralBreakpointError::Invalid(_))
-        ));
+        for expression in ["exp(1/(time-0.5))", "1/(time-0.5)", "0*exp(1000+time)"] {
+            assert!(
+                matches!(
+                    source(expression).refine_time_mesh(
+                        &original,
+                        NonlinearConvergenceCriteria::default(),
+                        &ResourceLimits::default(),
+                        &NoAbort
+                    ),
+                    Err(BehavioralBreakpointError::Invalid(_))
+                ),
+                "{expression}"
+            );
+        }
     }
 
     #[test]
