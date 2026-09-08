@@ -1231,6 +1231,7 @@ impl CircuitData {
             rhs,
             voltages,
             DiodeStampMode::LimitedNewton,
+            false,
         )
     }
 
@@ -1245,7 +1246,44 @@ impl CircuitData {
         rhs: &mut [Value],
         voltages: &[Value],
     ) -> Result<(), String> {
-        self.try_stamp_nonlinear_with_diode_mode(matrix, rhs, voltages, DiodeStampMode::StaticProbe)
+        self.try_stamp_nonlinear_with_diode_mode(
+            matrix,
+            rhs,
+            voltages,
+            DiodeStampMode::StaticProbe,
+            false,
+        )
+    }
+
+    /// Leave promoted VBIC rows for the direct Newton-residual pass after
+    /// the remaining companion system has been converted to correction form.
+    pub(crate) fn try_stamp_nonlinear_deferred_vbic(
+        &mut self,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        voltages: &[Value],
+        static_probe: bool,
+    ) -> Result<(), String> {
+        let mode = if static_probe {
+            DiodeStampMode::StaticProbe
+        } else {
+            DiodeStampMode::LimitedNewton
+        };
+        self.try_stamp_nonlinear_with_diode_mode(matrix, rhs, voltages, mode, true)
+    }
+
+    pub(crate) fn stamp_promoted_vbic_correction(
+        &self,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        anchor: &[Value],
+    ) {
+        let mut stamper = StaticMatrixStamper { matrix, rhs };
+        for bjt in &self.bjts.devices {
+            if bjt.vbic_mna_promoted() {
+                bjt.stamp_vbic_mna_correction(&mut stamper, anchor);
+            }
+        }
     }
 
     fn try_stamp_nonlinear_with_diode_mode(
@@ -1254,6 +1292,7 @@ impl CircuitData {
         rhs: &mut [Value],
         voltages: &[Value],
         diode_stamp_mode: DiodeStampMode,
+        defer_vbic: bool,
     ) -> Result<(), String> {
         use crate::device::NonlinearDevice;
         match diode_stamp_mode {
@@ -1263,7 +1302,15 @@ impl CircuitData {
                     .stamp_static_probe_all_direct(matrix, rhs, voltages);
             }
         }
-        self.bjts.stamp_all_direct(matrix, rhs, voltages);
+        if defer_vbic {
+            for bjt in &self.bjts.devices {
+                if !bjt.vbic_mna_promoted() {
+                    bjt.stamp_direct(matrix, rhs, voltages);
+                }
+            }
+        } else {
+            self.bjts.stamp_all_direct(matrix, rhs, voltages);
+        }
         match diode_stamp_mode {
             DiodeStampMode::LimitedNewton => {
                 self.mosfets.stamp_all_direct(matrix, rhs, voltages);

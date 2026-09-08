@@ -268,6 +268,38 @@ mod wasm_tests {
     }
 
     #[wasm_bindgen_test]
+    fn vbic13_extreme_thermal_slope_retains_physical_currents_in_wasm() {
+        let netlist = rspice_core::Netlist::parse(
+            "VBIC direct residual in WASM\nVc c 0 -0.6\nVb b 0 -0.7\nVth th 0 DC 20 AC 1\nQ1 c b 0 0 th vm SW_ET=0 M=3\n\
+             .model vm PNP(LEVEL=12 IS=1e-16 IBEI=1e-18 IBCI=1e-18 ISP=0 IBEIP=0 VEF=1e15 VER=3 TCVEF=-0.049999999999999989 TCVER=-0.02 RCX=1 RCI=1 RBX=1 RBI=1 RE=1 RBP=0 RS=0 GMIN=0 TNOM=27 RTH=1000 CTH=1p CJE=1p CJC=1p TF=1n TR=2n QTF=0.3 TD=1n)\n.temp 27\n.options gmin=0\n.end\n",
+        ).unwrap();
+        let points = rspice_core::Engine::default()
+            .run_ac_with_abort(&netlist, &[1e8], &rspice_core::abort_signal::NoAbort)
+            .unwrap();
+        for (branch, expected) in [
+            (
+                "vc",
+                rspice_core::Complex64::new(-11073210790.749592, 8091064247.664278),
+            ),
+            (
+                "vb",
+                rspice_core::Complex64::new(-91165705.28041226, -9220857782.629837),
+            ),
+            (
+                "vth",
+                rspice_core::Complex64::new(-0.003, -0.0018849555921538759),
+            ),
+        ] {
+            let index = points[0]
+                .branch_names
+                .iter()
+                .position(|name| name.eq_ignore_ascii_case(branch))
+                .unwrap();
+            assert!((points[0].currents[index] - expected).norm() < 2e-6 * expected.norm());
+        }
+    }
+
+    #[wasm_bindgen_test]
     fn vbic13_early_voltage_cutoff_matches_xyce_in_wasm() {
         let netlist = rspice_core::Netlist::parse(
             "VBIC Early-voltage cutoff in WASM\nVc c 0 1.8\nVb b 0 0.7\nVth th 0 DC 20 AC 1\nQ1 c b 0 th vm SW_ET=1\n\

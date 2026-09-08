@@ -74,6 +74,43 @@ fn vbic_overlap_capacitance_has_positive_admittance_for_both_polarities() {
 }
 
 #[test]
+fn vbic13_extreme_early_thermal_slope_preserves_dc_and_ac_currents() {
+    // Independent 80-digit DC/derivative evaluation, followed by an
+    // algebraically reduced AC solve; Xyce 7.10 agrees within 2e-14.
+    for level in [11, 12] {
+        for (kind, polarity) in [("NPN", 1.0), ("PNP", -1.0)] {
+            let substrate = if level == 12 { " 0" } else { "" };
+            let deck = format!(
+                "* VBIC extreme Early slope\nVc c 0 {}\nVb b 0 {}\nVth th 0 DC 20 AC 1\nQ1 c b 0{substrate} th vm SW_ET=0 M=3\n\
+                .model vm {kind}(LEVEL={level} IS=1e-16 IBEI=1e-18 IBCI=1e-18 ISP=0 IBEIP=0 VEF=1e15 VER=3 TCVEF=-0.049999999999999989 TCVER=-0.02 RCX=1 RCI=1 RBX=1 RBI=1 RE=1 RBP=0 RS=0 GMIN=0 TNOM=27 RTH=1000 CTH=1p CJE=1p CJC=1p TF=1n TR=2n QTF=0.3 TD=1n)\n.temp 27\n.options gmin=0\n.end\n",
+                polarity * 0.6,
+                polarity * 0.7
+            );
+            let points = Engine::default()
+                .run_ac_with_abort(&parse(&deck), &[1e8], &rspice_core::abort_signal::NoAbort)
+                .unwrap();
+            for (branch, expected) in [
+                (
+                    "vc",
+                    polarity * Complex64::new(11073210790.749592, -8091064247.664278),
+                ),
+                (
+                    "vb",
+                    polarity * Complex64::new(91165705.28041226, 9220857782.629837),
+                ),
+                ("vth", Complex64::new(-0.003, -0.0018849555921538759)),
+            ] {
+                let actual = branch_current(&points[0], branch);
+                assert!(
+                    (actual - expected).norm() < 2e-6 * expected.norm(),
+                    "LEVEL={level} {kind} {branch}: {actual:?} != {expected:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn vbic13_early_voltage_cutoff_and_thermal_derivatives_match_xyce710() {
     // Xyce 7.10 differentiates the inactive reciprocal branch at exactly
     // zero Early voltage; a temperature probe must not turn it back on.

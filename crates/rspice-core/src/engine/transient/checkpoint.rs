@@ -1185,7 +1185,8 @@ pub(crate) fn simulation_checkpoint_identity(config: &SimulationConfig) -> Strin
     // v32 implements VBIC 1.3 PNJMAXI and per-junction expLinA transitions.
     // v33 retains VBIC 1.3's floored electrical resistance branches.
     // v34 differentiates the Early-voltage cutoff without collapsing thermal probes.
-    hasher.update(b"rspice-transient-resolved-config-v34\0");
+    // v35 preserves physical VBIC currents in operating-point correction solves.
+    hasher.update(b"rspice-transient-resolved-config-v35\0");
     hash_field(&mut hasher, "temperature", config.temperature.to_bits());
     hash_field(&mut hasher, "ramptime", config.ramptime.to_bits());
     hash_field(&mut hasher, "digital_delay_type", config.digital_delay_type);

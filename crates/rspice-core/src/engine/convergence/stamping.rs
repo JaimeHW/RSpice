@@ -14,47 +14,6 @@ impl Engine {
     }
 
     #[inline]
-    pub(in crate::engine::convergence) fn try_stamp_nonlinear_devices_for_dc(
-        &self,
-        circuit: &mut CircuitData,
-        matrix: &mut StaticMatrix,
-        rhs: &mut [Value],
-        solution: &[Value],
-    ) -> Result<(), SimulationError> {
-        let junction_gmin =
-            self.effective_device_junction_gmin(self.config.convergence_config.gmin_target);
-        self.try_stamp_nonlinear_devices_for_dc_with_junction_gmin(
-            circuit,
-            matrix,
-            rhs,
-            solution,
-            junction_gmin,
-        )
-    }
-
-    #[inline]
-    pub(in crate::engine::convergence) fn try_stamp_nonlinear_devices_for_dc_with_junction_gmin(
-        &self,
-        circuit: &mut CircuitData,
-        matrix: &mut StaticMatrix,
-        rhs: &mut [Value],
-        solution: &[Value],
-        junction_gmin: Value,
-    ) -> Result<(), SimulationError> {
-        self.try_stamp_nonlinear_devices_for_operating_point(
-            circuit,
-            matrix,
-            rhs,
-            OperatingPointProbe {
-                solution,
-                time: 0.0,
-                analysis: crate::xspice::AnalysisType::DcOp,
-                junction_gmin,
-            },
-        )
-    }
-
-    #[inline]
     pub(in crate::engine::convergence) fn try_stamp_static_probe_nonlinear_devices_for_dc(
         &self,
         circuit: &mut CircuitData,
@@ -128,44 +87,64 @@ impl Engine {
         rhs: &mut [Value],
         probe: OperatingPointProbe<'_>,
     ) -> Result<(), SimulationError> {
-        let OperatingPointProbe {
-            solution,
-            time,
-            analysis,
-            junction_gmin,
-        } = probe;
-        circuit.set_b3soi_operating_point_mode(true);
-        circuit.set_xyce_memristor_operating_point_mode(true);
-        circuit.set_semiconductor_junction_gmin(junction_gmin);
-        circuit.update_nonlinear(solution);
-        circuit.update_bjt_static_linearizations(solution);
-        circuit.update_b3soi_static_linearizations(solution);
-        circuit.update_jfet_static_linearizations(solution);
-        circuit.stamp_generic_switches_with_solution(matrix, rhs, solution, time);
-        circuit
-            .try_stamp_static_probe_nonlinear(matrix, rhs, solution)
-            .map_err(SimulationError::Circuit)?;
-        circuit
-            .stamp_behavioral_static_probe(matrix, rhs, solution, time, analysis)
-            .map_err(SimulationError::Circuit)?;
-        if circuit.has_xspice_devices() {
-            circuit.evaluate_xspice_with_analysis(time, 0.0, solution, analysis);
-            circuit.stamp_xspice(matrix, rhs);
-        }
-        #[cfg(feature = "veriloga")]
-        if circuit.has_mixed_signal_hosts() {
-            circuit.stamp_mixed_operating_point(matrix, rhs, solution, time)?;
-        }
-        Ok(())
+        self.try_stamp_operating_point_devices(circuit, matrix, rhs, probe, true, false)
     }
 
-    #[inline]
-    pub(in crate::engine::convergence) fn try_stamp_nonlinear_devices_for_operating_point(
+    /// Complete a partially assembled operating-point system in correction
+    /// coordinates. VBIC contributes its physical currents after the other
+    /// devices' companions have been converted, avoiding large J*x-I sources.
+    pub(in crate::engine::convergence) fn try_stamp_operating_point_correction(
         &self,
         circuit: &mut CircuitData,
         matrix: &mut StaticMatrix,
         rhs: &mut [Value],
         probe: OperatingPointProbe<'_>,
+        static_probe: bool,
+        correction_rhs: &mut Vec<Value>,
+    ) -> Result<(), SimulationError> {
+        let solution = probe.solution;
+        self.try_stamp_operating_point_devices(circuit, matrix, rhs, probe, static_probe, true)?;
+        matrix.correction_rhs_into(rhs, solution, correction_rhs)?;
+        circuit.stamp_promoted_vbic_correction(matrix, correction_rhs, solution);
+        Ok(())
+    }
+
+    /// Assemble an operating-point Newton system using direct correction
+    /// coordinates when promoted VBIC devices need them. The caller must
+    /// apply constraints and interpret the solve in the same coordinates.
+    pub(in crate::engine::convergence) fn try_stamp_operating_point_newton_system(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        probe: OperatingPointProbe<'_>,
+        static_probe: bool,
+        correction_rhs: &mut Vec<Value>,
+    ) -> Result<(), SimulationError> {
+        if Self::requires_vbic_correction_form(circuit) {
+            self.try_stamp_operating_point_correction(
+                circuit,
+                matrix,
+                rhs,
+                probe,
+                static_probe,
+                correction_rhs,
+            )?;
+            rhs.copy_from_slice(correction_rhs);
+            Ok(())
+        } else {
+            self.try_stamp_operating_point_devices(circuit, matrix, rhs, probe, static_probe, false)
+        }
+    }
+
+    fn try_stamp_operating_point_devices(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        probe: OperatingPointProbe<'_>,
+        static_probe: bool,
+        defer_vbic: bool,
     ) -> Result<(), SimulationError> {
         let OperatingPointProbe {
             solution,
@@ -177,20 +156,35 @@ impl Engine {
         // public convergence metric at this common assembly boundary so DC,
         // startup, and continuation paths cannot silently omit successful
         // iterations or double-count residual-only probes.
-        self.record_convergence(|quality| {
-            quality.total_iterations = quality.total_iterations.saturating_add(1);
-        });
+        if !static_probe {
+            self.record_convergence(|quality| {
+                quality.total_iterations = quality.total_iterations.saturating_add(1);
+            });
+        }
         circuit.set_b3soi_operating_point_mode(true);
         circuit.set_xyce_memristor_operating_point_mode(true);
         circuit.set_semiconductor_junction_gmin(junction_gmin);
         circuit.update_nonlinear(solution);
+        if static_probe {
+            circuit.update_bjt_static_linearizations(solution);
+            circuit.update_b3soi_static_linearizations(solution);
+            circuit.update_jfet_static_linearizations(solution);
+        }
         circuit.stamp_generic_switches_with_solution(matrix, rhs, solution, time);
-        circuit
-            .try_stamp_nonlinear(matrix, rhs, solution)
-            .map_err(SimulationError::Circuit)?;
-        circuit
-            .stamp_behavioral(matrix, rhs, solution, time, analysis)
-            .map_err(SimulationError::Circuit)?;
+        if defer_vbic {
+            circuit.try_stamp_nonlinear_deferred_vbic(matrix, rhs, solution, static_probe)
+        } else if static_probe {
+            circuit.try_stamp_static_probe_nonlinear(matrix, rhs, solution)
+        } else {
+            circuit.try_stamp_nonlinear(matrix, rhs, solution)
+        }
+        .map_err(SimulationError::Circuit)?;
+        if static_probe {
+            circuit.stamp_behavioral_static_probe(matrix, rhs, solution, time, analysis)
+        } else {
+            circuit.stamp_behavioral(matrix, rhs, solution, time, analysis)
+        }
+        .map_err(SimulationError::Circuit)?;
         if circuit.has_xspice_devices() {
             circuit.evaluate_xspice_with_analysis(time, 0.0, solution, analysis);
             circuit.stamp_xspice(matrix, rhs);

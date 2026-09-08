@@ -1912,7 +1912,13 @@ fn vbic13_resistance_floor_preserves_small_current_precision() {
                 1.8 * p,
                 0.65 * p,
             );
-            let result = op_result(&deck);
+            let netlist = Netlist::parse(&deck).unwrap();
+            let mut unconditioned = SimulationConfig::default();
+            // The independent reference has no nodal shunts. Deck GMIN
+            // controls junction leakage, separately from this solver floor.
+            unconditioned.convergence_config.gmin_target = 0.0;
+            let result = Engine::new(unconditioned).run_dc_op(&netlist).unwrap();
+            let conditioned = op_result(&deck);
             for (branch, expected) in [
                 ("Vc", -7.045_220_149_350_812e-8),
                 ("Vb", -8.783310826230572e-8),
@@ -1922,6 +1928,17 @@ fn vbic13_resistance_floor_preserves_small_current_precision() {
                     (actual - p * expected).abs() < 1e-7 * expected.abs(),
                     "LEVEL={level} {kind} {branch}: {actual:e} != {:e}",
                     p * expected
+                );
+                // The default 1 fS conditioning is below the ULP of a
+                // 3 kS parasitic diagonal, but its current must survive:
+                // four collector nodes at 1.8 V, three base nodes at 0.65 V.
+                let shunt_current = if branch == "Vc" { 7.2e-15 } else { 1.95e-15 };
+                assert!(
+                    (conditioned.branch_current_named(branch).unwrap() - actual
+                        + p * shunt_current)
+                        .abs()
+                        < 1e-20,
+                    "LEVEL={level} {kind} {branch}: conditioning current was lost",
                 );
             }
         }
