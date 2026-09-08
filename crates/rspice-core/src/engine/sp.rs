@@ -108,7 +108,8 @@ impl Engine {
 
         // Only the AC reference-plane solve needs the Thevenin normalization.
         // Its bias, model state, topology and factorization are shared by all
-        // excitation columns. The original sources still define Norton Cy.
+        // excitation columns. Noise retains the original deck's bias and
+        // converts physical generator currents back to the DUT Norton plane.
         let mut base = netlist.clone();
         let normalized = normalize_ports(&mut base, &ports).map_err(|error| {
             SimulationError::Netlist(format!(".SP port normalization failed: {error}"))
@@ -154,17 +155,19 @@ impl Engine {
                 .iter()
                 .map(|port| port.source_name.clone())
                 .collect::<Vec<_>>();
-            let PreparedPortNoise {
-                circuit,
-                matrix,
-                linearization,
-            } = engine.prepare_port_noise_analysis(
+            let mut prepared = engine.prepare_port_noise_analysis(
                 netlist,
                 &names,
                 frequencies.len(),
                 temperature,
                 abort,
             )?;
+            prepared.use_sp_reference_planes(netlist, &ports, abort)?;
+            let PreparedPortNoise {
+                circuit,
+                matrix,
+                linearization,
+            } = prepared;
             (Some(circuit), Some(matrix), Some(linearization))
         } else {
             (None, None, None)

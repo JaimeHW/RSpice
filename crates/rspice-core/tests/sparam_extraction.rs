@@ -269,3 +269,160 @@ fn xyce_named_gnd_port_is_an_ordinary_measured_node() {
         );
     }
 }
+
+#[test]
+fn sp_noise_conversion_preserves_standalone_probes_and_cancellation() {
+    use rspice_core::abort_signal::CountingAbort;
+    let netlist =
+        Netlist::parse("* Physical noise probe\nP1 p 0 PORT=1 Z0=50\nR1 p 0 100\n.end\n").unwrap();
+    let engine = Engine::default();
+    let temperature = 300.15;
+    let kt4 = 4.0 * 1.380649e-23 * temperature;
+    let standalone = engine
+        .run_port_noise_correlation(&netlist, &["P1".into()], &[10.0], temperature)
+        .unwrap();
+    // The standalone API observes current through the actual voltage source:
+    // both resistors remain in series and both contribute thermal noise.
+    assert!((standalone[0].current_correlation[0][0].re / (kt4 / 150.0) - 1.0).abs() < 1e-10);
+    let count = CountingAbort::new(usize::MAX);
+    let result = engine
+        .run_sp_over_grid_with_abort(&netlist, &[10.0], true, &count)
+        .unwrap();
+    let intrinsic = result.port_noise.unwrap().points[0].current_correlation[0][0];
+    assert!((intrinsic.re / (kt4 / 100.0) - 1.0).abs() < 1e-10);
+    for threshold in 0..count.count() {
+        let abort = CountingAbort::new(threshold);
+        let error = engine
+            .run_sp_over_grid_with_abort(&netlist, &[10.0], true, &abort)
+            .unwrap_err();
+        assert!(
+            matches!(error, SimulationError::Aborted),
+            "poll {threshold}: {error}"
+        );
+        assert_eq!(abort.polls_after_abort(), 0, "poll {threshold}");
+    }
+}
+
+#[test]
+fn sp_noise_rejects_a_shorted_reference_plane_without_a_norton_representation() {
+    let netlist = Netlist::parse("* Shorted port\nP1 0 0 PORT=1 Z0=50\n.end\n").unwrap();
+    let error = Engine::default()
+        .run_sp_over_grid_with_abort(&netlist, &[10.0], true, &rspice_core::NoAbort)
+        .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("no finite Norton representation"),
+        "{error}"
+    );
+}
+
+#[test]
+#[cfg(all(
+    feature = "veriloga-model-diode-cmc",
+    feature = "veriloga-builtins-noise"
+))]
+fn sp_physical_ports_preserve_generated_diode_noise_at_the_same_bias() {
+    let device = "D1 p 0 dmod\n.model dmod D level=2002\n.end\n";
+    let physical = Netlist::parse(&format!(
+        "* Generated diode\nP1 p 0 DC 0.7 PORT=1 Z0=50\n{device}",
+    ))
+    .unwrap();
+    let engine = Engine::default();
+    let bias = engine.run_dc_op(&physical).unwrap();
+    let index = bias
+        .node_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case("p"))
+        .unwrap();
+    let ideal = Netlist::parse(&format!(
+        "* Same diode bias with a short-circuit probe\nV1 p 0 DC {:.17e}\n{device}",
+        bias.node_voltages[index],
+    ))
+    .unwrap();
+    let frequencies = [1e3, 1e6];
+    let reference = engine
+        .run_port_noise_correlation(&ideal, &["V1".into()], &frequencies, 300.15)
+        .unwrap();
+    let actual = engine
+        .run_sp_over_grid_with_abort(&physical, &frequencies, true, &rspice_core::NoAbort)
+        .unwrap()
+        .port_noise
+        .unwrap();
+    for (actual, reference) in actual.points.iter().zip(reference) {
+        let expected = reference.current_correlation[0][0].re;
+        assert!(expected > 0.0 && expected.is_finite(), "{expected}");
+        assert!((actual.current_correlation[0][0].re / expected - 1.0).abs() < 1e-7);
+    }
+}
+
+#[test]
+fn sp_noise_excludes_port_loading_and_termination_noise() {
+    // A passive RC star has Cy = 4 k T Re(Y). Eliminating the star node gives
+    // Yij = delta_ij gi - gi gj / (g_ground + sum(g) + j omega C).
+    // This independent expression covers complex transfer, cross correlation,
+    // unequal impedances, differential planes and mixed port realizations.
+    let temperature = 300.15;
+    let kt4 = 4.0 * 1.380649e-23 * temperature;
+    let frequencies = [1e5, 1e6, 1e7];
+    for count in 1..=3 {
+        let conductance = (0..count)
+            .map(|index| 1.0 / (30.0 + 10.0 * index as f64))
+            .collect::<Vec<_>>();
+        let total = 0.01 + conductance.iter().sum::<f64>();
+        for mask in 0..=(1 << count) {
+            let configured = mask == 1 << count;
+            let mut deck = String::from("* Analytic DUT noise\nRg mid 0 100\nC1 mid 0 1n\n");
+            let mut ports = Vec::new();
+            for (index, &g) in conductance.iter().enumerate() {
+                let number = index + 1;
+                let z0 = 50.0 + 25.0 * index as f64;
+                deck.push_str(&format!(
+                    "R{number} p{number} mid {}\nVREF{number} ref{number} 0 DC {}\n",
+                    1.0 / g,
+                    0.1 * number as f64,
+                ));
+                if !configured {
+                    let source = if mask & (1 << index) == 0 { "V" } else { "P" };
+                    deck.push_str(&format!(
+                        "{source}{number} p{number} ref{number} PORTNUM={number} Z0={z0}\n"
+                    ));
+                }
+                ports.push(Port {
+                    number,
+                    node_pos: format!("p{number}"),
+                    node_neg: format!("ref{number}"),
+                    z0,
+                });
+            }
+            deck.push_str(".end\n");
+            let mut netlist = Netlist::parse(&deck).unwrap();
+            if configured {
+                declare_ports_with_abort(&mut netlist, &ports, &rspice_core::NoAbort).unwrap();
+            }
+            let run = Engine::default()
+                .run_sp_over_grid_with_abort(&netlist, &frequencies, true, &rspice_core::NoAbort)
+                .unwrap_or_else(|error| panic!("count={count}, mask={mask}: {error}"));
+            let noise = run.port_noise.unwrap();
+            for point in noise.points {
+                let denominator =
+                    Complex64::new(total, std::f64::consts::TAU * point.frequency * 1e-9);
+                for row in 0..count {
+                    for column in 0..count {
+                        let admittance =
+                            Complex64::new(if row == column { conductance[row] } else { 0.0 }, 0.0)
+                                - conductance[row] * conductance[column] / denominator;
+                        let expected = kt4 * admittance.re;
+                        let actual = point.current_correlation[row][column];
+                        assert!(
+                            (actual.re - expected).abs() < 1e-10 * expected.abs()
+                                && actual.im.abs() < 1e-10 * expected.abs(),
+                            "count={count}, mask={mask}, f={}, Cy({row},{column})={actual}, expected {expected}",
+                            point.frequency,
+                        );
+                    }
+                }
+            }
+        }
+    }
+}

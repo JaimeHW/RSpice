@@ -6090,7 +6090,7 @@ fn parse_xyce_port(
     };
 
     elements.push(Element {
-        name,
+        name: name.clone(),
         kind: ElementKind::VoltageSource(source_spec),
         nodes: vec![internal_node.clone(), node_neg],
         provenance: crate::netlist::ElementProvenance::Authored,
@@ -6105,7 +6105,10 @@ fn parse_xyce_port(
             deferred_params: Vec::new(),
         },
         nodes: vec![node_pos, internal_node],
-        provenance: crate::netlist::ElementProvenance::Authored,
+        provenance: ElementProvenance::GeneratedPassiveHelper {
+            owner: name,
+            role: GeneratedPassiveHelperRole::SeriesResistance,
+        },
     });
 
     Ok(())

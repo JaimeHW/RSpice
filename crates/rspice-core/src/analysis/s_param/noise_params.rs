@@ -94,8 +94,19 @@ pub fn derive_two_port_noise(
     let knorm = 4.0 * crate::constants::K_BOLTZMANN * temperature;
     let c11 = cy[0][0] / knorm;
     let c12 = cy[0][1] / knorm;
+    let c21 = cy[1][0] / knorm;
     let c22 = cy[1][1] / knorm;
+    if [c11, c12, c21, c22]
+        .into_iter()
+        .any(|value| !finite_complex(value))
+    {
+        return TwoPortNoise::undefined();
+    }
     let covariance_scale = c11.norm().max(c12.norm()).max(c22.norm());
+    let covariance_tolerance = covariance_scale * f64::EPSILON * 256.0;
+    if (c21 - c12.conj()).norm() > covariance_tolerance {
+        return TwoPortNoise::undefined();
+    }
 
     // A noiseless two-port has F=Fmin=1 and Rn=0. Sopt is non-unique;
     // zero is the deterministic matched-source convention used here.
@@ -109,7 +120,6 @@ pub fn derive_two_port_noise(
         };
     }
 
-    let covariance_tolerance = covariance_scale * f64::EPSILON * 256.0;
     if c11.re < -covariance_tolerance
         || c22.re <= covariance_tolerance
         || c11.im.abs() > covariance_tolerance
@@ -123,14 +133,19 @@ pub fn derive_two_port_noise(
         return TwoPortNoise::undefined();
     }
     let ycor = admittance[0][0] - (c12 / c22.re) * admittance[1][0];
-    let gu = c11.re - noise_resistance * (admittance[0][0] - ycor).norm_sqr();
-    let raw_radicand = ycor.re * ycor.re + gu / noise_resistance;
-    let radicand_scale = ycor.norm_sqr().max((gu / noise_resistance).abs());
-    let radicand_tolerance = radicand_scale * f64::EPSILON * 1024.0;
-    if !raw_radicand.is_finite() || raw_radicand < -radicand_tolerance {
+    // gu is the covariance Schur complement c11 - |c12|^2/c22.
+    // Computing it through Y adds avoidable cancellation. A fully coherent
+    // source has gu=0: judge its roundoff against the original covariance,
+    // not the nearly zero residual. A materially negative value is not PSD.
+    let gu = c11.re - (c12 / c22.re).norm_sqr() * c22.re;
+    if !gu.is_finite() || gu < -covariance_tolerance {
         return TwoPortNoise::undefined();
     }
-    let ysopt = Complex64::new(raw_radicand.max(0.0).sqrt(), -ycor.im);
+    let radicand = ycor.re * ycor.re + gu.max(0.0) / noise_resistance;
+    if !radicand.is_finite() {
+        return TwoPortNoise::undefined();
+    }
+    let ysopt = Complex64::new(radicand.sqrt(), -ycor.im);
     let y0 = Complex64::new(1.0 / input_reference_impedance, 0.0);
     let reflection_denominator = y0 + ysopt;
     if reflection_denominator.norm_sqr() <= f64::MIN_POSITIVE {
@@ -246,6 +261,19 @@ mod tests {
         let nan = vec![vec![Complex64::new(f64::NAN, 0.0); 2]; 2];
         assert!(!derive_two_port_noise(&nan, &cy, 50.0, 300.15).valid);
         assert!(!derive_two_port_noise(&y, &nan, 50.0, 300.15).valid);
+    }
+
+    #[test]
+    fn invalid_covariances_are_not_noise_parameter_sets() {
+        let (y, cy) = series_resistor(1.0, 300.15);
+        let mut asymmetric = cy.clone();
+        asymmetric[1][0] = -asymmetric[1][0];
+        assert!(!derive_two_port_noise(&y, &asymmetric, 50.0, 300.15).valid);
+
+        let mut indefinite = cy.clone();
+        indefinite[0][1] = cy[0][0] * 2.0;
+        indefinite[1][0] = indefinite[0][1];
+        assert!(!derive_two_port_noise(&y, &indefinite, 50.0, 300.15).valid);
     }
 
     #[test]

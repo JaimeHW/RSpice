@@ -92,10 +92,19 @@ analog begin
 end
 endmodule"#,
     );
-    for (phase, do_noise) in [(0, false), (1, false), (0, true), (1, true), (3, true)] {
+    for (phase, do_noise, source) in [
+        (0, false, "V"),
+        (1, false, "V"),
+        (0, true, "V"),
+        (1, true, "V"),
+        (3, true, "V"),
+        (0, true, "P"),
+        (1, true, "P"),
+        (3, true, "P"),
+    ] {
         for early in [false, true] {
             let netlist = Netlist::parse(&format!(
-                "* Atomic SP frequency point\nV1 p1 0 AC 1 portnum=1 z0=50\nV2 p2 0 AC 0 portnum=2 z0=50\nX1 p1 p2 sp_frequency_finish finish_phase={phase} finish_early={}\n.va \"{}\" sp_frequency_finish\n.end\n",
+                "* Atomic SP frequency point\n{source}1 p1 0 AC 1 portnum=1 z0=50\n{source}2 p2 0 AC 0 portnum=2 z0=50\nX1 p1 p2 sp_frequency_finish finish_phase={phase} finish_early={}\n.va \"{}\" sp_frequency_finish\n.end\n",
                 usize::from(early), deck_path(&model),
             )).unwrap();
             let mut config = SimulationConfig::default();
@@ -167,6 +176,36 @@ endmodule"#,
                 }
             }
         }
+    }
+    let _ = std::fs::remove_file(model);
+}
+
+#[test]
+fn sp_physical_port_noise_retains_bias_and_uses_the_noise_operator() {
+    let model = write_model(
+        "sp_biased_noise",
+        r#"module sp_biased_noise(p,n);
+inout p,n; electrical p,n;
+analog begin
+    I(p,n) <+ ((analysis("noise") && !analysis("static")) ? 0.04 : 0.02)*V(p,n);
+    I(p,n) <+ white_noise(V(p,n)*V(p,n)*1e-20, "biased");
+end
+endmodule"#,
+    );
+    let netlist = Netlist::parse(&format!(
+        "* Preserve physical port bias\nP1 p 0 DC 1 PORT=1 Z0=50\nX1 p 0 sp_biased_noise\n.va \"{}\" sp_biased_noise\n.end\n",
+        deck_path(&model),
+    )).unwrap();
+    let result = Engine::default()
+        .run_sp_over_grid_with_abort(&netlist, &[10.0, 20.0], true, &NoAbort)
+        .unwrap();
+    for point in result.port_noise.unwrap().points {
+        // The 1 V generator and two equal DC resistances put the DUT at 0.5 V.
+        // Its Norton PSD is Vbias^2 * 1e-20 even though the noise-phase
+        // conductance (0.04 S) differs from both the DC and AC value (0.02 S).
+        let actual = point.current_correlation[0][0];
+        assert!((actual.re / 2.5e-21 - 1.0).abs() < 1e-10, "{actual}");
+        assert_eq!(actual.im, 0.0);
     }
     let _ = std::fs::remove_file(model);
 }
@@ -284,7 +323,7 @@ end
 endmodule"#,
     );
     let netlist = Netlist::parse(&format!(
-        "* Parallel SP with independent columns\nV1 p1 0 AC 7 portnum=1 z0=50\nV2 p2 0 AC 9 portnum=2 z0=50\nIextra p1 p2 AC 11\nVextra aux 0 AC 100\nRextra aux 0 1k\nC1 p1 p2 1u\nX1 p1 p2 sp_passive_parallel\n.va \"{}\" sp_passive_parallel\n.end\n",
+        "* Parallel SP with independent columns\nP1 p1 0 AC 7 portnum=1 z0=50\nP2 p2 0 AC 9 portnum=2 z0=50\nIextra p1 p2 AC 11\nVextra aux 0 AC 100\nRextra aux 0 1k\nC1 p1 p2 1u\nX1 p1 p2 sp_passive_parallel\n.va \"{}\" sp_passive_parallel\n.end\n",
         deck_path(&model),
     )).unwrap();
     let frequencies = (1..=25)

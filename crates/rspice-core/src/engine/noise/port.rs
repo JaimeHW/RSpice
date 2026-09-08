@@ -1,6 +1,10 @@
 //! Port-noise preparation and frequency evaluation, shared by standalone Cy and SP.
 
 use super::*;
+use crate::analysis::s_param::{
+    NetworkError, PortRealization, SParameterPort, invert_complex_matrix_with_abort,
+};
+use crate::netlist::{ElementKind, ElementProvenance, GeneratedPassiveHelperRole};
 use crate::solver::{ComplexMatrix, StaticMatrix};
 
 pub(in crate::engine) struct PreparedPortNoise {
@@ -20,11 +24,103 @@ pub(in crate::engine) struct PortNoiseLinearization {
     generated_devices: HashSet<String>,
     port_rhs: Vec<Complex64>,
     num_ports: usize,
+    norton_nodes: Vec<(usize, usize)>,
+    termination_devices: HashSet<String>,
 }
 
 pub(in crate::engine) struct PortNoiseWorkspace {
     ac_matrix: ComplexMatrix,
     port_adjoint: Vec<Complex64>,
+    adjoint_column: Vec<Complex64>,
+}
+
+impl PreparedPortNoise {
+    /// Refer SP noise to the DUT while retaining the physical port's DC bias.
+    /// Standalone source-current noise deliberately keeps its original probes.
+    pub(in crate::engine) fn use_sp_reference_planes(
+        &mut self,
+        netlist: &Netlist,
+        ports: &[SParameterPort],
+        abort: &dyn AbortSignal,
+    ) -> Result<(), SimulationError> {
+        if !ports
+            .iter()
+            .any(|port| port.realization == PortRealization::Thevenin)
+        {
+            return Ok(());
+        }
+        let ground = netlist.ground_policy();
+        let node_id = |name: &str| {
+            let name = ground.canonical_node(name);
+            if name == "0" {
+                return Ok(0);
+            }
+            self.circuit.get_node_by_name(name).ok_or_else(|| {
+                SimulationError::Circuit(format!(
+                    "SP noise reference-plane node '{name}' was not found"
+                ))
+            })
+        };
+        for port in ports {
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
+            self.linearization
+                .norton_nodes
+                .push((node_id(&port.node_pos)?, node_id(&port.node_neg)?));
+            if port.realization == PortRealization::Ideal {
+                continue;
+            }
+            let source = netlist
+                .elements
+                .iter()
+                .find(|element| element.name.eq_ignore_ascii_case(&port.source_name))
+                .ok_or_else(|| {
+                    SimulationError::Circuit(format!(
+                        "SP noise source '{}' was not found",
+                        port.source_name
+                    ))
+                })?;
+            let mut termination = None;
+            for element in &netlist.elements {
+                if abort.is_aborted() {
+                    return Err(SimulationError::Aborted);
+                }
+                if !matches!(&element.provenance, ElementProvenance::GeneratedPassiveHelper {
+                    owner, role: GeneratedPassiveHelperRole::SeriesResistance,
+                } if owner.eq_ignore_ascii_case(&port.source_name))
+                {
+                    continue;
+                }
+                let valid = matches!(&element.kind, ElementKind::Resistor { value, .. } if *value == port.z0)
+                    && element.nodes.len() == 2
+                    && source.nodes.first().is_some_and(|internal| {
+                        (element.nodes[0].eq_ignore_ascii_case(&port.node_pos)
+                            && element.nodes[1].eq_ignore_ascii_case(internal))
+                            || (element.nodes[1].eq_ignore_ascii_case(&port.node_pos)
+                                && element.nodes[0].eq_ignore_ascii_case(internal))
+                    });
+                if !valid
+                    || termination
+                        .replace(element.name.to_ascii_lowercase())
+                        .is_some()
+                {
+                    return Err(SimulationError::Circuit(format!(
+                        "SP noise port '{}' has an invalid reference-impedance helper",
+                        port.source_name
+                    )));
+                }
+            }
+            let termination = termination.ok_or_else(|| {
+                SimulationError::Circuit(format!(
+                    "SP noise port '{}' has no owned reference-impedance resistor",
+                    port.source_name,
+                ))
+            })?;
+            self.linearization.termination_devices.insert(termination);
+        }
+        Ok(())
+    }
 }
 
 impl Engine {
@@ -32,9 +128,11 @@ impl Engine {
     ///
     /// Every entry is a complex cross-power spectral density in A²/Hz using
     /// `E[I_i * conj(I_j)]`. Each named port must be an independent voltage
-    /// source: its branch enforces zero small-signal port voltage while its
-    /// branch current observes the equivalent Norton noise current. This is
-    /// the `Cy` matrix used by SPICE `.SP ... donoise` analysis.
+    /// source: its branch enforces zero small-signal voltage at its terminals.
+    /// A source directly across the DUT observes its Norton current noise.
+    /// A source behind a series resistor observes loaded current noise,
+    /// including that resistor's noise. Use the SP runner to refer such a
+    /// physical port to the DUT reference plane.
     pub fn run_port_noise_correlation(
         &self,
         netlist: &Netlist,
@@ -269,6 +367,8 @@ impl Engine {
                 generated_devices: generated_veriloga_device_names,
                 port_rhs,
                 num_ports,
+                norton_nodes: Vec::new(),
+                termination_devices: HashSet::new(),
             },
         })
     }
@@ -298,7 +398,74 @@ impl PortNoiseLinearization {
         PortNoiseWorkspace {
             ac_matrix: ComplexMatrix::from_real_structure(matrix),
             port_adjoint: Vec::with_capacity(self.port_rhs.len()),
+            adjoint_column: vec![Complex64::new(0.0, 0.0); self.num_ports],
         }
+    }
+
+    fn refer_adjoint_to_dut(
+        &self,
+        workspace: &mut PortNoiseWorkspace,
+        frequency: Value,
+        abort: &dyn AbortSignal,
+    ) -> Result<(), SimulationError> {
+        if self.norton_nodes.is_empty() {
+            return Ok(());
+        }
+        // L observes currents through the loaded port generators. Injecting a
+        // unit current at each DUT plane gives H = L B. Any DUT Norton source
+        // therefore produces measured current H i_n; H^-1 L is the unloaded
+        // Norton observation. Obtain H from the *noise* operator, since a
+        // model can have different AC/noise conductance at the same bias.
+        let size = self.bias.len();
+        let mut transfer = Vec::with_capacity(self.num_ports);
+        for adjoint in workspace.port_adjoint.chunks_exact(size) {
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
+            transfer.push(
+                self.norton_nodes
+                    .iter()
+                    .map(|&(positive, negative)| {
+                        Engine::noise_transfer_from_adjoint(adjoint, positive, negative)
+                    })
+                    .collect(),
+            );
+        }
+        let inverse = invert_complex_matrix_with_abort(&transfer, abort)
+            .map_err(|error| match error {
+                NetworkError::Aborted => SimulationError::Aborted,
+                other => SimulationError::Circuit(format!("SP noise reference-plane conversion failed at {frequency} Hz: {other}")),
+            })?
+            .ok_or_else(|| SimulationError::Circuit(format!(
+                "SP noise reference planes have no finite Norton representation at {frequency} Hz"
+            )))?;
+        // Transform in place with only one saved column, avoiding a second
+        // ports-by-unknowns allocation for every frequency and worker.
+        for unknown in 0..size {
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
+            for (port, value) in workspace.adjoint_column.iter_mut().enumerate() {
+                *value = workspace.port_adjoint[port * size + unknown];
+            }
+            for (port, weights) in inverse.iter().enumerate() {
+                let mut sum = Complex64::new(0.0, 0.0);
+                let mut correction = Complex64::new(0.0, 0.0);
+                for (&weight, &value) in weights.iter().zip(&workspace.adjoint_column) {
+                    let term = weight * value;
+                    crate::numerics::compensated_add(&mut sum.re, &mut correction.re, term.re);
+                    crate::numerics::compensated_add(&mut sum.im, &mut correction.im, term.im);
+                }
+                let value = sum + correction;
+                if !value.re.is_finite() || !value.im.is_finite() {
+                    return Err(SimulationError::Circuit(format!(
+                        "SP noise reference-plane conversion overflowed at {frequency} Hz"
+                    )));
+                }
+                workspace.port_adjoint[port * size + unknown] = value;
+            }
+        }
+        Ok(())
     }
 
     pub(in crate::engine) fn solve(
@@ -395,6 +562,7 @@ impl PortNoiseLinearization {
             Err(error) => return Err(SimulationError::Solver(error)),
         }
 
+        self.refer_adjoint_to_dut(workspace, frequency, abort)?;
         let solve_transfer =
             |node_pos: usize, node_neg: usize| -> Result<Vec<Complex64>, SimulationError> {
                 (0..self.num_ports)
@@ -415,12 +583,10 @@ impl PortNoiseLinearization {
             if abort.is_aborted() {
                 return Err(SimulationError::Aborted);
             }
-            if self
-                .runtime_devices
-                .contains(&source.identity.device.to_ascii_lowercase())
-                || self
-                    .generated_devices
-                    .contains(&source.identity.device.to_ascii_lowercase())
+            let device_name = source.identity.device.to_ascii_lowercase();
+            if self.runtime_devices.contains(&device_name)
+                || self.generated_devices.contains(&device_name)
+                || self.termination_devices.contains(&device_name)
             {
                 continue;
             }
