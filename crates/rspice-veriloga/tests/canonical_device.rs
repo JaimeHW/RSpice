@@ -1433,6 +1433,148 @@ assert_eq!(disabled.0, vec![(true, 1.5), (false, 0.0)]);
 }
 
 #[test]
+fn generated_grouped_noise_retains_static_and_reactive_paths_in_one_contribution() {
+    let (state, stamp, noise) = generated_parts(
+        r#"
+module mixed_noise(p, n);
+    inout p, n; electrical p, n;
+    real source;
+    analog begin
+        source = white_noise(4.0, "mixed");
+        I(p, n) <+ 2.0 * source + ddt(3.0 * source);
+        I(p, n) <+ source + ddt(V(p, n));
+        I(p, n) <+ ddt(5.0 * source);
+    end
+endmodule
+"#,
+        "mixed static reactive noise",
+    );
+    run_generated_main(
+        "mixed static reactive noise",
+        &state,
+        &stamp,
+        &noise,
+        r#"
+#[derive(Default)]
+struct Capture(Vec<(usize, f64, f64)>);
+impl runtime::GeneratedNoiseProcessVisitor for Capture {
+    fn visit_process(&mut self, _: usize, process: runtime::GeneratedNoiseProcessEvaluationRef<'_>) -> bool {
+        assert!(process.active);
+        assert_eq!(process.psd, 4.0);
+        self.0.extend(process.injections.iter().map(|injection| {
+            (device::noise::GROUPED_NOISE_INJECTIONS[injection.descriptor].equation,
+             injection.gain.re, injection.gain.im)
+        }));
+        true
+    }
+}
+let mut instance = device::state::Instance::new(&[0, 1]);
+instance.finalize_parameters().unwrap();
+let ctx = runtime::GeneratedEvalContext { voltages: &[2.0, 0.0], temperature: 300.15 };
+for frequency in [0.0, 1.0, 17.0] {
+    let mut capture = Capture::default();
+    instance.evaluate_noise_processes_at_frequency(&ctx, frequency, &mut capture).unwrap();
+    assert_eq!(capture.0.len(), 3, "every coherent path must survive: {:?}", capture.0);
+    for (equation, re, im) in capture.0 {
+        let (static_gain, reactive_gain) = [(-2.0, -3.0), (-1.0, 0.0), (0.0, -5.0)][equation];
+        assert_eq!(re, static_gain, "equation {equation}");
+        assert_eq!(im, 2.0 * std::f64::consts::PI * frequency * reactive_gain, "equation {equation}");
+    }
+}
+"#,
+    )
+    .unwrap_or_else(|report| panic!("mixed noise probe failed:\n{report}"));
+}
+
+#[test]
+fn generated_one_step_split_does_not_hide_unsupported_dynamic_subexpressions() {
+    for (index, expression) in [
+        "ddt(V(p,n)) + sin(ddt(V(p,n)))",
+        "sin(ddt(V(p,n))) + ddt(V(p,n))",
+        "ddt(V(p,n)) * sin(ddt(V(p,n)))",
+        "ddt(V(p,n)) / (1.0 + sin(ddt(V(p,n))))",
+        "ddt(ddt(V(p,n)))",
+    ]
+    .iter()
+    .enumerate()
+    {
+        let source = format!(
+            "module nonlinear_dynamic(p,n); inout p,n; electrical p,n; analog I(p,n)<+{expression}; endmodule"
+        );
+        let name = format!("unsupported dynamic split {index}");
+        let (state, stamp, noise) = generated_parts(&source, &name);
+        run_generated_main(
+            &name,
+            &state,
+            &stamp,
+            &noise,
+            "assert!(!device::state::Instance::ONE_STEP_DAE_SPLIT_SAFE);",
+        )
+        .unwrap_or_else(|report| panic!("{expression}: {report}"));
+    }
+}
+
+#[test]
+fn generated_split_validation_preserves_existing_reactive_linearization() {
+    let (state, stamp, noise) = generated_parts(
+        "module reactive_cosine(p,n); inout p,n; electrical p,n; analog I(p,n)<+ddt(V(p,n))+cos(ddt(V(p,n))); endmodule",
+        "reactive split validation",
+    );
+    run_generated_main(
+        "reactive split validation",
+        &state,
+        &stamp,
+        &noise,
+        r#"
+let mut instance = device::state::Instance::new(&[0, 1]);
+instance.finalize_parameters().unwrap();
+let ctx = runtime::GeneratedEvalContext { voltages: &[2.0, 0.0], temperature: 300.15 };
+instance.stamp(&ctx, &mut runtime::GeneratedStamper::default());
+let mut reactive = [0.0];
+instance.stamp_reactive(&ctx, &mut runtime::GeneratedReactiveStamper { sink: Some(&mut reactive) });
+assert_eq!(reactive[0], 1.0, "cos(ddt(V)) has zero first variation at DC");
+assert!(!device::state::Instance::ONE_STEP_DAE_SPLIT_SAFE);
+"#,
+    )
+    .unwrap_or_else(|report| panic!("reactive split validation: {report}"));
+}
+
+#[test]
+fn generated_nested_history_operators_compile_and_evaluate_in_source_order() {
+    for (index, expression, expected) in [
+        (0, "ddt(ddt(V(p,n)))", 12.0),
+        (1, "idt(idt(V(p,n),0.0),0.0)", 0.75),
+        (2, "ddt(idt(V(p,n),0.0))", 3.0),
+        (3, "idt(ddt(V(p,n)),0.0)", 3.0),
+    ] {
+        let source = format!(
+            "module nested_history(p,n); inout p,n; electrical p,n; analog I(p,n)<+{expression}; endmodule"
+        );
+        let name = format!("nested history operator {index}");
+        let (state, stamp, noise) = generated_parts(&source, &name);
+        let body = format!(
+            r#"
+let mut instance = device::state::Instance::new(&[0, 1]);
+instance.finalize_parameters().unwrap();
+instance.set_timepoint(1.0, 0.5, runtime::GeneratedDdtCoefficients {{
+    active: true, derivative_scale: 2.0, previous_value_scale: 0.0,
+    older_value_scale: 0.0, previous_derivative_scale: 0.0,
+}});
+let ctx = runtime::GeneratedEvalContext {{ voltages: &[3.0, 0.0], temperature: 300.15 }};
+for _ in 0..2 {{
+    let mut sink = [0.0; 10];
+    instance.stamp(&ctx, &mut runtime::GeneratedStamper {{ sink: Some(&mut sink) }});
+    assert_eq!(sink[9], {expected:?});
+    assert!(!ctx.evaluation_failed());
+}}
+"#
+        );
+        run_generated_main(&name, &state, &stamp, &noise, &body)
+            .unwrap_or_else(|report| panic!("{expression}: {report}"));
+    }
+}
+
+#[test]
 fn generated_grouped_noise_preserves_process_identity_coherence_and_rhs_orientation() {
     let (state, stamp, noise) = generated_parts(
         r#"

@@ -1427,26 +1427,26 @@ impl Instance {
 		let CUS=staged[319]!=0.0;
 		let CUT=staged[238];
 		let CUV=staged[239];
-		let CXI=ddt_scale();
-		let CYF=staged[320]!=0.0;
-		let CYG=L5([0f64;5]);
-		let CYH=L5([0f64;5]);
-		let CYK=node_potentials[0];
-		let CYQ=node_potentials[2];
-		let CZF=L6([0f64;6]);
-		let CZI=staged[321]!=0.0;
-		let CZJ=L2([0f64;2]);
-		let CZK=staged[240];
-		let CZT=0.0;
-		let CZU=0.0;
-		let CZV=0.0;
-		let CZW=0.0;
-		let DAB=staged[322]!=0.0;
-		let DAC=L7([0f64;7]);
-		let DBP=staged[241];
-		let DBS=staged[242];
-		let DHO=0.0;
-		let DHP=0.0;
+		let CXJ=ddt_scale();
+		let CYJ=staged[320]!=0.0;
+		let CYK=L5([0f64;5]);
+		let CYL=L5([0f64;5]);
+		let CYO=node_potentials[0];
+		let CYU=node_potentials[2];
+		let CZJ=L6([0f64;6]);
+		let CZM=staged[321]!=0.0;
+		let CZN=L2([0f64;2]);
+		let CZO=staged[240];
+		let CZX=0.0;
+		let CZY=0.0;
+		let CZZ=0.0;
+		let DAA=0.0;
+		let DAF=staged[322]!=0.0;
+		let DAG=L7([0f64;7]);
+		let DBT=staged[241];
+		let DBW=staged[242];
+		let DHS=0.0;
+		let DHT=0.0;
 		if A{
 		analog_finish(30, time, B);
 		}
@@ -4522,335 +4522,339 @@ impl Instance {
 		let CXF=CLT* CM;
 		let CXG=CM* CLU;
 		let CXH=CLW* CM;
-		let CXJ=CM* ddt(0, CUM);
-		let CXK=(CUN* CXI)* CM;
-		let CXL=CM* CUM;
-		let CXM=CUN* CM;
-		let CXN=ddt(1, CUD);
-		let CXO=CUE* CXI;
-		let CXP=CM* ddt(2, CUF);
-		let CXQ=(CUG* CXI)* CM;
-		let CXR=CM* CUF;
-		let CXS=CUG* CM;
-		let CXT=ddt(3, CUO);
-		let CXU=CUP* CXI;
-		let CXV=ddt(4, CUQ);
-		let CXW=CUR* CXI;
-		let CXX=CM* ddt(5, CIY);
-		let CXY=(CIZ* CXI)* CM;
-		let CXZ=CM* CIY;
-		let CYA=CIZ* CM;
-		let CYB=CM* ddt(6, CJB);
-		let CYC=(CJC* CXI)* CM;
-		let CYD=CM* CJB;
-		let CYE=CJC* CM;
-		let CYW;
-		let CYX;
-		let CYY;
-		let CYZ;
-		if CYF{
-		CYW=B;
-		CYX=B;
-		CYY=CYG;
-		CYZ=CYH;
+		let CXI=ddt(0, CUM);
+		let CXK=CM* CXI;
+		let CXL=(CUN* CXJ)* CM;
+		let CXM=CM* CUM;
+		let CXN=CUN* CM;
+		let CXO=ddt(1, CUD);
+		let CXP=CUE* CXJ;
+		let CXQ=ddt(2, CUF);
+		let CXR=CM* CXQ;
+		let CXS=(CUG* CXJ)* CM;
+		let CXT=CM* CUF;
+		let CXU=CUG* CM;
+		let CXV=ddt(3, CUO);
+		let CXW=CUP* CXJ;
+		let CXX=ddt(4, CUQ);
+		let CXY=CUR* CXJ;
+		let CXZ=ddt(5, CIY);
+		let CYA=CM* CXZ;
+		let CYB=(CIZ* CXJ)* CM;
+		let CYC=CM* CIY;
+		let CYD=CIZ* CM;
+		let CYE=ddt(6, CJB);
+		let CYF=CM* CYE;
+		let CYG=(CJC* CXJ)* CM;
+		let CYH=CM* CJB;
+		let CYI=CJC* CM;
+		let CZA;
+		let CZB;
+		let CZC;
+		let CZD;
+		if CYJ{
+		CZA=B;
+		CZB=B;
+		CZC=CYK;
+		CZD=CYL;
 		}else{
-		let CYI=DO/ CFN;
-		let CYJ=DO/ CFO;
-		let CYL=CYK- JM;
-		let CYM=CYL* CYI;
-		let CYN=(L2([1f64,0.0])- L2([0.0,JO]))* CYI;
-		let CYO=(((CFQ* CYI)* AR)/ CFN)* CYL;
-		let CYP=L5([CYN[0],0.0,0.0,CYN[1],0.0])+ L5([0.0,CYO[0],CYO[1],CYO[2],CYO[3]]);
-		let CYR=CYQ- JI;
-		let CYS=CYR* CYJ;
-		let CYT=(L2([1f64,0.0])- L2([0.0,JJ]))* CYJ;
-		let CYU=(((CFR* CYJ)* AR)/ CFO)* CYR;
-		let CYV=L5([CYT[0],0.0,0.0,CYT[1],0.0])+ L5([0.0,CYU[0],CYU[1],CYU[2],CYU[3]]);
-		CYW=CYM;
-		CYX=CYS;
-		CYY=CYP;
-		CYZ=CYV;
+		let CYM=DO/ CFN;
+		let CYN=DO/ CFO;
+		let CYP=CYO- JM;
+		let CYQ=CYP* CYM;
+		let CYR=(L2([1f64,0.0])- L2([0.0,JO]))* CYM;
+		let CYS=(((CFQ* CYM)* AR)/ CFN)* CYP;
+		let CYT=L5([CYR[0],0.0,0.0,CYR[1],0.0])+ L5([0.0,CYS[0],CYS[1],CYS[2],CYS[3]]);
+		let CYV=CYU- JI;
+		let CYW=CYV* CYN;
+		let CYX=(L2([1f64,0.0])- L2([0.0,JJ]))* CYN;
+		let CYY=(((CFR* CYN)* AR)/ CFO)* CYV;
+		let CYZ=L5([CYX[0],0.0,0.0,CYX[1],0.0])+ L5([0.0,CYY[0],CYY[1],CYY[2],CYY[3]]);
+		CZA=CYQ;
+		CZB=CYW;
+		CZC=CYT;
+		CZD=CYZ;
 		}
-		let CZG;
-		let CZH;
+		let CZK;
+		let CZL;
 		if CUS{
-		let CZA=LA- JH;
-		let CZB=CZA* CUY;
-		let CZC=(L2([1f64,0.0])- L2([0.0,1f64]))* CUY;
-		let CZD=CUZ* CZA;
-		let CZE=L6([0.0,0.0,0.0,0.0,CZC[0],CZC[1]])+ L6([CZD[0],CZD[1],CZD[2],CZD[3],0.0,CZD[4]]);
-		CZG=CZB;
-		CZH=CZE;
+		let CZE=LA- JH;
+		let CZF=CZE* CUY;
+		let CZG=(L2([1f64,0.0])- L2([0.0,1f64]))* CUY;
+		let CZH=CUZ* CZE;
+		let CZI=L6([0.0,0.0,0.0,0.0,CZG[0],CZG[1]])+ L6([CZH[0],CZH[1],CZH[2],CZH[3],0.0,CZH[4]]);
+		CZK=CZF;
+		CZL=CZI;
 		}else{
-		CZG=B;
-		CZH=CZF;
+		CZK=B;
+		CZL=CZJ;
 		}
-		let CZN;
-		let CZO;
-		if CZI{
-		CZN=B;
-		CZO=CZJ;
-		}else{
-		let CZL=(node_potentials[1]- LA)* CZK;
-		let CZM=(L2([1f64,0.0])- L2([0.0,1f64]))* CZK;
-		CZN=CZL;
-		CZO=CZM;
-		}
-		let CZP;
-		let CZQ;
 		let CZR;
 		let CZS;
-		if CLX{
-		let CZX;
-		let CZY;
-		let CZZ;
-		let DAA;
-		if CUH{
-		CZX=CZT;
-		CZY=CZU;
-		CZZ=B;
-		DAA=B;
-		}else{
-		CZX=B;
-		CZY=B;
-		CZZ=CZV;
-		DAA=CZW;
-		}
-		CZP=CZX;
-		CZQ=CZY;
-		CZR=CZZ;
-		CZS=DAA;
-		}else{
-		CZP=B;
-		CZQ=B;
+		if CZM{
 		CZR=B;
-		CZS=B;
+		CZS=CZN;
+		}else{
+		let CZP=(node_potentials[1]- LA)* CZO;
+		let CZQ=(L2([1f64,0.0])- L2([0.0,1f64]))* CZO;
+		CZR=CZP;
+		CZS=CZQ;
 		}
+		let CZT;
+		let CZU;
+		let CZV;
+		let CZW;
+		if CLX{
+		let DAB;
+		let DAC;
 		let DAD;
 		let DAE;
-		let DAF;
-		let DAG;
+		if CUH{
+		DAB=CZX;
+		DAC=CZY;
+		DAD=B;
+		DAE=B;
+		}else{
+		DAB=B;
+		DAC=B;
+		DAD=CZZ;
+		DAE=DAA;
+		}
+		CZT=DAB;
+		CZU=DAC;
+		CZV=DAD;
+		CZW=DAE;
+		}else{
+		CZT=B;
+		CZU=B;
+		CZV=B;
+		CZW=B;
+		}
 		let DAH;
 		let DAI;
 		let DAJ;
 		let DAK;
 		let DAL;
 		let DAM;
+		let DAN;
+		let DAO;
+		let DAP;
+		let DAQ;
 		if O{
-		let DBL;
-		let DBM;
-		let DBN;
-		let DBO;
-		if DAB{
-		let DAN=CM* KV;
-		let DAO=DAN* JN;
-		let DAP=(JR* DAN)* CFY;
-		let DAQ=L5([0.0,0.0,DAP[0],DAP[1],0.0])+ (CFZ* DAO);
-		let DAR=CYK- JM;
-		let DAS=(L2([1f64,0.0])- L2([0.0,JO]))* DAR;
-		let DAT=DAS+ DAS;
-		let DAU=(DAR* DAR)/ CFN;
-		let DAV=CFQ* DAU;
-		let DAW=(L5([DAT[0],0.0,0.0,DAT[1],0.0])- L5([0.0,DAV[0],DAV[1],DAV[2],DAV[3]]))/ CFN;
-		let DAX=L6([0.0,DAQ[0],DAQ[1],DAQ[2],DAQ[3],DAQ[4]])+ L6([DAW[0],DAW[1],DAW[2],DAW[3],0.0,DAW[4]]);
-		let DAY=CYQ- JI;
-		let DAZ=(L2([1f64,0.0])- L2([0.0,JJ]))* DAY;
-		let DBA=DAZ+ DAZ;
-		let DBB=(DAY* DAY)/ CFO;
-		let DBC=CFR* DBB;
-		let DBD=(L5([DBA[0],0.0,0.0,DBA[1],0.0])- L5([0.0,DBC[0],DBC[1],DBC[2],DBC[3]]))/ CFO;
-		let DBE=-(((DAO* CFY)+ DAU)+ DBB);
-		let DBF=(L7([DAX[0],0.0,DAX[1],DAX[2],DAX[3],DAX[4],DAX[5]])+ L7([0.0,DBD[0],DBD[1],DBD[2],0.0,DBD[3],DBD[4]]))* AR;
-		DBL=DBE;
-		DBM=B;
-		DBN=DBF;
-		DBO=AUT;
+		let DBP;
+		let DBQ;
+		let DBR;
+		let DBS;
+		if DAF{
+		let DAR=CM* KV;
+		let DAS=DAR* JN;
+		let DAT=(JR* DAR)* CFY;
+		let DAU=L5([0.0,0.0,DAT[0],DAT[1],0.0])+ (CFZ* DAS);
+		let DAV=CYO- JM;
+		let DAW=(L2([1f64,0.0])- L2([0.0,JO]))* DAV;
+		let DAX=DAW+ DAW;
+		let DAY=(DAV* DAV)/ CFN;
+		let DAZ=CFQ* DAY;
+		let DBA=(L5([DAX[0],0.0,0.0,DAX[1],0.0])- L5([0.0,DAZ[0],DAZ[1],DAZ[2],DAZ[3]]))/ CFN;
+		let DBB=L6([0.0,DAU[0],DAU[1],DAU[2],DAU[3],DAU[4]])+ L6([DBA[0],DBA[1],DBA[2],DBA[3],0.0,DBA[4]]);
+		let DBC=CYU- JI;
+		let DBD=(L2([1f64,0.0])- L2([0.0,JJ]))* DBC;
+		let DBE=DBD+ DBD;
+		let DBF=(DBC* DBC)/ CFO;
+		let DBG=CFR* DBF;
+		let DBH=(L5([DBE[0],0.0,0.0,DBE[1],0.0])- L5([0.0,DBG[0],DBG[1],DBG[2],DBG[3]]))/ CFO;
+		let DBI=-(((DAS* CFY)+ DAY)+ DBF);
+		let DBJ=(L7([DBB[0],0.0,DBB[1],DBB[2],DBB[3],DBB[4],DBB[5]])+ L7([0.0,DBH[0],DBH[1],DBH[2],0.0,DBH[3],DBH[4]]))* AR;
+		DBP=DBI;
+		DBQ=B;
+		DBR=DBJ;
+		DBS=AUT;
 		}else{
-		let DBG=CM* KV;
-		let DBH=DBG* JN;
-		let DBI=(JR* DBG)* CFY;
-		let DBJ=-(DBH* CFY);
-		let DBK=(L5([0.0,0.0,DBI[0],DBI[1],0.0])+ (CFZ* DBH))* AR;
-		DBL=B;
-		DBM=DBJ;
-		DBN=DAC;
-		DBO=DBK;
+		let DBK=CM* KV;
+		let DBL=DBK* JN;
+		let DBM=(JR* DBK)* CFY;
+		let DBN=-(DBL* CFY);
+		let DBO=(L5([0.0,0.0,DBM[0],DBM[1],0.0])+ (CFZ* DBL))* AR;
+		DBP=B;
+		DBQ=DBN;
+		DBR=DAG;
+		DBS=DBO;
 		}
-		let DBQ=P* DBP;
-		let DBR=R* DBP;
-		let DBT=P* DBS;
-		let DBU=R* DBS;
-		let DBV=ddt(7, DBT);
-		let DBW=DBU* CXI;
-		DAD=DBL;
-		DAE=DBM;
-		DAF=DBQ;
-		DAG=DBV;
-		DAH=DBT;
-		DAI=DBN;
-		DAJ=DBO;
-		DAK=DBR;
-		DAL=DBW;
-		DAM=DBU;
+		let DBU=P* DBT;
+		let DBV=R* DBT;
+		let DBX=P* DBW;
+		let DBY=R* DBW;
+		let DBZ=ddt(7, DBX);
+		let DCA=DBY* CXJ;
+		DAH=DBP;
+		DAI=DBQ;
+		DAJ=DBU;
+		DAK=DBZ;
+		DAL=DBX;
+		DAM=DBR;
+		DAN=DBS;
+		DAO=DBV;
+		DAP=DCA;
+		DAQ=DBY;
 		}else{
-		DAD=B;
-		DAE=B;
-		DAF=B;
-		DAG=B;
 		DAH=B;
-		DAI=DAC;
-		DAJ=AUT;
-		DAK=T;
-		DAL=T;
-		DAM=T;
+		DAI=B;
+		DAJ=B;
+		DAK=B;
+		DAL=B;
+		DAM=DAG;
+		DAN=AUT;
+		DAO=T;
+		DAP=T;
+		DAQ=T;
 		}
-		let DBX=CUE[2];
-		let DBY=CUE[4];
-		let DBZ=CUE[3];
-		let DCA=CUE[0];
-		let DCB=CXS[2];
-		let DCC=CXS[4];
-		let DCD=CXS[3];
-		let DCE=CXS[0];
-		let DCF=CXM[2];
-		let DCG=CXM[4];
-		let DCH=CXM[3];
-		let DCI=CXM[0];
-		let DCJ=CWU[0];
-		let DCK=CWU[1];
-		let DCL=CWU[2];
-		let DCM=CWU[3];
-		let DCN=CWU[4];
-		let DCO=CWV[0];
-		let DCP=CWV[1];
-		let DCQ=CWV[2];
-		let DCR=CWV[3];
-		let DCS=CWV[4];
-		let DCT=CWW[0];
-		let DCU=CWW[1];
-		let DCV=CWW[2];
-		let DCW=CWW[3];
-		let DCX=CWW[4];
-		let DCY=CWX[0];
-		let DCZ=CWX[1];
-		let DDA=CWX[2];
-		let DDB=CWX[3];
-		let DDC=CWX[4];
-		let DDD=CWY[0];
-		let DDE=CWY[1];
-		let DDF=CWY[2];
-		let DDG=CWY[3];
-		let DDH=CWY[4];
-		let DDI=CWZ[0];
-		let DDJ=CWZ[1];
-		let DDK=CWZ[2];
-		let DDL=CWZ[3];
-		let DDM=CWZ[4];
-		let DDN=CXA[0];
-		let DDO=CXA[1];
-		let DDP=CXA[2];
-		let DDQ=CXA[3];
-		let DDR=CXA[4];
-		let DDS=CXB[0];
-		let DDT=CXB[1];
-		let DDU=CXB[2];
-		let DDV=CXB[3];
-		let DDW=CXB[4];
-		let DDX=CXC[0];
-		let DDY=CXC[1];
-		let DDZ=CXC[2];
-		let DEA=CXC[3];
-		let DEB=CXC[4];
-		let DEC=CXD[0];
-		let DED=CXD[1];
-		let DEE=CXD[2];
-		let DEF=CXD[3];
-		let DEG=CXD[4];
-		let DEH=CXF[0];
-		let DEI=CXF[1];
-		let DEJ=CXF[2];
-		let DEK=CXF[3];
-		let DEL=CXF[4];
-		let DEM=CXH[0];
-		let DEN=CXH[1];
-		let DEO=CXH[2];
-		let DEP=CXH[3];
-		let DEQ=CXH[4];
-		let DER=CXK[0];
-		let DES=CXK[1];
-		let DET=CXK[2];
-		let DEU=CXK[3];
-		let DEV=CXK[4];
-		let DEW=CXO[0];
-		let DEX=CXO[1];
-		let DEY=CXO[2];
-		let DEZ=CXO[3];
-		let DFA=CXO[4];
-		let DFB=CXQ[0];
-		let DFC=CXQ[1];
-		let DFD=CXQ[2];
-		let DFE=CXQ[3];
-		let DFF=CXQ[4];
-		let DFG=CXU[0];
-		let DFH=CXU[1];
-		let DFI=CXU[2];
-		let DFJ=CXU[3];
+		let DCB=CUE[2];
+		let DCC=CUE[4];
+		let DCD=CUE[3];
+		let DCE=CUE[0];
+		let DCF=CXU[2];
+		let DCG=CXU[4];
+		let DCH=CXU[3];
+		let DCI=CXU[0];
+		let DCJ=CXN[2];
+		let DCK=CXN[4];
+		let DCL=CXN[3];
+		let DCM=CXN[0];
+		let DCN=CWU[0];
+		let DCO=CWU[1];
+		let DCP=CWU[2];
+		let DCQ=CWU[3];
+		let DCR=CWU[4];
+		let DCS=CWV[0];
+		let DCT=CWV[1];
+		let DCU=CWV[2];
+		let DCV=CWV[3];
+		let DCW=CWV[4];
+		let DCX=CWW[0];
+		let DCY=CWW[1];
+		let DCZ=CWW[2];
+		let DDA=CWW[3];
+		let DDB=CWW[4];
+		let DDC=CWX[0];
+		let DDD=CWX[1];
+		let DDE=CWX[2];
+		let DDF=CWX[3];
+		let DDG=CWX[4];
+		let DDH=CWY[0];
+		let DDI=CWY[1];
+		let DDJ=CWY[2];
+		let DDK=CWY[3];
+		let DDL=CWY[4];
+		let DDM=CWZ[0];
+		let DDN=CWZ[1];
+		let DDO=CWZ[2];
+		let DDP=CWZ[3];
+		let DDQ=CWZ[4];
+		let DDR=CXA[0];
+		let DDS=CXA[1];
+		let DDT=CXA[2];
+		let DDU=CXA[3];
+		let DDV=CXA[4];
+		let DDW=CXB[0];
+		let DDX=CXB[1];
+		let DDY=CXB[2];
+		let DDZ=CXB[3];
+		let DEA=CXB[4];
+		let DEB=CXC[0];
+		let DEC=CXC[1];
+		let DED=CXC[2];
+		let DEE=CXC[3];
+		let DEF=CXC[4];
+		let DEG=CXD[0];
+		let DEH=CXD[1];
+		let DEI=CXD[2];
+		let DEJ=CXD[3];
+		let DEK=CXD[4];
+		let DEL=CXF[0];
+		let DEM=CXF[1];
+		let DEN=CXF[2];
+		let DEO=CXF[3];
+		let DEP=CXF[4];
+		let DEQ=CXH[0];
+		let DER=CXH[1];
+		let DES=CXH[2];
+		let DET=CXH[3];
+		let DEU=CXH[4];
+		let DEV=CXL[0];
+		let DEW=CXL[1];
+		let DEX=CXL[2];
+		let DEY=CXL[3];
+		let DEZ=CXL[4];
+		let DFA=CXP[0];
+		let DFB=CXP[1];
+		let DFC=CXP[2];
+		let DFD=CXP[3];
+		let DFE=CXP[4];
+		let DFF=CXS[0];
+		let DFG=CXS[1];
+		let DFH=CXS[2];
+		let DFI=CXS[3];
+		let DFJ=CXS[4];
 		let DFK=CXW[0];
 		let DFL=CXW[1];
 		let DFM=CXW[2];
 		let DFN=CXW[3];
 		let DFO=CXY[0];
 		let DFP=CXY[1];
-		let DFQ=CYC[0];
-		let DFR=CYC[1];
-		let DFS=CYY[0];
-		let DFT=CYY[1];
-		let DFU=CYY[2];
-		let DFV=CYY[3];
-		let DFW=CYY[4];
-		let DFX=CYZ[0];
-		let DFY=CYZ[1];
-		let DFZ=CYZ[2];
-		let DGA=CYZ[3];
-		let DGB=CYZ[4];
-		let DGC=CZH[0];
-		let DGD=CZH[1];
-		let DGE=CZH[2];
-		let DGF=CZH[3];
-		let DGG=CZH[4];
-		let DGH=CZH[5];
-		let DGI=CZO[0];
-		let DGJ=CZO[1];
-		let DGK=DAI[0];
-		let DGL=DAI[1];
-		let DGM=DAI[2];
-		let DGN=DAI[3];
-		let DGO=DAI[4];
-		let DGP=DAI[5];
-		let DGQ=DAI[6];
-		let DGR=DAJ[0];
-		let DGS=DAJ[1];
-		let DGT=DAJ[2];
-		let DGU=DAJ[3];
-		let DGV=DAJ[4];
-		let DGW=DAK;
-		let DGX=DAL;
-		let DGY=CXM[1];
-		let DGZ=CUE[1];
-		let DHA=CXS[1];
-		let DHB=CUP[0];
-		let DHC=CUP[1];
-		let DHD=CUP[2];
-		let DHE=CUP[3];
-		let DHF=CUR[0];
-		let DHG=CUR[1];
-		let DHH=CUR[2];
-		let DHI=CUR[3];
-		let DHJ=CYA[0];
-		let DHK=CYA[1];
-		let DHL=CYE[0];
-		let DHM=CYE[1];
-		let DHN=DAM;
+		let DFQ=CXY[2];
+		let DFR=CXY[3];
+		let DFS=CYB[0];
+		let DFT=CYB[1];
+		let DFU=CYG[0];
+		let DFV=CYG[1];
+		let DFW=CZC[0];
+		let DFX=CZC[1];
+		let DFY=CZC[2];
+		let DFZ=CZC[3];
+		let DGA=CZC[4];
+		let DGB=CZD[0];
+		let DGC=CZD[1];
+		let DGD=CZD[2];
+		let DGE=CZD[3];
+		let DGF=CZD[4];
+		let DGG=CZL[0];
+		let DGH=CZL[1];
+		let DGI=CZL[2];
+		let DGJ=CZL[3];
+		let DGK=CZL[4];
+		let DGL=CZL[5];
+		let DGM=CZS[0];
+		let DGN=CZS[1];
+		let DGO=DAM[0];
+		let DGP=DAM[1];
+		let DGQ=DAM[2];
+		let DGR=DAM[3];
+		let DGS=DAM[4];
+		let DGT=DAM[5];
+		let DGU=DAM[6];
+		let DGV=DAN[0];
+		let DGW=DAN[1];
+		let DGX=DAN[2];
+		let DGY=DAN[3];
+		let DGZ=DAN[4];
+		let DHA=DAO;
+		let DHB=DAP;
+		let DHC=CXN[1];
+		let DHD=CUE[1];
+		let DHE=CXU[1];
+		let DHF=CUP[0];
+		let DHG=CUP[1];
+		let DHH=CUP[2];
+		let DHI=CUP[3];
+		let DHJ=CUR[0];
+		let DHK=CUR[1];
+		let DHL=CUR[2];
+		let DHM=CUR[3];
+		let DHN=CYD[0];
+		let DHO=CYD[1];
+		let DHP=CYI[0];
+		let DHQ=CYI[1];
+		let DHR=DAQ;
         if (staged[333] != 0.0) {
             stamper.stamp_potential_branch_local(Some(0), Some(5), 0, multiplicity);
         } else {
@@ -4881,7 +4885,7 @@ impl Instance {
             Some(6),
             multiplicity * (CWK),
             [3, 4, 5, 6, 8],
-            [DCJ, DCK, DCL, DCM, DCN],
+            [DCN, DCO, DCP, DCQ, DCR],
             [],
             [],
             multiplicity,
@@ -4891,7 +4895,7 @@ impl Instance {
             Some(6),
             multiplicity * (CWL),
             [3, 4, 5, 6, 8],
-            [DCO, DCP, DCQ, DCR, DCS],
+            [DCS, DCT, DCU, DCV, DCW],
             [],
             [],
             multiplicity,
@@ -4901,7 +4905,7 @@ impl Instance {
             Some(5),
             multiplicity * (CWM),
             [3, 4, 5, 6, 8],
-            [DCT, DCU, DCV, DCW, DCX],
+            [DCX, DCY, DCZ, DDA, DDB],
             [],
             [],
             multiplicity,
@@ -4911,7 +4915,7 @@ impl Instance {
             Some(6),
             multiplicity * (CWN),
             [3, 4, 5, 6, 8],
-            [DCY, DCZ, DDA, DDB, DDC],
+            [DDC, DDD, DDE, DDF, DDG],
             [],
             [],
             multiplicity,
@@ -4921,7 +4925,7 @@ impl Instance {
             Some(5),
             multiplicity * (CWO),
             [3, 4, 5, 6, 8],
-            [DDD, DDE, DDF, DDG, DDH],
+            [DDH, DDI, DDJ, DDK, DDL],
             [],
             [],
             multiplicity,
@@ -4931,7 +4935,7 @@ impl Instance {
             Some(5),
             multiplicity * (CWP),
             [3, 4, 5, 6, 8],
-            [DDI, DDJ, DDK, DDL, DDM],
+            [DDM, DDN, DDO, DDP, DDQ],
             [],
             [],
             multiplicity,
@@ -4941,7 +4945,7 @@ impl Instance {
             Some(5),
             multiplicity * (CWQ),
             [3, 4, 5, 6, 8],
-            [DDN, DDO, DDP, DDQ, DDR],
+            [DDR, DDS, DDT, DDU, DDV],
             [],
             [],
             multiplicity,
@@ -4951,7 +4955,7 @@ impl Instance {
             Some(6),
             multiplicity * (CWR),
             [3, 4, 5, 6, 8],
-            [DDS, DDT, DDU, DDV, DDW],
+            [DDW, DDX, DDY, DDZ, DEA],
             [],
             [],
             multiplicity,
@@ -4961,7 +4965,7 @@ impl Instance {
             Some(5),
             multiplicity * (CWS),
             [3, 4, 5, 6, 8],
-            [DDX, DDY, DDZ, DEA, DEB],
+            [DEB, DEC, DED, DEE, DEF],
             [],
             [],
             multiplicity,
@@ -4971,7 +4975,7 @@ impl Instance {
             Some(6),
             multiplicity * (CWT),
             [3, 4, 5, 6, 8],
-            [DEC, DED, DEE, DEF, DEG],
+            [DEG, DEH, DEI, DEJ, DEK],
             [],
             [],
             multiplicity,
@@ -4981,7 +4985,7 @@ impl Instance {
             Some(6),
             multiplicity * (CXE),
             [3, 4, 5, 6, 8],
-            [DEH, DEI, DEJ, DEK, DEL],
+            [DEL, DEM, DEN, DEO, DEP],
             [],
             [],
             multiplicity,
@@ -4991,7 +4995,7 @@ impl Instance {
             Some(5),
             multiplicity * (CXG),
             [3, 4, 5, 6, 8],
-            [DEM, DEN, DEO, DEP, DEQ],
+            [DEQ, DER, DES, DET, DEU],
             [],
             [],
             multiplicity,
@@ -4999,9 +5003,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<5, 0>(
             Some(5),
             Some(6),
-            multiplicity * (CXJ),
+            multiplicity * (CXK),
             [3, 4, 5, 6, 8],
-            [DER, DES, DET, DEU, DEV],
+            [DEV, DEW, DEX, DEY, DEZ],
             [],
             [],
             multiplicity,
@@ -5009,9 +5013,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<5, 0>(
             Some(8),
             Some(6),
-            multiplicity * (CXN),
+            multiplicity * (CXO),
             [3, 4, 5, 6, 8],
-            [DEW, DEX, DEY, DEZ, DFA],
+            [DFA, DFB, DFC, DFD, DFE],
             [],
             [],
             multiplicity,
@@ -5019,9 +5023,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<5, 0>(
             Some(3),
             Some(6),
-            multiplicity * (CXP),
+            multiplicity * (CXR),
             [3, 4, 5, 6, 8],
-            [DFB, DFC, DFD, DFE, DFF],
+            [DFF, DFG, DFH, DFI, DFJ],
             [],
             [],
             multiplicity,
@@ -5029,29 +5033,29 @@ impl Instance {
         stamper.stamp_current_sparse_local::<4, 0>(
             Some(7),
             Some(6),
-            multiplicity * (CXT),
-            [3, 4, 6, 7],
-            [DFG, DFH, DFI, DFJ],
-            [],
-            [],
-            multiplicity,
-        );
-        stamper.stamp_current_sparse_local::<4, 0>(
-            Some(7),
-            Some(5),
             multiplicity * (CXV),
-            [3, 4, 5, 7],
+            [3, 4, 6, 7],
             [DFK, DFL, DFM, DFN],
             [],
             [],
             multiplicity,
         );
+        stamper.stamp_current_sparse_local::<4, 0>(
+            Some(7),
+            Some(5),
+            multiplicity * (CXX),
+            [3, 4, 5, 7],
+            [DFO, DFP, DFQ, DFR],
+            [],
+            [],
+            multiplicity,
+        );
         stamper.stamp_current_sparse_local::<2, 0>(
             Some(6),
             Some(3),
-            multiplicity * (CXX),
+            multiplicity * (CYA),
             [3, 6],
-            [DFO, DFP],
+            [DFS, DFT],
             [],
             [],
             multiplicity,
@@ -5059,9 +5063,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<2, 0>(
             Some(5),
             Some(3),
-            multiplicity * (CYB),
+            multiplicity * (CYF),
             [3, 5],
-            [DFQ, DFR],
+            [DFU, DFV],
             [],
             [],
             multiplicity,
@@ -5089,9 +5093,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<5, 0>(
             Some(0),
             Some(5),
-            multiplicity * (CYW),
+            multiplicity * (CZA),
             [0, 3, 4, 5, 8],
-            [DFS, DFT, DFU, DFV, DFW],
+            [DFW, DFX, DFY, DFZ, DGA],
             [],
             [],
             multiplicity,
@@ -5099,9 +5103,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<5, 0>(
             Some(2),
             Some(6),
-            multiplicity * (CYX),
+            multiplicity * (CZB),
             [2, 3, 4, 6, 8],
-            [DFX, DFY, DFZ, DGA, DGB],
+            [DGB, DGC, DGD, DGE, DGF],
             [],
             [],
             multiplicity,
@@ -5129,9 +5133,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<6, 0>(
             Some(7),
             Some(8),
-            multiplicity * (CZG),
+            multiplicity * (CZK),
             [3, 4, 5, 6, 7, 8],
-            [DGC, DGD, DGE, DGF, DGG, DGH],
+            [DGG, DGH, DGI, DGJ, DGK, DGL],
             [],
             [],
             multiplicity,
@@ -5159,9 +5163,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<2, 0>(
             Some(1),
             Some(7),
-            multiplicity * (CZN),
+            multiplicity * (CZR),
             [1, 7],
-            [DGI, DGJ],
+            [DGM, DGN],
             [],
             [],
             multiplicity,
@@ -5179,7 +5183,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(5),
             Some(6),
-            multiplicity * (DHO),
+            multiplicity * (DHS),
             [],
             [],
             [],
@@ -5189,7 +5193,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(5),
             Some(6),
-            multiplicity * (DHP),
+            multiplicity * (DHT),
             [],
             [],
             [],
@@ -5199,7 +5203,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(8),
             Some(6),
-            multiplicity * (CZP),
+            multiplicity * (CZT),
             [],
             [],
             [],
@@ -5209,7 +5213,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(8),
             Some(5),
-            multiplicity * (CZQ),
+            multiplicity * (CZU),
             [],
             [],
             [],
@@ -5219,7 +5223,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(8),
             Some(5),
-            multiplicity * (CZR),
+            multiplicity * (CZV),
             [],
             [],
             [],
@@ -5229,7 +5233,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(8),
             Some(6),
-            multiplicity * (CZS),
+            multiplicity * (CZW),
             [],
             [],
             [],
@@ -5259,9 +5263,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<7, 0>(
             Some(4),
             None,
-            multiplicity * (DAD),
+            multiplicity * (DAH),
             [0, 2, 3, 4, 5, 6, 8],
-            [DGK, DGL, DGM, DGN, DGO, DGP, DGQ],
+            [DGO, DGP, DGQ, DGR, DGS, DGT, DGU],
             [],
             [],
             multiplicity,
@@ -5269,9 +5273,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<5, 0>(
             Some(4),
             None,
-            multiplicity * (DAE),
+            multiplicity * (DAI),
             [3, 4, 5, 6, 8],
-            [DGR, DGS, DGT, DGU, DGV],
+            [DGV, DGW, DGX, DGY, DGZ],
             [],
             [],
             multiplicity,
@@ -5279,9 +5283,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<1, 0>(
             Some(4),
             None,
-            multiplicity * (DAF),
+            multiplicity * (DAJ),
             [4],
-            [DGW],
+            [DHA],
             [],
             [],
             multiplicity,
@@ -5289,9 +5293,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<1, 0>(
             Some(4),
             None,
-            multiplicity * (DAG),
+            multiplicity * (DAK),
             [4],
-            [DGX],
+            [DHB],
             [],
             [],
             multiplicity,
@@ -5318,64 +5322,64 @@ impl Instance {
         self.canonical_reactive[9] = CWT;
         self.canonical_reactive[10] = CXE;
         self.canonical_reactive[11] = CXG;
-        self.canonical_reactive[12] = CXL;
-        self.canonical_reactive[13] = DCI;
-        self.canonical_reactive[14] = DGY;
-        self.canonical_reactive[15] = DCF;
-        self.canonical_reactive[16] = DCH;
-        self.canonical_reactive[17] = DCG;
+        self.canonical_reactive[12] = CXM;
+        self.canonical_reactive[13] = DCM;
+        self.canonical_reactive[14] = DHC;
+        self.canonical_reactive[15] = DCJ;
+        self.canonical_reactive[16] = DCL;
+        self.canonical_reactive[17] = DCK;
         self.canonical_reactive[18] = CUD;
-        self.canonical_reactive[19] = DCA;
-        self.canonical_reactive[20] = DGZ;
-        self.canonical_reactive[21] = DBX;
-        self.canonical_reactive[22] = DBZ;
-        self.canonical_reactive[23] = DBY;
-        self.canonical_reactive[24] = CXR;
-        self.canonical_reactive[25] = DCE;
-        self.canonical_reactive[26] = DHA;
-        self.canonical_reactive[27] = DCB;
-        self.canonical_reactive[28] = DCD;
-        self.canonical_reactive[29] = DCC;
+        self.canonical_reactive[19] = DCE;
+        self.canonical_reactive[20] = DHD;
+        self.canonical_reactive[21] = DCB;
+        self.canonical_reactive[22] = DCD;
+        self.canonical_reactive[23] = DCC;
+        self.canonical_reactive[24] = CXT;
+        self.canonical_reactive[25] = DCI;
+        self.canonical_reactive[26] = DHE;
+        self.canonical_reactive[27] = DCF;
+        self.canonical_reactive[28] = DCH;
+        self.canonical_reactive[29] = DCG;
         self.canonical_reactive[30] = CUO;
-        self.canonical_reactive[31] = DHB;
-        self.canonical_reactive[32] = DHC;
-        self.canonical_reactive[33] = DHD;
-        self.canonical_reactive[34] = DHE;
+        self.canonical_reactive[31] = DHF;
+        self.canonical_reactive[32] = DHG;
+        self.canonical_reactive[33] = DHH;
+        self.canonical_reactive[34] = DHI;
         self.canonical_reactive[35] = CUQ;
-        self.canonical_reactive[36] = DHF;
-        self.canonical_reactive[37] = DHG;
-        self.canonical_reactive[38] = DHH;
-        self.canonical_reactive[39] = DHI;
-        self.canonical_reactive[40] = CXZ;
-        self.canonical_reactive[41] = DHJ;
-        self.canonical_reactive[42] = DHK;
-        self.canonical_reactive[43] = CYD;
-        self.canonical_reactive[44] = DHL;
-        self.canonical_reactive[45] = DHM;
+        self.canonical_reactive[36] = DHJ;
+        self.canonical_reactive[37] = DHK;
+        self.canonical_reactive[38] = DHL;
+        self.canonical_reactive[39] = DHM;
+        self.canonical_reactive[40] = CYC;
+        self.canonical_reactive[41] = DHN;
+        self.canonical_reactive[42] = DHO;
+        self.canonical_reactive[43] = CYH;
+        self.canonical_reactive[44] = DHP;
+        self.canonical_reactive[45] = DHQ;
         self.canonical_reactive[46] = staged[323];
         self.canonical_reactive[47] = staged[324];
-        self.canonical_reactive[48] = CYW;
-        self.canonical_reactive[49] = CYX;
+        self.canonical_reactive[48] = CZA;
+        self.canonical_reactive[49] = CZB;
         self.canonical_reactive[50] = staged[325];
         self.canonical_reactive[51] = staged[326];
-        self.canonical_reactive[52] = CZG;
+        self.canonical_reactive[52] = CZK;
         self.canonical_reactive[53] = staged[327];
         self.canonical_reactive[54] = staged[328];
-        self.canonical_reactive[55] = CZN;
+        self.canonical_reactive[55] = CZR;
         self.canonical_reactive[56] = staged[329];
-        self.canonical_reactive[57] = DHO;
-        self.canonical_reactive[58] = DHP;
-        self.canonical_reactive[59] = CZP;
-        self.canonical_reactive[60] = CZQ;
-        self.canonical_reactive[61] = CZR;
-        self.canonical_reactive[62] = CZS;
+        self.canonical_reactive[57] = DHS;
+        self.canonical_reactive[58] = DHT;
+        self.canonical_reactive[59] = CZT;
+        self.canonical_reactive[60] = CZU;
+        self.canonical_reactive[61] = CZV;
+        self.canonical_reactive[62] = CZW;
         self.canonical_reactive[63] = staged[330];
         self.canonical_reactive[64] = staged[331];
-        self.canonical_reactive[65] = DAD;
-        self.canonical_reactive[66] = DAE;
-        self.canonical_reactive[67] = DAF;
-        self.canonical_reactive[68] = DAH;
-        self.canonical_reactive[69] = DHN;
+        self.canonical_reactive[65] = DAH;
+        self.canonical_reactive[66] = DAI;
+        self.canonical_reactive[67] = DAJ;
+        self.canonical_reactive[68] = DAL;
+        self.canonical_reactive[69] = DHR;
         self.canonical_reactive[70] = staged[332];
         if ctx.analog_tasks_enabled() && !ctx.evaluation_failed() { self.analog_effects.as_mut().expect("task evaluation began").complete_evaluation(); }
     }

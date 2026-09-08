@@ -1012,7 +1012,7 @@ impl ModelPlan {
                     if values_reaching_ddt[usize::from(*condition)]
             )
         });
-        let charges = stored_charges(&mut cfg.function, &residuals);
+        let (charges, first_order_complete) = recover_stored_charges(&mut cfg.function, &residuals);
         let mut derivative_roots = residuals.clone();
         derivative_roots.extend(charges.iter().flatten().copied());
         // A task argument can contain ddx even though a task has no derivative.
@@ -1033,6 +1033,7 @@ impl ModelPlan {
         // executable stamp with solver-invisible Hessians.
         let one_step_dae_split_safe = idt_slots.is_empty()
             && !ddt_controls_flow
+            && first_order_complete
             && residuals.iter().zip(&charges).all(|(residual, charge)| {
                 !values_reaching_ddt[usize::from(*residual)] || charge.is_some()
             });
@@ -4691,14 +4692,10 @@ impl Wants {
     }
 }
 
-/// The charge a contribution stores, if it is a `ddt` and nothing else.
-///
-/// A residual is an accumulator, so `I(a, b) <+ ddt(q)` arrives as `0 + ddt(q)`
-/// and simplification has not run yet — the zero is peeled here rather than
-/// relied on. What is deliberately *not* accepted is a residual mixing stored
-/// charge with conduction in one statement: separating those needs the reactive
-/// part tracked through the arithmetic, and calling the whole expression a
-/// charge would put conduction into the reactive matrix.
+/// Recover reactive terms through arithmetic and guards, leaving conduction
+/// in the original residual. This projection alone does not certify a complete
+/// first-order DAE split: a supported term can sit beside an unrecovered one.
+/// Split eligibility also uses the completeness result from the same walk.
 ///
 /// # The CFG level's one charge extraction
 ///
@@ -4716,12 +4713,20 @@ pub(crate) fn stored_charges(
     function: &mut CfgFunction,
     residuals: &[ValueId],
 ) -> Vec<Option<ValueId>> {
+    recover_stored_charges(function, residuals).0
+}
+
+fn recover_stored_charges(
+    function: &mut CfgFunction,
+    residuals: &[ValueId],
+) -> (Vec<Option<ValueId>>, bool) {
     let reaches = values_reaching_a_ddt(function);
     let mut insertions: Vec<(ValueId, ValueId)> = Vec::new();
+    let mut first_order_complete = true;
     let charges: Vec<Option<ValueId>> = residuals
         .iter()
         .map(|residual| {
-            resolve_charge(function, &reaches, *residual, 0)
+            resolve_charge(function, &reaches, *residual, 0, &mut first_order_complete)
                 .and_then(|charge| materialise_charge(function, &charge, &mut insertions))
         })
         .collect();
@@ -4729,7 +4734,7 @@ pub(crate) fn stored_charges(
     // being read for the next residual, and two residuals routinely share a
     // subexpression.
     apply_insertions(function, &insertions);
-    charges
+    (charges, first_order_complete)
 }
 
 /// Splice each built instruction in directly after the one it mirrors.
@@ -4824,7 +4829,7 @@ enum ChargeOp {
 /// "stores nothing" in O(1) instead of walking a residual's whole expression
 /// DAG as a tree — which on a compact model is both exponential and, if it were
 /// bounded to stop that, silently wrong for anything deeper than the bound.
-fn values_reaching_a_ddt(function: &CfgFunction) -> Vec<bool> {
+pub(super) fn values_reaching_a_ddt(function: &CfgFunction) -> Vec<bool> {
     let incoming = {
         let mut incoming: HashMap<ValueId, Vec<ValueId>> = HashMap::new();
         for block in &function.blocks {
@@ -4897,16 +4902,35 @@ fn resolve_charge(
     reaches: &[bool],
     residual: ValueId,
     merges: usize,
+    first_order_complete: &mut bool,
 ) -> Option<Charge> {
     if !reaches.get(usize::from(residual)).copied().unwrap_or(false) {
         return Some(Charge::Nothing);
     }
     if merges > MAX_CHARGE_MERGE_DEPTH {
+        *first_order_complete = false;
         return None;
     }
 
+    let charge = resolve_charge_kind(function, reaches, residual, merges, first_order_complete);
+    *first_order_complete &= charge.is_some();
+    charge
+}
+
+fn resolve_charge_kind(
+    function: &CfgFunction,
+    reaches: &[bool],
+    residual: ValueId,
+    merges: usize,
+    first_order_complete: &mut bool,
+) -> Option<Charge> {
     match &function.value(residual).kind {
-        CfgValueKind::Ddt { input, .. } => Some(Charge::Value(*input)),
+        CfgValueKind::Ddt { input, .. } => {
+            // Preserve the existing reactive projection, but do not certify
+            // a higher-order equation for the first-order OneStep split.
+            *first_order_complete &= !reaches[usize::from(*input)];
+            Some(Charge::Value(*input))
+        }
         CfgValueKind::RealConstant(constant) if *constant == 0.0 => Some(Charge::Nothing),
         // Linear arithmetic is pushed inside the `ddt`, which is what makes a
         // scaled or summed charge recoverable. `k * ddt(q)` stores `k * q`;
@@ -4915,8 +4939,12 @@ fn resolve_charge(
         // linear in either, so it is refused rather than approximated.
         CfgValueKind::Binary { op, left, right } => {
             let (op, left, right) = (*op, *left, *right);
-            let charged_left = resolve_charge(function, reaches, left, merges);
-            let charged_right = resolve_charge(function, reaches, right, merges);
+            // An unrecovered operand must invalidate split eligibility even
+            // when the existing reactive projection retains the other term.
+            let charged_left =
+                resolve_charge(function, reaches, left, merges, first_order_complete);
+            let charged_right =
+                resolve_charge(function, reaches, right, merges, first_order_complete);
             let stores =
                 |charge: &Option<Charge>| matches!(charge, Some(charge) if !charge.is_nothing());
             match (op, stores(&charged_left), stores(&charged_right)) {
@@ -4976,7 +5004,7 @@ fn resolve_charge(
             input,
         } => {
             let (op, input) = (*op, *input);
-            match resolve_charge(function, reaches, input, merges)? {
+            match resolve_charge(function, reaches, input, merges, first_order_complete)? {
                 Charge::Nothing => Some(Charge::Nothing),
                 charge => Some(Charge::Op {
                     anchor: residual,
@@ -5001,7 +5029,13 @@ fn resolve_charge(
             let mut stores = false;
             for (source, slot) in edges_into(function, block) {
                 let argument = *edge_arguments(function, source, slot).get(position)?;
-                let arm = resolve_charge(function, reaches, argument, merges + 1)?;
+                let arm = resolve_charge(
+                    function,
+                    reaches,
+                    argument,
+                    merges + 1,
+                    first_order_complete,
+                )?;
                 stores |= !matches!(arm, Charge::Nothing);
                 arms.push(arm);
             }

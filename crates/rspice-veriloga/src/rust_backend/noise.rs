@@ -803,6 +803,43 @@ fn plan_grouped_noise(
         .map(|charge| charge.map_or_else(Vec::new, |charge| differentiated.derivative_row(charge)))
         .collect::<Vec<_>>();
 
+    // The real routing gain is the residual derivative at the DC operating
+    // point, even when that same contribution also carries charge. Clear the
+    // transient companion only after AD has recovered the reactive lane.
+    // Metadata must be checked first: replacing a derivative used as a PSD or
+    // a source guard would otherwise disguise an unsupported noise model.
+    let metadata_roots = cfg
+        .noise_processes
+        .iter()
+        .flat_map(|process| {
+            std::iter::once(process.active)
+                .chain(std::iter::once(process.psd))
+                .chain(process.exponent)
+                .chain(process.table.iter().copied())
+        })
+        .collect::<Vec<_>>();
+    let (metadata, _) =
+        crate::canonical_ir::prune_cfg_to_outputs(&differentiated.function, &metadata_roots);
+    if metadata.values.iter().any(|value| {
+        matches!(
+            value.kind,
+            CfgValueKind::Ddt { .. } | CfgValueKind::DdtScale
+        )
+    }) {
+        return Err(unsupported(
+            artifact,
+            "a time derivative in generated noise magnitude or activation metadata",
+        ));
+    }
+    for value in &mut differentiated.function.values {
+        if matches!(
+            value.kind,
+            CfgValueKind::Ddt { .. } | CfgValueKind::DdtScale
+        ) {
+            value.kind = CfgValueKind::RealConstant(0.0);
+        }
+    }
+
     let mut wanted = Vec::new();
     let mut processes = Vec::with_capacity(cfg.noise_processes.len());
     let mut descriptors = Vec::new();
@@ -817,14 +854,7 @@ fn plan_grouped_noise(
         let table = process.table.iter().copied().map(&mut place).collect();
         let mut injections = Vec::new();
         for equation in 0..residuals.len() {
-            // A pure ddt contribution belongs entirely to the reactive lane;
-            // using its transient companion derivative as a real gain here
-            // would make noise depend on the last timestep.
-            let real = if charges[equation].is_some() {
-                None
-            } else {
-                conduction_rows[equation][process_index]
-            };
+            let real = conduction_rows[equation][process_index];
             let reactive = reactive_rows[equation]
                 .get(process_index)
                 .copied()
@@ -876,6 +906,7 @@ fn validate_linear_noise_routing(
     function: &CfgFunction,
 ) -> Result<(), RustBackendError> {
     let noise_dependent = raw_noise_dependencies(function);
+    let dynamic_dependent = super::canonical::values_reaching_a_ddt(function);
     let depends = |value: ValueId| noise_dependent[usize::from(value)];
     for block in &function.blocks {
         if let CfgTerminator::Branch { condition, .. } = block.terminator
@@ -892,9 +923,9 @@ fn validate_linear_noise_routing(
             continue;
         }
         let valid = match &value.kind {
+            CfgValueKind::Ddt { input, .. } => !dynamic_dependent[usize::from(*input)],
             CfgValueKind::NoiseProcess(_)
             | CfgValueKind::BlockParameter
-            | CfgValueKind::Ddt { .. }
             | CfgValueKind::LaneSplat(_)
             | CfgValueKind::LaneWiden { .. }
             | CfgValueKind::LaneBinary { .. }
@@ -2054,6 +2085,28 @@ endmodule
             .expect("fixture has a grouped process");
         assert_eq!(plan.processes.len(), 1);
         assert_eq!(plan.processes[0].injections.len(), 1);
+    }
+
+    #[test]
+    fn static_noise_projection_does_not_mask_dynamic_metadata_or_nested_routing() {
+        for body in [
+            "I(p,n) <+ white_noise(1.0 + ddt(V(p,n)), \"psd\");",
+            "if (ddt(V(p,n)) > 0.0) I(p,n) <+ white_noise(1.0, \"guard\");",
+            "source = white_noise(1.0, \"nested\"); I(p,n) <+ ddt(ddt(source));",
+        ] {
+            let artifact = crate::VerilogACompiler::default()
+                .compile_canonical_ir(&format!(
+                    "module dynamic_noise(p,n); inout p,n; electrical p,n; real source; analog begin {body} end endmodule"
+                ))
+                .unwrap_or_else(|error| panic!("{body}: {error}"));
+            let error = super::plan_grouped_noise(&artifact)
+                .expect_err("unsupported dynamic noise must remain explicit");
+            assert!(
+                error.to_string().contains("time derivative")
+                    || error.to_string().contains("stateful"),
+                "{body}: {error}"
+            );
+        }
     }
 
     #[test]

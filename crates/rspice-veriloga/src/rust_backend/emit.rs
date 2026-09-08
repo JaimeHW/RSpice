@@ -816,6 +816,13 @@ impl Emitter<'_> {
                 if uses[usize::from(result)] != 1 {
                     continue;
                 }
+                // These calls borrow a mutable history closure. Substituting
+                // one into another can both reorder state effects and emit
+                // an illegal nested borrow, such as ddt(outer, ddt(inner, x)).
+                // Keep their SSA bindings; ordinary arithmetic still inlines.
+                if self.function.value(result).kind.state_site().is_some() {
+                    continue;
+                }
                 let same_block = reader_of[usize::from(result)]
                     .and_then(|reader| block_of[usize::from(reader)])
                     .is_some_and(|defined_in| defined_in == block.id);
