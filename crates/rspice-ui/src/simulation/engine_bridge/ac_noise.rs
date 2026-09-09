@@ -91,6 +91,7 @@ impl EngineBridge {
         let measurements = rspice_core::analysis::evaluate_ac_measurements(netlist, &ac_results);
         ensure_not_aborted(abort)?;
         Ok(SimulationResult::Ac {
+            convergence: None,
             noise_reference_temperature_kelvin: None,
             reference_impedances_ohm: None,
             frequencies,

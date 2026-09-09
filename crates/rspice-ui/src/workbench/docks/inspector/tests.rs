@@ -180,6 +180,47 @@ fn inspector_header_exposes_its_workspace_heading() {
     }));
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn convergence_inspector_exposes_unknown_and_forced_acceptance_status_accessibly() {
+    use crate::state::{AnalysisResult, AnalysisType, TransientConvergenceEvidence};
+    for expected in [
+        "Unknown · no solver evidence retained",
+        "No forced LTE acceptances recorded",
+        "Forced LTE acceptances recorded",
+    ] {
+        let mut analysis = AnalysisResult::new(1, AnalysisType::Transient, "Transient");
+        if !expected.starts_with("Unknown") {
+            let mut quality = rspice_core::diagnostics::ConvergenceQuality::default();
+            if expected.starts_with("Forced") {
+                quality.record_force_accept(1);
+            }
+            analysis.convergence = Some(std::sync::Arc::new(
+                TransientConvergenceEvidence::capture(
+                    quality,
+                    &[0.0, 1.0],
+                    &rspice_core::abort_signal::NoAbort,
+                )
+                .unwrap(),
+            ));
+        }
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        let output = ctx.run_ui(Default::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                ui.set_width(312.0);
+                result_authority::result_convergence(ui, &analysis);
+            });
+        });
+        let nodes = output.platform_output.accesskit_update.unwrap().nodes;
+        assert!(
+            nodes.iter().any(|(_, node)| node.label() == Some(expected)),
+            "Missing accessible quality status: {expected}"
+        );
+    }
+}
+
 fn result_app_with_current_out_map(split: bool) -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
     app.state.project_lifecycle.project_open = true;

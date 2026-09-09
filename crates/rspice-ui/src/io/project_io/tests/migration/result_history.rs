@@ -695,6 +695,7 @@ fn project_results_validation_rejects_duplicate_waveform_names_in_analysis() {
             label: "Run 1".to_string(),
             timestamp: 1.0,
             analyses: vec![ProjectAnalysisResult {
+                convergence: PersistedField::Missing,
                 id: 1,
                 analysis_type: "Transient".to_string(),
                 label: "TRAN".to_string(),
@@ -776,6 +777,7 @@ fn project_results_validation_rejects_non_monotonic_waveform_x() {
             label: "Run 1".to_string(),
             timestamp: 1.0,
             analyses: vec![ProjectAnalysisResult {
+                convergence: PersistedField::Missing,
                 id: 1,
                 analysis_type: "Transient".to_string(),
                 label: "TRAN".to_string(),
@@ -856,6 +858,7 @@ fn project_results_preserve_core_noise_mechanism_labels() {
             label: "Run 1".to_string(),
             timestamp: 1.0,
             analyses: vec![ProjectAnalysisResult {
+                convergence: PersistedField::Missing,
                 id: 1,
                 analysis_type: "Noise".to_string(),
                 label: "NOISE".to_string(),

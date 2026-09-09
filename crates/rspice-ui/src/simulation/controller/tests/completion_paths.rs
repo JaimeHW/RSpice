@@ -128,6 +128,7 @@ fn ac_result_conversion_drops_traces_with_mismatched_frequency_shapes() {
 
     let analysis = controller.convert_to_analysis_result_with_metadata_owned(
         crate::simulation::SimulationResult::Ac {
+            convergence: None,
             noise_reference_temperature_kelvin: None,
             reference_impedances_ohm: None,
             frequencies,
@@ -348,6 +349,7 @@ fn advanced_result_conversion_retains_exact_family_metadata() {
 
     let soa = controller.convert_to_analysis_result_with_metadata_owned(
         crate::simulation::SimulationResult::Soa {
+            convergence: None,
             time: vec![0.0, 1.0e-9],
             waveforms: empty_waveforms(),
             violations: Vec::new(),
@@ -525,6 +527,7 @@ fn incomplete_reliability_and_soa_results_fail_closed_without_retained_payloads(
 
     let soa = controller.convert_to_analysis_result_with_metadata_owned(
         crate::simulation::SimulationResult::Soa {
+            convergence: None,
             time: vec![0.0, 1.0],
             waveforms: std::collections::HashMap::new(),
             violations: Vec::new(),

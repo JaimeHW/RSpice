@@ -255,3 +255,16 @@ mod transfer_function_tests {
         assert!(!result(None, None, None).has_data());
     }
 }
+
+impl SimulationResult {
+    pub(crate) fn transient_convergence(
+        &self,
+    ) -> Option<&std::sync::Arc<crate::state::TransientConvergenceEvidence>> {
+        match self {
+            Self::Transient { convergence, .. }
+            | Self::Ac { convergence, .. }
+            | Self::Soa { convergence, .. } => convergence.as_ref(),
+            _ => None,
+        }
+    }
+}

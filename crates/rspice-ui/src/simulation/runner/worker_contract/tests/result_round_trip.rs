@@ -9,6 +9,71 @@
 use super::*;
 
 #[test]
+fn transient_convergence_survives_worker_round_trip() {
+    let mut convergence = rspice_core::diagnostics::ConvergenceQuality {
+        total_iterations: 19,
+        gmin_stepping_count: 2,
+        source_stepping_count: 3,
+        max_residual: 1.25e-9,
+        avg_iterations_per_solve: 3.5,
+        timestep_reductions: 7,
+        lte_rejections: 8,
+        bypassed_device_evaluations: 11,
+        ..Default::default()
+    };
+    convergence.record_force_accept(1);
+    let convergence = crate::state::TransientConvergenceEvidence::capture(
+        convergence,
+        &[0.0, 1e-9],
+        &rspice_core::abort_signal::NoAbort,
+    )
+    .unwrap();
+    let expected = convergence.clone();
+    let result = SimulationResult::Transient {
+        time: vec![0.0, 1e-9],
+        waveforms: HashMap::from([(
+            "V(out)".to_owned(),
+            WaveformData::new_time_domain("V(out)", vec![0.0, 1e-9], vec![0.0, 0.8]),
+        )]),
+        measurements: Vec::new(),
+        periodic_state: None,
+        convergence: Some(std::sync::Arc::new(convergence)),
+        events: Default::default(),
+    };
+    let response = WorkerResponse {
+        id: 42,
+        outcome: WorkerOutcome::Success(Box::new(
+            WorkerSimulationResult::try_from(result).unwrap(),
+        )),
+    };
+    let transport = WorkerResponseTransport::from_response(response).unwrap();
+    let json = serde_json::to_string(&transport.response).unwrap();
+    let transport = WorkerResponseTransport {
+        response: serde_json::from_str(&json).unwrap(),
+        ..transport
+    };
+    let WorkerOutcome::Success(result) = transport.into_response().unwrap().outcome else {
+        panic!("worker must retain the successful result")
+    };
+    let SimulationResult::Transient { convergence, .. } = SimulationResult::from(*result) else {
+        panic!("transient result must retain its kind")
+    };
+    let convergence = convergence.unwrap();
+    assert_eq!(*convergence, expected);
+    let convergence = &convergence.transient;
+    assert_eq!(convergence.total_iterations, 19);
+    assert_eq!(convergence.gmin_stepping_count, 2);
+    assert_eq!(convergence.source_stepping_count, 3);
+    assert_eq!(convergence.force_accepted_points, 1);
+    assert_eq!(convergence.force_accepted_indices, vec![1]);
+    assert_eq!(convergence.max_residual, 1.25e-9);
+    assert_eq!(convergence.avg_iterations_per_solve, 3.5);
+    assert_eq!(convergence.timestep_reductions, 7);
+    assert_eq!(convergence.lte_rejections, 8);
+    assert_eq!(convergence.bypassed_device_evaluations, 11);
+}
+
+#[test]
 fn worker_result_round_trip() {
     let dc_op = SimulationResult::DcOp(Box::new(DcOpResult {
         configuration: crate::simulation::dialog::OpConfig::default(),
@@ -242,6 +307,7 @@ fn worker_result_round_trip() {
     }
 
     let soa = SimulationResult::Soa {
+        convergence: None,
         time: vec![0.0, 1e-6],
         waveforms: HashMap::from([(
             "SOA_VIOLATION_COUNT".to_string(),
@@ -274,7 +340,9 @@ fn worker_result_round_trip() {
             waveforms,
             violations,
             evaluations,
+            convergence,
         } => {
+            assert!(convergence.is_none());
             assert_eq!(time, vec![0.0, 1e-6]);
             assert_eq!(waveforms["SOA_VIOLATION_COUNT"].y_values, vec![0.0, 1.0]);
             assert_eq!(violations[0].device_id, "M1");
@@ -401,6 +469,7 @@ fn worker_result_round_trip() {
     );
     pac_current.y_unit = "A".to_owned();
     let ac = SimulationResult::Ac {
+        convergence: None,
         noise_reference_temperature_kelvin: None,
         reference_impedances_ohm: None,
         frequencies: vec![1.0, 10.0],
@@ -426,7 +495,9 @@ fn worker_result_round_trip() {
             measurements,
             reference_impedances_ohm,
             noise_reference_temperature_kelvin,
+            convergence,
         } => {
+            assert!(convergence.is_none());
             assert_eq!(reference_impedances_ohm, None);
             assert_eq!(noise_reference_temperature_kelvin, None);
             assert_eq!(frequencies, vec![1.0, 10.0]);
@@ -449,4 +520,137 @@ fn worker_result_round_trip() {
         }
         other => panic!("expected ac result, got {other:?}"),
     }
+}
+
+#[test]
+fn convergence_source_evidence_survives_derived_worker_transports() {
+    use crate::state::{
+        ConvergenceReport, PeriodicConvergenceEvidence, PeriodicInitializationMethod,
+        TransientConvergenceEvidence,
+    };
+    use rspice_core::abort_signal::NoAbort;
+    use rspice_core::diagnostics::{
+        ConvergenceDiagnostic, ConvergenceFailureClass, ConvergenceQuality, ConvergenceSite,
+        ConvergenceSiteKind,
+    };
+    let mut metrics = ConvergenceQuality {
+        total_iterations: 23,
+        bypassed_device_evaluations: (1_u64 << 53) + 1,
+        failure_diagnostic: Some(ConvergenceDiagnostic {
+            class: ConvergenceFailureClass::NewtonNonConvergence,
+            sites: vec![ConvergenceSite {
+                name: "OUT".to_owned(),
+                kind: ConvergenceSiteKind::Node,
+                residual: Some(2.75),
+            }],
+            elided_sites: 2,
+            failure_message: "initial attempt exhausted iterations".to_owned(),
+        }),
+        ..Default::default()
+    };
+    metrics.record_force_accept(1);
+    let mut quality =
+        TransientConvergenceEvidence::capture(metrics, &[0.0, 0.5, 1.0], &NoAbort).unwrap();
+    let mut initialization = ConvergenceQuality::default();
+    initialization.record_force_accept(4);
+    quality.initialization = Some(PeriodicConvergenceEvidence {
+        method: PeriodicInitializationMethod::Shooting,
+        solver_iterations: (1_u64 << 53) + 3,
+        final_residual: 2.75e-12,
+        report: ConvergenceReport::capture(initialization, None, &NoAbort).unwrap(),
+    });
+    let quality = std::sync::Arc::new(quality);
+    for result in [
+        SimulationResult::Transient {
+            time: vec![0.6, 1.0],
+            waveforms: HashMap::new(),
+            measurements: Vec::new(),
+            periodic_state: None,
+            events: Default::default(),
+            convergence: Some(quality.clone()),
+        },
+        SimulationResult::Ac {
+            frequencies: vec![1.0],
+            waveforms: HashMap::new(),
+            measurements: Vec::new(),
+            reference_impedances_ohm: None,
+            noise_reference_temperature_kelvin: None,
+            convergence: Some(quality.clone()),
+        },
+        SimulationResult::Soa {
+            time: vec![0.6, 1.0],
+            waveforms: HashMap::new(),
+            violations: Vec::new(),
+            evaluations: Vec::new(),
+            convergence: Some(quality.clone()),
+        },
+    ] {
+        let transport = WorkerResponseTransport::from_response(
+            WorkerResponse::from_result_for_transfer(7, Ok(result)),
+        )
+        .unwrap();
+        let json = serde_json::to_string(&transport.response).unwrap();
+        assert!(json.contains("\"9007199254740993\""));
+        let restored = WorkerResponseTransport {
+            response: serde_json::from_str(&json).unwrap(),
+            ..transport
+        }
+        .into_response()
+        .unwrap()
+        .into_result()
+        .unwrap();
+        assert_eq!(restored.transient_convergence(), Some(&quality));
+    }
+}
+
+#[test]
+fn convergence_worker_transport_rejects_inline_and_malformed_quality_buffers() {
+    let mut metrics = rspice_core::diagnostics::ConvergenceQuality::default();
+    metrics.record_force_accept(1);
+    let quality = crate::state::TransientConvergenceEvidence::capture(
+        metrics,
+        &[0.0, 1.0],
+        &rspice_core::abort_signal::NoAbort,
+    )
+    .unwrap();
+    let result = SimulationResult::Transient {
+        time: vec![0.0, 1.0],
+        waveforms: HashMap::new(),
+        measurements: Vec::new(),
+        periodic_state: None,
+        events: Default::default(),
+        convergence: Some(std::sync::Arc::new(quality)),
+    };
+    let transport = WorkerResponseTransport::from_response(
+        WorkerResponse::from_result_for_transfer(8, Ok(result)),
+    )
+    .unwrap();
+    let mut metadata = serde_json::to_value(&transport.response).unwrap();
+    let index = metadata["outcome"]["Success"]["Transient"]["convergence"]["transient_indices"]["Buffer"]["buffer"].as_u64().unwrap() as usize;
+    let mut malformed = transport.clone();
+    malformed.buffers[index][0] = 0.5;
+    assert!(
+        malformed
+            .into_response()
+            .unwrap_err()
+            .contains("integer limb")
+    );
+    metadata["outcome"]["Success"]["Transient"]["convergence"]["transient_indices"] =
+        serde_json::json!({"Inline": [1.0, 0.0]});
+    let mut inline = transport.clone();
+    inline.response = serde_json::from_value(metadata).unwrap();
+    assert!(
+        inline
+            .into_response()
+            .unwrap_err()
+            .contains("dedicated transfer buffers")
+    );
+    let mut obsolete = transport;
+    obsolete.protocol = 17;
+    assert!(
+        obsolete
+            .into_response()
+            .unwrap_err()
+            .contains("unsupported")
+    );
 }

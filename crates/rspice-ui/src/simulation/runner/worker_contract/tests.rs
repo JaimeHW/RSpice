@@ -298,7 +298,7 @@ pub(super) fn nondefault_op_config() -> crate::simulation::dialog::OpConfig {
 
 #[test]
 fn browser_worker_transfer_protocol_matches_rust_transport() {
-    assert_eq!(WORKER_RESPONSE_TRANSPORT_PROTOCOL, 17);
+    assert_eq!(WORKER_RESPONSE_TRANSPORT_PROTOCOL, 18);
     assert_eq!(WORKER_REQUEST_TRANSPORT_PROTOCOL, 9);
     let source = include_str!("../../../../web/simulation-worker.js");
     assert!(source.contains(&format!(
@@ -781,6 +781,7 @@ fn legacy_hb_specs_default_the_exact_collocation_grid() {
 #[test]
 fn transient_worker_result_round_trips_through_json() {
     let result = WorkerSimulationResult::Transient {
+        convergence: None,
         time: vec![0.0, 1e-9],
         waveforms: vec![WorkerWaveform {
             name: "V(out)".to_string(),
@@ -853,6 +854,7 @@ fn response_with_measurement(measurement: WorkerMeasurement) -> WorkerResponse {
     WorkerResponse {
         id: 901,
         outcome: WorkerOutcome::Success(Box::new(WorkerSimulationResult::Transient {
+            convergence: None,
             time: vec![0.0],
             waveforms: Vec::new(),
             measurements: vec![measurement],
@@ -1067,6 +1069,7 @@ fn monte_carlo_worker_result_round_trips_seed_and_exact_samples_through_json() {
 #[test]
 fn worker_result_payload_estimate_counts_high_volume_arrays() {
     let transient = WorkerSimulationResult::Transient {
+        convergence: None,
         time: vec![0.0, 1.0],
         waveforms: vec![WorkerWaveform {
             name: "V(out)".to_string(),
@@ -1082,6 +1085,7 @@ fn worker_result_payload_estimate_counts_high_volume_arrays() {
     assert_eq!(transient.estimated_numeric_payload_bytes(), 48);
 
     let ac = WorkerSimulationResult::Ac {
+        convergence: None,
         noise_reference_temperature_kelvin: None,
         reference_impedances_ohm: None,
         frequencies: vec![1.0, 10.0, 100.0],
@@ -1180,6 +1184,7 @@ fn worker_transport_extracts_transient_waveform_buffers() {
     let response = WorkerResponse {
         id: 77,
         outcome: WorkerOutcome::Success(Box::new(WorkerSimulationResult::Transient {
+            convergence: None,
             time: vec![0.0, 1.0],
             waveforms: vec![WorkerWaveform {
                 name: "V(out)".to_string(),
@@ -1264,6 +1269,7 @@ fn worker_transport_round_trips_ac_and_noise_buffers() {
     let ac = WorkerResponse {
         id: 10,
         outcome: WorkerOutcome::Success(Box::new(WorkerSimulationResult::Ac {
+            convergence: None,
             noise_reference_temperature_kelvin: None,
             reference_impedances_ohm: None,
             frequencies: vec![1.0, 10.0, 100.0],
@@ -1310,6 +1316,7 @@ fn worker_transport_retains_and_validates_resolved_port_references() {
         let response = WorkerResponse {
             id: 19,
             outcome: WorkerOutcome::Success(Box::new(WorkerSimulationResult::Ac {
+                convergence: None,
                 noise_reference_temperature_kelvin: None,
                 frequencies: vec![1e6, 2e6],
                 waveforms: Vec::new(),
@@ -1341,6 +1348,7 @@ fn worker_transport_retains_and_validates_resolved_port_references() {
         let response = WorkerResponse {
             id: 19,
             outcome: WorkerOutcome::Success(Box::new(WorkerSimulationResult::Ac {
+                convergence: None,
                 noise_reference_temperature_kelvin: None,
                 frequencies: vec![1e6],
                 waveforms: Vec::new(),
@@ -1577,6 +1585,7 @@ fn worker_transport_rejects_missing_or_mismatched_buffers() {
     let response = WorkerResponse {
         id: 12,
         outcome: WorkerOutcome::Success(Box::new(WorkerSimulationResult::Transient {
+            convergence: None,
             time: vec![0.0, 1.0],
             waveforms: vec![WorkerWaveform {
                 name: "V(out)".to_string(),
@@ -1614,6 +1623,7 @@ fn worker_transport_validates_complex_waveform_shape() {
         response: WorkerResponseTransportMetadata {
             id: 44,
             outcome: WorkerOutcomeTransport::Success(WorkerSimulationResultTransport::Transient {
+                convergence: None,
                 time: WorkerF64Series::Buffer { buffer: 0, len: 2 },
                 waveforms: vec![WorkerWaveformTransport {
                     name: "V(out)".to_string(),
@@ -1639,6 +1649,7 @@ fn worker_transport_validates_complex_waveform_shape() {
         response: WorkerResponseTransportMetadata {
             id: 45,
             outcome: WorkerOutcomeTransport::Success(WorkerSimulationResultTransport::Transient {
+                convergence: None,
                 time: WorkerF64Series::Buffer { buffer: 0, len: 2 },
                 waveforms: vec![WorkerWaveformTransport {
                     name: "V(out)".to_string(),

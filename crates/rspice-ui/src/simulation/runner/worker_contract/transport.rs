@@ -56,7 +56,27 @@ impl WorkerResponseTransport {
 pub(super) fn validate_worker_response_before_transport(
     response: &WorkerResponse,
 ) -> Result<(), String> {
+    if let WorkerOutcome::Success(result) = &response.outcome
+        && let WorkerSimulationResult::Transient {
+            convergence: Some(quality),
+            ..
+        }
+        | WorkerSimulationResult::Ac {
+            convergence: Some(quality),
+            ..
+        }
+        | WorkerSimulationResult::Soa {
+            convergence: Some(quality),
+            ..
+        } = result.as_ref()
+    {
+        if quality.transfer_value_count() > MAX_WORKER_F64_VALUES {
+            return Err("Convergence evidence exceeds the worker numeric payload limit".to_owned());
+        }
+        quality.validate()?;
+    }
     if let WorkerOutcome::Success(result) = &response.outcome {
+        validate_transient_source_payload_size(result)?;
         validate_worker_measurements(result)?;
     }
     if let WorkerOutcome::Success(result) = &response.outcome
@@ -422,6 +442,12 @@ pub(crate) fn validate_worker_request_transfer_buffer_lengths(
 }
 
 impl WorkerF64Series {
+    fn into_convergence_values(self, buffers: &[Vec<f64>]) -> Result<Vec<f64>, String> {
+        if matches!(self, Self::Inline(_)) {
+            return Err("Convergence arrays must use dedicated transfer buffers".to_owned());
+        }
+        self.into_vec(buffers)
+    }
     pub(super) fn from_vec(values: Vec<f64>, buffers: &mut Vec<Vec<f64>>) -> Self {
         let len = values.len();
         let buffer = buffers.len();
@@ -1232,6 +1258,7 @@ pub(crate) enum WorkerSimulationResultTransport {
         time: WorkerF64Series,
         waveforms: Vec<WorkerWaveformTransport>,
         measurements: Vec<WorkerMeasurement>,
+        convergence: Option<crate::simulation::results::ConvergenceTransport<WorkerF64Series>>,
         /// Event histories ride the JSON envelope rather than the binary
         /// buffer channel: they are short, and their times are the datum, not
         /// a resampling of `time`.
@@ -1270,6 +1297,7 @@ pub(crate) enum WorkerSimulationResultTransport {
         operating_point: WorkerHbOperatingPointTransport,
     },
     Ac {
+        convergence: Option<crate::simulation::results::ConvergenceTransport<WorkerF64Series>>,
         frequencies: WorkerF64Series,
         waveforms: Vec<WorkerWaveformTransport>,
         measurements: Vec<WorkerMeasurement>,
@@ -1318,6 +1346,7 @@ pub(crate) enum WorkerSimulationResultTransport {
         converged: bool,
     },
     Soa {
+        convergence: Option<crate::simulation::results::ConvergenceTransport<WorkerF64Series>>,
         time: WorkerF64Series,
         waveforms: Vec<WorkerWaveformTransport>,
         violations: Vec<WorkerSoAViolation>,
@@ -1408,11 +1437,18 @@ impl WorkerSimulationResultTransport {
                 time,
                 waveforms,
                 measurements,
+                convergence,
                 events,
             } => Self::Transient {
                 time: WorkerF64Series::from_vec(time, buffers),
                 waveforms: transport_waveforms(waveforms, buffers),
                 measurements,
+                convergence: convergence.as_ref().map(|quality| {
+                    crate::simulation::results::ConvergenceTransport::from_evidence(
+                        quality,
+                        |values| WorkerF64Series::from_vec(values.into_owned(), buffers),
+                    )
+                }),
                 events,
             },
             WorkerSimulationResult::Pss {
@@ -1481,12 +1517,19 @@ impl WorkerSimulationResultTransport {
                 ),
             },
             WorkerSimulationResult::Ac {
+                convergence,
                 frequencies,
                 waveforms,
                 measurements,
                 reference_impedances_ohm,
                 noise_reference_temperature_kelvin,
             } => Self::Ac {
+                convergence: convergence.as_ref().map(|quality| {
+                    crate::simulation::results::ConvergenceTransport::from_evidence(
+                        quality,
+                        |values| WorkerF64Series::from_vec(values.into_owned(), buffers),
+                    )
+                }),
                 frequencies: WorkerF64Series::from_vec(frequencies, buffers),
                 waveforms: transport_waveforms(waveforms, buffers),
                 measurements,
@@ -1567,11 +1610,18 @@ impl WorkerSimulationResultTransport {
                 converged,
             },
             WorkerSimulationResult::Soa {
+                convergence,
                 time,
                 waveforms,
                 violations,
                 evaluations,
             } => Self::Soa {
+                convergence: convergence.as_ref().map(|quality| {
+                    crate::simulation::results::ConvergenceTransport::from_evidence(
+                        quality,
+                        |values| WorkerF64Series::from_vec(values.into_owned(), buffers),
+                    )
+                }),
                 time: WorkerF64Series::from_vec(time, buffers),
                 waveforms: transport_waveforms(waveforms, buffers),
                 violations,
@@ -1587,9 +1637,15 @@ impl WorkerSimulationResultTransport {
     ) -> Result<WorkerSimulationResult, String> {
         match self {
             Self::Inline(result) => {
-                if matches!(result, WorkerSimulationResult::Pstb { .. }) {
+                if matches!(
+                    result,
+                    WorkerSimulationResult::Pstb { .. }
+                        | WorkerSimulationResult::Transient { .. }
+                        | WorkerSimulationResult::Ac { .. }
+                        | WorkerSimulationResult::Soa { .. }
+                ) {
                     return Err(
-                        "PSTB worker result must use the dedicated transfer-buffer transport"
+                        "Waveform and convergence results must use the dedicated transfer-buffer transport"
                             .to_owned(),
                     );
                 }
@@ -1649,11 +1705,19 @@ impl WorkerSimulationResultTransport {
                 time,
                 waveforms,
                 measurements,
+                convergence,
                 events,
             } => Ok(WorkerSimulationResult::Transient {
                 time: time.into_vec(buffers)?,
                 waveforms: worker_waveforms_from_transport(waveforms, buffers)?,
                 measurements,
+                convergence: convergence
+                    .map(|quality| {
+                        quality.into_evidence(WorkerF64Series::len, |series| {
+                            series.into_convergence_values(buffers)
+                        })
+                    })
+                    .transpose()?,
                 events,
             }),
             Self::Pss {
@@ -1720,12 +1784,20 @@ impl WorkerSimulationResultTransport {
                 operating_point: operating_point.into_operating_point(buffers)?,
             }),
             Self::Ac {
+                convergence,
                 frequencies,
                 waveforms,
                 measurements,
                 reference_impedances_ohm,
                 noise_reference_temperature_kelvin,
             } => Ok(WorkerSimulationResult::Ac {
+                convergence: convergence
+                    .map(|quality| {
+                        quality.into_evidence(WorkerF64Series::len, |series| {
+                            series.into_convergence_values(buffers)
+                        })
+                    })
+                    .transpose()?,
                 frequencies: frequencies.into_vec(buffers)?,
                 waveforms: worker_waveforms_from_transport(waveforms, buffers)?,
                 measurements,
@@ -1809,11 +1881,19 @@ impl WorkerSimulationResultTransport {
                 converged,
             }),
             Self::Soa {
+                convergence,
                 time,
                 waveforms,
                 violations,
                 evaluations,
             } => Ok(WorkerSimulationResult::Soa {
+                convergence: convergence
+                    .map(|quality| {
+                        quality.into_evidence(WorkerF64Series::len, |series| {
+                            series.into_convergence_values(buffers)
+                        })
+                    })
+                    .transpose()?,
                 time: time.into_vec(buffers)?,
                 waveforms: worker_waveforms_from_transport(waveforms, buffers)?,
                 violations,
@@ -1821,6 +1901,62 @@ impl WorkerSimulationResultTransport {
             }),
         }
     }
+}
+
+/// Bound the complete representation before allocating packed quality indices.
+fn validate_transient_source_payload_size(result: &WorkerSimulationResult) -> Result<(), String> {
+    let (axis, waveforms, quality, references) = match result {
+        WorkerSimulationResult::Transient {
+            time,
+            waveforms,
+            convergence,
+            ..
+        }
+        | WorkerSimulationResult::Soa {
+            time,
+            waveforms,
+            convergence,
+            ..
+        } => (time, waveforms, convergence, None),
+        WorkerSimulationResult::Ac {
+            frequencies,
+            waveforms,
+            convergence,
+            reference_impedances_ohm,
+            ..
+        } => (
+            frequencies,
+            waveforms,
+            convergence,
+            reference_impedances_ohm.as_ref(),
+        ),
+        _ => return Ok(()),
+    };
+    let mut values = axis
+        .len()
+        .saturating_add(references.map_or(0, Vec::len))
+        .saturating_add(quality.as_ref().map_or(
+            0,
+            crate::state::TransientConvergenceEvidence::transfer_value_count,
+        ));
+    let mut buffers = 1usize
+        .saturating_add(usize::from(references.is_some()))
+        .saturating_add(quality.as_ref().map_or(0, |quality| {
+            2 + usize::from(quality.initialization.is_some())
+        }));
+    for waveform in waveforms {
+        values = values
+            .saturating_add(waveform.x_values.len())
+            .saturating_add(waveform.y_values.len())
+            .saturating_add(waveform.y_imag.as_ref().map_or(0, Vec::len));
+        buffers = buffers.saturating_add(2 + usize::from(waveform.y_imag.is_some()));
+    }
+    if values > MAX_WORKER_F64_VALUES || buffers > MAX_WORKER_TRANSFER_BUFFERS {
+        return Err(
+            "Waveform and convergence evidence exceed the worker transfer limit".to_owned(),
+        );
+    }
+    Ok(())
 }
 
 pub(super) fn validate_worker_dc_op_state(

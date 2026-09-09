@@ -147,6 +147,7 @@ pub use rspice_design_model::design_management::*;
 pub use schematic::*;
 // Test-only aliases: the submodule is private, so this path is the only way
 // the tests can name an attribution's vocabulary directly.
+pub(crate) use simulation::ConvergenceEncoder;
 #[cfg(test)]
 pub use simulation::ConvergenceFailureClass;
 pub(crate) use simulation::RunHistoryRevision;
@@ -182,6 +183,10 @@ pub use simulation::{
     TransferFunctionScalarEvidence, WaveformData, absent_deck_reason, ac_bode_shape_for_analysis,
     ac_bode_shape_for_selection, ac_bode_summary_for_analysis, ac_bode_summary_for_selection,
     sealed_model_sources,
+};
+pub use simulation::{
+    ConvergenceReport, PeriodicConvergenceEvidence, PeriodicInitializationMethod,
+    TransientConvergenceEvidence,
 };
 // Only the two types the persisted model itself names are hoisted here. The
 // rest of the stimulus vocabulary — the definition record, the draft state

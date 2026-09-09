@@ -34,7 +34,7 @@ use legacy_digests::{
     validate_v8_result_digests, validate_v9_result_digests, validate_v10_result_digests,
     validate_v11_result_digests, validate_v12_result_digests, validate_v13_to_v15_result_digests,
     validate_v16_result_digests, validate_v17_result_digests, validate_v18_result_digests,
-    validate_v19_result_digests,
+    validate_v19_result_digests, validate_v20_result_digests,
 };
 pub use provenance::*;
 use provenance::{
@@ -151,6 +151,25 @@ impl ProjectSimulationResultsData {
 
     fn migrate_to_current_in_place(&mut self, project_id: ProjectId) -> Result<(), String> {
         let source_schema = self.schema_version;
+        if source_schema < CONVERGENCE_RESULTS_SCHEMA_VERSION
+            && self
+                .runs
+                .iter()
+                .flat_map(|run| &run.analyses)
+                .any(|analysis| analysis.convergence.is_present())
+        {
+            return Err("result schemas before v21 cannot contain convergence evidence".to_owned());
+        }
+        if source_schema == IMPORT_SOURCE_RESULTS_SCHEMA_VERSION {
+            for run in &self.runs {
+                validate_v20_result_digests(run)?;
+            }
+            for run in &mut self.runs {
+                seal_project_result_digests(run)?;
+            }
+            self.schema_version = PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION;
+            return self.validate();
+        }
         if source_schema < IMPORT_SOURCE_RESULTS_SCHEMA_VERSION
             && self
                 .runs
@@ -1525,6 +1544,9 @@ pub struct ProjectAnalysisResult {
     /// reads back as the honest "it named none".
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub failure_attribution: Option<crate::state::ConvergenceAttribution>,
+    /// Numerical quality introduced by result schema v21. Missing stays unknown.
+    #[serde(default, skip_serializing_if = "PersistedField::is_missing")]
+    pub convergence: PersistedField<crate::state::TransientConvergenceEvidence>,
     /// Complete source identity for prepared-task results. `None` is retained only
     /// when loading result history written by v1/v2 projects.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1668,6 +1690,15 @@ impl From<&AnalysisResultProvenance> for ProjectAnalysisResultProvenance {
 
 impl ProjectAnalysisResult {
     pub(super) fn into_analysis(self) -> Result<AnalysisResult, String> {
+        if self.convergence.is_null() {
+            return Err(format!(
+                "analysis sequence {} has explicitly null convergence evidence",
+                self.id
+            ));
+        }
+        if let Some(quality) = self.convergence.as_ref() {
+            quality.validate()?;
+        }
         if self.result_data_digest.is_null() {
             return Err(format!(
                 "analysis sequence {} has an explicitly null result data digest",
@@ -1718,6 +1749,7 @@ impl ProjectAnalysisResult {
             success: self.success,
             error_message: self.error_message,
             failure_attribution: self.failure_attribution,
+            convergence: self.convergence.into_value().map(std::sync::Arc::new),
             provenance,
             import_source: self.import_source.into_value(),
         };
@@ -1745,6 +1777,14 @@ impl ProjectAnalysisResult {
 
     fn validate(&self, run_idx: usize, analysis_idx: usize) -> Result<(), String> {
         let prefix = format!("runs[{run_idx}].analyses[{analysis_idx}]");
+        if self.convergence.is_null() {
+            return Err(format!("{prefix}.convergence must not be null"));
+        }
+        if let Some(quality) = self.convergence.as_ref() {
+            quality
+                .validate()
+                .map_err(|error| format!("{prefix}.convergence is invalid: {error}"))?;
+        }
         if analysis_type_from_key(&self.analysis_type).is_none() {
             return Err(format!(
                 "{prefix}.analysis_type has unknown analysis type '{}'",
@@ -1969,6 +2009,11 @@ impl From<&AnalysisResult> for ProjectAnalysisResult {
             success: analysis.success,
             error_message: analysis.error_message.clone(),
             failure_attribution: analysis.failure_attribution.clone(),
+            convergence: analysis
+                .convergence
+                .as_deref()
+                .cloned()
+                .map_or(PersistedField::Missing, PersistedField::Value),
             import_source: analysis
                 .import_source
                 .clone()

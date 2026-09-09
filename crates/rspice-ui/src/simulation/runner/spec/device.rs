@@ -228,6 +228,7 @@ fn run_soa(
     }
 
     Ok(SimulationResult::Soa {
+        convergence: data.convergence,
         time: data.time,
         waveforms,
         violations: data.violations,

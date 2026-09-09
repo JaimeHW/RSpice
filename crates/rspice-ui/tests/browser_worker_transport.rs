@@ -40,7 +40,7 @@ fn run(seed: u64, source: &str) -> serde_json::Value {
         .expect("worker must return valid Monte Carlo results");
     let response = structured_clone(&response);
     let response: serde_json::Value = serde_wasm_bindgen::from_value(response).unwrap();
-    assert_eq!(response["protocolVersion"], 17);
+    assert_eq!(response["protocolVersion"], 18);
     assert_eq!(response["response"]["id"].as_u64(), Some(1));
     let result = response["response"]["outcome"]["Success"]["Inline"]["MonteCarlo"].clone();
     assert_eq!(result["seed"].as_u64(), Some(seed), "{response}");
@@ -71,4 +71,42 @@ fn deck_statistics_retain_full_width_trial_identities() {
         assert_eq!(member["member"]["index"].as_u64(), Some(index as u64));
     }
     assert_eq!(result, run(7, "deck_statistics"));
+}
+
+#[wasm_bindgen_test]
+fn transient_quality_survives_the_worker_and_structured_clone_before_output_cropping() {
+    let request = serde_json::json!({
+        "protocolVersion": 9,
+        "request": {
+            "request": {
+                "id": 2,
+                "request": {"Spec": {"spec": {"Transient": {
+                    "stop_time": 1.0, "step_time": 0.01, "start_time": 0.5,
+                    "max_timestep": null, "uic": false
+                }}, "options": {}}},
+                "netlist": "Worker convergence\nV1 out 0 1\nR1 out 0 1k\n.end\n",
+                "source_path": null
+            },
+            "dependency_metadata": "{\"snapshot_digest\":null,\"bindings\":[],\"artifacts\":[]}",
+            "dependency_buffer_count": 0
+        },
+        "buffers": []
+    });
+    let response =
+        rspice_ui::run_rspice_ui_worker_request(js_sys::JSON::parse(&request.to_string()).unwrap())
+            .unwrap();
+    let response: serde_json::Value =
+        serde_wasm_bindgen::from_value(structured_clone(&response)).unwrap();
+    assert_eq!(response["protocolVersion"], 18);
+    let transient = &response["response"]["outcome"]["Success"]["Transient"];
+    let quality = &transient["convergence"]["metadata"]["transient"];
+    let basis = &quality["time_basis"];
+    assert_eq!(basis["start_s"], 0.0);
+    assert_eq!(basis["stop_s"], 1.0);
+    let source_samples: u64 = basis["sample_count"].as_str().unwrap().parse().unwrap();
+    assert!(source_samples > transient["time"]["Buffer"]["len"].as_u64().unwrap());
+    assert_eq!(quality["force_accepted_points"], "0");
+    for field in ["transient_indices", "transient_times"] {
+        assert!(transient["convergence"][field]["Buffer"].is_object());
+    }
 }

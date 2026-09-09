@@ -1887,18 +1887,12 @@ impl SimulationController {
                         });
 
                     self.apply_result_side_effects(state, &sim_result);
-                    if let crate::simulation::SimulationResult::Transient { convergence, .. } =
-                        &sim_result
+                    if let Some(quality) = sim_result.transient_convergence()
+                        && quality.has_lte_exceptions()
                     {
-                        // Only when the solver needed help. A clean run says
-                        // nothing, so the console stays a signal rather than a
-                        // per-run receipt.
-                        if convergence.has_issues() {
-                            state.push_sim_message(ConsoleMessage::warning(format!(
-                                "{current_label}: {}",
-                                convergence.summary()
-                            )));
-                        }
+                        state.push_sim_message(ConsoleMessage::warning(format!(
+                            "{current_label}: accepted points exceeded the local truncation-error criterion. Review convergence details in the result inspector."
+                        )));
                     }
 
                     let mut analysis_result = if let Some(config) = &self.current_config {

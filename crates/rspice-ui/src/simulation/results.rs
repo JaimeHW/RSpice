@@ -8,6 +8,10 @@ use crate::simulation::reliability_engine::ReliabilityResult;
 use std::collections::HashMap;
 
 mod accessors;
+#[cfg(any(target_arch = "wasm32", test))]
+mod convergence_transport;
+#[cfg(any(target_arch = "wasm32", test))]
+pub(crate) use convergence_transport::ConvergenceTransport;
 mod measurements;
 mod monte_carlo;
 mod operating_point;
@@ -167,10 +171,10 @@ pub enum SimulationResult {
         periodic_state: Option<std::sync::Arc<rspice_core::engine::PssOperatingPoint>>,
         /// What the solver had to do to produce these waveforms.
         ///
-        /// Travels with the data because it qualifies it: a force-accepted
-        /// point is a sample the solver could not converge and kept anyway,
-        /// so a curve that looks smooth can still be wrong there.
-        convergence: rspice_core::diagnostics::ConvergenceQuality,
+        /// Source times remain tied to the engine trajectory after cropping
+        /// or projection. Force-accepted points converged in Newton but failed
+        /// the local truncation error test. Missing evidence means unknown.
+        convergence: Option<std::sync::Arc<crate::state::TransientConvergenceEvidence>>,
         /// Committed XSPICE event histories, when the deck has event nodes.
         ///
         /// Events keep their own sparse schedule instead of being resampled
@@ -181,6 +185,8 @@ pub enum SimulationResult {
 
     /// AC analysis results
     Ac {
+        /// Quality of a transient source used to derive this spectrum, when available.
+        convergence: Option<std::sync::Arc<crate::state::TransientConvergenceEvidence>>,
         /// Frequency vector
         frequencies: Vec<f64>,
         /// Complex waveforms indexed by signal name
@@ -380,6 +386,7 @@ pub enum SimulationResult {
 
     /// Safety / SOA analysis result.
     Soa {
+        convergence: Option<std::sync::Arc<crate::state::TransientConvergenceEvidence>>,
         /// Time axis for SOA checks.
         time: Vec<f64>,
         /// Waveforms indexed by signal name.

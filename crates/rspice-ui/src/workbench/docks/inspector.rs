@@ -1452,6 +1452,11 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
 
     // The analysis's own provenance belongs to the same folded record as the
     // dataset's, even though a different owner draws it.
+    if let Some(index) = app.state.simulation.active_analysis_idx
+        && let Some(analysis) = run.analyses.get(index)
+    {
+        result_authority::result_convergence(ui, analysis);
+    }
     if inspector_disclosure_open(ui.ctx(), "result-provenance")
         && let Some(index) = app.state.simulation.active_analysis_idx
         && let Some(analysis) = run.analyses.get(index)

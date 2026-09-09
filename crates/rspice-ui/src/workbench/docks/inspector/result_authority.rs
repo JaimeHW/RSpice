@@ -11,6 +11,130 @@ use egui::Ui;
 use super::super::super::design_system::property_row;
 use super::{executed_deck, inspector_disclosure, section_header};
 
+/// Solver evidence belongs to the selected result, including after project reload.
+pub(super) fn result_convergence(ui: &mut Ui, analysis: &crate::state::AnalysisResult) {
+    use crate::state::{AnalysisType, PeriodicInitializationMethod};
+    let Some(quality) = analysis.convergence.as_deref() else {
+        if matches!(
+            analysis.analysis_type,
+            AnalysisType::Transient
+                | AnalysisType::TransientNoise
+                | AnalysisType::Envelope
+                | AnalysisType::Fourier
+                | AnalysisType::Soa
+        ) {
+            section_header(ui, "Transient convergence", None);
+            ui.add(egui::Label::new("Unknown · no solver evidence retained").wrap());
+        }
+        return;
+    };
+    section_header(ui, "Transient convergence", None);
+    let label = if quality.has_lte_exceptions() {
+        "Forced LTE acceptances recorded"
+    } else {
+        "No forced LTE acceptances recorded"
+    };
+    ui.add(egui::Label::new(label).wrap());
+    if !inspector_disclosure(ui, "result-convergence", "Convergence details", "recorded") {
+        return;
+    }
+    ui.label("LTE is local truncation error. A forced acceptance passed Newton convergence but exceeded the LTE criterion. These statistics do not establish overall numerical accuracy.");
+    convergence_report(ui, &quality.transient, "Source transient");
+    if let Some(initialization) = &quality.initialization {
+        let phase = match initialization.method {
+            PeriodicInitializationMethod::Shooting => "Shooting initialization",
+            PeriodicInitializationMethod::HarmonicBalance => "Harmonic-balance initialization",
+        };
+        section_header(ui, phase, None);
+        let iterations_label = match initialization.method {
+            PeriodicInitializationMethod::Shooting => "Shooting corrections",
+            PeriodicInitializationMethod::HarmonicBalance => "HB Newton iterations",
+        };
+        property_row(
+            ui,
+            iterations_label,
+            &initialization.solver_iterations.to_string(),
+        );
+        property_row(
+            ui,
+            "Final periodic residual",
+            &format!("{:.6e}", initialization.final_residual),
+        );
+        ui.label("The counters below cover recorded helper solves during initialization; they are separate from the periodic solver's iteration count.");
+        convergence_report(ui, &initialization.report, "Initialization helper solves");
+    }
+}
+
+fn convergence_report(ui: &mut Ui, report: &crate::state::ConvergenceReport, phase: &str) {
+    section_header(ui, phase, None);
+    for (name, count) in [
+        ("Newton iterations", report.total_iterations),
+        ("Gmin stepping", report.gmin_stepping_count),
+        ("Source stepping", report.source_stepping_count),
+        ("Forced LTE points", report.force_accepted_points),
+        ("Step reductions", report.timestep_reductions),
+        ("LTE rejections", report.lte_rejections),
+        ("Device bypasses", report.bypassed_device_evaluations),
+    ] {
+        property_row(ui, name, &count.to_string());
+    }
+    property_row(
+        ui,
+        "Maximum residual",
+        &format!("{:.6e}", report.max_residual),
+    );
+    property_row(
+        ui,
+        "Iterations / solve",
+        &format!("{:.6}", report.avg_iterations_per_solve),
+    );
+    if let Some(basis) = &report.time_basis {
+        property_row(ui, "Source samples", &basis.sample_count.to_string());
+        property_row(ui, "Source start", &format!("{:.16e} s", basis.start_s));
+        property_row(ui, "Source stop", &format!("{:.16e} s", basis.stop_s));
+        ui.label("Affected times refer to the original solver trajectory, before cropping, envelope extraction or Fourier analysis.");
+    } else {
+        property_row(
+            ui,
+            "Source times",
+            "Not available for the internal initialization trajectory",
+        );
+    }
+    if !report.force_accepted_indices.is_empty() {
+        ui.push_id(phase, |ui| {
+            ui.collapsing("Forced LTE acceptance locations", |ui| {
+                egui::ScrollArea::both().max_height(160.0).show_rows(
+                    ui,
+                    ui.text_style_height(&egui::TextStyle::Body),
+                    report.force_accepted_indices.len(),
+                    |ui, range| {
+                        for position in range {
+                            let index = report.force_accepted_indices[position];
+                            let location = report.time_basis.as_ref().map_or_else(
+                                || format!("Source index {index} (zero based)"),
+                                |basis| {
+                                    format!(
+                                        "{:.16e} s · source index {index}",
+                                        basis.force_accepted_times_s[position]
+                                    )
+                                },
+                            );
+                            ui.add(egui::Label::new(location).extend());
+                        }
+                    },
+                );
+            });
+        });
+    }
+    if let Some(diagnostic) = &report.failure_diagnostic {
+        ui.label("An attempted solve left this diagnostic; a later convergence aid may have recovered it.");
+        ui.label(diagnostic.summary());
+        if !diagnostic.failure_message.is_empty() {
+            ui.label(&diagnostic.failure_message);
+        }
+    }
+}
+
 /// What a reader asked the authority record to do next.
 #[derive(Debug, Clone, Copy, Default)]
 pub(super) struct AuthorityRoutes {

@@ -1532,6 +1532,7 @@ mod tests {
 
     fn analysis(label: &str, waveforms: Vec<WaveformData>) -> AnalysisResult {
         AnalysisResult {
+            convergence: None,
             id: 1,
             analysis_type: AnalysisType::Transient,
             label: label.to_string(),

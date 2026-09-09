@@ -735,7 +735,7 @@ mod browser {
                 ))
             })?;
             let view = js_sys::Float64Array::new_with_length(length);
-            view.copy_from(values);
+            view.copy_from(values.as_ref());
             transfer.push(&view.buffer());
             buffers.push(&view);
         }

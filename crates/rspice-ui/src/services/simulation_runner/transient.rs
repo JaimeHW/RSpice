@@ -9,7 +9,6 @@ use super::{
 };
 use rspice_core::Value;
 use rspice_core::abort_signal::AbortSignal;
-use rspice_core::diagnostics::ConvergenceQuality;
 use rspice_core::engine::{Engine, TransientResult};
 use std::collections::HashSet;
 use std::path::Path;
@@ -61,10 +60,9 @@ pub struct TransientData {
 
     /// What the solver had to do to produce these waveforms.
     ///
-    /// Carried alongside the data because it qualifies it: force-accepted
-    /// points are samples the solver could not converge and kept anyway, so a
-    /// run that looks smooth can still be untrustworthy at those times.
-    pub convergence: ConvergenceQuality,
+    /// Force-accepted points converged in Newton but failed the local
+    /// truncation error test. Missing evidence means the quality is unknown.
+    pub convergence: Option<std::sync::Arc<crate::state::TransientConvergenceEvidence>>,
 }
 
 impl TransientData {
@@ -144,7 +142,7 @@ impl TransientData {
             voltages,
             // The engine is not in scope here; callers that have it overwrite
             // this from `Engine::convergence_quality`.
-            convergence: ConvergenceQuality::default(),
+            convergence: None,
         })
     }
 }
@@ -354,7 +352,14 @@ pub fn run_transient_analysis_with_source_path_and_abort(
 
     let node_names = result.node_names.clone();
     let mut data = TransientData::from_result_with_abort(result, &node_names, abort)?;
-    data.convergence = engine.convergence_quality();
+    data.convergence = Some(std::sync::Arc::new(
+        crate::state::TransientConvergenceEvidence::capture(
+            engine.convergence_quality(),
+            &data.time,
+            abort,
+        )
+        .map_err(ServiceRunError::from)?,
+    ));
     Ok(data)
 }
 
@@ -489,6 +494,14 @@ mod tests {
                 &deck, 10e-6, 1e-6, None, &NoAbort,
             )
             .expect("unselected nodes must not invalidate a retained voltage waveform");
+            let quality = result
+                .convergence
+                .as_ref()
+                .expect("solver quality must be retained");
+            quality.validate().unwrap();
+            let basis = quality.transient.time_basis.as_ref().unwrap();
+            assert_eq!(basis.sample_count, result.time.len() as u64);
+            assert_eq!(basis.stop_s, 10e-6);
             assert_eq!(result.voltages.len(), 1);
             let (name, values) = &result.voltages[0];
             assert!(name.eq_ignore_ascii_case(&format!("V({selection})")));

@@ -12,6 +12,8 @@ mod analysis_result;
 mod analysis_tag;
 mod analysis_type;
 mod convergence_attribution;
+mod convergence_quality;
+pub(crate) use convergence_quality::ConvergenceEncoder;
 mod cross_probe;
 mod executed_deck;
 mod family_measurements;
@@ -58,6 +60,10 @@ pub use analysis_result::{
 pub use analysis_tag::{AnalysisAvailability, CanonicalAnalysisKind};
 pub use analysis_type::AnalysisType;
 pub use convergence_attribution::ConvergenceAttribution;
+pub use convergence_quality::{
+    ConvergenceReport, PeriodicConvergenceEvidence, PeriodicInitializationMethod,
+    TransientConvergenceEvidence,
+};
 // Test-only alias: outside tests an attribution's vocabulary is only ever
 // named through the attribution's own fields.
 #[cfg(test)]

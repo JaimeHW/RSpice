@@ -325,6 +325,7 @@ mod tests {
             }
         }
         crate::simulation::SimulationResult::Ac {
+            convergence: None,
             noise_reference_temperature_kelvin: None,
             reference_impedances_ohm: None,
             frequencies,

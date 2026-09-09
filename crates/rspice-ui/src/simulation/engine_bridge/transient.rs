@@ -29,7 +29,12 @@ impl EngineBridge {
         let tran_result = engine
             .run_tran_with_abort(netlist, config.stop_time, max_step, abort)
             .map_err(|e| self.translate_error(e))?;
-        let convergence = engine.convergence_quality();
+        let convergence = crate::state::TransientConvergenceEvidence::capture(
+            engine.convergence_quality(),
+            &tran_result.time,
+            abort,
+        )
+        .map_err(|error| self.translate_error(error))?;
 
         let mut converted =
             convert_transient_result(netlist, tran_result, config.start_time, abort)?;
@@ -37,7 +42,7 @@ impl EngineBridge {
             convergence: slot, ..
         } = &mut converted
         {
-            *slot = convergence;
+            *slot = Some(std::sync::Arc::new(convergence));
         }
         Ok(converted)
     }
@@ -771,11 +776,22 @@ mod tests {
                 .run(&AnalysisConfig::Transient(config), deck)
                 .unwrap();
             let SimulationResult::Transient {
-                time, waveforms, ..
+                time,
+                waveforms,
+                convergence,
+                ..
             } = result
             else {
                 panic!("expected a transient result");
             };
+            let quality = convergence.expect("engine quality must survive output cropping");
+            quality.validate().unwrap();
+            let basis = quality.transient.time_basis.as_ref().unwrap();
+            assert_eq!(basis.start_s, 0.0);
+            assert_eq!(basis.stop_s, 1.0);
+            if start_time > 0.0 {
+                assert!(basis.sample_count > time.len() as u64);
+            }
             assert_eq!(time.first().copied(), Some(start_time));
             assert_eq!(time.last().copied(), Some(1.0));
             let largest_step = time

@@ -8,6 +8,8 @@ pub(in crate::simulation) struct TransientTrajectoryArtifact {
     time: Vec<f64>,
     #[serde(with = "f64_bits_map")]
     waveforms: BTreeMap<String, Vec<f64>>,
+    #[serde(default)]
+    convergence: Option<Arc<crate::state::TransientConvergenceEvidence>>,
 }
 
 mod f64_bits_vec {
@@ -99,6 +101,12 @@ mod f64_bits_map {
 }
 
 impl TransientTrajectoryArtifact {
+    pub(in crate::simulation) fn convergence(
+        &self,
+    ) -> Option<&Arc<crate::state::TransientConvergenceEvidence>> {
+        self.convergence.as_ref()
+    }
+
     pub(in crate::simulation) fn time(&self) -> &[f64] {
         &self.time
     }
@@ -112,6 +120,27 @@ impl TransientTrajectoryArtifact {
     }
 
     fn validate(&self) -> Result<(), ExecutionArtifactError> {
+        let numeric_values = self
+            .waveforms
+            .values()
+            .fold(self.time.len(), |total, values| {
+                total.saturating_add(values.len())
+            })
+            .saturating_add(self.convergence.as_deref().map_or(
+                0,
+                crate::state::TransientConvergenceEvidence::transfer_value_count,
+            ));
+        if numeric_values > PeriodicStateArtifact::MAX_NUMERIC_VALUES {
+            return Err(ExecutionArtifactError::InvalidPayload(
+                "Transient trajectory and convergence evidence exceed the numeric payload limit"
+                    .to_owned(),
+            ));
+        }
+        if let Some(quality) = &self.convergence {
+            quality
+                .validate()
+                .map_err(ExecutionArtifactError::InvalidPayload)?;
+        }
         if self.time.len() < 3 {
             return Err(ExecutionArtifactError::InvalidPayload(
                 "transient trajectory contains fewer than three samples".to_owned(),
@@ -160,7 +189,10 @@ impl TransientTrajectoryArtifact {
     }
 
     fn digest(&self) -> ContentDigest {
-        let mut writer = CanonicalWriter::new("rspice.transient-trajectory-artifact/v1");
+        let mut writer = CanonicalWriter::new("rspice.transient-trajectory-artifact/v2");
+        writer.option(self.convergence.as_ref(), |writer, quality| {
+            quality.encode(writer)
+        });
         writer.sequence(self.time.len());
         for value in &self.time {
             writer.f64(*value);
@@ -811,7 +843,10 @@ impl ExecutionArtifactEnvelope {
         required_waveforms: &[String],
     ) -> Result<Option<Self>, ExecutionArtifactError> {
         let SimulationResult::Transient {
-            time, waveforms, ..
+            time,
+            waveforms,
+            convergence,
+            ..
         } = result
         else {
             return Ok(None);
@@ -869,6 +904,7 @@ impl ExecutionArtifactEnvelope {
         let trajectory = TransientTrajectoryArtifact {
             time: time.clone(),
             waveforms: artifact_waveforms,
+            convergence: convergence.clone(),
         };
         trajectory.validate()?;
         let payload_digest = trajectory.digest();
@@ -1330,7 +1366,13 @@ impl ResolvedExecutionDependencies {
         &self,
     ) -> Result<(String, Vec<Vec<f64>>), ExecutionArtifactError> {
         let (encoded, buffers) = self.encode_transfer_borrowed()?;
-        Ok((encoded, buffers.into_iter().map(<[f64]>::to_vec).collect()))
+        Ok((
+            encoded,
+            buffers
+                .into_iter()
+                .map(std::borrow::Cow::into_owned)
+                .collect(),
+        ))
     }
 
     /// Encode transfer metadata while borrowing the numerical payloads.
@@ -1343,7 +1385,7 @@ impl ResolvedExecutionDependencies {
     #[cfg(any(target_arch = "wasm32", test))]
     pub(in crate::simulation) fn encode_transfer_borrowed(
         &self,
-    ) -> Result<(String, Vec<&[f64]>), ExecutionArtifactError> {
+    ) -> Result<(String, Vec<std::borrow::Cow<'_, [f64]>>), ExecutionArtifactError> {
         self.validate_transport_integrity()?;
 
         let mut buffers = Vec::new();
@@ -1377,8 +1419,14 @@ impl ResolvedExecutionDependencies {
                                 (name.clone(), push_transfer_slice(&mut buffers, values))
                             })
                             .collect();
+                        let convergence = trajectory.convergence.as_ref().map(|quality|
+                            crate::simulation::results::ConvergenceTransport::from_evidence(quality, |values| {
+                                let reference = TransferBufferRef { buffer: buffers.len(), len: values.len() };
+                                buffers.push(values);
+                                reference
+                            }));
                         ExecutionArtifactPayloadTransferMetadata::TransientTrajectory(
-                            TransientTrajectoryTransferMetadata { time, waveforms },
+                            TransientTrajectoryTransferMetadata { time, waveforms, convergence },
                         )
                     }
                     ExecutionArtifactPayload::PeriodicState(periodic) => {
@@ -1620,7 +1668,11 @@ impl ResolvedExecutionDependencies {
                                     .map(|values| (name, values))
                             })
                             .collect::<Result<_, _>>()?;
-                        let trajectory = TransientTrajectoryArtifact { time, waveforms };
+                        let convergence = metadata.convergence.map(|quality|
+                            quality.into_evidence(|reference| reference.len, |reference| take_transfer_buffer(&mut buffers, reference)
+                                .map_err(|error| error.to_string())))
+                            .transpose().map_err(ExecutionArtifactError::Transport)?.map(Arc::new);
+                        let trajectory = TransientTrajectoryArtifact { time, waveforms, convergence };
                         trajectory.validate()?;
                         ExecutionArtifactPayload::TransientTrajectory(Arc::new(trajectory))
                     }
@@ -1917,10 +1969,12 @@ struct TransferBufferRef {
 }
 
 #[cfg(any(target_arch = "wasm32", test))]
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 struct TransientTrajectoryTransferMetadata {
     time: TransferBufferRef,
     waveforms: BTreeMap<String, TransferBufferRef>,
+    #[serde(default)]
+    convergence: Option<crate::simulation::results::ConvergenceTransport<TransferBufferRef>>,
 }
 
 #[cfg(any(target_arch = "wasm32", test))]
@@ -2056,12 +2110,15 @@ struct ResolvedExecutionDependenciesTransferMetadata {
 }
 
 #[cfg(any(target_arch = "wasm32", test))]
-fn push_transfer_slice<'a>(buffers: &mut Vec<&'a [f64]>, values: &'a [f64]) -> TransferBufferRef {
+fn push_transfer_slice<'a>(
+    buffers: &mut Vec<std::borrow::Cow<'a, [f64]>>,
+    values: &'a [f64],
+) -> TransferBufferRef {
     let reference = TransferBufferRef {
         buffer: buffers.len(),
         len: values.len(),
     };
-    buffers.push(values);
+    buffers.push(std::borrow::Cow::Borrowed(values));
     reference
 }
 

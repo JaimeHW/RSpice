@@ -35,11 +35,28 @@ const RESULT_DIGEST_ENCODING_VERSION_V9: u16 = 9;
 const RESULT_DIGEST_ENCODING_VERSION_V10: u16 = 10;
 /// v11 binds external source attribution to its retained event-code interpretation.
 const RESULT_DIGEST_ENCODING_VERSION_V11: u16 = 11;
+/// v12 binds numerical quality and its original transient time basis.
+const RESULT_DIGEST_ENCODING_VERSION_V12: u16 = 12;
 const CANONICAL_NAN_BITS: u64 = 0x7ff8_0000_0000_0000;
 
 struct ResultDigestWriter {
     hasher: Sha256,
     retained_bytes: u64,
+}
+
+impl super::ConvergenceEncoder for ResultDigestWriter {
+    fn u64(&mut self, value: u64) {
+        Self::u64(self, value);
+    }
+    fn f64(&mut self, value: f64) {
+        Self::f64(self, value);
+    }
+    fn string(&mut self, value: &str) {
+        Self::string(self, value);
+    }
+    fn tag(&mut self, value: u8) {
+        Self::u8(self, value);
+    }
 }
 
 impl ResultDigestWriter {
@@ -157,7 +174,7 @@ impl AnalysisResult {
     /// derived display caches are intentionally not part of the identity.
     #[must_use]
     pub fn result_data_digest(&self) -> ContentDigest {
-        self.result_data_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V11)
+        self.result_data_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V12)
     }
 
     /// Logical bytes occupied by all authoritative retained result evidence.
@@ -169,7 +186,7 @@ impl AnalysisResult {
     /// excluded from immutable content identity.
     #[must_use]
     pub fn retained_storage_bytes(&self) -> u64 {
-        let writer = self.result_data_writer_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V11);
+        let writer = self.result_data_writer_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V12);
         let cache_bytes = self.waveforms.iter().fold(0_u64, |total, waveform| {
             let bytes = waveform.display_cache.as_ref().map_or(0_u64, |cache| {
                 u64::try_from(cache.x.len())
@@ -250,6 +267,11 @@ impl AnalysisResult {
         self.result_data_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V10)
     }
 
+    /// Schema-v20 content identity, solely for authenticated migration.
+    pub(crate) fn legacy_v11_result_data_digest(&self) -> ContentDigest {
+        self.result_data_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V11)
+    }
+
     fn result_data_digest_with_encoding(&self, version: u16) -> ContentDigest {
         self.result_data_writer_with_encoding(version).finish()
     }
@@ -267,6 +289,7 @@ impl AnalysisResult {
             RESULT_DIGEST_ENCODING_VERSION_V9 => "rspice.analysis-result-data/v9",
             RESULT_DIGEST_ENCODING_VERSION_V10 => "rspice.analysis-result-data/v10",
             RESULT_DIGEST_ENCODING_VERSION_V11 => "rspice.analysis-result-data/v11",
+            RESULT_DIGEST_ENCODING_VERSION_V12 => "rspice.analysis-result-data/v12",
             _ => unreachable!("supported result digest encoding"),
         };
         let mut writer = ResultDigestWriter::new(domain, version);
@@ -280,6 +303,11 @@ impl AnalysisResult {
             writer.option(self.import_source.as_ref(), |writer, source| {
                 writer.string(&source.source_name);
                 writer.string(source.format.canonical_id());
+            });
+        }
+        if version >= RESULT_DIGEST_ENCODING_VERSION_V12 {
+            writer.option(self.convergence.as_deref(), |writer, quality| {
+                quality.encode(writer)
             });
         }
         writer.sequence(self.waveforms.len());
@@ -366,7 +394,7 @@ impl SimulationRun {
     /// they address the dataset but do not define its sample content.
     #[must_use]
     pub fn dataset_content_digest(&self) -> ContentDigest {
-        self.dataset_content_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V11)
+        self.dataset_content_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V12)
     }
 
     /// Schema-v8 dataset digest retained solely for authenticated migration.
@@ -429,6 +457,11 @@ impl SimulationRun {
         self.dataset_content_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V10)
     }
 
+    /// Schema-v20 dataset identity, solely for authenticated migration.
+    pub(crate) fn legacy_v11_dataset_content_digest(&self) -> ContentDigest {
+        self.dataset_content_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V11)
+    }
+
     fn dataset_content_digest_with_encoding(&self, version: u16) -> ContentDigest {
         let domain = match version {
             RESULT_DIGEST_ENCODING_VERSION_V1 => "rspice.simulation-dataset-data/v1",
@@ -442,6 +475,7 @@ impl SimulationRun {
             RESULT_DIGEST_ENCODING_VERSION_V9 => "rspice.simulation-dataset-data/v9",
             RESULT_DIGEST_ENCODING_VERSION_V10 => "rspice.simulation-dataset-data/v10",
             RESULT_DIGEST_ENCODING_VERSION_V11 => "rspice.simulation-dataset-data/v11",
+            RESULT_DIGEST_ENCODING_VERSION_V12 => "rspice.simulation-dataset-data/v12",
             _ => unreachable!("supported dataset digest encoding"),
         };
         let mut writer = ResultDigestWriter::new(domain, version);
@@ -459,7 +493,8 @@ impl SimulationRun {
                 RESULT_DIGEST_ENCODING_VERSION_V8 => analysis.legacy_v8_result_data_digest(),
                 RESULT_DIGEST_ENCODING_VERSION_V9 => analysis.legacy_v9_result_data_digest(),
                 RESULT_DIGEST_ENCODING_VERSION_V10 => analysis.legacy_v10_result_data_digest(),
-                RESULT_DIGEST_ENCODING_VERSION_V11 => analysis.result_data_digest(),
+                RESULT_DIGEST_ENCODING_VERSION_V11 => analysis.legacy_v11_result_data_digest(),
+                RESULT_DIGEST_ENCODING_VERSION_V12 => analysis.result_data_digest(),
                 _ => unreachable!("supported dataset digest encoding"),
             });
         }

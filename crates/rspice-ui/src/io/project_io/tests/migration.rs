@@ -1766,6 +1766,130 @@ fn event_source_schema_v19() -> ProjectSimulationResults {
     persisted
 }
 
+fn convergence_schema_v20() -> ProjectSimulationResults {
+    let mut persisted = event_source_schema_v19();
+    persisted.schema_version = IMPORT_SOURCE_RESULTS_SCHEMA_VERSION;
+    for run in &mut persisted.runs {
+        let restored = run.clone().into_run().unwrap();
+        for (stored, analysis) in run.analyses.iter_mut().zip(&restored.analyses) {
+            stored.result_data_digest =
+                PersistedField::Value(analysis.legacy_v11_result_data_digest());
+        }
+        run.dataset_content_digest =
+            PersistedField::Value(restored.legacy_v11_dataset_content_digest());
+    }
+    persisted
+}
+
+fn convergence_fixture() -> crate::state::TransientConvergenceEvidence {
+    let mut metrics = rspice_core::diagnostics::ConvergenceQuality {
+        total_iterations: 19,
+        bypassed_device_evaluations: (1_u64 << 53) + 1,
+        ..Default::default()
+    };
+    metrics.record_force_accept(1);
+    crate::state::TransientConvergenceEvidence::capture(
+        metrics,
+        &[0.0, 0.5, 1.0],
+        &rspice_core::abort_signal::NoAbort,
+    )
+    .unwrap()
+}
+
+#[test]
+fn convergence_schema_v20_authenticates_before_migrating_unknown_quality() {
+    let mut stored = convergence_schema_v20();
+    let old_digest = stored.runs[0].dataset_content_digest.clone();
+    stored.migrate_to_current(ProjectId::new()).unwrap();
+    stored.validate().unwrap();
+    assert_eq!(stored.schema_version, CONVERGENCE_RESULTS_SCHEMA_VERSION);
+    assert_ne!(stored.runs[0].dataset_content_digest, old_digest);
+    assert!(stored.runs[0].analyses[0].convergence.is_missing());
+    assert!(
+        stored.into_simulation_state().unwrap().runs[0].analyses[0]
+            .convergence
+            .is_none()
+    );
+    for alter_dataset in [false, true] {
+        let mut corrupt = convergence_schema_v20();
+        let changed = PersistedField::Value(crate::product::ContentDigest::from_bytes([7; 32]));
+        if alter_dataset {
+            corrupt.runs[0].dataset_content_digest = changed;
+        } else {
+            corrupt.runs[0].analyses[0].result_data_digest = changed;
+        }
+        assert!(
+            corrupt
+                .migrate_to_current(ProjectId::new())
+                .unwrap_err()
+                .contains("digest")
+        );
+    }
+}
+
+#[test]
+fn convergence_evidence_cannot_be_injected_into_historical_schemas() {
+    for schema in 1..CONVERGENCE_RESULTS_SCHEMA_VERSION {
+        for field in [
+            PersistedField::Null,
+            PersistedField::Value(convergence_fixture()),
+        ] {
+            let mut stored = convergence_schema_v20();
+            stored.schema_version = schema;
+            stored.runs[0].analyses[0].convergence = field;
+            assert!(
+                stored
+                    .migrate_to_current(ProjectId::new())
+                    .unwrap_err()
+                    .contains("convergence")
+            );
+        }
+    }
+}
+
+#[test]
+fn convergence_project_round_trip_preserves_quality_and_rejects_tampering() {
+    let mut stored = convergence_schema_v20();
+    stored.migrate_to_current(ProjectId::new()).unwrap();
+    let mut simulation = stored.into_simulation_state().unwrap();
+    let quality = convergence_fixture();
+    simulation.runs[0].analyses[0].convergence = Some(std::sync::Arc::new(quality.clone()));
+    let stored = ProjectSimulationResults::from_state(&simulation);
+    stored.validate().unwrap();
+    let json = serde_json::to_string(&stored).unwrap();
+    let restored: ProjectSimulationResults = serde_json::from_str(&json).unwrap();
+    restored.validate().unwrap();
+    let restored = restored.into_simulation_state().unwrap();
+    assert_eq!(
+        restored.runs[0].analyses[0].convergence.as_deref(),
+        Some(&quality)
+    );
+    let mut changed_quality = quality.clone();
+    changed_quality.transient.total_iterations += 1;
+    for replacement in [
+        PersistedField::Missing,
+        PersistedField::Null,
+        PersistedField::Value(changed_quality),
+    ] {
+        let mut altered = stored.clone();
+        altered.runs[0].analyses[0].convergence = replacement;
+        assert!(
+            altered.validate().is_err(),
+            "quality changes must invalidate the retained identity"
+        );
+    }
+    let mut invalid_quality = quality;
+    invalid_quality
+        .transient
+        .time_basis
+        .as_mut()
+        .unwrap()
+        .force_accepted_times_s[0] = f64::INFINITY;
+    let mut altered = stored;
+    altered.runs[0].analyses[0].convergence = PersistedField::Value(invalid_quality);
+    assert!(altered.validate().unwrap_err().contains("convergence"));
+}
+
 #[test]
 fn event_source_schema_v19_migrates_without_inventing_import_attribution() {
     let mut persisted = event_source_schema_v19();

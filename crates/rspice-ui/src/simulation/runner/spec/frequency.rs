@@ -238,6 +238,7 @@ fn run_sparameter(
         }
     }
     Ok(SimulationResult::Ac {
+        convergence: None,
         frequencies,
         waveforms,
         measurements: Vec::new(),
@@ -377,6 +378,7 @@ fn run_pac(
         .into_iter()
         .map(|trace| (trace.name, trace.unit, trace.values));
     Ok(SimulationResult::Ac {
+        convergence: None,
         noise_reference_temperature_kelvin: None,
         reference_impedances_ohm: None,
         waveforms: pac_traces_to_complex_waveforms(&data.frequencies, traces, abort)?,
@@ -444,6 +446,7 @@ fn run_pxf(
     // The document's own abscissa is the swept baseband offset, which is what
     // every curve above is stated against and what `AnalysisType::Pxf` names.
     Ok(SimulationResult::Ac {
+        convergence: None,
         noise_reference_temperature_kelvin: None,
         reference_impedances_ohm: None,
         frequencies: data.offset_frequencies,
@@ -579,6 +582,7 @@ fn run_stb(
     }
 
     Ok(SimulationResult::Ac {
+        convergence: None,
         noise_reference_temperature_kelvin: None,
         reference_impedances_ohm: None,
         frequencies: data.frequencies,

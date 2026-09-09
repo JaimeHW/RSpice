@@ -933,6 +933,7 @@ pub(crate) enum WorkerSimulationResult {
         time: Vec<f64>,
         waveforms: Vec<WorkerWaveform>,
         measurements: Vec<WorkerMeasurement>,
+        convergence: Option<crate::state::TransientConvergenceEvidence>,
         #[serde(default)]
         events: WorkerEventHistory,
     },
@@ -944,6 +945,7 @@ pub(crate) enum WorkerSimulationResult {
         operating_point: rspice_core::engine::PssOperatingPoint,
     },
     Ac {
+        convergence: Option<crate::state::TransientConvergenceEvidence>,
         frequencies: Vec<f64>,
         waveforms: Vec<WorkerWaveform>,
         measurements: Vec<WorkerMeasurement>,
@@ -1066,6 +1068,7 @@ pub(crate) enum WorkerSimulationResult {
         converged: bool,
     },
     Soa {
+        convergence: Option<crate::state::TransientConvergenceEvidence>,
         time: Vec<f64>,
         waveforms: Vec<WorkerWaveform>,
         violations: Vec<WorkerSoAViolation>,
@@ -1438,11 +1441,15 @@ impl WorkerSimulationResult {
                 measurements_payload_bytes(measurements),
             ]),
             WorkerSimulationResult::Transient {
+                convergence,
                 time,
                 waveforms,
                 measurements,
                 events,
             } => sum_payload_bytes([
+                convergence.as_ref().map_or(0, |quality| {
+                    f64_payload_bytes(quality.transfer_value_count())
+                }),
                 f64_payload_bytes(time.len()),
                 waveforms_payload_bytes(waveforms),
                 measurements_payload_bytes(measurements),
@@ -1456,12 +1463,16 @@ impl WorkerSimulationResult {
                 pss_operating_point_payload_bytes(operating_point),
             ]),
             WorkerSimulationResult::Ac {
+                convergence,
                 frequencies,
                 waveforms,
                 measurements,
                 reference_impedances_ohm,
                 noise_reference_temperature_kelvin,
             } => sum_payload_bytes([
+                convergence.as_ref().map_or(0, |quality| {
+                    f64_payload_bytes(quality.transfer_value_count())
+                }),
                 f64_payload_bytes(frequencies.len()),
                 waveforms_payload_bytes(waveforms),
                 measurements_payload_bytes(measurements),
@@ -1594,11 +1605,15 @@ impl WorkerSimulationResult {
                 f64_payload_bytes(1),
             ]),
             WorkerSimulationResult::Soa {
+                convergence,
                 time,
                 waveforms,
                 violations,
                 evaluations,
             } => sum_payload_bytes([
+                convergence.as_ref().map_or(0, |quality| {
+                    f64_payload_bytes(quality.transfer_value_count())
+                }),
                 f64_payload_bytes(time.len()),
                 waveforms_payload_bytes(waveforms),
                 soa_violations_payload_bytes(violations),
@@ -1611,9 +1626,9 @@ impl WorkerSimulationResult {
     }
 }
 
-/// 17: SP noise requests retain covariance, noise factors and reference temperature.
-/// Earlier workers can silently omit requested noise.
-const WORKER_RESPONSE_TRANSPORT_PROTOCOL: u8 = 17;
+/// 18: transient-source convergence evidence survives result transport.
+/// Earlier workers silently omit numerical quality.
+const WORKER_RESPONSE_TRANSPORT_PROTOCOL: u8 = 18;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct WorkerResponseTransport {
@@ -1653,16 +1668,16 @@ impl TryFrom<SimulationResult> for WorkerSimulationResult {
                 waveforms,
                 measurements,
                 periodic_state,
-                // Convergence metrics do not cross the worker boundary yet:
-                // `WorkerSimulationResult` is a serde wire format and
-                // `ConvergenceQuality` is not serializable. The browser build
-                // therefore reports no convergence warnings. Bound explicitly
-                // rather than swallowed by `..` so adding a field to this
-                // result forces a decision here.
-                convergence: _,
+                convergence,
                 events,
             } => match periodic_state {
                 Some(operating_point) => {
+                    if convergence.is_some() {
+                        return Err(SimulationError::SolverError(
+                            "PSS display results cannot claim a transient source time basis"
+                                .to_owned(),
+                        ));
+                    }
                     validate_pss_display_contract(&time, &waveforms, &operating_point)?;
                     Ok(Self::Pss {
                         measurements: worker_measurements(measurements),
@@ -1673,16 +1688,19 @@ impl TryFrom<SimulationResult> for WorkerSimulationResult {
                     time,
                     waveforms: worker_waveforms(waveforms),
                     measurements: worker_measurements(measurements),
+                    convergence: convergence.map(std::sync::Arc::unwrap_or_clone),
                     events: events.into(),
                 }),
             },
             SimulationResult::Ac {
+                convergence,
                 frequencies,
                 waveforms,
                 measurements,
                 reference_impedances_ohm,
                 noise_reference_temperature_kelvin,
             } => Ok(Self::Ac {
+                convergence: convergence.map(std::sync::Arc::unwrap_or_clone),
                 frequencies,
                 waveforms: worker_waveforms(waveforms),
                 measurements: worker_measurements(measurements),
@@ -1905,11 +1923,13 @@ impl TryFrom<SimulationResult> for WorkerSimulationResult {
                 converged,
             }),
             SimulationResult::Soa {
+                convergence,
                 time,
                 waveforms,
                 violations,
                 evaluations,
             } => Ok(Self::Soa {
+                convergence: convergence.map(std::sync::Arc::unwrap_or_clone),
                 time,
                 waveforms: worker_waveforms(waveforms),
                 violations: violations
@@ -1965,14 +1985,14 @@ impl From<WorkerSimulationResult> for SimulationResult {
                 time,
                 waveforms,
                 measurements,
+                convergence,
                 events,
             } => Self::Transient {
                 time,
                 waveforms: waveform_map(waveforms),
                 measurements: measure_results(measurements),
                 periodic_state: None,
-                // See the outbound conversion: not carried over the wire.
-                convergence: Default::default(),
+                convergence: convergence.map(std::sync::Arc::new),
                 events: events.into(),
             },
             WorkerSimulationResult::Pss {
@@ -1980,12 +2000,14 @@ impl From<WorkerSimulationResult> for SimulationResult {
                 operating_point,
             } => simulation_result_from_worker_pss(measurements, operating_point),
             WorkerSimulationResult::Ac {
+                convergence,
                 frequencies,
                 waveforms,
                 measurements,
                 reference_impedances_ohm,
                 noise_reference_temperature_kelvin,
             } => Self::Ac {
+                convergence: convergence.map(std::sync::Arc::new),
                 frequencies,
                 waveforms: waveform_map(waveforms),
                 measurements: measure_results(measurements),
@@ -2202,11 +2224,13 @@ impl From<WorkerSimulationResult> for SimulationResult {
                 converged,
             },
             WorkerSimulationResult::Soa {
+                convergence,
                 time,
                 waveforms,
                 violations,
                 evaluations,
             } => Self::Soa {
+                convergence: convergence.map(std::sync::Arc::new),
                 time,
                 waveforms: waveform_map(waveforms),
                 violations: violations.into_iter().map(SoAViolation::from).collect(),

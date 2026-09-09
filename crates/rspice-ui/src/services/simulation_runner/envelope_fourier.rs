@@ -105,6 +105,7 @@ pub struct EnvelopeData {
     /// Complex carrier envelopes using
     /// `v(t) = Re{envelope(t) * exp(j*omega*t)}`.
     pub waveforms: Vec<(String, Vec<Complex64>)>,
+    pub convergence: Option<std::sync::Arc<crate::state::TransientConvergenceEvidence>>,
 }
 
 /// Run envelope analysis with source-path resolution and cooperative
@@ -252,6 +253,7 @@ pub fn run_envelope_analysis_with_source_path_and_abort(
     Ok(EnvelopeData {
         time: output_time,
         waveforms,
+        convergence: transient.convergence,
     })
 }
 
@@ -388,7 +390,7 @@ fn run_pss_initialized_envelope_transient(
     pss_config.points_per_period = points_per_period;
 
     let engine = Engine::new(build_engine_config(netlist, None));
-    let (_, state) = engine
+    let (periodic, state) = engine
         .run_pss_with_frozen_source_continuation_state_abort(
             netlist,
             pss_config,
@@ -396,11 +398,28 @@ fn run_pss_initialized_envelope_transient(
             abort,
         )
         .map_err(|error| ServiceRunError::from_core("Envelope PSS initialization error", error))?;
+    let initialization =
+        crate::state::ConvergenceReport::capture(engine.convergence_quality(), None, abort)
+            .map_err(ServiceRunError::from)?;
     let (result, _) = engine
         .run_tran_from_pss_state_with_abort(netlist, &state, config.stop_time, step_time, abort)
         .map_err(|error| ServiceRunError::from_core("Envelope PSS continuation error", error))?;
     let node_names = result.node_names.clone();
-    TransientData::from_result_with_abort(result, &node_names, abort)
+    let mut data = TransientData::from_result_with_abort(result, &node_names, abort)?;
+    let mut quality = crate::state::TransientConvergenceEvidence::capture(
+        engine.convergence_quality(),
+        &data.time,
+        abort,
+    )
+    .map_err(ServiceRunError::from)?;
+    quality.initialization = Some(crate::state::PeriodicConvergenceEvidence {
+        method: crate::state::PeriodicInitializationMethod::Shooting,
+        report: initialization,
+        solver_iterations: periodic.iterations as u64,
+        final_residual: periodic.final_residual,
+    });
+    data.convergence = Some(std::sync::Arc::new(quality));
+    Ok(data)
 }
 
 fn run_hb_initialized_envelope_transient(
@@ -412,7 +431,7 @@ fn run_hb_initialized_envelope_transient(
     validate_commensurate_carriers(config, "HB")?;
     let hb_config = HbConfig::new(config.fundamental_freq).with_harmonics(config.num_harmonics);
     let engine = Engine::new(build_engine_config(netlist, None));
-    let (_, state) = engine
+    let (periodic, state) = engine
         .run_hb_envelope_continuation_state_with_abort(
             netlist,
             hb_config.clone(),
@@ -420,6 +439,9 @@ fn run_hb_initialized_envelope_transient(
             abort,
         )
         .map_err(|error| ServiceRunError::from_core("Envelope HB initialization error", error))?;
+    let initialization =
+        crate::state::ConvergenceReport::capture(engine.convergence_quality(), None, abort)
+            .map_err(ServiceRunError::from)?;
     let (result, _) = engine
         .run_tran_from_hb_envelope_state_with_abort(
             netlist,
@@ -432,7 +454,21 @@ fn run_hb_initialized_envelope_transient(
         )
         .map_err(|error| ServiceRunError::from_core("Envelope HB continuation error", error))?;
     let node_names = result.node_names.clone();
-    TransientData::from_result_with_abort(result, &node_names, abort)
+    let mut data = TransientData::from_result_with_abort(result, &node_names, abort)?;
+    let mut quality = crate::state::TransientConvergenceEvidence::capture(
+        engine.convergence_quality(),
+        &data.time,
+        abort,
+    )
+    .map_err(ServiceRunError::from)?;
+    quality.initialization = Some(crate::state::PeriodicConvergenceEvidence {
+        method: crate::state::PeriodicInitializationMethod::HarmonicBalance,
+        report: initialization,
+        solver_iterations: periodic.result.iterations as u64,
+        final_residual: periodic.result.residual_norm,
+    });
+    data.convergence = Some(std::sync::Arc::new(quality));
+    Ok(data)
 }
 
 fn validate_commensurate_carriers(
@@ -1609,6 +1645,63 @@ mod tests {
         let result = compute_carrier_envelopes_with_abort(&time, &values, &[0.5], &[1.0], &abort);
 
         assert!(matches!(result, Err(ServiceRunError::Aborted)));
+    }
+
+    #[test]
+    fn convergence_envelope_retains_continuation_and_periodic_initialization_evidence() {
+        for method in [
+            EnvelopeInitialPeriodicSolve::TransientSpectralEstimate,
+            EnvelopeInitialPeriodicSolve::PeriodicSteadyState,
+            EnvelopeInitialPeriodicSolve::HarmonicBalance,
+        ] {
+            let config = EnvelopeRunConfig {
+                fundamental_freq: 1e6,
+                additional_carrier_tones: Vec::new(),
+                stop_time: 4e-6,
+                num_harmonics: 1,
+                envelope_step: Some(0.5e-6),
+                modulation_sources: vec!["Vmod".to_owned()],
+                initial_periodic_solve: method,
+                adaptive_mode: EnvelopeAdaptiveMode::FixedEnvelopeStep,
+                extraction_path: EnvelopeExtractionPath::Projection,
+            };
+            let result = run_envelope_analysis_with_source_path_and_abort(
+                "Envelope convergence\nV1 in mod SIN(0 1 1Meg)\nVmod mod 0 PWL(0 0 10u 0.1)\nR1 in out 1k\nC1 out 0 10p\n.end\n",
+                &config,
+                None,
+                &NoAbort,
+            )
+            .unwrap();
+            let quality = result
+                .convergence
+                .as_ref()
+                .expect("continuation quality is known");
+            quality.validate().unwrap();
+            let basis = quality.transient.time_basis.as_ref().unwrap();
+            assert!(
+                basis.sample_count > result.time.len() as u64,
+                "quality must describe the dense source trajectory"
+            );
+            assert!(basis.start_s <= result.time[0]);
+            assert!(basis.stop_s >= *result.time.last().unwrap());
+            assert_eq!(
+                quality.initialization.is_some(),
+                method != EnvelopeInitialPeriodicSolve::TransientSpectralEstimate
+            );
+            if let Some(initialization) = &quality.initialization {
+                let expected = if method == EnvelopeInitialPeriodicSolve::PeriodicSteadyState {
+                    crate::state::PeriodicInitializationMethod::Shooting
+                } else {
+                    crate::state::PeriodicInitializationMethod::HarmonicBalance
+                };
+                assert_eq!(initialization.method, expected);
+                assert!(
+                    initialization.report.time_basis.is_none(),
+                    "the periodic display orbit is not the helper-solve trajectory"
+                );
+                assert!(initialization.final_residual.is_finite());
+            }
+        }
     }
 
     #[test]

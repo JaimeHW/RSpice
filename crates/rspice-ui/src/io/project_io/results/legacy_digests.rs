@@ -7,9 +7,9 @@
 //! validator, and migration runs the one that matches the file it was handed
 //! before it admits any later field or reseals anything.
 //!
-//! These are deliberately not shared. A single parameterised validator would
-//! have to be edited every time a field is added, and the edit that got it
-//! wrong would silently re-authenticate history under the wrong rule.
+//! Schema-specific entry points select their original encodings and field
+//! policies. The common comparison helper used by the latest schemas receives
+//! those exact encoders; adding a schema does not change an older selection.
 
 use super::*;
 
@@ -486,6 +486,29 @@ pub(super) fn validate_v18_result_digests(run: &ProjectSimulationRun) -> Result<
 /// Authenticate a schema-v19 run with the exact digest encoding that wrote it
 /// before external import-source attribution is admitted and the document is resealed.
 pub(super) fn validate_v19_result_digests(run: &ProjectSimulationRun) -> Result<(), String> {
+    validate_versioned_result_digests(
+        run,
+        19,
+        AnalysisResult::legacy_v10_result_data_digest,
+        SimulationRun::legacy_v10_dataset_content_digest,
+    )
+}
+
+pub(super) fn validate_v20_result_digests(run: &ProjectSimulationRun) -> Result<(), String> {
+    validate_versioned_result_digests(
+        run,
+        20,
+        AnalysisResult::legacy_v11_result_data_digest,
+        SimulationRun::legacy_v11_dataset_content_digest,
+    )
+}
+
+fn validate_versioned_result_digests(
+    run: &ProjectSimulationRun,
+    schema: u32,
+    analysis_digest: fn(&AnalysisResult) -> ContentDigest,
+    dataset_digest: fn(&SimulationRun) -> ContentDigest,
+) -> Result<(), String> {
     for analysis in &run.analyses {
         let retained = analysis
             .result_data_digest
@@ -493,17 +516,14 @@ pub(super) fn validate_v19_result_digests(run: &ProjectSimulationRun) -> Result<
             .copied()
             .ok_or_else(|| {
                 format!(
-                    "schema-v19 analysis {} is missing its result data digest",
+                    "schema-v{schema} analysis {} is missing its result data digest",
                     analysis.id
                 )
             })?;
-        let computed = analysis
-            .clone()
-            .into_analysis()?
-            .legacy_v10_result_data_digest();
+        let computed = analysis_digest(&analysis.clone().into_analysis()?);
         if retained != computed {
             return Err(format!(
-                "schema-v19 analysis {} result data digest does not match retained content",
+                "schema-v{schema} analysis {} result data digest does not match retained content",
                 analysis.id
             ));
         }
@@ -515,14 +535,14 @@ pub(super) fn validate_v19_result_digests(run: &ProjectSimulationRun) -> Result<
         .copied()
         .ok_or_else(|| {
             format!(
-                "schema-v19 simulation run {} is missing its dataset content digest",
+                "schema-v{schema} simulation run {} is missing its dataset content digest",
                 run.id
             )
         })?;
-    let computed = run.clone().into_run()?.legacy_v10_dataset_content_digest();
+    let computed = dataset_digest(&run.clone().into_run()?);
     if retained != computed {
         return Err(format!(
-            "schema-v19 simulation run {} dataset content digest does not match retained content",
+            "schema-v{schema} simulation run {} dataset content digest does not match retained content",
             run.id
         ));
     }

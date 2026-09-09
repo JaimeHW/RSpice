@@ -38,6 +38,21 @@ pub(super) struct CanonicalWriter {
     hasher: Sha256,
 }
 
+impl crate::state::ConvergenceEncoder for CanonicalWriter {
+    fn u64(&mut self, value: u64) {
+        Self::u64(self, value);
+    }
+    fn f64(&mut self, value: f64) {
+        Self::f64(self, value);
+    }
+    fn string(&mut self, value: &str) {
+        Self::string(self, value);
+    }
+    fn tag(&mut self, value: u8) {
+        Self::u8(self, value);
+    }
+}
+
 impl CanonicalWriter {
     pub(super) fn new(domain: &str) -> Self {
         let mut writer = Self {

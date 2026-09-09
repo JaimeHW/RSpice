@@ -514,6 +514,7 @@ fn periodic_sparameter_result(
         );
     }
     Ok(SimulationResult::Ac {
+        convergence: None,
         noise_reference_temperature_kelvin: None,
         reference_impedances_ohm: data.reference_impedances_ohm,
         frequencies: data.frequencies,
@@ -714,6 +715,7 @@ fn run_pss_spectrum(
     }
 
     Ok(SimulationResult::Ac {
+        convergence: None,
         noise_reference_temperature_kelvin: None,
         reference_impedances_ohm: None,
         frequencies,
@@ -810,8 +812,7 @@ fn run_envelope(
         waveforms,
         measurements: Vec::new(),
         periodic_state: None,
-        // As above: this waveform comes from the periodic solver.
-        convergence: Default::default(),
+        convergence: data.convergence,
         events: Default::default(),
     })
 }
@@ -897,6 +898,7 @@ fn run_fourier(
     );
 
     Ok(SimulationResult::Ac {
+        convergence: trajectory.convergence().cloned(),
         noise_reference_temperature_kelvin: None,
         reference_impedances_ohm: None,
         frequencies: data.frequencies,
@@ -1032,6 +1034,7 @@ fn run_disto(
     }
 
     Ok(SimulationResult::Ac {
+        convergence: None,
         noise_reference_temperature_kelvin: None,
         reference_impedances_ohm: None,
         frequencies,
@@ -1244,11 +1247,93 @@ fn fourier_output_unit(output_expression: &str) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::fourier_output_unit;
+    use super::*;
 
     #[test]
     fn fourier_results_preserve_voltage_and_current_dimensions() {
         assert_eq!(fourier_output_unit("V(out)"), "V");
         assert_eq!(fourier_output_unit("  i(Rload)"), "A");
+    }
+
+    #[test]
+    fn convergence_fourier_retains_its_source_quality_through_native_conversion() {
+        use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
+        use crate::simulation::execution::ExecutionArtifactEnvelope;
+        use crate::state::{AnalysisType, TransientConvergenceEvidence};
+        let time = (0..=64)
+            .map(|index| f64::from(index) / 64.0)
+            .collect::<Vec<_>>();
+        let values = time
+            .iter()
+            .map(|time| (std::f64::consts::TAU * time).sin())
+            .collect();
+        let mut metrics = rspice_core::diagnostics::ConvergenceQuality::default();
+        metrics.record_force_accept(10);
+        let quality = std::sync::Arc::new(
+            TransientConvergenceEvidence::capture(
+                metrics,
+                &time,
+                &rspice_core::abort_signal::NoAbort,
+            )
+            .unwrap(),
+        );
+        let transient = SimulationResult::Transient {
+            time: time.clone(),
+            waveforms: HashMap::from([(
+                "out".to_owned(),
+                WaveformData::new_time_domain("out", time, values),
+            )]),
+            measurements: Vec::new(),
+            periodic_state: None,
+            convergence: Some(quality.clone()),
+            events: Default::default(),
+        };
+        let artifact = ExecutionArtifactEnvelope::from_transient_result(
+            ContentDigest::from_bytes([1; 32]),
+            AnalysisInstanceId::new(),
+            ObjectRevision::new(1).unwrap(),
+            ContentDigest::from_bytes([2; 32]),
+            &transient,
+            &["out".to_owned()],
+        )
+        .unwrap()
+        .unwrap();
+        let spectrum = run_fourier(
+            1.0,
+            FourierRunRequest {
+                num_harmonics: 3,
+                output_node: "out".to_owned(),
+                output_ref: "0".to_owned(),
+                start_time: 0.0,
+                stop_time: 1.0,
+                compute_thd: true,
+                normalize: false,
+            },
+            artifact.trajectory().unwrap(),
+            &rspice_core::abort_signal::NoAbort,
+        )
+        .unwrap();
+        assert_eq!(spectrum.transient_convergence(), Some(&quality));
+        assert!(
+            std::sync::Arc::ptr_eq(spectrum.transient_convergence().unwrap(), &quality),
+            "derived spectra must share immutable quality buffers"
+        );
+        let retained = crate::simulation::controller::SimulationController::default()
+            .convert_to_analysis_result_with_metadata_owned(
+                spectrum,
+                AnalysisType::Fourier,
+                "Spectrum",
+            );
+        assert!(retained.success);
+        assert_eq!(retained.convergence.as_ref(), Some(&quality));
+        assert_eq!(
+            quality
+                .transient
+                .time_basis
+                .as_ref()
+                .unwrap()
+                .force_accepted_times_s,
+            [10.0 / 64.0]
+        );
     }
 }

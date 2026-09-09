@@ -108,6 +108,7 @@ pub struct SoaStressTrace {
 /// SOA analysis output.
 #[derive(Debug, Clone)]
 pub struct SoaData {
+    pub convergence: Option<std::sync::Arc<crate::state::TransientConvergenceEvidence>>,
     /// Transient time vector.
     pub time: Vec<Value>,
     /// Cumulative violation count over time.
@@ -282,6 +283,7 @@ pub fn run_soa_analysis_with_config_and_source_path_and_abort(
     }
     ensure_not_aborted(abort)?;
     Ok(SoaData {
+        convergence: transient.convergence,
         time: transient.time,
         violation_count,
         violations,
@@ -443,6 +445,31 @@ mod tests {
         let result = run_soa_analysis_with_abort("invalid", &abort);
 
         assert!(matches!(result, Err(ServiceRunError::Aborted)));
+    }
+
+    #[test]
+    fn convergence_soa_retains_the_underlying_transient_quality() {
+        let result = run_soa_analysis_with_config_and_source_path_and_abort(
+            "SOA convergence\nVg g 0 1\nVd d 0 1\nM1 d g 0 0 NM\n.model NM NMOS LEVEL=1\n.end\n",
+            &SoaRunConfig {
+                stop_time: 1e-6,
+                step_time: 1e-7,
+                ..Default::default()
+            },
+            None,
+            &NoAbort,
+        )
+        .unwrap();
+        let quality = result
+            .convergence
+            .as_ref()
+            .expect("SOA retains solver quality");
+        quality.validate().unwrap();
+        let basis = quality.transient.time_basis.as_ref().unwrap();
+        assert_eq!(basis.sample_count, result.time.len() as u64);
+        assert_eq!(basis.start_s, result.time[0]);
+        assert_eq!(basis.stop_s, *result.time.last().unwrap());
+        assert!(!result.evaluations.is_empty());
     }
 
     #[test]

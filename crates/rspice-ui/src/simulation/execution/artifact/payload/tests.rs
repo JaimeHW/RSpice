@@ -33,6 +33,84 @@ fn transient() -> SimulationResult {
     }
 }
 
+#[test]
+fn transient_convergence_changes_dependency_artifact_identity() {
+    let producer = AnalysisInstanceId::new();
+    let create = |result: &SimulationResult| {
+        ExecutionArtifactEnvelope::from_transient_result(
+            digest(1),
+            producer,
+            ObjectRevision::new(3).unwrap(),
+            digest(2),
+            result,
+            &["out".to_owned()],
+        )
+        .unwrap()
+        .unwrap()
+    };
+    let mut result = transient();
+    let SimulationResult::Transient {
+        convergence, time, ..
+    } = &mut result
+    else {
+        unreachable!()
+    };
+    *convergence = Some(std::sync::Arc::new(
+        crate::state::TransientConvergenceEvidence::capture(
+            Default::default(),
+            time,
+            &rspice_core::abort_signal::NoAbort,
+        )
+        .unwrap(),
+    ));
+    let clean = create(&result);
+    let mut result = result;
+    let SimulationResult::Transient {
+        convergence, time, ..
+    } = &mut result
+    else {
+        unreachable!()
+    };
+    let mut quality = rspice_core::diagnostics::ConvergenceQuality::default();
+    quality.record_force_accept(1);
+    *convergence = Some(std::sync::Arc::new(
+        crate::state::TransientConvergenceEvidence::capture(
+            quality,
+            time,
+            &rspice_core::abort_signal::NoAbort,
+        )
+        .unwrap(),
+    ));
+    let degraded = create(&result);
+    assert_ne!(
+        clean.payload_digest, degraded.payload_digest,
+        "downstream Fourier authorization must bind the producer's numerical quality"
+    );
+    let binding = PreparedDependencyBinding::transient_trajectory(
+        producer,
+        ObjectRevision::new(3).unwrap(),
+        digest(2),
+    );
+    let artifacts = HashMap::from([(producer, degraded)]);
+    let resolved =
+        ResolvedExecutionDependencies::resolve(digest(1), vec![binding], &artifacts).unwrap();
+    let (metadata, buffers) = resolved.encode_transfer().unwrap();
+    let restored =
+        ResolvedExecutionDependencies::decode_transfer(&metadata, buffers.clone()).unwrap();
+    assert_eq!(restored, resolved);
+    assert_eq!(
+        restored.transient_trajectory().unwrap().convergence(),
+        result.transient_convergence()
+    );
+    let mut changed = buffers;
+    assert_eq!(changed.last().unwrap(), &[0.5]);
+    changed.last_mut().unwrap()[0] = 0.6;
+    assert!(matches!(
+        ResolvedExecutionDependencies::decode_transfer(&metadata, changed),
+        Err(ExecutionArtifactError::PayloadDigestMismatch { .. })
+    ));
+}
+
 fn pss_spec(method: PssMethod) -> AnalysisSpec {
     AnalysisSpec::Pss {
         method,

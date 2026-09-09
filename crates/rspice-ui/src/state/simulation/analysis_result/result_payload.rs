@@ -686,6 +686,9 @@ pub struct AnalysisResult {
     /// name any. `None` covers every successful run and every failure the
     /// engine could not attribute — a parse error names no conductor.
     pub failure_attribution: Option<ConvergenceAttribution>,
+    /// Quality of this result's transient source. Missing historical or
+    /// imported evidence stays unknown; it is never inferred from smooth data.
+    pub convergence: Option<std::sync::Arc<crate::state::TransientConvergenceEvidence>>,
     /// Exact prepared-task identity. Missing only for migrated legacy result
     /// history that was written before source instance IDs existed.
     pub provenance: Option<AnalysisResultProvenance>,
@@ -778,6 +781,7 @@ impl AnalysisResult {
             success: true,
             error_message: None,
             failure_attribution: None,
+            convergence: None,
             provenance: None,
             import_source: None,
         }
@@ -806,6 +810,7 @@ impl AnalysisResult {
             success: false,
             error_message: Some(error.into()),
             failure_attribution: None,
+            convergence: None,
             provenance: None,
             import_source: None,
         }
@@ -890,6 +895,9 @@ impl AnalysisResult {
     /// Historical analyses may legitimately lack a newer payload; when both
     /// fields exist they must describe one coherent execution.
     pub fn validate_retained_evidence(&self) -> Result<(), String> {
+        if let Some(quality) = &self.convergence {
+            quality.validate()?;
+        }
         if let Some(source) = &self.import_source {
             source.validate()?;
             if self.provenance.is_some() || !self.saved_output_receipts.is_empty() {

@@ -272,7 +272,13 @@ impl SimulationController {
     ) -> AnalysisResult {
         use crate::simulation::SimulationResult;
 
-        match sim_result {
+        let convergence = sim_result.transient_convergence().cloned();
+        if let Some(quality) = &convergence
+            && let Err(error) = quality.validate()
+        {
+            return AnalysisResult::failed(1, analysis_type, label, error);
+        }
+        let mut retained = match sim_result {
             SimulationResult::DcOp(dc_result) => {
                 let op_payload = operating_point_payload(
                     &dc_result.configuration,
@@ -342,7 +348,7 @@ impl SimulationController {
                 measurements,
                 events,
                 periodic_state,
-                ..
+                convergence: _,
             } => {
                 let result = AnalysisResult::new(1, analysis_type, label.to_string())
                     .with_waveforms(self.build_time_waveforms_owned(time, waveforms))
@@ -380,6 +386,7 @@ impl SimulationController {
                 measurements,
                 reference_impedances_ohm,
                 noise_reference_temperature_kelvin,
+                convergence: _,
             } => {
                 let mut result = AnalysisResult::new(1, analysis_type, label.to_string())
                     .with_waveforms(self.build_ac_waveforms_owned(frequencies, waveforms))
@@ -837,6 +844,7 @@ impl SimulationController {
                 waveforms,
                 violations,
                 evaluations,
+                convergence: _,
             } => {
                 let retained_time = time.clone();
                 let retained_waveforms = self.build_waveforms_with_shared_x_owned(time, waveforms);
@@ -937,7 +945,9 @@ impl SimulationController {
                 };
                 self.analysis_result_with_validated_payload(analysis_type, label, payload)
             }
-        }
+        };
+        retained.convergence = convergence;
+        retained
     }
 
     fn analysis_result_with_validated_payload(
@@ -1495,6 +1505,62 @@ mod operating_point_conversion_tests {
 }
 
 #[cfg(test)]
+mod convergence_conversion_tests {
+    use super::*;
+
+    #[test]
+    fn transient_convergence_changes_retained_result_identity() {
+        let convert = |force_accepted| {
+            let time = vec![0.0, 1e-9];
+            let mut convergence = rspice_core::diagnostics::ConvergenceQuality::default();
+            if force_accepted {
+                convergence.record_force_accept(1);
+            }
+            let convergence = Some(std::sync::Arc::new(
+                crate::state::TransientConvergenceEvidence::capture(
+                    convergence,
+                    &time,
+                    &rspice_core::abort_signal::NoAbort,
+                )
+                .unwrap(),
+            ));
+            let result = crate::simulation::SimulationResult::Transient {
+                time: time.clone(),
+                waveforms: HashMap::from([(
+                    "V(out)".to_owned(),
+                    crate::simulation::results::WaveformData::new_time_domain(
+                        "V(out)",
+                        time,
+                        vec![0.0, 0.8],
+                    ),
+                )]),
+                measurements: Vec::new(),
+                periodic_state: None,
+                convergence,
+                events: Default::default(),
+            };
+            SimulationController::default().convert_to_analysis_result_with_metadata_owned(
+                result,
+                AnalysisType::Transient,
+                "Quality retention",
+            )
+        };
+        let clean = convert(false);
+        let degraded = convert(true);
+        assert!(clean.success && degraded.success);
+        assert_ne!(
+            clean.result_data_digest(),
+            degraded.result_data_digest(),
+            "identical samples with different solver quality are different retained evidence"
+        );
+        assert!(
+            degraded.retained_storage_bytes() > clean.retained_storage_bytes(),
+            "retained quality records must participate in resource accounting"
+        );
+    }
+}
+
+#[cfg(test)]
 mod floquet_payload_conversion_tests {
     use super::*;
     use crate::simulation::SimulationResult;
@@ -1840,6 +1906,7 @@ mod waveform_unit_conversion_tests {
         );
         spectrum.y_unit = "V".to_owned();
         let sim_result = crate::simulation::SimulationResult::Ac {
+            convergence: None,
             noise_reference_temperature_kelvin: None,
             reference_impedances_ohm: None,
             frequencies: vec![1.0, 10.0],
@@ -1872,6 +1939,7 @@ mod waveform_unit_conversion_tests {
             "s",
         );
         let sim_result = crate::simulation::SimulationResult::Ac {
+            convergence: None,
             noise_reference_temperature_kelvin: None,
             reference_impedances_ohm: None,
             frequencies: vec![1.0, 10.0],
@@ -1899,6 +1967,7 @@ mod waveform_unit_conversion_tests {
         );
         let result = SimulationController::new().convert_to_analysis_result_with_metadata_owned(
             crate::simulation::SimulationResult::Ac {
+                convergence: None,
                 noise_reference_temperature_kelvin: None,
                 reference_impedances_ohm: None,
                 frequencies: vec![1.0, 10.0, 100.0],
@@ -1950,6 +2019,7 @@ mod waveform_unit_conversion_tests {
         // read downstream as a real unit and stop the browser and the axes
         // falling back to the accessor in the name.
         let sim_result = crate::simulation::SimulationResult::Ac {
+            convergence: None,
             noise_reference_temperature_kelvin: None,
             reference_impedances_ohm: None,
             frequencies: vec![1.0, 10.0],
@@ -2127,6 +2197,7 @@ mod noise_conversion_tests {
         );
         waveform.y_unit = "A²/Hz".to_owned();
         let simulation = crate::simulation::SimulationResult::Ac {
+            convergence: None,
             frequencies: vec![1e6, 2e6],
             waveforms: HashMap::from([("CY(1,2)".to_owned(), waveform)]),
             measurements: Vec::new(),
@@ -2201,6 +2272,7 @@ mod noise_conversion_tests {
             (AnalysisType::Hbsp, vec![75.0, 100.0]),
         ] {
             let simulation = crate::simulation::SimulationResult::Ac {
+                convergence: None,
                 noise_reference_temperature_kelvin: None,
                 frequencies: vec![1e6],
                 waveforms: HashMap::new(),
