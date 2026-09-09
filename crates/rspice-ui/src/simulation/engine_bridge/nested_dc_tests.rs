@@ -1,3 +1,7 @@
+//! Real DC solves through retention, projection, and authenticated project history.
+//! Nearby secondary coordinates must stay distinct, and terminal traversal and
+//! voltage/current identities must survive every consumer without label inference.
+
 use super::*;
 use crate::simulation::config::DcSweepConfig;
 
