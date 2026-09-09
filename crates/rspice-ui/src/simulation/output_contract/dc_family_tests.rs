@@ -2,9 +2,8 @@
 //! Ordinary sweeps are the control; nested and retraced sweeps have the same
 //! requested signals but must not collapse their members into one waveform.
 
+use super::fixtures::output;
 use super::*;
-use crate::simulation::controller::QueuedAnalysis;
-use crate::simulation::execution::SavePolicy;
 use crate::state::{AnalysisResultPayload, DcSweepFamily, OutputSelectionMode, SimulationRun};
 
 const DECK: &str = "Saved DC family\nV1 in 0 0\nV2 out 0 1e-7\nR1 in out 1k\n.end\n";
@@ -23,19 +22,6 @@ fn spec(nested: bool, retraced: bool) -> AnalysisSpec {
     }
 }
 
-fn output(kind: SavedOutputKind, name: &str, expression: &str) -> SavedOutput {
-    SavedOutput::new(
-        kind,
-        name,
-        expression,
-        SavedOutputCompatibility::AllCompatibleAnalyses,
-        SavedOutputPolicy::EveryAcceptedPoint,
-        SavedOutputPrecision::FullSourcePrecision,
-        SavedOutputStreaming::StoreOnly,
-    )
-    .unwrap()
-}
-
 fn run(spec: AnalysisSpec, outputs: &[SavedOutput]) -> SimulationRun {
     run_with_selection(spec, outputs, OutputSelectionMode::ExplicitOnly)
 }
@@ -45,27 +31,19 @@ fn run_with_selection(
     outputs: &[SavedOutput],
     output_selection_mode: OutputSelectionMode,
 ) -> SimulationRun {
-    crate::simulation::runner::pvt_point_evidence::run_declaration(
+    let line = if matches!(spec, AnalysisSpec::DcOp { .. }) {
+        ".op"
+    } else {
+        ".dc V1 1 0 -0.5"
+    };
+    super::fixtures::run(
         DECK,
         "Authored DC family",
-        QueuedAnalysis {
-            numeric_override: None,
-            spec,
-            config: None,
-            spec_options: Default::default(),
-            analysis_line: ".dc V1 1 0 -0.5".to_owned(),
-        },
-        27.0,
-        SavePolicy::PlanOwned {
-            output_selection_mode,
-            retained_dataset_limit: 10,
-            maximum_storage_bytes: u64::MAX,
-            live_streaming_enabled: false,
-            retain_failure_diagnostics: true,
-        },
+        spec,
+        line,
         outputs,
+        output_selection_mode,
     )
-    .expect("a real prepared declaration executes")
 }
 
 fn assert_outputs(spec: AnalysisSpec, member_count: usize) {

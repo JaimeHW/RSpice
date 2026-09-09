@@ -102,17 +102,12 @@ impl AnalysisResult {
                         if receipt.output_kind == crate::state::SavedOutputKind::RawVoltageOrCurrent
                         {
                             let waveform = waveforms[member.waveform_name.as_str()];
-                            let prefix = receipt.source_expression.trim().get(..2).unwrap_or("");
-                            let unit = if prefix.eq_ignore_ascii_case("V(") {
-                                "V"
-                            } else if prefix.eq_ignore_ascii_case("I(") {
-                                "A"
-                            } else {
-                                return Err(
-                                    "saved-output DC raw probe has no voltage/current identity"
-                                        .to_owned(),
-                                );
-                            };
+                            let unit =
+                                crate::state::workspace::raw_probe_unit(&receipt.source_expression)
+                                    .ok_or_else(|| {
+                                        "saved-output DC raw probe has no voltage/current identity"
+                                            .to_owned()
+                                    })?;
                             if waveform.unit.as_deref() != Some(unit) || waveform.complex.is_some()
                             {
                                 return Err(

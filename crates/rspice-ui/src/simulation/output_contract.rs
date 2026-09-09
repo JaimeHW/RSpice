@@ -22,15 +22,21 @@ const MAX_SELECTED_POINT_COUNT: usize = 10_000_000;
 
 mod dc_family;
 mod materialize;
+mod probe;
 pub(crate) use materialize::materialize_deferred_saved_output;
 #[cfg(test)]
 use materialize::materialize_saved_outputs;
 pub(in crate::simulation) use materialize::{
     apply_saved_output_policy, materialize_live_saved_outputs, retain_plan_saved_outputs,
 };
+use probe::{resolve_raw_probe, resolve_raw_probe_with};
 
 #[cfg(test)]
 mod dc_family_tests;
+#[cfg(test)]
+mod fixtures;
+#[cfg(test)]
+mod probe_tests;
 
 /// Static validation result for a candidate output contract. `RuntimeBound`
 /// is not a placeholder: it records the precise evidence that cannot exist
@@ -831,9 +837,12 @@ fn resolve_contract_waveform(
     waveforms: &[WaveformData],
 ) -> Result<WaveformData, String> {
     match contract.kind {
-        SavedOutputKind::RawVoltageOrCurrent => {
-            resolve_raw_probe(&contract.source_expression, waveforms, &contract.name)
-        }
+        SavedOutputKind::RawVoltageOrCurrent => resolve_raw_probe(
+            &contract.source_expression,
+            waveforms,
+            &contract.name,
+            analysis.analysis_type.uses_complex_bode_projection(),
+        ),
         SavedOutputKind::DerivedExpression => {
             resolve_derived_expression(&contract.source_expression, waveforms, &contract.name)
         }
@@ -866,34 +875,6 @@ fn resolve_contract_waveform(
                 })
         }
     }
-}
-
-fn resolve_raw_probe(
-    expression: &str,
-    waveforms: &[WaveformData],
-    output_name: &str,
-) -> Result<WaveformData, String> {
-    resolve_raw_probe_with(expression, output_name, |name| {
-        find_waveform(waveforms, name)
-    })
-}
-
-fn resolve_raw_probe_with<'a>(
-    expression: &str,
-    output_name: &str,
-    find: impl Fn(&str) -> Option<&'a WaveformData>,
-) -> Result<WaveformData, String> {
-    let (function, arguments) = parse_probe(expression)?;
-    if function.eq_ignore_ascii_case("V") && arguments.len() == 2 {
-        let positive = find(&format!("V({})", arguments[0]))
-            .ok_or_else(|| format!("positive probe '{}' is absent", arguments[0]))?;
-        let negative = find(&format!("V({})", arguments[1]))
-            .ok_or_else(|| format!("negative probe '{}' is absent", arguments[1]))?;
-        return subtract_waveforms(positive, negative, output_name);
-    }
-    let source =
-        find(expression).ok_or_else(|| format!("source probe '{expression}' is absent"))?;
-    Ok(clone_with_name(source, output_name))
 }
 
 fn resolve_derived_expression(
@@ -986,7 +967,7 @@ fn parse_probe(expression: &str) -> Result<(String, Vec<String>), String> {
         .strip_suffix(')')
         .ok_or_else(|| "probe is missing ')'".to_owned())?;
     Ok((
-        expression[..open].to_owned(),
+        expression[..open].trim().to_owned(),
         inner
             .split(',')
             .map(|value| value.trim().to_owned())
@@ -1071,49 +1052,6 @@ fn clone_with_name(source: &WaveformData, name: &str) -> WaveformData {
     waveform.name = name.to_owned();
     waveform.display_cache = None;
     waveform
-}
-
-fn subtract_waveforms(
-    positive: &WaveformData,
-    negative: &WaveformData,
-    name: &str,
-) -> Result<WaveformData, String> {
-    if positive.x.as_ref() != negative.x.as_ref() || positive.y.len() != negative.y.len() {
-        return Err("differential probe sources do not share an exact axis".to_owned());
-    }
-    let y = positive
-        .y
-        .iter()
-        .zip(negative.y.iter())
-        .map(|(positive, negative)| positive - negative)
-        .collect::<Vec<_>>();
-    let mut result = WaveformData::new(name, Arc::clone(&positive.x), y, "#f5b700");
-    // A difference is only in a unit when both probes agree on one. Two
-    // series that disagree have no common unit to inherit.
-    if positive.unit == negative.unit {
-        result.unit = positive.unit.clone();
-    }
-    if let (Some(positive), Some(negative)) = (&positive.complex, &negative.complex)
-        && positive.real.len() == negative.real.len()
-        && positive.imag.len() == negative.imag.len()
-    {
-        result = result.with_complex_components(
-            name,
-            positive
-                .real
-                .iter()
-                .zip(negative.real.iter())
-                .map(|(positive, negative)| positive - negative)
-                .collect::<Vec<_>>(),
-            positive
-                .imag
-                .iter()
-                .zip(negative.imag.iter())
-                .map(|(positive, negative)| positive - negative)
-                .collect::<Vec<_>>(),
-        );
-    }
-    Ok(result)
 }
 
 fn validate_selection_grid(grid: TransientSelectionGrid) -> Result<(), String> {
@@ -1290,22 +1228,22 @@ mod tests {
                 vec![voltage.clone(), current.clone()],
             ] {
                 assert_eq!(
-                    resolve_raw_probe("v(v1)", &traces, "Voltage")
+                    resolve_raw_probe("v(v1)", &traces, "Voltage", false)
                         .unwrap()
                         .y
                         .as_slice(),
                     &[0.0, 1.0]
                 );
                 assert_eq!(
-                    resolve_raw_probe("i(v1)", &traces, "Current")
+                    resolve_raw_probe("i(v1)", &traces, "Current", false)
                         .unwrap()
                         .y
                         .as_slice(),
                     &[0.0, -0.001]
                 );
             }
-            assert!(resolve_raw_probe("I(V1)", &[voltage], "missing current").is_err());
-            assert!(resolve_raw_probe("V(V1)", &[current], "missing voltage").is_err());
+            assert!(resolve_raw_probe("I(V1)", &[voltage], "missing current", false).is_err());
+            assert!(resolve_raw_probe("V(V1)", &[current], "missing voltage", false).is_err());
         }
     }
 

@@ -62,10 +62,10 @@ impl EngineBridge {
             }
 
             let name = format!("V({})", first_result.node_names[node_idx]);
-            waveforms.insert(
-                name.clone(),
-                WaveformData::new_complex(&name, frequencies.clone(), real_values, imag_values),
-            );
+            let mut waveform =
+                WaveformData::new_complex(&name, frequencies.clone(), real_values, imag_values);
+            waveform.y_unit = "V".to_owned();
+            waveforms.insert(name, waveform);
         }
 
         for branch_idx in 0..first_result.currents.len() {
@@ -81,10 +81,10 @@ impl EngineBridge {
             }
 
             let name = format!("I({})", first_result.branch_names[branch_idx]);
-            waveforms.insert(
-                name.clone(),
-                WaveformData::new_complex(&name, frequencies.clone(), real_values, imag_values),
-            );
+            let mut waveform =
+                WaveformData::new_complex(&name, frequencies.clone(), real_values, imag_values);
+            waveform.y_unit = "A".to_owned();
+            waveforms.insert(name, waveform);
         }
 
         ensure_not_aborted(abort)?;
@@ -579,6 +579,31 @@ R3 n 0 3k
 
         assert!(matches!(error, SimulationError::SolverError(_)));
         assert!(error.to_string().contains("signal shape"));
+    }
+
+    #[test]
+    fn bridge_ac_retains_voltage_and_current_units_at_the_producer() {
+        let netlist = rspice_core::Netlist::parse(DIFFERENTIAL_NOISE_DECK).unwrap();
+        let SimulationResult::Ac { waveforms, .. } = EngineBridge::new()
+            .run_ac_frequencies(&netlist, vec![1e3, 2e3], &NoAbort)
+            .unwrap()
+        else {
+            panic!("AC result expected")
+        };
+        assert_eq!(waveforms.len(), 4);
+        assert_eq!(
+            waveforms.values().filter(|wave| wave.y_unit == "V").count(),
+            3
+        );
+        assert_eq!(
+            waveforms.values().filter(|wave| wave.y_unit == "A").count(),
+            1
+        );
+        assert!(
+            waveforms
+                .values()
+                .all(|wave| wave.is_complex && wave.y_imag.is_some())
+        );
     }
 
     #[test]

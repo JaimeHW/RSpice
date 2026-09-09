@@ -264,16 +264,11 @@ impl SavedOutput {
     /// calculator's dimensional resolver evaluates their dependencies.
     pub fn inferred_unit(&self) -> &'static str {
         match self.kind {
-            SavedOutputKind::RawVoltageOrCurrent
-                if self
-                    .source_expression
-                    .trim()
-                    .get(..2)
-                    .is_some_and(|prefix| prefix.eq_ignore_ascii_case("V(")) =>
-            {
-                "volts"
-            }
-            SavedOutputKind::RawVoltageOrCurrent => "amperes",
+            SavedOutputKind::RawVoltageOrCurrent => match raw_probe_unit(&self.source_expression) {
+                Some("V") => "volts",
+                Some("A") => "amperes",
+                _ => "invalid probe",
+            },
             SavedOutputKind::DerivedExpression => "resolved from expression",
             SavedOutputKind::DeviceOperatingPointQuantity => "from device quantity",
             SavedOutputKind::NoiseContributor => "V²/Hz or A²/Hz",
@@ -495,6 +490,17 @@ fn parse_calculator_expression(expression: &str) -> Result<(), String> {
         .try_parse()
         .map(|_| ())
         .map_err(|error| format!("expression is invalid: {error}"))
+}
+
+/// Quantity identity for a raw probe, including accepted function whitespace.
+/// This is a unit projection; argument validation remains in validate_raw_probe.
+pub(crate) fn raw_probe_unit(expression: &str) -> Option<&'static str> {
+    let (function, _) = expression.trim().split_once('(')?;
+    match function.trim() {
+        value if value.eq_ignore_ascii_case("V") => Some("V"),
+        value if value.eq_ignore_ascii_case("I") => Some("A"),
+        _ => None,
+    }
 }
 
 pub(crate) fn validate_raw_probe(expression: &str) -> Result<(), String> {

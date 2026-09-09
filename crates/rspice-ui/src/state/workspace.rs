@@ -38,7 +38,7 @@ pub use hierarchy::*;
 pub use netlist_profile::NetlistExecutionProfile;
 pub use project_descriptor::*;
 pub use project_library_publication::*;
-pub(crate) use saved_output::validate_raw_probe;
+pub(crate) use saved_output::{raw_probe_unit, validate_raw_probe};
 // The glob is crate-private: `materialize` is `pub(super)` throughout except
 // the one binding lookup two workbench surfaces reach by path, the terminal
 // contract netlist generation compares against, and the metadata lookup the

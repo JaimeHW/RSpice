@@ -227,6 +227,7 @@ struct SpannedToken {
 // =============================================================================
 
 pub struct Parser<'a> {
+    input: &'a str,
     lexer: Lexer<'a>,
     current: SpannedToken,
     initial_error: Option<ParseError>,
@@ -246,6 +247,7 @@ impl<'a> Parser<'a> {
             ),
         };
         Self {
+            input,
             lexer,
             current,
             initial_error,
@@ -397,7 +399,11 @@ impl<'a> Parser<'a> {
 
             let arg = match self.current.token.clone() {
                 Token::Ident(s) if !s.trim().is_empty() => s,
-                Token::Number(n) => n.to_string(),
+                // Inside a probe, this token is a node identity, not a value.
+                // Keep 00, 001 and 1k distinct from canonical ground and 1000.
+                Token::Number(_) => {
+                    self.input[self.current.position..self.lexer.position()].to_owned()
+                }
                 _ => {
                     return Err(ParseError::new(
                         self.current.position,
@@ -490,6 +496,17 @@ mod tests {
             other => panic!("expected numeric literal, got {other:?}"),
         }
         assert_eq!(try_parse("3meg").unwrap(), CalculatorExpr::Number(3.0e6));
+    }
+
+    #[test]
+    fn numeric_probe_tokens_preserve_authored_spelling() {
+        for node in ["0", "00", "001", "1k", "1e-3", "1.25", "2µ"] {
+            let signal = format!("V({node})");
+            assert_eq!(
+                try_parse(&format!(" V ( {node} ) ")).unwrap(),
+                CalculatorExpr::wave(&signal)
+            );
+        }
     }
 
     #[test]

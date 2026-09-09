@@ -80,11 +80,13 @@ impl<'a> Sources<'a> {
         let mut outputs = Vec::new();
         for member in 0..self.evidence.member_count() {
             let result = match contract.kind {
-                SavedOutputKind::RawVoltageOrCurrent => {
-                    resolve_raw_probe_with(&contract.source_expression, &contract.name, |name| {
-                        self.find(member, name)
-                    })
-                }
+                SavedOutputKind::RawVoltageOrCurrent => resolve_raw_probe_with(
+                    &contract.source_expression,
+                    &contract.name,
+                    self.axes.get(&member).copied(),
+                    false,
+                    |name| self.find(member, name),
+                ),
                 SavedOutputKind::DerivedExpression => resolve_derived_with(
                     &contract.source_expression,
                     &contract.name,
@@ -128,6 +130,11 @@ impl calculator::EvaluationContext for MemberContext<'_, '_> {
                     CalcValue::create_waveform(waveform.x.to_vec(), waveform.x.to_vec())
                 })
                 .ok_or_else(|| calculator::EvaluationError::IdentifierNotFound(signal.to_owned()));
+        }
+        if let Some(value) =
+            calculator::canonical_ground_value(signal, self.sources.axes.get(&self.member).copied())
+        {
+            return value;
         }
         self.sources
             .find(self.member, signal)

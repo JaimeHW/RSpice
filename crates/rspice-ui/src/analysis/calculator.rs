@@ -106,6 +106,25 @@ fn find_in<'a>(waveforms: &'a [WaveformData], signal: &str) -> Option<&'a Wavefo
     })
 }
 
+/// Canonical ground has no solved unknown. Resolve only the literal V(0),
+/// against this context's own retained axis. Named aliases need a deck binding;
+/// an absent ordinary signal must never be converted into a zero waveform.
+pub(crate) fn canonical_ground_value(
+    signal: &str,
+    axis: Option<&WaveformData>,
+) -> Option<Result<CalcValue, EvaluationError>> {
+    if !signal.eq_ignore_ascii_case("V(0)") {
+        return None;
+    }
+    Some(
+        axis.filter(|wave| !wave.x.is_empty())
+            .map(|wave| CalcValue::create_waveform(wave.x.to_vec(), vec![0.0; wave.x.len()]))
+            .ok_or_else(|| {
+                EvaluationError::IdentifierNotFound("V(0) has no retained analysis axis".to_owned())
+            }),
+    )
+}
+
 /// Return the body of a voltage/current wrapper without assuming the producer
 /// used uppercase `V`/`I`. AC magnitude traces retain the same signal spelling
 /// inside a symmetric pair of bars.
@@ -140,6 +159,9 @@ impl<'a> EvaluationContext for WaveformsContext<'a> {
                 )));
             }
             _ => {}
+        }
+        if let Some(value) = canonical_ground_value(signal, self.waveforms.first()) {
+            return value;
         }
         match find_in(self.waveforms, signal) {
             Some(wf) => Ok(SimulationContext::waveform_to_calc_value(wf)),
@@ -186,6 +208,10 @@ impl<'a> EvaluationContext for SimulationContext<'a> {
             _ => {}
         }
 
+        if let Some(value) = canonical_ground_value(signal, self.simulation.waveforms.first()) {
+            return value;
+        }
+
         // Find the waveform by signal name
         match self.find_waveform(signal) {
             Some(wf) => Ok(Self::waveform_to_calc_value(wf)),
@@ -229,5 +255,27 @@ mod tests {
 
         assert_eq!(context.get_waveform("out", None).unwrap(), expected(3.75));
         assert_eq!(context.get_waveform("vdd", None).unwrap(), expected(5.0));
+    }
+
+    #[test]
+    fn both_contexts_resolve_only_canonical_voltage_ground_on_their_own_axis() {
+        let simulation = SimulationState {
+            waveforms: vec![waveform("V(00)", 2.0), waveform("I(0)", 3.0)],
+            ..SimulationState::default()
+        };
+        let live = SimulationContext::new(&simulation);
+        let retained = WaveformsContext::new(&simulation.waveforms);
+        for context in [&live as &dyn EvaluationContext, &retained] {
+            assert_eq!(context.get_waveform("V(0)", None).unwrap(), expected(0.0));
+            assert_eq!(context.get_waveform("V(00)", None).unwrap(), expected(2.0));
+            assert_eq!(context.get_waveform("I(0)", None).unwrap(), expected(3.0));
+            assert!(context.get_waveform("V(missing)", None).is_err());
+            assert!(context.get_waveform("V(GND)", None).is_err());
+        }
+        assert!(
+            WaveformsContext::new(&[])
+                .get_waveform("V(0)", None)
+                .is_err()
+        );
     }
 }
