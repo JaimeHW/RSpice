@@ -73,7 +73,7 @@ PSPICE/MODELS/capacitor_model_statements.cir.pspice	accepted	ready
 PSPICE/MODELS/inductor_model_statements.cir.pspice	accepted	ready
 PSPICE/MODELS/model_level_translation.cir.pspice	accepted	ready
 PSPICE/MODELS/multiple_devices_same_model.cir.pspice	blocked	-
-PSPICE/MODELS/resistor_model_statements.cir.pspice	accepted	step_time must be a positive finite value
+PSPICE/MODELS/resistor_model_statements.cir.pspice	accepted	transient TSTEP must be finite and positive
 PSPICE/MODELS/switch_model_statements.cir.pspice	accepted	ready
 PSPICE/OTHER_PARSING/ONE/TWO/file_hierarchy.cir.pspice	blocked	-
 PSPICE/OTHER_PARSING/ext_ascii_chars_comment_line.cir.pspice	blocked	-
