@@ -51,13 +51,43 @@ impl LegacyBsimModel {
         }
     }
 
+    pub(crate) fn geometry_parameter_error(
+        &self,
+        width: Value,
+        length: Value,
+    ) -> Option<&'static str> {
+        if !width.is_finite() || width <= 0.0 {
+            return Some("legacy BSIM W must be finite and positive");
+        }
+        if !length.is_finite() || length <= 0.0 {
+            return Some("legacy BSIM L must be finite and positive");
+        }
+        let (delta_w, delta_l, tox) = self.geometry_parameters();
+        if effective_dimensions(width, length, delta_w, delta_l).is_none() {
+            return Some(
+                "legacy BSIM effective W-DW*1e-6 and L-DL*1e-6 must be finite and positive",
+            );
+        }
+        let cox = legacy_cox(tox);
+        if !cox.is_finite() || cox <= 0.0 {
+            return Some(
+                "legacy BSIM TOX must be finite and positive with representable oxide capacitance",
+            );
+        }
+        None
+    }
+
+    fn geometry_parameters(&self) -> (Value, Value, Value) {
+        match self {
+            Self::Bsim1(model) => (model.delta_w, model.delta_l, model.tox),
+            Self::Bsim2(model) => (model.delta_w, model.delta_l, model.tox),
+        }
+    }
+
     /// BSIM1/2 use effective dimensions in metres and Cox in F/cm² in
     /// their KF law, unlike the classic MOS NLEV noise models.
     pub(crate) fn flicker_noise_denominator(&self, width: Value, length: Value) -> Option<Value> {
-        let (delta_w, delta_l, tox) = match self {
-            Self::Bsim1(model) => (model.delta_w, model.delta_l, model.tox),
-            Self::Bsim2(model) => (model.delta_w, model.delta_l, model.tox),
-        };
+        let (delta_w, delta_l, tox) = self.geometry_parameters();
         let (width, length) = effective_dimensions(width, length, delta_w, delta_l)?;
         let cox = legacy_cox(tox);
         let denominator = width * length * cox * cox;
@@ -247,8 +277,8 @@ impl SizeDependence {
         }
     }
 
-    fn eval(self, inv_l_um: Value, inv_w_um: Value) -> Value {
-        self.nominal + self.length * inv_l_um + self.width * inv_w_um
+    fn eval(self, inv_l_um: Value, inv_w_um: Value) -> Option<Value> {
+        finite(self.nominal + self.length * inv_l_um + self.width * inv_w_um)
     }
 }
 
@@ -288,37 +318,40 @@ impl LegacyBsim1Model {
 
         let leff_um = effective_length / MICRON;
         let weff_um = effective_width / MICRON;
-        let inv_l_um = 1.0 / leff_um;
-        let inv_w_um = 1.0 / weff_um;
+        let inv_l_um = positive(1.0 / leff_um)?;
+        let inv_w_um = positive(1.0 / weff_um)?;
         let cox = legacy_cox(self.tox);
-        let cox_w_over_l = cox * weff_um / leff_um;
+        if !cox.is_finite() || cox <= 0.0 {
+            return None;
+        }
+        let cox_w_over_l = positive(cox * weff_um / leff_um)?;
 
-        let phi = self.phi.eval(inv_l_um, inv_w_um).max(0.1);
-        let k1 = self.k1.eval(inv_l_um, inv_w_um).max(0.0);
-        let k2 = self.k2.eval(inv_l_um, inv_w_um).max(0.0);
+        let phi = self.phi.eval(inv_l_um, inv_w_um)?.max(0.1);
+        let k1 = self.k1.eval(inv_l_um, inv_w_um)?.max(0.0);
+        let k2 = self.k2.eval(inv_l_um, inv_w_um)?.max(0.0);
 
         Some(LegacyBsim1Sized {
-            vfb: self.vfb.eval(inv_l_um, inv_w_um),
+            vfb: self.vfb.eval(inv_l_um, inv_w_um)?,
             phi,
             k1,
             k2,
-            eta: self.eta.eval(inv_l_um, inv_w_um),
-            eta_b: self.eta_b.eval(inv_l_um, inv_w_um),
-            eta_d: self.eta_d.eval(inv_l_um, inv_w_um),
-            beta_zero: self.beta_zero.eval(inv_l_um, inv_w_um) * cox_w_over_l,
-            beta_zero_b: self.beta_zero_b.eval(inv_l_um, inv_w_um) * cox_w_over_l,
-            beta_vdd: self.beta_vdd.eval(inv_l_um, inv_w_um) * cox_w_over_l,
-            beta_vdd_b: self.beta_vdd_b.eval(inv_l_um, inv_w_um) * cox_w_over_l,
-            beta_vdd_d: (self.beta_vdd_d.eval(inv_l_um, inv_w_um) * cox_w_over_l).max(0.0),
-            ugs: self.ugs.eval(inv_l_um, inv_w_um),
-            ugs_b: self.ugs_b.eval(inv_l_um, inv_w_um),
-            uds: self.uds.eval(inv_l_um, inv_w_um),
-            uds_b: self.uds_b.eval(inv_l_um, inv_w_um),
-            uds_d: self.uds_d.eval(inv_l_um, inv_w_um),
-            subth_slope: self.subth_slope.eval(inv_l_um, inv_w_um),
-            subth_slope_b: self.subth_slope_b.eval(inv_l_um, inv_w_um),
-            subth_slope_d: self.subth_slope_d.eval(inv_l_um, inv_w_um),
-            vdd: self.vdd,
+            eta: self.eta.eval(inv_l_um, inv_w_um)?,
+            eta_b: self.eta_b.eval(inv_l_um, inv_w_um)?,
+            eta_d: self.eta_d.eval(inv_l_um, inv_w_um)?,
+            beta_zero: finite(self.beta_zero.eval(inv_l_um, inv_w_um)? * cox_w_over_l)?,
+            beta_zero_b: finite(self.beta_zero_b.eval(inv_l_um, inv_w_um)? * cox_w_over_l)?,
+            beta_vdd: finite(self.beta_vdd.eval(inv_l_um, inv_w_um)? * cox_w_over_l)?,
+            beta_vdd_b: finite(self.beta_vdd_b.eval(inv_l_um, inv_w_um)? * cox_w_over_l)?,
+            beta_vdd_d: finite(self.beta_vdd_d.eval(inv_l_um, inv_w_um)? * cox_w_over_l)?.max(0.0),
+            ugs: self.ugs.eval(inv_l_um, inv_w_um)?,
+            ugs_b: self.ugs_b.eval(inv_l_um, inv_w_um)?,
+            uds: self.uds.eval(inv_l_um, inv_w_um)?,
+            uds_b: self.uds_b.eval(inv_l_um, inv_w_um)?,
+            uds_d: self.uds_d.eval(inv_l_um, inv_w_um)?,
+            subth_slope: self.subth_slope.eval(inv_l_um, inv_w_um)?,
+            subth_slope_b: self.subth_slope_b.eval(inv_l_um, inv_w_um)?,
+            subth_slope_d: self.subth_slope_d.eval(inv_l_um, inv_w_um)?,
+            vdd: finite(self.vdd)?,
             leff_um,
         })
     }
@@ -472,53 +505,60 @@ impl LegacyBsim2Model {
         let (effective_width, effective_length) =
             effective_dimensions(width, length, self.delta_w, self.delta_l)?;
 
-        let inv_l_um = MICRON / effective_length;
-        let inv_w_um = MICRON / effective_width;
-        let cox_w_over_l = legacy_cox(self.tox) * effective_width / effective_length;
+        let inv_l_um = positive(MICRON / effective_length)?;
+        let inv_w_um = positive(MICRON / effective_width)?;
+        let cox = legacy_cox(self.tox);
+        if !cox.is_finite() || cox <= 0.0 {
+            return None;
+        }
+        let cox_w_over_l = positive(cox * effective_width / effective_length)?;
 
-        let mut beta0 = self.beta0.eval(inv_l_um, inv_w_um);
-        let mut beta0_b = self.beta0_b.eval(inv_l_um, inv_w_um);
-        let mut betas0 = self.betas0.eval(inv_l_um, inv_w_um);
-        let mut betas_b = self.betas_b.eval(inv_l_um, inv_w_um);
-        let beta20 = self.beta20.eval(inv_l_um, inv_w_um);
-        let beta2_b = self.beta2_b.eval(inv_l_um, inv_w_um);
-        let beta2_g = self.beta2_g.eval(inv_l_um, inv_w_um);
-        let mut beta30 = self.beta30.eval(inv_l_um, inv_w_um);
-        let mut beta3_b = self.beta3_b.eval(inv_l_um, inv_w_um);
-        let mut beta3_g = self.beta3_g.eval(inv_l_um, inv_w_um);
-        let mut beta40 = self.beta40.eval(inv_l_um, inv_w_um);
-        let mut beta4_b = self.beta4_b.eval(inv_l_um, inv_w_um);
-        let mut beta4_g = self.beta4_g.eval(inv_l_um, inv_w_um);
+        let mut beta0 = self.beta0.eval(inv_l_um, inv_w_um)?;
+        let mut beta0_b = self.beta0_b.eval(inv_l_um, inv_w_um)?;
+        let mut betas0 = self.betas0.eval(inv_l_um, inv_w_um)?;
+        let mut betas_b = self.betas_b.eval(inv_l_um, inv_w_um)?;
+        let beta20 = self.beta20.eval(inv_l_um, inv_w_um)?;
+        let beta2_b = self.beta2_b.eval(inv_l_um, inv_w_um)?;
+        let beta2_g = self.beta2_g.eval(inv_l_um, inv_w_um)?;
+        let mut beta30 = self.beta30.eval(inv_l_um, inv_w_um)?;
+        let mut beta3_b = self.beta3_b.eval(inv_l_um, inv_w_um)?;
+        let mut beta3_g = self.beta3_g.eval(inv_l_um, inv_w_um)?;
+        let mut beta40 = self.beta40.eval(inv_l_um, inv_w_um)?;
+        let mut beta4_b = self.beta4_b.eval(inv_l_um, inv_w_um)?;
+        let mut beta4_g = self.beta4_g.eval(inv_l_um, inv_w_um)?;
 
         if betas0 < 1.01 * beta0 {
             betas0 = 1.01 * beta0;
         }
-        let tmp = betas0 - beta0 - beta0_b * self.vbb;
+        let tmp = finite(betas0 - beta0 - beta0_b * self.vbb)?;
         if (-betas_b * self.vbb) > tmp && self.vbb.abs() > 1e-30 {
             betas_b = -tmp / self.vbb;
         }
 
-        beta0 *= cox_w_over_l;
-        beta0_b *= cox_w_over_l;
-        betas0 *= cox_w_over_l;
-        betas_b *= cox_w_over_l;
-        beta30 *= cox_w_over_l;
-        beta3_b *= cox_w_over_l;
-        beta3_g *= cox_w_over_l;
-        beta40 *= cox_w_over_l;
-        beta4_b *= cox_w_over_l;
-        beta4_g *= cox_w_over_l;
+        beta0 = finite(beta0 * cox_w_over_l)?;
+        beta0_b = finite(beta0_b * cox_w_over_l)?;
+        betas0 = finite(betas0 * cox_w_over_l)?;
+        betas_b = finite(betas_b * cox_w_over_l)?;
+        beta30 = finite(beta30 * cox_w_over_l)?;
+        beta3_b = finite(beta3_b * cox_w_over_l)?;
+        beta3_g = finite(beta3_g * cox_w_over_l)?;
+        beta40 = finite(beta40 * cox_w_over_l)?;
+        beta4_b = finite(beta4_b * cox_w_over_l)?;
+        beta4_g = finite(beta4_g * cox_w_over_l)?;
 
-        let phi = self.phi.eval(inv_l_um, inv_w_um);
+        let phi = self.phi.eval(inv_l_um, inv_w_um)?;
+        if phi <= 0.0 {
+            return None;
+        }
         let sqrt_phi = phi.sqrt();
 
         Some(LegacyBsim2Sized {
-            vfb: self.vfb.eval(inv_l_um, inv_w_um),
+            vfb: self.vfb.eval(inv_l_um, inv_w_um)?,
             phi,
-            k1: self.k1.eval(inv_l_um, inv_w_um),
-            k2: self.k2.eval(inv_l_um, inv_w_um),
-            eta0: self.eta0.eval(inv_l_um, inv_w_um),
-            eta_b: self.eta_b.eval(inv_l_um, inv_w_um),
+            k1: self.k1.eval(inv_l_um, inv_w_um)?,
+            k2: self.k2.eval(inv_l_um, inv_w_um)?,
+            eta0: self.eta0.eval(inv_l_um, inv_w_um)?,
+            eta_b: self.eta_b.eval(inv_l_um, inv_w_um)?,
             beta0,
             beta0_b,
             betas0,
@@ -532,30 +572,30 @@ impl LegacyBsim2Model {
             beta40,
             beta4_b,
             beta4_g,
-            ua0: self.ua0.eval(inv_l_um, inv_w_um),
-            ua_b: self.ua_b.eval(inv_l_um, inv_w_um),
-            ub0: self.ub0.eval(inv_l_um, inv_w_um),
-            ub_b: self.ub_b.eval(inv_l_um, inv_w_um),
-            u10: self.u10.eval(inv_l_um, inv_w_um),
-            u1_b: self.u1_b.eval(inv_l_um, inv_w_um),
-            u1_d: self.u1_d.eval(inv_l_um, inv_w_um),
-            n0: self.n0.eval(inv_l_um, inv_w_um).max(0.0),
-            n_b: self.n_b.eval(inv_l_um, inv_w_um),
-            n_d: self.n_d.eval(inv_l_um, inv_w_um),
-            vof0: self.vof0.eval(inv_l_um, inv_w_um),
-            vof_b: self.vof_b.eval(inv_l_um, inv_w_um),
-            vof_d: self.vof_d.eval(inv_l_um, inv_w_um),
-            ai0: self.ai0.eval(inv_l_um, inv_w_um),
-            ai_b: self.ai_b.eval(inv_l_um, inv_w_um),
-            bi0: self.bi0.eval(inv_l_um, inv_w_um),
-            bi_b: self.bi_b.eval(inv_l_um, inv_w_um),
-            vghigh: self.vghigh.eval(inv_l_um, inv_w_um),
-            vglow: self.vglow.eval(inv_l_um, inv_w_um),
-            vdd: self.vdd,
-            vgg: self.vgg,
-            vbb: self.vbb,
-            vtm: 8.625e-5 * (self.temp_c + 273.0),
-            phi_sqrt_phi: sqrt_phi * phi,
+            ua0: self.ua0.eval(inv_l_um, inv_w_um)?,
+            ua_b: self.ua_b.eval(inv_l_um, inv_w_um)?,
+            ub0: self.ub0.eval(inv_l_um, inv_w_um)?,
+            ub_b: self.ub_b.eval(inv_l_um, inv_w_um)?,
+            u10: self.u10.eval(inv_l_um, inv_w_um)?,
+            u1_b: self.u1_b.eval(inv_l_um, inv_w_um)?,
+            u1_d: self.u1_d.eval(inv_l_um, inv_w_um)?,
+            n0: self.n0.eval(inv_l_um, inv_w_um)?.max(0.0),
+            n_b: self.n_b.eval(inv_l_um, inv_w_um)?,
+            n_d: self.n_d.eval(inv_l_um, inv_w_um)?,
+            vof0: self.vof0.eval(inv_l_um, inv_w_um)?,
+            vof_b: self.vof_b.eval(inv_l_um, inv_w_um)?,
+            vof_d: self.vof_d.eval(inv_l_um, inv_w_um)?,
+            ai0: self.ai0.eval(inv_l_um, inv_w_um)?,
+            ai_b: self.ai_b.eval(inv_l_um, inv_w_um)?,
+            bi0: self.bi0.eval(inv_l_um, inv_w_um)?,
+            bi_b: self.bi_b.eval(inv_l_um, inv_w_um)?,
+            vghigh: self.vghigh.eval(inv_l_um, inv_w_um)?,
+            vglow: self.vglow.eval(inv_l_um, inv_w_um)?,
+            vdd: finite(self.vdd)?,
+            vgg: finite(self.vgg)?,
+            vbb: finite(self.vbb)?,
+            vtm: positive(8.625e-5 * (self.temp_c + 273.0))?,
+            phi_sqrt_phi: finite(sqrt_phi * phi)?,
         })
     }
 }
@@ -734,6 +774,9 @@ fn effective_dimensions(
     delta_w: Value,
     delta_l: Value,
 ) -> Option<(Value, Value)> {
+    if !width.is_finite() || !length.is_finite() || width <= 0.0 || length <= 0.0 {
+        return None;
+    }
     let width = width - delta_w * MICRON;
     let length = length - delta_l * MICRON;
     (width.is_finite() && length.is_finite() && width > 0.0 && length > 0.0)
@@ -749,9 +792,15 @@ fn legacy_cox(tox_um: Value) -> Value {
 }
 
 fn param(params: &HashMap<String, Value>, name: &str, default: Value) -> Value {
-    params
-        .get(name)
-        .copied()
-        .filter(|value| value.is_finite())
-        .unwrap_or(default)
+    // Preserve authored invalid values for sizing to reject; omission alone
+    // selects a model default.
+    params.get(name).copied().unwrap_or(default)
+}
+
+fn finite(value: Value) -> Option<Value> {
+    value.is_finite().then_some(value)
+}
+
+fn positive(value: Value) -> Option<Value> {
+    (value.is_finite() && value > 0.0).then_some(value)
 }

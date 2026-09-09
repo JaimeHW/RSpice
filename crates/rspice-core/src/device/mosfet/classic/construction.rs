@@ -561,7 +561,7 @@ impl Mosfet {
         vds: Value,
         vbs: Value,
     ) -> (Value, MosRegion, Value, Value, Value, Value, Value) {
-        let (id, region, gm, gds, gmb, gss) = if self.legacy_bsim_sized.is_some() {
+        let (id, region, gm, gds, gmb, gss) = if self.legacy_bsim_model.is_some() {
             self.legacy_bsim_linearized_operating_point(vgs, vds, vbs)
         } else if self.level == 6 {
             self.level6_operating_point(vgs, vds, vbs)
@@ -1321,11 +1321,21 @@ impl Mosfet {
         }
     }
 
-    /// Reject unrepresentable parallel-instance contributions before finite
-    /// guards in the device laws can turn them into missing current or charge.
-    pub(crate) fn resolved_scaling_parameter_error(&self) -> Option<&'static str> {
+    /// Reject invalid sizing and unrepresentable parallel contributions before
+    /// the device laws can turn them into missing current or charge.
+    pub(crate) fn resolved_parameter_error(&self) -> Option<&'static str> {
         if !self.multiplicity.is_finite() || self.multiplicity <= 0.0 {
             return Some("resolved M*NF product must be finite and positive");
+        }
+        if let Some(model) = &self.legacy_bsim_model {
+            if let Some(reason) = model.geometry_parameter_error(self.w, self.l) {
+                return Some(reason);
+            }
+            if self.legacy_bsim_sized.is_none() {
+                return Some(
+                    "legacy BSIM size-dependent parameters are invalid or not representable",
+                );
+            }
         }
         for area in [self.source_area, self.drain_area] {
             if !self
@@ -1447,7 +1457,7 @@ impl Mosfet {
         if !beta.is_finite() || beta < 0.0 {
             return Some("M*NF*KP*W/(L-2*LD) must be finite and nonnegative");
         }
-        self.resolved_scaling_parameter_error()
+        self.resolved_parameter_error()
     }
 
     pub(crate) fn with_instance_params(mut self, params: &[(String, Value)]) -> Self {
@@ -1457,6 +1467,18 @@ impl Mosfet {
         let mut nf = 1.0;
 
         for (name, value) in params {
+            // Keep invalid legacy dimensions until resolved validation. A
+            // rejected override must not turn into the constructor's geometry.
+            if self.legacy_bsim_model.is_some() {
+                if name.eq_ignore_ascii_case("W") {
+                    width_override = Some(*value);
+                    continue;
+                }
+                if name.eq_ignore_ascii_case("L") {
+                    length_override = Some(*value);
+                    continue;
+                }
+            }
             if !value.is_finite() {
                 continue;
             }
@@ -1559,6 +1581,49 @@ impl Mosfet {
 mod tests {
     use super::*;
     use std::collections::HashMap;
+
+    #[test]
+    fn legacy_bsim_invalid_sizing_never_selects_a_simplified_channel() {
+        for level in [4, 5] {
+            let params = HashMap::from([
+                ("LEVEL".to_string(), level as Value),
+                ("TOX".to_string(), 0.03),
+            ]);
+            let make = |params: &HashMap<String, Value>| {
+                Mosfet::new_nmos("M1".to_string(), 1, 2, 0, 0)
+                    .with_params(params)
+                    .with_geometry(0.5e-6, 1e-6)
+            };
+            for name in [
+                "DL", "DW", "TOX", "VFB", "LVFB", "PHI", "LPHI", "K1", "K2", "VDD",
+            ] {
+                for value in [Value::NAN, Value::INFINITY, Value::NEG_INFINITY] {
+                    let mut invalid = params.clone();
+                    invalid.insert(name.to_string(), value);
+                    let mos = make(&invalid);
+                    assert!(
+                        mos.resolved_parameter_error().is_some(),
+                        "L{level} {name}={value}"
+                    );
+                    assert!(
+                        !mos.calculate_id(1.5, 2.0, 0.0).0.is_finite(),
+                        "L{level} {name} substituted another model"
+                    );
+                    assert!(!mos.linearized_operating_point(1.5, 2.0, 0.0).0.is_finite());
+                }
+            }
+            for name in ["W", "L"] {
+                for value in [0.0, -1.0, Value::NAN, Value::INFINITY] {
+                    let mos = make(&params).with_instance_params(&[(name.to_string(), value)]);
+                    assert!(
+                        mos.resolved_parameter_error().is_some(),
+                        "L{level} {name}={value}"
+                    );
+                    assert!(!mos.calculate_id(1.5, 2.0, 0.0).0.is_finite());
+                }
+            }
+        }
+    }
 
     #[test]
     fn off_instance_holds_its_zero_bias_startup_state_until_newton_moves() {

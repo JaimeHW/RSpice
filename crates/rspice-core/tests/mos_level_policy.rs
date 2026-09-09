@@ -195,6 +195,125 @@ fn check_native_mos_parallel_equivalence(analysis: &str) {
 }
 
 #[test]
+fn legacy_bsim_invalid_sizing_is_rejected_before_analysis() {
+    for level in [4, 5] {
+        for (kind, p) in [("NMOS", 1.0), ("PMOS", -1.0)] {
+            for (geometry, model, reason) in [
+                ("W=0 L=1u", "TOX=0.03", "W"),
+                ("W=-1u L=1u", "TOX=0.03", "W"),
+                ("W=0.5u L=0", "TOX=0.03", "L"),
+                ("W=0.5u L=-1u", "TOX=0.03", "L"),
+                ("W=0.5u L=1u", "TOX=0.03 DL=1", "effective"),
+                ("W=0.5u L=1u", "TOX=0.03 DL=2", "effective"),
+                ("W=0.5u L=1u", "TOX=0.03 DW=0.5", "effective"),
+                ("W=0.5u L=1u", "TOX=0.03 DW=1", "effective"),
+                ("W=0.5u L=1u", "TOX=0", "TOX"),
+                ("W=0.5u L=1u", "TOX=-0.03", "TOX"),
+                ("W=0.5u L=1u", "TOX=1e-320", "TOX"),
+                ("W=0.5u L=0.1u", "TOX=0.03 LVFB=1e308", "size-dependent"),
+                ("W=0.5u L=1u", "TOX=0.03 WPHI=1e308", "size-dependent"),
+                (
+                    "W=1u L=1e-300",
+                    "TOX=0.03 MUZ=1e308 MU0=1e308",
+                    "size-dependent",
+                ),
+            ] {
+                let netlist = Netlist::parse(&format!(
+                    "Invalid legacy BSIM sizing\nVD d 0 {}\nVG g 0 {}\nM1 d g 0 0 mm {geometry}\n.model mm {kind}(LEVEL={level} {model})\n.end\n", p * 2.0, p * 1.5,
+                )).unwrap();
+                let engine = Engine::default().resolved_for_netlist(&netlist);
+                for error in [
+                    engine.run_dc_op(&netlist).unwrap_err(),
+                    engine.run_ac(&netlist, &[1000.0]).unwrap_err(),
+                    engine.run_tran(&netlist, 1e-9, 1e-9).unwrap_err(),
+                ] {
+                    let error = error.to_string();
+                    assert!(
+                        error.contains("M1")
+                            && error.contains("model 'MM'")
+                            && error.contains(reason),
+                        "L{level} {kind} {geometry} {model}: {error}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn legacy_bsim_valid_effective_geometry_preserves_channel_current() {
+    for level in [4, 5] {
+        for (kind, p) in [("NMOS", 1.0), ("PMOS", -1.0)] {
+            for (dl, dw) in [(0.2, 0.1), (-0.2, -0.1)] {
+                let solve = |width, length, dl, dw| {
+                    let netlist = Netlist::parse(&format!(
+                        "Valid legacy BSIM sizing\nVD d 0 {}\nVG g 0 {}\nM1 d g 0 0 mm W={width}u L={length}u M=2.5 NF=2\n.model mm {kind}(LEVEL={level} TOX=0.03 VFB=-0.7 PHI=0.6 MUZ=400 MUS=500 VDD=2 MU0=400 MUS0=500 LVFB=0.05 WVFB=0.01 DL={dl} DW={dw})\n.end\n", p * 2.0, p * 1.5,
+                    )).unwrap();
+                    let dc = Engine::default()
+                        .resolved_for_netlist(&netlist)
+                        .run_dc_op(&netlist)
+                        .unwrap();
+                    dc.branch_currents[dc
+                        .branch_names
+                        .iter()
+                        .position(|name| name.eq_ignore_ascii_case("VD"))
+                        .unwrap()]
+                };
+                let actual = solve(0.5, 1.0, dl, dw);
+                let expected = solve(0.5 - dw, 1.0 - dl, 0.0, 0.0);
+                assert!(actual.abs() > 1e-6);
+                assert!(
+                    (actual - expected).abs() < expected.abs() * 1e-10,
+                    "L{level} {kind} DL={dl} DW={dw}: {actual} vs {expected}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn legacy_bsim_defaults_and_family_limits_are_validated() {
+    let netlist = |level, model| {
+        Netlist::parse(&format!(
+        "Legacy BSIM model defaults\nVD d 0 2\nVG g 0 1.5\nM1 d g 0 0 mm W=0.5u L=1u\n.model mm NMOS(LEVEL={level} {model})\n.end\n"
+    )).unwrap()
+    };
+    // BSIM1's zero-TOX default is not a usable oxide; BSIM2 defaults to 0.03 um.
+    let error = Engine::default()
+        .build_circuit(&netlist(4, ""))
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("TOX"), "{error}");
+    Engine::default().run_dc_op(&netlist(5, "")).unwrap();
+    for params in [
+        "PHI=0",
+        "PHI=-0.1",
+        "PHI=0.6 LPHI=-1",
+        "TEMP=-273",
+        "TEMP=-300",
+    ] {
+        let error = Engine::default()
+            .build_circuit(&netlist(5, params))
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("size-dependent"), "{params}: {error}");
+    }
+    // b1temp.c floors PHI, K1 and K2 after size dependence is applied.
+    let solve = |model| {
+        let result = Engine::default().run_dc_op(&netlist(4, model)).unwrap();
+        result.branch_currents[result
+            .branch_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("VD"))
+            .unwrap()]
+    };
+    let actual = solve("TOX=0.03 VFB=-0.7 MUZ=400 MUS=500 VDD=2 PHI=-1 K1=-1 K2=-1");
+    let expected = solve("TOX=0.03 VFB=-0.7 MUZ=400 MUS=500 VDD=2 PHI=0.1 K1=0 K2=0");
+    assert_eq!(actual, expected);
+    assert!(actual.abs() > 1e-6);
+}
+
+#[test]
 fn native_mos_rejects_invalid_multiplicity_and_unrepresentable_products() {
     for level in [1, 2, 3, 4, 5, 6, 9] {
         for parameters in [
@@ -228,6 +347,11 @@ fn native_mos_rejects_overflowing_resolved_current_and_capacitance() {
         } else {
             "IS=1e200"
         };
+        let oxide = if matches!(level, 4 | 5) {
+            "TOX=0.03"
+        } else {
+            ""
+        };
         for (model, geometry, quantity) in [
             (saturation, "AD=1 AS=1", "saturation current"),
             ("IS=0 JS=1e200", "AD=1e200 AS=1e200", "saturation current"),
@@ -238,7 +362,7 @@ fn native_mos_rejects_overflowing_resolved_current_and_capacitance() {
             ("IS=0 CGBO=1e200", "", "capacitance"),
         ] {
             let netlist = Netlist::parse(&format!(
-                "MOS overflow\nVD d 0 0\nVG g 0 -1\nVB b 0 0.2\nM1 d g 0 b mm L=1u W=1u M=1e200 {geometry}\n.model mm NMOS(LEVEL={level} KP=0 {model})\n.end\n"
+                "MOS overflow\nVD d 0 0\nVG g 0 -1\nVB b 0 0.2\nM1 d g 0 b mm L=1u W=1u M=1e200 {geometry}\n.model mm NMOS(LEVEL={level} KP=0 {oxide} {model})\n.end\n"
             )).unwrap();
             let engine = Engine::default().resolved_for_netlist(&netlist);
             let error = engine

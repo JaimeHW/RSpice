@@ -7142,23 +7142,29 @@ R2 OUT 0 1k
                 ("TOX=0.03 KF=-1", "KF"),
                 ("TOX=0 KF=1e-28", "TOX"),
                 ("TOX=-0.03 KF=1e-28", "TOX"),
-                ("TOX=0.03 DL=1 KF=1e-28", "effective W, L"),
-                ("TOX=0.03 DW=0.5 KF=1e-28", "effective W, L"),
+                ("TOX=0.03 DL=1 KF=1e-28", "effective"),
+                ("TOX=0.03 DW=0.5 KF=1e-28", "effective"),
                 ("TOX=0.03 KF=1e300", "coefficient"),
             ] {
                 let netlist = Netlist::parse(&format!(
                     "Invalid legacy BSIM noise\nM1 0 0 0 0 mm W=0.5u L=1u\n.model mm NMOS(LEVEL={level} {params})\n.end\n"
                 )).unwrap();
                 let engine = Engine::default().resolved_for_netlist(&netlist);
-                let circuit = engine.build_circuit(&netlist).unwrap();
-                let Err(error) =
-                    Engine::try_collect_noise_sources(&circuit, &vec![0.0; circuit.matrix_size()])
-                else {
-                    panic!("L{level} {params}: invalid active flicker noise was accepted");
+                let error = match engine.build_circuit(&netlist) {
+                    Err(error) => error,
+                    Ok(circuit) => {
+                        let Err(error) = Engine::try_collect_noise_sources(
+                            &circuit,
+                            &vec![0.0; circuit.matrix_size()],
+                        ) else {
+                            panic!("L{level} {params}: invalid active flicker noise was accepted");
+                        };
+                        error
+                    }
                 };
                 let error = error.to_string();
                 assert!(
-                    error.contains("M1:FN") && error.contains(reason),
+                    error.contains("M1") && error.contains(reason),
                     "L{level} {params}: {error}"
                 );
             }

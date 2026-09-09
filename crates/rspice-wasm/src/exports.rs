@@ -262,6 +262,34 @@ mod wasm_tests {
     }
 
     #[wasm_bindgen_test]
+    fn legacy_bsim_invalid_sizing_fails_in_wasm() {
+        let abort = rspice_core::abort_signal::NoAbort;
+        for level in [4, 5] {
+            for (geometry, model) in [
+                ("W=0 L=1u", "TOX=0.03"),
+                ("W=0.5u L=-1u", "TOX=0.03"),
+                ("W=0.5u L=1u", "TOX=0.03 DL=1"),
+                ("W=0.5u L=1u", "TOX=0.03 DW=0.5"),
+                ("W=0.5u L=1u", "TOX=0"),
+                ("W=0.5u L=0.1u", "TOX=0.03 LVFB=1e308"),
+            ] {
+                let netlist = rspice_core::Netlist::parse(&format!(
+                    "Invalid legacy BSIM sizing in WASM\nVD d 0 2\nVG g 0 1.5\nM1 d g 0 0 mm {geometry}\n.model mm NMOS(LEVEL={level} {model})\n.end\n"
+                )).unwrap();
+                let error = rspice_core::Engine::default()
+                    .resolved_for_netlist(&netlist)
+                    .run_dc_op_with_abort(&netlist, &abort)
+                    .unwrap_err()
+                    .to_string();
+                assert!(
+                    error.contains("M1") && error.contains("legacy BSIM"),
+                    "L{level}: {error}"
+                );
+            }
+        }
+    }
+
+    #[wasm_bindgen_test]
     fn legacy_bsim_flicker_law_in_wasm() {
         let abort = rspice_core::abort_signal::NoAbort;
         for level in [4, 5] {

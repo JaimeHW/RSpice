@@ -6673,7 +6673,7 @@ impl Engine {
                     mosfet.set_temperature(temp_k, tnom_k);
                     if level == 1 {
                         validate_resolved_level1_mos(&mosfet, model)?;
-                    } else if let Some(reason) = mosfet.resolved_scaling_parameter_error() {
+                    } else if let Some(reason) = mosfet.resolved_parameter_error() {
                         return Err(SimulationError::Circuit(format!(
                             "MOSFET '{}' model '{model}': {reason}",
                             element.name

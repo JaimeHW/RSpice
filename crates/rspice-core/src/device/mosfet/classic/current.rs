@@ -40,7 +40,9 @@ impl Mosfet {
         vbs: Value,
     ) -> (Value, MosRegion) {
         let Some(legacy) = &self.legacy_bsim_sized else {
-            return (0.0, MosRegion::Cutoff);
+            // Construction rejects failed sizing. Preserve invalid evidence
+            // if an internally assembled device nevertheless reaches a load.
+            return (Value::NAN, MosRegion::Cutoff);
         };
         if !vgs.is_finite() || !vds.is_finite() || !vbs.is_finite() {
             return (0.0, MosRegion::Cutoff);
@@ -114,7 +116,7 @@ impl Mosfet {
         vds: Value,
         vbs: Value,
     ) -> (Value, MosRegion) {
-        if self.legacy_bsim_sized.is_some() {
+        if self.legacy_bsim_model.is_some() {
             return self.legacy_bsim_current(vgs, vds, vbs);
         }
 
@@ -494,7 +496,7 @@ impl Mosfet {
         vds: Value,
         vbs: Value,
     ) -> (Value, Value, Value) {
-        if self.legacy_bsim_sized.is_some() {
+        if self.legacy_bsim_model.is_some() {
             let (_, _, gm, gds, gmb, _) =
                 self.legacy_bsim_linearized_operating_point(vgs, vds, vbs);
             return (gm, gds, gmb);
