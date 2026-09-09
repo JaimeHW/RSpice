@@ -440,12 +440,24 @@ impl ProbeTarget {
         self.scope.engine_name_for(&self.leaf)
     }
 
+    /// Alternate engine spelling for a lookup that found no literal signal.
+    /// Callers must try the exact identity first: a deck can contain literal
+    /// punctuation as well as flattened hierarchical names. Only the request
+    /// is translated; unrelated retained names must never be normalized into it.
+    pub(crate) fn engine_alias(text: &str) -> Option<String> {
+        let engine = Self::parse_legacy(text).ok()?.engine_name().ok()?;
+        (!engine.eq_ignore_ascii_case(text)).then_some(engine)
+    }
+
     fn parse_scoped(
         text: &str,
         parse_scope: fn(&str) -> Result<InstancePath, HierarchyPathError>,
     ) -> Result<Self, HierarchyPathError> {
         if text.is_empty() {
             return Err(HierarchyPathError::Empty);
+        }
+        if text.contains("//") {
+            return Err(HierarchyPathError::EmptySegment(text.to_owned()));
         }
         if text.len() > MAX_INSTANCE_PATH_BYTES {
             return Err(HierarchyPathError::TooLong {
@@ -1011,6 +1023,11 @@ mod tests {
         );
 
         assert_eq!(ProbeTarget::parse(""), Err(HierarchyPathError::Empty));
+        for text in ["//net", "/top//net", "/X1//net"] {
+            assert!(ProbeTarget::parse(text).is_err(), "{text}");
+            assert!(ProbeTarget::parse_legacy(text).is_err(), "{text}");
+            assert!(ProbeTarget::engine_alias(text).is_none(), "{text}");
+        }
         assert_eq!(
             ProbeTarget::parse("/X1/"),
             Err(HierarchyPathError::EmptyLeaf)

@@ -69,7 +69,13 @@ impl<'a> Sources<'a> {
 
     fn find(&self, member: usize, signal: &str) -> Option<&'a WaveformData> {
         let (current, name) = probe_identity(signal.trim());
-        let quantity = self.quantities.get(&(current, name.to_ascii_lowercase()))?;
+        let quantity = self
+            .quantities
+            .get(&(current, name.to_ascii_lowercase()))
+            .or_else(|| {
+                let engine = crate::state::ProbeTarget::engine_alias(name)?;
+                self.quantities.get(&(current, engine))
+            })?;
         self.curves.get(&(*quantity, member)).copied()
     }
 

@@ -84,6 +84,19 @@ impl<'a> WaveformsContext<'a> {
 /// net name inside `V()`/`I()`, and AC magnitude entries (`|V(out)|`
 /// matches `V(out)` so `dB(V(out)/V(in))` works on AC strips).
 fn find_in<'a>(waveforms: &'a [WaveformData], signal: &str) -> Option<&'a WaveformData> {
+    find_literal_in(waveforms, signal).or_else(|| {
+        let engine = if let Some(body) = bare_wrapped_signal_name(signal) {
+            let engine = crate::state::ProbeTarget::engine_alias(body)?;
+            // The accessor keeps voltage and current namespaces distinct.
+            format!("{}({engine})", &signal.trim_matches('|')[..1])
+        } else {
+            crate::state::ProbeTarget::engine_alias(signal)?
+        };
+        find_literal_in(waveforms, &engine)
+    })
+}
+
+fn find_literal_in<'a>(waveforms: &'a [WaveformData], signal: &str) -> Option<&'a WaveformData> {
     if let Some(wf) = waveforms
         .iter()
         .find(|wf| wf.name.eq_ignore_ascii_case(signal))
@@ -95,6 +108,19 @@ fn find_in<'a>(waveforms: &'a [WaveformData], signal: &str) -> Option<&'a Wavefo
     if let Some(wf) = waveforms
         .iter()
         .find(|wf| wf.name.trim_matches('|').eq_ignore_ascii_case(signal))
+    {
+        return Some(wf);
+    }
+
+    // Transient producers retain bare node names. A voltage accessor may
+    // read one; a current accessor must never resolve to that node voltage.
+    if signal
+        .get(..2)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("V("))
+        && let Some(node) = bare_wrapped_signal_name(signal)
+        && let Some(wf) = waveforms.iter().find(|wf| {
+            bare_wrapped_signal_name(&wf.name).is_none() && wf.name.eq_ignore_ascii_case(node)
+        })
     {
         return Some(wf);
     }
@@ -277,5 +303,40 @@ mod tests {
                 .get_waveform("V(0)", None)
                 .is_err()
         );
+    }
+
+    #[test]
+    fn live_and_retained_calculators_bind_scopes_without_crossing_quantity_namespaces() {
+        let simulation = SimulationState {
+            waveforms: vec![
+                waveform("|V(X1.out)|", 2.0),
+                waveform("I(X1.out)", 3.0),
+                waveform("V(X1:out)", 4.0),
+                waveform("V(out)", 5.0),
+                waveform("X2.out", 6.0),
+                waveform("I(X2.out)", 7.0),
+            ],
+            ..SimulationState::default()
+        };
+        let live = SimulationContext::new(&simulation);
+        let retained = WaveformsContext::new(&simulation.waveforms);
+        for context in [&live as &dyn EvaluationContext, &retained] {
+            for (signal, value) in [
+                ("V(/X1/out)", 2.0),
+                ("|V(/X1/out)|", 2.0),
+                ("V(X1:out)", 4.0),
+                ("I(/top/X1/out)", 3.0),
+                ("I(X1:out)", 3.0),
+                ("/X1/out", 2.0),
+                ("V(/out)", 5.0),
+                ("V(/X2/out)", 6.0),
+                ("I(/X2/out)", 7.0),
+            ] {
+                assert_eq!(context.get_waveform(signal, None).unwrap(), expected(value));
+            }
+            for signal in ["V(/missing/out)", "I(/out)", "V(//out)", "V(I(X2.out))"] {
+                assert!(context.get_waveform(signal, None).is_err(), "{signal}");
+            }
+        }
     }
 }

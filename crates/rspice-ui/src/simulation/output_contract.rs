@@ -32,6 +32,8 @@ pub(in crate::simulation) use materialize::{
 use probe::{resolve_raw_probe, resolve_raw_probe_with};
 
 #[cfg(test)]
+mod binding_tests;
+#[cfg(test)]
 mod dc_family_tests;
 #[cfg(test)]
 mod fixtures;
@@ -1004,6 +1006,20 @@ fn clone_named_waveform(
 
 fn find_waveform<'a>(waveforms: &'a [WaveformData], requested: &str) -> Option<&'a WaveformData> {
     let requested = requested.trim();
+    find_literal_waveform(waveforms, requested).or_else(|| {
+        let (current, node) = probe_identity(requested);
+        let engine = crate::state::ProbeTarget::engine_alias(node)?;
+        find_literal_waveform(
+            waveforms,
+            &format!("{}({engine})", if current { "I" } else { "V" }),
+        )
+    })
+}
+
+fn find_literal_waveform<'a>(
+    waveforms: &'a [WaveformData],
+    requested: &str,
+) -> Option<&'a WaveformData> {
     // Exact authored names win before compatibility with bare engine nodes.
     // A node named V1 and branch I(V1) are different physical quantities.
     waveforms

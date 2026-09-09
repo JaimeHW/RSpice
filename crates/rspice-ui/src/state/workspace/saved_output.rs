@@ -555,11 +555,6 @@ fn validate_device_op_probe(expression: &str) -> Result<(), String> {
 /// refused here: `//net` would otherwise resolve to a root probe rather than
 /// to the empty instance name it actually spells.
 fn parse_probe_target(value: &str) -> Result<ProbeTarget, String> {
-    if value.contains("//") {
-        return Err(format!(
-            "probe target {value:?} has an empty instance name; the design root is written '/'"
-        ));
-    }
     ProbeTarget::parse_legacy(value).map_err(|error| error.to_string())
 }
 
