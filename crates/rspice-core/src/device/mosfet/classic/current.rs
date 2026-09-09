@@ -1,6 +1,24 @@
 use super::*;
 
 impl Mosfet {
+    /// Retain both channel diagonals before changing reference terminals.
+    /// In inverse mode the source diagonal is the intrinsic output slope;
+    /// reconstructing it as gm + gds + gmb can lose it beside a large gm.
+    #[inline]
+    pub(in crate::device::mosfet::classic) fn terminal_channel_derivatives(
+        inverse: bool,
+        gm: Value,
+        gds: Value,
+        gmb: Value,
+    ) -> (Value, Value, Value, Value) {
+        let sum = gm + gds + gmb;
+        if inverse {
+            (-gm, sum, -gmb, gds)
+        } else {
+            (gm, gds, gmb, sum)
+        }
+    }
+
     /// Voltages with intrinsic source/drain swapped.
     ///
     /// (Vgs', Vds', Vbs') correspond to using original drain as intrinsic source:
@@ -49,9 +67,9 @@ impl Mosfet {
         vgs: Value,
         vds: Value,
         vbs: Value,
-    ) -> (Value, MosRegion, Value, Value, Value) {
+    ) -> (Value, MosRegion, Value, Value, Value, Value) {
         if !vgs.is_finite() || !vds.is_finite() || !vbs.is_finite() {
-            return (0.0, MosRegion::Cutoff, 0.0, 0.0, 0.0);
+            return (0.0, MosRegion::Cutoff, 0.0, 0.0, 0.0, 0.0);
         }
 
         let (id, region) = self.legacy_bsim_current(vgs, vds, vbs);
@@ -73,7 +91,7 @@ impl Mosfet {
         let gm = derivative(1.0, 0.0, 0.0, gm_step);
         let gds = derivative(0.0, 1.0, 0.0, gds_step);
         let gmb = derivative(0.0, 0.0, 1.0, gmb_step);
-        (id, region, gm, gds, gmb)
+        (id, region, gm, gds, gmb, gm + gds + gmb)
     }
 
     pub(in crate::device::mosfet::classic) fn legacy_region_to_mos(
@@ -102,7 +120,7 @@ impl Mosfet {
         }
 
         if self.level == 1 {
-            let (id, region, _, _, _) = self.level1_operating_point(vgs, vds, vbs);
+            let (id, region, _, _, _, _) = self.level1_operating_point(vgs, vds, vbs);
             return (id, region);
         }
 
@@ -144,7 +162,7 @@ impl Mosfet {
         vgs: Value,
         vds: Value,
         vbs: Value,
-    ) -> (Value, MosRegion, Value, Value, Value) {
+    ) -> (Value, MosRegion, Value, Value, Value, Value) {
         let phi = self.phi;
         let sqrt_phi = phi.sqrt();
         let effective_length = self.l - 2.0 * self.ld;
@@ -160,9 +178,9 @@ impl Mosfet {
         vbs: Value,
         sqrt_phi: Value,
         beta: Value,
-    ) -> (Value, MosRegion, Value, Value, Value) {
+    ) -> (Value, MosRegion, Value, Value, Value, Value) {
         if !vgs.is_finite() || !vds.is_finite() || !vbs.is_finite() {
-            return (0.0, MosRegion::Cutoff, 0.0, 0.0, 0.0);
+            return (0.0, MosRegion::Cutoff, 0.0, 0.0, 0.0, 0.0);
         }
 
         let p = self.polarity();
@@ -189,7 +207,7 @@ impl Mosfet {
         let von = p * self.vto + self.gamma * (sarg - sqrt_phi);
         let vgst = vg_active - von;
         if !vgst.is_finite() || vgst <= 0.0 {
-            return (0.0, MosRegion::Cutoff, 0.0, 0.0, 0.0);
+            return (0.0, MosRegion::Cutoff, 0.0, 0.0, 0.0, 0.0);
         }
 
         let arg = if sarg <= 0.0 {
@@ -215,11 +233,8 @@ impl Mosfet {
         };
 
         let id = p * mode * cdrain;
-        let (gm, gds, gmb) = if mode > 0.0 {
-            (gm_model, gds_model, gmb_model)
-        } else {
-            (-gm_model, gm_model + gds_model + gmb_model, -gmb_model)
-        };
+        let (gm, gds, gmb, gss) =
+            Self::terminal_channel_derivatives(mode < 0.0, gm_model, gds_model, gmb_model);
 
         let sanitize = |value: Value| if value.is_finite() { value } else { 0.0 };
         (
@@ -228,6 +243,7 @@ impl Mosfet {
             sanitize(gm),
             sanitize(gds),
             sanitize(gmb),
+            gss,
         )
     }
 
@@ -377,7 +393,7 @@ impl Mosfet {
         vgs: Value,
         vds: Value,
         vbs: Value,
-    ) -> (Value, MosRegion, Value, Value, Value) {
+    ) -> (Value, MosRegion, Value, Value, Value, Value) {
         let p = self.polarity();
         let vgs_m = p * vgs;
         let vds_m = p * vds;
@@ -403,7 +419,7 @@ impl Mosfet {
             - self.sigma * vdshere;
         let vgon = vg_active - von;
         if !vgon.is_finite() || vgon <= 0.0 {
-            return (0.0, MosRegion::Cutoff, 0.0, 0.0, 0.0);
+            return (0.0, MosRegion::Cutoff, 0.0, 0.0, 0.0, 0.0);
         }
 
         let vonbm = if sarg1 <= 0.0 {
@@ -438,11 +454,8 @@ impl Mosfet {
         }
 
         let id = p * mode * cdrain;
-        let (gm, gds, gmb) = if mode > 0.0 {
-            (gm_model, gds_model, gmb_model)
-        } else {
-            (-gm_model, gm_model + gds_model + gmb_model, -gmb_model)
-        };
+        let (gm, gds, gmb, gss) =
+            Self::terminal_channel_derivatives(mode < 0.0, gm_model, gds_model, gmb_model);
 
         let sanitize = |value: Value| if value.is_finite() { value } else { 0.0 };
         (
@@ -451,6 +464,7 @@ impl Mosfet {
             sanitize(gm),
             sanitize(gds),
             sanitize(gmb),
+            gss,
         )
     }
 
@@ -460,7 +474,7 @@ impl Mosfet {
         vds: Value,
         vbs: Value,
     ) -> (Value, MosRegion) {
-        let (id, region, _, _, _) = self.level6_operating_point(vgs, vds, vbs);
+        let (id, region, _, _, _, _) = self.level6_operating_point(vgs, vds, vbs);
         (id, region)
     }
 
@@ -478,17 +492,18 @@ impl Mosfet {
         vbs: Value,
     ) -> (Value, Value, Value) {
         if self.legacy_bsim_sized.is_some() {
-            let (_, _, gm, gds, gmb) = self.legacy_bsim_linearized_operating_point(vgs, vds, vbs);
+            let (_, _, gm, gds, gmb, _) =
+                self.legacy_bsim_linearized_operating_point(vgs, vds, vbs);
             return (gm, gds, gmb);
         }
 
         if self.level == 6 {
-            let (_, _, gm, gds, gmb) = self.level6_operating_point(vgs, vds, vbs);
+            let (_, _, gm, gds, gmb, _) = self.level6_operating_point(vgs, vds, vbs);
             return (gm, gds, gmb);
         }
 
         if self.level == 2 {
-            let (_, _, gm, gds, gmb) = self.level2_operating_point(vgs, vds, vbs);
+            let (_, _, gm, gds, gmb, _) = self.level2_operating_point(vgs, vds, vbs);
             return (gm, gds, gmb);
         }
 
@@ -497,7 +512,7 @@ impl Mosfet {
         }
 
         if self.level == 1 {
-            let (_, _, gm, gds, gmb) = self.level1_operating_point(vgs, vds, vbs);
+            let (_, _, gm, gds, gmb, _) = self.level1_operating_point(vgs, vds, vbs);
             return (gm, gds, gmb);
         }
 

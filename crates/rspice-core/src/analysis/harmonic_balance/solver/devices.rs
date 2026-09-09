@@ -955,8 +955,14 @@ impl NonlinearDeviceInstance {
         let (eff_d, eff_s, _, gm, gds, gmbs) = self.mos_operating_point(p, node_voltages);
         let g = self.terminals[1];
         let b = self.terminals[3];
-        let (gm, gds, gmbs, _) =
-            crate::device::Mosfet::channel_stamp_terms([eff_d, g, eff_s, b], gm, gds, gmbs, 0.0);
+        let (gm, gds, gmbs, gss, _) = crate::device::Mosfet::channel_stamp_terms(
+            [eff_d, g, eff_s, b],
+            gm,
+            gds,
+            gmbs,
+            gm + gds + gmbs,
+            0.0,
+        );
 
         // The polarity factors cancel (p^2 = 1): the node-space stamps are the
         // textbook MOS pattern in the effective frame for NMOS and PMOS alike.
@@ -967,11 +973,11 @@ impl NonlinearDeviceInstance {
             ((eff_d, eff_d), gds),
             ((eff_d, g), gm),
             ((eff_d, b), gmbs),
-            ((eff_d, eff_s), -(gm + gds + gmbs)),
+            ((eff_d, eff_s), -gss),
             ((eff_s, eff_d), -gds),
             ((eff_s, g), -gm),
             ((eff_s, b), -gmbs),
-            ((eff_s, eff_s), gm + gds + gmbs),
+            ((eff_s, eff_s), gss),
         ];
 
         // Bulk diode conductances on the physical terminals.

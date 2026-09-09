@@ -27,6 +27,16 @@ FC = 1.0 / (2 * math.pi * 1e3 * 1e-6)  # RC corner: 159.155 Hz
 
 
 class TestAcBasics:
+    @pytest.mark.parametrize("kind,polarity", [("NMOS", 1), ("PMOS", -1)])
+    def test_reverse_mos_preserves_small_output_conductance(self, engine, kind, polarity):
+        netlist = rspice.Netlist.parse_spice(
+            f"* reverse MOS output slope\nV1 out 0 DC {2 * polarity} AC 1\n"
+            "M1 0 0 out 0 mm W=1 L=1\n"
+            f".model mm {kind}(LEVEL=1 KP=1e20 VTO={-polarity} LAMBDA=1e-20 IS=0)\n.end\n"
+        )
+        current = engine.run_ac(netlist, [1e6]).branch_current_complex("V1")[0]
+        assert abs(current + 0.5) < 1e-10
+
     @pytest.mark.parametrize(
         "device",
         [

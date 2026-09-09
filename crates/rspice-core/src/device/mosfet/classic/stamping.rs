@@ -20,6 +20,7 @@ struct ClassicMosDirectOperatingPoint {
     gm: Value,
     gds: Value,
     gmb: Value,
+    gss: Value,
     id_eq: Value,
 }
 
@@ -30,38 +31,55 @@ impl Mosfet {
     #[inline]
     pub(crate) fn channel_stamp_terms(
         [drain, gate, source, bulk]: [NodeId; 4],
-        mut gm: Value,
-        mut gds: Value,
-        mut gmb: Value,
+        gm: Value,
+        gds: Value,
+        gmb: Value,
+        gss: Value,
         id_eq: Value,
-    ) -> (Value, Value, Value, Value) {
+    ) -> (Value, Value, Value, Value, Value) {
         if drain == source {
-            return (0.0, 0.0, 0.0, 0.0);
+            return (0.0, 0.0, 0.0, 0.0, 0.0);
         }
         if gate == drain && bulk == drain {
-            let mut correction = 0.0;
-            crate::numerics::compensated_add(&mut gds, &mut correction, gm);
-            crate::numerics::compensated_add(&mut gds, &mut correction, gmb);
-            return (0.0, gds + correction, 0.0, id_eq);
+            return (0.0, gss, 0.0, gss, id_eq);
+        }
+        if gate == source && bulk == source {
+            return (0.0, gds, 0.0, gds, id_eq);
+        }
+        // Each merged column has two algebraically equivalent forms. Use
+        // the smaller operands: the other form may subtract a large control
+        // slope from a diagonal that has already rounded away the remainder.
+        let merged = |a: Value, b: Value, c: Value, d: Value| {
+            if a.abs().max(b.abs()) <= c.abs().max(d.abs()) {
+                a + b
+            } else {
+                c + d
+            }
+        };
+        if gate == drain {
+            let dg = merged(gds, gm, gss, -gmb);
+            if bulk == source {
+                return (0.0, dg, 0.0, dg, id_eq);
+            }
+            return (0.0, dg, gmb, gss, id_eq);
         }
         if gate == source {
-            gm = 0.0;
-        }
-        if bulk == source {
-            gmb = 0.0;
-        }
-        if gate == drain {
-            gds += gm;
-            gm = 0.0;
+            let db = merged(gds, gmb, gss, -gm);
+            if bulk == drain {
+                return (0.0, db, 0.0, db, id_eq);
+            }
+            return (0.0, gds, gmb, db, id_eq);
         }
         if bulk == drain {
-            gds += gmb;
-            gmb = 0.0;
-        } else if bulk == gate {
-            gm += gmb;
-            gmb = 0.0;
+            return (gm, merged(gds, gmb, gss, -gm), 0.0, gss, id_eq);
         }
-        (gm, gds, gmb, id_eq)
+        if bulk == source {
+            return (gm, gds, 0.0, merged(gds, gm, gss, -gmb), id_eq);
+        }
+        if bulk == gate {
+            return (gm + gmb, gds, 0.0, gss, id_eq);
+        }
+        (gm, gds, gmb, gss, id_eq)
     }
 
     #[inline]
@@ -138,6 +156,7 @@ impl Mosfet {
             gm: self.gm,
             gds: self.gds,
             gmb: self.gmb,
+            gss: self.gss,
             id_eq: self.id_eq,
             gbs,
             ieq_bs,
@@ -210,7 +229,7 @@ impl Mosfet {
         terms: &ClassicMosCachedStaticTerms,
     ) {
         let mut terms = *terms;
-        (terms.gm, terms.gds, terms.gmb, terms.id_eq) = Self::channel_stamp_terms(
+        (terms.gm, terms.gds, terms.gmb, terms.gss, terms.id_eq) = Self::channel_stamp_terms(
             [
                 plan.node_drain,
                 plan.node_gate,
@@ -220,9 +239,10 @@ impl Mosfet {
             terms.gm,
             terms.gds,
             terms.gmb,
+            terms.gss,
             terms.id_eq,
         );
-        let source_diagonal = terms.gm + terms.gds + terms.gmb;
+        let source_diagonal = terms.gss;
         if let Some(index) = plan.indices.dd.checked_index(plan.pattern) {
             matrix.stamp_direct(index, terms.gds);
         }
@@ -327,7 +347,7 @@ impl Mosfet {
         terms: &ClassicMosCachedStaticTerms,
     ) {
         let mut terms = *terms;
-        (terms.gm, terms.gds, terms.gmb, terms.id_eq) = Self::channel_stamp_terms(
+        (terms.gm, terms.gds, terms.gmb, terms.gss, terms.id_eq) = Self::channel_stamp_terms(
             [
                 plan.node_drain,
                 plan.node_gate,
@@ -337,9 +357,10 @@ impl Mosfet {
             terms.gm,
             terms.gds,
             terms.gmb,
+            terms.gss,
             terms.id_eq,
         );
-        let source_diagonal = terms.gm + terms.gds + terms.gmb;
+        let source_diagonal = terms.gss;
         if let Some(offset) = plan.indices.dd.offset() {
             values[offset] += terms.gds;
         }
@@ -444,9 +465,10 @@ impl Mosfet {
             gm,
             gds,
             gmb,
+            gss,
             id_eq,
         } = operating_point;
-        let (gm, gds, gmb, id_eq) = Self::channel_stamp_terms(
+        let (gm, gds, gmb, gss, id_eq) = Self::channel_stamp_terms(
             [
                 self.node_drain,
                 self.node_gate,
@@ -456,6 +478,7 @@ impl Mosfet {
             gm,
             gds,
             gmb,
+            gss,
             id_eq,
         );
         // Stamp matrix using direct indexing
@@ -467,7 +490,7 @@ impl Mosfet {
             matrix.stamp_direct(idx, gm);
         }
         if let Some(idx) = self.indices.ds {
-            matrix.stamp_direct(idx, -gm - gds - gmb);
+            matrix.stamp_direct(idx, -gss);
         }
         if let Some(idx) = self.indices.db {
             matrix.stamp_direct(idx, gmb);
@@ -480,7 +503,7 @@ impl Mosfet {
             matrix.stamp_direct(idx, -gm);
         }
         if let Some(idx) = self.indices.ss {
-            matrix.stamp_direct(idx, gm + gds + gmb);
+            matrix.stamp_direct(idx, gss);
         }
         if let Some(idx) = self.indices.sb {
             matrix.stamp_direct(idx, -gmb);
@@ -513,12 +536,12 @@ impl Mosfet {
         let (vgs, vds, vbs) = self.branch_voltages(voltages);
         let (eval_vgs, eval_vds, eval_vbs) = self.limited_branch_voltages_for_eval(vgs, vds, vbs);
         let cache_matches = self.cached_linearization_matches_eval(eval_vgs, eval_vds, eval_vbs);
-        let (gm, gds, gmb, id_eq) = if cache_matches {
-            (self.gm, self.gds, self.gmb, self.id_eq)
+        let (gm, gds, gmb, gss, id_eq) = if cache_matches {
+            (self.gm, self.gds, self.gmb, self.gss, self.id_eq)
         } else {
-            let (_, _, gm, gds, gmb, id_eq) =
+            let (_, _, gm, gds, gmb, gss, id_eq) =
                 self.linearized_operating_point(eval_vgs, eval_vds, eval_vbs);
-            (gm, gds, gmb, id_eq)
+            (gm, gds, gmb, gss, id_eq)
         };
 
         self.stamp_direct_operating_point(
@@ -530,6 +553,7 @@ impl Mosfet {
                 gm,
                 gds,
                 gmb,
+                gss,
                 id_eq,
             },
             cache_matches,
@@ -552,6 +576,7 @@ impl Mosfet {
                 gm: self.gm,
                 gds: self.gds,
                 gmb: self.gmb,
+                gss: self.gss,
                 id_eq: self.id_eq,
             },
             true,
@@ -571,7 +596,7 @@ impl Mosfet {
         debug_assert!(self.has_branch_history);
         debug_assert_eq!(self.node_bulk, 0);
 
-        let (gm, gds, gmb, id_eq) = Self::channel_stamp_terms(
+        let (gm, gds, gmb, gss, id_eq) = Self::channel_stamp_terms(
             [
                 self.node_drain,
                 self.node_gate,
@@ -581,6 +606,7 @@ impl Mosfet {
             self.gm,
             self.gds,
             self.gmb,
+            self.gss,
             self.id_eq,
         );
 
@@ -591,7 +617,7 @@ impl Mosfet {
             values[index.offset()] += gm;
         }
         if let Some(index) = self.indices.ds {
-            values[index.offset()] += -gm - gds - gmb;
+            values[index.offset()] += -gss;
         }
         if let Some(index) = self.indices.db {
             values[index.offset()] += gmb;
@@ -603,7 +629,7 @@ impl Mosfet {
             values[index.offset()] += -gm;
         }
         if let Some(index) = self.indices.ss {
-            values[index.offset()] += gm + gds + gmb;
+            values[index.offset()] += gss;
         }
         if let Some(index) = self.indices.sb {
             values[index.offset()] += -gmb;
@@ -659,14 +685,14 @@ impl Mosfet {
     ) {
         let (vgs, vds, vbs) = self.branch_voltages(solution);
         let cache_matches = self.cached_linearization_matches_eval(vgs, vds, vbs);
-        let (gm, gds, gmb, id_eq) = if cache_matches {
-            (self.gm, self.gds, self.gmb, self.id_eq)
+        let (gm, gds, gmb, gss, id_eq) = if cache_matches {
+            (self.gm, self.gds, self.gmb, self.gss, self.id_eq)
         } else {
-            let (_, _, gm, gds, gmb, id_eq) =
+            let (_, _, gm, gds, gmb, gss, id_eq) =
                 self.linearized_transient_operating_point(vgs, vds, vbs, constants);
-            (gm, gds, gmb, id_eq)
+            (gm, gds, gmb, gss, id_eq)
         };
-        let (gm, gds, gmb, id_eq) = Self::channel_stamp_terms(
+        let (gm, gds, gmb, gss, id_eq) = Self::channel_stamp_terms(
             [
                 self.node_drain,
                 self.node_gate,
@@ -676,13 +702,14 @@ impl Mosfet {
             gm,
             gds,
             gmb,
+            gss,
             id_eq,
         );
         let vd = Self::terminal_voltage(solution, self.node_drain);
         let vg = Self::terminal_voltage(solution, self.node_gate);
         let vs = Self::terminal_voltage(solution, self.node_source);
         let vb = Self::terminal_voltage(solution, self.node_bulk);
-        let source_diagonal = gm + gds + gmb;
+        let source_diagonal = gss;
 
         if self.node_drain > 0 {
             let row = self.node_drain - 1;
@@ -755,7 +782,7 @@ impl Mosfet {
         row_rhs: &mut [Value],
     ) {
         let mut terms = *terms;
-        (terms.gm, terms.gds, terms.gmb, terms.id_eq) = Self::channel_stamp_terms(
+        (terms.gm, terms.gds, terms.gmb, terms.gss, terms.id_eq) = Self::channel_stamp_terms(
             [
                 plan.node_drain,
                 plan.node_gate,
@@ -765,13 +792,14 @@ impl Mosfet {
             terms.gm,
             terms.gds,
             terms.gmb,
+            terms.gss,
             terms.id_eq,
         );
         let vd = Self::terminal_voltage(solution, plan.node_drain);
         let vg = Self::terminal_voltage(solution, plan.node_gate);
         let vs = Self::terminal_voltage(solution, plan.node_source);
         let vb = Self::terminal_voltage(solution, plan.node_bulk);
-        let source_diagonal = terms.gm + terms.gds + terms.gmb;
+        let source_diagonal = terms.gss;
 
         if plan.node_drain > 0 {
             let row = plan.node_drain - 1;
@@ -843,7 +871,7 @@ impl Mosfet {
         row_rhs: &mut Value,
     ) {
         let mut terms = *terms;
-        (terms.gm, terms.gds, terms.gmb, terms.id_eq) = Self::channel_stamp_terms(
+        (terms.gm, terms.gds, terms.gmb, terms.gss, terms.id_eq) = Self::channel_stamp_terms(
             [
                 plan.node_drain,
                 plan.node_gate,
@@ -853,13 +881,14 @@ impl Mosfet {
             terms.gm,
             terms.gds,
             terms.gmb,
+            terms.gss,
             terms.id_eq,
         );
         let vd = Self::terminal_voltage(solution, plan.node_drain);
         let vg = Self::terminal_voltage(solution, plan.node_gate);
         let vs = Self::terminal_voltage(solution, plan.node_source);
         let vb = Self::terminal_voltage(solution, plan.node_bulk);
-        let source_diagonal = terms.gm + terms.gds + terms.gmb;
+        let source_diagonal = terms.gss;
 
         if plan.node_drain > 0 && row == plan.node_drain - 1 {
             *row_ax += terms.gds * vd;
@@ -1001,11 +1030,11 @@ impl Mosfet {
     ) {
         let (vgs, vds, vbs) = self.branch_voltages(voltages);
         let cache_matches = self.cached_linearization_matches_eval(vgs, vds, vbs);
-        let (gm, gds, gmb, id_eq) = if cache_matches {
-            (self.gm, self.gds, self.gmb, self.id_eq)
+        let (gm, gds, gmb, gss, id_eq) = if cache_matches {
+            (self.gm, self.gds, self.gmb, self.gss, self.id_eq)
         } else {
-            let (_, _, gm, gds, gmb, id_eq) = self.linearized_operating_point(vgs, vds, vbs);
-            (gm, gds, gmb, id_eq)
+            let (_, _, gm, gds, gmb, gss, id_eq) = self.linearized_operating_point(vgs, vds, vbs);
+            (gm, gds, gmb, gss, id_eq)
         };
         self.stamp_direct_operating_point(
             matrix,
@@ -1016,6 +1045,7 @@ impl Mosfet {
                 gm,
                 gds,
                 gmb,
+                gss,
                 id_eq,
             },
             cache_matches,
@@ -1064,6 +1094,12 @@ mod tests {
             mos.link(&seed);
             mos.update(&[0.0; 3]);
             [mos.gm, mos.gds, mos.gmb, mos.id_eq] = raw;
+            let mut sum = 0.0;
+            let mut correction = 0.0;
+            for value in &raw[..3] {
+                crate::numerics::compensated_add(&mut sum, &mut correction, *value);
+            }
+            mos.gss = sum + correction;
             // A tied body diode also has zero incidence; its terms must
             // not disturb the independent body branch or another device.
             mos.gbs = if b == s { 1e20 } else { 3.0 };
@@ -1073,12 +1109,13 @@ mod tests {
             let terms = mos.classic_cached_static_terms();
             let plan = mos.classic_static_stamp_plan(&seed).unwrap();
             let [gm, gds, gmb, id_eq] = projected;
+            let gss = gm + gds + gmb;
             let mut expected = seed.clone_structure();
             expected.values_mut().fill(1.0);
             let mut expected_rhs = [1.0; 3];
             for (row, sign) in [(d, 1.0), (s, -1.0)] {
                 if row != 0 {
-                    for (col, value) in [(d, gds), (g, gm), (s, -gm - gds - gmb), (b, gmb)] {
+                    for (col, value) in [(d, gds), (g, gm), (s, -gss), (b, gmb)] {
                         if col != 0 {
                             expected.add(row - 1, col - 1, sign * value);
                         }
