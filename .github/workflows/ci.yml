@@ -498,6 +498,10 @@ jobs:
         env:
           WASM_BINDGEN_USE_DEDICATED_WORKER: '1'
         run: cargo test --locked -p rspice-ui --target wasm32-unknown-unknown --test browser_clock
+      - name: Test UI worker structured-clone transport in Node
+        run: |
+          node --version
+          cargo test --locked -p rspice-ui --target wasm32-unknown-unknown --features browser-worker --test browser_worker_transport
 
   wasm-ui-size:
     name: Browser build & qualification

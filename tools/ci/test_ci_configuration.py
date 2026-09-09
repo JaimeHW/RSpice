@@ -475,6 +475,7 @@ class CiConfigurationTests(unittest.TestCase):
         self.assertIn("WASM_BINDGEN_USE_DEDICATED_WORKER: '1'", job)
         self.assertIn("cargo test --locked -p rspice-wasm -p rspice-cloud-client --lib --target wasm32-unknown-unknown", job)
         self.assertEqual(job.count("--test browser_clock"), 2)
+        self.assertIn("cargo test --locked -p rspice-ui --target wasm32-unknown-unknown --features browser-worker --test browser_worker_transport", job)
 
     def test_browser_size_reports_measure_the_delivered_bindgen_modules(self) -> None:
         workflow = read_text(".github/workflows/ci.yml")
