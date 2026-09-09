@@ -3210,6 +3210,37 @@ mod tests {
     }
 
     #[test]
+    fn xyce_pulse_exact_rise_endpoint_is_bounded_with_zero_tolerance() {
+        for rise in [1e-15_f64, 1e-9, 0.25] {
+            let spec = SourceSpec::Pulse {
+                v1: 0.0,
+                v2: -2.0,
+                delay: 0.0,
+                rise,
+                fall: rise,
+                width: 10.0,
+                period: 20.0,
+                pulse_count: 0.0,
+                width_defaults_to_zero: false,
+            };
+            let mut context = xyce_transient_context(rise, 20.0);
+            context.as_mut().unwrap().xyce_breakpoint_tolerance = Some(0.0);
+            for time in [
+                f64::from_bits(rise.to_bits() - 1),
+                rise,
+                f64::from_bits(rise.to_bits() + 1),
+            ] {
+                let actual =
+                    VoltageSources::evaluate_source_at_time_with_context(&spec, time, context);
+                assert!(
+                    (actual + 2.0).abs() < 1e-14,
+                    "rise={rise}, time={time}, value={actual}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn xyce_pulse_boundaries_use_accepted_state_breakpoint_tolerance() {
         let spec = SourceSpec::Pulse {
             v1: 0.0,

@@ -6140,35 +6140,8 @@ impl Engine {
             }
             circuit.enforce_ideal_voltage_constraints(&mut new_solution, step_time)?;
             for (i, value) in new_solution.iter_mut().enumerate() {
-                let protected_ideal_output = i < num_nodes
-                    && force_accept_protected_nodes
-                        .get(i)
-                        .copied()
-                        .unwrap_or(false);
-                let magnitude_limit = if protected_ideal_output {
-                    Value::INFINITY
-                } else if i < num_nodes {
-                    MAX_VOLTAGE
-                } else if circuit.has_xyce_core_inductors() {
-                    MAX_XYCE_CORE_BRANCH_STATE_MAGNITUDE
-                } else {
-                    MAX_BRANCH_STATE_MAGNITUDE
-                };
                 if !value.is_finite() {
                     *value = solution[i];
-                } else if value.abs() > magnitude_limit {
-                    let old = solution[i];
-                    let delta = *value - old;
-                    let limit = if i < num_nodes {
-                        newton_step_delta_limit
-                    } else {
-                        magnitude_limit * 0.1
-                    };
-                    *value = if delta.is_finite() {
-                        old + delta.signum() * limit
-                    } else {
-                        old
-                    };
                 }
             }
             if conservative_limiting_active {
@@ -6733,7 +6706,7 @@ impl Engine {
                     Ok(()) => {
                         let sol = &mut linear_solution;
                         had_solver_candidate = true;
-                        // Sanity check: detect and handle NaN/Inf/excessive values.
+                        // Finite candidates are qualified by device and residual checks.
                         // IMPORTANT: Preserve the newest valid candidate when possible.
                         // If we keep the previous timestep guess here, force-accept can
                         // propagate a stale state and flatten non-source traces.
@@ -6742,24 +6715,6 @@ impl Engine {
                         let mut logged_divergence = false;
 
                         for (i, v) in sol.iter_mut().enumerate() {
-                            let protected_ideal_output = i < num_nodes
-                                && force_accept_protected_nodes
-                                    .get(i)
-                                    .copied()
-                                    .unwrap_or(false);
-                            // A finite direct solution of a linear circuit is
-                            // qualified by its residual, not an arbitrary rail.
-                            // Large branch currents can be exact scaled states.
-                            let magnitude_limit =
-                                if is_strictly_linear_transient || protected_ideal_output {
-                                    Value::INFINITY
-                                } else if i < num_nodes {
-                                    MAX_VOLTAGE
-                                } else if circuit.has_xyce_core_inductors() {
-                                    MAX_XYCE_CORE_BRANCH_STATE_MAGNITUDE
-                                } else {
-                                    MAX_BRANCH_STATE_MAGNITUDE
-                                };
                             if !v.is_finite() {
                                 had_nonfinite_solution = true;
                                 if !logged_divergence {
@@ -6773,33 +6728,6 @@ impl Engine {
                                 }
                                 // Non-finite values cannot be used; fall back to prior guess.
                                 *v = new_solution[i];
-                                has_bad_values = true;
-                            } else if v.abs() > magnitude_limit {
-                                if !logged_divergence {
-                                    log::debug!(
-                                        "Transient: Newton divergence at t={:.3e}s, state {}: {:.3e} - reducing timestep",
-                                        step_time,
-                                        i,
-                                        *v
-                                    );
-                                    logged_divergence = true;
-                                }
-                                // Soft-limit finite overflow around the previous Newton
-                                // guess instead of hard-clamping to a global rail. Hard
-                                // clamps can be force-accepted and then contaminate
-                                // dynamic history with nonphysical state.
-                                let old = new_solution[i];
-                                let delta = *v - old;
-                                if delta.is_finite() {
-                                    let limit = if i < num_nodes {
-                                        iteration_delta_limit
-                                    } else {
-                                        magnitude_limit * 0.1
-                                    };
-                                    *v = old + delta.signum() * limit;
-                                } else {
-                                    *v = old;
-                                }
                                 has_bad_values = true;
                             }
                         }

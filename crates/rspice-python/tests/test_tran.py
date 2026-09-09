@@ -23,6 +23,19 @@ R2 out 0 1k
 
 
 class TestTransient:
+    @pytest.mark.parametrize("bias,resistance", [(5000.0, 1000.0), (-5000.0, 1000.0), (5.0, 1e-14)])
+    def test_nonlinear_voltage_and_branch_states_have_no_global_rail(self, engine, bias, resistance):
+        diode_nodes = "0 out" if bias > 0 else "out 0"
+        netlist = rspice.Netlist.parse_spice(
+            f"* reverse diode divider\nV1 in 0 PWL(0 {bias} 1n {2*bias} 2n {2*bias})\n"
+            f"R1 in out {resistance}\nR2 out 0 {resistance}\nD1 {diode_nodes} dm\n.model dm D(IS=1e-14)\n.end\n"
+        )
+        assert abs(engine.run_dc_op(netlist).voltage("out") / bias - 0.5) < 1e-8
+        result = engine.run_tran(netlist, stop_time=2e-9, max_step=1e-9)
+        assert result.time[-1] == 2e-9
+        expected = 0.5 * (1 + np.minimum(result.time / 1e-9, 1))
+        np.testing.assert_allclose(result.voltage_waveform("out") / bias, expected, rtol=0, atol=1e-8)
+
     @pytest.mark.parametrize("mean", [64.0, 1e6, 1e20, 1e100])
     def test_large_poisson_current_sources_converge_without_integer_saturation(self, engine, mean):
         netlist = rspice.Netlist.parse_spice(

@@ -1190,8 +1190,8 @@ pub(crate) fn simulation_checkpoint_identity(config: &SimulationConfig) -> Strin
     // v35 preserves physical VBIC currents in operating-point correction solves.
     // v36 gives RBI an independent current and voltage constitutive equation.
     // v37 preserves explicitly zero and negative VBIC activation energies.
-    // v43 uses Poisson rejection sampling and accepts residual-qualified attenuation.
-    hasher.update(b"rspice-transient-resolved-config-v43\0");
+    // v44 qualifies finite nonlinear states without global magnitude or uniformity exclusions.
+    hasher.update(b"rspice-transient-resolved-config-v44\0");
     hash_field(&mut hasher, "temperature", config.temperature.to_bits());
     hash_field(&mut hasher, "ramptime", config.ramptime.to_bits());
     hash_field(&mut hasher, "digital_delay_type", config.digital_delay_type);

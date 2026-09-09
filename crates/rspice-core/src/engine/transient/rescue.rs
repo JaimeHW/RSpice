@@ -28,6 +28,8 @@ use super::*;
 const RESCUE_LINE_SEARCH_TRIALS: usize = 6;
 /// Armijo sufficient-decrease coefficient, matching the DC line search.
 const RESCUE_LINE_SEARCH_ARMIJO_C1: Value = 1e-4;
+/// Bound additional continuation levels when a coarse shunt change fails.
+const RESCUE_GMIN_MAX_REFINEMENTS: usize = 32;
 
 impl Engine {
     /// Solve one transient step by gmin continuation after plain Newton has
@@ -94,7 +96,13 @@ impl Engine {
         levels.push(0.0);
 
         let mut iterate = seed.to_vec();
-        for &extra_gmin in &levels {
+        let mut level_index = 0;
+        let mut refinements = 0;
+        while level_index < levels.len() {
+            let extra_gmin = levels[level_index];
+            let level_seed = iterate.clone();
+            let level_state = circuit.nonlinear_state_snapshot();
+            let level_vbic_cache = vbic_snapshot_cache.to_vec();
             // ngspice gmin stepping moves `CKTgmin` itself, so the junction
             // parallels inside the compact models ramp with the level — that
             // is what flattens an exponential's knife edge; the diagonal
@@ -125,31 +133,16 @@ impl Engine {
                 let line_search_vbic_cache = vbic_snapshot_cache.to_vec();
 
                 let Ok(mut sol) = matrix.solve(rhs) else {
-                    return Ok(None);
+                    break;
                 };
 
-                // Continuation discipline mirrors DC gmin stepping: hard
-                // physical bounds instead of a per-iteration trust region
-                // (the deformed solutions legitimately sit volts away from
-                // the seed, so motion clamps starve the walk), plus the
-                // device-level pnjlim junction limiting.
-                let mut needs_constraint_projection = false;
-                for (i, value) in sol.iter_mut().enumerate() {
-                    let magnitude_limit = if i < num_nodes {
-                        MAX_VOLTAGE
-                    } else if circuit.has_xyce_core_inductors() {
-                        MAX_XYCE_CORE_BRANCH_STATE_MAGNITUDE
-                    } else {
-                        MAX_BRANCH_STATE_MAGNITUDE
-                    };
-                    if !value.is_finite() {
-                        *value = iterate[i];
-                        needs_constraint_projection = true;
-                    } else if value.abs() > magnitude_limit {
-                        *value = value.signum() * magnitude_limit;
-                        needs_constraint_projection = true;
-                    }
+                // Preserve finite Newton states at every scale. Device-local
+                // limiting and the deformed-system merit below govern the
+                // continuation; non-finite proposals cannot enter that search.
+                if sol.iter().any(|value| !value.is_finite()) {
+                    break;
                 }
+                let mut needs_constraint_projection = false;
 
                 if !circuit.bjts.devices.is_empty()
                     && Self::limit_bjt_junction_external_updates(
@@ -279,8 +272,30 @@ impl Engine {
             }
 
             if !level_converged {
-                return Ok(None);
+                // A decade-sized shunt change can cross a turning point of
+                // the deformed equations. Retry from the last converged level
+                // with a smaller change, as in DC continuation. This controls
+                // the path without imposing any absolute voltage ceiling.
+                if level_index == 0 || refinements >= RESCUE_GMIN_MAX_REFINEMENTS {
+                    return Ok(None);
+                }
+                let previous_gmin = levels[level_index - 1];
+                let intermediate = if extra_gmin > 0.0 {
+                    (0.5 * previous_gmin.ln() + 0.5 * extra_gmin.ln()).exp()
+                } else {
+                    0.5 * previous_gmin
+                };
+                if intermediate <= extra_gmin || intermediate >= previous_gmin {
+                    return Ok(None);
+                }
+                circuit.restore_nonlinear_state(level_state);
+                vbic_snapshot_cache.clone_from_slice(&level_vbic_cache);
+                iterate = level_seed;
+                levels.insert(level_index, intermediate);
+                refinements += 1;
+                continue;
             }
+            level_index += 1;
         }
 
         // The final level converged with a zero extra shunt, but its

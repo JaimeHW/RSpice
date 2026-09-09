@@ -209,6 +209,65 @@ mod wasm_tests {
     use crate::js_interop::{js_array_property, js_property};
 
     #[wasm_bindgen_test]
+    fn nonlinear_voltage_and_branch_states_have_no_global_rail_in_wasm() {
+        let engine = rspice_core::Engine::default();
+        for (bias, resistance) in [(5000.0_f64, 1000.0), (-5000.0, 1000.0), (5.0, 1e-14)] {
+            let diode_nodes = if bias > 0.0 { "0 out" } else { "out 0" };
+            let netlist = rspice_core::Netlist::parse(&format!(
+                "reverse diode divider\nV1 in 0 PWL(0 {bias} 1n {end} 2n {end})\nR1 in out {resistance}\nR2 out 0 {resistance}\nD1 {diode_nodes} dm\n.model dm D(IS=1e-14)\n.end\n",
+                end = 2.0 * bias,
+            )).unwrap();
+            let result = engine
+                .run_tran_with_abort(&netlist, 2e-9, 1e-9, &rspice_core::abort_signal::NoAbort)
+                .unwrap();
+            assert_eq!(result.time.last().copied(), Some(2e-9));
+            for (time, actual) in result
+                .time
+                .iter()
+                .zip(result.try_voltage_waveform_named("out").unwrap())
+            {
+                let expected = 0.5 * (1.0 + (*time / 1e-9).min(1.0));
+                assert!(
+                    (actual / bias - expected).abs() < 1e-8,
+                    "at {time}: {actual}"
+                );
+            }
+        }
+    }
+
+    #[wasm_bindgen_test]
+    fn exact_pulse_corner_and_gmin_recovery_retain_the_physical_root_in_wasm() {
+        let netlist = rspice_core::Netlist::parse(
+            "cubic continuation\n.options gmin=0\nI1 0 n PULSE(0 -2 0 1f 1f 10n 20n)\nB1 n 0 I={V(n)*V(n)*V(n)-2*V(n)}\n.tran 0 1f uic\n.end\n"
+        ).unwrap();
+        let engine = rspice_core::Engine::new(rspice_core::engine::SimulationConfig {
+            spice_dialect: rspice_core::engine::SpiceDialect::Xyce,
+            transient_nonlinear_max_iterations: Some(8),
+            convergence_config: rspice_core::ConvergenceConfig {
+                gmin_initial: 10.0,
+                gmin_target: 1e-15,
+                junction_gmin_target: 0.0,
+                ..Default::default()
+            },
+            locked_time_grid: Some(std::sync::Arc::new(vec![0.0, 1e-15])),
+            ..Default::default()
+        });
+        let result = engine
+            .run_tran_with_abort(&netlist, 1e-15, 1e-15, &rspice_core::abort_signal::NoAbort)
+            .unwrap();
+        let voltage = *result
+            .try_voltage_waveform_named("n")
+            .unwrap()
+            .last()
+            .unwrap();
+        assert!(
+            (voltage + 1.769_292_354_238_631_4).abs() < 1e-6,
+            "cubic root: {voltage}"
+        );
+        assert_eq!(engine.convergence_quality().force_accepted_points, 0);
+    }
+
+    #[wasm_bindgen_test]
     fn poisson_sources_and_canceling_currents_converge_in_wasm() {
         let engine = rspice_core::Engine::default();
         for mean in [64.0_f64, 1e6, 1e20, 1e100] {

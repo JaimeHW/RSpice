@@ -275,7 +275,6 @@ impl Engine {
         const SOURCE_SCALE_EPS: Value = 1.0e-12;
 
         let size = circuit.matrix_size();
-        let node_count = circuit.num_nodes().min(size);
         let entry_state = circuit.nonlinear_state_snapshot();
 
         if circuit.has_b3soi_devices() {
@@ -283,7 +282,7 @@ impl Engine {
         }
         let zero_guess = vec![0.0; size];
         let mut solution = if circuit.has_b3soi_devices() {
-            Self::sanitize_initial_guess(circuit, initial_guess, size, node_count)
+            Self::sanitize_initial_guess(initial_guess, size)
         } else {
             self.prefer_lower_merit_scaled_seed(circuit, matrix, initial_guess, &zero_guess, 0.0)
         };
@@ -411,14 +410,8 @@ impl Engine {
         abort: &dyn AbortSignal,
     ) -> Result<Vec<Value>, SimulationError> {
         let size = circuit.matrix_size();
-        let mut solution = Self::normalize_initial_guess(initial_guess, size);
-        let node_count = circuit.num_nodes().min(size);
-        if Self::is_suspicious_solution(circuit, &solution, node_count) {
-            solution.fill(0.0);
-        }
+        let mut solution = Self::sanitize_initial_guess(initial_guess, size);
         let mut anchor_solution = solution.clone();
-        Self::clamp_solution_to_physical_bounds(circuit, &mut solution, node_count);
-        Self::clamp_solution_to_physical_bounds(circuit, &mut anchor_solution, node_count);
 
         let mut pseudo = PseudoTransient::new();
         let mut damping_state = NewtonDampingState::default();
@@ -505,7 +498,7 @@ impl Engine {
                     },
                 );
                 circuit.enforce_dc_ideal_voltage_constraints(&mut new_solution)?;
-                Self::clamp_solution_to_physical_bounds(circuit, &mut new_solution, node_count);
+                Self::reset_nonfinite_values(&mut new_solution);
 
                 let converged = self.node_voltage_convergence_met(
                     &solution,
@@ -556,12 +549,7 @@ impl Engine {
         abort: &dyn AbortSignal,
     ) -> Result<Vec<Value>, SimulationError> {
         let size = circuit.matrix_size();
-        let mut current_solution = Self::normalize_initial_guess(initial_guess, size);
-        let node_count = circuit.num_nodes().min(size);
-        if Self::is_suspicious_solution(circuit, &current_solution, node_count) {
-            current_solution.fill(0.0);
-        }
-        Self::clamp_solution_to_physical_bounds(circuit, &mut current_solution, node_count);
+        let mut current_solution = Self::sanitize_initial_guess(initial_guess, size);
         let arc_newton_iters = self.continuation_iteration_budget(8, 16);
 
         let mut arc_cfg = ArcLengthConfig {
@@ -659,8 +647,7 @@ impl Engine {
         const MAX_ATTEMPTS: usize = 512;
 
         let size = circuit.matrix_size();
-        let node_count = circuit.num_nodes().min(size);
-        let mut solution = Self::sanitize_initial_guess(circuit, initial_guess, size, node_count);
+        let mut solution = Self::sanitize_initial_guess(initial_guess, size);
         let mut damping_state = NewtonDampingState::default();
         let corrector_iterations = self.continuation_iteration_budget(8, 16);
         let mut total_iterations = 0usize;
@@ -801,42 +788,16 @@ impl Engine {
         let final_gmin = gmin_scales.last().copied().unwrap_or(0.0).max(0.0);
 
         let size = circuit.matrix_size();
-        let node_count = circuit.num_nodes().min(size);
 
-        // Check for suspicious values - not just clamped at ±999V but also
-        // suspiciously uniform values that indicate failed source stepping.
-        // Reset to zero if the guess looks like garbage.
-        let node_guess_len = node_count.min(initial_guess.len());
-        let is_garbage = Self::has_suspicious_uniformity(&initial_guess[..node_guess_len]);
-
-        let mut solution: Vec<Value> = if is_garbage {
-            log::debug!("GMIN stepping: resetting garbage initial guess to zero");
-            // Discarding a failed iterate must not also discard what the deck
-            // said about where to start. Zeroing the vector drops the compact
-            // models' startup seeds along with the garbage, and with them any
-            // device OFF state, so an escalation to GMIN stepping would erase
-            // the only thing distinguishing the two branches of a bistable
-            // operating point. Reapply the same startup seeds the direct
-            // Newton entry point installs over a sanitized vector.
-            let mut reseeded = vec![0.0; size];
-            Self::apply_bjt_initial_guess_correction(&mut reseeded, circuit, true);
-            Self::apply_b3soi_pd_initial_guess_correction(&mut reseeded, circuit);
-            Self::apply_bsim4_internal_gate_initial_guess_correction(&mut reseeded, circuit);
-            Self::apply_vbic_internal_initial_guess_correction(&mut reseeded, circuit);
-            reseeded
-        } else {
-            Self::normalize_initial_guess(initial_guess, size)
-                .iter()
-                .enumerate()
-                .map(|(idx, &v)| {
-                    if idx < node_count && v.abs() >= 999.0 {
-                        0.0
-                    } else {
-                        v
-                    }
-                })
-                .collect()
-        };
+        // A finite seed can legitimately be large or uniform. Only discard
+        // non-finite seeds, restoring device startup hints after the reset.
+        let mut solution = Self::sanitize_initial_guess(initial_guess, size);
+        if Self::has_nonfinite_values(initial_guess) {
+            Self::apply_bjt_initial_guess_correction(&mut solution, circuit, true);
+            Self::apply_b3soi_pd_initial_guess_correction(&mut solution, circuit);
+            Self::apply_bsim4_internal_gate_initial_guess_correction(&mut solution, circuit);
+            Self::apply_vbic_internal_initial_guess_correction(&mut solution, circuit);
+        }
         if circuit.has_b3soi_devices() {
             circuit.reset_b3soi_operating_point_history();
         }
@@ -945,30 +906,7 @@ impl Engine {
                 .collect::<Vec<_>>()
         );
 
-        // Final check: detect both clamped values and suspicious uniformity
-        let has_clamped = Self::has_clamped_values(circuit, &solution, node_count);
-
-        // Check for suspicious uniformity (same issue as source stepping)
-        let final_node_count = node_count.min(solution.len());
-        let has_suspicious_uniformity =
-            Self::has_suspicious_uniformity(&solution[..final_node_count]);
-
-        if has_clamped {
-            log::warn!(
-                "GMIN stepping completed but solution still contains clamped values. \
-                Circuit may need additional biasing or convergence aids."
-            );
-        } else if has_suspicious_uniformity {
-            let unique_values: std::collections::HashSet<i32> =
-                solution.iter().map(|v| (v * 100.0) as i32).collect();
-            log::warn!(
-                "GMIN stepping completed but solution has suspiciously uniform values ({} unique). \
-                DC operating point may be incorrect.",
-                unique_values.len()
-            );
-        } else {
-            log::info!("GMIN stepping converged successfully");
-        }
+        log::info!("GMIN stepping converged successfully");
 
         Ok(solution)
     }
@@ -1063,7 +1001,7 @@ impl Engine {
                 |trial| self.nonlinear_merit_with_gmin(circuit, matrix, trial, gmin),
             );
             circuit.enforce_dc_ideal_voltage_constraints(&mut new_solution)?;
-            Self::clamp_solution_to_physical_bounds(circuit, &mut new_solution, node_count);
+            Self::reset_nonfinite_values(&mut new_solution);
 
             let voltage_converged =
                 self.node_voltage_convergence_met(&solution, &new_solution, node_count);

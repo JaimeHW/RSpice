@@ -27,16 +27,13 @@ impl Engine {
 
     #[inline]
     pub(in crate::engine::convergence) fn sanitize_initial_guess(
-        circuit: &CircuitData,
         initial_guess: &[Value],
         size: usize,
-        node_count: usize,
     ) -> Vec<Value> {
         let mut guess = Self::normalize_initial_guess(initial_guess, size);
-        if Self::is_suspicious_solution(circuit, &guess, node_count) {
+        if Self::has_nonfinite_values(&guess) {
             guess.fill(0.0);
         }
-        Self::clamp_solution_to_physical_bounds(circuit, &mut guess, node_count);
         guess
     }
 
@@ -114,9 +111,8 @@ impl Engine {
         source_scale: Value,
     ) -> Vec<Value> {
         let size = circuit.matrix_size();
-        let node_count = circuit.num_nodes().min(size);
-        let incumbent = Self::sanitize_initial_guess(circuit, incumbent, size, node_count);
-        let proposal = Self::sanitize_initial_guess(circuit, proposal, size, node_count);
+        let incumbent = Self::sanitize_initial_guess(incumbent, size);
+        let proposal = Self::sanitize_initial_guess(proposal, size);
 
         if incumbent == proposal {
             return incumbent;
@@ -276,7 +272,7 @@ impl Engine {
                 circuit
                     .enforce_scaled_dc_ideal_voltage_constraints(&mut new_solution, source_scale)?;
             }
-            Self::clamp_solution_to_physical_bounds(circuit, &mut new_solution, node_count);
+            Self::reset_nonfinite_values(&mut new_solution);
 
             let voltage_converged =
                 self.node_voltage_convergence_met(&solution, &new_solution, node_count);
@@ -331,15 +327,13 @@ impl Engine {
         method_name: &str,
         abort: &dyn AbortSignal,
     ) -> Result<Option<Vec<Value>>, SimulationError> {
-        let node_count = circuit.num_nodes().min(candidate.len());
-        let suspicious = Self::is_suspicious_solution(circuit, &candidate, node_count);
-        let validated =
-            !suspicious && self.validate_nonlinear_solution(circuit, matrix, &candidate);
+        let nonfinite = Self::has_nonfinite_values(&candidate);
+        let validated = !nonfinite && self.validate_nonlinear_solution(circuit, matrix, &candidate);
         if validated {
             return Ok(Some(candidate));
         }
 
-        if !suspicious
+        if !nonfinite
             && let Some(refined) =
                 self.refine_fallback_candidate(circuit, matrix, &candidate, abort)?
         {
@@ -350,18 +344,11 @@ impl Engine {
             return Ok(Some(refined));
         }
 
-        if suspicious {
-            if Self::has_clamped_values(circuit, &candidate, node_count) {
-                log::warn!(
-                    "{} produced clamped/non-finite values; candidate rejected.",
-                    method_name
-                );
-            } else {
-                log::warn!(
-                    "{} produced suspiciously uniform values; candidate rejected.",
-                    method_name
-                );
-            }
+        if nonfinite {
+            log::warn!(
+                "{} produced non-finite values; candidate rejected.",
+                method_name
+            );
         } else {
             log::warn!(
                 "{} candidate failed convergence re-validation; candidate rejected.",
