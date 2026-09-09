@@ -262,6 +262,49 @@ mod wasm_tests {
     }
 
     #[wasm_bindgen_test]
+    fn native_mos_terminal_currents_in_wasm() {
+        use rspice_core::engine::{SimulationConfig, SpiceDialect};
+        use rspice_core::numerics::integration::IntegrationMethod;
+        let abort = rspice_core::abort_signal::NoAbort;
+        let engine = rspice_core::Engine::new(SimulationConfig {
+            spice_dialect: SpiceDialect::Ngspice,
+            integration_method: IntegrationMethod::BackwardEuler,
+            locked_time_grid: Some(std::sync::Arc::new(vec![0.0, 1e-6, 2e-6])),
+            ..Default::default()
+        });
+        for level in [1, 2, 3, 4, 5, 6, 9] {
+            for (kind, polarity) in [("NMOS", 1.0), ("PMOS", -1.0)] {
+                for series in ["", "RD=20 RS=10"] {
+                    let netlist = rspice_core::Netlist::parse(&format!(
+                        "MOS current report in WASM\nVD d 0 0\nVS s 0 0\nVG g 0 DC {} PWL(0 {} 1u {} 2u {})\nVB b 0 {}\nM1 d g s b mm L=1u W=1u\n.model mm {kind}(LEVEL={level} VTO={} IS=1u CGSO=1m CGDO=2m CGBO=3m CBS=2n CBD=3n {series})\n.options RELTOL=1e-8 ABSTOL=1e-12 VNTOL=1e-10\n.print tran ID(M1) IG(M1) IS(M1) IB(M1) I(VD) I(VG) I(VS) I(VB)\n.end\n",
+                        -polarity, -polarity, -0.5 * polarity, -polarity, 0.2 * polarity, polarity,
+                    )).unwrap();
+                    let result = engine
+                        .run_tran_with_abort(&netlist, 2e-6, 1e-6, &abort)
+                        .unwrap();
+                    for (parameter, source) in
+                        [("ID", "VD"), ("IG", "VG"), ("IS", "VS"), ("IB", "VB")]
+                    {
+                        let currents = result
+                            .try_device_op_waveform_named("M1", parameter)
+                            .unwrap();
+                        let probes = result.try_branch_current_waveform_named(source).unwrap();
+                        assert_eq!(currents.len(), result.time.len());
+                        for (index, (reported, probe)) in currents.iter().zip(probes).enumerate() {
+                            assert!(
+                                (reported + probe).abs() < 2e-10 + probe.abs() * 1e-7,
+                                "L{level} {kind} {series} {parameter} at {}: {reported} vs {}",
+                                result.time[index],
+                                -probe
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[wasm_bindgen_test]
     fn classic_jfet_charge_cycle_is_conservative_in_wasm() {
         use rspice_core::engine::{SimulationConfig, SpiceDialect};
         use rspice_core::numerics::integration::IntegrationMethod;

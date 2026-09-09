@@ -617,6 +617,7 @@ impl Engine {
     ) -> MosfetTransientHistory {
         let n = circuit.mosfets.len();
         let mut history = MosfetTransientHistory {
+            accepted_displacement_currents: vec![[0.0; 5]; n],
             vgs_prev: Vec::with_capacity(n),
             vgs_prev_prev: Vec::with_capacity(n),
             capgs_prev_half: Vec::with_capacity(n),

@@ -652,6 +652,9 @@ impl Vdmoses {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct Mosfets {
     pub devices: Vec<Mosfet>,
+    /// Sparse report-only mapping (device index, D/G/S/B pin index, resistor
+    /// index) for builder-externalized RD/RS. Keep it out of hot model state.
+    pub(crate) series_leads: Vec<(usize, usize, usize)>,
     /// True only when every device's latest collection-wide update evaluated
     /// its raw candidate without voltage limiting.
     last_update_all_is_physical: bool,

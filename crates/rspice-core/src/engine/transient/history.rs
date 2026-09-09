@@ -775,6 +775,9 @@ pub(super) struct CapacitorAcceptedState {
 
 #[derive(Debug, Clone, Default)]
 pub(super) struct MosfetTransientHistory {
+    /// Accepted G-S/G-D/G-B/B-S/B-D companion currents at the solved
+    /// voltages, kept separately from integration state reset at breakpoints.
+    pub(super) accepted_displacement_currents: Vec<[Value; 5]>,
     pub(super) vgs_prev: Vec<Value>,
     pub(super) vgs_prev_prev: Vec<Value>,
     pub(super) capgs_prev_half: Vec<Value>,

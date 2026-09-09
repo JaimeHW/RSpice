@@ -514,6 +514,7 @@ struct TransientSample<'a> {
 /// The extra series that sample is assembled from.
 #[derive(Clone, Copy)]
 struct TransientSampleSources<'a> {
+    mosfet_history: &'a MosfetTransientHistory,
     jfet_history: &'a JfetTransientHistory,
     derived_branches: &'a [DerivedTransientBranchCurrent],
     bjt_history: &'a BjtTransientHistory,
@@ -1809,6 +1810,7 @@ impl Engine {
             trajectory_point_count,
         } = request;
         let TransientSampleSources {
+            mosfet_history,
             jfet_history,
             derived_branches,
             bjt_history,
@@ -1904,6 +1906,7 @@ impl Engine {
                                 &jfet_history.accepted_cqgd,
                                 &jfet_history.accepted_cqds,
                             ]),
+                            Some(&mosfet_history.accepted_displacement_currents),
                         )
                         .map_err(SimulationError::Circuit)?,
                 ),
@@ -5050,6 +5053,7 @@ impl Engine {
                                 &jfet_history.accepted_cqgd,
                                 &jfet_history.accepted_cqds,
                             ]),
+                            None,
                         )
                         .map_err(SimulationError::Circuit)?,
                 ),
@@ -8814,6 +8818,7 @@ impl Engine {
                                 step_size: dt,
                             },
                             TransientSampleSources {
+                                mosfet_history: &mosfet_history,
                                 jfet_history: &jfet_history,
                                 derived_branches: &derived_branch_currents,
                                 bjt_history: &bjt_history,
@@ -9337,6 +9342,7 @@ impl Engine {
                         step_size: dt,
                     },
                     TransientSampleSources {
+                        mosfet_history: &mosfet_history,
                         jfet_history: &jfet_history,
                         derived_branches: &derived_branch_currents,
                         bjt_history: &bjt_history,

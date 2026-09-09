@@ -85,6 +85,226 @@ fn run(deck: &str) -> Result<(), String> {
 }
 
 #[test]
+fn native_mos_terminal_reports_include_body_junction_currents() {
+    use rspice_core::engine::SpiceDialect;
+    for dialect in [SpiceDialect::Ngspice, SpiceDialect::Xyce] {
+        for level in [1, 2, 3, 4, 5, 6, 9] {
+            if level == 9 && dialect == SpiceDialect::Xyce {
+                continue; // Xyce LEVEL=9 selects the separate BSIM3 implementation.
+            }
+            for (kind, polarity) in [("NMOS", 1.0), ("PMOS", -1.0)] {
+                for series in ["", "RD=20 RS=10"] {
+                    for (drain, gate, bulk) in
+                        [(0.0, -1.0, 0.2), (0.8, 1.5, -0.1), (-0.2, 1.5, -0.3)]
+                    {
+                        let netlist = Netlist::parse(&format!(
+                            "MOS terminal currents\nVD d 0 {}\nVG g 0 {}\nVS s 0 0\nVB b 0 {}\nM1 d g s b mm L=1u W=2u M=3\n.model mm {kind}(LEVEL={level} VTO={} IS=1u {series})\n.options RELTOL=1e-8 ABSTOL=1e-12 VNTOL=1e-10\n.end\n",
+                            polarity * drain, polarity * gate, polarity * bulk, polarity,
+                        )).unwrap();
+                        let (result, report) = Engine::new(SimulationConfig {
+                            spice_dialect: dialect,
+                            ..Default::default()
+                        })
+                        .run_dc_op_with_report(&netlist)
+                        .unwrap();
+                        let entry = report
+                            .entries
+                            .iter()
+                            .find(|entry| entry.name == "M1")
+                            .unwrap();
+                        for (parameter, source) in
+                            [("id", "VD"), ("ig", "VG"), ("is", "VS"), ("ib", "VB")]
+                        {
+                            let reported = entry
+                                .params
+                                .iter()
+                                .find(|(name, _)| *name == parameter)
+                                .unwrap_or_else(|| panic!("missing {parameter}: {entry:?}"))
+                                .1;
+                            let index = result
+                                .branch_names
+                                .iter()
+                                .position(|name| name.eq_ignore_ascii_case(source))
+                                .unwrap();
+                            let expected = -result.branch_currents[index];
+                            assert!(
+                                (reported - expected).abs() < 2e-11 + 1e-7 * expected.abs(),
+                                "{dialect:?} {kind} L{level} {series}, bias=({drain},{gate},{bulk}) {parameter}: {reported} vs {expected}"
+                            );
+                            assert_eq!(
+                                result.try_dc_observable_named(&format!("M1:{parameter}")),
+                                Some(reported)
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn native_mos_terminal_reports_include_transient_displacement() {
+    use rspice_core::engine::SpiceDialect;
+    use rspice_core::numerics::integration::IntegrationMethod;
+    for method in [
+        IntegrationMethod::BackwardEuler,
+        IntegrationMethod::Trapezoidal,
+        IntegrationMethod::Gear2,
+    ] {
+        for gate_bias in [-1.0, 1.2] {
+            for dialect in [SpiceDialect::Ngspice, SpiceDialect::Xyce] {
+                for level in [1, 2, 3, 4, 5, 6, 9] {
+                    if level == 9 && dialect == SpiceDialect::Xyce {
+                        continue;
+                    }
+                    for (kind, polarity) in [("NMOS", 1.0), ("PMOS", -1.0)] {
+                        for series in ["", "RD=20 RS=10"] {
+                            let netlist = Netlist::parse(&format!(
+                        "MOS transient terminal currents\nVD d 0 PWL(0 0 1u {} 2u 0)\nVG g 0 DC {} PWL(0 {} 1u {} 2u {})\nVS s 0 0\nVB b 0 PWL(0 0 1u {} 2u 0)\nM1 d g s b mm L=1u W=2u M=3\n.model mm {kind}(LEVEL={level} VTO={} IS=1p CGSO=1m CGDO=2m CGBO=3m CBS=2n CBD=3n {series})\n.options RELTOL=1e-8 ABSTOL=1e-12 VNTOL=1e-10\n.print tran ID(M1) IG(M1) IS(M1) IB(M1) I(VD) I(VG) I(VS) I(VB)\n.end\n",
+                        0.2 * polarity, gate_bias * polarity, gate_bias * polarity, (gate_bias + 0.5) * polarity, gate_bias * polarity, -0.1 * polarity, polarity,
+                    )).unwrap();
+                            let engine = Engine::new(SimulationConfig {
+                                spice_dialect: dialect,
+                                integration_method: method,
+                                locked_time_grid: Some(std::sync::Arc::new(vec![
+                                    0.0, 0.5e-6, 1e-6, 1.5e-6, 2e-6,
+                                ])),
+                                ..Default::default()
+                            });
+                            let result = engine.run_tran(&netlist, 2e-6, 0.5e-6).unwrap();
+                            for (parameter, source) in
+                                [("ID", "VD"), ("IG", "VG"), ("IS", "VS"), ("IB", "VB")]
+                            {
+                                let actual = result
+                                    .try_device_op_waveform_named("M1", parameter)
+                                    .unwrap_or_else(|| panic!("missing {parameter}"));
+                                let expected =
+                                    result.try_branch_current_waveform_named(source).unwrap();
+                                assert_eq!(actual.len(), result.time.len());
+                                for (index, (reported, source_current)) in
+                                    actual.iter().zip(expected).enumerate()
+                                {
+                                    assert!(
+                                        (reported + source_current).abs()
+                                            < 2e-10 + 1e-7 * source_current.abs(),
+                                        "{method:?} gate={gate_bias}, {dialect:?} {kind} L{level} {series}, {parameter} at {}: {reported} vs {}",
+                                        result.time[index],
+                                        -source_current
+                                    );
+                                }
+                            }
+                            assert_eq!(engine.convergence_quality().force_accepted_points, 0);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn native_mos_terminal_reports_preserve_individual_tied_pin_currents() {
+    use rspice_core::numerics::integration::IntegrationMethod;
+    for (kind, polarity) in [("NMOS", 1.0), ("PMOS", -1.0)] {
+        for pins in [
+            ["x", "g", "x", "x"],
+            ["g", "g", "x", "x"],
+            ["x", "g", "g", "x"],
+            ["x", "g", "x", "g"],
+        ] {
+            let netlist = Netlist::parse(&format!(
+                "tied MOS pins\nVX x 0 0\nVG g 0 DC {} PWL(0 {} 1u {} 2u {})\nM1 {} mm L=1u W=1u\n.model mm {kind}(LEVEL=1 KP=0 VTO={} IS=0 CGSO=1m CGDO=2m CGBO=3m)\n.options GMIN=0\n.print tran ID(M1) IG(M1) IS(M1) IB(M1) I(VG)\n.end\n",
+                -polarity, -polarity, -0.5 * polarity, -polarity, pins.join(" "), polarity,
+            )).unwrap();
+            let result = Engine::new(SimulationConfig {
+                integration_method: IntegrationMethod::BackwardEuler,
+                locked_time_grid: Some(std::sync::Arc::new(vec![0.0, 1e-6, 2e-6])),
+                ..Default::default()
+            })
+            .run_tran(&netlist, 2e-6, 1e-6)
+            .unwrap();
+            for row in 1..result.time.len() {
+                let slope = if row == 1 {
+                    0.5e6 * polarity
+                } else {
+                    -0.5e6 * polarity
+                };
+                let pin_slope = pins.map(|pin| if pin == "g" { slope } else { 0.0 });
+                let gs = 1e-9 * (pin_slope[1] - pin_slope[2]);
+                let gd = 2e-9 * (pin_slope[1] - pin_slope[0]);
+                let gb = 3e-9 * (pin_slope[1] - pin_slope[3]);
+                for (parameter, expected) in
+                    [("ID", -gd), ("IG", gs + gd + gb), ("IS", -gs), ("IB", -gb)]
+                {
+                    let actual = result
+                        .try_device_op_waveform_named("M1", parameter)
+                        .unwrap()[row];
+                    assert!(
+                        (actual - expected).abs() < 2e-12,
+                        "{kind} {pins:?}, {parameter}: {actual} vs {expected}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[cfg(feature = "parallel")]
+#[test]
+fn native_mos_terminal_reports_match_between_serial_and_parallel_history() {
+    use rspice_core::numerics::integration::IntegrationMethod;
+    // Cross the 2048-device parallel threshold with a topology eligible for
+    // the cached classic-MOS transient path and nonzero body/gate charge.
+    let mut deck = String::from(
+        "parallel MOS currents\nVD d 0 DC 0.2 PWL(0 0.2 1u 0.4 2u 0.2)\nVG g 0 DC -1 PWL(0 -1 1u -0.5 2u -1)\nVS s 0 0\n.model mm NMOS(LEVEL=1 VTO=1 IS=1p CGSO=1m CGDO=2m CBS=2n CBD=3n)\n.options RELTOL=1e-8 ABSTOL=1e-12 VNTOL=1e-10\n",
+    );
+    for index in 0..2048 {
+        deck.push_str(&format!("M{index} d g s 0 mm L=1u W=1u\n"));
+    }
+    deck.push_str(".print tran ID(M0) IG(M0) IS(M0) IB(M0) ID(M2047) IG(M2047) IS(M2047) IB(M2047) I(VD) I(VG) I(VS)\n.end\n");
+    let netlist = Netlist::parse(&deck).unwrap();
+    let solve = |workers| {
+        let mut config = SimulationConfig {
+            integration_method: IntegrationMethod::Trapezoidal,
+            locked_time_grid: Some(std::sync::Arc::new(vec![0.0, 0.5e-6, 1e-6, 1.5e-6, 2e-6])),
+            ..Default::default()
+        };
+        config.resource_limits.max_parallel_workers = workers;
+        let engine = Engine::new(config);
+        let result = engine.run_tran(&netlist, 2e-6, 0.5e-6).unwrap();
+        assert_eq!(engine.convergence_quality().force_accepted_points, 0);
+        result
+    };
+    let serial = solve(1);
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(2)
+        .build()
+        .unwrap();
+    let parallel = pool.install(|| solve(2));
+    assert_eq!(serial.time, parallel.time);
+    for device in ["M0", "M2047"] {
+        for (parameter, source) in [("ID", "VD"), ("IG", "VG"), ("IS", "VS")] {
+            let first = serial
+                .try_device_op_waveform_named(device, parameter)
+                .unwrap();
+            let second = parallel
+                .try_device_op_waveform_named(device, parameter)
+                .unwrap();
+            assert_eq!(first, second, "{device}:{parameter}");
+            let probes = parallel.try_branch_current_waveform_named(source).unwrap();
+            for (reported, source_current) in second.iter().zip(probes) {
+                assert!((reported + source_current / 2048.0).abs() < 2e-10 + 1e-7 * reported.abs());
+            }
+        }
+        assert_eq!(
+            serial.try_device_op_waveform_named(device, "IB"),
+            parallel.try_device_op_waveform_named(device, "IB")
+        );
+    }
+}
+
+#[test]
 fn compact_three_terminal_mos_rejects_non_vdmos_model() {
     let deck = "* compact mos syntax policy\n\
                 vdd d 0 dc 1.8\n\
