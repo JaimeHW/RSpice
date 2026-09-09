@@ -87,6 +87,20 @@ impl LegacyBsimModel {
         }
     }
 
+    pub(crate) fn sidewall_junction_potential(&self) -> Value {
+        let potential = match self {
+            Self::Bsim1(model) => model.sidewall_junction_potential,
+            Self::Bsim2(model) => model.sidewall_junction_potential,
+        };
+        // b1temp.c/b2temp.c floor finite authored values and the zero
+        // default independently of PB. Preserve nonfinite input for validation.
+        if potential.is_finite() {
+            potential.max(0.1)
+        } else {
+            potential
+        }
+    }
+
     pub(crate) fn oxide_density(&self) -> Value {
         legacy_cox(self.geometry_parameters().2) * 1e4
     }
@@ -151,6 +165,7 @@ impl LegacyBsimSizedModel {
 
 #[derive(Debug, Clone)]
 pub struct LegacyBsim1Model {
+    sidewall_junction_potential: Value,
     vfb: SizeDependence,
     phi: SizeDependence,
     k1: SizeDependence,
@@ -208,6 +223,7 @@ pub struct LegacyBsim1Sized {
 
 #[derive(Debug, Clone)]
 pub struct LegacyBsim2Model {
+    sidewall_junction_potential: Value,
     vfb: SizeDependence,
     phi: SizeDependence,
     k1: SizeDependence,
@@ -329,6 +345,7 @@ impl SizeDependence {
 impl LegacyBsim1Model {
     fn from_params(params: &HashMap<String, Value>) -> Self {
         Self {
+            sidewall_junction_potential: param(params, "PBSW", 0.0),
             vfb: SizeDependence::from_params(params, "VFB", 0.0),
             phi: SizeDependence::from_params(params, "PHI", 0.0),
             k1: SizeDependence::from_params(params, "K1", 0.0),
@@ -560,6 +577,7 @@ impl LegacyBsim1Sized {
 impl LegacyBsim2Model {
     fn from_params(params: &HashMap<String, Value>) -> Self {
         Self {
+            sidewall_junction_potential: param(params, "PBSW", 0.0),
             vfb: SizeDependence::from_params(params, "VFB", -1.0),
             phi: SizeDependence::from_params(params, "PHI", 0.75),
             k1: SizeDependence::from_params(params, "K1", 0.8),

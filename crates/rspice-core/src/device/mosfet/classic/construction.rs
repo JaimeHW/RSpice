@@ -724,6 +724,15 @@ impl Mosfet {
             self.lambda1 = 0.0;
         }
 
+        let legacy_bsim = matches!(self.level, 4 | 5);
+        if legacy_bsim {
+            // b1set.c/b2set.c default both grading coefficients to zero;
+            // b1temp.c/b2temp.c floor the zero potential default to 0.1 V.
+            self.pb = 0.1;
+            self.mj = 0.0;
+            self.mjsw = 0.0;
+        }
+
         let kp_explicit = params
             .get("KP")
             .copied()
@@ -785,7 +794,7 @@ impl Mosfet {
         if let Some(v) = params
             .get("JS")
             .copied()
-            .filter(|v| v.is_finite() && *v >= 0.0)
+            .filter(|v| legacy_bsim || (v.is_finite() && *v >= 0.0))
         {
             self.js_bulk = v;
         }
@@ -805,35 +814,35 @@ impl Mosfet {
             .get("CJ")
             .or_else(|| params.get("CJ0"))
             .copied()
-            .filter(|v| v.is_finite() && *v >= 0.0)
+            .filter(|v| legacy_bsim || (v.is_finite() && *v >= 0.0))
         {
             self.cj = v;
         }
         if let Some(v) = params
             .get("CJSW")
             .copied()
-            .filter(|v| v.is_finite() && *v >= 0.0)
+            .filter(|v| legacy_bsim || (v.is_finite() && *v >= 0.0))
         {
             self.cjsw = v;
         }
         if let Some(v) = params
             .get("PB")
             .copied()
-            .filter(|v| v.is_finite() && *v > 0.0)
+            .filter(|v| legacy_bsim || (v.is_finite() && *v > 0.0))
         {
             self.pb = v;
         }
         if let Some(v) = params
             .get("MJ")
             .copied()
-            .filter(|v| v.is_finite() && *v >= 0.0)
+            .filter(|v| legacy_bsim || (v.is_finite() && *v >= 0.0))
         {
             self.mj = v;
         }
         if let Some(v) = params
             .get("MJSW")
             .copied()
-            .filter(|v| v.is_finite() && *v >= 0.0)
+            .filter(|v| legacy_bsim || (v.is_finite() && *v >= 0.0))
         {
             self.mjsw = v;
         }
@@ -848,7 +857,7 @@ impl Mosfet {
             .get("CBD")
             .or_else(|| params.get("CAPBD"))
             .copied()
-            .filter(|v| v.is_finite() && *v >= 0.0)
+            .filter(|v| legacy_bsim || (v.is_finite() && *v >= 0.0))
         {
             self.drain_bulk_cap_zero_bias = Some(v);
         }
@@ -856,7 +865,7 @@ impl Mosfet {
             .get("CBS")
             .or_else(|| params.get("CAPBS"))
             .copied()
-            .filter(|v| v.is_finite() && *v >= 0.0)
+            .filter(|v| legacy_bsim || (v.is_finite() && *v >= 0.0))
         {
             self.source_bulk_cap_zero_bias = Some(v);
         }
@@ -1184,6 +1193,9 @@ impl Mosfet {
             LegacyBsimModel::from_level_and_params(self.level, params).map(Box::new);
         if let Some(model) = &self.legacy_bsim_model {
             self.cox = model.oxide_density();
+            if self.pb.is_finite() {
+                self.pb = self.pb.max(0.1);
+            }
         }
         self.refresh_legacy_bsim_size_params();
         self
@@ -1330,6 +1342,34 @@ impl Mosfet {
                 return Some(
                     "legacy BSIM size-dependent parameters are invalid or not representable",
                 );
+            }
+            for (value, reason) in [
+                (
+                    self.js_bulk,
+                    "legacy BSIM JS must be finite and nonnegative",
+                ),
+                (self.cj, "legacy BSIM CJ must be finite and nonnegative"),
+                (self.cjsw, "legacy BSIM CJSW must be finite and nonnegative"),
+                (self.mj, "legacy BSIM MJ must be finite and nonnegative"),
+                (self.mjsw, "legacy BSIM MJSW must be finite and nonnegative"),
+                (
+                    self.drain_bulk_cap_zero_bias.unwrap_or(0.0),
+                    "legacy BSIM CBD must be finite and nonnegative",
+                ),
+                (
+                    self.source_bulk_cap_zero_bias.unwrap_or(0.0),
+                    "legacy BSIM CBS must be finite and nonnegative",
+                ),
+            ] {
+                if !value.is_finite() || value < 0.0 {
+                    return Some(reason);
+                }
+            }
+            if !self.pb.is_finite() {
+                return Some("legacy BSIM PB must be finite");
+            }
+            if !model.sidewall_junction_potential().is_finite() {
+                return Some("legacy BSIM PBSW must be finite");
             }
         }
         for (value, reason) in [
@@ -1550,6 +1590,70 @@ impl Mosfet {
 mod tests {
     use super::*;
     use std::collections::HashMap;
+
+    #[test]
+    fn legacy_bsim_body_parameters_preserve_defaults_floors_and_invalid_inputs() {
+        for level in [4, 5] {
+            let params = HashMap::from([("LEVEL".into(), level as Value), ("TOX".into(), 0.03)]);
+            let make = |params: &HashMap<String, Value>| {
+                Mosfet::new_nmos("M1".into(), 1, 2, 3, 0).with_params(params)
+            };
+            let defaults = make(&params);
+            assert_eq!((defaults.pb, defaults.mj, defaults.mjsw), (0.1, 0.0, 0.0));
+            assert_eq!(
+                defaults
+                    .legacy_bsim_model
+                    .as_ref()
+                    .unwrap()
+                    .sidewall_junction_potential(),
+                0.1
+            );
+            for (name, canonical) in [
+                ("JS", "JS"),
+                ("CJ", "CJ"),
+                ("CJ0", "CJ"),
+                ("CJSW", "CJSW"),
+                ("MJ", "MJ"),
+                ("MJSW", "MJSW"),
+                ("CBD", "CBD"),
+                ("CAPBD", "CBD"),
+                ("CBS", "CBS"),
+                ("CAPBS", "CBS"),
+                ("PB", "PB"),
+                ("PBSW", "PBSW"),
+            ] {
+                for value in [-1.0, Value::NAN, Value::INFINITY, Value::NEG_INFINITY] {
+                    let mut card = params.clone();
+                    card.insert(name.into(), value);
+                    let mos = make(&card);
+                    if matches!(name, "PB" | "PBSW") && value.is_finite() {
+                        assert!(mos.resolved_parameter_error().is_none());
+                        continue;
+                    }
+                    let reason = mos
+                        .resolved_parameter_error()
+                        .expect("invalid body parameter");
+                    assert!(reason.contains(canonical), "{name}={value}: {reason}");
+                }
+            }
+            for potential in [-1.0, 0.0, 0.05, 0.1, 2.0] {
+                let mut card = params.clone();
+                card.insert("PB".into(), potential);
+                card.insert("PBSW".into(), potential);
+                let mut mos = make(&card);
+                mos.set_temperature(358.15, 300.15);
+                assert_eq!(mos.pb, potential.max(0.1));
+                assert_eq!(
+                    mos.legacy_bsim_model
+                        .as_ref()
+                        .unwrap()
+                        .sidewall_junction_potential(),
+                    potential.max(0.1)
+                );
+                assert!(mos.resolved_parameter_error().is_none());
+            }
+        }
+    }
 
     #[test]
     fn classic_mos_preserves_invalid_geometry_and_resistance_until_validation() {

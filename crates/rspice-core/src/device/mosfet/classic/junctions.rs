@@ -425,18 +425,52 @@ impl Mosfet {
     }
 
     #[inline]
-    pub(crate) fn body_source_junction_charge_and_capacitance_at(
+    fn body_junction_charge_and_capacitance(
         &self,
-        vbs: Value,
+        voltage: Value,
+        bottom_capacitance: Value,
+        sidewall_capacitance: Value,
     ) -> (Value, Value) {
+        if let Some(model) = &self.legacy_bsim_model {
+            // b1ld.c/b2ld.c use separate bottom/sidewall potentials and
+            // a quadratic forward charge continuation beginning at zero.
+            // The shared law also evaluates the continuous MJ=1 limit.
+            let bottom = crate::device::semiconductor::depletion_charge_and_capacitance(
+                voltage,
+                bottom_capacitance,
+                self.pb,
+                self.mj,
+                0.0,
+            );
+            let sidewall = crate::device::semiconductor::depletion_charge_and_capacitance(
+                voltage,
+                sidewall_capacitance,
+                model.sidewall_junction_potential(),
+                self.mjsw,
+                0.0,
+            );
+            return (bottom.0 + sidewall.0, bottom.1 + sidewall.1);
+        }
         Self::junction_depletion_charge_and_capacitance(
-            self.body_source_diode_voltage(vbs),
-            self.source_zero_bias_bottom_junction_capacitance(),
-            self.source_zero_bias_sidewall_junction_capacitance(),
+            voltage,
+            bottom_capacitance,
+            sidewall_capacitance,
             self.pb,
             self.mj,
             self.mjsw,
             self.fc,
+        )
+    }
+
+    #[inline]
+    pub(crate) fn body_source_junction_charge_and_capacitance_at(
+        &self,
+        vbs: Value,
+    ) -> (Value, Value) {
+        self.body_junction_charge_and_capacitance(
+            self.body_source_diode_voltage(vbs),
+            self.source_zero_bias_bottom_junction_capacitance(),
+            self.source_zero_bias_sidewall_junction_capacitance(),
         )
     }
 
@@ -446,14 +480,10 @@ impl Mosfet {
         vds: Value,
         vbs: Value,
     ) -> (Value, Value) {
-        Self::junction_depletion_charge_and_capacitance(
+        self.body_junction_charge_and_capacitance(
             self.body_drain_diode_voltage(vds, vbs),
             self.drain_zero_bias_bottom_junction_capacitance(),
             self.drain_zero_bias_sidewall_junction_capacitance(),
-            self.pb,
-            self.mj,
-            self.mjsw,
-            self.fc,
         )
     }
 
@@ -631,6 +661,96 @@ mod tests {
             (actual - expected).abs() <= tol,
             "{label}: actual={actual:.12e} expected={expected:.12e} tol={tol:.12e}"
         );
+    }
+
+    #[test]
+    fn legacy_bsim_junction_charge_has_independent_potentials_and_consistent_slopes() {
+        use std::collections::HashMap;
+        for level in [4, 5] {
+            for p in [1.0, -1.0] {
+                for grading in [0.0, 0.5, 1.0, 1.0 - 1e-10, 1.0 + 1e-10, 2.0] {
+                    let mos = if p > 0.0 {
+                        Mosfet::new_nmos("M1".into(), 1, 2, 3, 4)
+                    } else {
+                        Mosfet::new_pmos("M1".into(), 1, 2, 3, 4)
+                    }
+                    .with_params(&HashMap::from([
+                        ("LEVEL".into(), level as Value),
+                        ("TOX".into(), 0.03),
+                        ("PB".into(), 0.8),
+                        ("PBSW".into(), 0.2),
+                        ("MJ".into(), grading),
+                        ("MJSW".into(), grading),
+                        ("CJ".into(), 1e-3),
+                        ("CJSW".into(), 1e-9),
+                    ]))
+                    .with_instance_params(&[
+                        ("AD".into(), 2e-12),
+                        ("AS".into(), 3e-12),
+                        ("PD".into(), 4e-6),
+                        ("PS".into(), 5e-6),
+                        ("M".into(), 2.5),
+                        ("NF".into(), 2.0),
+                    ]);
+                    for bias in [-2.0_f64, -0.5, -1e-18, 0.0, 1e-18, 0.05, 0.2, 0.6] {
+                        for (drain, bottom, sidewall) in
+                            [(false, 15e-15, 25e-15), (true, 10e-15, 20e-15)]
+                        {
+                            let evaluate = |v| {
+                                if drain {
+                                    mos.body_drain_junction_charge_and_capacitance_at(
+                                        p * 0.3,
+                                        p * (v + 0.3),
+                                    )
+                                } else {
+                                    mos.body_source_junction_charge_and_capacitance_at(p * v)
+                                }
+                            };
+                            // Avoid adding a tiny bias to the drain offset in
+                            // cases intended to exercise the near-zero limit.
+                            if drain && bias != 0.0 && bias.abs() < 1e-16 {
+                                continue;
+                            }
+                            let (q, c) = evaluate(bias);
+                            let mut expected_c = 0.0;
+                            let mut expected_q = 0.0;
+                            for (c0, phi) in [(bottom, 0.8), (sidewall, 0.2)] {
+                                if bias >= 0.0 {
+                                    expected_c += c0 * (1.0 + grading * bias / phi);
+                                    expected_q += c0 * bias * (1.0 + 0.5 * grading * bias / phi);
+                                } else {
+                                    expected_c += c0 / (1.0 - bias / phi).powf(grading);
+                                    // Independent closed forms for the constant,
+                                    // square-root and logarithmic junction laws.
+                                    expected_q += if grading == 0.0 {
+                                        c0 * bias
+                                    } else if grading == 0.5 {
+                                        2.0 * c0 * bias / (1.0 + (1.0 - bias / phi).sqrt())
+                                    } else if grading == 1.0 {
+                                        -c0 * phi * (-bias / phi).ln_1p()
+                                    } else {
+                                        0.0
+                                    }; // General grading is checked by dQ/dV below.
+                                }
+                            }
+                            assert!((c - expected_c).abs() < expected_c.abs() * 1e-12 + 1e-29);
+                            if bias >= 0.0 || matches!(grading, 0.0 | 0.5 | 1.0) {
+                                assert!(
+                                    (q - expected_q).abs() < expected_q.abs() * 1e-12 + 1e-45,
+                                    "L{level} p={p} v={bias} m={grading}: {q} vs {expected_q}"
+                                );
+                            }
+                            let h = 1e-6;
+                            let slope = (evaluate(bias + h).0 - evaluate(bias - h).0) / (2.0 * h);
+                            assert!(
+                                (slope - c).abs() < c.abs() * 1e-8 + 1e-27,
+                                "L{level} p={p} v={bias} m={grading}: dQ/dV={slope} C={c}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
     }
 
     #[test]

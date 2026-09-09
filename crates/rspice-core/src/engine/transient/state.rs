@@ -1859,7 +1859,7 @@ mod tests {
         for level in [4, 5] {
             for (kind, p) in [("NMOS", 1.0), ("PMOS", -1.0)] {
                 let netlist = Netlist::parse(&format!(
-                    "legacy BSIM charge seed\nRD d 0 1k\nRG g 0 1k\nRS s 0 1k\nRB b 0 1k\nM1 d g s b mm W=2u L=1u IC={},{},{}\n.model mm {kind}(LEVEL={level} TOX=.03 VFB=-.7 PHI=.6 K1=.5 VBB=-5 VDD=5)\n.end\n",
+                    "legacy BSIM charge seed\nRD d 0 1k\nRG g 0 1k\nRS s 0 1k\nRB b 0 1k\nM1 d g s b mm W=2u L=1u AD=2p AS=3p PD=4u PS=5u IC={},{},{}\n.model mm {kind}(LEVEL={level} TOX=.03 VFB=-.7 PHI=.6 K1=.5 VBB=-5 VDD=5 CJ=1m CJSW=1n PB=.8 PBSW=.2 MJ=.5 MJSW=.5)\n.end\n",
                     p*0.2, p*1.5, p*-0.3)).unwrap();
                 let engine = Engine::default();
                 let circuit = engine.build_circuit(&netlist).unwrap();
@@ -1907,6 +1907,34 @@ mod tests {
                         assert_eq!(first, second);
                         assert_eq!(first, third);
                     }
+                    for (first, second, third, bias, bottom, sidewall) in [
+                        (
+                            &history.qbs_prev,
+                            &history.qbs_prev_prev,
+                            &history.qbs_prev_prev_prev,
+                            -0.3,
+                            3e-15,
+                            5e-15,
+                        ),
+                        (
+                            &history.qbd_prev,
+                            &history.qbd_prev_prev,
+                            &history.qbd_prev_prev_prev,
+                            -0.5,
+                            2e-15,
+                            4e-15,
+                        ),
+                    ] {
+                        let q = [(bottom, 0.8_f64), (sidewall, 0.2_f64)]
+                            .into_iter()
+                            .map(|(c, phi)| 2.0 * c * bias / (1.0 + (1.0 - bias / phi).sqrt()))
+                            .sum::<Value>();
+                        assert!((first[0] - q).abs() < q.abs() * 1e-12);
+                        assert_eq!(first, second);
+                        assert_eq!(first, third);
+                    }
+                    assert_eq!(history.cqbs_prev, [0.0]);
+                    assert_eq!(history.cqbd_prev, [0.0]);
                     assert_eq!(history.cqgs_prev, [0.0]);
                     assert_eq!(history.cqgd_prev, [0.0]);
                     assert_eq!(history.cqgb_prev, [0.0]);

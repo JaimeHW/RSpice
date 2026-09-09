@@ -262,6 +262,40 @@ mod wasm_tests {
     }
 
     #[wasm_bindgen_test]
+    fn legacy_bsim_junction_capacitance_in_wasm() {
+        let abort = rspice_core::abort_signal::NoAbort;
+        for level in [4, 5] {
+            for (kind, p) in [("NMOS", 1.0), ("PMOS", -1.0)] {
+                for (bias, pbsw) in [(-0.5, 0.5), (-0.5, 2.0), (0.2, 0.5), (0.2, 2.0)] {
+                    let make = |cjsw| {
+                        rspice_core::Netlist::parse(&format!(
+                        "Legacy BSIM junction in WASM\nVB b 0 DC {} AC 1\nM1 0 0 0 b mm W=1u L=1u PD=1 PS=1\n.model mm {kind}(LEVEL={level} TOX=0.03 PHI=0.6 PB=1 PBSW={pbsw} MJSW=0.5 CJSW={cjsw})\n.end\n", p*bias
+                    )).unwrap()
+                    };
+                    let engine = rspice_core::Engine::default();
+                    let a = engine
+                        .run_ac_with_abort(&make(1e-9), &[1e3], &abort)
+                        .unwrap();
+                    let b = engine
+                        .run_ac_with_abort(&make(0.0), &[1e3], &abort)
+                        .unwrap();
+                    let expected = if bias < 0.0 {
+                        2e-9 / (1.0_f64 - bias / pbsw).sqrt()
+                    } else {
+                        2e-9 * (1.0 + 0.5 * bias / pbsw)
+                    };
+                    let actual = -(a[0].currents[0] - b[0].currents[0]).im
+                        / (2.0 * std::f64::consts::PI * 1e3);
+                    assert!(
+                        (actual - expected).abs() < expected * 1e-12,
+                        "L{level} {kind}: {actual} vs {expected}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[wasm_bindgen_test]
     fn classic_mos_series_and_geometry_contract_in_wasm() {
         let abort = rspice_core::abort_signal::NoAbort;
         for level in [1, 2, 3, 4, 5, 6, 9] {

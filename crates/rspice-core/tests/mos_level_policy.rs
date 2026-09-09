@@ -1557,3 +1557,184 @@ fn classic_mos_series_zero_retains_xyce_sheet_resistance() {
         }
     }
 }
+
+// Independent square-root primitive for the Berkeley MJ=MJSW=1/2 fixture.
+fn legacy_bsim_junction_reference(voltage: f64, capacitance: f64, potential: f64) -> (f64, f64) {
+    if voltage < 0.0 {
+        let root = (1.0 - voltage / potential).sqrt();
+        (
+            2.0 * capacitance * voltage / (1.0 + root),
+            capacitance / root,
+        )
+    } else {
+        (
+            capacitance * voltage * (1.0 + 0.25 * voltage / potential),
+            capacitance * (1.0 + 0.5 * voltage / potential),
+        )
+    }
+}
+
+#[test]
+fn legacy_bsim_junction_ac_matches_independent_bottom_and_sidewall_laws() {
+    let omega = 2.0 * std::f64::consts::PI * 1e3;
+    for level in [4, 5] {
+        for (kind, p) in [("NMOS", 1.0), ("PMOS", -1.0)] {
+            for temperature in [27, 85] {
+                for (pb, pbsw) in [(0.8_f64, 0.2_f64), (0.2, 2.0), (0.0, -1.0)] {
+                    for bias in [-2.0, -0.5, 0.0, 0.05, 0.2] {
+                        let make = |caps| {
+                            Netlist::parse(&format!(
+                            "Legacy BSIM junction AC\nVD d 0 {}\nVS s 0 0\nVG g 0 {}\nVB b 0 DC {} AC 1\nM1 d g s b mm W=1u L=1u M=2.5 NF=2 AD=2p AS=3p PD=4u PS=5u\n.model mm {kind}(LEVEL={level} TOX=0.03 PHI=0.6 PB={pb} PBSW={pbsw} MJ=0.5 MJSW=0.5 {caps})\n.options TEMP={temperature}\n.end\n",
+                            p*0.15, -p*0.8, p*bias
+                        )).unwrap()
+                        };
+                        let netlist = make("CJ=1k CJSW=1m");
+                        let engine = Engine::default().resolved_for_netlist(&netlist);
+                        let actual = engine.run_ac(&netlist, &[1e3]).unwrap();
+                        let baseline = engine.run_ac(&make("CJ=0 CJSW=0"), &[1e3]).unwrap();
+                        for (source, voltage, bottom, sidewall) in [
+                            ("VD", bias - 0.15, 10e-9, 20e-9),
+                            ("VS", bias, 15e-9, 25e-9),
+                        ] {
+                            let expected =
+                                legacy_bsim_junction_reference(voltage, bottom, pb.max(0.1)).1
+                                    + legacy_bsim_junction_reference(
+                                        voltage,
+                                        sidewall,
+                                        pbsw.max(0.1),
+                                    )
+                                    .1;
+                            let index = actual[0]
+                                .branch_names
+                                .iter()
+                                .position(|n| n.eq_ignore_ascii_case(source))
+                                .unwrap();
+                            let delta = actual[0].currents[index] - baseline[0].currents[index];
+                            assert!(
+                                (delta.im / omega - expected).abs() < expected * 1e-9,
+                                "L{level} {kind} T={temperature} PB={pb} PBSW={pbsw} V={bias} {source}: {delta} expected C={expected}"
+                            );
+                            assert!(delta.re.abs() < 1e-12);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn legacy_bsim_junction_transient_integrates_charge_and_reports_terminal_currents() {
+    use rspice_core::numerics::integration::IntegrationMethod;
+    for level in [4, 5] {
+        for (kind, p) in [("NMOS", 1.0), ("PMOS", -1.0)] {
+            for method in [
+                IntegrationMethod::BackwardEuler,
+                IntegrationMethod::Trapezoidal,
+                IntegrationMethod::Gear2,
+            ] {
+                let make = |caps| {
+                    Netlist::parse(&format!(
+                    "Legacy BSIM junction transient\nVD d 0 {}\nVS s 0 0\nVG g 0 {}\nVB b 0 DC {} PWL(0 {} 1u {})\nM1 d g s b mm W=1u L=1u M=2.5 NF=2 AD=2p AS=3p PD=4u PS=5u\n.model mm {kind}(LEVEL={level} TOX=0.03 PHI=0.6 PB=0.8 PBSW=0.2 MJ=0.5 MJSW=0.5 {caps})\n.options RELTOL=1e-9 ABSTOL=1e-13 VNTOL=1e-11\n.print tran ID(M1) IS(M1) IB(M1) I(VD) I(VS) I(VB)\n.end\n",
+                    p*0.15, -p*0.8, -p*0.4, -p*0.4, p*0.2
+                )).unwrap()
+                };
+                let engine = Engine::new(SimulationConfig {
+                    integration_method: method,
+                    // The prescribed grid isolates companion equations. Permit
+                    // order promotion after the two startup intervals while
+                    // retaining strict Newton tolerances on the deck.
+                    transient_trtol: 1e12,
+                    locked_time_grid: Some(std::sync::Arc::new(vec![
+                        0.0, 0.2e-6, 0.4e-6, 0.6e-6, 0.8e-6, 1e-6,
+                    ])),
+                    ..Default::default()
+                });
+                let actual = engine
+                    .run_tran(&make("CJ=1k CJSW=1m"), 1e-6, 0.2e-6)
+                    .unwrap();
+                let baseline = engine.run_tran(&make("CJ=0 CJSW=0"), 1e-6, 0.2e-6).unwrap();
+                assert_eq!(actual.time, baseline.time);
+                let mut expected_body = vec![0.0; actual.time.len()];
+                for (source, report, offset, bottom, sidewall) in [
+                    ("VD", "ID", 0.15, 10e-9, 20e-9),
+                    ("VS", "IS", 0.0, 15e-9, 25e-9),
+                ] {
+                    let charge = |t| {
+                        let v = -0.4 + 0.6 * t / 1e-6 - offset;
+                        legacy_bsim_junction_reference(v, bottom, 0.8).0
+                            + legacy_bsim_junction_reference(v, sidewall, 0.2).0
+                    };
+                    let mut previous_charge = charge(0.0);
+                    let mut older_charge = previous_charge;
+                    let mut previous_current = 0.0;
+                    let wave = actual.try_branch_current_waveform_named(source).unwrap();
+                    let base = baseline.try_branch_current_waveform_named(source).unwrap();
+                    let terminal = actual.try_device_op_waveform_named("M1", report).unwrap();
+                    for (index, &time) in actual.time.iter().enumerate().skip(1) {
+                        let dt = time - actual.time[index - 1];
+                        let q = charge(time);
+                        let current = match method {
+                            IntegrationMethod::BackwardEuler => (q - previous_charge) / dt,
+                            // Native trapezoidal startup needs two accepted
+                            // intervals before promoting to order two.
+                            IntegrationMethod::Trapezoidal if index <= 2 => {
+                                (q - previous_charge) / dt
+                            }
+                            IntegrationMethod::Trapezoidal => {
+                                2.0 * (q - previous_charge) / dt - previous_current
+                            }
+                            IntegrationMethod::Gear2 => {
+                                (1.5 * q - 2.0 * previous_charge + 0.5 * older_charge) / dt
+                            }
+                            IntegrationMethod::TrapGear => {
+                                unreachable!("fixture enumerates fixed methods")
+                            }
+                        };
+                        let expected = p * current;
+                        assert!(
+                            (wave[index] - base[index] - expected).abs()
+                                < 1e-11 + expected.abs() * 1e-8,
+                            "L{level} {kind} {method:?} {source} t={time}: {} vs {expected}",
+                            wave[index] - base[index]
+                        );
+                        assert!((terminal[index] + wave[index]).abs() < 1e-11);
+                        expected_body[index] -= expected;
+                        older_charge = previous_charge;
+                        previous_charge = q;
+                        previous_current = current;
+                    }
+                }
+                let body = actual.try_branch_current_waveform_named("VB").unwrap();
+                let baseline_body = baseline.try_branch_current_waveform_named("VB").unwrap();
+                let report = actual.try_device_op_waveform_named("M1", "IB").unwrap();
+                for index in 1..actual.time.len() {
+                    assert!(
+                        (body[index] - baseline_body[index] - expected_body[index]).abs() < 1e-10
+                    );
+                    assert!((report[index] + body[index]).abs() < 1e-10);
+                }
+                assert_eq!(engine.convergence_quality().force_accepted_points, 0);
+            }
+        }
+    }
+}
+
+#[test]
+fn legacy_bsim_invalid_body_parameters_fail_before_analysis() {
+    for level in [4, 5] {
+        for param in ["JS", "CJ", "CJSW", "MJ", "MJSW", "CBD", "CBS"] {
+            let netlist = Netlist::parse(&format!(
+                "Invalid legacy BSIM body parameter\nVD d 0 1\nVG g 0 1.5\nM1 d g 0 0 mm W=1u L=1u\n.model mm NMOS(LEVEL={level} TOX=0.03 {param}=-1)\n.end\n"
+            )).unwrap();
+            let error = Engine::default()
+                .build_circuit(&netlist)
+                .unwrap_err()
+                .to_string();
+            assert!(
+                error.contains("M1") && error.contains("MM") && error.contains(param),
+                "{error}"
+            );
+        }
+    }
+}

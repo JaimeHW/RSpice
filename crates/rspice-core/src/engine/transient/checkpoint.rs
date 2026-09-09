@@ -1200,7 +1200,8 @@ pub(crate) fn simulation_checkpoint_identity(config: &SimulationConfig) -> Strin
     // v63 resolves the native BSIM1/2 body-junction laws and limiting.
     // v64 replaces legacy BSIM Meyer approximations with terminal charge.
     // v65 respects explicit zero MOS series resistances and checks their scaling.
-    hasher.update(b"rspice-transient-resolved-config-v65\0");
+    // v66 implements legacy BSIM body-junction potentials and charge laws.
+    hasher.update(b"rspice-transient-resolved-config-v66\0");
     hash_field(&mut hasher, "temperature", config.temperature.to_bits());
     hash_field(&mut hasher, "ramptime", config.ramptime.to_bits());
     hash_field(&mut hasher, "digital_delay_type", config.digital_delay_type);
