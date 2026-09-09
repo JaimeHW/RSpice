@@ -96,13 +96,15 @@ impl ClassicMosTransientConstants {
 }
 
 /// Compact Newton linearization consumed by the classic-MOS transient
-/// assembler. Keeping these eight scalars contiguous avoids revisiting the
+/// assembler. Keeping these nine scalars contiguous avoids revisiting the
 /// complete model-card-sized [`Mosfet`] object after its evaluation pass.
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct ClassicMosCachedStaticTerms {
     gm: Value,
     gds: Value,
     gmb: Value,
+    /// Source diagonal, retained before the inverse-mode derivative sum.
+    gss: Value,
     id_eq: Value,
     gbs: Value,
     ieq_bs: Value,
@@ -453,6 +455,8 @@ pub struct Mosfet {
     gm: Value,
     gds: Value,
     gmb: Value,
+    /// Source diagonal, retained before the inverse-mode derivative sum.
+    gss: Value,
     id_eq: Value,
     ibs: Value,
     gbs: Value,
@@ -469,7 +473,7 @@ pub struct Mosfet {
     eval_vbs_prev: Value,
     id_prev: Value,
     gm_prev: Value,
-    gds_prev: Value,
+    gout_prev: Value,
     gmb_prev: Value,
     ibs_prev: Value,
     gbs_prev: Value,
@@ -515,6 +519,8 @@ pub(crate) struct MosfetNonlinearState {
     gm: Value,
     gds: Value,
     gmb: Value,
+    /// Source diagonal, retained before the inverse-mode derivative sum.
+    gss: Value,
     id_eq: Value,
     ibs: Value,
     gbs: Value,
@@ -529,7 +535,7 @@ pub(crate) struct MosfetNonlinearState {
     eval_vbs_prev: Value,
     id_prev: Value,
     gm_prev: Value,
-    gds_prev: Value,
+    gout_prev: Value,
     gmb_prev: Value,
     ibs_prev: Value,
     gbs_prev: Value,
@@ -556,6 +562,7 @@ impl Mosfet {
             gm: self.gm,
             gds: self.gds,
             gmb: self.gmb,
+            gss: self.gss,
             id_eq: self.id_eq,
             ibs: self.ibs,
             gbs: self.gbs,
@@ -570,7 +577,7 @@ impl Mosfet {
             eval_vbs_prev: self.eval_vbs_prev,
             id_prev: self.id_prev,
             gm_prev: self.gm_prev,
-            gds_prev: self.gds_prev,
+            gout_prev: self.gout_prev,
             gmb_prev: self.gmb_prev,
             ibs_prev: self.ibs_prev,
             gbs_prev: self.gbs_prev,
@@ -596,6 +603,7 @@ impl Mosfet {
         self.gm = state.gm;
         self.gds = state.gds;
         self.gmb = state.gmb;
+        self.gss = state.gss;
         self.id_eq = state.id_eq;
         self.ibs = state.ibs;
         self.gbs = state.gbs;
@@ -610,7 +618,7 @@ impl Mosfet {
         self.eval_vbs_prev = state.eval_vbs_prev;
         self.id_prev = state.id_prev;
         self.gm_prev = state.gm_prev;
-        self.gds_prev = state.gds_prev;
+        self.gout_prev = state.gout_prev;
         self.gmb_prev = state.gmb_prev;
         self.ibs_prev = state.ibs_prev;
         self.gbs_prev = state.gbs_prev;

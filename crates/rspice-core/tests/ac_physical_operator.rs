@@ -103,6 +103,49 @@ fn tied_admittance_terminals_preserve_the_physical_rc_response() {
 }
 
 #[test]
+fn reverse_mos_channel_retains_small_output_conductance_beside_large_transconductance() {
+    use rspice_core::engine::SpiceDialect;
+    for dialect in [
+        SpiceDialect::BestAvailable,
+        SpiceDialect::Ngspice,
+        SpiceDialect::Xyce,
+    ] {
+        let engine = Engine::new(SimulationConfig::default().with_spice_dialect(dialect));
+        for (kind, polarity) in [("NMOS", 1.0), ("PMOS", -1.0)] {
+            for kp in [1.0, 1e12, 1e16, 1e20] {
+                for terminals in ["out 0 0 0", "0 0 out 0"] {
+                    let netlist = parse(&format!(
+                        "MOS output slope\nV1 out 0 DC {} AC 1\nM1 {terminals} mm W=1 L=1\n.model mm {kind}(LEVEL=1 KP={kp} VTO={} LAMBDA={} IS=0)\n.end\n",
+                        2.0 * polarity,
+                        -polarity,
+                        1.0 / kp,
+                    ));
+                    let dc = engine.run_dc_op(&netlist).unwrap();
+                    let source = dc
+                        .branch_names
+                        .iter()
+                        .position(|name| name.eq_ignore_ascii_case("V1"))
+                        .unwrap();
+                    let expected_dc = -polarity * (0.5 * kp + 1.0);
+                    assert!(
+                        (dc.branch_currents[source] - expected_dc).abs()
+                            < 1e-10 * expected_dc.abs()
+                    );
+                    let ac = engine.run_ac(&netlist, &[1e6]).unwrap();
+                    let current = branch_current(&ac[0], "V1");
+                    // At unit overdrive in saturation, gds = KP*LAMBDA/2.
+                    assert!(
+                        (current.re + 0.5).abs() < 1e-10,
+                        "{dialect:?}, {kind}, KP={kp}, {terminals}: {current}"
+                    );
+                    assert!(current.im.abs() < 1e-12);
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn tied_mos_terminals_preserve_dc_ac_and_transient_at_large_scale() {
     use rspice_core::engine::SpiceDialect;
     for dialect in [

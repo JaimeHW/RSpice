@@ -24,7 +24,11 @@ impl Mosfet {
         self.eval_vbs_prev = self.eval_vbs;
         self.id_prev = self.id;
         self.gm_prev = self.gm;
-        self.gds_prev = self.gds;
+        self.gout_prev = if self.polarity() * self.eval_vds_prev < 0.0 {
+            self.gss
+        } else {
+            self.gds
+        };
         self.gmb_prev = self.gmb;
         if self.has_branch_history {
             self.ibs_prev = self.ibs;
@@ -98,7 +102,7 @@ impl Mosfet {
         self.eval_vds = eval_vds;
         self.eval_vbs = eval_vbs;
 
-        let (id, region, gm, gds, gmb, id_eq) = if let Some(constants) = constants {
+        let (id, region, gm, gds, gmb, gss, id_eq) = if let Some(constants) = constants {
             self.linearized_transient_operating_point(
                 self.eval_vgs,
                 self.eval_vds,
@@ -113,6 +117,7 @@ impl Mosfet {
         self.gm = gm;
         self.gds = gds;
         self.gmb = gmb;
+        self.gss = gss;
         self.id_eq = id_eq;
         if let Some(constants) = constants {
             (self.ibs, self.gbs) = self
@@ -148,16 +153,16 @@ impl NonlinearDevice for Mosfet {
     ) {
         let (vgs, vds, vbs) = self.branch_voltages(voltages);
         let (eval_vgs, eval_vds, eval_vbs) = self.limited_branch_voltages_for_eval(vgs, vds, vbs);
-        let (gm, gds, gmb, id_eq) =
+        let (gm, gds, gmb, gss, id_eq) =
             if self.cached_linearization_matches_eval(eval_vgs, eval_vds, eval_vbs) {
-                (self.gm, self.gds, self.gmb, self.id_eq)
+                (self.gm, self.gds, self.gmb, self.gss, self.id_eq)
             } else {
-                let (_, _, gm, gds, gmb, id_eq) =
+                let (_, _, gm, gds, gmb, gss, id_eq) =
                     self.linearized_operating_point(eval_vgs, eval_vds, eval_vbs);
-                (gm, gds, gmb, id_eq)
+                (gm, gds, gmb, gss, id_eq)
             };
 
-        let (gm, gds, gmb, id_eq) = Self::channel_stamp_terms(
+        let (gm, gds, gmb, gss, id_eq) = Self::channel_stamp_terms(
             [
                 self.node_drain,
                 self.node_gate,
@@ -167,6 +172,7 @@ impl NonlinearDevice for Mosfet {
             gm,
             gds,
             gmb,
+            gss,
             id_eq,
         );
 
@@ -174,13 +180,13 @@ impl NonlinearDevice for Mosfet {
         // Drain node equation
         matrix.stamp(self.node_drain, self.node_drain, gds);
         matrix.stamp(self.node_drain, self.node_gate, gm);
-        matrix.stamp(self.node_drain, self.node_source, -gm - gds - gmb);
+        matrix.stamp(self.node_drain, self.node_source, -gss);
         matrix.stamp(self.node_drain, self.node_bulk, gmb);
 
         // Source node equation (current exits source)
         matrix.stamp(self.node_source, self.node_drain, -gds);
         matrix.stamp(self.node_source, self.node_gate, -gm);
-        matrix.stamp(self.node_source, self.node_source, gm + gds + gmb);
+        matrix.stamp(self.node_source, self.node_source, gss);
         matrix.stamp(self.node_source, self.node_bulk, -gmb);
 
         // Stamp equivalent current source
@@ -201,9 +207,9 @@ impl NonlinearDevice for Mosfet {
         // Every voltage, channel-current, and previous-junction field below
         // participates in a strict `< tolerance` predicate. IEEE NaN/Inf
         // therefore fails closed without a separate scan. The current body
-        // conductances are the only convergence-state fields not consumed by
-        // those expressions, so retain their explicit validity guard.
-        if !self.gbs.is_finite() || !self.gbd.is_finite() {
+        // conductances and independent source diagonal do not participate in
+        // those expressions, so validate all three explicitly.
+        if !self.gbs.is_finite() || !self.gbd.is_finite() || !self.gss.is_finite() {
             return false;
         }
 
@@ -223,10 +229,19 @@ impl NonlinearDevice for Mosfet {
             return false;
         }
 
-        let drain_current_hat = self.id_prev
-            + self.gm_prev * (self.eval_vgs - self.eval_vgs_prev)
-            + self.gds_prev * (self.eval_vds - self.eval_vds_prev)
-            + self.gmb_prev * (self.eval_vbs - self.eval_vbs_prev);
+        let drain_current_hat = if self.polarity() * self.eval_vds_prev < 0.0 {
+            self.id_prev
+                + self.gm_prev
+                    * ((self.eval_vgs - self.eval_vds) - (self.eval_vgs_prev - self.eval_vds_prev))
+                + self.gout_prev * (self.eval_vds - self.eval_vds_prev)
+                + self.gmb_prev
+                    * ((self.eval_vbs - self.eval_vds) - (self.eval_vbs_prev - self.eval_vds_prev))
+        } else {
+            self.id_prev
+                + self.gm_prev * (self.eval_vgs - self.eval_vgs_prev)
+                + self.gout_prev * (self.eval_vds - self.eval_vds_prev)
+                + self.gmb_prev * (self.eval_vbs - self.eval_vbs_prev)
+        };
         let drain_current_tol = reltol * self.id.abs().max(drain_current_hat.abs()) + current_tol;
         if (drain_current_hat - self.id)
             .abs()
@@ -270,6 +285,66 @@ mod tests {
             ],
             "{context}"
         );
+    }
+
+    #[test]
+    fn inverse_channel_output_steps_satisfy_the_current_convergence_contract() {
+        for (mut mos, polarity) in [
+            (Mosfet::new_nmos("n".into(), 1, 2, 3, 4), 1.0),
+            (Mosfet::new_pmos("p".into(), 1, 2, 3, 4), -1.0),
+        ] {
+            mos.vto = -polarity;
+            mos.kp = 1.0;
+            mos.lambda = 1.0;
+            mos.gamma = 0.0;
+            mos.w = 1.0;
+            mos.l = 1.0;
+            mos.update(&[0.0, 0.0, 2.0 * polarity, 0.0]);
+            mos.update(&[0.0, 0.0, 2.0001 * polarity, 0.0]);
+            // Output current is exactly affine at fixed intrinsic overdrive.
+            // Permit this small voltage move while requiring the predictor
+            // to match the physical current to floating-point precision.
+            assert!(mos.is_converged(NonlinearConvergenceCriteria::new(0.01, 1e-14, 1e-14)));
+        }
+    }
+
+    #[test]
+    fn inverse_channel_cache_preserves_the_intrinsic_output_slope() {
+        for level in [1, 2, 3, 6] {
+            for (mut mos, polarity) in [
+                (
+                    Mosfet::new_nmos("n".into(), 1, 2, 3, 4).with_level(level),
+                    1.0,
+                ),
+                (
+                    Mosfet::new_pmos("p".into(), 1, 2, 3, 4).with_level(level),
+                    -1.0,
+                ),
+            ] {
+                mos.vto = -polarity;
+                mos.kp = 1e20;
+                mos.kc = 1e20;
+                mos.lambda = 1e-20;
+                mos.lambda0 = 1e-20;
+                mos.gamma = 0.0;
+                mos.w = 1.0;
+                mos.l = 1.0;
+                let (_, _, _, forward_gds, _, _, _) =
+                    mos.linearized_operating_point(0.0, 2.0 * polarity, 0.0);
+                let candidate = [0.0, 0.0, 2.0 * polarity, 0.0];
+                mos.update(&candidate);
+                assert_eq!(mos.gss, forward_gds, "level {level}, {:?}", mos.mos_type);
+                let constants = mos.classic_transient_constants();
+                let mut cached = mos.clone();
+                cached.update_with_classic_transient_constants(&candidate, &constants);
+                mos.update(&candidate);
+                assert_eq!(
+                    cached.nonlinear_state_snapshot(),
+                    mos.nonlinear_state_snapshot()
+                );
+                assert!(mos.is_converged(NonlinearConvergenceCriteria::default()));
+            }
+        }
     }
 
     #[test]
@@ -385,7 +460,7 @@ mod tests {
     #[test]
     fn classic_mos_convergence_fails_closed_for_every_nonfinite_input() {
         type Corrupt = fn(&mut Mosfet, Value);
-        let corruptions: [Corrupt; 25] = [
+        let corruptions: [Corrupt; 26] = [
             |mos, value| mos.vgs = value,
             |mos, value| mos.vgs_prev = value,
             |mos, value| mos.vds = value,
@@ -401,8 +476,9 @@ mod tests {
             |mos, value| mos.id = value,
             |mos, value| mos.id_prev = value,
             |mos, value| mos.gm_prev = value,
-            |mos, value| mos.gds_prev = value,
+            |mos, value| mos.gout_prev = value,
             |mos, value| mos.gmb_prev = value,
+            |mos, value| mos.gss = value,
             |mos, value| mos.ibs = value,
             |mos, value| mos.gbs = value,
             |mos, value| mos.ibd = value,

@@ -342,7 +342,7 @@ impl Mosfet {
         vgs: Value,
         vds: Value,
         vbs: Value,
-    ) -> (Value, MosRegion, Value, Value, Value) {
+    ) -> (Value, MosRegion, Value, Value, Value, Value) {
         let eval = self.level2_evaluate(vgs, vds, vbs);
         let p = self.polarity();
         let vgs_m = p * vgs;
@@ -356,15 +356,8 @@ impl Mosfet {
         let lvgs = if mode > 0.0 { vgs_m } else { vgd_m };
 
         let forward = self.level2_forward_operating_point(lvgs, lvds, lvbs);
-        let (gm, gds, gmb) = if mode > 0.0 {
-            (forward.gm, forward.gds, forward.gmb)
-        } else {
-            (
-                -forward.gm,
-                forward.gm + forward.gds + forward.gmb,
-                -forward.gmb,
-            )
-        };
+        let (gm, gds, gmb, gss) =
+            Self::terminal_channel_derivatives(mode < 0.0, forward.gm, forward.gds, forward.gmb);
         let sanitize = |value: Value| if value.is_finite() { value } else { 0.0 };
 
         (
@@ -373,6 +366,7 @@ impl Mosfet {
             sanitize(gm),
             sanitize(gds),
             sanitize(gmb),
+            gss,
         )
     }
 
@@ -1501,7 +1495,7 @@ mod tests {
         let cases = [(1.2, 0.15, -0.02), (3.5, 1.8, -0.35), (2.0, -0.4, -0.1)];
 
         for (vgs, vds, vbs) in cases {
-            let (_, _, gm, gds, gmb) = mos.level2_operating_point(vgs, vds, vbs);
+            let (_, _, gm, gds, gmb, _) = mos.level2_operating_point(vgs, vds, vbs);
             let finite_difference = |dvgs: Value, dvds: Value, dvbs: Value| {
                 let step = 1.0e-7;
                 let plus =
@@ -1554,7 +1548,7 @@ mod tests {
         // neglected), so a finite-difference check cannot apply here.
         // Oracle: ngspice-46 .op, print @m1[gm] @m1[gds] @m1[gmbs].
         let mos = mos2_vmax_device();
-        let (_, _, gm, gds, gmb) = mos.level2_operating_point(1.5, 2.0, 0.0);
+        let (_, _, gm, gds, gmb, _) = mos.level2_operating_point(1.5, 2.0, 0.0);
         assert_relative(gm, 8.231405e-4, 1.0e-6);
         assert_relative(gds, 1.639541e-5, 1.0e-6);
         assert_relative(gmb, 7.948465e-5, 1.0e-6);
@@ -1568,7 +1562,7 @@ mod tests {
         let cases = [(1.2, 0.2, -0.2), (2.5, 0.5, -0.5)];
 
         for (vgs, vds, vbs) in cases {
-            let (_, _, gm, gds, gmb) = mos.level2_operating_point(vgs, vds, vbs);
+            let (_, _, gm, gds, gmb, _) = mos.level2_operating_point(vgs, vds, vbs);
             let finite_difference = |dvgs: Value, dvds: Value, dvbs: Value| {
                 let step = 1.0e-7;
                 let plus =
@@ -1589,7 +1583,7 @@ mod tests {
         let mos = mos2_reference_device();
         let vgs = 2.0;
         let vbs = -0.1;
-        let (_, _, gm, gds, gmb) = mos.level2_operating_point(vgs, 0.0, vbs);
+        let (_, _, gm, gds, gmb, _) = mos.level2_operating_point(vgs, 0.0, vbs);
         let effective_length = mos.level2_effective_length();
         let phi_min_vbs = mos.phi - vbs;
         let sarg = phi_min_vbs.sqrt();
@@ -1630,7 +1624,7 @@ mod tests {
         let vbs = -0.15;
 
         let eval = mos.level2_evaluate(vgs, vds, vbs);
-        let (_, _, gm, gds, gmb) = mos.level2_operating_point(vgs, vds, vbs);
+        let (_, _, gm, gds, gmb, _) = mos.level2_operating_point(vgs, vds, vbs);
 
         assert!(eval.id.is_finite() && eval.id > 0.0, "id={:e}", eval.id);
         assert!(gm.is_finite() && gm > 0.0, "gm={gm:e}");

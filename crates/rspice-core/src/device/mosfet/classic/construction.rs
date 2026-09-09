@@ -159,6 +159,7 @@ impl Mosfet {
             gm: 0.0,
             gds: 0.0,
             gmb: 0.0,
+            gss: 0.0,
             id_eq: 0.0,
             ibs: 0.0,
             gbs: 0.0,
@@ -174,7 +175,7 @@ impl Mosfet {
             eval_vbs_prev: 0.0,
             id_prev: 0.0,
             gm_prev: 0.0,
-            gds_prev: 0.0,
+            gout_prev: 0.0,
             gmb_prev: 0.0,
             ibs_prev: 0.0,
             gbs_prev: 0.0,
@@ -559,36 +560,35 @@ impl Mosfet {
         vgs: Value,
         vds: Value,
         vbs: Value,
-    ) -> (Value, MosRegion, Value, Value, Value, Value) {
-        if self.legacy_bsim_sized.is_some() {
-            let (id, region, gm, gds, gmb) =
-                self.legacy_bsim_linearized_operating_point(vgs, vds, vbs);
-            let id_eq = id - gm * vgs - gds * vds - gmb * vbs;
-            return (id, region, gm, gds, gmb, id_eq);
-        }
-
-        if self.level == 6 {
-            let (id, region, gm, gds, gmb) = self.level6_operating_point(vgs, vds, vbs);
-            let id_eq = id - gm * vgs - gds * vds - gmb * vbs;
-            return (id, region, gm, gds, gmb, id_eq);
-        }
-
-        if self.level == 2 {
-            let (id, region, gm, gds, gmb) = self.level2_operating_point(vgs, vds, vbs);
-            let id_eq = id - gm * vgs - gds * vds - gmb * vbs;
-            return (id, region, gm, gds, gmb, id_eq);
-        }
-
-        if self.level == 1 {
-            let (id, region, gm, gds, gmb) = self.level1_operating_point(vgs, vds, vbs);
-            let id_eq = id - gm * vgs - gds * vds - gmb * vbs;
-            return (id, region, gm, gds, gmb, id_eq);
-        }
-
-        let (id, region) = self.calculate_id(vgs, vds, vbs);
-        let (gm, gds, gmb) = self.small_signal(vgs, vds, vbs);
-        let id_eq = id - gm * vgs - gds * vds - gmb * vbs;
-        (id, region, gm, gds, gmb, id_eq)
+    ) -> (Value, MosRegion, Value, Value, Value, Value, Value) {
+        let (id, region, gm, gds, gmb, gss) = if self.legacy_bsim_sized.is_some() {
+            self.legacy_bsim_linearized_operating_point(vgs, vds, vbs)
+        } else if self.level == 6 {
+            self.level6_operating_point(vgs, vds, vbs)
+        } else if self.level == 2 {
+            self.level2_operating_point(vgs, vds, vbs)
+        } else if self.level == 1 {
+            self.level1_operating_point(vgs, vds, vbs)
+        } else if self.uses_mos3_core() {
+            let state = self.mos3_state(vgs, vds, vbs);
+            let (gm, gds, gmb, gss) = Self::terminal_channel_derivatives(
+                self.polarity() * vds < 0.0,
+                state.gm,
+                state.gds,
+                state.gmb,
+            );
+            (self.polarity() * state.ids, state.region, gm, gds, gmb, gss)
+        } else {
+            let (id, region) = self.calculate_id(vgs, vds, vbs);
+            let (gm, gds, gmb) = self.small_signal(vgs, vds, vbs);
+            (id, region, gm, gds, gmb, gm + gds + gmb)
+        };
+        let id_eq = if self.polarity() * vds < 0.0 {
+            id - gm * (vgs - vds) - gss * vds - gmb * (vbs - vds)
+        } else {
+            id - gm * vgs - gds * vds - gmb * vbs
+        };
+        (id, region, gm, gds, gmb, gss, id_eq)
     }
 
     #[inline]
@@ -598,19 +598,23 @@ impl Mosfet {
         vds: Value,
         vbs: Value,
         constants: &ClassicMosTransientConstants,
-    ) -> (Value, MosRegion, Value, Value, Value, Value) {
+    ) -> (Value, MosRegion, Value, Value, Value, Value, Value) {
         if self.level != 1 || self.legacy_bsim_sized.is_some() {
             return self.linearized_operating_point(vgs, vds, vbs);
         }
-        let (id, region, gm, gds, gmb) = self.level1_operating_point_with_constants(
+        let (id, region, gm, gds, gmb, gss) = self.level1_operating_point_with_constants(
             vgs,
             vds,
             vbs,
             constants.level1_sqrt_phi,
             constants.level1_beta,
         );
-        let id_eq = id - gm * vgs - gds * vds - gmb * vbs;
-        (id, region, gm, gds, gmb, id_eq)
+        let id_eq = if self.polarity() * vds < 0.0 {
+            id - gm * (vgs - vds) - gss * vds - gmb * (vbs - vds)
+        } else {
+            id - gm * vgs - gds * vds - gmb * vbs
+        };
+        (id, region, gm, gds, gmb, gss, id_eq)
     }
 
     /// Whether the linearization cached by `update` is valid for the given

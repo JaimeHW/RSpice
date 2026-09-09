@@ -209,6 +209,27 @@ mod wasm_tests {
     use crate::js_interop::{js_array_property, js_property};
 
     #[wasm_bindgen_test]
+    fn reverse_mos_preserves_small_output_conductance_in_wasm() {
+        let engine = rspice_core::Engine::default();
+        let abort = rspice_core::abort_signal::NoAbort;
+        for (kind, polarity) in [("NMOS", 1), ("PMOS", -1)] {
+            let netlist = rspice_core::Netlist::parse(&format!(
+                "reverse MOS output slope\nV1 out 0 DC {} AC 1\nM1 0 0 out 0 mm W=1 L=1\n.model mm {kind}(LEVEL=1 KP=1e20 VTO={} LAMBDA=1e-20 IS=0)\n.end\n",
+                2 * polarity, -polarity,
+            )).unwrap();
+            let ac = engine.run_ac_with_abort(&netlist, &[1e6], &abort).unwrap();
+            let branch = ac[0]
+                .branch_names
+                .iter()
+                .position(|name| name.eq_ignore_ascii_case("V1"))
+                .unwrap();
+            assert!(
+                (ac[0].currents[branch] + rspice_core::Complex64::new(0.5, 0.0)).norm() < 1e-10
+            );
+        }
+    }
+
+    #[wasm_bindgen_test]
     fn tied_admittance_preserves_dc_ac_and_transient_in_wasm() {
         let engine = rspice_core::Engine::default();
         let abort = rspice_core::abort_signal::NoAbort;
