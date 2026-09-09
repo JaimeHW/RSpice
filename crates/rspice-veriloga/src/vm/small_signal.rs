@@ -27,6 +27,11 @@ pub(crate) struct SmallSignalVm<'a> {
     context: &'a VmContext,
     variables: Vec<Complex64>,
     stack: Vec<Complex64>,
+    // A VM borrows one immutable operating-point context at one frequency.
+    // Cache transfer responses across assignment and Jacobian programs, while
+    // keeping each instruction's input/action outside the cache.
+    laplace_responses: Vec<Option<Complex64>>,
+    zi_responses: Vec<Option<Complex64>>,
     frequency_hz: f64,
     omega: f64,
 }
@@ -67,6 +72,8 @@ impl<'a> SmallSignalVm<'a> {
                 .map(|value| Complex64::new(value, 0.0))
                 .collect(),
             stack: Vec::with_capacity(32),
+            laplace_responses: Vec::new(),
+            zi_responses: Vec::new(),
             frequency_hz,
             omega,
         })
@@ -309,17 +316,26 @@ impl<'a> SmallSignalVm<'a> {
                 layout.filter_id
             )));
         }
-        let (real, imag) = if derivative {
-            filter.frequency_response_rectangular(self.frequency_hz)
-        } else {
-            filter.dc_gain().map(|gain| (gain, 0.0))
-        }
-        .map_err(|error| {
+        let map_error = |error| {
             VmError::InvalidNumericResult(format!("zi filter {}: {error}", layout.filter_id))
-        })?;
+        };
+        let response = if derivative {
+            cached_filter_response(
+                &mut self.zi_responses,
+                self.context.zi_filters.len(),
+                layout.filter_id,
+                || {
+                    filter
+                        .frequency_response_rectangular(self.frequency_hz)
+                        .map_err(map_error)
+                },
+            )?
+        } else {
+            Complex64::new(filter.dc_gain().map_err(map_error)?, 0.0)
+        };
         self.stack.truncate(start);
-        self.stack
-            .push(multiply_complex(Complex64::new(real, imag), action));
+        self.stack.push(multiply_complex(response, action));
+
         Ok(())
     }
 
@@ -775,19 +791,42 @@ impl<'a> SmallSignalVm<'a> {
                     .laplace_filters
                     .get(*filter_id)
                     .ok_or(VmError::InvalidInstruction("missing laplace filter"))?;
-                let (real, imag) = filter
-                    .frequency_response_rectangular(self.frequency_hz)
-                    .map_err(|error| {
-                        VmError::InvalidNumericResult(format!(
-                            "Laplace filter {filter_id}: {error}"
-                        ))
-                    })?;
-                self.stack
-                    .push(multiply_complex(Complex64::new(real, imag), input));
+                let response = cached_filter_response(
+                    &mut self.laplace_responses,
+                    self.context.laplace_filters.len(),
+                    *filter_id,
+                    || {
+                        filter
+                            .frequency_response_rectangular(self.frequency_hz)
+                            .map_err(|error| {
+                                VmError::InvalidNumericResult(format!(
+                                    "Laplace filter {filter_id}: {error}"
+                                ))
+                            })
+                    },
+                )?;
+                self.stack.push(multiply_complex(response, input));
             }
         }
         Ok(())
     }
+}
+
+/// The caller has resolved `filter_id` in the immutable context before lookup.
+fn cached_filter_response(
+    cache: &mut Vec<Option<Complex64>>,
+    filter_count: usize,
+    filter_id: usize,
+    evaluate: impl FnOnce() -> Result<(f64, f64), VmError>,
+) -> Result<Complex64, VmError> {
+    if let Some(Some(response)) = cache.get(filter_id) {
+        return Ok(*response);
+    }
+    let (real, imaginary) = evaluate()?;
+    let response = Complex64::new(real, imaginary);
+    cache.resize(filter_count, None);
+    cache[filter_id] = Some(response);
+    Ok(response)
 }
 
 #[cfg(test)]
@@ -922,6 +961,68 @@ mod tests {
         assert!(vm.execute(&program).is_err());
         program.instructions[1] = Instruction::Jump(usize::MAX);
         assert!(vm.execute(&program).is_err());
+    }
+
+    #[test]
+    fn cached_filter_responses_keep_site_kinds_actions_and_frequencies_distinct() {
+        use crate::codegen::ZiPolynomialLayout;
+        let mut context = ac_context();
+        context.laplace_filters = vec![StateSpaceFilter::lowpass_first_order(1.0).unwrap()];
+        context.zi_filters =
+            vec![crate::zfilter::ZiFilter::new(vec![1.0, 1.0], vec![1.0], 1.0).unwrap()];
+        let layout = ZiRuntimeLayout {
+            filter_id: 0,
+            numerator: ZiPolynomialLayout::Coefficients { len: 2 },
+            denominator: ZiPolynomialLayout::Coefficients { len: 1 },
+            direct_assignment: false,
+        };
+        for analysis in [1, 3] {
+            context.analysis_type = analysis;
+            for frequency in [0.25, 0.75] {
+                let mut vm = SmallSignalVm::new(&context, frequency).unwrap();
+                for action in [2.0, 3.0, -4.0] {
+                    let laplace = BytecodeProgram {
+                        instructions: vec![
+                            Instruction::PushConst(action),
+                            Instruction::LaplaceStateDerivative(0),
+                        ],
+                    };
+                    let response = vm.execute(&laplace).unwrap();
+                    let expected = Complex64::new(
+                        action / (1.0 + frequency * frequency),
+                        -action * frequency / (1.0 + frequency * frequency),
+                    );
+                    assert!((response - expected).norm() <= 8.0 * f64::EPSILON * action.abs());
+                    let mut zi = BytecodeProgram {
+                        instructions: vec![
+                            Instruction::PushConst(1.0),
+                            Instruction::PushConst(1.0),
+                            Instruction::PushConst(1.0),
+                            Instruction::PushConst(1.0),
+                            Instruction::PushConst(0.0),
+                            Instruction::PushConst(action),
+                            Instruction::PushConst(0.0),
+                            Instruction::ZiStateDerivative(layout),
+                        ],
+                    };
+                    let expected =
+                        Complex64::new(action, if frequency == 0.25 { -action } else { action });
+                    assert!(
+                        (vm.execute(&zi).unwrap() - expected).norm()
+                            <= 8.0 * f64::EPSILON * action.abs()
+                    );
+                    *zi.instructions.last_mut().unwrap() = Instruction::ZiState(layout);
+                    assert_eq!(vm.execute(&zi).unwrap(), Complex64::new(2.0 * action, 0.0));
+                    let dc = BytecodeProgram {
+                        instructions: vec![
+                            Instruction::PushConst(action),
+                            Instruction::LaplaceState(0),
+                        ],
+                    };
+                    assert_eq!(vm.execute(&dc).unwrap(), Complex64::new(action, 0.0));
+                }
+            }
+        }
     }
 
     #[test]
