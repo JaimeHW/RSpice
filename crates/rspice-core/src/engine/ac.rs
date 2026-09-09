@@ -2768,13 +2768,16 @@ impl Engine {
         for i in 0..circuit.current_sources.len() {
             let ac_mag = circuit.current_sources.ac_magnitudes[i];
             let ac_phase = circuit.current_sources.ac_phases[i];
-            if ac_mag.abs() <= 1e-15 {
+            if ac_mag == 0.0 {
                 continue;
             }
 
             let i_ac = Complex64::from_polar(ac_mag, ac_phase);
             let np = circuit.current_sources.node_pos[i];
             let nn = circuit.current_sources.node_neg[i];
+            if np == nn {
+                continue;
+            }
 
             if np > 0 {
                 rhs[np - 1] -= i_ac;

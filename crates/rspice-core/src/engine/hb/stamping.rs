@@ -1560,6 +1560,9 @@ impl Engine {
                 self.config.spice_dialect,
             )?;
 
+            if np == nn {
+                continue;
+            }
             // Stamp DC component (harmonic 0)
             if np > 0 {
                 solver.add_dc_source(np - 1, -spectrum.dc); // Current leaves at + terminal

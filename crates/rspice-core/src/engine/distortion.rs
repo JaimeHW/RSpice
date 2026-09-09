@@ -186,6 +186,9 @@ fn build_distortion_rhs(
         let current = Complex64::from_polar(0.5 * excitation.magnitude, excitation.phase);
         let positive = circuit.current_sources.node_pos[index];
         let negative = circuit.current_sources.node_neg[index];
+        if positive == negative {
+            continue;
+        }
         if positive > 0 {
             rhs[positive - 1] -= current;
         }

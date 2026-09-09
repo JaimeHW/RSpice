@@ -17,7 +17,7 @@ const C: f64 = 159.154943091895e-12; // RC corner ~ 1 MHz (w*RC = 1)
 #[test]
 fn periodic_current_waveform_is_independent_of_its_dc_specification() {
     let netlist = Netlist::parse(
-        "periodic current bias\nI1 0 in DC 1e100 SIN(1 1 1meg)\nI2 0 in 3\nL1 in out 1u\nR1 out 0 1\n.end\n",
+        "periodic current bias\nI1 0 in DC 1e100 SIN(1 1 1meg)\nI2 0 in 3\nI3 in in DC -1e100 SIN(1e100 1e100 1meg)\nL1 in out 1u\nR1 out 0 1\n.end\n",
     )
     .unwrap();
     let point = Engine::default()

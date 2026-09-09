@@ -29,6 +29,28 @@ fn coefficient(result: &HbAnalysisResult, node: &str, k: usize) -> num_complex::
 }
 
 #[test]
+fn tied_current_terminals_preserve_the_dc_and_harmonic_solution() {
+    for terminals in ["out out", "0 0"] {
+        let result = run_hb(
+            &format!(
+                "tied HB current terminals\nI1 0 out DC 1 AC 2 37\nI2 {terminals} DC 1e100 AC 1e100 37\nR1 out 0 1\n.end\n"
+            ),
+            1e6,
+            2,
+        );
+        assert!(result.converged);
+        assert!((coefficient(&result, "out", 0).re - 1.0).abs() < 1e-12);
+        // Public HB coefficients are physical peak phasors.
+        let expected = num_complex::Complex64::from_polar(2.0, 37.0_f64.to_radians());
+        let actual = coefficient(&result, "out", 1);
+        assert!(
+            (actual - expected).norm() < 1e-12,
+            "{terminals}: {actual} vs {expected}"
+        );
+    }
+}
+
+#[test]
 fn dc_rail_keeps_its_polarity_through_exact_mna_constraint() {
     // Forward-biased diode behind a +2 V rail: V(vin) must sit at +2 V and the
     // diode node at one forward drop, ~0.72 V for Is=1e-14 at ~13 mA.

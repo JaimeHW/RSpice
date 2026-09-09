@@ -320,6 +320,9 @@ impl CircuitData {
                     self.num_nodes
                 ));
             }
+            if node_pos == node_neg {
+                continue;
+            }
             if node_pos > 0 {
                 b[node_pos - 1] -= source;
             }
@@ -350,6 +353,37 @@ mod tests {
         K1 L1 1 CORE_MODEL\n\
         .model CORE_MODEL CORE (LEVEL=2 MS=510K A=62 C=.92 K=25 ALPHA=3.7e-4 AREA=1.12 GAP=0 PATH=8.49)\n\
         .end\n";
+
+    #[test]
+    fn direct_core_dae_preserves_injections_with_tied_current_terminals() {
+        let deck = BH_LEVEL2_DECK
+            .replace("R1 1 0 1", "Ibefore 1 1 1e100\nR1 1 0 1")
+            .replace(".end", "Iafter 1 1 1e100\n.end");
+        let netlist = Netlist::parse(&deck).unwrap();
+        let mut circuit =
+            Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce))
+                .build_circuit(&netlist)
+                .unwrap();
+        assert!(circuit.supports_direct_xyce_level2_core_dae());
+        let device = &mut circuit.jiles_atherton_inductors[0].device;
+        let trial = device.xyce_core_trial_with_update(0.0, 0.0, 0.0).unwrap();
+        device.cache_xyce_core_trial_endpoint(0.0, 0.0, trial);
+        let mut vectors = XyceDaeVectors::new(circuit.matrix_size());
+        circuit
+            .load_direct_xyce_level2_core_dae(
+                &vec![0.0; circuit.matrix_size()],
+                3.25,
+                0.0,
+                &mut vectors,
+            )
+            .unwrap();
+        let row = circuit.get_node_by_name("1").unwrap() - 1;
+        assert!(
+            (vectors.b()[row] + 1.1).abs() < 1e-14,
+            "B={:?}",
+            vectors.b()
+        );
+    }
 
     #[test]
     fn direct_level2_core_capability_is_fail_closed_and_requires_cached_trial() {

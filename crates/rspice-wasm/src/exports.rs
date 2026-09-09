@@ -209,6 +209,41 @@ mod wasm_tests {
     use crate::js_interop::{js_array_property, js_property};
 
     #[wasm_bindgen_test]
+    fn current_excitation_scale_and_tied_terminals_are_physical_in_wasm() {
+        let engine = rspice_core::Engine::default();
+        let abort = rspice_core::abort_signal::NoAbort;
+        let expected = rspice_core::Complex64::from_polar(1.0, 37.0_f64.to_radians());
+        for magnitude in [1e-15, 1e-16, 1e-300] {
+            let netlist = rspice_core::Netlist::parse(&format!(
+                "small AC current\nI1 0 out DC 0 AC {magnitude} 37\nR1 out 0 1\n.end\n"
+            ))
+            .unwrap();
+            let result = engine.run_ac_with_abort(&netlist, &[1e3], &abort).unwrap();
+            assert!((result[0].voltages[0] / magnitude - expected).norm() < 1e-14);
+        }
+        for terminals in ["out out", "0 0"] {
+            let netlist = rspice_core::Netlist::parse(&format!(
+                "tied current\nI1 0 out DC 1 AC 1 37\nI2 {terminals} DC 1e100 PWL(0 1e100 1n -1e100 2n -1e100) AC 1e100 37\nR1 out 0 1\n.end\n"
+            )).unwrap();
+            let dc = engine.run_dc_op_with_abort(&netlist, &abort).unwrap();
+            assert!((dc.try_voltage_named("out").unwrap() - 1.0).abs() < 1e-12);
+            let ac = engine.run_ac_with_abort(&netlist, &[1e3], &abort).unwrap();
+            assert!((ac[0].voltages[0] - expected).norm() < 1e-14);
+            let tran = engine
+                .run_tran_with_abort(&netlist, 2e-9, 1e-9, &abort)
+                .unwrap();
+            assert_eq!(tran.time.last().copied(), Some(2e-9));
+            assert!(
+                tran.try_voltage_waveform_named("out")
+                    .unwrap()
+                    .iter()
+                    .all(|v| (v - 1.0).abs() < 1e-12)
+            );
+            assert_eq!(engine.convergence_quality().force_accepted_points, 0);
+        }
+    }
+
+    #[wasm_bindgen_test]
     fn centered_poisson_fluctuations_survive_large_bias_cancellation_in_wasm() {
         let grid: Vec<_> = (0..=256).map(|index| f64::from(index) * 1e-9).collect();
         let engine = rspice_core::Engine::new(rspice_core::engine::SimulationConfig {

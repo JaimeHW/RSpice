@@ -23,6 +23,16 @@ R2 out 0 1k
 
 
 class TestTransient:
+    @pytest.mark.parametrize("terminals", ["out out", "0 0"])
+    def test_tied_current_terminals_preserve_other_dc_and_transient_sources(self, engine, terminals):
+        netlist = rspice.Netlist.parse_spice(
+            f"* tied current\nI1 0 out 1\nI2 {terminals} DC 1e100 PWL(0 1e100 1n -1e100 2n -1e100)\nR1 out 0 1\n.end\n"
+        )
+        assert abs(engine.run_dc_op(netlist).voltage("out") - 1) < 1e-12
+        result = engine.run_tran(netlist, stop_time=2e-9, max_step=1e-9)
+        assert result.time[-1] == 2e-9
+        np.testing.assert_allclose(result.voltage_waveform("out"), 1, rtol=0, atol=1e-12)
+
     @pytest.mark.parametrize("mean", [1e20, 1e40, 1e100])
     def test_centered_poisson_fluctuations_survive_large_bias_cancellation(self, engine, mean):
         samples = []

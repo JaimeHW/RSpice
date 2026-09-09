@@ -2107,6 +2107,9 @@ impl CurrentSources {
         for i in 0..self.names.len() {
             let np = self.node_pos[i];
             let nn = self.node_neg[i];
+            if np == nn {
+                continue;
+            }
             let current = self.finite_dc_value(i);
 
             if np > 0 {
@@ -2124,6 +2127,9 @@ impl CurrentSources {
         for i in 0..self.names.len() {
             let np = self.node_pos[i];
             let nn = self.node_neg[i];
+            if np == nn {
+                continue;
+            }
             let current = self.finite_dc_value(i) * scale;
 
             if np > 0 {
@@ -2141,22 +2147,17 @@ impl CurrentSources {
     #[inline]
     pub fn stamp_transient_rhs(&self, rhs: &mut [Value], time: Value) {
         for i in 0..self.names.len() {
-            let value = self.source_specs[i].as_ref().map_or_else(
-                || self.finite_dc_value(i),
-                |spec| {
-                    VoltageSources::evaluate_source_at_time_with_context_and_pwl(
-                        spec,
-                        time,
-                        self.transient_context,
-                        self.pwl_waveforms[i].as_deref(),
-                    )
-                },
-            );
+            let np = self.node_pos[i];
+            let nn = self.node_neg[i];
+            // The incidence is exactly zero for tied terminals. Subtracting
+            // and re-adding a large value can erase other source contributions.
+            if np == nn {
+                continue;
+            }
+            let value = self.value_at_time(i, time);
             if value == 0.0 {
                 continue;
             }
-            let np = self.node_pos[i];
-            let nn = self.node_neg[i];
             if np > 0 {
                 rhs[np - 1] -= value;
             }
@@ -3461,6 +3462,39 @@ mod tests {
         sources.stamp_transient_rhs(&mut rhs, 0.5e-6);
         assert_close(rhs[0], -0.5e-3);
         assert_close(sources.max_dc_to_transient_delta(0.5e-6), 0.5e-3);
+    }
+
+    #[test]
+    fn tied_current_terminals_preserve_every_existing_rhs_entry() {
+        for node in [0, 1, 2] {
+            for magnitude in [1e20, Value::MAX, -Value::MAX] {
+                let mut sources = CurrentSources::new();
+                sources.add_with_ac_and_spec(
+                    "tied".to_owned(),
+                    node,
+                    node,
+                    SourceExcitation {
+                        dc_value: magnitude,
+                        ac_magnitude: 0.0,
+                        ac_phase: 0.0,
+                        source_spec: None,
+                    },
+                );
+                for mode in 0..3 {
+                    let mut rhs = [1.0, -2.0];
+                    match mode {
+                        0 => sources.stamp_all(&mut rhs),
+                        1 => sources.stamp_all_scaled(&mut rhs, 0.5),
+                        _ => sources.stamp_transient_rhs(&mut rhs, 1e-9),
+                    }
+                    assert_eq!(
+                        rhs,
+                        [1.0, -2.0],
+                        "node={node}, magnitude={magnitude}, mode={mode}"
+                    );
+                }
+            }
+        }
     }
 
     /// `FS < 0` makes `FC/FM` negative; ngspice's MDI limiter is an

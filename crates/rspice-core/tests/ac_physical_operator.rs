@@ -40,6 +40,34 @@ fn branch_current(point: &AcResult, branch: &str) -> Complex64 {
 }
 
 #[test]
+fn nonzero_current_excitations_have_no_absolute_amplitude_cutoff() {
+    for magnitude in [1e-14, 1e-15, 1e-16, 1e-30, 1e-300] {
+        for phase in [0.0_f64, 37.0, -90.0] {
+            let point = solve_one(&format!(
+                "small current excitation\nI1 0 out DC 0 AC {magnitude} {phase}\nR1 out 0 1\n.end\n"
+            ));
+            let scaled = voltage(&point, "out") / magnitude;
+            let expected = Complex64::from_polar(1.0, phase.to_radians());
+            assert!(
+                (scaled - expected).norm() < 1e-14,
+                "magnitude={magnitude}, phase={phase}: {scaled}"
+            );
+        }
+    }
+}
+
+#[test]
+fn tied_current_terminals_cannot_erase_other_ac_excitations() {
+    for terminals in ["out out", "0 0"] {
+        let point = solve_one(&format!(
+            "tied AC current terminals\nI1 0 out DC 0 AC 1 37\nI2 {terminals} DC 0 AC 1e100 37\nR1 out 0 1\n.end\n"
+        ));
+        let expected = Complex64::from_polar(1.0, 37.0_f64.to_radians());
+        assert!((voltage(&point, "out") - expected).norm() < 1e-14);
+    }
+}
+
+#[test]
 fn waveform_bias_is_retained_when_linearizing_a_nonlinear_ac_circuit() {
     for waveform in [
         "SIN(.65 .05 1meg)",

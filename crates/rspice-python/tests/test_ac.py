@@ -27,6 +27,24 @@ FC = 1.0 / (2 * math.pi * 1e3 * 1e-6)  # RC corner: 159.155 Hz
 
 
 class TestAcBasics:
+    @pytest.mark.parametrize("magnitude", [1e-15, 1e-16, 1e-300])
+    def test_nonzero_current_excitations_have_no_absolute_amplitude_cutoff(self, engine, magnitude):
+        netlist = rspice.Netlist.parse_spice(
+            f"* small current excitation\nI1 0 out DC 0 AC {magnitude} 37\nR1 out 0 1\n.end\n"
+        )
+        actual = engine.run_ac(netlist, [1e3]).voltage_complex("out")[0]
+        expected = complex(math.cos(math.radians(37)), math.sin(math.radians(37)))
+        assert abs(actual / magnitude - expected) < 1e-14
+
+    @pytest.mark.parametrize("terminals", ["out out", "0 0"])
+    def test_tied_current_terminals_preserve_other_ac_excitations(self, engine, terminals):
+        netlist = rspice.Netlist.parse_spice(
+            f"* tied AC current\nI1 0 out DC 0 AC 1 37\nI2 {terminals} DC 0 AC 1e100 37\nR1 out 0 1\n.end\n"
+        )
+        actual = engine.run_ac(netlist, [1e3]).voltage_complex("out")[0]
+        expected = complex(math.cos(math.radians(37)), math.sin(math.radians(37)))
+        assert abs(actual - expected) < 1e-14
+
     @pytest.mark.parametrize(
         "waveform",
         ["SIN(.65 .05 1meg)", "PULSE(.65 .7 0 1n 1n 5n 10n)", "PWL(0 .65 20n .7)"],
