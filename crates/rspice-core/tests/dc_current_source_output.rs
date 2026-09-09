@@ -5,6 +5,43 @@ use rspice_core::netlist::Netlist;
 use rspice_core::resource::ResourceLimits;
 
 #[test]
+fn tied_current_terminals_cannot_erase_other_sources_in_dc_or_transient() {
+    use rspice_core::engine::{SimulationConfig, SpiceDialect};
+    for dialect in [
+        SpiceDialect::BestAvailable,
+        SpiceDialect::Ngspice,
+        SpiceDialect::Xyce,
+    ] {
+        let engine = Engine::new(SimulationConfig::default().with_spice_dialect(dialect));
+        for terminals in ["out out", "0 0"] {
+            let netlist = Netlist::parse(&format!(
+                "tied current terminals\nI1 0 out 1\nI2 {terminals} DC 1e100 PWL(0 1e100 1n -1e100 2n -1e100)\nR1 out 0 1\n.end\n"
+            )).unwrap();
+            assert!(
+                (engine
+                    .run_dc_op(&netlist)
+                    .unwrap()
+                    .try_voltage_named("out")
+                    .unwrap()
+                    - 1.0)
+                    .abs()
+                    < 1e-12
+            );
+            let result = engine.run_tran(&netlist, 2e-9, 1e-9).unwrap();
+            assert_eq!(result.time.last().copied(), Some(2e-9));
+            assert!(
+                result
+                    .try_voltage_waveform_named("out")
+                    .unwrap()
+                    .iter()
+                    .all(|value| (value - 1.0).abs() < 1e-12)
+            );
+            assert_eq!(engine.convergence_quality().force_accepted_points, 0);
+        }
+    }
+}
+
+#[test]
 fn waveform_ac_terms_preserve_dc_bias_and_explicit_overrides() {
     // ngspice 46 retains 0.65 V for all three waveforms with or without AC.
     // Test both polarities of the MNA source interface and both term orders.

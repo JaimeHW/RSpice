@@ -32,6 +32,39 @@ fn active_current_sources_can_cancel_without_any_voltage_motion() {
 }
 
 #[test]
+fn transient_current_values_do_not_cancel_against_their_dc_specification() {
+    for dialect in [
+        SpiceDialect::BestAvailable,
+        SpiceDialect::Ngspice,
+        SpiceDialect::Xyce,
+    ] {
+        for load in [
+            "",
+            "D1 0 out dm\n.model dm D(IS=1e-14)",
+            "M1 out 0 0 0 mm\n.model mm NMOS(LEVEL=1 VTO=1)",
+        ] {
+            let netlist = Netlist::parse(&format!(
+                "independent DC and transient current\nI1 0 out DC 1e100 PWL(0 1 1n 2 2n 2)\nI2 0 out 3\nR1 out 0 1\n{load}\n.end\n"
+            )).unwrap();
+            let engine = Engine::new(SimulationConfig::default().with_spice_dialect(dialect));
+            let result = engine.run_tran(&netlist, 2e-9, 1e-9).unwrap();
+            assert_eq!(result.time.last().copied(), Some(2e-9));
+            for (time, actual) in result
+                .time
+                .iter()
+                .zip(result.try_voltage_waveform_named("out").unwrap())
+            {
+                let expected = 4.0 + (*time / 1e-9).min(1.0);
+                assert!(
+                    (actual - expected).abs() < 1e-10,
+                    "{dialect:?}, {load}, at {time}: {actual} versus {expected}"
+                );
+            }
+            assert_eq!(engine.convergence_quality().force_accepted_points, 0);
+        }
+    }
+}
+#[test]
 fn current_shunts_are_qualified_by_kcl_instead_of_a_source_to_voltage_ratio() {
     let netlist =
         Netlist::parse("current shunt\nI1 0 out PWL(0 0 1n 1 2n 1 3n 0)\nR1 out 0 1u\n.end\n")

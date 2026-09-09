@@ -7,6 +7,38 @@ use rspice_core::{Engine, Netlist};
 const BIAS: f64 = 0.5;
 const SATURATION_CURRENT: f64 = 1.0e-12;
 
+#[test]
+fn tied_current_terminals_cannot_erase_distortion_input_tones() {
+    for terminals in ["out out", "0 0"] {
+        let netlist = Netlist::parse(&format!(
+            "tied distortion source\nI1 0 out DC 0 DISTOF1 1 37 DISTOF2 .5 -90\nI2 {terminals} DC 0 DISTOF1 1e100 37 DISTOF2 1e100 -90\nR1 out 0 1\n.end\n"
+        )).unwrap();
+        let result = Engine::default()
+            .run_distortion(&netlist, &[1e3], Some(0.9))
+            .unwrap();
+        let point = &result.points[0];
+        for (response, amplitude, phase) in [
+            (&point.fundamental_f1, 1.0, 37.0_f64),
+            (point.fundamental_f2.as_ref().unwrap(), 0.5, -90.0),
+        ] {
+            let node = response
+                .node_names
+                .iter()
+                .position(|name| name.eq_ignore_ascii_case("out"))
+                .unwrap();
+            let expected = rspice_core::Complex64::from_polar(amplitude, phase.to_radians());
+            assert!((response.voltages[node] - expected).norm() < 1e-12);
+        }
+        assert!(point.products.iter().all(|product| {
+            product
+                .response
+                .voltages
+                .iter()
+                .all(|value| value.norm() < 1e-14)
+        }));
+    }
+}
+
 fn run_diode(amplitude: f64, frequencies: &[f64]) -> DistortionAnalysisResult {
     let deck = format!(
         "diode distortion public oracle\n\
