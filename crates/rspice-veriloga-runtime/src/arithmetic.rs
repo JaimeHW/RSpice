@@ -378,6 +378,50 @@ impl Default for BigMagnitude {
 }
 
 impl BigMagnitude {
+    /// A normalized leading-word estimate is at most two integer units above
+    /// the quotient when that quotient fits u64. Verify it against the complete
+    /// integers before rounding; no low limbs are discarded from the result.
+    fn quotient_remainder(&self, divisor: &Self) -> Option<(u64, Self)> {
+        let shift = divisor.top_bit()?.saturating_sub(63);
+        if self
+            .top_bit()
+            .is_some_and(|top| top.saturating_sub(shift) >= 128)
+        {
+            return None;
+        }
+        let leading_divisor = divisor.window_u128(shift);
+        let estimate = self.window_u128(shift) / leading_divisor;
+        let mut quotient = u64::try_from(estimate).ok()?;
+        let mut product = Self::default();
+        for index in 0..divisor.significant_len() {
+            product.add_shifted(
+                u128::from(divisor.word(index)) * u128::from(quotient),
+                index * 64,
+            );
+        }
+        while product.compare(self) == std::cmp::Ordering::Greater {
+            quotient = quotient.checked_sub(1)?;
+            product = product.subtract(divisor);
+        }
+        let remainder = self.subtract(&product);
+        debug_assert!(remainder.compare(divisor) == std::cmp::Ordering::Less);
+        Some((quotient, remainder))
+    }
+
+    fn window_u128(&self, shift: usize) -> u128 {
+        let index = shift / 64;
+        let bits = shift % 64;
+        let (low, high) = if bits == 0 {
+            (self.word(index), self.word(index + 1))
+        } else {
+            (
+                (self.word(index) >> bits) | (self.word(index + 1) << (64 - bits)),
+                (self.word(index + 1) >> bits) | (self.word(index + 2) << (64 - bits)),
+            )
+        };
+        u128::from(low) | (u128::from(high) << 64)
+    }
+
     fn add_shifted(&mut self, value: u128, shift: usize) {
         let limb = shift / 64;
         let intra = shift % 64;
@@ -614,20 +658,38 @@ fn rounded_scaled_ratio(
         )
     };
 
-    let mut quotient = 0_u64;
-    while remainder.compare(&divisor) != std::cmp::Ordering::Less {
+    let subtract_bit = |remainder: &BigMagnitude| -> Result<(u64, BigMagnitude), ArithmeticError> {
         let mut shift = remainder.top_bit().expect("nonzero remainder")
             - divisor.top_bit().expect("nonzero divisor");
         let mut shifted = divisor.shift_left(shift);
-        if shifted.compare(&remainder) == std::cmp::Ordering::Greater {
+        let ordering = shifted.compare(remainder);
+        if ordering == std::cmp::Ordering::Greater {
             shift -= 1;
             shifted = divisor.shift_left(shift);
         }
         if shift >= u64::BITS as usize {
             return Err(ArithmeticError::MantissaBounds);
         }
-        quotient |= 1_u64 << shift;
-        remainder = remainder.subtract(&shifted);
+        if ordering == std::cmp::Ordering::Equal {
+            return Ok((1_u64 << shift, BigMagnitude::default()));
+        }
+        Ok((1_u64 << shift, remainder.subtract(&shifted)))
+    };
+    let mut quotient = 0_u64;
+    if remainder.compare(&divisor) != std::cmp::Ordering::Less {
+        (quotient, remainder) = subtract_bit(&remainder)?;
+        // Preserve the single-subtraction path for exact powers of two and
+        // small quotients; estimate only the remaining dense quotient bits.
+        while remainder.compare(&divisor) != std::cmp::Ordering::Less {
+            if let Some((estimate, residual)) = remainder.quotient_remainder(&divisor) {
+                quotient |= estimate;
+                remainder = residual;
+                break;
+            }
+            let (bit, residual) = subtract_bit(&remainder)?;
+            quotient |= bit;
+            remainder = residual;
+        }
     }
 
     let twice_remainder = remainder.shift_left(1);
@@ -669,6 +731,63 @@ fn encode_f64(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn leading_quotient_estimates_preserve_carries_and_halfway_rounding() {
+        for limbs in [1, 2, 3, 8, 33, 67] {
+            let mut divisor = BigMagnitude::default();
+            for index in 0..limbs {
+                divisor.set_word(index, 0xffff_ffff_ffff_fffe - index as u64 * 2);
+            }
+            let mut half = BigMagnitude::default();
+            for index in 0..limbs {
+                half.set_word(
+                    index,
+                    (divisor.word(index) >> 1) | (divisor.word(index + 1) << 63),
+                );
+            }
+            let one = BigMagnitude::one();
+            let below = half.subtract(&one);
+            let mut above = half.clone();
+            above.add_word(0, 1);
+            for quotient in [0_u64, 1, 1_u64 << 52, (1_u64 << 53) - 1, u64::MAX] {
+                let mut product = BigMagnitude::default();
+                for index in 0..limbs {
+                    product.add_shifted(
+                        u128::from(divisor.word(index)) * u128::from(quotient),
+                        index * 64,
+                    );
+                }
+                for (remainder, increment) in [
+                    (&BigMagnitude::default(), false),
+                    (&below, false),
+                    (&half, quotient & 1 != 0),
+                    (&above, true),
+                ] {
+                    let mut numerator = product.clone();
+                    for index in 0..remainder.significant_len() {
+                        numerator.add_word(index, remainder.word(index));
+                    }
+                    let expected = quotient
+                        .checked_add(u64::from(increment))
+                        .ok_or(ArithmeticError::MantissaBounds);
+                    assert_eq!(
+                        rounded_scaled_ratio(&numerator, &divisor, 0),
+                        expected,
+                        "limbs={limbs}, quotient={quotient}, increment={increment}"
+                    );
+                    assert_eq!(
+                        rounded_scaled_ratio(&numerator.shift_left(65), &divisor, -65),
+                        expected
+                    );
+                    assert_eq!(
+                        rounded_scaled_ratio(&numerator, &divisor.shift_left(65), 65),
+                        expected
+                    );
+                }
+            }
+        }
+    }
 
     #[test]
     fn exact_zero_detection_distinguishes_underflow_and_cancellation() {
