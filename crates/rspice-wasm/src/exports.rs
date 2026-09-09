@@ -262,6 +262,36 @@ mod wasm_tests {
     }
 
     #[wasm_bindgen_test]
+    fn newton_tracker_rejects_nonfinite_and_stale_success_in_wasm() {
+        use rspice_core::solver::{NewtonConfig, NewtonSolver};
+        let finite = [1.0; 17];
+        for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let mut solver = NewtonSolver::new(NewtonConfig::default());
+            solver.init(finite.to_vec());
+            let mut invalid = finite;
+            invalid[16] = value;
+            assert!(!solver.check_convergence(&invalid));
+            assert!(solver.result().is_err());
+            assert!(!solver.check_convergence(&finite));
+            assert!(solver.check_convergence(&finite));
+            assert!(!solver.check_convergence(&[1.0]));
+            assert!(solver.result().is_err());
+        }
+        let mut solver = NewtonSolver::new(NewtonConfig::default());
+        solver.init(vec![1.0]);
+        assert!(!solver.check_convergence(&[0.0]));
+        for (rel_tol, expected) in [(0.5, false), (1.0, true)] {
+            let mut solver = NewtonSolver::new(NewtonConfig {
+                abs_tol: f64::MAX,
+                rel_tol,
+                ..NewtonConfig::default()
+            });
+            solver.init(vec![-f64::MAX; 17]);
+            assert_eq!(solver.check_convergence(&[f64::MAX; 17]), expected);
+        }
+    }
+
+    #[wasm_bindgen_test]
     fn transient_gmin_rescue_observes_cancellation_in_wasm() {
         let netlist = rspice_core::Netlist::parse(
             "cubic continuation rescue\nI1 0 n PULSE(0 -2 0 1f 1f 10n 20n)\nB1 n 0 I={V(n)*V(n)*V(n)-2*V(n)}\n.tran 0 1f uic\n.end\n",

@@ -15,6 +15,85 @@ pub mod rustfft_qualification;
 
 use crate::Value;
 
+/// Componentwise Newton update test shared by scalar and SIMD entry points.
+/// Each finite coordinate must satisfy `|new-old| <= abs_tol + rel_tol*scale`,
+/// where `scale = max(|old|, |new|)`. Both tolerances must be finite and nonnegative.
+pub(crate) fn solution_update_converged(
+    old: &[Value],
+    new: &[Value],
+    abs_tol: Value,
+    rel_tol: Value,
+) -> bool {
+    if old.len() != new.len()
+        || !abs_tol.is_finite()
+        || abs_tol < 0.0
+        || !rel_tol.is_finite()
+        || rel_tol < 0.0
+    {
+        return false;
+    }
+
+    #[cfg(feature = "simd")]
+    let (old, new) = {
+        use wide::f64x4;
+        let end = if old.len() >= 16 {
+            old.len() / 4 * 4
+        } else {
+            0
+        };
+        let absolute = f64x4::splat(abs_tol);
+        let relative = f64x4::splat(rel_tol);
+        let minimum = f64x4::splat(Value::from_bits(1));
+        for start in (0..end).step_by(4) {
+            let a = f64x4::from(&old[start..start + 4]);
+            let b = f64x4::from(&new[start..start + 4]);
+            if !(a.is_finite() & b.is_finite()).all() {
+                return false;
+            }
+            let difference = (b - a).abs();
+            if difference.is_finite().all() {
+                let scale = a.abs().max(b.abs()).max(minimum);
+                if !(difference / scale)
+                    .simd_le(absolute / scale + relative)
+                    .all()
+                {
+                    return false;
+                }
+            } else {
+                // Finite opposite endpoints can have an overflowing difference.
+                // Only those exceptional chunks need the scaled scalar path.
+                for lane in start..start + 4 {
+                    if !solution_component_converged(old[lane], new[lane], abs_tol, rel_tol) {
+                        return false;
+                    }
+                }
+            }
+        }
+        (&old[end..], &new[end..])
+    };
+
+    old.iter()
+        .zip(new)
+        .all(|(&a, &b)| solution_component_converged(a, b, abs_tol, rel_tol))
+}
+
+#[inline]
+fn solution_component_converged(a: Value, b: Value, abs_tol: Value, rel_tol: Value) -> bool {
+    if !a.is_finite() || !b.is_finite() {
+        return false;
+    }
+    // Scaling avoids overflow in both the update and the tolerance sum.
+    // The least subnormal only gives two exact zeros a nonzero denominator.
+    let scale = a.abs().max(b.abs()).max(Value::from_bits(1));
+    let difference = (b - a).abs();
+    let relative_difference = if difference.is_finite() {
+        difference / scale
+    } else {
+        (b / scale - a / scale).abs()
+    };
+    relative_difference <= abs_tol / scale + rel_tol
+}
+
 /// Authenticate an authored frequency ratio without accepting a fraction of
 /// a cycle as floating-point tolerance. Zero is a separate constant case.
 pub(crate) fn is_integral_cycle_count(cycles: Value) -> bool {
@@ -138,6 +217,36 @@ pub fn xyce_hard_min_timestep(current_time: Value) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn update_tolerances_are_consistent_at_extreme_scales_and_simd_boundaries() {
+        let tiny = Value::from_bits(1);
+        for length in [1, 15, 16, 17, 32, 33] {
+            for (old, new, absolute, relative, expected) in [
+                (0.0, 0.0, 0.0, 0.0, true),
+                (0.0, tiny, 0.0, 0.0, false),
+                (0.0, tiny, tiny, 0.0, true),
+                (1.0, 1.5, 0.5, 0.0, true),
+                (1.0, 1.5_f64.next_up(), 0.5, 0.0, false),
+                (-Value::MAX, Value::MAX, Value::MAX, 0.5, false),
+                (-Value::MAX, Value::MAX, Value::MAX, 1.0, true),
+                (Value::MAX, Value::MAX.next_down(), 0.0, 1e-15, true),
+                (Value::MAX, 0.0, 0.0, 1e-15, false),
+            ] {
+                assert_eq!(
+                    solution_update_converged(
+                        &vec![old; length],
+                        &vec![new; length],
+                        absolute,
+                        relative
+                    ),
+                    expected,
+                    "length={length}, old={old}, new={new}, abs={absolute}, rel={relative}"
+                );
+            }
+        }
+        assert!(!solution_update_converged(&[1.0], &[1.0, 2.0], 1e-12, 1e-6));
+    }
 
     #[test]
     fn pwl_feature_width_ignores_redundant_holds_and_retains_ideal_pulses() {

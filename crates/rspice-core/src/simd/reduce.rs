@@ -123,6 +123,7 @@ pub fn sum(slice: &[Value]) -> Value {
 /// Find the maximum absolute value in a slice.
 ///
 /// This is useful for convergence checking where we need the largest change.
+/// A nonfinite coordinate yields infinity, so NaN cannot hide in a norm reduction.
 #[inline]
 pub fn max_abs(slice: &[Value]) -> Value {
     if slice.is_empty() {
@@ -130,7 +131,13 @@ pub fn max_abs(slice: &[Value]) -> Value {
     }
 
     if !should_use_simd(slice.len()) {
-        return slice.iter().map(|x| x.abs()).fold(0.0, f64::max);
+        return slice.iter().fold(0.0, |norm, value| {
+            if value.is_nan() {
+                Value::INFINITY
+            } else {
+                norm.max(value.abs())
+            }
+        });
     }
 
     let aligned_len = slice.len() - (slice.len() % SIMD_WIDTH);
@@ -139,6 +146,9 @@ pub fn max_abs(slice: &[Value]) -> Value {
     let mut i = 0;
     while i < aligned_len {
         let chunk = f64x4::from(&slice[i..i + SIMD_WIDTH]);
+        if chunk.is_nan().any() {
+            return Value::INFINITY;
+        }
         max_vec = max_vec.max(chunk.abs());
         i += SIMD_WIDTH;
     }
@@ -146,6 +156,9 @@ pub fn max_abs(slice: &[Value]) -> Value {
     let mut result = horizontal_max(max_vec);
 
     for &val in &slice[aligned_len..] {
+        if val.is_nan() {
+            return Value::INFINITY;
+        }
         result = result.max(val.abs());
     }
 
@@ -156,6 +169,7 @@ pub fn max_abs(slice: &[Value]) -> Value {
 ///
 /// Computes `max(|a[i] - b[i]|)` - the infinity norm of the difference.
 /// This is the core operation for Newton-Raphson convergence checking.
+/// Nonfinite coordinates yield infinity, including equal infinite endpoints.
 ///
 /// # Panics
 ///
@@ -177,7 +191,13 @@ pub fn max_abs_diff(a: &[Value], b: &[Value]) -> Value {
             .iter()
             .zip(b.iter())
             .map(|(x, y)| (x - y).abs())
-            .fold(0.0, f64::max);
+            .fold(0.0, |norm, difference| {
+                if difference.is_nan() {
+                    Value::INFINITY
+                } else {
+                    norm.max(difference)
+                }
+            });
     }
 
     let aligned_len = a.len() - (a.len() % SIMD_WIDTH);
@@ -188,6 +208,9 @@ pub fn max_abs_diff(a: &[Value], b: &[Value]) -> Value {
         let vec_a = f64x4::from(&a[i..i + SIMD_WIDTH]);
         let vec_b = f64x4::from(&b[i..i + SIMD_WIDTH]);
         let diff = (vec_a - vec_b).abs();
+        if diff.is_nan().any() {
+            return Value::INFINITY;
+        }
         max_vec = max_vec.max(diff);
         i += SIMD_WIDTH;
     }
@@ -195,7 +218,11 @@ pub fn max_abs_diff(a: &[Value], b: &[Value]) -> Value {
     let mut result = horizontal_max(max_vec);
 
     for j in aligned_len..a.len() {
-        result = result.max((a[j] - b[j]).abs());
+        let difference = (a[j] - b[j]).abs();
+        if difference.is_nan() {
+            return Value::INFINITY;
+        }
+        result = result.max(difference);
     }
 
     result
@@ -205,6 +232,7 @@ pub fn max_abs_diff(a: &[Value], b: &[Value]) -> Value {
 ///
 /// Computes `max(|a[i] - b[i]| / max(|a[i]|, |b[i]|, threshold))`.
 /// Used for convergence checking with relative tolerance.
+/// Nonfinite coordinates or a negative/nonfinite threshold yield infinity.
 #[inline]
 pub fn max_rel_diff(a: &[Value], b: &[Value], threshold: Value) -> Value {
     assert_eq!(
@@ -213,16 +241,25 @@ pub fn max_rel_diff(a: &[Value], b: &[Value], threshold: Value) -> Value {
         "max_rel_diff requires equal length slices"
     );
 
-    if a.is_empty() {
-        return 0.0;
+    if !threshold.is_finite() || threshold < 0.0 {
+        return Value::INFINITY;
     }
 
     // This doesn't vectorize as cleanly due to the division, use scalar
     let mut max_rel: Value = 0.0;
     for (x, y) in a.iter().zip(b.iter()) {
+        if !x.is_finite() || !y.is_finite() {
+            return Value::INFINITY;
+        }
         let diff = (x - y).abs();
         let denom = x.abs().max(y.abs()).max(threshold);
-        let rel = diff / denom;
+        let rel = if denom == 0.0 {
+            0.0
+        } else if diff.is_finite() {
+            diff / denom
+        } else {
+            (x / denom - y / denom).abs()
+        };
         max_rel = max_rel.max(rel);
     }
 
@@ -235,21 +272,12 @@ pub fn max_rel_diff(a: &[Value], b: &[Value], threshold: Value) -> Value {
 
 /// Check if two solution vectors have converged.
 ///
-/// Returns `true` if the maximum absolute difference is below `abs_tol`
-/// OR the maximum relative difference is below `rel_tol`.
-///
-/// This combines the two tolerance checks used in Newton-Raphson iteration.
+/// Each finite coordinate must satisfy `|new-old| <= abs_tol + rel_tol*scale`,
+/// where `scale = max(|old|, |new|)`. Invalid tolerances, nonfinite coordinates
+/// and mismatched lengths return false. Empty equal-length vectors satisfy the test.
 #[inline]
 pub fn check_convergence(x_old: &[Value], x_new: &[Value], abs_tol: Value, rel_tol: Value) -> bool {
-    let max_diff = max_abs_diff(x_old, x_new);
-
-    if max_diff < abs_tol {
-        return true;
-    }
-
-    // Check relative tolerance
-    let max_rel = max_rel_diff(x_old, x_new, abs_tol);
-    max_rel < rel_tol
+    crate::numerics::solution_update_converged(x_old, x_new, abs_tol, rel_tol)
 }
 
 //=============================================================================
@@ -280,3 +308,36 @@ fn horizontal_sum(v: f64x4) -> Value {
 //=============================================================================
 // Tests
 //=============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn norms_reject_nonfinite_lanes_in_scalar_vector_and_tail_positions() {
+        for length in [1, 15, 16, 17, 32, 33] {
+            for lane in 0..length {
+                for value in [Value::NAN, Value::INFINITY, Value::NEG_INFINITY] {
+                    let finite = vec![1.0; length];
+                    let mut invalid = finite.clone();
+                    invalid[lane] = value;
+                    assert_eq!(max_abs(&invalid), Value::INFINITY);
+                    assert_eq!(max_abs_diff(&finite, &invalid), Value::INFINITY);
+                    assert_eq!(max_abs_diff(&invalid, &invalid), Value::INFINITY);
+                    assert_eq!(max_rel_diff(&finite, &invalid, 0.0), Value::INFINITY);
+                    assert_eq!(max_rel_diff(&invalid, &invalid, 0.0), Value::INFINITY);
+                    assert!(!check_convergence(&finite, &invalid, 1e-12, 1e-6));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn relative_norm_retains_extreme_finite_differences() {
+        assert_eq!(max_rel_diff(&[-Value::MAX], &[Value::MAX], 0.0), 2.0);
+        assert_eq!(max_rel_diff(&[0.0], &[0.0], 0.0), 0.0);
+        for threshold in [-1.0, Value::NAN, Value::INFINITY] {
+            assert_eq!(max_rel_diff(&[1.0], &[1.0], threshold), Value::INFINITY);
+        }
+    }
+}
