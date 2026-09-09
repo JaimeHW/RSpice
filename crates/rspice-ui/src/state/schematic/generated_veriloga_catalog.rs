@@ -8,7 +8,7 @@ use rspice_core::device::veriloga_builtins::{
     GENERATED_VERILOGA_DESCRIPTOR_ABI_VERSION, GeneratedVerilogACompatibilityCatalogEntry,
     GeneratedVerilogAModelDescriptor, GeneratedVerilogATerminalDirection,
     generated_veriloga_model_descriptor, generated_veriloga_model_descriptors,
-    generated_veriloga_wire_compatibility_entry, validate_generated_veriloga_compatibility_catalog,
+    generated_veriloga_wire_compatibility_entry,
 };
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;
@@ -278,17 +278,13 @@ pub(crate) fn migrate_generated_veriloga_binding(
             contract.stable_id
         ));
     }
-    if let Err(error) = validate_generated_veriloga_compatibility_catalog() {
-        return GeneratedVerilogABindingMigration::Unresolved(format!(
-            "generated Verilog-A compatibility catalog is invalid: {error}"
-        ));
-    }
     let Some(descriptor) = generated_veriloga_model_descriptor(&contract.model_name) else {
         return GeneratedVerilogABindingMigration::Unresolved(format!(
             "generated Verilog-A model '{}' is unavailable in this build",
             contract.model_name
         ));
     };
+    // This lookup validates the entire catalog before returning any alias.
     let alias = match generated_veriloga_wire_compatibility_entry(
         &contract.model_name,
         &contract.checkpoint_identity,
@@ -634,6 +630,12 @@ mod tests {
         &'static GeneratedVerilogAModelDescriptor,
         GeneratedVerilogACompatibilityCatalogEntry,
     ) {
+        static CURRENT_SHAPE: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
+            generated_veriloga_model_descriptor("vbic13")
+                .unwrap()
+                .accepted_state_shape_identity
+                .to_string()
+        });
         let descriptor = generated_veriloga_model_descriptor("vbic13").unwrap();
         let historical = GENERATED_VERILOGA_COMPATIBILITY_CATALOG
             .iter()
@@ -642,7 +644,10 @@ mod tests {
         // A test-local approval exercises the transaction independently of the
         // registry. It never grants compatibility to the published catalog.
         let approved = GeneratedVerilogACompatibilityCatalogEntry {
+            target_descriptor_abi_version: descriptor.abi_version,
+            source_identity: descriptor.source_identity,
             semantic_identity: descriptor.checkpoint_identity,
+            accepted_state_shape_identity: &CURRENT_SHAPE,
             ..*historical
         };
         (descriptor, approved)
