@@ -1311,7 +1311,7 @@ fn arithmetic_error(
         ArithmeticError::ZeroDenominator => {
             ZiFilterError::InvalidEvaluation(format!("{context} has a zero denominator"))
         }
-        ArithmeticError::Overflow => {
+        ArithmeticError::Overflow { .. } => {
             ZiFilterError::InvalidEvaluation(format!("{context} is outside the finite f64 range"))
         }
         ArithmeticError::NonFiniteTerm => {

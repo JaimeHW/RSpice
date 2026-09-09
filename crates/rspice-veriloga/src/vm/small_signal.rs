@@ -10,6 +10,7 @@
 use super::{VmContext, VmError, idtmod_wrapped_candidate};
 use crate::array_index::{ArrayIndexError, checked_array_slot, saturated_array_upper};
 use crate::codegen::{AssignmentStep, BytecodeProgram, Instruction, ZiRuntimeLayout};
+use crate::complex_arithmetic::{divide_complex, multiply_complex};
 use crate::integer_runtime::{IntegerBinaryOperation, integer_binary};
 use crate::timing_contract::{NormalizedSlewRates, normalize_slew_rates};
 use num_complex::Complex64;
@@ -317,7 +318,8 @@ impl<'a> SmallSignalVm<'a> {
             VmError::InvalidNumericResult(format!("zi filter {}: {error}", layout.filter_id))
         })?;
         self.stack.truncate(start);
-        self.stack.push(Complex64::new(real, imag) * action);
+        self.stack
+            .push(multiply_complex(Complex64::new(real, imag), action));
         Ok(())
     }
 
@@ -357,8 +359,10 @@ impl<'a> SmallSignalVm<'a> {
                     self.frequency_hz
                 )));
             }
-            Complex64::from_polar(1.0, phase)
-                * input_derivative.expect("derivative operand was decoded")
+            multiply_complex(
+                Complex64::from_polar(1.0, phase),
+                input_derivative.expect("derivative operand was decoded"),
+            )
         } else {
             Complex64::new(input_real, 0.0)
         };
@@ -479,8 +483,8 @@ impl<'a> SmallSignalVm<'a> {
             }
             Instruction::Add => self.binary("Add", |left, right| left + right)?,
             Instruction::Sub => self.binary("Sub", |left, right| left - right)?,
-            Instruction::Mul => self.binary("Mul", |left, right| left * right)?,
-            Instruction::Div => self.binary("Div", |left, right| left / right)?,
+            Instruction::Mul => self.binary("Mul", multiply_complex)?,
+            Instruction::Div => self.binary("Div", divide_complex)?,
             Instruction::Pow | Instruction::FnPow => self.binary_real("Pow", f64::powf)?,
             Instruction::Mod => self.binary_real("Mod", |left, right| left % right)?,
             Instruction::Shl => self.integer_binary(IntegerBinaryOperation::Shl, "left shift")?,
@@ -576,7 +580,8 @@ impl<'a> SmallSignalVm<'a> {
             }
             Instruction::DdtJacobian => {
                 let input = self.pop("DdtJacobian")?;
-                self.stack.push(Complex64::new(0.0, self.omega) * input);
+                self.stack
+                    .push(multiply_complex(Complex64::new(0.0, self.omega), input));
             }
             Instruction::IdtJacobian => {
                 let input = self.pop("IdtJacobian")?;
@@ -585,7 +590,8 @@ impl<'a> SmallSignalVm<'a> {
                         "idt/idtmod small-signal transfer is singular at zero frequency".into(),
                     ));
                 }
-                self.stack.push(input / Complex64::new(0.0, self.omega));
+                self.stack
+                    .push(divide_complex(input, Complex64::new(0.0, self.omega)));
             }
             Instruction::TableDerivative(table_id) => {
                 let input = self.pop_real("TableDerivative")?;
@@ -776,7 +782,8 @@ impl<'a> SmallSignalVm<'a> {
                             "Laplace filter {filter_id}: {error}"
                         ))
                     })?;
-                self.stack.push(Complex64::new(real, imag) * input);
+                self.stack
+                    .push(multiply_complex(Complex64::new(real, imag), input));
             }
         }
         Ok(())
@@ -794,6 +801,103 @@ mod tests {
         let mut context = VmContext::new(0);
         context.analysis_type = 1;
         context
+    }
+
+    #[test]
+    fn complex_division_preserves_range_and_live_stack_values() {
+        let context = ac_context();
+        let mut vm = SmallSignalVm::new(&context, 1.0).unwrap();
+        for scale in [f64::from_bits(1), 1e-200, 1.0, 1e200, f64::MAX] {
+            for (left, right, expected) in [
+                (
+                    Complex64::new(scale, 0.0),
+                    Complex64::new(scale, 0.0),
+                    Complex64::new(1.0, 0.0),
+                ),
+                (
+                    Complex64::new(scale, scale),
+                    Complex64::new(scale, -scale),
+                    Complex64::new(0.0, 1.0),
+                ),
+                (
+                    Complex64::new(scale, scale),
+                    Complex64::new(scale, scale),
+                    Complex64::new(1.0, 0.0),
+                ),
+                (
+                    Complex64::new(scale, scale),
+                    Complex64::new(0.0, scale),
+                    Complex64::new(1.0, -1.0),
+                ),
+            ] {
+                vm.stack = vec![Complex64::new(7.0, -3.0), left, right];
+                vm.execute_instruction(&Instruction::Div).unwrap();
+                assert_eq!(vm.stack, [Complex64::new(7.0, -3.0), expected]);
+            }
+        }
+        for frequency in [1e-200, 1e200] {
+            let mut vm = SmallSignalVm::new(&context, frequency).unwrap();
+            let program = BytecodeProgram {
+                instructions: vec![Instruction::PushConst(2.0), Instruction::IdtJacobian],
+            };
+            let value = vm.execute(&program).unwrap();
+            assert_eq!(value.re, 0.0);
+            assert_eq!(value.im, -2.0 / (std::f64::consts::TAU * frequency));
+        }
+    }
+
+    #[test]
+    fn complex_products_recover_finite_cross_products_in_bytecode_and_filters() {
+        let mut context = ac_context();
+        let frequency = 1.0 / std::f64::consts::TAU;
+        let tiny = f64::from_bits(1);
+        for (left, right, expected) in [
+            ([1.6e308, 8e307], [1.2, 0.3], [1.68e308, 1.44e308]),
+            ([tiny, tiny], [0.5, 0.5], [0.0, tiny]),
+        ] {
+            let program = BytecodeProgram {
+                instructions: vec![
+                    Instruction::PushConst(left[0]),
+                    Instruction::PushConst(left[1]),
+                    Instruction::DdtJacobian,
+                    Instruction::Add,
+                    Instruction::PushConst(right[0]),
+                    Instruction::PushConst(right[1]),
+                    Instruction::DdtJacobian,
+                    Instruction::Add,
+                    Instruction::Mul,
+                ],
+            };
+            let result = SmallSignalVm::new(&context, frequency)
+                .unwrap()
+                .execute(&program)
+                .expect("both final product components are representable");
+            for (actual, expected) in [result.re, result.im].into_iter().zip(expected) {
+                if expected == 0.0 || expected == tiny {
+                    assert_eq!(actual, expected);
+                } else {
+                    assert!((actual / expected - 1.0).abs() <= 4.0 * f64::EPSILON);
+                }
+            }
+        }
+
+        context.laplace_filters = vec![
+            StateSpaceFilter::new(vec![vec![-2.0]], vec![1.6e308], vec![2.5], 0.0).unwrap(),
+            StateSpaceFilter::new(vec![vec![-4.0]], vec![5.1], vec![1.0], 0.0).unwrap(),
+        ];
+        let program = BytecodeProgram {
+            instructions: vec![
+                Instruction::PushConst(1.0),
+                Instruction::LaplaceStateDerivative(0),
+                Instruction::LaplaceStateDerivative(1),
+            ],
+        };
+        let result = SmallSignalVm::new(&context, frequency)
+            .unwrap()
+            .execute(&program)
+            .expect("the cascade has finite rectangular components");
+        assert!((result.re / 1.68e308 - 1.0).abs() <= 8.0 * f64::EPSILON);
+        assert!((result.im / -1.44e308 - 1.0).abs() <= 8.0 * f64::EPSILON);
     }
 
     #[test]

@@ -29,6 +29,7 @@ use num_complex::Complex64;
 use serde::{Deserialize, Serialize};
 use std::f64::consts::PI;
 
+use crate::complex_arithmetic::{divide_complex, multiply_complex};
 use crate::vm::IntegrationCoefficients;
 
 /// A malformed transfer function or a Laplace evaluation that cannot be
@@ -1090,9 +1091,9 @@ fn solve_complex_system(
                 checked_complex_ratio(mat[row_idx][k], pivot, "frequency-response elimination")?;
             mat[row_idx][k] = Complex64::new(0.0, 0.0);
             for col_idx in (k + 1)..n {
-                mat[row_idx][col_idx] -= factor * pivot_row_values[col_idx];
+                mat[row_idx][col_idx] -= multiply_complex(factor, pivot_row_values[col_idx]);
             }
-            rhs[row_idx] -= factor * rhs_pivot;
+            rhs[row_idx] -= multiply_complex(factor, rhs_pivot);
             if !complex_is_finite(rhs[row_idx])
                 || mat[row_idx].iter().any(|value| !complex_is_finite(*value))
             {
@@ -1118,7 +1119,7 @@ fn solve_complex_system(
         }
         let mut sum = rhs[row_idx];
         for col_idx in (row_idx + 1)..n {
-            sum -= mat[row_idx][col_idx] * solution[col_idx];
+            sum -= multiply_complex(mat[row_idx][col_idx], solution[col_idx]);
         }
         solution[row_idx] =
             checked_complex_ratio(sum, pivot, "frequency-response back substitution")?;
@@ -1375,96 +1376,52 @@ fn checked_complex_ratio(
     denominator: Complex64,
     context: &str,
 ) -> Result<Complex64, LaplaceError> {
-    let numerator_scale = numerator.re.abs().max(numerator.im.abs());
-    let denominator_scale = denominator.re.abs().max(denominator.im.abs());
-    if denominator_scale == 0.0 || !denominator_scale.is_finite() || !numerator_scale.is_finite() {
+    use rspice_veriloga_runtime::arithmetic::sum_products_is_zero;
+
+    if !complex_is_finite(numerator)
+        || !complex_is_finite(denominator)
+        || denominator == Complex64::new(0.0, 0.0)
+    {
         return Err(LaplaceError::InvalidEvaluation(format!(
             "{context} has an invalid divisor or numerator"
         )));
     }
-    if numerator_scale == 0.0 {
-        return Ok(Complex64::new(0.0, 0.0));
-    }
-
-    let numerator_exponent = binary_exponent(numerator_scale);
-    let denominator_exponent = binary_exponent(denominator_scale);
-    let numerator_normalized = Complex64::new(
-        scale_by_power_of_two(numerator.re, -numerator_exponent, context)?,
-        scale_by_power_of_two(numerator.im, -numerator_exponent, context)?,
-    );
-    let denominator_normalized = Complex64::new(
-        scale_by_power_of_two(denominator.re, -denominator_exponent, context)?,
-        scale_by_power_of_two(denominator.im, -denominator_exponent, context)?,
-    );
-    let norm = denominator_normalized.re.mul_add(
-        denominator_normalized.re,
-        denominator_normalized.im * denominator_normalized.im,
-    );
-    let real_normalized = (numerator_normalized.re * denominator_normalized.re
-        + numerator_normalized.im * denominator_normalized.im)
-        / norm;
-    let imaginary_normalized = (numerator_normalized.im * denominator_normalized.re
-        - numerator_normalized.re * denominator_normalized.im)
-        / norm;
-    let exponent = numerator_exponent - denominator_exponent;
-    Ok(Complex64::new(
-        scale_by_power_of_two(real_normalized, exponent, context)?,
-        scale_by_power_of_two(imaginary_normalized, exponent, context)?,
-    ))
-}
-
-fn binary_exponent(value: f64) -> i32 {
-    debug_assert!(value.is_finite() && value > 0.0);
-    let bits = value.to_bits();
-    let encoded_exponent = ((bits >> 52) & 0x7ff) as i32;
-    if encoded_exponent != 0 {
-        encoded_exponent - 1023
-    } else {
-        let significand = bits & ((1_u64 << 52) - 1);
-        let highest_bit = 63 - significand.leading_zeros() as i32;
-        highest_bit - 1074
-    }
-}
-
-fn scale_by_power_of_two(
-    mut value: f64,
-    mut exponent: i32,
-    context: &str,
-) -> Result<f64, LaplaceError> {
-    if value == 0.0 {
-        return Ok(value);
-    }
-    let original = value;
-    while exponent > 1023 {
-        value *= 2.0_f64.powi(1023);
-        exponent -= 1023;
-        if !value.is_finite() {
+    let mut result = divide_complex(numerator, denominator);
+    for (component, terms) in [
+        (
+            &mut result.re,
+            [
+                (numerator.re, denominator.re),
+                (numerator.im, denominator.im),
+            ],
+        ),
+        (
+            &mut result.im,
+            [
+                (numerator.im, denominator.re),
+                (-numerator.re, denominator.im),
+            ],
+        ),
+    ] {
+        if !component.is_finite() {
             return Err(LaplaceError::InvalidEvaluation(format!(
                 "{context} result overflows f64"
             )));
         }
-    }
-    while exponent < -1022 {
-        value *= 2.0_f64.powi(-1022);
-        exponent += 1022;
-        if value == 0.0 {
-            return Err(LaplaceError::InvalidEvaluation(format!(
-                "{context} nonzero result underflows f64"
-            )));
+        if *component == 0.0 {
+            if !sum_products_is_zero(terms.into_iter()).map_err(|error| {
+                LaplaceError::InvalidEvaluation(format!(
+                    "{context} cancellation check failed: {error:?}"
+                ))
+            })? {
+                return Err(LaplaceError::InvalidEvaluation(format!(
+                    "{context} nonzero result underflows f64"
+                )));
+            }
+            *component = 0.0;
         }
     }
-    value *= 2.0_f64.powi(exponent);
-    if !value.is_finite() {
-        return Err(LaplaceError::InvalidEvaluation(format!(
-            "{context} result overflows f64"
-        )));
-    }
-    if value == 0.0 && original != 0.0 {
-        return Err(LaplaceError::InvalidEvaluation(format!(
-            "{context} nonzero result underflows f64"
-        )));
-    }
-    Ok(value)
+    Ok(result)
 }
 
 /// Laplace transform filter type
@@ -1940,6 +1897,22 @@ endmodule
         )
         .expect_err("a true nonzero quotient below f64 must fail closed");
         assert!(error.to_string().contains("underflows"));
+    }
+
+    #[test]
+    fn frequency_response_preserves_components_with_disparate_ranges() {
+        let filter = StateSpaceFilter::new(
+            vec![vec![-1.0, 0.0], vec![-1e-100, -1.0]],
+            vec![1.0, 1e308],
+            vec![0.0, 1.0],
+            0.0,
+        )
+        .expect("finite two-state realization");
+        let (real, imaginary) = filter
+            .frequency_response_rectangular(1e-100 / (2.0 * PI))
+            .expect("both final response components are representable");
+        assert!((real / 1e308 - 1.0).abs() <= 8.0 * f64::EPSILON);
+        assert!((imaginary / (-1e208) - 1.0).abs() <= 8.0 * f64::EPSILON);
     }
 
     #[test]
