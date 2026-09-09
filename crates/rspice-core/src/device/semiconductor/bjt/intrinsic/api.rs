@@ -126,13 +126,8 @@ impl Bjt {
             return;
         }
         let [vc, vb, ve, vs] = self.external_terminal_voltages(voltages);
-        let rows = self.small_signal_row_coefficients(vc, vb, ve, vs);
+        let (rows, source) = self.stamped_reduced_external_system(vc, vb, ve, vs);
         let nodes = self.external_terminal_nodes();
-        // The current/Jacobian pair is evaluated at the limited junction
-        // voltages.  Anchor its affine companion there as well so the direct
-        // O(1) stamp includes the limiter tangent correction.
-        let anchor = self.companion_anchor(vc, vb, ve, vs);
-        let currents = [self.ic, self.ib, self.ie, self.isub];
 
         let stamp_entry =
             |matrix: &mut StaticMatrix, row_idx: usize, col_idx: usize, value: Value| {
@@ -211,15 +206,11 @@ impl Bjt {
             };
 
         for row_idx in 0..EXTERNAL_DIM {
-            let ieq = currents[row_idx]
-                - (0..EXTERNAL_DIM)
-                    .map(|col_idx| rows[row_idx][col_idx] * anchor[col_idx])
-                    .sum::<Value>();
             for (col_idx, &conductance) in rows[row_idx].iter().enumerate().take(EXTERNAL_DIM) {
                 stamp_entry(matrix, row_idx, col_idx, conductance);
             }
             if nodes[row_idx] > 0 {
-                rhs[nodes[row_idx] - 1] -= ieq;
+                rhs[nodes[row_idx] - 1] += source[row_idx];
             }
         }
     }
@@ -311,6 +302,82 @@ mod tests {
                     (direct - expected).abs() <= tolerance,
                     "direct residual {direct:.16e} differs from generic residual {expected:.16e}"
                 );
+            }
+        }
+    }
+
+    #[test]
+    fn tied_legacy_bjt_preserves_preexisting_matrix_and_source() {
+        let params = [("IS".to_owned(), 1e20)].into_iter().collect();
+        for bjt in [
+            Bjt::new_npn("q".into(), 1, 1, 1),
+            Bjt::new_pnp("q".into(), 1, 1, 1),
+        ] {
+            let mut bjt = bjt.with_params(&params);
+            bjt.update(&[1.0]);
+            bjt.update(&[1.0]);
+            assert_eq!(bjt.operating_point_currents(), (0.0, 0.0, 0.0));
+            let mut direct = full_matrix(1);
+            direct.add(0, 0, 1.0);
+            let mut rhs = [1.0];
+            bjt.link(&direct);
+            bjt.stamp_direct(&mut direct, &mut rhs, &[1.0]);
+            assert_eq!(direct.residual_vector(&[2.0], &rhs).unwrap(), vec![1.0]);
+            assert_eq!(rhs, [1.0]);
+            let mut generic = DenseStamper::new(1);
+            generic.matrix[0][0] = 1.0;
+            generic.rhs[0] = 1.0;
+            bjt.stamp_nonlinear(&[1.0], &mut generic, &mut []);
+            assert_eq!(generic.matrix, vec![vec![1.0]]);
+            assert_eq!(generic.rhs, vec![1.0]);
+        }
+    }
+
+    #[test]
+    fn partially_tied_legacy_bjt_stamp_matches_terminal_current_derivative() {
+        for nodes in [[1, 1, 2], [1, 2, 1], [2, 1, 1]] {
+            for polarity in [1.0, -1.0] {
+                for isat in [1e-14, 1e20] {
+                    let params = [("IS".to_owned(), isat)].into_iter().collect();
+                    let mut bjt = if polarity > 0.0 {
+                        Bjt::new_npn("q".into(), nodes[0], nodes[1], nodes[2])
+                    } else {
+                        Bjt::new_pnp("q".into(), nodes[0], nodes[1], nodes[2])
+                    }
+                    .with_params(&params);
+                    let bias = [1.0, 1.0 + polarity * 0.001];
+                    for _ in 0..4 {
+                        bjt.update(&bias);
+                    }
+                    let mut stamp = DenseStamper::new(2);
+                    bjt.stamp_nonlinear(&bias, &mut stamp, &mut []);
+                    let current = |v: [Value; 2]| {
+                        bjt.external_terminal_currents_at_bias(
+                            v[nodes[0] - 1],
+                            v[nodes[1] - 1],
+                            v[nodes[2] - 1],
+                            0.0,
+                        )[[EXT_C, EXT_B, EXT_E][nodes.iter().position(|&node| node == 2).unwrap()]]
+                    };
+                    let expected = current(bias);
+                    assert!(
+                        (stamp.residual(&bias)[1] - expected).abs()
+                            < expected.abs() * 1e-10 + 1e-25
+                    );
+                    let h = 1e-7;
+                    let derivative = (current([bias[0], bias[1] + h])
+                        - current([bias[0], bias[1] - h]))
+                        / (2.0 * h);
+                    assert!(
+                        (stamp.matrix[1][1] - derivative).abs() < derivative.abs() * 1e-7,
+                        "{nodes:?}, polarity={polarity}, IS={isat}: {} vs {derivative}",
+                        stamp.matrix[1][1]
+                    );
+                    assert_eq!(stamp.matrix[0][0], stamp.matrix[1][1]);
+                    assert_eq!(stamp.matrix[0][1], -stamp.matrix[1][1]);
+                    assert_eq!(stamp.matrix[1][0], -stamp.matrix[1][1]);
+                    assert_eq!(stamp.rhs[0], -stamp.rhs[1]);
+                }
             }
         }
     }

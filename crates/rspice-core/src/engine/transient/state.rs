@@ -952,13 +952,14 @@ impl Engine {
             let (base_static_g, base_static_i_eq) =
                 Self::vbic_static_stamped_external_system(bjt, &[vc, vb, ve, vs]);
             vbic_snapshot_cache[idx] = Some(snapshot);
-            let Some((y_total, reduced_i_eq)) =
+            let Some((mut y_total, mut reduced_i_eq)) =
                 Self::vbic_reduce_transient_external_system(&linearization)
             else {
                 vbic_snapshot_cache[idx] = None;
                 continue;
             };
 
+            bjt.project_legacy_tied_terminal_system(&mut y_total, &mut reduced_i_eq);
             let mut delta = [[0.0; BJT_EXTERNAL_STATE_DIM]; BJT_EXTERNAL_STATE_DIM];
             let mut delta_i_eq = [0.0; BJT_EXTERNAL_STATE_DIM];
             for row in 0..BJT_EXTERNAL_STATE_DIM {

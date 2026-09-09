@@ -2643,26 +2643,19 @@ impl NonlinearDevice for Bjt {
             return;
         }
         let biases = self.external_terminal_voltages(voltages);
-        let rows = self.small_signal_row_coefficients(
+        let (rows, rhs) = self.stamped_reduced_external_system(
             biases[EXT_C],
             biases[EXT_B],
             biases[EXT_E],
             biases[EXT_S],
         );
-        let anchor =
-            self.companion_anchor(biases[EXT_C], biases[EXT_B], biases[EXT_E], biases[EXT_S]);
         let nodes = self.external_terminal_nodes();
-        let currents = [self.ic, self.ib, self.ie, self.isub];
 
         for row_idx in 0..EXTERNAL_DIM {
-            let ieq = currents[row_idx]
-                - (0..EXTERNAL_DIM)
-                    .map(|col_idx| rows[row_idx][col_idx] * anchor[col_idx])
-                    .sum::<Value>();
             for col_idx in 0..EXTERNAL_DIM {
                 matrix.stamp(nodes[row_idx], nodes[col_idx], rows[row_idx][col_idx]);
             }
-            matrix.stamp_rhs(nodes[row_idx], -ieq);
+            matrix.stamp_rhs(nodes[row_idx], rhs[row_idx]);
         }
     }
 

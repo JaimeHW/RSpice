@@ -1747,6 +1747,15 @@ impl Engine {
             }
         }
 
+        let mut base_static = snapshot.reduction.g_reduced;
+        bjt.project_legacy_tied_terminal_system(
+            &mut y_total,
+            &mut [Complex64::default(); BJT_EXTERNAL_STATE_DIM],
+        );
+        bjt.project_legacy_tied_terminal_system(
+            &mut base_static,
+            &mut [0.0; BJT_EXTERNAL_STATE_DIM],
+        );
         let nodes = [
             bjt.node_collector,
             bjt.node_base,
@@ -1755,8 +1764,7 @@ impl Engine {
         ];
         for row in 0..BJT_EXTERNAL_STATE_DIM {
             for col in 0..BJT_EXTERNAL_STATE_DIM {
-                let delta =
-                    y_total[row][col] - Complex64::new(snapshot.reduction.g_reduced[row][col], 0.0);
+                let delta = y_total[row][col] - Complex64::new(base_static[row][col], 0.0);
                 if delta.norm() > 0.0 && nodes[row] > 0 && nodes[col] > 0 {
                     matrix.add(nodes[row] - 1, nodes[col] - 1, delta);
                 }
