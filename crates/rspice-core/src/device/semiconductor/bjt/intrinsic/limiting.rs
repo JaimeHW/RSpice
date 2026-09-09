@@ -33,6 +33,14 @@ impl Bjt {
     ) -> Value {
         let vt = vt.max(1e-18);
         let isat = isat.abs().max(1e-18);
+        // pnjlim's forward logarithm requires a positive trial voltage. A
+        // negative critical voltage can send a return to zero through log(0)
+        // and prevent the limiter from ever releasing that bias. Start at
+        // equilibrium once IS reaches VT/sqrt(2). Comparing first also avoids
+        // overflowing sqrt(2)*IS for a large, finite saturation current.
+        if isat.is_finite() && isat >= vt / core::f64::consts::SQRT_2 {
+            return 0.0;
+        }
         vt * (vt / (core::f64::consts::SQRT_2 * isat)).ln()
     }
 

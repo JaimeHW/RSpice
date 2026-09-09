@@ -1190,8 +1190,8 @@ pub(crate) fn simulation_checkpoint_identity(config: &SimulationConfig) -> Strin
     // v35 preserves physical VBIC currents in operating-point correction solves.
     // v36 gives RBI an independent current and voltage constitutive equation.
     // v37 preserves explicitly zero and negative VBIC activation energies.
-    // v51 advances limited legacy BJT states at unchanged terminal voltages.
-    hasher.update(b"rspice-transient-resolved-config-v51\0");
+    // v52 keeps BJT/VBIC junction critical voltages in the forward-limiter domain.
+    hasher.update(b"rspice-transient-resolved-config-v52\0");
     hash_field(&mut hasher, "temperature", config.temperature.to_bits());
     hash_field(&mut hasher, "ramptime", config.ramptime.to_bits());
     hash_field(&mut hasher, "digital_delay_type", config.digital_delay_type);

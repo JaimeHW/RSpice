@@ -212,9 +212,16 @@ mod wasm_tests {
     fn stationary_bjt_bias_leaves_startup_in_wasm() {
         let engine = rspice_core::Engine::default();
         let abort = rspice_core::abort_signal::NoAbort;
-        for kind in ["NPN", "PNP"] {
+        for (kind, isat) in [
+            ("NPN", 1e-14),
+            ("PNP", 1e-14),
+            ("NPN", 1.0),
+            ("PNP", 1.0),
+            ("NPN", 1e20),
+            ("PNP", 1e20),
+        ] {
             let netlist = rspice_core::Netlist::parse(&format!(
-                "stationary BJT bias\nI1 0 out DC 1 AC 1\nR1 out 0 1\nQ1 0 0 0 qm\n.model qm {kind}(IS=1e-14)\n.end\n"
+                "stationary BJT bias\nI1 0 out DC 1 AC 1\nR1 out 0 1\nQ1 0 0 0 qm\n.model qm {kind}(IS={isat})\n.end\n"
             )).unwrap();
             let dc = engine.run_dc_op_with_abort(&netlist, &abort).unwrap();
             assert!((dc.try_voltage_named("out").unwrap() - 1.0).abs() < 1e-12);
