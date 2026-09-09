@@ -107,3 +107,75 @@ fn load_breaks_an_instantiation_cycle_and_names_both_ends() {
         "a broken loop has to name both of its ends: {warning}"
     );
 }
+
+#[test]
+#[cfg(feature = "generated-veriloga-catalog")]
+fn unresolved_generated_veriloga_bindings_survive_project_save_and_reload() {
+    use crate::state::{
+        PersistedGeneratedIdentity, generated_veriloga_library_binding,
+        validate_generated_veriloga_binding,
+    };
+    use rspice_core::device::veriloga_builtins::{
+        GENERATED_VERILOGA_COMPATIBILITY_CATALOG, generated_veriloga_model_descriptor,
+    };
+
+    let descriptor = generated_veriloga_model_descriptor("vbic13").unwrap();
+    let historical = GENERATED_VERILOGA_COMPATIBILITY_CATALOG
+        .iter()
+        .find(|entry| entry.public_model_name == "vbic13")
+        .unwrap();
+    assert_ne!(descriptor.checkpoint_identity, historical.semantic_identity);
+    for explicit_null in [false, true] {
+        let mut binding = generated_veriloga_library_binding(descriptor).unwrap();
+        let contract = binding.generated_veriloga.as_mut().unwrap();
+        contract.schema_revision = 1;
+        contract.descriptor_abi_version = 2;
+        contract.source_identity = if explicit_null {
+            PersistedGeneratedIdentity::Null
+        } else {
+            PersistedGeneratedIdentity::Missing
+        };
+        contract.accepted_state_shape_identity = PersistedGeneratedIdentity::Missing;
+        contract.checkpoint_identity = historical
+            .wire_v26_combined_identity_alias
+            .unwrap()
+            .to_owned();
+        contract.descriptor_signature = historical
+            .wire_ui_v1_descriptor_signature_alias
+            .unwrap()
+            .to_owned();
+
+        let mut libraries = LibraryManager::with_primitives();
+        let mut workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
+        let top = workspace.active_view.key();
+        let schematic = workspace.schematic_buffers.get_mut(&top).unwrap();
+        schematic.add_library_cell_component(Point::new(10, 20), binding);
+        let before = serde_json::to_value(&schematic.components[0]).unwrap();
+        let json = serde_json::to_string(&ProjectFile::new(workspace, libraries)).unwrap();
+
+        let loaded =
+            load_project_text(&json, None).expect("an unresolved model must not cost the project");
+        let restored = &loaded.workspace.schematic_buffers[&top].components[0];
+        assert_eq!(serde_json::to_value(restored).unwrap(), before);
+        assert!(
+            validate_generated_veriloga_binding(restored.library_cell.as_ref().unwrap()).is_err()
+        );
+        assert!(
+            loaded
+                .workspace_migration_warning
+                .as_deref()
+                .unwrap()
+                .contains("Preserved 1 generated Verilog-A binding(s) as unresolved")
+        );
+
+        let saved = serialize_project_file(&loaded).expect("unresolved evidence remains saveable");
+        let reloaded =
+            load_project_text(&saved, None).expect("unresolved evidence remains loadable");
+        assert_eq!(
+            serde_json::to_value(&reloaded.workspace.schematic_buffers[&top].components[0])
+                .unwrap(),
+            before,
+            "saving must preserve both absent and explicitly null identity fields"
+        );
+    }
+}
