@@ -701,7 +701,7 @@ impl Engine {
     ) -> Result<Vec<Value>, SimulationError> {
         let size = circuit.matrix_size();
         let node_count = circuit.num_nodes().min(size);
-        let mut solution = Self::sanitize_initial_guess(circuit, initial_guess, size, node_count);
+        let mut solution = Self::sanitize_initial_guess(initial_guess, size);
         Self::seed_node_voltage_hints(circuit, &mut solution, node_hints);
         let accepted_reference = solution.clone();
         self.prime_operating_point_seed(circuit, &solution, 0.0, crate::xspice::AnalysisType::DcOp);
@@ -761,7 +761,7 @@ impl Engine {
                     &mut new_solution,
                 )?;
             }
-            Self::clamp_solution_to_physical_bounds(circuit, &mut new_solution, node_count);
+            Self::reset_nonfinite_values(&mut new_solution);
             Self::enforce_node_voltage_hints(circuit, matrix, &mut new_solution, node_hints);
 
             let voltage_converged = self.dc_newton_update_convergence_met(
@@ -811,23 +811,22 @@ impl Engine {
         abort: &dyn AbortSignal,
     ) -> Result<Vec<Value>, SimulationError> {
         let size = circuit.matrix_size();
-        let node_count = circuit.num_nodes().min(size);
-        let seed_was_suspicious = initial_guess.is_some_and(|guess| {
+        let seed_was_nonfinite = initial_guess.is_some_and(|guess| {
             let normalized = Self::normalize_initial_guess(guess, size);
-            Self::is_suspicious_solution(circuit, &normalized, node_count)
+            Self::has_nonfinite_values(&normalized)
         });
         // Sanitize any warm-start seed before Newton so pathological presolve
-        // artifacts do not launch the iteration from physically impossible rails.
+        // artifacts do not launch the iteration from non-finite values.
         let mut solution = match initial_guess {
-            Some(guess) => Self::sanitize_initial_guess(circuit, guess, size, node_count),
+            Some(guess) => Self::sanitize_initial_guess(guess, size),
             None => {
                 let mut guess = vec![0.0; size];
                 Self::apply_bjt_initial_guess_correction(&mut guess, circuit, true);
                 guess
             }
         };
-        if seed_was_suspicious {
-            // Sanitizing an unphysical presolve resets the vector. Reapply the
+        if seed_was_nonfinite {
+            // Sanitizing a non-finite presolve resets the vector. Reapply the
             // compact-model startup seeds afterward so a floating nonlinear
             // node does not silently fall back to the same all-zero guess.
             Self::apply_bjt_initial_guess_correction(&mut solution, circuit, true);
@@ -862,8 +861,6 @@ impl Engine {
         let uses_vbic_correction = Self::requires_vbic_correction_form(circuit);
         let solve_denominator_floors = Self::dc_solve_denominator_floors(circuit, size);
         // Newton-Raphson iteration
-        let mut hit_voltage_limit = false;
-        let mut limited_nodes: Vec<usize> = Vec::new();
         let mut damping_state = NewtonDampingState::default();
         let gmin_floor = self.dc_nodal_gmin_floor(circuit);
         let requires_conservative_nonlinear_limiting =
@@ -871,13 +868,10 @@ impl Engine {
         // ngspice's flat Newton: when junction devices replace their own
         // iterate voltages (pnjlim), the full node step IS the algorithm and
         // merit-based step shrinking livelocks turn-on (the raw residual
-        // transiently rises along the convergent direction). The +/-1kV node
-        // containment below stays active regardless.
+        // transiently rises along the convergent direction).
         let junction_owns_steps = Self::junction_limiting_owns_newton_steps(circuit)
             || self.b3soi_limiter_owns_global_damping(circuit);
-        // Use 10x more iterations for DC nonlinear since damping limits voltage change per step
-        // With MAX_DELTA_V=2V and standard max_iterations=50, we can only move 100V
-        // Need 500+ iterations to traverse the full +/-1000V range if starting from a poor guess
+        // Allow additional iterations for damped nonlinear operating-point solves.
         let dc_max_iterations = self.nonlinear_iteration_budget(10);
         let mut direct_iterations = 0usize;
         let mut residual_stall_iterations = 0usize;
@@ -896,7 +890,6 @@ impl Engine {
                 Self::DC_LIMIT_CYCLE_HISTORY.min(dc_max_iterations),
             );
         let mut limit_cycle_hits = 0usize;
-        let mut rail_limited_bjt_stall_hits = 0usize;
         let mut limit_cycle_detected = false;
         let mut direct_solver_error = None;
         for iteration in 0..dc_max_iterations {
@@ -991,40 +984,10 @@ impl Engine {
             if should_project_damped_constraints {
                 circuit.enforce_dc_ideal_voltage_constraints(new_solution)?;
             }
-            // Solution limiting: prevent numerical blow-up by clamping extreme values
-            // This is a critical convergence aid for circuits with strong nonlinearities
-            for (i, v) in new_solution.iter_mut().enumerate() {
-                if !v.is_finite() {
-                    log::debug!(
-                        "DC iter {}: NaN/Inf at node {}, resetting to 0",
-                        iteration,
-                        i + 1
-                    );
-                    *v = 0.0; // Replace NaN/Inf with zero
-                } else if i < node_count
-                    && !circuit.is_non_electrical_state_matrix_index(i)
-                    && requires_conservative_nonlinear_limiting
-                    && v.abs() > Self::MAX_NODE_VOLTAGE
-                {
-                    if !hit_voltage_limit {
-                        hit_voltage_limit = true;
-                        log::debug!(
-                            "DC iter {}: Voltage limiting triggered - Newton-Raphson may struggle to converge",
-                            iteration
-                        );
-                    }
-                    if !limited_nodes.contains(&i) {
-                        limited_nodes.push(i);
-                        log::debug!(
-                            "  Node {}: {:.2e}V -> clamped to {:.0}V",
-                            i + 1,
-                            *v,
-                            v.signum() * Self::MAX_NODE_VOLTAGE
-                        );
-                    }
-                    *v = v.signum() * Self::MAX_NODE_VOLTAGE;
-                }
-            }
+            // Device limiting and the selected damping strategy govern finite
+            // Newton updates. Absolute node voltages are not a physical domain
+            // constraint; acceptance still requires the nonlinear residual.
+            Self::reset_nonfinite_values(new_solution);
             // Check convergence (both voltage change and device convergence)
             let voltage_converged = self.dc_newton_update_convergence_met(
                 &solution,
@@ -1048,20 +1011,6 @@ impl Engine {
             // Device convergence must be checked at the candidate iterate, not the prior iterate.
             self.update_device_states_for_dc(circuit, new_solution);
             let device_converged = circuit.nonlinear_converged(self.device_convergence_criteria());
-            let legacy_bjt_limiter_engaged = circuit
-                .bjts
-                .devices
-                .iter()
-                .any(|bjt| bjt.legacy_junction_limited_for_trace());
-            if hit_voltage_limit
-                && voltage_converged
-                && !device_converged
-                && legacy_bjt_limiter_engaged
-            {
-                rail_limited_bjt_stall_hits += 1;
-            } else if !legacy_bjt_limiter_engaged || device_converged {
-                rail_limited_bjt_stall_hits = 0;
-            }
             if std::env::var("RSPICE_DC_TRACE").as_deref() == Ok("1") {
                 let max_dv = solution
                     .iter()
@@ -1093,12 +1042,6 @@ impl Engine {
                     });
             std::mem::swap(&mut solution, new_solution);
             if voltage_converged && device_converged && nonlinear_residual_converged {
-                if hit_voltage_limit {
-                    log::info!(
-                        "DC operating point converged after {} iterations (voltage limiting was triggered)",
-                        iteration + 1
-                    );
-                }
                 if self.config.spice_dialect != crate::engine::SpiceDialect::Xyce
                     && let Some(refined) =
                         self.refine_fallback_candidate(circuit, matrix, &solution, abort)?
@@ -1106,16 +1049,6 @@ impl Engine {
                     return Ok(refined);
                 }
                 return Ok(solution);
-            }
-
-            // A junction-limited BJT may legitimately need several full
-            // Newton steps, but repeated node-fixed iterations after hitting
-            // the physical rail indicate the characteristic three-state
-            // clamp cycle. Escape early so the constrained half-bias recovery
-            // below can run instead of burning the entire DC iteration budget.
-            if rail_limited_bjt_stall_hits >= 3 {
-                limit_cycle_detected = true;
-                break;
             }
 
             if repeats_prior_iterate {
@@ -1199,13 +1132,6 @@ impl Engine {
                 "DC Newton-Raphson entered a repeated-iterate limit cycle after {} iterations. Trying configured convergence aids...",
                 direct_iterations.max(1)
             );
-        } else if hit_voltage_limit {
-            log::warn!(
-                "DC Newton-Raphson did not converge after {} iterations. \
-                Voltage limiting triggered on {} node(s). Trying configured convergence aids...",
-                direct_iterations.max(1),
-                limited_nodes.len()
-            );
         } else if residual_stalled {
             log::info!(
                 "DC Newton-Raphson residual checks stalled after {} iterations. Trying configured convergence aids...",
@@ -1241,7 +1167,35 @@ impl Engine {
             return Err(self.newton_non_convergence_error(newton_failure, dc_max_iterations));
         }
 
-        if hit_voltage_limit && limit_cycle_detected && !circuit.bjts.is_empty() {
+        // A finite linear presolve can be far from the nonlinear basin (for
+        // example a current-driven, initially cut-off MOS channel). If its
+        // damped Newton path stalls, retry from the device startup seeds before
+        // deforming the equations. No voltage magnitude decides seed validity.
+        if residual_stalled {
+            let restart_state = circuit.nonlinear_state_snapshot();
+            let mut restart_seed = vec![0.0; size];
+            Self::apply_bjt_initial_guess_correction(&mut restart_seed, circuit, true);
+            Self::apply_b3soi_pd_initial_guess_correction(&mut restart_seed, circuit);
+            Self::apply_bsim4_internal_gate_initial_guess_correction(&mut restart_seed, circuit);
+            Self::apply_vbic_internal_initial_guess_correction(&mut restart_seed, circuit);
+            if restart_seed != startup_seed {
+                self.prime_operating_point_seed(
+                    circuit,
+                    &restart_seed,
+                    0.0,
+                    crate::xspice::AnalysisType::DcOp,
+                );
+                if let Some(restarted) =
+                    self.warm_restart_after_fallback(circuit, matrix, &restart_seed, abort)?
+                {
+                    log::info!("Residual-stalled DC Newton converged from device startup seeds.");
+                    return Ok(restarted);
+                }
+            }
+            circuit.restore_nonlinear_state(restart_state);
+        }
+
+        if limit_cycle_detected && !circuit.bjts.is_empty() {
             let hints = Self::legacy_bjt_half_bias_startup_hints(circuit, &startup_seed)
                 .into_iter()
                 .map(|(positive, voltage)| StartupVoltageConstraint {
@@ -1339,12 +1293,7 @@ impl Engine {
 
         let zero_seed = vec![0.0; solution.len()];
         let mut fallback_seed = if circuit.has_b3soi_devices() {
-            Self::sanitize_initial_guess(
-                circuit,
-                &solution,
-                solution.len(),
-                circuit.num_nodes().min(solution.len()),
-            )
+            Self::sanitize_initial_guess(&solution, solution.len())
         } else {
             self.prefer_lower_merit_scaled_seed(circuit, matrix, &solution, &zero_seed, 1.0)
         };
@@ -1714,7 +1663,7 @@ impl Engine {
         let node_count = circuit.num_nodes().min(size);
         let gmin_floor = self.dc_nodal_gmin_floor(circuit);
         let junction_gmin = self.effective_device_junction_gmin(gmin_floor);
-        let mut solution = Self::sanitize_initial_guess(circuit, initial_guess, size, node_count);
+        let mut solution = Self::sanitize_initial_guess(initial_guess, size);
         Self::seed_node_voltage_hints(circuit, &mut solution, node_hints);
         self.prime_operating_point_seed(
             circuit,
@@ -1769,7 +1718,7 @@ impl Engine {
                     .solve_into(&rhs, &mut new_solution)
                     .map_err(SimulationError::Solver)?;
             }
-            Self::clamp_solution_to_physical_bounds(circuit, &mut new_solution, node_count);
+            Self::reset_nonfinite_values(&mut new_solution);
             Self::enforce_node_voltage_hints(circuit, matrix, &mut new_solution, node_hints);
 
             let voltage_converged =
@@ -2125,8 +2074,7 @@ impl Engine {
 
         Self::seed_node_voltage_hints(circuit, &mut solution, node_hints);
 
-        solution =
-            Self::sanitize_initial_guess(circuit, &solution, size, circuit.num_nodes().min(size));
+        solution = Self::sanitize_initial_guess(&solution, size);
         if hints.has_nodesets || !node_hints.is_empty() {
             match Self::with_nodeset_phase(circuit, hints.has_nodesets, |circuit| {
                 self.solve_nonlinear_transient_op_startup_with_guess_and_hints_abort(
@@ -2280,11 +2228,7 @@ impl Engine {
                 &mut raw_solution
             };
             circuit.enforce_ideal_voltage_constraints(new_solution, time)?;
-            Self::clamp_solution_to_physical_bounds(
-                circuit,
-                new_solution,
-                circuit.num_nodes().min(size),
-            );
+            Self::reset_nonfinite_values(new_solution);
             Self::enforce_node_voltage_hints(circuit, matrix, new_solution, node_constraints);
 
             let voltage_converged =

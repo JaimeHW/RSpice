@@ -90,6 +90,85 @@ fn finite_linear_voltage_and_branch_states_are_not_clipped_to_global_rails() {
     assert_eq!(engine.convergence_quality().force_accepted_points, 0);
 }
 
+#[test]
+fn finite_nonlinear_voltage_and_branch_states_are_not_clipped_to_global_rails() {
+    for (bias, resistance) in [(5000.0_f64, 1000.0), (-5000.0, 1000.0), (5.0, 1e-14)] {
+        let diode_nodes = if bias > 0.0 { "0 out" } else { "out 0" };
+        let netlist = Netlist::parse(&format!(
+            "reverse diode divider\nV1 in 0 PWL(0 {bias} 1n {end} 2n {end})\nR1 in out {resistance}\nR2 out 0 {resistance}\nD1 {diode_nodes} dm\n.model dm D(IS=1e-14)\n.end\n",
+            end = 2.0 * bias,
+        )).unwrap();
+        for dialect in [
+            SpiceDialect::BestAvailable,
+            SpiceDialect::Ngspice,
+            SpiceDialect::Xyce,
+        ] {
+            let engine = Engine::new(SimulationConfig::default().with_spice_dialect(dialect));
+            let dc = engine
+                .run_dc_op(&netlist)
+                .expect("finite reverse-bias operating point");
+            assert!((dc.try_voltage_named("out").unwrap() / bias - 0.5).abs() < 1e-8);
+            let result = engine
+                .run_tran(&netlist, 2e-9, 1e-9)
+                .unwrap_or_else(|error| {
+                    panic!("{dialect:?}, bias={bias}, R={resistance}: {error}")
+                });
+            assert_eq!(result.time.last().copied(), Some(2e-9));
+            for (time, actual) in result
+                .time
+                .iter()
+                .zip(result.try_voltage_waveform_named("out").unwrap())
+            {
+                let expected = 0.5 * (1.0 + (*time / 1e-9).min(1.0));
+                assert!(
+                    (actual / bias - expected).abs() < 1e-8,
+                    "{dialect:?}, at {time}: {actual}"
+                );
+            }
+            assert_eq!(engine.convergence_quality().force_accepted_points, 0);
+        }
+    }
+}
+
+#[test]
+fn forward_diode_solution_is_invariant_under_large_common_mode_shifts() {
+    let grid = Arc::new(vec![0.0, 0.5e-9, 1e-9, 1.5e-9, 2e-9]);
+    let mut reference: Option<Vec<f64>> = None;
+    for common_mode in [0.0, 5000.0, -5000.0] {
+        let netlist = Netlist::parse(&format!(
+            "translated diode\nV0 base 0 {common_mode}\nV1 in base PWL(0 1 1n 2 2n 2)\nR1 in out 1k\nD1 out base dm\n.model dm D(IS=1e-14)\n.end\n"
+        )).unwrap();
+        let engine = Engine::new(SimulationConfig {
+            locked_time_grid: Some(grid.clone()),
+            convergence_config: ConvergenceConfig {
+                gmin_target: 0.0,
+                junction_gmin_target: 0.0,
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+        let result = engine.run_tran(&netlist, 2e-9, 0.5e-9).unwrap();
+        assert_eq!(result.time, *grid);
+        let junction: Vec<_> = result
+            .try_voltage_waveform_named("out")
+            .unwrap()
+            .iter()
+            .map(|value| value - common_mode)
+            .collect();
+        if let Some(expected) = &reference {
+            for (actual, expected) in junction.iter().zip(expected) {
+                assert!(
+                    (actual - expected).abs() < 1e-8,
+                    "common mode {common_mode}: {actual} versus {expected}"
+                );
+            }
+        } else {
+            reference = Some(junction);
+        }
+        assert_eq!(engine.convergence_quality().force_accepted_points, 0);
+    }
+}
+
 const UNSATISFIABLE_TRANSIENT: &str = "\
 * No real transient operating point: v^2 + v + 1 = 0
  B1 n 0 I={V(n)*V(n)+1}
@@ -175,6 +254,15 @@ fn successful_gmin_rescue_is_not_counted_as_a_rejected_timestep() {
         "the rescued physical solution is finite"
     );
 
+    let voltage = *result
+        .try_voltage_waveform_named("n")
+        .unwrap()
+        .last()
+        .unwrap();
+    assert!(
+        (voltage + 1.769_292_354_238_631_4).abs() < 1e-6,
+        "cubic root: {voltage}"
+    );
     let quality = engine.convergence_quality();
     assert_eq!(
         quality.timestep_reductions, 1,

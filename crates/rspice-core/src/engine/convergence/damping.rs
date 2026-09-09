@@ -1,66 +1,11 @@
-//! Newton damping, line search, physical clamping, and solution validation helpers.
+//! Newton damping, line search, and solution validation helpers.
 
 use super::*;
 
 impl Engine {
     #[inline]
-    pub(in crate::engine::convergence) fn has_clamped_values(
-        circuit: &CircuitData,
-        solution: &[Value],
-        node_count: usize,
-    ) -> bool {
-        solution.iter().any(|&v| !v.is_finite())
-            || solution
-                .iter()
-                .take(node_count.min(solution.len()))
-                .enumerate()
-                .any(|(index, &v)| {
-                    !circuit.is_non_electrical_state_matrix_index(index) && v.abs() >= 999.0
-                })
-    }
-
-    #[inline]
-    pub(in crate::engine::convergence) fn has_suspicious_uniformity(solution: &[Value]) -> bool {
-        if solution.len() <= 4 {
-            return false;
-        }
-
-        let mut counts: std::collections::HashMap<i32, usize> = std::collections::HashMap::new();
-        let mut min_v = Value::INFINITY;
-        let mut max_v = Value::NEG_INFINITY;
-
-        for &v in solution {
-            if !v.is_finite() {
-                return false;
-            }
-            min_v = min_v.min(v);
-            max_v = max_v.max(v);
-            let bucket = (v * 1000.0).round() as i32; // 1 mV quantization
-            *counts.entry(bucket).or_insert(0) += 1;
-        }
-
-        let span = max_v - min_v;
-        if span <= 1e-9 {
-            return true;
-        }
-
-        let dominant = counts.values().copied().max().unwrap_or(0);
-        let dominant_ratio = dominant as Value / solution.len() as Value;
-
-        // Only flag near-constant stuck vectors; avoid false positives on
-        // legitimate rail-distributed logic operating points.
-        dominant_ratio >= 0.8 && counts.len() <= 3 && span <= 5e-2
-    }
-
-    #[inline]
-    pub(in crate::engine::convergence) fn is_suspicious_solution(
-        circuit: &CircuitData,
-        solution: &[Value],
-        node_count: usize,
-    ) -> bool {
-        let node_limit = node_count.min(solution.len());
-        Self::has_clamped_values(circuit, solution, node_limit)
-            || Self::has_suspicious_uniformity(&solution[..node_limit])
+    pub(in crate::engine::convergence) fn has_nonfinite_values(solution: &[Value]) -> bool {
+        solution.iter().any(|v| !v.is_finite())
     }
 
     #[inline]
@@ -305,24 +250,10 @@ impl Engine {
         }
     }
 
-    pub(in crate::engine::convergence) fn clamp_solution_to_physical_bounds(
-        circuit: &CircuitData,
-        solution: &mut [Value],
-        node_count: usize,
-    ) {
-        for v in solution.iter_mut() {
+    pub(in crate::engine::convergence) fn reset_nonfinite_values(solution: &mut [Value]) {
+        for v in solution {
             if !v.is_finite() {
                 *v = 0.0;
-            }
-        }
-
-        let node_limit = node_count.min(solution.len());
-        for (index, v) in solution.iter_mut().take(node_limit).enumerate() {
-            if circuit.is_non_electrical_state_matrix_index(index) {
-                continue;
-            }
-            if v.abs() > Self::MAX_NODE_VOLTAGE {
-                *v = v.signum() * Self::MAX_NODE_VOLTAGE;
             }
         }
     }
@@ -484,24 +415,65 @@ mod tests {
     use crate::device::Mosfet;
 
     #[test]
-    fn physical_clamp_only_limits_node_voltage_unknowns() {
-        let mut solution = vec![1500.0, -1500.0, 2500.0, -2500.0];
-
-        Engine::clamp_solution_to_physical_bounds(&CircuitData::new(), &mut solution, 2);
-
-        assert_eq!(solution[0], Engine::MAX_NODE_VOLTAGE);
-        assert_eq!(solution[1], -Engine::MAX_NODE_VOLTAGE);
-        assert_eq!(solution[2], 2500.0);
-        assert_eq!(solution[3], -2500.0);
-    }
-
-    #[test]
-    fn physical_clamp_replaces_non_finite_unknowns_everywhere() {
-        let mut solution = vec![0.0, Value::NAN, Value::INFINITY];
-
-        Engine::clamp_solution_to_physical_bounds(&CircuitData::new(), &mut solution, 1);
-
-        assert_eq!(solution, vec![0.0, 0.0, 0.0]);
+    fn fallback_acceptance_uses_equations_for_large_and_uniform_solutions() {
+        for bias in [0.0_f64, 0.01, 2500.0] {
+            let mut circuit = CircuitData::new();
+            for index in 0..6 {
+                let node = circuit.get_or_create_node(&format!("n{index}"));
+                circuit.resistors.add(format!("r{index}"), node, 0, 1.0);
+                circuit
+                    .current_sources
+                    .add(format!("i{index}"), 0, node, bias);
+                circuit.diodes.add(crate::device::Diode::spice_defaults(
+                    format!("d{index}"),
+                    0,
+                    node,
+                ));
+            }
+            let engine = Engine::default();
+            let mut matrix = engine.build_matrix(&circuit).unwrap();
+            circuit.link_indices(&matrix);
+            let candidate = vec![bias; circuit.matrix_size()];
+            assert_eq!(
+                Engine::sanitize_initial_guess(&candidate, candidate.len()),
+                candidate
+            );
+            let accepted = engine
+                .evaluate_fallback_candidate(
+                    &mut circuit,
+                    &mut matrix,
+                    candidate,
+                    "test continuation",
+                    &crate::abort_signal::NoAbort,
+                )
+                .unwrap();
+            assert!(
+                accepted.is_some(),
+                "valid uniform solution at {bias} must pass residual validation"
+            );
+            let continued = engine
+                .gmin_stepping_nonlinear_with_abort(
+                    &mut circuit,
+                    &mut matrix,
+                    accepted.as_ref().unwrap(),
+                    &crate::abort_signal::NoAbort,
+                )
+                .unwrap();
+            assert!(engine.validate_nonlinear_solution(&mut circuit, &mut matrix, &continued));
+            let invalid = vec![f64::NAN; circuit.matrix_size()];
+            assert!(
+                engine
+                    .evaluate_fallback_candidate(
+                        &mut circuit,
+                        &mut matrix,
+                        invalid,
+                        "test continuation",
+                        &crate::abort_signal::NoAbort,
+                    )
+                    .unwrap()
+                    .is_none()
+            );
+        }
     }
 
     #[test]

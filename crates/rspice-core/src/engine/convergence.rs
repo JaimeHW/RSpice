@@ -118,7 +118,6 @@ impl Default for NewtonDampingState {
 }
 
 impl Engine {
-    const MAX_NODE_VOLTAGE: Value = 1000.0;
     const MAX_DELTA_VOLTAGE_LIMIT: Value = 0.5;
     const BANK_ROSE_ALPHA_MIN: Value = 0.1;
     const BANK_ROSE_ALPHA_MAX: Value = 1.0;
@@ -272,23 +271,19 @@ mod failure_attribution_tests {
     fn a_newton_abort_names_its_worst_residual_nodes() {
         let mut config = unaided_config();
         config.max_iterations = 5;
-        // The source demands a full amp through a reverse-biased junction
-        // and a teraohm. The bias that would satisfy it is far outside the
-        // solver's physical voltage clamp, so Newton cycles against the
-        // clamp instead of settling.
+        // This equation has no real root at any voltage; failure attribution
+        // must not depend on imposing an arbitrary voltage range.
         let netlist = parse(
-            "reverse-driven junction with no reachable bias\n\
-             i1 out 0 1\n\
-             d1 out 0 dmod\n\
-             r1 out 0 1e12\n\
-             .model dmod d(is=1e-18 n=1)\n\
+            "unsatisfiable operating point\n\
+             b1 out 0 I={V(out)*V(out)+1}\n\
+             r1 out 0 1\n\
              .op\n\
              .end\n",
         );
         let engine = engine(config);
         let error = engine
             .run_dc_op(&netlist)
-            .expect_err("no reachable bias satisfies the demanded current");
+            .expect_err("no real bias satisfies the nonlinear equation");
         assert!(
             matches!(error, SimulationError::ConvergenceFailed(_)),
             "unexpected failure class: {error}"

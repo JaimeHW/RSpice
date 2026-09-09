@@ -3,22 +3,6 @@
 use super::*;
 use crate::device::semiconductor::AcceptedBjtChargeSnapshotCheckpoint;
 
-/// Maximum voltage limit for solution values (matching DC solver)
-///
-/// Commercial simulators like Spectre/HSPICE use similar limits to prevent
-/// Newton-Raphson divergence on stiff nonlinear circuits (e.g., BJT exponential I-V).
-/// This value matches the DC solver's MAX_VOLTAGE in convergence.rs for consistency.
-pub(super) const MAX_VOLTAGE: Value = 1000.0;
-/// Conservative magnitude limit for branch-state unknowns (currents and auxiliary
-/// MNA variables). These states can legitimately exceed node-voltage scales in
-/// tightly coupled passive networks, so they need a separate guardrail.
-pub(super) const MAX_BRANCH_STATE_MAGNITUDE: Value = 1e12;
-/// Xyce Core branch currents are raw physical currents multiplied by the
-/// authored winding values in the Q matrix.  Tiny vacuum coefficients can
-/// therefore require currents above the generic 1e12 safety rail even for
-/// bounded one-volt sources.  Keep a finite overflow guard while preserving
-/// the canonical Xyce state range.
-pub(super) const MAX_XYCE_CORE_BRANCH_STATE_MAGNITUDE: Value = 1e30;
 /// Maximum allowed per-iteration node update during Newton damping.
 ///
 /// This bound controls nonlinear solve trust-region size.

@@ -317,7 +317,11 @@ impl VoltageSources {
                         && (t < rise_width || (t - rise_width).abs() < breakpoint_tolerance)
                     {
                         *v2
-                    } else if t > 0.0 && (t < rise || (t - rise).abs() < breakpoint_tolerance) {
+                    } else if t > 0.0 && (t <= rise || (t - rise).abs() < breakpoint_tolerance) {
+                        // At the origin the accepted-state tolerance is zero.
+                        // An exact rise endpoint still belongs to this segment;
+                        // falling through would extrapolate the falling edge
+                        // backward across the entire pulse width.
                         if rise != 0.0 {
                             v1 + (v2 - v1) * t / rise
                         } else {
