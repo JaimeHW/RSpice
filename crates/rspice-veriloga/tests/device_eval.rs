@@ -18,6 +18,147 @@ fn compile(source: &str) -> DeviceFixture {
 }
 
 #[test]
+fn laplace_complex_and_origin_roots_match_coefficient_forms() {
+    for (zeros, poles, numerator, denominator, dc_gain) in [
+        (
+            "'{-1.0,1.0,-1.0,-1.0}",
+            "'{-2.0,2.0,-2.0,-2.0}",
+            "'{1.0,1.0,0.5}",
+            "'{1.0,0.5,0.125}",
+            1.0,
+        ),
+        (
+            "'{0.0,0.0}",
+            "'{-4.0,0.0}",
+            "'{0.0,1.0}",
+            "'{1.0,0.25}",
+            0.0,
+        ),
+    ] {
+        let mut responses = Vec::new();
+        for (operator, n, d) in [
+            ("laplace_zp", zeros, poles),
+            ("laplace_zd", zeros, denominator),
+            ("laplace_np", numerator, poles),
+            ("laplace_nd", numerator, denominator),
+        ] {
+            let fixture = compile(&format!(
+                "module normalized_roots(p,n); inout p,n; electrical p,n;
+                analog I(p,n)<+{operator}(V(p,n),{n},{d}); endmodule"
+            ));
+            let mut device = fixture.device("ROOTS", &[1, 0]);
+            device.update_voltages(&[0.25]);
+            assert_eq!(device.try_evaluate().unwrap()[0], 0.25 * dc_gain);
+            device.set_analysis_type(1);
+            let mut values = Vec::new();
+            for frequency in [0.0, 0.125, 1.0] {
+                let mut terms = Vec::new();
+                device
+                    .try_stamp_small_signal_complex(&[0.25], frequency, |r, c, re, im| {
+                        assert_eq!((r, c), (0, 0));
+                        terms.push([re, im]);
+                    })
+                    .unwrap();
+                assert_eq!(terms.len(), 1);
+                values.push(terms[0]);
+            }
+            responses.push(values);
+        }
+        assert!(responses.iter().all(|values| values == &responses[3]));
+    }
+}
+
+#[test]
+fn laplace_root_forms_match_normalized_dc_ac_and_transient_responses() {
+    // LRM 4.5.11: each spelling represents (1+s/2)/(1+s/4).
+    for (operator, arguments) in [
+        ("laplace_zp", "'{-2.0,0.0}, '{-4.0,0.0}"),
+        ("laplace_zd", "'{-2.0,0.0}, '{1.0,0.25}"),
+        ("laplace_np", "'{1.0,0.5}, '{-4.0,0.0}"),
+        ("laplace_nd", "'{1.0,0.5}, '{1.0,0.25}"),
+    ] {
+        for assigned in [false, true] {
+            let call = format!("{operator}(V(p,n)*V(p,n), {arguments})");
+            let body = if assigned {
+                format!("y={call}; I(p,n)<+y;")
+            } else {
+                format!("I(p,n)<+{call};")
+            };
+            let fixture = compile(&format!(
+                "module normalized_filter(p,n); inout p,n; electrical p,n; real y; analog begin {body} end endmodule"
+            ));
+            let mut device = fixture.device("NORMALIZED", &[1, 0]);
+            let bias = 0.25;
+            let expected_current = bias * bias;
+            let expected_slope = 2.0 * bias;
+            device.update_voltages(&[bias]);
+            assert!(
+                (device.try_evaluate().unwrap()[0] / expected_current - 1.0).abs() < 1e-12,
+                "{body}"
+            );
+            let (matrix, _) = collect_stamps(&mut device, &[bias]);
+            assert!(
+                (matrix[&(0, 0)] / expected_slope - 1.0).abs() < 1e-12,
+                "{body}"
+            );
+            device.set_analysis_type(1);
+            for frequency in [0.0, 0.125, 1.0, 1e-200, 1e200] {
+                // H = 2 - 1/(1+j*w/4), evaluated without squaring a huge w.
+                let x = 0.25 * std::f64::consts::TAU * frequency;
+                let (inv_re, inv_im) = if x <= 1.0 {
+                    (1.0 / (1.0 + x * x), -x / (1.0 + x * x))
+                } else {
+                    let inverse = 1.0 / x;
+                    (
+                        inverse * inverse / (1.0 + inverse * inverse),
+                        -inverse / (1.0 + inverse * inverse),
+                    )
+                };
+                let expected = [expected_slope * (2.0 - inv_re), -expected_slope * inv_im];
+                let mut terms = Vec::new();
+                device
+                    .try_stamp_small_signal_complex(&[bias], frequency, |r, c, re, im| {
+                        assert_eq!((r, c), (0, 0));
+                        terms.push([re, im]);
+                    })
+                    .unwrap();
+                assert_eq!(terms.len(), 1);
+                for (actual, expected) in terms[0].into_iter().zip(expected) {
+                    if expected == 0.0 {
+                        assert_eq!(actual, 0.0);
+                    } else {
+                        assert!(
+                            (actual / expected - 1.0).abs() < 1e-12,
+                            "{body}, f={frequency}: {actual} != {expected}"
+                        );
+                    }
+                }
+            }
+            let mut transient = fixture.device("STEP", &[1, 0]);
+            transient.update_voltages(&[0.0]);
+            assert_eq!(transient.try_evaluate().unwrap()[0], 0.0);
+            transient.advance_state();
+            transient.set_analysis_type(2);
+            transient.set_time(0.125);
+            transient.set_timestep(0.125);
+            transient.set_integration_coefficients(rspice_veriloga::vm::IntegrationCoefficients {
+                active: true,
+                derivative_scale: 8.0,
+                previous_value_scale: 8.0,
+                older_value_scale: 0.0,
+                previous_derivative_scale: 0.0,
+            });
+            transient.update_voltages(&[bias]);
+            let expected = (5.0 / 3.0) * bias * bias;
+            assert!(
+                (transient.try_evaluate().unwrap()[0] / expected - 1.0).abs() < 1e-12,
+                "{body}"
+            );
+        }
+    }
+}
+
+#[test]
 fn filter_null_zeros_preserve_assigned_and_direct_device_responses() {
     for operator in ["laplace_zp", "laplace_zd", "zi_zp", "zi_zd"] {
         let denominator = if operator.ends_with("zp") {

@@ -16,7 +16,6 @@ use crate::error::{CodeGenError, CodeGenErrorKind, CompileResult};
 use crate::ir::arena::{ExprArena, Heavy, IndexedRead, Node, ZiPolynomial, pack_index};
 use crate::ir::{BranchRef, DdxAxis, IrFunction, NodeId};
 use crate::semantic::AnalyzedModule;
-use num_complex::Complex64;
 use smol_str::SmolStr;
 use std::collections::HashMap;
 use std::path::Path;
@@ -165,24 +164,6 @@ fn validate_laplace_coefficients(
     let mut denominator = denominator_ascending.to_vec();
     denominator.reverse();
     crate::laplace::StateSpaceFilter::from_transfer_function(&numerator, &denominator)
-        .map(|_| ())
-        .map_err(|error| laplace_error(operator, error))
-}
-
-fn validate_laplace_roots(
-    operator: &str,
-    zeros: &[(f64, f64)],
-    poles: &[(f64, f64)],
-) -> CompileResult<()> {
-    let zeros = zeros
-        .iter()
-        .map(|(real, imaginary)| Complex64::new(*real, *imaginary))
-        .collect::<Vec<_>>();
-    let poles = poles
-        .iter()
-        .map(|(real, imaginary)| Complex64::new(*real, *imaginary))
-        .collect::<Vec<_>>();
-    crate::laplace::StateSpaceFilter::from_poles_zeros(&poles, &zeros, 1.0)
         .map(|_| ())
         .map_err(|error| laplace_error(operator, error))
 }
@@ -1395,13 +1376,16 @@ impl<'a> ExprConverter<'a> {
                     self.const_complex_pairs(arena, require_arg(1)?, "laplace_zp", "zeros", true)?;
                 let poles =
                     self.const_complex_pairs(arena, require_arg(2)?, "laplace_zp", "poles", false)?;
-                validate_laplace_roots("laplace_zp", &zeros, &poles)?;
-                Ok(arena.push_heavy(Heavy::LaplaceZP {
+                let numerator = crate::laplace::laplace_roots_to_polynomial(&zeros)
+                    .map_err(|error| laplace_error("laplace_zp zeros", error))?;
+                let denominator = crate::laplace::laplace_roots_to_polynomial(&poles)
+                    .map_err(|error| laplace_error("laplace_zp poles", error))?;
+                validate_laplace_coefficients("laplace_zp", &numerator, &denominator)?;
+                Ok(arena.push_heavy(Heavy::LaplaceND {
                     site: crate::ir::LaplaceSiteId::from_span(call.span),
                     expr,
-                    zeros,
-                    poles,
-                    gain: 1.0,
+                    numerator,
+                    denominator,
                 }))
             }
             "laplace_zd" => {
@@ -1418,12 +1402,13 @@ impl<'a> ExprConverter<'a> {
                     "denominator",
                     false,
                 )?;
-                let numerator = crate::laplace::roots_to_polynomial(&zeros).map_err(|e| {
-                    CodeGenError::new(CodeGenErrorKind::InvalidExpression(format!(
-                        "laplace_zd zeros: {}",
-                        e
-                    )))
-                })?;
+                let numerator =
+                    crate::laplace::laplace_roots_to_polynomial(&zeros).map_err(|e| {
+                        CodeGenError::new(CodeGenErrorKind::InvalidExpression(format!(
+                            "laplace_zd zeros: {}",
+                            e
+                        )))
+                    })?;
                 validate_laplace_coefficients("laplace_zd", &numerator, &denominator)?;
                 Ok(arena.push_heavy(Heavy::LaplaceND {
                     site: crate::ir::LaplaceSiteId::from_span(call.span),
@@ -1445,12 +1430,13 @@ impl<'a> ExprConverter<'a> {
                 )?;
                 let poles =
                     self.const_complex_pairs(arena, require_arg(2)?, "laplace_np", "poles", false)?;
-                let denominator = crate::laplace::roots_to_polynomial(&poles).map_err(|e| {
-                    CodeGenError::new(CodeGenErrorKind::InvalidExpression(format!(
-                        "laplace_np poles: {}",
-                        e
-                    )))
-                })?;
+                let denominator =
+                    crate::laplace::laplace_roots_to_polynomial(&poles).map_err(|e| {
+                        CodeGenError::new(CodeGenErrorKind::InvalidExpression(format!(
+                            "laplace_np poles: {}",
+                            e
+                        )))
+                    })?;
                 validate_laplace_coefficients("laplace_np", &numerator, &denominator)?;
                 Ok(arena.push_heavy(Heavy::LaplaceND {
                     site: crate::ir::LaplaceSiteId::from_span(call.span),

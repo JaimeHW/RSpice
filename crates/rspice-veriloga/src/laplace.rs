@@ -55,6 +55,49 @@ pub fn roots_to_polynomial(roots: &[(f64, f64)]) -> Result<Vec<f64>, String> {
     StateSpaceFilter::roots_to_polynomial_ascending(roots).map_err(|error| error.to_string())
 }
 
+/// Expand the Verilog-AMS Laplace factors `1 - s/root`, with `s` for
+/// roots at the origin, into ascending coefficients. The generic root
+/// polynomial and Zi conversion intentionally retain their monic convention.
+pub(crate) fn laplace_roots_to_polynomial(roots: &[(f64, f64)]) -> Result<Vec<f64>, LaplaceError> {
+    let coefficients = StateSpaceFilter::roots_to_polynomial_ascending(roots)?;
+    let origin_roots = roots
+        .iter()
+        .filter(|&&(re, im)| re == 0.0 && im == 0.0)
+        .count();
+    // The first coefficient after the explicit powers of s is the product
+    // of the negated nonzero roots. Dividing by it normalizes every factor
+    // without dividing an origin root by zero or dropping its power of s.
+    let normalization = coefficients[origin_roots];
+    if normalization == 0.0 {
+        return Err(LaplaceError::InvalidDefinition(
+            "Laplace root normalization underflows f64".into(),
+        ));
+    }
+    coefficients
+        .into_iter()
+        .enumerate()
+        .map(|(index, coefficient)| {
+            checked_ratio(
+                coefficient,
+                normalization,
+                &format!("normalized Laplace root coefficient {index}"),
+            )
+        })
+        .collect()
+}
+
+/// DC gain of language-level Laplace root factors, including origin roots.
+pub(crate) fn checked_laplace_pole_zero_dc_gain(
+    gain: f64,
+    zeros: &[(f64, f64)],
+    poles: &[(f64, f64)],
+) -> Result<f64, LaplaceError> {
+    let numerator = laplace_roots_to_polynomial(zeros)?[0];
+    let denominator = laplace_roots_to_polynomial(poles)?[0];
+    let numerator = checked_definition_product(gain, numerator, "Laplace root DC numerator")?;
+    checked_ratio(numerator, denominator, "Laplace root DC gain")
+}
+
 /// Return the real zero-frequency gain of a pole-zero transfer function.
 ///
 /// The root arrays contain `(real, imaginary)` pairs and must describe real
@@ -1961,6 +2004,31 @@ endmodule
         )
         .expect_err("a true nonzero quotient below f64 must fail closed");
         assert!(error.to_string().contains("underflows"));
+    }
+
+    #[test]
+    fn laplace_root_factors_are_normalized_and_retain_origin_zeros() {
+        for (roots, expected) in [
+            (vec![], vec![1.0]),
+            (vec![(-2.0, 0.0)], vec![1.0, 0.5]),
+            (vec![(2.0, 0.0)], vec![1.0, -0.5]),
+            (vec![(-1.0, 1.0), (-1.0, -1.0)], vec![1.0, 1.0, 0.5]),
+            (
+                vec![(0.0, 0.0), (-2.0, 0.0), (0.0, 0.0)],
+                vec![0.0, 0.0, 1.0, 0.5],
+            ),
+        ] {
+            assert_eq!(laplace_roots_to_polynomial(&roots).unwrap(), expected);
+        }
+        assert_eq!(
+            checked_laplace_pole_zero_dc_gain(1.0, &[(-2.0, 0.0)], &[(-4.0, 0.0)]).unwrap(),
+            1.0
+        );
+        assert_eq!(
+            checked_laplace_pole_zero_dc_gain(1.0, &[(0.0, 0.0)], &[(-4.0, 0.0)]).unwrap(),
+            0.0
+        );
+        assert!(checked_laplace_pole_zero_dc_gain(1.0, &[], &[(0.0, 0.0)]).is_err());
     }
 
     #[test]

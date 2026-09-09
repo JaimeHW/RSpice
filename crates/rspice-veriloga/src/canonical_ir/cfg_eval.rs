@@ -1271,7 +1271,7 @@ pub(super) fn apply_unary<S: CfgScalar>(op: CfgUnaryOp, input: S) -> S {
 fn laplace_dc_gain(id: ValueId, transfer: &CfgLaplaceTransfer) -> Result<f64, CfgEvalError> {
     let gain = match transfer {
         CfgLaplaceTransfer::ZeroPole { zeros, poles } => {
-            crate::laplace::checked_pole_zero_dc_gain(1.0, zeros, poles)
+            crate::laplace::checked_laplace_pole_zero_dc_gain(1.0, zeros, poles)
                 .map_err(|_| CfgEvalError::SingularFilterGain(id))?
         }
         // Ascending in `s`, so the constant terms are the leading elements and

@@ -2135,12 +2135,12 @@ impl<'a> CfgLowerer<'a> {
         span: SourceSpanRef,
     ) -> Option<CfgLaplaceTransfer> {
         // `laplace_zd` and `laplace_np` name one half of the transfer function
-        // by its roots and the other by its coefficients. Expanding the root
-        // half is exact and is what the executable IR does, which is why there
+        // by its roots and the other by its coefficients. Normalizing and
+        // expanding the root half matches the executable IR, which is why there
         // are two forms here and four spellings in the language.
         let expand = |lowerer: &mut Self, roots: &[ExprId]| -> Option<Vec<f64>> {
             let roots = lowerer.laplace_roots(roots, span)?;
-            match crate::laplace::roots_to_polynomial(&roots) {
+            match crate::laplace::laplace_roots_to_polynomial(&roots) {
                 Ok(polynomial) => Some(polynomial),
                 Err(error) => {
                     lowerer.unsupported(span, format!("a filter root list that {error}"));
@@ -2148,10 +2148,9 @@ impl<'a> CfgLowerer<'a> {
                 }
             }
         };
-        // Pole-zero form is the one that stays unexpanded, because the runtime
-        // realization is built from the roots and expanding first would throw
-        // that away. A form that names only *one* half by roots has no such
-        // realization to preserve, so it expands into the coefficient form.
+        // Retain both authored root lists together in canonical metadata.
+        // Its DC evaluator uses the same normalized factors as the executable
+        // realization. A mixed form stores the expanded coefficients instead.
         if form.numerator_is_roots && form.denominator_is_roots {
             return Some(CfgLaplaceTransfer::ZeroPole {
                 zeros: self.laplace_roots(numerator, span)?,

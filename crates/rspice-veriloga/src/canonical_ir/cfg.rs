@@ -218,12 +218,11 @@ pub enum CfgIntegerBitwiseOp {
 /// there are two forms rather than the language's four.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum CfgLaplaceTransfer {
-    /// `laplace_zp`: complex zeros and poles as `(real, imaginary)` pairs. Kept
-    /// unexpanded because the realization is built from the roots.
+    /// `laplace_zp`: authored complex zeros and poles as `(real, imaginary)`
+    /// pairs. Consumers normalize the factors when evaluating the transfer.
     ///
-    /// No gain factor: the operator takes three arguments in Verilog-AMS, so a
-    /// pole-zero filter's leading coefficient is always one, and a field that
-    /// can only hold one is a field a consumer has to check.
+    /// Each nonzero root contributes `1 - s/root`; an origin root contributes
+    /// `s`. The language operator has no separate gain argument.
     ZeroPole {
         zeros: Vec<(f64, f64)>,
         poles: Vec<(f64, f64)>,

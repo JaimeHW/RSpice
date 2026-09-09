@@ -5978,7 +5978,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         zeros: &[(f64, f64)],
         poles: &[(f64, f64)],
     ) -> JitResult<f64> {
-        crate::laplace::checked_pole_zero_dc_gain(gain, zeros, poles).map_err(|error| {
+        crate::laplace::checked_laplace_pole_zero_dc_gain(gain, zeros, poles).map_err(|error| {
             JitError::InvalidCanonicalIr {
                 model: self.model.clone(),
                 detail: format!("{operator} DC derivative: {error}").into(),

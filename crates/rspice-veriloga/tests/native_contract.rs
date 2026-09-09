@@ -2618,14 +2618,15 @@ endmodule
 
 #[cfg(target_arch = "x86_64")]
 #[test]
-fn laplace_zp_dc_jacobian_matches_checked_gain_across_lowering() {
+fn laplace_zp_dc_jacobian_matches_lrm_gain_across_lowering() {
+    // LRM 4.5.11.1 uses 1-s/root: nonzero root factors are unity at DC.
     for (case, zeros, poles, expected) in [
-        ("real", "-2.0, 0.0", "-4.0, 0.0", 0.5),
+        ("real", "-2.0, 0.0", "-4.0, 0.0", 1.0),
         (
             "complex",
             "-1.0, 2.0, -1.0, -2.0",
             "-3.0, 4.0, -3.0, -4.0",
-            0.2,
+            1.0,
         ),
     ] {
         let source = format!(

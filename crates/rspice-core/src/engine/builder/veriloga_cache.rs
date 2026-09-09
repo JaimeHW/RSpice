@@ -262,7 +262,8 @@ use super::*;
 // Version 56 preserves hypot and stabilizes homogeneous/division derivatives.
 // Version 57 retains authored Laplace coefficients for range-safe AC responses;
 // older realizations cannot recover coefficients lost during normalization.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 57;
+// Version 58 normalizes language-level Laplace root factors as 1 - s/root.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 58;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
@@ -2399,6 +2400,8 @@ endmodule
             (48, true),
             (56, false),
             (56, true),
+            (57, false),
+            (57, true),
         ] {
             persist_model_to_disk_locked(&source_path, &entry, &cache_root)
                 .expect("persist current cache record");
