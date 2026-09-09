@@ -218,6 +218,7 @@ mod wasm_tests {
             "R2 out out 1e-20",
             "C2 out out 1e6",
             "D2 out out dm\n.model dm D(IS=1e20 CJO=1e20)",
+            "J2 out out out jm\n.model jm NJF(BETA=1e20 VTO=-1 IS=1e20 CGS=1e20 CGD=1e20)",
         ] {
             let netlist = rspice_core::Netlist::parse(&format!(
                 "tied admittance\nI1 0 out DC 1 AC 1\nR1 out 0 1\nC1 out 0 1n\n{device}\n.end\n"

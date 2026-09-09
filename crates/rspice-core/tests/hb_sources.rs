@@ -60,6 +60,10 @@ fn tied_admittance_terminals_preserve_dc_and_harmonic_response() {
             format!("R2 {terminals} 1e-20"),
             format!("C2 {terminals} 1e6"),
             format!("D2 {terminals} dm\n.model dm D(IS=1e20 CJO=1e20)"),
+            format!(
+                "J2 {terminals} {} jm\n.model jm NJF(BETA=1e20 VTO=-1 IS=1e20 CGS=1e20 CGD=1e20)",
+                terminals.split_whitespace().next().unwrap()
+            ),
         ] {
             let result = run_hb(
                 &format!(

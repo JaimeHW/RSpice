@@ -11,6 +11,87 @@ fn engine() -> Engine {
     Engine::new(SimulationConfig::default())
 }
 
+#[test]
+fn tied_jfet_terminals_preserve_dc_ac_and_transient_at_large_scale() {
+    use rspice_core::engine::SpiceDialect;
+    for dialect in [
+        SpiceDialect::BestAvailable,
+        SpiceDialect::Ngspice,
+        SpiceDialect::Xyce,
+    ] {
+        let engine = Engine::new(SimulationConfig::default().with_spice_dialect(dialect));
+        for kind in ["NJF", "PJF"] {
+            for terminals in ["out out out", "0 0 0"] {
+                let netlist = Netlist::parse(&format!(
+                    "tied JFET\nI1 0 out DC 1 AC 1\nR1 out 0 1\nJ1 {terminals} jm\n.model jm {kind}(BETA=1e20 VTO=-1 IS=1e20 CGS=1e20 CGD=1e20)\n.end\n"
+                )).unwrap();
+                let dc = engine
+                    .run_dc_op(&netlist)
+                    .unwrap_or_else(|error| panic!("{dialect:?}, {kind}, {terminals}: {error}"));
+                assert!((dc.try_voltage_named("out").unwrap() - 1.0).abs() < 1e-12);
+                let ac = engine.run_ac(&netlist, &[1e6]).unwrap();
+                assert!((ac[0].voltages[0] - rspice_core::Complex64::new(1.0, 0.0)).norm() < 1e-12);
+                let tran = engine.run_tran(&netlist, 2e-9, 1e-9).unwrap();
+                assert_eq!(tran.time.last().copied(), Some(2e-9));
+                assert!(
+                    tran.try_voltage_waveform_named("out")
+                        .unwrap()
+                        .iter()
+                        .all(|v| (v - 1.0).abs() < 1e-12)
+                );
+                assert_eq!(engine.convergence_quality().force_accepted_points, 0);
+            }
+        }
+    }
+}
+
+#[test]
+fn tied_drain_source_preserves_gate_loading_independently_of_channel_scale() {
+    use rspice_core::engine::SpiceDialect;
+    for dialect in [
+        SpiceDialect::BestAvailable,
+        SpiceDialect::Ngspice,
+        SpiceDialect::Xyce,
+    ] {
+        let engine = Engine::new(SimulationConfig {
+            spice_dialect: dialect,
+            locked_time_grid: Some(std::sync::Arc::new(
+                (0..=8).map(|i| f64::from(i) * 0.25e-9).collect(),
+            )),
+            ..Default::default()
+        });
+        let solve = |beta| {
+            let netlist = Netlist::parse(&format!(
+                "tied JFET channel\nI1 0 out DC 1 PWL(0 1 2n 2) AC 1\nR1 out 0 1\nJ1 out 0 out jm\n.model jm NJF(BETA={beta} VTO=-2 IS=1e-14 CGS=1n CGD=2n)\n.end\n"
+            )).unwrap();
+            (
+                engine.run_ac(&netlist, &[1e6]).unwrap()[0].voltages[0],
+                engine.run_tran(&netlist, 2e-9, 0.25e-9).unwrap(),
+            )
+        };
+        let (expected_ac, expected_tran) = solve(1.0);
+        assert!(
+            expected_ac.im.abs() > 1e-3,
+            "gate charge must load the circuit"
+        );
+        let (actual_ac, actual_tran) = solve(1e20);
+        assert!((actual_ac - expected_ac).norm() < 1e-12, "{dialect:?}");
+        assert_eq!(actual_tran.time, expected_tran.time);
+        for (actual, expected) in actual_tran
+            .try_voltage_waveform_named("out")
+            .unwrap()
+            .iter()
+            .zip(expected_tran.try_voltage_waveform_named("out").unwrap())
+        {
+            assert!(
+                (actual - expected).abs() < 1e-12,
+                "{dialect:?}: {actual} vs {expected}"
+            );
+        }
+        assert_eq!(engine.convergence_quality().force_accepted_points, 0);
+    }
+}
+
 fn xyce_pjfet_switch_deck() -> &'static str {
     "\
 2N5144 PJFET Switching Speed Characteristic

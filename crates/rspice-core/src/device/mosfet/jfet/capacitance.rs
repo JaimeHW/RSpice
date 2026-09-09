@@ -820,17 +820,13 @@ impl Jfet {
             external_vs,
         )?;
 
-        matrix.stamp(self.drain, self.drain, gds + ggd);
-        matrix.stamp(self.drain, self.gate, gm - ggd);
-        matrix.stamp(self.drain, self.source, -gm - gds);
-
-        matrix.stamp(self.gate, self.drain, -ggd);
-        matrix.stamp(self.gate, self.gate, ggs + ggd);
-        matrix.stamp(self.gate, self.source, -ggs);
-
-        matrix.stamp(self.source, self.drain, -gds);
-        matrix.stamp(self.source, self.gate, -gm - ggs);
-        matrix.stamp(self.source, self.source, gm + gds + ggs);
+        let nodes = [self.drain, self.gate, self.source];
+        let jacobian = Self::terminal_jacobian(nodes, gm, gds, ggs, ggd, 0.0, 0.0);
+        for (row, &node) in nodes.iter().enumerate() {
+            for (column, &other) in nodes.iter().enumerate() {
+                matrix.stamp(node, other, jacobian[row][column]);
+            }
+        }
         Ok(())
     }
 

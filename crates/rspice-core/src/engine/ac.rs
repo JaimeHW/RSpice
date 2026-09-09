@@ -2100,12 +2100,14 @@ impl Engine {
                 continue;
             };
 
-            Self::stamp_imag_matrix_entry(matrix, jfet.drain, jfet.drain, xgds);
-            Self::stamp_imag_matrix_entry(matrix, jfet.drain, jfet.gate, xgm);
-            Self::stamp_imag_matrix_entry(matrix, jfet.drain, jfet.source, -xgds - xgm);
-            Self::stamp_imag_matrix_entry(matrix, jfet.source, jfet.drain, -xgds);
-            Self::stamp_imag_matrix_entry(matrix, jfet.source, jfet.gate, -xgm);
-            Self::stamp_imag_matrix_entry(matrix, jfet.source, jfet.source, xgds + xgm);
+            let nodes = [jfet.drain, jfet.gate, jfet.source];
+            let jacobian =
+                crate::device::Jfet::terminal_jacobian(nodes, xgm, xgds, 0.0, 0.0, 0.0, 0.0);
+            for (row, &node) in nodes.iter().enumerate() {
+                for (column, &other) in nodes.iter().enumerate() {
+                    Self::stamp_imag_matrix_entry(matrix, node, other, jacobian[row][column]);
+                }
+            }
         }
         Ok(())
     }

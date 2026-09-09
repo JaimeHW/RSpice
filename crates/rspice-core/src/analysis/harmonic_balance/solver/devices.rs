@@ -1080,39 +1080,30 @@ impl NonlinearDeviceInstance {
     fn eval_jfet(&self, polarity: Value, node_voltages: &[Value]) -> Vec<(usize, Value)> {
         let (id, _, _) = self.jfet_ids_gm_gds(node_voltages, polarity);
         let (igs, _, igd, _) = self.jfet_gate_junctions(node_voltages, polarity);
-        vec![
-            (self.terminals[0], -id + polarity * igd), // Channel out, gate-drain junction in
-            (self.terminals[1], -polarity * (igs + igd)), // Gate junction current out
-            (self.terminals[2], id + polarity * igs),  // Channel in, gate-source junction in
-        ]
+        let nodes = [self.terminals[0], self.terminals[1], self.terminals[2]];
+        let injections = crate::device::Jfet::terminal_current_injections(
+            nodes,
+            id,
+            polarity * igs,
+            polarity * igd,
+        );
+        nodes.into_iter().zip(injections).collect()
     }
 
     fn jac_jfet(&self, polarity: Value, node_voltages: &[Value]) -> Vec<((usize, usize), Value)> {
         let (_, gm, gds) = self.jfet_ids_gm_gds(node_voltages, polarity);
         let (_, ggs, _, ggd) = self.jfet_gate_junctions(node_voltages, polarity);
-        let d = self.terminals[0];
-        let g = self.terminals[1];
-        let s = self.terminals[2];
-        vec![
-            // Channel: textbook FET stamps; the source row carries the full
-            // -(gm + gds) dependence mirrored from the drain row.
-            ((d, d), gds),
-            ((d, g), gm),
-            ((d, s), -(gds + gm)),
-            ((s, d), -gds),
-            ((s, g), -gm),
-            ((s, s), gds + gm),
-            // Gate-source junction (polarity factors cancel in node space).
-            ((g, g), ggs),
-            ((g, s), -ggs),
-            ((s, g), -ggs),
-            ((s, s), ggs),
-            // Gate-drain junction.
-            ((g, g), ggd),
-            ((g, d), -ggd),
-            ((d, g), -ggd),
-            ((d, d), ggd),
-        ]
+        let nodes = [self.terminals[0], self.terminals[1], self.terminals[2]];
+        let jacobian = crate::device::Jfet::terminal_jacobian(nodes, gm, gds, ggs, ggd, 0.0, 0.0);
+        let mut entries = Vec::with_capacity(9);
+        for (row, values) in jacobian.into_iter().enumerate() {
+            for (column, value) in values.into_iter().enumerate() {
+                if value != 0.0 {
+                    entries.push(((nodes[row], nodes[column]), value));
+                }
+            }
+        }
+        entries
     }
 
     fn eval_njfet(&self, node_voltages: &[Value]) -> Vec<(usize, Value)> {
@@ -1433,26 +1424,26 @@ impl NonlinearDeviceInstance {
 
     fn charge_jfet(&self, p: Value, node_voltages: &[Value]) -> Vec<(usize, Value)> {
         let (q_gs, _, q_gd, _) = self.jfet_junction_charges(p, node_voltages);
-        let d = self.terminals[0];
-        let g = self.terminals[1];
-        let s = self.terminals[2];
-        vec![(g, -p * (q_gs + q_gd)), (s, p * q_gs), (d, p * q_gd)]
+        let nodes = [self.terminals[0], self.terminals[1], self.terminals[2]];
+        let charges =
+            crate::device::Jfet::terminal_current_injections(nodes, 0.0, p * q_gs, p * q_gd);
+        nodes.into_iter().zip(charges).collect()
     }
 
     fn cap_jfet(&self, p: Value, node_voltages: &[Value]) -> Vec<((usize, usize), Value)> {
         let (_, c_gs, _, c_gd) = self.jfet_junction_charges(p, node_voltages);
-        let d = self.terminals[0];
-        let g = self.terminals[1];
-        let s = self.terminals[2];
-        vec![
-            ((g, g), c_gs + c_gd),
-            ((g, s), -c_gs),
-            ((s, g), -c_gs),
-            ((s, s), c_gs),
-            ((g, d), -c_gd),
-            ((d, g), -c_gd),
-            ((d, d), c_gd),
-        ]
+        let nodes = [self.terminals[0], self.terminals[1], self.terminals[2]];
+        let capacitance =
+            crate::device::Jfet::terminal_jacobian(nodes, 0.0, 0.0, c_gs, c_gd, 0.0, 0.0);
+        let mut entries = Vec::with_capacity(9);
+        for (row, values) in capacitance.into_iter().enumerate() {
+            for (column, value) in values.into_iter().enumerate() {
+                if value != 0.0 {
+                    entries.push(((nodes[row], nodes[column]), value));
+                }
+            }
+        }
+        entries
     }
 }
 
