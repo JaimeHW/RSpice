@@ -64,6 +64,9 @@ fn tied_admittance_terminals_preserve_dc_and_harmonic_response() {
                 "J2 {terminals} {} jm\n.model jm NJF(BETA=1e20 VTO=-1 IS=1e20 CGS=1e20 CGD=1e20)",
                 terminals.split_whitespace().next().unwrap()
             ),
+            format!(
+                "M2 {terminals} {terminals} mm W=1 L=1\n.model mm NMOS(LEVEL=1 KP=1e20 VTO=-0.73 TOX=1e-30 IS=1e20 CGSO=1e20 CGDO=1e20 CGBO=1e20 CBD=1e20 CBS=1e20)"
+            ),
         ] {
             let result = run_hb(
                 &format!(

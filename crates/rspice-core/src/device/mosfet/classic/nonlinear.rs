@@ -157,6 +157,19 @@ impl NonlinearDevice for Mosfet {
                 (gm, gds, gmb, id_eq)
             };
 
+        let (gm, gds, gmb, id_eq) = Self::channel_stamp_terms(
+            [
+                self.node_drain,
+                self.node_gate,
+                self.node_source,
+                self.node_bulk,
+            ],
+            gm,
+            gds,
+            gmb,
+            id_eq,
+        );
+
         // Stamp the linearized model (Gate draws no DC current)
         // Drain node equation
         matrix.stamp(self.node_drain, self.node_drain, gds);

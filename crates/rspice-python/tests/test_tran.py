@@ -30,6 +30,11 @@ class TestTransient:
             "C2 out out 1e6",
             "D2 out out dm\n.model dm D(IS=1e20 CJO=1e20)",
             "J2 out out out jm\n.model jm NJF(BETA=1e20 VTO=-1 IS=1e20 CGS=1e20 CGD=1e20)",
+            (
+                "M2 out out out out mm W=1 L=1\n"
+                ".model mm NMOS(LEVEL=1 KP=1e20 VTO=-1 IS=1e20 "
+                "CGSO=1e20 CGDO=1e20 CGBO=1e20 CBD=1e20 CBS=1e20)"
+            ),
         ],
     )
     def test_tied_admittance_preserves_dc_and_transient(self, engine, device):

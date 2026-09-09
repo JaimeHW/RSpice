@@ -932,7 +932,7 @@ impl NonlinearDeviceInstance {
 
     fn eval_mos(&self, p: Value, node_voltages: &[Value]) -> Vec<(usize, Value)> {
         let (eff_d, eff_s, ids, _, _, _) = self.mos_operating_point(p, node_voltages);
-        let absorbed = p * ids; // Current absorbed at the effective drain.
+        let absorbed = if eff_d == eff_s { 0.0 } else { p * ids };
         let mut out = vec![(eff_d, -absorbed), (eff_s, absorbed)];
 
         // Bulk diode conduction (normally reverse biased; matters when the
@@ -943,6 +943,8 @@ impl NonlinearDeviceInstance {
         let b = self.terminals[3];
         let d = self.terminals[0];
         let s = self.terminals[2];
+        let i_sb = if b == s { 0.0 } else { i_sb };
+        let i_db = if b == d { 0.0 } else { i_db };
         out.push((b, -p * (i_sb + i_db)));
         out.push((s, p * i_sb));
         out.push((d, p * i_db));
@@ -953,6 +955,8 @@ impl NonlinearDeviceInstance {
         let (eff_d, eff_s, _, gm, gds, gmbs) = self.mos_operating_point(p, node_voltages);
         let g = self.terminals[1];
         let b = self.terminals[3];
+        let (gm, gds, gmbs, _) =
+            crate::device::Mosfet::channel_stamp_terms([eff_d, g, eff_s, b], gm, gds, gmbs, 0.0);
 
         // The polarity factors cancel (p^2 = 1): the node-space stamps are the
         // textbook MOS pattern in the effective frame for NMOS and PMOS alike.
@@ -976,6 +980,8 @@ impl NonlinearDeviceInstance {
         let (_, g_db) = junction_current(self.params.is2, vj_db, self.params.vt);
         let d = self.terminals[0];
         let s = self.terminals[2];
+        let g_sb = if b == s { 0.0 } else { g_sb };
+        let g_db = if b == d { 0.0 } else { g_db };
         stamps.extend_from_slice(&[
             ((b, b), g_sb + g_db),
             ((b, s), -g_sb),
@@ -1298,8 +1304,29 @@ impl NonlinearDeviceInstance {
         let t = vgs_eff - vth;
 
         // Frame-variable partials per column [eff_d, g, eff_s, b].
-        let dt = [0.0, p, -p * (1.0 + dvth), p * dvth];
-        let dvds = [p, 0.0, -p, 0.0];
+        let mut dt = [0.0, p, -p * (1.0 + dvth), p * dvth];
+        let mut dvds = [p, 0.0, -p, 0.0];
+        if nodes
+            .iter()
+            .enumerate()
+            .any(|(i, node)| nodes[..i].contains(node))
+        {
+            // Differentiate with respect to each physical node once. Apply
+            // incidence before multiplying by the body-effect slope, so a
+            // tied control cannot erase another column at large scale.
+            let incidence = |node, positive, negative| {
+                (if node == positive { 1.0 } else { 0.0 })
+                    - (if node == negative { 1.0 } else { 0.0 })
+            };
+            for (c, &node) in nodes.iter().enumerate() {
+                dt[c] = 0.0;
+                dvds[c] = 0.0;
+                if !nodes[..c].contains(&node) {
+                    dt[c] = p * (incidence(node, g, es) + dvth * incidence(node, b, es));
+                    dvds[c] = p * incidence(node, ed, es);
+                }
+            }
+        }
 
         let delta = Self::MOS_QSMOOTH;
         let r = (t * t + 4.0 * delta * delta).sqrt();
@@ -1341,13 +1368,27 @@ impl NonlinearDeviceInstance {
             (cox * (t + 0.5 * phi), cox)
         };
 
+        // The conserved charge consists of drain-source, gate-source, and
+        // gate-bulk transfers. Eliminate tied transfers before assembling
+        // node rows; the other transfers and their derivatives remain live.
+        let qd = if ed == es { 0.0 } else { qd };
+        let qg = if g == es { 0.0 } else { qg };
+        let qgb = if g == b { 0.0 } else { qgb };
         // Absorbed charges per node row [eff_d, g, eff_s, b].
         let q = [p * qd, p * (qg + qgb), p * (-qg - qd), -p * qgb];
         let mut dq = [[0.0; 4]; 4];
         for (c, (&da_c, &db_c)) in da.iter().zip(db.iter()).enumerate() {
-            let dqg = qg_a * da_c + qg_b * db_c;
-            let dqd = qd_a * da_c + qd_b * db_c;
-            let dqgb = cgb_t * dt[c];
+            let dqg = if g == es {
+                0.0
+            } else {
+                qg_a * da_c + qg_b * db_c
+            };
+            let dqd = if ed == es {
+                0.0
+            } else {
+                qd_a * da_c + qd_b * db_c
+            };
+            let dqgb = if g == b { 0.0 } else { cgb_t * dt[c] };
             dq[0][c] = p * dqd;
             dq[1][c] = p * (dqg + dqgb);
             dq[2][c] = p * (-dqg - dqd);
@@ -1365,6 +1406,8 @@ impl NonlinearDeviceInstance {
         let b = self.terminals[3];
         let d = self.terminals[0];
         let s = self.terminals[2];
+        let q_sb = if b == s { 0.0 } else { q_sb };
+        let q_db = if b == d { 0.0 } else { q_db };
         let mut out = vec![(b, -p * (q_sb + q_db)), (s, p * q_sb), (d, p * q_db)];
 
         if self.params.cox_wl > 0.0 {
@@ -1384,6 +1427,8 @@ impl NonlinearDeviceInstance {
         let b = self.terminals[3];
         let d = self.terminals[0];
         let s = self.terminals[2];
+        let c_sb = if b == s { 0.0 } else { c_sb };
+        let c_db = if b == d { 0.0 } else { c_db };
         let mut out = vec![
             ((b, b), c_sb + c_db),
             ((b, s), -c_sb),
@@ -1968,6 +2013,66 @@ mod tests {
 
         let device = NonlinearDeviceInstance::diode(0, 1, 2.5e-9, 1.8);
         assert_jacobian_matches_finite_difference(&device, 2, (-1.0, 1.0), 40, 13);
+    }
+
+    #[test]
+    fn tied_mos_transfers_preserve_existing_current_charge_and_jacobian() {
+        let cap = DepletionCap::new(1e20, 0.8, 0.5, 0.5);
+        for mos in [
+            NonlinearDeviceInstance::nmos(0, 0, 0, 0, -0.73, 1e20, 0.04),
+            NonlinearDeviceInstance::pmos(0, 0, 0, 0, -0.73, 1e20, 0.04),
+        ] {
+            let mos = mos
+                .with_intrinsic_gate(1e20)
+                .with_bulk_junctions(cap, cap, 1e20, 1e20);
+            for entries in [mos.evaluate(&[1.0]), mos.charge(&[1.0])] {
+                let mut value = 1.0;
+                for (row, contribution) in entries {
+                    assert_eq!(row, 0);
+                    value += contribution;
+                }
+                assert_eq!(value, 1.0);
+            }
+            for entries in [mos.jacobian(&[1.0]), mos.charge_jacobian(&[1.0])] {
+                let mut value = 1.0;
+                for (position, contribution) in entries {
+                    assert_eq!(position, (0, 0));
+                    value += contribution;
+                }
+                assert_eq!(value, 1.0);
+            }
+        }
+    }
+
+    #[test]
+    fn partially_tied_mos_current_and_charge_derivatives_match_finite_differences() {
+        for nodes in [
+            [0, 1, 0, 2],
+            [0, 0, 1, 2],
+            [0, 1, 1, 2],
+            [0, 1, 2, 0],
+            [0, 1, 2, 1],
+            [0, 1, 2, 2],
+            [0, 1, 0, 0],
+        ] {
+            let [d, g, s, b] = nodes;
+            for mos in [
+                NonlinearDeviceInstance::nmos(d, g, s, b, 0.7, 2e-5, 0.04),
+                NonlinearDeviceInstance::pmos(d, g, s, b, 0.7, 2e-5, 0.04),
+            ] {
+                let mos = mos
+                    .with_body_effect(0.6, 0.7)
+                    .with_intrinsic_gate(80e-15)
+                    .with_bulk_junctions(
+                        DepletionCap::new(3e-12, 0.8, 0.5, 0.5),
+                        DepletionCap::new(2e-12, 0.8, 0.5, 0.5),
+                        1e-14,
+                        2e-14,
+                    );
+                assert_jacobian_matches_finite_difference(&mos, 3, (-1.0, 1.0), 40, 73);
+                assert_charge_jacobian_matches_finite_difference(&mos, 3, (-1.0, 1.0), 40, 79);
+            }
+        }
     }
 
     #[test]

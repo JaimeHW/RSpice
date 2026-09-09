@@ -24,6 +24,46 @@ struct ClassicMosDirectOperatingPoint {
 }
 
 impl Mosfet {
+    /// Contract channel controls onto physical nodes before accumulating into
+    /// an existing matrix or residual. Keep device operating-point derivatives
+    /// unchanged; only the delivered stamp combines tied columns and rows.
+    #[inline]
+    pub(crate) fn channel_stamp_terms(
+        [drain, gate, source, bulk]: [NodeId; 4],
+        mut gm: Value,
+        mut gds: Value,
+        mut gmb: Value,
+        id_eq: Value,
+    ) -> (Value, Value, Value, Value) {
+        if drain == source {
+            return (0.0, 0.0, 0.0, 0.0);
+        }
+        if gate == drain && bulk == drain {
+            let mut correction = 0.0;
+            crate::numerics::compensated_add(&mut gds, &mut correction, gm);
+            crate::numerics::compensated_add(&mut gds, &mut correction, gmb);
+            return (0.0, gds + correction, 0.0, id_eq);
+        }
+        if gate == source {
+            gm = 0.0;
+        }
+        if bulk == source {
+            gmb = 0.0;
+        }
+        if gate == drain {
+            gds += gm;
+            gm = 0.0;
+        }
+        if bulk == drain {
+            gds += gmb;
+            gmb = 0.0;
+        } else if bulk == gate {
+            gm += gmb;
+            gmb = 0.0;
+        }
+        (gm, gds, gmb, id_eq)
+    }
+
     #[inline]
     fn classic_diode_stamp_plan(
         matrix: &StaticMatrix,
@@ -137,7 +177,7 @@ impl Mosfet {
             conductance,
             equivalent_current,
         } = branch;
-        if conductance == 0.0 && equivalent_current == 0.0 {
+        if anode == cathode || (conductance == 0.0 && equivalent_current == 0.0) {
             return;
         }
         if let Some(index) = plan.aa.checked_index(pattern) {
@@ -169,6 +209,19 @@ impl Mosfet {
         plan: &ClassicMosStaticStampPlan,
         terms: &ClassicMosCachedStaticTerms,
     ) {
+        let mut terms = *terms;
+        (terms.gm, terms.gds, terms.gmb, terms.id_eq) = Self::channel_stamp_terms(
+            [
+                plan.node_drain,
+                plan.node_gate,
+                plan.node_source,
+                plan.node_bulk,
+            ],
+            terms.gm,
+            terms.gds,
+            terms.gmb,
+            terms.id_eq,
+        );
         let source_diagonal = terms.gm + terms.gds + terms.gmb;
         if let Some(index) = plan.indices.dd.checked_index(plan.pattern) {
             matrix.stamp_direct(index, terms.gds);
@@ -240,7 +293,7 @@ impl Mosfet {
             conductance,
             equivalent_current,
         } = branch;
-        if conductance == 0.0 && equivalent_current == 0.0 {
+        if anode == cathode || (conductance == 0.0 && equivalent_current == 0.0) {
             return;
         }
         if let Some(offset) = plan.aa.offset() {
@@ -273,6 +326,19 @@ impl Mosfet {
         plan: &ClassicMosStaticStampPlan,
         terms: &ClassicMosCachedStaticTerms,
     ) {
+        let mut terms = *terms;
+        (terms.gm, terms.gds, terms.gmb, terms.id_eq) = Self::channel_stamp_terms(
+            [
+                plan.node_drain,
+                plan.node_gate,
+                plan.node_source,
+                plan.node_bulk,
+            ],
+            terms.gm,
+            terms.gds,
+            terms.gmb,
+            terms.id_eq,
+        );
         let source_diagonal = terms.gm + terms.gds + terms.gmb;
         if let Some(offset) = plan.indices.dd.offset() {
             values[offset] += terms.gds;
@@ -335,6 +401,7 @@ impl Mosfet {
         let g = self.node_gate;
         let s = self.node_source;
         let b = self.node_bulk;
+        self.indices = MosfetIndices::default();
 
         // Drain row (4 columns)
         if d > 0 {
@@ -379,6 +446,18 @@ impl Mosfet {
             gmb,
             id_eq,
         } = operating_point;
+        let (gm, gds, gmb, id_eq) = Self::channel_stamp_terms(
+            [
+                self.node_drain,
+                self.node_gate,
+                self.node_source,
+                self.node_bulk,
+            ],
+            gm,
+            gds,
+            gmb,
+            id_eq,
+        );
         // Stamp matrix using direct indexing
         // Drain row
         if let Some(idx) = self.indices.dd {
@@ -492,35 +571,48 @@ impl Mosfet {
         debug_assert!(self.has_branch_history);
         debug_assert_eq!(self.node_bulk, 0);
 
+        let (gm, gds, gmb, id_eq) = Self::channel_stamp_terms(
+            [
+                self.node_drain,
+                self.node_gate,
+                self.node_source,
+                self.node_bulk,
+            ],
+            self.gm,
+            self.gds,
+            self.gmb,
+            self.id_eq,
+        );
+
         if let Some(index) = self.indices.dd {
-            values[index.offset()] += self.gds;
+            values[index.offset()] += gds;
         }
         if let Some(index) = self.indices.dg {
-            values[index.offset()] += self.gm;
+            values[index.offset()] += gm;
         }
         if let Some(index) = self.indices.ds {
-            values[index.offset()] += -self.gm - self.gds - self.gmb;
+            values[index.offset()] += -gm - gds - gmb;
         }
         if let Some(index) = self.indices.db {
-            values[index.offset()] += self.gmb;
+            values[index.offset()] += gmb;
         }
         if let Some(index) = self.indices.sd {
-            values[index.offset()] += -self.gds;
+            values[index.offset()] += -gds;
         }
         if let Some(index) = self.indices.sg {
-            values[index.offset()] += -self.gm;
+            values[index.offset()] += -gm;
         }
         if let Some(index) = self.indices.ss {
-            values[index.offset()] += self.gm + self.gds + self.gmb;
+            values[index.offset()] += gm + gds + gmb;
         }
         if let Some(index) = self.indices.sb {
-            values[index.offset()] += -self.gmb;
+            values[index.offset()] += -gmb;
         }
         if self.node_drain > 0 {
-            rhs[self.node_drain - 1] -= self.id_eq;
+            rhs[self.node_drain - 1] -= id_eq;
         }
         if self.node_source > 0 {
-            rhs[self.node_source - 1] += self.id_eq;
+            rhs[self.node_source - 1] += id_eq;
         }
 
         let (bs_anode, bs_cathode, gbs, ieq_bs) =
@@ -574,6 +666,18 @@ impl Mosfet {
                 self.linearized_transient_operating_point(vgs, vds, vbs, constants);
             (gm, gds, gmb, id_eq)
         };
+        let (gm, gds, gmb, id_eq) = Self::channel_stamp_terms(
+            [
+                self.node_drain,
+                self.node_gate,
+                self.node_source,
+                self.node_bulk,
+            ],
+            gm,
+            gds,
+            gmb,
+            id_eq,
+        );
         let vd = Self::terminal_voltage(solution, self.node_drain);
         let vg = Self::terminal_voltage(solution, self.node_gate);
         let vs = Self::terminal_voltage(solution, self.node_source);
@@ -650,6 +754,19 @@ impl Mosfet {
         row_ax: &mut [Value],
         row_rhs: &mut [Value],
     ) {
+        let mut terms = *terms;
+        (terms.gm, terms.gds, terms.gmb, terms.id_eq) = Self::channel_stamp_terms(
+            [
+                plan.node_drain,
+                plan.node_gate,
+                plan.node_source,
+                plan.node_bulk,
+            ],
+            terms.gm,
+            terms.gds,
+            terms.gmb,
+            terms.id_eq,
+        );
         let vd = Self::terminal_voltage(solution, plan.node_drain);
         let vg = Self::terminal_voltage(solution, plan.node_gate);
         let vs = Self::terminal_voltage(solution, plan.node_source);
@@ -725,6 +842,19 @@ impl Mosfet {
         row_ax: &mut Value,
         row_rhs: &mut Value,
     ) {
+        let mut terms = *terms;
+        (terms.gm, terms.gds, terms.gmb, terms.id_eq) = Self::channel_stamp_terms(
+            [
+                plan.node_drain,
+                plan.node_gate,
+                plan.node_source,
+                plan.node_bulk,
+            ],
+            terms.gm,
+            terms.gds,
+            terms.gmb,
+            terms.id_eq,
+        );
         let vd = Self::terminal_voltage(solution, plan.node_drain);
         let vg = Self::terminal_voltage(solution, plan.node_gate);
         let vs = Self::terminal_voltage(solution, plan.node_source);
@@ -800,7 +930,7 @@ impl Mosfet {
             conductance,
             equivalent_current,
         } = branch;
-        if conductance == 0.0 && equivalent_current == 0.0 {
+        if anode == cathode || (conductance == 0.0 && equivalent_current == 0.0) {
             return;
         }
         let va = Self::terminal_voltage(solution, anode);
@@ -834,7 +964,7 @@ impl Mosfet {
             conductance,
             equivalent_current,
         } = branch;
-        if conductance == 0.0 && equivalent_current == 0.0 {
+        if anode == cathode || (conductance == 0.0 && equivalent_current == 0.0) {
             return;
         }
         let va = Self::terminal_voltage(solution, anode);
@@ -910,6 +1040,137 @@ mod tests {
             .flat_map(|row| (0..size).map(move |col| (row, col, 0.0)))
             .collect();
         StaticMatrix::from_triplets(size, size, &triplets).expect("full test matrix")
+    }
+
+    #[test]
+    fn tied_channel_controls_preserve_existing_matrix_and_residual_terms() {
+        // Each case has a modest surviving channel and arbitrarily large
+        // controls whose incidence vanishes, or whose columns cancel.
+        for (nodes, raw, projected) in [
+            ([1, 1, 1, 1], [1e20, 1e20, 1e20, 1e20], [0.0; 4]),
+            ([1, 2, 1, 3], [1e20, 1e20, 1e20, 1e20], [0.0; 4]),
+            ([1, 2, 2, 2], [1e20, 3.0, 1e20, 2.0], [0.0, 3.0, 0.0, 2.0]),
+            ([1, 1, 2, 2], [1e20, -1e20, 1e20, 2.0], [0.0, 0.0, 0.0, 2.0]),
+            ([1, 2, 3, 2], [1e20, 3.0, -1e20, 2.0], [0.0, 3.0, 0.0, 2.0]),
+            ([1, 2, 3, 1], [3.0, 1e20, -1e20, 2.0], [3.0, 0.0, 0.0, 2.0]),
+            ([1, 1, 2, 1], [3.0, 1e20, -1e20, 2.0], [0.0, 3.0, 0.0, 2.0]),
+            ([1, 0, 0, 0], [1e20, 3.0, 1e20, 2.0], [0.0, 3.0, 0.0, 2.0]),
+            ([0, 0, 0, 0], [1e20, 1e20, 1e20, 1e20], [0.0; 4]),
+        ] {
+            let [d, g, s, b] = nodes;
+            let mut mos = Mosfet::new_nmos("m".into(), d, g, s, b);
+            let mut seed = full_matrix(3);
+            seed.values_mut().fill(1.0);
+            mos.link(&seed);
+            mos.update(&[0.0; 3]);
+            [mos.gm, mos.gds, mos.gmb, mos.id_eq] = raw;
+            // A tied body diode also has zero incidence; its terms must
+            // not disturb the independent body branch or another device.
+            mos.gbs = if b == s { 1e20 } else { 3.0 };
+            mos.gbd = if b == d { 1e20 } else { 5.0 };
+            mos.ibs = if b == s { 1e20 } else { 7.0 };
+            mos.ibd = if b == d { 1e20 } else { 11.0 };
+            let terms = mos.classic_cached_static_terms();
+            let plan = mos.classic_static_stamp_plan(&seed).unwrap();
+            let [gm, gds, gmb, id_eq] = projected;
+            let mut expected = seed.clone_structure();
+            expected.values_mut().fill(1.0);
+            let mut expected_rhs = [1.0; 3];
+            for (row, sign) in [(d, 1.0), (s, -1.0)] {
+                if row != 0 {
+                    for (col, value) in [(d, gds), (g, gm), (s, -gm - gds - gmb), (b, gmb)] {
+                        if col != 0 {
+                            expected.add(row - 1, col - 1, sign * value);
+                        }
+                    }
+                    expected_rhs[row - 1] -= sign * id_eq;
+                }
+            }
+            for (cathode, gd, ieq) in [(s, mos.gbs, mos.ibs), (d, mos.gbd, mos.ibd)] {
+                if b != cathode {
+                    for (row, sign) in [(b, 1.0), (cathode, -1.0)] {
+                        if row != 0 {
+                            for (col, value) in [(b, gd), (cathode, -gd)] {
+                                if col != 0 {
+                                    expected.add(row - 1, col - 1, sign * value);
+                                }
+                            }
+                            expected_rhs[row - 1] -= sign * ieq;
+                        }
+                    }
+                }
+            }
+            for path in 0..4 {
+                if path == 3 && b != 0 {
+                    continue;
+                }
+                let mut matrix = seed.clone_structure();
+                matrix.values_mut().fill(1.0);
+                let mut rhs = [1.0; 3];
+                match path {
+                    0 => mos.stamp_cached_direct(&mut matrix, &mut rhs),
+                    1 => Mosfet::stamp_classic_cached_static_terms(
+                        &mut matrix,
+                        &mut rhs,
+                        &plan,
+                        &terms,
+                    ),
+                    2 => Mosfet::stamp_classic_cached_static_values(
+                        matrix.values_mut(),
+                        &mut rhs,
+                        &plan,
+                        &terms,
+                    ),
+                    _ => mos.stamp_grounded_bulk_cached_values(matrix.values_mut(), &mut rhs),
+                }
+                assert_eq!(
+                    matrix.values_mut(),
+                    expected.values_mut(),
+                    "{nodes:?}, path {path}"
+                );
+                assert_eq!(rhs, expected_rhs, "{nodes:?}, path {path}");
+            }
+            let mut ax = [1.0; 3];
+            let mut rhs = [1.0; 3];
+            Mosfet::add_cached_physical_static_residual_terms(
+                &[0.0; 3], &plan, &terms, &mut ax, &mut rhs,
+            );
+            assert_eq!(ax, [1.0; 3]);
+            assert_eq!(rhs, expected_rhs, "{nodes:?}, residual");
+            #[cfg(feature = "parallel")]
+            for (row, &expected) in expected_rhs.iter().enumerate() {
+                let mut ax = 1.0;
+                let mut rhs = 1.0;
+                Mosfet::add_cached_physical_static_residual_row_terms(
+                    &[0.0; 3],
+                    &mos.classic_residual_row_plan(),
+                    &terms,
+                    row,
+                    &mut ax,
+                    &mut rhs,
+                );
+                assert_eq!(ax, 1.0);
+                assert_eq!(rhs, expected, "{nodes:?}, row {row}");
+            }
+        }
+    }
+
+    #[test]
+    fn relinking_to_ground_clears_cached_channel_and_body_locations() {
+        let mut matrix = full_matrix(4);
+        matrix.values_mut().fill(1.0);
+        let mut mos = Mosfet::new_nmos("m".into(), 1, 2, 3, 4);
+        mos.link(&matrix);
+        mos.node_drain = 0;
+        mos.node_gate = 0;
+        mos.node_source = 0;
+        mos.node_bulk = 0;
+        mos.link(&matrix);
+        mos.update(&[0.0; 4]);
+        let mut rhs = [1.0; 4];
+        mos.stamp_grounded_bulk_cached_values(matrix.values_mut(), &mut rhs);
+        assert_eq!(matrix.values_mut(), &[1.0; 16]);
+        assert_eq!(rhs, [1.0; 4]);
     }
 
     #[test]
