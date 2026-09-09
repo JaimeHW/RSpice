@@ -5,7 +5,9 @@
 //! starts rather than partway through.
 
 use super::{AnalysisSpec, OptimizationGoal};
-use crate::simulation::config::{AcSweepType, NoiseAnalysisConfig, NoiseSweepType};
+use crate::simulation::config::{
+    AcSweepType, NoiseAnalysisConfig, NoiseSweepType, TransientAnalysisConfig,
+};
 use crate::simulation::dialog::OpConfig;
 
 impl AnalysisSpec {
@@ -171,32 +173,16 @@ impl AnalysisSpec {
                 step_time,
                 start_time,
                 max_timestep,
-                ..
-            } => {
-                if *stop_time <= 0.0 {
-                    return Err("Transient stop_time must be > 0".to_string());
-                }
-                if *step_time <= 0.0 {
-                    return Err("Transient step_time must be > 0".to_string());
-                }
-                if *step_time > *stop_time {
-                    return Err("Transient step_time must be <= stop_time".to_string());
-                }
-                if !start_time.is_finite() || *start_time < 0.0 {
-                    return Err("Transient start_time must be finite and >= 0".to_string());
-                }
-                if *start_time >= *stop_time {
-                    return Err("Transient start_time must be < stop_time".to_string());
-                }
-                if let Some(max_step) = max_timestep
-                    && (!max_step.is_finite() || *max_step <= 0.0)
-                {
-                    return Err(
-                        "Transient max_timestep must be finite and > 0 when set".to_string()
-                    );
-                }
-                Ok(())
+                uic,
+            } => TransientAnalysisConfig {
+                stop_time: *stop_time,
+                step_time: *step_time,
+                start_time: *start_time,
+                max_timestep: *max_timestep,
+                uic: *uic,
             }
+            .validate()
+            .map_err(|errors| errors.join("; ")),
             AnalysisSpec::Noise {
                 output_node,
                 reference_node,
@@ -1109,6 +1095,25 @@ mod tests {
         EnvelopeAdaptiveMode, EnvelopeExtractionPath, EnvelopeInitialPeriodicSolve, HbToneSpec,
         PssMethod, TfAccuracy, TfNormalization,
     };
+
+    #[test]
+    fn transient_spec_rejects_non_finite_stop_and_step_times() {
+        for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            for stop_field in [false, true] {
+                let spec = AnalysisSpec::Transient {
+                    stop_time: if stop_field { value } else { 1.0e-6 },
+                    step_time: if stop_field { 1.0e-9 } else { value },
+                    start_time: 0.0,
+                    max_timestep: None,
+                    uic: false,
+                };
+                assert!(
+                    spec.validate().is_err(),
+                    "non-finite transient input was accepted: {spec:?}"
+                );
+            }
+        }
+    }
 
     #[test]
     fn periodic_mixed_mode_requires_complete_equal_impedance_pairs() {

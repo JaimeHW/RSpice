@@ -35,7 +35,7 @@ impl Default for TransientAnalysisConfig {
 impl TransientAnalysisConfig {
     /// Generate SPICE .tran command
     pub fn to_spice(&self) -> String {
-        let mut cmd = if self.start_time > 0.0 {
+        let mut cmd = if self.start_time > 0.0 || self.max_timestep.is_some() {
             format!(
                 ".tran {} {} {}",
                 self.step_time, self.stop_time, self.start_time
@@ -52,38 +52,21 @@ impl TransientAnalysisConfig {
         cmd
     }
 
-    /// Validate configuration
+    pub(crate) fn resolved_maximum_step(
+        &self,
+    ) -> Result<f64, rspice_core::execution::TransientMaximumStepError> {
+        rspice_core::execution::resolve_transient_maximum_step(
+            self.step_time,
+            self.stop_time,
+            Some(self.start_time),
+            self.max_timestep,
+        )
+    }
+
+    /// Validate the same authored fields and derived solver limit used at execution.
     pub fn validate(&self) -> Result<(), Vec<String>> {
-        let mut errors = Vec::new();
-
-        if !self.stop_time.is_finite() || self.stop_time <= 0.0 {
-            errors.push("Stop time must be finite and positive".to_string());
-        }
-        if !self.step_time.is_finite() || self.step_time <= 0.0 {
-            errors.push("Step time must be finite and positive".to_string());
-        }
-        if !self.start_time.is_finite() || self.start_time < 0.0 {
-            errors.push("Start time must be finite and non-negative".to_string());
-        } else if self.start_time >= self.stop_time {
-            errors.push("Start time must be less than stop time".to_string());
-        }
-        if self.step_time.is_finite()
-            && self.stop_time.is_finite()
-            && self.step_time > self.stop_time
-        {
-            errors.push("Step time should not exceed stop time".to_string());
-        }
-        if self
-            .max_timestep
-            .is_some_and(|value| !value.is_finite() || value <= 0.0)
-        {
-            errors.push("Maximum timestep must be finite and positive when provided".to_string());
-        }
-
-        if errors.is_empty() {
-            Ok(())
-        } else {
-            Err(errors)
-        }
+        self.resolved_maximum_step()
+            .map(|_| ())
+            .map_err(|error| vec![error.to_string()])
     }
 }

@@ -166,6 +166,50 @@ fn the_harmonic_balance_directive_carries_the_tones_it_was_given() {
     );
 }
 
+#[test]
+fn transient_drafts_preserve_start_maximum_step_and_uic_in_the_engine_card() {
+    use crate::simulation::plan::AnalysisDraft;
+    use rspice_core::netlist::{AnalysisCommand, parse_netlist};
+
+    let controller = SimulationController::new();
+    for start_time in [0.0, 2.0e-7] {
+        for max_timestep in [None, Some(2.5e-10)] {
+            for uic in [false, true] {
+                let mut draft = fixture_draft(AnalysisKind::Transient);
+                let AnalysisDraft::Transient(tran) = &mut draft else {
+                    panic!("expected a transient draft");
+                };
+                tran.step = "1n".to_owned();
+                tran.stop = "1u".to_owned();
+                tran.start = start_time.to_string();
+                tran.max_step =
+                    max_timestep.map_or_else(String::new, |value: f64| value.to_string());
+                tran.uic = uic;
+                let state = engine_facing_state(&draft);
+                let directive = controller.analysis_draft_directive(&state, &draft).unwrap();
+                let parsed = parse_netlist(&format!("{FIXTURE_DECK}{directive}\n.end\n")).unwrap();
+                let [
+                    AnalysisCommand::Tran {
+                        step,
+                        stop,
+                        start,
+                        max_step,
+                        uic: parsed_uic,
+                    },
+                ] = parsed.analyses.as_slice()
+                else {
+                    panic!("expected one transient command: {directive}");
+                };
+                assert_eq!(*step, 1.0e-9, "{directive}");
+                assert_eq!(*stop, 1.0e-6, "{directive}");
+                assert_eq!(start.unwrap_or(0.0), start_time, "{directive}");
+                assert_eq!(*max_step, max_timestep, "{directive}");
+                assert_eq!(*parsed_uic, uic, "{directive}");
+            }
+        }
+    }
+}
+
 /// An inherited temperature axis reaches the deck as the axis the plan
 /// declared, and reads back as those exact temperatures.
 ///

@@ -20,10 +20,12 @@ impl EngineBridge {
         abort: &dyn rspice_core::abort_signal::AbortSignal,
     ) -> Result<SimulationResult, SimulationError> {
         ensure_not_aborted(abort)?;
+        let max_step = config
+            .resolved_maximum_step()
+            .map_err(|error| SimulationError::InvalidConfig(error.to_string()))?;
         let prepared_netlist = netlist_for_transient_config(netlist, config, abort)?;
         let netlist = prepared_netlist.as_ref();
         let engine = self.engine_for_netlist(netlist);
-        let max_step = resolve_transient_max_step(config);
         let tran_result = engine
             .run_tran_with_abort(netlist, config.stop_time, max_step, abort)
             .map_err(|e| self.translate_error(e))?;
@@ -106,16 +108,9 @@ fn transient_command_matches_config(
 
     *step == config.step_time
         && *stop == config.stop_time
-        && *start == (config.start_time > 0.0).then_some(config.start_time)
+        && start.unwrap_or(0.0) == config.start_time
         && *max_step == config.max_timestep
         && *uic == config.uic
-}
-
-fn resolve_transient_max_step(config: &TransientAnalysisConfig) -> f64 {
-    // SPICE .tran step is an output interval. Since our transient engine emits
-    // accepted timesteps directly, keep internal max-step at or below the
-    // requested output step by default to preserve waveform fidelity.
-    config.max_timestep.unwrap_or(config.step_time)
 }
 
 fn transient_start_index(time: &[f64], start_time: f64) -> usize {
@@ -730,6 +725,101 @@ mod tests {
             matches!(prepared, std::borrow::Cow::Borrowed(_)),
             "matching manual .tran decks should avoid cloning the parsed netlist"
         );
+    }
+
+    #[test]
+    fn transient_config_reuses_an_explicit_zero_start() {
+        let netlist = parse_netlist(
+            "explicit zero start\nV1 in 0 1\nR1 in 0 1k\n.tran 1n 1u 0 0.25n\n.end\n",
+        );
+        let config = TransientAnalysisConfig {
+            stop_time: 1e-6,
+            step_time: 1e-9,
+            start_time: 0.0,
+            max_timestep: Some(2.5e-10),
+            uic: false,
+        };
+        let prepared =
+            netlist_for_transient_config(&netlist, &config, &rspice_core::abort_signal::NoAbort)
+                .unwrap();
+        assert!(
+            matches!(prepared, Cow::Borrowed(_)),
+            "an explicit zero start has the same meaning as an omitted start"
+        );
+    }
+
+    #[test]
+    fn transient_execution_uses_core_default_and_explicit_step_limits() {
+        use crate::simulation::config::AnalysisConfig;
+
+        let bridge = EngineBridge::new();
+        let deck = "transient step limits\nV1 out 0 1\nR1 out 0 1k\n.end\n";
+        for (step_time, start_time, max_timestep, ceiling) in [
+            (0.01, 0.9, None, 0.002),
+            (0.001, 0.9, Some(0.007), 0.007),
+            (2.0, 0.0, None, 0.02),
+            (0.001, 0.0, None, 0.001),
+        ] {
+            let config = TransientAnalysisConfig {
+                stop_time: 1.0,
+                step_time,
+                start_time,
+                max_timestep,
+                uic: false,
+            };
+            let result = bridge
+                .run(&AnalysisConfig::Transient(config), deck)
+                .unwrap();
+            let SimulationResult::Transient {
+                time, waveforms, ..
+            } = result
+            else {
+                panic!("expected a transient result");
+            };
+            assert_eq!(time.first().copied(), Some(start_time));
+            assert_eq!(time.last().copied(), Some(1.0));
+            let largest_step = time
+                .windows(2)
+                .map(|pair| pair[1] - pair[0])
+                .fold(0.0, f64::max);
+            // Subtracting timestamps can lose precision relative to a small step.
+            let roundoff = 64.0 * f64::EPSILON;
+            assert!(
+                largest_step <= ceiling + roundoff,
+                "step={step_time}, start={start_time}, TMAX={max_timestep:?}: observed {largest_step}, ceiling {ceiling}"
+            );
+            assert!(
+                largest_step > 0.9 * ceiling,
+                "a steady linear circuit should reach the selected limit, including an explicit TMAX larger than TSTEP"
+            );
+            let (_, output) = waveforms
+                .iter()
+                .find(|(name, _)| name.eq_ignore_ascii_case("out"))
+                .unwrap_or_else(|| panic!("missing output node: {:?}", waveforms.keys()));
+            assert!(
+                output
+                    .y_values
+                    .iter()
+                    .all(|value| (*value - 1.0).abs() < 1.0e-12)
+            );
+        }
+    }
+
+    #[test]
+    fn transient_default_step_underflow_is_rejected_before_parsing() {
+        let config = TransientAnalysisConfig {
+            stop_time: f64::from_bits(1),
+            step_time: f64::from_bits(1),
+            ..Default::default()
+        };
+        let error = EngineBridge::new()
+            .run(
+                &crate::simulation::config::AnalysisConfig::Transient(config),
+                "invalid deck\n.this_is_not_a_command\n",
+            )
+            .unwrap_err();
+        assert!(matches!(error, SimulationError::InvalidConfig(message)
+            if message.contains("default TMAX underflowed")));
     }
 
     #[test]
