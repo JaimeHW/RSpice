@@ -12,6 +12,91 @@ fn engine() -> Engine {
 }
 
 #[test]
+fn classic_jfet_capacitance_is_continuous_and_has_no_reverse_bias_floor() {
+    let mut device = rspice_core::device::Jfet::njf("j1", 1, 2, 3);
+    device.params.cgs = 1e-9;
+    device.params.cgd = 2e-9;
+    for grading in [0.0, 0.2, 0.5, 1.0, 1.5] {
+        device.params.m = grading;
+        for fc in [0.0, 0.3, 0.5, 0.9] {
+            device.params.fc = fc;
+            let knee = fc * device.params.pb;
+            let below = device.capacitances(knee - 1e-9, knee - 1e-9);
+            let above = device.capacitances(knee + 1e-9, knee + 1e-9);
+            assert!((above.0 - below.0).abs() < 1e-7 * below.0);
+            assert!((above.1 - below.1).abs() < 1e-7 * below.1);
+        }
+        let (actual, _) = device.capacitances(-1e8, -1e8);
+        let expected = device.params.cgs * (1.0 + 1e8_f64).powf(-grading);
+        assert!((actual - expected).abs() < 1e-13 * expected);
+    }
+}
+
+#[test]
+fn classic_jfet_transient_delivers_the_analytic_charge_on_every_step() {
+    use rspice_core::engine::SpiceDialect;
+    use rspice_core::numerics::integration::IntegrationMethod;
+
+    // ngspice-46 jfetload.c: integrate the depletion Q(V), rather than
+    // accumulating C(V_new) * delta_V, including crossing the forward knee.
+    let charge = |voltage: f64| {
+        if voltage < 0.5 {
+            6e-9 * (1.0 - (1.0 - voltage).sqrt())
+        } else {
+            6e-9 * (1.0 - 0.5_f64.sqrt())
+                + 3e-9 / 0.5_f64.powf(1.5)
+                    * (0.25 * (voltage - 0.5) + (voltage * voltage - 0.25) / 4.0)
+        }
+    };
+    for dialect in [SpiceDialect::Ngspice, SpiceDialect::BestAvailable] {
+        for (kind, polarity) in [("NJF", 1.0), ("PJF", -1.0)] {
+            for (area, multiplicity) in [(1.0, 1.0), (2.0, 3.0)] {
+                let waveform = [-2.0, -0.1, 0.4, 0.7, -0.2, -2.0]
+                    .iter()
+                    .enumerate()
+                    .map(|(i, v)| format!("{} {}", i as f64 * 1e-6, polarity * v))
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                let netlist = Netlist::parse(&format!(
+                    "JFET charge cycle\nVg gate 0 DC {} PWL({waveform})\nJ1 0 gate 0 jm {area} M={multiplicity}\n.model jm {kind}(BETA=1m VTO=-2 IS=0 CGS=1n CGD=2n PB=1 FC=0.5)\n.end\n",
+                    -2.0 * polarity,
+                )).unwrap();
+                let engine = Engine::new(SimulationConfig {
+                    spice_dialect: dialect,
+                    integration_method: IntegrationMethod::BackwardEuler,
+                    locked_time_grid: Some(std::sync::Arc::new(
+                        (0..=5).map(|i| f64::from(i) * 1e-6).collect(),
+                    )),
+                    ..Default::default()
+                });
+                let result = engine.run_tran(&netlist, 5e-6, 1e-6).unwrap();
+                let voltage = result.try_voltage_waveform_named("gate").unwrap();
+                let current = result.try_branch_current_waveform_named("Vg").unwrap();
+                let mut delivered = 0.0;
+                for i in 1..result.time.len() {
+                    let step_charge = -current[i] * (result.time[i] - result.time[i - 1]);
+                    let expected = polarity
+                        * area
+                        * multiplicity
+                        * (charge(polarity * voltage[i]) - charge(polarity * voltage[i - 1]));
+                    assert!(
+                        (step_charge - expected).abs() < 2e-16 + 2e-7 * expected.abs(),
+                        "{dialect:?}, {kind}, area={area}, M={multiplicity}, t={}: got {step_charge}, expected {expected}",
+                        result.time[i],
+                    );
+                    delivered += step_charge;
+                }
+                assert!(
+                    delivered.abs() < 1e-15,
+                    "a closed bias cycle must return its charge: {delivered}"
+                );
+                assert_eq!(engine.convergence_quality().force_accepted_points, 0);
+            }
+        }
+    }
+}
+
+#[test]
 fn tied_jfet_terminals_preserve_dc_ac_and_transient_at_large_scale() {
     use rspice_core::engine::SpiceDialect;
     for dialect in [

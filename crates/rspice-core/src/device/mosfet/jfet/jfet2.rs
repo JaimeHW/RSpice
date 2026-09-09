@@ -1017,6 +1017,7 @@ impl Jfet {
         previous: Option<(Value, Value, Value, Value)>,
     ) -> Option<Jfet2ChargeState> {
         match self.params.channel_model {
+            JfetChannelModel::ShichmanHodges => Some(self.classic_gate_charge_state(vgs, vgd)),
             JfetChannelModel::XyceSydney => Some(self.xyce_jfet1_charge_state(vgs, vgd, temp)),
             JfetChannelModel::ParkerSkellern => {
                 Some(self.jfet2_charge_state(vgs, vgd, temp, previous))

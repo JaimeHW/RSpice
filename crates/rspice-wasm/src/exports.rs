@@ -262,6 +262,44 @@ mod wasm_tests {
     }
 
     #[wasm_bindgen_test]
+    fn classic_jfet_charge_cycle_is_conservative_in_wasm() {
+        use rspice_core::engine::{SimulationConfig, SpiceDialect};
+        use rspice_core::numerics::integration::IntegrationMethod;
+        let engine = rspice_core::Engine::new(SimulationConfig {
+            spice_dialect: SpiceDialect::Ngspice,
+            integration_method: IntegrationMethod::BackwardEuler,
+            locked_time_grid: Some(std::sync::Arc::new(vec![0.0, 1e-6, 2e-6])),
+            ..Default::default()
+        });
+        // Analytic ngspice depletion charge between -2 V and +0.75 V,
+        // crossing the FC=0.5 continuation knee (CGS+CGD = 3 nF).
+        let expected = 6e-9 * (3.0_f64.sqrt() - 0.5_f64.sqrt())
+            + 3e-9 / 0.5_f64.powf(1.5) * (0.25 * 0.25 + (0.75 * 0.75 - 0.25) / 4.0);
+        for (kind, polarity) in [("NJF", 1.0), ("PJF", -1.0)] {
+            let netlist = rspice_core::Netlist::parse(&format!(
+                "JFET charge cycle\nVg gate 0 DC {} PWL(0 {} 1u {} 2u {})\nJ1 0 gate 0 jm\n.model jm {kind}(BETA=1m VTO=-2 IS=0 CGS=1n CGD=2n)\n.end\n",
+                -2.0 * polarity, -2.0 * polarity, 0.75 * polarity, -2.0 * polarity,
+            )).unwrap();
+            let result = engine
+                .run_tran_with_abort(&netlist, 2e-6, 1e-6, &rspice_core::abort_signal::NoAbort)
+                .unwrap();
+            let current = result.try_branch_current_waveform_named("Vg").unwrap();
+            let mut charge = 0.0;
+            let mut reached_peak = false;
+            for (time, current) in result.time.windows(2).zip(&current[1..]) {
+                charge -= current * (time[1] - time[0]);
+                if time[1] == 1e-6 {
+                    assert!((charge - polarity * expected).abs() < 2e-16);
+                    reached_peak = true;
+                }
+            }
+            assert!(reached_peak);
+            assert!(charge.abs() < 1e-15);
+            assert_eq!(engine.convergence_quality().force_accepted_points, 0);
+        }
+    }
+
+    #[wasm_bindgen_test]
     fn newton_tracker_rejects_nonfinite_and_stale_success_in_wasm() {
         use rspice_core::solver::{NewtonConfig, NewtonSolver};
         let finite = [1.0; 17];

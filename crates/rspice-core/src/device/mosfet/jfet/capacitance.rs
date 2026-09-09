@@ -832,34 +832,36 @@ impl Jfet {
 
     /// Calculate junction capacitances
     ///
-    /// Returns (Cgs, Cgd) - gate-source and gate-drain capacitances
+    /// Returns (Cgs, Cgd) for branch voltages in the channel polarity frame.
     pub fn capacitances(&self, vgs: Value, vgd: Value) -> (Value, Value) {
-        let scale = self.junction_scale();
-        let cgs0 = self.params.cgs * scale;
-        let cgd0 = self.params.cgd * scale;
-        let pb = self.params.pb;
-        let m = self.params.m;
-        let fc = self.params.fc;
+        (
+            self.classic_junction_charge(vgs, self.params.cgs).1,
+            self.classic_junction_charge(vgd, self.params.cgd).1,
+        )
+    }
 
-        // Depletion capacitance model
-        let cgs = if vgs <= fc * pb {
-            cgs0 / (1.0 - vgs / pb).powf(m)
-        } else {
-            // Forward bias region - use linear extrapolation
-            let f1 = (1.0 - fc).powf(1.0 + m);
-            let f2 = 1.0 + m * fc;
-            cgs0 / f1 * (f2 + m * vgs / pb)
-        };
+    fn classic_junction_charge(&self, voltage: Value, capacitance: Value) -> (Value, Value) {
+        crate::device::semiconductor::depletion_charge_and_capacitance(
+            voltage,
+            capacitance * self.junction_scale(),
+            self.params.pb,
+            self.params.m,
+            self.params.fc,
+        )
+    }
 
-        let cgd = if vgd <= fc * pb {
-            cgd0 / (1.0 - vgd / pb).powf(m)
-        } else {
-            let f1 = (1.0 - fc).powf(1.0 + m);
-            let f2 = 1.0 + m * fc;
-            cgd0 / f1 * (f2 + m * vgd / pb)
-        };
-
-        (cgs.max(cgs0 * 0.01), cgd.max(cgd0 * 0.01))
+    /// Conservative classic JFET charge in external terminal orientation.
+    /// Trial, accepted history, LTE and AC all use this same Q(V), dQ/dV pair.
+    pub(super) fn classic_gate_charge_state(&self, vgs: Value, vgd: Value) -> Jfet2ChargeState {
+        let polarity = self.jfet_type.polarity();
+        let (qgs, cgs) = self.classic_junction_charge(polarity * vgs, self.params.cgs);
+        let (qgd, cgd) = self.classic_junction_charge(polarity * vgd, self.params.cgd);
+        Jfet2ChargeState {
+            qgs: polarity * qgs,
+            qgd: polarity * qgd,
+            cgs,
+            cgd,
+        }
     }
 
     /// Xyce LEVEL=1 analytic gate-junction charge and differential
@@ -918,5 +920,55 @@ impl Jfet {
     /// Get IDSS (drain current at Vgs=0 in saturation)
     pub fn idss(&self) -> Value {
         self.params.beta * self.params.vto * self.params.vto * self.area * self.m
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn classic_charge_is_history_independent_and_its_derivative_matches_ac() {
+        for polarity in [1.0, -1.0] {
+            let mut device = if polarity == 1.0 {
+                Jfet::njf("j1", 1, 2, 3)
+            } else {
+                Jfet::pjf("j1", 1, 2, 3)
+            };
+            device.params.cgs = 1e-9;
+            device.params.cgd = 2e-9;
+            device.area = 2.0;
+            device.m = 3.0;
+            for grading in [0.0, 0.2, 0.5, 1.0 - 1e-12, 1.0, 1.5] {
+                device.params.m = grading;
+                for voltage in [-4.0, -0.1, 0.49, 0.5, 0.51, 0.8] {
+                    let v = polarity * voltage;
+                    let charge = device
+                        .analytic_gate_charge_state(v, v, 300.15, None)
+                        .unwrap();
+                    let other_history = device
+                        .analytic_gate_charge_state(v, v, 300.15, Some((-10.0, 20.0, 3e-6, -4e-6)))
+                        .unwrap();
+                    assert_eq!(charge.qgs, other_history.qgs);
+                    assert_eq!(charge.qgd, other_history.qgd);
+                    let ac = device.ac_capacitances(v, v, 300.15);
+                    assert_eq!((charge.cgs, charge.cgd), (ac.0, ac.1));
+                    let h = 1e-6;
+                    let lower = device.classic_gate_charge_state(v - h, v - h);
+                    let upper = device.classic_gate_charge_state(v + h, v + h);
+                    for (derivative, capacitance) in [
+                        ((upper.qgs - lower.qgs) / (2.0 * h), charge.cgs),
+                        ((upper.qgd - lower.qgd) / (2.0 * h), charge.cgd),
+                    ] {
+                        assert!((derivative - capacitance).abs() < 1e-8 * capacitance);
+                    }
+                }
+                for voltage in [-1e-18, 1e-18] {
+                    let charge = device.classic_gate_charge_state(voltage, voltage);
+                    let expected = device.params.cgs * device.area * device.m * voltage;
+                    assert!((charge.qgs - expected).abs() <= 8.0 * Value::EPSILON * expected.abs());
+                }
+            }
+        }
     }
 }
