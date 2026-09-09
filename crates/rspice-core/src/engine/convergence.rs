@@ -103,9 +103,17 @@ pub(in crate::engine) struct TransientOperatingPointSolution {
 }
 
 #[derive(Debug, Clone, Copy)]
+struct ScaledStepNorm {
+    /// The norm is `scale * sqrt(squared_sum)`. Keeping the factors separate
+    /// also permits ratios of norms larger than the largest finite float.
+    scale: Value,
+    squared_sum: Value,
+}
+
+#[derive(Debug, Clone, Copy)]
 struct NewtonDampingState {
     pub(in crate::engine::convergence) bank_rose_alpha: Value,
-    pub(in crate::engine::convergence) prev_step_norm: Option<Value>,
+    pub(in crate::engine::convergence) prev_step_norm: Option<ScaledStepNorm>,
 }
 
 impl Default for NewtonDampingState {

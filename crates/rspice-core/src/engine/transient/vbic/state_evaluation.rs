@@ -161,7 +161,7 @@ impl Engine {
         let mut limited_target = current_internal;
         for idx in 0..BJT_INTERNAL_STATE_DIM {
             limited_target[idx] =
-                current_internal[idx] + alpha * (target_internal[idx] - current_internal[idx]);
+                Self::interpolate_newton_value(current_internal[idx], target_internal[idx], alpha);
         }
         limited_target
     }
@@ -272,8 +272,11 @@ impl Engine {
         for _ in 0..max_backtracks {
             let mut candidate_internal = current_internal;
             for idx in 0..BJT_INTERNAL_STATE_DIM {
-                candidate_internal[idx] =
-                    current_internal[idx] + alpha * (target_internal[idx] - current_internal[idx]);
+                candidate_internal[idx] = Self::interpolate_newton_value(
+                    current_internal[idx],
+                    target_internal[idx],
+                    alpha,
+                );
             }
             candidate_internal = bjt.limit_vbic_dynamic_internal_state_to_previous(
                 candidate_internal,
@@ -333,5 +336,20 @@ impl Engine {
                 None
             }
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unlimited_internal_step_preserves_a_small_target_after_cancellation() {
+        let current = [0.01; BJT_INTERNAL_STATE_DIM];
+        let target = [1e-20; BJT_INTERNAL_STATE_DIM];
+        assert_eq!(
+            Engine::step_limit_vbic_dynamic_internal_target(current, target, 0, 1e-8),
+            target
+        );
     }
 }

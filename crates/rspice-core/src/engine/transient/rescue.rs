@@ -203,15 +203,7 @@ impl Engine {
                     }
                     circuit.restore_nonlinear_state(line_search_base_state.clone());
                     vbic_snapshot_cache.clone_from_slice(&line_search_vbic_cache);
-                    let trial: Vec<Value> = if alpha >= 1.0 {
-                        full_step.clone()
-                    } else {
-                        iterate
-                            .iter()
-                            .zip(&full_step)
-                            .map(|(from, to)| from + alpha * (to - from))
-                            .collect()
-                    };
+                    let trial = Self::interpolate_solution(&iterate, &full_step, alpha);
                     self.stamp_transient_system_with_generated_mode(
                         circuit,
                         matrix,

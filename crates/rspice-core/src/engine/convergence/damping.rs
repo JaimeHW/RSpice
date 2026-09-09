@@ -9,25 +9,91 @@ impl Engine {
     }
 
     #[inline]
-    pub(in crate::engine::convergence) fn step_l2_norm(old: &[Value], new: &[Value]) -> Value {
-        old.iter()
-            .zip(new.iter())
-            .map(|(&a, &b)| {
-                let d = b - a;
-                d * d
-            })
-            .sum::<Value>()
-            .sqrt()
+    pub(in crate::engine::convergence) fn step_l2_norm(
+        old: &[Value],
+        new: &[Value],
+    ) -> ScaledStepNorm {
+        let mut norm = ScaledStepNorm {
+            scale: 0.0,
+            squared_sum: 0.0,
+        };
+        for (&a, &b) in old.iter().zip(new) {
+            let delta = b - a;
+            // Opposite finite endpoints may have an unrepresentable delta.
+            // Its half remains finite; a weight of four retains its square.
+            let (magnitude, weight) = if delta.is_infinite() && a.is_finite() && b.is_finite() {
+                ((0.5 * b - 0.5 * a).abs(), 4.0)
+            } else {
+                (delta.abs(), 1.0)
+            };
+            if magnitude.is_nan() {
+                return ScaledStepNorm {
+                    scale: Value::NAN,
+                    squared_sum: Value::NAN,
+                };
+            }
+            if magnitude > norm.scale {
+                norm.squared_sum = weight + norm.squared_sum * (norm.scale / magnitude).powi(2);
+                norm.scale = magnitude;
+            } else if magnitude != 0.0 {
+                norm.squared_sum += weight * (magnitude / norm.scale).powi(2);
+            }
+        }
+        norm
     }
 
-    pub(in crate::engine::convergence) fn interpolate_solution(
+    /// Interpolate finite Newton endpoints with `alpha` in `[0, 1]`.
+    #[inline]
+    pub(in crate::engine) fn interpolate_newton_value(
+        old_v: Value,
+        new_v: Value,
+        alpha: Value,
+    ) -> Value {
+        if alpha == 0.0 {
+            return old_v;
+        }
+        if alpha == 1.0 {
+            return new_v;
+        }
+        if (old_v < 0.0 && new_v > 0.0) || (old_v > 0.0 && new_v < 0.0) {
+            // A convex sum avoids overflowing the endpoint difference.
+            // Retain product, complement and sum roundoff so opposite
+            // large terms can still leave a small physical trial value.
+            let complement = 1.0 - alpha;
+            let complement_error = (1.0 - complement) - alpha;
+            let left = complement * old_v;
+            let right = alpha * new_v;
+            let sum = left + right;
+            let right_part = sum - left;
+            let sum_error = (left - (sum - right_part)) + (right - right_part);
+            let correction = complement.mul_add(old_v, -left)
+                + alpha.mul_add(new_v, -right)
+                + complement_error * old_v
+                + sum_error;
+            sum + correction
+        } else if alpha <= 0.5 {
+            old_v + alpha * (new_v - old_v)
+        } else {
+            // Anchor near the proposed endpoint to avoid subtracting
+            // nearly equal large values when a full step is approached.
+            new_v + (1.0 - alpha) * (old_v - new_v)
+        }
+    }
+
+    pub(in crate::engine) fn interpolate_solution(
         old: &[Value],
         proposal: &[Value],
         alpha: Value,
     ) -> Vec<Value> {
+        if alpha == 0.0 {
+            return old.to_vec();
+        }
+        if alpha == 1.0 {
+            return proposal.to_vec();
+        }
         old.iter()
             .zip(proposal.iter())
-            .map(|(&old_v, &new_v)| old_v + alpha * (new_v - old_v))
+            .map(|(&old_v, &new_v)| Self::interpolate_newton_value(old_v, new_v, alpha))
             .collect()
     }
 
@@ -65,18 +131,21 @@ impl Engine {
 
     pub(in crate::engine::convergence) fn update_bank_rose_alpha(
         damping_state: &mut NewtonDampingState,
-        step_norm: Value,
+        step_norm: ScaledStepNorm,
     ) {
         let Some(prev_norm) = damping_state.prev_step_norm else {
-            damping_state.prev_step_norm = Some(step_norm.max(1e-30));
+            damping_state.prev_step_norm = Some(step_norm);
             damping_state.bank_rose_alpha = 1.0;
             return;
         };
 
-        let ratio = if prev_norm > 0.0 {
-            step_norm / prev_norm
+        let ratio = if step_norm.scale == 0.0 {
+            0.0
+        } else if prev_norm.scale == 0.0 {
+            Value::INFINITY
         } else {
-            1.0
+            (step_norm.scale / prev_norm.scale)
+                * (step_norm.squared_sum / prev_norm.squared_sum).sqrt()
         };
 
         if ratio > 1.0 {
@@ -90,7 +159,7 @@ impl Engine {
         damping_state.bank_rose_alpha = damping_state
             .bank_rose_alpha
             .clamp(Self::BANK_ROSE_ALPHA_MIN, Self::BANK_ROSE_ALPHA_MAX);
-        damping_state.prev_step_norm = Some(step_norm.max(1e-30));
+        damping_state.prev_step_norm = Some(step_norm);
     }
 
     pub(in crate::engine::convergence) fn line_search_step<F>(
@@ -413,6 +482,69 @@ impl Engine {
 mod tests {
     use super::*;
     use crate::device::Mosfet;
+
+    #[test]
+    fn step_norm_and_bank_rose_are_independent_of_absolute_scale() {
+        for scale in [1e-300, 1e-200, 1.0, 1e200, 1e307] {
+            let norm = Engine::step_l2_norm(&[0.0; 2], &[3.0 * scale, 4.0 * scale]);
+            let magnitude = norm.scale * norm.squared_sum.sqrt();
+            assert!(
+                (magnitude / scale - 5.0).abs() < 2e-15,
+                "scale={scale}: {magnitude}"
+            );
+            let mut state = NewtonDampingState::default();
+            Engine::update_bank_rose_alpha(&mut state, norm);
+            Engine::update_bank_rose_alpha(
+                &mut state,
+                Engine::step_l2_norm(&[0.0; 2], &[6.0 * scale, 8.0 * scale]),
+            );
+            assert_eq!(state.bank_rose_alpha, 0.5, "scale={scale}");
+        }
+    }
+
+    #[test]
+    fn bank_rose_compares_steps_whose_norms_exceed_the_float_range() {
+        let old = [-1e308; 2];
+        let mut state = NewtonDampingState::default();
+        Engine::update_bank_rose_alpha(&mut state, Engine::step_l2_norm(&old, &[5e307; 2]));
+        Engine::update_bank_rose_alpha(&mut state, Engine::step_l2_norm(&old, &[1e308; 2]));
+        assert_eq!(state.bank_rose_alpha, 0.5);
+    }
+
+    #[test]
+    fn newton_interpolation_preserves_finite_endpoints_and_small_cancellations() {
+        let old = [f64::MAX, -1e308, 1e100, -1e16];
+        let new = [-f64::MAX, 1e308, 1.0, 1e16 - 2.0];
+        assert_eq!(Engine::interpolate_solution(&old, &new, 0.0), old);
+        assert_eq!(Engine::interpolate_solution(&old, &new, 1.0), new);
+        let midpoint = Engine::interpolate_solution(&old, &new, 0.5);
+        assert_eq!(midpoint[0], 0.0);
+        assert_eq!(midpoint[1], 0.0);
+        assert_eq!(midpoint[3], -1.0);
+        for alpha in [0.5_f64.next_down(), 0.5_f64.next_up()] {
+            let actual = Engine::interpolate_solution(&[-1e308], &[1e308], alpha)[0];
+            let expected = (2.0 * alpha - 1.0) * 1e308;
+            assert!(
+                (actual / expected - 1.0).abs() < 4.0 * f64::EPSILON,
+                "alpha={alpha}: {actual} vs {expected}"
+            );
+        }
+        let alpha = 1.0_f64.next_down();
+        let near_end = Engine::interpolate_solution(&[1e308], &[0.0], alpha)[0];
+        assert_eq!(near_end, (1.0 - alpha) * 1e308);
+    }
+
+    #[test]
+    fn line_search_can_reach_a_finite_root_across_extreme_endpoints() {
+        let mut merit = |values: &[Value]| {
+            let x = values[0] / 1e308;
+            x.is_finite().then(|| (x * (2.0 + x)).abs())
+        };
+        assert_eq!(
+            Engine::line_search_step(&[-1e308], &[1e308], &mut merit),
+            vec![0.0]
+        );
+    }
 
     #[test]
     fn fallback_acceptance_uses_equations_for_large_and_uniform_solutions() {

@@ -288,6 +288,15 @@ mod wasm_tests {
         ));
         assert_eq!(abort.observed_at(), Some(65));
         assert_eq!(abort.polls_after_abort(), 0);
+        let completed = engine
+            .run_tran_with_abort(&netlist, 1e-15, 1e-15, &rspice_core::abort_signal::NoAbort)
+            .unwrap();
+        let endpoint = *completed
+            .try_voltage_waveform_named("n")
+            .unwrap()
+            .last()
+            .unwrap();
+        assert!((endpoint + 1.769_292_354_238_631_4).abs() < 1e-6);
     }
 
     #[wasm_bindgen_test]

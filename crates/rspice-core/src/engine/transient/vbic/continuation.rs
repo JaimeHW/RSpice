@@ -903,8 +903,11 @@ impl Engine {
             for _ in 0..12 {
                 let mut candidate_internal = current_internal;
                 for idx in 0..BJT_STATIC_CORE_STATE_DIM {
-                    candidate_internal[idx] = current_internal[idx]
-                        + alpha * (target_internal[idx] - current_internal[idx]);
+                    candidate_internal[idx] = Self::interpolate_newton_value(
+                        current_internal[idx],
+                        target_internal[idx],
+                        alpha,
+                    );
                 }
                 let candidate_snapshot =
                     bjt.charge_snapshot_for_dynamic_state(vc, vb, ve, vs, candidate_internal);

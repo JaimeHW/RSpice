@@ -59,7 +59,7 @@ pub(super) enum BacktrackAction {
 pub(super) struct NewtonMeritBacktrack {
     base: Vec<Value>,
     base_merit: Value,
-    step: Vec<Value>,
+    candidate: Vec<Value>,
     alpha: Value,
     best_alpha: Value,
     best_merit: Value,
@@ -92,18 +92,15 @@ impl NewtonMeritBacktrack {
         candidate: &[Value],
         candidate_merit: Value,
     ) -> (Self, Vec<Value>) {
-        let step: Vec<Value> = candidate
-            .iter()
-            .zip(base)
-            .map(|(candidate_v, base_v)| candidate_v - base_v)
-            .collect();
         let alpha = BACKTRACK_FACTOR;
-        let trial = Self::point_at(base, &step, alpha);
+        let trial = Engine::interpolate_solution(base, candidate, alpha);
         (
             Self {
                 base: base.to_vec(),
                 base_merit,
-                step,
+                // Retain the endpoint itself. A pre-subtracted step can
+                // overflow or lose the value needed for a full-step fallback.
+                candidate: candidate.to_vec(),
                 alpha,
                 best_alpha: 1.0,
                 best_merit: candidate_merit,
@@ -139,25 +136,40 @@ impl NewtonMeritBacktrack {
             if self.best_alpha == self.alpha {
                 return BacktrackAction::Accept;
             }
-            return BacktrackAction::Trial(Self::point_at(&self.base, &self.step, self.best_alpha));
+            return BacktrackAction::Trial(Engine::interpolate_solution(
+                &self.base,
+                &self.candidate,
+                self.best_alpha,
+            ));
         }
 
         self.alpha *= BACKTRACK_FACTOR;
         self.trials += 1;
-        BacktrackAction::Trial(Self::point_at(&self.base, &self.step, self.alpha))
-    }
-
-    fn point_at(base: &[Value], step: &[Value], alpha: Value) -> Vec<Value> {
-        base.iter()
-            .zip(step)
-            .map(|(base_v, step_v)| base_v + alpha * step_v)
-            .collect()
+        BacktrackAction::Trial(Engine::interpolate_solution(
+            &self.base,
+            &self.candidate,
+            self.alpha,
+        ))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn backtracking_preserves_finite_trials_and_the_original_full_step() {
+        let base = [-f64::MAX, 1e100, -1e16];
+        let candidate = [f64::MAX, 1.0, 1e16 - 2.0];
+        let (mut search, mut trial) = NewtonMeritBacktrack::engage(&base, 1.0, &candidate, 100.0);
+        assert_eq!(trial[0], 0.0);
+        assert_eq!(trial[2], -1.0);
+        while let BacktrackAction::Trial(point) = search.judge(Value::INFINITY) {
+            assert!(point.iter().all(|value| value.is_finite()));
+            trial = point;
+        }
+        assert_eq!(trial, candidate);
+    }
 
     #[test]
     fn globalization_gate_engages_only_on_unconverged_order_of_magnitude_growth() {
