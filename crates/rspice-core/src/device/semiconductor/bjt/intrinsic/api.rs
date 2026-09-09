@@ -403,6 +403,56 @@ mod tests {
     }
 
     #[test]
+    fn high_saturation_bjt_limiting_returns_to_equilibrium() {
+        for vt in [0.005, 0.02585, 0.2] {
+            for isat in [1.0, 1e20, 1e100, f64::MAX] {
+                assert_eq!(Bjt::junction_critical_voltage(vt, isat), 0.0);
+            }
+            let isat = 1e-14;
+            assert_eq!(
+                Bjt::junction_critical_voltage(vt, isat),
+                vt * (vt / (core::f64::consts::SQRT_2 * isat)).ln()
+            );
+        }
+        for isat in [1e-14, 1.0, 1e20, 1e100] {
+            if isat >= 1.0 {
+                for level in [4.0, 11.0, 12.0] {
+                    let vbic = Bjt::new_npn("v".into(), 1, 2, 3).with_params(
+                        &std::collections::HashMap::from([
+                            ("LEVEL".into(), level),
+                            ("IS".into(), isat),
+                        ]),
+                    );
+                    let mut previous = [0.0; INTERNAL_DIM];
+                    previous[IDX_VBI] = -1.0;
+                    assert_eq!(
+                        vbic.limit_vbic_internal_state_to_previous([0.0; INTERNAL_DIM], previous),
+                        [0.0; INTERNAL_DIM]
+                    );
+                }
+            }
+            for xyce in [false, true] {
+                for (mut bjt, polarity) in [
+                    (Bjt::new_npn("n".into(), 1, 2, 3), 1.0),
+                    (Bjt::new_pnp("p".into(), 1, 2, 3), -1.0),
+                ] {
+                    bjt = bjt.with_params(&std::collections::HashMap::from([("IS".into(), isat)]));
+                    bjt.set_xyce_compatibility(xyce);
+                    for bias in [0.0, 0.2 * polarity, 0.0] {
+                        for _ in 0..16 {
+                            bjt.update(&[0.0, bias, 0.0]);
+                        }
+                    }
+                    assert!(bjt.is_converged(NonlinearConvergenceCriteria::default()));
+                    assert_eq!(bjt.vbe, 0.0);
+                    assert_eq!(bjt.vbc, 0.0);
+                    assert_eq!(bjt.operating_point_currents(), (0.0, 0.0, 0.0));
+                }
+            }
+        }
+    }
+
+    #[test]
     fn legacy_bjt_stamps_are_idempotent_while_fixed_bias_updates_leave_startup() {
         let mut bjt =
             Bjt::new_npn("q".to_string(), 1, 2, 3).with_params(&std::collections::HashMap::new());
