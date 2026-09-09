@@ -202,7 +202,7 @@ pub(crate) enum NativeOp {
     /// The slot array is `EvalContext::prelude_slots`: scratch a CFG prelude
     /// publishes its shared values into once per evaluation, so an entry that
     /// needs one reads it rather than recomputing its whole cone. Neither
-    /// analog state nor a model variable — it lives exactly as long as one
+    /// analog state nor a model variable â€” it lives exactly as long as one
     /// evaluation.
     LoadPreludeSlot(usize),
     /// Publish one value into a per-evaluation prelude slot, and yield it.
@@ -211,7 +211,7 @@ pub(crate) enum NativeOp {
     /// It is an identity on its operand so that it needs no new value kind and
     /// no publication metadata beside the program: the store rides in the
     /// instruction stream where the value is computed, which is what keeps
-    /// that value’s live range from stretching to the exit.
+    /// that valueâ€™s live range from stretching to the exit.
     StorePreludeSlot(usize),
 }
 
@@ -356,7 +356,7 @@ impl NativeIdentifierIndex {
     /// hold the definitions reaching it.
     ///
     /// `reads` pairs the name the equation was written with against the
-    /// snapshot capturing the definition it reads — see
+    /// snapshot capturing the definition it reads â€” see
     /// [`crate::ir::EquationSnapshotReads`]. The lowerer reaches a derivative
     /// shadow by appending axis suffixes to the value's name, so re-pointing
     /// the bare name alone would give the equation the reaching *value* and the
@@ -4359,17 +4359,17 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         Ok(())
     }
 
-    /// The base the power rule's `a^(b−1)` factor is raised from: `a` itself
+    /// The base the power rule's `a^(bâˆ’1)` factor is raised from: `a` itself
     /// wherever that factor is finite, and `a` nudged off exactly zero
-    /// wherever it is not — `canonical_ir/ad.rs`'s `power_rule_base_term_base`
+    /// wherever it is not â€” `canonical_ir/ad.rs`'s `power_rule_base_term_base`
     /// and `ir.rs`'s, for the third rule set.
     ///
-    /// `b · a^(b−1) · da` is `∞ · 0 = NaN` at `a = 0` for every `b < 1`, and
+    /// `b Â· a^(bâˆ’1) Â· da` is `âˆž Â· 0 = NaN` at `a = 0` for every `b < 1`, and
     /// `da` is numerically 0 exactly where this matters: a shadow along an axis
-    /// a merge keeps live whose taken arm does not carry it. The nudge `a + (a == 0) · MIN_POSITIVE` adds nothing to any
-    /// other `a`, so the term stays bit-exact — including for a negative base
+    /// a merge keeps live whose taken arm does not carry it. The nudge `a + (a == 0) Â· MIN_POSITIVE` adds nothing to any
+    /// other `a`, so the term stays bit-exact â€” including for a negative base
     /// under an integral exponent, where a `max` clamp would return the wrong
-    /// derivative — and at `a = 0` the factor is a large finite number that a
+    /// derivative â€” and at `a = 0` the factor is a large finite number that a
     /// zero lane multiplies to exactly zero.
     ///
     /// A constant exponent of 1 or more has no singularity to guard, and those
@@ -4391,9 +4391,9 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
     }
 
     /// `ln(a)` as the power rule's exponent term needs it: the logarithm where
-    /// it exists and exactly zero where it does not — `ir.rs`'s
-    /// `power_rule_guarded_log`, as a select. `a^b · ln(a) · db` at `a = 0` is
-    /// `0 · −∞ · db`, NaN however small `db` is — and `db` is exactly 0 for the
+    /// it exists and exactly zero where it does not â€” `ir.rs`'s
+    /// `power_rule_guarded_log`, as a select. `a^b Â· ln(a) Â· db` at `a = 0` is
+    /// `0 Â· âˆ’âˆž Â· db`, NaN however small `db` is â€” and `db` is exactly 0 for the
     /// runtime-parameter exponents compact models use, which is what made it
     /// invisible everywhere but here. bsimcmg's `T0 = pow(dqi / EsatCVL,
     /// PSATCV_i)` (`bsimcmg_body.include:2376`) differentiated by this pass at
@@ -4419,11 +4419,11 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
     /// first-order one above.
     ///
     /// `@dN@dM` of `a^b` carries the same singular factors the first-order
-    /// rule does — `a^(b−1)` and, one power lower, `a^(b−2)` — multiplied by
+    /// rule does â€” `a^(bâˆ’1)` and, one power lower, `a^(bâˆ’2)` â€” multiplied by
     /// derivative lanes that are numerically 0 exactly where the base is 0, so
-    /// the unguarded product is `∞ · 0 = NaN` there for the same reason and is
+    /// the unguarded product is `âˆž Â· 0 = NaN` there for the same reason and is
     /// nudged off zero by the same [`Self::lower_power_rule_base`]. The nudge
-    /// is a denormal floor, so it rescues `a^(b−2)` while `b > 1`; a shadow
+    /// is a denormal floor, so it rescues `a^(bâˆ’2)` while `b > 1`; a shadow
     /// through a base raised below that stays non-finite, as it does on the
     /// first-order rule for `b < 0`.
     ///
@@ -4454,8 +4454,8 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             self.lower_derivative(left, second)?;
             self.append_arithmetic("Mul")?;
             self.push(NativeOp::Const(first_coefficient))?;
-            // `a^(b−2)`: one power lower than the first-order rule's, so the
-            // guard is asked about `b − 1` and skips the nudge for `b ≥ 2`,
+            // `a^(bâˆ’2)`: one power lower than the first-order rule's, so the
+            // guard is asked about `b âˆ’ 1` and skips the nudge for `b â‰¥ 2`,
             // which is where this factor stops being singular.
             self.lower_power_rule_base(left, Some(exponent - 1.0))?;
             self.push(NativeOp::Const(exponent - 2.0))?;
@@ -4548,11 +4548,11 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             };
         }
 
-        // `a^b · (q_a·q_b + q_ab)` with `q_x = b_x·ln(a) + b·a_x/a` is the
+        // `a^b Â· (q_aÂ·q_b + q_ab)` with `q_x = b_xÂ·ln(a) + bÂ·a_x/a` is the
         // textbook form, and it cannot be evaluated at a zero base: the
-        // quotient is `∞` wherever `a_x ≠ 0`, `a^b` is `0`, and the product is
-        // NaN. Nudging the *divisor* off zero does not rescue it either —
-        // `b·a_x/MIN_POSITIVE` is `4.5e307`, so `q_a·q_b` overflows to `∞`
+        // quotient is `âˆž` wherever `a_x â‰  0`, `a^b` is `0`, and the product is
+        // NaN. Nudging the *divisor* off zero does not rescue it either â€”
+        // `bÂ·a_x/MIN_POSITIVE` is `4.5e307`, so `q_aÂ·q_b` overflows to `âˆž`
         // before the `a^b` factor can bring it back down.
         //
         // So multiply the `a^b` through *before* forming any product. Every
@@ -4560,30 +4560,30 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         // hold, exactly as the first-order rule and the two arms above carry
         // theirs:
         //
-        //     a^b·ln²(a)·b_x·b_y                          (i)
-        //   + a^(b−1)·(b·ln(a) + 1)·(b_x·a_y + b_y·a_x)   (ii)
-        //   + a^(b−2)·b·(b−1)·a_x·a_y                     (iii)
-        //   + a^b·ln(a)·b_xy                              (iv)
-        //   + a^(b−1)·b·a_xy                              (v)
+        //     a^bÂ·lnÂ²(a)Â·b_xÂ·b_y                          (i)
+        //   + a^(bâˆ’1)Â·(bÂ·ln(a) + 1)Â·(b_xÂ·a_y + b_yÂ·a_x)   (ii)
+        //   + a^(bâˆ’2)Â·bÂ·(bâˆ’1)Â·a_xÂ·a_y                     (iii)
+        //   + a^bÂ·ln(a)Â·b_xy                              (iv)
+        //   + a^(bâˆ’1)Â·bÂ·a_xy                              (v)
         //
         // These are the same nine products the quotient form had, regrouped:
-        // (iii) merges `q_a·q_b`'s `b²·a_x·a_y` with `q_ab`'s `−b·a_x·a_y`,
-        // which is the `b(b−1)` cross term the constant-exponent rule emits;
-        // (ii) merges `q_a·q_b`'s logarithmic cross terms with `q_ab`'s bare
+        // (iii) merges `q_aÂ·q_b`'s `bÂ²Â·a_xÂ·a_y` with `q_ab`'s `âˆ’bÂ·a_xÂ·a_y`,
+        // which is the `b(bâˆ’1)` cross term the constant-exponent rule emits;
+        // (ii) merges `q_aÂ·q_b`'s logarithmic cross terms with `q_ab`'s bare
         // ones. The five conditions below are the same union the two
         // `q_*_nonzero` predicates formed, so nothing new is emitted and
-        // nothing that was is dropped — including the all-zero case, which
+        // nothing that was is dropped â€” including the all-zero case, which
         // falls through to the `Const(0.0)` at the end.
         //
-        // The exponent is never a literal here — `lower_pow_second_derivative`
-        // would have taken the constant arm if it were — so every base factor
+        // The exponent is never a literal here â€” `lower_pow_second_derivative`
+        // would have taken the constant arm if it were â€” so every base factor
         // takes [`Self::lower_power_rule_base`] unconditionally, and every
         // logarithm the guarded form the first-order exponent term uses.
         let cross_first = !(right_a_zero || left_b_zero);
         let cross_second = !(right_b_zero || left_a_zero);
         let mut emitted = false;
 
-        // (i) a^b·ln(a)·ln(a)·b_x·b_y
+        // (i) a^bÂ·ln(a)Â·ln(a)Â·b_xÂ·b_y
         if !(right_a_zero || right_b_zero) {
             self.lower(left)?;
             self.lower(right)?;
@@ -4599,7 +4599,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             emitted = true;
         }
 
-        // (ii) a^(b−1)·(b·ln(a) + 1)·(b_x·a_y + b_y·a_x)
+        // (ii) a^(bâˆ’1)Â·(bÂ·ln(a) + 1)Â·(b_xÂ·a_y + b_yÂ·a_x)
         if cross_first || cross_second {
             self.lower_power_rule_base(left, None)?;
             self.lower(right)?;
@@ -4634,7 +4634,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             emitted = true;
         }
 
-        // (iii) a^(b−2)·b·(b−1)·a_x·a_y
+        // (iii) a^(bâˆ’2)Â·bÂ·(bâˆ’1)Â·a_xÂ·a_y
         if !(left_a_zero || left_b_zero) {
             self.lower_power_rule_base(left, None)?;
             self.lower(right)?;
@@ -4657,7 +4657,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             emitted = true;
         }
 
-        // (iv) a^b·ln(a)·b_xy
+        // (iv) a^bÂ·ln(a)Â·b_xy
         if !right_ab_zero {
             self.lower(left)?;
             self.lower(right)?;
@@ -4672,7 +4672,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             emitted = true;
         }
 
-        // (v) a^(b−1)·b·a_xy
+        // (v) a^(bâˆ’1)Â·bÂ·a_xy
         if !left_ab_zero {
             self.lower_power_rule_base(left, None)?;
             self.lower(right)?;
@@ -4745,7 +4745,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 self.lower_absdelay_derivative_operator(expr_id, expr, delay, max_delay, wrt)
             }
             "laplace_zp" | "laplace_zd" | "laplace_np" | "laplace_nd" => {
-                self.lower_laplace_call_derivative(normalized.as_str(), name, args, wrt)
+                self.lower_laplace_call_derivative(expr_id, name, args, wrt)
             }
             "zi_zp" | "zi_zd" | "zi_np" | "zi_nd" => {
                 self.lower_zi_call_derivative(expr_id, name, args, wrt)
@@ -4936,14 +4936,9 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             "absdelay" => Err(self.unsupported(format!(
                 "second derivative of absdelay at expression {expr_id}"
             ))),
-            "laplace_zp" | "laplace_zd" | "laplace_np" | "laplace_nd" => self
-                .lower_laplace_call_second_derivative(
-                    normalized.as_str(),
-                    name,
-                    args,
-                    first,
-                    second,
-                ),
+            "laplace_zp" | "laplace_zd" | "laplace_np" | "laplace_nd" => {
+                self.lower_laplace_call_second_derivative(expr_id, name, args, first, second)
+            }
             "zi_zp" | "zi_zd" | "zi_np" | "zi_nd" => {
                 self.lower_zi_call_second_derivative(expr_id, name, args, first, second)
             }
@@ -5938,57 +5933,9 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         self.append_arithmetic("Add")
     }
 
-    fn checked_filter_dc_gain(
-        &self,
-        operator: &str,
-        numerator: f64,
-        denominator: f64,
-    ) -> JitResult<f64> {
-        let invalid = |detail: String| JitError::InvalidCanonicalIr {
-            model: self.model.clone(),
-            detail: format!("{operator} {detail}").into(),
-        };
-        if !numerator.is_finite() || !denominator.is_finite() {
-            return Err(invalid(
-                "DC derivative gain has a non-finite coefficient product".into(),
-            ));
-        }
-        if denominator == 0.0 {
-            return Err(invalid(
-                "DC derivative is undefined because the denominator is zero at the evaluation point"
-                    .into(),
-            ));
-        }
-        let gain = numerator / denominator;
-        if !gain.is_finite() {
-            return Err(invalid(
-                "DC derivative gain is outside the representable f64 range".into(),
-            ));
-        }
-        if gain == 0.0 && numerator != 0.0 {
-            return Err(invalid("DC derivative gain underflows f64".into()));
-        }
-        Ok(gain)
-    }
-
-    fn checked_root_dc_gain(
-        &self,
-        operator: &str,
-        gain: f64,
-        zeros: &[(f64, f64)],
-        poles: &[(f64, f64)],
-    ) -> JitResult<f64> {
-        crate::laplace::checked_laplace_pole_zero_dc_gain(gain, zeros, poles).map_err(|error| {
-            JitError::InvalidCanonicalIr {
-                model: self.model.clone(),
-                detail: format!("{operator} DC derivative: {error}").into(),
-            }
-        })
-    }
-
     fn lower_laplace_call_derivative(
         &mut self,
-        normalized: &str,
+        expr_id: ExprId,
         name: &str,
         args: &[ExprId],
         wrt: CanonicalDerivativeAxis,
@@ -5999,13 +5946,14 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 args.len()
             )));
         }
-        let gain = self.laplace_call_dc_gain(normalized, args)?;
-        self.lower_scaled_derivative(args[0], wrt, gain)
+        let slot = self.laplace_slot(expr_id)?;
+        self.lower_derivative(args[0], wrt)?;
+        self.append_unary(NativeOp::LaplaceStateDerivative(slot))
     }
 
     fn lower_laplace_call_second_derivative(
         &mut self,
-        normalized: &str,
+        expr_id: ExprId,
         name: &str,
         args: &[ExprId],
         first: CanonicalDerivativeAxis,
@@ -6017,41 +5965,9 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 args.len()
             )));
         }
-        let gain = self.laplace_call_dc_gain(normalized, args)?;
-        self.lower_scaled_second_derivative(args[0], first, second, gain)
-    }
-
-    fn laplace_call_dc_gain(&self, normalized: &str, args: &[ExprId]) -> JitResult<f64> {
-        match normalized {
-            "laplace_zp" => {
-                let zeros = self.constant_array_root_pairs(args[1], "laplace_zp", "zeros", true)?;
-                let poles =
-                    self.constant_array_root_pairs(args[2], "laplace_zp", "poles", false)?;
-                self.checked_root_dc_gain("laplace_zp", 1.0, &zeros, &poles)
-            }
-            "laplace_zd" => {
-                let zeros = self.constant_array_root_pairs(args[1], "laplace_zd", "zeros", true)?;
-                let denominator = self.constant_array_values(args[2])?;
-                let numerator = self.checked_root_dc_gain("laplace_zd", 1.0, &zeros, &[])?;
-                self.checked_filter_dc_gain("laplace_zd", numerator, first_or(&denominator, 1.0))
-            }
-            "laplace_np" => {
-                let numerator = self.constant_array_values(args[1])?;
-                let poles =
-                    self.constant_array_root_pairs(args[2], "laplace_np", "poles", false)?;
-                self.checked_root_dc_gain("laplace_np", first_or(&numerator, 0.0), &[], &poles)
-            }
-            "laplace_nd" => {
-                let numerator = self.constant_array_values(args[1])?;
-                let denominator = self.constant_array_values(args[2])?;
-                self.checked_filter_dc_gain(
-                    "laplace_nd",
-                    first_or(&numerator, 0.0),
-                    first_or(&denominator, 1.0),
-                )
-            }
-            _ => unreachable!("caller filters canonical laplace names"),
-        }
+        let slot = self.laplace_slot(expr_id)?;
+        self.lower_second_derivative(args[0], first, second)?;
+        self.append_unary(NativeOp::LaplaceStateDerivative(slot))
     }
 
     fn lower_zi_call_derivative(
@@ -6130,104 +6046,6 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         Ok(slot)
     }
 
-    fn lower_scaled_derivative(
-        &mut self,
-        expr: ExprId,
-        wrt: CanonicalDerivativeAxis,
-        gain: f64,
-    ) -> JitResult<()> {
-        if gain.to_bits() == 0.0_f64.to_bits() {
-            return self.push(NativeOp::Const(0.0));
-        }
-        self.lower_derivative(expr, wrt)?;
-        if gain.to_bits() == 1.0_f64.to_bits() {
-            return Ok(());
-        }
-        self.push(NativeOp::Const(gain))?;
-        self.append_arithmetic("Mul")
-    }
-
-    fn lower_scaled_second_derivative(
-        &mut self,
-        expr: ExprId,
-        first: CanonicalDerivativeAxis,
-        second: CanonicalDerivativeAxis,
-        gain: f64,
-    ) -> JitResult<()> {
-        if gain.to_bits() == 0.0_f64.to_bits() {
-            return self.push(NativeOp::Const(0.0));
-        }
-        self.lower_second_derivative(expr, first, second)?;
-        if gain.to_bits() == 1.0_f64.to_bits() {
-            return Ok(());
-        }
-        self.push(NativeOp::Const(gain))?;
-        self.append_arithmetic("Mul")
-    }
-
-    fn constant_array_root_pairs(
-        &self,
-        expr_id: ExprId,
-        operator: &str,
-        role: &str,
-        allow_null: bool,
-    ) -> JitResult<Vec<(f64, f64)>> {
-        if allow_null && matches!(self.expression(expr_id)?.kind, HirExprKind::NullArgument) {
-            return Ok(Vec::new());
-        }
-        let values = self.constant_array_values(expr_id)?;
-        self.root_pairs_from_values(operator, role, values)
-    }
-
-    fn constant_expr_root_pairs(
-        &self,
-        exprs: &[ExprId],
-        operator: &str,
-        role: &str,
-    ) -> JitResult<Vec<(f64, f64)>> {
-        let values = exprs
-            .iter()
-            .map(|expr| self.constant_expr_value(*expr))
-            .collect::<JitResult<Vec<_>>>()?;
-        self.root_pairs_from_values(operator, role, values)
-    }
-
-    fn root_pairs_from_values(
-        &self,
-        operator: &str,
-        role: &str,
-        values: Vec<f64>,
-    ) -> JitResult<Vec<(f64, f64)>> {
-        if values.len() % 2 != 0 {
-            return Err(JitError::InvalidCanonicalIr {
-                model: self.model.clone(),
-                detail: format!(
-                    "{operator} {role} root array must contain real/imaginary pairs; found {} values",
-                    values.len()
-                )
-                .into(),
-            });
-        }
-        Ok(values
-            .chunks_exact(2)
-            .map(|pair| (pair[0], pair[1]))
-            .collect())
-    }
-
-    fn constant_array_values(&self, expr_id: ExprId) -> JitResult<Vec<f64>> {
-        match &self.expression(expr_id)?.kind {
-            HirExprKind::ArrayLiteral { elements, .. } => elements
-                .iter()
-                .map(|element| self.constant_expr_value(*element))
-                .collect(),
-            HirExprKind::Number { value, .. } => Ok(vec![*value]),
-            other => Err(self.unsupported(format!(
-                "constant array expected, found {}",
-                expression_kind_name(other)
-            ))),
-        }
-    }
-
     fn constant_expr_value(&self, expr_id: ExprId) -> JitResult<f64> {
         match &self.expression(expr_id)?.kind {
             HirExprKind::Number { value, .. } => Ok(*value),
@@ -6260,13 +6078,6 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 "constant coefficient expected, found {}",
                 expression_kind_name(other)
             ))),
-        }
-    }
-
-    fn constant_expr_first_or(&self, exprs: &[ExprId], default: f64) -> JitResult<f64> {
-        match exprs.first() {
-            Some(expr) => self.constant_expr_value(*expr),
-            None => Ok(default),
         }
     }
 
@@ -6744,7 +6555,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         self.lower_laplace_operator(expr_id, *expr)
     }
 
-    fn lower_laplace_operator(&mut self, expr_id: ExprId, expr: ExprId) -> JitResult<()> {
+    fn laplace_slot(&self, expr_id: ExprId) -> JitResult<usize> {
         let Some(slot) = self.limits.canonical_laplace_slot(expr_id) else {
             return Err(self.unsupported(format!(
                 "analog operator laplace expression {expr_id} filter slot"
@@ -6756,9 +6567,13 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             slot,
             self.limits.laplace_filter_count,
         )?;
+        Ok(slot)
+    }
+
+    fn lower_laplace_operator(&mut self, expr_id: ExprId, expr: ExprId) -> JitResult<()> {
+        let slot = self.laplace_slot(expr_id)?;
         self.lower(expr)?;
-        self.ops.push(NativeOp::LaplaceState(slot));
-        Ok(())
+        self.append_unary(NativeOp::LaplaceState(slot))
     }
 
     fn lower_zi_call(&mut self, expr_id: ExprId, args: &[ExprId]) -> JitResult<()> {
@@ -7308,9 +7123,9 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
 
     /// `$simparam`, answered at compile time.
     ///
-    /// The generated-Rust backend answers it at run time instead — the CFG
+    /// The generated-Rust backend answers it at run time instead â€” the CFG
     /// carries a `SimParam` value and the emitter turns it into a
-    /// `simparam("gmin", fallback)` call — so the two backends disagree about
+    /// `simparam("gmin", fallback)` call â€” so the two backends disagree about
     /// exactly the parameter that moves: a model reading `$simparam("gmin")`
     /// follows gmin stepping when it is generated and does not when it is
     /// compiled here. Closing that needs a `NativeOp` and a place for the
@@ -9613,10 +9428,6 @@ fn branch_voltage_derivative(pos: Option<NodeId>, neg: Option<NodeId>, wrt: Node
         value -= 1.0;
     }
     value
-}
-
-fn first_or(values: &[f64], default: f64) -> f64 {
-    values.first().copied().unwrap_or(default)
 }
 
 fn format_current_pair(pos: usize, neg: usize) -> String {

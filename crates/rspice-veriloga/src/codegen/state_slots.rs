@@ -4,15 +4,15 @@
 //!
 //! [`crate::canonical_ir::state`] defines what makes an expression own a state
 //! record and how the executed sites of a module are numbered. Only the
-//! direction that *mentions bytecode* lives here — from an [`Instruction`] to
+//! direction that *mentions bytecode* lives here â€” from an [`Instruction`] to
 //! the slot it addresses, and back.
 //!
 //! This used to sit in the JIT's expression lowering, where it was reachable
 //! only under `feature = "native"` or `feature = "wasm-jit"`. The per-site
 //! renumbering in [`super::state_renumbering`] runs on every compiled model
-//! regardless of which runtime will execute it — the VM route has to see the
+//! regardless of which runtime will execute it â€” the VM route has to see the
 //! same slot numbers the JIT route does, or a model interpreted and a model
-//! compiled would integrate different histories — so the vocabulary had to
+//! compiled would integrate different histories â€” so the vocabulary had to
 //! become unconditional. The JIT keeps thin wrappers that add the model name to
 //! the error.
 
@@ -128,7 +128,7 @@ pub(crate) fn carries_state(program: &BytecodeProgram) -> bool {
 /// family it owns and kept in traversal order.
 ///
 /// One walk answers all thirteen families. A canonical expression owns at most
-/// one record — [`state::classify`] is what decides which — so a single
+/// one record â€” [`state::classify`] is what decides which â€” so a single
 /// post-order pass fills every list, where this used to be thirteen passes over
 /// the same tree asking a different question each time.
 #[derive(Debug, Default)]
@@ -206,17 +206,17 @@ impl std::fmt::Display for StatePairingError {
 ///
 /// The identity and the order of the sites come from the canonical level; only
 /// the *number* comes from the bytecode. Historically the two numbering spaces
-/// were not the same size — a module with noise in an assignment is emitted
+/// were not the same size â€” a module with noise in an assignment is emitted
 /// twice, once as its assignment steps and again as the noise-shadowed replay,
 /// and the generator allocates a fresh scalar-state slot at each emission, so
 /// one canonical `ddt` site could own two bytecode slots.
 /// [`super::state_renumbering`] is what collapses that, using exactly this
 /// correlation to decide which emitted slot belongs to which site.
 ///
-/// The length disagreement below is therefore a real error rather than a
-/// tolerance: within one program the two lists describe the same operators in
-/// the same order, and a program whose bytecode names more or fewer records
-/// than the canonical expression owns is a correlation that cannot be made.
+/// Differentiation can repeat references to an already allocated slot within
+/// one program. When occurrence counts differ, compare distinct slots in
+/// first-appearance order. Extra or missing distinct records still prevent
+/// correlation; a repeated read does not create another operator site.
 pub(crate) fn pair_canonical_state_slots(
     expr_id: ExprId,
     scan: &CanonicalStateSiteScan,
@@ -225,11 +225,16 @@ pub(crate) fn pair_canonical_state_slots(
 ) -> Result<Vec<(ExprId, usize)>, StatePairingError> {
     let canonical_exprs = scan.sites(operator);
 
-    let bytecode_slots = bytecode_program
+    let mut bytecode_slots = bytecode_program
         .instructions
         .iter()
         .filter_map(|instruction| operator.bytecode_slot(instruction))
         .collect::<Vec<_>>();
+
+    if canonical_exprs.len() != bytecode_slots.len() {
+        let mut seen = std::collections::HashSet::new();
+        bytecode_slots.retain(|slot| seen.insert(*slot));
+    }
 
     if canonical_exprs.len() != bytecode_slots.len() {
         return Err(StatePairingError::CountMismatch {
@@ -245,4 +250,49 @@ pub(crate) fn pair_canonical_state_slots(
         .copied()
         .zip(bytecode_slots)
         .collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn repeated_filter_actions_keep_distinct_slot_ownership() {
+        let mut scan = CanonicalStateSiteScan::default();
+        scan.push(CanonicalStateOperator::Laplace, ExprId::new(10));
+        scan.push(CanonicalStateOperator::Laplace, ExprId::new(20));
+        let program = BytecodeProgram {
+            instructions: vec![
+                Instruction::LaplaceState(5),
+                Instruction::LaplaceStateDerivative(5),
+                Instruction::LaplaceState(2),
+                Instruction::LaplaceStateDerivative(2),
+                Instruction::LaplaceStateDerivative(5),
+            ],
+        };
+        assert_eq!(
+            pair_canonical_state_slots(
+                ExprId::new(30),
+                &scan,
+                &program,
+                CanonicalStateOperator::Laplace
+            )
+            .unwrap(),
+            [(ExprId::new(10), 5), (ExprId::new(20), 2)]
+        );
+        for slots in [vec![], vec![5, 5, 5], vec![5, 2, 7, 5]] {
+            let program = BytecodeProgram {
+                instructions: slots.into_iter().map(Instruction::LaplaceState).collect(),
+            };
+            assert!(matches!(
+                pair_canonical_state_slots(
+                    ExprId::new(30),
+                    &scan,
+                    &program,
+                    CanonicalStateOperator::Laplace
+                ),
+                Err(StatePairingError::CountMismatch { .. })
+            ));
+        }
+    }
 }

@@ -18,6 +18,141 @@ fn compile(source: &str) -> DeviceFixture {
 }
 
 #[test]
+fn ddx_laplace_repeated_state_actions_preserve_values_and_jacobians() {
+    for (expression, expected_current, expected_slope) in [
+        ("laplace_nd(V(p)*V(p), '{1.0,0.5}, '{1.0,0.25})", 0.5, 2.0),
+        ("laplace_zp(V(p)*V(p), '{-2.0,0.0}, '{-4.0,0.0})", 0.5, 2.0),
+        (
+            "laplace_nd(V(p)*V(p), '{1.0,0.5}, '{1.0,0.25}) + laplace_nd(V(q), '{3.0}, '{1.0,0.5})",
+            0.5,
+            2.0,
+        ),
+        (
+            "laplace_nd(V(p)*V(p), '{1.0,0.5}, '{1.0,0.25}) * laplace_nd(V(p), '{1.0}, '{1.0,0.5})",
+            0.1875,
+            1.5,
+        ),
+        (
+            "laplace_nd(laplace_nd(V(p)*V(p), '{1.0}, '{1.0,0.5}), '{1.0}, '{1.0,0.25})",
+            0.5,
+            2.0,
+        ),
+    ] {
+        for assigned in [false, true] {
+            let value = format!("ddx({expression},V(p))");
+            let body = if assigned {
+                format!("y={value}; I(p)<+y;")
+            } else {
+                format!("I(p)<+{value};")
+            };
+            let fixture = compile(&format!(
+                "module derivative_filters(p,q); inout p,q; electrical p,q; real y; analog begin {body} end endmodule"
+            ));
+            let mut device = fixture.device("DDX", &[1, 2]);
+            device.update_voltages(&[0.25, 0.75]);
+            let current = device.try_evaluate().unwrap()[0];
+            assert!(
+                (current / expected_current - 1.0).abs() < 1e-12,
+                "{body}: {current}"
+            );
+            let (matrix, _) = collect_stamps(&mut device, &[0.25, 0.75]);
+            assert!(
+                (matrix.get(&(0, 0)).copied().unwrap_or(0.0) / expected_slope - 1.0).abs() < 1e-12,
+                "{body}: {matrix:?}"
+            );
+            assert_eq!(matrix.get(&(0, 1)).copied().unwrap_or(0.0), 0.0, "{body}");
+        }
+    }
+}
+
+#[test]
+fn ddx_laplace_transient_matches_primal_with_fixed_accepted_history() {
+    use rspice_veriloga::vm::IntegrationCoefficients;
+
+    for expression in [
+        "laplace_nd(V(p)*V(p), '{1.0,0.5}, '{1.0,0.25})",
+        "laplace_zp(V(p)*V(p), '{-2.0,0.0}, '{-4.0,0.0})",
+        "laplace_zd(V(p)*V(p), '{-2.0,0.0}, '{1.0,0.25})",
+        "laplace_np(V(p)*V(p), '{1.0,0.5}, '{-4.0,0.0})",
+        "laplace_nd(V(p)*V(p), '{1.0,0.5}, '{1.0,0.25}) + laplace_nd(V(q), '{3.0}, '{1.0,0.5})",
+        "laplace_nd(V(p)*V(p), '{1.0,0.5}, '{1.0,0.25}) * laplace_nd(V(p), '{1.0}, '{1.0,0.5})",
+        "laplace_nd(laplace_nd(V(p)*V(p), '{1.0}, '{1.0,0.5}), '{1.0}, '{1.0,0.25})",
+    ] {
+        for assigned in [false, true] {
+            let make = |value: &str| {
+                let body = if assigned {
+                    format!("y={value}; I(p)<+y;")
+                } else {
+                    format!("I(p)<+{value};")
+                };
+                compile(&format!(
+                    "module filter_history(p,q); inout p,q; electrical p,q; real y; analog begin {body} end endmodule"
+                ))
+            };
+            let primal_fixture = make(expression);
+            let derivative_fixture = make(&format!("ddx({expression},V(p))"));
+            let mut primal = primal_fixture.device("PRIMAL", &[1, 2]);
+            let mut derivative = derivative_fixture.device("DERIVATIVE", &[1, 2]);
+            for device in [&mut primal, &mut derivative] {
+                device.update_voltages(&[0.0, 0.0]);
+                device.try_evaluate().unwrap();
+                device.advance_state();
+                device.set_analysis_type(2);
+            }
+            // Vary companion gains and retain nonzero accepted histories to
+            // expose accidental integration of derivative inputs.
+            let mut time = 0.0;
+            for (voltage, timestep) in [(0.25, 0.125), (0.4, 0.25), (-0.1, 0.0625)] {
+                time += timestep;
+                for device in [&mut primal, &mut derivative] {
+                    device.set_time(time);
+                    device.set_timestep(timestep);
+                    device.set_integration_coefficients(IntegrationCoefficients {
+                        active: true,
+                        derivative_scale: 1.0 / timestep,
+                        previous_value_scale: 1.0 / timestep,
+                        older_value_scale: 0.0,
+                        previous_derivative_scale: 0.0,
+                    });
+                }
+                let sample = |device: &mut VerilogADevice, v| {
+                    device.update_voltages(&[v, 0.75]);
+                    device.try_evaluate().unwrap()[0]
+                };
+                let epsilon = 1e-5;
+                let expected = (sample(&mut primal, voltage + epsilon)
+                    - sample(&mut primal, voltage - epsilon))
+                    / (2.0 * epsilon);
+                let expected_slope = (sample(&mut derivative, voltage + epsilon)
+                    - sample(&mut derivative, voltage - epsilon))
+                    / (2.0 * epsilon);
+                let current = sample(&mut derivative, voltage);
+                let (matrix, _) = collect_stamps(&mut derivative, &[voltage, 0.75]);
+                let slope = matrix.get(&(0, 0)).copied().unwrap_or(0.0);
+                let context = format!("{expression}, assigned={assigned}, time={time}");
+                assert!(
+                    (current - expected).abs() < 1e-8,
+                    "{context}: {current} != {expected}"
+                );
+                assert!(
+                    (slope - expected_slope).abs() < 1e-8,
+                    "{context}: slope {slope} != {expected_slope}"
+                );
+                assert_eq!(
+                    matrix.get(&(0, 1)).copied().unwrap_or(0.0),
+                    0.0,
+                    "{context}"
+                );
+                sample(&mut primal, voltage);
+                sample(&mut derivative, voltage);
+                primal.advance_state();
+                derivative.advance_state();
+            }
+        }
+    }
+}
+
+#[test]
 fn laplace_complex_and_origin_roots_match_coefficient_forms() {
     for (zeros, poles, numerator, denominator, dc_gain) in [
         (
