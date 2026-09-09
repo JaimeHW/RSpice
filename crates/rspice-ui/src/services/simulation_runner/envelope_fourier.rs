@@ -1,9 +1,8 @@
-//! Envelope-following analysis.
+//! Carrier-envelope extraction from transient waveforms.
 //!
-//! Integrates the slowly-varying envelope of a modulated carrier instead of
-//! every RF cycle, and reports the Fourier content of each envelope sample.
-//! The adaptive path skips periods whose envelope is not changing, which is
-//! the whole point of the analysis.
+//! Periodic initialization can precede the full transient solve. Fixed,
+//! adaptive, or event-aligned schedules select output projection times;
+//! they do not skip RF cycles during transient integration.
 
 use super::error::{ensure_not_aborted, poll_periodically};
 use super::{
@@ -1546,6 +1545,50 @@ mod tests {
     impl AbortSignal for AbortOnPoll {
         fn is_aborted(&self) -> bool {
             self.polls.fetch_add(1, Ordering::Relaxed) + 1 >= self.abort_on
+        }
+    }
+
+    #[test]
+    fn envelope_service_preserves_selected_voltage_outputs() {
+        let config = EnvelopeRunConfig {
+            fundamental_freq: 1e6,
+            additional_carrier_tones: Vec::new(),
+            stop_time: 4e-6,
+            num_harmonics: 1,
+            envelope_step: Some(0.5e-6),
+            modulation_sources: Vec::new(),
+            initial_periodic_solve: EnvelopeInitialPeriodicSolve::TransientSpectralEstimate,
+            adaptive_mode: EnvelopeAdaptiveMode::FixedEnvelopeStep,
+            extraction_path: EnvelopeExtractionPath::Projection,
+        };
+        let run = |selection: &str| {
+            let deck = format!(
+                "Selected carrier output\nV1 in 0 SIN(0 1 1Meg)\nR1 in out 1k\nR2 out 0 1k\n{selection}\n.end\n"
+            );
+            run_envelope_analysis_with_source_path_and_abort(&deck, &config, None, &NoAbort)
+                .expect("carrier extraction must honor the retained voltage selection")
+        };
+        let all = run("");
+        assert_eq!(all.waveforms.len(), 2);
+        for (selection, amplitude) in [("out", 0.5), ("in", 1.0)] {
+            let selected = run(&format!(".save V({selection})"));
+            assert_eq!(selected.time, all.time);
+            assert!(!selected.time.is_empty());
+            assert_eq!(selected.waveforms.len(), 1);
+            let (name, values) = &selected.waveforms[0];
+            assert!(name.eq_ignore_ascii_case(&format!("ENV(V({selection}))")));
+            let reference = &all
+                .waveforms
+                .iter()
+                .find(|(candidate, _)| candidate == name)
+                .unwrap()
+                .1;
+            assert_eq!(values.len(), selected.time.len());
+            for (actual, expected) in values.iter().zip(reference) {
+                assert!((actual - expected).norm() < 1e-12);
+                // A sine source has a negative imaginary carrier amplitude.
+                assert!((actual - Complex64::new(0.0, -amplitude)).norm() < 2e-4);
+            }
         }
     }
 

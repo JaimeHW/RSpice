@@ -1,7 +1,7 @@
 //! Transient analysis.
 //!
 //! Time-domain integration from an initial condition, returning node
-//! voltages and branch currents per timepoint.
+//! voltage waveforms.
 
 use super::error::{ensure_not_aborted, poll_periodically};
 use super::{
@@ -68,22 +68,28 @@ pub struct TransientData {
 }
 
 impl TransientData {
-    /// Create from an engine transient result with cooperative cancellation
-    /// during waveform transposition.
+    /// Validate and move retained engine voltage waveforms with cooperative
+    /// cancellation. Empty vectors identify signals omitted by output selection.
     pub fn from_result_with_abort(
         result: TransientResult,
         node_names: &[String],
         abort: &dyn AbortSignal,
     ) -> ServiceRunResult<Self> {
         ensure_not_aborted(abort)?;
-        if result.time.is_empty()
-            || result.time.iter().any(|value| !value.is_finite())
-            || result.time.windows(2).any(|pair| pair[1] <= pair[0])
-        {
-            return Err(ServiceRunError::Failure(
+        let invalid_time_axis = || {
+            ServiceRunError::Failure(
                 "Transient engine returned an empty, non-finite, or non-increasing time axis"
                     .to_owned(),
-            ));
+            )
+        };
+        if result.time.is_empty() {
+            return Err(invalid_time_axis());
+        }
+        for (index, &time) in result.time.iter().enumerate() {
+            poll_periodically(abort, index)?;
+            if !time.is_finite() || (index > 0 && time <= result.time[index - 1]) {
+                return Err(invalid_time_axis());
+            }
         }
         if node_names != result.node_names || node_names.len() != result.voltages.len() {
             return Err(ServiceRunError::Failure(format!(
@@ -96,7 +102,7 @@ impl TransientData {
         let mut voltages = Vec::with_capacity(node_names.len());
         let mut seen_names = HashSet::with_capacity(node_names.len());
 
-        for (name, samples) in node_names.iter().zip(&result.voltages) {
+        for (name, samples) in node_names.iter().zip(result.voltages) {
             ensure_not_aborted(abort)?;
             let normalized = name.trim().to_ascii_lowercase();
             if normalized.is_empty() || !seen_names.insert(normalized) {
@@ -104,23 +110,27 @@ impl TransientData {
                     "Transient engine returned an empty or duplicate node identity".to_owned(),
                 ));
             }
-            if samples.len() != result.time.len()
-                || samples.iter().any(|sample| !sample.is_finite())
-            {
+            if samples.is_empty() {
+                continue;
+            }
+            if samples.len() != result.time.len() {
                 return Err(ServiceRunError::Failure(format!(
                     "Transient node '{name}' returned an invalid sample vector"
                 )));
+            }
+            for (sample_index, sample) in samples.iter().enumerate() {
+                poll_periodically(abort, sample_index)?;
+                if !sample.is_finite() {
+                    return Err(ServiceRunError::Failure(format!(
+                        "Transient node '{name}' returned an invalid sample vector"
+                    )));
+                }
             }
             if name == "0" || name.eq_ignore_ascii_case("gnd") {
                 continue;
             }
 
-            let mut copied_samples = Vec::with_capacity(samples.len());
-            for (sample_idx, sample) in samples.iter().enumerate() {
-                poll_periodically(abort, sample_idx)?;
-                copied_samples.push(*sample);
-            }
-            voltages.push((format!("V({name})"), copied_samples));
+            voltages.push((format!("V({name})"), samples));
         }
         if voltages.is_empty() {
             return Err(ServiceRunError::Failure(
@@ -440,9 +450,8 @@ mod tests {
         assert_eq!(dc_op[0].1, 1.0, "V1 holds the node at 1 V");
     }
 
-    #[test]
-    fn transient_conversion_observes_counter_abort() {
-        let result = TransientResult {
+    fn conversion_result() -> TransientResult {
+        TransientResult {
             time: vec![0.0, 1.0],
             step_sizes: vec![0.0, 1.0],
             voltages: vec![vec![1.0, 1.0], vec![0.5, 0.5]],
@@ -456,12 +465,110 @@ mod tests {
             device_op_traces: Vec::new(),
             store_traces: Vec::new(),
             fft_results: Vec::new(),
-        };
+        }
+    }
+
+    #[test]
+    fn transient_conversion_observes_counter_abort() {
+        let result = conversion_result();
         let names = result.node_names.clone();
         let abort = AbortOnPoll::new(2);
 
         let converted = TransientData::from_result_with_abort(result, &names, &abort);
 
         assert!(matches!(converted, Err(ServiceRunError::Aborted)));
+    }
+
+    #[test]
+    fn transient_runner_preserves_selected_voltage_outputs() {
+        for (selection, expected) in [("out", 0.5), ("in", 1.0)] {
+            let deck = format!(
+                "Selected transient output\nV1 in 0 1\nR1 in out 1k\nR2 out 0 1k\n.save V({selection})\n.end\n"
+            );
+            let result = run_transient_analysis_with_source_path_and_abort(
+                &deck, 10e-6, 1e-6, None, &NoAbort,
+            )
+            .expect("unselected nodes must not invalidate a retained voltage waveform");
+            assert_eq!(result.voltages.len(), 1);
+            let (name, values) = &result.voltages[0];
+            assert!(name.eq_ignore_ascii_case(&format!("V({selection})")));
+            assert_eq!(values.len(), result.time.len());
+            assert!(values.iter().all(|value| (value - expected).abs() < 1e-12));
+            assert_eq!(result.time.last().copied(), Some(10e-6));
+        }
+    }
+
+    #[test]
+    fn transient_conversion_rejects_malformed_retained_data() {
+        let mut cases = Vec::new();
+        for time in [
+            vec![],
+            vec![0.0, Value::NAN],
+            vec![0.0, Value::INFINITY],
+            vec![0.0, 0.0],
+            vec![1.0, 0.0],
+        ] {
+            let mut result = conversion_result();
+            result.time = time;
+            cases.push(result);
+        }
+        for samples in [vec![0.5], vec![0.5, Value::NAN], vec![0.5, Value::INFINITY]] {
+            let mut result = conversion_result();
+            result.voltages[1] = samples;
+            cases.push(result);
+        }
+        for name in ["", "OUT"] {
+            let mut result = conversion_result();
+            result.node_names[1] = name.to_owned();
+            // Omitted traces still participate in node-identity validation.
+            result.voltages[1].clear();
+            cases.push(result);
+        }
+        let mut missing_vector = conversion_result();
+        missing_vector.voltages.pop();
+        cases.push(missing_vector);
+        let mut no_retained_voltage = conversion_result();
+        no_retained_voltage.voltages.iter_mut().for_each(Vec::clear);
+        cases.push(no_retained_voltage);
+        for (index, result) in cases.into_iter().enumerate() {
+            let names = result.node_names.clone();
+            assert!(
+                matches!(
+                    TransientData::from_result_with_abort(result, &names, &NoAbort),
+                    Err(ServiceRunError::Failure(_))
+                ),
+                "malformed case {index} must fail"
+            );
+        }
+        let result = conversion_result();
+        let mut names = result.node_names.clone();
+        names.swap(0, 1);
+        assert!(matches!(
+            TransientData::from_result_with_abort(result, &names, &NoAbort),
+            Err(ServiceRunError::Failure(_))
+        ));
+    }
+
+    #[test]
+    fn transient_conversion_polls_during_time_and_sample_validation() {
+        let mut result = conversion_result();
+        result.time = (0..256).map(Value::from).collect();
+        result.time[255] = Value::NAN;
+        let names = result.node_names.clone();
+        assert!(matches!(
+            TransientData::from_result_with_abort(result, &names, &AbortOnPoll::new(3)),
+            Err(ServiceRunError::Aborted)
+        ));
+
+        let mut result = conversion_result();
+        result.time = (0..256).map(Value::from).collect();
+        result.voltages = vec![vec![1.0; 256], vec![0.5; 256]];
+        result.voltages[0][255] = Value::NAN;
+        let names = result.node_names.clone();
+        // Entry, four time-axis polls, then the first node and its samples.
+        assert!(matches!(
+            TransientData::from_result_with_abort(result, &names, &AbortOnPoll::new(8)),
+            Err(ServiceRunError::Aborted)
+        ));
     }
 }
