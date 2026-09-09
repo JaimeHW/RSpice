@@ -202,7 +202,7 @@ pub(crate) enum NativeOp {
     /// The slot array is `EvalContext::prelude_slots`: scratch a CFG prelude
     /// publishes its shared values into once per evaluation, so an entry that
     /// needs one reads it rather than recomputing its whole cone. Neither
-    /// analog state nor a model variable â€” it lives exactly as long as one
+    /// analog state nor a model variable — it lives exactly as long as one
     /// evaluation.
     LoadPreludeSlot(usize),
     /// Publish one value into a per-evaluation prelude slot, and yield it.
@@ -211,7 +211,7 @@ pub(crate) enum NativeOp {
     /// It is an identity on its operand so that it needs no new value kind and
     /// no publication metadata beside the program: the store rides in the
     /// instruction stream where the value is computed, which is what keeps
-    /// that valueâ€™s live range from stretching to the exit.
+    /// that value’s live range from stretching to the exit.
     StorePreludeSlot(usize),
 }
 
@@ -356,7 +356,7 @@ impl NativeIdentifierIndex {
     /// hold the definitions reaching it.
     ///
     /// `reads` pairs the name the equation was written with against the
-    /// snapshot capturing the definition it reads â€” see
+    /// snapshot capturing the definition it reads — see
     /// [`crate::ir::EquationSnapshotReads`]. The lowerer reaches a derivative
     /// shadow by appending axis suffixes to the value's name, so re-pointing
     /// the bare name alone would give the equation the reaching *value* and the
@@ -4389,17 +4389,17 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         Ok(())
     }
 
-    /// The base the power rule's `a^(bâˆ’1)` factor is raised from: `a` itself
+    /// The base the power rule's `a^(b−1)` factor is raised from: `a` itself
     /// wherever that factor is finite, and `a` nudged off exactly zero
-    /// wherever it is not â€” `canonical_ir/ad.rs`'s `power_rule_base_term_base`
+    /// wherever it is not — `canonical_ir/ad.rs`'s `power_rule_base_term_base`
     /// and `ir.rs`'s, for the third rule set.
     ///
-    /// `b Â· a^(bâˆ’1) Â· da` is `âˆž Â· 0 = NaN` at `a = 0` for every `b < 1`, and
+    /// `b · a^(b−1) · da` is `∞ · 0 = NaN` at `a = 0` for every `b < 1`, and
     /// `da` is numerically 0 exactly where this matters: a shadow along an axis
-    /// a merge keeps live whose taken arm does not carry it. The nudge `a + (a == 0) Â· MIN_POSITIVE` adds nothing to any
-    /// other `a`, so the term stays bit-exact â€” including for a negative base
+    /// a merge keeps live whose taken arm does not carry it. The nudge `a + (a == 0) · MIN_POSITIVE` adds nothing to any
+    /// other `a`, so the term stays bit-exact — including for a negative base
     /// under an integral exponent, where a `max` clamp would return the wrong
-    /// derivative â€” and at `a = 0` the factor is a large finite number that a
+    /// derivative — and at `a = 0` the factor is a large finite number that a
     /// zero lane multiplies to exactly zero.
     ///
     /// A constant exponent of 1 or more has no singularity to guard, and those
@@ -4421,9 +4421,9 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
     }
 
     /// `ln(a)` as the power rule's exponent term needs it: the logarithm where
-    /// it exists and exactly zero where it does not â€” `ir.rs`'s
-    /// `power_rule_guarded_log`, as a select. `a^b Â· ln(a) Â· db` at `a = 0` is
-    /// `0 Â· âˆ’âˆž Â· db`, NaN however small `db` is â€” and `db` is exactly 0 for the
+    /// it exists and exactly zero where it does not — `ir.rs`'s
+    /// `power_rule_guarded_log`, as a select. `a^b · ln(a) · db` at `a = 0` is
+    /// `0 · −∞ · db`, NaN however small `db` is — and `db` is exactly 0 for the
     /// runtime-parameter exponents compact models use, which is what made it
     /// invisible everywhere but here. bsimcmg's `T0 = pow(dqi / EsatCVL,
     /// PSATCV_i)` (`bsimcmg_body.include:2376`) differentiated by this pass at
@@ -4449,11 +4449,11 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
     /// first-order one above.
     ///
     /// `@dN@dM` of `a^b` carries the same singular factors the first-order
-    /// rule does â€” `a^(bâˆ’1)` and, one power lower, `a^(bâˆ’2)` â€” multiplied by
+    /// rule does — `a^(b−1)` and, one power lower, `a^(b−2)` — multiplied by
     /// derivative lanes that are numerically 0 exactly where the base is 0, so
-    /// the unguarded product is `âˆž Â· 0 = NaN` there for the same reason and is
+    /// the unguarded product is `∞ · 0 = NaN` there for the same reason and is
     /// nudged off zero by the same [`Self::lower_power_rule_base`]. The nudge
-    /// is a denormal floor, so it rescues `a^(bâˆ’2)` while `b > 1`; a shadow
+    /// is a denormal floor, so it rescues `a^(b−2)` while `b > 1`; a shadow
     /// through a base raised below that stays non-finite, as it does on the
     /// first-order rule for `b < 0`.
     ///
@@ -4484,8 +4484,8 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             self.lower_derivative(left, second)?;
             self.append_arithmetic("Mul")?;
             self.push(NativeOp::Const(first_coefficient))?;
-            // `a^(bâˆ’2)`: one power lower than the first-order rule's, so the
-            // guard is asked about `b âˆ’ 1` and skips the nudge for `b â‰¥ 2`,
+            // `a^(b−2)`: one power lower than the first-order rule's, so the
+            // guard is asked about `b − 1` and skips the nudge for `b ≥ 2`,
             // which is where this factor stops being singular.
             self.lower_power_rule_base(left, Some(exponent - 1.0))?;
             self.push(NativeOp::Const(exponent - 2.0))?;
@@ -4578,11 +4578,11 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             };
         }
 
-        // `a^b Â· (q_aÂ·q_b + q_ab)` with `q_x = b_xÂ·ln(a) + bÂ·a_x/a` is the
+        // `a^b · (q_a·q_b + q_ab)` with `q_x = b_x·ln(a) + b·a_x/a` is the
         // textbook form, and it cannot be evaluated at a zero base: the
-        // quotient is `âˆž` wherever `a_x â‰  0`, `a^b` is `0`, and the product is
-        // NaN. Nudging the *divisor* off zero does not rescue it either â€”
-        // `bÂ·a_x/MIN_POSITIVE` is `4.5e307`, so `q_aÂ·q_b` overflows to `âˆž`
+        // quotient is `∞` wherever `a_x ≠ 0`, `a^b` is `0`, and the product is
+        // NaN. Nudging the *divisor* off zero does not rescue it either —
+        // `b·a_x/MIN_POSITIVE` is `4.5e307`, so `q_a·q_b` overflows to `∞`
         // before the `a^b` factor can bring it back down.
         //
         // So multiply the `a^b` through *before* forming any product. Every
@@ -4590,30 +4590,30 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         // hold, exactly as the first-order rule and the two arms above carry
         // theirs:
         //
-        //     a^bÂ·lnÂ²(a)Â·b_xÂ·b_y                          (i)
-        //   + a^(bâˆ’1)Â·(bÂ·ln(a) + 1)Â·(b_xÂ·a_y + b_yÂ·a_x)   (ii)
-        //   + a^(bâˆ’2)Â·bÂ·(bâˆ’1)Â·a_xÂ·a_y                     (iii)
-        //   + a^bÂ·ln(a)Â·b_xy                              (iv)
-        //   + a^(bâˆ’1)Â·bÂ·a_xy                              (v)
+        //     a^b·ln²(a)·b_x·b_y                          (i)
+        //   + a^(b−1)·(b·ln(a) + 1)·(b_x·a_y + b_y·a_x)   (ii)
+        //   + a^(b−2)·b·(b−1)·a_x·a_y                     (iii)
+        //   + a^b·ln(a)·b_xy                              (iv)
+        //   + a^(b−1)·b·a_xy                              (v)
         //
         // These are the same nine products the quotient form had, regrouped:
-        // (iii) merges `q_aÂ·q_b`'s `bÂ²Â·a_xÂ·a_y` with `q_ab`'s `âˆ’bÂ·a_xÂ·a_y`,
-        // which is the `b(bâˆ’1)` cross term the constant-exponent rule emits;
-        // (ii) merges `q_aÂ·q_b`'s logarithmic cross terms with `q_ab`'s bare
+        // (iii) merges `q_a·q_b`'s `b²·a_x·a_y` with `q_ab`'s `−b·a_x·a_y`,
+        // which is the `b(b−1)` cross term the constant-exponent rule emits;
+        // (ii) merges `q_a·q_b`'s logarithmic cross terms with `q_ab`'s bare
         // ones. The five conditions below are the same union the two
         // `q_*_nonzero` predicates formed, so nothing new is emitted and
-        // nothing that was is dropped â€” including the all-zero case, which
+        // nothing that was is dropped — including the all-zero case, which
         // falls through to the `Const(0.0)` at the end.
         //
-        // The exponent is never a literal here â€” `lower_pow_second_derivative`
-        // would have taken the constant arm if it were â€” so every base factor
+        // The exponent is never a literal here — `lower_pow_second_derivative`
+        // would have taken the constant arm if it were — so every base factor
         // takes [`Self::lower_power_rule_base`] unconditionally, and every
         // logarithm the guarded form the first-order exponent term uses.
         let cross_first = !(right_a_zero || left_b_zero);
         let cross_second = !(right_b_zero || left_a_zero);
         let mut emitted = false;
 
-        // (i) a^bÂ·ln(a)Â·ln(a)Â·b_xÂ·b_y
+        // (i) a^b·ln(a)·ln(a)·b_x·b_y
         if !(right_a_zero || right_b_zero) {
             self.lower(left)?;
             self.lower(right)?;
@@ -4629,7 +4629,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             emitted = true;
         }
 
-        // (ii) a^(bâˆ’1)Â·(bÂ·ln(a) + 1)Â·(b_xÂ·a_y + b_yÂ·a_x)
+        // (ii) a^(b−1)·(b·ln(a) + 1)·(b_x·a_y + b_y·a_x)
         if cross_first || cross_second {
             self.lower_power_rule_base(left, None)?;
             self.lower(right)?;
@@ -4664,7 +4664,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             emitted = true;
         }
 
-        // (iii) a^(bâˆ’2)Â·bÂ·(bâˆ’1)Â·a_xÂ·a_y
+        // (iii) a^(b−2)·b·(b−1)·a_x·a_y
         if !(left_a_zero || left_b_zero) {
             self.lower_power_rule_base(left, None)?;
             self.lower(right)?;
@@ -4687,7 +4687,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             emitted = true;
         }
 
-        // (iv) a^bÂ·ln(a)Â·b_xy
+        // (iv) a^b·ln(a)·b_xy
         if !right_ab_zero {
             self.lower(left)?;
             self.lower(right)?;
@@ -4702,7 +4702,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             emitted = true;
         }
 
-        // (v) a^(bâˆ’1)Â·bÂ·a_xy
+        // (v) a^(b−1)·b·a_xy
         if !left_ab_zero {
             self.lower_power_rule_base(left, None)?;
             self.lower(right)?;
@@ -7181,9 +7181,9 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
 
     /// `$simparam`, answered at compile time.
     ///
-    /// The generated-Rust backend answers it at run time instead â€” the CFG
+    /// The generated-Rust backend answers it at run time instead — the CFG
     /// carries a `SimParam` value and the emitter turns it into a
-    /// `simparam("gmin", fallback)` call â€” so the two backends disagree about
+    /// `simparam("gmin", fallback)` call — so the two backends disagree about
     /// exactly the parameter that moves: a model reading `$simparam("gmin")`
     /// follows gmin stepping when it is generated and does not when it is
     /// compiled here. Closing that needs a `NativeOp` and a place for the

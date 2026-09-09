@@ -4,15 +4,15 @@
 //!
 //! [`crate::canonical_ir::state`] defines what makes an expression own a state
 //! record and how the executed sites of a module are numbered. Only the
-//! direction that *mentions bytecode* lives here â€” from an [`Instruction`] to
+//! direction that *mentions bytecode* lives here — from an [`Instruction`] to
 //! the slot it addresses, and back.
 //!
 //! This used to sit in the JIT's expression lowering, where it was reachable
 //! only under `feature = "native"` or `feature = "wasm-jit"`. The per-site
 //! renumbering in [`super::state_renumbering`] runs on every compiled model
-//! regardless of which runtime will execute it â€” the VM route has to see the
+//! regardless of which runtime will execute it — the VM route has to see the
 //! same slot numbers the JIT route does, or a model interpreted and a model
-//! compiled would integrate different histories â€” so the vocabulary had to
+//! compiled would integrate different histories — so the vocabulary had to
 //! become unconditional. The JIT keeps thin wrappers that add the model name to
 //! the error.
 
@@ -128,7 +128,7 @@ pub(crate) fn carries_state(program: &BytecodeProgram) -> bool {
 /// family it owns and kept in traversal order.
 ///
 /// One walk answers all thirteen families. A canonical expression owns at most
-/// one record â€” [`state::classify`] is what decides which â€” so a single
+/// one record — [`state::classify`] is what decides which — so a single
 /// post-order pass fills every list, where this used to be thirteen passes over
 /// the same tree asking a different question each time.
 #[derive(Debug, Default)]
@@ -206,7 +206,7 @@ impl std::fmt::Display for StatePairingError {
 ///
 /// The identity and the order of the sites come from the canonical level; only
 /// the *number* comes from the bytecode. Historically the two numbering spaces
-/// were not the same size â€” a module with noise in an assignment is emitted
+/// were not the same size — a module with noise in an assignment is emitted
 /// twice, once as its assignment steps and again as the noise-shadowed replay,
 /// and the generator allocates a fresh scalar-state slot at each emission, so
 /// one canonical `ddt` site could own two bytecode slots.
