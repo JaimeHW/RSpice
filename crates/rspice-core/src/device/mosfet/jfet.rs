@@ -39,7 +39,7 @@ use crate::device::traits::{MatrixStamper, NonlinearConvergenceCriteria, Nonline
 use crate::solver::{CscIndex, StaticMatrix};
 use std::fmt;
 
-use bias::HfetGateDiodePair;
+use bias::{HfetGateDiodePair, NG_K_OVER_Q};
 
 mod bias;
 mod capacitance;

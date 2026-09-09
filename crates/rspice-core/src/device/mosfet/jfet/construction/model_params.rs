@@ -104,11 +104,10 @@ impl Jfet {
         {
             p.pb = v;
         }
-        if let Some(v) = params
-            .get("M")
-            .copied()
-            .filter(|v| v.is_finite() && *v > 0.0)
-        {
+        if let Some(v) = params.get("M").copied().filter(|v| {
+            v.is_finite()
+                && (*v > 0.0 || (*v == 0.0 && !matches!(p.channel_model, JfetChannelModel::Hfet1)))
+        }) {
             if matches!(p.channel_model, JfetChannelModel::Hfet1) {
                 p.hfet_m = v;
             } else {

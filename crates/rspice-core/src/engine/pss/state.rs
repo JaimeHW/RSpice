@@ -16,6 +16,12 @@ enum VoltageBranch {
         pos: usize,
         neg: usize,
     },
+    Jfet {
+        device: usize,
+        charge: usize,
+        pos: usize,
+        neg: usize,
+    },
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -132,6 +138,20 @@ impl PssStateBasis {
                 }
             }
         }
+        for (device, jfet) in circuit.jfets.iter().enumerate() {
+            for (charge, nodes) in jfet.classic_charge_storage_nodes().into_iter().enumerate() {
+                if let Some((pos, neg)) = nodes
+                    && add(pos, neg, ForestValue::State(voltage_branches.len()))
+                {
+                    voltage_branches.push(VoltageBranch::Jfet {
+                        device,
+                        charge,
+                        pos,
+                        neg,
+                    });
+                }
+            }
+        }
         let mut visited = vec![false; node_count];
         let mut forest = Vec::new();
         let mut pending = Vec::new();
@@ -174,6 +194,13 @@ impl PssStateBasis {
                         ["qbe", "qbex", "qbc", "qbcx", "qbep", "qbeo", "qbco", "qbcp"];
                     format!("Q:{}:{}", circuit.bjts.devices[device].name, NAMES[charge])
                 }
+                VoltageBranch::Jfet { device, charge, .. } => {
+                    format!(
+                        "J:{}:{}",
+                        circuit.jfets[device].name,
+                        ["qgs", "qgd"][charge]
+                    )
+                }
             })
             .chain(
                 self.currents
@@ -194,19 +221,22 @@ impl PssStateBasis {
                 let diode = &circuit.diodes.devices[index];
                 (diode.node_anode, diode.node_cathode)
             }
-            VoltageBranch::Bjt { pos, neg, .. } => (pos, neg),
+            VoltageBranch::Bjt { pos, neg, .. } | VoltageBranch::Jfet { pos, neg, .. } => {
+                (pos, neg)
+            }
         }
     }
 }
 
 /// A worker owns its circuit, accepted charge and coordinate basis together.
-/// Cloning for a derivative probe captures every accepted diode history lane;
-/// each period then resets those histories from the supplied shooting state.
+/// Cloning for a derivative probe captures every accepted semiconductor history
+/// lane; each period resets those histories from the supplied shooting state.
 #[derive(Debug, Clone)]
 pub(in crate::engine) struct PssCircuit {
     pub(super) circuit: CircuitData,
     pub(super) diode_history: TwoTerminalChargeHistory,
     pub(super) bjt_history: super::super::transient::BjtTransientHistory,
+    pub(super) jfet_history: super::super::transient::JfetTransientHistory,
     pub(super) bjt_snapshot_cache: Vec<Option<crate::device::semiconductor::BjtChargeSnapshot>>,
     /// Trial currents computed before a small Newton voltage correction is
     /// rounded into the absolute solution. Read only on accepted steps.
@@ -270,10 +300,16 @@ impl PssCircuit {
             super::super::transient::ReactiveHistorySeed::SolvedBias,
         );
         let bjt_snapshot_cache = vec![None; circuit.bjts.len()];
+        let jfet_history = Engine::initialize_jfet_history(
+            &circuit,
+            &solution_scratch[1..],
+            super::super::transient::ReactiveHistorySeed::SolvedBias,
+        );
         Self {
             circuit,
             diode_history,
             bjt_history,
+            jfet_history,
             bjt_snapshot_cache,
             capacitor_trial_currents,
             inductor_trial_offsets,
@@ -308,7 +344,7 @@ impl PssCircuit {
             .map(|branch| match *branch {
                 VoltageBranch::Capacitor(index) => self.capacitors.v_prev[index],
                 VoltageBranch::Diode(index) => self.diode_history.vd_prev[index],
-                VoltageBranch::Bjt { pos, neg, .. } => {
+                VoltageBranch::Bjt { pos, neg, .. } | VoltageBranch::Jfet { pos, neg, .. } => {
                     self.solution_scratch[pos] - self.solution_scratch[neg]
                 }
             })
@@ -387,10 +423,15 @@ impl PssCircuit {
             super::super::transient::ReactiveHistorySeed::SolvedBias,
         );
         self.bjt_snapshot_cache.fill(None);
+        self.jfet_history = Engine::initialize_jfet_history(
+            circuit,
+            &self.solution_scratch[1..],
+            super::super::transient::ReactiveHistorySeed::SolvedBias,
+        );
         Ok(())
     }
 
-    pub(super) fn seed_bjt_history(&mut self, solution: &[Value]) {
+    pub(super) fn seed_semiconductor_history(&mut self, solution: &[Value]) {
         self.solution_scratch[1..].copy_from_slice(solution);
         self.bjt_history = Engine::initialize_bjt_history(
             &self.circuit,
@@ -398,6 +439,11 @@ impl PssCircuit {
             super::super::transient::ReactiveHistorySeed::SolvedBias,
         );
         self.bjt_snapshot_cache.fill(None);
+        self.jfet_history = Engine::initialize_jfet_history(
+            &self.circuit,
+            solution,
+            super::super::transient::ReactiveHistorySeed::SolvedBias,
+        );
     }
 
     pub(super) fn accept_node_solution(&mut self, solution: &[Value]) {
@@ -424,7 +470,7 @@ impl PssCircuit {
             let value = match self.basis.voltage_branches[index] {
                 VoltageBranch::Capacitor(index) => self.capacitors.v_prev[index],
                 VoltageBranch::Diode(index) => self.diode_history.vd_prev[index],
-                VoltageBranch::Bjt { pos, neg, .. } => {
+                VoltageBranch::Bjt { pos, neg, .. } | VoltageBranch::Jfet { pos, neg, .. } => {
                     self.solution_scratch[pos] - self.solution_scratch[neg]
                 }
             };
@@ -433,7 +479,9 @@ impl PssCircuit {
             // row empty beside an unnecessary auxiliary branch.
             let existing_branch = match self.basis.voltage_branches[index] {
                 VoltageBranch::Capacitor(index) => self.capacitors.ic_branch_indices[index],
-                VoltageBranch::Diode(_) | VoltageBranch::Bjt { .. } => None,
+                VoltageBranch::Diode(_)
+                | VoltageBranch::Bjt { .. }
+                | VoltageBranch::Jfet { .. } => None,
             };
             let branch = existing_branch.unwrap_or_else(|| self.circuit.allocate_branch());
             self.circuit.voltage_sources.add(
@@ -710,6 +758,46 @@ impl PssCircuit {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn jfet_storage_forest_restores_charge_history_and_removes_redundant_coordinates() {
+        for (extra, names) in [
+            ("", vec!["J:J1:qgs", "J:J1:qgd"]),
+            ("C1 g s 1p\n", vec!["C:C1", "J:J1:qgd"]),
+            ("Vgs g s -0.2\n", vec!["J:J1:qgd"]),
+            ("Vgs g s -0.2\nVgd g d -0.3\n", Vec::new()),
+        ] {
+            let netlist = Netlist::parse(&format!(
+                "JFET charge forest\nVd d 0 1\nRg g 0 1k\nRs s 0 100\nJ1 d g s jm\n.model jm NJF(CGS=1n CGD=2n)\n{extra}.end\n"
+            )).unwrap();
+            let engine = Engine::default();
+            let mut circuit = PssCircuit::new(engine.build_circuit(&netlist).unwrap());
+            assert_eq!(circuit.basis.names(&circuit), names);
+            let state = vec![-0.3; names.len()];
+            circuit.set_state(&state).unwrap();
+            let accepted = circuit.jfet_history.clone();
+            for (actual, expected) in circuit.extract_state().iter().zip(&state) {
+                assert!((actual - expected).abs() < 1e-15);
+            }
+            assert_eq!(circuit.clone().jfet_history, accepted);
+            circuit.set_state(&vec![-0.7; names.len()]).unwrap();
+            circuit.set_state(&state).unwrap();
+            assert_eq!(
+                circuit.jfet_history, accepted,
+                "a prior period/probe cannot leak into a new shooting seed"
+            );
+        }
+    }
+
+    #[test]
+    fn jfet_ports_preserve_prescribed_winding_cutsets() {
+        let netlist = Netlist::parse(
+            "JFET winding cutsets\nI1 0 a SIN(0 1m 1meg)\nL1 a b 1u\nL2 b d 2u\nRg g 0 1k\nJ1 d g 0 jm\n.model jm NJF(CGS=1n CGD=2n)\n.end\n",
+        ).unwrap();
+        let circuit = PssCircuit::new(Engine::default().build_circuit(&netlist).unwrap());
+        assert_eq!(circuit.basis.names(&circuit), ["J:J1:qgs", "J:J1:qgd"]);
+        assert!(circuit.basis.currents.representatives.is_empty());
+    }
 
     #[test]
     fn vbic_storage_forest_removes_constant_charge_and_parallel_coordinates() {

@@ -447,7 +447,7 @@ impl Engine {
     }
 
     #[inline]
-    pub(super) fn initialize_jfet_history(
+    pub(in crate::engine) fn initialize_jfet_history(
         circuit: &crate::circuit::CircuitData,
         solution: &[Value],
         seed: ReactiveHistorySeed,
@@ -1059,7 +1059,7 @@ impl Engine {
     }
 
     #[inline]
-    pub(super) fn stamp_jfet_transient_companions(
+    pub(in crate::engine) fn stamp_jfet_transient_companions(
         stamp: TransientCompanionStamp<'_, '_>,
         history: &JfetTransientHistory,
         suppress_gate_charge: bool,

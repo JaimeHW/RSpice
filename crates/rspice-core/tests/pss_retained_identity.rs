@@ -51,6 +51,38 @@ fn produced() -> (Engine, Netlist, PssOperatingPoint) {
 }
 
 #[test]
+fn retained_classic_jfet_charge_drives_pac_and_authenticates_model_parameters() {
+    let deck = "retained JFET charge\nV1 in 0 DC -1 AC 1\nR1 in out 1k\nJ1 0 out 0 jm\n.model jm NJF(IS=1e-30 CGS=100p CGD=50p)\n.end\n";
+    let netlist = Netlist::parse(deck).unwrap();
+    let engine = Engine::default();
+    let point = engine
+        .run_pss_operating_point_with_abort(&netlist, pss_config(), &NoAbort)
+        .unwrap();
+    assert_eq!(point.shooting_state_basis(), ["J:J1:qgs"]);
+    let pac = engine
+        .run_pac_from_pss_with_abort(&netlist, pac_config(), &point, &NoAbort)
+        .unwrap();
+    let ac = engine.run_ac(&netlist, &[1e4]).unwrap();
+    let output = ac[0]
+        .node_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case("out"))
+        .unwrap();
+    let gain = pac.result.conversion_gain(0, 0, 0).unwrap();
+    assert!((gain - ac[0].voltages[output]).norm() < 1e-8);
+
+    let changed = Netlist::parse(&deck.replace("CGS=100p", "CGS=200p")).unwrap();
+    let error = engine
+        .run_pac_from_pss_with_abort(&changed, pac_config(), &point, &NoAbort)
+        .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("retained PSS semantic circuit identity")
+    );
+}
+
+#[test]
 fn retained_pss_accepts_identical_consumers_and_rejects_semantic_or_engine_drift() {
     let (engine, _, point) = produced();
     assert!(point.producer_identity().is_some());

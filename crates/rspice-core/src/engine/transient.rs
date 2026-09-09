@@ -435,7 +435,9 @@ pub use fft::transient_fft_window_coherent_gain;
 
 mod history;
 use history::*;
-pub(in crate::engine) use history::{BjtTransientHistory, VbicCachedSnapshotReuse};
+pub(in crate::engine) use history::{
+    BjtTransientHistory, JfetTransientHistory, VbicCachedSnapshotReuse,
+};
 
 #[derive(Debug, Clone, Copy)]
 struct DerivedTransientBranchCurrent {
@@ -3119,7 +3121,7 @@ impl Engine {
     ///
     /// Each message is reported under exactly one source, so a frontend that
     /// groups a report by owner sees each blocked owner once.
-    fn transient_checkpoint_capability_for_circuit(
+    pub(in crate::engine) fn transient_checkpoint_capability_for_circuit(
         circuit: &crate::circuit::CircuitData,
         abort: &dyn AbortSignal,
     ) -> Result<TransientCheckpointCapability, SimulationError> {

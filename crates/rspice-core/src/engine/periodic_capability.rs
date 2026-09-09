@@ -523,7 +523,7 @@ pub(crate) const fn periodic_capability_descriptor(
             dynamic_state: Complete,
             small_signal: Complete,
             noise: Restricted(CYCLOSTATIONARY_FLICKER),
-            pss_state: Absent("JFET/MESFET charge and trap history"),
+            pss_state: Restricted("classic Shichman-Hodges gate-junction charge history"),
             envelope: Absent(ENVELOPE_LINEAR_SUBSET),
         },
         F::XyceMemristor => PeriodicCapabilityDescriptor {
@@ -1214,6 +1214,17 @@ pub(in crate::engine) fn pss_state_gaps(circuit: &CircuitData) -> Vec<Capability
             Absent(missing) => gaps.push(CapabilityGap::new(family, missing)),
             Restricted(_) => {
                 match family {
+                    F::Jfet => {
+                        if circuit.jfets.iter().any(|jfet| {
+                            jfet.params.channel_model
+                                != crate::device::JfetChannelModel::ShichmanHodges
+                        }) {
+                            gaps.push(CapabilityGap::new(
+                                family,
+                                "non-classic JFET/MESFET charge and trap history",
+                            ));
+                        }
+                    }
                     F::Bjt => {
                         if circuit
                             .bjts
@@ -1561,7 +1572,7 @@ mod tests {
             F::Bsim3v3 | F::Bsim4v8 => [A, R, I, A, A, A],
             F::B3SoiDd | F::B3SoiFd | F::B3SoiPd => [A, C, I, A, A, A],
             F::Ekv26 | F::Ekv3 | F::Vdmos => [I, C, A, A, A, A],
-            F::Jfet => [R, C, C, R, A, A],
+            F::Jfet => [R, C, C, R, R, A],
             F::XyceMemristor => [A, A, I, A, A, A],
             F::VoltageSwitch => [R, I, C, I, A, A],
             F::CurrentSwitch | F::GenericSwitch => [A, I, I, I, A, A],

@@ -12,6 +12,181 @@ fn engine() -> Engine {
 }
 
 #[test]
+fn classic_jfet_temperature_mapped_ac_and_charge_match_ngspice46() {
+    use rspice_core::engine::SpiceDialect;
+    use rspice_core::numerics::integration::IntegrationMethod;
+    // ngspice-46 AC current, divided by 2*pi*1 MHz: CGS+CGD at VGS=VGD=-1.
+    // TNOM=50 exercises both sides of the nominal-to-reference mapping.
+    for (temperature, nominal, capacitance) in [
+        (-40.0, 27.0, 2.060_179_028_154_676e-9),
+        (27.0, 27.0, 2.121_320_343_559_643e-9),
+        (100.0, 27.0, 2.185_818_911_094_34e-9),
+        (-40.0, 50.0, 2.044_034_522_607_255e-9),
+        (100.0, 50.0, 2.163_254_513_623_347e-9),
+    ] {
+        for (kind, polarity) in [("NJF", 1.0), ("PJF", -1.0)] {
+            for (ambient, instance) in [
+                (temperature, String::new()),
+                (27.0, format!("DTEMP={}", temperature - 27.0)),
+                (27.0, format!("TEMP={temperature} DTEMP=10")),
+            ] {
+                let netlist = Netlist::parse(&format!(
+                    "JFET temperature AC and charge\nVg gate 0 DC {} AC 1 PWL(0 {} 1u {} 2u {})\nJ1 0 gate 0 jm {instance}\n.model jm {kind}(BETA=1m VTO=-2 IS=1e-30 CGS=1n CGD=2n PB=1 FC=0.5 TNOM={nominal})\n.options TEMP={ambient}\n.end\n",
+                    -polarity, -polarity, 0.75 * polarity, -polarity,
+                )).unwrap();
+                let engine = Engine::new(SimulationConfig {
+                    spice_dialect: SpiceDialect::Ngspice,
+                    integration_method: IntegrationMethod::BackwardEuler,
+                    locked_time_grid: Some(std::sync::Arc::new(vec![0.0, 1e-6, 2e-6])),
+                    ..Default::default()
+                });
+                let ac = engine.run_ac(&netlist, &[1e6]).unwrap();
+                let branch = ac[0]
+                    .branch_names
+                    .iter()
+                    .position(|name| name.eq_ignore_ascii_case("vg"))
+                    .unwrap();
+                let measured = -ac[0].currents[branch].im / (std::f64::consts::TAU * 1e6);
+                assert!(
+                    (measured - capacitance).abs() < 1e-12 * capacitance,
+                    "{kind}, TEMP={ambient}, {instance}, TNOM={nominal}: {measured} vs {capacitance}",
+                );
+                if temperature == 100.0 && nominal == 50.0 {
+                    // Independently recorded ngspice qgs+qgd at these two
+                    // biases: -2.5467560155408902 nC and +3.095418536243149 nC.
+                    let tran = engine.run_tran(&netlist, 2e-6, 1e-6).unwrap();
+                    let current = tran.try_branch_current_waveform_named("vg").unwrap();
+                    let mut charge = 0.0;
+                    let mut reached_peak = false;
+                    for (time, current) in tran.time.windows(2).zip(&current[1..]) {
+                        charge -= current * (time[1] - time[0]);
+                        if time[1] == 1e-6 {
+                            assert!((charge - polarity * 5.642_174_551_784_039e-9).abs() < 2e-16);
+                            reached_peak = true;
+                        }
+                    }
+                    assert!(reached_peak);
+                    assert!(charge.abs() < 1e-15);
+                    assert_eq!(engine.convergence_quality().force_accepted_points, 0);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn jfet_capacitance_temperature_offsets_are_applied_once() {
+    use rspice_core::device::Jfet;
+    for mut device in [
+        Jfet::njf("j1", 1, 2, 3),
+        Jfet::njf("j1", 1, 2, 3).enable_xyce_jfet1_model(),
+        Jfet::njf("j1", 1, 2, 3).enable_jfet2_model(),
+        Jfet::njf("j1", 1, 2, 3).enable_xyce_jfet2_model(),
+    ] {
+        device.params.cgs = 1e-9;
+        device.params.cgd = 2e-9;
+        let reference = device.transient_capacitances(-0.1, -0.2, 323.15);
+        for instance in [
+            vec![("DTEMP".to_owned(), 23.0)],
+            vec![("TEMP".to_owned(), 50.0), ("DTEMP".to_owned(), -70.0)],
+        ] {
+            let mapped = device.clone().with_instance_params(&instance);
+            let actual = mapped.transient_capacitances(-0.1, -0.2, 300.15);
+            assert_eq!(
+                actual, reference,
+                "{:?}: {instance:?}",
+                device.params.channel_model
+            );
+        }
+    }
+}
+
+#[test]
+fn classic_jfet_capacitance_is_continuous_and_has_no_reverse_bias_floor() {
+    let mut device = rspice_core::device::Jfet::njf("j1", 1, 2, 3);
+    device.params.cgs = 1e-9;
+    device.params.cgd = 2e-9;
+    for grading in [0.0, 0.2, 0.5, 1.0, 1.5] {
+        device.params.m = grading;
+        for fc in [0.0, 0.3, 0.5, 0.9] {
+            device.params.fc = fc;
+            let knee = fc * device.params.pb;
+            let below = device.capacitances(knee - 1e-9, knee - 1e-9);
+            let above = device.capacitances(knee + 1e-9, knee + 1e-9);
+            assert!((above.0 - below.0).abs() < 1e-7 * below.0);
+            assert!((above.1 - below.1).abs() < 1e-7 * below.1);
+        }
+        let (actual, _) = device.capacitances(-1e8, -1e8);
+        let expected = device.params.cgs * (1.0 + 1e8_f64).powf(-grading);
+        assert!((actual - expected).abs() < 1e-13 * expected);
+    }
+}
+
+#[test]
+fn classic_jfet_transient_delivers_the_analytic_charge_on_every_step() {
+    use rspice_core::engine::SpiceDialect;
+    use rspice_core::numerics::integration::IntegrationMethod;
+
+    // ngspice-46 jfetload.c: integrate the depletion Q(V), rather than
+    // accumulating C(V_new) * delta_V, including crossing the forward knee.
+    let charge = |voltage: f64| {
+        if voltage < 0.5 {
+            6e-9 * (1.0 - (1.0 - voltage).sqrt())
+        } else {
+            6e-9 * (1.0 - 0.5_f64.sqrt())
+                + 3e-9 / 0.5_f64.powf(1.5)
+                    * (0.25 * (voltage - 0.5) + (voltage * voltage - 0.25) / 4.0)
+        }
+    };
+    for dialect in [SpiceDialect::Ngspice, SpiceDialect::BestAvailable] {
+        for (kind, polarity) in [("NJF", 1.0), ("PJF", -1.0)] {
+            for (area, multiplicity) in [(1.0, 1.0), (2.0, 3.0)] {
+                let waveform = [-2.0, -0.1, 0.4, 0.7, -0.2, -2.0]
+                    .iter()
+                    .enumerate()
+                    .map(|(i, v)| format!("{} {}", i as f64 * 1e-6, polarity * v))
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                let netlist = Netlist::parse(&format!(
+                    "JFET charge cycle\nVg gate 0 DC {} PWL({waveform})\nJ1 0 gate 0 jm {area} M={multiplicity}\n.model jm {kind}(BETA=1m VTO=-2 IS=0 CGS=1n CGD=2n PB=1 FC=0.5)\n.end\n",
+                    -2.0 * polarity,
+                )).unwrap();
+                let engine = Engine::new(SimulationConfig {
+                    spice_dialect: dialect,
+                    integration_method: IntegrationMethod::BackwardEuler,
+                    locked_time_grid: Some(std::sync::Arc::new(
+                        (0..=5).map(|i| f64::from(i) * 1e-6).collect(),
+                    )),
+                    ..Default::default()
+                });
+                let result = engine.run_tran(&netlist, 5e-6, 1e-6).unwrap();
+                let voltage = result.try_voltage_waveform_named("gate").unwrap();
+                let current = result.try_branch_current_waveform_named("Vg").unwrap();
+                let mut delivered = 0.0;
+                for i in 1..result.time.len() {
+                    let step_charge = -current[i] * (result.time[i] - result.time[i - 1]);
+                    let expected = polarity
+                        * area
+                        * multiplicity
+                        * (charge(polarity * voltage[i]) - charge(polarity * voltage[i - 1]));
+                    assert!(
+                        (step_charge - expected).abs() < 2e-16 + 2e-7 * expected.abs(),
+                        "{dialect:?}, {kind}, area={area}, M={multiplicity}, t={}: got {step_charge}, expected {expected}",
+                        result.time[i],
+                    );
+                    delivered += step_charge;
+                }
+                assert!(
+                    delivered.abs() < 1e-15,
+                    "a closed bias cycle must return its charge: {delivered}"
+                );
+                assert_eq!(engine.convergence_quality().force_accepted_points, 0);
+            }
+        }
+    }
+}
+
+#[test]
 fn tied_jfet_terminals_preserve_dc_ac_and_transient_at_large_scale() {
     use rspice_core::engine::SpiceDialect;
     for dialect in [

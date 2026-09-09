@@ -111,7 +111,7 @@ impl PssAcceptedStepHistory {
 const PSS_FD_STEP: Value = 1e-8;
 const PSS_KRYLOV_STATE_THRESHOLD: usize = 12;
 const PSS_KRYLOV_REL_TOL: Value = 1e-9;
-const PSS_OPERATING_POINT_IDENTITY_VERSION: u32 = 56;
+const PSS_OPERATING_POINT_IDENTITY_VERSION: u32 = 57;
 
 fn pss_identity_field(hasher: &mut blake3::Hasher, name: &str, bytes: &[u8]) {
     hasher.update(&(name.len() as u64).to_le_bytes());
@@ -1882,6 +1882,17 @@ impl Engine {
         // is the authoritative gate. Repeat it against the returned circuit
         // so a future refactor cannot accidentally bypass the allowlist.
         Self::ensure_pss_state_supported(&circuit)?;
+        // A shooting adapter can advance an orbit before its complete history
+        // has a checkpoint encoding. Do not return a continuation artifact
+        // that ordinary transient integration will refuse to resume.
+        Self::transient_checkpoint_capability_for_circuit(&circuit, abort)?
+            .require_resumable()
+            .map_err(|detail| {
+                SimulationError::unsupported_capability(
+                    "analysis.tran.checkpoint_capability",
+                    detail,
+                )
+            })?;
         let mut frozen_sources = circuit
             .voltage_sources
             .names
@@ -2175,6 +2186,11 @@ impl Engine {
                 .all(|diode| !diode.has_charge_storage())
             && circuit.bjts.devices.iter().all(|bjt| {
                 bjt.vbic_electrical_charge_storage_nodes()
+                    .iter()
+                    .all(Option::is_none)
+            })
+            && circuit.jfets.iter().all(|jfet| {
+                jfet.classic_charge_storage_nodes()
                     .iter()
                     .all(Option::is_none)
             })
@@ -2739,7 +2755,7 @@ impl Engine {
 
     /// Initialize reactive element state from DC solution
     fn pss_initialize_reactive_state(&self, circuit: &mut PssCircuit, dc_solution: &[Value]) {
-        circuit.seed_bjt_history(dc_solution);
+        circuit.seed_semiconductor_history(dc_solution);
         let PssCircuit {
             circuit,
             diode_history,
@@ -3011,7 +3027,7 @@ impl Engine {
                 solution.truncate(size);
                 // Cross-coupled device charge also depends on algebraic node
                 // biases resolved by this consistency solve.
-                circuit.seed_bjt_history(&solution);
+                circuit.seed_semiconductor_history(&solution);
                 Ok(solution)
             }
             None => Err(SimulationError::ConvergenceFailed(
@@ -3874,6 +3890,7 @@ impl Engine {
             circuit,
             diode_history,
             bjt_history,
+            jfet_history,
             bjt_snapshot_cache,
             ..
         } = pss;
@@ -4001,6 +4018,18 @@ impl Engine {
                 super::transient::VbicCachedSnapshotReuse::SeedOnly,
                 self.voltage_abstol(),
                 self.voltage_reltol(),
+            );
+            Self::stamp_jfet_transient_companions(
+                super::transient::TransientCompanionStamp {
+                    circuit,
+                    matrix,
+                    rhs,
+                    voltages: linearize_at,
+                    coeff,
+                    dt,
+                },
+                jfet_history,
+                false,
             );
         }
         // B sources remain part of the physical transient equation even when
@@ -4331,6 +4360,7 @@ impl Engine {
                     circuit,
                     diode_history,
                     bjt_history,
+                    jfet_history,
                     bjt_snapshot_cache,
                     ..
                 } = circuit;
@@ -4352,6 +4382,7 @@ impl Engine {
                         reltol: self.voltage_reltol(),
                     },
                 )?;
+                Self::accept_jfet_history(circuit, jfet_history, &new_solution, &coeff, dt, false);
             }
 
             circuit.accept_node_solution(&new_solution);

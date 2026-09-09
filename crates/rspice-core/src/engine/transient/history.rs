@@ -80,8 +80,8 @@ pub(super) const BJT_EXT_E_INDEX: usize = 2;
 pub(super) const BJT_EXT_S_INDEX: usize = 3;
 pub(super) const EKV26_DYNAMIC_CHARGE_COUNT: usize = 4;
 
-#[derive(Debug, Clone, Default)]
-pub(super) struct JfetTransientHistory {
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(in crate::engine) struct JfetTransientHistory {
     pub(super) vgs_prev: Vec<Value>,
     pub(super) vgs_prev_prev: Vec<Value>,
     pub(super) qgs_prev: Vec<Value>,

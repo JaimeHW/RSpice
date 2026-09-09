@@ -262,6 +262,89 @@ mod wasm_tests {
     }
 
     #[wasm_bindgen_test]
+    fn classic_jfet_charge_cycle_is_conservative_in_wasm() {
+        use rspice_core::engine::{SimulationConfig, SpiceDialect};
+        use rspice_core::numerics::integration::IntegrationMethod;
+        let engine = rspice_core::Engine::new(SimulationConfig {
+            spice_dialect: SpiceDialect::Ngspice,
+            integration_method: IntegrationMethod::BackwardEuler,
+            locked_time_grid: Some(std::sync::Arc::new(vec![0.0, 1e-6, 2e-6])),
+            ..Default::default()
+        });
+        // Analytic ngspice depletion charge between -2 V and +0.75 V,
+        // crossing the FC=0.5 continuation knee (CGS+CGD = 3 nF).
+        let nominal_charge = 6e-9 * (3.0_f64.sqrt() - 0.5_f64.sqrt())
+            + 3e-9 / 0.5_f64.powf(1.5) * (0.25 * 0.25 + (0.75 * 0.75 - 0.25) / 4.0);
+        // Warm charge anchor from ngspice-46, TEMP=100 C and TNOM=50 C.
+        for (low, model_options, options, expected) in [
+            (-2.0, "", "", nominal_charge),
+            (
+                -1.0,
+                "TNOM=50",
+                ".options TEMP=100\n",
+                5.642_174_551_784_039e-9,
+            ),
+        ] {
+            for (kind, polarity) in [("NJF", 1.0), ("PJF", -1.0)] {
+                let netlist = rspice_core::Netlist::parse(&format!(
+                "JFET charge cycle\nVg gate 0 DC {} PWL(0 {} 1u {} 2u {})\nJ1 0 gate 0 jm\n.model jm {kind}(BETA=1m VTO=-2 IS=0 CGS=1n CGD=2n {model_options})\n{options}.end\n",
+                low * polarity, low * polarity, 0.75 * polarity, low * polarity,
+            )).unwrap();
+                let result = engine
+                    .run_tran_with_abort(&netlist, 2e-6, 1e-6, &rspice_core::abort_signal::NoAbort)
+                    .unwrap();
+                let current = result.try_branch_current_waveform_named("Vg").unwrap();
+                let mut charge = 0.0;
+                let mut reached_peak = false;
+                for (time, current) in result.time.windows(2).zip(&current[1..]) {
+                    charge -= current * (time[1] - time[0]);
+                    if time[1] == 1e-6 {
+                        assert!((charge - polarity * expected).abs() < 2e-16);
+                        reached_peak = true;
+                    }
+                }
+                assert!(reached_peak);
+                assert!(charge.abs() < 1e-15);
+                assert_eq!(engine.convergence_quality().force_accepted_points, 0);
+            }
+        }
+    }
+
+    #[wasm_bindgen_test]
+    fn classic_jfet_charge_pss_matches_analytic_rc_in_wasm() {
+        for (kind, polarity) in [("NJF", 1.0), ("PJF", -1.0)] {
+            let netlist = rspice_core::Netlist::parse(&format!(
+                "JFET PSS in WASM\nV1 in 0 DC {} SIN({} {} 1meg)\nR1 in out 1k\nJ1 0 out 0 jm 2 M=3\n.model jm {kind}(IS=0 CGS=100p CGD=50p M=0)\n.end\n",
+                -polarity, -polarity, 0.01 * polarity,
+            )).unwrap();
+            let point = rspice_core::Engine::default()
+                .run_pss_operating_point_with_abort(
+                    &netlist,
+                    rspice_core::analysis::PssConfig::new(1e6)
+                        .with_points_per_period(256)
+                        .with_tstab_periods(0)
+                        .with_tolerance(1e-10),
+                    &rspice_core::abort_signal::NoAbort,
+                )
+                .unwrap();
+            assert_eq!(point.shooting_state_basis(), ["J:J1:qgs"]);
+            let result = &point.analysis().result;
+            let out = result
+                .node_names
+                .iter()
+                .position(|name| name.eq_ignore_ascii_case("out"))
+                .unwrap();
+            let wc = std::f64::consts::TAU * 1e6 * 1e3 * 900e-12;
+            for (&time, &actual) in result.time.iter().zip(&result.waveforms[out].values) {
+                let phase = std::f64::consts::TAU * 1e6 * time;
+                let expected = -polarity
+                    + polarity * 0.01 * (phase.sin() - wc * phase.cos()) / (1.0 + wc * wc);
+                assert!((actual - expected).abs() < 4e-6);
+            }
+        }
+    }
+
+    #[wasm_bindgen_test]
     fn newton_tracker_rejects_nonfinite_and_stale_success_in_wasm() {
         use rspice_core::solver::{NewtonConfig, NewtonSolver};
         let finite = [1.0; 17];

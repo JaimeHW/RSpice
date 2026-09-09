@@ -65,6 +65,7 @@ impl PssCurrentBasis {
                         | F::Cccs
                         | F::Ccvs
                         | F::Diode
+                        | F::Jfet
                         | F::BehavioralSource
                         | F::TransmissionLine
                         | F::InductorCoupling
@@ -125,6 +126,12 @@ impl PssCurrentBasis {
         }
         for diode in &circuit.diodes.devices {
             join(diode.node_anode, diode.node_cathode);
+        }
+        // The admitted classic JFET owns both gate-junction current branches,
+        // including their model GMIN, even when its capacitances are zero.
+        for jfet in &circuit.jfets {
+            join(jfet.gate, jfet.source);
+            join(jfet.gate, jfet.drain);
         }
         for source in &circuit.behavioral_sources.voltage_sources {
             join(source.node_pos, source.node_neg);

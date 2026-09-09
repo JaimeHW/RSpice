@@ -96,33 +96,9 @@ fn junction_current(is: Value, v: Value, nvt: Value) -> (Value, Value) {
 /// holds; above it both charge and capacitance continue with the standard
 /// linearized form, C1-continuous at the knee.
 fn depletion_charge(cap: &DepletionCap, v: Value) -> (Value, Value) {
-    if cap.cj0 <= 0.0 {
-        return (0.0, 0.0);
-    }
-    let (cj0, vj, m, fc) = (cap.cj0, cap.vj, cap.m, cap.fc);
-    let knee = fc * vj;
-
-    if v < knee {
-        let x = 1.0 - v / vj;
-        let q = if m == 1.0 {
-            -cj0 * vj * x.ln()
-        } else {
-            cj0 * vj / (1.0 - m) * (1.0 - x.powf(1.0 - m))
-        };
-        let c = cj0 * x.powf(-m);
-        (q, c)
-    } else {
-        let f1 = if m == 1.0 {
-            -vj * (1.0 - fc).ln()
-        } else {
-            vj / (1.0 - m) * (1.0 - (1.0 - fc).powf(1.0 - m))
-        };
-        let f2 = (1.0 - fc).powf(1.0 + m);
-        let f3 = 1.0 - fc * (1.0 + m);
-        let q = cj0 * (f1 + (f3 * (v - knee) + m / (2.0 * vj) * (v * v - knee * knee)) / f2);
-        let c = cj0 * (f3 + m * v / vj) / f2;
-        (q, c)
-    }
+    crate::device::semiconductor::depletion_charge_and_capacitance(
+        v, cap.cj0, cap.vj, cap.m, cap.fc,
+    )
 }
 
 impl NonlinearDeviceParams {
