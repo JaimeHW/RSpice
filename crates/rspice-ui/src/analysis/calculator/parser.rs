@@ -153,6 +153,24 @@ impl<'a> Lexer<'a> {
         Err(ParseError::new(start, "unterminated string literal"))
     }
 
+    /// V/I arguments name signals. Read their spelling before the arithmetic
+    /// lexer can interpret `-`, `+`, a SPICE suffix, or an overflowing exponent.
+    fn read_probe_argument(&mut self) -> Result<String, ParseError> {
+        self.skip_whitespace();
+        if self.chars.peek().is_some_and(|(_, c)| *c == '"') {
+            return self.read_string_literal();
+        }
+        let mut name = String::new();
+        while let Some(&(_, c)) = self.chars.peek() {
+            if c.is_whitespace() || matches!(c, '(' | ')' | ',' | '"') {
+                break;
+            }
+            self.chars.next();
+            name.push(c);
+        }
+        Ok(name)
+    }
+
     fn next_token(&mut self) -> Result<SpannedToken, ParseError> {
         self.skip_whitespace();
 
@@ -227,7 +245,6 @@ struct SpannedToken {
 // =============================================================================
 
 pub struct Parser<'a> {
-    input: &'a str,
     lexer: Lexer<'a>,
     current: SpannedToken,
     initial_error: Option<ParseError>,
@@ -247,7 +264,6 @@ impl<'a> Parser<'a> {
             ),
         };
         Self {
-            input,
             lexer,
             current,
             initial_error,
@@ -395,22 +411,14 @@ impl<'a> Parser<'a> {
         // 1. Handle V(node) and I(branch) special forms
         if (upper_name == "V" || upper_name == "I") && matches!(self.current.token, Token::LParen) {
             let start = self.current.position;
-            self.advance()?; // consume (
-
-            let arg = match self.current.token.clone() {
-                Token::Ident(s) if !s.trim().is_empty() => s,
-                // Inside a probe, this token is a node identity, not a value.
-                // Keep 00, 001 and 1k distinct from canonical ground and 1000.
-                Token::Number(_) => {
-                    self.input[self.current.position..self.lexer.position()].to_owned()
-                }
-                _ => {
-                    return Err(ParseError::new(
-                        self.current.position,
-                        format!("expected signal name inside {}(...)", upper_name),
-                    ));
-                }
-            };
+            let argument_start = self.lexer.position();
+            let arg = self.lexer.read_probe_argument()?;
+            if arg.trim().is_empty() {
+                return Err(ParseError::new(
+                    argument_start,
+                    format!("expected signal name inside {}(...)", upper_name),
+                ));
+            }
             self.advance()?; // consume arg
             self.expect_rparen(start)?;
 
@@ -506,6 +514,52 @@ mod tests {
                 try_parse(&format!(" V ( {node} ) ")).unwrap(),
                 CalculatorExpr::wave(&signal)
             );
+        }
+    }
+
+    #[test]
+    fn probe_arguments_are_literal_names_before_arithmetic_tokenization() {
+        for name in [
+            "out+",
+            "out-",
+            "-1",
+            "n$bias",
+            "n#1",
+            "1e999",
+            "1e",
+            "2µ",
+            "/X1/1e999",
+        ] {
+            for accessor in ["V", "I"] {
+                let signal = format!("{accessor}({name})");
+                assert_eq!(
+                    try_parse(&format!(" {accessor} ( {name} ) / 2 ")).unwrap(),
+                    CalculatorExpr::binary(
+                        BinaryOp::Div,
+                        CalculatorExpr::wave(&signal),
+                        CalculatorExpr::Number(2.0),
+                    ),
+                    "{signal}",
+                );
+            }
+        }
+        assert_eq!(
+            try_parse(r#"V("out name")"#).unwrap(),
+            CalculatorExpr::wave("V(out name)")
+        );
+        for text in [
+            "V()",
+            "V( )",
+            "V(out name)",
+            "V(out,in)",
+            "I(out,in)",
+            "V((out))",
+            "V(out",
+            r#"V("out)"#,
+            "1e999",
+            "1e",
+        ] {
+            assert!(try_parse(text).is_err(), "{text}");
         }
     }
 
