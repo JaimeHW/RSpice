@@ -114,6 +114,7 @@ fn replace_transient_random(
     dc_offset: Value,
     abort: &dyn AbortSignal,
 ) -> Result<(), SimulationError> {
+    let mut dc_offset_pending = true;
     let mut points = match spec {
         SourceSpec::Distortion { inner, .. } | SourceSpec::RfPort { inner, .. } => {
             return replace_transient_random(inner, tstop, seed, name, dc_offset, abort);
@@ -163,24 +164,28 @@ fn replace_transient_random(
             delay,
             parameter1,
             parameter2,
-        } => generate_trrandom_points(
-            TrRandomSpec {
-                distribution: *distribution,
-                sample_interval: *sample_interval,
-                delay: *delay,
-                parameter1: *parameter1,
-                parameter2: *parameter2,
-            },
-            tstop,
-            seed,
-            name,
-            abort,
-        )?,
+        } => {
+            dc_offset_pending = false;
+            generate_trrandom_points(
+                TrRandomSpec {
+                    distribution: *distribution,
+                    sample_interval: *sample_interval,
+                    delay: *delay,
+                    parameter1: *parameter1,
+                    parameter2: *parameter2,
+                },
+                tstop,
+                seed,
+                name,
+                dc_offset,
+                abort,
+            )?
+        }
         _ => return Ok(()),
     };
     // Ngspice adds explicit DC to TRNOISE/TRRANDOM at every time, unlike
     // ordinary waveforms. Preserve that offset when lowering to generic PWL.
-    if dc_offset != 0.0 {
+    if dc_offset_pending && dc_offset != 0.0 {
         for (index, (_, value)) in points.iter_mut().enumerate() {
             if index.is_multiple_of(512) {
                 check_noise_abort(abort)?;
@@ -393,6 +398,7 @@ fn generate_trrandom_points(
     tstop: Value,
     seed: u64,
     name: &str,
+    dc_offset: Value,
     abort: &dyn AbortSignal,
 ) -> Result<Vec<(Value, Value)>, SimulationError> {
     check_noise_abort(abort)?;
@@ -430,22 +436,30 @@ fn generate_trrandom_points(
             "TRRANDOM source '{name}' sample times exceed finite precision"
         )));
     }
-    let mut rng = SplitMix64::new(seed);
-    let mut points = vec![(0.0, parameter2)];
-    if delay > 0.0 {
-        points.push((delay, parameter2));
+    // Combine authored offsets before rounding a sample. Keep the lost low
+    // part too, since the Poisson mean may cancel the large offset later.
+    let offset = two_sum(parameter2, dc_offset);
+    if !offset.0.is_finite() {
+        return Err(SimulationError::Circuit(format!(
+            "TRRANDOM source '{name}' offsets produced a non-finite initial value"
+        )));
     }
-    let mut previous = parameter2;
+    let mut rng = SplitMix64::new(seed);
+    let mut points = vec![(0.0, offset.0)];
+    if delay > 0.0 {
+        points.push((delay, offset.0));
+    }
+    let mut previous = offset.0;
     for index in 0..count {
         if index.is_multiple_of(512) {
             check_noise_abort(abort)?;
         }
         let time = delay + index as Value * sample_interval;
-        let value = match distribution {
-            1 => parameter2 + parameter1 * (2.0 * rng.uniform() - 1.0),
-            2 => parameter2 + parameter1 * rng.gaussian(),
-            3 => parameter2 - parameter1 * rng.uniform().ln(),
-            4 => parameter2 + rng.poisson(parameter1, abort)?,
+        let sample = match distribution {
+            1 => (0.0, parameter1 * (2.0 * rng.uniform() - 1.0)),
+            2 => (0.0, parameter1 * rng.gaussian()),
+            3 => (0.0, -parameter1 * rng.uniform().ln()),
+            4 => rng.poisson(parameter1, abort)?,
             _ => {
                 return Err(SimulationError::Circuit(format!(
                     "TRRANDOM source '{}' has invalid TYPE",
@@ -453,6 +467,7 @@ fn generate_trrandom_points(
                 )));
             }
         };
+        let value = add_random_offset(sample, offset);
         if !value.is_finite() {
             return Err(SimulationError::Circuit(format!(
                 "TRRANDOM source '{name}' generated a non-finite sample"
@@ -464,6 +479,20 @@ fn generate_trrandom_points(
     }
     points.push((tstop.max(final_sample_time).max(delay), previous));
     Ok(points)
+}
+
+/// Error-free addition when the rounded sum is finite.
+fn two_sum(a: Value, b: Value) -> (Value, Value) {
+    let sum = a + b;
+    let b_virtual = sum - a;
+    (sum, (a - (sum - b_virtual)) + (b - b_virtual))
+}
+
+/// Add a decomposed sample to the authored bias without losing cancellation.
+fn add_random_offset(sample: (Value, Value), offset: (Value, Value)) -> Value {
+    let (sample, sample_error) = two_sum(sample.0, sample.1);
+    let (value, error) = two_sum(sample, offset.0);
+    value + ((sample_error + offset.1) + error)
 }
 
 fn check_noise_abort(abort: &dyn AbortSignal) -> Result<(), SimulationError> {
@@ -657,7 +686,7 @@ impl SplitMix64 {
         &mut self,
         lambda: Value,
         abort: &dyn AbortSignal,
-    ) -> Result<Value, SimulationError> {
+    ) -> Result<(Value, Value), SimulationError> {
         check_noise_abort(abort)?;
         if !lambda.is_finite() || lambda < 0.0 {
             return Err(SimulationError::Circuit(
@@ -665,7 +694,7 @@ impl SplitMix64 {
             ));
         }
         if lambda == 0.0 {
-            return Ok(0.0);
+            return Ok((0.0, 0.0));
         }
         if lambda < 10.0 {
             let limit = (-lambda).exp();
@@ -674,7 +703,7 @@ impl SplitMix64 {
             loop {
                 product *= self.uniform();
                 if product <= limit {
-                    return Ok(count as Value);
+                    return Ok((0.0, count as Value));
                 }
                 count += 1;
                 if count.is_multiple_of(64) {
@@ -690,6 +719,8 @@ impl SplitMix64 {
         let a = -0.059 + 0.02483 * b;
         let inverse_alpha = 1.1239 + 1.1328 / (b - 3.4);
         let squeeze = 0.9277 - 3.6224 / (b - 2.0);
+        let center = lambda.floor();
+        let fraction = lambda - center;
         let mut attempts = 0u64;
         loop {
             attempts = attempts.wrapping_add(1);
@@ -699,21 +730,22 @@ impl SplitMix64 {
             let u = self.uniform() - 0.5;
             let v = self.uniform();
             let distance = 0.5 - u.abs();
-            // Keep the result in Value's domain: converting through an integer
-            // type silently saturates means above that integer type's maximum.
-            let k = ((2.0 * a / distance + b) * u + lambda + 0.43).floor();
+            // Round the displacement, not the full count: an ulp of a large
+            // mean can exceed the distribution's entire standard deviation.
+            let displacement = ((2.0 * a / distance + b) * u + fraction + 0.43).floor();
+            let k = center + displacement;
             if k < 0.0 || !k.is_finite() {
                 continue;
             }
             if distance >= 0.07 && v <= squeeze {
-                return Ok(k);
+                return Ok((center, displacement));
             }
             if distance < 0.013 && v > distance {
                 continue;
             }
             let log_acceptance = v.ln() + inverse_alpha.ln() - (a / (distance * distance) + b).ln();
-            if log_acceptance <= poisson_log_mass(k, lambda) {
-                return Ok(k);
+            if log_acceptance <= poisson_log_mass(k, lambda, displacement - fraction) {
+                return Ok((center, displacement));
             }
         }
     }
@@ -722,14 +754,14 @@ impl SplitMix64 {
 /// Log Poisson mass without subtracting O(lambda * log(lambda)) quantities.
 /// Near the mean, the deviance series starts with (k-lambda)^2/(2*lambda).
 /// Its scaled products remain finite even when k and lambda approach MAX.
-fn poisson_log_mass(k: Value, lambda: Value) -> Value {
+/// `delta` retains k-lambda before rounding k to the mean's precision.
+fn poisson_log_mass(k: Value, lambda: Value, delta: Value) -> Value {
     if k == 0.0 {
         return -lambda;
     }
     if k < 16.0 {
         return k * lambda.ln() - lambda - libm::lgamma(k + 1.0);
     }
-    let delta = k - lambda;
     let relative = delta / lambda;
     let deviance = if relative.abs() < 0.1 {
         let mut term = 0.5 * delta * relative;
@@ -789,7 +821,7 @@ mod tests {
             (1e100, 1e100, -116.048_193_182_906_96),
             (Value::MAX, Value::MAX, -355.810_294_979_896_7),
         ] {
-            let actual = poisson_log_mass(k, lambda);
+            let actual = poisson_log_mass(k, lambda, k - lambda);
             assert!(
                 (actual - expected).abs() < 1e-12,
                 "lambda={lambda}, k={k}: {actual} vs {expected}"
@@ -798,13 +830,94 @@ mod tests {
     }
 
     #[test]
-    fn poisson_samples_retain_the_mean_variance_and_asymmetric_third_moment() {
+    fn centered_poisson_log_mass_matches_high_precision_references() {
+        // 420-digit evaluation with k formed before rounding to f64. These
+        // displacements are smaller than an ulp of the largest means.
+        for (lambda, delta, expected) in [
+            (1e20, 1e10, -24.444_789_463_178_463),
+            (1e40, 2e20, -48.970_640_393_085_59),
+            (1e100, -3e50, -120.548_193_182_906_96),
+            (
+                Value::MAX,
+                5.363_123_171_977_038e154,
+                -363.810_294_979_896_7,
+            ),
+        ] {
+            let actual = poisson_log_mass(lambda + delta, lambda, delta);
+            assert!(
+                (actual - expected).abs() < 1e-12,
+                "lambda={lambda}, delta={delta}: {actual} vs {expected}"
+            );
+        }
+    }
+
+    #[test]
+    fn centered_poisson_fluctuations_preserve_mean_variance_and_tails() {
         let n = 250_000;
-        for lambda in [0.25, 9.5, 10.0, 64.0, 1e6] {
+        for lambda in [1e20_f64, 1e40, 1e100, Value::MAX] {
             let mut rng = SplitMix64::new(42);
             let mut moments = [0.0; 3];
             for _ in 0..n {
                 let sample = rng.poisson(lambda, &NoAbort).unwrap();
+                let normalized = add_random_offset(sample, two_sum(-lambda, 0.0)) / lambda.sqrt();
+                moments[0] += normalized;
+                moments[1] += normalized.powi(2);
+                moments[2] += normalized.powi(4);
+            }
+            // Exact normalized Poisson moments are 0, 1, and 3+1/lambda.
+            // Their estimator variances tend to 1, 2, and 96; corrections at
+            // these means are far below floating precision.
+            for (index, expected, variance) in [(0, 0.0, 1.0), (1, 1.0, 2.0), (2, 3.0, 96.0)] {
+                let actual = moments[index] / f64::from(n);
+                let tolerance = 8.0 * (variance / f64::from(n)).sqrt();
+                assert!(
+                    (actual - expected).abs() < tolerance,
+                    "lambda={lambda}, moment index={index}: {actual} vs {expected}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn random_dc_cancellation_preserves_the_unbiased_sample_train() {
+        for (distribution, parameter1) in [(1, 1.0), (2, 1.0), (3, 1.0), (4, 64.0)] {
+            let generate = |parameter2, dc_offset| {
+                generate_trrandom_points(
+                    TrRandomSpec {
+                        distribution,
+                        sample_interval: 1e-9,
+                        delay: 0.3e-9,
+                        parameter1,
+                        parameter2,
+                    },
+                    64e-9,
+                    42,
+                    "Irandom",
+                    dc_offset,
+                    &NoAbort,
+                )
+                .unwrap()
+            };
+            let baseline = generate(0.0, 0.0);
+            for bias in [1e100, -1e100] {
+                assert_eq!(
+                    baseline,
+                    generate(bias, -bias),
+                    "TYPE={distribution}, bias={bias}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn poisson_samples_retain_the_mean_variance_and_asymmetric_third_moment() {
+        let n = 250_000;
+        for lambda in [0.25, 9.5, 10.0, 63.75, 64.0, 1e6] {
+            let mut rng = SplitMix64::new(42);
+            let mut moments = [0.0; 3];
+            for _ in 0..n {
+                let (center, displacement) = rng.poisson(lambda, &NoAbort).unwrap();
+                let sample = center + displacement;
                 assert!(sample >= 0.0 && sample.fract() == 0.0);
                 let delta = sample - lambda;
                 moments[0] += delta;
@@ -837,7 +950,8 @@ mod tests {
         for lambda in [1e6, 1e18, 1e20, 1e100, Value::MAX] {
             let mut rng = SplitMix64::new(42);
             for _ in 0..128 {
-                let sample = rng.poisson(lambda, &NoAbort).unwrap();
+                let (center, displacement) = rng.poisson(lambda, &NoAbort).unwrap();
+                let sample = center + displacement;
                 assert!(sample.is_finite() && sample >= 0.0);
                 assert!(
                     (sample / lambda - 1.0).abs() <= 12.0 / lambda.sqrt() + 4.0 * Value::EPSILON,
@@ -882,6 +996,7 @@ mod tests {
             1.5e308,
             42,
             "Vrandom",
+            0.0,
             &NoAbort,
         )
         .unwrap_err();
@@ -1024,6 +1139,7 @@ mod tests {
                     stop,
                     42,
                     "Irandom",
+                    0.0,
                     &NoAbort,
                 )
                 .unwrap()
@@ -1352,6 +1468,7 @@ mod tests {
             f64::MAX,
             1,
             "vrextreme",
+            0.0,
             &NoAbort,
         )
         .expect_err("an overflowed (tstop-delay)/TS quotient must be rejected");
@@ -1378,6 +1495,7 @@ mod tests {
             3e-3,
             42,
             "vr",
+            0.0,
             &NoAbort,
         )
         .expect("TRRANDOM train");

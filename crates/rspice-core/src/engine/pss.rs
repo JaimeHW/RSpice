@@ -111,7 +111,7 @@ impl PssAcceptedStepHistory {
 const PSS_FD_STEP: Value = 1e-8;
 const PSS_KRYLOV_STATE_THRESHOLD: usize = 12;
 const PSS_KRYLOV_REL_TOL: Value = 1e-9;
-const PSS_OPERATING_POINT_IDENTITY_VERSION: u32 = 50;
+const PSS_OPERATING_POINT_IDENTITY_VERSION: u32 = 51;
 
 fn pss_identity_field(hasher: &mut blake3::Hasher, name: &str, bytes: &[u8]) {
     hasher.update(&(name.len() as u64).to_le_bytes());
@@ -3886,16 +3886,14 @@ impl Engine {
 
         circuit.stamp_transient_linear_direct(matrix, rhs);
 
-        // Time-varying independent sources: the static stamp wrote DC
-        // values; overwrite the source rows with their value at the
-        // end of this step. This is what makes driven PSS periodic —
-        // without it a SIN drive stamps as its DC offset and the
-        // "steady state" collapses to the DC solution.
+        // Evaluate independent sources at the end of this step. Voltage
+        // sources overwrite their branch rows; current sources add their
+        // complete waveform value to the source-free nodal RHS.
         let num_nodes = circuit.num_nodes();
         circuit
             .voltage_sources
             .update_transient_rhs(rhs, t_next, |br_ordinal| num_nodes + br_ordinal);
-        circuit.current_sources.update_transient_rhs(rhs, t_next);
+        circuit.current_sources.stamp_transient_rhs(rhs, t_next);
 
         // Memoryless transmission lines: the LEN=0 ideal through connection
         // and the finite-length RG two-port both load a constant matrix with

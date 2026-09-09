@@ -29,6 +29,48 @@ fn large_poisson_current_sources_preserve_their_mean_through_a_shunt() {
 }
 
 #[test]
+fn centered_poisson_noise_preserves_fluctuations_through_large_offset_cancellation() {
+    use std::sync::Arc;
+    let grid: Vec<_> = (0..=256).map(|index| f64::from(index) * 1e-9).collect();
+    let engine = Engine::new(SimulationConfig {
+        locked_time_grid: Some(Arc::new(grid.clone())),
+        ..Default::default()
+    });
+    for lambda in [1e20_f64, 1e40, 1e100] {
+        let mut reference = None;
+        for (bias, dc) in [
+            (-lambda, 0.0),
+            (0.0, -lambda),
+            (-0.5 * lambda, -0.5 * lambda),
+        ] {
+            let netlist = Netlist::parse(&format!(
+                "centered Poisson shunt\nI1 0 out DC {dc} TRRANDOM(4 1n 0 {lambda} {bias}) AC 1 DISTOF1 1\nR1 out 0 {}\n.end\n", 1.0/lambda.sqrt()
+            )).unwrap();
+            let result = engine.run_tran(&netlist, grid[256], 1e-9).unwrap();
+            assert_eq!(result.time, grid);
+            let output = result.try_voltage_waveform_named("out").unwrap().to_vec();
+            let samples = &output[1..];
+            let mean = samples.iter().sum::<f64>() / samples.len() as f64;
+            let variance =
+                samples.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / samples.len() as f64;
+            assert!(
+                mean.abs() < 0.5 && (variance - 1.0).abs() < 0.6,
+                "lambda={lambda}: mean={mean}, variance={variance}"
+            );
+            if let Some(expected) = &reference {
+                assert_eq!(
+                    &output, expected,
+                    "offset spelling must preserve every sample"
+                );
+            } else {
+                reference = Some(output);
+            }
+            assert_eq!(engine.convergence_quality().force_accepted_points, 0);
+        }
+    }
+}
+
+#[test]
 fn trnoise_startup_matches_zero_origin_and_explicit_dc_bias() {
     let engine = Engine::default();
     for waveform in [
@@ -120,6 +162,7 @@ fn extending_noise_horizons_preserves_every_locked_sample() {
         "TRNOISE(0 0 0 0 1 .7n .9n)",
         "TRRANDOM(2 1n .3n 1 0)",
         "TRRANDOM(4 1n .3n 64 0)",
+        "TRRANDOM(4 1n .3n 1e100 -1e100)",
     ] {
         let netlist = Netlist::parse(&format!(
             "noise horizon\nV1 out 0 {waveform}\nR1 out 0 1\n.end\n"

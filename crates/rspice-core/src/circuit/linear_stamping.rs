@@ -854,7 +854,9 @@ impl CircuitData {
             .stamp_all_direct(matrix, rhs, |br_ordinal| num_nodes + br_ordinal);
         self.voltage_sources
             .stamp_all_direct(matrix, rhs, |br_ordinal| num_nodes + br_ordinal);
-        self.current_sources.stamp_all(rhs);
+        // Current-source RHS values are stamped at the requested transient
+        // time by the caller. Adding DC here and later subtracting it would
+        // erase small waveforms when the independent DC bias is much larger.
 
         self.vcvs
             .stamp_all_direct(matrix, |br_ordinal| num_nodes + br_ordinal);
@@ -865,14 +867,16 @@ impl CircuitData {
             .stamp_all_direct(matrix, |br_ordinal| num_nodes + br_ordinal);
     }
 
+    /// Stamp the time-independent transient base. The caller must then update
+    /// voltage-source rows and stamp complete transient current-source values.
     pub fn stamp_transient_linear_direct(&self, matrix: &mut StaticMatrix, rhs: &mut [Value]) {
         self.stamp_transient_linear_base_direct(matrix, rhs);
     }
 
     /// Stamp the linear part of the t=0 transient operating point.
     ///
-    /// Time-varying independent sources are evaluated at the requested
-    /// transient time, while transmission lines use their DC fallback
+    /// The caller evaluates independent sources at the requested transient
+    /// time after this stamp, while transmission lines use their DC fallback
     /// conductance so their far ends start from the correct operating point
     /// before delayed-wave companions take over for t > 0. Inductors without
     /// `IC=` are DC shorts here, while `IC=` inductors are constrained to the

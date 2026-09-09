@@ -23,6 +23,37 @@ R2 out 0 1k
 
 
 class TestTransient:
+    @pytest.mark.parametrize("mean", [1e20, 1e40, 1e100])
+    def test_centered_poisson_fluctuations_survive_large_bias_cancellation(self, engine, mean):
+        samples = []
+        for bias, dc in [(-mean, 0), (0, -mean), (-mean / 2, -mean / 2)]:
+            netlist = rspice.Netlist.parse_spice(
+                f"* centered Poisson\nI1 0 out DC {dc} TRRANDOM(4 1n 0 {mean} {bias}) AC 1 DISTOF1 1\n"
+                f"R1 out 0 {1 / math.sqrt(mean)}\n.end\n"
+            )
+            result = engine.run_tran(netlist, stop_time=256e-9, max_step=1e-9)
+            output = result.voltage_waveform("out")
+            knot_values = []
+            for index in range(1, 257):
+                time = index * 1e-9
+                nearest = np.argmin(np.abs(result.time - time))
+                assert abs(result.time[nearest] - time) < 1e-20
+                knot_values.append(output[nearest])
+            assert abs(np.mean(knot_values)) < 0.5
+            assert abs(np.var(knot_values) - 1) < 0.6
+            samples.append(knot_values)
+        for values in samples[1:]:
+            np.testing.assert_array_equal(values, samples[0])
+
+    def test_transient_current_waveform_is_independent_of_its_dc_specification(self, engine):
+        netlist = rspice.Netlist.parse_spice(
+            "* independent DC and transient current\nI1 0 out DC 1e100 PWL(0 1 1n 2 2n 2)\nI2 0 out 3\nR1 out 0 1\n.end\n"
+        )
+        result = engine.run_tran(netlist, stop_time=2e-9, max_step=1e-9)
+        np.testing.assert_allclose(
+            result.voltage_waveform("out"), 4 + np.minimum(result.time / 1e-9, 1), rtol=0, atol=1e-10
+        )
+
     @pytest.mark.parametrize("bias,resistance", [(5000.0, 1000.0), (-5000.0, 1000.0), (5.0, 1e-14)])
     def test_nonlinear_voltage_and_branch_states_have_no_global_rail(self, engine, bias, resistance):
         diode_nodes = "0 out" if bias > 0 else "out 0"

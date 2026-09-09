@@ -209,6 +209,66 @@ mod wasm_tests {
     use crate::js_interop::{js_array_property, js_property};
 
     #[wasm_bindgen_test]
+    fn centered_poisson_fluctuations_survive_large_bias_cancellation_in_wasm() {
+        let grid: Vec<_> = (0..=256).map(|index| f64::from(index) * 1e-9).collect();
+        let engine = rspice_core::Engine::new(rspice_core::engine::SimulationConfig {
+            locked_time_grid: Some(std::sync::Arc::new(grid.clone())),
+            ..Default::default()
+        });
+        for mean in [1e20_f64, 1e40, 1e100] {
+            let mut reference = None;
+            for (bias, dc) in [(-mean, 0.0), (0.0, -mean), (-mean / 2.0, -mean / 2.0)] {
+                let netlist = rspice_core::Netlist::parse(&format!(
+                    "centered Poisson\nI1 0 out DC {dc} TRRANDOM(4 1n 0 {mean} {bias}) AC 1 DISTOF1 1\nR1 out 0 {}\n.end\n", 1.0/mean.sqrt()
+                )).unwrap();
+                let result = engine
+                    .run_tran_with_abort(
+                        &netlist,
+                        grid[256],
+                        1e-9,
+                        &rspice_core::abort_signal::NoAbort,
+                    )
+                    .unwrap();
+                assert_eq!(result.time, grid);
+                let output = result.try_voltage_waveform_named("out").unwrap();
+                let average = output[1..].iter().sum::<f64>() / 256.0;
+                let variance = output[1..]
+                    .iter()
+                    .map(|v| (v - average).powi(2))
+                    .sum::<f64>()
+                    / 256.0;
+                assert!(average.abs() < 0.5 && (variance - 1.0).abs() < 0.6);
+                if let Some(expected) = &reference {
+                    assert_eq!(output, expected);
+                } else {
+                    reference = Some(output.to_vec());
+                }
+                assert_eq!(engine.convergence_quality().force_accepted_points, 0);
+            }
+        }
+    }
+
+    #[wasm_bindgen_test]
+    fn transient_current_waveform_is_independent_of_its_dc_specification_in_wasm() {
+        let netlist = rspice_core::Netlist::parse(
+            "independent DC and transient current\nI1 0 out DC 1e100 PWL(0 1 1n 2 2n 2)\nI2 0 out 3\nR1 out 0 1\n.end\n"
+        ).unwrap();
+        let engine = rspice_core::Engine::default();
+        let result = engine
+            .run_tran_with_abort(&netlist, 2e-9, 1e-9, &rspice_core::abort_signal::NoAbort)
+            .unwrap();
+        assert_eq!(result.time.last().copied(), Some(2e-9));
+        for (time, actual) in result
+            .time
+            .iter()
+            .zip(result.try_voltage_waveform_named("out").unwrap())
+        {
+            assert!((actual - 4.0 - (*time / 1e-9).min(1.0)).abs() < 1e-10);
+        }
+        assert_eq!(engine.convergence_quality().force_accepted_points, 0);
+    }
+
+    #[wasm_bindgen_test]
     fn nonlinear_voltage_and_branch_states_have_no_global_rail_in_wasm() {
         let engine = rspice_core::Engine::default();
         for (bias, resistance) in [(5000.0_f64, 1000.0), (-5000.0, 1000.0), (5.0, 1e-14)] {

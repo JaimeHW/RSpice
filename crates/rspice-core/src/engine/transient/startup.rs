@@ -203,7 +203,7 @@ impl Engine {
             circuit
                 .voltage_sources
                 .update_transient_rhs(&mut rhs, time, |br_ordinal| num_nodes + br_ordinal);
-            circuit.current_sources.update_transient_rhs(&mut rhs, time);
+            circuit.current_sources.stamp_transient_rhs(&mut rhs, time);
             circuit.stamp_generic_switches_with_solution(matrix, &mut rhs, &solution, time);
 
             if circuit.has_nonlinear_devices() {

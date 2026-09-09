@@ -282,7 +282,7 @@ impl Engine {
         circuit
             .voltage_sources
             .update_transient_rhs(rhs, time, |br_ordinal| num_nodes + br_ordinal);
-        circuit.current_sources.update_transient_rhs(rhs, time);
+        circuit.current_sources.stamp_transient_rhs(rhs, time);
         if stamp_generic_switches {
             circuit.stamp_generic_switches(matrix, rhs, time);
         }
@@ -304,7 +304,7 @@ impl Engine {
         circuit
             .voltage_sources
             .update_transient_rhs(rhs, time, |br_ordinal| num_nodes + br_ordinal);
-        circuit.current_sources.update_transient_rhs(rhs, time);
+        circuit.current_sources.stamp_transient_rhs(rhs, time);
         if stamp_generic_switches {
             circuit.stamp_generic_switches(matrix, rhs, time);
         }
