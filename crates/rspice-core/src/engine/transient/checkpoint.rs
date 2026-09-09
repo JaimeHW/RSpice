@@ -175,7 +175,9 @@ fn checkpoint_operation_result<T>(
 /// Version 37 preserves sparse-solver factors, row scales and backend routing
 /// so exact continuation follows the uninterrupted numerical path.
 /// Version 38 adds complete accepted JFET nonlinear and integration history.
-const FORMAT_VERSION: u32 = 38;
+/// Version 39 retains JFET terminal displacement currents across integration resets.
+const FORMAT_VERSION: u32 = 39;
+const JFET_CURRENT_HISTORY_FORMAT_VERSION: u32 = 39;
 const JFET_STATE_FORMAT_VERSION: u32 = 38;
 const SOLVER_STATE_FORMAT_VERSION: u32 = 37;
 const SOURCE_TIME_BASIS_FORMAT_VERSION: u32 = 35;
@@ -1195,8 +1197,8 @@ pub(crate) fn simulation_checkpoint_identity(config: &SimulationConfig) -> Strin
     // v35 preserves physical VBIC currents in operating-point correction solves.
     // v36 gives RBI an independent current and voltage constitutive equation.
     // v37 preserves explicitly zero and negative VBIC activation energies.
-    // v58 preserves JFET charge/trap state across physical integration restarts.
-    hasher.update(b"rspice-transient-resolved-config-v58\0");
+    // v59 reports physical JFET terminal currents, including accepted charge.
+    hasher.update(b"rspice-transient-resolved-config-v59\0");
     hash_field(&mut hasher, "temperature", config.temperature.to_bits());
     hash_field(&mut hasher, "ramptime", config.ramptime.to_bits());
     hash_field(&mut hasher, "digital_delay_type", config.digital_delay_type);
@@ -2448,6 +2450,7 @@ fn read_accepted_jfet_transient_history(
     lines: &mut CheckpointLines<'_>,
     budget: &mut CheckpointParseBudget,
     checkpoint: &mut AcceptedJunctionTransientHistoryCheckpoint,
+    version: u32,
 ) -> Result<(), String> {
     let header = lines
         .next()
@@ -2480,8 +2483,19 @@ fn read_accepted_jfet_transient_history(
             "JFET history tag",
             budget,
         )?);
-        for (name, values) in checkpoint.jfet_history.columns_mut() {
-            values.push(read_finite_history_value(&mut fields, "JFET", row, name)?);
+        for (index, (name, values)) in checkpoint
+            .jfet_history
+            .columns_mut()
+            .into_iter()
+            .enumerate()
+        {
+            values.push(
+                if version < JFET_CURRENT_HISTORY_FORMAT_VERSION && index >= 21 {
+                    0.0
+                } else {
+                    read_finite_history_value(&mut fields, "JFET", row, name)?
+                },
+            );
         }
         if fields.next().is_some() {
             return Err("extra field in accepted JFET transient history".to_string());
@@ -2500,6 +2514,22 @@ fn read_accepted_jfet_transient_history(
         read_finite_history_value(&mut fields, "JFET", count, "accepted_dt_prev_prev")?;
     if fields.next().is_some() {
         return Err("extra field in accepted JFET transient timestep history".to_string());
+    }
+    if version < JFET_CURRENT_HISTORY_FORMAT_VERSION && count > 0 {
+        let blocker = copy_checkpoint_string(
+            "legacy checkpoint lacks accepted JFET terminal displacement currents",
+            "JFET current-history blocker",
+            budget,
+        )?;
+        budget.charge_items::<String>(
+            checkpoint.resume_blockers.len().saturating_add(1),
+            "JFET current-history blockers",
+        )?;
+        checkpoint
+            .resume_blockers
+            .try_reserve_exact(1)
+            .map_err(|_| "JFET current-history blockers exceed checkpoint allocation limits")?;
+        checkpoint.resume_blockers.push(blocker);
     }
     checkpoint.jfet_history.validate(count)
 }
@@ -8498,7 +8528,12 @@ impl TransientCheckpoint {
             AcceptedJunctionTransientHistoryCheckpoint::default()
         };
         if version >= JFET_STATE_FORMAT_VERSION {
-            read_accepted_jfet_transient_history(lines, budget, &mut accepted_junction_history)?;
+            read_accepted_jfet_transient_history(
+                lines,
+                budget,
+                &mut accepted_junction_history,
+                version,
+            )?;
         }
         let (tline_state_available, tline_resume_blockers, tline_states) = if version >= 14 {
             let availability_line = lines
@@ -9687,6 +9722,17 @@ mod tests {
                 .unwrap_err()
                 .contains("JFET")
         );
+        let previous = TransientCheckpoint::from_text(&legacy_text(&original, 38)).unwrap();
+        assert_eq!(
+            previous.accepted_nonlinear_states.jfets,
+            original.accepted_nonlinear_states.jfets
+        );
+        assert!(
+            previous
+                .restore_accepted_junction_transient_history(&circuit)
+                .unwrap_err()
+                .contains("accepted JFET terminal displacement currents")
+        );
         let mut empty = original.clone();
         empty.accepted_nonlinear_states.jfets.clear();
         empty.accepted_junction_history.jfet_names.clear();
@@ -9694,7 +9740,7 @@ mod tests {
         empty.accepted_junction_history.jfet_history = JfetTransientHistory::default();
         assert_eq!(
             original.retained_value_count() - empty.retained_value_count(),
-            29 + 2 + 21
+            29 + 2 + 24
         );
     }
 
@@ -10193,6 +10239,19 @@ mod tests {
         let mut output = String::new();
         let mut lines = text.lines();
         while let Some(line) = lines.next() {
+            if version < JFET_CURRENT_HISTORY_FORMAT_VERSION
+                && line.starts_with("accepted_jfet_transient_history ")
+            {
+                output.push_str(
+                    &line
+                        .split_whitespace()
+                        .take(24)
+                        .collect::<Vec<_>>()
+                        .join(" "),
+                );
+                output.push('\n');
+                continue;
+            }
             if version < JFET_STATE_FORMAT_VERSION {
                 if line.starts_with("accepted_jfet_nonlinear_states ")
                     || line.starts_with("accepted_jfet_transient_histories ")
@@ -12439,7 +12498,7 @@ mod tests {
     /// asserting current-format behaviour after two renumberings moved it into
     /// the legacy ladder.
     #[cfg(feature = "veriloga")]
-    const RUNTIME_VERILOGA_FORMAT_STATE_CONTRACTS: [(u32, u32); 22] = [
+    const RUNTIME_VERILOGA_FORMAT_STATE_CONTRACTS: [(u32, u32); 23] = [
         (17, 1),
         (18, 1),
         (19, 1),
@@ -12462,6 +12521,7 @@ mod tests {
         (36, 8),
         (37, 8),
         (38, 8),
+        (39, 8),
     ];
 
     #[cfg(feature = "veriloga")]

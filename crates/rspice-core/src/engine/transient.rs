@@ -514,6 +514,7 @@ struct TransientSample<'a> {
 /// The extra series that sample is assembled from.
 #[derive(Clone, Copy)]
 struct TransientSampleSources<'a> {
+    jfet_history: &'a JfetTransientHistory,
     derived_branches: &'a [DerivedTransientBranchCurrent],
     bjt_history: &'a BjtTransientHistory,
     diode_history: &'a DiodeTransientHistory,
@@ -1808,6 +1809,7 @@ impl Engine {
             trajectory_point_count,
         } = request;
         let TransientSampleSources {
+            jfet_history,
             derived_branches,
             bjt_history,
             diode_history,
@@ -1897,6 +1899,11 @@ impl Engine {
                             solution,
                             &diode_history.cqd_prev,
                             &bjt_history.accepted_terminal_currents,
+                            Some([
+                                &jfet_history.accepted_cqgs,
+                                &jfet_history.accepted_cqgd,
+                                &jfet_history.accepted_cqds,
+                            ]),
                         )
                         .map_err(SimulationError::Circuit)?,
                 ),
@@ -5038,6 +5045,11 @@ impl Engine {
                             &solution,
                             &diode_history.cqd_prev,
                             &bjt_history.accepted_terminal_currents,
+                            Some([
+                                &jfet_history.accepted_cqgs,
+                                &jfet_history.accepted_cqgd,
+                                &jfet_history.accepted_cqds,
+                            ]),
                         )
                         .map_err(SimulationError::Circuit)?,
                 ),
@@ -8802,6 +8814,7 @@ impl Engine {
                                 step_size: dt,
                             },
                             TransientSampleSources {
+                                jfet_history: &jfet_history,
                                 derived_branches: &derived_branch_currents,
                                 bjt_history: &bjt_history,
                                 diode_history: &diode_history,
@@ -9324,6 +9337,7 @@ impl Engine {
                         step_size: dt,
                     },
                     TransientSampleSources {
+                        jfet_history: &jfet_history,
                         derived_branches: &derived_branch_currents,
                         bjt_history: &bjt_history,
                         diode_history: &diode_history,

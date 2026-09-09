@@ -103,6 +103,11 @@ pub(in crate::engine) struct JfetTransientHistory {
     pub(super) jfet2_vgstrap_prev: Vec<Value>,
     pub(super) jfet2_vgdtrap_prev: Vec<Value>,
     pub(super) jfet2_power_prev: Vec<Value>,
+    // Accepted output currents outlive an order-one restart's numerical
+    // derivative reset. They do not participate in the integration formula.
+    pub(super) accepted_cqgs: Vec<Value>,
+    pub(super) accepted_cqgd: Vec<Value>,
+    pub(super) accepted_cqds: Vec<Value>,
     pub(super) accepted_dt_prev: Value,
     pub(super) accepted_dt_prev_prev: Value,
 }
@@ -110,7 +115,7 @@ pub(in crate::engine) struct JfetTransientHistory {
 pub(super) use crate::numerics::integration::TwoTerminalChargeHistory as DiodeTransientHistory;
 impl JfetTransientHistory {
     /// Canonical wire order, shared by shape validation, parsing and writing.
-    pub(super) fn columns(&self) -> [(&'static str, &[Value]); 21] {
+    pub(super) fn columns(&self) -> [(&'static str, &[Value]); 24] {
         [
             ("vgs_prev", self.vgs_prev.as_slice()),
             ("vgs_prev_prev", self.vgs_prev_prev.as_slice()),
@@ -133,10 +138,13 @@ impl JfetTransientHistory {
             ("jfet2_vgstrap_prev", self.jfet2_vgstrap_prev.as_slice()),
             ("jfet2_vgdtrap_prev", self.jfet2_vgdtrap_prev.as_slice()),
             ("jfet2_power_prev", self.jfet2_power_prev.as_slice()),
+            ("accepted_cqgs", self.accepted_cqgs.as_slice()),
+            ("accepted_cqgd", self.accepted_cqgd.as_slice()),
+            ("accepted_cqds", self.accepted_cqds.as_slice()),
         ]
     }
 
-    pub(super) fn columns_mut(&mut self) -> [(&'static str, &mut Vec<Value>); 21] {
+    pub(super) fn columns_mut(&mut self) -> [(&'static str, &mut Vec<Value>); 24] {
         [
             ("vgs_prev", &mut self.vgs_prev),
             ("vgs_prev_prev", &mut self.vgs_prev_prev),
@@ -159,6 +167,9 @@ impl JfetTransientHistory {
             ("jfet2_vgstrap_prev", &mut self.jfet2_vgstrap_prev),
             ("jfet2_vgdtrap_prev", &mut self.jfet2_vgdtrap_prev),
             ("jfet2_power_prev", &mut self.jfet2_power_prev),
+            ("accepted_cqgs", &mut self.accepted_cqgs),
+            ("accepted_cqgd", &mut self.accepted_cqgd),
+            ("accepted_cqds", &mut self.accepted_cqds),
         ]
     }
 

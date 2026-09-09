@@ -138,6 +138,7 @@ op_labels! {
 
     // Reported quantities.
     ID = "id",
+    IG = "ig",
     IS = "is",
     IC = "ic",
     IB = "ib",

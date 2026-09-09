@@ -92,8 +92,11 @@ impl Engine {
             jfet_history.vgd_prev[idx] = vgd_charge;
             jfet_history.vds_prev_prev[idx] = jfet_history.vds_prev[idx];
             jfet_history.vds_prev[idx] = vds_charge;
+            jfet_history.accepted_cqgs[idx] = 0.0;
+            jfet_history.accepted_cqgd[idx] = 0.0;
+            jfet_history.accepted_cqds[idx] = 0.0;
             if !suppress_gate_charge_history {
-                let (_geq_gs, _ieq_gs, qgs_curr, cqgs_curr) = if let Some(charge) = jfet2_charge {
+                let (geq_gs, _ieq_gs, qgs_curr, cqgs_curr) = if let Some(charge) = jfet2_charge {
                     nonlinear_charge_companion_terms(
                         coeff,
                         dt,
@@ -124,8 +127,12 @@ impl Engine {
                 jfet_history.qgs_prev_prev[idx] = jfet_history.qgs_prev[idx];
                 jfet_history.qgs_prev[idx] = qgs_curr;
                 jfet_history.cqgs_prev[idx] = cqgs_curr;
+                if cgs.is_finite() && cgs > 0.0 {
+                    let raw = Self::differential_voltage(accepted_solution, jfet.gate, jfet.source);
+                    jfet_history.accepted_cqgs[idx] = cqgs_curr + geq_gs * (raw - vgs_charge);
+                }
 
-                let (_geq_gd, _ieq_gd, qgd_curr, cqgd_curr) = if let Some(charge) = jfet2_charge {
+                let (geq_gd, _ieq_gd, qgd_curr, cqgd_curr) = if let Some(charge) = jfet2_charge {
                     nonlinear_charge_companion_terms(
                         coeff,
                         dt,
@@ -156,9 +163,13 @@ impl Engine {
                 jfet_history.qgd_prev_prev[idx] = jfet_history.qgd_prev[idx];
                 jfet_history.qgd_prev[idx] = qgd_curr;
                 jfet_history.cqgd_prev[idx] = cqgd_curr;
+                if cgd.is_finite() && cgd > 0.0 {
+                    let raw = Self::differential_voltage(accepted_solution, jfet.gate, jfet.drain);
+                    jfet_history.accepted_cqgd[idx] = cqgd_curr + geq_gd * (raw - vgd_charge);
+                }
             }
             if cds.is_finite() && cds > 0.0 {
-                let (_geq_ds, _ieq_ds, qds_curr, cqds_curr) = Self::jfet_companion_terms(
+                let (geq_ds, _ieq_ds, qds_curr, cqds_curr) = Self::jfet_companion_terms(
                     coeff,
                     dt,
                     cds,
@@ -174,6 +185,8 @@ impl Engine {
                 jfet_history.qds_prev_prev[idx] = jfet_history.qds_prev[idx];
                 jfet_history.qds_prev[idx] = qds_curr;
                 jfet_history.cqds_prev[idx] = cqds_curr;
+                let raw = Self::differential_voltage(accepted_solution, jfet.drain, jfet.source);
+                jfet_history.accepted_cqds[idx] = cqds_curr + geq_ds * (raw - vds_charge);
             }
         }
         jfet_history.accepted_dt_prev_prev = jfet_history.accepted_dt_prev;

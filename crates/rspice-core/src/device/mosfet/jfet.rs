@@ -675,6 +675,10 @@ pub struct Jfet {
     pub(crate) external_drain: NodeId,
     /// Original external source node before model RS externalization.
     pub(crate) external_source: NodeId,
+    /// Builder-owned RD/RS conductances, zero when the lead is intrinsic.
+    /// Kept after the model resistance is externalized so reports use the
+    /// actual solved lead current without searching resistor storage.
+    pub(crate) external_lead_conductances: [Value; 2],
     /// Model parameters
     pub params: JfetParams,
     /// Device multiplier

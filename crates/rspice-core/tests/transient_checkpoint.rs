@@ -404,6 +404,21 @@ fn assert_scheduled_deck_resumes_exactly(
             }
         }
     }
+    assert_eq!(second.device_op_traces.len(), full.device_op_traces.len());
+    for (actual, expected) in second.device_op_traces.iter().zip(&full.device_op_traces) {
+        assert_eq!(actual.device_name, expected.device_name);
+        assert_eq!(actual.parameter, expected.parameter);
+        assert_eq!(actual.values.len(), expected.values[baseline_index..].len());
+        for (a, b) in actual.values.iter().zip(&expected.values[baseline_index..]) {
+            assert_eq!(
+                a.to_bits(),
+                b.to_bits(),
+                "{label} {}:{} continuation",
+                actual.device_name,
+                actual.parameter
+            );
+        }
+    }
     full
 }
 
@@ -464,12 +479,12 @@ fn mesfet_and_hfet_checkpoints_preserve_charge_and_inverse_state() {
                 let label = format!("{model} level={level}, reversed={reverse}");
                 let supply = polarity * if reverse { -0.5 } else { 2.0 };
                 let deck = format!(
-                    "MESFET/HFET checkpoint\nVDD supply 0 {supply}\nVIN in 0 DC {} PULSE({} {} 20n 5n 5n 70n 150n)\nRG in gate 100\nRD supply drain 200\nZ1 drain gate 0 jm L=1u W=10u\n.model jm {model}(LEVEL={level} {parameters})\n.end\n",
+                    "MESFET/HFET checkpoint\nVDD supply 0 {supply}\nVIN in 0 DC {} PULSE({} {} 20n 5n 5n 70n 150n)\nVS source 0 0\nRG in gate 100\nRD supply drain 200\nZ1 drain gate source jm L=1u W=10u\n.model jm {model}(LEVEL={level} {parameters})\n.options RELTOL=1e-7 ABSTOL=1e-12 VNTOL=1e-9\n.save all\n.print tran ID(Z1) IG(Z1) IS(Z1)\n.end\n",
                     -0.1 * polarity,
                     -0.1 * polarity,
                     0.3 * polarity,
                 );
-                assert_scheduled_deck_resumes_exactly(
+                let full = assert_scheduled_deck_resumes_exactly(
                     &label,
                     &deck,
                     300e-9,
@@ -477,6 +492,20 @@ fn mesfet_and_hfet_checkpoints_preserve_charge_and_inverse_state() {
                     2e-9,
                     SimulationConfig::default(),
                 );
+                for (parameter, source) in [("ID", "VDD"), ("IG", "VIN"), ("IS", "VS")] {
+                    let actual = full.try_device_op_waveform_named("Z1", parameter).unwrap();
+                    let probe = full.try_branch_current_waveform_named(source).unwrap();
+                    assert_eq!(actual.len(), full.time.len());
+                    assert_eq!(probe.len(), full.time.len());
+                    for (index, (current, source_current)) in actual.iter().zip(probe).enumerate() {
+                        assert!(
+                            (current + source_current).abs() < 1e-10 + source_current.abs() * 2e-5,
+                            "{label} {parameter} at {}: {current} vs {}",
+                            full.time[index],
+                            -source_current
+                        );
+                    }
+                }
             }
         }
     }

@@ -661,7 +661,11 @@ impl Engine {
         // would silently report the wrong coordinate.  Several device
         // families already publish selected static values above; avoid a
         // duplicate registry entry when their canonical spelling overlaps.
-        for entry in circuit.device_op_report().entries {
+        for entry in circuit
+            .device_op_report_for_solution(solution)
+            .map_err(SimulationError::Circuit)?
+            .entries
+        {
             for (parameter, value) in entry.params {
                 let name = format!("{}:{parameter}", entry.name);
                 if result.try_dc_observable_named(&name).is_none() {
@@ -1016,7 +1020,9 @@ impl Engine {
 
         populate_public_dc_solution(&circuit, &solution, &mut result)?;
         Self::populate_dc_observables(&mut circuit, &solution, &mut result)?;
-        let device_op_report = circuit.device_op_report();
+        let device_op_report = circuit
+            .device_op_report_for_solution(&solution)
+            .map_err(SimulationError::Circuit)?;
         engine.ensure_result_values(dc_result_value_count(&result, &device_op_report))?;
         if let Some(state) = lifecycle.as_mut() {
             state.accept_public_point(&mut circuit, abort)?;
@@ -1614,7 +1620,9 @@ impl Engine {
                 let point = DcSweepPointResult {
                     sweep_value,
                     result,
-                    device_op_report: circuit.device_op_report(),
+                    device_op_report: circuit
+                        .device_op_report_for_solution(&solution)
+                        .map_err(SimulationError::Circuit)?,
                 };
                 retained_values =
                     retained_values.saturating_add(dc_sweep_point_value_count(&point));

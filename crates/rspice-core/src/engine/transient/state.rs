@@ -476,6 +476,9 @@ impl Engine {
             jfet2_vgstrap_prev: Vec::with_capacity(n),
             jfet2_vgdtrap_prev: Vec::with_capacity(n),
             jfet2_power_prev: Vec::with_capacity(n),
+            accepted_cqgs: vec![0.0; n],
+            accepted_cqgd: vec![0.0; n],
+            accepted_cqds: vec![0.0; n],
             accepted_dt_prev: 0.0,
             accepted_dt_prev_prev: 0.0,
         };
@@ -1789,6 +1792,9 @@ mod tests {
         history.qgs_prev[0] = 1.23e-9;
         history.qgd_prev[0] = -2.34e-9;
         history.qds_prev[0] = 3.45e-9;
+        history.accepted_cqgs[0] = 0.012;
+        history.accepted_cqgd[0] = -0.023;
+        history.accepted_cqds[0] = 0.034;
         Engine::reseed_reactive_histories_for_restart(
             &mut circuit,
             &solution,
@@ -1814,6 +1820,9 @@ mod tests {
         assert_eq!(history.qds_prev, [3.45e-9]);
         assert_eq!(history.qgs_prev_prev_prev, history.qgs_prev);
         assert_eq!(history.cqgs_prev, [0.0]);
+        assert_eq!(history.accepted_cqgs, [0.012]);
+        assert_eq!(history.accepted_cqgd, [-0.023]);
+        assert_eq!(history.accepted_cqds, [0.034]);
     }
 
     #[test]

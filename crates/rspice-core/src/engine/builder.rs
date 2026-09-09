@@ -6870,6 +6870,7 @@ impl Engine {
                         circuit.resistors.add(rd_name, drain, dint, rd);
                         jfet.drain = dint;
                         jfet.params.rd = 0.0;
+                        jfet.external_lead_conductances[0] = 1.0 / rd;
                         if let Some(temp_k) = jfet.noise_absolute_temperature {
                             circuit.set_last_resistor_absolute_noise_temperature(temp_k);
                         } else if jfet.noise_dtemp != 0.0 {
@@ -6883,6 +6884,7 @@ impl Engine {
                         circuit.resistors.add(rs_name, source, sint, rs);
                         jfet.source = sint;
                         jfet.params.rs = 0.0;
+                        jfet.external_lead_conductances[1] = 1.0 / rs;
                         if let Some(temp_k) = jfet.noise_absolute_temperature {
                             circuit.set_last_resistor_absolute_noise_temperature(temp_k);
                         } else if jfet.noise_dtemp != 0.0 {
@@ -7170,6 +7172,7 @@ impl Engine {
                         circuit.resistors.add(rd_name, drain, dint, rd);
                         jfet.drain = dint;
                         jfet.params.rd = 0.0;
+                        jfet.external_lead_conductances[0] = 1.0 / rd;
                         if let Some(temp_k) = jfet.noise_absolute_temperature {
                             circuit.set_last_resistor_absolute_noise_temperature(temp_k);
                         } else if jfet.noise_dtemp != 0.0 {
@@ -7183,6 +7186,7 @@ impl Engine {
                         circuit.resistors.add(rs_name, source, sint, rs);
                         jfet.source = sint;
                         jfet.params.rs = 0.0;
+                        jfet.external_lead_conductances[1] = 1.0 / rs;
                         if let Some(temp_k) = jfet.noise_absolute_temperature {
                             circuit.set_last_resistor_absolute_noise_temperature(temp_k);
                         } else if jfet.noise_dtemp != 0.0 {
