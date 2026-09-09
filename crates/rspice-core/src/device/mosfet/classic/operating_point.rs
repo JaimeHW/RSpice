@@ -97,20 +97,55 @@ impl Mosfet {
 
     /// Return the current thermal-noise coefficient used for channel noise.
     pub(crate) fn channel_thermal_noise_gamma(&self) -> Value {
-        self.thermal_noise_gamma.max(0.0)
+        if self.legacy_bsim_model.is_some() {
+            2.0 / 3.0
+        } else {
+            self.thermal_noise_gamma.max(0.0)
+        }
     }
 
     /// Flicker-noise source terms `(coefficient, current, af, ef)` for a
-    /// density of `coefficient·|current|^af / f^ef`, following the SPICE
-    /// NLEV laws of mos1noi.c (mos2/mos3 are identical; NLEV defaults to 2
+    /// density of `coefficient·|current|^af / f^ef`. BSIM1/2 use the
+    /// b1noi.c/b2noi.c law; other levels follow the SPICE NLEV laws of
+    /// mos1noi.c (mos2/mos3 are identical; NLEV defaults to 2
     /// per mos1set.c). Evaluate the noise law at per-instance current or gm,
     /// then sum the independent contributions of M·NF parallel instances.
     ///
-    /// `Leff = L − 2·LATD`; a zero oxide capacitance falls back to the
-    /// 100 nm-oxide default exactly as mos1noi.c does.
-    pub(crate) fn flicker_noise_source_terms(&self) -> Option<(Value, Value, Value, Value)> {
+    /// The NLEV laws use `Leff = L − 2·LATD`; a zero oxide capacitance
+    /// falls back to the 100 nm-oxide default exactly as mos1noi.c does.
+    pub(crate) fn flicker_noise_source_terms(
+        &self,
+    ) -> Result<Option<(Value, Value, Value, Value)>, &'static str> {
+        if let Some(model) = &self.legacy_bsim_model {
+            if !self.kf.is_finite() || self.kf < 0.0 {
+                return Err("legacy BSIM flicker noise requires finite KF >= 0");
+            }
+            if self.kf == 0.0 {
+                return Ok(None);
+            }
+            if !self.af.is_finite() {
+                return Err("legacy BSIM flicker noise requires finite AF");
+            }
+            let denominator = model.flicker_noise_denominator(self.w, self.l).ok_or(
+                "legacy BSIM flicker noise requires positive effective W, L and TOX with representable normalization",
+            )?;
+            let coefficient = self.kf * self.multiplicity / denominator;
+            if !coefficient.is_finite() || coefficient <= 0.0 {
+                return Err("legacy BSIM flicker noise coefficient is not representable");
+            }
+            // B1cd/B2cd in the load equations are net drain current, including
+            // the body-drain diode. Use its value, not the integer state offset
+            // accidentally used as a number by ngspice-46's noise routines.
+            let current = self.reported_currents(self.id)[0] / self.multiplicity;
+            if !current.is_finite() {
+                return Err("legacy BSIM flicker noise drain current is not finite");
+            }
+            // The legacy log floor keeps AF=0 and signed exponents defined
+            // even at zero drain current; AF never changes the 1/f exponent.
+            return Ok(Some((coefficient, current.abs().max(1e-38), self.af, 1.0)));
+        }
         if self.kf <= 0.0 || !self.kf.is_finite() {
-            return None;
+            return Ok(None);
         }
 
         let cox = if self.cox > 0.0 {
@@ -124,7 +159,7 @@ impl Mosfet {
         let af = self.af.max(1e-12);
         let ef = self.ef.max(1e-12);
 
-        match self.nlev {
+        Ok(match self.nlev {
             0 => Some((
                 self.kf * m / (leff * leff * cox),
                 self.drain_current().abs() / m,
@@ -143,7 +178,7 @@ impl Mosfet {
                 let gm = self.transconductance() / m;
                 Some((self.kf * gm * gm * m / (width * leff * cox), 1.0, 1.0, af))
             }
-        }
+        })
     }
 
     //=========================================================================

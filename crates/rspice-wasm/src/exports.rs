@@ -262,6 +262,114 @@ mod wasm_tests {
     }
 
     #[wasm_bindgen_test]
+    fn legacy_bsim_flicker_law_in_wasm() {
+        let abort = rspice_core::abort_signal::NoAbort;
+        for level in [4, 5] {
+            let mobility = if level == 4 {
+                "MUZ=400 MUS=500 VDD=2"
+            } else {
+                "MU0=400 MUS0=500"
+            };
+            for (kind, p) in [("NMOS", 1.0), ("PMOS", -1.0)] {
+                for af in [0.0, 1.3] {
+                    let netlist = rspice_core::Netlist::parse(&format!(
+                        "Legacy BSIM noise in WASM\nVDD supply 0 {}\nVIN gate 0 DC {} AC 1\nRL supply drain 1k\nM1 drain gate 0 0 mm L=1u W=0.5u M=2.5 NF=2\n.model mm {kind}(LEVEL={level} VFB=-0.7 PHI=0.6 TOX=0.03 DL=0.2 DW=0.1 {mobility} KF=1e-28 AF={af})\n.end\n", p * 2.0, p * 1.5,
+                    )).unwrap();
+                    let engine = rspice_core::Engine::default().resolved_for_netlist(&netlist);
+                    let circuit = engine.build_circuit_with_abort(&netlist, &abort).unwrap();
+                    let output = circuit.get_node_by_name("drain").unwrap();
+                    let dc = engine.run_dc_op_with_abort(&netlist, &abort).unwrap();
+                    let index = dc
+                        .branch_names
+                        .iter()
+                        .position(|name| name.eq_ignore_ascii_case("VDD"))
+                        .unwrap();
+                    let current = dc.branch_currents[index].abs();
+                    let results = engine
+                        .run_noise_with_input_source_and_abort(
+                            &netlist,
+                            output,
+                            None,
+                            "VIN",
+                            &[100.0, 10_000.0],
+                            300.15,
+                            &abort,
+                        )
+                        .unwrap();
+                    for result in results {
+                        let contribution = |probe| {
+                            result
+                                .contribution(
+                                    &rspice_core::analysis::NoiseContributionProbe::parse(probe)
+                                        .unwrap(),
+                                )
+                                .unwrap()
+                        };
+                        let actual = contribution("DNO(M1,FN)") / contribution("DNO(RL)")
+                            * (4.0 * 1.380649e-23 * 300.15 / 1000.0);
+                        let cox = 3.453e-13 / (0.03 * 1e-4);
+                        let expected = 5e-28 * (current / 5.0).powf(af)
+                            / (result.frequency * 0.4e-6 * 0.8e-6 * cox * cox);
+                        assert!(
+                            (actual - expected).abs() < expected * 2e-7,
+                            "L{level} {kind} AF={af} f={}: {actual:e} vs {expected:e}",
+                            result.frequency
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[wasm_bindgen_test]
+    fn legacy_bsim_body_laws_in_wasm() {
+        use rspice_core::engine::{SimulationConfig, SpiceDialect};
+        use rspice_core::numerics::integration::IntegrationMethod;
+        let engine = rspice_core::Engine::new(SimulationConfig {
+            spice_dialect: SpiceDialect::Ngspice,
+            integration_method: IntegrationMethod::BackwardEuler,
+            locked_time_grid: Some(std::sync::Arc::new(vec![0.0, 1e-6, 2e-6])),
+            ..Default::default()
+        });
+        let abort = rspice_core::abort_signal::NoAbort;
+        let vt = 300.15 * 1.380649e-23 / 1.602176634e-19;
+        for level in [4, 5] {
+            for temperature in [27, 85] {
+                for (kind, p) in [("NMOS", 1.0), ("PMOS", -1.0)] {
+                    for (js, isat) in [(1e-8, 1e-15), (1e4, 1e-8)] {
+                        let netlist = rspice_core::Netlist::parse(&format!(
+                            "Legacy BSIM body in WASM\nVD d 0 0\nVS s 0 0\nVG g 0 {}\nVB b 0 DC {} PWL(0 {} 2u {})\nM1 d g s b mm L=1u W=1u M=2.5 AD=1p AS=1p\n.model mm {kind}(LEVEL={level} VFB=-0.7 PHI=0.6 TOX=0.03 JS={js})\n.options TEMP={temperature} GMIN=0 RELTOL=1e-9 ABSTOL=1e-15 VNTOL=1e-12\n.end\n",
+                            -p, -p * 0.2, -p * 0.2, p * 0.2,
+                        )).unwrap();
+                        let result = engine
+                            .run_tran_with_abort(&netlist, 2e-6, 1e-6, &abort)
+                            .unwrap();
+                        for source in ["VD", "VS"] {
+                            let waveform =
+                                result.try_branch_current_waveform_named(source).unwrap();
+                            for (&time, &actual) in result.time.iter().zip(waveform) {
+                                let v = -0.2 + 0.4 * time / 2e-6;
+                                let expected = p
+                                    * 2.5
+                                    * isat
+                                    * if v <= 0.0 {
+                                        v / vt
+                                    } else {
+                                        (v / vt).exp() - 1.0
+                                    };
+                                assert!(
+                                    (actual - expected).abs() < 2e-15 + expected.abs() * 1e-7,
+                                    "L{level} {kind} TEMP={temperature} JS={js} {source}: {actual} vs {expected}"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[wasm_bindgen_test]
     fn one_sided_mos_area_uses_is_for_both_junctions_in_wasm() {
         use rspice_core::engine::{SimulationConfig, SpiceDialect};
         use rspice_core::numerics::integration::IntegrationMethod;

@@ -2886,10 +2886,11 @@ impl Engine {
                 noise_sources.push(source);
             }
 
-            // SPICE NLEV flicker laws (mos1noi.c; NLEV defaults to 2, whose
-            // gm²-based density is bias-dependent through the coefficient
-            // rather than the current term).
-            if let Some((coefficient, current, af, ef)) = mos.flicker_noise_source_terms()
+            // The device selects its family's flicker law and normalization.
+            let flicker = mos.flicker_noise_source_terms().map_err(|reason| {
+                SimulationError::Circuit(format!("Noise source '{}:FN': {reason}", mos.name))
+            })?;
+            if let Some((coefficient, current, af, ef)) = flicker
                 && coefficient != 0.0
                 && current != 0.0
             {
@@ -7045,6 +7046,186 @@ R2 OUT 0 1k
                 onoise_ref,
                 relative,
             );
+        }
+    }
+
+    /// Qualify the legacy equations using actual DC branch currents and a
+    /// numerical gate derivative. ngspice-46 b1noi.c/b2noi.c mistakenly use
+    /// integer state offsets for cd/gm, so its raw noise output is no oracle.
+    #[test]
+    fn legacy_bsim_noise_matches_current_and_transconductance_equations() {
+        for level in [4, 5] {
+            let mobility = if level == 4 {
+                "MUZ=400 MUS=500 VDD=2"
+            } else {
+                "MU0=400 MUS0=500"
+            };
+            for (kind, p) in [("NMOS", 1.0), ("PMOS", -1.0)] {
+                for (vds, vgs, vbs, dl, dw, tox, m, nf, af) in [
+                    (2.0, 1.5, 0.0, 0.0, 0.0, 0.03, 1.0, 1.0, 1.3),
+                    (-0.2, 1.5, -0.3, 0.2, 0.1, 0.04, 2.5, 2.0, 0.0),
+                    (0.0, -1.0, 0.2, 0.1, 0.05, 0.02, 0.5, 3.0, -0.5),
+                ] {
+                    let deck = |gate| {
+                        format!(
+                            "Legacy BSIM source equations\nVD d 0 {}\nVG g 0 {}\nVB b 0 {}\nM1 d g 0 b mm W=0.5u L=1u M={m} NF={nf} AD=1p AS=1p\n.model mm {kind}(LEVEL={level} VFB=-0.7 PHI=0.6 {mobility} TOX={tox} DL={dl} DW={dw} JS=1e4 KF=1e-28 AF={af} NLEV=0 EF=0.7 TNOIA=7 GAMMA_NOISE=8)\n.options GMIN=0 RELTOL=1e-9 ABSTOL=1e-15 VNTOL=1e-12\n.end\n",
+                            p * vds,
+                            p * gate,
+                            p * vbs,
+                        )
+                    };
+                    let drain_current = |gate| {
+                        let netlist = Netlist::parse(&deck(gate)).unwrap();
+                        let dc = Engine::default()
+                            .resolved_for_netlist(&netlist)
+                            .run_dc_op(&netlist)
+                            .unwrap();
+                        -dc.branch_currents[dc
+                            .branch_names
+                            .iter()
+                            .position(|name| name.eq_ignore_ascii_case("VD"))
+                            .unwrap()]
+                    };
+                    let current = drain_current(vgs);
+                    let sources = collected_noise_sources_for_deck(&deck(vgs));
+                    let flicker = mechanism(&sources, "M1", "FN").unwrap();
+                    let cox = 3.453e-13 / (tox * 1e-4);
+                    for frequency in [100.0, 10_000.0] {
+                        let expected =
+                            1e-28 * m * nf * (current.abs() / (m * nf)).max(1e-38).powf(af)
+                                / (frequency * (0.5 - dw) * 1e-6 * (1.0 - dl) * 1e-6 * cox * cox);
+                        let actual = flicker.spectral_density(frequency, 300.15);
+                        assert!(
+                            (actual - expected).abs() < expected * 2e-7,
+                            "L{level} {kind} VDS={vds} AF={af} f={frequency}: {actual:e} vs {expected:e}"
+                        );
+                    }
+                    let step = 1e-5;
+                    let gm = ((drain_current(vgs + step) - drain_current(vgs - step))
+                        / (2.0 * step))
+                        .abs();
+                    let expected = 4.0 * crate::constants::K_BOLTZMANN * 300.15 * (2.0 / 3.0) * gm;
+                    let actual = mechanism(&sources, "M1", "ID")
+                        .map_or(0.0, |source| source.spectral_density(100.0, 300.15));
+                    assert!(
+                        (actual - expected).abs() < 1e-35 + expected * 2e-5,
+                        "L{level} {kind} VDS={vds} thermal: {actual:e} vs {expected:e}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn legacy_bsim_flicker_preserves_zero_current_floor_and_signed_exponents() {
+        for level in [4, 5] {
+            for af in [-0.5, 0.0, 1.3] {
+                let sources = collected_noise_sources_for_deck(&format!(
+                    "Legacy BSIM zero-current noise\nVG g 0 -1\nM1 0 g 0 0 mm W=1u L=1u M=2.5\n.model mm NMOS(LEVEL={level} TOX=0.03 KF=1e-28 AF={af})\n.end\n"
+                ));
+                let source = mechanism(&sources, "M1", "FN").unwrap();
+                let cox = 3.453e-13 / (0.03 * 1e-4);
+                let expected = 2.5e-28 * (1e-38_f64).powf(af) / (100.0 * 1e-12 * cox * cox);
+                let actual = source.spectral_density(100.0, 300.15);
+                assert!(
+                    (actual - expected).abs() < expected * 1e-12,
+                    "L{level} AF={af}: {actual:e} vs {expected:e}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn legacy_bsim_active_flicker_rejects_invalid_normalization() {
+        for level in [4, 5] {
+            for (params, reason) in [
+                ("TOX=0.03 KF=-1", "KF"),
+                ("TOX=0 KF=1e-28", "TOX"),
+                ("TOX=-0.03 KF=1e-28", "TOX"),
+                ("TOX=0.03 DL=1 KF=1e-28", "effective W, L"),
+                ("TOX=0.03 DW=0.5 KF=1e-28", "effective W, L"),
+                ("TOX=0.03 KF=1e300", "coefficient"),
+            ] {
+                let netlist = Netlist::parse(&format!(
+                    "Invalid legacy BSIM noise\nM1 0 0 0 0 mm W=0.5u L=1u\n.model mm NMOS(LEVEL={level} {params})\n.end\n"
+                )).unwrap();
+                let engine = Engine::default().resolved_for_netlist(&netlist);
+                let circuit = engine.build_circuit(&netlist).unwrap();
+                let Err(error) =
+                    Engine::try_collect_noise_sources(&circuit, &vec![0.0; circuit.matrix_size()])
+                else {
+                    panic!("L{level} {params}: invalid active flicker noise was accepted");
+                };
+                let error = error.to_string();
+                assert!(
+                    error.contains("M1:FN") && error.contains(reason),
+                    "L{level} {params}: {error}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn legacy_bsim_flicker_output_transfer_matches_resistor_reference() {
+        for level in [4, 5] {
+            let mobility = if level == 4 {
+                "MUZ=400 MUS=500 VDD=2"
+            } else {
+                "MU0=400 MUS0=500"
+            };
+            for kf in [0.0, 1e-28] {
+                let netlist = Netlist::parse(&format!(
+                    "Legacy BSIM noise transfer\nVDD supply 0 2\nVIN gate 0 DC 1.5 AC 1\nRL supply drain 1k\nM1 drain gate 0 0 mm L=1u W=0.5u\n.model mm NMOS(LEVEL={level} VFB=-0.7 PHI=0.6 TOX=0.03 {mobility} KF={kf} AF=1.3)\n.end\n"
+                )).unwrap();
+                let engine = Engine::default().resolved_for_netlist(&netlist);
+                let circuit = engine.build_circuit(&netlist).unwrap();
+                let output = circuit.get_node_by_name("drain").unwrap();
+                let dc = engine.run_dc_op(&netlist).unwrap();
+                let current = dc.branch_currents[dc
+                    .branch_names
+                    .iter()
+                    .position(|name| name.eq_ignore_ascii_case("VDD"))
+                    .unwrap()]
+                .abs();
+                let results = engine
+                    .run_noise_with_input_source(
+                        &netlist,
+                        output,
+                        None,
+                        "VIN",
+                        &[100.0, 10_000.0],
+                        300.15,
+                    )
+                    .unwrap();
+                for result in results {
+                    let flicker = result
+                        .contribution(
+                            &crate::analysis::NoiseContributionProbe::parse("DNO(M1,FN)").unwrap(),
+                        )
+                        .unwrap();
+                    let resistor = result
+                        .contribution(
+                            &crate::analysis::NoiseContributionProbe::parse("DNO(RL)").unwrap(),
+                        )
+                        .unwrap();
+                    // Both Norton sources span AC ground and drain, so their
+                    // output-PSD ratio cancels the circuit transfer impedance.
+                    let actual = flicker / resistor
+                        * (4.0 * crate::constants::K_BOLTZMANN * 300.15 / 1000.0);
+                    let cox = 3.453e-13 / (0.03 * 1e-4);
+                    let expected =
+                        kf * current.powf(1.3) / (result.frequency * 0.5e-6 * 1e-6 * cox * cox);
+                    if kf == 0.0 {
+                        assert_eq!(actual, 0.0, "inactive FN stays in the contribution catalog");
+                    } else {
+                        assert!(
+                            (actual - expected).abs() < expected * 2e-7,
+                            "L{level} f={}: {actual:e} vs {expected:e}",
+                            result.frequency
+                        );
+                    }
+                }
+            }
         }
     }
 
