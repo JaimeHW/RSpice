@@ -17,7 +17,9 @@
 //! consistent waveform.
 
 use crate::Value;
-use crate::netlist::{Element, ElementKind, Netlist, SourceSpec};
+use crate::abort_signal::AbortSignal;
+use crate::engine::SimulationError;
+use crate::netlist::{Element, ElementKind, SourceSpec};
 
 /// Hard cap on generated samples per source. 4M samples is ~64 MB of PWL
 /// points — beyond that the deck should raise NT rather than the simulator
@@ -59,45 +61,37 @@ fn checked_noise_sample_count(
     Ok(grid_count as usize + required_tail)
 }
 
-/// Replace every TRNOISE/TRRANDOM source with a generated PWL sample train
-/// covering `[0, tstop]`. Returns `None` when the netlist contains neither
-/// source type (the common case — zero cost, no clone).
-pub(crate) fn expand_transient_noise(
-    netlist: &Netlist,
+/// Expand the elaborated sources in place, after instance parameters and
+/// canonical names are resolved. Each instance receives an independent stream.
+pub(in crate::engine) fn expand_transient_noise(
+    elements: &mut [Element],
+    seed: Option<u64>,
     tstop: Value,
-) -> Result<Option<Netlist>, String> {
-    let has_noise = netlist.elements.iter().any(element_has_transient_random);
-    if !has_noise {
-        return Ok(None);
-    }
-
-    let base_seed = netlist.options.seed.unwrap_or(0x5EED_0001);
-    let mut expanded = netlist.clone();
-    for element in &mut expanded.elements {
-        if !element_has_transient_random(element) {
-            continue;
+    abort: &dyn AbortSignal,
+) -> Result<(), SimulationError> {
+    let base_seed = seed.unwrap_or(0x5EED_0001);
+    for (index, element) in elements.iter_mut().enumerate() {
+        if index.is_multiple_of(64) && abort.is_aborted() {
+            return Err(SimulationError::Aborted);
         }
-        // Per-source stream: stable name hash mixed into the netlist seed so
-        // every noise source draws an independent, reproducible sequence.
-        let seed = base_seed ^ fnv1a(&element.name.to_ascii_uppercase());
-        let name = element.name.clone();
-        match &mut element.kind {
-            ElementKind::VoltageSource(spec) | ElementKind::CurrentSource(spec) => {
-                replace_transient_random(spec, tstop, seed, &name)?;
+        if let ElementKind::VoltageSource(spec) | ElementKind::CurrentSource(spec) =
+            &mut element.kind
+            && spec_contains_transient_random(spec)
+        {
+            // A single generated train may be large. Do not defer cancellation
+            // until another 64 source instances have allocated their samples.
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
             }
-            _ => {}
+            let seed = base_seed ^ fnv1a(&element.name.to_ascii_uppercase());
+            replace_transient_random(spec, tstop, seed, &element.name)
+                .map_err(SimulationError::Circuit)?;
         }
     }
-    Ok(Some(expanded))
-}
-
-fn element_has_transient_random(element: &Element) -> bool {
-    match &element.kind {
-        ElementKind::VoltageSource(spec) | ElementKind::CurrentSource(spec) => {
-            spec_contains_transient_random(spec)
-        }
-        _ => false,
+    if abort.is_aborted() {
+        return Err(SimulationError::Aborted);
     }
+    Ok(())
 }
 
 fn spec_contains_transient_random(spec: &SourceSpec) -> bool {
@@ -524,14 +518,51 @@ fn fnv1a(input: &str) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::abort_signal::NoAbort;
+    use crate::netlist::Netlist;
+
+    #[test]
+    fn expansion_observes_abort_between_random_instances() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        struct AbortAfterFirstSource(AtomicUsize);
+        impl AbortSignal for AbortAfterFirstSource {
+            fn is_aborted(&self) -> bool {
+                self.0.fetch_add(1, Ordering::Relaxed) >= 2
+            }
+        }
+        let mut netlist = Netlist::parse(
+            "noise cancellation\nV1 a 0 TRNOISE(1 1n 0 0)\nV2 b 0 TRNOISE(1 1n 0 0)\n.end\n",
+        )
+        .unwrap();
+        let error = expand_transient_noise(
+            &mut netlist.elements,
+            None,
+            10e-9,
+            &AbortAfterFirstSource(AtomicUsize::new(0)),
+        )
+        .unwrap_err();
+        assert!(matches!(error, SimulationError::Aborted));
+        let ElementKind::VoltageSource(first) = &netlist.elements[0].kind else {
+            panic!("source retained")
+        };
+        let ElementKind::VoltageSource(second) = &netlist.elements[1].kind else {
+            panic!("source retained")
+        };
+        assert!(!spec_contains_transient_random(first));
+        assert!(
+            spec_contains_transient_random(second),
+            "later instances must not allocate a waveform after cancellation"
+        );
+    }
 
     #[test]
     fn expansion_preserves_distortion_dc_and_ac_annotations() {
-        let netlist = Netlist::parse(
+        let mut netlist = Netlist::parse(
             "annotated noise\nV1 out 0 DC .25 AC 2 90 TRNOISE(1 1n 0 0) DISTOF1 3 45 DISTOF2 4 90\nR1 out 0 1\n.end\n"
         ).unwrap();
-        let expanded = expand_transient_noise(&netlist, 10e-9).unwrap().unwrap();
-        let ElementKind::VoltageSource(spec) = &expanded.elements[0].kind else {
+        expand_transient_noise(&mut netlist.elements, netlist.options.seed, 10e-9, &NoAbort)
+            .unwrap();
+        let ElementKind::VoltageSource(spec) = &netlist.elements[0].kind else {
             panic!("voltage source retained")
         };
         assert_eq!(crate::engine::extract_dc_value(spec), 0.25);
@@ -544,7 +575,7 @@ mod tests {
         assert_eq!((f1.magnitude, f1.phase), (3.0, std::f64::consts::FRAC_PI_4));
         assert_eq!((f2.magnitude, f2.phase), (4.0, std::f64::consts::FRAC_PI_2));
         assert!(
-            expand_transient_noise(&expanded, 10e-9).unwrap().is_none(),
+            !spec_contains_transient_random(spec),
             "expansion replaces the random waveform exactly once"
         );
     }

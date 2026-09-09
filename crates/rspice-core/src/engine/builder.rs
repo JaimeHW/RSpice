@@ -4630,11 +4630,37 @@ impl Engine {
             .map(|(circuit, _)| circuit)
     }
 
+    pub(super) fn build_transient_circuit_with_abort(
+        &self,
+        netlist: &Netlist,
+        tstop: Value,
+        abort: &dyn AbortSignal,
+    ) -> Result<CircuitData, SimulationError> {
+        self.build_circuit_for_analysis(netlist, &[], Some(tstop), abort)
+            .map(|(circuit, _)| circuit)
+    }
+
     /// Retain RF identities from the same elaboration that constructs the circuit.
     pub(super) fn build_circuit_with_rf_ports(
         &self,
         netlist: &Netlist,
         default_ports: &[crate::analysis::s_param::Port],
+        abort: &dyn AbortSignal,
+    ) -> Result<
+        (
+            CircuitData,
+            Vec<crate::analysis::s_param::MaterializedRfPort>,
+        ),
+        SimulationError,
+    > {
+        self.build_circuit_for_analysis(netlist, default_ports, None, abort)
+    }
+
+    fn build_circuit_for_analysis(
+        &self,
+        netlist: &Netlist,
+        default_ports: &[crate::analysis::s_param::Port],
+        transient_stop_time: Option<Value>,
         abort: &dyn AbortSignal,
     ) -> Result<
         (
@@ -4749,6 +4775,14 @@ impl Engine {
             }
             &effective_model_netlist
         };
+        if let Some(tstop) = transient_stop_time {
+            super::transient::noise::expand_transient_noise(
+                &mut flat_elements,
+                netlist.options.seed,
+                tstop,
+                abort,
+            )?;
+        }
         let rf_ports = crate::analysis::s_param::materialize_rf_ports(
             netlist,
             &mut flat_elements,

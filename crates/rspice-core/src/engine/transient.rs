@@ -385,7 +385,7 @@ mod charge_stamper;
 use charge_stamper::StaticMatrixChargeStamper;
 mod damped_status;
 mod globalization;
-mod noise;
+pub(in crate::engine) mod noise;
 mod nox_status;
 mod rescue;
 mod residual;
@@ -2083,22 +2083,7 @@ impl Engine {
         }
         let engine = self.resolved_for_netlist(netlist);
         engine.ensure_transient_request_floor(tstop, max_step)?;
-        match noise::expand_transient_noise(netlist, tstop).map_err(SimulationError::Circuit)? {
-            Some(expanded) => engine.transient_source_event_times_resolved(
-                &expanded,
-                tstop,
-                max_step,
-                source_names,
-                abort,
-            ),
-            None => engine.transient_source_event_times_resolved(
-                netlist,
-                tstop,
-                max_step,
-                source_names,
-                abort,
-            ),
-        }
+        engine.transient_source_event_times_resolved(netlist, tstop, max_step, source_names, abort)
     }
 
     /// List every elaborated independent source with an authored transient
@@ -2319,7 +2304,7 @@ impl Engine {
         source_names: &[String],
         abort: &dyn AbortSignal,
     ) -> Result<Vec<Value>, SimulationError> {
-        let circuit = self.build_circuit_with_abort(netlist, abort)?;
+        let circuit = self.build_transient_circuit_with_abort(netlist, tstop, abort)?;
         let selected = Self::validated_transient_source_selection(&circuit, source_names)?;
 
         let hinted_max_step = circuit
@@ -2415,17 +2400,7 @@ impl Engine {
         self.reset_convergence_quality();
         let engine = self.resolved_for_netlist(netlist);
         engine.ensure_transient_request_floor(tstop, max_step)?;
-        // TRNOISE sources expand into seeded, deterministic PWL sample
-        // trains covering [0, tstop] before circuit construction; decks
-        // without noise sources pass through untouched (no clone).
-        match noise::expand_transient_noise(netlist, tstop).map_err(SimulationError::Circuit)? {
-            Some(expanded) => {
-                engine.run_tran_with_abort_resolved(&expanded, tstop, max_step, startup_mode, abort)
-            }
-            None => {
-                engine.run_tran_with_abort_resolved(netlist, tstop, max_step, startup_mode, abort)
-            }
-        }
+        engine.run_tran_with_abort_resolved(netlist, tstop, max_step, startup_mode, abort)
     }
 
     fn inferred_transient_startup_mode(
@@ -2538,44 +2513,24 @@ impl Engine {
         validate_transient_window(tstop, max_step)?;
         let engine = self.resolved_for_netlist(netlist);
         engine.ensure_transient_request_floor(tstop, max_step)?;
-        match noise::expand_transient_noise(netlist, tstop).map_err(SimulationError::Circuit)? {
-            Some(expanded) => engine
-                .run_tran_resolved_with_resume(
-                    &expanded,
-                    netlist,
-                    TransientRunWindow {
-                        tstop,
-                        max_step,
-                        startup_mode,
-                    },
-                    abort,
-                    TransientResumePlan {
-                        resume: None,
-                        resume_validation: ResumeValidation::ExactNetlist,
-                        final_checkpoint_retention: FinalCheckpointRetention::Retained,
-                        scheduled_checkpoint_times: &[],
-                    },
-                )
-                .and_then(Self::require_retained_final_checkpoint),
-            None => engine
-                .run_tran_resolved_with_resume(
-                    netlist,
-                    netlist,
-                    TransientRunWindow {
-                        tstop,
-                        max_step,
-                        startup_mode,
-                    },
-                    abort,
-                    TransientResumePlan {
-                        resume: None,
-                        resume_validation: ResumeValidation::ExactNetlist,
-                        final_checkpoint_retention: FinalCheckpointRetention::Retained,
-                        scheduled_checkpoint_times: &[],
-                    },
-                )
-                .and_then(Self::require_retained_final_checkpoint),
-        }
+        engine
+            .run_tran_resolved_with_resume(
+                netlist,
+                netlist,
+                TransientRunWindow {
+                    tstop,
+                    max_step,
+                    startup_mode,
+                },
+                abort,
+                TransientResumePlan {
+                    resume: None,
+                    resume_validation: ResumeValidation::ExactNetlist,
+                    final_checkpoint_retention: FinalCheckpointRetention::Retained,
+                    scheduled_checkpoint_times: &[],
+                },
+            )
+            .and_then(Self::require_retained_final_checkpoint)
     }
 
     fn require_retained_final_checkpoint(
@@ -2683,24 +2638,8 @@ impl Engine {
 
         let engine = self.resolved_for_netlist(netlist);
         engine.ensure_transient_request_floor(tstop, max_step)?;
-        match noise::expand_transient_noise(netlist, tstop).map_err(SimulationError::Circuit)? {
-            Some(expanded) => engine.run_tran_resolved_with_resume(
-                &expanded,
-                netlist,
-                TransientRunWindow {
-                    tstop,
-                    max_step,
-                    startup_mode,
-                },
-                abort,
-                TransientResumePlan {
-                    resume: None,
-                    resume_validation: ResumeValidation::ExactNetlist,
-                    final_checkpoint_retention: FinalCheckpointRetention::Discarded,
-                    scheduled_checkpoint_times: checkpoint_times,
-                },
-            ),
-            None => engine.run_tran_resolved_with_resume(
+        engine
+            .run_tran_resolved_with_resume(
                 netlist,
                 netlist,
                 TransientRunWindow {
@@ -2715,9 +2654,8 @@ impl Engine {
                     final_checkpoint_retention: FinalCheckpointRetention::Discarded,
                     scheduled_checkpoint_times: checkpoint_times,
                 },
-            ),
-        }
-        .map(|(result, _, checkpoints)| (result, checkpoints))
+            )
+            .map(|(result, _, checkpoints)| (result, checkpoints))
     }
 
     /// Continue a transient from a checkpoint to a later stop time.
@@ -2834,44 +2772,24 @@ impl Engine {
 
         let engine = self.resolved_for_netlist(netlist);
         engine.ensure_transient_request_floor(tstop - checkpoint.time, max_step)?;
-        match noise::expand_transient_noise(netlist, tstop).map_err(SimulationError::Circuit)? {
-            Some(expanded) => engine
-                .run_tran_resolved_with_resume(
-                    &expanded,
-                    netlist,
-                    TransientRunWindow {
-                        tstop,
-                        max_step,
-                        startup_mode,
-                    },
-                    abort,
-                    TransientResumePlan {
-                        resume: Some(checkpoint),
-                        resume_validation: validation,
-                        final_checkpoint_retention: FinalCheckpointRetention::Retained,
-                        scheduled_checkpoint_times: &[],
-                    },
-                )
-                .and_then(Self::require_retained_final_checkpoint),
-            None => engine
-                .run_tran_resolved_with_resume(
-                    netlist,
-                    netlist,
-                    TransientRunWindow {
-                        tstop,
-                        max_step,
-                        startup_mode,
-                    },
-                    abort,
-                    TransientResumePlan {
-                        resume: Some(checkpoint),
-                        resume_validation: validation,
-                        final_checkpoint_retention: FinalCheckpointRetention::Retained,
-                        scheduled_checkpoint_times: &[],
-                    },
-                )
-                .and_then(Self::require_retained_final_checkpoint),
-        }
+        engine
+            .run_tran_resolved_with_resume(
+                netlist,
+                netlist,
+                TransientRunWindow {
+                    tstop,
+                    max_step,
+                    startup_mode,
+                },
+                abort,
+                TransientResumePlan {
+                    resume: Some(checkpoint),
+                    resume_validation: validation,
+                    final_checkpoint_retention: FinalCheckpointRetention::Retained,
+                    scheduled_checkpoint_times: &[],
+                },
+            )
+            .and_then(Self::require_retained_final_checkpoint)
     }
 
     #[inline]
@@ -3531,7 +3449,7 @@ impl Engine {
         } else {
             None
         };
-        let circuit = self.build_circuit_with_abort(netlist, abort)?;
+        let circuit = self.build_transient_circuit_with_abort(netlist, window.tstop, abort)?;
         self.run_tran_prepared(
             netlist,
             checkpoint_netlist,

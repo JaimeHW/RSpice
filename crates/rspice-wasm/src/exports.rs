@@ -209,6 +209,36 @@ mod wasm_tests {
     use crate::js_interop::{js_array_property, js_property};
 
     #[wasm_bindgen_test]
+    fn hierarchical_noise_sources_preserve_scoped_parameters_in_wasm() {
+        let engine = rspice_core::Engine::default();
+        for waveform in ["TRNOISE({amp} 1n 0 0)", "TRRANDOM(2 1n 0 {amp} 0)"] {
+            let netlist = rspice_core::Netlist::parse(&format!(
+                "hierarchical noise\n.subckt cell p params:amp=0\nV1 p 0 {waveform} AC 2 DISTOF1 1\n.ends cell\nX1 one cell amp=.01\nX2 two cell amp=.02\nR1 one 0 1\nR2 two 0 1\n.options seed=42\n.end\n"
+            )).unwrap();
+            let run = || {
+                engine
+                    .run_tran_with_abort(&netlist, 10e-9, 1e-9, &rspice_core::abort_signal::NoAbort)
+                    .unwrap()
+            };
+            let first = run();
+            let second = run();
+            assert_eq!(first.time, second.time);
+            assert_eq!(first.voltages, second.voltages);
+            let traces = ["one", "two"].map(|name| {
+                let index = first
+                    .node_names
+                    .iter()
+                    .position(|node| node.eq_ignore_ascii_case(name))
+                    .unwrap();
+                let values = &first.voltages[index];
+                assert!(values.iter().any(|value| value.abs() > 0.003));
+                values
+            });
+            assert!(traces[0].iter().zip(traces[1]).any(|(a, b)| *a != b / 2.0));
+        }
+    }
+
+    #[wasm_bindgen_test]
     fn distortion_annotations_preserve_transient_noise_in_wasm() {
         let engine = rspice_core::Engine::default();
         for waveform in ["TRNOISE(1 1n 0 0)", "TRRANDOM(2 1n 0 1 0)"] {

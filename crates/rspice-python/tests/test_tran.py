@@ -23,6 +23,19 @@ R2 out 0 1k
 
 
 class TestTransient:
+    @pytest.mark.parametrize("waveform", ["TRNOISE({amp} 1n 0 0)", "TRRANDOM(2 1n 0 {amp} 0)"])
+    def test_hierarchical_noise_sources_have_independent_repeatable_streams(self, engine, waveform):
+        netlist = rspice.Netlist.parse_spice(
+            f"* hierarchical noise\n.subckt cell p params:amp=0\nV1 p 0 {waveform} AC 2 DISTOF1 1\n.ends cell\nX1 one cell amp=.01\nX2 two cell amp=.02\nR1 one 0 1\nR2 two 0 1\n.options seed=42\n.end\n"
+        )
+        first = engine.run_tran(netlist, stop_time=10e-9, max_step=1e-9)
+        second = engine.run_tran(netlist, stop_time=10e-9, max_step=1e-9)
+        np.testing.assert_array_equal(first.time, second.time)
+        for node in ["one", "two"]:
+            assert np.std(first.voltage_waveform(node)) > .003
+            np.testing.assert_array_equal(first.voltage_waveform(node), second.voltage_waveform(node))
+        assert not np.array_equal(first.voltage_waveform("one"), first.voltage_waveform("two") / 2)
+
     @pytest.mark.parametrize("waveform", ["TRNOISE(1 1n 0 0)", "TRRANDOM(2 1n 0 1 0)"])
     @pytest.mark.parametrize("source", ["V1 out 0", "I1 0 out"])
     def test_distortion_annotations_preserve_transient_noise(self, engine, waveform, source):

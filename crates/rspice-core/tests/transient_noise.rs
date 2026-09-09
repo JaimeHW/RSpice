@@ -4,6 +4,86 @@ use rspice_core::engine::{Engine, SimulationConfig};
 use rspice_core::netlist::Netlist;
 
 #[test]
+fn hierarchical_random_sources_match_scoped_flat_instances() {
+    let engine = Engine::default();
+    for random in [false, true] {
+        for current in [false, true] {
+            let waveform = |amplitude: &str, interval: &str| {
+                if random {
+                    format!("TRRANDOM(2 {interval} 0 {amplitude} 0)")
+                } else {
+                    format!("TRNOISE({amplitude} {interval} 0 0)")
+                }
+            };
+            let source = if current { "I1 0 p" } else { "V1 p 0" };
+            let hierarchical = Netlist::parse(&format!(
+                "scoped random sources\n.subckt cell p params:gain=1 sample=1n\n{source} {} AC 2 DISTOF1 1\n.ends cell\n.subckt pair left right params:amp=1\nXleft left cell gain={{amp}} sample=1n\nXright right cell gain={{2*amp}} sample=2n\n.ends pair\nXtop out1 out2 pair amp=.01\nR1 out1 0 1\nR2 out2 0 1\n.options seed=42\n.end\n",
+                waveform("{gain}", "{sample}"),
+            )).unwrap();
+            let names = engine.transient_source_names(&hierarchical).unwrap();
+            assert_eq!(names.len(), 2);
+            assert!(names[0].contains("Xleft") && names[1].contains("Xright"));
+            let (left, right) = if current {
+                ("Ileft 0 out1", "Iright 0 out2")
+            } else {
+                ("Vleft out1 0", "Vright out2 0")
+            };
+            let mut flat = Netlist::parse(&format!(
+                "flat random instances\n{left} {} AC 2 DISTOF1 1\n{right} {} AC 2 DISTOF1 1\nR1 out1 0 1\nR2 out2 0 1\n.options seed=42\n.end\n",
+                waveform(".01", "1n"), waveform(".02", "2n"),
+            )).unwrap();
+            // Preserve canonical identities so the independent reference draws
+            // each instance's stream rather than a differently named source's.
+            flat.elements[0].name.clone_from(&names[0]);
+            flat.elements[1].name.clone_from(&names[1]);
+            let expected = engine.run_tran(&flat, 10e-9, 1e-9).unwrap();
+            let actual = engine.run_tran(&hierarchical, 10e-9, 1e-9).unwrap();
+            assert_eq!(actual.node_names, expected.node_names);
+            assert_eq!(actual.time, expected.time);
+            assert_eq!(actual.voltages, expected.voltages);
+            assert_eq!(actual.branch_currents, expected.branch_currents);
+            for name in ["out1", "out2"] {
+                let column = actual
+                    .node_names
+                    .iter()
+                    .position(|node| node.eq_ignore_ascii_case(name))
+                    .unwrap();
+                assert!(
+                    actual.voltages[column]
+                        .iter()
+                        .any(|value| value.abs() > 0.003)
+                );
+            }
+            for name in &names {
+                let selection = [name.clone()];
+                assert_eq!(
+                    engine
+                        .transient_source_event_times(&hierarchical, 10e-9, 1e-9, &selection)
+                        .unwrap(),
+                    engine
+                        .transient_source_event_times(&flat, 10e-9, 1e-9, &selection)
+                        .unwrap(),
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn uninstantiated_random_sources_do_not_expand_or_fail_the_run() {
+    let netlist = Netlist::parse(
+        "unused noise\nV1 out 0 1\nR1 out 0 1\n.subckt unused p\nVbad p 0 TRNOISE(1 0 0 0)\n.ends unused\n.end\n"
+    ).unwrap();
+    let result = Engine::default().run_tran(&netlist, 10e-9, 1e-9).unwrap();
+    let output = result
+        .node_names
+        .iter()
+        .position(|node| node.eq_ignore_ascii_case("out"))
+        .unwrap();
+    assert!(result.voltages[output].iter().all(|value| *value == 1.0));
+}
+
+#[test]
 fn distortion_annotations_preserve_seeded_transient_noise() {
     let engine = Engine::default();
     for waveform in ["TRNOISE(1 1n 0 0)", "TRRANDOM(2 1n 0 1 0)"] {

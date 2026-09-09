@@ -46,6 +46,27 @@ rload out 0 1k
 ";
 
 #[test]
+fn hierarchical_random_sources_resume_exactly_after_instance_expansion() {
+    for waveform in ["TRNOISE({amp} 1n 0 0)", "TRRANDOM(2 1n 0 {amp} 0)"] {
+        let result = assert_scheduled_deck_resumes_exactly(
+            waveform,
+            &format!(
+                "hierarchical noise checkpoint\n.subckt cell p params:amp=1\nV1 p 0 {waveform} AC 2 DISTOF1 1\n.ends cell\nX1 in cell amp=.1\nR1 in out 1k\nC1 out 0 1p\n.end\n"
+            ),
+            10e-9,
+            4e-9,
+            1e-9,
+            SimulationConfig::default(),
+        );
+        assert!(
+            result.voltages[out_index(&result)]
+                .iter()
+                .any(|value| value.abs() > 0.01)
+        );
+    }
+}
+
+#[test]
 fn annotated_transient_noise_resumes_the_same_seeded_trajectory() {
     for waveform in ["TRNOISE(1 1n 0 0)", "TRRANDOM(2 1n 0 1 0)"] {
         let result = assert_scheduled_deck_resumes_exactly(
