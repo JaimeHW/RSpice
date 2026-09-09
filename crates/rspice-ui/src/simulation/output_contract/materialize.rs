@@ -148,33 +148,22 @@ fn destinations(analysis: &AnalysisResult) -> HashMap<String, usize> {
 
 /// Operating points retain scalar voltages/currents in their table. Expose that
 /// solved basis to the same output resolver using the single-point OP axis.
-/// Existing authored waveforms must not replace the authoritative table values.
+/// Authored outputs are projections of this basis, never additional circuit
+/// nodes or branches. Reusing their labels here would let a previous output
+/// named `V(absent)` invent a physical node during deferred evaluation.
 fn source_waveforms(analysis: &AnalysisResult) -> Vec<WaveformData> {
     let Some(op) = &analysis.dc_op else {
         return analysis.waveforms.clone();
     };
     let axis = Arc::new(vec![0.0]);
-    let mut source = op
-        .node_voltages
+    op.node_voltages
         .iter()
         .chain(&op.branch_currents)
         .map(|value| {
             WaveformData::new(&value.name, Arc::clone(&axis), vec![value.value], "#f5b700")
                 .with_unit(&value.unit)
         })
-        .collect::<Vec<_>>();
-    let names = source
-        .iter()
-        .map(|waveform| waveform.name.to_ascii_lowercase())
-        .collect::<HashSet<_>>();
-    source.extend(
-        analysis
-            .waveforms
-            .iter()
-            .filter(|waveform| !names.contains(&waveform.name.to_ascii_lowercase()))
-            .cloned(),
-    );
-    source
+        .collect()
 }
 
 pub(in crate::simulation) fn materialize_saved_outputs(

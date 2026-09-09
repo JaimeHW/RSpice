@@ -435,3 +435,88 @@ fn raw_scope_lookup_preserves_quantity_namespaces_and_does_not_rewrite_retained_
     literal.name = "V(X1:out)".to_owned();
     assert!(resolve_raw_probe("V(/X1/out)", &[literal], "result", false).is_err());
 }
+
+#[test]
+fn deferred_op_outputs_use_physical_tables_after_renaming_and_project_reload() {
+    use crate::io::project_io::ProjectSimulationResults;
+    use crate::state::SimulationState;
+
+    // V1 is both a voltage-source instance and a distinct 7 V circuit node.
+    let deck = "OP identity\nV1 in 0 4\nR1 in 0 1k\nV2 V1 0 7\nR2 V1 0 1k\n.end\n";
+    for (alias, source, query, expected) in [
+        ("V(absent)", "V(in)", "V(absent)", None),
+        ("V(absent)", "V(in)", "V(/top/absent)", None),
+        ("I(absent)", "I(V1)", "I(absent)", None),
+        ("I(absent)", "I(V1)", "I(/top/absent)", None),
+        ("absent", "V(in)", "V(absent)", None),
+        ("V(V1)", "V(in)", "V(V1)", Some(7.0)),
+        ("I(V1)", "V(in)", "I(V1)", Some(-0.004)),
+    ] {
+        for kind in [
+            SavedOutputKind::RawVoltageOrCurrent,
+            SavedOutputKind::DerivedExpression,
+        ] {
+            for selection in [
+                OutputSelectionMode::ExplicitOnly,
+                OutputSelectionMode::SaveAll,
+            ] {
+                let alias = output(kind, alias, source);
+                let mut deferred = output(kind, "Deferred physical signal", query);
+                deferred.save_policy = SavedOutputPolicy::OnDemandFromRetainedState;
+                let run = run(
+                    deck,
+                    "OP identity",
+                    AnalysisSpec::dc_op(),
+                    ".op",
+                    &[alias, deferred],
+                    selection,
+                );
+                run.validate_provenance().unwrap();
+                check_value(&run, 0, if source.starts_with('I') { -0.004 } else { 4.0 });
+                for reload in [false, true] {
+                    let mut state = SimulationState::default();
+                    state.next_run_id = run.id;
+                    state.runs = vec![run.clone()].into();
+                    if reload {
+                        let snapshot = ProjectSimulationResults::from_state(&state);
+                        snapshot.validate().unwrap();
+                        let restored: ProjectSimulationResults =
+                            serde_json::from_slice(&serde_json::to_vec(&snapshot).unwrap())
+                                .unwrap();
+                        restored.apply_to_state(&mut state).unwrap();
+                    }
+                    assert!(state.select_run(0));
+                    let before =
+                        serde_json::to_vec(&ProjectSimulationResults::from_state(&state)).unwrap();
+                    let visible_before = state.waveforms.clone();
+                    let version_before = state.data_version;
+                    let result =
+                        state.materialize_deferred_saved_output(run.run_id, run.analyses[0].id, 1);
+                    if let Some(expected) = expected {
+                        result.unwrap();
+                        check_value(&state.runs[0], 1, expected);
+                        let visible = state
+                            .waveforms
+                            .iter()
+                            .find(|wave| wave.name == "Deferred physical signal")
+                            .unwrap();
+                        close(visible.y[0], expected);
+                    } else {
+                        assert!(result.is_err(), "{kind:?}: {query}, reload={reload}");
+                        assert_eq!(state.data_version, version_before);
+                        assert_eq!(state.waveforms, visible_before);
+                        assert_eq!(
+                            serde_json::to_vec(&ProjectSimulationResults::from_state(&state))
+                                .unwrap(),
+                            before
+                        );
+                    }
+                    state.runs[0].validate_provenance().unwrap();
+                    ProjectSimulationResults::from_state(&state)
+                        .validate()
+                        .unwrap();
+                }
+            }
+        }
+    }
+}
