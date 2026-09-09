@@ -445,7 +445,7 @@ fn generate_trrandom_points(
             1 => parameter2 + parameter1 * (2.0 * rng.uniform() - 1.0),
             2 => parameter2 + parameter1 * rng.gaussian(),
             3 => parameter2 - parameter1 * rng.uniform().ln(),
-            4 => parameter2 + rng.poisson(parameter1) as Value,
+            4 => parameter2 + rng.poisson(parameter1, abort)?,
             _ => {
                 return Err(SimulationError::Circuit(format!(
                     "TRRANDOM source '{}' has invalid TYPE",
@@ -653,24 +653,108 @@ impl SplitMix64 {
         r * theta.cos()
     }
 
-    fn poisson(&mut self, lambda: f64) -> u64 {
-        if lambda <= 0.0 {
-            return 0;
+    fn poisson(
+        &mut self,
+        lambda: Value,
+        abort: &dyn AbortSignal,
+    ) -> Result<Value, SimulationError> {
+        check_noise_abort(abort)?;
+        if !lambda.is_finite() || lambda < 0.0 {
+            return Err(SimulationError::Circuit(
+                "TRRANDOM Poisson mean must be finite and nonnegative".to_string(),
+            ));
         }
-        if lambda >= 64.0 {
-            return (lambda + lambda.sqrt() * self.gaussian()).round().max(0.0) as u64;
+        if lambda == 0.0 {
+            return Ok(0.0);
         }
-        let limit = (-lambda).exp();
-        let mut product = 1.0;
-        let mut count = 0u64;
-        loop {
-            product *= self.uniform();
-            if product <= limit {
-                return count;
+        if lambda < 10.0 {
+            let limit = (-lambda).exp();
+            let mut product = 1.0;
+            let mut count = 0u64;
+            loop {
+                product *= self.uniform();
+                if product <= limit {
+                    return Ok(count as Value);
+                }
+                count += 1;
+                if count.is_multiple_of(64) {
+                    check_noise_abort(abort)?;
+                }
             }
-            count += 1;
+        }
+
+        // Hoermann's PTRS transformed rejection, Insurance: Mathematics and
+        // Economics 12 (1993), 39-45. Unlike a rounded Gaussian approximation,
+        // the Poisson mass governs acceptance, including the asymmetric tails.
+        let b = 0.931 + 2.53 * lambda.sqrt();
+        let a = -0.059 + 0.02483 * b;
+        let inverse_alpha = 1.1239 + 1.1328 / (b - 3.4);
+        let squeeze = 0.9277 - 3.6224 / (b - 2.0);
+        let mut attempts = 0u64;
+        loop {
+            attempts = attempts.wrapping_add(1);
+            if attempts.is_multiple_of(64) {
+                check_noise_abort(abort)?;
+            }
+            let u = self.uniform() - 0.5;
+            let v = self.uniform();
+            let distance = 0.5 - u.abs();
+            // Keep the result in Value's domain: converting through an integer
+            // type silently saturates means above that integer type's maximum.
+            let k = ((2.0 * a / distance + b) * u + lambda + 0.43).floor();
+            if k < 0.0 || !k.is_finite() {
+                continue;
+            }
+            if distance >= 0.07 && v <= squeeze {
+                return Ok(k);
+            }
+            if distance < 0.013 && v > distance {
+                continue;
+            }
+            let log_acceptance = v.ln() + inverse_alpha.ln() - (a / (distance * distance) + b).ln();
+            if log_acceptance <= poisson_log_mass(k, lambda) {
+                return Ok(k);
+            }
         }
     }
+}
+
+/// Log Poisson mass without subtracting O(lambda * log(lambda)) quantities.
+/// Near the mean, the deviance series starts with (k-lambda)^2/(2*lambda).
+/// Its scaled products remain finite even when k and lambda approach MAX.
+fn poisson_log_mass(k: Value, lambda: Value) -> Value {
+    if k == 0.0 {
+        return -lambda;
+    }
+    if k < 16.0 {
+        return k * lambda.ln() - lambda - libm::lgamma(k + 1.0);
+    }
+    let delta = k - lambda;
+    let relative = delta / lambda;
+    let deviance = if relative.abs() < 0.1 {
+        let mut term = 0.5 * delta * relative;
+        let mut sum = term;
+        // |relative| < 0.1 gives geometric convergence well before this bound.
+        for order in 3..=32 {
+            term *= -relative * Value::from(order - 2) / Value::from(order);
+            let next = sum + term;
+            if next == sum {
+                break;
+            }
+            sum = next;
+        }
+        sum
+    } else {
+        k * (k / lambda).ln() - delta
+    };
+    let reciprocal = 1.0 / k;
+    let square = reciprocal * reciprocal;
+    let stirling_error = reciprocal
+        * (1.0 / 12.0
+            + square
+                * (-1.0 / 360.0
+                    + square * (1.0 / 1260.0 + square * (-1.0 / 1680.0 + square / 1188.0))));
+    -deviance - stirling_error - 0.5 * k.ln() - 0.918_938_533_204_672_7
 }
 
 /// FNV-1a — stable, dependency-free name hash for per-source seeding.
@@ -688,6 +772,84 @@ mod tests {
     use super::*;
     use crate::abort_signal::NoAbort;
     use crate::netlist::Netlist;
+
+    #[test]
+    fn poisson_log_mass_matches_high_precision_references() {
+        // 420-digit decimal evaluation of k*ln(lambda)-lambda-ln(k!), using
+        // exact small factorials and a higher-order expansion for large k.
+        for (lambda, k, expected) in [
+            (10.0, 0.0, -10.0),
+            (10.0, 1.0, -7.697_414_907_005_954),
+            (10.0, 10.0, -2.078_561_643_135_058_6),
+            (10.0, 16.0, -3.830_498_618_175_942),
+            (63.75, 64.0, -3.000_171_704_174_925),
+            (1e6, 1_005_000.0, -20.308_406_260_130_05),
+            (1e18, 1.000_000_01e18, -71.642_204_208_484_42),
+            (1e20, 1.000_000_001e20, -73.944_795_590_978_64),
+            (1e100, 1e100, -116.048_193_182_906_96),
+            (Value::MAX, Value::MAX, -355.810_294_979_896_7),
+        ] {
+            let actual = poisson_log_mass(k, lambda);
+            assert!(
+                (actual - expected).abs() < 1e-12,
+                "lambda={lambda}, k={k}: {actual} vs {expected}"
+            );
+        }
+    }
+
+    #[test]
+    fn poisson_samples_retain_the_mean_variance_and_asymmetric_third_moment() {
+        let n = 250_000;
+        for lambda in [0.25, 9.5, 10.0, 64.0, 1e6] {
+            let mut rng = SplitMix64::new(42);
+            let mut moments = [0.0; 3];
+            for _ in 0..n {
+                let sample = rng.poisson(lambda, &NoAbort).unwrap();
+                assert!(sample >= 0.0 && sample.fract() == 0.0);
+                let delta = sample - lambda;
+                moments[0] += delta;
+                moments[1] += delta * delta;
+                moments[2] += delta * delta * delta;
+            }
+            // Bounds use the exact variances of the first three centered
+            // Poisson powers. At lambda=64 the former Gaussian shortcut loses
+            // the third moment by much more than this eight-sigma bound.
+            let variances = [
+                lambda,
+                lambda + 2.0 * lambda * lambda,
+                lambda + 24.0 * lambda * lambda + 15.0 * lambda * lambda * lambda,
+            ];
+            for (index, expected) in [0.0, lambda, lambda].into_iter().enumerate() {
+                let actual = moments[index] / Value::from(n);
+                let tolerance = 8.0 * (variances[index] / Value::from(n)).sqrt();
+                assert!(
+                    (actual - expected).abs() < tolerance,
+                    "lambda={lambda}, moment={}: {actual} vs {expected} +/- {tolerance}",
+                    index + 1
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn poisson_generation_preserves_large_means_and_honors_cancellation() {
+        use crate::abort_signal::ImmediateAbort;
+        for lambda in [1e6, 1e18, 1e20, 1e100, Value::MAX] {
+            let mut rng = SplitMix64::new(42);
+            for _ in 0..128 {
+                let sample = rng.poisson(lambda, &NoAbort).unwrap();
+                assert!(sample.is_finite() && sample >= 0.0);
+                assert!(
+                    (sample / lambda - 1.0).abs() <= 12.0 / lambda.sqrt() + 4.0 * Value::EPSILON,
+                    "lambda={lambda}, sample={sample}"
+                );
+            }
+            assert!(matches!(
+                rng.poisson(lambda, &ImmediateAbort),
+                Err(SimulationError::Aborted)
+            ));
+        }
+    }
 
     #[test]
     fn finite_stop_time_cannot_overflow_generated_source_clocks() {

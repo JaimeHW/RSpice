@@ -66,7 +66,7 @@ impl Engine {
 
         // Capacitor-bearing decks carry dynamic state in node voltages, so a
         // tiny node delta there is not enough evidence to reject an otherwise
-        // bounded recovery step. Active-source stale checks remain separate.
+        // bounded recovery step.
         if !circuit.capacitors.is_empty() {
             return false;
         }
@@ -86,35 +86,6 @@ impl Engine {
             &circuit.inductors.branch_indices,
         );
         dynamic_current_delta <= current_threshold
-    }
-
-    #[inline]
-    pub(super) fn is_stale_step(
-        previous_solution: &[Value],
-        candidate_solution: &[Value],
-        expected_source_delta: Value,
-        num_nodes: usize,
-        dynamic_branch_ordinals: &[crate::NodeId],
-    ) -> bool {
-        // Only police stale accepts when sources are strongly active on this step.
-        // Weak source movement can legitimately yield tiny accepted deltas in
-        // high-rejection circuits (for example differential stages).
-        if expected_source_delta <= SOURCE_ACTIVE_DELTA {
-            return false;
-        }
-
-        // If the entire solution moves orders of magnitude less than the source
-        // should have moved, the solver likely accepted a stale state.
-        let node_delta =
-            Self::max_abs_delta_prefix(previous_solution, candidate_solution, num_nodes);
-        let dynamic_current_delta = Self::max_abs_delta_branch_ordinals(
-            previous_solution,
-            candidate_solution,
-            num_nodes,
-            dynamic_branch_ordinals,
-        );
-        let observed_delta = node_delta.max(dynamic_current_delta);
-        observed_delta <= expected_source_delta * 1e-3
     }
 
     #[inline]

@@ -4,6 +4,31 @@ use rspice_core::engine::{Engine, SimulationConfig};
 use rspice_core::netlist::Netlist;
 
 #[test]
+fn large_poisson_current_sources_preserve_their_mean_through_a_shunt() {
+    let engine = Engine::default();
+    for lambda in [64.0_f64, 1e6, 1e18, 1e20, 1e100] {
+        let netlist = Netlist::parse(&format!(
+            "Poisson shunt\nI1 0 out TRRANDOM(4 1n 0 {lambda} 0)\nR1 out 0 {}\n.end\n",
+            1.0 / lambda
+        ))
+        .unwrap();
+        let result = engine
+            .run_tran(&netlist, 4e-9, 1e-9)
+            .unwrap_or_else(|error| panic!("lambda={lambda}: {error}"));
+        let output = result.try_voltage_waveform_named("out").unwrap();
+        assert_eq!(output[0], 0.0);
+        for value in output.iter().skip(1) {
+            assert!(
+                (value - 1.0).abs() < 12.0 / lambda.sqrt() + 1e-12,
+                "lambda={lambda}, normalized sample={value}"
+            );
+        }
+        assert_eq!(result.time.last().copied(), Some(4e-9));
+        assert_eq!(engine.convergence_quality().force_accepted_points, 0);
+    }
+}
+
+#[test]
 fn trnoise_startup_matches_zero_origin_and_explicit_dc_bias() {
     let engine = Engine::default();
     for waveform in [
@@ -94,6 +119,7 @@ fn extending_noise_horizons_preserves_every_locked_sample() {
         "TRNOISE(1 1n 1 1 1 .7n .9n)",
         "TRNOISE(0 0 0 0 1 .7n .9n)",
         "TRRANDOM(2 1n .3n 1 0)",
+        "TRRANDOM(4 1n .3n 64 0)",
     ] {
         let netlist = Netlist::parse(&format!(
             "noise horizon\nV1 out 0 {waveform}\nR1 out 0 1\n.end\n"
