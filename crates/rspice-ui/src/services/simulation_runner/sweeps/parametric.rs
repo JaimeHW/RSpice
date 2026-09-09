@@ -103,9 +103,9 @@ pub fn run_parametric_analysis_with_base_and_source_path_and_abort(
         .step_netlists_for_command_with_abort(&netlist, step_cmd, &values, abort)
         .map_err(|error| ServiceRunError::from_core("Parametric analysis error", error))?;
     let mut results = Vec::with_capacity(stepped.len());
-    for (value, stepped_netlist) in stepped {
+    for (value, mut stepped_netlist) in stepped {
         ensure_not_aborted(abort)?;
-        let (names, values) = run_base_analysis(&engine, &stepped_netlist, base_mode, abort)
+        let (names, values) = run_base_analysis(&engine, &mut stepped_netlist, base_mode, abort)
             .map_err(|error| ServiceRunError::from_core("Parametric base analysis error", error))?;
         results.push((value, names, values));
     }
@@ -171,7 +171,7 @@ pub fn run_parametric_analysis_with_base_and_source_path_and_abort(
 
 fn run_base_analysis(
     engine: &Engine,
-    netlist: &rspice_core::Netlist,
+    netlist: &mut rspice_core::Netlist,
     mode: &CornerBaseMode,
     abort: &dyn AbortSignal,
 ) -> Result<(Vec<String>, Vec<f64>), rspice_core::SimulationError> {
@@ -248,17 +248,34 @@ fn run_base_analysis(
         CornerBaseMode::Transient {
             stop_time,
             step_time,
-        } => terminal_transient(engine, netlist, *stop_time, *step_time, abort),
-        CornerBaseMode::TransientWindow {
-            stop_time,
-            step_time,
-            max_timestep,
-            ..
         } => terminal_transient(
             engine,
             netlist,
-            *stop_time,
-            max_timestep.unwrap_or(*step_time),
+            AnalysisCommand::Tran {
+                step: *step_time,
+                stop: *stop_time,
+                start: None,
+                max_step: None,
+                uic: false,
+            },
+            abort,
+        ),
+        CornerBaseMode::TransientWindow {
+            stop_time,
+            step_time,
+            start_time,
+            max_timestep,
+            uic,
+        } => terminal_transient(
+            engine,
+            netlist,
+            AnalysisCommand::Tran {
+                step: *step_time,
+                stop: *stop_time,
+                start: Some(*start_time),
+                max_step: *max_timestep,
+                uic: *uic,
+            },
             abort,
         ),
         CornerBaseMode::Ac {
@@ -301,12 +318,47 @@ fn run_base_analysis(
 
 fn terminal_transient(
     engine: &Engine,
-    netlist: &rspice_core::Netlist,
-    stop_time: f64,
-    max_timestep: f64,
+    netlist: &mut rspice_core::Netlist,
+    command: AnalysisCommand,
     abort: &dyn AbortSignal,
 ) -> Result<(Vec<String>, Vec<f64>), rspice_core::SimulationError> {
-    let result = engine.run_tran_with_abort(netlist, stop_time, max_timestep, abort)?;
+    let AnalysisCommand::Tran {
+        step,
+        stop,
+        start,
+        max_step,
+        uic,
+    } = command
+    else {
+        return Err(rspice_core::SimulationError::Circuit(
+            "transient base sweep requires a transient command".to_owned(),
+        ));
+    };
+    let maximum_step =
+        rspice_core::execution::resolve_transient_maximum_step(step, stop, start, max_step)
+            .map_err(|error| rspice_core::SimulationError::Circuit(error.to_string()))?;
+
+    // The step expansion already owns this netlist. Bind its transient card
+    // in place so startup, initial-step hints and source defaults all belong
+    // to the selected base, even when the authored deck has other cards.
+    let mut analyses = Vec::with_capacity(netlist.analyses.len() + 1);
+    for analysis in netlist.analyses.drain(..) {
+        if abort.is_aborted() {
+            return Err(rspice_core::SimulationError::Aborted);
+        }
+        if !matches!(analysis, AnalysisCommand::Tran { .. }) {
+            analyses.push(analysis);
+        }
+    }
+    analyses.push(command);
+    netlist.analyses = analyses;
+    let result = engine.run_tran_with_startup_mode_and_abort(
+        netlist,
+        stop,
+        maximum_step,
+        rspice_core::engine::TransientStartupMode::from_uic(uic),
+        abort,
+    )?;
     if result.node_names.len() != result.voltages.len() {
         return Err(rspice_core::SimulationError::Circuit(format!(
             "transient base sweep returned {} node names but {} waveforms",
@@ -314,26 +366,26 @@ fn terminal_transient(
             result.voltages.len()
         )));
     }
+    let mut names = Vec::with_capacity(result.node_names.len());
     let mut values = Vec::with_capacity(result.voltages.len());
-    for (node_index, waveform) in result.voltages.iter().enumerate() {
+    for (name, waveform) in result.node_names.into_iter().zip(result.voltages) {
         if abort.is_aborted() {
             return Err(rspice_core::SimulationError::Aborted);
         }
-        let value = waveform.last().copied().ok_or_else(|| {
-            rspice_core::SimulationError::Circuit(format!(
-                "transient base sweep returned an empty waveform for node '{}'",
-                result.node_names[node_index]
-            ))
-        })?;
+        // Output projection retains node/index alignment with empty vectors
+        // for unselected signals. Only retained waveforms form this family.
+        let Some(value) = waveform.last().copied() else {
+            continue;
+        };
         if !value.is_finite() {
             return Err(rspice_core::SimulationError::Circuit(format!(
-                "transient base sweep returned a non-finite terminal value for node '{}'",
-                result.node_names[node_index]
+                "transient base sweep returned a non-finite terminal value for node '{name}'"
             )));
         }
+        names.push(name);
         values.push(value);
     }
-    Ok((result.node_names, values))
+    Ok((names, values))
 }
 
 fn validate_terminal_quantities(
@@ -498,5 +550,193 @@ R2 out 0 1k
             .expect("terminal output trace");
         assert_eq!(output.len(), 2);
         assert!(output.iter().all(|value| value.is_finite()));
+    }
+
+    fn assert_selected_transient(
+        mode: &CornerBaseMode,
+        deck_cards: &str,
+        selected_card: &str,
+        maximum_step: f64,
+        uic: bool,
+    ) {
+        let data = run_parametric_analysis_with_base_and_source_path_and_abort(
+            &format!(
+                "parametric startup\n.param rload=1k\nV1 in 0 1\nR1 in out {{rload}}\n\
+                 C1 out 0 1u ic=0\n{deck_cards}\n.step param rload list 1k 2k\n.end\n"
+            ),
+            None,
+            mode,
+            &NoAbort,
+        )
+        .expect("execute the selected base at both parameter points");
+        assert_eq!(data.sweep_values, vec![1000.0, 2000.0]);
+        assert_eq!(data.num_failures, 0);
+        let (_, actual) = data
+            .voltages
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case("V(out)"))
+            .expect("terminal output trace");
+        assert_eq!(actual.len(), 2);
+        for (&resistance, &actual) in data.sweep_values.iter().zip(actual) {
+            // Independently author the selected card and component value;
+            // this path does not use the sweep's configuration conversion.
+            let reference = rspice_core::Netlist::parse(&format!(
+                "selected reference\nV1 in 0 1\nR1 in out {resistance}\n\
+                 C1 out 0 1u ic=0\n{selected_card}\n.end\n"
+            ))
+            .unwrap();
+            let result = Engine::default()
+                .run_tran_with_startup_mode(
+                    &reference,
+                    100e-6,
+                    maximum_step,
+                    rspice_core::engine::TransientStartupMode::from_uic(uic),
+                )
+                .unwrap();
+            let index = result
+                .node_names
+                .iter()
+                .position(|name| name.eq_ignore_ascii_case("out"))
+                .unwrap();
+            let expected = *result.voltages[index].last().unwrap();
+            let analytic = if uic {
+                1.0 - (-100e-6 / (resistance * 1e-6)).exp()
+            } else {
+                1.0
+            };
+            assert!(
+                (expected - analytic).abs() < 1e-4,
+                "reference {expected} differs from analytic RC value {analytic}"
+            );
+            assert!(
+                (actual - expected).abs() < 1e-12,
+                "{mode:?}, deck {deck_cards:?}, R={resistance}: sweep {actual}, selected reference {expected}"
+            );
+        }
+    }
+
+    #[test]
+    fn parametric_transient_uses_selected_startup_and_card() {
+        for uic in [false, true] {
+            let mode = CornerBaseMode::TransientWindow {
+                stop_time: 100e-6,
+                step_time: 10e-6,
+                start_time: 0.0,
+                max_timestep: Some(1e-6),
+                uic,
+            };
+            let selected = if uic {
+                ".tran 10u 100u 0 1u uic"
+            } else {
+                ".tran 10u 100u 0 1u"
+            };
+            for cards in [
+                "",
+                ".tran 70u 700u",
+                ".tran 70u 700u uic",
+                ".tran 70u 700u\n.tran 80u 800u uic",
+            ] {
+                assert_selected_transient(&mode, cards, selected, 1e-6, uic);
+            }
+        }
+        assert_selected_transient(
+            &CornerBaseMode::Transient {
+                stop_time: 100e-6,
+                step_time: 10e-6,
+            },
+            ".tran 70u 700u uic",
+            ".tran 10u 100u",
+            2e-6,
+            false,
+        );
+    }
+
+    #[test]
+    fn parametric_transient_uses_selected_window_and_maximum_step() {
+        for (step_time, start_time, max_timestep, ceiling, selected) in [
+            (10e-6, 90e-6, None, 0.2e-6, ".tran 10u 100u 90u uic"),
+            (
+                0.1e-6,
+                90e-6,
+                Some(0.7e-6),
+                0.7e-6,
+                ".tran 0.1u 100u 90u 0.7u uic",
+            ),
+            (1e-3, 0.0, None, 2e-6, ".tran 1m 100u uic"),
+            (0.1e-6, 0.0, None, 0.1e-6, ".tran 0.1u 100u uic"),
+        ] {
+            assert_selected_transient(
+                &CornerBaseMode::TransientWindow {
+                    stop_time: 100e-6,
+                    step_time,
+                    start_time,
+                    max_timestep,
+                    uic: true,
+                },
+                ".tran 70u 700u uic",
+                selected,
+                ceiling,
+                true,
+            );
+        }
+    }
+
+    #[test]
+    fn parametric_transient_rejects_default_step_underflow_before_parsing() {
+        let smallest = f64::from_bits(1);
+        for mode in [
+            CornerBaseMode::Transient {
+                stop_time: smallest,
+                step_time: smallest,
+            },
+            CornerBaseMode::TransientWindow {
+                stop_time: smallest,
+                step_time: smallest,
+                start_time: 0.0,
+                max_timestep: None,
+                uic: true,
+            },
+        ] {
+            let error = run_parametric_analysis_with_base_and_source_path_and_abort(
+                "invalid deck",
+                None,
+                &mode,
+                &NoAbort,
+            )
+            .expect_err("reject the unrepresentable default before deck parsing");
+            assert!(
+                error.to_string().contains("default TMAX underflowed"),
+                "{error}"
+            );
+        }
+    }
+
+    #[test]
+    fn parametric_transient_preserves_selected_voltage_outputs() {
+        for (selected, expected) in [("out", vec![0.5, 1.0 / 3.0]), ("in", vec![1.0, 1.0])] {
+            let data = run_parametric_analysis_with_base_and_source_path_and_abort(
+                &format!(
+                    "parametric outputs\n.param rload=1k\nV1 in 0 1\n\
+                     R1 in out {{rload}}\nR2 out 0 1k\n.tran 1u 100u\n\
+                     .save v({selected})\n.step param rload list 1k 2k\n.end\n"
+                ),
+                None,
+                &CornerBaseMode::Transient {
+                    stop_time: 100e-6,
+                    step_time: 1e-6,
+                },
+                &NoAbort,
+            )
+            .expect("an intentionally omitted node is not a failed waveform");
+            assert_eq!(data.sweep_values, vec![1000.0, 2000.0]);
+            assert_eq!(data.num_failures, 0);
+            assert_eq!(data.voltages.len(), 1);
+            let (name, values) = &data.voltages[0];
+            assert!(name.eq_ignore_ascii_case(&format!("V({selected})")));
+            assert_eq!(values.len(), expected.len());
+            for (actual, expected) in values.iter().zip(expected) {
+                assert!((actual - expected).abs() < 1e-12, "{actual} != {expected}");
+            }
+        }
     }
 }

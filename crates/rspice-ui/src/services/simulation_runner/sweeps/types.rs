@@ -436,24 +436,7 @@ pub(super) fn validate_base_mode(context: &str, base_mode: &CornerBaseMode) -> R
             stop_time,
             step_time,
         } => {
-            if !stop_time.is_finite() || *stop_time <= 0.0 {
-                return Err(format!(
-                    "{} transient base mode stop_time must be a positive finite value",
-                    context
-                ));
-            }
-            if !step_time.is_finite() || *step_time <= 0.0 {
-                return Err(format!(
-                    "{} transient base mode step_time must be a positive finite value",
-                    context
-                ));
-            }
-            if step_time > stop_time {
-                return Err(format!(
-                    "{} transient base mode step_time must be <= stop_time",
-                    context
-                ));
-            }
+            validate_transient_base(context, *stop_time, *step_time, None, None)?;
         }
         CornerBaseMode::TransientWindow {
             stop_time,
@@ -462,19 +445,13 @@ pub(super) fn validate_base_mode(context: &str, base_mode: &CornerBaseMode) -> R
             max_timestep,
             ..
         } => {
-            validate_transient_base(context, *stop_time, *step_time)?;
-            if !start_time.is_finite() || *start_time < 0.0 || start_time >= stop_time {
-                return Err(format!(
-                    "{context} transient start_time must be finite, non-negative, and below stop_time"
-                ));
-            }
-            if let Some(max_timestep) = max_timestep
-                && (!max_timestep.is_finite() || *max_timestep <= 0.0)
-            {
-                return Err(format!(
-                    "{context} transient max_timestep must be a positive finite value"
-                ));
-            }
+            validate_transient_base(
+                context,
+                *stop_time,
+                *step_time,
+                Some(*start_time),
+                *max_timestep,
+            )?;
         }
         CornerBaseMode::Ac {
             start_freq,
@@ -543,23 +520,17 @@ fn validate_transient_base(
     context: &str,
     stop_time: Value,
     step_time: Value,
+    start_time: Option<Value>,
+    max_timestep: Option<Value>,
 ) -> Result<(), String> {
-    if !stop_time.is_finite() || stop_time <= 0.0 {
-        return Err(format!(
-            "{context} transient base mode stop_time must be a positive finite value"
-        ));
-    }
-    if !step_time.is_finite() || step_time <= 0.0 {
-        return Err(format!(
-            "{context} transient base mode step_time must be a positive finite value"
-        ));
-    }
-    if step_time > stop_time {
-        return Err(format!(
-            "{context} transient base mode step_time must be <= stop_time"
-        ));
-    }
-    Ok(())
+    rspice_core::execution::resolve_transient_maximum_step(
+        step_time,
+        stop_time,
+        start_time,
+        max_timestep,
+    )
+    .map(|_| ())
+    .map_err(|error| format!("{context} transient base mode: {error}"))
 }
 
 /// One executable corner point.
