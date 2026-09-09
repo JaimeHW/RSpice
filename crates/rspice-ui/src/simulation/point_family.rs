@@ -322,15 +322,10 @@ fn waveforms_over(
     waveforms
 }
 
-/// One scalar per node for every point that converged, all of them stating
-/// their nodes in the same order.
-///
-/// The mappers pair a trace name taken from the first point with a sample
-/// taken from every point by index, so a point that listed its nodes in a
-/// different order would relabel every trace after it. The order is therefore
-/// imposed here — the first converged point's node list, by name — and a later
-/// point that is missing one of those nodes reads zero for it rather than
-/// shifting the rest.
+/// One scalar per node for every point that converged, sorted by node name.
+/// Keep each point's actual nodes so the mappers can reject a changed signal
+/// basis. Filling an absent node with zero or dropping an additional node
+/// would invent a family that the retained point results do not support.
 fn converged_point_results<A: Copy>(
     base_mode: &CornerBaseMode,
     solved: &[(A, &AnalysisResult)],
@@ -343,40 +338,18 @@ fn converged_point_results<A: Copy>(
         let Some(values) = point_node_values(analysis, base_mode) else {
             continue;
         };
-        collected.push((*point, values));
+        let (node_names, node_values) = std::iter::once((GROUND_NODE.to_owned(), 0.0))
+            .chain(values)
+            .unzip();
+        collected.push((
+            *point,
+            SweepPointResult {
+                node_names,
+                node_values,
+            },
+        ));
     }
-
-    let Some((_, first)) = collected.first() else {
-        return Vec::new();
-    };
-    let mut node_names = Vec::with_capacity(first.len().saturating_add(1));
-    node_names.push(GROUND_NODE.to_owned());
-    node_names.extend(first.iter().map(|(name, _)| name.clone()));
-
     collected
-        .into_iter()
-        .map(|(point, values)| {
-            let by_name = values.into_iter().collect::<HashMap<_, _>>();
-            let node_values = node_names
-                .iter()
-                .enumerate()
-                .map(|(index, name)| {
-                    if index == 0 {
-                        0.0
-                    } else {
-                        by_name.get(name).copied().unwrap_or(0.0)
-                    }
-                })
-                .collect();
-            (
-                point,
-                SweepPointResult {
-                    node_names: node_names.clone(),
-                    node_values,
-                },
-            )
-        })
-        .collect()
 }
 
 /// The scalar each node contributed at one point, named the way the deck names
@@ -465,6 +438,8 @@ fn is_branch_current(name: &str) -> bool {
     (name.starts_with("I(") || name.starts_with("i(")) && name.ends_with(')')
 }
 
+#[cfg(test)]
+mod basis_tests;
 #[cfg(test)]
 mod corner_tests;
 #[cfg(test)]

@@ -198,17 +198,24 @@ fn render_studio(ctx: &Context, app: &mut RSpiceApp, viewport: Vec2) -> egui::Fu
 
 /// Fonts build on the first pass, the source resolves on a worker thread,
 /// and the exact page raster lands a pass after the plan it belongs to. The
-/// measurement is only meaningful once all three have happened, so the
-/// probe waits for them.
+/// measurement is only meaningful once all three have happened and the modal
+/// fade has finished, so the probe waits for them using egui's frame clock.
 #[cfg(not(target_arch = "wasm32"))]
 fn settled_studio(ctx: &Context, app: &mut RSpiceApp, viewport: Vec2) -> egui::FullOutput {
+    let _ = render_studio(ctx, app, viewport);
+    let fully_visible_at =
+        ctx.input(|input| input.time) + f64::from(ctx.global_style().animation_time);
     for _ in 0..400 {
         let _ = render_studio(ctx, app, viewport);
-        if app.state.dialogs.hardcopy.preview.is_some() {
+        if app.state.dialogs.hardcopy.preview.is_some()
+            && ctx.input(|input| input.time) >= fully_visible_at
+        {
             let _ = render_studio(ctx, app, viewport);
             return render_studio(ctx, app, viewport);
         }
-        std::thread::sleep(std::time::Duration::from_millis(5));
+        if app.state.dialogs.hardcopy.preview.is_none() {
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
     }
     panic!("the hardcopy studio never resolved a source and an exact page preview");
 }
@@ -651,89 +658,100 @@ fn no_widget_changes_its_id_as_the_studio_changes() {
 #[test]
 #[cfg(not(target_arch = "wasm32"))]
 fn a_blocked_section_is_marked_on_the_rail_from_every_other_section() {
-    let ctx = Context::default();
-    ctx.enable_accesskit();
-    crate::ui::Theme::default().apply(&ctx);
-    let err = Tokens::get(&ctx).color.err;
-    let mut app = studio_app();
-    let viewport = vec2(1_440.0, 900.0);
+    for ready_preview in [false, true] {
+        let ctx = Context::default();
+        ctx.enable_accesskit();
+        crate::ui::Theme::default().apply(&ctx);
+        let err = Tokens::get(&ctx).color.err;
+        let mut app = studio_app();
+        let viewport = vec2(1_440.0, 900.0);
 
-    let settled = settled_studio(&ctx, &mut app, viewport);
-    let clean = dialog_controls(&settled);
-    let clean_row = control_rect(&clean, HardcopySection::Page.label())
-        .expect("the rail names every section it offers");
-    assert!(
-        marker_rects(&settled, err)
-            .iter()
-            .all(|marker| !clean_row.contains_rect(*marker)),
-        "a valid configuration marks nothing"
-    );
+        if ready_preview {
+            // A resolved preview can arrive before a newly opened dialog finishes
+            // fading in. Warm the real source/preview pipeline in another context
+            // so this case does not depend on the machine's worker scheduling.
+            let warm_context = Context::default();
+            crate::ui::Theme::default().apply(&warm_context);
+            let _ = settled_studio(&warm_context, &mut app, viewport);
+        }
 
-    // A margin wider than the page, entered while standing in Output.
-    app.state.dialogs.hardcopy.section = HardcopySection::Output;
-    app.state.dialogs.hardcopy.margin_left = "100".to_owned();
-    app.state.dialogs.hardcopy.refresh_preview();
-    assert_eq!(
-        app.state.dialogs.hardcopy.error_section,
-        Some(HardcopySection::Page)
-    );
-    // A blocked draft compiles no plan, so the settling probe would wait
-    // for a preview that can never arrive. Two passes are what the tree
-    // needs: one to lay the rail out and one to report it.
-    let _ = render_studio(&ctx, &mut app, viewport);
-    let blocked = render_studio(&ctx, &mut app, viewport);
-    let controls = dialog_controls(&blocked);
-
-    let marked = control_rect(&controls, "Page and pagination · blocked")
-        .expect("the rail entry names the section that holds the refused field");
-    // The entry sets its title as text inside itself as well. What has to
-    // carry the mark is the row a keyboard or screen reader lands on, which
-    // is the one that contains the other.
-    let title = control_rect(&controls, HardcopySection::Page.label())
-        .expect("the entry still draws its title");
-    assert!(
-        marked.contains_rect(title) && marked.height() > title.height(),
-        "the mark is on a label inside the entry rather than on the entry"
-    );
-    for section in [
-        HardcopySection::Source,
-        HardcopySection::Output,
-        HardcopySection::Identity,
-    ] {
+        let settled = settled_studio(&ctx, &mut app, viewport);
+        let clean = dialog_controls(&settled);
+        let clean_row = control_rect(&clean, HardcopySection::Page.label())
+            .expect("the rail names every section it offers");
         assert!(
-            control_rect(&controls, &format!("{} · blocked", section.label())).is_none(),
-            "{section:?} holds nothing invalid and must not be marked"
+            marker_rects(&settled, err)
+                .iter()
+                .all(|marker| !clean_row.contains_rect(*marker)),
+            "a valid configuration marks nothing"
+        );
+
+        // A margin wider than the page, entered while standing in Output.
+        app.state.dialogs.hardcopy.section = HardcopySection::Output;
+        app.state.dialogs.hardcopy.margin_left = "100".to_owned();
+        app.state.dialogs.hardcopy.refresh_preview();
+        assert_eq!(
+            app.state.dialogs.hardcopy.error_section,
+            Some(HardcopySection::Page)
+        );
+        // A blocked draft compiles no plan, so the settling probe would wait
+        // for a preview that can never arrive. Two passes are what the tree
+        // needs: one to lay the rail out and one to report it.
+        let _ = render_studio(&ctx, &mut app, viewport);
+        let blocked = render_studio(&ctx, &mut app, viewport);
+        let controls = dialog_controls(&blocked);
+
+        let marked = control_rect(&controls, "Page and pagination · blocked")
+            .expect("the rail entry names the section that holds the refused field");
+        // The entry sets its title as text inside itself as well. What has to
+        // carry the mark is the row a keyboard or screen reader lands on, which
+        // is the one that contains the other.
+        let title = control_rect(&controls, HardcopySection::Page.label())
+            .expect("the entry still draws its title");
+        assert!(
+            marked.contains_rect(title) && marked.height() > title.height(),
+            "the mark is on a label inside the entry rather than on the entry"
+        );
+        for section in [
+            HardcopySection::Source,
+            HardcopySection::Output,
+            HardcopySection::Identity,
+        ] {
+            assert!(
+                control_rect(&controls, &format!("{} · blocked", section.label())).is_none(),
+                "{section:?} holds nothing invalid and must not be marked"
+            );
+        }
+        assert!(
+            (marked.height() - clean_row.height()).abs() < 0.5,
+            "the marker grew the rail row from {:.0} pt to {:.0} pt",
+            clean_row.height(),
+            marked.height()
+        );
+        let markers: Vec<Rect> = marker_rects(&blocked, err)
+            .into_iter()
+            .filter(|marker| marked.contains_rect(*marker))
+            .collect();
+        assert_eq!(
+            markers.len(),
+            1,
+            "the marked entry carries exactly one painted mark"
+        );
+        assert!(
+            marked.right() - markers[0].right() < PROBLEM_MARKER_TRACK,
+            "the mark sits at the entry's trailing edge"
+        );
+
+        // The strip the primary's refusal is explained in names the same
+        // section, so the banner and the rail cannot send the operator to
+        // different places.
+        assert!(
+            controls
+                .iter()
+                .any(|(label, _)| label == "Blocked in Page and pagination"),
+            "the transaction strip names the section holding the primary"
         );
     }
-    assert!(
-        (marked.height() - clean_row.height()).abs() < 0.5,
-        "the marker grew the rail row from {:.0} pt to {:.0} pt",
-        clean_row.height(),
-        marked.height()
-    );
-    let markers: Vec<Rect> = marker_rects(&blocked, err)
-        .into_iter()
-        .filter(|marker| marked.contains_rect(*marker))
-        .collect();
-    assert_eq!(
-        markers.len(),
-        1,
-        "the marked entry carries exactly one painted mark"
-    );
-    assert!(
-        marked.right() - markers[0].right() < PROBLEM_MARKER_TRACK,
-        "the mark sits at the entry's trailing edge"
-    );
-
-    // The strip the primary's refusal is explained in names the same
-    // section, so the banner and the rail cannot send the operator to
-    // different places.
-    assert!(
-        controls
-            .iter()
-            .any(|(label, _)| label == "Blocked in Page and pagination"),
-        "the transaction strip names the section holding the primary"
-    );
 }
 
 /// Below the rail's width the chips are the rail, and a mark that only
