@@ -1447,3 +1447,113 @@ fn native_levels_unaffected() {
         run(&deck).unwrap_or_else(|err| panic!("{model_line} must build: {err}"));
     }
 }
+
+#[test]
+fn classic_mos_geometry_and_series_inputs_fail_closed() {
+    for level in [1, 2, 3, 4, 5, 6, 9] {
+        for (instance, model, reason) in [
+            ("AD=-1", "", "AD"),
+            ("AS=-1", "", "AS"),
+            ("PD=-1", "", "PD"),
+            ("PS=-1", "", "PS"),
+            ("NRD=-1", "RSH=100", "NRD"),
+            ("NRS=-1", "RSH=100", "NRS"),
+            ("", "RD=-1", "RD"),
+            ("", "RS=-1", "RS"),
+            ("", "RSH=-1", "RSH"),
+            ("NRD=1e308 NRS=0", "RSH=1e308", "series resistance"),
+            ("NRD=0 NRS=1e308", "RSH=1e308", "series resistance"),
+            ("M=1e200", "RD=1e-200", "series resistance"),
+            ("M=1e-200", "RS=1e200", "series resistance"),
+            ("", "RD=1e-320", "series resistance"),
+            ("NRD=1e-200 NRS=0", "RSH=1e-200", "series resistance"),
+        ] {
+            let netlist = Netlist::parse(&format!(
+                "Invalid MOS geometry or series resistance\nVD d 0 2\nVG g 0 1.5\nM1 d g 0 0 mm W=1u L=1u {instance}\n.model mm NMOS(LEVEL={level} TOX=0.03 {model})\n.end\n"
+            )).unwrap();
+            let error = Engine::default()
+                .build_circuit(&netlist)
+                .unwrap_err()
+                .to_string();
+            assert!(
+                error.contains("M1") && error.contains("MM") && error.contains(reason),
+                "L{level} {instance} {model}: {error}"
+            );
+        }
+    }
+}
+
+#[test]
+fn classic_mos_series_precedence_matches_explicit_resistor_values() {
+    // MOS1/2/3/6/9 select authored RD/RS even when zero (mos1temp.c).
+    // RSpice also exposes this override on its legacy BSIM RSH network.
+    for level in [1, 2, 3, 4, 5, 6, 9] {
+        for (kind, p) in [("NMOS", 1.0), ("PMOS", -1.0)] {
+            for (model, reference) in [
+                ("RSH=100 RD=0 RS=0", "RD=0 RS=0"),
+                ("RSH=100 RD=0", "RD=0 RS=70"),
+                ("RSH=100 RS=0", "RD=40 RS=0"),
+                ("RSH=100", "RD=40 RS=70"),
+                ("RSH=100 RD=20 RS=10", "RD=20 RS=10"),
+            ] {
+                let make = |series| {
+                    Netlist::parse(&format!(
+                    "MOS series precedence\nVD d 0 DC {} AC 0.3\nVG g 0 DC {} AC 1\nM1 d g 0 0 mm W=2u L=1u M=2 NF=3 NRD=0.4 NRS=0.7\n.model mm {kind}(LEVEL={level} TOX=0.03 VTO={} VFB=-0.7 PHI=0.6 MUZ=400 MUS=500 VDD=2 MU0=400 MUS0=500 {series})\n.options RELTOL=1e-9 ABSTOL=1e-13 VNTOL=1e-11\n.end\n",
+                    p*2.0, p*1.5, p*0.5
+                )).unwrap()
+                };
+                let actual = make(model);
+                let expected = make(reference);
+                let engine = Engine::default().resolved_for_netlist(&actual);
+                let a = engine.build_circuit(&actual).unwrap();
+                let e = engine.build_circuit(&expected).unwrap();
+                assert_eq!(
+                    a.node_names_sorted(),
+                    e.node_names_sorted(),
+                    "L{level} {model}"
+                );
+                let a = engine.run_dc_op(&actual).unwrap();
+                let e = engine.run_dc_op(&expected).unwrap();
+                for (a, e) in a.branch_currents.iter().zip(&e.branch_currents) {
+                    assert!(
+                        (a - e).abs() < 1e-14 + e.abs() * 1e-10,
+                        "L{level} {kind} {model} DC: {a} vs {e}"
+                    );
+                }
+                let a = engine.run_ac(&actual, &[1e6]).unwrap();
+                let e = engine.run_ac(&expected, &[1e6]).unwrap();
+                for (a, e) in a[0].currents.iter().zip(&e[0].currents) {
+                    assert!(
+                        (a - e).norm() < 1e-14 + e.norm() * 1e-10,
+                        "L{level} {kind} {model} AC: {a} vs {e}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn classic_mos_series_zero_retains_xyce_sheet_resistance() {
+    use rspice_core::config::SpiceDialect;
+    for level in [1, 2, 3, 6] {
+        let make = |model| {
+            Netlist::parse(&format!(
+            "Xyce MOS series precedence\nVD d 0 DC 2 AC 0.3\nVG g 0 DC 1.5 AC 1\nM1 d g 0 0 mm W=2u L=1u M=2 NRD=0.4 NRS=0.7\n.model mm NMOS(LEVEL={level} VTO=0.5 {model})\n.end\n"
+        )).unwrap()
+        };
+        let engine =
+            Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce));
+        let actual = make("RD=0 RS=0 RSH=100");
+        let expected = make("RD=40 RS=70");
+        let a = engine.run_dc_op(&actual).unwrap();
+        let e = engine.run_dc_op(&expected).unwrap();
+        assert_eq!(a.node_names, e.node_names);
+        for (a, e) in a.branch_currents.iter().zip(&e.branch_currents) {
+            assert!(
+                (a - e).abs() < 1e-14 + e.abs() * 1e-10,
+                "L{level}: {a} vs {e}"
+            );
+        }
+    }
+}

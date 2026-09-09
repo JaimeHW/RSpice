@@ -6700,21 +6700,54 @@ impl Engine {
                     // terminals make junction noise and limiting act at the
                     // true internal nodes. BSIM1/BSIM2 default NRD/NRS to one
                     // and therefore participate in this path as well.
-                    let multiplicity = mosfet.multiplicity;
-                    let drain_r = if mosfet.rd_model > 0.0 {
-                        mosfet.rd_model
-                    } else if mosfet.rsh > 0.0 {
-                        mosfet.rsh * mosfet.nrd.max(0.0)
-                    } else {
-                        0.0
+                    let series_resistance = |label: &str, explicit: Value, squares: Value| {
+                        // Xyce selects a nonzero RD/RS; Berkeley selects
+                        // an authored RD/RS, including zero (mos1temp.c).
+                        let given = explicit != 0.0
+                            || (self.config.spice_dialect != SpiceDialect::Xyce
+                                && params_map
+                                    .as_ref()
+                                    .is_some_and(|params| params.contains_key(label)));
+                        let (resistance, scale) = if given {
+                            (explicit, 1.0)
+                        } else {
+                            (mosfet.rsh, squares)
+                        };
+                        // An authored zero suppresses the sheet-resistance
+                        // fallback, just as a zero diffusion square does.
+                        if resistance == 0.0 || scale == 0.0 {
+                            return Ok(0.0);
+                        }
+                        let multiplicity = mosfet.multiplicity;
+                        let valid = |r: Value| r.is_finite() && r > 0.0 && r.recip().is_finite();
+                        let product = resistance * scale;
+                        let mut resolved = product / multiplicity;
+                        if !product.is_normal() || !valid(resolved) {
+                            // Avoid overflow and subnormal precision loss in
+                            // the intermediate product when the final R/(M*NF)
+                            // is representable. Divide the larger factor first.
+                            let large = resistance.max(scale);
+                            let small = resistance.min(scale);
+                            resolved = (large / multiplicity) * small;
+                            if !valid(resolved) {
+                                resolved = (small / multiplicity) * large;
+                            }
+                        }
+                        if !valid(resolved) {
+                            return Err(SimulationError::Circuit(format!(
+                                "MOSFET '{}' model '{model}': resolved {label} series resistance and conductance must be finite and positive",
+                                element.name
+                            )));
+                        }
+                        Ok(resolved)
                     };
+                    let drain_r = series_resistance("RD", mosfet.rd_model, mosfet.nrd)?;
+                    let source_r = series_resistance("RS", mosfet.rs_model, mosfet.nrs)?;
                     if drain_r > 0.0 {
                         let dint_name = format!("{}.__dint", element.name);
                         let dint = circuit.get_or_create_node(&dint_name);
                         let rd_name = format!("{}.__rd", element.name);
-                        circuit
-                            .resistors
-                            .add(rd_name, drain, dint, drain_r / multiplicity);
+                        circuit.resistors.add(rd_name, drain, dint, drain_r);
                         mosfet.node_drain = dint;
                         circuit.mosfets.series_leads.push((
                             circuit.mosfets.len(),
@@ -6729,20 +6762,11 @@ impl Engine {
                             );
                         }
                     }
-                    let source_r = if mosfet.rs_model > 0.0 {
-                        mosfet.rs_model
-                    } else if mosfet.rsh > 0.0 {
-                        mosfet.rsh * mosfet.nrs.max(0.0)
-                    } else {
-                        0.0
-                    };
                     if source_r > 0.0 {
                         let sint_name = format!("{}.__sint", element.name);
                         let sint = circuit.get_or_create_node(&sint_name);
                         let rs_name = format!("{}.__rs", element.name);
-                        circuit
-                            .resistors
-                            .add(rs_name, source, sint, source_r / multiplicity);
+                        circuit.resistors.add(rs_name, source, sint, source_r);
                         mosfet.node_source = sint;
                         circuit.mosfets.series_leads.push((
                             circuit.mosfets.len(),
@@ -8840,6 +8864,34 @@ impl Engine {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn classic_mos_series_scaling_preserves_representable_extremes() {
+        for level in [1, 2, 3, 4, 5, 6, 9] {
+            for (model, geometry, expected) in [
+                ("RSH=1e200", "NRD=1e200 NRS=0 M=1e200", 1e200),
+                ("RSH=1e-200", "NRD=1e-120 NRS=0 M=1e-200", 1e-120),
+                ("RSH=1e-120", "NRD=1e-200 NRS=0 M=1e-200", 1e-120),
+                ("RSH=1e-200", "NRD=1e-200 NRS=0 M=1e-100", 1e-300),
+                ("RD=1e-200 RS=0", "M=1e100", 1e-300),
+                ("RD=1e200 RS=0", "M=1e-100", 1e300),
+            ] {
+                let netlist = Netlist::parse(&format!(
+                    "MOS series scaling\nVD d 0 0\nVG g 0 0\nM1 d g 0 0 mm W=1u L=1u {geometry}\n.model mm NMOS(LEVEL={level} TOX=0.03 {model})\n.end\n"
+                )).unwrap();
+                let circuit = Engine::default().build_circuit(&netlist).unwrap();
+                assert_eq!(circuit.resistors.len(), 1);
+                let actual = circuit.resistors.reported_resistances[0];
+                assert!(
+                    (actual / expected - 1.0).abs() < 1e-14,
+                    "L{level} {model} {geometry}: {actual:e} vs {expected:e}"
+                );
+                let conductance = circuit.resistors.conductances[0];
+                assert!(conductance.is_finite() && conductance > 0.0);
+                assert!((conductance * expected - 1.0).abs() < 1e-14);
+            }
+        }
+    }
     use super::*;
     use crate::SimulationConfig;
 

@@ -262,6 +262,42 @@ mod wasm_tests {
     }
 
     #[wasm_bindgen_test]
+    fn classic_mos_series_and_geometry_contract_in_wasm() {
+        let abort = rspice_core::abort_signal::NoAbort;
+        for level in [1, 2, 3, 4, 5, 6, 9] {
+            let make = |instance, model| {
+                rspice_core::Netlist::parse(&format!(
+                "MOS series in WASM\nVD d 0 2\nVG g 0 1.5\nM1 d g 0 0 mm W=1u L=1u {instance}\n.model mm NMOS(LEVEL={level} TOX=0.03 {model})\n.end\n"
+            )).unwrap()
+            };
+            let engine = rspice_core::Engine::default();
+            for (instance, model) in [
+                ("AD=-1", ""),
+                ("PS=-1", ""),
+                ("NRS=-1", "RSH=100"),
+                ("", "RD=-1"),
+                ("", "RSH=-1"),
+                ("NRD=1e308", "RSH=1e308"),
+                ("M=1e200", "RS=1e-200"),
+            ] {
+                let error = engine
+                    .build_circuit_with_abort(&make(instance, model), &abort)
+                    .unwrap_err()
+                    .to_string();
+                assert!(error.contains("M1") && error.contains("MM"), "{error}");
+            }
+            let a = engine
+                .run_dc_op_with_abort(&make("", "RSH=100 RD=0 RS=0"), &abort)
+                .unwrap();
+            let e = engine
+                .run_dc_op_with_abort(&make("", "RD=0 RS=0"), &abort)
+                .unwrap();
+            assert_eq!(a.node_names, e.node_names);
+            assert_eq!(a.branch_currents, e.branch_currents);
+        }
+    }
+
+    #[wasm_bindgen_test]
     fn legacy_bsim_invalid_sizing_fails_in_wasm() {
         let abort = rspice_core::abort_signal::NoAbort;
         for level in [4, 5] {
