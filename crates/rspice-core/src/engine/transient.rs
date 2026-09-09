@@ -2672,9 +2672,8 @@ impl Engine {
     /// LTRA/TXL and coupled-line runtimes fail closed until their complete
     /// convolution state has a versioned checkpoint contract.
     ///
-    /// TRNOISE decks regenerate their sample train for each segment's
-    /// horizon; run noise decks unsegmented when a single continuous
-    /// sample path matters.
+    /// Seeded transient-random sources regenerate the same sample path when
+    /// the resumed segment extends the original generation horizon.
     ///
     /// A resumed run under [`crate::config::SimulationConfig::locked_time_grid`] starts at the
     /// checkpoint time, which is its first sample whether or not the grid names

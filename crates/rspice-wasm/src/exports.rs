@@ -209,6 +209,52 @@ mod wasm_tests {
     use crate::js_interop::{js_array_property, js_property};
 
     #[wasm_bindgen_test]
+    fn noise_zero_origin_and_exact_prefixes_survive_horizon_extension_in_wasm() {
+        use std::sync::Arc;
+        let grid: Vec<_> = (0..=129).map(|index| f64::from(index) * 0.3e-9).collect();
+        let engine = rspice_core::Engine::new(rspice_core::engine::SimulationConfig {
+            locked_time_grid: Some(Arc::new(grid.clone())),
+            ..Default::default()
+        });
+        for waveform in [
+            "TRNOISE(0 1n 1 1)",
+            "TRNOISE(1 1n 1 1 1 .7n .9n)",
+            "TRRANDOM(2 1n .3n 1 0)",
+        ] {
+            for dc in [0.0, 0.25] {
+                let netlist = rspice_core::Netlist::parse(&format!(
+                    "noise horizon\nV1 out 0 DC {dc} {waveform}\nR1 out 0 1\n.end\n"
+                ))
+                .unwrap();
+                let run = |stop| {
+                    engine
+                        .run_tran_with_abort(
+                            &netlist,
+                            stop,
+                            1e-9,
+                            &rspice_core::abort_signal::NoAbort,
+                        )
+                        .unwrap()
+                };
+                let full = run(grid[129]);
+                let short = run(grid[57]);
+                assert_eq!(short.try_voltage_waveform_named("out").unwrap()[0], dc);
+                assert_eq!(short.time, full.time[..short.time.len()]);
+                for (actual, expected) in short
+                    .voltages
+                    .iter()
+                    .zip(&full.voltages)
+                    .chain(short.branch_currents.iter().zip(&full.branch_currents))
+                {
+                    for (a, b) in actual.iter().zip(expected) {
+                        assert_eq!(a.to_bits(), b.to_bits(), "{waveform}");
+                    }
+                }
+            }
+        }
+    }
+
+    #[wasm_bindgen_test]
     fn hierarchical_noise_sources_preserve_scoped_parameters_in_wasm() {
         let engine = rspice_core::Engine::default();
         for waveform in ["TRNOISE({amp} 1n 0 0)", "TRRANDOM(2 1n 0 {amp} 0)"] {
