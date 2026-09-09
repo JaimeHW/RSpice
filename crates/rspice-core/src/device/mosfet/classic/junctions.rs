@@ -513,7 +513,7 @@ impl Mosfet {
         gd: Value,
         ieq: Value,
     ) {
-        if gd == 0.0 && ieq == 0.0 {
+        if anode == cathode || (gd == 0.0 && ieq == 0.0) {
             return;
         }
 
@@ -534,7 +534,7 @@ impl Mosfet {
         gd: Value,
         ieq: Value,
     ) {
-        if gd == 0.0 && ieq == 0.0 {
+        if anode == cathode || (gd == 0.0 && ieq == 0.0) {
             return;
         }
 
@@ -570,7 +570,7 @@ impl Mosfet {
             Self::stamp_diode_linearization_direct(matrix, rhs, anode, cathode, gd, ieq);
             return;
         }
-        if gd == 0.0 && ieq == 0.0 {
+        if anode == cathode || (gd == 0.0 && ieq == 0.0) {
             return;
         }
         if let Some(index) = self.indices.ss {
@@ -600,7 +600,7 @@ impl Mosfet {
             Self::stamp_diode_linearization_direct(matrix, rhs, anode, cathode, gd, ieq);
             return;
         }
-        if gd == 0.0 && ieq == 0.0 {
+        if anode == cathode || (gd == 0.0 && ieq == 0.0) {
             return;
         }
         if let Some(index) = self.indices.dd {

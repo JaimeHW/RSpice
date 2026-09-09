@@ -578,12 +578,12 @@ impl ResistorBranches {
             let np = self.node_pos[i];
             let nn = self.node_neg[i];
             let br = get_branch_idx(self.branch_indices[i]);
-
-            if np > 0 {
+            self.csc_indices[i] = [None; 5];
+            if np > 0 && np != nn {
                 self.csc_indices[i][0] = matrix.get_index(br - 1, np - 1);
                 self.csc_indices[i][1] = matrix.get_index(np - 1, br - 1);
             }
-            if nn > 0 {
+            if nn > 0 && np != nn {
                 self.csc_indices[i][2] = matrix.get_index(br - 1, nn - 1);
                 self.csc_indices[i][3] = matrix.get_index(nn - 1, br - 1);
             }
@@ -625,12 +625,11 @@ impl ResistorBranches {
             let np = self.node_pos[i];
             let nn = self.node_neg[i];
             let br = num_nodes + self.branch_indices[i];
-
-            if np > 0 {
+            if np > 0 && np != nn {
                 matrix.push(br - 1, np - 1, 1.0);
                 matrix.push(np - 1, br - 1, 1.0);
             }
-            if nn > 0 {
+            if nn > 0 && np != nn {
                 matrix.push(br - 1, nn - 1, -1.0);
                 matrix.push(nn - 1, br - 1, -1.0);
             }
@@ -1236,10 +1235,10 @@ impl Capacitors {
 
             if let Some(branch_ordinal) = self.ic_branch_indices[index] {
                 let branch = num_nodes + branch_ordinal - 1;
-                if stamp.pp.row > 0 {
+                if stamp.pp.row > 0 && stamp.pp.row != stamp.nn.row {
                     matrix.add(stamp.pp.row - 1, branch, 1.0);
                 }
-                if stamp.nn.row > 0 {
+                if stamp.nn.row > 0 && stamp.pp.row != stamp.nn.row {
                     matrix.add(stamp.nn.row - 1, branch, -1.0);
                 }
 
@@ -1265,7 +1264,7 @@ impl Capacitors {
                     matrix.add(branch, branch, 1.0);
                     rhs[branch] += affine;
                 }
-            } else {
+            } else if stamp.pp.row != stamp.nn.row {
                 for (column, derivative) in current_derivatives {
                     if stamp.pp.row > 0 {
                         matrix.add(stamp.pp.row - 1, column, derivative);
@@ -1490,16 +1489,16 @@ impl Capacitors {
             let pos = stamp.pp.row;
             let neg = stamp.nn.row;
             self.ic_branch_csc_indices[index] = [
-                (pos > 0)
+                (pos != neg && pos > 0)
                     .then(|| matrix.get_index(branch - 1, pos - 1))
                     .flatten(),
-                (pos > 0)
+                (pos != neg && pos > 0)
                     .then(|| matrix.get_index(pos - 1, branch - 1))
                     .flatten(),
-                (neg > 0)
+                (pos != neg && neg > 0)
                     .then(|| matrix.get_index(branch - 1, neg - 1))
                     .flatten(),
-                (neg > 0)
+                (pos != neg && neg > 0)
                     .then(|| matrix.get_index(neg - 1, branch - 1))
                     .flatten(),
                 matrix.get_index(branch - 1, branch - 1),
@@ -1554,11 +1553,11 @@ impl Capacitors {
             let branch = num_nodes + branch_ordinal;
             let pos = self.stamps[index].pp.row;
             let neg = self.stamps[index].nn.row;
-            if pos > 0 {
+            if pos != neg && pos > 0 {
                 matrix.push(branch - 1, pos - 1, 1.0);
                 matrix.push(pos - 1, branch - 1, 1.0);
             }
-            if neg > 0 {
+            if pos != neg && neg > 0 {
                 matrix.push(branch - 1, neg - 1, -1.0);
                 matrix.push(neg - 1, branch - 1, -1.0);
             }
@@ -1753,7 +1752,7 @@ impl Capacitors {
                     }
                     rhs[num_nodes + branch_ordinal - 1] = -i_eq;
                 }
-            } else if NORTON {
+            } else if NORTON && stamp.pp.row != stamp.nn.row {
                 // Compute the Norton history source only when this capacitor
                 // actually uses the Norton terminal stamp.
                 let i_eq = coeff.capacitor_ieq(
@@ -1786,7 +1785,10 @@ impl Capacitors {
     ) {
         let voltage = |node| if node == 0 { 0.0 } else { iterate[node - 1] };
         for (index, stamp) in self.stamps.iter().enumerate() {
-            if self.ic_branch_indices[index].is_some() || self.value_expression(index).is_some() {
+            if self.ic_branch_indices[index].is_some()
+                || self.value_expression(index).is_some()
+                || stamp.pp.row == stamp.nn.row
+            {
                 continue;
             }
             let current = coeff.capacitor_current(
@@ -1810,7 +1812,10 @@ impl Capacitors {
     /// Use independently retained physical currents for a residual probe.
     pub(crate) fn stamp_norton_currents(&self, rhs: &mut [Value], currents: &[Value]) {
         for (index, stamp) in self.stamps.iter().enumerate() {
-            if self.ic_branch_indices[index].is_some() || self.value_expression(index).is_some() {
+            if self.ic_branch_indices[index].is_some()
+                || self.value_expression(index).is_some()
+                || stamp.pp.row == stamp.nn.row
+            {
                 continue;
             }
             if stamp.pp.row != 0 {
@@ -1904,6 +1909,81 @@ impl Capacitors {
 #[cfg(test)]
 mod capacitor_state_tests {
     use super::*;
+
+    #[test]
+    fn tied_conductance_stamps_preserve_existing_entries_and_relink_clears_slots() {
+        let mut matrix = StaticMatrix::from_triplets(
+            2,
+            2,
+            &[(0, 0, 1.0), (0, 1, 0.25), (1, 0, -0.5), (1, 1, 2.0)],
+        )
+        .unwrap();
+        let original = matrix.values_mut().to_vec();
+        let mut stamp = TwoTerminalStamp::new(1, 2);
+        stamp.link(&matrix);
+        assert!(stamp.csc_pn.is_some());
+        for node in [1, 0, 2] {
+            // Mutate terminal metadata while retaining the old linked slots.
+            let topology = TwoTerminalStamp::new(node, node);
+            stamp.pp = topology.pp;
+            stamp.pn = topology.pn;
+            stamp.np = topology.np;
+            stamp.nn = topology.nn;
+            stamp.link(&matrix);
+            stamp.stamp_direct(&mut matrix, 1e100);
+            assert_eq!(matrix.values_mut(), original);
+            assert!(
+                [stamp.csc_pp, stamp.csc_pn, stamp.csc_np, stamp.csc_nn]
+                    .iter()
+                    .all(Option::is_none)
+            );
+            let mut triplets = TripletMatrix::new(2);
+            triplets.push(0, 0, 1.0);
+            stamp.stamp_conductance(&mut triplets, 1e100);
+            assert_eq!(triplets.entries().collect::<Vec<_>>(), [(0, 0, 1.0)]);
+        }
+        let topology = TwoTerminalStamp::new(1, 0);
+        stamp.pp = topology.pp;
+        stamp.pn = topology.pn;
+        stamp.np = topology.np;
+        stamp.nn = topology.nn;
+        stamp.link(&matrix);
+        stamp.stamp_direct(&mut matrix, 3.0);
+        assert_eq!(matrix.values_mut(), &[4.0, -0.5, 0.25, 2.0]);
+    }
+
+    #[test]
+    fn tied_branch_passives_keep_their_current_equations() {
+        let mut matrix = StaticMatrix::from_triplets(
+            2,
+            2,
+            &[(0, 0, 1.0), (0, 1, 0.0), (1, 0, 0.0), (1, 1, 0.0)],
+        )
+        .unwrap();
+        let mut resistors = ResistorBranches::new();
+        resistors.add("R1".into(), 1, 1, 1, 2.0, 2.0);
+        resistors.link_indices(&matrix, |ordinal| 1 + ordinal);
+        let mut rhs = [1.0, 0.0];
+        resistors.stamp_all_direct(&mut matrix, &mut rhs, |ordinal| 1 + ordinal);
+        assert_eq!(matrix.solve(&rhs).unwrap(), [1.0, 0.0]);
+        let mut triplets = TripletMatrix::new(2);
+        resistors.stamp_all(&mut triplets, &mut rhs, 1);
+        assert_eq!(triplets.entries().collect::<Vec<_>>(), [(1, 1, -2.0)]);
+
+        let mut capacitors = Capacitors::new();
+        capacitors.add_with_ic_branch("C1".into(), 1, 1, 1.0, 0.0, 1);
+        capacitors.link_indices(&matrix, |ordinal| 1 + ordinal);
+        matrix.values_mut().copy_from_slice(&[1.0, 0.0, 0.0, 0.0]);
+        capacitors.stamp_transient_companion(
+            &mut matrix,
+            &mut rhs,
+            1e-10,
+            &CompanionCoefficients::backward_euler(),
+            1,
+        );
+        assert_eq!(matrix.solve(&rhs).unwrap(), [1.0, 0.0]);
+        assert_eq!(matrix.values_mut(), &[1.0, 0.0, 0.0, -1e-10]);
+    }
 
     fn assert_close(actual: Value, expected: Value) {
         let tolerance = 32.0 * Value::EPSILON * expected.abs().max(1.0);

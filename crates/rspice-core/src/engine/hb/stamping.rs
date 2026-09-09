@@ -240,6 +240,9 @@ impl Engine {
         conductance: Value,
         small_signal_conductance: Value,
     ) {
+        if np == nn {
+            return;
+        }
         let mut stamp = |row: usize, column: usize, sign: Value| {
             solver.add_conductance_with_small_signal(
                 row,
@@ -1597,6 +1600,9 @@ impl Engine {
         value: Value,
         is_conductance: bool,
     ) {
+        if np == nn {
+            return;
+        }
         // Standard MNA stamp pattern for two-terminal element
         if np > 0 && nn > 0 {
             // Both nodes are non-ground

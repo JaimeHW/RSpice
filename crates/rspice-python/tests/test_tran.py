@@ -23,6 +23,29 @@ R2 out 0 1k
 
 
 class TestTransient:
+    @pytest.mark.parametrize(
+        "device",
+        [
+            "R2 out out 1e-20",
+            "C2 out out 1e6",
+            "D2 out out dm\n.model dm D(IS=1e20 CJO=1e20)",
+            "J2 out out out jm\n.model jm NJF(BETA=1e20 VTO=-1 IS=1e20 CGS=1e20 CGD=1e20)",
+            (
+                "M2 out out out out mm W=1 L=1\n"
+                ".model mm NMOS(LEVEL=1 KP=1e20 VTO=-1 IS=1e20 "
+                "CGSO=1e20 CGDO=1e20 CGBO=1e20 CBD=1e20 CBS=1e20)"
+            ),
+        ],
+    )
+    def test_tied_admittance_preserves_dc_and_transient(self, engine, device):
+        netlist = rspice.Netlist.parse_spice(
+            f"* tied admittance\nI1 0 out 1\nR1 out 0 1\n{device}\n.end\n"
+        )
+        assert abs(engine.run_dc_op(netlist).voltage("out") - 1) < 1e-12
+        result = engine.run_tran(netlist, stop_time=2e-9, max_step=1e-9)
+        assert result.time[-1] == 2e-9
+        np.testing.assert_allclose(result.voltage_waveform("out"), 1, rtol=0, atol=1e-12)
+
     @pytest.mark.parametrize("terminals", ["out out", "0 0"])
     def test_tied_current_terminals_preserve_other_dc_and_transient_sources(self, engine, terminals):
         netlist = rspice.Netlist.parse_spice(

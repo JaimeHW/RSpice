@@ -92,6 +92,7 @@ impl Jfet {
         let d = self.drain;
         let g = self.gate;
         let s = self.source;
+        self.indices = JfetIndices::default();
 
         if d > 0 {
             self.indices.dd = matrix.get_index(d - 1, d - 1);
@@ -124,8 +125,73 @@ impl Jfet {
         }
     }
 
-    /// Stamp using O(1) direct indexing (call after `link`).
-    pub fn stamp_direct(&self, matrix: &mut StaticMatrix, rhs: &mut [Value], voltages: &[Value]) {
+    /// Project the independent channel and gate branches before accumulation.
+    /// A tied branch contributes exactly zero, even if its derivative is much
+    /// larger than the remaining physical conductances.
+    #[inline]
+    pub(crate) fn terminal_jacobian(
+        [d, g, s]: [NodeId; 3],
+        gm: Value,
+        gds: Value,
+        ggs: Value,
+        ggd: Value,
+        gmg: Value,
+        gmd: Value,
+    ) -> [[Value; 3]; 3] {
+        if d == s {
+            if g == s {
+                return [[0.0; 3]; 3];
+            }
+            let gate = ggs + ggd + gmg;
+            return [[0.0; 3], [0.0, gate, -gate], [0.0, -gate, gate]];
+        }
+        let tied_conductance = if g == d {
+            Some(gm + gds + ggs)
+        } else if g == s {
+            Some(gds + ggd - gmd)
+        } else {
+            None
+        };
+        if let Some(conductance) = tied_conductance {
+            return [
+                [conductance, 0.0, -conductance],
+                [0.0; 3],
+                [-conductance, 0.0, conductance],
+            ];
+        }
+        [
+            [gds + ggd - gmd, gm - ggd - gmg, -gm - gds + gmg + gmd],
+            [-ggd + gmd, ggs + ggd + gmg, -ggs - gmg - gmd],
+            [-gds, -gm - ggs, gm + gds + ggs],
+        ]
+    }
+
+    #[inline]
+    pub(crate) fn terminal_current_injections(
+        [d, g, s]: [NodeId; 3],
+        ids: Value,
+        igs: Value,
+        igd: Value,
+    ) -> [Value; 3] {
+        if d == s {
+            if g == s {
+                return [0.0; 3];
+            }
+            let gate = igs + igd;
+            [0.0, -gate, gate]
+        } else if g == d {
+            let current = ids + igs;
+            [-current, 0.0, current]
+        } else if g == s {
+            let current = ids - igd;
+            [-current, 0.0, current]
+        } else {
+            [-ids + igd, -igs - igd, ids + igs]
+        }
+    }
+
+    #[inline]
+    fn linearized_terminal_stamp(&self, voltages: &[Value]) -> ([[Value; 3]; 3], [Value; 3]) {
         let (vgs, vds, vgd) = self.state_or_raw_branch_voltages(voltages);
         let (external_vd, external_vs) = self.external_terminal_voltages(voltages);
 
@@ -151,47 +217,35 @@ impl Jfet {
         // (gmg/gmd), not vgd; both are zero for the diode gate models.
         let igd_eq = igd - ggd * vgd - gmg * vgs - gmd * vds;
 
-        // Drain row
-        if let Some(idx) = self.indices.dd {
-            matrix.stamp_direct(idx, gds + ggd - gmd);
-        }
-        if let Some(idx) = self.indices.dg {
-            matrix.stamp_direct(idx, gm - ggd - gmg);
-        }
-        if let Some(idx) = self.indices.ds {
-            matrix.stamp_direct(idx, -gm - gds + gmg + gmd);
-        }
+        let nodes = [self.drain, self.gate, self.source];
+        (
+            Self::terminal_jacobian(nodes, gm, gds, ggs, ggd, gmg, gmd),
+            Self::terminal_current_injections(nodes, ids_eq, igs_eq, igd_eq),
+        )
+    }
 
-        // Gate row
-        if let Some(idx) = self.indices.gd {
-            matrix.stamp_direct(idx, -ggd + gmd);
+    /// Stamp using O(1) direct indexing (call after `link`).
+    pub fn stamp_direct(&self, matrix: &mut StaticMatrix, rhs: &mut [Value], voltages: &[Value]) {
+        let (jacobian, injections) = self.linearized_terminal_stamp(voltages);
+        let indices = [
+            [self.indices.dd, self.indices.dg, self.indices.ds],
+            [self.indices.gd, self.indices.gg, self.indices.gs],
+            [self.indices.sd, self.indices.sg, self.indices.ss],
+        ];
+        for (row, entries) in jacobian.iter().zip(indices) {
+            for (&value, index) in row.iter().zip(entries) {
+                if let Some(index) = index {
+                    matrix.stamp_direct(index, value);
+                }
+            }
         }
-        if let Some(idx) = self.indices.gg {
-            matrix.stamp_direct(idx, ggs + ggd + gmg);
-        }
-        if let Some(idx) = self.indices.gs {
-            matrix.stamp_direct(idx, -ggs - gmg - gmd);
-        }
-
-        // Source row
-        if let Some(idx) = self.indices.sd {
-            matrix.stamp_direct(idx, -gds);
-        }
-        if let Some(idx) = self.indices.sg {
-            matrix.stamp_direct(idx, -gm - ggs);
-        }
-        if let Some(idx) = self.indices.ss {
-            matrix.stamp_direct(idx, gm + gds + ggs);
-        }
-
-        if self.drain > 0 {
-            rhs[self.drain - 1] -= ids_eq - igd_eq;
-        }
-        if self.gate > 0 {
-            rhs[self.gate - 1] -= igs_eq + igd_eq;
-        }
-        if self.source > 0 {
-            rhs[self.source - 1] += ids_eq + igs_eq;
+        for (node, current) in [self.drain, self.gate, self.source]
+            .into_iter()
+            .zip(injections)
+        {
+            if node > 0 {
+                rhs[node - 1] += current;
+            }
         }
     }
 }
@@ -288,6 +342,28 @@ impl NonlinearDevice for Jfet {
             vgd = vgd_limited;
         }
 
+        // Independent junction limiters must still describe a realizable
+        // terminal voltage. Select the more conservative common bias when
+        // drain and source are tied; a tied gate junction has exact zero bias.
+        if self.gate == self.source || self.gate == self.drain || self.drain == self.source {
+            if self.gate == self.source {
+                vgs = 0.0;
+            }
+            if self.gate == self.drain {
+                vgd = 0.0;
+            }
+            if self.drain == self.source {
+                let common = if (vgs - vgs_raw).abs() > (vgd - vgd_raw).abs() {
+                    vgs
+                } else {
+                    vgd
+                };
+                vgs = common;
+                vgd = common;
+            }
+            limiter_applied = vgs != vgs_raw || vgd != vgd_raw;
+        }
+
         let mut bypassed = false;
         let can_use_static_bypass = self.params.channel_model
             != JfetChannelModel::XyceModifiedShockley
@@ -347,44 +423,14 @@ impl NonlinearDevice for Jfet {
         matrix: &mut impl MatrixStamper,
         _rhs: &mut [Value],
     ) {
-        let (vgs, vds, vgd) = self.state_or_raw_branch_voltages(voltages);
-        let (external_vd, external_vs) = self.external_terminal_voltages(voltages);
-
-        let (ids, gm, gds, igs, igd, ggs, ggd, vds_linear, gmg, gmd) = if self.eval_valid {
-            (
-                self.eval_ids,
-                self.eval_gm,
-                self.eval_gds,
-                self.eval_igs,
-                self.eval_igd,
-                self.eval_ggs,
-                self.eval_ggd,
-                self.eval_vds_linear,
-                self.eval_gmg,
-                self.eval_gmd,
-            )
-        } else {
-            self.compute_operating_terms_with_terminals(vgs, vds, vgd, external_vd, external_vs)
-        };
-        let ids_eq = ids - gm * vgs - gds * vds_linear;
-        let igs_eq = igs - ggs * vgs;
-        let igd_eq = igd - ggd * vgd - gmg * vgs - gmd * vds;
-
-        matrix.stamp(self.drain, self.drain, gds + ggd - gmd);
-        matrix.stamp(self.drain, self.gate, gm - ggd - gmg);
-        matrix.stamp(self.drain, self.source, -gm - gds + gmg + gmd);
-
-        matrix.stamp(self.gate, self.drain, -ggd + gmd);
-        matrix.stamp(self.gate, self.gate, ggs + ggd + gmg);
-        matrix.stamp(self.gate, self.source, -ggs - gmg - gmd);
-
-        matrix.stamp(self.source, self.drain, -gds);
-        matrix.stamp(self.source, self.gate, -gm - ggs);
-        matrix.stamp(self.source, self.source, gm + gds + ggs);
-
-        matrix.stamp_rhs(self.drain, -ids_eq + igd_eq);
-        matrix.stamp_rhs(self.gate, -igs_eq - igd_eq);
-        matrix.stamp_rhs(self.source, ids_eq + igs_eq);
+        let (jacobian, injections) = self.linearized_terminal_stamp(voltages);
+        let nodes = [self.drain, self.gate, self.source];
+        for (row, &node) in nodes.iter().enumerate() {
+            for (column, &other) in nodes.iter().enumerate() {
+                matrix.stamp(node, other, jacobian[row][column]);
+            }
+            matrix.stamp_rhs(node, injections[row]);
+        }
     }
 
     fn is_converged(&self, criteria: NonlinearConvergenceCriteria) -> bool {
@@ -443,6 +489,99 @@ impl NonlinearDevice for Jfet {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tied_terminal_stamps_retain_only_the_active_physical_branches() {
+        // (D,G,S), channel/gate derivatives, branch currents, expected G and
+        // injection at node 1. Huge terms belong only to tied branches.
+        let cases = [
+            (
+                [1, 2, 1],
+                [1e100, 1e100, 1.0, 2.0, 3.0, 1e100],
+                [1e100, 2.0, 3.0],
+                6.0,
+                5.0,
+            ),
+            (
+                [1, 1, 2],
+                [1.0, 2.0, 3.0, 1e100, 1e100, 1e100],
+                [3.0, 2.0, 1e100],
+                6.0,
+                -5.0,
+            ),
+            (
+                [1, 2, 2],
+                [1e100, 1.0, 1e100, 2.0, 1e100, 0.5],
+                [3.0, 1e100, 1.0],
+                2.5,
+                -2.0,
+            ),
+            ([1, 1, 1], [1e100; 6], [1e100; 3], 0.0, 0.0),
+            // Quadrature feedback may cancel when gate and drain are tied.
+            (
+                [1, 1, 2],
+                [-1e100, 1e100, 0.0, 1e100, 1e100, 1e100],
+                [3.0, -3.0, 1e100],
+                0.0,
+                0.0,
+            ),
+        ];
+        for ([d, g, s], terms, currents, conductance, injection) in cases {
+            let mut device = Jfet::njf("J1", d, g, s);
+            [
+                device.eval_gm,
+                device.eval_gds,
+                device.eval_ggs,
+                device.eval_ggd,
+                device.eval_gmg,
+                device.eval_gmd,
+            ] = terms;
+            [device.eval_ids, device.eval_igs, device.eval_igd] = currents;
+            device.eval_valid = true;
+            device.vgs = 0.0;
+            device.vds = 0.0;
+            device.eval_vds_linear = 0.0;
+            let mut matrix = StaticMatrix::from_triplets(
+                2,
+                2,
+                &[(0, 0, 1.0), (0, 1, 0.25), (1, 0, -0.5), (1, 1, 2.0)],
+            )
+            .unwrap();
+            device.link(&matrix);
+            let mut rhs = [3.0, -4.0];
+            device.stamp_direct(&mut matrix, &mut rhs, &[0.0, 0.0]);
+            assert_eq!(
+                matrix.values_mut(),
+                &[
+                    1.0 + conductance,
+                    -0.5 - conductance,
+                    0.25 - conductance,
+                    2.0 + conductance
+                ]
+            );
+            assert_eq!(rhs, [3.0 + injection, -4.0 - injection]);
+        }
+    }
+
+    #[test]
+    fn tied_gate_junctions_cannot_acquire_a_startup_voltage() {
+        for nodes in [[1, 1, 1], [1, 1, 2], [1, 2, 2], [1, 2, 1]] {
+            let [d, g, s] = nodes;
+            let mut device = Jfet::njf("J1", d, g, s);
+            for _ in 0..3 {
+                device.update(&[0.25, 0.0]);
+                if g == s {
+                    assert_eq!(device.vgs, 0.0);
+                }
+                if g == d {
+                    assert_eq!(device.vgs - device.vds, 0.0);
+                }
+                if d == s {
+                    assert_eq!(device.vds, 0.0);
+                }
+            }
+        }
+    }
 
     #[test]
     fn off_instance_takes_the_zero_bias_startup_seed() {

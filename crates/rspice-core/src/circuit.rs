@@ -250,23 +250,27 @@ impl TwoTerminalStamp {
 
     /// Link this stamp to a StaticMatrix, caching CSC indices for O(1) access
     pub fn link(&mut self, matrix: &StaticMatrix) {
-        if self.pp.row > 0 && self.pp.col > 0 {
-            self.csc_pp = matrix.get_index(self.pp.row - 1, self.pp.col - 1);
-        }
-        if self.pn.row > 0 && self.pn.col > 0 {
-            self.csc_pn = matrix.get_index(self.pn.row - 1, self.pn.col - 1);
-        }
-        if self.np.row > 0 && self.np.col > 0 {
-            self.csc_np = matrix.get_index(self.np.row - 1, self.np.col - 1);
-        }
-        if self.nn.row > 0 && self.nn.col > 0 {
-            self.csc_nn = matrix.get_index(self.nn.row - 1, self.nn.col - 1);
-        }
+        let index = |location: StampLocation| {
+            if self.pp.row != self.nn.row && location.row > 0 && location.col > 0 {
+                matrix.get_index(location.row - 1, location.col - 1)
+            } else {
+                None
+            }
+        };
+        // Assign every slot: relinking a grounded or tied terminal must clear
+        // positions retained from its previous topology.
+        self.csc_pp = index(self.pp);
+        self.csc_pn = index(self.pn);
+        self.csc_np = index(self.np);
+        self.csc_nn = index(self.nn);
     }
 
     /// Stamp a conductance value using pre-baked CSC indices (O(1) per stamp)
     #[inline]
     pub fn stamp_direct(&self, matrix: &mut StaticMatrix, g: Value) {
+        if self.pp.row == self.nn.row {
+            return;
+        }
         if let Some(idx) = self.csc_pp {
             matrix.stamp_direct(idx, g);
         }
@@ -284,6 +288,9 @@ impl TwoTerminalStamp {
     /// Stamp a conductance value into the matrix
     #[inline]
     pub fn stamp_conductance(&self, matrix: &mut TripletMatrix, g: Value) {
+        if self.pp.row == self.nn.row {
+            return;
+        }
         if self.pp.row != 0 && self.pp.col != 0 {
             matrix.push(self.pp.row - 1, self.pp.col - 1, g);
         }

@@ -15,6 +15,41 @@ const R: f64 = 1.0e3;
 const C: f64 = 159.154943091895e-12; // RC corner ~ 1 MHz (w*RC = 1)
 
 #[test]
+fn tied_admittance_preserves_the_periodic_current_driven_voltage() {
+    for device in [
+        "R2 out out 1e-20",
+        "C2 out out 1e6",
+        "D2 out out dm\n.model dm D(IS=1e20 CJO=1e20)",
+    ] {
+        let netlist = Netlist::parse(&format!(
+            "tied periodic admittance\nI1 0 in SIN(1 1 1meg)\nL1 in out 1u\nR1 out 0 1\n{device}\n.end\n"
+        )).unwrap();
+        let point = Engine::default()
+            .run_pss_operating_point_with_abort(
+                &netlist,
+                PssConfig::new(F0)
+                    .with_points_per_period(64)
+                    .with_tstab_periods(0),
+                &NoAbort,
+            )
+            .unwrap_or_else(|error| panic!("{device}: {error}"));
+        let result = &point.analysis().result;
+        let output = result
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("out"))
+            .unwrap();
+        for (&time, &actual) in result.time.iter().zip(&result.waveforms[output].values) {
+            let expected = 1.0 + (std::f64::consts::TAU * F0 * time).sin();
+            assert!(
+                (actual - expected).abs() < 1e-10,
+                "{device}, at {time}: {actual} vs {expected}"
+            );
+        }
+    }
+}
+
+#[test]
 fn periodic_current_waveform_is_independent_of_its_dc_specification() {
     let netlist = Netlist::parse(
         "periodic current bias\nI1 0 in DC 1e100 SIN(1 1 1meg)\nI2 0 in 3\nI3 in in DC -1e100 SIN(1e100 1e100 1meg)\nL1 in out 1u\nR1 out 0 1\n.end\n",

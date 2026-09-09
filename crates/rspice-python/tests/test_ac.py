@@ -27,6 +27,28 @@ FC = 1.0 / (2 * math.pi * 1e3 * 1e-6)  # RC corner: 159.155 Hz
 
 
 class TestAcBasics:
+    @pytest.mark.parametrize(
+        "device",
+        [
+            "R2 out out 1e-20",
+            "C2 out out 1e6",
+            "D2 out out dm\n.model dm D(IS=1e20 CJO=1e20)",
+            "J2 out out out jm\n.model jm NJF(BETA=1e20 VTO=-1 IS=1e20 CGS=1e20 CGD=1e20)",
+            (
+                "M2 out out out out mm W=1 L=1\n"
+                ".model mm NMOS(LEVEL=1 KP=1e20 VTO=-1 IS=1e20 "
+                "CGSO=1e20 CGDO=1e20 CGBO=1e20 CBD=1e20 CBS=1e20)"
+            ),
+        ],
+    )
+    def test_tied_admittance_preserves_the_rc_response(self, engine, device):
+        netlist = rspice.Netlist.parse_spice(
+            f"* tied admittance\nI1 0 out DC 0 AC 1\nR1 out 0 1\nC1 out 0 1n\n{device}\n.end\n"
+        )
+        actual = engine.run_ac(netlist, [1e6]).voltage_complex("out")[0]
+        expected = 1 / complex(1, math.tau * 1e6 * 1e-9)
+        assert abs(actual - expected) < 1e-14
+
     @pytest.mark.parametrize("magnitude", [1e-15, 1e-16, 1e-300])
     def test_nonzero_current_excitations_have_no_absolute_amplitude_cutoff(self, engine, magnitude):
         netlist = rspice.Netlist.parse_spice(
