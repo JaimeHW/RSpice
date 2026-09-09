@@ -403,8 +403,9 @@ mod tests {
     }
 
     #[test]
-    fn repeated_legacy_bjt_update_is_idempotent_for_one_newton_candidate() {
-        let mut bjt = Bjt::new_npn("q".to_string(), 1, 2, 3);
+    fn legacy_bjt_stamps_are_idempotent_while_fixed_bias_updates_leave_startup() {
+        let mut bjt =
+            Bjt::new_npn("q".to_string(), 1, 2, 3).with_params(&std::collections::HashMap::new());
         bjt.set_xyce_compatibility(true);
         let candidate = [0.0, 0.0, 0.0];
 
@@ -412,14 +413,26 @@ mod tests {
         let first_vbe = bjt.vbe;
         let first_vbc = bjt.vbc;
         let first_currents = [bjt.ic, bjt.ib, bjt.ie, bjt.isub];
-        bjt.update(&candidate);
+        let mut first_stamp = DenseStamper::new(3);
+        let mut repeated_stamp = DenseStamper::new(3);
+        bjt.stamp_nonlinear(&candidate, &mut first_stamp, &mut []);
+        bjt.stamp_nonlinear(&candidate, &mut repeated_stamp, &mut []);
 
+        assert_eq!(first_stamp.matrix, repeated_stamp.matrix);
+        assert_eq!(first_stamp.rhs, repeated_stamp.rhs);
         assert_eq!(bjt.vbe.to_bits(), first_vbe.to_bits());
         assert_eq!(bjt.vbc.to_bits(), first_vbc.to_bits());
         assert_eq!(
             [bjt.ic, bjt.ib, bjt.ie, bjt.isub].map(Value::to_bits),
             first_currents.map(Value::to_bits)
         );
+        assert!(bjt.legacy_junction_limited_for_trace());
+        for _ in 0..4 {
+            bjt.update(&candidate);
+        }
+        assert!(bjt.is_converged(NonlinearConvergenceCriteria::default()));
+        assert!(bjt.vbe.abs() < 1e-14 && bjt.vbc.abs() < 1e-14);
+        assert!([bjt.ic, bjt.ib, bjt.ie].iter().all(|i| i.abs() < 1e-14));
     }
 
     #[test]
@@ -481,6 +494,11 @@ mod tests {
             "OFF anchor junctions must be zeroed, found {:?}",
             off.eval_anchor
         );
+        assert!(off.legacy_junction_limited_for_trace());
+        // OFF initializes one load even with VOLTLIM disabled, but it must
+        // release that state on the next update at the same physical bias.
+        off.update(&[0.0, 1.0, 0.0]);
+        assert!((off.vbe - 1.0).abs() <= 1e-14);
         assert!(!off.legacy_junction_limited_for_trace());
     }
 
@@ -508,8 +526,6 @@ mod tests {
 
             // OFF is a starting hint, not a constraint: once a previous
             // iterate exists the instance must track the bias like any other.
-            // Each candidate has to differ, because repeated evaluation of one
-            // Newton candidate is deliberately cached and idempotent.
             for bias in [0.9, 0.8, 0.7] {
                 off.update(&[0.0, bias, 0.0]);
             }

@@ -2117,3 +2117,37 @@ fn vbic13_resistance_floor_preserves_small_current_precision() {
         }
     }
 }
+
+#[test]
+fn stationary_zero_bjt_bias_leaves_the_startup_junction_state() {
+    for dialect in [
+        SpiceDialect::BestAvailable,
+        SpiceDialect::Ngspice,
+        SpiceDialect::Xyce,
+    ] {
+        let engine = Engine::new(SimulationConfig::default().with_spice_dialect(dialect));
+        for kind in ["NPN", "PNP"] {
+            for (terminals, sources) in [("0 0 0", ""), ("c b e", "Vc c 0 0\nVb b 0 0\nVe e 0 0\n")]
+            {
+                let netlist = Netlist::parse(&format!(
+                    "stationary BJT bias\nI1 0 out DC 1 AC 1\nR1 out 0 1\n{sources}Q1 {terminals} qm\n.model qm {kind}(IS=1e-14)\n.end\n"
+                )).unwrap();
+                let dc = engine
+                    .run_dc_op(&netlist)
+                    .unwrap_or_else(|error| panic!("{dialect:?}, {kind}, {terminals}: {error}"));
+                assert!((dc.try_voltage_named("out").unwrap() - 1.0).abs() < 1e-12);
+                for current in dc.branch_currents {
+                    assert!(current.abs() < 1e-14, "zero-bias source current {current}");
+                }
+                let tran = engine.run_tran(&netlist, 2e-9, 1e-9).unwrap();
+                assert!(
+                    tran.try_voltage_waveform_named("out")
+                        .unwrap()
+                        .iter()
+                        .all(|v| (v - 1.0).abs() < 1e-12)
+                );
+                assert_eq!(engine.convergence_quality().force_accepted_points, 0);
+            }
+        }
+    }
+}

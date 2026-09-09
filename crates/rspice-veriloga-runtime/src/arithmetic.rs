@@ -7,7 +7,7 @@
 pub enum ArithmeticError {
     NonFiniteTerm,
     ZeroDenominator,
-    Overflow,
+    Overflow { negative: bool },
     MantissaBounds,
 }
 
@@ -28,7 +28,7 @@ pub fn product_ratio(a: f64, b: f64, c: f64, d: f64) -> f64 {
     }
     match sum_products_ratio([(a, b)].into_iter(), [(c, d)].into_iter()) {
         Ok(value) => value,
-        Err(ArithmeticError::Overflow) => f64::from_bits(sign | f64::INFINITY.to_bits()),
+        Err(ArithmeticError::Overflow { .. }) => f64::from_bits(sign | f64::INFINITY.to_bits()),
         Err(_) => f64::NAN,
     }
 }
@@ -247,6 +247,18 @@ where
     let numerator = scaled_sum_products(numerator_terms)?;
     let denominator = scaled_sum_products(denominator_terms)?;
     checked_exact_ratio(numerator, denominator)
+}
+
+/// Whether an exact sum of finite products cancels to zero, before rounding.
+/// This distinguishes cancellation from a nonzero result rounded below binary64.
+pub fn sum_products_is_zero<I>(terms: I) -> Result<bool, ArithmeticError>
+where
+    I: Iterator<Item = (f64, f64)> + Clone,
+{
+    if let Some(exact) = small_sum_products(terms.clone())? {
+        return Ok(exact.value == 0);
+    }
+    Ok(scaled_sum_products(terms)?.magnitude.is_zero())
 }
 
 /// Sum exact products, rounding once after cancellation.
@@ -647,7 +659,7 @@ fn encode_f64(
         }
     } else {
         if unbiased_exponent > 1023 || !((1_u64 << 52)..(1_u64 << 53)).contains(&quotient) {
-            return Err(ArithmeticError::Overflow);
+            return Err(ArithmeticError::Overflow { negative });
         }
         sign | ((unbiased_exponent + 1023) as u64) << 52 | (quotient - (1_u64 << 52))
     };
@@ -657,6 +669,33 @@ fn encode_f64(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn exact_zero_detection_distinguishes_underflow_and_cancellation() {
+        let tiny = f64::from_bits(1);
+        for terms in [
+            vec![(tiny, tiny)],
+            vec![(f64::MAX, f64::MAX), (tiny, tiny), (-f64::MAX, f64::MAX)],
+        ] {
+            assert_eq!(sum_products_is_zero(terms.into_iter()), Ok(false));
+        }
+        for terms in [
+            vec![],
+            vec![(f64::MAX, f64::MAX), (-f64::MAX, f64::MAX)],
+            vec![
+                (f64::MAX, f64::MAX),
+                (tiny, tiny),
+                (-f64::MAX, f64::MAX),
+                (-tiny, tiny),
+            ],
+        ] {
+            assert_eq!(sum_products_is_zero(terms.into_iter()), Ok(true));
+        }
+        assert_eq!(
+            sum_products_is_zero([(f64::MAX, f64::MAX), (tiny, tiny), (f64::NAN, 0.)].into_iter()),
+            Err(ArithmeticError::NonFiniteTerm)
+        );
+    }
 
     #[test]
     fn product_ratio_retains_finite_results_and_signed_underflow() {

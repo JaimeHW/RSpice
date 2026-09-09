@@ -209,6 +209,31 @@ mod wasm_tests {
     use crate::js_interop::{js_array_property, js_property};
 
     #[wasm_bindgen_test]
+    fn stationary_bjt_bias_leaves_startup_in_wasm() {
+        let engine = rspice_core::Engine::default();
+        let abort = rspice_core::abort_signal::NoAbort;
+        for kind in ["NPN", "PNP"] {
+            let netlist = rspice_core::Netlist::parse(&format!(
+                "stationary BJT bias\nI1 0 out DC 1 AC 1\nR1 out 0 1\nQ1 0 0 0 qm\n.model qm {kind}(IS=1e-14)\n.end\n"
+            )).unwrap();
+            let dc = engine.run_dc_op_with_abort(&netlist, &abort).unwrap();
+            assert!((dc.try_voltage_named("out").unwrap() - 1.0).abs() < 1e-12);
+            let ac = engine.run_ac_with_abort(&netlist, &[1e6], &abort).unwrap();
+            assert!((ac[0].voltages[0] - rspice_core::Complex64::new(1.0, 0.0)).norm() < 1e-12);
+            let tran = engine
+                .run_tran_with_abort(&netlist, 2e-9, 1e-9, &abort)
+                .unwrap();
+            assert_eq!(tran.time.last().copied(), Some(2e-9));
+            assert!(
+                tran.try_voltage_waveform_named("out")
+                    .unwrap()
+                    .iter()
+                    .all(|v| (v - 1.0).abs() < 1e-12)
+            );
+        }
+    }
+
+    #[wasm_bindgen_test]
     fn reverse_mos_preserves_small_output_conductance_in_wasm() {
         let engine = rspice_core::Engine::default();
         let abort = rspice_core::abort_signal::NoAbort;

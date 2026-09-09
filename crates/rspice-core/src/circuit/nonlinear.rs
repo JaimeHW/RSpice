@@ -1058,8 +1058,8 @@ impl CircuitData {
     }
 
     /// Prime device history from a solver seed while preserving the one-shot
-    /// switch initial-junction load. Preparatory seed evaluation is not a
-    /// matrix load and therefore must not consume instance `ON`/`OFF`.
+    /// BJT and switch initial-junction loads. Preparatory seed evaluation is
+    /// not a matrix load and therefore must not consume instance `ON`/`OFF`.
     pub(crate) fn prime_nonlinear_operating_point(&mut self, voltages: &[Value]) {
         self.update_nonlinear_impl(voltages, None, true);
     }
@@ -1093,11 +1093,22 @@ impl CircuitData {
         &mut self,
         voltages: &[Value],
         parallel_classic_mos_workers: Option<usize>,
-        preserve_switch_initial_load: bool,
+        preserve_initial_load: bool,
     ) {
         use crate::device::NonlinearDevice;
         self.diodes.update_all(voltages);
-        self.bjts.update_all(voltages);
+        if preserve_initial_load {
+            // Legacy GP initialization belongs to the first Newton load.
+            // Consuming it here would discard its OFF/startup bias before
+            // any matrix could use it.
+            for bjt in &mut self.bjts.devices {
+                if !bjt.uses_legacy_gummel_poon() {
+                    bjt.update(voltages);
+                }
+            }
+        } else {
+            self.bjts.update_all(voltages);
+        }
         #[cfg(feature = "parallel")]
         if let Some(worker_count) = parallel_classic_mos_workers {
             self.mosfets.update_all_parallel(voltages, worker_count);
@@ -1130,14 +1141,14 @@ impl CircuitData {
             }
         }
         for vswitch in &mut self.vswitches {
-            if preserve_switch_initial_load {
+            if preserve_initial_load {
                 vswitch.prime_operating_point_seed(voltages);
             } else {
                 vswitch.update(voltages);
             }
         }
         for iswitch in &mut self.iswitches {
-            if preserve_switch_initial_load {
+            if preserve_initial_load {
                 iswitch.prime_operating_point_seed(voltages);
             } else {
                 iswitch.update(voltages);
