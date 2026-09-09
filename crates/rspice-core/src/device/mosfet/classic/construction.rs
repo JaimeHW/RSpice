@@ -1089,18 +1089,10 @@ impl Mosfet {
         if let Some(&v) = params.get("RSH") {
             self.rsh = v;
         }
-        if let Some(v) = params
-            .get("RD")
-            .copied()
-            .filter(|v| v.is_finite() && *v >= 0.0)
-        {
+        if let Some(&v) = params.get("RD") {
             self.rd_model = v;
         }
-        if let Some(v) = params
-            .get("RS")
-            .copied()
-            .filter(|v| v.is_finite() && *v >= 0.0)
-        {
+        if let Some(&v) = params.get("RS") {
             self.rs_model = v;
         }
         // Legacy BSIM accepts signed AF. Preserve invalid authored noise
@@ -1340,6 +1332,29 @@ impl Mosfet {
                 );
             }
         }
+        for (value, reason) in [
+            (self.w, "W must be finite and positive"),
+            (self.l, "L must be finite and positive"),
+        ] {
+            if !value.is_finite() || value <= 0.0 {
+                return Some(reason);
+            }
+        }
+        for (value, reason) in [
+            (self.drain_area, "AD must be finite and nonnegative"),
+            (self.source_area, "AS must be finite and nonnegative"),
+            (self.drain_perimeter, "PD must be finite and nonnegative"),
+            (self.source_perimeter, "PS must be finite and nonnegative"),
+            (self.nrd, "NRD must be finite and nonnegative"),
+            (self.nrs, "NRS must be finite and nonnegative"),
+            (self.rd_model, "RD must be finite and nonnegative"),
+            (self.rs_model, "RS must be finite and nonnegative"),
+            (self.rsh, "RSH must be finite and nonnegative"),
+        ] {
+            if !value.is_finite() || value < 0.0 {
+                return Some(reason);
+            }
+        }
         for area in [self.source_area, self.drain_area] {
             if !self
                 .effective_body_junction_saturation_current(area)
@@ -1434,16 +1449,6 @@ impl Mosfet {
         if !self.fc.is_finite() || !(0.0..1.0).contains(&self.fc) {
             return Some("FC must be finite and satisfy 0 <= FC < 1");
         }
-        for geometry in [
-            self.drain_area,
-            self.source_area,
-            self.drain_perimeter,
-            self.source_perimeter,
-        ] {
-            if !geometry.is_finite() || geometry < 0.0 {
-                return Some("junction areas and perimeters must be finite and nonnegative");
-            }
-        }
         for capacitance in [
             self.drain_bulk_cap_zero_bias,
             self.source_bulk_cap_zero_bias,
@@ -1464,23 +1469,34 @@ impl Mosfet {
     }
 
     pub(crate) fn with_instance_params(mut self, params: &[(String, Value)]) -> Self {
-        let mut width_override: Option<Value> = None;
-        let mut length_override: Option<Value> = None;
         let mut multiplier = 1.0;
         let mut nf = 1.0;
 
         for (name, value) in params {
-            // Keep invalid legacy dimensions until resolved validation. A
-            // rejected override must not turn into the constructor's geometry.
-            if self.legacy_bsim_model.is_some() {
-                if name.eq_ignore_ascii_case("W") {
-                    width_override = Some(*value);
-                    continue;
-                }
-                if name.eq_ignore_ascii_case("L") {
-                    length_override = Some(*value);
-                    continue;
-                }
+            // Preserve authored geometry, including invalid values, until
+            // resolved validation can report the error instead of using defaults.
+            let geometry = if name.eq_ignore_ascii_case("W") {
+                Some(&mut self.w)
+            } else if name.eq_ignore_ascii_case("L") {
+                Some(&mut self.l)
+            } else if name.eq_ignore_ascii_case("AD") {
+                Some(&mut self.drain_area)
+            } else if name.eq_ignore_ascii_case("AS") {
+                Some(&mut self.source_area)
+            } else if name.eq_ignore_ascii_case("PD") {
+                Some(&mut self.drain_perimeter)
+            } else if name.eq_ignore_ascii_case("PS") {
+                Some(&mut self.source_perimeter)
+            } else if name.eq_ignore_ascii_case("NRD") {
+                Some(&mut self.nrd)
+            } else if name.eq_ignore_ascii_case("NRS") {
+                Some(&mut self.nrs)
+            } else {
+                None
+            };
+            if let Some(geometry) = geometry {
+                *geometry = *value;
+                continue;
             }
             if !value.is_finite() {
                 continue;
@@ -1509,20 +1525,6 @@ impl Mosfet {
                 continue;
             }
 
-            if name.eq_ignore_ascii_case("W") {
-                if *value > 0.0 {
-                    width_override = Some(*value);
-                }
-                continue;
-            }
-
-            if name.eq_ignore_ascii_case("L") {
-                if *value > 0.0 {
-                    length_override = Some(*value);
-                }
-                continue;
-            }
-
             if name.eq_ignore_ascii_case("M") || name.eq_ignore_ascii_case("MULT") {
                 if *value > 0.0 {
                     multiplier = *value;
@@ -1534,42 +1536,6 @@ impl Mosfet {
                 nf = *value;
                 continue;
             }
-
-            if name.eq_ignore_ascii_case("NRD") && *value >= 0.0 {
-                self.nrd = *value;
-                continue;
-            }
-
-            if name.eq_ignore_ascii_case("NRS") && *value >= 0.0 {
-                self.nrs = *value;
-                continue;
-            }
-
-            if name.eq_ignore_ascii_case("AD") && *value >= 0.0 {
-                self.drain_area = *value;
-                continue;
-            }
-
-            if name.eq_ignore_ascii_case("AS") && *value >= 0.0 {
-                self.source_area = *value;
-                continue;
-            }
-
-            if name.eq_ignore_ascii_case("PD") && *value >= 0.0 {
-                self.drain_perimeter = *value;
-                continue;
-            }
-
-            if name.eq_ignore_ascii_case("PS") && *value >= 0.0 {
-                self.source_perimeter = *value;
-            }
-        }
-
-        if let Some(w) = width_override {
-            self.w = w;
-        }
-        if let Some(l) = length_override {
-            self.l = l;
         }
 
         let scale = multiplier * nf;
@@ -1584,6 +1550,41 @@ impl Mosfet {
 mod tests {
     use super::*;
     use std::collections::HashMap;
+
+    #[test]
+    fn classic_mos_preserves_invalid_geometry_and_resistance_until_validation() {
+        for level in [1, 2, 3, 4, 5, 6, 9] {
+            let params = HashMap::from([
+                ("LEVEL".to_string(), level as Value),
+                ("TOX".to_string(), 0.03),
+            ]);
+            let make = |params: &HashMap<String, Value>| {
+                Mosfet::new_nmos("M1".to_string(), 1, 2, 0, 0).with_params(params)
+            };
+            for name in ["W", "L", "AD", "AS", "PD", "PS", "NRD", "NRS"] {
+                for value in [-1.0, Value::NAN, Value::INFINITY, Value::NEG_INFINITY] {
+                    let mos = make(&params).with_instance_params(&[(name.to_lowercase(), value)]);
+                    let reason = mos.resolved_parameter_error().expect("invalid geometry");
+                    assert!(reason.contains(name), "L{level} {name}={value}: {reason}");
+                }
+                let zero = make(&params).with_instance_params(&[(name.to_string(), 0.0)]);
+                assert_eq!(
+                    zero.resolved_parameter_error().is_some(),
+                    matches!(name, "W" | "L")
+                );
+            }
+            for name in ["RD", "RS", "RSH"] {
+                for value in [-1.0, Value::NAN, Value::INFINITY, Value::NEG_INFINITY] {
+                    let mut invalid = params.clone();
+                    invalid.insert(name.to_string(), value);
+                    let reason = make(&invalid)
+                        .resolved_parameter_error()
+                        .expect("invalid resistance");
+                    assert!(reason.contains(name), "L{level} {name}={value}: {reason}");
+                }
+            }
+        }
+    }
 
     #[test]
     fn legacy_bsim_invalid_sizing_never_selects_a_simplified_channel() {
