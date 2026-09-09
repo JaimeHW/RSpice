@@ -365,7 +365,7 @@ fn a_saved_output_trace_is_resolved_from_the_receipt_not_the_waveform_names() {
     let mut app = RSpiceApp::test_instance();
     let output = saved_output();
     assert_eq!(
-        super::page_outputs::materialized_trace(&app, &output),
+        super::page_outputs::materialized_traces(&app, &output),
         Err("No run has been retained, so this output has no stored trace.".to_owned())
     );
 
@@ -376,7 +376,7 @@ fn a_saved_output_trace_is_resolved_from_the_receipt_not_the_waveform_names() {
     ]);
     retain_run_for_active_plan(&mut app.state, analysis);
     assert_eq!(
-        super::page_outputs::materialized_trace(&app, &output),
+        super::page_outputs::materialized_traces(&app, &output),
         Err(
             "The retained dataset holds no receipt for this output, so it was never stored."
                 .to_owned()
@@ -401,7 +401,7 @@ fn a_saved_output_trace_is_resolved_from_the_receipt_not_the_waveform_names() {
             status: SavedOutputMaterializationStatus::Deferred,
         });
     assert!(
-        super::page_outputs::materialized_trace(&app, &output)
+        super::page_outputs::materialized_traces(&app, &output)
             .expect_err("a deferred output has no trace")
             .contains("deferred in the retained dataset"),
         "the refusal names the status rather than the absence"
@@ -414,12 +414,12 @@ fn a_saved_output_trace_is_resolved_from_the_receipt_not_the_waveform_names() {
             sample_count: 2,
         };
     assert_eq!(
-        super::page_outputs::materialized_trace(&app, &output),
-        Ok((0, 0)),
+        super::page_outputs::materialized_traces(&app, &output),
+        Ok((0, vec![0])),
         "the analysis and waveform the receipt names are what the hop carries"
     );
 
-    super::page_outputs::open_materialized_trace(&mut app, 0, 0);
+    super::page_outputs::open_materialized_traces(&mut app, 0, &[0]);
     assert_eq!(
         app.state.workbench.workspace,
         crate::workbench::state::Workspace::Results
@@ -433,6 +433,104 @@ fn a_saved_output_trace_is_resolved_from_the_receipt_not_the_waveform_names() {
             .map(crate::workbench::documents::result_document::SelectedResultTrace::source_name),
         Some("V(out)"),
         "and the trace itself is selected, not merely the workspace opened"
+    );
+}
+
+#[test]
+fn a_saved_output_dc_family_reveals_all_members_without_changing_retained_data() {
+    use crate::state::{
+        AnalysisResultPayload, DcCurveSelection, DcSweepDirection, DcSweepEvidence, DcSweepFamily,
+        DcSweepQuantity, SavedOutputDcMember,
+    };
+    use crate::workbench::documents::result_document::{
+        AnalysisPresentationKey, SourceWaveformPresentationKey,
+    };
+    let mut app = RSpiceApp::test_instance();
+    let output = saved_output();
+    let evidence = DcSweepEvidence {
+        source: "V1".to_owned(),
+        direction: DcSweepDirection::Ascending,
+        quantities: vec![DcSweepQuantity::NodeVoltage("out".to_owned())],
+        family: DcSweepFamily::Retraced,
+        selection: DcCurveSelection::Saved(Vec::new()),
+    };
+    let members = (0..2)
+        .map(|member| SavedOutputDcMember {
+            member,
+            waveform_name: evidence.member_trace_name(&output.name, member),
+            sample_count: 2,
+        })
+        .collect::<Vec<_>>();
+    let mut waveforms = members
+        .iter()
+        .map(|member| {
+            let mut waveform = WaveformData::new(
+                &member.waveform_name,
+                vec![0.0, 1.0],
+                vec![0.0, 0.5],
+                "#fff",
+            )
+            .with_unit("V");
+            waveform.visible = false;
+            waveform
+        })
+        .collect::<Vec<_>>();
+    let mut unrelated = WaveformData::new("Unrelated", vec![0.0, 1.0], vec![1.0, 1.0], "#fff");
+    unrelated.visible = false;
+    waveforms.push(unrelated);
+    let mut analysis = AnalysisResult::new(1, AnalysisType::DcSweep, "Retraced DC")
+        .with_waveforms(waveforms)
+        .with_result_payload(AnalysisResultPayload::DcSweep {
+            evidence: std::sync::Arc::new(evidence),
+        });
+    let analysis_id = app
+        .state
+        .sim_setup
+        .stable_analysis_plan()
+        .unwrap()
+        .instances()[0]
+        .id();
+    analysis.saved_output_receipts.push(SavedOutputReceipt {
+        output_id: output.id,
+        output_revision: output.revision,
+        analysis_id,
+        contract_digest: ContentDigest::from_bytes([0x55; 32]),
+        name: output.name.clone(),
+        source_expression: output.source_expression.clone(),
+        output_kind: output.kind,
+        save_policy: output.save_policy,
+        stored_precision: output.stored_precision,
+        streaming: output.streaming,
+        display_intent: output.display_intent,
+        status: SavedOutputMaterializationStatus::MaterializedDcFamily { members },
+    });
+    analysis.validate_retained_evidence().unwrap();
+    retain_run_for_active_plan(&mut app.state, analysis);
+    let run = app.state.simulation.active_run().unwrap();
+    let analysis = &run.analyses[0];
+    let digest = analysis.result_data_digest();
+    let key = AnalysisPresentationKey::new(run.dataset_id, analysis);
+    let keys = analysis
+        .waveforms
+        .iter()
+        .map(|waveform| SourceWaveformPresentationKey::new(key, waveform.name.clone()))
+        .collect::<Vec<_>>();
+    let resolved = super::page_outputs::materialized_traces(&app, &output).unwrap();
+    assert_eq!(resolved, (0, vec![0, 1]));
+    super::page_outputs::open_materialized_traces(&mut app, resolved.0, &resolved.1);
+    assert!(app.state.ui.results.selected_trace.is_none());
+    for (index, key) in keys.iter().enumerate() {
+        assert_eq!(
+            app.state.ui.results.waveform_visibility(key, false),
+            index < 2
+        );
+    }
+    let retained = &app.state.simulation.active_run().unwrap().analyses[0];
+    assert_eq!(retained.result_data_digest(), digest);
+    assert!(retained.waveforms.iter().all(|waveform| !waveform.visible));
+    assert_eq!(
+        app.state.workbench.workspace,
+        crate::workbench::state::Workspace::Results
     );
 }
 

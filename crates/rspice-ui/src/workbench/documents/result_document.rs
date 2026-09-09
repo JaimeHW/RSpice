@@ -2962,6 +2962,31 @@ impl ResultsState {
             .unwrap_or(dataset_default)
     }
 
+    /// Reveal a stored output's members through presentation state only.
+    pub(crate) fn reveal_waveforms(
+        &mut self,
+        waveforms: impl IntoIterator<Item = (SourceWaveformPresentationKey, bool)>,
+    ) {
+        let mut changed = false;
+        for (key, dataset_default) in waveforms {
+            if !self.waveform_visibility(&key, dataset_default) {
+                if dataset_default {
+                    self.waveform_visibility.remove(&key);
+                } else {
+                    self.waveform_visibility.insert(key.clone(), true);
+                }
+                changed = true;
+            }
+            self.note_recent_signal(key);
+        }
+        if changed {
+            self.models.invalidate();
+            self.cache.invalidate();
+            self.derived = DerivedSeries::default();
+            self.clear_cursors();
+        }
+    }
+
     fn toggle_waveform_visibility(
         &mut self,
         key: SourceWaveformPresentationKey,

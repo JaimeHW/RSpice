@@ -1483,6 +1483,67 @@ fn engineering_export_ui_publishes_reopenable_native_real_and_complex_bundles() 
 }
 
 #[test]
+fn native_bundle_preserves_saved_output_alias_units_in_real_and_complex_samples() {
+    for (analysis_type, waveform) in [
+        (
+            AnalysisType::DcSweep,
+            waveform(
+                "Source current [forward]",
+                vec![0.0, 0.5, 1.0],
+                vec![0.0, -0.0005, -0.001],
+            )
+            .with_unit("A"),
+        ),
+        (
+            AnalysisType::Ac,
+            complex_waveform(
+                "|Current alias|",
+                "Current alias",
+                vec![1e3, 2e3],
+                vec![1.0, 2.0],
+                vec![0.6, 1.2],
+                vec![0.8, 1.6],
+            )
+            .with_unit("A"),
+        ),
+    ] {
+        for preference in [3, 4] {
+            let analysis = AnalysisResult::new(1, analysis_type, "Aliased current")
+                .with_waveforms(vec![waveform.clone()]);
+            let mut state = state_with_typed_result(analysis);
+            state
+                .ui
+                .preferences
+                .set_choice(
+                    crate::workbench::ChoicePreference::EngineeringExport,
+                    preference,
+                )
+                .unwrap();
+            let io = MockExportWorkflowIo::default();
+            action_export_csv_with_io(&mut state, &io);
+            let files = io.byte_files.borrow();
+            assert_eq!(files.len(), 1, "{}", last_log_message(&state));
+            let reopened =
+                crate::workbench::workflows::result_import_workflow::parse_result_dataset(
+                    files[0].0.to_str().unwrap(),
+                    &files[0].1,
+                )
+                .unwrap();
+            assert_eq!(reopened.waveforms.len(), 1);
+            assert_eq!(reopened.waveforms[0].unit.as_deref(), Some("A"));
+            assert_eq!(reopened.waveforms[0].x, waveform.x);
+            if let Some(original) = &waveform.complex {
+                let restored = reopened.waveforms[0].complex.as_ref().unwrap();
+                assert_eq!(restored.real, original.real);
+                assert_eq!(restored.imag, original.imag);
+            } else {
+                assert_eq!(reopened.waveforms[0].y, waveform.y);
+            }
+        }
+    }
+}
+
+#[test]
 fn flat_export_refuses_mismatched_sample_lengths_without_opening_a_picker() {
     let transient =
         AnalysisResult::new(1, AnalysisType::Transient, "Transient").with_waveforms(vec![

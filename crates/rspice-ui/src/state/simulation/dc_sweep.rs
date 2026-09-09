@@ -145,9 +145,13 @@ impl DcSweepEvidence {
     /// The ordinal keeps every nested member distinct even when a displayed
     /// coordinate is rounded by a consumer. Node and branch namespaces differ.
     pub fn trace_name(&self, quantity: &DcSweepQuantity, member: usize) -> String {
-        let label = quantity.label();
+        self.member_trace_name(&quantity.label(), member)
+    }
+
+    /// Use one member naming rule for solved quantities and authored outputs.
+    pub fn member_trace_name(&self, label: &str, member: usize) -> String {
         match &self.family {
-            DcSweepFamily::Single => label,
+            DcSweepFamily::Single => label.to_owned(),
             DcSweepFamily::Nested { source, values } => {
                 format!(
                     "{label} [{source}={}; point {}]",
@@ -314,7 +318,7 @@ impl DcSweepEvidence {
     }
 }
 
-fn validate_axis(axis: &[f64]) -> Result<(), String> {
+pub(super) fn validate_axis(axis: &[f64]) -> Result<(), String> {
     if axis.is_empty()
         || axis.iter().any(|value| !value.is_finite())
         || axis.windows(2).any(|pair| pair[1] <= pair[0])

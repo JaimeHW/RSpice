@@ -173,7 +173,7 @@ pub use simulation::{
     PssFloquetMultiplierEvidence, PstbFloquetModeEvidence, PstbStabilityClassificationEvidence,
     RealEventPointEvidence, RealEventTraceEvidence, ReliabilityCheckpointEvidence,
     ReliabilityDeviceEvidence, ReliabilityShiftEvidence, ReliabilityStressEvidence,
-    ResultImportFormat, ResultImportSource, RunHistory, RunRetention,
+    ResultImportFormat, ResultImportSource, RunHistory, RunRetention, SavedOutputDcMember,
     SavedOutputMaterializationStatus, SavedOutputReceipt, SensitivityResultMode,
     SensitivityResultRow, SharedWaveformValues, SignOffStanding, SimulationCampaignMembership,
     SimulationRun, SimulationRunIntent, SimulationRunLifecycle, SimulationRunProvenance,

@@ -957,7 +957,10 @@ fn export_native_result_bundle(
                 let signal_type = complex_signal_type(&complex.source_name, true);
                 NativeBundleSignal {
                     name: &complex.source_name,
-                    unit: nonempty_unit(signal_type.default_unit()),
+                    unit: waveform
+                        .unit
+                        .as_deref()
+                        .or_else(|| nonempty_unit(signal_type.default_unit())),
                     values: NativeBundleSignalValues::Complex {
                         real: complex.real.as_ref(),
                         imag: complex.imag.as_ref(),
@@ -967,7 +970,10 @@ fn export_native_result_bundle(
                 let signal_type = signal_type_from_waveform_name(&waveform.name);
                 NativeBundleSignal {
                     name: &waveform.name,
-                    unit: nonempty_unit(signal_type.default_unit()),
+                    unit: waveform
+                        .unit
+                        .as_deref()
+                        .or_else(|| nonempty_unit(signal_type.default_unit())),
                     values: NativeBundleSignalValues::Real(waveform.y.as_ref()),
                 }
             }

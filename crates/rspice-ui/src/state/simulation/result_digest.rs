@@ -1379,6 +1379,15 @@ fn encode_saved_output_status(
             writer.u8(3);
             writer.string(reason);
         }
+        SavedOutputMaterializationStatus::MaterializedDcFamily { members } => {
+            writer.u8(4);
+            writer.sequence(members.len());
+            for member in members {
+                writer.usize(member.member);
+                writer.string(&member.waveform_name);
+                writer.u64(member.sample_count);
+            }
+        }
     }
 }
 

@@ -161,6 +161,24 @@ impl ProjectSimulationResultsData {
 
     fn migrate_to_current_in_place(&mut self, project_id: ProjectId) -> Result<(), String> {
         let source_schema = self.schema_version;
+        if source_schema < DC_FAMILY_OUTPUT_RESULTS_SCHEMA_VERSION
+            && self
+                .runs
+                .iter()
+                .flat_map(|run| &run.analyses)
+                .flat_map(|analysis| &analysis.saved_output_receipts)
+                .any(|receipt| {
+                    matches!(
+                        receipt.status,
+                        SavedOutputMaterializationStatus::MaterializedDcFamily { .. }
+                    )
+                })
+        {
+            return Err(
+                "Result schemas before v23 cannot contain materialized DC output families"
+                    .to_owned(),
+            );
+        }
         if source_schema < DC_SWEEP_RESULTS_SCHEMA_VERSION
             && self
                 .runs
@@ -177,7 +195,10 @@ impl ProjectSimulationResultsData {
                 "Result schemas before v22 cannot contain exact DC curve evidence".to_owned(),
             );
         }
-        if source_schema == CONVERGENCE_RESULTS_SCHEMA_VERSION {
+        if matches!(
+            source_schema,
+            CONVERGENCE_RESULTS_SCHEMA_VERSION | DC_SWEEP_RESULTS_SCHEMA_VERSION
+        ) {
             // No old field or digest encoding changed. Authenticate the
             // unchanged history under the current schema without resealing.
             self.schema_version = PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION;
@@ -1533,22 +1554,22 @@ impl ProjectAnalysisResult {
             import_source: self.import_source.into_value(),
         };
         for receipt in &analysis.saved_output_receipts {
-            let SavedOutputMaterializationStatus::Materialized { waveform_name, .. } =
-                &receipt.status
-            else {
-                continue;
-            };
-            if (receipt.stored_precision
+            if receipt.stored_precision
                 == crate::state::SavedOutputPrecision::DisplayCacheWithFullSourcePrecision
                 || receipt.streaming
-                    == crate::state::SavedOutputStreaming::LivePlotAdaptiveDisplayDecimation)
-                && let Some(waveform) = analysis
-                    .waveforms
-                    .iter_mut()
-                    .find(|waveform| waveform.name == *waveform_name)
+                    == crate::state::SavedOutputStreaming::LivePlotAdaptiveDisplayDecimation
             {
-                waveform
-                    .rebuild_display_cache(crate::state::DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES);
+                for (name, _) in receipt.status.materialized_waveforms() {
+                    if let Some(waveform) = analysis
+                        .waveforms
+                        .iter_mut()
+                        .find(|waveform| waveform.name == name)
+                    {
+                        waveform.rebuild_display_cache(
+                            crate::state::DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES,
+                        );
+                    }
+                }
             }
         }
         Ok(analysis)
@@ -1653,95 +1674,6 @@ impl ProjectAnalysisResult {
             .map_err(|error| format!("{prefix}.retained evidence is invalid: {error}"))?;
         for (measurement_idx, measurement) in self.measurements.iter().enumerate() {
             measurement.validate(&format!("{prefix}.measurements[{measurement_idx}]"))?;
-        }
-        let mut receipt_ids = HashSet::new();
-        let mut receipt_digests = HashSet::new();
-        for (receipt_idx, receipt) in self.saved_output_receipts.iter().enumerate() {
-            let receipt_prefix = format!("{prefix}.saved_output_receipts[{receipt_idx}]");
-            if !receipt_ids.insert(receipt.output_id) {
-                return Err(format!(
-                    "{prefix} has duplicate saved-output identity {}",
-                    receipt.output_id
-                ));
-            }
-            if !receipt_digests.insert(receipt.contract_digest) {
-                return Err(format!(
-                    "{prefix} has duplicate saved-output contract digest {}",
-                    receipt.contract_digest
-                ));
-            }
-            if receipt.name.trim().is_empty() || receipt.source_expression.trim().is_empty() {
-                return Err(format!(
-                    "{receipt_prefix} has an empty name or source expression"
-                ));
-            }
-            if let Some(provenance) = &self.provenance
-                && receipt.analysis_id != provenance.source_instance_id
-            {
-                return Err(format!(
-                    "{receipt_prefix} analysis identity does not match result provenance"
-                ));
-            }
-            match &receipt.status {
-                SavedOutputMaterializationStatus::Materialized {
-                    waveform_name,
-                    sample_count,
-                } => {
-                    if self.success
-                        && receipt.save_policy
-                            == crate::state::SavedOutputPolicy::FailureDiagnosticsOnly
-                    {
-                        return Err(format!(
-                            "{receipt_prefix} materializes failure-only data on a successful analysis"
-                        ));
-                    }
-                    let waveform = self
-                        .waveforms
-                        .iter()
-                        .find(|waveform| waveform.name == *waveform_name)
-                        .ok_or_else(|| {
-                            format!(
-                                "{receipt_prefix} names absent materialized waveform '{waveform_name}'"
-                            )
-                        })?;
-                    if usize::try_from(*sample_count).ok() != Some(waveform.x.len()) {
-                        return Err(format!(
-                            "{receipt_prefix} sample count does not match waveform '{waveform_name}'"
-                        ));
-                    }
-                }
-                SavedOutputMaterializationStatus::SuppressedOnSuccess if !self.success => {
-                    return Err(format!(
-                        "{receipt_prefix} suppresses failure diagnostics on a failed analysis"
-                    ));
-                }
-                SavedOutputMaterializationStatus::SuppressedOnSuccess
-                    if receipt.save_policy
-                        != crate::state::SavedOutputPolicy::FailureDiagnosticsOnly =>
-                {
-                    return Err(format!(
-                        "{receipt_prefix} uses success suppression for a non-diagnostic save policy"
-                    ));
-                }
-                SavedOutputMaterializationStatus::Deferred
-                    if receipt.save_policy
-                        != crate::state::SavedOutputPolicy::OnDemandFromRetainedState =>
-                {
-                    return Err(format!(
-                        "{receipt_prefix} defers a save policy that requires immediate materialization"
-                    ));
-                }
-                SavedOutputMaterializationStatus::Unavailable { reason }
-                    if reason.trim().is_empty() =>
-                {
-                    return Err(format!(
-                        "{receipt_prefix} has an empty unavailability reason"
-                    ));
-                }
-                SavedOutputMaterializationStatus::Deferred
-                | SavedOutputMaterializationStatus::SuppressedOnSuccess
-                | SavedOutputMaterializationStatus::Unavailable { .. } => {}
-            }
         }
         if let Some(provenance) = &self.provenance {
             provenance

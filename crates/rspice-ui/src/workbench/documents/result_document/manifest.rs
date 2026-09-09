@@ -604,6 +604,16 @@ fn saved_output_status_label(receipt: &SavedOutputReceipt) -> String {
         SavedOutputMaterializationStatus::Materialized { sample_count, .. } => {
             format!("materialized · {sample_count} samples")
         }
+        SavedOutputMaterializationStatus::MaterializedDcFamily { members } => {
+            let samples = members
+                .iter()
+                .map(|member| u128::from(member.sample_count))
+                .sum::<u128>();
+            format!(
+                "materialized · {} DC members · {samples} samples",
+                members.len()
+            )
+        }
         SavedOutputMaterializationStatus::Deferred => {
             "deferred · retained source available".to_owned()
         }

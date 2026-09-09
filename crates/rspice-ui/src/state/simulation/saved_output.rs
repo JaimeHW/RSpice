@@ -10,6 +10,8 @@ use crate::state::{
     SavedOutputStreaming,
 };
 
+mod validation;
+
 /// Durable outcome of applying one immutable saved-output contract to an
 /// analysis result. Receipts are persisted with the dataset so result viewers
 /// never have to infer which live project configuration produced a trace.
@@ -21,6 +23,9 @@ pub enum SavedOutputMaterializationStatus {
         waveform_name: String,
         sample_count: u64,
     },
+    /// One authored output evaluated independently for every retained DC
+    /// member. Indices refer to this analysis' exact DC sweep evidence.
+    MaterializedDcFamily { members: Vec<SavedOutputDcMember> },
     /// The exact recipe is retained and can be evaluated against the source
     /// data in this same immutable analysis result.
     Deferred,
@@ -29,6 +34,36 @@ pub enum SavedOutputMaterializationStatus {
     SuppressedOnSuccess,
     /// The contract applied, but its required source evidence was absent.
     Unavailable { reason: String },
+}
+
+/// One member's samples, with no copy of its coordinate or numerical arrays.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SavedOutputDcMember {
+    pub member: usize,
+    pub waveform_name: String,
+    pub sample_count: u64,
+}
+
+impl SavedOutputMaterializationStatus {
+    pub fn materialized_waveforms(&self) -> impl Iterator<Item = (&str, u64)> {
+        let single = match self {
+            Self::Materialized {
+                waveform_name,
+                sample_count,
+            } => Some((waveform_name.as_str(), *sample_count)),
+            _ => None,
+        };
+        let members = match self {
+            Self::MaterializedDcFamily { members } => members.as_slice(),
+            _ => &[],
+        };
+        single.into_iter().chain(
+            members
+                .iter()
+                .map(|member| (member.waveform_name.as_str(), member.sample_count)),
+        )
+    }
 }
 
 /// Immutable provenance for a single saved output in one retained analysis.

@@ -20,6 +20,17 @@ use crate::state::{
 
 const MAX_SELECTED_POINT_COUNT: usize = 10_000_000;
 
+mod dc_family;
+mod materialize;
+pub(crate) use materialize::materialize_deferred_saved_output;
+pub(in crate::simulation) use materialize::{
+    apply_saved_output_policy, materialize_live_saved_outputs, materialize_saved_outputs,
+    retain_plan_saved_outputs,
+};
+
+#[cfg(test)]
+mod dc_family_tests;
+
 /// Static validation result for a candidate output contract. `RuntimeBound`
 /// is not a placeholder: it records the precise evidence that cannot exist
 /// until the solver has produced the retained source dataset.
@@ -793,290 +804,6 @@ fn stores_complex_components(kind: SavedOutputKind, run_type: AnalysisRunType) -
             )
 }
 
-/// Apply immutable contracts to either a successful result or a failed result
-/// carrying partial diagnostic waveforms. Existing engine outputs are retained
-/// as the source state for deferred evaluation and exact downstream exports.
-pub(in crate::simulation) fn materialize_saved_outputs(
-    analysis: &mut AnalysisResult,
-    contracts: &[PreparedSavedOutput],
-) {
-    materialize_saved_outputs_with_engine_policy(analysis, contracts, false);
-}
-
-/// Materialize authored outputs while retaining every engine waveform. A raw
-/// contract that names an already-retained engine quantity may be satisfied by
-/// that full-precision superset even when its narrower sampling policy would
-/// otherwise collide with the same waveform name.
-pub(in crate::simulation) fn materialize_saved_outputs_preserving_engine(
-    analysis: &mut AnalysisResult,
-    contracts: &[PreparedSavedOutput],
-) {
-    materialize_saved_outputs_with_engine_policy(analysis, contracts, true);
-}
-
-fn materialize_saved_outputs_with_engine_policy(
-    analysis: &mut AnalysisResult,
-    contracts: &[PreparedSavedOutput],
-    preserve_engine_waveforms: bool,
-) {
-    if contracts.is_empty() {
-        return;
-    }
-    let source_waveforms = analysis.waveforms.clone();
-    let mut receipts = Vec::with_capacity(contracts.len());
-    for contract in contracts {
-        let status = if contract.policy == SavedOutputPolicy::OnDemandFromRetainedState {
-            SavedOutputMaterializationStatus::Deferred
-        } else if contract.policy == SavedOutputPolicy::FailureDiagnosticsOnly && analysis.success {
-            SavedOutputMaterializationStatus::SuppressedOnSuccess
-        } else {
-            match resolve_contract_waveform(contract, analysis, &source_waveforms) {
-                Ok(mut waveform) => {
-                    if contract.policy == SavedOutputPolicy::SelectedAndFinalPoints
-                        && let Some(grid) = contract.selection_grid
-                    {
-                        match resample_selected_and_final(&waveform, grid) {
-                            Ok(selected) => waveform = selected,
-                            Err(error) => {
-                                receipts.push(receipt(
-                                    contract,
-                                    SavedOutputMaterializationStatus::Unavailable { reason: error },
-                                ));
-                                continue;
-                            }
-                        }
-                    }
-                    if contract.precision
-                        == SavedOutputPrecision::DisplayCacheWithFullSourcePrecision
-                        || contract.streaming
-                            == SavedOutputStreaming::LivePlotAdaptiveDisplayDecimation
-                    {
-                        waveform.rebuild_display_cache(DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES);
-                    }
-                    waveform.visible =
-                        contract.display_intent == crate::state::SavedOutputDisplayIntent::Plot;
-                    let sample_count = u64::try_from(waveform.x.len()).unwrap_or(u64::MAX);
-                    let waveform_name = waveform.name.clone();
-                    if let Some(existing) = analysis
-                        .waveforms
-                        .iter_mut()
-                        .find(|existing| existing.name == waveform_name)
-                    {
-                        if existing.x != waveform.x
-                            || existing.y != waveform.y
-                            || existing.complex != waveform.complex
-                        {
-                            if preserve_engine_waveforms
-                                && contract.kind == SavedOutputKind::RawVoltageOrCurrent
-                                && waveform_matches_requested(existing, &contract.source_expression)
-                            {
-                                if contract.precision
-                                    == SavedOutputPrecision::DisplayCacheWithFullSourcePrecision
-                                    || contract.streaming
-                                        == SavedOutputStreaming::LivePlotAdaptiveDisplayDecimation
-                                {
-                                    existing.rebuild_display_cache(
-                                        DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES,
-                                    );
-                                }
-                                existing.visible = waveform.visible;
-                                let sample_count =
-                                    u64::try_from(existing.x.len()).unwrap_or(u64::MAX);
-                                let waveform_name = existing.name.clone();
-                                receipts.push(receipt(
-                                    contract,
-                                    SavedOutputMaterializationStatus::Materialized {
-                                        waveform_name,
-                                        sample_count,
-                                    },
-                                ));
-                                continue;
-                            }
-                            receipts.push(receipt(
-                                contract,
-                                SavedOutputMaterializationStatus::Unavailable {
-                                    reason: format!(
-                                        "saved-output name '{}' collides with a different retained waveform",
-                                        waveform_name
-                                    ),
-                                },
-                            ));
-                            continue;
-                        }
-                        existing.display_cache = waveform.display_cache;
-                        existing.visible = waveform.visible;
-                    } else {
-                        analysis.waveforms.push(waveform);
-                    }
-                    SavedOutputMaterializationStatus::Materialized {
-                        waveform_name,
-                        sample_count,
-                    }
-                }
-                Err(reason) => SavedOutputMaterializationStatus::Unavailable { reason },
-            }
-        };
-        receipts.push(receipt(contract, status));
-    }
-    analysis.saved_output_receipts.extend(receipts);
-}
-
-/// Apply the authorized save policy while preserving authored display intent.
-pub(in crate::simulation) fn apply_saved_output_policy(
-    analysis: &mut AnalysisResult,
-    policy: crate::simulation::execution::SavePolicy,
-    contracts: &[PreparedSavedOutput],
-) {
-    if !matches!(
-        policy,
-        crate::simulation::execution::SavePolicy::PlanOwned { .. }
-    ) {
-        return;
-    }
-    if policy.output_selection_mode() == crate::state::OutputSelectionMode::SaveAll {
-        // Retain all quantities, while authored outputs own initial display intent.
-        for waveform in &mut analysis.waveforms {
-            waveform.visible = false;
-        }
-        materialize_saved_outputs_preserving_engine(analysis, contracts);
-    } else {
-        retain_plan_saved_outputs(analysis, contracts);
-    }
-}
-
-/// Keep successful authored outputs, or complete source state when deferred
-/// evaluation requires it. An empty registry retains no engine waveforms.
-pub(in crate::simulation) fn retain_plan_saved_outputs(
-    analysis: &mut AnalysisResult,
-    contracts: &[PreparedSavedOutput],
-) {
-    let receipt_start = analysis.saved_output_receipts.len();
-    materialize_saved_outputs(analysis, contracts);
-
-    if contracts
-        .iter()
-        .any(|contract| contract.policy == SavedOutputPolicy::OnDemandFromRetainedState)
-    {
-        return;
-    }
-
-    let retained_names = analysis.saved_output_receipts[receipt_start..]
-        .iter()
-        .filter_map(|receipt| match &receipt.status {
-            SavedOutputMaterializationStatus::Materialized { waveform_name, .. } => {
-                Some(waveform_name.clone())
-            }
-            SavedOutputMaterializationStatus::Deferred
-            | SavedOutputMaterializationStatus::SuppressedOnSuccess
-            | SavedOutputMaterializationStatus::Unavailable { .. } => None,
-        })
-        .collect::<HashSet<_>>();
-    if let Some(crate::state::AnalysisResultPayload::DcSweep { evidence }) =
-        &mut analysis.result_payload
-    {
-        Arc::make_mut(evidence).retain_curves(&retained_names);
-    }
-    analysis
-        .waveforms
-        .retain(|waveform| retained_names.contains(&waveform.name));
-}
-
-/// Resolve only outputs explicitly authored for live adaptive plotting. The
-/// returned waveforms contain the bounded extrema-preserving display cache,
-/// not the engine's authoritative full-precision arrays; the terminal result
-/// replaces them atomically when execution completes.
-pub(in crate::simulation) fn materialize_live_saved_outputs(
-    source_analysis: &AnalysisResult,
-    contracts: &[PreparedSavedOutput],
-) -> Vec<WaveformData> {
-    let mut outputs = Vec::new();
-    for contract in contracts.iter().filter(|contract| {
-        contract.streaming() == SavedOutputStreaming::LivePlotAdaptiveDisplayDecimation
-            && contract.display_intent == crate::state::SavedOutputDisplayIntent::Plot
-    }) {
-        let Ok(mut waveform) =
-            resolve_contract_waveform(contract, source_analysis, &source_analysis.waveforms)
-        else {
-            continue;
-        };
-        waveform.rebuild_display_cache(DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES);
-        if let Some(cache) = waveform.display_cache.take() {
-            waveform.x = Arc::new(cache.x.iter().map(|value| f64::from(*value)).collect());
-            waveform.y = Arc::new(cache.y.iter().map(|value| f64::from(*value)).collect());
-            waveform.rebuild_display_cache(DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES);
-        }
-        outputs.push(waveform);
-    }
-    outputs
-}
-
-/// Materialize one deferred receipt against its retained source analysis.
-/// The receipt's immutable digest and source text are reused; live project
-/// rows are never consulted.
-pub(crate) fn materialize_deferred_saved_output(
-    analysis: &mut AnalysisResult,
-    receipt_index: usize,
-) -> Result<(), String> {
-    let receipt = analysis
-        .saved_output_receipts
-        .get(receipt_index)
-        .cloned()
-        .ok_or_else(|| "saved-output receipt no longer exists".to_owned())?;
-    if receipt.status != SavedOutputMaterializationStatus::Deferred {
-        return Err("saved-output receipt is not deferred".to_owned());
-    }
-    let contract = PreparedSavedOutput {
-        output_id: receipt.output_id,
-        output_revision: receipt.output_revision,
-        analysis_id: receipt.analysis_id,
-        kind: receipt.output_kind,
-        name: receipt.name.clone(),
-        source_expression: receipt.source_expression.clone(),
-        policy: receipt.save_policy,
-        precision: receipt.stored_precision,
-        streaming: receipt.streaming,
-        display_intent: receipt.display_intent,
-        selection_grid: None,
-        digest: receipt.contract_digest,
-    };
-    let mut candidate = analysis.clone();
-    let source_waveforms = candidate.waveforms.clone();
-    let mut waveform = resolve_contract_waveform(&contract, &candidate, &source_waveforms)?;
-    waveform.visible = contract.display_intent == crate::state::SavedOutputDisplayIntent::Plot;
-    if contract.precision == SavedOutputPrecision::DisplayCacheWithFullSourcePrecision
-        || contract.streaming == SavedOutputStreaming::LivePlotAdaptiveDisplayDecimation
-    {
-        waveform.rebuild_display_cache(DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES);
-    }
-    let sample_count = u64::try_from(waveform.x.len()).unwrap_or(u64::MAX);
-    let waveform_name = waveform.name.clone();
-    if let Some(existing) = candidate
-        .waveforms
-        .iter_mut()
-        .find(|existing| existing.name == waveform_name)
-    {
-        if existing.x != waveform.x
-            || existing.y != waveform.y
-            || existing.complex != waveform.complex
-        {
-            return Err(format!(
-                "saved-output name '{waveform_name}' collides with a different retained waveform"
-            ));
-        }
-        existing.display_cache = waveform.display_cache;
-    } else {
-        candidate.waveforms.push(waveform);
-    }
-    candidate.saved_output_receipts[receipt_index].status =
-        SavedOutputMaterializationStatus::Materialized {
-            waveform_name,
-            sample_count,
-        };
-    candidate.validate_retained_evidence()?;
-    *analysis = candidate;
-    Ok(())
-}
-
 fn receipt(
     contract: &PreparedSavedOutput,
     status: SavedOutputMaterializationStatus,
@@ -1145,16 +872,26 @@ fn resolve_raw_probe(
     waveforms: &[WaveformData],
     output_name: &str,
 ) -> Result<WaveformData, String> {
+    resolve_raw_probe_with(expression, output_name, |name| {
+        find_waveform(waveforms, name)
+    })
+}
+
+fn resolve_raw_probe_with<'a>(
+    expression: &str,
+    output_name: &str,
+    find: impl Fn(&str) -> Option<&'a WaveformData>,
+) -> Result<WaveformData, String> {
     let (function, arguments) = parse_probe(expression)?;
     if function.eq_ignore_ascii_case("V") && arguments.len() == 2 {
-        let positive = find_waveform(waveforms, &format!("V({})", arguments[0]))
+        let positive = find(&format!("V({})", arguments[0]))
             .ok_or_else(|| format!("positive probe '{}' is absent", arguments[0]))?;
-        let negative = find_waveform(waveforms, &format!("V({})", arguments[1]))
+        let negative = find(&format!("V({})", arguments[1]))
             .ok_or_else(|| format!("negative probe '{}' is absent", arguments[1]))?;
         return subtract_waveforms(positive, negative, output_name);
     }
-    let source = find_waveform(waveforms, expression)
-        .ok_or_else(|| format!("source probe '{expression}' is absent"))?;
+    let source =
+        find(expression).ok_or_else(|| format!("source probe '{expression}' is absent"))?;
     Ok(clone_with_name(source, output_name))
 }
 
@@ -1163,11 +900,24 @@ fn resolve_derived_expression(
     waveforms: &[WaveformData],
     output_name: &str,
 ) -> Result<WaveformData, String> {
+    resolve_derived_with(
+        expression,
+        output_name,
+        &calculator::WaveformsContext::new(waveforms),
+        waveforms.first(),
+    )
+}
+
+fn resolve_derived_with(
+    expression: &str,
+    output_name: &str,
+    context: &impl calculator::EvaluationContext,
+    axis_source: Option<&WaveformData>,
+) -> Result<WaveformData, String> {
     let parsed = calculator::parser::Parser::new(expression)
         .try_parse()
         .map_err(|error| format!("expression parse failed: {error}"))?;
-    let context = calculator::WaveformsContext::new(waveforms);
-    match calculator::evaluator::evaluate(&parsed, &context)
+    match calculator::evaluator::evaluate(&parsed, context)
         .map_err(|error| format!("expression evaluation failed: {error}"))?
     {
         CalcValue::Waveform(x, y) if !x.is_empty() && x.len() == y.len() => {
@@ -1175,9 +925,8 @@ fn resolve_derived_expression(
         }
         CalcValue::Waveform(..) => Err("expression produced no aligned samples".to_owned()),
         CalcValue::Scalar(value) => {
-            let source = waveforms
-                .first()
-                .ok_or_else(|| "scalar expression has no retained axis".to_owned())?;
+            let source =
+                axis_source.ok_or_else(|| "scalar expression has no retained axis".to_owned())?;
             Ok(WaveformData::new(
                 output_name,
                 Arc::clone(&source.x),

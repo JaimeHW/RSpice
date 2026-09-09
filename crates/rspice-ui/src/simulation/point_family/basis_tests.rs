@@ -142,7 +142,27 @@ fn pvt_family_uses_the_solved_basis_before_authored_aliases_filter_point_outputs
             assert_eq!(summary.waveforms[0].name, "Chosen voltage");
             assert_eq!(summary.waveforms[0].y.as_slice(), &[2.0, 2.0]);
             for point in &run.analyses[..2] {
-                assert!(point.waveforms.iter().all(|w| w.name == "Chosen voltage"));
+                let members = if matches!(base, CornerBaseMode::DcSweepNested { .. }) {
+                    2
+                } else {
+                    1
+                };
+                assert_eq!(
+                    point.waveforms.len(),
+                    members,
+                    "{family:?} {base:?}: {:?}",
+                    point.saved_output_receipts
+                );
+                assert_eq!(point.saved_output_receipts.len(), 1);
+                let materialized = point.saved_output_receipts[0]
+                    .status
+                    .materialized_waveforms()
+                    .collect::<Vec<_>>();
+                assert_eq!(materialized.len(), members);
+                for (name, _) in materialized {
+                    assert!(name.starts_with("Chosen voltage"));
+                    assert!(point.waveforms.iter().any(|waveform| waveform.name == name));
+                }
                 point.validate_retained_evidence().unwrap();
             }
             run.validate_provenance().unwrap();

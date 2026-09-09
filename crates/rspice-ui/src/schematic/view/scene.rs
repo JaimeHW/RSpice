@@ -675,6 +675,15 @@ fn probe_visual_statuses(state: &AppState) -> ProbeMaterializationStatuses {
             crate::state::SavedOutputMaterializationStatus::Materialized { .. } => {
                 ProbeVisualStatus::Materialized
             }
+            crate::state::SavedOutputMaterializationStatus::MaterializedDcFamily { members } => {
+                if members.iter().all(|member| {
+                    hidden_waveforms.contains(&normalized_probe_expression(&member.waveform_name))
+                }) {
+                    ProbeVisualStatus::Hidden
+                } else {
+                    ProbeVisualStatus::Materialized
+                }
+            }
             crate::state::SavedOutputMaterializationStatus::Unavailable { .. } => {
                 ProbeVisualStatus::Unavailable
             }

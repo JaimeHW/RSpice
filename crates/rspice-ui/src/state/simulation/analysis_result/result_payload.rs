@@ -895,6 +895,7 @@ impl AnalysisResult {
     /// Historical analyses may legitimately lack a newer payload; when both
     /// fields exist they must describe one coherent execution.
     pub fn validate_retained_evidence(&self) -> Result<(), String> {
+        self.validate_saved_output_receipts()?;
         if let Some(quality) = &self.convergence {
             quality.validate()?;
         }

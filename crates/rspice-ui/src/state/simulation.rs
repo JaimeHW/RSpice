@@ -91,7 +91,7 @@ pub use run_receipt::{
     PreparedRunTaskReceipt, PreparedSourceCheckReceipt, PreparedSpecification,
     PreparedSpecificationPolicy, SignOffStanding, SimulationRunProvenance,
 };
-pub use saved_output::{SavedOutputMaterializationStatus, SavedOutputReceipt};
+pub use saved_output::{SavedOutputDcMember, SavedOutputMaterializationStatus, SavedOutputReceipt};
 pub use specification_verdict::{SpecificationVerdict, SpecificationVerdictStatus};
 pub use state_impl::EvidenceDomain;
 pub use state_model::{SimulationRunIntent, SimulationState};
