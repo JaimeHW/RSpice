@@ -491,6 +491,52 @@ mod tests {
     use super::*;
 
     #[test]
+    fn accepted_checkpoint_preserves_startup_and_rejects_corruption_before_mutation() {
+        let mut source = Jfet::njf("J1", 1, 2, 0);
+        let mut target = source.clone();
+        for initialized in [false, true] {
+            if initialized {
+                source.update(&[2.0, -0.4]);
+                source.update(&[2.1, -0.3]);
+            }
+            let checkpoint = source.accepted_nonlinear_checkpoint().unwrap();
+            assert_eq!(
+                checkpoint.uninitialized_biases,
+                if initialized { 0 } else { 255 }
+            );
+            target.update(&[1.0, -1.0]);
+            target.drain = 7;
+            target
+                .restore_accepted_nonlinear_checkpoint(&checkpoint)
+                .unwrap();
+            assert_eq!(
+                target.drain, 7,
+                "restoration preserves the current topology"
+            );
+            assert_eq!(target.accepted_nonlinear_checkpoint().unwrap(), checkpoint);
+            target.drain = 1;
+            for lane in 0..checkpoint.values.len() {
+                let mut invalid = checkpoint.clone();
+                invalid.values[lane] = Value::INFINITY;
+                assert!(
+                    target
+                        .restore_accepted_nonlinear_checkpoint(&invalid)
+                        .is_err()
+                );
+                assert_eq!(target.accepted_nonlinear_checkpoint().unwrap(), checkpoint);
+            }
+            let mut invalid = checkpoint.clone();
+            invalid.runtime_tag = "jfet-hfet-v1".to_owned();
+            assert!(
+                target
+                    .restore_accepted_nonlinear_checkpoint(&invalid)
+                    .is_err()
+            );
+            assert_eq!(target.accepted_nonlinear_checkpoint().unwrap(), checkpoint);
+        }
+    }
+
+    #[test]
     fn tied_terminal_stamps_retain_only_the_active_physical_branches() {
         // (D,G,S), channel/gate derivatives, branch currents, expected G and
         // injection at node 1. Huge terms belong only to tied branches.

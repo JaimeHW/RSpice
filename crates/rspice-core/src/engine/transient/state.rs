@@ -169,7 +169,7 @@ impl Engine {
     /// Re-seeds every reactive history like transient startup (flat history,
     /// zeroed companion derivatives, maxstep-seeded dt chains) so truncation
     /// estimators stop differencing the previous integration epoch. A physical
-    /// breakpoint preserves the accepted BJT/diode generation because its
+    /// breakpoint preserves accepted junction charge and JFET traps because their
     /// limited and reduced state cannot be reconstructed exactly from the
     /// external solution; livelock recovery deliberately recomputes it to
     /// discard poisoned history. Transmission-line delay buffers are left
@@ -228,6 +228,7 @@ impl Engine {
                     diode_history,
                     hinted_max_step,
                 );
+                jfet_history.normalize_for_order_one(hinted_max_step);
             }
             AcceptedJunctionHistoryRestart::Reinitialize => {
                 *bjt_history = Self::initialize_bjt_history(circuit, solution, seed);
@@ -236,11 +237,11 @@ impl Engine {
                 *diode_history = Self::initialize_diode_history(circuit, solution, seed);
                 diode_history.accepted_dt_prev = hinted_max_step;
                 diode_history.accepted_dt_prev_prev = hinted_max_step;
+                *jfet_history = Self::initialize_jfet_history(circuit, solution, seed);
+                jfet_history.accepted_dt_prev = hinted_max_step;
+                jfet_history.accepted_dt_prev_prev = hinted_max_step;
             }
         }
-        *jfet_history = Self::initialize_jfet_history(circuit, solution, seed);
-        jfet_history.accepted_dt_prev = hinted_max_step;
-        jfet_history.accepted_dt_prev_prev = hinted_max_step;
         *mosfet_history = Self::initialize_mosfet_history(circuit, solution, seed);
         mosfet_history.accepted_dt_prev = hinted_max_step;
         mosfet_history.accepted_dt_prev_prev = hinted_max_step;
@@ -1774,6 +1775,46 @@ pub(super) type MosfetGateCompanionCharges = [(Value, Value); 3];
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn physical_breakpoint_preserves_jfet_traps_and_accepted_charge() {
+        let netlist = crate::netlist::Netlist::parse("JFET restart\nVd d 0 2\nVg g 0 -0.5\nJ1 d g 0 jm\n.model jm NJF(LEVEL=2 CGS=1n CGD=2n TAUG=1u TAUD=2u)\n.end\n").unwrap();
+        let mut circuit = Engine::default().build_circuit(&netlist).unwrap();
+        let solution = vec![0.0; circuit.matrix_size()];
+        let mut history =
+            Engine::initialize_jfet_history(&circuit, &solution, ReactiveHistorySeed::SolvedBias);
+        history.jfet2_vgstrap_prev[0] = -0.73;
+        history.jfet2_vgdtrap_prev[0] = -2.1;
+        history.jfet2_power_prev[0] = 0.031;
+        history.qgs_prev[0] = 1.23e-9;
+        history.qgd_prev[0] = -2.34e-9;
+        history.qds_prev[0] = 3.45e-9;
+        Engine::reseed_reactive_histories_for_restart(
+            &mut circuit,
+            &solution,
+            1e-9,
+            AcceptedJunctionHistoryRestart::Preserve,
+            TransientDeviceHistories {
+                bjt: &mut BjtTransientHistory::default(),
+                jfet: &mut history,
+                diode: &mut DiodeTransientHistory::default(),
+                mosfet: &mut MosfetTransientHistory::default(),
+                vdmos: &mut VdmosTransientHistory::default(),
+                b3soi: &mut B3SoiTransientHistory::default(),
+                bsim3: &mut Bsim3TransientHistory::default(),
+                bsim4: &mut Bsim4TransientHistory::default(),
+                ekv26: &mut Ekv26TransientHistory::default(),
+            },
+        );
+        assert_eq!(history.jfet2_vgstrap_prev, [-0.73]);
+        assert_eq!(history.jfet2_vgdtrap_prev, [-2.1]);
+        assert_eq!(history.jfet2_power_prev, [0.031]);
+        assert_eq!(history.qgs_prev, [1.23e-9]);
+        assert_eq!(history.qgd_prev, [-2.34e-9]);
+        assert_eq!(history.qds_prev, [3.45e-9]);
+        assert_eq!(history.qgs_prev_prev_prev, history.qgs_prev);
+        assert_eq!(history.cqgs_prev, [0.0]);
+    }
 
     #[test]
     fn diode_charge_stamp_and_commit_preserve_zero_and_signed_slopes() {

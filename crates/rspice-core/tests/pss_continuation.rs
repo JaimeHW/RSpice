@@ -8,6 +8,57 @@ use std::sync::atomic::{AtomicU64, Ordering};
 const F0: f64 = 1.0e6;
 
 #[test]
+fn classic_jfet_pss_continues_the_analytic_orbit_and_persists_its_history() {
+    use rspice_core::engine::{TransientCheckpoint, TransientCheckpointEncoding};
+    for (kind, polarity) in [("NJF", 1.0), ("PJF", -1.0)] {
+        let netlist = Netlist::parse(&format!(
+            "JFET periodic continuation\nV1 in 0 DC {} SIN({} {} 1meg)\nR1 in out 1k\nJ1 0 out 0 jm 2 M=3\n.model jm {kind}(IS=0 CGS=100p CGD=50p M=0)\n.end\n",
+            -polarity, -polarity, 0.01 * polarity,
+        )).unwrap();
+        let engine = Engine::default();
+        let (_, state) = engine
+            .run_pss_with_continuation_state(
+                &netlist,
+                PssConfig::new(F0)
+                    .with_points_per_period(256)
+                    .with_tstab_periods(0)
+                    .with_tolerance(1e-10),
+            )
+            .unwrap();
+        let (continued, checkpoint) = engine
+            .run_tran_from_pss_state(&netlist, &state, 1e-6, 2e-9)
+            .unwrap();
+        let output = continued.try_voltage_waveform_named("out").unwrap();
+        let wc = std::f64::consts::TAU * F0 * 1e3 * 900e-12;
+        for (&time, &actual) in continued.time.iter().zip(output) {
+            let phase = std::f64::consts::TAU * F0 * time;
+            let expected =
+                -polarity + polarity * 0.01 * (phase.sin() - wc * phase.cos()) / (1.0 + wc * wc);
+            assert!(
+                (actual - expected).abs() < 4e-6,
+                "{kind}: t={time:e}, {actual} vs {expected}"
+            );
+        }
+        let (direct, _) = engine
+            .run_tran_resume(&netlist, &checkpoint, 1.2e-6, 2e-9)
+            .unwrap();
+        for encoding in [
+            TransientCheckpointEncoding::Unpacked,
+            TransientCheckpointEncoding::Packed,
+        ] {
+            let restored =
+                TransientCheckpoint::from_bytes(&checkpoint.to_bytes(encoding).unwrap()).unwrap();
+            let (resumed, _) = engine
+                .run_tran_resume(&netlist, &restored, 1.2e-6, 2e-9)
+                .unwrap();
+            assert_eq!(resumed.time, direct.time);
+            assert_eq!(resumed.voltages, direct.voltages);
+            assert_eq!(resumed.branch_currents, direct.branch_currents);
+        }
+    }
+}
+
+#[test]
 fn vbic_periodic_charge_and_continuation_match_analytic_rc() {
     use rspice_core::engine::{TransientCheckpoint, TransientCheckpointEncoding};
     for (polarity, level) in [("NPN", 4), ("PNP", 4), ("NPN", 11), ("PNP", 11)] {

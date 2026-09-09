@@ -1260,6 +1260,67 @@ mod wasm_tests {
     }
 
     #[wasm_bindgen_test]
+    fn jfet_checkpoints_preserve_startup_and_accepted_trajectories_in_wasm() {
+        use rspice_core::engine::{
+            TransientCheckpoint, TransientCheckpointEncoding, TransientStartupMode,
+        };
+        let abort = rspice_core::abort_signal::NoAbort;
+        for level in [1, 2] {
+            let netlist = rspice_core::Netlist::parse(&format!(
+                "JFET checkpoint in WASM\nVDD supply 0 5\nVIN in 0 DC -1 PULSE(-1 -0.2 20n 5n 5n 70n 150n)\nRG in gate 1k\nRD supply drain 1k\nJ1 drain gate 0 jm IC=0.1,-0.2\n.model jm NJF(LEVEL={level} BETA=1e-4 VTO=-2 IS=1e-30 CGS=100p CGD=50p TAUG=40n TAUD=60n LFGAM=0.03 DELTA=0.01)\n.end\n",
+            )).unwrap();
+            let engine = rspice_core::Engine::default();
+            for startup in [
+                TransientStartupMode::OperatingPoint,
+                TransientStartupMode::Uic,
+            ] {
+                let (full, scheduled) = engine
+                    .run_tran_checkpoint_schedule_with_startup_mode_and_abort(
+                        &netlist,
+                        150e-9,
+                        2e-9,
+                        startup,
+                        &[0.0, 77.3e-9],
+                        &abort,
+                    )
+                    .unwrap();
+                assert_eq!(scheduled.len(), 2);
+                for captured in scheduled {
+                    let checkpoint = TransientCheckpoint::from_bytes(
+                        &captured
+                            .checkpoint
+                            .to_bytes_with_abort(TransientCheckpointEncoding::Packed, &abort)
+                            .unwrap(),
+                    )
+                    .unwrap();
+                    let (resumed, _) = engine
+                        .run_tran_resume_with_abort(&netlist, &checkpoint, 150e-9, 2e-9, &abort)
+                        .unwrap();
+                    let offset = full
+                        .time
+                        .iter()
+                        .position(|time| time.to_bits() == checkpoint.time.to_bits())
+                        .unwrap();
+                    assert_eq!(resumed.time, full.time[offset..]);
+                    assert_eq!(resumed.node_names, full.node_names);
+                    assert_eq!(resumed.branch_names, full.branch_names);
+                    for (actual, expected) in resumed
+                        .voltages
+                        .iter()
+                        .zip(&full.voltages)
+                        .chain(resumed.branch_currents.iter().zip(&full.branch_currents))
+                    {
+                        assert_eq!(actual.len(), expected.len() - offset);
+                        for (actual, expected) in actual.iter().zip(&expected[offset..]) {
+                            assert_eq!(actual.to_bits(), expected.to_bits());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[wasm_bindgen_test]
     fn promoted_vbic_checkpoint_continues_exactly_in_wasm() {
         use rspice_core::engine::{
             TransientCheckpoint, TransientCheckpointEncoding, TransientStartupMode,

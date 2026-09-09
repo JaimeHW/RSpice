@@ -615,6 +615,7 @@ struct ScheduledCheckpointIntegration<'a> {
 
 /// The device histories it must carry.
 struct ScheduledCheckpointHistories<'a> {
+    jfet_history: &'a JfetTransientHistory,
     bjt_history: &'a BjtTransientHistory,
     diode_history: &'a DiodeTransientHistory,
     vbic_snapshot_cache: &'a [Option<BjtChargeSnapshot>],
@@ -2987,11 +2988,6 @@ impl Engine {
         let mut blockers = Vec::new();
         block_if_present(
             &mut blockers,
-            !circuit.jfets.is_empty(),
-            "JFET accepted transient integration history is not checkpointed",
-        );
-        block_if_present(
-            &mut blockers,
             !circuit.mosfets.is_empty(),
             "classic MOSFET accepted transient integration history is not checkpointed",
         );
@@ -3224,6 +3220,7 @@ impl Engine {
             captured,
         } = sink;
         let ScheduledCheckpointHistories {
+            jfet_history,
             bjt_history,
             diode_history,
             vbic_snapshot_cache,
@@ -3276,6 +3273,7 @@ impl Engine {
                 circuit,
                 bjt_history,
                 diode_history,
+                jfet_history,
                 vbic_snapshot_cache,
             );
         let restart_normalized = at_integration_endpoint
@@ -4971,8 +4969,11 @@ impl Engine {
         // Restart-normalized checkpoints already carry zero intervals.
         let (accepted_dt_seed, accepted_dt_prev_seed) = restored_accepted_junction_history
             .as_ref()
-            .map_or((hinted_max_step, hinted_max_step), |(bjt, _, _)| {
-                (bjt.accepted_dt_prev, bjt.accepted_dt_prev_prev)
+            .map_or((hinted_max_step, hinted_max_step), |restored| {
+                (
+                    restored.bjt.accepted_dt_prev,
+                    restored.bjt.accepted_dt_prev_prev,
+                )
             });
         // Only a fresh UIC startup stands in for ngspice's single
         // `MODEINITJCT|MODETRANOP|MODEUIC` device load, which is the one place
@@ -4996,12 +4997,11 @@ impl Engine {
         let mut diode_history = Self::initialize_diode_history(&circuit, &solution, reactive_seed);
         diode_history.accepted_dt_prev = accepted_dt_seed;
         diode_history.accepted_dt_prev_prev = accepted_dt_prev_seed;
-        if let Some((restored_bjt, restored_diode, restored_snapshot_cache)) =
-            restored_accepted_junction_history
-        {
-            bjt_history = restored_bjt;
-            diode_history = restored_diode;
-            vbic_snapshot_cache = restored_snapshot_cache;
+        if let Some(restored) = restored_accepted_junction_history {
+            bjt_history = restored.bjt;
+            diode_history = restored.diode;
+            jfet_history = restored.jfet;
+            vbic_snapshot_cache = restored.vbic_snapshot_cache;
         }
 
         if resume.is_some() {
@@ -5281,6 +5281,7 @@ impl Engine {
                 dynamic_tline_breakpoints_added,
             },
             ScheduledCheckpointHistories {
+                jfet_history: &jfet_history,
                 bjt_history: &bjt_history,
                 diode_history: &diode_history,
                 vbic_snapshot_cache: &vbic_snapshot_cache,
@@ -8903,6 +8904,7 @@ impl Engine {
                             dynamic_tline_breakpoints_added,
                         },
                         ScheduledCheckpointHistories {
+                            jfet_history: &jfet_history,
                             bjt_history: &bjt_history,
                             diode_history: &diode_history,
                             vbic_snapshot_cache: &vbic_snapshot_cache,
@@ -9546,6 +9548,7 @@ impl Engine {
                     dynamic_tline_breakpoints_added,
                 },
                 ScheduledCheckpointHistories {
+                    jfet_history: &jfet_history,
                     bjt_history: &bjt_history,
                     diode_history: &diode_history,
                     vbic_snapshot_cache: &vbic_snapshot_cache,
@@ -9690,6 +9693,7 @@ impl Engine {
                     &circuit,
                     &bjt_history,
                     &diode_history,
+                    &jfet_history,
                     &vbic_snapshot_cache,
                 );
             let final_accepted_junction_history =

@@ -41,6 +41,7 @@ pub(crate) use classic::{
 pub use classic::{MosType, Mosfet};
 pub use ekv::EkvMosfet;
 pub use ekv3::{Ekv3Device, Ekv3Op};
+pub(crate) use jfet::{AcceptedJfetNonlinearCheckpoint, JFET_CHECKPOINT_RUNTIME_TAGS};
 pub use jfet::{Jfet, JfetChannelModel, JfetParams, JfetType};
 pub use mos_models::MosParams;
 pub use smooth::{SMOOTH_VOLTAGE, smooth_max, smooth_min, smooth_positive, smooth_step};

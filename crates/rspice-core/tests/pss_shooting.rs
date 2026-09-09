@@ -90,19 +90,14 @@ fn classic_jfet_pss_prescribed_and_tied_charge_have_no_spurious_state() {
         )
         .unwrap();
     assert!(point.shooting_state().is_empty());
-    let error = engine
+    engine
         .run_pss_with_continuation_state(
             &netlist,
             PssConfig::new(F0)
                 .with_points_per_period(64)
                 .with_tstab_periods(0),
         )
-        .unwrap_err()
-        .to_string();
-    assert!(
-        error.contains("JFET accepted transient integration history is not checkpointed"),
-        "{error}"
-    );
+        .expect("the complete accepted JFET state supports continuation");
     for (&time, &voltage) in point
         .analysis()
         .result

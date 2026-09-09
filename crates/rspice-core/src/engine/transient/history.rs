@@ -108,6 +108,92 @@ pub(in crate::engine) struct JfetTransientHistory {
 }
 
 pub(super) use crate::numerics::integration::TwoTerminalChargeHistory as DiodeTransientHistory;
+impl JfetTransientHistory {
+    /// Canonical wire order, shared by shape validation, parsing and writing.
+    pub(super) fn columns(&self) -> [(&'static str, &[Value]); 21] {
+        [
+            ("vgs_prev", self.vgs_prev.as_slice()),
+            ("vgs_prev_prev", self.vgs_prev_prev.as_slice()),
+            ("qgs_prev", self.qgs_prev.as_slice()),
+            ("qgs_prev_prev", self.qgs_prev_prev.as_slice()),
+            ("qgs_prev_prev_prev", self.qgs_prev_prev_prev.as_slice()),
+            ("cqgs_prev", self.cqgs_prev.as_slice()),
+            ("vgd_prev", self.vgd_prev.as_slice()),
+            ("vgd_prev_prev", self.vgd_prev_prev.as_slice()),
+            ("qgd_prev", self.qgd_prev.as_slice()),
+            ("qgd_prev_prev", self.qgd_prev_prev.as_slice()),
+            ("qgd_prev_prev_prev", self.qgd_prev_prev_prev.as_slice()),
+            ("cqgd_prev", self.cqgd_prev.as_slice()),
+            ("vds_prev", self.vds_prev.as_slice()),
+            ("vds_prev_prev", self.vds_prev_prev.as_slice()),
+            ("qds_prev", self.qds_prev.as_slice()),
+            ("qds_prev_prev", self.qds_prev_prev.as_slice()),
+            ("qds_prev_prev_prev", self.qds_prev_prev_prev.as_slice()),
+            ("cqds_prev", self.cqds_prev.as_slice()),
+            ("jfet2_vgstrap_prev", self.jfet2_vgstrap_prev.as_slice()),
+            ("jfet2_vgdtrap_prev", self.jfet2_vgdtrap_prev.as_slice()),
+            ("jfet2_power_prev", self.jfet2_power_prev.as_slice()),
+        ]
+    }
+
+    pub(super) fn columns_mut(&mut self) -> [(&'static str, &mut Vec<Value>); 21] {
+        [
+            ("vgs_prev", &mut self.vgs_prev),
+            ("vgs_prev_prev", &mut self.vgs_prev_prev),
+            ("qgs_prev", &mut self.qgs_prev),
+            ("qgs_prev_prev", &mut self.qgs_prev_prev),
+            ("qgs_prev_prev_prev", &mut self.qgs_prev_prev_prev),
+            ("cqgs_prev", &mut self.cqgs_prev),
+            ("vgd_prev", &mut self.vgd_prev),
+            ("vgd_prev_prev", &mut self.vgd_prev_prev),
+            ("qgd_prev", &mut self.qgd_prev),
+            ("qgd_prev_prev", &mut self.qgd_prev_prev),
+            ("qgd_prev_prev_prev", &mut self.qgd_prev_prev_prev),
+            ("cqgd_prev", &mut self.cqgd_prev),
+            ("vds_prev", &mut self.vds_prev),
+            ("vds_prev_prev", &mut self.vds_prev_prev),
+            ("qds_prev", &mut self.qds_prev),
+            ("qds_prev_prev", &mut self.qds_prev_prev),
+            ("qds_prev_prev_prev", &mut self.qds_prev_prev_prev),
+            ("cqds_prev", &mut self.cqds_prev),
+            ("jfet2_vgstrap_prev", &mut self.jfet2_vgstrap_prev),
+            ("jfet2_vgdtrap_prev", &mut self.jfet2_vgdtrap_prev),
+            ("jfet2_power_prev", &mut self.jfet2_power_prev),
+        ]
+    }
+
+    pub(super) fn validate(&self, count: usize) -> Result<(), String> {
+        for (field, values) in self.columns() {
+            if values.len() != count {
+                return Err(format!(
+                    "JFET transient history field '{field}' has {} values, expected {count}",
+                    values.len()
+                ));
+            }
+            validate_history_finite_values(field, values.iter().copied())?;
+        }
+        validate_history_dt("jfet.accepted_dt_prev", self.accepted_dt_prev)?;
+        validate_history_dt("jfet.accepted_dt_prev_prev", self.accepted_dt_prev_prev)
+    }
+
+    /// Start an integration epoch without erasing physical trap or charge state.
+    pub(super) fn normalize_for_order_one(&mut self, dt: Value) {
+        self.vgs_prev_prev.clone_from(&self.vgs_prev);
+        self.qgs_prev_prev.clone_from(&self.qgs_prev);
+        self.qgs_prev_prev_prev.clone_from(&self.qgs_prev);
+        self.cqgs_prev.fill(0.0);
+        self.vgd_prev_prev.clone_from(&self.vgd_prev);
+        self.qgd_prev_prev.clone_from(&self.qgd_prev);
+        self.qgd_prev_prev_prev.clone_from(&self.qgd_prev);
+        self.cqgd_prev.fill(0.0);
+        self.vds_prev_prev.clone_from(&self.vds_prev);
+        self.qds_prev_prev.clone_from(&self.qds_prev);
+        self.qds_prev_prev_prev.clone_from(&self.qds_prev);
+        self.cqds_prev.fill(0.0);
+        self.accepted_dt_prev = dt;
+        self.accepted_dt_prev_prev = dt;
+    }
+}
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(in crate::engine) struct BjtTransientHistory {
@@ -152,7 +238,7 @@ fn bjt_history_runtime_tag(bjt: &crate::device::Bjt) -> &'static str {
 // or negative. That lost history cannot be reconstructed from a capture.
 pub(super) const DIODE_TRANSIENT_HISTORY_RUNTIME_TAG: &str = "native-diode-transient-history-v2";
 
-/// Versionable image of the accepted BJT/diode integration state owned by the
+/// Versionable image of the accepted BJT/diode/JFET integration state owned by the
 /// transient engine rather than by the device instances.
 ///
 /// The histories remain in their runtime struct-of-arrays form. Parallel name
@@ -161,6 +247,9 @@ pub(super) const DIODE_TRANSIENT_HISTORY_RUNTIME_TAG: &str = "native-diode-trans
 /// or duplicating the in-memory payload here.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(in crate::engine) struct AcceptedJunctionTransientHistoryCheckpoint {
+    pub(super) jfet_names: Vec<String>,
+    pub(super) jfet_runtime_tags: Vec<String>,
+    pub(super) jfet_history: JfetTransientHistory,
     pub(super) available: bool,
     pub(super) resume_blockers: Vec<String>,
     pub(super) bjt_names: Vec<String>,
@@ -170,6 +259,14 @@ pub(in crate::engine) struct AcceptedJunctionTransientHistoryCheckpoint {
     pub(super) diode_runtime_tags: Vec<String>,
     pub(super) diode_history: DiodeTransientHistory,
     pub(super) vbic_snapshot_cache: Vec<Option<AcceptedBjtChargeSnapshotCheckpoint>>,
+}
+
+#[derive(Debug, Default)]
+pub(super) struct RestoredJunctionTransientHistories {
+    pub(super) bjt: BjtTransientHistory,
+    pub(super) diode: DiodeTransientHistory,
+    pub(super) jfet: JfetTransientHistory,
+    pub(super) vbic_snapshot_cache: Vec<Option<BjtChargeSnapshot>>,
 }
 
 impl AcceptedJunctionTransientHistoryCheckpoint {
@@ -276,6 +373,7 @@ impl Engine {
         circuit: &crate::circuit::CircuitData,
         bjt_history: &BjtTransientHistory,
         diode_history: &DiodeTransientHistory,
+        jfet_history: &JfetTransientHistory,
         vbic_snapshot_cache: &[Option<BjtChargeSnapshot>],
     ) -> AcceptedJunctionTransientHistoryCheckpoint {
         let mut resume_blockers = Vec::new();
@@ -304,6 +402,13 @@ impl Engine {
         }
 
         let mut checkpoint = AcceptedJunctionTransientHistoryCheckpoint {
+            jfet_names: circuit.jfets.iter().map(|jfet| jfet.name.clone()).collect(),
+            jfet_runtime_tags: circuit
+                .jfets
+                .iter()
+                .map(|jfet| jfet.checkpoint_runtime_tag().to_string())
+                .collect(),
+            jfet_history: jfet_history.clone(),
             available: true,
             resume_blockers,
             bjt_names: circuit
@@ -353,11 +458,11 @@ impl Engine {
         checkpoint: &AcceptedJunctionTransientHistoryCheckpoint,
     ) -> Result<(), String> {
         if !checkpoint.available {
-            return Err("accepted BJT/diode transient history is unavailable".to_string());
+            return Err("accepted junction transient history is unavailable".to_string());
         }
         if !checkpoint.resume_blockers.is_empty() {
             return Err(format!(
-                "accepted BJT/diode transient history is not resumable: {}",
+                "accepted junction transient history is not resumable: {}",
                 checkpoint.resume_blockers.join("; ")
             ));
         }
@@ -368,6 +473,22 @@ impl Engine {
         circuit: &crate::circuit::CircuitData,
         checkpoint: &AcceptedJunctionTransientHistoryCheckpoint,
     ) -> Result<(), String> {
+        if checkpoint.jfet_names.len() != circuit.jfets.len()
+            || checkpoint.jfet_runtime_tags.len() != circuit.jfets.len()
+        {
+            return Err("JFET transient history identity shape mismatch".to_string());
+        }
+        for (index, jfet) in circuit.jfets.iter().enumerate() {
+            if checkpoint.jfet_names[index] != jfet.name
+                || checkpoint.jfet_runtime_tags[index] != jfet.checkpoint_runtime_tag()
+            {
+                return Err(format!(
+                    "JFET '{}' transient history identity/runtime mismatch at ordinal {index}",
+                    jfet.name
+                ));
+            }
+        }
+        checkpoint.jfet_history.validate(circuit.jfets.len())?;
         let bjt_count = circuit.bjts.devices.len();
         if checkpoint.bjt_names.len() != bjt_count {
             return Err(format!(
@@ -600,6 +721,9 @@ impl Engine {
             accepted_dt_seed,
         );
         normalized.vbic_snapshot_cache.fill(None);
+        normalized
+            .jfet_history
+            .normalize_for_order_one(accepted_dt_seed);
         Self::validate_accepted_junction_transient_history_checkpoint(circuit, &normalized)?;
         Ok(normalized)
     }
@@ -609,14 +733,7 @@ impl Engine {
     pub(super) fn restore_accepted_junction_transient_history_checkpoint(
         circuit: &crate::circuit::CircuitData,
         checkpoint: &AcceptedJunctionTransientHistoryCheckpoint,
-    ) -> Result<
-        (
-            BjtTransientHistory,
-            DiodeTransientHistory,
-            Vec<Option<BjtChargeSnapshot>>,
-        ),
-        String,
-    > {
+    ) -> Result<RestoredJunctionTransientHistories, String> {
         Self::validate_accepted_junction_transient_history_checkpoint(circuit, checkpoint)?;
         let mut snapshot_cache = Vec::with_capacity(checkpoint.vbic_snapshot_cache.len());
         for (index, snapshot) in checkpoint.vbic_snapshot_cache.iter().enumerate() {
@@ -628,11 +745,12 @@ impl Engine {
                 None => None,
             });
         }
-        Ok((
-            checkpoint.bjt_history.clone(),
-            checkpoint.diode_history.clone(),
-            snapshot_cache,
-        ))
+        Ok(RestoredJunctionTransientHistories {
+            bjt: checkpoint.bjt_history.clone(),
+            diode: checkpoint.diode_history.clone(),
+            jfet: checkpoint.jfet_history.clone(),
+            vbic_snapshot_cache: snapshot_cache,
+        })
     }
 }
 
@@ -967,6 +1085,7 @@ D1 b 0 DM
             &circuit,
             &bjt_history,
             &diode_history,
+            &JfetTransientHistory::default(),
             &snapshot_cache,
         );
         assert!(checkpoint.available);
@@ -990,11 +1109,16 @@ D1 b 0 DM
         Engine::validate_accepted_junction_transient_history_checkpoint(&circuit, &checkpoint)
             .expect("captured history validates");
 
-        let (restored_bjt, restored_diode, restored_cache) =
-            Engine::restore_accepted_junction_transient_history_checkpoint(&circuit, &checkpoint)
-                .expect("history restores");
+        let RestoredJunctionTransientHistories {
+            bjt: restored_bjt,
+            diode: restored_diode,
+            jfet: restored_jfet,
+            vbic_snapshot_cache: restored_cache,
+        } = Engine::restore_accepted_junction_transient_history_checkpoint(&circuit, &checkpoint)
+            .expect("history restores");
         assert_eq!(restored_bjt, bjt_history);
         assert_eq!(restored_diode, diode_history);
+        assert_eq!(restored_jfet, JfetTransientHistory::default());
         let restored_cache_checkpoint = circuit.bjts.devices[0]
             .encode_accepted_charge_snapshot_checkpoint(
                 restored_cache[0]
@@ -1016,6 +1140,7 @@ D1 b 0 DM
             &circuit,
             &bjt_history,
             &diode_history,
+            &JfetTransientHistory::default(),
             &snapshot_cache,
         );
         let mut expected_bjt = bjt_history.clone();
@@ -1051,6 +1176,7 @@ D1 b 0 DM
             &circuit,
             &bjt_history,
             &diode_history,
+            &JfetTransientHistory::default(),
             &snapshot_cache,
         );
 

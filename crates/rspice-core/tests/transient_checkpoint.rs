@@ -408,6 +408,81 @@ fn assert_scheduled_deck_resumes_exactly(
 }
 
 #[test]
+fn jfet_charge_and_trap_checkpoints_resume_every_accepted_point_exactly() {
+    use rspice_core::numerics::integration::IntegrationMethod;
+    for dialect in [SpiceDialect::Ngspice, SpiceDialect::Xyce] {
+        for level in [1, 2] {
+            for (kind, polarity) in [("NJF", 1.0), ("PJF", -1.0)] {
+                for method in [IntegrationMethod::Trapezoidal, IntegrationMethod::Gear2] {
+                    let label = format!("{dialect:?} {kind} level={level} {method:?}");
+                    let deck = format!(
+                        "JFET charge and trap checkpoint\nVDD supply 0 {}\nVIN in 0 DC {} PULSE({} {} 20n 5n 5n 70n 150n)\nRG in gate 1k\nRD supply drain 1k\nRS source 0 100\nJ1 drain gate source jm 1.5 M=2\n.model jm {kind}(LEVEL={level} BETA=1e-4 VTO=-2 IS=1e-30 CGS=100p CGD=50p CAPDS=20p RD=20 RS=10 TAUG=40n TAUD=60n LFGAM=0.03 LFG1=0.02 LFG2=0.01 DELTA=0.01 TNOM=50)\n.options TEMP=100\n.end\n",
+                        5.0 * polarity,
+                        -polarity,
+                        -polarity,
+                        -0.2 * polarity,
+                    );
+                    let result = assert_scheduled_deck_resumes_exactly(
+                        &label,
+                        &deck,
+                        300e-9,
+                        77.3e-9,
+                        2e-9,
+                        SimulationConfig {
+                            spice_dialect: dialect,
+                            integration_method: method,
+                            ..Default::default()
+                        },
+                    );
+                    let gate = result.try_voltage_waveform_named("gate").unwrap();
+                    let (min, max) = gate
+                        .iter()
+                        .fold((f64::INFINITY, f64::NEG_INFINITY), |(min, max), &v| {
+                            (min.min(v), max.max(v))
+                        });
+                    assert!(
+                        max - min > 0.05,
+                        "{label}: fixture must exercise dynamic state"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn mesfet_and_hfet_checkpoints_preserve_charge_and_inverse_state() {
+    for level in 1..=6 {
+        for polarity in [1.0, -1.0] {
+            let model = if polarity == 1.0 { "NMF" } else { "PMF" };
+            let parameters = if level < 5 {
+                "BETA=2.5m VTO=-0.5 ALPHA=2.1 LAMBDA=0.05 CGS=100p CGD=50p"
+            } else {
+                "RD=60 RS=60 M=2.57 LAMBDA=0.17 VS=1.5e5 MU=0.385 VTO=0.13 ETA=1.28 SIGMA0=0.04 VSIGMA=0.1 VSIGMAT=0.3 NMAX=6e15 D1=0.03u D2=0.2u DI=0.04u DELTA=3 DELTAD=4.5n GAMMA=3 N=5"
+            };
+            for reverse in [false, true] {
+                let label = format!("{model} level={level}, reversed={reverse}");
+                let supply = polarity * if reverse { -0.5 } else { 2.0 };
+                let deck = format!(
+                    "MESFET/HFET checkpoint\nVDD supply 0 {supply}\nVIN in 0 DC {} PULSE({} {} 20n 5n 5n 70n 150n)\nRG in gate 100\nRD supply drain 200\nZ1 drain gate 0 jm L=1u W=10u\n.model jm {model}(LEVEL={level} {parameters})\n.end\n",
+                    -0.1 * polarity,
+                    -0.1 * polarity,
+                    0.3 * polarity,
+                );
+                assert_scheduled_deck_resumes_exactly(
+                    &label,
+                    &deck,
+                    300e-9,
+                    77.3e-9,
+                    2e-9,
+                    SimulationConfig::default(),
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn promoted_vbic_thermal_and_excess_phase_checkpoints_resume_every_state_exactly() {
     for (kind, polarity) in [("NPN", 1.0), ("PNP", -1.0)] {
         let deck = format!(
