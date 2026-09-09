@@ -873,7 +873,7 @@ impl Engine {
             &snapshot.reduction.external_voltages,
             &snapshot.reduction.internal_voltages,
         );
-        let mut norm = Self::legacy_bjt_internal_residual_norm(&residual);
+        let mut norm = Self::vbic_dynamic_static_core_residual_norm(&residual);
         let mut best_snapshot = snapshot;
         let mut best_norm = norm;
 
@@ -930,7 +930,8 @@ impl Engine {
                     &candidate_snapshot.reduction.external_voltages,
                     &candidate_snapshot.reduction.internal_voltages,
                 );
-                let candidate_norm = Self::legacy_bjt_internal_residual_norm(&candidate_residual);
+                let candidate_norm =
+                    Self::vbic_dynamic_static_core_residual_norm(&candidate_residual);
 
                 if candidate_norm.is_finite() && candidate_norm < best_norm {
                     best_norm = candidate_norm;
@@ -959,13 +960,6 @@ impl Engine {
         } else {
             None
         }
-    }
-
-    #[inline]
-    fn legacy_bjt_internal_residual_norm(residual: &[Value; BJT_INTERNAL_STATE_DIM]) -> Value {
-        residual[..BJT_STATIC_CORE_STATE_DIM]
-            .iter()
-            .fold(0.0_f64, |norm, value| norm.max(value.abs()))
     }
 
     #[inline]

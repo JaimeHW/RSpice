@@ -131,13 +131,7 @@ pub fn max_abs(slice: &[Value]) -> Value {
     }
 
     if !should_use_simd(slice.len()) {
-        return slice.iter().fold(0.0, |norm, value| {
-            if value.is_nan() {
-                Value::INFINITY
-            } else {
-                norm.max(value.abs())
-            }
-        });
+        return crate::numerics::infinity_norm(slice);
     }
 
     let aligned_len = slice.len() - (slice.len() % SIMD_WIDTH);
@@ -155,13 +149,7 @@ pub fn max_abs(slice: &[Value]) -> Value {
 
     let mut result = horizontal_max(max_vec);
 
-    for &val in &slice[aligned_len..] {
-        if val.is_nan() {
-            return Value::INFINITY;
-        }
-        result = result.max(val.abs());
-    }
-
+    result = result.max(crate::numerics::infinity_norm(&slice[aligned_len..]));
     result
 }
 

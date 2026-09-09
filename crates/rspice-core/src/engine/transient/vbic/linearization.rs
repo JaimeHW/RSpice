@@ -996,20 +996,18 @@ impl Engine {
         external_voltages: &[Value; BJT_EXTERNAL_STATE_DIM],
         internal_voltages: &[Value; BJT_INTERNAL_STATE_DIM],
     ) -> Value {
-        Self::vbic_internal_equation_residual(linearization, external_voltages, internal_voltages)
-            .into_iter()
-            .fold(0.0, |max_norm, value| max_norm.max(value.abs()))
+        crate::numerics::infinity_norm(&Self::vbic_internal_equation_residual(
+            linearization,
+            external_voltages,
+            internal_voltages,
+        ))
     }
 
     #[inline]
     pub(in crate::engine::transient) fn vbic_internal_equation_residual_objective(
         residual: &[Value; BJT_INTERNAL_STATE_DIM],
     ) -> Value {
-        residual
-            .iter()
-            .map(|value| value * value)
-            .sum::<Value>()
-            .sqrt()
+        crate::numerics::ScaledL2Norm::from_values(residual).value()
     }
 
     #[inline]
@@ -1023,9 +1021,7 @@ impl Engine {
     pub(in crate::engine::transient) fn vbic_dynamic_static_core_residual_norm(
         residual: &[Value; BJT_INTERNAL_STATE_DIM],
     ) -> Value {
-        residual[..BJT_STATIC_CORE_STATE_DIM]
-            .iter()
-            .fold(0.0_f64, |max_norm, value| max_norm.max(value.abs()))
+        crate::numerics::infinity_norm(&residual[..BJT_STATIC_CORE_STATE_DIM])
     }
 
     #[inline]
@@ -1239,6 +1235,51 @@ impl Engine {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn vbic_residual_norms_include_invalid_equations_and_retain_finite_objectives() {
+        let mut linearization = VbicTransientLinearization {
+            g_ii: [[0.0; BJT_INTERNAL_STATE_DIM]; BJT_INTERNAL_STATE_DIM],
+            g_ie: [[0.0; BJT_EXTERNAL_STATE_DIM]; BJT_INTERNAL_STATE_DIM],
+            g_ei: [[0.0; BJT_INTERNAL_STATE_DIM]; BJT_EXTERNAL_STATE_DIM],
+            g_ee: [[0.0; BJT_EXTERNAL_STATE_DIM]; BJT_EXTERNAL_STATE_DIM],
+            z_i: [0.0; BJT_INTERNAL_STATE_DIM],
+            z_e: [0.0; BJT_EXTERNAL_STATE_DIM],
+        };
+        let external = [0.0; BJT_EXTERNAL_STATE_DIM];
+        let internal = [0.0; BJT_INTERNAL_STATE_DIM];
+        for lane in 0..BJT_INTERNAL_STATE_DIM {
+            linearization.z_i = [0.0; BJT_INTERNAL_STATE_DIM];
+            linearization.z_i[lane] = Value::NAN;
+            assert_eq!(
+                Engine::vbic_internal_equation_residual_norm(&linearization, &external, &internal),
+                Value::INFINITY
+            );
+            let residual =
+                Engine::vbic_internal_equation_residual(&linearization, &external, &internal);
+            assert_eq!(
+                Engine::vbic_internal_equation_residual_objective(&residual),
+                Value::INFINITY
+            );
+            assert_eq!(
+                Engine::vbic_dynamic_static_core_residual_norm(&residual),
+                if lane < BJT_STATIC_CORE_STATE_DIM {
+                    Value::INFINITY
+                } else {
+                    0.0
+                }
+            );
+        }
+        for scale in [1e-200, 1e200] {
+            let mut residual = [0.0; BJT_INTERNAL_STATE_DIM];
+            residual[0] = 3.0 * scale;
+            residual[1] = 4.0 * scale;
+            assert!(
+                (Engine::vbic_internal_equation_residual_objective(&residual) / scale - 5.0).abs()
+                    < 2e-15
+            );
+        }
+    }
 
     #[test]
     fn legacy_companion_preserves_history_at_nonpositive_charge_slopes() {

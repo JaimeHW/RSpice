@@ -433,9 +433,7 @@ impl Bjt {
     pub(in crate::device::semiconductor::bjt) fn intrinsic_state_residual_norm(
         residual: &[Value; INTERNAL_DIM],
     ) -> Value {
-        residual
-            .iter()
-            .fold(0.0, |max_norm, value| max_norm.max(value.abs()))
+        crate::numerics::infinity_norm(residual)
     }
 
     #[inline]
@@ -1277,5 +1275,22 @@ impl Bjt {
         }
 
         (g_ei, g_ee, g_reduced)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn intrinsic_residual_norm_cannot_accept_an_invalid_equation_as_zero() {
+        for lane in 0..INTERNAL_DIM {
+            let mut residual = [0.0; INTERNAL_DIM];
+            residual[lane] = Value::NAN;
+            assert_eq!(
+                Bjt::intrinsic_state_residual_norm(&residual),
+                Value::INFINITY
+            );
+        }
     }
 }

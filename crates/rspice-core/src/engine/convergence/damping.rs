@@ -8,40 +8,6 @@ impl Engine {
         solution.iter().any(|v| !v.is_finite())
     }
 
-    #[inline]
-    pub(in crate::engine::convergence) fn step_l2_norm(
-        old: &[Value],
-        new: &[Value],
-    ) -> ScaledStepNorm {
-        let mut norm = ScaledStepNorm {
-            scale: 0.0,
-            squared_sum: 0.0,
-        };
-        for (&a, &b) in old.iter().zip(new) {
-            let delta = b - a;
-            // Opposite finite endpoints may have an unrepresentable delta.
-            // Its half remains finite; a weight of four retains its square.
-            let (magnitude, weight) = if delta.is_infinite() && a.is_finite() && b.is_finite() {
-                ((0.5 * b - 0.5 * a).abs(), 4.0)
-            } else {
-                (delta.abs(), 1.0)
-            };
-            if magnitude.is_nan() {
-                return ScaledStepNorm {
-                    scale: Value::NAN,
-                    squared_sum: Value::NAN,
-                };
-            }
-            if magnitude > norm.scale {
-                norm.squared_sum = weight + norm.squared_sum * (norm.scale / magnitude).powi(2);
-                norm.scale = magnitude;
-            } else if magnitude != 0.0 {
-                norm.squared_sum += weight * (magnitude / norm.scale).powi(2);
-            }
-        }
-        norm
-    }
-
     /// Interpolate finite Newton endpoints with `alpha` in `[0, 1]`.
     #[inline]
     pub(in crate::engine) fn interpolate_newton_value(
@@ -131,7 +97,7 @@ impl Engine {
 
     pub(in crate::engine::convergence) fn update_bank_rose_alpha(
         damping_state: &mut NewtonDampingState,
-        step_norm: ScaledStepNorm,
+        step_norm: ScaledL2Norm,
     ) {
         let Some(prev_norm) = damping_state.prev_step_norm else {
             damping_state.prev_step_norm = Some(step_norm);
@@ -139,14 +105,7 @@ impl Engine {
             return;
         };
 
-        let ratio = if step_norm.scale == 0.0 {
-            0.0
-        } else if prev_norm.scale == 0.0 {
-            Value::INFINITY
-        } else {
-            (step_norm.scale / prev_norm.scale)
-                * (step_norm.squared_sum / prev_norm.squared_sum).sqrt()
-        };
+        let ratio = step_norm.ratio(prev_norm);
 
         if ratio > 1.0 {
             damping_state.bank_rose_alpha *= 0.5;
@@ -299,7 +258,7 @@ impl Engine {
                 Self::line_search_step(old, &limited, &mut merit)
             }
             DampingStrategy::BankRose => {
-                let step_norm = Self::step_l2_norm(old, proposal);
+                let step_norm = ScaledL2Norm::between(old, proposal);
                 Self::update_bank_rose_alpha(damping_state, step_norm);
                 Self::interpolate_solution(old, proposal, damping_state.bank_rose_alpha)
             }
@@ -310,7 +269,7 @@ impl Engine {
                     proposal,
                     Self::MAX_DELTA_VOLTAGE_LIMIT,
                 );
-                let step_norm = Self::step_l2_norm(old, &limited);
+                let step_norm = ScaledL2Norm::between(old, &limited);
                 Self::update_bank_rose_alpha(damping_state, step_norm);
                 let bank_rose_step =
                     Self::interpolate_solution(old, &limited, damping_state.bank_rose_alpha);
@@ -486,8 +445,8 @@ mod tests {
     #[test]
     fn step_norm_and_bank_rose_are_independent_of_absolute_scale() {
         for scale in [1e-300, 1e-200, 1.0, 1e200, 1e307] {
-            let norm = Engine::step_l2_norm(&[0.0; 2], &[3.0 * scale, 4.0 * scale]);
-            let magnitude = norm.scale * norm.squared_sum.sqrt();
+            let norm = ScaledL2Norm::between(&[0.0; 2], &[3.0 * scale, 4.0 * scale]);
+            let magnitude = norm.value();
             assert!(
                 (magnitude / scale - 5.0).abs() < 2e-15,
                 "scale={scale}: {magnitude}"
@@ -496,7 +455,7 @@ mod tests {
             Engine::update_bank_rose_alpha(&mut state, norm);
             Engine::update_bank_rose_alpha(
                 &mut state,
-                Engine::step_l2_norm(&[0.0; 2], &[6.0 * scale, 8.0 * scale]),
+                ScaledL2Norm::between(&[0.0; 2], &[6.0 * scale, 8.0 * scale]),
             );
             assert_eq!(state.bank_rose_alpha, 0.5, "scale={scale}");
         }
@@ -506,8 +465,8 @@ mod tests {
     fn bank_rose_compares_steps_whose_norms_exceed_the_float_range() {
         let old = [-1e308; 2];
         let mut state = NewtonDampingState::default();
-        Engine::update_bank_rose_alpha(&mut state, Engine::step_l2_norm(&old, &[5e307; 2]));
-        Engine::update_bank_rose_alpha(&mut state, Engine::step_l2_norm(&old, &[1e308; 2]));
+        Engine::update_bank_rose_alpha(&mut state, ScaledL2Norm::between(&old, &[5e307; 2]));
+        Engine::update_bank_rose_alpha(&mut state, ScaledL2Norm::between(&old, &[1e308; 2]));
         assert_eq!(state.bank_rose_alpha, 0.5);
     }
 

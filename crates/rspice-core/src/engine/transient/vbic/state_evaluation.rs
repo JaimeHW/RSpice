@@ -232,9 +232,7 @@ impl Engine {
             &snapshot.reduction.external_voltages,
             &snapshot.reduction.internal_voltages,
         );
-        let residual_norm = residual
-            .iter()
-            .fold(0.0_f64, |max_norm, value| max_norm.max(value.abs()));
+        let residual_norm = crate::numerics::infinity_norm(&residual);
         Some((
             snapshot,
             linearization,

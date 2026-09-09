@@ -15,6 +15,79 @@ pub mod rustfft_qualification;
 
 use crate::Value;
 
+/// Infinity norm for residual and state vectors. Nonfinite entries yield
+/// infinity, so an invalid equation cannot disappear from a maximum reduction.
+pub(crate) fn infinity_norm(values: &[Value]) -> Value {
+    let mut norm = 0.0_f64;
+    for value in values {
+        if !value.is_finite() {
+            return Value::INFINITY;
+        }
+        norm = norm.max(value.abs());
+    }
+    norm
+}
+
+/// Scaled sum of squares, retaining ratios even when a norm exceeds f64 range.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct ScaledL2Norm {
+    scale: Value,
+    squared_sum: Value,
+}
+
+impl ScaledL2Norm {
+    pub(crate) fn from_values(values: &[Value]) -> Self {
+        let mut norm = Self::default();
+        for value in values {
+            norm.accumulate(value.abs(), 1.0);
+        }
+        norm
+    }
+
+    pub(crate) fn between(old: &[Value], new: &[Value]) -> Self {
+        let mut norm = Self::default();
+        for (&a, &b) in old.iter().zip(new) {
+            let delta = b - a;
+            // Opposite finite endpoints may have an unrepresentable delta.
+            // Its half remains finite; a weight of four retains its square.
+            let (magnitude, weight) = if delta.is_infinite() && a.is_finite() && b.is_finite() {
+                ((0.5 * b - 0.5 * a).abs(), 4.0)
+            } else {
+                (delta.abs(), 1.0)
+            };
+            norm.accumulate(magnitude, weight);
+        }
+        norm
+    }
+
+    #[inline]
+    fn accumulate(&mut self, magnitude: Value, weight: Value) {
+        if !magnitude.is_finite() {
+            self.scale = Value::INFINITY;
+            self.squared_sum = 1.0;
+        } else if magnitude > self.scale {
+            self.squared_sum = weight + self.squared_sum * (self.scale / magnitude).powi(2);
+            self.scale = magnitude;
+        } else if magnitude != 0.0 {
+            self.squared_sum += weight * (magnitude / self.scale).powi(2);
+        }
+    }
+
+    pub(crate) fn value(self) -> Value {
+        self.scale * self.squared_sum.sqrt()
+    }
+
+    pub(crate) fn ratio(self, previous: Self) -> Value {
+        if self.scale == 0.0 {
+            0.0
+        } else if previous.scale == 0.0 {
+            Value::INFINITY
+        } else {
+            (self.scale / previous.scale) * (self.squared_sum / previous.squared_sum).sqrt()
+        }
+    }
+}
+
 /// Componentwise Newton update test shared by scalar and SIMD entry points.
 /// Each finite coordinate must satisfy `|new-old| <= abs_tol + rel_tol*scale`,
 /// where `scale = max(|old|, |new|)`. Both tolerances must be finite and nonnegative.
@@ -217,6 +290,25 @@ pub fn xyce_hard_min_timestep(current_time: Value) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn residual_norms_preserve_finite_scale_and_reject_every_nonfinite_entry() {
+        for scale in [Value::from_bits(1), 1e-300, 1e-200, 1.0, 1e200, 1e307] {
+            let values = [3.0 * scale, -4.0 * scale];
+            assert_eq!(infinity_norm(&values), 4.0 * scale);
+            assert!((ScaledL2Norm::from_values(&values).value() / scale - 5.0).abs() < 2e-15);
+        }
+        assert_eq!(infinity_norm(&[]), 0.0);
+        assert_eq!(ScaledL2Norm::from_values(&[]).value(), 0.0);
+        for lane in 0..10 {
+            for invalid in [Value::NAN, Value::INFINITY, Value::NEG_INFINITY] {
+                let mut values = [1.0; 10];
+                values[lane] = invalid;
+                assert_eq!(infinity_norm(&values), Value::INFINITY);
+                assert_eq!(ScaledL2Norm::from_values(&values).value(), Value::INFINITY);
+            }
+        }
+    }
 
     #[test]
     fn update_tolerances_are_consistent_at_extreme_scales_and_simd_boundaries() {

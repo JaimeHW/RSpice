@@ -594,9 +594,7 @@ impl Engine {
                 transient_linearization,
                 base_static_g,
                 initial_residual,
-                initial_residual
-                    .iter()
-                    .fold(0.0_f64, |max_norm, value| max_norm.max(value.abs())),
+                crate::numerics::infinity_norm(&initial_residual),
             ),
             6,
         );
