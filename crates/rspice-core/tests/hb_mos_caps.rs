@@ -73,50 +73,92 @@ fn assert_divider(result: &HbAnalysisResult, c_expected: f64, label: &str) {
 
 #[test]
 fn accumulation_gate_capacitance_is_the_full_oxide_capacitance() {
-    // vgs = -1 V: overdrive t = -1.7 V sits below -phi, so the gate-bulk
-    // wedge delivers the full Cox and the channel charge is off.
-    let deck = format!(
-        "* mos gate capacitance divider, deep accumulation\n\
+    for m in [1.0, 3.0] {
+        // vgs = -1 V: overdrive t = -1.7 V sits below -phi, so the gate-bulk
+        // wedge delivers the full Cox and the channel charge is off.
+        let deck = format!(
+            "* mos gate capacitance divider, deep accumulation\n\
          v1 in 0 dc -1 ac 0.001\n\
          r1 in g 1meg\n\
-         m1 0 g 0 0 nmod l=1u w=10u\n\
+         m1 0 g 0 0 nmod l=1u w=10u m={m}\n\
          {MODEL}\n\
          .end\n"
-    );
-    let result = run_gate_divider(&deck);
+        );
+        let result = run_gate_divider(&deck);
 
-    // The 1e-12 S convergence GMIN leaks ~1 uV through the megohm.
-    let vdc = coefficient(&result, "g", 0).re;
-    assert!(
-        (vdc + 1.0).abs() < 1e-5,
-        "gate draws no DC current, bias must hold -1 V: got {vdc}"
-    );
+        // The 1e-12 S convergence GMIN leaks ~1 uV through the megohm.
+        let vdc = coefficient(&result, "g", 0).re;
+        assert!(
+            (vdc + 1.0).abs() < 1e-5,
+            "gate draws no DC current, bias must hold -1 V: got {vdc}"
+        );
 
-    assert_divider(&result, COX_WL + C_OVERLAP, "accumulation");
+        assert_divider(&result, (COX_WL + C_OVERLAP) * m, "accumulation");
+    }
 }
 
 #[test]
 fn saturation_gate_capacitance_is_two_thirds_of_the_oxide_capacitance() {
-    // vgs = 2 V, vds = 3 V > vgst: saturation. The drain rail is an AC
-    // ground, so there is no Miller multiplication and the gate sees
-    // (2/3) Cox plus the overlaps.
-    let deck = format!(
-        "* mos gate capacitance divider, saturation\n\
+    for m in [1.0, 3.0] {
+        // vgs = 2 V, vds = 3 V > vgst: saturation. The drain rail is an AC
+        // ground, so there is no Miller multiplication and the gate sees
+        // (2/3) Cox plus the overlaps.
+        let deck = format!(
+            "* mos gate capacitance divider, saturation\n\
          v1 in 0 dc 2 ac 0.001\n\
          vdd d 0 dc 3\n\
          r1 in g 1meg\n\
-         m1 d g 0 0 nmod l=1u w=10u\n\
+         m1 d g 0 0 nmod l=1u w=10u m={m}\n\
          {MODEL}\n\
          .end\n"
-    );
-    let result = run_gate_divider(&deck);
+        );
+        let result = run_gate_divider(&deck);
 
-    // The 1e-12 S convergence GMIN leaks ~2 uV through the megohm.
-    let vdc = coefficient(&result, "g", 0).re;
-    assert!(
-        (vdc - 2.0).abs() < 1e-5,
-        "gate draws no DC current, bias must hold +2 V: got {vdc}"
-    );
+        // The 1e-12 S convergence GMIN leaks ~2 uV through the megohm.
+        let vdc = coefficient(&result, "g", 0).re;
+        assert!(
+            (vdc - 2.0).abs() < 1e-5,
+            "gate draws no DC current, bias must hold +2 V: got {vdc}"
+        );
 
-    assert_divider(&result, 2.0 / 3.0 * COX_WL + C_OVERLAP, "saturation");
+        assert_divider(&result, (2.0 / 3.0 * COX_WL + C_OVERLAP) * m, "saturation");
+    }
+}
+
+#[test]
+fn parallel_mos_bulk_capacitance_matches_the_analytic_hb_divider() {
+    for m in [1.0, 3.0] {
+        let deck = format!(
+            "MOS bulk capacitance divider\nv1 in 0 dc 0 ac 0.001\nr1 in g 1meg\nm1 g 0 0 0 mm l=1u w=10u m={m}\n.model mm NMOS(LEVEL=1 VTO=1 KP=0 IS=0 CBD=1p)\n.end\n"
+        );
+        let result = run_gate_divider(&deck);
+        assert_divider(&result, 1e-12 * m, "bulk capacitance");
+    }
+}
+
+#[test]
+fn parallel_mos_channel_current_matches_the_analytic_hb_harmonics() {
+    for m in [1.0, 3.0] {
+        // The drain remains in saturation throughout the small gate swing.
+        // Squaring Vov + A*cos(wt) gives exact DC, fundamental and HD2 terms.
+        let deck = format!(
+            "MOS channel harmonics\nv1 in 0 dc 2 ac 0.001\nvdd supply 0 3\nr1 supply g 1k\nm1 g in 0 0 mm l=1u w=10u m={m}\n.model mm NMOS(LEVEL=1 VTO=0.7 KP=20u IS=0)\n.options GMIN=0\n.end\n"
+        );
+        let result = run_gate_divider(&deck);
+        assert!(result.converged);
+        let beta_r = m * 20e-6 * 10.0 * 1e3;
+        let expected = [
+            3.0 - 0.5 * beta_r * (1.3 * 1.3 + 0.5 * A * A),
+            -beta_r * 1.3 * A,
+            -0.25 * beta_r * A * A,
+        ];
+        for (harmonic, expected) in expected.into_iter().enumerate() {
+            let actual = coefficient(&result, "g", harmonic);
+            assert!(
+                (actual.re - expected).abs() < 1e-10 + expected.abs() * 1e-6,
+                "M={m} harmonic={harmonic}: {actual} vs {expected}"
+            );
+            assert!(actual.im.abs() < 1e-10);
+        }
+    }
 }

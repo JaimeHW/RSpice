@@ -262,6 +262,65 @@ mod wasm_tests {
     }
 
     #[wasm_bindgen_test]
+    fn native_mos_multiplicity_matches_parallel_devices_in_wasm() {
+        use rspice_core::engine::{SimulationConfig, SpiceDialect};
+        use rspice_core::numerics::integration::IntegrationMethod;
+        let abort = rspice_core::abort_signal::NoAbort;
+        let engine = rspice_core::Engine::new(SimulationConfig {
+            spice_dialect: SpiceDialect::Ngspice,
+            integration_method: IntegrationMethod::BackwardEuler,
+            locked_time_grid: Some(std::sync::Arc::new(vec![0.0, 0.5e-6, 1e-6])),
+            ..Default::default()
+        });
+        for level in [1, 2, 3, 4, 5, 6, 9] {
+            let geometry = match level {
+                2 | 3 | 9 => "TOX=30n DELTA=1",
+                4 => "TOX=0.03 VFB=-0.7 PHI=0.6 VDD=2 MUZ=400 MUS=500 WMUZ=20 WVFB=0.1",
+                5 => "TOX=0.03 VFB=-0.7 PHI=0.6 MU0=400 MUS0=500 WMU0=20 WVFB=0.1",
+                _ => "TOX=30n",
+            };
+            for (kind, p) in [("NMOS", 1.0), ("PMOS", -1.0)] {
+                let deck = |parallel| {
+                    let mut text = format!(
+                        "MOS multiplicity in WASM\nVD d 0 DC {} PWL(0 {} 1u {})\nVG g 0 DC {} PWL(0 {} 1u {})\nVS s 0 0\nVB b 0 {}\n.model mm {kind}(LEVEL={level} VTO={} KP=50u {geometry} IS=1u CGSO=1m CGDO=2m CGBO=3m CBS=1n CBD=2n RD=20 RS=10)\n.options GMIN=0 RELTOL=1e-9 ABSTOL=1e-13 VNTOL=1e-11\n",
+                        p * 0.5,
+                        p * 0.5,
+                        p * 0.8,
+                        p * 1.5,
+                        p * 1.5,
+                        p * 1.8,
+                        p * 0.1,
+                        p * 0.5
+                    );
+                    for index in 0..if parallel { 3 } else { 1 } {
+                        let multiplier = if parallel { "M=1" } else { "M=1.5 NF=2" };
+                        text.push_str(&format!("M{index} d g s b mm L=1u W=0.5u {multiplier}\n"));
+                    }
+                    text.push_str(".end\n");
+                    rspice_core::Netlist::parse(&text).unwrap()
+                };
+                let actual = engine
+                    .run_tran_with_abort(&deck(false), 1e-6, 0.5e-6, &abort)
+                    .unwrap();
+                let expected = engine
+                    .run_tran_with_abort(&deck(true), 1e-6, 0.5e-6, &abort)
+                    .unwrap();
+                assert_eq!(actual.time, expected.time);
+                for source in ["VD", "VG", "VS", "VB"] {
+                    let a = actual.try_branch_current_waveform_named(source).unwrap();
+                    let b = expected.try_branch_current_waveform_named(source).unwrap();
+                    for (a, b) in a.iter().zip(b) {
+                        assert!(
+                            (a - b).abs() < 1e-10 + b.abs() * 2e-7,
+                            "L{level} {kind} {source}: {a} vs {b}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[wasm_bindgen_test]
     fn native_mos_terminal_currents_in_wasm() {
         use rspice_core::engine::{SimulationConfig, SpiceDialect};
         use rspice_core::numerics::integration::IntegrationMethod;

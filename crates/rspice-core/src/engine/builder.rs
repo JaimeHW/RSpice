@@ -6622,7 +6622,25 @@ impl Engine {
                         mosfet = mosfet.with_params(params_map);
                     }
 
+                    for (name, value) in instance_params {
+                        if ["M", "MULT", "NF"]
+                            .iter()
+                            .any(|label| name.eq_ignore_ascii_case(label))
+                            && (!value.is_finite() || *value <= 0.0)
+                        {
+                            return Err(SimulationError::Circuit(format!(
+                                "MOSFET '{}' requires {name} to be finite and positive, got {value}",
+                                element.name
+                            )));
+                        }
+                    }
                     mosfet = mosfet.with_instance_params(instance_params);
+                    if !mosfet.multiplicity.is_finite() || mosfet.multiplicity <= 0.0 {
+                        return Err(SimulationError::Circuit(format!(
+                            "MOSFET '{}' requires the resolved M*NF product to be finite and positive",
+                            element.name
+                        )));
+                    }
 
                     // Device temperature: instance TEMP is absolute (C),
                     // DTEMP offsets the circuit temperature; model TNOM
@@ -6655,6 +6673,11 @@ impl Engine {
                     mosfet.set_temperature(temp_k, tnom_k);
                     if level == 1 {
                         validate_resolved_level1_mos(&mosfet, model)?;
+                    } else if let Some(reason) = mosfet.resolved_scaling_parameter_error() {
+                        return Err(SimulationError::Circuit(format!(
+                            "MOSFET '{}' model '{model}': {reason}",
+                            element.name
+                        )));
                     }
 
                     // The physical source temperature is the resolved
@@ -6677,7 +6700,7 @@ impl Engine {
                     // terminals make junction noise and limiting act at the
                     // true internal nodes. BSIM1/BSIM2 default NRD/NRS to one
                     // and therefore participate in this path as well.
-                    let multiplicity = mosfet.multiplicity.max(1e-12);
+                    let multiplicity = mosfet.multiplicity;
                     let drain_r = if mosfet.rd_model > 0.0 {
                         mosfet.rd_model
                     } else if mosfet.rsh > 0.0 {

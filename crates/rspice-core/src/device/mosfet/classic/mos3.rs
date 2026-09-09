@@ -119,7 +119,7 @@ impl Mosfet {
         let one_over_l = 1.0 / effective_length;
         let cox = self.cox.max(0.0);
         let oxide_cap = cox * effective_length * effective_width;
-        let beta = self.kp * effective_width * one_over_l;
+        let beta = self.kp * effective_width * one_over_l * self.multiplicity;
         let phi = self.phi.max(1.0e-12);
         let sqrt_phi = phi.sqrt();
         let t_vbi = self.vto - self.polarity() * self.gamma * sqrt_phi;

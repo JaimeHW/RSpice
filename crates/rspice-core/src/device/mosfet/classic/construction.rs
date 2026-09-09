@@ -324,14 +324,12 @@ impl Mosfet {
         } else {
             (self.l - 2.0 * self.ld).max(1.0e-12)
         };
-        let meyer_width = self.classic_meyer_effective_width();
-        let meyer_length = self.classic_meyer_effective_length();
         let source_body_isat = self.effective_body_junction_saturation_current(self.source_area);
         let drain_body_isat = self.effective_body_junction_saturation_current(self.drain_area);
         ClassicMosTransientConstants {
             sqrt_phi: self.phi.sqrt(),
             level1_sqrt_phi: phi.sqrt(),
-            level1_beta: self.kp * self.w / effective_length,
+            level1_beta: self.kp * self.w / effective_length * self.multiplicity,
             source_body_isat,
             drain_body_isat,
             body_junction_nvt: self.body_junction_thermal_voltage(),
@@ -339,12 +337,8 @@ impl Mosfet {
             body_junction_charge_mask: self.body_junction_charge_mask(),
             source_body_vcrit: self.body_junction_vcrit(source_body_isat),
             drain_body_vcrit: self.body_junction_vcrit(drain_body_isat),
-            oxide_capacitance_total: self.cox * meyer_width * meyer_length,
-            overlap_capacitances: (
-                self.cgso * meyer_width,
-                self.cgdo * meyer_width,
-                self.cgbo * meyer_length,
-            ),
+            oxide_capacitance_total: self.oxide_capacitance_total(),
+            overlap_capacitances: self.overlap_capacitances(),
         }
     }
 
@@ -1319,6 +1313,38 @@ impl Mosfet {
         }
     }
 
+    /// Reject unrepresentable parallel-instance contributions before finite
+    /// guards in the device laws can turn them into missing current or charge.
+    pub(crate) fn resolved_scaling_parameter_error(&self) -> Option<&'static str> {
+        if !self.multiplicity.is_finite() || self.multiplicity <= 0.0 {
+            return Some("resolved M*NF product must be finite and positive");
+        }
+        for area in [self.source_area, self.drain_area] {
+            if !self
+                .effective_body_junction_saturation_current(area)
+                .is_finite()
+            {
+                return Some("resolved body-junction saturation current must be finite");
+            }
+        }
+        let (cgs, cgd, cgb) = self.overlap_capacitances();
+        for capacitance in [
+            self.oxide_capacitance_total(),
+            cgs,
+            cgd,
+            cgb,
+            self.source_zero_bias_bottom_junction_capacitance(),
+            self.drain_zero_bias_bottom_junction_capacitance(),
+            self.source_zero_bias_sidewall_junction_capacitance(),
+            self.drain_zero_bias_sidewall_junction_capacitance(),
+        ] {
+            if !capacitance.is_finite() || capacitance < 0.0 {
+                return Some("resolved MOS capacitance must be finite and nonnegative");
+            }
+        }
+        None
+    }
+
     /// Validate the physical scalar contract consumed by the native Level-1
     /// equations. Circuit construction calls this after geometry and
     /// temperature resolution; exact HB calls it again defensively for
@@ -1409,25 +1435,11 @@ impl Mosfet {
             }
         }
 
-        let beta = self.kp * self.w / effective_length;
+        let beta = self.kp * self.w / effective_length * self.multiplicity;
         if !beta.is_finite() || beta < 0.0 {
-            return Some("KP*W/(L-2*LD) must be finite and nonnegative");
+            return Some("M*NF*KP*W/(L-2*LD) must be finite and nonnegative");
         }
-        for capacitance in [
-            self.cox * self.w * effective_length,
-            self.cgso * self.w,
-            self.cgdo * self.w,
-            self.cgbo * effective_length,
-            self.cj * self.source_area,
-            self.cj * self.drain_area,
-            self.cjsw * self.source_perimeter,
-            self.cjsw * self.drain_perimeter,
-        ] {
-            if !capacitance.is_finite() || capacitance < 0.0 {
-                return Some("resolved Level-1 capacitance must be finite and nonnegative");
-            }
-        }
-        None
+        self.resolved_scaling_parameter_error()
     }
 
     pub(crate) fn with_instance_params(mut self, params: &[(String, Value)]) -> Self {
@@ -1528,10 +1540,7 @@ impl Mosfet {
         }
 
         let scale = multiplier * nf;
-        if scale.is_finite() && scale > 0.0 {
-            self.w *= scale;
-            self.multiplicity = scale;
-        }
+        self.multiplicity = scale;
 
         self.refresh_legacy_bsim_size_params();
         self

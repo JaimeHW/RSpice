@@ -59,7 +59,10 @@ impl Mosfet {
         };
         let current = if current.is_finite() { current } else { 0.0 };
 
-        (p * mode * current, Self::legacy_region_to_mos(region))
+        (
+            p * mode * current * self.multiplicity,
+            Self::legacy_region_to_mos(region),
+        )
     }
 
     pub(in crate::device::mosfet::classic) fn legacy_bsim_linearized_operating_point(
@@ -166,7 +169,7 @@ impl Mosfet {
         let phi = self.phi;
         let sqrt_phi = phi.sqrt();
         let effective_length = self.l - 2.0 * self.ld;
-        let beta = self.kp * self.w / effective_length;
+        let beta = self.kp * self.w / effective_length * self.multiplicity;
         self.level1_operating_point_with_constants(vgs, vds, vbs, sqrt_phi, beta)
     }
 
@@ -348,7 +351,7 @@ impl Mosfet {
         let mobility = self.u0 / (1.0 + self.ua * eeff + self.ub * eeff * eeff);
 
         // Effective beta with mobility degradation
-        let beta_eff = mobility * 1e-4 * self.cox * self.wl_ratio();
+        let beta_eff = mobility * 1e-4 * self.cox * self.wl_ratio() * self.multiplicity;
 
         // Saturation voltage with velocity saturation (smooth formulation)
         let vsat_over_l = self.vsat / self.l;
@@ -430,7 +433,7 @@ impl Mosfet {
             self.gamma1 + self.gamma / (2.0 * sqrt_phi.max(1e-12))
         };
 
-        let betac = self.kc * self.w / self.level6_effective_length();
+        let betac = self.kc * self.w / self.level6_effective_length() * self.multiplicity;
         let vdsat = self.kv * vgon.powf(self.nv);
         let idsat = betac * vgon.powf(self.nc);
         let lambda = self.lambda0 - self.lambda1 * vbsvbd;

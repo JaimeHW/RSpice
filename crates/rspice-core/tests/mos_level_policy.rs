@@ -84,6 +84,184 @@ fn run(deck: &str) -> Result<(), String> {
     run_report(deck).map(|_| ())
 }
 
+fn check_native_mos_parallel_equivalence(analysis: &str) {
+    use rspice_core::engine::SpiceDialect;
+    use rspice_core::numerics::integration::IntegrationMethod;
+    for dialect in [SpiceDialect::Ngspice, SpiceDialect::Xyce] {
+        for level in [1, 2, 3, 4, 5, 6, 9] {
+            if level == 9 && dialect == SpiceDialect::Xyce {
+                continue;
+            }
+            let narrow = if matches!(level, 2 | 3 | 9) {
+                "DELTA=1"
+            } else {
+                ""
+            };
+            for (kind, p) in [("NMOS", 1.0), ("PMOS", -1.0)] {
+                for series in ["", "RD=20 RS=10"] {
+                    for multiplier in ["M=3", "M=1.5 NF=2"] {
+                        for (gate, drain, bulk) in [(-1.0, 0.0, 0.2), (1.5, 1.0, -0.2)] {
+                            let context = format!(
+                                "{analysis} {dialect:?} L{level} {kind} {series} {multiplier} bias=({gate},{drain},{bulk})"
+                            );
+                            let deck = |parallel| {
+                                let mut text = format!(
+                                    "MOS parallel equivalence\nVD d 0 DC {} AC 0.3 PWL(0 {} 1u {})\nVG g 0 DC {} AC 1 PWL(0 {} 1u {})\nVS s 0 0\nVB b 0 DC {} AC 0.2 PWL(0 {} 1u {})\n.model mm {kind}(LEVEL={level} VTO={} KP=50u TOX=30n IS=1u JS=1e4 CGSO=1m CGDO=2m CGBO=3m CJ=1e3 CJSW=1m {narrow} {series})\n.options GMIN=0 RELTOL=1e-9 ABSTOL=1e-13 VNTOL=1e-11\n",
+                                    p * drain,
+                                    p * drain,
+                                    p * (drain + 0.1),
+                                    p * gate,
+                                    p * gate,
+                                    p * (gate + 0.3),
+                                    p * bulk,
+                                    p * bulk,
+                                    p * (bulk - 0.1),
+                                    p,
+                                );
+                                for index in 0..if parallel { 3 } else { 1 } {
+                                    let m = if parallel { "M=1" } else { multiplier };
+                                    text.push_str(&format!("M{index} d g s b mm L=1u W=0.5u AD=2p AS=3p PD=4u PS=5u {m}\n"));
+                                }
+                                text.push_str(".end\n");
+                                Netlist::parse(&text).unwrap()
+                            };
+                            let engine = Engine::new(SimulationConfig {
+                                spice_dialect: dialect,
+                                integration_method: IntegrationMethod::BackwardEuler,
+                                locked_time_grid: Some(std::sync::Arc::new(vec![
+                                    0.0, 0.5e-6, 1e-6,
+                                ])),
+                                ..Default::default()
+                            });
+                            let scalar = deck(false);
+                            let parallel = deck(true);
+                            let close = |actual: f64, expected: f64| {
+                                assert!(
+                                    (actual - expected).abs() < 1e-10 + expected.abs() * 2e-7,
+                                    "{context}: {actual} vs {expected}"
+                                );
+                            };
+                            match analysis {
+                                "dc" => {
+                                    let actual = engine.run_dc_op(&scalar).unwrap();
+                                    let expected = engine.run_dc_op(&parallel).unwrap();
+                                    assert_eq!(actual.branch_names, expected.branch_names);
+                                    for (a, b) in
+                                        actual.branch_currents.iter().zip(&expected.branch_currents)
+                                    {
+                                        close(*a, *b);
+                                    }
+                                }
+                                "ac" => {
+                                    let actual = engine.run_ac(&scalar, &[1e3, 1e6]).unwrap();
+                                    let expected = engine.run_ac(&parallel, &[1e3, 1e6]).unwrap();
+                                    for (a, b) in actual.iter().zip(&expected) {
+                                        assert_eq!(a.branch_names, b.branch_names);
+                                        for (x, y) in a.currents.iter().zip(&b.currents) {
+                                            close(x.re, y.re);
+                                            close(x.im, y.im);
+                                        }
+                                    }
+                                }
+                                "tran" => {
+                                    let actual = engine.run_tran(&scalar, 1e-6, 0.5e-6).unwrap();
+                                    let expected =
+                                        engine.run_tran(&parallel, 1e-6, 0.5e-6).unwrap();
+                                    assert_eq!(actual.time, expected.time);
+                                    for source in ["VD", "VG", "VS", "VB"] {
+                                        let a = actual
+                                            .try_branch_current_waveform_named(source)
+                                            .unwrap();
+                                        let b = expected
+                                            .try_branch_current_waveform_named(source)
+                                            .unwrap();
+                                        for (x, y) in a.iter().zip(b) {
+                                            close(*x, *y);
+                                        }
+                                    }
+                                    assert_eq!(
+                                        engine.convergence_quality().force_accepted_points,
+                                        0
+                                    );
+                                }
+                                _ => unreachable!(),
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn native_mos_rejects_invalid_multiplicity_and_unrepresentable_products() {
+    for level in [1, 2, 3, 4, 5, 6, 9] {
+        for parameters in [
+            "M=0",
+            "M=-1",
+            "MULT=0",
+            "NF=0",
+            "NF=-1",
+            "M=1e200 NF=1e200",
+            "M=1e-200 NF=1e-200",
+        ] {
+            let netlist = Netlist::parse(&format!("invalid MOS multiplicity\nVD d 0 1\nVG g 0 1.5\nM1 d g 0 0 mm W=1u L=1u {parameters}\n.model mm NMOS(LEVEL={level} VTO=0.5)\n.end\n")).unwrap();
+            let error = Engine::default()
+                .run_dc_op(&netlist)
+                .expect_err("invalid multiplicity must not run as M=1")
+                .to_string();
+            assert!(
+                error.contains("positive") && (error.contains("M") || error.contains("NF")),
+                "L{level} {parameters}: {error}"
+            );
+        }
+    }
+}
+
+#[test]
+fn native_mos_rejects_overflowing_resolved_current_and_capacitance() {
+    for level in [1, 2, 3, 4, 5, 6, 9] {
+        for (model, geometry, quantity) in [
+            ("IS=1e200", "", "saturation current"),
+            ("IS=0 JS=1e200", "AD=1e200 AS=1e200", "saturation current"),
+            ("IS=0 CBD=1e200", "", "capacitance"),
+            ("IS=0 CBS=1e200", "", "capacitance"),
+            ("IS=0 CJ=1e200", "AD=1 AS=1", "capacitance"),
+            ("IS=0 CJSW=1e200", "PD=1 PS=1", "capacitance"),
+            ("IS=0 CGBO=1e200", "", "capacitance"),
+        ] {
+            let netlist = Netlist::parse(&format!(
+                "MOS overflow\nVD d 0 0\nVG g 0 -1\nVB b 0 0.2\nM1 d g 0 b mm L=1u W=1u M=1e200 {geometry}\n.model mm NMOS(LEVEL={level} KP=0 {model})\n.end\n"
+            )).unwrap();
+            let engine = Engine::default().resolved_for_netlist(&netlist);
+            let error = engine
+                .build_circuit(&netlist)
+                .expect_err("overflow must not erase a contribution")
+                .to_string();
+            assert!(
+                error.contains("M1") && error.contains(quantity),
+                "L{level} {model}: {error}"
+            );
+        }
+    }
+}
+
+#[test]
+fn native_mos_multiplicity_matches_parallel_dc() {
+    check_native_mos_parallel_equivalence("dc");
+}
+
+#[test]
+fn native_mos_multiplicity_matches_parallel_ac() {
+    check_native_mos_parallel_equivalence("ac");
+}
+
+#[test]
+fn native_mos_multiplicity_matches_parallel_transient() {
+    check_native_mos_parallel_equivalence("tran");
+}
+
 #[test]
 fn native_mos_terminal_reports_include_body_junction_currents() {
     use rspice_core::engine::SpiceDialect;

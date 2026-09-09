@@ -48,7 +48,7 @@ impl Engine {
             let source = Self::hb_node_to_solver_index(mos.node_source, num_nodes);
             let bulk = Self::hb_node_to_solver_index(mos.node_bulk, num_nodes);
             let leff = mos.l - 2.0 * mos.ld;
-            let beta = mos.kp * mos.w / leff;
+            let beta = mos.kp * mos.w / leff * mos.multiplicity;
             let instance = match mos.mos_type {
                 crate::device::MosType::Nmos => NonlinearDeviceInstance::nmos(
                     drain, gate, source, bulk, mos.vto, beta, mos.lambda,
@@ -62,33 +62,19 @@ impl Engine {
             // Effective bulk-junction zero-bias capacitances: explicit
             // CBD/CBS overrides, else bottom density times area, plus the
             // sidewall density times perimeter folded at the bottom grading.
-            let cbs0 = mos
-                .source_bulk_cap_zero_bias
-                .unwrap_or(mos.cj * mos.source_area)
-                .max(0.0)
-                + (mos.cjsw * mos.source_perimeter).max(0.0);
-            let cbd0 = mos
-                .drain_bulk_cap_zero_bias
-                .unwrap_or(mos.cj * mos.drain_area)
-                .max(0.0)
-                + (mos.cjsw * mos.drain_perimeter).max(0.0);
-            let is_s = if mos.js_bulk > 0.0 && mos.source_area > 0.0 {
-                mos.js_bulk * mos.source_area
-            } else {
-                mos.is_bulk
-            };
-            let is_d = if mos.js_bulk > 0.0 && mos.drain_area > 0.0 {
-                mos.js_bulk * mos.drain_area
-            } else {
-                mos.is_bulk
-            };
+            let cbs0 = mos.source_zero_bias_bottom_junction_capacitance()
+                + mos.source_zero_bias_sidewall_junction_capacitance();
+            let cbd0 = mos.drain_zero_bias_bottom_junction_capacitance()
+                + mos.drain_zero_bias_sidewall_junction_capacitance();
+            let is_s = mos.effective_body_junction_saturation_current(mos.source_area);
+            let is_d = mos.effective_body_junction_saturation_current(mos.drain_area);
             // Intrinsic channel charge: total oxide capacitance over the
             // effective (lateral-diffusion-shortened) channel.
             let instance = instance
                 .with_thermal_voltage(mos.vt)
                 .with_body_effect(mos.gamma, mos.phi)
                 .with_channel_noise_gamma(mos.channel_thermal_noise_gamma())
-                .with_intrinsic_gate(mos.cox * mos.w * leff)
+                .with_intrinsic_gate(mos.oxide_capacitance_total())
                 .with_bulk_junctions(
                     DepletionCap::new(cbs0, mos.pb, mos.mj, mos.fc),
                     DepletionCap::new(cbd0, mos.pb, mos.mj, mos.fc),
@@ -111,9 +97,7 @@ impl Engine {
 
             // Gate overlap capacitances are bias-independent in level 1:
             // stamp them as ordinary linear capacitors.
-            let cgs_ov = mos.cgso * mos.w;
-            let cgd_ov = mos.cgdo * mos.w;
-            let cgb_ov = mos.cgbo * leff;
+            let (cgs_ov, cgd_ov, cgb_ov) = mos.overlap_capacitances();
             if cgs_ov > 0.0 {
                 self.hb_stamp_admittance(solver, mos.node_gate, mos.node_source, cgs_ov, false);
             }

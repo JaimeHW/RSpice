@@ -103,10 +103,8 @@ impl Mosfet {
     /// Flicker-noise source terms `(coefficient, current, af, ef)` for a
     /// density of `coefficient·|current|^af / f^ef`, following the SPICE
     /// NLEV laws of mos1noi.c (mos2/mos3 are identical; NLEV defaults to 2
-    /// per mos1set.c) under this model's folded-width representation: the
-    /// instance multiplicity is folded into `w`, so ngspice's per-finger
-    /// width `W/m` and its explicit `m`/`Id/m` factors recombine into the
-    /// `m`-power on the coefficient shown at each arm.
+    /// per mos1set.c). Evaluate the noise law at per-instance current or gm,
+    /// then sum the independent contributions of M·NF parallel instances.
     ///
     /// `Leff = L − 2·LATD`; a zero oxide capacitance falls back to the
     /// 100 nm-oxide default exactly as mos1noi.c does.
@@ -122,29 +120,28 @@ impl Mosfet {
         };
         let leff = (self.l - 2.0 * self.ld).max(1e-18);
         let width = self.w.max(1e-18);
-        let m = self.multiplicity.max(1e-12);
+        let m = self.multiplicity;
         let af = self.af.max(1e-12);
         let ef = self.ef.max(1e-12);
 
         match self.nlev {
             0 => Some((
-                self.kf * m.powf(1.0 - af) / (leff * leff * cox),
-                self.drain_current().abs(),
+                self.kf * m / (leff * leff * cox),
+                self.drain_current().abs() / m,
                 af,
                 ef,
             )),
             1 => Some((
-                self.kf * m.powf(2.0 - af) / (width * leff * cox),
-                self.drain_current().abs(),
+                self.kf * m / (width * leff * cox),
+                self.drain_current().abs() / m,
                 af,
                 ef,
             )),
             // NLEV 2 and 3 share the gm²-based law; AF moves onto the
-            // frequency exponent and the explicit m cancels against the
-            // folded width.
+            // frequency exponent; each instance contributes its own gm².
             _ => {
-                let gm = self.transconductance();
-                Some((self.kf * gm * gm / (width * leff * cox), 1.0, 1.0, af))
+                let gm = self.transconductance() / m;
+                Some((self.kf * gm * gm * m / (width * leff * cox), 1.0, 1.0, af))
             }
         }
     }
@@ -254,7 +251,7 @@ impl Mosfet {
 
     /// Beta = KP * W/L
     pub(crate) fn beta(&self) -> Value {
-        self.kp * self.wl_ratio()
+        self.kp * self.wl_ratio() * self.multiplicity
     }
 }
 
