@@ -215,7 +215,9 @@ fn convergence_inspector_exposes_unknown_and_forced_acceptance_status_accessibly
         });
         let nodes = output.platform_output.accesskit_update.unwrap().nodes;
         assert!(
-            nodes.iter().any(|(_, node)| node.label() == Some(expected)),
+            nodes.iter().any(|(_, node)| {
+                node.role() == egui::accesskit::Role::Label && node.value() == Some(expected)
+            }),
             "Missing accessible quality status: {expected}"
         );
     }
