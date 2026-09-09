@@ -299,7 +299,7 @@ pub(super) fn nondefault_op_config() -> crate::simulation::dialog::OpConfig {
 
 #[test]
 fn browser_worker_transfer_protocol_matches_rust_transport() {
-    assert_eq!(WORKER_RESPONSE_TRANSPORT_PROTOCOL, 18);
+    assert_eq!(WORKER_RESPONSE_TRANSPORT_PROTOCOL, 19);
     assert_eq!(WORKER_REQUEST_TRANSPORT_PROTOCOL, 9);
     let source = include_str!("../../../../web/simulation-worker.js");
     assert!(source.contains(&format!(

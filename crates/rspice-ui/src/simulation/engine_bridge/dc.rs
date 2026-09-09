@@ -924,8 +924,8 @@ mod operating_point_contract_tests {
                     )
                 })
         };
-        let forward = trace("out [forward]");
-        let reverse = trace("out [reverse]");
+        let forward = trace("V(out) [forward]");
+        let reverse = trace("V(out) [reverse]");
 
         // Both branches span the whole axis, so neither is dropped by the
         // shared-axis length check on the way to a plot.
@@ -947,9 +947,11 @@ mod operating_point_contract_tests {
         assert_eq!(current.y_unit, "A");
         assert_eq!(current.y_values.len(), sweep_values.len());
 
-        // A one-way sweep is unchanged: no branch suffix, one trace per signal.
+        // Every retained curve identifies a branch of the retrace.
         assert!(
-            !waveforms.keys().any(|name| name == "out"),
+            !waveforms
+                .keys()
+                .any(|name| name.eq_ignore_ascii_case("V(out)")),
             "a retracing sweep names its branches rather than leaving a bare trace"
         );
     }
