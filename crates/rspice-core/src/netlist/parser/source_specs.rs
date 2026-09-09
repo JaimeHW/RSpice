@@ -699,16 +699,15 @@ fn parse_trnoise_spec(
     let rts_capture = rts_capture.unwrap_or(0.0);
     let rts_emit = rts_emit.unwrap_or(0.0);
 
-    if (na != 0.0 || namp != 0.0) && !(nt.is_finite() && nt > 0.0) {
+    if (na != 0.0 || namp != 0.0 && nalpha > 0.0) && !(nt.is_finite() && nt > 0.0) {
         return Err(ParseError::Syntax {
             line: line_num,
             message: "TRNOISE requires a positive sample interval NT".to_string(),
         });
     }
-    // ngspice accepts alpha=0 as the unshaped (white) endpoint of the
-    // fractional-noise generator; its distributed `simple-noise.cir`
-    // example relies on exactly that spelling. Negative alpha and alpha >= 2
-    // remain outside the supported Kasdin range.
+    // NALPHA=0 is accepted and disables the flicker component, including
+    // the spelling used by ngspice's distributed simple-noise.cir. Negative
+    // alpha and alpha >= 2 remain outside the supported Kasdin range.
     if namp != 0.0 && !(0.0..2.0).contains(&nalpha) {
         return Err(ParseError::Syntax {
             line: line_num,
@@ -1772,7 +1771,7 @@ mod tests {
     }
 
     #[test]
-    fn trnoise_accepts_zero_alpha_as_ngspice_white_endpoint() {
+    fn trnoise_accepts_zero_alpha_with_flicker_disabled() {
         let source = parse_source_spec_text("TRNOISE(0.05 8p 0 1.0 0)", 1, &ParamContext::new())
             .expect("ngspice accepts NALPHA=0 with NAMP");
 
@@ -1781,6 +1780,12 @@ mod tests {
             SourceSpec::TrNoise { nalpha, namp, .. }
                 if nalpha == 0.0 && namp == 1.0
         ));
+    }
+
+    #[test]
+    fn disabled_flicker_does_not_require_a_sample_clock() {
+        parse_source_spec_text("TRNOISE(0 0 0 1)", 1, &ParamContext::new())
+            .expect("disabled noise requires no positive sample interval");
     }
 
     #[test]

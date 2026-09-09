@@ -4,6 +4,118 @@ use rspice_core::engine::{Engine, SimulationConfig};
 use rspice_core::netlist::Netlist;
 
 #[test]
+fn trnoise_startup_matches_zero_origin_and_explicit_dc_bias() {
+    let engine = Engine::default();
+    for waveform in [
+        "TRNOISE(1 1n 0 0)",
+        "TRNOISE(0 1n 1 1)",
+        "TRNOISE(1 1n 1 1)",
+    ] {
+        for source in ["V1 out 0", "I1 0 out"] {
+            for dc in ["", "DC .25"] {
+                let netlist = Netlist::parse(&format!(
+                    "noise startup\n{source} {dc} {waveform} AC 2 DISTOF1 1\nR1 out 0 1\n.end\n"
+                ))
+                .unwrap();
+                let result = engine.run_tran(&netlist, 10e-9, 1e-9).unwrap();
+                let output = result
+                    .node_names
+                    .iter()
+                    .position(|node| node.eq_ignore_ascii_case("out"))
+                    .unwrap();
+                assert_eq!(result.time[0], 0.0);
+                let expected = if dc.is_empty() { 0.0 } else { 0.25 };
+                assert!(
+                    (result.voltages[output][0] - expected).abs() < 1e-14,
+                    "{source} {dc} {waveform}: {}",
+                    result.voltages[output][0]
+                );
+                assert!(
+                    result.voltages[output]
+                        .iter()
+                        .skip(1)
+                        .any(|value| value.abs() > 0.1)
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn explicit_dc_offsets_the_complete_random_waveform() {
+    use std::sync::Arc;
+    let grid: Vec<_> = (0..=32).map(|index| f64::from(index) * 1e-9).collect();
+    let engine = Engine::new(SimulationConfig {
+        locked_time_grid: Some(Arc::new(grid.clone())),
+        ..SimulationConfig::default()
+    });
+    for waveform in ["TRNOISE(1 1n 1 1 1 .7n .9n)", "TRRANDOM(2 1n .3n 1 0)"] {
+        for source in ["V1 out 0", "I1 0 out"] {
+            let run = |dc: &str| {
+                let deck = Netlist::parse(&format!(
+                    "random DC offset\n{source} {dc} {waveform} AC 2 DISTOF1 1\nR1 out 0 1\n.end\n"
+                ))
+                .unwrap();
+                engine.run_tran(&deck, grid[32], 1e-9).unwrap()
+            };
+            let baseline = run("");
+            let biased = run("DC .25");
+            assert_eq!(baseline.time, biased.time);
+            let base = baseline.try_voltage_waveform_named("out").unwrap();
+            let offset = biased.try_voltage_waveform_named("out").unwrap();
+            for (a, b) in base.iter().zip(offset) {
+                assert!(
+                    (b - a - 0.25).abs() < 2e-14,
+                    "{source} {waveform}: {a} -> {b}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn disabled_flicker_is_zero_without_allocating_a_noise_sample_train() {
+    let netlist =
+        Netlist::parse("disabled flicker\nV1 out 0 TRNOISE(0 0 0 1)\nR1 out 0 1\n.end\n").unwrap();
+    let result = Engine::default().run_tran(&netlist, 10e-9, 1e-9).unwrap();
+    assert!(result.voltages.iter().flatten().all(|value| *value == 0.0));
+}
+
+#[test]
+fn extending_noise_horizons_preserves_every_locked_sample() {
+    use std::sync::Arc;
+    let grid: Vec<_> = (0..=129).map(|index| f64::from(index) * 0.3e-9).collect();
+    let engine = Engine::new(SimulationConfig {
+        locked_time_grid: Some(Arc::new(grid.clone())),
+        ..SimulationConfig::default()
+    });
+    for waveform in [
+        "TRNOISE(0 1n 1 1)",
+        "TRNOISE(1 1n 1 1 1 .7n .9n)",
+        "TRNOISE(0 0 0 0 1 .7n .9n)",
+        "TRRANDOM(2 1n .3n 1 0)",
+    ] {
+        let netlist = Netlist::parse(&format!(
+            "noise horizon\nV1 out 0 {waveform}\nR1 out 0 1\n.end\n"
+        ))
+        .unwrap();
+        let full = engine.run_tran(&netlist, grid[129], 1e-9).unwrap();
+        let short = engine.run_tran(&netlist, grid[57], 1e-9).unwrap();
+        assert_eq!(short.time, full.time[..short.time.len()]);
+        for (actual, expected) in short
+            .voltages
+            .iter()
+            .zip(&full.voltages)
+            .chain(short.branch_currents.iter().zip(&full.branch_currents))
+        {
+            for (a, b) in actual.iter().zip(expected) {
+                assert_eq!(a.to_bits(), b.to_bits(), "{waveform}");
+            }
+        }
+    }
+}
+
+#[test]
 fn hierarchical_random_sources_match_scoped_flat_instances() {
     let engine = Engine::default();
     for random in [false, true] {

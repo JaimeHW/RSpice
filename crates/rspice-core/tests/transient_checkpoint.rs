@@ -46,6 +46,64 @@ rload out 0 1k
 ";
 
 #[test]
+fn colored_noise_checkpoint_extension_preserves_the_complete_sample_path() {
+    let grid: Vec<_> = (0..=129).map(|index| f64::from(index) * 0.3e-9).collect();
+    let engine = Engine::new(SimulationConfig {
+        locked_time_grid: Some(Arc::new(grid.clone())),
+        ..SimulationConfig::default()
+    });
+    for waveform in [
+        "TRNOISE(0 1n 1 1)",
+        "TRNOISE(1 1n 1 1 1 .7n .9n)",
+        "TRRANDOM(2 1n .3n 1 0)",
+    ] {
+        let netlist = Netlist::parse(&format!(
+            "noise checkpoint extension\nV1 in 0 {waveform}\nR1 in out 1k\nC1 out 0 1p\n.end\n"
+        ))
+        .unwrap();
+        let run = |stop| {
+            engine
+                .run_tran_checkpoint_schedule_with_startup_mode(
+                    &netlist,
+                    stop,
+                    1e-9,
+                    TransientStartupMode::OperatingPoint,
+                    &[grid[24]],
+                )
+                .unwrap()
+        };
+        let (full, _) = run(grid[129]);
+        let (_, scheduled) = run(grid[57]);
+        let checkpoint = TransientCheckpoint::from_bytes(
+            &scheduled[0]
+                .checkpoint
+                .to_bytes(TransientCheckpointEncoding::Packed)
+                .unwrap(),
+        )
+        .unwrap();
+        let (resumed, _) = engine
+            .run_tran_resume(&netlist, &checkpoint, grid[129], 1e-9)
+            .unwrap();
+        let offset = full
+            .time
+            .iter()
+            .position(|time| time.to_bits() == checkpoint.time.to_bits())
+            .unwrap();
+        assert_eq!(resumed.time, full.time[offset..], "{waveform}");
+        for (actual, expected) in resumed
+            .voltages
+            .iter()
+            .zip(&full.voltages)
+            .chain(resumed.branch_currents.iter().zip(&full.branch_currents))
+        {
+            for (a, b) in actual.iter().zip(&expected[offset..]) {
+                assert_eq!(a.to_bits(), b.to_bits(), "{waveform}");
+            }
+        }
+    }
+}
+
+#[test]
 fn hierarchical_random_sources_resume_exactly_after_instance_expansion() {
     for waveform in ["TRNOISE({amp} 1n 0 0)", "TRRANDOM(2 1n 0 {amp} 0)"] {
         let result = assert_scheduled_deck_resumes_exactly(
@@ -68,7 +126,12 @@ fn hierarchical_random_sources_resume_exactly_after_instance_expansion() {
 
 #[test]
 fn annotated_transient_noise_resumes_the_same_seeded_trajectory() {
-    for waveform in ["TRNOISE(1 1n 0 0)", "TRRANDOM(2 1n 0 1 0)"] {
+    for waveform in [
+        "TRNOISE(1 1n 0 0)",
+        "TRRANDOM(2 1n 0 1 0)",
+        "TRNOISE(0 1n 1 1)",
+        "TRNOISE(1 1n 1 1 1 .7n .9n)",
+    ] {
         let result = assert_scheduled_deck_resumes_exactly(
             waveform,
             &format!(

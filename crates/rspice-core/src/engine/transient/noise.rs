@@ -84,8 +84,7 @@ pub(in crate::engine) fn expand_transient_noise(
                 return Err(SimulationError::Aborted);
             }
             let seed = base_seed ^ fnv1a(&element.name.to_ascii_uppercase());
-            replace_transient_random(spec, tstop, seed, &element.name)
-                .map_err(SimulationError::Circuit)?;
+            replace_transient_random(spec, tstop, seed, &element.name, 0.0, abort)?;
         }
     }
     if abort.is_aborted() {
@@ -112,10 +111,26 @@ fn replace_transient_random(
     tstop: Value,
     seed: u64,
     name: &str,
-) -> Result<(), String> {
-    match spec {
+    dc_offset: Value,
+    abort: &dyn AbortSignal,
+) -> Result<(), SimulationError> {
+    let mut points = match spec {
         SourceSpec::Distortion { inner, .. } | SourceSpec::RfPort { inner, .. } => {
-            replace_transient_random(inner, tstop, seed, name)
+            return replace_transient_random(inner, tstop, seed, name, dc_offset, abort);
+        }
+        SourceSpec::DcTransient {
+            dc_value,
+            transient,
+        }
+        | SourceSpec::DcAcTransient {
+            dc_value,
+            transient,
+            ..
+        } => {
+            return replace_transient_random(transient, tstop, seed, name, *dc_value, abort);
+        }
+        SourceSpec::AcTransient { transient, .. } => {
+            return replace_transient_random(transient, tstop, seed, name, dc_offset, abort);
         }
         SourceSpec::TrNoise {
             na,
@@ -125,63 +140,65 @@ fn replace_transient_random(
             rts_amplitude,
             rts_capture,
             rts_emit,
-        } => {
-            let points = generate_noise_points(
-                TrNoiseSpectrum {
-                    na: *na,
-                    nt: *nt,
-                    nalpha: *nalpha,
-                    namp: *namp,
-                },
-                TrNoiseRts {
-                    rts_amplitude: *rts_amplitude,
-                    rts_capture: *rts_capture,
-                    rts_emit: *rts_emit,
-                },
-                tstop,
-                seed,
-                name,
-            )?;
-            *spec = SourceSpec::Pwl {
-                points,
-                delay: 0.0,
-                repeat_from: None,
-            };
-            Ok(())
-        }
+        } => generate_noise_points(
+            TrNoiseSpectrum {
+                na: *na,
+                nt: *nt,
+                nalpha: *nalpha,
+                namp: *namp,
+            },
+            TrNoiseRts {
+                rts_amplitude: *rts_amplitude,
+                rts_capture: *rts_capture,
+                rts_emit: *rts_emit,
+            },
+            tstop,
+            seed,
+            name,
+            abort,
+        )?,
         SourceSpec::TrRandom {
             distribution,
             sample_interval,
             delay,
             parameter1,
             parameter2,
-        } => {
-            let points = generate_trrandom_points(
-                TrRandomSpec {
-                    distribution: *distribution,
-                    sample_interval: *sample_interval,
-                    delay: *delay,
-                    parameter1: *parameter1,
-                    parameter2: *parameter2,
-                },
-                tstop,
-                seed,
-                name,
-            )?;
-            *spec = SourceSpec::Pwl {
-                points,
-                delay: 0.0,
-                repeat_from: None,
-            };
-            Ok(())
+        } => generate_trrandom_points(
+            TrRandomSpec {
+                distribution: *distribution,
+                sample_interval: *sample_interval,
+                delay: *delay,
+                parameter1: *parameter1,
+                parameter2: *parameter2,
+            },
+            tstop,
+            seed,
+            name,
+            abort,
+        )?,
+        _ => return Ok(()),
+    };
+    // Ngspice adds explicit DC to TRNOISE/TRRANDOM at every time, unlike
+    // ordinary waveforms. Preserve that offset when lowering to generic PWL.
+    if dc_offset != 0.0 {
+        for (index, (_, value)) in points.iter_mut().enumerate() {
+            if index.is_multiple_of(512) {
+                check_noise_abort(abort)?;
+            }
+            *value += dc_offset;
+            if !value.is_finite() {
+                return Err(SimulationError::Circuit(format!(
+                    "transient-random source '{name}' DC offset produced a non-finite sample"
+                )));
+            }
         }
-        SourceSpec::DcTransient { transient, .. }
-        | SourceSpec::AcTransient { transient, .. }
-        | SourceSpec::DcAcTransient { transient, .. } => {
-            replace_transient_random(transient, tstop, seed, name)
-        }
-        _ => Ok(()),
     }
+    *spec = SourceSpec::Pwl {
+        points,
+        delay: 0.0,
+        repeat_from: None,
+    };
+    Ok(())
 }
 
 /// Generate the noise sample train as PWL points on the `k*NT` grid.
@@ -191,7 +208,8 @@ fn generate_noise_points(
     tstop: Value,
     seed: u64,
     name: &str,
-) -> Result<Vec<(Value, Value)>, String> {
+    abort: &dyn AbortSignal,
+) -> Result<Vec<(Value, Value)>, SimulationError> {
     let TrNoiseSpectrum {
         na,
         nt,
@@ -203,17 +221,20 @@ fn generate_noise_points(
         rts_capture,
         rts_emit,
     } = rts;
-    if na == 0.0 && namp == 0.0 && rts_amplitude == 0.0 {
+    check_noise_abort(abort)?;
+    // NALPHA=0 disables flicker noise, as in ngspice's trnoise_state_gen.
+    let flicker_enabled = namp != 0.0 && nalpha > 0.0;
+    let rts_enabled = rts_amplitude != 0.0 && !(rts_capture == 0.0 && rts_emit == 0.0);
+    if na == 0.0 && !flicker_enabled && !rts_enabled {
         return Ok(vec![(0.0, 0.0), (tstop.max(1e-12), 0.0)]);
     }
-    if (na != 0.0 || namp != 0.0) && !(nt.is_finite() && nt > 0.0) {
-        return Err(format!(
-            "TRNOISE source '{}' requires a positive sample interval NT",
-            name
-        ));
+    if (na != 0.0 || flicker_enabled) && !(nt.is_finite() && nt > 0.0) {
+        return Err(SimulationError::Circuit(format!(
+            "TRNOISE source '{name}' requires a positive sample interval NT"
+        )));
     }
-
-    // One sample past tstop so interpolation never extrapolates.
+    // Cover a complete sample interval beyond tstop. RTS generation uses this
+    // same horizon so inserting a later event cannot change earlier interpolation.
     let effective_nt = if nt > 0.0 { nt } else { tstop.max(1e-12) };
     let n = checked_noise_sample_count(
         "TRNOISE",
@@ -222,36 +243,60 @@ fn generate_noise_points(
         2,
         "tstop/NT",
         "Raise NT or shorten the transient.",
-    )?;
-
-    let mut rng = SplitMix64::new(seed);
-    let mut samples = vec![0.0f64; n];
-
+    )
+    .map_err(SimulationError::Circuit)?;
+    let waveform_end = (n - 1) as Value * effective_nt;
+    if !waveform_end.is_finite() {
+        return Err(SimulationError::Circuit(format!(
+            "TRNOISE source '{name}' sample times exceed finite precision"
+        )));
+    }
+    let mut samples = vec![0.0; n];
+    // Separate component streams: enabling another component or extending the
+    // requested horizon must not change samples already drawn from this one.
+    let mut white_rng = SplitMix64::new(seed);
     if na != 0.0 {
-        for sample in samples.iter_mut() {
-            *sample += na * rng.gaussian();
+        for (index, sample) in samples.iter_mut().enumerate().skip(1) {
+            if index.is_multiple_of(512) {
+                check_noise_abort(abort)?;
+            }
+            *sample = na * white_rng.gaussian();
         }
     }
-
-    if namp != 0.0 {
-        let flicker = kasdin_one_over_f(n, nalpha, namp, &mut rng);
-        for (sample, f) in samples.iter_mut().zip(flicker) {
-            *sample += f;
+    if flicker_enabled {
+        let mut flicker_rng = SplitMix64::new(seed ^ 0x464C_4943_4B45_5221);
+        let flicker = kasdin_one_over_f(n, nalpha, namp, &mut flicker_rng, abort)?;
+        let origin = flicker[0];
+        for (index, (sample, value)) in samples.iter_mut().zip(flicker).enumerate().skip(1) {
+            if index.is_multiple_of(512) {
+                check_noise_abort(abort)?;
+            }
+            *sample += value - origin;
         }
     }
-
-    let points = samples
-        .into_iter()
-        .enumerate()
-        .map(|(k, v)| (k as Value * effective_nt, v))
-        .collect::<Vec<_>>();
+    // The noise component starts at zero. Expansion adds any explicit DC
+    // offset after generation, including at the origin.
+    let mut points = Vec::with_capacity(n);
+    for (index, value) in samples.into_iter().enumerate() {
+        if index.is_multiple_of(512) {
+            check_noise_abort(abort)?;
+        }
+        if !value.is_finite() {
+            return Err(SimulationError::Circuit(format!(
+                "TRNOISE source '{name}' generated a non-finite sample"
+            )));
+        }
+        points.push((index as Value * effective_nt, value));
+    }
+    let mut rts_rng = SplitMix64::new(seed ^ 0x5254_535F_4E4F_4953);
     add_rts_points(
         points,
         rts_amplitude,
         rts_capture,
         rts_emit,
-        tstop,
-        &mut rng,
+        waveform_end,
+        &mut rts_rng,
+        abort,
     )
 }
 
@@ -262,12 +307,16 @@ fn add_rts_points(
     emit_mean: Value,
     tstop: Value,
     rng: &mut SplitMix64,
-) -> Result<Vec<(Value, Value)>, String> {
+    abort: &dyn AbortSignal,
+) -> Result<Vec<(Value, Value)>, SimulationError> {
     if amplitude == 0.0 || (capture_mean == 0.0 && emit_mean == 0.0) {
         return Ok(base);
     }
-    if !(capture_mean > 0.0 && emit_mean > 0.0) {
-        return Err("TRNOISE RTS requires positive capture and emission mean times".to_string());
+    if !(capture_mean.is_finite() && capture_mean > 0.0 && emit_mean.is_finite() && emit_mean > 0.0)
+    {
+        return Err(SimulationError::Circuit(
+            "TRNOISE RTS requires positive capture and emission mean times".to_string(),
+        ));
     }
     let base_value_at = |time: Value| {
         let upper = base.partition_point(|(sample_time, _)| *sample_time <= time);
@@ -290,12 +339,21 @@ fn add_rts_points(
     let mut time = 0.0;
     let mut state = 0.0;
     while time <= tstop {
+        if events.len().is_multiple_of(512) {
+            check_noise_abort(abort)?;
+        }
         let mean = if state == 0.0 {
             capture_mean
         } else {
             emit_mean
         };
-        time += -mean * rng.uniform().ln();
+        let next_time = time - mean * rng.uniform().ln();
+        if next_time <= time {
+            return Err(SimulationError::Circuit(
+                "TRNOISE RTS event clock cannot advance at the requested precision".to_string(),
+            ));
+        }
+        time = next_time;
         if time > tstop {
             break;
         }
@@ -303,14 +361,19 @@ fn add_rts_points(
         events.push((time, state, next));
         state = next;
         if events.len() > MAX_NOISE_SAMPLES {
-            return Err("TRNOISE RTS generated too many transitions".to_string());
+            return Err(SimulationError::Circuit(
+                "TRNOISE RTS generated too many transitions".to_string(),
+            ));
         }
     }
 
     let mut output = Vec::with_capacity(base.len() + events.len() * 2);
     let mut event_index = 0usize;
     let mut state = 0.0;
-    for &(time, value) in &base {
+    for (index, &(time, value)) in base.iter().enumerate() {
+        if index.is_multiple_of(512) {
+            check_noise_abort(abort)?;
+        }
         while let Some(&(event_time, before, after)) = events.get(event_index)
             && event_time <= time
         {
@@ -330,7 +393,9 @@ fn generate_trrandom_points(
     tstop: Value,
     seed: u64,
     name: &str,
-) -> Result<Vec<(Value, Value)>, String> {
+    abort: &dyn AbortSignal,
+) -> Result<Vec<(Value, Value)>, SimulationError> {
+    check_noise_abort(abort)?;
     let TrRandomSpec {
         distribution,
         sample_interval,
@@ -339,10 +404,10 @@ fn generate_trrandom_points(
         parameter2,
     } = spec;
     if !(sample_interval.is_finite() && sample_interval > 0.0) {
-        return Err(format!(
+        return Err(SimulationError::Circuit(format!(
             "TRRANDOM source '{}' requires a positive sample interval TS",
             name
-        ));
+        )));
     }
     let available_duration = tstop - delay;
     let quotient = if available_duration.is_finite() {
@@ -357,7 +422,14 @@ fn generate_trrandom_points(
         1,
         "(tstop-delay)/TS",
         "Raise TS, delay the source, or shorten the transient.",
-    )?;
+    )
+    .map_err(SimulationError::Circuit)?;
+    let final_sample_time = delay + (count - 1) as Value * sample_interval;
+    if !final_sample_time.is_finite() {
+        return Err(SimulationError::Circuit(format!(
+            "TRRANDOM source '{name}' sample times exceed finite precision"
+        )));
+    }
     let mut rng = SplitMix64::new(seed);
     let mut points = vec![(0.0, parameter2)];
     if delay > 0.0 {
@@ -365,54 +437,144 @@ fn generate_trrandom_points(
     }
     let mut previous = parameter2;
     for index in 0..count {
+        if index.is_multiple_of(512) {
+            check_noise_abort(abort)?;
+        }
         let time = delay + index as Value * sample_interval;
         let value = match distribution {
             1 => parameter2 + parameter1 * (2.0 * rng.uniform() - 1.0),
             2 => parameter2 + parameter1 * rng.gaussian(),
             3 => parameter2 - parameter1 * rng.uniform().ln(),
             4 => parameter2 + rng.poisson(parameter1) as Value,
-            _ => return Err(format!("TRRANDOM source '{}' has invalid TYPE", name)),
+            _ => {
+                return Err(SimulationError::Circuit(format!(
+                    "TRRANDOM source '{}' has invalid TYPE",
+                    name
+                )));
+            }
         };
+        if !value.is_finite() {
+            return Err(SimulationError::Circuit(format!(
+                "TRRANDOM source '{name}' generated a non-finite sample"
+            )));
+        }
         points.push((time, previous));
         points.push((time, value));
         previous = value;
     }
-    points.push((tstop.max(delay), previous));
+    points.push((tstop.max(final_sample_time).max(delay), previous));
     Ok(points)
 }
 
-/// Kasdin 1/f^alpha sequence: white Gaussian sequence convolved with the
-/// fractional-integration impulse response, via FFT (O(n log n)).
-fn kasdin_one_over_f(n: usize, alpha: Value, amplitude: Value, rng: &mut SplitMix64) -> Vec<Value> {
+fn check_noise_abort(abort: &dyn AbortSignal) -> Result<(), SimulationError> {
+    if abort.is_aborted() {
+        Err(SimulationError::Aborted)
+    } else {
+        Ok(())
+    }
+}
+
+/// Causal Kasdin convolution with horizon-independent operation order.
+/// Every source/target pair belongs to one dyadic interval: the source lies
+/// in its left half and the target in its right half. At that midpoint the
+/// left inputs are complete, so their contributions can be added once. Block
+/// sizes depend only on the midpoint, never on the requested output length.
+/// This costs O(n log^2 n), retains O(n) storage and preserves exact prefixes.
+fn kasdin_one_over_f(
+    n: usize,
+    alpha: Value,
+    amplitude: Value,
+    rng: &mut SplitMix64,
+    abort: &dyn AbortSignal,
+) -> Result<Vec<Value>, SimulationError> {
     use rustfft::{FftPlanner, num_complex::Complex};
-
-    let m = (2 * n).next_power_of_two();
-    let mut h = vec![Complex::new(0.0f64, 0.0); m];
-    let mut w = vec![Complex::new(0.0f64, 0.0); m];
-
-    // Impulse response of the fractional integrator.
-    let mut hk = 1.0f64;
-    h[0].re = 1.0;
-    for (k, entry) in h.iter_mut().enumerate().take(n).skip(1) {
-        hk *= (k as f64 - 1.0 + alpha / 2.0) / k as f64;
-        entry.re = hk;
+    check_noise_abort(abort)?;
+    if n == 0 {
+        return Ok(Vec::new());
     }
-    for item in w.iter_mut().take(n) {
-        item.re = amplitude * rng.gaussian();
+    let size = n.next_power_of_two();
+    let mut h = vec![1.0; size];
+    for k in 1..size {
+        if k.is_multiple_of(512) {
+            check_noise_abort(abort)?;
+        }
+        h[k] = h[k - 1] * (k as Value - 1.0 + alpha / 2.0) / k as Value;
     }
-
+    let mut white = Vec::with_capacity(n);
+    for index in 0..n {
+        if index.is_multiple_of(512) {
+            check_noise_abort(abort)?;
+        }
+        white.push(amplitude * rng.gaussian());
+    }
+    let mut result = vec![0.0; n];
     let mut planner = FftPlanner::new();
-    let fft = planner.plan_fft_forward(m);
-    let ifft = planner.plan_fft_inverse(m);
-    fft.process(&mut h);
-    fft.process(&mut w);
-    for (a, b) in h.iter_mut().zip(w.iter()) {
-        *a *= *b;
+    let mut kernels: Vec<Option<Vec<Complex<Value>>>> = vec![None; size.ilog2() as usize + 1];
+    let mut work = Vec::new();
+    let mut scratch = Vec::new();
+    for midpoint in 1..n {
+        if midpoint.is_multiple_of(512) {
+            check_noise_abort(abort)?;
+        }
+        let level = midpoint.trailing_zeros() as usize;
+        let block = 1usize << level;
+        let end = (midpoint + block).min(n);
+        let left = midpoint - block;
+        if block <= 32 {
+            for target in midpoint..end {
+                let mut sum = 0.0;
+                for source in left..midpoint {
+                    sum += white[source] * h[target - source];
+                }
+                result[target] += sum;
+            }
+            continue;
+        }
+        check_noise_abort(abort)?;
+        let length = block * 2;
+        let forward = planner.plan_fft_forward(length);
+        let inverse = planner.plan_fft_inverse(length);
+        scratch.resize(
+            forward
+                .get_inplace_scratch_len()
+                .max(inverse.get_inplace_scratch_len()),
+            Complex::default(),
+        );
+        if kernels[level].is_none() {
+            let mut kernel: Vec<_> = h[..length]
+                .iter()
+                .map(|value| Complex::new(*value, 0.0))
+                .collect();
+            forward.process_with_scratch(&mut kernel, &mut scratch);
+            kernels[level] = Some(kernel);
+            check_noise_abort(abort)?;
+        }
+        let kernel = kernels[level].as_ref().expect("kernel initialized");
+        work.resize(length, Complex::default());
+        work.fill(Complex::default());
+        for (entry, value) in work.iter_mut().zip(&white[left..midpoint]) {
+            entry.re = *value;
+        }
+        forward.process_with_scratch(&mut work, &mut scratch);
+        check_noise_abort(abort)?;
+        for (entry, coefficient) in work.iter_mut().zip(kernel) {
+            *entry *= coefficient;
+        }
+        inverse.process_with_scratch(&mut work, &mut scratch);
+        check_noise_abort(abort)?;
+        // Circular wrap lands only in the first half, which is discarded.
+        let scale = 1.0 / length as Value;
+        for target in midpoint..end {
+            result[target] += work[target - left].re * scale;
+        }
     }
-    ifft.process(&mut h);
-
-    let scale = 1.0 / m as f64;
-    h.into_iter().take(n).map(|c| c.re * scale).collect()
+    for (index, (value, diagonal)) in result.iter_mut().zip(white).enumerate() {
+        if index.is_multiple_of(512) {
+            check_noise_abort(abort)?;
+        }
+        *value += diagonal;
+    }
+    Ok(result)
 }
 
 /// SplitMix64 — tiny, fast, platform-stable generator for the noise stream.
@@ -468,8 +630,14 @@ impl SplitMix64 {
     }
 
     fn uniform(&mut self) -> f64 {
-        // 53-bit mantissa in (0, 1].
-        (((self.next_u64() >> 11) as f64) + 1.0) / 9_007_199_254_740_992.0
+        // Open endpoints keep logarithmic draws finite and RTS dwell times
+        // strictly positive. Rejection avoids biasing the first discrete bin.
+        loop {
+            let bits = self.next_u64() >> 11;
+            if bits != 0 {
+                return bits as f64 / 9_007_199_254_740_992.0;
+            }
+        }
     }
 
     /// Standard normal via Box-Muller (cached pair).
@@ -522,10 +690,223 @@ mod tests {
     use crate::netlist::Netlist;
 
     #[test]
-    fn expansion_observes_abort_between_random_instances() {
+    fn finite_stop_time_cannot_overflow_generated_source_clocks() {
+        let noise = generate_noise_points(
+            TrNoiseSpectrum {
+                na: 1.0,
+                nt: 1e308,
+                nalpha: 0.0,
+                namp: 0.0,
+            },
+            TrNoiseRts {
+                rts_amplitude: 0.0,
+                rts_capture: 0.0,
+                rts_emit: 0.0,
+            },
+            1.5e308,
+            42,
+            "Vnoise",
+            &NoAbort,
+        )
+        .unwrap_err();
+        let random = generate_trrandom_points(
+            TrRandomSpec {
+                distribution: 2,
+                sample_interval: 1e308,
+                delay: 0.0,
+                parameter1: 1.0,
+                parameter2: 0.0,
+            },
+            1.5e308,
+            42,
+            "Vrandom",
+            &NoAbort,
+        )
+        .unwrap_err();
+        for error in [noise, random] {
+            assert!(
+                matches!(error, SimulationError::Circuit(ref message) if message.contains("sample times exceed finite precision"))
+            );
+        }
+    }
+
+    #[test]
+    fn causal_flicker_matches_direct_convolution_and_preserves_exact_prefixes() {
+        for alpha in [0.25, 1.0, 1.8] {
+            let n = 513;
+            let mut rng = SplitMix64::new(42);
+            let full = kasdin_one_over_f(n, alpha, 1.0, &mut rng, &NoAbort).unwrap();
+            let mut reference_rng = SplitMix64::new(42);
+            let white: Vec<_> = (0..n).map(|_| reference_rng.gaussian()).collect();
+            let mut h = vec![1.0; n];
+            for k in 1..n {
+                h[k] = h[k - 1] * (k as Value - 1.0 + alpha / 2.0) / k as Value;
+            }
+            for target in 0..n {
+                let direct: Value = (0..=target)
+                    .map(|source| white[source] * h[target - source])
+                    .sum();
+                assert!(
+                    (full[target] - direct).abs() < 1e-12,
+                    "alpha={alpha}, sample={target}: {} vs {direct}",
+                    full[target]
+                );
+            }
+            for length in [1, 2, 3, 31, 32, 33, 63, 64, 65, 127, 128, 129, 257, 512] {
+                let mut rng = SplitMix64::new(42);
+                let prefix = kasdin_one_over_f(length, alpha, 1.0, &mut rng, &NoAbort).unwrap();
+                for (actual, expected) in prefix.iter().zip(&full) {
+                    assert_eq!(
+                        actual.to_bits(),
+                        expected.to_bits(),
+                        "alpha={alpha}, length={length}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn noise_components_start_at_zero_and_keep_the_same_horizon_prefix() {
+        for (white, flicker, rts) in [
+            (1.0, 0.0, 0.0),
+            (0.0, 1.0, 0.0),
+            (1.0, 1.0, 0.0),
+            (0.0, 0.0, 1.0),
+            (1.0, 1.0, 1.0),
+        ] {
+            let generate = |stop| {
+                generate_noise_points(
+                    TrNoiseSpectrum {
+                        na: white,
+                        nt: 1e-9,
+                        nalpha: 1.0,
+                        namp: flicker,
+                    },
+                    TrNoiseRts {
+                        rts_amplitude: rts,
+                        rts_capture: 0.7e-9,
+                        rts_emit: 0.9e-9,
+                    },
+                    stop,
+                    42,
+                    "Vnoise",
+                    &NoAbort,
+                )
+                .unwrap()
+            };
+            let full = generate(257.25e-9);
+            assert_eq!(full[0], (0.0, 0.0));
+            for stop in [
+                0.25e-9, 1.25e-9, 31.25e-9, 32.25e-9, 63.25e-9, 64.25e-9, 127.25e-9, 128.25e-9,
+            ] {
+                let actual: Vec<_> = generate(stop)
+                    .into_iter()
+                    .filter(|(time, _)| *time <= stop)
+                    .collect();
+                let expected: Vec<_> = full
+                    .iter()
+                    .copied()
+                    .filter(|(time, _)| *time <= stop)
+                    .collect();
+                assert_eq!(
+                    actual, expected,
+                    "components=({white},{flicker},{rts}), tstop={stop}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn white_and_flicker_components_use_independent_random_streams() {
+        let generate = |na, namp| {
+            generate_noise_points(
+                TrNoiseSpectrum {
+                    na,
+                    nt: 1e-9,
+                    nalpha: 1.0,
+                    namp,
+                },
+                TrNoiseRts {
+                    rts_amplitude: 0.0,
+                    rts_capture: 0.0,
+                    rts_emit: 0.0,
+                },
+                100e-9,
+                42,
+                "Vnoise",
+                &NoAbort,
+            )
+            .unwrap()
+        };
+        let white = generate(1.0, 0.0);
+        let flicker = generate(0.0, 1.0);
+        let both = generate(1.0, 1.0);
+        for ((w, f), sum) in white.iter().zip(&flicker).zip(&both) {
+            assert_eq!(sum.1.to_bits(), (w.1 + f.1).to_bits());
+        }
+    }
+
+    #[test]
+    fn non_grid_trrandom_horizons_keep_ordered_stable_prefixes() {
+        for distribution in 1..=4 {
+            let generate = |stop| {
+                generate_trrandom_points(
+                    TrRandomSpec {
+                        distribution,
+                        sample_interval: 1e-9,
+                        delay: 0.3e-9,
+                        parameter1: 2.0,
+                        parameter2: 0.25,
+                    },
+                    stop,
+                    42,
+                    "Irandom",
+                    &NoAbort,
+                )
+                .unwrap()
+            };
+            let full = generate(10.75e-9);
+            for stop in [0.1e-9, 0.3e-9, 0.75e-9, 3.75e-9, 9.75e-9] {
+                let short = generate(stop);
+                assert!(short.windows(2).all(|pair| pair[0].0 <= pair[1].0));
+                let prefix: Vec<_> = short.into_iter().filter(|(time, _)| *time < stop).collect();
+                let expected: Vec<_> = full
+                    .iter()
+                    .copied()
+                    .filter(|(time, _)| *time < stop)
+                    .collect();
+                assert_eq!(prefix, expected, "TYPE={distribution}, tstop={stop}");
+            }
+        }
+    }
+
+    #[test]
+    fn long_flicker_generation_observes_cancellation() {
         use std::sync::atomic::{AtomicUsize, Ordering};
-        struct AbortAfterFirstSource(AtomicUsize);
-        impl AbortSignal for AbortAfterFirstSource {
+        struct PollBudget(AtomicUsize);
+        impl AbortSignal for PollBudget {
+            fn is_aborted(&self) -> bool {
+                self.0.fetch_add(1, Ordering::Relaxed) >= 4
+            }
+        }
+        let mut rng = SplitMix64::new(42);
+        let error = kasdin_one_over_f(
+            1 << 20,
+            1.0,
+            1.0,
+            &mut rng,
+            &PollBudget(AtomicUsize::new(0)),
+        )
+        .unwrap_err();
+        assert!(matches!(error, SimulationError::Aborted));
+    }
+
+    #[test]
+    fn expansion_honors_abort_before_later_random_instances() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        struct AbortAfterPollBudget(AtomicUsize);
+        impl AbortSignal for AbortAfterPollBudget {
             fn is_aborted(&self) -> bool {
                 self.0.fetch_add(1, Ordering::Relaxed) >= 2
             }
@@ -538,17 +919,13 @@ mod tests {
             &mut netlist.elements,
             None,
             10e-9,
-            &AbortAfterFirstSource(AtomicUsize::new(0)),
+            &AbortAfterPollBudget(AtomicUsize::new(0)),
         )
         .unwrap_err();
         assert!(matches!(error, SimulationError::Aborted));
-        let ElementKind::VoltageSource(first) = &netlist.elements[0].kind else {
-            panic!("source retained")
-        };
         let ElementKind::VoltageSource(second) = &netlist.elements[1].kind else {
             panic!("source retained")
         };
-        assert!(!spec_contains_transient_random(first));
         assert!(
             spec_contains_transient_random(second),
             "later instances must not allocate a waveform after cancellation"
@@ -610,7 +987,7 @@ mod tests {
         let n = 32_768;
         let alpha = 1.0;
         let mut rng = SplitMix64::new(7);
-        let series = kasdin_one_over_f(n, alpha, 1.0, &mut rng);
+        let series = kasdin_one_over_f(n, alpha, 1.0, &mut rng, &NoAbort).unwrap();
 
         let mut buf: Vec<Complex<f64>> = series.iter().map(|v| Complex::new(*v, 0.0)).collect();
         FftPlanner::new().plan_fft_forward(n).process(&mut buf);
@@ -644,6 +1021,7 @@ mod tests {
             1e-6,
             99,
             "v1",
+            &NoAbort,
         )
         .unwrap();
         let b = generate_noise_points(
@@ -661,6 +1039,7 @@ mod tests {
             1e-6,
             99,
             "v1",
+            &NoAbort,
         )
         .unwrap();
         let c = generate_noise_points(
@@ -678,6 +1057,7 @@ mod tests {
             1e-6,
             100,
             "v1",
+            &NoAbort,
         )
         .unwrap();
         assert_eq!(a.len(), b.len());
@@ -708,10 +1088,11 @@ mod tests {
             1.0,
             1,
             "vbig",
+            &NoAbort,
         )
         .unwrap_err();
         assert!(
-            err.contains("Raise NT"),
+            err.to_string().contains("Raise NT"),
             "diagnostic explains the fix: {err}"
         );
     }
@@ -783,10 +1164,17 @@ mod tests {
             f64::MAX,
             1,
             "vextreme",
+            &NoAbort,
         )
         .expect_err("an infinite tstop/NT quotient must be rejected");
-        assert!(error.contains("TRNOISE source 'vextreme'"), "{error}");
-        assert!(error.contains("non-finite sample count"), "{error}");
+        assert!(
+            error.to_string().contains("TRNOISE source 'vextreme'"),
+            "{error}"
+        );
+        assert!(
+            error.to_string().contains("non-finite sample count"),
+            "{error}"
+        );
     }
 
     #[test]
@@ -802,10 +1190,17 @@ mod tests {
             f64::MAX,
             1,
             "vrextreme",
+            &NoAbort,
         )
         .expect_err("an overflowed (tstop-delay)/TS quotient must be rejected");
-        assert!(error.contains("TRRANDOM source 'vrextreme'"), "{error}");
-        assert!(error.contains("non-finite sample count"), "{error}");
+        assert!(
+            error.to_string().contains("TRRANDOM source 'vrextreme'"),
+            "{error}"
+        );
+        assert!(
+            error.to_string().contains("non-finite sample count"),
+            "{error}"
+        );
     }
 
     #[test]
@@ -821,6 +1216,7 @@ mod tests {
             3e-3,
             42,
             "vr",
+            &NoAbort,
         )
         .expect("TRRANDOM train");
         assert_eq!(points[0], (0.0, 0.0));
@@ -846,6 +1242,7 @@ mod tests {
             20e-6,
             9,
             "vrts",
+            &NoAbort,
         )
         .expect("RTS train");
         assert!(
@@ -872,6 +1269,7 @@ mod tests {
             1e-9,
             9,
             "vnoise",
+            &NoAbort,
         )
         .expect("incomplete RTS group is disabled");
 

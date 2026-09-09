@@ -23,6 +23,26 @@ R2 out 0 1k
 
 
 class TestTransient:
+    @pytest.mark.parametrize("waveform", ["TRNOISE(1 1n 0 0)", "TRNOISE(0 1n 1 1)", "TRNOISE(1 1n 1 1 1 .7n .9n)"])
+    @pytest.mark.parametrize("source", ["V1 out 0", "I1 0 out"])
+    @pytest.mark.parametrize("dc", [0.0, 0.25])
+    def test_noise_zero_origin_and_samples_survive_horizon_extension(self, engine, waveform, source, dc):
+        netlist = rspice.Netlist.parse_spice(
+            f"* noise prefix\n{source} DC {dc} {waveform} AC 2 DISTOF1 1\nR1 out 0 1\n.end\n"
+        )
+        short = engine.run_tran(netlist, stop_time=10.25e-9, max_step=1e-9)
+        full = engine.run_tran(netlist, stop_time=130.25e-9, max_step=1e-9)
+        def samples(result):
+            assert abs(result.voltage_waveform("out")[0] - dc) < 1e-14
+            values = []
+            for index in range(1, 10):
+                time = index * 1e-9
+                nearest = np.argmin(np.abs(result.time-time))
+                assert abs(result.time[nearest]-time) < 1e-21
+                values.append(result.voltage_waveform("out")[nearest])
+            return values
+        np.testing.assert_array_equal(samples(short), samples(full))
+
     @pytest.mark.parametrize("waveform", ["TRNOISE({amp} 1n 0 0)", "TRRANDOM(2 1n 0 {amp} 0)"])
     def test_hierarchical_noise_sources_have_independent_repeatable_streams(self, engine, waveform):
         netlist = rspice.Netlist.parse_spice(

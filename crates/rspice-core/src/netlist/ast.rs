@@ -1884,15 +1884,14 @@ pub enum SourceSpec {
     /// seconds, plus 1/f^NALPHA noise of amplitude `NAMP` (Kasdin
     /// fractional-integration filter, matching ngspice's trnoise). The
     /// transient front end expands this spec into a seeded, deterministic
-    /// PWL sample train before circuit construction; the DC operating
-    /// point sees exactly 0 (zero-mean noise, ngspice semantics).
+    /// PWL sample train after hierarchy elaboration. Noise starts at zero;
+    /// an explicit DC annotation offsets the complete waveform.
     TrNoise {
         /// NA: white-noise RMS amplitude (V or A). 0 disables.
         na: Value,
-        /// NT: sample interval (s). Must be > 0 when any amplitude is set.
+        /// NT: sample interval (s). Must be > 0 when white or flicker noise is active.
         nt: Value,
-        /// NALPHA: 1/f exponent, 0 <= alpha < 2. At zero the NAMP
-        /// contribution is unshaped white noise.
+        /// NALPHA: 1/f exponent, 0 <= alpha < 2. Zero disables flicker noise.
         nalpha: Value,
         /// NAMP: 1/f^alpha amplitude. 0 disables flicker.
         namp: Value,
