@@ -539,7 +539,37 @@ impl ZiFilter {
                 self.period
             )));
         }
-        let angle = std::f64::consts::TAU * cycles.rem_euclid(1.0);
+        let fractional_cycle = cycles.rem_euclid(1.0);
+        if fractional_cycle == 0.0 || fractional_cycle == 0.5 {
+            // At DC and Nyquist, z^-1 is exactly +1 or -1. Preserve exact
+            // coefficient cancellation before division, and avoid sin(pi)'s
+            // rounding residual turning a Nyquist pole into a finite response.
+            let signed_term = |(index, value): (usize, &f64)| {
+                let sign = if fractional_cycle == 0.5 && index % 2 != 0 {
+                    -1.0
+                } else {
+                    1.0
+                };
+                (*value, sign)
+            };
+            let numerator = self.num.iter().enumerate().map(signed_term);
+            let real = checked_sum_products_ratio(
+                numerator.clone(),
+                self.den.iter().enumerate().map(signed_term),
+                "Zi real-axis frequency response",
+                false,
+            )?;
+            if real == 0.0
+                && !rspice_veriloga_runtime::arithmetic::sum_products_is_zero(numerator)
+                    .map_err(|error| arithmetic_error(error, "Zi frequency response", false))?
+            {
+                return Err(ZiFilterError::InvalidEvaluation(format!(
+                    "Zi frequency response underflows at {frequency_hz} Hz"
+                )));
+            }
+            return Ok((real, 0.0));
+        }
+        let angle = std::f64::consts::TAU * fractional_cycle;
         let z_inverse = Complex64::from_polar(1.0, -angle);
         let (numerator, numerator_scale) =
             evaluate_unit_circle_polynomial(&self.num, z_inverse, "numerator")?;
@@ -1587,6 +1617,58 @@ mod tests {
         let periodic = iir.frequency_response_rectangular(1.125).unwrap();
         assert!((base.0 - periodic.0).abs() <= 16.0 * f64::EPSILON);
         assert!((base.1 - periodic.1).abs() <= 16.0 * f64::EPSILON);
+    }
+
+    #[test]
+    fn real_axis_frequency_response_preserves_cancellation_and_poles() {
+        for residual in [1.0, -1e-200, f64::from_bits(1)] {
+            let filter =
+                ZiFilter::new(vec![f64::MAX, residual, -f64::MAX], vec![1.0], 0.25).unwrap();
+            for (frequency, expected) in [
+                (0.0, residual),
+                (2.0, -residual),
+                (4.0, residual),
+                (6.0, -residual),
+            ] {
+                let response = filter.frequency_response_rectangular(frequency).unwrap();
+                assert_eq!(response.0.to_bits(), expected.to_bits());
+                assert_eq!(response.1, 0.0);
+            }
+        }
+        let scaled = ZiFilter::new(
+            vec![f64::MAX, 0.0, f64::MAX],
+            vec![f64::MAX, 0.0, f64::MAX],
+            1.0,
+        )
+        .unwrap();
+        let pole = ZiFilter::new(vec![1.0], vec![1.0, 1.0], 1.0).unwrap();
+        let underflow = ZiFilter::new(vec![f64::from_bits(1)], vec![f64::MAX], 1.0).unwrap();
+        for frequency in [0.5, 1.5] {
+            assert_eq!(
+                scaled.frequency_response_rectangular(frequency).unwrap(),
+                (1.0, 0.0)
+            );
+            assert!(pole.frequency_response_rectangular(frequency).is_err());
+            assert!(
+                underflow
+                    .frequency_response_rectangular(frequency)
+                    .unwrap_err()
+                    .to_string()
+                    .contains("underflows")
+            );
+        }
+        assert!(
+            underflow
+                .frequency_response_rectangular(0.0)
+                .unwrap_err()
+                .to_string()
+                .contains("underflows")
+        );
+        // A neighboring frequency is not snapped to the real axis.
+        assert!(
+            pole.frequency_response_rectangular(0.5 + f64::EPSILON)
+                .is_ok()
+        );
     }
 
     #[test]
