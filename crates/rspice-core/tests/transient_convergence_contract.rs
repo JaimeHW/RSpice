@@ -247,8 +247,7 @@ fn every_dialect_rejects_nonconverged_newton_points() {
     }
 }
 
-#[test]
-fn successful_gmin_rescue_is_not_counted_as_a_rejected_timestep() {
+fn gmin_rescue_fixture() -> (Engine, Netlist) {
     let netlist = Netlist::parse(
         "cubic continuation rescue\n\
          .options gmin=0\n\
@@ -271,6 +270,27 @@ fn successful_gmin_rescue_is_not_counted_as_a_rejected_timestep() {
         ..Default::default()
     });
 
+    (engine, netlist)
+}
+
+#[test]
+fn gmin_rescue_observes_cancellation_inside_continuation() {
+    let (engine, netlist) = gmin_rescue_fixture();
+    // This two-point fixture previously completed with just 51 polls, all
+    // outside rescue. Cancellation at poll 65 requires checks in the walk.
+    let abort = rspice_core::abort_signal::CountingAbort::new(64);
+    let error = engine
+        .run_tran_with_abort(&netlist, 1.0e-15, 1.0e-15, &abort)
+        .expect_err("cancel a running GMIN continuation");
+    assert!(matches!(error, SimulationError::Aborted), "{error}");
+    assert_eq!(abort.observed_at(), Some(65));
+    assert_eq!(abort.polls_after_abort(), 0);
+    assert_eq!(engine.convergence_quality().force_accepted_points, 0);
+}
+
+#[test]
+fn successful_gmin_rescue_is_not_counted_as_a_rejected_timestep() {
+    let (engine, netlist) = gmin_rescue_fixture();
     let result = engine
         .run_tran(&netlist, 1.0e-15, 1.0e-15)
         .expect("GMIN continuation recovers the nonlinear endpoint");

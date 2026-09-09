@@ -48,7 +48,11 @@ impl Engine {
         dt: Value,
         ctx: &residual::TransientSystemContext<'_>,
         vbic_snapshot_cache: &mut [Option<BjtChargeSnapshot>],
+        abort: &dyn AbortSignal,
     ) -> Result<Option<Vec<Value>>, SimulationError> {
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
         let snapshot = circuit.nonlinear_state_snapshot();
         let vbic_snapshot = vbic_snapshot_cache.to_vec();
         let rescued = self.walk_gmin_continuation_levels(
@@ -60,6 +64,7 @@ impl Engine {
             dt,
             ctx,
             vbic_snapshot_cache,
+            abort,
         );
         // The walk ramps the device junction GMIN level by level; restore
         // the configured transient floor whether or not it succeeded.
@@ -84,6 +89,7 @@ impl Engine {
         dt: Value,
         ctx: &residual::TransientSystemContext<'_>,
         vbic_snapshot_cache: &mut [Option<BjtChargeSnapshot>],
+        abort: &dyn AbortSignal,
     ) -> Result<Option<Vec<Value>>, SimulationError> {
         let num_nodes = circuit.num_nodes();
         let budget = self.transient_newton_iteration_budget(false);
@@ -99,6 +105,9 @@ impl Engine {
         let mut level_index = 0;
         let mut refinements = 0;
         while level_index < levels.len() {
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
             let extra_gmin = levels[level_index];
             let level_seed = iterate.clone();
             let level_state = circuit.nonlinear_state_snapshot();
@@ -112,6 +121,9 @@ impl Engine {
                 .set_semiconductor_junction_gmin(self.effective_device_junction_gmin(extra_gmin));
             let mut level_converged = false;
             for level_iter in 0..budget {
+                if abort.is_aborted() {
+                    return Err(SimulationError::Aborted);
+                }
                 self.stamp_transient_system(
                     circuit,
                     matrix,
@@ -186,6 +198,9 @@ impl Engine {
                 let mut best_merit = Value::INFINITY;
                 let mut alpha: Value = 1.0;
                 for _trial in 0..RESCUE_LINE_SEARCH_TRIALS {
+                    if abort.is_aborted() {
+                        return Err(SimulationError::Aborted);
+                    }
                     circuit.restore_nonlinear_state(line_search_base_state.clone());
                     vbic_snapshot_cache.clone_from_slice(&line_search_vbic_cache);
                     let trial: Vec<Value> = if alpha >= 1.0 {
@@ -303,7 +318,10 @@ impl Engine {
         // iterate. Prove the candidate against a fresh restamp of the true
         // system so the rescue's success claim matches the acceptance
         // standard used everywhere else.
-        if !self.transient_nonlinear_residual_converged(
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
+        let converged = self.transient_nonlinear_residual_converged(
             circuit,
             matrix,
             rhs,
@@ -317,10 +335,101 @@ impl Engine {
             None,
             None,
             None,
-        )? {
-            return Ok(None);
+        )?;
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
         }
+        Ok(converged.then_some(iterate))
+    }
+}
 
-        Ok(Some(iterate))
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gmin_rescue_cancellation_restores_device_and_charge_cache() {
+        let engine = Engine::default();
+        let netlist =
+            Netlist::parse("rescue rollback\nR1 n 0 1\nQ1 n n n qm\n.model qm NPN(CJS=1n)\n.end\n")
+                .unwrap();
+        let mut circuit = engine.build_circuit(&netlist).unwrap();
+        let mut matrix = engine.build_matrix(&circuit).unwrap();
+        circuit.link_indices(&matrix);
+        let floor =
+            engine.effective_device_junction_gmin(engine.config.convergence_config.gmin_target);
+        circuit.set_semiconductor_junction_gmin(floor);
+        let seed = [1.0];
+        circuit.update_nonlinear(&seed);
+        circuit.update_nonlinear(&seed);
+        let history =
+            Engine::initialize_bjt_history(&circuit, &seed, ReactiveHistorySeed::SolvedBias);
+        let snapshot = circuit.bjts.devices[0].charge_snapshot(1.0, 1.0, 1.0, 0.0);
+        let mut cache = [Some(snapshot)];
+        let expected_cache = circuit.bjts.devices[0]
+            .encode_accepted_charge_snapshot_checkpoint(&snapshot)
+            .unwrap();
+        let expected_device = circuit.bjts.devices[0]
+            .accepted_nonlinear_checkpoint()
+            .unwrap();
+        let coeff = CompanionCoefficients::backward_euler();
+        let ctx = residual::TransientSystemContext {
+            coeff: &coeff,
+            xyce_one_step: false,
+            xyce_one_step_order2: false,
+            xyce_static_history: None,
+            bsim4_trnqs_coeff: &coeff,
+            bjt_history: &history,
+            jfet_history: &Default::default(),
+            diode_history: &Default::default(),
+            diode_attempt_cache: None,
+            mosfet_history: &Default::default(),
+            mosfet_companion_slots: &[],
+            vdmos_history: &Default::default(),
+            vdmos_companion_slots: &[],
+            b3soi_history: &Default::default(),
+            b3soi_zero_first_transient_charge_derivative: false,
+            bsim3_history: &Default::default(),
+            bsim4_history: &Default::default(),
+            ekv26_history: &Default::default(),
+            suppress_gate_charge: false,
+            baseline_diag_gmin: 0.0,
+            tline_dc_refs: &[],
+            coupled_tline_refs: &[],
+            analysis_initial_step: false,
+            analysis_final_step: false,
+        };
+        // Cancel after GMIN changes, after the first trial assembly, and
+        // farther into Newton/backtracking. Every exit must restore the same
+        // pre-rescue state, including a populated engine-owned charge cache.
+        for threshold in [2, 3, 5] {
+            let abort = crate::abort_signal::CountingAbort::new(threshold);
+            let error = engine
+                .rescue_transient_step_with_gmin_continuation(
+                    &mut circuit,
+                    &mut matrix,
+                    &mut [0.0],
+                    &seed,
+                    1e-9,
+                    1e-9,
+                    &ctx,
+                    &mut cache,
+                    &abort,
+                )
+                .unwrap_err();
+            assert!(matches!(error, SimulationError::Aborted));
+            assert_eq!(abort.polls_after_abort(), 0);
+            let bjt = &circuit.bjts.devices[0];
+            assert_eq!(bjt.junction_gmin, floor);
+            assert_eq!(
+                bjt.accepted_nonlinear_checkpoint().unwrap(),
+                expected_device
+            );
+            assert_eq!(
+                bjt.encode_accepted_charge_snapshot_checkpoint(cache[0].as_ref().unwrap())
+                    .unwrap(),
+                expected_cache
+            );
+        }
     }
 }

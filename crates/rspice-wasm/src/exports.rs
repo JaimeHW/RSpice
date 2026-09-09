@@ -262,6 +262,35 @@ mod wasm_tests {
     }
 
     #[wasm_bindgen_test]
+    fn transient_gmin_rescue_observes_cancellation_in_wasm() {
+        let netlist = rspice_core::Netlist::parse(
+            "cubic continuation rescue\nI1 0 n PULSE(0 -2 0 1f 1f 10n 20n)\nB1 n 0 I={V(n)*V(n)*V(n)-2*V(n)}\n.tran 0 1f uic\n.end\n",
+        ).unwrap();
+        let engine = rspice_core::Engine::new(rspice_core::engine::SimulationConfig {
+            spice_dialect: rspice_core::engine::SpiceDialect::Xyce,
+            transient_nonlinear_max_iterations: Some(8),
+            convergence_config: rspice_core::ConvergenceConfig {
+                gmin_initial: 10.0,
+                gmin_target: 1e-15,
+                junction_gmin_target: 0.0,
+                ..Default::default()
+            },
+            locked_time_grid: Some(std::sync::Arc::new(vec![0.0, 1e-15])),
+            ..Default::default()
+        });
+        let abort = rspice_core::abort_signal::CountingAbort::new(64);
+        let error = engine
+            .run_tran_with_abort(&netlist, 1e-15, 1e-15, &abort)
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            rspice_core::engine::SimulationError::Aborted
+        ));
+        assert_eq!(abort.observed_at(), Some(65));
+        assert_eq!(abort.polls_after_abort(), 0);
+    }
+
+    #[wasm_bindgen_test]
     fn tied_admittance_preserves_dc_ac_and_transient_in_wasm() {
         let engine = rspice_core::Engine::default();
         let abort = rspice_core::abort_signal::NoAbort;

@@ -7366,6 +7366,7 @@ impl Engine {
                             analysis_final_step,
                         },
                         &mut vbic_snapshot_cache,
+                        abort,
                     )?
                 {
                     static GMIN_RESCUE_LOG_COUNT: std::sync::atomic::AtomicUsize =
