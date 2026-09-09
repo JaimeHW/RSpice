@@ -366,17 +366,16 @@ impl ConvergenceReport {
         if self.force_accepted_points != self.force_accepted_indices.len() as u64 {
             return Err(invalid("Convergence point count is invalid"));
         }
-        if let Some(basis) = &self.time_basis {
-            if basis.sample_count == 0
+        if let Some(basis) = &self.time_basis
+            && (basis.sample_count == 0
                 || !basis.start_s.is_finite()
                 || basis.start_s < 0.0
                 || !basis.stop_s.is_finite()
                 || basis.stop_s < basis.start_s
                 || ((basis.sample_count == 1) != (basis.start_s == basis.stop_s))
-                || basis.force_accepted_times_s.len() != self.force_accepted_indices.len()
-            {
-                return Err(invalid("Convergence source time basis is invalid"));
-            }
+                || basis.force_accepted_times_s.len() != self.force_accepted_indices.len())
+        {
+            return Err(invalid("Convergence source time basis is invalid"));
         }
         for (position, &index) in self.force_accepted_indices.iter().enumerate() {
             if position.is_multiple_of(64) {
@@ -399,20 +398,19 @@ impl ConvergenceReport {
                 }
             }
         }
-        if let Some(diagnostic) = &self.failure_diagnostic {
-            if diagnostic.sites.len()
+        if let Some(diagnostic) = &self.failure_diagnostic
+            && (diagnostic.sites.len()
                 > rspice_core::diagnostics::ConvergenceDiagnostic::MAX_NAMED_SITES
                 || diagnostic.sites.iter().any(|site| {
                     site.name.trim().is_empty()
                         || site
                             .residual
                             .is_some_and(|value| !value.is_finite() || value < 0.0)
-                })
-            {
-                return Err(invalid(
-                    "Convergence diagnostic contains invalid named sites",
-                ));
-            }
+                }))
+        {
+            return Err(invalid(
+                "Convergence diagnostic contains invalid named sites",
+            ));
         }
         check_abort(abort)
     }
