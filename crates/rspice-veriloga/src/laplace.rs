@@ -1279,14 +1279,21 @@ fn validate_conjugate_roots(roots: &[Complex64]) -> Result<(), LaplaceError> {
             paired[index] = true;
             continue;
         }
-        let conjugate = roots
+        let mut candidates = roots
             .iter()
             .enumerate()
             .skip(index + 1)
-            .find(|(candidate_index, candidate)| {
-                !paired[*candidate_index]
-                    && relative_match(root.re, candidate.re)
-                    && relative_match(root.im, -candidate.im)
+            .filter(|(candidate_index, _)| !paired[*candidate_index]);
+        // A nearby root may have its own exact partner later in the array.
+        // Consuming it first can strand a valid pair and make acceptance
+        // depend on input order. Preserve exact pairs before using tolerance.
+        let conjugate = candidates
+            .clone()
+            .find(|(_, candidate)| root.re == candidate.re && root.im == -candidate.im)
+            .or_else(|| {
+                candidates.find(|(_, candidate)| {
+                    relative_match(root.re, candidate.re) && relative_match(root.im, -candidate.im)
+                })
             })
             .map(|(candidate_index, _)| candidate_index);
         let Some(conjugate_index) = conjugate else {
@@ -1954,6 +1961,36 @@ endmodule
         )
         .expect_err("a true nonzero quotient below f64 must fail closed");
         assert!(error.to_string().contains("underflows"));
+    }
+
+    #[test]
+    fn exact_conjugate_root_pairs_are_independent_of_array_order() {
+        let mut roots = [
+            -1.0,
+            -1.0 - 50.0 * f64::EPSILON,
+            -1.0 - 100.0 * f64::EPSILON,
+        ]
+        .into_iter()
+        .flat_map(|real| [Complex64::new(real, 1.0), Complex64::new(real, -1.0)])
+        .collect::<Vec<_>>();
+        let expected = StateSpaceFilter::roots_to_poly(&roots).unwrap();
+        fn check_permutations(roots: &mut [Complex64], offset: usize, expected: &[f64]) {
+            if offset == roots.len() {
+                let actual = StateSpaceFilter::roots_to_poly(roots)
+                    .expect("every exact conjugate pair remains present after permutation");
+                assert_eq!(actual.len(), expected.len());
+                for (actual, expected) in actual.iter().zip(expected) {
+                    assert!((actual / expected - 1.0).abs() <= 16.0 * f64::EPSILON);
+                }
+                return;
+            }
+            for next in offset..roots.len() {
+                roots.swap(offset, next);
+                check_permutations(roots, offset + 1, expected);
+                roots.swap(offset, next);
+            }
+        }
+        check_permutations(&mut roots, 0, &expected);
     }
 
     #[test]

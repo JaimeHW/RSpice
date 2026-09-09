@@ -18,6 +18,135 @@ fn compile(source: &str) -> DeviceFixture {
 }
 
 #[test]
+fn filter_null_zeros_preserve_assigned_and_direct_device_responses() {
+    for operator in ["laplace_zp", "laplace_zd", "zi_zp", "zi_zd"] {
+        let denominator = if operator.ends_with("zp") {
+            "'{-1.0,0.0}"
+        } else {
+            "'{1.0,1.0}"
+        };
+        let timing = if operator.starts_with("zi_") {
+            ",0.25"
+        } else {
+            ""
+        };
+        let gain = if operator.starts_with("zi_") {
+            0.5
+        } else {
+            1.0
+        };
+        let mut responses = Vec::new();
+        for assigned in [false, true] {
+            let call = format!("{operator}(V(p,n)*V(p,n),, {denominator}{timing})");
+            let body = if assigned {
+                format!("y={call}; I(p,n)<+y;")
+            } else {
+                format!("I(p,n)<+{call};")
+            };
+            let fixture = compile(&format!(
+                "module null_filter(p,n); inout p,n; electrical p,n; real y;
+                 analog begin {body} end endmodule"
+            ));
+            let mut device = fixture.device("NULL", &[1, 0]);
+            let bias = 0.25;
+            device.update_voltages(&[bias]);
+            let current = device.try_evaluate().unwrap()[0];
+            assert!(
+                (current / (gain * bias * bias) - 1.0).abs() < 1e-12,
+                "{operator}: {current}"
+            );
+            let (matrix, _) = collect_stamps(&mut device, &[bias]);
+            assert!((matrix[&(0, 0)] / (2.0 * gain * bias) - 1.0).abs() < 1e-12);
+            device.set_analysis_type(1);
+            let mut values = Vec::new();
+            for frequency in [0.0, 0.125, 0.373] {
+                let mut terms = Vec::new();
+                device
+                    .try_stamp_small_signal_complex(&[bias], frequency, |r, c, re, im| {
+                        assert_eq!((r, c), (0, 0));
+                        terms.push([re, im]);
+                    })
+                    .unwrap();
+                assert_eq!(terms.len(), 1);
+                assert!(terms[0].iter().all(|value| value.is_finite()));
+                values.push(terms[0]);
+            }
+            responses.push(values);
+        }
+        assert_eq!(responses[0], responses[1], "{operator}");
+    }
+}
+
+#[test]
+fn filter_root_array_order_preserves_compilation_and_ac_stamps() {
+    let [a, b, c] = [
+        -1.0,
+        -1.0 - 50.0 * f64::EPSILON,
+        -1.0 - 100.0 * f64::EPSILON,
+    ];
+    let ordered = [
+        (a, 1.0),
+        (a, -1.0),
+        (b, 1.0),
+        (b, -1.0),
+        (c, 1.0),
+        (c, -1.0),
+    ];
+    let permuted = [
+        (a, 1.0),
+        (b, -1.0),
+        (b, 1.0),
+        (c, -1.0),
+        (c, 1.0),
+        (a, -1.0),
+    ];
+    for operator in ["laplace_zp", "zi_zp"] {
+        let mut responses = Vec::new();
+        for roots in [ordered, permuted] {
+            let roots = roots
+                .into_iter()
+                .flat_map(|(re, im)| [re, im])
+                .map(|v| format!("{v:.17e}"))
+                .collect::<Vec<_>>()
+                .join(",");
+            let timing = if operator == "zi_zp" { ",0.25" } else { "" };
+            let fixture = compile(&format!(
+                "module paired_filter(p,n); inout p,n; electrical p,n; real y;
+                 analog begin y={operator}(V(p,n), , '{{{roots}}}{timing});
+                 I(p,n)<+y; end endmodule"
+            ));
+            let mut device = fixture.device("PAIRS", &[1, 0]);
+            device.set_analysis_type(1);
+            let mut values = Vec::new();
+            for frequency in [0.0, 0.125, 0.373] {
+                let mut terms = Vec::new();
+                device
+                    .try_stamp_small_signal_complex(&[0.25], frequency, |r, c, re, im| {
+                        assert_eq!((r, c), (0, 0));
+                        terms.push([re, im]);
+                    })
+                    .unwrap();
+                assert_eq!(terms.len(), 1);
+                values.push(terms[0]);
+            }
+            responses.push(values);
+        }
+        for (ordered, permuted) in responses[0].iter().zip(&responses[1]) {
+            for (&expected, &actual) in ordered.iter().zip(permuted) {
+                if expected == 0.0 {
+                    assert_eq!(actual, 0.0)
+                } else {
+                    assert!(
+                        (actual / expected - 1.0).abs() <= 128.0 * f64::EPSILON,
+                        "{operator}: {actual} vs {expected}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn laplace_ac_stamps_preserve_final_components_across_intermediate_range_limits() {
     let fixture = compile(
         "module ranged_filter(p,n); inout p,n; electrical p,n; real y;

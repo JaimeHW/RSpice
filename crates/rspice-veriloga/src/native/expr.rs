@@ -6024,19 +6024,21 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
     fn laplace_call_dc_gain(&self, normalized: &str, args: &[ExprId]) -> JitResult<f64> {
         match normalized {
             "laplace_zp" => {
-                let zeros = self.constant_array_root_pairs(args[1], "laplace_zp", "zeros")?;
-                let poles = self.constant_array_root_pairs(args[2], "laplace_zp", "poles")?;
+                let zeros = self.constant_array_root_pairs(args[1], "laplace_zp", "zeros", true)?;
+                let poles =
+                    self.constant_array_root_pairs(args[2], "laplace_zp", "poles", false)?;
                 self.checked_root_dc_gain("laplace_zp", 1.0, &zeros, &poles)
             }
             "laplace_zd" => {
-                let zeros = self.constant_array_root_pairs(args[1], "laplace_zd", "zeros")?;
+                let zeros = self.constant_array_root_pairs(args[1], "laplace_zd", "zeros", true)?;
                 let denominator = self.constant_array_values(args[2])?;
                 let numerator = self.checked_root_dc_gain("laplace_zd", 1.0, &zeros, &[])?;
                 self.checked_filter_dc_gain("laplace_zd", numerator, first_or(&denominator, 1.0))
             }
             "laplace_np" => {
                 let numerator = self.constant_array_values(args[1])?;
-                let poles = self.constant_array_root_pairs(args[2], "laplace_np", "poles")?;
+                let poles =
+                    self.constant_array_root_pairs(args[2], "laplace_np", "poles", false)?;
                 self.checked_root_dc_gain("laplace_np", first_or(&numerator, 0.0), &[], &poles)
             }
             "laplace_nd" => {
@@ -6168,7 +6170,11 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         expr_id: ExprId,
         operator: &str,
         role: &str,
+        allow_null: bool,
     ) -> JitResult<Vec<(f64, f64)>> {
+        if allow_null && matches!(self.expression(expr_id)?.kind, HirExprKind::NullArgument) {
+            return Ok(Vec::new());
+        }
         let values = self.constant_array_values(expr_id)?;
         self.root_pairs_from_values(operator, role, values)
     }

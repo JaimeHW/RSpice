@@ -5354,8 +5354,13 @@ impl SemanticAnalyzer {
                     *c.else_expr = self.normalize_integer_expression(&c.else_expr)?;
                 }
                 Expression::Call(c) => {
+                    self.validate_null_arguments(c)?;
                     for arg in &mut c.args {
-                        *arg = self.normalize_integer_expression(arg)?;
+                        // A permitted omission carries no scalar value to
+                        // coerce. Preserve it for the owning operator.
+                        if !matches!(arg, Expression::NullArgument(_)) {
+                            *arg = self.normalize_integer_expression(arg)?;
+                        }
                     }
                 }
                 Expression::SystemFunction(c) => {

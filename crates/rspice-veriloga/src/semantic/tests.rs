@@ -636,6 +636,40 @@ fn filter_vectors_reject_bare_scalars_without_losing_authorized_null_zeros() {
 }
 
 #[test]
+fn assigned_filters_preserve_authorized_null_zeros() {
+    for operator in ["laplace_zp", "laplace_zd", "zi_zp", "zi_zd"] {
+        let denominator = if operator.ends_with("zp") {
+            "'{-1.0, 0.0}"
+        } else {
+            "'{1.0, 1.0}"
+        };
+        let timing = if operator.starts_with("zi_") {
+            ", 1.0e-6"
+        } else {
+            ""
+        };
+        analyze(&module_src(&format!(
+            "real y; analog begin
+             y = 2.0 * {operator}(V(p,n),, {denominator}{timing});
+             I(p,n) <+ y; end"
+        )))
+        .unwrap_or_else(|error| panic!("{operator}: {error}"));
+    }
+    for expression in [
+        "sin()",
+        "sin(,)",
+        "laplace_zp(, '{-1.0,0.0}, '{-1.0,0.0})",
+        "laplace_zp(V(p,n),,)",
+        "zi_zp(V(p,n),, '{-1.0,0.0},)",
+    ] {
+        analyze(&module_src(&format!(
+            "real y; analog begin y = {expression}; I(p,n) <+ y; end"
+        )))
+        .expect_err("invalid omissions remain errors in assignments");
+    }
+}
+
+#[test]
 fn filter_assignment_pattern_replication_materializes_nested_and_zero_counts() {
     analyze(&module_src(
         "analog I(p, n) <+ laplace_nd(V(p, n), '{2{2{1.0}}}, '{1.0, 1.0, 1.0, 1.0});",
