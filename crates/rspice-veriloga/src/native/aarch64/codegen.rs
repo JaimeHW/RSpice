@@ -12,7 +12,6 @@ use super::encoder::{
 use super::verifier::{verify_exact_function, verify_exact_function_at};
 use crate::jit::plan_program::PlanProgram;
 use crate::native::FUSED_KERNEL_INLINE_LIMIT;
-use crate::native::abi::NativeRuntimeStatus;
 use crate::native::abi::{
     INTEGER_CAST_DESCRIPTOR, integer_binary_const_descriptor, integer_binary_descriptor,
     integer_shift_const_descriptor, rspice_above_state_native,
@@ -34,8 +33,8 @@ use crate::native::abi::{
     rspice_slew_derivative_native, rspice_slew_state_native, rspice_table_derivative_native,
     rspice_table_lookup_native, rspice_tan, rspice_tanh, rspice_timer_state_native,
     rspice_transition_derivative_native, rspice_transition_state_native,
-    rspice_zi_derivative_native, rspice_zi_step_native,
 };
+use crate::native::abi::{NativeRuntimeStatus, OperandArrayCall, operand_array_call};
 use crate::native::assignment::{NativeAssignment, shareable_batch_ranges};
 use crate::native::expr::{
     BinaryMathOp, CompareOp, ExtremumOp, IntegerBinaryOp, LogicalOp, NativeOp, NativeProgram,
@@ -152,6 +151,22 @@ pub(crate) fn compile_segmented_program(program: &NativeProgram) -> JitResult<A6
         let mut compiler = FunctionCompiler::new_with_kernel_io(0, true, true)?;
         let scratch = compiler.kernel_io_register()?;
         for instruction in instructions {
+            if let Some(call) = operand_array_call(instruction.op())? {
+                compiler.emit_operand_array_call(
+                    &call,
+                    instruction.operands().len(),
+                    |compiler, index, _| {
+                        compiler.emit_array_load(
+                            DReg::D23,
+                            scratch,
+                            instruction.operands()[index].index(),
+                        )?;
+                        compiler.stack_store_d(DReg::D23, index * WORD_BYTES)
+                    },
+                )?;
+                compiler.emit_array_store(DReg::D0, scratch, instruction.result().index())?;
+                continue;
+            }
             if instruction.operands().len() >= LOGICAL_VALUE_REGISTER_COUNT {
                 return Err(register_allocation_error(format!(
                     "AArch64 segmented instruction requires {} operands",
@@ -1113,6 +1128,36 @@ impl FunctionCompiler {
                 instruction.value_type()
             )));
         }
+        if let Some(call) = operand_array_call(instruction.op())? {
+            self.emit_operand_array_call(
+                &call,
+                allocated.operands().len(),
+                |compiler, index, frame_bytes| {
+                    let operand = match allocated.operands()[index] {
+                        ValueLocation::Register(register) => logical_register(register)?,
+                        ValueLocation::Spill(slot) => {
+                            let offset = spill_slot_offset(slot)?
+                                .checked_add(frame_bytes)
+                                .ok_or_else(|| {
+                                    encoding_error("operand-array spill displacement overflow")
+                                })?;
+                            compiler.stack_load_d(DReg::D23, offset)?;
+                            DReg::D23
+                        }
+                    };
+                    compiler.stack_store_d(operand, index * WORD_BYTES)
+                },
+            )?;
+            return match allocated.result() {
+                ValueLocation::Register(register) => {
+                    self.encoder.fmov_d(logical_register(register)?, DReg::D0);
+                    Ok(())
+                }
+                ValueLocation::Spill(slot) => {
+                    self.stack_store_d(DReg::D0, spill_slot_offset(slot)?)
+                }
+            };
+        }
         let mut prepared = self.prepare_instruction(allocated)?;
         self.emit_op(instruction.op(), &mut prepared)?;
         if let ValueLocation::Spill(slot) = allocated.result() {
@@ -1706,47 +1751,8 @@ impl FunctionCompiler {
                 filter_id,
                 rspice_laplace_derivative_native as *const () as usize,
             )?,
-            NativeOp::ZiState(layout) => {
-                let operands =
-                    layout
-                        .validate_operand_budget()
-                        .map_err(|error| JitError::Encoding {
-                            model: "native-aarch64".into(),
-                            detail: error.to_string().into(),
-                        })?;
-                self.emit_operand_context_helper(
-                    prepared,
-                    operands,
-                    layout
-                        .native_descriptor()
-                        .ok_or_else(|| JitError::Encoding {
-                            model: "native-aarch64".into(),
-                            detail: "Zi runtime layout exceeds the native descriptor limits".into(),
-                        })?,
-                    rspice_zi_step_native as *const () as usize,
-                )?;
-            }
-            NativeOp::ZiStateDerivative(layout) => {
-                let operands =
-                    layout
-                        .validate_operand_budget()
-                        .map_err(|error| JitError::Encoding {
-                            model: "native-aarch64".into(),
-                            detail: error.to_string().into(),
-                        })?;
-                self.emit_operand_context_helper(
-                    prepared,
-                    operands,
-                    layout
-                        .native_descriptor()
-                        .ok_or_else(|| JitError::Encoding {
-                            model: "native-aarch64".into(),
-                            detail:
-                                "Zi derivative runtime layout exceeds the native descriptor limits"
-                                    .into(),
-                        })?,
-                    rspice_zi_derivative_native as *const () as usize,
-                )?;
+            NativeOp::ZiState(_) | NativeOp::ZiStateDerivative(_) => {
+                unreachable!("operand-array helpers are emitted before register preparation")
             }
             NativeOp::TimerState(timer_id) => self.emit_operand_context_helper(
                 prepared,
@@ -1992,6 +1998,34 @@ impl FunctionCompiler {
             self.encoder.fmov_d(prepared.result, DReg::D0);
         }
         Ok(())
+    }
+
+    fn emit_operand_array_call(
+        &mut self,
+        call: &OperandArrayCall,
+        count: usize,
+        mut store_operand: impl FnMut(&mut Self, usize, usize) -> JitResult<()>,
+    ) -> JitResult<()> {
+        if !self.saves_entry_args {
+            return Err(verifier_error(
+                "AArch64 operand-array helper requires saved entry arguments",
+            ));
+        }
+        if count == 0 || count != call.count || count > MAX_EXPRESSION_STACK_DEPTH {
+            return Err(encoding_error("operand-array helper count mismatch"));
+        }
+        let frame_bytes = (count * WORD_BYTES).div_ceil(STACK_ALIGNMENT) * STACK_ALIGNMENT;
+        self.adjust_stack(frame_bytes, false)?;
+        for index in 0..count {
+            store_operand(self, index, frame_bytes)?;
+        }
+        self.encoder.add_x_imm(XReg::X0, XReg::Sp, 0)?;
+        self.encoder.mov_x(XReg::X1, self.context_register())?;
+        self.encoder.mov_u64(XReg::X2, call.descriptor as u64)?;
+        self.encoder
+            .mov_u64(HOST_ABI.indirect_call_scratch, call.helper as usize as u64)?;
+        self.encoder.blr(HOST_ABI.indirect_call_scratch);
+        self.adjust_stack(frame_bytes, true)
     }
 
     fn emit_operand_context_helper(
@@ -3675,6 +3709,50 @@ mod cross_target_contract_tests {
         verify_exact_function(&bytes, "product ratio").unwrap();
     }
 
+    #[test]
+    fn wide_zi_operands_encode_in_allocated_and_segmented_functions() {
+        use crate::codegen::{ZiPolynomialLayout, ZiRuntimeLayout};
+
+        for width in [16, 1019] {
+            let layout = ZiRuntimeLayout {
+                numerator: ZiPolynomialLayout::Coefficients { len: width },
+                ..ZiRuntimeLayout::unit_coefficients(0)
+            };
+            let count = layout.operand_count();
+            for op in [
+                NativeOp::ZiState(layout),
+                NativeOp::ZiStateDerivative(layout),
+            ] {
+                // Distinct live operands force spills; the prefix must survive
+                // the callback and the following variable load uses saved args.
+                let mut ops = vec![NativeOp::LoadVariable(count)];
+                ops.extend((0..count).map(NativeOp::LoadVariable));
+                ops.extend([op, NativeOp::Add, NativeOp::LoadVariable(0), NativeOp::Add]);
+                let program =
+                    NativeProgram::from_ops_for_test(ops, count + 1, Vec::new(), Vec::new());
+                let allocated = compile_value_function(&program)
+                    .expect("wide Zi operands must not require simultaneous registers");
+                verify_exact_function(&allocated, "wide allocated Zi").unwrap();
+                let segmented = super::compile_segmented_program(&program)
+                    .expect("wide Zi operands must be marshalled from segment storage");
+                for function in &segmented.functions {
+                    verify_exact_function(function, "wide segmented Zi").unwrap();
+                }
+                let mut encoder = A64Encoder::new();
+                encoder.blr(HOST_ABI.indirect_call_scratch);
+                let call = encoder.into_bytes();
+                assert_eq!(instruction_occurrences(&allocated, &call), 1);
+                assert_eq!(
+                    segmented
+                        .functions
+                        .iter()
+                        .map(|bytes| instruction_occurrences(bytes, &call))
+                        .sum::<usize>(),
+                    1
+                );
+            }
+        }
+    }
     /// The relaxation is invisible to anything that already fit: no function
     /// under the reach gains an island, so its bytes cannot move.
     #[test]

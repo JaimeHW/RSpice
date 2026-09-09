@@ -553,6 +553,103 @@ endmodule
 }
 
 #[test]
+fn wide_zi_operands_preserve_stamps_readback_and_impulse_history() {
+    let unit = 1.0 / 1_048_576.0;
+    let denominator_unit = 1.0 / 16_777_216.0;
+    for (width, denominator_width) in [(16, 1), (8, 8), (1019, 1)] {
+        let numerator = (1..=width)
+            .map(|i| format!("{:.17e}", i as f64 * unit))
+            .collect::<Vec<_>>()
+            .join(",");
+        let denominator = (0..denominator_width)
+            .map(|i| {
+                format!(
+                    "{:.17e}",
+                    if i == 0 {
+                        1.0
+                    } else {
+                        (i + 1) as f64 * denominator_unit
+                    }
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        let source = format!(
+            "module wide(p,n); inout p,n; electrical p,n; real y;
+             analog begin
+               y=zi_nd(V(p,n), '{{{numerator}}}, '{{{denominator}}}, 1.0, 0.0);
+               I(p,n)<+0.125*V(p,n)+y+0.25*V(p,n);
+             end endmodule"
+        );
+        let (mut device, artifact) = compile_observable_device("WIDE", &source);
+        device.set_analysis_type(0);
+        let gain = (width * (width + 1)) as f64 * (0.5 * unit)
+            / (1.0
+                + ((denominator_width * (denominator_width + 1) / 2 - 1) as f64)
+                    * denominator_unit);
+        let expected_jacobian = 0.375 + gain;
+        assert!(
+            (jacobian_sum(&mut device, &[2.0]) - expected_jacobian).abs()
+                <= 2.0 * f64::EPSILON * expected_jacobian.abs(),
+            "DC Jacobian for {width}/{denominator_width} coefficients"
+        );
+        observe(&mut device, &artifact);
+        assert_eq!(device.variable("y"), Some(2.0 * gain));
+
+        device.try_begin_analysis(2).unwrap();
+        device.set_timestep(1.0);
+        let samples = if denominator_width == 1 { width + 1 } else { 2 };
+        for sample in 0..samples {
+            device.set_time(sample as f64);
+            let input = if sample == 0 { 1.0 } else { 0.0 };
+            let expected = if sample == 0 {
+                unit
+            } else if denominator_width != 1 {
+                2.0 * unit - 2.0 * denominator_unit * unit
+            } else if sample < width {
+                (sample + 1) as f64 * unit
+            } else {
+                0.0
+            };
+            let mut jacobian = 0.0;
+            let mut rhs = 0.0;
+            device
+                .try_stamp(
+                    &[input],
+                    |row, col, value| {
+                        assert_eq!((row, col), (0, 0));
+                        jacobian += value;
+                    },
+                    |row, value| {
+                        assert_eq!(row, 0);
+                        rhs += value;
+                    },
+                )
+                .unwrap();
+            assert_eq!(
+                jacobian,
+                0.375 + unit,
+                "{width}/{denominator_width}, sample {sample}"
+            );
+            assert_eq!(
+                rhs,
+                unit * input - expected,
+                "{width}/{denominator_width}, sample {sample}"
+            );
+            if [0, 1, width / 2, width - 1, width].contains(&sample) {
+                observe(&mut device, &artifact);
+                assert_eq!(
+                    device.variable("y"),
+                    Some(expected),
+                    "{width}/{denominator_width}, sample {sample}"
+                );
+            }
+            device.try_advance_state().unwrap();
+        }
+    }
+}
+
+#[test]
 fn zi_operand_ceiling_is_platform_uniform_for_coefficients_and_mixed_roots() {
     let compiler = VerilogACompiler::new(CompilerOptions::default());
     let coefficients = |len: usize| vec!["1.0"; len].join(", ");
@@ -569,9 +666,16 @@ endmodule
         )
     };
 
-    compiler
-        .compile(&source("zi_nd", coefficients(1019), coefficients(1)))
-        .expect("1,020 definition scalars plus four fixed operands are supported");
+    let mut widest = compile_device(
+        "WIDEST",
+        &source("zi_nd", coefficients(1019), coefficients(1)),
+    );
+    widest.set_analysis_type(0);
+    assert_eq!(
+        jacobian_sum(&mut widest, &[1.0]),
+        1019.0,
+        "1,020 definition scalars plus four fixed operands must execute, not just parse"
+    );
     let error = compiler
         .compile(&source("zi_nd", coefficients(1020), coefficients(1)))
         .expect_err("1,025 runtime operands must fail in the shared frontend")
@@ -582,9 +686,16 @@ endmodule
     );
 
     let roots = |len: usize| vec!["0.0, 0.0"; len].join(", ");
-    compiler
-        .compile(&source("zi_zd", roots(509), "1.0, 0.0".into()))
-        .expect("mixed roots/coefficients at exactly 1,024 operands are supported");
+    let mut widest_roots = compile_device(
+        "WIDEST_ROOTS",
+        &source("zi_zd", roots(509), "1.0, 0.0".into()),
+    );
+    widest_roots.set_analysis_type(0);
+    assert_eq!(
+        jacobian_sum(&mut widest_roots, &[1.0]),
+        1.0,
+        "mixed roots/coefficients at exactly 1,024 operands must execute"
+    );
     let error = compiler
         .compile(&source("zi_zd", roots(510), "1.0, 0.0".into()))
         .expect_err("mixed roots/coefficients over the shared ceiling must fail")
