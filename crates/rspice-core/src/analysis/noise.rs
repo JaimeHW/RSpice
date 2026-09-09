@@ -19,48 +19,14 @@
 //! ```
 //! This computes noise at output node referenced to input source Vin.
 
-use crate::constants::{K_BOLTZMANN, Q_ELECTRON, XYCE_K_BOLTZMANN, XYCE_Q_ELECTRON};
+pub use crate::constants::NoisePhysicalConstants;
+use crate::constants::{K_BOLTZMANN, Q_ELECTRON};
 use crate::{Complex64, Value};
 
 //=============================================================================
 // Constants
 //=============================================================================
 
-/// Physical constants used while evaluating primitive noise sources.
-///
-/// Compatibility simulators historically embedded rounded constants in their
-/// device support libraries. Keeping the pair on each source lets one circuit
-/// reproduce that simulator's published behavior without changing the modern
-/// constants used by native RSpice analyses.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct NoisePhysicalConstants {
-    pub boltzmann: Value,
-    pub electron_charge: Value,
-}
-
-impl NoisePhysicalConstants {
-    pub const MODERN: Self = Self {
-        boltzmann: K_BOLTZMANN,
-        electron_charge: Q_ELECTRON,
-    };
-
-    pub const XYCE_7_10: Self = Self {
-        boltzmann: XYCE_K_BOLTZMANN,
-        electron_charge: XYCE_Q_ELECTRON,
-    };
-
-    /// Constants embedded in vbic_1p3.va, distinct from Xyce's device library.
-    pub(crate) const VBIC_1_3: Self = Self {
-        boltzmann: 1.380662e-23,
-        electron_charge: 1.602189e-19,
-    };
-}
-
-impl Default for NoisePhysicalConstants {
-    fn default() -> Self {
-        Self::MODERN
-    }
-}
 /// Default temperature (K): 27°C = 300.15K (SPICE convention, ngspice REFTEMP)
 pub const T_NOMINAL: Value = 300.15;
 

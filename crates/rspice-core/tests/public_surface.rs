@@ -721,7 +721,11 @@ use rspice_core::analysis::harmonic_balance::{
 // the core's source contract during preparation and import. The first two
 // landed without an allowance. The source accessor and VBIC_1_3 preset are
 // core-only helpers and remain pub(crate), so they consume no public slots.
-const MAX_PUBLIC_ITEMS: usize = 5027;
+// 2026-09-08, +1 compatibility re-export (5,027 -> 5,028): shared
+// NoisePhysicalConstants now lives in the constants leaf, removing the
+// device-to-analysis dependency. Preserve analysis::noise::NoisePhysicalConstants
+// for existing frontend consumers; the type and values are unchanged.
+const MAX_PUBLIC_ITEMS: usize = 5028;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

@@ -199,6 +199,42 @@ pub const XYCE_K_BOLTZMANN: Value = 1.3806226e-23;
 /// Elementary charge as Xyce 7.10 rounds it (C). See [`XYCE_K_BOLTZMANN`].
 pub const XYCE_Q_ELECTRON: Value = 1.6021918e-19;
 
+/// Physical constants used while evaluating primitive noise sources.
+///
+/// Compatibility simulators historically embedded rounded constants in their
+/// device support libraries. Keeping the pair on each source lets one circuit
+/// reproduce that simulator's published behavior without changing the modern
+/// constants used by native RSpice analyses.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct NoisePhysicalConstants {
+    pub boltzmann: Value,
+    pub electron_charge: Value,
+}
+
+impl NoisePhysicalConstants {
+    pub const MODERN: Self = Self {
+        boltzmann: K_BOLTZMANN,
+        electron_charge: Q_ELECTRON,
+    };
+
+    pub const XYCE_7_10: Self = Self {
+        boltzmann: XYCE_K_BOLTZMANN,
+        electron_charge: XYCE_Q_ELECTRON,
+    };
+
+    /// Constants embedded in vbic_1p3.va, distinct from Xyce's device library.
+    pub(crate) const VBIC_1_3: Self = Self {
+        boltzmann: 1.380662e-23,
+        electron_charge: 1.602189e-19,
+    };
+}
+
+impl Default for NoisePhysicalConstants {
+    fn default() -> Self {
+        Self::MODERN
+    }
+}
+
 /// Celsius-to-Kelvin offset (K).
 pub const KELVIN_OFFSET: Value = 273.15;
 

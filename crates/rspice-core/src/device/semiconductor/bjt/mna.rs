@@ -25,7 +25,7 @@ use super::*;
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct VbicNoiseOperatingModel {
     /// Explicit compact-model constants take precedence over dialect defaults.
-    pub physical_constants: Option<crate::analysis::noise::NoisePhysicalConstants>,
+    pub physical_constants: Option<crate::constants::NoisePhysicalConstants>,
     /// VBIC 1.3 evaluates thermal noise at the local operating temperature.
     pub absolute_temperature: Option<Value>,
     /// `(mechanism, node+, node−, conductance)`; absent sources have zero strength.
@@ -478,7 +478,7 @@ impl Bjt {
         Some(VbicNoiseOperatingModel {
             physical_constants: self
                 .vbic_13
-                .then_some(crate::analysis::noise::NoisePhysicalConstants::VBIC_1_3),
+                .then_some(crate::constants::NoisePhysicalConstants::VBIC_1_3),
             absolute_temperature: self.vbic_13.then(|| {
                 self.mapped_temperature(self.requested_temperature() + self.vrth)
                     .0
