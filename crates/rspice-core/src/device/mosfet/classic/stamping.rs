@@ -25,6 +25,88 @@ struct ClassicMosDirectOperatingPoint {
 }
 
 impl Mosfet {
+    /// Currents entering individual D/G/S/B pins. Body charge currents use
+    /// diode orientation; Meyer currents enter the gate. Only matrix stamping
+    /// combines the individual currents when authored pins share a node.
+    fn report_branch_currents(
+        &self,
+        channel: Value,
+        body_source: Value,
+        body_drain: Value,
+        [cqgs, cqgd, cqgb, cqbs, cqbd]: [Value; 5],
+    ) -> [Value; 4] {
+        let ibs = self.polarity() * (body_source + cqbs);
+        let ibd = self.polarity() * (body_drain + cqbd);
+        [
+            channel - ibd - cqgd,
+            cqgs + cqgd + cqgb,
+            -channel - ibs - cqgs,
+            ibs + ibd - cqgb,
+        ]
+    }
+
+    pub(crate) fn reported_currents(&self, channel: Value) -> [Value; 4] {
+        // MOS3/9's internal OP table folds channel current into model polarity;
+        // terminal reports consistently use current entering the physical pin.
+        let channel = if self.uses_mos3_core() {
+            self.polarity() * channel
+        } else {
+            channel
+        };
+        self.report_branch_currents(channel, self.ibs, self.ibd, [0.0; 5])
+    }
+
+    pub(crate) fn reported_currents_at(
+        &self,
+        solution: &[Value],
+        displacement: [Value; 5],
+    ) -> Result<[Value; 4], String> {
+        let voltage = |node: NodeId| {
+            if node == 0 {
+                Ok(0.0)
+            } else {
+                solution.get(node - 1).copied().ok_or_else(|| {
+                    format!(
+                        "MOSFET '{}' lead node {node} is outside solution length {}",
+                        self.name,
+                        solution.len()
+                    )
+                })
+            }
+        };
+        let vd = voltage(self.node_drain)?;
+        let vg = voltage(self.node_gate)?;
+        let vs = voltage(self.node_source)?;
+        let vb = voltage(self.node_bulk)?;
+        let (op, cache_matches) = self.direct_operating_point_at(solution);
+        // Reuse the stamp's cancellation-safe merging of tied controls while
+        // retaining the separate D/S channel contributions in the report.
+        let (gm, gds, gmb, gss, id_eq) = Self::channel_stamp_terms(
+            [
+                self.node_drain,
+                self.node_gate,
+                self.node_source,
+                self.node_bulk,
+            ],
+            op.gm,
+            op.gds,
+            op.gmb,
+            op.gss,
+            op.id_eq,
+        );
+        let (_, _, gbs, ieq_bs) =
+            self.body_source_junction_linearization_cached(op.eval_vbs, cache_matches);
+        let (_, _, gbd, ieq_bd) =
+            self.body_drain_junction_linearization_cached(op.eval_vds, op.eval_vbs, cache_matches);
+        let currents = self.report_branch_currents(
+            id_eq + gds * vd + gm * vg - gss * vs + gmb * vb,
+            ieq_bs + gbs * self.body_source_diode_voltage(vb - vs),
+            ieq_bd + gbd * self.body_drain_diode_voltage(vd - vs, vb - vs),
+            displacement,
+        );
+        Ok(currents)
+    }
+
     /// Contract channel controls onto physical nodes before accumulating into
     /// an existing matrix or residual. Keep device operating-point derivatives
     /// unchanged; only the delivered stamp combines tied columns and rows.
@@ -533,6 +615,14 @@ impl Mosfet {
         rhs: &mut [Value],
         voltages: &[Value],
     ) {
+        let (op, cache_matches) = self.direct_operating_point_at(voltages);
+        self.stamp_direct_operating_point(matrix, rhs, op, cache_matches);
+    }
+
+    fn direct_operating_point_at(
+        &self,
+        voltages: &[Value],
+    ) -> (ClassicMosDirectOperatingPoint, bool) {
         let (vgs, vds, vbs) = self.branch_voltages(voltages);
         let (eval_vgs, eval_vds, eval_vbs) = self.limited_branch_voltages_for_eval(vgs, vds, vbs);
         let cache_matches = self.cached_linearization_matches_eval(eval_vgs, eval_vds, eval_vbs);
@@ -544,9 +634,7 @@ impl Mosfet {
             (gm, gds, gmb, gss, id_eq)
         };
 
-        self.stamp_direct_operating_point(
-            matrix,
-            rhs,
+        (
             ClassicMosDirectOperatingPoint {
                 eval_vds,
                 eval_vbs,
@@ -557,7 +645,7 @@ impl Mosfet {
                 id_eq,
             },
             cache_matches,
-        );
+        )
     }
 
     /// Stamp the Newton linearization already cached by [`NonlinearDevice::update`].

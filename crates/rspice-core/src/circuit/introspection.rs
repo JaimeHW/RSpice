@@ -322,12 +322,16 @@ impl CircuitData {
 
         for mosfet in &self.mosfets.devices {
             let op = mosfet.op_values();
+            let [id, ig, is, ib] = mosfet.reported_currents(op.id);
             entries.push(DeviceOpEntry::new(
                 mosfet.name.clone(),
                 mosfet.device_kind(),
                 Some(op.region),
                 vec![
-                    (OpLabel::ID, op.id),
+                    (OpLabel::ID, id),
+                    (OpLabel::IG, ig),
+                    (OpLabel::IS, is),
+                    (OpLabel::IB, ib),
                     (OpLabel::VGS, op.vgs),
                     (OpLabel::VDS, op.vds),
                     (OpLabel::VBS, op.vbs),
@@ -758,7 +762,7 @@ impl CircuitData {
         report
     }
 
-    /// Report the authored JFET leads from the solved series resistors when
+    /// Report the authored MOSFET and JFET leads from the solved series resistors when
     /// present. The public cache-only report remains usable without a solution.
     pub(crate) fn device_op_report_for_solution(
         &self,
@@ -766,7 +770,61 @@ impl CircuitData {
     ) -> Result<DeviceOpReport, String> {
         let mut report = self.device_op_report();
         self.replace_jfet_report_currents(&mut report, solution, None)?;
+        self.replace_mosfet_report_currents(&mut report, solution, None)?;
         Ok(report)
+    }
+
+    fn replace_mosfet_report_currents(
+        &self,
+        report: &mut DeviceOpReport,
+        solution: &[Value],
+        displacement: Option<&[[Value; 5]]>,
+    ) -> Result<(), String> {
+        if displacement.is_some_and(|currents| currents.len() != self.mosfets.len()) {
+            return Err("accepted MOSFET displacement current count mismatch".to_string());
+        }
+        // Classic MOS devices are the leading entries in the canonical report.
+        for (index, (mosfet, entry)) in self
+            .mosfets
+            .devices
+            .iter()
+            .zip(&mut report.entries)
+            .enumerate()
+        {
+            let currents = mosfet.reported_currents_at(
+                solution,
+                displacement.map_or([0.0; 5], |currents| currents[index]),
+            )?;
+            for (parameter, value) in &mut entry.params {
+                if let Some(index) = ["id", "ig", "is", "ib"]
+                    .iter()
+                    .position(|label| parameter == label)
+                {
+                    *value = currents[index];
+                }
+            }
+        }
+        for &(device, pin, resistor) in &self.mosfets.series_leads {
+            let stamp = &self.resistors.stamps[resistor];
+            let voltage = |node: NodeId| {
+                if node == 0 {
+                    Ok(0.0)
+                } else {
+                    solution.get(node - 1).copied().ok_or_else(|| {
+                        format!(
+                            "MOSFET '{}' lead node {node} is outside solution length {}",
+                            self.mosfets.devices[device].name,
+                            solution.len()
+                        )
+                    })
+                }
+            };
+            let current = self.resistors.conductances[resistor]
+                * (voltage(stamp.pp.row)? - voltage(stamp.nn.row)?);
+            // ID/IG/IS/IB lead the canonical classic-MOS parameter list.
+            report.entries[device].params[pin].1 = current;
+        }
+        Ok(())
     }
 
     fn replace_jfet_report_currents(
@@ -805,7 +863,7 @@ impl CircuitData {
         Ok(())
     }
 
-    /// Build an accepted transient report, replacing native diode, JFET and legacy
+    /// Build an accepted transient report, replacing native diode, MOSFET, JFET and legacy
     /// BJT lead currents with the exact totals from their committed
     /// companions. Ordinary `.OP` and every other parameter retain the static
     /// report; these overrides exist only for this transient sample and cannot
@@ -816,6 +874,7 @@ impl CircuitData {
         accepted_diode_displacement_currents: &[Value],
         accepted_bjt_terminal_currents: &[Option<[Value; 4]>],
         accepted_jfet_displacement_currents: Option<[&[Value]; 3]>,
+        accepted_mosfet_displacement_currents: Option<&[[Value; 5]]>,
     ) -> Result<DeviceOpReport, String> {
         if accepted_diode_displacement_currents.len() != self.diodes.devices.len() {
             return Err(format!(
@@ -825,6 +884,11 @@ impl CircuitData {
             ));
         }
         let mut report = self.device_op_report();
+        self.replace_mosfet_report_currents(
+            &mut report,
+            solution,
+            accepted_mosfet_displacement_currents,
+        )?;
         self.replace_jfet_report_currents(
             &mut report,
             solution,
@@ -922,7 +986,13 @@ impl CircuitData {
             })
             .collect::<Vec<_>>();
         let diode_displacement_currents = vec![0.0; self.diodes.devices.len()];
-        self.transient_device_op_report(solution, &diode_displacement_currents, &currents, None)
+        self.transient_device_op_report(
+            solution,
+            &diode_displacement_currents,
+            &currents,
+            None,
+            None,
+        )
     }
 
     /// Read-only access to linear resistor storage (names, nodes, conductances).

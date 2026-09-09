@@ -382,6 +382,38 @@ impl Engine {
         (*qgb, *cqgb) = charges[2];
     }
 
+    /// Include the companion's linear movement when its accepted charge
+    /// coordinate still differs from the solved node drop after limiting.
+    fn accepted_mosfet_gate_currents(
+        mos: &crate::device::Mosfet,
+        solution: &[Value],
+        coeff: &CompanionCoefficients,
+        dt: Value,
+        [halves, previous]: [(Value, Value, Value); 2],
+        mut currents: [Value; 3],
+    ) -> [Value; 3] {
+        let (raw_vgs, raw_vds, raw_vbs) = mos.unlimited_branch_voltages_at(solution);
+        let (vgs, vgd, vgb) = mos.gate_charge_branch_voltages_at(solution);
+        let movement = [
+            raw_vgs - vgs,
+            (raw_vgs - raw_vds) - vgd,
+            (raw_vgs - raw_vbs) - vgb,
+        ];
+        if movement != [0.0; 3] {
+            let overlap = mos.overlap_capacitances();
+            let caps = [
+                halves.0 + previous.0 + overlap.0,
+                halves.1 + previous.1 + overlap.1,
+                halves.2 + previous.2 + overlap.2,
+            ];
+            for branch in 0..3 {
+                currents[branch] +=
+                    Self::jfet_companion_geq(coeff, caps[branch], dt) * movement[branch];
+            }
+        }
+        currents
+    }
+
     #[inline]
     pub(super) fn update_reactive_history(
         &self,
@@ -806,7 +838,11 @@ impl Engine {
                     mosfet_caps.is_none_or(|capacitances| capacitances.len() == instance_count);
                 let gate_charges_shape_matches = mosfet_gate_companion_charges
                     .is_none_or(|charges| charges.len() == instance_count);
-                if !history_shapes_match || !caps_shape_matches || !gate_charges_shape_matches {
+                if !history_shapes_match
+                    || !caps_shape_matches
+                    || !gate_charges_shape_matches
+                    || mosfet_history.accepted_displacement_currents.len() != instance_count
+                {
                     return Err(SimulationError::Circuit(
                         "classic-MOS transient history shape does not match the device population"
                             .to_string(),
@@ -850,6 +886,7 @@ impl Engine {
                     mosfet_history.qbd_prev.as_mut_slice(),
                     mosfet_history.qbd_prev_prev.as_mut_slice(),
                     mosfet_history.cqbd_prev.as_mut_slice(),
+                    mosfet_history.accepted_displacement_currents.as_mut_slice(),
                 )
                     .into_par_iter();
 
@@ -887,10 +924,14 @@ impl Engine {
                                         qbd_out,
                                         qbd_prev_out,
                                         cqbd_out,
+                                        displacement_out,
                                     ),
                                 ),
                             )| {
                                 let mos = &devices[idx];
+                                *displacement_out = [0.0; 5];
+                                let (_, raw_vds, raw_vbs) =
+                                    mos.unlimited_branch_voltages_at(accepted_solution);
                                 let (vgs, vds, vbs) =
                                     mos.eval_branch_voltages_at(accepted_solution);
                                 let vgd = vgs - vds;
@@ -972,12 +1013,25 @@ impl Engine {
                                     }
                                 }
 
+                                if !suppress_gate_charge_history {
+                                    displacement_out[..3].copy_from_slice(
+                                        &Self::accepted_mosfet_gate_currents(
+                                            mos,
+                                            accepted_solution,
+                                            coeff,
+                                            dt,
+                                            [(cgs_half, cgd_half, cgb_half), previous_cap_halves],
+                                            [*cqgs_out, *cqgd_out, *cqgb_out],
+                                        ),
+                                    );
+                                }
+
                                 let body_charge_mask = mos.body_junction_charge_mask();
                                 if body_charge_mask & 1 != 0 {
                                     let vbs_j = mos.body_source_charge_branch_voltage(vbs);
                                     let (q_exact, capacitance) =
                                         mos.body_source_junction_charge_and_capacitance_at(vbs);
-                                    let (_geq, _ieq, q_curr, cq_curr) =
+                                    let (geq, _ieq, q_curr, cq_curr) =
                                         nonlinear_charge_companion_terms(
                                             coeff,
                                             dt,
@@ -995,13 +1049,17 @@ impl Engine {
                                     *qbs_prev_out = *qbs_out;
                                     *qbs_out = q_curr;
                                     *cqbs_out = cq_curr;
+                                    displacement_out[3] = cq_curr
+                                        + geq
+                                            * (mos.body_source_charge_branch_voltage(raw_vbs)
+                                                - vbs_j);
                                 }
 
                                 if body_charge_mask & 2 != 0 {
                                     let vbd_j = mos.body_drain_charge_branch_voltage(vds, vbs);
                                     let (q_exact, capacitance) =
                                         mos.body_drain_junction_charge_and_capacitance_at(vds, vbs);
-                                    let (_geq, _ieq, q_curr, cq_curr) =
+                                    let (geq, _ieq, q_curr, cq_curr) =
                                         nonlinear_charge_companion_terms(
                                             coeff,
                                             dt,
@@ -1019,6 +1077,11 @@ impl Engine {
                                     *qbd_prev_out = *qbd_out;
                                     *qbd_out = q_curr;
                                     *cqbd_out = cq_curr;
+                                    displacement_out[4] = cq_curr
+                                        + geq
+                                            * (mos.body_drain_charge_branch_voltage(
+                                                raw_vds, raw_vbs,
+                                            ) - vbd_j);
                                 }
                             },
                         );
@@ -1037,6 +1100,9 @@ impl Engine {
             circuit.mosfets.devices.as_slice()
         };
         for (idx, mos) in serial_mosfet_devices.iter().enumerate() {
+            let displacement = &mut mosfet_history.accepted_displacement_currents[idx];
+            *displacement = [0.0; 5];
+            let (_, raw_vds, raw_vbs) = mos.unlimited_branch_voltages_at(accepted_solution);
             let (vgs, vds, vbs) = mos.eval_branch_voltages_at(accepted_solution);
             let vgd = vgs - vds;
             let vgb = vgs - vbs;
@@ -1120,11 +1186,26 @@ impl Engine {
                 }
             }
 
+            if !suppress_gate_charge_history {
+                displacement[..3].copy_from_slice(&Self::accepted_mosfet_gate_currents(
+                    mos,
+                    accepted_solution,
+                    coeff,
+                    dt,
+                    [(cgs_half, cgd_half, cgb_half), previous_cap_halves],
+                    [
+                        mosfet_history.cqgs_prev[idx],
+                        mosfet_history.cqgd_prev[idx],
+                        mosfet_history.cqgb_prev[idx],
+                    ],
+                ));
+            }
+
             let body_charge_mask = mos.body_junction_charge_mask();
             if body_charge_mask & 1 != 0 {
                 let vbs_j = mos.body_source_charge_branch_voltage(vbs);
                 let (qbs_exact, cbs) = mos.body_source_junction_charge_and_capacitance_at(vbs);
-                let (_geq_bs, _ieq_bs, qbs_curr, cqbs_curr) = nonlinear_charge_companion_terms(
+                let (geq_bs, _ieq_bs, qbs_curr, cqbs_curr) = nonlinear_charge_companion_terms(
                     coeff,
                     dt,
                     cbs,
@@ -1141,12 +1222,14 @@ impl Engine {
                 mosfet_history.qbs_prev_prev[idx] = mosfet_history.qbs_prev[idx];
                 mosfet_history.qbs_prev[idx] = qbs_curr;
                 mosfet_history.cqbs_prev[idx] = cqbs_curr;
+                displacement[3] =
+                    cqbs_curr + geq_bs * (mos.body_source_charge_branch_voltage(raw_vbs) - vbs_j);
             }
 
             if body_charge_mask & 2 != 0 {
                 let vbd_j = mos.body_drain_charge_branch_voltage(vds, vbs);
                 let (qbd_exact, cbd) = mos.body_drain_junction_charge_and_capacitance_at(vds, vbs);
-                let (_geq_bd, _ieq_bd, qbd_curr, cqbd_curr) = nonlinear_charge_companion_terms(
+                let (geq_bd, _ieq_bd, qbd_curr, cqbd_curr) = nonlinear_charge_companion_terms(
                     coeff,
                     dt,
                     cbd,
@@ -1163,6 +1246,8 @@ impl Engine {
                 mosfet_history.qbd_prev_prev[idx] = mosfet_history.qbd_prev[idx];
                 mosfet_history.qbd_prev[idx] = qbd_curr;
                 mosfet_history.cqbd_prev[idx] = cqbd_curr;
+                displacement[4] = cqbd_curr
+                    + geq_bd * (mos.body_drain_charge_branch_voltage(raw_vds, raw_vbs) - vbd_j);
             }
         }
         mosfet_history.accepted_dt_prev_prev = mosfet_history.accepted_dt_prev;

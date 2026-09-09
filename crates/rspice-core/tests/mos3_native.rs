@@ -529,7 +529,22 @@ fn mos3_nmos_op_matches_ngspice46() {
 #[test]
 fn mos3_pmos_op_matches_ngspice46() {
     let entry = m1_op_entry(PMOS_DECK);
-    assert_op_matches_ngspice46(&entry, PMOS_ORACLE);
+    // ngspice's MOS3 @m1[cd] is polarity-folded. RSpice terminal reports
+    // use current entering D, so the PMOS reference needs its physical sign.
+    assert_op_matches_ngspice46(
+        &entry,
+        Mos3Oracle {
+            id: -PMOS_ORACLE.id,
+            ..PMOS_ORACLE
+        },
+    );
+    assert_close(
+        "physical PMOS drain current",
+        op_param(&entry, "id"),
+        -dc_branch_current(PMOS_DECK, "VD"),
+        1e-7,
+        1e-11,
+    );
 }
 
 #[test]
