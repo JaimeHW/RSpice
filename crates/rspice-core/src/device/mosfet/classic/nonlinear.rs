@@ -356,7 +356,7 @@ mod tests {
             [2.8, 3.1, -0.2, 0.6],
         ];
 
-        for level in [1, 2, 3, 6] {
+        for level in [1, 2, 3, 4, 5, 6, 9] {
             for mut canonical in [
                 Mosfet::new_nmos(format!("mn{level}"), 1, 2, 3, 4).with_level(level),
                 Mosfet::new_pmos(format!("mp{level}"), 1, 2, 3, 4).with_level(level),

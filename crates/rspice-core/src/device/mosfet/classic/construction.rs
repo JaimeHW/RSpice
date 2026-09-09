@@ -305,6 +305,12 @@ impl Mosfet {
             return vt * 40.0;
         }
 
+        if matches!(self.level, 4 | 5) {
+            // Legacy BSIM stamps M outside its per-instance diode law; its
+            // pnjlim threshold must likewise be independent of M.
+            let per_instance_isat = isat / self.multiplicity;
+            return vt * (vt.ln() - std::f64::consts::LN_2 * 0.5 - per_instance_isat.ln());
+        }
         let arg = (vt / ((2.0_f64).sqrt() * isat)).max(1.0);
         vt * arg.ln()
     }
@@ -333,7 +339,7 @@ impl Mosfet {
             source_body_isat,
             drain_body_isat,
             body_junction_nvt: self.body_junction_thermal_voltage(),
-            uses_xyce_classic_reverse_body_junction: self.uses_xyce_classic_reverse_body_junction(),
+            uses_linearized_reverse_body_junction: self.uses_linearized_reverse_body_junction(),
             body_junction_charge_mask: self.body_junction_charge_mask(),
             source_body_vcrit: self.body_junction_vcrit(source_body_isat),
             drain_body_vcrit: self.body_junction_vcrit(drain_body_isat),

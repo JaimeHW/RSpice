@@ -80,7 +80,7 @@ pub(crate) struct ClassicMosTransientConstants {
     source_body_isat: Value,
     drain_body_isat: Value,
     body_junction_nvt: Value,
-    uses_xyce_classic_reverse_body_junction: bool,
+    uses_linearized_reverse_body_junction: bool,
     body_junction_charge_mask: u8,
     source_body_vcrit: Value,
     drain_body_vcrit: Value,

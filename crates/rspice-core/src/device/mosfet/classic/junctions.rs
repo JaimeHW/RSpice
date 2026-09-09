@@ -19,7 +19,7 @@ impl Mosfet {
         };
         let gmin = gmin.max(0.0);
         let nvt = self.body_junction_thermal_voltage();
-        if self.uses_xyce_classic_reverse_body_junction() && v <= 0.0 {
+        if self.uses_linearized_reverse_body_junction() && v <= 0.0 {
             let conductance = isat / nvt + gmin;
             return (conductance * v, conductance);
         }
@@ -47,7 +47,7 @@ impl Mosfet {
     ) -> (Value, Value) {
         let gmin = self.junction_gmin.max(0.0);
         let nvt = constants.body_junction_nvt;
-        if constants.uses_xyce_classic_reverse_body_junction && v <= 0.0 {
+        if constants.uses_linearized_reverse_body_junction && v <= 0.0 {
             let conductance = isat / nvt + gmin;
             return (conductance * v, conductance);
         }
@@ -64,15 +64,20 @@ impl Mosfet {
 
     #[inline]
     pub(in crate::device::mosfet::classic) fn body_junction_thermal_voltage(&self) -> Value {
-        self.vt.max(1e-12)
+        if matches!(self.level, 4 | 5) {
+            // b1ld.c/b2ld.c use CONSTvt0, fixed at 27 C, for both the
+            // body-diode equation and junction limiting.
+            VT_REFERENCE
+        } else {
+            self.vt.max(1e-12)
+        }
     }
 
     #[inline]
-    pub(in crate::device::mosfet::classic) fn uses_xyce_classic_reverse_body_junction(
-        &self,
-    ) -> bool {
-        self.body_junction_model == MosBodyJunctionModel::XyceClassicLinearizedReverse
-            && matches!(self.level, 1 | 2 | 3 | 6)
+    pub(in crate::device::mosfet::classic) fn uses_linearized_reverse_body_junction(&self) -> bool {
+        matches!(self.level, 4 | 5)
+            || (self.body_junction_model == MosBodyJunctionModel::XyceClassicLinearizedReverse
+                && matches!(self.level, 1 | 2 | 3 | 6))
     }
 
     #[inline]
@@ -90,7 +95,7 @@ impl Mosfet {
         };
         let gmin = gmin.max(0.0);
         let nvt = self.body_junction_thermal_voltage();
-        if self.uses_xyce_classic_reverse_body_junction() && v <= 0.0 {
+        if self.uses_linearized_reverse_body_junction() && v <= 0.0 {
             return (isat / nvt + gmin) * v;
         }
         if v <= -3.0 * nvt {
@@ -116,7 +121,7 @@ impl Mosfet {
         };
         let gmin = gmin.max(0.0);
         let nvt = self.body_junction_thermal_voltage();
-        if self.uses_xyce_classic_reverse_body_junction() && v <= 0.0 {
+        if self.uses_linearized_reverse_body_junction() && v <= 0.0 {
             return isat / nvt + gmin;
         }
         if v <= -3.0 * nvt {
@@ -129,6 +134,11 @@ impl Mosfet {
 
     #[inline]
     pub(crate) fn effective_body_junction_saturation_current(&self, area: Value) -> Value {
+        if matches!(self.level, 4 | 5) {
+            // Legacy BSIM has no IS fallback: each junction independently
+            // floors JS*area before the parallel instances are summed.
+            return (self.js_bulk * area).max(1e-15) * self.multiplicity;
+        }
         // MOS1/2/3/6/9 select IS for both junctions if either area is
         // absent (ngspice mos*load.c and Xyce MOSFET1/2/3/6). The legacy
         // BSIM families have a separate per-junction area policy.
@@ -621,6 +631,37 @@ mod tests {
             (actual - expected).abs() <= tol,
             "{label}: actual={actual:.12e} expected={expected:.12e} tol={tol:.12e}"
         );
+    }
+
+    #[test]
+    fn legacy_bsim_body_constants_and_limiting_preserve_per_instance_laws() {
+        for level in [4, 5] {
+            for temperature in [233.15, 300.15, 358.15] {
+                for m in [1.0, 2.5] {
+                    let mut mos = Mosfet::new_nmos("m1".to_owned(), 1, 2, 3, 0)
+                        .with_level(level)
+                        .with_params(&std::collections::HashMap::from([("JS".to_owned(), 1e4)]));
+                    mos.source_area = 0.0;
+                    mos.drain_area = 1e-12;
+                    mos.multiplicity = m;
+                    mos.set_temperature(temperature, 300.15);
+                    let constants = mos.classic_transient_constants();
+                    assert_eq!(constants.body_junction_nvt, VT_REFERENCE);
+                    assert_eq!(constants.source_body_isat, m * 1e-15);
+                    assert_eq!(constants.drain_body_isat, m * 1e-8);
+                    for (isat, critical) in [
+                        (1e-15, constants.source_body_vcrit),
+                        (1e-8, constants.drain_body_vcrit),
+                    ] {
+                        let expected = VT_REFERENCE * (VT_REFERENCE / (2.0_f64.sqrt() * isat)).ln();
+                        assert!((critical - expected).abs() < 1e-14);
+                        let current = mos.junction_diode_current(isat * m, -0.2, 0.0);
+                        let expected = -0.2 * isat * m / VT_REFERENCE;
+                        assert!((current - expected).abs() < expected.abs() * 1e-14);
+                    }
+                }
+            }
+        }
     }
 
     #[test]

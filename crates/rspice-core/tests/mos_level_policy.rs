@@ -222,8 +222,14 @@ fn native_mos_rejects_invalid_multiplicity_and_unrepresentable_products() {
 #[test]
 fn native_mos_rejects_overflowing_resolved_current_and_capacitance() {
     for level in [1, 2, 3, 4, 5, 6, 9] {
+        // Exercise the active saturation parameter for each model family.
+        let saturation = if matches!(level, 4 | 5) {
+            "JS=1e200"
+        } else {
+            "IS=1e200"
+        };
         for (model, geometry, quantity) in [
-            ("IS=1e200", "", "saturation current"),
+            (saturation, "AD=1 AS=1", "saturation current"),
             ("IS=0 JS=1e200", "AD=1e200 AS=1e200", "saturation current"),
             ("IS=0 CBD=1e200", "", "capacitance"),
             ("IS=0 CBS=1e200", "", "capacitance"),
@@ -243,6 +249,88 @@ fn native_mos_rejects_overflowing_resolved_current_and_capacitance() {
                 error.contains("M1") && error.contains(quantity),
                 "L{level} {model}: {error}"
             );
+        }
+    }
+}
+
+#[test]
+fn legacy_bsim_body_junctions_match_reference_laws() {
+    use rspice_core::engine::{Engine, SimulationConfig, SpiceDialect};
+    use rspice_core::netlist::Netlist;
+    use rspice_core::numerics::integration::IntegrationMethod;
+    let vt = 300.15 * 1.380649e-23 / 1.602176634e-19;
+    for level in [4, 5] {
+        for temperature in [27, 85] {
+            for (kind, p) in [("NMOS", 1.0), ("PMOS", -1.0)] {
+                for m in [1.0, 2.5] {
+                    for (ad, source_area, js, saturation) in [
+                        (0.0, 0.0, 0.0, [1e-15, 1e-15]),
+                        (2e-12, 0.0, 1e4, [2e-8, 1e-15]),
+                        (0.0, 3e-12, 1e4, [1e-15, 3e-8]),
+                        (2e-12, 3e-12, 1e-8, [1e-15, 1e-15]),
+                        (2e-12, 3e-12, 1e4, [2e-8, 3e-8]),
+                    ] {
+                        for bias in [-0.2, 0.0, 0.2] {
+                            let context = format!(
+                                "L{level} {kind} TEMP={temperature} M={m} AD={ad} AS={source_area} JS={js} VBS={bias}"
+                            );
+                            let netlist = Netlist::parse(&format!(
+                                "Legacy BSIM junctions\nVD d 0 0\nVS s 0 0\nVG g 0 {}\nVB b 0 DC {} AC 1 PWL(0 {} 1u {})\nM1 d g s b mm L=1u W=1u M={m} AD={ad} AS={source_area}\n.model mm {kind}(LEVEL={level} VFB=-0.7 PHI=0.6 TOX=0.03 JS={js})\n.options TEMP={temperature} GMIN=0 RELTOL=1e-9 ABSTOL=1e-15 VNTOL=1e-12\n.end\n", -p, p * bias, p * bias, p * (bias + 0.01),
+                            )).unwrap();
+                            let engine = Engine::new(SimulationConfig {
+                                spice_dialect: SpiceDialect::Ngspice,
+                                integration_method: IntegrationMethod::BackwardEuler,
+                                locked_time_grid: Some(std::sync::Arc::new(vec![
+                                    0.0, 0.5e-6, 1e-6,
+                                ])),
+                                ..Default::default()
+                            });
+                            let dc = engine.run_dc_op(&netlist).unwrap();
+                            let ac = engine.run_ac(&netlist, &[1e3]).unwrap();
+                            let tran = engine.run_tran(&netlist, 1e-6, 0.5e-6).unwrap();
+                            for (source, isat) in ["VD", "VS"].into_iter().zip(saturation) {
+                                let law = |v: f64| {
+                                    if v <= 0.0 {
+                                        (m * isat * v / vt, m * isat / vt)
+                                    } else {
+                                        let e = (v / vt).exp();
+                                        (m * isat * (e - 1.0), m * isat * e / vt)
+                                    }
+                                };
+                                // Allow the minimum numerical junction shunt,
+                                // while resolving the physical 1 fA saturation floor.
+                                let close = |actual: f64, expected: f64| {
+                                    assert!(
+                                        (actual - expected).abs() < 2e-15 + expected.abs() * 1e-7,
+                                        "{context} {source}: {actual} vs {expected}"
+                                    );
+                                };
+                                let index = dc
+                                    .branch_names
+                                    .iter()
+                                    .position(|n| n.eq_ignore_ascii_case(source))
+                                    .unwrap();
+                                close(dc.branch_currents[index], p * law(bias).0);
+                                let index = ac[0]
+                                    .branch_names
+                                    .iter()
+                                    .position(|n| n.eq_ignore_ascii_case(source))
+                                    .unwrap();
+                                close(ac[0].currents[index].re, law(bias).1);
+                                close(ac[0].currents[index].im, 0.0);
+                                for (&time, &current) in tran
+                                    .time
+                                    .iter()
+                                    .zip(tran.try_branch_current_waveform_named(source).unwrap())
+                                {
+                                    close(current, p * law(bias + 0.01 * time / 1e-6).0);
+                                }
+                            }
+                            assert_eq!(engine.convergence_quality().force_accepted_points, 0);
+                        }
+                    }
+                }
+            }
         }
     }
 }

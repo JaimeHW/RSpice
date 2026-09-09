@@ -262,6 +262,54 @@ mod wasm_tests {
     }
 
     #[wasm_bindgen_test]
+    fn legacy_bsim_body_laws_in_wasm() {
+        use rspice_core::engine::{SimulationConfig, SpiceDialect};
+        use rspice_core::numerics::integration::IntegrationMethod;
+        let engine = rspice_core::Engine::new(SimulationConfig {
+            spice_dialect: SpiceDialect::Ngspice,
+            integration_method: IntegrationMethod::BackwardEuler,
+            locked_time_grid: Some(std::sync::Arc::new(vec![0.0, 1e-6, 2e-6])),
+            ..Default::default()
+        });
+        let abort = rspice_core::abort_signal::NoAbort;
+        let vt = 300.15 * 1.380649e-23 / 1.602176634e-19;
+        for level in [4, 5] {
+            for temperature in [27, 85] {
+                for (kind, p) in [("NMOS", 1.0), ("PMOS", -1.0)] {
+                    for (js, isat) in [(1e-8, 1e-15), (1e4, 1e-8)] {
+                        let netlist = rspice_core::Netlist::parse(&format!(
+                            "Legacy BSIM body in WASM\nVD d 0 0\nVS s 0 0\nVG g 0 {}\nVB b 0 DC {} PWL(0 {} 2u {})\nM1 d g s b mm L=1u W=1u M=2.5 AD=1p AS=1p\n.model mm {kind}(LEVEL={level} VFB=-0.7 PHI=0.6 TOX=0.03 JS={js})\n.options TEMP={temperature} GMIN=0 RELTOL=1e-9 ABSTOL=1e-15 VNTOL=1e-12\n.end\n",
+                            -p, -p * 0.2, -p * 0.2, p * 0.2,
+                        )).unwrap();
+                        let result = engine
+                            .run_tran_with_abort(&netlist, 2e-6, 1e-6, &abort)
+                            .unwrap();
+                        for source in ["VD", "VS"] {
+                            let waveform =
+                                result.try_branch_current_waveform_named(source).unwrap();
+                            for (&time, &actual) in result.time.iter().zip(waveform) {
+                                let v = -0.2 + 0.4 * time / 2e-6;
+                                let expected = p
+                                    * 2.5
+                                    * isat
+                                    * if v <= 0.0 {
+                                        v / vt
+                                    } else {
+                                        (v / vt).exp() - 1.0
+                                    };
+                                assert!(
+                                    (actual - expected).abs() < 2e-15 + expected.abs() * 1e-7,
+                                    "L{level} {kind} TEMP={temperature} JS={js} {source}: {actual} vs {expected}"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[wasm_bindgen_test]
     fn one_sided_mos_area_uses_is_for_both_junctions_in_wasm() {
         use rspice_core::engine::{SimulationConfig, SpiceDialect};
         use rspice_core::numerics::integration::IntegrationMethod;
