@@ -2,6 +2,11 @@
 
 use super::*;
 
+const NG_CHARGE: Value = 1.602_176_620_8e-19;
+const NG_BOLTZMANN: Value = 1.380_648_52e-23;
+pub(super) const NG_K_OVER_Q: Value = NG_BOLTZMANN / NG_CHARGE;
+const NG_REFTEMP: Value = 300.15;
+
 /// The two parallel gate-leakage diodes of an HFET: their saturation currents
 /// and the matching ideality factors. A saturation current paired with the
 /// wrong ideality factor is a different diode, so the four terms travel as one
@@ -15,6 +20,40 @@ pub(super) struct HfetGateDiodePair {
 }
 
 impl Jfet {
+    /// Shared ngspice jfettemp.c/jfet2temp.c junction mapping. Temperatures
+    /// are already resolved Kelvin values; TEMP/DTEMP and geometry belong to
+    /// the caller. Returns (junction potential, zero-bias CGS, zero-bias CGD).
+    pub(super) fn ngspice_junction_capacitance_at(
+        &self,
+        temp: Value,
+        tnom: Value,
+    ) -> (Value, Value, Value) {
+        let vtnom = NG_K_OVER_Q * tnom;
+        let fact1 = tnom / NG_REFTEMP;
+        let kt1 = NG_BOLTZMANN * tnom;
+        let egfet1 = 1.16 - (7.02e-4 * tnom * tnom) / (tnom + 1108.0);
+        let arg1 = -egfet1 / (kt1 + kt1) + 1.115_087_7 / (NG_BOLTZMANN * (NG_REFTEMP + NG_REFTEMP));
+        let pbfact1 = -2.0 * vtnom * (1.5 * fact1.ln() + NG_CHARGE * arg1);
+        let pbo = (self.params.pb - pbfact1) / fact1;
+        let gmaold = (self.params.pb - pbo) / pbo;
+        let cjfact = 1.0 / (1.0 + 0.5 * (4.0e-4 * (tnom - NG_REFTEMP) - gmaold));
+        let mut t_cgs = self.params.cgs * cjfact;
+        let mut t_cgd = self.params.cgd * cjfact;
+
+        let vt = temp * NG_K_OVER_Q;
+        let fact2 = temp / NG_REFTEMP;
+        let kt = NG_BOLTZMANN * temp;
+        let egfet = 1.16 - (7.02e-4 * temp * temp) / (temp + 1108.0);
+        let arg = -egfet / (kt + kt) + 1.115_087_7 / (NG_BOLTZMANN * (NG_REFTEMP + NG_REFTEMP));
+        let pbfact = -2.0 * vt * (1.5 * fact2.ln() + NG_CHARGE * arg);
+        let t_gate_pot = fact2 * pbo + pbfact;
+        let gmanew = (t_gate_pot - pbo) / pbo;
+        let cjfact1 = 1.0 + 0.5 * (4.0e-4 * (temp - NG_REFTEMP) - gmanew);
+        t_cgs *= cjfact1;
+        t_cgd *= cjfact1;
+        (t_gate_pot, t_cgs, t_cgd)
+    }
+
     /// Thermal voltage at given temperature
     pub(super) fn thermal_voltage(&self, temp: Value) -> Value {
         use crate::constants::K_BOLTZMANN;

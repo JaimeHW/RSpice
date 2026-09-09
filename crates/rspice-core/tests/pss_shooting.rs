@@ -15,6 +15,214 @@ const R: f64 = 1.0e3;
 const C: f64 = 159.154943091895e-12; // RC corner ~ 1 MHz (w*RC = 1)
 
 #[test]
+fn classic_jfet_pss_charge_matches_rc_ac_and_floquet_under_refinement() {
+    for (kind, polarity) in [("NJF", 1.0), ("PJF", -1.0)] {
+        let netlist = Netlist::parse(&format!(
+            "JFET RC periodic charge\nV1 in 0 DC {} SIN({} {} 1meg) AC 1\nR1 in out 1k\nJ1 0 out 0 jm 2 M=3\n.model jm {kind}(BETA=1m VTO=-2 IS=0 CGS=100p CGD=50p M=0)\n.end\n",
+            -polarity, -polarity, 0.01 * polarity,
+        )).unwrap();
+        let engine = Engine::default();
+        let tau = 1e3 * 900e-12;
+        let omega_tau = std::f64::consts::TAU * F0 * tau;
+        let expected_amplitude = 0.01 / (1.0 + omega_tau * omega_tau).sqrt();
+        let expected_multiplier = (-(1.0 / F0) / tau).exp();
+        let ac = engine.run_ac(&netlist, &[F0]).unwrap();
+        let out = ac[0]
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("out"))
+            .unwrap();
+        assert!((0.01 * ac[0].voltages[out].norm() / expected_amplitude - 1.0).abs() < 1e-8);
+        let mut previous_error = f64::INFINITY;
+        for points in [256, 512] {
+            let point = engine
+                .run_pss_operating_point_with_abort(
+                    &netlist,
+                    PssConfig::new(F0)
+                        .with_points_per_period(points)
+                        .with_tstab_periods(0)
+                        .with_tolerance(1e-10),
+                    &NoAbort,
+                )
+                .unwrap_or_else(|error| panic!("{kind}, N={points}: {error}"));
+            assert_eq!(point.shooting_state_basis(), ["J:J1:qgs"]);
+            let result = &point.analysis().result;
+            let out = result
+                .node_names
+                .iter()
+                .position(|name| name.eq_ignore_ascii_case("out"))
+                .unwrap()
+                + 1;
+            let error = (result.harmonics(out, 1)[1].magnitude / expected_amplitude - 1.0).abs();
+            assert!(
+                error < previous_error,
+                "{kind}, N={points}: {error} vs {previous_error}"
+            );
+            previous_error = error;
+            assert!(error < 0.002);
+            for (&time, &actual) in result.time.iter().zip(&result.waveforms[out - 1].values) {
+                let phase = std::f64::consts::TAU * F0 * time;
+                let expected = -polarity
+                    + polarity * 0.01 * (phase.sin() - omega_tau * phase.cos())
+                        / (1.0 + omega_tau * omega_tau);
+                assert!((actual - expected).abs() < 0.002 * expected_amplitude);
+            }
+            assert_eq!(point.analysis().floquet_multipliers.len(), 1);
+            assert!(
+                (point.analysis().floquet_multipliers[0].re / expected_multiplier - 1.0).abs()
+                    < 0.001
+            );
+        }
+    }
+}
+
+#[test]
+fn classic_jfet_pss_prescribed_and_tied_charge_have_no_spurious_state() {
+    let netlist = Netlist::parse("prescribed JFET charge\nV1 out 0 SIN(-1 0.1 1meg)\nJ1 0 out 0 jm\n.model jm NJF(IS=0 CGS=1n CGD=2n)\n.end\n").unwrap();
+    let engine = Engine::default();
+    let point = engine
+        .run_pss_operating_point_with_abort(
+            &netlist,
+            PssConfig::new(F0)
+                .with_points_per_period(64)
+                .with_tstab_periods(0),
+            &NoAbort,
+        )
+        .unwrap();
+    assert!(point.shooting_state().is_empty());
+    let error = engine
+        .run_pss_with_continuation_state(
+            &netlist,
+            PssConfig::new(F0)
+                .with_points_per_period(64)
+                .with_tstab_periods(0),
+        )
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains("JFET accepted transient integration history is not checkpointed"),
+        "{error}"
+    );
+    for (&time, &voltage) in point
+        .analysis()
+        .result
+        .time
+        .iter()
+        .zip(&point.analysis().result.waveforms[0].values)
+    {
+        assert!((voltage - (-1.0 + 0.1 * (std::f64::consts::TAU * F0 * time).sin())).abs() < 1e-10);
+    }
+    let tied = Netlist::parse("tied JFET charge\nI1 0 out 1m\nR1 out 0 1k\nJ1 out out out jm\n.model jm NJF(CGS=1n CGD=2n)\n.end\n").unwrap();
+    let error = engine
+        .run_pss(&tied, PssConfig::new(F0))
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("no charge or flux storage"), "{error}");
+    let unadapted = Netlist::parse("JFET2 history\nV1 out 0 SIN(-1 0.1 1meg)\nJ1 0 out 0 jm\n.model jm NJF(LEVEL=2 CGS=1n CGD=2n)\n.end\n").unwrap();
+    let error = engine
+        .run_pss(&unadapted, PssConfig::new(F0))
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains("non-classic JFET/MESFET charge and trap history"),
+        "{error}"
+    );
+}
+
+#[test]
+fn classic_jfet_pss_nonlinear_orbit_matches_settled_ngspice46() {
+    // ngspice-46, 2026-09-09: 1 ns TRAN steps, RELTOL=1e-6, settled
+    // 20-21 us cycle. Phase zero uses the exact 21 us endpoint; other rows
+    // interpolate at eighth-period offsets. Columns are gate/drain/source.
+    let reference = [
+        [
+            -1.141_700_438_178_542_5,
+            4.802_819_700_583_247,
+            0.033_888_073_759_555_37,
+        ],
+        [
+            -1.019_612_809_389_259_1,
+            4.800_673_414_720_112,
+            0.050_178_098_263_160_58,
+        ],
+        [
+            -0.888_275_362_109_973,
+            4.730_884_293_621_087,
+            0.055_738_947_672_138_356,
+        ],
+        [
+            -0.823_245_571_100_116_6,
+            4.633_972_095_801_266_5,
+            0.047_211_506_118_656_52,
+        ],
+        [
+            -0.859_561_312_256_275_2,
+            4.570_488_258_918_537,
+            0.028_907_305_187_074_194,
+        ],
+        [
+            -0.977_246_421_154_020_7,
+            4.578_332_291_272_227,
+            0.011_607_254_191_949_789,
+        ],
+        [
+            -1.110_463_041_151_341_4,
+            4.649_254_493_093_919_5,
+            0.006_121_013_982_541_72,
+        ],
+        [
+            -1.179_895_508_212_268,
+            4.740_468_369_302_182_5,
+            0.015_658_555_302_262_64,
+        ],
+    ];
+    for (kind, polarity) in [("NJF", 1.0), ("PJF", -1.0)] {
+        let netlist = Netlist::parse(&format!(
+            "JFET nonlinear PSS oracle\nVDD supply 0 {}\nVIN in 0 DC {} SIN({} {} 1meg)\nRG in gate 1k\nRD supply drain 1k\nRS source 0 100\nJ1 drain gate source jm 1.5 M=2\n.model jm {kind}(BETA=1e-4 VTO=-2 LAMBDA=0.02 IS=1e-30 CGS=100p CGD=50p PB=1 FC=0.5 RD=20 RS=10 TNOM=50)\n.options TEMP=100\n.end\n",
+            5.0 * polarity, -polarity, -polarity, 0.4 * polarity,
+        )).unwrap();
+        let engine = Engine::default();
+        let mut previous_error = f64::INFINITY;
+        for points in [256, 512] {
+            let point = engine
+                .run_pss_operating_point_with_abort(
+                    &netlist,
+                    PssConfig::new(F0)
+                        .with_points_per_period(points)
+                        .with_tstab_periods(0)
+                        .with_tolerance(1e-10),
+                    &NoAbort,
+                )
+                .unwrap_or_else(|error| panic!("{kind}, N={points}: {error}"));
+            assert_eq!(point.shooting_state_basis(), ["J:J1:qgs", "J:J1:qgd"]);
+            let result = &point.analysis().result;
+            let mut error = 0.0_f64;
+            for (column, name) in ["gate", "drain", "source"].iter().enumerate() {
+                let node = result
+                    .node_names
+                    .iter()
+                    .position(|node| node.eq_ignore_ascii_case(name))
+                    .unwrap()
+                    + 1;
+                for (phase, expected) in reference.iter().enumerate() {
+                    error = error.max(
+                        (result.voltage_at(node, phase as f64 / 8.0 / F0)
+                            - polarity * expected[column])
+                            .abs(),
+                    );
+                }
+            }
+            eprintln!("{kind}, N={points}: max nonlinear JFET orbit error={error:e} V");
+            assert!(error < previous_error);
+            previous_error = error;
+            if points == 512 {
+                assert!(error < 2e-5);
+            }
+        }
+    }
+}
+
+#[test]
 fn tied_admittance_preserves_the_periodic_current_driven_voltage() {
     for device in [
         "R2 out out 1e-20",

@@ -574,7 +574,11 @@ impl Jfet {
     pub fn transient_capacitances(&self, vgs: Value, vgd: Value, temp: Value) -> (Value, Value) {
         let (temp_common, temp_source, _) = self.resolved_temperatures(temp);
         let (mut cgs, mut cgd) = match self.params.channel_model {
-            JfetChannelModel::ShichmanHodges | JfetChannelModel::LegacyMesfet => {
+            JfetChannelModel::ShichmanHodges => {
+                let charge = self.classic_gate_charge_state(vgs, vgd, temp);
+                (charge.cgs, charge.cgd)
+            }
+            JfetChannelModel::LegacyMesfet => {
                 let pol = self.jfet_type.polarity();
                 self.capacitances(pol * vgs, pol * vgd)
             }
@@ -583,10 +587,10 @@ impl Jfet {
                 (charge.cgs, charge.cgd)
             }
             JfetChannelModel::XyceModifiedShockley => {
-                let charge = self.xyce_jfet2_charge_state(vgs, vgd, temp_common);
+                let charge = self.xyce_jfet2_charge_state(vgs, vgd, temp);
                 (charge.cgs, charge.cgd)
             }
-            JfetChannelModel::ParkerSkellern => self.jfet2_capacitances(vgs, vgd, temp_common),
+            JfetChannelModel::ParkerSkellern => self.jfet2_capacitances(vgs, vgd, temp),
             JfetChannelModel::Hfet1 => match self.params.hfet_level {
                 2..=4 => {
                     let pol = self.jfet_type.polarity();
@@ -641,7 +645,11 @@ impl Jfet {
         };
 
         match self.params.channel_model {
-            JfetChannelModel::ShichmanHodges | JfetChannelModel::LegacyMesfet => {
+            JfetChannelModel::ShichmanHodges => {
+                let charge = self.classic_gate_charge_state(vgs, vgd, temp);
+                (charge.cgs, charge.cgd, cds)
+            }
+            JfetChannelModel::LegacyMesfet => {
                 let pol = self.jfet_type.polarity();
                 let (cgs, cgd) = self.capacitances(pol * vgs, pol * vgd);
                 (cgs, cgd, cds)
@@ -830,21 +838,44 @@ impl Jfet {
         Ok(())
     }
 
-    /// Calculate junction capacitances
+    /// Electrical coordinates for the classic model's conservative charges.
+    /// Tied terminals and explicitly absent junction capacitances carry no
+    /// independent charge; other JFET-family models need their own adapters.
+    pub(crate) fn classic_charge_storage_nodes(&self) -> [Option<(NodeId, NodeId)>; 2] {
+        if self.params.channel_model != JfetChannelModel::ShichmanHodges
+            || self.junction_scale() == 0.0
+        {
+            return [None; 2];
+        }
+        [
+            (self.gate != self.source && self.params.cgs != 0.0)
+                .then_some((self.gate, self.source)),
+            (self.gate != self.drain && self.params.cgd != 0.0).then_some((self.gate, self.drain)),
+        ]
+    }
+
+    /// Calculate nominal junction capacitances (without temperature mapping).
     ///
     /// Returns (Cgs, Cgd) for branch voltages in the channel polarity frame.
     pub fn capacitances(&self, vgs: Value, vgd: Value) -> (Value, Value) {
         (
-            self.classic_junction_charge(vgs, self.params.cgs).1,
-            self.classic_junction_charge(vgd, self.params.cgd).1,
+            self.classic_junction_charge(vgs, self.params.cgs, self.params.pb)
+                .1,
+            self.classic_junction_charge(vgd, self.params.cgd, self.params.pb)
+                .1,
         )
     }
 
-    fn classic_junction_charge(&self, voltage: Value, capacitance: Value) -> (Value, Value) {
+    fn classic_junction_charge(
+        &self,
+        voltage: Value,
+        capacitance: Value,
+        potential: Value,
+    ) -> (Value, Value) {
         crate::device::semiconductor::depletion_charge_and_capacitance(
             voltage,
             capacitance * self.junction_scale(),
-            self.params.pb,
+            potential,
             self.params.m,
             self.params.fc,
         )
@@ -852,10 +883,18 @@ impl Jfet {
 
     /// Conservative classic JFET charge in external terminal orientation.
     /// Trial, accepted history, LTE and AC all use this same Q(V), dQ/dV pair.
-    pub(super) fn classic_gate_charge_state(&self, vgs: Value, vgd: Value) -> Jfet2ChargeState {
+    pub(super) fn classic_gate_charge_state(
+        &self,
+        vgs: Value,
+        vgd: Value,
+        ambient: Value,
+    ) -> Jfet2ChargeState {
+        let (temperature, _, _) = self.resolved_temperatures(ambient);
+        let (potential, cgs0, cgd0) =
+            self.ngspice_junction_capacitance_at(temperature, self.params.tnom);
         let polarity = self.jfet_type.polarity();
-        let (qgs, cgs) = self.classic_junction_charge(polarity * vgs, self.params.cgs);
-        let (qgd, cgd) = self.classic_junction_charge(polarity * vgd, self.params.cgd);
+        let (qgs, cgs) = self.classic_junction_charge(polarity * vgs, cgs0, potential);
+        let (qgd, cgd) = self.classic_junction_charge(polarity * vgd, cgd0, potential);
         Jfet2ChargeState {
             qgs: polarity * qgs,
             qgd: polarity * qgd,
@@ -954,8 +993,8 @@ mod tests {
                     let ac = device.ac_capacitances(v, v, 300.15);
                     assert_eq!((charge.cgs, charge.cgd), (ac.0, ac.1));
                     let h = 1e-6;
-                    let lower = device.classic_gate_charge_state(v - h, v - h);
-                    let upper = device.classic_gate_charge_state(v + h, v + h);
+                    let lower = device.classic_gate_charge_state(v - h, v - h, 300.15);
+                    let upper = device.classic_gate_charge_state(v + h, v + h, 300.15);
                     for (derivative, capacitance) in [
                         ((upper.qgs - lower.qgs) / (2.0 * h), charge.cgs),
                         ((upper.qgd - lower.qgd) / (2.0 * h), charge.cgd),
@@ -964,7 +1003,7 @@ mod tests {
                     }
                 }
                 for voltage in [-1e-18, 1e-18] {
-                    let charge = device.classic_gate_charge_state(voltage, voltage);
+                    let charge = device.classic_gate_charge_state(voltage, voltage, 300.15);
                     let expected = device.params.cgs * device.area * device.m * voltage;
                     assert!((charge.qgs - expected).abs() <= 8.0 * Value::EPSILON * expected.abs());
                 }

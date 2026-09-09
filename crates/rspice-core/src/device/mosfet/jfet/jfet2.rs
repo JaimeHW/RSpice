@@ -6,10 +6,6 @@
 
 use super::*;
 
-const NG_CHARGE: Value = 1.602_176_620_8e-19;
-const NG_BOLTZMANN: Value = 1.380_648_52e-23;
-const NG_K_OVER_Q: Value = NG_BOLTZMANN / NG_CHARGE;
-const NG_REFTEMP: Value = 300.15;
 const FX: Value = -10.0;
 const MX: Value = 40.0;
 const EMX: Value = 2.353_852_668_370_199_8e17;
@@ -119,31 +115,10 @@ impl Jfet {
         let (temp, _, _) = self.resolved_temperatures(ambient);
         let temp = temp.max(1.0);
         let tnom = self.params.tnom.max(1.0);
-        let vtnom = NG_K_OVER_Q * tnom;
-        let fact1 = tnom / NG_REFTEMP;
-        let kt1 = NG_BOLTZMANN * tnom;
-        let egfet1 = 1.16 - (7.02e-4 * tnom * tnom) / (tnom + 1108.0);
-        let arg1 = -egfet1 / (kt1 + kt1) + 1.115_087_7 / (NG_BOLTZMANN * (NG_REFTEMP + NG_REFTEMP));
-        let pbfact1 = -2.0 * vtnom * (1.5 * fact1.ln() + NG_CHARGE * arg1);
-        let pbo = (self.params.pb - pbfact1) / fact1;
-        let gmaold = (self.params.pb - pbo) / pbo;
-        let cjfact = 1.0 / (1.0 + 0.5 * (4.0e-4 * (tnom - NG_REFTEMP) - gmaold));
-
         let vt = temp * NG_K_OVER_Q;
-        let fact2 = temp / NG_REFTEMP;
         let ratio1 = temp / tnom - 1.0;
         let t_sat_cur = self.params.is * (ratio1 * 1.11 / vt.max(1.0e-30)).exp();
-        let mut t_cgs = self.params.cgs * cjfact;
-        let mut t_cgd = self.params.cgd * cjfact;
-        let kt = NG_BOLTZMANN * temp;
-        let egfet = 1.16 - (7.02e-4 * temp * temp) / (temp + 1108.0);
-        let arg = -egfet / (kt + kt) + 1.115_087_7 / (NG_BOLTZMANN * (NG_REFTEMP + NG_REFTEMP));
-        let pbfact = -2.0 * vt * (1.5 * fact2.ln() + NG_CHARGE * arg);
-        let t_gate_pot = fact2 * pbo + pbfact;
-        let gmanew = (t_gate_pot - pbo) / pbo;
-        let cjfact1 = 1.0 + 0.5 * (4.0e-4 * (temp - NG_REFTEMP) - gmanew);
-        t_cgs *= cjfact1;
-        t_cgd *= cjfact1;
+        let (t_gate_pot, t_cgs, t_cgd) = self.ngspice_junction_capacitance_at(temp, tnom);
 
         let cor_dep_cap = self.jfet2_forward_bias_coefficient() * t_gate_pot;
         let woo = (t_gate_pot - self.params.vto).max(1.0e-30);
@@ -1017,7 +992,9 @@ impl Jfet {
         previous: Option<(Value, Value, Value, Value)>,
     ) -> Option<Jfet2ChargeState> {
         match self.params.channel_model {
-            JfetChannelModel::ShichmanHodges => Some(self.classic_gate_charge_state(vgs, vgd)),
+            JfetChannelModel::ShichmanHodges => {
+                Some(self.classic_gate_charge_state(vgs, vgd, temp))
+            }
             JfetChannelModel::XyceSydney => Some(self.xyce_jfet1_charge_state(vgs, vgd, temp)),
             JfetChannelModel::ParkerSkellern => {
                 Some(self.jfet2_charge_state(vgs, vgd, temp, previous))

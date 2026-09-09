@@ -43,6 +43,143 @@ pub(super) struct ReactiveBreakpointScheduling<'a> {
 }
 
 impl Engine {
+    /// Commit all accepted JFET charge and trap histories. Trial evaluations
+    /// borrow these histories; transient and shooting share the same commit.
+    pub(in crate::engine) fn accept_jfet_history(
+        circuit: &crate::circuit::CircuitData,
+        jfet_history: &mut JfetTransientHistory,
+        accepted_solution: &[Value],
+        coeff: &CompanionCoefficients,
+        dt: Value,
+        suppress_gate_charge_history: bool,
+    ) {
+        for (idx, jfet) in circuit.jfets.iter().enumerate() {
+            let (vgs_eval, vgd_eval) = Self::jfet_branch_voltages(jfet, accepted_solution);
+            let (vgs_charge, vgd_charge) =
+                Self::jfet_charge_branch_voltages(jfet, accepted_solution);
+            let (vgstrap, vgdtrap, power) = jfet.jfet2_next_transient_memory(
+                vgs_eval,
+                vgd_eval,
+                jfet_history.jfet2_vgstrap_prev[idx],
+                jfet_history.jfet2_vgdtrap_prev[idx],
+                jfet_history.jfet2_power_prev[idx],
+                dt,
+            );
+            let jfet2_charge = jfet.analytic_gate_charge_state(
+                vgs_eval,
+                vgd_eval,
+                jfet.analysis_temperature(),
+                Some((
+                    jfet_history.vgs_prev[idx],
+                    jfet_history.vgd_prev[idx],
+                    jfet_history.qgs_prev[idx],
+                    jfet_history.qgd_prev[idx],
+                )),
+            );
+            let (cgs, cgd) = jfet2_charge
+                .map(|charge| (charge.cgs, charge.cgd))
+                .unwrap_or_else(|| {
+                    jfet.transient_capacitances(vgs_eval, vgd_eval, jfet.analysis_temperature())
+                });
+            let cds = jfet.transient_drain_source_capacitance();
+            let vds_charge = vgs_eval - vgd_eval;
+            jfet_history.jfet2_vgstrap_prev[idx] = vgstrap;
+            jfet_history.jfet2_vgdtrap_prev[idx] = vgdtrap;
+            jfet_history.jfet2_power_prev[idx] = power;
+            jfet_history.vgs_prev_prev[idx] = jfet_history.vgs_prev[idx];
+            jfet_history.vgs_prev[idx] = vgs_charge;
+            jfet_history.vgd_prev_prev[idx] = jfet_history.vgd_prev[idx];
+            jfet_history.vgd_prev[idx] = vgd_charge;
+            jfet_history.vds_prev_prev[idx] = jfet_history.vds_prev[idx];
+            jfet_history.vds_prev[idx] = vds_charge;
+            if !suppress_gate_charge_history {
+                let (_geq_gs, _ieq_gs, qgs_curr, cqgs_curr) = if let Some(charge) = jfet2_charge {
+                    nonlinear_charge_companion_terms(
+                        coeff,
+                        dt,
+                        cgs,
+                        vgs_charge,
+                        charge.qgs,
+                        BranchChargeHistory {
+                            q_prev: jfet_history.qgs_prev[idx],
+                            q_prev_prev: jfet_history.qgs_prev_prev[idx],
+                            cq_prev: jfet_history.cqgs_prev[idx],
+                        },
+                    )
+                } else {
+                    Self::jfet_companion_terms(
+                        coeff,
+                        dt,
+                        cgs,
+                        vgs_charge,
+                        jfet_history.vgs_prev_prev[idx],
+                        BranchChargeHistory {
+                            q_prev: jfet_history.qgs_prev[idx],
+                            q_prev_prev: jfet_history.qgs_prev_prev[idx],
+                            cq_prev: jfet_history.cqgs_prev[idx],
+                        },
+                    )
+                };
+                jfet_history.qgs_prev_prev_prev[idx] = jfet_history.qgs_prev_prev[idx];
+                jfet_history.qgs_prev_prev[idx] = jfet_history.qgs_prev[idx];
+                jfet_history.qgs_prev[idx] = qgs_curr;
+                jfet_history.cqgs_prev[idx] = cqgs_curr;
+
+                let (_geq_gd, _ieq_gd, qgd_curr, cqgd_curr) = if let Some(charge) = jfet2_charge {
+                    nonlinear_charge_companion_terms(
+                        coeff,
+                        dt,
+                        cgd,
+                        vgd_charge,
+                        charge.qgd,
+                        BranchChargeHistory {
+                            q_prev: jfet_history.qgd_prev[idx],
+                            q_prev_prev: jfet_history.qgd_prev_prev[idx],
+                            cq_prev: jfet_history.cqgd_prev[idx],
+                        },
+                    )
+                } else {
+                    Self::jfet_companion_terms(
+                        coeff,
+                        dt,
+                        cgd,
+                        vgd_charge,
+                        jfet_history.vgd_prev_prev[idx],
+                        BranchChargeHistory {
+                            q_prev: jfet_history.qgd_prev[idx],
+                            q_prev_prev: jfet_history.qgd_prev_prev[idx],
+                            cq_prev: jfet_history.cqgd_prev[idx],
+                        },
+                    )
+                };
+                jfet_history.qgd_prev_prev_prev[idx] = jfet_history.qgd_prev_prev[idx];
+                jfet_history.qgd_prev_prev[idx] = jfet_history.qgd_prev[idx];
+                jfet_history.qgd_prev[idx] = qgd_curr;
+                jfet_history.cqgd_prev[idx] = cqgd_curr;
+            }
+            if cds.is_finite() && cds > 0.0 {
+                let (_geq_ds, _ieq_ds, qds_curr, cqds_curr) = Self::jfet_companion_terms(
+                    coeff,
+                    dt,
+                    cds,
+                    vds_charge,
+                    jfet_history.vds_prev_prev[idx],
+                    BranchChargeHistory {
+                        q_prev: jfet_history.qds_prev[idx],
+                        q_prev_prev: jfet_history.qds_prev_prev[idx],
+                        cq_prev: jfet_history.cqds_prev[idx],
+                    },
+                );
+                jfet_history.qds_prev_prev_prev[idx] = jfet_history.qds_prev_prev[idx];
+                jfet_history.qds_prev_prev[idx] = jfet_history.qds_prev[idx];
+                jfet_history.qds_prev[idx] = qds_curr;
+                jfet_history.cqds_prev[idx] = cqds_curr;
+            }
+        }
+        jfet_history.accepted_dt_prev_prev = jfet_history.accepted_dt_prev;
+        jfet_history.accepted_dt_prev = dt;
+    }
+
     /// Commit the accepted BJT charge, predictor and terminal-current history.
     /// Shared by ordinary transient integration and periodic traversals; trial
     /// evaluations never call this operation.
@@ -580,131 +717,14 @@ impl Engine {
             },
         )?;
 
-        for (idx, jfet) in circuit.jfets.iter().enumerate() {
-            let (vgs_eval, vgd_eval) = Self::jfet_branch_voltages(jfet, accepted_solution);
-            let (vgs_charge, vgd_charge) =
-                Self::jfet_charge_branch_voltages(jfet, accepted_solution);
-            let (vgstrap, vgdtrap, power) = jfet.jfet2_next_transient_memory(
-                vgs_eval,
-                vgd_eval,
-                jfet_history.jfet2_vgstrap_prev[idx],
-                jfet_history.jfet2_vgdtrap_prev[idx],
-                jfet_history.jfet2_power_prev[idx],
-                dt,
-            );
-            let jfet2_charge = jfet.analytic_gate_charge_state(
-                vgs_eval,
-                vgd_eval,
-                jfet.analysis_temperature(),
-                Some((
-                    jfet_history.vgs_prev[idx],
-                    jfet_history.vgd_prev[idx],
-                    jfet_history.qgs_prev[idx],
-                    jfet_history.qgd_prev[idx],
-                )),
-            );
-            let (cgs, cgd) = jfet2_charge
-                .map(|charge| (charge.cgs, charge.cgd))
-                .unwrap_or_else(|| {
-                    jfet.transient_capacitances(vgs_eval, vgd_eval, jfet.analysis_temperature())
-                });
-            let cds = jfet.transient_drain_source_capacitance();
-            let vds_charge = vgs_eval - vgd_eval;
-            jfet_history.jfet2_vgstrap_prev[idx] = vgstrap;
-            jfet_history.jfet2_vgdtrap_prev[idx] = vgdtrap;
-            jfet_history.jfet2_power_prev[idx] = power;
-            jfet_history.vgs_prev_prev[idx] = jfet_history.vgs_prev[idx];
-            jfet_history.vgs_prev[idx] = vgs_charge;
-            jfet_history.vgd_prev_prev[idx] = jfet_history.vgd_prev[idx];
-            jfet_history.vgd_prev[idx] = vgd_charge;
-            jfet_history.vds_prev_prev[idx] = jfet_history.vds_prev[idx];
-            jfet_history.vds_prev[idx] = vds_charge;
-            if !suppress_gate_charge_history {
-                let (_geq_gs, _ieq_gs, qgs_curr, cqgs_curr) = if let Some(charge) = jfet2_charge {
-                    nonlinear_charge_companion_terms(
-                        coeff,
-                        dt,
-                        cgs,
-                        vgs_charge,
-                        charge.qgs,
-                        BranchChargeHistory {
-                            q_prev: jfet_history.qgs_prev[idx],
-                            q_prev_prev: jfet_history.qgs_prev_prev[idx],
-                            cq_prev: jfet_history.cqgs_prev[idx],
-                        },
-                    )
-                } else {
-                    Self::jfet_companion_terms(
-                        coeff,
-                        dt,
-                        cgs,
-                        vgs_charge,
-                        jfet_history.vgs_prev_prev[idx],
-                        BranchChargeHistory {
-                            q_prev: jfet_history.qgs_prev[idx],
-                            q_prev_prev: jfet_history.qgs_prev_prev[idx],
-                            cq_prev: jfet_history.cqgs_prev[idx],
-                        },
-                    )
-                };
-                jfet_history.qgs_prev_prev_prev[idx] = jfet_history.qgs_prev_prev[idx];
-                jfet_history.qgs_prev_prev[idx] = jfet_history.qgs_prev[idx];
-                jfet_history.qgs_prev[idx] = qgs_curr;
-                jfet_history.cqgs_prev[idx] = cqgs_curr;
-
-                let (_geq_gd, _ieq_gd, qgd_curr, cqgd_curr) = if let Some(charge) = jfet2_charge {
-                    nonlinear_charge_companion_terms(
-                        coeff,
-                        dt,
-                        cgd,
-                        vgd_charge,
-                        charge.qgd,
-                        BranchChargeHistory {
-                            q_prev: jfet_history.qgd_prev[idx],
-                            q_prev_prev: jfet_history.qgd_prev_prev[idx],
-                            cq_prev: jfet_history.cqgd_prev[idx],
-                        },
-                    )
-                } else {
-                    Self::jfet_companion_terms(
-                        coeff,
-                        dt,
-                        cgd,
-                        vgd_charge,
-                        jfet_history.vgd_prev_prev[idx],
-                        BranchChargeHistory {
-                            q_prev: jfet_history.qgd_prev[idx],
-                            q_prev_prev: jfet_history.qgd_prev_prev[idx],
-                            cq_prev: jfet_history.cqgd_prev[idx],
-                        },
-                    )
-                };
-                jfet_history.qgd_prev_prev_prev[idx] = jfet_history.qgd_prev_prev[idx];
-                jfet_history.qgd_prev_prev[idx] = jfet_history.qgd_prev[idx];
-                jfet_history.qgd_prev[idx] = qgd_curr;
-                jfet_history.cqgd_prev[idx] = cqgd_curr;
-            }
-            if cds.is_finite() && cds > 0.0 {
-                let (_geq_ds, _ieq_ds, qds_curr, cqds_curr) = Self::jfet_companion_terms(
-                    coeff,
-                    dt,
-                    cds,
-                    vds_charge,
-                    jfet_history.vds_prev_prev[idx],
-                    BranchChargeHistory {
-                        q_prev: jfet_history.qds_prev[idx],
-                        q_prev_prev: jfet_history.qds_prev_prev[idx],
-                        cq_prev: jfet_history.cqds_prev[idx],
-                    },
-                );
-                jfet_history.qds_prev_prev_prev[idx] = jfet_history.qds_prev_prev[idx];
-                jfet_history.qds_prev_prev[idx] = jfet_history.qds_prev[idx];
-                jfet_history.qds_prev[idx] = qds_curr;
-                jfet_history.cqds_prev[idx] = cqds_curr;
-            }
-        }
-        jfet_history.accepted_dt_prev_prev = jfet_history.accepted_dt_prev;
-        jfet_history.accepted_dt_prev = dt;
+        Self::accept_jfet_history(
+            circuit,
+            jfet_history,
+            accepted_solution,
+            coeff,
+            dt,
+            suppress_gate_charge_history,
+        );
 
         for (idx, diode) in circuit.diodes.devices.iter().enumerate() {
             let vd =

@@ -12,6 +12,96 @@ fn engine() -> Engine {
 }
 
 #[test]
+fn classic_jfet_temperature_mapped_ac_and_charge_match_ngspice46() {
+    use rspice_core::engine::SpiceDialect;
+    use rspice_core::numerics::integration::IntegrationMethod;
+    // ngspice-46 AC current, divided by 2*pi*1 MHz: CGS+CGD at VGS=VGD=-1.
+    // TNOM=50 exercises both sides of the nominal-to-reference mapping.
+    for (temperature, nominal, capacitance) in [
+        (-40.0, 27.0, 2.060_179_028_154_676e-9),
+        (27.0, 27.0, 2.121_320_343_559_643e-9),
+        (100.0, 27.0, 2.185_818_911_094_34e-9),
+        (-40.0, 50.0, 2.044_034_522_607_255e-9),
+        (100.0, 50.0, 2.163_254_513_623_347e-9),
+    ] {
+        for (kind, polarity) in [("NJF", 1.0), ("PJF", -1.0)] {
+            for (ambient, instance) in [
+                (temperature, String::new()),
+                (27.0, format!("DTEMP={}", temperature - 27.0)),
+                (27.0, format!("TEMP={temperature} DTEMP=10")),
+            ] {
+                let netlist = Netlist::parse(&format!(
+                    "JFET temperature AC and charge\nVg gate 0 DC {} AC 1 PWL(0 {} 1u {} 2u {})\nJ1 0 gate 0 jm {instance}\n.model jm {kind}(BETA=1m VTO=-2 IS=1e-30 CGS=1n CGD=2n PB=1 FC=0.5 TNOM={nominal})\n.options TEMP={ambient}\n.end\n",
+                    -polarity, -polarity, 0.75 * polarity, -polarity,
+                )).unwrap();
+                let engine = Engine::new(SimulationConfig {
+                    spice_dialect: SpiceDialect::Ngspice,
+                    integration_method: IntegrationMethod::BackwardEuler,
+                    locked_time_grid: Some(std::sync::Arc::new(vec![0.0, 1e-6, 2e-6])),
+                    ..Default::default()
+                });
+                let ac = engine.run_ac(&netlist, &[1e6]).unwrap();
+                let branch = ac[0]
+                    .branch_names
+                    .iter()
+                    .position(|name| name.eq_ignore_ascii_case("vg"))
+                    .unwrap();
+                let measured = -ac[0].currents[branch].im / (std::f64::consts::TAU * 1e6);
+                assert!(
+                    (measured - capacitance).abs() < 1e-12 * capacitance,
+                    "{kind}, TEMP={ambient}, {instance}, TNOM={nominal}: {measured} vs {capacitance}",
+                );
+                if temperature == 100.0 && nominal == 50.0 {
+                    // Independently recorded ngspice qgs+qgd at these two
+                    // biases: -2.5467560155408902 nC and +3.095418536243149 nC.
+                    let tran = engine.run_tran(&netlist, 2e-6, 1e-6).unwrap();
+                    let current = tran.try_branch_current_waveform_named("vg").unwrap();
+                    let mut charge = 0.0;
+                    let mut reached_peak = false;
+                    for (time, current) in tran.time.windows(2).zip(&current[1..]) {
+                        charge -= current * (time[1] - time[0]);
+                        if time[1] == 1e-6 {
+                            assert!((charge - polarity * 5.642_174_551_784_039e-9).abs() < 2e-16);
+                            reached_peak = true;
+                        }
+                    }
+                    assert!(reached_peak);
+                    assert!(charge.abs() < 1e-15);
+                    assert_eq!(engine.convergence_quality().force_accepted_points, 0);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn jfet_capacitance_temperature_offsets_are_applied_once() {
+    use rspice_core::device::Jfet;
+    for mut device in [
+        Jfet::njf("j1", 1, 2, 3),
+        Jfet::njf("j1", 1, 2, 3).enable_xyce_jfet1_model(),
+        Jfet::njf("j1", 1, 2, 3).enable_jfet2_model(),
+        Jfet::njf("j1", 1, 2, 3).enable_xyce_jfet2_model(),
+    ] {
+        device.params.cgs = 1e-9;
+        device.params.cgd = 2e-9;
+        let reference = device.transient_capacitances(-0.1, -0.2, 323.15);
+        for instance in [
+            vec![("DTEMP".to_owned(), 23.0)],
+            vec![("TEMP".to_owned(), 50.0), ("DTEMP".to_owned(), -70.0)],
+        ] {
+            let mapped = device.clone().with_instance_params(&instance);
+            let actual = mapped.transient_capacitances(-0.1, -0.2, 300.15);
+            assert_eq!(
+                actual, reference,
+                "{:?}: {instance:?}",
+                device.params.channel_model
+            );
+        }
+    }
+}
+
+#[test]
 fn classic_jfet_capacitance_is_continuous_and_has_no_reverse_bias_floor() {
     let mut device = rspice_core::device::Jfet::njf("j1", 1, 2, 3);
     device.params.cgs = 1e-9;
