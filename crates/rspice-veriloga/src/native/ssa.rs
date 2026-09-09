@@ -3651,6 +3651,7 @@ fn op_may_call(op: NativeOp) -> bool {
     matches!(
         op,
         NativeOp::BinaryMath(_)
+            | NativeOp::ProductRatio
             | NativeOp::CheckedValue
             | NativeOp::IntegerCast
             | NativeOp::IntegerBinary(_)

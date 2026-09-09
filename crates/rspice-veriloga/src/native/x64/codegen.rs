@@ -1227,6 +1227,22 @@ impl FunctionCompiler {
                     }
                     NativeOp::UnaryMath(op) => self.emit_unary_math(op)?,
                     NativeOp::BinaryMath(op) => self.emit_binary_math(op)?,
+                    NativeOp::ProductRatio => {
+                        if self.depth < 4 {
+                            return Err(JitError::Encoding {
+                                model: MODEL.into(),
+                                detail: "product ratio requires four operands".into(),
+                            });
+                        }
+                        let target = self.register_stack[self.depth - 4];
+                        self.emit_operand_context_filter_helper_call(
+                            target,
+                            4,
+                            0,
+                            crate::native::abi::rspice_product_ratio_native,
+                        );
+                        self.drop_stack_values(3)?;
+                    }
                     NativeOp::IntegerCast => self.emit_integer_cast()?,
                     NativeOp::CheckedValue => self
                         .emit_checked_binary(0, crate::native::abi::rspice_checked_value_native)?,
@@ -5614,6 +5630,44 @@ mod tests {
             function(&context, variables.as_ptr()).to_bits(),
             12.0_f64.to_bits()
         );
+    }
+
+    #[test]
+    fn product_ratio_helper_preserves_operands_and_live_values() {
+        let program = NativeProgram::from_ops_for_test(
+            vec![
+                NativeOp::LoadVariable(0),
+                NativeOp::LoadVariable(1),
+                NativeOp::LoadVariable(2),
+                NativeOp::LoadVariable(3),
+                NativeOp::LoadVariable(4),
+                NativeOp::ProductRatio,
+                NativeOp::LoadVariable(5),
+                NativeOp::Add,
+                NativeOp::Mul,
+            ],
+            5,
+            Vec::new(),
+            Vec::new(),
+        );
+        let bytes = compile_value_function(&program).unwrap();
+        let memory = ExecutableMemory::allocate(&bytes).unwrap();
+        let entry = memory.ptr_at(0).unwrap();
+        let function: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+        let context = eval_context(&[], &[], &[], &[]);
+        for scale in [f64::from_bits(1), 1e-200, 1e200, f64::MAX] {
+            for sign in [-1.0, 1.0] {
+                let variables = [2.0, sign * scale, scale, scale, scale, 3.0];
+                assert_eq!(function(&context, variables.as_ptr()), 2.0 * (sign + 3.0));
+            }
+        }
+        // Distinct factors detect a numerator/denominator argument swap;
+        // the equal-factor range cases above cannot distinguish that error.
+        for scale in [1e-200, 1e200, f64::MAX] {
+            let variables = [2.0, scale, scale * 0.5, scale * 0.25, scale * 0.125, 3.0];
+            assert_eq!(function(&context, variables.as_ptr()), 38.0);
+        }
     }
 
     #[test]

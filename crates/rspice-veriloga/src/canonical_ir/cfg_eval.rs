@@ -41,6 +41,10 @@ pub trait CfgScalar: Copy {
     fn sub(self, rhs: Self) -> Self;
     fn mul(self, rhs: Self) -> Self;
     fn div(self, rhs: Self) -> Self;
+    /// Product ratio with no binary64 intermediate product range restriction.
+    fn product_ratio(self, b: Self, c: Self, d: Self) -> Self {
+        scaled_product_ratio(self, b, c, d)
+    }
     fn rem(self, rhs: Self) -> Self;
     fn powf(self, rhs: Self) -> Self;
     fn hypot(self, rhs: Self) -> Self;
@@ -104,6 +108,48 @@ pub trait CfgScalar: Copy {
     }
 }
 
+/// Normalize each factor by an exact power of two before performing arithmetic
+/// in a derivative-carrying or wider reference scalar. The scale depends only
+/// on the real projection and is fixed for the scalar's infinitesimal part.
+pub(crate) fn scaled_product_ratio<S: CfgScalar>(a: S, b: S, c: S, d: S) -> S {
+    let factors = [a, b, c, d];
+    if factors.iter().any(|value| !value.real().is_finite()) || c.real() == 0.0 || d.real() == 0.0 {
+        return a.mul(b).div(c.mul(d));
+    }
+    let mut exponent = 0;
+    let normalized = factors.map(|value| {
+        let bits = value.real().abs().to_bits();
+        let biased = (bits >> 52) as i32;
+        let power = if bits == 0 {
+            0
+        } else if biased == 0 {
+            63 - bits.leading_zeros() as i32 - 1074
+        } else {
+            biased - 1023
+        };
+        (scale_reference(value, -power), power)
+    });
+    for (index, (_, power)) in normalized.iter().enumerate() {
+        exponent += if index < 2 { *power } else { -*power };
+    }
+    scale_reference(
+        normalized[0]
+            .0
+            .mul(normalized[1].0)
+            .div(normalized[2].0.mul(normalized[3].0)),
+        exponent,
+    )
+}
+
+fn scale_reference<S: CfgScalar>(mut value: S, mut power: i32) -> S {
+    while power != 0 {
+        let step = power.clamp(-512, 512);
+        value = value.mul(S::from_f64(f64::from_bits(((step + 1023) as u64) << 52)));
+        power -= step;
+    }
+    value
+}
+
 const LIMITED_EXP_FLOOR: f64 = rspice_veriloga_runtime::LIMITED_EXP_FLOOR;
 
 impl CfgScalar for f64 {
@@ -127,6 +173,9 @@ impl CfgScalar for f64 {
     }
     fn div(self, rhs: Self) -> Self {
         self / rhs
+    }
+    fn product_ratio(self, b: Self, c: Self, d: Self) -> Self {
+        rspice_veriloga_runtime::arithmetic::product_ratio(self, b, c, d)
     }
     fn rem(self, rhs: Self) -> Self {
         self % rhs

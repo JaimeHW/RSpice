@@ -1654,6 +1654,12 @@ impl FunctionCompiler {
             }
             NativeOp::UnaryMath(math) => self.emit_unary_math(prepared, math)?,
             NativeOp::BinaryMath(math) => self.emit_binary_math(prepared, math)?,
+            NativeOp::ProductRatio => self.emit_operand_context_helper(
+                prepared,
+                4,
+                0,
+                crate::native::abi::rspice_product_ratio_native as *const () as usize,
+            )?,
             NativeOp::IntegerCast => self.emit_integer_cast(prepared)?,
             NativeOp::CheckedValue => self.emit_operand_context_helper(
                 prepared,
@@ -3649,6 +3655,24 @@ mod cross_target_contract_tests {
             );
             assert_eq!(marker % 8, 4, "island {marker} data is not eight-aligned");
         }
+    }
+
+    #[test]
+    fn product_ratio_four_operand_helper_is_encodable() {
+        let program = NativeProgram::from_ops_for_test(
+            vec![
+                NativeOp::LoadVariable(0),
+                NativeOp::LoadVariable(1),
+                NativeOp::LoadVariable(2),
+                NativeOp::LoadVariable(3),
+                NativeOp::ProductRatio,
+            ],
+            4,
+            Vec::new(),
+            Vec::new(),
+        );
+        let bytes = compile_value_function(&program).unwrap();
+        verify_exact_function(&bytes, "product ratio").unwrap();
     }
 
     /// The relaxation is invisible to anything that already fit: no function

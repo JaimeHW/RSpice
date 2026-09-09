@@ -181,6 +181,12 @@ pub(super) fn evaluate_helper_with_session(
             operands[0],
             operands[1],
         )),
+        250 => Ok(rspice_veriloga_runtime::arithmetic::product_ratio(
+            operands[0],
+            operands[1],
+            operands[2],
+            operands[3],
+        )),
         340 => rspice_veriloga_runtime::checked_derivative_value(operands[0], operands[1])
             .map_err(HelperError::InvalidDerivative),
         300 => real_to_integer(operands[0])

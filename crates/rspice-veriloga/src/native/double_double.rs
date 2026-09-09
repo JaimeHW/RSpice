@@ -833,6 +833,12 @@ impl CfgScalar for DoubleDouble {
         Self::powf(self, rhs).carrying(self.real.powf(rhs.real))
     }
 
+    fn product_ratio(self, b: Self, c: Self, d: Self) -> Self {
+        crate::canonical_ir::cfg_eval::scaled_product_ratio(self, b, c, d).carrying(
+            rspice_veriloga_runtime::arithmetic::product_ratio(self.real, b.real, c.real, d.real),
+        )
+    }
+
     fn hypot(self, rhs: Self) -> Self {
         Self::hypot(self, rhs).carrying(f64::hypot(self.real, rhs.real))
     }

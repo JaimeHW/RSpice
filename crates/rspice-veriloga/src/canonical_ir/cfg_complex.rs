@@ -327,6 +327,23 @@ mod tests {
     use super::*;
 
     #[test]
+    fn product_ratio_retains_complex_perturbations_at_extreme_scales() {
+        for (scale, step) in [(1e200, 1.0), (1e-200, 1e-220)] {
+            let constant = ComplexStep::from_f64(scale);
+            let result = ComplexStep::new(scale, step).product_ratio(constant, constant, constant);
+            assert!((result.re - 1.0).abs() < 1e-14);
+            assert!((result.im / (step / scale) - 1.0).abs() < 1e-14);
+        }
+        let zero = ComplexStep::new(0.0, 1e-200).product_ratio(
+            ComplexStep::from_f64(1e200),
+            ComplexStep::from_f64(1e200),
+            ComplexStep::from_f64(1e-200),
+        );
+        assert_eq!(zero.re, 0.0);
+        assert!((zero.im - 1.0).abs() < 1e-14);
+    }
+
+    #[test]
     fn real_modulo_complex_step_tracks_each_operand() {
         for a in [-10.0_f64, 10.0] {
             for b in [-3.75_f64, 3.75] {

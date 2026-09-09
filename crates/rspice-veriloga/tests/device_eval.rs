@@ -138,6 +138,42 @@ fn quotient_mixed_partials_preserve_representable_results() {
 }
 
 #[test]
+fn hypot_input_gains_preserve_finite_full_hessian() {
+    for (a, b, p, q) in [
+        (1e-200_f64, 1e-200_f64, 1.0, 1.0),
+        (1e200, 1e200, 1.0, 1.0),
+        (1e150, 1e-150, 1e-150, 1e150),
+        (1e-150, 1e150, 1e150, 1e-150),
+    ] {
+        let radius = (a * p).hypot(b * q);
+        // Coordinates are equal, so the analytic Hessian is
+        // [a*a, -a*b; -a*b, b*b] / (2*radius).
+        for (axis, gain, slopes) in [
+            ("p", a, [(a / radius) * a / 2.0, -(a / radius) * b / 2.0]),
+            ("q", b, [-(b / radius) * a / 2.0, (b / radius) * b / 2.0]),
+        ] {
+            let fixture = compile(&format!(
+                "module gain(p,q); inout p,q; electrical p,q; analog I(p)<+ddx(hypot({a:e}*V(p),{b:e}*V(q)),V({axis})); endmodule"
+            ));
+            let mut device = fixture.device("X", &[1, 2]);
+            device.update_voltages(&[p, q]);
+            let value = device.try_evaluate().unwrap()[0];
+            let (matrix, _) = collect_stamps(&mut device, &[p, q]);
+            for (actual, expected) in [value, matrix[&(0, 0)], matrix[&(0, 1)]].into_iter().zip([
+                gain / std::f64::consts::SQRT_2,
+                slopes[0],
+                slopes[1],
+            ]) {
+                assert!(
+                    (actual / expected - 1.0).abs() < 1e-12,
+                    "a={a:e}, b={b:e}, axis={axis}: expected {expected:e}, got {actual:e}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn hypot_shared_operand_keeps_its_large_value_and_finite_gradient() {
     let fixture = compile(
         "module shared(p); inout p; electrical p; analog I(p)<+hypot(V(p),V(p)); endmodule",

@@ -553,6 +553,19 @@ impl<'a, S: CfgScalar> PlanWalk<'a, S> {
             NativeOp::BinaryMath(op) => {
                 Self::binary(stack, name, |left, right| binary_math(op, left, right))?;
             }
+            NativeOp::ProductRatio => {
+                let start = stack
+                    .len()
+                    .checked_sub(4)
+                    .ok_or(PostfixRefusal::Malformed(name))?;
+                let result = stack[start].product_ratio(
+                    stack[start + 1],
+                    stack[start + 2],
+                    stack[start + 3],
+                );
+                stack.truncate(start);
+                stack.push(result);
+            }
             NativeOp::IntegerCast => {
                 let value = Self::top(stack, name)?;
                 let integer = real_to_integer(value.real())
@@ -1099,6 +1112,46 @@ mod tests {
             )),
             Ok(-8.0)
         );
+    }
+
+    #[test]
+    fn product_ratio_preserves_range_in_both_reference_precisions() {
+        let point = point();
+        for factor in [f64::from_bits(1), 1e-200, 1e200, f64::MAX] {
+            for numerator in [-factor, 0.0, factor] {
+                let ops = vec![
+                    NativeOp::Const(numerator),
+                    NativeOp::Const(factor),
+                    NativeOp::Const(factor),
+                    NativeOp::Const(factor),
+                    NativeOp::ProductRatio,
+                ];
+                let mut narrow: PlanWalk<'_, f64> = PlanWalk::new(&point, 0, 0);
+                let mut wide: PlanWalk<'_, DoubleDouble> = PlanWalk::new(&point, 0, 0);
+                let narrow = narrow.run(&program(ops.clone(), 4)).unwrap();
+                let wide = wide.run(&program(ops, 4)).unwrap();
+                assert_eq!(narrow, numerator / factor);
+                assert_eq!(crate::canonical_ir::cfg_eval::CfgScalar::real(wide), narrow);
+                assert!((wide.to_f64() - narrow).abs() < 1e-30);
+            }
+        }
+    }
+
+    #[test]
+    fn product_ratio_retains_the_wide_reference_residual() {
+        let point = point();
+        let ops = vec![
+            NativeOp::Const(1.0),
+            NativeOp::Const(1e-20),
+            NativeOp::Add,
+            NativeOp::Const(1e200),
+            NativeOp::Const(1.0),
+            NativeOp::Const(1e200),
+            NativeOp::ProductRatio,
+        ];
+        let mut wide: PlanWalk<'_, DoubleDouble> = PlanWalk::new(&point, 0, 0);
+        let result = wide.run(&program(ops, 4)).unwrap();
+        assert!((result.relative_distance_to(1.0) / 1e-20 - 1.0).abs() < 1e-10);
     }
 
     /// The same program walked in `f64` and in double-double agrees where the

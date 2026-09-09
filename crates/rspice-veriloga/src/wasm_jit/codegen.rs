@@ -2198,6 +2198,7 @@ fn helper_descriptor(op: NativeOp) -> WasmJitResult<HelperDescriptor> {
         }
         NativeOp::UnaryMath(kind) => descriptor.opcode = 100 + unary_math_code(kind),
         NativeOp::BinaryMath(kind) => descriptor.opcode = 200 + binary_math_code(kind),
+        NativeOp::ProductRatio => descriptor.opcode = 250,
         NativeOp::CheckedValue => descriptor.opcode = 340,
         NativeOp::IntegerCast => descriptor.opcode = 300,
         NativeOp::IntegerBinary(kind) => {

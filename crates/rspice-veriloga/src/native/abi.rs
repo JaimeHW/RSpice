@@ -987,6 +987,24 @@ pub extern "C" fn rspice_hypot(left: f64, right: f64) -> f64 {
     left.hypot(right)
 }
 
+/// One-rounding product ratio for derivative expressions.
+///
+/// # Safety
+/// `operands` is null or points to four initialized f64 values. Context and
+/// descriptor are unused; this pure helper shares the fixed operand-call ABI.
+#[unsafe(export_name = "rspice_product_ratio_native")]
+pub unsafe extern "C" fn rspice_product_ratio_native(
+    operands: *const f64,
+    _ctx: *const EvalContext,
+    _descriptor: usize,
+) -> f64 {
+    if operands.is_null() {
+        return f64::NAN;
+    }
+    let [a, b, c, d] = unsafe { *(operands.cast::<[f64; 4]>()) };
+    rspice_veriloga_runtime::arithmetic::product_ratio(a, b, c, d)
+}
+
 /// External helper function for Verilog-A remainder.
 #[unsafe(export_name = "rspice_mod")]
 pub extern "C" fn rspice_mod(left: f64, right: f64) -> f64 {

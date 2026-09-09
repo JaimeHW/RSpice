@@ -50,7 +50,8 @@ use wasmparser::{Encoding, ExternalKind, Imports, Operator, Parser, Payload, Typ
 
 /// Version of the linear-memory and helper-function contract understood by
 /// emitted modules and the browser worker.
-pub const WASM_JIT_ABI_VERSION: u32 = 11;
+/// Version 12 adds the exact product-ratio helper opcode.
+pub const WASM_JIT_ABI_VERSION: u32 = 12;
 
 /// Version of the deterministic encoder. It participates in cache identity
 /// independently of the ABI because code layout may change without changing
@@ -110,7 +111,8 @@ pub const WASM_JIT_ABI_VERSION: u32 = 11;
 /// 24 to 25 implements scalar hypot/atan2 AD and scales their derivative rules.
 /// 25 to 26 preserves Hypot bytecode and stabilizes legacy math derivatives.
 /// 26 to 27 avoids raw squares/cubes in legacy quotient derivatives.
-pub const WASM_JIT_EMITTER_VERSION: u32 = 27;
+/// 27 to 28 preserves finite legacy hypot curvature at extreme input gains.
+pub const WASM_JIT_EMITTER_VERSION: u32 = 28;
 
 /// Hard ceiling for one qualified shipped model's generated module.
 pub const SHIPPED_MODEL_WASM_CODE_SIZE_BUDGET_BYTES: usize = 32 * 1024 * 1024;
@@ -2040,6 +2042,81 @@ endmodule
                         }
                     }
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn wasm_large_gain_hypot_keeps_finite_curvature() {
+        for gain in [1e-200_f64, 1.0, 1e200, -1e200] {
+            let slope = gain.abs() / std::f64::consts::SQRT_2;
+            assert_large_gain_derivative(
+                &format!("ddx(hypot({gain:e}*V(p),{gain:e}*V(q)),V(p))"),
+                1.0,
+                1.0,
+                slope,
+                slope / 2.0,
+            );
+        }
+        for (a, b) in [(1e150_f64, 1e-150_f64), (1e-150, 1e150)] {
+            let base = format!("hypot({a:e}*V(p),{b:e}*V(q))");
+            for (axis, value, curvature) in [
+                (
+                    "p",
+                    a / std::f64::consts::SQRT_2,
+                    (a * a) / (2.0 * std::f64::consts::SQRT_2),
+                ),
+                (
+                    "q",
+                    b / std::f64::consts::SQRT_2,
+                    -(a * b) / (2.0 * std::f64::consts::SQRT_2),
+                ),
+            ] {
+                assert_large_gain_derivative(
+                    &format!("ddx({base},V({axis}))"),
+                    1.0 / a,
+                    1.0 / b,
+                    value,
+                    curvature,
+                );
+            }
+        }
+    }
+
+    fn assert_large_gain_derivative(expression: &str, p: f64, q: f64, value: f64, slope: f64) {
+        use super::abi::FRAME_RESULT_OFFSET;
+        let source = format!(
+            "module gain(p,q); inout p,q; electrical p,q; analog I(p)<+{expression}; endmodule"
+        );
+        let report = VerilogACompiler::default()
+            .compile_runtime(&source, None)
+            .unwrap();
+        let column = report.model.stamp_programs[0]
+            .jacobian_programs
+            .iter()
+            .position(|entry| matches!(entry.col_axis, crate::codegen::ColumnAxis::Node(0)))
+            .unwrap();
+        for postfix in [false, true] {
+            let mut harness = FusedKernelHarness::for_source_with_plan(&source, "gain", postfix);
+            harness.reset();
+            harness.write_f64(FusedKernelHarness::VOLTAGES as usize, p);
+            harness.write_f64(FusedKernelHarness::VOLTAGES as usize + 8, q);
+            harness.call_assignments();
+            harness.call_prelude();
+            for (entry, expected) in [
+                (harness.stamp_value_export(0), value),
+                (harness.jacobian_export(0, column), slope),
+            ] {
+                assert_eq!(
+                    harness.call(&entry),
+                    0,
+                    "{expression}, postfix={postfix}, {entry}"
+                );
+                let actual = harness.read_f64(FRAME_RESULT_OFFSET as usize);
+                assert!(
+                    (actual / expected - 1.0).abs() < 1e-12,
+                    "{expression}, postfix={postfix}, {entry}: expected {expected:e}, got {actual:e}"
+                );
             }
         }
     }

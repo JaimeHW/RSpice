@@ -162,6 +162,8 @@ pub(crate) enum NativeOp {
     ExtremumConstLhs(ExtremumOp, f64),
     UnaryMath(UnaryMathOp),
     BinaryMath(BinaryMathOp),
+    /// One-rounding (a*b)/(c*d), used after symbolic differentiation.
+    ProductRatio,
     CheckedValue,
     IntegerCast,
     IntegerBinary(IntegerBinaryOp),
@@ -5579,11 +5581,14 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         self.lower_planar_projection(left, right, first, Some(second), false, true)?;
         self.lower_planar_projection(left, right, first, None, true, true)?;
         self.lower_planar_projection(left, right, second, None, true, true)?;
-        self.append_arithmetic("Mul")?;
         self.lower_normalized_hypot(left, right)?;
-        self.append_arithmetic("Div")?;
         self.lower_planar_scale(left, right)?;
-        self.append_arithmetic("Div")?;
+        // Keep both products exact until the final ratio is rounded. Large
+        // input gains can overflow their product despite finite curvature.
+        for _ in 0..3 {
+            self.pop_binary("hypot curvature product ratio")?;
+        }
+        self.ops.push(NativeOp::ProductRatio);
         self.append_arithmetic("Add")
     }
 
@@ -8436,6 +8441,7 @@ fn is_parameter_default_op(op: &NativeOp) -> bool {
             | NativeOp::ExtremumConstLhs(_, _)
             | NativeOp::UnaryMath(_)
             | NativeOp::BinaryMath(_)
+            | NativeOp::ProductRatio
             | NativeOp::IntegerCast
             | NativeOp::CheckedValue
             | NativeOp::IntegerBinary(_)
@@ -8500,6 +8506,7 @@ pub(crate) fn native_op_name(op: &NativeOp) -> &'static str {
         NativeOp::ExtremumConstLhs(_, _) => "ExtremumConstLhs",
         NativeOp::UnaryMath(_) => "UnaryMath",
         NativeOp::BinaryMath(_) => "BinaryMath",
+        NativeOp::ProductRatio => "ProductRatio",
         NativeOp::CheckedValue => "CheckedValue",
         NativeOp::IntegerCast => "IntegerCast",
         NativeOp::IntegerBinary(_) => "IntegerBinary",
@@ -9495,7 +9502,8 @@ pub(crate) fn native_op_stack_effect(op: &NativeOp) -> (usize, usize) {
         | NativeOp::TimerState(_)
         | NativeOp::AboveState(_)
         | NativeOp::AbsDelayStateDerivative(_)
-        | NativeOp::IdtModState(_) => (4, 1),
+        | NativeOp::IdtModState(_)
+        | NativeOp::ProductRatio => (4, 1),
         NativeOp::TransitionStateDerivative(_)
         | NativeOp::AbsDelayStateDerivativeMax(_)
         | NativeOp::CrossState(_) => (5, 1),
