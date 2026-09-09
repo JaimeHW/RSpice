@@ -51,6 +51,38 @@ fn tied_current_terminals_preserve_the_dc_and_harmonic_solution() {
 }
 
 #[test]
+fn tied_admittance_terminals_preserve_dc_and_harmonic_response() {
+    let frequency = 1e6;
+    let expected = num_complex::Complex64::new(1.0, 0.0)
+        / num_complex::Complex64::new(1.0, std::f64::consts::TAU * frequency * 1e-9);
+    for terminals in ["out out", "0 0"] {
+        for device in [
+            format!("R2 {terminals} 1e-20"),
+            format!("C2 {terminals} 1e6"),
+            format!("D2 {terminals} dm\n.model dm D(IS=1e20 CJO=1e20)"),
+        ] {
+            let result = run_hb(
+                &format!(
+                    "tied HB admittance\nI1 0 out DC 1 AC 1\nR1 out 0 1\nC1 out 0 1n\n{device}\n.end\n"
+                ),
+                frequency,
+                2,
+            );
+            assert!(result.converged, "{device}");
+            assert!(
+                (coefficient(&result, "out", 0).re - 1.0).abs() < 1e-12,
+                "{device}"
+            );
+            let actual = coefficient(&result, "out", 1);
+            assert!(
+                (actual - expected).norm() < 1e-12,
+                "{device}: {actual} vs {expected}"
+            );
+        }
+    }
+}
+
+#[test]
 fn dc_rail_keeps_its_polarity_through_exact_mna_constraint() {
     // Forward-biased diode behind a +2 V rail: V(vin) must sit at +2 V and the
     // diode node at one forward drop, ~0.72 V for Is=1e-14 at ~13 mA.

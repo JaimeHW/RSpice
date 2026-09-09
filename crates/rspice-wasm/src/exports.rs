@@ -209,6 +209,39 @@ mod wasm_tests {
     use crate::js_interop::{js_array_property, js_property};
 
     #[wasm_bindgen_test]
+    fn tied_admittance_preserves_dc_ac_and_transient_in_wasm() {
+        let engine = rspice_core::Engine::default();
+        let abort = rspice_core::abort_signal::NoAbort;
+        let expected = rspice_core::Complex64::new(1.0, 0.0)
+            / rspice_core::Complex64::new(1.0, std::f64::consts::TAU * 1e6 * 1e-9);
+        for device in [
+            "R2 out out 1e-20",
+            "C2 out out 1e6",
+            "D2 out out dm\n.model dm D(IS=1e20 CJO=1e20)",
+        ] {
+            let netlist = rspice_core::Netlist::parse(&format!(
+                "tied admittance\nI1 0 out DC 1 AC 1\nR1 out 0 1\nC1 out 0 1n\n{device}\n.end\n"
+            ))
+            .unwrap();
+            let dc = engine.run_dc_op_with_abort(&netlist, &abort).unwrap();
+            assert!((dc.try_voltage_named("out").unwrap() - 1.0).abs() < 1e-12);
+            let ac = engine.run_ac_with_abort(&netlist, &[1e6], &abort).unwrap();
+            assert!((ac[0].voltages[0] - expected).norm() < 1e-14);
+            let tran = engine
+                .run_tran_with_abort(&netlist, 2e-9, 1e-9, &abort)
+                .unwrap();
+            assert_eq!(tran.time.last().copied(), Some(2e-9));
+            assert!(
+                tran.try_voltage_waveform_named("out")
+                    .unwrap()
+                    .iter()
+                    .all(|v| (v - 1.0).abs() < 1e-12)
+            );
+            assert_eq!(engine.convergence_quality().force_accepted_points, 0);
+        }
+    }
+
+    #[wasm_bindgen_test]
     fn current_excitation_scale_and_tied_terminals_are_physical_in_wasm() {
         let engine = rspice_core::Engine::default();
         let abort = rspice_core::abort_signal::NoAbort;

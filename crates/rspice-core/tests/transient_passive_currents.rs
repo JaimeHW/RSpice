@@ -2,6 +2,61 @@ use rspice_core::engine::{Engine, SimulationConfig, SpiceDialect};
 use rspice_core::netlist::Netlist;
 use rspice_core::numerics::integration::IntegrationMethod;
 
+#[test]
+fn tied_passive_and_diode_terminals_preserve_dc_and_transient_voltages() {
+    for dialect in [
+        SpiceDialect::BestAvailable,
+        SpiceDialect::Ngspice,
+        SpiceDialect::Xyce,
+    ] {
+        let engine = Engine::new(SimulationConfig::default().with_spice_dialect(dialect));
+        for terminals in ["out out", "0 0"] {
+            for device in [
+                format!("R2 {terminals} 1e-16"),
+                format!("R2 {terminals} 1e-20"),
+                format!("C2 {terminals} 1e6"),
+                format!("D2 {terminals} dm\n.model dm D(IS=1e20 CJO=1e20)"),
+            ] {
+                let netlist = Netlist::parse(&format!(
+                    "tied passive terminals\nI1 0 out 1\nR1 out 0 1\n{device}\n.end\n"
+                ))
+                .unwrap();
+                let dc = engine
+                    .run_dc_op(&netlist)
+                    .unwrap_or_else(|error| panic!("{dialect:?}, {device}: {error}"));
+                assert!(
+                    (dc.try_voltage_named("out").unwrap() - 1.0).abs() < 1e-12,
+                    "{dialect:?}, {device}"
+                );
+                let result = engine
+                    .run_tran(&netlist, 2e-9, 1e-9)
+                    .unwrap_or_else(|error| panic!("{dialect:?}, {device}: {error}"));
+                assert_eq!(result.time.last().copied(), Some(2e-9));
+                assert!(
+                    result
+                        .try_voltage_waveform_named("out")
+                        .unwrap()
+                        .iter()
+                        .all(|value| (value - 1.0).abs() < 1e-12),
+                    "{dialect:?}, {device}"
+                );
+                if device.starts_with('R') || device.starts_with('C') {
+                    let branch = if device.starts_with('R') { "r2" } else { "c2" };
+                    assert!(
+                        result
+                            .try_branch_current_waveform_named(branch)
+                            .unwrap()
+                            .iter()
+                            .all(|current| *current == 0.0),
+                        "{dialect:?}, {device}: tied lead current"
+                    );
+                }
+                assert_eq!(engine.convergence_quality().force_accepted_points, 0);
+            }
+        }
+    }
+}
+
 fn modified_trapezoidal_rc_step_response(xmu: f64) -> rspice_core::engine::TransientResult {
     let deck = format!(
         "\

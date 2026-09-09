@@ -724,10 +724,13 @@ impl Diode {
         // an unlimited pnjlim reference degrades to no limiting, but an
         // unlimited *bias* is a NaN in the matrix. Such an instance keeps the
         // ordinary path.
-        if !self.junction_history_valid.get() && (self.initial_off || vcrit.is_finite()) {
+        // A tied junction has an exact zero bias. Limiting or seeding it at
+        // tVcrit would invent an unreachable voltage and prevent convergence.
+        let tied = self.node_anode == self.node_cathode;
+        if tied || (!self.junction_history_valid.get() && (self.initial_off || vcrit.is_finite())) {
             self.junction_history_valid.set(true);
             self.limited.set(false);
-            let vd = if self.initial_off { 0.0 } else { vcrit };
+            let vd = if tied || self.initial_off { 0.0 } else { vcrit };
             self.last_limited_vd.set(vd);
             let (id, gd) = self.candidate_current_and_conductance(vd);
             let stamped_id = id + self.junction_gmin * vd;
@@ -1751,6 +1754,10 @@ impl Diode {
     pub fn link(&mut self, matrix: &StaticMatrix) {
         let a = self.node_anode;
         let c = self.node_cathode;
+        self.indices = DiodeIndices::default();
+        if a == c {
+            return;
+        }
 
         if a > 0 {
             self.indices.aa = matrix.get_index(a - 1, a - 1);
@@ -1836,6 +1843,9 @@ impl Diode {
         id: Value,
         gd: Value,
     ) {
+        if self.node_anode == self.node_cathode {
+            return;
+        }
         // Equivalent current source: ieq = id - gd * vd
         let ieq = id - gd * vd;
 
@@ -2429,6 +2439,9 @@ impl NonlinearDevice for Diode {
         };
         // Iteration-limited linearization with junction gmin folded in.
         let (vd, id, gd) = self.limited_linearization(va - vc);
+        if self.node_anode == self.node_cathode {
+            return;
+        }
 
         // Equivalent current source: ieq = id - gd * vd
         let ieq = id - gd * vd;
@@ -2458,6 +2471,50 @@ impl NonlinearDevice for Diode {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn relinking_a_grounded_diode_clears_the_old_terminal_slots() {
+        let mut matrix = StaticMatrix::from_triplets(
+            2,
+            2,
+            &[(0, 0, 1.0), (0, 1, 0.25), (1, 0, -0.5), (1, 1, 2.0)],
+        )
+        .unwrap();
+        let mut diode = test_diode();
+        diode.link(&matrix);
+        assert!(diode.indices.ac.is_some());
+        diode.node_cathode = 0;
+        diode.link(&matrix);
+        assert!(diode.indices.aa.is_some());
+        assert!(
+            [diode.indices.ac, diode.indices.ca, diode.indices.cc]
+                .iter()
+                .all(Option::is_none)
+        );
+        diode.node_anode = 0;
+        diode.link(&matrix);
+        assert!(diode.indices.aa.is_none());
+        let original = matrix.values_mut().to_vec();
+        let mut rhs = [3.0, -4.0];
+        diode.stamp_linearized_direct(&mut matrix, &mut rhs, 1.0, 1e100, 1e100);
+        assert_eq!(matrix.values_mut(), original);
+        assert_eq!(rhs, [3.0, -4.0]);
+    }
+
+    #[test]
+    fn tied_junction_has_zero_bias_without_limiter_iteration() {
+        let mut diode = test_diode();
+        diode.node_cathode = diode.node_anode;
+        diode.is = 1e20;
+        for _ in 0..3 {
+            diode.update(&[1.0]);
+            let (voltage, current, conductance) = diode.limited_linearization(0.0);
+            assert_eq!(voltage, 0.0);
+            assert_eq!(current, 0.0);
+            assert!(conductance > 1e20);
+            assert!(diode.is_converged(NonlinearConvergenceCriteria::default()));
+        }
+    }
 
     fn test_diode() -> Diode {
         let mut d = Diode::new("d1".to_string(), 1, 2);

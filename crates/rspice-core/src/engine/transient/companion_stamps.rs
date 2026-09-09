@@ -116,6 +116,9 @@ impl Engine {
         geq: Value,
         i_eq: Value,
     ) {
+        if slots.pos == slots.neg {
+            return;
+        }
         if let Some(idx) = slots.pp {
             values[idx.offset()] += geq;
         }
@@ -147,6 +150,9 @@ impl Engine {
         geq: Value,
         i_eq: Value,
     ) {
+        if slots.pos == slots.neg {
+            return;
+        }
         if let Some(offset) = CompactTwoTerminalStampSlots::offset(slots.pp) {
             values[offset] += geq;
         }
@@ -176,6 +182,9 @@ impl Engine {
         geq: Value,
         i_eq: Value,
     ) {
+        if slots.pos == slots.neg {
+            return;
+        }
         if let Some(idx) = slots.pp {
             matrix.stamp_direct(idx, geq);
         }
@@ -213,6 +222,9 @@ impl Engine {
         g: Value,
         i_eq: Value,
     ) {
+        if node_pos == node_neg {
+            return;
+        }
         if node_pos > 0 {
             matrix.add(node_pos - 1, node_pos - 1, g);
             if node_neg > 0 {
@@ -238,7 +250,7 @@ impl Engine {
         node_col_neg: usize,
         g_cross: Value,
     ) {
-        if g_cross == 0.0 {
+        if g_cross == 0.0 || node_row_pos == node_row_neg || node_col_pos == node_col_neg {
             return;
         }
 
@@ -589,6 +601,9 @@ impl Engine {
         geq: Value,
         i_eq: Value,
     ) {
+        if node_pos == node_neg {
+            return;
+        }
         if node_pos > 0 {
             matrix.add(node_pos - 1, node_pos - 1, geq);
             if node_neg > 0 {
@@ -882,6 +897,61 @@ impl Engine {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tied_companion_ports_preserve_existing_matrix_and_rhs() {
+        for node in [0, 1, 2] {
+            for mode in 0..5 {
+                let mut matrix = crate::solver::StaticMatrix::from_triplets(
+                    2,
+                    2,
+                    &[(0, 0, 1.0), (0, 1, 0.25), (1, 0, -0.5), (1, 1, 2.0)],
+                )
+                .unwrap();
+                let original = matrix.values_mut().to_vec();
+                let mut rhs = [3.0, -4.0];
+                let slots = TwoTerminalStampSlots::link(&matrix, node, node);
+                let compact = CompactTwoTerminalStampSlots::link(&matrix, node, node);
+                match mode {
+                    0 => Engine::stamp_two_terminal_companion(
+                        &mut matrix,
+                        &mut rhs,
+                        node,
+                        node,
+                        1e100,
+                        1e100,
+                    ),
+                    1 => Engine::stamp_two_terminal_companion_direct(
+                        &mut matrix,
+                        &mut rhs,
+                        &slots,
+                        1e100,
+                        1e100,
+                    ),
+                    2 => Engine::stamp_two_terminal_companion_values(
+                        matrix.values_mut(),
+                        &mut rhs,
+                        &slots,
+                        1e100,
+                        1e100,
+                    ),
+                    3 => Engine::stamp_compact_two_terminal_companion_values(
+                        matrix.values_mut(),
+                        &mut rhs,
+                        &compact,
+                        1e100,
+                        1e100,
+                    ),
+                    _ => Engine::stamp_tline_port(&mut matrix, &mut rhs, node, node, 1e100, 1e100),
+                }
+                assert_eq!(matrix.values_mut(), original, "node={node}, mode={mode}");
+                assert_eq!(rhs, [3.0, -4.0], "node={node}, mode={mode}");
+                Engine::stamp_tline_cross_conductance(&mut matrix, node, node, 1, 2, 1e100);
+                Engine::stamp_tline_cross_conductance(&mut matrix, 1, 2, node, node, 1e100);
+                assert_eq!(matrix.values_mut(), original);
+            }
+        }
+    }
 
     #[test]
     fn compact_two_terminal_stamp_slots_contain_only_offsets() {

@@ -484,6 +484,9 @@ impl Engine {
         col_neg: usize,
         y: Complex64,
     ) {
+        if row_pos == row_neg || col_pos == col_neg {
+            return;
+        }
         if row_pos > 0 {
             if col_pos > 0 {
                 matrix.add(row_pos - 1, col_pos - 1, y);
@@ -713,6 +716,9 @@ impl Engine {
         node_neg: NodeId,
         susceptance: Value,
     ) {
+        if node_pos == node_neg {
+            return;
+        }
         if node_pos > 0 {
             matrix.add_imag(node_pos - 1, node_pos - 1, susceptance);
             if node_neg > 0 {
@@ -2123,6 +2129,9 @@ impl Engine {
 
         // Stamp resistors (real conductance)
         for (r_idx, stamp) in circuit.resistors.stamps.iter().enumerate() {
+            if stamp.pp.row == stamp.nn.row {
+                continue;
+            }
             let g = circuit.resistors.small_signal_conductance(r_idx);
 
             if stamp.pp.row > 0 && stamp.pp.col > 0 {
@@ -2202,10 +2211,10 @@ impl Engine {
             if circuit.capacitors.value_expression(i).is_some() {
                 for &(column, dqdx) in &circuit.capacitors.small_signal_charge_partials[i] {
                     let omega_dqdx = omega * dqdx;
-                    if stamp.pp.row > 0 {
+                    if stamp.pp.row > 0 && stamp.pp.row != stamp.nn.row {
                         ac_matrix.add_imag(stamp.pp.row - 1, column, omega_dqdx);
                     }
-                    if stamp.nn.row > 0 {
+                    if stamp.nn.row > 0 && stamp.pp.row != stamp.nn.row {
                         ac_matrix.add_imag(stamp.nn.row - 1, column, -omega_dqdx);
                     }
                     if let Some(branch_ordinal) = circuit.capacitors.ic_branch_indices[i] {
@@ -2223,19 +2232,10 @@ impl Engine {
                 .unwrap_or(0.0);
             let jwc = omega * c;
 
-            if stamp.pp.row > 0 && stamp.pp.col > 0 {
-                ac_matrix.add_imag(stamp.pp.row - 1, stamp.pp.col - 1, jwc);
-            }
-            if stamp.pn.row > 0 && stamp.pn.col > 0 {
-                ac_matrix.add_imag(stamp.pn.row - 1, stamp.pn.col - 1, -jwc);
-            }
-            if stamp.np.row > 0 && stamp.np.col > 0 {
-                ac_matrix.add_imag(stamp.np.row - 1, stamp.np.col - 1, -jwc);
-            }
-            if stamp.nn.row > 0 && stamp.nn.col > 0 {
-                ac_matrix.add_imag(stamp.nn.row - 1, stamp.nn.col - 1, jwc);
-            }
-            if let Some(branch_ordinal) = circuit.capacitors.ic_branch_indices[i] {
+            Self::stamp_imag_two_terminal(ac_matrix, stamp.pp.row, stamp.nn.row, jwc);
+            if stamp.pp.row != stamp.nn.row
+                && let Some(branch_ordinal) = circuit.capacitors.ic_branch_indices[i]
+            {
                 let branch = circuit.get_branch_matrix_index(branch_ordinal) - 1;
                 if stamp.pp.row > 0 {
                     ac_matrix.add_imag(branch, stamp.pp.row - 1, -jwc);
@@ -2273,47 +2273,9 @@ impl Engine {
             let ns = mos.node_source;
             let nb = mos.node_bulk;
 
-            let jwcgs = omega * cgs;
-            if ng > 0 {
-                ac_matrix.add_imag(ng - 1, ng - 1, jwcgs);
-            }
-            if ng > 0 && ns > 0 {
-                ac_matrix.add_imag(ng - 1, ns - 1, -jwcgs);
-            }
-            if ns > 0 && ng > 0 {
-                ac_matrix.add_imag(ns - 1, ng - 1, -jwcgs);
-            }
-            if ns > 0 {
-                ac_matrix.add_imag(ns - 1, ns - 1, jwcgs);
-            }
-
-            let jwcgd = omega * cgd;
-            if ng > 0 {
-                ac_matrix.add_imag(ng - 1, ng - 1, jwcgd);
-            }
-            if ng > 0 && nd > 0 {
-                ac_matrix.add_imag(ng - 1, nd - 1, -jwcgd);
-            }
-            if nd > 0 && ng > 0 {
-                ac_matrix.add_imag(nd - 1, ng - 1, -jwcgd);
-            }
-            if nd > 0 {
-                ac_matrix.add_imag(nd - 1, nd - 1, jwcgd);
-            }
-
-            let jwcgb = omega * cgb;
-            if ng > 0 {
-                ac_matrix.add_imag(ng - 1, ng - 1, jwcgb);
-            }
-            if ng > 0 && nb > 0 {
-                ac_matrix.add_imag(ng - 1, nb - 1, -jwcgb);
-            }
-            if nb > 0 && ng > 0 {
-                ac_matrix.add_imag(nb - 1, ng - 1, -jwcgb);
-            }
-            if nb > 0 {
-                ac_matrix.add_imag(nb - 1, nb - 1, jwcgb);
-            }
+            Self::stamp_imag_two_terminal(ac_matrix, ng, ns, omega * cgs);
+            Self::stamp_imag_two_terminal(ac_matrix, ng, nd, omega * cgd);
+            Self::stamp_imag_two_terminal(ac_matrix, ng, nb, omega * cgb);
 
             let (_vgs_eval, vds_eval, vbs_eval) = mos.eval_branch_voltages_at(op_voltages);
             let (_, cbs) = mos.body_source_junction_charge_and_capacitance_at(vbs_eval);
@@ -2450,11 +2412,11 @@ impl Engine {
             let br = circuit.get_branch_matrix_index(br_ordinal);
             let resistance = circuit.resistor_branches.small_signal_resistances[i];
 
-            if np > 0 {
+            if np > 0 && np != nn {
                 ac_matrix.add_real(br - 1, np - 1, 1.0);
                 ac_matrix.add_real(np - 1, br - 1, 1.0);
             }
-            if nn > 0 {
+            if nn > 0 && np != nn {
                 ac_matrix.add_real(br - 1, nn - 1, -1.0);
                 ac_matrix.add_real(nn - 1, br - 1, -1.0);
             }

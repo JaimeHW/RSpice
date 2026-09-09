@@ -792,6 +792,9 @@ impl NonlinearDeviceInstance {
         node_voltages: &[Value],
         diode_junction: Option<crate::device::semiconductor::ResolvedDiodeJunction>,
     ) -> Vec<(usize, Value)> {
+        if self.terminals[0] == self.terminals[1] {
+            return Vec::new();
+        }
         let v_a = self.get_terminal_voltage(node_voltages, 0);
         let v_c = self.get_terminal_voltage(node_voltages, 1);
         let vd = v_a - v_c;
@@ -812,6 +815,9 @@ impl NonlinearDeviceInstance {
         node_voltages: &[Value],
         diode_junction: Option<crate::device::semiconductor::ResolvedDiodeJunction>,
     ) -> Vec<((usize, usize), Value)> {
+        if self.terminals[0] == self.terminals[1] {
+            return Vec::new();
+        }
         let v_a = self.get_terminal_voltage(node_voltages, 0);
         let v_c = self.get_terminal_voltage(node_voltages, 1);
         let vd = v_a - v_c;
@@ -1211,6 +1217,9 @@ impl NonlinearDeviceInstance {
         node_voltages: &[Value],
         diode_junction: Option<crate::device::semiconductor::ResolvedDiodeJunction>,
     ) -> Vec<(usize, Value)> {
+        if self.terminals[0] == self.terminals[1] {
+            return Vec::new();
+        }
         let v_a = self.get_terminal_voltage(node_voltages, 0);
         let v_c = self.get_terminal_voltage(node_voltages, 1);
         let vd = v_a - v_c;
@@ -1227,6 +1236,9 @@ impl NonlinearDeviceInstance {
         node_voltages: &[Value],
         diode_junction: Option<crate::device::semiconductor::ResolvedDiodeJunction>,
     ) -> Vec<((usize, usize), Value)> {
+        if self.terminals[0] == self.terminals[1] {
+            return Vec::new();
+        }
         let v_a = self.get_terminal_voltage(node_voltages, 0);
         let v_c = self.get_terminal_voltage(node_voltages, 1);
         let vd = v_a - v_c;

@@ -68,6 +68,41 @@ fn tied_current_terminals_cannot_erase_other_ac_excitations() {
 }
 
 #[test]
+fn tied_admittance_terminals_preserve_the_physical_rc_response() {
+    use rspice_core::engine::SpiceDialect;
+    let frequency = 1e6;
+    let expected =
+        Complex64::new(1.0, 0.0) / Complex64::new(1.0, std::f64::consts::TAU * frequency * 1e-9);
+    for dialect in [
+        SpiceDialect::BestAvailable,
+        SpiceDialect::Ngspice,
+        SpiceDialect::Xyce,
+    ] {
+        let engine = Engine::new(SimulationConfig::default().with_spice_dialect(dialect));
+        for terminals in ["out out", "0 0"] {
+            for device in [
+                format!("R2 {terminals} 1e-16"),
+                format!("R2 {terminals} 1e-20"),
+                format!("C2 {terminals} 1e6"),
+                format!("D2 {terminals} dm\n.model dm D(IS=1e20 CJO=1e20)"),
+            ] {
+                let netlist = parse(&format!(
+                    "tied admittance\nI1 0 out DC 0 AC 1\nR1 out 0 1\nC1 out 0 1n\n{device}\n.end\n"
+                ));
+                let result = engine
+                    .run_ac(&netlist, &[frequency])
+                    .unwrap_or_else(|error| panic!("{dialect:?}, {device}: {error}"));
+                let actual = voltage(&result[0], "out");
+                assert!(
+                    (actual - expected).norm() < 1e-14,
+                    "{dialect:?}, {device}: {actual} vs {expected}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn waveform_bias_is_retained_when_linearizing_a_nonlinear_ac_circuit() {
     for waveform in [
         "SIN(.65 .05 1meg)",
