@@ -17,7 +17,6 @@
 //! [`ZiFilter::next_sample_step_bound`]; a caller that nevertheless crosses an
 //! edge is refused because the input at the missed edge is unknowable.
 
-use num_complex::Complex64;
 use serde::{Deserialize, Deserializer, Serialize};
 
 const TIME_ULPS: f64 = 8.0;
@@ -532,78 +531,14 @@ impl ZiFilter {
                 "frequency must be finite and nonnegative, got {frequency_hz}"
             )));
         }
-        let cycles = frequency_hz * self.period;
-        if !cycles.is_finite() {
-            return Err(ZiFilterError::InvalidEvaluation(format!(
-                "frequency-period product overflows for {frequency_hz} Hz and period {}",
-                self.period
-            )));
-        }
-        let fractional_cycle = cycles.rem_euclid(1.0);
-        if fractional_cycle == 0.0 || fractional_cycle == 0.5 {
-            // At DC and Nyquist, z^-1 is exactly +1 or -1. Preserve exact
-            // coefficient cancellation before division, and avoid sin(pi)'s
-            // rounding residual turning a Nyquist pole into a finite response.
-            let signed_term = |(index, value): (usize, &f64)| {
-                let sign = if fractional_cycle == 0.5 && index % 2 != 0 {
-                    -1.0
-                } else {
-                    1.0
-                };
-                (*value, sign)
-            };
-            let numerator = self.num.iter().enumerate().map(signed_term);
-            let real = checked_sum_products_ratio(
-                numerator.clone(),
-                self.den.iter().enumerate().map(signed_term),
-                "Zi real-axis frequency response",
-                false,
-            )?;
-            if real == 0.0
-                && !rspice_veriloga_runtime::arithmetic::sum_products_is_zero(numerator)
-                    .map_err(|error| arithmetic_error(error, "Zi frequency response", false))?
-            {
-                return Err(ZiFilterError::InvalidEvaluation(format!(
-                    "Zi frequency response underflows at {frequency_hz} Hz"
-                )));
-            }
-            return Ok((real, 0.0));
-        }
-        let angle = std::f64::consts::TAU * fractional_cycle;
-        let z_inverse = Complex64::from_polar(1.0, -angle);
-        let (numerator, numerator_scale) =
-            evaluate_unit_circle_polynomial(&self.num, z_inverse, "numerator")?;
-        let (denominator, denominator_scale) =
-            evaluate_unit_circle_polynomial(&self.den, z_inverse, "denominator")?;
-        if denominator == Complex64::new(0.0, 0.0) {
-            return Err(ZiFilterError::InvalidEvaluation(format!(
-                "Zi frequency response is singular at {frequency_hz} Hz"
-            )));
-        }
-        let normalized = numerator / denominator;
-        if !normalized.re.is_finite() || !normalized.im.is_finite() {
-            return Err(ZiFilterError::InvalidEvaluation(format!(
-                "Zi normalized frequency response is not representable at {frequency_hz} Hz"
-            )));
-        }
-        let real = checked_sum_products_ratio(
-            [(normalized.re, numerator_scale)].into_iter(),
-            [(denominator_scale, 1.0)].into_iter(),
-            "Zi frequency-response real component",
-            false,
-        )?;
-        let imag = checked_sum_products_ratio(
-            [(normalized.im, numerator_scale)].into_iter(),
-            [(denominator_scale, 1.0)].into_iter(),
-            "Zi frequency-response imaginary component",
-            false,
-        )?;
-        if (real == 0.0 && normalized.re != 0.0) || (imag == 0.0 && normalized.im != 0.0) {
-            return Err(ZiFilterError::InvalidEvaluation(format!(
-                "Zi frequency response underflows at {frequency_hz} Hz"
-            )));
-        }
-        Ok((real, imag))
+        rspice_veriloga_runtime::polynomial::unit_circle_polynomial_ratio(
+            &self.num,
+            &self.den,
+            frequency_hz,
+            self.period,
+        )
+        .map(|[real, imaginary]| (real, imaginary))
+        .map_err(|error| arithmetic_error(error, "Zi frequency response", false))
     }
 
     /// Instantaneous feedthrough b0/a0, used by an exact transient Jacobian
@@ -1101,30 +1036,6 @@ impl ZiFilter {
     }
 }
 
-fn evaluate_unit_circle_polynomial(
-    coefficients: &[f64],
-    z_inverse: Complex64,
-    role: &str,
-) -> Result<(Complex64, f64), ZiFilterError> {
-    let scale = coefficients
-        .iter()
-        .map(|coefficient| coefficient.abs())
-        .fold(0.0_f64, f64::max);
-    if scale == 0.0 {
-        return Ok((Complex64::new(0.0, 0.0), 1.0));
-    }
-    let mut value = Complex64::new(0.0, 0.0);
-    for coefficient in coefficients.iter().rev() {
-        value = value * z_inverse + Complex64::new(*coefficient / scale, 0.0);
-        if !value.re.is_finite() || !value.im.is_finite() {
-            return Err(ZiFilterError::InvalidEvaluation(format!(
-                "Zi {role} polynomial is not representable on the unit circle"
-            )));
-        }
-    }
-    Ok((value, scale))
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SamplePosition {
     Before,
@@ -1344,9 +1255,15 @@ fn arithmetic_error(
         ArithmeticError::Overflow { .. } => {
             ZiFilterError::InvalidEvaluation(format!("{context} is outside the finite f64 range"))
         }
+        ArithmeticError::Underflow => ZiFilterError::InvalidEvaluation(format!(
+            "{context} underflows the finite binary64 range"
+        )),
         ArithmeticError::NonFiniteTerm => {
             ZiFilterError::InvalidEvaluation("non-finite term in sampled-filter arithmetic".into())
         }
+        ArithmeticError::PrecisionLimit { bits } => ZiFilterError::InvalidEvaluation(format!(
+            "{context} could not be resolved within {bits} bits of recovery precision"
+        )),
         ArithmeticError::MantissaBounds => ZiFilterError::InvalidEvaluation(
             "sampled-filter exact quotient exceeds internal f64 mantissa bounds".into(),
         ),

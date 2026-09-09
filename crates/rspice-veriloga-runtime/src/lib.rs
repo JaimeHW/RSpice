@@ -23,6 +23,7 @@ mod analog_lifecycle;
 pub mod arithmetic;
 mod compatibility_catalog;
 pub mod integer;
+pub mod polynomial;
 
 pub use analog_effects::{
     AnalogEffectError, AnalogEffectJournal, AnalogEffectLimits, AnalogTaskArgument,

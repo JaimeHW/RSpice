@@ -2,13 +2,16 @@
 //! Shared by sampled filters and derivative evaluation; intermediate products
 //! may exceed the binary64 range without discarding a finite final result.
 
-/// Failure to represent an exact arithmetic result as a finite binary64 value.
+/// Failure to evaluate or represent an arithmetic result as a finite binary64 value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ArithmeticError {
     NonFiniteTerm,
     ZeroDenominator,
     Overflow { negative: bool },
+    Underflow,
     MantissaBounds,
+    /// Bounded recovery could not certify the result within this precision.
+    PrecisionLimit { bits: u32 },
 }
 
 /// Evaluate `(a * b) / (c * d)` with one final binary64 rounding.
@@ -38,18 +41,18 @@ pub fn product_ratio(a: f64, b: f64, c: f64, d: f64) -> f64 {
 /// exponent spans or carries fall back to `BigMagnitude`; they never round in
 /// this representation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct SmallExact {
-    value: i128,
-    exponent: i32,
+pub(crate) struct SmallExact {
+    pub(crate) value: i128,
+    pub(crate) exponent: i32,
 }
 
 impl SmallExact {
-    const ZERO: Self = Self {
+    pub(crate) const ZERO: Self = Self {
         value: 0,
         exponent: 0,
     };
 
-    fn normalized(value: i128, exponent: i32) -> Option<Self> {
+    pub(crate) fn normalized(value: i128, exponent: i32) -> Option<Self> {
         if value == 0 {
             return Some(Self::ZERO);
         }
@@ -60,7 +63,7 @@ impl SmallExact {
         })
     }
 
-    fn product(left: f64, right: f64) -> Option<Self> {
+    pub(crate) fn product(left: f64, right: f64) -> Option<Self> {
         let (left_negative, left_mantissa, left_exponent) = exact_f64_parts(left);
         let (right_negative, right_mantissa, right_exponent) = exact_f64_parts(right);
         let magnitude = u128::from(left_mantissa) * u128::from(right_mantissa);
@@ -73,7 +76,7 @@ impl SmallExact {
         Self::normalized(value, left_exponent.checked_add(right_exponent)?)
     }
 
-    fn checked_add(self, other: Self) -> Option<Self> {
+    pub(crate) fn checked_add(self, other: Self) -> Option<Self> {
         if self.value == 0 {
             return Some(other);
         }
@@ -175,7 +178,7 @@ fn round_small_quotient(quotient: u128, remainder: u128, denominator: u128) -> O
     u64::try_from(quotient.checked_add(u128::from(round_up))?).ok()
 }
 
-fn small_exact_ratio_to_f64(
+pub(crate) fn small_exact_ratio_to_f64(
     numerator: SmallExact,
     denominator: SmallExact,
 ) -> Option<Result<f64, ArithmeticError>> {
@@ -354,7 +357,7 @@ fn exact_f64_parts(value: f64) -> (bool, u64, i32) {
 const INLINE_ACCUMULATOR_LIMBS: usize = 68;
 
 #[derive(Debug, Clone)]
-struct BigMagnitude {
+pub(crate) struct BigMagnitude {
     // 4352 inline bits cover the entire 4196-bit finite-f64 product span plus
     // 156 carry bits. Ordinary sums therefore do not allocate in the
     // Newton loop. Very large term counts grow explicitly rather
@@ -422,7 +425,7 @@ impl BigMagnitude {
         u128::from(low) | (u128::from(high) << 64)
     }
 
-    fn add_shifted(&mut self, value: u128, shift: usize) {
+    pub(crate) fn add_shifted(&mut self, value: u128, shift: usize) {
         let limb = shift / 64;
         let intra = shift % 64;
         let low = value as u64;
@@ -438,7 +441,7 @@ impl BigMagnitude {
         }
     }
 
-    fn add_word(&mut self, mut index: usize, word: u64) {
+    pub(crate) fn add_word(&mut self, mut index: usize, word: u64) {
         if word == 0 {
             return;
         }
@@ -452,7 +455,7 @@ impl BigMagnitude {
         }
     }
 
-    fn word(&self, index: usize) -> u64 {
+    pub(crate) fn word(&self, index: usize) -> u64 {
         if index < INLINE_ACCUMULATOR_LIMBS {
             self.inline[index]
         } else {
@@ -463,7 +466,7 @@ impl BigMagnitude {
         }
     }
 
-    fn set_word(&mut self, index: usize, value: u64) {
+    pub(crate) fn set_word(&mut self, index: usize, value: u64) {
         if index < INLINE_ACCUMULATOR_LIMBS {
             self.inline[index] = value;
         } else {
@@ -485,11 +488,11 @@ impl BigMagnitude {
         }
     }
 
-    fn significant_len(&self) -> usize {
+    pub(crate) fn significant_len(&self) -> usize {
         self.active_len
     }
 
-    fn compare(&self, other: &Self) -> std::cmp::Ordering {
+    pub(crate) fn compare(&self, other: &Self) -> std::cmp::Ordering {
         let self_len = self.significant_len();
         let other_len = other.significant_len();
         self_len.cmp(&other_len).then_with(|| {
@@ -504,7 +507,7 @@ impl BigMagnitude {
     }
 
     /// Exact unsigned subtraction. `self` must be at least `other`.
-    fn subtract(&self, other: &Self) -> Self {
+    pub(crate) fn subtract(&self, other: &Self) -> Self {
         debug_assert!(self.compare(other) != std::cmp::Ordering::Less);
         let mut result = Self::default();
         let mut borrow = false;
@@ -523,7 +526,7 @@ impl BigMagnitude {
         result
     }
 
-    fn is_zero(&self) -> bool {
+    pub(crate) fn is_zero(&self) -> bool {
         self.significant_len() == 0
     }
 
@@ -541,7 +544,7 @@ impl BigMagnitude {
         })
     }
 
-    fn shift_left(&self, shift: usize) -> Self {
+    pub(crate) fn shift_left(&self, shift: usize) -> Self {
         if self.is_zero() || shift == 0 {
             return self.clone();
         }
@@ -613,6 +616,15 @@ fn exact_ratio_to_f64(
     denominator: &BigMagnitude,
     negative: bool,
 ) -> Result<f64, ArithmeticError> {
+    scaled_exact_ratio_to_f64(numerator, denominator, negative, 0)
+}
+
+pub(crate) fn scaled_exact_ratio_to_f64(
+    numerator: &BigMagnitude,
+    denominator: &BigMagnitude,
+    negative: bool,
+    exponent_offset: i32,
+) -> Result<f64, ArithmeticError> {
     let numerator_top = numerator.top_bit().expect("nonzero numerator");
     let denominator_top = denominator.top_bit().expect("nonzero denominator");
     let mut unbiased = numerator_top as i32 - denominator_top as i32;
@@ -627,11 +639,22 @@ fn exact_ratio_to_f64(
     if below_candidate {
         unbiased -= 1;
     }
-    let scale = if unbiased < -1022 {
+    let unbiased = unbiased
+        .checked_add(exponent_offset)
+        .ok_or(ArithmeticError::MantissaBounds)?;
+    if unbiased > 1023 {
+        return Err(ArithmeticError::Overflow { negative });
+    }
+    if unbiased < -1075 {
+        return Ok(f64::from_bits(u64::from(negative) << 63));
+    }
+    let scale = (if unbiased < -1022 {
         1074
     } else {
         52 - unbiased
-    };
+    })
+    .checked_add(exponent_offset)
+    .ok_or(ArithmeticError::MantissaBounds)?;
     let mut quotient = rounded_scaled_ratio(numerator, denominator, scale)?;
     let mut output_exponent = unbiased;
     if unbiased >= -1022 && quotient == 1_u64 << 53 {

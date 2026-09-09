@@ -26,6 +26,8 @@
 //! the same accepted/candidate transaction boundary as the circuit solver.
 
 use num_complex::Complex64;
+use rspice_veriloga_runtime::arithmetic::ArithmeticError;
+use rspice_veriloga_runtime::polynomial::bounded_complex_polynomial_ratio;
 use serde::{Deserialize, Serialize};
 use std::f64::consts::PI;
 
@@ -121,6 +123,11 @@ pub struct StateSpaceFilter {
     /// serialized artifacts fall back to the realization solve.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     transfer_function_dc_gain: Option<f64>,
+    /// Authored coefficients in ascending powers, before normalization and
+    /// state-space rounding. AC evaluation needs no state realization solve.
+    /// Arbitrary matrices and older serialized filters use the matrix path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    transfer_function: Option<TransferFunctionCoefficients>,
     /// Candidate state vector for the in-flight timestep
     state: Vec<f64>,
     /// Physical derivative of the in-flight state candidate.
@@ -153,6 +160,12 @@ pub struct LaplaceCheckpoint {
     pub derivative: Vec<f64>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct TransferFunctionCoefficients {
+    numerator: Vec<f64>,
+    denominator: Vec<f64>,
+}
+
 impl StateSpaceFilter {
     /// Create a new state-space filter from coefficients
     pub fn new(a: Vec<Vec<f64>>, b: Vec<f64>, c: Vec<f64>, d: f64) -> Result<Self, LaplaceError> {
@@ -169,6 +182,7 @@ impl StateSpaceFilter {
             c,
             d,
             transfer_function_dc_gain: None,
+            transfer_function: None,
             state,
             state_derivative,
             state_prev,
@@ -242,6 +256,7 @@ impl StateSpaceFilter {
                 c: vec![],
                 d: gain,
                 transfer_function_dc_gain,
+                transfer_function: None,
                 state: vec![],
                 state_derivative: vec![],
                 state_prev: vec![],
@@ -307,6 +322,10 @@ impl StateSpaceFilter {
             c: c_vec,
             d: d_scalar,
             transfer_function_dc_gain,
+            transfer_function: Some(TransferFunctionCoefficients {
+                numerator: numerator.iter().rev().copied().collect(),
+                denominator: denominator.iter().rev().copied().collect(),
+            }),
             state: vec![0.0; n],
             state_derivative: vec![0.0; n],
             state_prev: vec![0.0; n],
@@ -340,6 +359,7 @@ impl StateSpaceFilter {
                 c: vec![],
                 d: gain,
                 transfer_function_dc_gain: Some(gain),
+                transfer_function: None,
                 state: vec![],
                 state_derivative: vec![],
                 state_prev: vec![],
@@ -442,6 +462,7 @@ impl StateSpaceFilter {
             c: vec![],
             d: 1.0,
             transfer_function_dc_gain: Some(1.0),
+            transfer_function: None,
             state: vec![],
             state_derivative: vec![],
             state_prev: vec![],
@@ -945,6 +966,29 @@ impl StateSpaceFilter {
             return Ok((self.d, 0.0));
         }
 
+        if let Some(transfer) = &self.transfer_function {
+            let [real, imaginary] = bounded_complex_polynomial_ratio(
+                &transfer.numerator,
+                &transfer.denominator,
+                [0.0, omega],
+            )
+            .map_err(|error| match error {
+                ArithmeticError::ZeroDenominator => {
+                    LaplaceError::SingularSystem("frequency-response")
+                }
+                ArithmeticError::Underflow => LaplaceError::InvalidEvaluation(
+                    "frequency-response component underflows f64".into(),
+                ),
+                ArithmeticError::Overflow { .. } => LaplaceError::InvalidEvaluation(
+                    "frequency-response component overflows f64".into(),
+                ),
+                other => LaplaceError::InvalidEvaluation(format!(
+                    "frequency-response polynomial evaluation failed: {other:?}"
+                )),
+            })?;
+            return Ok((real, imaginary));
+        }
+
         // Evaluate H(jw) = C * (jwI - A)^(-1) * B + D directly from the
         // state-space form so the response stays consistent with the runtime
         // filter realization instead of relying on reconstructed polynomials.
@@ -978,6 +1022,19 @@ impl StateSpaceFilter {
     }
 
     fn validate_structure(&self) -> Result<(), LaplaceError> {
+        if let Some(transfer) = &self.transfer_function {
+            if transfer.denominator.len().checked_sub(1) != Some(self.order)
+                || transfer.numerator.is_empty()
+                || transfer.numerator.len() > transfer.denominator.len()
+                || transfer.denominator.last() == Some(&0.0)
+            {
+                return Err(LaplaceError::InvalidDefinition(
+                    "retained transfer coefficients do not match the filter order".into(),
+                ));
+            }
+            validate_finite_coefficients("retained numerator", &transfer.numerator)?;
+            validate_finite_coefficients("retained denominator", &transfer.denominator)?;
+        }
         let dimensions_match = self.a.len() == self.order
             && self.a.iter().all(|row| row.len() == self.order)
             && self.b.len() == self.order
@@ -1897,6 +1954,78 @@ endmodule
         )
         .expect_err("a true nonzero quotient below f64 must fail closed");
         assert!(error.to_string().contains("underflows"));
+    }
+
+    #[test]
+    fn authored_ac_response_survives_internal_state_underflow_and_overflow() {
+        let filter =
+            StateSpaceFilter::from_transfer_function(&[0.1, 0.15, 0.3], &[-0.05, -0.075, 1.0])
+                .unwrap();
+        let frequency = 1e-200;
+        let (real, imaginary) = filter.frequency_response_rectangular(frequency).unwrap();
+        assert!((real / 0.3 - 1.0).abs() <= 8.0 * f64::EPSILON);
+        assert!((imaginary / (0.1725 * (2.0 * PI * frequency)) - 1.0).abs() <= 8.0 * f64::EPSILON);
+
+        // Both polynomial evaluations overflow ordinary binary64 at this
+        // frequency, while each final response component is representable.
+        let filter =
+            StateSpaceFilter::from_transfer_function(&[0.3, 0.1, 1.0], &[1.0, 1.0, 1.0]).unwrap();
+        let frequency = 1e200;
+        let (real, imaginary) = filter.frequency_response_rectangular(frequency).unwrap();
+        assert_eq!(real, 0.3);
+        assert!((imaginary / (0.2 / (2.0 * PI * frequency)) - 1.0).abs() <= 8.0 * f64::EPSILON);
+    }
+
+    #[test]
+    fn authored_ac_response_preserves_exact_zeros_poles_and_final_range_errors() {
+        let zero =
+            StateSpaceFilter::from_transfer_function(&[1.0, 0.0, 1.0], &[1.0, 1.0, 1.0]).unwrap();
+        assert_eq!(
+            zero.frequency_response_rectangular(1.0 / (2.0 * PI))
+                .unwrap(),
+            (0.0, 0.0)
+        );
+        let pole = StateSpaceFilter::from_transfer_function(&[1.0], &[1.0, 0.0, 1.0]).unwrap();
+        assert!(matches!(
+            pole.frequency_response_rectangular(1.0 / (2.0 * PI)),
+            Err(LaplaceError::SingularSystem("frequency-response"))
+        ));
+        let underflow = StateSpaceFilter::from_transfer_function(&[1.0], &[1.0, 1.0, 1.0]).unwrap();
+        assert!(
+            underflow
+                .frequency_response_rectangular(1e200)
+                .unwrap_err()
+                .to_string()
+                .contains("underflows")
+        );
+    }
+
+    #[test]
+    fn authored_transfer_survives_serialization_and_legacy_matrix_fallback() {
+        let filter =
+            StateSpaceFilter::from_transfer_function(&[0.3, 0.1, 1.0], &[1.0, 1.0, 1.0]).unwrap();
+        let mut serialized = serde_json::to_value(&filter).unwrap();
+        let restored: StateSpaceFilter = serde_json::from_value(serialized.clone()).unwrap();
+        for frequency in [1e-200, 0.125, 0.373, 1e200] {
+            assert_eq!(
+                restored.frequency_response_rectangular(frequency).unwrap(),
+                filter.frequency_response_rectangular(frequency).unwrap()
+            );
+        }
+        serialized
+            .as_object_mut()
+            .unwrap()
+            .remove("transfer_function");
+        let legacy: StateSpaceFilter = serde_json::from_value(serialized.clone()).unwrap();
+        let expected = filter.frequency_response_rectangular(0.125).unwrap();
+        let actual = legacy.frequency_response_rectangular(0.125).unwrap();
+        assert!((actual.0 / expected.0 - 1.0).abs() <= 32.0 * f64::EPSILON);
+        assert!((actual.1 / expected.1 - 1.0).abs() <= 32.0 * f64::EPSILON);
+
+        serialized["transfer_function"] =
+            serde_json::json!({"numerator": [1.0], "denominator": [1.0]});
+        let malformed: StateSpaceFilter = serde_json::from_value(serialized).unwrap();
+        assert!(malformed.frequency_response_rectangular(0.125).is_err());
     }
 
     #[test]

@@ -260,7 +260,9 @@ use super::*;
 // Version 53 retains checked primal dependencies when resolving ddx.
 // Version 54 preserves signed zero in primal factors during differentiation.
 // Version 56 preserves hypot and stabilizes homogeneous/division derivatives.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 56;
+// Version 57 retains authored Laplace coefficients for range-safe AC responses;
+// older realizations cannot recover coefficients lost during normalization.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 57;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
@@ -2395,6 +2397,8 @@ endmodule
             (46, true),
             (48, false),
             (48, true),
+            (56, false),
+            (56, true),
         ] {
             persist_model_to_disk_locked(&source_path, &entry, &cache_root)
                 .expect("persist current cache record");

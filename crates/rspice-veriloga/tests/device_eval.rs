@@ -18,6 +18,46 @@ fn compile(source: &str) -> DeviceFixture {
 }
 
 #[test]
+fn laplace_ac_stamps_preserve_final_components_across_intermediate_range_limits() {
+    let fixture = compile(
+        "module ranged_filter(p,n); inout p,n; electrical p,n; real y;
+         analog begin y=laplace_nd(V(p,n), '{1.0,0.1,0.3}, '{1.0,1.0,1.0});
+         I(p,n)<+y; end endmodule",
+    );
+    let mut device = fixture.device("AC", &[1, 0]);
+    device.set_analysis_type(1);
+    for (frequency, expected_real, expected_imaginary) in [
+        (1e-200, 1.0, -0.9 * (std::f64::consts::TAU * 1e-200)),
+        (1e200, 0.3, 0.2 / (std::f64::consts::TAU * 1e200)),
+    ] {
+        let mut terms = Vec::new();
+        device
+            .try_stamp_small_signal_complex(&[0.25], frequency, |r, c, re, im| {
+                terms.push((r, c, re, im));
+            })
+            .unwrap();
+        assert_eq!(terms.len(), 1);
+        let (row, column, real, imaginary) = terms[0];
+        assert_eq!((row, column), (0, 0));
+        assert!((real / expected_real - 1.0).abs() <= 16.0 * f64::EPSILON);
+        assert!((imaginary / expected_imaginary - 1.0).abs() <= 16.0 * f64::EPSILON);
+    }
+
+    let fixture = compile(
+        "module small_response(p,n); inout p,n; electrical p,n;
+         analog I(p,n)<+laplace_nd(V(p,n), '{1.0}, '{1.0,1.0,1.0}); endmodule",
+    );
+    let mut device = fixture.device("UNDERFLOW", &[1, 0]);
+    device.set_analysis_type(1);
+    let mut terms = 0;
+    let error = device
+        .try_stamp_small_signal_complex(&[0.25], 1e200, |_, _, _, _| terms += 1)
+        .unwrap_err();
+    assert!(error.to_string().contains("underflows"));
+    assert_eq!(terms, 0);
+}
+
+#[test]
 fn homogeneous_math_device_values_and_gradients_preserve_extreme_scales() {
     for op in ["hypot", "atan2"] {
         for derivative in 0..3 {

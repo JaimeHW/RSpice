@@ -86,6 +86,218 @@ fn ac_real_axis_retains_sampled_filter_residuals_and_rejects_poles() {
     );
 }
 
+#[test]
+fn ac_quarter_cycle_preserves_residuals_and_exact_poles() {
+    for residual in [1.0, -1e-200, f64::from_bits(1)] {
+        let source = format!(
+            "module quadrature(p,n); inout p,n; electrical p,n; real y;
+             analog begin y=zi_nd(V(p,n), '{{1e200,{residual:e},1e200}}, '{{1.0}}, 1.0); I(p,n)<+y; end endmodule"
+        );
+        let mut device = compile_device("QUADRATURE", &source);
+        device.set_analysis_type(1);
+        for (frequency, sign) in [(0.25, -1.0), (0.75, 1.0), (1.25, -1.0), (1.75, 1.0)] {
+            let mut response = [0.0, 0.0];
+            device
+                .try_stamp_small_signal_complex(&[0.25], frequency, |row, col, re, im| {
+                    assert_eq!((row, col), (0, 0));
+                    response[0] += re;
+                    response[1] += im;
+                })
+                .unwrap();
+            assert_eq!(response, [0.0, residual * sign]);
+        }
+    }
+    let mut pole = compile_device(
+        "QUARTER_POLE",
+        "module qp(p,n); inout p,n; electrical p,n; real y;
+         analog begin y=zi_nd(V(p,n), '{1.0}, '{1.0,0.0,1.0}, 1.0); I(p,n)<+y; end endmodule",
+    );
+    pole.set_analysis_type(1);
+    for frequency in [0.25, 0.75] {
+        let mut published = 0;
+        assert!(
+            pole.try_stamp_small_signal_complex(&[0.25], frequency, |_, _, _, _| published += 1)
+                .is_err()
+        );
+        assert_eq!(
+            published, 0,
+            "a pole must not publish a partial matrix contribution"
+        );
+    }
+}
+
+#[test]
+fn ac_sampled_phase_preserves_wide_and_tiny_products() {
+    let tau = std::f64::consts::TAU;
+    for (numerator, period, frequency, expected) in [
+        (
+            "0.0,1.0",
+            1.0 + f64::EPSILON,
+            1.25 * (1_u64 << 52) as f64,
+            [0.0, -1.0],
+        ),
+        (
+            "0.0,1.0",
+            1.0 + f64::EPSILON,
+            1.5 * (1_u64 << 52) as f64,
+            [-1.0, 0.0],
+        ),
+        (
+            "0.0,1.0",
+            1.0 + f64::EPSILON,
+            1.75 * (1_u64 << 52) as f64,
+            [0.0, 1.0],
+        ),
+        ("0.0,1e300", 1e-200, 1e-200, [1e300, -tau * 1e-100]),
+        (
+            "1e300,-1e300",
+            1.0,
+            1e-160,
+            [0.5 * tau * tau * 1e-20, tau * 1e140],
+        ),
+    ] {
+        let source=format!(
+            "module phase(p,n); inout p,n; electrical p,n; real y;
+             analog begin y=zi_nd(V(p,n), '{{{numerator}}}, '{{1.0}}, {period:e}); I(p,n)<+y; end endmodule"
+        );
+        let mut device = compile_device("PHASE", &source);
+        device.set_analysis_type(1);
+        let mut response = [0.0, 0.0];
+        device
+            .try_stamp_small_signal_complex(&[0.25], frequency, |row, col, re, im| {
+                assert_eq!((row, col), (0, 0));
+                response[0] += re;
+                response[1] += im;
+            })
+            .unwrap();
+        for (actual, expected) in response.into_iter().zip(expected) {
+            if expected == 0.0 {
+                assert_eq!(actual, expected);
+            } else {
+                assert!(
+                    (actual / expected - 1.0).abs() <= 8.0 * f64::EPSILON,
+                    "{numerator}, frequency={frequency:e}: {actual:e} vs {expected:e}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn ac_dyadic_pole_neighbors_keep_finite_transfer_components() {
+    let mut device = compile_device(
+        "NEAR_POLE",
+        "module near_pole(p,n); inout p,n; electrical p,n; real y;
+         analog begin y=zi_nd(V(p,n), '{1.0}, '{1.0,0.0,0.0,0.0,1.0}, 1.0); I(p,n)<+y; end endmodule",
+    );
+    device.set_analysis_type(1);
+    let center = 0.125_f64;
+    for frequency in [center.next_down(), center.next_up()] {
+        let mut response = [0.0, 0.0];
+        device
+            .try_stamp_small_signal_complex(&[0.25], frequency, |row, col, re, im| {
+                assert_eq!((row, col), (0, 0));
+                response[0] += re;
+                response[1] += im;
+            })
+            .unwrap();
+        let imaginary = -0.5 / (2.0 * std::f64::consts::TAU * (frequency - center)).tan();
+        for (actual, expected) in response.into_iter().zip([0.5, imaginary]) {
+            assert!(
+                (actual / expected - 1.0).abs() <= 8.0 * f64::EPSILON,
+                "frequency={frequency}: {actual:e} vs {expected:e}"
+            );
+        }
+    }
+    let mut published = 0;
+    assert!(
+        device
+            .try_stamp_small_signal_complex(&[0.25], center, |_, _, _, _| published += 1)
+            .is_err()
+    );
+    assert_eq!(published, 0);
+}
+
+#[test]
+fn ac_non_dyadic_pole_neighbors_preserve_real_and_reactive_components() {
+    for reactive in [false, true] {
+        let numerator = if reactive { "1.0,0.0,0.0,-1.0" } else { "1.0" };
+        let source = format!(
+            "module bounded_ac(p,n); inout p,n; electrical p,n; real y;
+             analog begin y=zi_nd(V(p,n), '{{{numerator}}}, '{{1.0,0.0,0.0,1.0}}, 1.0);
+             I(p,n)<+y; end endmodule"
+        );
+        let mut device = compile_device("BOUNDED_AC", &source);
+        device.set_analysis_type(1);
+        // Independent 250-digit references for exact binary64 phases.
+        for (frequency_bits, imaginary_bits) in [
+            (0x3fc5555555555554, 0x43145f306dc9c883),
+            (0x3fc5555555555556, 0xc3245f306dc9c883),
+        ] {
+            let frequency = f64::from_bits(frequency_bits);
+            let imaginary = f64::from_bits(imaginary_bits);
+            let expected = if reactive {
+                [0.0, 2.0 * imaginary]
+            } else {
+                [0.5, imaginary]
+            };
+            let mut response = [0.0; 2];
+            device
+                .try_stamp_small_signal_complex(&[0.25], frequency, |row, col, re, im| {
+                    assert_eq!((row, col), (0, 0));
+                    response[0] += re;
+                    response[1] += im;
+                })
+                .unwrap();
+            for (actual, expected) in response.into_iter().zip(expected) {
+                if expected == 0.0 {
+                    assert_eq!(actual, 0.0);
+                } else {
+                    assert!(
+                        (actual / expected - 1.0).abs() <= 8.0 * f64::EPSILON,
+                        "f={frequency:e}, reactive={reactive}: {actual:e} vs {expected:e}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn ac_non_axis_zeros_and_subnormal_ties_reach_matrix_stamps() {
+    let tiny = f64::from_bits(1);
+    for amplitude in [1.0, tiny, 3.0 * tiny, 5.0 * tiny] {
+        let source = format!(
+            "module rounded_ac(p,n); inout p,n; electrical p,n; real y;
+             analog begin y=zi_nd(V(p,n), '{{0.0,0.0,{amplitude:.17e}}}, '{{2.0}}, 1.0);
+             I(p,n)<+y; end endmodule"
+        );
+        let mut device = compile_device("ROUNDED_AC", &source);
+        device.set_analysis_type(1);
+        let mut response = [0.0; 2];
+        let mut published = 0;
+        let result = device.try_stamp_small_signal_complex(&[2.0], 0.125, |row, col, re, im| {
+            assert_eq!((row, col), (0, 0));
+            published += 1;
+            response[0] += re;
+            response[1] += im;
+        });
+        if amplitude == tiny {
+            let error = result
+                .expect_err("half-minsub must be a range error")
+                .to_string();
+            assert!(error.contains("underflow"), "{error}");
+            assert_eq!(
+                published, 0,
+                "a failed filter must not publish matrix terms"
+            );
+        } else {
+            result.unwrap();
+            assert_eq!(response, [0.0, -amplitude / 2.0]);
+        }
+    }
+}
+
 /// First-order IIR lowpass: y[n] = 0.25 x[n] + 0.75 y[n-1], H(1) = 1
 const IIR: &str = r#"
 `include "disciplines.vams"
