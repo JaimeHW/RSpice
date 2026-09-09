@@ -46,6 +46,8 @@ class TestTransient:
             "R2 out out 1e-20",
             "C2 out out 1e6",
             "D2 out out dm\n.model dm D(IS=1e20 CJO=1e20)",
+            "Q2 out out out out qm\n.model qm NPN(IS=1e20 CJE=1e20 CJC=1e20 CJS=1e20)",
+            "Q2 out out out out qm\n.model qm PNP(IS=1e20 CJE=1e20 CJC=1e20 CJS=1e20)",
             "J2 out out out jm\n.model jm NJF(BETA=1e20 VTO=-1 IS=1e20 CGS=1e20 CGD=1e20)",
             (
                 "M2 out out out out mm W=1 L=1\n"

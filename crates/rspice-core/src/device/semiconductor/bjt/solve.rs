@@ -1095,17 +1095,77 @@ impl Bjt {
         ve: Value,
         vs: Value,
     ) -> (BjtConductanceMatrix, [Value; EXTERNAL_DIM]) {
-        let rows = self.small_signal_row_coefficients(vc, vb, ve, vs);
+        let mut rows = self.small_signal_row_coefficients(vc, vb, ve, vs);
         let anchor = self.companion_anchor(vc, vb, ve, vs);
-        let currents = self.external_terminal_currents_at_bias(vc, vb, ve, vs);
+        let mut currents = self.external_terminal_currents_at_bias(vc, vb, ve, vs);
+        let reference = self.project_legacy_tied_terminal_system(&mut rows, &mut currents);
         let mut rhs = [0.0; EXTERNAL_DIM];
         for row in 0..EXTERNAL_DIM {
-            rhs[row] = -currents[row];
-            for col in 0..EXTERNAL_DIM {
-                rhs[row] += rows[row][col] * anchor[col];
-            }
+            // A tied port uses independent voltage differences. Forming
+            // its Norton source from absolute voltages can lose the small
+            // current beside cancelling common-mode products. Subtract the
+            // current after the dot product, as in the original static stamp.
+            rhs[row] = (0..EXTERNAL_DIM)
+                .map(|col| {
+                    let voltage = reference.map_or(anchor[col], |idx| anchor[col] - anchor[idx]);
+                    rows[row][col] * voltage
+                })
+                .sum::<Value>()
+                - currents[row];
         }
         (rows, rhs)
+    }
+
+    /// Reduce a conservative electrical port before adding it to the global
+    /// matrix. The shared C/B/E node is the reference: its dependent row and
+    /// column must never be summed into an already populated matrix slot.
+    /// Keep the independent terminal entries and recover the reference from
+    /// KCL and voltage-shift invariance. This also retains a distinct substrate.
+    pub(crate) fn project_legacy_tied_terminal_system<T>(
+        &self,
+        matrix: &mut [[T; EXTERNAL_DIM]; EXTERNAL_DIM],
+        rhs: &mut [T; EXTERNAL_DIM],
+    ) -> Option<usize>
+    where
+        T: Copy + Default + std::ops::AddAssign + std::ops::SubAssign,
+    {
+        if self.charge_model != BjtChargeModel::LegacyGummelPoon {
+            return None;
+        }
+        let nodes = self.external_terminal_nodes();
+        let reference = if nodes[EXT_C] == nodes[EXT_B] || nodes[EXT_C] == nodes[EXT_E] {
+            EXT_C
+        } else if nodes[EXT_B] == nodes[EXT_E] {
+            EXT_B
+        } else {
+            return None;
+        };
+        let representatives: [usize; EXTERNAL_DIM] =
+            std::array::from_fn(|idx| (0..=idx).find(|&other| nodes[other] == nodes[idx]).unwrap());
+        let mut reduced = [[T::default(); EXTERNAL_DIM]; EXTERNAL_DIM];
+        let mut source = [T::default(); EXTERNAL_DIM];
+        for row in 0..EXTERNAL_DIM {
+            if nodes[row] == nodes[reference] {
+                continue;
+            }
+            let i = representatives[row];
+            source[i] += rhs[row];
+            source[reference] -= rhs[row];
+            for col in 0..EXTERNAL_DIM {
+                if nodes[col] == nodes[reference] {
+                    continue;
+                }
+                let j = representatives[col];
+                let value = matrix[row][col];
+                reduced[i][j] += value;
+                reduced[i][reference] -= value;
+                reduced[reference][j] -= value;
+                reduced[reference][reference] += value;
+            }
+        }
+        *matrix = reduced;
+        *rhs = source;
+        Some(reference)
     }
 
     pub(crate) fn stamp_small_signal_ac(
@@ -1121,7 +1181,8 @@ impl Bjt {
             return;
         }
         let [vc, vb, ve, vs] = self.external_terminal_voltages(voltages);
-        let rows = self.small_signal_row_coefficients(vc, vb, ve, vs);
+        let mut rows = self.small_signal_row_coefficients(vc, vb, ve, vs);
+        self.project_legacy_tied_terminal_system(&mut rows, &mut [0.0; EXTERNAL_DIM]);
         let nodes = self.external_terminal_nodes();
         for row_idx in 0..EXTERNAL_DIM {
             for col_idx in 0..EXTERNAL_DIM {

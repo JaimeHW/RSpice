@@ -226,8 +226,37 @@ impl Bjt {
     pub(in crate::device::semiconductor::bjt) fn project_legacy_limited_branches_onto_internal_state(
         &self,
         raw: [Value; INTERNAL_DIM],
-        limited: LegacyNonlinearBranchVoltages,
+        mut limited: LegacyNonlinearBranchVoltages,
     ) -> [Value; INTERNAL_DIM] {
+        let terminals = [
+            self.legacy_charge_collector_terminal(),
+            self.legacy_charge_base_terminal(),
+            self.legacy_charge_emitter_terminal(),
+            self.legacy_charge_substrate_terminal(),
+        ];
+        let nodes = self.external_terminal_nodes();
+        let tied = |a: usize, b: usize| {
+            matches!((terminals[a].1, terminals[b].1),
+                (Some(i), Some(j)) if nodes[i] == nodes[j])
+        };
+        // Limiting cannot introduce a voltage across a physical wire. Series
+        // nodes remain independent, even if the authored terminals are tied.
+        if tied(EXT_B, EXT_E) {
+            limited.vbe = 0.0;
+        }
+        if tied(EXT_B, EXT_C) {
+            limited.vbc = 0.0;
+        }
+        if tied(EXT_C, EXT_E) {
+            limited.vbc = limited.vbe;
+        }
+        if tied(EXT_S, EXT_C) {
+            limited.vsub = 0.0;
+        } else if tied(EXT_S, EXT_B) {
+            limited.vsub = limited.vbc;
+        } else if tied(EXT_S, EXT_E) {
+            limited.vsub = limited.vbc - limited.vbe;
+        }
         let p = self.polarity();
         let raw_nodes = [
             raw[IDX_VCX],
@@ -274,6 +303,14 @@ impl Bjt {
                 .map(|row| constraints[row][node_idx] * lagrange[row])
                 .sum::<Value>();
             projected[node_idx] = raw_nodes[node_idx] - correction;
+        }
+        // The projection solve may leave equal nodes one ulp apart. Copy
+        // the representative so large junction slopes still see exactly zero.
+        let internal = [IDX_VCI, IDX_VBI, IDX_VEI, IDX_VSI];
+        for terminal in 1..EXTERNAL_DIM {
+            if let Some(other) = (0..terminal).find(|&other| tied(terminal, other)) {
+                projected[internal[terminal]] = projected[internal[other]];
+            }
         }
         projected
     }

@@ -751,6 +751,20 @@ impl Bjt {
             branches[7] = branch;
         }
 
+        let nodes = self.external_terminal_nodes();
+        for branch in &mut branches {
+            let tied = match (branch.pos_external, branch.neg_external) {
+                (Some(pos), Some(neg)) => nodes[pos] == nodes[neg],
+                _ => matches!((branch.pos_internal, branch.neg_internal),
+                    (Some(pos), Some(neg)) if pos == neg),
+            };
+            if tied {
+                // No incidence means no charge enters the circuit. Remove
+                // it before accumulating derivatives, while retaining any
+                // branch separated by a real internal series resistance.
+                *branch = BjtChargeBranch::default();
+            }
+        }
         branches
     }
 
@@ -1392,6 +1406,25 @@ mod tests {
             assert_eq!(charge.qbc, 3e-12 * -0.5);
             assert_eq!(charge.capbc, 3e-12);
         }
+    }
+
+    #[test]
+    fn legacy_tied_charge_branches_preserve_substrate_and_internal_series_storage() {
+        let params = [("CJE", 1.0), ("CJC", 1.0), ("CJS", 1e-9)]
+            .map(|(name, value)| (name.to_owned(), value))
+            .into_iter()
+            .collect();
+        let mut bjt = Bjt::new_npn("q".into(), 1, 1, 1).with_params(&params);
+        let reduction = BjtDynamicReduction::default();
+        let branches = bjt.legacy_dynamic_charge_branches(&reduction);
+        assert!(!branches[0].is_active());
+        assert!(!branches[2].is_active());
+        assert!(branches[7].is_active());
+        bjt.rbi = 1.0;
+        let branches = bjt.legacy_dynamic_charge_branches(&reduction);
+        assert!(branches[0].is_active());
+        assert!(branches[2].is_active());
+        assert!(branches[7].is_active());
     }
 
     #[test]

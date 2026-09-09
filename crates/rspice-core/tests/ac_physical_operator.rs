@@ -103,6 +103,174 @@ fn tied_admittance_terminals_preserve_the_physical_rc_response() {
 }
 
 #[test]
+fn tied_bjt_terminals_preserve_dc_ac_and_transient_substrate_loading() {
+    use rspice_core::engine::SpiceDialect;
+    for dialect in [
+        SpiceDialect::BestAvailable,
+        SpiceDialect::Ngspice,
+        SpiceDialect::Xyce,
+    ] {
+        let engine = Engine::new(SimulationConfig {
+            spice_dialect: dialect,
+            locked_time_grid: Some(std::sync::Arc::new(
+                (0..=8).map(|i| f64::from(i) * 0.25e-9).collect(),
+            )),
+            ..Default::default()
+        });
+        for kind in ["NPN", "PNP"] {
+            for substrate in ["0", "out"] {
+                let solve = |device: &str| {
+                    let netlist = parse(&format!(
+                        "tied BJT\nI1 0 out DC 1 PWL(0 1 2n 2) AC 1\nR1 out 0 1\n{device}\n.end\n"
+                    ));
+                    let dc = engine.run_dc_op(&netlist).unwrap();
+                    assert!((dc.try_voltage_named("out").unwrap() - 1.0).abs() < 1e-12);
+                    let ac = engine.run_ac(&netlist, &[1e6]).unwrap();
+                    let tran = engine.run_tran(&netlist, 2e-9, 0.25e-9).unwrap();
+                    assert_eq!(engine.convergence_quality().force_accepted_points, 0);
+                    (voltage(&ac[0], "out"), tran)
+                };
+                let (expected_ac, expected_tran) = solve(&format!("C1 out {substrate} 1n"));
+                for isat in [1e-14, 1e20] {
+                    let cjs = if substrate == "out" { 1e20 } else { 1e-9 };
+                    let (actual_ac, actual_tran) = solve(&format!(
+                        "Q1 out out out {substrate} qm\n.model qm {kind}(IS={isat} CJE=1e20 CJC=1e20 CJS={cjs} MJS=0)"
+                    ));
+                    assert!(
+                        (actual_ac - expected_ac).norm() < 1e-12,
+                        "{dialect:?}, {kind}, {substrate}, IS={isat}: {actual_ac} vs {expected_ac}"
+                    );
+                    assert_eq!(actual_tran.time, expected_tran.time);
+                    for (actual, expected) in actual_tran
+                        .try_voltage_waveform_named("out")
+                        .unwrap()
+                        .iter()
+                        .zip(expected_tran.try_voltage_waveform_named("out").unwrap())
+                    {
+                        assert!(
+                            (actual - expected).abs() < 1e-10,
+                            "{dialect:?}, {kind}, {substrate}, IS={isat}: {actual} vs {expected}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn partially_tied_bjt_matches_its_independent_diode_and_charge() {
+    use rspice_core::engine::SpiceDialect;
+    for dialect in [
+        SpiceDialect::BestAvailable,
+        SpiceDialect::Ngspice,
+        SpiceDialect::Xyce,
+    ] {
+        // The standalone diode retains ngspice's older k/q constants, while
+        // the native GP model uses SI constants outside Xyce mode. Match n*VT
+        // so this comparison isolates the terminal and charge topology.
+        let diode_n = if dialect == SpiceDialect::Xyce {
+            1.0
+        } else {
+            (rspice_core::constants::K_BOLTZMANN / rspice_core::constants::Q_ELECTRON)
+                / (1.38064852e-23 / 1.6021766208e-19)
+        };
+        let engine = Engine::new(SimulationConfig {
+            spice_dialect: dialect,
+            tolerance: 1e-12,
+            convergence_config: rspice_core::engine::ConvergenceConfig {
+                voltage_reltol: 1e-10,
+                voltage_abstol: 1e-12,
+                current_abstol: 1e-15,
+                residual_reltol: 1e-10,
+                junction_gmin_target: 0.0,
+                ..Default::default()
+            },
+            locked_time_grid: Some(std::sync::Arc::new(
+                (0..=8).map(|i| f64::from(i) * 0.25e-9).collect(),
+            )),
+            ..Default::default()
+        });
+        for (kind, polarity) in [("NPN", 1.0), ("PNP", -1.0)] {
+            for (terminals, parameters, isat, cap, direction, drive) in [
+                (
+                    "out out 0",
+                    "IS=1e-6 BF=100 CJE=1n CJC=1e20",
+                    1.01e-6,
+                    1e-9,
+                    1.0,
+                    1e-4,
+                ),
+                (
+                    "0 out 0",
+                    "IS=1e20 BF=1e20 BR=1e20 CJE=1n CJC=2n",
+                    2.0,
+                    3e-9,
+                    1.0,
+                    1.0,
+                ),
+                (
+                    "out 0 0",
+                    "IS=1e-6 BR=1 CJE=1e20 CJC=1n",
+                    2e-6,
+                    1e-9,
+                    -1.0,
+                    1e-4,
+                ),
+            ] {
+                let sign = polarity * direction;
+                let diode_nodes = if sign > 0.0 { "out 0" } else { "0 out" };
+                let solve = |device: &str| {
+                    let netlist = parse(&format!(
+                        "partial BJT tie\nI1 0 out DC {} PWL(0 {} 2n {}) AC 1\nR1 out 0 1\n{device}\n.end\n",
+                        sign * drive,
+                        sign * drive,
+                        sign * drive * 2.0,
+                    ));
+                    (
+                        engine.run_ac(&netlist, &[1e6]).unwrap(),
+                        engine.run_tran(&netlist, 2e-9, 0.25e-9).unwrap(),
+                    )
+                };
+                let (expected_ac, expected_tran) = solve(&format!(
+                    "D1 {diode_nodes} dm\n.model dm D(IS={isat} N={diode_n} CJO={cap} M=0)"
+                ));
+                let (actual_ac, actual_tran) = solve(&format!(
+                    "Q1 {terminals} qm\n.model qm {kind}({parameters} MJE=0 MJC=0)"
+                ));
+                assert!(
+                    (voltage(&actual_ac[0], "out") - voltage(&expected_ac[0], "out")).norm()
+                        < 1e-10,
+                    "{dialect:?}, {kind}, {terminals}: {} vs {}; initial {:?} vs {:?}",
+                    voltage(&actual_ac[0], "out"),
+                    voltage(&expected_ac[0], "out"),
+                    actual_tran
+                        .try_voltage_waveform_named("out")
+                        .unwrap()
+                        .first(),
+                    expected_tran
+                        .try_voltage_waveform_named("out")
+                        .unwrap()
+                        .first()
+                );
+                assert_eq!(actual_tran.time, expected_tran.time);
+                for (actual, expected) in actual_tran
+                    .try_voltage_waveform_named("out")
+                    .unwrap()
+                    .iter()
+                    .zip(expected_tran.try_voltage_waveform_named("out").unwrap())
+                {
+                    assert!(
+                        (actual - expected).abs() < 1e-10,
+                        "{dialect:?}, {kind}, {terminals}: {actual} vs {expected}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn reverse_mos_channel_retains_small_output_conductance_beside_large_transconductance() {
     use rspice_core::engine::SpiceDialect;
     for dialect in [
