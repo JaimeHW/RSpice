@@ -770,7 +770,9 @@ fn hash_source_dependencies(
         SourceSpec::Distortion { inner, .. } | SourceSpec::RfPort { inner, .. } => {
             hash_source_dependencies(hasher, inner, source_path);
         }
-        SourceSpec::DcTransient { transient, .. } | SourceSpec::DcAcTransient { transient, .. } => {
+        SourceSpec::DcTransient { transient, .. }
+        | SourceSpec::AcTransient { transient, .. }
+        | SourceSpec::DcAcTransient { transient, .. } => {
             hash_source_dependencies(hasher, transient, source_path);
         }
         SourceSpec::PwlFile { path, .. } => hash_dependency(hasher, path, source_path, false, None),
@@ -1188,8 +1190,8 @@ pub(crate) fn simulation_checkpoint_identity(config: &SimulationConfig) -> Strin
     // v35 preserves physical VBIC currents in operating-point correction solves.
     // v36 gives RBI an independent current and voltage constitutive equation.
     // v37 preserves explicitly zero and negative VBIC activation energies.
-    // v38 scales legacy ITF with its instance and preserves small-current charge.
-    hasher.update(b"rspice-transient-resolved-config-v38\0");
+    // v39 preserves waveform DC bias when AC is authored without explicit DC.
+    hasher.update(b"rspice-transient-resolved-config-v39\0");
     hash_field(&mut hasher, "temperature", config.temperature.to_bits());
     hash_field(&mut hasher, "ramptime", config.ramptime.to_bits());
     hash_field(&mut hasher, "digital_delay_type", config.digital_delay_type);
@@ -13494,7 +13496,8 @@ mod tests {
         std::fs::create_dir_all(&directory).expect("create PWL checkpoint test directory");
         let root = directory.join("root.cir");
         let waveform = directory.join("wave.csv");
-        let source = "pwl dependency identity\nv1 1 0 pwl file=\"wave.csv\"\nr1 1 0 1k\n.end\n";
+        let source =
+            "pwl dependency identity\nv1 1 0 pwl file=\"wave.csv\" ac 1\nr1 1 0 1k\n.end\n";
         std::fs::write(&waveform, "0,0\n1e-9,1\n").expect("write first waveform");
         let netlist = Netlist::parse_with_path(source, &root).expect("PWL deck parses");
         let first = netlist_checkpoint_identity(&netlist);

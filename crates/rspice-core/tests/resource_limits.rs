@@ -334,7 +334,7 @@ fn circuit_build_rejects_oversized_pwl_files_with_a_typed_error() {
     let waveform = "0 0\n1 1\n";
     std::fs::write(directory.0.join("wave.csv"), waveform).expect("write PWL waveform");
     let netlist = Netlist::parse_with_path(
-        "limited PWL\nV1 1 0 PWL FILE=\"wave.csv\"\nR1 1 0 1k\n.end\n",
+        "limited PWL\nV1 1 0 PWL FILE=\"wave.csv\" AC 1\nR1 1 0 1k\n.end\n",
         &root,
     )
     .expect("PWL fixture parses");
@@ -351,6 +351,34 @@ fn circuit_build_rejects_oversized_pwl_files_with_a_typed_error() {
             limit,
         })) if requested == waveform.len() && limit == waveform.len() - 1
     ));
+}
+
+#[test]
+fn file_waveform_ac_bias_is_loaded_at_build_time() {
+    let directory = TestDirectory::new("pwl-ac-bias");
+    let path = directory.0.join("wave.csv");
+    let root = directory.0.join("root.cir");
+    // Parsing must not freeze the bias, or require the file to exist yet.
+    let netlist = Netlist::parse_with_path(
+        "file waveform bias\nV1 out 0 PWL FILE=\"wave.csv\" AC 1\nR1 out 0 1\n.end\n",
+        &root,
+    )
+    .unwrap();
+    let engine = Engine::default();
+    assert!(
+        engine.run_dc_op(&netlist).is_err(),
+        "missing waveform must fail at build time"
+    );
+    for (contents, expected) in [("0 .65\n1e-9 .7\n", 0.65), ("0 -.125\n1e-9 .7\n", -0.125)] {
+        std::fs::write(&path, contents).unwrap();
+        let dc = engine.run_dc_op(&netlist).unwrap();
+        let index = dc
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("out"))
+            .unwrap();
+        assert!((dc.node_voltages[index] - expected).abs() < 1e-12);
+    }
 }
 
 #[test]

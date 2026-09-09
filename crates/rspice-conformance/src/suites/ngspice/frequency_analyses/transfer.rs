@@ -136,29 +136,7 @@ impl TestRunner {
     }
 
     fn get_source_dc_value_from_spec(spec: &rspice_core::netlist::SourceSpec) -> Value {
-        match spec {
-            rspice_core::netlist::SourceSpec::Distortion { inner, .. } => {
-                Self::get_source_dc_value_from_spec(inner)
-            }
-            rspice_core::netlist::SourceSpec::RfPort { inner, .. } => {
-                Self::get_source_dc_value_from_spec(inner)
-            }
-            rspice_core::netlist::SourceSpec::Dc(v) => *v,
-            rspice_core::netlist::SourceSpec::DcAc { dc_value, .. } => *dc_value,
-            rspice_core::netlist::SourceSpec::DcTransient { dc_value, .. } => *dc_value,
-            rspice_core::netlist::SourceSpec::DcAcTransient { dc_value, .. } => *dc_value,
-            rspice_core::netlist::SourceSpec::Ac { .. }
-            | rspice_core::netlist::SourceSpec::Pulse { .. }
-            | rspice_core::netlist::SourceSpec::Sin { .. }
-            | rspice_core::netlist::SourceSpec::Pwl { .. }
-            | rspice_core::netlist::SourceSpec::PwlFile { .. }
-            | rspice_core::netlist::SourceSpec::Pat { .. }
-            | rspice_core::netlist::SourceSpec::Exp { .. }
-            | rspice_core::netlist::SourceSpec::Sffm { .. }
-            | rspice_core::netlist::SourceSpec::Am { .. }
-            | rspice_core::netlist::SourceSpec::TrNoise { .. }
-            | rspice_core::netlist::SourceSpec::TrRandom { .. } => 0.0,
-        }
+        rspice_core::engine::extract_dc_value(spec)
     }
 
     pub(in crate::suites::ngspice) fn run_transfer_function_test(

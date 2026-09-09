@@ -62,6 +62,9 @@ impl VoltageSources {
             | SourceSpec::DcTransient {
                 transient: inner, ..
             }
+            | SourceSpec::AcTransient {
+                transient: inner, ..
+            }
             | SourceSpec::DcAcTransient {
                 transient: inner, ..
             }
@@ -139,6 +142,9 @@ impl VoltageSources {
         match spec {
             SourceSpec::Distortion { inner, .. }
             | SourceSpec::DcTransient {
+                transient: inner, ..
+            }
+            | SourceSpec::AcTransient {
                 transient: inner, ..
             }
             | SourceSpec::DcAcTransient {
@@ -234,6 +240,9 @@ impl VoltageSources {
             | SourceSpec::DcTransient {
                 transient: inner, ..
             }
+            | SourceSpec::AcTransient {
+                transient: inner, ..
+            }
             | SourceSpec::DcAcTransient {
                 transient: inner, ..
             } => Self::constant_waveform_over_orbit(inner, period, context, pwl),
@@ -327,6 +336,9 @@ impl VoltageSources {
         match spec {
             SourceSpec::Distortion { inner, .. }
             | SourceSpec::DcTransient {
+                transient: inner, ..
+            }
+            | SourceSpec::AcTransient {
                 transient: inner, ..
             }
             | SourceSpec::DcAcTransient {

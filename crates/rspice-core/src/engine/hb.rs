@@ -2433,8 +2433,7 @@ mod tests {
     #[test]
     fn transient_waveform_takes_precedence_over_small_signal_ac_annotation() {
         let config = HbConfig::new(1.0e3).with_harmonics(3);
-        let source = SourceSpec::DcAcTransient {
-            dc_value: 0.0,
+        let source = SourceSpec::AcTransient {
             ac_magnitude: 99.0,
             ac_phase: 1.0,
             transient: Box::new(SourceSpec::Sin {
@@ -2446,22 +2445,23 @@ mod tests {
                 phase: 0.0,
             }),
         };
-        let spectrum = Engine::hb_source_spectrum(
-            0.0,
-            99.0,
-            1.0,
-            Some(&source),
-            &config,
-            &[1],
-            SpiceDialect::BestAvailable,
-        )
-        .expect("periodic transient spectrum");
-
-        assert_eq!(spectrum.dc, 1.0);
-        let (_, amplitude, phase) = spectrum.harmonics[0];
-        let phasor = Complex64::from_polar(amplitude, phase);
-        assert!(phasor.re.abs() < 1.0e-12, "phasor={phasor:?}");
-        assert!((phasor.im + 2.0).abs() < 1.0e-12, "phasor={phasor:?}");
+        for source in [source.clone(), source.with_dc_value(0.0)] {
+            let spectrum = Engine::hb_source_spectrum(
+                0.0,
+                99.0,
+                1.0,
+                Some(&source),
+                &config,
+                &[1],
+                SpiceDialect::BestAvailable,
+            )
+            .expect("periodic transient spectrum");
+            assert_eq!(spectrum.dc, 1.0);
+            let (_, amplitude, phase) = spectrum.harmonics[0];
+            let phasor = Complex64::from_polar(amplitude, phase);
+            assert!(phasor.re.abs() < 1.0e-12, "phasor={phasor:?}");
+            assert!((phasor.im + 2.0).abs() < 1.0e-12, "phasor={phasor:?}");
+        }
     }
 
     #[test]

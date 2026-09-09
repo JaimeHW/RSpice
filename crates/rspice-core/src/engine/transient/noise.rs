@@ -104,9 +104,9 @@ fn spec_contains_transient_random(spec: &SourceSpec) -> bool {
     match spec {
         SourceSpec::RfPort { inner, .. } => spec_contains_transient_random(inner),
         SourceSpec::TrNoise { .. } | SourceSpec::TrRandom { .. } => true,
-        SourceSpec::DcTransient { transient, .. } | SourceSpec::DcAcTransient { transient, .. } => {
-            spec_contains_transient_random(transient)
-        }
+        SourceSpec::DcTransient { transient, .. }
+        | SourceSpec::AcTransient { transient, .. }
+        | SourceSpec::DcAcTransient { transient, .. } => spec_contains_transient_random(transient),
         _ => false,
     }
 }
@@ -177,7 +177,9 @@ fn replace_transient_random(
             };
             Ok(())
         }
-        SourceSpec::DcTransient { transient, .. } | SourceSpec::DcAcTransient { transient, .. } => {
+        SourceSpec::DcTransient { transient, .. }
+        | SourceSpec::AcTransient { transient, .. }
+        | SourceSpec::DcAcTransient { transient, .. } => {
             replace_transient_random(transient, tstop, seed, name)
         }
         _ => Ok(()),

@@ -975,7 +975,9 @@ fn validate_source_inputs(
             }
             Ok(Some(waveform))
         }
-        SourceSpec::DcTransient { transient, .. } | SourceSpec::DcAcTransient { transient, .. } => {
+        SourceSpec::DcTransient { transient, .. }
+        | SourceSpec::AcTransient { transient, .. }
+        | SourceSpec::DcAcTransient { transient, .. } => {
             validate_source_inputs(source_name, transient, dialect, resource_limits)
         }
         _ => Ok(None),
@@ -5408,6 +5410,7 @@ impl Engine {
                         | crate::netlist::SourceSpec::PwlFile { .. }
                         | crate::netlist::SourceSpec::Pat { .. }
                         | crate::netlist::SourceSpec::DcTransient { .. }
+                        | crate::netlist::SourceSpec::AcTransient { .. }
                         | crate::netlist::SourceSpec::DcAcTransient { .. }
                         | crate::netlist::SourceSpec::Exp { .. }
                         | crate::netlist::SourceSpec::Sffm { .. }
@@ -5457,6 +5460,7 @@ impl Engine {
                         | crate::netlist::SourceSpec::PwlFile { .. }
                         | crate::netlist::SourceSpec::Pat { .. }
                         | crate::netlist::SourceSpec::DcTransient { .. }
+                        | crate::netlist::SourceSpec::AcTransient { .. }
                         | crate::netlist::SourceSpec::DcAcTransient { .. }
                         | crate::netlist::SourceSpec::Exp { .. }
                         | crate::netlist::SourceSpec::Sffm { .. }

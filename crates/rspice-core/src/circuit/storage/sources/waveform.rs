@@ -26,6 +26,9 @@ impl VoltageSources {
             | SourceSpec::DcTransient {
                 transient: inner, ..
             }
+            | SourceSpec::AcTransient {
+                transient: inner, ..
+            }
             | SourceSpec::DcAcTransient {
                 transient: inner, ..
             } => Self::source_needs_time_basis(inner, dialect),
@@ -222,10 +225,9 @@ impl VoltageSources {
                     *dc_value
                 }
             }
-            SourceSpec::DcTransient { transient, .. } => {
-                Self::source_time_component::<DERIVATIVE>(transient, time, context, pwl_waveform)
-            }
-            SourceSpec::DcAcTransient { transient, .. } => {
+            SourceSpec::DcTransient { transient, .. }
+            | SourceSpec::AcTransient { transient, .. }
+            | SourceSpec::DcAcTransient { transient, .. } => {
                 Self::source_time_component::<DERIVATIVE>(transient, time, context, pwl_waveform)
             }
             SourceSpec::Pulse {

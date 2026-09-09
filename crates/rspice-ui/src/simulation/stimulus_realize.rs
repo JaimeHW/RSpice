@@ -325,9 +325,9 @@ fn transient_part(spec: &SourceSpec) -> &SourceSpec {
         SourceSpec::Distortion { inner, .. } | SourceSpec::RfPort { inner, .. } => {
             transient_part(inner)
         }
-        SourceSpec::DcTransient { transient, .. } | SourceSpec::DcAcTransient { transient, .. } => {
-            transient_part(transient)
-        }
+        SourceSpec::DcTransient { transient, .. }
+        | SourceSpec::AcTransient { transient, .. }
+        | SourceSpec::DcAcTransient { transient, .. } => transient_part(transient),
         other => other,
     }
 }

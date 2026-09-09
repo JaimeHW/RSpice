@@ -322,43 +322,8 @@ impl TestRunner {
             match &mut element.kind {
                 rspice_core::netlist::ElementKind::VoltageSource(spec)
                 | rspice_core::netlist::ElementKind::CurrentSource(spec) => {
-                    match spec {
-                        rspice_core::netlist::SourceSpec::Distortion { inner, .. } => {
-                            **inner = std::mem::replace(
-                                inner.as_mut(),
-                                rspice_core::netlist::SourceSpec::Dc(0.0),
-                            )
-                            .with_dc_value(dc_value);
-                        }
-                        rspice_core::netlist::SourceSpec::RfPort { inner, .. } => {
-                            **inner = std::mem::replace(
-                                inner.as_mut(),
-                                rspice_core::netlist::SourceSpec::Dc(0.0),
-                            )
-                            .with_dc_value(dc_value);
-                        }
-                        rspice_core::netlist::SourceSpec::Dc(v) => *v = dc_value,
-                        rspice_core::netlist::SourceSpec::DcAc { dc_value: v, .. } => *v = dc_value,
-                        rspice_core::netlist::SourceSpec::DcTransient { dc_value: v, .. } => {
-                            *v = dc_value
-                        }
-                        rspice_core::netlist::SourceSpec::DcAcTransient { dc_value: v, .. } => {
-                            *v = dc_value
-                        }
-                        rspice_core::netlist::SourceSpec::Ac { .. }
-                        | rspice_core::netlist::SourceSpec::Pulse { .. }
-                        | rspice_core::netlist::SourceSpec::Sin { .. }
-                        | rspice_core::netlist::SourceSpec::Pwl { .. }
-                        | rspice_core::netlist::SourceSpec::PwlFile { .. }
-                        | rspice_core::netlist::SourceSpec::Pat { .. }
-                        | rspice_core::netlist::SourceSpec::Exp { .. }
-                        | rspice_core::netlist::SourceSpec::Sffm { .. }
-                        | rspice_core::netlist::SourceSpec::Am { .. }
-                        | rspice_core::netlist::SourceSpec::TrNoise { .. }
-                        | rspice_core::netlist::SourceSpec::TrRandom { .. } => {
-                            *spec = rspice_core::netlist::SourceSpec::Dc(dc_value);
-                        }
-                    }
+                    *spec = std::mem::replace(spec, rspice_core::netlist::SourceSpec::Dc(0.0))
+                        .with_dc_value(dc_value);
                     return Ok(());
                 }
                 _ => {

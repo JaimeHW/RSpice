@@ -2576,7 +2576,9 @@ fn normalize_source_spec_file_paths(spec: &mut SourceSpec, source_base_dir: &Pat
                     .into_owned();
             }
         }
-        SourceSpec::DcTransient { transient, .. } | SourceSpec::DcAcTransient { transient, .. } => {
+        SourceSpec::DcTransient { transient, .. }
+        | SourceSpec::AcTransient { transient, .. }
+        | SourceSpec::DcAcTransient { transient, .. } => {
             normalize_source_spec_file_paths(transient, source_base_dir);
         }
         _ => {}
@@ -10198,7 +10200,7 @@ mod tests {
         .expect("netlist parses");
         assert!(matches!(
             first_source_spec(&netlist),
-            SourceSpec::DcAcTransient { dc_value, .. } if *dc_value == 0.0
+            SourceSpec::AcTransient { .. }
         ));
 
         // Omitted AC magnitude still defaults when followed by a recognized
@@ -10212,7 +10214,7 @@ mod tests {
         .expect("omitted AC magnitude before transient parses");
         assert!(matches!(
             first_source_spec(&netlist),
-            SourceSpec::DcAcTransient {
+            SourceSpec::AcTransient {
                 ac_magnitude,
                 transient,
                 ..
@@ -10545,7 +10547,7 @@ mod tests {
         let voltage = first_source_spec(&netlist);
         assert!(matches!(
             voltage,
-            SourceSpec::DcAcTransient {
+            SourceSpec::AcTransient {
                 ac_magnitude,
                 transient,
                 ..

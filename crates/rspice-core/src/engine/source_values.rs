@@ -12,9 +12,10 @@ pub(crate) fn extract_dc_value_with_limits(
     resource_limits: crate::resource::ResourceLimits,
 ) -> Value {
     match spec {
-        SourceSpec::Distortion { inner, .. } => {
-            extract_dc_value_with_limits(inner, resource_limits)
-        }
+        SourceSpec::Distortion { inner, .. }
+        | SourceSpec::AcTransient {
+            transient: inner, ..
+        } => extract_dc_value_with_limits(inner, resource_limits),
         // Same rule as SIN below: ngspice's TRANOP takes the `time = 0`
         // waveform value rather than the bare DC (MODEDC covers MODETRANOP, so
         // vsrcload.c reaches `case PORT`). Without it the transient would open
@@ -112,7 +113,12 @@ pub fn extract_ac_value(spec: &SourceSpec) -> (Value, Value) {
             ac_phase,
             ..
         } => (*ac_magnitude, *ac_phase),
-        SourceSpec::DcAcTransient {
+        SourceSpec::AcTransient {
+            ac_magnitude,
+            ac_phase,
+            ..
+        }
+        | SourceSpec::DcAcTransient {
             ac_magnitude,
             ac_phase,
             ..

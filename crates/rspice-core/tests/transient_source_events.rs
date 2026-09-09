@@ -79,6 +79,27 @@ fn selected_source_events_use_the_transient_breakpoint_contract() {
 }
 
 #[test]
+fn ac_annotations_preserve_waveform_event_schedules() {
+    use rspice_core::netlist::ElementKind;
+    let mut netlist = event_deck();
+    let engine = Engine::default();
+    let expected = engine
+        .transient_source_event_times(&netlist, 6e-6, 1e-7, &[])
+        .unwrap();
+    for element in &mut netlist.elements {
+        if let ElementKind::VoltageSource(spec) | ElementKind::CurrentSource(spec) =
+            &mut element.kind
+        {
+            *spec = spec.clone().with_ac(1.0, 0.0);
+        }
+    }
+    let actual = engine
+        .transient_source_event_times(&netlist, 6e-6, 1e-7, &[])
+        .unwrap();
+    assert_eq!(actual, expected);
+}
+
+#[test]
 fn transient_source_catalog_is_canonical_sorted_and_excludes_dc_only_sources() {
     let netlist = Netlist::parse(
         "source catalog\n\

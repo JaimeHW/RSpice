@@ -1576,6 +1576,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             | rspice_core::netlist::SourceSpec::TrNoise { .. }
             | rspice_core::netlist::SourceSpec::TrRandom { .. } => None,
             rspice_core::netlist::SourceSpec::DcTransient { transient, .. }
+            | rspice_core::netlist::SourceSpec::AcTransient { transient, .. }
             | rspice_core::netlist::SourceSpec::DcAcTransient { transient, .. } => {
                 Self::source_spec_transient_max_step(transient, tran)
             }
@@ -3490,6 +3491,15 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 transient,
                 ..
             } => dc_value.is_finite() && Self::native_transient_independent_source_spec(transient),
+            rspice_core::netlist::SourceSpec::AcTransient {
+                ac_magnitude,
+                ac_phase,
+                transient,
+            } => {
+                ac_magnitude.is_finite()
+                    && ac_phase.is_finite()
+                    && Self::native_transient_independent_source_spec(transient)
+            }
             _ => false,
         }
     }

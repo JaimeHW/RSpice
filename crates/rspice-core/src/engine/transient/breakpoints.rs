@@ -240,6 +240,7 @@ impl Engine {
             | SourceSpec::TrNoise { .. }
             | SourceSpec::TrRandom { .. } => {}
             SourceSpec::DcTransient { transient, .. }
+            | SourceSpec::AcTransient { transient, .. }
             | SourceSpec::DcAcTransient { transient, .. } => {
                 Self::add_source_spec_breakpoints_with_pwl(
                     breakpoints,

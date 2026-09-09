@@ -1064,6 +1064,7 @@ impl VoltageSources {
                 Self::xyce_source_max_timestep_at(inner, time, context)
             }
             SourceSpec::DcTransient { transient, .. }
+            | SourceSpec::AcTransient { transient, .. }
             | SourceSpec::DcAcTransient { transient, .. } => {
                 Self::xyce_source_max_timestep_at(transient, time, context)
             }

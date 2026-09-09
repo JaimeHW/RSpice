@@ -723,6 +723,7 @@ impl XyceTestRunner {
                 Some((*v1, *v2, *delay, *rise, *fall, *width, *period))
             }
             SourceSpec::DcTransient { transient, .. }
+            | SourceSpec::AcTransient { transient, .. }
             | SourceSpec::DcAcTransient { transient, .. } => Self::bug372_pulse(transient),
             _ => None,
         }

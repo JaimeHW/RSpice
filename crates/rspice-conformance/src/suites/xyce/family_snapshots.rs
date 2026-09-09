@@ -4823,16 +4823,29 @@ impl XyceTestRunner {
         spec: &rspice_core::netlist::SourceSpec,
     ) -> Result<([u64; 2], [u64; 6]), String> {
         use rspice_core::netlist::SourceSpec;
-        let SourceSpec::DcAcTransient {
-            dc_value,
-            ac_magnitude,
-            ac_phase,
-            transient,
-        } = spec
-        else {
-            return Err(
-                "ABM_FREQ current source must retain its combined AC/SIN specification".to_string(),
-            );
+        let (dc_value, ac_magnitude, ac_phase, transient) = match spec {
+            SourceSpec::AcTransient {
+                ac_magnitude,
+                ac_phase,
+                transient,
+            } => (
+                rspice_core::engine::extract_dc_value(transient),
+                ac_magnitude,
+                ac_phase,
+                transient,
+            ),
+            SourceSpec::DcAcTransient {
+                dc_value,
+                ac_magnitude,
+                ac_phase,
+                transient,
+            } => (*dc_value, ac_magnitude, ac_phase, transient),
+            _ => {
+                return Err(
+                    "ABM_FREQ current source must retain its combined AC/SIN specification"
+                        .to_string(),
+                );
+            }
         };
         let SourceSpec::Sin {
             offset,
