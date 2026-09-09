@@ -486,6 +486,178 @@ pub struct JfetIndices {
     pub ss: Option<CscIndex>,
 }
 
+/// Compact accepted nonlinear state; topology and resolved model parameters
+/// remain owned by the freshly elaborated target.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct AcceptedJfetNonlinearCheckpoint {
+    pub(crate) instance_name: String,
+    pub(crate) runtime_tag: String,
+    pub(crate) values: [Value; 24],
+    pub(crate) flags: [bool; 4],
+    /// The first eight bias/history lanes use NaN only as an uninitialized
+    /// startup marker. Encode that state explicitly, with zero wire values.
+    pub(crate) uninitialized_biases: u8,
+}
+
+pub(crate) const JFET_CHECKPOINT_RUNTIME_TAGS: [&str; 6] = [
+    "jfet-shichman-hodges-v1",
+    "jfet-xyce-sydney-v1",
+    "jfet-parker-skellern-v1",
+    "jfet-xyce-modified-shockley-v1",
+    "jfet-legacy-mesfet-v1",
+    "jfet-hfet-v1",
+];
+
+impl AcceptedJfetNonlinearCheckpoint {
+    pub(crate) fn validate_numeric_state(&self) -> Result<(), String> {
+        let [.., junction_gmin, gate_generation_scale] = self.values;
+        if self.values.iter().any(|value| !value.is_finite())
+            || junction_gmin < 0.0
+            || !(0.0..=1.0).contains(&gate_generation_scale)
+            || (self.flags[0] && self.uninitialized_biases & 0xc3 != 0)
+            || self.values[..8].iter().enumerate().any(|(index, value)| {
+                self.uninitialized_biases & (1 << index) != 0 && value.to_bits() != 0
+            })
+        {
+            return Err(format!(
+                "JFET '{}' accepted nonlinear state has invalid numeric values",
+                self.instance_name
+            ));
+        }
+        Ok(())
+    }
+}
+
+impl Jfet {
+    pub(crate) fn checkpoint_runtime_tag(&self) -> &'static str {
+        match self.params.channel_model {
+            JfetChannelModel::ShichmanHodges => JFET_CHECKPOINT_RUNTIME_TAGS[0],
+            JfetChannelModel::XyceSydney => JFET_CHECKPOINT_RUNTIME_TAGS[1],
+            JfetChannelModel::ParkerSkellern => JFET_CHECKPOINT_RUNTIME_TAGS[2],
+            JfetChannelModel::XyceModifiedShockley => JFET_CHECKPOINT_RUNTIME_TAGS[3],
+            JfetChannelModel::LegacyMesfet => JFET_CHECKPOINT_RUNTIME_TAGS[4],
+            JfetChannelModel::Hfet1 => JFET_CHECKPOINT_RUNTIME_TAGS[5],
+        }
+    }
+
+    pub(crate) fn accepted_nonlinear_checkpoint(
+        &self,
+    ) -> Result<AcceptedJfetNonlinearCheckpoint, String> {
+        let mut checkpoint = AcceptedJfetNonlinearCheckpoint {
+            instance_name: self.name.clone(),
+            runtime_tag: self.checkpoint_runtime_tag().to_string(),
+            values: [
+                self.vgs,
+                self.vds,
+                self.vgs_prev,
+                self.vds_prev,
+                self.last_raw_vgs_prev,
+                self.last_raw_vgd_prev,
+                self.last_raw_vgs,
+                self.last_raw_vgd,
+                self.eval_ids,
+                self.eval_gm,
+                self.eval_gds,
+                self.eval_igs,
+                self.eval_igd,
+                self.eval_ggs,
+                self.eval_ggd,
+                self.eval_gmg,
+                self.eval_gmd,
+                self.eval_vds_linear,
+                self.lin_vgs,
+                self.lin_vgd,
+                self.lin_cg,
+                self.lin_cd,
+                self.junction_gmin,
+                self.gate_generation_scale,
+            ],
+            flags: [
+                self.eval_valid,
+                self.limiter_applied,
+                self.hfet_legacy_inverse_mode,
+                self.hfet_legacy_inverse_active,
+            ],
+            uninitialized_biases: 0,
+        };
+        for (index, value) in checkpoint.values[..8].iter_mut().enumerate() {
+            if value.is_nan() {
+                checkpoint.uninitialized_biases |= 1 << index;
+                *value = 0.0;
+            }
+        }
+        self.validate_accepted_nonlinear_checkpoint(&checkpoint)?;
+        Ok(checkpoint)
+    }
+
+    pub(crate) fn validate_accepted_nonlinear_checkpoint(
+        &self,
+        checkpoint: &AcceptedJfetNonlinearCheckpoint,
+    ) -> Result<(), String> {
+        if checkpoint.instance_name != self.name {
+            return Err(format!(
+                "JFET instance mismatch: captured '{}', circuit has '{}'",
+                checkpoint.instance_name, self.name
+            ));
+        }
+        if checkpoint.runtime_tag != self.checkpoint_runtime_tag() {
+            return Err(format!(
+                "JFET '{}' runtime mismatch: captured '{}', runtime requires '{}'",
+                self.name,
+                checkpoint.runtime_tag,
+                self.checkpoint_runtime_tag()
+            ));
+        }
+        checkpoint.validate_numeric_state()
+    }
+
+    pub(crate) fn restore_accepted_nonlinear_checkpoint(
+        &mut self,
+        checkpoint: &AcceptedJfetNonlinearCheckpoint,
+    ) -> Result<(), String> {
+        self.validate_accepted_nonlinear_checkpoint(checkpoint)?;
+        let mut values = checkpoint.values;
+        for (index, value) in values[..8].iter_mut().enumerate() {
+            if checkpoint.uninitialized_biases & (1 << index) != 0 {
+                *value = Value::NAN;
+            }
+        }
+        [
+            self.vgs,
+            self.vds,
+            self.vgs_prev,
+            self.vds_prev,
+            self.last_raw_vgs_prev,
+            self.last_raw_vgd_prev,
+            self.last_raw_vgs,
+            self.last_raw_vgd,
+            self.eval_ids,
+            self.eval_gm,
+            self.eval_gds,
+            self.eval_igs,
+            self.eval_igd,
+            self.eval_ggs,
+            self.eval_ggd,
+            self.eval_gmg,
+            self.eval_gmd,
+            self.eval_vds_linear,
+            self.lin_vgs,
+            self.lin_vgd,
+            self.lin_cg,
+            self.lin_cd,
+            self.junction_gmin,
+            self.gate_generation_scale,
+        ] = values;
+        [
+            self.eval_valid,
+            self.limiter_applied,
+            self.hfet_legacy_inverse_mode,
+            self.hfet_legacy_inverse_active,
+        ] = checkpoint.flags;
+        Ok(())
+    }
+}
+
 /// JFET device instance
 #[derive(Debug, Clone)]
 pub struct Jfet {
@@ -503,6 +675,10 @@ pub struct Jfet {
     pub(crate) external_drain: NodeId,
     /// Original external source node before model RS externalization.
     pub(crate) external_source: NodeId,
+    /// Builder-owned RD/RS conductances, zero when the lead is intrinsic.
+    /// Kept after the model resistance is externalized so reports use the
+    /// actual solved lead current without searching resistor storage.
+    pub(crate) external_lead_conductances: [Value; 2],
     /// Model parameters
     pub params: JfetParams,
     /// Device multiplier

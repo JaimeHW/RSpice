@@ -12,6 +12,183 @@ fn engine() -> Engine {
 }
 
 #[test]
+fn jfet_terminal_reports_include_gate_leakage_at_operating_point() {
+    use rspice_core::engine::SpiceDialect;
+    for dialect in [SpiceDialect::Ngspice, SpiceDialect::Xyce] {
+        for level in [1, 2] {
+            for (kind, polarity) in [("NJF", 1.0), ("PJF", -1.0)] {
+                for series in ["", "RD=20 RS=10"] {
+                    let netlist = Netlist::parse(&format!(
+                        "JFET terminal report\nVD d 0 0\nVS s 0 0\nVG g 0 {}\nJ1 d g s jm\n.model jm {kind}(LEVEL={level} IS=1u {series})\n.end\n",
+                        0.2 * polarity,
+                    )).unwrap();
+                    let (result, report) = Engine::new(SimulationConfig {
+                        spice_dialect: dialect,
+                        ..Default::default()
+                    })
+                    .run_dc_op_with_report(&netlist)
+                    .unwrap();
+                    let entry = report
+                        .entries
+                        .iter()
+                        .find(|entry| entry.name == "J1")
+                        .unwrap();
+                    for (parameter, source) in [("id", "VD"), ("ig", "VG"), ("is", "VS")] {
+                        let reported = entry
+                            .params
+                            .iter()
+                            .find(|(name, _)| *name == parameter)
+                            .unwrap_or_else(|| panic!("missing {parameter} in {entry:?}"))
+                            .1;
+                        let index = result
+                            .branch_names
+                            .iter()
+                            .position(|name| name.eq_ignore_ascii_case(source))
+                            .unwrap();
+                        let expected = -result.branch_currents[index];
+                        assert!(
+                            (reported - expected).abs() < 1e-12 + expected.abs() * 1e-9,
+                            "{dialect:?} {kind} L{level} {series}, {parameter}: {reported} vs {expected}"
+                        );
+                        assert_eq!(
+                            result.try_dc_observable_named(&format!("J1:{parameter}")),
+                            Some(reported)
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn jfet_terminal_reports_preserve_displacement_and_checkpoint_seams() {
+    use rspice_core::engine::{
+        SpiceDialect, TransientCheckpoint, TransientCheckpointEncoding, TransientStartupMode,
+    };
+    use rspice_core::numerics::integration::IntegrationMethod;
+    for dialect in [SpiceDialect::Ngspice, SpiceDialect::Xyce] {
+        for level in [1, 2] {
+            for (kind, polarity) in [("NJF", 1.0), ("PJF", -1.0)] {
+                for series in ["", "RD=20 RS=10"] {
+                    let netlist = Netlist::parse(&format!(
+                        "JFET current output\nVD d 0 PWL(0 0 1u {} 2u 0)\nVS s 0 0\nVG g 0 DC {} PWL(0 {} 1u {} 2u {})\nJ1 d g s jm\n.model jm {kind}(LEVEL={level} IS=1p CGS=1n CGD=2n CAPDS=3n {series})\n.print tran ID(J1) IG(J1) IS(J1) @J1[IGS] @J1[IGD] I(VD) I(VG) I(VS)\n.end\n",
+                        0.2 * polarity, -polarity, -polarity, -0.5 * polarity, -polarity,
+                    )).unwrap();
+                    let engine = Engine::new(SimulationConfig {
+                        spice_dialect: dialect,
+                        integration_method: IntegrationMethod::BackwardEuler,
+                        locked_time_grid: Some(std::sync::Arc::new(vec![
+                            0.0, 0.5e-6, 1e-6, 1.5e-6, 2e-6,
+                        ])),
+                        ..Default::default()
+                    });
+                    let (full, checkpoints) = engine
+                        .run_tran_checkpoint_schedule_with_startup_mode(
+                            &netlist,
+                            2e-6,
+                            0.5e-6,
+                            TransientStartupMode::OperatingPoint,
+                            &[0.5e-6, 1e-6],
+                        )
+                        .unwrap();
+                    for (parameter, source) in [("ID", "VD"), ("IG", "VG"), ("IS", "VS")] {
+                        let reported = full
+                            .try_device_op_waveform_named("J1", parameter)
+                            .unwrap_or_else(|| panic!("missing {parameter}"));
+                        let expected = full.try_branch_current_waveform_named(source).unwrap();
+                        for (index, (actual, source_current)) in
+                            reported.iter().zip(expected).enumerate()
+                        {
+                            assert!(
+                                (actual + source_current).abs()
+                                    < 1e-10 + source_current.abs() * 1e-6,
+                                "{dialect:?} {kind} L{level} {series}, {parameter} at {}: {actual} vs {}",
+                                full.time[index],
+                                -source_current
+                            );
+                        }
+                    }
+                    for saved in checkpoints {
+                        let checkpoint = TransientCheckpoint::from_bytes(
+                            &saved
+                                .checkpoint
+                                .to_bytes(TransientCheckpointEncoding::Packed)
+                                .unwrap(),
+                        )
+                        .unwrap();
+                        let (resumed, _) = engine
+                            .run_tran_resume(&netlist, &checkpoint, 2e-6, 0.5e-6)
+                            .unwrap();
+                        let offset = full
+                            .time
+                            .iter()
+                            .position(|time| time.to_bits() == checkpoint.time.to_bits())
+                            .unwrap();
+                        assert_eq!(resumed.time, full.time[offset..]);
+                        for parameter in ["ID", "IG", "IS", "IGS", "IGD"] {
+                            let expected =
+                                full.try_device_op_waveform_named("J1", parameter).unwrap();
+                            let actual = resumed
+                                .try_device_op_waveform_named("J1", parameter)
+                                .unwrap();
+                            assert_eq!(actual.len(), expected[offset..].len());
+                            for (a, b) in actual.iter().zip(&expected[offset..]) {
+                                assert_eq!(
+                                    a.to_bits(),
+                                    b.to_bits(),
+                                    "{dialect:?} {kind} L{level} {series}, {parameter} seam at {}",
+                                    checkpoint.time
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn tied_jfet_reports_keep_each_pin_charge_current() {
+    use rspice_core::numerics::integration::IntegrationMethod;
+    for (nodes, terminal_waveforms) in [
+        ("d g d", [0, 1, 0]),
+        ("d d s", [0, 0, 1]),
+        ("d s s", [0, 1, 1]),
+        ("d d d", [0, 0, 0]),
+    ] {
+        let nodes = nodes.replace('g', "s");
+        let netlist = Netlist::parse(&format!(
+            "tied JFET pin currents\nVD d 0 PWL(0 0 1u 0.1 2u 0)\nVS s 0 DC -1 PWL(0 -1 1u -0.5 2u -1)\nJ1 {nodes} jm\n.model jm NJF(BETA=1e-30 IS=0 CGS=1n CGD=2n M=0)\n.print tran ID(J1) IG(J1) IS(J1)\n.end\n",
+        )).unwrap();
+        let result = Engine::new(SimulationConfig {
+            integration_method: IntegrationMethod::BackwardEuler,
+            locked_time_grid: Some(std::sync::Arc::new(vec![0.0, 1e-6, 2e-6])),
+            ..Default::default()
+        })
+        .run_tran(&netlist, 2e-6, 1e-6)
+        .unwrap();
+        let slopes = terminal_waveforms.map(|index| [0.1 / 1e-6, 0.5 / 1e-6][index]);
+        let cqgs = 1e-9 * (slopes[1] - slopes[2]);
+        let cqgd = 2e-9 * (slopes[1] - slopes[0]);
+        for (parameter, expected) in [("ID", -cqgd), ("IG", cqgs + cqgd), ("IS", -cqgs)] {
+            let current = result
+                .try_device_op_waveform_named("J1", parameter)
+                .unwrap();
+            for (index, polarity) in [(1, 1.0), (2, -1.0)] {
+                assert!(
+                    (current[index] - polarity * expected).abs() < 2e-12,
+                    "{nodes} {parameter} at {index}: {} vs {}",
+                    current[index],
+                    polarity * expected
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn classic_jfet_temperature_mapped_ac_and_charge_match_ngspice46() {
     use rspice_core::engine::SpiceDialect;
     use rspice_core::numerics::integration::IntegrationMethod;

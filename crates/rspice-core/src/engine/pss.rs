@@ -1953,6 +1953,7 @@ impl Engine {
             &circuit,
             &circuit.bjt_history,
             &circuit.diode_history,
+            &circuit.jfet_history,
             &circuit.bjt_snapshot_cache,
         );
         let junction_history =

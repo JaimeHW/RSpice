@@ -27,7 +27,6 @@ use super::{
 };
 use crate::jit::plan_program::PlanProgram;
 use crate::native::FUSED_KERNEL_INLINE_LIMIT;
-use crate::native::abi::NativeRuntimeStatus;
 use crate::native::abi::{
     INTEGER_CAST_DESCRIPTOR, integer_binary_const_descriptor, integer_binary_descriptor,
     integer_shift_const_descriptor, rspice_above_state_native,
@@ -49,8 +48,8 @@ use crate::native::abi::{
     rspice_slew_derivative_native, rspice_slew_state_native, rspice_table_derivative_native,
     rspice_table_lookup_native, rspice_tan, rspice_tanh, rspice_timer_state_native,
     rspice_transition_derivative_native, rspice_transition_state_native,
-    rspice_zi_derivative_native, rspice_zi_step_native,
 };
+use crate::native::abi::{NativeRuntimeStatus, OperandArrayCall, operand_array_call};
 pub(crate) use crate::native::assignment::NativeAssignment;
 use crate::native::assignment::shareable_batch_ranges;
 use crate::native::expr::{BinaryMathOp, IntegerBinaryOp, UnaryMathOp, runtime_integer_operation};
@@ -1087,239 +1086,279 @@ impl FunctionCompiler {
                         .into(),
                     });
                 }
-                let result_register = self.prepare_allocated_instruction(allocated)?;
-
                 let op = instruction.op();
-                match op {
-                    NativeOp::Const(value) => {
-                        let dst = self.push_register()?;
-                        self.emit_constant_load(dst, value);
-                    }
-                    NativeOp::LoadParam(index) => {
-                        let dst = self.push_register()?;
-                        self.emit_context_pointer_load_cached(
-                            PARAMS_OFFSET,
-                            &mut context_pointer_cache,
-                        );
-                        self.encoder
-                            .movsd_xmm_m64_base_disp32(dst, Gpr::Rax, byte_disp(index)?);
-                    }
-                    NativeOp::LoadParamGiven(index) => {
-                        self.emit_param_given_load(index, &mut context_pointer_cache)?;
-                    }
-                    NativeOp::LoadPortConnected(index) => {
-                        self.emit_port_connected_load(index, &mut context_pointer_cache)?;
-                    }
-                    NativeOp::LoadVoltage { pos, neg } => {
-                        self.emit_voltage_load(pos, neg, &mut context_pointer_cache)?;
-                    }
-                    NativeOp::LoadCurrent(pair_index) => {
-                        self.emit_current_load(pair_index, &mut context_pointer_cache)?;
-                    }
-                    NativeOp::LoadPriorCurrent(current_index) => {
-                        self.emit_prior_current_load(current_index, &mut context_pointer_cache)?;
-                    }
-                    NativeOp::LoadPreludeSlot(index) => {
-                        let dst = self.push_register()?;
-                        self.emit_context_pointer_load_cached(
-                            PRELUDE_SLOTS_OFFSET,
-                            &mut context_pointer_cache,
-                        );
-                        self.encoder
-                            .movsd_xmm_m64_base_disp32(dst, Gpr::Rax, byte_disp(index)?);
-                    }
-                    NativeOp::StorePreludeSlot(index) => {
-                        // An identity on its operand: the value stays where the
-                        // allocator put it and the store is the whole effect.
-                        if self.depth == 0 {
-                            return Err(JitError::Encoding {
-                                model: MODEL.into(),
-                                detail: "prelude slot store requires stack depth 1, found 0".into(),
-                            });
+                if let Some(call) = operand_array_call(op)? {
+                    self.emit_allocated_operand_array(allocated, &call)?;
+                } else {
+                    let result_register = self.prepare_allocated_instruction(allocated)?;
+
+                    match op {
+                        NativeOp::Const(value) => {
+                            let dst = self.push_register()?;
+                            self.emit_constant_load(dst, value);
                         }
-                        let source = self.register_stack[self.depth - 1];
-                        self.emit_context_pointer_load_cached(
-                            PRELUDE_SLOTS_OFFSET,
-                            &mut context_pointer_cache,
-                        );
-                        self.encoder
-                            .movsd_m64_base_disp32_xmm(Gpr::Rax, byte_disp(index)?, source);
-                    }
-                    NativeOp::LoadInternalVoltage(index) => {
-                        let dst = self.push_register()?;
-                        self.emit_context_pointer_load_cached(
-                            INTERNAL_VOLTAGES_OFFSET,
-                            &mut context_pointer_cache,
-                        );
-                        self.encoder
-                            .movsd_xmm_m64_base_disp32(dst, Gpr::Rax, byte_disp(index)?);
-                    }
-                    NativeOp::LoadVariable(index) => {
-                        let dst = self.push_register()?;
-                        self.encoder.movsd_xmm_m64_base_disp32(
-                            dst,
-                            self.vars_arg_reg(),
-                            byte_disp(index)?,
-                        );
-                    }
-                    NativeOp::LoadVariableDyn { base, len, lower } => {
-                        self.emit_dynamic_variable_load(base, len, lower)?;
-                    }
-                    NativeOp::LoadBranchUnknown(index) => {
-                        let dst = self.push_register()?;
-                        self.emit_context_pointer_load_cached(
-                            BRANCH_UNKNOWNS_OFFSET,
-                            &mut context_pointer_cache,
-                        );
-                        self.encoder
-                            .movsd_xmm_m64_base_disp32(dst, Gpr::Rax, byte_disp(index)?);
-                    }
-                    NativeOp::LoadTemperature => {
-                        self.emit_context_f64_load(TEMPERATURE_OFFSET)?;
-                    }
-                    NativeOp::LoadThermalVoltage => {
-                        self.emit_thermal_voltage_load()?;
-                    }
-                    NativeOp::LoadTime => {
-                        self.emit_context_f64_load(TIME_OFFSET)?;
-                    }
-                    NativeOp::Analysis(analysis_id) => {
-                        self.emit_analysis_check(analysis_id)?;
-                    }
-                    NativeOp::LoadMfactor => {
-                        self.emit_context_f64_load(MFACTOR_OFFSET)?;
-                    }
-                    NativeOp::Add => self.emit_binary_op(BinaryOp::Add)?,
-                    NativeOp::Sub => self.emit_binary_op(BinaryOp::Sub)?,
-                    NativeOp::Mul => self.emit_binary_op(BinaryOp::Mul)?,
-                    NativeOp::Div => self.emit_binary_op(BinaryOp::Div)?,
-                    NativeOp::AddConst(value) => {
-                        self.emit_literal_rhs_binary_op(value, BinaryOp::Add)?
-                    }
-                    NativeOp::SubConst(value) => {
-                        self.emit_literal_rhs_binary_op(value, BinaryOp::Sub)?
-                    }
-                    NativeOp::MulConst(value) => {
-                        self.emit_literal_rhs_binary_op(value, BinaryOp::Mul)?
-                    }
-                    NativeOp::DivConst(value) => {
-                        self.emit_literal_rhs_binary_op(value, BinaryOp::Div)?
-                    }
-                    NativeOp::SubFromConst(value) => {
-                        self.emit_literal_lhs_binary_op(value, BinaryOp::Sub)?
-                    }
-                    NativeOp::DivFromConst(value) => {
-                        self.emit_literal_lhs_binary_op(value, BinaryOp::Div)?
-                    }
-                    NativeOp::Neg => self.emit_neg()?,
-                    NativeOp::Abs => self.emit_abs()?,
-                    NativeOp::Square => self.emit_square()?,
-                    NativeOp::Sqrt => self.emit_sqrt()?,
-                    NativeOp::Compare(op) => self.emit_compare(op)?,
-                    NativeOp::CompareConst(op, value) => self.emit_compare_const(op, value)?,
-                    NativeOp::Logical(op) => self.emit_logical(op)?,
-                    NativeOp::LogicalConst(op, value) => self.emit_logical_const(op, value)?,
-                    NativeOp::IfElse => self.emit_ifelse()?,
-                    NativeOp::Extremum(op) => self.emit_extremum(op)?,
-                    NativeOp::ExtremumConst(op, value) => self.emit_extremum_const(op, value)?,
-                    NativeOp::ExtremumConstLhs(op, value) => {
-                        self.emit_extremum_const_lhs(op, value)?
-                    }
-                    NativeOp::UnaryMath(op) => self.emit_unary_math(op)?,
-                    NativeOp::BinaryMath(op) => self.emit_binary_math(op)?,
-                    NativeOp::ProductRatio => {
-                        if self.depth < 4 {
-                            return Err(JitError::Encoding {
-                                model: MODEL.into(),
-                                detail: "product ratio requires four operands".into(),
-                            });
+                        NativeOp::LoadParam(index) => {
+                            let dst = self.push_register()?;
+                            self.emit_context_pointer_load_cached(
+                                PARAMS_OFFSET,
+                                &mut context_pointer_cache,
+                            );
+                            self.encoder.movsd_xmm_m64_base_disp32(
+                                dst,
+                                Gpr::Rax,
+                                byte_disp(index)?,
+                            );
                         }
-                        let target = self.register_stack[self.depth - 4];
-                        self.emit_operand_context_filter_helper_call(
-                            target,
-                            4,
+                        NativeOp::LoadParamGiven(index) => {
+                            self.emit_param_given_load(index, &mut context_pointer_cache)?;
+                        }
+                        NativeOp::LoadPortConnected(index) => {
+                            self.emit_port_connected_load(index, &mut context_pointer_cache)?;
+                        }
+                        NativeOp::LoadVoltage { pos, neg } => {
+                            self.emit_voltage_load(pos, neg, &mut context_pointer_cache)?;
+                        }
+                        NativeOp::LoadCurrent(pair_index) => {
+                            self.emit_current_load(pair_index, &mut context_pointer_cache)?;
+                        }
+                        NativeOp::LoadPriorCurrent(current_index) => {
+                            self.emit_prior_current_load(
+                                current_index,
+                                &mut context_pointer_cache,
+                            )?;
+                        }
+                        NativeOp::LoadPreludeSlot(index) => {
+                            let dst = self.push_register()?;
+                            self.emit_context_pointer_load_cached(
+                                PRELUDE_SLOTS_OFFSET,
+                                &mut context_pointer_cache,
+                            );
+                            self.encoder.movsd_xmm_m64_base_disp32(
+                                dst,
+                                Gpr::Rax,
+                                byte_disp(index)?,
+                            );
+                        }
+                        NativeOp::StorePreludeSlot(index) => {
+                            // An identity on its operand: the value stays where the
+                            // allocator put it and the store is the whole effect.
+                            if self.depth == 0 {
+                                return Err(JitError::Encoding {
+                                    model: MODEL.into(),
+                                    detail: "prelude slot store requires stack depth 1, found 0"
+                                        .into(),
+                                });
+                            }
+                            let source = self.register_stack[self.depth - 1];
+                            self.emit_context_pointer_load_cached(
+                                PRELUDE_SLOTS_OFFSET,
+                                &mut context_pointer_cache,
+                            );
+                            self.encoder.movsd_m64_base_disp32_xmm(
+                                Gpr::Rax,
+                                byte_disp(index)?,
+                                source,
+                            );
+                        }
+                        NativeOp::LoadInternalVoltage(index) => {
+                            let dst = self.push_register()?;
+                            self.emit_context_pointer_load_cached(
+                                INTERNAL_VOLTAGES_OFFSET,
+                                &mut context_pointer_cache,
+                            );
+                            self.encoder.movsd_xmm_m64_base_disp32(
+                                dst,
+                                Gpr::Rax,
+                                byte_disp(index)?,
+                            );
+                        }
+                        NativeOp::LoadVariable(index) => {
+                            let dst = self.push_register()?;
+                            self.encoder.movsd_xmm_m64_base_disp32(
+                                dst,
+                                self.vars_arg_reg(),
+                                byte_disp(index)?,
+                            );
+                        }
+                        NativeOp::LoadVariableDyn { base, len, lower } => {
+                            self.emit_dynamic_variable_load(base, len, lower)?;
+                        }
+                        NativeOp::LoadBranchUnknown(index) => {
+                            let dst = self.push_register()?;
+                            self.emit_context_pointer_load_cached(
+                                BRANCH_UNKNOWNS_OFFSET,
+                                &mut context_pointer_cache,
+                            );
+                            self.encoder.movsd_xmm_m64_base_disp32(
+                                dst,
+                                Gpr::Rax,
+                                byte_disp(index)?,
+                            );
+                        }
+                        NativeOp::LoadTemperature => {
+                            self.emit_context_f64_load(TEMPERATURE_OFFSET)?;
+                        }
+                        NativeOp::LoadThermalVoltage => {
+                            self.emit_thermal_voltage_load()?;
+                        }
+                        NativeOp::LoadTime => {
+                            self.emit_context_f64_load(TIME_OFFSET)?;
+                        }
+                        NativeOp::Analysis(analysis_id) => {
+                            self.emit_analysis_check(analysis_id)?;
+                        }
+                        NativeOp::LoadMfactor => {
+                            self.emit_context_f64_load(MFACTOR_OFFSET)?;
+                        }
+                        NativeOp::Add => self.emit_binary_op(BinaryOp::Add)?,
+                        NativeOp::Sub => self.emit_binary_op(BinaryOp::Sub)?,
+                        NativeOp::Mul => self.emit_binary_op(BinaryOp::Mul)?,
+                        NativeOp::Div => self.emit_binary_op(BinaryOp::Div)?,
+                        NativeOp::AddConst(value) => {
+                            self.emit_literal_rhs_binary_op(value, BinaryOp::Add)?
+                        }
+                        NativeOp::SubConst(value) => {
+                            self.emit_literal_rhs_binary_op(value, BinaryOp::Sub)?
+                        }
+                        NativeOp::MulConst(value) => {
+                            self.emit_literal_rhs_binary_op(value, BinaryOp::Mul)?
+                        }
+                        NativeOp::DivConst(value) => {
+                            self.emit_literal_rhs_binary_op(value, BinaryOp::Div)?
+                        }
+                        NativeOp::SubFromConst(value) => {
+                            self.emit_literal_lhs_binary_op(value, BinaryOp::Sub)?
+                        }
+                        NativeOp::DivFromConst(value) => {
+                            self.emit_literal_lhs_binary_op(value, BinaryOp::Div)?
+                        }
+                        NativeOp::Neg => self.emit_neg()?,
+                        NativeOp::Abs => self.emit_abs()?,
+                        NativeOp::Square => self.emit_square()?,
+                        NativeOp::Sqrt => self.emit_sqrt()?,
+                        NativeOp::Compare(op) => self.emit_compare(op)?,
+                        NativeOp::CompareConst(op, value) => self.emit_compare_const(op, value)?,
+                        NativeOp::Logical(op) => self.emit_logical(op)?,
+                        NativeOp::LogicalConst(op, value) => self.emit_logical_const(op, value)?,
+                        NativeOp::IfElse => self.emit_ifelse()?,
+                        NativeOp::Extremum(op) => self.emit_extremum(op)?,
+                        NativeOp::ExtremumConst(op, value) => {
+                            self.emit_extremum_const(op, value)?
+                        }
+                        NativeOp::ExtremumConstLhs(op, value) => {
+                            self.emit_extremum_const_lhs(op, value)?
+                        }
+                        NativeOp::UnaryMath(op) => self.emit_unary_math(op)?,
+                        NativeOp::BinaryMath(op) => self.emit_binary_math(op)?,
+                        NativeOp::ProductRatio => {
+                            if self.depth < 4 {
+                                return Err(JitError::Encoding {
+                                    model: MODEL.into(),
+                                    detail: "product ratio requires four operands".into(),
+                                });
+                            }
+                            let target = self.register_stack[self.depth - 4];
+                            self.emit_operand_context_filter_helper_call(
+                                target,
+                                4,
+                                0,
+                                crate::native::abi::rspice_product_ratio_native,
+                            );
+                            self.drop_stack_values(3)?;
+                        }
+                        NativeOp::IntegerCast => self.emit_integer_cast()?,
+                        NativeOp::CheckedValue => self.emit_checked_binary(
                             0,
-                            crate::native::abi::rspice_product_ratio_native,
+                            crate::native::abi::rspice_checked_value_native,
+                        )?,
+                        NativeOp::IntegerBinary(op) => self.emit_integer_binary(op)?,
+                        NativeOp::IntegerShiftConst(op, count) => {
+                            self.emit_integer_shift_const(op, count)?
+                        }
+                        NativeOp::IntegerBinaryConst(op, value) => {
+                            self.emit_integer_bitwise_const(op, value)?
+                        }
+                        NativeOp::TableLookup(table_id) => {
+                            self.emit_table_helper_call(table_id, rspice_table_lookup_native)?
+                        }
+                        NativeOp::TableDerivative(table_id) => {
+                            self.emit_table_helper_call(table_id, rspice_table_derivative_native)?
+                        }
+                        NativeOp::LimitState(index) => self.emit_limit_state(index)?,
+                        NativeOp::LimiterPrevious(index) => {
+                            self.emit_limiter_state_helper(index, rspice_limiter_previous_native)?
+                        }
+                        NativeOp::LimiterStore(index) => self.emit_limiter_store(index)?,
+                        NativeOp::LaplaceState(filter_id) => self.emit_laplace_state(filter_id)?,
+                        NativeOp::LaplaceStateDerivative(filter_id) => {
+                            self.emit_laplace_derivative(filter_id)?
+                        }
+                        NativeOp::ZiState(_) | NativeOp::ZiStateDerivative(_) => {
+                            unreachable!(
+                                "operand-array helpers are emitted before register preparation"
+                            )
+                        }
+                        NativeOp::TimerState(timer_id) => self.emit_timer_state(timer_id)?,
+                        NativeOp::TransitionState(filter_id) => {
+                            self.emit_transition_state(filter_id)?
+                        }
+                        NativeOp::TransitionStateDerivative(filter_id) => {
+                            self.emit_transition_derivative_state(filter_id)?
+                        }
+                        NativeOp::SlewState(filter_id) => self.emit_slew_state(filter_id)?,
+                        NativeOp::SlewStateDerivative(filter_id) => {
+                            self.emit_slew_derivative_state(filter_id)?
+                        }
+                        NativeOp::AbsDelayState(buffer_id) => {
+                            self.emit_absdelay_state(buffer_id)?
+                        }
+                        NativeOp::AbsDelayStateMax(buffer_id) => self.emit_absdelay_helper(
+                            buffer_id,
+                            3,
+                            rspice_absdelay_state_max_native,
+                        )?,
+                        NativeOp::AbsDelayStateDerivative(buffer_id) => self.emit_absdelay_helper(
+                            buffer_id,
+                            4,
+                            rspice_absdelay_derivative_native,
+                        )?,
+                        NativeOp::AbsDelayStateDerivativeMax(buffer_id) => self
+                            .emit_absdelay_helper(
+                                buffer_id,
+                                5,
+                                rspice_absdelay_derivative_max_native,
+                            )?,
+                        NativeOp::CrossState(detector_id) => self.emit_cross_state(detector_id)?,
+                        NativeOp::AboveState(detector_id) => self.emit_above_state(detector_id)?,
+                        NativeOp::LastCrossingState(detector_id) => {
+                            self.emit_last_crossing_state(detector_id)?
+                        }
+                        NativeOp::WhiteNoise => self.emit_white_noise()?,
+                        NativeOp::FlickerNoise => self.emit_flicker_noise()?,
+                        NativeOp::DdtState(index) => self.emit_ddt_state(index)?,
+                        NativeOp::DdtJacobian => self.emit_ddt_jacobian()?,
+                        NativeOp::IdtState(index) => self.emit_idt_state(index)?,
+                        NativeOp::IdtJacobian => self.emit_idt_jacobian()?,
+                        NativeOp::IdtModState(index) => self.emit_idtmod_state(index)?,
+                    }
+                    if self.logical_depth() != 1 {
+                        return Err(JitError::Verifier {
+                            model: MODEL.into(),
+                            detail: format!(
+                                "x64 emitter depth {} is not one result after allocated {op:?}",
+                                self.logical_depth(),
+                            )
+                            .into(),
+                        });
+                    }
+                    if let X64ValueLocation::Spill(slot) = allocated.result() {
+                        let displacement = self.expression_spill_disp(slot)?;
+                        self.encoder.movsd_m64_base_disp32_xmm(
+                            Gpr::Rsp,
+                            displacement,
+                            result_register,
                         );
-                        self.drop_stack_values(3)?;
                     }
-                    NativeOp::IntegerCast => self.emit_integer_cast()?,
-                    NativeOp::CheckedValue => self
-                        .emit_checked_binary(0, crate::native::abi::rspice_checked_value_native)?,
-                    NativeOp::IntegerBinary(op) => self.emit_integer_binary(op)?,
-                    NativeOp::IntegerShiftConst(op, count) => {
-                        self.emit_integer_shift_const(op, count)?
-                    }
-                    NativeOp::IntegerBinaryConst(op, value) => {
-                        self.emit_integer_bitwise_const(op, value)?
-                    }
-                    NativeOp::TableLookup(table_id) => {
-                        self.emit_table_helper_call(table_id, rspice_table_lookup_native)?
-                    }
-                    NativeOp::TableDerivative(table_id) => {
-                        self.emit_table_helper_call(table_id, rspice_table_derivative_native)?
-                    }
-                    NativeOp::LimitState(index) => self.emit_limit_state(index)?,
-                    NativeOp::LimiterPrevious(index) => {
-                        self.emit_limiter_state_helper(index, rspice_limiter_previous_native)?
-                    }
-                    NativeOp::LimiterStore(index) => self.emit_limiter_store(index)?,
-                    NativeOp::LaplaceState(filter_id) => self.emit_laplace_state(filter_id)?,
-                    NativeOp::LaplaceStateDerivative(filter_id) => {
-                        self.emit_laplace_derivative(filter_id)?
-                    }
-                    NativeOp::ZiState(layout) => self.emit_zi_state(layout)?,
-                    NativeOp::ZiStateDerivative(layout) => self.emit_zi_derivative_state(layout)?,
-                    NativeOp::TimerState(timer_id) => self.emit_timer_state(timer_id)?,
-                    NativeOp::TransitionState(filter_id) => {
-                        self.emit_transition_state(filter_id)?
-                    }
-                    NativeOp::TransitionStateDerivative(filter_id) => {
-                        self.emit_transition_derivative_state(filter_id)?
-                    }
-                    NativeOp::SlewState(filter_id) => self.emit_slew_state(filter_id)?,
-                    NativeOp::SlewStateDerivative(filter_id) => {
-                        self.emit_slew_derivative_state(filter_id)?
-                    }
-                    NativeOp::AbsDelayState(buffer_id) => self.emit_absdelay_state(buffer_id)?,
-                    NativeOp::AbsDelayStateMax(buffer_id) => {
-                        self.emit_absdelay_helper(buffer_id, 3, rspice_absdelay_state_max_native)?
-                    }
-                    NativeOp::AbsDelayStateDerivative(buffer_id) => {
-                        self.emit_absdelay_helper(buffer_id, 4, rspice_absdelay_derivative_native)?
-                    }
-                    NativeOp::AbsDelayStateDerivativeMax(buffer_id) => self.emit_absdelay_helper(
-                        buffer_id,
-                        5,
-                        rspice_absdelay_derivative_max_native,
-                    )?,
-                    NativeOp::CrossState(detector_id) => self.emit_cross_state(detector_id)?,
-                    NativeOp::AboveState(detector_id) => self.emit_above_state(detector_id)?,
-                    NativeOp::LastCrossingState(detector_id) => {
-                        self.emit_last_crossing_state(detector_id)?
-                    }
-                    NativeOp::WhiteNoise => self.emit_white_noise()?,
-                    NativeOp::FlickerNoise => self.emit_flicker_noise()?,
-                    NativeOp::DdtState(index) => self.emit_ddt_state(index)?,
-                    NativeOp::DdtJacobian => self.emit_ddt_jacobian()?,
-                    NativeOp::IdtState(index) => self.emit_idt_state(index)?,
-                    NativeOp::IdtJacobian => self.emit_idt_jacobian()?,
-                    NativeOp::IdtModState(index) => self.emit_idtmod_state(index)?,
-                }
-                if self.logical_depth() != 1 {
-                    return Err(JitError::Verifier {
-                        model: MODEL.into(),
-                        detail: format!(
-                            "x64 emitter depth {} is not one result after allocated {op:?}",
-                            self.logical_depth(),
-                        )
-                        .into(),
-                    });
-                }
-                if let X64ValueLocation::Spill(slot) = allocated.result() {
-                    let displacement = self.expression_spill_disp(slot)?;
-                    self.encoder
-                        .movsd_m64_base_disp32_xmm(Gpr::Rsp, displacement, result_register);
                 }
                 self.reset_expression_state();
                 if instruction.effects().clobbers_context_pointer_cache() {
@@ -1556,6 +1595,72 @@ impl FunctionCompiler {
                 self.encoder
                     .mov_m64_base_disp32_r64(Gpr::Rsp, destination, Gpr::Rax);
             }
+        }
+        Ok(())
+    }
+
+    fn emit_allocated_operand_array(
+        &mut self,
+        allocated: &AllocatedInstruction,
+        call: &OperandArrayCall,
+    ) -> JitResult<()> {
+        let count = call.count;
+        if count == 0 || count != allocated.operands().len() || count > MAX_EXPRESSION_STACK_DEPTH {
+            return Err(register_allocation_error(
+                "operand-array helper count mismatch".into(),
+            ));
+        }
+        let frame_bytes = call_frame_bytes_for_slots(count);
+        self.emit_stack_probe(frame_bytes)?;
+        self.encoder.sub_rsp_imm32(frame_bytes);
+        // Marshal one location at a time. Register allocation already puts
+        // values crossing this call in ABI-preserved registers or spill slots.
+        for (index, location) in allocated.operands().iter().enumerate() {
+            match *location {
+                X64ValueLocation::Register(register) => self.encoder.movsd_m64_base_disp32_xmm(
+                    Gpr::Rsp,
+                    call_spill_disp(index),
+                    allocated_xmm(register)?,
+                ),
+                X64ValueLocation::Spill(slot) => {
+                    let source = self
+                        .expression_spill_disp(slot)?
+                        .checked_add(frame_bytes)
+                        .ok_or_else(|| {
+                            register_allocation_error(
+                                "operand-array spill displacement overflow".into(),
+                            )
+                        })?;
+                    self.encoder
+                        .mov_r64_m64_base_disp32(Gpr::Rax, Gpr::Rsp, source);
+                    self.encoder.mov_m64_base_disp32_r64(
+                        Gpr::Rsp,
+                        call_spill_disp(index),
+                        Gpr::Rax,
+                    );
+                }
+            }
+        }
+        self.encoder
+            .mov_r64_r64(operand_filter_ctx_arg_reg(), self.ctx_arg_reg());
+        self.encoder
+            .mov_r64_r64(operand_filter_operands_arg_reg(), Gpr::Rsp);
+        self.encoder
+            .add_r64_imm32(operand_filter_operands_arg_reg(), call_spill_disp(0));
+        self.emit_usize_arg(operand_filter_id_arg_reg(), call.descriptor);
+        self.encoder
+            .movabs_r64_imm64(Gpr::Rax, call.helper as usize as u64);
+        self.encoder.call_r64(Gpr::Rax);
+        self.encoder.add_rsp_imm32(frame_bytes);
+        match allocated.result() {
+            X64ValueLocation::Register(register) => self
+                .encoder
+                .movsd_xmm_xmm(allocated_xmm(register)?, Xmm::Xmm0),
+            X64ValueLocation::Spill(slot) => self.encoder.movsd_m64_base_disp32_xmm(
+                Gpr::Rsp,
+                self.expression_spill_disp(slot)?,
+                Xmm::Xmm0,
+            ),
         }
         Ok(())
     }
@@ -1850,6 +1955,14 @@ impl FunctionCompiler {
         let frame_bytes = self.local_frame_bytes;
         debug_assert!(frame_bytes > 0);
 
+        self.emit_stack_probe(frame_bytes)?;
+
+        self.encoder.sub_rsp_imm32(frame_bytes);
+        self.record_windows_unwind_stack_allocation(frame_bytes as u32);
+        Ok(())
+    }
+
+    fn emit_stack_probe(&mut self, frame_bytes: i32) -> JitResult<()> {
         if frame_bytes >= STACK_PROBE_INTERVAL_BYTES {
             self.encoder.mov_r64_r64(Gpr::R10, Gpr::Rsp);
             self.encoder
@@ -1882,8 +1995,6 @@ impl FunctionCompiler {
             self.encoder.mov_r64_m64_base_disp32(Gpr::Rax, Gpr::R10, 0);
         }
 
-        self.encoder.sub_rsp_imm32(frame_bytes);
-        self.record_windows_unwind_stack_allocation(frame_bytes as u32);
         Ok(())
     }
 
@@ -3482,77 +3593,6 @@ impl FunctionCompiler {
 
         let target = self.register_stack[self.depth - 1];
         self.emit_context_filter_helper_call(target, filter_id, rspice_laplace_derivative_native)
-    }
-
-    fn emit_zi_state(&mut self, layout: crate::codegen::ZiRuntimeLayout) -> JitResult<()> {
-        let operand_count =
-            layout
-                .validate_operand_budget()
-                .map_err(|error| JitError::Encoding {
-                    model: MODEL.into(),
-                    detail: error.to_string().into(),
-                })?;
-        if self.depth < operand_count {
-            return Err(JitError::Encoding {
-                model: MODEL.into(),
-                detail: format!(
-                    "zi state requires stack depth {operand_count}, found {}",
-                    self.depth
-                )
-                .into(),
-            });
-        }
-        let descriptor = layout
-            .native_descriptor()
-            .ok_or_else(|| JitError::Encoding {
-                model: MODEL.into(),
-                detail: "Zi runtime layout exceeds the native descriptor limits".into(),
-            })?;
-        let target = self.register_stack[self.depth - operand_count];
-        self.emit_operand_context_filter_helper_call(
-            target,
-            operand_count,
-            descriptor,
-            rspice_zi_step_native,
-        );
-        self.drop_stack_values(operand_count - 1)
-    }
-
-    fn emit_zi_derivative_state(
-        &mut self,
-        layout: crate::codegen::ZiRuntimeLayout,
-    ) -> JitResult<()> {
-        let operand_count =
-            layout
-                .validate_operand_budget()
-                .map_err(|error| JitError::Encoding {
-                    model: MODEL.into(),
-                    detail: error.to_string().into(),
-                })?;
-        if self.depth < operand_count {
-            return Err(JitError::Encoding {
-                model: MODEL.into(),
-                detail: format!(
-                    "zi derivative state requires stack depth {operand_count}, found {}",
-                    self.depth
-                )
-                .into(),
-            });
-        }
-        let descriptor = layout
-            .native_descriptor()
-            .ok_or_else(|| JitError::Encoding {
-                model: MODEL.into(),
-                detail: "Zi derivative runtime layout exceeds the native descriptor limits".into(),
-            })?;
-        let target = self.register_stack[self.depth - operand_count];
-        self.emit_operand_context_filter_helper_call(
-            target,
-            operand_count,
-            descriptor,
-            rspice_zi_derivative_native,
-        );
-        self.drop_stack_values(operand_count - 1)
     }
 
     fn emit_timer_state(&mut self, timer_id: usize) -> JitResult<()> {

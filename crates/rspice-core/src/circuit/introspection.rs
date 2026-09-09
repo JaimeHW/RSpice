@@ -548,7 +548,8 @@ impl CircuitData {
         }
 
         for jfet in &self.jfets {
-            let (vgs, vds, ids, gm, gds, igs, igd) = jfet.op_values();
+            let (vgs, vds, _, gm, gds, _, _) = jfet.op_values();
+            let [id, ig, is, igs, igd] = jfet.reported_currents([0.0; 3]);
             let device_kind = match jfet.params.channel_model {
                 crate::device::JfetChannelModel::ShichmanHodges
                 | crate::device::JfetChannelModel::XyceSydney => OpLabel::JFET,
@@ -565,7 +566,9 @@ impl CircuitData {
                 device_kind,
                 None,
                 vec![
-                    (OpLabel::ID, ids),
+                    (OpLabel::ID, id),
+                    (OpLabel::IG, ig),
+                    (OpLabel::IS, is),
                     (OpLabel::VGS, vgs),
                     (OpLabel::VDS, vds),
                     (OpLabel::GM, gm),
@@ -755,7 +758,54 @@ impl CircuitData {
         report
     }
 
-    /// Build an accepted transient report, replacing native diode and legacy
+    /// Report the authored JFET leads from the solved series resistors when
+    /// present. The public cache-only report remains usable without a solution.
+    pub(crate) fn device_op_report_for_solution(
+        &self,
+        solution: &[Value],
+    ) -> Result<DeviceOpReport, String> {
+        let mut report = self.device_op_report();
+        self.replace_jfet_report_currents(&mut report, solution, None)?;
+        Ok(report)
+    }
+
+    fn replace_jfet_report_currents(
+        &self,
+        report: &mut DeviceOpReport,
+        solution: &[Value],
+        displacement: Option<[&[Value]; 3]>,
+    ) -> Result<(), String> {
+        if displacement.is_some_and(|columns| {
+            columns
+                .iter()
+                .any(|column| column.len() != self.jfets.len())
+        }) {
+            return Err("accepted JFET displacement current count mismatch".to_string());
+        }
+        // The canonical report emits JFET-family entries in storage order.
+        let entries = report.entries.iter_mut().filter(|entry| {
+            matches!(
+                entry.device_kind,
+                "JFET" | "JFET2" | "JFET2_XYCE" | "MESFET" | "HFET1" | "HFET2"
+            )
+        });
+        for (index, (jfet, entry)) in self.jfets.iter().zip(entries).enumerate() {
+            let displacement =
+                displacement.map_or([0.0; 3], |columns| columns.map(|column| column[index]));
+            let currents = jfet.authored_reported_currents(solution, displacement)?;
+            for (parameter, value) in &mut entry.params {
+                if let Some(index) = ["id", "ig", "is", "igs", "igd"]
+                    .iter()
+                    .position(|label| parameter == label)
+                {
+                    *value = currents[index];
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Build an accepted transient report, replacing native diode, JFET and legacy
     /// BJT lead currents with the exact totals from their committed
     /// companions. Ordinary `.OP` and every other parameter retain the static
     /// report; these overrides exist only for this transient sample and cannot
@@ -765,6 +815,7 @@ impl CircuitData {
         solution: &[Value],
         accepted_diode_displacement_currents: &[Value],
         accepted_bjt_terminal_currents: &[Option<[Value; 4]>],
+        accepted_jfet_displacement_currents: Option<[&[Value]; 3]>,
     ) -> Result<DeviceOpReport, String> {
         if accepted_diode_displacement_currents.len() != self.diodes.devices.len() {
             return Err(format!(
@@ -774,6 +825,11 @@ impl CircuitData {
             ));
         }
         let mut report = self.device_op_report();
+        self.replace_jfet_report_currents(
+            &mut report,
+            solution,
+            accepted_jfet_displacement_currents,
+        )?;
         for (diode, displacement_current) in self
             .diodes
             .devices
@@ -866,7 +922,7 @@ impl CircuitData {
             })
             .collect::<Vec<_>>();
         let diode_displacement_currents = vec![0.0; self.diodes.devices.len()];
-        self.transient_device_op_report(solution, &diode_displacement_currents, &currents)
+        self.transient_device_op_report(solution, &diode_displacement_currents, &currents, None)
     }
 
     /// Read-only access to linear resistor storage (names, nodes, conductances).

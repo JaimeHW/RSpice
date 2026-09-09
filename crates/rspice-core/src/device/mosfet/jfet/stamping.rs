@@ -2,6 +2,19 @@
 
 use super::*;
 
+/// The three independent static branches used by both stamping and reporting.
+struct JfetBranchStamp {
+    ids_eq: Value,
+    igs_eq: Value,
+    igd_eq: Value,
+    gm: Value,
+    gds: Value,
+    ggs: Value,
+    ggd: Value,
+    gmg: Value,
+    gmd: Value,
+}
+
 impl Jfet {
     fn regularized_gate_conductance(
         &self,
@@ -167,6 +180,87 @@ impl Jfet {
     }
 
     #[inline]
+    fn independent_terminal_injections(ids: Value, igs: Value, igd: Value) -> [Value; 3] {
+        [-ids + igd, -igs - igd, ids + igs]
+    }
+
+    /// Currents entering D/G/S, followed by the G-S and G-D branch currents.
+    /// Charge currents have the same external orientation as the static
+    /// branches. Keep individual pin currents even when authored pins alias;
+    /// only matrix stamping combines their node contributions.
+    fn report_branch_currents(
+        [ids, igs, igd]: [Value; 3],
+        [cqgs, cqgd, cqds]: [Value; 3],
+    ) -> [Value; 5] {
+        let igs = igs + cqgs;
+        let igd = igd + cqgd;
+        let [id, ig, is] =
+            Self::independent_terminal_injections(ids + cqds, igs, igd).map(|injection| -injection);
+        [id, ig, is, igs, igd]
+    }
+
+    pub(crate) fn reported_currents(&self, displacement: [Value; 3]) -> [Value; 5] {
+        Self::report_branch_currents([self.eval_ids, self.eval_igs, self.eval_igd], displacement)
+    }
+
+    pub(crate) fn authored_reported_currents(
+        &self,
+        solution: &[Value],
+        displacement: [Value; 3],
+    ) -> Result<[Value; 5], String> {
+        // Cached evaluations can be anchored away from accepted voltages.
+        // Include the same movement from that anchor that supplied KCL.
+        let stamp = self.linearized_branch_stamp(solution);
+        let vd = Self::node_voltage(solution, self.drain);
+        let vg = Self::node_voltage(solution, self.gate);
+        let vs = Self::node_voltage(solution, self.source);
+        let vgs = vg - vs;
+        let vgd = vg - vd;
+        let vds = vd - vs;
+        let mut currents = Self::report_branch_currents(
+            [
+                stamp.ids_eq + stamp.gm * vgs + stamp.gds * vds,
+                stamp.igs_eq + stamp.ggs * vgs,
+                stamp.igd_eq + stamp.ggd * vgd + stamp.gmg * vgs + stamp.gmd * vds,
+            ],
+            displacement,
+        );
+        for (index, external, internal, conductance) in [
+            (
+                0,
+                self.external_drain,
+                self.drain,
+                self.external_lead_conductances[0],
+            ),
+            (
+                2,
+                self.external_source,
+                self.source,
+                self.external_lead_conductances[1],
+            ),
+        ] {
+            if conductance == 0.0 {
+                continue;
+            }
+            let voltage = |node: NodeId| {
+                if node == 0 {
+                    Ok(0.0)
+                } else {
+                    solution.get(node - 1).copied().ok_or_else(|| {
+                        format!(
+                            "JFET '{}' lead node {node} is outside solution length {}",
+                            self.name,
+                            solution.len(),
+                        )
+                    })
+                }
+            };
+            currents[index] = conductance * (voltage(external)? - voltage(internal)?);
+        }
+        Ok(currents)
+    }
+
+    #[inline]
     pub(crate) fn terminal_current_injections(
         [d, g, s]: [NodeId; 3],
         ids: Value,
@@ -186,12 +280,12 @@ impl Jfet {
             let current = ids - igd;
             [-current, 0.0, current]
         } else {
-            [-ids + igd, -igs - igd, ids + igs]
+            Self::independent_terminal_injections(ids, igs, igd)
         }
     }
 
     #[inline]
-    fn linearized_terminal_stamp(&self, voltages: &[Value]) -> ([[Value; 3]; 3], [Value; 3]) {
+    fn linearized_branch_stamp(&self, voltages: &[Value]) -> JfetBranchStamp {
         let (vgs, vds, vgd) = self.state_or_raw_branch_voltages(voltages);
         let (external_vd, external_vs) = self.external_terminal_voltages(voltages);
 
@@ -217,6 +311,32 @@ impl Jfet {
         // (gmg/gmd), not vgd; both are zero for the diode gate models.
         let igd_eq = igd - ggd * vgd - gmg * vgs - gmd * vds;
 
+        JfetBranchStamp {
+            ids_eq,
+            igs_eq,
+            igd_eq,
+            gm,
+            gds,
+            ggs,
+            ggd,
+            gmg,
+            gmd,
+        }
+    }
+
+    #[inline]
+    fn linearized_terminal_stamp(&self, voltages: &[Value]) -> ([[Value; 3]; 3], [Value; 3]) {
+        let JfetBranchStamp {
+            ids_eq,
+            igs_eq,
+            igd_eq,
+            gm,
+            gds,
+            ggs,
+            ggd,
+            gmg,
+            gmd,
+        } = self.linearized_branch_stamp(voltages);
         let nodes = [self.drain, self.gate, self.source];
         (
             Self::terminal_jacobian(nodes, gm, gds, ggs, ggd, gmg, gmd),
@@ -489,6 +609,52 @@ impl NonlinearDevice for Jfet {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn accepted_checkpoint_preserves_startup_and_rejects_corruption_before_mutation() {
+        let mut source = Jfet::njf("J1", 1, 2, 0);
+        let mut target = source.clone();
+        for initialized in [false, true] {
+            if initialized {
+                source.update(&[2.0, -0.4]);
+                source.update(&[2.1, -0.3]);
+            }
+            let checkpoint = source.accepted_nonlinear_checkpoint().unwrap();
+            assert_eq!(
+                checkpoint.uninitialized_biases,
+                if initialized { 0 } else { 255 }
+            );
+            target.update(&[1.0, -1.0]);
+            target.drain = 7;
+            target
+                .restore_accepted_nonlinear_checkpoint(&checkpoint)
+                .unwrap();
+            assert_eq!(
+                target.drain, 7,
+                "restoration preserves the current topology"
+            );
+            assert_eq!(target.accepted_nonlinear_checkpoint().unwrap(), checkpoint);
+            target.drain = 1;
+            for lane in 0..checkpoint.values.len() {
+                let mut invalid = checkpoint.clone();
+                invalid.values[lane] = Value::INFINITY;
+                assert!(
+                    target
+                        .restore_accepted_nonlinear_checkpoint(&invalid)
+                        .is_err()
+                );
+                assert_eq!(target.accepted_nonlinear_checkpoint().unwrap(), checkpoint);
+            }
+            let mut invalid = checkpoint.clone();
+            invalid.runtime_tag = "jfet-hfet-v1".to_owned();
+            assert!(
+                target
+                    .restore_accepted_nonlinear_checkpoint(&invalid)
+                    .is_err()
+            );
+            assert_eq!(target.accepted_nonlinear_checkpoint().unwrap(), checkpoint);
+        }
+    }
 
     #[test]
     fn tied_terminal_stamps_retain_only_the_active_physical_branches() {

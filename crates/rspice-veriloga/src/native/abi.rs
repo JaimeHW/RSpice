@@ -26,6 +26,50 @@ const INTEGER_BINARY_DESCRIPTOR_BASE: usize = 1;
 const INTEGER_SHIFT_CONST_DESCRIPTOR_BASE: usize = 16;
 const INTEGER_BINARY_CONST_DESCRIPTOR_BASE: usize = 32;
 
+/// Native callbacks whose operands are marshalled as an array, independently
+/// of the target's register count. Descriptor validation is shared by allocated
+/// and segmented emission on every architecture.
+pub(crate) struct OperandArrayCall {
+    pub(crate) count: usize,
+    pub(crate) descriptor: usize,
+    pub(crate) helper: unsafe extern "C" fn(*const f64, *const EvalContext, usize) -> f64,
+}
+
+pub(crate) fn operand_array_call(
+    op: super::expr::NativeOp,
+) -> super::JitResult<Option<OperandArrayCall>> {
+    use super::expr::NativeOp;
+    let invalid = |detail: String| super::JitError::Encoding {
+        model: "native".into(),
+        detail: detail.into(),
+    };
+    let (layout, helper) = match op {
+        NativeOp::ZiState(layout) => (
+            layout,
+            rspice_zi_step_native
+                as unsafe extern "C" fn(*const f64, *const EvalContext, usize) -> f64,
+        ),
+        NativeOp::ZiStateDerivative(layout) => (
+            layout,
+            rspice_zi_derivative_native
+                as unsafe extern "C" fn(*const f64, *const EvalContext, usize) -> f64,
+        ),
+
+        _ => return Ok(None),
+    };
+    let count = layout
+        .validate_operand_budget()
+        .map_err(|error| invalid(error.to_string()))?;
+    let descriptor = layout
+        .native_descriptor()
+        .ok_or_else(|| invalid("Zi runtime layout exceeds native descriptor limits".into()))?;
+    Ok(Some(OperandArrayCall {
+        count,
+        descriptor,
+        helper,
+    }))
+}
+
 fn integration_coefficients(ctx: &EvalContext) -> IntegrationCoefficients {
     IntegrationCoefficients {
         active: ctx.integration_active != 0,

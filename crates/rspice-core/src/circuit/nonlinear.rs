@@ -58,12 +58,13 @@ pub(crate) struct NonlinearDeviceStateSnapshot {
     generated_veriloga_devices: crate::device::veriloga_builtins::BuiltinVerilogADevicesRollback,
 }
 
-/// Accepted native diode/BJT state plus any runtime families that deliberately
+/// Accepted native diode/BJT/JFET state plus any runtime families that deliberately
 /// block resume. Capture is infallible so checkpoint producers can persist a
 /// diagnostic image even when a circuit contains an unsupported VBIC runtime;
 /// validation/restore fail closed on a non-empty blocker list.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct AcceptedNativeNonlinearCheckpointStates {
+    pub(crate) jfets: Vec<crate::device::mosfet::AcceptedJfetNonlinearCheckpoint>,
     pub(crate) diodes: Vec<crate::device::semiconductor::AcceptedDiodeNonlinearCheckpoint>,
     pub(crate) bjts: Vec<crate::device::semiconductor::AcceptedBjtNonlinearCheckpoint>,
     pub(crate) resume_blockers: Vec<String>,
@@ -184,6 +185,7 @@ impl CircuitData {
         &self,
     ) -> AcceptedNativeNonlinearCheckpointStates {
         let mut captured = AcceptedNativeNonlinearCheckpointStates {
+            jfets: Vec::with_capacity(self.jfets.len()),
             diodes: Vec::with_capacity(self.diodes.devices.len()),
             bjts: Vec::with_capacity(self.bjts.devices.len()),
             resume_blockers: Vec::new(),
@@ -191,6 +193,12 @@ impl CircuitData {
         for diode in &self.diodes.devices {
             match diode.accepted_nonlinear_checkpoint() {
                 Ok(state) => captured.diodes.push(state),
+                Err(blocker) => captured.resume_blockers.push(blocker),
+            }
+        }
+        for jfet in &self.jfets {
+            match jfet.accepted_nonlinear_checkpoint() {
+                Ok(state) => captured.jfets.push(state),
                 Err(blocker) => captured.resume_blockers.push(blocker),
             }
         }
@@ -222,6 +230,16 @@ impl CircuitData {
                 self.diodes.devices.len()
             ));
         }
+        if captured.jfets.len() != self.jfets.len() {
+            return Err(format!(
+                "checkpoint JFET accepted nonlinear state shape mismatch: captured {}, circuit has {}",
+                captured.jfets.len(),
+                self.jfets.len()
+            ));
+        }
+        for (jfet, state) in self.jfets.iter().zip(&captured.jfets) {
+            jfet.validate_accepted_nonlinear_checkpoint(state)?;
+        }
         if captured.bjts.len() != self.bjts.devices.len() {
             return Err(format!(
                 "checkpoint BJT accepted nonlinear state shape mismatch: captured {}, circuit has {}",
@@ -249,6 +267,9 @@ impl CircuitData {
         captured: &AcceptedNativeNonlinearCheckpointStates,
     ) -> Result<(), String> {
         self.validate_accepted_native_nonlinear_checkpoint_states(captured)?;
+        for (jfet, state) in self.jfets.iter_mut().zip(&captured.jfets) {
+            jfet.restore_accepted_nonlinear_checkpoint(state)?;
+        }
         for (diode, state) in self.diodes.devices.iter_mut().zip(&captured.diodes) {
             diode.restore_accepted_nonlinear_checkpoint(state)?;
         }

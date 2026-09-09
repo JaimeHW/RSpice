@@ -16,8 +16,9 @@
 //! Scope, stated precisely: accepted linear-reactive histories and
 //! solution-dependent capacitor charge/linearization state; native diode and
 //! legacy Gummel-Poon and promoted VBIC limiter/evaluation state; the engine-owned
-//! accepted diode/BJT charge, derivative, predictor, lead-current, timestep,
-//! and optional charge-snapshot histories; ordinary lossless scalar
+//! accepted diode/BJT/JFET charge, derivative, predictor, lead-current, timestep,
+//! trap/power and optional charge-snapshot histories; complete JFET nonlinear
+//! state and explicit uninitialized-bias markers; ordinary lossless scalar
 //! transmission-line delay histories; generated Verilog-A `ddt`/`idt`
 //! histories and limiter anchors; XSPICE model-owned checkpoint state; and the
 //! accepted LTE, Trap/Gear, static-residual/DAE, nonlinear-solver, cooldown,
@@ -45,14 +46,15 @@ use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::circuit::{
     AcceptedNativeNonlinearCheckpointStates, CircuitData, SolutionDependentCapacitorState,
 };
+use crate::device::mosfet::{AcceptedJfetNonlinearCheckpoint, JFET_CHECKPOINT_RUNTIME_TAGS};
 #[cfg(test)]
 use crate::device::semiconductor::BJT_ACCEPTED_NONLINEAR_RUNTIME_TAG;
 use crate::device::semiconductor::{
     AcceptedBjtChargeSnapshotCheckpoint, AcceptedBjtNonlinearCheckpoint,
     AcceptedDiodeNonlinearCheckpoint, BJT_ACCEPTED_CHARGE_SNAPSHOT_STATE_VALUE_COUNT,
     BJT_ACCEPTED_NONLINEAR_STATE_VALUE_COUNT, BJT_DYNAMIC_CHARGE_COUNT, BJT_EXTERNAL_STATE_DIM,
-    BJT_INTERNAL_STATE_DIM, BjtChargeSnapshot, DIODE_ACCEPTED_NONLINEAR_RUNTIME_TAG,
-    DiodeNonlinearState, VBIC_ACCEPTED_NONLINEAR_STATE_VALUE_COUNT,
+    BJT_INTERNAL_STATE_DIM, DIODE_ACCEPTED_NONLINEAR_RUNTIME_TAG, DiodeNonlinearState,
+    VBIC_ACCEPTED_NONLINEAR_STATE_VALUE_COUNT,
 };
 #[cfg(feature = "veriloga")]
 use crate::device::veriloga::VerilogADeviceCheckpoint;
@@ -89,9 +91,10 @@ use solver_state::{read_solver_state, write_solver_state};
 use std::io::Read;
 
 use super::damped_status::XyceDampedAcceptedBoundaryCheckpoint;
+use super::history::RestoredJunctionTransientHistories;
 use super::{
     AcceptedJunctionTransientHistoryCheckpoint, BjtTransientHistory, DiodeTransientHistory, Engine,
-    SimulationError, TransientStartupMode, VbicPredictorLinearBranchState,
+    JfetTransientHistory, SimulationError, TransientStartupMode, VbicPredictorLinearBranchState,
 };
 
 const CHECKPOINT_ABORT_POLL_INTERVAL: usize = 64;
@@ -171,7 +174,11 @@ fn checkpoint_operation_result<T>(
 /// needs to repeat the operating point to select its transient controls.
 /// Version 37 preserves sparse-solver factors, row scales and backend routing
 /// so exact continuation follows the uninterrupted numerical path.
-const FORMAT_VERSION: u32 = 37;
+/// Version 38 adds complete accepted JFET nonlinear and integration history.
+/// Version 39 retains JFET terminal displacement currents across integration resets.
+const FORMAT_VERSION: u32 = 39;
+const JFET_CURRENT_HISTORY_FORMAT_VERSION: u32 = 39;
+const JFET_STATE_FORMAT_VERSION: u32 = 38;
 const SOLVER_STATE_FORMAT_VERSION: u32 = 37;
 const SOURCE_TIME_BASIS_FORMAT_VERSION: u32 = 35;
 const XYCE_TEAM_RESISTANCE_NOISE_FORMAT_VERSION: u32 = 32;
@@ -236,7 +243,7 @@ pub enum TransientCheckpointBlockerSource {
     Structural,
     /// A scalar or distributed transmission-line history is incomplete.
     TransmissionLine,
-    /// Accepted native diode/BJT limiter or evaluation state is incomplete.
+    /// Accepted native junction limiter or evaluation state is incomplete.
     NativeNonlinearState,
     /// Engine-owned accepted diode/BJT charge or predictor history is incomplete.
     JunctionHistory,
@@ -251,8 +258,8 @@ impl TransientCheckpointBlockerSource {
         match self {
             Self::Structural => "structural checkpoint state",
             Self::TransmissionLine => "transmission-line state",
-            Self::NativeNonlinearState => "accepted native diode/BJT state",
-            Self::JunctionHistory => "accepted BJT/diode transient history",
+            Self::NativeNonlinearState => "accepted native nonlinear state",
+            Self::JunctionHistory => "accepted junction transient history",
             Self::IntegrationRuntime => "accepted integration runtime",
             Self::ExtensionState => "extension state",
         }
@@ -1190,8 +1197,8 @@ pub(crate) fn simulation_checkpoint_identity(config: &SimulationConfig) -> Strin
     // v35 preserves physical VBIC currents in operating-point correction solves.
     // v36 gives RBI an independent current and voltage constitutive equation.
     // v37 preserves explicitly zero and negative VBIC activation energies.
-    // v57 maps classic JFET junction charge through temperature exactly once.
-    hasher.update(b"rspice-transient-resolved-config-v57\0");
+    // v59 reports physical JFET terminal currents, including accepted charge.
+    hasher.update(b"rspice-transient-resolved-config-v59\0");
     hash_field(&mut hasher, "temperature", config.temperature.to_bits());
     hash_field(&mut hasher, "ramptime", config.ramptime.to_bits());
     hash_field(&mut hasher, "digital_delay_type", config.digital_delay_type);
@@ -2383,6 +2390,149 @@ fn read_accepted_bjt_nonlinear_states(
 }
 
 const BJT_TRANSIENT_LINEAR_BRANCH_VALUE_COUNT: usize = 7;
+fn read_accepted_jfet_nonlinear_states(
+    lines: &mut CheckpointLines<'_>,
+    budget: &mut CheckpointParseBudget,
+) -> Result<Vec<AcceptedJfetNonlinearCheckpoint>, String> {
+    let header = lines
+        .next()
+        .ok_or("missing accepted JFET nonlinear states")?;
+    let count = parse_count_header(header, "accepted_jfet_nonlinear_states")?;
+    if count > lines.remaining() {
+        return Err("accepted JFET nonlinear state count exceeds remaining rows".to_string());
+    }
+    let mut states = allocate_checkpoint_capacity(count, "accepted JFET nonlinear states", budget)?;
+    for row in 0..count {
+        let line = lines
+            .next()
+            .ok_or("truncated accepted JFET nonlinear states")?;
+        let mut fields = line.split_whitespace();
+        if fields.next() != Some("accepted_jfet_nonlinear_state") {
+            return Err("malformed accepted JFET nonlinear state row".to_string());
+        }
+        let instance_name = copy_checkpoint_string(
+            fields.next().ok_or("missing JFET instance name")?,
+            "JFET instance name",
+            budget,
+        )?;
+        let runtime_tag = copy_checkpoint_string(
+            fields.next().ok_or("missing JFET runtime tag")?,
+            "JFET runtime tag",
+            budget,
+        )?;
+        let uninitialized_biases = fields
+            .next()
+            .ok_or("missing JFET startup mask")?
+            .parse::<u8>()
+            .map_err(|_| "invalid JFET startup mask")?;
+        let values = read_fixed_finite_values(&mut fields, "JFET", row, "nonlinear")?;
+        let mut flags = [false; 4];
+        for flag in &mut flags {
+            *flag = read_history_bool(&mut fields, "JFET", row, "nonlinear flag")?;
+        }
+        if fields.next().is_some() {
+            return Err("extra field in accepted JFET nonlinear state".to_string());
+        }
+        let state = AcceptedJfetNonlinearCheckpoint {
+            instance_name,
+            runtime_tag,
+            values,
+            flags,
+            uninitialized_biases,
+        };
+        state.validate_numeric_state()?;
+        states.push(state);
+    }
+    Ok(states)
+}
+
+fn read_accepted_jfet_transient_history(
+    lines: &mut CheckpointLines<'_>,
+    budget: &mut CheckpointParseBudget,
+    checkpoint: &mut AcceptedJunctionTransientHistoryCheckpoint,
+    version: u32,
+) -> Result<(), String> {
+    let header = lines
+        .next()
+        .ok_or("missing accepted JFET transient histories")?;
+    let count = parse_count_header(header, "accepted_jfet_transient_histories")?;
+    if count > lines.remaining() {
+        return Err("accepted JFET transient history count exceeds remaining rows".to_string());
+    }
+    checkpoint.jfet_names = allocate_checkpoint_capacity(count, "JFET history names", budget)?;
+    checkpoint.jfet_runtime_tags =
+        allocate_checkpoint_capacity(count, "JFET history tags", budget)?;
+    for (name, values) in checkpoint.jfet_history.columns_mut() {
+        *values = allocate_checkpoint_capacity(count, name, budget)?;
+    }
+    for row in 0..count {
+        let line = lines
+            .next()
+            .ok_or("truncated accepted JFET transient histories")?;
+        let mut fields = line.split_whitespace();
+        if fields.next() != Some("accepted_jfet_transient_history") {
+            return Err("malformed accepted JFET transient history row".to_string());
+        }
+        checkpoint.jfet_names.push(copy_checkpoint_string(
+            fields.next().ok_or("missing JFET history instance name")?,
+            "JFET history instance",
+            budget,
+        )?);
+        checkpoint.jfet_runtime_tags.push(copy_checkpoint_string(
+            fields.next().ok_or("missing JFET history runtime tag")?,
+            "JFET history tag",
+            budget,
+        )?);
+        for (index, (name, values)) in checkpoint
+            .jfet_history
+            .columns_mut()
+            .into_iter()
+            .enumerate()
+        {
+            values.push(
+                if version < JFET_CURRENT_HISTORY_FORMAT_VERSION && index >= 21 {
+                    0.0
+                } else {
+                    read_finite_history_value(&mut fields, "JFET", row, name)?
+                },
+            );
+        }
+        if fields.next().is_some() {
+            return Err("extra field in accepted JFET transient history".to_string());
+        }
+    }
+    let line = lines
+        .next()
+        .ok_or("missing accepted JFET transient timestep history")?;
+    let mut fields = line.split_whitespace();
+    if fields.next() != Some("accepted_jfet_transient_dt") {
+        return Err("malformed accepted JFET transient timestep history".to_string());
+    }
+    checkpoint.jfet_history.accepted_dt_prev =
+        read_finite_history_value(&mut fields, "JFET", count, "accepted_dt_prev")?;
+    checkpoint.jfet_history.accepted_dt_prev_prev =
+        read_finite_history_value(&mut fields, "JFET", count, "accepted_dt_prev_prev")?;
+    if fields.next().is_some() {
+        return Err("extra field in accepted JFET transient timestep history".to_string());
+    }
+    if version < JFET_CURRENT_HISTORY_FORMAT_VERSION && count > 0 {
+        let blocker = copy_checkpoint_string(
+            "legacy checkpoint lacks accepted JFET terminal displacement currents",
+            "JFET current-history blocker",
+            budget,
+        )?;
+        budget.charge_items::<String>(
+            checkpoint.resume_blockers.len().saturating_add(1),
+            "JFET current-history blockers",
+        )?;
+        checkpoint
+            .resume_blockers
+            .try_reserve_exact(1)
+            .map_err(|_| "JFET current-history blockers exceed checkpoint allocation limits")?;
+        checkpoint.resume_blockers.push(blocker);
+    }
+    checkpoint.jfet_history.validate(count)
+}
 
 fn allocate_bjt_transient_history(
     count: usize,
@@ -2935,6 +3085,7 @@ fn read_accepted_junction_transient_history(
         diode_runtime_tags,
         diode_history,
         vbic_snapshot_cache,
+        ..Default::default()
     })
 }
 
@@ -2952,10 +3103,10 @@ fn validate_checkpoint_identity_vector(
             runtime_tags.len()
         ));
     }
-    let allocation_name = if kind == "BJT" {
-        "accepted BJT transient-history validation names"
-    } else {
-        "accepted diode transient-history validation names"
+    let allocation_name = match kind {
+        "BJT" => "accepted BJT transient-history validation names",
+        "JFET" => "accepted JFET transient-history validation names",
+        _ => "accepted diode transient-history validation names",
     };
     let mut sorted_names = match budget.as_deref_mut() {
         Some(budget) => allocate_checkpoint_capacity(names.len(), allocation_name, budget)?,
@@ -2996,6 +3147,15 @@ fn accepted_junction_history_payload_is_empty(
     let bjt = &checkpoint.bjt_history;
     let diode = &checkpoint.diode_history;
     checkpoint.bjt_names.is_empty()
+        && checkpoint.jfet_names.is_empty()
+        && checkpoint.jfet_runtime_tags.is_empty()
+        && checkpoint
+            .jfet_history
+            .columns()
+            .iter()
+            .all(|(_, values)| values.is_empty())
+        && checkpoint.jfet_history.accepted_dt_prev.to_bits() == 0.0_f64.to_bits()
+        && checkpoint.jfet_history.accepted_dt_prev_prev.to_bits() == 0.0_f64.to_bits()
         && checkpoint.bjt_runtime_tags.is_empty()
         && checkpoint.vbic_snapshot_cache.is_empty()
         && bjt.vbe_prev.is_empty()
@@ -3037,18 +3197,28 @@ fn validate_accepted_junction_transient_history_numeric_state(
     if checkpoint.resume_blockers.iter().any(|blocker| {
         blocker.is_empty() || blocker != blocker.trim() || blocker.contains(['\r', '\n'])
     }) {
-        return Err("accepted BJT/diode transient-history blocker text is malformed".to_string());
+        return Err("accepted junction transient-history blocker text is malformed".to_string());
     }
     if !checkpoint.available {
         if !accepted_junction_history_payload_is_empty(checkpoint) {
             return Err(
-                "accepted BJT/diode transient history is present without availability provenance"
+                "accepted junction transient history is present without availability provenance"
                     .to_string(),
             );
         }
         return Ok(());
     }
 
+    validate_checkpoint_identity_vector(
+        "JFET",
+        &checkpoint.jfet_names,
+        &checkpoint.jfet_runtime_tags,
+        &JFET_CHECKPOINT_RUNTIME_TAGS,
+        budget,
+    )?;
+    checkpoint
+        .jfet_history
+        .validate(checkpoint.jfet_names.len())?;
     validate_checkpoint_identity_vector(
         "BJT",
         &checkpoint.bjt_names,
@@ -5352,10 +5522,11 @@ impl TransientCheckpoint {
         if !self.accepted_nonlinear_state_available
             && (!self.accepted_nonlinear_states.resume_blockers.is_empty()
                 || !self.accepted_nonlinear_states.diodes.is_empty()
-                || !self.accepted_nonlinear_states.bjts.is_empty())
+                || !self.accepted_nonlinear_states.bjts.is_empty()
+                || !self.accepted_nonlinear_states.jfets.is_empty())
         {
             return Err(
-                "accepted diode/BJT nonlinear checkpoint state is present without availability provenance"
+                "accepted native nonlinear checkpoint state is present without availability provenance"
                     .to_string(),
             );
         }
@@ -5370,7 +5541,39 @@ impl TransientCheckpoint {
             })
         {
             return Err(
-                "accepted diode/BJT nonlinear checkpoint blocker text is malformed".to_string(),
+                "accepted native nonlinear checkpoint blocker text is malformed".to_string(),
+            );
+        }
+        let mut jfet_names = match budget.as_deref_mut() {
+            Some(budget) => allocate_checkpoint_capacity(
+                self.accepted_nonlinear_states.jfets.len(),
+                "accepted JFET validation names",
+                budget,
+            )?,
+            None => {
+                let mut names = Vec::new();
+                names
+                    .try_reserve_exact(self.accepted_nonlinear_states.jfets.len())
+                    .map_err(|_| "accepted JFET validation names exceed allocation limits")?;
+                names
+            }
+        };
+        for state in &self.accepted_nonlinear_states.jfets {
+            if state.instance_name.is_empty()
+                || state.instance_name.chars().any(char::is_whitespace)
+                || !JFET_CHECKPOINT_RUNTIME_TAGS.contains(&state.runtime_tag.as_str())
+            {
+                return Err(
+                    "accepted JFET nonlinear state has invalid identity/runtime tag".to_string(),
+                );
+            }
+            state.validate_numeric_state()?;
+            jfet_names.push(state.instance_name.as_str());
+        }
+        jfet_names.sort_unstable();
+        if jfet_names.windows(2).any(|names| names[0] == names[1]) {
+            return Err(
+                "accepted JFET nonlinear states contain duplicate instance names".to_string(),
             );
         }
         let mut diode_names = match budget.as_deref_mut() {
@@ -5695,13 +5898,14 @@ impl TransientCheckpoint {
         let accepted_junction_history = if let Some(history) = junction_history {
             Engine::validate_accepted_junction_transient_history_checkpoint(circuit, &history)?;
             history
-        } else if circuit.bjts.is_empty() && circuit.diodes.is_empty() {
+        } else if circuit.bjts.is_empty() && circuit.diodes.is_empty() && circuit.jfets.is_empty() {
             AcceptedJunctionTransientHistoryCheckpoint {
                 available: true,
                 ..AcceptedJunctionTransientHistoryCheckpoint::default()
             }
         } else if time.to_bits() == 0.0_f64.to_bits()
             && circuit.bjts.is_empty()
+            && circuit.jfets.is_empty()
             && circuit
                 .diodes
                 .devices
@@ -5720,11 +5924,12 @@ impl TransientCheckpoint {
                 circuit,
                 &BjtTransientHistory::default(),
                 &diode_history,
+                &JfetTransientHistory::default(),
                 &[],
             )
         } else {
             AcceptedJunctionTransientHistoryCheckpoint::unavailable(
-                "checkpoint capture caller did not provide accepted BJT/diode transient histories",
+                "checkpoint capture caller did not provide accepted junction transient histories",
             )
         };
         Self::capture_with_restart_identity(
@@ -5844,13 +6049,13 @@ impl TransientCheckpoint {
             circuit.capture_accepted_native_nonlinear_checkpoint_states();
         if !accepted_nonlinear_states.resume_blockers.is_empty() {
             log::warn!(
-                "transient checkpoint at t={time:.6e}: accepted native diode/BJT state is not fully serialized; this checkpoint will be refused for resume: {}",
+                "transient checkpoint at t={time:.6e}: accepted native nonlinear state is not fully serialized; this checkpoint will be refused for resume: {}",
                 accepted_nonlinear_states.resume_blockers.join("; ")
             );
         }
         if !accepted_junction_history.resume_blockers.is_empty() {
             log::warn!(
-                "transient checkpoint at t={time:.6e}: accepted BJT/diode transient history is not fully serialized; this checkpoint will be refused for resume: {}",
+                "transient checkpoint at t={time:.6e}: accepted junction transient history is not fully serialized; this checkpoint will be refused for resume: {}",
                 accepted_junction_history.resume_blockers.join("; ")
             );
         }
@@ -6046,16 +6251,16 @@ impl TransientCheckpoint {
     ) -> Result<(), String> {
         if !self.accepted_junction_history.resume_blockers.is_empty() {
             return Err(format!(
-                "transient checkpoint resume cannot restore unsupported accepted BJT/diode transient history: {}",
+                "transient checkpoint resume cannot restore unsupported accepted junction transient history: {}",
                 self.accepted_junction_history.resume_blockers.join("; ")
             ));
         }
         if !self.accepted_junction_history.available {
-            if circuit.bjts.is_empty() && circuit.diodes.is_empty() {
+            if circuit.bjts.is_empty() && circuit.diodes.is_empty() && circuit.jfets.is_empty() {
                 return Ok(());
             }
             return Err(
-                "legacy transient checkpoint does not contain accepted BJT/diode transient history; re-run the transient from t=0"
+                "legacy transient checkpoint does not contain accepted junction transient history; re-run the transient from t=0"
                     .to_string(),
             );
         }
@@ -6070,21 +6275,10 @@ impl TransientCheckpoint {
     pub(super) fn restore_accepted_junction_transient_history(
         &self,
         circuit: &CircuitData,
-    ) -> Result<
-        (
-            BjtTransientHistory,
-            DiodeTransientHistory,
-            Vec<Option<BjtChargeSnapshot>>,
-        ),
-        String,
-    > {
+    ) -> Result<RestoredJunctionTransientHistories, String> {
         self.validate_accepted_junction_history_for_circuit(circuit)?;
         if !self.accepted_junction_history.available {
-            return Ok((
-                BjtTransientHistory::default(),
-                DiodeTransientHistory::default(),
-                Vec::new(),
-            ));
+            return Ok(RestoredJunctionTransientHistories::default());
         }
         Engine::restore_accepted_junction_transient_history_checkpoint(
             circuit,
@@ -6108,10 +6302,10 @@ impl TransientCheckpoint {
         self.validate_numeric_state()?;
 
         if !self.accepted_nonlinear_state_available
-            && (!circuit.diodes.is_empty() || !circuit.bjts.is_empty())
+            && (!circuit.diodes.is_empty() || !circuit.bjts.is_empty() || !circuit.jfets.is_empty())
         {
             return Err(
-                "legacy transient checkpoint does not contain accepted native diode/BJT nonlinear state; re-run the transient from t=0"
+                "legacy transient checkpoint does not contain accepted native nonlinear state; re-run the transient from t=0"
                     .to_string(),
             );
         }
@@ -6482,13 +6676,13 @@ impl TransientCheckpoint {
         }
         if !self.accepted_junction_history.resume_blockers.is_empty() {
             return Err(format!(
-                "transient checkpoint resume cannot restore unsupported accepted BJT/diode transient history: {}. Run this transient deck unsegmented.",
+                "transient checkpoint resume cannot restore unsupported accepted junction transient history: {}. Run this transient deck unsegmented.",
                 self.accepted_junction_history.resume_blockers.join("; ")
             ));
         }
         if !self.accepted_nonlinear_states.resume_blockers.is_empty() {
             return Err(format!(
-                "transient checkpoint resume cannot restore unsupported accepted native diode/BJT state: {}. Run this transient deck unsegmented.",
+                "transient checkpoint resume cannot restore unsupported accepted native nonlinear state: {}. Run this transient deck unsegmented.",
                 self.accepted_nonlinear_states.resume_blockers.join("; ")
             ));
         }
@@ -6918,6 +7112,19 @@ impl TransientCheckpoint {
         let junction = &self.accepted_junction_history;
         let bjt = &junction.bjt_history;
         count = count
+            .saturating_add(
+                self.accepted_nonlinear_states
+                    .jfets
+                    .len()
+                    .saturating_mul(29),
+            )
+            .saturating_add(junction.jfet_names.len())
+            .saturating_add(junction.jfet_runtime_tags.len())
+            .saturating_add(2);
+        for (_, column) in junction.jfet_history.columns() {
+            count = count.saturating_add(column.len());
+        }
+        count = count
             .saturating_add(bjt.vbe_prev.len())
             .saturating_add(bjt.vbe_prev_prev.len())
             .saturating_add(bjt.ibe_prev.len())
@@ -7324,6 +7531,25 @@ impl TransientCheckpoint {
                 abort,
             )?;
         }
+        out.push_str(&format!(
+            "accepted_jfet_nonlinear_states {}\n",
+            self.accepted_nonlinear_states.jfets.len()
+        ));
+        for (index, state) in self.accepted_nonlinear_states.jfets.iter().enumerate() {
+            poll_checkpoint_abort(abort, index)?;
+            out.push_str(&format!(
+                "accepted_jfet_nonlinear_state {} {} {}",
+                state.instance_name, state.runtime_tag, state.uninitialized_biases
+            ));
+            for value in state.values {
+                out.push(' ');
+                out.push_str(&value.to_string());
+            }
+            for flag in state.flags {
+                out.push_str(if flag { " 1" } else { " 0" });
+            }
+            out.push('\n');
+        }
         let junction = &self.accepted_junction_history;
         out.push_str(&format!(
             "accepted_junction_history_available {}\n",
@@ -7453,6 +7679,26 @@ impl TransientCheckpoint {
         out.push_str(&format!(
             "accepted_diode_transient_dt {} {}\n",
             junction.diode_history.accepted_dt_prev, junction.diode_history.accepted_dt_prev_prev
+        ));
+        out.push_str(&format!(
+            "accepted_jfet_transient_histories {}\n",
+            junction.jfet_names.len()
+        ));
+        for index in 0..junction.jfet_names.len() {
+            poll_checkpoint_abort(abort, index)?;
+            out.push_str(&format!(
+                "accepted_jfet_transient_history {} {}",
+                junction.jfet_names[index], junction.jfet_runtime_tags[index]
+            ));
+            for (_, values) in junction.jfet_history.columns() {
+                out.push(' ');
+                out.push_str(&values[index].to_string());
+            }
+            out.push('\n');
+        }
+        out.push_str(&format!(
+            "accepted_jfet_transient_dt {} {}\n",
+            junction.jfet_history.accepted_dt_prev, junction.jfet_history.accepted_dt_prev_prev
         ));
         out.push_str(&format!(
             "tline_state_available {}\n",
@@ -8266,16 +8512,29 @@ impl TransientCheckpoint {
                     )?,
                     diodes: read_accepted_diode_nonlinear_states(lines, budget)?,
                     bjts: read_accepted_bjt_nonlinear_states(lines, budget)?,
+                    jfets: if version >= JFET_STATE_FORMAT_VERSION {
+                        read_accepted_jfet_nonlinear_states(lines, budget)?
+                    } else {
+                        Vec::new()
+                    },
                 },
             )
         } else {
             (false, AcceptedNativeNonlinearCheckpointStates::default())
         };
-        let accepted_junction_history = if version >= ACCEPTED_JUNCTION_HISTORY_FORMAT_VERSION {
+        let mut accepted_junction_history = if version >= ACCEPTED_JUNCTION_HISTORY_FORMAT_VERSION {
             read_accepted_junction_transient_history(lines, budget)?
         } else {
             AcceptedJunctionTransientHistoryCheckpoint::default()
         };
+        if version >= JFET_STATE_FORMAT_VERSION {
+            read_accepted_jfet_transient_history(
+                lines,
+                budget,
+                &mut accepted_junction_history,
+                version,
+            )?;
+        }
         let (tline_state_available, tline_resume_blockers, tline_states) = if version >= 14 {
             let availability_line = lines
                 .next()
@@ -9377,6 +9636,114 @@ mod tests {
         )
     }
 
+    #[test]
+    fn jfet_checkpoint_wire_preserves_every_lane_and_refuses_legacy_state() {
+        let mut original = sample();
+        let device = crate::device::Jfet::njf("J1", 1, 2, 0);
+        original
+            .accepted_nonlinear_states
+            .jfets
+            .push(device.accepted_nonlinear_checkpoint().unwrap());
+        let history = &mut original.accepted_junction_history;
+        history.jfet_names.push(device.name.clone());
+        history
+            .jfet_runtime_tags
+            .push(device.checkpoint_runtime_tag().to_owned());
+        for (index, (_, values)) in history.jfet_history.columns_mut().into_iter().enumerate() {
+            values.push(if index == 0 {
+                -0.0
+            } else if index == 1 {
+                Value::from_bits(1)
+            } else {
+                -0.125 * index as Value
+            });
+        }
+        history.jfet_history.accepted_dt_prev = 2e-9;
+        history.jfet_history.accepted_dt_prev_prev = 3e-9;
+        for encoding in [
+            TransientCheckpointEncoding::Unpacked,
+            TransientCheckpointEncoding::Packed,
+        ] {
+            let restored =
+                TransientCheckpoint::from_bytes(&original.to_bytes(encoding).unwrap()).unwrap();
+            assert_eq!(
+                restored.accepted_nonlinear_states.jfets,
+                original.accepted_nonlinear_states.jfets
+            );
+            assert_eq!(
+                restored.accepted_junction_history.jfet_history,
+                original.accepted_junction_history.jfet_history
+            );
+            for ((_, actual), (_, expected)) in restored
+                .accepted_junction_history
+                .jfet_history
+                .columns()
+                .into_iter()
+                .zip(original.accepted_junction_history.jfet_history.columns())
+            {
+                assert_eq!(actual[0].to_bits(), expected[0].to_bits());
+            }
+        }
+        let text = original.to_text();
+        for malformed in [
+            text.replace(
+                "accepted_jfet_nonlinear_state J1 jfet-shichman-hodges-v1 255",
+                "accepted_jfet_nonlinear_state J1 jfet-shichman-hodges-v1 256",
+            ),
+            text.replace(
+                "accepted_jfet_transient_history J1 jfet-shichman-hodges-v1 -0",
+                "accepted_jfet_transient_history J1 jfet-shichman-hodges-v1 NaN",
+            ),
+            text.replace(
+                "accepted_jfet_transient_histories 1",
+                "accepted_jfet_transient_histories 18446744073709551615",
+            ),
+        ] {
+            assert_ne!(malformed, text);
+            assert!(TransientCheckpoint::from_text(&malformed).is_err());
+        }
+        let mut legacy = TransientCheckpoint::from_text(&legacy_text(&original, 37)).unwrap();
+        assert!(legacy.accepted_nonlinear_states.jfets.is_empty());
+        legacy.accepted_nonlinear_states.diodes.clear();
+        legacy.accepted_nonlinear_states.bjts.clear();
+        let mut circuit = CircuitData::new();
+        circuit.jfets.push(device);
+        assert!(
+            circuit
+                .validate_accepted_native_nonlinear_checkpoint_states(
+                    &legacy.accepted_nonlinear_states
+                )
+                .unwrap_err()
+                .contains("JFET")
+        );
+        assert!(
+            legacy
+                .restore_accepted_junction_transient_history(&circuit)
+                .unwrap_err()
+                .contains("JFET")
+        );
+        let previous = TransientCheckpoint::from_text(&legacy_text(&original, 38)).unwrap();
+        assert_eq!(
+            previous.accepted_nonlinear_states.jfets,
+            original.accepted_nonlinear_states.jfets
+        );
+        assert!(
+            previous
+                .restore_accepted_junction_transient_history(&circuit)
+                .unwrap_err()
+                .contains("accepted JFET terminal displacement currents")
+        );
+        let mut empty = original.clone();
+        empty.accepted_nonlinear_states.jfets.clear();
+        empty.accepted_junction_history.jfet_names.clear();
+        empty.accepted_junction_history.jfet_runtime_tags.clear();
+        empty.accepted_junction_history.jfet_history = JfetTransientHistory::default();
+        assert_eq!(
+            original.retained_value_count() - empty.retained_value_count(),
+            29 + 2 + 24
+        );
+    }
+
     fn sample_junction_history() -> AcceptedJunctionTransientHistoryCheckpoint {
         let linear = |offset: Value| VbicPredictorLinearBranchState {
             vrcx: offset + 0.01,
@@ -9390,6 +9757,9 @@ mod tests {
         AcceptedJunctionTransientHistoryCheckpoint {
             available: true,
             resume_blockers: Vec::new(),
+            jfet_names: Vec::new(),
+            jfet_runtime_tags: Vec::new(),
+            jfet_history: JfetTransientHistory::default(),
             bjt_names: vec!["qcheck".to_string()],
             bjt_runtime_tags: vec![super::super::BJT_TRANSIENT_HISTORY_RUNTIME_TAG.to_string()],
             bjt_history: BjtTransientHistory {
@@ -9617,6 +9987,7 @@ mod tests {
             generic_switch_stores: vec![[-0.25, 0.125, 0.375, f64::MIN_POSITIVE]],
             accepted_nonlinear_state_available: true,
             accepted_nonlinear_states: AcceptedNativeNonlinearCheckpointStates {
+                jfets: Vec::new(),
                 resume_blockers: Vec::new(),
                 diodes: vec![AcceptedDiodeNonlinearCheckpoint {
                     instance_name: "dcheck".to_string(),
@@ -9868,6 +10239,38 @@ mod tests {
         let mut output = String::new();
         let mut lines = text.lines();
         while let Some(line) = lines.next() {
+            if version < JFET_CURRENT_HISTORY_FORMAT_VERSION
+                && line.starts_with("accepted_jfet_transient_history ")
+            {
+                output.push_str(
+                    &line
+                        .split_whitespace()
+                        .take(24)
+                        .collect::<Vec<_>>()
+                        .join(" "),
+                );
+                output.push('\n');
+                continue;
+            }
+            if version < JFET_STATE_FORMAT_VERSION {
+                if line.starts_with("accepted_jfet_nonlinear_states ")
+                    || line.starts_with("accepted_jfet_transient_histories ")
+                {
+                    let count = line
+                        .split_whitespace()
+                        .nth(1)
+                        .unwrap()
+                        .parse::<usize>()
+                        .unwrap();
+                    for _ in 0..count {
+                        lines.next().expect("JFET checkpoint row");
+                    }
+                    continue;
+                }
+                if line.starts_with("accepted_jfet_transient_dt ") {
+                    continue;
+                }
+            }
             if version < SOLVER_STATE_FORMAT_VERSION && line.starts_with("accepted_solver_state ") {
                 if !line.ends_with(" none") {
                     for row in lines.by_ref() {
@@ -11401,6 +11804,7 @@ mod tests {
                 &circuit,
                 &bjt_history,
                 &diode_history,
+                &JfetTransientHistory::default(),
                 &[None],
             );
         (engine, netlist, checkpoint)
@@ -11518,7 +11922,8 @@ mod tests {
             .inject(&mut target)
             .expect_err("v17 cannot reconstruct accepted diode/BJT state");
         assert!(
-            error.contains("legacy transient checkpoint") && error.contains("diode/BJT"),
+            error.contains("legacy transient checkpoint")
+                && error.contains("accepted native nonlinear state"),
             "unexpected error: {error}"
         );
     }
@@ -11542,18 +11947,24 @@ mod tests {
             .expect_err("v19 cannot reconstruct accepted BJT/diode histories");
         assert!(
             error.contains("legacy transient checkpoint")
-                && error.contains("BJT/diode transient history"),
+                && error.contains("junction transient history"),
             "unexpected error: {error}"
         );
 
         let empty = engine
             .build_circuit(&Netlist::default())
             .expect("empty target circuit builds");
-        let (bjt, diode, cache) = legacy
+        let RestoredJunctionTransientHistories {
+            bjt,
+            diode,
+            jfet,
+            vbic_snapshot_cache: cache,
+        } = legacy
             .restore_accepted_junction_transient_history(&empty)
             .expect("v19 missing junction history is irrelevant to a junction-free target");
         assert_eq!(bjt, BjtTransientHistory::default());
         assert_eq!(diode, DiodeTransientHistory::default());
+        assert_eq!(jfet, JfetTransientHistory::default());
         assert!(cache.is_empty());
     }
 
@@ -11620,11 +12031,17 @@ mod tests {
         assert!(accepted_junction_history_payload_is_empty(
             &empty_checkpoint.accepted_junction_history
         ));
-        let (bjt, diode, cache) = empty_checkpoint
+        let RestoredJunctionTransientHistories {
+            bjt,
+            diode,
+            jfet,
+            vbic_snapshot_cache: cache,
+        } = empty_checkpoint
             .restore_accepted_junction_transient_history(&empty)
             .expect("available-empty v20 history validates exact zero topology");
         assert_eq!(bjt, BjtTransientHistory::default());
         assert_eq!(diode, DiodeTransientHistory::default());
+        assert_eq!(jfet, JfetTransientHistory::default());
         assert!(cache.is_empty());
 
         let diode_netlist =
@@ -11774,7 +12191,7 @@ mod tests {
             vec!["Q1: exact accepted charge history is unavailable".to_string()];
         cases.push((
             junction,
-            "accepted BJT/diode transient history",
+            "accepted junction transient history",
             "Q1: exact accepted charge history is unavailable",
         ));
 
@@ -11783,7 +12200,7 @@ mod tests {
             vec!["M1: native limiter state is unavailable".to_string()];
         cases.push((
             nonlinear,
-            "accepted native diode/BJT state",
+            "accepted native nonlinear state",
             "M1: native limiter state is unavailable",
         ));
 
@@ -11921,7 +12338,7 @@ mod tests {
         assert_eq!(
             error,
             format!(
-                "refusing to save unusable transient checkpoint: transient checkpoint capability preflight failed: accepted BJT/diode transient history: {blocker}"
+                "refusing to save unusable transient checkpoint: transient checkpoint capability preflight failed: accepted junction transient history: {blocker}"
             )
         );
         assert!(
@@ -12081,7 +12498,7 @@ mod tests {
     /// asserting current-format behaviour after two renumberings moved it into
     /// the legacy ladder.
     #[cfg(feature = "veriloga")]
-    const RUNTIME_VERILOGA_FORMAT_STATE_CONTRACTS: [(u32, u32); 21] = [
+    const RUNTIME_VERILOGA_FORMAT_STATE_CONTRACTS: [(u32, u32); 23] = [
         (17, 1),
         (18, 1),
         (19, 1),
@@ -12103,6 +12520,8 @@ mod tests {
         (35, 8),
         (36, 8),
         (37, 8),
+        (38, 8),
+        (39, 8),
     ];
 
     #[cfg(feature = "veriloga")]
