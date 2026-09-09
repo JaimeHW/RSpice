@@ -93,7 +93,7 @@ export async function qualifyAbi(wasm) {
       expect(label, invoke(opcode, operands), expected);
     }
     reset();
-    expect("hypot", instance.exports.math2(2, 3, 4), 5);
+    expect("hypot", instance.exports.math2(202, 3, 4), 5);
     for (const [label, opcode, operands] of [
       ["nonfinite integer", 300, [NaN]],
       ["invalid derivative primal", 340, [NaN, 0.25]],
