@@ -1738,3 +1738,42 @@ fn legacy_bsim_invalid_body_parameters_fail_before_analysis() {
         }
     }
 }
+
+#[test]
+fn legacy_bsim_transient_preserves_charge_when_c_phi_overflows() {
+    use rspice_core::engine::SpiceDialect;
+    use rspice_core::numerics::integration::IntegrationMethod;
+    for (kind, p, level) in [
+        ("NMOS", 1.0, 4),
+        ("PMOS", -1.0, 4),
+        ("NMOS", 1.0, 5),
+        ("PMOS", -1.0, 5),
+    ] {
+        // C*Phi overflows, but Q=C*V and the companion conductance C/dt
+        // are representable. A round trip also checks accepted charge history.
+        let deck = Netlist::parse(&format!(
+            "Junction range\nVx x 0 DC 0 PWL(0 0 1e12 {} 2e12 0)\nM1 0 0 0 x jm W=1u L=1u PS=1\n.model jm {kind}(LEVEL={level} TOX=0.03 CJSW=3e12 PBSW=1e300 MJSW=0.5)\n.print tran V(x) I(Vx) IB(M1)\n.end\n", -0.5 * p
+        )).unwrap();
+        let engine = Engine::new(SimulationConfig {
+            spice_dialect: SpiceDialect::Ngspice,
+            integration_method: IntegrationMethod::BackwardEuler,
+            locked_time_grid: Some(std::sync::Arc::new(vec![0.0, 1e12, 2e12])),
+            ..Default::default()
+        });
+        let result = engine.run_tran(&deck, 2e12, 1e12).unwrap();
+        assert_eq!(result.time, [0.0, 1e12, 2e12]);
+        let current = result.try_branch_current_waveform_named("Vx").unwrap();
+        let report = result.try_device_op_waveform_named("M1", "IB").unwrap();
+        assert_eq!(current.len(), result.time.len());
+        assert_eq!(report.len(), result.time.len());
+        for (i, expected) in [(1, 1.5 * p), (2, -1.5 * p)] {
+            assert!(
+                (current[i] - expected).abs() < 1e-9,
+                "{kind}: {} vs {expected}",
+                current[i]
+            );
+            assert!((report[i] + current[i]).abs() < 1e-9);
+        }
+        assert_eq!(engine.convergence_quality().force_accepted_points, 0);
+    }
+}

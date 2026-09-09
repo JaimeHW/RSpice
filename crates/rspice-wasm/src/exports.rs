@@ -660,6 +660,47 @@ mod wasm_tests {
     }
 
     #[wasm_bindgen_test]
+    fn depletion_charge_extreme_scale_in_wasm() {
+        use rspice_core::engine::{SimulationConfig, SpiceDialect};
+        use rspice_core::numerics::integration::IntegrationMethod;
+        for (kind, p, level) in [
+            ("NJF", 1.0, 1),
+            ("PJF", -1.0, 1),
+            ("NMOS", 1.0, 4),
+            ("PMOS", -1.0, 4),
+            ("NMOS", 1.0, 5),
+            ("PMOS", -1.0, 5),
+        ] {
+            let device = if level == 1 {
+                format!("J1 0 x 0 jm\n.model jm {kind}(IS=0 CGS=1e12 CGD=2e12 PB=1e300)")
+            } else {
+                format!(
+                    "M1 0 0 0 x jm W=1u L=1u PS=1\n.model jm {kind}(LEVEL={level} TOX=0.03 CJSW=3e12 PBSW=1e300 MJSW=0.5)"
+                )
+            };
+            // A finite charge cycle whose intermediate C*Phi overflows.
+            let deck = rspice_core::Netlist::parse(&format!(
+                "Junction range in WASM\nVx x 0 DC 0 PWL(0 0 1e12 {} 2e12 0)\n{device}\n.print tran I(Vx)\n.end\n", -0.5 * p
+            )).unwrap();
+            let engine = rspice_core::Engine::new(SimulationConfig {
+                spice_dialect: SpiceDialect::Ngspice,
+                integration_method: IntegrationMethod::BackwardEuler,
+                locked_time_grid: Some(std::sync::Arc::new(vec![0.0, 1e12, 2e12])),
+                ..Default::default()
+            });
+            let result = engine
+                .run_tran_with_abort(&deck, 2e12, 1e12, &rspice_core::abort_signal::NoAbort)
+                .unwrap();
+            assert_eq!(result.time, [0.0, 1e12, 2e12]);
+            let current = result.try_branch_current_waveform_named("Vx").unwrap();
+            assert_eq!(current.len(), result.time.len());
+            assert!((current[1] - 1.5 * p).abs() < 1e-9);
+            assert!((current[2] + 1.5 * p).abs() < 1e-9);
+            assert_eq!(engine.convergence_quality().force_accepted_points, 0);
+        }
+    }
+
+    #[wasm_bindgen_test]
     fn classic_jfet_charge_cycle_is_conservative_in_wasm() {
         use rspice_core::engine::{SimulationConfig, SpiceDialect};
         use rspice_core::numerics::integration::IntegrationMethod;

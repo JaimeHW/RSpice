@@ -2326,6 +2326,42 @@ mod tests {
     }
 
     #[test]
+    fn retained_depletion_branches_preserve_finite_charge_when_c_phi_overflows() {
+        let cap = DepletionCap::new(1e150, 1e200, 0.5, 0.5);
+        let none = DepletionCap::none();
+        for device in [
+            NonlinearDeviceInstance::diode(0, 1, 0.0, 1.0).with_junction_caps(cap, none, 0.0),
+            NonlinearDeviceInstance::njfet(1, 0, 1, -2.0, 1e-3, 0.0, 0.0)
+                .with_junction_caps(cap, none, 0.0),
+            NonlinearDeviceInstance::pjfet(1, 0, 1, -2.0, 1e-3, 0.0, 0.0)
+                .with_junction_caps(cap, none, 0.0),
+            NonlinearDeviceInstance::nmos(1, 1, 1, 0, 0.7, 2e-5, 0.0)
+                .with_bulk_junctions(cap, none, 0.0, 0.0),
+            NonlinearDeviceInstance::pmos(1, 1, 1, 0, 0.7, 2e-5, 0.0)
+                .with_bulk_junctions(cap, none, 0.0, 0.0),
+        ] {
+            for v in [-0.5, 0.0, 0.5] {
+                let mut charge = [0.0; 2];
+                let mut jacobian = [[0.0; 2]; 2];
+                for (node, q) in device.charge(&[v, 0.0]) {
+                    charge[node] += q;
+                }
+                for ((row, column), c) in device.charge_jacobian(&[v, 0.0]) {
+                    jacobian[row][column] += c;
+                }
+                // Phi is so large that the nonlinear correction is below an
+                // ulp: each branch is C*V, with opposite terminal injections.
+                for node in 0..2 {
+                    let sign = if node == 0 { 1.0 } else { -1.0 };
+                    assert!((charge[node] + sign * 1e150 * v).abs() <= 1e136);
+                    assert!((jacobian[node][node] - 1e150).abs() <= 1e136);
+                    assert!((jacobian[node][1 - node] + 1e150).abs() <= 1e136);
+                }
+            }
+        }
+    }
+
+    #[test]
     fn retained_charge_parameter_boundaries_are_preserved_and_accepted() {
         let primary = DepletionCap::new(0.0, Value::MIN_POSITIVE, 0.0, 0.0);
         let secondary = DepletionCap::new(Value::from_bits(1), 1.0, 1.0, 0.999_999_999_999);
