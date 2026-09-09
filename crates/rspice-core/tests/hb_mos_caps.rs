@@ -162,3 +162,45 @@ fn parallel_mos_channel_current_matches_the_analytic_hb_harmonics() {
         }
     }
 }
+
+#[test]
+fn one_sided_mos_area_uses_is_for_both_hb_junctions() {
+    for (kind, p) in [("NMOS", 1.0), ("PMOS", -1.0)] {
+        for area in ["AD=2p", "AS=3p"] {
+            let solve = |js| {
+                run_gate_divider(&format!(
+                    "MOS body area in HB\nVD d 0 0\nVS s 0 0\nVG g 0 {}\nVB b 0 DC {} AC 0.001\nM1 d g s b mm L=1u W=1u M=2.5 {area}\n.model mm {kind}(LEVEL=1 VTO={} KP=0 IS=1n JS={js})\n.options GMIN=0\n.end\n",
+                    -p,
+                    p * 0.2,
+                    p,
+                ))
+            };
+            let actual = solve(1e4);
+            let reference = solve(0.0);
+            assert!(actual.converged && reference.converged);
+            for source in ["VD", "VS"] {
+                let spectrum = |result: &HbAnalysisResult| {
+                    result
+                        .result
+                        .mna_branch_currents
+                        .iter()
+                        .find(|branch| branch.device_name.eq_ignore_ascii_case(source))
+                        .unwrap()
+                        .coefficients
+                        .clone()
+                };
+                let expected = spectrum(&reference);
+                assert!(
+                    expected[1].norm() > 1e-8,
+                    "body conductance must be observable"
+                );
+                for (a, b) in spectrum(&actual).iter().zip(&expected) {
+                    assert!(
+                        (a - b).norm() < 1e-13 + b.norm() * 1e-7,
+                        "{kind} {area} {source}: {a} vs {b}"
+                    );
+                }
+            }
+        }
+    }
+}

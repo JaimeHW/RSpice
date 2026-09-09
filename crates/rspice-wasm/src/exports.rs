@@ -262,6 +262,44 @@ mod wasm_tests {
     }
 
     #[wasm_bindgen_test]
+    fn one_sided_mos_area_uses_is_for_both_junctions_in_wasm() {
+        use rspice_core::engine::{SimulationConfig, SpiceDialect};
+        use rspice_core::numerics::integration::IntegrationMethod;
+        let engine = rspice_core::Engine::new(SimulationConfig {
+            spice_dialect: SpiceDialect::Ngspice,
+            integration_method: IntegrationMethod::BackwardEuler,
+            locked_time_grid: Some(std::sync::Arc::new(vec![0.0, 0.5e-6, 1e-6])),
+            ..Default::default()
+        });
+        let abort = rspice_core::abort_signal::NoAbort;
+        let vt = 300.15 * 1.380649e-23 / 1.602176634e-19;
+        for level in [1, 2, 3, 6, 9] {
+            for (kind, p) in [("NMOS", 1.0), ("PMOS", -1.0)] {
+                for area in ["AD=2p", "AS=3p"] {
+                    let netlist = rspice_core::Netlist::parse(&format!(
+                        "MOS body area in WASM\nVD d 0 0\nVS s 0 0\nVG g 0 {}\nVB b 0 DC {} PWL(0 {} 1u {})\nM1 d g s b mm L=1u W=1u M=2.5 {area}\n.model mm {kind}(LEVEL={level} VTO={} KP=0 KC=0 TOX=1 IS=1n JS=1e4)\n.options TEMP=27 TNOM=27 GMIN=0 RELTOL=1e-9 ABSTOL=1e-14 VNTOL=1e-12\n.end\n",
+                        -p, p * 0.2, p * 0.2, p * 0.21, p,
+                    )).unwrap();
+                    let result = engine
+                        .run_tran_with_abort(&netlist, 1e-6, 0.5e-6, &abort)
+                        .unwrap();
+                    for source in ["VD", "VS"] {
+                        let waveform = result.try_branch_current_waveform_named(source).unwrap();
+                        for (&time, &actual) in result.time.iter().zip(waveform) {
+                            let expected =
+                                p * 2.5e-9 * (((0.2 + 0.01 * time / 1e-6) / vt).exp() - 1.0);
+                            assert!(
+                                (actual - expected).abs() < 1e-13 + expected.abs() * 1e-7,
+                                "L{level} {kind} {area} {source}: {actual} vs {expected}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[wasm_bindgen_test]
     fn native_mos_multiplicity_matches_parallel_devices_in_wasm() {
         use rspice_core::engine::{SimulationConfig, SpiceDialect};
         use rspice_core::numerics::integration::IntegrationMethod;

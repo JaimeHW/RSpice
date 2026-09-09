@@ -248,6 +248,91 @@ fn native_mos_rejects_overflowing_resolved_current_and_capacitance() {
 }
 
 #[test]
+fn native_mos_body_area_selection_matches_junction_equations() {
+    use rspice_core::engine::{Engine, SimulationConfig, SpiceDialect};
+    use rspice_core::netlist::Netlist;
+    use rspice_core::numerics::integration::IntegrationMethod;
+    // Shockley current and its derivative, with the dialect's reverse law.
+    // ngspice46 independently gives 2.280257 uA for IS=1n at VBS=0.2.
+    let vt = 300.15 * 1.380649e-23 / 1.602176634e-19;
+    for dialect in [SpiceDialect::Ngspice, SpiceDialect::Xyce] {
+        for level in [1, 2, 3, 6, 9] {
+            if dialect == SpiceDialect::Xyce && level == 9 {
+                continue; // Xyce LEVEL=9 selects BSIM3.
+            }
+            let engine = Engine::new(SimulationConfig {
+                spice_dialect: dialect,
+                integration_method: IntegrationMethod::BackwardEuler,
+                locked_time_grid: Some(std::sync::Arc::new(vec![0.0, 0.5e-6, 1e-6])),
+                ..Default::default()
+            });
+            for (kind, p) in [("NMOS", 1.0), ("PMOS", -1.0)] {
+                // Reference saturation currents per instance, in [drain, source] order.
+                for (ad, source_area, js, saturation) in [
+                    (0.0, 0.0, 1e4, [1e-9, 1e-9]),
+                    (2e-12, 0.0, 1e4, [1e-9, 1e-9]),
+                    (0.0, 3e-12, 1e4, [1e-9, 1e-9]),
+                    (2e-12, 3e-12, 1e4, [2e-8, 3e-8]),
+                    (2e-12, 3e-12, 0.0, [1e-9, 1e-9]),
+                ] {
+                    for bias in [-0.2, 0.2] {
+                        let context = format!(
+                            "{dialect:?} L{level} {kind} AD={ad} AS={source_area} JS={js} VBS={bias}"
+                        );
+                        let netlist = Netlist::parse(&format!(
+                            "MOS body area selection\nVD d 0 0\nVS s 0 0\nVG g 0 {}\nVB b 0 DC {} AC 1 PWL(0 {} 1u {})\nM1 d g s b mm L=1u W=1u M=2.5 AD={ad} AS={source_area}\n.model mm {kind}(LEVEL={level} VTO={} KP=0 KC=0 TOX=1 IS=1n JS={js})\n.options TEMP=27 TNOM=27 GMIN=0 RELTOL=1e-9 ABSTOL=1e-14 VNTOL=1e-12\n.end\n",
+                            -p, p * bias, p * bias, p * (bias + 0.01), p,
+                        )).unwrap();
+                        let dc = engine.run_dc_op(&netlist).unwrap();
+                        let ac = engine.run_ac(&netlist, &[1e3]).unwrap();
+                        let tran = engine.run_tran(&netlist, 1e-6, 0.5e-6).unwrap();
+                        for (source, isat) in ["VD", "VS"].into_iter().zip(saturation) {
+                            let isat = 2.5 * isat;
+                            let law = |v: f64| {
+                                if v < 0.0 {
+                                    if dialect == SpiceDialect::Xyce {
+                                        (isat * v / vt, isat / vt)
+                                    } else {
+                                        (-isat, 0.0)
+                                    }
+                                } else {
+                                    let e = (v / vt).exp();
+                                    (isat * (e - 1.0), isat * e / vt)
+                                }
+                            };
+                            let close = |actual: f64, expected: f64| {
+                                assert!(
+                                    (actual - expected).abs() < 1e-13 + expected.abs() * 1e-7,
+                                    "{context} {source}: {actual} vs {expected}"
+                                );
+                            };
+                            let index = dc
+                                .branch_names
+                                .iter()
+                                .position(|n| n.eq_ignore_ascii_case(source))
+                                .unwrap();
+                            close(dc.branch_currents[index], p * law(bias).0);
+                            let index = ac[0]
+                                .branch_names
+                                .iter()
+                                .position(|n| n.eq_ignore_ascii_case(source))
+                                .unwrap();
+                            close(ac[0].currents[index].re, law(bias).1);
+                            close(ac[0].currents[index].im, 0.0);
+                            let waveform = tran.try_branch_current_waveform_named(source).unwrap();
+                            for (&time, &current) in tran.time.iter().zip(waveform) {
+                                close(current, p * law(bias + 0.01 * time / 1e-6).0);
+                            }
+                        }
+                        assert_eq!(engine.convergence_quality().force_accepted_points, 0);
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn native_mos_multiplicity_matches_parallel_dc() {
     check_native_mos_parallel_equivalence("dc");
 }
