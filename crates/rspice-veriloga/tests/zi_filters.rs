@@ -48,6 +48,44 @@ fn jacobian_sum(device: &mut VerilogADevice, voltages: &[f64]) -> f64 {
     sum
 }
 
+#[test]
+fn ac_real_axis_retains_sampled_filter_residuals_and_rejects_poles() {
+    for residual in [1.0, -1e-200, f64::from_bits(1)] {
+        let source = format!(
+            "module sampled_ac(p,n); inout p,n; electrical p,n; real y;
+             analog begin
+               y=zi_nd(V(p,n), '{{1.7976931348623157e308,{residual:e},-1.7976931348623157e308}}, '{{1.0}}, 0.25);
+               I(p,n)<+y;
+             end endmodule"
+        );
+        let mut device = compile_device("AC", &source);
+        device.set_analysis_type(1);
+        for (frequency, expected) in [(0.0, residual), (2.0, -residual), (6.0, -residual)] {
+            let mut response = (0.0, 0.0);
+            device
+                .try_stamp_small_signal_complex(&[0.25], frequency, |row, col, re, im| {
+                    assert_eq!((row, col), (0, 0));
+                    response.0 += re;
+                    response.1 += im;
+                })
+                .unwrap();
+            assert_eq!(response.0.to_bits(), expected.to_bits());
+            assert_eq!(response.1, 0.0);
+        }
+    }
+
+    let mut pole = compile_device(
+        "POLE",
+        "module sampled_pole(p,n); inout p,n; electrical p,n; real y;
+         analog begin y=zi_nd(V(p,n), '{1.0}, '{1.0,1.0}, 1.0); I(p,n)<+y; end endmodule",
+    );
+    pole.set_analysis_type(1);
+    assert!(
+        pole.try_stamp_small_signal_complex(&[0.25], 0.5, |_, _, _, _| {})
+            .is_err()
+    );
+}
+
 /// First-order IIR lowpass: y[n] = 0.25 x[n] + 0.75 y[n-1], H(1) = 1
 const IIR: &str = r#"
 `include "disciplines.vams"
