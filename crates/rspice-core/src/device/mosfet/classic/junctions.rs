@@ -128,52 +128,48 @@ impl Mosfet {
     }
 
     #[inline]
-    pub(in crate::device::mosfet::classic) fn effective_body_junction_saturation_current(
-        &self,
-        area: Value,
-    ) -> Value {
-        let area_scaled = if self.js_bulk > 0.0 && area > 0.0 {
+    pub(crate) fn effective_body_junction_saturation_current(&self, area: Value) -> Value {
+        // MOS1/2/3/6/9 select IS for both junctions if either area is
+        // absent (ngspice mos*load.c and Xyce MOSFET1/2/3/6). The legacy
+        // BSIM families have a separate per-junction area policy.
+        let areas_present = !matches!(self.level, 1 | 2 | 3 | 6 | 9)
+            || (self.source_area > 0.0 && self.drain_area > 0.0);
+        let area_scaled = if self.js_bulk > 0.0 && area > 0.0 && areas_present {
             self.js_bulk * area
         } else {
             self.is_bulk
         };
-        if area_scaled.is_finite() && area_scaled > 0.0 {
-            area_scaled
+        if area_scaled > 0.0 {
+            area_scaled * self.multiplicity
         } else {
             0.0
         }
     }
 
     #[inline]
-    pub(in crate::device::mosfet::classic) fn source_zero_bias_bottom_junction_capacitance(
-        &self,
-    ) -> Value {
+    pub(crate) fn source_zero_bias_bottom_junction_capacitance(&self) -> Value {
         self.source_bulk_cap_zero_bias
             .unwrap_or(self.cj * self.source_area)
             .max(0.0)
+            * self.multiplicity
     }
 
     #[inline]
-    pub(in crate::device::mosfet::classic) fn drain_zero_bias_bottom_junction_capacitance(
-        &self,
-    ) -> Value {
+    pub(crate) fn drain_zero_bias_bottom_junction_capacitance(&self) -> Value {
         self.drain_bulk_cap_zero_bias
             .unwrap_or(self.cj * self.drain_area)
             .max(0.0)
+            * self.multiplicity
     }
 
     #[inline]
-    pub(in crate::device::mosfet::classic) fn source_zero_bias_sidewall_junction_capacitance(
-        &self,
-    ) -> Value {
-        (self.cjsw * self.source_perimeter).max(0.0)
+    pub(crate) fn source_zero_bias_sidewall_junction_capacitance(&self) -> Value {
+        (self.cjsw * self.source_perimeter).max(0.0) * self.multiplicity
     }
 
     #[inline]
-    pub(in crate::device::mosfet::classic) fn drain_zero_bias_sidewall_junction_capacitance(
-        &self,
-    ) -> Value {
-        (self.cjsw * self.drain_perimeter).max(0.0)
+    pub(crate) fn drain_zero_bias_sidewall_junction_capacitance(&self) -> Value {
+        (self.cjsw * self.drain_perimeter).max(0.0) * self.multiplicity
     }
 
     #[inline]

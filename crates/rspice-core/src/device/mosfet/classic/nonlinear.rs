@@ -361,6 +361,7 @@ mod tests {
                 Mosfet::new_nmos(format!("mn{level}"), 1, 2, 3, 4).with_level(level),
                 Mosfet::new_pmos(format!("mp{level}"), 1, 2, 3, 4).with_level(level),
             ] {
+                canonical.multiplicity = 3.0;
                 canonical.l = 1.3e-6;
                 canonical.w = 7.1e-6;
                 canonical.ld = 0.08e-6;

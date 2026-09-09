@@ -66,8 +66,11 @@ impl Mosfet {
     }
 
     #[inline]
-    pub(in crate::device::mosfet::classic) fn oxide_capacitance_total(&self) -> Value {
-        self.cox * self.classic_meyer_effective_width() * self.classic_meyer_effective_length()
+    pub(crate) fn oxide_capacitance_total(&self) -> Value {
+        self.cox
+            * self.classic_meyer_effective_width()
+            * self.classic_meyer_effective_length()
+            * self.multiplicity
     }
 
     #[inline]
@@ -376,11 +379,11 @@ impl Mosfet {
     pub(crate) fn overlap_capacitances(&self) -> (Value, Value, Value) {
         let width = self.classic_meyer_effective_width();
         // Cgs_overlap = CGSO * W
-        let cgs = self.cgso * width;
+        let cgs = self.cgso * width * self.multiplicity;
         // Cgd_overlap = CGDO * W
-        let cgd = self.cgdo * width;
+        let cgd = self.cgdo * width * self.multiplicity;
         let cgb_length = self.classic_meyer_effective_length();
-        let cgb = self.cgbo * cgb_length;
+        let cgb = self.cgbo * cgb_length * self.multiplicity;
 
         (cgs, cgd, cgb)
     }
@@ -408,7 +411,7 @@ impl Mosfet {
         }
 
         // Intrinsic gate oxide capacitance
-        let cox_wl = self.cox * self.w * self.classic_meyer_effective_length();
+        let cox_wl = self.oxide_capacitance_total();
 
         // Determine operating region from stored values
         let vgs_eff = self.polarity() * self.vgs;

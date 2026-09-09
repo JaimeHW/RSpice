@@ -7048,8 +7048,57 @@ R2 OUT 0 1k
         }
     }
 
-    /// The default (NLEV=2) gm²-based flicker law and the NLEV=0 legacy law
-    /// must both reproduce the official binary.
+    /// Independent parallel devices must sum to the same output spectrum,
+    /// including width-dependent channel equations and every flicker law.
+    #[test]
+    fn classic_mos_multiplicity_noise_matches_independent_parallel_devices() {
+        for level in [1, 2, 3, 4, 5, 6, 9] {
+            for nlev in [0, 1, 2, 3] {
+                let geometry = match level {
+                    2 | 3 | 9 => "TOX=30n DELTA=1",
+                    4 => "TOX=0.03 VFB=-0.7 PHI=0.6 VDD=2 MUZ=400 MUS=500 WMUZ=20 WVFB=0.1",
+                    5 => "TOX=0.03 VFB=-0.7 PHI=0.6 MU0=400 MUS0=500 WMU0=20 WVFB=0.1",
+                    _ => "TOX=30n",
+                };
+                let solve = |parallel| {
+                    let mut deck = format!(
+                        "MOS parallel noise\nVDD supply 0 2\nVIN gate 0 DC 1.5 AC 1\nRL supply drain 1k\n.model mm NMOS(LEVEL={level} VTO=0.5 KP=50u {geometry} NLEV={nlev} KF=1e-21 AF=1.3 RD=20 RS=10)\n.options RELTOL=1e-9 ABSTOL=1e-13 VNTOL=1e-11\n"
+                    );
+                    for index in 0..if parallel { 3 } else { 1 } {
+                        let m = if parallel { 1 } else { 3 };
+                        deck.push_str(&format!("M{index} drain gate 0 0 mm L=1u W=0.5u M={m}\n"));
+                    }
+                    deck.push_str(".end\n");
+                    let netlist = Netlist::parse(&deck).unwrap();
+                    let engine = Engine::default().resolved_for_netlist(&netlist);
+                    let circuit = engine.build_circuit(&netlist).unwrap();
+                    let output = circuit.get_node_by_name("drain").unwrap();
+                    engine
+                        .run_noise_with_input_source(
+                            &netlist,
+                            output,
+                            None,
+                            "VIN",
+                            &[1e2, 1e4, 1e6],
+                            300.15,
+                        )
+                        .unwrap_or_else(|err| {
+                            panic!("L{level} NLEV={nlev} parallel={parallel}: {err}")
+                        })
+                };
+                let actual = solve(false);
+                let expected = solve(true);
+                for (a, b) in actual.iter().zip(&expected) {
+                    let a = a.output_noise_rms();
+                    let b = b.output_noise_rms();
+                    assert!(b > 0.0);
+                    assert!((a - b).abs() < b * 2e-6, "L{level} NLEV={nlev}: {a} vs {b}");
+                }
+            }
+        }
+    }
+
+    /// Both default NLEV=2 and legacy NLEV=0 reproduce the official binary.
     #[test]
     fn mos_flicker_noise_matches_the_ngspice46_oracle() {
         assert_noise_matches_oracle(MOS_FLICKER_DECK, MOS_FLICKER_NLEV2_ORACLE, "nlev2");

@@ -422,8 +422,8 @@ pub struct Mosfet {
     pub nlev: i32,
     /// NLEV=3 channel thermal-noise scale (GDSNOI)
     pub gdsnoi: Value,
-    /// Instance multiplicity (M·NF). Geometry folds it into the width, but
-    /// the SPICE noise laws keep per-finger factors, so it is retained.
+    /// Number of parallel instances (M·NF). Geometry stays per instance;
+    /// channel, junction, charge and noise contributions scale independently.
     pub multiplicity: Value,
 
     // Level 6 (double-exponent/simplified) MOSFET parameters

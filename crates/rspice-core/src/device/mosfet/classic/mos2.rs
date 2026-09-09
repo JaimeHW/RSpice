@@ -546,7 +546,7 @@ impl Mosfet {
         let phi_min_vbs = phi - lvbs;
         let cox = self.cox.max(0.0);
         let oxide_cap = cox * effective_length * effective_width;
-        let beta = self.kp * effective_width / effective_length;
+        let beta = self.kp * effective_width / effective_length * self.multiplicity;
         let xd = self.level2_depletion_width_factor();
         let model_vto = if self.polarity() < 0.0 {
             -self.vto.abs()
@@ -773,7 +773,7 @@ impl Mosfet {
         let phi_min_vbs = Dual3::constant(phi) - lvbs;
         let cox = self.cox.max(0.0);
         let oxide_cap = cox * effective_length * effective_width;
-        let beta = self.kp * effective_width / effective_length;
+        let beta = self.kp * effective_width / effective_length * self.multiplicity;
         let xd = self.level2_depletion_width_factor();
         let model_vto = if self.polarity() < 0.0 {
             -self.vto.abs()
