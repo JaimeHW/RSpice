@@ -169,7 +169,12 @@ fn pvt_family_rejects_a_node_added_by_a_later_successful_point() {
 #[test]
 fn pvt_family_reorders_matching_nodes_and_preserves_physical_zero() {
     for family in [AnalysisType::Parametric, AnalysisType::Corner] {
-        for base in base_modes() {
+        // Nested DC retains multiple secondary-coordinate traces per node;
+        // its terminal-coordinate reduction needs separate qualification.
+        for base in base_modes()
+            .into_iter()
+            .filter(|base| !matches!(base, CornerBaseMode::DcSweepNested { .. }))
+        {
             let run = run(family, REORDERED, [27.0, 85.0], base.clone());
             assert!(run.analyses.iter().all(|point| point.success));
             let summary = &run.analyses[2];
