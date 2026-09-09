@@ -150,6 +150,7 @@ pub use schematic::*;
 pub(crate) use simulation::ConvergenceEncoder;
 #[cfg(test)]
 pub use simulation::ConvergenceFailureClass;
+pub(crate) use simulation::DcTraceView;
 pub(crate) use simulation::RunHistoryRevision;
 pub use simulation::{
     AnalysisAvailability, AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload,
@@ -187,6 +188,9 @@ pub use simulation::{
 pub use simulation::{
     ConvergenceReport, PeriodicConvergenceEvidence, PeriodicInitializationMethod,
     TransientConvergenceEvidence,
+};
+pub use simulation::{
+    DcCurveSelection, DcSweepDirection, DcSweepEvidence, DcSweepFamily, DcSweepQuantity,
 };
 // Only the two types the persisted model itself names are hoisted here. The
 // rest of the stimulus vocabulary — the definition record, the draft state

@@ -1831,7 +1831,8 @@ fn periodic_result_tables(payload: &AnalysisResultPayload) -> Option<Vec<Semanti
                 },
             ])
         }
-        AnalysisResultPayload::OperatingPoint { .. }
+        AnalysisResultPayload::DcSweep { .. }
+        | AnalysisResultPayload::OperatingPoint { .. }
         | AnalysisResultPayload::PoleZero { .. }
         | AnalysisResultPayload::Sensitivity { .. }
         | AnalysisResultPayload::ScalarMeasurements { .. }

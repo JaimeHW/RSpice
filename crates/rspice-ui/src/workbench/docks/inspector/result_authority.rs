@@ -11,6 +11,61 @@ use egui::Ui;
 use super::super::super::design_system::property_row;
 use super::{executed_deck, inspector_disclosure, section_header};
 
+pub(super) fn result_dc_sweep(ui: &mut Ui, analysis: &crate::state::AnalysisResult) {
+    use crate::state::{AnalysisResultPayload, AnalysisType, DcCurveSelection, DcSweepFamily};
+    if analysis.analysis_type != AnalysisType::DcSweep || !analysis.success {
+        return;
+    }
+    section_header(ui, "DC sweep", None);
+    let Some(AnalysisResultPayload::DcSweep { evidence }) = &analysis.result_payload else {
+        ui.label("Curve identity and traversal were not recorded for this result.");
+        return;
+    };
+    property_row(ui, "Primary source", &evidence.source);
+    property_row(ui, "Primary traversal", evidence.direction.label());
+    property_row(
+        ui,
+        "Solved quantities",
+        &evidence.quantities.len().to_string(),
+    );
+    if let DcCurveSelection::Saved(curves) = &evidence.selection {
+        property_row(ui, "Retained source curves", &curves.len().to_string());
+    }
+    match &evidence.family {
+        DcSweepFamily::Single => {
+            property_row(ui, "Sweep family", "Single");
+        }
+        DcSweepFamily::Retraced => {
+            property_row(ui, "Sweep family", "Forward and reverse continuation");
+        }
+        DcSweepFamily::Nested { source, values } => {
+            property_row(ui, "Secondary source", source);
+            property_row(ui, "Secondary points", &values.len().to_string());
+            if let Some(last) = values.last() {
+                property_row(ui, "Final secondary value", &format!("{last:.16e}"));
+            }
+            if inspector_disclosure(
+                ui,
+                "dc-secondary-points",
+                "Secondary coordinates",
+                "executed order",
+            ) {
+                egui::ScrollArea::both().max_height(160.0).show_rows(
+                    ui,
+                    ui.text_style_height(&egui::TextStyle::Body),
+                    values.len(),
+                    |ui, range| {
+                        for index in range {
+                            ui.monospace(format!("{}: {:.16e}", index + 1, values[index]));
+                        }
+                    },
+                );
+            }
+        }
+    }
+    ui.label("Curves use ascending display axes; traversal records the order actually solved.");
+}
+
 /// Solver evidence belongs to the selected result, including after project reload.
 pub(super) fn result_convergence(ui: &mut Ui, analysis: &crate::state::AnalysisResult) {
     use crate::state::{AnalysisType, PeriodicInitializationMethod};

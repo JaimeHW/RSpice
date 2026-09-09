@@ -223,6 +223,33 @@ fn convergence_inspector_exposes_unknown_and_forced_acceptance_status_accessibly
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn dc_inspector_exposes_exact_secondary_coordinates_and_primary_traversal() {
+    use crate::simulation::engine_bridge::nested_dc_tests::{nested_config, retain, solve};
+    let mut config = nested_config();
+    config.start = 1.0;
+    config.stop = 0.0;
+    config.step = -0.5;
+    let analysis = retain(solve(config));
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    ctx.enable_accesskit();
+    let output = ctx.run_ui(Default::default(), |ctx| {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            ui.set_width(312.0);
+            result_authority::result_dc_sweep(ui, &analysis);
+        });
+    });
+    let nodes = output.platform_output.accesskit_update.unwrap().nodes;
+    for expected in ["V1", "V2", "Descending", "3", "2.9999999999999999e-7"] {
+        assert!(
+            nodes.iter().any(|(_, n)| n.value() == Some(expected)),
+            "Missing DC evidence: {expected}"
+        );
+    }
+}
+
 fn result_app_with_current_out_map(split: bool) -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
     app.state.project_lifecycle.project_open = true;

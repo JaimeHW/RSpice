@@ -1093,6 +1093,12 @@ fn format_frequency(value: f64) -> String {
 
 fn payload_values_label(payload: &AnalysisResultPayload) -> String {
     match payload {
+        AnalysisResultPayload::DcSweep { evidence } => format!(
+            "{} solved quantities / {} sweep members / {} primary traversal",
+            evidence.quantities.len(),
+            evidence.member_count(),
+            evidence.direction.label(),
+        ),
         AnalysisResultPayload::OperatingPoint {
             mna_node_names,
             mna_branch_names,

@@ -3271,6 +3271,19 @@ fn retained_result_artifacts(
     }
     if let Some(payload) = &analysis.result_payload {
         let (canonical, name, kind, count, value, viewer) = match payload {
+            AnalysisResultPayload::DcSweep { evidence } => (
+                "payload/dc-sweep",
+                "DC sweep curves",
+                ResultArtifactKind::Array,
+                analysis.waveforms.len(),
+                Some(format!(
+                    "{} · {} · {} members",
+                    evidence.source,
+                    evidence.direction.label(),
+                    evidence.member_count()
+                )),
+                ResultViewer::Table,
+            ),
             AnalysisResultPayload::OperatingPoint { mna_solution, .. } => (
                 "payload/operating-point",
                 "Operating-point execution evidence",
@@ -3438,7 +3451,11 @@ fn retained_result_artifacts(
                 )
             }
         };
-        push(canonical, name.to_owned(), kind, count, "", value, viewer);
+        // DC metadata alone lives in the inspector; this table route requires
+        // retained curves to display.
+        if !matches!(payload, AnalysisResultPayload::DcSweep { .. }) || count > 0 {
+            push(canonical, name.to_owned(), kind, count, "", value, viewer);
+        }
     }
     if let Some(metadata) = &analysis.family_metadata {
         let (name, count, viewer) = match metadata {

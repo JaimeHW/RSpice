@@ -57,6 +57,37 @@ fn a_dc_sweep_names_the_source_the_run_actually_swept() {
     );
 }
 
+#[test]
+fn a_solved_current_source_sweep_keeps_amperes_without_an_executed_deck() {
+    let result = crate::simulation::EngineBridge::new()
+        .run(
+            &crate::simulation::AnalysisConfig::DcSweep(crate::simulation::config::DcSweepConfig {
+                source: "IBIAS".to_owned(),
+                start: 0.0,
+                stop: 1e-3,
+                step: 0.5e-3,
+                ..Default::default()
+            }),
+            "Current sweep\nIBIAS 0 out 0\nR1 out 0 1k\n.end\n",
+        )
+        .unwrap();
+    let analysis = crate::simulation::engine_bridge::nested_dc_tests::retain(result);
+    assert!(analysis.success, "{:?}", analysis.error_message);
+    assert_eq!(analysis.waveforms[0].unit.as_deref(), Some("V"));
+    let voltage = analysis.waveforms[0].y[2];
+    assert!(
+        (voltage - 1.0).abs() <= rspice_core::constants::RELTOL,
+        "1 V within configured relative tolerance; got {voltage:.16e}"
+    );
+    let mut state = AppState::default();
+    state.simulation = crate::simulation::engine_bridge::nested_dc_tests::history(analysis);
+    state.ui.results.viewer = super::super::super::ResultViewer::DcSweep;
+    assert_eq!(model_axis(&mut state), ("IBIAS".to_owned(), "A".to_owned()));
+    let stored = crate::io::project_io::ProjectSimulationResults::from_state(&state.simulation);
+    stored.apply_to_state(&mut state.simulation).unwrap();
+    assert_eq!(model_axis(&mut state), ("IBIAS".to_owned(), "A".to_owned()));
+}
+
 /// A run whose decks were not retained has nothing to read, and inventing a
 /// source would be the failure this replaces. The analysis default stands.
 #[test]

@@ -486,7 +486,8 @@ pub(super) fn retained_pole_zero_payload(
             zero_evidence,
             gain: *gain,
         }),
-        AnalysisResultPayload::OperatingPoint { .. }
+        AnalysisResultPayload::DcSweep { .. }
+        | AnalysisResultPayload::OperatingPoint { .. }
         | AnalysisResultPayload::PssFloquet { .. }
         | AnalysisResultPayload::Pstb { .. }
         | AnalysisResultPayload::Sensitivity { .. }
@@ -514,7 +515,8 @@ pub(super) fn retained_sensitivity_payload(
             result_mode,
             rows,
         } => Some((output.as_str(), *result_mode, rows.as_slice())),
-        AnalysisResultPayload::OperatingPoint { .. }
+        AnalysisResultPayload::DcSweep { .. }
+        | AnalysisResultPayload::OperatingPoint { .. }
         | AnalysisResultPayload::PoleZero { .. }
         | AnalysisResultPayload::PssFloquet { .. }
         | AnalysisResultPayload::Pstb { .. }

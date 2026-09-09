@@ -739,21 +739,26 @@ fn swept_source_axis(
     run: &SimulationRun,
     analysis_index: usize,
 ) -> Option<(String, String)> {
-    let deck = simulation.executed_decks.get(run.id)?;
-    let source = deck
-        .points
-        .get(analysis_index)
-        .and_then(|point| dc_card_source(&point.deck))
-        .or_else(|| {
-            let sources: std::collections::BTreeSet<String> = deck
-                .points
-                .iter()
-                .filter_map(|point| dc_card_source(&point.deck))
-                .collect();
-            (sources.len() == 1)
-                .then(|| sources.into_iter().next())
-                .flatten()
-        })?;
+    let source = if let Some(crate::state::AnalysisResultPayload::DcSweep { evidence }) =
+        &run.analyses.get(analysis_index)?.result_payload
+    {
+        evidence.source.clone()
+    } else {
+        let deck = simulation.executed_decks.get(run.id)?;
+        deck.points
+            .get(analysis_index)
+            .and_then(|point| dc_card_source(&point.deck))
+            .or_else(|| {
+                let sources: std::collections::BTreeSet<String> = deck
+                    .points
+                    .iter()
+                    .filter_map(|point| dc_card_source(&point.deck))
+                    .collect();
+                (sources.len() == 1)
+                    .then(|| sources.into_iter().next())
+                    .flatten()
+            })?
+    };
     // SPICE names a source by what it is: the leading letter is the element
     // type, so it is also the quantity being swept. Anything else is a swept
     // parameter, which has no unit the sheet is entitled to invent.
@@ -920,11 +925,8 @@ pub(super) fn build_models(
         } else {
             analysis_default_unit(analysis.analysis_type)
         };
-        // A DC sweep's abscissa is whatever source the run swept, and the
-        // retained result keeps the values without naming what produced them —
-        // so every DC sheet said volts, including a sweep of a current source,
-        // which is off by a whole quantity. The deck the run executed is that
-        // run's own frozen evidence and its `.dc` card names the source.
+        // Exact retained DC evidence names the swept source. Historical
+        // results can still use their frozen executed deck when available.
         let swept_source = (analysis.analysis_type == AnalysisType::DcSweep)
             .then(|| swept_source_axis(simulation, run, analysis_index))
             .flatten();

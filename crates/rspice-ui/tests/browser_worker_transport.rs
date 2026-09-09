@@ -12,6 +12,21 @@ extern "C" {
     fn structured_clone(value: &JsValue) -> JsValue;
 }
 
+fn transferred_series(
+    buffers: &js_sys::Array,
+    reference: &serde_json::Value,
+) -> js_sys::Float64Array {
+    let reference = &reference["Buffer"];
+    let index = u32::try_from(reference["buffer"].as_u64().unwrap()).unwrap();
+    assert!(index < buffers.length());
+    let values = buffers
+        .get(index)
+        .dyn_into::<js_sys::Float64Array>()
+        .expect("structuredClone preserves the actual Float64Array");
+    assert_eq!(Some(u64::from(values.length())), reference["len"].as_u64());
+    values
+}
+
 fn run(seed: u64, source: &str) -> serde_json::Value {
     let resistance = if source == "deck_statistics" {
         "{aunif(1000,50)}"
@@ -40,7 +55,7 @@ fn run(seed: u64, source: &str) -> serde_json::Value {
         .expect("worker must return valid Monte Carlo results");
     let response = structured_clone(&response);
     let response: serde_json::Value = serde_wasm_bindgen::from_value(response).unwrap();
-    assert_eq!(response["protocolVersion"], 18);
+    assert_eq!(response["protocolVersion"], 19);
     assert_eq!(response["response"]["id"].as_u64(), Some(1));
     let result = response["response"]["outcome"]["Success"]["Inline"]["MonteCarlo"].clone();
     assert_eq!(result["seed"].as_u64(), Some(seed), "{response}");
@@ -100,7 +115,7 @@ fn transient_quality_survives_the_worker_and_structured_clone_before_output_crop
         js_sys::Reflect::get(&response, &"protocolVersion".into())
             .unwrap()
             .as_f64(),
-        Some(18.0)
+        Some(19.0)
     );
     let buffers = js_sys::Reflect::get(&response, &"buffers".into())
         .unwrap()
@@ -111,17 +126,7 @@ fn transient_quality_survives_the_worker_and_structured_clone_before_output_crop
     )
     .unwrap();
     assert_eq!(metadata["id"], 2);
-    let series = |reference: &serde_json::Value| {
-        let reference = &reference["Buffer"];
-        let index = u32::try_from(reference["buffer"].as_u64().unwrap()).unwrap();
-        assert!(index < buffers.length());
-        let values = buffers
-            .get(index)
-            .dyn_into::<js_sys::Float64Array>()
-            .expect("structuredClone preserves the actual Float64Array");
-        assert_eq!(Some(u64::from(values.length())), reference["len"].as_u64());
-        values
-    };
+    let series = |reference: &serde_json::Value| transferred_series(&buffers, reference);
     let transient = &metadata["outcome"]["Success"]["Transient"];
     let quality = &transient["convergence"]["metadata"]["transient"];
     let basis = &quality["time_basis"];
@@ -135,5 +140,80 @@ fn transient_quality_survives_the_worker_and_structured_clone_before_output_crop
     assert_eq!(quality["force_accepted_points"], "0");
     for field in ["transient_indices", "transient_times"] {
         assert_eq!(series(&transient["convergence"][field]).length(), 0);
+    }
+}
+
+#[wasm_bindgen_test]
+fn nested_dc_curves_and_exact_traversal_survive_the_worker_and_structured_clone() {
+    let request = serde_json::json!({
+        "protocolVersion": 9,
+        "request": {
+            "request": {"id":3,"request":{"Spec":{"spec":{"DcSweep":{
+                "source_name":"V1","start":1.0,"stop":0.0,"step":-0.5,
+                "source2":"V2","start2":1e-7,"stop2":3e-7,"step2":1e-7,"hysteresis":false
+            }},"options":{}}},
+            "netlist":"Nested worker DC\nV1 in 0 0\nV2 out 0 0\nR1 in out 1k\n.end\n","source_path":null},
+            "dependency_metadata":"{\"snapshot_digest\":null,\"bindings\":[],\"artifacts\":[]}",
+            "dependency_buffer_count":0
+        },"buffers":[]
+    });
+    let response =
+        rspice_ui::run_rspice_ui_worker_request(js_sys::JSON::parse(&request.to_string()).unwrap())
+            .unwrap();
+    let response = structured_clone(&response);
+    assert_eq!(
+        js_sys::Reflect::get(&response, &"protocolVersion".into())
+            .unwrap()
+            .as_f64(),
+        Some(19.0)
+    );
+    let buffers = js_sys::Reflect::get(&response, &"buffers".into())
+        .unwrap()
+        .dyn_into::<js_sys::Array>()
+        .unwrap();
+    let metadata: serde_json::Value = serde_wasm_bindgen::from_value(
+        js_sys::Reflect::get(&response, &"response".into()).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(metadata["id"], 3);
+    let dc = &metadata["outcome"]["Success"]["DcSweep"];
+    assert_eq!(dc["evidence"]["direction"], "descending");
+    assert_eq!(dc["evidence"]["source"], "V1");
+    assert_eq!(dc["evidence"]["family"]["source"], "V2");
+    assert_eq!(
+        transferred_series(&buffers, &dc["evidence"]["family"]["values"]).to_vec(),
+        [1e-7, 2e-7, 3e-7]
+    );
+    assert_eq!(
+        transferred_series(&buffers, &dc["sweep_values"]).to_vec(),
+        [0.0, 0.5, 1.0]
+    );
+    let curves = dc["waveforms"]
+        .as_array()
+        .expect("a successful family retains curves");
+    assert_eq!(curves.len(), 12);
+    let mut names = std::collections::HashSet::new();
+    let mut secondary = Vec::new();
+    for curve in curves {
+        let name = curve["name"].as_str().unwrap();
+        assert!(names.insert(name));
+        let current = name.starts_with("I(");
+        assert_eq!(curve["y_unit"], if current { "A" } else { "V" });
+        assert_eq!(
+            transferred_series(&buffers, &curve["x_values"]).to_vec(),
+            [0.0, 0.5, 1.0]
+        );
+        let y = transferred_series(&buffers, &curve["y_values"]).to_vec();
+        if name.starts_with("V(OUT)") {
+            assert!(y.iter().all(|v| *v == y[0]));
+            secondary.push(y[0]);
+        } else if name.starts_with("V(IN)") {
+            assert_eq!(y, [0.0, 0.5, 1.0]);
+        }
+    }
+    secondary.sort_by(f64::total_cmp);
+    assert_eq!(secondary.len(), 3);
+    for (actual, expected) in secondary.into_iter().zip([1e-7, 2e-7, 3e-7]) {
+        assert!((actual - expected).abs() < 1e-20);
     }
 }

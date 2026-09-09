@@ -66,6 +66,155 @@ fn base_modes() -> [CornerBaseMode; 6] {
     ]
 }
 
+fn run_projected(family: AnalysisType, deck: &str, base: CornerBaseMode) -> SimulationRun {
+    use crate::simulation::controller::QueuedAnalysis;
+    use crate::simulation::multi_run::AnalysisSpec;
+    use crate::state::{
+        SavedOutput, SavedOutputCompatibility, SavedOutputKind, SavedOutputPolicy,
+        SavedOutputPrecision, SavedOutputStreaming,
+    };
+    let corner = family == AnalysisType::Corner;
+    let options = crate::simulation::runner::SpecExecutionOptions {
+        corner: corner.then(|| CornerRunConfig {
+            temperatures_c: vec![27.0, 85.0],
+            voltages: vec![1.8],
+            nominal_voltage: Some(1.8),
+            supply_source_names: vec!["VDD".to_owned()],
+            base_mode: base.clone(),
+            ..Default::default()
+        }),
+        temp: (!corner).then_some(TempRunConfig {
+            temperatures_c: vec![27.0, 85.0],
+            base_mode: base,
+        }),
+        ..Default::default()
+    };
+    let output = SavedOutput::new(
+        SavedOutputKind::RawVoltageOrCurrent,
+        "Chosen voltage",
+        "V(B)",
+        SavedOutputCompatibility::AllCompatibleAnalyses,
+        SavedOutputPolicy::EveryAcceptedPoint,
+        SavedOutputPrecision::FullSourcePrecision,
+        SavedOutputStreaming::StoreOnly,
+    )
+    .unwrap();
+    crate::simulation::runner::pvt_point_evidence::run_declaration(
+        deck,
+        "Projected family",
+        QueuedAnalysis {
+            numeric_override: None,
+            spec: if corner {
+                AnalysisSpec::Corner
+            } else {
+                AnalysisSpec::Parametric
+            },
+            config: None,
+            spec_options: options,
+            analysis_line: if corner { ".corner" } else { ".step temp" }.to_owned(),
+        },
+        27.0,
+        crate::simulation::execution::SavePolicy::PlanOwned {
+            output_selection_mode: crate::state::OutputSelectionMode::ExplicitOnly,
+            retained_dataset_limit: 10,
+            maximum_storage_bytes: u64::MAX,
+            live_streaming_enabled: false,
+            retain_failure_diagnostics: true,
+        },
+        &[output],
+    )
+    .unwrap()
+}
+
+#[test]
+fn pvt_family_uses_the_solved_basis_before_authored_aliases_filter_point_outputs() {
+    for family in [AnalysisType::Parametric, AnalysisType::Corner] {
+        for base in base_modes() {
+            let run = run_projected(family, REORDERED, base.clone());
+            assert_eq!(run.analyses.len(), 3);
+            assert!(
+                run.analyses.iter().all(|a| a.success),
+                "{family:?} {base:?}: {:?}",
+                run.analyses[2].error_message
+            );
+            let summary = &run.analyses[2];
+            assert_eq!(summary.waveforms.len(), 1);
+            assert_eq!(summary.waveforms[0].name, "Chosen voltage");
+            assert_eq!(summary.waveforms[0].y.as_slice(), &[2.0, 2.0]);
+            for point in &run.analyses[..2] {
+                assert!(point.waveforms.iter().all(|w| w.name == "Chosen voltage"));
+                point.validate_retained_evidence().unwrap();
+            }
+            run.validate_provenance().unwrap();
+            let mut state = SimulationState::default();
+            state.next_run_id = run.id;
+            state.runs = vec![run].into();
+            let stored = crate::io::project_io::ProjectSimulationResults::from_state(&state);
+            stored.validate().unwrap();
+            let json = serde_json::to_vec(&stored).unwrap();
+            let restored: crate::io::project_io::ProjectSimulationResults =
+                serde_json::from_slice(&json).unwrap();
+            restored.validate().unwrap();
+        }
+    }
+}
+
+#[test]
+fn pvt_output_filtering_cannot_conceal_a_changed_solved_node_basis() {
+    for family in [AnalysisType::Parametric, AnalysisType::Corner] {
+        for base in base_modes() {
+            let run = run_projected(family, CONDITIONAL, base.clone());
+            assert!(run.analyses[..2].iter().all(|a| a.success));
+            let summary = &run.analyses[2];
+            assert!(!summary.success, "{family:?} {base:?}");
+            assert!(
+                summary
+                    .error_message
+                    .as_deref()
+                    .unwrap()
+                    .contains("changed the solved node basis")
+            );
+        }
+    }
+}
+
+#[test]
+fn pvt_nested_dc_reduces_the_last_solved_pair_in_both_traversal_directions() {
+    for family in [AnalysisType::Parametric, AnalysisType::Corner] {
+        for descending in [false, true] {
+            let base = CornerBaseMode::DcSweepNested {
+                source_name: "VDD".to_owned(),
+                start: if descending { 1.0 } else { 0.0 },
+                stop: if descending { 0.0 } else { 1.0 },
+                step: if descending { -0.3 } else { 0.3 },
+                source2: "VBIAS".to_owned(),
+                start2: 3.0e-7,
+                stop2: 0.0,
+                step2: -1.1e-7,
+            };
+            let result = run(family, REORDERED, [27.0, 85.0], base);
+            let summary = &result.analyses[2];
+            assert!(summary.success, "{:?}", summary.error_message);
+            assert_eq!(
+                summary.waveforms.len(),
+                4,
+                "only the four actual node voltages enter the family"
+            );
+            for (name, expected) in [
+                ("V(VDD)", if descending { 0.1 } else { 0.9 }),
+                ("V(BIAS)", 0.8e-7),
+            ] {
+                let trace = summary.waveforms.iter().find(|w| w.name == name).unwrap();
+                assert!(
+                    trace.y.iter().all(|value| (value - expected).abs() < 1e-12),
+                    "{name}: {:?}",
+                    trace.y
+                );
+            }
+        }
+    }
+}
+
 fn run(
     family: AnalysisType,
     deck: &str,
@@ -113,8 +262,9 @@ fn assert_basis_failure(temperatures: [f64; 2]) {
                     "{family:?} {base:?}: {:?}",
                     point.error_message
                 );
-                let values =
-                    point_node_values(point, &base).expect("the point retains node values");
+                let values = point_node_values(point, &base)
+                    .unwrap()
+                    .expect("the point retains node values");
                 assert_eq!(
                     values.iter().any(|(name, _)| name.contains("EXTRA")),
                     temperature < 50.0,
@@ -169,16 +319,16 @@ fn pvt_family_rejects_a_node_added_by_a_later_successful_point() {
 #[test]
 fn pvt_family_reorders_matching_nodes_and_preserves_physical_zero() {
     for family in [AnalysisType::Parametric, AnalysisType::Corner] {
-        // Nested DC retains multiple secondary-coordinate traces per node;
-        // its terminal-coordinate reduction needs separate qualification.
-        for base in base_modes()
-            .into_iter()
-            .filter(|base| !matches!(base, CornerBaseMode::DcSweepNested { .. }))
-        {
+        for base in base_modes() {
             let run = run(family, REORDERED, [27.0, 85.0], base.clone());
             assert!(run.analyses.iter().all(|point| point.success));
             let summary = &run.analyses[2];
-            for (node, expected) in [("A", 0.0), ("B", 2.0)] {
+            let bias = if matches!(base, CornerBaseMode::DcSweepNested { .. }) {
+                0.1
+            } else {
+                0.0
+            };
+            for (node, expected) in [("A", 0.0), ("B", 2.0), ("BIAS", bias)] {
                 let name = if matches!(base, CornerBaseMode::Ac { .. }) {
                     format!("|V({node})|")
                 } else {

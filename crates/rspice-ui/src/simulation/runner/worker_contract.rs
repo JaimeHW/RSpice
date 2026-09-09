@@ -928,6 +928,7 @@ pub(crate) enum WorkerSimulationResult {
         sweep_values: Vec<f64>,
         waveforms: Vec<WorkerWaveform>,
         measurements: Vec<WorkerMeasurement>,
+        evidence: Option<crate::state::DcSweepEvidence>,
     },
     Transient {
         time: Vec<f64>,
@@ -1434,11 +1435,20 @@ impl WorkerSimulationResult {
                 sweep_values,
                 waveforms,
                 measurements,
+                evidence,
                 ..
             } => sum_payload_bytes([
                 f64_payload_bytes(sweep_values.len()),
                 waveforms_payload_bytes(waveforms),
                 measurements_payload_bytes(measurements),
+                f64_payload_bytes(
+                    evidence
+                        .as_ref()
+                        .map_or(0, |evidence| match &evidence.family {
+                            crate::state::DcSweepFamily::Nested { values, .. } => values.len(),
+                            _ => 0,
+                        }),
+                ),
             ]),
             WorkerSimulationResult::Transient {
                 convergence,
@@ -1627,8 +1637,9 @@ impl WorkerSimulationResult {
 }
 
 /// 18: transient-source convergence evidence survives result transport.
+/// 19: exact DC curve identities, coordinates and traversal survive transport.
 /// Earlier workers silently omit numerical quality.
-const WORKER_RESPONSE_TRANSPORT_PROTOCOL: u8 = 18;
+const WORKER_RESPONSE_TRANSPORT_PROTOCOL: u8 = 19;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct WorkerResponseTransport {
@@ -1653,11 +1664,13 @@ impl TryFrom<SimulationResult> for WorkerSimulationResult {
                 device_report: result.device_report.map(WorkerDeviceOpReport::from),
             }),
             SimulationResult::DcSweep {
+                evidence,
                 sweep_var,
                 sweep_values,
                 waveforms,
                 measurements,
             } => Ok(Self::DcSweep {
+                evidence: evidence.map(std::sync::Arc::unwrap_or_clone),
                 sweep_var,
                 sweep_values,
                 waveforms: worker_waveforms(waveforms),
@@ -1971,11 +1984,13 @@ impl From<WorkerSimulationResult> for SimulationResult {
                 device_report: device_report.map(rspice_core::circuit::DeviceOpReport::from),
             })),
             WorkerSimulationResult::DcSweep {
+                evidence,
                 sweep_var,
                 sweep_values,
                 waveforms,
                 measurements,
             } => Self::DcSweep {
+                evidence: evidence.map(std::sync::Arc::new),
                 sweep_var,
                 sweep_values,
                 waveforms: waveform_map(waveforms),

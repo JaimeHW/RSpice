@@ -148,6 +148,8 @@ pub enum SimulationResult {
 
     /// DC sweep results
     DcSweep {
+        /// Exact curve identities and traversal; absent on legacy/imported data.
+        evidence: Option<std::sync::Arc<crate::state::DcSweepEvidence>>,
         /// Sweep variable name
         sweep_var: String,
         /// Sweep values

@@ -509,13 +509,50 @@ impl SimulationController {
                 .with_measurements(measurements),
 
             SimulationResult::DcSweep {
+                evidence,
                 sweep_values,
+                sweep_var,
                 waveforms,
                 measurements,
                 ..
-            } => AnalysisResult::new(1, analysis_type, label.to_string())
-                .with_waveforms(self.build_waveforms_with_shared_x_owned(sweep_values, waveforms))
-                .with_measurements(measurements),
+            } => {
+                if evidence
+                    .as_ref()
+                    .is_some_and(|evidence| !evidence.source.eq_ignore_ascii_case(&sweep_var))
+                {
+                    return AnalysisResult::failed(
+                        1,
+                        analysis_type,
+                        label.to_string(),
+                        "DC primary source disagrees with its curve evidence",
+                    );
+                }
+                if let Some(evidence) = &evidence
+                    && let Err(error) = evidence.validate_traces(
+                        &sweep_values,
+                        waveforms.values().map(|trace| crate::state::DcTraceView {
+                            name: &trace.name,
+                            unit: Some(&trace.y_unit),
+                            x: &trace.x_values,
+                            sample_count: trace.y_values.len(),
+                            complex: trace.is_complex || trace.y_imag.is_some(),
+                        }),
+                    )
+                {
+                    return AnalysisResult::failed(1, analysis_type, label.to_string(), error);
+                }
+                let mut result = AnalysisResult::new(1, analysis_type, label.to_string())
+                    .with_waveforms(
+                        self.build_waveforms_with_shared_x_owned(sweep_values, waveforms),
+                    )
+                    .with_measurements(measurements);
+                result.result_payload =
+                    evidence.map(|evidence| AnalysisResultPayload::DcSweep { evidence });
+                if let Err(error) = result.validate_retained_evidence() {
+                    return AnalysisResult::failed(1, analysis_type, label.to_string(), error);
+                }
+                result
+            }
 
             SimulationResult::PoleZero {
                 poles,

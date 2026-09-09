@@ -151,6 +151,28 @@ impl ProjectSimulationResultsData {
 
     fn migrate_to_current_in_place(&mut self, project_id: ProjectId) -> Result<(), String> {
         let source_schema = self.schema_version;
+        if source_schema < DC_SWEEP_RESULTS_SCHEMA_VERSION
+            && self
+                .runs
+                .iter()
+                .flat_map(|run| &run.analyses)
+                .any(|analysis| {
+                    matches!(
+                        analysis.result_payload.as_ref(),
+                        Some(AnalysisResultPayload::DcSweep { .. })
+                    )
+                })
+        {
+            return Err(
+                "Result schemas before v22 cannot contain exact DC curve evidence".to_owned(),
+            );
+        }
+        if source_schema == CONVERGENCE_RESULTS_SCHEMA_VERSION {
+            // No old field or digest encoding changed. Authenticate the
+            // unchanged history under the current schema without resealing.
+            self.schema_version = PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION;
+            return self.validate();
+        }
         if source_schema < CONVERGENCE_RESULTS_SCHEMA_VERSION
             && self
                 .runs
@@ -1829,6 +1851,19 @@ impl ProjectAnalysisResult {
                         .expect("analysis type was checked above"),
                 )
                 .map_err(|error| format!("{prefix}.result_payload is invalid: {error}"))?;
+            if let AnalysisResultPayload::DcSweep { evidence } = payload {
+                evidence
+                    .validate_retained_traces(self.waveforms.iter().map(|trace| {
+                        crate::state::DcTraceView {
+                            name: &trace.name,
+                            unit: trace.unit.as_deref(),
+                            x: &trace.x,
+                            sample_count: trace.y.len(),
+                            complex: trace.complex.is_some(),
+                        }
+                    }))
+                    .map_err(|error| format!("{prefix}.result_payload is invalid: {error}"))?;
+            }
             if !self.success {
                 return Err(format!(
                     "{prefix}.result_payload is not permitted on a failed analysis"

@@ -9,15 +9,14 @@ use crate::simulation::config::DcSweepConfig;
 use crate::simulation::dialog::{OpConfig, OpInitialGuess, OpNodeInitialization, OpSaveDevice};
 use crate::simulation::results::{DcOpResult, SimulationResult, WaveformData};
 use crate::simulation::runner::SimulationError;
+use crate::state::{
+    DcSweepDirection, DcSweepEvidence, DcSweepFamily, DcSweepQuantity, DcTraceView,
+};
 
 /// What the two branches of a retracing sweep are called.
 ///
-/// The suffix is the trace's own, following the `[key=value]` shape a nested
-/// sweep already uses for the same reason: every trace in a DC result is drawn
-/// against one shared ascending axis, so the direction a branch was travelled
-/// can only live in its name. A reader who sees `V(out) [reverse]` beside
-/// `V(out) [forward]` is being told which way the source was moving, which is
-/// the only thing that distinguishes the two curves.
+/// Curve labels and scalar measurement names distinguish the two branches.
+/// Typed DC evidence separately retains traversal for numerical consumers.
 const HYSTERESIS_FORWARD: &str = "forward";
 const HYSTERESIS_REVERSE: &str = "reverse";
 
@@ -158,6 +157,17 @@ impl EngineBridge {
         let mut sweep_values = Vec::new();
         let mut waveforms = HashMap::new();
         let mut measurements = Vec::new();
+        let mut evidence = DcSweepEvidence {
+            source: config.source.clone(),
+            direction: if config.stop < config.start {
+                DcSweepDirection::Descending
+            } else {
+                DcSweepDirection::Ascending
+            },
+            quantities: Vec::new(),
+            family: DcSweepFamily::Single,
+            selection: crate::state::DcCurveSelection::All,
+        };
 
         if let Some((source2, start2, stop2, step2)) = nested_cfg {
             let sweep2 =
@@ -170,7 +180,15 @@ impl EngineBridge {
                 ));
             }
 
-            for &sweep2_value in &sweep2_values {
+            evidence.family = DcSweepFamily::Nested {
+                source: source2.to_owned(),
+                values: sweep2_values,
+            };
+            for member in 0..evidence.member_count() {
+                let DcSweepFamily::Nested { values, .. } = &evidence.family else {
+                    unreachable!();
+                };
+                let sweep2_value = values[member];
                 ensure_not_aborted(abort)?;
                 let mut nested_netlist = netlist.clone();
                 set_dc_source_value(&mut nested_netlist, source2, sweep2_value, abort)?;
@@ -216,6 +234,7 @@ impl EngineBridge {
                 }
 
                 let first_result = &sweep_results[0].1;
+                retain_dc_quantity_basis(&mut evidence, first_result)?;
                 for (node_idx, node_name) in first_result.node_names.iter().enumerate() {
                     ensure_not_aborted(abort)?;
                     if node_idx == 0 {
@@ -226,7 +245,8 @@ impl EngineBridge {
                         ensure_not_aborted(abort)?;
                         voltages.push(result.node_voltages[node_idx]);
                     }
-                    let trace_name = format!("{} [{}={:.6}]", node_name, source2, sweep2_value);
+                    let trace_name = evidence
+                        .trace_name(&DcSweepQuantity::NodeVoltage(node_name.clone()), member);
                     waveforms.insert(
                         trace_name.clone(),
                         WaveformData::new_time_domain(trace_name, sweep_values.clone(), voltages),
@@ -239,8 +259,8 @@ impl EngineBridge {
                         ensure_not_aborted(abort)?;
                         currents.push(result.branch_currents[branch_idx]);
                     }
-                    let trace_name =
-                        format!("I({}) [{}={:.6}]", branch_name, source2, sweep2_value);
+                    let trace_name = evidence
+                        .trace_name(&DcSweepQuantity::BranchCurrent(branch_name.clone()), member);
                     waveforms.insert(
                         trace_name.clone(),
                         WaveformData::new_time_domain_in_unit(
@@ -253,6 +273,7 @@ impl EngineBridge {
                 }
             }
         } else if config.hysteresis {
+            evidence.family = DcSweepFamily::Retraced;
             // One solve, not two. The engine steps an explicit value list in
             // the order given, carrying the previous point's solution and the
             // devices' own state into the next, and never rebuilding the
@@ -332,12 +353,15 @@ impl EngineBridge {
                 };
 
                 let first_result = &results[0].1;
+                retain_dc_quantity_basis(&mut evidence, first_result)?;
+                let member = usize::from(branch == HYSTERESIS_REVERSE);
                 for (index, node_name) in first_result.node_names.iter().enumerate() {
                     ensure_not_aborted(abort)?;
                     if index == 0 {
                         continue;
                     }
-                    let trace_name = format!("{node_name} [{branch}]");
+                    let trace_name = evidence
+                        .trace_name(&DcSweepQuantity::NodeVoltage(node_name.clone()), member);
                     let voltages = ordered(&|result| result.node_voltages[index]);
                     waveforms.insert(
                         trace_name.clone(),
@@ -346,7 +370,8 @@ impl EngineBridge {
                 }
                 for (index, branch_name) in first_result.branch_names.iter().enumerate() {
                     ensure_not_aborted(abort)?;
-                    let trace_name = format!("I({branch_name}) [{branch}]");
+                    let trace_name = evidence
+                        .trace_name(&DcSweepQuantity::BranchCurrent(branch_name.clone()), member);
                     let currents = ordered(&|result| result.branch_currents[index]);
                     waveforms.insert(
                         trace_name.clone(),
@@ -383,6 +408,7 @@ impl EngineBridge {
             }
 
             let first_result = &sweep_results[0].1;
+            retain_dc_quantity_basis(&mut evidence, first_result)?;
             for (i, name) in first_result.node_names.iter().enumerate() {
                 ensure_not_aborted(abort)?;
                 if i == 0 {
@@ -394,9 +420,11 @@ impl EngineBridge {
                     voltages.push(result.node_voltages[i]);
                 }
 
+                let trace_name =
+                    evidence.trace_name(&DcSweepQuantity::NodeVoltage(name.clone()), 0);
                 waveforms.insert(
-                    name.clone(),
-                    WaveformData::new_time_domain(name, sweep_values.clone(), voltages),
+                    trace_name.clone(),
+                    WaveformData::new_time_domain(trace_name, sweep_values.clone(), voltages),
                 );
             }
             for (branch_idx, branch_name) in first_result.branch_names.iter().enumerate() {
@@ -406,7 +434,8 @@ impl EngineBridge {
                     ensure_not_aborted(abort)?;
                     currents.push(result.branch_currents[branch_idx]);
                 }
-                let trace_name = format!("I({branch_name})");
+                let trace_name =
+                    evidence.trace_name(&DcSweepQuantity::BranchCurrent(branch_name.clone()), 0);
                 waveforms.insert(
                     trace_name.clone(),
                     WaveformData::new_time_domain_in_unit(
@@ -419,13 +448,65 @@ impl EngineBridge {
             }
         }
 
+        // Plot, interpolation and project storage use ascending axes. The
+        // evidence retains traversal so terminal reductions remain exact.
+        if evidence.direction == DcSweepDirection::Descending {
+            sweep_values.reverse();
+            for waveform in waveforms.values_mut() {
+                ensure_not_aborted(abort)?;
+                waveform.x_values.reverse();
+                waveform.y_values.reverse();
+            }
+        }
+        evidence
+            .validate_traces(
+                &sweep_values,
+                waveforms.values().map(|trace| DcTraceView {
+                    name: &trace.name,
+                    unit: Some(&trace.y_unit),
+                    x: &trace.x_values,
+                    sample_count: trace.y_values.len(),
+                    complex: trace.is_complex || trace.y_imag.is_some(),
+                }),
+            )
+            .map_err(SimulationError::SolverError)?;
+        ensure_not_aborted(abort)?;
         Ok(SimulationResult::DcSweep {
+            evidence: Some(std::sync::Arc::new(evidence)),
             sweep_var: config.source.clone(),
             sweep_values,
             waveforms,
             measurements,
         })
     }
+}
+
+fn retain_dc_quantity_basis(
+    evidence: &mut DcSweepEvidence,
+    result: &rspice_core::SimulationResult,
+) -> Result<(), SimulationError> {
+    let quantities = result
+        .node_names
+        .iter()
+        .skip(1)
+        .cloned()
+        .map(DcSweepQuantity::NodeVoltage)
+        .chain(
+            result
+                .branch_names
+                .iter()
+                .cloned()
+                .map(DcSweepQuantity::BranchCurrent),
+        )
+        .collect::<Vec<_>>();
+    if evidence.quantities.is_empty() {
+        evidence.quantities = quantities;
+    } else if evidence.quantities != quantities {
+        return Err(SimulationError::SolverError(
+            "DC sweep members changed the solved quantity basis".to_owned(),
+        ));
+    }
+    Ok(())
 }
 
 fn validate_dc_sweep_results(

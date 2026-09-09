@@ -49,6 +49,8 @@ pub(crate) fn run_corner_declaration(
             analysis_line: ".corner".to_owned(),
         },
         reference_temperature_celsius,
+        SavePolicy::RetainEngineProducedResults,
+        &[],
     )
 }
 
@@ -73,6 +75,8 @@ pub(crate) fn run_temperature_declaration(
             analysis_line: ".step temp".to_owned(),
         },
         reference_temperature_celsius,
+        SavePolicy::RetainEngineProducedResults,
+        &[],
     )
 }
 
@@ -84,12 +88,25 @@ pub(crate) fn run_temperature_declaration(
 /// seals one. Without it a test could not tell whether the results it is
 /// judging are an authentic ordered prefix of the authorized task graph — which
 /// is the property a project save and reload depends on.
-fn run_declaration(
+pub(in crate::simulation) fn run_declaration(
     deck: &str,
     label: &str,
     declaration: QueuedAnalysis,
     reference_temperature_celsius: f64,
+    save_policy: SavePolicy,
+    outputs: &[crate::state::SavedOutput],
 ) -> Result<SimulationRun, String> {
+    let instance =
+        crate::product::AnalysisInstanceId::from_namespace(TEST_NAMESPACE, label.as_bytes());
+    let mut contracts = Vec::new();
+    for output in outputs {
+        contracts.extend(
+            crate::simulation::output_contract::compile_saved_output_contracts(
+                output,
+                [(instance, &declaration.spec)],
+            )?,
+        );
+    }
     let parts = SnapshotParts {
         intent: SimulationRunIntent::SimulateRunSet,
         simulation_plan_id: Some(SimulationPlanId::from_namespace(
@@ -104,15 +121,18 @@ fn run_declaration(
         reference_process: ProcessCorner::TT,
         reference_temperature_celsius,
         run_set: None,
-        tasks: vec![PreparedTask::new(
-            crate::product::AnalysisInstanceId::from_namespace(TEST_NAMESPACE, label.as_bytes()),
-            ObjectRevision::INITIAL,
-            Vec::new(),
-            label,
-            declaration,
-        )],
+        tasks: vec![
+            PreparedTask::new(
+                instance,
+                ObjectRevision::INITIAL,
+                Vec::new(),
+                label,
+                declaration,
+            )
+            .with_saved_output_contracts(contracts),
+        ],
         executable_netlist: deck.to_owned(),
-        save_policy: SavePolicy::RetainEngineProducedResults,
+        save_policy,
         model_identities: Vec::new(),
         project_model_sources: Vec::new(),
         specifications: Vec::new(),
@@ -167,12 +187,13 @@ fn run_declaration(
         let analysis_type = analysis_type_for(task.spec());
         let label = task.label().to_owned();
         let id = u64::try_from(index).unwrap_or(u64::MAX).saturating_add(1);
+        let outputs = task.saved_output_contracts().to_vec();
 
         // The declaration's own turn assembles the family from the points that
         // already ran, exactly as the controller does. It costs no engine call,
         // which is the whole point of it still being a task.
         if families.declares(task.instance_id()) {
-            let analysis = match families.family_for(task.instance_id(), &run) {
+            let mut analysis = match families.family_for(task.instance_id(), &run) {
                 Ok(result) => retainer.convert_to_analysis_result_with_metadata_owned(
                     result,
                     analysis_type,
@@ -180,6 +201,11 @@ fn run_declaration(
                 ),
                 Err(error) => AnalysisResult::failed(id, analysis_type, label, error),
             };
+            crate::simulation::output_contract::apply_saved_output_policy(
+                &mut analysis,
+                save_policy,
+                &outputs,
+            );
             run.add_analysis(analysis.with_provenance(provenance));
             continue;
         }
@@ -209,7 +235,7 @@ fn run_declaration(
             ),
         };
 
-        let analysis = match outcome {
+        let mut analysis = match outcome {
             Ok(result) => retainer.convert_to_analysis_result_with_metadata_owned(
                 result,
                 analysis_type,
@@ -220,6 +246,12 @@ fn run_declaration(
             }
             Err(error) => AnalysisResult::failed(id, analysis_type, label, error.to_string()),
         };
+        families.capture_result(provenance.source_instance_id(), &analysis);
+        crate::simulation::output_contract::apply_saved_output_policy(
+            &mut analysis,
+            save_policy,
+            &outputs,
+        );
         run.add_analysis(analysis.with_provenance(provenance));
     }
     // Sealed the way the controller seals a finished batch, so the run a test

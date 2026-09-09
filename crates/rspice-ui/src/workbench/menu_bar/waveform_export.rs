@@ -949,7 +949,7 @@ fn export_native_result_bundle(
         state.push_user_message(crate::diagnostics::ConsoleMessage::error(error));
         return;
     }
-    let (coordinate_name, _) = axis_signal_for_analysis_type(analysis.analysis_type);
+    let (coordinate_name, _) = axis_signal_for_analysis(analysis);
     let signals = waveforms
         .iter()
         .map(|waveform| {
@@ -1443,7 +1443,7 @@ fn prepare_single_analysis_dataset(
     waveforms: &[&crate::state::WaveformData],
     touchstone: bool,
 ) -> Result<PreparedWaveformDataset, String> {
-    let (x_name, x_signal_type) = axis_signal_for_analysis_type(analysis.analysis_type);
+    let (x_name, x_signal_type) = axis_signal_for_analysis(analysis);
     let mut prepared =
         if touchstone && analysis.analysis_type == crate::state::AnalysisType::SParameter {
             prepare_touchstone_waveform_dataset(waveforms)?
@@ -1611,6 +1611,24 @@ fn validate_shared_x_axis(
 /// whether its abscissa is an absolute drive frequency or an offset from a
 /// carrier. The exported quantity is a frequency in hertz either way, and
 /// which frequency it is belongs to the analysis type the file already names.
+fn axis_signal_for_analysis(
+    analysis: &crate::state::AnalysisResult,
+) -> (&str, crate::io::SignalType) {
+    if let Some(crate::state::AnalysisResultPayload::DcSweep { evidence }) =
+        &analysis.result_payload
+    {
+        let kind = if evidence.source.starts_with(['I', 'i']) {
+            crate::io::SignalType::Current
+        } else if evidence.source.starts_with(['V', 'v']) {
+            crate::io::SignalType::Voltage
+        } else {
+            crate::io::SignalType::Unknown
+        };
+        return (&evidence.source, kind);
+    }
+    axis_signal_for_analysis_type(analysis.analysis_type)
+}
+
 const fn axis_signal_for_analysis_type(
     analysis: crate::state::AnalysisType,
 ) -> (&'static str, crate::io::SignalType) {

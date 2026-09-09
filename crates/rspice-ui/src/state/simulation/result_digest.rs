@@ -508,6 +508,46 @@ fn encode_result_payload(
     encoding_version: u16,
 ) {
     match payload {
+        AnalysisResultPayload::DcSweep { evidence } => {
+            use super::{DcCurveSelection, DcSweepDirection, DcSweepFamily, DcSweepQuantity};
+            writer.u8(10);
+            writer.string(&evidence.source);
+            writer.u8(match evidence.direction {
+                DcSweepDirection::Ascending => 0,
+                DcSweepDirection::Descending => 1,
+            });
+            writer.sequence(evidence.quantities.len());
+            for quantity in &evidence.quantities {
+                writer.u8(match quantity {
+                    DcSweepQuantity::NodeVoltage(_) => 0,
+                    DcSweepQuantity::BranchCurrent(_) => 1,
+                });
+                writer.string(quantity.name());
+            }
+            match &evidence.family {
+                DcSweepFamily::Single => writer.u8(0),
+                DcSweepFamily::Nested { source, values } => {
+                    writer.u8(1);
+                    writer.string(source);
+                    writer.sequence(values.len());
+                    for value in values {
+                        writer.f64(*value);
+                    }
+                }
+                DcSweepFamily::Retraced => writer.u8(2),
+            }
+            match &evidence.selection {
+                DcCurveSelection::All => writer.u8(0),
+                DcCurveSelection::Saved(curves) => {
+                    writer.u8(1);
+                    writer.sequence(curves.len());
+                    for curve in curves {
+                        writer.u64(curve.quantity as u64);
+                        writer.u64(curve.member as u64);
+                    }
+                }
+            }
+        }
         AnalysisResultPayload::OperatingPoint {
             temperature_mode,
             temperature_celsius,

@@ -1456,6 +1456,7 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
         && let Some(analysis) = run.analyses.get(index)
     {
         result_authority::result_convergence(ui, analysis);
+        result_authority::result_dc_sweep(ui, analysis);
     }
     if inspector_disclosure_open(ui.ctx(), "result-provenance")
         && let Some(index) = app.state.simulation.active_analysis_idx

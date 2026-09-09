@@ -117,13 +117,19 @@ impl DcSweepConfig {
     pub fn validate(&self) -> Result<(), Vec<String>> {
         let mut errors = Vec::new();
 
-        if self.source.is_empty() {
+        if self.source.trim().is_empty() {
             errors.push("Source name is required".to_string());
         }
         if self.step == 0.0 {
             errors.push("Step size cannot be zero".to_string());
         }
-        if (self.stop - self.start).signum() != self.step.signum() {
+        if [self.start, self.stop, self.step]
+            .iter()
+            .any(|value| !value.is_finite())
+        {
+            errors.push("Sweep start, stop, and step must be finite".to_owned());
+        }
+        if self.stop != self.start && (self.stop - self.start).signum() != self.step.signum() {
             errors.push("Step direction must match sweep direction".to_string());
         }
 
@@ -139,7 +145,13 @@ impl DcSweepConfig {
                 if step2 == 0.0 {
                     errors.push("Secondary step size cannot be zero".to_string());
                 }
-                if (stop2 - start2).signum() != step2.signum() {
+                if [start2, stop2, step2]
+                    .iter()
+                    .any(|value| !value.is_finite())
+                {
+                    errors.push("Secondary sweep start, stop, and step must be finite".to_owned());
+                }
+                if stop2 != start2 && (stop2 - start2).signum() != step2.signum() {
                     errors.push("Secondary step direction must match sweep direction".to_string());
                 }
             }
@@ -213,6 +225,58 @@ fn sweeps_an_independent_source(source: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn single_coordinate_sweeps_validate_on_either_axis() {
+        for step in [-1.0, 1.0] {
+            let config = DcSweepConfig {
+                start: 0.4,
+                stop: 0.4,
+                step,
+                source2: Some("VBIAS".to_owned()),
+                start2: Some(0.2),
+                stop2: Some(0.2),
+                step2: Some(step),
+                ..Default::default()
+            };
+            config.validate().unwrap();
+            assert_eq!(config.forward_points(), [0.4]);
+        }
+    }
+
+    #[test]
+    fn dc_configuration_rejects_nonfinite_values_on_either_axis() {
+        for invalid in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            for [start, stop, step] in [
+                [invalid, 1.0, 1.0],
+                [0.0, invalid, 1.0],
+                [0.0, 1.0, invalid],
+            ] {
+                let primary = DcSweepConfig {
+                    start,
+                    stop,
+                    step,
+                    ..Default::default()
+                };
+                let secondary = DcSweepConfig {
+                    source2: Some("VBIAS".to_owned()),
+                    start2: Some(start),
+                    stop2: Some(stop),
+                    step2: Some(step),
+                    ..Default::default()
+                };
+                for config in [primary, secondary] {
+                    assert!(
+                        config
+                            .validate()
+                            .unwrap_err()
+                            .iter()
+                            .any(|error| error.contains("finite"))
+                    );
+                }
+            }
+        }
+    }
 
     fn retracing() -> DcSweepConfig {
         DcSweepConfig {

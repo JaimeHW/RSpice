@@ -30,6 +30,8 @@ use super::runner::SimulationError;
 mod ac_noise;
 mod dc;
 mod error;
+#[cfg(test)]
+pub(crate) mod nested_dc_tests;
 mod parsing;
 mod pole_zero;
 mod sensitivity;

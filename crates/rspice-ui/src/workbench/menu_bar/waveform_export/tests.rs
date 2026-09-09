@@ -1003,6 +1003,45 @@ fn csv_export_preserves_single_analysis_axis_shape() {
 }
 
 #[test]
+fn dc_export_uses_the_retained_swept_quantity_and_every_nested_curve() {
+    use crate::simulation::engine_bridge::nested_dc_tests::{nested_config, retain, solve};
+    let nested = retain(solve(nested_config()));
+    let current = retain(
+        crate::simulation::EngineBridge::new()
+            .run(
+                &crate::simulation::AnalysisConfig::DcSweep(
+                    crate::simulation::config::DcSweepConfig {
+                        source: "IBIAS".to_owned(),
+                        start: 0.0,
+                        stop: 1e-3,
+                        step: 0.5e-3,
+                        ..Default::default()
+                    },
+                ),
+                "Current sweep\nIBIAS 0 out 0\nR1 out 0 1k\n.end\n",
+            )
+            .unwrap(),
+    );
+    for (analysis, source, unit, count) in [(nested, "V1", "V", 12), (current, "IBIAS", "A", 1)] {
+        assert!(prepare_typed_result_csv(&analysis).is_none());
+        let traces = analysis.waveforms.iter().collect::<Vec<_>>();
+        let exported = prepare_single_analysis_dataset(&analysis, &traces, false).unwrap();
+        let axis = exported.dataset.x_signal.as_ref().unwrap();
+        assert_eq!(axis.name, source);
+        assert_eq!(axis.unit, unit);
+        assert_eq!(exported.dataset.signal_names().len(), count);
+        for trace in &analysis.waveforms {
+            assert!(
+                exported
+                    .dataset
+                    .signal_names()
+                    .contains(&trace.name.as_str())
+            );
+        }
+    }
+}
+
+#[test]
 fn csv_export_uses_the_displayed_analysis_without_a_global_analysis_selector() {
     let transient = AnalysisResult::new(1, AnalysisType::Transient, "Transient")
         .with_waveforms(vec![waveform("V(out)", vec![0.0, 1.0e-6], vec![0.0, 1.2])]);

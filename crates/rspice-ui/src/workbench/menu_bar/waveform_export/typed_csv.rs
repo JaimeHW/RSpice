@@ -22,6 +22,8 @@ pub(super) fn prepare_typed_result_csv(
 
     use crate::state::{AnalysisResultPayload, SensitivityResultMode};
     match payload {
+        // DC exports its sampled curves through the ordinary waveform CSV path.
+        AnalysisResultPayload::DcSweep { .. } => None,
         AnalysisResultPayload::OperatingPoint {
             temperature_mode,
             temperature_celsius,

@@ -18,6 +18,8 @@
 #![allow(clippy::large_enum_variant)]
 
 use super::*;
+mod dc_sweep;
+use dc_sweep::WorkerDcSweepEvidence;
 
 impl WorkerResponseTransport {
     pub(super) fn from_response(response: WorkerResponse) -> Result<Self, String> {
@@ -78,6 +80,31 @@ pub(super) fn validate_worker_response_before_transport(
     if let WorkerOutcome::Success(result) = &response.outcome {
         validate_transient_source_payload_size(result)?;
         validate_worker_measurements(result)?;
+        if let WorkerSimulationResult::DcSweep {
+            evidence,
+            waveforms,
+            sweep_values,
+            sweep_var,
+            ..
+        } = result.as_ref()
+        {
+            let evidence = evidence
+                .as_ref()
+                .ok_or_else(|| "Worker DC result is missing exact curve evidence".to_owned())?;
+            if !evidence.source.eq_ignore_ascii_case(sweep_var) {
+                return Err("Worker DC primary source disagrees with its curve evidence".to_owned());
+            }
+            evidence.validate_traces(
+                sweep_values,
+                waveforms.iter().map(|trace| crate::state::DcTraceView {
+                    name: &trace.name,
+                    unit: Some(&trace.y_unit),
+                    x: &trace.x_values,
+                    sample_count: trace.y_values.len(),
+                    complex: trace.is_complex || trace.y_imag.is_some(),
+                }),
+            )?;
+        }
     }
     if let WorkerOutcome::Success(result) = &response.outcome
         && let WorkerSimulationResult::DcOp {
@@ -1253,6 +1280,7 @@ pub(crate) enum WorkerSimulationResultTransport {
         sweep_values: WorkerF64Series,
         waveforms: Vec<WorkerWaveformTransport>,
         measurements: Vec<WorkerMeasurement>,
+        evidence: Option<WorkerDcSweepEvidence>,
     },
     Transient {
         time: WorkerF64Series,
@@ -1423,11 +1451,14 @@ impl WorkerSimulationResultTransport {
                 device_report,
             },
             WorkerSimulationResult::DcSweep {
+                evidence,
                 sweep_var,
                 sweep_values,
                 waveforms,
                 measurements,
             } => Self::DcSweep {
+                evidence: evidence
+                    .map(|evidence| WorkerDcSweepEvidence::from_evidence(evidence, buffers)),
                 sweep_var,
                 sweep_values: WorkerF64Series::from_vec(sweep_values, buffers),
                 waveforms: transport_waveforms(waveforms, buffers),
@@ -1691,16 +1722,23 @@ impl WorkerSimulationResultTransport {
                 })
             }
             Self::DcSweep {
+                evidence,
                 sweep_var,
                 sweep_values,
                 waveforms,
                 measurements,
-            } => Ok(WorkerSimulationResult::DcSweep {
-                sweep_var,
-                sweep_values: sweep_values.into_vec(buffers)?,
-                waveforms: worker_waveforms_from_transport(waveforms, buffers)?,
-                measurements,
-            }),
+            } => {
+                dc_sweep::validate_dc_transport_size(&sweep_values, &waveforms, evidence.as_ref())?;
+                Ok(WorkerSimulationResult::DcSweep {
+                    evidence: evidence
+                        .map(|evidence| evidence.into_evidence(buffers))
+                        .transpose()?,
+                    sweep_var,
+                    sweep_values: sweep_values.into_vec(buffers)?,
+                    waveforms: worker_waveforms_from_transport(waveforms, buffers)?,
+                    measurements,
+                })
+            }
             Self::Transient {
                 time,
                 waveforms,

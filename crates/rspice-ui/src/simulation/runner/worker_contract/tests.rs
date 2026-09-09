@@ -8,6 +8,7 @@
 
 use super::*;
 
+mod dc_sweep;
 mod result_round_trip;
 
 #[test]

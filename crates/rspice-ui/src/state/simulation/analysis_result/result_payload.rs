@@ -1117,6 +1117,17 @@ impl AnalysisResult {
         if let Some(payload) = &self.result_payload {
             payload.validate_for(self.analysis_type)?;
         }
+        if let Some(AnalysisResultPayload::DcSweep { evidence }) = &self.result_payload {
+            evidence.validate_retained_traces(self.waveforms.iter().map(|trace| {
+                super::super::DcTraceView {
+                    name: &trace.name,
+                    unit: trace.unit.as_deref(),
+                    x: &trace.x,
+                    sample_count: trace.y.len(),
+                    complex: trace.complex.is_some(),
+                }
+            }))?;
+        }
 
         match (&self.family_metadata, &self.result_payload) {
             (None, Some(AnalysisResultPayload::Reliability { .. })) => {

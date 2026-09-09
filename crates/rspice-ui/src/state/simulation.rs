@@ -13,7 +13,12 @@ mod analysis_tag;
 mod analysis_type;
 mod convergence_attribution;
 mod convergence_quality;
+mod dc_sweep;
 pub(crate) use convergence_quality::ConvergenceEncoder;
+pub(crate) use dc_sweep::DcTraceView;
+pub use dc_sweep::{
+    DcCurveSelection, DcSweepDirection, DcSweepEvidence, DcSweepFamily, DcSweepQuantity,
+};
 mod cross_probe;
 mod executed_deck;
 mod family_measurements;

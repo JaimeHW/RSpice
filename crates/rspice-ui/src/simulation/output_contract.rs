@@ -921,15 +921,31 @@ fn materialize_saved_outputs_with_engine_policy(
     analysis.saved_output_receipts.extend(receipts);
 }
 
-/// Materialize a plan's authored outputs and discard engine waveform state
-/// that the plan did not ask to retain.
-///
-/// Deferred outputs are the sole exception: their authored meaning is that the
-/// complete source state remains available for later exact evaluation. Their
-/// preflight estimate is therefore indeterminate until the engine-source
-/// cardinality estimator can prove a ceiling. Every other policy leaves only
-/// waveforms named by a successful materialization receipt, making an empty
-/// saved-output registry retain zero engine waveforms instead of all of them.
+/// Apply the authorized save policy while preserving authored display intent.
+pub(in crate::simulation) fn apply_saved_output_policy(
+    analysis: &mut AnalysisResult,
+    policy: crate::simulation::execution::SavePolicy,
+    contracts: &[PreparedSavedOutput],
+) {
+    if !matches!(
+        policy,
+        crate::simulation::execution::SavePolicy::PlanOwned { .. }
+    ) {
+        return;
+    }
+    if policy.output_selection_mode() == crate::state::OutputSelectionMode::SaveAll {
+        // Retain all quantities, while authored outputs own initial display intent.
+        for waveform in &mut analysis.waveforms {
+            waveform.visible = false;
+        }
+        materialize_saved_outputs_preserving_engine(analysis, contracts);
+    } else {
+        retain_plan_saved_outputs(analysis, contracts);
+    }
+}
+
+/// Keep successful authored outputs, or complete source state when deferred
+/// evaluation requires it. An empty registry retains no engine waveforms.
 pub(in crate::simulation) fn retain_plan_saved_outputs(
     analysis: &mut AnalysisResult,
     contracts: &[PreparedSavedOutput],
@@ -955,6 +971,11 @@ pub(in crate::simulation) fn retain_plan_saved_outputs(
             | SavedOutputMaterializationStatus::Unavailable { .. } => None,
         })
         .collect::<HashSet<_>>();
+    if let Some(crate::state::AnalysisResultPayload::DcSweep { evidence }) =
+        &mut analysis.result_payload
+    {
+        Arc::make_mut(evidence).retain_curves(&retained_names);
+    }
     analysis
         .waveforms
         .retain(|waveform| retained_names.contains(&waveform.name));
@@ -1127,19 +1148,12 @@ fn resolve_raw_probe(
     let (function, arguments) = parse_probe(expression)?;
     if function.eq_ignore_ascii_case("V") && arguments.len() == 2 {
         let positive = find_waveform(waveforms, &format!("V({})", arguments[0]))
-            .or_else(|| find_waveform(waveforms, &arguments[0]))
             .ok_or_else(|| format!("positive probe '{}' is absent", arguments[0]))?;
         let negative = find_waveform(waveforms, &format!("V({})", arguments[1]))
-            .or_else(|| find_waveform(waveforms, &arguments[1]))
             .ok_or_else(|| format!("negative probe '{}' is absent", arguments[1]))?;
         return subtract_waveforms(positive, negative, output_name);
     }
     let source = find_waveform(waveforms, expression)
-        .or_else(|| {
-            arguments
-                .first()
-                .and_then(|argument| find_waveform(waveforms, argument))
-        })
         .ok_or_else(|| format!("source probe '{expression}' is absent"))?;
     Ok(clone_with_name(source, output_name))
 }
@@ -1259,36 +1273,43 @@ fn clone_named_waveform(
 
 fn find_waveform<'a>(waveforms: &'a [WaveformData], requested: &str) -> Option<&'a WaveformData> {
     let requested = requested.trim();
-    waveforms.iter().find(|waveform| {
-        if waveform.name.eq_ignore_ascii_case(requested)
-            || waveform
-                .name
-                .trim_matches('|')
-                .eq_ignore_ascii_case(requested)
+    // Exact authored names win before compatibility with bare engine nodes.
+    // A node named V1 and branch I(V1) are different physical quantities.
+    waveforms
+        .iter()
+        .find(|waveform| waveform.name.eq_ignore_ascii_case(requested))
+        .or_else(|| {
+            waveforms.iter().find(|waveform| {
+                let source = waveform
+                    .complex
+                    .as_ref()
+                    .map_or(waveform.name.as_str(), |complex| {
+                        complex.source_name.as_str()
+                    });
+                let (current, node) = probe_identity(source);
+                let (requested_current, requested_node) = probe_identity(requested);
+                current == requested_current && node.eq_ignore_ascii_case(requested_node)
+            })
+        })
+}
+
+fn probe_identity(name: &str) -> (bool, &str) {
+    let name = name.trim_matches('|');
+    if let Some(inner) = name.get(2..).and_then(|inner| inner.strip_suffix(')')) {
+        if name
+            .get(..2)
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case("I("))
         {
-            return true;
+            return (true, inner);
         }
-        let source_name = waveform
-            .complex
-            .as_ref()
-            .map(|complex| complex.source_name.as_str());
-        if source_name.is_some_and(|source| source.eq_ignore_ascii_case(requested)) {
-            return true;
+        if name
+            .get(..2)
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case("V("))
+        {
+            return (false, inner);
         }
-        let waveform_inner = waveform
-            .name
-            .trim_matches('|')
-            .strip_prefix("V(")
-            .or_else(|| waveform.name.trim_matches('|').strip_prefix("I("))
-            .and_then(|value| value.strip_suffix(')'))
-            .unwrap_or(waveform.name.trim_matches('|'));
-        let requested_inner = requested
-            .strip_prefix("V(")
-            .or_else(|| requested.strip_prefix("I("))
-            .and_then(|value| value.strip_suffix(')'))
-            .unwrap_or(requested);
-        waveform_inner.eq_ignore_ascii_case(requested_inner)
-    })
+    }
+    (false, name)
 }
 
 fn waveform_matches_requested(waveform: &WaveformData, requested: &str) -> bool {
@@ -1508,6 +1529,35 @@ pub(in crate::simulation) const fn streaming_tag(streaming: SavedOutputStreaming
 mod tests {
     use super::*;
     use crate::state::AnalysisType;
+
+    #[test]
+    fn raw_probes_keep_voltage_and_current_namespaces_separate() {
+        for voltage_name in ["V(V1)", "V1", "|V(V1)|"] {
+            let voltage = WaveformData::new(voltage_name, vec![0.0, 1.0], vec![0.0, 1.0], "#fff");
+            let current = WaveformData::new("I(V1)", vec![0.0, 1.0], vec![0.0, -0.001], "#fff");
+            for traces in [
+                vec![current.clone(), voltage.clone()],
+                vec![voltage.clone(), current.clone()],
+            ] {
+                assert_eq!(
+                    resolve_raw_probe("v(v1)", &traces, "Voltage")
+                        .unwrap()
+                        .y
+                        .as_slice(),
+                    &[0.0, 1.0]
+                );
+                assert_eq!(
+                    resolve_raw_probe("i(v1)", &traces, "Current")
+                        .unwrap()
+                        .y
+                        .as_slice(),
+                    &[0.0, -0.001]
+                );
+            }
+            assert!(resolve_raw_probe("I(V1)", &[voltage], "missing current").is_err());
+            assert!(resolve_raw_probe("V(V1)", &[current], "missing voltage").is_err());
+        }
+    }
 
     fn output(policy: SavedOutputPolicy, precision: SavedOutputPrecision) -> SavedOutput {
         SavedOutput::new(

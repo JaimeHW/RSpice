@@ -1802,7 +1802,10 @@ fn convergence_schema_v20_authenticates_before_migrating_unknown_quality() {
     let old_digest = stored.runs[0].dataset_content_digest.clone();
     stored.migrate_to_current(ProjectId::new()).unwrap();
     stored.validate().unwrap();
-    assert_eq!(stored.schema_version, CONVERGENCE_RESULTS_SCHEMA_VERSION);
+    assert_eq!(
+        stored.schema_version,
+        PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION
+    );
     assert_ne!(stored.runs[0].dataset_content_digest, old_digest);
     assert!(stored.runs[0].analyses[0].convergence.is_missing());
     assert!(

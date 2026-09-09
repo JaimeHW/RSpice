@@ -32,8 +32,7 @@ use crate::simulation::multi_run::{
     OptimizationVariable, PssMethod, SpPort,
 };
 use crate::simulation::output_contract::{
-    PreparedSavedOutput, materialize_live_saved_outputs,
-    materialize_saved_outputs_preserving_engine, retain_plan_saved_outputs,
+    PreparedSavedOutput, materialize_live_saved_outputs, retain_plan_saved_outputs,
 };
 use crate::simulation::plan::AnalysisNumericOverride;
 use crate::simulation::runner::SpecExecutionOptions;
@@ -1003,26 +1002,16 @@ impl SimulationController {
     }
 
     fn materialize_current_saved_outputs(&mut self, analysis: &mut AnalysisResult) {
-        let contracts = std::mem::take(&mut self.current_saved_output_contracts);
-        if matches!(
-            self.current_save_policy,
-            crate::simulation::execution::SavePolicy::PlanOwned { .. }
-        ) {
-            if self.current_save_policy.output_selection_mode()
-                == crate::state::OutputSelectionMode::SaveAll
-            {
-                // Save All is a retention override, not a command to open
-                // every engine quantity in the plot. Authored outputs/probes
-                // still own initial display intent; everything else starts in
-                // the data browser and remains available on demand.
-                for waveform in &mut analysis.waveforms {
-                    waveform.visible = false;
-                }
-                materialize_saved_outputs_preserving_engine(analysis, &contracts);
-            } else {
-                retain_plan_saved_outputs(analysis, &contracts);
-            }
+        if let Some(provenance) = &self.current_provenance {
+            self.point_families
+                .capture_result(provenance.source_instance_id(), analysis);
         }
+        let contracts = std::mem::take(&mut self.current_saved_output_contracts);
+        crate::simulation::output_contract::apply_saved_output_policy(
+            analysis,
+            self.current_save_policy,
+            &contracts,
+        );
     }
 
     fn retain_completed_analysis(

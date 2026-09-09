@@ -164,6 +164,7 @@ impl SimulationController {
                 sweep_values,
                 waveforms,
                 measurements,
+                ..
             } => {
                 state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(
                     "DC Sweep ({}): {} points, {} waveforms",

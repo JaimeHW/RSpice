@@ -6,7 +6,8 @@
 //! declaration expands into one task per point, and each of those results keeps
 //! its own waveforms, its own `.MEAS` evaluation and the point it was solved
 //! at. The family a plot reads — one scalar per node against the declaration's
-//! axis — is a reduction of exactly those results.
+//! axis — is a reduction of those solved results, captured before their
+//! authored output projection and admitted only for retained successful points.
 //!
 //! Each declaration keeps its own task, so the run's authenticated receipt
 //! still has an entry for it and the retained results still line up with that
@@ -89,6 +90,15 @@ impl DeclaredRunPoint {
 #[derive(Debug, Default)]
 pub(in crate::simulation) struct PointFamilyRegistry {
     declarations: Vec<PointDeclaration>,
+    reductions: HashMap<AnalysisInstanceId, PointReduction>,
+}
+
+/// Only terminal scalars survive output projection here. A retained successful
+/// point must still answer its authorized task before its scalars enter a family.
+#[derive(Debug)]
+struct PointReduction {
+    declaration: usize,
+    result: Option<Result<SweepPointResult, String>>,
 }
 
 #[derive(Debug)]
@@ -160,6 +170,39 @@ impl PointFamilyRegistry {
         self.declarations[position]
             .space
             .push(declared.index, declared.point, task.instance_id());
+        self.reductions.insert(
+            task.instance_id(),
+            PointReduction {
+                declaration: position,
+                result: None,
+            },
+        );
+    }
+
+    /// Capture before saved-output aliases, sampling, or retention discard the
+    /// engine basis. No full waveform arrays are retained or cloned here.
+    pub(in crate::simulation) fn capture_result(
+        &mut self,
+        instance: AnalysisInstanceId,
+        analysis: &AnalysisResult,
+    ) {
+        let Some(reduction) = self.reductions.get_mut(&instance) else {
+            return;
+        };
+        reduction.result = analysis.success.then(|| {
+            let values = point_node_values(
+                analysis,
+                &self.declarations[reduction.declaration].base_mode,
+            )?
+            .ok_or_else(|| "Successful PVT point has no terminal node values".to_owned())?;
+            let (node_names, node_values) = std::iter::once((GROUND_NODE.to_owned(), 0.0))
+                .chain(values)
+                .unzip();
+            Ok(SweepPointResult {
+                node_names,
+                node_values,
+            })
+        });
     }
 
     /// Whether this task's turn assembles a family rather than reaching the
@@ -173,6 +216,7 @@ impl PointFamilyRegistry {
 
     pub(in crate::simulation) fn clear(&mut self) {
         self.declarations.clear();
+        self.reductions.clear();
     }
 
     /// The family a declaration's turn produces, read off the point results
@@ -183,7 +227,7 @@ impl PointFamilyRegistry {
     /// result, not a missing one, because a plot reporting nothing is
     /// indistinguishable from a sweep nobody asked for.
     pub(in crate::simulation) fn family_for(
-        &self,
+        &mut self,
         declaration: AnalysisInstanceId,
         run: &SimulationRun,
     ) -> Result<SimulationResult, String> {
@@ -194,22 +238,26 @@ impl PointFamilyRegistry {
         else {
             return Err("PVT declaration expanded into no points to assemble".to_owned());
         };
-        declaration.family(run)
+        declaration.family(run, &mut self.reductions)
     }
 }
 
 impl PointDeclaration {
-    fn family(&self, run: &SimulationRun) -> Result<SimulationResult, String> {
+    fn family(
+        &self,
+        run: &SimulationRun,
+        reductions: &mut HashMap<AnalysisInstanceId, PointReduction>,
+    ) -> Result<SimulationResult, String> {
         match &self.space {
             DeclaredSpace::Corner(points) => corner_family_of_points(
                 &self.base_mode,
                 self.declared_points,
-                &solved_points(run, points),
+                &solved_points(run, points, reductions)?,
             ),
             DeclaredSpace::Temperature(points) => temperature_family_of_points(
                 &self.base_mode,
                 self.declared_points,
-                &solved_points(run, points),
+                &solved_points(run, points, reductions)?,
             ),
         }
     }
@@ -220,26 +268,40 @@ impl PointDeclaration {
 /// The join is on the point task's own instance identity, so a result belongs
 /// to a point because the run says it answers for that task and never because
 /// it happened to arrive in the right place.
-fn solved_points<'run, A: Copy>(
-    run: &'run SimulationRun,
+fn solved_points<A: Copy>(
+    run: &SimulationRun,
     points: &[(usize, A, AnalysisInstanceId)],
-) -> Vec<(A, &'run AnalysisResult)> {
+    reductions: &mut HashMap<AnalysisInstanceId, PointReduction>,
+) -> Result<Vec<(A, SweepPointResult)>, String> {
     let mut points = points.to_vec();
     points.sort_by_key(|(index, _, _)| *index);
-    points
+    let retained = run
+        .analyses
         .iter()
-        .filter_map(|(_, point, instance)| {
-            run.analyses
-                .iter()
-                .find(|analysis| {
-                    analysis
-                        .provenance
-                        .as_ref()
-                        .is_some_and(|provenance| provenance.source_instance_id() == *instance)
-                })
-                .map(|analysis| (*point, analysis))
+        .filter_map(|analysis| {
+            analysis
+                .provenance
+                .as_ref()
+                .map(|p| (p.source_instance_id(), analysis.success))
         })
-        .collect()
+        .collect::<HashMap<_, _>>();
+    let mut collected = Vec::with_capacity(points.len());
+    let mut failure = None;
+    for (index, point, instance) in points {
+        let captured = reductions.remove(&instance).and_then(|point| point.result);
+        if retained.get(&instance) != Some(&true) {
+            continue;
+        }
+        match captured.unwrap_or_else(|| {
+            Err("terminal reduction was not captured before output projection".to_owned())
+        }) {
+            Ok(values) => collected.push((point, values)),
+            Err(error) => {
+                failure.get_or_insert_with(|| format!("PVT point {}: {error}", index + 1));
+            }
+        }
+    }
+    failure.map_or(Ok(collected), Err)
 }
 
 /// The corner family a set of solved points adds up to.
@@ -251,14 +313,13 @@ fn solved_points<'run, A: Copy>(
 pub(in crate::simulation) fn corner_family_of_points(
     base_mode: &CornerBaseMode,
     declared_points: usize,
-    solved: &[(CornerPoint, &AnalysisResult)],
+    converged: &[(CornerPoint, SweepPointResult)],
 ) -> Result<SimulationResult, String> {
-    let converged = converged_point_results(base_mode, solved);
     if converged.is_empty() {
         return Err("Corner analysis produced no converged corner points".to_owned());
     }
     let (x_values, x_label, x_unit, temperatures_c, corner_labels, voltages) =
-        map_corner_results(&converged, base_mode.metric_label(), &NoAbort)
+        map_corner_results(converged, base_mode.metric_label(), &NoAbort)
             .map_err(|error| error.to_string())?;
 
     Ok(SimulationResult::Corner {
@@ -287,14 +348,13 @@ pub(in crate::simulation) fn corner_family_of_points(
 pub(in crate::simulation) fn temperature_family_of_points(
     base_mode: &CornerBaseMode,
     declared_points: usize,
-    solved: &[(Value, &AnalysisResult)],
+    converged: &[(Value, SweepPointResult)],
 ) -> Result<SimulationResult, String> {
-    let converged = converged_point_results(base_mode, solved);
     if converged.is_empty() {
         return Err("Parametric analysis produced no converged sweep points".to_owned());
     }
     let (sweep_values, voltages) =
-        map_temperature_results(&converged, base_mode.metric_label(), &NoAbort)
+        map_temperature_results(converged, base_mode.metric_label(), &NoAbort)
             .map_err(|error| error.to_string())?;
 
     Ok(SimulationResult::Parametric {
@@ -322,36 +382,6 @@ fn waveforms_over(
     waveforms
 }
 
-/// One scalar per node for every point that converged, sorted by node name.
-/// Keep each point's actual nodes so the mappers can reject a changed signal
-/// basis. Filling an absent node with zero or dropping an additional node
-/// would invent a family that the retained point results do not support.
-fn converged_point_results<A: Copy>(
-    base_mode: &CornerBaseMode,
-    solved: &[(A, &AnalysisResult)],
-) -> Vec<(A, SweepPointResult)> {
-    let mut collected = Vec::with_capacity(solved.len());
-    for (point, analysis) in solved {
-        if !analysis.success {
-            continue;
-        }
-        let Some(values) = point_node_values(analysis, base_mode) else {
-            continue;
-        };
-        let (node_names, node_values) = std::iter::once((GROUND_NODE.to_owned(), 0.0))
-            .chain(values)
-            .unzip();
-        collected.push((
-            *point,
-            SweepPointResult {
-                node_names,
-                node_values,
-            },
-        ));
-    }
-    collected
-}
-
 /// The scalar each node contributed at one point, named the way the deck names
 /// the node, sorted so every point agrees on an order.
 ///
@@ -361,20 +391,81 @@ fn converged_point_results<A: Copy>(
 fn point_node_values(
     analysis: &AnalysisResult,
     base_mode: &CornerBaseMode,
-) -> Option<Vec<(String, f64)>> {
+) -> Result<Option<Vec<(String, f64)>>, String> {
     let mut values = match base_mode {
-        CornerBaseMode::Op => operating_point_node_values(analysis)?,
+        CornerBaseMode::Op => {
+            let Some(values) = operating_point_node_values(analysis) else {
+                return Ok(None);
+            };
+            values
+        }
         CornerBaseMode::Ac { .. } => terminal_ac_magnitudes(analysis),
-        CornerBaseMode::DcSweep { .. }
-        | CornerBaseMode::DcSweepNested { .. }
-        | CornerBaseMode::Transient { .. }
-        | CornerBaseMode::TransientWindow { .. } => terminal_node_samples(analysis),
+        CornerBaseMode::DcSweep { .. } | CornerBaseMode::DcSweepNested { .. } => {
+            terminal_dc_node_samples(analysis, base_mode)?
+        }
+        CornerBaseMode::Transient { .. } | CornerBaseMode::TransientWindow { .. } => {
+            terminal_node_samples(analysis)
+        }
     };
     if values.is_empty() {
-        return None;
+        return Ok(None);
     }
     values.sort_by(|left, right| left.0.cmp(&right.0));
-    Some(values)
+    Ok(Some(values))
+}
+
+fn terminal_dc_node_samples(
+    analysis: &AnalysisResult,
+    base_mode: &CornerBaseMode,
+) -> Result<Vec<(String, f64)>, String> {
+    use crate::state::{DcSweepFamily, DcSweepQuantity, DcTraceView};
+    let Some(AnalysisResultPayload::DcSweep { evidence }) = &analysis.result_payload else {
+        return Err("DC point is missing exact curve identity and traversal evidence; rerun the point before assembling its family".to_owned());
+    };
+    match (base_mode, &evidence.family) {
+        (CornerBaseMode::DcSweep { source_name, .. }, DcSweepFamily::Single)
+            if source_name.eq_ignore_ascii_case(&evidence.source) => {}
+        (
+            CornerBaseMode::DcSweepNested {
+                source_name,
+                source2,
+                ..
+            },
+            DcSweepFamily::Nested { source, .. },
+        ) if source_name.eq_ignore_ascii_case(&evidence.source)
+            && source2.eq_ignore_ascii_case(source) => {}
+        _ => return Err("DC point evidence does not match its declared sweep family".to_owned()),
+    }
+    evidence.validate_retained_traces(analysis.waveforms.iter().map(|trace| DcTraceView {
+        name: &trace.name,
+        unit: trace.unit.as_deref(),
+        x: &trace.x,
+        sample_count: trace.y.len(),
+        complex: trace.complex.is_some(),
+    }))?;
+    let member = evidence.member_count() - 1;
+    let by_name = analysis
+        .waveforms
+        .iter()
+        .map(|trace| (trace.name.as_str(), trace))
+        .collect::<HashMap<_, _>>();
+    let mut values = Vec::new();
+    for curve in evidence
+        .curve_indices()
+        .filter(|curve| curve.member == member)
+    {
+        let quantity = &evidence.quantities[curve.quantity];
+        let DcSweepQuantity::NodeVoltage(node) = quantity else {
+            continue;
+        };
+        let trace_name = evidence.trace_name(quantity, member);
+        let trace = by_name[trace_name.as_str()];
+        let index = evidence
+            .terminal_sample(member, trace.y.len())
+            .ok_or_else(|| "DC point has no terminal sample".to_owned())?;
+        values.push((node.clone(), trace.y[index]));
+    }
+    Ok(values)
 }
 
 /// The operating point reads its retained MNA ordering rather than its node

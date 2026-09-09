@@ -1019,6 +1019,7 @@ fn completed_dc_sweep_result_reuses_owned_shared_axis_buffers_in_run_history() {
     controller
         .runner
         .store_pending_result(Ok(crate::simulation::SimulationResult::DcSweep {
+            evidence: None,
             sweep_var: "V1".to_string(),
             sweep_values,
             waveforms,
