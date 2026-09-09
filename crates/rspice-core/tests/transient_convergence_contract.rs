@@ -7,6 +7,89 @@ use rspice_core::ConvergenceConfig;
 use rspice_core::engine::{Engine, SimulationConfig, SimulationError, SpiceDialect};
 use rspice_core::netlist::Netlist;
 
+#[test]
+fn active_current_sources_can_cancel_without_any_voltage_motion() {
+    let netlist = Netlist::parse(
+        "canceling sources\nI1 0 out PWL(0 0 1n 1 2n 1 3n 0)\nI2 out 0 PWL(0 0 1n 1 2n 1 3n 0)\nR1 out 0 1\n.end\n"
+    ).unwrap();
+    for dialect in [
+        SpiceDialect::BestAvailable,
+        SpiceDialect::Ngspice,
+        SpiceDialect::Xyce,
+    ] {
+        let engine = Engine::new(SimulationConfig::default().with_spice_dialect(dialect));
+        let result = engine.run_tran(&netlist, 4e-9, 1e-9).unwrap();
+        assert_eq!(result.time.last().copied(), Some(4e-9));
+        assert!(
+            result
+                .try_voltage_waveform_named("out")
+                .unwrap()
+                .iter()
+                .all(|value| value.abs() < 1e-14)
+        );
+        assert_eq!(engine.convergence_quality().force_accepted_points, 0);
+    }
+}
+
+#[test]
+fn current_shunts_are_qualified_by_kcl_instead_of_a_source_to_voltage_ratio() {
+    let netlist =
+        Netlist::parse("current shunt\nI1 0 out PWL(0 0 1n 1 2n 1 3n 0)\nR1 out 0 1u\n.end\n")
+            .unwrap();
+    for dialect in [
+        SpiceDialect::BestAvailable,
+        SpiceDialect::Ngspice,
+        SpiceDialect::Xyce,
+    ] {
+        let engine = Engine::new(SimulationConfig::default().with_spice_dialect(dialect));
+        let result = engine.run_tran(&netlist, 4e-9, 1e-9).unwrap();
+        assert_eq!(result.time.last().copied(), Some(4e-9));
+        for (time, actual) in result
+            .time
+            .iter()
+            .zip(result.try_voltage_waveform_named("out").unwrap())
+        {
+            let current = if *time < 1e-9 {
+                *time / 1e-9
+            } else if *time <= 2e-9 {
+                1.0
+            } else if *time < 3e-9 {
+                (3e-9 - time) / 1e-9
+            } else {
+                0.0
+            };
+            assert!(
+                (actual - current * 1e-6).abs() < 1e-14,
+                "{dialect:?} at {time}: {actual}"
+            );
+        }
+        assert_eq!(engine.convergence_quality().force_accepted_points, 0);
+    }
+}
+
+#[test]
+fn finite_linear_voltage_and_branch_states_are_not_clipped_to_global_rails() {
+    let netlist = Netlist::parse(
+        "scaled divider\nV1 in 0 PWL(0 0 1n 1e100 2n 1e100)\nR1 in out 1\nR2 out 0 1\n.end\n",
+    )
+    .unwrap();
+    let engine = Engine::default();
+    let result = engine.run_tran(&netlist, 2e-9, 1e-9).unwrap();
+    assert_eq!(result.time.last().copied(), Some(2e-9));
+    for (time, actual) in result
+        .time
+        .iter()
+        .zip(result.try_voltage_waveform_named("out").unwrap())
+    {
+        let expected = 0.5 * (*time / 1e-9).min(1.0);
+        assert!(
+            (actual / 1e100 - expected).abs() < 1e-12,
+            "at {time}: {actual}"
+        );
+    }
+    assert_eq!(engine.convergence_quality().force_accepted_points, 0);
+}
+
 const UNSATISFIABLE_TRANSIENT: &str = "\
 * No real transient operating point: v^2 + v + 1 = 0
  B1 n 0 I={V(n)*V(n)+1}

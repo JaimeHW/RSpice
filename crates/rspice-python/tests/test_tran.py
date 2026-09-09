@@ -23,6 +23,25 @@ R2 out 0 1k
 
 
 class TestTransient:
+    @pytest.mark.parametrize("mean", [64.0, 1e6, 1e20, 1e100])
+    def test_large_poisson_current_sources_converge_without_integer_saturation(self, engine, mean):
+        netlist = rspice.Netlist.parse_spice(
+            f"* Poisson shunt\nI1 0 out TRRANDOM(4 1n 0 {mean} 0)\nR1 out 0 {1.0/mean}\n.end\n"
+        )
+        result = engine.run_tran(netlist, stop_time=4e-9, max_step=1e-9)
+        output = result.voltage_waveform("out")
+        assert output[0] == 0.0
+        assert result.time[-1] == 4e-9
+        assert np.all(np.abs(output[1:] - 1.0) < 12.0 / math.sqrt(mean) + 1e-12)
+
+    def test_canceling_current_sources_can_keep_the_voltage_stationary(self, engine):
+        netlist = rspice.Netlist.parse_spice(
+            "* canceling sources\nI1 0 out PWL(0 0 1n 1 2n 1 3n 0)\nI2 out 0 PWL(0 0 1n 1 2n 1 3n 0)\nR1 out 0 1\n.end\n"
+        )
+        result = engine.run_tran(netlist, stop_time=4e-9, max_step=1e-9)
+        assert result.time[-1] == 4e-9
+        assert np.all(np.abs(result.voltage_waveform("out")) < 1e-14)
+
     @pytest.mark.parametrize("waveform", ["TRNOISE(1 1n 0 0)", "TRNOISE(0 1n 1 1)", "TRNOISE(1 1n 1 1 1 .7n .9n)"])
     @pytest.mark.parametrize("source", ["V1 out 0", "I1 0 out"])
     @pytest.mark.parametrize("dc", [0.0, 0.25])

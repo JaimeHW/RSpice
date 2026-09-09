@@ -56,6 +56,7 @@ fn colored_noise_checkpoint_extension_preserves_the_complete_sample_path() {
         "TRNOISE(0 1n 1 1)",
         "TRNOISE(1 1n 1 1 1 .7n .9n)",
         "TRRANDOM(2 1n .3n 1 0)",
+        "TRRANDOM(4 1n .3n 64 0)",
     ] {
         let netlist = Netlist::parse(&format!(
             "noise checkpoint extension\nV1 in 0 {waveform}\nR1 in out 1k\nC1 out 0 1p\n.end\n"

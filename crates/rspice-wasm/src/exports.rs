@@ -209,6 +209,44 @@ mod wasm_tests {
     use crate::js_interop::{js_array_property, js_property};
 
     #[wasm_bindgen_test]
+    fn poisson_sources_and_canceling_currents_converge_in_wasm() {
+        let engine = rspice_core::Engine::default();
+        for mean in [64.0_f64, 1e6, 1e20, 1e100] {
+            let netlist = rspice_core::Netlist::parse(&format!(
+                "Poisson shunt\nI1 0 out TRRANDOM(4 1n 0 {mean} 0)\nR1 out 0 {}\n.end\n",
+                1.0 / mean
+            ))
+            .unwrap();
+            let result = engine
+                .run_tran_with_abort(&netlist, 4e-9, 1e-9, &rspice_core::abort_signal::NoAbort)
+                .unwrap();
+            let output = result.try_voltage_waveform_named("out").unwrap();
+            assert_eq!(output[0], 0.0);
+            assert_eq!(result.time.last().copied(), Some(4e-9));
+            assert!(
+                output
+                    .iter()
+                    .skip(1)
+                    .all(|value| (value - 1.0).abs() < 12.0 / mean.sqrt() + 1e-12)
+            );
+        }
+        let netlist = rspice_core::Netlist::parse(
+            "canceling sources\nI1 0 out PWL(0 0 1n 1 2n 1 3n 0)\nI2 out 0 PWL(0 0 1n 1 2n 1 3n 0)\nR1 out 0 1\n.end\n"
+        ).unwrap();
+        let result = engine
+            .run_tran_with_abort(&netlist, 4e-9, 1e-9, &rspice_core::abort_signal::NoAbort)
+            .unwrap();
+        assert_eq!(result.time.last().copied(), Some(4e-9));
+        assert!(
+            result
+                .try_voltage_waveform_named("out")
+                .unwrap()
+                .iter()
+                .all(|value| value.abs() < 1e-14)
+        );
+    }
+
+    #[wasm_bindgen_test]
     fn noise_zero_origin_and_exact_prefixes_survive_horizon_extension_in_wasm() {
         use std::sync::Arc;
         let grid: Vec<_> = (0..=129).map(|index| f64::from(index) * 0.3e-9).collect();

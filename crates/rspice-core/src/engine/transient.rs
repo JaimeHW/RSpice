@@ -6747,15 +6747,19 @@ impl Engine {
                                     .get(i)
                                     .copied()
                                     .unwrap_or(false);
-                            let magnitude_limit = if protected_ideal_output {
-                                Value::INFINITY
-                            } else if i < num_nodes {
-                                MAX_VOLTAGE
-                            } else if circuit.has_xyce_core_inductors() {
-                                MAX_XYCE_CORE_BRANCH_STATE_MAGNITUDE
-                            } else {
-                                MAX_BRANCH_STATE_MAGNITUDE
-                            };
+                            // A finite direct solution of a linear circuit is
+                            // qualified by its residual, not an arbitrary rail.
+                            // Large branch currents can be exact scaled states.
+                            let magnitude_limit =
+                                if is_strictly_linear_transient || protected_ideal_output {
+                                    Value::INFINITY
+                                } else if i < num_nodes {
+                                    MAX_VOLTAGE
+                                } else if circuit.has_xyce_core_inductors() {
+                                    MAX_XYCE_CORE_BRANCH_STATE_MAGNITUDE
+                                } else {
+                                    MAX_BRANCH_STATE_MAGNITUDE
+                                };
                             if !v.is_finite() {
                                 had_nonfinite_solution = true;
                                 if !logged_divergence {
@@ -8269,14 +8273,6 @@ impl Engine {
                             num_nodes,
                             force_accept_delta_limit,
                         );
-                    let stale_force_candidate = use_static_source_recovery_guards
-                        && Self::is_stale_step(
-                            &solution,
-                            &bounded_force_candidate,
-                            expected_source_delta,
-                            num_nodes,
-                            &circuit.inductors.branch_indices,
-                        );
                     let stagnant_force_candidate = use_static_source_recovery_guards
                         && Self::is_stagnant_force_candidate(
                             &circuit,
@@ -8291,7 +8287,6 @@ impl Engine {
                         && (unbounded_force_candidate
                             || excessive_quiet_force_candidate
                             || !had_solver_candidate
-                            || stale_force_candidate
                             || stagnant_force_candidate)
                     {
                         stale_accept_count += 1;
@@ -8318,11 +8313,6 @@ impl Engine {
                             } else if excessive_quiet_force_candidate {
                                 log::error!(
                                     "Transient stalled near t={:.6e}s: quiet-source LTE force-accept candidates exceeded the bounded step envelope",
-                                    t
-                                );
-                            } else if stale_force_candidate {
-                                log::error!(
-                                    "Transient stalled near t={:.6e}s: stale LTE force-accept candidates with active sources",
                                     t
                                 );
                             } else if stagnant_force_candidate {
@@ -9035,33 +9025,9 @@ impl Engine {
                 nonlinear_state_matches_new_solution = false;
             }
 
-            if locked_grid.is_none()
-                && !circuit.has_xspice_event_driven_devices()
-                && Self::is_stale_step(
-                    &solution,
-                    &new_solution,
-                    expected_source_delta,
-                    num_nodes,
-                    &circuit.inductors.branch_indices,
-                )
-            {
-                stale_accept_count += 1;
-                let boosted = (dt * 2.0).min(max_step);
-                if boosted > dt {
-                    timestep.force_step(boosted);
-                }
-                if stale_accept_count >= 8 {
-                    log::error!(
-                        "Transient stalled near t={:.6e}s: repeated stale accepted steps with active sources",
-                        t
-                    );
-                    return Err(SimulationError::ConvergenceFailed(total_step_attempts));
-                }
-                trap_order = native_order_after_restart(current_method);
-                restore_rejected_transient_nonlinear_state!();
-                total_middle_nanos += middle_phase_start.elapsed().as_nanos();
-                continue;
-            }
+            // A converged circuit may attenuate or exactly cancel active
+            // sources. Source-to-solution amplitude ratios are not a residual
+            // test (and current/voltage source magnitudes have different units).
             stale_accept_count = 0;
             reject_for_veriloga_event_refinement!(&new_solution, step_time, middle_phase_start);
             finalize_model_finish_candidate!();
@@ -13858,27 +13824,6 @@ D1 D 0 DMOD
             (cq - fixed_step_cq).abs() > 128.0 * Value::EPSILON * comparison_scale,
             "unequal-step Gear2 must not silently reconstruct fixed-step BDF2"
         );
-    }
-
-    #[test]
-    fn stale_step_guard_counts_inductor_branch_current_motion() {
-        let previous = [1.0, 2.0, 0.0];
-        let node_stale_branch_active = [1.0, 2.0, 0.1];
-
-        assert!(!Engine::is_stale_step(
-            &previous,
-            &node_stale_branch_active,
-            SOURCE_ACTIVE_DELTA * 10.0,
-            2,
-            &[1],
-        ));
-        assert!(Engine::is_stale_step(
-            &previous,
-            &node_stale_branch_active,
-            SOURCE_ACTIVE_DELTA * 10.0,
-            2,
-            &[],
-        ));
     }
 
     #[test]
