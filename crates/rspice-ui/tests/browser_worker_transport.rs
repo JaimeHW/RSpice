@@ -95,18 +95,45 @@ fn transient_quality_survives_the_worker_and_structured_clone_before_output_crop
     let response =
         rspice_ui::run_rspice_ui_worker_request(js_sys::JSON::parse(&request.to_string()).unwrap())
             .unwrap();
-    let response: serde_json::Value =
-        serde_wasm_bindgen::from_value(structured_clone(&response)).unwrap();
-    assert_eq!(response["protocolVersion"], 18);
-    let transient = &response["response"]["outcome"]["Success"]["Transient"];
+    let response = structured_clone(&response);
+    assert_eq!(
+        js_sys::Reflect::get(&response, &"protocolVersion".into())
+            .unwrap()
+            .as_f64(),
+        Some(18.0)
+    );
+    let buffers = js_sys::Reflect::get(&response, &"buffers".into())
+        .unwrap()
+        .dyn_into::<js_sys::Array>()
+        .expect("the worker retains a separate numeric buffer array");
+    let metadata: serde_json::Value = serde_wasm_bindgen::from_value(
+        js_sys::Reflect::get(&response, &"response".into()).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(metadata["id"], 2);
+    let series = |reference: &serde_json::Value| {
+        let reference = &reference["Buffer"];
+        let index = u32::try_from(reference["buffer"].as_u64().unwrap()).unwrap();
+        assert!(index < buffers.length());
+        let values = buffers
+            .get(index)
+            .dyn_into::<js_sys::Float64Array>()
+            .expect("structuredClone preserves the actual Float64Array");
+        assert_eq!(Some(u64::from(values.length())), reference["len"].as_u64());
+        values
+    };
+    let transient = &metadata["outcome"]["Success"]["Transient"];
     let quality = &transient["convergence"]["metadata"]["transient"];
     let basis = &quality["time_basis"];
     assert_eq!(basis["start_s"], 0.0);
     assert_eq!(basis["stop_s"], 1.0);
     let source_samples: u64 = basis["sample_count"].as_str().unwrap().parse().unwrap();
-    assert!(source_samples > transient["time"]["Buffer"]["len"].as_u64().unwrap());
+    let time = series(&transient["time"]);
+    assert!(source_samples > u64::from(time.length()));
+    assert_eq!(time.get_index(0), 0.5);
+    assert_eq!(time.get_index(time.length() - 1), 1.0);
     assert_eq!(quality["force_accepted_points"], "0");
     for field in ["transient_indices", "transient_times"] {
-        assert!(transient["convergence"][field]["Buffer"].is_object());
+        assert_eq!(series(&transient["convergence"][field]).length(), 0);
     }
 }
