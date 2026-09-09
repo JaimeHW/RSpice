@@ -90,6 +90,35 @@ class BrowserJitGateTests(unittest.TestCase):
         self.assertIsNotNone(version)
         self.assertEqual(int(version.group(1)), self.gate.EXPECTED_WASM_JIT_ABI_VERSION)
 
+    def test_independent_helper_fixture_uses_the_reviewed_abi(self) -> None:
+        source = read_text("tools/ci/wasm_jit_abi_probe.mjs")
+        version = re.search(r"const ABI = (\d+);", source)
+        self.assertIsNotNone(version)
+        self.assertEqual(int(version.group(1)), self.gate.EXPECTED_WASM_JIT_ABI_VERSION)
+
+    def test_abi_fixture_uses_the_actual_source_and_immutable_worker_assets(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            for folder, compressed in [(root, False), (root / "assets" / ("a" * 64), True)]:
+                worker = folder / "simulation-worker.js"
+                assets = self.gate.qualification_assets(worker)
+                package = folder if compressed else folder / "pkg"
+                self.assertEqual(assets, {
+                    "bindings": package / "rspice-ui-worker.js",
+                    "loader": folder / "wasm-loader.js",
+                    "wasm": package / ("rspice-ui-worker_bg.wasm.gz" if compressed else "rspice-ui-worker_bg.wasm"),
+                })
+                for path in (worker, *assets.values()):
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_bytes(b"fixture")
+                relative = worker.relative_to(root)
+                self.assertEqual(self.gate.qualification_worker(root, str(relative)), relative)
+                assets["wasm"].unlink()
+                with self.assertRaisesRegex(ValueError, "qualification is missing"):
+                    self.gate.qualification_worker(root, str(relative))
+            with self.assertRaisesRegex(ValueError, "must stay inside"):
+                self.gate.qualification_worker(root, "../simulation-worker.js")
+
     def test_only_finite_positive_measurements_can_qualify(self) -> None:
         for reported in (None, "", "invalid", "0", "-1", "NaN", "inf", "-inf"):
             with self.subTest(reported=reported), self.assertRaises(SystemExit):

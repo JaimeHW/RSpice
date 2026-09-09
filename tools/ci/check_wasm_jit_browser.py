@@ -18,7 +18,10 @@ import urllib.parse
 EXPECTED_STAMPS = 20000
 # An independent release contract: changing the compiler ABI also requires
 # reviewing the worker qualification expectations.
-EXPECTED_WASM_JIT_ABI_VERSION = 9
+# ABI 10 integer arithmetic, ABI 11 checked derivatives and ABI 12 product ratios
+# are exercised by an independent secondary module against the actual worker.
+EXPECTED_WASM_JIT_ABI_VERSION = 12
+EXPECTED_ABI_CHECKS = 17
 
 # The page runs on a real clock, so the runner cannot bound it with
 # --virtual-time-budget and read the DOM afterwards: a virtual clock reports a
@@ -46,11 +49,15 @@ class QualificationHandler(http.server.SimpleHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802 - http.server's spelling
         parsed = urllib.parse.urlparse(self.path)
-        if parsed.path == "/wasm-jit-qualification.html":
-            source = pathlib.Path(__file__).resolve().parents[2] / "crates/rspice-ui/web/wasm-jit-qualification.html"
+        fixtures = {
+            "/wasm-jit-qualification.html": pathlib.Path(__file__).resolve().parents[2] / "crates/rspice-ui/web/wasm-jit-qualification.html",
+            "/wasm-jit-abi-probe.mjs": pathlib.Path(__file__).resolve().with_name("wasm_jit_abi_probe.mjs"),
+        }
+        if parsed.path in fixtures:
+            source = fixtures[parsed.path]
             payload = source.read_bytes()
             self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Type", "text/html; charset=utf-8" if source.suffix == ".html" else "text/javascript; charset=utf-8")
             self.send_header("Content-Length", str(len(payload)))
             self.end_headers()
             self.wfile.write(payload)
@@ -105,16 +112,22 @@ def find_chromium() -> str:
     raise SystemExit("Chrome/Chromium is required for the browser WASM JIT qualification")
 
 
+def qualification_assets(worker: pathlib.Path) -> dict[str, pathlib.Path]:
+    release = worker.parent.parent.name == "assets" and re.fullmatch(r"[0-9a-f]{64}", worker.parent.name)
+    package = worker.parent if release else worker.parent / "pkg"
+    return {
+        "loader": worker.parent / "wasm-loader.js",
+        "bindings": package / "rspice-ui-worker.js",
+        "wasm": package / ("rspice-ui-worker_bg.wasm.gz" if release else "rspice-ui-worker_bg.wasm"),
+    }
+
+
 def qualification_worker(web_root: pathlib.Path, worker_path: str) -> pathlib.Path:
     web_root = web_root.resolve()
     worker = (web_root / worker_path).resolve()
     if not worker.is_relative_to(web_root):
         raise ValueError("qualification worker must stay inside the served tree")
-    release = worker.parent.parent.name == "assets" and re.fullmatch(r"[0-9a-f]{64}", worker.parent.name)
-    package = worker.parent if release else worker.parent / "pkg"
-    required = (worker, worker.parent / "wasm-loader.js",
-                package / "rspice-ui-worker.js",
-                package / ("rspice-ui-worker_bg.wasm.gz" if release else "rspice-ui-worker_bg.wasm"))
+    required = (worker, *qualification_assets(worker).values())
     missing = [str(path) for path in required if not path.is_file()]
     if missing:
         raise ValueError("browser WASM JIT qualification is missing: " + ", ".join(missing))
@@ -142,7 +155,9 @@ def main() -> None:
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     qualification_query = urllib.parse.urlencode(
-        {"expectedAbi": EXPECTED_WASM_JIT_ABI_VERSION, "worker": "/" + worker.as_posix()}
+        {"expectedAbi": EXPECTED_WASM_JIT_ABI_VERSION, "worker": "/" + worker.as_posix(),
+         **{name: "/" + path.relative_to(web_root).as_posix()
+            for name, path in qualification_assets(web_root / worker).items()}}
     )
     url = (
         f"http://127.0.0.1:{server.server_port}/wasm-jit-qualification.html"
@@ -194,6 +209,7 @@ def main() -> None:
     expected = {
         "status": "qualified",
         "abi": str(EXPECTED_WASM_JIT_ABI_VERSION),
+        "abiChecks": str(EXPECTED_ABI_CHECKS),
         "solverResult": "15",
         "contributions": "3",
         "jacobians": "14",
@@ -218,7 +234,7 @@ def main() -> None:
         )
     print(
         f"browser WASM JIT qualification passed: ABI {EXPECTED_WASM_JIT_ABI_VERSION}, "
-        "solver result 15, "
+        f"{EXPECTED_ABI_CHECKS} independent ABI checks, solver result 15, "
         f"3 contributions, 14 Jacobian entries, {nanoseconds:.1f} ns/stamp"
     )
 
