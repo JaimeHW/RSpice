@@ -39,6 +39,29 @@ fn branch_current(point: &AcResult, branch: &str) -> Complex64 {
     point.currents[index]
 }
 
+#[test]
+fn waveform_bias_is_retained_when_linearizing_a_nonlinear_ac_circuit() {
+    for waveform in [
+        "SIN(.65 .05 1meg)",
+        "PULSE(.65 .7 0 1n 1n 5n 10n)",
+        "PWL(0 .65 20n .7)",
+    ] {
+        let deck = |dc: &str| {
+            format!(
+                "biased diode\nV1 in 0 {waveform} AC 1 {dc}\nR1 in out 100\nD1 out 0 dm\n.model dm D IS=1e-14\n.end\n"
+            )
+        };
+        let implicit = solve_one(&deck(""));
+        let explicit = solve_one(&deck("DC .65"));
+        let expected = voltage(&explicit, "out");
+        assert!(expected.norm() < 0.8, "diode must load the biased circuit");
+        assert!(
+            (voltage(&implicit, "out") - expected).norm() < 1e-12,
+            "{waveform}"
+        );
+    }
+}
+
 fn assert_solver_singular(deck: &str) {
     let error = Engine::new(SimulationConfig::default())
         .run_ac(&parse(deck), &[1.0e3])

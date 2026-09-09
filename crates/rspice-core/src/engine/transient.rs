@@ -4336,6 +4336,9 @@ impl Engine {
             || resume.is_none() || resume_time.to_bits() == 0.0_f64.to_bits(),
             |continuation| continuation.analysis_first_step_pending,
         );
+        // Keep the Xyce restart phase inactive for native LTE: native
+        // breakpoint departures still need accepted charge/timestep history
+        // for truncation and order promotion, including after checkpoint resume.
         let mut xyce_lte_restart_first_step = resume_continuation.map_or_else(
             || {
                 resume.is_some()
@@ -4952,7 +4955,7 @@ impl Engine {
             Some(ValidatedAcceptedIntegrationRuntime::RestartNormalized(_))
         );
         if resume_is_restart_normalized {
-            xyce_lte_restart_first_step = true;
+            xyce_lte_restart_first_step = lte_estimator.uses_accepted_solution_reference();
             if fixed_method.is_none() {
                 trapgear.restart_from(&solution);
             }
@@ -5042,15 +5045,16 @@ impl Engine {
                 .initialize_direct_xyce_accepted_q(accepted_q)
                 .map_err(SimulationError::Circuit)?;
         }
-        // Fresh startup retains ngspice's maxstep seed. A resumed run
-        // replaces these provisional histories below with the exact decoded
-        // checkpoint state, which is already normalized when the checkpoint
-        // represents a breakpoint-style restart.
-        let accepted_dt_seed = if resume.is_some() {
-            0.0
-        } else {
-            hinted_max_step
-        };
+        // All device histories share accepted timestep provenance, including
+        // the MOS history used by passive-device truncation. Restore both
+        // intervals even when that device family is absent; seeding them with
+        // zero would skip truncation and order promotion after exact resume.
+        // Restart-normalized checkpoints already carry zero intervals.
+        let (accepted_dt_seed, accepted_dt_prev_seed) = restored_accepted_junction_history
+            .as_ref()
+            .map_or((hinted_max_step, hinted_max_step), |(bjt, _, _)| {
+                (bjt.accepted_dt_prev, bjt.accepted_dt_prev_prev)
+            });
         // Only a fresh UIC startup stands in for ngspice's single
         // `MODEINITJCT|MODETRANOP|MODEUIC` device load, which is the one place
         // either reference reads a device-line `IC=` vector. A resumed run is
@@ -5066,13 +5070,13 @@ impl Engine {
         // first transient point. Mirror that only at startup so early
         // device-local truncation/order checks see the same history.
         bjt_history.accepted_dt_prev = accepted_dt_seed;
-        bjt_history.accepted_dt_prev_prev = accepted_dt_seed;
+        bjt_history.accepted_dt_prev_prev = accepted_dt_prev_seed;
         let mut jfet_history = Self::initialize_jfet_history(&circuit, &solution, reactive_seed);
         jfet_history.accepted_dt_prev = accepted_dt_seed;
-        jfet_history.accepted_dt_prev_prev = accepted_dt_seed;
+        jfet_history.accepted_dt_prev_prev = accepted_dt_prev_seed;
         let mut diode_history = Self::initialize_diode_history(&circuit, &solution, reactive_seed);
         diode_history.accepted_dt_prev = accepted_dt_seed;
-        diode_history.accepted_dt_prev_prev = accepted_dt_seed;
+        diode_history.accepted_dt_prev_prev = accepted_dt_prev_seed;
         if let Some((restored_bjt, restored_diode, restored_snapshot_cache)) =
             restored_accepted_junction_history
         {
@@ -5130,22 +5134,22 @@ impl Engine {
         let mut mosfet_history =
             Self::initialize_mosfet_history(&circuit, &solution, reactive_seed);
         mosfet_history.accepted_dt_prev = accepted_dt_seed;
-        mosfet_history.accepted_dt_prev_prev = accepted_dt_seed;
+        mosfet_history.accepted_dt_prev_prev = accepted_dt_prev_seed;
         let mut vdmos_history = Self::initialize_vdmos_history(&circuit, &solution);
         vdmos_history.accepted_dt_prev = accepted_dt_seed;
-        vdmos_history.accepted_dt_prev_prev = accepted_dt_seed;
+        vdmos_history.accepted_dt_prev_prev = accepted_dt_prev_seed;
         let mut b3soi_history = Self::initialize_b3soi_history(&circuit, &solution);
         b3soi_history.accepted_dt_prev = accepted_dt_seed;
-        b3soi_history.accepted_dt_prev_prev = accepted_dt_seed;
+        b3soi_history.accepted_dt_prev_prev = accepted_dt_prev_seed;
         let mut bsim3_history = Self::initialize_bsim3_history(&circuit, &solution);
         bsim3_history.accepted_dt_prev = accepted_dt_seed;
-        bsim3_history.accepted_dt_prev_prev = accepted_dt_seed;
+        bsim3_history.accepted_dt_prev_prev = accepted_dt_prev_seed;
         let mut bsim4_history = Self::initialize_bsim4_history(&circuit, &solution);
         bsim4_history.accepted_dt_prev = accepted_dt_seed;
-        bsim4_history.accepted_dt_prev_prev = accepted_dt_seed;
+        bsim4_history.accepted_dt_prev_prev = accepted_dt_prev_seed;
         let mut ekv26_history = Self::initialize_ekv26_history(&circuit, &solution);
         ekv26_history.accepted_dt_prev = accepted_dt_seed;
-        ekv26_history.accepted_dt_prev_prev = accepted_dt_seed;
+        ekv26_history.accepted_dt_prev_prev = accepted_dt_prev_seed;
         let ideal_output_pairs = circuit.ideal_voltage_output_pairs();
 
         // Xyce OneStep carries the accepted physical static residual into its
@@ -5563,7 +5567,7 @@ impl Engine {
                         lte_estimator.restart_history();
                         lte_warmup_skips = 2;
                     }
-                    xyce_lte_restart_first_step = true;
+                    xyce_lte_restart_first_step = lte_estimator.uses_accepted_solution_reference();
                     let restart_dt = Self::ngspice_t0_breakpoint_limited_initial_timestep(
                         Self::ngspice_initial_timestep(tstop, tran_step_hint, hinted_max_step),
                         breakpoints.next_after(t),
@@ -8898,7 +8902,8 @@ impl Engine {
                         if lte_estimator.uses_accepted_solution_reference() {
                             lte_estimator.restart_history_from(&new_solution);
                         }
-                        xyce_lte_restart_first_step = true;
+                        xyce_lte_restart_first_step =
+                            lte_estimator.uses_accepted_solution_reference();
                     }
                     lte_estimator.set_method_order(effective_method_order(
                         method_after_step,
@@ -9446,7 +9451,7 @@ impl Engine {
                     .set_method_order(effective_method_order(method_after_step, step_trap_order));
             }
             if hit_breakpoint {
-                xyce_lte_restart_first_step = true;
+                xyce_lte_restart_first_step = lte_estimator.uses_accepted_solution_reference();
             }
             xyce_step_failure_count = 0;
 

@@ -27,6 +27,24 @@ FC = 1.0 / (2 * math.pi * 1e3 * 1e-6)  # RC corner: 159.155 Hz
 
 
 class TestAcBasics:
+    @pytest.mark.parametrize(
+        "waveform",
+        ["SIN(.65 .05 1meg)", "PULSE(.65 .7 0 1n 1n 5n 10n)", "PWL(0 .65 20n .7)"],
+    )
+    @pytest.mark.parametrize("source", ["V1 out 0", "I1 0 out"])
+    def test_waveform_ac_terms_preserve_dc_bias(self, engine, waveform, source):
+        for dc, expected in [("", 0.65), ("DC 0", 0.0)]:
+            netlist = rspice.Netlist.parse_spice(
+                f"* waveform bias\n{source} {waveform} AC 2 90 {dc}\nR1 out 0 1\n.end\n"
+            )
+            op = engine.run_dc_op(netlist)
+            index = next(
+                i for i, name in enumerate(op.node_names) if name.lower() == "out"
+            )
+            assert op.node_voltages[index] == pytest.approx(expected, abs=1e-12)
+            ac = engine.run_ac(netlist, [1e3])
+            assert ac.voltage_complex("out")[0] == pytest.approx(2j, abs=1e-12)
+
     @pytest.mark.parametrize("instance", ["M=3", "AREA=3", "AREA=1.5 M=2"])
     @pytest.mark.parametrize("kind, polarity", [("NPN", 1), ("PNP", -1)])
     def test_legacy_itf_scaling_preserves_input_charge(self, instance, kind, polarity):

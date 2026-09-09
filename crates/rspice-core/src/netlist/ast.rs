@@ -1715,6 +1715,14 @@ pub enum SourceSpec {
         transient: Box<SourceSpec>,
     },
 
+    /// AC excitation and transient waveform with no explicit DC value.
+    /// Operating-point analysis uses the waveform's initial value.
+    AcTransient {
+        ac_magnitude: Value,
+        ac_phase: Value,
+        transient: Box<SourceSpec>,
+    },
+
     /// Combined DC, AC, and transient specification.
     ///
     /// Common in ngspice decks where one source drives:
@@ -1924,6 +1932,9 @@ impl SourceSpec {
             | Self::DcTransient {
                 transient: inner, ..
             }
+            | Self::AcTransient {
+                transient: inner, ..
+            }
             | Self::DcAcTransient {
                 transient: inner, ..
             } => inner.file_dependency(),
@@ -1970,8 +1981,8 @@ impl SourceSpec {
     /// Return this specification with its AC excitation replaced by the
     /// given magnitude and phase, preserving DC and transient content.
     ///
-    /// Pure waveform specs gain a `DcAcTransient` wrapper with a zero DC
-    /// value, matching how SPICE treats `AC` annotations on such sources.
+    /// Waveforms without an explicit DC value retain their initial-value
+    /// bias through an `AcTransient` wrapper.
     pub fn with_ac(self, magnitude: Value, phase: Value) -> Self {
         match self {
             SourceSpec::Distortion { inner, f1, f2 } => SourceSpec::Distortion {
@@ -2008,8 +2019,12 @@ impl SourceSpec {
                 ac_phase: phase,
                 transient,
             },
-            transient => SourceSpec::DcAcTransient {
-                dc_value: 0.0,
+            SourceSpec::AcTransient { transient, .. } => SourceSpec::AcTransient {
+                ac_magnitude: magnitude,
+                ac_phase: phase,
+                transient,
+            },
+            transient => SourceSpec::AcTransient {
                 ac_magnitude: magnitude,
                 ac_phase: phase,
                 transient: Box::new(transient),
@@ -2049,7 +2064,12 @@ impl SourceSpec {
                 dc_value: value,
                 transient,
             },
-            SourceSpec::DcAcTransient {
+            SourceSpec::AcTransient {
+                ac_magnitude,
+                ac_phase,
+                transient,
+            }
+            | SourceSpec::DcAcTransient {
                 ac_magnitude,
                 ac_phase,
                 transient,

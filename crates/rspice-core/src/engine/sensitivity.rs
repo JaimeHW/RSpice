@@ -1001,9 +1001,10 @@ impl Engine {
             SourceSpec::Distortion { inner, .. } | SourceSpec::RfPort { inner, .. } => {
                 Self::source_has_explicit_ac(inner)
             }
-            SourceSpec::Ac { .. } | SourceSpec::DcAc { .. } | SourceSpec::DcAcTransient { .. } => {
-                true
-            }
+            SourceSpec::Ac { .. }
+            | SourceSpec::DcAc { .. }
+            | SourceSpec::AcTransient { .. }
+            | SourceSpec::DcAcTransient { .. } => true,
             SourceSpec::DcTransient { transient, .. } => Self::source_has_explicit_ac(transient),
             _ => false,
         }

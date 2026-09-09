@@ -4086,6 +4086,14 @@ fn scale_source_amplitudes(spec: &mut SourceSpec, m: Value) {
             *dc_value *= m;
             scale_source_amplitudes(transient, m);
         }
+        SourceSpec::AcTransient {
+            ac_magnitude,
+            transient,
+            ..
+        } => {
+            *ac_magnitude *= m;
+            scale_source_amplitudes(transient, m);
+        }
         SourceSpec::DcAcTransient {
             dc_value,
             ac_magnitude,

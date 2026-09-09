@@ -102,11 +102,13 @@ fn element_has_transient_random(element: &Element) -> bool {
 
 fn spec_contains_transient_random(spec: &SourceSpec) -> bool {
     match spec {
-        SourceSpec::RfPort { inner, .. } => spec_contains_transient_random(inner),
-        SourceSpec::TrNoise { .. } | SourceSpec::TrRandom { .. } => true,
-        SourceSpec::DcTransient { transient, .. } | SourceSpec::DcAcTransient { transient, .. } => {
-            spec_contains_transient_random(transient)
+        SourceSpec::Distortion { inner, .. } | SourceSpec::RfPort { inner, .. } => {
+            spec_contains_transient_random(inner)
         }
+        SourceSpec::TrNoise { .. } | SourceSpec::TrRandom { .. } => true,
+        SourceSpec::DcTransient { transient, .. }
+        | SourceSpec::AcTransient { transient, .. }
+        | SourceSpec::DcAcTransient { transient, .. } => spec_contains_transient_random(transient),
         _ => false,
     }
 }
@@ -118,7 +120,9 @@ fn replace_transient_random(
     name: &str,
 ) -> Result<(), String> {
     match spec {
-        SourceSpec::RfPort { inner, .. } => replace_transient_random(inner, tstop, seed, name),
+        SourceSpec::Distortion { inner, .. } | SourceSpec::RfPort { inner, .. } => {
+            replace_transient_random(inner, tstop, seed, name)
+        }
         SourceSpec::TrNoise {
             na,
             nt,
@@ -177,7 +181,9 @@ fn replace_transient_random(
             };
             Ok(())
         }
-        SourceSpec::DcTransient { transient, .. } | SourceSpec::DcAcTransient { transient, .. } => {
+        SourceSpec::DcTransient { transient, .. }
+        | SourceSpec::AcTransient { transient, .. }
+        | SourceSpec::DcAcTransient { transient, .. } => {
             replace_transient_random(transient, tstop, seed, name)
         }
         _ => Ok(()),
@@ -518,6 +524,30 @@ fn fnv1a(input: &str) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn expansion_preserves_distortion_dc_and_ac_annotations() {
+        let netlist = Netlist::parse(
+            "annotated noise\nV1 out 0 DC .25 AC 2 90 TRNOISE(1 1n 0 0) DISTOF1 3 45 DISTOF2 4 90\nR1 out 0 1\n.end\n"
+        ).unwrap();
+        let expanded = expand_transient_noise(&netlist, 10e-9).unwrap().unwrap();
+        let ElementKind::VoltageSource(spec) = &expanded.elements[0].kind else {
+            panic!("voltage source retained")
+        };
+        assert_eq!(crate::engine::extract_dc_value(spec), 0.25);
+        assert_eq!(
+            crate::engine::extract_ac_value(spec),
+            (2.0, std::f64::consts::FRAC_PI_2)
+        );
+        let f1 = spec.distortion_f1().unwrap();
+        let f2 = spec.distortion_f2().unwrap();
+        assert_eq!((f1.magnitude, f1.phase), (3.0, std::f64::consts::FRAC_PI_4));
+        assert_eq!((f2.magnitude, f2.phase), (4.0, std::f64::consts::FRAC_PI_2));
+        assert!(
+            expand_transient_noise(&expanded, 10e-9).unwrap().is_none(),
+            "expansion replaces the random waveform exactly once"
+        );
+    }
 
     #[test]
     fn white_noise_matches_requested_variance() {

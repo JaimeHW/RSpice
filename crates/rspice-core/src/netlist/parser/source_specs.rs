@@ -252,12 +252,19 @@ pub(super) fn parse_source_spec(
             dc_value,
             transient: Box::new(transient),
         },
-        (dc_value, Some((ac_magnitude, ac_phase)), Some(transient)) => SourceSpec::DcAcTransient {
-            dc_value: dc_value.unwrap_or(0.0),
+        (None, Some((ac_magnitude, ac_phase)), Some(transient)) => SourceSpec::AcTransient {
             ac_magnitude,
             ac_phase,
             transient: Box::new(transient),
         },
+        (Some(dc_value), Some((ac_magnitude, ac_phase)), Some(transient)) => {
+            SourceSpec::DcAcTransient {
+                dc_value,
+                ac_magnitude,
+                ac_phase,
+                transient: Box::new(transient),
+            }
+        }
     };
 
     let source = if distortion_f1.is_some() || distortion_f2.is_some() {
@@ -1742,6 +1749,8 @@ mod tests {
         params.set("pwl", 2.0);
         for raw in [
             "PWL FILE \"wave.csv\"",
+            "PWL FILE \"wave.csv\" AC 1",
+            "AC 1 PWL FILE \"wave.csv\" DISTOF1 1 PORTNUM 1",
             "DC=pwl PWL(FILE=\"wave.csv\")",
             "DC 1 AC 1 PWL FILE \"wave.csv\" DISTOF1 1 PORTNUM 1",
             "PWL 0 0 pwl file",

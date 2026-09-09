@@ -209,6 +209,82 @@ mod wasm_tests {
     use crate::js_interop::{js_array_property, js_property};
 
     #[wasm_bindgen_test]
+    fn distortion_annotations_preserve_transient_noise_in_wasm() {
+        let engine = rspice_core::Engine::default();
+        for waveform in ["TRNOISE(1 1n 0 0)", "TRRANDOM(2 1n 0 1 0)"] {
+            for source in ["V1 out 0", "I1 0 out"] {
+                let run = |annotation: &str| {
+                    let netlist = rspice_core::Netlist::parse(&format!(
+                        "noise annotation\n{source} {waveform} AC 2 {annotation}\nR1 out 0 1\n.end\n"
+                    )).unwrap();
+                    engine
+                        .run_tran_with_abort(
+                            &netlist,
+                            10e-9,
+                            1e-9,
+                            &rspice_core::abort_signal::NoAbort,
+                        )
+                        .unwrap()
+                };
+                let baseline = run("");
+                let annotated = run("DISTOF1 1 DISTOF2 .5 90");
+                let index = baseline
+                    .node_names
+                    .iter()
+                    .position(|name| name.eq_ignore_ascii_case("out"))
+                    .unwrap();
+                assert!(
+                    baseline.voltages[index]
+                        .iter()
+                        .any(|value| value.abs() > 0.3)
+                );
+                assert_eq!(annotated.time, baseline.time);
+                assert_eq!(annotated.voltages, baseline.voltages);
+            }
+        }
+    }
+
+    #[wasm_bindgen_test]
+    fn waveform_ac_terms_preserve_dc_bias_in_wasm() {
+        let engine = rspice_core::Engine::default();
+        for waveform in [
+            "SIN(.65 .05 1meg)",
+            "PULSE(.65 .7 0 1n 1n 5n 10n)",
+            "PWL(0 .65 20n .7)",
+        ] {
+            for source in ["V1 out 0", "I1 0 out"] {
+                for (dc, expected) in [("", 0.65), ("DC 0", 0.0)] {
+                    let netlist = rspice_core::Netlist::parse(&format!(
+                        "waveform bias\n{source} {waveform} AC 2 90 {dc}\nR1 out 0 1\n.end\n"
+                    ))
+                    .unwrap();
+                    let op = engine
+                        .run_dc_op_with_abort(&netlist, &rspice_core::abort_signal::NoAbort)
+                        .unwrap();
+                    let index = op
+                        .node_names
+                        .iter()
+                        .position(|name| name.eq_ignore_ascii_case("out"))
+                        .unwrap();
+                    assert!((op.node_voltages[index] - expected).abs() < 1e-12);
+                    let ac = engine
+                        .run_ac_with_abort(&netlist, &[1e3], &rspice_core::abort_signal::NoAbort)
+                        .unwrap();
+                    let index = ac[0]
+                        .node_names
+                        .iter()
+                        .position(|name| name.eq_ignore_ascii_case("out"))
+                        .unwrap();
+                    assert!(
+                        (ac[0].voltages[index] - rspice_core::Complex64::new(0.0, 2.0)).norm()
+                            < 1e-12
+                    );
+                }
+            }
+        }
+    }
+
+    #[wasm_bindgen_test]
     fn legacy_itf_scaling_preserves_input_charge_in_wasm() {
         let vt = 300.15 * 1.380649e-23 / 1.602176634e-19_f64;
         let forward = 1e-16 * (0.65 / vt).exp_m1();

@@ -847,6 +847,10 @@ mod tests {
                     ac_magnitude: magnitude,
                     ..
                 }
+                | SourceSpec::AcTransient {
+                    ac_magnitude: magnitude,
+                    ..
+                }
                 | SourceSpec::DcAcTransient {
                     ac_magnitude: magnitude,
                     ..

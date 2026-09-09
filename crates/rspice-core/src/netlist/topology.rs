@@ -439,9 +439,11 @@ fn dc_current_constraint_nodes(element: &Element) -> &[String] {
 /// semantics without performing I/O.
 fn independent_current_is_zero_at_dc(spec: &super::SourceSpec) -> bool {
     match spec {
-        super::SourceSpec::Distortion { inner, .. } | super::SourceSpec::RfPort { inner, .. } => {
-            independent_current_is_zero_at_dc(inner)
-        }
+        super::SourceSpec::Distortion { inner, .. }
+        | super::SourceSpec::RfPort { inner, .. }
+        | super::SourceSpec::AcTransient {
+            transient: inner, ..
+        } => independent_current_is_zero_at_dc(inner),
         super::SourceSpec::Ac { .. } => true,
         super::SourceSpec::Dc(value)
         | super::SourceSpec::DcAc {

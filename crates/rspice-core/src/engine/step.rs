@@ -1934,6 +1934,7 @@ impl Engine {
                 Self::set_sin_source_parameter(inner, param_name, value)
             }
             SourceSpec::DcTransient { transient, .. }
+            | SourceSpec::AcTransient { transient, .. }
             | SourceSpec::DcAcTransient { transient, .. } => {
                 Self::set_sin_source_parameter(transient, param_name, value)
             }
@@ -1977,6 +1978,7 @@ impl Engine {
                 Self::set_pat_source_parameter(inner, param_name, value)
             }
             SourceSpec::DcTransient { transient, .. }
+            | SourceSpec::AcTransient { transient, .. }
             | SourceSpec::DcAcTransient { transient, .. } => {
                 Self::set_pat_source_parameter(transient, param_name, value)
             }
@@ -2032,7 +2034,12 @@ impl Engine {
         value: Value,
     ) -> Result<(), SimulationError> {
         match spec {
-            SourceSpec::RfPort { inner, .. } => Self::set_source_dc_value(inner, value),
+            SourceSpec::Distortion { inner, .. }
+            | SourceSpec::RfPort { inner, .. } => Self::set_source_dc_value(inner, value),
+            SourceSpec::AcTransient { .. } => {
+                *spec = std::mem::replace(spec, SourceSpec::Dc(0.0)).with_dc_value(value);
+                Ok(())
+            }
             SourceSpec::Dc(v) => {
                 *v = value;
                 Ok(())
@@ -2756,6 +2763,27 @@ I1 out 0 DC 0 SIN(0 1 1k 0 0 0)
             }
             other => panic!("unexpected stepped source kind: {other:?}"),
         }
+    }
+
+    #[test]
+    fn ac_waveform_steps_preserve_implicit_bias_and_excitation() {
+        let mut spec = SourceSpec::Sin {
+            offset: 0.65,
+            amplitude: 0.05,
+            frequency: 1e3,
+            delay: 0.0,
+            damping: 0.0,
+            phase: 0.0,
+        }
+        .with_ac(2.0, 0.25);
+        Engine::set_sin_source_parameter(&mut spec, "PHASE", 90.0).unwrap();
+        assert!((crate::engine::extract_dc_value(&spec) - 0.70).abs() < 1e-15);
+        Engine::set_source_dc_value(&mut spec, -0.2).unwrap();
+        assert_eq!(crate::engine::extract_dc_value(&spec), -0.2);
+        assert_eq!(crate::engine::extract_ac_value(&spec), (2.0, 0.25));
+        assert!(matches!(spec, SourceSpec::DcAcTransient { transient, .. }
+            if matches!(transient.as_ref(), SourceSpec::Sin { phase, .. }
+                if (*phase - std::f64::consts::FRAC_PI_2).abs() < 1e-15)));
     }
 
     #[test]

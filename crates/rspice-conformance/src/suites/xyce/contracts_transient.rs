@@ -4021,6 +4021,7 @@ impl XyceTestRunner {
             | rspice_core::netlist::SourceSpec::PwlFile { .. }
             | rspice_core::netlist::SourceSpec::Pat { .. } => Ok(()),
             rspice_core::netlist::SourceSpec::DcTransient { transient, .. }
+            | rspice_core::netlist::SourceSpec::AcTransient { transient, .. }
             | rspice_core::netlist::SourceSpec::DcAcTransient { transient, .. } => {
                 Self::validate_static_step_tran_source_spec(source_name, transient)
             }

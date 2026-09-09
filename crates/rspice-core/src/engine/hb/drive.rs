@@ -120,7 +120,8 @@ impl Engine {
                     .map(|harmonic| (harmonic, *ac_magnitude, *ac_phase))
                     .collect(),
             }),
-            SourceSpec::DcTransient {
+            SourceSpec::AcTransient { transient, .. }
+            | SourceSpec::DcTransient {
                 dc_value: _,
                 transient,
             }

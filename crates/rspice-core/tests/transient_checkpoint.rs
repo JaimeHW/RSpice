@@ -46,6 +46,52 @@ rload out 0 1k
 ";
 
 #[test]
+fn annotated_transient_noise_resumes_the_same_seeded_trajectory() {
+    for waveform in ["TRNOISE(1 1n 0 0)", "TRRANDOM(2 1n 0 1 0)"] {
+        let result = assert_scheduled_deck_resumes_exactly(
+            waveform,
+            &format!(
+                "noise checkpoint\nV1 in 0 {waveform} AC 2 DISTOF1 1\nR1 in out 1k\nC1 out 0 1p\n.end\n"
+            ),
+            10e-9,
+            4e-9,
+            1e-9,
+            SimulationConfig::default(),
+        );
+        assert!(
+            result.voltages[out_index(&result)]
+                .iter()
+                .any(|value| value.abs() > 0.1)
+        );
+    }
+}
+
+#[test]
+fn native_pwl_breakpoint_checkpoints_preserve_order_promotion() {
+    for method in [
+        IntegrationMethod::Trapezoidal,
+        IntegrationMethod::TrapGear,
+        IntegrationMethod::Gear2,
+    ] {
+        for device in ["", "D1 out 0 dm\n.model dm D(IS=1e-14 CJO=1p)\n"] {
+            assert_scheduled_deck_resumes_exactly(
+                "native PWL breakpoint",
+                &format!(
+                    "PWL checkpoint\nV1 in 0 PWL(0 0 1n .5 2n -.3 3n .8 4n -.6 5n .3 6n .8 7n -.2 8n .1 9n .6 10n .4)\nR1 in out 1k\nC1 out 0 1p\n{device}.end\n"
+                ),
+                10e-9,
+                4e-9,
+                1e-9,
+                SimulationConfig {
+                    integration_method: method,
+                    ..SimulationConfig::default()
+                },
+            );
+        }
+    }
+}
+
+#[test]
 fn source_time_defaults_remain_attached_to_the_original_transient() {
     for dialect in [SpiceDialect::Ngspice, SpiceDialect::Xyce] {
         let engine = Engine::new(SimulationConfig {
