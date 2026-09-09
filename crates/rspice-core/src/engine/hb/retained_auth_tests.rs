@@ -27,7 +27,9 @@ fn pre_apft_source_transform_identity_version_is_rejected() {
     assert!(
         error
             .to_string()
-            .contains("producer identity version 1 is unsupported; expected 2"),
+            .contains(&format!(
+                "producer identity version 1 is unsupported; expected {HB_OPERATING_POINT_IDENTITY_VERSION}"
+            )),
         "{error}"
     );
 }
