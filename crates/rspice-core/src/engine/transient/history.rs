@@ -773,6 +773,8 @@ pub(super) struct CapacitorAcceptedState {
     pub(super) current: Value,
 }
 
+/// Legacy BSIM stores intrinsic/overlap flows [-Qs, -Qd, -Qb] in the
+/// three gate histories; body-junction charge retains its separate histories.
 #[derive(Debug, Clone, Default)]
 pub(super) struct MosfetTransientHistory {
     /// Accepted G-S/G-D/G-B/B-S/B-D companion currents at the solved
@@ -803,11 +805,14 @@ pub(super) struct MosfetTransientHistory {
     pub(super) vbs_j_prev_prev: Vec<Value>,
     pub(super) qbs_prev: Vec<Value>,
     pub(super) qbs_prev_prev: Vec<Value>,
+    // Allocated only when a legacy BSIM instance needs total-terminal LTE.
+    pub(super) qbs_prev_prev_prev: Vec<Value>,
     pub(super) cqbs_prev: Vec<Value>,
     pub(super) vbd_j_prev: Vec<Value>,
     pub(super) vbd_j_prev_prev: Vec<Value>,
     pub(super) qbd_prev: Vec<Value>,
     pub(super) qbd_prev_prev: Vec<Value>,
+    pub(super) qbd_prev_prev_prev: Vec<Value>,
     pub(super) cqbd_prev: Vec<Value>,
     pub(super) accepted_dt_prev: Value,
     pub(super) accepted_dt_prev_prev: Value,

@@ -196,12 +196,13 @@ impl Mosfet {
     ///
     /// Returns (Qgs, Qgd, Qgb) in Coulombs
     ///
-    /// Stays `pub` rather than `pub(crate)` because no in-crate caller
-    /// consumes it yet: the classic transient path stamps from
-    /// `ac_capacitances`, so narrowing it would turn a physical model into
-    /// dead code that `-D warnings` then deletes. Whether that path should
-    /// read these charges is a numerics question, not a visibility one.
+    /// Legacy BSIM returns its physical terminal-charge flows, including
+    /// overlap. Classic Meyer models retain their historical charge estimate.
     pub fn gate_charges(&self) -> (Value, Value, Value) {
+        if let Some(charge) = self.legacy_gate_charge_at(self.vgs, self.vds, self.vbs) {
+            let [qgs, qgd, qgb] = charge.charges;
+            return (qgs, qgd, qgb);
+        }
         let (cgs_ov, cgd_ov, cgb_ov) = self.overlap_capacitances();
         let p = self.polarity();
         let vgs = p * self.vgs;

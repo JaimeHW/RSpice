@@ -1,6 +1,85 @@
 use super::*;
 
+/// Independent gate-to-source/drain/bulk charge flows. Columns are the
+/// physical Vgs, Vds and Vbs derivatives; intrinsic terminal charge is coupled.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct LegacyBsimGateCharge {
+    pub(crate) charges: [Value; 3],
+    pub(crate) derivatives: [[Value; 3]; 3],
+}
+
 impl Mosfet {
+    pub(crate) fn legacy_gate_charge_at(
+        &self,
+        vgs: Value,
+        vds: Value,
+        vbs: Value,
+    ) -> Option<LegacyBsimGateCharge> {
+        use crate::device::mosfet::dual::Dual3;
+        self.legacy_bsim_model.as_ref()?;
+        let Some(model) = self.legacy_bsim_sized.as_ref() else {
+            return Some(LegacyBsimGateCharge {
+                charges: [Value::NAN; 3],
+                derivatives: [[Value::NAN; 3]; 3],
+            });
+        };
+        let gate = Dual3::variable(vgs, 0);
+        let drain = Dual3::variable(vds, 1);
+        let bulk = Dual3::variable(vbs, 2);
+        let p = self.polarity();
+        let forward = p * vds >= 0.0;
+        let [qg, qb, qd] = if forward {
+            model.terminal_charges(p * gate, p * drain, p * bulk)
+        } else {
+            model.terminal_charges(p * (gate - drain), -p * drain, p * (bulk - drain))
+        };
+        let qs = -(qg + qb + qd);
+        let (qs, qd) = if forward { (qs, qd) } else { (qd, qs) };
+        let (cgs, cgd, cgb) = self.overlap_capacitances();
+        let scale = p * self.multiplicity;
+        let flows = [
+            -scale * qs + cgs * gate,
+            -scale * qd + cgd * (gate - drain),
+            -scale * qb + cgb * (gate - bulk),
+        ];
+        Some(LegacyBsimGateCharge {
+            charges: flows.map(|q| q.value),
+            derivatives: flows.map(|q| q.derivative),
+        })
+    }
+
+    /// Stamp a charge-conserving coupled companion. AC uses zero currents and
+    /// zero bias with gain=omega; transient uses its integration gain and dQ/dt.
+    pub(crate) fn stamp_legacy_gate_charge(
+        &self,
+        charge: &LegacyBsimGateCharge,
+        gain: Value,
+        currents: [Value; 3],
+        bias: [Value; 3],
+        stamper: &mut impl MatrixStamper,
+    ) {
+        let columns = [
+            self.node_gate,
+            self.node_drain,
+            self.node_bulk,
+            self.node_source,
+        ];
+        for (branch, negative) in [self.node_source, self.node_drain, self.node_bulk]
+            .into_iter()
+            .enumerate()
+        {
+            let c = charge.derivatives[branch];
+            let row = [c[0], c[1], c[2], -(c[0] + c[1] + c[2])];
+            for (column, derivative) in columns.into_iter().zip(row) {
+                stamper.stamp(self.node_gate, column, gain * derivative);
+                stamper.stamp(negative, column, -gain * derivative);
+            }
+            let ieq = gain * (c[0] * bias[0] + c[1] * bias[1] + c[2] * bias[2]) - currents[branch];
+            stamper.stamp_rhs(self.node_gate, ieq);
+            stamper.stamp_rhs(negative, -ieq);
+        }
+    }
+
     /// Calculate effective threshold voltage with body effect and fallback short-channel effects.
     ///
     /// For Level 1 and MOS6: standard body effect formula.
@@ -67,6 +146,9 @@ impl Mosfet {
 
     #[inline]
     pub(crate) fn oxide_capacitance_total(&self) -> Value {
+        if let Some(model) = &self.legacy_bsim_sized {
+            return model.oxide_capacitance() * self.multiplicity;
+        }
         self.cox
             * self.classic_meyer_effective_width()
             * self.classic_meyer_effective_length()
@@ -224,6 +306,10 @@ impl Mosfet {
         vds: Value,
         vbs: Value,
     ) -> (Value, Value, Value) {
+        if self.uses_legacy_bsim() {
+            // Legacy BSIM uses terminal charge and a coupled Jacobian instead.
+            return (0.0, 0.0, 0.0);
+        }
         let oxide_cap = self.oxide_capacitance_total();
         let phi = if self.level == 1 {
             self.phi
@@ -377,12 +463,19 @@ impl Mosfet {
     /// Calculate overlap capacitances for AC analysis
     /// Returns (Cgs_overlap, Cgd_overlap, Cgb_overlap)
     pub(crate) fn overlap_capacitances(&self) -> (Value, Value, Value) {
-        let width = self.classic_meyer_effective_width();
+        let (width, cgb_length) = self.legacy_bsim_model.as_ref().map_or_else(
+            || {
+                (
+                    self.classic_meyer_effective_width(),
+                    self.classic_meyer_effective_length(),
+                )
+            },
+            |model| model.overlap_dimensions(self.w, self.l),
+        );
         // Cgs_overlap = CGSO * W
         let cgs = self.cgso * width * self.multiplicity;
         // Cgd_overlap = CGDO * W
         let cgd = self.cgdo * width * self.multiplicity;
-        let cgb_length = self.classic_meyer_effective_length();
         let cgb = self.cgbo * cgb_length * self.multiplicity;
 
         (cgs, cgd, cgb)
@@ -507,6 +600,292 @@ impl Mosfet {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn legacy_charge_mos(level: i32, p: Value, xpart: Value) -> Mosfet {
+        let params = std::collections::HashMap::from([
+            ("LEVEL".into(), level as Value),
+            ("TOX".into(), 0.03),
+            ("VFB".into(), -0.7),
+            ("PHI".into(), 0.6),
+            ("K1".into(), 0.5),
+            ("K2".into(), 0.02),
+            ("ETA0".into(), 0.02),
+            ("ETAB".into(), 0.01),
+            ("VBB".into(), -5.0),
+            ("VDD".into(), 5.0),
+            ("XPART".into(), xpart),
+            ("CGSO".into(), 2e-10),
+            ("CGDO".into(), 3e-10),
+            ("CGBO".into(), 4e-10),
+            ("DL".into(), 0.1),
+            ("DW".into(), 0.2),
+        ]);
+        let mos = if p > 0.0 {
+            Mosfet::new_nmos("m".into(), 1, 2, 3, 4)
+        } else {
+            Mosfet::new_pmos("m".into(), 1, 2, 3, 4)
+        };
+        mos.with_params(&params).with_instance_params(&[
+            ("W".into(), 2e-6),
+            ("L".into(), 1e-6),
+            ("M".into(), 1.5),
+            ("NF".into(), 2.0),
+        ])
+    }
+
+    #[test]
+    fn legacy_bsim_charge_jacobian_matches_finite_differences() {
+        for level in [4, 5] {
+            for p in [1.0, -1.0] {
+                for xpart in [0.0, 1.0, 2.0] {
+                    let mos = legacy_charge_mos(level, p, xpart);
+                    for bias in [
+                        [-2.0, 0.2, -0.3],
+                        [0.1, 0.2, -0.3],
+                        [1.5, 0.2, -0.3],
+                        [1.5, 2.0, -0.3],
+                        [1.5, -0.2, -0.3],
+                        [1.5, 0.2, 0.2],
+                        [12.0, 11.0, -12.0],
+                    ] {
+                        let bias = bias.map(|v| p * v);
+                        let charge = mos
+                            .legacy_gate_charge_at(bias[0], bias[1], bias[2])
+                            .unwrap();
+                        assert!(charge.charges.iter().all(|q| q.is_finite()));
+                        for column in 0..3 {
+                            let mut plus = bias;
+                            let mut minus = bias;
+                            plus[column] += 1e-6;
+                            minus[column] -= 1e-6;
+                            let qp = mos
+                                .legacy_gate_charge_at(plus[0], plus[1], plus[2])
+                                .unwrap();
+                            let qm = mos
+                                .legacy_gate_charge_at(minus[0], minus[1], minus[2])
+                                .unwrap();
+                            for row in 0..3 {
+                                let finite_difference = (qp.charges[row] - qm.charges[row]) / 2e-6;
+                                assert_close(
+                                    &format!(
+                                        "L{level} p={p} XPART={xpart} {bias:?} ({row},{column})"
+                                    ),
+                                    charge.derivatives[row][column],
+                                    finite_difference,
+                                    2e-6,
+                                    2e-23,
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn legacy_bsim_charge_stamp_conserves_charge_and_reference_voltage() {
+        #[derive(Default)]
+        struct Stamp {
+            matrix: [[Value; 4]; 4],
+            rhs: [Value; 4],
+        }
+        impl MatrixStamper for Stamp {
+            fn stamp(&mut self, row: NodeId, col: NodeId, value: Value) {
+                self.matrix[row - 1][col - 1] += value;
+            }
+            fn stamp_rhs(&mut self, row: NodeId, value: Value) {
+                self.rhs[row - 1] += value;
+            }
+        }
+        for level in [4, 5] {
+            for p in [1.0, -1.0] {
+                let mos = legacy_charge_mos(level, p, 0.0);
+                let bias = [p * 1.5, p * 0.2, p * -0.3];
+                let charge = mos
+                    .legacy_gate_charge_at(bias[0], bias[1], bias[2])
+                    .unwrap();
+                let mut stamp = Stamp::default();
+                mos.stamp_legacy_gate_charge(
+                    &charge,
+                    1.0,
+                    [1e-15, -2e-15, 4e-15],
+                    bias,
+                    &mut stamp,
+                );
+                for row in stamp.matrix {
+                    assert!(row.iter().sum::<Value>().abs() < 1e-29);
+                }
+                for col in 0..4 {
+                    assert!(stamp.matrix.iter().map(|row| row[col]).sum::<Value>().abs() < 1e-29);
+                }
+                assert!(stamp.rhs.iter().sum::<Value>().abs() < 1e-29);
+                assert!(
+                    (stamp.matrix[0][1] - stamp.matrix[1][0]).abs() > 1e-17,
+                    "BSIM charge must retain its nonreciprocal terms"
+                );
+                let mut symmetric = mos.clone();
+                symmetric.cgdo = symmetric.cgso;
+                let forward = symmetric
+                    .legacy_gate_charge_at(bias[0], bias[1], bias[2])
+                    .unwrap();
+                let reverse = symmetric
+                    .legacy_gate_charge_at(bias[0] - bias[1], -bias[1], bias[2] - bias[1])
+                    .unwrap();
+                for (a, b) in forward.charges.into_iter().zip([
+                    reverse.charges[1],
+                    reverse.charges[0],
+                    reverse.charges[2],
+                ]) {
+                    assert_close("reverse charge", a, b, 1e-13, 1e-29);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn legacy_bsim_charge_matches_berkeley_evaluator_values() {
+        // ngspice 46 b1eval.c/b2eval.c, called directly with this sized card.
+        // Direct charge output avoids b1ld.c/b2ld.c reverse-mode AC state
+        // storage and the BSIM1 parser's presence-only XPART flag handling.
+        let cases: &[(i32, [Value; 3], [Value; 3])] = &[
+            (
+                4,
+                [-2.0, 0.2, -0.3],
+                [-2.16e-15, -3.564e-15, -7.633859999999999e-15],
+            ),
+            (
+                4,
+                [0.1, 0.2, -0.3],
+                [
+                    1.0799999999999998e-16,
+                    -1.6200000000000014e-16,
+                    2.7963976590954825e-15,
+                ],
+            ),
+            (
+                4,
+                [1.5, 0.2, -0.3],
+                [
+                    4.564564363457661e-15,
+                    4.835213440870462e-15,
+                    4.898393237400814e-15,
+                ],
+            ),
+            (
+                4,
+                [1.5, 2.0, -0.3],
+                [
+                    4.138710089273431e-15,
+                    8.6914005951562e-16,
+                    5.099746757162225e-15,
+                ],
+            ),
+            (
+                4,
+                [1.5, -0.2, -0.3],
+                [
+                    5.0582017333184725e-15,
+                    6.4100880648231046e-15,
+                    4.59253121455456e-15,
+                ],
+            ),
+            (5, [-2.0, 0.2, -0.3], [-2.16e-15, -3.564e-15, -7.42986e-15]),
+            (
+                5,
+                [0.1, 0.2, -0.3],
+                [
+                    1.0799999999999998e-16,
+                    -1.6200000000000014e-16,
+                    2.9382368947364877e-15,
+                ],
+            ),
+            (
+                5,
+                [1.5, 0.2, -0.3],
+                [
+                    4.616779740106061e-15,
+                    4.879102857756852e-15,
+                    4.466722057605473e-15,
+                ],
+            ),
+            (
+                5,
+                [1.5, 2.0, -0.3],
+                [
+                    4.25506237727343e-15,
+                    9.467082515156202e-16,
+                    4.4096646856054735e-15,
+                ],
+            ),
+            (
+                5,
+                [1.5, -0.2, -0.3],
+                [
+                    5.089308289413676e-15,
+                    6.450908409423569e-15,
+                    3.996070273337982e-15,
+                ],
+            ),
+        ];
+        for &(level, bias, expected) in cases {
+            for p in [1.0, -1.0] {
+                let mos = legacy_charge_mos(level, p, 0.0);
+                let actual = mos
+                    .legacy_gate_charge_at(p * bias[0], p * bias[1], p * bias[2])
+                    .unwrap();
+                for (a, q) in actual.charges.into_iter().zip(expected) {
+                    assert_close("Berkeley charge", a, p * q, 2e-13, 2e-28);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn legacy_bsim_charge_uses_oxide_units_geometry_and_partition() {
+        for level in [4, 5] {
+            let mut mos = legacy_charge_mos(level, 1.0, 0.0);
+            let cox = 3.453e-13 / (0.03 * 1e-4) * 1e4;
+            assert_close("SI oxide density", mos.cox, cox, 1e-14, 0.0);
+            assert_close(
+                "oxide area",
+                mos.oxide_capacitance_total(),
+                cox * 1.8e-6 * 0.9e-6 * 3.0,
+                1e-14,
+                0.0,
+            );
+            let (cgs, cgd, cgb) = mos.overlap_capacitances();
+            assert_close("G-S overlap", cgs, 2e-10 * 1.8e-6 * 3.0, 1e-14, 0.0);
+            assert_close("G-D overlap", cgd, 3e-10 * 1.8e-6 * 3.0, 1e-14, 0.0);
+            assert_close(
+                "G-B overlap",
+                cgb,
+                4e-10 * if level == 4 { 1e-6 } else { 0.9e-6 } * 3.0,
+                1e-14,
+                0.0,
+            );
+            mos.cgso = 0.0;
+            mos.cgdo = 0.0;
+            mos.cgbo = 0.0;
+            let sat = mos.legacy_gate_charge_at(2.0, 3.0, -0.3).unwrap();
+            assert_close(
+                "40/60 partition",
+                sat.charges[1] / (sat.charges[0] + sat.charges[1]),
+                0.4,
+                1e-13,
+                0.0,
+            );
+            let mut partitioned = legacy_charge_mos(level, 1.0, if level == 4 { 1.0 } else { 2.0 });
+            partitioned.cgso = 0.0;
+            partitioned.cgdo = 0.0;
+            partitioned.cgbo = 0.0;
+            let sat = partitioned.legacy_gate_charge_at(2.0, 3.0, -0.3).unwrap();
+            assert_eq!(sat.charges[1], 0.0);
+            if level == 5 {
+                assert_eq!(sat.charges, [0.0; 3]);
+            }
+        }
+    }
 
     fn assert_close(label: &str, actual: Value, expected: Value, rel: Value, abs: Value) {
         let diff = (actual - expected).abs();

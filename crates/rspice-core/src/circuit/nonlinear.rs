@@ -283,6 +283,8 @@ impl CircuitData {
     /// MOS devices. Their physical residual stamp and charge companions are
     /// pure functions of the candidate solution, so a proof restamp can
     /// reuse the candidate update instead of evaluating the family twice.
+    /// Legacy BSIM's coupled charge matrix uses the general assembly path;
+    /// these caches represent only reciprocal gate branches.
     pub(crate) fn has_classic_mos_only_transient_nonlinearity(&self) -> bool {
         #[cfg(feature = "veriloga-builtins-base")]
         let has_generated_veriloga = self.has_generated_veriloga_devices();
@@ -294,6 +296,11 @@ impl CircuitData {
         let has_dynamic_veriloga = false;
 
         !self.mosfets.is_empty()
+            && self
+                .mosfets
+                .devices
+                .iter()
+                .all(|mos| !mos.uses_legacy_bsim())
             && !self.capacitors.has_solution_dependent_values()
             && self.diodes.is_empty()
             && self.bjts.is_empty()

@@ -2,8 +2,11 @@
 //!
 //! Levels 4 and 5 in SPICE3/ngspice are the original BSIM1 and BSIM2
 //! implementations. Their parameter names and equations predate BSIM3 and
-//! cannot be interpreted as BSIM3/BSIM4 cards.
+//! cannot be interpreted as BSIM3/BSIM4 cards. Terminal charges follow
+//! b1eval.c/b2eval.c; automatic derivatives follow those charge values,
+//! including clamps, rather than inconsistent handwritten reference slopes.
 
+use super::dual::Dual3;
 use crate::Value;
 use std::collections::HashMap;
 
@@ -84,6 +87,26 @@ impl LegacyBsimModel {
         }
     }
 
+    pub(crate) fn oxide_density(&self) -> Value {
+        legacy_cox(self.geometry_parameters().2) * 1e4
+    }
+
+    pub(crate) fn overlap_dimensions(&self, width: Value, length: Value) -> (Value, Value) {
+        let (dw, dl, _) = self.geometry_parameters();
+        let Some((width, effective_length)) = effective_dimensions(width, length, dw, dl) else {
+            return (Value::NAN, Value::NAN);
+        };
+        // b1temp.c uses drawn L for CGB; b2temp.c uses effective L.
+        (
+            width,
+            if matches!(self, Self::Bsim1(_)) {
+                length
+            } else {
+                effective_length
+            },
+        )
+    }
+
     /// BSIM1/2 use effective dimensions in metres and Cox in F/cm² in
     /// their KF law, unlike the classic MOS NLEV noise models.
     pub(crate) fn flicker_noise_denominator(&self, width: Value, length: Value) -> Option<Value> {
@@ -96,6 +119,21 @@ impl LegacyBsimModel {
 }
 
 impl LegacyBsimSizedModel {
+    pub(crate) fn oxide_capacitance(&self) -> Value {
+        match self {
+            Self::Bsim1(model) => model.oxide_capacitance,
+            Self::Bsim2(model) => model.oxide_capacitance,
+        }
+    }
+
+    /// Intrinsic G/B/D charges in forward model coordinates. Source charge
+    /// follows from conservation; Dual3 differentiates the same charge laws.
+    pub(super) fn terminal_charges(&self, vgs: Dual3, vds: Dual3, vbs: Dual3) -> [Dual3; 3] {
+        match self {
+            Self::Bsim1(model) => model.terminal_charges(vgs, vds, vbs),
+            Self::Bsim2(model) => model.terminal_charges(vgs, vds, vbs),
+        }
+    }
     pub fn evaluate(&self, vgs: Value, vds: Value, vbs: Value) -> (Value, LegacyBsimRegion) {
         match self {
             Self::Bsim1(model) => model.evaluate(vgs, vds, vbs),
@@ -137,6 +175,7 @@ pub struct LegacyBsim1Model {
     subth_slope_d: SizeDependence,
     tox: Value,
     vdd: Value,
+    xpart: Value,
 }
 
 #[derive(Debug, Clone)]
@@ -163,6 +202,8 @@ pub struct LegacyBsim1Sized {
     subth_slope_d: Value,
     vdd: Value,
     leff_um: Value,
+    oxide_capacitance: Value,
+    zero_drain_partition: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -212,6 +253,7 @@ pub struct LegacyBsim2Model {
     vdd: Value,
     vgg: Value,
     vbb: Value,
+    xpart: Value,
 }
 
 #[derive(Debug, Clone)]
@@ -259,6 +301,8 @@ pub struct LegacyBsim2Sized {
     vbb: Value,
     vtm: Value,
     phi_sqrt_phi: Value,
+    oxide_capacitance: Value,
+    suppress_intrinsic_charge: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -309,6 +353,7 @@ impl LegacyBsim1Model {
             subth_slope_d: SizeDependence::from_params(params, "ND", 0.0),
             tox: param(params, "TOX", 0.0),
             vdd: param(params, "VDD", 0.0),
+            xpart: param(params, "XPART", 0.0),
         }
     }
 
@@ -353,11 +398,73 @@ impl LegacyBsim1Model {
             subth_slope_d: self.subth_slope_d.eval(inv_l_um, inv_w_um)?,
             vdd: finite(self.vdd)?,
             leff_um,
+            oxide_capacitance: positive(cox * effective_width * effective_length * 1e4)?,
+            zero_drain_partition: finite(self.xpart)? != 0.0,
         })
     }
 }
 
 impl LegacyBsim1Sized {
+    fn terminal_charges(&self, vgs: Dual3, vds: Dual3, vbs: Dual3) -> [Dual3; 3] {
+        let zero = Dual3::constant(0.0);
+        let vpb = self.phi - if vbs.value < 0.0 { vbs } else { zero };
+        let sqrt_vpb = vpb.sqrt();
+        let body = self.k1 * sqrt_vpb;
+        let g = 1.0 - 1.0 / (1.744 + 0.8364 * vpb);
+        let a = (1.0 + 0.5 * g * self.k1 / sqrt_vpb).max_const(1.0);
+        let overdrive = vgs - (self.vfb + self.phi + body);
+        let flatband = vgs - vbs - self.vfb;
+        let cox = self.oxide_capacitance;
+        if flatband.value < 0.0 {
+            let qg = cox * flatband;
+            return [qg, -qg, zero];
+        }
+        if overdrive.value < 0.0 {
+            // Rationalized depletion charge avoids cancellation at flatband
+            // and preserves the K1=0 limit without 0*infinity.
+            let qg = if self.k1 == 0.0 {
+                zero
+            } else {
+                2.0 * cox * self.k1 * flatband
+                    / ((self.k1 * self.k1 + 4.0 * flatband).sqrt() + self.k1)
+            };
+            return [qg, -qg, zero];
+        }
+        if vds.value >= (overdrive / a).value.max(0.0) {
+            let third = overdrive / (3.0 * a);
+            return [
+                cox * (overdrive + body - third),
+                cox * (-body + (1.0 - a) * third),
+                if self.zero_drain_partition {
+                    zero
+                } else {
+                    -(4.0 / 15.0) * cox * overdrive
+                },
+            ];
+        }
+        let channel_drop = a * vds;
+        let mean_overdrive = (overdrive - 0.5 * channel_drop).max_const(1e-8);
+        let ratio = if mean_overdrive.value > 1e-8 {
+            channel_drop / mean_overdrive
+        } else {
+            Dual3::constant(2.0)
+        };
+        let qg = cox * (overdrive + body - 0.5 * vds + vds * ratio / 12.0);
+        let qb = cox * (-body + (1.0 - a) * vds * (0.5 - ratio / 12.0));
+        let qd = if self.zero_drain_partition {
+            -cox * (0.5 * overdrive - 0.75 * channel_drop + 0.125 * channel_drop * ratio)
+        } else {
+            let partition = if mean_overdrive.value > 1e-8 {
+                (overdrive * overdrive / 6.0 - 0.125 * channel_drop * overdrive
+                    + 0.025 * channel_drop * channel_drop)
+                    / (mean_overdrive * mean_overdrive)
+            } else {
+                Dual3::constant(4.0 / 15.0)
+            };
+            -cox * (0.5 * (overdrive - channel_drop) + channel_drop * partition)
+        };
+        [qg, qb, qd]
+    }
     fn threshold_components(&self, vds: Value, vbs: Value) -> (Value, Value, Value) {
         if !vds.is_finite() || !vbs.is_finite() {
             return (self.vfb + self.phi, self.phi, self.phi.sqrt());
@@ -498,6 +605,7 @@ impl LegacyBsim2Model {
             vdd: param(params, "VDD", 5.0),
             vgg: param(params, "VGG", 5.0),
             vbb: param(params, "VBB", 5.0),
+            xpart: param(params, "XPART", 0.0),
         }
     }
 
@@ -596,11 +704,83 @@ impl LegacyBsim2Model {
             vbb: finite(self.vbb)?,
             vtm: positive(8.625e-5 * (self.temp_c + 273.0))?,
             phi_sqrt_phi: finite(sqrt_phi * phi)?,
+            oxide_capacitance: positive(cox * effective_width * effective_length * 1e4)?,
+            suppress_intrinsic_charge: finite(self.xpart)? > 1.0,
         })
     }
 }
 
 impl LegacyBsim2Sized {
+    fn terminal_charges(&self, vgs: Dual3, vds: Dual3, vbs: Dual3) -> [Dual3; 3] {
+        let zero = Dual3::constant(0.0);
+        if self.suppress_intrinsic_charge {
+            return [zero; 3];
+        }
+        let vbs = vbs.max_const(2.0 * self.vbb);
+        let vgs = -(-vgs).max_const(-2.0 * self.vgg);
+        let vds = -(-vds).max_const(-2.0 * self.vdd);
+        let (phis, sqrt_phis) = if vbs.value <= 0.0 {
+            let phis = self.phi - vbs;
+            (phis, phis.sqrt())
+        } else {
+            (
+                self.phi * self.phi / (self.phi + vbs),
+                self.phi_sqrt_phi / (self.phi + 0.5 * vbs),
+            )
+        };
+        let eta = self.eta0 + self.eta_b * vbs;
+        let threshold = self.vfb + self.phi + self.k1 * sqrt_phis - self.k2 * phis - eta * vds;
+        let overdrive = vgs - threshold;
+        let vbseff = if vbs.value < 0.0 {
+            vbs
+        } else {
+            self.phi - phis
+        };
+        let flatband = vgs - vbseff - self.vfb;
+        let cox = self.oxide_capacitance;
+        if flatband.value <= 0.0 {
+            let qg = cox * flatband;
+            return [qg, -qg, zero];
+        }
+        let bulk_bias = flatband - overdrive;
+        if overdrive.value <= 0.0 {
+            let ratio = flatband / bulk_bias;
+            let qg = cox * flatband * (1.0 - ratio * (1.0 - ratio / 3.0));
+            return [qg, -qg, zero];
+        }
+        let qbulk = (cox / 3.0) * bulk_bias;
+        let g = 1.0 - 1.0 / (1.744 + 0.8364 * phis);
+        let a = 1.0 + 0.5 * g * self.k1 / sqrt_phis;
+        let ua = self.ua0 + self.ua_b * vbs;
+        let ub = self.ub0 + self.ub_b * vbs;
+        let u1 = self.u10 + self.u1_b * vbs;
+        // Charge uses the strong-inversion overdrive even in the channel's
+        // subthreshold interpolation interval (b2eval.c charge block).
+        let vertical = (1.0 + overdrive * (ua + overdrive * ub)).max_const(0.2);
+        let vc = u1 * overdrive / (a * vertical);
+        let k = 0.5 * (1.0 + vc + (1.0 + 2.0 * vc).sqrt());
+        let saturation = overdrive / (a * k.sqrt());
+        if vds.value >= saturation.value {
+            return [
+                (2.0 / 3.0) * cox * overdrive + qbulk,
+                -qbulk,
+                -(4.0 / 15.0) * cox * overdrive,
+            ];
+        }
+        let drain_overdrive = overdrive * (1.0 - vds / saturation);
+        let gate_fraction = overdrive / (overdrive + drain_overdrive);
+        let drain_fraction = drain_overdrive / (overdrive + drain_overdrive);
+        let qg =
+            (2.0 / 3.0) * cox * (overdrive + drain_overdrive - drain_overdrive * gate_fraction)
+                + qbulk;
+        let qd = -(cox / 3.0)
+            * (0.2 * drain_overdrive
+                + 0.8 * overdrive
+                + drain_overdrive * drain_fraction
+                + 0.2 * gate_fraction * drain_fraction * (drain_overdrive - overdrive));
+        [qg, -qbulk, qd]
+    }
+
     fn threshold_terms(&self, vds: Value, vbs: Value) -> (Value, Value, Value) {
         if !vds.is_finite() || !vbs.is_finite() {
             return (self.vfb + self.phi, self.phi, self.sqrt_phi_or_default());

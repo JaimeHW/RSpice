@@ -678,10 +678,6 @@ impl Mosfet {
 
     /// True when this instance runs the legacy BSIM1/BSIM2 equations rather
     /// than the classic level 1/2/3/6 models.
-    ///
-    /// Stamping matches on `legacy_bsim_model` itself; this predicate is how
-    /// the builder tests assert a level routed to the legacy equation set.
-    #[cfg(test)]
     pub(crate) fn uses_legacy_bsim(&self) -> bool {
         self.legacy_bsim_model.is_some()
     }

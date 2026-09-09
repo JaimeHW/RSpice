@@ -194,6 +194,179 @@ fn check_native_mos_parallel_equivalence(analysis: &str) {
     }
 }
 
+// Independent saturation law: inversion charge is 2*CoxWL*Vov/3,
+// partitioned 40/60 (BSIM1 XPART!=0 selects 0/100). BSIM2 also has
+// Qbulk=CoxWL*(PHI-Vbs)/3 at K1=K2=ETA0=0.
+fn legacy_bsim_saturation_capacitance(level: i32, xpart: i32) -> [[f64; 4]; 4] {
+    let c = 3.453e-13 / (0.03 * 1e-4) * 1e4 * 1.8e-6 * 0.9e-6 * 3.0;
+    let mut matrix = [[0.0; 4]; 4]; // D,G,S,B
+    if level == 4 || xpart <= 1 {
+        let drain = if level == 4 && xpart != 0 {
+            0.0
+        } else {
+            4.0 / 15.0
+        };
+        matrix[0][1] = -drain * c;
+        matrix[0][2] = drain * c;
+        matrix[1][1] = (2.0 / 3.0) * c;
+        matrix[1][2] = -(2.0 / 3.0) * c;
+        matrix[2][1] = -(2.0 / 3.0 - drain) * c;
+        matrix[2][2] = (2.0 / 3.0 - drain) * c;
+        if level == 5 {
+            matrix[1][2] += c / 3.0;
+            matrix[1][3] -= c / 3.0;
+            matrix[3][2] -= c / 3.0;
+            matrix[3][3] += c / 3.0;
+        }
+    }
+    for (negative, cap) in [
+        (2, 2e-10 * 1.8e-6 * 3.0),
+        (0, 3e-10 * 1.8e-6 * 3.0),
+        (3, 4e-10 * if level == 4 { 1e-6 } else { 0.9e-6 } * 3.0),
+    ] {
+        matrix[1][1] += cap;
+        matrix[1][negative] -= cap;
+        matrix[negative][1] -= cap;
+        matrix[negative][negative] += cap;
+    }
+    matrix
+}
+
+fn legacy_bsim_charge_card(level: i32, kind: &str, xpart: i32) -> String {
+    format!(
+        ".model mm {kind}(LEVEL={level} TOX=.03 VFB=-.7 PHI=.6 K1=0 K2=0 ETA=0 ETA0=0 VBB=-5 VDD=5 XPART={xpart} CGSO=2e-10 CGDO=3e-10 CGBO=4e-10 DL=.1 DW=.2 MUZ=0 MUS=0 MU0=0 MUS0=0 MU30=0)\n.options GMIN=0 RELTOL=1e-9 ABSTOL=1e-17 VNTOL=1e-11\n"
+    )
+}
+
+#[test]
+fn legacy_bsim_ac_stamps_full_terminal_charge_matrix() {
+    for level in [4, 5] {
+        for (kind, p) in [("NMOS", 1.0), ("PMOS", -1.0)] {
+            for xpart in [0, 1, 2] {
+                let expected = legacy_bsim_saturation_capacitance(level, xpart);
+                for reverse in [false, true] {
+                    for (column, _) in expected[0].iter().enumerate() {
+                        let mut deck = "Legacy BSIM AC charge\n".to_string();
+                        for (index, (node, bias)) in ["d", "g", "s", "b"]
+                            .into_iter()
+                            .zip([2.9, 1.9, 0.4, 0.1])
+                            .enumerate()
+                        {
+                            deck.push_str(&format!(
+                                "V{node} {node} 0 DC {} AC {}\n",
+                                p * bias,
+                                usize::from(index == column)
+                            ));
+                        }
+                        let pins = if reverse { "s g d b" } else { "d g s b" };
+                        deck.push_str(&format!("M1 {pins} mm W=2u L=1u M=1.5 NF=2\n"));
+                        // Reverse mode exchanges intrinsic terminals; overlap
+                        // follows physical pins, so reverse its authored pair.
+                        let card = legacy_bsim_charge_card(level, kind, xpart);
+                        deck.push_str(&if reverse {
+                            card.replace("CGSO=2e-10 CGDO=3e-10", "CGSO=3e-10 CGDO=2e-10")
+                        } else {
+                            card
+                        });
+                        deck.push_str(".end\n");
+                        let netlist = Netlist::parse(&deck).unwrap();
+                        let result = Engine::default()
+                            .resolved_for_netlist(&netlist)
+                            .run_ac(&netlist, &[1e6])
+                            .unwrap();
+                        for (row, source) in ["VD", "VG", "VS", "VB"].into_iter().enumerate() {
+                            let index = result[0]
+                                .branch_names
+                                .iter()
+                                .position(|name| name.eq_ignore_ascii_case(source))
+                                .unwrap();
+                            let capacitance =
+                                -result[0].currents[index].im / (2.0 * std::f64::consts::PI * 1e6);
+                            // External voltages stay forward; only M1's pin
+                            // names reverse. The external reference is unchanged.
+                            assert!(
+                                (capacitance - expected[row][column]).abs() < 2e-27,
+                                "L{level} {kind} XPART={xpart} reverse={reverse} ({row},{column}): {capacitance:e} vs {:e}",
+                                expected[row][column]
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn legacy_bsim_transient_currents_integrate_terminal_charge() {
+    use rspice_core::numerics::integration::IntegrationMethod;
+    for level in [4, 5] {
+        for (kind, p) in [("NMOS", 1.0), ("PMOS", -1.0)] {
+            for xpart in [0, 1, 2] {
+                for method in [
+                    IntegrationMethod::BackwardEuler,
+                    IntegrationMethod::Trapezoidal,
+                    IntegrationMethod::Gear2,
+                ] {
+                    let deck = format!(
+                        "Legacy BSIM transient charge\nVD d 0 {}\nVG g 0 DC {} PWL(0 {} 1u {})\nVS s 0 {}\nVB b 0 {}\nM1 d g s b mm W=2u L=1u M=1.5 NF=2\n{}\n.print tran ID(M1) IG(M1) IS(M1) IB(M1) I(VD) I(VG) I(VS) I(VB)\n.end\n",
+                        p * 2.9,
+                        p * 1.7,
+                        p * 1.7,
+                        p * 2.1,
+                        p * 0.4,
+                        p * 0.1,
+                        legacy_bsim_charge_card(level, kind, xpart)
+                    );
+                    let netlist = Netlist::parse(&deck).unwrap();
+                    let engine = Engine::new(SimulationConfig {
+                        integration_method: method,
+                        locked_time_grid: Some(std::sync::Arc::new(vec![
+                            0.0, 0.2e-6, 0.4e-6, 0.6e-6, 0.8e-6, 1e-6,
+                        ])),
+                        ..Default::default()
+                    })
+                    .resolved_for_netlist(&netlist);
+                    let result = engine.run_tran(&netlist, 1e-6, 0.2e-6).unwrap();
+                    let expected = legacy_bsim_saturation_capacitance(level, xpart);
+                    for (row, (source, parameter)) in
+                        [("VD", "id"), ("VG", "ig"), ("VS", "is"), ("VB", "ib")]
+                            .into_iter()
+                            .enumerate()
+                    {
+                        let waveform = result.try_branch_current_waveform_named(source).unwrap();
+                        let reported = result
+                            .try_device_op_waveform_named("M1", parameter)
+                            .unwrap();
+                        for (index, &time) in result.time.iter().enumerate().skip(1) {
+                            // Native fixed-order Gear2 uses repeated initial
+                            // charge for its first, synthetic history interval.
+                            let startup_gain = if method == IntegrationMethod::Gear2 && index == 1 {
+                                1.5
+                            } else {
+                                1.0
+                            };
+                            let current = -p * expected[row][1] * 0.4 / 1e-6 * startup_gain;
+                            assert!(
+                                (waveform[index] - current).abs() < 1e-12,
+                                "L{level} {kind} XPART={xpart} {method:?} {source} t={time}: {:e} vs {current:e}",
+                                waveform[index]
+                            );
+                            assert!(
+                                (reported[index] + waveform[index]).abs() < 1e-14,
+                                "terminal report {parameter}: {} vs {}",
+                                reported[index],
+                                -waveform[index]
+                            );
+                        }
+                    }
+                    assert_eq!(engine.convergence_quality().force_accepted_points, 0);
+                }
+            }
+        }
+    }
+}
+
 #[test]
 fn legacy_bsim_invalid_sizing_is_rejected_before_analysis() {
     for level in [4, 5] {
@@ -567,13 +740,18 @@ fn native_mos_terminal_reports_include_body_junction_currents() {
             if level == 9 && dialect == SpiceDialect::Xyce {
                 continue; // Xyce LEVEL=9 selects the separate BSIM3 implementation.
             }
+            let legacy = if matches!(level, 4 | 5) {
+                "TOX=.03 VFB=-.7 PHI=.6 VBB=-5 VDD=5"
+            } else {
+                ""
+            };
             for (kind, polarity) in [("NMOS", 1.0), ("PMOS", -1.0)] {
                 for series in ["", "RD=20 RS=10"] {
                     for (drain, gate, bulk) in
                         [(0.0, -1.0, 0.2), (0.8, 1.5, -0.1), (-0.2, 1.5, -0.3)]
                     {
                         let netlist = Netlist::parse(&format!(
-                            "MOS terminal currents\nVD d 0 {}\nVG g 0 {}\nVS s 0 0\nVB b 0 {}\nM1 d g s b mm L=1u W=2u M=3\n.model mm {kind}(LEVEL={level} VTO={} IS=1u {series})\n.options RELTOL=1e-8 ABSTOL=1e-12 VNTOL=1e-10\n.end\n",
+                            "MOS terminal currents\nVD d 0 {}\nVG g 0 {}\nVS s 0 0\nVB b 0 {}\nM1 d g s b mm L=1u W=2u M=3\n.model mm {kind}(LEVEL={level} VTO={} IS=1u {legacy} {series})\n.options RELTOL=1e-8 ABSTOL=1e-12 VNTOL=1e-10\n.end\n",
                             polarity * drain, polarity * gate, polarity * bulk, polarity,
                         )).unwrap();
                         let (result, report) = Engine::new(SimulationConfig {
@@ -633,10 +811,15 @@ fn native_mos_terminal_reports_include_transient_displacement() {
                     if level == 9 && dialect == SpiceDialect::Xyce {
                         continue;
                     }
+                    let legacy = if matches!(level, 4 | 5) {
+                        "TOX=.03 VFB=-.7 PHI=.6 VBB=-5 VDD=5"
+                    } else {
+                        ""
+                    };
                     for (kind, polarity) in [("NMOS", 1.0), ("PMOS", -1.0)] {
                         for series in ["", "RD=20 RS=10"] {
                             let netlist = Netlist::parse(&format!(
-                        "MOS transient terminal currents\nVD d 0 PWL(0 0 1u {} 2u 0)\nVG g 0 DC {} PWL(0 {} 1u {} 2u {})\nVS s 0 0\nVB b 0 PWL(0 0 1u {} 2u 0)\nM1 d g s b mm L=1u W=2u M=3\n.model mm {kind}(LEVEL={level} VTO={} IS=1p CGSO=1m CGDO=2m CGBO=3m CBS=2n CBD=3n {series})\n.options RELTOL=1e-8 ABSTOL=1e-12 VNTOL=1e-10\n.print tran ID(M1) IG(M1) IS(M1) IB(M1) I(VD) I(VG) I(VS) I(VB)\n.end\n",
+                        "MOS transient terminal currents\nVD d 0 PWL(0 0 1u {} 2u 0)\nVG g 0 DC {} PWL(0 {} 1u {} 2u {})\nVS s 0 0\nVB b 0 PWL(0 0 1u {} 2u 0)\nM1 d g s b mm L=1u W=2u M=3\n.model mm {kind}(LEVEL={level} VTO={} IS=1p CGSO=1m CGDO=2m CGBO=3m CBS=2n CBD=3n {legacy} {series})\n.options RELTOL=1e-8 ABSTOL=1e-12 VNTOL=1e-10\n.print tran ID(M1) IG(M1) IS(M1) IB(M1) I(VD) I(VG) I(VS) I(VB)\n.end\n",
                         0.2 * polarity, gate_bias * polarity, gate_bias * polarity, (gate_bias + 0.5) * polarity, gate_bias * polarity, -0.1 * polarity, polarity,
                     )).unwrap();
                             let engine = Engine::new(SimulationConfig {
@@ -738,44 +921,64 @@ fn native_mos_terminal_reports_match_between_serial_and_parallel_history() {
         deck.push_str(&format!("M{index} d g s 0 mm L=1u W=1u\n"));
     }
     deck.push_str(".print tran ID(M0) IG(M0) IS(M0) IB(M0) ID(M2047) IG(M2047) IS(M2047) IB(M2047) I(VD) I(VG) I(VS)\n.end\n");
-    let netlist = Netlist::parse(&deck).unwrap();
-    let solve = |workers| {
-        let mut config = SimulationConfig {
-            integration_method: IntegrationMethod::Trapezoidal,
-            locked_time_grid: Some(std::sync::Arc::new(vec![0.0, 0.5e-6, 1e-6, 1.5e-6, 2e-6])),
-            ..Default::default()
+    for level in [1, 4, 5] {
+        let model = if level == 1 {
+            deck.clone()
+        } else {
+            deck.replace(
+                "LEVEL=1 VTO=1",
+                &format!("LEVEL={level} VFB=-0.7 PHI=0.6 TOX=0.03 VBB=-5"),
+            )
+            .replace(
+                "DC -1 PWL(0 -1 1u -0.5 2u -1)",
+                "DC 1.5 PWL(0 1.5 1u 2 2u 1.5)",
+            )
+            .replace(
+                "CGSO=1m CGDO=2m CBS=2n CBD=3n",
+                "CGSO=1p CGDO=2p CBS=2f CBD=3f",
+            )
         };
-        config.resource_limits.max_parallel_workers = workers;
-        let engine = Engine::new(config);
-        let result = engine.run_tran(&netlist, 2e-6, 0.5e-6).unwrap();
-        assert_eq!(engine.convergence_quality().force_accepted_points, 0);
-        result
-    };
-    let serial = solve(1);
-    let pool = rayon::ThreadPoolBuilder::new()
-        .num_threads(2)
-        .build()
-        .unwrap();
-    let parallel = pool.install(|| solve(2));
-    assert_eq!(serial.time, parallel.time);
-    for device in ["M0", "M2047"] {
-        for (parameter, source) in [("ID", "VD"), ("IG", "VG"), ("IS", "VS")] {
-            let first = serial
-                .try_device_op_waveform_named(device, parameter)
-                .unwrap();
-            let second = parallel
-                .try_device_op_waveform_named(device, parameter)
-                .unwrap();
-            assert_eq!(first, second, "{device}:{parameter}");
-            let probes = parallel.try_branch_current_waveform_named(source).unwrap();
-            for (reported, source_current) in second.iter().zip(probes) {
-                assert!((reported + source_current / 2048.0).abs() < 2e-10 + 1e-7 * reported.abs());
+        let netlist = Netlist::parse(&model).unwrap();
+        let solve = |workers| {
+            let mut config = SimulationConfig {
+                integration_method: IntegrationMethod::Trapezoidal,
+                locked_time_grid: Some(std::sync::Arc::new(vec![0.0, 0.5e-6, 1e-6, 1.5e-6, 2e-6])),
+                ..Default::default()
+            };
+            config.resource_limits.max_parallel_workers = workers;
+            let engine = Engine::new(config);
+            let result = engine.run_tran(&netlist, 2e-6, 0.5e-6).unwrap();
+            assert_eq!(engine.convergence_quality().force_accepted_points, 0);
+            result
+        };
+        let serial = solve(1);
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(2)
+            .build()
+            .unwrap();
+        let parallel = pool.install(|| solve(2));
+        assert_eq!(serial.time, parallel.time);
+        for device in ["M0", "M2047"] {
+            for (parameter, source) in [("ID", "VD"), ("IG", "VG"), ("IS", "VS")] {
+                let first = serial
+                    .try_device_op_waveform_named(device, parameter)
+                    .unwrap();
+                let second = parallel
+                    .try_device_op_waveform_named(device, parameter)
+                    .unwrap();
+                assert_eq!(first, second, "{device}:{parameter}");
+                let probes = parallel.try_branch_current_waveform_named(source).unwrap();
+                for (reported, source_current) in second.iter().zip(probes) {
+                    assert!(
+                        (reported + source_current / 2048.0).abs() < 2e-10 + 1e-7 * reported.abs()
+                    );
+                }
             }
+            assert_eq!(
+                serial.try_device_op_waveform_named(device, "IB"),
+                parallel.try_device_op_waveform_named(device, "IB")
+            );
         }
-        assert_eq!(
-            serial.try_device_op_waveform_named(device, "IB"),
-            parallel.try_device_op_waveform_named(device, "IB")
-        );
     }
 }
 

@@ -19,6 +19,7 @@ pub mod b3soi;
 pub mod bsim3v3;
 pub mod bsim4v8;
 mod classic;
+mod dual;
 mod ekv;
 mod ekv3;
 mod jfet;

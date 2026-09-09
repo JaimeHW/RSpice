@@ -1190,6 +1190,9 @@ impl Mosfet {
 
         self.legacy_bsim_model =
             LegacyBsimModel::from_level_and_params(self.level, params).map(Box::new);
+        if let Some(model) = &self.legacy_bsim_model {
+            self.cox = model.oxide_density();
+        }
         self.refresh_legacy_bsim_size_params();
         self
     }

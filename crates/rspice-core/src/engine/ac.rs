@@ -2275,19 +2275,28 @@ impl Engine {
             Self::stamp_jfet_ac_imag_feedback(ac_matrix, circuit, op_voltages, frequency_hz)?;
         }
 
-        // Stamp MOSFET capacitances: jωCgs, jωCgd, jωCgb (Meyer model)
+        // Stamp the legacy BSIM charge Jacobian or classic Meyer capacitances.
         for mos in &circuit.mosfets.devices {
-            let (cgs, cgd, cgb) = mos.ac_capacitances();
             let ng = mos.node_gate;
             let nd = mos.node_drain;
             let ns = mos.node_source;
             let nb = mos.node_bulk;
 
-            Self::stamp_imag_two_terminal(ac_matrix, ng, ns, omega * cgs);
-            Self::stamp_imag_two_terminal(ac_matrix, ng, nd, omega * cgd);
-            Self::stamp_imag_two_terminal(ac_matrix, ng, nb, omega * cgb);
-
-            let (_vgs_eval, vds_eval, vbs_eval) = mos.eval_branch_voltages_at(op_voltages);
+            let (vgs_eval, vds_eval, vbs_eval) = mos.eval_branch_voltages_at(op_voltages);
+            if let Some(charge) = mos.legacy_gate_charge_at(vgs_eval, vds_eval, vbs_eval) {
+                mos.stamp_legacy_gate_charge(
+                    &charge,
+                    omega,
+                    [0.0; 3],
+                    [0.0; 3],
+                    &mut AcImagStamper { matrix: ac_matrix },
+                );
+            } else {
+                let (cgs, cgd, cgb) = mos.ac_capacitances();
+                Self::stamp_imag_two_terminal(ac_matrix, ng, ns, omega * cgs);
+                Self::stamp_imag_two_terminal(ac_matrix, ng, nd, omega * cgd);
+                Self::stamp_imag_two_terminal(ac_matrix, ng, nb, omega * cgb);
+            }
             let (_, cbs) = mos.body_source_junction_charge_and_capacitance_at(vbs_eval);
             if cbs.is_finite() && cbs > 0.0 {
                 let (pos, neg) = mos.body_source_charge_nodes();

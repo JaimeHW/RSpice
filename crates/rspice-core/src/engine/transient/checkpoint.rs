@@ -1198,7 +1198,8 @@ pub(crate) fn simulation_checkpoint_identity(config: &SimulationConfig) -> Strin
     // v36 gives RBI an independent current and voltage constitutive equation.
     // v37 preserves explicitly zero and negative VBIC activation energies.
     // v63 resolves the native BSIM1/2 body-junction laws and limiting.
-    hasher.update(b"rspice-transient-resolved-config-v63\0");
+    // v64 replaces legacy BSIM Meyer approximations with terminal charge.
+    hasher.update(b"rspice-transient-resolved-config-v64\0");
     hash_field(&mut hasher, "temperature", config.temperature.to_bits());
     hash_field(&mut hasher, "ramptime", config.ramptime.to_bits());
     hash_field(&mut hasher, "digital_delay_type", config.digital_delay_type);

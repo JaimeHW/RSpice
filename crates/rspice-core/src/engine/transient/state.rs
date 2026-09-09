@@ -616,6 +616,11 @@ impl Engine {
         seed: ReactiveHistorySeed,
     ) -> MosfetTransientHistory {
         let n = circuit.mosfets.len();
+        let legacy_lte = circuit
+            .mosfets
+            .devices
+            .iter()
+            .any(|mos| mos.uses_legacy_bsim());
         let mut history = MosfetTransientHistory {
             accepted_displacement_currents: vec![[0.0; 5]; n],
             vgs_prev: Vec::with_capacity(n),
@@ -643,11 +648,13 @@ impl Engine {
             vbs_j_prev_prev: Vec::with_capacity(n),
             qbs_prev: Vec::with_capacity(n),
             qbs_prev_prev: Vec::with_capacity(n),
+            qbs_prev_prev_prev: Vec::with_capacity(if legacy_lte { n } else { 0 }),
             cqbs_prev: Vec::with_capacity(n),
             vbd_j_prev: Vec::with_capacity(n),
             vbd_j_prev_prev: Vec::with_capacity(n),
             qbd_prev: Vec::with_capacity(n),
             qbd_prev_prev: Vec::with_capacity(n),
+            qbd_prev_prev_prev: Vec::with_capacity(if legacy_lte { n } else { 0 }),
             cqbd_prev: Vec::with_capacity(n),
             accepted_dt_prev: 0.0,
             accepted_dt_prev_prev: 0.0,
@@ -683,28 +690,33 @@ impl Engine {
             let cgd = 2.0 * cgd_half + cgd_ov;
             let cgb = 2.0 * cgb_half + cgb_ov;
 
+            let [qgs, qgd, qgb] = mos.legacy_gate_charge_at(vgs, vds, vbs).map_or(
+                [cgs.max(0.0) * vgs, cgd.max(0.0) * vgd, cgb.max(0.0) * vgb],
+                |charge| charge.charges,
+            );
+
             history.vgs_prev.push(vgs);
             history.vgs_prev_prev.push(vgs);
             history.capgs_prev_half.push(cgs_half);
-            history.qgs_prev.push(cgs.max(0.0) * vgs);
-            history.qgs_prev_prev.push(cgs.max(0.0) * vgs);
-            history.qgs_prev_prev_prev.push(cgs.max(0.0) * vgs);
+            history.qgs_prev.push(qgs);
+            history.qgs_prev_prev.push(qgs);
+            history.qgs_prev_prev_prev.push(qgs);
             history.cqgs_prev.push(0.0);
 
             history.vgd_prev.push(vgd);
             history.vgd_prev_prev.push(vgd);
             history.capgd_prev_half.push(cgd_half);
-            history.qgd_prev.push(cgd.max(0.0) * vgd);
-            history.qgd_prev_prev.push(cgd.max(0.0) * vgd);
-            history.qgd_prev_prev_prev.push(cgd.max(0.0) * vgd);
+            history.qgd_prev.push(qgd);
+            history.qgd_prev_prev.push(qgd);
+            history.qgd_prev_prev_prev.push(qgd);
             history.cqgd_prev.push(0.0);
 
             history.vgb_prev.push(vgb);
             history.vgb_prev_prev.push(vgb);
             history.capgb_prev_half.push(cgb_half);
-            history.qgb_prev.push(cgb.max(0.0) * vgb);
-            history.qgb_prev_prev.push(cgb.max(0.0) * vgb);
-            history.qgb_prev_prev_prev.push(cgb.max(0.0) * vgb);
+            history.qgb_prev.push(qgb);
+            history.qgb_prev_prev.push(qgb);
+            history.qgb_prev_prev_prev.push(qgb);
             history.cqgb_prev.push(0.0);
 
             let vbs_j = mos.body_source_charge_branch_voltage(vbs);
@@ -715,11 +727,17 @@ impl Engine {
             history.vbs_j_prev_prev.push(vbs_j);
             history.qbs_prev.push(qbs);
             history.qbs_prev_prev.push(qbs);
+            if legacy_lte {
+                history.qbs_prev_prev_prev.push(qbs);
+            }
             history.cqbs_prev.push(0.0);
             history.vbd_j_prev.push(vbd_j);
             history.vbd_j_prev_prev.push(vbd_j);
             history.qbd_prev.push(qbd);
             history.qbd_prev_prev.push(qbd);
+            if legacy_lte {
+                history.qbd_prev_prev_prev.push(qbd);
+            }
             history.cqbd_prev.push(0.0);
         }
 
@@ -1289,6 +1307,40 @@ impl Engine {
             cache.reserve(circuit.mosfets.devices.len());
         }
         for (idx, mos) in circuit.mosfets.devices.iter().enumerate() {
+            if !suppress_gate_charge && mos.uses_legacy_bsim() {
+                let (vgs, vds, vbs) = mos.eval_branch_voltages_at(voltages);
+                if let Some(charge) = mos.legacy_gate_charge_at(vgs, vds, vbs) {
+                    let charges = Self::integrate_mosfet_gate_charges(
+                        charge.charges,
+                        coeff,
+                        dt,
+                        [
+                            BranchChargeHistory {
+                                q_prev: history.qgs_prev[idx],
+                                q_prev_prev: history.qgs_prev_prev[idx],
+                                cq_prev: history.cqgs_prev[idx],
+                            },
+                            BranchChargeHistory {
+                                q_prev: history.qgd_prev[idx],
+                                q_prev_prev: history.qgd_prev_prev[idx],
+                                cq_prev: history.cqgd_prev[idx],
+                            },
+                            BranchChargeHistory {
+                                q_prev: history.qgb_prev[idx],
+                                q_prev_prev: history.qgb_prev_prev[idx],
+                                cq_prev: history.cqgb_prev[idx],
+                            },
+                        ],
+                    );
+                    mos.stamp_legacy_gate_charge(
+                        &charge,
+                        Self::jfet_companion_geq(coeff, 1.0, dt),
+                        charges.map(|(_, cq)| cq),
+                        [vgs, vds, vbs],
+                        &mut StaticMatrixChargeStamper { matrix, rhs },
+                    );
+                }
+            }
             let (device_terms, _charges, caps) = Self::mosfet_companion_branch_terms::<false>(
                 mos,
                 idx,
@@ -1394,6 +1446,14 @@ impl Engine {
             coeff,
             dt,
         } = stamp;
+        if circuit
+            .mosfets
+            .devices
+            .iter()
+            .any(|mos| mos.uses_legacy_bsim())
+        {
+            return false;
+        }
         if slots.len() != circuit.mosfets.devices.len() {
             return false;
         }
@@ -1504,7 +1564,7 @@ impl Engine {
             }
         };
 
-        if !suppress_gate_charge {
+        if !suppress_gate_charge && !mos.uses_legacy_bsim() {
             let unit_geq = Self::jfet_companion_geq(coeff, 1.0, dt);
             let (cgs_half, cgd_half, cgb_half) = if let Some(constants) = constants {
                 mos.transient_capacitance_halves_with_constants(
@@ -1620,6 +1680,20 @@ impl Engine {
         }
 
         (terms, charges, caps)
+    }
+
+    pub(super) fn integrate_mosfet_gate_charges(
+        charges: [Value; 3],
+        coeff: &CompanionCoefficients,
+        dt: Value,
+        history: [BranchChargeHistory; 3],
+    ) -> MosfetGateCompanionCharges {
+        std::array::from_fn(|branch| {
+            (
+                charges[branch],
+                Self::jfet_companion_ccap(coeff, dt, charges[branch], history[branch]),
+            )
+        })
     }
 
     #[inline]
@@ -1779,6 +1853,70 @@ pub(super) type MosfetGateCompanionCharges = [(Value, Value); 3];
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn legacy_bsim_history_seeds_exact_charge_for_solved_and_uic_bias() {
+        for level in [4, 5] {
+            for (kind, p) in [("NMOS", 1.0), ("PMOS", -1.0)] {
+                let netlist = Netlist::parse(&format!(
+                    "legacy BSIM charge seed\nRD d 0 1k\nRG g 0 1k\nRS s 0 1k\nRB b 0 1k\nM1 d g s b mm W=2u L=1u IC={},{},{}\n.model mm {kind}(LEVEL={level} TOX=.03 VFB=-.7 PHI=.6 K1=.5 VBB=-5 VDD=5)\n.end\n",
+                    p*0.2, p*1.5, p*-0.3)).unwrap();
+                let engine = Engine::default();
+                let circuit = engine.build_circuit(&netlist).unwrap();
+                assert!(
+                    !circuit.has_cacheable_classic_mos_transient_base(),
+                    "a reciprocal-capacitor cache cannot stamp BSIM terminal charge"
+                );
+                let mos = &circuit.mosfets.devices[0];
+                let expected = mos
+                    .legacy_gate_charge_at(p * 1.5, p * 0.2, p * -0.3)
+                    .unwrap()
+                    .charges;
+                for seed in [
+                    ReactiveHistorySeed::UicStartup,
+                    ReactiveHistorySeed::SolvedBias,
+                ] {
+                    let mut voltage = vec![0.0; circuit.matrix_size()];
+                    if seed == ReactiveHistorySeed::SolvedBias {
+                        voltage[mos.node_gate - 1] = p * 1.5;
+                        voltage[mos.node_drain - 1] = p * 0.2;
+                        voltage[mos.node_bulk - 1] = p * -0.3;
+                    }
+                    let history = Engine::initialize_mosfet_history(&circuit, &voltage, seed);
+                    for (branch, (first, second, third)) in [
+                        (
+                            &history.qgs_prev,
+                            &history.qgs_prev_prev,
+                            &history.qgs_prev_prev_prev,
+                        ),
+                        (
+                            &history.qgd_prev,
+                            &history.qgd_prev_prev,
+                            &history.qgd_prev_prev_prev,
+                        ),
+                        (
+                            &history.qgb_prev,
+                            &history.qgb_prev_prev,
+                            &history.qgb_prev_prev_prev,
+                        ),
+                    ]
+                    .into_iter()
+                    .enumerate()
+                    {
+                        assert!((first[0] - expected[branch]).abs() < 1e-28);
+                        assert_eq!(first, second);
+                        assert_eq!(first, third);
+                    }
+                    assert_eq!(history.cqgs_prev, [0.0]);
+                    assert_eq!(history.cqgd_prev, [0.0]);
+                    assert_eq!(history.cqgb_prev, [0.0]);
+                    assert_eq!(history.capgs_prev_half, [0.0]);
+                    assert_eq!(history.capgd_prev_half, [0.0]);
+                    assert_eq!(history.capgb_prev_half, [0.0]);
+                }
+            }
+        }
+    }
 
     #[test]
     fn physical_breakpoint_preserves_jfet_traps_and_accepted_charge() {

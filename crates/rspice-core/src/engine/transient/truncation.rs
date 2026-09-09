@@ -1522,6 +1522,94 @@ impl Engine {
         let mut found_branch = false;
 
         for (idx, mos) in circuit.mosfets.devices.iter().enumerate() {
+            if mos.uses_legacy_bsim() {
+                let (vgs_eval, vds_eval, vbs_eval) =
+                    mos.eval_branch_voltages_at(candidate_solution);
+                let charge = mos
+                    .legacy_gate_charge_at(vgs_eval, vds_eval, vbs_eval)
+                    .expect("legacy BSIM charge");
+                if let Some((cache, false)) = caps_cache.as_mut() {
+                    cache.push((0.0, 0.0, 0.0));
+                }
+                let (qbs, _) = mos.body_source_junction_charge_and_capacitance_at(vbs_eval);
+                let (qbd, _) =
+                    mos.body_drain_junction_charge_and_capacitance_at(vds_eval, vbs_eval);
+                let q = [
+                    charge.charges[0],
+                    charge.charges[1],
+                    charge.charges[2],
+                    qbs,
+                    qbd,
+                ];
+                let q_prev = [
+                    history.qgs_prev[idx],
+                    history.qgd_prev[idx],
+                    history.qgb_prev[idx],
+                    history.qbs_prev[idx],
+                    history.qbd_prev[idx],
+                ];
+                let q_prev_prev = [
+                    history.qgs_prev_prev[idx],
+                    history.qgd_prev_prev[idx],
+                    history.qgb_prev_prev[idx],
+                    history.qbs_prev_prev[idx],
+                    history.qbd_prev_prev[idx],
+                ];
+                let q_prev_prev_prev = [
+                    history.qgs_prev_prev_prev[idx],
+                    history.qgd_prev_prev_prev[idx],
+                    history.qgb_prev_prev_prev[idx],
+                    history.qbs_prev_prev_prev[idx],
+                    history.qbd_prev_prev_prev[idx],
+                ];
+                let cq_prev = [
+                    history.cqgs_prev[idx],
+                    history.cqgd_prev[idx],
+                    history.cqgb_prev[idx],
+                    history.cqbs_prev[idx],
+                    history.cqbd_prev[idx],
+                ];
+                let cq = std::array::from_fn(|branch| {
+                    Self::jfet_companion_ccap(
+                        &coeff,
+                        dt,
+                        q[branch],
+                        BranchChargeHistory {
+                            q_prev: q_prev[branch],
+                            q_prev_prev: q_prev_prev[branch],
+                            cq_prev: cq_prev[branch],
+                        },
+                    )
+                });
+                // Gate flows are physical, whereas body junction histories use
+                // polarity-normalized diode charge. Include all four terminals
+                // so neither charge partition nor a tied bulk hides an error.
+                let terminals = |[qgs, qgd, qgb, qbs, qbd]: [Value; 5]| {
+                    let p = mos.polarity();
+                    [
+                        qgs + qgd + qgb,
+                        -qgd - p * qbd,
+                        -qgs - p * qbs,
+                        -qgb + p * (qbs + qbd),
+                    ]
+                };
+                let [q, qp, qpp, qppp, cq, cqp] =
+                    [q, q_prev, q_prev_prev, q_prev_prev_prev, cq, cq_prev].map(terminals);
+                for terminal in 0..4 {
+                    if let Some(terminal_limit) = truncation.limit(ChargeSamples {
+                        q_curr: q[terminal],
+                        q_prev: qp[terminal],
+                        q_prev_prev: qpp[terminal],
+                        q_prev_prev_prev: qppp[terminal],
+                        cq_curr: cq[terminal],
+                        cq_prev: cqp[terminal],
+                    }) {
+                        found_branch = true;
+                        limit = limit.min(terminal_limit);
+                    }
+                }
+                continue;
+            }
             let (cgs_half, cgd_half, cgb_half) = match caps_cache.as_ref() {
                 Some((cache, true)) => cache[idx],
                 _ => {
@@ -4367,6 +4455,54 @@ M1 n g 0 0 vtrunc W=1 L=1u
                         && parallel.current.to_bits() == serial.current.to_bits()
                 })
         );
+    }
+
+    #[test]
+    fn legacy_bsim_truncation_controls_body_junction_charge() {
+        for level in [4, 5] {
+            for (kind, p) in [("NMOS", 1.0), ("PMOS", -1.0)] {
+                for cbs in [0.0, 1e-9] {
+                    // Negligible oxide charge isolates the body junction. The
+                    // old gate-only LTE walk returned 2*dt for both circuits.
+                    let circuit = build_truncation_circuit(&format!(
+                        "BSIM junction LTE\nRD d 0 1k\nRG g 0 1k\nRS s 0 1k\nRB b 0 1k\nM1 d g s b mm W=1u L=1u\n.model mm {kind}(LEVEL={level} TOX=1e12 VBB=-5 VFB=-.7 PHI=.6 K1=0 CBS={cbs} PB=1 MJ=.5)\n.end\n"
+                    ));
+                    let initial = vec![0.0; circuit.matrix_size()];
+                    let mut history = Engine::initialize_mosfet_history(
+                        &circuit,
+                        &initial,
+                        crate::engine::transient::state::ReactiveHistorySeed::SolvedBias,
+                    );
+                    history.accepted_dt_prev = 1e-6;
+                    history.accepted_dt_prev_prev = 1e-6;
+                    let mut candidate = initial;
+                    candidate[circuit.get_node_by_name("b").unwrap() - 1] = p * -0.5;
+                    let limit = Engine::mosfet_ngspice_truncation_limit(
+                        &circuit,
+                        &candidate,
+                        TruncationStep {
+                            method: IntegrationMethod::Gear2,
+                            trap_order: 2,
+                            dt: 1e-6,
+                        },
+                        &history,
+                        NgspiceTruncationTolerances {
+                            reltol: 1e-6,
+                            current_abstol: 1e-15,
+                            charge_abstol: 1e-18,
+                            trtol: 1.0,
+                        },
+                        None,
+                    )
+                    .unwrap();
+                    if cbs == 0.0 {
+                        assert_eq!(limit, 2e-6);
+                    } else {
+                        assert!(limit < 0.5e-6, "body charge escaped LTE: {limit}");
+                    }
+                }
+            }
+        }
     }
 
     fn build_truncation_circuit(deck: &str) -> crate::circuit::CircuitData {

@@ -393,6 +393,18 @@ impl Engine {
         mut currents: [Value; 3],
     ) -> [Value; 3] {
         let (raw_vgs, raw_vds, raw_vbs) = mos.unlimited_branch_voltages_at(solution);
+        if mos.uses_legacy_bsim() {
+            let (vgs, vds, vbs) = mos.eval_branch_voltages_at(solution);
+            let charge = mos
+                .legacy_gate_charge_at(vgs, vds, vbs)
+                .expect("legacy BSIM charge");
+            let movement = [raw_vgs - vgs, raw_vds - vds, raw_vbs - vbs];
+            let gain = Self::jfet_companion_geq(coeff, 1.0, dt);
+            for (current, c) in currents.iter_mut().zip(charge.derivatives) {
+                *current += gain * (c[0] * movement[0] + c[1] * movement[1] + c[2] * movement[2]);
+            }
+            return currents;
+        }
         let (vgs, vgd, vgb) = mos.gate_charge_branch_voltages_at(solution);
         let movement = [
             raw_vgs - vgs,
@@ -785,6 +797,17 @@ impl Engine {
         // the new accepted values; arithmetic below still reads the identical
         // old `prev` and `prev_prev` generations.
         mosfet_history.rotate_gate_generations(suppress_gate_charge_history);
+        // Preserve the oldest body-charge generation before serial or parallel
+        // acceptance shifts the two body histories. BSIM terminal-charge LTE
+        // includes these junctions in its Gear2 divided differences.
+        if !mosfet_history.qbs_prev_prev_prev.is_empty() {
+            mosfet_history
+                .qbs_prev_prev_prev
+                .clone_from(&mosfet_history.qbs_prev_prev);
+            mosfet_history
+                .qbd_prev_prev_prev
+                .clone_from(&mosfet_history.qbd_prev_prev);
+        }
         let mosfet_gate_companion_charges = mosfet_gate_companion_charges
             .filter(|charges| charges.len() == circuit.mosfets.devices.len());
 
@@ -948,14 +971,36 @@ impl Engine {
                                 *vgb_out = vgb;
                                 *capgb_out = cgb_half;
                                 if !suppress_gate_charge_history {
-                                    if let Some(charges) = mosfet_gate_companion_charges {
+                                    let exact_charges =
+                                        mos.legacy_gate_charge_at(vgs, vds, vbs).map(|charge| {
+                                            Self::integrate_mosfet_gate_charges(
+                                                charge.charges,
+                                                coeff,
+                                                dt,
+                                                [
+                                                    BranchChargeHistory {
+                                                        q_prev: qgs_prev_prev[idx],
+                                                        q_prev_prev: qgs_prev_prev_prev[idx],
+                                                        cq_prev: *cqgs_out,
+                                                    },
+                                                    BranchChargeHistory {
+                                                        q_prev: qgd_prev_prev[idx],
+                                                        q_prev_prev: qgd_prev_prev_prev[idx],
+                                                        cq_prev: *cqgd_out,
+                                                    },
+                                                    BranchChargeHistory {
+                                                        q_prev: qgb_prev_prev[idx],
+                                                        q_prev_prev: qgb_prev_prev_prev[idx],
+                                                        cq_prev: *cqgb_out,
+                                                    },
+                                                ],
+                                            )
+                                        });
+                                    if let Some(charges) = exact_charges.as_ref().or_else(|| {
+                                        mosfet_gate_companion_charges.map(|charges| &charges[idx])
+                                    }) {
                                         Self::install_cached_mosfet_gate_companion_charges(
-                                            &charges[idx],
-                                            qgs_out,
-                                            cqgs_out,
-                                            qgd_out,
-                                            cqgd_out,
-                                            qgb_out,
+                                            charges, qgs_out, cqgs_out, qgd_out, cqgd_out, qgb_out,
                                             cqgb_out,
                                         );
                                     } else {
@@ -1124,9 +1169,36 @@ impl Engine {
             mosfet_history.vgb_prev[idx] = vgb;
             mosfet_history.capgb_prev_half[idx] = cgb_half;
             if !suppress_gate_charge_history {
-                if let Some(charges) = mosfet_gate_companion_charges {
+                let exact_charges = mos.legacy_gate_charge_at(vgs, vds, vbs).map(|charge| {
+                    Self::integrate_mosfet_gate_charges(
+                        charge.charges,
+                        coeff,
+                        dt,
+                        [
+                            BranchChargeHistory {
+                                q_prev: mosfet_history.qgs_prev_prev[idx],
+                                q_prev_prev: mosfet_history.qgs_prev_prev_prev[idx],
+                                cq_prev: mosfet_history.cqgs_prev[idx],
+                            },
+                            BranchChargeHistory {
+                                q_prev: mosfet_history.qgd_prev_prev[idx],
+                                q_prev_prev: mosfet_history.qgd_prev_prev_prev[idx],
+                                cq_prev: mosfet_history.cqgd_prev[idx],
+                            },
+                            BranchChargeHistory {
+                                q_prev: mosfet_history.qgb_prev_prev[idx],
+                                q_prev_prev: mosfet_history.qgb_prev_prev_prev[idx],
+                                cq_prev: mosfet_history.cqgb_prev[idx],
+                            },
+                        ],
+                    )
+                });
+                if let Some(charges) = exact_charges
+                    .as_ref()
+                    .or_else(|| mosfet_gate_companion_charges.map(|charges| &charges[idx]))
+                {
                     Self::install_cached_mosfet_gate_companion_charges(
-                        &charges[idx],
+                        charges,
                         &mut mosfet_history.qgs_prev[idx],
                         &mut mosfet_history.cqgs_prev[idx],
                         &mut mosfet_history.qgd_prev[idx],

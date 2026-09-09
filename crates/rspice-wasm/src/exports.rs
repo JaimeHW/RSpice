@@ -350,6 +350,58 @@ mod wasm_tests {
     }
 
     #[wasm_bindgen_test]
+    fn legacy_bsim_terminal_charge_in_wasm() {
+        use rspice_core::engine::SimulationConfig;
+        use rspice_core::numerics::integration::IntegrationMethod;
+        let abort = rspice_core::abort_signal::NoAbort;
+        for level in [4, 5] {
+            for (kind, p) in [("NMOS", 1.0), ("PMOS", -1.0)] {
+                for xpart in [0, if level == 4 { 1 } else { 2 }] {
+                    let netlist = rspice_core::Netlist::parse(&format!(
+                        "BSIM charge in WASM\nVD d 0 {}\nVG g 0 DC {} AC 1 PWL(0 {} 1u {})\nVS s 0 0\nVB b 0 {}\nM1 d g s b mm W=2u L=1u M=1.5 NF=2\n.model mm {kind}(LEVEL={level} TOX=.03 VFB=-.7 PHI=.6 K1=0 K2=0 ETA0=0 VBB=-5 VDD=5 XPART={xpart} DL=.1 DW=.2 MUZ=0 MUS=0 MU0=0 MUS0=0 MU30=0)\n.options GMIN=0 RELTOL=1e-9 ABSTOL=1e-17 VNTOL=1e-11\n.end\n",
+                        p*2.5, p*1.3, p*1.3, p*1.7, p*-0.3)).unwrap();
+                    let engine = rspice_core::Engine::new(SimulationConfig {
+                        integration_method: IntegrationMethod::BackwardEuler,
+                        locked_time_grid: Some(std::sync::Arc::new(vec![0.0, 0.5e-6, 1e-6])),
+                        ..Default::default()
+                    })
+                    .resolved_for_netlist(&netlist);
+                    let c = 3.453e-13 / (0.03 * 1e-4) * 1e4 * 1.8e-6 * 0.9e-6 * 3.0;
+                    let gate = if level == 5 && xpart > 1 {
+                        0.0
+                    } else {
+                        2.0 * c / 3.0
+                    };
+                    let drain = if xpart != 0 { 0.0 } else { -4.0 * c / 15.0 };
+                    let expected = [drain, gate, -gate - drain, 0.0];
+                    let ac = engine.run_ac_with_abort(&netlist, &[1e6], &abort).unwrap();
+                    let tran = engine
+                        .run_tran_with_abort(&netlist, 1e-6, 0.5e-6, &abort)
+                        .unwrap();
+                    for (row, source) in ["VD", "VG", "VS", "VB"].into_iter().enumerate() {
+                        let index = ac[0]
+                            .branch_names
+                            .iter()
+                            .position(|name| name.eq_ignore_ascii_case(source))
+                            .unwrap();
+                        let capacitance =
+                            -ac[0].currents[index].im / (2.0 * std::f64::consts::PI * 1e6);
+                        assert!((capacitance - expected[row]).abs() < 1e-27);
+                        let waveform = tran.try_branch_current_waveform_named(source).unwrap();
+                        for current in waveform.iter().skip(1) {
+                            assert!(
+                                (current + p * expected[row] * 0.4 / 1e-6).abs() < 1e-12,
+                                "L{level} {kind} XPART={xpart} {source}: {current}"
+                            );
+                        }
+                    }
+                    assert_eq!(engine.convergence_quality().force_accepted_points, 0);
+                }
+            }
+        }
+    }
+
+    #[wasm_bindgen_test]
     fn legacy_bsim_body_laws_in_wasm() {
         use rspice_core::engine::{SimulationConfig, SpiceDialect};
         use rspice_core::numerics::integration::IntegrationMethod;
