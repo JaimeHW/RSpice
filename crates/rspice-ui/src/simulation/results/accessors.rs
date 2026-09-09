@@ -5,6 +5,17 @@
 use super::*;
 
 impl SimulationResult {
+    pub(crate) fn transient_convergence(
+        &self,
+    ) -> Option<&std::sync::Arc<crate::state::TransientConvergenceEvidence>> {
+        match self {
+            Self::Transient { convergence, .. }
+            | Self::Ac { convergence, .. }
+            | Self::Soa { convergence, .. } => convergence.as_ref(),
+            _ => None,
+        }
+    }
+
     /// Get all waveform names
     #[cfg(test)]
     pub fn waveform_names(&self) -> Vec<&str> {
@@ -253,18 +264,5 @@ mod transfer_function_tests {
     #[test]
     fn tf_without_any_retained_scalar_has_no_data() {
         assert!(!result(None, None, None).has_data());
-    }
-}
-
-impl SimulationResult {
-    pub(crate) fn transient_convergence(
-        &self,
-    ) -> Option<&std::sync::Arc<crate::state::TransientConvergenceEvidence>> {
-        match self {
-            Self::Transient { convergence, .. }
-            | Self::Ac { convergence, .. }
-            | Self::Soa { convergence, .. } => convergence.as_ref(),
-            _ => None,
-        }
     }
 }

@@ -2,6 +2,10 @@
 
 use super::*;
 
+#[cfg(any(target_arch = "wasm32", test))]
+pub(in crate::simulation) type EncodedArtifactTransfer<'a> =
+    (String, Vec<std::borrow::Cow<'a, [f64]>>);
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(in crate::simulation) struct TransientTrajectoryArtifact {
     #[serde(with = "f64_bits_vec")]
@@ -1385,7 +1389,7 @@ impl ResolvedExecutionDependencies {
     #[cfg(any(target_arch = "wasm32", test))]
     pub(in crate::simulation) fn encode_transfer_borrowed(
         &self,
-    ) -> Result<(String, Vec<std::borrow::Cow<'_, [f64]>>), ExecutionArtifactError> {
+    ) -> Result<EncodedArtifactTransfer<'_>, ExecutionArtifactError> {
         self.validate_transport_integrity()?;
 
         let mut buffers = Vec::new();
@@ -1425,9 +1429,9 @@ impl ResolvedExecutionDependencies {
                                 buffers.push(values);
                                 reference
                             }));
-                        ExecutionArtifactPayloadTransferMetadata::TransientTrajectory(
+                        ExecutionArtifactPayloadTransferMetadata::TransientTrajectory(Box::new(
                             TransientTrajectoryTransferMetadata { time, waveforms, convergence },
-                        )
+                        ))
                     }
                     ExecutionArtifactPayload::PeriodicState(periodic) => {
                         let analysis = periodic.operating_point.analysis();
@@ -2083,7 +2087,7 @@ struct DcOperatingPointSeedTransferMetadata {
 #[cfg(any(target_arch = "wasm32", test))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 enum ExecutionArtifactPayloadTransferMetadata {
-    TransientTrajectory(TransientTrajectoryTransferMetadata),
+    TransientTrajectory(Box<TransientTrajectoryTransferMetadata>),
     PeriodicState(Box<PeriodicStateTransferMetadata>),
     HbState(HbStateTransferMetadata),
     DcOperatingPointSeed(DcOperatingPointSeedTransferMetadata),

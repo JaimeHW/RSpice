@@ -64,7 +64,6 @@ fn transient_convergence_changes_dependency_artifact_identity() {
         .unwrap(),
     ));
     let clean = create(&result);
-    let mut result = result;
     let SimulationResult::Transient {
         convergence, time, ..
     } = &mut result
