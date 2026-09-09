@@ -2491,24 +2491,21 @@ impl NonlinearDevice for Bjt {
             return;
         }
         let [vc, vb, ve, vs] = self.external_terminal_voltages(voltages);
-        // Device update and matrix load are separate phases in both the
-        // RSpice and Xyce solver lifecycles. Reusing the same candidate must
-        // therefore be idempotent: applying pnjlim again would advance the
-        // limiter history twice for one Newton iterate. The effective GMIN
-        // setter invalidates this cache whenever continuation changes the
-        // device equations.
+        // A limited state must advance toward the raw bias even when ideal
+        // sources or ground keep every terminal unchanged. Matrix loads use
+        // this cached evaluation without advancing history; an update starts
+        // the next device iterate. Only an unlimited evaluation can be reused
+        // indefinitely. GMIN changes invalidate the cache separately.
         if self.reduced_linearization_cache_valid.get()
             && self.cache_exactly_matches_external_biases(vc, vb, ve, vs)
+            && !self.legacy_junction_limited
         {
             // The solver can revisit the stamped candidate without changing
             // any BJT terminal bias (for example, when only voltage-source
-            // branch-current unknowns changed). Preserve pnjlim idempotence,
-            // but advance the convergence comparison to the identical cached
-            // evaluation so legacy GP devices do not remain permanently
-            // non-converged after their first load.
-            if self.charge_model == BjtChargeModel::LegacyGummelPoon
-                && !self.legacy_junction_limited
-            {
+            // branch-current unknowns changed). Advance the convergence
+            // comparison to the identical cached evaluation so legacy GP
+            // devices do not remain non-converged after their first load.
+            if self.charge_model == BjtChargeModel::LegacyGummelPoon {
                 self.previous_reduced_linearization_valid = true;
                 self.vbe_prev = self.vbe;
                 self.vbc_prev = self.vbc;
@@ -2553,7 +2550,13 @@ impl NonlinearDevice for Bjt {
         // the limited state value rather than the raw solution bias.
         let mut anchor = [vc, vb, ve, vs];
         self.legacy_junction_limited = false;
-        if self.uses_legacy_junction_limiting() {
+        // OFF initialization applies even with VOLTLIM disabled. Its replaced
+        // bias owns the first load and must be released on the next update.
+        if self.uses_legacy_junction_limiting()
+            || (self.charge_model == BjtChargeModel::LegacyGummelPoon
+                && self.initial_off
+                && !previous_linearization_available)
+        {
             let raw_vbe = state.vbi - state.vei;
             let raw_vbc = state.vbi - state.vci;
             state = self.limit_legacy_terminal_state_against_iterate(
@@ -2571,28 +2574,6 @@ impl NonlinearDevice for Bjt {
             // instead of on its bias.
             self.legacy_junction_limited = (state.vbi - state.vei - raw_vbe).abs() > 1e-12
                 || (state.vbi - state.vci - raw_vbc).abs() > 1e-12;
-            if !Self::series_active(self.rcx) && !Self::series_active(self.rci) {
-                anchor[EXT_C] = state.vci;
-            }
-            if !Self::series_active(self.rbx) && !Self::series_active(self.rbi) {
-                anchor[EXT_B] = state.vbi;
-            }
-            if !Self::series_active(self.re) {
-                anchor[EXT_E] = state.vei;
-            }
-            if !self.has_substrate_resistance() {
-                anchor[EXT_S] = state.vsi;
-            }
-        } else if self.charge_model == BjtChargeModel::LegacyGummelPoon
-            && self.initial_off
-            && !self.reduced_linearization_cache_valid.get()
-        {
-            // The explicit OFF initialization is outside the global VOLTLIM
-            // guard in both references, so a deck that disables device
-            // voltage limiting still starts an OFF instance from its
-            // zero-junction state. Preserve that first state without
-            // re-enabling pnjlim or reporting a limiter-owned iteration.
-            state = self.limit_legacy_terminal_state_against_iterate(state, false);
             if !Self::series_active(self.rcx) && !Self::series_active(self.rci) {
                 anchor[EXT_C] = state.vci;
             }

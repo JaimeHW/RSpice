@@ -23,6 +23,22 @@ R2 out 0 1k
 
 
 class TestTransient:
+    @pytest.mark.parametrize("kind", ["NPN", "PNP"])
+    def test_stationary_bjt_bias_leaves_startup(self, engine, kind):
+        for terminals, sources in [
+            ("0 0 0", ""),
+            ("c b e", "Vc c 0 0\nVb b 0 0\nVe e 0 0\n"),
+        ]:
+            netlist = rspice.Netlist.parse_spice(
+                "* stationary BJT bias\nI1 0 out DC 1 AC 1\nR1 out 0 1\n"
+                f"{sources}Q1 {terminals} qm\n.model qm {kind}(IS=1e-14)\n.end\n"
+            )
+            assert abs(engine.run_dc_op(netlist).voltage("out") - 1) < 1e-12
+            assert abs(engine.run_ac(netlist, [1e6]).voltage_complex("out")[0] - 1) < 1e-12
+            result = engine.run_tran(netlist, stop_time=2e-9, max_step=1e-9)
+            assert result.time[-1] == 2e-9
+            np.testing.assert_allclose(result.voltage_waveform("out"), 1, rtol=0, atol=1e-12)
+
     @pytest.mark.parametrize(
         "device",
         [
