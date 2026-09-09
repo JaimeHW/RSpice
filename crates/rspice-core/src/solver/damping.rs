@@ -32,7 +32,7 @@ use crate::Value;
 pub const VMAX_JUNCTION: Value = 0.5; // 500 mV max per iteration
 /// Critical voltage threshold for limiting (thermal voltage ~26mV at 300K)
 pub const VT_THERMAL: Value = 0.02585;
-/// Minimum damping factor
+/// Minimum Bank-Rose damping factor
 pub const DAMP_MIN: Value = 0.1;
 /// Maximum damping factor (1.0 = no damping)
 pub const DAMP_MAX: Value = 1.0;
@@ -79,7 +79,7 @@ pub struct DampingController {
     /// Active damping strategy
     strategy: DampingStrategy,
 
-    /// Current damping factor (0 < α ≤ 1)
+    /// Current damping factor (0 ≤ α ≤ 1); zero means no improving step.
     alpha: Value,
 
     /// Previous residual norm
@@ -88,7 +88,7 @@ pub struct DampingController {
     /// Bank-Rose damping factor evolution
     bank_rose_alpha: Value,
 
-    /// Number of line search iterations this step
+    /// Number of residual evaluations in the latest line search
     line_search_iters: usize,
 
     /// Statistics: total line search iterations
@@ -206,6 +206,8 @@ impl DampingController {
         if self.prev_residual.is_infinite() {
             // First iteration
             self.prev_residual = current_residual;
+            self.bank_rose_alpha = DAMP_INITIAL;
+            self.alpha = DAMP_INITIAL;
             return DAMP_INITIAL;
         }
 
@@ -230,16 +232,21 @@ impl DampingController {
 
     /// Perform backtracking line search
     ///
-    /// Finds α that satisfies Armijo condition:
+    /// Searches for α that satisfies the scaled Armijo decrease:
     /// ||F(x + α·dx)|| ≤ ||F(x)|| - c₁·α·||dx||·||F(x)||
     ///
     /// # Arguments
-    /// * `residual_current` - ||F(x)|| at current point
-    /// * `dx_norm` - ||dx|| Newton step norm
+    /// * `residual_current` - Finite, nonnegative ||F(x)|| at the current point
+    /// * `dx_norm` - Finite, nonnegative ||dx|| Newton step norm
     /// * `residual_func` - Function to compute ||F(x + α·dx)||
     ///
     /// # Returns
-    /// Optimal α satisfying Armijo condition
+    /// The first evaluated α satisfying the decrease, or the best strictly
+    /// improving evaluated α if the trial budget is exhausted. Returns zero
+    /// when no valid trial improves the residual, either input is invalid,
+    /// or the residual or step norm is zero. Callers must treat zero as a
+    /// failed or stationary search and retain the current iterate.
+    /// The Bank-Rose minimum does not constrain an accepted line-search step.
     pub fn line_search<F>(
         &mut self,
         residual_current: Value,
@@ -249,29 +256,41 @@ impl DampingController {
     where
         F: FnMut(Value) -> Value,
     {
-        let mut alpha = 1.0;
-        let mut iters = 0;
-
-        // Armijo threshold
-        let threshold = residual_current - ARMIJO_C1 * dx_norm * residual_current;
-
-        while iters < LINE_SEARCH_MAX_ITERS {
-            let residual_new = residual_func(alpha);
-
-            if residual_new <= threshold || residual_new < residual_current * 0.99 {
-                // Sufficient decrease achieved
-                break;
-            }
-
-            // Backtrack
-            alpha *= LINE_SEARCH_FACTOR;
-            iters += 1;
+        self.alpha = 0.0;
+        self.line_search_iters = 0;
+        if !residual_current.is_finite()
+            || residual_current <= 0.0
+            || !dx_norm.is_finite()
+            || dx_norm <= 0.0
+        {
+            return self.alpha;
         }
 
-        self.line_search_iters = iters;
-        self.total_line_search_iters += iters;
-        self.alpha = alpha.max(DAMP_MIN);
+        let mut alpha = 1.0;
+        let mut best_residual = residual_current;
+        for _ in 0..LINE_SEARCH_MAX_ITERS {
+            self.line_search_iters += 1;
+            let residual_new = residual_func(alpha);
+            if residual_new.is_finite() && residual_new >= 0.0 {
+                if residual_new < best_residual {
+                    best_residual = residual_new;
+                    self.alpha = alpha;
+                }
+                // Normalize before comparison so a finite residual need not
+                // multiply a large step norm. The trial's alpha belongs in
+                // the required decrease, and roundoff must not admit no change.
+                let threshold = 1.0 - (ARMIJO_C1 * alpha) * dx_norm;
+                if residual_new < residual_current && residual_new / residual_current <= threshold {
+                    self.alpha = alpha;
+                    break;
+                }
+            }
+            alpha *= LINE_SEARCH_FACTOR;
+        }
 
+        self.total_line_search_iters = self
+            .total_line_search_iters
+            .saturating_add(self.line_search_iters);
         self.alpha
     }
 
@@ -298,7 +317,7 @@ impl Default for DampingController {
 /// Damping statistics
 #[derive(Debug, Clone, Default)]
 pub struct DampingStatistics {
-    /// Total line search iterations across all Newton steps
+    /// Total residual evaluations across all line searches
     pub total_line_search_iters: usize,
     /// Number of steps where voltage limiting was applied
     pub limited_steps: usize,
@@ -309,3 +328,105 @@ pub struct DampingStatistics {
 //=============================================================================
 // Tests
 //=============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn initial_bank_rose_step_updates_the_reported_factor_after_line_search() {
+        let mut controller = DampingController::new();
+        controller.line_search(1.0, 1.0, |_| 2.0);
+        assert_eq!(controller.alpha(), 0.0);
+        let alpha = controller.bank_rose_damping(1.0);
+        assert_eq!(alpha, 1.0);
+        assert_eq!(controller.alpha(), alpha);
+        assert_eq!(controller.statistics().final_alpha, alpha);
+    }
+
+    #[test]
+    fn line_search_returns_the_evaluated_step_below_the_bank_rose_floor() {
+        let residual = |alpha: Value| ((1.0 - 16.0 * alpha) * (1.0 + 10.0 * alpha)).abs();
+        let mut controller = DampingController::new();
+        let mut trials = Vec::new();
+        let alpha = controller.line_search(residual(0.0), 1.0, |alpha| {
+            trials.push(alpha);
+            residual(alpha)
+        });
+        assert_eq!(alpha, 0.0625);
+        assert!(trials.contains(&alpha));
+        assert_eq!(residual(alpha), 0.0);
+        assert_eq!(controller.alpha(), alpha);
+        assert_eq!(controller.statistics().final_alpha, alpha);
+        assert_eq!(
+            controller.statistics().total_line_search_iters,
+            trials.len()
+        );
+    }
+
+    #[test]
+    fn line_search_scales_the_armijo_decrease_with_the_trial_step() {
+        // The second curve has a slightly smaller full-step residual, but
+        // only the half step satisfies its alpha-dependent Armijo decrease.
+        for (quadratic, linear) in [(0.0005, -0.0004), (0.0001, -0.00016)] {
+            let mut controller = DampingController::new();
+            let alpha = controller
+                .line_search(1.0, 1.0, |alpha| 1.0 + alpha * (quadratic * alpha + linear));
+            assert_eq!(alpha, 0.5);
+            assert_eq!(controller.statistics().total_line_search_iters, 2);
+        }
+    }
+
+    #[test]
+    fn exhausted_line_search_keeps_the_best_evaluated_decrease() {
+        let mut controller = DampingController::new();
+        let alpha = controller.line_search(1.0, 1.0, |alpha| 1.0 - 5e-5 * alpha);
+        assert_eq!(alpha, 1.0);
+        assert_eq!(
+            controller.statistics().total_line_search_iters,
+            LINE_SEARCH_MAX_ITERS
+        );
+    }
+
+    #[test]
+    fn failed_line_search_returns_no_step_and_counts_every_trial() {
+        for residual in [1.0, 2.0, Value::INFINITY, Value::NAN, -1.0] {
+            let mut controller = DampingController::new();
+            let mut trials = 0;
+            assert_eq!(
+                controller.line_search(1.0, 1.0, |_| {
+                    trials += 1;
+                    residual
+                }),
+                0.0
+            );
+            assert_eq!(controller.alpha(), 0.0);
+            assert_eq!(trials, LINE_SEARCH_MAX_ITERS);
+            assert_eq!(controller.statistics().total_line_search_iters, trials);
+            controller.reset();
+            assert_eq!(controller.alpha(), 1.0);
+            assert_eq!(controller.statistics().total_line_search_iters, trials);
+        }
+    }
+
+    #[test]
+    fn invalid_or_stationary_line_search_inputs_do_not_evaluate_trials() {
+        for (residual, norm) in [
+            (0.0, 1.0),
+            (1.0, 0.0),
+            (-1.0, 1.0),
+            (1.0, -1.0),
+            (Value::NAN, 1.0),
+            (1.0, Value::NAN),
+            (Value::INFINITY, 1.0),
+            (1.0, Value::INFINITY),
+        ] {
+            let mut controller = DampingController::new();
+            assert_eq!(
+                controller.line_search(residual, norm, |_| panic!("unexpected trial")),
+                0.0
+            );
+            assert_eq!(controller.statistics().total_line_search_iters, 0);
+        }
+    }
+}
