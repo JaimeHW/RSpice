@@ -23,9 +23,10 @@ const MAX_SELECTED_POINT_COUNT: usize = 10_000_000;
 mod dc_family;
 mod materialize;
 pub(crate) use materialize::materialize_deferred_saved_output;
+#[cfg(test)]
+use materialize::materialize_saved_outputs;
 pub(in crate::simulation) use materialize::{
-    apply_saved_output_policy, materialize_live_saved_outputs, materialize_saved_outputs,
-    retain_plan_saved_outputs,
+    apply_saved_output_policy, materialize_live_saved_outputs, retain_plan_saved_outputs,
 };
 
 #[cfg(test)]

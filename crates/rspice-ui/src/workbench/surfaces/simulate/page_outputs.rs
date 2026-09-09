@@ -1042,8 +1042,23 @@ pub(super) fn materialized_traces(
         match &receipt.status {
             crate::state::SavedOutputMaterializationStatus::Materialized { .. }
             | crate::state::SavedOutputMaterializationStatus::MaterializedDcFamily { .. } => {
+                let family_index = matches!(
+                    receipt.status,
+                    crate::state::SavedOutputMaterializationStatus::MaterializedDcFamily { .. }
+                )
+                .then(|| {
+                    analysis
+                        .waveforms
+                        .iter()
+                        .enumerate()
+                        .map(|(index, waveform)| (waveform.name.as_str(), index))
+                        .collect::<std::collections::HashMap<_, _>>()
+                });
                 let indices = receipt.status.materialized_waveforms().map(|(name, _)| {
-                    analysis.waveforms.iter().position(|waveform| waveform.name == name)
+                    match &family_index {
+                        Some(index) => index.get(name).copied(),
+                        None => analysis.waveforms.iter().position(|waveform| waveform.name == name),
+                    }
                         .ok_or_else(|| format!("The receipt names waveform {name}, which the retained analysis no longer holds."))
                 }).collect::<Result<Vec<_>, _>>();
                 match indices {

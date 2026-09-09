@@ -1553,22 +1553,28 @@ impl ProjectAnalysisResult {
             provenance,
             import_source: self.import_source.into_value(),
         };
-        for receipt in &analysis.saved_output_receipts {
-            if receipt.stored_precision
-                == crate::state::SavedOutputPrecision::DisplayCacheWithFullSourcePrecision
-                || receipt.streaming
-                    == crate::state::SavedOutputStreaming::LivePlotAdaptiveDisplayDecimation
-            {
-                for (name, _) in receipt.status.materialized_waveforms() {
-                    if let Some(waveform) = analysis
-                        .waveforms
-                        .iter_mut()
-                        .find(|waveform| waveform.name == name)
-                    {
-                        waveform.rebuild_display_cache(
-                            crate::state::DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES,
-                        );
-                    }
+        let cached_names = analysis
+            .saved_output_receipts
+            .iter()
+            .filter(|receipt| {
+                receipt.stored_precision
+                    == crate::state::SavedOutputPrecision::DisplayCacheWithFullSourcePrecision
+                    || receipt.streaming
+                        == crate::state::SavedOutputStreaming::LivePlotAdaptiveDisplayDecimation
+            })
+            .flat_map(|receipt| {
+                receipt
+                    .status
+                    .materialized_waveforms()
+                    .map(|(name, _)| name)
+            })
+            .collect::<HashSet<_>>();
+        if !cached_names.is_empty() {
+            for waveform in &mut analysis.waveforms {
+                if cached_names.contains(waveform.name.as_str()) {
+                    waveform.rebuild_display_cache(
+                        crate::state::DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES,
+                    );
                 }
             }
         }
