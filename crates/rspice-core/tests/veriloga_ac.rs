@@ -1070,40 +1070,49 @@ fn nested_ddx_laplace_model_solves_through_the_engine() {
         ("laplace_zd", "'{-2.0,0.0}", "'{1.0,0.25}"),
         ("laplace_np", "'{1.0,0.5}", "'{-4.0,0.0}"),
     ] {
-        let model = write_model(
-            &format!("curvature_{operator}"),
+        for (case, input) in [
+            "V(p,n)*V(p,n)*V(p,n)",
+            "($abstime+1.0)*V(p,n)*V(p,n)*V(p,n)",
+            "inv_k*$vt(V(p,n))*V(p,n)*V(p,n)",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let model = write_model(
+            &format!("curvature_{operator}_{case}"),
             &format!(
-                "module curvature(p,n); inout p,n; electrical p,n; real y;
+                "module curvature(p,n); inout p,n; electrical p,n; real y; parameter real inv_k=1.0/8.617333262e-5;
                 analog begin
-                    y=ddx(ddx({operator}(V(p,n)*V(p,n)*V(p,n),{numerator},{denominator}),V(p)),V(p));
+                    y=ddx(ddx({operator}({input},{numerator},{denominator}),V(p)),V(p));
                     I(p,n)<+y;
                 end endmodule"
             ),
         );
-        let netlist = Netlist::parse(&format!(
+            let netlist = Netlist::parse(&format!(
             "* Laplace curvature\nI1 0 out DC 6 AC 1\nX1 out 0 curvature\n.va \"{}\" curvature\n.end\n",
             deck_path(&model)
         )).unwrap();
-        let engine = Engine::default();
-        // At DC, I = d^2(V^3)/dV^2 = 6V and dI/dV = 6.
-        let bias = engine.run_dc_op(&netlist).expect("curvature bias solves");
-        assert!(
-            (bias.try_voltage_named("out").unwrap() - 1.0).abs() < 1e-10,
-            "{operator}"
-        );
-        let points = engine
-            .run_ac(&netlist, &[0.0])
-            .expect("curvature AC solves");
-        let out = points[0]
-            .node_names
-            .iter()
-            .position(|name| name.eq_ignore_ascii_case("out"))
-            .unwrap();
-        let voltage = points[0].voltages[out];
-        assert!(
-            (voltage.re - 1.0 / 6.0).abs() < 1e-10 && voltage.im.abs() < 1e-10,
-            "{operator}: {voltage}"
-        );
-        std::fs::remove_file(model).expect("remove curvature model");
+            let engine = Engine::default();
+            // Each input reduces to V^3 at DC: I = 6V and dI/dV = 6.
+            let bias = engine.run_dc_op(&netlist).expect("curvature bias solves");
+            assert!(
+                (bias.try_voltage_named("out").unwrap() - 1.0).abs() < 1e-10,
+                "{operator}, {input}"
+            );
+            let points = engine
+                .run_ac(&netlist, &[0.0])
+                .expect("curvature AC solves");
+            let out = points[0]
+                .node_names
+                .iter()
+                .position(|name| name.eq_ignore_ascii_case("out"))
+                .unwrap();
+            let voltage = points[0].voltages[out];
+            assert!(
+                (voltage.re - 1.0 / 6.0).abs() < 1e-10 && voltage.im.abs() < 1e-10,
+                "{operator}, {input}: {voltage}"
+            );
+            std::fs::remove_file(model).expect("remove curvature model");
+        }
     }
 }

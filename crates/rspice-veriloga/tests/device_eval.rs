@@ -18,6 +18,157 @@ fn compile(source: &str) -> DeviceFixture {
 }
 
 #[test]
+fn ddx_laplace_system_quantities_preserve_values_jacobians_and_readback() {
+    use rspice_veriloga::vm::IntegrationCoefficients;
+
+    let thermal_scale = 8.617333262e-5;
+    let ambient_vt = 330.0 * 1.380649e-23 / 1.602176634e-19;
+    for (input, factor) in [
+        ("$abstime*V(p)*V(p)*V(p)", None),
+        ("$realtime*V(p)*V(p)*V(p)", None),
+        ("$temperature*V(p)*V(p)*V(p)", Some(330.0)),
+        ("$mfactor*V(p)*V(p)*V(p)", Some(1.0)),
+        ("$param_given(gain)*V(p)*V(p)*V(p)", Some(1.0)),
+        ("$port_connected(p)*V(p)*V(p)*V(p)", Some(1.0)),
+        ("analysis(\"tran\")*V(p)*V(p)*V(p)", Some(1.0)),
+        ("$vt()*V(p)*V(p)*V(p)", Some(ambient_vt)),
+        ("$thermal_vt()*V(p)*V(p)*V(p)", Some(ambient_vt)),
+        ("$vt(V(p))*V(p)*V(p)", Some(thermal_scale)),
+        ("$thermal_vt(V(p)*V(p))*V(p)", Some(thermal_scale)),
+        ("$vt(V(p)*V(p)*V(p))", Some(thermal_scale)),
+    ] {
+        for order in [1, 2] {
+            let mut value = format!("laplace_nd({input}, '{{1.0,0.5}}, '{{1.0,0.25}})");
+            for _ in 0..order {
+                value = format!("ddx({value},V(p))");
+            }
+            let fixture = compile(&format!(
+                "module query_derivative(p); inout p; electrical p; parameter real gain=2; real y;
+                analog begin y={value}; I(p)<+y; end endmodule"
+            ));
+            let mut device = fixture.device("QUERY", &[1]);
+            device.set_temperature(330.0);
+            assert!(device.set_parameter("gain", 3.0));
+            device.update_voltages(&[0.0]);
+            device.try_evaluate().unwrap();
+            device.advance_state();
+            device.set_analysis_type(2);
+            let mut time = 0.0;
+            for (voltage, timestep) in [(0.25_f64, 0.125), (0.4, 0.25)] {
+                time += timestep;
+                device.set_time(time);
+                device.set_timestep(timestep);
+                let a = 1.0 / timestep;
+                device.set_integration_coefficients(IntegrationCoefficients {
+                    active: true,
+                    derivative_scale: a,
+                    previous_value_scale: a,
+                    older_value_scale: 0.0,
+                    previous_derivative_scale: 0.0,
+                });
+                let scale = factor.unwrap_or(time) * (1.0 + 0.5 * a) / (1.0 + 0.25 * a);
+                let (expected, slope) = if order == 1 {
+                    (3.0 * scale * voltage.powi(2), 6.0 * scale * voltage)
+                } else {
+                    (6.0 * scale * voltage, 6.0 * scale)
+                };
+                device.update_voltages(&[voltage]);
+                let current = device.try_evaluate().unwrap()[0];
+                let (matrix, _) = collect_stamps(&mut device, &[voltage]);
+                assert!(
+                    (current / expected - 1.0).abs() < 1e-12,
+                    "{value}: {current} != {expected}"
+                );
+                assert!(
+                    (matrix[&(0, 0)] / slope - 1.0).abs() < 1e-12,
+                    "{value}: {matrix:?} != {slope}"
+                );
+                fixture.observe(&mut device);
+                assert!(
+                    (device.variable("y").unwrap() / expected - 1.0).abs() < 1e-12,
+                    "{value}"
+                );
+                device.advance_state();
+            }
+        }
+    }
+}
+
+#[test]
+fn ddx_laplace_thermal_arguments_keep_quotient_dependencies() {
+    let k = 8.617333262e-5;
+    for (input, scale) in [
+        ("V(p)*V(p)*V(p)/$vt(V(p))", 1.0 / k),
+        ("$vt(V(p)*V(p)*V(p))/V(p)", k),
+    ] {
+        let fixture = compile(&format!(
+            "module thermal_quotient(p); inout p; electrical p;
+            analog I(p)<+ddx(laplace_nd({input}, '{{1.0}}, '{{1.0,0.25}}),V(p)); endmodule"
+        ));
+        let mut device = fixture.device("QUOTIENT", &[1]);
+        for voltage in [0.25, 0.5, 2.0] {
+            device.update_voltages(&[voltage]);
+            let current = device.try_evaluate().unwrap()[0];
+            let (matrix, _) = collect_stamps(&mut device, &[voltage]);
+            assert!(
+                (current / (2.0 * scale * voltage) - 1.0).abs() < 1e-12,
+                "{input}: {current}"
+            );
+            assert!(
+                (matrix[&(0, 0)] / (2.0 * scale) - 1.0).abs() < 1e-12,
+                "{input}: {matrix:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn ddx_laplace_thermal_arguments_keep_mixed_electrical_derivatives() {
+    let k = 8.617333262e-5;
+    for mixed in [false, true] {
+        let first = "ddx(laplace_nd($vt(V(p)*V(q))*V(p), '{1.0,0.5}, '{1.0,0.25}),V(p))";
+        let value = if mixed {
+            format!("ddx({first},V(q))")
+        } else {
+            first.to_owned()
+        };
+        let fixture = compile(&format!(
+            "module thermal_mixed(p,q); inout p,q; electrical p,q; real y;
+            analog begin y={value}; I(p)<+y; end endmodule"
+        ));
+        let mut device = fixture.device("MIXED", &[1, 2]);
+        for (p, q) in [(0.25, 0.75), (2.0, 0.125), (0.5, 0.5)] {
+            let (expected, dp, dq) = if mixed {
+                (2.0 * k * p, 2.0 * k, 0.0)
+            } else {
+                (2.0 * k * p * q, 2.0 * k * q, 2.0 * k * p)
+            };
+            device.update_voltages(&[p, q]);
+            let current = device.try_evaluate().unwrap()[0];
+            let (matrix, _) = collect_stamps(&mut device, &[p, q]);
+            assert!(
+                (current / expected - 1.0).abs() < 1e-12,
+                "{value}: {current}"
+            );
+            assert!(
+                (matrix[&(0, 0)] / dp - 1.0).abs() < 1e-12,
+                "{value}: {matrix:?}"
+            );
+            let actual_dq = matrix.get(&(0, 1)).copied().unwrap_or(0.0);
+            assert!(
+                (actual_dq - dq).abs() <= 1e-12 * dq.abs(),
+                "{value}: {matrix:?}"
+            );
+            fixture.observe(&mut device);
+            assert!(
+                (device.variable("y").unwrap() / expected - 1.0).abs() < 1e-12,
+                "{value}"
+            );
+        }
+    }
+}
+
+#[test]
 fn ddx_laplace_repeated_state_actions_preserve_values_and_jacobians() {
     for (expression, expected_current, expected_slope) in [
         ("laplace_nd(V(p)*V(p), '{1.0,0.5}, '{1.0,0.25})", 0.5, 2.0),

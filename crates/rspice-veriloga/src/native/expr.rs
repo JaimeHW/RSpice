@@ -3285,6 +3285,17 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             ),
             HirExprKind::SystemFunction { name, args } | HirExprKind::Call { name, args } => {
                 match normalize_intrinsic_name(name).as_str() {
+                    query if electrically_independent_query(query) => {
+                        self.push(NativeOp::Const(0.0))
+                    }
+                    "vt" | "thermal_vt" => self.lower_thermal_voltage_intrinsic(
+                        name,
+                        args,
+                        NativeOp::Const(0.0),
+                        |this, temperature| {
+                            this.lower_third_derivative(temperature, first, second, third)
+                        },
+                    ),
                     "laplace_zp" | "laplace_zd" | "laplace_np" | "laplace_nd" => {
                         self.require_intrinsic_arity(name, args, 3)?;
                         let slot = self.laplace_slot(expr_id)?;
@@ -3622,9 +3633,15 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
     ) -> JitResult<bool> {
         let normalized = normalize_intrinsic_name(name);
         match normalized.as_str() {
-            "temperature" | "vt" | "thermal_vt" | "abstime" | "realtime" | "mfactor"
-            | "simparam" | "param_given" | "port_connected" | "analysis" | "white_noise"
-            | "flicker_noise" | "noise_table" | "noise_table_log" => Ok(true),
+            query if electrically_independent_query(query) => Ok(true),
+            "vt" | "thermal_vt" => match args {
+                [] => Ok(true),
+                [temperature] => self.expr_derivative_is_zero(*temperature, wrt),
+                _ => Ok(false),
+            },
+            "simparam" | "white_noise" | "flicker_noise" | "noise_table" | "noise_table_log" => {
+                Ok(true)
+            }
             "slew" if (1..=3).contains(&args.len()) => {
                 for argument in args {
                     if !self.expr_derivative_is_zero(*argument, wrt)? {
@@ -3691,10 +3708,14 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
     ) -> JitResult<bool> {
         let normalized = normalize_intrinsic_name(name);
         match normalized.as_str() {
-            "temperature" | "vt" | "thermal_vt" | "abstime" | "realtime" | "mfactor"
-            | "simparam" | "param_given" | "port_connected" | "analysis" | "white_noise"
-            | "flicker_noise" | "noise_table" | "noise_table_log" | "floor" | "ceil" | "abs"
-            | "fabs" => Ok(true),
+            query if electrically_independent_query(query) => Ok(true),
+            "vt" | "thermal_vt" => match args {
+                [] => Ok(true),
+                [temperature] => self.expr_second_derivative_is_zero(*temperature, first, second),
+                _ => Ok(false),
+            },
+            "simparam" | "white_noise" | "flicker_noise" | "noise_table" | "noise_table_log"
+            | "floor" | "ceil" | "abs" | "fabs" => Ok(true),
             "slew" if (1..=3).contains(&args.len()) => {
                 for argument in args {
                     if !self.expr_second_derivative_is_zero(*argument, first, second)? {
@@ -4714,6 +4735,13 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
     ) -> JitResult<()> {
         let normalized = normalize_intrinsic_name(name);
         match normalized.as_str() {
+            query if electrically_independent_query(query) => self.push(NativeOp::Const(0.0)),
+            "vt" | "thermal_vt" => self.lower_thermal_voltage_intrinsic(
+                name,
+                args,
+                NativeOp::Const(0.0),
+                |this, temperature| this.lower_derivative(temperature, wrt),
+            ),
             "ddx" => {
                 let [expr, probe] = args else {
                     return Err(self.unsupported(format!(
@@ -4849,9 +4877,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             }
             "atan2" => self.lower_atan2_derivative(name, args, wrt),
             "hypot" => self.lower_hypot_derivative(name, args, wrt),
-            "temperature" | "vt" | "thermal_vt" | "abstime" | "realtime" | "mfactor"
-            | "simparam" | "param_given" | "port_connected" | "analysis" | "white_noise"
-            | "flicker_noise" | "noise_table" | "noise_table_log" => {
+            "simparam" | "white_noise" | "flicker_noise" | "noise_table" | "noise_table_log" => {
                 self.push(NativeOp::Const(0.0))
             }
             _ => Err(self.unsupported(format!("ddx derivative of intrinsic function '{name}'"))),
@@ -4866,12 +4892,16 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         wrt: CanonicalDerivativeAxis,
     ) -> JitResult<()> {
         match normalize_intrinsic_name(name).as_str() {
+            query if electrically_independent_query(query) => self.push(NativeOp::Const(0.0)),
+            "vt" | "thermal_vt" => self.lower_thermal_voltage_intrinsic(
+                name,
+                args,
+                NativeOp::Const(0.0),
+                |this, temperature| this.lower_derivative(temperature, wrt),
+            ),
             "limit" => self.lower_limit_derivative(name, args, wrt),
             "table_model" => self.lower_table_model_derivative(expr_id, name, args, wrt),
-            "temperature" | "vt" | "thermal_vt" | "abstime" | "realtime" | "mfactor"
-            | "simparam" | "param_given" | "port_connected" | "analysis" => {
-                self.push(NativeOp::Const(0.0))
-            }
+            "simparam" => self.push(NativeOp::Const(0.0)),
             _ => Err(self.unsupported(format!("ddx derivative of system function '{name}'"))),
         }
     }
@@ -4885,6 +4915,13 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         second: CanonicalDerivativeAxis,
     ) -> JitResult<()> {
         match normalize_intrinsic_name(name).as_str() {
+            query if electrically_independent_query(query) => self.push(NativeOp::Const(0.0)),
+            "vt" | "thermal_vt" => self.lower_thermal_voltage_intrinsic(
+                name,
+                args,
+                NativeOp::Const(0.0),
+                |this, temperature| this.lower_second_derivative(temperature, first, second),
+            ),
             "limit" => {
                 self.require_intrinsic_arity_range(name, args, 1, 2)?;
                 self.lower_second_derivative(args[0], first, second)
@@ -4892,10 +4929,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             "table_model" => Err(self.unsupported(format!(
                 "second derivative of system function '{name}' at expression {expr_id}"
             ))),
-            "temperature" | "vt" | "thermal_vt" | "abstime" | "realtime" | "mfactor"
-            | "simparam" | "param_given" | "port_connected" | "analysis" => {
-                self.push(NativeOp::Const(0.0))
-            }
+            "simparam" => self.push(NativeOp::Const(0.0)),
             _ => Err(self.unsupported(format!("second derivative of system function '{name}'"))),
         }
     }
@@ -4910,6 +4944,13 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
     ) -> JitResult<()> {
         let normalized = normalize_intrinsic_name(name);
         match normalized.as_str() {
+            query if electrically_independent_query(query) => self.push(NativeOp::Const(0.0)),
+            "vt" | "thermal_vt" => self.lower_thermal_voltage_intrinsic(
+                name,
+                args,
+                NativeOp::Const(0.0),
+                |this, temperature| this.lower_second_derivative(temperature, first, second),
+            ),
             "ddx" => {
                 let [expr, probe] = args else {
                     return Err(self.unsupported(format!(
@@ -5127,11 +5168,8 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 self.lower_second_derivative(args[1], first, second)?;
                 self.append_ifelse()
             }
-            "floor" | "ceil" | "temperature" | "vt" | "thermal_vt" | "abstime" | "realtime"
-            | "mfactor" | "simparam" | "param_given" | "port_connected" | "analysis"
-            | "white_noise" | "flicker_noise" | "noise_table" | "noise_table_log" => {
-                self.push(NativeOp::Const(0.0))
-            }
+            "floor" | "ceil" | "simparam" | "white_noise" | "flicker_noise" | "noise_table"
+            | "noise_table_log" => self.push(NativeOp::Const(0.0)),
             "atan2" => self.lower_atan2_second_derivative(name, args, first, second),
             "hypot" => self.lower_hypot_second_derivative(name, args, first, second),
             _ => Err(self.unsupported(format!("second derivative of intrinsic function '{name}'"))),
@@ -7099,7 +7137,12 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 self.require_intrinsic_arity(name, args, 0)?;
                 self.push(NativeOp::LoadTemperature)
             }
-            "vt" | "thermal_vt" => self.lower_thermal_voltage_intrinsic(name, args),
+            "vt" | "thermal_vt" => self.lower_thermal_voltage_intrinsic(
+                name,
+                args,
+                NativeOp::LoadThermalVoltage,
+                |this, temperature| this.lower(temperature),
+            ),
             "abstime" | "realtime" => {
                 self.require_intrinsic_arity(name, args, 0)?;
                 self.push(NativeOp::LoadTime)
@@ -7119,13 +7162,19 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         }
     }
 
-    fn lower_thermal_voltage_intrinsic(&mut self, name: &str, args: &[ExprId]) -> JitResult<()> {
+    fn lower_thermal_voltage_intrinsic(
+        &mut self,
+        name: &str,
+        args: &[ExprId],
+        default: NativeOp,
+        lower_temperature: impl FnOnce(&mut Self, ExprId) -> JitResult<()>,
+    ) -> JitResult<()> {
         self.require_intrinsic_arity_range(name, args, 0, 1)?;
         if args.is_empty() {
-            return self.push(NativeOp::LoadThermalVoltage);
+            return self.push(default);
         }
 
-        self.lower(args[0])?;
+        lower_temperature(self, args[0])?;
         self.push(NativeOp::Const(8.617333262e-5))?;
         self.append_arithmetic("Mul")
     }
@@ -8144,6 +8193,22 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             format!("expression {}", detail.into()),
         )
     }
+}
+
+/// Simulator and connectivity queries do not depend on node potentials or
+/// branch currents. Thermal voltage with an explicit argument is handled
+/// separately because that argument may depend on either electrical axis.
+fn electrically_independent_query(name: &str) -> bool {
+    matches!(
+        name,
+        "temperature"
+            | "abstime"
+            | "realtime"
+            | "mfactor"
+            | "param_given"
+            | "port_connected"
+            | "analysis"
+    )
 }
 
 fn normalize_intrinsic_name(name: &str) -> String {
