@@ -153,6 +153,81 @@ fn ddx_laplace_transient_matches_primal_with_fixed_accepted_history() {
 }
 
 #[test]
+fn nested_ddx_laplace_preserves_curvature_jacobian_and_observation() {
+    use rspice_veriloga::vm::IntegrationCoefficients;
+
+    for (operator, numerator, denominator) in [
+        ("laplace_nd", "'{1.0,0.5}", "'{1.0,0.25}"),
+        ("laplace_zp", "'{-2.0,0.0}", "'{-4.0,0.0}"),
+        ("laplace_zd", "'{-2.0,0.0}", "'{1.0,0.25}"),
+        ("laplace_np", "'{1.0,0.5}", "'{-4.0,0.0}"),
+    ] {
+        for assigned in [false, true] {
+            let value =
+                format!("ddx(ddx({operator}(V(p)*V(p)*V(p),{numerator},{denominator}),V(p)),V(p))");
+            let body = if assigned {
+                format!("y={value}; I(p)<+y;")
+            } else {
+                format!("I(p)<+{value};")
+            };
+            let fixture = compile(&format!(
+                "module filter_curvature(p); inout p; electrical p; real y; analog begin {body} end endmodule"
+            ));
+            let mut device = fixture.device("CURVATURE", &[1]);
+            let check = |device: &mut VerilogADevice, voltage: f64, gain: f64| {
+                let expected = 6.0 * voltage * gain;
+                device.update_voltages(&[voltage]);
+                let current = device.try_evaluate().unwrap()[0];
+                assert!(
+                    (current - expected).abs() < 1e-12,
+                    "{body}: {current} != {expected}"
+                );
+                let (matrix, _) = collect_stamps(device, &[voltage]);
+                assert!(
+                    (matrix[&(0, 0)] - 6.0 * gain).abs() < 1e-12,
+                    "{body}: {matrix:?}"
+                );
+                if assigned {
+                    fixture.observe(device);
+                    assert!(
+                        (device.variable("y").unwrap() - expected).abs() < 1e-12,
+                        "{body}"
+                    );
+                }
+            };
+            for voltage in [-0.75, 0.0, 1.25] {
+                check(&mut device, voltage, 1.0);
+            }
+            check(&mut device, 0.0, 1.0);
+            device.advance_state();
+            device.set_analysis_type(2);
+            let mut time = 0.0;
+            for (voltage, timestep) in [(0.25, 0.125), (-0.4, 0.25)] {
+                time += timestep;
+                let scale = 1.0 / timestep;
+                device.set_time(time);
+                device.set_timestep(timestep);
+                device.set_integration_coefficients(IntegrationCoefficients {
+                    active: true,
+                    derivative_scale: scale,
+                    previous_value_scale: scale,
+                    older_value_scale: 0.0,
+                    previous_derivative_scale: 0.0,
+                });
+                // H(a) = (1 + a/2)/(1 + a/4), where a is the
+                // integration rule's current-value derivative coefficient.
+                check(
+                    &mut device,
+                    voltage,
+                    (1.0 + 0.5 * scale) / (1.0 + 0.25 * scale),
+                );
+                device.advance_state();
+            }
+        }
+    }
+}
+
+#[test]
 fn laplace_complex_and_origin_roots_match_coefficient_forms() {
     for (zeros, poles, numerator, denominator, dc_gain) in [
         (

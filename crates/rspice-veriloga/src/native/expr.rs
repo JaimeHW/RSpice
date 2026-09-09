@@ -3283,8 +3283,17 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 second,
                 third,
             ),
-            HirExprKind::SystemFunction { name, .. } | HirExprKind::Call { name, .. } => {
-                Err(self.unsupported(format!("third derivative of intrinsic function '{name}'")))
+            HirExprKind::SystemFunction { name, args } | HirExprKind::Call { name, args } => {
+                match normalize_intrinsic_name(name).as_str() {
+                    "laplace_zp" | "laplace_zd" | "laplace_np" | "laplace_nd" => {
+                        self.require_intrinsic_arity(name, args, 3)?;
+                        let slot = self.laplace_slot(expr_id)?;
+                        self.lower_third_derivative(args[0], first, second, third)?;
+                        self.append_unary(NativeOp::LaplaceStateDerivative(slot))
+                    }
+                    _ => Err(self
+                        .unsupported(format!("third derivative of intrinsic function '{name}'"))),
+                }
             }
             HirExprKind::AnalogOperator { op } => Err(self.unsupported(format!(
                 "third derivative of analog operator {}",
