@@ -1103,17 +1103,19 @@ impl Mosfet {
         {
             self.rs_model = v;
         }
+        // Legacy BSIM accepts signed AF. Preserve invalid authored noise
+        // values too, so source collection reports them instead of defaults.
         if let Some(v) = params
             .get("KF")
             .copied()
-            .filter(|v| v.is_finite() && *v >= 0.0)
+            .filter(|v| matches!(self.level, 4 | 5) || (v.is_finite() && *v >= 0.0))
         {
             self.kf = v;
         }
         if let Some(v) = params
             .get("AF")
             .copied()
-            .filter(|v| v.is_finite() && *v > 0.0)
+            .filter(|v| matches!(self.level, 4 | 5) || (v.is_finite() && *v > 0.0))
         {
             self.af = v;
         }

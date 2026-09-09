@@ -50,6 +50,19 @@ impl LegacyBsimModel {
             Self::Bsim2(model) => model.sized(width, length).map(LegacyBsimSizedModel::Bsim2),
         }
     }
+
+    /// BSIM1/2 use effective dimensions in metres and Cox in F/cm² in
+    /// their KF law, unlike the classic MOS NLEV noise models.
+    pub(crate) fn flicker_noise_denominator(&self, width: Value, length: Value) -> Option<Value> {
+        let (delta_w, delta_l, tox) = match self {
+            Self::Bsim1(model) => (model.delta_w, model.delta_l, model.tox),
+            Self::Bsim2(model) => (model.delta_w, model.delta_l, model.tox),
+        };
+        let (width, length) = effective_dimensions(width, length, delta_w, delta_l)?;
+        let cox = legacy_cox(tox);
+        let denominator = width * length * cox * cox;
+        (denominator.is_finite() && denominator > 0.0).then_some(denominator)
+    }
 }
 
 impl LegacyBsimSizedModel {
@@ -270,15 +283,8 @@ impl LegacyBsim1Model {
     }
 
     fn sized(&self, width: Value, length: Value) -> Option<LegacyBsim1Sized> {
-        let effective_length = length - self.delta_l * MICRON;
-        let effective_width = width - self.delta_w * MICRON;
-        if !effective_length.is_finite()
-            || !effective_width.is_finite()
-            || effective_length <= 0.0
-            || effective_width <= 0.0
-        {
-            return None;
-        }
+        let (effective_width, effective_length) =
+            effective_dimensions(width, length, self.delta_w, self.delta_l)?;
 
         let leff_um = effective_length / MICRON;
         let weff_um = effective_width / MICRON;
@@ -463,15 +469,8 @@ impl LegacyBsim2Model {
     }
 
     fn sized(&self, width: Value, length: Value) -> Option<LegacyBsim2Sized> {
-        let effective_length = length - self.delta_l * MICRON;
-        let effective_width = width - self.delta_w * MICRON;
-        if !effective_length.is_finite()
-            || !effective_width.is_finite()
-            || effective_length <= 0.0
-            || effective_width <= 0.0
-        {
-            return None;
-        }
+        let (effective_width, effective_length) =
+            effective_dimensions(width, length, self.delta_w, self.delta_l)?;
 
         let inv_l_um = MICRON / effective_length;
         let inv_w_um = MICRON / effective_width;
@@ -727,6 +726,18 @@ impl LegacyBsim2Sized {
             1.0
         }
     }
+}
+
+fn effective_dimensions(
+    width: Value,
+    length: Value,
+    delta_w: Value,
+    delta_l: Value,
+) -> Option<(Value, Value)> {
+    let width = width - delta_w * MICRON;
+    let length = length - delta_l * MICRON;
+    (width.is_finite() && length.is_finite() && width > 0.0 && length > 0.0)
+        .then_some((width, length))
 }
 
 fn legacy_cox(tox_um: Value) -> Value {
