@@ -209,6 +209,42 @@ mod wasm_tests {
     use crate::js_interop::{js_array_property, js_property};
 
     #[wasm_bindgen_test]
+    fn distortion_annotations_preserve_transient_noise_in_wasm() {
+        let engine = rspice_core::Engine::default();
+        for waveform in ["TRNOISE(1 1n 0 0)", "TRRANDOM(2 1n 0 1 0)"] {
+            for source in ["V1 out 0", "I1 0 out"] {
+                let run = |annotation: &str| {
+                    let netlist = rspice_core::Netlist::parse(&format!(
+                        "noise annotation\n{source} {waveform} AC 2 {annotation}\nR1 out 0 1\n.end\n"
+                    )).unwrap();
+                    engine
+                        .run_tran_with_abort(
+                            &netlist,
+                            10e-9,
+                            1e-9,
+                            &rspice_core::abort_signal::NoAbort,
+                        )
+                        .unwrap()
+                };
+                let baseline = run("");
+                let annotated = run("DISTOF1 1 DISTOF2 .5 90");
+                let index = baseline
+                    .node_names
+                    .iter()
+                    .position(|name| name.eq_ignore_ascii_case("out"))
+                    .unwrap();
+                assert!(
+                    baseline.voltages[index]
+                        .iter()
+                        .any(|value| value.abs() > 0.3)
+                );
+                assert_eq!(annotated.time, baseline.time);
+                assert_eq!(annotated.voltages, baseline.voltages);
+            }
+        }
+    }
+
+    #[wasm_bindgen_test]
     fn waveform_ac_terms_preserve_dc_bias_in_wasm() {
         let engine = rspice_core::Engine::default();
         for waveform in [

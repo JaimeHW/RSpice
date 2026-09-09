@@ -3,6 +3,46 @@
 use rspice_core::engine::{Engine, SimulationConfig};
 use rspice_core::netlist::Netlist;
 
+#[test]
+fn distortion_annotations_preserve_seeded_transient_noise() {
+    let engine = Engine::default();
+    for waveform in ["TRNOISE(1 1n 0 0)", "TRRANDOM(2 1n 0 1 0)"] {
+        for source in ["V1 out 0", "I1 0 out"] {
+            for terms in ["", "AC 2", "DC .25 AC 2"] {
+                let run = |annotation: &str| {
+                    let netlist = Netlist::parse(&format!(
+                        "annotated noise\n{source} {waveform} {terms} {annotation}\nR1 out 0 1\n.options seed=42\n.end\n"
+                    )).unwrap();
+                    engine.run_tran(&netlist, 10e-9, 1e-9).unwrap()
+                };
+                let expected = run("");
+                let index = expected
+                    .node_names
+                    .iter()
+                    .position(|name| name.eq_ignore_ascii_case("out"))
+                    .unwrap();
+                assert!(
+                    expected.voltages[index]
+                        .iter()
+                        .any(|value| value.abs() > 0.3),
+                    "fixture must contain noise"
+                );
+                for annotation in ["DISTOF1 1", "DISTOF2 .5 90", "DISTOF1 1 DISTOF2 .5 90"] {
+                    let actual = run(annotation);
+                    assert_eq!(
+                        actual.time, expected.time,
+                        "{waveform} {terms} {annotation}"
+                    );
+                    assert_eq!(
+                        actual.voltages, expected.voltages,
+                        "{source} {waveform} {terms} {annotation}"
+                    );
+                }
+            }
+        }
+    }
+}
+
 fn run_noise_deck(seed_line: &str) -> (Vec<f64>, Vec<f64>) {
     let deck = format!(
         "\

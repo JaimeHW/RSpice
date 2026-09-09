@@ -23,6 +23,23 @@ R2 out 0 1k
 
 
 class TestTransient:
+    @pytest.mark.parametrize("waveform", ["TRNOISE(1 1n 0 0)", "TRRANDOM(2 1n 0 1 0)"])
+    @pytest.mark.parametrize("source", ["V1 out 0", "I1 0 out"])
+    def test_distortion_annotations_preserve_transient_noise(self, engine, waveform, source):
+        def run(annotation):
+            netlist = rspice.Netlist.parse_spice(
+                f"* noise annotation\n{source} {waveform} AC 2 {annotation}\nR1 out 0 1\n.end\n"
+            )
+            return engine.run_tran(netlist, stop_time=10e-9, max_step=1e-9)
+
+        baseline = run("")
+        annotated = run("DISTOF1 1 DISTOF2 .5 90")
+        assert np.std(baseline.voltage_waveform("out")) > 0.1
+        np.testing.assert_array_equal(annotated.time, baseline.time)
+        np.testing.assert_array_equal(
+            annotated.voltage_waveform("out"), baseline.voltage_waveform("out")
+        )
+
     def test_run_honors_each_selected_tran_startup_mode(self, engine):
         netlist = rspice.Netlist.parse(
             """* mixed selected transient startup modes
