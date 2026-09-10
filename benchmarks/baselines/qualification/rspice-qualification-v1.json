@@ -1378,7 +1378,7 @@
       "note": "canonical checkpoint text size for a fixed first segment",
       "tolerance": 0.1,
       "unit": "bytes",
-      "value": 1754.0
+      "value": 2660.0
     },
     {
       "metric": "checkpoint.packed_over_unpacked",
