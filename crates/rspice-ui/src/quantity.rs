@@ -1,8 +1,8 @@
 //! Unit-safe presentation and interactive quantity parsing.
 //!
 //! This domain is deliberately separate from the SPICE deck lexer and from
-//! PDK/layout database units. It converts immutable SI values at the UI edge;
-//! it never changes stored engineering data.
+//! PDK/layout database units. It normalizes external result units on import and
+//! presents immutable engineering values without rewriting stored results.
 
 pub(crate) mod engineering;
 mod format;
@@ -10,6 +10,7 @@ mod layout;
 mod locale;
 mod parse;
 mod preferences;
+pub(crate) mod unit;
 
 pub use engineering::{
     EngineeringPrecision, format_engineering_value, format_engineering_value_with,

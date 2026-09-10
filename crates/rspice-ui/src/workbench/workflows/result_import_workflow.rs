@@ -5,6 +5,7 @@
 //! but never claim native-solver provenance or prepared-plan authority.
 
 use crate::diagnostics::ConsoleMessage;
+use crate::quantity::unit::{EngineeringUnit, UnitDimension};
 pub(crate) use crate::state::ResultImportFormat;
 use crate::state::{
     AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload, AnalysisType,
@@ -89,33 +90,10 @@ const MIN_RESULT_ROWS: usize = 1;
 const RESULT_IMPORT_WINDOW_MARGIN: f32 = 24.0;
 const RESULT_IMPORT_FOOTER_RESERVE: f32 = 82.0;
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum UnitDimension {
-    Dimensionless,
-    Time,
-    Frequency,
-    Voltage,
-    Current,
-    Resistance,
-    Conductance,
-    Power,
-    Capacitance,
-    Inductance,
-    Temperature,
-    Angle,
-    LogRatio,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-struct UnitContract {
-    dimension: UnitDimension,
-    scale: f64,
-}
-
 #[derive(Debug, Clone, PartialEq)]
 struct ColumnContract {
     name: String,
-    unit: Option<UnitContract>,
+    unit: Option<EngineeringUnit>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1297,11 +1275,7 @@ fn parse_delimited_result_dataset(
         headers.push(header);
     }
 
-    let (analysis_type, coordinate_scale) = infer_analysis_type(&headers[0])?;
-    let signal_scales: Vec<f64> = headers[1..]
-        .iter()
-        .map(|header| header.unit.map_or(1.0, |unit| unit.scale))
-        .collect();
+    let analysis_type = infer_analysis_type(&headers[0])?;
     let mut coordinate = Vec::new();
     let mut signal_values = vec![Vec::new(); headers.len() - 1];
     let mut direction = None;
@@ -1315,7 +1289,7 @@ fn parse_delimited_result_dataset(
             ));
         }
         let record = record.map_err(|error| csv_error(&format!("row {line}"), error))?;
-        let x = parse_finite_cell(record.get(0), line, 1, &headers[0].name, coordinate_scale)?;
+        let x = parse_finite_cell(record.get(0), line, 1, &headers[0].name, headers[0].unit)?;
         if analysis_type == AnalysisType::Ac && x <= 0.0 {
             return Err(format!(
                 "row {line} frequency must be greater than zero after unit conversion"
@@ -1350,7 +1324,7 @@ fn parse_delimited_result_dataset(
                 line,
                 column,
                 &headers[signal_index + 1].name,
-                signal_scales[signal_index],
+                headers[signal_index + 1].unit,
             )?);
         }
     }
@@ -1366,12 +1340,16 @@ fn parse_delimited_result_dataset(
         .into_iter()
         .enumerate()
         .map(|(index, values)| {
-            WaveformData::new(
+            let mut waveform = WaveformData::new(
                 headers[index + 1].name.clone(),
                 Arc::clone(&coordinate),
                 values,
                 trace_color(index),
-            )
+            );
+            waveform.unit = headers[index + 1]
+                .unit
+                .map(|unit| unit.canonical_symbol().to_owned());
+            waveform
         })
         .collect();
     Ok(ParsedResultDataset {
@@ -1436,102 +1414,26 @@ fn parse_column_header(raw: &str, column: usize) -> Result<ColumnContract, Strin
     })
 }
 
-fn parse_unit(raw: &str) -> Result<UnitContract, String> {
-    let symbol = raw
-        .trim()
-        .replace(['µ', 'μ'], "u")
-        .replace('Ω', "ohm")
-        .replace('°', "deg");
-    let contract = match symbol.as_str() {
-        "s" => (UnitDimension::Time, 1.0),
-        "ms" => (UnitDimension::Time, 1e-3),
-        "us" => (UnitDimension::Time, 1e-6),
-        "ns" => (UnitDimension::Time, 1e-9),
-        "ps" => (UnitDimension::Time, 1e-12),
-        "fs" => (UnitDimension::Time, 1e-15),
-        "Hz" | "hz" => (UnitDimension::Frequency, 1.0),
-        "mHz" => (UnitDimension::Frequency, 1e-3),
-        "kHz" | "KHz" => (UnitDimension::Frequency, 1e3),
-        "MHz" => (UnitDimension::Frequency, 1e6),
-        "GHz" => (UnitDimension::Frequency, 1e9),
-        "THz" => (UnitDimension::Frequency, 1e12),
-        "V" => (UnitDimension::Voltage, 1.0),
-        "mV" => (UnitDimension::Voltage, 1e-3),
-        "uV" => (UnitDimension::Voltage, 1e-6),
-        "nV" => (UnitDimension::Voltage, 1e-9),
-        "kV" => (UnitDimension::Voltage, 1e3),
-        "A" => (UnitDimension::Current, 1.0),
-        "mA" => (UnitDimension::Current, 1e-3),
-        "uA" => (UnitDimension::Current, 1e-6),
-        "nA" => (UnitDimension::Current, 1e-9),
-        "pA" => (UnitDimension::Current, 1e-12),
-        "ohm" => (UnitDimension::Resistance, 1.0),
-        "mohm" => (UnitDimension::Resistance, 1e-3),
-        "kohm" => (UnitDimension::Resistance, 1e3),
-        "Mohm" => (UnitDimension::Resistance, 1e6),
-        "Gohm" => (UnitDimension::Resistance, 1e9),
-        "S" => (UnitDimension::Conductance, 1.0),
-        "mS" => (UnitDimension::Conductance, 1e-3),
-        "uS" => (UnitDimension::Conductance, 1e-6),
-        "nS" => (UnitDimension::Conductance, 1e-9),
-        "W" => (UnitDimension::Power, 1.0),
-        "mW" => (UnitDimension::Power, 1e-3),
-        "uW" => (UnitDimension::Power, 1e-6),
-        "nW" => (UnitDimension::Power, 1e-9),
-        "kW" => (UnitDimension::Power, 1e3),
-        "F" => (UnitDimension::Capacitance, 1.0),
-        "mF" => (UnitDimension::Capacitance, 1e-3),
-        "uF" => (UnitDimension::Capacitance, 1e-6),
-        "nF" => (UnitDimension::Capacitance, 1e-9),
-        "pF" => (UnitDimension::Capacitance, 1e-12),
-        "fF" => (UnitDimension::Capacitance, 1e-15),
-        "H" => (UnitDimension::Inductance, 1.0),
-        "mH" => (UnitDimension::Inductance, 1e-3),
-        "uH" => (UnitDimension::Inductance, 1e-6),
-        "nH" => (UnitDimension::Inductance, 1e-9),
-        "K" => (UnitDimension::Temperature, 1.0),
-        "C" | "degC" => (UnitDimension::Temperature, 1.0),
-        _ => match symbol.to_ascii_lowercase().as_str() {
-            "1" | "unitless" | "dimensionless" => (UnitDimension::Dimensionless, 1.0),
-            "second" | "seconds" => (UnitDimension::Time, 1.0),
-            "hertz" => (UnitDimension::Frequency, 1.0),
-            "volt" | "volts" => (UnitDimension::Voltage, 1.0),
-            "amp" | "amps" | "ampere" | "amperes" => (UnitDimension::Current, 1.0),
-            "ohms" => (UnitDimension::Resistance, 1.0),
-            "megohm" | "megohms" => (UnitDimension::Resistance, 1e6),
-            "siemens" | "siemen" => (UnitDimension::Conductance, 1.0),
-            "watt" | "watts" => (UnitDimension::Power, 1.0),
-            "farad" | "farads" => (UnitDimension::Capacitance, 1.0),
-            "henry" | "henries" => (UnitDimension::Inductance, 1.0),
-            "kelvin" | "celsius" => (UnitDimension::Temperature, 1.0),
-            "rad" | "radian" | "radians" => (UnitDimension::Angle, 1.0),
-            "deg" | "degree" | "degrees" => (UnitDimension::Angle, 1.0),
-            "db" => (UnitDimension::LogRatio, 1.0),
-            "%" | "percent" => (UnitDimension::Dimensionless, 0.01),
-            _ => return Err(format!("{raw:?} is not a recognized engineering unit")),
-        },
-    };
-    Ok(UnitContract {
-        dimension: contract.0,
-        scale: contract.1,
-    })
+fn parse_unit(raw: &str) -> Result<EngineeringUnit, String> {
+    // Historical CSV headers used bare C for Celsius. Keep that adapter
+    // spelling local; it is not a general engineering-unit abbreviation.
+    EngineeringUnit::parse(if raw.trim() == "C" { "degC" } else { raw })
 }
-
-fn infer_analysis_type(header: &ColumnContract) -> Result<(AnalysisType, f64), String> {
+fn infer_analysis_type(header: &ColumnContract) -> Result<AnalysisType, String> {
     let normalized: String = header
         .name
         .chars()
         .filter(|character| !matches!(character, '_' | '-' | ' '))
         .flat_map(char::to_lowercase)
         .collect();
-    let (analysis_type, required_dimension, default_scale) = match normalized.as_str() {
-        "time" | "t" | "timestamp" => (AnalysisType::Transient, Some(UnitDimension::Time), 1.0),
-        "frequency" | "freq" => (AnalysisType::Ac, Some(UnitDimension::Frequency), 1.0),
+    let (analysis_type, required_dimension) = match normalized.as_str() {
+        "time" | "t" | "timestamp" => (AnalysisType::Transient, Some(UnitDimension::Time)),
+        "frequency" | "freq" => (AnalysisType::Ac, Some(UnitDimension::Frequency)),
         "f" if header
             .unit
             .is_some_and(|unit| unit.dimension == UnitDimension::Frequency) =>
         {
-            (AnalysisType::Ac, Some(UnitDimension::Frequency), 1.0)
+            (AnalysisType::Ac, Some(UnitDimension::Frequency))
         }
         "f" => {
             return Err(
@@ -1549,15 +1451,15 @@ fn infer_analysis_type(header: &ColumnContract) -> Result<(AnalysisType, f64), S
             .unit
             .is_some_and(|unit| unit.dimension == UnitDimension::Time) =>
         {
-            (AnalysisType::Transient, Some(UnitDimension::Time), 1.0)
+            (AnalysisType::Transient, Some(UnitDimension::Time))
         }
         _ if header
             .unit
             .is_some_and(|unit| unit.dimension == UnitDimension::Frequency) =>
         {
-            (AnalysisType::Ac, Some(UnitDimension::Frequency), 1.0)
+            (AnalysisType::Ac, Some(UnitDimension::Frequency))
         }
-        _ => (AnalysisType::DcSweep, None, 1.0),
+        _ => (AnalysisType::DcSweep, None),
     };
 
     if let (Some(required), Some(unit)) = (required_dimension, header.unit)
@@ -1587,10 +1489,7 @@ fn infer_analysis_type(header: &ColumnContract) -> Result<(AnalysisType, f64), S
             header.name
         ));
     }
-    Ok((
-        analysis_type,
-        header.unit.map_or(default_scale, |unit| unit.scale),
-    ))
+    Ok(analysis_type)
 }
 
 fn looks_like_signal_expression(name: &str) -> bool {
@@ -1604,7 +1503,7 @@ fn parse_finite_cell(
     row: usize,
     column: usize,
     header: &str,
-    scale: f64,
+    unit: Option<EngineeringUnit>,
 ) -> Result<f64, String> {
     let value =
         value.ok_or_else(|| format!("row {row}, column {column} ({header:?}) is missing"))?;
@@ -1619,47 +1518,13 @@ fn parse_finite_cell(
             "row {row}, column {column} ({header:?}) must be finite"
         ));
     }
-    // Every accepted engineering-unit scale is an exact decimal power of
-    // ten. Parse the combined decimal exponent in one operation so values
-    // such as `10 [uA]` round directly to the nearest representation of
-    // `1e-5`, instead of accumulating a second rounding from `10.0 * 1e-6`.
-    let scaled = decimal_power_scaled(value, scale).unwrap_or(parsed * scale);
+    let scaled = unit.map_or(parsed, |unit| unit.normalize_decimal(value, parsed));
     if !scaled.is_finite() {
         return Err(format!(
             "row {row}, column {column} ({header:?}) overflows after unit conversion"
         ));
     }
     Ok(scaled)
-}
-
-fn decimal_power_scaled(value: &str, scale: f64) -> Option<f64> {
-    let scale_exponent = [
-        (1e-15, -15),
-        (1e-12, -12),
-        (1e-9, -9),
-        (1e-6, -6),
-        (1e-3, -3),
-        (0.01, -2),
-        (1.0, 0),
-        (1e3, 3),
-        (1e6, 6),
-        (1e9, 9),
-        (1e12, 12),
-    ]
-    .into_iter()
-    .find_map(|(candidate, exponent)| (scale == candidate).then_some(exponent))?;
-    let (mantissa, source_exponent) = if let Some(separator) = value.find(['e', 'E']) {
-        (
-            &value[..separator],
-            value[separator + 1..].parse::<i32>().ok()?,
-        )
-    } else {
-        (value, 0_i32)
-    };
-    let combined_exponent = source_exponent.checked_add(scale_exponent)?;
-    format!("{mantissa}e{combined_exponent}")
-        .parse::<f64>()
-        .ok()
 }
 
 fn csv_error(context: &str, error: csv::Error) -> String {
@@ -1803,9 +1668,56 @@ mod tests {
         assert_eq!(parsed.waveforms[0].x.as_slice(), &[0.0, 5e-4, 1e-3]);
         assert_eq!(parsed.waveforms[0].y.as_slice(), &[0.0, 1.25, 2.5]);
         assert_eq!(parsed.waveforms[1].y.as_slice(), &[10e-6, 11e-6, 12e-6]);
+        assert_eq!(parsed.waveforms[0].unit.as_deref(), Some("V"));
+        assert_eq!(parsed.waveforms[1].unit.as_deref(), Some("A"));
         assert!(Arc::ptr_eq(&parsed.waveforms[0].x, &parsed.waveforms[1].x));
         assert_eq!(parsed.source_format, ResultImportFormat::CsvRfc4180);
         assert!(parsed.family_metadata.is_none());
+    }
+
+    #[test]
+    fn imported_angles_and_temperatures_retain_normalized_values_and_units() {
+        let csv = b"time [s],phase [rad],angle [deg],ambient [degC],absolute [K],legacy [C],ratio [%],gain [dB],unstated\n0,3.141592653589793,-90,25,25,-273.15,12.5,-20,7\n";
+        let parsed = parse_result_dataset("units.csv", csv).unwrap();
+        let expected = [
+            (180.0, Some("°")),
+            (-90.0, Some("°")),
+            (298.15, Some("K")),
+            (25.0, Some("K")),
+            (0.0, Some("K")),
+            (0.125, Some("1")),
+            (-20.0, Some("dB")),
+            (7.0, None),
+        ];
+        for (waveform, (value, unit)) in parsed.waveforms.iter().zip(expected) {
+            assert_eq!(waveform.y.as_slice(), &[value], "{}", waveform.name);
+            assert_eq!(waveform.unit.as_deref(), unit, "{}", waveform.name);
+        }
+        let mut state = loaded_project_state();
+        apply_imported_result_dataset(&mut state, "units.csv", csv).unwrap();
+        let project = crate::workbench::lifecycle::project_lifecycle::snapshot(&state).unwrap();
+        let text = crate::io::project_io::serialize_project_file(&project).unwrap();
+        let project = crate::io::project_io::load_project_text(&text, None).unwrap();
+        assert!(project.simulation_results_warning.is_none());
+        let simulation = project.simulation_results.into_simulation_state().unwrap();
+        let restored = &simulation.active_run().unwrap().analyses[0];
+        restored.validate_retained_evidence().unwrap();
+        for (before, after) in parsed.waveforms.iter().zip(&restored.waveforms) {
+            assert_eq!(after.name, before.name);
+            assert_eq!(after.y, before.y);
+            assert_eq!(after.unit, before.unit);
+        }
+        let sweep = parse_result_dataset(
+            "temperature.csv",
+            b"temperature [degC],V(out) [V]\n-273.15,0\n25,1\n",
+        )
+        .unwrap();
+        assert_eq!(sweep.analysis_type, AnalysisType::DcSweep);
+        assert_eq!(sweep.waveforms[0].x.as_slice(), &[0.0, 298.15]);
+
+        let error =
+            parse_result_dataset("overflow.csv", b"time [s],angle [rad]\n0,1e308\n").unwrap_err();
+        assert!(error.contains("angle") && error.contains("overflows after unit conversion"));
     }
 
     #[test]
