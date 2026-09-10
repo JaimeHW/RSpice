@@ -1,39 +1,8 @@
-//! Waveform Interpolation Module
-//!
-//! Professional-grade interpolation for waveform operations following Spectre conventions.
-//! Handles mismatched time bases through automatic resampling.
-//!
-//! # Features
-//!
-//! - Linear interpolation (default, fast)
-//! - Cubic spline interpolation (accurate, smooth derivatives)
-//! - Automatic resampling for binary operations
-//! - Extrapolation control (flat, linear, error)
-//!
-//! # Architecture
-//!
-//! ```text
+//! Interpolation on a strictly monotone, finite axis. Binary arithmetic uses
+//! both operands' breakpoints in their shared domain, without extrapolation.
+//! Nonfinite ordinates represent gaps; interpolation does not bridge them.
 
 #![allow(clippy::type_complexity)]
-//! calc(V(out) + V(in))
-//!         │
-//!         ▼
-//! ┌─────────────────────┐
-//! │ detect time base    │
-//! │ mismatch            │
-//! └─────────────────────┘
-//!         │
-//!         ▼
-//! ┌─────────────────────┐
-//! │ resample second     │
-//! │ waveform to first   │
-//! └─────────────────────┘
-//!         │
-//!         ▼
-//! ┌─────────────────────┐
-//! │ apply operation     │
-//! └─────────────────────┘
-//! ```
 
 // =============================================================================
 // Interpolation Method
@@ -60,6 +29,7 @@ pub struct WaveformInterpolator<'a> {
     x: &'a [f64],
     /// Y values (signal values)
     y: &'a [f64],
+    descending: bool,
     /// Interpolation method
     method: InterpolationMethod,
     /// Pre-computed spline coefficients (for CubicSpline)
@@ -74,15 +44,26 @@ struct SplineCoefficients {
 }
 
 impl<'a> WaveformInterpolator<'a> {
-    /// Create a new interpolator with default settings (linear, flat extrapolation)
-    pub fn new(x: &'a [f64], y: &'a [f64]) -> Self {
-        assert_eq!(x.len(), y.len(), "x and y must have same length");
-        Self {
+    /// Validate an unambiguous interpolation domain once before sampling it.
+    pub fn new(x: &'a [f64], y: &'a [f64]) -> Result<Self, InterpolationError> {
+        validate_samples(x, y)?;
+        let descending = x[0] > x[x.len() - 1];
+        if x.windows(2).any(|pair| {
+            if descending {
+                pair[0] <= pair[1]
+            } else {
+                pair[0] >= pair[1]
+            }
+        }) {
+            return Err(InterpolationError::AmbiguousAxis);
+        }
+        Ok(Self {
             x,
             y,
+            descending,
             method: InterpolationMethod::Linear,
             spline_coeffs: None,
-        }
+        })
     }
 
     /// Set interpolation method
@@ -96,34 +77,34 @@ impl<'a> WaveformInterpolator<'a> {
 
     /// Interpolate at a single point
     pub fn interpolate_at(&self, target_x: f64) -> Result<f64, InterpolationError> {
-        if self.x.is_empty() {
-            return Err(InterpolationError::EmptyWaveform);
+        if !target_x.is_finite() {
+            return Err(InterpolationError::NonfiniteCoordinate);
         }
-
-        if self.x.len() == 1 {
-            // Single point - just return the value
-            return Ok(self.y[0]);
+        let last = self.x.len() - 1;
+        if target_x < self.x[0].min(self.x[last]) || target_x > self.x[0].max(self.x[last]) {
+            return Err(InterpolationError::OutsideDomain);
         }
-
-        let x_min = self.x[0];
-        let x_max = self.x[self.x.len() - 1];
-
-        // Handle extrapolation
-        if target_x < x_min {
-            return Ok(self.extrapolate_left());
+        if target_x == self.x[0] {
+            return Ok(self.sample(0));
         }
-        if target_x > x_max {
-            return Ok(self.extrapolate_right());
+        if target_x == self.x[last] {
+            return Ok(self.sample(last));
         }
-
-        // Find bracketing interval using binary search
         let idx = self.find_interval(target_x);
-
-        // Interpolate within interval
-        match self.method {
-            InterpolationMethod::Linear => Ok(self.interpolate_linear(idx, target_x)),
-            InterpolationMethod::CubicSpline => Ok(self.interpolate_cubic(idx, target_x)),
+        if target_x == self.x[idx] {
+            return Ok(self.sample(idx));
         }
+        if !self.y[idx].is_finite() || !self.y[idx + 1].is_finite() {
+            return Ok(f64::NAN);
+        }
+        let value = match self.method {
+            InterpolationMethod::Linear => self.interpolate_linear(idx, target_x),
+            InterpolationMethod::CubicSpline => self.interpolate_cubic(idx, target_x),
+        };
+        value
+            .is_finite()
+            .then_some(value)
+            .ok_or(InterpolationError::UnrepresentableValue)
     }
 
     /// Resample onto a new x grid
@@ -137,13 +118,16 @@ impl<'a> WaveformInterpolator<'a> {
 
     /// Binary search for interval containing target_x
     fn find_interval(&self, target_x: f64) -> usize {
-        // Binary search to find i such that x[i] <= target_x < x[i+1]
         let mut low = 0;
         let mut high = self.x.len() - 1;
 
         while high - low > 1 {
             let mid = (low + high) / 2;
-            if self.x[mid] <= target_x {
+            if if self.descending {
+                self.x[mid] >= target_x
+            } else {
+                self.x[mid] <= target_x
+            } {
                 low = mid;
             } else {
                 high = mid;
@@ -160,12 +144,15 @@ impl<'a> WaveformInterpolator<'a> {
         let y0 = self.y[idx];
         let y1 = self.y[idx + 1];
 
-        if x1 == x0 {
-            return y0; // Avoid division by zero
-        }
-
-        let t = (target_x - x0) / (x1 - x0);
-        y0 + t * (y1 - y0)
+        let width = x1 - x0;
+        let t = if width.is_finite() {
+            (target_x - x0) / width
+        } else {
+            (target_x * 0.5 - x0 * 0.5) / (x1 * 0.5 - x0 * 0.5)
+        };
+        // A convex combination avoids overflowing the difference between
+        // opposite-sign finite ordinates.
+        (1.0 - t) * y0 + t * y1
     }
 
     /// Cubic spline interpolation within an interval
@@ -195,15 +182,20 @@ impl<'a> WaveformInterpolator<'a> {
         a * y0 + b * y1 + ((a * a * a - a) * y2_0 + (b * b * b - b) * y2_1) * (h * h) / 6.0
     }
 
-    /// Extrapolate to the left. Out-of-range queries hold the endpoint value:
-    /// a resampled trace never invents samples beyond what was measured.
-    fn extrapolate_left(&self) -> f64 {
-        self.y[0]
+    fn sample(&self, index: usize) -> f64 {
+        if self.y[index].is_finite() {
+            self.y[index]
+        } else {
+            f64::NAN
+        }
     }
 
-    /// Extrapolate to the right, holding the endpoint value.
-    fn extrapolate_right(&self) -> f64 {
-        self.y[self.y.len() - 1]
+    fn ascending_x(&self, index: usize) -> f64 {
+        self.x[if self.descending {
+            self.x.len() - 1 - index
+        } else {
+            index
+        }]
     }
 }
 
@@ -213,6 +205,26 @@ impl<'a> WaveformInterpolator<'a> {
 
 /// Compute natural cubic spline second derivatives
 fn compute_spline_coeffs(x: &[f64], y: &[f64]) -> SplineCoefficients {
+    let mut y2 = vec![f64::NAN; x.len()];
+    let mut start = 0;
+    while start < y.len() {
+        if !y[start].is_finite() {
+            start += 1;
+            continue;
+        }
+        let end = start
+            + y[start..]
+                .iter()
+                .take_while(|value| value.is_finite())
+                .count();
+        let segment = compute_finite_spline(&x[start..end], &y[start..end]);
+        y2[start..end].copy_from_slice(&segment.y2);
+        start = end;
+    }
+    SplineCoefficients { y2 }
+}
+
+fn compute_finite_spline(x: &[f64], y: &[f64]) -> SplineCoefficients {
     let n = x.len();
     if n < 3 {
         return SplineCoefficients { y2: vec![0.0; n] };
@@ -256,17 +268,52 @@ fn compute_spline_coeffs(x: &[f64], y: &[f64]) -> SplineCoefficients {
 pub enum InterpolationError {
     /// Empty waveform provided
     EmptyWaveform,
+    LengthMismatch,
+    NonfiniteCoordinate,
+    AmbiguousAxis,
+    OutsideDomain,
+    NoSharedDomain,
+    UnrepresentableValue,
 }
 
 impl std::fmt::Display for InterpolationError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::EmptyWaveform => write!(f, "Empty waveform"),
+            Self::LengthMismatch => write!(f, "X and Y sample counts differ"),
+            Self::NonfiniteCoordinate => write!(f, "X coordinates must be finite"),
+            Self::AmbiguousAxis => write!(
+                f,
+                "unequal axes with repeated coordinates or multiple sweep branches need an explicit branch selection"
+            ),
+            Self::OutsideDomain => {
+                write!(f, "the requested coordinate is outside the waveform domain")
+            }
+            Self::NoSharedDomain => write!(f, "waveform domains do not overlap"),
+            Self::UnrepresentableValue => write!(
+                f,
+                "the interpolated value cannot be represented as a finite number"
+            ),
         }
     }
 }
 
 impl std::error::Error for InterpolationError {}
+
+/// Pointwise operations can keep a repeated or branching axis, but cannot
+/// accept malformed storage or nonfinite coordinates.
+pub(super) fn validate_samples(x: &[f64], y: &[f64]) -> Result<(), InterpolationError> {
+    if x.len() != y.len() {
+        return Err(InterpolationError::LengthMismatch);
+    }
+    if x.is_empty() {
+        return Err(InterpolationError::EmptyWaveform);
+    }
+    if x.iter().any(|value| !value.is_finite()) {
+        return Err(InterpolationError::NonfiniteCoordinate);
+    }
+    Ok(())
+}
 
 // =============================================================================
 // Waveform Alignment Utility
@@ -274,7 +321,8 @@ impl std::error::Error for InterpolationError {}
 
 /// Align two waveforms to a common time base for binary operations
 ///
-/// Resamples the second waveform onto the first waveform's time base.
+/// Keep every breakpoint in the intersection, ordered like the first operand.
+/// This preserves narrow features regardless of which operand is on the left.
 pub fn align_waveforms(
     x1: &[f64],
     y1: &[f64],
@@ -282,18 +330,147 @@ pub fn align_waveforms(
     y2: &[f64],
     method: InterpolationMethod,
 ) -> Result<(Vec<f64>, Vec<f64>, Vec<f64>), InterpolationError> {
-    if x1.is_empty() || x2.is_empty() {
-        return Err(InterpolationError::EmptyWaveform);
+    let left = WaveformInterpolator::new(x1, y1)?.with_method(method);
+    let right = WaveformInterpolator::new(x2, y2)?.with_method(method);
+    let low = left.ascending_x(0).max(right.ascending_x(0));
+    let high = left
+        .ascending_x(x1.len() - 1)
+        .min(right.ascending_x(x2.len() - 1));
+    if low > high {
+        return Err(InterpolationError::NoSharedDomain);
     }
-
-    // Use first waveform's x-axis as reference
-    let interp = WaveformInterpolator::new(x2, y2).with_method(method);
-
-    let y2_resampled = interp.resample(x1)?;
-
-    Ok((x1.to_vec(), y1.to_vec(), y2_resampled))
+    let mut x = Vec::with_capacity(x1.len() + x2.len());
+    let (mut i, mut j) = (0, 0);
+    while i < x1.len() || j < x2.len() {
+        let next = if j == x2.len() || (i < x1.len() && left.ascending_x(i) < right.ascending_x(j))
+        {
+            let value = left.ascending_x(i);
+            i += 1;
+            value
+        } else {
+            let value = right.ascending_x(j);
+            j += 1;
+            if i < x1.len() && left.ascending_x(i) == value {
+                i += 1;
+            }
+            value
+        };
+        if next >= low && next <= high {
+            x.push(next);
+        }
+    }
+    if left.descending {
+        x.reverse();
+    }
+    let left_y = left.resample(&x)?;
+    let right_y = right.resample(&x)?;
+    Ok((x, left_y, right_y))
 }
 
 // =============================================================================
 // Tests
 // =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn descending_interpolation_matches_ascending_for_both_methods() {
+        for method in [
+            InterpolationMethod::Linear,
+            InterpolationMethod::CubicSpline,
+        ] {
+            let ascending = WaveformInterpolator::new(&[0.0, 1.0, 3.0], &[0.0, 2.0, 1.0])
+                .unwrap()
+                .with_method(method);
+            let descending = WaveformInterpolator::new(&[3.0, 1.0, 0.0], &[1.0, 2.0, 0.0])
+                .unwrap()
+                .with_method(method);
+            for at in [0.0, 0.25, 1.0, 1.5, 2.5, 3.0] {
+                assert!(
+                    (ascending.interpolate_at(at).unwrap()
+                        - descending.interpolate_at(at).unwrap())
+                    .abs()
+                        < 1e-14
+                );
+            }
+            assert!(descending.interpolate_at(-0.1).is_err());
+            assert!(descending.interpolate_at(3.1).is_err());
+        }
+        assert_eq!(
+            WaveformInterpolator::new(&[3.0, 2.0, 0.0], &[3.0, 2.0, 0.0])
+                .unwrap()
+                .interpolate_at(1.5)
+                .unwrap(),
+            1.5
+        );
+    }
+
+    #[test]
+    fn interpolation_does_not_bridge_holes_or_poison_other_segments() {
+        let x = [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
+        let y = [0.0, 1.0, 2.0, f64::NAN, 4.0, 5.0, 6.0];
+        for method in [
+            InterpolationMethod::Linear,
+            InterpolationMethod::CubicSpline,
+        ] {
+            let interpolator = WaveformInterpolator::new(&x, &y)
+                .unwrap()
+                .with_method(method);
+            for at in [0.0, 0.5, 1.0, 1.5, 2.0, 4.0, 4.5, 5.0, 5.5, 6.0] {
+                assert_eq!(interpolator.interpolate_at(at).unwrap(), at);
+            }
+            for at in [2.5, 3.0, 3.5] {
+                assert!(interpolator.interpolate_at(at).unwrap().is_nan());
+            }
+        }
+    }
+
+    #[test]
+    fn interpolation_validates_storage_and_ambiguous_domains() {
+        assert!(matches!(
+            WaveformInterpolator::new(&[0.0, 1.0], &[0.0]),
+            Err(InterpolationError::LengthMismatch)
+        ));
+        assert!(matches!(
+            WaveformInterpolator::new(&[], &[]),
+            Err(InterpolationError::EmptyWaveform)
+        ));
+        for x in [[0.0, 0.0, 1.0], [0.0, 1.0, 0.0], [1.0, 0.0, 1.0]] {
+            assert!(matches!(
+                WaveformInterpolator::new(&x, &[0.0; 3]),
+                Err(InterpolationError::AmbiguousAxis)
+            ));
+        }
+        for invalid in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert!(matches!(
+                WaveformInterpolator::new(&[0.0, invalid], &[0.0, 1.0]),
+                Err(InterpolationError::NonfiniteCoordinate)
+            ));
+            assert!(
+                WaveformInterpolator::new(&[0.0], &[1.0])
+                    .unwrap()
+                    .interpolate_at(invalid)
+                    .is_err()
+            );
+        }
+    }
+
+    #[test]
+    fn finite_extreme_linear_samples_do_not_overflow_the_intermediate_difference() {
+        let x = [-f64::MAX, f64::MAX];
+        let interpolator = WaveformInterpolator::new(&x, &x).unwrap();
+        assert_eq!(interpolator.interpolate_at(0.0).unwrap(), 0.0);
+        assert_eq!(interpolator.interpolate_at(-f64::MAX).unwrap(), -f64::MAX);
+        assert_eq!(interpolator.interpolate_at(f64::MAX).unwrap(), f64::MAX);
+        let small = [0.0, f64::MIN_POSITIVE];
+        assert_eq!(
+            WaveformInterpolator::new(&small, &[0.0, 1.0])
+                .unwrap()
+                .interpolate_at(f64::MIN_POSITIVE / 2.0)
+                .unwrap(),
+            0.5
+        );
+    }
+}

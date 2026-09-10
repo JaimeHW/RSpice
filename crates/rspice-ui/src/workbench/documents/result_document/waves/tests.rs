@@ -183,6 +183,41 @@ fn marker_fixture() -> AppState {
     state
 }
 
+#[test]
+fn retained_and_live_expressions_align_real_analysis_waveforms() {
+    use crate::analysis::calculator::{CalcValue, SimulationContext, evaluator, parser};
+
+    let mut state = AppState::default();
+    let first = vec![0.0, 1.0, 3.0];
+    let second = vec![0.0, 2.0, 3.0];
+    state.simulation.start_run().add_analysis(
+        AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(vec![
+            WaveformData::new("V(a)", first.clone(), first, "#fff"),
+            WaveformData::new("V(b)", second.clone(), second, "#0af"),
+        ]),
+    );
+    state.simulation.complete_run();
+    let before = state
+        .simulation
+        .active_analysis()
+        .unwrap()
+        .waveforms
+        .clone();
+
+    let (x, y) = evaluate_expression(&state.simulation, 0, "V(a)-V(b)", None).unwrap();
+    assert_eq!(x.as_slice(), &[0.0, 1.0, 2.0, 3.0]);
+    assert_eq!(y.as_slice(), &[0.0; 4]);
+    let expression = parser::try_parse("min(V(a)-V(b))").unwrap();
+    assert_eq!(
+        evaluator::evaluate(&expression, &SimulationContext::new(&state.simulation)).unwrap(),
+        CalcValue::Scalar(0.0)
+    );
+    assert_eq!(
+        state.simulation.active_analysis().unwrap().waveforms,
+        before
+    );
+}
+
 fn deep_readout_fixture(trace_count: usize) -> AppState {
     let waveforms = (0..trace_count)
         .map(|index| {
