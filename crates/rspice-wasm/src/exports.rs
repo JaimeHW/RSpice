@@ -422,6 +422,51 @@ mod wasm_tests {
     }
 
     #[wasm_bindgen_test]
+    fn legacy_bjt_gmin_placement_and_substrate_in_wasm() {
+        use rspice_core::engine::{SimulationConfig, SpiceDialect};
+        for (dialect, dc_expected, ac_expected) in [
+            (
+                SpiceDialect::Ngspice,
+                [0.0008, -0.0021, 0.0012],
+                [-0.002, 0.001, 0.0],
+            ),
+            (
+                SpiceDialect::Xyce,
+                [0.000449, -0.00145, 0.0],
+                [-0.00051, 0.0005, 0.0],
+            ),
+        ] {
+            let mut config = SimulationConfig::default().with_spice_dialect(dialect);
+            config.convergence_config.gmin_target = 0.0;
+            config.convergence_config.junction_gmin_target = 1e-3;
+            let engine = rspice_core::Engine::new(config);
+            let abort = rspice_core::abort_signal::NoAbort;
+            for (kind, p) in [("NPN", 1.0), ("PNP", -1.0)] {
+                let deck = rspice_core::Netlist::parse(&format!(
+                    "GP GMIN\nVC c 0 {}\nVB b 0 DC {} AC 1\nVS s 0 {}\nQ1 c b 0 s mm AREA=5 M=3\n.model mm {kind}(IS=0 SUBS=1 BF=100 BR=2 TF=1n TR=2n)\n.end\n",p,p*0.1,p*(-0.2))).unwrap();
+                let dc = engine.run_dc_op_with_abort(&deck, &abort).unwrap();
+                let ac = engine.run_ac_with_abort(&deck, &[1e6], &abort).unwrap();
+                for (index, branch) in ["VB", "VC", "VS"].into_iter().enumerate() {
+                    assert!(
+                        (dc.branch_current_named(branch).unwrap() - 3.0 * p * dc_expected[index])
+                            .abs()
+                            < 1e-13
+                    );
+                    let column = ac[0]
+                        .branch_names
+                        .iter()
+                        .position(|name| name.eq_ignore_ascii_case(branch))
+                        .unwrap();
+                    assert!((ac[0].currents[column].re - 3.0 * ac_expected[index]).abs() < 1e-13);
+                    if dialect == SpiceDialect::Ngspice {
+                        assert_eq!(ac[0].currents[column].im, 0.0);
+                    }
+                }
+            }
+        }
+    }
+
+    #[wasm_bindgen_test]
     fn legacy_bjt_capacitance_temperature_in_wasm() {
         use rspice_core::engine::{SimulationConfig, SpiceDialect};
         // Same isolated CJE case as the native independent-reference test:

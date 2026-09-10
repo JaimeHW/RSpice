@@ -2423,3 +2423,170 @@ fn legacy_junction_capacitance_temperature_matches_spice_references() {
         }
     }
 }
+
+#[test]
+fn legacy_gmin_placement_and_multiplicity_match_spice_dialects() {
+    for dialect in [
+        SpiceDialect::BestAvailable,
+        SpiceDialect::Ngspice,
+        SpiceDialect::Xyce,
+    ] {
+        for gmin in [1e-12, 1e-3] {
+            let mut config = SimulationConfig::default().with_spice_dialect(dialect);
+            config.convergence_config.gmin_target = 0.0;
+            config.convergence_config.junction_gmin_target = gmin;
+            let engine = Engine::new(config);
+            for (kind, p) in [("NPN", 1.0), ("PNP", -1.0)] {
+                for area in [1.0, 5.0] {
+                    for m in [1e-20, 0.5, 3.0] {
+                        // Tie the substrate to its collector connection to
+                        // isolate BE/BC GMIN. IS=0 eliminates physical current.
+                        let deck = Netlist::parse(&format!(
+                            "GP GMIN\nVC c 0 {}\nVB b 0 DC {} AC 1\nQ1 c b 0 c mm AREA={area} M={m}\n.model mm {kind}(IS=0 SUBS=1 BF=100 BR=2 TF=1n TR=2n)\n.end\n",p,p*0.1)).unwrap();
+                        let dc = engine.run_dc_op(&deck).unwrap();
+                        let ac = engine.run_ac(&deck, &[1e6]).unwrap();
+                        let g = gmin * m;
+                        let omega = std::f64::consts::TAU * 1e6;
+                        // Ngspice 46 binary captures: leakage parallels.
+                        // Xyce 7.10 N_DEV_BJT.C: GMIN enters transport and
+                        // diffusion charge, then BF/BR divide base currents.
+                        let expected = if dialect == SpiceDialect::Xyce {
+                            [
+                                ("VB", 0.449 * g, -0.51 * g, -omega * 3e-9 * g),
+                                ("VC", -1.45 * g, 0.5 * g, omega * 2e-9 * g),
+                            ]
+                        } else {
+                            [("VB", 0.8 * g, -2.0 * g, 0.0), ("VC", -0.9 * g, g, 0.0)]
+                        };
+                        for (branch, current, re, im) in expected {
+                            let actual = dc.branch_current_named(branch).unwrap();
+                            assert!(
+                                (actual - p * current).abs() < g * 2e-11,
+                                "{dialect:?} {kind} AREA={area} M={m} GMIN={gmin} DC {branch}: {actual:e} vs {:e}",
+                                p * current
+                            );
+                            let index = ac[0]
+                                .branch_names
+                                .iter()
+                                .position(|name| name.eq_ignore_ascii_case(branch))
+                                .unwrap();
+                            let actual = ac[0].currents[index];
+                            assert!(
+                                (actual.re - re).abs() < g * 2e-11
+                                    && (actual.im - im).abs() < g * 2e-11,
+                                "{dialect:?} {kind} AREA={area} M={m} GMIN={gmin} AC {branch}: {actual:?} vs ({re:e},{im:e})"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn ngspice_gp_gmin_substrate_and_series_network_match_explicit_resistors() {
+    let gmin = 1e-3;
+    let mut config = SimulationConfig::default().with_spice_dialect(SpiceDialect::Ngspice);
+    config.convergence_config.gmin_target = 0.0;
+    config.convergence_config.junction_gmin_target = gmin;
+    let engine = Engine::new(config);
+    for (kind, p) in [("NPN", 1.0), ("PNP", -1.0)] {
+        for subs in [1, -1] {
+            for series in [false, true] {
+                for (area, m) in [(1.0, 1.0), (5.0, 0.25), (2.0, 3.0)] {
+                    let (rc, rb, re, rbm) = if series {
+                        (20.0, 30.0, 10.0, 10.0)
+                    } else {
+                        (0.0, 0.0, 0.0, 0.0)
+                    };
+                    let sources = |vb: f64| {
+                        format!(
+                            "GP resistor equivalent\nVC c 0 {} AC .3\nVB b 0 DC {vb} AC 1\nVE e 0 {} AC .2\nVS s 0 {} AC .4\n",
+                            p,
+                            p * (-0.05),
+                            p * (-0.2)
+                        )
+                    };
+                    let actual = format!(
+                        "{}Q1 c b e s mm AREA={area} M={m}\n.model mm {kind}(IS=0 SUBS={subs} TF=1n TR=2n RC={rc} RB={rb} RBM={rbm} RE={re})\n.end\n",
+                        sources(p * 0.1)
+                    );
+                    let (ci, bi, ei) = if series {
+                        ("ci", "bi", "ei")
+                    } else {
+                        ("c", "b", "e")
+                    };
+                    let connection = if subs == 1 { ci } else { bi };
+                    let rg = 1.0 / (gmin * m);
+                    let mut resistors = format!(
+                        "Rbe {bi} {ei} {rg}\nRbc {bi} {ci} {rg}\nRsub s {connection} {rg}\n"
+                    );
+                    if series {
+                        resistors.push_str(&format!(
+                            "Rc c ci {}\nRb b bi {}\nRe e ei {}\n",
+                            rc / (area * m),
+                            rb / (area * m),
+                            re / (area * m)
+                        ));
+                    }
+                    let reference =
+                        Netlist::parse(&format!("{}{resistors}.end\n", sources(p * 0.1))).unwrap();
+                    let deck = Netlist::parse(&actual).unwrap();
+                    let expected_dc = engine.run_dc_op(&reference).unwrap();
+                    let actual_dc = engine.run_dc_op(&deck).unwrap();
+                    let expected_ac = engine.run_ac(&reference, &[1e6]).unwrap();
+                    let actual_ac = engine.run_ac(&deck, &[1e6]).unwrap();
+                    for branch in ["VC", "VB", "VE", "VS"] {
+                        let a = actual_dc.branch_current_named(branch).unwrap();
+                        let b = expected_dc.branch_current_named(branch).unwrap();
+                        assert!(
+                            (a - b).abs() < 1e-11 * m,
+                            "{kind} SUBS={subs} series={series} AREA={area} M={m} DC {branch}: {a:e} vs {b:e}"
+                        );
+                        let current = |ac: &rspice_core::analysis::ac::AcResult| {
+                            ac.currents[ac
+                                .branch_names
+                                .iter()
+                                .position(|name| name.eq_ignore_ascii_case(branch))
+                                .unwrap()]
+                        };
+                        let a = current(&actual_ac[0]);
+                        let b = current(&expected_ac[0]);
+                        assert!(
+                            (a - b).norm() < 1e-11 * m,
+                            "{kind} SUBS={subs} series={series} AREA={area} M={m} AC {branch}: {a:?} vs {b:?}"
+                        );
+                    }
+                    if series && area == 2.0 && p == 1.0 {
+                        // With IS=0, GMIN must not create a transient storage
+                        // term. A linear ramp follows the resistive endpoints.
+                        let final_reference =
+                            Netlist::parse(&format!("{}{resistors}.end\n", sources(p * 0.3)))
+                                .unwrap();
+                        let final_dc = engine.run_dc_op(&final_reference).unwrap();
+                        let ramp = Netlist::parse(
+                            &actual.replace("DC 0.1 AC 1", "PWL(0 0.1 20n 0.3) AC 1"),
+                        )
+                        .unwrap();
+                        let tran = engine.run_tran(&ramp, 20e-9, 1e-9).unwrap();
+                        assert!(tran.time.len() > 3);
+                        for branch in ["VC", "VB", "VE", "VS"] {
+                            let start = expected_dc.branch_current_named(branch).unwrap();
+                            let end = final_dc.branch_current_named(branch).unwrap();
+                            let values = tran.try_branch_current_waveform_named(branch).unwrap();
+                            for (&time, &actual) in tran.time.iter().zip(values) {
+                                let expected =
+                                    start + (end - start) * (time / 20e-9).clamp(0.0, 1.0);
+                                assert!(
+                                    (actual - expected).abs() < 1e-10 * m,
+                                    "SUBS={subs} transient {branch} at {time:e}: {actual:e} vs {expected:e}"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

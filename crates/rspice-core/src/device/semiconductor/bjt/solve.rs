@@ -338,11 +338,8 @@ impl Bjt {
             },
             state.vrth,
         );
-        let (collector_d, base_d, emitter_d) = self.intrinsic_terminal_derivatives(eval.linearized);
-        let collector_internal = Self::branch_from_internal(eval.linearized.ic, collector_d);
-        let base_internal = Self::branch_from_internal(eval.linearized.ib, base_d);
-        let emitter_internal =
-            Self::branch_from_internal(-(eval.linearized.ic + eval.linearized.ib), emitter_d);
+        let [collector_internal, base_internal, emitter_internal] =
+            self.intrinsic_terminal_branches(&eval);
         let thermal_sink = self.thermal_sink_branch(state.vrth);
         let thermal_power = self.thermal_power_branch(
             eval,
@@ -468,22 +465,45 @@ impl Bjt {
         &self,
         eval: &EvaluatedBjtState,
     ) -> BranchLinearization {
-        if self.vbic_solves_vbp() {
+        if self.charge_model == BjtChargeModel::LegacyGummelPoon {
+            // GP's substrate current is folded at its intrinsic connection.
+            BranchLinearization::default()
+        } else if self.vbic_solves_vbp() {
             eval.irbp
         } else {
             Self::add_branches(eval.ibep, eval.ibcp)
         }
     }
 
+    /// Intrinsic terminal rows shared by Newton, sensitivity and reduction.
+    /// GP's substrate branch shares the charge network's intrinsic endpoint;
+    /// it must flow through RC/RB before reaching the external terminal.
+    pub(super) fn intrinsic_terminal_branches(
+        &self,
+        eval: &EvaluatedBjtState,
+    ) -> [BranchLinearization; 3] {
+        let (collector_d, base_d, emitter_d) = self.intrinsic_terminal_derivatives(eval.linearized);
+        let mut collector = Self::branch_from_internal(eval.linearized.ic, collector_d);
+        let mut base = Self::branch_from_internal(eval.linearized.ib, base_d);
+        let emitter =
+            Self::branch_from_internal(-(eval.linearized.ic + eval.linearized.ib), emitter_d);
+        if self.charge_model == BjtChargeModel::LegacyGummelPoon {
+            match self.substrate_topology {
+                BjtSubstrateTopology::Vertical => {
+                    collector = Self::sub_branches(collector, eval.ibcp)
+                }
+                BjtSubstrateTopology::Lateral => base = Self::sub_branches(base, eval.ibcp),
+            }
+        }
+        [collector, base, emitter]
+    }
+
     pub(super) fn external_terminal_branches(
         &self,
         eval: EvaluatedBjtState,
     ) -> [BranchLinearization; EXTERNAL_DIM] {
-        let (collector_d, base_d, emitter_d) = self.intrinsic_terminal_derivatives(eval.linearized);
-        let collector_internal = Self::branch_from_internal(eval.linearized.ic, collector_d);
-        let base_internal = Self::branch_from_internal(eval.linearized.ib, base_d);
-        let emitter_internal =
-            Self::branch_from_internal(-(eval.linearized.ic + eval.linearized.ib), emitter_d);
+        let [collector_internal, base_internal, emitter_internal] =
+            self.intrinsic_terminal_branches(&eval);
 
         let collector = if Self::series_active(self.rcx) {
             eval.ircx

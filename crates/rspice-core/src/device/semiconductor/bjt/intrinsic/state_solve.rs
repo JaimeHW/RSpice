@@ -293,7 +293,7 @@ impl Bjt {
             ire: self.ire_branch(ve, vei),
             ibep: self.ibep_branch(vbx, vbp),
             irbp: self.irbp_branch(vbx, vbi, vcx, vci, vbp, vsi),
-            ibcp: self.ibcp_branch(vbp, vsi),
+            ibcp: self.ibcp_branch(voltages),
             iccp: self.iccp_branch(vbx, vbi, vci, vbp, vsi),
             irs: self.irs_branch(vs, vsi),
             igcx: self.igcx_branch(vc, vcx, vbx),
@@ -770,11 +770,8 @@ impl Bjt {
             },
             vrth,
         );
-        let (collector_d, base_d, emitter_d) = self.intrinsic_terminal_derivatives(eval.linearized);
-        let collector_internal = Self::branch_from_internal(eval.linearized.ic, collector_d);
-        let base_internal = Self::branch_from_internal(eval.linearized.ib, base_d);
-        let emitter_internal =
-            Self::branch_from_internal(-(eval.linearized.ic + eval.linearized.ib), emitter_d);
+        let [collector_internal, base_internal, emitter_internal] =
+            self.intrinsic_terminal_branches(&eval);
         let thermal_sink = self.thermal_sink_branch(vrth);
         let thermal_power = Self::scale_branch(
             self.thermal_power_branch(eval, [vc, vb, ve, vs], state),
@@ -937,11 +934,8 @@ impl Bjt {
         let has_rs = self.has_substrate_resistance();
         let has_self_heat = self.thermal_model_enabled();
         let solve_vbp = self.vbic_solves_vbp();
-        let (collector_d, base_d, emitter_d) = self.intrinsic_terminal_derivatives(eval.linearized);
-        let collector_internal = Self::branch_from_internal(eval.linearized.ic, collector_d);
-        let base_internal = Self::branch_from_internal(eval.linearized.ib, base_d);
-        let emitter_internal =
-            Self::branch_from_internal(-(eval.linearized.ic + eval.linearized.ib), emitter_d);
+        let [collector_internal, base_internal, emitter_internal] =
+            self.intrinsic_terminal_branches(&eval);
         let thermal_sink = self.thermal_sink_branch(state.vrth);
         let thermal_power = self.thermal_power_branch(
             eval,
