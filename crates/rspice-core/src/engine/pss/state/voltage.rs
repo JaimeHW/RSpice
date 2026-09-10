@@ -530,14 +530,24 @@ impl InitialChargeRates {
                     }
                     ForestValue::Zero | ForestValue::State(_) => 0.0,
                 });
+                if !rate.is_finite() {
+                    let name = match value {
+                        ForestValue::Source(index) => &circuit.voltage_sources.names[index],
+                        ForestValue::BehavioralSource(index) => {
+                            &circuit.behavioral_sources.voltage_sources[index].name
+                        }
+                        ForestValue::Zero | ForestValue::State(_) => return Err(precision_error()),
+                    };
+                    return Err(SimulationError::Circuit(format!(
+                        "PSS initial displacement current requires a finite analytic outgoing derivative for source {name} at t=0"
+                    )));
+                }
                 rhs[row] = rspice_veriloga_runtime::arithmetic::sum_products(
                     [(rhs[row], 1.0), (-weight, rate)].into_iter(),
                 )
                 .map_err(|_| precision_error())?;
                 if !rhs[row].is_finite() {
-                    return Err(SimulationError::Circuit(
-                        "PSS initial displacement current requires a finite analytic source derivative".to_owned(),
-                    ));
+                    return Err(precision_error());
                 }
             }
         }

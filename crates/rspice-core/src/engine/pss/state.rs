@@ -1037,6 +1037,33 @@ mod tests {
     }
 
     #[test]
+    fn vcvs_initialization_identifies_the_source_without_an_outgoing_derivative() {
+        for dialect in [
+            crate::config::SpiceDialect::Ngspice,
+            crate::config::SpiceDialect::Xyce,
+        ] {
+            for expression in ["floor(-sin(2*pi*time))", "sqrt(sin(2*pi*time)^2)"] {
+                let deck = Netlist::parse(&format!(
+                    "Initial source derivative diagnostic\nB1 aux 0 V=1\nRaux aux 0 1\nB2 in 0 V={expression}\nR1 in 0 1\nE1 out 0 in 0 2\nC1 out 0 0.2\n.end\n"
+                )).unwrap();
+                let engine = Engine::new(
+                    super::super::super::SimulationConfig::default().with_spice_dialect(dialect),
+                );
+                let mut circuit = PssCircuit::new(engine.build_circuit(&deck).unwrap()).unwrap();
+                circuit.set_state(&[]).unwrap();
+                let error = engine
+                    .pss_initial_node_solution(&mut circuit, &crate::abort_signal::NoAbort)
+                    .unwrap_err();
+                assert!(
+                    matches!(error, SimulationError::Circuit(ref message)
+                    if message.contains("source B2") && message.contains("analytic outgoing derivative")),
+                    "{error}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn vcvs_initialization_retains_ic_capacitor_and_semiconductor_charge_currents() {
         for input in [
             "V1 in 0 SIN(0 0.01 1)",
