@@ -116,7 +116,7 @@ impl Engine {
                         .copied()
                         .unwrap_or(0.0)
                 });
-            if !g.is_finite() || g.abs() <= 1e-30 {
+            if !g.is_finite() || g == 0.0 {
                 continue;
             }
 
@@ -126,6 +126,22 @@ impl Engine {
                 Self::optional_system_index(stamp.nn.row),
                 1.0 / g,
             ));
+        }
+
+        for (idx, name) in circuit.resistor_branches.names.iter().enumerate() {
+            let resistance = circuit.resistor_branches.small_signal_resistances[idx];
+            let branch = circuit.resistor_branches.branch_indices[idx];
+            if !resistance.is_finite() || branch == 0 {
+                continue;
+            }
+            let mut element = ElementDesc::resistor(
+                name,
+                Self::optional_system_index(circuit.resistor_branches.node_pos[idx]),
+                Self::optional_system_index(circuit.resistor_branches.node_neg[idx]),
+                resistance,
+            );
+            element.branch_index = Some(circuit.get_branch_matrix_index(branch) - 1);
+            elements.push(element);
         }
 
         for idx in 0..circuit.current_sources.names.len() {

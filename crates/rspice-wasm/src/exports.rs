@@ -315,6 +315,54 @@ mod wasm_tests {
     }
 
     #[wasm_bindgen_test]
+    fn adjoint_sensitivity_boundaries_and_scale_in_wasm() {
+        use rspice_core::analysis::sensitivity::SensitivityAnalyzer;
+        assert!(
+            SensitivityAnalyzer::new(vec![vec![]], vec![1.0], vec![])
+                .analyze(0, None)
+                .is_none()
+        );
+        let tiny = f64::from_bits(1);
+        let mut dense = SensitivityAnalyzer::new(
+            vec![vec![2.0, tiny], vec![0.0, tiny]],
+            vec![1.0, 1.0],
+            vec![
+                rspice_core::analysis::sensitivity::ElementDesc::current_source(
+                    "I",
+                    None,
+                    Some(1),
+                    1.0,
+                ),
+            ],
+        );
+        assert_eq!(
+            dense.analyze(0, None).unwrap().get("I").unwrap().absolute,
+            -0.5
+        );
+        let mut config = rspice_core::engine::SimulationConfig::default();
+        config.convergence_config.gmin_target = 0.0;
+        config.convergence_config.junction_gmin_target = 0.0;
+        let engine = rspice_core::Engine::new(config);
+        for (resistance, current) in [(1e-200, 1e200), (1.0, 1e-200), (1e200, 1e-200)] {
+            let netlist = rspice_core::Netlist::parse(&format!(
+                "Scaled adjoint in WASM\nI1 0 out {current:e}\nR1 out 0 {resistance:e}\n.end\n"
+            ))
+            .unwrap();
+            let result = engine
+                .run_sensitivity_linearized_with_abort(
+                    &netlist,
+                    1,
+                    None,
+                    &rspice_core::abort_signal::NoAbort,
+                )
+                .unwrap();
+            let resistor = result.get("R1").unwrap();
+            assert!((resistor.absolute / current - 1.0).abs() < 2e-12);
+            assert!((resistor.normalized - 1.0).abs() < 2e-12);
+        }
+    }
+
+    #[wasm_bindgen_test]
     fn pss_large_drop_port_precision_in_wasm() {
         use rspice_core::abort_signal::NoAbort;
         use rspice_core::analysis::PssConfig;

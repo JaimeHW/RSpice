@@ -9,7 +9,7 @@
 //! For a linear system **G·x = b**, the sensitivity of output xₖ to parameter p is:
 //!
 //! ```text
-//! ∂xₖ/∂p = -λᵀ · (∂G/∂p · x + ∂b/∂p)
+//! ∂xₖ/∂p = λᵀ · (∂b/∂p - ∂G/∂p · x)
 //! ```
 //!
 //! where λ is the adjoint vector solving **Gᵀ·λ = eₖ** (eₖ is unit vector).
@@ -27,6 +27,7 @@
 
 use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::{Complex64, Value};
+use rspice_veriloga_runtime::arithmetic::ScaledValue;
 
 //=============================================================================
 // Data Structures
@@ -156,8 +157,11 @@ impl Sensitivity {
         absolute: Value,
         output_value: Value,
     ) -> Self {
-        let normalized = if output_value.abs() > 1e-15 {
-            (nominal / output_value) * absolute
+        let normalized = if output_value != 0.0 {
+            ScaledValue::new(nominal)
+                .multiply(ScaledValue::new(absolute))
+                .divide(ScaledValue::new(output_value))
+                .binary64()
         } else {
             0.0
         };
@@ -271,7 +275,7 @@ pub struct ElementDesc {
     pub node_neg: Option<usize>,
     /// Optional MNA branch-equation index for branch-based elements.
     pub branch_index: Option<usize>,
-    /// Parameter value (conductance for R, capacitance for C, etc.)
+    /// Parameter value (resistance for R, capacitance for C, etc.)
     pub value: Value,
 }
 
@@ -351,11 +355,7 @@ impl ElementDesc {
 
     /// Get conductance (for resistors)
     pub fn conductance(&self) -> Value {
-        if self.value.abs() > 1e-15 {
-            1.0 / self.value
-        } else {
-            1e15 // Very large conductance for near-zero resistance
-        }
+        1.0 / self.value
     }
 }
 
@@ -458,6 +458,7 @@ impl SensitivityAnalyzer {
         e[output_node] = 1.0;
         let n = self.system_size;
         let mut aug = vec![vec![0.0; n + 1]; n];
+        let mut trial = vec![0.0; n];
         let mut work = 0usize;
 
         for row in 0..n {
@@ -466,6 +467,20 @@ impl SensitivityAnalyzer {
                 *entry = self.g_matrix[col][row];
             }
             aug[row][n] = e[row];
+            let scale = aug[row][..n]
+                .iter()
+                .fold(0.0_f64, |scale, value| scale.max(value.abs()));
+            if scale == 0.0 {
+                return Ok(false);
+            }
+            for value in &mut aug[row] {
+                poll_sensitivity_work(abort, &mut work)?;
+                let scaled = *value / scale;
+                if !scaled.is_finite() || (scaled == 0.0 && *value != 0.0) {
+                    return Ok(false);
+                }
+                *value = scaled;
+            }
         }
 
         for k in 0..n {
@@ -480,7 +495,7 @@ impl SensitivityAnalyzer {
                 }
             }
 
-            if max_val < 1e-15 {
+            if max_val == 0.0 || !max_val.is_finite() {
                 return Ok(false);
             }
 
@@ -512,12 +527,53 @@ impl SensitivityAnalyzer {
             let mut sum = aug[i][n];
             for (j, &coefficient) in aug[i].iter().enumerate().take(n).skip(i + 1) {
                 poll_sensitivity_work(abort, &mut work)?;
-                sum -= coefficient * self.adjoint[j];
+                sum -= coefficient * trial[j];
             }
-            self.adjoint[i] = sum / aug[i][i];
+            trial[i] = sum / aug[i][i];
+            if !trial[i].is_finite() {
+                return Ok(false);
+            }
         }
 
+        // Certify the original transpose, not the rounded triangular system.
+        // A finite solve can still be inaccurate after cancellation or growth.
+        for row in 0..n {
+            poll_sensitivity_index(abort, row)?;
+            let terms = (0..aug[row].len()).map(|column| {
+                if column == n {
+                    (-e[row], 1.0)
+                } else {
+                    (self.g_matrix[column][row], trial[column])
+                }
+            });
+            let Ok(residual) = ScaledValue::sum_products_div(
+                terms.clone().map(|(coefficient, value)| {
+                    [ScaledValue::new(coefficient), ScaledValue::new(value)]
+                }),
+                ScaledValue::new(1.0),
+            ) else {
+                return Ok(false);
+            };
+            let mut scale = ScaledValue::new(0.0);
+            for (coefficient, value) in terms {
+                poll_sensitivity_work(abort, &mut work)?;
+                scale = ScaledValue::product_sum(
+                    ScaledValue::new(coefficient.abs()),
+                    ScaledValue::new(value.abs()),
+                    scale,
+                    ScaledValue::new(1.0),
+                );
+            }
+            if !residual.is_zero()
+                && (scale.is_zero()
+                    || residual.divide(scale).binary64().abs()
+                        > 128.0 * Value::EPSILON * n as Value)
+            {
+                return Ok(false);
+            }
+        }
         ensure_sensitivity_not_aborted(abort)?;
+        self.adjoint = trial;
         Ok(true)
     }
 
@@ -528,17 +584,28 @@ impl SensitivityAnalyzer {
     ///       = -λᵀ · (-1/R² · stamps) · V
     ///       = (1/R²) · (λᵢ - λⱼ) · (Vᵢ - Vⱼ)
     fn resistor_sensitivity(&self, elem: &ElementDesc) -> Value {
-        let r = elem.value;
-        if r.abs() < 1e-15 {
-            return 0.0;
+        if let Some(branch) = elem.branch_index {
+            // Vp - Vn - R*I = 0: -lambda^T (dG/dR) x = lambda_branch * I.
+            return ScaledValue::new(self.adjoint[branch])
+                .multiply(ScaledValue::new(self.solution[branch]))
+                .binary64();
         }
-
-        let v_diff = self.voltage_difference(elem.node_pos, elem.node_neg);
-        let lambda_diff = self.adjoint_difference(elem.node_pos, elem.node_neg);
+        let r = elem.value;
+        let difference = |values: &[Value]| {
+            ScaledValue::product_sum(
+                ScaledValue::new(elem.node_pos.map_or(0.0, |index| values[index])),
+                ScaledValue::new(1.0),
+                ScaledValue::new(-elem.node_neg.map_or(0.0, |index| values[index])),
+                ScaledValue::new(1.0),
+            )
+        };
 
         // ∂G/∂R = -G² = -1/R²
         // Sensitivity = -λᵀ · (∂G/∂R · V) = (1/R²) · (λᵢ - λⱼ) · (Vᵢ - Vⱼ)
-        (1.0 / (r * r)) * lambda_diff * v_diff
+        difference(&self.adjoint)
+            .divide(ScaledValue::new(r))
+            .multiply(difference(&self.solution).divide(ScaledValue::new(r)))
+            .binary64()
     }
 
     /// Compute sensitivity of a capacitor (DC case: no effect)
@@ -568,18 +635,6 @@ impl SensitivityAnalyzer {
             .unwrap_or(0.0)
     }
 
-    #[inline]
-    fn unsupported_linearized_sensitivity(&self, _elem: &ElementDesc) -> Value {
-        0.0
-    }
-
-    /// Get voltage difference across element
-    fn voltage_difference(&self, n_pos: Option<usize>, n_neg: Option<usize>) -> Value {
-        let v_pos = n_pos.map(|i| self.solution[i]).unwrap_or(0.0);
-        let v_neg = n_neg.map(|i| self.solution[i]).unwrap_or(0.0);
-        v_pos - v_neg
-    }
-
     /// Get adjoint difference across element
     fn adjoint_difference(&self, n_pos: Option<usize>, n_neg: Option<usize>) -> Value {
         let l_pos = n_pos.map(|i| self.adjoint[i]).unwrap_or(0.0);
@@ -592,6 +647,9 @@ impl SensitivityAnalyzer {
     /// # Arguments
     /// * `output_node` - Node index for output voltage
     /// * `output_ref` - Reference node (None = ground)
+    ///
+    /// Returns `None` for invalid dimensions/indices, unsupported element
+    /// derivatives, or a singular, nonfinite or inaccurate adjoint solution.
     pub fn analyze(
         &mut self,
         output_node: usize,
@@ -612,8 +670,22 @@ impl SensitivityAnalyzer {
         ensure_sensitivity_not_aborted(abort)?;
         if output_node >= self.system_size
             || output_ref.is_some_and(|reference| reference >= self.system_size)
+            || !self.valid_vectors_with_abort(abort)?
+            || self.g_matrix.len() != self.system_size
         {
             return Ok(None);
+        }
+        let mut work = 0;
+        for row in &self.g_matrix {
+            if row.len() != self.system_size {
+                return Ok(None);
+            }
+            for &value in row {
+                poll_sensitivity_work(abort, &mut work)?;
+                if !value.is_finite() {
+                    return Ok(None);
+                }
+            }
         }
         // Get output value
         let output_value = match output_ref {
@@ -653,7 +725,6 @@ impl SensitivityAnalyzer {
         }
 
         self.build_result_with_abort(output_node, output_value, abort)
-            .map(Some)
     }
 
     /// Assemble sensitivities from the adjoint supplied to
@@ -679,6 +750,7 @@ impl SensitivityAnalyzer {
         ensure_sensitivity_not_aborted(abort)?;
         if output_node >= self.system_size
             || output_ref.is_some_and(|reference| reference >= self.system_size)
+            || !self.valid_vectors_with_abort(abort)?
         {
             return Ok(None);
         }
@@ -686,7 +758,22 @@ impl SensitivityAnalyzer {
             .map(|reference| self.solution[output_node] - self.solution[reference])
             .unwrap_or(self.solution[output_node]);
         self.build_result_with_abort(output_node, output_value, abort)
-            .map(Some)
+    }
+
+    fn valid_vectors_with_abort(
+        &self,
+        abort: &dyn AbortSignal,
+    ) -> Result<bool, SensitivityAnalysisError> {
+        if self.solution.len() != self.system_size || self.adjoint.len() != self.system_size {
+            return Ok(false);
+        }
+        for (index, value) in self.solution.iter().chain(&self.adjoint).enumerate() {
+            poll_sensitivity_index(abort, index)?;
+            if !value.is_finite() {
+                return Ok(false);
+            }
+        }
+        Ok(true)
     }
 
     fn build_result_with_abort(
@@ -694,19 +781,33 @@ impl SensitivityAnalyzer {
         output_node: usize,
         output_value: Value,
         abort: &dyn AbortSignal,
-    ) -> Result<SensitivityResult, SensitivityAnalysisError> {
+    ) -> Result<Option<SensitivityResult>, SensitivityAnalysisError> {
+        if !output_value.is_finite() {
+            return Ok(None);
+        }
         let mut result = SensitivityResult::new(&format!("V({})", output_node + 1), output_value);
 
         // Compute sensitivity for each element
         for (index, elem) in self.elements.iter().enumerate() {
             poll_sensitivity_index(abort, index)?;
+            if !elem.value.is_finite()
+                || [elem.node_pos, elem.node_neg, elem.branch_index]
+                    .into_iter()
+                    .flatten()
+                    .any(|index| index >= self.system_size)
+                || (elem.element_type == ElementType::Resistor
+                    && elem.value == 0.0
+                    && elem.branch_index.is_none())
+                || (elem.element_type == ElementType::VoltageSource && elem.branch_index.is_none())
+            {
+                return Ok(None);
+            }
             let absolute = match elem.element_type {
                 ElementType::Resistor => self.resistor_sensitivity(elem),
-                ElementType::Capacitor => self.capacitor_sensitivity(elem),
+                ElementType::Capacitor | ElementType::Inductor => self.capacitor_sensitivity(elem),
                 ElementType::CurrentSource => self.current_source_sensitivity(elem),
                 ElementType::VoltageSource => self.voltage_source_sensitivity(elem),
-                ElementType::Inductor
-                | ElementType::Transconductance
+                ElementType::Transconductance
                 | ElementType::Transresistance
                 | ElementType::Diode
                 | ElementType::Bjt
@@ -719,8 +820,11 @@ impl SensitivityAnalyzer {
                 | ElementType::Coupling
                 | ElementType::Xspice
                 | ElementType::Model
-                | ElementType::Other => self.unsupported_linearized_sensitivity(elem),
+                | ElementType::Other => return Ok(None),
             };
+            if !absolute.is_finite() {
+                return Ok(None);
+            }
 
             let sensitivity = Sensitivity::new(
                 &elem.name,
@@ -735,7 +839,7 @@ impl SensitivityAnalyzer {
         }
 
         ensure_sensitivity_not_aborted(abort)?;
-        Ok(result)
+        Ok(Some(result))
     }
 }
 
@@ -783,6 +887,151 @@ fn poll_sensitivity_work(
 mod tests {
     use super::*;
     use crate::abort_signal::CountingAbort;
+
+    #[test]
+    fn adjoint_refuses_malformed_systems_and_element_descriptions_without_panicking() {
+        for (matrix, solution) in [
+            (vec![vec![]], vec![1.0]),
+            (vec![vec![1.0]], vec![]),
+            (vec![vec![1.0]], vec![1.0, 2.0]),
+            (vec![vec![Value::NAN]], vec![1.0]),
+            (vec![vec![1.0]], vec![Value::INFINITY]),
+        ] {
+            assert!(
+                SensitivityAnalyzer::new(matrix, solution, vec![])
+                    .analyze(0, None)
+                    .is_none()
+            );
+        }
+        let mut invalid = ElementDesc::resistor("R", Some(1), None, 1.0);
+        for kind in [
+            ElementType::Resistor,
+            ElementType::Capacitor,
+            ElementType::CurrentSource,
+        ] {
+            invalid.element_type = kind;
+            let analyzer = SensitivityAnalyzer::with_precomputed_adjoint(
+                vec![1.0],
+                vec![1.0],
+                vec![invalid.clone()],
+            )
+            .unwrap();
+            assert!(analyzer.analyze_precomputed(0, None).is_none());
+        }
+        for element in [
+            ElementDesc::resistor("R", Some(0), None, 0.0),
+            ElementDesc::resistor("R", Some(0), None, Value::NAN),
+            ElementDesc::voltage_source("V", Some(0), None, 1, 1.0),
+        ] {
+            assert!(
+                SensitivityAnalyzer::new(vec![vec![1.0]], vec![1.0], vec![element])
+                    .analyze(0, None)
+                    .is_none()
+            );
+        }
+        let mut analyzer =
+            SensitivityAnalyzer::with_precomputed_adjoint(vec![1.0], vec![1.0], vec![]).unwrap();
+        assert!(analyzer.analyze(0, None).is_none());
+    }
+
+    #[test]
+    fn adjoint_refuses_unsupported_derivatives_instead_of_reporting_zero() {
+        let mut element = ElementDesc::resistor("D", Some(0), None, 1.0);
+        element.element_type = ElementType::Diode;
+        let analyzer =
+            SensitivityAnalyzer::with_precomputed_adjoint(vec![1.0], vec![1.0], vec![element])
+                .unwrap();
+        assert!(analyzer.analyze_precomputed(0, None).is_none());
+    }
+
+    #[test]
+    fn adjoint_preserves_resistor_derivatives_at_extreme_scales() {
+        for resistance in [1e-200, 1e-20, 1.0, 1e20, 1e200, -1e200] {
+            let element = ElementDesc::resistor("R", Some(0), None, resistance);
+            let mut dense = SensitivityAnalyzer::new(
+                vec![vec![1.0 / resistance]],
+                vec![1.0],
+                vec![element.clone()],
+            );
+            let sparse = SensitivityAnalyzer::with_precomputed_adjoint(
+                vec![1.0],
+                vec![resistance],
+                vec![element],
+            )
+            .unwrap();
+            for result in [dense.analyze(0, None), sparse.analyze_precomputed(0, None)] {
+                let result = result.expect("the finite one-resistor sensitivity is defined");
+                let resistor = result.get("R").unwrap();
+                assert!(
+                    (resistor.absolute * resistance - 1.0).abs() < 2e-14,
+                    "R={resistance:e}: {resistor:?}"
+                );
+                assert!((resistor.normalized - 1.0).abs() < 2e-14);
+            }
+        }
+        let element = ElementDesc::resistor("R", Some(0), Some(1), 1e200);
+        let result = SensitivityAnalyzer::with_precomputed_adjoint(
+            vec![1e308, -1e308],
+            vec![1e200, -1e200],
+            vec![element],
+        )
+        .unwrap()
+        .analyze_precomputed(0, None)
+        .unwrap();
+        assert!((result.get("R").unwrap().absolute / 4e108 - 1.0).abs() < 2e-14);
+    }
+
+    #[test]
+    fn normalized_sensitivity_has_no_dimensionful_output_floor() {
+        for (parameter, derivative, output, expected) in [
+            (1e-200, 1.0, 1e-200, 1.0),
+            (1e200, 1e-200, 1e-200, 1e200),
+            (1e-200, 1e200, 1e200, 1e-200),
+        ] {
+            let result = Sensitivity::new(
+                "R",
+                ElementType::Resistor,
+                "value",
+                parameter,
+                derivative,
+                output,
+            );
+            assert!(
+                (result.normalized / expected - 1.0).abs() < 2e-14,
+                "{result:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn dense_adjoint_preserves_subnormal_row_constraints() {
+        let tiny = Value::from_bits(1);
+        // G^T * lambda = [1, 0] implies lambda = [1/2, -1/2].
+        // Dividing the second pivot row by two must not erase its coupling.
+        let mut analyzer = SensitivityAnalyzer::new(
+            vec![vec![2.0, tiny], vec![0.0, tiny]],
+            vec![1.0, 1.0],
+            vec![ElementDesc::current_source("I", None, Some(1), 1.0)],
+        );
+        let result = analyzer.analyze(0, None).unwrap();
+        assert_eq!(result.get("I").unwrap().absolute, -0.5);
+    }
+
+    #[test]
+    fn dense_adjoint_preserves_scaled_transpose_and_differential_observation() {
+        for scale in [1e-200, 1.0, 1e200] {
+            let mut analyzer = SensitivityAnalyzer::new(
+                vec![vec![2.0 * scale, -scale], vec![0.0, scale]],
+                vec![1.0, 2.0],
+                vec![ElementDesc::current_source("I", None, Some(0), scale)],
+            );
+            let result = analyzer.analyze(0, None).unwrap();
+            assert!((result.get("I").unwrap().absolute * scale - 0.5).abs() < 2e-14);
+            let result = analyzer.analyze(0, Some(1)).unwrap();
+            assert_eq!(result.output_value, -1.0);
+            assert!((result.get("I").unwrap().absolute * scale - 0.5).abs() < 2e-14);
+        }
+    }
 
     #[test]
     fn precomputed_projection_observes_abort_within_one_poll_stride() {

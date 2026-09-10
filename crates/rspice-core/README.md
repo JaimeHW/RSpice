@@ -350,6 +350,16 @@ How each analysis is reached (netlist card, CLI flag, or engine API only)
 varies. The [CLI README](../rspice-cli/README.md) documents the netlist-card
 and flag surface; anything not listed there is engine-API only.
 
+The low-level DC adjoint API differentiates effective linear resistances
+(including branch-form resistors) and independent source amplitudes. Its
+resistance and nonzero-output normalization arithmetic preserves finite extreme
+scales without absolute resistance/conductance/output cutoffs. The standalone
+`SensitivityAnalyzer` returns `None` for malformed matrices, vectors or element
+indices, unsupported derivatives, and nonfinite or inaccurate adjoint solves;
+cancellation remains a distinct error. The dense path verifies its original
+transpose residual. Authored device/model-parameter studies use the separate
+complete-sensitivity engine APIs.
+
 ### Periodic large-signal cards
 
 `.PSS`, `.PAC`, `.PNOISE` and `.ENVELOPE` are parsed into typed, fully

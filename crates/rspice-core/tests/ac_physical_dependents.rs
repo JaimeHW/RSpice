@@ -94,6 +94,44 @@ fn high_impedance_resistor_noise_is_four_k_t_r() {
 }
 
 #[test]
+fn adjoint_sensitivity_preserves_extreme_resistors_and_small_outputs() {
+    let engine = physical_engine();
+    for (resistance, current) in [
+        (1e-200, 1e200),
+        (1e-20, 1e20),
+        (1.0, 1e-200),
+        (1e200, 1e-200),
+    ] {
+        let netlist = Netlist::parse(&format!(
+            "Scaled resistor sensitivity\nI1 0 out {current:e}\nR1 out 0 {resistance:e}\n.end\n"
+        ))
+        .unwrap();
+        let result = engine
+            .run_sensitivity_linearized(&netlist, 1, None)
+            .unwrap();
+        assert_relative(result.output_value, current * resistance, 2e-12, "V=IR");
+        let resistor = result
+            .get("R1")
+            .expect("finite nonzero conductance must remain eligible");
+        assert_relative(resistor.absolute, current, 2e-12, "dV/dR=I");
+        assert_relative(
+            resistor.normalized,
+            1.0,
+            2e-12,
+            "normalized resistance derivative",
+        );
+        let source = result.get("I1").unwrap();
+        assert_relative(source.absolute, resistance, 2e-12, "dV/dI=R");
+        assert_relative(
+            source.normalized,
+            1.0,
+            2e-12,
+            "normalized source derivative",
+        );
+    }
+}
+
+#[test]
 fn high_impedance_adjoint_sensitivity_matches_closed_form() {
     let netlist = Netlist::parse(
         "* one-node high-Z adjoint oracle\n\
