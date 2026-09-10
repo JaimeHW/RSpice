@@ -1349,7 +1349,7 @@ inout p,n; electrical p,n;
 parameter real gain=2;
 integer starts; real scale;
 analog initial begin starts=starts+1; scale=gain*$temperature; $finish(0); end
-analog I(p,n)<+scale*V(p,n)+ddt(V(p,n))+idt(V(p,n));
+analog I(p,n)<+scale*V(p,n)+ddt(V(p,n))+idt(V(p,n),0.0);
 endmodule"#,
         "analysis restart",
     );
@@ -1364,6 +1364,7 @@ instance.begin_analysis(&ctx);
 assert_eq!(&*instance.event_state_accepted, &[1.0,1200.0]);
 assert_eq!(instance.drain_analog_tasks().count(), 1);
 instance.stamp_state.ddt_previous.fill(7.0);
+assert!(!instance.stamp_state.idt_previous.is_empty());
 instance.stamp_state.idt_previous.fill(8.0);
 instance.stamp_state.ddt_initialized.fill(true);
 instance.stamp_state.idt_initialized.fill(true);
@@ -2844,6 +2845,58 @@ for enabled in [0.0,1.0,0.0] {
 }
 
 #[test]
+fn generated_implicit_integrator_stamps_preserve_guards_and_noise() {
+    for (index, route) in [
+        "if(enabled) y=idt(e); else y=0.25;",
+        "y=enabled ? idt(e) : 0.25;",
+        "case(enabled) 0:y=0.25; default:y=idt(e); endcase",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let source = format!(
+            "module implicit_integrator_generated(p,n); inout p,n; electrical p,n; parameter integer enabled=1; real e,y; analog begin e=1000*(V(p)-V(n))+white_noise(1,\"input\"); {route} e=17; V(n)<+y; end endmodule"
+        );
+        let name = format!("implicit integrator generated {index}");
+        let (state, stamp, noise) = generated_parts(&source, &name);
+        run_generated_main(&name,&state,&stamp,&noise,r#"
+struct Capture(Vec<(f64,f64)>);
+impl runtime::GeneratedNoiseProcessVisitor for Capture {
+    fn visit_process(&mut self, _:usize, process:runtime::GeneratedNoiseProcessEvaluationRef<'_>)->bool {
+        assert_eq!(process.psd,1.0);
+        self.0.extend(process.injections.iter().map(|injection| (injection.gain.re,injection.gain.im)));
+        true
+    }
+}
+assert_eq!(device::state::Instance::INTERNAL_STATE_NODES, &[0]);
+let mut instance=device::state::Instance::new(&[0,1,2]);
+instance.set_branch_indices(&[3]);
+runtime::set_dynamic_operators_enabled(false);
+for enabled in [1.0,0.0,1.0] {
+    instance.set_parameter("enabled",enabled).unwrap();
+    instance.finalize_parameters().unwrap();
+    let ctx=runtime::GeneratedEvalContext {voltages:&[2.0,1.5,9.0,0.0],temperature:300.15};
+    let mut real=[0.0;12];
+    instance.stamp(&ctx,&mut runtime::GeneratedStamper {sink:Some(&mut real)});
+    assert_eq!(real[2],if enabled>0.0 {9.0} else {0.25});
+    assert_eq!(real[9],if enabled>0.0 {-500.0} else {9.0});
+    assert_eq!(real[10],if enabled>0.0 {-1000.0} else {0.0});
+    assert_eq!(real[11],if enabled>0.0 {1000.0} else {0.0});
+    let history=instance.capture_rollback_state();
+    for frequency in [0.0,1.0,1e6] {
+        let mut capture=Capture(Vec::new());
+        instance.evaluate_noise_processes_at_frequency(&ctx,frequency,&mut capture).unwrap();
+        assert_eq!(capture.0.iter().map(|gain|gain.0).sum::<f64>(),enabled);
+        assert!(capture.0.iter().all(|gain|gain.1==0.0));
+        assert!(!ctx.evaluation_failed());
+        assert_eq!(instance.capture_rollback_state(),history);
+    }
+}
+"#).unwrap_or_else(|report|panic!("{name}: {report}"));
+    }
+}
+
+#[test]
 fn generated_noise_integrator_activity_is_specific_to_each_packed_lane() {
     let source = "module lane_integrator_noise(p,n); inout p,n; electrical p,n; real a,b; analog begin a=white_noise(1.0,\"a\"); b=white_noise(1.0,\"b\"); I(p,n)<+a+idt(b,0.0); end endmodule";
     let (state, stamp, noise) = generated_parts(source, "lane integrator noise");
@@ -2857,6 +2910,7 @@ impl runtime::GeneratedNoiseProcessVisitor for Capture {
         !self.first_only
     }
 }
+
 let mut instance=device::state::Instance::new(&[0,1]);
 instance.finalize_parameters().unwrap();
 for (frequency,first_only) in [(0.0,true),(0.0,false),(1.0,false),(0.0,true)] {

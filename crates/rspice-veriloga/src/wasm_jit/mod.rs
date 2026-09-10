@@ -1957,6 +1957,86 @@ endmodule
     }
 
     #[test]
+    fn wasm_implicit_integrator_uses_its_solver_unknown_in_both_plans() {
+        use super::abi::{
+            FRAME_INTERNAL_VOLTAGES_LEN_OFFSET, FRAME_INTERNAL_VOLTAGES_PTR_OFFSET,
+            FRAME_RESULT_OFFSET,
+        };
+        use crate::codegen::ColumnAxis;
+        let source = "module implicit_integrator(p,n); inout p,n; electrical p,n; parameter integer enabled=1; analog I(p)<+(enabled ? idt(V(p,n)) : 0.25); endmodule";
+        let report = VerilogACompiler::default()
+            .compile_runtime(source, Some("implicit_integrator"))
+            .unwrap();
+        for postfix in [false, true] {
+            let mut harness =
+                FusedKernelHarness::for_source_with_plan(source, "implicit_integrator", postfix);
+            for enabled in [1.0, 0.0, 1.0] {
+                harness.reset();
+                let internal = FusedKernelHarness::VOLTAGES + 64;
+                harness.poke_frame_u32(FRAME_INTERNAL_VOLTAGES_PTR_OFFSET, internal);
+                harness.poke_frame_u32(FRAME_INTERNAL_VOLTAGES_LEN_OFFSET, 1);
+                harness.write_f64(FusedKernelHarness::PARAMETERS as usize, enabled);
+                harness.write_f64(FusedKernelHarness::VOLTAGES as usize, 2.0);
+                harness.write_f64(FusedKernelHarness::VOLTAGES as usize + 8, 1.5);
+                harness.write_f64(internal as usize, 9.0);
+                harness.call_assignments();
+                harness.call_prelude();
+                let on = enabled > 0.0;
+                for (stamp, expected) in [if on { 9.0 } else { 0.25 }, if on { -0.5 } else { 9.0 }]
+                    .into_iter()
+                    .enumerate()
+                {
+                    let export = harness.stamp_value_export(stamp);
+                    assert_eq!(harness.call(&export), 0);
+                    assert_eq!(
+                        harness.read_f64(FRAME_RESULT_OFFSET as usize),
+                        expected,
+                        "postfix={postfix}, enabled={enabled}, stamp={stamp}"
+                    );
+                    for (entry, derivative) in report.model.stamp_programs[stamp]
+                        .jacobian_programs
+                        .iter()
+                        .enumerate()
+                    {
+                        let expected = match (stamp, derivative.col_axis, on) {
+                            (0, ColumnAxis::Node(2), true)
+                            | (1, ColumnAxis::Node(1), true)
+                            | (1, ColumnAxis::Node(2), false) => 1.0,
+                            (1, ColumnAxis::Node(0), true) => -1.0,
+                            _ => 0.0,
+                        };
+                        let export = harness.jacobian_export(stamp, entry);
+                        assert_eq!(harness.call(&export), 0);
+                        assert_eq!(
+                            harness.read_f64(FRAME_RESULT_OFFSET as usize),
+                            expected,
+                            "postfix={postfix}, enabled={enabled}, stamp={stamp}, entry={entry}"
+                        );
+                    }
+                }
+                for (entry, derivative) in report.model.stamp_programs[1]
+                    .reactive_jacobians
+                    .iter()
+                    .enumerate()
+                {
+                    let expected = if on && matches!(derivative.col_axis, ColumnAxis::Node(2)) {
+                        1.0
+                    } else {
+                        0.0
+                    };
+                    let export = harness
+                        .executable
+                        .export(WasmJitExecutableEntry::ReactiveJacobian { stamp: 1, entry })
+                        .unwrap()
+                        .to_owned();
+                    assert_eq!(harness.call(&export), 0);
+                    assert_eq!(harness.read_f64(FRAME_RESULT_OFFSET as usize), expected);
+                }
+            }
+        }
+    }
+
+    #[test]
     fn wasm_homogeneous_math_preserves_extreme_scales() {
         use super::abi::FRAME_RESULT_OFFSET;
         for op in ["hypot", "atan2"] {

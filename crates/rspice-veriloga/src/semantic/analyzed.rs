@@ -357,6 +357,8 @@ pub struct AnalyzedVariable {
 /// Analyzed internal node (not connected to external ports)
 #[derive(Debug, Clone)]
 pub struct AnalyzedInternalNode {
+    /// Private mathematical state; electrical shunts must not alter its equation.
+    pub is_state: bool,
     pub name: SmolStr,
     pub discipline: SmolStr,
     pub index: usize, // Index within internal nodes array

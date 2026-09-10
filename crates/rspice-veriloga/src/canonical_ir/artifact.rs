@@ -312,10 +312,10 @@ fn validate_hir_mir_nodes(diagnostics: &mut Vec<IrDiagnostic>, hir: &HirModel, m
             continue;
         };
 
-        if node.name != port.name || !node.is_external {
+        if node.name != port.name || !node.is_external || node.is_state {
             diagnostics.push(artifact_error(format!(
-                "MIR node {} must match HIR port '{}': found name='{}' is_external={}",
-                index, port.name, node.name, node.is_external
+                "MIR node {} must match HIR port '{}': found name='{}' is_external={} is_state={}",
+                index, port.name, node.name, node.is_external, node.is_state
             )));
         }
     }
@@ -330,10 +330,13 @@ fn validate_hir_mir_nodes(diagnostics: &mut Vec<IrDiagnostic>, hir: &HirModel, m
             continue;
         };
 
-        if node.name != internal_node.name || node.is_external {
+        if node.name != internal_node.name
+            || node.is_external
+            || node.is_state != internal_node.is_state
+        {
             diagnostics.push(artifact_error(format!(
-                "MIR node {} must match HIR internal node '{}': found name='{}' is_external={}",
-                node_index, internal_node.name, node.name, node.is_external
+                "MIR node {} must match HIR internal node '{}': found name='{}' is_external={} is_state={} (expected {})",
+                node_index, internal_node.name, node.name, node.is_external, node.is_state, internal_node.is_state
             )));
         }
     }
@@ -782,11 +785,12 @@ fn write_hir_branch(out: &mut String, branch: &HirBranch) {
 fn write_hir_internal_node(out: &mut String, node: &HirInternalNode) {
     writeln!(
         out,
-        "internal_node id={} name={} discipline={} index={}",
+        "internal_node id={} name={} discipline={} index={} is_state={}",
         node.id.index(),
         enc_str(&node.name),
         enc_str(&node.discipline),
-        node.index
+        node.index,
+        node.is_state
     )
     .expect("write to string");
 }
@@ -887,10 +891,11 @@ fn write_hir_loop(out: &mut String, label: &str, loop_statement: &HirLoop) {
 fn write_mir_node(out: &mut String, node: &MirNode) {
     writeln!(
         out,
-        "node id={} name={} is_external={}",
+        "node id={} name={} is_external={} is_state={}",
         node.id.index(),
         enc_str(&node.name),
-        node.is_external
+        node.is_external,
+        node.is_state
     )
     .expect("write to string");
 }

@@ -75,7 +75,7 @@ module state_layout_mixed(p, n);
   electrical p, n;
   analog begin
     I(p, n) <+ ddt(V(p, n))
-             + idt(V(p, n))
+             + idt(V(p, n), 0.0)
              + idtmod(V(p, n), 0.0, 2.0, 0.0)
              + ddt(V(p, n) * 2.0)
              + transition(V(p, n) > 1.0 ? 1.0 : 0.0, 0.0, 1e-9, 1e-9)

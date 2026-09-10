@@ -3285,10 +3285,11 @@ fn write_registry(
     {
         writeln!(
             out,
-            "    #[cfg(feature = {feature:?})]\n    super::GeneratedVerilogAModelDescriptor {{ abi_version: super::GENERATED_VERILOGA_DESCRIPTOR_ABI_VERSION, model_name: {registry_name:?}, module_name: {:?}, source_digest: {:?}, source_identity: {:?}, checkpoint_identity: {}::Instance::CHECKPOINT_MODEL_IDENTITY, accepted_state_shape_identity: {}::Instance::ACCEPTED_STATE_SHAPE_IDENTITY, terminals: &{}::Instance::TERMINALS, parameters: &{}::Instance::PARAMETER_DESCRIPTORS, total_node_count: {}::Instance::NODE_COUNT, internal_node_names: &{}::Instance::INTERNAL_NODE_NAMES, branch_count: {}::Instance::BRANCH_COUNT }},",
+            "    #[cfg(feature = {feature:?})]\n    super::GeneratedVerilogAModelDescriptor {{ abi_version: super::GENERATED_VERILOGA_DESCRIPTOR_ABI_VERSION, model_name: {registry_name:?}, module_name: {:?}, source_digest: {:?}, source_identity: {:?}, checkpoint_identity: {}::Instance::CHECKPOINT_MODEL_IDENTITY, accepted_state_shape_identity: {}::Instance::ACCEPTED_STATE_SHAPE_IDENTITY, terminals: &{}::Instance::TERMINALS, parameters: &{}::Instance::PARAMETER_DESCRIPTORS, total_node_count: {}::Instance::NODE_COUNT, internal_node_names: &{}::Instance::INTERNAL_NODE_NAMES, internal_state_nodes: {}::Instance::INTERNAL_STATE_NODES, branch_count: {}::Instance::BRANCH_COUNT }},",
             device.module_name,
             device.source_digest,
             device.source_identity,
+            device.folder_name,
             device.folder_name,
             device.folder_name,
             device.folder_name,

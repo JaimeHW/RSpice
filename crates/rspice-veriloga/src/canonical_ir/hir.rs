@@ -300,6 +300,8 @@ pub struct HirBranch {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HirInternalNode {
+    /// Private mathematical state rather than an electrical node.
+    pub is_state: bool,
     pub id: NodeId,
     pub name: SmolStr,
     pub discipline: SmolStr,
@@ -998,6 +1000,7 @@ impl HirModel {
                 .internal_nodes
                 .iter()
                 .map(|node| HirInternalNode {
+                    is_state: node.is_state,
                     id: NodeId::from(node.index),
                     name: node.name.clone(),
                     discipline: node.discipline.clone(),

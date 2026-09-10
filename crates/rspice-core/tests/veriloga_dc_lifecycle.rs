@@ -34,6 +34,233 @@ fn node_voltage(result: &rspice_core::solver::SimulationResult, name: &str) -> f
     result.node_voltages[index]
 }
 
+#[test]
+fn implicit_integrator_initial_condition_is_determined_by_feedback() {
+    for (body, enabled, expected) in [
+        ("V(output_node)<+idt(V(input_node,output_node));", 1, None),
+        (
+            "V(output_node)<+idt(1e-15*V(input_node,output_node));",
+            1,
+            None,
+        ),
+        (
+            "V(output_node)<+idt(1e15*V(input_node,output_node));",
+            1,
+            None,
+        ),
+        (
+            "if(enabled>0) begin case(enabled) 1: result=idt(V(input_node,output_node)); default: result=0.25; endcase end else result=0.25; V(output_node)<+result;",
+            1,
+            None,
+        ),
+        (
+            "if(enabled>0) begin case(enabled) 1: result=idt(V(input_node,output_node)); default: result=0.25; endcase end else result=0.25; V(output_node)<+result;",
+            2,
+            Some(0.25),
+        ),
+        (
+            "error=V(input_node,output_node); result=idt(error); error=error+7; V(output_node)<+result;",
+            1,
+            None,
+        ),
+        (
+            "V(output_node)<+idt(idt(V(input_node,output_node))-V(output_node));",
+            1,
+            None,
+        ),
+        (
+            "if (enabled) result=idt(V(input_node,output_node)); else result=0.25; V(output_node)<+result;",
+            1,
+            None,
+        ),
+        (
+            "if (enabled) result=idt(V(input_node,output_node)); else result=0.25; V(output_node)<+result;",
+            0,
+            Some(0.25),
+        ),
+        (
+            "V(output_node)<+(enabled ? idt(V(input_node,output_node)) : 0.25);",
+            1,
+            None,
+        ),
+        (
+            "V(output_node)<+(enabled ? idt(V(input_node,output_node)) : 0.25);",
+            0,
+            Some(0.25),
+        ),
+        (
+            "V(output_node)<+idt(V(input_node,output_node),0.5);",
+            1,
+            Some(0.5),
+        ),
+        (
+            "V(output_node)<+idtmod(V(input_node,output_node));",
+            1,
+            Some(0.0),
+        ),
+    ] {
+        let model = write_model(
+            "implicit_integrator_feedback",
+            &format!(
+                r#"module implicit_integrator_feedback(input_node,output_node);
+inout input_node,output_node; electrical input_node,output_node;
+parameter integer enabled={enabled};
+real error,result,__idt_out1,__idt_input1;
+analog begin {body} end
+endmodule"#
+            ),
+        );
+        for (bias, options) in [(-2.5, ""), (1.75, ".options rshunt=1e3\n")] {
+            let expected = expected.unwrap_or(bias);
+            let netlist = Netlist::parse(&format!(
+            "* feedback determines the integration constant\n{options}V1 in 0 {bias}\nX1 in out implicit_integrator_feedback\nR1 out 0 1k\n.va \"{}\" implicit_integrator_feedback\n.end\n",
+            deck_path(&model),
+        )).unwrap();
+            let engine = Engine::default();
+            let result = engine.run_dc_op(&netlist).unwrap();
+            assert!(
+                (node_voltage(&result, "out") - expected).abs() < 1e-9,
+                "bias={bias}, enabled={enabled}, {body}: {:?}",
+                result.node_voltages,
+            );
+            // Explicit initial conditions may evolve away from their DC value.
+            if expected != bias {
+                continue;
+            }
+            let result = engine.run_tran(&netlist, 1e-3, 1e-4).unwrap();
+            let output = result
+                .node_names
+                .iter()
+                .position(|name| name.eq_ignore_ascii_case("out"))
+                .unwrap();
+            assert!(
+                result.voltages[output]
+                    .iter()
+                    .all(|value| (*value - bias).abs() < 1e-9),
+                "bias={bias}: {:?}",
+                result.voltages[output]
+            );
+        }
+        let _ = std::fs::remove_file(model);
+    }
+}
+
+#[test]
+fn implicit_integrator_feedback_has_a_finite_dc_small_signal_limit() {
+    let model = write_model(
+        "implicit_integrator_ac",
+        r#"
+module implicit_integrator_ac(input_node,output_node);
+inout input_node,output_node; electrical input_node,output_node;
+analog V(output_node)<+idt(1000*V(input_node,output_node)+white_noise(1,"input"));
+endmodule"#,
+    );
+    let netlist = Netlist::parse(&format!(
+        "* first-order feedback\nV1 in 0 DC 2 AC 1\nX1 in out implicit_integrator_ac\nR1 out 0 1k\n.va \"{}\" implicit_integrator_ac\n.end\n", deck_path(&model)
+    )).unwrap();
+    let frequencies = [0.0, 1.0, 100.0, 1e3, 1e6];
+    let points = Engine::default().run_ac(&netlist, &frequencies).unwrap();
+    for (frequency, point) in frequencies.into_iter().zip(points) {
+        let output = point
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("out"))
+            .unwrap();
+        let ratio = std::f64::consts::TAU * frequency / 1000.0;
+        let actual = point.voltages[output];
+        let denominator = 1.0 + ratio * ratio;
+        assert!(
+            (actual.re - 1.0 / denominator).abs() < 1e-10
+                && (actual.im + ratio / denominator).abs() < 1e-10,
+            "f={frequency}: {actual}"
+        );
+    }
+    let engine = Engine::default();
+    let circuit = engine.build_circuit(&netlist).unwrap();
+    let output = circuit.get_node_by_name("out").unwrap();
+    let noise = engine
+        .run_noise(&netlist, output, &frequencies[1..], 300.15)
+        .unwrap();
+    for (frequency, point) in frequencies.into_iter().skip(1).zip(noise) {
+        let expected = 1.0 / (1e6 + (std::f64::consts::TAU * frequency).powi(2));
+        assert!(
+            (point.output_noise_density / expected - 1.0).abs() < 1e-9,
+            "f={frequency}: {} vs {expected}",
+            point.output_noise_density
+        );
+    }
+    let _ = std::fs::remove_file(model);
+}
+
+#[test]
+fn implicit_integrator_hierarchy_keeps_independent_solver_unknowns() {
+    let model = write_model(
+        "implicit_integrator_pair",
+        r#"
+module implicit_integrator_leaf(p,n);
+inout p,n; electrical p,n; parameter real gain=1;
+analog V(n)<+idt(gain*V(p,n));
+endmodule
+module implicit_integrator_pair(p,a,b);
+inout p,a,b; electrical p,a,b;
+implicit_integrator_leaf #(.gain(1000)) first(p,a);
+implicit_integrator_leaf #(.gain(2000)) second(p,b);
+endmodule"#,
+    );
+    let source_key = PathBuf::from("__rspice_project__/implicit-integrator/feedback/model.va");
+    let netlist = Netlist::parse(&format!(
+        "* separate hierarchy sites\nV1 in 0 2\nX1 in a b implicit_integrator_pair\nR1 a 0 1k\nR2 b 0 2k\n.va \"{}\" implicit_integrator_pair\n.end\n", deck_path(&source_key)
+    )).unwrap();
+    let engine = Engine::default();
+    // The project runtime API supports selecting a module from a hierarchy.
+    let runtime = rspice_veriloga::VerilogACompiler::default()
+        .compile_runtime(
+            &std::fs::read_to_string(&model).unwrap(),
+            Some("implicit_integrator_pair"),
+        )
+        .unwrap();
+    rspice_core::register_project_veriloga_runtime_for_session(
+        &source_key,
+        runtime.model,
+        runtime.canonical_ir,
+    )
+    .unwrap();
+    let point = engine.run_dc_op(&netlist).unwrap();
+    for node in ["a", "b"] {
+        assert!((node_voltage(&point, node) - 2.0).abs() < 1e-9);
+    }
+    let _ = std::fs::remove_file(model);
+}
+
+#[test]
+fn implicit_integrator_history_tracks_a_feedback_step() {
+    let model = write_model(
+        "implicit_integrator_step",
+        r#"
+module implicit_integrator_step(input_node,output_node);
+inout input_node,output_node; electrical input_node,output_node;
+analog V(output_node)<+idt(1000*V(input_node,output_node));
+endmodule"#,
+    );
+    let netlist = Netlist::parse(&format!(
+        "* first-order feedback step\nV1 in 0 PWL(0 0 100u 0 100.001u 1)\nX1 in out implicit_integrator_step\nR1 out 0 1k\n.va \"{}\" implicit_integrator_step\n.end\n", deck_path(&model)
+    )).unwrap();
+    let result = Engine::default().run_tran(&netlist, 3e-3, 1e-5).unwrap();
+    let output = result
+        .node_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case("out"))
+        .unwrap();
+    for (time, value) in result.time.iter().zip(&result.voltages[output]) {
+        let expected = 1.0 - (-1000.0 * (time - 100.0005e-6).max(0.0)).exp();
+        assert!(
+            (value - expected).abs() < 2e-3,
+            "t={time}: {value}, expected {expected}"
+        );
+    }
+    let _ = std::fs::remove_file(model);
+}
+
 const REBUILT_LIFECYCLE_MODEL: &str = r#"
 `include "disciplines.vams"
 module va_dc_rebuild_lifecycle(p, n);

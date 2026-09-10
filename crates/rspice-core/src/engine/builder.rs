@@ -125,6 +125,9 @@ fn bind_veriloga_solver_unknowns(
             .try_set_branch_current_indices(&branch_nodes)
             .map_err(|error| error.to_string())?;
     }
+    circuit
+        .non_electrical_state_nodes
+        .extend(device.non_electrical_node_indices());
     Ok(())
 }
 

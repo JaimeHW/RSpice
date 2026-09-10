@@ -89,6 +89,60 @@ fn runtime_noise_count_tracks_processes_and_checks_both_artifacts() {
 }
 
 #[test]
+fn implicit_integrator_state_classification_survives_hierarchy_and_serialization() {
+    let source = r#"
+module leaf(p,n); inout p,n; electrical p,n;
+analog V(n)<+idt(V(p,n)); endmodule
+module parent(p,n); inout p,n; electrical p,n,mid;
+leaf first(p,mid); leaf second(mid,n); endmodule
+"#;
+    let report = compiler().compile_runtime(source, Some("parent")).unwrap();
+    assert_eq!(report.model.internal_nodes, 3);
+    assert_eq!(report.model.internal_state_nodes, [1, 2]);
+    let encoded = serde_json::to_vec(&report.model).unwrap();
+    let model: rspice_veriloga::CompiledModel = serde_json::from_slice(&encoded).unwrap();
+    assert_eq!(model.internal_state_nodes, [1, 2]);
+    let mut device = rspice_veriloga::device::VerilogADevice::try_new_with_canonical_ir(
+        "X1",
+        model,
+        &report.canonical_ir,
+        &[1, 2],
+    )
+    .unwrap();
+    device.try_set_internal_node_indices(&[3, 4, 5]).unwrap();
+    assert_eq!(
+        device.non_electrical_node_indices().collect::<Vec<_>>(),
+        [4, 5]
+    );
+    device.try_set_branch_current_indices(&[6, 7]).unwrap();
+    assert_eq!(
+        device.non_electrical_node_indices().collect::<Vec<_>>(),
+        [4, 5, 6, 7]
+    );
+
+    for indices in [vec![], vec![0, 2], vec![2, 1], vec![1, 1], vec![1, 3]] {
+        let mut damaged = report.clone();
+        damaged.model.internal_state_nodes = indices;
+        assert!(matches!(
+            damaged.validate_integrity(),
+            Err(RuntimeArtifactIntegrityError::AbiSurfaceMismatch)
+        ));
+        assert!(
+            rspice_veriloga::device::VerilogADevice::try_new_with_canonical_ir(
+                "bad",
+                damaged.model,
+                &report.canonical_ir,
+                &[1, 2],
+            )
+            .is_err()
+        );
+    }
+    let mut damaged = report.canonical_ir.clone();
+    damaged.mir.nodes[report.model.num_terminals + 1].is_state = false;
+    assert!(damaged.validate().is_err());
+}
+
+#[test]
 fn runtime_integrity_rejects_modified_digital_control_flow() {
     let mut report = VerilogACompiler::new(CompilerOptions {
         enable_ams: true,

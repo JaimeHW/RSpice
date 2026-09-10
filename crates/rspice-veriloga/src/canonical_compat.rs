@@ -48,6 +48,17 @@ pub(crate) fn validate_canonical_artifact_identity_for_model(
         ));
     }
 
+    if artifact.hir.internal_nodes.len() != model.internal_nodes
+        || !artifact
+            .hir
+            .internal_nodes
+            .iter()
+            .enumerate()
+            .filter_map(|(index, node)| node.is_state.then_some(index))
+            .eq(model.internal_state_nodes.iter().copied())
+    {
+        return Err("canonical internal state layout does not match compiled model".into());
+    }
     validate_source_digest(model, artifact)?;
     validate_parameters(model, &artifact.mir)?;
     for (index, (equation, stamp)) in artifact

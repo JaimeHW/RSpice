@@ -512,6 +512,7 @@ impl Instance {
 	pub const NODE_COUNT: usize = 12;
 	pub const INTERNAL_NODE_NAMES: [&str; 7] = ["cx", "ci", "bx", "bi", "ei", "bp", "si"];
 
+	pub const INTERNAL_STATE_NODES: &[usize] = &[];
 	pub const BRANCH_COUNT: usize = 0;
 	pub const PARAMETER_COUNT: usize = 108;
 	pub const VARIABLE_COUNT: usize = 171;
@@ -521,7 +522,7 @@ impl Instance {
 	pub const EVENT_STATE_COUNT: usize = 0;
 	pub const ONE_STEP_DAE_SPLIT_SAFE: bool = true;
 	pub const REQUIRES_NODESET_PHASE: bool = false;
-	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "27e273fb5e716e272f9b0b9ae6a289fcbb4751edd71931e220ff42afa351c899";
+	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "26ade9b739ee4a64af37649c88ce6af5cde5f2cafa7ffcfc7d34ef22c28de2d2";
 	pub const MAX_ANALOG_LOOP_ITERATIONS: usize = 1_000_000;
 
 	pub fn new(nodes: &[usize]) -> Self {

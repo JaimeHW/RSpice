@@ -345,6 +345,7 @@ impl<'a> HierarchyElaborator<'a> {
                     self.flattened.internal_nodes.push(AnalyzedInternalNode {
                         name: name.clone(),
                         discipline: port.discipline.clone(),
+                        is_state: false,
                         index,
                     });
                     (
@@ -374,6 +375,7 @@ impl<'a> HierarchyElaborator<'a> {
             self.flattened.internal_nodes.push(AnalyzedInternalNode {
                 name: name.clone(),
                 discipline: node.discipline.clone(),
+                is_state: node.is_state,
                 index,
             });
             scope.nodes.insert(

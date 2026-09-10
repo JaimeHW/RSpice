@@ -295,6 +295,15 @@ pub(super) fn generate_state_file_with_extensions(
         .map(|node| node.name.as_str())
         .collect();
     let internal_node_count = internal_node_names.len();
+    let internal_state_nodes = artifact
+        .mir
+        .nodes
+        .iter()
+        .filter(|node| !node.is_external)
+        .enumerate()
+        .filter_map(|(index, node)| node.is_state.then_some(index.to_string()))
+        .collect::<Vec<_>>()
+        .join(", ");
     let parameter_count = artifact.mir.parameters.len();
     let variable_count = artifact.hir.variables.len();
     let event_state_count = artifact
@@ -386,6 +395,9 @@ pub(super) fn generate_state_file_with_extensions(
             .map(|name| format!("{name:?}"))
             .collect::<Vec<_>>()
             .join(", ")
+    ));
+    out.push_str(&format!(
+        "    pub const INTERNAL_STATE_NODES: &[usize] = &[{internal_state_nodes}];\n"
     ));
     out.push_str(&format!(
         "    pub const BRANCH_COUNT: usize = {branch_count};\n"
@@ -1557,7 +1569,8 @@ fn finalize_checkpoint_identity_with_compatibility(
 // Version 13 preserves primal validation through dynamic noise routing and
 // emits general nonlinear noise frequency coefficients. Earlier artifacts can
 // suppress invalid operator inputs and must not share this semantic identity.
-const GENERATED_MODEL_SEMANTICS_VERSION: u32 = 14;
+// Version 15 preserves feedback-determined initial conditions for implicit idt.
+const GENERATED_MODEL_SEMANTICS_VERSION: u32 = 15;
 
 fn generated_model_semantic_identity(device: &GeneratedRustDevice) -> String {
     let mut hasher = blake3::Hasher::new();

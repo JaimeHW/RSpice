@@ -219,6 +219,15 @@ impl RuntimeCompileReport {
         }
         if self.abi != RuntimeAbiSummary::from_artifact(&self.canonical_ir)
             || self.abi.noise_source_count != self.model.noise_sources.len()
+            || self.abi.internal_node_count != self.model.internal_nodes
+            || !self
+                .canonical_ir
+                .hir
+                .internal_nodes
+                .iter()
+                .enumerate()
+                .filter_map(|(index, node)| node.is_state.then_some(index))
+                .eq(self.model.internal_state_nodes.iter().copied())
         {
             return Err(RuntimeArtifactIntegrityError::AbiSurfaceMismatch);
         }

@@ -963,6 +963,7 @@ fn for_each_program_mut(model: &mut CompiledModel, visit: &mut impl FnMut(&mut B
         stamp_programs,
         lookup_tables: _,
         internal_nodes: _,
+        internal_state_nodes: _,
         branch_sources: _,
         laplace_filters: _,
         zi_filters: _,

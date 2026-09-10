@@ -14,6 +14,7 @@ use smol_str::SmolStr;
 /// never deserialize a structurally different artifact merely because its HIR
 /// and metadata happen to repeat the same stale version number.
 ///
+/// Version 28 gives implicit integrators feedback-determined solver unknowns.
 /// Version 27 protects scalar and packed derivative quotients against intermediate range loss.
 /// Version 26 adds numerical value selection to the serialized CFG vocabulary.
 /// Version 25 retains the primal validation dependency of symbolic derivatives.
@@ -28,7 +29,7 @@ use smol_str::SmolStr;
 /// Version 19 rejects unrepresentable digital select and delay constants instead
 /// of clamping them. Earlier artifacts must be rebuilt from source. Version 18
 /// fixed constant integer comparisons; version 17 fixed digital range arithmetic.
-pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 27;
+pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 28;
 
 /// Collision-resistant identity of one exact preprocessed source closure.
 pub fn source_identity(source_text: &str) -> String {

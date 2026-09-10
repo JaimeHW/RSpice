@@ -362,7 +362,7 @@ fn direct_laplace_noise_preserves_processes_and_complex_transfer() {
 
 #[test]
 fn direct_integrated_and_delayed_noise_preserves_complex_transfer() {
-    for arguments in ["", ",0.0"] {
+    for arguments in [",0.0", ",0.25"] {
         assert_noise_transfer("idt", arguments, &[0.0, 0.1, 1.0, 1000.0], |omega| {
             (omega != 0.0).then(|| (0.0, -1.0 / omega))
         });

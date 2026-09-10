@@ -154,6 +154,10 @@ fn compiled_model_layout_identity(model: &CompiledModel) -> CompiledModelLayoutI
     assignment_layout(&mut hasher, &model.noise_assignment_steps);
 
     usize_field(&mut hasher, model.internal_nodes);
+    usize_field(&mut hasher, model.internal_state_nodes.len());
+    for &node in &model.internal_state_nodes {
+        usize_field(&mut hasher, node);
+    }
     usize_field(&mut hasher, model.branch_sources.len());
     for source in &model.branch_sources {
         stamp_index(&mut hasher, &source.pos);
@@ -2501,6 +2505,19 @@ impl VerilogADevice {
         if control.is_cancelled() {
             return Err(VmError::CompilationCancelled);
         }
+        if model
+            .internal_state_nodes
+            .iter()
+            .any(|&node| node >= model.internal_nodes)
+            || model
+                .internal_state_nodes
+                .windows(2)
+                .any(|nodes| nodes[0] >= nodes[1])
+        {
+            return Err(VmError::InvalidModel(
+                "invalid internal state node layout".into(),
+            ));
+        }
         Self::validate_compiled_assignment_layout(model.num_variables, &model.assignment_steps)?;
         Self::validate_compiled_assignment_layout(
             model.num_variables,
@@ -3198,7 +3215,18 @@ impl VerilogADevice {
         self.model.num_terminals
     }
 
-    /// Get the number of internal nodes
+    /// Bound nodal-prefix IDs occupied by mathematical states or branch currents.
+    /// Electrical shunts and voltage clamps must not alter these unknowns.
+    pub fn non_electrical_node_indices(&self) -> impl Iterator<Item = usize> + '_ {
+        self.model
+            .internal_state_nodes
+            .iter()
+            .map(|&index| self.internal_node_indices[index])
+            .chain(self.branch_current_indices.iter().copied())
+            .filter(|&node| node > 0)
+    }
+
+    /// Get the number of internal nodes.
     pub fn num_internal_nodes(&self) -> usize {
         self.num_internal_nodes
     }

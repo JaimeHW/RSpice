@@ -297,6 +297,7 @@ pub struct Terminal {
 /// Internal node definition (not in port list)
 #[derive(Debug, Clone)]
 pub struct InternalNodeDef {
+    pub is_state: bool,
     pub name: SmolStr,
     pub index: usize,
 }
@@ -659,6 +660,7 @@ impl DeviceIR {
         // Build internal nodes from analyzed module
         for node in &module.internal_nodes {
             ir.internal_nodes.push(InternalNodeDef {
+                is_state: node.is_state,
                 name: node.name.clone(),
                 index: node.index,
             });

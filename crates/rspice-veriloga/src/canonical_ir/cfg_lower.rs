@@ -3323,25 +3323,13 @@ impl<'a> CfgLowerer<'a> {
                     },
                 )
             }
-            // Keyed by the call for the same reason. One argument means no
-            // initial condition, which the LRM says is zero; three or four add
-            // `assert` and `abstol`, which the operator path refuses too.
-            ("idt", 1 | 2) => {
-                let input = self.expr(args[0]);
-                let ic = match args.get(1) {
-                    Some(ic) => self.expr(*ic),
-                    None => self.real_constant(0.0),
-                };
-                self.builder.push(
-                    self.block,
-                    CfgValueType::Real,
-                    CfgValueKind::Idt {
-                        operator: expression,
-                        input,
-                        ic,
-                    },
-                )
+            // Semantic lowering gives the one-argument form its own solver
+            // equation. An artifact that skipped that step cannot assume IC=0.
+            ("idt", 1) => {
+                self.unsupported(span, "implicit idt without its solver equation".into());
+                self.real_constant(0.0)
             }
+            ("idt", 2) => self.idt(expression, args[0], Some(args[1])),
             ("cross", 1..=5) => {
                 let input = self.expr(args[0]);
                 let direction = self.optional_argument(args, 1, 0.0);
@@ -3602,13 +3590,11 @@ impl<'a> CfgLowerer<'a> {
 
     /// `idt(x, ic)`, keyed by the call.
     ///
-    /// Shared by `idt` and by `idtmod` written without a modulus, which the LRM
-    /// makes the same integral: keying both here is what keeps the two source
-    /// forms on one state slot instead of two.
+    /// Also used by `idtmod` without a modulus; its omitted IC defaults to zero
+    /// under section 4.5.5, independently of the one-argument `idt` form.
     fn idt(&mut self, operator: ExprId, expr: ExprId, ic: Option<ExprId>) -> ValueId {
         let input = self.expr(expr);
-        // Absent means zero, which is what the LRM says an unstated initial
-        // condition is.
+        // Only idtmod can reach this path without an explicit initial value.
         let ic = self.optional_expr(ic, 0.0);
         self.builder.push(
             self.block,

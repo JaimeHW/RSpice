@@ -295,7 +295,7 @@ module every_operator(p, n);
   analog begin
     filtered = zi_nd(V(p, n), '{0.25}, '{1.0, -0.75}, 1e-6, 0.0);
     I(p, n) <+ ddt(V(p, n))
-             + idt(V(p, n))
+             + idt(V(p, n), 0.0)
              + idtmod(V(p, n), 0.0, 2.0, 0.0)
              + absdelay(V(p, n), 1e-9)
              + slew(V(p, n), 1e6)

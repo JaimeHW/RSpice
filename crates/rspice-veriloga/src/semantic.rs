@@ -374,6 +374,7 @@ mod digital;
 mod digital_elaborate;
 mod elaboration;
 mod function_effects;
+mod implicit_integrator;
 mod symbols;
 
 pub use analyzed::*;
@@ -463,6 +464,7 @@ pub struct SemanticAnalyzer {
     /// Dense identity assigned once, before an analyzed expression is cloned
     /// into the flat compatibility stream and the structured CFG body.
     next_noise_process: u32,
+    implicit_integrators: Vec<implicit_integrator::ImplicitIntegrator>,
 }
 
 /// How an event expression lowers into the dataflow representation
@@ -508,6 +510,7 @@ impl SemanticAnalyzer {
             warnings: Vec::new(),
             digital_scopes: Vec::new(),
             next_noise_process: 0,
+            implicit_integrators: Vec::new(),
         }
     }
 
@@ -794,6 +797,7 @@ impl SemanticAnalyzer {
             .collect();
         self.effectful_functions = function_effects::effectful_functions(&self.user_functions);
         self.in_analog_initial = false;
+        self.implicit_integrators.clear();
         self.arrays.clear();
         self.task_vars.clear();
 
@@ -917,6 +921,7 @@ impl SemanticAnalyzer {
 
                 // Add to analyzed internal nodes
                 analyzed.internal_nodes.push(AnalyzedInternalNode {
+                    is_state: false,
                     name: name.clone(),
                     discipline: discipline.clone(),
                     index: internal_node_idx,
@@ -1672,6 +1677,7 @@ impl SemanticAnalyzer {
             }
         }
 
+        self.finish_implicit_integrators(&mut analyzed);
         analyzed.statements = statements;
         analyzed.body = self.take_body();
         analyzed.analog_site_count = self.next_analog_site;
@@ -4822,9 +4828,11 @@ impl SemanticAnalyzer {
         module: &mut AnalyzedModule,
         sink: &mut Vec<AnalyzedStatement>,
     ) -> CompileResult<Expression> {
-        // Without user functions this pass can only copy the input tree. Borrow
-        // it instead, avoiding an allocation and recursive walk per AST node.
-        let materialized = if self.user_functions.is_empty() {
+        // Borrow trees that need neither function materialization nor a solver
+        // equation for an integrator without an explicit initial condition.
+        let materialized = if self.user_functions.is_empty()
+            && !self.expression_contains_output_function_call(expr)
+        {
             None
         } else {
             Some(self.materialize_output_function_calls(expr, module, sink)?)
@@ -4924,6 +4932,11 @@ impl SemanticAnalyzer {
                 })
             }
             Expression::Call(call) => {
+                if call.name == "idt" && call.args.len() == 1
+                    && !matches!(call.args[0], Expression::NullArgument(_))
+                {
+                    return self.materialize_implicit_integrator(call, module, sink);
+                }
                 if let Some(func) = self.user_functions.get(&call.name).cloned()
                     && self.function_should_materialize(&func)
                 {
@@ -5144,15 +5157,37 @@ impl SemanticAnalyzer {
     }
 
     fn expression_contains_output_function_call(&self, expr: &Expression) -> bool {
+        if !matches!(expr, Expression::Binary(_) | Expression::Unary(_)) {
+            return self.non_operator_contains_output_function_call(expr);
+        }
+        // Operator chains can be much deeper than the host call stack.
+        let mut pending = vec![expr];
+        while let Some(expression) = pending.pop() {
+            match expression {
+                Expression::Binary(binary) => {
+                    pending.push(&binary.right);
+                    pending.push(&binary.left);
+                }
+                Expression::Unary(unary) => pending.push(&unary.operand),
+                _ if self.non_operator_contains_output_function_call(expression) => return true,
+                _ => {}
+            }
+        }
+        false
+    }
+
+    fn non_operator_contains_output_function_call(&self, expr: &Expression) -> bool {
         match expr {
             Expression::Digital(digital) => digital
                 .children()
                 .into_iter()
                 .any(|child| self.expression_contains_output_function_call(child)),
             Expression::Call(call) => {
-                self.user_functions
-                    .get(&call.name)
-                    .is_some_and(|func| self.function_needs_materialization(func))
+                (call.name == "idt" && call.args.len() == 1)
+                    || self
+                        .user_functions
+                        .get(&call.name)
+                        .is_some_and(|func| self.function_needs_materialization(func))
                     || call
                         .args
                         .iter()

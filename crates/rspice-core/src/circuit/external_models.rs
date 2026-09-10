@@ -337,6 +337,8 @@ impl CircuitData {
     #[cfg(feature = "veriloga")]
     pub fn add_veriloga_device(&mut self, mut device: crate::device::veriloga::VerilogADevice) {
         device.set_simulation_parameters(self.generated_simulation_parameters);
+        self.non_electrical_state_nodes
+            .extend(device.non_electrical_node_indices());
         self.veriloga_devices.add(device);
     }
 
@@ -430,6 +432,8 @@ impl CircuitData {
         &mut self,
         device: crate::device::veriloga_builtins::BuiltinVerilogAInstance,
     ) {
+        self.non_electrical_state_nodes
+            .extend(device.non_electrical_node_indices());
         self.generated_veriloga_devices.add(device);
     }
 

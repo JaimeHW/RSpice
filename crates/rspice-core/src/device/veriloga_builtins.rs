@@ -1323,9 +1323,18 @@ impl BuiltinVerilogAInstance {
         Ok(())
     }
 
-    /// Canonical generated internal-node names paired with their circuit node
-    /// IDs. External terminals occupy the prefix of `nodes`; the registry's
-    /// internal names describe the remaining entries in the same order.
+    /// Bound circuit node IDs occupied by private mathematical states.
+    pub(crate) fn non_electrical_node_indices(&self) -> impl Iterator<Item = usize> + '_ {
+        let external_count = self.terminal_currents.len();
+        builtins::descriptor(self.model_name)
+            .map_or(&[][..], |descriptor| descriptor.internal_state_nodes)
+            .iter()
+            .map(move |&index| self.nodes[external_count + index])
+            .filter(|&node| node > 0)
+    }
+
+    /// Canonical internal-node names paired with their circuit node IDs.
+    /// External terminals occupy the prefix of `nodes`.
     pub(crate) fn internal_nodes(&self) -> impl Iterator<Item = (&'static str, usize)> + '_ {
         let external_count = self.terminal_currents.len();
         builtins::descriptor(self.model_name)

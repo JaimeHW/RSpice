@@ -130,6 +130,20 @@ pub fn validate_generated_veriloga_descriptor(
             descriptor.model_name
         ));
     }
+    if descriptor
+        .internal_state_nodes
+        .iter()
+        .any(|&index| index >= descriptor.internal_node_names.len())
+        || descriptor
+            .internal_state_nodes
+            .windows(2)
+            .any(|indices| indices[0] >= indices[1])
+    {
+        return Err(format!(
+            "generated Verilog-A model '{}' has invalid internal-state metadata",
+            descriptor.model_name
+        ));
+    }
     let mut node_names = HashSet::new();
     let mut terminal_current_parameters = HashSet::new();
     for terminal in descriptor.terminals {
@@ -398,7 +412,7 @@ fn generated_veriloga_descriptor_signature(
     descriptor: &GeneratedVerilogAModelDescriptor,
 ) -> String {
     let mut hasher = Sha256::new();
-    hasher.update(b"rspice-generated-veriloga-descriptor-signature-v3\0");
+    hasher.update(b"rspice-generated-veriloga-descriptor-signature-v4\0");
     hash_u64(&mut hasher, u64::from(descriptor.abi_version));
     hash_text(&mut hasher, descriptor.model_name);
     hash_text(&mut hasher, descriptor.module_name);
@@ -406,6 +420,10 @@ fn generated_veriloga_descriptor_signature(
     hash_text(&mut hasher, descriptor.source_identity);
     hash_text(&mut hasher, descriptor.checkpoint_identity);
     hasher.update(descriptor.accepted_state_shape_identity.as_bytes());
+    hash_u64(&mut hasher, descriptor.internal_state_nodes.len() as u64);
+    for &index in descriptor.internal_state_nodes {
+        hash_u64(&mut hasher, index as u64);
+    }
     hash_generated_veriloga_interface(&mut hasher, descriptor);
     format!("{:x}", hasher.finalize())
 }
@@ -528,7 +546,7 @@ mod descriptor_v2_tests {
     use rspice_core::device::veriloga_builtins::GeneratedVerilogATerminalDescriptor;
 
     #[test]
-    fn descriptor_signature_covers_terminal_current_identity() {
+    fn descriptor_signature_covers_terminal_current_and_state_identity() {
         const TERMINALS_A: [GeneratedVerilogATerminalDescriptor; 1] =
             [GeneratedVerilogATerminalDescriptor {
                 name: "p",
@@ -552,8 +570,9 @@ mod descriptor_v2_tests {
                 rspice_core::device::veriloga_builtins::GeneratedVerilogAAcceptedStateShapeIdentity::from_bytes([0x5a; 32]),
             terminals: &TERMINALS_A,
             parameters: &[],
-            total_node_count: 1,
-            internal_node_names: &[],
+            total_node_count: 2,
+            internal_node_names: &["state"],
+            internal_state_nodes: &[],
             branch_count: 0,
         };
         const CHANGED: GeneratedVerilogAModelDescriptor = GeneratedVerilogAModelDescriptor {
@@ -565,6 +584,23 @@ mod descriptor_v2_tests {
             generated_veriloga_descriptor_signature(&BASE),
             generated_veriloga_descriptor_signature(&CHANGED)
         );
+        let state = GeneratedVerilogAModelDescriptor {
+            internal_state_nodes: &[0],
+            ..BASE
+        };
+        validate_generated_veriloga_descriptor(&BASE).unwrap();
+        validate_generated_veriloga_descriptor(&state).unwrap();
+        assert_ne!(
+            generated_veriloga_descriptor_signature(&BASE),
+            generated_veriloga_descriptor_signature(&state)
+        );
+        for indices in [&[1][..], &[0, 0][..]] {
+            let invalid = GeneratedVerilogAModelDescriptor {
+                internal_state_nodes: indices,
+                ..BASE
+            };
+            assert!(validate_generated_veriloga_descriptor(&invalid).is_err());
+        }
     }
 }
 

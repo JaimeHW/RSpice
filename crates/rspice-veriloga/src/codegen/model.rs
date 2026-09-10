@@ -112,6 +112,9 @@ pub struct CompiledModel {
     pub lookup_tables: Vec<LookupTable>,
     /// Number of internal nodes (if any)
     pub internal_nodes: usize,
+    /// Sorted internal-node indices occupied by private mathematical states.
+    /// Hosts must exclude these from electrical shunts and voltage clamps.
+    pub internal_state_nodes: Vec<usize>,
     /// Branch-current unknowns required by potential contributions; the
     /// engine must allocate one extra system unknown per entry
     pub branch_sources: Vec<CompiledBranchSource>,

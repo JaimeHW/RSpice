@@ -95,7 +95,7 @@ pub fn checked_derivative_value(primal: Value, derivative: Value) -> Result<Valu
 /// This is intentionally independent of checkpoint and stamp-workspace
 /// versions: consumers use it to decide whether a persisted schematic binding
 /// can be reconstructed from the compiled model catalog.
-pub const GENERATED_VERILOGA_DESCRIPTOR_ABI_VERSION: u32 = 3;
+pub const GENERATED_VERILOGA_DESCRIPTOR_ABI_VERSION: u32 = 4;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GeneratedVerilogAParameterScope {
@@ -259,6 +259,9 @@ pub struct GeneratedVerilogAModelDescriptor {
     pub parameters: &'static [GeneratedVerilogAParameterDescriptor],
     pub total_node_count: usize,
     pub internal_node_names: &'static [&'static str],
+    /// Sorted indices into `internal_node_names` occupied by mathematical states.
+    /// Hosts must exclude these unknowns from electrical shunts and voltage clamps.
+    pub internal_state_nodes: &'static [usize],
     pub branch_count: usize,
 }
 
@@ -8575,7 +8578,7 @@ mod fixed_lane_tests {
         const INSTANCE_PARAMETER: GeneratedVerilogAParameterDescriptor =
             GeneratedVerilogAParameterDescriptor::instance("instance_only", Some(1.0));
 
-        assert_eq!(GENERATED_VERILOGA_DESCRIPTOR_ABI_VERSION, 3);
+        assert_eq!(GENERATED_VERILOGA_DESCRIPTOR_ABI_VERSION, 4);
         assert_eq!(TERMINALS[0].name, "FG");
         assert_eq!(TERMINALS[0].current_parameter, "ifg");
         assert_eq!(PARAMETER, EXPECTED_PARAMETER);

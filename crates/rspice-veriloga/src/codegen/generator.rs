@@ -500,6 +500,12 @@ impl CodeGenerator {
             stamp_programs: Vec::new(),
             lookup_tables: Vec::new(),
             internal_nodes: ir.internal_nodes.len(),
+            internal_state_nodes: ir
+                .internal_nodes
+                .iter()
+                .filter(|node| node.is_state)
+                .map(|node| node.index)
+                .collect(),
             branch_sources: ir
                 .branch_unknowns
                 .iter()

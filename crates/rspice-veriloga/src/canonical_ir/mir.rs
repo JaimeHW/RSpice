@@ -41,6 +41,8 @@ pub enum MirEquationKind {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MirNode {
+    /// Private mathematical state rather than an electrical node.
+    pub is_state: bool,
     pub id: NodeId,
     pub name: SmolStr,
     pub is_external: bool,
@@ -142,6 +144,7 @@ impl MirModel {
                 id: NodeId::from(index),
                 name: port.name.clone(),
                 is_external: true,
+                is_state: false,
             })
             .collect();
 
@@ -154,6 +157,7 @@ impl MirModel {
                     id: NodeId::from(external_node_count + index),
                     name: node.name.clone(),
                     is_external: false,
+                    is_state: node.is_state,
                 }),
         );
 

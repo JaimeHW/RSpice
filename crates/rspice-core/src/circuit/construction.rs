@@ -539,9 +539,9 @@ impl CircuitData {
             binding.node_x = Self::remap_node_id(binding.node_x, old_node_id);
         }
         self.non_electrical_state_nodes = self
-            .xyce_memristors
+            .non_electrical_state_nodes
             .iter()
-            .map(|binding| binding.node_x)
+            .map(|&node| Self::remap_node_id(node, old_node_id))
             .filter(|node| *node > 0)
             .collect();
 
@@ -1021,6 +1021,20 @@ mod tests {
                 .to_string()
                 .contains("require a voltage-source branch")
         );
+    }
+
+    #[test]
+    fn node_remapping_preserves_private_state_classification() {
+        let mut circuit = CircuitData::new();
+        let reference = circuit.get_or_create_node("reference");
+        let electrical = circuit.get_or_create_node("electrical");
+        let state = circuit.get_or_create_node("private_state");
+        circuit.non_electrical_state_nodes.insert(state);
+        circuit.remap_node_to_ground(reference);
+        assert!(circuit.is_non_electrical_state_matrix_index(state - 2));
+        assert!(!circuit.is_non_electrical_state_matrix_index(electrical - 2));
+        circuit.remap_node_to_ground(state - 1);
+        assert!(circuit.non_electrical_state_nodes.is_empty());
     }
 
     #[test]
