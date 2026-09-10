@@ -484,12 +484,16 @@ impl Bjt {
                 best_residual_norm = residual_norm;
                 best_state = state;
             }
-            if !residual_norm.is_finite() || residual_norm < 1e-14 {
+            // A small current residual alone says nothing about the voltage
+            // error of a small instance. Test the Newton voltage correction
+            // below before accepting a nonzero residual.
+            if !residual_norm.is_finite() || residual_norm == 0.0 {
                 break;
             }
 
             let rhs = residual.map(|value| -value);
-            let Some(delta) = Self::solve_small_dense_system(&jacobian, &rhs, INTERNAL_DIM) else {
+            let Some(delta) = crate::numerics::solve_small_dense(&jacobian, &rhs, INTERNAL_DIM)
+            else {
                 break;
             };
 
@@ -555,9 +559,6 @@ impl Bjt {
             if candidate_residual_norm < best_residual_norm {
                 best_residual_norm = candidate_residual_norm;
                 best_state = state;
-            }
-            if candidate_residual_norm < 1e-14 {
-                break;
             }
         }
 
@@ -1250,9 +1251,15 @@ impl Bjt {
         let mut sensitivities = [[0.0; EXTERNAL_DIM]; INTERNAL_DIM];
         for external in 0..EXTERNAL_DIM {
             let rhs = g_ie.map(|partials| -partials[external]);
-            if let Some(solution) = Self::solve_small_dense_system(g_ii, &rhs, INTERNAL_DIM) {
+            if let Some(solution) = crate::numerics::solve_small_dense(g_ii, &rhs, INTERNAL_DIM) {
                 for idx in 0..INTERNAL_DIM {
                     sensitivities[idx][external] = solution[idx];
+                }
+            } else {
+                // A failed private solve is not a zero terminal derivative.
+                // Nonfinite reduction evidence must reach the engine checks.
+                for row in &mut sensitivities {
+                    row[external] = Value::NAN;
                 }
             }
         }
@@ -1275,6 +1282,46 @@ impl Bjt {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn private_intrinsic_newton_preserves_voltage_across_instance_scales() {
+        for xyce in [false, true] {
+            for p in [1.0, -1.0] {
+                let make = |m| {
+                    let mut bjt = if p > 0.0 {
+                        Bjt::new_npn("q".into(), 1, 2, 0)
+                    } else {
+                        Bjt::new_pnp("q".into(), 1, 2, 0)
+                    }
+                    .with_params(
+                        &[
+                            ("IS".into(), 1e-14),
+                            ("BF".into(), 100.0),
+                            ("RB".into(), 5e3),
+                            ("RBM".into(), 1e3),
+                        ]
+                        .into_iter()
+                        .collect(),
+                    )
+                    .with_instance_params(&[("M".into(), m)]);
+                    bjt.set_xyce_compatibility(xyce);
+                    bjt.set_junction_gmin(0.0);
+                    bjt
+                };
+                let reference = make(1.0).solve_intrinsic_terminal_state(p, 0.7 * p, 0.0, 0.0);
+                for m in [1e-20, 1e-100, 1e-200] {
+                    let bjt = make(m);
+                    let actual = bjt.solve_intrinsic_terminal_state(p, 0.7 * p, 0.0, 0.0);
+                    assert!(
+                        (actual.vbi - reference.vbi).abs() < 2e-12,
+                        "xyce={xyce} p={p} M={m:e}: vbi={} vs {}",
+                        actual.vbi,
+                        reference.vbi
+                    );
+                }
+            }
+        }
+    }
 
     #[test]
     fn intrinsic_residual_norm_cannot_accept_an_invalid_equation_as_zero() {

@@ -522,31 +522,46 @@ mod wasm_tests {
         let mut config = rspice_core::engine::SimulationConfig::default();
         config.convergence_config.gmin_target = 0.0;
         config.convergence_config.junction_gmin_target = 0.0;
+        // Resolve the outer operating point more tightly than the scaling
+        // assertion, including currents of the smallest tested instance.
+        config.convergence_config.voltage_reltol = 1e-10;
+        config.convergence_config.voltage_abstol = 1e-12;
+        config.convergence_config.current_abstol = 1e-220;
+        config.convergence_config.residual_reltol = 1e-10;
         let engine = rspice_core::Engine::new(config);
         let abort = rspice_core::abort_signal::NoAbort;
-        for (kind, p) in [("NPN", 1.0), ("PNP", -1.0)] {
-            let make = |parameter, scale| {
-                rspice_core::Netlist::parse(&format!(
-                "Small BJT\nVC c 0 {p}\nVB b 0 DC {} AC 1\nQ1 c b 0 mm {parameter}={scale}\n.model mm {kind}(IS=1e-14 BF=100 IKF=1m IKR=2m CJE=2p CJC=1p TF=1n)\n.options GMIN=0\n.end\n",p*0.7)).unwrap()
-            };
-            let unit = make("M", 1.0);
-            let dc = engine.run_dc_op_with_abort(&unit, &abort).unwrap();
-            let ac = engine.run_ac_with_abort(&unit, &[1e6], &abort).unwrap();
-            for parameter in ["M", "AREA"] {
-                for scale in [1e-20, 1e-200] {
-                    let deck = make(parameter, scale);
-                    let actual_dc = engine.run_dc_op_with_abort(&deck, &abort).unwrap();
-                    let actual_ac = engine.run_ac_with_abort(&deck, &[1e6], &abort).unwrap();
-                    for (&actual, &expected) in
-                        actual_dc.branch_currents.iter().zip(&dc.branch_currents)
-                    {
-                        assert!((actual / scale - expected).abs() < expected.abs() * 3e-10);
-                    }
-                    for (actual, expected) in actual_ac[0].currents.iter().zip(&ac[0].currents) {
-                        for (actual, expected) in
-                            [(actual.re, expected.re), (actual.im, expected.im)]
+        for resistance in ["", "RB=5k RBM=1k"] {
+            for (kind, p) in [("NPN", 1.0), ("PNP", -1.0)] {
+                let make = |parameter, scale| {
+                    rspice_core::Netlist::parse(&format!(
+                "Small BJT\nVC c 0 {p}\nVB b 0 DC {} AC 1\nQ1 c b 0 mm {parameter}={scale}\n.model mm {kind}(IS=1e-14 BF=100 {resistance} IKF=1m IKR=2m CJE=2p CJC=1p TF=1n)\n.options GMIN=0\n.end\n",p*0.7)).unwrap()
+                };
+                let unit = make("M", 1.0);
+                let dc = engine.run_dc_op_with_abort(&unit, &abort).unwrap();
+                let ac = engine.run_ac_with_abort(&unit, &[1e6], &abort).unwrap();
+                for parameter in ["M", "AREA"] {
+                    for scale in [1e-20, 1e-200] {
+                        let deck = make(parameter, scale);
+                        let actual_dc = engine.run_dc_op_with_abort(&deck, &abort).unwrap();
+                        let actual_ac = engine.run_ac_with_abort(&deck, &[1e6], &abort).unwrap();
+                        for (&actual, &expected) in
+                            actual_dc.branch_currents.iter().zip(&dc.branch_currents)
                         {
-                            assert!((actual / scale - expected).abs() <= expected.abs() * 3e-10);
+                            assert!(
+                                (actual / scale - expected).abs() < expected.abs() * 3e-10,
+                                "{kind} {resistance} {parameter}={scale:e} DC: {:e} vs {expected:e}",
+                                actual / scale
+                            );
+                        }
+                        for (actual, expected) in actual_ac[0].currents.iter().zip(&ac[0].currents)
+                        {
+                            for (actual, expected) in
+                                [(actual.re, expected.re), (actual.im, expected.im)]
+                            {
+                                assert!(
+                                    (actual / scale - expected).abs() <= expected.abs() * 3e-10
+                                );
+                            }
                         }
                     }
                 }

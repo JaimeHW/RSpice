@@ -215,7 +215,8 @@ impl Bjt {
             }
         }
 
-        let Some(lagrange) = Self::solve_small_dense_system(&gram, &residual, branch_count) else {
+        let Some(lagrange) = crate::numerics::solve_small_dense(&gram, &residual, branch_count)
+        else {
             let mut fallback = raw;
             fallback[IDX_VRTH] = limited.vrth;
             return fallback;
@@ -302,7 +303,7 @@ impl Bjt {
         }
 
         let Some(lagrange) =
-            Self::solve_small_dense_system(&gram, &residual, LEGACY_LIMITED_BRANCH_DIM)
+            crate::numerics::solve_small_dense(&gram, &residual, LEGACY_LIMITED_BRANCH_DIM)
         else {
             return raw;
         };

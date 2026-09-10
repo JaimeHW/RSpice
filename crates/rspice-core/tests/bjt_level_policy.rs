@@ -2600,7 +2600,7 @@ fn legacy_private_base_ac_reduction_matches_explicit_rc_network() {
         let engine = Engine::new(config);
         for kind in ["NPN", "PNP"] {
             for subs in [1, -1] {
-                for (area, m) in [(1.0, 1.0), (5.0, 0.25)] {
+                for (area, m) in [(1.0, 1.0), (5.0, 0.25), (1.0, 1e-20), (5.0, 1e-200)] {
                     // Grading zero makes these pure capacitors. RBM<RB keeps
                     // a private base node; IS=0 and no Early/knee terms make
                     // the base resistance constant, so the RC oracle is exact.
@@ -2621,8 +2621,8 @@ fn legacy_private_base_ac_reduction_matches_explicit_rc_network() {
                                     .position(|name| name.eq_ignore_ascii_case(branch))
                                     .unwrap()]
                             };
-                            let a = get(actual);
-                            let b = get(expected);
+                            let a = get(actual) / scale;
+                            let b = get(expected) / scale;
                             assert!(
                                 (a - b).norm() < 2e-11 * b.norm().max(1e-12),
                                 "{dialect:?} {kind} SUBS={subs} AREA={area} M={m} f={} {branch}: {a:?} vs {b:?}",
@@ -2659,4 +2659,66 @@ fn legacy_private_base_ac_reduction_conserves_nonlinear_terminal_current() {
             }
         }
     }
+}
+
+#[test]
+fn private_bjt_small_instance_dc_and_ac_match_parallel_scaling() {
+    for dialect in [SpiceDialect::Ngspice, SpiceDialect::Xyce] {
+        let mut config = SimulationConfig::default().with_spice_dialect(dialect);
+        config.convergence_config.gmin_target = 0.0;
+        config.convergence_config.junction_gmin_target = 0.0;
+        let engine = Engine::new(config);
+        let make = |m| {
+            Netlist::parse(&format!("Private BJT scaling\nVC c 0 1\nVB b 0 DC .7 AC 1\nQ1 c b 0 mm M={m}\n.model mm NPN(IS=1e-14 BF=100 RB=5k RBM=1k CJE=1p CJC=2p TF=1n)\n.end\n")).unwrap()
+        };
+        let reference = make(1.0);
+        let reference_dc = engine.run_dc_op(&reference).unwrap();
+        let reference_ac = engine.run_ac(&reference, &[1e6]).unwrap();
+        for m in [1e-20, 1e-100, 1e-200] {
+            let deck = make(m);
+            let dc = engine.run_dc_op(&deck).unwrap();
+            let ac = engine.run_ac(&deck, &[1e6]).unwrap();
+            for branch in ["VC", "VB"] {
+                let a = dc.branch_current_named(branch).unwrap() / m;
+                let b = reference_dc.branch_current_named(branch).unwrap();
+                // Xyce's outer DC update uses its fixed 1e-3 relative gate.
+                // The private-voltage unit separately requires 2e-12 V;
+                // do not mistake the returned MNA iterate for that root.
+                let dc_tolerance = if dialect == SpiceDialect::Xyce {
+                    1e-6
+                } else {
+                    2e-8
+                };
+                assert!(
+                    (a - b).abs() < dc_tolerance * b.abs(),
+                    "{dialect:?} M={m} {branch} DC {a:e} vs {b:e}"
+                );
+                let index = ac[0]
+                    .branch_names
+                    .iter()
+                    .position(|name| name.eq_ignore_ascii_case(branch))
+                    .unwrap();
+                let a = ac[0].currents[index] / m;
+                let b = reference_ac[0].currents[index];
+                assert!(
+                    (a - b).norm() < 2e-8 * b.norm(),
+                    "{dialect:?} M={m} {branch} AC {a:?} vs {b:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn private_bjt_ac_reduction_errors_instead_of_dropping_invalid_charge() {
+    let mut config = SimulationConfig::default();
+    config.convergence_config.gmin_target = 0.0;
+    config.convergence_config.junction_gmin_target = 0.0;
+    let engine = Engine::new(config);
+    let deck=Netlist::parse("Invalid private BJT AC\nVC c 0 0\nVB b 0 0 AC 1\nQ1 c b 0 mm\n.model mm NPN(IS=0 RB=1k RBM=100 CJE=1e308 MJE=0)\n.end\n").unwrap();
+    let error = engine.run_ac(&deck, &[1e6]).unwrap_err().to_string();
+    assert!(
+        error.contains("Q1") && error.contains("AC private-state reduction"),
+        "{error}"
+    );
 }
