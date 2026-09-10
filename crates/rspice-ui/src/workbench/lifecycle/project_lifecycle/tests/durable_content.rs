@@ -283,8 +283,13 @@ fn result_annotation_save_publishes_only_results_and_retains_later_edits() {
                 0.75,
             )
             .unwrap();
-        let post_save =
-            prepare_post_save_registry(&state, &saved, SaveScope::ActiveDocument).unwrap();
+        let post_save = prepare_post_save_registry(
+            &state,
+            &saved,
+            SaveScope::ActiveDocument,
+            SnapshotContent::Current,
+        )
+        .unwrap();
         assert!(post_save.is_dirty(&ProjectDocumentId::ResultHistory));
 
         save_native(

@@ -3,6 +3,85 @@
 use super::*;
 
 #[test]
+fn acknowledged_save_rebases_pending_cancellation_against_exact_saved_content() {
+    for scope in [SaveScope::AllDocuments, SaveScope::ActiveDocument] {
+        for later_change in 0..3 {
+            let path = unique_path("acknowledged-gesture");
+            let mut state = AppState::default();
+            state
+                .workbench
+                .activate(crate::workbench::state::Workspace::Design);
+            state.schematic.with_undo("Place resistor", |schematic| {
+                schematic.add_component(ComponentType::Resistor, Point::new(100, 100));
+            });
+            save_native(
+                &mut state,
+                SaveScope::AllDocuments,
+                &path,
+                DestinationAuthority::UserSelected,
+            )
+            .unwrap();
+            state.schematic.with_undo("Update resistor", |schematic| {
+                schematic.components[0].value = "2k".to_owned();
+            });
+            let candidate = snapshot(&state).unwrap();
+            let (bytes, _) = persistence::serialized_project(&candidate).unwrap();
+            let accepted_digest = state
+                .project_lifecycle
+                .accepted()
+                .unwrap()
+                .binding
+                .as_ref()
+                .unwrap()
+                .accepted_digest();
+            if later_change == 1 {
+                state
+                    .schematic
+                    .with_undo("Newer resistor edit", |schematic| {
+                        schematic.components[0].value = "3k".to_owned();
+                    });
+            } else if later_change == 2 {
+                state.sim_setup.options.reltol = -1.0;
+            }
+            state.schematic.begin_operation("move preview");
+            state.schematic.components[0].pos = Point::new(150, 100);
+            let operation = state.schematic.pending_operation_id();
+            state.sync_active_schematic_to_workspace();
+            let digest = persistence::publish_canonical_native(
+                &path,
+                crate::io::durable_file::ExpectedContent::Digest(*accepted_digest.as_bytes()),
+                &bytes,
+            )
+            .unwrap();
+            finish_successful_save(
+                &mut state,
+                candidate,
+                PersistenceBinding::Native {
+                    canonical_path: path.clone(),
+                    accepted_digest: digest,
+                },
+                scope,
+            );
+            assert_eq!(state.schematic.pending_operation_id(), operation);
+            assert_eq!(state.schematic.components[0].pos, Point::new(150, 100));
+            let key = state.workspace.active_key();
+            let mut inactive_copy = state.workspace.schematic_buffers[&key].clone();
+            assert!(inactive_copy.cancel_operation());
+            assert_eq!(inactive_copy.is_dirty, later_change != 0);
+            assert!(state.schematic.cancel_operation());
+            assert_eq!(
+                state.schematic.components[0].value,
+                if later_change == 1 { "3k" } else { "2k" }
+            );
+            assert_eq!(state.schematic.components[0].pos, Point::new(100, 100));
+            assert_eq!(state.schematic.is_dirty, later_change != 0);
+            assert_eq!(has_unsaved_changes(&state), later_change != 0);
+            remove_project_artifacts(&path);
+        }
+    }
+}
+
+#[test]
 fn acknowledged_save_adopts_published_content_despite_invalid_newer_draft() {
     for scope in [SaveScope::AllDocuments, SaveScope::ActiveDocument] {
         let path = unique_path("acknowledged-invalid-draft");

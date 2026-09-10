@@ -296,6 +296,82 @@ fn gesture_project_and_session_snapshots_preserve_committed_geometry() {
 }
 
 #[test]
+fn gesture_native_save_acceptance_rebases_cancel_and_release_dirty_state() {
+    use crate::workbench::lifecycle::project_lifecycle::{
+        DestinationAuthority, SaveScope, has_unsaved_changes, save_native,
+    };
+    for dirty_before_drag in [false, true] {
+        for completion in 0..3 {
+            let mut fixture = Fixture::new(false);
+            let path = std::env::temp_dir().join(format!(
+                "rspice-gesture-save-{}.rspiceproj",
+                uuid::Uuid::new_v4(),
+            ));
+            save_native(
+                &mut fixture.app.state,
+                SaveScope::AllDocuments,
+                &path,
+                DestinationAuthority::UserSelected,
+            )
+            .unwrap();
+            if dirty_before_drag {
+                fixture
+                    .app
+                    .state
+                    .schematic
+                    .with_undo("change resistor", |schematic| {
+                        schematic.components[0].value = "2k".to_owned();
+                    });
+            }
+            fixture.drag(DragType::MoveSelection);
+            save_native(
+                &mut fixture.app.state,
+                SaveScope::AllDocuments,
+                &path,
+                DestinationAuthority::UserSelected,
+            )
+            .unwrap();
+            let saved = crate::io::load_project_file(&path).unwrap();
+            let key = fixture.app.state.workspace.active_key();
+            assert_eq!(
+                saved.workspace.schematic_buffers[&key].components[0].pos,
+                Point::new(100, 100)
+            );
+            assert!(fixture.app.state.schematic_drag_in_progress());
+            assert!(has_unsaved_changes(&fixture.app.state));
+            match completion {
+                0 => {
+                    fixture.app.state.cancel_schematic_drag();
+                }
+                1 => fixture.frame(
+                    vec![egui::Event::PointerMoved(
+                        fixture.origin + egui::vec2(100.0, 100.0),
+                    )],
+                    true,
+                ),
+                _ => {}
+            }
+            fixture.frame(
+                vec![fixture.button(if completion == 1 { 100.0 } else { 170.0 }, false)],
+                true,
+            );
+            assert_eq!(has_unsaved_changes(&fixture.app.state), completion == 2);
+            assert_eq!(
+                fixture.app.state.schematic.is_dirty,
+                completion == 2,
+                "dirty before drag={dirty_before_drag}, completion={completion}"
+            );
+            assert!(!fixture.app.state.schematic.has_pending_operation());
+            for suffix in ["", ".bak", ".rspice.lock"] {
+                let mut artifact = path.as_os_str().to_os_string();
+                artifact.push(suffix);
+                let _ = std::fs::remove_file(std::path::PathBuf::from(artifact));
+            }
+        }
+    }
+}
+
+#[test]
 fn gesture_previews_remain_part_of_execution_and_replacement_guards() {
     use crate::workbench::lifecycle::project_lifecycle::{
         begin_project_replacement, generated_netlist_input_digest, validate_project_replacement,

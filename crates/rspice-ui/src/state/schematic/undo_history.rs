@@ -471,6 +471,16 @@ impl UndoHistory {
             .map(|cancel| cancel.was_dirty)
     }
 
+    /// Save acceptance can change whether the cancellation baseline is dirty
+    /// without committing or replacing the live operation.
+    pub(crate) fn set_pending_was_dirty(&mut self, was_dirty: bool) {
+        if let Some(pending) = &mut self.pending
+            && let Some(cancel) = &mut pending.before_snapshot.cancel_state
+        {
+            cancel.was_dirty = was_dirty;
+        }
+    }
+
     /// A step that has just been applied makes its own membership the live
     /// one, and hands it to the boundary that owns the sheet catalog.
     fn adopt_restored_sheet_assignments(&mut self, assignments: &BTreeMap<u64, SheetId>) {

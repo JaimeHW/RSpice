@@ -948,7 +948,8 @@ pub(crate) fn save_native(
         // Build every fallible post-save document digest before publishing.
         // Once the durable file replacement succeeds, adoption below is an
         // in-memory, infallible state transition.
-        let post_save_registry = prepare_post_save_registry(state, &candidate, scope)?;
+        let post_save_registry =
+            prepare_post_save_registry(state, &candidate, scope, SnapshotContent::Current)?;
         let (bytes, _) = persistence::serialized_project(&candidate)?;
         let digest = persistence::publish_canonical_native(&path, expected, &bytes)?;
         let binding = PersistenceBinding::Native {
@@ -1329,7 +1330,12 @@ fn finish_successful_save(
     // A newer working draft can be invalid without revoking that publication.
     // Adopt its binding even when comparison fails, so the next save expects
     // the bytes actually on disk and recovery retains the written baseline.
-    let post_save_registry = match prepare_post_save_registry(state, &candidate, scope) {
+    let post_save_registry = match prepare_post_save_registry(
+        state,
+        &candidate,
+        scope,
+        SnapshotContent::Current,
+    ) {
         Ok(registry) => registry,
         Err(error) => {
             let mut registry = state.project_lifecycle.registry.clone();
@@ -1347,11 +1353,12 @@ fn prepare_post_save_registry(
     state: &AppState,
     candidate: &ProjectFile,
     scope: SaveScope,
+    content: SnapshotContent,
 ) -> Result<registry::DocumentRegistry, ProjectLifecycleError> {
     #[cfg(not(target_arch = "wasm32"))]
-    let mut current = capture_snapshot(state, SnapshotContent::Current)?;
+    let mut current = capture_snapshot(state, content)?;
     #[cfg(target_arch = "wasm32")]
-    let current = capture_snapshot(state, SnapshotContent::Current)?;
+    let current = capture_snapshot(state, content)?;
     #[cfg(not(target_arch = "wasm32"))]
     {
         if scope == SaveScope::AllDocuments
@@ -1365,12 +1372,65 @@ fn prepare_post_save_registry(
     #[cfg(target_arch = "wasm32")]
     let _ = scope;
     let mut post_save_registry = registry::DocumentRegistry::default();
-    let candidate_fingerprints = registry::DocumentFingerprints::new(candidate)
+    let cache = &state.project_lifecycle.result_fingerprints;
+    let candidate_fingerprints =
+        registry::DocumentFingerprints::with_results_cache(candidate, cache)
+            .map_err(ProjectLifecycleError::InvalidState)?;
+    let current_fingerprints = registry::DocumentFingerprints::with_results_cache(&current, cache)
         .map_err(ProjectLifecycleError::InvalidState)?;
     post_save_registry
-        .rebuild(&current, Some(&candidate_fingerprints))
-        .map_err(ProjectLifecycleError::InvalidState)?;
+        .rebuild_from_fingerprints(&current_fingerprints, Some(&candidate_fingerprints));
     Ok(post_save_registry)
+}
+
+fn rebase_pending_operation_dirty_state(
+    state: &mut AppState,
+    candidate: &ProjectFile,
+    scope: SaveScope,
+) {
+    if !state.schematic.has_pending_operation()
+        && !state
+            .workspace
+            .schematic_buffers
+            .values()
+            .any(crate::state::SchematicState::has_pending_operation)
+    {
+        return;
+    }
+    // Compare cancellation baselines through the same complete document
+    // projection used by dirty indicators. A delayed save may acknowledge an
+    // older baseline, and a newer invalid draft cannot be declared clean.
+    let comparison =
+        prepare_post_save_registry(state, candidate, scope, SnapshotContent::Committed);
+    let dirty = |key: &str| {
+        comparison
+            .as_ref()
+            .ok()
+            .and_then(|registry| {
+                registry
+                    .records()
+                    .iter()
+                    .find_map(|record| match &record.id {
+                        ProjectDocumentId::CellView(reference) if reference.key() == key => {
+                            Some(record.dirty)
+                        }
+                        _ => None,
+                    })
+            })
+            .unwrap_or(true)
+    };
+    if state.schematic.has_pending_operation() {
+        let was_dirty = dirty(&state.workspace.active_schematic_reference().key());
+        state
+            .schematic
+            .undo_history
+            .set_pending_was_dirty(was_dirty);
+    }
+    for (key, schematic) in &mut state.workspace.schematic_buffers {
+        if schematic.has_pending_operation() {
+            schematic.undo_history.set_pending_was_dirty(dirty(key));
+        }
+    }
 }
 
 fn adopt_successful_save(
@@ -1380,6 +1440,7 @@ fn adopt_successful_save(
     scope: SaveScope,
     post_save_registry: registry::DocumentRegistry,
 ) {
+    rebase_pending_operation_dirty_state(state, &candidate, scope);
     #[cfg(not(target_arch = "wasm32"))]
     let native_receipt = binding.native_receipt(&candidate.workspace.project.id().to_string());
     #[cfg(target_arch = "wasm32")]
