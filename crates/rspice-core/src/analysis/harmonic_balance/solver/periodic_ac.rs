@@ -354,18 +354,18 @@ impl ScaledComplexAccumulator {
             || !physical_absolute_sum.is_finite()
             || physical_absolute_sum <= 0.0
         {
-            return Err("the completed white-noise sum is outside the finite binary64 range");
+            return Err("the completed noise sum is outside the finite binary64 range");
         }
         if (normalized.re != 0.0 && contribution.re == 0.0)
             || (normalized.im != 0.0 && contribution.im == 0.0)
         {
-            return Err("a nonzero completed white-noise component is below the binary64 range");
+            return Err("a nonzero completed noise component is below the binary64 range");
         }
         Ok((contribution, physical_absolute_sum))
     }
 }
 
-/// Sum scaled white-noise terms before crossing binary64's physical exponent
+/// Sum scaled noise terms before crossing binary64's physical exponent
 /// range. This avoids separately rounding or underflowing terms whose complete
 /// Hermitian sum is representable. Terms that cannot be aligned exactly are
 /// rejected rather than silently discarded.
@@ -477,14 +477,14 @@ fn modulated_noise_gain(
     )
 }
 
-fn scaled_flicker_density(
+fn scaled_flicker_term(
     gain: Complex64,
     gain_binary_exponent: i32,
     coefficient: Value,
     coefficient_binary_exponent: i32,
     frequency: Value,
     exponent: Value,
-) -> Result<Value, &'static str> {
+) -> Result<ScaledComplex, &'static str> {
     if !gain.re.is_finite()
         || !gain.im.is_finite()
         || !coefficient.is_finite()
@@ -497,7 +497,7 @@ fn scaled_flicker_density(
     }
     let gain_scale = gain.re.abs().max(gain.im.abs());
     if coefficient == 0.0 || gain_scale == 0.0 {
-        return Ok(0.0);
+        return Ok(ScaledComplex::ZERO);
     }
     let gain_exponent = libm::ilogb(gain_scale);
     let normalized_gain = Complex64::new(
@@ -510,9 +510,9 @@ fn scaled_flicker_density(
     }
     if frequency == 0.0 {
         return if exponent < 0.0 {
-            Ok(0.0)
+            Ok(ScaledComplex::ZERO)
         } else if exponent == 0.0 {
-            scaled_flicker_density(
+            scaled_flicker_term(
                 gain,
                 gain_binary_exponent,
                 coefficient,
@@ -526,7 +526,7 @@ fn scaled_flicker_density(
     }
 
     let frequency_power = frequency.powf(exponent);
-    let density = if frequency_power.is_normal() {
+    let (mantissa, power) = if frequency_power.is_normal() {
         let (mantissa, power) = crate::numerics::product_binary_normalization(
             &[coefficient, normalized_power],
             &[frequency_power],
@@ -534,9 +534,10 @@ fn scaled_flicker_density(
         let power = i64::from(power)
             + i64::from(coefficient_binary_exponent)
             + 2 * (i64::from(gain_exponent) + i64::from(gain_binary_exponent));
-        libm::scalbn(
+        (
             mantissa,
-            power.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32,
+            i32::try_from(power)
+                .map_err(|_| "the flicker term exceeds the retained binary exponent range")?,
         )
     } else {
         // Normalize the coefficient before combining it with the bounded
@@ -545,20 +546,99 @@ fn scaled_flicker_density(
         // the frequency law cancels it.
         let coefficient_exponent = libm::ilogb(coefficient);
         let mantissa = libm::scalbn(coefficient, -coefficient_exponent) * normalized_power;
-        crate::numerics::scaled_power_law(
+        crate::numerics::power_product_binary_normalization(
             mantissa,
             coefficient_binary_exponent,
-            2.0,
-            Value::from(coefficient_exponent)
-                + 2.0 * (Value::from(gain_exponent) + Value::from(gain_binary_exponent)),
-            frequency,
-            exponent,
+            &[
+                (
+                    2.0,
+                    Value::from(coefficient_exponent)
+                        + 2.0 * (Value::from(gain_exponent) + Value::from(gain_binary_exponent)),
+                ),
+                (frequency, -exponent),
+            ],
         )
     };
-    if !density.is_finite() || density <= 0.0 {
-        return Err("the nonzero flicker density is not representable");
+    if !mantissa.is_finite() || mantissa <= 0.0 {
+        return Err("the nonzero flicker term exceeds the retained binary exponent range");
     }
-    Ok(density)
+    scaled_complex_product3(
+        Complex64::new(mantissa, 0.0),
+        Complex64::new(1.0, 0.0),
+        Complex64::new(1.0, 0.0),
+        power,
+    )
+}
+
+/// Visit the complete source power at retained binary scales. Both mechanisms
+/// must enter the compensated sum before any term is rounded to physical units.
+fn visit_periodic_noise_terms(
+    gains: &[Complex64],
+    source: &PeriodicNoiseSource,
+    sideband_min: i32,
+    offset_hz: Value,
+    fundamental_hz: Value,
+    mut visit: impl FnMut(ScaledComplex) -> Result<(), &'static str>,
+) -> Result<usize, HbError> {
+    let mut term_count =
+        visit_white_noise_terms(gains, &source.psd, source.binary_scale_exponent, &mut visit)
+            .map_err(|reason| {
+                HbError::InvalidCircuit(format!(
+                    "pnoise source '{}' white-noise term is invalid: {reason}",
+                    source.name
+                ))
+            })?;
+    if let Some(flicker) = &source.flicker
+        && flicker.coefficient != 0.0
+    {
+        // Combine correlated modulation paths before squaring their gains.
+        // The stationary-source support extends beyond the circuit window by
+        // the modulation bandwidth, including frequency translation at K=0.
+        let harmonics = (flicker.modulation.len() - 1) as i64;
+        for m in -harmonics..gains.len() as i64 + harmonics {
+            let k = i64::from(sideband_min) + m;
+            let gain = modulated_noise_gain(gains, &flicker.modulation, m).map_err(|reason| {
+                HbError::InvalidCircuit(format!(
+                    "pnoise source '{}' flicker modulation is invalid at sideband {k}: {reason}",
+                    source.name
+                ))
+            })?;
+            if gain.is_zero() {
+                continue;
+            }
+            let sideband_frequency = (k as Value).mul_add(fundamental_hz, offset_hz);
+            if !sideband_frequency.is_finite() {
+                return Err(HbError::InvalidCircuit(format!(
+                    "pnoise source '{}' has a non-finite sideband frequency at k={k}",
+                    source.name
+                )));
+            }
+            let frequency = sideband_frequency.abs();
+            if frequency == 0.0 && flicker.exponent > 0.0 {
+                return Err(HbError::InvalidCircuit(format!(
+                    "pnoise source '{}' has singular 1/f noise at the zero-frequency sideband k={k}",
+                    source.name
+                )));
+            }
+            scaled_flicker_term(
+                gain.mantissa,
+                gain.exponent,
+                flicker.coefficient,
+                source.binary_scale_exponent,
+                frequency,
+                flicker.exponent,
+            )
+            .and_then(&mut visit)
+            .map_err(|reason| {
+                HbError::InvalidCircuit(format!(
+                    "pnoise source '{}' flicker-noise term is invalid at sideband {k}: {reason}",
+                    source.name
+                ))
+            })?;
+            term_count = term_count.saturating_add(1);
+        }
+    }
+    Ok(term_count)
 }
 
 /// One small-signal excitation column: current injections applied at a single
@@ -2519,10 +2599,12 @@ impl HbSolver {
             // O(sidebands^2) terms. Pass two streams the same deterministic
             // products into the compensated accumulator.
             let mut common_exponent = None;
-            let mut term_count = visit_white_noise_terms(
+            let term_count = visit_periodic_noise_terms(
                 &gains,
-                &source.psd,
-                source.binary_scale_exponent,
+                source,
+                sideband_min,
+                offset_hz,
+                self.config.fundamental_freq,
                 |term| {
                     validate_scaled_complex(term)?;
                     if !term.is_zero() {
@@ -2533,30 +2615,20 @@ impl HbSolver {
                     }
                     Ok(())
                 },
-            )
-            .map_err(|reason| {
-                HbError::InvalidCircuit(format!(
-                    "pnoise source '{}' white-noise term is invalid: {reason}",
-                    source.name
-                ))
-            })?;
-            let (mut contribution, mut absolute_sum) = if let Some(exponent) = common_exponent {
+            )?;
+            let (contribution, absolute_sum) = if let Some(exponent) = common_exponent {
                 let mut accumulator = ScaledComplexAccumulator::new(exponent);
-                visit_white_noise_terms(
+                visit_periodic_noise_terms(
                     &gains,
-                    &source.psd,
-                    source.binary_scale_exponent,
+                    source,
+                    sideband_min,
+                    offset_hz,
+                    self.config.fundamental_freq,
                     |term| accumulator.add(term),
-                )
-                .map_err(|reason| {
-                    HbError::InvalidCircuit(format!(
-                        "pnoise source '{}' white-noise accumulation is invalid: {reason}",
-                        source.name
-                    ))
-                })?;
+                )?;
                 accumulator.finish().map_err(|reason| {
                     HbError::InvalidCircuit(format!(
-                        "pnoise source '{}' white-noise accumulation is invalid: {reason}",
+                        "pnoise source '{}' noise accumulation is invalid: {reason}",
                         source.name
                     ))
                 })?
@@ -2564,73 +2636,6 @@ impl HbSolver {
                 (Complex64::new(0.0, 0.0), 0.0)
             };
 
-            // Combine correlated modulation paths BEFORE squaring their gains.
-            // The stationary-source support extends beyond the circuit window
-            // by the modulation bandwidth; clipping it to the circuit window
-            // would lose frequency translation even in an LTI circuit at K=0.
-            if let Some(flicker) = &source.flicker
-                && flicker.coefficient != 0.0
-            {
-                let coeff = flicker.coefficient;
-                let ef = flicker.exponent;
-                let omega0_hz = self.config.fundamental_freq;
-                let harmonics = (flicker.modulation.len() - 1) as i64;
-                for m in -harmonics..gains.len() as i64 + harmonics {
-                    let gain = modulated_noise_gain(&gains, &flicker.modulation, m).map_err(|reason| {
-                        HbError::InvalidCircuit(format!(
-                            "pnoise source '{}' flicker modulation is invalid at sideband {}: {reason}",
-                            source.name, i64::from(sideband_min) + m
-                        ))
-                    })?;
-                    if gain.is_zero() {
-                        continue;
-                    }
-                    let k = i64::from(sideband_min) + m;
-                    let sideband_frequency = (k as f64).mul_add(omega0_hz, offset_hz);
-                    if !sideband_frequency.is_finite() {
-                        return Err(HbError::InvalidCircuit(format!(
-                            "pnoise source '{}' has a non-finite sideband frequency at k={k}",
-                            source.name
-                        )));
-                    }
-                    let f_abs = sideband_frequency.abs();
-                    if f_abs == 0.0 && ef > 0.0 {
-                        return Err(HbError::InvalidCircuit(format!(
-                            "pnoise source '{}' has singular 1/f noise at the zero-frequency sideband k={k}",
-                            source.name
-                        )));
-                    }
-                    let term = scaled_flicker_density(
-                        gain.mantissa,
-                        gain.exponent,
-                        coeff,
-                        source.binary_scale_exponent,
-                        f_abs,
-                        ef,
-                    )
-                    .map_err(|reason| {
-                        HbError::InvalidCircuit(format!(
-                            "pnoise source '{}' produced an invalid flicker-noise density at sideband {k}: {reason}",
-                            source.name
-                        ))
-                    })?;
-                    contribution.re += term;
-                    if !contribution.re.is_finite() {
-                        return Err(HbError::InvalidCircuit(format!(
-                            "pnoise source '{}' flicker-noise accumulation became non-finite",
-                            source.name
-                        )));
-                    }
-                    absolute_sum += term;
-                    if !absolute_sum.is_finite() {
-                        return Err(HbError::InvalidCircuit(format!(
-                            "pnoise source '{}' flicker-noise error bound became non-finite",
-                            source.name
-                        )));
-                    }
-                    term_count = term_count.saturating_add(1);
-                }
-            }
             // The double sum is Hermitian by construction; numerical
             // round-off leaves a vanishing imaginary part and can place an
             // exact zero a few ulps below zero. Do not let max(0) silently
@@ -2709,6 +2714,25 @@ pub struct PeriodicFlickerNoise {
 #[cfg(test)]
 mod matrix_free_tests {
     use super::*;
+
+    fn scaled_flicker_density(
+        gain: Complex64,
+        gain_binary_exponent: i32,
+        coefficient: Value,
+        coefficient_binary_exponent: i32,
+        frequency: Value,
+        exponent: Value,
+    ) -> Result<Value, &'static str> {
+        let term = scaled_flicker_term(
+            gain,
+            gain_binary_exponent,
+            coefficient,
+            coefficient_binary_exponent,
+            frequency,
+            exponent,
+        )?;
+        materialize_scaled_complex_sum(&[term]).map(|(sum, _)| sum.re)
+    }
 
     struct IdentityPreconditioner;
 
@@ -3510,6 +3534,40 @@ mod matrix_free_tests {
         assert_eq!(sum.re.to_bits(), Value::from_bits(2).to_bits());
         assert_eq!(sum.im, 0.0);
         assert_eq!(absolute_sum.to_bits(), Value::from_bits(2).to_bits());
+    }
+
+    #[test]
+    fn periodic_noise_combines_white_and_flicker_before_materialization() {
+        let mut solver = HbSolver::new(HbConfig::new(1.0).with_harmonics(1), 1);
+        solver.add_conductance(0, 0, 2.0);
+        let state = HbSolverState::new(1, 1);
+        let source = PeriodicNoiseSource {
+            name: "joint source".into(),
+            node_pos: 0,
+            node_neg: usize::MAX,
+            psd: vec![Complex64::new(1.0, 0.0)],
+            binary_scale_exponent: -1073,
+            flicker: Some(PeriodicFlickerNoise {
+                coefficient: 1.0,
+                exponent: 0.0,
+                modulation: vec![Complex64::new(1.0, 0.0)],
+            }),
+        };
+        let actual = solver
+            .solve_periodic_noise(
+                &state,
+                PeriodicSidebandWindow {
+                    offset_hz: 0.25,
+                    sideband_min: 0,
+                    sideband_max: 0,
+                },
+                0,
+                None,
+                &[source],
+            )
+            .unwrap()[0];
+        // Each independent mechanism contributes 2^-1073 / 2^2 = 2^-1075.
+        assert_eq!(actual.to_bits(), Value::from_bits(1).to_bits());
     }
 
     #[test]

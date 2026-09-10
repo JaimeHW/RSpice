@@ -602,6 +602,39 @@ mod wasm_tests {
     }
 
     #[wasm_bindgen_test]
+    fn flicker_sideband_accumulation_in_wasm() {
+        let small = 2.0_f64.powi(-26);
+        for (bias, first, second, kf, expected) in [
+            (0.0, 1.0, 0.0, f64::from_bits(2), f64::from_bits(1)),
+            (1.0, small, small, 1.0, 1.0 + f64::EPSILON),
+        ] {
+            let deck = rspice_core::Netlist::parse(&format!(
+                "Flicker sideband rounding\nI1 0 out SIN({bias} {first} 1)\nI2 0 out SIN(0 {second} 2)\nR1 out 0 RM 1\n.model RM R(KF={kf} AF=2 EF=0)\n.end\n"
+            )).unwrap();
+            let result = rspice_core::Engine::default()
+                .run_pnoise_with_abort(
+                    &deck,
+                    1.0,
+                    &[0.25],
+                    "out",
+                    None,
+                    None,
+                    0,
+                    &rspice_core::abort_signal::NoAbort,
+                )
+                .unwrap();
+            let actual = result
+                .contributors
+                .iter()
+                .find(|(name, _)| name.eq_ignore_ascii_case("r1 flicker"))
+                .unwrap()
+                .1[0];
+            // Parseval: KF*(bias^2 + first^2/2 + second^2/2).
+            assert_eq!(actual.to_bits(), expected.to_bits());
+        }
+    }
+
+    #[wasm_bindgen_test]
     fn signed_resistor_flicker_folding_in_wasm() {
         for branch_form in [false, true] {
             let option = if branch_form {

@@ -142,6 +142,42 @@ fn pnoise_rshunt_is_one_physical_source_per_electrical_node_and_uses_dialect_con
 }
 
 #[test]
+fn pnoise_flicker_sums_sidebands_before_rounding() {
+    let small_amplitude = 2.0_f64.powi(-26);
+    for (bias, first, second, kf, expected) in [
+        (0.0, 1.0, 0.0, f64::from_bits(2), f64::from_bits(1)),
+        (
+            1.0,
+            small_amplitude,
+            small_amplitude,
+            1.0,
+            1.0 + f64::EPSILON,
+        ),
+    ] {
+        let deck = Netlist::parse(&format!(
+            "Flicker sideband rounding\nI1 0 out SIN({bias} {first} 1)\nI2 0 out SIN(0 {second} 2)\nR1 out 0 RM 1\n.model RM R(KF={kf} AF=2 EF=0)\n.end\n"
+        )).unwrap();
+        let result = Engine::default()
+            .run_pnoise(&deck, 1.0, &[0.25], "out", None, None, 0)
+            .unwrap();
+        let actual = result
+            .contributors
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case("r1 flicker"))
+            .unwrap()
+            .1[0];
+        // With EF=0, Parseval gives KF*(bias^2 + first^2/2 + second^2/2).
+        // The first case sums two half-subnormal powers; the second recovers
+        // four quarter-ulp powers beside the DC term.
+        assert_eq!(
+            actual.to_bits(),
+            expected.to_bits(),
+            "KF={kf}, bias={bias}: {actual:e} vs {expected:e}"
+        );
+    }
+}
+
+#[test]
 fn pnoise_resistor_flicker_retains_coefficient_scale() {
     for (m, kf, frequency, tolerance) in
         [(1e300, 1e-300, 1e-300, 1.0), (1e-200, 1e200, 1e200, 1e201)]
