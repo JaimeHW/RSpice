@@ -202,19 +202,7 @@ impl Engine {
             q_prev_prev,
             cq_prev,
         } = step;
-        let mut snapshot = bjt.charge_snapshot_for_dynamic_state(vc, vb, ve, vs, internal);
-        Self::rebalance_vbic_dynamic_thermal_state(
-            bjt,
-            BjtExternalBias { vc, vb, ve, vs },
-            VbicChargeStep {
-                coeff,
-                dt,
-                q_prev,
-                q_prev_prev,
-                cq_prev,
-            },
-            &mut snapshot,
-        );
+        let snapshot = bjt.charge_snapshot_for_dynamic_state(vc, vb, ve, vs, internal);
         let base_static_g = snapshot.reduction.g_reduced;
         let linearization = Self::assemble_vbic_transient_linearization(
             bjt,

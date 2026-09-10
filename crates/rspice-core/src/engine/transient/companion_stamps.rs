@@ -854,23 +854,6 @@ impl Engine {
     }
 
     #[inline]
-    pub(super) fn linear_charge_history_ieq(
-        coeff: &CompanionCoefficients,
-        dt: Value,
-        history: BranchChargeHistory,
-    ) -> Value {
-        let BranchChargeHistory {
-            q_prev,
-            q_prev_prev,
-            cq_prev,
-        } = history;
-        if !dt.is_finite() || dt <= 0.0 {
-            return 0.0;
-        }
-        coeff.capacitor_ieq(1.0, dt, q_prev, q_prev_prev, cq_prev)
-    }
-
-    #[inline]
     pub(super) fn predict_transient_history_value(
         previous: Value,
         previous_previous: Option<Value>,

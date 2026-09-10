@@ -208,6 +208,54 @@ mod wasm_tests {
     use crate::js_interop::{js_array_property, js_property};
 
     #[wasm_bindgen_test]
+    fn promoted_vbic_thermal_decay_in_wasm() {
+        use rspice_core::engine::{Engine, SimulationConfig, TransientStartupMode};
+        use rspice_core::numerics::integration::IntegrationMethod;
+
+        for level in [4, 9, 11, 12, 13] {
+            let substrate = if level == 11 { "" } else { " 0" };
+            for m in [1e-200, 1e200] {
+                for rise in [30.0, 1e-14] {
+                    let netlist = rspice_core::Netlist::parse(&format!(
+                        "VBIC thermal decay\nQ1 0 0 0{substrate} th vm M={m} SW_ET=0\n.model vm NPN(LEVEL={level} RTH=1000 CTH=1p SELFT=1 IS=0 IBEI=0 IBCI=0 RCI=0 RBI=0 RBP=0)\n.ic V(th)={rise}\n.end\n"
+                    )).unwrap();
+                    let mut config = SimulationConfig {
+                        integration_method: IntegrationMethod::BackwardEuler,
+                        ..Default::default()
+                    };
+                    config.convergence_config.gmin_target = 0.0;
+                    config.convergence_config.junction_gmin_target = 0.0;
+                    config.convergence_config.voltage_abstol = rise * 1e-10;
+                    config.convergence_config.voltage_reltol = 1e-9;
+                    config.convergence_config.current_abstol = rise * m * 1e-13;
+                    config.convergence_config.residual_reltol = 1e-9;
+                    config.transient_nonlinear_abstol = Some(rise * 1e-10);
+                    config.transient_nonlinear_reltol = Some(1e-9);
+                    config.transient_nonlinear_rhstol = Some(rise * m * 1e-13);
+                    let result = Engine::new(config)
+                        .run_tran_with_startup_mode_and_abort(
+                            &netlist,
+                            2e-9,
+                            1e-10,
+                            TransientStartupMode::Uic,
+                            &rspice_core::abort_signal::NoAbort,
+                        )
+                        .unwrap();
+                    let values = result.try_voltage_waveform_named("th").unwrap();
+                    assert_eq!(result.time[0], 0.0);
+                    assert_eq!(*result.time.last().unwrap(), 2e-9);
+                    assert!((values[0] - rise).abs() <= rise * 1e-10);
+                    let mut expected = rise;
+                    for (times, &actual) in result.time.windows(2).zip(&values[1..]) {
+                        expected /= 1.0 + (times[1] - times[0]) / 1e-9;
+                        assert!((actual - expected).abs() <= rise * 2e-8);
+                    }
+                }
+            }
+        }
+    }
+
+    #[wasm_bindgen_test]
     fn private_vbic_thermal_equilibrium_scales_in_wasm() {
         use rspice_core::device::{Bjt, NonlinearDevice};
 

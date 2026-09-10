@@ -1,155 +1,9 @@
-//! VBIC transient linearization, thermal rebalance, and reduced-system assembly.
+//! BJT transient linearization and reduced-system assembly.
+//! VBIC thermal dynamics use the promoted MNA charge branches.
 
 use super::*;
 
 impl Engine {
-    #[inline]
-    pub(in crate::engine::transient) fn rebalance_vbic_dynamic_thermal_state(
-        bjt: &crate::device::Bjt,
-        bias: BjtExternalBias,
-        step: VbicChargeStep<'_>,
-        snapshot: &mut crate::device::semiconductor::BjtChargeSnapshot,
-    ) {
-        let BjtExternalBias { vc, vb, ve, vs } = bias;
-        let VbicChargeStep {
-            coeff,
-            dt,
-            q_prev,
-            q_prev_prev,
-            cq_prev,
-        } = step;
-        let mut internal = snapshot.reduction.internal_voltages;
-        let original_vrth = internal[BJT_THERMAL_STATE_INDEX];
-        let minimum_vrth = bjt.minimum_thermal_rise();
-        let mut best_internal = internal;
-        let mut best_residual = Value::INFINITY;
-
-        for _ in 0..8 {
-            let (residual, derivative) = Self::vbic_transient_thermal_residual_and_derivative(
-                bjt,
-                BjtExternalBias { vc, vb, ve, vs },
-                internal,
-                VbicChargeStep {
-                    coeff,
-                    dt,
-                    q_prev,
-                    q_prev_prev,
-                    cq_prev,
-                },
-            );
-            let residual_abs = residual.abs();
-            if residual_abs.is_finite() && residual_abs < best_residual {
-                best_residual = residual_abs;
-                best_internal = internal;
-            }
-            if !residual.is_finite() || !derivative.is_finite() || derivative.abs() < 1e-18 {
-                break;
-            }
-            if residual_abs < 1e-12 {
-                break;
-            }
-
-            let current_vrth = internal[BJT_THERMAL_STATE_INDEX];
-            let max_step = bjt.thermal_rebalance_step_limit(current_vrth);
-            let step = (-residual / derivative).clamp(-max_step, max_step);
-            if step.abs() < 1e-12 {
-                break;
-            }
-
-            let mut alpha = 1.0;
-            let mut accepted = false;
-            let mut best_candidate = internal;
-            let mut best_candidate_residual = residual_abs;
-            for _ in 0..10 {
-                let candidate_vrth = (current_vrth + alpha * step).max(minimum_vrth);
-                if (candidate_vrth - current_vrth).abs() < 1e-12 {
-                    break;
-                }
-
-                let mut candidate = internal;
-                candidate[BJT_THERMAL_STATE_INDEX] = candidate_vrth;
-                let (candidate_residual, _) = Self::vbic_transient_thermal_residual_and_derivative(
-                    bjt,
-                    BjtExternalBias { vc, vb, ve, vs },
-                    candidate,
-                    VbicChargeStep {
-                        coeff,
-                        dt,
-                        q_prev,
-                        q_prev_prev,
-                        cq_prev,
-                    },
-                );
-                let candidate_abs = candidate_residual.abs();
-                if candidate_abs.is_finite() && candidate_abs < best_candidate_residual {
-                    best_candidate = candidate;
-                    best_candidate_residual = candidate_abs;
-                }
-                if candidate_abs.is_finite() && candidate_abs < residual_abs {
-                    internal = candidate;
-                    accepted = true;
-                    break;
-                }
-                alpha *= 0.5;
-            }
-
-            if accepted {
-                continue;
-            }
-            if best_candidate_residual + 1e-15 < residual_abs {
-                internal = best_candidate;
-                continue;
-            }
-            break;
-        }
-
-        if best_residual.is_finite()
-            && best_residual < 1e-9
-            && (best_internal[BJT_THERMAL_STATE_INDEX] - original_vrth).abs() >= 1e-12
-        {
-            *snapshot = bjt.charge_snapshot_for_dynamic_state(vc, vb, ve, vs, best_internal);
-        }
-    }
-
-    #[inline]
-    pub(in crate::engine::transient) fn vbic_transient_thermal_residual_and_derivative(
-        bjt: &crate::device::Bjt,
-        bias: BjtExternalBias,
-        internal: [Value; BJT_INTERNAL_STATE_DIM],
-        step: VbicChargeStep<'_>,
-    ) -> (Value, Value) {
-        let BjtExternalBias { vc, vb, ve, vs } = bias;
-        let VbicChargeStep {
-            coeff,
-            dt,
-            q_prev,
-            q_prev_prev,
-            cq_prev,
-        } = step;
-        let thermal_charge_idx = BJT_DYNAMIC_CHARGE_COUNT - 3;
-        let (mut residual, mut derivative) =
-            bjt.vbic_dynamic_thermal_residual_and_derivative(vc, vb, ve, vs, internal);
-
-        let cth = bjt.thermal_capacitance();
-        let charge_factor = Self::jfet_companion_geq(coeff, 1.0, dt);
-        if cth > 0.0 && charge_factor > 0.0 {
-            let vrth = internal[BJT_THERMAL_STATE_INDEX];
-            let ieq = Self::linear_charge_history_ieq(
-                coeff,
-                dt,
-                BranchChargeHistory {
-                    q_prev: q_prev[thermal_charge_idx],
-                    q_prev_prev: q_prev_prev[thermal_charge_idx],
-                    cq_prev: cq_prev[thermal_charge_idx],
-                },
-            );
-            residual += charge_factor * cth * vrth - ieq;
-            derivative += charge_factor * cth;
-        }
-
-        (residual, derivative)
-    }
-
     #[inline]
     pub(in crate::engine::transient) fn assemble_vbic_transient_linearization(
         bjt: &crate::device::Bjt,
@@ -1226,6 +1080,59 @@ impl Engine {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn promoted_vbic_thermal_decay_matches_backward_euler_across_scales() {
+        for level in [4, 9, 11, 12, 13] {
+            let substrate = if level == 11 { "" } else { " 0" };
+            for m in [1.0, 1e-20, 1e-200, 1e200] {
+                for rise in [30.0, 1e-14] {
+                    let netlist = crate::Netlist::parse(&format!(
+                        "VBIC thermal decay\nQ1 0 0 0{substrate} th vm M={m} SW_ET=0\n.model vm NPN(LEVEL={level} RTH=1000 CTH=1p SELFT=1 IS=0 IBEI=0 IBCI=0 RCI=0 RBI=0 RBP=0)\n.ic V(th)={rise}\n.end\n"
+                    )).unwrap();
+                    let mut config = crate::engine::SimulationConfig {
+                        integration_method: IntegrationMethod::BackwardEuler,
+                        ..Default::default()
+                    };
+                    config.convergence_config.gmin_target = 0.0;
+                    config.convergence_config.junction_gmin_target = 0.0;
+                    config.convergence_config.voltage_abstol = rise * 1e-10;
+                    config.convergence_config.voltage_reltol = 1e-9;
+                    config.convergence_config.current_abstol = rise * m * 1e-13;
+                    config.convergence_config.residual_reltol = 1e-9;
+                    config.transient_nonlinear_abstol = Some(rise * 1e-10);
+                    config.transient_nonlinear_reltol = Some(1e-9);
+                    config.transient_nonlinear_rhstol = Some(rise * m * 1e-13);
+                    let engine = Engine::new(config);
+                    let circuit = engine.build_circuit(&netlist).unwrap();
+                    assert!(circuit.bjts.devices[0].vbic_mna_promoted());
+                    let result = engine
+                        .run_tran_with_startup_mode(
+                            &netlist,
+                            2e-9,
+                            1e-10,
+                            TransientStartupMode::Uic,
+                        )
+                        .unwrap();
+                    let values = result.try_voltage_waveform_named("th").unwrap();
+                    assert_eq!(result.time[0], 0.0);
+                    assert_eq!(*result.time.last().unwrap(), 2e-9);
+                    assert!((values[0] - rise).abs() <= rise * 1e-10);
+                    let mut expected = rise;
+                    for (times, &actual) in result.time.windows(2).zip(&values[1..]) {
+                        // The physical RC is 1 ns for every M. Check the
+                        // backward-Euler law on each actual accepted step.
+                        expected /= 1.0 + (times[1] - times[0]) / 1e-9;
+                        assert!(
+                            (actual - expected).abs() <= rise * 2e-8,
+                            "LEVEL={level} M={m:e} rise={rise:e} t={:e}: {actual:e} vs {expected:e}",
+                            times[1],
+                        );
+                    }
+                }
+            }
+        }
+    }
 
     #[test]
     fn vbic_residual_norms_include_invalid_equations_and_retain_finite_objectives() {

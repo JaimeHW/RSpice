@@ -13710,36 +13710,6 @@ D1 D 0 DMOD
         );
         assert_eq!(gear_order_one_ccap, backward_euler_ccap);
         assert_ne!(gear_order_two_ccap, backward_euler_ccap);
-
-        let backward_euler_ieq = Engine::linear_charge_history_ieq(
-            &backward_euler,
-            dt,
-            BranchChargeHistory {
-                q_prev,
-                q_prev_prev,
-                cq_prev,
-            },
-        );
-        let gear_order_one_ieq = Engine::linear_charge_history_ieq(
-            &gear_order_one,
-            dt,
-            BranchChargeHistory {
-                q_prev,
-                q_prev_prev,
-                cq_prev,
-            },
-        );
-        let gear_order_two_ieq = Engine::linear_charge_history_ieq(
-            &gear_order_two,
-            dt,
-            BranchChargeHistory {
-                q_prev,
-                q_prev_prev,
-                cq_prev,
-            },
-        );
-        assert_eq!(gear_order_one_ieq, backward_euler_ieq);
-        assert_ne!(gear_order_two_ieq, backward_euler_ieq);
     }
 
     #[test]

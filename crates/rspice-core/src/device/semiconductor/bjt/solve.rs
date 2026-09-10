@@ -688,7 +688,7 @@ impl Bjt {
         }
     }
 
-    pub(crate) fn thermal_rebalance_step_limit(&self, rise: Value) -> Value {
+    pub(super) fn thermal_rebalance_step_limit(&self, rise: Value) -> Value {
         let minimum = self.minimum_thermal_rise();
         let half_distance = if minimum.is_finite() {
             0.5 * rise - 0.5 * minimum
@@ -696,58 +696,6 @@ impl Bjt {
             0.5 * rise.abs() + 0.5 * self.requested_temperature().abs()
         };
         (half_distance + 5.0).max(0.5)
-    }
-
-    pub(crate) fn vbic_dynamic_thermal_residual_and_derivative(
-        &self,
-        vc: Value,
-        vb: Value,
-        ve: Value,
-        vs: Value,
-        internal: [Value; BJT_INTERNAL_STATE_DIM],
-    ) -> (Value, Value) {
-        let static_internal = [
-            internal[IDX_VCX],
-            internal[IDX_VCI],
-            internal[IDX_VBX],
-            internal[IDX_VBI],
-            internal[IDX_VEI],
-            internal[IDX_VBP],
-            internal[IDX_VSI],
-            internal[IDX_VRTH],
-        ];
-        let state = self.intrinsic_state_from_internal_vector(static_internal);
-        let eval = self.evaluate_state(
-            BjtNodeVoltages {
-                vc,
-                vb,
-                ve,
-                vs,
-                vcx: state.vcx,
-                vci: state.vci,
-                vbx: state.vbx,
-                vbi: state.vbi,
-                vei: state.vei,
-                vbp: state.vbp,
-                vsi: state.vsi,
-            },
-            state.vrth,
-        );
-        let static_row = Self::sub_branches(
-            self.thermal_sink_branch(state.vrth),
-            self.thermal_power_branch(eval, [vc, vb, ve, vs], static_internal),
-        );
-        let mut residual = static_row.current;
-        let mut derivative = static_row.d_internal[IDX_VRTH];
-
-        let reduction = self.dynamic_reduction_for_internal_state(vc, vb, ve, vs, internal);
-        let thermal_branch = self.vbic_delay_static_thermal_branch(&reduction);
-        if thermal_branch.is_active() {
-            residual += thermal_branch.current;
-            derivative += thermal_branch.d_internal[IDX_VRTH];
-        }
-
-        (residual, derivative)
     }
 
     #[inline]
