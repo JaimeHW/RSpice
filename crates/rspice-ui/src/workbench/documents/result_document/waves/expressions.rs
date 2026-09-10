@@ -128,6 +128,25 @@ pub(super) fn expr_editor_row(
     analysis_key: AnalysisPresentationKey,
     analysis_index: usize,
 ) {
+    let scope_note = state
+        .ui
+        .results
+        .sample_selection
+        .as_ref()
+        .and_then(|selection| {
+            let run = state.simulation.active_run()?;
+            let analysis = run.analyses.get(analysis_index)?;
+            (selection.dataset_id == run.dataset_id && selection.analysis_sequence == analysis.id)
+                .then(|| {
+                    if selection.source_indices.is_empty() {
+                        "Scope: no samples selected"
+                    } else if selection.family_render_plan().is_some() {
+                        "Scope: each selected curve, evaluated independently"
+                    } else {
+                        "Scope: selected samples"
+                    }
+                })
+        });
     let Some(editor) = state
         .ui
         .results
@@ -291,6 +310,17 @@ pub(super) fn expr_editor_row(
         }
     }
 
+    if let Some(note) = scope_note {
+        ui.add(
+            egui::Label::new(
+                egui::RichText::new(note)
+                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                    .color(c.text_dim),
+            )
+            .wrap(),
+        );
+    }
+
     match action {
         Action::None => {}
         Action::Cancel => state.ui.results.expr_editor = None,
@@ -347,87 +377,6 @@ pub(super) fn expr_editor_row(
     }
 }
 
-/// Evaluate one expression against an analysis' waveforms. Scalars become a
-/// constant trace across the analysis' x span.
-pub(super) fn evaluate_expression(
-    simulation: &SimulationState,
-    analysis_index: usize,
-    text: &str,
-    selection: Option<&SourceSampleSelection>,
-) -> WaveformSeriesResult {
-    evaluate_expression_with_policy(
-        simulation,
-        analysis_index,
-        text,
-        selection,
-        ComplexExpressionPolicy::Rectangular,
-    )
-}
-
-fn evaluate_expression_with_policy(
-    simulation: &SimulationState,
-    analysis_index: usize,
-    text: &str,
-    selection: Option<&SourceSampleSelection>,
-    complex_policy: ComplexExpressionPolicy,
-) -> WaveformSeriesResult {
-    let Some(run) = simulation.active_run() else {
-        return Err("analysis no longer exists".to_owned());
-    };
-    let Some(analysis) = run.analyses.get(analysis_index) else {
-        return Err("analysis no longer exists".to_owned());
-    };
-    let selection = selection.filter(|selection| {
-        selection.dataset_id == run.dataset_id && selection.analysis_sequence == analysis.id
-    });
-
-    let ctx = calculator::WaveformsContext::with_policy(&analysis.waveforms, complex_policy);
-    let expr = match calculator::parser::try_parse(text) {
-        Ok(expr) => expr,
-        Err(error) => return Err(format!("parse error: {error}")),
-    };
-    let value = calculator::evaluator::evaluate(&expr, &ctx).map_err(|error| error.to_string())?;
-    let scalar_axis = analysis.waveforms.first().and_then(|waveform| {
-        let x = waveform.x.as_slice();
-        if selection.is_some() {
-            Some(x.to_vec())
-        } else {
-            x.first()
-                .zip(x.last())
-                .map(|(&first, &last)| vec![first, last])
-        }
-    });
-    let mut result = calculator::evaluated_waveform(value, text, scalar_axis.as_deref())?;
-    if result.x.is_empty() {
-        return Err("expression produced no samples".to_owned());
-    }
-    if let Some(selection) = selection {
-        if selection
-            .source_indices
-            .iter()
-            .any(|index| *index >= result.x.len())
-        {
-            return Err(
-                "expression sample count does not match the retained family manifest".to_owned(),
-            );
-        }
-        let selected = |values: &SharedWaveformValues| -> SharedWaveformValues {
-            selection
-                .source_indices
-                .iter()
-                .map(|index| values[*index])
-                .collect::<Vec<_>>()
-                .into()
-        };
-        result.x = selected(&result.x);
-        result.y = selected(&result.y);
-        if let Some(complex) = &mut result.complex {
-            complex.real = selected(&complex.real);
-            complex.imag = selected(&complex.imag);
-        }
-    }
-    Ok(result)
-}
 pub(super) fn expression_version(
     data_version: u64,
     selection: Option<&SourceSampleSelection>,
@@ -520,36 +469,39 @@ pub(super) fn resolve_strip_exprs(
             .results
             .analysis_expr_cache
             .get(&key)
-            .and_then(|cached| {
-                cached.series.as_ref().ok().map(|series| {
-                    (
-                        Arc::clone(&series.x),
-                        Arc::clone(&series.y),
-                        series.complex.is_some(),
-                    )
-                })
-            });
-        let Some((x, y, complex)) = cached else {
-            continue;
-        };
-        let Some(projections) = projected_selected_family_series(&x, &y, sample_selection.as_ref())
-        else {
-            state.push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
-                "expression `{}`: selected rows do not match the active family render plan",
-                expr.text
-            )));
+            .and_then(|cached| cached.series.as_ref().ok())
+            .cloned();
+        let Some(outputs) = cached else {
             continue;
         };
         let base_color = expr_color(tokens, expr_palette_slot(model, slot));
         let base_cache_key =
             (expr_cache_key(model.analysis_key, &expr.text) ^ version.rotate_left(7)) | (1 << 63);
-        let base_label = expression_label(&expr, complex);
-        for projection in projections {
-            let family_style = projection.group.map(|group| group.style);
-            let cache_key = base_cache_key
-                ^ projection
-                    .group
-                    .map_or(0, |group| group.stable_key.rotate_left(19));
+        for output in outputs {
+            let group = match output.source {
+                ExpressionSource::Analysis | ExpressionSource::SelectedSamples => None,
+                ExpressionSource::FamilyMember { ordinal } => {
+                    let group = sample_selection
+                        .as_ref()
+                        .and_then(SourceSampleSelection::family_render_plan)
+                        .and_then(|plan| plan.groups().get(ordinal))
+                        .filter(|group| group.ordinal == ordinal);
+                    if group.is_none() {
+                        state.push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
+                            "expression `{}`: its evaluated family member is no longer selected",
+                            expr.text
+                        )));
+                        continue;
+                    }
+                    group
+                }
+            };
+            let base_label = expression_label(&expr, output.waveform.complex.is_some());
+            let x = output.waveform.x;
+            let y = output.waveform.y;
+            let family_style = group.map(|group| group.style);
+            let cache_key =
+                base_cache_key ^ group.map_or(0, |group| group.stable_key.rotate_left(19));
             // The evaluated version is folded into the memo key: an expression
             // re-evaluated against a new family selection produces different
             // coordinates at the same data version, and a shape held over from
@@ -559,7 +511,7 @@ pub(super) fn resolve_strip_exprs(
                 .ui
                 .results
                 .derived
-                .shape_or(cache_key, || SweepShape::of(&projection.x));
+                .shape_or(cache_key, || SweepShape::of(&x));
             // Cached beside the shape, under the same identity: the pane's
             // automatic fit wants an expression's bounds on every frame, and
             // resolving a strip happens twice per frame, so scanning for them
@@ -568,15 +520,15 @@ pub(super) fn resolve_strip_exprs(
                 .ui
                 .results
                 .derived
-                .range_or(cache_key, || super::super::finite_extremes(&projection.y));
+                .range_or(cache_key, || super::super::finite_extremes(&y));
             resolved.push(ResolvedExpr {
-                x: projection.x,
+                x,
                 shape,
                 y_extremes,
-                y: projection.y,
+                y,
                 color: family_style.map_or(base_color, |style| family_color(style, base_color)),
                 cache_key,
-                label: projection.group.map_or_else(
+                label: group.map_or_else(
                     || base_label.clone(),
                     |group| format!("{base_label} · {}", group.label),
                 ),

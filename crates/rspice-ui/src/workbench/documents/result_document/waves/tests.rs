@@ -8,6 +8,7 @@ use super::*;
 
 mod branches;
 mod degenerate;
+mod expression_scope;
 mod extent;
 mod honest_axes;
 mod interaction;
@@ -205,7 +206,8 @@ fn retained_and_live_expressions_align_real_analysis_waveforms() {
         .waveforms
         .clone();
 
-    let series = evaluate_expression(&state.simulation, 0, "V(a)-V(b)", None).unwrap();
+    let outputs = evaluate_expression(&state.simulation, 0, "V(a)-V(b)", None).unwrap();
+    let series = &outputs[0].waveform;
     assert_eq!(series.x.as_slice(), &[0.0, 1.0, 2.0, 3.0]);
     assert_eq!(series.y.as_slice(), &[0.0; 4]);
     let expression = parser::try_parse("min(V(a)-V(b))").unwrap();
@@ -1547,35 +1549,6 @@ fn filtered_overlay_uses_typed_ast_and_ignores_excluded_duplicate_x_rows() {
     let overlay = models[0].traces.iter().find(|trace| trace.overlay).unwrap();
     assert_eq!(overlay.x.as_slice(), &[3.0, 4.0]);
     assert_eq!(overlay.y.as_slice(), &[31.0, 41.0]);
-}
-
-#[test]
-fn derived_expression_rows_are_split_by_the_exact_family_plan() {
-    let analysis = family_analysis(vec![10.0, 20.0, 30.0, 40.0, 50.0, 60.0]);
-    let manifest = FamilyManifest::from_analysis(&analysis).unwrap().unwrap();
-    let selection = SourceSampleSelection::new(DatasetId::new(), 41, vec![0, 2, 4])
-        .unwrap()
-        .with_family_presentation(&manifest, &family_policy())
-        .unwrap();
-    // Expression evaluation has already selected exact rows 0, 2, 4.
-    let x = Arc::new(vec![101.0, 103.0, 105.0]);
-    let y = Arc::new(vec![100.0, 300.0, 500.0]);
-
-    let projections = projected_selected_family_series(&x, &y, Some(&selection)).unwrap();
-
-    assert_eq!(projections.len(), 3);
-    assert!(projections.iter().all(|projection| projection.x.len() == 1));
-    let tt = projections
-        .iter()
-        .find(|projection| projection.group.unwrap().label.contains("TT"))
-        .unwrap();
-    assert_eq!(tt.x.as_slice(), &[3.0]);
-    assert_eq!(tt.y.as_slice(), &[300.0]);
-    let styled = apply_family_trace_style(
-        Trace::new(&tt.x, &tt.y, egui::Color32::WHITE),
-        Some(tt.group.unwrap().style),
-    );
-    assert!(styled.show_single_point);
 }
 
 fn ac_result(source_id: AnalysisInstanceId, values: [f64; 2], snapshot_byte: u8) -> AnalysisResult {

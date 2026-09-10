@@ -851,7 +851,6 @@ mod tests {
         assert!(results.views.is_empty());
         assert!(results.analysis_exprs.is_empty());
         assert!(results.expr_editor.is_none());
-        assert!(results.expr_cache.is_empty());
         assert!(results.analysis_expr_cache.is_empty());
         assert!(results.rf_pin.is_empty());
         assert!(results.op_filter.is_empty());

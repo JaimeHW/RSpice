@@ -261,7 +261,22 @@ pub(crate) type AxisExtent = (f64, f64);
 /// The X and Y intervals one plot last drew.
 pub(crate) type DrawnAxes = (AxisExtent, AxisExtent);
 
-pub type WaveformSeriesResult = Result<crate::state::WaveformData, String>;
+pub(crate) type ExpressionSeriesResult = Result<Vec<ExpressionWaveform>, String>;
+
+/// The input scope that produced an expression output. A family ordinal is
+/// resolved only within the exact selection fingerprint held by its cache.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum ExpressionSource {
+    Analysis,
+    SelectedSamples,
+    FamilyMember { ordinal: usize },
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ExpressionWaveform {
+    pub(crate) source: ExpressionSource,
+    pub(crate) waveform: crate::state::WaveformData,
+}
 type WindowStatsKey = (u64, u64, u64, usize);
 type WindowStats = Result<
     crate::analysis::measurements::IntervalStatistics,
@@ -1895,7 +1910,6 @@ pub(crate) fn restore_expression_groups(state: &mut AppState, groups: Vec<Result
     state.ui.results.exprs.clear();
     state.ui.results.expr_projection_keys.clear();
     state.ui.results.analysis_expr_cache.clear();
-    state.ui.results.expr_cache.clear();
     for group in groups {
         let retained = state
             .simulation
@@ -2561,7 +2575,6 @@ pub struct ResultsState {
     pub expr_editor: Option<ExprEditor>,
     /// Evaluated expression series, keyed by (stable analysis, expression);
     /// refreshed when the simulation data version advances.
-    pub expr_cache: std::collections::HashMap<(usize, String), ExprSeries>,
     pub(crate) analysis_expr_cache:
         std::collections::HashMap<(AnalysisPresentationKey, String), ExprSeries>,
     /// Pinned data point per XY viewer (trace slot, point index) — the
@@ -2724,11 +2737,11 @@ pub struct ExprEditor {
 
 /// One evaluated expression series (owned arrays, cheap to clone).
 #[derive(Debug, Clone)]
-pub struct ExprSeries {
+pub(crate) struct ExprSeries {
     /// `simulation.data_version` the series was computed against.
     pub version: u64,
     /// Evaluation result, or the error to show on the strip.
-    pub series: WaveformSeriesResult,
+    pub series: ExpressionSeriesResult,
 }
 
 impl ResultsState {
@@ -2934,7 +2947,6 @@ impl ResultsState {
         let next = selection.as_ref().map(SourceSampleSelection::fingerprint);
         if current != next {
             self.models.invalidate();
-            self.expr_cache.clear();
             self.analysis_expr_cache.clear();
             self.cache.invalidate();
             self.derived = DerivedSeries::default();
@@ -3061,7 +3073,6 @@ impl ResultsState {
         self.cache.invalidate();
         self.derived = DerivedSeries::default();
         self.derived.ensure_version(simulation.data_version);
-        self.expr_cache.clear();
         self.analysis_expr_cache.clear();
     }
 

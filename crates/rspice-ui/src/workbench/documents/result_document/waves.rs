@@ -6,6 +6,7 @@
 //! cursors live on one strip at a time; their values, deltas and windowed
 //! measurements render in the right panel.
 
+mod expression_evaluation;
 mod expressions;
 mod extent;
 pub(super) use extent::{FamilyEnvelopeCache, FamilyEnvelopePlan};
@@ -15,6 +16,7 @@ pub(super) use model_cache::{ModelsCache, cached_models};
 mod readout;
 mod viewport;
 
+use expression_evaluation::{evaluate_expression, evaluate_expression_with_policy};
 pub(crate) use expressions::*;
 pub(crate) use readout::*;
 pub(crate) use viewport::*;
@@ -54,10 +56,10 @@ use super::frame_work::{self, FrameSampleRead};
 use super::strip::{LegendChip, StripHeader};
 use super::{
     AnalysisPresentationKey, DerivedSeries, ExprEditor, ExprSeries, ExprTrace,
-    HorizontalWaveCursor, MarkerEditDraft, MarkerKind, MarkerSelector, MarkerView, ResultsState,
-    SelectedResultTrace, SourceWaveformPresentationKey, TracePresentationKey,
-    WavePanePresentationKey, WaveformPresentationKey, WaveformSeriesResult, waveform_color,
-    well_hint,
+    ExpressionSeriesResult, ExpressionSource, ExpressionWaveform, HorizontalWaveCursor,
+    MarkerEditDraft, MarkerKind, MarkerSelector, MarkerView, ResultsState, SelectedResultTrace,
+    SourceWaveformPresentationKey, TracePresentationKey, WavePanePresentationKey,
+    WaveformPresentationKey, waveform_color, well_hint,
 };
 
 const WAVE_SHARED_X_HEIGHT: f32 = 57.0;
@@ -608,53 +610,6 @@ fn projected_family_series<'a>(
     selected_series_pair(x, y, Some(selection))
         .map(|(x, y)| vec![FamilyProjection { group: None, x, y }])
         .unwrap_or_default()
-}
-
-/// Project an already-selected derived series through the same exact source
-/// row groups. Expression evaluation returns rows in `source_indices` order,
-/// so this maps group source identities back to those retained positions
-/// without drawing false segments between different family categories.
-fn projected_selected_family_series<'a>(
-    x: &SharedWaveformValues,
-    y: &SharedWaveformValues,
-    selection: Option<&'a SourceSampleSelection>,
-) -> Option<Vec<FamilyProjection<'a>>> {
-    let Some(selection) = selection else {
-        return Some(vec![FamilyProjection {
-            group: None,
-            x: Arc::clone(x),
-            y: Arc::clone(y),
-        }]);
-    };
-    if x.len() != y.len() || x.len() != selection.source_indices.len() {
-        return None;
-    }
-    let Some(plan) = selection.family_render_plan() else {
-        return Some(vec![FamilyProjection {
-            group: None,
-            x: Arc::clone(x),
-            y: Arc::clone(y),
-        }]);
-    };
-    let mut projections = Vec::with_capacity(plan.groups().len());
-    for group in plan.groups() {
-        let positions = group
-            .source_indices
-            .iter()
-            .map(|source_index| selection.source_indices.binary_search(source_index))
-            .collect::<Result<Vec<_>, _>>()
-            .ok()?;
-        let projected_y = positions.iter().map(|position| y[*position]).collect();
-        if group.x_values.len() != positions.len() {
-            return None;
-        }
-        projections.push(FamilyProjection {
-            group: Some(group),
-            x: Arc::new(group.x_values.clone()),
-            y: Arc::new(projected_y),
-        });
-    }
-    Some(projections)
 }
 
 fn family_color(style: FamilyTraceStyle, fallback: egui::Color32) -> egui::Color32 {
@@ -2003,10 +1958,11 @@ fn show_with_pane_chrome(ui: &mut Ui, state: &mut AppState, pane_chrome: bool) {
                                     .analysis_expr_cache
                                     .get(&(model.analysis_key, expr.text.clone()))
                                     .is_some_and(|cached| {
-                                        cached
-                                            .series
-                                            .as_ref()
-                                            .is_ok_and(|wave| wave.complex.is_some())
+                                        cached.series.as_ref().is_ok_and(|outputs| {
+                                            outputs
+                                                .iter()
+                                                .any(|output| output.waveform.complex.is_some())
+                                        })
                                     });
                                 expression_label(expr, complex)
                             })

@@ -15,6 +15,7 @@ pub(crate) mod evaluator;
 pub(crate) mod functions;
 pub(crate) mod interpolation;
 pub(crate) mod parser;
+mod sample_projection;
 mod value;
 
 pub use evaluator::{CalcValue, EvaluationContext, EvaluationError};
@@ -167,6 +168,7 @@ impl<'a> SimulationContext<'a> {
 pub struct WaveformsContext<'a> {
     waveforms: &'a [WaveformData],
     complex_policy: ComplexExpressionPolicy,
+    projection: Option<sample_projection::SampleProjection<'a>>,
 }
 
 impl<'a> WaveformsContext<'a> {
@@ -182,6 +184,73 @@ impl<'a> WaveformsContext<'a> {
         Self {
             waveforms,
             complex_policy,
+            projection: None,
+        }
+    }
+
+    /// Bind exact source rows and, when supplied, their authoritative family
+    /// coordinate before any arithmetic or stateful calculation occurs.
+    pub(crate) fn with_sample_projection(
+        mut self,
+        indices: &'a [usize],
+        axis: Option<&'a [f64]>,
+    ) -> Result<Self, EvaluationError> {
+        self.projection = Some(sample_projection::SampleProjection::new(indices, axis)?);
+        if self.waveforms.first().is_none_or(|waveform| {
+            indices
+                .last()
+                .is_some_and(|index| *index >= waveform.x.len())
+        }) {
+            return Err(EvaluationError::WaveformMismatch(
+                "selected rows exceed the retained analysis axis".to_owned(),
+            ));
+        }
+        Ok(self)
+    }
+
+    fn projected<'w>(
+        &self,
+        waveform: &'w WaveformData,
+    ) -> Result<std::borrow::Cow<'w, WaveformData>, EvaluationError> {
+        self.projection.map_or_else(
+            || Ok(std::borrow::Cow::Borrowed(waveform)),
+            |projection| projection.apply(waveform).map(std::borrow::Cow::Owned),
+        )
+    }
+
+    fn get_waveform_with_policy(
+        &self,
+        signal: &str,
+        dataset: Option<&str>,
+        policy: ComplexExpressionPolicy,
+    ) -> Result<CalcValue, EvaluationError> {
+        reject_unbound_dataset(dataset)?;
+        match signal.to_uppercase().as_str() {
+            "TIME" | "T" | "FREQ" | "FREQUENCY" => {
+                if let Some(wf) = self.waveforms.first() {
+                    let wf = self.projected(wf)?;
+                    let x = wf.x.to_vec();
+                    let y = x.clone();
+                    return Ok(CalcValue::create_waveform(x, y));
+                }
+                return Err(EvaluationError::IdentifierNotFound(format!(
+                    "No waveforms available for {signal}"
+                )));
+            }
+            _ => {}
+        }
+        if signal.eq_ignore_ascii_case("V(0)") {
+            let axis = self
+                .waveforms
+                .first()
+                .map(|wf| self.projected(wf))
+                .transpose()?;
+            return canonical_ground_value(signal, axis.as_deref())
+                .expect("literal canonical ground is always handled");
+        }
+        match find_in(self.waveforms, signal) {
+            Some(wf) => waveform_value(self.projected(wf)?.as_ref(), policy),
+            None => Err(EvaluationError::IdentifierNotFound(signal.to_string())),
         }
     }
 }
@@ -278,10 +347,15 @@ impl<'a> EvaluationContext for WaveformsContext<'a> {
         signal: &str,
         dataset: Option<&str>,
     ) -> Result<CalcValue, EvaluationError> {
-        magnitude_value(
-            self.get_waveform(signal, dataset),
-            find_in(self.waveforms, signal),
-        )
+        let value = match self.get_waveform(signal, dataset) {
+            Err(EvaluationError::PhaseUnavailable(_)) => self.get_waveform_with_policy(
+                signal,
+                dataset,
+                ComplexExpressionPolicy::LegacyMagnitude,
+            ),
+            value => value,
+        }?;
+        complex_functions::dispatch("mag", vec![value])
     }
 
     fn get_waveform(
@@ -289,27 +363,7 @@ impl<'a> EvaluationContext for WaveformsContext<'a> {
         signal: &str,
         dataset: Option<&str>,
     ) -> Result<CalcValue, EvaluationError> {
-        reject_unbound_dataset(dataset)?;
-        match signal.to_uppercase().as_str() {
-            "TIME" | "T" | "FREQ" | "FREQUENCY" => {
-                if let Some(wf) = self.waveforms.first() {
-                    let x: Vec<f64> = wf.x.to_vec();
-                    let y = x.clone();
-                    return Ok(CalcValue::create_waveform(x, y));
-                }
-                return Err(EvaluationError::IdentifierNotFound(format!(
-                    "No waveforms available for {signal}"
-                )));
-            }
-            _ => {}
-        }
-        if let Some(value) = canonical_ground_value(signal, self.waveforms.first()) {
-            return value;
-        }
-        match find_in(self.waveforms, signal) {
-            Some(wf) => waveform_value(wf, self.complex_policy),
-            None => Err(EvaluationError::IdentifierNotFound(signal.to_string())),
-        }
+        self.get_waveform_with_policy(signal, dataset, self.complex_policy)
     }
 }
 
