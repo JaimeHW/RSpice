@@ -125,9 +125,15 @@ pub fn measure_interval(
     let mut mean = Sum::default();
     // Keep cancellation residuals in physical amplitude units. Normalizing all
     // means by the largest sample would erase tiny signals after large equal
-    // positive and negative areas cancel. Only reserve overflow headroom when
-    // the amplitude is close to the floating-point limit.
-    let mean_scale = if scale > f64::MAX * 0.5 { 2.0 } else { 1.0 };
+    // positive and negative areas cancel. Scale small signals up to protect
+    // subnormal areas, and reserve headroom near the overflow limit.
+    let mean_scale = if scale > 0.0 && scale < 1.0 {
+        scale
+    } else if scale > f64::MAX * 0.5 {
+        2.0
+    } else {
+        1.0
+    };
     let mut rms: f64 = 0.0;
     if scale > 0.0 {
         for (xs, ys) in x.windows(2).zip(y.windows(2)) {
@@ -376,5 +382,19 @@ mod tests {
         .unwrap();
         close(stats.mean / 1e-300, 1.0);
         close(stats.rms, 1.0);
+    }
+
+    #[test]
+    fn subnormal_mean_is_invariant_under_equivalent_resampling() {
+        let tiny = f64::from_bits(1);
+        for x in [&[0.0, 1.0][..], &[0.0, 0.5, 1.0][..]] {
+            let constant = vec![tiny; x.len()];
+            let ramp: Vec<_> = x.iter().map(|value| value * (2.0 * tiny)).collect();
+            for y in [constant, ramp] {
+                let stats = measure_interval(x, &y, None).unwrap();
+                assert_eq!(stats.mean, tiny);
+                assert_eq!(stats.rms, tiny);
+            }
+        }
     }
 }

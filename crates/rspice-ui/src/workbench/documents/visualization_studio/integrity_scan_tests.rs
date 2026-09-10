@@ -598,7 +598,9 @@ fn scalar_measurements_validate_against_the_exact_active_analysis() {
         app.state.simulation.active_run().map(|run| run.dataset_id)
     );
     assert_eq!(analysis_sequence, 17);
-    assert!((value - (7.515625_f64).sqrt()).abs() < 1.0e-14); // ∫y²dt, time-weighted
+    // Exact integral of y² over the two linear segments:
+    // 0.5*(1.5625 - 3.125 + 6.25)/3 + 0.5*(6.25 + 10 + 16)/3 = 197/32.
+    assert!((value - (197.0_f64 / 32.0).sqrt()).abs() < 1.0e-14);
     assert_eq!(
         evaluate_scalar_measurement(&app.state, "V(out)").unwrap_err(),
         "The expression produces a trace; reduce it with avg(), rms(), or another scalar function"

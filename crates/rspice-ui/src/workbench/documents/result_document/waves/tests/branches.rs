@@ -263,12 +263,11 @@ fn a_viewer_without_the_cursors_strip_reserves_no_band() {
     );
 }
 
-/// Window statistics are taken over the samples the cursors enclose. On a
-/// loop those are two disjoint runs of the source array, and a single bisected
-/// slice spans the turnaround — reporting an extremum from samples on the far
-/// side of it.
+/// Window statistics integrate each branch between the cursors. Neither a
+/// slice spanning the turnaround nor a merged sample-count RMS represents the
+/// two distinct waveforms in a hysteresis loop.
 #[test]
-fn window_statistics_fold_only_the_samples_between_the_cursors() {
+fn window_statistics_measure_each_branch_between_the_cursors() {
     let mut state = hysteresis_run();
     state.ui.results.cursors.a = Some(0.0);
     state.ui.results.cursors.b = Some(0.5);
@@ -285,11 +284,15 @@ fn window_statistics_fold_only_the_samples_between_the_cursors() {
         painted.iter().any(|text| text == "0.000000 V"),
         "the window lost its minimum: {painted:?}"
     );
-    // rms over {0, 1, 3, 4} is √6.5; over the bisected slice {0, 1} it is
-    // √0.5, so this pins the fold as well as its extremes.
+    // Forward y=2x has RMS sqrt(1/3); return y=4-2x has RMS sqrt(37/3).
+    // Each integral is over [0, 0.5], including its linear segments.
     assert!(
-        painted.iter().any(|text| text == "2.549510 V"),
-        "the rms was folded over the wrong samples: {painted:?}"
+        painted.iter().any(|text| text == "577.3503 mV"),
+        "the forward branch RMS is incorrect: {painted:?}"
+    );
+    assert!(
+        painted.iter().any(|text| text == "3.511885 V"),
+        "the return branch RMS is incorrect: {painted:?}"
     );
 }
 
