@@ -233,7 +233,7 @@ fn dc_project_round_trip_preserves_coordinates_units_selection_and_immutable_own
     let digest = analysis.result_data_digest();
     let snapshot = stored(analysis);
     snapshot.validate().unwrap();
-    assert_eq!(snapshot.schema_version, 23);
+    assert_eq!(snapshot.schema_version, 24);
     let serialized = serde_json::to_value(&snapshot).unwrap();
     let restored: ProjectSimulationResults = serde_json::from_value(serialized.clone()).unwrap();
     let mut state = crate::state::SimulationState::default();
@@ -280,8 +280,15 @@ fn schema_21_dc_history_authenticates_without_inventing_traversal() {
     let mut legacy = retain(solve(nested_config()));
     legacy.result_payload = None;
     let digest = legacy.result_data_digest();
-    let mut snapshot = stored(legacy);
+    let old_digest = legacy.legacy_v12_result_data_digest();
+    let history = history(legacy);
+    let old_dataset_digest = history.runs[0].legacy_v12_dataset_content_digest();
+    let mut snapshot = crate::io::project_io::ProjectSimulationResults::from_state(&history);
     snapshot.schema_version = 21;
+    snapshot.runs[0].analyses[0].result_data_digest =
+        crate::io::project_io::PersistedField::Value(old_digest);
+    snapshot.runs[0].dataset_content_digest =
+        crate::io::project_io::PersistedField::Value(old_dataset_digest);
     let mut corrupt = serde_json::to_value(&snapshot).unwrap();
     corrupt["runs"][0]["analyses"][0]["waveforms"][0]["name"] = serde_json::json!("changed");
     let mut corrupt: crate::io::project_io::ProjectSimulationResults =
