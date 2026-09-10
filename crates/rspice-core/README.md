@@ -360,21 +360,32 @@ cancellation remains a distinct error. The dense path verifies its original
 transpose residual. Authored device/model-parameter studies use the separate
 complete-sensitivity engine APIs.
 
-Finite-difference sensitivity uses the evaluated parameter coordinates rather
-than an assumed symmetric spacing. Central and one-sided complete studies share
-a quadratic interpolation formula; scalar DC studies use a secant. Scaled arithmetic
-retains finite derivatives through overflowing spans and cancelling weighted
-sums. AC normalized, magnitude and phase derivatives preserve finite nonzero
-signals across extreme scales, and nonfinite or unrepresentable results are
-diagnosed. Postprocessing polls cancellation, and fatal perturbation failures
-stop the study before another trial is attempted.
+Scalar and complete DC/AC sensitivity share one refinement driver. It compares
+quadratic derivatives at successively halved, representable coordinates and
+checks agreement between one-sided estimates when both sides can be evaluated.
+Richardson extrapolation uses the actual rounded coordinate products. Trials
+must agree to a relative threshold of 1e-4 plus a scale-dependent arithmetic
+roundoff allowance; there is no absolute voltage or current floor. A study that
+cannot resolve a consistent derivative within twelve refinements is diagnosed
+with its parameter identity, rather than returning the first stencil's value.
+These checks provide numerical consistency evidence, not a proof of model
+regularity or an independent bound on operating-point solver error.
 
-Single-parameter AC sensitivity also interpolates complex voltages before
-projecting onto the nominal phasor. It replays the requested nominal parameter
-override, even when it differs from the authored value. It does not difference
-magnitudes across an output null: its numeric-only API diagnoses undefined or
-out-of-range magnitude derivatives, identifying the parameter and frequency.
-The nominal solve and two perturbations require a batch-run budget of three.
+At physical or finite-range boundaries the driver compares successive one-sided
+quadratic stencils. Domain/solver failures remain candidates for a smaller step;
+cancellation, resource limits and other typed fatal errors stop immediately.
+Every attempted trial consumes the shared batch-run budget, including failures.
+An ordinary central study uses a nominal solve plus four perturbations; further
+refinement consumes additional runs. The default relative step reserves enough
+ULPs for refinement at subnormal values and remains finite at f64::MAX. Explicit
+steps still require distinct finite coordinates and consistency qualification.
+
+AC studies differentiate the complex output before projecting magnitude, phase
+or normalized sensitivities. The single-parameter API replays the requested
+nominal override, even when it differs from the authored value, and diagnoses
+undefined or out-of-range magnitude derivatives with parameter/frequency context.
+Scaled arithmetic retains finite derivatives through overflowing spans and
+cancelling weighted sums. Probe extraction and refinement poll cancellation.
 
 Derived sensitivities use `SensitivityValue<T>`: an available number or an
 explicit reason. Relative sensitivity and phase are undefined at zero output;

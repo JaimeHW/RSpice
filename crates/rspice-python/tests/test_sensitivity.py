@@ -9,6 +9,22 @@ import rspice
 
 
 class TestSensitivity:
+    def test_parameter_sensitivity_refines_curvature_and_rejects_kinks(self, engine):
+        for expression, nominal in [("exp(100*gain)", 1.0), ("abs(gain)", 0.0)]:
+            netlist = rspice.Netlist.parse_spice(
+                f"Refinement\n.param gain={nominal}\nV1 in 0 DC 1 AC 1\n"
+                f"E1 out 0 in 0 {{{expression}}}\n.end\n"
+            )
+            if nominal == 0.0:
+                with pytest.raises(rspice.SimulationError, match="could not resolve"):
+                    engine.run_sensitivity(netlist, "out", "gain", nominal)
+                with pytest.raises(rspice.SimulationError, match="could not resolve"):
+                    engine.run_sensitivity_ac(netlist, "out", "gain", nominal, [1.0])
+            else:
+                expected = 100.0 * np.exp(100.0)
+                assert engine.run_sensitivity(netlist, "out", "gain", nominal) == pytest.approx(expected, rel=1e-5)
+                assert engine.run_sensitivity_ac(netlist, "out", "gain", nominal, [1.0]) == pytest.approx([expected], rel=1e-5)
+
     def test_parameter_ac_magnitude_sensitivity_uses_the_nominal_phasor(self, engine):
         netlist = rspice.Netlist.parse_spice(
             "AC null\n.param gain=1\nV1 in 0 AC 1 60\nE1 out 0 in 0 {gain}\n.end\n"

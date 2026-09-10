@@ -78,6 +78,88 @@ fn parameter_ac_magnitude_sensitivity_respects_the_run_budget() {
 }
 
 #[test]
+fn sensitivity_refinement_rejects_a_hidden_parameter_kink() {
+    let netlist = Netlist::parse(
+        "Parameter kink\n.param gain=0\nV1 in 0 DC 1 AC 1\nE1 out 0 in 0 {abs(gain)}\n.end\n",
+    )
+    .unwrap();
+    let engine = physical_engine();
+    let output = node_id(&engine, &netlist, "out");
+    for result in [
+        engine.run_sensitivity(&netlist, output, "gain", 0.0, None),
+        engine
+            .run_sensitivity_ac(&netlist, output, "gain", 0.0, &[1.0], None)
+            .map(|values| values[0]),
+    ] {
+        let error = result.expect_err("opposing one-sided slopes must not masquerade as zero");
+        assert!(error.to_string().contains("gain"), "{error}");
+    }
+}
+
+#[test]
+fn sensitivity_refinement_resolves_curvature_and_smooth_stationary_points() {
+    let engine = physical_engine();
+    for (expression, nominal, expected) in [
+        ("exp(100*gain)", 1.0, 100.0 * 100.0_f64.exp()),
+        ("gain*gain", 0.0, 0.0),
+    ] {
+        let netlist = Netlist::parse(&format!(
+            "Parameter curvature\n.param gain={nominal}\nV1 in 0 DC 1 AC 1\nE1 out 0 in 0 {{{expression}}}\n.end\n"
+        )).unwrap();
+        let output = node_id(&engine, &netlist, "out");
+        for derivative in [
+            engine
+                .run_sensitivity(&netlist, output, "gain", nominal, None)
+                .unwrap(),
+            engine
+                .run_sensitivity_ac(&netlist, output, "gain", nominal, &[1.0], None)
+                .unwrap()[0],
+        ] {
+            if expected == 0.0 {
+                assert_eq!(derivative, 0.0);
+            } else {
+                assert_relative(derivative, expected, 1e-5, "refined sensitivity");
+            }
+        }
+    }
+}
+
+#[test]
+fn sensitivity_refinement_uses_finite_stencils_at_the_binary64_boundary() {
+    let engine = physical_engine();
+    let netlist = Netlist::parse(&format!(
+        "Finite parameter boundary\n.param drive={}\nV1 out 0 {{drive}}\n.end\n",
+        f64::MAX
+    ))
+    .unwrap();
+    let output = node_id(&engine, &netlist, "out");
+    assert_relative(
+        engine
+            .run_sensitivity(&netlist, output, "drive", f64::MAX, None)
+            .unwrap(),
+        1.0,
+        2e-12,
+        "boundary sensitivity",
+    );
+    let complete = engine
+        .run_sensitivity_dc_complete(
+            &netlist,
+            rspice_core::analysis::AcSensitivityOutput::Voltage {
+                positive: output,
+                negative: None,
+            },
+            &["V1".to_owned()],
+        )
+        .unwrap();
+    assert_relative(
+        complete.get("V1").unwrap().absolute,
+        1.0,
+        2e-12,
+        "complete boundary sensitivity",
+    );
+}
+
+#[test]
 fn parameter_ac_magnitude_sensitivity_projects_at_the_nominal_point() {
     let netlist = Netlist::parse(
         "AC near an output null\n.param gain=1\nV1 in 0 AC 1 60\nE1 out 0 in 0 {gain}\n.end\n",

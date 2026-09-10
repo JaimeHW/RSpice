@@ -315,6 +315,45 @@ mod wasm_tests {
     }
 
     #[wasm_bindgen_test]
+    fn sensitivity_refinement_and_finite_boundary_in_wasm() {
+        use rspice_core::abort_signal::NoAbort;
+        let engine = rspice_core::Engine::default();
+        for (expression, nominal) in [("exp(100*gain)", 1.0), ("abs(gain)", 0.0)] {
+            let netlist = rspice_core::Netlist::parse(&format!(
+                "Refinement\n.param gain={nominal}\nV1 in 0 DC 1 AC 1\nE1 out 0 in 0 {{{expression}}}\n.end\n"
+            )).unwrap();
+            let dc =
+                engine.run_sensitivity_with_abort(&netlist, 2, "gain", nominal, None, &NoAbort);
+            let ac = engine.run_sensitivity_ac_with_abort(
+                &netlist,
+                2,
+                "gain",
+                nominal,
+                &[1.0],
+                None,
+                &NoAbort,
+            );
+            if nominal == 0.0 {
+                assert!(dc.unwrap_err().to_string().contains("could not resolve"));
+                assert!(ac.unwrap_err().to_string().contains("could not resolve"));
+            } else {
+                let expected = 100.0 * 100.0_f64.exp();
+                assert!((dc.unwrap() / expected - 1.0).abs() < 1e-5);
+                assert!((ac.unwrap()[0] / expected - 1.0).abs() < 1e-5);
+            }
+        }
+        let netlist = rspice_core::Netlist::parse(&format!(
+            "Finite boundary\n.param drive={}\nV1 out 0 {{drive}}\n.end\n",
+            f64::MAX
+        ))
+        .unwrap();
+        let derivative = engine
+            .run_sensitivity_with_abort(&netlist, 1, "drive", f64::MAX, None, &NoAbort)
+            .unwrap();
+        assert!((derivative - 1.0).abs() < 2e-12);
+    }
+
+    #[wasm_bindgen_test]
     fn parameter_ac_sensitivity_at_output_null_in_wasm() {
         use rspice_core::abort_signal::NoAbort;
         use rspice_core::analysis::SensitivityValue;

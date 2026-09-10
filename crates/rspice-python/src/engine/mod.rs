@@ -1559,7 +1559,8 @@ impl PyEngine {
 
     /// Run DC sensitivity analysis
     ///
-    /// Computes dV(output)/d(param) by central finite differences. The
+    /// Computes dV(output)/d(param) by refined finite differences, checking
+    /// agreement between step sizes and available one-sided estimates. The
     /// parameter must be a `.param` name referenced by the netlist via
     /// `{...}` expressions — element names are not parameters.
     ///
@@ -1576,7 +1577,7 @@ impl PyEngine {
     /// Raises:
     ///     ValueError: For non-finite param_value or non-positive delta
     ///     SimulationError: If the parameter is not bound to any netlist
-    ///                      expression, or a perturbed solve fails
+    ///                      expression, or no consistent derivative can be resolved
     ///
     /// Example:
     ///     >>> # netlist: .param rval=1k / R1 in out {rval} / ...
@@ -1666,7 +1667,8 @@ impl PyEngine {
     /// Computes d|V(output)|/d(param) by differentiating the complex voltage
     /// and projecting at the requested nominal parameter value. Reports an
     /// error if that magnitude derivative is undefined (an output-null cusp)
-    /// or out of range. Same binding rules as `run_sensitivity`.
+    /// or out of range. Uses the same step refinement and binding rules as
+    /// `run_sensitivity`.
     ///
     /// Args:
     ///     netlist: Parsed netlist to simulate
