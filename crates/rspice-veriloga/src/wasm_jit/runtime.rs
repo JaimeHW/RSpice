@@ -26,6 +26,7 @@ pub(super) enum HelperError {
     InvalidOpcode,
     InvalidDynamicIndex,
     InvalidIntegerOperation,
+    InvalidOperandLayout,
     InvalidDerivative(&'static str),
     StatefulRuntimeUnavailable,
     StatefulRuntimeFailed,
@@ -187,6 +188,15 @@ pub(super) fn evaluate_helper_with_session(
             operands[2],
             operands[3],
         )),
+        251 => {
+            let count = usize::try_from(aux0)
+                .ok()
+                .and_then(|n| n.checked_mul(2))
+                .and_then(|n| n.checked_add(1))
+                .filter(|&n| n <= operands.len())
+                .ok_or(HelperError::InvalidOperandLayout)?;
+            evaluate_sum_products_div(aux0, aux1, aux2, &operands[..count])
+        }
         340 => rspice_veriloga_runtime::checked_derivative_value(operands[0], operands[1])
             .map_err(HelperError::InvalidDerivative),
         300 => real_to_integer(operands[0])
@@ -402,6 +412,33 @@ fn evaluate_stateful_helper(
     session.execute_instruction(instruction.0, operands)
 }
 
+pub(super) fn evaluate_sum_products_div(
+    terms: i32,
+    reserved0: i32,
+    reserved1: i64,
+    operands: &[f64],
+) -> Result<f64, HelperError> {
+    let count = usize::try_from(terms)
+        .ok()
+        .and_then(|n| n.checked_mul(2))
+        .and_then(|n| n.checked_add(1));
+    if reserved0 != 0
+        || reserved1 != 0
+        || count != Some(operands.len())
+        || operands.len() > WASM_JIT_MAX_SLICE_OPERANDS
+    {
+        return Err(HelperError::InvalidOperandLayout);
+    }
+    let (divisor, factors) = operands
+        .split_last()
+        .ok_or(HelperError::InvalidOperandLayout)?;
+    let (pairs, remainder) = factors.as_chunks::<2>();
+    debug_assert!(remainder.is_empty());
+    Ok(rspice_veriloga_runtime::arithmetic::sum_products_div(
+        pairs, *divisor,
+    ))
+}
+
 fn evaluate_slice_helper_with_session(
     opcode: i32,
     aux0: i32,
@@ -416,6 +453,9 @@ fn evaluate_slice_helper_with_session(
             operands.len(),
             WASM_JIT_MAX_SLICE_OPERANDS
         )));
+    }
+    if opcode == 251 {
+        return evaluate_sum_products_div(aux0, aux1, aux2, operands);
     }
     if opcode == 445 {
         if aux1 != 0 || aux2 != 0 {
@@ -803,11 +843,11 @@ pub fn eval_op_v1(
     }
 }
 
-/// Variable-arity host capability for bounded stateful operations.
+/// Variable-arity host capability for bounded arithmetic and stateful operations.
 ///
 /// Operands reside in the authenticated trailing region of `frame_offset`;
 /// callers supply only the count, never a linear-memory pointer. ABI v6+
-/// allowlists Zi value and derivative operations on this capability.
+/// allowlists Zi value and derivative operations; ABI v13 adds pure quotient sums.
 #[cfg(target_arch = "wasm32")]
 pub fn eval_op_slice_v1(
     frame_offset: u32,
@@ -836,21 +876,32 @@ pub fn eval_op_slice_v1(
     };
     let token = frame.session_token;
     let generation = frame.session_generation;
-    let result = ACTIVE_RUNTIME_SESSION.with(|active| {
-        let mut active = active.borrow_mut();
-        let active = active
-            .as_mut()
-            .ok_or(HelperError::StatefulRuntimeUnavailable)?;
-        if token == 0
-            || generation == 0
-            || active.frame_offset != frame_offset
-            || active.token != token
-            || active.generation != generation
-        {
-            return Err(HelperError::StatefulRuntimeUnavailable);
-        }
-        evaluate_slice_helper_with_session(opcode, aux0, aux1, aux2, operands, &mut active.session)
-    });
+    let result = if opcode == 251 {
+        evaluate_sum_products_div(aux0, aux1, aux2, operands)
+    } else {
+        ACTIVE_RUNTIME_SESSION.with(|active| {
+            let mut active = active.borrow_mut();
+            let active = active
+                .as_mut()
+                .ok_or(HelperError::StatefulRuntimeUnavailable)?;
+            if token == 0
+                || generation == 0
+                || active.frame_offset != frame_offset
+                || active.token != token
+                || active.generation != generation
+            {
+                return Err(HelperError::StatefulRuntimeUnavailable);
+            }
+            evaluate_slice_helper_with_session(
+                opcode,
+                aux0,
+                aux1,
+                aux2,
+                operands,
+                &mut active.session,
+            )
+        })
+    };
     match result {
         Ok(value) => value,
         Err(_) => {
@@ -1731,6 +1782,35 @@ mod tests {
             session
                 .take_error()
                 .is_some_and(|error| error.contains("not fully preallocated"))
+        );
+    }
+
+    #[test]
+    fn quotient_sum_helpers_validate_layout_and_require_no_session() {
+        assert_eq!(
+            evaluate_helper(251, 2, 0, 0, [1.6e308, 1.0, -8e307, 3.0, 2.0], &[]),
+            Ok(-4e307)
+        );
+        let operands = [f64::MAX, f64::MAX, 1.0, 1.0, -f64::MAX, f64::MAX, 2.0];
+        assert_eq!(evaluate_sum_products_div(3, 0, 0, &operands), Ok(0.5));
+        for (terms, aux1, aux2) in [(-1, 0, 0), (2, 0, 0), (3, 1, 0), (3, 0, 1)] {
+            assert_eq!(
+                evaluate_sum_products_div(terms, aux1, aux2, &operands),
+                Err(HelperError::InvalidOperandLayout)
+            );
+        }
+        assert_eq!(
+            evaluate_helper(251, 3, 0, 0, [1.0; 5], &[]),
+            Err(HelperError::InvalidOperandLayout)
+        );
+        let at_limit = vec![1.0; WASM_JIT_MAX_SLICE_OPERANDS - 1];
+        assert_eq!(
+            evaluate_sum_products_div(((at_limit.len() - 1) / 2) as i32, 0, 0, &at_limit),
+            Ok(((at_limit.len() - 1) / 2) as f64)
+        );
+        assert_eq!(
+            evaluate_sum_products_div(512, 0, 0, &[1.0; 1025]),
+            Err(HelperError::InvalidOperandLayout)
         );
     }
 

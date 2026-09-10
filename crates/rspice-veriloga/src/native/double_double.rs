@@ -833,6 +833,36 @@ impl CfgScalar for DoubleDouble {
         Self::powf(self, rhs).carrying(self.real.powf(rhs.real))
     }
 
+    fn sum_products_div(terms: &[[Self; 2]], divisor: Self) -> Self {
+        use rspice_veriloga_runtime::arithmetic::{ArithmeticError, sum_products_ratio};
+        let real_terms = terms
+            .iter()
+            .map(|&[a, b]| [a.real, b.real])
+            .collect::<Vec<_>>();
+        let real = rspice_veriloga_runtime::arithmetic::sum_products_div(&real_terms, divisor.real);
+        let products = terms
+            .iter()
+            .flat_map(|&[a, b]| [(a.hi, b.hi), (a.hi, b.lo), (a.lo, b.hi), (a.lo, b.lo)]);
+        let denominator = [(divisor.hi, 1.0), (divisor.lo, 1.0)];
+        let high = match sum_products_ratio(products.clone(), denominator.into_iter()) {
+            Ok(value) => value,
+            Err(ArithmeticError::Overflow { negative }) => {
+                if negative {
+                    f64::NEG_INFINITY
+                } else {
+                    f64::INFINITY
+                }
+            }
+            Err(_) => f64::NAN,
+        };
+        if !high.is_finite() {
+            return Self::from_parts(high, 0.0).carrying(real);
+        }
+        let residual = products.chain([(-high, divisor.hi), (-high, divisor.lo)]);
+        let low = sum_products_ratio(residual, denominator.into_iter()).unwrap_or(f64::NAN);
+        Self::from_parts(high, low).carrying(real)
+    }
+
     fn product_ratio(self, b: Self, c: Self, d: Self) -> Self {
         crate::canonical_ir::cfg_eval::scaled_product_ratio(self, b, c, d).carrying(
             rspice_veriloga_runtime::arithmetic::product_ratio(self.real, b.real, c.real, d.real),
@@ -1042,6 +1072,24 @@ mod tests {
 
     /// A double-double sum of a large and a small quantity keeps the small one,
     /// which is the whole point: `f64` loses it.
+    #[test]
+    fn quotient_sum_keeps_wide_cancellation_and_the_separate_f64_result() {
+        let wide = CfgScalar::add(dd(1e16), dd(1.0));
+        let quotient = <DoubleDouble as CfgScalar>::sum_products_div(
+            &[[wide, dd(1.0)], [dd(-1e16), dd(1.0)]],
+            dd(3.0),
+        );
+        assert_eq!(quotient.real, 0.0);
+        assert!(quotient.mul(dd(3.0)).sub(dd(1.0)).hi.abs() < 1e-30);
+        let wide = DoubleDouble::from_parts(1e200, 1e184);
+        let quotient = <DoubleDouble as CfgScalar>::sum_products_div(
+            &[[wide, dd(1e200)], [dd(-1e200), dd(1e200)]],
+            dd(1e200),
+        );
+        assert_eq!(quotient.hi, 1e184);
+        assert_eq!(quotient.real, 0.0);
+    }
+
     #[test]
     fn the_format_holds_what_f64_drops() {
         let large = dd(1.0e16);

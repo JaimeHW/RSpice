@@ -75,6 +75,11 @@ trait FrequencyScalar: Copy + std::fmt::Debug + std::ops::Neg<Output = Self> {
     fn multiply(self, other: Self, range_lost: &mut bool) -> Self;
     fn divide(self, other: Self, range_lost: &mut bool) -> Self;
     fn scale(self, scale: f64, range_lost: &mut bool) -> Self;
+    fn sum_products_div(
+        pairs: &[[Self; 2]],
+        divisor: Self,
+        range_lost: &mut bool,
+    ) -> Result<Self, VmError>;
 
     fn from_complex(value: Complex64) -> Self {
         Self::new(value.re, value.im)
@@ -87,6 +92,29 @@ trait FrequencyScalar: Copy + std::fmt::Debug + std::ops::Neg<Output = Self> {
 
 impl FrequencyScalar for Complex64 {
     const TRACK_RANGE: bool = true;
+    fn sum_products_div(
+        pairs: &[[Self; 2]],
+        divisor: Self,
+        range_lost: &mut bool,
+    ) -> Result<Self, VmError> {
+        let value = crate::complex_arithmetic::sum_complex_products_div(pairs, divisor);
+        let real_product = pairs
+            .iter()
+            .any(|[a, b]| (a.re != 0.0 && b.re != 0.0) || (a.im != 0.0 && b.im != 0.0));
+        let imaginary_product = pairs
+            .iter()
+            .any(|[a, b]| (a.re != 0.0 && b.im != 0.0) || (a.im != 0.0 && b.re != 0.0));
+        let real_zero =
+            !(real_product && divisor.re != 0.0 || imaginary_product && divisor.im != 0.0);
+        let imaginary_zero =
+            !(imaginary_product && divisor.re != 0.0 || real_product && divisor.im != 0.0);
+        if !(value.re.is_normal() || (value.re == 0.0 && real_zero))
+            || !(value.im.is_normal() || (value.im == 0.0 && imaginary_zero))
+        {
+            *range_lost = true;
+        }
+        Ok(value)
+    }
     #[inline]
     fn new(real: f64, imaginary: f64) -> Self {
         Self::new(real, imaginary)
@@ -168,6 +196,14 @@ impl FrequencyScalar for Complex64 {
 
 impl FrequencyScalar for FrequencyValue {
     const TRACK_RANGE: bool = false;
+    fn sum_products_div(
+        pairs: &[[Self; 2]],
+        divisor: Self,
+        _range_lost: &mut bool,
+    ) -> Result<Self, VmError> {
+        Self::sum_products_div(pairs, divisor)
+            .map_err(|error| VmError::InvalidNumericResult(format!("complex quotient: {error:?}")))
+    }
     fn new(real: f64, imaginary: f64) -> Self {
         Self::new(real, imaginary)
     }
@@ -908,6 +944,22 @@ impl<'a, V: FrequencyScalar> SmallSignalEngine<'a, V> {
             Instruction::Atanh => self.unary_real("Atanh", f64::atanh)?,
             Instruction::Atan2 => self.binary_real("Atan2", |left, right| left.atan2(right))?,
             Instruction::Hypot => self.binary_real("Hypot", f64::hypot)?,
+            Instruction::SumProductsDiv(terms) => {
+                let count = terms.checked_mul(2).and_then(|n| n.checked_add(1)).ok_or(
+                    VmError::InvalidInstruction("sum-products quotient count overflow"),
+                )?;
+                let start = self
+                    .stack
+                    .len()
+                    .checked_sub(count)
+                    .ok_or(VmError::StackUnderflow("sum-products quotient"))?;
+                let divisor = self.stack[start + count - 1];
+                let (pairs, remainder) = self.stack[start..start + count - 1].as_chunks::<2>();
+                debug_assert!(remainder.is_empty());
+                let result = V::sum_products_div(pairs, divisor, &mut self.range_lost)?;
+                self.stack.truncate(start);
+                self.stack.push(result);
+            }
             Instruction::Floor => self.unary_real("Floor", f64::floor)?,
             Instruction::Ceil => self.unary_real("Ceil", f64::ceil)?,
             Instruction::Gt => self.binary_real("Gt", |left, right| f64::from(left > right))?,
@@ -1340,57 +1392,79 @@ mod tests {
     }
 
     #[test]
-    fn complex_products_recover_finite_cross_products_in_bytecode_and_filters() {
-        let mut context = ac_context();
-        let frequency = 1.0 / std::f64::consts::TAU;
-        let tiny = f64::from_bits(1);
-        for (left, right, expected) in [
-            ([1.6e308, 8e307], [1.2, 0.3], [1.68e308, 1.44e308]),
-            ([tiny, tiny], [0.5, 0.5], [0.0, tiny]),
-        ] {
-            let program = BytecodeProgram {
-                instructions: vec![
-                    Instruction::PushConst(left[0]),
-                    Instruction::PushConst(left[1]),
-                    Instruction::DdtJacobian,
-                    Instruction::Add,
-                    Instruction::PushConst(right[0]),
-                    Instruction::PushConst(right[1]),
-                    Instruction::DdtJacobian,
-                    Instruction::Add,
-                    Instruction::Mul,
-                ],
-            };
-            let result = SmallSignalVm::new(&context, frequency)
-                .unwrap()
-                .execute(&program)
-                .expect("both final product components are representable");
-            for (actual, expected) in [result.re, result.im].into_iter().zip(expected) {
-                if expected == 0.0 || expected == tiny {
-                    assert_eq!(actual, expected);
-                } else {
-                    assert!((actual / expected - 1.0).abs() <= 4.0 * f64::EPSILON);
-                }
-            }
+    fn quotient_sum_preserves_complex_products_and_division() {
+        let context = ac_context();
+        let mut vm = SmallSignalEngine::<Complex64>::new(&context, 1.0).unwrap();
+        for divisor in [Complex64::new(4.0, 0.0), Complex64::new(4.0, 4.0)] {
+            vm.stack = vec![
+                Complex64::new(7.0, 0.0),
+                Complex64::new(1.6e308, 0.0),
+                Complex64::new(1.0, 1.0),
+                Complex64::new(1.6e308, 0.0),
+                Complex64::new(1.0, 1.0),
+                divisor,
+            ];
+            vm.execute_instruction(&Instruction::SumProductsDiv(2))
+                .unwrap();
+            assert_eq!(vm.stack[0], Complex64::new(7.0, 0.0));
+            assert_eq!(vm.stack.len(), 2);
+            let expected_im = if divisor.im == 0.0 { 8e307 } else { 0.0 };
+            assert!((vm.stack[1].re / 8e307 - 1.0).abs() < 1e-14);
+            assert_eq!(vm.stack[1].im, expected_im);
         }
+        vm.stack.clear();
+        assert!(
+            vm.execute_instruction(&Instruction::SumProductsDiv(usize::MAX))
+                .is_err()
+        );
+        assert!(
+            vm.execute_instruction(&Instruction::SumProductsDiv(2))
+                .is_err()
+        );
+    }
 
-        context.laplace_filters = vec![
-            StateSpaceFilter::new(vec![vec![-2.0]], vec![1.6e308], vec![2.5], 0.0).unwrap(),
-            StateSpaceFilter::new(vec![vec![-4.0]], vec![5.1], vec![1.0], 0.0).unwrap(),
-        ];
-        let program = BytecodeProgram {
-            instructions: vec![
-                Instruction::PushConst(1.0),
-                Instruction::LaplaceStateDerivative(0),
-                Instruction::LaplaceStateDerivative(1),
-            ],
-        };
-        let result = SmallSignalVm::new(&context, frequency)
-            .unwrap()
-            .execute(&program)
-            .expect("the cascade has finite rectangular components");
-        assert!((result.re / 1.68e308 - 1.0).abs() <= 8.0 * f64::EPSILON);
-        assert!((result.im / -1.44e308 - 1.0).abs() <= 8.0 * f64::EPSILON);
+    #[test]
+    fn quotient_replay_retains_wide_components_and_cancellation() {
+        let context = ac_context();
+        for complex_divisor in [false, true] {
+            let mut instructions = Vec::new();
+            for (a, b) in [(1e200, 1e200), (1e-200, 1e-200), (-1e200, 1e200)] {
+                instructions.extend([
+                    Instruction::PushConst(a),
+                    Instruction::PushConst(b),
+                    Instruction::Mul,
+                    Instruction::PushConst(1.0),
+                    Instruction::PushConst(1.0),
+                    Instruction::DdtJacobian,
+                    Instruction::Add,
+                ]);
+            }
+            instructions.extend([
+                Instruction::PushConst(1e-200),
+                Instruction::PushConst(1e-200),
+                Instruction::Mul,
+            ]);
+            if complex_divisor {
+                instructions.extend([
+                    Instruction::PushConst(1e-200),
+                    Instruction::PushConst(1e-200),
+                    Instruction::Mul,
+                    Instruction::DdtJacobian,
+                    Instruction::Add,
+                ]);
+            }
+            instructions.push(Instruction::SumProductsDiv(3));
+            let mut vm = SmallSignalVm::new(&context, 1.0 / std::f64::consts::TAU).unwrap();
+            let value = vm.execute(&BytecodeProgram { instructions }).unwrap();
+            assert_eq!(
+                value,
+                Complex64::new(1.0, if complex_divisor { 0.0 } else { 1.0 })
+            );
+            assert!(
+                vm.wide.is_some(),
+                "The regression must exercise range replay"
+            );
+        }
     }
 
     #[test]
@@ -1499,6 +1573,60 @@ mod tests {
             .unwrap();
         assert!((result.re - 0.0).abs() <= 1.0e-14, "{result:?}");
         assert!((result.im + 0.5).abs() <= 1.0e-14, "{result:?}");
+    }
+
+    #[test]
+    fn complex_products_recover_finite_cross_products_in_bytecode_and_filters() {
+        let mut context = ac_context();
+        let frequency = 1.0 / std::f64::consts::TAU;
+        let tiny = f64::from_bits(1);
+        for (left, right, expected) in [
+            ([1.6e308, 8e307], [1.2, 0.3], [1.68e308, 1.44e308]),
+            ([tiny, tiny], [0.5, 0.5], [0.0, tiny]),
+        ] {
+            let program = BytecodeProgram {
+                instructions: vec![
+                    Instruction::PushConst(left[0]),
+                    Instruction::PushConst(left[1]),
+                    Instruction::DdtJacobian,
+                    Instruction::Add,
+                    Instruction::PushConst(right[0]),
+                    Instruction::PushConst(right[1]),
+                    Instruction::DdtJacobian,
+                    Instruction::Add,
+                    Instruction::Mul,
+                ],
+            };
+            let result = SmallSignalVm::new(&context, frequency)
+                .unwrap()
+                .execute(&program)
+                .expect("both final product components are representable");
+            for (actual, expected) in [result.re, result.im].into_iter().zip(expected) {
+                if expected == 0.0 || expected == tiny {
+                    assert_eq!(actual, expected);
+                } else {
+                    assert!((actual / expected - 1.0).abs() <= 4.0 * f64::EPSILON);
+                }
+            }
+        }
+
+        context.laplace_filters = vec![
+            StateSpaceFilter::new(vec![vec![-2.0]], vec![1.6e308], vec![2.5], 0.0).unwrap(),
+            StateSpaceFilter::new(vec![vec![-4.0]], vec![5.1], vec![1.0], 0.0).unwrap(),
+        ];
+        let program = BytecodeProgram {
+            instructions: vec![
+                Instruction::PushConst(1.0),
+                Instruction::LaplaceStateDerivative(0),
+                Instruction::LaplaceStateDerivative(1),
+            ],
+        };
+        let result = SmallSignalVm::new(&context, frequency)
+            .unwrap()
+            .execute(&program)
+            .expect("the cascade has finite rectangular components");
+        assert!((result.re / 1.68e308 - 1.0).abs() <= 8.0 * f64::EPSILON);
+        assert!((result.im / -1.44e308 - 1.0).abs() <= 8.0 * f64::EPSILON);
     }
 
     #[test]

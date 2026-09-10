@@ -350,6 +350,7 @@ impl<const DDT: usize, const IDT: usize> StampState<DDT, IDT> {
 	}
 }
 
+pub(crate) type CanonicalModelValues = [f64; 49];
 pub struct Instance {
 	pub nodes: [usize; 10],
 	pub branches: [usize; 8],
@@ -363,6 +364,12 @@ pub struct Instance {
 	pub(crate) timestep: f64,
 	pub(crate) ddt_coefficients: GeneratedDdtCoefficients,
 	pub(crate) canonical_reactive: Box<[f64; 81]>,
+	pub(crate) canonical_model_values: Option<std::sync::Arc<CanonicalModelValues>>,
+	pub(crate) canonical_staged: Box<[f64; 62]>,
+	pub(crate) canonical_instance_valid: bool,
+	pub(crate) canonical_temperature_valid: bool,
+	pub(crate) canonical_temperature: f64,
+	pub(crate) canonical_thermal_voltage: f64,
 }
 
 impl Clone for Instance {
@@ -381,6 +388,12 @@ impl Clone for Instance {
 			timestep: self.timestep,
 			ddt_coefficients: self.ddt_coefficients,
 			canonical_reactive: self.canonical_reactive.clone(),
+			canonical_model_values: self.canonical_model_values.clone(),
+			canonical_staged: self.canonical_staged.clone(),
+			canonical_instance_valid: self.canonical_instance_valid,
+			canonical_temperature_valid: self.canonical_temperature_valid,
+			canonical_temperature: self.canonical_temperature,
+			canonical_thermal_voltage: self.canonical_thermal_voltage,
 		}
 	}
 }
@@ -488,7 +501,7 @@ impl Instance {
 	pub const EVENT_STATE_COUNT: usize = 0;
 	pub const ONE_STEP_DAE_SPLIT_SAFE: bool = false;
 	pub const REQUIRES_NODESET_PHASE: bool = false;
-	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "68296ffb19fcadc656fc89e5a71845465236eeca4224b429e9f5ba8d4665cc82";
+	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "d4590f2de725161a5b054c2bac3b6da82d24796b23bcf7bd5494d60009124185";
 	pub const MAX_ANALOG_LOOP_ITERATIONS: usize = 1_000_000;
 
 	pub fn new(nodes: &[usize]) -> Self {
@@ -520,6 +533,12 @@ impl Instance {
 			timestep: 0.0,
 			ddt_coefficients: GeneratedDdtCoefficients::inactive(),
 			canonical_reactive: boxed_zero_f64_array(),
+			canonical_model_values: None,
+			canonical_staged: boxed_zero_f64_array(),
+			canonical_instance_valid: false,
+			canonical_temperature_valid: false,
+			canonical_temperature: 0.0,
+			canonical_thermal_voltage: 0.0,
 		};
 		instance.apply_parameters(assignments)?;
 		Ok(instance)
@@ -854,13 +873,22 @@ impl Instance {
 
 	#[inline]
 	fn invalidate_parameter_caches(&mut self, index: usize) {
-		let _ = index;
+		if PARAMETER_MODEL_FLAGS[index] {
+			self.canonical_model_values = None;
+		}
+		self.canonical_instance_valid = false;
+		self.canonical_temperature_valid = false;
 	}
 
 	#[inline]
 	pub fn set_multiplicity(&mut self, multiplicity: f64) -> Result<(), String> {
 		if multiplicity.is_finite() && multiplicity > 0.0 {
+			let changed = self.multiplicity.to_bits() != multiplicity.to_bits();
 			self.multiplicity = multiplicity;
+			if changed {
+				self.canonical_instance_valid = false;
+				self.canonical_temperature_valid = false;
+			}
 			Ok(())
 		} else {
 			Err(format!("instance multiplicity 'm' must be finite and > 0.0, got {}", multiplicity))

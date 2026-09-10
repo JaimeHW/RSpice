@@ -30,6 +30,7 @@ use std::sync::Arc;
 #[cfg(feature = "veriloga-builtins-base")]
 pub use rspice_veriloga_models::registry as builtins;
 
+pub use rspice_veriloga_runtime::arithmetic;
 pub use rspice_veriloga_runtime::{
     AnalogEffectJournal, AnalogTaskArgument, AnalogTaskEvent, AnalogTaskInvocation, AnalogTaskKind,
     GENERATED_PERSISTENT_STATE_VERSION, GENERATED_VERILOGA_COMPATIBILITY_CATALOG,

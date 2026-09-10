@@ -222,7 +222,7 @@ impl Instance {
 		let NS=NK* ((2f64* ((R>= 0f64) as u8 as f64))- MR);
 		let AZ=T+ (AX* AY);
 		let BA=AW* AZ;
-		let NT=(((((NR+ NR)* AV)* NE)/ AU)* AT)* AZ;
+		let NT=((((NR+ NR)).product_div((-AV),AU))* AT)* AZ;
 		let NU=L3([0.0,NT[0],NT[1]])+ L3([((NS* AX)* AW),0.0,0.0]);
 		let BD=BB* (T+ (BC* AY));
 		let NV=(NS* BC)* BB;

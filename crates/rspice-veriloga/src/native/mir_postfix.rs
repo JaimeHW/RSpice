@@ -563,6 +563,22 @@ impl<'a, S: CfgScalar> PlanWalk<'a, S> {
             NativeOp::BinaryMath(op) => {
                 Self::binary(stack, name, |left, right| binary_math(op, left, right))?;
             }
+            NativeOp::SumProductsDiv(terms) => {
+                let count = terms
+                    .checked_mul(2)
+                    .and_then(|n| n.checked_add(1))
+                    .ok_or(PostfixRefusal::Malformed(name))?;
+                let start = stack
+                    .len()
+                    .checked_sub(count)
+                    .ok_or(PostfixRefusal::Malformed(name))?;
+                let divisor = stack[start + count - 1];
+                let (pairs, remainder) = stack[start..start + count - 1].as_chunks::<2>();
+                debug_assert!(remainder.is_empty());
+                let result = S::sum_products_div(pairs, divisor);
+                stack.truncate(start);
+                stack.push(result);
+            }
             NativeOp::ProductRatio => {
                 let start = stack
                     .len()

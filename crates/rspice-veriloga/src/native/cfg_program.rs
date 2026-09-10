@@ -927,6 +927,15 @@ impl Lowerer<'_> {
                 let right = operand(*right)?;
                 push(binary_op(*op), &[left, right])
             }
+            CfgValueKind::SumProductsDiv { terms, divisor } => {
+                let mut inputs = Vec::with_capacity(2 * terms.len() + 1);
+                for &(a, b) in terms {
+                    inputs.push(operand(a)?);
+                    inputs.push(operand(b)?);
+                }
+                inputs.push(operand(*divisor)?);
+                push(NativeOp::SumProductsDiv(terms.len()), &inputs)
+            }
             CfgValueKind::Select {
                 condition,
                 then_value,
@@ -1512,6 +1521,7 @@ fn speculation_hazard(kind: &CfgValueKind) -> Option<&'static str> {
         | CfgValueKind::NoiseProcess(_)
         | CfgValueKind::Unary { .. }
         | CfgValueKind::Binary { .. }
+        | CfgValueKind::SumProductsDiv { .. }
         | CfgValueKind::Select { .. } => None,
         CfgValueKind::BlockParameter => {
             Some("is a merge of the arms reaching it and so has no single value to move")

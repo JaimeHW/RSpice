@@ -1,6 +1,6 @@
 //! Binary64 significands with a retained exponent for frequency-domain arithmetic.
 
-use super::sum_products;
+use super::scalar::{ArithmeticError, BigMagnitude, ExactValue, exact_f64_parts, sum_products};
 
 /// A binary64 significand with a separate exponent for AC intermediates.
 /// Values in the normal binary64 range retain their ordinary representation.
@@ -12,6 +12,129 @@ pub struct ScaledValue {
 }
 
 impl ScaledValue {
+    /// Preserve the ordinary derivative numerator's rounding when it stays in
+    /// range, then retain the quotient exponent for subsequent AC operations.
+    pub fn sum_products_div(
+        terms: impl ExactSizeIterator<Item = [Self; 2]> + Clone,
+        divisor: Self,
+    ) -> Result<Self, ArithmeticError> {
+        if terms
+            .clone()
+            .all(|pair| pair.iter().all(|factor| factor.is_regular()))
+            && let Some(sum) =
+                super::scalar::ordinary_sum_products(terms.clone().map(|[a, b]| [a.value, b.value]))
+        {
+            return Ok(Self::new(sum).divide(divisor));
+        }
+        let one = Self::new(1.0);
+        Self::sum_triple_products_ratio(
+            terms.map(|[a, b]| [a, b, one]),
+            [[divisor, one, one]].into_iter(),
+        )
+    }
+
+    /// Divide complete sums of triple products without narrowing their factors.
+    /// Recovery retains cancellation across terms and independent exponents.
+    /// An excessive exponent span is reported before allocating an accumulator.
+    pub fn sum_triple_products_ratio(
+        numerator: impl Iterator<Item = [Self; 3]> + Clone,
+        denominator: impl Iterator<Item = [Self; 3]> + Clone,
+    ) -> Result<Self, ArithmeticError> {
+        let (numerator, numerator_floor) = Self::exact_sum(numerator)?;
+        let (denominator, denominator_floor) = Self::exact_sum(denominator)?;
+        let Some(denominator_top) = denominator.magnitude.top_bit() else {
+            return Err(ArithmeticError::ZeroDenominator);
+        };
+        let Some(numerator_top) = numerator.magnitude.top_bit() else {
+            return Ok(Self::new(0.0));
+        };
+        let adjustment = numerator_top as i32 - denominator_top as i32;
+        let value = super::scalar::scaled_exact_ratio_to_f64(
+            &numerator.magnitude,
+            &denominator.magnitude,
+            numerator.negative ^ denominator.negative,
+            -adjustment,
+        )?;
+        let exponent = numerator_floor
+            .checked_sub(denominator_floor)
+            .and_then(|exponent| exponent.checked_add(i64::from(adjustment)))
+            .ok_or(ArithmeticError::MantissaBounds)?;
+        Ok(Self::scaled(value, exponent))
+    }
+
+    fn exact_sum(
+        terms: impl Iterator<Item = [Self; 3]> + Clone,
+    ) -> Result<(ExactValue, i64), ArithmeticError> {
+        // This is a cold recovery path. Bound storage independently of an
+        // adversarial operator order; never clamp or discard a distant term.
+        const MAX_SPAN_BITS: u32 = 65_536;
+        let mut floor = i64::MAX;
+        let mut ceiling = i64::MIN;
+        for factors in terms.clone() {
+            if let Some((_, _, exponent)) = Self::exact_term(factors)? {
+                floor = floor.min(exponent);
+                ceiling = ceiling.max(exponent);
+            }
+        }
+        if floor != i64::MAX
+            && ceiling
+                .checked_sub(floor)
+                .is_none_or(|span| span > i64::from(MAX_SPAN_BITS) - 159)
+        {
+            return Err(ArithmeticError::PrecisionLimit {
+                bits: MAX_SPAN_BITS,
+            });
+        }
+        let mut positive = BigMagnitude::default();
+        let mut negative = BigMagnitude::default();
+        for factors in terms {
+            let Some((sign, mantissas, exponent)) = Self::exact_term(factors)? else {
+                continue;
+            };
+            let pair = u128::from(mantissas[0]) * u128::from(mantissas[1]);
+            let third = u128::from(mantissas[2]);
+            let shift = (exponent - floor) as usize;
+            let accumulator = if sign { &mut negative } else { &mut positive };
+            accumulator.add_shifted(u128::from(pair as u64) * third, shift);
+            accumulator.add_shifted((pair >> 64) * third, shift + 64);
+        }
+        let (negative_result, magnitude) = match positive.compare(&negative) {
+            std::cmp::Ordering::Greater => (false, positive.subtract(&negative)),
+            std::cmp::Ordering::Less => (true, negative.subtract(&positive)),
+            std::cmp::Ordering::Equal => (false, BigMagnitude::default()),
+        };
+        Ok((
+            ExactValue {
+                negative: negative_result,
+                magnitude,
+            },
+            floor,
+        ))
+    }
+
+    fn exact_term(factors: [Self; 3]) -> Result<Option<(bool, [u64; 3], i64)>, ArithmeticError> {
+        if factors.iter().any(|factor| !factor.is_finite()) {
+            return Err(ArithmeticError::NonFiniteTerm);
+        }
+        if factors.iter().any(|factor| factor.is_zero()) {
+            return Ok(None);
+        }
+        let mut sign = false;
+        let mut exponent = 0_i64;
+        let mut mantissas = [0; 3];
+        for (factor, mantissa) in factors.into_iter().zip(&mut mantissas) {
+            let (negative, bits, power) = exact_f64_parts(factor.value);
+            let trailing = bits.trailing_zeros();
+            *mantissa = bits >> trailing;
+            exponent = exponent
+                .checked_add(factor.exponent)
+                .and_then(|exponent| exponent.checked_add(i64::from(power) + i64::from(trailing)))
+                .ok_or(ArithmeticError::MantissaBounds)?;
+            sign ^= negative;
+        }
+        Ok(Some((sign, mantissas, exponent)))
+    }
+
     #[inline]
     pub fn is_zero(self) -> bool {
         self.value == 0.0
@@ -233,5 +356,75 @@ impl ScaledValue {
         };
         let value = sum_products([first, second].into_iter()).unwrap_or(f64::NAN);
         Self::scaled(value, common)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn quotient_recovery_retains_distant_canceling_terms() {
+        let one = ScaledValue::new(1.0);
+        let huge = ScaledValue::new(1e200).multiply(ScaledValue::new(1e200));
+        let tiny = ScaledValue::new(1e-200).multiply(ScaledValue::new(1e-200));
+        for values in [
+            [huge, tiny, huge.negated()],
+            [tiny, huge.negated(), huge],
+            [huge, huge.negated(), tiny],
+        ] {
+            let value =
+                ScaledValue::sum_products_div(values.into_iter().map(|value| [value, one]), tiny)
+                    .unwrap();
+            assert_eq!(value.binary64(), 1.0);
+        }
+        let value = ScaledValue::sum_triple_products_ratio(
+            [
+                [huge, one, tiny],
+                [tiny, one, tiny],
+                [huge.negated(), one, tiny],
+            ]
+            .into_iter(),
+            [[tiny, tiny, one]].into_iter(),
+        )
+        .unwrap();
+        assert_eq!(value.binary64(), 1.0);
+    }
+
+    #[test]
+    fn quotient_recovery_preserves_ordinary_rounding_and_reports_limits() {
+        let one = ScaledValue::new(1.0);
+        let value = ScaledValue::sum_products_div(
+            [
+                [ScaledValue::new(2.0), one],
+                [ScaledValue::new(-2.0 / 3.0), ScaledValue::new(3.0)],
+            ]
+            .into_iter(),
+            ScaledValue::new(1e-309),
+        )
+        .unwrap();
+        assert_eq!(value.binary64(), 0.0);
+        let huge = ScaledValue::new(2.0).powu(1_000_000);
+        assert_eq!(
+            ScaledValue::sum_triple_products_ratio(
+                [[huge, one, one], [one, one, one]].into_iter(),
+                [[one, one, one]].into_iter(),
+            ),
+            Err(ArithmeticError::PrecisionLimit { bits: 65_536 })
+        );
+        assert_eq!(
+            ScaledValue::sum_triple_products_ratio(
+                [[one, one, one]].into_iter(),
+                [[ScaledValue::new(0.0), one, one]].into_iter(),
+            ),
+            Err(ArithmeticError::ZeroDenominator)
+        );
+        assert_eq!(
+            ScaledValue::sum_triple_products_ratio(
+                [[ScaledValue::new(f64::INFINITY), one, one]].into_iter(),
+                [[one, one, one]].into_iter(),
+            ),
+            Err(ArithmeticError::NonFiniteTerm)
+        );
     }
 }

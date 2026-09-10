@@ -441,6 +441,28 @@ macro_rules! define_fixed_lanes {
         #[derive(Clone, Copy)]
         pub struct $name(pub [f64; $width]);
 
+        impl $name {
+            /// Lane-wise form of [`arithmetic::product_div`].
+            #[inline]
+            pub fn product_div(self, scalar: f64, divisor: f64) -> Self {
+                Self([$(arithmetic::product_div(self.0[$index], scalar, divisor)),+])
+            }
+
+            /// Lane-wise form of [`arithmetic::product_sum_div`].
+            #[inline]
+            pub fn product_sum_div(
+                self,
+                scalar: f64,
+                right: Self,
+                right_scalar: f64,
+                divisor: f64,
+            ) -> Self {
+                Self([$(arithmetic::product_sum_div(
+                    self.0[$index], scalar, right.0[$index], right_scalar, divisor
+                )),+])
+            }
+        }
+
         impl core::ops::Add for $name {
             type Output = Self;
 
@@ -9238,6 +9260,33 @@ mod fixed_lane_tests {
             assert_same_bits(($name(lhs) - $name(rhs)).0, (Lanes(lhs) - Lanes(rhs)).0);
             assert_same_bits(($name(lhs) * -3.25).0, (Lanes(lhs) * -3.25).0);
             assert_same_bits(($name(lhs) / -3.25).0, (Lanes(lhs) / -3.25).0);
+            for (left_scalar, right_scalar) in [(2.0, -3.0), (1e-200, 1e-200), (1e200, -1e200)] {
+                for divisor in [1e-200, 1.0, 1e200] {
+                    let one = $name(lhs).product_div(left_scalar, divisor).0;
+                    let two = $name(lhs)
+                        .product_sum_div(left_scalar, $name(rhs), right_scalar, divisor)
+                        .0;
+                    let expected_one = arithmetic::sum_products_div_lanes::<$width>(
+                        &[(&lhs, left_scalar)],
+                        divisor,
+                    );
+                    let expected_two = arithmetic::sum_products_div_lanes::<$width>(
+                        &[(&lhs, left_scalar), (&rhs, right_scalar)],
+                        divisor,
+                    );
+                    for (actual, expected) in one
+                        .into_iter()
+                        .zip(expected_one)
+                        .chain(two.into_iter().zip(expected_two))
+                    {
+                        if expected.is_nan() {
+                            assert!(actual.is_nan());
+                        } else {
+                            assert_eq!(actual.to_bits(), expected.to_bits());
+                        }
+                    }
+                }
+            }
             for index in 0..$width {
                 assert_eq!($name(lhs)[index].to_bits(), lhs[index].to_bits());
             }

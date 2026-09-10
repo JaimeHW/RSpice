@@ -3654,6 +3654,7 @@ fn op_may_call(op: NativeOp) -> bool {
             | NativeOp::LoadSimParamValue(_)
             | NativeOp::LoadSimParamPresent(_)
             | NativeOp::ProductRatio
+            | NativeOp::SumProductsDiv(_)
             | NativeOp::CheckedValue
             | NativeOp::IntegerCast
             | NativeOp::IntegerBinary(_)

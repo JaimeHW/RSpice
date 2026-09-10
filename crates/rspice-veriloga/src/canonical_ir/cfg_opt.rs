@@ -286,6 +286,16 @@ impl Optimizer {
                 self.constant(*right)?,
             )
             .ok()?,
+            CfgValueKind::SumProductsDiv { terms, divisor } => {
+                let pairs = terms
+                    .iter()
+                    .map(|&(a, b)| Some([self.constant(a)?, self.constant(b)?]))
+                    .collect::<Option<Vec<_>>>()?;
+                rspice_veriloga_runtime::arithmetic::sum_products_div(
+                    &pairs,
+                    self.constant(*divisor)?,
+                )
+            }
             CfgValueKind::Binary { op, left, right } => {
                 apply_binary(*op, self.constant(*left)?, self.constant(*right)?)
             }
@@ -576,6 +586,12 @@ impl Optimizer {
                 } else {
                     CseKey::Binary(op, left, right)
                 }
+            }
+            CfgValueKind::SumProductsDiv { ref terms, divisor } => {
+                CseKey::SumProductsDiv(terms.clone(), divisor)
+            }
+            CfgValueKind::LaneSumProductsDiv { ref terms, divisor } => {
+                CseKey::LaneSumProductsDiv(terms.clone(), divisor, shape?)
             }
             CfgValueKind::LaneSplat(constant) => CseKey::LaneSplat(constant.to_bits(), shape?),
             CfgValueKind::LaneWiden { input } => CseKey::LaneWiden(input, shape?),
@@ -914,7 +930,7 @@ impl Optimizer {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum CseKey {
     RealConstant(u64),
     BooleanConstant(bool),
@@ -924,6 +940,8 @@ enum CseKey {
     LaneWiden(ValueId, ShapeId),
     LaneBinary(CfgBinaryOp, ValueId, ValueId, ShapeId),
     LaneScalar(CfgBinaryOp, ValueId, ValueId, ShapeId),
+    SumProductsDiv(Vec<(ValueId, ValueId)>, ValueId),
+    LaneSumProductsDiv(Vec<(ValueId, ValueId)>, ValueId, ShapeId),
     LaneExtract(ValueId, u32),
     Select(ValueId, ValueId, ValueId),
 }

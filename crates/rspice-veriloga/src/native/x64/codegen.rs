@@ -1093,7 +1093,6 @@ impl FunctionCompiler {
                     self.emit_allocated_operand_array(allocated, &call)?;
                 } else {
                     let result_register = self.prepare_allocated_instruction(allocated)?;
-
                     match op {
                         NativeOp::Const(value) => {
                             let dst = self.push_register()?;
@@ -1252,6 +1251,9 @@ impl FunctionCompiler {
                         }
                         NativeOp::UnaryMath(op) => self.emit_unary_math(op)?,
                         NativeOp::BinaryMath(op) => self.emit_binary_math(op)?,
+                        NativeOp::SumProductsDiv(_) => {
+                            unreachable!("handled before register preparation")
+                        }
                         NativeOp::ProductRatio => {
                             if self.depth < 4 {
                                 return Err(JitError::Encoding {
@@ -5675,6 +5677,35 @@ mod tests {
             function(&context, variables.as_ptr()).to_bits(),
             12.0_f64.to_bits()
         );
+    }
+
+    #[test]
+    fn quotient_sum_helper_preserves_variable_arity_and_live_values() {
+        for terms in [1, 2, 4, 16, 511, 1023] {
+            let count = 2 * terms + 1;
+            let mut ops = (0..count + 1)
+                .map(NativeOp::LoadVariable)
+                .collect::<Vec<_>>();
+            ops.extend([NativeOp::SumProductsDiv(terms), NativeOp::Add]);
+            let program = NativeProgram::from_ops_for_test(ops, count + 1, Vec::new(), Vec::new());
+            let bytes = compile_value_function(&program).unwrap();
+            let memory = ExecutableMemory::allocate(&bytes).unwrap();
+            let function: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+                unsafe { std::mem::transmute(memory.ptr_at(0).unwrap()) };
+            let context = eval_context(&[], &[], &[], &[]);
+            let mut variables = vec![7.0];
+            // Exactly representable products and sums isolate marshalling and
+            // live-value preservation from the quotient's rounding policy.
+            let scale = 2.0_f64.powi(600);
+            for term in 0..terms {
+                variables.extend([scale, (term + 1) as f64]);
+            }
+            variables.push(scale);
+            assert_eq!(
+                function(&context, variables.as_ptr()),
+                7.0 + (terms * (terms + 1) / 2) as f64
+            );
+        }
     }
 
     #[test]

@@ -1,8 +1,9 @@
-// Independent ABI 13 release fixture. Keep these bytes and opcodes explicit:
+// Independent ABI 14 release fixture. Keep these bytes and opcodes explicit:
 // deriving them from the compiler would let both sides drift together.
-const ABI = 13;
-const FRAME_BYTES = 168;
-const STACK_BYTES = 176; // Preserve the WASM stack's 16-byte alignment.
+const ABI = 14;
+const HEADER_BYTES = 168;
+const FRAME_BYTES = 8360; // Header plus the bounded 1,024-element operand region.
+const STACK_BYTES = 8368; // Preserve the WASM stack's 16-byte alignment.
 const FRAME_MAGIC = 0x5253574a;
 const ERROR_OFFSET = 24;
 
@@ -31,21 +32,25 @@ export function helperModule() {
   const body = [0, ...Array.from({ length: 10 }, (_, i) => [0x20, i]).flat(), 0x10, 0, 0x0b];
   return Uint8Array.from([
     0, 97, 115, 109, 1, 0, 0, 0,
-    ...section(1, [2, 0x60, 10, 0x7f, 0x7f, 0x7f, 0x7f, 0x7e,
+    ...section(1, [3, 0x60, 10, 0x7f, 0x7f, 0x7f, 0x7f, 0x7e,
       0x7c, 0x7c, 0x7c, 0x7c, 0x7c, 1, 0x7c,
-      0x60, 3, 0x7f, 0x7c, 0x7c, 1, 0x7c]),
-    ...section(2, [2,
+      0x60, 3, 0x7f, 0x7c, 0x7c, 1, 0x7c,
+      0x60, 6, 0x7f, 0x7f, 0x7f, 0x7f, 0x7e, 0x7f, 1, 0x7c]),
+    ...section(2, [3,
       ...name("rspice_jit"), ...name("eval_op_v1"), 0, 0,
-      ...name("rspice_jit"), ...name("math2_v1"), 0, 1]),
+      ...name("rspice_jit"), ...name("math2_v1"), 0, 1,
+      ...name("rspice_jit"), ...name("eval_op_slice_v1"), 0, 2]),
     ...section(3, [1, 0]),
-    ...section(7, [2, ...name("helper"), 0, 2, ...name("math2"), 0, 1]),
+    ...section(7, [3, ...name("helper"), 0, 3, ...name("math2"), 0, 1,
+      ...name("slice"), 0, 2]),
     ...section(10, [1, ...unsigned(body.length), ...body]),
   ]);
 }
 
 export async function qualifyAbi(wasm) {
   for (const exportName of ["__wbindgen_add_to_stack_pointer",
-    "rspice_ui_wasm_jit_eval_op_v1", "rspice_ui_wasm_jit_math2_v1"]) {
+    "rspice_ui_wasm_jit_eval_op_v1", "rspice_ui_wasm_jit_math2_v1",
+    "rspice_ui_wasm_jit_eval_op_slice_v1"]) {
     if (typeof wasm[exportName] !== "function") throw new Error(`Missing ${exportName}.`);
   }
   if (!(wasm.memory instanceof WebAssembly.Memory)) throw new Error("Missing worker memory.");
@@ -53,6 +58,7 @@ export async function qualifyAbi(wasm) {
     rspice_jit: {
       eval_op_v1: wasm.rspice_ui_wasm_jit_eval_op_v1,
       math2_v1: wasm.rspice_ui_wasm_jit_math2_v1,
+      eval_op_slice_v1: wasm.rspice_ui_wasm_jit_eval_op_slice_v1,
     },
   });
   // Reserve scratch space through the same stack export used by the pinned
@@ -67,9 +73,13 @@ export async function qualifyAbi(wasm) {
     view().setUint32(4, ABI, true);
     view().setUint32(8, FRAME_BYTES, true);
   }
-  function invoke(opcode, operands) {
-    return instance.exports.helper(frame, opcode, 0, 0, 0n,
+  function invoke(opcode, operands, terms = 0) {
+    return instance.exports.helper(frame, opcode, terms, 0, 0n,
       ...Array.from({ length: 5 }, (_, i) => operands[i] ?? 0));
+  }
+  function invokeSlice(terms, operands, reserved = 0, count = operands.length) {
+    operands.forEach((value, index) => view().setFloat64(HEADER_BYTES + index * 8, value, true));
+    return instance.exports.slice(frame, 251, terms, reserved, 0n, count);
   }
   function expect(label, actual, expected, status = 0) {
     if (!Object.is(actual, expected) || view().getInt32(ERROR_OFFSET, true) !== status) {
@@ -79,7 +89,7 @@ export async function qualifyAbi(wasm) {
   }
   try {
     if (!frame || frame % 16) throw new Error("Invalid ABI fixture stack alignment.");
-    for (const [label, opcode, operands, expected] of [
+    for (const [label, opcode, operands, expected, terms] of [
       // Verilog-AMS 2023 section 4.2.1.1 requires rounding to nearest.
       ["integer rounding", 300, [-7.75], -8],
       ["signed integer addition", 330, [-2147483648, 1], -2147483647],
@@ -88,10 +98,33 @@ export async function qualifyAbi(wasm) {
       ["underflowing products", 250, [2 ** -800, 2 ** -700, 2 ** -750, 2 ** -650], 2 ** -100],
       ["subnormal quotient", 250, [2 ** -800, 2 ** -600, 2 ** -326, 1], 2 ** -1074],
       ["signed zero quotient", 250, [-0, 1, 1, 1], -0],
+      ["overflowing quotient sum", 251, [2 ** 1023, 1, 2 ** 1023, 1, 2], 2 ** 1023, 2],
+      ["rescued quotient product", 251, [2 ** -800, 2 ** -400, 2 ** -1000], 2 ** -200, 1],
+      ["canceling quotient products", 251, [2 ** 800, 2 ** 700, -(2 ** 800), 2 ** 700, 3], 0, 2],
+      ["separated quotient products", 251, [1, 1, 2 ** -500, 1, 3], 1 / 3, 2],
+      ["rounded primal cancellation", 251, [2, 1, -2 / 3, 3, 1e-309], 0, 2],
     ]) {
       reset();
-      expect(label, invoke(opcode, operands), expected);
+      expect(label, invoke(opcode, operands, terms), expected);
     }
+    const sliceTerms = [2 ** 800, 2 ** 700, -(2 ** 800), 2 ** 700, 1, 1, 2];
+    reset();
+    expect("slice quotient cancellation", invokeSlice(3, sliceTerms), 0.5);
+    for (const [sign, expected] of [[-1, 1.5], [1, 1.5 + Number.EPSILON]]) {
+      reset();
+      expect("underflowed quotient rounding", invokeSlice(3,
+        [1.5, 1, 2 ** -53, 1, sign * 1e-200, 1e-200, 1]), expected);
+    }
+    reset();
+    const largeTerms = Array.from({ length: 255 }, () =>
+      [2 ** 800, 2 ** 700, -(2 ** 800), 2 ** 700]).flat().concat([2, 3, 2]);
+    expect("maximum quotient slice", invokeSlice(511, largeTerms), 3);
+    reset();
+    expect("mismatched quotient count", invokeSlice(2, sliceTerms), 0, -2);
+    reset();
+    expect("reserved quotient metadata", invokeSlice(3, sliceTerms, 1), 0, -2);
+    reset();
+    expect("oversized quotient slice", invokeSlice(3, sliceTerms, 0, 1025), 0, -1);
     reset();
     expect("hypot", instance.exports.math2(202, 3, 4), 5);
     for (const [label, opcode, operands] of [
@@ -107,7 +140,7 @@ export async function qualifyAbi(wasm) {
     // Reuse a previously validated allocation so the fast frame cache must
     // observe each changed header, including after a successful helper call.
     for (const [label, offset, invalid] of [
-      ["stale ABI", 4, ABI - 1], ["invalid magic", 0, 0], ["short frame", 8, FRAME_BYTES - 8],
+      ["stale ABI", 4, ABI - 1], ["invalid magic", 0, 0], ["short frame", 8, HEADER_BYTES - 8],
     ]) {
       reset();
       if (invoke(250, [2, 3, 1, 1]) !== 6) throw new Error("Valid frame warmup failed.");
@@ -144,13 +177,17 @@ if (typeof self !== "undefined" && typeof self.postMessage === "function") {
         "an incompatible helper signature", (error) => error instanceof WebAssembly.LinkError);
       await rejectMutation({ ...wasm, rspice_ui_wasm_jit_eval_op_v1: () => 0 },
         "an incorrect helper value", (error) => error.message.includes("integer rounding"));
+      await rejectMutation({ ...wasm, rspice_ui_wasm_jit_eval_op_slice_v1: wasm.rspice_ui_wasm_jit_eval_op_v1 },
+        "an incompatible slice signature", (error) => error instanceof WebAssembly.LinkError);
+      await rejectMutation({ ...wasm, rspice_ui_wasm_jit_eval_op_slice_v1: () => 0 },
+        "an incorrect slice value", (error) => error.message.includes("slice quotient cancellation"));
       await rejectMutation({ ...wasm, rspice_ui_wasm_jit_eval_op_v1: (...args) => {
         const result = wasm.rspice_ui_wasm_jit_eval_op_v1(...args);
         new DataView(wasm.memory.buffer).setInt32(args[0] + ERROR_OFFSET, -2, true);
         return result;
       } }, "an incorrect helper status", (error) => error.message.includes("status -2"));
       const result = await qualifyAbi(wasm);
-      self.postMessage({ status: "qualified", ...result, checks: result.checks + 3 });
+      self.postMessage({ status: "qualified", ...result, checks: result.checks + 5 });
     } catch (error) {
       self.postMessage({ status: "error", error: String(error) });
     }

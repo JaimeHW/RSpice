@@ -22,6 +22,86 @@ use std::process::Command;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 #[test]
+fn generated_quotient_range_preserves_higher_derivatives() {
+    for (expression, bias, expected) in [
+        ("ddx(1e308/(1e308*V(p)),V(p))", 0.01, [-1e4, 2e6]),
+        ("ddx(ddx(1e308/(1e308*V(p)),V(p)),V(p))", 0.01, [2e6, -6e8]),
+        ("ddx(1.6e308*V(p)/(3*V(p)-1),V(p))", 1.0, [-4e307, 1.2e308]),
+        ("ddx(V(p)/V(p),V(p))", 1e-309, [0.0, 0.0]),
+        ("ddx((2*V(p))/(3*V(p)),V(p))", 1e-309, [0.0, 0.0]),
+        ("ddx((5*V(p))/(7*V(p)),V(p))", -1e-309, [0.0, 0.0]),
+        ("ddx(ddx((2*V(p))/(3*V(p)),V(p)),V(p))", 1e-100, [0.0, 0.0]),
+        ("ddx(1e308/(1e200+1e-200*V(p)),V(p))", 0.0, [-1e-292, 0.0]),
+    ] {
+        let source = format!(
+            "module quotient(p); inout p; electrical p; analog I(p)<+{expression}; endmodule"
+        );
+        let (state, stamp, noise) = generated_parts(&source, expression);
+        let main = format!(
+            r#"
+let mut instance=device::state::Instance::new(&[0]);
+instance.finalize_parameters().unwrap();
+let bias=[{bias:e}];
+let ctx=runtime::GeneratedEvalContext {{voltages:&bias,temperature:300.0}};
+let mut sink=[0.0;12];
+instance.stamp(&ctx,&mut runtime::GeneratedStamper {{sink:Some(&mut sink)}});
+for (actual,expected) in [sink[9],sink[10]].into_iter().zip([{:e},{:e}]) {{
+    if expected==0.0 {{assert_eq!(actual,expected);}}
+    else {{assert!((actual/expected-1.0).abs()<1e-12,"{{actual:e}} != {{expected:e}}");}}
+}}
+assert!(!ctx.evaluation_failed());
+"#,
+            expected[0], expected[1]
+        );
+        run_generated_main("quotient range", &state, &stamp, &noise, &main)
+            .unwrap_or_else(|report| panic!("{report}"));
+    }
+}
+
+#[test]
+fn generated_packed_quotients_preserve_independent_tangents() {
+    for (expression, bias, expected) in [
+        (
+            "1e308/(1e308*(V(p)+0.5*V(q)))",
+            [0.005, 0.01],
+            [100.0, -1e4, -5e3],
+        ),
+        (
+            "ddx(1e308/(1e308*(V(p)+0.5*V(q))),V(p))",
+            [0.005, 0.01],
+            [-1e4, 2e6, 1e6],
+        ),
+        (
+            "1.6e308*V(p)/(3*V(p)+V(q)-1)",
+            [1.0, 0.0],
+            [8e307, -4e307, -4e307],
+        ),
+    ] {
+        let source = format!(
+            "module packed_quotient(p,q); inout p,q; electrical p,q; analog I(p)<+{expression}; endmodule"
+        );
+        let (state, stamp, noise) = generated_parts(&source, expression);
+        let main = format!(
+            r#"
+let mut instance=device::state::Instance::new(&[0,1]);
+instance.finalize_parameters().unwrap();
+let bias=[{:e},{:e}];
+let ctx=runtime::GeneratedEvalContext {{voltages:&bias,temperature:300.0}};
+let mut sink=[0.0;12];
+instance.stamp(&ctx,&mut runtime::GeneratedStamper {{sink:Some(&mut sink)}});
+for (actual,expected) in sink[9..12].iter().copied().zip([{:e},{:e},{:e}]) {{
+    assert!((actual/expected-1.0).abs()<1e-12,"{{actual:e}} != {{expected:e}}");
+}}
+assert!(!ctx.evaluation_failed());
+"#,
+            bias[0], bias[1], expected[0], expected[1], expected[2]
+        );
+        run_generated_main("packed quotient", &state, &stamp, &noise, &main)
+            .unwrap_or_else(|report| panic!("{report}"));
+    }
+}
+
+#[test]
 fn generated_simparam_noise_apis_preserve_values_and_required_query_errors() {
     let source = r#"module query_noise(p); inout p; electrical p;
 analog I(p)<+white_noise($simparam("pnjmaxi",1/V(p))+$simparam("tnom",1000)+$simparam("unavailable",25),"query");
@@ -952,6 +1032,12 @@ fn generated_dynamic_expressions_preserve_small_signal_chain_rules() {
             "-4.0*v/(v*v+4.0).powi(2)",
             "4.0*v/(v*v+4.0).powi(2)*w*w",
             "-8.0*v/(v*v+4.0).powi(2)*w",
+        ),
+        (
+            "ddx(1e308/(1e308*(V(p,n)+ddt(V(p,n)))),V(p,n))",
+            "2.0/v.powi(3)",
+            "-2.0/v.powi(3)*w*w",
+            "4.0/v.powi(3)*w",
         ),
         ("sin(ddt(V(p,n)))", "0.0", "0.0", "w"),
         ("exp(ddt(V(p,n)))", "0.0", "0.0", "w"),
@@ -5162,6 +5248,11 @@ mod analog_effects {
     r#"
 }
 pub mod runtime {
+    pub mod arithmetic {
+"#,
+    include_str!("../../rspice-veriloga-runtime/src/arithmetic/scalar.rs"),
+    r#"
+    }
     pub mod integer {
 "#,
     include_str!("../../rspice-veriloga-runtime/src/integer.rs"),
@@ -5388,6 +5479,17 @@ pub mod runtime {
             #[repr(transparent)]
             #[derive(Clone, Copy)]
             pub struct $name(pub [f64; $width]);
+
+            impl $name {
+                pub fn product_div(self, scalar: f64, divisor: f64) -> Self {
+                    Self([$(arithmetic::product_div(self.0[$index], scalar, divisor)),+])
+                }
+                pub fn product_sum_div(self, scalar: f64, right: Self, right_scalar: f64, divisor: f64) -> Self {
+                    Self([$(arithmetic::product_sum_div(
+                        self.0[$index], scalar, right.0[$index], right_scalar, divisor
+                    )),+])
+                }
+            }
 
             impl core::ops::Add for $name {
                 type Output = Self;

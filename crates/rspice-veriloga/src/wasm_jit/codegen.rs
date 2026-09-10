@@ -2039,6 +2039,16 @@ fn emit_helper_call(
     }
 
     let descriptor = helper_descriptor(op)?;
+    if let NativeOp::SumProductsDiv(terms) = op {
+        if terms.checked_mul(2).and_then(|n| n.checked_add(1)) != Some(operands.len()) {
+            return Err(WasmJitError::Encoding(
+                "sum-products quotient operand count mismatch".into(),
+            ));
+        }
+        if operands.len() > 5 {
+            return emit_slice_helper_call(body, descriptor, operands, result);
+        }
+    }
     if let NativeOp::ZiState(layout) | NativeOp::ZiStateDerivative(layout) = op {
         let operand_count = layout.validate_operand_budget().map_err(|error| {
             WasmJitError::Encoding(format!("Zi runtime layout rejected: {error}"))
@@ -2199,6 +2209,19 @@ fn helper_descriptor(op: NativeOp) -> WasmJitResult<HelperDescriptor> {
         NativeOp::UnaryMath(kind) => descriptor.opcode = 100 + unary_math_code(kind),
         NativeOp::BinaryMath(kind) => descriptor.opcode = 200 + binary_math_code(kind),
         NativeOp::ProductRatio => descriptor.opcode = 250,
+        NativeOp::SumProductsDiv(terms) => {
+            terms
+                .checked_mul(2)
+                .and_then(|n| n.checked_add(1))
+                .filter(|&n| n <= WASM_JIT_MAX_SLICE_OPERANDS)
+                .ok_or_else(|| {
+                    WasmJitError::Encoding(
+                        "sum-products quotient exceeds the browser operand budget".into(),
+                    )
+                })?;
+            descriptor.opcode = 251;
+            descriptor.aux0 = index_i32(terms)?;
+        }
         NativeOp::CheckedValue => descriptor.opcode = 340,
         NativeOp::IntegerCast => descriptor.opcode = 300,
         NativeOp::IntegerBinary(kind) => {
@@ -2488,12 +2511,42 @@ fn f64_mem(offset: u64) -> MemArg {
 /// entry points the browser binds, so a test can never disagree with the
 /// browser about what `exp` means.
 #[cfg(test)]
-pub(super) fn define_test_math_imports<T>(linker: &mut wasmi::Linker<T>) {
+pub(super) fn define_test_math_imports<T>(linker: &mut wasmi::Linker<T>, memory: wasmi::Memory) {
     linker
         .func_wrap(
             WASM_JIT_IMPORT_MODULE,
             WASM_JIT_SLICE_HELPER_IMPORT,
-            |_: i32, _: i32, _: i32, _: i32, _: i64, _: i32| -> f64 { 0.0 },
+            move |mut caller: wasmi::Caller<'_, T>,
+                  frame: i32,
+                  opcode: i32,
+                  aux0: i32,
+                  aux1: i32,
+                  aux2: i64,
+                  count: i32|
+                  -> f64 {
+                assert_eq!(
+                    opcode, 251,
+                    "stateful slice operation requires a session-aware harness"
+                );
+                let count = usize::try_from(count).expect("nonnegative operand count");
+                assert!(count <= WASM_JIT_MAX_SLICE_OPERANDS);
+                let start = frame as usize + super::abi::WASM_JIT_SLICE_OPERANDS_OFFSET as usize;
+                let operands = memory.data(&caller)[start..start + count * 8]
+                    .chunks_exact(8)
+                    .map(|bytes| f64::from_le_bytes(bytes.try_into().unwrap()))
+                    .collect::<Vec<_>>();
+                super::runtime::evaluate_sum_products_div(aux0, aux1, aux2, &operands)
+                    .unwrap_or_else(|_| {
+                        memory
+                            .write(
+                                &mut caller,
+                                frame as usize + FRAME_ERROR_STATUS_OFFSET as usize,
+                                &WASM_JIT_STATUS_RUNTIME_ERROR.to_le_bytes(),
+                            )
+                            .expect("write helper status");
+                        0.0
+                    })
+            },
         )
         .expect("define slice helper import");
     linker
@@ -3086,7 +3139,7 @@ mod tests {
                 },
             )
             .expect("define scalar helper import");
-        define_test_math_imports(&mut linker);
+        define_test_math_imports(&mut linker, memory);
         let instance = linker
             .instantiate_and_start(&mut store, &module)
             .expect("instantiate executable assignment module");
@@ -3203,7 +3256,7 @@ mod tests {
                  -> f64 { 0.0 },
             )
             .expect("define unused scalar helper import");
-        define_test_math_imports(&mut linker);
+        define_test_math_imports(&mut linker, memory);
         let instance = linker
             .instantiate_and_start(&mut store, &module)
             .expect("instantiate analysis-mask module");
@@ -3314,7 +3367,7 @@ mod tests {
                 },
             )
             .expect("define trap helper import");
-        define_test_math_imports(&mut linker);
+        define_test_math_imports(&mut linker, memory);
         let instance = linker
             .instantiate_and_start(&mut store, &module)
             .expect("instantiate transcendental module");
@@ -3729,7 +3782,7 @@ endmodule
                 },
             )
             .expect("define trap helper import");
-        define_test_math_imports(&mut linker);
+        define_test_math_imports(&mut linker, memory);
         let instance = linker
             .instantiate_and_start(&mut store, &module)
             .expect("instantiate value module");

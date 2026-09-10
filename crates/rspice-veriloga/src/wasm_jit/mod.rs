@@ -51,7 +51,8 @@ use wasmparser::{Encoding, ExternalKind, Imports, Operator, Parser, Payload, Typ
 /// Version of the linear-memory and helper-function contract understood by
 /// emitted modules and the browser worker.
 /// Version 13 adds simulation-parameter helper opcodes 470 and 471.
-pub const WASM_JIT_ABI_VERSION: u32 = 13;
+/// Version 14 adds bounded range-protected sum-products quotient helpers.
+pub const WASM_JIT_ABI_VERSION: u32 = 14;
 
 /// Version of the deterministic encoder. It participates in cache identity
 /// independently of the ABI because code layout may change without changing
@@ -113,7 +114,8 @@ pub const WASM_JIT_ABI_VERSION: u32 = 13;
 /// 26 to 27 avoids raw squares/cubes in legacy quotient derivatives.
 /// 27 to 28 preserves finite legacy hypot curvature at extreme input gains.
 /// 28 to 29 evaluates simulator queries and their selected fallbacks at runtime.
-pub const WASM_JIT_EMITTER_VERSION: u32 = 29;
+/// 29 to 30 protects quotient numerators against intermediate range loss in scalar and packed AD.
+pub const WASM_JIT_EMITTER_VERSION: u32 = 30;
 
 /// Hard ceiling for one qualified shipped model's generated module.
 pub const SHIPPED_MODEL_WASM_CODE_SIZE_BUDGET_BYTES: usize = 32 * 1024 * 1024;
@@ -1539,13 +1541,13 @@ endmodule
     }
 
     impl FusedKernelHarness {
-        const PARAMETERS: u32 = 512;
-        const VOLTAGES: u32 = 640;
-        const VARIABLES: u32 = 768;
-        const PROGRAM_ACTIVE: u32 = 1024;
-        const SEQUENTIAL_CURRENTS: u32 = 1152;
-        const PAIR_CURRENTS: u32 = 1280;
-        const JACOBIANS: u32 = 1536;
+        const PARAMETERS: u32 = 8704;
+        const VOLTAGES: u32 = 8832;
+        const VARIABLES: u32 = 8960;
+        const PROGRAM_ACTIVE: u32 = 9216;
+        const SEQUENTIAL_CURRENTS: u32 = 9344;
+        const PAIR_CURRENTS: u32 = 9472;
+        const JACOBIANS: u32 = 9728;
         /// Where the assignment prelude publishes.
         ///
         /// Past every other region, because it is the only one whose length is
@@ -1553,7 +1555,7 @@ endmodule
         /// reads `WasmJitModelArtifact::prelude_slots` and allocates from it,
         /// and this harness has to do the same or the module stores through the
         /// frame at offset zero.
-        const PRELUDE_SLOTS: u32 = 4096;
+        const PRELUDE_SLOTS: u32 = 12288;
 
         fn new() -> Self {
             Self::for_source(FUSED_KERNEL_SOURCE, "wasm_kernel_pair")
@@ -1577,10 +1579,11 @@ endmodule
                 FRAME_PROGRAM_ACTIVE_LEN_OFFSET, FRAME_PROGRAM_ACTIVE_PTR_OFFSET,
                 FRAME_TERMINAL_VOLTAGES_LEN_OFFSET, FRAME_TERMINAL_VOLTAGES_PTR_OFFSET,
                 FRAME_VARIABLES_LEN_OFFSET, FRAME_VARIABLES_PTR_OFFSET,
+                WASM_JIT_MAX_EVAL_FRAME_BYTES,
             };
             use super::{
-                WASM_JIT_ABI_VERSION, WASM_JIT_EVAL_FRAME_BYTES, WASM_JIT_FRAME_MAGIC,
-                WASM_JIT_IMPORT_MODULE, WASM_JIT_MEMORY_IMPORT,
+                WASM_JIT_ABI_VERSION, WASM_JIT_FRAME_MAGIC, WASM_JIT_IMPORT_MODULE,
+                WASM_JIT_MEMORY_IMPORT,
             };
 
             let report = VerilogACompiler::new(CompilerOptions::default())
@@ -1682,13 +1685,13 @@ endmodule
                     },
                 )
                 .expect("define helper import");
-            super::codegen::define_test_math_imports(&mut linker);
+            super::codegen::define_test_math_imports(&mut linker, memory);
             let instance = linker
                 .instantiate_and_start(&mut store, &module)
                 .expect("instantiate fused-kernel module");
 
             let pair_len = (report.model.num_terminals + 1) * (report.model.num_terminals + 1);
-            let mut frame = vec![0_u8; WASM_JIT_EVAL_FRAME_BYTES as usize];
+            let mut frame = vec![0_u8; WASM_JIT_MAX_EVAL_FRAME_BYTES as usize];
             {
                 let mut write = |offset: u64, value: u32| {
                     let offset = offset as usize;
@@ -1696,7 +1699,7 @@ endmodule
                 };
                 write(FRAME_MAGIC_OFFSET, WASM_JIT_FRAME_MAGIC);
                 write(FRAME_ABI_VERSION_OFFSET, WASM_JIT_ABI_VERSION);
-                write(FRAME_BYTE_LEN_OFFSET, WASM_JIT_EVAL_FRAME_BYTES);
+                write(FRAME_BYTE_LEN_OFFSET, WASM_JIT_MAX_EVAL_FRAME_BYTES);
                 write(FRAME_PARAMETERS_PTR_OFFSET, Self::PARAMETERS);
                 write(FRAME_PARAMETERS_LEN_OFFSET, parameters as u32);
                 write(FRAME_TERMINAL_VOLTAGES_PTR_OFFSET, Self::VOLTAGES);
@@ -2048,6 +2051,43 @@ endmodule
     }
 
     #[test]
+    fn wasm_quotient_range_large_gain() {
+        assert_large_gain_derivative("ddx(1e308/(1e308*V(p)),V(p))", 0.01, 1.0, -1e4, 2e6);
+    }
+
+    #[test]
+    fn wasm_quotient_range_large_canceling_terms() {
+        assert_large_gain_derivative(
+            "ddx(1.6e308*V(p)/(3*V(p)-1),V(p))",
+            1.0,
+            1.0,
+            -4e307,
+            1.2e308,
+        );
+    }
+
+    #[test]
+    fn wasm_quotient_range_tiny_proportional_cancellation() {
+        assert_large_gain_derivative("ddx(V(p)/V(p),V(p))", 1e-309, 1.0, 0.0, 0.0);
+        for expression in ["ddx((2*V(p))/(3*V(p)),V(p))", "ddx((5*V(p))/(7*V(p)),V(p))"] {
+            for bias in [-1e-309, 1e-309, 1e-100, 1.0] {
+                assert_large_gain_derivative(expression, bias, 1.0, 0.0, 0.0);
+            }
+        }
+    }
+
+    #[test]
+    fn wasm_quotient_range_rescued_tiny_tangent() {
+        assert_large_gain_derivative(
+            "ddx(1e308/(1e200+1e-200*V(p)),V(p))",
+            0.0,
+            1.0,
+            -1e-292,
+            0.0,
+        );
+    }
+
+    #[test]
     fn wasm_large_gain_hypot_keeps_finite_curvature() {
         for gain in [1e-200_f64, 1.0, 1e200, -1e200] {
             let slope = gain.abs() / std::f64::consts::SQRT_2;
@@ -2114,10 +2154,14 @@ endmodule
                     "{expression}, postfix={postfix}, {entry}"
                 );
                 let actual = harness.read_f64(FRAME_RESULT_OFFSET as usize);
-                assert!(
-                    (actual / expected - 1.0).abs() < 1e-12,
-                    "{expression}, postfix={postfix}, {entry}: expected {expected:e}, got {actual:e}"
-                );
+                if expected == 0.0 {
+                    assert_eq!(actual, expected, "{expression}, postfix={postfix}, {entry}");
+                } else {
+                    assert!(
+                        (actual / expected - 1.0).abs() < 1e-12,
+                        "{expression}, postfix={postfix}, {entry}: expected {expected:e}, got {actual:e}"
+                    );
+                }
             }
         }
     }
@@ -3248,7 +3292,7 @@ endmodule
                 },
             )
             .expect("define helper import");
-        super::codegen::define_test_math_imports(&mut linker);
+        super::codegen::define_test_math_imports(&mut linker, memory);
         let instance = linker
             .instantiate_and_start(&mut store, &module)
             .expect("instantiate browser-WASM differential model");

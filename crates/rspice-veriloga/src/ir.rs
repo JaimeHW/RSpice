@@ -492,6 +492,8 @@ pub enum IrFunction {
     Atanh,
     Atan2,
     Hypot,
+    /// Internal derivative primitive with pairs followed by one divisor.
+    SumProductsDiv,
     Floor,
     Ceil,
     Min,
@@ -3317,6 +3319,14 @@ pub mod autodiff {
                 // their construction path.
                 _ => {}
             },
+            Node::CallSpilled {
+                func: IrFunction::SumProductsDiv,
+                args,
+            } => {
+                for argument in arena.call_args(args).to_vec() {
+                    collect!(argument);
+                }
+            }
             Node::CallSpilled { .. } => {}
             Node::Limexp(inner) | Node::Ddt(inner) | Node::CanonicalLimit(inner) => collect!(inner),
             Node::Idt(inner, _) | Node::Limit(inner, _) => collect!(inner),
@@ -4295,11 +4305,10 @@ pub mod autodiff {
                         binary!(BinaryOp::Add, from_left, from_right)
                     }
                     BinaryOp::Div => {
-                        // (df - (f/g)*dg)/g avoids squaring a finite denominator.
                         let quotient = binary!(BinaryOp::Div, left, right);
-                        let from_right = binary!(BinaryOp::Mul, quotient, dr);
-                        let num = binary!(BinaryOp::Sub, dl, from_right);
-                        binary!(BinaryOp::Div, num, right)
+                        let negative = arena.push(Node::Unary(UnaryOp::Neg, quotient));
+                        let one = constant!(1.0);
+                        arena.push_call(IrFunction::SumProductsDiv, &[dl, one, negative, dr, right])
                     }
                     BinaryOp::Pow => {
                         // d(u^v) =
@@ -4568,6 +4577,25 @@ pub mod autodiff {
                 let dl = differentiate!(left);
                 let dr = differentiate!(right);
                 arena.push(Node::Conditional(condition, dl, dr))
+            }
+
+            Node::CallSpilled {
+                func: IrFunction::SumProductsDiv,
+                args,
+            } => {
+                let arguments = arena.call_args(args).to_vec();
+                let terms = (arguments.len() - 1) / 2;
+                let divisor = arguments[2 * terms];
+                let mut derivatives = Vec::with_capacity(4 * terms + 3);
+                for pair in arguments[..2 * terms].chunks_exact(2) {
+                    let da = differentiate!(pair[0]);
+                    let db = differentiate!(pair[1]);
+                    derivatives.extend([da, pair[1], pair[0], db]);
+                }
+                let negative = arena.push(Node::Unary(UnaryOp::Neg, expr));
+                let dd = differentiate!(divisor);
+                derivatives.extend([negative, dd, divisor]);
+                arena.push_call(IrFunction::SumProductsDiv, &derivatives)
             }
 
             // d(limexp(x)) = limexp(x) * x' (same as exp, but clamped). The
@@ -5124,6 +5152,39 @@ pub mod autodiff {
                 let mut simplified = Vec::with_capacity(arguments.len());
                 for argument in &arguments {
                     simplified.push(simplify_from(arena, *argument, primal_len));
+                }
+                if let IrFunction::SumProductsDiv = func {
+                    let terms = (simplified.len() - 1) / 2;
+                    let divisor = simplified[2 * terms];
+                    let mut live = Vec::with_capacity(simplified.len());
+                    for pair in simplified[..2 * terms].chunks_exact(2) {
+                        if pair
+                            .iter()
+                            .any(|&id| matches!(*arena.node(id), Node::Const(x) if x == 0.0))
+                        {
+                            continue;
+                        }
+                        live.extend(pair);
+                    }
+                    if live.is_empty() {
+                        return arena.push(Node::Const(0.0));
+                    }
+                    if live.len() == 2 {
+                        let factor = if matches!(*arena.node(live[0]), Node::Const(1.0)) {
+                            Some(live[1])
+                        } else if matches!(*arena.node(live[1]), Node::Const(1.0)) {
+                            Some(live[0])
+                        } else {
+                            None
+                        };
+                        if let Some(factor) = factor {
+                            return arena.push(Node::Binary(BinaryOp::Div, factor, divisor));
+                        }
+                    }
+                    live.push(divisor);
+                    if live != arguments {
+                        return arena.push_call(IrFunction::SumProductsDiv, &live);
+                    }
                 }
                 if simplified == arguments {
                     return expr;

@@ -18,11 +18,11 @@ import urllib.parse
 EXPECTED_STAMPS = 20000
 # An independent release contract: changing the compiler ABI also requires
 # reviewing the worker qualification expectations.
-# ABI 10 integer arithmetic, ABI 11 checked derivatives, ABI 12 product ratios
-# and ABI 13 simulator queries
+# ABI 10 integers, ABI 11 checked derivatives, ABI 12 product ratios,
+# ABI 13 simulator queries and ABI 14 sums
 # are exercised by an independent secondary module against the actual worker.
-EXPECTED_WASM_JIT_ABI_VERSION = 13
-EXPECTED_ABI_CHECKS = 19
+EXPECTED_WASM_JIT_ABI_VERSION = 14
+EXPECTED_ABI_CHECKS = 33
 
 # The page runs on a real clock, so the runner cannot bound it with
 # --virtual-time-budget and read the DOM afterwards: a virtual clock reports a
@@ -156,7 +156,8 @@ def main() -> None:
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     qualification_query = urllib.parse.urlencode(
-        {"expectedAbi": EXPECTED_WASM_JIT_ABI_VERSION, "worker": "/" + worker.as_posix(),
+        {"expectedAbi": EXPECTED_WASM_JIT_ABI_VERSION, "expectedAbiChecks": EXPECTED_ABI_CHECKS,
+         "worker": "/" + worker.as_posix(),
          **{name: "/" + path.relative_to(web_root).as_posix()
             for name, path in qualification_assets(web_root / worker).items()}}
     )

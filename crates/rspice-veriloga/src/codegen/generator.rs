@@ -1136,8 +1136,8 @@ impl CodeGenerator {
     }
 
     /// The instruction one built-in call lowers to
-    fn call_instruction(func: IrFunction) -> Instruction {
-        match func {
+    fn call_instruction(func: IrFunction, argc: usize) -> CompileResult<Instruction> {
+        Ok(match func {
             IrFunction::Abs => Instruction::Abs,
             IrFunction::Sqrt => Instruction::Sqrt,
             IrFunction::Exp => Instruction::Exp,
@@ -1161,12 +1161,21 @@ impl CodeGenerator {
             IrFunction::Atanh => Instruction::Atanh,
             IrFunction::Atan2 => Instruction::Atan2,
             IrFunction::Hypot => Instruction::Hypot,
+            IrFunction::SumProductsDiv => {
+                if argc < 3 || argc.is_multiple_of(2) {
+                    return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
+                        "sum-products quotient requires product pairs and one divisor".into(),
+                    ))
+                    .into());
+                }
+                Instruction::SumProductsDiv((argc - 1) / 2)
+            }
             // Rounding
             IrFunction::Floor => Instruction::Floor,
             IrFunction::Ceil => Instruction::Ceil,
             // Power
             IrFunction::Pow => Instruction::FnPow,
-        }
+        })
     }
 
     /// Emit bytecode for the arena expression rooted at `id`
@@ -1339,23 +1348,26 @@ impl CodeGenerator {
                         }
                     }
                 }
-                Node::Call { func, a, b, .. } => {
+                Node::Call { func, argc, a, b } => {
                     if let Some(a) = a {
                         self.emit_expr(arena, a, emit_ctx, program)?;
                     }
                     if let Some(b) = b {
                         self.emit_expr(arena, b, emit_ctx, program)?;
                     }
-                    program.instructions.push(Self::call_instruction(func));
+                    program
+                        .instructions
+                        .push(Self::call_instruction(func, usize::from(argc))?);
                 }
-                // No `IrFunction` takes a third argument; this encoding exists
-                // only because the converter never checked a source call's
-                // argument list against an arity, and it emits like the pair.
+                // Variable-arity internal arithmetic retains every operand.
+                // Source-call arities are checked before reaching this IR.
                 Node::CallSpilled { func, args } => {
                     for arg in arena.call_args(args) {
                         self.emit_expr(arena, *arg, emit_ctx, program)?;
                     }
-                    program.instructions.push(Self::call_instruction(func));
+                    program
+                        .instructions
+                        .push(Self::call_instruction(func, arena.call_args(args).len())?);
                 }
                 Node::Limexp(inner) => {
                     self.emit_expr(arena, inner, emit_ctx, program)?;

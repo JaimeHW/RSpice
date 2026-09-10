@@ -326,6 +326,9 @@ pub(super) fn lane_runtime_types(function: &CfgFunction) -> BTreeSet<String> {
 /// `rspice-veriloga-runtime`; this copy keeps direct-rustc emitter and benchmark
 /// programs self-contained.
 pub const RUNTIME_PRELUDE: &str = concat!(
+    "mod arithmetic {\n",
+    include_str!("../../../rspice-veriloga-runtime/src/arithmetic/scalar.rs"),
+    "\n}\n#[allow(unused_imports)] use arithmetic::{product_div, product_sum_div, sum_products_div, sum_products_div_lanes};\n",
     "mod integer {\n",
     include_str!("../../../rspice-veriloga-runtime/src/integer.rs"),
     "\n}\n",
@@ -434,6 +437,19 @@ macro_rules! define_fixed_lanes {
         #[repr(transparent)]
         #[derive(Clone, Copy)]
         struct $name([f64; $width]);
+
+        impl $name {
+            #[inline]
+            fn product_div(self, scalar: f64, divisor: f64) -> Self {
+                Self([$(arithmetic::product_div(self.0[$index], scalar, divisor)),+])
+            }
+            #[inline]
+            fn product_sum_div(self, scalar: f64, right: Self, right_scalar: f64, divisor: f64) -> Self {
+                Self([$(arithmetic::product_sum_div(
+                    self.0[$index], scalar, right.0[$index], right_scalar, divisor
+                )),+])
+            }
+        }
 
         impl core::ops::Add for $name {
             type Output = Self;
@@ -1963,6 +1979,62 @@ impl Emitter<'_> {
                 self.numeric_operand(*right)
             ),
             CfgValueKind::Binary { op, left, right } => self.binary_expression(*op, *left, *right),
+            CfgValueKind::SumProductsDiv { terms, divisor } => {
+                let pairs = terms
+                    .iter()
+                    .map(|&(a, b)| (self.numeric_operand(a), self.numeric_operand(b)))
+                    .collect::<Vec<_>>();
+                product_quotient_expression(&pairs, &self.numeric_operand(*divisor))
+            }
+            CfgValueKind::LaneSumProductsDiv { terms, divisor } => {
+                let width = self.function.lanes_of(value).map_or(0, <[u32]>::len);
+                if width == 1 {
+                    let pairs = terms
+                        .iter()
+                        .map(|&(input, scalar)| {
+                            (self.lane_element(input, 0), self.numeric_operand(scalar))
+                        })
+                        .collect::<Vec<_>>();
+                    product_quotient_expression(&pairs, &self.numeric_operand(*divisor))
+                } else if width <= MAX_FIXED_LANE_WIDTH && terms.len() == 1 {
+                    let (input, scalar) = terms[0];
+                    format!(
+                        "({}).product_div({},{})",
+                        self.operand(input),
+                        self.numeric_operand(scalar),
+                        self.numeric_operand(*divisor)
+                    )
+                } else if width <= MAX_FIXED_LANE_WIDTH && terms.len() == 2 {
+                    let [(left, left_scalar), (right, right_scalar)] = terms[..] else {
+                        unreachable!("two quotient terms")
+                    };
+                    format!(
+                        "({}).product_sum_div({},{},{},{})",
+                        self.operand(left),
+                        self.numeric_operand(left_scalar),
+                        self.operand(right),
+                        self.numeric_operand(right_scalar),
+                        self.numeric_operand(*divisor)
+                    )
+                } else {
+                    let pairs = terms
+                        .iter()
+                        .map(|&(input, scalar)| {
+                            format!(
+                                "(&{}.0,{})",
+                                self.operand(input),
+                                self.numeric_operand(scalar)
+                            )
+                        })
+                        .collect::<Vec<_>>();
+                    format!(
+                        "{}(sum_products_div_lanes(&[{}],{}))",
+                        lane_type_name(width),
+                        pairs.join(","),
+                        self.numeric_operand(*divisor)
+                    )
+                }
+            }
             CfgValueKind::Select {
                 condition,
                 then_value,
@@ -2296,6 +2368,20 @@ fn propagate_value_liveness(
 }
 
 /// A literal that reads back as exactly this value.
+fn product_quotient_expression(terms: &[(String, String)], divisor: &str) -> String {
+    match terms {
+        [(a, b)] => format!("product_div({a},{b},{divisor})"),
+        [(a, b), (c, d)] => format!("product_sum_div({a},{b},{c},{d},{divisor})"),
+        _ => {
+            let pairs = terms
+                .iter()
+                .map(|(a, b)| format!("[{a},{b}]"))
+                .collect::<Vec<_>>();
+            format!("sum_products_div(&[{}],{divisor})", pairs.join(","))
+        }
+    }
+}
+
 fn real_literal(value: f64) -> String {
     if value.is_nan() {
         return "f64::NAN".into();

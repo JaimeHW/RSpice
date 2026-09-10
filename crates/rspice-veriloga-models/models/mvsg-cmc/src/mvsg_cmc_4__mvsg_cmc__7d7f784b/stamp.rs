@@ -2,7 +2,7 @@
 #![allow(dead_code, non_snake_case, unused_imports, unused_mut, unused_parens, unused_variables)]
 
 use super::state::Instance;
-use rspice_veriloga_runtime::{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, L10, L13, L15, L17, L18, L19, L2, L20, L21, L22, L3, L4, L5, L6, L8, L9, integer, evaluate_generated_above, evaluate_generated_cross, evaluate_generated_timer, rspice_eval_ddt, rspice_eval_idt, rspice_limexp, rspice_limited_exp, rspice_limited_exp_derivative};
+use rspice_veriloga_runtime::{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, L10, L13, L15, L17, L18, L19, L2, L20, L21, L22, L3, L4, L5, L6, L8, L9, integer, arithmetic::product_div, arithmetic::product_sum_div, arithmetic::sum_products_div, arithmetic::sum_products_div_lanes, evaluate_generated_above, evaluate_generated_cross, evaluate_generated_timer, rspice_eval_ddt, rspice_eval_idt, rspice_limexp, rspice_limited_exp, rspice_limited_exp_derivative};
 impl Instance {
     pub fn stamp(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedStamper<'_>) {
         let parameters = &self.params.values;
@@ -714,65 +714,65 @@ impl Instance {
 		let KUE=L3([0f64;3]);
 		let KUP=2.2250738585072014e-308f64;
 		let KUR=L2([0f64;2]);
-		let LBQ=L5([0f64;5]);
-		let LCM=L5([0f64;5]);
-		let LCN=L4([0f64;4]);
-		let LCO=L3([0f64;3]);
-		let LDA=L2([0f64;2]);
-		let LJZ=L5([0f64;5]);
-		let LKV=L5([0f64;5]);
-		let LKW=L4([0f64;4]);
-		let LKX=L3([0f64;3]);
-		let LLJ=L2([0f64;2]);
-		let LSI=L5([0f64;5]);
-		let LTE=L5([0f64;5]);
-		let LTF=L4([0f64;4]);
-		let LTG=L3([0f64;3]);
-		let LTS=L2([0f64;2]);
-		let MAR=L5([0f64;5]);
-		let MBN=L5([0f64;5]);
-		let MBO=L4([0f64;4]);
-		let MBP=L3([0f64;3]);
-		let MCB=L2([0f64;2]);
-		let MJV=L5([0f64;5]);
-		let MJW=L4([0f64;4]);
-		let MJX=L3([0f64;3]);
-		let MKJ=L2([0f64;2]);
-		let MRI=L5([0f64;5]);
-		let MSE=L5([0f64;5]);
-		let MSF=L4([0f64;4]);
-		let MSG=L3([0f64;3]);
-		let MSS=L2([0f64;2]);
-		let MZR=L5([0f64;5]);
-		let NAN=L5([0f64;5]);
-		let NAO=L4([0f64;4]);
-		let NAP=L3([0f64;3]);
-		let NBB=L2([0f64;2]);
-		let NIA=L5([0f64;5]);
-		let NIW=L5([0f64;5]);
-		let NJH=L2([0f64;2]);
-		let NMS=L6([0f64;6]);
-		let NNE=L2([0f64;2]);
-		let NQY=L2([0f64;2]);
-		let NRO=L4([0f64;4]);
-		let NWE=L3([0f64;3]);
-		let NXN=L8([0f64;8]);
-		let NXQ=L10([0f64;10]);
-		let NXR=L2([0f64;2]);
-		let NXS=L3([0f64;3]);
-		let NXT=0f64;
-		let NXU=0f64;
-		let NYE=L3([0f64;3]);
-		let NYF=L3([0f64;3]);
-		let NYG=L3([0f64;3]);
-		let OOD=L3([0f64;3]);
-		let OOE=L2([0f64;2]);
-		let OTL=L6([0f64;6]);
-		let OXY=L3([0f64;3]);
-		let OYB=L3([0f64;3]);
-		let OYE=L2([0f64;2]);
-		let OYG=L2([0f64;2]);
-		let PCO=L22([0f64;22]);
+		let LBN=L5([0f64;5]);
+		let LCJ=L5([0f64;5]);
+		let LCK=L4([0f64;4]);
+		let LCL=L3([0f64;3]);
+		let LCX=L2([0f64;2]);
+		let LJT=L5([0f64;5]);
+		let LKP=L5([0f64;5]);
+		let LKQ=L4([0f64;4]);
+		let LKR=L3([0f64;3]);
+		let LLD=L2([0f64;2]);
+		let LRZ=L5([0f64;5]);
+		let LSV=L5([0f64;5]);
+		let LSW=L4([0f64;4]);
+		let LSX=L3([0f64;3]);
+		let LTJ=L2([0f64;2]);
+		let MAF=L5([0f64;5]);
+		let MBB=L5([0f64;5]);
+		let MBC=L4([0f64;4]);
+		let MBD=L3([0f64;3]);
+		let MBP=L2([0f64;2]);
+		let MJG=L5([0f64;5]);
+		let MJH=L4([0f64;4]);
+		let MJI=L3([0f64;3]);
+		let MJU=L2([0f64;2]);
+		let MQQ=L5([0f64;5]);
+		let MRM=L5([0f64;5]);
+		let MRN=L4([0f64;4]);
+		let MRO=L3([0f64;3]);
+		let MSA=L2([0f64;2]);
+		let MYW=L5([0f64;5]);
+		let MZS=L5([0f64;5]);
+		let MZT=L4([0f64;4]);
+		let MZU=L3([0f64;3]);
+		let NAG=L2([0f64;2]);
+		let NHC=L5([0f64;5]);
+		let NHY=L5([0f64;5]);
+		let NIJ=L2([0f64;2]);
+		let NLQ=L6([0f64;6]);
+		let NMC=L2([0f64;2]);
+		let NPS=L2([0f64;2]);
+		let NQI=L4([0f64;4]);
+		let NUV=L3([0f64;3]);
+		let NWE=L8([0f64;8]);
+		let NWH=L10([0f64;10]);
+		let NWI=L2([0f64;2]);
+		let NWJ=L3([0f64;3]);
+		let NWK=0f64;
+		let NWL=0f64;
+		let NWV=L3([0f64;3]);
+		let NWW=L3([0f64;3]);
+		let NWX=L3([0f64;3]);
+		let OMU=L3([0f64;3]);
+		let OMV=L2([0f64;2]);
+		let OSC=L6([0f64;6]);
+		let OWP=L3([0f64;3]);
+		let OWS=L3([0f64;3]);
+		let OWV=L2([0f64;2]);
+		let OWX=L2([0f64;2]);
+		let PBF=L22([0f64;22]);
 		let B=ctx.has_simparam("gmin");
 		let D=if B{
 		let C=ctx.simparam_required("gmin");
@@ -886,9 +886,9 @@ impl Instance {
 		}
 		let BE=AC/ E;
 		let KJV=IVA/ E;
-		let QJL=BE* BE;
-		let BG=QJL* BE;
-		let KJW=BF* QJL;
+		let QIC=BE* BE;
+		let BG=QIC* BE;
+		let KJW=BF* QIC;
 		let KJX=KJV* KJW;
 		let KJY=IVA* BI;
 		let BJ=F+ (BI* BB);
@@ -1713,7 +1713,7 @@ impl Instance {
 		let MG=A+ (JE* (JO- JQ));
 		let KNZ=L2([0.0,1f64])- L2([1f64,0.0]);
 		let MK=(MJ- MI)/ AZ;
-		let KOA=(L3([0.0,KNZ[0],KNZ[1]])- L3([(KJT* MK),0.0,0.0]))/ AZ;
+		let KOA=(L3([0.0,KNZ[0],KNZ[1]])).product_sum_div(IUF,L3([KJT,0.0,0.0]),(-MK),AZ);
 		let ML=MK> LD;
 		let MS;
 		let IYF;
@@ -1763,7 +1763,7 @@ impl Instance {
 		let NK=A+ (JE* (KX- JQ));
 		let KOO=L2([1f64,0.0])- L2([0.0,1f64]);
 		let NO=(NM- NN)/ AZ;
-		let KOP=(L3([0.0,KOO[0],KOO[1]])- L3([(KJT* NO),0.0,0.0]))/ AZ;
+		let KOP=(L3([0.0,KOO[0],KOO[1]])).product_sum_div(IUF,L3([KJT,0.0,0.0]),(-NO),AZ);
 		let NP=NO> LD;
 		let NV;
 		let IYH;
@@ -1809,7 +1809,7 @@ impl Instance {
 		let KOZ=((KOV- KOU)* ((KNB* ((OH>= KOL) as u8 as f64))- IUF))/ OI;
 		let OJ=(F+ NJ)+ ((OH.abs())/ OI);
 		let OK=F/ OJ;
-		let KPA=(((L4([KOM[0],KOM[1],0.0,0.0])+ L4([0.0,0.0,KOZ[0],KOZ[1]]))* OK)* KNJ)/ OJ;
+		let KPA=((L4([KOM[0],KOM[1],0.0,0.0])+ L4([0.0,0.0,KOZ[0],KOZ[1]]))).product_div((-OK),OJ);
 		EZD=OK;
 		IEU=ME;
 		IEW=MF;
@@ -2040,7 +2040,7 @@ impl Instance {
 		}
 		let PK=((PI* T)* PJ)* KI;
 		let PL=F/ PK;
-		let KQG=(((((IWV* T)* PJ)* KI)* PL)* KNJ)/ PK;
+		let KQG=((((IWV* T)* PJ)* KI)).product_div((-PL),PK);
 		let PN=PM- OT;
 		let KQH=L2([0.0,IUQ])- L2([IUP,0.0]);
 		let PO=JE* PN;
@@ -2376,7 +2376,7 @@ impl Instance {
 		let KUK=KJT* TA;
 		let TT=TS* AZ;
 		let TU=parameters[248]/ TT;
-		let KUL=(((KJT* TS)* TU)* KNJ)/ TT;
+		let KUL=product_div((KJT* TS),(-TU),TT);
 		let KUM=IZJ* SZ;
 		let TV=TU+ (SZ* TP);
 		let KUN=L3([KUL,0.0,0.0])+ L3([0.0,KUM[0],KUM[1]]);
@@ -2393,50 +2393,50 @@ impl Instance {
 		let UB=F/ TD;
 		let UC=UA.powf(UB);
 		let UD=TP/ UC;
-		let KUS=(((IZJ/ TH)* (TD* ((TZ+ (((TZ== KOL) as u8 as f64)* KUP)).powf((TD- IUF)))))* (UB* ((UA+ (((UA== KOL) as u8 as f64)* KUP)).powf((UB- IUF)))))* UD;
-		let KUT=(IZJ- KUS)/ UC;
+		let KUS=(IZJ).product_sum_div(IUF,(((IZJ/ TH)* (TD* ((TZ+ (((TZ== KOL) as u8 as f64)* KUP)).powf((TD- IUF)))))* (UB* ((UA+ (((UA== KOL) as u8 as f64)* KUP)).powf((UB- IUF))))),(-UD),UC);
 		UE=UD;
-		IZK=KUT;
+		IZK=KUS;
 		}else{
 		UE=A;
 		IZK=KUR;
 		}
 		let UF=parameters[247]- (UE* A);
-		let KUU=(((IZK* A)* KNJ)* TP)+ (IZJ* UF);
+		let KUT=(((IZK* A)* KNJ)* TP)+ (IZJ* UF);
 		let UG=TW- (UF* TP);
-		let KUV=L3([KUO,0.0,0.0])- L3([0.0,KUU[0],KUU[1]]);
+		let KUU=L3([KUO,0.0,0.0])- L3([0.0,KUT[0],KUT[1]]);
 		let UH=MC* TV;
 		let UI=UH* AZ;
-		let KUW=((KUN* MC)* AZ)+ L3([(KJT* UH),0.0,0.0]);
+		let KUV=((KUN* MC)* AZ)+ L3([(KJT* UH),0.0,0.0]);
 		let UJ=HH* UI;
-		let KUX=L3([(KLX* UI),0.0,0.0])+ (KUW* HH);
+		let KUW=L3([(KLX* UI),0.0,0.0])+ (KUV* HH);
 		let UL=(UK* TR)/ MC;
-		let KUY=(KUK* UK)/ MC;
+		let KUX=(KUK* UK)/ MC;
 		let UM=UG- UL;
-		let KUZ=KUV- L3([KUY,0.0,0.0]);
+		let KUY=KUU- L3([KUX,0.0,0.0]);
 		let UU;
 		let IZL;
 		if JM{
 		let UN=SX- TQ;
-		let KVC=(KUI- KUJ)* UN;
+		let KVB=(KUI- KUJ)* UN;
 		let UO=((UN* UN)+ JV).sqrt();
 		let UP=JW* ((SX+ TQ)+ UO);
-		let KVD=((KUI+ KUJ)+ ((KVC+ KVC)* (IUF/ (KNB* UO))))* JW;
+		let KVC=((KUI+ KUJ)+ ((KVB+ KVB)* (IUF/ (KNB* UO))))* JW;
 		UU=UP;
-		IZL=KVD;
+		IZL=KVC;
 		}else{
 		let UQ=SX- TQ;
-		let KVA=KUI- KUJ;
+		let KUZ=KUI- KUJ;
 		let UR=KB/ JV;
 		let US=(UR* UQ).tanh();
 		let UT=JW* ((SX+ TQ)+ (UQ* US));
-		let KVB=((KUI+ KUJ)+ ((KVA* US)+ (((KVA* UR)* (IUF- (US* US)))* UQ)))* JW;
+		let KVA=((KUI+ KUJ)+ ((KUZ* US)+ (((KUZ* UR)* (IUF- (US* US)))* UQ)))* JW;
 		UU=UT;
-		IZL=KVB;
+		IZL=KVA;
 		}
-		let KVE=L5([0.0,KUZ[0],0.0,KUZ[1],KUZ[2]]);
+		let KVD=L5([0.0,KUY[0],0.0,KUY[1],KUY[2]]);
 		let UV=(UU- UM)/ TR;
-		let KVF=((L5([IZL[0],0.0,IZL[1],IZL[2],IZL[3]])- KVE)- L5([0.0,(KUK* UV),0.0,0.0,0.0]))/ TR;
+		let KVE=L5([0.0,KUK,0.0,0.0,0.0]);
+		let KVF=((L5([IZL[0],0.0,IZL[1],IZL[2],IZL[3]])- KVD)).product_sum_div(IUF,KVE,(-UV),TR);
 		let UW=UV> LD;
 		let VL;
 		let IZM;
@@ -2454,7 +2454,7 @@ impl Instance {
 		let UY=UV.exp();
 		let UZ=F+ UY;
 		let VA=F/ UZ;
-		let KVG=(((KVF* UY)* VA)* KNJ)/ UZ;
+		let KVG=((KVF* UY)).product_div((-VA),UZ);
 		VM=VA;
 		IZN=KVG;
 		}
@@ -2484,16 +2484,16 @@ impl Instance {
 		let VJ=UK* AI;
 		let VK=VJ* TR;
 		let KVL=KUK* VJ;
-		let KVM=L5([0.0,KUV[0],0.0,KUV[1],KUV[2]]);
+		let KVM=L5([0.0,KUU[0],0.0,KUU[1],KUU[2]]);
 		let VN=(VI- (UG- (VK* VL)))/ UI;
-		let KVN=KUW* VN;
-		let KVO=((L5([IZO[0],0.0,IZO[1],IZO[2],IZO[3]])- (KVM- (L5([0.0,(KVL* VL),0.0,0.0,0.0])+ (IZM* VK))))- L5([0.0,KVN[0],0.0,KVN[1],KVN[2]]))/ UI;
+		let KVN=L5([0.0,KUV[0],0.0,KUV[1],KUV[2]]);
+		let KVO=((L5([IZO[0],0.0,IZO[1],IZO[2],IZO[3]])- (KVM- (L5([0.0,(KVL* VL),0.0,0.0,0.0])+ (IZM* VK))))).product_sum_div(IUF,KVN,(-VN),UI);
 		let VO=VN> LD;
 		let VX;
 		let IZP;
 		if VO{
 		let VP=UJ* VN;
-		let KVT=KUX* VN;
+		let KVT=KUW* VN;
 		let KVU=L5([0.0,KVT[0],0.0,KVT[1],KVT[2]])+ (KVO* UJ);
 		VX=VP;
 		IZP=KVU;
@@ -2504,7 +2504,7 @@ impl Instance {
 		if VQ{
 		let VR=VN.exp();
 		let VS=UJ* VR;
-		let KVR=KUX* VR;
+		let KVR=KUW* VR;
 		let KVS=L5([0.0,KVR[0],0.0,KVR[1],KVR[2]])+ ((KVO* VR)* UJ);
 		VY=VS;
 		IZQ=KVS;
@@ -2513,7 +2513,7 @@ impl Instance {
 		let VU=F+ VT;
 		let VV=VU.ln();
 		let VW=UJ* VV;
-		let KVP=KUX* VV;
+		let KVP=KUW* VV;
 		let KVQ=L5([0.0,KVP[0],0.0,KVP[1],KVP[2]])+ (((KVO* VT)* (IUF/ VU))* UJ);
 		VY=VW;
 		IZQ=KVQ;
@@ -2522,79 +2522,79 @@ impl Instance {
 		IZP=IZQ;
 		}
 		let VZ=(TE* VX)/ HH;
+		let KVV=L5([0.0,KLX,0.0,0.0,0.0]);
 		let WA=F+ VZ;
 		let WB=TX* WA;
 		let WC=TC/ WB;
-		let KVV=(((L5([0.0,(KUQ* WA),0.0,0.0,0.0])+ ((((IZP* TE)- L5([0.0,(KLX* VZ),0.0,0.0,0.0]))/ HH)* TX))* WC)* KNJ)/ WB;
+		let KVW=((L5([0.0,(KUQ* WA),0.0,0.0,0.0])+ ((((IZP* TE)).product_sum_div(IUF,KVV,(-VZ),HH))* TX))).product_div((-WC),WB);
 		let WD=F+ (TJ* AC);
 		let WE=(F+ (TJ* E))/ WD;
 		let WF=TB* WE;
-		let KVW=((((IVA* TJ)* WE)* KNJ)/ WD)* TB;
+		let KVX=(product_div((IVA* TJ),(-WE),WD))* TB;
 		let WG=F+ ((TK* TP)/ SU);
-		let KVX=((IZJ* TK)/ SU)* WF;
-		let KVY=L3([(KVW* WG),0.0,0.0])+ L3([0.0,KVX[0],KVX[1]]);
+		let KVY=((IZJ* TK)/ SU)* WF;
+		let KVZ=L3([(KVX* WG),0.0,0.0])+ L3([0.0,KVY[0],KVY[1]]);
 		let WH=(TF* VX)/ HH;
 		let WI=F+ WH;
 		let WJ=(WF* WG)/ WI;
-		let KVZ=(L5([0.0,KVY[0],0.0,KVY[1],KVY[2]])- ((((IZP* TF)- L5([0.0,(KLX* WH),0.0,0.0,0.0]))/ HH)* WJ))/ WI;
+		let KWA=(L5([0.0,KVZ[0],0.0,KVZ[1],KVZ[2]])).product_sum_div(IUF,(((IZP* TF)).product_sum_div(IUF,KVV,(-WH),HH)),(-WJ),WI);
 		let WK=MC* VL;
 		let WL=WK* AZ;
 		let WM=F- VL;
-		let KWA=IZM* KNJ;
+		let KWB=IZM* KNJ;
 		let WN=((WL* WC)/ SU)+ (WM* WJ);
-		let KWB=((((((IZM* MC)* AZ)+ L5([0.0,(KJT* WK),0.0,0.0,0.0]))* WC)+ (KVV* WL))/ SU)+ ((KWA* WJ)+ (KVZ* WM));
+		let KWC=((((((IZM* MC)* AZ)+ L5([0.0,(KJT* WK),0.0,0.0,0.0]))* WC)+ (KVW* WL))/ SU)+ ((KWB* WJ)+ (KWA* WM));
 		let WO=(WJ* SU)/ WC;
-		let KWC=((KVZ* SU)- (KVV* WO))/ WC;
+		let KWD=((KWA* SU)).product_sum_div(IUF,KVW,(-WO),WC);
 		let WP=(MC* VX)/ HH;
 		let WQ=WP/ WO;
 		let WR=(F+ WQ).sqrt();
 		let WS=(WO* WR)- WO;
 		let WT=UI* VL;
-		let KWD=KUW* VL;
-		let KWE=L5([0.0,KWD[0],0.0,KWD[1],KWD[2]])+ (IZM* UI);
+		let KWE=KUV* VL;
+		let KWF=L5([0.0,KWE[0],0.0,KWE[1],KWE[2]])+ (IZM* UI);
 		let WU=(WO* WM)+ WT;
-		let KWF=((KWC* WM)+ (KWA* WO))+ KWE;
-		let KWG=((((KWC* WR)+ (((((((IZP* MC)- L5([0.0,(KLX* WP),0.0,0.0,0.0]))/ HH)- (KWC* WQ))/ WO)* (IUF/ (KNB* WR)))* WO))- KWC)* WM)+ (KWA* WS);
+		let KWG=((KWD* WM)+ (KWB* WO))+ KWF;
+		let KWH=((((KWD* WR)+ (((((((IZP* MC)).product_sum_div(IUF,KVV,(-WP),HH))).product_sum_div(IUF,KWD,(-WQ),WO))* (IUF/ (KNB* WR)))* WO))- KWD)* WM)+ (KWB* WS);
 		let WV=(WS* WM)+ WT;
-		let KWH=KWG+ KWE;
+		let KWI=KWH+ KWF;
 		let WW=SR/ WV;
-		let KWI=L5([0.0,0.0,0.0,KTZ[0],KTZ[1]]);
-		let KWJ=(KWI- (KWH* WW))/ WV;
+		let KWJ=L5([0.0,0.0,0.0,KTZ[0],KTZ[1]]);
+		let KWK=(KWJ).product_sum_div(IUF,KWI,(-WW),WV);
 		let XE;
 		let IZR;
 		if JM{
 		let WX=A- WW;
-		let KWM=(KWJ* KNJ)* WX;
+		let KWN=(KWK* KNJ)* WX;
 		let WY=((WX* WX)+ JV).sqrt();
 		let WZ=JW* ((A+ WW)+ WY);
-		let KWN=(KWJ+ ((KWM+ KWM)* (IUF/ (KNB* WY))))* JW;
+		let KWO=(KWK+ ((KWN+ KWN)* (IUF/ (KNB* WY))))* JW;
 		XE=WZ;
-		IZR=KWN;
+		IZR=KWO;
 		}else{
 		let XA=A- WW;
-		let KWK=KWJ* KNJ;
+		let KWL=KWK* KNJ;
 		let XB=KB/ JV;
 		let XC=(XB* XA).tanh();
 		let XD=JW* ((A+ WW)+ (XA* XC));
-		let KWL=(KWJ+ ((KWK* XC)+ (((KWK* XB)* (IUF- (XC* XC)))* XA)))* JW;
+		let KWM=(KWK+ ((KWL* XC)+ (((KWL* XB)* (IUF- (XC* XC)))* XA)))* JW;
 		XE=XD;
-		IZR=KWL;
+		IZR=KWM;
 		}
-		let KWO=TD- IUF;
+		let KWP=TD- IUF;
 		let XF=F+ (XE.powf(TD));
 		let XG=F/ TD;
 		let XH=XF.powf(XG);
-		let KWP=XG- IUF;
+		let KWQ=XG- IUF;
 		let XI=F/ XH;
 		let XJ=SR* XI;
-		let KWQ=KTZ* XI;
-		let KWR=(((((IZR* (TD* ((XE+ (((XE== KOL) as u8 as f64)* KUP)).powf(KWO))))* (XG* ((XF+ (((XF== KOL) as u8 as f64)* KUP)).powf(KWP))))* XI)* KNJ)/ XH)* SR;
-		let KWS=L5([0.0,0.0,0.0,KWQ[0],KWQ[1]])+ KWR;
+		let KWR=KTZ* XI;
+		let KWS=L5([0.0,0.0,0.0,KWR[0],KWR[1]])+ (((((IZR* (TD* ((XE+ (((XE== KOL) as u8 as f64)* KUP)).powf(KWP))))* (XG* ((XF+ (((XF== KOL) as u8 as f64)* KUP)).powf(KWQ))))).product_div((-XI),XH))* SR);
 		let XK=-SR;
 		let KWT=KTZ* KNJ;
 		let XL=XK/ WV;
 		let KWU=L5([0.0,0.0,0.0,KWT[0],KWT[1]]);
-		let KWV=(KWU- (KWH* XL))/ WV;
+		let KWV=(KWU).product_sum_div(IUF,KWI,(-XL),WV);
 		let XT;
 		let IZS;
 		if JM{
@@ -2620,11 +2620,10 @@ impl Instance {
 		let XW=F/ XV;
 		let XX=XK* XW;
 		let KXA=KWT* XW;
-		let KXB=(((((IZS* (TD* ((XT+ (((XT== KOL) as u8 as f64)* KUP)).powf(KWO))))* (XG* ((XU+ (((XU== KOL) as u8 as f64)* KUP)).powf(KWP))))* XW)* KNJ)/ XV)* XK;
-		let KXC=L5([0.0,0.0,0.0,KXA[0],KXA[1]])+ KXB;
-		let KXD=L5([IZA[0],0.0,IZA[1],IZA[2],0.0]);
+		let KXB=L5([0.0,0.0,0.0,KXA[0],KXA[1]])+ (((((IZS* (TD* ((XT+ (((XT== KOL) as u8 as f64)* KUP)).powf(KWP))))* (XG* ((XU+ (((XU== KOL) as u8 as f64)* KUP)).powf(KWQ))))).product_div((-XW),XV))* XK);
+		let KXC=L5([IZA[0],0.0,IZA[1],IZA[2],0.0]);
 		let XY=(SX- UM)/ TR;
-		let KXE=((KXD- KVE)- L5([0.0,(KUK* XY),0.0,0.0,0.0]))/ TR;
+		let KXD=((KXC- KVD)).product_sum_div(IUF,KVE,(-XY),TR);
 		let XZ=XY> LD;
 		let YE;
 		let IZT;
@@ -2642,26 +2641,25 @@ impl Instance {
 		let YB=XY.exp();
 		let YC=F+ YB;
 		let YD=F/ YC;
-		let KXF=(((KXE* YB)* YD)* KNJ)/ YC;
+		let KXE=((KXD* YB)).product_div((-YD),YC);
 		YF=YD;
-		IZU=KXF;
+		IZU=KXE;
 		}
 		YE=YF;
 		IZT=IZU;
 		}
-		let KXG=L5([KUJ[0],0.0,KUJ[1],KUJ[2],KUJ[3]]);
+		let KXF=L5([KUJ[0],0.0,KUJ[1],KUJ[2],KUJ[3]]);
 		let YG=((TQ- XX)- (UG- (VK* YE)))/ UI;
-		let KXH=KUW* YG;
-		let KXI=(((KXG- KXC)- (KVM- (L5([0.0,(KVL* YE),0.0,0.0,0.0])+ (IZT* VK))))- L5([0.0,KXH[0],0.0,KXH[1],KXH[2]]))/ UI;
+		let KXG=(((KXF- KXB)- (KVM- (L5([0.0,(KVL* YE),0.0,0.0,0.0])+ (IZT* VK))))).product_sum_div(IUF,KVN,(-YG),UI);
 		let YH=YG> LD;
 		let ZI;
 		let IZV;
 		if YH{
 		let YI=UJ* YG;
-		let KXN=KUX* YG;
-		let KXO=L5([0.0,KXN[0],0.0,KXN[1],KXN[2]])+ (KXI* UJ);
+		let KXL=KUW* YG;
+		let KXM=L5([0.0,KXL[0],0.0,KXL[1],KXL[2]])+ (KXG* UJ);
 		ZI=YI;
-		IZV=KXO;
+		IZV=KXM;
 		}else{
 		let YJ=YG< -50f64;
 		let ZJ;
@@ -2669,25 +2667,25 @@ impl Instance {
 		if YJ{
 		let YK=YG.exp();
 		let YL=UJ* YK;
-		let KXL=KUX* YK;
-		let KXM=L5([0.0,KXL[0],0.0,KXL[1],KXL[2]])+ ((KXI* YK)* UJ);
+		let KXJ=KUW* YK;
+		let KXK=L5([0.0,KXJ[0],0.0,KXJ[1],KXJ[2]])+ ((KXG* YK)* UJ);
 		ZJ=YL;
-		IZW=KXM;
+		IZW=KXK;
 		}else{
 		let YM=YG.exp();
 		let YN=F+ YM;
 		let YO=YN.ln();
 		let YP=UJ* YO;
-		let KXJ=KUX* YO;
-		let KXK=L5([0.0,KXJ[0],0.0,KXJ[1],KXJ[2]])+ (((KXI* YM)* (IUF/ YN))* UJ);
+		let KXH=KUW* YO;
+		let KXI=L5([0.0,KXH[0],0.0,KXH[1],KXH[2]])+ (((KXG* YM)* (IUF/ YN))* UJ);
 		ZJ=YP;
-		IZW=KXK;
+		IZW=KXI;
 		}
 		ZI=ZJ;
 		IZV=IZW;
 		}
 		let YQ=(TQ- UM)/ TR;
-		let KXP=((KXG- KVE)- L5([0.0,(KUK* YQ),0.0,0.0,0.0]))/ TR;
+		let KXN=((KXF- KVD)).product_sum_div(IUF,KVE,(-YQ),TR);
 		let YR=YQ> LD;
 		let YW;
 		let IZX;
@@ -2705,25 +2703,24 @@ impl Instance {
 		let YT=YQ.exp();
 		let YU=F+ YT;
 		let YV=F/ YU;
-		let KXQ=(((KXP* YT)* YV)* KNJ)/ YU;
+		let KXO=((KXN* YT)).product_div((-YV),YU);
 		YX=YV;
-		IZY=KXQ;
+		IZY=KXO;
 		}
 		YW=YX;
 		IZX=IZY;
 		}
 		let YY=((SX- XJ)- (UG- (VK* YW)))/ UI;
-		let KXR=KUW* YY;
-		let KXS=(((KXD- KWS)- (KVM- (L5([0.0,(KVL* YW),0.0,0.0,0.0])+ (IZX* VK))))- L5([0.0,KXR[0],0.0,KXR[1],KXR[2]]))/ UI;
+		let KXP=(((KXC- KWS)- (KVM- (L5([0.0,(KVL* YW),0.0,0.0,0.0])+ (IZX* VK))))).product_sum_div(IUF,KVN,(-YY),UI);
 		let YZ=YY> LD;
 		let ZK;
 		let IZZ;
 		if YZ{
 		let ZA=UJ* YY;
-		let KXX=KUX* YY;
-		let KXY=L5([0.0,KXX[0],0.0,KXX[1],KXX[2]])+ (KXS* UJ);
+		let KXU=KUW* YY;
+		let KXV=L5([0.0,KXU[0],0.0,KXU[1],KXU[2]])+ (KXP* UJ);
 		ZK=ZA;
-		IZZ=KXY;
+		IZZ=KXV;
 		}else{
 		let ZB=YY< -50f64;
 		let ZL;
@@ -2731,81 +2728,81 @@ impl Instance {
 		if ZB{
 		let ZC=YY.exp();
 		let ZD=UJ* ZC;
-		let KXV=KUX* ZC;
-		let KXW=L5([0.0,KXV[0],0.0,KXV[1],KXV[2]])+ ((KXS* ZC)* UJ);
+		let KXS=KUW* ZC;
+		let KXT=L5([0.0,KXS[0],0.0,KXS[1],KXS[2]])+ ((KXP* ZC)* UJ);
 		ZL=ZD;
-		JAA=KXW;
+		JAA=KXT;
 		}else{
 		let ZE=YY.exp();
 		let ZF=F+ ZE;
 		let ZG=ZF.ln();
 		let ZH=UJ* ZG;
-		let KXT=KUX* ZG;
-		let KXU=L5([0.0,KXT[0],0.0,KXT[1],KXT[2]])+ (((KXS* ZE)* (IUF/ ZF))* UJ);
+		let KXQ=KUW* ZG;
+		let KXR=L5([0.0,KXQ[0],0.0,KXQ[1],KXQ[2]])+ (((KXP* ZE)* (IUF/ ZF))* UJ);
 		ZL=ZH;
-		JAA=KXU;
+		JAA=KXR;
 		}
 		ZK=ZL;
 		IZZ=JAA;
 		}
 		let ZM=(ZI- ZK)/ HH;
 		let ZN=ZM/ WU;
-		let KXZ=((((IZV- IZZ)- L5([0.0,(KLX* ZM),0.0,0.0,0.0]))/ HH)- (KWF* ZN))/ WU;
+		let KXW=((((IZV- IZZ)).product_sum_div(IUF,KVV,(-ZM),HH))).product_sum_div(IUF,KWG,(-ZN),WU);
 		let ZS;
 		let JAB;
 		if JM{
-		let KYB=KXZ* ZN;
+		let KXY=KXW* ZN;
 		let ZO=((ZN* ZN)+ JV).sqrt();
-		let KYC=(KYB+ KYB)* (IUF/ (KNB* ZO));
+		let KXZ=(KXY+ KXY)* (IUF/ (KNB* ZO));
 		ZS=ZO;
-		JAB=KYC;
+		JAB=KXZ;
 		}else{
 		let ZP=KB/ JV;
 		let ZQ=(ZP* ZN).tanh();
 		let ZR=ZN* ZQ;
-		let KYA=(KXZ* ZQ)+ (((KXZ* ZP)* (IUF- (ZQ* ZQ)))* ZN);
+		let KXX=(KXW* ZQ)+ (((KXW* ZP)* (IUF- (ZQ* ZQ)))* ZN);
 		ZS=ZR;
-		JAB=KYA;
+		JAB=KXX;
 		}
 		let ZT=F+ (ZS.powf(TD));
 		let ZU=ZT.powf(XG);
 		let ZV=ZN/ ZU;
 		let ZW=WN* ZV;
-		let KYD=((KXZ- (((JAB* (TD* ((ZS+ (((ZS== KOL) as u8 as f64)* KUP)).powf(KWO))))* (XG* ((ZT+ (((ZT== KOL) as u8 as f64)* KUP)).powf(KWP))))* ZV))/ ZU)* WN;
+		let KYA=((KXW).product_sum_div(IUF,((JAB* (TD* ((ZS+ (((ZS== KOL) as u8 as f64)* KUP)).powf(KWP))))* (XG* ((ZT+ (((ZT== KOL) as u8 as f64)* KUP)).powf(KWQ)))),(-ZV),ZU))* WN;
 		let ZX=((JE* O)* P)* JW;
 		let ZY=ZX* (ZI+ ZK);
 		let ZZ=ZY* ZW;
-		let KYE=(((IZV+ IZZ)* ZX)* ZW)+ (((KWB* ZV)+ KYD)* ZY);
+		let KYB=(((IZV+ IZZ)* ZX)* ZW)+ (((KWC* ZV)+ KYA)* ZY);
 		let AAA=MC* TU;
 		let AAB=AAA* AZ;
-		let KYF=((KUL* MC)* AZ)+ (KJT* AAA);
+		let KYC=((KUL* MC)* AZ)+ (KJT* AAA);
 		let AAC=HH* AAB;
-		let KYG=(KLX* AAB)+ (KYF* HH);
+		let KYD=(KLX* AAB)+ (KYC* HH);
 		let AAD=TW- UL;
-		let KYH=KUO- KUY;
+		let KYE=KUO- KUX;
 		let AAL;
 		let JAC;
 		if JM{
 		let AAE=SX- TQ;
-		let KYK=(KUI- KUJ)* AAE;
+		let KYH=(KUI- KUJ)* AAE;
 		let AAF=((AAE* AAE)+ JV).sqrt();
 		let AAG=JW* ((SX+ TQ)+ AAF);
-		let KYL=((KUI+ KUJ)+ ((KYK+ KYK)* (IUF/ (KNB* AAF))))* JW;
+		let KYI=((KUI+ KUJ)+ ((KYH+ KYH)* (IUF/ (KNB* AAF))))* JW;
 		AAL=AAG;
-		JAC=KYL;
+		JAC=KYI;
 		}else{
 		let AAH=SX- TQ;
-		let KYI=KUI- KUJ;
+		let KYF=KUI- KUJ;
 		let AAI=KB/ JV;
 		let AAJ=(AAI* AAH).tanh();
 		let AAK=JW* ((SX+ TQ)+ (AAH* AAJ));
-		let KYJ=((KUI+ KUJ)+ ((KYI* AAJ)+ (((KYI* AAI)* (IUF- (AAJ* AAJ)))* AAH)))* JW;
+		let KYG=((KUI+ KUJ)+ ((KYF* AAJ)+ (((KYF* AAI)* (IUF- (AAJ* AAJ)))* AAH)))* JW;
 		AAL=AAK;
-		JAC=KYJ;
+		JAC=KYG;
 		}
-		let KYM=L5([0.0,KYH,0.0,0.0,0.0]);
+		let KYJ=L5([0.0,KYE,0.0,0.0,0.0]);
 		let AAM=(AAL- AAD)/ TR;
-		let KYN=((L5([JAC[0],0.0,JAC[1],JAC[2],JAC[3]])- KYM)- L5([0.0,(KUK* AAM),0.0,0.0,0.0]))/ TR;
+		let KYK=((L5([JAC[0],0.0,JAC[1],JAC[2],JAC[3]])- KYJ)).product_sum_div(IUF,KVE,(-AAM),TR);
 		let AAN=AAM> LD;
 		let ABA;
 		let JAD;
@@ -2823,9 +2820,9 @@ impl Instance {
 		let AAP=AAM.exp();
 		let AAQ=F+ AAP;
 		let AAR=F/ AAQ;
-		let KYO=(((KYN* AAP)* AAR)* KNJ)/ AAQ;
+		let KYL=((KYK* AAP)).product_div((-AAR),AAQ);
 		ABB=AAR;
-		JAE=KYO;
+		JAE=KYL;
 		}
 		ABA=ABB;
 		JAD=JAE;
@@ -2834,33 +2831,34 @@ impl Instance {
 		let JAF;
 		if JM{
 		let AAS=SX- TQ;
-		let KYR=(KUI- KUJ)* AAS;
+		let KYO=(KUI- KUJ)* AAS;
 		let AAT=((AAS* AAS)+ JV).sqrt();
 		let AAU=JW* ((SX+ TQ)+ AAT);
-		let KYS=((KUI+ KUJ)+ ((KYR+ KYR)* (IUF/ (KNB* AAT))))* JW;
+		let KYP=((KUI+ KUJ)+ ((KYO+ KYO)* (IUF/ (KNB* AAT))))* JW;
 		AAZ=AAU;
-		JAF=KYS;
+		JAF=KYP;
 		}else{
 		let AAV=SX- TQ;
-		let KYP=KUI- KUJ;
+		let KYM=KUI- KUJ;
 		let AAW=KB/ JV;
 		let AAX=(AAW* AAV).tanh();
 		let AAY=JW* ((SX+ TQ)+ (AAV* AAX));
-		let KYQ=((KUI+ KUJ)+ ((KYP* AAX)+ (((KYP* AAW)* (IUF- (AAX* AAX)))* AAV)))* JW;
+		let KYN=((KUI+ KUJ)+ ((KYM* AAX)+ (((KYM* AAW)* (IUF- (AAX* AAX)))* AAV)))* JW;
 		AAZ=AAY;
-		JAF=KYQ;
+		JAF=KYN;
 		}
-		let KYT=L5([0.0,KUO,0.0,0.0,0.0]);
+		let KYQ=L5([0.0,KUO,0.0,0.0,0.0]);
 		let ABC=(AAZ- (TW- (VK* ABA)))/ AAB;
-		let KYU=((L5([JAF[0],0.0,JAF[1],JAF[2],JAF[3]])- (KYT- (L5([0.0,(KVL* ABA),0.0,0.0,0.0])+ (JAD* VK))))- L5([0.0,(KYF* ABC),0.0,0.0,0.0]))/ AAB;
+		let KYR=L5([0.0,KYC,0.0,0.0,0.0]);
+		let KYS=((L5([JAF[0],0.0,JAF[1],JAF[2],JAF[3]])- (KYQ- (L5([0.0,(KVL* ABA),0.0,0.0,0.0])+ (JAD* VK))))).product_sum_div(IUF,KYR,(-ABC),AAB);
 		let ABD=ABC> LD;
 		let ABO;
 		let JAG;
 		if ABD{
 		let ABE=AAC* ABC;
-		let KYX=L5([0.0,(KYG* ABC),0.0,0.0,0.0])+ (KYU* AAC);
+		let KYV=L5([0.0,(KYD* ABC),0.0,0.0,0.0])+ (KYS* AAC);
 		ABO=ABE;
-		JAG=KYX;
+		JAG=KYV;
 		}else{
 		let ABF=ABC< -50f64;
 		let ABP;
@@ -2868,93 +2866,92 @@ impl Instance {
 		if ABF{
 		let ABG=ABC.exp();
 		let ABH=AAC* ABG;
-		let KYW=L5([0.0,(KYG* ABG),0.0,0.0,0.0])+ ((KYU* ABG)* AAC);
+		let KYU=L5([0.0,(KYD* ABG),0.0,0.0,0.0])+ ((KYS* ABG)* AAC);
 		ABP=ABH;
-		JAH=KYW;
+		JAH=KYU;
 		}else{
 		let ABI=ABC.exp();
 		let ABJ=F+ ABI;
 		let ABK=ABJ.ln();
 		let ABL=AAC* ABK;
-		let KYV=L5([0.0,(KYG* ABK),0.0,0.0,0.0])+ (((KYU* ABI)* (IUF/ ABJ))* AAC);
+		let KYT=L5([0.0,(KYD* ABK),0.0,0.0,0.0])+ (((KYS* ABI)* (IUF/ ABJ))* AAC);
 		ABP=ABL;
-		JAH=KYV;
+		JAH=KYT;
 		}
 		ABO=ABP;
 		JAG=JAH;
 		}
 		let ABM=TC/ TX;
 		let ABN=(WF* SU)/ ABM;
-		let KYY=((KVW* SU)- ((((KUQ* ABM)* KNJ)/ TX)* ABN))/ ABM;
+		let KYW=product_sum_div((KVX* SU),IUF,(product_div(KUQ,(-ABM),TX)),(-ABN),ABM);
 		let ABQ=(MC* ABO)/ HH;
 		let ABR=ABQ/ ABN;
+		let KYX=L5([0.0,KYW,0.0,0.0,0.0]);
 		let ABS=(F+ ABR).sqrt();
 		let ABT=(ABN* ABS)- ABN;
-		let KYZ=(L5([0.0,(KYY* ABS),0.0,0.0,0.0])+ (((((((JAG* MC)- L5([0.0,(KLX* ABQ),0.0,0.0,0.0]))/ HH)- L5([0.0,(KYY* ABR),0.0,0.0,0.0]))/ ABN)* (IUF/ (KNB* ABS)))* ABN))- L5([0.0,KYY,0.0,0.0,0.0]);
 		let ABU=F- ABA;
+		let KYY=(((L5([0.0,(KYW* ABS),0.0,0.0,0.0])+ (((((((JAG* MC)).product_sum_div(IUF,KVV,(-ABQ),HH))).product_sum_div(IUF,KYX,(-ABR),ABN))* (IUF/ (KNB* ABS)))* ABN))- KYX)* ABU)+ ((JAD* KNJ)* ABT);
 		let ABV=(ABT* ABU)+ (AAB* ABA);
-		let KZA=((KYZ* ABU)+ ((JAD* KNJ)* ABT))+ (L5([0.0,(KYF* ABA),0.0,0.0,0.0])+ (JAD* AAB));
+		let KYZ=KYY+ (L5([0.0,(KYC* ABA),0.0,0.0,0.0])+ (JAD* AAB));
 		let ABW=SR/ ABV;
-		let KZB=(KWI- (KZA* ABW))/ ABV;
+		let KZA=(KWJ).product_sum_div(IUF,KYZ,(-ABW),ABV);
 		let ACE;
 		let JAI;
 		if JM{
 		let ABX=A- ABW;
-		let KZE=(KZB* KNJ)* ABX;
+		let KZD=(KZA* KNJ)* ABX;
 		let ABY=((ABX* ABX)+ JV).sqrt();
 		let ABZ=JW* ((A+ ABW)+ ABY);
-		let KZF=(KZB+ ((KZE+ KZE)* (IUF/ (KNB* ABY))))* JW;
+		let KZE=(KZA+ ((KZD+ KZD)* (IUF/ (KNB* ABY))))* JW;
 		ACE=ABZ;
-		JAI=KZF;
+		JAI=KZE;
 		}else{
 		let ACA=A- ABW;
-		let KZC=KZB* KNJ;
+		let KZB=KZA* KNJ;
 		let ACB=KB/ JV;
 		let ACC=(ACB* ACA).tanh();
 		let ACD=JW* ((A+ ABW)+ (ACA* ACC));
-		let KZD=(KZB+ ((KZC* ACC)+ (((KZC* ACB)* (IUF- (ACC* ACC)))* ACA)))* JW;
+		let KZC=(KZA+ ((KZB* ACC)+ (((KZB* ACB)* (IUF- (ACC* ACC)))* ACA)))* JW;
 		ACE=ACD;
-		JAI=KZD;
+		JAI=KZC;
 		}
 		let ACF=F+ (ACE.powf(TD));
 		let ACG=ACF.powf(XG);
 		let ACH=F/ ACG;
 		let ACI=SR* ACH;
-		let KZG=KTZ* ACH;
-		let KZH=(((((JAI* (TD* ((ACE+ (((ACE== KOL) as u8 as f64)* KUP)).powf(KWO))))* (XG* ((ACF+ (((ACF== KOL) as u8 as f64)* KUP)).powf(KWP))))* ACH)* KNJ)/ ACG)* SR;
-		let KZI=L5([0.0,0.0,0.0,KZG[0],KZG[1]])+ KZH;
+		let KZF=KTZ* ACH;
+		let KZG=L5([0.0,0.0,0.0,KZF[0],KZF[1]])+ (((((JAI* (TD* ((ACE+ (((ACE== KOL) as u8 as f64)* KUP)).powf(KWP))))* (XG* ((ACF+ (((ACF== KOL) as u8 as f64)* KUP)).powf(KWQ))))).product_div((-ACH),ACG))* SR);
 		let ACJ=XK/ ABV;
-		let KZJ=(KWU- (KZA* ACJ))/ ABV;
+		let KZH=(KWU).product_sum_div(IUF,KYZ,(-ACJ),ABV);
 		let ACR;
 		let JAJ;
 		if JM{
 		let ACK=A- ACJ;
-		let KZM=(KZJ* KNJ)* ACK;
+		let KZK=(KZH* KNJ)* ACK;
 		let ACL=((ACK* ACK)+ JV).sqrt();
 		let ACM=JW* ((A+ ACJ)+ ACL);
-		let KZN=(KZJ+ ((KZM+ KZM)* (IUF/ (KNB* ACL))))* JW;
+		let KZL=(KZH+ ((KZK+ KZK)* (IUF/ (KNB* ACL))))* JW;
 		ACR=ACM;
-		JAJ=KZN;
+		JAJ=KZL;
 		}else{
 		let ACN=A- ACJ;
-		let KZK=KZJ* KNJ;
+		let KZI=KZH* KNJ;
 		let ACO=KB/ JV;
 		let ACP=(ACO* ACN).tanh();
 		let ACQ=JW* ((A+ ACJ)+ (ACN* ACP));
-		let KZL=(KZJ+ ((KZK* ACP)+ (((KZK* ACO)* (IUF- (ACP* ACP)))* ACN)))* JW;
+		let KZJ=(KZH+ ((KZI* ACP)+ (((KZI* ACO)* (IUF- (ACP* ACP)))* ACN)))* JW;
 		ACR=ACQ;
-		JAJ=KZL;
+		JAJ=KZJ;
 		}
 		let ACS=F+ (ACR.powf(TD));
 		let ACT=ACS.powf(XG);
 		let ACU=F/ ACT;
 		let ACV=XK* ACU;
-		let KZO=KWT* ACU;
-		let KZP=(((((JAJ* (TD* ((ACR+ (((ACR== KOL) as u8 as f64)* KUP)).powf(KWO))))* (XG* ((ACS+ (((ACS== KOL) as u8 as f64)* KUP)).powf(KWP))))* ACU)* KNJ)/ ACT)* XK;
-		let KZQ=L5([0.0,0.0,0.0,KZO[0],KZO[1]])+ KZP;
-		let KZR=L4([IZA[0],0.0,IZA[1],IZA[2]]);
+		let KZM=KWT* ACU;
+		let KZN=L5([0.0,0.0,0.0,KZM[0],KZM[1]])+ (((((JAJ* (TD* ((ACR+ (((ACR== KOL) as u8 as f64)* KUP)).powf(KWP))))* (XG* ((ACS+ (((ACS== KOL) as u8 as f64)* KUP)).powf(KWQ))))).product_div((-ACU),ACT))* XK);
+		let KZO=L4([IZA[0],0.0,IZA[1],IZA[2]]);
 		let ACW=(SX- AAD)/ TR;
-		let KZS=((KZR- L4([0.0,KYH,0.0,0.0]))- L4([0.0,(KUK* ACW),0.0,0.0]))/ TR;
+		let KZP=((KZO- L4([0.0,KYE,0.0,0.0]))).product_sum_div(IUF,L4([0.0,KUK,0.0,0.0]),(-ACW),TR);
 		let ACX=ACW> LD;
 		let ADC;
 		let JAK;
@@ -2972,24 +2969,24 @@ impl Instance {
 		let ACZ=ACW.exp();
 		let ADA=F+ ACZ;
 		let ADB=F/ ADA;
-		let KZT=(((KZS* ACZ)* ADB)* KNJ)/ ADA;
+		let KZQ=((KZP* ACZ)).product_div((-ADB),ADA);
 		ADD=ADB;
-		JAL=KZT;
+		JAL=KZQ;
 		}
 		ADC=ADD;
 		JAK=JAL;
 		}
-		let KZU=L4([0.0,KUO,0.0,0.0])- (L4([0.0,(KVL* ADC),0.0,0.0])+ (JAK* VK));
+		let KZR=L4([0.0,KUO,0.0,0.0])- (L4([0.0,(KVL* ADC),0.0,0.0])+ (JAK* VK));
 		let ADE=((TQ- ACV)- (TW- (VK* ADC)))/ AAB;
-		let KZV=(((KXG- KZQ)- L5([KZU[0],KZU[1],KZU[2],KZU[3],0.0]))- L5([0.0,(KYF* ADE),0.0,0.0,0.0]))/ AAB;
+		let KZS=(((KXF- KZN)- L5([KZR[0],KZR[1],KZR[2],KZR[3],0.0]))).product_sum_div(IUF,KYR,(-ADE),AAB);
 		let ADF=ADE> LD;
 		let AEG;
 		let JAM;
 		if ADF{
 		let ADG=AAC* ADE;
-		let KZY=L5([0.0,(KYG* ADE),0.0,0.0,0.0])+ (KZV* AAC);
+		let KZV=L5([0.0,(KYD* ADE),0.0,0.0,0.0])+ (KZS* AAC);
 		AEG=ADG;
-		JAM=KZY;
+		JAM=KZV;
 		}else{
 		let ADH=ADE< -50f64;
 		let AEH;
@@ -2997,23 +2994,23 @@ impl Instance {
 		if ADH{
 		let ADI=ADE.exp();
 		let ADJ=AAC* ADI;
-		let KZX=L5([0.0,(KYG* ADI),0.0,0.0,0.0])+ ((KZV* ADI)* AAC);
+		let KZU=L5([0.0,(KYD* ADI),0.0,0.0,0.0])+ ((KZS* ADI)* AAC);
 		AEH=ADJ;
-		JAN=KZX;
+		JAN=KZU;
 		}else{
 		let ADK=ADE.exp();
 		let ADL=F+ ADK;
 		let ADM=ADL.ln();
 		let ADN=AAC* ADM;
-		let KZW=L5([0.0,(KYG* ADM),0.0,0.0,0.0])+ (((KZV* ADK)* (IUF/ ADL))* AAC);
+		let KZT=L5([0.0,(KYD* ADM),0.0,0.0,0.0])+ (((KZS* ADK)* (IUF/ ADL))* AAC);
 		AEH=ADN;
-		JAN=KZW;
+		JAN=KZT;
 		}
 		AEG=AEH;
 		JAM=JAN;
 		}
 		let ADO=(TQ- AAD)/ TR;
-		let KZZ=((KXG- KYM)- L5([0.0,(KUK* ADO),0.0,0.0,0.0]))/ TR;
+		let KZW=((KXF- KYJ)).product_sum_div(IUF,KVE,(-ADO),TR);
 		let ADP=ADO> LD;
 		let ADU;
 		let JAO;
@@ -3031,23 +3028,23 @@ impl Instance {
 		let ADR=ADO.exp();
 		let ADS=F+ ADR;
 		let ADT=F/ ADS;
-		let LAA=(((KZZ* ADR)* ADT)* KNJ)/ ADS;
+		let KZX=((KZW* ADR)).product_div((-ADT),ADS);
 		ADV=ADT;
-		JAP=LAA;
+		JAP=KZX;
 		}
 		ADU=ADV;
 		JAO=JAP;
 		}
 		let ADW=((SX- ACI)- (TW- (VK* ADU)))/ AAB;
-		let LAB=(((KXD- KZI)- (KYT- (L5([0.0,(KVL* ADU),0.0,0.0,0.0])+ (JAO* VK))))- L5([0.0,(KYF* ADW),0.0,0.0,0.0]))/ AAB;
+		let KZY=(((KXC- KZG)- (KYQ- (L5([0.0,(KVL* ADU),0.0,0.0,0.0])+ (JAO* VK))))).product_sum_div(IUF,KYR,(-ADW),AAB);
 		let ADX=ADW> LD;
 		let AEL;
 		let JAQ;
 		if ADX{
 		let ADY=AAC* ADW;
-		let LAE=L5([0.0,(KYG* ADW),0.0,0.0,0.0])+ (LAB* AAC);
+		let LAB=L5([0.0,(KYD* ADW),0.0,0.0,0.0])+ (KZY* AAC);
 		AEL=ADY;
-		JAQ=LAE;
+		JAQ=LAB;
 		}else{
 		let ADZ=ADW< -50f64;
 		let AEM;
@@ -3055,45 +3052,45 @@ impl Instance {
 		if ADZ{
 		let AEA=ADW.exp();
 		let AEB=AAC* AEA;
-		let LAD=L5([0.0,(KYG* AEA),0.0,0.0,0.0])+ ((LAB* AEA)* AAC);
+		let LAA=L5([0.0,(KYD* AEA),0.0,0.0,0.0])+ ((KZY* AEA)* AAC);
 		AEM=AEB;
-		JAR=LAD;
+		JAR=LAA;
 		}else{
 		let AEC=ADW.exp();
 		let AED=F+ AEC;
 		let AEE=AED.ln();
 		let AEF=AAC* AEE;
-		let LAC=L5([0.0,(KYG* AEE),0.0,0.0,0.0])+ (((LAB* AEC)* (IUF/ AED))* AAC);
+		let KZZ=L5([0.0,(KYD* AEE),0.0,0.0,0.0])+ (((KZY* AEC)* (IUF/ AED))* AAC);
 		AEM=AEF;
-		JAR=LAC;
+		JAR=KZZ;
 		}
 		AEL=AEM;
 		JAQ=JAR;
 		}
-		let LAF=JAM* AEG;
-		let LAG=LAF+ LAF;
+		let LAC=JAM* AEG;
+		let LAD=LAC+ LAC;
 		let AEJ=(AEG* AEG)+ AEI;
-		let LAH=JAQ* AEL;
-		let LAI=LAH+ LAH;
+		let LAE=JAQ* AEL;
+		let LAF=LAE+ LAE;
 		let AEN=(AEL* AEL)+ AEI;
-		let LAJ=(JAM* AEL)+ (JAQ* AEG);
+		let LAG=(JAM* AEL)+ (JAQ* AEG);
 		let AEO=(AEG* AEL)+ AEI;
 		let AEQ=AEJ+ AEN;
-		let LAK=LAG+ LAI;
+		let LAH=LAD+ LAF;
 		let AES=(AEG+ AEL)+ AER;
 		let AET=(AEP* (AEQ+ AEO))/ AES;
 		let AEV=AEU* AEJ;
 		let AEX=AEW* AEN;
-		let LAL=(((((LAG* AEG)+ (JAM* AEJ))* MC)+ (((LAI* AEL)+ (JAQ* AEN))* BF))+ (((LAG* AEU)* AEL)+ (JAQ* AEV)))+ (((LAI* AEW)* AEG)+ (JAM* AEX));
+		let LAI=(((((LAD* AEG)+ (JAM* AEJ))* MC)+ (((LAF* AEL)+ (JAQ* AEN))* BF))+ (((LAD* AEU)* AEL)+ (JAQ* AEV)))+ (((LAF* AEW)* AEG)+ (JAM* AEX));
 		let AEZ=AEY* (AEQ+ (MC* AEO));
 		let AFA=(MC* ((((MC* ((AEJ* AEG)+ AEK))+ (BF* ((AEN* AEL)+ AEK)))+ (AEV* AEL))+ (AEX* AEG)))/ AEZ;
-		let LAM=((LAL* MC)- (((LAK+ (LAJ* MC))* AEY)* AFA))/ AEZ;
+		let LAJ=((LAI* MC)).product_sum_div(IUF,((LAH+ (LAG* MC))* AEY),(-AFA),AEZ);
 		let AFB=O* P;
 		let AFC=(AFB* SU)* JE;
 		let AFD=AFC* (AET- AFA);
-		let LAN=(((((LAK+ LAJ)* AEP)- ((JAM+ JAQ)* AET))/ AES)- LAM)* AFC;
+		let LAK=(((((LAH+ LAG)* AEP)).product_sum_div(IUF,(JAM+ JAQ),(-AET),AES))- LAJ)* AFC;
 		let AFE=AFC* AFA;
-		let LAO=LAM* AFC;
+		let LAL=LAJ* AFC;
 		let AFF=parameters[239]== F;
 		let AGV;
 		let AGW;
@@ -3102,31 +3099,31 @@ impl Instance {
 		if AFF{
 		let AFG=UK* JW;
 		let AFH=TW- (AFG* TR);
-		let LAP=KUO- (KUK* AFG);
+		let LAM=KUO- (KUK* AFG);
 		let AFI=(SY- AFH)/ AAB;
-		let LAQ=((L4([IZB[0],0.0,IZB[1],IZB[2]])- L4([0.0,LAP,0.0,0.0]))- L4([0.0,(KYF* AFI),0.0,0.0]))/ AAB;
+		let LAN=((L4([IZB[0],0.0,IZB[1],IZB[2]])- L4([0.0,LAM,0.0,0.0]))).product_sum_div(IUF,L4([0.0,KYC,0.0,0.0]),(-AFI),AAB);
 		let AFJ=AFI> LD;
 		let AFS;
 		let JAU;
 		if AFJ{
 		AFS=AFI;
-		JAU=LAQ;
+		JAU=LAN;
 		}else{
 		let AFK=AFI< -50f64;
 		let AFT;
 		let JAV;
 		if AFK{
 		let AFL=AFI.exp();
-		let LAS=LAQ* AFL;
+		let LAP=LAN* AFL;
 		AFT=AFL;
-		JAV=LAS;
+		JAV=LAP;
 		}else{
 		let AFM=AFI.exp();
 		let AFN=F+ AFM;
 		let AFO=AFN.ln();
-		let LAR=(LAQ* AFM)* (IUF/ AFN);
+		let LAO=(LAN* AFM)* (IUF/ AFN);
 		AFT=AFO;
-		JAV=LAR;
+		JAV=LAO;
 		}
 		AFS=AFT;
 		JAU=JAV;
@@ -3135,31 +3132,31 @@ impl Instance {
 		let AFQ=AFP* IF;
 		let AFR=AFQ* AAB;
 		let AFU=AFR* AFS;
-		let LAT=L4([0.0,((((KMF* AFP)* AAB)+ (KYF* AFQ))* AFS),0.0,0.0])+ (JAU* AFR);
+		let LAQ=L4([0.0,((((KMF* AFP)* AAB)+ (KYC* AFQ))* AFS),0.0,0.0])+ (JAU* AFR);
 		let AFV=(ST- AFH)/ AAB;
-		let LAU=((L3([KUB[0],0.0,KUB[1]])- L3([0.0,LAP,0.0]))- L3([0.0,(KYF* AFV),0.0]))/ AAB;
+		let LAR=((L3([KUB[0],0.0,KUB[1]])- L3([0.0,LAM,0.0]))).product_sum_div(IUF,L3([0.0,KYC,0.0]),(-AFV),AAB);
 		let AFW=AFV> LD;
 		let AGE;
 		let JAW;
 		if AFW{
 		AGE=AFV;
-		JAW=LAU;
+		JAW=LAR;
 		}else{
 		let AFX=AFV< -50f64;
 		let AGF;
 		let JAX;
 		if AFX{
 		let AFY=AFV.exp();
-		let LAW=LAU* AFY;
+		let LAT=LAR* AFY;
 		AGF=AFY;
-		JAX=LAW;
+		JAX=LAT;
 		}else{
 		let AFZ=AFV.exp();
 		let AGA=F+ AFZ;
 		let AGB=AGA.ln();
-		let LAV=(LAU* AFZ)* (IUF/ AGA);
+		let LAS=(LAR* AFZ)* (IUF/ AGA);
 		AGF=AGB;
-		JAX=LAV;
+		JAX=LAS;
 		}
 		AGE=AGF;
 		JAW=JAX;
@@ -3167,11 +3164,11 @@ impl Instance {
 		let AGC=AFP* JD;
 		let AGD=AGC* AAB;
 		let AGG=AGD* AGE;
-		let LAX=L3([0.0,((((KMN* AFP)* AAB)+ (KYF* AGC))* AGE),0.0])+ (JAW* AGD);
+		let LAU=L3([0.0,((((KMN* AFP)* AAB)+ (KYC* AGC))* AGE),0.0])+ (JAW* AGD);
 		AGV=AFU;
 		AGW=AGG;
-		JAS=LAT;
-		JAT=LAX;
+		JAS=LAQ;
+		JAT=LAU;
 		}else{
 		AGV=A;
 		AGW=A;
@@ -3184,29 +3181,29 @@ impl Instance {
 		if AGH{
 		let AGI=UK* JW;
 		let AGJ=(SX- (TW- (AGI* TR)))/ AAB;
-		let LAY=((KZR- L4([0.0,(KUO- (KUK* AGI)),0.0,0.0]))- L4([0.0,(KYF* AGJ),0.0,0.0]))/ AAB;
+		let LAV=((KZO- L4([0.0,(KUO- (KUK* AGI)),0.0,0.0]))).product_sum_div(IUF,L4([0.0,KYC,0.0,0.0]),(-AGJ),AAB);
 		let AGK=AGJ> LD;
 		let AGS;
 		let JAZ;
 		if AGK{
 		AGS=AGJ;
-		JAZ=LAY;
+		JAZ=LAV;
 		}else{
 		let AGL=AGJ< -50f64;
 		let AGT;
 		let JBA;
 		if AGL{
 		let AGM=AGJ.exp();
-		let LBA=LAY* AGM;
+		let LAX=LAV* AGM;
 		AGT=AGM;
-		JBA=LBA;
+		JBA=LAX;
 		}else{
 		let AGN=AGJ.exp();
 		let AGO=F+ AGN;
 		let AGP=AGO.ln();
-		let LAZ=(LAY* AGN)* (IUF/ AGO);
+		let LAW=(LAV* AGN)* (IUF/ AGO);
 		AGT=AGP;
-		JBA=LAZ;
+		JBA=LAW;
 		}
 		AGS=AGT;
 		JAZ=JBA;
@@ -3214,15 +3211,15 @@ impl Instance {
 		let AGQ=(AFB* JE)* parameters[238];
 		let AGR=AGQ* AAB;
 		let AGU=AGR* AGS;
-		let LBB=L4([0.0,((KYF* AGQ)* AGS),0.0,0.0])+ (JAZ* AGR);
+		let LAY=L4([0.0,((KYC* AGQ)* AGS),0.0,0.0])+ (JAZ* AGR);
 		AGX=AGU;
-		JAY=LBB;
+		JAY=LAY;
 		}else{
 		AGX=A;
 		JAY=KUD;
 		}
-		let LBC=KTY* D;
-		let LBD=KYE+ L5([0.0,0.0,0.0,LBC[0],LBC[1]]);
+		let LAZ=KTY* D;
+		let LBA=KYB+ L5([0.0,0.0,0.0,LAZ[0],LAZ[1]]);
 		let AGY=A+ (ZZ+ (D* SQ));
 		AHA=AFD;
 		AHG=AFE;
@@ -3233,13 +3230,13 @@ impl Instance {
 		IGH=AGY;
 		IGI=A;
 		IOE=A;
-		IZC=LAN;
-		IZD=LAO;
+		IZC=LAK;
+		IZD=LAL;
 		IZE=JAS;
 		IZF=JAY;
 		IZG=JAT;
-		IZH=KYE;
-		IZI=LBD;
+		IZH=KYB;
+		IZI=LBA;
 		}else{
 		AHA=A;
 		AHG=A;
@@ -3292,40 +3289,40 @@ impl Instance {
 		if SL{
 		let AHB=ddt(4, AHA);
 		let AHD=AHC* (PT- SG);
-		let LBR=(L2([IUR,0.0])- L2([0.0,IUY]))* AHC;
+		let LBO=(L2([IUR,0.0])- L2([0.0,IUY]))* AHC;
 		let AHE=ddt(5, AHD);
-		let LBS=LBR* KOI;
-		let LBT=(IZC* KOI)+ L5([0.0,0.0,LBS[0],LBS[1],0.0]);
+		let LBP=LBO* KOI;
+		let LBQ=(IZC* KOI)+ L5([0.0,0.0,LBP[0],LBP[1],0.0]);
 		let IPH=AHA+ AHD;
-		let LBU=IZC+ L5([0.0,0.0,LBR[0],LBR[1],0.0]);
+		let LBR=IZC+ L5([0.0,0.0,LBO[0],LBO[1],0.0]);
 		let AHF=A+ (AHB+ AHE);
 		let AHH=ddt(6, AHG);
 		let AHI=AHC* (PT- OT);
-		let LBV=(L2([IUR,0.0])- L2([0.0,IUP]))* AHC;
+		let LBS=(L2([IUR,0.0])- L2([0.0,IUP]))* AHC;
 		let AHJ=ddt(7, AHI);
-		let LBW=LBV* KOI;
-		let LBX=(IZD* KOI)+ L5([0.0,0.0,LBW[0],0.0,LBW[1]]);
+		let LBT=LBS* KOI;
+		let LBU=(IZD* KOI)+ L5([0.0,0.0,LBT[0],0.0,LBT[1]]);
 		let IPJ=AHG+ AHI;
-		let LBY=IZD+ L5([0.0,0.0,LBV[0],0.0,LBV[1]]);
+		let LBV=IZD+ L5([0.0,0.0,LBS[0],0.0,LBS[1]]);
 		let AHK=A+ (AHH+ AHJ);
 		let AHM=ddt(8, AHL);
 		let AHN=AHC* (JQ- SG);
-		let LBZ=(L2([IUM,0.0])- L2([0.0,IUY]))* AHC;
+		let LBW=(L2([IUM,0.0])- L2([0.0,IUY]))* AHC;
 		let AHO=ddt(9, AHN);
-		let LCA=LBZ* KOI;
-		let LCB=(IZE* KOI)+ L4([LCA[0],0.0,0.0,LCA[1]]);
+		let LBX=LBW* KOI;
+		let LBY=(IZE* KOI)+ L4([LBX[0],0.0,0.0,LBX[1]]);
 		let IPL=AHL+ AHN;
-		let LCC=IZE+ L4([LBZ[0],0.0,0.0,LBZ[1]]);
+		let LBZ=IZE+ L4([LBW[0],0.0,0.0,LBW[1]]);
 		let AHP=A+ (AHM+ AHO);
 		let AHS=ddt(10, AHR);
-		let LCD=IZF* KOI;
+		let LCA=IZF* KOI;
 		let AHT=AHC* (PT- JG);
-		let LCE=(L2([IUR,0.0])- L2([0.0,IUI]))* AHC;
+		let LCB=(L2([IUR,0.0])- L2([0.0,IUI]))* AHC;
 		let AHU=ddt(11, AHT);
-		let LCF=LCE* KOI;
-		let LCG=L5([LCD[0],LCD[1],LCD[2],0.0,LCD[3]])+ L5([0.0,0.0,LCF[0],LCF[1],0.0]);
+		let LCC=LCB* KOI;
+		let LCD=L5([LCA[0],LCA[1],LCA[2],0.0,LCA[3]])+ L5([0.0,0.0,LCC[0],LCC[1],0.0]);
 		let IPN=AHR+ AHT;
-		let LCH=L5([IZF[0],IZF[1],IZF[2],0.0,IZF[3]])+ L5([0.0,0.0,LCE[0],LCE[1],0.0]);
+		let LCE=L5([IZF[0],IZF[1],IZF[2],0.0,IZF[3]])+ L5([0.0,0.0,LCB[0],LCB[1],0.0]);
 		let AHV=A+ (AHS+ AHU);
 		IGJ=AHF;
 		IGK=AHK;
@@ -3344,47 +3341,47 @@ impl Instance {
 		IPQ=A;
 		IPS=A;
 		IPU=A;
-		JBB=LBT;
-		JBC=LBX;
-		JBD=LCB;
-		JBE=LCG;
+		JBB=LBQ;
+		JBC=LBU;
+		JBD=LBY;
+		JBE=LCD;
 		JBF=KUC;
 		JBG=KUC;
 		JBH=KUD;
-		JBI=LBU;
-		JBJ=LBY;
-		JBK=LCC;
-		JBL=LCH;
+		JBI=LBR;
+		JBJ=LBV;
+		JBK=LBZ;
+		JBL=LCE;
 		JBM=KUC;
 		JBN=KUC;
 		JBO=KUD;
 		}else{
 		let AHW=ddt(12, AHA);
 		let AHX=AHC* (JQ- SG);
-		let LBE=(L2([IUM,0.0])- L2([0.0,IUY]))* AHC;
+		let LBB=(L2([IUM,0.0])- L2([0.0,IUY]))* AHC;
 		let AHY=ddt(13, AHX);
-		let LBF=LBE* KOI;
-		let LBG=(IZC* KOI)+ L5([LBF[0],0.0,0.0,LBF[1],0.0]);
+		let LBC=LBB* KOI;
+		let LBD=(IZC* KOI)+ L5([LBC[0],0.0,0.0,LBC[1],0.0]);
 		let IPP=AHA+ AHX;
-		let LBH=IZC+ L5([LBE[0],0.0,0.0,LBE[1],0.0]);
+		let LBE=IZC+ L5([LBB[0],0.0,0.0,LBB[1],0.0]);
 		let AHZ=A+ (AHW+ AHY);
 		let AIA=ddt(14, AHG);
 		let AIB=AHC* (JQ- OT);
-		let LBI=(L2([IUM,0.0])- L2([0.0,IUP]))* AHC;
+		let LBF=(L2([IUM,0.0])- L2([0.0,IUP]))* AHC;
 		let AIC=ddt(15, AIB);
-		let LBJ=LBI* KOI;
-		let LBK=(IZD* KOI)+ L5([LBJ[0],0.0,0.0,0.0,LBJ[1]]);
+		let LBG=LBF* KOI;
+		let LBH=(IZD* KOI)+ L5([LBG[0],0.0,0.0,0.0,LBG[1]]);
 		let IPR=AHG+ AIB;
-		let LBL=IZD+ L5([LBI[0],0.0,0.0,0.0,LBI[1]]);
+		let LBI=IZD+ L5([LBF[0],0.0,0.0,0.0,LBF[1]]);
 		let AID=A+ (AIA+ AIC);
 		let AIE=ddt(16, AHL);
 		let AIF=AHC* (PT- SG);
-		let LBM=(L2([IUR,0.0])- L2([0.0,IUY]))* AHC;
+		let LBJ=(L2([IUR,0.0])- L2([0.0,IUY]))* AHC;
 		let AIG=ddt(17, AIF);
-		let LBN=LBM* KOI;
-		let LBO=(IZE* KOI)+ L4([0.0,0.0,LBN[0],LBN[1]]);
+		let LBK=LBJ* KOI;
+		let LBL=(IZE* KOI)+ L4([0.0,0.0,LBK[0],LBK[1]]);
 		let IPT=AHL+ AIF;
-		let LBP=IZE+ L4([0.0,0.0,LBM[0],LBM[1]]);
+		let LBM=IZE+ L4([0.0,0.0,LBJ[0],LBJ[1]]);
 		let AIH=A+ (AIE+ AIG);
 		IGJ=A;
 		IGK=A;
@@ -3406,26 +3403,26 @@ impl Instance {
 		JBB=KUC;
 		JBC=KUC;
 		JBD=KUD;
-		JBE=LBQ;
-		JBF=LBG;
-		JBG=LBK;
-		JBH=LBO;
+		JBE=LBN;
+		JBF=LBD;
+		JBG=LBH;
+		JBH=LBL;
 		JBI=KUC;
 		JBJ=KUC;
 		JBK=KUD;
-		JBL=LBQ;
-		JBM=LBH;
-		JBN=LBL;
-		JBO=LBP;
+		JBL=LBN;
+		JBM=LBE;
+		JBN=LBI;
+		JBO=LBM;
 		}
 		let AIL=ddt(18, AIK);
 		let AIM=AHC* SS;
-		let LCI=KUA* AHC;
+		let LCF=KUA* AHC;
 		let AIN=ddt(19, AIM);
-		let LCJ=LCI* KOI;
-		let LCK=(IZG* KOI)+ L3([LCJ[0],0.0,LCJ[1]]);
+		let LCG=LCF* KOI;
+		let LCH=(IZG* KOI)+ L3([LCG[0],0.0,LCG[1]]);
 		let IPV=AIK+ AIM;
-		let LCL=IZG+ L3([LCI[0],0.0,LCI[1]]);
+		let LCI=IZG+ L3([LCF[0],0.0,LCF[1]]);
 		let AIO=A+ (AIL+ AIN);
 		let AIQ=AIP> SV;
 		let AWI;
@@ -3448,34 +3445,34 @@ impl Instance {
 		let AJF;
 		let JBW;
 		if JM{
-		let LCQ=KTN* SI;
+		let LCN=KTN* SI;
 		let AJB=((SI* SI)+ JV).sqrt();
-		let LCR=(LCQ+ LCQ)* (IUF/ (KNB* AJB));
+		let LCO=(LCN+ LCN)* (IUF/ (KNB* AJB));
 		AJF=AJB;
-		JBW=LCR;
+		JBW=LCO;
 		}else{
 		let AJC=KB/ JV;
 		let AJD=(AJC* SI).tanh();
 		let AJE=SI* AJD;
-		let LCP=(KTN* AJD)+ (((KTN* AJC)* (IUF- (AJD* AJD)))* SI);
+		let LCM=(KTN* AJD)+ (((KTN* AJC)* (IUF- (AJD* AJD)))* SI);
 		AJF=AJE;
-		JBW=LCP;
+		JBW=LCM;
 		}
 		let AJG=AIR- SI;
-		let LCS=L4([IYY[0],IYY[1],IYY[2],0.0]);
-		let LCT=LCS- L4([0.0,0.0,KTN[0],KTN[1]]);
+		let LCP=L4([IYY[0],IYY[1],IYY[2],0.0]);
+		let LCQ=LCP- L4([0.0,0.0,KTN[0],KTN[1]]);
 		let AJH=AIU* AZ;
-		let LCU=KJT* AIU;
+		let LCR=KJT* AIU;
 		let AJI=TS* AZ;
 		let AJJ=parameters[226]/ AJI;
-		let LCV=(((KJT* TS)* AJJ)* KNJ)/ AJI;
-		let LCW=JBW* AIT;
+		let LCS=product_div((KJT* TS),(-AJJ),AJI);
+		let LCT=JBW* AIT;
 		let AJK=AJJ+ (AIT* AJF);
-		let LCX=L3([LCV,0.0,0.0])+ L3([0.0,LCW[0],LCW[1]]);
-		let LCY=IVA* AJA;
+		let LCU=L3([LCS,0.0,0.0])+ L3([0.0,LCT[0],LCT[1]]);
+		let LCV=IVA* AJA;
 		let AJL=parameters[212]+ (AJA* BB);
 		let AJM=BE.powf(TI);
-		let LCZ=KJV* (TI* ((BE+ (((BE== KOL) as u8 as f64)* KUP)).powf((TI- IUF))));
+		let LCW=KJV* (TI* ((BE+ (((BE== KOL) as u8 as f64)* KUP)).powf((TI- IUF))));
 		let AJN=TH!= A;
 		let AJT;
 		let JBX;
@@ -3485,70 +3482,70 @@ impl Instance {
 		let AJQ=F/ AIX;
 		let AJR=AJP.powf(AJQ);
 		let AJS=AJF/ AJR;
-		let LDB=(((JBW/ TH)* (AIX* ((AJO+ (((AJO== KOL) as u8 as f64)* KUP)).powf((AIX- IUF)))))* (AJQ* ((AJP+ (((AJP== KOL) as u8 as f64)* KUP)).powf((AJQ- IUF)))))* AJS;
-		let LDC=(JBW- LDB)/ AJR;
+		let LCY=(JBW).product_sum_div(IUF,(((JBW/ TH)* (AIX* ((AJO+ (((AJO== KOL) as u8 as f64)* KUP)).powf((AIX- IUF)))))* (AJQ* ((AJP+ (((AJP== KOL) as u8 as f64)* KUP)).powf((AJQ- IUF))))),(-AJS),AJR);
 		AJT=AJS;
-		JBX=LDC;
+		JBX=LCY;
 		}else{
 		AJT=A;
-		JBX=LDA;
+		JBX=LCX;
 		}
 		let AJU=parameters[225]- (AJT* A);
-		let LDD=(((JBX* A)* KNJ)* AJF)+ (JBW* AJU);
+		let LCZ=(((JBX* A)* KNJ)* AJF)+ (JBW* AJU);
 		let AJV=AJL- (AJU* AJF);
-		let LDE=L3([LCY,0.0,0.0])- L3([0.0,LDD[0],LDD[1]]);
+		let LDA=L3([LCV,0.0,0.0])- L3([0.0,LCZ[0],LCZ[1]]);
 		let AJW=MC* AJK;
 		let AJX=AJW* AZ;
-		let LDF=((LCX* MC)* AZ)+ L3([(KJT* AJW),0.0,0.0]);
+		let LDB=((LCU* MC)* AZ)+ L3([(KJT* AJW),0.0,0.0]);
 		let AJY=HB* AJX;
-		let LDG=L3([(KLV* AJX),0.0,0.0])+ (LDF* HB);
+		let LDC=L3([(KLV* AJX),0.0,0.0])+ (LDB* HB);
 		let AJZ=(UK* AJH)/ MC;
-		let LDH=(LCU* UK)/ MC;
+		let LDD=(LCR* UK)/ MC;
 		let AKA=AJV- AJZ;
-		let LDI=LDE- L3([LDH,0.0,0.0]);
+		let LDE=LDA- L3([LDD,0.0,0.0]);
 		let AKI;
 		let JBY;
 		if JM{
 		let AKB=AIR- AJG;
-		let LDL=(LCS- LCT)* AKB;
+		let LDH=(LCP- LCQ)* AKB;
 		let AKC=((AKB* AKB)+ JV).sqrt();
 		let AKD=JW* ((AIR+ AJG)+ AKC);
-		let LDM=((LCS+ LCT)+ ((LDL+ LDL)* (IUF/ (KNB* AKC))))* JW;
+		let LDI=((LCP+ LCQ)+ ((LDH+ LDH)* (IUF/ (KNB* AKC))))* JW;
 		AKI=AKD;
-		JBY=LDM;
+		JBY=LDI;
 		}else{
 		let AKE=AIR- AJG;
-		let LDJ=LCS- LCT;
+		let LDF=LCP- LCQ;
 		let AKF=KB/ JV;
 		let AKG=(AKF* AKE).tanh();
 		let AKH=JW* ((AIR+ AJG)+ (AKE* AKG));
-		let LDK=((LCS+ LCT)+ ((LDJ* AKG)+ (((LDJ* AKF)* (IUF- (AKG* AKG)))* AKE)))* JW;
+		let LDG=((LCP+ LCQ)+ ((LDF* AKG)+ (((LDF* AKF)* (IUF- (AKG* AKG)))* AKE)))* JW;
 		AKI=AKH;
-		JBY=LDK;
+		JBY=LDG;
 		}
-		let LDN=L5([0.0,LDI[0],0.0,LDI[1],LDI[2]]);
+		let LDJ=L5([0.0,LDE[0],0.0,LDE[1],LDE[2]]);
 		let AKJ=(AKI- AKA)/ AJH;
-		let LDO=((L5([JBY[0],0.0,JBY[1],JBY[2],JBY[3]])- LDN)- L5([0.0,(LCU* AKJ),0.0,0.0,0.0]))/ AJH;
+		let LDK=L5([0.0,LCR,0.0,0.0,0.0]);
+		let LDL=((L5([JBY[0],0.0,JBY[1],JBY[2],JBY[3]])- LDJ)).product_sum_div(IUF,LDK,(-AKJ),AJH);
 		let AKK=AKJ> LD;
 		let AKZ;
 		let JBZ;
 		if AKK{
 		AKZ=A;
-		JBZ=LCM;
+		JBZ=LCJ;
 		}else{
 		let AKL=AKJ< -50f64;
 		let ALA;
 		let JCA;
 		if AKL{
 		ALA=F;
-		JCA=LCM;
+		JCA=LCJ;
 		}else{
 		let AKM=AKJ.exp();
 		let AKN=F+ AKM;
 		let AKO=F/ AKN;
-		let LDP=(((LDO* AKM)* AKO)* KNJ)/ AKN;
+		let LDM=((LDL* AKM)).product_div((-AKO),AKN);
 		ALA=AKO;
-		JCA=LDP;
+		JCA=LDM;
 		}
 		AKZ=ALA;
 		JBZ=JCA;
@@ -3557,38 +3554,38 @@ impl Instance {
 		let JCB;
 		if JM{
 		let AKP=AIR- AJG;
-		let LDS=(LCS- LCT)* AKP;
+		let LDP=(LCP- LCQ)* AKP;
 		let AKQ=((AKP* AKP)+ JV).sqrt();
 		let AKR=JW* ((AIR+ AJG)+ AKQ);
-		let LDT=((LCS+ LCT)+ ((LDS+ LDS)* (IUF/ (KNB* AKQ))))* JW;
+		let LDQ=((LCP+ LCQ)+ ((LDP+ LDP)* (IUF/ (KNB* AKQ))))* JW;
 		AKW=AKR;
-		JCB=LDT;
+		JCB=LDQ;
 		}else{
 		let AKS=AIR- AJG;
-		let LDQ=LCS- LCT;
+		let LDN=LCP- LCQ;
 		let AKT=KB/ JV;
 		let AKU=(AKT* AKS).tanh();
 		let AKV=JW* ((AIR+ AJG)+ (AKS* AKU));
-		let LDR=((LCS+ LCT)+ ((LDQ* AKU)+ (((LDQ* AKT)* (IUF- (AKU* AKU)))* AKS)))* JW;
+		let LDO=((LCP+ LCQ)+ ((LDN* AKU)+ (((LDN* AKT)* (IUF- (AKU* AKU)))* AKS)))* JW;
 		AKW=AKV;
-		JCB=LDR;
+		JCB=LDO;
 		}
 		let AKX=UK* AI;
 		let AKY=AKX* AJH;
-		let LDU=LCU* AKX;
-		let LDV=L5([0.0,LDE[0],0.0,LDE[1],LDE[2]]);
+		let LDR=LCR* AKX;
+		let LDS=L5([0.0,LDA[0],0.0,LDA[1],LDA[2]]);
 		let ALB=(AKW- (AJV- (AKY* AKZ)))/ AJX;
-		let LDW=LDF* ALB;
-		let LDX=((L5([JCB[0],0.0,JCB[1],JCB[2],JCB[3]])- (LDV- (L5([0.0,(LDU* AKZ),0.0,0.0,0.0])+ (JBZ* AKY))))- L5([0.0,LDW[0],0.0,LDW[1],LDW[2]]))/ AJX;
+		let LDT=L5([0.0,LDB[0],0.0,LDB[1],LDB[2]]);
+		let LDU=((L5([JCB[0],0.0,JCB[1],JCB[2],JCB[3]])- (LDS- (L5([0.0,(LDR* AKZ),0.0,0.0,0.0])+ (JBZ* AKY))))).product_sum_div(IUF,LDT,(-ALB),AJX);
 		let ALC=ALB> LD;
 		let ALL;
 		let JCC;
 		if ALC{
 		let ALD=AJY* ALB;
-		let LEC=LDG* ALB;
-		let LED=L5([0.0,LEC[0],0.0,LEC[1],LEC[2]])+ (LDX* AJY);
+		let LDZ=LDC* ALB;
+		let LEA=L5([0.0,LDZ[0],0.0,LDZ[1],LDZ[2]])+ (LDU* AJY);
 		ALL=ALD;
-		JCC=LED;
+		JCC=LEA;
 		}else{
 		let ALE=ALB< -50f64;
 		let ALM;
@@ -3596,164 +3593,162 @@ impl Instance {
 		if ALE{
 		let ALF=ALB.exp();
 		let ALG=AJY* ALF;
-		let LEA=LDG* ALF;
-		let LEB=L5([0.0,LEA[0],0.0,LEA[1],LEA[2]])+ ((LDX* ALF)* AJY);
+		let LDX=LDC* ALF;
+		let LDY=L5([0.0,LDX[0],0.0,LDX[1],LDX[2]])+ ((LDU* ALF)* AJY);
 		ALM=ALG;
-		JCD=LEB;
+		JCD=LDY;
 		}else{
 		let ALH=ALB.exp();
 		let ALI=F+ ALH;
 		let ALJ=ALI.ln();
 		let ALK=AJY* ALJ;
-		let LDY=LDG* ALJ;
-		let LDZ=L5([0.0,LDY[0],0.0,LDY[1],LDY[2]])+ (((LDX* ALH)* (IUF/ ALI))* AJY);
+		let LDV=LDC* ALJ;
+		let LDW=L5([0.0,LDV[0],0.0,LDV[1],LDV[2]])+ (((LDU* ALH)* (IUF/ ALI))* AJY);
 		ALM=ALK;
-		JCD=LDZ;
+		JCD=LDW;
 		}
 		ALL=ALM;
 		JCC=JCD;
 		}
 		let ALN=(AIY* ALL)/ HB;
+		let LEB=L5([0.0,KLV,0.0,0.0,0.0]);
 		let ALO=F+ ALN;
 		let ALP=AJM* ALO;
 		let ALQ=AIW/ ALP;
-		let LEE=(((L5([0.0,(LCZ* ALO),0.0,0.0,0.0])+ ((((JCC* AIY)- L5([0.0,(KLV* ALN),0.0,0.0,0.0]))/ HB)* AJM))* ALQ)* KNJ)/ ALP;
+		let LEC=((L5([0.0,(LCW* ALO),0.0,0.0,0.0])+ ((((JCC* AIY)).product_sum_div(IUF,LEB,(-ALN),HB))* AJM))).product_div((-ALQ),ALP);
 		let ALR=F+ (TJ* AC);
 		let ALS=(F+ (TJ* E))/ ALR;
 		let ALT=AIV* ALS;
-		let LEF=((((IVA* TJ)* ALS)* KNJ)/ ALR)* AIV;
+		let LED=(product_div((IVA* TJ),(-ALS),ALR))* AIV;
 		let ALU=F+ ((TK* AJF)/ AIP);
-		let LEG=((JBW* TK)/ AIP)* ALT;
-		let LEH=L3([(LEF* ALU),0.0,0.0])+ L3([0.0,LEG[0],LEG[1]]);
+		let LEE=((JBW* TK)/ AIP)* ALT;
+		let LEF=L3([(LED* ALU),0.0,0.0])+ L3([0.0,LEE[0],LEE[1]]);
 		let ALV=(AIZ* ALL)/ HB;
 		let ALW=F+ ALV;
 		let ALX=(ALT* ALU)/ ALW;
-		let LEI=(L5([0.0,LEH[0],0.0,LEH[1],LEH[2]])- ((((JCC* AIZ)- L5([0.0,(KLV* ALV),0.0,0.0,0.0]))/ HB)* ALX))/ ALW;
+		let LEG=(L5([0.0,LEF[0],0.0,LEF[1],LEF[2]])).product_sum_div(IUF,(((JCC* AIZ)).product_sum_div(IUF,LEB,(-ALV),HB)),(-ALX),ALW);
 		let ALY=MC* AKZ;
 		let ALZ=ALY* AZ;
 		let AMA=F- AKZ;
-		let LEJ=JBZ* KNJ;
+		let LEH=JBZ* KNJ;
 		let AMB=((ALZ* ALQ)/ AIP)+ (AMA* ALX);
-		let LEK=((((((JBZ* MC)* AZ)+ L5([0.0,(KJT* ALY),0.0,0.0,0.0]))* ALQ)+ (LEE* ALZ))/ AIP)+ ((LEJ* ALX)+ (LEI* AMA));
+		let LEI=((((((JBZ* MC)* AZ)+ L5([0.0,(KJT* ALY),0.0,0.0,0.0]))* ALQ)+ (LEC* ALZ))/ AIP)+ ((LEH* ALX)+ (LEG* AMA));
 		let AMC=(ALX* AIP)/ ALQ;
-		let LEL=((LEI* AIP)- (LEE* AMC))/ ALQ;
+		let LEJ=((LEG* AIP)).product_sum_div(IUF,LEC,(-AMC),ALQ);
 		let AMD=(MC* ALL)/ HB;
 		let AME=AMD/ AMC;
 		let AMF=(F+ AME).sqrt();
 		let AMG=(AMC* AMF)- AMC;
 		let AMH=AJX* AKZ;
-		let LEM=LDF* AKZ;
-		let LEN=L5([0.0,LEM[0],0.0,LEM[1],LEM[2]])+ (JBZ* AJX);
+		let LEK=LDB* AKZ;
+		let LEL=L5([0.0,LEK[0],0.0,LEK[1],LEK[2]])+ (JBZ* AJX);
 		let AMI=(AMC* AMA)+ AMH;
-		let LEO=((LEL* AMA)+ (LEJ* AMC))+ LEN;
-		let LEP=((((LEL* AMF)+ (((((((JCC* MC)- L5([0.0,(KLV* AMD),0.0,0.0,0.0]))/ HB)- (LEL* AME))/ AMC)* (IUF/ (KNB* AMF)))* AMC))- LEL)* AMA)+ (LEJ* AMG);
+		let LEM=((LEJ* AMA)+ (LEH* AMC))+ LEL;
+		let LEN=((((LEJ* AMF)+ (((((((JCC* MC)).product_sum_div(IUF,LEB,(-AMD),HB))).product_sum_div(IUF,LEJ,(-AME),AMC))* (IUF/ (KNB* AMF)))* AMC))- LEJ)* AMA)+ (LEH* AMG);
 		let AMJ=(AMG* AMA)+ AMH;
-		let LEQ=LEP+ LEN;
+		let LEO=LEN+ LEL;
 		let AMK=SI/ AMJ;
-		let LER=L5([0.0,0.0,0.0,KTN[0],KTN[1]]);
-		let LES=(LER- (LEQ* AMK))/ AMJ;
+		let LEP=L5([0.0,0.0,0.0,KTN[0],KTN[1]]);
+		let LEQ=(LEP).product_sum_div(IUF,LEO,(-AMK),AMJ);
 		let AMS;
 		let JCE;
 		if JM{
 		let AML=A- AMK;
-		let LEV=(LES* KNJ)* AML;
+		let LET=(LEQ* KNJ)* AML;
 		let AMM=((AML* AML)+ JV).sqrt();
 		let AMN=JW* ((A+ AMK)+ AMM);
-		let LEW=(LES+ ((LEV+ LEV)* (IUF/ (KNB* AMM))))* JW;
+		let LEU=(LEQ+ ((LET+ LET)* (IUF/ (KNB* AMM))))* JW;
 		AMS=AMN;
-		JCE=LEW;
+		JCE=LEU;
 		}else{
 		let AMO=A- AMK;
-		let LET=LES* KNJ;
+		let LER=LEQ* KNJ;
 		let AMP=KB/ JV;
 		let AMQ=(AMP* AMO).tanh();
 		let AMR=JW* ((A+ AMK)+ (AMO* AMQ));
-		let LEU=(LES+ ((LET* AMQ)+ (((LET* AMP)* (IUF- (AMQ* AMQ)))* AMO)))* JW;
+		let LES=(LEQ+ ((LER* AMQ)+ (((LER* AMP)* (IUF- (AMQ* AMQ)))* AMO)))* JW;
 		AMS=AMR;
-		JCE=LEU;
+		JCE=LES;
 		}
-		let LEX=AIX- IUF;
+		let LEV=AIX- IUF;
 		let AMT=F+ (AMS.powf(AIX));
 		let AMU=F/ AIX;
 		let AMV=AMT.powf(AMU);
-		let LEY=AMU- IUF;
+		let LEW=AMU- IUF;
 		let AMW=F/ AMV;
 		let AMX=SI* AMW;
-		let LEZ=KTN* AMW;
-		let LFA=(((((JCE* (AIX* ((AMS+ (((AMS== KOL) as u8 as f64)* KUP)).powf(LEX))))* (AMU* ((AMT+ (((AMT== KOL) as u8 as f64)* KUP)).powf(LEY))))* AMW)* KNJ)/ AMV)* SI;
-		let LFB=L5([0.0,0.0,0.0,LEZ[0],LEZ[1]])+ LFA;
+		let LEX=KTN* AMW;
+		let LEY=L5([0.0,0.0,0.0,LEX[0],LEX[1]])+ (((((JCE* (AIX* ((AMS+ (((AMS== KOL) as u8 as f64)* KUP)).powf(LEV))))* (AMU* ((AMT+ (((AMT== KOL) as u8 as f64)* KUP)).powf(LEW))))).product_div((-AMW),AMV))* SI);
 		let AMY=-SI;
-		let LFC=KTN* KNJ;
+		let LEZ=KTN* KNJ;
 		let AMZ=AMY/ AMJ;
-		let LFD=L5([0.0,0.0,0.0,LFC[0],LFC[1]]);
-		let LFE=(LFD- (LEQ* AMZ))/ AMJ;
+		let LFA=L5([0.0,0.0,0.0,LEZ[0],LEZ[1]]);
+		let LFB=(LFA).product_sum_div(IUF,LEO,(-AMZ),AMJ);
 		let ANH;
 		let JCF;
 		if JM{
 		let ANA=A- AMZ;
-		let LFH=(LFE* KNJ)* ANA;
+		let LFE=(LFB* KNJ)* ANA;
 		let ANB=((ANA* ANA)+ JV).sqrt();
 		let ANC=JW* ((A+ AMZ)+ ANB);
-		let LFI=(LFE+ ((LFH+ LFH)* (IUF/ (KNB* ANB))))* JW;
+		let LFF=(LFB+ ((LFE+ LFE)* (IUF/ (KNB* ANB))))* JW;
 		ANH=ANC;
-		JCF=LFI;
+		JCF=LFF;
 		}else{
 		let AND=A- AMZ;
-		let LFF=LFE* KNJ;
+		let LFC=LFB* KNJ;
 		let ANE=KB/ JV;
 		let ANF=(ANE* AND).tanh();
 		let ANG=JW* ((A+ AMZ)+ (AND* ANF));
-		let LFG=(LFE+ ((LFF* ANF)+ (((LFF* ANE)* (IUF- (ANF* ANF)))* AND)))* JW;
+		let LFD=(LFB+ ((LFC* ANF)+ (((LFC* ANE)* (IUF- (ANF* ANF)))* AND)))* JW;
 		ANH=ANG;
-		JCF=LFG;
+		JCF=LFD;
 		}
 		let ANI=F+ (ANH.powf(AIX));
 		let ANJ=ANI.powf(AMU);
 		let ANK=F/ ANJ;
 		let ANL=AMY* ANK;
-		let LFJ=LFC* ANK;
-		let LFK=(((((JCF* (AIX* ((ANH+ (((ANH== KOL) as u8 as f64)* KUP)).powf(LEX))))* (AMU* ((ANI+ (((ANI== KOL) as u8 as f64)* KUP)).powf(LEY))))* ANK)* KNJ)/ ANJ)* AMY;
-		let LFL=L5([0.0,0.0,0.0,LFJ[0],LFJ[1]])+ LFK;
-		let LFM=L5([IYY[0],0.0,IYY[1],IYY[2],0.0]);
+		let LFG=LEZ* ANK;
+		let LFH=L5([0.0,0.0,0.0,LFG[0],LFG[1]])+ (((((JCF* (AIX* ((ANH+ (((ANH== KOL) as u8 as f64)* KUP)).powf(LEV))))* (AMU* ((ANI+ (((ANI== KOL) as u8 as f64)* KUP)).powf(LEW))))).product_div((-ANK),ANJ))* AMY);
+		let LFI=L5([IYY[0],0.0,IYY[1],IYY[2],0.0]);
 		let ANM=(AIR- AKA)/ AJH;
-		let LFN=((LFM- LDN)- L5([0.0,(LCU* ANM),0.0,0.0,0.0]))/ AJH;
+		let LFJ=((LFI- LDJ)).product_sum_div(IUF,LDK,(-ANM),AJH);
 		let ANN=ANM> LD;
 		let ANS;
 		let JCG;
 		if ANN{
 		ANS=A;
-		JCG=LCM;
+		JCG=LCJ;
 		}else{
 		let ANO=ANM< -50f64;
 		let ANT;
 		let JCH;
 		if ANO{
 		ANT=F;
-		JCH=LCM;
+		JCH=LCJ;
 		}else{
 		let ANP=ANM.exp();
 		let ANQ=F+ ANP;
 		let ANR=F/ ANQ;
-		let LFO=(((LFN* ANP)* ANR)* KNJ)/ ANQ;
+		let LFK=((LFJ* ANP)).product_div((-ANR),ANQ);
 		ANT=ANR;
-		JCH=LFO;
+		JCH=LFK;
 		}
 		ANS=ANT;
 		JCG=JCH;
 		}
-		let LFP=L5([LCT[0],0.0,LCT[1],LCT[2],LCT[3]]);
+		let LFL=L5([LCQ[0],0.0,LCQ[1],LCQ[2],LCQ[3]]);
 		let ANU=((AJG- ANL)- (AJV- (AKY* ANS)))/ AJX;
-		let LFQ=LDF* ANU;
-		let LFR=(((LFP- LFL)- (LDV- (L5([0.0,(LDU* ANS),0.0,0.0,0.0])+ (JCG* AKY))))- L5([0.0,LFQ[0],0.0,LFQ[1],LFQ[2]]))/ AJX;
+		let LFM=(((LFL- LFH)- (LDS- (L5([0.0,(LDR* ANS),0.0,0.0,0.0])+ (JCG* AKY))))).product_sum_div(IUF,LDT,(-ANU),AJX);
 		let ANV=ANU> LD;
 		let AOW;
 		let JCI;
 		if ANV{
 		let ANW=AJY* ANU;
-		let LFW=LDG* ANU;
-		let LFX=L5([0.0,LFW[0],0.0,LFW[1],LFW[2]])+ (LFR* AJY);
+		let LFR=LDC* ANU;
+		let LFS=L5([0.0,LFR[0],0.0,LFR[1],LFR[2]])+ (LFM* AJY);
 		AOW=ANW;
-		JCI=LFX;
+		JCI=LFS;
 		}else{
 		let ANX=ANU< -50f64;
 		let AOX;
@@ -3761,61 +3756,60 @@ impl Instance {
 		if ANX{
 		let ANY=ANU.exp();
 		let ANZ=AJY* ANY;
-		let LFU=LDG* ANY;
-		let LFV=L5([0.0,LFU[0],0.0,LFU[1],LFU[2]])+ ((LFR* ANY)* AJY);
+		let LFP=LDC* ANY;
+		let LFQ=L5([0.0,LFP[0],0.0,LFP[1],LFP[2]])+ ((LFM* ANY)* AJY);
 		AOX=ANZ;
-		JCJ=LFV;
+		JCJ=LFQ;
 		}else{
 		let AOA=ANU.exp();
 		let AOB=F+ AOA;
 		let AOC=AOB.ln();
 		let AOD=AJY* AOC;
-		let LFS=LDG* AOC;
-		let LFT=L5([0.0,LFS[0],0.0,LFS[1],LFS[2]])+ (((LFR* AOA)* (IUF/ AOB))* AJY);
+		let LFN=LDC* AOC;
+		let LFO=L5([0.0,LFN[0],0.0,LFN[1],LFN[2]])+ (((LFM* AOA)* (IUF/ AOB))* AJY);
 		AOX=AOD;
-		JCJ=LFT;
+		JCJ=LFO;
 		}
 		AOW=AOX;
 		JCI=JCJ;
 		}
 		let AOE=(AJG- AKA)/ AJH;
-		let LFY=((LFP- LDN)- L5([0.0,(LCU* AOE),0.0,0.0,0.0]))/ AJH;
+		let LFT=((LFL- LDJ)).product_sum_div(IUF,LDK,(-AOE),AJH);
 		let AOF=AOE> LD;
 		let AOK;
 		let JCK;
 		if AOF{
 		AOK=A;
-		JCK=LCM;
+		JCK=LCJ;
 		}else{
 		let AOG=AOE< -50f64;
 		let AOL;
 		let JCL;
 		if AOG{
 		AOL=F;
-		JCL=LCM;
+		JCL=LCJ;
 		}else{
 		let AOH=AOE.exp();
 		let AOI=F+ AOH;
 		let AOJ=F/ AOI;
-		let LFZ=(((LFY* AOH)* AOJ)* KNJ)/ AOI;
+		let LFU=((LFT* AOH)).product_div((-AOJ),AOI);
 		AOL=AOJ;
-		JCL=LFZ;
+		JCL=LFU;
 		}
 		AOK=AOL;
 		JCK=JCL;
 		}
 		let AOM=((AIR- AMX)- (AJV- (AKY* AOK)))/ AJX;
-		let LGA=LDF* AOM;
-		let LGB=(((LFM- LFB)- (LDV- (L5([0.0,(LDU* AOK),0.0,0.0,0.0])+ (JCK* AKY))))- L5([0.0,LGA[0],0.0,LGA[1],LGA[2]]))/ AJX;
+		let LFV=(((LFI- LEY)- (LDS- (L5([0.0,(LDR* AOK),0.0,0.0,0.0])+ (JCK* AKY))))).product_sum_div(IUF,LDT,(-AOM),AJX);
 		let AON=AOM> LD;
 		let AOY;
 		let JCM;
 		if AON{
 		let AOO=AJY* AOM;
-		let LGG=LDG* AOM;
-		let LGH=L5([0.0,LGG[0],0.0,LGG[1],LGG[2]])+ (LGB* AJY);
+		let LGA=LDC* AOM;
+		let LGB=L5([0.0,LGA[0],0.0,LGA[1],LGA[2]])+ (LFV* AJY);
 		AOY=AOO;
-		JCM=LGH;
+		JCM=LGB;
 		}else{
 		let AOP=AOM< -50f64;
 		let AOZ;
@@ -3823,101 +3817,101 @@ impl Instance {
 		if AOP{
 		let AOQ=AOM.exp();
 		let AOR=AJY* AOQ;
-		let LGE=LDG* AOQ;
-		let LGF=L5([0.0,LGE[0],0.0,LGE[1],LGE[2]])+ ((LGB* AOQ)* AJY);
+		let LFY=LDC* AOQ;
+		let LFZ=L5([0.0,LFY[0],0.0,LFY[1],LFY[2]])+ ((LFV* AOQ)* AJY);
 		AOZ=AOR;
-		JCN=LGF;
+		JCN=LFZ;
 		}else{
 		let AOS=AOM.exp();
 		let AOT=F+ AOS;
 		let AOU=AOT.ln();
 		let AOV=AJY* AOU;
-		let LGC=LDG* AOU;
-		let LGD=L5([0.0,LGC[0],0.0,LGC[1],LGC[2]])+ (((LGB* AOS)* (IUF/ AOT))* AJY);
+		let LFW=LDC* AOU;
+		let LFX=L5([0.0,LFW[0],0.0,LFW[1],LFW[2]])+ (((LFV* AOS)* (IUF/ AOT))* AJY);
 		AOZ=AOV;
-		JCN=LGD;
+		JCN=LFX;
 		}
 		AOY=AOZ;
 		JCM=JCN;
 		}
 		let APA=(AOW- AOY)/ HB;
 		let APB=APA/ AMI;
-		let LGI=((((JCI- JCM)- L5([0.0,(KLV* APA),0.0,0.0,0.0]))/ HB)- (LEO* APB))/ AMI;
+		let LGC=((((JCI- JCM)).product_sum_div(IUF,LEB,(-APA),HB))).product_sum_div(IUF,LEM,(-APB),AMI);
 		let APG;
 		let JCO;
 		if JM{
-		let LGK=LGI* APB;
+		let LGE=LGC* APB;
 		let APC=((APB* APB)+ JV).sqrt();
-		let LGL=(LGK+ LGK)* (IUF/ (KNB* APC));
+		let LGF=(LGE+ LGE)* (IUF/ (KNB* APC));
 		APG=APC;
-		JCO=LGL;
+		JCO=LGF;
 		}else{
 		let APD=KB/ JV;
 		let APE=(APD* APB).tanh();
 		let APF=APB* APE;
-		let LGJ=(LGI* APE)+ (((LGI* APD)* (IUF- (APE* APE)))* APB);
+		let LGD=(LGC* APE)+ (((LGC* APD)* (IUF- (APE* APE)))* APB);
 		APG=APF;
-		JCO=LGJ;
+		JCO=LGD;
 		}
 		let APH=F+ (APG.powf(AIX));
 		let API=APH.powf(AMU);
 		let APJ=APB/ API;
 		let APK=AMB* APJ;
-		let LGM=((LGI- (((JCO* (AIX* ((APG+ (((APG== KOL) as u8 as f64)* KUP)).powf(LEX))))* (AMU* ((APH+ (((APH== KOL) as u8 as f64)* KUP)).powf(LEY))))* APJ))/ API)* AMB;
+		let LGG=((LGC).product_sum_div(IUF,((JCO* (AIX* ((APG+ (((APG== KOL) as u8 as f64)* KUP)).powf(LEV))))* (AMU* ((APH+ (((APH== KOL) as u8 as f64)* KUP)).powf(LEW)))),(-APJ),API))* AMB;
 		let APL=((JE* O)* P)* JW;
 		let APM=APL* (AOW+ AOY);
 		let APN=APM* APK;
-		let LGN=(((JCI+ JCM)* APL)* APK)+ (((LEK* APJ)+ LGM)* APM);
+		let LGH=(((JCI+ JCM)* APL)* APK)+ (((LEI* APJ)+ LGG)* APM);
 		let APO=MC* AJJ;
 		let APP=APO* AZ;
-		let LGO=((LCV* MC)* AZ)+ (KJT* APO);
+		let LGI=((LCS* MC)* AZ)+ (KJT* APO);
 		let APQ=HB* APP;
-		let LGP=(KLV* APP)+ (LGO* HB);
+		let LGJ=(KLV* APP)+ (LGI* HB);
 		let APR=AJL- AJZ;
-		let LGQ=LCY- LDH;
+		let LGK=LCV- LDD;
 		let APZ;
 		let JCP;
 		if JM{
 		let APS=AIR- AJG;
-		let LGT=(LCS- LCT)* APS;
+		let LGN=(LCP- LCQ)* APS;
 		let APT=((APS* APS)+ JV).sqrt();
 		let APU=JW* ((AIR+ AJG)+ APT);
-		let LGU=((LCS+ LCT)+ ((LGT+ LGT)* (IUF/ (KNB* APT))))* JW;
+		let LGO=((LCP+ LCQ)+ ((LGN+ LGN)* (IUF/ (KNB* APT))))* JW;
 		APZ=APU;
-		JCP=LGU;
+		JCP=LGO;
 		}else{
 		let APV=AIR- AJG;
-		let LGR=LCS- LCT;
+		let LGL=LCP- LCQ;
 		let APW=KB/ JV;
 		let APX=(APW* APV).tanh();
 		let APY=JW* ((AIR+ AJG)+ (APV* APX));
-		let LGS=((LCS+ LCT)+ ((LGR* APX)+ (((LGR* APW)* (IUF- (APX* APX)))* APV)))* JW;
+		let LGM=((LCP+ LCQ)+ ((LGL* APX)+ (((LGL* APW)* (IUF- (APX* APX)))* APV)))* JW;
 		APZ=APY;
-		JCP=LGS;
+		JCP=LGM;
 		}
-		let LGV=L5([0.0,LGQ,0.0,0.0,0.0]);
+		let LGP=L5([0.0,LGK,0.0,0.0,0.0]);
 		let AQA=(APZ- APR)/ AJH;
-		let LGW=((L5([JCP[0],0.0,JCP[1],JCP[2],JCP[3]])- LGV)- L5([0.0,(LCU* AQA),0.0,0.0,0.0]))/ AJH;
+		let LGQ=((L5([JCP[0],0.0,JCP[1],JCP[2],JCP[3]])- LGP)).product_sum_div(IUF,LDK,(-AQA),AJH);
 		let AQB=AQA> LD;
 		let AQO;
 		let JCQ;
 		if AQB{
 		AQO=A;
-		JCQ=LCM;
+		JCQ=LCJ;
 		}else{
 		let AQC=AQA< -50f64;
 		let AQP;
 		let JCR;
 		if AQC{
 		AQP=F;
-		JCR=LCM;
+		JCR=LCJ;
 		}else{
 		let AQD=AQA.exp();
 		let AQE=F+ AQD;
 		let AQF=F/ AQE;
-		let LGX=(((LGW* AQD)* AQF)* KNJ)/ AQE;
+		let LGR=((LGQ* AQD)).product_div((-AQF),AQE);
 		AQP=AQF;
-		JCR=LGX;
+		JCR=LGR;
 		}
 		AQO=AQP;
 		JCQ=JCR;
@@ -3926,33 +3920,34 @@ impl Instance {
 		let JCS;
 		if JM{
 		let AQG=AIR- AJG;
-		let LHA=(LCS- LCT)* AQG;
+		let LGU=(LCP- LCQ)* AQG;
 		let AQH=((AQG* AQG)+ JV).sqrt();
 		let AQI=JW* ((AIR+ AJG)+ AQH);
-		let LHB=((LCS+ LCT)+ ((LHA+ LHA)* (IUF/ (KNB* AQH))))* JW;
+		let LGV=((LCP+ LCQ)+ ((LGU+ LGU)* (IUF/ (KNB* AQH))))* JW;
 		AQN=AQI;
-		JCS=LHB;
+		JCS=LGV;
 		}else{
 		let AQJ=AIR- AJG;
-		let LGY=LCS- LCT;
+		let LGS=LCP- LCQ;
 		let AQK=KB/ JV;
 		let AQL=(AQK* AQJ).tanh();
 		let AQM=JW* ((AIR+ AJG)+ (AQJ* AQL));
-		let LGZ=((LCS+ LCT)+ ((LGY* AQL)+ (((LGY* AQK)* (IUF- (AQL* AQL)))* AQJ)))* JW;
+		let LGT=((LCP+ LCQ)+ ((LGS* AQL)+ (((LGS* AQK)* (IUF- (AQL* AQL)))* AQJ)))* JW;
 		AQN=AQM;
-		JCS=LGZ;
+		JCS=LGT;
 		}
-		let LHC=L5([0.0,LCY,0.0,0.0,0.0]);
+		let LGW=L5([0.0,LCV,0.0,0.0,0.0]);
 		let AQQ=(AQN- (AJL- (AKY* AQO)))/ APP;
-		let LHD=((L5([JCS[0],0.0,JCS[1],JCS[2],JCS[3]])- (LHC- (L5([0.0,(LDU* AQO),0.0,0.0,0.0])+ (JCQ* AKY))))- L5([0.0,(LGO* AQQ),0.0,0.0,0.0]))/ APP;
+		let LGX=L5([0.0,LGI,0.0,0.0,0.0]);
+		let LGY=((L5([JCS[0],0.0,JCS[1],JCS[2],JCS[3]])- (LGW- (L5([0.0,(LDR* AQO),0.0,0.0,0.0])+ (JCQ* AKY))))).product_sum_div(IUF,LGX,(-AQQ),APP);
 		let AQR=AQQ> LD;
 		let ARC;
 		let JCT;
 		if AQR{
 		let AQS=APQ* AQQ;
-		let LHG=L5([0.0,(LGP* AQQ),0.0,0.0,0.0])+ (LHD* APQ);
+		let LHB=L5([0.0,(LGJ* AQQ),0.0,0.0,0.0])+ (LGY* APQ);
 		ARC=AQS;
-		JCT=LHG;
+		JCT=LHB;
 		}else{
 		let AQT=AQQ< -50f64;
 		let ARD;
@@ -3960,128 +3955,127 @@ impl Instance {
 		if AQT{
 		let AQU=AQQ.exp();
 		let AQV=APQ* AQU;
-		let LHF=L5([0.0,(LGP* AQU),0.0,0.0,0.0])+ ((LHD* AQU)* APQ);
+		let LHA=L5([0.0,(LGJ* AQU),0.0,0.0,0.0])+ ((LGY* AQU)* APQ);
 		ARD=AQV;
-		JCU=LHF;
+		JCU=LHA;
 		}else{
 		let AQW=AQQ.exp();
 		let AQX=F+ AQW;
 		let AQY=AQX.ln();
 		let AQZ=APQ* AQY;
-		let LHE=L5([0.0,(LGP* AQY),0.0,0.0,0.0])+ (((LHD* AQW)* (IUF/ AQX))* APQ);
+		let LGZ=L5([0.0,(LGJ* AQY),0.0,0.0,0.0])+ (((LGY* AQW)* (IUF/ AQX))* APQ);
 		ARD=AQZ;
-		JCU=LHE;
+		JCU=LGZ;
 		}
 		ARC=ARD;
 		JCT=JCU;
 		}
 		let ARA=AIW/ AJM;
 		let ARB=(ALT* AIP)/ ARA;
-		let LHH=((LEF* AIP)- ((((LCZ* ARA)* KNJ)/ AJM)* ARB))/ ARA;
+		let LHC=product_sum_div((LED* AIP),IUF,(product_div(LCW,(-ARA),AJM)),(-ARB),ARA);
 		let ARE=(MC* ARC)/ HB;
 		let ARF=ARE/ ARB;
+		let LHD=L5([0.0,LHC,0.0,0.0,0.0]);
 		let ARG=(F+ ARF).sqrt();
 		let ARH=(ARB* ARG)- ARB;
-		let LHI=(L5([0.0,(LHH* ARG),0.0,0.0,0.0])+ (((((((JCT* MC)- L5([0.0,(KLV* ARE),0.0,0.0,0.0]))/ HB)- L5([0.0,(LHH* ARF),0.0,0.0,0.0]))/ ARB)* (IUF/ (KNB* ARG)))* ARB))- L5([0.0,LHH,0.0,0.0,0.0]);
 		let ARI=F- AQO;
+		let LHE=(((L5([0.0,(LHC* ARG),0.0,0.0,0.0])+ (((((((JCT* MC)).product_sum_div(IUF,LEB,(-ARE),HB))).product_sum_div(IUF,LHD,(-ARF),ARB))* (IUF/ (KNB* ARG)))* ARB))- LHD)* ARI)+ ((JCQ* KNJ)* ARH);
 		let ARJ=(ARH* ARI)+ (APP* AQO);
-		let LHJ=((LHI* ARI)+ ((JCQ* KNJ)* ARH))+ (L5([0.0,(LGO* AQO),0.0,0.0,0.0])+ (JCQ* APP));
+		let LHF=LHE+ (L5([0.0,(LGI* AQO),0.0,0.0,0.0])+ (JCQ* APP));
 		let ARK=SI/ ARJ;
-		let LHK=(LER- (LHJ* ARK))/ ARJ;
+		let LHG=(LEP).product_sum_div(IUF,LHF,(-ARK),ARJ);
 		let ARS;
 		let JCV;
 		if JM{
 		let ARL=A- ARK;
-		let LHN=(LHK* KNJ)* ARL;
+		let LHJ=(LHG* KNJ)* ARL;
 		let ARM=((ARL* ARL)+ JV).sqrt();
 		let ARN=JW* ((A+ ARK)+ ARM);
-		let LHO=(LHK+ ((LHN+ LHN)* (IUF/ (KNB* ARM))))* JW;
+		let LHK=(LHG+ ((LHJ+ LHJ)* (IUF/ (KNB* ARM))))* JW;
 		ARS=ARN;
-		JCV=LHO;
+		JCV=LHK;
 		}else{
 		let ARO=A- ARK;
-		let LHL=LHK* KNJ;
+		let LHH=LHG* KNJ;
 		let ARP=KB/ JV;
 		let ARQ=(ARP* ARO).tanh();
 		let ARR=JW* ((A+ ARK)+ (ARO* ARQ));
-		let LHM=(LHK+ ((LHL* ARQ)+ (((LHL* ARP)* (IUF- (ARQ* ARQ)))* ARO)))* JW;
+		let LHI=(LHG+ ((LHH* ARQ)+ (((LHH* ARP)* (IUF- (ARQ* ARQ)))* ARO)))* JW;
 		ARS=ARR;
-		JCV=LHM;
+		JCV=LHI;
 		}
 		let ART=F+ (ARS.powf(AIX));
 		let ARU=ART.powf(AMU);
 		let ARV=F/ ARU;
 		let ARW=SI* ARV;
-		let LHP=KTN* ARV;
-		let LHQ=(((((JCV* (AIX* ((ARS+ (((ARS== KOL) as u8 as f64)* KUP)).powf(LEX))))* (AMU* ((ART+ (((ART== KOL) as u8 as f64)* KUP)).powf(LEY))))* ARV)* KNJ)/ ARU)* SI;
-		let LHR=L5([0.0,0.0,0.0,LHP[0],LHP[1]])+ LHQ;
+		let LHL=KTN* ARV;
+		let LHM=L5([0.0,0.0,0.0,LHL[0],LHL[1]])+ (((((JCV* (AIX* ((ARS+ (((ARS== KOL) as u8 as f64)* KUP)).powf(LEV))))* (AMU* ((ART+ (((ART== KOL) as u8 as f64)* KUP)).powf(LEW))))).product_div((-ARV),ARU))* SI);
 		let ARX=AMY/ ARJ;
-		let LHS=(LFD- (LHJ* ARX))/ ARJ;
+		let LHN=(LFA).product_sum_div(IUF,LHF,(-ARX),ARJ);
 		let ASF;
 		let JCW;
 		if JM{
 		let ARY=A- ARX;
-		let LHV=(LHS* KNJ)* ARY;
+		let LHQ=(LHN* KNJ)* ARY;
 		let ARZ=((ARY* ARY)+ JV).sqrt();
 		let ASA=JW* ((A+ ARX)+ ARZ);
-		let LHW=(LHS+ ((LHV+ LHV)* (IUF/ (KNB* ARZ))))* JW;
+		let LHR=(LHN+ ((LHQ+ LHQ)* (IUF/ (KNB* ARZ))))* JW;
 		ASF=ASA;
-		JCW=LHW;
+		JCW=LHR;
 		}else{
 		let ASB=A- ARX;
-		let LHT=LHS* KNJ;
+		let LHO=LHN* KNJ;
 		let ASC=KB/ JV;
 		let ASD=(ASC* ASB).tanh();
 		let ASE=JW* ((A+ ARX)+ (ASB* ASD));
-		let LHU=(LHS+ ((LHT* ASD)+ (((LHT* ASC)* (IUF- (ASD* ASD)))* ASB)))* JW;
+		let LHP=(LHN+ ((LHO* ASD)+ (((LHO* ASC)* (IUF- (ASD* ASD)))* ASB)))* JW;
 		ASF=ASE;
-		JCW=LHU;
+		JCW=LHP;
 		}
 		let ASG=F+ (ASF.powf(AIX));
 		let ASH=ASG.powf(AMU);
 		let ASI=F/ ASH;
 		let ASJ=AMY* ASI;
-		let LHX=LFC* ASI;
-		let LHY=(((((JCW* (AIX* ((ASF+ (((ASF== KOL) as u8 as f64)* KUP)).powf(LEX))))* (AMU* ((ASG+ (((ASG== KOL) as u8 as f64)* KUP)).powf(LEY))))* ASI)* KNJ)/ ASH)* AMY;
-		let LHZ=L5([0.0,0.0,0.0,LHX[0],LHX[1]])+ LHY;
-		let LIA=L4([IYY[0],0.0,IYY[1],IYY[2]]);
+		let LHS=LEZ* ASI;
+		let LHT=L5([0.0,0.0,0.0,LHS[0],LHS[1]])+ (((((JCW* (AIX* ((ASF+ (((ASF== KOL) as u8 as f64)* KUP)).powf(LEV))))* (AMU* ((ASG+ (((ASG== KOL) as u8 as f64)* KUP)).powf(LEW))))).product_div((-ASI),ASH))* AMY);
+		let LHU=L4([IYY[0],0.0,IYY[1],IYY[2]]);
 		let ASK=(AIR- APR)/ AJH;
-		let LIB=((LIA- L4([0.0,LGQ,0.0,0.0]))- L4([0.0,(LCU* ASK),0.0,0.0]))/ AJH;
+		let LHV=((LHU- L4([0.0,LGK,0.0,0.0]))).product_sum_div(IUF,L4([0.0,LCR,0.0,0.0]),(-ASK),AJH);
 		let ASL=ASK> LD;
 		let ASQ;
 		let JCX;
 		if ASL{
 		ASQ=A;
-		JCX=LCN;
+		JCX=LCK;
 		}else{
 		let ASM=ASK< -50f64;
 		let ASR;
 		let JCY;
 		if ASM{
 		ASR=F;
-		JCY=LCN;
+		JCY=LCK;
 		}else{
 		let ASN=ASK.exp();
 		let ASO=F+ ASN;
 		let ASP=F/ ASO;
-		let LIC=(((LIB* ASN)* ASP)* KNJ)/ ASO;
+		let LHW=((LHV* ASN)).product_div((-ASP),ASO);
 		ASR=ASP;
-		JCY=LIC;
+		JCY=LHW;
 		}
 		ASQ=ASR;
 		JCX=JCY;
 		}
-		let LID=L4([0.0,LCY,0.0,0.0])- (L4([0.0,(LDU* ASQ),0.0,0.0])+ (JCX* AKY));
+		let LHX=L4([0.0,LCV,0.0,0.0])- (L4([0.0,(LDR* ASQ),0.0,0.0])+ (JCX* AKY));
 		let ASS=((AJG- ASJ)- (AJL- (AKY* ASQ)))/ APP;
-		let LIE=(((LFP- LHZ)- L5([LID[0],LID[1],LID[2],LID[3],0.0]))- L5([0.0,(LGO* ASS),0.0,0.0,0.0]))/ APP;
+		let LHY=(((LFL- LHT)- L5([LHX[0],LHX[1],LHX[2],LHX[3],0.0]))).product_sum_div(IUF,LGX,(-ASS),APP);
 		let AST=ASS> LD;
 		let ATU;
 		let JCZ;
 		if AST{
 		let ASU=APQ* ASS;
-		let LIH=L5([0.0,(LGP* ASS),0.0,0.0,0.0])+ (LIE* APQ);
+		let LIB=L5([0.0,(LGJ* ASS),0.0,0.0,0.0])+ (LHY* APQ);
 		ATU=ASU;
-		JCZ=LIH;
+		JCZ=LIB;
 		}else{
 		let ASV=ASS< -50f64;
 		let ATV;
@@ -4089,57 +4083,57 @@ impl Instance {
 		if ASV{
 		let ASW=ASS.exp();
 		let ASX=APQ* ASW;
-		let LIG=L5([0.0,(LGP* ASW),0.0,0.0,0.0])+ ((LIE* ASW)* APQ);
+		let LIA=L5([0.0,(LGJ* ASW),0.0,0.0,0.0])+ ((LHY* ASW)* APQ);
 		ATV=ASX;
-		JDA=LIG;
+		JDA=LIA;
 		}else{
 		let ASY=ASS.exp();
 		let ASZ=F+ ASY;
 		let ATA=ASZ.ln();
 		let ATB=APQ* ATA;
-		let LIF=L5([0.0,(LGP* ATA),0.0,0.0,0.0])+ (((LIE* ASY)* (IUF/ ASZ))* APQ);
+		let LHZ=L5([0.0,(LGJ* ATA),0.0,0.0,0.0])+ (((LHY* ASY)* (IUF/ ASZ))* APQ);
 		ATV=ATB;
-		JDA=LIF;
+		JDA=LHZ;
 		}
 		ATU=ATV;
 		JCZ=JDA;
 		}
 		let ATC=(AJG- APR)/ AJH;
-		let LII=((LFP- LGV)- L5([0.0,(LCU* ATC),0.0,0.0,0.0]))/ AJH;
+		let LIC=((LFL- LGP)).product_sum_div(IUF,LDK,(-ATC),AJH);
 		let ATD=ATC> LD;
 		let ATI;
 		let JDB;
 		if ATD{
 		ATI=A;
-		JDB=LCM;
+		JDB=LCJ;
 		}else{
 		let ATE=ATC< -50f64;
 		let ATJ;
 		let JDC;
 		if ATE{
 		ATJ=F;
-		JDC=LCM;
+		JDC=LCJ;
 		}else{
 		let ATF=ATC.exp();
 		let ATG=F+ ATF;
 		let ATH=F/ ATG;
-		let LIJ=(((LII* ATF)* ATH)* KNJ)/ ATG;
+		let LID=((LIC* ATF)).product_div((-ATH),ATG);
 		ATJ=ATH;
-		JDC=LIJ;
+		JDC=LID;
 		}
 		ATI=ATJ;
 		JDB=JDC;
 		}
 		let ATK=((AIR- ARW)- (AJL- (AKY* ATI)))/ APP;
-		let LIK=(((LFM- LHR)- (LHC- (L5([0.0,(LDU* ATI),0.0,0.0,0.0])+ (JDB* AKY))))- L5([0.0,(LGO* ATK),0.0,0.0,0.0]))/ APP;
+		let LIE=(((LFI- LHM)- (LGW- (L5([0.0,(LDR* ATI),0.0,0.0,0.0])+ (JDB* AKY))))).product_sum_div(IUF,LGX,(-ATK),APP);
 		let ATL=ATK> LD;
 		let ATX;
 		let JDD;
 		if ATL{
 		let ATM=APQ* ATK;
-		let LIN=L5([0.0,(LGP* ATK),0.0,0.0,0.0])+ (LIK* APQ);
+		let LIH=L5([0.0,(LGJ* ATK),0.0,0.0,0.0])+ (LIE* APQ);
 		ATX=ATM;
-		JDD=LIN;
+		JDD=LIH;
 		}else{
 		let ATN=ATK< -50f64;
 		let ATY;
@@ -4147,45 +4141,45 @@ impl Instance {
 		if ATN{
 		let ATO=ATK.exp();
 		let ATP=APQ* ATO;
-		let LIM=L5([0.0,(LGP* ATO),0.0,0.0,0.0])+ ((LIK* ATO)* APQ);
+		let LIG=L5([0.0,(LGJ* ATO),0.0,0.0,0.0])+ ((LIE* ATO)* APQ);
 		ATY=ATP;
-		JDE=LIM;
+		JDE=LIG;
 		}else{
 		let ATQ=ATK.exp();
 		let ATR=F+ ATQ;
 		let ATS=ATR.ln();
 		let ATT=APQ* ATS;
-		let LIL=L5([0.0,(LGP* ATS),0.0,0.0,0.0])+ (((LIK* ATQ)* (IUF/ ATR))* APQ);
+		let LIF=L5([0.0,(LGJ* ATS),0.0,0.0,0.0])+ (((LIE* ATQ)* (IUF/ ATR))* APQ);
 		ATY=ATT;
-		JDE=LIL;
+		JDE=LIF;
 		}
 		ATX=ATY;
 		JDD=JDE;
 		}
-		let LIO=JCZ* ATU;
-		let LIP=LIO+ LIO;
+		let LII=JCZ* ATU;
+		let LIJ=LII+ LII;
 		let ATW=(ATU* ATU)+ AEI;
-		let LIQ=JDD* ATX;
-		let LIR=LIQ+ LIQ;
+		let LIK=JDD* ATX;
+		let LIL=LIK+ LIK;
 		let ATZ=(ATX* ATX)+ AEI;
-		let LIS=(JCZ* ATX)+ (JDD* ATU);
+		let LIM=(JCZ* ATX)+ (JDD* ATU);
 		let AUA=(ATU* ATX)+ AEI;
 		let AUC=ATW+ ATZ;
-		let LIT=LIP+ LIR;
+		let LIN=LIJ+ LIL;
 		let AUD=(ATU+ ATX)+ AER;
 		let AUE=(AUB* (AUC+ AUA))/ AUD;
 		let AUF=AEU* ATW;
 		let AUG=AEW* ATZ;
-		let LIU=(((((LIP* ATU)+ (JCZ* ATW))* MC)+ (((LIR* ATX)+ (JDD* ATZ))* BF))+ (((LIP* AEU)* ATX)+ (JDD* AUF)))+ (((LIR* AEW)* ATU)+ (JCZ* AUG));
+		let LIO=(((((LIJ* ATU)+ (JCZ* ATW))* MC)+ (((LIL* ATX)+ (JDD* ATZ))* BF))+ (((LIJ* AEU)* ATX)+ (JDD* AUF)))+ (((LIL* AEW)* ATU)+ (JCZ* AUG));
 		let AUH=AEY* (AUC+ (MC* AUA));
 		let AUI=(MC* ((((MC* ((ATW* ATU)+ AEK))+ (BF* ((ATZ* ATX)+ AEK)))+ (AUF* ATX))+ (AUG* ATU)))/ AUH;
-		let LIV=((LIU* MC)- (((LIT+ (LIS* MC))* AEY)* AUI))/ AUH;
+		let LIP=((LIO* MC)).product_sum_div(IUF,((LIN+ (LIM* MC))* AEY),(-AUI),AUH);
 		let AUJ=O* P;
 		let AUK=(AUJ* AIP)* JE;
 		let AUL=AUK* (AUE- AUI);
-		let LIW=(((((LIT+ LIS)* AUB)- ((JCZ+ JDD)* AUE))/ AUD)- LIV)* AUK;
+		let LIQ=(((((LIN+ LIM)* AUB)).product_sum_div(IUF,(JCZ+ JDD),(-AUE),AUD))- LIP)* AUK;
 		let AUM=AUK* AUI;
-		let LIX=LIV* AUK;
+		let LIR=LIP* AUK;
 		let AUN=parameters[217]== F;
 		let AWD;
 		let AWE;
@@ -4194,31 +4188,31 @@ impl Instance {
 		if AUN{
 		let AUO=UK* JW;
 		let AUP=AJL- (AUO* AJH);
-		let LIY=LCY- (LCU* AUO);
+		let LIS=LCV- (LCR* AUO);
 		let AUQ=(AIS- AUP)/ APP;
-		let LIZ=((L4([IYZ[0],0.0,IYZ[1],IYZ[2]])- L4([0.0,LIY,0.0,0.0]))- L4([0.0,(LGO* AUQ),0.0,0.0]))/ APP;
+		let LIT=((L4([IYZ[0],0.0,IYZ[1],IYZ[2]])- L4([0.0,LIS,0.0,0.0]))).product_sum_div(IUF,L4([0.0,LGI,0.0,0.0]),(-AUQ),APP);
 		let AUR=AUQ> LD;
 		let AVA;
 		let JDH;
 		if AUR{
 		AVA=AUQ;
-		JDH=LIZ;
+		JDH=LIT;
 		}else{
 		let AUS=AUQ< -50f64;
 		let AVB;
 		let JDI;
 		if AUS{
 		let AUT=AUQ.exp();
-		let LJB=LIZ* AUT;
+		let LIV=LIT* AUT;
 		AVB=AUT;
-		JDI=LJB;
+		JDI=LIV;
 		}else{
 		let AUU=AUQ.exp();
 		let AUV=F+ AUU;
 		let AUW=AUV.ln();
-		let LJA=(LIZ* AUU)* (IUF/ AUV);
+		let LIU=(LIT* AUU)* (IUF/ AUV);
 		AVB=AUW;
-		JDI=LJA;
+		JDI=LIU;
 		}
 		AVA=AVB;
 		JDH=JDI;
@@ -4227,31 +4221,31 @@ impl Instance {
 		let AUY=AUX* HZ;
 		let AUZ=AUY* APP;
 		let AVC=AUZ* AVA;
-		let LJC=L4([0.0,((((KMD* AUX)* APP)+ (LGO* AUY))* AVA),0.0,0.0])+ (JDH* AUZ);
+		let LIW=L4([0.0,((((KMD* AUX)* APP)+ (LGI* AUY))* AVA),0.0,0.0])+ (JDH* AUZ);
 		let AVD=(SK- AUP)/ APP;
-		let LJD=((L3([KTP[0],0.0,KTP[1]])- L3([0.0,LIY,0.0]))- L3([0.0,(LGO* AVD),0.0]))/ APP;
+		let LIX=((L3([KTP[0],0.0,KTP[1]])- L3([0.0,LIS,0.0]))).product_sum_div(IUF,L3([0.0,LGI,0.0]),(-AVD),APP);
 		let AVE=AVD> LD;
 		let AVM;
 		let JDJ;
 		if AVE{
 		AVM=AVD;
-		JDJ=LJD;
+		JDJ=LIX;
 		}else{
 		let AVF=AVD< -50f64;
 		let AVN;
 		let JDK;
 		if AVF{
 		let AVG=AVD.exp();
-		let LJF=LJD* AVG;
+		let LIZ=LIX* AVG;
 		AVN=AVG;
-		JDK=LJF;
+		JDK=LIZ;
 		}else{
 		let AVH=AVD.exp();
 		let AVI=F+ AVH;
 		let AVJ=AVI.ln();
-		let LJE=(LJD* AVH)* (IUF/ AVI);
+		let LIY=(LIX* AVH)* (IUF/ AVI);
 		AVN=AVJ;
-		JDK=LJE;
+		JDK=LIY;
 		}
 		AVM=AVN;
 		JDJ=JDK;
@@ -4259,16 +4253,16 @@ impl Instance {
 		let AVK=AUX* IX;
 		let AVL=AVK* APP;
 		let AVO=AVL* AVM;
-		let LJG=L3([0.0,((((KML* AUX)* APP)+ (LGO* AVK))* AVM),0.0])+ (JDJ* AVL);
+		let LJA=L3([0.0,((((KML* AUX)* APP)+ (LGI* AVK))* AVM),0.0])+ (JDJ* AVL);
 		AWD=AVC;
 		AWE=AVO;
-		JDF=LJC;
-		JDG=LJG;
+		JDF=LIW;
+		JDG=LJA;
 		}else{
 		AWD=A;
 		AWE=A;
-		JDF=LCN;
-		JDG=LCO;
+		JDF=LCK;
+		JDG=LCL;
 		}
 		let AVP=parameters[215]== F;
 		let AWF;
@@ -4276,29 +4270,29 @@ impl Instance {
 		if AVP{
 		let AVQ=UK* JW;
 		let AVR=(AIR- (AJL- (AVQ* AJH)))/ APP;
-		let LJH=((LIA- L4([0.0,(LCY- (LCU* AVQ)),0.0,0.0]))- L4([0.0,(LGO* AVR),0.0,0.0]))/ APP;
+		let LJB=((LHU- L4([0.0,(LCV- (LCR* AVQ)),0.0,0.0]))).product_sum_div(IUF,L4([0.0,LGI,0.0,0.0]),(-AVR),APP);
 		let AVS=AVR> LD;
 		let AWA;
 		let JDM;
 		if AVS{
 		AWA=AVR;
-		JDM=LJH;
+		JDM=LJB;
 		}else{
 		let AVT=AVR< -50f64;
 		let AWB;
 		let JDN;
 		if AVT{
 		let AVU=AVR.exp();
-		let LJJ=LJH* AVU;
+		let LJD=LJB* AVU;
 		AWB=AVU;
-		JDN=LJJ;
+		JDN=LJD;
 		}else{
 		let AVV=AVR.exp();
 		let AVW=F+ AVV;
 		let AVX=AVW.ln();
-		let LJI=(LJH* AVV)* (IUF/ AVW);
+		let LJC=(LJB* AVV)* (IUF/ AVW);
 		AWB=AVX;
-		JDN=LJI;
+		JDN=LJC;
 		}
 		AWA=AWB;
 		JDM=JDN;
@@ -4306,15 +4300,15 @@ impl Instance {
 		let AVY=(AUJ* JE)* parameters[216];
 		let AVZ=AVY* APP;
 		let AWC=AVZ* AWA;
-		let LJK=L4([0.0,((LGO* AVY)* AWA),0.0,0.0])+ (JDM* AVZ);
+		let LJE=L4([0.0,((LGI* AVY)* AWA),0.0,0.0])+ (JDM* AVZ);
 		AWF=AWC;
-		JDL=LJK;
+		JDL=LJE;
 		}else{
 		AWF=A;
-		JDL=LCN;
+		JDL=LCK;
 		}
-		let LJL=KTM* D;
-		let LJM=LGN+ L5([0.0,0.0,0.0,LJL[0],LJL[1]]);
+		let LJF=KTM* D;
+		let LJG=LGH+ L5([0.0,0.0,0.0,LJF[0],LJF[1]]);
 		let AWG=A+ (APN+ (D* SH));
 		AWI=AUL;
 		AWN=AUM;
@@ -4325,13 +4319,13 @@ impl Instance {
 		IGT=AWG;
 		IGU=A;
 		IOF=A;
-		JBP=LIW;
-		JBQ=LIX;
+		JBP=LIQ;
+		JBQ=LIR;
 		JBR=JDF;
 		JBS=JDL;
 		JBT=JDG;
-		JBU=LGN;
-		JBV=LJM;
+		JBU=LGH;
+		JBV=LJG;
 		}else{
 		AWI=A;
 		AWN=A;
@@ -4342,13 +4336,13 @@ impl Instance {
 		IGT=A;
 		IGU=AWH;
 		IOF=F;
-		JBP=LCM;
-		JBQ=LCM;
-		JBR=LCN;
-		JBS=LCN;
-		JBT=LCO;
-		JBU=LCM;
-		JBV=LCM;
+		JBP=LCJ;
+		JBQ=LCJ;
+		JBR=LCK;
+		JBS=LCK;
+		JBT=LCL;
+		JBU=LCJ;
+		JBV=LCJ;
 		}
 		let IGV;
 		let IGW;
@@ -4384,40 +4378,40 @@ impl Instance {
 		if SB{
 		let AWJ=ddt(20, AWI);
 		let AWK=AHC* (PT- RW);
-		let LKA=(L2([IUR,0.0])- L2([0.0,IUX]))* AHC;
+		let LJU=(L2([IUR,0.0])- L2([0.0,IUX]))* AHC;
 		let AWL=ddt(21, AWK);
-		let LKB=LKA* KOI;
-		let LKC=(JBP* KOI)+ L5([0.0,0.0,LKB[0],LKB[1],0.0]);
+		let LJV=LJU* KOI;
+		let LJW=(JBP* KOI)+ L5([0.0,0.0,LJV[0],LJV[1],0.0]);
 		let IPW=AWI+ AWK;
-		let LKD=JBP+ L5([0.0,0.0,LKA[0],LKA[1],0.0]);
+		let LJX=JBP+ L5([0.0,0.0,LJU[0],LJU[1],0.0]);
 		let AWM=A+ (AWJ+ AWL);
 		let AWO=ddt(22, AWN);
 		let AWP=AHC* (PT- SG);
-		let LKE=(L2([IUR,0.0])- L2([0.0,IUY]))* AHC;
+		let LJY=(L2([IUR,0.0])- L2([0.0,IUY]))* AHC;
 		let AWQ=ddt(23, AWP);
-		let LKF=LKE* KOI;
-		let LKG=(JBQ* KOI)+ L5([0.0,0.0,LKF[0],0.0,LKF[1]]);
+		let LJZ=LJY* KOI;
+		let LKA=(JBQ* KOI)+ L5([0.0,0.0,LJZ[0],0.0,LJZ[1]]);
 		let IPY=AWN+ AWP;
-		let LKH=JBQ+ L5([0.0,0.0,LKE[0],0.0,LKE[1]]);
+		let LKB=JBQ+ L5([0.0,0.0,LJY[0],0.0,LJY[1]]);
 		let AWR=A+ (AWO+ AWQ);
 		let AWT=ddt(24, AWS);
 		let AWU=AHC* (JQ- RW);
-		let LKI=(L2([IUM,0.0])- L2([0.0,IUX]))* AHC;
+		let LKC=(L2([IUM,0.0])- L2([0.0,IUX]))* AHC;
 		let AWV=ddt(25, AWU);
-		let LKJ=LKI* KOI;
-		let LKK=(JBR* KOI)+ L4([LKJ[0],0.0,0.0,LKJ[1]]);
+		let LKD=LKC* KOI;
+		let LKE=(JBR* KOI)+ L4([LKD[0],0.0,0.0,LKD[1]]);
 		let IQA=AWS+ AWU;
-		let LKL=JBR+ L4([LKI[0],0.0,0.0,LKI[1]]);
+		let LKF=JBR+ L4([LKC[0],0.0,0.0,LKC[1]]);
 		let AWW=A+ (AWT+ AWV);
 		let AWZ=ddt(26, AWY);
-		let LKM=JBS* KOI;
+		let LKG=JBS* KOI;
 		let AXA=AHC* (PT- JG);
-		let LKN=(L2([IUR,0.0])- L2([0.0,IUI]))* AHC;
+		let LKH=(L2([IUR,0.0])- L2([0.0,IUI]))* AHC;
 		let AXB=ddt(27, AXA);
-		let LKO=LKN* KOI;
-		let LKP=L5([LKM[0],LKM[1],LKM[2],0.0,LKM[3]])+ L5([0.0,0.0,LKO[0],LKO[1],0.0]);
+		let LKI=LKH* KOI;
+		let LKJ=L5([LKG[0],LKG[1],LKG[2],0.0,LKG[3]])+ L5([0.0,0.0,LKI[0],LKI[1],0.0]);
 		let IQC=AWY+ AXA;
-		let LKQ=L5([JBS[0],JBS[1],JBS[2],0.0,JBS[3]])+ L5([0.0,0.0,LKN[0],LKN[1],0.0]);
+		let LKK=L5([JBS[0],JBS[1],JBS[2],0.0,JBS[3]])+ L5([0.0,0.0,LKH[0],LKH[1],0.0]);
 		let AXC=A+ (AWZ+ AXB);
 		IGV=AWM;
 		IGW=AWR;
@@ -4436,47 +4430,47 @@ impl Instance {
 		IQF=A;
 		IQH=A;
 		IQJ=A;
-		JDO=LKC;
-		JDP=LKG;
-		JDQ=LKK;
-		JDR=LKP;
-		JDS=LCM;
-		JDT=LCM;
-		JDU=LCN;
-		JDV=LKD;
-		JDW=LKH;
-		JDX=LKL;
-		JDY=LKQ;
-		JDZ=LCM;
-		JEA=LCM;
-		JEB=LCN;
+		JDO=LJW;
+		JDP=LKA;
+		JDQ=LKE;
+		JDR=LKJ;
+		JDS=LCJ;
+		JDT=LCJ;
+		JDU=LCK;
+		JDV=LJX;
+		JDW=LKB;
+		JDX=LKF;
+		JDY=LKK;
+		JDZ=LCJ;
+		JEA=LCJ;
+		JEB=LCK;
 		}else{
 		let AXD=ddt(28, AWI);
 		let AXE=AHC* (JQ- RW);
-		let LJN=(L2([IUM,0.0])- L2([0.0,IUX]))* AHC;
+		let LJH=(L2([IUM,0.0])- L2([0.0,IUX]))* AHC;
 		let AXF=ddt(29, AXE);
-		let LJO=LJN* KOI;
-		let LJP=(JBP* KOI)+ L5([LJO[0],0.0,0.0,LJO[1],0.0]);
+		let LJI=LJH* KOI;
+		let LJJ=(JBP* KOI)+ L5([LJI[0],0.0,0.0,LJI[1],0.0]);
 		let IQE=AWI+ AXE;
-		let LJQ=JBP+ L5([LJN[0],0.0,0.0,LJN[1],0.0]);
+		let LJK=JBP+ L5([LJH[0],0.0,0.0,LJH[1],0.0]);
 		let AXG=A+ (AXD+ AXF);
 		let AXH=ddt(30, AWN);
 		let AXI=AHC* (JQ- SG);
-		let LJR=(L2([IUM,0.0])- L2([0.0,IUY]))* AHC;
+		let LJL=(L2([IUM,0.0])- L2([0.0,IUY]))* AHC;
 		let AXJ=ddt(31, AXI);
-		let LJS=LJR* KOI;
-		let LJT=(JBQ* KOI)+ L5([LJS[0],0.0,0.0,0.0,LJS[1]]);
+		let LJM=LJL* KOI;
+		let LJN=(JBQ* KOI)+ L5([LJM[0],0.0,0.0,0.0,LJM[1]]);
 		let IQG=AWN+ AXI;
-		let LJU=JBQ+ L5([LJR[0],0.0,0.0,0.0,LJR[1]]);
+		let LJO=JBQ+ L5([LJL[0],0.0,0.0,0.0,LJL[1]]);
 		let AXK=A+ (AXH+ AXJ);
 		let AXL=ddt(32, AWS);
 		let AXM=AHC* (PT- RW);
-		let LJV=(L2([IUR,0.0])- L2([0.0,IUX]))* AHC;
+		let LJP=(L2([IUR,0.0])- L2([0.0,IUX]))* AHC;
 		let AXN=ddt(33, AXM);
-		let LJW=LJV* KOI;
-		let LJX=(JBR* KOI)+ L4([0.0,0.0,LJW[0],LJW[1]]);
+		let LJQ=LJP* KOI;
+		let LJR=(JBR* KOI)+ L4([0.0,0.0,LJQ[0],LJQ[1]]);
 		let IQI=AWS+ AXM;
-		let LJY=JBR+ L4([0.0,0.0,LJV[0],LJV[1]]);
+		let LJS=JBR+ L4([0.0,0.0,LJP[0],LJP[1]]);
 		let AXO=A+ (AXL+ AXN);
 		IGV=A;
 		IGW=A;
@@ -4495,29 +4489,29 @@ impl Instance {
 		IQF=IQE;
 		IQH=IQG;
 		IQJ=IQI;
-		JDO=LCM;
-		JDP=LCM;
-		JDQ=LCN;
-		JDR=LJZ;
-		JDS=LJP;
-		JDT=LJT;
-		JDU=LJX;
-		JDV=LCM;
-		JDW=LCM;
-		JDX=LCN;
-		JDY=LJZ;
-		JDZ=LJQ;
-		JEA=LJU;
-		JEB=LJY;
+		JDO=LCJ;
+		JDP=LCJ;
+		JDQ=LCK;
+		JDR=LJT;
+		JDS=LJJ;
+		JDT=LJN;
+		JDU=LJR;
+		JDV=LCJ;
+		JDW=LCJ;
+		JDX=LCK;
+		JDY=LJT;
+		JDZ=LJK;
+		JEA=LJO;
+		JEB=LJS;
 		}
 		let AXS=ddt(34, AXR);
 		let AXT=AHC* SJ;
-		let LKR=KTO* AHC;
+		let LKL=KTO* AHC;
 		let AXU=ddt(35, AXT);
-		let LKS=LKR* KOI;
-		let LKT=(JBT* KOI)+ L3([LKS[0],0.0,LKS[1]]);
+		let LKM=LKL* KOI;
+		let LKN=(JBT* KOI)+ L3([LKM[0],0.0,LKM[1]]);
 		let IQK=AXR+ AXT;
-		let LKU=JBT+ L3([LKR[0],0.0,LKR[1]]);
+		let LKO=JBT+ L3([LKL[0],0.0,LKL[1]]);
 		let AXV=A+ (AXS+ AXU);
 		let AXX=AXW> SV;
 		let BLP;
@@ -4540,34 +4534,34 @@ impl Instance {
 		let AYM;
 		let JEJ;
 		if JM{
-		let LKZ=KTB* RY;
+		let LKT=KTB* RY;
 		let AYI=((RY* RY)+ JV).sqrt();
-		let LLA=(LKZ+ LKZ)* (IUF/ (KNB* AYI));
+		let LKU=(LKT+ LKT)* (IUF/ (KNB* AYI));
 		AYM=AYI;
-		JEJ=LLA;
+		JEJ=LKU;
 		}else{
 		let AYJ=KB/ JV;
 		let AYK=(AYJ* RY).tanh();
 		let AYL=RY* AYK;
-		let LKY=(KTB* AYK)+ (((KTB* AYJ)* (IUF- (AYK* AYK)))* RY);
+		let LKS=(KTB* AYK)+ (((KTB* AYJ)* (IUF- (AYK* AYK)))* RY);
 		AYM=AYL;
-		JEJ=LKY;
+		JEJ=LKS;
 		}
 		let AYN=AXY- RY;
-		let LLB=L4([IYW[0],IYW[1],IYW[2],0.0]);
-		let LLC=LLB- L4([0.0,0.0,KTB[0],KTB[1]]);
+		let LKV=L4([IYW[0],IYW[1],IYW[2],0.0]);
+		let LKW=LKV- L4([0.0,0.0,KTB[0],KTB[1]]);
 		let AYO=AYB* AZ;
-		let LLD=KJT* AYB;
+		let LKX=KJT* AYB;
 		let AYP=TS* AZ;
 		let AYQ=parameters[204]/ AYP;
-		let LLE=(((KJT* TS)* AYQ)* KNJ)/ AYP;
-		let LLF=JEJ* AYA;
+		let LKY=product_div((KJT* TS),(-AYQ),AYP);
+		let LKZ=JEJ* AYA;
 		let AYR=AYQ+ (AYA* AYM);
-		let LLG=L3([LLE,0.0,0.0])+ L3([0.0,LLF[0],LLF[1]]);
-		let LLH=IVA* AYH;
+		let LLA=L3([LKY,0.0,0.0])+ L3([0.0,LKZ[0],LKZ[1]]);
+		let LLB=IVA* AYH;
 		let AYS=parameters[190]+ (AYH* BB);
 		let AYT=BE.powf(TI);
-		let LLI=KJV* (TI* ((BE+ (((BE== KOL) as u8 as f64)* KUP)).powf((TI- IUF))));
+		let LLC=KJV* (TI* ((BE+ (((BE== KOL) as u8 as f64)* KUP)).powf((TI- IUF))));
 		let AYU=TH!= A;
 		let AZA;
 		let JEK;
@@ -4577,70 +4571,70 @@ impl Instance {
 		let AYX=F/ AYE;
 		let AYY=AYW.powf(AYX);
 		let AYZ=AYM/ AYY;
-		let LLK=(((JEJ/ TH)* (AYE* ((AYV+ (((AYV== KOL) as u8 as f64)* KUP)).powf((AYE- IUF)))))* (AYX* ((AYW+ (((AYW== KOL) as u8 as f64)* KUP)).powf((AYX- IUF)))))* AYZ;
-		let LLL=(JEJ- LLK)/ AYY;
+		let LLE=(JEJ).product_sum_div(IUF,(((JEJ/ TH)* (AYE* ((AYV+ (((AYV== KOL) as u8 as f64)* KUP)).powf((AYE- IUF)))))* (AYX* ((AYW+ (((AYW== KOL) as u8 as f64)* KUP)).powf((AYX- IUF))))),(-AYZ),AYY);
 		AZA=AYZ;
-		JEK=LLL;
+		JEK=LLE;
 		}else{
 		AZA=A;
-		JEK=LLJ;
+		JEK=LLD;
 		}
 		let AZB=parameters[203]- (AZA* A);
-		let LLM=(((JEK* A)* KNJ)* AYM)+ (JEJ* AZB);
+		let LLF=(((JEK* A)* KNJ)* AYM)+ (JEJ* AZB);
 		let AZC=AYS- (AZB* AYM);
-		let LLN=L3([LLH,0.0,0.0])- L3([0.0,LLM[0],LLM[1]]);
+		let LLG=L3([LLB,0.0,0.0])- L3([0.0,LLF[0],LLF[1]]);
 		let AZD=MC* AYR;
 		let AZE=AZD* AZ;
-		let LLO=((LLG* MC)* AZ)+ L3([(KJT* AZD),0.0,0.0]);
+		let LLH=((LLA* MC)* AZ)+ L3([(KJT* AZD),0.0,0.0]);
 		let AZF=GV* AZE;
-		let LLP=L3([(KLT* AZE),0.0,0.0])+ (LLO* GV);
+		let LLI=L3([(KLT* AZE),0.0,0.0])+ (LLH* GV);
 		let AZG=(UK* AYO)/ MC;
-		let LLQ=(LLD* UK)/ MC;
+		let LLJ=(LKX* UK)/ MC;
 		let AZH=AZC- AZG;
-		let LLR=LLN- L3([LLQ,0.0,0.0]);
+		let LLK=LLG- L3([LLJ,0.0,0.0]);
 		let AZP;
 		let JEL;
 		if JM{
 		let AZI=AXY- AYN;
-		let LLU=(LLB- LLC)* AZI;
+		let LLN=(LKV- LKW)* AZI;
 		let AZJ=((AZI* AZI)+ JV).sqrt();
 		let AZK=JW* ((AXY+ AYN)+ AZJ);
-		let LLV=((LLB+ LLC)+ ((LLU+ LLU)* (IUF/ (KNB* AZJ))))* JW;
+		let LLO=((LKV+ LKW)+ ((LLN+ LLN)* (IUF/ (KNB* AZJ))))* JW;
 		AZP=AZK;
-		JEL=LLV;
+		JEL=LLO;
 		}else{
 		let AZL=AXY- AYN;
-		let LLS=LLB- LLC;
+		let LLL=LKV- LKW;
 		let AZM=KB/ JV;
 		let AZN=(AZM* AZL).tanh();
 		let AZO=JW* ((AXY+ AYN)+ (AZL* AZN));
-		let LLT=((LLB+ LLC)+ ((LLS* AZN)+ (((LLS* AZM)* (IUF- (AZN* AZN)))* AZL)))* JW;
+		let LLM=((LKV+ LKW)+ ((LLL* AZN)+ (((LLL* AZM)* (IUF- (AZN* AZN)))* AZL)))* JW;
 		AZP=AZO;
-		JEL=LLT;
+		JEL=LLM;
 		}
-		let LLW=L5([0.0,LLR[0],0.0,LLR[1],LLR[2]]);
+		let LLP=L5([0.0,LLK[0],0.0,LLK[1],LLK[2]]);
 		let AZQ=(AZP- AZH)/ AYO;
-		let LLX=((L5([JEL[0],0.0,JEL[1],JEL[2],JEL[3]])- LLW)- L5([0.0,(LLD* AZQ),0.0,0.0,0.0]))/ AYO;
+		let LLQ=L5([0.0,LKX,0.0,0.0,0.0]);
+		let LLR=((L5([JEL[0],0.0,JEL[1],JEL[2],JEL[3]])- LLP)).product_sum_div(IUF,LLQ,(-AZQ),AYO);
 		let AZR=AZQ> LD;
 		let BAG;
 		let JEM;
 		if AZR{
 		BAG=A;
-		JEM=LKV;
+		JEM=LKP;
 		}else{
 		let AZS=AZQ< -50f64;
 		let BAH;
 		let JEN;
 		if AZS{
 		BAH=F;
-		JEN=LKV;
+		JEN=LKP;
 		}else{
 		let AZT=AZQ.exp();
 		let AZU=F+ AZT;
 		let AZV=F/ AZU;
-		let LLY=(((LLX* AZT)* AZV)* KNJ)/ AZU;
+		let LLS=((LLR* AZT)).product_div((-AZV),AZU);
 		BAH=AZV;
-		JEN=LLY;
+		JEN=LLS;
 		}
 		BAG=BAH;
 		JEM=JEN;
@@ -4649,38 +4643,38 @@ impl Instance {
 		let JEO;
 		if JM{
 		let AZW=AXY- AYN;
-		let LMB=(LLB- LLC)* AZW;
+		let LLV=(LKV- LKW)* AZW;
 		let AZX=((AZW* AZW)+ JV).sqrt();
 		let AZY=JW* ((AXY+ AYN)+ AZX);
-		let LMC=((LLB+ LLC)+ ((LMB+ LMB)* (IUF/ (KNB* AZX))))* JW;
+		let LLW=((LKV+ LKW)+ ((LLV+ LLV)* (IUF/ (KNB* AZX))))* JW;
 		BAD=AZY;
-		JEO=LMC;
+		JEO=LLW;
 		}else{
 		let AZZ=AXY- AYN;
-		let LLZ=LLB- LLC;
+		let LLT=LKV- LKW;
 		let BAA=KB/ JV;
 		let BAB=(BAA* AZZ).tanh();
 		let BAC=JW* ((AXY+ AYN)+ (AZZ* BAB));
-		let LMA=((LLB+ LLC)+ ((LLZ* BAB)+ (((LLZ* BAA)* (IUF- (BAB* BAB)))* AZZ)))* JW;
+		let LLU=((LKV+ LKW)+ ((LLT* BAB)+ (((LLT* BAA)* (IUF- (BAB* BAB)))* AZZ)))* JW;
 		BAD=BAC;
-		JEO=LMA;
+		JEO=LLU;
 		}
 		let BAE=UK* AI;
 		let BAF=BAE* AYO;
-		let LMD=LLD* BAE;
-		let LME=L5([0.0,LLN[0],0.0,LLN[1],LLN[2]]);
+		let LLX=LKX* BAE;
+		let LLY=L5([0.0,LLG[0],0.0,LLG[1],LLG[2]]);
 		let BAI=(BAD- (AZC- (BAF* BAG)))/ AZE;
-		let LMF=LLO* BAI;
-		let LMG=((L5([JEO[0],0.0,JEO[1],JEO[2],JEO[3]])- (LME- (L5([0.0,(LMD* BAG),0.0,0.0,0.0])+ (JEM* BAF))))- L5([0.0,LMF[0],0.0,LMF[1],LMF[2]]))/ AZE;
+		let LLZ=L5([0.0,LLH[0],0.0,LLH[1],LLH[2]]);
+		let LMA=((L5([JEO[0],0.0,JEO[1],JEO[2],JEO[3]])- (LLY- (L5([0.0,(LLX* BAG),0.0,0.0,0.0])+ (JEM* BAF))))).product_sum_div(IUF,LLZ,(-BAI),AZE);
 		let BAJ=BAI> LD;
 		let BAS;
 		let JEP;
 		if BAJ{
 		let BAK=AZF* BAI;
-		let LML=LLP* BAI;
-		let LMM=L5([0.0,LML[0],0.0,LML[1],LML[2]])+ (LMG* AZF);
+		let LMF=LLI* BAI;
+		let LMG=L5([0.0,LMF[0],0.0,LMF[1],LMF[2]])+ (LMA* AZF);
 		BAS=BAK;
-		JEP=LMM;
+		JEP=LMG;
 		}else{
 		let BAL=BAI< -50f64;
 		let BAT;
@@ -4688,164 +4682,162 @@ impl Instance {
 		if BAL{
 		let BAM=BAI.exp();
 		let BAN=AZF* BAM;
-		let LMJ=LLP* BAM;
-		let LMK=L5([0.0,LMJ[0],0.0,LMJ[1],LMJ[2]])+ ((LMG* BAM)* AZF);
+		let LMD=LLI* BAM;
+		let LME=L5([0.0,LMD[0],0.0,LMD[1],LMD[2]])+ ((LMA* BAM)* AZF);
 		BAT=BAN;
-		JEQ=LMK;
+		JEQ=LME;
 		}else{
 		let BAO=BAI.exp();
 		let BAP=F+ BAO;
 		let BAQ=BAP.ln();
 		let BAR=AZF* BAQ;
-		let LMH=LLP* BAQ;
-		let LMI=L5([0.0,LMH[0],0.0,LMH[1],LMH[2]])+ (((LMG* BAO)* (IUF/ BAP))* AZF);
+		let LMB=LLI* BAQ;
+		let LMC=L5([0.0,LMB[0],0.0,LMB[1],LMB[2]])+ (((LMA* BAO)* (IUF/ BAP))* AZF);
 		BAT=BAR;
-		JEQ=LMI;
+		JEQ=LMC;
 		}
 		BAS=BAT;
 		JEP=JEQ;
 		}
 		let BAU=(AYF* BAS)/ GV;
+		let LMH=L5([0.0,KLT,0.0,0.0,0.0]);
 		let BAV=F+ BAU;
 		let BAW=AYT* BAV;
 		let BAX=AYD/ BAW;
-		let LMN=(((L5([0.0,(LLI* BAV),0.0,0.0,0.0])+ ((((JEP* AYF)- L5([0.0,(KLT* BAU),0.0,0.0,0.0]))/ GV)* AYT))* BAX)* KNJ)/ BAW;
+		let LMI=((L5([0.0,(LLC* BAV),0.0,0.0,0.0])+ ((((JEP* AYF)).product_sum_div(IUF,LMH,(-BAU),GV))* AYT))).product_div((-BAX),BAW);
 		let BAY=F+ (TJ* AC);
 		let BAZ=(F+ (TJ* E))/ BAY;
 		let BBA=AYC* BAZ;
-		let LMO=((((IVA* TJ)* BAZ)* KNJ)/ BAY)* AYC;
+		let LMJ=(product_div((IVA* TJ),(-BAZ),BAY))* AYC;
 		let BBB=F+ ((TK* AYM)/ AXW);
-		let LMP=((JEJ* TK)/ AXW)* BBA;
-		let LMQ=L3([(LMO* BBB),0.0,0.0])+ L3([0.0,LMP[0],LMP[1]]);
+		let LMK=((JEJ* TK)/ AXW)* BBA;
+		let LML=L3([(LMJ* BBB),0.0,0.0])+ L3([0.0,LMK[0],LMK[1]]);
 		let BBC=(AYG* BAS)/ GV;
 		let BBD=F+ BBC;
 		let BBE=(BBA* BBB)/ BBD;
-		let LMR=(L5([0.0,LMQ[0],0.0,LMQ[1],LMQ[2]])- ((((JEP* AYG)- L5([0.0,(KLT* BBC),0.0,0.0,0.0]))/ GV)* BBE))/ BBD;
+		let LMM=(L5([0.0,LML[0],0.0,LML[1],LML[2]])).product_sum_div(IUF,(((JEP* AYG)).product_sum_div(IUF,LMH,(-BBC),GV)),(-BBE),BBD);
 		let BBF=MC* BAG;
 		let BBG=BBF* AZ;
 		let BBH=F- BAG;
-		let LMS=JEM* KNJ;
+		let LMN=JEM* KNJ;
 		let BBI=((BBG* BAX)/ AXW)+ (BBH* BBE);
-		let LMT=((((((JEM* MC)* AZ)+ L5([0.0,(KJT* BBF),0.0,0.0,0.0]))* BAX)+ (LMN* BBG))/ AXW)+ ((LMS* BBE)+ (LMR* BBH));
+		let LMO=((((((JEM* MC)* AZ)+ L5([0.0,(KJT* BBF),0.0,0.0,0.0]))* BAX)+ (LMI* BBG))/ AXW)+ ((LMN* BBE)+ (LMM* BBH));
 		let BBJ=(BBE* AXW)/ BAX;
-		let LMU=((LMR* AXW)- (LMN* BBJ))/ BAX;
+		let LMP=((LMM* AXW)).product_sum_div(IUF,LMI,(-BBJ),BAX);
 		let BBK=(MC* BAS)/ GV;
 		let BBL=BBK/ BBJ;
 		let BBM=(F+ BBL).sqrt();
 		let BBN=(BBJ* BBM)- BBJ;
 		let BBO=AZE* BAG;
-		let LMV=LLO* BAG;
-		let LMW=L5([0.0,LMV[0],0.0,LMV[1],LMV[2]])+ (JEM* AZE);
+		let LMQ=LLH* BAG;
+		let LMR=L5([0.0,LMQ[0],0.0,LMQ[1],LMQ[2]])+ (JEM* AZE);
 		let BBP=(BBJ* BBH)+ BBO;
-		let LMX=((LMU* BBH)+ (LMS* BBJ))+ LMW;
-		let LMY=((((LMU* BBM)+ (((((((JEP* MC)- L5([0.0,(KLT* BBK),0.0,0.0,0.0]))/ GV)- (LMU* BBL))/ BBJ)* (IUF/ (KNB* BBM)))* BBJ))- LMU)* BBH)+ (LMS* BBN);
+		let LMS=((LMP* BBH)+ (LMN* BBJ))+ LMR;
+		let LMT=((((LMP* BBM)+ (((((((JEP* MC)).product_sum_div(IUF,LMH,(-BBK),GV))).product_sum_div(IUF,LMP,(-BBL),BBJ))* (IUF/ (KNB* BBM)))* BBJ))- LMP)* BBH)+ (LMN* BBN);
 		let BBQ=(BBN* BBH)+ BBO;
-		let LMZ=LMY+ LMW;
+		let LMU=LMT+ LMR;
 		let BBR=RY/ BBQ;
-		let LNA=L5([0.0,0.0,0.0,KTB[0],KTB[1]]);
-		let LNB=(LNA- (LMZ* BBR))/ BBQ;
+		let LMV=L5([0.0,0.0,0.0,KTB[0],KTB[1]]);
+		let LMW=(LMV).product_sum_div(IUF,LMU,(-BBR),BBQ);
 		let BBZ;
 		let JER;
 		if JM{
 		let BBS=A- BBR;
-		let LNE=(LNB* KNJ)* BBS;
+		let LMZ=(LMW* KNJ)* BBS;
 		let BBT=((BBS* BBS)+ JV).sqrt();
 		let BBU=JW* ((A+ BBR)+ BBT);
-		let LNF=(LNB+ ((LNE+ LNE)* (IUF/ (KNB* BBT))))* JW;
+		let LNA=(LMW+ ((LMZ+ LMZ)* (IUF/ (KNB* BBT))))* JW;
 		BBZ=BBU;
-		JER=LNF;
+		JER=LNA;
 		}else{
 		let BBV=A- BBR;
-		let LNC=LNB* KNJ;
+		let LMX=LMW* KNJ;
 		let BBW=KB/ JV;
 		let BBX=(BBW* BBV).tanh();
 		let BBY=JW* ((A+ BBR)+ (BBV* BBX));
-		let LND=(LNB+ ((LNC* BBX)+ (((LNC* BBW)* (IUF- (BBX* BBX)))* BBV)))* JW;
+		let LMY=(LMW+ ((LMX* BBX)+ (((LMX* BBW)* (IUF- (BBX* BBX)))* BBV)))* JW;
 		BBZ=BBY;
-		JER=LND;
+		JER=LMY;
 		}
-		let LNG=AYE- IUF;
+		let LNB=AYE- IUF;
 		let BCA=F+ (BBZ.powf(AYE));
 		let BCB=F/ AYE;
 		let BCC=BCA.powf(BCB);
-		let LNH=BCB- IUF;
+		let LNC=BCB- IUF;
 		let BCD=F/ BCC;
 		let BCE=RY* BCD;
-		let LNI=KTB* BCD;
-		let LNJ=(((((JER* (AYE* ((BBZ+ (((BBZ== KOL) as u8 as f64)* KUP)).powf(LNG))))* (BCB* ((BCA+ (((BCA== KOL) as u8 as f64)* KUP)).powf(LNH))))* BCD)* KNJ)/ BCC)* RY;
-		let LNK=L5([0.0,0.0,0.0,LNI[0],LNI[1]])+ LNJ;
+		let LND=KTB* BCD;
+		let LNE=L5([0.0,0.0,0.0,LND[0],LND[1]])+ (((((JER* (AYE* ((BBZ+ (((BBZ== KOL) as u8 as f64)* KUP)).powf(LNB))))* (BCB* ((BCA+ (((BCA== KOL) as u8 as f64)* KUP)).powf(LNC))))).product_div((-BCD),BCC))* RY);
 		let BCF=-RY;
-		let LNL=KTB* KNJ;
+		let LNF=KTB* KNJ;
 		let BCG=BCF/ BBQ;
-		let LNM=L5([0.0,0.0,0.0,LNL[0],LNL[1]]);
-		let LNN=(LNM- (LMZ* BCG))/ BBQ;
+		let LNG=L5([0.0,0.0,0.0,LNF[0],LNF[1]]);
+		let LNH=(LNG).product_sum_div(IUF,LMU,(-BCG),BBQ);
 		let BCO;
 		let JES;
 		if JM{
 		let BCH=A- BCG;
-		let LNQ=(LNN* KNJ)* BCH;
+		let LNK=(LNH* KNJ)* BCH;
 		let BCI=((BCH* BCH)+ JV).sqrt();
 		let BCJ=JW* ((A+ BCG)+ BCI);
-		let LNR=(LNN+ ((LNQ+ LNQ)* (IUF/ (KNB* BCI))))* JW;
+		let LNL=(LNH+ ((LNK+ LNK)* (IUF/ (KNB* BCI))))* JW;
 		BCO=BCJ;
-		JES=LNR;
+		JES=LNL;
 		}else{
 		let BCK=A- BCG;
-		let LNO=LNN* KNJ;
+		let LNI=LNH* KNJ;
 		let BCL=KB/ JV;
 		let BCM=(BCL* BCK).tanh();
 		let BCN=JW* ((A+ BCG)+ (BCK* BCM));
-		let LNP=(LNN+ ((LNO* BCM)+ (((LNO* BCL)* (IUF- (BCM* BCM)))* BCK)))* JW;
+		let LNJ=(LNH+ ((LNI* BCM)+ (((LNI* BCL)* (IUF- (BCM* BCM)))* BCK)))* JW;
 		BCO=BCN;
-		JES=LNP;
+		JES=LNJ;
 		}
 		let BCP=F+ (BCO.powf(AYE));
 		let BCQ=BCP.powf(BCB);
 		let BCR=F/ BCQ;
 		let BCS=BCF* BCR;
-		let LNS=LNL* BCR;
-		let LNT=(((((JES* (AYE* ((BCO+ (((BCO== KOL) as u8 as f64)* KUP)).powf(LNG))))* (BCB* ((BCP+ (((BCP== KOL) as u8 as f64)* KUP)).powf(LNH))))* BCR)* KNJ)/ BCQ)* BCF;
-		let LNU=L5([0.0,0.0,0.0,LNS[0],LNS[1]])+ LNT;
-		let LNV=L5([IYW[0],0.0,IYW[1],IYW[2],0.0]);
+		let LNM=LNF* BCR;
+		let LNN=L5([0.0,0.0,0.0,LNM[0],LNM[1]])+ (((((JES* (AYE* ((BCO+ (((BCO== KOL) as u8 as f64)* KUP)).powf(LNB))))* (BCB* ((BCP+ (((BCP== KOL) as u8 as f64)* KUP)).powf(LNC))))).product_div((-BCR),BCQ))* BCF);
+		let LNO=L5([IYW[0],0.0,IYW[1],IYW[2],0.0]);
 		let BCT=(AXY- AZH)/ AYO;
-		let LNW=((LNV- LLW)- L5([0.0,(LLD* BCT),0.0,0.0,0.0]))/ AYO;
+		let LNP=((LNO- LLP)).product_sum_div(IUF,LLQ,(-BCT),AYO);
 		let BCU=BCT> LD;
 		let BCZ;
 		let JET;
 		if BCU{
 		BCZ=A;
-		JET=LKV;
+		JET=LKP;
 		}else{
 		let BCV=BCT< -50f64;
 		let BDA;
 		let JEU;
 		if BCV{
 		BDA=F;
-		JEU=LKV;
+		JEU=LKP;
 		}else{
 		let BCW=BCT.exp();
 		let BCX=F+ BCW;
 		let BCY=F/ BCX;
-		let LNX=(((LNW* BCW)* BCY)* KNJ)/ BCX;
+		let LNQ=((LNP* BCW)).product_div((-BCY),BCX);
 		BDA=BCY;
-		JEU=LNX;
+		JEU=LNQ;
 		}
 		BCZ=BDA;
 		JET=JEU;
 		}
-		let LNY=L5([LLC[0],0.0,LLC[1],LLC[2],LLC[3]]);
+		let LNR=L5([LKW[0],0.0,LKW[1],LKW[2],LKW[3]]);
 		let BDB=((AYN- BCS)- (AZC- (BAF* BCZ)))/ AZE;
-		let LNZ=LLO* BDB;
-		let LOA=(((LNY- LNU)- (LME- (L5([0.0,(LMD* BCZ),0.0,0.0,0.0])+ (JET* BAF))))- L5([0.0,LNZ[0],0.0,LNZ[1],LNZ[2]]))/ AZE;
+		let LNS=(((LNR- LNN)- (LLY- (L5([0.0,(LLX* BCZ),0.0,0.0,0.0])+ (JET* BAF))))).product_sum_div(IUF,LLZ,(-BDB),AZE);
 		let BDC=BDB> LD;
 		let BED;
 		let JEV;
 		if BDC{
 		let BDD=AZF* BDB;
-		let LOF=LLP* BDB;
-		let LOG=L5([0.0,LOF[0],0.0,LOF[1],LOF[2]])+ (LOA* AZF);
+		let LNX=LLI* BDB;
+		let LNY=L5([0.0,LNX[0],0.0,LNX[1],LNX[2]])+ (LNS* AZF);
 		BED=BDD;
-		JEV=LOG;
+		JEV=LNY;
 		}else{
 		let BDE=BDB< -50f64;
 		let BEE;
@@ -4853,61 +4845,60 @@ impl Instance {
 		if BDE{
 		let BDF=BDB.exp();
 		let BDG=AZF* BDF;
-		let LOD=LLP* BDF;
-		let LOE=L5([0.0,LOD[0],0.0,LOD[1],LOD[2]])+ ((LOA* BDF)* AZF);
+		let LNV=LLI* BDF;
+		let LNW=L5([0.0,LNV[0],0.0,LNV[1],LNV[2]])+ ((LNS* BDF)* AZF);
 		BEE=BDG;
-		JEW=LOE;
+		JEW=LNW;
 		}else{
 		let BDH=BDB.exp();
 		let BDI=F+ BDH;
 		let BDJ=BDI.ln();
 		let BDK=AZF* BDJ;
-		let LOB=LLP* BDJ;
-		let LOC=L5([0.0,LOB[0],0.0,LOB[1],LOB[2]])+ (((LOA* BDH)* (IUF/ BDI))* AZF);
+		let LNT=LLI* BDJ;
+		let LNU=L5([0.0,LNT[0],0.0,LNT[1],LNT[2]])+ (((LNS* BDH)* (IUF/ BDI))* AZF);
 		BEE=BDK;
-		JEW=LOC;
+		JEW=LNU;
 		}
 		BED=BEE;
 		JEV=JEW;
 		}
 		let BDL=(AYN- AZH)/ AYO;
-		let LOH=((LNY- LLW)- L5([0.0,(LLD* BDL),0.0,0.0,0.0]))/ AYO;
+		let LNZ=((LNR- LLP)).product_sum_div(IUF,LLQ,(-BDL),AYO);
 		let BDM=BDL> LD;
 		let BDR;
 		let JEX;
 		if BDM{
 		BDR=A;
-		JEX=LKV;
+		JEX=LKP;
 		}else{
 		let BDN=BDL< -50f64;
 		let BDS;
 		let JEY;
 		if BDN{
 		BDS=F;
-		JEY=LKV;
+		JEY=LKP;
 		}else{
 		let BDO=BDL.exp();
 		let BDP=F+ BDO;
 		let BDQ=F/ BDP;
-		let LOI=(((LOH* BDO)* BDQ)* KNJ)/ BDP;
+		let LOA=((LNZ* BDO)).product_div((-BDQ),BDP);
 		BDS=BDQ;
-		JEY=LOI;
+		JEY=LOA;
 		}
 		BDR=BDS;
 		JEX=JEY;
 		}
 		let BDT=((AXY- BCE)- (AZC- (BAF* BDR)))/ AZE;
-		let LOJ=LLO* BDT;
-		let LOK=(((LNV- LNK)- (LME- (L5([0.0,(LMD* BDR),0.0,0.0,0.0])+ (JEX* BAF))))- L5([0.0,LOJ[0],0.0,LOJ[1],LOJ[2]]))/ AZE;
+		let LOB=(((LNO- LNE)- (LLY- (L5([0.0,(LLX* BDR),0.0,0.0,0.0])+ (JEX* BAF))))).product_sum_div(IUF,LLZ,(-BDT),AZE);
 		let BDU=BDT> LD;
 		let BEF;
 		let JEZ;
 		if BDU{
 		let BDV=AZF* BDT;
-		let LOP=LLP* BDT;
-		let LOQ=L5([0.0,LOP[0],0.0,LOP[1],LOP[2]])+ (LOK* AZF);
+		let LOG=LLI* BDT;
+		let LOH=L5([0.0,LOG[0],0.0,LOG[1],LOG[2]])+ (LOB* AZF);
 		BEF=BDV;
-		JEZ=LOQ;
+		JEZ=LOH;
 		}else{
 		let BDW=BDT< -50f64;
 		let BEG;
@@ -4915,101 +4906,101 @@ impl Instance {
 		if BDW{
 		let BDX=BDT.exp();
 		let BDY=AZF* BDX;
-		let LON=LLP* BDX;
-		let LOO=L5([0.0,LON[0],0.0,LON[1],LON[2]])+ ((LOK* BDX)* AZF);
+		let LOE=LLI* BDX;
+		let LOF=L5([0.0,LOE[0],0.0,LOE[1],LOE[2]])+ ((LOB* BDX)* AZF);
 		BEG=BDY;
-		JFA=LOO;
+		JFA=LOF;
 		}else{
 		let BDZ=BDT.exp();
 		let BEA=F+ BDZ;
 		let BEB=BEA.ln();
 		let BEC=AZF* BEB;
-		let LOL=LLP* BEB;
-		let LOM=L5([0.0,LOL[0],0.0,LOL[1],LOL[2]])+ (((LOK* BDZ)* (IUF/ BEA))* AZF);
+		let LOC=LLI* BEB;
+		let LOD=L5([0.0,LOC[0],0.0,LOC[1],LOC[2]])+ (((LOB* BDZ)* (IUF/ BEA))* AZF);
 		BEG=BEC;
-		JFA=LOM;
+		JFA=LOD;
 		}
 		BEF=BEG;
 		JEZ=JFA;
 		}
 		let BEH=(BED- BEF)/ GV;
 		let BEI=BEH/ BBP;
-		let LOR=((((JEV- JEZ)- L5([0.0,(KLT* BEH),0.0,0.0,0.0]))/ GV)- (LMX* BEI))/ BBP;
+		let LOI=((((JEV- JEZ)).product_sum_div(IUF,LMH,(-BEH),GV))).product_sum_div(IUF,LMS,(-BEI),BBP);
 		let BEN;
 		let JFB;
 		if JM{
-		let LOT=LOR* BEI;
+		let LOK=LOI* BEI;
 		let BEJ=((BEI* BEI)+ JV).sqrt();
-		let LOU=(LOT+ LOT)* (IUF/ (KNB* BEJ));
+		let LOL=(LOK+ LOK)* (IUF/ (KNB* BEJ));
 		BEN=BEJ;
-		JFB=LOU;
+		JFB=LOL;
 		}else{
 		let BEK=KB/ JV;
 		let BEL=(BEK* BEI).tanh();
 		let BEM=BEI* BEL;
-		let LOS=(LOR* BEL)+ (((LOR* BEK)* (IUF- (BEL* BEL)))* BEI);
+		let LOJ=(LOI* BEL)+ (((LOI* BEK)* (IUF- (BEL* BEL)))* BEI);
 		BEN=BEM;
-		JFB=LOS;
+		JFB=LOJ;
 		}
 		let BEO=F+ (BEN.powf(AYE));
 		let BEP=BEO.powf(BCB);
 		let BEQ=BEI/ BEP;
 		let BER=BBI* BEQ;
-		let LOV=((LOR- (((JFB* (AYE* ((BEN+ (((BEN== KOL) as u8 as f64)* KUP)).powf(LNG))))* (BCB* ((BEO+ (((BEO== KOL) as u8 as f64)* KUP)).powf(LNH))))* BEQ))/ BEP)* BBI;
+		let LOM=((LOI).product_sum_div(IUF,((JFB* (AYE* ((BEN+ (((BEN== KOL) as u8 as f64)* KUP)).powf(LNB))))* (BCB* ((BEO+ (((BEO== KOL) as u8 as f64)* KUP)).powf(LNC)))),(-BEQ),BEP))* BBI;
 		let BES=((JE* O)* P)* JW;
 		let BET=BES* (BED+ BEF);
 		let BEU=BET* BER;
-		let LOW=(((JEV+ JEZ)* BES)* BER)+ (((LMT* BEQ)+ LOV)* BET);
+		let LON=(((JEV+ JEZ)* BES)* BER)+ (((LMO* BEQ)+ LOM)* BET);
 		let BEV=MC* AYQ;
 		let BEW=BEV* AZ;
-		let LOX=((LLE* MC)* AZ)+ (KJT* BEV);
+		let LOO=((LKY* MC)* AZ)+ (KJT* BEV);
 		let BEX=GV* BEW;
-		let LOY=(KLT* BEW)+ (LOX* GV);
+		let LOP=(KLT* BEW)+ (LOO* GV);
 		let BEY=AYS- AZG;
-		let LOZ=LLH- LLQ;
+		let LOQ=LLB- LLJ;
 		let BFG;
 		let JFC;
 		if JM{
 		let BEZ=AXY- AYN;
-		let LPC=(LLB- LLC)* BEZ;
+		let LOT=(LKV- LKW)* BEZ;
 		let BFA=((BEZ* BEZ)+ JV).sqrt();
 		let BFB=JW* ((AXY+ AYN)+ BFA);
-		let LPD=((LLB+ LLC)+ ((LPC+ LPC)* (IUF/ (KNB* BFA))))* JW;
+		let LOU=((LKV+ LKW)+ ((LOT+ LOT)* (IUF/ (KNB* BFA))))* JW;
 		BFG=BFB;
-		JFC=LPD;
+		JFC=LOU;
 		}else{
 		let BFC=AXY- AYN;
-		let LPA=LLB- LLC;
+		let LOR=LKV- LKW;
 		let BFD=KB/ JV;
 		let BFE=(BFD* BFC).tanh();
 		let BFF=JW* ((AXY+ AYN)+ (BFC* BFE));
-		let LPB=((LLB+ LLC)+ ((LPA* BFE)+ (((LPA* BFD)* (IUF- (BFE* BFE)))* BFC)))* JW;
+		let LOS=((LKV+ LKW)+ ((LOR* BFE)+ (((LOR* BFD)* (IUF- (BFE* BFE)))* BFC)))* JW;
 		BFG=BFF;
-		JFC=LPB;
+		JFC=LOS;
 		}
-		let LPE=L5([0.0,LOZ,0.0,0.0,0.0]);
+		let LOV=L5([0.0,LOQ,0.0,0.0,0.0]);
 		let BFH=(BFG- BEY)/ AYO;
-		let LPF=((L5([JFC[0],0.0,JFC[1],JFC[2],JFC[3]])- LPE)- L5([0.0,(LLD* BFH),0.0,0.0,0.0]))/ AYO;
+		let LOW=((L5([JFC[0],0.0,JFC[1],JFC[2],JFC[3]])- LOV)).product_sum_div(IUF,LLQ,(-BFH),AYO);
 		let BFI=BFH> LD;
 		let BFV;
 		let JFD;
 		if BFI{
 		BFV=A;
-		JFD=LKV;
+		JFD=LKP;
 		}else{
 		let BFJ=BFH< -50f64;
 		let BFW;
 		let JFE;
 		if BFJ{
 		BFW=F;
-		JFE=LKV;
+		JFE=LKP;
 		}else{
 		let BFK=BFH.exp();
 		let BFL=F+ BFK;
 		let BFM=F/ BFL;
-		let LPG=(((LPF* BFK)* BFM)* KNJ)/ BFL;
+		let LOX=((LOW* BFK)).product_div((-BFM),BFL);
 		BFW=BFM;
-		JFE=LPG;
+		JFE=LOX;
 		}
 		BFV=BFW;
 		JFD=JFE;
@@ -5018,33 +5009,34 @@ impl Instance {
 		let JFF;
 		if JM{
 		let BFN=AXY- AYN;
-		let LPJ=(LLB- LLC)* BFN;
+		let LPA=(LKV- LKW)* BFN;
 		let BFO=((BFN* BFN)+ JV).sqrt();
 		let BFP=JW* ((AXY+ AYN)+ BFO);
-		let LPK=((LLB+ LLC)+ ((LPJ+ LPJ)* (IUF/ (KNB* BFO))))* JW;
+		let LPB=((LKV+ LKW)+ ((LPA+ LPA)* (IUF/ (KNB* BFO))))* JW;
 		BFU=BFP;
-		JFF=LPK;
+		JFF=LPB;
 		}else{
 		let BFQ=AXY- AYN;
-		let LPH=LLB- LLC;
+		let LOY=LKV- LKW;
 		let BFR=KB/ JV;
 		let BFS=(BFR* BFQ).tanh();
 		let BFT=JW* ((AXY+ AYN)+ (BFQ* BFS));
-		let LPI=((LLB+ LLC)+ ((LPH* BFS)+ (((LPH* BFR)* (IUF- (BFS* BFS)))* BFQ)))* JW;
+		let LOZ=((LKV+ LKW)+ ((LOY* BFS)+ (((LOY* BFR)* (IUF- (BFS* BFS)))* BFQ)))* JW;
 		BFU=BFT;
-		JFF=LPI;
+		JFF=LOZ;
 		}
-		let LPL=L5([0.0,LLH,0.0,0.0,0.0]);
+		let LPC=L5([0.0,LLB,0.0,0.0,0.0]);
 		let BFX=(BFU- (AYS- (BAF* BFV)))/ BEW;
-		let LPM=((L5([JFF[0],0.0,JFF[1],JFF[2],JFF[3]])- (LPL- (L5([0.0,(LMD* BFV),0.0,0.0,0.0])+ (JFD* BAF))))- L5([0.0,(LOX* BFX),0.0,0.0,0.0]))/ BEW;
+		let LPD=L5([0.0,LOO,0.0,0.0,0.0]);
+		let LPE=((L5([JFF[0],0.0,JFF[1],JFF[2],JFF[3]])- (LPC- (L5([0.0,(LLX* BFV),0.0,0.0,0.0])+ (JFD* BAF))))).product_sum_div(IUF,LPD,(-BFX),BEW);
 		let BFY=BFX> LD;
 		let BGJ;
 		let JFG;
 		if BFY{
 		let BFZ=BEX* BFX;
-		let LPP=L5([0.0,(LOY* BFX),0.0,0.0,0.0])+ (LPM* BEX);
+		let LPH=L5([0.0,(LOP* BFX),0.0,0.0,0.0])+ (LPE* BEX);
 		BGJ=BFZ;
-		JFG=LPP;
+		JFG=LPH;
 		}else{
 		let BGA=BFX< -50f64;
 		let BGK;
@@ -5052,128 +5044,127 @@ impl Instance {
 		if BGA{
 		let BGB=BFX.exp();
 		let BGC=BEX* BGB;
-		let LPO=L5([0.0,(LOY* BGB),0.0,0.0,0.0])+ ((LPM* BGB)* BEX);
+		let LPG=L5([0.0,(LOP* BGB),0.0,0.0,0.0])+ ((LPE* BGB)* BEX);
 		BGK=BGC;
-		JFH=LPO;
+		JFH=LPG;
 		}else{
 		let BGD=BFX.exp();
 		let BGE=F+ BGD;
 		let BGF=BGE.ln();
 		let BGG=BEX* BGF;
-		let LPN=L5([0.0,(LOY* BGF),0.0,0.0,0.0])+ (((LPM* BGD)* (IUF/ BGE))* BEX);
+		let LPF=L5([0.0,(LOP* BGF),0.0,0.0,0.0])+ (((LPE* BGD)* (IUF/ BGE))* BEX);
 		BGK=BGG;
-		JFH=LPN;
+		JFH=LPF;
 		}
 		BGJ=BGK;
 		JFG=JFH;
 		}
 		let BGH=AYD/ AYT;
 		let BGI=(BBA* AXW)/ BGH;
-		let LPQ=((LMO* AXW)- ((((LLI* BGH)* KNJ)/ AYT)* BGI))/ BGH;
+		let LPI=product_sum_div((LMJ* AXW),IUF,(product_div(LLC,(-BGH),AYT)),(-BGI),BGH);
 		let BGL=(MC* BGJ)/ GV;
 		let BGM=BGL/ BGI;
+		let LPJ=L5([0.0,LPI,0.0,0.0,0.0]);
 		let BGN=(F+ BGM).sqrt();
 		let BGO=(BGI* BGN)- BGI;
-		let LPR=(L5([0.0,(LPQ* BGN),0.0,0.0,0.0])+ (((((((JFG* MC)- L5([0.0,(KLT* BGL),0.0,0.0,0.0]))/ GV)- L5([0.0,(LPQ* BGM),0.0,0.0,0.0]))/ BGI)* (IUF/ (KNB* BGN)))* BGI))- L5([0.0,LPQ,0.0,0.0,0.0]);
 		let BGP=F- BFV;
+		let LPK=(((L5([0.0,(LPI* BGN),0.0,0.0,0.0])+ (((((((JFG* MC)).product_sum_div(IUF,LMH,(-BGL),GV))).product_sum_div(IUF,LPJ,(-BGM),BGI))* (IUF/ (KNB* BGN)))* BGI))- LPJ)* BGP)+ ((JFD* KNJ)* BGO);
 		let BGQ=(BGO* BGP)+ (BEW* BFV);
-		let LPS=((LPR* BGP)+ ((JFD* KNJ)* BGO))+ (L5([0.0,(LOX* BFV),0.0,0.0,0.0])+ (JFD* BEW));
+		let LPL=LPK+ (L5([0.0,(LOO* BFV),0.0,0.0,0.0])+ (JFD* BEW));
 		let BGR=RY/ BGQ;
-		let LPT=(LNA- (LPS* BGR))/ BGQ;
+		let LPM=(LMV).product_sum_div(IUF,LPL,(-BGR),BGQ);
 		let BGZ;
 		let JFI;
 		if JM{
 		let BGS=A- BGR;
-		let LPW=(LPT* KNJ)* BGS;
+		let LPP=(LPM* KNJ)* BGS;
 		let BGT=((BGS* BGS)+ JV).sqrt();
 		let BGU=JW* ((A+ BGR)+ BGT);
-		let LPX=(LPT+ ((LPW+ LPW)* (IUF/ (KNB* BGT))))* JW;
+		let LPQ=(LPM+ ((LPP+ LPP)* (IUF/ (KNB* BGT))))* JW;
 		BGZ=BGU;
-		JFI=LPX;
+		JFI=LPQ;
 		}else{
 		let BGV=A- BGR;
-		let LPU=LPT* KNJ;
+		let LPN=LPM* KNJ;
 		let BGW=KB/ JV;
 		let BGX=(BGW* BGV).tanh();
 		let BGY=JW* ((A+ BGR)+ (BGV* BGX));
-		let LPV=(LPT+ ((LPU* BGX)+ (((LPU* BGW)* (IUF- (BGX* BGX)))* BGV)))* JW;
+		let LPO=(LPM+ ((LPN* BGX)+ (((LPN* BGW)* (IUF- (BGX* BGX)))* BGV)))* JW;
 		BGZ=BGY;
-		JFI=LPV;
+		JFI=LPO;
 		}
 		let BHA=F+ (BGZ.powf(AYE));
 		let BHB=BHA.powf(BCB);
 		let BHC=F/ BHB;
 		let BHD=RY* BHC;
-		let LPY=KTB* BHC;
-		let LPZ=(((((JFI* (AYE* ((BGZ+ (((BGZ== KOL) as u8 as f64)* KUP)).powf(LNG))))* (BCB* ((BHA+ (((BHA== KOL) as u8 as f64)* KUP)).powf(LNH))))* BHC)* KNJ)/ BHB)* RY;
-		let LQA=L5([0.0,0.0,0.0,LPY[0],LPY[1]])+ LPZ;
+		let LPR=KTB* BHC;
+		let LPS=L5([0.0,0.0,0.0,LPR[0],LPR[1]])+ (((((JFI* (AYE* ((BGZ+ (((BGZ== KOL) as u8 as f64)* KUP)).powf(LNB))))* (BCB* ((BHA+ (((BHA== KOL) as u8 as f64)* KUP)).powf(LNC))))).product_div((-BHC),BHB))* RY);
 		let BHE=BCF/ BGQ;
-		let LQB=(LNM- (LPS* BHE))/ BGQ;
+		let LPT=(LNG).product_sum_div(IUF,LPL,(-BHE),BGQ);
 		let BHM;
 		let JFJ;
 		if JM{
 		let BHF=A- BHE;
-		let LQE=(LQB* KNJ)* BHF;
+		let LPW=(LPT* KNJ)* BHF;
 		let BHG=((BHF* BHF)+ JV).sqrt();
 		let BHH=JW* ((A+ BHE)+ BHG);
-		let LQF=(LQB+ ((LQE+ LQE)* (IUF/ (KNB* BHG))))* JW;
+		let LPX=(LPT+ ((LPW+ LPW)* (IUF/ (KNB* BHG))))* JW;
 		BHM=BHH;
-		JFJ=LQF;
+		JFJ=LPX;
 		}else{
 		let BHI=A- BHE;
-		let LQC=LQB* KNJ;
+		let LPU=LPT* KNJ;
 		let BHJ=KB/ JV;
 		let BHK=(BHJ* BHI).tanh();
 		let BHL=JW* ((A+ BHE)+ (BHI* BHK));
-		let LQD=(LQB+ ((LQC* BHK)+ (((LQC* BHJ)* (IUF- (BHK* BHK)))* BHI)))* JW;
+		let LPV=(LPT+ ((LPU* BHK)+ (((LPU* BHJ)* (IUF- (BHK* BHK)))* BHI)))* JW;
 		BHM=BHL;
-		JFJ=LQD;
+		JFJ=LPV;
 		}
 		let BHN=F+ (BHM.powf(AYE));
 		let BHO=BHN.powf(BCB);
 		let BHP=F/ BHO;
 		let BHQ=BCF* BHP;
-		let LQG=LNL* BHP;
-		let LQH=(((((JFJ* (AYE* ((BHM+ (((BHM== KOL) as u8 as f64)* KUP)).powf(LNG))))* (BCB* ((BHN+ (((BHN== KOL) as u8 as f64)* KUP)).powf(LNH))))* BHP)* KNJ)/ BHO)* BCF;
-		let LQI=L5([0.0,0.0,0.0,LQG[0],LQG[1]])+ LQH;
-		let LQJ=L4([IYW[0],0.0,IYW[1],IYW[2]]);
+		let LPY=LNF* BHP;
+		let LPZ=L5([0.0,0.0,0.0,LPY[0],LPY[1]])+ (((((JFJ* (AYE* ((BHM+ (((BHM== KOL) as u8 as f64)* KUP)).powf(LNB))))* (BCB* ((BHN+ (((BHN== KOL) as u8 as f64)* KUP)).powf(LNC))))).product_div((-BHP),BHO))* BCF);
+		let LQA=L4([IYW[0],0.0,IYW[1],IYW[2]]);
 		let BHR=(AXY- BEY)/ AYO;
-		let LQK=((LQJ- L4([0.0,LOZ,0.0,0.0]))- L4([0.0,(LLD* BHR),0.0,0.0]))/ AYO;
+		let LQB=((LQA- L4([0.0,LOQ,0.0,0.0]))).product_sum_div(IUF,L4([0.0,LKX,0.0,0.0]),(-BHR),AYO);
 		let BHS=BHR> LD;
 		let BHX;
 		let JFK;
 		if BHS{
 		BHX=A;
-		JFK=LKW;
+		JFK=LKQ;
 		}else{
 		let BHT=BHR< -50f64;
 		let BHY;
 		let JFL;
 		if BHT{
 		BHY=F;
-		JFL=LKW;
+		JFL=LKQ;
 		}else{
 		let BHU=BHR.exp();
 		let BHV=F+ BHU;
 		let BHW=F/ BHV;
-		let LQL=(((LQK* BHU)* BHW)* KNJ)/ BHV;
+		let LQC=((LQB* BHU)).product_div((-BHW),BHV);
 		BHY=BHW;
-		JFL=LQL;
+		JFL=LQC;
 		}
 		BHX=BHY;
 		JFK=JFL;
 		}
-		let LQM=L4([0.0,LLH,0.0,0.0])- (L4([0.0,(LMD* BHX),0.0,0.0])+ (JFK* BAF));
+		let LQD=L4([0.0,LLB,0.0,0.0])- (L4([0.0,(LLX* BHX),0.0,0.0])+ (JFK* BAF));
 		let BHZ=((AYN- BHQ)- (AYS- (BAF* BHX)))/ BEW;
-		let LQN=(((LNY- LQI)- L5([LQM[0],LQM[1],LQM[2],LQM[3],0.0]))- L5([0.0,(LOX* BHZ),0.0,0.0,0.0]))/ BEW;
+		let LQE=(((LNR- LPZ)- L5([LQD[0],LQD[1],LQD[2],LQD[3],0.0]))).product_sum_div(IUF,LPD,(-BHZ),BEW);
 		let BIA=BHZ> LD;
 		let BJB;
 		let JFM;
 		if BIA{
 		let BIB=BEX* BHZ;
-		let LQQ=L5([0.0,(LOY* BHZ),0.0,0.0,0.0])+ (LQN* BEX);
+		let LQH=L5([0.0,(LOP* BHZ),0.0,0.0,0.0])+ (LQE* BEX);
 		BJB=BIB;
-		JFM=LQQ;
+		JFM=LQH;
 		}else{
 		let BIC=BHZ< -50f64;
 		let BJC;
@@ -5181,57 +5172,57 @@ impl Instance {
 		if BIC{
 		let BID=BHZ.exp();
 		let BIE=BEX* BID;
-		let LQP=L5([0.0,(LOY* BID),0.0,0.0,0.0])+ ((LQN* BID)* BEX);
+		let LQG=L5([0.0,(LOP* BID),0.0,0.0,0.0])+ ((LQE* BID)* BEX);
 		BJC=BIE;
-		JFN=LQP;
+		JFN=LQG;
 		}else{
 		let BIF=BHZ.exp();
 		let BIG=F+ BIF;
 		let BIH=BIG.ln();
 		let BII=BEX* BIH;
-		let LQO=L5([0.0,(LOY* BIH),0.0,0.0,0.0])+ (((LQN* BIF)* (IUF/ BIG))* BEX);
+		let LQF=L5([0.0,(LOP* BIH),0.0,0.0,0.0])+ (((LQE* BIF)* (IUF/ BIG))* BEX);
 		BJC=BII;
-		JFN=LQO;
+		JFN=LQF;
 		}
 		BJB=BJC;
 		JFM=JFN;
 		}
 		let BIJ=(AYN- BEY)/ AYO;
-		let LQR=((LNY- LPE)- L5([0.0,(LLD* BIJ),0.0,0.0,0.0]))/ AYO;
+		let LQI=((LNR- LOV)).product_sum_div(IUF,LLQ,(-BIJ),AYO);
 		let BIK=BIJ> LD;
 		let BIP;
 		let JFO;
 		if BIK{
 		BIP=A;
-		JFO=LKV;
+		JFO=LKP;
 		}else{
 		let BIL=BIJ< -50f64;
 		let BIQ;
 		let JFP;
 		if BIL{
 		BIQ=F;
-		JFP=LKV;
+		JFP=LKP;
 		}else{
 		let BIM=BIJ.exp();
 		let BIN=F+ BIM;
 		let BIO=F/ BIN;
-		let LQS=(((LQR* BIM)* BIO)* KNJ)/ BIN;
+		let LQJ=((LQI* BIM)).product_div((-BIO),BIN);
 		BIQ=BIO;
-		JFP=LQS;
+		JFP=LQJ;
 		}
 		BIP=BIQ;
 		JFO=JFP;
 		}
 		let BIR=((AXY- BHD)- (AYS- (BAF* BIP)))/ BEW;
-		let LQT=(((LNV- LQA)- (LPL- (L5([0.0,(LMD* BIP),0.0,0.0,0.0])+ (JFO* BAF))))- L5([0.0,(LOX* BIR),0.0,0.0,0.0]))/ BEW;
+		let LQK=(((LNO- LPS)- (LPC- (L5([0.0,(LLX* BIP),0.0,0.0,0.0])+ (JFO* BAF))))).product_sum_div(IUF,LPD,(-BIR),BEW);
 		let BIS=BIR> LD;
 		let BJE;
 		let JFQ;
 		if BIS{
 		let BIT=BEX* BIR;
-		let LQW=L5([0.0,(LOY* BIR),0.0,0.0,0.0])+ (LQT* BEX);
+		let LQN=L5([0.0,(LOP* BIR),0.0,0.0,0.0])+ (LQK* BEX);
 		BJE=BIT;
-		JFQ=LQW;
+		JFQ=LQN;
 		}else{
 		let BIU=BIR< -50f64;
 		let BJF;
@@ -5239,45 +5230,45 @@ impl Instance {
 		if BIU{
 		let BIV=BIR.exp();
 		let BIW=BEX* BIV;
-		let LQV=L5([0.0,(LOY* BIV),0.0,0.0,0.0])+ ((LQT* BIV)* BEX);
+		let LQM=L5([0.0,(LOP* BIV),0.0,0.0,0.0])+ ((LQK* BIV)* BEX);
 		BJF=BIW;
-		JFR=LQV;
+		JFR=LQM;
 		}else{
 		let BIX=BIR.exp();
 		let BIY=F+ BIX;
 		let BIZ=BIY.ln();
 		let BJA=BEX* BIZ;
-		let LQU=L5([0.0,(LOY* BIZ),0.0,0.0,0.0])+ (((LQT* BIX)* (IUF/ BIY))* BEX);
+		let LQL=L5([0.0,(LOP* BIZ),0.0,0.0,0.0])+ (((LQK* BIX)* (IUF/ BIY))* BEX);
 		BJF=BJA;
-		JFR=LQU;
+		JFR=LQL;
 		}
 		BJE=BJF;
 		JFQ=JFR;
 		}
-		let LQX=JFM* BJB;
-		let LQY=LQX+ LQX;
+		let LQO=JFM* BJB;
+		let LQP=LQO+ LQO;
 		let BJD=(BJB* BJB)+ AEI;
-		let LQZ=JFQ* BJE;
-		let LRA=LQZ+ LQZ;
+		let LQQ=JFQ* BJE;
+		let LQR=LQQ+ LQQ;
 		let BJG=(BJE* BJE)+ AEI;
-		let LRB=(JFM* BJE)+ (JFQ* BJB);
+		let LQS=(JFM* BJE)+ (JFQ* BJB);
 		let BJH=(BJB* BJE)+ AEI;
 		let BJJ=BJD+ BJG;
-		let LRC=LQY+ LRA;
+		let LQT=LQP+ LQR;
 		let BJK=(BJB+ BJE)+ AER;
 		let BJL=(BJI* (BJJ+ BJH))/ BJK;
 		let BJM=AEU* BJD;
 		let BJN=AEW* BJG;
-		let LRD=(((((LQY* BJB)+ (JFM* BJD))* MC)+ (((LRA* BJE)+ (JFQ* BJG))* BF))+ (((LQY* AEU)* BJE)+ (JFQ* BJM)))+ (((LRA* AEW)* BJB)+ (JFM* BJN));
+		let LQU=(((((LQP* BJB)+ (JFM* BJD))* MC)+ (((LQR* BJE)+ (JFQ* BJG))* BF))+ (((LQP* AEU)* BJE)+ (JFQ* BJM)))+ (((LQR* AEW)* BJB)+ (JFM* BJN));
 		let BJO=AEY* (BJJ+ (MC* BJH));
 		let BJP=(MC* ((((MC* ((BJD* BJB)+ AEK))+ (BF* ((BJG* BJE)+ AEK)))+ (BJM* BJE))+ (BJN* BJB)))/ BJO;
-		let LRE=((LRD* MC)- (((LRC+ (LRB* MC))* AEY)* BJP))/ BJO;
+		let LQV=((LQU* MC)).product_sum_div(IUF,((LQT+ (LQS* MC))* AEY),(-BJP),BJO);
 		let BJQ=O* P;
 		let BJR=(BJQ* AXW)* JE;
 		let BJS=BJR* (BJL- BJP);
-		let LRF=(((((LRC+ LRB)* BJI)- ((JFM+ JFQ)* BJL))/ BJK)- LRE)* BJR;
+		let LQW=(((((LQT+ LQS)* BJI)).product_sum_div(IUF,(JFM+ JFQ),(-BJL),BJK))- LQV)* BJR;
 		let BJT=BJR* BJP;
-		let LRG=LRE* BJR;
+		let LQX=LQV* BJR;
 		let BJU=parameters[195]== F;
 		let BLK;
 		let BLL;
@@ -5286,31 +5277,31 @@ impl Instance {
 		if BJU{
 		let BJV=UK* JW;
 		let BJW=AYS- (BJV* AYO);
-		let LRH=LLH- (LLD* BJV);
+		let LQY=LLB- (LKX* BJV);
 		let BJX=(AXZ- BJW)/ BEW;
-		let LRI=((L4([IYX[0],0.0,IYX[1],IYX[2]])- L4([0.0,LRH,0.0,0.0]))- L4([0.0,(LOX* BJX),0.0,0.0]))/ BEW;
+		let LQZ=((L4([IYX[0],0.0,IYX[1],IYX[2]])- L4([0.0,LQY,0.0,0.0]))).product_sum_div(IUF,L4([0.0,LOO,0.0,0.0]),(-BJX),BEW);
 		let BJY=BJX> LD;
 		let BKH;
 		let JFU;
 		if BJY{
 		BKH=BJX;
-		JFU=LRI;
+		JFU=LQZ;
 		}else{
 		let BJZ=BJX< -50f64;
 		let BKI;
 		let JFV;
 		if BJZ{
 		let BKA=BJX.exp();
-		let LRK=LRI* BKA;
+		let LRB=LQZ* BKA;
 		BKI=BKA;
-		JFV=LRK;
+		JFV=LRB;
 		}else{
 		let BKB=BJX.exp();
 		let BKC=F+ BKB;
 		let BKD=BKC.ln();
-		let LRJ=(LRI* BKB)* (IUF/ BKC);
+		let LRA=(LQZ* BKB)* (IUF/ BKC);
 		BKI=BKD;
-		JFV=LRJ;
+		JFV=LRA;
 		}
 		BKH=BKI;
 		JFU=JFV;
@@ -5319,31 +5310,31 @@ impl Instance {
 		let BKF=BKE* HT;
 		let BKG=BKF* BEW;
 		let BKJ=BKG* BKH;
-		let LRL=L4([0.0,((((KMB* BKE)* BEW)+ (LOX* BKF))* BKH),0.0,0.0])+ (JFU* BKG);
+		let LRC=L4([0.0,((((KMB* BKE)* BEW)+ (LOO* BKF))* BKH),0.0,0.0])+ (JFU* BKG);
 		let BKK=(SA- BJW)/ BEW;
-		let LRM=((L3([KTD[0],0.0,KTD[1]])- L3([0.0,LRH,0.0]))- L3([0.0,(LOX* BKK),0.0]))/ BEW;
+		let LRD=((L3([KTD[0],0.0,KTD[1]])- L3([0.0,LQY,0.0]))).product_sum_div(IUF,L3([0.0,LOO,0.0]),(-BKK),BEW);
 		let BKL=BKK> LD;
 		let BKT;
 		let JFW;
 		if BKL{
 		BKT=BKK;
-		JFW=LRM;
+		JFW=LRD;
 		}else{
 		let BKM=BKK< -50f64;
 		let BKU;
 		let JFX;
 		if BKM{
 		let BKN=BKK.exp();
-		let LRO=LRM* BKN;
+		let LRF=LRD* BKN;
 		BKU=BKN;
-		JFX=LRO;
+		JFX=LRF;
 		}else{
 		let BKO=BKK.exp();
 		let BKP=F+ BKO;
 		let BKQ=BKP.ln();
-		let LRN=(LRM* BKO)* (IUF/ BKP);
+		let LRE=(LRD* BKO)* (IUF/ BKP);
 		BKU=BKQ;
-		JFX=LRN;
+		JFX=LRE;
 		}
 		BKT=BKU;
 		JFW=JFX;
@@ -5351,16 +5342,16 @@ impl Instance {
 		let BKR=BKE* IR;
 		let BKS=BKR* BEW;
 		let BKV=BKS* BKT;
-		let LRP=L3([0.0,((((KMJ* BKE)* BEW)+ (LOX* BKR))* BKT),0.0])+ (JFW* BKS);
+		let LRG=L3([0.0,((((KMJ* BKE)* BEW)+ (LOO* BKR))* BKT),0.0])+ (JFW* BKS);
 		BLK=BKJ;
 		BLL=BKV;
-		JFS=LRL;
-		JFT=LRP;
+		JFS=LRC;
+		JFT=LRG;
 		}else{
 		BLK=A;
 		BLL=A;
-		JFS=LKW;
-		JFT=LKX;
+		JFS=LKQ;
+		JFT=LKR;
 		}
 		let BKW=parameters[193]== F;
 		let BLM;
@@ -5368,29 +5359,29 @@ impl Instance {
 		if BKW{
 		let BKX=UK* JW;
 		let BKY=(AXY- (AYS- (BKX* AYO)))/ BEW;
-		let LRQ=((LQJ- L4([0.0,(LLH- (LLD* BKX)),0.0,0.0]))- L4([0.0,(LOX* BKY),0.0,0.0]))/ BEW;
+		let LRH=((LQA- L4([0.0,(LLB- (LKX* BKX)),0.0,0.0]))).product_sum_div(IUF,L4([0.0,LOO,0.0,0.0]),(-BKY),BEW);
 		let BKZ=BKY> LD;
 		let BLH;
 		let JFZ;
 		if BKZ{
 		BLH=BKY;
-		JFZ=LRQ;
+		JFZ=LRH;
 		}else{
 		let BLA=BKY< -50f64;
 		let BLI;
 		let JGA;
 		if BLA{
 		let BLB=BKY.exp();
-		let LRS=LRQ* BLB;
+		let LRJ=LRH* BLB;
 		BLI=BLB;
-		JGA=LRS;
+		JGA=LRJ;
 		}else{
 		let BLC=BKY.exp();
 		let BLD=F+ BLC;
 		let BLE=BLD.ln();
-		let LRR=(LRQ* BLC)* (IUF/ BLD);
+		let LRI=(LRH* BLC)* (IUF/ BLD);
 		BLI=BLE;
-		JGA=LRR;
+		JGA=LRI;
 		}
 		BLH=BLI;
 		JFZ=JGA;
@@ -5398,15 +5389,15 @@ impl Instance {
 		let BLF=(BJQ* JE)* parameters[194];
 		let BLG=BLF* BEW;
 		let BLJ=BLG* BLH;
-		let LRT=L4([0.0,((LOX* BLF)* BLH),0.0,0.0])+ (JFZ* BLG);
+		let LRK=L4([0.0,((LOO* BLF)* BLH),0.0,0.0])+ (JFZ* BLG);
 		BLM=BLJ;
-		JFY=LRT;
+		JFY=LRK;
 		}else{
 		BLM=A;
-		JFY=LKW;
+		JFY=LKQ;
 		}
-		let LRU=KTA* D;
-		let LRV=LOW+ L5([0.0,0.0,0.0,LRU[0],LRU[1]]);
+		let LRL=KTA* D;
+		let LRM=LON+ L5([0.0,0.0,0.0,LRL[0],LRL[1]]);
 		let BLN=A+ (BEU+ (D* RX));
 		BLP=BJS;
 		BLU=BJT;
@@ -5417,13 +5408,13 @@ impl Instance {
 		IHF=BLN;
 		IHG=A;
 		IOG=A;
-		JEC=LRF;
-		JED=LRG;
+		JEC=LQW;
+		JED=LQX;
 		JEE=JFS;
 		JEF=JFY;
 		JEG=JFT;
-		JEH=LOW;
-		JEI=LRV;
+		JEH=LON;
+		JEI=LRM;
 		}else{
 		BLP=A;
 		BLU=A;
@@ -5434,13 +5425,13 @@ impl Instance {
 		IHF=A;
 		IHG=BLO;
 		IOG=F;
-		JEC=LKV;
-		JED=LKV;
-		JEE=LKW;
-		JEF=LKW;
-		JEG=LKX;
-		JEH=LKV;
-		JEI=LKV;
+		JEC=LKP;
+		JED=LKP;
+		JEE=LKQ;
+		JEF=LKQ;
+		JEG=LKR;
+		JEH=LKP;
+		JEI=LKP;
 		}
 		let IHH;
 		let IHI;
@@ -5476,40 +5467,40 @@ impl Instance {
 		if RR{
 		let BLQ=ddt(36, BLP);
 		let BLR=AHC* (PT- RM);
-		let LSJ=(L2([IUR,0.0])- L2([0.0,IUW]))* AHC;
+		let LSA=(L2([IUR,0.0])- L2([0.0,IUW]))* AHC;
 		let BLS=ddt(37, BLR);
-		let LSK=LSJ* KOI;
-		let LSL=(JEC* KOI)+ L5([0.0,0.0,LSK[0],LSK[1],0.0]);
+		let LSB=LSA* KOI;
+		let LSC=(JEC* KOI)+ L5([0.0,0.0,LSB[0],LSB[1],0.0]);
 		let IQL=BLP+ BLR;
-		let LSM=JEC+ L5([0.0,0.0,LSJ[0],LSJ[1],0.0]);
+		let LSD=JEC+ L5([0.0,0.0,LSA[0],LSA[1],0.0]);
 		let BLT=A+ (BLQ+ BLS);
 		let BLV=ddt(38, BLU);
 		let BLW=AHC* (PT- RW);
-		let LSN=(L2([IUR,0.0])- L2([0.0,IUX]))* AHC;
+		let LSE=(L2([IUR,0.0])- L2([0.0,IUX]))* AHC;
 		let BLX=ddt(39, BLW);
-		let LSO=LSN* KOI;
-		let LSP=(JED* KOI)+ L5([0.0,0.0,LSO[0],0.0,LSO[1]]);
+		let LSF=LSE* KOI;
+		let LSG=(JED* KOI)+ L5([0.0,0.0,LSF[0],0.0,LSF[1]]);
 		let IQN=BLU+ BLW;
-		let LSQ=JED+ L5([0.0,0.0,LSN[0],0.0,LSN[1]]);
+		let LSH=JED+ L5([0.0,0.0,LSE[0],0.0,LSE[1]]);
 		let BLY=A+ (BLV+ BLX);
 		let BMA=ddt(40, BLZ);
 		let BMB=AHC* (JQ- RM);
-		let LSR=(L2([IUM,0.0])- L2([0.0,IUW]))* AHC;
+		let LSI=(L2([IUM,0.0])- L2([0.0,IUW]))* AHC;
 		let BMC=ddt(41, BMB);
-		let LSS=LSR* KOI;
-		let LST=(JEE* KOI)+ L4([LSS[0],0.0,0.0,LSS[1]]);
+		let LSJ=LSI* KOI;
+		let LSK=(JEE* KOI)+ L4([LSJ[0],0.0,0.0,LSJ[1]]);
 		let IQP=BLZ+ BMB;
-		let LSU=JEE+ L4([LSR[0],0.0,0.0,LSR[1]]);
+		let LSL=JEE+ L4([LSI[0],0.0,0.0,LSI[1]]);
 		let BMD=A+ (BMA+ BMC);
 		let BMG=ddt(42, BMF);
-		let LSV=JEF* KOI;
+		let LSM=JEF* KOI;
 		let BMH=AHC* (PT- JG);
-		let LSW=(L2([IUR,0.0])- L2([0.0,IUI]))* AHC;
+		let LSN=(L2([IUR,0.0])- L2([0.0,IUI]))* AHC;
 		let BMI=ddt(43, BMH);
-		let LSX=LSW* KOI;
-		let LSY=L5([LSV[0],LSV[1],LSV[2],0.0,LSV[3]])+ L5([0.0,0.0,LSX[0],LSX[1],0.0]);
+		let LSO=LSN* KOI;
+		let LSP=L5([LSM[0],LSM[1],LSM[2],0.0,LSM[3]])+ L5([0.0,0.0,LSO[0],LSO[1],0.0]);
 		let IQR=BMF+ BMH;
-		let LSZ=L5([JEF[0],JEF[1],JEF[2],0.0,JEF[3]])+ L5([0.0,0.0,LSW[0],LSW[1],0.0]);
+		let LSQ=L5([JEF[0],JEF[1],JEF[2],0.0,JEF[3]])+ L5([0.0,0.0,LSN[0],LSN[1],0.0]);
 		let BMJ=A+ (BMG+ BMI);
 		IHH=BLT;
 		IHI=BLY;
@@ -5528,47 +5519,47 @@ impl Instance {
 		IQU=A;
 		IQW=A;
 		IQY=A;
-		JGB=LSL;
-		JGC=LSP;
-		JGD=LST;
-		JGE=LSY;
-		JGF=LKV;
-		JGG=LKV;
-		JGH=LKW;
-		JGI=LSM;
-		JGJ=LSQ;
-		JGK=LSU;
-		JGL=LSZ;
-		JGM=LKV;
-		JGN=LKV;
-		JGO=LKW;
+		JGB=LSC;
+		JGC=LSG;
+		JGD=LSK;
+		JGE=LSP;
+		JGF=LKP;
+		JGG=LKP;
+		JGH=LKQ;
+		JGI=LSD;
+		JGJ=LSH;
+		JGK=LSL;
+		JGL=LSQ;
+		JGM=LKP;
+		JGN=LKP;
+		JGO=LKQ;
 		}else{
 		let BMK=ddt(44, BLP);
 		let BML=AHC* (JQ- RM);
-		let LRW=(L2([IUM,0.0])- L2([0.0,IUW]))* AHC;
+		let LRN=(L2([IUM,0.0])- L2([0.0,IUW]))* AHC;
 		let BMM=ddt(45, BML);
-		let LRX=LRW* KOI;
-		let LRY=(JEC* KOI)+ L5([LRX[0],0.0,0.0,LRX[1],0.0]);
+		let LRO=LRN* KOI;
+		let LRP=(JEC* KOI)+ L5([LRO[0],0.0,0.0,LRO[1],0.0]);
 		let IQT=BLP+ BML;
-		let LRZ=JEC+ L5([LRW[0],0.0,0.0,LRW[1],0.0]);
+		let LRQ=JEC+ L5([LRN[0],0.0,0.0,LRN[1],0.0]);
 		let BMN=A+ (BMK+ BMM);
 		let BMO=ddt(46, BLU);
 		let BMP=AHC* (JQ- RW);
-		let LSA=(L2([IUM,0.0])- L2([0.0,IUX]))* AHC;
+		let LRR=(L2([IUM,0.0])- L2([0.0,IUX]))* AHC;
 		let BMQ=ddt(47, BMP);
-		let LSB=LSA* KOI;
-		let LSC=(JED* KOI)+ L5([LSB[0],0.0,0.0,0.0,LSB[1]]);
+		let LRS=LRR* KOI;
+		let LRT=(JED* KOI)+ L5([LRS[0],0.0,0.0,0.0,LRS[1]]);
 		let IQV=BLU+ BMP;
-		let LSD=JED+ L5([LSA[0],0.0,0.0,0.0,LSA[1]]);
+		let LRU=JED+ L5([LRR[0],0.0,0.0,0.0,LRR[1]]);
 		let BMR=A+ (BMO+ BMQ);
 		let BMS=ddt(48, BLZ);
 		let BMT=AHC* (PT- RM);
-		let LSE=(L2([IUR,0.0])- L2([0.0,IUW]))* AHC;
+		let LRV=(L2([IUR,0.0])- L2([0.0,IUW]))* AHC;
 		let BMU=ddt(49, BMT);
-		let LSF=LSE* KOI;
-		let LSG=(JEE* KOI)+ L4([0.0,0.0,LSF[0],LSF[1]]);
+		let LRW=LRV* KOI;
+		let LRX=(JEE* KOI)+ L4([0.0,0.0,LRW[0],LRW[1]]);
 		let IQX=BLZ+ BMT;
-		let LSH=JEE+ L4([0.0,0.0,LSE[0],LSE[1]]);
+		let LRY=JEE+ L4([0.0,0.0,LRV[0],LRV[1]]);
 		let BMV=A+ (BMS+ BMU);
 		IHH=A;
 		IHI=A;
@@ -5587,29 +5578,29 @@ impl Instance {
 		IQU=IQT;
 		IQW=IQV;
 		IQY=IQX;
-		JGB=LKV;
-		JGC=LKV;
-		JGD=LKW;
-		JGE=LSI;
-		JGF=LRY;
-		JGG=LSC;
-		JGH=LSG;
-		JGI=LKV;
-		JGJ=LKV;
-		JGK=LKW;
-		JGL=LSI;
-		JGM=LRZ;
-		JGN=LSD;
-		JGO=LSH;
+		JGB=LKP;
+		JGC=LKP;
+		JGD=LKQ;
+		JGE=LRZ;
+		JGF=LRP;
+		JGG=LRT;
+		JGH=LRX;
+		JGI=LKP;
+		JGJ=LKP;
+		JGK=LKQ;
+		JGL=LRZ;
+		JGM=LRQ;
+		JGN=LRU;
+		JGO=LRY;
 		}
 		let BMZ=ddt(50, BMY);
 		let BNA=AHC* RZ;
-		let LTA=KTC* AHC;
+		let LSR=KTC* AHC;
 		let BNB=ddt(51, BNA);
-		let LTB=LTA* KOI;
-		let LTC=(JEG* KOI)+ L3([LTB[0],0.0,LTB[1]]);
+		let LSS=LSR* KOI;
+		let LST=(JEG* KOI)+ L3([LSS[0],0.0,LSS[1]]);
 		let IQZ=BMY+ BNA;
-		let LTD=JEG+ L3([LTA[0],0.0,LTA[1]]);
+		let LSU=JEG+ L3([LSR[0],0.0,LSR[1]]);
 		let BNC=A+ (BMZ+ BNB);
 		let BNE=BND> SV;
 		let CAW;
@@ -5632,34 +5623,34 @@ impl Instance {
 		let BNT;
 		let JGW;
 		if JM{
-		let LTI=KSP* RO;
+		let LSZ=KSP* RO;
 		let BNP=((RO* RO)+ JV).sqrt();
-		let LTJ=(LTI+ LTI)* (IUF/ (KNB* BNP));
+		let LTA=(LSZ+ LSZ)* (IUF/ (KNB* BNP));
 		BNT=BNP;
-		JGW=LTJ;
+		JGW=LTA;
 		}else{
 		let BNQ=KB/ JV;
 		let BNR=(BNQ* RO).tanh();
 		let BNS=RO* BNR;
-		let LTH=(KSP* BNR)+ (((KSP* BNQ)* (IUF- (BNR* BNR)))* RO);
+		let LSY=(KSP* BNR)+ (((KSP* BNQ)* (IUF- (BNR* BNR)))* RO);
 		BNT=BNS;
-		JGW=LTH;
+		JGW=LSY;
 		}
 		let BNU=BNF- RO;
-		let LTK=L4([IYU[0],IYU[1],IYU[2],0.0]);
-		let LTL=LTK- L4([0.0,KSP[0],0.0,KSP[1]]);
+		let LTB=L4([IYU[0],IYU[1],IYU[2],0.0]);
+		let LTC=LTB- L4([0.0,KSP[0],0.0,KSP[1]]);
 		let BNV=BNI* AZ;
-		let LTM=KJT* BNI;
+		let LTD=KJT* BNI;
 		let BNW=TS* AZ;
 		let BNX=parameters[182]/ BNW;
-		let LTN=(((KJT* TS)* BNX)* KNJ)/ BNW;
-		let LTO=JGW* BNH;
+		let LTE=product_div((KJT* TS),(-BNX),BNW);
+		let LTF=JGW* BNH;
 		let BNY=BNX+ (BNH* BNT);
-		let LTP=L3([LTN,0.0,0.0])+ L3([0.0,LTO[0],LTO[1]]);
-		let LTQ=IVA* BNO;
+		let LTG=L3([LTE,0.0,0.0])+ L3([0.0,LTF[0],LTF[1]]);
+		let LTH=IVA* BNO;
 		let BNZ=parameters[168]+ (BNO* BB);
 		let BOA=BE.powf(TI);
-		let LTR=KJV* (TI* ((BE+ (((BE== KOL) as u8 as f64)* KUP)).powf((TI- IUF))));
+		let LTI=KJV* (TI* ((BE+ (((BE== KOL) as u8 as f64)* KUP)).powf((TI- IUF))));
 		let BOB=TH!= A;
 		let BOH;
 		let JGX;
@@ -5669,70 +5660,70 @@ impl Instance {
 		let BOE=F/ BNL;
 		let BOF=BOD.powf(BOE);
 		let BOG=BNT/ BOF;
-		let LTT=(((JGW/ TH)* (BNL* ((BOC+ (((BOC== KOL) as u8 as f64)* KUP)).powf((BNL- IUF)))))* (BOE* ((BOD+ (((BOD== KOL) as u8 as f64)* KUP)).powf((BOE- IUF)))))* BOG;
-		let LTU=(JGW- LTT)/ BOF;
+		let LTK=(JGW).product_sum_div(IUF,(((JGW/ TH)* (BNL* ((BOC+ (((BOC== KOL) as u8 as f64)* KUP)).powf((BNL- IUF)))))* (BOE* ((BOD+ (((BOD== KOL) as u8 as f64)* KUP)).powf((BOE- IUF))))),(-BOG),BOF);
 		BOH=BOG;
-		JGX=LTU;
+		JGX=LTK;
 		}else{
 		BOH=A;
-		JGX=LTS;
+		JGX=LTJ;
 		}
 		let BOI=parameters[181]- (BOH* A);
-		let LTV=(((JGX* A)* KNJ)* BNT)+ (JGW* BOI);
+		let LTL=(((JGX* A)* KNJ)* BNT)+ (JGW* BOI);
 		let BOJ=BNZ- (BOI* BNT);
-		let LTW=L3([LTQ,0.0,0.0])- L3([0.0,LTV[0],LTV[1]]);
+		let LTM=L3([LTH,0.0,0.0])- L3([0.0,LTL[0],LTL[1]]);
 		let BOK=MC* BNY;
 		let BOL=BOK* AZ;
-		let LTX=((LTP* MC)* AZ)+ L3([(KJT* BOK),0.0,0.0]);
+		let LTN=((LTG* MC)* AZ)+ L3([(KJT* BOK),0.0,0.0]);
 		let BOM=GP* BOL;
-		let LTY=L3([(KLR* BOL),0.0,0.0])+ (LTX* GP);
+		let LTO=L3([(KLR* BOL),0.0,0.0])+ (LTN* GP);
 		let BON=(UK* BNV)/ MC;
-		let LTZ=(LTM* UK)/ MC;
+		let LTP=(LTD* UK)/ MC;
 		let BOO=BOJ- BON;
-		let LUA=LTW- L3([LTZ,0.0,0.0]);
+		let LTQ=LTM- L3([LTP,0.0,0.0]);
 		let BOW;
 		let JGY;
 		if JM{
 		let BOP=BNF- BNU;
-		let LUD=(LTK- LTL)* BOP;
+		let LTT=(LTB- LTC)* BOP;
 		let BOQ=((BOP* BOP)+ JV).sqrt();
 		let BOR=JW* ((BNF+ BNU)+ BOQ);
-		let LUE=((LTK+ LTL)+ ((LUD+ LUD)* (IUF/ (KNB* BOQ))))* JW;
+		let LTU=((LTB+ LTC)+ ((LTT+ LTT)* (IUF/ (KNB* BOQ))))* JW;
 		BOW=BOR;
-		JGY=LUE;
+		JGY=LTU;
 		}else{
 		let BOS=BNF- BNU;
-		let LUB=LTK- LTL;
+		let LTR=LTB- LTC;
 		let BOT=KB/ JV;
 		let BOU=(BOT* BOS).tanh();
 		let BOV=JW* ((BNF+ BNU)+ (BOS* BOU));
-		let LUC=((LTK+ LTL)+ ((LUB* BOU)+ (((LUB* BOT)* (IUF- (BOU* BOU)))* BOS)))* JW;
+		let LTS=((LTB+ LTC)+ ((LTR* BOU)+ (((LTR* BOT)* (IUF- (BOU* BOU)))* BOS)))* JW;
 		BOW=BOV;
-		JGY=LUC;
+		JGY=LTS;
 		}
-		let LUF=L5([0.0,LUA[0],LUA[1],0.0,LUA[2]]);
+		let LTV=L5([0.0,LTQ[0],LTQ[1],0.0,LTQ[2]]);
 		let BOX=(BOW- BOO)/ BNV;
-		let LUG=((L5([JGY[0],0.0,JGY[1],JGY[2],JGY[3]])- LUF)- L5([0.0,(LTM* BOX),0.0,0.0,0.0]))/ BNV;
+		let LTW=L5([0.0,LTD,0.0,0.0,0.0]);
+		let LTX=((L5([JGY[0],0.0,JGY[1],JGY[2],JGY[3]])- LTV)).product_sum_div(IUF,LTW,(-BOX),BNV);
 		let BOY=BOX> LD;
 		let BPN;
 		let JGZ;
 		if BOY{
 		BPN=A;
-		JGZ=LTE;
+		JGZ=LSV;
 		}else{
 		let BOZ=BOX< -50f64;
 		let BPO;
 		let JHA;
 		if BOZ{
 		BPO=F;
-		JHA=LTE;
+		JHA=LSV;
 		}else{
 		let BPA=BOX.exp();
 		let BPB=F+ BPA;
 		let BPC=F/ BPB;
-		let LUH=(((LUG* BPA)* BPC)* KNJ)/ BPB;
+		let LTY=((LTX* BPA)).product_div((-BPC),BPB);
 		BPO=BPC;
-		JHA=LUH;
+		JHA=LTY;
 		}
 		BPN=BPO;
 		JGZ=JHA;
@@ -5741,38 +5732,38 @@ impl Instance {
 		let JHB;
 		if JM{
 		let BPD=BNF- BNU;
-		let LUK=(LTK- LTL)* BPD;
+		let LUB=(LTB- LTC)* BPD;
 		let BPE=((BPD* BPD)+ JV).sqrt();
 		let BPF=JW* ((BNF+ BNU)+ BPE);
-		let LUL=((LTK+ LTL)+ ((LUK+ LUK)* (IUF/ (KNB* BPE))))* JW;
+		let LUC=((LTB+ LTC)+ ((LUB+ LUB)* (IUF/ (KNB* BPE))))* JW;
 		BPK=BPF;
-		JHB=LUL;
+		JHB=LUC;
 		}else{
 		let BPG=BNF- BNU;
-		let LUI=LTK- LTL;
+		let LTZ=LTB- LTC;
 		let BPH=KB/ JV;
 		let BPI=(BPH* BPG).tanh();
 		let BPJ=JW* ((BNF+ BNU)+ (BPG* BPI));
-		let LUJ=((LTK+ LTL)+ ((LUI* BPI)+ (((LUI* BPH)* (IUF- (BPI* BPI)))* BPG)))* JW;
+		let LUA=((LTB+ LTC)+ ((LTZ* BPI)+ (((LTZ* BPH)* (IUF- (BPI* BPI)))* BPG)))* JW;
 		BPK=BPJ;
-		JHB=LUJ;
+		JHB=LUA;
 		}
 		let BPL=UK* AI;
 		let BPM=BPL* BNV;
-		let LUM=LTM* BPL;
-		let LUN=L5([0.0,LTW[0],LTW[1],0.0,LTW[2]]);
+		let LUD=LTD* BPL;
+		let LUE=L5([0.0,LTM[0],LTM[1],0.0,LTM[2]]);
 		let BPP=(BPK- (BOJ- (BPM* BPN)))/ BOL;
-		let LUO=LTX* BPP;
-		let LUP=((L5([JHB[0],0.0,JHB[1],JHB[2],JHB[3]])- (LUN- (L5([0.0,(LUM* BPN),0.0,0.0,0.0])+ (JGZ* BPM))))- L5([0.0,LUO[0],LUO[1],0.0,LUO[2]]))/ BOL;
+		let LUF=L5([0.0,LTN[0],LTN[1],0.0,LTN[2]]);
+		let LUG=((L5([JHB[0],0.0,JHB[1],JHB[2],JHB[3]])- (LUE- (L5([0.0,(LUD* BPN),0.0,0.0,0.0])+ (JGZ* BPM))))).product_sum_div(IUF,LUF,(-BPP),BOL);
 		let BPQ=BPP> LD;
 		let BPZ;
 		let JHC;
 		if BPQ{
 		let BPR=BOM* BPP;
-		let LUU=LTY* BPP;
-		let LUV=L5([0.0,LUU[0],LUU[1],0.0,LUU[2]])+ (LUP* BOM);
+		let LUL=LTO* BPP;
+		let LUM=L5([0.0,LUL[0],LUL[1],0.0,LUL[2]])+ (LUG* BOM);
 		BPZ=BPR;
-		JHC=LUV;
+		JHC=LUM;
 		}else{
 		let BPS=BPP< -50f64;
 		let BQA;
@@ -5780,164 +5771,162 @@ impl Instance {
 		if BPS{
 		let BPT=BPP.exp();
 		let BPU=BOM* BPT;
-		let LUS=LTY* BPT;
-		let LUT=L5([0.0,LUS[0],LUS[1],0.0,LUS[2]])+ ((LUP* BPT)* BOM);
+		let LUJ=LTO* BPT;
+		let LUK=L5([0.0,LUJ[0],LUJ[1],0.0,LUJ[2]])+ ((LUG* BPT)* BOM);
 		BQA=BPU;
-		JHD=LUT;
+		JHD=LUK;
 		}else{
 		let BPV=BPP.exp();
 		let BPW=F+ BPV;
 		let BPX=BPW.ln();
 		let BPY=BOM* BPX;
-		let LUQ=LTY* BPX;
-		let LUR=L5([0.0,LUQ[0],LUQ[1],0.0,LUQ[2]])+ (((LUP* BPV)* (IUF/ BPW))* BOM);
+		let LUH=LTO* BPX;
+		let LUI=L5([0.0,LUH[0],LUH[1],0.0,LUH[2]])+ (((LUG* BPV)* (IUF/ BPW))* BOM);
 		BQA=BPY;
-		JHD=LUR;
+		JHD=LUI;
 		}
 		BPZ=BQA;
 		JHC=JHD;
 		}
 		let BQB=(BNM* BPZ)/ GP;
+		let LUN=L5([0.0,KLR,0.0,0.0,0.0]);
 		let BQC=F+ BQB;
 		let BQD=BOA* BQC;
 		let BQE=BNK/ BQD;
-		let LUW=(((L5([0.0,(LTR* BQC),0.0,0.0,0.0])+ ((((JHC* BNM)- L5([0.0,(KLR* BQB),0.0,0.0,0.0]))/ GP)* BOA))* BQE)* KNJ)/ BQD;
+		let LUO=((L5([0.0,(LTI* BQC),0.0,0.0,0.0])+ ((((JHC* BNM)).product_sum_div(IUF,LUN,(-BQB),GP))* BOA))).product_div((-BQE),BQD);
 		let BQF=F+ (TJ* AC);
 		let BQG=(F+ (TJ* E))/ BQF;
 		let BQH=BNJ* BQG;
-		let LUX=((((IVA* TJ)* BQG)* KNJ)/ BQF)* BNJ;
+		let LUP=(product_div((IVA* TJ),(-BQG),BQF))* BNJ;
 		let BQI=F+ ((TK* BNT)/ BND);
-		let LUY=((JGW* TK)/ BND)* BQH;
-		let LUZ=L3([(LUX* BQI),0.0,0.0])+ L3([0.0,LUY[0],LUY[1]]);
+		let LUQ=((JGW* TK)/ BND)* BQH;
+		let LUR=L3([(LUP* BQI),0.0,0.0])+ L3([0.0,LUQ[0],LUQ[1]]);
 		let BQJ=(BNN* BPZ)/ GP;
 		let BQK=F+ BQJ;
 		let BQL=(BQH* BQI)/ BQK;
-		let LVA=(L5([0.0,LUZ[0],LUZ[1],0.0,LUZ[2]])- ((((JHC* BNN)- L5([0.0,(KLR* BQJ),0.0,0.0,0.0]))/ GP)* BQL))/ BQK;
+		let LUS=(L5([0.0,LUR[0],LUR[1],0.0,LUR[2]])).product_sum_div(IUF,(((JHC* BNN)).product_sum_div(IUF,LUN,(-BQJ),GP)),(-BQL),BQK);
 		let BQM=MC* BPN;
 		let BQN=BQM* AZ;
 		let BQO=F- BPN;
-		let LVB=JGZ* KNJ;
+		let LUT=JGZ* KNJ;
 		let BQP=((BQN* BQE)/ BND)+ (BQO* BQL);
-		let LVC=((((((JGZ* MC)* AZ)+ L5([0.0,(KJT* BQM),0.0,0.0,0.0]))* BQE)+ (LUW* BQN))/ BND)+ ((LVB* BQL)+ (LVA* BQO));
+		let LUU=((((((JGZ* MC)* AZ)+ L5([0.0,(KJT* BQM),0.0,0.0,0.0]))* BQE)+ (LUO* BQN))/ BND)+ ((LUT* BQL)+ (LUS* BQO));
 		let BQQ=(BQL* BND)/ BQE;
-		let LVD=((LVA* BND)- (LUW* BQQ))/ BQE;
+		let LUV=((LUS* BND)).product_sum_div(IUF,LUO,(-BQQ),BQE);
 		let BQR=(MC* BPZ)/ GP;
 		let BQS=BQR/ BQQ;
 		let BQT=(F+ BQS).sqrt();
 		let BQU=(BQQ* BQT)- BQQ;
 		let BQV=BOL* BPN;
-		let LVE=LTX* BPN;
-		let LVF=L5([0.0,LVE[0],LVE[1],0.0,LVE[2]])+ (JGZ* BOL);
+		let LUW=LTN* BPN;
+		let LUX=L5([0.0,LUW[0],LUW[1],0.0,LUW[2]])+ (JGZ* BOL);
 		let BQW=(BQQ* BQO)+ BQV;
-		let LVG=((LVD* BQO)+ (LVB* BQQ))+ LVF;
-		let LVH=((((LVD* BQT)+ (((((((JHC* MC)- L5([0.0,(KLR* BQR),0.0,0.0,0.0]))/ GP)- (LVD* BQS))/ BQQ)* (IUF/ (KNB* BQT)))* BQQ))- LVD)* BQO)+ (LVB* BQU);
+		let LUY=((LUV* BQO)+ (LUT* BQQ))+ LUX;
+		let LUZ=((((LUV* BQT)+ (((((((JHC* MC)).product_sum_div(IUF,LUN,(-BQR),GP))).product_sum_div(IUF,LUV,(-BQS),BQQ))* (IUF/ (KNB* BQT)))* BQQ))- LUV)* BQO)+ (LUT* BQU);
 		let BQX=(BQU* BQO)+ BQV;
-		let LVI=LVH+ LVF;
+		let LVA=LUZ+ LUX;
 		let BQY=RO/ BQX;
-		let LVJ=L5([0.0,0.0,KSP[0],0.0,KSP[1]]);
-		let LVK=(LVJ- (LVI* BQY))/ BQX;
+		let LVB=L5([0.0,0.0,KSP[0],0.0,KSP[1]]);
+		let LVC=(LVB).product_sum_div(IUF,LVA,(-BQY),BQX);
 		let BRG;
 		let JHE;
 		if JM{
 		let BQZ=A- BQY;
-		let LVN=(LVK* KNJ)* BQZ;
+		let LVF=(LVC* KNJ)* BQZ;
 		let BRA=((BQZ* BQZ)+ JV).sqrt();
 		let BRB=JW* ((A+ BQY)+ BRA);
-		let LVO=(LVK+ ((LVN+ LVN)* (IUF/ (KNB* BRA))))* JW;
+		let LVG=(LVC+ ((LVF+ LVF)* (IUF/ (KNB* BRA))))* JW;
 		BRG=BRB;
-		JHE=LVO;
+		JHE=LVG;
 		}else{
 		let BRC=A- BQY;
-		let LVL=LVK* KNJ;
+		let LVD=LVC* KNJ;
 		let BRD=KB/ JV;
 		let BRE=(BRD* BRC).tanh();
 		let BRF=JW* ((A+ BQY)+ (BRC* BRE));
-		let LVM=(LVK+ ((LVL* BRE)+ (((LVL* BRD)* (IUF- (BRE* BRE)))* BRC)))* JW;
+		let LVE=(LVC+ ((LVD* BRE)+ (((LVD* BRD)* (IUF- (BRE* BRE)))* BRC)))* JW;
 		BRG=BRF;
-		JHE=LVM;
+		JHE=LVE;
 		}
-		let LVP=BNL- IUF;
+		let LVH=BNL- IUF;
 		let BRH=F+ (BRG.powf(BNL));
 		let BRI=F/ BNL;
 		let BRJ=BRH.powf(BRI);
-		let LVQ=BRI- IUF;
+		let LVI=BRI- IUF;
 		let BRK=F/ BRJ;
 		let BRL=RO* BRK;
-		let LVR=KSP* BRK;
-		let LVS=(((((JHE* (BNL* ((BRG+ (((BRG== KOL) as u8 as f64)* KUP)).powf(LVP))))* (BRI* ((BRH+ (((BRH== KOL) as u8 as f64)* KUP)).powf(LVQ))))* BRK)* KNJ)/ BRJ)* RO;
-		let LVT=L5([0.0,0.0,LVR[0],0.0,LVR[1]])+ LVS;
+		let LVJ=KSP* BRK;
+		let LVK=L5([0.0,0.0,LVJ[0],0.0,LVJ[1]])+ (((((JHE* (BNL* ((BRG+ (((BRG== KOL) as u8 as f64)* KUP)).powf(LVH))))* (BRI* ((BRH+ (((BRH== KOL) as u8 as f64)* KUP)).powf(LVI))))).product_div((-BRK),BRJ))* RO);
 		let BRM=-RO;
-		let LVU=KSP* KNJ;
+		let LVL=KSP* KNJ;
 		let BRN=BRM/ BQX;
-		let LVV=L5([0.0,0.0,LVU[0],0.0,LVU[1]]);
-		let LVW=(LVV- (LVI* BRN))/ BQX;
+		let LVM=L5([0.0,0.0,LVL[0],0.0,LVL[1]]);
+		let LVN=(LVM).product_sum_div(IUF,LVA,(-BRN),BQX);
 		let BRV;
 		let JHF;
 		if JM{
 		let BRO=A- BRN;
-		let LVZ=(LVW* KNJ)* BRO;
+		let LVQ=(LVN* KNJ)* BRO;
 		let BRP=((BRO* BRO)+ JV).sqrt();
 		let BRQ=JW* ((A+ BRN)+ BRP);
-		let LWA=(LVW+ ((LVZ+ LVZ)* (IUF/ (KNB* BRP))))* JW;
+		let LVR=(LVN+ ((LVQ+ LVQ)* (IUF/ (KNB* BRP))))* JW;
 		BRV=BRQ;
-		JHF=LWA;
+		JHF=LVR;
 		}else{
 		let BRR=A- BRN;
-		let LVX=LVW* KNJ;
+		let LVO=LVN* KNJ;
 		let BRS=KB/ JV;
 		let BRT=(BRS* BRR).tanh();
 		let BRU=JW* ((A+ BRN)+ (BRR* BRT));
-		let LVY=(LVW+ ((LVX* BRT)+ (((LVX* BRS)* (IUF- (BRT* BRT)))* BRR)))* JW;
+		let LVP=(LVN+ ((LVO* BRT)+ (((LVO* BRS)* (IUF- (BRT* BRT)))* BRR)))* JW;
 		BRV=BRU;
-		JHF=LVY;
+		JHF=LVP;
 		}
 		let BRW=F+ (BRV.powf(BNL));
 		let BRX=BRW.powf(BRI);
 		let BRY=F/ BRX;
 		let BRZ=BRM* BRY;
-		let LWB=LVU* BRY;
-		let LWC=(((((JHF* (BNL* ((BRV+ (((BRV== KOL) as u8 as f64)* KUP)).powf(LVP))))* (BRI* ((BRW+ (((BRW== KOL) as u8 as f64)* KUP)).powf(LVQ))))* BRY)* KNJ)/ BRX)* BRM;
-		let LWD=L5([0.0,0.0,LWB[0],0.0,LWB[1]])+ LWC;
-		let LWE=L5([IYU[0],0.0,IYU[1],IYU[2],0.0]);
+		let LVS=LVL* BRY;
+		let LVT=L5([0.0,0.0,LVS[0],0.0,LVS[1]])+ (((((JHF* (BNL* ((BRV+ (((BRV== KOL) as u8 as f64)* KUP)).powf(LVH))))* (BRI* ((BRW+ (((BRW== KOL) as u8 as f64)* KUP)).powf(LVI))))).product_div((-BRY),BRX))* BRM);
+		let LVU=L5([IYU[0],0.0,IYU[1],IYU[2],0.0]);
 		let BSA=(BNF- BOO)/ BNV;
-		let LWF=((LWE- LUF)- L5([0.0,(LTM* BSA),0.0,0.0,0.0]))/ BNV;
+		let LVV=((LVU- LTV)).product_sum_div(IUF,LTW,(-BSA),BNV);
 		let BSB=BSA> LD;
 		let BSG;
 		let JHG;
 		if BSB{
 		BSG=A;
-		JHG=LTE;
+		JHG=LSV;
 		}else{
 		let BSC=BSA< -50f64;
 		let BSH;
 		let JHH;
 		if BSC{
 		BSH=F;
-		JHH=LTE;
+		JHH=LSV;
 		}else{
 		let BSD=BSA.exp();
 		let BSE=F+ BSD;
 		let BSF=F/ BSE;
-		let LWG=(((LWF* BSD)* BSF)* KNJ)/ BSE;
+		let LVW=((LVV* BSD)).product_div((-BSF),BSE);
 		BSH=BSF;
-		JHH=LWG;
+		JHH=LVW;
 		}
 		BSG=BSH;
 		JHG=JHH;
 		}
-		let LWH=L5([LTL[0],0.0,LTL[1],LTL[2],LTL[3]]);
+		let LVX=L5([LTC[0],0.0,LTC[1],LTC[2],LTC[3]]);
 		let BSI=((BNU- BRZ)- (BOJ- (BPM* BSG)))/ BOL;
-		let LWI=LTX* BSI;
-		let LWJ=(((LWH- LWD)- (LUN- (L5([0.0,(LUM* BSG),0.0,0.0,0.0])+ (JHG* BPM))))- L5([0.0,LWI[0],LWI[1],0.0,LWI[2]]))/ BOL;
+		let LVY=(((LVX- LVT)- (LUE- (L5([0.0,(LUD* BSG),0.0,0.0,0.0])+ (JHG* BPM))))).product_sum_div(IUF,LUF,(-BSI),BOL);
 		let BSJ=BSI> LD;
 		let BTK;
 		let JHI;
 		if BSJ{
 		let BSK=BOM* BSI;
-		let LWO=LTY* BSI;
-		let LWP=L5([0.0,LWO[0],LWO[1],0.0,LWO[2]])+ (LWJ* BOM);
+		let LWD=LTO* BSI;
+		let LWE=L5([0.0,LWD[0],LWD[1],0.0,LWD[2]])+ (LVY* BOM);
 		BTK=BSK;
-		JHI=LWP;
+		JHI=LWE;
 		}else{
 		let BSL=BSI< -50f64;
 		let BTL;
@@ -5945,61 +5934,60 @@ impl Instance {
 		if BSL{
 		let BSM=BSI.exp();
 		let BSN=BOM* BSM;
-		let LWM=LTY* BSM;
-		let LWN=L5([0.0,LWM[0],LWM[1],0.0,LWM[2]])+ ((LWJ* BSM)* BOM);
+		let LWB=LTO* BSM;
+		let LWC=L5([0.0,LWB[0],LWB[1],0.0,LWB[2]])+ ((LVY* BSM)* BOM);
 		BTL=BSN;
-		JHJ=LWN;
+		JHJ=LWC;
 		}else{
 		let BSO=BSI.exp();
 		let BSP=F+ BSO;
 		let BSQ=BSP.ln();
 		let BSR=BOM* BSQ;
-		let LWK=LTY* BSQ;
-		let LWL=L5([0.0,LWK[0],LWK[1],0.0,LWK[2]])+ (((LWJ* BSO)* (IUF/ BSP))* BOM);
+		let LVZ=LTO* BSQ;
+		let LWA=L5([0.0,LVZ[0],LVZ[1],0.0,LVZ[2]])+ (((LVY* BSO)* (IUF/ BSP))* BOM);
 		BTL=BSR;
-		JHJ=LWL;
+		JHJ=LWA;
 		}
 		BTK=BTL;
 		JHI=JHJ;
 		}
 		let BSS=(BNU- BOO)/ BNV;
-		let LWQ=((LWH- LUF)- L5([0.0,(LTM* BSS),0.0,0.0,0.0]))/ BNV;
+		let LWF=((LVX- LTV)).product_sum_div(IUF,LTW,(-BSS),BNV);
 		let BST=BSS> LD;
 		let BSY;
 		let JHK;
 		if BST{
 		BSY=A;
-		JHK=LTE;
+		JHK=LSV;
 		}else{
 		let BSU=BSS< -50f64;
 		let BSZ;
 		let JHL;
 		if BSU{
 		BSZ=F;
-		JHL=LTE;
+		JHL=LSV;
 		}else{
 		let BSV=BSS.exp();
 		let BSW=F+ BSV;
 		let BSX=F/ BSW;
-		let LWR=(((LWQ* BSV)* BSX)* KNJ)/ BSW;
+		let LWG=((LWF* BSV)).product_div((-BSX),BSW);
 		BSZ=BSX;
-		JHL=LWR;
+		JHL=LWG;
 		}
 		BSY=BSZ;
 		JHK=JHL;
 		}
 		let BTA=((BNF- BRL)- (BOJ- (BPM* BSY)))/ BOL;
-		let LWS=LTX* BTA;
-		let LWT=(((LWE- LVT)- (LUN- (L5([0.0,(LUM* BSY),0.0,0.0,0.0])+ (JHK* BPM))))- L5([0.0,LWS[0],LWS[1],0.0,LWS[2]]))/ BOL;
+		let LWH=(((LVU- LVK)- (LUE- (L5([0.0,(LUD* BSY),0.0,0.0,0.0])+ (JHK* BPM))))).product_sum_div(IUF,LUF,(-BTA),BOL);
 		let BTB=BTA> LD;
 		let BTM;
 		let JHM;
 		if BTB{
 		let BTC=BOM* BTA;
-		let LWY=LTY* BTA;
-		let LWZ=L5([0.0,LWY[0],LWY[1],0.0,LWY[2]])+ (LWT* BOM);
+		let LWM=LTO* BTA;
+		let LWN=L5([0.0,LWM[0],LWM[1],0.0,LWM[2]])+ (LWH* BOM);
 		BTM=BTC;
-		JHM=LWZ;
+		JHM=LWN;
 		}else{
 		let BTD=BTA< -50f64;
 		let BTN;
@@ -6007,101 +5995,101 @@ impl Instance {
 		if BTD{
 		let BTE=BTA.exp();
 		let BTF=BOM* BTE;
-		let LWW=LTY* BTE;
-		let LWX=L5([0.0,LWW[0],LWW[1],0.0,LWW[2]])+ ((LWT* BTE)* BOM);
+		let LWK=LTO* BTE;
+		let LWL=L5([0.0,LWK[0],LWK[1],0.0,LWK[2]])+ ((LWH* BTE)* BOM);
 		BTN=BTF;
-		JHN=LWX;
+		JHN=LWL;
 		}else{
 		let BTG=BTA.exp();
 		let BTH=F+ BTG;
 		let BTI=BTH.ln();
 		let BTJ=BOM* BTI;
-		let LWU=LTY* BTI;
-		let LWV=L5([0.0,LWU[0],LWU[1],0.0,LWU[2]])+ (((LWT* BTG)* (IUF/ BTH))* BOM);
+		let LWI=LTO* BTI;
+		let LWJ=L5([0.0,LWI[0],LWI[1],0.0,LWI[2]])+ (((LWH* BTG)* (IUF/ BTH))* BOM);
 		BTN=BTJ;
-		JHN=LWV;
+		JHN=LWJ;
 		}
 		BTM=BTN;
 		JHM=JHN;
 		}
 		let BTO=(BTK- BTM)/ GP;
 		let BTP=BTO/ BQW;
-		let LXA=((((JHI- JHM)- L5([0.0,(KLR* BTO),0.0,0.0,0.0]))/ GP)- (LVG* BTP))/ BQW;
+		let LWO=((((JHI- JHM)).product_sum_div(IUF,LUN,(-BTO),GP))).product_sum_div(IUF,LUY,(-BTP),BQW);
 		let BTU;
 		let JHO;
 		if JM{
-		let LXC=LXA* BTP;
+		let LWQ=LWO* BTP;
 		let BTQ=((BTP* BTP)+ JV).sqrt();
-		let LXD=(LXC+ LXC)* (IUF/ (KNB* BTQ));
+		let LWR=(LWQ+ LWQ)* (IUF/ (KNB* BTQ));
 		BTU=BTQ;
-		JHO=LXD;
+		JHO=LWR;
 		}else{
 		let BTR=KB/ JV;
 		let BTS=(BTR* BTP).tanh();
 		let BTT=BTP* BTS;
-		let LXB=(LXA* BTS)+ (((LXA* BTR)* (IUF- (BTS* BTS)))* BTP);
+		let LWP=(LWO* BTS)+ (((LWO* BTR)* (IUF- (BTS* BTS)))* BTP);
 		BTU=BTT;
-		JHO=LXB;
+		JHO=LWP;
 		}
 		let BTV=F+ (BTU.powf(BNL));
 		let BTW=BTV.powf(BRI);
 		let BTX=BTP/ BTW;
 		let BTY=BQP* BTX;
-		let LXE=((LXA- (((JHO* (BNL* ((BTU+ (((BTU== KOL) as u8 as f64)* KUP)).powf(LVP))))* (BRI* ((BTV+ (((BTV== KOL) as u8 as f64)* KUP)).powf(LVQ))))* BTX))/ BTW)* BQP;
+		let LWS=((LWO).product_sum_div(IUF,((JHO* (BNL* ((BTU+ (((BTU== KOL) as u8 as f64)* KUP)).powf(LVH))))* (BRI* ((BTV+ (((BTV== KOL) as u8 as f64)* KUP)).powf(LVI)))),(-BTX),BTW))* BQP;
 		let BTZ=((JE* O)* P)* JW;
 		let BUA=BTZ* (BTK+ BTM);
 		let BUB=BUA* BTY;
-		let LXF=(((JHI+ JHM)* BTZ)* BTY)+ (((LVC* BTX)+ LXE)* BUA);
+		let LWT=(((JHI+ JHM)* BTZ)* BTY)+ (((LUU* BTX)+ LWS)* BUA);
 		let BUC=MC* BNX;
 		let BUD=BUC* AZ;
-		let LXG=((LTN* MC)* AZ)+ (KJT* BUC);
+		let LWU=((LTE* MC)* AZ)+ (KJT* BUC);
 		let BUE=GP* BUD;
-		let LXH=(KLR* BUD)+ (LXG* GP);
+		let LWV=(KLR* BUD)+ (LWU* GP);
 		let BUF=BNZ- BON;
-		let LXI=LTQ- LTZ;
+		let LWW=LTH- LTP;
 		let BUN;
 		let JHP;
 		if JM{
 		let BUG=BNF- BNU;
-		let LXL=(LTK- LTL)* BUG;
+		let LWZ=(LTB- LTC)* BUG;
 		let BUH=((BUG* BUG)+ JV).sqrt();
 		let BUI=JW* ((BNF+ BNU)+ BUH);
-		let LXM=((LTK+ LTL)+ ((LXL+ LXL)* (IUF/ (KNB* BUH))))* JW;
+		let LXA=((LTB+ LTC)+ ((LWZ+ LWZ)* (IUF/ (KNB* BUH))))* JW;
 		BUN=BUI;
-		JHP=LXM;
+		JHP=LXA;
 		}else{
 		let BUJ=BNF- BNU;
-		let LXJ=LTK- LTL;
+		let LWX=LTB- LTC;
 		let BUK=KB/ JV;
 		let BUL=(BUK* BUJ).tanh();
 		let BUM=JW* ((BNF+ BNU)+ (BUJ* BUL));
-		let LXK=((LTK+ LTL)+ ((LXJ* BUL)+ (((LXJ* BUK)* (IUF- (BUL* BUL)))* BUJ)))* JW;
+		let LWY=((LTB+ LTC)+ ((LWX* BUL)+ (((LWX* BUK)* (IUF- (BUL* BUL)))* BUJ)))* JW;
 		BUN=BUM;
-		JHP=LXK;
+		JHP=LWY;
 		}
-		let LXN=L5([0.0,LXI,0.0,0.0,0.0]);
+		let LXB=L5([0.0,LWW,0.0,0.0,0.0]);
 		let BUO=(BUN- BUF)/ BNV;
-		let LXO=((L5([JHP[0],0.0,JHP[1],JHP[2],JHP[3]])- LXN)- L5([0.0,(LTM* BUO),0.0,0.0,0.0]))/ BNV;
+		let LXC=((L5([JHP[0],0.0,JHP[1],JHP[2],JHP[3]])- LXB)).product_sum_div(IUF,LTW,(-BUO),BNV);
 		let BUP=BUO> LD;
 		let BVC;
 		let JHQ;
 		if BUP{
 		BVC=A;
-		JHQ=LTE;
+		JHQ=LSV;
 		}else{
 		let BUQ=BUO< -50f64;
 		let BVD;
 		let JHR;
 		if BUQ{
 		BVD=F;
-		JHR=LTE;
+		JHR=LSV;
 		}else{
 		let BUR=BUO.exp();
 		let BUS=F+ BUR;
 		let BUT=F/ BUS;
-		let LXP=(((LXO* BUR)* BUT)* KNJ)/ BUS;
+		let LXD=((LXC* BUR)).product_div((-BUT),BUS);
 		BVD=BUT;
-		JHR=LXP;
+		JHR=LXD;
 		}
 		BVC=BVD;
 		JHQ=JHR;
@@ -6110,33 +6098,34 @@ impl Instance {
 		let JHS;
 		if JM{
 		let BUU=BNF- BNU;
-		let LXS=(LTK- LTL)* BUU;
+		let LXG=(LTB- LTC)* BUU;
 		let BUV=((BUU* BUU)+ JV).sqrt();
 		let BUW=JW* ((BNF+ BNU)+ BUV);
-		let LXT=((LTK+ LTL)+ ((LXS+ LXS)* (IUF/ (KNB* BUV))))* JW;
+		let LXH=((LTB+ LTC)+ ((LXG+ LXG)* (IUF/ (KNB* BUV))))* JW;
 		BVB=BUW;
-		JHS=LXT;
+		JHS=LXH;
 		}else{
 		let BUX=BNF- BNU;
-		let LXQ=LTK- LTL;
+		let LXE=LTB- LTC;
 		let BUY=KB/ JV;
 		let BUZ=(BUY* BUX).tanh();
 		let BVA=JW* ((BNF+ BNU)+ (BUX* BUZ));
-		let LXR=((LTK+ LTL)+ ((LXQ* BUZ)+ (((LXQ* BUY)* (IUF- (BUZ* BUZ)))* BUX)))* JW;
+		let LXF=((LTB+ LTC)+ ((LXE* BUZ)+ (((LXE* BUY)* (IUF- (BUZ* BUZ)))* BUX)))* JW;
 		BVB=BVA;
-		JHS=LXR;
+		JHS=LXF;
 		}
-		let LXU=L5([0.0,LTQ,0.0,0.0,0.0]);
+		let LXI=L5([0.0,LTH,0.0,0.0,0.0]);
 		let BVE=(BVB- (BNZ- (BPM* BVC)))/ BUD;
-		let LXV=((L5([JHS[0],0.0,JHS[1],JHS[2],JHS[3]])- (LXU- (L5([0.0,(LUM* BVC),0.0,0.0,0.0])+ (JHQ* BPM))))- L5([0.0,(LXG* BVE),0.0,0.0,0.0]))/ BUD;
+		let LXJ=L5([0.0,LWU,0.0,0.0,0.0]);
+		let LXK=((L5([JHS[0],0.0,JHS[1],JHS[2],JHS[3]])- (LXI- (L5([0.0,(LUD* BVC),0.0,0.0,0.0])+ (JHQ* BPM))))).product_sum_div(IUF,LXJ,(-BVE),BUD);
 		let BVF=BVE> LD;
 		let BVQ;
 		let JHT;
 		if BVF{
 		let BVG=BUE* BVE;
-		let LXY=L5([0.0,(LXH* BVE),0.0,0.0,0.0])+ (LXV* BUE);
+		let LXN=L5([0.0,(LWV* BVE),0.0,0.0,0.0])+ (LXK* BUE);
 		BVQ=BVG;
-		JHT=LXY;
+		JHT=LXN;
 		}else{
 		let BVH=BVE< -50f64;
 		let BVR;
@@ -6144,128 +6133,127 @@ impl Instance {
 		if BVH{
 		let BVI=BVE.exp();
 		let BVJ=BUE* BVI;
-		let LXX=L5([0.0,(LXH* BVI),0.0,0.0,0.0])+ ((LXV* BVI)* BUE);
+		let LXM=L5([0.0,(LWV* BVI),0.0,0.0,0.0])+ ((LXK* BVI)* BUE);
 		BVR=BVJ;
-		JHU=LXX;
+		JHU=LXM;
 		}else{
 		let BVK=BVE.exp();
 		let BVL=F+ BVK;
 		let BVM=BVL.ln();
 		let BVN=BUE* BVM;
-		let LXW=L5([0.0,(LXH* BVM),0.0,0.0,0.0])+ (((LXV* BVK)* (IUF/ BVL))* BUE);
+		let LXL=L5([0.0,(LWV* BVM),0.0,0.0,0.0])+ (((LXK* BVK)* (IUF/ BVL))* BUE);
 		BVR=BVN;
-		JHU=LXW;
+		JHU=LXL;
 		}
 		BVQ=BVR;
 		JHT=JHU;
 		}
 		let BVO=BNK/ BOA;
 		let BVP=(BQH* BND)/ BVO;
-		let LXZ=((LUX* BND)- ((((LTR* BVO)* KNJ)/ BOA)* BVP))/ BVO;
+		let LXO=product_sum_div((LUP* BND),IUF,(product_div(LTI,(-BVO),BOA)),(-BVP),BVO);
 		let BVS=(MC* BVQ)/ GP;
 		let BVT=BVS/ BVP;
+		let LXP=L5([0.0,LXO,0.0,0.0,0.0]);
 		let BVU=(F+ BVT).sqrt();
 		let BVV=(BVP* BVU)- BVP;
-		let LYA=(L5([0.0,(LXZ* BVU),0.0,0.0,0.0])+ (((((((JHT* MC)- L5([0.0,(KLR* BVS),0.0,0.0,0.0]))/ GP)- L5([0.0,(LXZ* BVT),0.0,0.0,0.0]))/ BVP)* (IUF/ (KNB* BVU)))* BVP))- L5([0.0,LXZ,0.0,0.0,0.0]);
 		let BVW=F- BVC;
+		let LXQ=(((L5([0.0,(LXO* BVU),0.0,0.0,0.0])+ (((((((JHT* MC)).product_sum_div(IUF,LUN,(-BVS),GP))).product_sum_div(IUF,LXP,(-BVT),BVP))* (IUF/ (KNB* BVU)))* BVP))- LXP)* BVW)+ ((JHQ* KNJ)* BVV);
 		let BVX=(BVV* BVW)+ (BUD* BVC);
-		let LYB=((LYA* BVW)+ ((JHQ* KNJ)* BVV))+ (L5([0.0,(LXG* BVC),0.0,0.0,0.0])+ (JHQ* BUD));
+		let LXR=LXQ+ (L5([0.0,(LWU* BVC),0.0,0.0,0.0])+ (JHQ* BUD));
 		let BVY=RO/ BVX;
-		let LYC=(LVJ- (LYB* BVY))/ BVX;
+		let LXS=(LVB).product_sum_div(IUF,LXR,(-BVY),BVX);
 		let BWG;
 		let JHV;
 		if JM{
 		let BVZ=A- BVY;
-		let LYF=(LYC* KNJ)* BVZ;
+		let LXV=(LXS* KNJ)* BVZ;
 		let BWA=((BVZ* BVZ)+ JV).sqrt();
 		let BWB=JW* ((A+ BVY)+ BWA);
-		let LYG=(LYC+ ((LYF+ LYF)* (IUF/ (KNB* BWA))))* JW;
+		let LXW=(LXS+ ((LXV+ LXV)* (IUF/ (KNB* BWA))))* JW;
 		BWG=BWB;
-		JHV=LYG;
+		JHV=LXW;
 		}else{
 		let BWC=A- BVY;
-		let LYD=LYC* KNJ;
+		let LXT=LXS* KNJ;
 		let BWD=KB/ JV;
 		let BWE=(BWD* BWC).tanh();
 		let BWF=JW* ((A+ BVY)+ (BWC* BWE));
-		let LYE=(LYC+ ((LYD* BWE)+ (((LYD* BWD)* (IUF- (BWE* BWE)))* BWC)))* JW;
+		let LXU=(LXS+ ((LXT* BWE)+ (((LXT* BWD)* (IUF- (BWE* BWE)))* BWC)))* JW;
 		BWG=BWF;
-		JHV=LYE;
+		JHV=LXU;
 		}
 		let BWH=F+ (BWG.powf(BNL));
 		let BWI=BWH.powf(BRI);
 		let BWJ=F/ BWI;
 		let BWK=RO* BWJ;
-		let LYH=KSP* BWJ;
-		let LYI=(((((JHV* (BNL* ((BWG+ (((BWG== KOL) as u8 as f64)* KUP)).powf(LVP))))* (BRI* ((BWH+ (((BWH== KOL) as u8 as f64)* KUP)).powf(LVQ))))* BWJ)* KNJ)/ BWI)* RO;
-		let LYJ=L5([0.0,0.0,LYH[0],0.0,LYH[1]])+ LYI;
+		let LXX=KSP* BWJ;
+		let LXY=L5([0.0,0.0,LXX[0],0.0,LXX[1]])+ (((((JHV* (BNL* ((BWG+ (((BWG== KOL) as u8 as f64)* KUP)).powf(LVH))))* (BRI* ((BWH+ (((BWH== KOL) as u8 as f64)* KUP)).powf(LVI))))).product_div((-BWJ),BWI))* RO);
 		let BWL=BRM/ BVX;
-		let LYK=(LVV- (LYB* BWL))/ BVX;
+		let LXZ=(LVM).product_sum_div(IUF,LXR,(-BWL),BVX);
 		let BWT;
 		let JHW;
 		if JM{
 		let BWM=A- BWL;
-		let LYN=(LYK* KNJ)* BWM;
+		let LYC=(LXZ* KNJ)* BWM;
 		let BWN=((BWM* BWM)+ JV).sqrt();
 		let BWO=JW* ((A+ BWL)+ BWN);
-		let LYO=(LYK+ ((LYN+ LYN)* (IUF/ (KNB* BWN))))* JW;
+		let LYD=(LXZ+ ((LYC+ LYC)* (IUF/ (KNB* BWN))))* JW;
 		BWT=BWO;
-		JHW=LYO;
+		JHW=LYD;
 		}else{
 		let BWP=A- BWL;
-		let LYL=LYK* KNJ;
+		let LYA=LXZ* KNJ;
 		let BWQ=KB/ JV;
 		let BWR=(BWQ* BWP).tanh();
 		let BWS=JW* ((A+ BWL)+ (BWP* BWR));
-		let LYM=(LYK+ ((LYL* BWR)+ (((LYL* BWQ)* (IUF- (BWR* BWR)))* BWP)))* JW;
+		let LYB=(LXZ+ ((LYA* BWR)+ (((LYA* BWQ)* (IUF- (BWR* BWR)))* BWP)))* JW;
 		BWT=BWS;
-		JHW=LYM;
+		JHW=LYB;
 		}
 		let BWU=F+ (BWT.powf(BNL));
 		let BWV=BWU.powf(BRI);
 		let BWW=F/ BWV;
 		let BWX=BRM* BWW;
-		let LYP=LVU* BWW;
-		let LYQ=(((((JHW* (BNL* ((BWT+ (((BWT== KOL) as u8 as f64)* KUP)).powf(LVP))))* (BRI* ((BWU+ (((BWU== KOL) as u8 as f64)* KUP)).powf(LVQ))))* BWW)* KNJ)/ BWV)* BRM;
-		let LYR=L5([0.0,0.0,LYP[0],0.0,LYP[1]])+ LYQ;
-		let LYS=L4([IYU[0],0.0,IYU[1],IYU[2]]);
+		let LYE=LVL* BWW;
+		let LYF=L5([0.0,0.0,LYE[0],0.0,LYE[1]])+ (((((JHW* (BNL* ((BWT+ (((BWT== KOL) as u8 as f64)* KUP)).powf(LVH))))* (BRI* ((BWU+ (((BWU== KOL) as u8 as f64)* KUP)).powf(LVI))))).product_div((-BWW),BWV))* BRM);
+		let LYG=L4([IYU[0],0.0,IYU[1],IYU[2]]);
 		let BWY=(BNF- BUF)/ BNV;
-		let LYT=((LYS- L4([0.0,LXI,0.0,0.0]))- L4([0.0,(LTM* BWY),0.0,0.0]))/ BNV;
+		let LYH=((LYG- L4([0.0,LWW,0.0,0.0]))).product_sum_div(IUF,L4([0.0,LTD,0.0,0.0]),(-BWY),BNV);
 		let BWZ=BWY> LD;
 		let BXE;
 		let JHX;
 		if BWZ{
 		BXE=A;
-		JHX=LTF;
+		JHX=LSW;
 		}else{
 		let BXA=BWY< -50f64;
 		let BXF;
 		let JHY;
 		if BXA{
 		BXF=F;
-		JHY=LTF;
+		JHY=LSW;
 		}else{
 		let BXB=BWY.exp();
 		let BXC=F+ BXB;
 		let BXD=F/ BXC;
-		let LYU=(((LYT* BXB)* BXD)* KNJ)/ BXC;
+		let LYI=((LYH* BXB)).product_div((-BXD),BXC);
 		BXF=BXD;
-		JHY=LYU;
+		JHY=LYI;
 		}
 		BXE=BXF;
 		JHX=JHY;
 		}
-		let LYV=L4([0.0,LTQ,0.0,0.0])- (L4([0.0,(LUM* BXE),0.0,0.0])+ (JHX* BPM));
+		let LYJ=L4([0.0,LTH,0.0,0.0])- (L4([0.0,(LUD* BXE),0.0,0.0])+ (JHX* BPM));
 		let BXG=((BNU- BWX)- (BNZ- (BPM* BXE)))/ BUD;
-		let LYW=(((LWH- LYR)- L5([LYV[0],LYV[1],LYV[2],LYV[3],0.0]))- L5([0.0,(LXG* BXG),0.0,0.0,0.0]))/ BUD;
+		let LYK=(((LVX- LYF)- L5([LYJ[0],LYJ[1],LYJ[2],LYJ[3],0.0]))).product_sum_div(IUF,LXJ,(-BXG),BUD);
 		let BXH=BXG> LD;
 		let BYI;
 		let JHZ;
 		if BXH{
 		let BXI=BUE* BXG;
-		let LYZ=L5([0.0,(LXH* BXG),0.0,0.0,0.0])+ (LYW* BUE);
+		let LYN=L5([0.0,(LWV* BXG),0.0,0.0,0.0])+ (LYK* BUE);
 		BYI=BXI;
-		JHZ=LYZ;
+		JHZ=LYN;
 		}else{
 		let BXJ=BXG< -50f64;
 		let BYJ;
@@ -6273,57 +6261,57 @@ impl Instance {
 		if BXJ{
 		let BXK=BXG.exp();
 		let BXL=BUE* BXK;
-		let LYY=L5([0.0,(LXH* BXK),0.0,0.0,0.0])+ ((LYW* BXK)* BUE);
+		let LYM=L5([0.0,(LWV* BXK),0.0,0.0,0.0])+ ((LYK* BXK)* BUE);
 		BYJ=BXL;
-		JIA=LYY;
+		JIA=LYM;
 		}else{
 		let BXM=BXG.exp();
 		let BXN=F+ BXM;
 		let BXO=BXN.ln();
 		let BXP=BUE* BXO;
-		let LYX=L5([0.0,(LXH* BXO),0.0,0.0,0.0])+ (((LYW* BXM)* (IUF/ BXN))* BUE);
+		let LYL=L5([0.0,(LWV* BXO),0.0,0.0,0.0])+ (((LYK* BXM)* (IUF/ BXN))* BUE);
 		BYJ=BXP;
-		JIA=LYX;
+		JIA=LYL;
 		}
 		BYI=BYJ;
 		JHZ=JIA;
 		}
 		let BXQ=(BNU- BUF)/ BNV;
-		let LZA=((LWH- LXN)- L5([0.0,(LTM* BXQ),0.0,0.0,0.0]))/ BNV;
+		let LYO=((LVX- LXB)).product_sum_div(IUF,LTW,(-BXQ),BNV);
 		let BXR=BXQ> LD;
 		let BXW;
 		let JIB;
 		if BXR{
 		BXW=A;
-		JIB=LTE;
+		JIB=LSV;
 		}else{
 		let BXS=BXQ< -50f64;
 		let BXX;
 		let JIC;
 		if BXS{
 		BXX=F;
-		JIC=LTE;
+		JIC=LSV;
 		}else{
 		let BXT=BXQ.exp();
 		let BXU=F+ BXT;
 		let BXV=F/ BXU;
-		let LZB=(((LZA* BXT)* BXV)* KNJ)/ BXU;
+		let LYP=((LYO* BXT)).product_div((-BXV),BXU);
 		BXX=BXV;
-		JIC=LZB;
+		JIC=LYP;
 		}
 		BXW=BXX;
 		JIB=JIC;
 		}
 		let BXY=((BNF- BWK)- (BNZ- (BPM* BXW)))/ BUD;
-		let LZC=(((LWE- LYJ)- (LXU- (L5([0.0,(LUM* BXW),0.0,0.0,0.0])+ (JIB* BPM))))- L5([0.0,(LXG* BXY),0.0,0.0,0.0]))/ BUD;
+		let LYQ=(((LVU- LXY)- (LXI- (L5([0.0,(LUD* BXW),0.0,0.0,0.0])+ (JIB* BPM))))).product_sum_div(IUF,LXJ,(-BXY),BUD);
 		let BXZ=BXY> LD;
 		let BYL;
 		let JID;
 		if BXZ{
 		let BYA=BUE* BXY;
-		let LZF=L5([0.0,(LXH* BXY),0.0,0.0,0.0])+ (LZC* BUE);
+		let LYT=L5([0.0,(LWV* BXY),0.0,0.0,0.0])+ (LYQ* BUE);
 		BYL=BYA;
-		JID=LZF;
+		JID=LYT;
 		}else{
 		let BYB=BXY< -50f64;
 		let BYM;
@@ -6331,45 +6319,45 @@ impl Instance {
 		if BYB{
 		let BYC=BXY.exp();
 		let BYD=BUE* BYC;
-		let LZE=L5([0.0,(LXH* BYC),0.0,0.0,0.0])+ ((LZC* BYC)* BUE);
+		let LYS=L5([0.0,(LWV* BYC),0.0,0.0,0.0])+ ((LYQ* BYC)* BUE);
 		BYM=BYD;
-		JIE=LZE;
+		JIE=LYS;
 		}else{
 		let BYE=BXY.exp();
 		let BYF=F+ BYE;
 		let BYG=BYF.ln();
 		let BYH=BUE* BYG;
-		let LZD=L5([0.0,(LXH* BYG),0.0,0.0,0.0])+ (((LZC* BYE)* (IUF/ BYF))* BUE);
+		let LYR=L5([0.0,(LWV* BYG),0.0,0.0,0.0])+ (((LYQ* BYE)* (IUF/ BYF))* BUE);
 		BYM=BYH;
-		JIE=LZD;
+		JIE=LYR;
 		}
 		BYL=BYM;
 		JID=JIE;
 		}
-		let LZG=JHZ* BYI;
-		let LZH=LZG+ LZG;
+		let LYU=JHZ* BYI;
+		let LYV=LYU+ LYU;
 		let BYK=(BYI* BYI)+ AEI;
-		let LZI=JID* BYL;
-		let LZJ=LZI+ LZI;
+		let LYW=JID* BYL;
+		let LYX=LYW+ LYW;
 		let BYN=(BYL* BYL)+ AEI;
-		let LZK=(JHZ* BYL)+ (JID* BYI);
+		let LYY=(JHZ* BYL)+ (JID* BYI);
 		let BYO=(BYI* BYL)+ AEI;
 		let BYQ=BYK+ BYN;
-		let LZL=LZH+ LZJ;
+		let LYZ=LYV+ LYX;
 		let BYR=(BYI+ BYL)+ AER;
 		let BYS=(BYP* (BYQ+ BYO))/ BYR;
 		let BYT=AEU* BYK;
 		let BYU=AEW* BYN;
-		let LZM=(((((LZH* BYI)+ (JHZ* BYK))* MC)+ (((LZJ* BYL)+ (JID* BYN))* BF))+ (((LZH* AEU)* BYL)+ (JID* BYT)))+ (((LZJ* AEW)* BYI)+ (JHZ* BYU));
+		let LZA=(((((LYV* BYI)+ (JHZ* BYK))* MC)+ (((LYX* BYL)+ (JID* BYN))* BF))+ (((LYV* AEU)* BYL)+ (JID* BYT)))+ (((LYX* AEW)* BYI)+ (JHZ* BYU));
 		let BYV=AEY* (BYQ+ (MC* BYO));
 		let BYW=(MC* ((((MC* ((BYK* BYI)+ AEK))+ (BF* ((BYN* BYL)+ AEK)))+ (BYT* BYL))+ (BYU* BYI)))/ BYV;
-		let LZN=((LZM* MC)- (((LZL+ (LZK* MC))* AEY)* BYW))/ BYV;
+		let LZB=((LZA* MC)).product_sum_div(IUF,((LYZ+ (LYY* MC))* AEY),(-BYW),BYV);
 		let BYX=O* P;
 		let BYY=(BYX* BND)* JE;
 		let BYZ=BYY* (BYS- BYW);
-		let LZO=(((((LZL+ LZK)* BYP)- ((JHZ+ JID)* BYS))/ BYR)- LZN)* BYY;
+		let LZC=(((((LYZ+ LYY)* BYP)).product_sum_div(IUF,(JHZ+ JID),(-BYS),BYR))- LZB)* BYY;
 		let BZA=BYY* BYW;
-		let LZP=LZN* BYY;
+		let LZD=LZB* BYY;
 		let BZB=parameters[173]== F;
 		let CAR;
 		let CAS;
@@ -6378,31 +6366,31 @@ impl Instance {
 		if BZB{
 		let BZC=UK* JW;
 		let BZD=BNZ- (BZC* BNV);
-		let LZQ=LTQ- (LTM* BZC);
+		let LZE=LTH- (LTD* BZC);
 		let BZE=(BNG- BZD)/ BUD;
-		let LZR=((L4([IYV[0],0.0,IYV[1],IYV[2]])- L4([0.0,LZQ,0.0,0.0]))- L4([0.0,(LXG* BZE),0.0,0.0]))/ BUD;
+		let LZF=((L4([IYV[0],0.0,IYV[1],IYV[2]])- L4([0.0,LZE,0.0,0.0]))).product_sum_div(IUF,L4([0.0,LWU,0.0,0.0]),(-BZE),BUD);
 		let BZF=BZE> LD;
 		let BZO;
 		let JIH;
 		if BZF{
 		BZO=BZE;
-		JIH=LZR;
+		JIH=LZF;
 		}else{
 		let BZG=BZE< -50f64;
 		let BZP;
 		let JII;
 		if BZG{
 		let BZH=BZE.exp();
-		let LZT=LZR* BZH;
+		let LZH=LZF* BZH;
 		BZP=BZH;
-		JII=LZT;
+		JII=LZH;
 		}else{
 		let BZI=BZE.exp();
 		let BZJ=F+ BZI;
 		let BZK=BZJ.ln();
-		let LZS=(LZR* BZI)* (IUF/ BZJ);
+		let LZG=(LZF* BZI)* (IUF/ BZJ);
 		BZP=BZK;
-		JII=LZS;
+		JII=LZG;
 		}
 		BZO=BZP;
 		JIH=JII;
@@ -6411,31 +6399,31 @@ impl Instance {
 		let BZM=BZL* HN;
 		let BZN=BZM* BUD;
 		let BZQ=BZN* BZO;
-		let LZU=L4([0.0,((((KLZ* BZL)* BUD)+ (LXG* BZM))* BZO),0.0,0.0])+ (JIH* BZN);
+		let LZI=L4([0.0,((((KLZ* BZL)* BUD)+ (LWU* BZM))* BZO),0.0,0.0])+ (JIH* BZN);
 		let BZR=(RQ- BZD)/ BUD;
-		let LZV=((L3([KSR[0],0.0,KSR[1]])- L3([0.0,LZQ,0.0]))- L3([0.0,(LXG* BZR),0.0]))/ BUD;
+		let LZJ=((L3([KSR[0],0.0,KSR[1]])- L3([0.0,LZE,0.0]))).product_sum_div(IUF,L3([0.0,LWU,0.0]),(-BZR),BUD);
 		let BZS=BZR> LD;
 		let CAA;
 		let JIJ;
 		if BZS{
 		CAA=BZR;
-		JIJ=LZV;
+		JIJ=LZJ;
 		}else{
 		let BZT=BZR< -50f64;
 		let CAB;
 		let JIK;
 		if BZT{
 		let BZU=BZR.exp();
-		let LZX=LZV* BZU;
+		let LZL=LZJ* BZU;
 		CAB=BZU;
-		JIK=LZX;
+		JIK=LZL;
 		}else{
 		let BZV=BZR.exp();
 		let BZW=F+ BZV;
 		let BZX=BZW.ln();
-		let LZW=(LZV* BZV)* (IUF/ BZW);
+		let LZK=(LZJ* BZV)* (IUF/ BZW);
 		CAB=BZX;
-		JIK=LZW;
+		JIK=LZK;
 		}
 		CAA=CAB;
 		JIJ=JIK;
@@ -6443,16 +6431,16 @@ impl Instance {
 		let BZY=BZL* IL;
 		let BZZ=BZY* BUD;
 		let CAC=BZZ* CAA;
-		let LZY=L3([0.0,((((KMH* BZL)* BUD)+ (LXG* BZY))* CAA),0.0])+ (JIJ* BZZ);
+		let LZM=L3([0.0,((((KMH* BZL)* BUD)+ (LWU* BZY))* CAA),0.0])+ (JIJ* BZZ);
 		CAR=BZQ;
 		CAS=CAC;
-		JIF=LZU;
-		JIG=LZY;
+		JIF=LZI;
+		JIG=LZM;
 		}else{
 		CAR=A;
 		CAS=A;
-		JIF=LTF;
-		JIG=LTG;
+		JIF=LSW;
+		JIG=LSX;
 		}
 		let CAD=parameters[171]== F;
 		let CAT;
@@ -6460,29 +6448,29 @@ impl Instance {
 		if CAD{
 		let CAE=UK* JW;
 		let CAF=(BNF- (BNZ- (CAE* BNV)))/ BUD;
-		let LZZ=((LYS- L4([0.0,(LTQ- (LTM* CAE)),0.0,0.0]))- L4([0.0,(LXG* CAF),0.0,0.0]))/ BUD;
+		let LZN=((LYG- L4([0.0,(LTH- (LTD* CAE)),0.0,0.0]))).product_sum_div(IUF,L4([0.0,LWU,0.0,0.0]),(-CAF),BUD);
 		let CAG=CAF> LD;
 		let CAO;
 		let JIM;
 		if CAG{
 		CAO=CAF;
-		JIM=LZZ;
+		JIM=LZN;
 		}else{
 		let CAH=CAF< -50f64;
 		let CAP;
 		let JIN;
 		if CAH{
 		let CAI=CAF.exp();
-		let MAB=LZZ* CAI;
+		let LZP=LZN* CAI;
 		CAP=CAI;
-		JIN=MAB;
+		JIN=LZP;
 		}else{
 		let CAJ=CAF.exp();
 		let CAK=F+ CAJ;
 		let CAL=CAK.ln();
-		let MAA=(LZZ* CAJ)* (IUF/ CAK);
+		let LZO=(LZN* CAJ)* (IUF/ CAK);
 		CAP=CAL;
-		JIN=MAA;
+		JIN=LZO;
 		}
 		CAO=CAP;
 		JIM=JIN;
@@ -6490,15 +6478,15 @@ impl Instance {
 		let CAM=(BYX* JE)* parameters[172];
 		let CAN=CAM* BUD;
 		let CAQ=CAN* CAO;
-		let MAC=L4([0.0,((LXG* CAM)* CAO),0.0,0.0])+ (JIM* CAN);
+		let LZQ=L4([0.0,((LWU* CAM)* CAO),0.0,0.0])+ (JIM* CAN);
 		CAT=CAQ;
-		JIL=MAC;
+		JIL=LZQ;
 		}else{
 		CAT=A;
-		JIL=LTF;
+		JIL=LSW;
 		}
-		let MAD=KSO* D;
-		let MAE=LXF+ L5([0.0,0.0,MAD[0],0.0,MAD[1]]);
+		let LZR=KSO* D;
+		let LZS=LWT+ L5([0.0,0.0,LZR[0],0.0,LZR[1]]);
 		let CAU=A+ (BUB+ (D* RN));
 		CAW=BYZ;
 		CBB=BZA;
@@ -6509,13 +6497,13 @@ impl Instance {
 		IHR=CAU;
 		IHS=A;
 		IOH=A;
-		JGP=LZO;
-		JGQ=LZP;
+		JGP=LZC;
+		JGQ=LZD;
 		JGR=JIF;
 		JGS=JIL;
 		JGT=JIG;
-		JGU=LXF;
-		JGV=MAE;
+		JGU=LWT;
+		JGV=LZS;
 		}else{
 		CAW=A;
 		CBB=A;
@@ -6526,13 +6514,13 @@ impl Instance {
 		IHR=A;
 		IHS=CAV;
 		IOH=F;
-		JGP=LTE;
-		JGQ=LTE;
-		JGR=LTF;
-		JGS=LTF;
-		JGT=LTG;
-		JGU=LTE;
-		JGV=LTE;
+		JGP=LSV;
+		JGQ=LSV;
+		JGR=LSW;
+		JGS=LSW;
+		JGT=LSX;
+		JGU=LSV;
+		JGV=LSV;
 		}
 		let IHT;
 		let IHU;
@@ -6568,40 +6556,40 @@ impl Instance {
 		if RH{
 		let CAX=ddt(52, CAW);
 		let CAY=AHC* (PT- JF);
-		let MAS=(L2([0.0,IUR])- L2([IUH,0.0]))* AHC;
+		let MAG=(L2([0.0,IUR])- L2([IUH,0.0]))* AHC;
 		let CAZ=ddt(53, CAY);
-		let MAT=MAS* KOI;
-		let MAU=(JGP* KOI)+ L5([0.0,0.0,MAT[0],MAT[1],0.0]);
+		let MAH=MAG* KOI;
+		let MAI=(JGP* KOI)+ L5([0.0,0.0,MAH[0],MAH[1],0.0]);
 		let IRA=CAW+ CAY;
-		let MAV=JGP+ L5([0.0,0.0,MAS[0],MAS[1],0.0]);
+		let MAJ=JGP+ L5([0.0,0.0,MAG[0],MAG[1],0.0]);
 		let CBA=A+ (CAX+ CAZ);
 		let CBC=ddt(54, CBB);
 		let CBD=AHC* (PT- RM);
-		let MAW=(L2([IUR,0.0])- L2([0.0,IUW]))* AHC;
+		let MAK=(L2([IUR,0.0])- L2([0.0,IUW]))* AHC;
 		let CBE=ddt(55, CBD);
-		let MAX=MAW* KOI;
-		let MAY=(JGQ* KOI)+ L5([0.0,0.0,0.0,MAX[0],MAX[1]]);
+		let MAL=MAK* KOI;
+		let MAM=(JGQ* KOI)+ L5([0.0,0.0,0.0,MAL[0],MAL[1]]);
 		let IRC=CBB+ CBD;
-		let MAZ=JGQ+ L5([0.0,0.0,0.0,MAW[0],MAW[1]]);
+		let MAN=JGQ+ L5([0.0,0.0,0.0,MAK[0],MAK[1]]);
 		let CBF=A+ (CBC+ CBE);
 		let CBH=ddt(56, CBG);
 		let CBI=AHC* (JQ- JF);
-		let MBA=(L2([IUM,0.0])- L2([0.0,IUH]))* AHC;
+		let MAO=(L2([IUM,0.0])- L2([0.0,IUH]))* AHC;
 		let CBJ=ddt(57, CBI);
-		let MBB=MBA* KOI;
-		let MBC=(JGR* KOI)+ L4([MBB[0],0.0,MBB[1],0.0]);
+		let MAP=MAO* KOI;
+		let MAQ=(JGR* KOI)+ L4([MAP[0],0.0,MAP[1],0.0]);
 		let IRE=CBG+ CBI;
-		let MBD=JGR+ L4([MBA[0],0.0,MBA[1],0.0]);
+		let MAR=JGR+ L4([MAO[0],0.0,MAO[1],0.0]);
 		let CBK=A+ (CBH+ CBJ);
 		let CBN=ddt(58, CBM);
-		let MBE=JGS* KOI;
+		let MAS=JGS* KOI;
 		let CBO=AHC* (PT- JG);
-		let MBF=(L2([IUR,0.0])- L2([0.0,IUI]))* AHC;
+		let MAT=(L2([IUR,0.0])- L2([0.0,IUI]))* AHC;
 		let CBP=ddt(59, CBO);
-		let MBG=MBF* KOI;
-		let MBH=L5([MBE[0],MBE[1],MBE[2],MBE[3],0.0])+ L5([0.0,0.0,0.0,MBG[0],MBG[1]]);
+		let MAU=MAT* KOI;
+		let MAV=L5([MAS[0],MAS[1],MAS[2],MAS[3],0.0])+ L5([0.0,0.0,0.0,MAU[0],MAU[1]]);
 		let IRG=CBM+ CBO;
-		let MBI=L5([JGS[0],JGS[1],JGS[2],JGS[3],0.0])+ L5([0.0,0.0,0.0,MBF[0],MBF[1]]);
+		let MAW=L5([JGS[0],JGS[1],JGS[2],JGS[3],0.0])+ L5([0.0,0.0,0.0,MAT[0],MAT[1]]);
 		let CBQ=A+ (CBN+ CBP);
 		IHT=CBA;
 		IHU=CBF;
@@ -6620,47 +6608,47 @@ impl Instance {
 		IRJ=A;
 		IRL=A;
 		IRN=A;
-		JIO=MAU;
-		JIP=MAY;
-		JIQ=MBC;
-		JIR=MBH;
-		JIS=LTE;
-		JIT=LTE;
-		JIU=LTF;
-		JIV=MAV;
-		JIW=MAZ;
-		JIX=MBD;
-		JIY=MBI;
-		JIZ=LTE;
-		JJA=LTE;
-		JJB=LTF;
+		JIO=MAI;
+		JIP=MAM;
+		JIQ=MAQ;
+		JIR=MAV;
+		JIS=LSV;
+		JIT=LSV;
+		JIU=LSW;
+		JIV=MAJ;
+		JIW=MAN;
+		JIX=MAR;
+		JIY=MAW;
+		JIZ=LSV;
+		JJA=LSV;
+		JJB=LSW;
 		}else{
 		let CBR=ddt(60, CAW);
 		let CBS=AHC* (JQ- JF);
-		let MAF=(L2([IUM,0.0])- L2([0.0,IUH]))* AHC;
+		let LZT=(L2([IUM,0.0])- L2([0.0,IUH]))* AHC;
 		let CBT=ddt(61, CBS);
-		let MAG=MAF* KOI;
-		let MAH=(JGP* KOI)+ L5([MAG[0],0.0,MAG[1],0.0,0.0]);
+		let LZU=LZT* KOI;
+		let LZV=(JGP* KOI)+ L5([LZU[0],0.0,LZU[1],0.0,0.0]);
 		let IRI=CAW+ CBS;
-		let MAI=JGP+ L5([MAF[0],0.0,MAF[1],0.0,0.0]);
+		let LZW=JGP+ L5([LZT[0],0.0,LZT[1],0.0,0.0]);
 		let CBU=A+ (CBR+ CBT);
 		let CBV=ddt(62, CBB);
 		let CBW=AHC* (JQ- RM);
-		let MAJ=(L2([IUM,0.0])- L2([0.0,IUW]))* AHC;
+		let LZX=(L2([IUM,0.0])- L2([0.0,IUW]))* AHC;
 		let CBX=ddt(63, CBW);
-		let MAK=MAJ* KOI;
-		let MAL=(JGQ* KOI)+ L5([MAK[0],0.0,0.0,0.0,MAK[1]]);
+		let LZY=LZX* KOI;
+		let LZZ=(JGQ* KOI)+ L5([LZY[0],0.0,0.0,0.0,LZY[1]]);
 		let IRK=CBB+ CBW;
-		let MAM=JGQ+ L5([MAJ[0],0.0,0.0,0.0,MAJ[1]]);
+		let MAA=JGQ+ L5([LZX[0],0.0,0.0,0.0,LZX[1]]);
 		let CBY=A+ (CBV+ CBX);
 		let CBZ=ddt(64, CBG);
 		let CCA=AHC* (PT- JF);
-		let MAN=(L2([0.0,IUR])- L2([IUH,0.0]))* AHC;
+		let MAB=(L2([0.0,IUR])- L2([IUH,0.0]))* AHC;
 		let CCB=ddt(65, CCA);
-		let MAO=MAN* KOI;
-		let MAP=(JGR* KOI)+ L4([0.0,0.0,MAO[0],MAO[1]]);
+		let MAC=MAB* KOI;
+		let MAD=(JGR* KOI)+ L4([0.0,0.0,MAC[0],MAC[1]]);
 		let IRM=CBG+ CCA;
-		let MAQ=JGR+ L4([0.0,0.0,MAN[0],MAN[1]]);
+		let MAE=JGR+ L4([0.0,0.0,MAB[0],MAB[1]]);
 		let CCC=A+ (CBZ+ CCB);
 		IHT=A;
 		IHU=A;
@@ -6679,29 +6667,29 @@ impl Instance {
 		IRJ=IRI;
 		IRL=IRK;
 		IRN=IRM;
-		JIO=LTE;
-		JIP=LTE;
-		JIQ=LTF;
-		JIR=MAR;
-		JIS=MAH;
-		JIT=MAL;
-		JIU=MAP;
-		JIV=LTE;
-		JIW=LTE;
-		JIX=LTF;
-		JIY=MAR;
-		JIZ=MAI;
-		JJA=MAM;
-		JJB=MAQ;
+		JIO=LSV;
+		JIP=LSV;
+		JIQ=LSW;
+		JIR=MAF;
+		JIS=LZV;
+		JIT=LZZ;
+		JIU=MAD;
+		JIV=LSV;
+		JIW=LSV;
+		JIX=LSW;
+		JIY=MAF;
+		JIZ=LZW;
+		JJA=MAA;
+		JJB=MAE;
 		}
 		let CCG=ddt(66, CCF);
 		let CCH=AHC* RP;
-		let MBJ=KSQ* AHC;
+		let MAX=KSQ* AHC;
 		let CCI=ddt(67, CCH);
-		let MBK=MBJ* KOI;
-		let MBL=(JGT* KOI)+ L3([MBK[0],0.0,MBK[1]]);
+		let MAY=MAX* KOI;
+		let MAZ=(JGT* KOI)+ L3([MAY[0],0.0,MAY[1]]);
 		let IRO=CCF+ CCH;
-		let MBM=JGT+ L3([MBJ[0],0.0,MBJ[1]]);
+		let MBA=JGT+ L3([MAX[0],0.0,MAX[1]]);
 		let CCJ=A+ (CCG+ CCI);
 		let CCL=CCK> SV;
 		let CQD;
@@ -6724,34 +6712,34 @@ impl Instance {
 		let CDA;
 		let JJJ;
 		if JM{
-		let MBR=KQT* QA;
+		let MBF=KQT* QA;
 		let CCW=((QA* QA)+ JV).sqrt();
-		let MBS=(MBR+ MBR)* (IUF/ (KNB* CCW));
+		let MBG=(MBF+ MBF)* (IUF/ (KNB* CCW));
 		CDA=CCW;
-		JJJ=MBS;
+		JJJ=MBG;
 		}else{
 		let CCX=KB/ JV;
 		let CCY=(CCX* QA).tanh();
 		let CCZ=QA* CCY;
-		let MBQ=(KQT* CCY)+ (((KQT* CCX)* (IUF- (CCY* CCY)))* QA);
+		let MBE=(KQT* CCY)+ (((KQT* CCX)* (IUF- (CCY* CCY)))* QA);
 		CDA=CCZ;
-		JJJ=MBQ;
+		JJJ=MBE;
 		}
 		let CDB=CCM- QA;
-		let MBT=L4([IYM[0],IYM[1],0.0,IYM[2]]);
-		let MBU=MBT- L4([0.0,0.0,KQT[0],KQT[1]]);
+		let MBH=L4([IYM[0],IYM[1],0.0,IYM[2]]);
+		let MBI=MBH- L4([0.0,0.0,KQT[0],KQT[1]]);
 		let CDC=CCP* AZ;
-		let MBV=KJT* CCP;
+		let MBJ=KJT* CCP;
 		let CDD=TS* AZ;
 		let CDE=parameters[94]/ CDD;
-		let MBW=(((KJT* TS)* CDE)* KNJ)/ CDD;
-		let MBX=JJJ* CCO;
+		let MBK=product_div((KJT* TS),(-CDE),CDD);
+		let MBL=JJJ* CCO;
 		let CDF=CDE+ (CCO* CDA);
-		let MBY=L3([MBW,0.0,0.0])+ L3([0.0,MBX[0],MBX[1]]);
-		let MBZ=IVA* CCV;
+		let MBM=L3([MBK,0.0,0.0])+ L3([0.0,MBL[0],MBL[1]]);
+		let MBN=IVA* CCV;
 		let CDG=parameters[80]+ (CCV* BB);
 		let CDH=BE.powf(TI);
-		let MCA=KJV* (TI* ((BE+ (((BE== KOL) as u8 as f64)* KUP)).powf((TI- IUF))));
+		let MBO=KJV* (TI* ((BE+ (((BE== KOL) as u8 as f64)* KUP)).powf((TI- IUF))));
 		let CDI=TH!= A;
 		let CDO;
 		let JJK;
@@ -6761,70 +6749,70 @@ impl Instance {
 		let CDL=F/ CCS;
 		let CDM=CDK.powf(CDL);
 		let CDN=CDA/ CDM;
-		let MCC=(((JJJ/ TH)* (CCS* ((CDJ+ (((CDJ== KOL) as u8 as f64)* KUP)).powf((CCS- IUF)))))* (CDL* ((CDK+ (((CDK== KOL) as u8 as f64)* KUP)).powf((CDL- IUF)))))* CDN;
-		let MCD=(JJJ- MCC)/ CDM;
+		let MBQ=(JJJ).product_sum_div(IUF,(((JJJ/ TH)* (CCS* ((CDJ+ (((CDJ== KOL) as u8 as f64)* KUP)).powf((CCS- IUF)))))* (CDL* ((CDK+ (((CDK== KOL) as u8 as f64)* KUP)).powf((CDL- IUF))))),(-CDN),CDM);
 		CDO=CDN;
-		JJK=MCD;
+		JJK=MBQ;
 		}else{
 		CDO=A;
-		JJK=MCB;
+		JJK=MBP;
 		}
 		let CDP=parameters[93]- (CDO* A);
-		let MCE=(((JJK* A)* KNJ)* CDA)+ (JJJ* CDP);
+		let MBR=(((JJK* A)* KNJ)* CDA)+ (JJJ* CDP);
 		let CDQ=CDG- (CDP* CDA);
-		let MCF=L3([MBZ,0.0,0.0])- L3([0.0,MCE[0],MCE[1]]);
+		let MBS=L3([MBN,0.0,0.0])- L3([0.0,MBR[0],MBR[1]]);
 		let CDR=MC* CDF;
 		let CDS=CDR* AZ;
-		let MCG=((MBY* MC)* AZ)+ L3([(KJT* CDR),0.0,0.0]);
+		let MBT=((MBM* MC)* AZ)+ L3([(KJT* CDR),0.0,0.0]);
 		let CDT=DV* CDS;
-		let MCH=L3([(KKT* CDS),0.0,0.0])+ (MCG* DV);
+		let MBU=L3([(KKT* CDS),0.0,0.0])+ (MBT* DV);
 		let CDU=(UK* CDC)/ MC;
-		let MCI=(MBV* UK)/ MC;
+		let MBV=(MBJ* UK)/ MC;
 		let CDV=CDQ- CDU;
-		let MCJ=MCF- L3([MCI,0.0,0.0]);
+		let MBW=MBS- L3([MBV,0.0,0.0]);
 		let CED;
 		let JJL;
 		if JM{
 		let CDW=CCM- CDB;
-		let MCM=(MBT- MBU)* CDW;
+		let MBZ=(MBH- MBI)* CDW;
 		let CDX=((CDW* CDW)+ JV).sqrt();
 		let CDY=JW* ((CCM+ CDB)+ CDX);
-		let MCN=((MBT+ MBU)+ ((MCM+ MCM)* (IUF/ (KNB* CDX))))* JW;
+		let MCA=((MBH+ MBI)+ ((MBZ+ MBZ)* (IUF/ (KNB* CDX))))* JW;
 		CED=CDY;
-		JJL=MCN;
+		JJL=MCA;
 		}else{
 		let CDZ=CCM- CDB;
-		let MCK=MBT- MBU;
+		let MBX=MBH- MBI;
 		let CEA=KB/ JV;
 		let CEB=(CEA* CDZ).tanh();
 		let CEC=JW* ((CCM+ CDB)+ (CDZ* CEB));
-		let MCL=((MBT+ MBU)+ ((MCK* CEB)+ (((MCK* CEA)* (IUF- (CEB* CEB)))* CDZ)))* JW;
+		let MBY=((MBH+ MBI)+ ((MBX* CEB)+ (((MBX* CEA)* (IUF- (CEB* CEB)))* CDZ)))* JW;
 		CED=CEC;
-		JJL=MCL;
+		JJL=MBY;
 		}
-		let MCO=L5([0.0,MCJ[0],0.0,MCJ[1],MCJ[2]]);
+		let MCB=L5([0.0,MBW[0],0.0,MBW[1],MBW[2]]);
 		let CEE=(CED- CDV)/ CDC;
-		let MCP=((L5([JJL[0],0.0,JJL[1],JJL[2],JJL[3]])- MCO)- L5([0.0,(MBV* CEE),0.0,0.0,0.0]))/ CDC;
+		let MCC=L5([0.0,MBJ,0.0,0.0,0.0]);
+		let MCD=((L5([JJL[0],0.0,JJL[1],JJL[2],JJL[3]])- MCB)).product_sum_div(IUF,MCC,(-CEE),CDC);
 		let CEF=CEE> LD;
 		let CEU;
 		let JJM;
 		if CEF{
 		CEU=A;
-		JJM=MBN;
+		JJM=MBB;
 		}else{
 		let CEG=CEE< -50f64;
 		let CEV;
 		let JJN;
 		if CEG{
 		CEV=F;
-		JJN=MBN;
+		JJN=MBB;
 		}else{
 		let CEH=CEE.exp();
 		let CEI=F+ CEH;
 		let CEJ=F/ CEI;
-		let MCQ=(((MCP* CEH)* CEJ)* KNJ)/ CEI;
+		let MCE=((MCD* CEH)).product_div((-CEJ),CEI);
 		CEV=CEJ;
-		JJN=MCQ;
+		JJN=MCE;
 		}
 		CEU=CEV;
 		JJM=JJN;
@@ -6833,38 +6821,38 @@ impl Instance {
 		let JJO;
 		if JM{
 		let CEK=CCM- CDB;
-		let MCT=(MBT- MBU)* CEK;
+		let MCH=(MBH- MBI)* CEK;
 		let CEL=((CEK* CEK)+ JV).sqrt();
 		let CEM=JW* ((CCM+ CDB)+ CEL);
-		let MCU=((MBT+ MBU)+ ((MCT+ MCT)* (IUF/ (KNB* CEL))))* JW;
+		let MCI=((MBH+ MBI)+ ((MCH+ MCH)* (IUF/ (KNB* CEL))))* JW;
 		CER=CEM;
-		JJO=MCU;
+		JJO=MCI;
 		}else{
 		let CEN=CCM- CDB;
-		let MCR=MBT- MBU;
+		let MCF=MBH- MBI;
 		let CEO=KB/ JV;
 		let CEP=(CEO* CEN).tanh();
 		let CEQ=JW* ((CCM+ CDB)+ (CEN* CEP));
-		let MCS=((MBT+ MBU)+ ((MCR* CEP)+ (((MCR* CEO)* (IUF- (CEP* CEP)))* CEN)))* JW;
+		let MCG=((MBH+ MBI)+ ((MCF* CEP)+ (((MCF* CEO)* (IUF- (CEP* CEP)))* CEN)))* JW;
 		CER=CEQ;
-		JJO=MCS;
+		JJO=MCG;
 		}
 		let CES=UK* AI;
 		let CET=CES* CDC;
-		let MCV=MBV* CES;
-		let MCW=L5([0.0,MCF[0],0.0,MCF[1],MCF[2]]);
+		let MCJ=MBJ* CES;
+		let MCK=L5([0.0,MBS[0],0.0,MBS[1],MBS[2]]);
 		let CEW=(CER- (CDQ- (CET* CEU)))/ CDS;
-		let MCX=MCG* CEW;
-		let MCY=((L5([JJO[0],0.0,JJO[1],JJO[2],JJO[3]])- (MCW- (L5([0.0,(MCV* CEU),0.0,0.0,0.0])+ (JJM* CET))))- L5([0.0,MCX[0],0.0,MCX[1],MCX[2]]))/ CDS;
+		let MCL=L5([0.0,MBT[0],0.0,MBT[1],MBT[2]]);
+		let MCM=((L5([JJO[0],0.0,JJO[1],JJO[2],JJO[3]])- (MCK- (L5([0.0,(MCJ* CEU),0.0,0.0,0.0])+ (JJM* CET))))).product_sum_div(IUF,MCL,(-CEW),CDS);
 		let CEX=CEW> LD;
 		let CFG;
 		let JJP;
 		if CEX{
 		let CEY=CDT* CEW;
-		let MDD=MCH* CEW;
-		let MDE=L5([0.0,MDD[0],0.0,MDD[1],MDD[2]])+ (MCY* CDT);
+		let MCR=MBU* CEW;
+		let MCS=L5([0.0,MCR[0],0.0,MCR[1],MCR[2]])+ (MCM* CDT);
 		CFG=CEY;
-		JJP=MDE;
+		JJP=MCS;
 		}else{
 		let CEZ=CEW< -50f64;
 		let CFH;
@@ -6872,164 +6860,162 @@ impl Instance {
 		if CEZ{
 		let CFA=CEW.exp();
 		let CFB=CDT* CFA;
-		let MDB=MCH* CFA;
-		let MDC=L5([0.0,MDB[0],0.0,MDB[1],MDB[2]])+ ((MCY* CFA)* CDT);
+		let MCP=MBU* CFA;
+		let MCQ=L5([0.0,MCP[0],0.0,MCP[1],MCP[2]])+ ((MCM* CFA)* CDT);
 		CFH=CFB;
-		JJQ=MDC;
+		JJQ=MCQ;
 		}else{
 		let CFC=CEW.exp();
 		let CFD=F+ CFC;
 		let CFE=CFD.ln();
 		let CFF=CDT* CFE;
-		let MCZ=MCH* CFE;
-		let MDA=L5([0.0,MCZ[0],0.0,MCZ[1],MCZ[2]])+ (((MCY* CFC)* (IUF/ CFD))* CDT);
+		let MCN=MBU* CFE;
+		let MCO=L5([0.0,MCN[0],0.0,MCN[1],MCN[2]])+ (((MCM* CFC)* (IUF/ CFD))* CDT);
 		CFH=CFF;
-		JJQ=MDA;
+		JJQ=MCO;
 		}
 		CFG=CFH;
 		JJP=JJQ;
 		}
 		let CFI=(CCT* CFG)/ DV;
+		let MCT=L5([0.0,KKT,0.0,0.0,0.0]);
 		let CFJ=F+ CFI;
 		let CFK=CDH* CFJ;
 		let CFL=CCR/ CFK;
-		let MDF=(((L5([0.0,(MCA* CFJ),0.0,0.0,0.0])+ ((((JJP* CCT)- L5([0.0,(KKT* CFI),0.0,0.0,0.0]))/ DV)* CDH))* CFL)* KNJ)/ CFK;
+		let MCU=((L5([0.0,(MBO* CFJ),0.0,0.0,0.0])+ ((((JJP* CCT)).product_sum_div(IUF,MCT,(-CFI),DV))* CDH))).product_div((-CFL),CFK);
 		let CFM=F+ (TJ* AC);
 		let CFN=(F+ (TJ* E))/ CFM;
 		let CFO=CCQ* CFN;
-		let MDG=((((IVA* TJ)* CFN)* KNJ)/ CFM)* CCQ;
+		let MCV=(product_div((IVA* TJ),(-CFN),CFM))* CCQ;
 		let CFP=F+ ((TK* CDA)/ CCK);
-		let MDH=((JJJ* TK)/ CCK)* CFO;
-		let MDI=L3([(MDG* CFP),0.0,0.0])+ L3([0.0,MDH[0],MDH[1]]);
+		let MCW=((JJJ* TK)/ CCK)* CFO;
+		let MCX=L3([(MCV* CFP),0.0,0.0])+ L3([0.0,MCW[0],MCW[1]]);
 		let CFQ=(CCU* CFG)/ DV;
 		let CFR=F+ CFQ;
 		let CFS=(CFO* CFP)/ CFR;
-		let MDJ=(L5([0.0,MDI[0],0.0,MDI[1],MDI[2]])- ((((JJP* CCU)- L5([0.0,(KKT* CFQ),0.0,0.0,0.0]))/ DV)* CFS))/ CFR;
+		let MCY=(L5([0.0,MCX[0],0.0,MCX[1],MCX[2]])).product_sum_div(IUF,(((JJP* CCU)).product_sum_div(IUF,MCT,(-CFQ),DV)),(-CFS),CFR);
 		let CFT=MC* CEU;
 		let CFU=CFT* AZ;
 		let CFV=F- CEU;
-		let MDK=JJM* KNJ;
+		let MCZ=JJM* KNJ;
 		let CFW=((CFU* CFL)/ CCK)+ (CFV* CFS);
-		let MDL=((((((JJM* MC)* AZ)+ L5([0.0,(KJT* CFT),0.0,0.0,0.0]))* CFL)+ (MDF* CFU))/ CCK)+ ((MDK* CFS)+ (MDJ* CFV));
+		let MDA=((((((JJM* MC)* AZ)+ L5([0.0,(KJT* CFT),0.0,0.0,0.0]))* CFL)+ (MCU* CFU))/ CCK)+ ((MCZ* CFS)+ (MCY* CFV));
 		let CFX=(CFS* CCK)/ CFL;
-		let MDM=((MDJ* CCK)- (MDF* CFX))/ CFL;
+		let MDB=((MCY* CCK)).product_sum_div(IUF,MCU,(-CFX),CFL);
 		let CFY=(MC* CFG)/ DV;
 		let CFZ=CFY/ CFX;
 		let CGA=(F+ CFZ).sqrt();
 		let CGB=(CFX* CGA)- CFX;
 		let CGC=CDS* CEU;
-		let MDN=MCG* CEU;
-		let MDO=L5([0.0,MDN[0],0.0,MDN[1],MDN[2]])+ (JJM* CDS);
+		let MDC=MBT* CEU;
+		let MDD=L5([0.0,MDC[0],0.0,MDC[1],MDC[2]])+ (JJM* CDS);
 		let CGD=(CFX* CFV)+ CGC;
-		let MDP=((MDM* CFV)+ (MDK* CFX))+ MDO;
-		let MDQ=((((MDM* CGA)+ (((((((JJP* MC)- L5([0.0,(KKT* CFY),0.0,0.0,0.0]))/ DV)- (MDM* CFZ))/ CFX)* (IUF/ (KNB* CGA)))* CFX))- MDM)* CFV)+ (MDK* CGB);
+		let MDE=((MDB* CFV)+ (MCZ* CFX))+ MDD;
+		let MDF=((((MDB* CGA)+ (((((((JJP* MC)).product_sum_div(IUF,MCT,(-CFY),DV))).product_sum_div(IUF,MDB,(-CFZ),CFX))* (IUF/ (KNB* CGA)))* CFX))- MDB)* CFV)+ (MCZ* CGB);
 		let CGE=(CGB* CFV)+ CGC;
-		let MDR=MDQ+ MDO;
+		let MDG=MDF+ MDD;
 		let CGF=QA/ CGE;
-		let MDS=L5([0.0,0.0,0.0,KQT[0],KQT[1]]);
-		let MDT=(MDS- (MDR* CGF))/ CGE;
+		let MDH=L5([0.0,0.0,0.0,KQT[0],KQT[1]]);
+		let MDI=(MDH).product_sum_div(IUF,MDG,(-CGF),CGE);
 		let CGN;
 		let JJR;
 		if JM{
 		let CGG=A- CGF;
-		let MDW=(MDT* KNJ)* CGG;
+		let MDL=(MDI* KNJ)* CGG;
 		let CGH=((CGG* CGG)+ JV).sqrt();
 		let CGI=JW* ((A+ CGF)+ CGH);
-		let MDX=(MDT+ ((MDW+ MDW)* (IUF/ (KNB* CGH))))* JW;
+		let MDM=(MDI+ ((MDL+ MDL)* (IUF/ (KNB* CGH))))* JW;
 		CGN=CGI;
-		JJR=MDX;
+		JJR=MDM;
 		}else{
 		let CGJ=A- CGF;
-		let MDU=MDT* KNJ;
+		let MDJ=MDI* KNJ;
 		let CGK=KB/ JV;
 		let CGL=(CGK* CGJ).tanh();
 		let CGM=JW* ((A+ CGF)+ (CGJ* CGL));
-		let MDV=(MDT+ ((MDU* CGL)+ (((MDU* CGK)* (IUF- (CGL* CGL)))* CGJ)))* JW;
+		let MDK=(MDI+ ((MDJ* CGL)+ (((MDJ* CGK)* (IUF- (CGL* CGL)))* CGJ)))* JW;
 		CGN=CGM;
-		JJR=MDV;
+		JJR=MDK;
 		}
-		let MDY=CCS- IUF;
+		let MDN=CCS- IUF;
 		let CGO=F+ (CGN.powf(CCS));
 		let CGP=F/ CCS;
 		let CGQ=CGO.powf(CGP);
-		let MDZ=CGP- IUF;
+		let MDO=CGP- IUF;
 		let CGR=F/ CGQ;
 		let CGS=QA* CGR;
-		let MEA=KQT* CGR;
-		let MEB=(((((JJR* (CCS* ((CGN+ (((CGN== KOL) as u8 as f64)* KUP)).powf(MDY))))* (CGP* ((CGO+ (((CGO== KOL) as u8 as f64)* KUP)).powf(MDZ))))* CGR)* KNJ)/ CGQ)* QA;
-		let MEC=L5([0.0,0.0,0.0,MEA[0],MEA[1]])+ MEB;
+		let MDP=KQT* CGR;
+		let MDQ=L5([0.0,0.0,0.0,MDP[0],MDP[1]])+ (((((JJR* (CCS* ((CGN+ (((CGN== KOL) as u8 as f64)* KUP)).powf(MDN))))* (CGP* ((CGO+ (((CGO== KOL) as u8 as f64)* KUP)).powf(MDO))))).product_div((-CGR),CGQ))* QA);
 		let CGT=-QA;
-		let MED=KQT* KNJ;
+		let MDR=KQT* KNJ;
 		let CGU=CGT/ CGE;
-		let MEE=L5([0.0,0.0,0.0,MED[0],MED[1]]);
-		let MEF=(MEE- (MDR* CGU))/ CGE;
+		let MDS=L5([0.0,0.0,0.0,MDR[0],MDR[1]]);
+		let MDT=(MDS).product_sum_div(IUF,MDG,(-CGU),CGE);
 		let CHC;
 		let JJS;
 		if JM{
 		let CGV=A- CGU;
-		let MEI=(MEF* KNJ)* CGV;
+		let MDW=(MDT* KNJ)* CGV;
 		let CGW=((CGV* CGV)+ JV).sqrt();
 		let CGX=JW* ((A+ CGU)+ CGW);
-		let MEJ=(MEF+ ((MEI+ MEI)* (IUF/ (KNB* CGW))))* JW;
+		let MDX=(MDT+ ((MDW+ MDW)* (IUF/ (KNB* CGW))))* JW;
 		CHC=CGX;
-		JJS=MEJ;
+		JJS=MDX;
 		}else{
 		let CGY=A- CGU;
-		let MEG=MEF* KNJ;
+		let MDU=MDT* KNJ;
 		let CGZ=KB/ JV;
 		let CHA=(CGZ* CGY).tanh();
 		let CHB=JW* ((A+ CGU)+ (CGY* CHA));
-		let MEH=(MEF+ ((MEG* CHA)+ (((MEG* CGZ)* (IUF- (CHA* CHA)))* CGY)))* JW;
+		let MDV=(MDT+ ((MDU* CHA)+ (((MDU* CGZ)* (IUF- (CHA* CHA)))* CGY)))* JW;
 		CHC=CHB;
-		JJS=MEH;
+		JJS=MDV;
 		}
 		let CHD=F+ (CHC.powf(CCS));
 		let CHE=CHD.powf(CGP);
 		let CHF=F/ CHE;
 		let CHG=CGT* CHF;
-		let MEK=MED* CHF;
-		let MEL=(((((JJS* (CCS* ((CHC+ (((CHC== KOL) as u8 as f64)* KUP)).powf(MDY))))* (CGP* ((CHD+ (((CHD== KOL) as u8 as f64)* KUP)).powf(MDZ))))* CHF)* KNJ)/ CHE)* CGT;
-		let MEM=L5([0.0,0.0,0.0,MEK[0],MEK[1]])+ MEL;
-		let MEN=L5([IYM[0],0.0,IYM[1],0.0,IYM[2]]);
+		let MDY=MDR* CHF;
+		let MDZ=L5([0.0,0.0,0.0,MDY[0],MDY[1]])+ (((((JJS* (CCS* ((CHC+ (((CHC== KOL) as u8 as f64)* KUP)).powf(MDN))))* (CGP* ((CHD+ (((CHD== KOL) as u8 as f64)* KUP)).powf(MDO))))).product_div((-CHF),CHE))* CGT);
+		let MEA=L5([IYM[0],0.0,IYM[1],0.0,IYM[2]]);
 		let CHH=(CCM- CDV)/ CDC;
-		let MEO=((MEN- MCO)- L5([0.0,(MBV* CHH),0.0,0.0,0.0]))/ CDC;
+		let MEB=((MEA- MCB)).product_sum_div(IUF,MCC,(-CHH),CDC);
 		let CHI=CHH> LD;
 		let CHN;
 		let JJT;
 		if CHI{
 		CHN=A;
-		JJT=MBN;
+		JJT=MBB;
 		}else{
 		let CHJ=CHH< -50f64;
 		let CHO;
 		let JJU;
 		if CHJ{
 		CHO=F;
-		JJU=MBN;
+		JJU=MBB;
 		}else{
 		let CHK=CHH.exp();
 		let CHL=F+ CHK;
 		let CHM=F/ CHL;
-		let MEP=(((MEO* CHK)* CHM)* KNJ)/ CHL;
+		let MEC=((MEB* CHK)).product_div((-CHM),CHL);
 		CHO=CHM;
-		JJU=MEP;
+		JJU=MEC;
 		}
 		CHN=CHO;
 		JJT=JJU;
 		}
-		let MEQ=L5([MBU[0],0.0,MBU[1],MBU[2],MBU[3]]);
+		let MED=L5([MBI[0],0.0,MBI[1],MBI[2],MBI[3]]);
 		let CHP=((CDB- CHG)- (CDQ- (CET* CHN)))/ CDS;
-		let MER=MCG* CHP;
-		let MES=(((MEQ- MEM)- (MCW- (L5([0.0,(MCV* CHN),0.0,0.0,0.0])+ (JJT* CET))))- L5([0.0,MER[0],0.0,MER[1],MER[2]]))/ CDS;
+		let MEE=(((MED- MDZ)- (MCK- (L5([0.0,(MCJ* CHN),0.0,0.0,0.0])+ (JJT* CET))))).product_sum_div(IUF,MCL,(-CHP),CDS);
 		let CHQ=CHP> LD;
 		let CIR;
 		let JJV;
 		if CHQ{
 		let CHR=CDT* CHP;
-		let MEX=MCH* CHP;
-		let MEY=L5([0.0,MEX[0],0.0,MEX[1],MEX[2]])+ (MES* CDT);
+		let MEJ=MBU* CHP;
+		let MEK=L5([0.0,MEJ[0],0.0,MEJ[1],MEJ[2]])+ (MEE* CDT);
 		CIR=CHR;
-		JJV=MEY;
+		JJV=MEK;
 		}else{
 		let CHS=CHP< -50f64;
 		let CIS;
@@ -7037,61 +7023,60 @@ impl Instance {
 		if CHS{
 		let CHT=CHP.exp();
 		let CHU=CDT* CHT;
-		let MEV=MCH* CHT;
-		let MEW=L5([0.0,MEV[0],0.0,MEV[1],MEV[2]])+ ((MES* CHT)* CDT);
+		let MEH=MBU* CHT;
+		let MEI=L5([0.0,MEH[0],0.0,MEH[1],MEH[2]])+ ((MEE* CHT)* CDT);
 		CIS=CHU;
-		JJW=MEW;
+		JJW=MEI;
 		}else{
 		let CHV=CHP.exp();
 		let CHW=F+ CHV;
 		let CHX=CHW.ln();
 		let CHY=CDT* CHX;
-		let MET=MCH* CHX;
-		let MEU=L5([0.0,MET[0],0.0,MET[1],MET[2]])+ (((MES* CHV)* (IUF/ CHW))* CDT);
+		let MEF=MBU* CHX;
+		let MEG=L5([0.0,MEF[0],0.0,MEF[1],MEF[2]])+ (((MEE* CHV)* (IUF/ CHW))* CDT);
 		CIS=CHY;
-		JJW=MEU;
+		JJW=MEG;
 		}
 		CIR=CIS;
 		JJV=JJW;
 		}
 		let CHZ=(CDB- CDV)/ CDC;
-		let MEZ=((MEQ- MCO)- L5([0.0,(MBV* CHZ),0.0,0.0,0.0]))/ CDC;
+		let MEL=((MED- MCB)).product_sum_div(IUF,MCC,(-CHZ),CDC);
 		let CIA=CHZ> LD;
 		let CIF;
 		let JJX;
 		if CIA{
 		CIF=A;
-		JJX=MBN;
+		JJX=MBB;
 		}else{
 		let CIB=CHZ< -50f64;
 		let CIG;
 		let JJY;
 		if CIB{
 		CIG=F;
-		JJY=MBN;
+		JJY=MBB;
 		}else{
 		let CIC=CHZ.exp();
 		let CID=F+ CIC;
 		let CIE=F/ CID;
-		let MFA=(((MEZ* CIC)* CIE)* KNJ)/ CID;
+		let MEM=((MEL* CIC)).product_div((-CIE),CID);
 		CIG=CIE;
-		JJY=MFA;
+		JJY=MEM;
 		}
 		CIF=CIG;
 		JJX=JJY;
 		}
 		let CIH=((CCM- CGS)- (CDQ- (CET* CIF)))/ CDS;
-		let MFB=MCG* CIH;
-		let MFC=(((MEN- MEC)- (MCW- (L5([0.0,(MCV* CIF),0.0,0.0,0.0])+ (JJX* CET))))- L5([0.0,MFB[0],0.0,MFB[1],MFB[2]]))/ CDS;
+		let MEN=(((MEA- MDQ)- (MCK- (L5([0.0,(MCJ* CIF),0.0,0.0,0.0])+ (JJX* CET))))).product_sum_div(IUF,MCL,(-CIH),CDS);
 		let CII=CIH> LD;
 		let CIT;
 		let JJZ;
 		if CII{
 		let CIJ=CDT* CIH;
-		let MFH=MCH* CIH;
-		let MFI=L5([0.0,MFH[0],0.0,MFH[1],MFH[2]])+ (MFC* CDT);
+		let MES=MBU* CIH;
+		let MET=L5([0.0,MES[0],0.0,MES[1],MES[2]])+ (MEN* CDT);
 		CIT=CIJ;
-		JJZ=MFI;
+		JJZ=MET;
 		}else{
 		let CIK=CIH< -50f64;
 		let CIU;
@@ -7099,101 +7084,101 @@ impl Instance {
 		if CIK{
 		let CIL=CIH.exp();
 		let CIM=CDT* CIL;
-		let MFF=MCH* CIL;
-		let MFG=L5([0.0,MFF[0],0.0,MFF[1],MFF[2]])+ ((MFC* CIL)* CDT);
+		let MEQ=MBU* CIL;
+		let MER=L5([0.0,MEQ[0],0.0,MEQ[1],MEQ[2]])+ ((MEN* CIL)* CDT);
 		CIU=CIM;
-		JKA=MFG;
+		JKA=MER;
 		}else{
 		let CIN=CIH.exp();
 		let CIO=F+ CIN;
 		let CIP=CIO.ln();
 		let CIQ=CDT* CIP;
-		let MFD=MCH* CIP;
-		let MFE=L5([0.0,MFD[0],0.0,MFD[1],MFD[2]])+ (((MFC* CIN)* (IUF/ CIO))* CDT);
+		let MEO=MBU* CIP;
+		let MEP=L5([0.0,MEO[0],0.0,MEO[1],MEO[2]])+ (((MEN* CIN)* (IUF/ CIO))* CDT);
 		CIU=CIQ;
-		JKA=MFE;
+		JKA=MEP;
 		}
 		CIT=CIU;
 		JJZ=JKA;
 		}
 		let CIV=(CIR- CIT)/ DV;
 		let CIW=CIV/ CGD;
-		let MFJ=((((JJV- JJZ)- L5([0.0,(KKT* CIV),0.0,0.0,0.0]))/ DV)- (MDP* CIW))/ CGD;
+		let MEU=((((JJV- JJZ)).product_sum_div(IUF,MCT,(-CIV),DV))).product_sum_div(IUF,MDE,(-CIW),CGD);
 		let CJB;
 		let JKB;
 		if JM{
-		let MFL=MFJ* CIW;
+		let MEW=MEU* CIW;
 		let CIX=((CIW* CIW)+ JV).sqrt();
-		let MFM=(MFL+ MFL)* (IUF/ (KNB* CIX));
+		let MEX=(MEW+ MEW)* (IUF/ (KNB* CIX));
 		CJB=CIX;
-		JKB=MFM;
+		JKB=MEX;
 		}else{
 		let CIY=KB/ JV;
 		let CIZ=(CIY* CIW).tanh();
 		let CJA=CIW* CIZ;
-		let MFK=(MFJ* CIZ)+ (((MFJ* CIY)* (IUF- (CIZ* CIZ)))* CIW);
+		let MEV=(MEU* CIZ)+ (((MEU* CIY)* (IUF- (CIZ* CIZ)))* CIW);
 		CJB=CJA;
-		JKB=MFK;
+		JKB=MEV;
 		}
 		let CJC=F+ (CJB.powf(CCS));
 		let CJD=CJC.powf(CGP);
 		let CJE=CIW/ CJD;
 		let CJF=CFW* CJE;
-		let MFN=((MFJ- (((JKB* (CCS* ((CJB+ (((CJB== KOL) as u8 as f64)* KUP)).powf(MDY))))* (CGP* ((CJC+ (((CJC== KOL) as u8 as f64)* KUP)).powf(MDZ))))* CJE))/ CJD)* CFW;
+		let MEY=((MEU).product_sum_div(IUF,((JKB* (CCS* ((CJB+ (((CJB== KOL) as u8 as f64)* KUP)).powf(MDN))))* (CGP* ((CJC+ (((CJC== KOL) as u8 as f64)* KUP)).powf(MDO)))),(-CJE),CJD))* CFW;
 		let CJG=((JE* O)* P)* JW;
 		let CJH=CJG* (CIR+ CIT);
 		let CJI=CJH* CJF;
-		let MFO=(((JJV+ JJZ)* CJG)* CJF)+ (((MDL* CJE)+ MFN)* CJH);
+		let MEZ=(((JJV+ JJZ)* CJG)* CJF)+ (((MDA* CJE)+ MEY)* CJH);
 		let CJJ=MC* CDE;
 		let CJK=CJJ* AZ;
-		let MFP=((MBW* MC)* AZ)+ (KJT* CJJ);
+		let MFA=((MBK* MC)* AZ)+ (KJT* CJJ);
 		let CJL=DV* CJK;
-		let MFQ=(KKT* CJK)+ (MFP* DV);
+		let MFB=(KKT* CJK)+ (MFA* DV);
 		let CJM=CDG- CDU;
-		let MFR=MBZ- MCI;
+		let MFC=MBN- MBV;
 		let CJU;
 		let JKC;
 		if JM{
 		let CJN=CCM- CDB;
-		let MFU=(MBT- MBU)* CJN;
+		let MFF=(MBH- MBI)* CJN;
 		let CJO=((CJN* CJN)+ JV).sqrt();
 		let CJP=JW* ((CCM+ CDB)+ CJO);
-		let MFV=((MBT+ MBU)+ ((MFU+ MFU)* (IUF/ (KNB* CJO))))* JW;
+		let MFG=((MBH+ MBI)+ ((MFF+ MFF)* (IUF/ (KNB* CJO))))* JW;
 		CJU=CJP;
-		JKC=MFV;
+		JKC=MFG;
 		}else{
 		let CJQ=CCM- CDB;
-		let MFS=MBT- MBU;
+		let MFD=MBH- MBI;
 		let CJR=KB/ JV;
 		let CJS=(CJR* CJQ).tanh();
 		let CJT=JW* ((CCM+ CDB)+ (CJQ* CJS));
-		let MFT=((MBT+ MBU)+ ((MFS* CJS)+ (((MFS* CJR)* (IUF- (CJS* CJS)))* CJQ)))* JW;
+		let MFE=((MBH+ MBI)+ ((MFD* CJS)+ (((MFD* CJR)* (IUF- (CJS* CJS)))* CJQ)))* JW;
 		CJU=CJT;
-		JKC=MFT;
+		JKC=MFE;
 		}
-		let MFW=L5([0.0,MFR,0.0,0.0,0.0]);
+		let MFH=L5([0.0,MFC,0.0,0.0,0.0]);
 		let CJV=(CJU- CJM)/ CDC;
-		let MFX=((L5([JKC[0],0.0,JKC[1],JKC[2],JKC[3]])- MFW)- L5([0.0,(MBV* CJV),0.0,0.0,0.0]))/ CDC;
+		let MFI=((L5([JKC[0],0.0,JKC[1],JKC[2],JKC[3]])- MFH)).product_sum_div(IUF,MCC,(-CJV),CDC);
 		let CJW=CJV> LD;
 		let CKJ;
 		let JKD;
 		if CJW{
 		CKJ=A;
-		JKD=MBN;
+		JKD=MBB;
 		}else{
 		let CJX=CJV< -50f64;
 		let CKK;
 		let JKE;
 		if CJX{
 		CKK=F;
-		JKE=MBN;
+		JKE=MBB;
 		}else{
 		let CJY=CJV.exp();
 		let CJZ=F+ CJY;
 		let CKA=F/ CJZ;
-		let MFY=(((MFX* CJY)* CKA)* KNJ)/ CJZ;
+		let MFJ=((MFI* CJY)).product_div((-CKA),CJZ);
 		CKK=CKA;
-		JKE=MFY;
+		JKE=MFJ;
 		}
 		CKJ=CKK;
 		JKD=JKE;
@@ -7202,33 +7187,34 @@ impl Instance {
 		let JKF;
 		if JM{
 		let CKB=CCM- CDB;
-		let MGB=(MBT- MBU)* CKB;
+		let MFM=(MBH- MBI)* CKB;
 		let CKC=((CKB* CKB)+ JV).sqrt();
 		let CKD=JW* ((CCM+ CDB)+ CKC);
-		let MGC=((MBT+ MBU)+ ((MGB+ MGB)* (IUF/ (KNB* CKC))))* JW;
+		let MFN=((MBH+ MBI)+ ((MFM+ MFM)* (IUF/ (KNB* CKC))))* JW;
 		CKI=CKD;
-		JKF=MGC;
+		JKF=MFN;
 		}else{
 		let CKE=CCM- CDB;
-		let MFZ=MBT- MBU;
+		let MFK=MBH- MBI;
 		let CKF=KB/ JV;
 		let CKG=(CKF* CKE).tanh();
 		let CKH=JW* ((CCM+ CDB)+ (CKE* CKG));
-		let MGA=((MBT+ MBU)+ ((MFZ* CKG)+ (((MFZ* CKF)* (IUF- (CKG* CKG)))* CKE)))* JW;
+		let MFL=((MBH+ MBI)+ ((MFK* CKG)+ (((MFK* CKF)* (IUF- (CKG* CKG)))* CKE)))* JW;
 		CKI=CKH;
-		JKF=MGA;
+		JKF=MFL;
 		}
-		let MGD=L5([0.0,MBZ,0.0,0.0,0.0]);
+		let MFO=L5([0.0,MBN,0.0,0.0,0.0]);
 		let CKL=(CKI- (CDG- (CET* CKJ)))/ CJK;
-		let MGE=((L5([JKF[0],0.0,JKF[1],JKF[2],JKF[3]])- (MGD- (L5([0.0,(MCV* CKJ),0.0,0.0,0.0])+ (JKD* CET))))- L5([0.0,(MFP* CKL),0.0,0.0,0.0]))/ CJK;
+		let MFP=L5([0.0,MFA,0.0,0.0,0.0]);
+		let MFQ=((L5([JKF[0],0.0,JKF[1],JKF[2],JKF[3]])- (MFO- (L5([0.0,(MCJ* CKJ),0.0,0.0,0.0])+ (JKD* CET))))).product_sum_div(IUF,MFP,(-CKL),CJK);
 		let CKM=CKL> LD;
 		let CKX;
 		let JKG;
 		if CKM{
 		let CKN=CJL* CKL;
-		let MGH=L5([0.0,(MFQ* CKL),0.0,0.0,0.0])+ (MGE* CJL);
+		let MFT=L5([0.0,(MFB* CKL),0.0,0.0,0.0])+ (MFQ* CJL);
 		CKX=CKN;
-		JKG=MGH;
+		JKG=MFT;
 		}else{
 		let CKO=CKL< -50f64;
 		let CKY;
@@ -7236,128 +7222,127 @@ impl Instance {
 		if CKO{
 		let CKP=CKL.exp();
 		let CKQ=CJL* CKP;
-		let MGG=L5([0.0,(MFQ* CKP),0.0,0.0,0.0])+ ((MGE* CKP)* CJL);
+		let MFS=L5([0.0,(MFB* CKP),0.0,0.0,0.0])+ ((MFQ* CKP)* CJL);
 		CKY=CKQ;
-		JKH=MGG;
+		JKH=MFS;
 		}else{
 		let CKR=CKL.exp();
 		let CKS=F+ CKR;
 		let CKT=CKS.ln();
 		let CKU=CJL* CKT;
-		let MGF=L5([0.0,(MFQ* CKT),0.0,0.0,0.0])+ (((MGE* CKR)* (IUF/ CKS))* CJL);
+		let MFR=L5([0.0,(MFB* CKT),0.0,0.0,0.0])+ (((MFQ* CKR)* (IUF/ CKS))* CJL);
 		CKY=CKU;
-		JKH=MGF;
+		JKH=MFR;
 		}
 		CKX=CKY;
 		JKG=JKH;
 		}
 		let CKV=CCR/ CDH;
 		let CKW=(CFO* CCK)/ CKV;
-		let MGI=((MDG* CCK)- ((((MCA* CKV)* KNJ)/ CDH)* CKW))/ CKV;
+		let MFU=product_sum_div((MCV* CCK),IUF,(product_div(MBO,(-CKV),CDH)),(-CKW),CKV);
 		let CKZ=(MC* CKX)/ DV;
 		let CLA=CKZ/ CKW;
+		let MFV=L5([0.0,MFU,0.0,0.0,0.0]);
 		let CLB=(F+ CLA).sqrt();
 		let CLC=(CKW* CLB)- CKW;
-		let MGJ=(L5([0.0,(MGI* CLB),0.0,0.0,0.0])+ (((((((JKG* MC)- L5([0.0,(KKT* CKZ),0.0,0.0,0.0]))/ DV)- L5([0.0,(MGI* CLA),0.0,0.0,0.0]))/ CKW)* (IUF/ (KNB* CLB)))* CKW))- L5([0.0,MGI,0.0,0.0,0.0]);
 		let CLD=F- CKJ;
+		let MFW=(((L5([0.0,(MFU* CLB),0.0,0.0,0.0])+ (((((((JKG* MC)).product_sum_div(IUF,MCT,(-CKZ),DV))).product_sum_div(IUF,MFV,(-CLA),CKW))* (IUF/ (KNB* CLB)))* CKW))- MFV)* CLD)+ ((JKD* KNJ)* CLC);
 		let CLE=(CLC* CLD)+ (CJK* CKJ);
-		let MGK=((MGJ* CLD)+ ((JKD* KNJ)* CLC))+ (L5([0.0,(MFP* CKJ),0.0,0.0,0.0])+ (JKD* CJK));
+		let MFX=MFW+ (L5([0.0,(MFA* CKJ),0.0,0.0,0.0])+ (JKD* CJK));
 		let CLF=QA/ CLE;
-		let MGL=(MDS- (MGK* CLF))/ CLE;
+		let MFY=(MDH).product_sum_div(IUF,MFX,(-CLF),CLE);
 		let CLN;
 		let JKI;
 		if JM{
 		let CLG=A- CLF;
-		let MGO=(MGL* KNJ)* CLG;
+		let MGB=(MFY* KNJ)* CLG;
 		let CLH=((CLG* CLG)+ JV).sqrt();
 		let CLI=JW* ((A+ CLF)+ CLH);
-		let MGP=(MGL+ ((MGO+ MGO)* (IUF/ (KNB* CLH))))* JW;
+		let MGC=(MFY+ ((MGB+ MGB)* (IUF/ (KNB* CLH))))* JW;
 		CLN=CLI;
-		JKI=MGP;
+		JKI=MGC;
 		}else{
 		let CLJ=A- CLF;
-		let MGM=MGL* KNJ;
+		let MFZ=MFY* KNJ;
 		let CLK=KB/ JV;
 		let CLL=(CLK* CLJ).tanh();
 		let CLM=JW* ((A+ CLF)+ (CLJ* CLL));
-		let MGN=(MGL+ ((MGM* CLL)+ (((MGM* CLK)* (IUF- (CLL* CLL)))* CLJ)))* JW;
+		let MGA=(MFY+ ((MFZ* CLL)+ (((MFZ* CLK)* (IUF- (CLL* CLL)))* CLJ)))* JW;
 		CLN=CLM;
-		JKI=MGN;
+		JKI=MGA;
 		}
 		let CLO=F+ (CLN.powf(CCS));
 		let CLP=CLO.powf(CGP);
 		let CLQ=F/ CLP;
 		let CLR=QA* CLQ;
-		let MGQ=KQT* CLQ;
-		let MGR=(((((JKI* (CCS* ((CLN+ (((CLN== KOL) as u8 as f64)* KUP)).powf(MDY))))* (CGP* ((CLO+ (((CLO== KOL) as u8 as f64)* KUP)).powf(MDZ))))* CLQ)* KNJ)/ CLP)* QA;
-		let MGS=L5([0.0,0.0,0.0,MGQ[0],MGQ[1]])+ MGR;
+		let MGD=KQT* CLQ;
+		let MGE=L5([0.0,0.0,0.0,MGD[0],MGD[1]])+ (((((JKI* (CCS* ((CLN+ (((CLN== KOL) as u8 as f64)* KUP)).powf(MDN))))* (CGP* ((CLO+ (((CLO== KOL) as u8 as f64)* KUP)).powf(MDO))))).product_div((-CLQ),CLP))* QA);
 		let CLS=CGT/ CLE;
-		let MGT=(MEE- (MGK* CLS))/ CLE;
+		let MGF=(MDS).product_sum_div(IUF,MFX,(-CLS),CLE);
 		let CMA;
 		let JKJ;
 		if JM{
 		let CLT=A- CLS;
-		let MGW=(MGT* KNJ)* CLT;
+		let MGI=(MGF* KNJ)* CLT;
 		let CLU=((CLT* CLT)+ JV).sqrt();
 		let CLV=JW* ((A+ CLS)+ CLU);
-		let MGX=(MGT+ ((MGW+ MGW)* (IUF/ (KNB* CLU))))* JW;
+		let MGJ=(MGF+ ((MGI+ MGI)* (IUF/ (KNB* CLU))))* JW;
 		CMA=CLV;
-		JKJ=MGX;
+		JKJ=MGJ;
 		}else{
 		let CLW=A- CLS;
-		let MGU=MGT* KNJ;
+		let MGG=MGF* KNJ;
 		let CLX=KB/ JV;
 		let CLY=(CLX* CLW).tanh();
 		let CLZ=JW* ((A+ CLS)+ (CLW* CLY));
-		let MGV=(MGT+ ((MGU* CLY)+ (((MGU* CLX)* (IUF- (CLY* CLY)))* CLW)))* JW;
+		let MGH=(MGF+ ((MGG* CLY)+ (((MGG* CLX)* (IUF- (CLY* CLY)))* CLW)))* JW;
 		CMA=CLZ;
-		JKJ=MGV;
+		JKJ=MGH;
 		}
 		let CMB=F+ (CMA.powf(CCS));
 		let CMC=CMB.powf(CGP);
 		let CMD=F/ CMC;
 		let CME=CGT* CMD;
-		let MGY=MED* CMD;
-		let MGZ=(((((JKJ* (CCS* ((CMA+ (((CMA== KOL) as u8 as f64)* KUP)).powf(MDY))))* (CGP* ((CMB+ (((CMB== KOL) as u8 as f64)* KUP)).powf(MDZ))))* CMD)* KNJ)/ CMC)* CGT;
-		let MHA=L5([0.0,0.0,0.0,MGY[0],MGY[1]])+ MGZ;
-		let MHB=L4([IYM[0],0.0,IYM[1],IYM[2]]);
+		let MGK=MDR* CMD;
+		let MGL=L5([0.0,0.0,0.0,MGK[0],MGK[1]])+ (((((JKJ* (CCS* ((CMA+ (((CMA== KOL) as u8 as f64)* KUP)).powf(MDN))))* (CGP* ((CMB+ (((CMB== KOL) as u8 as f64)* KUP)).powf(MDO))))).product_div((-CMD),CMC))* CGT);
+		let MGM=L4([IYM[0],0.0,IYM[1],IYM[2]]);
 		let CMF=(CCM- CJM)/ CDC;
-		let MHC=((MHB- L4([0.0,MFR,0.0,0.0]))- L4([0.0,(MBV* CMF),0.0,0.0]))/ CDC;
+		let MGN=((MGM- L4([0.0,MFC,0.0,0.0]))).product_sum_div(IUF,L4([0.0,MBJ,0.0,0.0]),(-CMF),CDC);
 		let CMG=CMF> LD;
 		let CML;
 		let JKK;
 		if CMG{
 		CML=A;
-		JKK=MBO;
+		JKK=MBC;
 		}else{
 		let CMH=CMF< -50f64;
 		let CMM;
 		let JKL;
 		if CMH{
 		CMM=F;
-		JKL=MBO;
+		JKL=MBC;
 		}else{
 		let CMI=CMF.exp();
 		let CMJ=F+ CMI;
 		let CMK=F/ CMJ;
-		let MHD=(((MHC* CMI)* CMK)* KNJ)/ CMJ;
+		let MGO=((MGN* CMI)).product_div((-CMK),CMJ);
 		CMM=CMK;
-		JKL=MHD;
+		JKL=MGO;
 		}
 		CML=CMM;
 		JKK=JKL;
 		}
-		let MHE=L4([0.0,MBZ,0.0,0.0])- (L4([0.0,(MCV* CML),0.0,0.0])+ (JKK* CET));
+		let MGP=L4([0.0,MBN,0.0,0.0])- (L4([0.0,(MCJ* CML),0.0,0.0])+ (JKK* CET));
 		let CMN=((CDB- CME)- (CDG- (CET* CML)))/ CJK;
-		let MHF=(((MEQ- MHA)- L5([MHE[0],MHE[1],MHE[2],0.0,MHE[3]]))- L5([0.0,(MFP* CMN),0.0,0.0,0.0]))/ CJK;
+		let MGQ=(((MED- MGL)- L5([MGP[0],MGP[1],MGP[2],0.0,MGP[3]]))).product_sum_div(IUF,MFP,(-CMN),CJK);
 		let CMO=CMN> LD;
 		let CNP;
 		let JKM;
 		if CMO{
 		let CMP=CJL* CMN;
-		let MHI=L5([0.0,(MFQ* CMN),0.0,0.0,0.0])+ (MHF* CJL);
+		let MGT=L5([0.0,(MFB* CMN),0.0,0.0,0.0])+ (MGQ* CJL);
 		CNP=CMP;
-		JKM=MHI;
+		JKM=MGT;
 		}else{
 		let CMQ=CMN< -50f64;
 		let CNQ;
@@ -7365,57 +7350,57 @@ impl Instance {
 		if CMQ{
 		let CMR=CMN.exp();
 		let CMS=CJL* CMR;
-		let MHH=L5([0.0,(MFQ* CMR),0.0,0.0,0.0])+ ((MHF* CMR)* CJL);
+		let MGS=L5([0.0,(MFB* CMR),0.0,0.0,0.0])+ ((MGQ* CMR)* CJL);
 		CNQ=CMS;
-		JKN=MHH;
+		JKN=MGS;
 		}else{
 		let CMT=CMN.exp();
 		let CMU=F+ CMT;
 		let CMV=CMU.ln();
 		let CMW=CJL* CMV;
-		let MHG=L5([0.0,(MFQ* CMV),0.0,0.0,0.0])+ (((MHF* CMT)* (IUF/ CMU))* CJL);
+		let MGR=L5([0.0,(MFB* CMV),0.0,0.0,0.0])+ (((MGQ* CMT)* (IUF/ CMU))* CJL);
 		CNQ=CMW;
-		JKN=MHG;
+		JKN=MGR;
 		}
 		CNP=CNQ;
 		JKM=JKN;
 		}
 		let CMX=(CDB- CJM)/ CDC;
-		let MHJ=((MEQ- MFW)- L5([0.0,(MBV* CMX),0.0,0.0,0.0]))/ CDC;
+		let MGU=((MED- MFH)).product_sum_div(IUF,MCC,(-CMX),CDC);
 		let CMY=CMX> LD;
 		let CND;
 		let JKO;
 		if CMY{
 		CND=A;
-		JKO=MBN;
+		JKO=MBB;
 		}else{
 		let CMZ=CMX< -50f64;
 		let CNE;
 		let JKP;
 		if CMZ{
 		CNE=F;
-		JKP=MBN;
+		JKP=MBB;
 		}else{
 		let CNA=CMX.exp();
 		let CNB=F+ CNA;
 		let CNC=F/ CNB;
-		let MHK=(((MHJ* CNA)* CNC)* KNJ)/ CNB;
+		let MGV=((MGU* CNA)).product_div((-CNC),CNB);
 		CNE=CNC;
-		JKP=MHK;
+		JKP=MGV;
 		}
 		CND=CNE;
 		JKO=JKP;
 		}
 		let CNF=((CCM- CLR)- (CDG- (CET* CND)))/ CJK;
-		let MHL=(((MEN- MGS)- (MGD- (L5([0.0,(MCV* CND),0.0,0.0,0.0])+ (JKO* CET))))- L5([0.0,(MFP* CNF),0.0,0.0,0.0]))/ CJK;
+		let MGW=(((MEA- MGE)- (MFO- (L5([0.0,(MCJ* CND),0.0,0.0,0.0])+ (JKO* CET))))).product_sum_div(IUF,MFP,(-CNF),CJK);
 		let CNG=CNF> LD;
 		let CNS;
 		let JKQ;
 		if CNG{
 		let CNH=CJL* CNF;
-		let MHO=L5([0.0,(MFQ* CNF),0.0,0.0,0.0])+ (MHL* CJL);
+		let MGZ=L5([0.0,(MFB* CNF),0.0,0.0,0.0])+ (MGW* CJL);
 		CNS=CNH;
-		JKQ=MHO;
+		JKQ=MGZ;
 		}else{
 		let CNI=CNF< -50f64;
 		let CNT;
@@ -7423,45 +7408,45 @@ impl Instance {
 		if CNI{
 		let CNJ=CNF.exp();
 		let CNK=CJL* CNJ;
-		let MHN=L5([0.0,(MFQ* CNJ),0.0,0.0,0.0])+ ((MHL* CNJ)* CJL);
+		let MGY=L5([0.0,(MFB* CNJ),0.0,0.0,0.0])+ ((MGW* CNJ)* CJL);
 		CNT=CNK;
-		JKR=MHN;
+		JKR=MGY;
 		}else{
 		let CNL=CNF.exp();
 		let CNM=F+ CNL;
 		let CNN=CNM.ln();
 		let CNO=CJL* CNN;
-		let MHM=L5([0.0,(MFQ* CNN),0.0,0.0,0.0])+ (((MHL* CNL)* (IUF/ CNM))* CJL);
+		let MGX=L5([0.0,(MFB* CNN),0.0,0.0,0.0])+ (((MGW* CNL)* (IUF/ CNM))* CJL);
 		CNT=CNO;
-		JKR=MHM;
+		JKR=MGX;
 		}
 		CNS=CNT;
 		JKQ=JKR;
 		}
-		let MHP=JKM* CNP;
-		let MHQ=MHP+ MHP;
+		let MHA=JKM* CNP;
+		let MHB=MHA+ MHA;
 		let CNR=(CNP* CNP)+ AEI;
-		let MHR=JKQ* CNS;
-		let MHS=MHR+ MHR;
+		let MHC=JKQ* CNS;
+		let MHD=MHC+ MHC;
 		let CNU=(CNS* CNS)+ AEI;
-		let MHT=(JKM* CNS)+ (JKQ* CNP);
+		let MHE=(JKM* CNS)+ (JKQ* CNP);
 		let CNV=(CNP* CNS)+ AEI;
 		let CNX=CNR+ CNU;
-		let MHU=MHQ+ MHS;
+		let MHF=MHB+ MHD;
 		let CNY=(CNP+ CNS)+ AER;
 		let CNZ=(CNW* (CNX+ CNV))/ CNY;
 		let COA=AEU* CNR;
 		let COB=AEW* CNU;
-		let MHV=(((((MHQ* CNP)+ (JKM* CNR))* MC)+ (((MHS* CNS)+ (JKQ* CNU))* BF))+ (((MHQ* AEU)* CNS)+ (JKQ* COA)))+ (((MHS* AEW)* CNP)+ (JKM* COB));
+		let MHG=(((((MHB* CNP)+ (JKM* CNR))* MC)+ (((MHD* CNS)+ (JKQ* CNU))* BF))+ (((MHB* AEU)* CNS)+ (JKQ* COA)))+ (((MHD* AEW)* CNP)+ (JKM* COB));
 		let COC=AEY* (CNX+ (MC* CNV));
 		let COD=(MC* ((((MC* ((CNR* CNP)+ AEK))+ (BF* ((CNU* CNS)+ AEK)))+ (COA* CNS))+ (COB* CNP)))/ COC;
-		let MHW=((MHV* MC)- (((MHU+ (MHT* MC))* AEY)* COD))/ COC;
+		let MHH=((MHG* MC)).product_sum_div(IUF,((MHF+ (MHE* MC))* AEY),(-COD),COC);
 		let COE=O* P;
 		let COF=(COE* CCK)* JE;
 		let COG=COF* (CNZ- COD);
-		let MHX=(((((MHU+ MHT)* CNW)- ((JKM+ JKQ)* CNZ))/ CNY)- MHW)* COF;
+		let MHI=(((((MHF+ MHE)* CNW)).product_sum_div(IUF,(JKM+ JKQ),(-CNZ),CNY))- MHH)* COF;
 		let COH=COF* COD;
-		let MHY=MHW* COF;
+		let MHJ=MHH* COF;
 		let COI=parameters[85]== F;
 		let CPY;
 		let CPZ;
@@ -7470,31 +7455,31 @@ impl Instance {
 		if COI{
 		let COJ=UK* JW;
 		let COK=CDG- (COJ* CDC);
-		let MHZ=MBZ- (MBV* COJ);
+		let MHK=MBN- (MBJ* COJ);
 		let COL=(CCN- COK)/ CJK;
-		let MIA=((L4([IYN[0],0.0,IYN[1],IYN[2]])- L4([0.0,MHZ,0.0,0.0]))- L4([0.0,(MFP* COL),0.0,0.0]))/ CJK;
+		let MHL=((L4([IYN[0],0.0,IYN[1],IYN[2]])- L4([0.0,MHK,0.0,0.0]))).product_sum_div(IUF,L4([0.0,MFA,0.0,0.0]),(-COL),CJK);
 		let COM=COL> LD;
 		let COV;
 		let JKU;
 		if COM{
 		COV=COL;
-		JKU=MIA;
+		JKU=MHL;
 		}else{
 		let CON=COL< -50f64;
 		let COW;
 		let JKV;
 		if CON{
 		let COO=COL.exp();
-		let MIC=MIA* COO;
+		let MHN=MHL* COO;
 		COW=COO;
-		JKV=MIC;
+		JKV=MHN;
 		}else{
 		let COP=COL.exp();
 		let COQ=F+ COP;
 		let COR=COQ.ln();
-		let MIB=(MIA* COP)* (IUF/ COQ);
+		let MHM=(MHL* COP)* (IUF/ COQ);
 		COW=COR;
-		JKV=MIB;
+		JKV=MHM;
 		}
 		COV=COW;
 		JKU=JKV;
@@ -7503,31 +7488,31 @@ impl Instance {
 		let COT=COS* ET;
 		let COU=COT* CJK;
 		let COX=COU* COV;
-		let MID=L4([0.0,((((KLB* COS)* CJK)+ (MFP* COT))* COV),0.0,0.0])+ (JKU* COU);
+		let MHO=L4([0.0,((((KLB* COS)* CJK)+ (MFA* COT))* COV),0.0,0.0])+ (JKU* COU);
 		let COY=(QD- COK)/ CJK;
-		let MIE=((L3([KQV[0],0.0,KQV[1]])- L3([0.0,MHZ,0.0]))- L3([0.0,(MFP* COY),0.0]))/ CJK;
+		let MHP=((L3([KQV[0],0.0,KQV[1]])- L3([0.0,MHK,0.0]))).product_sum_div(IUF,L3([0.0,MFA,0.0]),(-COY),CJK);
 		let COZ=COY> LD;
 		let CPH;
 		let JKW;
 		if COZ{
 		CPH=COY;
-		JKW=MIE;
+		JKW=MHP;
 		}else{
 		let CPA=COY< -50f64;
 		let CPI;
 		let JKX;
 		if CPA{
 		let CPB=COY.exp();
-		let MIG=MIE* CPB;
+		let MHR=MHP* CPB;
 		CPI=CPB;
-		JKX=MIG;
+		JKX=MHR;
 		}else{
 		let CPC=COY.exp();
 		let CPD=F+ CPC;
 		let CPE=CPD.ln();
-		let MIF=(MIE* CPC)* (IUF/ CPD);
+		let MHQ=(MHP* CPC)* (IUF/ CPD);
 		CPI=CPE;
-		JKX=MIF;
+		JKX=MHQ;
 		}
 		CPH=CPI;
 		JKW=JKX;
@@ -7535,16 +7520,16 @@ impl Instance {
 		let CPF=COS* FR;
 		let CPG=CPF* CJK;
 		let CPJ=CPG* CPH;
-		let MIH=L3([0.0,((((KLJ* COS)* CJK)+ (MFP* CPF))* CPH),0.0])+ (JKW* CPG);
+		let MHS=L3([0.0,((((KLJ* COS)* CJK)+ (MFA* CPF))* CPH),0.0])+ (JKW* CPG);
 		CPY=COX;
 		CPZ=CPJ;
-		JKS=MID;
-		JKT=MIH;
+		JKS=MHO;
+		JKT=MHS;
 		}else{
 		CPY=A;
 		CPZ=A;
-		JKS=MBO;
-		JKT=MBP;
+		JKS=MBC;
+		JKT=MBD;
 		}
 		let CPK=parameters[83]== F;
 		let CQA;
@@ -7552,29 +7537,29 @@ impl Instance {
 		if CPK{
 		let CPL=UK* JW;
 		let CPM=(CCM- (CDG- (CPL* CDC)))/ CJK;
-		let MII=((MHB- L4([0.0,(MBZ- (MBV* CPL)),0.0,0.0]))- L4([0.0,(MFP* CPM),0.0,0.0]))/ CJK;
+		let MHT=((MGM- L4([0.0,(MBN- (MBJ* CPL)),0.0,0.0]))).product_sum_div(IUF,L4([0.0,MFA,0.0,0.0]),(-CPM),CJK);
 		let CPN=CPM> LD;
 		let CPV;
 		let JKZ;
 		if CPN{
 		CPV=CPM;
-		JKZ=MII;
+		JKZ=MHT;
 		}else{
 		let CPO=CPM< -50f64;
 		let CPW;
 		let JLA;
 		if CPO{
 		let CPP=CPM.exp();
-		let MIK=MII* CPP;
+		let MHV=MHT* CPP;
 		CPW=CPP;
-		JLA=MIK;
+		JLA=MHV;
 		}else{
 		let CPQ=CPM.exp();
 		let CPR=F+ CPQ;
 		let CPS=CPR.ln();
-		let MIJ=(MII* CPQ)* (IUF/ CPR);
+		let MHU=(MHT* CPQ)* (IUF/ CPR);
 		CPW=CPS;
-		JLA=MIJ;
+		JLA=MHU;
 		}
 		CPV=CPW;
 		JKZ=JLA;
@@ -7582,15 +7567,15 @@ impl Instance {
 		let CPT=(COE* JE)* parameters[84];
 		let CPU=CPT* CJK;
 		let CPX=CPU* CPV;
-		let MIL=L4([0.0,((MFP* CPT)* CPV),0.0,0.0])+ (JKZ* CPU);
+		let MHW=L4([0.0,((MFA* CPT)* CPV),0.0,0.0])+ (JKZ* CPU);
 		CQA=CPX;
-		JKY=MIL;
+		JKY=MHW;
 		}else{
 		CQA=A;
-		JKY=MBO;
+		JKY=MBC;
 		}
-		let MIM=KQS* D;
-		let MIN=MFO+ L5([0.0,0.0,0.0,MIM[0],MIM[1]]);
+		let MHX=KQS* D;
+		let MHY=MEZ+ L5([0.0,0.0,0.0,MHX[0],MHX[1]]);
 		let CQB=A+ (CJI+ (D* PZ));
 		CQD=COG;
 		CQI=COH;
@@ -7601,13 +7586,13 @@ impl Instance {
 		IID=CQB;
 		IIE=A;
 		IOI=A;
-		JJC=MHX;
-		JJD=MHY;
+		JJC=MHI;
+		JJD=MHJ;
 		JJE=JKS;
 		JJF=JKY;
 		JJG=JKT;
-		JJH=MFO;
-		JJI=MIN;
+		JJH=MEZ;
+		JJI=MHY;
 		}else{
 		CQD=A;
 		CQI=A;
@@ -7618,13 +7603,13 @@ impl Instance {
 		IID=A;
 		IIE=CQC;
 		IOI=F;
-		JJC=MBN;
-		JJD=MBN;
-		JJE=MBO;
-		JJF=MBO;
-		JJG=MBP;
-		JJH=MBN;
-		JJI=MBN;
+		JJC=MBB;
+		JJD=MBB;
+		JJE=MBC;
+		JJF=MBC;
+		JJG=MBD;
+		JJH=MBB;
+		JJI=MBB;
 		}
 		let IIF;
 		let IIG;
@@ -7660,39 +7645,39 @@ impl Instance {
 		if PS{
 		let CQE=ddt(68, CQD);
 		let CQF=AHC* (PT- PU);
-		let MJA=(L2([IUR,0.0])- L2([0.0,IUS]))* AHC;
+		let MIL=(L2([IUR,0.0])- L2([0.0,IUS]))* AHC;
 		let CQG=ddt(69, CQF);
-		let MJB=MJA* KOI;
-		let MJC=(JJC* KOI)+ L5([0.0,0.0,MJB[0],0.0,MJB[1]]);
+		let MIM=MIL* KOI;
+		let MIN=(JJC* KOI)+ L5([0.0,0.0,MIM[0],0.0,MIM[1]]);
 		let IRP=CQD+ CQF;
-		let MJD=JJC+ L5([0.0,0.0,MJA[0],0.0,MJA[1]]);
+		let MIO=JJC+ L5([0.0,0.0,MIL[0],0.0,MIL[1]]);
 		let CQH=A+ (CQE+ CQG);
 		let CQJ=ddt(70, CQI);
 		let CQK=AHC* (PT- JG);
-		let MJE=(L2([IUR,0.0])- L2([0.0,IUI]))* AHC;
+		let MIP=(L2([IUR,0.0])- L2([0.0,IUI]))* AHC;
 		let CQL=ddt(71, CQK);
-		let MJF=MJE* KOI;
-		let MJG=L5([0.0,0.0,MJF[0],MJF[1],0.0]);
-		let MJH=(JJD* KOI)+ MJG;
+		let MIQ=MIP* KOI;
+		let MIR=L5([0.0,0.0,MIQ[0],MIQ[1],0.0]);
+		let MIS=(JJD* KOI)+ MIR;
 		let IRR=CQI+ CQK;
-		let MJI=L5([0.0,0.0,MJE[0],MJE[1],0.0]);
-		let MJJ=JJD+ MJI;
+		let MIT=L5([0.0,0.0,MIP[0],MIP[1],0.0]);
+		let MIU=JJD+ MIT;
 		let CQM=A+ (CQJ+ CQL);
 		let CQO=ddt(72, CQN);
 		let CQP=AHC* (JQ- PU);
-		let MJK=(L2([IUM,0.0])- L2([0.0,IUS]))* AHC;
+		let MIV=(L2([IUM,0.0])- L2([0.0,IUS]))* AHC;
 		let CQQ=ddt(73, CQP);
-		let MJL=MJK* KOI;
-		let MJM=(JJE* KOI)+ L4([MJL[0],0.0,0.0,MJL[1]]);
+		let MIW=MIV* KOI;
+		let MIX=(JJE* KOI)+ L4([MIW[0],0.0,0.0,MIW[1]]);
 		let IRT=CQN+ CQP;
-		let MJN=JJE+ L4([MJK[0],0.0,0.0,MJK[1]]);
+		let MIY=JJE+ L4([MIV[0],0.0,0.0,MIV[1]]);
 		let CQR=A+ (CQO+ CQQ);
 		let CQU=ddt(74, CQT);
-		let MJO=JJF* KOI;
+		let MIZ=JJF* KOI;
 		let CQV=ddt(75, CQK);
-		let MJP=L5([MJO[0],MJO[1],MJO[2],0.0,MJO[3]])+ MJG;
+		let MJA=L5([MIZ[0],MIZ[1],MIZ[2],0.0,MIZ[3]])+ MIR;
 		let IRV=CQT+ CQK;
-		let MJQ=L5([JJF[0],JJF[1],JJF[2],0.0,JJF[3]])+ MJI;
+		let MJB=L5([JJF[0],JJF[1],JJF[2],0.0,JJF[3]])+ MIT;
 		let CQW=A+ (CQU+ CQV);
 		IIF=CQH;
 		IIG=CQM;
@@ -7711,47 +7696,47 @@ impl Instance {
 		IRY=A;
 		ISA=A;
 		ISC=A;
-		JLB=MJC;
-		JLC=MJH;
-		JLD=MJM;
-		JLE=MJP;
-		JLF=MBN;
-		JLG=MBN;
-		JLH=MBO;
-		JLI=MJD;
-		JLJ=MJJ;
-		JLK=MJN;
-		JLL=MJQ;
-		JLM=MBN;
-		JLN=MBN;
-		JLO=MBO;
+		JLB=MIN;
+		JLC=MIS;
+		JLD=MIX;
+		JLE=MJA;
+		JLF=MBB;
+		JLG=MBB;
+		JLH=MBC;
+		JLI=MIO;
+		JLJ=MIU;
+		JLK=MIY;
+		JLL=MJB;
+		JLM=MBB;
+		JLN=MBB;
+		JLO=MBC;
 		}else{
 		let CQX=ddt(76, CQD);
 		let CQY=AHC* (JQ- PU);
-		let MIO=(L2([IUM,0.0])- L2([0.0,IUS]))* AHC;
+		let MHZ=(L2([IUM,0.0])- L2([0.0,IUS]))* AHC;
 		let CQZ=ddt(77, CQY);
-		let MIP=MIO* KOI;
-		let MIQ=(JJC* KOI)+ L5([MIP[0],0.0,0.0,0.0,MIP[1]]);
+		let MIA=MHZ* KOI;
+		let MIB=(JJC* KOI)+ L5([MIA[0],0.0,0.0,0.0,MIA[1]]);
 		let IRX=CQD+ CQY;
-		let MIR=JJC+ L5([MIO[0],0.0,0.0,0.0,MIO[1]]);
+		let MIC=JJC+ L5([MHZ[0],0.0,0.0,0.0,MHZ[1]]);
 		let CRA=A+ (CQX+ CQZ);
 		let CRB=ddt(78, CQI);
 		let CRC=AHC* (JQ- JG);
-		let MIS=(L2([IUM,0.0])- L2([0.0,IUI]))* AHC;
+		let MID=(L2([IUM,0.0])- L2([0.0,IUI]))* AHC;
 		let CRD=ddt(79, CRC);
-		let MIT=MIS* KOI;
-		let MIU=(JJD* KOI)+ L5([MIT[0],0.0,0.0,MIT[1],0.0]);
+		let MIE=MID* KOI;
+		let MIF=(JJD* KOI)+ L5([MIE[0],0.0,0.0,MIE[1],0.0]);
 		let IRZ=CQI+ CRC;
-		let MIV=JJD+ L5([MIS[0],0.0,0.0,MIS[1],0.0]);
+		let MIG=JJD+ L5([MID[0],0.0,0.0,MID[1],0.0]);
 		let CRE=A+ (CRB+ CRD);
 		let CRF=ddt(80, CQN);
 		let CRG=AHC* (PT- PU);
-		let MIW=(L2([IUR,0.0])- L2([0.0,IUS]))* AHC;
+		let MIH=(L2([IUR,0.0])- L2([0.0,IUS]))* AHC;
 		let CRH=ddt(81, CRG);
-		let MIX=MIW* KOI;
-		let MIY=(JJE* KOI)+ L4([0.0,0.0,MIX[0],MIX[1]]);
+		let MII=MIH* KOI;
+		let MIJ=(JJE* KOI)+ L4([0.0,0.0,MII[0],MII[1]]);
 		let ISB=CQN+ CRG;
-		let MIZ=JJE+ L4([0.0,0.0,MIW[0],MIW[1]]);
+		let MIK=JJE+ L4([0.0,0.0,MIH[0],MIH[1]]);
 		let CRI=A+ (CRF+ CRH);
 		IIF=A;
 		IIG=A;
@@ -7770,29 +7755,29 @@ impl Instance {
 		IRY=IRX;
 		ISA=IRZ;
 		ISC=ISB;
-		JLB=MBN;
-		JLC=MBN;
-		JLD=MBO;
-		JLE=MBN;
-		JLF=MIQ;
-		JLG=MIU;
-		JLH=MIY;
-		JLI=MBN;
-		JLJ=MBN;
-		JLK=MBO;
-		JLL=MBN;
-		JLM=MIR;
-		JLN=MIV;
-		JLO=MIZ;
+		JLB=MBB;
+		JLC=MBB;
+		JLD=MBC;
+		JLE=MBB;
+		JLF=MIB;
+		JLG=MIF;
+		JLH=MIJ;
+		JLI=MBB;
+		JLJ=MBB;
+		JLK=MBC;
+		JLL=MBB;
+		JLM=MIC;
+		JLN=MIG;
+		JLO=MIK;
 		}
 		let CRM=ddt(82, CRL);
 		let CRN=AHC* QC;
-		let MJR=KQU* AHC;
+		let MJC=KQU* AHC;
 		let CRO=ddt(83, CRN);
-		let MJS=MJR* KOI;
-		let MJT=(JJG* KOI)+ L3([MJS[0],0.0,MJS[1]]);
+		let MJD=MJC* KOI;
+		let MJE=(JJG* KOI)+ L3([MJD[0],0.0,MJD[1]]);
 		let ISD=CRL+ CRN;
-		let MJU=JJG+ L3([MJR[0],0.0,MJR[1]]);
+		let MJF=JJG+ L3([MJC[0],0.0,MJC[1]]);
 		let CRP=A+ (CRM+ CRO);
 		let CRR=CRQ> SV;
 		let DFJ;
@@ -7815,34 +7800,34 @@ impl Instance {
 		let CSG;
 		let JLW;
 		if JM{
-		let MJZ=KRF* QL;
+		let MJK=KRF* QL;
 		let CSC=((QL* QL)+ JV).sqrt();
-		let MKA=(MJZ+ MJZ)* (IUF/ (KNB* CSC));
+		let MJL=(MJK+ MJK)* (IUF/ (KNB* CSC));
 		CSG=CSC;
-		JLW=MKA;
+		JLW=MJL;
 		}else{
 		let CSD=KB/ JV;
 		let CSE=(CSD* QL).tanh();
 		let CSF=QL* CSE;
-		let MJY=(KRF* CSE)+ (((KRF* CSD)* (IUF- (CSE* CSE)))* QL);
+		let MJJ=(KRF* CSE)+ (((KRF* CSD)* (IUF- (CSE* CSE)))* QL);
 		CSG=CSF;
-		JLW=MJY;
+		JLW=MJJ;
 		}
 		let CSH=CRS- QL;
-		let MKB=L4([IYO[0],IYO[1],0.0,IYO[2]]);
-		let MKC=MKB- L4([0.0,0.0,KRF[0],KRF[1]]);
+		let MJM=L4([IYO[0],IYO[1],0.0,IYO[2]]);
+		let MJN=MJM- L4([0.0,0.0,KRF[0],KRF[1]]);
 		let CSI=CRV* AZ;
-		let MKD=KJT* CRV;
+		let MJO=KJT* CRV;
 		let CSJ=TS* AZ;
 		let CSK=parameters[116]/ CSJ;
-		let MKE=(((KJT* TS)* CSK)* KNJ)/ CSJ;
-		let MKF=JLW* CRU;
+		let MJP=product_div((KJT* TS),(-CSK),CSJ);
+		let MJQ=JLW* CRU;
 		let CSL=CSK+ (CRU* CSG);
-		let MKG=L3([MKE,0.0,0.0])+ L3([0.0,MKF[0],MKF[1]]);
-		let MKH=IVA* CSB;
+		let MJR=L3([MJP,0.0,0.0])+ L3([0.0,MJQ[0],MJQ[1]]);
+		let MJS=IVA* CSB;
 		let CSM=parameters[102]+ (CSB* BB);
 		let CSN=BE.powf(TI);
-		let MKI=KJV* (TI* ((BE+ (((BE== KOL) as u8 as f64)* KUP)).powf((TI- IUF))));
+		let MJT=KJV* (TI* ((BE+ (((BE== KOL) as u8 as f64)* KUP)).powf((TI- IUF))));
 		let CSO=TH!= A;
 		let CSU;
 		let JLX;
@@ -7852,70 +7837,70 @@ impl Instance {
 		let CSR=F/ CRY;
 		let CSS=CSQ.powf(CSR);
 		let CST=CSG/ CSS;
-		let MKK=(((JLW/ TH)* (CRY* ((CSP+ (((CSP== KOL) as u8 as f64)* KUP)).powf((CRY- IUF)))))* (CSR* ((CSQ+ (((CSQ== KOL) as u8 as f64)* KUP)).powf((CSR- IUF)))))* CST;
-		let MKL=(JLW- MKK)/ CSS;
+		let MJV=(JLW).product_sum_div(IUF,(((JLW/ TH)* (CRY* ((CSP+ (((CSP== KOL) as u8 as f64)* KUP)).powf((CRY- IUF)))))* (CSR* ((CSQ+ (((CSQ== KOL) as u8 as f64)* KUP)).powf((CSR- IUF))))),(-CST),CSS);
 		CSU=CST;
-		JLX=MKL;
+		JLX=MJV;
 		}else{
 		CSU=A;
-		JLX=MKJ;
+		JLX=MJU;
 		}
 		let CSV=parameters[115]- (CSU* A);
-		let MKM=(((JLX* A)* KNJ)* CSG)+ (JLW* CSV);
+		let MJW=(((JLX* A)* KNJ)* CSG)+ (JLW* CSV);
 		let CSW=CSM- (CSV* CSG);
-		let MKN=L3([MKH,0.0,0.0])- L3([0.0,MKM[0],MKM[1]]);
+		let MJX=L3([MJS,0.0,0.0])- L3([0.0,MJW[0],MJW[1]]);
 		let CSX=MC* CSL;
 		let CSY=CSX* AZ;
-		let MKO=((MKG* MC)* AZ)+ L3([(KJT* CSX),0.0,0.0]);
+		let MJY=((MJR* MC)* AZ)+ L3([(KJT* CSX),0.0,0.0]);
 		let CSZ=EB* CSY;
-		let MKP=L3([(KKV* CSY),0.0,0.0])+ (MKO* EB);
+		let MJZ=L3([(KKV* CSY),0.0,0.0])+ (MJY* EB);
 		let CTA=(UK* CSI)/ MC;
-		let MKQ=(MKD* UK)/ MC;
+		let MKA=(MJO* UK)/ MC;
 		let CTB=CSW- CTA;
-		let MKR=MKN- L3([MKQ,0.0,0.0]);
+		let MKB=MJX- L3([MKA,0.0,0.0]);
 		let CTJ;
 		let JLY;
 		if JM{
 		let CTC=CRS- CSH;
-		let MKU=(MKB- MKC)* CTC;
+		let MKE=(MJM- MJN)* CTC;
 		let CTD=((CTC* CTC)+ JV).sqrt();
 		let CTE=JW* ((CRS+ CSH)+ CTD);
-		let MKV=((MKB+ MKC)+ ((MKU+ MKU)* (IUF/ (KNB* CTD))))* JW;
+		let MKF=((MJM+ MJN)+ ((MKE+ MKE)* (IUF/ (KNB* CTD))))* JW;
 		CTJ=CTE;
-		JLY=MKV;
+		JLY=MKF;
 		}else{
 		let CTF=CRS- CSH;
-		let MKS=MKB- MKC;
+		let MKC=MJM- MJN;
 		let CTG=KB/ JV;
 		let CTH=(CTG* CTF).tanh();
 		let CTI=JW* ((CRS+ CSH)+ (CTF* CTH));
-		let MKT=((MKB+ MKC)+ ((MKS* CTH)+ (((MKS* CTG)* (IUF- (CTH* CTH)))* CTF)))* JW;
+		let MKD=((MJM+ MJN)+ ((MKC* CTH)+ (((MKC* CTG)* (IUF- (CTH* CTH)))* CTF)))* JW;
 		CTJ=CTI;
-		JLY=MKT;
+		JLY=MKD;
 		}
-		let MKW=L5([0.0,MKR[0],0.0,MKR[1],MKR[2]]);
+		let MKG=L5([0.0,MKB[0],0.0,MKB[1],MKB[2]]);
 		let CTK=(CTJ- CTB)/ CSI;
-		let MKX=((L5([JLY[0],0.0,JLY[1],JLY[2],JLY[3]])- MKW)- L5([0.0,(MKD* CTK),0.0,0.0,0.0]))/ CSI;
+		let MKH=L5([0.0,MJO,0.0,0.0,0.0]);
+		let MKI=((L5([JLY[0],0.0,JLY[1],JLY[2],JLY[3]])- MKG)).product_sum_div(IUF,MKH,(-CTK),CSI);
 		let CTL=CTK> LD;
 		let CUA;
 		let JLZ;
 		if CTL{
 		CUA=A;
-		JLZ=MJV;
+		JLZ=MJG;
 		}else{
 		let CTM=CTK< -50f64;
 		let CUB;
 		let JMA;
 		if CTM{
 		CUB=F;
-		JMA=MJV;
+		JMA=MJG;
 		}else{
 		let CTN=CTK.exp();
 		let CTO=F+ CTN;
 		let CTP=F/ CTO;
-		let MKY=(((MKX* CTN)* CTP)* KNJ)/ CTO;
+		let MKJ=((MKI* CTN)).product_div((-CTP),CTO);
 		CUB=CTP;
-		JMA=MKY;
+		JMA=MKJ;
 		}
 		CUA=CUB;
 		JLZ=JMA;
@@ -7924,38 +7909,38 @@ impl Instance {
 		let JMB;
 		if JM{
 		let CTQ=CRS- CSH;
-		let MLB=(MKB- MKC)* CTQ;
+		let MKM=(MJM- MJN)* CTQ;
 		let CTR=((CTQ* CTQ)+ JV).sqrt();
 		let CTS=JW* ((CRS+ CSH)+ CTR);
-		let MLC=((MKB+ MKC)+ ((MLB+ MLB)* (IUF/ (KNB* CTR))))* JW;
+		let MKN=((MJM+ MJN)+ ((MKM+ MKM)* (IUF/ (KNB* CTR))))* JW;
 		CTX=CTS;
-		JMB=MLC;
+		JMB=MKN;
 		}else{
 		let CTT=CRS- CSH;
-		let MKZ=MKB- MKC;
+		let MKK=MJM- MJN;
 		let CTU=KB/ JV;
 		let CTV=(CTU* CTT).tanh();
 		let CTW=JW* ((CRS+ CSH)+ (CTT* CTV));
-		let MLA=((MKB+ MKC)+ ((MKZ* CTV)+ (((MKZ* CTU)* (IUF- (CTV* CTV)))* CTT)))* JW;
+		let MKL=((MJM+ MJN)+ ((MKK* CTV)+ (((MKK* CTU)* (IUF- (CTV* CTV)))* CTT)))* JW;
 		CTX=CTW;
-		JMB=MLA;
+		JMB=MKL;
 		}
 		let CTY=UK* AI;
 		let CTZ=CTY* CSI;
-		let MLD=MKD* CTY;
-		let MLE=L5([0.0,MKN[0],0.0,MKN[1],MKN[2]]);
+		let MKO=MJO* CTY;
+		let MKP=L5([0.0,MJX[0],0.0,MJX[1],MJX[2]]);
 		let CUC=(CTX- (CSW- (CTZ* CUA)))/ CSY;
-		let MLF=MKO* CUC;
-		let MLG=((L5([JMB[0],0.0,JMB[1],JMB[2],JMB[3]])- (MLE- (L5([0.0,(MLD* CUA),0.0,0.0,0.0])+ (JLZ* CTZ))))- L5([0.0,MLF[0],0.0,MLF[1],MLF[2]]))/ CSY;
+		let MKQ=L5([0.0,MJY[0],0.0,MJY[1],MJY[2]]);
+		let MKR=((L5([JMB[0],0.0,JMB[1],JMB[2],JMB[3]])- (MKP- (L5([0.0,(MKO* CUA),0.0,0.0,0.0])+ (JLZ* CTZ))))).product_sum_div(IUF,MKQ,(-CUC),CSY);
 		let CUD=CUC> LD;
 		let CUM;
 		let JMC;
 		if CUD{
 		let CUE=CSZ* CUC;
-		let MLL=MKP* CUC;
-		let MLM=L5([0.0,MLL[0],0.0,MLL[1],MLL[2]])+ (MLG* CSZ);
+		let MKW=MJZ* CUC;
+		let MKX=L5([0.0,MKW[0],0.0,MKW[1],MKW[2]])+ (MKR* CSZ);
 		CUM=CUE;
-		JMC=MLM;
+		JMC=MKX;
 		}else{
 		let CUF=CUC< -50f64;
 		let CUN;
@@ -7963,164 +7948,162 @@ impl Instance {
 		if CUF{
 		let CUG=CUC.exp();
 		let CUH=CSZ* CUG;
-		let MLJ=MKP* CUG;
-		let MLK=L5([0.0,MLJ[0],0.0,MLJ[1],MLJ[2]])+ ((MLG* CUG)* CSZ);
+		let MKU=MJZ* CUG;
+		let MKV=L5([0.0,MKU[0],0.0,MKU[1],MKU[2]])+ ((MKR* CUG)* CSZ);
 		CUN=CUH;
-		JMD=MLK;
+		JMD=MKV;
 		}else{
 		let CUI=CUC.exp();
 		let CUJ=F+ CUI;
 		let CUK=CUJ.ln();
 		let CUL=CSZ* CUK;
-		let MLH=MKP* CUK;
-		let MLI=L5([0.0,MLH[0],0.0,MLH[1],MLH[2]])+ (((MLG* CUI)* (IUF/ CUJ))* CSZ);
+		let MKS=MJZ* CUK;
+		let MKT=L5([0.0,MKS[0],0.0,MKS[1],MKS[2]])+ (((MKR* CUI)* (IUF/ CUJ))* CSZ);
 		CUN=CUL;
-		JMD=MLI;
+		JMD=MKT;
 		}
 		CUM=CUN;
 		JMC=JMD;
 		}
 		let CUO=(CRZ* CUM)/ EB;
+		let MKY=L5([0.0,KKV,0.0,0.0,0.0]);
 		let CUP=F+ CUO;
 		let CUQ=CSN* CUP;
 		let CUR=CRX/ CUQ;
-		let MLN=(((L5([0.0,(MKI* CUP),0.0,0.0,0.0])+ ((((JMC* CRZ)- L5([0.0,(KKV* CUO),0.0,0.0,0.0]))/ EB)* CSN))* CUR)* KNJ)/ CUQ;
+		let MKZ=((L5([0.0,(MJT* CUP),0.0,0.0,0.0])+ ((((JMC* CRZ)).product_sum_div(IUF,MKY,(-CUO),EB))* CSN))).product_div((-CUR),CUQ);
 		let CUS=F+ (TJ* AC);
 		let CUT=(F+ (TJ* E))/ CUS;
 		let CUU=CRW* CUT;
-		let MLO=((((IVA* TJ)* CUT)* KNJ)/ CUS)* CRW;
+		let MLA=(product_div((IVA* TJ),(-CUT),CUS))* CRW;
 		let CUV=F+ ((TK* CSG)/ CRQ);
-		let MLP=((JLW* TK)/ CRQ)* CUU;
-		let MLQ=L3([(MLO* CUV),0.0,0.0])+ L3([0.0,MLP[0],MLP[1]]);
+		let MLB=((JLW* TK)/ CRQ)* CUU;
+		let MLC=L3([(MLA* CUV),0.0,0.0])+ L3([0.0,MLB[0],MLB[1]]);
 		let CUW=(CSA* CUM)/ EB;
 		let CUX=F+ CUW;
 		let CUY=(CUU* CUV)/ CUX;
-		let MLR=(L5([0.0,MLQ[0],0.0,MLQ[1],MLQ[2]])- ((((JMC* CSA)- L5([0.0,(KKV* CUW),0.0,0.0,0.0]))/ EB)* CUY))/ CUX;
+		let MLD=(L5([0.0,MLC[0],0.0,MLC[1],MLC[2]])).product_sum_div(IUF,(((JMC* CSA)).product_sum_div(IUF,MKY,(-CUW),EB)),(-CUY),CUX);
 		let CUZ=MC* CUA;
 		let CVA=CUZ* AZ;
 		let CVB=F- CUA;
-		let MLS=JLZ* KNJ;
+		let MLE=JLZ* KNJ;
 		let CVC=((CVA* CUR)/ CRQ)+ (CVB* CUY);
-		let MLT=((((((JLZ* MC)* AZ)+ L5([0.0,(KJT* CUZ),0.0,0.0,0.0]))* CUR)+ (MLN* CVA))/ CRQ)+ ((MLS* CUY)+ (MLR* CVB));
+		let MLF=((((((JLZ* MC)* AZ)+ L5([0.0,(KJT* CUZ),0.0,0.0,0.0]))* CUR)+ (MKZ* CVA))/ CRQ)+ ((MLE* CUY)+ (MLD* CVB));
 		let CVD=(CUY* CRQ)/ CUR;
-		let MLU=((MLR* CRQ)- (MLN* CVD))/ CUR;
+		let MLG=((MLD* CRQ)).product_sum_div(IUF,MKZ,(-CVD),CUR);
 		let CVE=(MC* CUM)/ EB;
 		let CVF=CVE/ CVD;
 		let CVG=(F+ CVF).sqrt();
 		let CVH=(CVD* CVG)- CVD;
 		let CVI=CSY* CUA;
-		let MLV=MKO* CUA;
-		let MLW=L5([0.0,MLV[0],0.0,MLV[1],MLV[2]])+ (JLZ* CSY);
+		let MLH=MJY* CUA;
+		let MLI=L5([0.0,MLH[0],0.0,MLH[1],MLH[2]])+ (JLZ* CSY);
 		let CVJ=(CVD* CVB)+ CVI;
-		let MLX=((MLU* CVB)+ (MLS* CVD))+ MLW;
-		let MLY=((((MLU* CVG)+ (((((((JMC* MC)- L5([0.0,(KKV* CVE),0.0,0.0,0.0]))/ EB)- (MLU* CVF))/ CVD)* (IUF/ (KNB* CVG)))* CVD))- MLU)* CVB)+ (MLS* CVH);
+		let MLJ=((MLG* CVB)+ (MLE* CVD))+ MLI;
+		let MLK=((((MLG* CVG)+ (((((((JMC* MC)).product_sum_div(IUF,MKY,(-CVE),EB))).product_sum_div(IUF,MLG,(-CVF),CVD))* (IUF/ (KNB* CVG)))* CVD))- MLG)* CVB)+ (MLE* CVH);
 		let CVK=(CVH* CVB)+ CVI;
-		let MLZ=MLY+ MLW;
+		let MLL=MLK+ MLI;
 		let CVL=QL/ CVK;
-		let MMA=L5([0.0,0.0,0.0,KRF[0],KRF[1]]);
-		let MMB=(MMA- (MLZ* CVL))/ CVK;
+		let MLM=L5([0.0,0.0,0.0,KRF[0],KRF[1]]);
+		let MLN=(MLM).product_sum_div(IUF,MLL,(-CVL),CVK);
 		let CVT;
 		let JME;
 		if JM{
 		let CVM=A- CVL;
-		let MME=(MMB* KNJ)* CVM;
+		let MLQ=(MLN* KNJ)* CVM;
 		let CVN=((CVM* CVM)+ JV).sqrt();
 		let CVO=JW* ((A+ CVL)+ CVN);
-		let MMF=(MMB+ ((MME+ MME)* (IUF/ (KNB* CVN))))* JW;
+		let MLR=(MLN+ ((MLQ+ MLQ)* (IUF/ (KNB* CVN))))* JW;
 		CVT=CVO;
-		JME=MMF;
+		JME=MLR;
 		}else{
 		let CVP=A- CVL;
-		let MMC=MMB* KNJ;
+		let MLO=MLN* KNJ;
 		let CVQ=KB/ JV;
 		let CVR=(CVQ* CVP).tanh();
 		let CVS=JW* ((A+ CVL)+ (CVP* CVR));
-		let MMD=(MMB+ ((MMC* CVR)+ (((MMC* CVQ)* (IUF- (CVR* CVR)))* CVP)))* JW;
+		let MLP=(MLN+ ((MLO* CVR)+ (((MLO* CVQ)* (IUF- (CVR* CVR)))* CVP)))* JW;
 		CVT=CVS;
-		JME=MMD;
+		JME=MLP;
 		}
-		let MMG=CRY- IUF;
+		let MLS=CRY- IUF;
 		let CVU=F+ (CVT.powf(CRY));
 		let CVV=F/ CRY;
 		let CVW=CVU.powf(CVV);
-		let MMH=CVV- IUF;
+		let MLT=CVV- IUF;
 		let CVX=F/ CVW;
 		let CVY=QL* CVX;
-		let MMI=KRF* CVX;
-		let MMJ=(((((JME* (CRY* ((CVT+ (((CVT== KOL) as u8 as f64)* KUP)).powf(MMG))))* (CVV* ((CVU+ (((CVU== KOL) as u8 as f64)* KUP)).powf(MMH))))* CVX)* KNJ)/ CVW)* QL;
-		let MMK=L5([0.0,0.0,0.0,MMI[0],MMI[1]])+ MMJ;
+		let MLU=KRF* CVX;
+		let MLV=L5([0.0,0.0,0.0,MLU[0],MLU[1]])+ (((((JME* (CRY* ((CVT+ (((CVT== KOL) as u8 as f64)* KUP)).powf(MLS))))* (CVV* ((CVU+ (((CVU== KOL) as u8 as f64)* KUP)).powf(MLT))))).product_div((-CVX),CVW))* QL);
 		let CVZ=-QL;
-		let MML=KRF* KNJ;
+		let MLW=KRF* KNJ;
 		let CWA=CVZ/ CVK;
-		let MMM=L5([0.0,0.0,0.0,MML[0],MML[1]]);
-		let MMN=(MMM- (MLZ* CWA))/ CVK;
+		let MLX=L5([0.0,0.0,0.0,MLW[0],MLW[1]]);
+		let MLY=(MLX).product_sum_div(IUF,MLL,(-CWA),CVK);
 		let CWI;
 		let JMF;
 		if JM{
 		let CWB=A- CWA;
-		let MMQ=(MMN* KNJ)* CWB;
+		let MMB=(MLY* KNJ)* CWB;
 		let CWC=((CWB* CWB)+ JV).sqrt();
 		let CWD=JW* ((A+ CWA)+ CWC);
-		let MMR=(MMN+ ((MMQ+ MMQ)* (IUF/ (KNB* CWC))))* JW;
+		let MMC=(MLY+ ((MMB+ MMB)* (IUF/ (KNB* CWC))))* JW;
 		CWI=CWD;
-		JMF=MMR;
+		JMF=MMC;
 		}else{
 		let CWE=A- CWA;
-		let MMO=MMN* KNJ;
+		let MLZ=MLY* KNJ;
 		let CWF=KB/ JV;
 		let CWG=(CWF* CWE).tanh();
 		let CWH=JW* ((A+ CWA)+ (CWE* CWG));
-		let MMP=(MMN+ ((MMO* CWG)+ (((MMO* CWF)* (IUF- (CWG* CWG)))* CWE)))* JW;
+		let MMA=(MLY+ ((MLZ* CWG)+ (((MLZ* CWF)* (IUF- (CWG* CWG)))* CWE)))* JW;
 		CWI=CWH;
-		JMF=MMP;
+		JMF=MMA;
 		}
 		let CWJ=F+ (CWI.powf(CRY));
 		let CWK=CWJ.powf(CVV);
 		let CWL=F/ CWK;
 		let CWM=CVZ* CWL;
-		let MMS=MML* CWL;
-		let MMT=(((((JMF* (CRY* ((CWI+ (((CWI== KOL) as u8 as f64)* KUP)).powf(MMG))))* (CVV* ((CWJ+ (((CWJ== KOL) as u8 as f64)* KUP)).powf(MMH))))* CWL)* KNJ)/ CWK)* CVZ;
-		let MMU=L5([0.0,0.0,0.0,MMS[0],MMS[1]])+ MMT;
-		let MMV=L5([IYO[0],0.0,IYO[1],0.0,IYO[2]]);
+		let MMD=MLW* CWL;
+		let MME=L5([0.0,0.0,0.0,MMD[0],MMD[1]])+ (((((JMF* (CRY* ((CWI+ (((CWI== KOL) as u8 as f64)* KUP)).powf(MLS))))* (CVV* ((CWJ+ (((CWJ== KOL) as u8 as f64)* KUP)).powf(MLT))))).product_div((-CWL),CWK))* CVZ);
+		let MMF=L5([IYO[0],0.0,IYO[1],0.0,IYO[2]]);
 		let CWN=(CRS- CTB)/ CSI;
-		let MMW=((MMV- MKW)- L5([0.0,(MKD* CWN),0.0,0.0,0.0]))/ CSI;
+		let MMG=((MMF- MKG)).product_sum_div(IUF,MKH,(-CWN),CSI);
 		let CWO=CWN> LD;
 		let CWT;
 		let JMG;
 		if CWO{
 		CWT=A;
-		JMG=MJV;
+		JMG=MJG;
 		}else{
 		let CWP=CWN< -50f64;
 		let CWU;
 		let JMH;
 		if CWP{
 		CWU=F;
-		JMH=MJV;
+		JMH=MJG;
 		}else{
 		let CWQ=CWN.exp();
 		let CWR=F+ CWQ;
 		let CWS=F/ CWR;
-		let MMX=(((MMW* CWQ)* CWS)* KNJ)/ CWR;
+		let MMH=((MMG* CWQ)).product_div((-CWS),CWR);
 		CWU=CWS;
-		JMH=MMX;
+		JMH=MMH;
 		}
 		CWT=CWU;
 		JMG=JMH;
 		}
-		let MMY=L5([MKC[0],0.0,MKC[1],MKC[2],MKC[3]]);
+		let MMI=L5([MJN[0],0.0,MJN[1],MJN[2],MJN[3]]);
 		let CWV=((CSH- CWM)- (CSW- (CTZ* CWT)))/ CSY;
-		let MMZ=MKO* CWV;
-		let MNA=(((MMY- MMU)- (MLE- (L5([0.0,(MLD* CWT),0.0,0.0,0.0])+ (JMG* CTZ))))- L5([0.0,MMZ[0],0.0,MMZ[1],MMZ[2]]))/ CSY;
+		let MMJ=(((MMI- MME)- (MKP- (L5([0.0,(MKO* CWT),0.0,0.0,0.0])+ (JMG* CTZ))))).product_sum_div(IUF,MKQ,(-CWV),CSY);
 		let CWW=CWV> LD;
 		let CXX;
 		let JMI;
 		if CWW{
 		let CWX=CSZ* CWV;
-		let MNF=MKP* CWV;
-		let MNG=L5([0.0,MNF[0],0.0,MNF[1],MNF[2]])+ (MNA* CSZ);
+		let MMO=MJZ* CWV;
+		let MMP=L5([0.0,MMO[0],0.0,MMO[1],MMO[2]])+ (MMJ* CSZ);
 		CXX=CWX;
-		JMI=MNG;
+		JMI=MMP;
 		}else{
 		let CWY=CWV< -50f64;
 		let CXY;
@@ -8128,61 +8111,60 @@ impl Instance {
 		if CWY{
 		let CWZ=CWV.exp();
 		let CXA=CSZ* CWZ;
-		let MND=MKP* CWZ;
-		let MNE=L5([0.0,MND[0],0.0,MND[1],MND[2]])+ ((MNA* CWZ)* CSZ);
+		let MMM=MJZ* CWZ;
+		let MMN=L5([0.0,MMM[0],0.0,MMM[1],MMM[2]])+ ((MMJ* CWZ)* CSZ);
 		CXY=CXA;
-		JMJ=MNE;
+		JMJ=MMN;
 		}else{
 		let CXB=CWV.exp();
 		let CXC=F+ CXB;
 		let CXD=CXC.ln();
 		let CXE=CSZ* CXD;
-		let MNB=MKP* CXD;
-		let MNC=L5([0.0,MNB[0],0.0,MNB[1],MNB[2]])+ (((MNA* CXB)* (IUF/ CXC))* CSZ);
+		let MMK=MJZ* CXD;
+		let MML=L5([0.0,MMK[0],0.0,MMK[1],MMK[2]])+ (((MMJ* CXB)* (IUF/ CXC))* CSZ);
 		CXY=CXE;
-		JMJ=MNC;
+		JMJ=MML;
 		}
 		CXX=CXY;
 		JMI=JMJ;
 		}
 		let CXF=(CSH- CTB)/ CSI;
-		let MNH=((MMY- MKW)- L5([0.0,(MKD* CXF),0.0,0.0,0.0]))/ CSI;
+		let MMQ=((MMI- MKG)).product_sum_div(IUF,MKH,(-CXF),CSI);
 		let CXG=CXF> LD;
 		let CXL;
 		let JMK;
 		if CXG{
 		CXL=A;
-		JMK=MJV;
+		JMK=MJG;
 		}else{
 		let CXH=CXF< -50f64;
 		let CXM;
 		let JML;
 		if CXH{
 		CXM=F;
-		JML=MJV;
+		JML=MJG;
 		}else{
 		let CXI=CXF.exp();
 		let CXJ=F+ CXI;
 		let CXK=F/ CXJ;
-		let MNI=(((MNH* CXI)* CXK)* KNJ)/ CXJ;
+		let MMR=((MMQ* CXI)).product_div((-CXK),CXJ);
 		CXM=CXK;
-		JML=MNI;
+		JML=MMR;
 		}
 		CXL=CXM;
 		JMK=JML;
 		}
 		let CXN=((CRS- CVY)- (CSW- (CTZ* CXL)))/ CSY;
-		let MNJ=MKO* CXN;
-		let MNK=(((MMV- MMK)- (MLE- (L5([0.0,(MLD* CXL),0.0,0.0,0.0])+ (JMK* CTZ))))- L5([0.0,MNJ[0],0.0,MNJ[1],MNJ[2]]))/ CSY;
+		let MMS=(((MMF- MLV)- (MKP- (L5([0.0,(MKO* CXL),0.0,0.0,0.0])+ (JMK* CTZ))))).product_sum_div(IUF,MKQ,(-CXN),CSY);
 		let CXO=CXN> LD;
 		let CXZ;
 		let JMM;
 		if CXO{
 		let CXP=CSZ* CXN;
-		let MNP=MKP* CXN;
-		let MNQ=L5([0.0,MNP[0],0.0,MNP[1],MNP[2]])+ (MNK* CSZ);
+		let MMX=MJZ* CXN;
+		let MMY=L5([0.0,MMX[0],0.0,MMX[1],MMX[2]])+ (MMS* CSZ);
 		CXZ=CXP;
-		JMM=MNQ;
+		JMM=MMY;
 		}else{
 		let CXQ=CXN< -50f64;
 		let CYA;
@@ -8190,101 +8172,101 @@ impl Instance {
 		if CXQ{
 		let CXR=CXN.exp();
 		let CXS=CSZ* CXR;
-		let MNN=MKP* CXR;
-		let MNO=L5([0.0,MNN[0],0.0,MNN[1],MNN[2]])+ ((MNK* CXR)* CSZ);
+		let MMV=MJZ* CXR;
+		let MMW=L5([0.0,MMV[0],0.0,MMV[1],MMV[2]])+ ((MMS* CXR)* CSZ);
 		CYA=CXS;
-		JMN=MNO;
+		JMN=MMW;
 		}else{
 		let CXT=CXN.exp();
 		let CXU=F+ CXT;
 		let CXV=CXU.ln();
 		let CXW=CSZ* CXV;
-		let MNL=MKP* CXV;
-		let MNM=L5([0.0,MNL[0],0.0,MNL[1],MNL[2]])+ (((MNK* CXT)* (IUF/ CXU))* CSZ);
+		let MMT=MJZ* CXV;
+		let MMU=L5([0.0,MMT[0],0.0,MMT[1],MMT[2]])+ (((MMS* CXT)* (IUF/ CXU))* CSZ);
 		CYA=CXW;
-		JMN=MNM;
+		JMN=MMU;
 		}
 		CXZ=CYA;
 		JMM=JMN;
 		}
 		let CYB=(CXX- CXZ)/ EB;
 		let CYC=CYB/ CVJ;
-		let MNR=((((JMI- JMM)- L5([0.0,(KKV* CYB),0.0,0.0,0.0]))/ EB)- (MLX* CYC))/ CVJ;
+		let MMZ=((((JMI- JMM)).product_sum_div(IUF,MKY,(-CYB),EB))).product_sum_div(IUF,MLJ,(-CYC),CVJ);
 		let CYH;
 		let JMO;
 		if JM{
-		let MNT=MNR* CYC;
+		let MNB=MMZ* CYC;
 		let CYD=((CYC* CYC)+ JV).sqrt();
-		let MNU=(MNT+ MNT)* (IUF/ (KNB* CYD));
+		let MNC=(MNB+ MNB)* (IUF/ (KNB* CYD));
 		CYH=CYD;
-		JMO=MNU;
+		JMO=MNC;
 		}else{
 		let CYE=KB/ JV;
 		let CYF=(CYE* CYC).tanh();
 		let CYG=CYC* CYF;
-		let MNS=(MNR* CYF)+ (((MNR* CYE)* (IUF- (CYF* CYF)))* CYC);
+		let MNA=(MMZ* CYF)+ (((MMZ* CYE)* (IUF- (CYF* CYF)))* CYC);
 		CYH=CYG;
-		JMO=MNS;
+		JMO=MNA;
 		}
 		let CYI=F+ (CYH.powf(CRY));
 		let CYJ=CYI.powf(CVV);
 		let CYK=CYC/ CYJ;
 		let CYL=CVC* CYK;
-		let MNV=((MNR- (((JMO* (CRY* ((CYH+ (((CYH== KOL) as u8 as f64)* KUP)).powf(MMG))))* (CVV* ((CYI+ (((CYI== KOL) as u8 as f64)* KUP)).powf(MMH))))* CYK))/ CYJ)* CVC;
+		let MND=((MMZ).product_sum_div(IUF,((JMO* (CRY* ((CYH+ (((CYH== KOL) as u8 as f64)* KUP)).powf(MLS))))* (CVV* ((CYI+ (((CYI== KOL) as u8 as f64)* KUP)).powf(MLT)))),(-CYK),CYJ))* CVC;
 		let CYM=((JE* O)* P)* JW;
 		let CYN=CYM* (CXX+ CXZ);
 		let CYO=CYN* CYL;
-		let MNW=(((JMI+ JMM)* CYM)* CYL)+ (((MLT* CYK)+ MNV)* CYN);
+		let MNE=(((JMI+ JMM)* CYM)* CYL)+ (((MLF* CYK)+ MND)* CYN);
 		let CYP=MC* CSK;
 		let CYQ=CYP* AZ;
-		let MNX=((MKE* MC)* AZ)+ (KJT* CYP);
+		let MNF=((MJP* MC)* AZ)+ (KJT* CYP);
 		let CYR=EB* CYQ;
-		let MNY=(KKV* CYQ)+ (MNX* EB);
+		let MNG=(KKV* CYQ)+ (MNF* EB);
 		let CYS=CSM- CTA;
-		let MNZ=MKH- MKQ;
+		let MNH=MJS- MKA;
 		let CZA;
 		let JMP;
 		if JM{
 		let CYT=CRS- CSH;
-		let MOC=(MKB- MKC)* CYT;
+		let MNK=(MJM- MJN)* CYT;
 		let CYU=((CYT* CYT)+ JV).sqrt();
 		let CYV=JW* ((CRS+ CSH)+ CYU);
-		let MOD=((MKB+ MKC)+ ((MOC+ MOC)* (IUF/ (KNB* CYU))))* JW;
+		let MNL=((MJM+ MJN)+ ((MNK+ MNK)* (IUF/ (KNB* CYU))))* JW;
 		CZA=CYV;
-		JMP=MOD;
+		JMP=MNL;
 		}else{
 		let CYW=CRS- CSH;
-		let MOA=MKB- MKC;
+		let MNI=MJM- MJN;
 		let CYX=KB/ JV;
 		let CYY=(CYX* CYW).tanh();
 		let CYZ=JW* ((CRS+ CSH)+ (CYW* CYY));
-		let MOB=((MKB+ MKC)+ ((MOA* CYY)+ (((MOA* CYX)* (IUF- (CYY* CYY)))* CYW)))* JW;
+		let MNJ=((MJM+ MJN)+ ((MNI* CYY)+ (((MNI* CYX)* (IUF- (CYY* CYY)))* CYW)))* JW;
 		CZA=CYZ;
-		JMP=MOB;
+		JMP=MNJ;
 		}
-		let MOE=L5([0.0,MNZ,0.0,0.0,0.0]);
+		let MNM=L5([0.0,MNH,0.0,0.0,0.0]);
 		let CZB=(CZA- CYS)/ CSI;
-		let MOF=((L5([JMP[0],0.0,JMP[1],JMP[2],JMP[3]])- MOE)- L5([0.0,(MKD* CZB),0.0,0.0,0.0]))/ CSI;
+		let MNN=((L5([JMP[0],0.0,JMP[1],JMP[2],JMP[3]])- MNM)).product_sum_div(IUF,MKH,(-CZB),CSI);
 		let CZC=CZB> LD;
 		let CZP;
 		let JMQ;
 		if CZC{
 		CZP=A;
-		JMQ=MJV;
+		JMQ=MJG;
 		}else{
 		let CZD=CZB< -50f64;
 		let CZQ;
 		let JMR;
 		if CZD{
 		CZQ=F;
-		JMR=MJV;
+		JMR=MJG;
 		}else{
 		let CZE=CZB.exp();
 		let CZF=F+ CZE;
 		let CZG=F/ CZF;
-		let MOG=(((MOF* CZE)* CZG)* KNJ)/ CZF;
+		let MNO=((MNN* CZE)).product_div((-CZG),CZF);
 		CZQ=CZG;
-		JMR=MOG;
+		JMR=MNO;
 		}
 		CZP=CZQ;
 		JMQ=JMR;
@@ -8293,33 +8275,34 @@ impl Instance {
 		let JMS;
 		if JM{
 		let CZH=CRS- CSH;
-		let MOJ=(MKB- MKC)* CZH;
+		let MNR=(MJM- MJN)* CZH;
 		let CZI=((CZH* CZH)+ JV).sqrt();
 		let CZJ=JW* ((CRS+ CSH)+ CZI);
-		let MOK=((MKB+ MKC)+ ((MOJ+ MOJ)* (IUF/ (KNB* CZI))))* JW;
+		let MNS=((MJM+ MJN)+ ((MNR+ MNR)* (IUF/ (KNB* CZI))))* JW;
 		CZO=CZJ;
-		JMS=MOK;
+		JMS=MNS;
 		}else{
 		let CZK=CRS- CSH;
-		let MOH=MKB- MKC;
+		let MNP=MJM- MJN;
 		let CZL=KB/ JV;
 		let CZM=(CZL* CZK).tanh();
 		let CZN=JW* ((CRS+ CSH)+ (CZK* CZM));
-		let MOI=((MKB+ MKC)+ ((MOH* CZM)+ (((MOH* CZL)* (IUF- (CZM* CZM)))* CZK)))* JW;
+		let MNQ=((MJM+ MJN)+ ((MNP* CZM)+ (((MNP* CZL)* (IUF- (CZM* CZM)))* CZK)))* JW;
 		CZO=CZN;
-		JMS=MOI;
+		JMS=MNQ;
 		}
-		let MOL=L5([0.0,MKH,0.0,0.0,0.0]);
+		let MNT=L5([0.0,MJS,0.0,0.0,0.0]);
 		let CZR=(CZO- (CSM- (CTZ* CZP)))/ CYQ;
-		let MOM=((L5([JMS[0],0.0,JMS[1],JMS[2],JMS[3]])- (MOL- (L5([0.0,(MLD* CZP),0.0,0.0,0.0])+ (JMQ* CTZ))))- L5([0.0,(MNX* CZR),0.0,0.0,0.0]))/ CYQ;
+		let MNU=L5([0.0,MNF,0.0,0.0,0.0]);
+		let MNV=((L5([JMS[0],0.0,JMS[1],JMS[2],JMS[3]])- (MNT- (L5([0.0,(MKO* CZP),0.0,0.0,0.0])+ (JMQ* CTZ))))).product_sum_div(IUF,MNU,(-CZR),CYQ);
 		let CZS=CZR> LD;
 		let DAD;
 		let JMT;
 		if CZS{
 		let CZT=CYR* CZR;
-		let MOP=L5([0.0,(MNY* CZR),0.0,0.0,0.0])+ (MOM* CYR);
+		let MNY=L5([0.0,(MNG* CZR),0.0,0.0,0.0])+ (MNV* CYR);
 		DAD=CZT;
-		JMT=MOP;
+		JMT=MNY;
 		}else{
 		let CZU=CZR< -50f64;
 		let DAE;
@@ -8327,128 +8310,127 @@ impl Instance {
 		if CZU{
 		let CZV=CZR.exp();
 		let CZW=CYR* CZV;
-		let MOO=L5([0.0,(MNY* CZV),0.0,0.0,0.0])+ ((MOM* CZV)* CYR);
+		let MNX=L5([0.0,(MNG* CZV),0.0,0.0,0.0])+ ((MNV* CZV)* CYR);
 		DAE=CZW;
-		JMU=MOO;
+		JMU=MNX;
 		}else{
 		let CZX=CZR.exp();
 		let CZY=F+ CZX;
 		let CZZ=CZY.ln();
 		let DAA=CYR* CZZ;
-		let MON=L5([0.0,(MNY* CZZ),0.0,0.0,0.0])+ (((MOM* CZX)* (IUF/ CZY))* CYR);
+		let MNW=L5([0.0,(MNG* CZZ),0.0,0.0,0.0])+ (((MNV* CZX)* (IUF/ CZY))* CYR);
 		DAE=DAA;
-		JMU=MON;
+		JMU=MNW;
 		}
 		DAD=DAE;
 		JMT=JMU;
 		}
 		let DAB=CRX/ CSN;
 		let DAC=(CUU* CRQ)/ DAB;
-		let MOQ=((MLO* CRQ)- ((((MKI* DAB)* KNJ)/ CSN)* DAC))/ DAB;
+		let MNZ=product_sum_div((MLA* CRQ),IUF,(product_div(MJT,(-DAB),CSN)),(-DAC),DAB);
 		let DAF=(MC* DAD)/ EB;
 		let DAG=DAF/ DAC;
+		let MOA=L5([0.0,MNZ,0.0,0.0,0.0]);
 		let DAH=(F+ DAG).sqrt();
 		let DAI=(DAC* DAH)- DAC;
-		let MOR=(L5([0.0,(MOQ* DAH),0.0,0.0,0.0])+ (((((((JMT* MC)- L5([0.0,(KKV* DAF),0.0,0.0,0.0]))/ EB)- L5([0.0,(MOQ* DAG),0.0,0.0,0.0]))/ DAC)* (IUF/ (KNB* DAH)))* DAC))- L5([0.0,MOQ,0.0,0.0,0.0]);
 		let DAJ=F- CZP;
+		let MOB=(((L5([0.0,(MNZ* DAH),0.0,0.0,0.0])+ (((((((JMT* MC)).product_sum_div(IUF,MKY,(-DAF),EB))).product_sum_div(IUF,MOA,(-DAG),DAC))* (IUF/ (KNB* DAH)))* DAC))- MOA)* DAJ)+ ((JMQ* KNJ)* DAI);
 		let DAK=(DAI* DAJ)+ (CYQ* CZP);
-		let MOS=((MOR* DAJ)+ ((JMQ* KNJ)* DAI))+ (L5([0.0,(MNX* CZP),0.0,0.0,0.0])+ (JMQ* CYQ));
+		let MOC=MOB+ (L5([0.0,(MNF* CZP),0.0,0.0,0.0])+ (JMQ* CYQ));
 		let DAL=QL/ DAK;
-		let MOT=(MMA- (MOS* DAL))/ DAK;
+		let MOD=(MLM).product_sum_div(IUF,MOC,(-DAL),DAK);
 		let DAT;
 		let JMV;
 		if JM{
 		let DAM=A- DAL;
-		let MOW=(MOT* KNJ)* DAM;
+		let MOG=(MOD* KNJ)* DAM;
 		let DAN=((DAM* DAM)+ JV).sqrt();
 		let DAO=JW* ((A+ DAL)+ DAN);
-		let MOX=(MOT+ ((MOW+ MOW)* (IUF/ (KNB* DAN))))* JW;
+		let MOH=(MOD+ ((MOG+ MOG)* (IUF/ (KNB* DAN))))* JW;
 		DAT=DAO;
-		JMV=MOX;
+		JMV=MOH;
 		}else{
 		let DAP=A- DAL;
-		let MOU=MOT* KNJ;
+		let MOE=MOD* KNJ;
 		let DAQ=KB/ JV;
 		let DAR=(DAQ* DAP).tanh();
 		let DAS=JW* ((A+ DAL)+ (DAP* DAR));
-		let MOV=(MOT+ ((MOU* DAR)+ (((MOU* DAQ)* (IUF- (DAR* DAR)))* DAP)))* JW;
+		let MOF=(MOD+ ((MOE* DAR)+ (((MOE* DAQ)* (IUF- (DAR* DAR)))* DAP)))* JW;
 		DAT=DAS;
-		JMV=MOV;
+		JMV=MOF;
 		}
 		let DAU=F+ (DAT.powf(CRY));
 		let DAV=DAU.powf(CVV);
 		let DAW=F/ DAV;
 		let DAX=QL* DAW;
-		let MOY=KRF* DAW;
-		let MOZ=(((((JMV* (CRY* ((DAT+ (((DAT== KOL) as u8 as f64)* KUP)).powf(MMG))))* (CVV* ((DAU+ (((DAU== KOL) as u8 as f64)* KUP)).powf(MMH))))* DAW)* KNJ)/ DAV)* QL;
-		let MPA=L5([0.0,0.0,0.0,MOY[0],MOY[1]])+ MOZ;
+		let MOI=KRF* DAW;
+		let MOJ=L5([0.0,0.0,0.0,MOI[0],MOI[1]])+ (((((JMV* (CRY* ((DAT+ (((DAT== KOL) as u8 as f64)* KUP)).powf(MLS))))* (CVV* ((DAU+ (((DAU== KOL) as u8 as f64)* KUP)).powf(MLT))))).product_div((-DAW),DAV))* QL);
 		let DAY=CVZ/ DAK;
-		let MPB=(MMM- (MOS* DAY))/ DAK;
+		let MOK=(MLX).product_sum_div(IUF,MOC,(-DAY),DAK);
 		let DBG;
 		let JMW;
 		if JM{
 		let DAZ=A- DAY;
-		let MPE=(MPB* KNJ)* DAZ;
+		let MON=(MOK* KNJ)* DAZ;
 		let DBA=((DAZ* DAZ)+ JV).sqrt();
 		let DBB=JW* ((A+ DAY)+ DBA);
-		let MPF=(MPB+ ((MPE+ MPE)* (IUF/ (KNB* DBA))))* JW;
+		let MOO=(MOK+ ((MON+ MON)* (IUF/ (KNB* DBA))))* JW;
 		DBG=DBB;
-		JMW=MPF;
+		JMW=MOO;
 		}else{
 		let DBC=A- DAY;
-		let MPC=MPB* KNJ;
+		let MOL=MOK* KNJ;
 		let DBD=KB/ JV;
 		let DBE=(DBD* DBC).tanh();
 		let DBF=JW* ((A+ DAY)+ (DBC* DBE));
-		let MPD=(MPB+ ((MPC* DBE)+ (((MPC* DBD)* (IUF- (DBE* DBE)))* DBC)))* JW;
+		let MOM=(MOK+ ((MOL* DBE)+ (((MOL* DBD)* (IUF- (DBE* DBE)))* DBC)))* JW;
 		DBG=DBF;
-		JMW=MPD;
+		JMW=MOM;
 		}
 		let DBH=F+ (DBG.powf(CRY));
 		let DBI=DBH.powf(CVV);
 		let DBJ=F/ DBI;
 		let DBK=CVZ* DBJ;
-		let MPG=MML* DBJ;
-		let MPH=(((((JMW* (CRY* ((DBG+ (((DBG== KOL) as u8 as f64)* KUP)).powf(MMG))))* (CVV* ((DBH+ (((DBH== KOL) as u8 as f64)* KUP)).powf(MMH))))* DBJ)* KNJ)/ DBI)* CVZ;
-		let MPI=L5([0.0,0.0,0.0,MPG[0],MPG[1]])+ MPH;
-		let MPJ=L4([IYO[0],0.0,IYO[1],IYO[2]]);
+		let MOP=MLW* DBJ;
+		let MOQ=L5([0.0,0.0,0.0,MOP[0],MOP[1]])+ (((((JMW* (CRY* ((DBG+ (((DBG== KOL) as u8 as f64)* KUP)).powf(MLS))))* (CVV* ((DBH+ (((DBH== KOL) as u8 as f64)* KUP)).powf(MLT))))).product_div((-DBJ),DBI))* CVZ);
+		let MOR=L4([IYO[0],0.0,IYO[1],IYO[2]]);
 		let DBL=(CRS- CYS)/ CSI;
-		let MPK=((MPJ- L4([0.0,MNZ,0.0,0.0]))- L4([0.0,(MKD* DBL),0.0,0.0]))/ CSI;
+		let MOS=((MOR- L4([0.0,MNH,0.0,0.0]))).product_sum_div(IUF,L4([0.0,MJO,0.0,0.0]),(-DBL),CSI);
 		let DBM=DBL> LD;
 		let DBR;
 		let JMX;
 		if DBM{
 		DBR=A;
-		JMX=MJW;
+		JMX=MJH;
 		}else{
 		let DBN=DBL< -50f64;
 		let DBS;
 		let JMY;
 		if DBN{
 		DBS=F;
-		JMY=MJW;
+		JMY=MJH;
 		}else{
 		let DBO=DBL.exp();
 		let DBP=F+ DBO;
 		let DBQ=F/ DBP;
-		let MPL=(((MPK* DBO)* DBQ)* KNJ)/ DBP;
+		let MOT=((MOS* DBO)).product_div((-DBQ),DBP);
 		DBS=DBQ;
-		JMY=MPL;
+		JMY=MOT;
 		}
 		DBR=DBS;
 		JMX=JMY;
 		}
-		let MPM=L4([0.0,MKH,0.0,0.0])- (L4([0.0,(MLD* DBR),0.0,0.0])+ (JMX* CTZ));
+		let MOU=L4([0.0,MJS,0.0,0.0])- (L4([0.0,(MKO* DBR),0.0,0.0])+ (JMX* CTZ));
 		let DBT=((CSH- DBK)- (CSM- (CTZ* DBR)))/ CYQ;
-		let MPN=(((MMY- MPI)- L5([MPM[0],MPM[1],MPM[2],0.0,MPM[3]]))- L5([0.0,(MNX* DBT),0.0,0.0,0.0]))/ CYQ;
+		let MOV=(((MMI- MOQ)- L5([MOU[0],MOU[1],MOU[2],0.0,MOU[3]]))).product_sum_div(IUF,MNU,(-DBT),CYQ);
 		let DBU=DBT> LD;
 		let DCV;
 		let JMZ;
 		if DBU{
 		let DBV=CYR* DBT;
-		let MPQ=L5([0.0,(MNY* DBT),0.0,0.0,0.0])+ (MPN* CYR);
+		let MOY=L5([0.0,(MNG* DBT),0.0,0.0,0.0])+ (MOV* CYR);
 		DCV=DBV;
-		JMZ=MPQ;
+		JMZ=MOY;
 		}else{
 		let DBW=DBT< -50f64;
 		let DCW;
@@ -8456,57 +8438,57 @@ impl Instance {
 		if DBW{
 		let DBX=DBT.exp();
 		let DBY=CYR* DBX;
-		let MPP=L5([0.0,(MNY* DBX),0.0,0.0,0.0])+ ((MPN* DBX)* CYR);
+		let MOX=L5([0.0,(MNG* DBX),0.0,0.0,0.0])+ ((MOV* DBX)* CYR);
 		DCW=DBY;
-		JNA=MPP;
+		JNA=MOX;
 		}else{
 		let DBZ=DBT.exp();
 		let DCA=F+ DBZ;
 		let DCB=DCA.ln();
 		let DCC=CYR* DCB;
-		let MPO=L5([0.0,(MNY* DCB),0.0,0.0,0.0])+ (((MPN* DBZ)* (IUF/ DCA))* CYR);
+		let MOW=L5([0.0,(MNG* DCB),0.0,0.0,0.0])+ (((MOV* DBZ)* (IUF/ DCA))* CYR);
 		DCW=DCC;
-		JNA=MPO;
+		JNA=MOW;
 		}
 		DCV=DCW;
 		JMZ=JNA;
 		}
 		let DCD=(CSH- CYS)/ CSI;
-		let MPR=((MMY- MOE)- L5([0.0,(MKD* DCD),0.0,0.0,0.0]))/ CSI;
+		let MOZ=((MMI- MNM)).product_sum_div(IUF,MKH,(-DCD),CSI);
 		let DCE=DCD> LD;
 		let DCJ;
 		let JNB;
 		if DCE{
 		DCJ=A;
-		JNB=MJV;
+		JNB=MJG;
 		}else{
 		let DCF=DCD< -50f64;
 		let DCK;
 		let JNC;
 		if DCF{
 		DCK=F;
-		JNC=MJV;
+		JNC=MJG;
 		}else{
 		let DCG=DCD.exp();
 		let DCH=F+ DCG;
 		let DCI=F/ DCH;
-		let MPS=(((MPR* DCG)* DCI)* KNJ)/ DCH;
+		let MPA=((MOZ* DCG)).product_div((-DCI),DCH);
 		DCK=DCI;
-		JNC=MPS;
+		JNC=MPA;
 		}
 		DCJ=DCK;
 		JNB=JNC;
 		}
 		let DCL=((CRS- DAX)- (CSM- (CTZ* DCJ)))/ CYQ;
-		let MPT=(((MMV- MPA)- (MOL- (L5([0.0,(MLD* DCJ),0.0,0.0,0.0])+ (JNB* CTZ))))- L5([0.0,(MNX* DCL),0.0,0.0,0.0]))/ CYQ;
+		let MPB=(((MMF- MOJ)- (MNT- (L5([0.0,(MKO* DCJ),0.0,0.0,0.0])+ (JNB* CTZ))))).product_sum_div(IUF,MNU,(-DCL),CYQ);
 		let DCM=DCL> LD;
 		let DCY;
 		let JND;
 		if DCM{
 		let DCN=CYR* DCL;
-		let MPW=L5([0.0,(MNY* DCL),0.0,0.0,0.0])+ (MPT* CYR);
+		let MPE=L5([0.0,(MNG* DCL),0.0,0.0,0.0])+ (MPB* CYR);
 		DCY=DCN;
-		JND=MPW;
+		JND=MPE;
 		}else{
 		let DCO=DCL< -50f64;
 		let DCZ;
@@ -8514,45 +8496,45 @@ impl Instance {
 		if DCO{
 		let DCP=DCL.exp();
 		let DCQ=CYR* DCP;
-		let MPV=L5([0.0,(MNY* DCP),0.0,0.0,0.0])+ ((MPT* DCP)* CYR);
+		let MPD=L5([0.0,(MNG* DCP),0.0,0.0,0.0])+ ((MPB* DCP)* CYR);
 		DCZ=DCQ;
-		JNE=MPV;
+		JNE=MPD;
 		}else{
 		let DCR=DCL.exp();
 		let DCS=F+ DCR;
 		let DCT=DCS.ln();
 		let DCU=CYR* DCT;
-		let MPU=L5([0.0,(MNY* DCT),0.0,0.0,0.0])+ (((MPT* DCR)* (IUF/ DCS))* CYR);
+		let MPC=L5([0.0,(MNG* DCT),0.0,0.0,0.0])+ (((MPB* DCR)* (IUF/ DCS))* CYR);
 		DCZ=DCU;
-		JNE=MPU;
+		JNE=MPC;
 		}
 		DCY=DCZ;
 		JND=JNE;
 		}
-		let MPX=JMZ* DCV;
-		let MPY=MPX+ MPX;
+		let MPF=JMZ* DCV;
+		let MPG=MPF+ MPF;
 		let DCX=(DCV* DCV)+ AEI;
-		let MPZ=JND* DCY;
-		let MQA=MPZ+ MPZ;
+		let MPH=JND* DCY;
+		let MPI=MPH+ MPH;
 		let DDA=(DCY* DCY)+ AEI;
-		let MQB=(JMZ* DCY)+ (JND* DCV);
+		let MPJ=(JMZ* DCY)+ (JND* DCV);
 		let DDB=(DCV* DCY)+ AEI;
 		let DDD=DCX+ DDA;
-		let MQC=MPY+ MQA;
+		let MPK=MPG+ MPI;
 		let DDE=(DCV+ DCY)+ AER;
 		let DDF=(DDC* (DDD+ DDB))/ DDE;
 		let DDG=AEU* DCX;
 		let DDH=AEW* DDA;
-		let MQD=(((((MPY* DCV)+ (JMZ* DCX))* MC)+ (((MQA* DCY)+ (JND* DDA))* BF))+ (((MPY* AEU)* DCY)+ (JND* DDG)))+ (((MQA* AEW)* DCV)+ (JMZ* DDH));
+		let MPL=(((((MPG* DCV)+ (JMZ* DCX))* MC)+ (((MPI* DCY)+ (JND* DDA))* BF))+ (((MPG* AEU)* DCY)+ (JND* DDG)))+ (((MPI* AEW)* DCV)+ (JMZ* DDH));
 		let DDI=AEY* (DDD+ (MC* DDB));
 		let DDJ=(MC* ((((MC* ((DCX* DCV)+ AEK))+ (BF* ((DDA* DCY)+ AEK)))+ (DDG* DCY))+ (DDH* DCV)))/ DDI;
-		let MQE=((MQD* MC)- (((MQC+ (MQB* MC))* AEY)* DDJ))/ DDI;
+		let MPM=((MPL* MC)).product_sum_div(IUF,((MPK+ (MPJ* MC))* AEY),(-DDJ),DDI);
 		let DDK=O* P;
 		let DDL=(DDK* CRQ)* JE;
 		let DDM=DDL* (DDF- DDJ);
-		let MQF=(((((MQC+ MQB)* DDC)- ((JMZ+ JND)* DDF))/ DDE)- MQE)* DDL;
+		let MPN=(((((MPK+ MPJ)* DDC)).product_sum_div(IUF,(JMZ+ JND),(-DDF),DDE))- MPM)* DDL;
 		let DDN=DDL* DDJ;
-		let MQG=MQE* DDL;
+		let MPO=MPM* DDL;
 		let DDO=parameters[107]== F;
 		let DFE;
 		let DFF;
@@ -8561,31 +8543,31 @@ impl Instance {
 		if DDO{
 		let DDP=UK* JW;
 		let DDQ=CSM- (DDP* CSI);
-		let MQH=MKH- (MKD* DDP);
+		let MPP=MJS- (MJO* DDP);
 		let DDR=(CRT- DDQ)/ CYQ;
-		let MQI=((L4([IYP[0],0.0,IYP[1],IYP[2]])- L4([0.0,MQH,0.0,0.0]))- L4([0.0,(MNX* DDR),0.0,0.0]))/ CYQ;
+		let MPQ=((L4([IYP[0],0.0,IYP[1],IYP[2]])- L4([0.0,MPP,0.0,0.0]))).product_sum_div(IUF,L4([0.0,MNF,0.0,0.0]),(-DDR),CYQ);
 		let DDS=DDR> LD;
 		let DEB;
 		let JNH;
 		if DDS{
 		DEB=DDR;
-		JNH=MQI;
+		JNH=MPQ;
 		}else{
 		let DDT=DDR< -50f64;
 		let DEC;
 		let JNI;
 		if DDT{
 		let DDU=DDR.exp();
-		let MQK=MQI* DDU;
+		let MPS=MPQ* DDU;
 		DEC=DDU;
-		JNI=MQK;
+		JNI=MPS;
 		}else{
 		let DDV=DDR.exp();
 		let DDW=F+ DDV;
 		let DDX=DDW.ln();
-		let MQJ=(MQI* DDV)* (IUF/ DDW);
+		let MPR=(MPQ* DDV)* (IUF/ DDW);
 		DEC=DDX;
-		JNI=MQJ;
+		JNI=MPR;
 		}
 		DEB=DEC;
 		JNH=JNI;
@@ -8594,31 +8576,31 @@ impl Instance {
 		let DDZ=DDY* EZ;
 		let DEA=DDZ* CYQ;
 		let DED=DEA* DEB;
-		let MQL=L4([0.0,((((KLD* DDY)* CYQ)+ (MNX* DDZ))* DEB),0.0,0.0])+ (JNH* DEA);
+		let MPT=L4([0.0,((((KLD* DDY)* CYQ)+ (MNF* DDZ))* DEB),0.0,0.0])+ (JNH* DEA);
 		let DEE=(QN- DDQ)/ CYQ;
-		let MQM=((L3([KRH[0],0.0,KRH[1]])- L3([0.0,MQH,0.0]))- L3([0.0,(MNX* DEE),0.0]))/ CYQ;
+		let MPU=((L3([KRH[0],0.0,KRH[1]])- L3([0.0,MPP,0.0]))).product_sum_div(IUF,L3([0.0,MNF,0.0]),(-DEE),CYQ);
 		let DEF=DEE> LD;
 		let DEN;
 		let JNJ;
 		if DEF{
 		DEN=DEE;
-		JNJ=MQM;
+		JNJ=MPU;
 		}else{
 		let DEG=DEE< -50f64;
 		let DEO;
 		let JNK;
 		if DEG{
 		let DEH=DEE.exp();
-		let MQO=MQM* DEH;
+		let MPW=MPU* DEH;
 		DEO=DEH;
-		JNK=MQO;
+		JNK=MPW;
 		}else{
 		let DEI=DEE.exp();
 		let DEJ=F+ DEI;
 		let DEK=DEJ.ln();
-		let MQN=(MQM* DEI)* (IUF/ DEJ);
+		let MPV=(MPU* DEI)* (IUF/ DEJ);
 		DEO=DEK;
-		JNK=MQN;
+		JNK=MPV;
 		}
 		DEN=DEO;
 		JNJ=JNK;
@@ -8626,16 +8608,16 @@ impl Instance {
 		let DEL=DDY* FX;
 		let DEM=DEL* CYQ;
 		let DEP=DEM* DEN;
-		let MQP=L3([0.0,((((KLL* DDY)* CYQ)+ (MNX* DEL))* DEN),0.0])+ (JNJ* DEM);
+		let MPX=L3([0.0,((((KLL* DDY)* CYQ)+ (MNF* DEL))* DEN),0.0])+ (JNJ* DEM);
 		DFE=DED;
 		DFF=DEP;
-		JNF=MQL;
-		JNG=MQP;
+		JNF=MPT;
+		JNG=MPX;
 		}else{
 		DFE=A;
 		DFF=A;
-		JNF=MJW;
-		JNG=MJX;
+		JNF=MJH;
+		JNG=MJI;
 		}
 		let DEQ=parameters[105]== F;
 		let DFG;
@@ -8643,29 +8625,29 @@ impl Instance {
 		if DEQ{
 		let DER=UK* JW;
 		let DES=(CRS- (CSM- (DER* CSI)))/ CYQ;
-		let MQQ=((MPJ- L4([0.0,(MKH- (MKD* DER)),0.0,0.0]))- L4([0.0,(MNX* DES),0.0,0.0]))/ CYQ;
+		let MPY=((MOR- L4([0.0,(MJS- (MJO* DER)),0.0,0.0]))).product_sum_div(IUF,L4([0.0,MNF,0.0,0.0]),(-DES),CYQ);
 		let DET=DES> LD;
 		let DFB;
 		let JNM;
 		if DET{
 		DFB=DES;
-		JNM=MQQ;
+		JNM=MPY;
 		}else{
 		let DEU=DES< -50f64;
 		let DFC;
 		let JNN;
 		if DEU{
 		let DEV=DES.exp();
-		let MQS=MQQ* DEV;
+		let MQA=MPY* DEV;
 		DFC=DEV;
-		JNN=MQS;
+		JNN=MQA;
 		}else{
 		let DEW=DES.exp();
 		let DEX=F+ DEW;
 		let DEY=DEX.ln();
-		let MQR=(MQQ* DEW)* (IUF/ DEX);
+		let MPZ=(MPY* DEW)* (IUF/ DEX);
 		DFC=DEY;
-		JNN=MQR;
+		JNN=MPZ;
 		}
 		DFB=DFC;
 		JNM=JNN;
@@ -8673,15 +8655,15 @@ impl Instance {
 		let DEZ=(DDK* JE)* parameters[106];
 		let DFA=DEZ* CYQ;
 		let DFD=DFA* DFB;
-		let MQT=L4([0.0,((MNX* DEZ)* DFB),0.0,0.0])+ (JNM* DFA);
+		let MQB=L4([0.0,((MNF* DEZ)* DFB),0.0,0.0])+ (JNM* DFA);
 		DFG=DFD;
-		JNL=MQT;
+		JNL=MQB;
 		}else{
 		DFG=A;
-		JNL=MJW;
+		JNL=MJH;
 		}
-		let MQU=KRE* D;
-		let MQV=MNW+ L5([0.0,0.0,0.0,MQU[0],MQU[1]]);
+		let MQC=KRE* D;
+		let MQD=MNE+ L5([0.0,0.0,0.0,MQC[0],MQC[1]]);
 		let DFH=A+ (CYO+ (D* QK));
 		DFJ=DDM;
 		DFO=DDN;
@@ -8692,13 +8674,13 @@ impl Instance {
 		IIP=DFH;
 		IIQ=A;
 		IOJ=A;
-		JLP=MQF;
-		JLQ=MQG;
+		JLP=MPN;
+		JLQ=MPO;
 		JLR=JNF;
 		JLS=JNL;
 		JLT=JNG;
-		JLU=MNW;
-		JLV=MQV;
+		JLU=MNE;
+		JLV=MQD;
 		}else{
 		DFJ=A;
 		DFO=A;
@@ -8709,13 +8691,13 @@ impl Instance {
 		IIP=A;
 		IIQ=DFI;
 		IOJ=F;
-		JLP=MJV;
-		JLQ=MJV;
-		JLR=MJW;
-		JLS=MJW;
-		JLT=MJX;
-		JLU=MJV;
-		JLV=MJV;
+		JLP=MJG;
+		JLQ=MJG;
+		JLR=MJH;
+		JLS=MJH;
+		JLT=MJI;
+		JLU=MJG;
+		JLV=MJG;
 		}
 		let IIR;
 		let IIS;
@@ -8751,40 +8733,40 @@ impl Instance {
 		if QE{
 		let DFK=ddt(84, DFJ);
 		let DFL=AHC* (PT- QF);
-		let MRJ=(L2([IUR,0.0])- L2([0.0,IUU]))* AHC;
+		let MQR=(L2([IUR,0.0])- L2([0.0,IUU]))* AHC;
 		let DFM=ddt(85, DFL);
-		let MRK=MRJ* KOI;
-		let MRL=(JLP* KOI)+ L5([0.0,0.0,MRK[0],0.0,MRK[1]]);
+		let MQS=MQR* KOI;
+		let MQT=(JLP* KOI)+ L5([0.0,0.0,MQS[0],0.0,MQS[1]]);
 		let ISE=DFJ+ DFL;
-		let MRM=JLP+ L5([0.0,0.0,MRJ[0],0.0,MRJ[1]]);
+		let MQU=JLP+ L5([0.0,0.0,MQR[0],0.0,MQR[1]]);
 		let DFN=A+ (DFK+ DFM);
 		let DFP=ddt(86, DFO);
 		let DFQ=AHC* (PT- PU);
-		let MRN=(L2([IUR,0.0])- L2([0.0,IUS]))* AHC;
+		let MQV=(L2([IUR,0.0])- L2([0.0,IUS]))* AHC;
 		let DFR=ddt(87, DFQ);
-		let MRO=MRN* KOI;
-		let MRP=(JLQ* KOI)+ L5([0.0,0.0,MRO[0],MRO[1],0.0]);
+		let MQW=MQV* KOI;
+		let MQX=(JLQ* KOI)+ L5([0.0,0.0,MQW[0],MQW[1],0.0]);
 		let ISG=DFO+ DFQ;
-		let MRQ=JLQ+ L5([0.0,0.0,MRN[0],MRN[1],0.0]);
+		let MQY=JLQ+ L5([0.0,0.0,MQV[0],MQV[1],0.0]);
 		let DFS=A+ (DFP+ DFR);
 		let DFU=ddt(88, DFT);
 		let DFV=AHC* (JQ- QF);
-		let MRR=(L2([IUM,0.0])- L2([0.0,IUU]))* AHC;
+		let MQZ=(L2([IUM,0.0])- L2([0.0,IUU]))* AHC;
 		let DFW=ddt(89, DFV);
-		let MRS=MRR* KOI;
-		let MRT=(JLR* KOI)+ L4([MRS[0],0.0,0.0,MRS[1]]);
+		let MRA=MQZ* KOI;
+		let MRB=(JLR* KOI)+ L4([MRA[0],0.0,0.0,MRA[1]]);
 		let ISI=DFT+ DFV;
-		let MRU=JLR+ L4([MRR[0],0.0,0.0,MRR[1]]);
+		let MRC=JLR+ L4([MQZ[0],0.0,0.0,MQZ[1]]);
 		let DFX=A+ (DFU+ DFW);
 		let DGA=ddt(90, DFZ);
-		let MRV=JLS* KOI;
+		let MRD=JLS* KOI;
 		let DGB=AHC* (PT- JG);
-		let MRW=(L2([IUR,0.0])- L2([0.0,IUI]))* AHC;
+		let MRE=(L2([IUR,0.0])- L2([0.0,IUI]))* AHC;
 		let DGC=ddt(91, DGB);
-		let MRX=MRW* KOI;
-		let MRY=L5([MRV[0],MRV[1],MRV[2],0.0,MRV[3]])+ L5([0.0,0.0,MRX[0],MRX[1],0.0]);
+		let MRF=MRE* KOI;
+		let MRG=L5([MRD[0],MRD[1],MRD[2],0.0,MRD[3]])+ L5([0.0,0.0,MRF[0],MRF[1],0.0]);
 		let ISK=DFZ+ DGB;
-		let MRZ=L5([JLS[0],JLS[1],JLS[2],0.0,JLS[3]])+ L5([0.0,0.0,MRW[0],MRW[1],0.0]);
+		let MRH=L5([JLS[0],JLS[1],JLS[2],0.0,JLS[3]])+ L5([0.0,0.0,MRE[0],MRE[1],0.0]);
 		let DGD=A+ (DGA+ DGC);
 		IIR=DFN;
 		IIS=DFS;
@@ -8803,47 +8785,47 @@ impl Instance {
 		ISN=A;
 		ISP=A;
 		ISR=A;
-		JNO=MRL;
-		JNP=MRP;
-		JNQ=MRT;
-		JNR=MRY;
-		JNS=MJV;
-		JNT=MJV;
-		JNU=MJW;
-		JNV=MRM;
-		JNW=MRQ;
-		JNX=MRU;
-		JNY=MRZ;
-		JNZ=MJV;
-		JOA=MJV;
-		JOB=MJW;
+		JNO=MQT;
+		JNP=MQX;
+		JNQ=MRB;
+		JNR=MRG;
+		JNS=MJG;
+		JNT=MJG;
+		JNU=MJH;
+		JNV=MQU;
+		JNW=MQY;
+		JNX=MRC;
+		JNY=MRH;
+		JNZ=MJG;
+		JOA=MJG;
+		JOB=MJH;
 		}else{
 		let DGE=ddt(92, DFJ);
 		let DGF=AHC* (JQ- QF);
-		let MQW=(L2([IUM,0.0])- L2([0.0,IUU]))* AHC;
+		let MQE=(L2([IUM,0.0])- L2([0.0,IUU]))* AHC;
 		let DGG=ddt(93, DGF);
-		let MQX=MQW* KOI;
-		let MQY=(JLP* KOI)+ L5([MQX[0],0.0,0.0,0.0,MQX[1]]);
+		let MQF=MQE* KOI;
+		let MQG=(JLP* KOI)+ L5([MQF[0],0.0,0.0,0.0,MQF[1]]);
 		let ISM=DFJ+ DGF;
-		let MQZ=JLP+ L5([MQW[0],0.0,0.0,0.0,MQW[1]]);
+		let MQH=JLP+ L5([MQE[0],0.0,0.0,0.0,MQE[1]]);
 		let DGH=A+ (DGE+ DGG);
 		let DGI=ddt(94, DFO);
 		let DGJ=AHC* (JQ- PU);
-		let MRA=(L2([IUM,0.0])- L2([0.0,IUS]))* AHC;
+		let MQI=(L2([IUM,0.0])- L2([0.0,IUS]))* AHC;
 		let DGK=ddt(95, DGJ);
-		let MRB=MRA* KOI;
-		let MRC=(JLQ* KOI)+ L5([MRB[0],0.0,0.0,MRB[1],0.0]);
+		let MQJ=MQI* KOI;
+		let MQK=(JLQ* KOI)+ L5([MQJ[0],0.0,0.0,MQJ[1],0.0]);
 		let ISO=DFO+ DGJ;
-		let MRD=JLQ+ L5([MRA[0],0.0,0.0,MRA[1],0.0]);
+		let MQL=JLQ+ L5([MQI[0],0.0,0.0,MQI[1],0.0]);
 		let DGL=A+ (DGI+ DGK);
 		let DGM=ddt(96, DFT);
 		let DGN=AHC* (PT- QF);
-		let MRE=(L2([IUR,0.0])- L2([0.0,IUU]))* AHC;
+		let MQM=(L2([IUR,0.0])- L2([0.0,IUU]))* AHC;
 		let DGO=ddt(97, DGN);
-		let MRF=MRE* KOI;
-		let MRG=(JLR* KOI)+ L4([0.0,0.0,MRF[0],MRF[1]]);
+		let MQN=MQM* KOI;
+		let MQO=(JLR* KOI)+ L4([0.0,0.0,MQN[0],MQN[1]]);
 		let ISQ=DFT+ DGN;
-		let MRH=JLR+ L4([0.0,0.0,MRE[0],MRE[1]]);
+		let MQP=JLR+ L4([0.0,0.0,MQM[0],MQM[1]]);
 		let DGP=A+ (DGM+ DGO);
 		IIR=A;
 		IIS=A;
@@ -8862,29 +8844,29 @@ impl Instance {
 		ISN=ISM;
 		ISP=ISO;
 		ISR=ISQ;
-		JNO=MJV;
-		JNP=MJV;
-		JNQ=MJW;
-		JNR=MRI;
-		JNS=MQY;
-		JNT=MRC;
-		JNU=MRG;
-		JNV=MJV;
-		JNW=MJV;
-		JNX=MJW;
-		JNY=MRI;
-		JNZ=MQZ;
-		JOA=MRD;
-		JOB=MRH;
+		JNO=MJG;
+		JNP=MJG;
+		JNQ=MJH;
+		JNR=MQQ;
+		JNS=MQG;
+		JNT=MQK;
+		JNU=MQO;
+		JNV=MJG;
+		JNW=MJG;
+		JNX=MJH;
+		JNY=MQQ;
+		JNZ=MQH;
+		JOA=MQL;
+		JOB=MQP;
 		}
 		let DGT=ddt(98, DGS);
 		let DGU=AHC* QM;
-		let MSA=KRG* AHC;
+		let MRI=KRG* AHC;
 		let DGV=ddt(99, DGU);
-		let MSB=MSA* KOI;
-		let MSC=(JLT* KOI)+ L3([MSB[0],0.0,MSB[1]]);
+		let MRJ=MRI* KOI;
+		let MRK=(JLT* KOI)+ L3([MRJ[0],0.0,MRJ[1]]);
 		let ISS=DGS+ DGU;
-		let MSD=JLT+ L3([MSA[0],0.0,MSA[1]]);
+		let MRL=JLT+ L3([MRI[0],0.0,MRI[1]]);
 		let DGW=A+ (DGT+ DGV);
 		let DGY=DGX> SV;
 		let DUQ;
@@ -8907,34 +8889,34 @@ impl Instance {
 		let DHN;
 		let JOJ;
 		if JM{
-		let MSI=KRR* QV;
+		let MRQ=KRR* QV;
 		let DHJ=((QV* QV)+ JV).sqrt();
-		let MSJ=(MSI+ MSI)* (IUF/ (KNB* DHJ));
+		let MRR=(MRQ+ MRQ)* (IUF/ (KNB* DHJ));
 		DHN=DHJ;
-		JOJ=MSJ;
+		JOJ=MRR;
 		}else{
 		let DHK=KB/ JV;
 		let DHL=(DHK* QV).tanh();
 		let DHM=QV* DHL;
-		let MSH=(KRR* DHL)+ (((KRR* DHK)* (IUF- (DHL* DHL)))* QV);
+		let MRP=(KRR* DHL)+ (((KRR* DHK)* (IUF- (DHL* DHL)))* QV);
 		DHN=DHM;
-		JOJ=MSH;
+		JOJ=MRP;
 		}
 		let DHO=DGZ- QV;
-		let MSK=L4([IYQ[0],IYQ[1],0.0,IYQ[2]]);
-		let MSL=MSK- L4([0.0,0.0,KRR[0],KRR[1]]);
+		let MRS=L4([IYQ[0],IYQ[1],0.0,IYQ[2]]);
+		let MRT=MRS- L4([0.0,0.0,KRR[0],KRR[1]]);
 		let DHP=DHC* AZ;
-		let MSM=KJT* DHC;
+		let MRU=KJT* DHC;
 		let DHQ=TS* AZ;
 		let DHR=parameters[138]/ DHQ;
-		let MSN=(((KJT* TS)* DHR)* KNJ)/ DHQ;
-		let MSO=JOJ* DHB;
+		let MRV=product_div((KJT* TS),(-DHR),DHQ);
+		let MRW=JOJ* DHB;
 		let DHS=DHR+ (DHB* DHN);
-		let MSP=L3([MSN,0.0,0.0])+ L3([0.0,MSO[0],MSO[1]]);
-		let MSQ=IVA* DHI;
+		let MRX=L3([MRV,0.0,0.0])+ L3([0.0,MRW[0],MRW[1]]);
+		let MRY=IVA* DHI;
 		let DHT=parameters[124]+ (DHI* BB);
 		let DHU=BE.powf(TI);
-		let MSR=KJV* (TI* ((BE+ (((BE== KOL) as u8 as f64)* KUP)).powf((TI- IUF))));
+		let MRZ=KJV* (TI* ((BE+ (((BE== KOL) as u8 as f64)* KUP)).powf((TI- IUF))));
 		let DHV=TH!= A;
 		let DIB;
 		let JOK;
@@ -8944,70 +8926,70 @@ impl Instance {
 		let DHY=F/ DHF;
 		let DHZ=DHX.powf(DHY);
 		let DIA=DHN/ DHZ;
-		let MST=(((JOJ/ TH)* (DHF* ((DHW+ (((DHW== KOL) as u8 as f64)* KUP)).powf((DHF- IUF)))))* (DHY* ((DHX+ (((DHX== KOL) as u8 as f64)* KUP)).powf((DHY- IUF)))))* DIA;
-		let MSU=(JOJ- MST)/ DHZ;
+		let MSB=(JOJ).product_sum_div(IUF,(((JOJ/ TH)* (DHF* ((DHW+ (((DHW== KOL) as u8 as f64)* KUP)).powf((DHF- IUF)))))* (DHY* ((DHX+ (((DHX== KOL) as u8 as f64)* KUP)).powf((DHY- IUF))))),(-DIA),DHZ);
 		DIB=DIA;
-		JOK=MSU;
+		JOK=MSB;
 		}else{
 		DIB=A;
-		JOK=MSS;
+		JOK=MSA;
 		}
 		let DIC=parameters[137]- (DIB* A);
-		let MSV=(((JOK* A)* KNJ)* DHN)+ (JOJ* DIC);
+		let MSC=(((JOK* A)* KNJ)* DHN)+ (JOJ* DIC);
 		let DID=DHT- (DIC* DHN);
-		let MSW=L3([MSQ,0.0,0.0])- L3([0.0,MSV[0],MSV[1]]);
+		let MSD=L3([MRY,0.0,0.0])- L3([0.0,MSC[0],MSC[1]]);
 		let DIE=MC* DHS;
 		let DIF=DIE* AZ;
-		let MSX=((MSP* MC)* AZ)+ L3([(KJT* DIE),0.0,0.0]);
+		let MSE=((MRX* MC)* AZ)+ L3([(KJT* DIE),0.0,0.0]);
 		let DIG=EH* DIF;
-		let MSY=L3([(KKX* DIF),0.0,0.0])+ (MSX* EH);
+		let MSF=L3([(KKX* DIF),0.0,0.0])+ (MSE* EH);
 		let DIH=(UK* DHP)/ MC;
-		let MSZ=(MSM* UK)/ MC;
+		let MSG=(MRU* UK)/ MC;
 		let DII=DID- DIH;
-		let MTA=MSW- L3([MSZ,0.0,0.0]);
+		let MSH=MSD- L3([MSG,0.0,0.0]);
 		let DIQ;
 		let JOL;
 		if JM{
 		let DIJ=DGZ- DHO;
-		let MTD=(MSK- MSL)* DIJ;
+		let MSK=(MRS- MRT)* DIJ;
 		let DIK=((DIJ* DIJ)+ JV).sqrt();
 		let DIL=JW* ((DGZ+ DHO)+ DIK);
-		let MTE=((MSK+ MSL)+ ((MTD+ MTD)* (IUF/ (KNB* DIK))))* JW;
+		let MSL=((MRS+ MRT)+ ((MSK+ MSK)* (IUF/ (KNB* DIK))))* JW;
 		DIQ=DIL;
-		JOL=MTE;
+		JOL=MSL;
 		}else{
 		let DIM=DGZ- DHO;
-		let MTB=MSK- MSL;
+		let MSI=MRS- MRT;
 		let DIN=KB/ JV;
 		let DIO=(DIN* DIM).tanh();
 		let DIP=JW* ((DGZ+ DHO)+ (DIM* DIO));
-		let MTC=((MSK+ MSL)+ ((MTB* DIO)+ (((MTB* DIN)* (IUF- (DIO* DIO)))* DIM)))* JW;
+		let MSJ=((MRS+ MRT)+ ((MSI* DIO)+ (((MSI* DIN)* (IUF- (DIO* DIO)))* DIM)))* JW;
 		DIQ=DIP;
-		JOL=MTC;
+		JOL=MSJ;
 		}
-		let MTF=L5([0.0,MTA[0],0.0,MTA[1],MTA[2]]);
+		let MSM=L5([0.0,MSH[0],0.0,MSH[1],MSH[2]]);
 		let DIR=(DIQ- DII)/ DHP;
-		let MTG=((L5([JOL[0],0.0,JOL[1],JOL[2],JOL[3]])- MTF)- L5([0.0,(MSM* DIR),0.0,0.0,0.0]))/ DHP;
+		let MSN=L5([0.0,MRU,0.0,0.0,0.0]);
+		let MSO=((L5([JOL[0],0.0,JOL[1],JOL[2],JOL[3]])- MSM)).product_sum_div(IUF,MSN,(-DIR),DHP);
 		let DIS=DIR> LD;
 		let DJH;
 		let JOM;
 		if DIS{
 		DJH=A;
-		JOM=MSE;
+		JOM=MRM;
 		}else{
 		let DIT=DIR< -50f64;
 		let DJI;
 		let JON;
 		if DIT{
 		DJI=F;
-		JON=MSE;
+		JON=MRM;
 		}else{
 		let DIU=DIR.exp();
 		let DIV=F+ DIU;
 		let DIW=F/ DIV;
-		let MTH=(((MTG* DIU)* DIW)* KNJ)/ DIV;
+		let MSP=((MSO* DIU)).product_div((-DIW),DIV);
 		DJI=DIW;
-		JON=MTH;
+		JON=MSP;
 		}
 		DJH=DJI;
 		JOM=JON;
@@ -9016,38 +8998,38 @@ impl Instance {
 		let JOO;
 		if JM{
 		let DIX=DGZ- DHO;
-		let MTK=(MSK- MSL)* DIX;
+		let MSS=(MRS- MRT)* DIX;
 		let DIY=((DIX* DIX)+ JV).sqrt();
 		let DIZ=JW* ((DGZ+ DHO)+ DIY);
-		let MTL=((MSK+ MSL)+ ((MTK+ MTK)* (IUF/ (KNB* DIY))))* JW;
+		let MST=((MRS+ MRT)+ ((MSS+ MSS)* (IUF/ (KNB* DIY))))* JW;
 		DJE=DIZ;
-		JOO=MTL;
+		JOO=MST;
 		}else{
 		let DJA=DGZ- DHO;
-		let MTI=MSK- MSL;
+		let MSQ=MRS- MRT;
 		let DJB=KB/ JV;
 		let DJC=(DJB* DJA).tanh();
 		let DJD=JW* ((DGZ+ DHO)+ (DJA* DJC));
-		let MTJ=((MSK+ MSL)+ ((MTI* DJC)+ (((MTI* DJB)* (IUF- (DJC* DJC)))* DJA)))* JW;
+		let MSR=((MRS+ MRT)+ ((MSQ* DJC)+ (((MSQ* DJB)* (IUF- (DJC* DJC)))* DJA)))* JW;
 		DJE=DJD;
-		JOO=MTJ;
+		JOO=MSR;
 		}
 		let DJF=UK* AI;
 		let DJG=DJF* DHP;
-		let MTM=MSM* DJF;
-		let MTN=L5([0.0,MSW[0],0.0,MSW[1],MSW[2]]);
+		let MSU=MRU* DJF;
+		let MSV=L5([0.0,MSD[0],0.0,MSD[1],MSD[2]]);
 		let DJJ=(DJE- (DID- (DJG* DJH)))/ DIF;
-		let MTO=MSX* DJJ;
-		let MTP=((L5([JOO[0],0.0,JOO[1],JOO[2],JOO[3]])- (MTN- (L5([0.0,(MTM* DJH),0.0,0.0,0.0])+ (JOM* DJG))))- L5([0.0,MTO[0],0.0,MTO[1],MTO[2]]))/ DIF;
+		let MSW=L5([0.0,MSE[0],0.0,MSE[1],MSE[2]]);
+		let MSX=((L5([JOO[0],0.0,JOO[1],JOO[2],JOO[3]])- (MSV- (L5([0.0,(MSU* DJH),0.0,0.0,0.0])+ (JOM* DJG))))).product_sum_div(IUF,MSW,(-DJJ),DIF);
 		let DJK=DJJ> LD;
 		let DJT;
 		let JOP;
 		if DJK{
 		let DJL=DIG* DJJ;
-		let MTU=MSY* DJJ;
-		let MTV=L5([0.0,MTU[0],0.0,MTU[1],MTU[2]])+ (MTP* DIG);
+		let MTC=MSF* DJJ;
+		let MTD=L5([0.0,MTC[0],0.0,MTC[1],MTC[2]])+ (MSX* DIG);
 		DJT=DJL;
-		JOP=MTV;
+		JOP=MTD;
 		}else{
 		let DJM=DJJ< -50f64;
 		let DJU;
@@ -9055,164 +9037,162 @@ impl Instance {
 		if DJM{
 		let DJN=DJJ.exp();
 		let DJO=DIG* DJN;
-		let MTS=MSY* DJN;
-		let MTT=L5([0.0,MTS[0],0.0,MTS[1],MTS[2]])+ ((MTP* DJN)* DIG);
+		let MTA=MSF* DJN;
+		let MTB=L5([0.0,MTA[0],0.0,MTA[1],MTA[2]])+ ((MSX* DJN)* DIG);
 		DJU=DJO;
-		JOQ=MTT;
+		JOQ=MTB;
 		}else{
 		let DJP=DJJ.exp();
 		let DJQ=F+ DJP;
 		let DJR=DJQ.ln();
 		let DJS=DIG* DJR;
-		let MTQ=MSY* DJR;
-		let MTR=L5([0.0,MTQ[0],0.0,MTQ[1],MTQ[2]])+ (((MTP* DJP)* (IUF/ DJQ))* DIG);
+		let MSY=MSF* DJR;
+		let MSZ=L5([0.0,MSY[0],0.0,MSY[1],MSY[2]])+ (((MSX* DJP)* (IUF/ DJQ))* DIG);
 		DJU=DJS;
-		JOQ=MTR;
+		JOQ=MSZ;
 		}
 		DJT=DJU;
 		JOP=JOQ;
 		}
 		let DJV=(DHG* DJT)/ EH;
+		let MTE=L5([0.0,KKX,0.0,0.0,0.0]);
 		let DJW=F+ DJV;
 		let DJX=DHU* DJW;
 		let DJY=DHE/ DJX;
-		let MTW=(((L5([0.0,(MSR* DJW),0.0,0.0,0.0])+ ((((JOP* DHG)- L5([0.0,(KKX* DJV),0.0,0.0,0.0]))/ EH)* DHU))* DJY)* KNJ)/ DJX;
+		let MTF=((L5([0.0,(MRZ* DJW),0.0,0.0,0.0])+ ((((JOP* DHG)).product_sum_div(IUF,MTE,(-DJV),EH))* DHU))).product_div((-DJY),DJX);
 		let DJZ=F+ (TJ* AC);
 		let DKA=(F+ (TJ* E))/ DJZ;
 		let DKB=DHD* DKA;
-		let MTX=((((IVA* TJ)* DKA)* KNJ)/ DJZ)* DHD;
+		let MTG=(product_div((IVA* TJ),(-DKA),DJZ))* DHD;
 		let DKC=F+ ((TK* DHN)/ DGX);
-		let MTY=((JOJ* TK)/ DGX)* DKB;
-		let MTZ=L3([(MTX* DKC),0.0,0.0])+ L3([0.0,MTY[0],MTY[1]]);
+		let MTH=((JOJ* TK)/ DGX)* DKB;
+		let MTI=L3([(MTG* DKC),0.0,0.0])+ L3([0.0,MTH[0],MTH[1]]);
 		let DKD=(DHH* DJT)/ EH;
 		let DKE=F+ DKD;
 		let DKF=(DKB* DKC)/ DKE;
-		let MUA=(L5([0.0,MTZ[0],0.0,MTZ[1],MTZ[2]])- ((((JOP* DHH)- L5([0.0,(KKX* DKD),0.0,0.0,0.0]))/ EH)* DKF))/ DKE;
+		let MTJ=(L5([0.0,MTI[0],0.0,MTI[1],MTI[2]])).product_sum_div(IUF,(((JOP* DHH)).product_sum_div(IUF,MTE,(-DKD),EH)),(-DKF),DKE);
 		let DKG=MC* DJH;
 		let DKH=DKG* AZ;
 		let DKI=F- DJH;
-		let MUB=JOM* KNJ;
+		let MTK=JOM* KNJ;
 		let DKJ=((DKH* DJY)/ DGX)+ (DKI* DKF);
-		let MUC=((((((JOM* MC)* AZ)+ L5([0.0,(KJT* DKG),0.0,0.0,0.0]))* DJY)+ (MTW* DKH))/ DGX)+ ((MUB* DKF)+ (MUA* DKI));
+		let MTL=((((((JOM* MC)* AZ)+ L5([0.0,(KJT* DKG),0.0,0.0,0.0]))* DJY)+ (MTF* DKH))/ DGX)+ ((MTK* DKF)+ (MTJ* DKI));
 		let DKK=(DKF* DGX)/ DJY;
-		let MUD=((MUA* DGX)- (MTW* DKK))/ DJY;
+		let MTM=((MTJ* DGX)).product_sum_div(IUF,MTF,(-DKK),DJY);
 		let DKL=(MC* DJT)/ EH;
 		let DKM=DKL/ DKK;
 		let DKN=(F+ DKM).sqrt();
 		let DKO=(DKK* DKN)- DKK;
 		let DKP=DIF* DJH;
-		let MUE=MSX* DJH;
-		let MUF=L5([0.0,MUE[0],0.0,MUE[1],MUE[2]])+ (JOM* DIF);
+		let MTN=MSE* DJH;
+		let MTO=L5([0.0,MTN[0],0.0,MTN[1],MTN[2]])+ (JOM* DIF);
 		let DKQ=(DKK* DKI)+ DKP;
-		let MUG=((MUD* DKI)+ (MUB* DKK))+ MUF;
-		let MUH=((((MUD* DKN)+ (((((((JOP* MC)- L5([0.0,(KKX* DKL),0.0,0.0,0.0]))/ EH)- (MUD* DKM))/ DKK)* (IUF/ (KNB* DKN)))* DKK))- MUD)* DKI)+ (MUB* DKO);
+		let MTP=((MTM* DKI)+ (MTK* DKK))+ MTO;
+		let MTQ=((((MTM* DKN)+ (((((((JOP* MC)).product_sum_div(IUF,MTE,(-DKL),EH))).product_sum_div(IUF,MTM,(-DKM),DKK))* (IUF/ (KNB* DKN)))* DKK))- MTM)* DKI)+ (MTK* DKO);
 		let DKR=(DKO* DKI)+ DKP;
-		let MUI=MUH+ MUF;
+		let MTR=MTQ+ MTO;
 		let DKS=QV/ DKR;
-		let MUJ=L5([0.0,0.0,0.0,KRR[0],KRR[1]]);
-		let MUK=(MUJ- (MUI* DKS))/ DKR;
+		let MTS=L5([0.0,0.0,0.0,KRR[0],KRR[1]]);
+		let MTT=(MTS).product_sum_div(IUF,MTR,(-DKS),DKR);
 		let DLA;
 		let JOR;
 		if JM{
 		let DKT=A- DKS;
-		let MUN=(MUK* KNJ)* DKT;
+		let MTW=(MTT* KNJ)* DKT;
 		let DKU=((DKT* DKT)+ JV).sqrt();
 		let DKV=JW* ((A+ DKS)+ DKU);
-		let MUO=(MUK+ ((MUN+ MUN)* (IUF/ (KNB* DKU))))* JW;
+		let MTX=(MTT+ ((MTW+ MTW)* (IUF/ (KNB* DKU))))* JW;
 		DLA=DKV;
-		JOR=MUO;
+		JOR=MTX;
 		}else{
 		let DKW=A- DKS;
-		let MUL=MUK* KNJ;
+		let MTU=MTT* KNJ;
 		let DKX=KB/ JV;
 		let DKY=(DKX* DKW).tanh();
 		let DKZ=JW* ((A+ DKS)+ (DKW* DKY));
-		let MUM=(MUK+ ((MUL* DKY)+ (((MUL* DKX)* (IUF- (DKY* DKY)))* DKW)))* JW;
+		let MTV=(MTT+ ((MTU* DKY)+ (((MTU* DKX)* (IUF- (DKY* DKY)))* DKW)))* JW;
 		DLA=DKZ;
-		JOR=MUM;
+		JOR=MTV;
 		}
-		let MUP=DHF- IUF;
+		let MTY=DHF- IUF;
 		let DLB=F+ (DLA.powf(DHF));
 		let DLC=F/ DHF;
 		let DLD=DLB.powf(DLC);
-		let MUQ=DLC- IUF;
+		let MTZ=DLC- IUF;
 		let DLE=F/ DLD;
 		let DLF=QV* DLE;
-		let MUR=KRR* DLE;
-		let MUS=(((((JOR* (DHF* ((DLA+ (((DLA== KOL) as u8 as f64)* KUP)).powf(MUP))))* (DLC* ((DLB+ (((DLB== KOL) as u8 as f64)* KUP)).powf(MUQ))))* DLE)* KNJ)/ DLD)* QV;
-		let MUT=L5([0.0,0.0,0.0,MUR[0],MUR[1]])+ MUS;
+		let MUA=KRR* DLE;
+		let MUB=L5([0.0,0.0,0.0,MUA[0],MUA[1]])+ (((((JOR* (DHF* ((DLA+ (((DLA== KOL) as u8 as f64)* KUP)).powf(MTY))))* (DLC* ((DLB+ (((DLB== KOL) as u8 as f64)* KUP)).powf(MTZ))))).product_div((-DLE),DLD))* QV);
 		let DLG=-QV;
-		let MUU=KRR* KNJ;
+		let MUC=KRR* KNJ;
 		let DLH=DLG/ DKR;
-		let MUV=L5([0.0,0.0,0.0,MUU[0],MUU[1]]);
-		let MUW=(MUV- (MUI* DLH))/ DKR;
+		let MUD=L5([0.0,0.0,0.0,MUC[0],MUC[1]]);
+		let MUE=(MUD).product_sum_div(IUF,MTR,(-DLH),DKR);
 		let DLP;
 		let JOS;
 		if JM{
 		let DLI=A- DLH;
-		let MUZ=(MUW* KNJ)* DLI;
+		let MUH=(MUE* KNJ)* DLI;
 		let DLJ=((DLI* DLI)+ JV).sqrt();
 		let DLK=JW* ((A+ DLH)+ DLJ);
-		let MVA=(MUW+ ((MUZ+ MUZ)* (IUF/ (KNB* DLJ))))* JW;
+		let MUI=(MUE+ ((MUH+ MUH)* (IUF/ (KNB* DLJ))))* JW;
 		DLP=DLK;
-		JOS=MVA;
+		JOS=MUI;
 		}else{
 		let DLL=A- DLH;
-		let MUX=MUW* KNJ;
+		let MUF=MUE* KNJ;
 		let DLM=KB/ JV;
 		let DLN=(DLM* DLL).tanh();
 		let DLO=JW* ((A+ DLH)+ (DLL* DLN));
-		let MUY=(MUW+ ((MUX* DLN)+ (((MUX* DLM)* (IUF- (DLN* DLN)))* DLL)))* JW;
+		let MUG=(MUE+ ((MUF* DLN)+ (((MUF* DLM)* (IUF- (DLN* DLN)))* DLL)))* JW;
 		DLP=DLO;
-		JOS=MUY;
+		JOS=MUG;
 		}
 		let DLQ=F+ (DLP.powf(DHF));
 		let DLR=DLQ.powf(DLC);
 		let DLS=F/ DLR;
 		let DLT=DLG* DLS;
-		let MVB=MUU* DLS;
-		let MVC=(((((JOS* (DHF* ((DLP+ (((DLP== KOL) as u8 as f64)* KUP)).powf(MUP))))* (DLC* ((DLQ+ (((DLQ== KOL) as u8 as f64)* KUP)).powf(MUQ))))* DLS)* KNJ)/ DLR)* DLG;
-		let MVD=L5([0.0,0.0,0.0,MVB[0],MVB[1]])+ MVC;
-		let MVE=L5([IYQ[0],0.0,IYQ[1],0.0,IYQ[2]]);
+		let MUJ=MUC* DLS;
+		let MUK=L5([0.0,0.0,0.0,MUJ[0],MUJ[1]])+ (((((JOS* (DHF* ((DLP+ (((DLP== KOL) as u8 as f64)* KUP)).powf(MTY))))* (DLC* ((DLQ+ (((DLQ== KOL) as u8 as f64)* KUP)).powf(MTZ))))).product_div((-DLS),DLR))* DLG);
+		let MUL=L5([IYQ[0],0.0,IYQ[1],0.0,IYQ[2]]);
 		let DLU=(DGZ- DII)/ DHP;
-		let MVF=((MVE- MTF)- L5([0.0,(MSM* DLU),0.0,0.0,0.0]))/ DHP;
+		let MUM=((MUL- MSM)).product_sum_div(IUF,MSN,(-DLU),DHP);
 		let DLV=DLU> LD;
 		let DMA;
 		let JOT;
 		if DLV{
 		DMA=A;
-		JOT=MSE;
+		JOT=MRM;
 		}else{
 		let DLW=DLU< -50f64;
 		let DMB;
 		let JOU;
 		if DLW{
 		DMB=F;
-		JOU=MSE;
+		JOU=MRM;
 		}else{
 		let DLX=DLU.exp();
 		let DLY=F+ DLX;
 		let DLZ=F/ DLY;
-		let MVG=(((MVF* DLX)* DLZ)* KNJ)/ DLY;
+		let MUN=((MUM* DLX)).product_div((-DLZ),DLY);
 		DMB=DLZ;
-		JOU=MVG;
+		JOU=MUN;
 		}
 		DMA=DMB;
 		JOT=JOU;
 		}
-		let MVH=L5([MSL[0],0.0,MSL[1],MSL[2],MSL[3]]);
+		let MUO=L5([MRT[0],0.0,MRT[1],MRT[2],MRT[3]]);
 		let DMC=((DHO- DLT)- (DID- (DJG* DMA)))/ DIF;
-		let MVI=MSX* DMC;
-		let MVJ=(((MVH- MVD)- (MTN- (L5([0.0,(MTM* DMA),0.0,0.0,0.0])+ (JOT* DJG))))- L5([0.0,MVI[0],0.0,MVI[1],MVI[2]]))/ DIF;
+		let MUP=(((MUO- MUK)- (MSV- (L5([0.0,(MSU* DMA),0.0,0.0,0.0])+ (JOT* DJG))))).product_sum_div(IUF,MSW,(-DMC),DIF);
 		let DMD=DMC> LD;
 		let DNE;
 		let JOV;
 		if DMD{
 		let DME=DIG* DMC;
-		let MVO=MSY* DMC;
-		let MVP=L5([0.0,MVO[0],0.0,MVO[1],MVO[2]])+ (MVJ* DIG);
+		let MUU=MSF* DMC;
+		let MUV=L5([0.0,MUU[0],0.0,MUU[1],MUU[2]])+ (MUP* DIG);
 		DNE=DME;
-		JOV=MVP;
+		JOV=MUV;
 		}else{
 		let DMF=DMC< -50f64;
 		let DNF;
@@ -9220,61 +9200,60 @@ impl Instance {
 		if DMF{
 		let DMG=DMC.exp();
 		let DMH=DIG* DMG;
-		let MVM=MSY* DMG;
-		let MVN=L5([0.0,MVM[0],0.0,MVM[1],MVM[2]])+ ((MVJ* DMG)* DIG);
+		let MUS=MSF* DMG;
+		let MUT=L5([0.0,MUS[0],0.0,MUS[1],MUS[2]])+ ((MUP* DMG)* DIG);
 		DNF=DMH;
-		JOW=MVN;
+		JOW=MUT;
 		}else{
 		let DMI=DMC.exp();
 		let DMJ=F+ DMI;
 		let DMK=DMJ.ln();
 		let DML=DIG* DMK;
-		let MVK=MSY* DMK;
-		let MVL=L5([0.0,MVK[0],0.0,MVK[1],MVK[2]])+ (((MVJ* DMI)* (IUF/ DMJ))* DIG);
+		let MUQ=MSF* DMK;
+		let MUR=L5([0.0,MUQ[0],0.0,MUQ[1],MUQ[2]])+ (((MUP* DMI)* (IUF/ DMJ))* DIG);
 		DNF=DML;
-		JOW=MVL;
+		JOW=MUR;
 		}
 		DNE=DNF;
 		JOV=JOW;
 		}
 		let DMM=(DHO- DII)/ DHP;
-		let MVQ=((MVH- MTF)- L5([0.0,(MSM* DMM),0.0,0.0,0.0]))/ DHP;
+		let MUW=((MUO- MSM)).product_sum_div(IUF,MSN,(-DMM),DHP);
 		let DMN=DMM> LD;
 		let DMS;
 		let JOX;
 		if DMN{
 		DMS=A;
-		JOX=MSE;
+		JOX=MRM;
 		}else{
 		let DMO=DMM< -50f64;
 		let DMT;
 		let JOY;
 		if DMO{
 		DMT=F;
-		JOY=MSE;
+		JOY=MRM;
 		}else{
 		let DMP=DMM.exp();
 		let DMQ=F+ DMP;
 		let DMR=F/ DMQ;
-		let MVR=(((MVQ* DMP)* DMR)* KNJ)/ DMQ;
+		let MUX=((MUW* DMP)).product_div((-DMR),DMQ);
 		DMT=DMR;
-		JOY=MVR;
+		JOY=MUX;
 		}
 		DMS=DMT;
 		JOX=JOY;
 		}
 		let DMU=((DGZ- DLF)- (DID- (DJG* DMS)))/ DIF;
-		let MVS=MSX* DMU;
-		let MVT=(((MVE- MUT)- (MTN- (L5([0.0,(MTM* DMS),0.0,0.0,0.0])+ (JOX* DJG))))- L5([0.0,MVS[0],0.0,MVS[1],MVS[2]]))/ DIF;
+		let MUY=(((MUL- MUB)- (MSV- (L5([0.0,(MSU* DMS),0.0,0.0,0.0])+ (JOX* DJG))))).product_sum_div(IUF,MSW,(-DMU),DIF);
 		let DMV=DMU> LD;
 		let DNG;
 		let JOZ;
 		if DMV{
 		let DMW=DIG* DMU;
-		let MVY=MSY* DMU;
-		let MVZ=L5([0.0,MVY[0],0.0,MVY[1],MVY[2]])+ (MVT* DIG);
+		let MVD=MSF* DMU;
+		let MVE=L5([0.0,MVD[0],0.0,MVD[1],MVD[2]])+ (MUY* DIG);
 		DNG=DMW;
-		JOZ=MVZ;
+		JOZ=MVE;
 		}else{
 		let DMX=DMU< -50f64;
 		let DNH;
@@ -9282,101 +9261,101 @@ impl Instance {
 		if DMX{
 		let DMY=DMU.exp();
 		let DMZ=DIG* DMY;
-		let MVW=MSY* DMY;
-		let MVX=L5([0.0,MVW[0],0.0,MVW[1],MVW[2]])+ ((MVT* DMY)* DIG);
+		let MVB=MSF* DMY;
+		let MVC=L5([0.0,MVB[0],0.0,MVB[1],MVB[2]])+ ((MUY* DMY)* DIG);
 		DNH=DMZ;
-		JPA=MVX;
+		JPA=MVC;
 		}else{
 		let DNA=DMU.exp();
 		let DNB=F+ DNA;
 		let DNC=DNB.ln();
 		let DND=DIG* DNC;
-		let MVU=MSY* DNC;
-		let MVV=L5([0.0,MVU[0],0.0,MVU[1],MVU[2]])+ (((MVT* DNA)* (IUF/ DNB))* DIG);
+		let MUZ=MSF* DNC;
+		let MVA=L5([0.0,MUZ[0],0.0,MUZ[1],MUZ[2]])+ (((MUY* DNA)* (IUF/ DNB))* DIG);
 		DNH=DND;
-		JPA=MVV;
+		JPA=MVA;
 		}
 		DNG=DNH;
 		JOZ=JPA;
 		}
 		let DNI=(DNE- DNG)/ EH;
 		let DNJ=DNI/ DKQ;
-		let MWA=((((JOV- JOZ)- L5([0.0,(KKX* DNI),0.0,0.0,0.0]))/ EH)- (MUG* DNJ))/ DKQ;
+		let MVF=((((JOV- JOZ)).product_sum_div(IUF,MTE,(-DNI),EH))).product_sum_div(IUF,MTP,(-DNJ),DKQ);
 		let DNO;
 		let JPB;
 		if JM{
-		let MWC=MWA* DNJ;
+		let MVH=MVF* DNJ;
 		let DNK=((DNJ* DNJ)+ JV).sqrt();
-		let MWD=(MWC+ MWC)* (IUF/ (KNB* DNK));
+		let MVI=(MVH+ MVH)* (IUF/ (KNB* DNK));
 		DNO=DNK;
-		JPB=MWD;
+		JPB=MVI;
 		}else{
 		let DNL=KB/ JV;
 		let DNM=(DNL* DNJ).tanh();
 		let DNN=DNJ* DNM;
-		let MWB=(MWA* DNM)+ (((MWA* DNL)* (IUF- (DNM* DNM)))* DNJ);
+		let MVG=(MVF* DNM)+ (((MVF* DNL)* (IUF- (DNM* DNM)))* DNJ);
 		DNO=DNN;
-		JPB=MWB;
+		JPB=MVG;
 		}
 		let DNP=F+ (DNO.powf(DHF));
 		let DNQ=DNP.powf(DLC);
 		let DNR=DNJ/ DNQ;
 		let DNS=DKJ* DNR;
-		let MWE=((MWA- (((JPB* (DHF* ((DNO+ (((DNO== KOL) as u8 as f64)* KUP)).powf(MUP))))* (DLC* ((DNP+ (((DNP== KOL) as u8 as f64)* KUP)).powf(MUQ))))* DNR))/ DNQ)* DKJ;
+		let MVJ=((MVF).product_sum_div(IUF,((JPB* (DHF* ((DNO+ (((DNO== KOL) as u8 as f64)* KUP)).powf(MTY))))* (DLC* ((DNP+ (((DNP== KOL) as u8 as f64)* KUP)).powf(MTZ)))),(-DNR),DNQ))* DKJ;
 		let DNT=((JE* O)* P)* JW;
 		let DNU=DNT* (DNE+ DNG);
 		let DNV=DNU* DNS;
-		let MWF=(((JOV+ JOZ)* DNT)* DNS)+ (((MUC* DNR)+ MWE)* DNU);
+		let MVK=(((JOV+ JOZ)* DNT)* DNS)+ (((MTL* DNR)+ MVJ)* DNU);
 		let DNW=MC* DHR;
 		let DNX=DNW* AZ;
-		let MWG=((MSN* MC)* AZ)+ (KJT* DNW);
+		let MVL=((MRV* MC)* AZ)+ (KJT* DNW);
 		let DNY=EH* DNX;
-		let MWH=(KKX* DNX)+ (MWG* EH);
+		let MVM=(KKX* DNX)+ (MVL* EH);
 		let DNZ=DHT- DIH;
-		let MWI=MSQ- MSZ;
+		let MVN=MRY- MSG;
 		let DOH;
 		let JPC;
 		if JM{
 		let DOA=DGZ- DHO;
-		let MWL=(MSK- MSL)* DOA;
+		let MVQ=(MRS- MRT)* DOA;
 		let DOB=((DOA* DOA)+ JV).sqrt();
 		let DOC=JW* ((DGZ+ DHO)+ DOB);
-		let MWM=((MSK+ MSL)+ ((MWL+ MWL)* (IUF/ (KNB* DOB))))* JW;
+		let MVR=((MRS+ MRT)+ ((MVQ+ MVQ)* (IUF/ (KNB* DOB))))* JW;
 		DOH=DOC;
-		JPC=MWM;
+		JPC=MVR;
 		}else{
 		let DOD=DGZ- DHO;
-		let MWJ=MSK- MSL;
+		let MVO=MRS- MRT;
 		let DOE=KB/ JV;
 		let DOF=(DOE* DOD).tanh();
 		let DOG=JW* ((DGZ+ DHO)+ (DOD* DOF));
-		let MWK=((MSK+ MSL)+ ((MWJ* DOF)+ (((MWJ* DOE)* (IUF- (DOF* DOF)))* DOD)))* JW;
+		let MVP=((MRS+ MRT)+ ((MVO* DOF)+ (((MVO* DOE)* (IUF- (DOF* DOF)))* DOD)))* JW;
 		DOH=DOG;
-		JPC=MWK;
+		JPC=MVP;
 		}
-		let MWN=L5([0.0,MWI,0.0,0.0,0.0]);
+		let MVS=L5([0.0,MVN,0.0,0.0,0.0]);
 		let DOI=(DOH- DNZ)/ DHP;
-		let MWO=((L5([JPC[0],0.0,JPC[1],JPC[2],JPC[3]])- MWN)- L5([0.0,(MSM* DOI),0.0,0.0,0.0]))/ DHP;
+		let MVT=((L5([JPC[0],0.0,JPC[1],JPC[2],JPC[3]])- MVS)).product_sum_div(IUF,MSN,(-DOI),DHP);
 		let DOJ=DOI> LD;
 		let DOW;
 		let JPD;
 		if DOJ{
 		DOW=A;
-		JPD=MSE;
+		JPD=MRM;
 		}else{
 		let DOK=DOI< -50f64;
 		let DOX;
 		let JPE;
 		if DOK{
 		DOX=F;
-		JPE=MSE;
+		JPE=MRM;
 		}else{
 		let DOL=DOI.exp();
 		let DOM=F+ DOL;
 		let DON=F/ DOM;
-		let MWP=(((MWO* DOL)* DON)* KNJ)/ DOM;
+		let MVU=((MVT* DOL)).product_div((-DON),DOM);
 		DOX=DON;
-		JPE=MWP;
+		JPE=MVU;
 		}
 		DOW=DOX;
 		JPD=JPE;
@@ -9385,33 +9364,34 @@ impl Instance {
 		let JPF;
 		if JM{
 		let DOO=DGZ- DHO;
-		let MWS=(MSK- MSL)* DOO;
+		let MVX=(MRS- MRT)* DOO;
 		let DOP=((DOO* DOO)+ JV).sqrt();
 		let DOQ=JW* ((DGZ+ DHO)+ DOP);
-		let MWT=((MSK+ MSL)+ ((MWS+ MWS)* (IUF/ (KNB* DOP))))* JW;
+		let MVY=((MRS+ MRT)+ ((MVX+ MVX)* (IUF/ (KNB* DOP))))* JW;
 		DOV=DOQ;
-		JPF=MWT;
+		JPF=MVY;
 		}else{
 		let DOR=DGZ- DHO;
-		let MWQ=MSK- MSL;
+		let MVV=MRS- MRT;
 		let DOS=KB/ JV;
 		let DOT=(DOS* DOR).tanh();
 		let DOU=JW* ((DGZ+ DHO)+ (DOR* DOT));
-		let MWR=((MSK+ MSL)+ ((MWQ* DOT)+ (((MWQ* DOS)* (IUF- (DOT* DOT)))* DOR)))* JW;
+		let MVW=((MRS+ MRT)+ ((MVV* DOT)+ (((MVV* DOS)* (IUF- (DOT* DOT)))* DOR)))* JW;
 		DOV=DOU;
-		JPF=MWR;
+		JPF=MVW;
 		}
-		let MWU=L5([0.0,MSQ,0.0,0.0,0.0]);
+		let MVZ=L5([0.0,MRY,0.0,0.0,0.0]);
 		let DOY=(DOV- (DHT- (DJG* DOW)))/ DNX;
-		let MWV=((L5([JPF[0],0.0,JPF[1],JPF[2],JPF[3]])- (MWU- (L5([0.0,(MTM* DOW),0.0,0.0,0.0])+ (JPD* DJG))))- L5([0.0,(MWG* DOY),0.0,0.0,0.0]))/ DNX;
+		let MWA=L5([0.0,MVL,0.0,0.0,0.0]);
+		let MWB=((L5([JPF[0],0.0,JPF[1],JPF[2],JPF[3]])- (MVZ- (L5([0.0,(MSU* DOW),0.0,0.0,0.0])+ (JPD* DJG))))).product_sum_div(IUF,MWA,(-DOY),DNX);
 		let DOZ=DOY> LD;
 		let DPK;
 		let JPG;
 		if DOZ{
 		let DPA=DNY* DOY;
-		let MWY=L5([0.0,(MWH* DOY),0.0,0.0,0.0])+ (MWV* DNY);
+		let MWE=L5([0.0,(MVM* DOY),0.0,0.0,0.0])+ (MWB* DNY);
 		DPK=DPA;
-		JPG=MWY;
+		JPG=MWE;
 		}else{
 		let DPB=DOY< -50f64;
 		let DPL;
@@ -9419,128 +9399,127 @@ impl Instance {
 		if DPB{
 		let DPC=DOY.exp();
 		let DPD=DNY* DPC;
-		let MWX=L5([0.0,(MWH* DPC),0.0,0.0,0.0])+ ((MWV* DPC)* DNY);
+		let MWD=L5([0.0,(MVM* DPC),0.0,0.0,0.0])+ ((MWB* DPC)* DNY);
 		DPL=DPD;
-		JPH=MWX;
+		JPH=MWD;
 		}else{
 		let DPE=DOY.exp();
 		let DPF=F+ DPE;
 		let DPG=DPF.ln();
 		let DPH=DNY* DPG;
-		let MWW=L5([0.0,(MWH* DPG),0.0,0.0,0.0])+ (((MWV* DPE)* (IUF/ DPF))* DNY);
+		let MWC=L5([0.0,(MVM* DPG),0.0,0.0,0.0])+ (((MWB* DPE)* (IUF/ DPF))* DNY);
 		DPL=DPH;
-		JPH=MWW;
+		JPH=MWC;
 		}
 		DPK=DPL;
 		JPG=JPH;
 		}
 		let DPI=DHE/ DHU;
 		let DPJ=(DKB* DGX)/ DPI;
-		let MWZ=((MTX* DGX)- ((((MSR* DPI)* KNJ)/ DHU)* DPJ))/ DPI;
+		let MWF=product_sum_div((MTG* DGX),IUF,(product_div(MRZ,(-DPI),DHU)),(-DPJ),DPI);
 		let DPM=(MC* DPK)/ EH;
 		let DPN=DPM/ DPJ;
+		let MWG=L5([0.0,MWF,0.0,0.0,0.0]);
 		let DPO=(F+ DPN).sqrt();
 		let DPP=(DPJ* DPO)- DPJ;
-		let MXA=(L5([0.0,(MWZ* DPO),0.0,0.0,0.0])+ (((((((JPG* MC)- L5([0.0,(KKX* DPM),0.0,0.0,0.0]))/ EH)- L5([0.0,(MWZ* DPN),0.0,0.0,0.0]))/ DPJ)* (IUF/ (KNB* DPO)))* DPJ))- L5([0.0,MWZ,0.0,0.0,0.0]);
 		let DPQ=F- DOW;
+		let MWH=(((L5([0.0,(MWF* DPO),0.0,0.0,0.0])+ (((((((JPG* MC)).product_sum_div(IUF,MTE,(-DPM),EH))).product_sum_div(IUF,MWG,(-DPN),DPJ))* (IUF/ (KNB* DPO)))* DPJ))- MWG)* DPQ)+ ((JPD* KNJ)* DPP);
 		let DPR=(DPP* DPQ)+ (DNX* DOW);
-		let MXB=((MXA* DPQ)+ ((JPD* KNJ)* DPP))+ (L5([0.0,(MWG* DOW),0.0,0.0,0.0])+ (JPD* DNX));
+		let MWI=MWH+ (L5([0.0,(MVL* DOW),0.0,0.0,0.0])+ (JPD* DNX));
 		let DPS=QV/ DPR;
-		let MXC=(MUJ- (MXB* DPS))/ DPR;
+		let MWJ=(MTS).product_sum_div(IUF,MWI,(-DPS),DPR);
 		let DQA;
 		let JPI;
 		if JM{
 		let DPT=A- DPS;
-		let MXF=(MXC* KNJ)* DPT;
+		let MWM=(MWJ* KNJ)* DPT;
 		let DPU=((DPT* DPT)+ JV).sqrt();
 		let DPV=JW* ((A+ DPS)+ DPU);
-		let MXG=(MXC+ ((MXF+ MXF)* (IUF/ (KNB* DPU))))* JW;
+		let MWN=(MWJ+ ((MWM+ MWM)* (IUF/ (KNB* DPU))))* JW;
 		DQA=DPV;
-		JPI=MXG;
+		JPI=MWN;
 		}else{
 		let DPW=A- DPS;
-		let MXD=MXC* KNJ;
+		let MWK=MWJ* KNJ;
 		let DPX=KB/ JV;
 		let DPY=(DPX* DPW).tanh();
 		let DPZ=JW* ((A+ DPS)+ (DPW* DPY));
-		let MXE=(MXC+ ((MXD* DPY)+ (((MXD* DPX)* (IUF- (DPY* DPY)))* DPW)))* JW;
+		let MWL=(MWJ+ ((MWK* DPY)+ (((MWK* DPX)* (IUF- (DPY* DPY)))* DPW)))* JW;
 		DQA=DPZ;
-		JPI=MXE;
+		JPI=MWL;
 		}
 		let DQB=F+ (DQA.powf(DHF));
 		let DQC=DQB.powf(DLC);
 		let DQD=F/ DQC;
 		let DQE=QV* DQD;
-		let MXH=KRR* DQD;
-		let MXI=(((((JPI* (DHF* ((DQA+ (((DQA== KOL) as u8 as f64)* KUP)).powf(MUP))))* (DLC* ((DQB+ (((DQB== KOL) as u8 as f64)* KUP)).powf(MUQ))))* DQD)* KNJ)/ DQC)* QV;
-		let MXJ=L5([0.0,0.0,0.0,MXH[0],MXH[1]])+ MXI;
+		let MWO=KRR* DQD;
+		let MWP=L5([0.0,0.0,0.0,MWO[0],MWO[1]])+ (((((JPI* (DHF* ((DQA+ (((DQA== KOL) as u8 as f64)* KUP)).powf(MTY))))* (DLC* ((DQB+ (((DQB== KOL) as u8 as f64)* KUP)).powf(MTZ))))).product_div((-DQD),DQC))* QV);
 		let DQF=DLG/ DPR;
-		let MXK=(MUV- (MXB* DQF))/ DPR;
+		let MWQ=(MUD).product_sum_div(IUF,MWI,(-DQF),DPR);
 		let DQN;
 		let JPJ;
 		if JM{
 		let DQG=A- DQF;
-		let MXN=(MXK* KNJ)* DQG;
+		let MWT=(MWQ* KNJ)* DQG;
 		let DQH=((DQG* DQG)+ JV).sqrt();
 		let DQI=JW* ((A+ DQF)+ DQH);
-		let MXO=(MXK+ ((MXN+ MXN)* (IUF/ (KNB* DQH))))* JW;
+		let MWU=(MWQ+ ((MWT+ MWT)* (IUF/ (KNB* DQH))))* JW;
 		DQN=DQI;
-		JPJ=MXO;
+		JPJ=MWU;
 		}else{
 		let DQJ=A- DQF;
-		let MXL=MXK* KNJ;
+		let MWR=MWQ* KNJ;
 		let DQK=KB/ JV;
 		let DQL=(DQK* DQJ).tanh();
 		let DQM=JW* ((A+ DQF)+ (DQJ* DQL));
-		let MXM=(MXK+ ((MXL* DQL)+ (((MXL* DQK)* (IUF- (DQL* DQL)))* DQJ)))* JW;
+		let MWS=(MWQ+ ((MWR* DQL)+ (((MWR* DQK)* (IUF- (DQL* DQL)))* DQJ)))* JW;
 		DQN=DQM;
-		JPJ=MXM;
+		JPJ=MWS;
 		}
 		let DQO=F+ (DQN.powf(DHF));
 		let DQP=DQO.powf(DLC);
 		let DQQ=F/ DQP;
 		let DQR=DLG* DQQ;
-		let MXP=MUU* DQQ;
-		let MXQ=(((((JPJ* (DHF* ((DQN+ (((DQN== KOL) as u8 as f64)* KUP)).powf(MUP))))* (DLC* ((DQO+ (((DQO== KOL) as u8 as f64)* KUP)).powf(MUQ))))* DQQ)* KNJ)/ DQP)* DLG;
-		let MXR=L5([0.0,0.0,0.0,MXP[0],MXP[1]])+ MXQ;
-		let MXS=L4([IYQ[0],0.0,IYQ[1],IYQ[2]]);
+		let MWV=MUC* DQQ;
+		let MWW=L5([0.0,0.0,0.0,MWV[0],MWV[1]])+ (((((JPJ* (DHF* ((DQN+ (((DQN== KOL) as u8 as f64)* KUP)).powf(MTY))))* (DLC* ((DQO+ (((DQO== KOL) as u8 as f64)* KUP)).powf(MTZ))))).product_div((-DQQ),DQP))* DLG);
+		let MWX=L4([IYQ[0],0.0,IYQ[1],IYQ[2]]);
 		let DQS=(DGZ- DNZ)/ DHP;
-		let MXT=((MXS- L4([0.0,MWI,0.0,0.0]))- L4([0.0,(MSM* DQS),0.0,0.0]))/ DHP;
+		let MWY=((MWX- L4([0.0,MVN,0.0,0.0]))).product_sum_div(IUF,L4([0.0,MRU,0.0,0.0]),(-DQS),DHP);
 		let DQT=DQS> LD;
 		let DQY;
 		let JPK;
 		if DQT{
 		DQY=A;
-		JPK=MSF;
+		JPK=MRN;
 		}else{
 		let DQU=DQS< -50f64;
 		let DQZ;
 		let JPL;
 		if DQU{
 		DQZ=F;
-		JPL=MSF;
+		JPL=MRN;
 		}else{
 		let DQV=DQS.exp();
 		let DQW=F+ DQV;
 		let DQX=F/ DQW;
-		let MXU=(((MXT* DQV)* DQX)* KNJ)/ DQW;
+		let MWZ=((MWY* DQV)).product_div((-DQX),DQW);
 		DQZ=DQX;
-		JPL=MXU;
+		JPL=MWZ;
 		}
 		DQY=DQZ;
 		JPK=JPL;
 		}
-		let MXV=L4([0.0,MSQ,0.0,0.0])- (L4([0.0,(MTM* DQY),0.0,0.0])+ (JPK* DJG));
+		let MXA=L4([0.0,MRY,0.0,0.0])- (L4([0.0,(MSU* DQY),0.0,0.0])+ (JPK* DJG));
 		let DRA=((DHO- DQR)- (DHT- (DJG* DQY)))/ DNX;
-		let MXW=(((MVH- MXR)- L5([MXV[0],MXV[1],MXV[2],0.0,MXV[3]]))- L5([0.0,(MWG* DRA),0.0,0.0,0.0]))/ DNX;
+		let MXB=(((MUO- MWW)- L5([MXA[0],MXA[1],MXA[2],0.0,MXA[3]]))).product_sum_div(IUF,MWA,(-DRA),DNX);
 		let DRB=DRA> LD;
 		let DSC;
 		let JPM;
 		if DRB{
 		let DRC=DNY* DRA;
-		let MXZ=L5([0.0,(MWH* DRA),0.0,0.0,0.0])+ (MXW* DNY);
+		let MXE=L5([0.0,(MVM* DRA),0.0,0.0,0.0])+ (MXB* DNY);
 		DSC=DRC;
-		JPM=MXZ;
+		JPM=MXE;
 		}else{
 		let DRD=DRA< -50f64;
 		let DSD;
@@ -9548,57 +9527,57 @@ impl Instance {
 		if DRD{
 		let DRE=DRA.exp();
 		let DRF=DNY* DRE;
-		let MXY=L5([0.0,(MWH* DRE),0.0,0.0,0.0])+ ((MXW* DRE)* DNY);
+		let MXD=L5([0.0,(MVM* DRE),0.0,0.0,0.0])+ ((MXB* DRE)* DNY);
 		DSD=DRF;
-		JPN=MXY;
+		JPN=MXD;
 		}else{
 		let DRG=DRA.exp();
 		let DRH=F+ DRG;
 		let DRI=DRH.ln();
 		let DRJ=DNY* DRI;
-		let MXX=L5([0.0,(MWH* DRI),0.0,0.0,0.0])+ (((MXW* DRG)* (IUF/ DRH))* DNY);
+		let MXC=L5([0.0,(MVM* DRI),0.0,0.0,0.0])+ (((MXB* DRG)* (IUF/ DRH))* DNY);
 		DSD=DRJ;
-		JPN=MXX;
+		JPN=MXC;
 		}
 		DSC=DSD;
 		JPM=JPN;
 		}
 		let DRK=(DHO- DNZ)/ DHP;
-		let MYA=((MVH- MWN)- L5([0.0,(MSM* DRK),0.0,0.0,0.0]))/ DHP;
+		let MXF=((MUO- MVS)).product_sum_div(IUF,MSN,(-DRK),DHP);
 		let DRL=DRK> LD;
 		let DRQ;
 		let JPO;
 		if DRL{
 		DRQ=A;
-		JPO=MSE;
+		JPO=MRM;
 		}else{
 		let DRM=DRK< -50f64;
 		let DRR;
 		let JPP;
 		if DRM{
 		DRR=F;
-		JPP=MSE;
+		JPP=MRM;
 		}else{
 		let DRN=DRK.exp();
 		let DRO=F+ DRN;
 		let DRP=F/ DRO;
-		let MYB=(((MYA* DRN)* DRP)* KNJ)/ DRO;
+		let MXG=((MXF* DRN)).product_div((-DRP),DRO);
 		DRR=DRP;
-		JPP=MYB;
+		JPP=MXG;
 		}
 		DRQ=DRR;
 		JPO=JPP;
 		}
 		let DRS=((DGZ- DQE)- (DHT- (DJG* DRQ)))/ DNX;
-		let MYC=(((MVE- MXJ)- (MWU- (L5([0.0,(MTM* DRQ),0.0,0.0,0.0])+ (JPO* DJG))))- L5([0.0,(MWG* DRS),0.0,0.0,0.0]))/ DNX;
+		let MXH=(((MUL- MWP)- (MVZ- (L5([0.0,(MSU* DRQ),0.0,0.0,0.0])+ (JPO* DJG))))).product_sum_div(IUF,MWA,(-DRS),DNX);
 		let DRT=DRS> LD;
 		let DSF;
 		let JPQ;
 		if DRT{
 		let DRU=DNY* DRS;
-		let MYF=L5([0.0,(MWH* DRS),0.0,0.0,0.0])+ (MYC* DNY);
+		let MXK=L5([0.0,(MVM* DRS),0.0,0.0,0.0])+ (MXH* DNY);
 		DSF=DRU;
-		JPQ=MYF;
+		JPQ=MXK;
 		}else{
 		let DRV=DRS< -50f64;
 		let DSG;
@@ -9606,45 +9585,45 @@ impl Instance {
 		if DRV{
 		let DRW=DRS.exp();
 		let DRX=DNY* DRW;
-		let MYE=L5([0.0,(MWH* DRW),0.0,0.0,0.0])+ ((MYC* DRW)* DNY);
+		let MXJ=L5([0.0,(MVM* DRW),0.0,0.0,0.0])+ ((MXH* DRW)* DNY);
 		DSG=DRX;
-		JPR=MYE;
+		JPR=MXJ;
 		}else{
 		let DRY=DRS.exp();
 		let DRZ=F+ DRY;
 		let DSA=DRZ.ln();
 		let DSB=DNY* DSA;
-		let MYD=L5([0.0,(MWH* DSA),0.0,0.0,0.0])+ (((MYC* DRY)* (IUF/ DRZ))* DNY);
+		let MXI=L5([0.0,(MVM* DSA),0.0,0.0,0.0])+ (((MXH* DRY)* (IUF/ DRZ))* DNY);
 		DSG=DSB;
-		JPR=MYD;
+		JPR=MXI;
 		}
 		DSF=DSG;
 		JPQ=JPR;
 		}
-		let MYG=JPM* DSC;
-		let MYH=MYG+ MYG;
+		let MXL=JPM* DSC;
+		let MXM=MXL+ MXL;
 		let DSE=(DSC* DSC)+ AEI;
-		let MYI=JPQ* DSF;
-		let MYJ=MYI+ MYI;
+		let MXN=JPQ* DSF;
+		let MXO=MXN+ MXN;
 		let DSH=(DSF* DSF)+ AEI;
-		let MYK=(JPM* DSF)+ (JPQ* DSC);
+		let MXP=(JPM* DSF)+ (JPQ* DSC);
 		let DSI=(DSC* DSF)+ AEI;
 		let DSK=DSE+ DSH;
-		let MYL=MYH+ MYJ;
+		let MXQ=MXM+ MXO;
 		let DSL=(DSC+ DSF)+ AER;
 		let DSM=(DSJ* (DSK+ DSI))/ DSL;
 		let DSN=AEU* DSE;
 		let DSO=AEW* DSH;
-		let MYM=(((((MYH* DSC)+ (JPM* DSE))* MC)+ (((MYJ* DSF)+ (JPQ* DSH))* BF))+ (((MYH* AEU)* DSF)+ (JPQ* DSN)))+ (((MYJ* AEW)* DSC)+ (JPM* DSO));
+		let MXR=(((((MXM* DSC)+ (JPM* DSE))* MC)+ (((MXO* DSF)+ (JPQ* DSH))* BF))+ (((MXM* AEU)* DSF)+ (JPQ* DSN)))+ (((MXO* AEW)* DSC)+ (JPM* DSO));
 		let DSP=AEY* (DSK+ (MC* DSI));
 		let DSQ=(MC* ((((MC* ((DSE* DSC)+ AEK))+ (BF* ((DSH* DSF)+ AEK)))+ (DSN* DSF))+ (DSO* DSC)))/ DSP;
-		let MYN=((MYM* MC)- (((MYL+ (MYK* MC))* AEY)* DSQ))/ DSP;
+		let MXS=((MXR* MC)).product_sum_div(IUF,((MXQ+ (MXP* MC))* AEY),(-DSQ),DSP);
 		let DSR=O* P;
 		let DSS=(DSR* DGX)* JE;
 		let DST=DSS* (DSM- DSQ);
-		let MYO=(((((MYL+ MYK)* DSJ)- ((JPM+ JPQ)* DSM))/ DSL)- MYN)* DSS;
+		let MXT=(((((MXQ+ MXP)* DSJ)).product_sum_div(IUF,(JPM+ JPQ),(-DSM),DSL))- MXS)* DSS;
 		let DSU=DSS* DSQ;
-		let MYP=MYN* DSS;
+		let MXU=MXS* DSS;
 		let DSV=parameters[129]== F;
 		let DUL;
 		let DUM;
@@ -9653,31 +9632,31 @@ impl Instance {
 		if DSV{
 		let DSW=UK* JW;
 		let DSX=DHT- (DSW* DHP);
-		let MYQ=MSQ- (MSM* DSW);
+		let MXV=MRY- (MRU* DSW);
 		let DSY=(DHA- DSX)/ DNX;
-		let MYR=((L4([IYR[0],0.0,IYR[1],IYR[2]])- L4([0.0,MYQ,0.0,0.0]))- L4([0.0,(MWG* DSY),0.0,0.0]))/ DNX;
+		let MXW=((L4([IYR[0],0.0,IYR[1],IYR[2]])- L4([0.0,MXV,0.0,0.0]))).product_sum_div(IUF,L4([0.0,MVL,0.0,0.0]),(-DSY),DNX);
 		let DSZ=DSY> LD;
 		let DTI;
 		let JPU;
 		if DSZ{
 		DTI=DSY;
-		JPU=MYR;
+		JPU=MXW;
 		}else{
 		let DTA=DSY< -50f64;
 		let DTJ;
 		let JPV;
 		if DTA{
 		let DTB=DSY.exp();
-		let MYT=MYR* DTB;
+		let MXY=MXW* DTB;
 		DTJ=DTB;
-		JPV=MYT;
+		JPV=MXY;
 		}else{
 		let DTC=DSY.exp();
 		let DTD=F+ DTC;
 		let DTE=DTD.ln();
-		let MYS=(MYR* DTC)* (IUF/ DTD);
+		let MXX=(MXW* DTC)* (IUF/ DTD);
 		DTJ=DTE;
-		JPV=MYS;
+		JPV=MXX;
 		}
 		DTI=DTJ;
 		JPU=JPV;
@@ -9686,31 +9665,31 @@ impl Instance {
 		let DTG=DTF* FF;
 		let DTH=DTG* DNX;
 		let DTK=DTH* DTI;
-		let MYU=L4([0.0,((((KLF* DTF)* DNX)+ (MWG* DTG))* DTI),0.0,0.0])+ (JPU* DTH);
+		let MXZ=L4([0.0,((((KLF* DTF)* DNX)+ (MVL* DTG))* DTI),0.0,0.0])+ (JPU* DTH);
 		let DTL=(QX- DSX)/ DNX;
-		let MYV=((L3([KRT[0],0.0,KRT[1]])- L3([0.0,MYQ,0.0]))- L3([0.0,(MWG* DTL),0.0]))/ DNX;
+		let MYA=((L3([KRT[0],0.0,KRT[1]])- L3([0.0,MXV,0.0]))).product_sum_div(IUF,L3([0.0,MVL,0.0]),(-DTL),DNX);
 		let DTM=DTL> LD;
 		let DTU;
 		let JPW;
 		if DTM{
 		DTU=DTL;
-		JPW=MYV;
+		JPW=MYA;
 		}else{
 		let DTN=DTL< -50f64;
 		let DTV;
 		let JPX;
 		if DTN{
 		let DTO=DTL.exp();
-		let MYX=MYV* DTO;
+		let MYC=MYA* DTO;
 		DTV=DTO;
-		JPX=MYX;
+		JPX=MYC;
 		}else{
 		let DTP=DTL.exp();
 		let DTQ=F+ DTP;
 		let DTR=DTQ.ln();
-		let MYW=(MYV* DTP)* (IUF/ DTQ);
+		let MYB=(MYA* DTP)* (IUF/ DTQ);
 		DTV=DTR;
-		JPX=MYW;
+		JPX=MYB;
 		}
 		DTU=DTV;
 		JPW=JPX;
@@ -9718,16 +9697,16 @@ impl Instance {
 		let DTS=DTF* GD;
 		let DTT=DTS* DNX;
 		let DTW=DTT* DTU;
-		let MYY=L3([0.0,((((KLN* DTF)* DNX)+ (MWG* DTS))* DTU),0.0])+ (JPW* DTT);
+		let MYD=L3([0.0,((((KLN* DTF)* DNX)+ (MVL* DTS))* DTU),0.0])+ (JPW* DTT);
 		DUL=DTK;
 		DUM=DTW;
-		JPS=MYU;
-		JPT=MYY;
+		JPS=MXZ;
+		JPT=MYD;
 		}else{
 		DUL=A;
 		DUM=A;
-		JPS=MSF;
-		JPT=MSG;
+		JPS=MRN;
+		JPT=MRO;
 		}
 		let DTX=parameters[127]== F;
 		let DUN;
@@ -9735,29 +9714,29 @@ impl Instance {
 		if DTX{
 		let DTY=UK* JW;
 		let DTZ=(DGZ- (DHT- (DTY* DHP)))/ DNX;
-		let MYZ=((MXS- L4([0.0,(MSQ- (MSM* DTY)),0.0,0.0]))- L4([0.0,(MWG* DTZ),0.0,0.0]))/ DNX;
+		let MYE=((MWX- L4([0.0,(MRY- (MRU* DTY)),0.0,0.0]))).product_sum_div(IUF,L4([0.0,MVL,0.0,0.0]),(-DTZ),DNX);
 		let DUA=DTZ> LD;
 		let DUI;
 		let JPZ;
 		if DUA{
 		DUI=DTZ;
-		JPZ=MYZ;
+		JPZ=MYE;
 		}else{
 		let DUB=DTZ< -50f64;
 		let DUJ;
 		let JQA;
 		if DUB{
 		let DUC=DTZ.exp();
-		let MZB=MYZ* DUC;
+		let MYG=MYE* DUC;
 		DUJ=DUC;
-		JQA=MZB;
+		JQA=MYG;
 		}else{
 		let DUD=DTZ.exp();
 		let DUE=F+ DUD;
 		let DUF=DUE.ln();
-		let MZA=(MYZ* DUD)* (IUF/ DUE);
+		let MYF=(MYE* DUD)* (IUF/ DUE);
 		DUJ=DUF;
-		JQA=MZA;
+		JQA=MYF;
 		}
 		DUI=DUJ;
 		JPZ=JQA;
@@ -9765,15 +9744,15 @@ impl Instance {
 		let DUG=(DSR* JE)* parameters[128];
 		let DUH=DUG* DNX;
 		let DUK=DUH* DUI;
-		let MZC=L4([0.0,((MWG* DUG)* DUI),0.0,0.0])+ (JPZ* DUH);
+		let MYH=L4([0.0,((MVL* DUG)* DUI),0.0,0.0])+ (JPZ* DUH);
 		DUN=DUK;
-		JPY=MZC;
+		JPY=MYH;
 		}else{
 		DUN=A;
-		JPY=MSF;
+		JPY=MRN;
 		}
-		let MZD=KRQ* D;
-		let MZE=MWF+ L5([0.0,0.0,0.0,MZD[0],MZD[1]]);
+		let MYI=KRQ* D;
+		let MYJ=MVK+ L5([0.0,0.0,0.0,MYI[0],MYI[1]]);
 		let DUO=A+ (DNV+ (D* QU));
 		DUQ=DST;
 		DUV=DSU;
@@ -9784,13 +9763,13 @@ impl Instance {
 		IJB=DUO;
 		IJC=A;
 		IOK=A;
-		JOC=MYO;
-		JOD=MYP;
+		JOC=MXT;
+		JOD=MXU;
 		JOE=JPS;
 		JOF=JPY;
 		JOG=JPT;
-		JOH=MWF;
-		JOI=MZE;
+		JOH=MVK;
+		JOI=MYJ;
 		}else{
 		DUQ=A;
 		DUV=A;
@@ -9801,13 +9780,13 @@ impl Instance {
 		IJB=A;
 		IJC=DUP;
 		IOK=F;
-		JOC=MSE;
-		JOD=MSE;
-		JOE=MSF;
-		JOF=MSF;
-		JOG=MSG;
-		JOH=MSE;
-		JOI=MSE;
+		JOC=MRM;
+		JOD=MRM;
+		JOE=MRN;
+		JOF=MRN;
+		JOG=MRO;
+		JOH=MRM;
+		JOI=MRM;
 		}
 		let IJD;
 		let IJE;
@@ -9843,40 +9822,40 @@ impl Instance {
 		if QO{
 		let DUR=ddt(100, DUQ);
 		let DUS=AHC* (PT- QP);
-		let MZS=(L2([IUR,0.0])- L2([0.0,IUV]))* AHC;
+		let MYX=(L2([IUR,0.0])- L2([0.0,IUV]))* AHC;
 		let DUT=ddt(101, DUS);
-		let MZT=MZS* KOI;
-		let MZU=(JOC* KOI)+ L5([0.0,0.0,MZT[0],0.0,MZT[1]]);
+		let MYY=MYX* KOI;
+		let MYZ=(JOC* KOI)+ L5([0.0,0.0,MYY[0],0.0,MYY[1]]);
 		let IST=DUQ+ DUS;
-		let MZV=JOC+ L5([0.0,0.0,MZS[0],0.0,MZS[1]]);
+		let MZA=JOC+ L5([0.0,0.0,MYX[0],0.0,MYX[1]]);
 		let DUU=A+ (DUR+ DUT);
 		let DUW=ddt(102, DUV);
 		let DUX=AHC* (PT- QF);
-		let MZW=(L2([IUR,0.0])- L2([0.0,IUU]))* AHC;
+		let MZB=(L2([IUR,0.0])- L2([0.0,IUU]))* AHC;
 		let DUY=ddt(103, DUX);
-		let MZX=MZW* KOI;
-		let MZY=(JOD* KOI)+ L5([0.0,0.0,MZX[0],MZX[1],0.0]);
+		let MZC=MZB* KOI;
+		let MZD=(JOD* KOI)+ L5([0.0,0.0,MZC[0],MZC[1],0.0]);
 		let ISV=DUV+ DUX;
-		let MZZ=JOD+ L5([0.0,0.0,MZW[0],MZW[1],0.0]);
+		let MZE=JOD+ L5([0.0,0.0,MZB[0],MZB[1],0.0]);
 		let DUZ=A+ (DUW+ DUY);
 		let DVB=ddt(104, DVA);
 		let DVC=AHC* (JQ- QP);
-		let NAA=(L2([IUM,0.0])- L2([0.0,IUV]))* AHC;
+		let MZF=(L2([IUM,0.0])- L2([0.0,IUV]))* AHC;
 		let DVD=ddt(105, DVC);
-		let NAB=NAA* KOI;
-		let NAC=(JOE* KOI)+ L4([NAB[0],0.0,0.0,NAB[1]]);
+		let MZG=MZF* KOI;
+		let MZH=(JOE* KOI)+ L4([MZG[0],0.0,0.0,MZG[1]]);
 		let ISX=DVA+ DVC;
-		let NAD=JOE+ L4([NAA[0],0.0,0.0,NAA[1]]);
+		let MZI=JOE+ L4([MZF[0],0.0,0.0,MZF[1]]);
 		let DVE=A+ (DVB+ DVD);
 		let DVH=ddt(106, DVG);
-		let NAE=JOF* KOI;
+		let MZJ=JOF* KOI;
 		let DVI=AHC* (PT- JG);
-		let NAF=(L2([IUR,0.0])- L2([0.0,IUI]))* AHC;
+		let MZK=(L2([IUR,0.0])- L2([0.0,IUI]))* AHC;
 		let DVJ=ddt(107, DVI);
-		let NAG=NAF* KOI;
-		let NAH=L5([NAE[0],NAE[1],NAE[2],0.0,NAE[3]])+ L5([0.0,0.0,NAG[0],NAG[1],0.0]);
+		let MZL=MZK* KOI;
+		let MZM=L5([MZJ[0],MZJ[1],MZJ[2],0.0,MZJ[3]])+ L5([0.0,0.0,MZL[0],MZL[1],0.0]);
 		let ISZ=DVG+ DVI;
-		let NAI=L5([JOF[0],JOF[1],JOF[2],0.0,JOF[3]])+ L5([0.0,0.0,NAF[0],NAF[1],0.0]);
+		let MZN=L5([JOF[0],JOF[1],JOF[2],0.0,JOF[3]])+ L5([0.0,0.0,MZK[0],MZK[1],0.0]);
 		let DVK=A+ (DVH+ DVJ);
 		IJD=DUU;
 		IJE=DUZ;
@@ -9895,47 +9874,47 @@ impl Instance {
 		ITC=A;
 		ITE=A;
 		ITG=A;
-		JQB=MZU;
-		JQC=MZY;
-		JQD=NAC;
-		JQE=NAH;
-		JQF=MSE;
-		JQG=MSE;
-		JQH=MSF;
-		JQI=MZV;
-		JQJ=MZZ;
-		JQK=NAD;
-		JQL=NAI;
-		JQM=MSE;
-		JQN=MSE;
-		JQO=MSF;
+		JQB=MYZ;
+		JQC=MZD;
+		JQD=MZH;
+		JQE=MZM;
+		JQF=MRM;
+		JQG=MRM;
+		JQH=MRN;
+		JQI=MZA;
+		JQJ=MZE;
+		JQK=MZI;
+		JQL=MZN;
+		JQM=MRM;
+		JQN=MRM;
+		JQO=MRN;
 		}else{
 		let DVL=ddt(108, DUQ);
 		let DVM=AHC* (JQ- QP);
-		let MZF=(L2([IUM,0.0])- L2([0.0,IUV]))* AHC;
+		let MYK=(L2([IUM,0.0])- L2([0.0,IUV]))* AHC;
 		let DVN=ddt(109, DVM);
-		let MZG=MZF* KOI;
-		let MZH=(JOC* KOI)+ L5([MZG[0],0.0,0.0,0.0,MZG[1]]);
+		let MYL=MYK* KOI;
+		let MYM=(JOC* KOI)+ L5([MYL[0],0.0,0.0,0.0,MYL[1]]);
 		let ITB=DUQ+ DVM;
-		let MZI=JOC+ L5([MZF[0],0.0,0.0,0.0,MZF[1]]);
+		let MYN=JOC+ L5([MYK[0],0.0,0.0,0.0,MYK[1]]);
 		let DVO=A+ (DVL+ DVN);
 		let DVP=ddt(110, DUV);
 		let DVQ=AHC* (JQ- QF);
-		let MZJ=(L2([IUM,0.0])- L2([0.0,IUU]))* AHC;
+		let MYO=(L2([IUM,0.0])- L2([0.0,IUU]))* AHC;
 		let DVR=ddt(111, DVQ);
-		let MZK=MZJ* KOI;
-		let MZL=(JOD* KOI)+ L5([MZK[0],0.0,0.0,MZK[1],0.0]);
+		let MYP=MYO* KOI;
+		let MYQ=(JOD* KOI)+ L5([MYP[0],0.0,0.0,MYP[1],0.0]);
 		let ITD=DUV+ DVQ;
-		let MZM=JOD+ L5([MZJ[0],0.0,0.0,MZJ[1],0.0]);
+		let MYR=JOD+ L5([MYO[0],0.0,0.0,MYO[1],0.0]);
 		let DVS=A+ (DVP+ DVR);
 		let DVT=ddt(112, DVA);
 		let DVU=AHC* (PT- QP);
-		let MZN=(L2([IUR,0.0])- L2([0.0,IUV]))* AHC;
+		let MYS=(L2([IUR,0.0])- L2([0.0,IUV]))* AHC;
 		let DVV=ddt(113, DVU);
-		let MZO=MZN* KOI;
-		let MZP=(JOE* KOI)+ L4([0.0,0.0,MZO[0],MZO[1]]);
+		let MYT=MYS* KOI;
+		let MYU=(JOE* KOI)+ L4([0.0,0.0,MYT[0],MYT[1]]);
 		let ITF=DVA+ DVU;
-		let MZQ=JOE+ L4([0.0,0.0,MZN[0],MZN[1]]);
+		let MYV=JOE+ L4([0.0,0.0,MYS[0],MYS[1]]);
 		let DVW=A+ (DVT+ DVV);
 		IJD=A;
 		IJE=A;
@@ -9954,29 +9933,29 @@ impl Instance {
 		ITC=ITB;
 		ITE=ITD;
 		ITG=ITF;
-		JQB=MSE;
-		JQC=MSE;
-		JQD=MSF;
-		JQE=MZR;
-		JQF=MZH;
-		JQG=MZL;
-		JQH=MZP;
-		JQI=MSE;
-		JQJ=MSE;
-		JQK=MSF;
-		JQL=MZR;
-		JQM=MZI;
-		JQN=MZM;
-		JQO=MZQ;
+		JQB=MRM;
+		JQC=MRM;
+		JQD=MRN;
+		JQE=MYW;
+		JQF=MYM;
+		JQG=MYQ;
+		JQH=MYU;
+		JQI=MRM;
+		JQJ=MRM;
+		JQK=MRN;
+		JQL=MYW;
+		JQM=MYN;
+		JQN=MYR;
+		JQO=MYV;
 		}
 		let DWA=ddt(114, DVZ);
 		let DWB=AHC* QW;
-		let NAJ=KRS* AHC;
+		let MZO=KRS* AHC;
 		let DWC=ddt(115, DWB);
-		let NAK=NAJ* KOI;
-		let NAL=(JOG* KOI)+ L3([NAK[0],0.0,NAK[1]]);
+		let MZP=MZO* KOI;
+		let MZQ=(JOG* KOI)+ L3([MZP[0],0.0,MZP[1]]);
 		let ITH=DVZ+ DWB;
-		let NAM=JOG+ L3([NAJ[0],0.0,NAJ[1]]);
+		let MZR=JOG+ L3([MZO[0],0.0,MZO[1]]);
 		let DWD=A+ (DWA+ DWC);
 		let DWF=DWE> SV;
 		let EJX;
@@ -9999,34 +9978,34 @@ impl Instance {
 		let DWU;
 		let JQW;
 		if JM{
-		let NAR=KSD* RE;
+		let MZW=KSD* RE;
 		let DWQ=((RE* RE)+ JV).sqrt();
-		let NAS=(NAR+ NAR)* (IUF/ (KNB* DWQ));
+		let MZX=(MZW+ MZW)* (IUF/ (KNB* DWQ));
 		DWU=DWQ;
-		JQW=NAS;
+		JQW=MZX;
 		}else{
 		let DWR=KB/ JV;
 		let DWS=(DWR* RE).tanh();
 		let DWT=RE* DWS;
-		let NAQ=(KSD* DWS)+ (((KSD* DWR)* (IUF- (DWS* DWS)))* RE);
+		let MZV=(KSD* DWS)+ (((KSD* DWR)* (IUF- (DWS* DWS)))* RE);
 		DWU=DWT;
-		JQW=NAQ;
+		JQW=MZV;
 		}
 		let DWV=DWG- RE;
-		let NAT=L4([IYS[0],IYS[1],0.0,IYS[2]]);
-		let NAU=NAT- L4([0.0,0.0,KSD[0],KSD[1]]);
+		let MZY=L4([IYS[0],IYS[1],0.0,IYS[2]]);
+		let MZZ=MZY- L4([0.0,0.0,KSD[0],KSD[1]]);
 		let DWW=DWJ* AZ;
-		let NAV=KJT* DWJ;
+		let NAA=KJT* DWJ;
 		let DWX=TS* AZ;
 		let DWY=parameters[160]/ DWX;
-		let NAW=(((KJT* TS)* DWY)* KNJ)/ DWX;
-		let NAX=JQW* DWI;
+		let NAB=product_div((KJT* TS),(-DWY),DWX);
+		let NAC=JQW* DWI;
 		let DWZ=DWY+ (DWI* DWU);
-		let NAY=L3([NAW,0.0,0.0])+ L3([0.0,NAX[0],NAX[1]]);
-		let NAZ=IVA* DWP;
+		let NAD=L3([NAB,0.0,0.0])+ L3([0.0,NAC[0],NAC[1]]);
+		let NAE=IVA* DWP;
 		let DXA=parameters[146]+ (DWP* BB);
 		let DXB=BE.powf(TI);
-		let NBA=KJV* (TI* ((BE+ (((BE== KOL) as u8 as f64)* KUP)).powf((TI- IUF))));
+		let NAF=KJV* (TI* ((BE+ (((BE== KOL) as u8 as f64)* KUP)).powf((TI- IUF))));
 		let DXC=TH!= A;
 		let DXI;
 		let JQX;
@@ -10036,70 +10015,70 @@ impl Instance {
 		let DXF=F/ DWM;
 		let DXG=DXE.powf(DXF);
 		let DXH=DWU/ DXG;
-		let NBC=(((JQW/ TH)* (DWM* ((DXD+ (((DXD== KOL) as u8 as f64)* KUP)).powf((DWM- IUF)))))* (DXF* ((DXE+ (((DXE== KOL) as u8 as f64)* KUP)).powf((DXF- IUF)))))* DXH;
-		let NBD=(JQW- NBC)/ DXG;
+		let NAH=(JQW).product_sum_div(IUF,(((JQW/ TH)* (DWM* ((DXD+ (((DXD== KOL) as u8 as f64)* KUP)).powf((DWM- IUF)))))* (DXF* ((DXE+ (((DXE== KOL) as u8 as f64)* KUP)).powf((DXF- IUF))))),(-DXH),DXG);
 		DXI=DXH;
-		JQX=NBD;
+		JQX=NAH;
 		}else{
 		DXI=A;
-		JQX=NBB;
+		JQX=NAG;
 		}
 		let DXJ=parameters[159]- (DXI* A);
-		let NBE=(((JQX* A)* KNJ)* DWU)+ (JQW* DXJ);
+		let NAI=(((JQX* A)* KNJ)* DWU)+ (JQW* DXJ);
 		let DXK=DXA- (DXJ* DWU);
-		let NBF=L3([NAZ,0.0,0.0])- L3([0.0,NBE[0],NBE[1]]);
+		let NAJ=L3([NAE,0.0,0.0])- L3([0.0,NAI[0],NAI[1]]);
 		let DXL=MC* DWZ;
 		let DXM=DXL* AZ;
-		let NBG=((NAY* MC)* AZ)+ L3([(KJT* DXL),0.0,0.0]);
+		let NAK=((NAD* MC)* AZ)+ L3([(KJT* DXL),0.0,0.0]);
 		let DXN=EN* DXM;
-		let NBH=L3([(KKZ* DXM),0.0,0.0])+ (NBG* EN);
+		let NAL=L3([(KKZ* DXM),0.0,0.0])+ (NAK* EN);
 		let DXO=(UK* DWW)/ MC;
-		let NBI=(NAV* UK)/ MC;
+		let NAM=(NAA* UK)/ MC;
 		let DXP=DXK- DXO;
-		let NBJ=NBF- L3([NBI,0.0,0.0]);
+		let NAN=NAJ- L3([NAM,0.0,0.0]);
 		let DXX;
 		let JQY;
 		if JM{
 		let DXQ=DWG- DWV;
-		let NBM=(NAT- NAU)* DXQ;
+		let NAQ=(MZY- MZZ)* DXQ;
 		let DXR=((DXQ* DXQ)+ JV).sqrt();
 		let DXS=JW* ((DWG+ DWV)+ DXR);
-		let NBN=((NAT+ NAU)+ ((NBM+ NBM)* (IUF/ (KNB* DXR))))* JW;
+		let NAR=((MZY+ MZZ)+ ((NAQ+ NAQ)* (IUF/ (KNB* DXR))))* JW;
 		DXX=DXS;
-		JQY=NBN;
+		JQY=NAR;
 		}else{
 		let DXT=DWG- DWV;
-		let NBK=NAT- NAU;
+		let NAO=MZY- MZZ;
 		let DXU=KB/ JV;
 		let DXV=(DXU* DXT).tanh();
 		let DXW=JW* ((DWG+ DWV)+ (DXT* DXV));
-		let NBL=((NAT+ NAU)+ ((NBK* DXV)+ (((NBK* DXU)* (IUF- (DXV* DXV)))* DXT)))* JW;
+		let NAP=((MZY+ MZZ)+ ((NAO* DXV)+ (((NAO* DXU)* (IUF- (DXV* DXV)))* DXT)))* JW;
 		DXX=DXW;
-		JQY=NBL;
+		JQY=NAP;
 		}
-		let NBO=L5([0.0,NBJ[0],0.0,NBJ[1],NBJ[2]]);
+		let NAS=L5([0.0,NAN[0],0.0,NAN[1],NAN[2]]);
 		let DXY=(DXX- DXP)/ DWW;
-		let NBP=((L5([JQY[0],0.0,JQY[1],JQY[2],JQY[3]])- NBO)- L5([0.0,(NAV* DXY),0.0,0.0,0.0]))/ DWW;
+		let NAT=L5([0.0,NAA,0.0,0.0,0.0]);
+		let NAU=((L5([JQY[0],0.0,JQY[1],JQY[2],JQY[3]])- NAS)).product_sum_div(IUF,NAT,(-DXY),DWW);
 		let DXZ=DXY> LD;
 		let DYO;
 		let JQZ;
 		if DXZ{
 		DYO=A;
-		JQZ=NAN;
+		JQZ=MZS;
 		}else{
 		let DYA=DXY< -50f64;
 		let DYP;
 		let JRA;
 		if DYA{
 		DYP=F;
-		JRA=NAN;
+		JRA=MZS;
 		}else{
 		let DYB=DXY.exp();
 		let DYC=F+ DYB;
 		let DYD=F/ DYC;
-		let NBQ=(((NBP* DYB)* DYD)* KNJ)/ DYC;
+		let NAV=((NAU* DYB)).product_div((-DYD),DYC);
 		DYP=DYD;
-		JRA=NBQ;
+		JRA=NAV;
 		}
 		DYO=DYP;
 		JQZ=JRA;
@@ -10108,38 +10087,38 @@ impl Instance {
 		let JRB;
 		if JM{
 		let DYE=DWG- DWV;
-		let NBT=(NAT- NAU)* DYE;
+		let NAY=(MZY- MZZ)* DYE;
 		let DYF=((DYE* DYE)+ JV).sqrt();
 		let DYG=JW* ((DWG+ DWV)+ DYF);
-		let NBU=((NAT+ NAU)+ ((NBT+ NBT)* (IUF/ (KNB* DYF))))* JW;
+		let NAZ=((MZY+ MZZ)+ ((NAY+ NAY)* (IUF/ (KNB* DYF))))* JW;
 		DYL=DYG;
-		JRB=NBU;
+		JRB=NAZ;
 		}else{
 		let DYH=DWG- DWV;
-		let NBR=NAT- NAU;
+		let NAW=MZY- MZZ;
 		let DYI=KB/ JV;
 		let DYJ=(DYI* DYH).tanh();
 		let DYK=JW* ((DWG+ DWV)+ (DYH* DYJ));
-		let NBS=((NAT+ NAU)+ ((NBR* DYJ)+ (((NBR* DYI)* (IUF- (DYJ* DYJ)))* DYH)))* JW;
+		let NAX=((MZY+ MZZ)+ ((NAW* DYJ)+ (((NAW* DYI)* (IUF- (DYJ* DYJ)))* DYH)))* JW;
 		DYL=DYK;
-		JRB=NBS;
+		JRB=NAX;
 		}
 		let DYM=UK* AI;
 		let DYN=DYM* DWW;
-		let NBV=NAV* DYM;
-		let NBW=L5([0.0,NBF[0],0.0,NBF[1],NBF[2]]);
+		let NBA=NAA* DYM;
+		let NBB=L5([0.0,NAJ[0],0.0,NAJ[1],NAJ[2]]);
 		let DYQ=(DYL- (DXK- (DYN* DYO)))/ DXM;
-		let NBX=NBG* DYQ;
-		let NBY=((L5([JRB[0],0.0,JRB[1],JRB[2],JRB[3]])- (NBW- (L5([0.0,(NBV* DYO),0.0,0.0,0.0])+ (JQZ* DYN))))- L5([0.0,NBX[0],0.0,NBX[1],NBX[2]]))/ DXM;
+		let NBC=L5([0.0,NAK[0],0.0,NAK[1],NAK[2]]);
+		let NBD=((L5([JRB[0],0.0,JRB[1],JRB[2],JRB[3]])- (NBB- (L5([0.0,(NBA* DYO),0.0,0.0,0.0])+ (JQZ* DYN))))).product_sum_div(IUF,NBC,(-DYQ),DXM);
 		let DYR=DYQ> LD;
 		let DZA;
 		let JRC;
 		if DYR{
 		let DYS=DXN* DYQ;
-		let NCD=NBH* DYQ;
-		let NCE=L5([0.0,NCD[0],0.0,NCD[1],NCD[2]])+ (NBY* DXN);
+		let NBI=NAL* DYQ;
+		let NBJ=L5([0.0,NBI[0],0.0,NBI[1],NBI[2]])+ (NBD* DXN);
 		DZA=DYS;
-		JRC=NCE;
+		JRC=NBJ;
 		}else{
 		let DYT=DYQ< -50f64;
 		let DZB;
@@ -10147,164 +10126,162 @@ impl Instance {
 		if DYT{
 		let DYU=DYQ.exp();
 		let DYV=DXN* DYU;
-		let NCB=NBH* DYU;
-		let NCC=L5([0.0,NCB[0],0.0,NCB[1],NCB[2]])+ ((NBY* DYU)* DXN);
+		let NBG=NAL* DYU;
+		let NBH=L5([0.0,NBG[0],0.0,NBG[1],NBG[2]])+ ((NBD* DYU)* DXN);
 		DZB=DYV;
-		JRD=NCC;
+		JRD=NBH;
 		}else{
 		let DYW=DYQ.exp();
 		let DYX=F+ DYW;
 		let DYY=DYX.ln();
 		let DYZ=DXN* DYY;
-		let NBZ=NBH* DYY;
-		let NCA=L5([0.0,NBZ[0],0.0,NBZ[1],NBZ[2]])+ (((NBY* DYW)* (IUF/ DYX))* DXN);
+		let NBE=NAL* DYY;
+		let NBF=L5([0.0,NBE[0],0.0,NBE[1],NBE[2]])+ (((NBD* DYW)* (IUF/ DYX))* DXN);
 		DZB=DYZ;
-		JRD=NCA;
+		JRD=NBF;
 		}
 		DZA=DZB;
 		JRC=JRD;
 		}
 		let DZC=(DWN* DZA)/ EN;
+		let NBK=L5([0.0,KKZ,0.0,0.0,0.0]);
 		let DZD=F+ DZC;
 		let DZE=DXB* DZD;
 		let DZF=DWL/ DZE;
-		let NCF=(((L5([0.0,(NBA* DZD),0.0,0.0,0.0])+ ((((JRC* DWN)- L5([0.0,(KKZ* DZC),0.0,0.0,0.0]))/ EN)* DXB))* DZF)* KNJ)/ DZE;
+		let NBL=((L5([0.0,(NAF* DZD),0.0,0.0,0.0])+ ((((JRC* DWN)).product_sum_div(IUF,NBK,(-DZC),EN))* DXB))).product_div((-DZF),DZE);
 		let DZG=F+ (TJ* AC);
 		let DZH=(F+ (TJ* E))/ DZG;
 		let DZI=DWK* DZH;
-		let NCG=((((IVA* TJ)* DZH)* KNJ)/ DZG)* DWK;
+		let NBM=(product_div((IVA* TJ),(-DZH),DZG))* DWK;
 		let DZJ=F+ ((TK* DWU)/ DWE);
-		let NCH=((JQW* TK)/ DWE)* DZI;
-		let NCI=L3([(NCG* DZJ),0.0,0.0])+ L3([0.0,NCH[0],NCH[1]]);
+		let NBN=((JQW* TK)/ DWE)* DZI;
+		let NBO=L3([(NBM* DZJ),0.0,0.0])+ L3([0.0,NBN[0],NBN[1]]);
 		let DZK=(DWO* DZA)/ EN;
 		let DZL=F+ DZK;
 		let DZM=(DZI* DZJ)/ DZL;
-		let NCJ=(L5([0.0,NCI[0],0.0,NCI[1],NCI[2]])- ((((JRC* DWO)- L5([0.0,(KKZ* DZK),0.0,0.0,0.0]))/ EN)* DZM))/ DZL;
+		let NBP=(L5([0.0,NBO[0],0.0,NBO[1],NBO[2]])).product_sum_div(IUF,(((JRC* DWO)).product_sum_div(IUF,NBK,(-DZK),EN)),(-DZM),DZL);
 		let DZN=MC* DYO;
 		let DZO=DZN* AZ;
 		let DZP=F- DYO;
-		let NCK=JQZ* KNJ;
+		let NBQ=JQZ* KNJ;
 		let DZQ=((DZO* DZF)/ DWE)+ (DZP* DZM);
-		let NCL=((((((JQZ* MC)* AZ)+ L5([0.0,(KJT* DZN),0.0,0.0,0.0]))* DZF)+ (NCF* DZO))/ DWE)+ ((NCK* DZM)+ (NCJ* DZP));
+		let NBR=((((((JQZ* MC)* AZ)+ L5([0.0,(KJT* DZN),0.0,0.0,0.0]))* DZF)+ (NBL* DZO))/ DWE)+ ((NBQ* DZM)+ (NBP* DZP));
 		let DZR=(DZM* DWE)/ DZF;
-		let NCM=((NCJ* DWE)- (NCF* DZR))/ DZF;
+		let NBS=((NBP* DWE)).product_sum_div(IUF,NBL,(-DZR),DZF);
 		let DZS=(MC* DZA)/ EN;
 		let DZT=DZS/ DZR;
 		let DZU=(F+ DZT).sqrt();
 		let DZV=(DZR* DZU)- DZR;
 		let DZW=DXM* DYO;
-		let NCN=NBG* DYO;
-		let NCO=L5([0.0,NCN[0],0.0,NCN[1],NCN[2]])+ (JQZ* DXM);
+		let NBT=NAK* DYO;
+		let NBU=L5([0.0,NBT[0],0.0,NBT[1],NBT[2]])+ (JQZ* DXM);
 		let DZX=(DZR* DZP)+ DZW;
-		let NCP=((NCM* DZP)+ (NCK* DZR))+ NCO;
-		let NCQ=((((NCM* DZU)+ (((((((JRC* MC)- L5([0.0,(KKZ* DZS),0.0,0.0,0.0]))/ EN)- (NCM* DZT))/ DZR)* (IUF/ (KNB* DZU)))* DZR))- NCM)* DZP)+ (NCK* DZV);
+		let NBV=((NBS* DZP)+ (NBQ* DZR))+ NBU;
+		let NBW=((((NBS* DZU)+ (((((((JRC* MC)).product_sum_div(IUF,NBK,(-DZS),EN))).product_sum_div(IUF,NBS,(-DZT),DZR))* (IUF/ (KNB* DZU)))* DZR))- NBS)* DZP)+ (NBQ* DZV);
 		let DZY=(DZV* DZP)+ DZW;
-		let NCR=NCQ+ NCO;
+		let NBX=NBW+ NBU;
 		let DZZ=RE/ DZY;
-		let NCS=L5([0.0,0.0,0.0,KSD[0],KSD[1]]);
-		let NCT=(NCS- (NCR* DZZ))/ DZY;
+		let NBY=L5([0.0,0.0,0.0,KSD[0],KSD[1]]);
+		let NBZ=(NBY).product_sum_div(IUF,NBX,(-DZZ),DZY);
 		let EAH;
 		let JRE;
 		if JM{
 		let EAA=A- DZZ;
-		let NCW=(NCT* KNJ)* EAA;
+		let NCC=(NBZ* KNJ)* EAA;
 		let EAB=((EAA* EAA)+ JV).sqrt();
 		let EAC=JW* ((A+ DZZ)+ EAB);
-		let NCX=(NCT+ ((NCW+ NCW)* (IUF/ (KNB* EAB))))* JW;
+		let NCD=(NBZ+ ((NCC+ NCC)* (IUF/ (KNB* EAB))))* JW;
 		EAH=EAC;
-		JRE=NCX;
+		JRE=NCD;
 		}else{
 		let EAD=A- DZZ;
-		let NCU=NCT* KNJ;
+		let NCA=NBZ* KNJ;
 		let EAE=KB/ JV;
 		let EAF=(EAE* EAD).tanh();
 		let EAG=JW* ((A+ DZZ)+ (EAD* EAF));
-		let NCV=(NCT+ ((NCU* EAF)+ (((NCU* EAE)* (IUF- (EAF* EAF)))* EAD)))* JW;
+		let NCB=(NBZ+ ((NCA* EAF)+ (((NCA* EAE)* (IUF- (EAF* EAF)))* EAD)))* JW;
 		EAH=EAG;
-		JRE=NCV;
+		JRE=NCB;
 		}
-		let NCY=DWM- IUF;
+		let NCE=DWM- IUF;
 		let EAI=F+ (EAH.powf(DWM));
 		let EAJ=F/ DWM;
 		let EAK=EAI.powf(EAJ);
-		let NCZ=EAJ- IUF;
+		let NCF=EAJ- IUF;
 		let EAL=F/ EAK;
 		let EAM=RE* EAL;
-		let NDA=KSD* EAL;
-		let NDB=(((((JRE* (DWM* ((EAH+ (((EAH== KOL) as u8 as f64)* KUP)).powf(NCY))))* (EAJ* ((EAI+ (((EAI== KOL) as u8 as f64)* KUP)).powf(NCZ))))* EAL)* KNJ)/ EAK)* RE;
-		let NDC=L5([0.0,0.0,0.0,NDA[0],NDA[1]])+ NDB;
+		let NCG=KSD* EAL;
+		let NCH=L5([0.0,0.0,0.0,NCG[0],NCG[1]])+ (((((JRE* (DWM* ((EAH+ (((EAH== KOL) as u8 as f64)* KUP)).powf(NCE))))* (EAJ* ((EAI+ (((EAI== KOL) as u8 as f64)* KUP)).powf(NCF))))).product_div((-EAL),EAK))* RE);
 		let EAN=-RE;
-		let NDD=KSD* KNJ;
+		let NCI=KSD* KNJ;
 		let EAO=EAN/ DZY;
-		let NDE=L5([0.0,0.0,0.0,NDD[0],NDD[1]]);
-		let NDF=(NDE- (NCR* EAO))/ DZY;
+		let NCJ=L5([0.0,0.0,0.0,NCI[0],NCI[1]]);
+		let NCK=(NCJ).product_sum_div(IUF,NBX,(-EAO),DZY);
 		let EAW;
 		let JRF;
 		if JM{
 		let EAP=A- EAO;
-		let NDI=(NDF* KNJ)* EAP;
+		let NCN=(NCK* KNJ)* EAP;
 		let EAQ=((EAP* EAP)+ JV).sqrt();
 		let EAR=JW* ((A+ EAO)+ EAQ);
-		let NDJ=(NDF+ ((NDI+ NDI)* (IUF/ (KNB* EAQ))))* JW;
+		let NCO=(NCK+ ((NCN+ NCN)* (IUF/ (KNB* EAQ))))* JW;
 		EAW=EAR;
-		JRF=NDJ;
+		JRF=NCO;
 		}else{
 		let EAS=A- EAO;
-		let NDG=NDF* KNJ;
+		let NCL=NCK* KNJ;
 		let EAT=KB/ JV;
 		let EAU=(EAT* EAS).tanh();
 		let EAV=JW* ((A+ EAO)+ (EAS* EAU));
-		let NDH=(NDF+ ((NDG* EAU)+ (((NDG* EAT)* (IUF- (EAU* EAU)))* EAS)))* JW;
+		let NCM=(NCK+ ((NCL* EAU)+ (((NCL* EAT)* (IUF- (EAU* EAU)))* EAS)))* JW;
 		EAW=EAV;
-		JRF=NDH;
+		JRF=NCM;
 		}
 		let EAX=F+ (EAW.powf(DWM));
 		let EAY=EAX.powf(EAJ);
 		let EAZ=F/ EAY;
 		let EBA=EAN* EAZ;
-		let NDK=NDD* EAZ;
-		let NDL=(((((JRF* (DWM* ((EAW+ (((EAW== KOL) as u8 as f64)* KUP)).powf(NCY))))* (EAJ* ((EAX+ (((EAX== KOL) as u8 as f64)* KUP)).powf(NCZ))))* EAZ)* KNJ)/ EAY)* EAN;
-		let NDM=L5([0.0,0.0,0.0,NDK[0],NDK[1]])+ NDL;
-		let NDN=L5([IYS[0],0.0,IYS[1],0.0,IYS[2]]);
+		let NCP=NCI* EAZ;
+		let NCQ=L5([0.0,0.0,0.0,NCP[0],NCP[1]])+ (((((JRF* (DWM* ((EAW+ (((EAW== KOL) as u8 as f64)* KUP)).powf(NCE))))* (EAJ* ((EAX+ (((EAX== KOL) as u8 as f64)* KUP)).powf(NCF))))).product_div((-EAZ),EAY))* EAN);
+		let NCR=L5([IYS[0],0.0,IYS[1],0.0,IYS[2]]);
 		let EBB=(DWG- DXP)/ DWW;
-		let NDO=((NDN- NBO)- L5([0.0,(NAV* EBB),0.0,0.0,0.0]))/ DWW;
+		let NCS=((NCR- NAS)).product_sum_div(IUF,NAT,(-EBB),DWW);
 		let EBC=EBB> LD;
 		let EBH;
 		let JRG;
 		if EBC{
 		EBH=A;
-		JRG=NAN;
+		JRG=MZS;
 		}else{
 		let EBD=EBB< -50f64;
 		let EBI;
 		let JRH;
 		if EBD{
 		EBI=F;
-		JRH=NAN;
+		JRH=MZS;
 		}else{
 		let EBE=EBB.exp();
 		let EBF=F+ EBE;
 		let EBG=F/ EBF;
-		let NDP=(((NDO* EBE)* EBG)* KNJ)/ EBF;
+		let NCT=((NCS* EBE)).product_div((-EBG),EBF);
 		EBI=EBG;
-		JRH=NDP;
+		JRH=NCT;
 		}
 		EBH=EBI;
 		JRG=JRH;
 		}
-		let NDQ=L5([NAU[0],0.0,NAU[1],NAU[2],NAU[3]]);
+		let NCU=L5([MZZ[0],0.0,MZZ[1],MZZ[2],MZZ[3]]);
 		let EBJ=((DWV- EBA)- (DXK- (DYN* EBH)))/ DXM;
-		let NDR=NBG* EBJ;
-		let NDS=(((NDQ- NDM)- (NBW- (L5([0.0,(NBV* EBH),0.0,0.0,0.0])+ (JRG* DYN))))- L5([0.0,NDR[0],0.0,NDR[1],NDR[2]]))/ DXM;
+		let NCV=(((NCU- NCQ)- (NBB- (L5([0.0,(NBA* EBH),0.0,0.0,0.0])+ (JRG* DYN))))).product_sum_div(IUF,NBC,(-EBJ),DXM);
 		let EBK=EBJ> LD;
 		let ECL;
 		let JRI;
 		if EBK{
 		let EBL=DXN* EBJ;
-		let NDX=NBH* EBJ;
-		let NDY=L5([0.0,NDX[0],0.0,NDX[1],NDX[2]])+ (NDS* DXN);
+		let NDA=NAL* EBJ;
+		let NDB=L5([0.0,NDA[0],0.0,NDA[1],NDA[2]])+ (NCV* DXN);
 		ECL=EBL;
-		JRI=NDY;
+		JRI=NDB;
 		}else{
 		let EBM=EBJ< -50f64;
 		let ECM;
@@ -10312,61 +10289,60 @@ impl Instance {
 		if EBM{
 		let EBN=EBJ.exp();
 		let EBO=DXN* EBN;
-		let NDV=NBH* EBN;
-		let NDW=L5([0.0,NDV[0],0.0,NDV[1],NDV[2]])+ ((NDS* EBN)* DXN);
+		let NCY=NAL* EBN;
+		let NCZ=L5([0.0,NCY[0],0.0,NCY[1],NCY[2]])+ ((NCV* EBN)* DXN);
 		ECM=EBO;
-		JRJ=NDW;
+		JRJ=NCZ;
 		}else{
 		let EBP=EBJ.exp();
 		let EBQ=F+ EBP;
 		let EBR=EBQ.ln();
 		let EBS=DXN* EBR;
-		let NDT=NBH* EBR;
-		let NDU=L5([0.0,NDT[0],0.0,NDT[1],NDT[2]])+ (((NDS* EBP)* (IUF/ EBQ))* DXN);
+		let NCW=NAL* EBR;
+		let NCX=L5([0.0,NCW[0],0.0,NCW[1],NCW[2]])+ (((NCV* EBP)* (IUF/ EBQ))* DXN);
 		ECM=EBS;
-		JRJ=NDU;
+		JRJ=NCX;
 		}
 		ECL=ECM;
 		JRI=JRJ;
 		}
 		let EBT=(DWV- DXP)/ DWW;
-		let NDZ=((NDQ- NBO)- L5([0.0,(NAV* EBT),0.0,0.0,0.0]))/ DWW;
+		let NDC=((NCU- NAS)).product_sum_div(IUF,NAT,(-EBT),DWW);
 		let EBU=EBT> LD;
 		let EBZ;
 		let JRK;
 		if EBU{
 		EBZ=A;
-		JRK=NAN;
+		JRK=MZS;
 		}else{
 		let EBV=EBT< -50f64;
 		let ECA;
 		let JRL;
 		if EBV{
 		ECA=F;
-		JRL=NAN;
+		JRL=MZS;
 		}else{
 		let EBW=EBT.exp();
 		let EBX=F+ EBW;
 		let EBY=F/ EBX;
-		let NEA=(((NDZ* EBW)* EBY)* KNJ)/ EBX;
+		let NDD=((NDC* EBW)).product_div((-EBY),EBX);
 		ECA=EBY;
-		JRL=NEA;
+		JRL=NDD;
 		}
 		EBZ=ECA;
 		JRK=JRL;
 		}
 		let ECB=((DWG- EAM)- (DXK- (DYN* EBZ)))/ DXM;
-		let NEB=NBG* ECB;
-		let NEC=(((NDN- NDC)- (NBW- (L5([0.0,(NBV* EBZ),0.0,0.0,0.0])+ (JRK* DYN))))- L5([0.0,NEB[0],0.0,NEB[1],NEB[2]]))/ DXM;
+		let NDE=(((NCR- NCH)- (NBB- (L5([0.0,(NBA* EBZ),0.0,0.0,0.0])+ (JRK* DYN))))).product_sum_div(IUF,NBC,(-ECB),DXM);
 		let ECC=ECB> LD;
 		let ECN;
 		let JRM;
 		if ECC{
 		let ECD=DXN* ECB;
-		let NEH=NBH* ECB;
-		let NEI=L5([0.0,NEH[0],0.0,NEH[1],NEH[2]])+ (NEC* DXN);
+		let NDJ=NAL* ECB;
+		let NDK=L5([0.0,NDJ[0],0.0,NDJ[1],NDJ[2]])+ (NDE* DXN);
 		ECN=ECD;
-		JRM=NEI;
+		JRM=NDK;
 		}else{
 		let ECE=ECB< -50f64;
 		let ECO;
@@ -10374,101 +10350,101 @@ impl Instance {
 		if ECE{
 		let ECF=ECB.exp();
 		let ECG=DXN* ECF;
-		let NEF=NBH* ECF;
-		let NEG=L5([0.0,NEF[0],0.0,NEF[1],NEF[2]])+ ((NEC* ECF)* DXN);
+		let NDH=NAL* ECF;
+		let NDI=L5([0.0,NDH[0],0.0,NDH[1],NDH[2]])+ ((NDE* ECF)* DXN);
 		ECO=ECG;
-		JRN=NEG;
+		JRN=NDI;
 		}else{
 		let ECH=ECB.exp();
 		let ECI=F+ ECH;
 		let ECJ=ECI.ln();
 		let ECK=DXN* ECJ;
-		let NED=NBH* ECJ;
-		let NEE=L5([0.0,NED[0],0.0,NED[1],NED[2]])+ (((NEC* ECH)* (IUF/ ECI))* DXN);
+		let NDF=NAL* ECJ;
+		let NDG=L5([0.0,NDF[0],0.0,NDF[1],NDF[2]])+ (((NDE* ECH)* (IUF/ ECI))* DXN);
 		ECO=ECK;
-		JRN=NEE;
+		JRN=NDG;
 		}
 		ECN=ECO;
 		JRM=JRN;
 		}
 		let ECP=(ECL- ECN)/ EN;
 		let ECQ=ECP/ DZX;
-		let NEJ=((((JRI- JRM)- L5([0.0,(KKZ* ECP),0.0,0.0,0.0]))/ EN)- (NCP* ECQ))/ DZX;
+		let NDL=((((JRI- JRM)).product_sum_div(IUF,NBK,(-ECP),EN))).product_sum_div(IUF,NBV,(-ECQ),DZX);
 		let ECV;
 		let JRO;
 		if JM{
-		let NEL=NEJ* ECQ;
+		let NDN=NDL* ECQ;
 		let ECR=((ECQ* ECQ)+ JV).sqrt();
-		let NEM=(NEL+ NEL)* (IUF/ (KNB* ECR));
+		let NDO=(NDN+ NDN)* (IUF/ (KNB* ECR));
 		ECV=ECR;
-		JRO=NEM;
+		JRO=NDO;
 		}else{
 		let ECS=KB/ JV;
 		let ECT=(ECS* ECQ).tanh();
 		let ECU=ECQ* ECT;
-		let NEK=(NEJ* ECT)+ (((NEJ* ECS)* (IUF- (ECT* ECT)))* ECQ);
+		let NDM=(NDL* ECT)+ (((NDL* ECS)* (IUF- (ECT* ECT)))* ECQ);
 		ECV=ECU;
-		JRO=NEK;
+		JRO=NDM;
 		}
 		let ECW=F+ (ECV.powf(DWM));
 		let ECX=ECW.powf(EAJ);
 		let ECY=ECQ/ ECX;
 		let ECZ=DZQ* ECY;
-		let NEN=((NEJ- (((JRO* (DWM* ((ECV+ (((ECV== KOL) as u8 as f64)* KUP)).powf(NCY))))* (EAJ* ((ECW+ (((ECW== KOL) as u8 as f64)* KUP)).powf(NCZ))))* ECY))/ ECX)* DZQ;
+		let NDP=((NDL).product_sum_div(IUF,((JRO* (DWM* ((ECV+ (((ECV== KOL) as u8 as f64)* KUP)).powf(NCE))))* (EAJ* ((ECW+ (((ECW== KOL) as u8 as f64)* KUP)).powf(NCF)))),(-ECY),ECX))* DZQ;
 		let EDA=((JE* O)* P)* JW;
 		let EDB=EDA* (ECL+ ECN);
 		let EDC=EDB* ECZ;
-		let NEO=(((JRI+ JRM)* EDA)* ECZ)+ (((NCL* ECY)+ NEN)* EDB);
+		let NDQ=(((JRI+ JRM)* EDA)* ECZ)+ (((NBR* ECY)+ NDP)* EDB);
 		let EDD=MC* DWY;
 		let EDE=EDD* AZ;
-		let NEP=((NAW* MC)* AZ)+ (KJT* EDD);
+		let NDR=((NAB* MC)* AZ)+ (KJT* EDD);
 		let EDF=EN* EDE;
-		let NEQ=(KKZ* EDE)+ (NEP* EN);
+		let NDS=(KKZ* EDE)+ (NDR* EN);
 		let EDG=DXA- DXO;
-		let NER=NAZ- NBI;
+		let NDT=NAE- NAM;
 		let EDO;
 		let JRP;
 		if JM{
 		let EDH=DWG- DWV;
-		let NEU=(NAT- NAU)* EDH;
+		let NDW=(MZY- MZZ)* EDH;
 		let EDI=((EDH* EDH)+ JV).sqrt();
 		let EDJ=JW* ((DWG+ DWV)+ EDI);
-		let NEV=((NAT+ NAU)+ ((NEU+ NEU)* (IUF/ (KNB* EDI))))* JW;
+		let NDX=((MZY+ MZZ)+ ((NDW+ NDW)* (IUF/ (KNB* EDI))))* JW;
 		EDO=EDJ;
-		JRP=NEV;
+		JRP=NDX;
 		}else{
 		let EDK=DWG- DWV;
-		let NES=NAT- NAU;
+		let NDU=MZY- MZZ;
 		let EDL=KB/ JV;
 		let EDM=(EDL* EDK).tanh();
 		let EDN=JW* ((DWG+ DWV)+ (EDK* EDM));
-		let NET=((NAT+ NAU)+ ((NES* EDM)+ (((NES* EDL)* (IUF- (EDM* EDM)))* EDK)))* JW;
+		let NDV=((MZY+ MZZ)+ ((NDU* EDM)+ (((NDU* EDL)* (IUF- (EDM* EDM)))* EDK)))* JW;
 		EDO=EDN;
-		JRP=NET;
+		JRP=NDV;
 		}
-		let NEW=L5([0.0,NER,0.0,0.0,0.0]);
+		let NDY=L5([0.0,NDT,0.0,0.0,0.0]);
 		let EDP=(EDO- EDG)/ DWW;
-		let NEX=((L5([JRP[0],0.0,JRP[1],JRP[2],JRP[3]])- NEW)- L5([0.0,(NAV* EDP),0.0,0.0,0.0]))/ DWW;
+		let NDZ=((L5([JRP[0],0.0,JRP[1],JRP[2],JRP[3]])- NDY)).product_sum_div(IUF,NAT,(-EDP),DWW);
 		let EDQ=EDP> LD;
 		let EED;
 		let JRQ;
 		if EDQ{
 		EED=A;
-		JRQ=NAN;
+		JRQ=MZS;
 		}else{
 		let EDR=EDP< -50f64;
 		let EEE;
 		let JRR;
 		if EDR{
 		EEE=F;
-		JRR=NAN;
+		JRR=MZS;
 		}else{
 		let EDS=EDP.exp();
 		let EDT=F+ EDS;
 		let EDU=F/ EDT;
-		let NEY=(((NEX* EDS)* EDU)* KNJ)/ EDT;
+		let NEA=((NDZ* EDS)).product_div((-EDU),EDT);
 		EEE=EDU;
-		JRR=NEY;
+		JRR=NEA;
 		}
 		EED=EEE;
 		JRQ=JRR;
@@ -10477,33 +10453,34 @@ impl Instance {
 		let JRS;
 		if JM{
 		let EDV=DWG- DWV;
-		let NFB=(NAT- NAU)* EDV;
+		let NED=(MZY- MZZ)* EDV;
 		let EDW=((EDV* EDV)+ JV).sqrt();
 		let EDX=JW* ((DWG+ DWV)+ EDW);
-		let NFC=((NAT+ NAU)+ ((NFB+ NFB)* (IUF/ (KNB* EDW))))* JW;
+		let NEE=((MZY+ MZZ)+ ((NED+ NED)* (IUF/ (KNB* EDW))))* JW;
 		EEC=EDX;
-		JRS=NFC;
+		JRS=NEE;
 		}else{
 		let EDY=DWG- DWV;
-		let NEZ=NAT- NAU;
+		let NEB=MZY- MZZ;
 		let EDZ=KB/ JV;
 		let EEA=(EDZ* EDY).tanh();
 		let EEB=JW* ((DWG+ DWV)+ (EDY* EEA));
-		let NFA=((NAT+ NAU)+ ((NEZ* EEA)+ (((NEZ* EDZ)* (IUF- (EEA* EEA)))* EDY)))* JW;
+		let NEC=((MZY+ MZZ)+ ((NEB* EEA)+ (((NEB* EDZ)* (IUF- (EEA* EEA)))* EDY)))* JW;
 		EEC=EEB;
-		JRS=NFA;
+		JRS=NEC;
 		}
-		let NFD=L5([0.0,NAZ,0.0,0.0,0.0]);
+		let NEF=L5([0.0,NAE,0.0,0.0,0.0]);
 		let EEF=(EEC- (DXA- (DYN* EED)))/ EDE;
-		let NFE=((L5([JRS[0],0.0,JRS[1],JRS[2],JRS[3]])- (NFD- (L5([0.0,(NBV* EED),0.0,0.0,0.0])+ (JRQ* DYN))))- L5([0.0,(NEP* EEF),0.0,0.0,0.0]))/ EDE;
+		let NEG=L5([0.0,NDR,0.0,0.0,0.0]);
+		let NEH=((L5([JRS[0],0.0,JRS[1],JRS[2],JRS[3]])- (NEF- (L5([0.0,(NBA* EED),0.0,0.0,0.0])+ (JRQ* DYN))))).product_sum_div(IUF,NEG,(-EEF),EDE);
 		let EEG=EEF> LD;
 		let EER;
 		let JRT;
 		if EEG{
 		let EEH=EDF* EEF;
-		let NFH=L5([0.0,(NEQ* EEF),0.0,0.0,0.0])+ (NFE* EDF);
+		let NEK=L5([0.0,(NDS* EEF),0.0,0.0,0.0])+ (NEH* EDF);
 		EER=EEH;
-		JRT=NFH;
+		JRT=NEK;
 		}else{
 		let EEI=EEF< -50f64;
 		let EES;
@@ -10511,128 +10488,127 @@ impl Instance {
 		if EEI{
 		let EEJ=EEF.exp();
 		let EEK=EDF* EEJ;
-		let NFG=L5([0.0,(NEQ* EEJ),0.0,0.0,0.0])+ ((NFE* EEJ)* EDF);
+		let NEJ=L5([0.0,(NDS* EEJ),0.0,0.0,0.0])+ ((NEH* EEJ)* EDF);
 		EES=EEK;
-		JRU=NFG;
+		JRU=NEJ;
 		}else{
 		let EEL=EEF.exp();
 		let EEM=F+ EEL;
 		let EEN=EEM.ln();
 		let EEO=EDF* EEN;
-		let NFF=L5([0.0,(NEQ* EEN),0.0,0.0,0.0])+ (((NFE* EEL)* (IUF/ EEM))* EDF);
+		let NEI=L5([0.0,(NDS* EEN),0.0,0.0,0.0])+ (((NEH* EEL)* (IUF/ EEM))* EDF);
 		EES=EEO;
-		JRU=NFF;
+		JRU=NEI;
 		}
 		EER=EES;
 		JRT=JRU;
 		}
 		let EEP=DWL/ DXB;
 		let EEQ=(DZI* DWE)/ EEP;
-		let NFI=((NCG* DWE)- ((((NBA* EEP)* KNJ)/ DXB)* EEQ))/ EEP;
+		let NEL=product_sum_div((NBM* DWE),IUF,(product_div(NAF,(-EEP),DXB)),(-EEQ),EEP);
 		let EET=(MC* EER)/ EN;
 		let EEU=EET/ EEQ;
+		let NEM=L5([0.0,NEL,0.0,0.0,0.0]);
 		let EEV=(F+ EEU).sqrt();
 		let EEW=(EEQ* EEV)- EEQ;
-		let NFJ=(L5([0.0,(NFI* EEV),0.0,0.0,0.0])+ (((((((JRT* MC)- L5([0.0,(KKZ* EET),0.0,0.0,0.0]))/ EN)- L5([0.0,(NFI* EEU),0.0,0.0,0.0]))/ EEQ)* (IUF/ (KNB* EEV)))* EEQ))- L5([0.0,NFI,0.0,0.0,0.0]);
 		let EEX=F- EED;
+		let NEN=(((L5([0.0,(NEL* EEV),0.0,0.0,0.0])+ (((((((JRT* MC)).product_sum_div(IUF,NBK,(-EET),EN))).product_sum_div(IUF,NEM,(-EEU),EEQ))* (IUF/ (KNB* EEV)))* EEQ))- NEM)* EEX)+ ((JRQ* KNJ)* EEW);
 		let EEY=(EEW* EEX)+ (EDE* EED);
-		let NFK=((NFJ* EEX)+ ((JRQ* KNJ)* EEW))+ (L5([0.0,(NEP* EED),0.0,0.0,0.0])+ (JRQ* EDE));
+		let NEO=NEN+ (L5([0.0,(NDR* EED),0.0,0.0,0.0])+ (JRQ* EDE));
 		let EEZ=RE/ EEY;
-		let NFL=(NCS- (NFK* EEZ))/ EEY;
+		let NEP=(NBY).product_sum_div(IUF,NEO,(-EEZ),EEY);
 		let EFH;
 		let JRV;
 		if JM{
 		let EFA=A- EEZ;
-		let NFO=(NFL* KNJ)* EFA;
+		let NES=(NEP* KNJ)* EFA;
 		let EFB=((EFA* EFA)+ JV).sqrt();
 		let EFC=JW* ((A+ EEZ)+ EFB);
-		let NFP=(NFL+ ((NFO+ NFO)* (IUF/ (KNB* EFB))))* JW;
+		let NET=(NEP+ ((NES+ NES)* (IUF/ (KNB* EFB))))* JW;
 		EFH=EFC;
-		JRV=NFP;
+		JRV=NET;
 		}else{
 		let EFD=A- EEZ;
-		let NFM=NFL* KNJ;
+		let NEQ=NEP* KNJ;
 		let EFE=KB/ JV;
 		let EFF=(EFE* EFD).tanh();
 		let EFG=JW* ((A+ EEZ)+ (EFD* EFF));
-		let NFN=(NFL+ ((NFM* EFF)+ (((NFM* EFE)* (IUF- (EFF* EFF)))* EFD)))* JW;
+		let NER=(NEP+ ((NEQ* EFF)+ (((NEQ* EFE)* (IUF- (EFF* EFF)))* EFD)))* JW;
 		EFH=EFG;
-		JRV=NFN;
+		JRV=NER;
 		}
 		let EFI=F+ (EFH.powf(DWM));
 		let EFJ=EFI.powf(EAJ);
 		let EFK=F/ EFJ;
 		let EFL=RE* EFK;
-		let NFQ=KSD* EFK;
-		let NFR=(((((JRV* (DWM* ((EFH+ (((EFH== KOL) as u8 as f64)* KUP)).powf(NCY))))* (EAJ* ((EFI+ (((EFI== KOL) as u8 as f64)* KUP)).powf(NCZ))))* EFK)* KNJ)/ EFJ)* RE;
-		let NFS=L5([0.0,0.0,0.0,NFQ[0],NFQ[1]])+ NFR;
+		let NEU=KSD* EFK;
+		let NEV=L5([0.0,0.0,0.0,NEU[0],NEU[1]])+ (((((JRV* (DWM* ((EFH+ (((EFH== KOL) as u8 as f64)* KUP)).powf(NCE))))* (EAJ* ((EFI+ (((EFI== KOL) as u8 as f64)* KUP)).powf(NCF))))).product_div((-EFK),EFJ))* RE);
 		let EFM=EAN/ EEY;
-		let NFT=(NDE- (NFK* EFM))/ EEY;
+		let NEW=(NCJ).product_sum_div(IUF,NEO,(-EFM),EEY);
 		let EFU;
 		let JRW;
 		if JM{
 		let EFN=A- EFM;
-		let NFW=(NFT* KNJ)* EFN;
+		let NEZ=(NEW* KNJ)* EFN;
 		let EFO=((EFN* EFN)+ JV).sqrt();
 		let EFP=JW* ((A+ EFM)+ EFO);
-		let NFX=(NFT+ ((NFW+ NFW)* (IUF/ (KNB* EFO))))* JW;
+		let NFA=(NEW+ ((NEZ+ NEZ)* (IUF/ (KNB* EFO))))* JW;
 		EFU=EFP;
-		JRW=NFX;
+		JRW=NFA;
 		}else{
 		let EFQ=A- EFM;
-		let NFU=NFT* KNJ;
+		let NEX=NEW* KNJ;
 		let EFR=KB/ JV;
 		let EFS=(EFR* EFQ).tanh();
 		let EFT=JW* ((A+ EFM)+ (EFQ* EFS));
-		let NFV=(NFT+ ((NFU* EFS)+ (((NFU* EFR)* (IUF- (EFS* EFS)))* EFQ)))* JW;
+		let NEY=(NEW+ ((NEX* EFS)+ (((NEX* EFR)* (IUF- (EFS* EFS)))* EFQ)))* JW;
 		EFU=EFT;
-		JRW=NFV;
+		JRW=NEY;
 		}
 		let EFV=F+ (EFU.powf(DWM));
 		let EFW=EFV.powf(EAJ);
 		let EFX=F/ EFW;
 		let EFY=EAN* EFX;
-		let NFY=NDD* EFX;
-		let NFZ=(((((JRW* (DWM* ((EFU+ (((EFU== KOL) as u8 as f64)* KUP)).powf(NCY))))* (EAJ* ((EFV+ (((EFV== KOL) as u8 as f64)* KUP)).powf(NCZ))))* EFX)* KNJ)/ EFW)* EAN;
-		let NGA=L5([0.0,0.0,0.0,NFY[0],NFY[1]])+ NFZ;
-		let NGB=L4([IYS[0],0.0,IYS[1],IYS[2]]);
+		let NFB=NCI* EFX;
+		let NFC=L5([0.0,0.0,0.0,NFB[0],NFB[1]])+ (((((JRW* (DWM* ((EFU+ (((EFU== KOL) as u8 as f64)* KUP)).powf(NCE))))* (EAJ* ((EFV+ (((EFV== KOL) as u8 as f64)* KUP)).powf(NCF))))).product_div((-EFX),EFW))* EAN);
+		let NFD=L4([IYS[0],0.0,IYS[1],IYS[2]]);
 		let EFZ=(DWG- EDG)/ DWW;
-		let NGC=((NGB- L4([0.0,NER,0.0,0.0]))- L4([0.0,(NAV* EFZ),0.0,0.0]))/ DWW;
+		let NFE=((NFD- L4([0.0,NDT,0.0,0.0]))).product_sum_div(IUF,L4([0.0,NAA,0.0,0.0]),(-EFZ),DWW);
 		let EGA=EFZ> LD;
 		let EGF;
 		let JRX;
 		if EGA{
 		EGF=A;
-		JRX=NAO;
+		JRX=MZT;
 		}else{
 		let EGB=EFZ< -50f64;
 		let EGG;
 		let JRY;
 		if EGB{
 		EGG=F;
-		JRY=NAO;
+		JRY=MZT;
 		}else{
 		let EGC=EFZ.exp();
 		let EGD=F+ EGC;
 		let EGE=F/ EGD;
-		let NGD=(((NGC* EGC)* EGE)* KNJ)/ EGD;
+		let NFF=((NFE* EGC)).product_div((-EGE),EGD);
 		EGG=EGE;
-		JRY=NGD;
+		JRY=NFF;
 		}
 		EGF=EGG;
 		JRX=JRY;
 		}
-		let NGE=L4([0.0,NAZ,0.0,0.0])- (L4([0.0,(NBV* EGF),0.0,0.0])+ (JRX* DYN));
+		let NFG=L4([0.0,NAE,0.0,0.0])- (L4([0.0,(NBA* EGF),0.0,0.0])+ (JRX* DYN));
 		let EGH=((DWV- EFY)- (DXA- (DYN* EGF)))/ EDE;
-		let NGF=(((NDQ- NGA)- L5([NGE[0],NGE[1],NGE[2],0.0,NGE[3]]))- L5([0.0,(NEP* EGH),0.0,0.0,0.0]))/ EDE;
+		let NFH=(((NCU- NFC)- L5([NFG[0],NFG[1],NFG[2],0.0,NFG[3]]))).product_sum_div(IUF,NEG,(-EGH),EDE);
 		let EGI=EGH> LD;
 		let EHJ;
 		let JRZ;
 		if EGI{
 		let EGJ=EDF* EGH;
-		let NGI=L5([0.0,(NEQ* EGH),0.0,0.0,0.0])+ (NGF* EDF);
+		let NFK=L5([0.0,(NDS* EGH),0.0,0.0,0.0])+ (NFH* EDF);
 		EHJ=EGJ;
-		JRZ=NGI;
+		JRZ=NFK;
 		}else{
 		let EGK=EGH< -50f64;
 		let EHK;
@@ -10640,57 +10616,57 @@ impl Instance {
 		if EGK{
 		let EGL=EGH.exp();
 		let EGM=EDF* EGL;
-		let NGH=L5([0.0,(NEQ* EGL),0.0,0.0,0.0])+ ((NGF* EGL)* EDF);
+		let NFJ=L5([0.0,(NDS* EGL),0.0,0.0,0.0])+ ((NFH* EGL)* EDF);
 		EHK=EGM;
-		JSA=NGH;
+		JSA=NFJ;
 		}else{
 		let EGN=EGH.exp();
 		let EGO=F+ EGN;
 		let EGP=EGO.ln();
 		let EGQ=EDF* EGP;
-		let NGG=L5([0.0,(NEQ* EGP),0.0,0.0,0.0])+ (((NGF* EGN)* (IUF/ EGO))* EDF);
+		let NFI=L5([0.0,(NDS* EGP),0.0,0.0,0.0])+ (((NFH* EGN)* (IUF/ EGO))* EDF);
 		EHK=EGQ;
-		JSA=NGG;
+		JSA=NFI;
 		}
 		EHJ=EHK;
 		JRZ=JSA;
 		}
 		let EGR=(DWV- EDG)/ DWW;
-		let NGJ=((NDQ- NEW)- L5([0.0,(NAV* EGR),0.0,0.0,0.0]))/ DWW;
+		let NFL=((NCU- NDY)).product_sum_div(IUF,NAT,(-EGR),DWW);
 		let EGS=EGR> LD;
 		let EGX;
 		let JSB;
 		if EGS{
 		EGX=A;
-		JSB=NAN;
+		JSB=MZS;
 		}else{
 		let EGT=EGR< -50f64;
 		let EGY;
 		let JSC;
 		if EGT{
 		EGY=F;
-		JSC=NAN;
+		JSC=MZS;
 		}else{
 		let EGU=EGR.exp();
 		let EGV=F+ EGU;
 		let EGW=F/ EGV;
-		let NGK=(((NGJ* EGU)* EGW)* KNJ)/ EGV;
+		let NFM=((NFL* EGU)).product_div((-EGW),EGV);
 		EGY=EGW;
-		JSC=NGK;
+		JSC=NFM;
 		}
 		EGX=EGY;
 		JSB=JSC;
 		}
 		let EGZ=((DWG- EFL)- (DXA- (DYN* EGX)))/ EDE;
-		let NGL=(((NDN- NFS)- (NFD- (L5([0.0,(NBV* EGX),0.0,0.0,0.0])+ (JSB* DYN))))- L5([0.0,(NEP* EGZ),0.0,0.0,0.0]))/ EDE;
+		let NFN=(((NCR- NEV)- (NEF- (L5([0.0,(NBA* EGX),0.0,0.0,0.0])+ (JSB* DYN))))).product_sum_div(IUF,NEG,(-EGZ),EDE);
 		let EHA=EGZ> LD;
 		let EHM;
 		let JSD;
 		if EHA{
 		let EHB=EDF* EGZ;
-		let NGO=L5([0.0,(NEQ* EGZ),0.0,0.0,0.0])+ (NGL* EDF);
+		let NFQ=L5([0.0,(NDS* EGZ),0.0,0.0,0.0])+ (NFN* EDF);
 		EHM=EHB;
-		JSD=NGO;
+		JSD=NFQ;
 		}else{
 		let EHC=EGZ< -50f64;
 		let EHN;
@@ -10698,45 +10674,45 @@ impl Instance {
 		if EHC{
 		let EHD=EGZ.exp();
 		let EHE=EDF* EHD;
-		let NGN=L5([0.0,(NEQ* EHD),0.0,0.0,0.0])+ ((NGL* EHD)* EDF);
+		let NFP=L5([0.0,(NDS* EHD),0.0,0.0,0.0])+ ((NFN* EHD)* EDF);
 		EHN=EHE;
-		JSE=NGN;
+		JSE=NFP;
 		}else{
 		let EHF=EGZ.exp();
 		let EHG=F+ EHF;
 		let EHH=EHG.ln();
 		let EHI=EDF* EHH;
-		let NGM=L5([0.0,(NEQ* EHH),0.0,0.0,0.0])+ (((NGL* EHF)* (IUF/ EHG))* EDF);
+		let NFO=L5([0.0,(NDS* EHH),0.0,0.0,0.0])+ (((NFN* EHF)* (IUF/ EHG))* EDF);
 		EHN=EHI;
-		JSE=NGM;
+		JSE=NFO;
 		}
 		EHM=EHN;
 		JSD=JSE;
 		}
-		let NGP=JRZ* EHJ;
-		let NGQ=NGP+ NGP;
+		let NFR=JRZ* EHJ;
+		let NFS=NFR+ NFR;
 		let EHL=(EHJ* EHJ)+ AEI;
-		let NGR=JSD* EHM;
-		let NGS=NGR+ NGR;
+		let NFT=JSD* EHM;
+		let NFU=NFT+ NFT;
 		let EHO=(EHM* EHM)+ AEI;
-		let NGT=(JRZ* EHM)+ (JSD* EHJ);
+		let NFV=(JRZ* EHM)+ (JSD* EHJ);
 		let EHP=(EHJ* EHM)+ AEI;
 		let EHR=EHL+ EHO;
-		let NGU=NGQ+ NGS;
+		let NFW=NFS+ NFU;
 		let EHS=(EHJ+ EHM)+ AER;
 		let EHT=(EHQ* (EHR+ EHP))/ EHS;
 		let EHU=AEU* EHL;
 		let EHV=AEW* EHO;
-		let NGV=(((((NGQ* EHJ)+ (JRZ* EHL))* MC)+ (((NGS* EHM)+ (JSD* EHO))* BF))+ (((NGQ* AEU)* EHM)+ (JSD* EHU)))+ (((NGS* AEW)* EHJ)+ (JRZ* EHV));
+		let NFX=(((((NFS* EHJ)+ (JRZ* EHL))* MC)+ (((NFU* EHM)+ (JSD* EHO))* BF))+ (((NFS* AEU)* EHM)+ (JSD* EHU)))+ (((NFU* AEW)* EHJ)+ (JRZ* EHV));
 		let EHW=AEY* (EHR+ (MC* EHP));
 		let EHX=(MC* ((((MC* ((EHL* EHJ)+ AEK))+ (BF* ((EHO* EHM)+ AEK)))+ (EHU* EHM))+ (EHV* EHJ)))/ EHW;
-		let NGW=((NGV* MC)- (((NGU+ (NGT* MC))* AEY)* EHX))/ EHW;
+		let NFY=((NFX* MC)).product_sum_div(IUF,((NFW+ (NFV* MC))* AEY),(-EHX),EHW);
 		let EHY=O* P;
 		let EHZ=(EHY* DWE)* JE;
 		let EIA=EHZ* (EHT- EHX);
-		let NGX=(((((NGU+ NGT)* EHQ)- ((JRZ+ JSD)* EHT))/ EHS)- NGW)* EHZ;
+		let NFZ=(((((NFW+ NFV)* EHQ)).product_sum_div(IUF,(JRZ+ JSD),(-EHT),EHS))- NFY)* EHZ;
 		let EIB=EHZ* EHX;
-		let NGY=NGW* EHZ;
+		let NGA=NFY* EHZ;
 		let EIC=parameters[151]== F;
 		let EJS;
 		let EJT;
@@ -10745,31 +10721,31 @@ impl Instance {
 		if EIC{
 		let EID=UK* JW;
 		let EIE=DXA- (EID* DWW);
-		let NGZ=NAZ- (NAV* EID);
+		let NGB=NAE- (NAA* EID);
 		let EIF=(DWH- EIE)/ EDE;
-		let NHA=((L4([IYT[0],0.0,IYT[1],IYT[2]])- L4([0.0,NGZ,0.0,0.0]))- L4([0.0,(NEP* EIF),0.0,0.0]))/ EDE;
+		let NGC=((L4([IYT[0],0.0,IYT[1],IYT[2]])- L4([0.0,NGB,0.0,0.0]))).product_sum_div(IUF,L4([0.0,NDR,0.0,0.0]),(-EIF),EDE);
 		let EIG=EIF> LD;
 		let EIP;
 		let JSH;
 		if EIG{
 		EIP=EIF;
-		JSH=NHA;
+		JSH=NGC;
 		}else{
 		let EIH=EIF< -50f64;
 		let EIQ;
 		let JSI;
 		if EIH{
 		let EII=EIF.exp();
-		let NHC=NHA* EII;
+		let NGE=NGC* EII;
 		EIQ=EII;
-		JSI=NHC;
+		JSI=NGE;
 		}else{
 		let EIJ=EIF.exp();
 		let EIK=F+ EIJ;
 		let EIL=EIK.ln();
-		let NHB=(NHA* EIJ)* (IUF/ EIK);
+		let NGD=(NGC* EIJ)* (IUF/ EIK);
 		EIQ=EIL;
-		JSI=NHB;
+		JSI=NGD;
 		}
 		EIP=EIQ;
 		JSH=JSI;
@@ -10778,31 +10754,31 @@ impl Instance {
 		let EIN=EIM* FL;
 		let EIO=EIN* EDE;
 		let EIR=EIO* EIP;
-		let NHD=L4([0.0,((((KLH* EIM)* EDE)+ (NEP* EIN))* EIP),0.0,0.0])+ (JSH* EIO);
+		let NGF=L4([0.0,((((KLH* EIM)* EDE)+ (NDR* EIN))* EIP),0.0,0.0])+ (JSH* EIO);
 		let EIS=(RG- EIE)/ EDE;
-		let NHE=((L3([KSF[0],0.0,KSF[1]])- L3([0.0,NGZ,0.0]))- L3([0.0,(NEP* EIS),0.0]))/ EDE;
+		let NGG=((L3([KSF[0],0.0,KSF[1]])- L3([0.0,NGB,0.0]))).product_sum_div(IUF,L3([0.0,NDR,0.0]),(-EIS),EDE);
 		let EIT=EIS> LD;
 		let EJB;
 		let JSJ;
 		if EIT{
 		EJB=EIS;
-		JSJ=NHE;
+		JSJ=NGG;
 		}else{
 		let EIU=EIS< -50f64;
 		let EJC;
 		let JSK;
 		if EIU{
 		let EIV=EIS.exp();
-		let NHG=NHE* EIV;
+		let NGI=NGG* EIV;
 		EJC=EIV;
-		JSK=NHG;
+		JSK=NGI;
 		}else{
 		let EIW=EIS.exp();
 		let EIX=F+ EIW;
 		let EIY=EIX.ln();
-		let NHF=(NHE* EIW)* (IUF/ EIX);
+		let NGH=(NGG* EIW)* (IUF/ EIX);
 		EJC=EIY;
-		JSK=NHF;
+		JSK=NGH;
 		}
 		EJB=EJC;
 		JSJ=JSK;
@@ -10810,16 +10786,16 @@ impl Instance {
 		let EIZ=EIM* GJ;
 		let EJA=EIZ* EDE;
 		let EJD=EJA* EJB;
-		let NHH=L3([0.0,((((KLP* EIM)* EDE)+ (NEP* EIZ))* EJB),0.0])+ (JSJ* EJA);
+		let NGJ=L3([0.0,((((KLP* EIM)* EDE)+ (NDR* EIZ))* EJB),0.0])+ (JSJ* EJA);
 		EJS=EIR;
 		EJT=EJD;
-		JSF=NHD;
-		JSG=NHH;
+		JSF=NGF;
+		JSG=NGJ;
 		}else{
 		EJS=A;
 		EJT=A;
-		JSF=NAO;
-		JSG=NAP;
+		JSF=MZT;
+		JSG=MZU;
 		}
 		let EJE=parameters[149]== F;
 		let EJU;
@@ -10827,29 +10803,29 @@ impl Instance {
 		if EJE{
 		let EJF=UK* JW;
 		let EJG=(DWG- (DXA- (EJF* DWW)))/ EDE;
-		let NHI=((NGB- L4([0.0,(NAZ- (NAV* EJF)),0.0,0.0]))- L4([0.0,(NEP* EJG),0.0,0.0]))/ EDE;
+		let NGK=((NFD- L4([0.0,(NAE- (NAA* EJF)),0.0,0.0]))).product_sum_div(IUF,L4([0.0,NDR,0.0,0.0]),(-EJG),EDE);
 		let EJH=EJG> LD;
 		let EJP;
 		let JSM;
 		if EJH{
 		EJP=EJG;
-		JSM=NHI;
+		JSM=NGK;
 		}else{
 		let EJI=EJG< -50f64;
 		let EJQ;
 		let JSN;
 		if EJI{
 		let EJJ=EJG.exp();
-		let NHK=NHI* EJJ;
+		let NGM=NGK* EJJ;
 		EJQ=EJJ;
-		JSN=NHK;
+		JSN=NGM;
 		}else{
 		let EJK=EJG.exp();
 		let EJL=F+ EJK;
 		let EJM=EJL.ln();
-		let NHJ=(NHI* EJK)* (IUF/ EJL);
+		let NGL=(NGK* EJK)* (IUF/ EJL);
 		EJQ=EJM;
-		JSN=NHJ;
+		JSN=NGL;
 		}
 		EJP=EJQ;
 		JSM=JSN;
@@ -10857,15 +10833,15 @@ impl Instance {
 		let EJN=(EHY* JE)* parameters[150];
 		let EJO=EJN* EDE;
 		let EJR=EJO* EJP;
-		let NHL=L4([0.0,((NEP* EJN)* EJP),0.0,0.0])+ (JSM* EJO);
+		let NGN=L4([0.0,((NDR* EJN)* EJP),0.0,0.0])+ (JSM* EJO);
 		EJU=EJR;
-		JSL=NHL;
+		JSL=NGN;
 		}else{
 		EJU=A;
-		JSL=NAO;
+		JSL=MZT;
 		}
-		let NHM=KSC* D;
-		let NHN=NEO+ L5([0.0,0.0,0.0,NHM[0],NHM[1]]);
+		let NGO=KSC* D;
+		let NGP=NDQ+ L5([0.0,0.0,0.0,NGO[0],NGO[1]]);
 		let EJV=A+ (EDC+ (D* RD));
 		EJX=EIA;
 		EKC=EIB;
@@ -10876,13 +10852,13 @@ impl Instance {
 		IJN=EJV;
 		IJO=A;
 		IOL=A;
-		JQP=NGX;
-		JQQ=NGY;
+		JQP=NFZ;
+		JQQ=NGA;
 		JQR=JSF;
 		JQS=JSL;
 		JQT=JSG;
-		JQU=NEO;
-		JQV=NHN;
+		JQU=NDQ;
+		JQV=NGP;
 		}else{
 		EJX=A;
 		EKC=A;
@@ -10893,13 +10869,13 @@ impl Instance {
 		IJN=A;
 		IJO=EJW;
 		IOL=F;
-		JQP=NAN;
-		JQQ=NAN;
-		JQR=NAO;
-		JQS=NAO;
-		JQT=NAP;
-		JQU=NAN;
-		JQV=NAN;
+		JQP=MZS;
+		JQQ=MZS;
+		JQR=MZT;
+		JQS=MZT;
+		JQT=MZU;
+		JQU=MZS;
+		JQV=MZS;
 		}
 		let IJP;
 		let IJQ;
@@ -10935,40 +10911,40 @@ impl Instance {
 		if QY{
 		let EJY=ddt(116, EJX);
 		let EJZ=AHC* (PT- KJ);
-		let NIB=(L2([IUR,0.0])- L2([0.0,IUN]))* AHC;
+		let NHD=(L2([IUR,0.0])- L2([0.0,IUN]))* AHC;
 		let EKA=ddt(117, EJZ);
-		let NIC=NIB* KOI;
-		let NID=(JQP* KOI)+ L5([0.0,0.0,NIC[0],0.0,NIC[1]]);
+		let NHE=NHD* KOI;
+		let NHF=(JQP* KOI)+ L5([0.0,0.0,NHE[0],0.0,NHE[1]]);
 		let ITI=EJX+ EJZ;
-		let NIE=JQP+ L5([0.0,0.0,NIB[0],0.0,NIB[1]]);
+		let NHG=JQP+ L5([0.0,0.0,NHD[0],0.0,NHD[1]]);
 		let EKB=A+ (EJY+ EKA);
 		let EKD=ddt(118, EKC);
 		let EKE=AHC* (PT- QP);
-		let NIF=(L2([IUR,0.0])- L2([0.0,IUV]))* AHC;
+		let NHH=(L2([IUR,0.0])- L2([0.0,IUV]))* AHC;
 		let EKF=ddt(119, EKE);
-		let NIG=NIF* KOI;
-		let NIH=(JQQ* KOI)+ L5([0.0,0.0,NIG[0],NIG[1],0.0]);
+		let NHI=NHH* KOI;
+		let NHJ=(JQQ* KOI)+ L5([0.0,0.0,NHI[0],NHI[1],0.0]);
 		let ITK=EKC+ EKE;
-		let NII=JQQ+ L5([0.0,0.0,NIF[0],NIF[1],0.0]);
+		let NHK=JQQ+ L5([0.0,0.0,NHH[0],NHH[1],0.0]);
 		let EKG=A+ (EKD+ EKF);
 		let EKI=ddt(120, EKH);
 		let EKJ=AHC* (JQ- KJ);
-		let NIJ=(L2([IUM,0.0])- L2([0.0,IUN]))* AHC;
+		let NHL=(L2([IUM,0.0])- L2([0.0,IUN]))* AHC;
 		let EKK=ddt(121, EKJ);
-		let NIK=NIJ* KOI;
-		let NIL=(JQR* KOI)+ L4([NIK[0],0.0,0.0,NIK[1]]);
+		let NHM=NHL* KOI;
+		let NHN=(JQR* KOI)+ L4([NHM[0],0.0,0.0,NHM[1]]);
 		let ITM=EKH+ EKJ;
-		let NIM=JQR+ L4([NIJ[0],0.0,0.0,NIJ[1]]);
+		let NHO=JQR+ L4([NHL[0],0.0,0.0,NHL[1]]);
 		let EKL=A+ (EKI+ EKK);
 		let EKO=ddt(122, EKN);
-		let NIN=JQS* KOI;
+		let NHP=JQS* KOI;
 		let EKP=AHC* (PT- JG);
-		let NIO=(L2([IUR,0.0])- L2([0.0,IUI]))* AHC;
+		let NHQ=(L2([IUR,0.0])- L2([0.0,IUI]))* AHC;
 		let EKQ=ddt(123, EKP);
-		let NIP=NIO* KOI;
-		let NIQ=L5([NIN[0],NIN[1],NIN[2],0.0,NIN[3]])+ L5([0.0,0.0,NIP[0],NIP[1],0.0]);
+		let NHR=NHQ* KOI;
+		let NHS=L5([NHP[0],NHP[1],NHP[2],0.0,NHP[3]])+ L5([0.0,0.0,NHR[0],NHR[1],0.0]);
 		let ITO=EKN+ EKP;
-		let NIR=L5([JQS[0],JQS[1],JQS[2],0.0,JQS[3]])+ L5([0.0,0.0,NIO[0],NIO[1],0.0]);
+		let NHT=L5([JQS[0],JQS[1],JQS[2],0.0,JQS[3]])+ L5([0.0,0.0,NHQ[0],NHQ[1],0.0]);
 		let EKR=A+ (EKO+ EKQ);
 		IJP=EKB;
 		IJQ=EKG;
@@ -10987,47 +10963,47 @@ impl Instance {
 		ITR=A;
 		ITT=A;
 		ITV=A;
-		JSO=NID;
-		JSP=NIH;
-		JSQ=NIL;
-		JSR=NIQ;
-		JSS=NAN;
-		JST=NAN;
-		JSU=NAO;
-		JSV=NIE;
-		JSW=NII;
-		JSX=NIM;
-		JSY=NIR;
-		JSZ=NAN;
-		JTA=NAN;
-		JTB=NAO;
+		JSO=NHF;
+		JSP=NHJ;
+		JSQ=NHN;
+		JSR=NHS;
+		JSS=MZS;
+		JST=MZS;
+		JSU=MZT;
+		JSV=NHG;
+		JSW=NHK;
+		JSX=NHO;
+		JSY=NHT;
+		JSZ=MZS;
+		JTA=MZS;
+		JTB=MZT;
 		}else{
 		let EKS=ddt(124, EJX);
 		let EKT=AHC* (JQ- KJ);
-		let NHO=(L2([IUM,0.0])- L2([0.0,IUN]))* AHC;
+		let NGQ=(L2([IUM,0.0])- L2([0.0,IUN]))* AHC;
 		let EKU=ddt(125, EKT);
-		let NHP=NHO* KOI;
-		let NHQ=(JQP* KOI)+ L5([NHP[0],0.0,0.0,0.0,NHP[1]]);
+		let NGR=NGQ* KOI;
+		let NGS=(JQP* KOI)+ L5([NGR[0],0.0,0.0,0.0,NGR[1]]);
 		let ITQ=EJX+ EKT;
-		let NHR=JQP+ L5([NHO[0],0.0,0.0,0.0,NHO[1]]);
+		let NGT=JQP+ L5([NGQ[0],0.0,0.0,0.0,NGQ[1]]);
 		let EKV=A+ (EKS+ EKU);
 		let EKW=ddt(126, EKC);
 		let EKX=AHC* (JQ- QP);
-		let NHS=(L2([IUM,0.0])- L2([0.0,IUV]))* AHC;
+		let NGU=(L2([IUM,0.0])- L2([0.0,IUV]))* AHC;
 		let EKY=ddt(127, EKX);
-		let NHT=NHS* KOI;
-		let NHU=(JQQ* KOI)+ L5([NHT[0],0.0,0.0,NHT[1],0.0]);
+		let NGV=NGU* KOI;
+		let NGW=(JQQ* KOI)+ L5([NGV[0],0.0,0.0,NGV[1],0.0]);
 		let ITS=EKC+ EKX;
-		let NHV=JQQ+ L5([NHS[0],0.0,0.0,NHS[1],0.0]);
+		let NGX=JQQ+ L5([NGU[0],0.0,0.0,NGU[1],0.0]);
 		let EKZ=A+ (EKW+ EKY);
 		let ELA=ddt(128, EKH);
 		let ELB=AHC* (PT- KJ);
-		let NHW=(L2([IUR,0.0])- L2([0.0,IUN]))* AHC;
+		let NGY=(L2([IUR,0.0])- L2([0.0,IUN]))* AHC;
 		let ELC=ddt(129, ELB);
-		let NHX=NHW* KOI;
-		let NHY=(JQR* KOI)+ L4([0.0,0.0,NHX[0],NHX[1]]);
+		let NGZ=NGY* KOI;
+		let NHA=(JQR* KOI)+ L4([0.0,0.0,NGZ[0],NGZ[1]]);
 		let ITU=EKH+ ELB;
-		let NHZ=JQR+ L4([0.0,0.0,NHW[0],NHW[1]]);
+		let NHB=JQR+ L4([0.0,0.0,NGY[0],NGY[1]]);
 		let ELD=A+ (ELA+ ELC);
 		IJP=A;
 		IJQ=A;
@@ -11046,29 +11022,29 @@ impl Instance {
 		ITR=ITQ;
 		ITT=ITS;
 		ITV=ITU;
-		JSO=NAN;
-		JSP=NAN;
-		JSQ=NAO;
-		JSR=NIA;
-		JSS=NHQ;
-		JST=NHU;
-		JSU=NHY;
-		JSV=NAN;
-		JSW=NAN;
-		JSX=NAO;
-		JSY=NIA;
-		JSZ=NHR;
-		JTA=NHV;
-		JTB=NHZ;
+		JSO=MZS;
+		JSP=MZS;
+		JSQ=MZT;
+		JSR=NHC;
+		JSS=NGS;
+		JST=NGW;
+		JSU=NHA;
+		JSV=MZS;
+		JSW=MZS;
+		JSX=MZT;
+		JSY=NHC;
+		JSZ=NGT;
+		JTA=NGX;
+		JTB=NHB;
 		}
 		let ELH=ddt(130, ELG);
 		let ELI=AHC* RF;
-		let NIS=KSE* AHC;
+		let NHU=KSE* AHC;
 		let ELJ=ddt(131, ELI);
-		let NIT=NIS* KOI;
-		let NIU=(JQT* KOI)+ L3([NIT[0],0.0,NIT[1]]);
+		let NHV=NHU* KOI;
+		let NHW=(JQT* KOI)+ L3([NHV[0],0.0,NHV[1]]);
 		let ITW=ELG+ ELI;
-		let NIV=JQT+ L3([NIS[0],0.0,NIS[1]]);
+		let NHX=JQT+ L3([NHU[0],0.0,NHU[1]]);
 		let ELK=A+ (ELH+ ELJ);
 		let ELL=M&& (U> SV);
 		let IDG;
@@ -11081,33 +11057,33 @@ impl Instance {
 		let ELX;
 		let JTE;
 		if JM{
-		let NIY=KNI* KL;
+		let NIA=KNI* KL;
 		let ELT=((KL* KL)+ JV).sqrt();
-		let NIZ=(NIY+ NIY)* (IUF/ (KNB* ELT));
+		let NIB=(NIA+ NIA)* (IUF/ (KNB* ELT));
 		ELX=ELT;
-		JTE=NIZ;
+		JTE=NIB;
 		}else{
 		let ELU=KB/ JV;
 		let ELV=(ELU* KL).tanh();
 		let ELW=KL* ELV;
-		let NIX=(KNI* ELV)+ (((KNI* ELU)* (IUF- (ELV* ELV)))* KL);
+		let NHZ=(KNI* ELV)+ (((KNI* ELU)* (IUF- (ELV* ELV)))* KL);
 		ELX=ELW;
-		JTE=NIX;
+		JTE=NHZ;
 		}
 		let ELY=KO- KL;
-		let NJA=L4([KNK[0],KNK[1],0.0,KNK[2]]);
-		let NJB=NJA- L4([0.0,0.0,KNI[0],KNI[1]]);
+		let NIC=L4([KNK[0],KNK[1],0.0,KNK[2]]);
+		let NID=NIC- L4([0.0,0.0,KNI[0],KNI[1]]);
 		let ELZ=ELN* AZ;
-		let NJC=KJT* ELN;
+		let NIE=KJT* ELN;
 		let EMA=TS* AZ;
 		let EMB=parameters[61]/ EMA;
-		let NJD=JTE* ELM;
+		let NIF=JTE* ELM;
 		let EMC=EMB+ (ELM* ELX);
-		let NJE=L3([((((KJT* TS)* EMB)* KNJ)/ EMA),0.0,0.0])+ L3([0.0,NJD[0],NJD[1]]);
-		let NJF=IVA* ELS;
+		let NIG=L3([(product_div((KJT* TS),(-EMB),EMA)),0.0,0.0])+ L3([0.0,NIF[0],NIF[1]]);
+		let NIH=IVA* ELS;
 		let EMD=KG+ (ELS* BB);
 		let EME=BE.powf(TI);
-		let NJG=KJV* (TI* ((BE+ (((BE== KOL) as u8 as f64)* KUP)).powf((TI- IUF))));
+		let NII=KJV* (TI* ((BE+ (((BE== KOL) as u8 as f64)* KUP)).powf((TI- IUF))));
 		let EMF=TH!= A;
 		let EML;
 		let JTF;
@@ -11117,68 +11093,68 @@ impl Instance {
 		let EMI=F/ ELP;
 		let EMJ=EMH.powf(EMI);
 		let EMK=ELX/ EMJ;
-		let NJI=(((JTE/ TH)* (ELP* ((EMG+ (((EMG== KOL) as u8 as f64)* KUP)).powf((ELP- IUF)))))* (EMI* ((EMH+ (((EMH== KOL) as u8 as f64)* KUP)).powf((EMI- IUF)))))* EMK;
-		let NJJ=(JTE- NJI)/ EMJ;
+		let NIK=(JTE).product_sum_div(IUF,(((JTE/ TH)* (ELP* ((EMG+ (((EMG== KOL) as u8 as f64)* KUP)).powf((ELP- IUF)))))* (EMI* ((EMH+ (((EMH== KOL) as u8 as f64)* KUP)).powf((EMI- IUF))))),(-EMK),EMJ);
 		EML=EMK;
-		JTF=NJJ;
+		JTF=NIK;
 		}else{
 		EML=A;
-		JTF=NJH;
+		JTF=NIJ;
 		}
 		let EMM=parameters[60]- (EML* A);
-		let NJK=(((JTF* A)* KNJ)* ELX)+ (JTE* EMM);
+		let NIL=(((JTF* A)* KNJ)* ELX)+ (JTE* EMM);
 		let EMN=EMD- (EMM* ELX);
-		let NJL=L3([NJF,0.0,0.0])- L3([0.0,NJK[0],NJK[1]]);
+		let NIM=L3([NIH,0.0,0.0])- L3([0.0,NIL[0],NIL[1]]);
 		let EMO=MC* EMC;
 		let EMP=EMO* AZ;
-		let NJM=((NJE* MC)* AZ)+ L3([(KJT* EMO),0.0,0.0]);
+		let NIN=((NIG* MC)* AZ)+ L3([(KJT* EMO),0.0,0.0]);
 		let EMQ=KH* EMP;
-		let NJN=NJM* KH;
+		let NIO=NIN* KH;
 		let EMR=EMN- ((UK* ELZ)/ MC);
-		let NJO=NJL- L3([((NJC* UK)/ MC),0.0,0.0]);
+		let NIP=NIM- L3([((NIE* UK)/ MC),0.0,0.0]);
 		let EMZ;
 		let JTG;
 		if JM{
 		let EMS=KO- ELY;
-		let NJR=(NJA- NJB)* EMS;
+		let NIS=(NIC- NID)* EMS;
 		let EMT=((EMS* EMS)+ JV).sqrt();
 		let EMU=JW* ((KO+ ELY)+ EMT);
-		let NJS=((NJA+ NJB)+ ((NJR+ NJR)* (IUF/ (KNB* EMT))))* JW;
+		let NIT=((NIC+ NID)+ ((NIS+ NIS)* (IUF/ (KNB* EMT))))* JW;
 		EMZ=EMU;
-		JTG=NJS;
+		JTG=NIT;
 		}else{
 		let EMV=KO- ELY;
-		let NJP=NJA- NJB;
+		let NIQ=NIC- NID;
 		let EMW=KB/ JV;
 		let EMX=(EMW* EMV).tanh();
 		let EMY=JW* ((KO+ ELY)+ (EMV* EMX));
-		let NJQ=((NJA+ NJB)+ ((NJP* EMX)+ (((NJP* EMW)* (IUF- (EMX* EMX)))* EMV)))* JW;
+		let NIR=((NIC+ NID)+ ((NIQ* EMX)+ (((NIQ* EMW)* (IUF- (EMX* EMX)))* EMV)))* JW;
 		EMZ=EMY;
-		JTG=NJQ;
+		JTG=NIR;
 		}
-		let NJT=L5([0.0,0.0,NJO[0],NJO[1],NJO[2]]);
+		let NIU=L5([0.0,0.0,NIP[0],NIP[1],NIP[2]]);
 		let ENA=(EMZ- EMR)/ ELZ;
-		let NJU=((L5([JTG[0],JTG[1],0.0,JTG[2],JTG[3]])- NJT)- L5([0.0,0.0,(NJC* ENA),0.0,0.0]))/ ELZ;
+		let NIV=L5([0.0,0.0,NIE,0.0,0.0]);
+		let NIW=((L5([JTG[0],JTG[1],0.0,JTG[2],JTG[3]])- NIU)).product_sum_div(IUF,NIV,(-ENA),ELZ);
 		let ENB=ENA> LD;
 		let ENQ;
 		let JTH;
 		if ENB{
 		ENQ=A;
-		JTH=NIW;
+		JTH=NHY;
 		}else{
 		let ENC=ENA< -50f64;
 		let ENR;
 		let JTI;
 		if ENC{
 		ENR=F;
-		JTI=NIW;
+		JTI=NHY;
 		}else{
 		let END=ENA.exp();
 		let ENE=F+ END;
 		let ENF=F/ ENE;
-		let NJV=(((NJU* END)* ENF)* KNJ)/ ENE;
+		let NIX=((NIW* END)).product_div((-ENF),ENE);
 		ENR=ENF;
-		JTI=NJV;
+		JTI=NIX;
 		}
 		ENQ=ENR;
 		JTH=JTI;
@@ -11187,38 +11163,38 @@ impl Instance {
 		let JTJ;
 		if JM{
 		let ENG=KO- ELY;
-		let NJY=(NJA- NJB)* ENG;
+		let NJA=(NIC- NID)* ENG;
 		let ENH=((ENG* ENG)+ JV).sqrt();
 		let ENI=JW* ((KO+ ELY)+ ENH);
-		let NJZ=((NJA+ NJB)+ ((NJY+ NJY)* (IUF/ (KNB* ENH))))* JW;
+		let NJB=((NIC+ NID)+ ((NJA+ NJA)* (IUF/ (KNB* ENH))))* JW;
 		ENN=ENI;
-		JTJ=NJZ;
+		JTJ=NJB;
 		}else{
 		let ENJ=KO- ELY;
-		let NJW=NJA- NJB;
+		let NIY=NIC- NID;
 		let ENK=KB/ JV;
 		let ENL=(ENK* ENJ).tanh();
 		let ENM=JW* ((KO+ ELY)+ (ENJ* ENL));
-		let NJX=((NJA+ NJB)+ ((NJW* ENL)+ (((NJW* ENK)* (IUF- (ENL* ENL)))* ENJ)))* JW;
+		let NIZ=((NIC+ NID)+ ((NIY* ENL)+ (((NIY* ENK)* (IUF- (ENL* ENL)))* ENJ)))* JW;
 		ENN=ENM;
-		JTJ=NJX;
+		JTJ=NIZ;
 		}
 		let ENO=UK* AI;
 		let ENP=ENO* ELZ;
-		let NKA=NJC* ENO;
-		let NKB=L5([0.0,0.0,NJL[0],NJL[1],NJL[2]]);
+		let NJC=NIE* ENO;
+		let NJD=L5([0.0,0.0,NIM[0],NIM[1],NIM[2]]);
 		let ENS=(ENN- (EMN- (ENP* ENQ)))/ EMP;
-		let NKC=NJM* ENS;
-		let NKD=((L5([JTJ[0],JTJ[1],0.0,JTJ[2],JTJ[3]])- (NKB- (L5([0.0,0.0,(NKA* ENQ),0.0,0.0])+ (JTH* ENP))))- L5([0.0,0.0,NKC[0],NKC[1],NKC[2]]))/ EMP;
+		let NJE=L5([0.0,0.0,NIN[0],NIN[1],NIN[2]]);
+		let NJF=((L5([JTJ[0],JTJ[1],0.0,JTJ[2],JTJ[3]])- (NJD- (L5([0.0,0.0,(NJC* ENQ),0.0,0.0])+ (JTH* ENP))))).product_sum_div(IUF,NJE,(-ENS),EMP);
 		let ENT=ENS> LD;
 		let EOC;
 		let JTK;
 		if ENT{
 		let ENU=EMQ* ENS;
-		let NKI=NJN* ENS;
-		let NKJ=L5([0.0,0.0,NKI[0],NKI[1],NKI[2]])+ (NKD* EMQ);
+		let NJK=NIO* ENS;
+		let NJL=L5([0.0,0.0,NJK[0],NJK[1],NJK[2]])+ (NJF* EMQ);
 		EOC=ENU;
-		JTK=NKJ;
+		JTK=NJL;
 		}else{
 		let ENV=ENS< -50f64;
 		let EOD;
@@ -11226,19 +11202,19 @@ impl Instance {
 		if ENV{
 		let ENW=ENS.exp();
 		let ENX=EMQ* ENW;
-		let NKG=NJN* ENW;
-		let NKH=L5([0.0,0.0,NKG[0],NKG[1],NKG[2]])+ ((NKD* ENW)* EMQ);
+		let NJI=NIO* ENW;
+		let NJJ=L5([0.0,0.0,NJI[0],NJI[1],NJI[2]])+ ((NJF* ENW)* EMQ);
 		EOD=ENX;
-		JTL=NKH;
+		JTL=NJJ;
 		}else{
 		let ENY=ENS.exp();
 		let ENZ=F+ ENY;
 		let EOA=ENZ.ln();
 		let EOB=EMQ* EOA;
-		let NKE=NJN* EOA;
-		let NKF=L5([0.0,0.0,NKE[0],NKE[1],NKE[2]])+ (((NKD* ENY)* (IUF/ ENZ))* EMQ);
+		let NJG=NIO* EOA;
+		let NJH=L5([0.0,0.0,NJG[0],NJG[1],NJG[2]])+ (((NJF* ENY)* (IUF/ ENZ))* EMQ);
 		EOD=EOB;
-		JTL=NKF;
+		JTL=NJH;
 		}
 		EOC=EOD;
 		JTK=JTL;
@@ -11246,137 +11222,134 @@ impl Instance {
 		let EOE=F+ ((ELQ* EOC)/ KH);
 		let EOF=EME* EOE;
 		let EOG=parameters[58]/ EOF;
-		let NKK=(((L5([0.0,0.0,(NJG* EOE),0.0,0.0])+ (((JTK* ELQ)/ KH)* EME))* EOG)* KNJ)/ EOF;
+		let NJM=((L5([0.0,0.0,(NII* EOE),0.0,0.0])+ (((JTK* ELQ)/ KH)* EME))).product_div((-EOG),EOF);
 		let EOH=F+ (TJ* AC);
 		let EOI=(F+ (TJ* E))/ EOH;
 		let EOJ=ELO* EOI;
 		let EOK=F+ ((TK* ELX)/ U);
-		let NKL=((JTE* TK)/ U)* EOJ;
-		let NKM=L3([((((((IVA* TJ)* EOI)* KNJ)/ EOH)* ELO)* EOK),0.0,0.0])+ L3([0.0,NKL[0],NKL[1]]);
+		let NJN=((JTE* TK)/ U)* EOJ;
+		let NJO=L3([(((product_div((IVA* TJ),(-EOI),EOH))* ELO)* EOK),0.0,0.0])+ L3([0.0,NJN[0],NJN[1]]);
 		let EOL=F+ ((ELR* EOC)/ KH);
 		let EOM=(EOJ* EOK)/ EOL;
-		let NKN=(L5([0.0,0.0,NKM[0],NKM[1],NKM[2]])- (((JTK* ELR)/ KH)* EOM))/ EOL;
+		let NJP=(L5([0.0,0.0,NJO[0],NJO[1],NJO[2]])).product_sum_div(IUF,((JTK* ELR)/ KH),(-EOM),EOL);
 		let EON=MC* ENQ;
 		let EOO=EON* AZ;
 		let EOP=F- ENQ;
-		let NKO=JTH* KNJ;
+		let NJQ=JTH* KNJ;
 		let EOQ=((EOO* EOG)/ U)+ (EOP* EOM);
-		let NKP=((((((JTH* MC)* AZ)+ L5([0.0,0.0,(KJT* EON),0.0,0.0]))* EOG)+ (NKK* EOO))/ U)+ ((NKO* EOM)+ (NKN* EOP));
+		let NJR=((((((JTH* MC)* AZ)+ L5([0.0,0.0,(KJT* EON),0.0,0.0]))* EOG)+ (NJM* EOO))/ U)+ ((NJQ* EOM)+ (NJP* EOP));
 		let EOR=(EOM* U)/ EOG;
-		let NKQ=((NKN* U)- (NKK* EOR))/ EOG;
+		let NJS=((NJP* U)).product_sum_div(IUF,NJM,(-EOR),EOG);
 		let EOS=((MC* EOC)/ KH)/ EOR;
 		let EOT=(F+ EOS).sqrt();
 		let EOU=(EOR* EOT)- EOR;
 		let EOV=EMP* ENQ;
-		let NKR=NJM* ENQ;
-		let NKS=L5([0.0,0.0,NKR[0],NKR[1],NKR[2]])+ (JTH* EMP);
+		let NJT=NIN* ENQ;
+		let NJU=L5([0.0,0.0,NJT[0],NJT[1],NJT[2]])+ (JTH* EMP);
 		let EOW=(EOR* EOP)+ EOV;
-		let NKT=((NKQ* EOP)+ (NKO* EOR))+ NKS;
+		let NJV=((NJS* EOP)+ (NJQ* EOR))+ NJU;
 		let EOX=(EOU* EOP)+ EOV;
-		let NKU=(((((NKQ* EOT)+ ((((((JTK* MC)/ KH)- (NKQ* EOS))/ EOR)* (IUF/ (KNB* EOT)))* EOR))- NKQ)* EOP)+ (NKO* EOU))+ NKS;
+		let NJW=(((((NJS* EOT)+ ((((((JTK* MC)/ KH)).product_sum_div(IUF,NJS,(-EOS),EOR))* (IUF/ (KNB* EOT)))* EOR))- NJS)* EOP)+ (NJQ* EOU))+ NJU;
 		let EOY=KL/ EOX;
-		let NKV=(L5([0.0,0.0,0.0,KNI[0],KNI[1]])- (NKU* EOY))/ EOX;
+		let NJX=(L5([0.0,0.0,0.0,KNI[0],KNI[1]])).product_sum_div(IUF,NJW,(-EOY),EOX);
 		let EPG;
 		let JTM;
 		if JM{
 		let EOZ=A- EOY;
-		let NKY=(NKV* KNJ)* EOZ;
+		let NKA=(NJX* KNJ)* EOZ;
 		let EPA=((EOZ* EOZ)+ JV).sqrt();
 		let EPB=JW* ((A+ EOY)+ EPA);
-		let NKZ=(NKV+ ((NKY+ NKY)* (IUF/ (KNB* EPA))))* JW;
+		let NKB=(NJX+ ((NKA+ NKA)* (IUF/ (KNB* EPA))))* JW;
 		EPG=EPB;
-		JTM=NKZ;
+		JTM=NKB;
 		}else{
 		let EPC=A- EOY;
-		let NKW=NKV* KNJ;
+		let NJY=NJX* KNJ;
 		let EPD=KB/ JV;
 		let EPE=(EPD* EPC).tanh();
 		let EPF=JW* ((A+ EOY)+ (EPC* EPE));
-		let NKX=(NKV+ ((NKW* EPE)+ (((NKW* EPD)* (IUF- (EPE* EPE)))* EPC)))* JW;
+		let NJZ=(NJX+ ((NJY* EPE)+ (((NJY* EPD)* (IUF- (EPE* EPE)))* EPC)))* JW;
 		EPG=EPF;
-		JTM=NKX;
+		JTM=NJZ;
 		}
-		let NLA=ELP- IUF;
+		let NKC=ELP- IUF;
 		let EPH=F+ (EPG.powf(ELP));
 		let EPI=F/ ELP;
 		let EPJ=EPH.powf(EPI);
-		let NLB=EPI- IUF;
+		let NKD=EPI- IUF;
 		let EPK=F/ EPJ;
 		let EPL=KL* EPK;
-		let NLC=KNI* EPK;
-		let NLD=(((((JTM* (ELP* ((EPG+ (((EPG== KOL) as u8 as f64)* KUP)).powf(NLA))))* (EPI* ((EPH+ (((EPH== KOL) as u8 as f64)* KUP)).powf(NLB))))* EPK)* KNJ)/ EPJ)* KL;
-		let NLE=L5([0.0,0.0,0.0,NLC[0],NLC[1]])+ NLD;
+		let NKE=KNI* EPK;
+		let NKF=L5([0.0,0.0,0.0,NKE[0],NKE[1]])+ (((((JTM* (ELP* ((EPG+ (((EPG== KOL) as u8 as f64)* KUP)).powf(NKC))))* (EPI* ((EPH+ (((EPH== KOL) as u8 as f64)* KUP)).powf(NKD))))).product_div((-EPK),EPJ))* KL);
 		let EPM=-KL;
-		let NLF=KNI* KNJ;
+		let NKG=KNI* KNJ;
 		let EPN=EPM/ EOX;
-		let NLG=(L5([0.0,0.0,0.0,NLF[0],NLF[1]])- (NKU* EPN))/ EOX;
+		let NKH=(L5([0.0,0.0,0.0,NKG[0],NKG[1]])).product_sum_div(IUF,NJW,(-EPN),EOX);
 		let EPV;
 		let JTN;
 		if JM{
 		let EPO=A- EPN;
-		let NLJ=(NLG* KNJ)* EPO;
+		let NKK=(NKH* KNJ)* EPO;
 		let EPP=((EPO* EPO)+ JV).sqrt();
 		let EPQ=JW* ((A+ EPN)+ EPP);
-		let NLK=(NLG+ ((NLJ+ NLJ)* (IUF/ (KNB* EPP))))* JW;
+		let NKL=(NKH+ ((NKK+ NKK)* (IUF/ (KNB* EPP))))* JW;
 		EPV=EPQ;
-		JTN=NLK;
+		JTN=NKL;
 		}else{
 		let EPR=A- EPN;
-		let NLH=NLG* KNJ;
+		let NKI=NKH* KNJ;
 		let EPS=KB/ JV;
 		let EPT=(EPS* EPR).tanh();
 		let EPU=JW* ((A+ EPN)+ (EPR* EPT));
-		let NLI=(NLG+ ((NLH* EPT)+ (((NLH* EPS)* (IUF- (EPT* EPT)))* EPR)))* JW;
+		let NKJ=(NKH+ ((NKI* EPT)+ (((NKI* EPS)* (IUF- (EPT* EPT)))* EPR)))* JW;
 		EPV=EPU;
-		JTN=NLI;
+		JTN=NKJ;
 		}
 		let EPW=F+ (EPV.powf(ELP));
 		let EPX=EPW.powf(EPI);
 		let EPY=F/ EPX;
 		let EPZ=EPM* EPY;
-		let NLL=NLF* EPY;
-		let NLM=(((((JTN* (ELP* ((EPV+ (((EPV== KOL) as u8 as f64)* KUP)).powf(NLA))))* (EPI* ((EPW+ (((EPW== KOL) as u8 as f64)* KUP)).powf(NLB))))* EPY)* KNJ)/ EPX)* EPM;
-		let NLN=L5([0.0,0.0,0.0,NLL[0],NLL[1]])+ NLM;
-		let NLO=L5([KNK[0],KNK[1],0.0,0.0,KNK[2]]);
+		let NKM=NKG* EPY;
+		let NKN=L5([0.0,0.0,0.0,NKM[0],NKM[1]])+ (((((JTN* (ELP* ((EPV+ (((EPV== KOL) as u8 as f64)* KUP)).powf(NKC))))* (EPI* ((EPW+ (((EPW== KOL) as u8 as f64)* KUP)).powf(NKD))))).product_div((-EPY),EPX))* EPM);
+		let NKO=L5([KNK[0],KNK[1],0.0,0.0,KNK[2]]);
 		let EQA=(KO- EMR)/ ELZ;
-		let NLP=((NLO- NJT)- L5([0.0,0.0,(NJC* EQA),0.0,0.0]))/ ELZ;
+		let NKP=((NKO- NIU)).product_sum_div(IUF,NIV,(-EQA),ELZ);
 		let EQB=EQA> LD;
 		let EQG;
 		let JTO;
 		if EQB{
 		EQG=A;
-		JTO=NIW;
+		JTO=NHY;
 		}else{
 		let EQC=EQA< -50f64;
 		let EQH;
 		let JTP;
 		if EQC{
 		EQH=F;
-		JTP=NIW;
+		JTP=NHY;
 		}else{
 		let EQD=EQA.exp();
 		let EQE=F+ EQD;
 		let EQF=F/ EQE;
-		let NLQ=(((NLP* EQD)* EQF)* KNJ)/ EQE;
+		let NKQ=((NKP* EQD)).product_div((-EQF),EQE);
 		EQH=EQF;
-		JTP=NLQ;
+		JTP=NKQ;
 		}
 		EQG=EQH;
 		JTO=JTP;
 		}
-		let NLR=L5([NJB[0],NJB[1],0.0,NJB[2],NJB[3]]);
+		let NKR=L5([NID[0],NID[1],0.0,NID[2],NID[3]]);
 		let EQI=((ELY- EPZ)- (EMN- (ENP* EQG)))/ EMP;
-		let NLS=NJM* EQI;
-		let NLT=(((NLR- NLN)- (NKB- (L5([0.0,0.0,(NKA* EQG),0.0,0.0])+ (JTO* ENP))))- L5([0.0,0.0,NLS[0],NLS[1],NLS[2]]))/ EMP;
+		let NKS=(((NKR- NKN)- (NJD- (L5([0.0,0.0,(NJC* EQG),0.0,0.0])+ (JTO* ENP))))).product_sum_div(IUF,NJE,(-EQI),EMP);
 		let EQJ=EQI> LD;
 		let ERK;
 		let JTQ;
 		if EQJ{
 		let EQK=EMQ* EQI;
-		let NLY=NJN* EQI;
-		let NLZ=L5([0.0,0.0,NLY[0],NLY[1],NLY[2]])+ (NLT* EMQ);
+		let NKX=NIO* EQI;
+		let NKY=L5([0.0,0.0,NKX[0],NKX[1],NKX[2]])+ (NKS* EMQ);
 		ERK=EQK;
-		JTQ=NLZ;
+		JTQ=NKY;
 		}else{
 		let EQL=EQI< -50f64;
 		let ERL;
@@ -11384,61 +11357,60 @@ impl Instance {
 		if EQL{
 		let EQM=EQI.exp();
 		let EQN=EMQ* EQM;
-		let NLW=NJN* EQM;
-		let NLX=L5([0.0,0.0,NLW[0],NLW[1],NLW[2]])+ ((NLT* EQM)* EMQ);
+		let NKV=NIO* EQM;
+		let NKW=L5([0.0,0.0,NKV[0],NKV[1],NKV[2]])+ ((NKS* EQM)* EMQ);
 		ERL=EQN;
-		JTR=NLX;
+		JTR=NKW;
 		}else{
 		let EQO=EQI.exp();
 		let EQP=F+ EQO;
 		let EQQ=EQP.ln();
 		let EQR=EMQ* EQQ;
-		let NLU=NJN* EQQ;
-		let NLV=L5([0.0,0.0,NLU[0],NLU[1],NLU[2]])+ (((NLT* EQO)* (IUF/ EQP))* EMQ);
+		let NKT=NIO* EQQ;
+		let NKU=L5([0.0,0.0,NKT[0],NKT[1],NKT[2]])+ (((NKS* EQO)* (IUF/ EQP))* EMQ);
 		ERL=EQR;
-		JTR=NLV;
+		JTR=NKU;
 		}
 		ERK=ERL;
 		JTQ=JTR;
 		}
 		let EQS=(ELY- EMR)/ ELZ;
-		let NMA=((NLR- NJT)- L5([0.0,0.0,(NJC* EQS),0.0,0.0]))/ ELZ;
+		let NKZ=((NKR- NIU)).product_sum_div(IUF,NIV,(-EQS),ELZ);
 		let EQT=EQS> LD;
 		let EQY;
 		let JTS;
 		if EQT{
 		EQY=A;
-		JTS=NIW;
+		JTS=NHY;
 		}else{
 		let EQU=EQS< -50f64;
 		let EQZ;
 		let JTT;
 		if EQU{
 		EQZ=F;
-		JTT=NIW;
+		JTT=NHY;
 		}else{
 		let EQV=EQS.exp();
 		let EQW=F+ EQV;
 		let EQX=F/ EQW;
-		let NMB=(((NMA* EQV)* EQX)* KNJ)/ EQW;
+		let NLA=((NKZ* EQV)).product_div((-EQX),EQW);
 		EQZ=EQX;
-		JTT=NMB;
+		JTT=NLA;
 		}
 		EQY=EQZ;
 		JTS=JTT;
 		}
 		let ERA=((KO- EPL)- (EMN- (ENP* EQY)))/ EMP;
-		let NMC=NJM* ERA;
-		let NMD=(((NLO- NLE)- (NKB- (L5([0.0,0.0,(NKA* EQY),0.0,0.0])+ (JTS* ENP))))- L5([0.0,0.0,NMC[0],NMC[1],NMC[2]]))/ EMP;
+		let NLB=(((NKO- NKF)- (NJD- (L5([0.0,0.0,(NJC* EQY),0.0,0.0])+ (JTS* ENP))))).product_sum_div(IUF,NJE,(-ERA),EMP);
 		let ERB=ERA> LD;
 		let ERM;
 		let JTU;
 		if ERB{
 		let ERC=EMQ* ERA;
-		let NMI=NJN* ERA;
-		let NMJ=L5([0.0,0.0,NMI[0],NMI[1],NMI[2]])+ (NMD* EMQ);
+		let NLG=NIO* ERA;
+		let NLH=L5([0.0,0.0,NLG[0],NLG[1],NLG[2]])+ (NLB* EMQ);
 		ERM=ERC;
-		JTU=NMJ;
+		JTU=NLH;
 		}else{
 		let ERD=ERA< -50f64;
 		let ERN;
@@ -11446,66 +11418,66 @@ impl Instance {
 		if ERD{
 		let ERE=ERA.exp();
 		let ERF=EMQ* ERE;
-		let NMG=NJN* ERE;
-		let NMH=L5([0.0,0.0,NMG[0],NMG[1],NMG[2]])+ ((NMD* ERE)* EMQ);
+		let NLE=NIO* ERE;
+		let NLF=L5([0.0,0.0,NLE[0],NLE[1],NLE[2]])+ ((NLB* ERE)* EMQ);
 		ERN=ERF;
-		JTV=NMH;
+		JTV=NLF;
 		}else{
 		let ERG=ERA.exp();
 		let ERH=F+ ERG;
 		let ERI=ERH.ln();
 		let ERJ=EMQ* ERI;
-		let NME=NJN* ERI;
-		let NMF=L5([0.0,0.0,NME[0],NME[1],NME[2]])+ (((NMD* ERG)* (IUF/ ERH))* EMQ);
+		let NLC=NIO* ERI;
+		let NLD=L5([0.0,0.0,NLC[0],NLC[1],NLC[2]])+ (((NLB* ERG)* (IUF/ ERH))* EMQ);
 		ERN=ERJ;
-		JTV=NMF;
+		JTV=NLD;
 		}
 		ERM=ERN;
 		JTU=JTV;
 		}
 		let ERO=((ERK- ERM)/ KH)/ EOW;
-		let NMK=(((JTQ- JTU)/ KH)- (NKT* ERO))/ EOW;
+		let NLI=(((JTQ- JTU)/ KH)).product_sum_div(IUF,NJV,(-ERO),EOW);
 		let ERT;
 		let JTW;
 		if JM{
-		let NMM=NMK* ERO;
+		let NLK=NLI* ERO;
 		let ERP=((ERO* ERO)+ JV).sqrt();
-		let NMN=(NMM+ NMM)* (IUF/ (KNB* ERP));
+		let NLL=(NLK+ NLK)* (IUF/ (KNB* ERP));
 		ERT=ERP;
-		JTW=NMN;
+		JTW=NLL;
 		}else{
 		let ERQ=KB/ JV;
 		let ERR=(ERQ* ERO).tanh();
 		let ERS=ERO* ERR;
-		let NML=(NMK* ERR)+ (((NMK* ERQ)* (IUF- (ERR* ERR)))* ERO);
+		let NLJ=(NLI* ERR)+ (((NLI* ERQ)* (IUF- (ERR* ERR)))* ERO);
 		ERT=ERS;
-		JTW=NML;
+		JTW=NLJ;
 		}
 		let ERU=F+ (ERT.powf(ELP));
 		let ERV=ERU.powf(EPI);
 		let ERW=ERO/ ERV;
 		let ERX=EOQ* ERW;
-		let NMO=((NMK- (((JTW* (ELP* ((ERT+ (((ERT== KOL) as u8 as f64)* KUP)).powf(NLA))))* (EPI* ((ERU+ (((ERU== KOL) as u8 as f64)* KUP)).powf(NLB))))* ERW))/ ERV)* EOQ;
+		let NLM=((NLI).product_sum_div(IUF,((JTW* (ELP* ((ERT+ (((ERT== KOL) as u8 as f64)* KUP)).powf(NKC))))* (EPI* ((ERU+ (((ERU== KOL) as u8 as f64)* KUP)).powf(NKD)))),(-ERW),ERV))* EOQ;
 		let ERY=((JE* O)* P)* JW;
 		let ERZ=ERY* (ERK+ ERM);
 		let ESA=ERZ* ERX;
-		let NMP=(((JTQ+ JTU)* ERY)* ERX)+ (((NKP* ERW)+ NMO)* ERZ);
-		let NMQ=KNH* D;
-		let NMR=NMP+ L5([0.0,0.0,0.0,NMQ[0],NMQ[1]]);
+		let NLN=(((JTQ+ JTU)* ERY)* ERX)+ (((NJR* ERW)+ NLM)* ERZ);
+		let NLO=KNH* D;
+		let NLP=NLN+ L5([0.0,0.0,0.0,NLO[0],NLO[1]]);
 		let ESB=A+ (ESA+ (D* KK));
 		IDG=ESA;
 		IJZ=ESB;
 		IKA=A;
 		IOM=A;
-		JTC=NMP;
-		JTD=NMR;
+		JTC=NLN;
+		JTD=NLP;
 		}else{
 		IDG=A;
 		IJZ=A;
 		IKA=ESC;
 		IOM=F;
-		JTC=NIW;
-		JTD=NIW;
+		JTC=NHY;
+		JTD=NHY;
 		}
 		let ESD=M&& (W> SV);
 		let IDF;
@@ -11518,34 +11490,34 @@ impl Instance {
 		let ESO;
 		let JTZ;
 		if JM{
-		let NMU=KQI* PO;
+		let NLS=KQI* PO;
 		let ESK=((PO* PO)+ JV).sqrt();
-		let NMV=(NMU+ NMU)* (IUF/ (KNB* ESK));
+		let NLT=(NLS+ NLS)* (IUF/ (KNB* ESK));
 		ESO=ESK;
-		JTZ=NMV;
+		JTZ=NLT;
 		}else{
 		let ESL=KB/ JV;
 		let ESM=(ESL* PO).tanh();
 		let ESN=PO* ESM;
-		let NMT=(KQI* ESM)+ (((KQI* ESL)* (IUF- (ESM* ESM)))* PO);
+		let NLR=(KQI* ESM)+ (((KQI* ESL)* (IUF- (ESM* ESM)))* PO);
 		ESO=ESN;
-		JTZ=NMT;
+		JTZ=NLR;
 		}
 		let ESP=PR- PO;
-		let NMW=L6([KQJ[0],KQJ[1],KQJ[2],KQJ[3],0.0,KQJ[4]]);
-		let NMX=L6([0.0,0.0,0.0,KQI[0],KQI[1],0.0]);
-		let NMY=NMW- NMX;
+		let NLU=L6([KQJ[0],KQJ[1],KQJ[2],KQJ[3],0.0,KQJ[4]]);
+		let NLV=L6([0.0,0.0,0.0,KQI[0],KQI[1],0.0]);
+		let NLW=NLU- NLV;
 		let ESQ=ESF* AZ;
-		let NMZ=KJT* ESF;
+		let NLX=KJT* ESF;
 		let ESR=TS* AZ;
 		let ESS=parameters[73]/ ESR;
-		let NNA=JTZ* ESE;
+		let NLY=JTZ* ESE;
 		let EST=ESS+ (ESE* ESO);
-		let NNB=L3([((((KJT* TS)* ESS)* KNJ)/ ESR),0.0,0.0])+ L3([0.0,NNA[0],NNA[1]]);
-		let NNC=IVA* ELS;
+		let NLZ=L3([(product_div((KJT* TS),(-ESS),ESR)),0.0,0.0])+ L3([0.0,NLY[0],NLY[1]]);
+		let NMA=IVA* ELS;
 		let ESU=PH+ (ELS* BB);
 		let ESV=BE.powf(TI);
-		let NND=KJV* (TI* ((BE+ (((BE== KOL) as u8 as f64)* KUP)).powf((TI- IUF))));
+		let NMB=KJV* (TI* ((BE+ (((BE== KOL) as u8 as f64)* KUP)).powf((TI- IUF))));
 		let ESW=TH!= A;
 		let ETC;
 		let JUA;
@@ -11555,68 +11527,68 @@ impl Instance {
 		let ESZ=F/ ESH;
 		let ETA=ESY.powf(ESZ);
 		let ETB=ESO/ ETA;
-		let NNF=(((JTZ/ TH)* (ESH* ((ESX+ (((ESX== KOL) as u8 as f64)* KUP)).powf((ESH- IUF)))))* (ESZ* ((ESY+ (((ESY== KOL) as u8 as f64)* KUP)).powf((ESZ- IUF)))))* ETB;
-		let NNG=(JTZ- NNF)/ ETA;
+		let NMD=(JTZ).product_sum_div(IUF,(((JTZ/ TH)* (ESH* ((ESX+ (((ESX== KOL) as u8 as f64)* KUP)).powf((ESH- IUF)))))* (ESZ* ((ESY+ (((ESY== KOL) as u8 as f64)* KUP)).powf((ESZ- IUF))))),(-ETB),ETA);
 		ETC=ETB;
-		JUA=NNG;
+		JUA=NMD;
 		}else{
 		ETC=A;
-		JUA=NNE;
+		JUA=NMC;
 		}
 		let ETD=parameters[72]- (ETC* A);
-		let NNH=(((JUA* A)* KNJ)* ESO)+ (JTZ* ETD);
+		let NME=(((JUA* A)* KNJ)* ESO)+ (JTZ* ETD);
 		let ETE=ESU- (ETD* ESO);
-		let NNI=L3([NNC,0.0,0.0])- L3([0.0,NNH[0],NNH[1]]);
+		let NMF=L3([NMA,0.0,0.0])- L3([0.0,NME[0],NME[1]]);
 		let ETF=MC* EST;
 		let ETG=ETF* AZ;
-		let NNJ=((NNB* MC)* AZ)+ L3([(KJT* ETF),0.0,0.0]);
+		let NMG=((NLZ* MC)* AZ)+ L3([(KJT* ETF),0.0,0.0]);
 		let ETH=PJ* ETG;
-		let NNK=NNJ* PJ;
+		let NMH=NMG* PJ;
 		let ETI=ETE- ((UK* ESQ)/ MC);
-		let NNL=NNI- L3([((NMZ* UK)/ MC),0.0,0.0]);
+		let NMI=NMF- L3([((NLX* UK)/ MC),0.0,0.0]);
 		let ETQ;
 		let JUB;
 		if JM{
 		let ETJ=PR- ESP;
-		let NNO=(NMW- NMY)* ETJ;
+		let NML=(NLU- NLW)* ETJ;
 		let ETK=((ETJ* ETJ)+ JV).sqrt();
 		let ETL=JW* ((PR+ ESP)+ ETK);
-		let NNP=((NMW+ NMY)+ ((NNO+ NNO)* (IUF/ (KNB* ETK))))* JW;
+		let NMM=((NLU+ NLW)+ ((NML+ NML)* (IUF/ (KNB* ETK))))* JW;
 		ETQ=ETL;
-		JUB=NNP;
+		JUB=NMM;
 		}else{
 		let ETM=PR- ESP;
-		let NNM=NMW- NMY;
+		let NMJ=NLU- NLW;
 		let ETN=KB/ JV;
 		let ETO=(ETN* ETM).tanh();
 		let ETP=JW* ((PR+ ESP)+ (ETM* ETO));
-		let NNN=((NMW+ NMY)+ ((NNM* ETO)+ (((NNM* ETN)* (IUF- (ETO* ETO)))* ETM)))* JW;
+		let NMK=((NLU+ NLW)+ ((NMJ* ETO)+ (((NMJ* ETN)* (IUF- (ETO* ETO)))* ETM)))* JW;
 		ETQ=ETP;
-		JUB=NNN;
+		JUB=NMK;
 		}
-		let NNQ=L6([0.0,0.0,NNL[0],NNL[1],NNL[2],0.0]);
+		let NMN=L6([0.0,0.0,NMI[0],NMI[1],NMI[2],0.0]);
 		let ETR=(ETQ- ETI)/ ESQ;
-		let NNR=((JUB- NNQ)- L6([0.0,0.0,(NMZ* ETR),0.0,0.0,0.0]))/ ESQ;
+		let NMO=L6([0.0,0.0,NLX,0.0,0.0,0.0]);
+		let NMP=((JUB- NMN)).product_sum_div(IUF,NMO,(-ETR),ESQ);
 		let ETS=ETR> LD;
 		let EUH;
 		let JUC;
 		if ETS{
 		EUH=A;
-		JUC=NMS;
+		JUC=NLQ;
 		}else{
 		let ETT=ETR< -50f64;
 		let EUI;
 		let JUD;
 		if ETT{
 		EUI=F;
-		JUD=NMS;
+		JUD=NLQ;
 		}else{
 		let ETU=ETR.exp();
 		let ETV=F+ ETU;
 		let ETW=F/ ETV;
-		let NNS=(((NNR* ETU)* ETW)* KNJ)/ ETV;
+		let NMQ=((NMP* ETU)).product_div((-ETW),ETV);
 		EUI=ETW;
-		JUD=NNS;
+		JUD=NMQ;
 		}
 		EUH=EUI;
 		JUC=JUD;
@@ -11625,38 +11597,38 @@ impl Instance {
 		let JUE;
 		if JM{
 		let ETX=PR- ESP;
-		let NNV=(NMW- NMY)* ETX;
+		let NMT=(NLU- NLW)* ETX;
 		let ETY=((ETX* ETX)+ JV).sqrt();
 		let ETZ=JW* ((PR+ ESP)+ ETY);
-		let NNW=((NMW+ NMY)+ ((NNV+ NNV)* (IUF/ (KNB* ETY))))* JW;
+		let NMU=((NLU+ NLW)+ ((NMT+ NMT)* (IUF/ (KNB* ETY))))* JW;
 		EUE=ETZ;
-		JUE=NNW;
+		JUE=NMU;
 		}else{
 		let EUA=PR- ESP;
-		let NNT=NMW- NMY;
+		let NMR=NLU- NLW;
 		let EUB=KB/ JV;
 		let EUC=(EUB* EUA).tanh();
 		let EUD=JW* ((PR+ ESP)+ (EUA* EUC));
-		let NNU=((NMW+ NMY)+ ((NNT* EUC)+ (((NNT* EUB)* (IUF- (EUC* EUC)))* EUA)))* JW;
+		let NMS=((NLU+ NLW)+ ((NMR* EUC)+ (((NMR* EUB)* (IUF- (EUC* EUC)))* EUA)))* JW;
 		EUE=EUD;
-		JUE=NNU;
+		JUE=NMS;
 		}
 		let EUF=UK* AI;
 		let EUG=EUF* ESQ;
-		let NNX=NMZ* EUF;
-		let NNY=L6([0.0,0.0,NNI[0],NNI[1],NNI[2],0.0]);
+		let NMV=NLX* EUF;
+		let NMW=L6([0.0,0.0,NMF[0],NMF[1],NMF[2],0.0]);
 		let EUJ=(EUE- (ETE- (EUG* EUH)))/ ETG;
-		let NNZ=NNJ* EUJ;
-		let NOA=((JUE- (NNY- (L6([0.0,0.0,(NNX* EUH),0.0,0.0,0.0])+ (JUC* EUG))))- L6([0.0,0.0,NNZ[0],NNZ[1],NNZ[2],0.0]))/ ETG;
+		let NMX=L6([0.0,0.0,NMG[0],NMG[1],NMG[2],0.0]);
+		let NMY=((JUE- (NMW- (L6([0.0,0.0,(NMV* EUH),0.0,0.0,0.0])+ (JUC* EUG))))).product_sum_div(IUF,NMX,(-EUJ),ETG);
 		let EUK=EUJ> LD;
 		let EUT;
 		let JUF;
 		if EUK{
 		let EUL=ETH* EUJ;
-		let NOF=NNK* EUJ;
-		let NOG=L6([0.0,0.0,NOF[0],NOF[1],NOF[2],0.0])+ (NOA* ETH);
+		let NND=NMH* EUJ;
+		let NNE=L6([0.0,0.0,NND[0],NND[1],NND[2],0.0])+ (NMY* ETH);
 		EUT=EUL;
-		JUF=NOG;
+		JUF=NNE;
 		}else{
 		let EUM=EUJ< -50f64;
 		let EUU;
@@ -11664,19 +11636,19 @@ impl Instance {
 		if EUM{
 		let EUN=EUJ.exp();
 		let EUO=ETH* EUN;
-		let NOD=NNK* EUN;
-		let NOE=L6([0.0,0.0,NOD[0],NOD[1],NOD[2],0.0])+ ((NOA* EUN)* ETH);
+		let NNB=NMH* EUN;
+		let NNC=L6([0.0,0.0,NNB[0],NNB[1],NNB[2],0.0])+ ((NMY* EUN)* ETH);
 		EUU=EUO;
-		JUG=NOE;
+		JUG=NNC;
 		}else{
 		let EUP=EUJ.exp();
 		let EUQ=F+ EUP;
 		let EUR=EUQ.ln();
 		let EUS=ETH* EUR;
-		let NOB=NNK* EUR;
-		let NOC=L6([0.0,0.0,NOB[0],NOB[1],NOB[2],0.0])+ (((NOA* EUP)* (IUF/ EUQ))* ETH);
+		let NMZ=NMH* EUR;
+		let NNA=L6([0.0,0.0,NMZ[0],NMZ[1],NMZ[2],0.0])+ (((NMY* EUP)* (IUF/ EUQ))* ETH);
 		EUU=EUS;
-		JUG=NOC;
+		JUG=NNA;
 		}
 		EUT=EUU;
 		JUF=JUG;
@@ -11684,135 +11656,132 @@ impl Instance {
 		let EUV=F+ ((ESI* EUT)/ PJ);
 		let EUW=ESV* EUV;
 		let EUX=parameters[70]/ EUW;
-		let NOH=(((L6([0.0,0.0,(NND* EUV),0.0,0.0,0.0])+ (((JUF* ESI)/ PJ)* ESV))* EUX)* KNJ)/ EUW;
+		let NNF=((L6([0.0,0.0,(NMB* EUV),0.0,0.0,0.0])+ (((JUF* ESI)/ PJ)* ESV))).product_div((-EUX),EUW);
 		let EUY=F+ (TJ* AC);
 		let EUZ=(F+ (TJ* E))/ EUY;
 		let EVA=ESG* EUZ;
 		let EVB=F+ ((TK* ESO)/ W);
-		let NOI=((JTZ* TK)/ W)* EVA;
-		let NOJ=L3([((((((IVA* TJ)* EUZ)* KNJ)/ EUY)* ESG)* EVB),0.0,0.0])+ L3([0.0,NOI[0],NOI[1]]);
+		let NNG=((JTZ* TK)/ W)* EVA;
+		let NNH=L3([(((product_div((IVA* TJ),(-EUZ),EUY))* ESG)* EVB),0.0,0.0])+ L3([0.0,NNG[0],NNG[1]]);
 		let EVC=F+ ((ESJ* EUT)/ PJ);
 		let EVD=(EVA* EVB)/ EVC;
-		let NOK=(L6([0.0,0.0,NOJ[0],NOJ[1],NOJ[2],0.0])- (((JUF* ESJ)/ PJ)* EVD))/ EVC;
+		let NNI=(L6([0.0,0.0,NNH[0],NNH[1],NNH[2],0.0])).product_sum_div(IUF,((JUF* ESJ)/ PJ),(-EVD),EVC);
 		let EVE=MC* EUH;
 		let EVF=EVE* AZ;
 		let EVG=F- EUH;
-		let NOL=JUC* KNJ;
+		let NNJ=JUC* KNJ;
 		let EVH=((EVF* EUX)/ W)+ (EVG* EVD);
-		let NOM=((((((JUC* MC)* AZ)+ L6([0.0,0.0,(KJT* EVE),0.0,0.0,0.0]))* EUX)+ (NOH* EVF))/ W)+ ((NOL* EVD)+ (NOK* EVG));
+		let NNK=((((((JUC* MC)* AZ)+ L6([0.0,0.0,(KJT* EVE),0.0,0.0,0.0]))* EUX)+ (NNF* EVF))/ W)+ ((NNJ* EVD)+ (NNI* EVG));
 		let EVI=(EVD* W)/ EUX;
-		let NON=((NOK* W)- (NOH* EVI))/ EUX;
+		let NNL=((NNI* W)).product_sum_div(IUF,NNF,(-EVI),EUX);
 		let EVJ=((MC* EUT)/ PJ)/ EVI;
 		let EVK=(F+ EVJ).sqrt();
 		let EVL=(EVI* EVK)- EVI;
 		let EVM=ETG* EUH;
-		let NOO=NNJ* EUH;
-		let NOP=L6([0.0,0.0,NOO[0],NOO[1],NOO[2],0.0])+ (JUC* ETG);
+		let NNM=NMG* EUH;
+		let NNN=L6([0.0,0.0,NNM[0],NNM[1],NNM[2],0.0])+ (JUC* ETG);
 		let EVN=(EVI* EVG)+ EVM;
-		let NOQ=((NON* EVG)+ (NOL* EVI))+ NOP;
+		let NNO=((NNL* EVG)+ (NNJ* EVI))+ NNN;
 		let EVO=(EVL* EVG)+ EVM;
-		let NOR=(((((NON* EVK)+ ((((((JUF* MC)/ PJ)- (NON* EVJ))/ EVI)* (IUF/ (KNB* EVK)))* EVI))- NON)* EVG)+ (NOL* EVL))+ NOP;
+		let NNP=(((((NNL* EVK)+ ((((((JUF* MC)/ PJ)).product_sum_div(IUF,NNL,(-EVJ),EVI))* (IUF/ (KNB* EVK)))* EVI))- NNL)* EVG)+ (NNJ* EVL))+ NNN;
 		let EVP=PO/ EVO;
-		let NOS=(NMX- (NOR* EVP))/ EVO;
+		let NNQ=(NLV).product_sum_div(IUF,NNP,(-EVP),EVO);
 		let EVX;
 		let JUH;
 		if JM{
 		let EVQ=A- EVP;
-		let NOV=(NOS* KNJ)* EVQ;
+		let NNT=(NNQ* KNJ)* EVQ;
 		let EVR=((EVQ* EVQ)+ JV).sqrt();
 		let EVS=JW* ((A+ EVP)+ EVR);
-		let NOW=(NOS+ ((NOV+ NOV)* (IUF/ (KNB* EVR))))* JW;
+		let NNU=(NNQ+ ((NNT+ NNT)* (IUF/ (KNB* EVR))))* JW;
 		EVX=EVS;
-		JUH=NOW;
+		JUH=NNU;
 		}else{
 		let EVT=A- EVP;
-		let NOT=NOS* KNJ;
+		let NNR=NNQ* KNJ;
 		let EVU=KB/ JV;
 		let EVV=(EVU* EVT).tanh();
 		let EVW=JW* ((A+ EVP)+ (EVT* EVV));
-		let NOU=(NOS+ ((NOT* EVV)+ (((NOT* EVU)* (IUF- (EVV* EVV)))* EVT)))* JW;
+		let NNS=(NNQ+ ((NNR* EVV)+ (((NNR* EVU)* (IUF- (EVV* EVV)))* EVT)))* JW;
 		EVX=EVW;
-		JUH=NOU;
+		JUH=NNS;
 		}
-		let NOX=ESH- IUF;
+		let NNV=ESH- IUF;
 		let EVY=F+ (EVX.powf(ESH));
 		let EVZ=F/ ESH;
 		let EWA=EVY.powf(EVZ);
-		let NOY=EVZ- IUF;
+		let NNW=EVZ- IUF;
 		let EWB=F/ EWA;
 		let EWC=PO* EWB;
-		let NOZ=KQI* EWB;
-		let NPA=(((((JUH* (ESH* ((EVX+ (((EVX== KOL) as u8 as f64)* KUP)).powf(NOX))))* (EVZ* ((EVY+ (((EVY== KOL) as u8 as f64)* KUP)).powf(NOY))))* EWB)* KNJ)/ EWA)* PO;
-		let NPB=L6([0.0,0.0,0.0,NOZ[0],NOZ[1],0.0])+ NPA;
+		let NNX=KQI* EWB;
+		let NNY=L6([0.0,0.0,0.0,NNX[0],NNX[1],0.0])+ (((((JUH* (ESH* ((EVX+ (((EVX== KOL) as u8 as f64)* KUP)).powf(NNV))))* (EVZ* ((EVY+ (((EVY== KOL) as u8 as f64)* KUP)).powf(NNW))))).product_div((-EWB),EWA))* PO);
 		let EWD=-PO;
-		let NPC=KQI* KNJ;
+		let NNZ=KQI* KNJ;
 		let EWE=EWD/ EVO;
-		let NPD=(L6([0.0,0.0,0.0,NPC[0],NPC[1],0.0])- (NOR* EWE))/ EVO;
+		let NOA=(L6([0.0,0.0,0.0,NNZ[0],NNZ[1],0.0])).product_sum_div(IUF,NNP,(-EWE),EVO);
 		let EWM;
 		let JUI;
 		if JM{
 		let EWF=A- EWE;
-		let NPG=(NPD* KNJ)* EWF;
+		let NOD=(NOA* KNJ)* EWF;
 		let EWG=((EWF* EWF)+ JV).sqrt();
 		let EWH=JW* ((A+ EWE)+ EWG);
-		let NPH=(NPD+ ((NPG+ NPG)* (IUF/ (KNB* EWG))))* JW;
+		let NOE=(NOA+ ((NOD+ NOD)* (IUF/ (KNB* EWG))))* JW;
 		EWM=EWH;
-		JUI=NPH;
+		JUI=NOE;
 		}else{
 		let EWI=A- EWE;
-		let NPE=NPD* KNJ;
+		let NOB=NOA* KNJ;
 		let EWJ=KB/ JV;
 		let EWK=(EWJ* EWI).tanh();
 		let EWL=JW* ((A+ EWE)+ (EWI* EWK));
-		let NPF=(NPD+ ((NPE* EWK)+ (((NPE* EWJ)* (IUF- (EWK* EWK)))* EWI)))* JW;
+		let NOC=(NOA+ ((NOB* EWK)+ (((NOB* EWJ)* (IUF- (EWK* EWK)))* EWI)))* JW;
 		EWM=EWL;
-		JUI=NPF;
+		JUI=NOC;
 		}
 		let EWN=F+ (EWM.powf(ESH));
 		let EWO=EWN.powf(EVZ);
 		let EWP=F/ EWO;
 		let EWQ=EWD* EWP;
-		let NPI=NPC* EWP;
-		let NPJ=(((((JUI* (ESH* ((EWM+ (((EWM== KOL) as u8 as f64)* KUP)).powf(NOX))))* (EVZ* ((EWN+ (((EWN== KOL) as u8 as f64)* KUP)).powf(NOY))))* EWP)* KNJ)/ EWO)* EWD;
-		let NPK=L6([0.0,0.0,0.0,NPI[0],NPI[1],0.0])+ NPJ;
+		let NOF=NNZ* EWP;
+		let NOG=L6([0.0,0.0,0.0,NOF[0],NOF[1],0.0])+ (((((JUI* (ESH* ((EWM+ (((EWM== KOL) as u8 as f64)* KUP)).powf(NNV))))* (EVZ* ((EWN+ (((EWN== KOL) as u8 as f64)* KUP)).powf(NNW))))).product_div((-EWP),EWO))* EWD);
 		let EWR=(PR- ETI)/ ESQ;
-		let NPL=((NMW- NNQ)- L6([0.0,0.0,(NMZ* EWR),0.0,0.0,0.0]))/ ESQ;
+		let NOH=((NLU- NMN)).product_sum_div(IUF,NMO,(-EWR),ESQ);
 		let EWS=EWR> LD;
 		let EWX;
 		let JUJ;
 		if EWS{
 		EWX=A;
-		JUJ=NMS;
+		JUJ=NLQ;
 		}else{
 		let EWT=EWR< -50f64;
 		let EWY;
 		let JUK;
 		if EWT{
 		EWY=F;
-		JUK=NMS;
+		JUK=NLQ;
 		}else{
 		let EWU=EWR.exp();
 		let EWV=F+ EWU;
 		let EWW=F/ EWV;
-		let NPM=(((NPL* EWU)* EWW)* KNJ)/ EWV;
+		let NOI=((NOH* EWU)).product_div((-EWW),EWV);
 		EWY=EWW;
-		JUK=NPM;
+		JUK=NOI;
 		}
 		EWX=EWY;
 		JUJ=JUK;
 		}
 		let EWZ=((ESP- EWQ)- (ETE- (EUG* EWX)))/ ETG;
-		let NPN=NNJ* EWZ;
-		let NPO=(((NMY- NPK)- (NNY- (L6([0.0,0.0,(NNX* EWX),0.0,0.0,0.0])+ (JUJ* EUG))))- L6([0.0,0.0,NPN[0],NPN[1],NPN[2],0.0]))/ ETG;
+		let NOJ=(((NLW- NOG)- (NMW- (L6([0.0,0.0,(NMV* EWX),0.0,0.0,0.0])+ (JUJ* EUG))))).product_sum_div(IUF,NMX,(-EWZ),ETG);
 		let EXA=EWZ> LD;
 		let EYB;
 		let JUL;
 		if EXA{
 		let EXB=ETH* EWZ;
-		let NPT=NNK* EWZ;
-		let NPU=L6([0.0,0.0,NPT[0],NPT[1],NPT[2],0.0])+ (NPO* ETH);
+		let NOO=NMH* EWZ;
+		let NOP=L6([0.0,0.0,NOO[0],NOO[1],NOO[2],0.0])+ (NOJ* ETH);
 		EYB=EXB;
-		JUL=NPU;
+		JUL=NOP;
 		}else{
 		let EXC=EWZ< -50f64;
 		let EYC;
@@ -11820,61 +11789,60 @@ impl Instance {
 		if EXC{
 		let EXD=EWZ.exp();
 		let EXE=ETH* EXD;
-		let NPR=NNK* EXD;
-		let NPS=L6([0.0,0.0,NPR[0],NPR[1],NPR[2],0.0])+ ((NPO* EXD)* ETH);
+		let NOM=NMH* EXD;
+		let NON=L6([0.0,0.0,NOM[0],NOM[1],NOM[2],0.0])+ ((NOJ* EXD)* ETH);
 		EYC=EXE;
-		JUM=NPS;
+		JUM=NON;
 		}else{
 		let EXF=EWZ.exp();
 		let EXG=F+ EXF;
 		let EXH=EXG.ln();
 		let EXI=ETH* EXH;
-		let NPP=NNK* EXH;
-		let NPQ=L6([0.0,0.0,NPP[0],NPP[1],NPP[2],0.0])+ (((NPO* EXF)* (IUF/ EXG))* ETH);
+		let NOK=NMH* EXH;
+		let NOL=L6([0.0,0.0,NOK[0],NOK[1],NOK[2],0.0])+ (((NOJ* EXF)* (IUF/ EXG))* ETH);
 		EYC=EXI;
-		JUM=NPQ;
+		JUM=NOL;
 		}
 		EYB=EYC;
 		JUL=JUM;
 		}
 		let EXJ=(ESP- ETI)/ ESQ;
-		let NPV=((NMY- NNQ)- L6([0.0,0.0,(NMZ* EXJ),0.0,0.0,0.0]))/ ESQ;
+		let NOQ=((NLW- NMN)).product_sum_div(IUF,NMO,(-EXJ),ESQ);
 		let EXK=EXJ> LD;
 		let EXP;
 		let JUN;
 		if EXK{
 		EXP=A;
-		JUN=NMS;
+		JUN=NLQ;
 		}else{
 		let EXL=EXJ< -50f64;
 		let EXQ;
 		let JUO;
 		if EXL{
 		EXQ=F;
-		JUO=NMS;
+		JUO=NLQ;
 		}else{
 		let EXM=EXJ.exp();
 		let EXN=F+ EXM;
 		let EXO=F/ EXN;
-		let NPW=(((NPV* EXM)* EXO)* KNJ)/ EXN;
+		let NOR=((NOQ* EXM)).product_div((-EXO),EXN);
 		EXQ=EXO;
-		JUO=NPW;
+		JUO=NOR;
 		}
 		EXP=EXQ;
 		JUN=JUO;
 		}
 		let EXR=((PR- EWC)- (ETE- (EUG* EXP)))/ ETG;
-		let NPX=NNJ* EXR;
-		let NPY=(((NMW- NPB)- (NNY- (L6([0.0,0.0,(NNX* EXP),0.0,0.0,0.0])+ (JUN* EUG))))- L6([0.0,0.0,NPX[0],NPX[1],NPX[2],0.0]))/ ETG;
+		let NOS=(((NLU- NNY)- (NMW- (L6([0.0,0.0,(NMV* EXP),0.0,0.0,0.0])+ (JUN* EUG))))).product_sum_div(IUF,NMX,(-EXR),ETG);
 		let EXS=EXR> LD;
 		let EYD;
 		let JUP;
 		if EXS{
 		let EXT=ETH* EXR;
-		let NQD=NNK* EXR;
-		let NQE=L6([0.0,0.0,NQD[0],NQD[1],NQD[2],0.0])+ (NPY* ETH);
+		let NOX=NMH* EXR;
+		let NOY=L6([0.0,0.0,NOX[0],NOX[1],NOX[2],0.0])+ (NOS* ETH);
 		EYD=EXT;
-		JUP=NQE;
+		JUP=NOY;
 		}else{
 		let EXU=EXR< -50f64;
 		let EYE;
@@ -11882,98 +11850,98 @@ impl Instance {
 		if EXU{
 		let EXV=EXR.exp();
 		let EXW=ETH* EXV;
-		let NQB=NNK* EXV;
-		let NQC=L6([0.0,0.0,NQB[0],NQB[1],NQB[2],0.0])+ ((NPY* EXV)* ETH);
+		let NOV=NMH* EXV;
+		let NOW=L6([0.0,0.0,NOV[0],NOV[1],NOV[2],0.0])+ ((NOS* EXV)* ETH);
 		EYE=EXW;
-		JUQ=NQC;
+		JUQ=NOW;
 		}else{
 		let EXX=EXR.exp();
 		let EXY=F+ EXX;
 		let EXZ=EXY.ln();
 		let EYA=ETH* EXZ;
-		let NPZ=NNK* EXZ;
-		let NQA=L6([0.0,0.0,NPZ[0],NPZ[1],NPZ[2],0.0])+ (((NPY* EXX)* (IUF/ EXY))* ETH);
+		let NOT=NMH* EXZ;
+		let NOU=L6([0.0,0.0,NOT[0],NOT[1],NOT[2],0.0])+ (((NOS* EXX)* (IUF/ EXY))* ETH);
 		EYE=EYA;
-		JUQ=NQA;
+		JUQ=NOU;
 		}
 		EYD=EYE;
 		JUP=JUQ;
 		}
 		let EYF=((EYB- EYD)/ PJ)/ EVN;
-		let NQF=(((JUL- JUP)/ PJ)- (NOQ* EYF))/ EVN;
+		let NOZ=(((JUL- JUP)/ PJ)).product_sum_div(IUF,NNO,(-EYF),EVN);
 		let EYK;
 		let JUR;
 		if JM{
-		let NQH=NQF* EYF;
+		let NPB=NOZ* EYF;
 		let EYG=((EYF* EYF)+ JV).sqrt();
-		let NQI=(NQH+ NQH)* (IUF/ (KNB* EYG));
+		let NPC=(NPB+ NPB)* (IUF/ (KNB* EYG));
 		EYK=EYG;
-		JUR=NQI;
+		JUR=NPC;
 		}else{
 		let EYH=KB/ JV;
 		let EYI=(EYH* EYF).tanh();
 		let EYJ=EYF* EYI;
-		let NQG=(NQF* EYI)+ (((NQF* EYH)* (IUF- (EYI* EYI)))* EYF);
+		let NPA=(NOZ* EYI)+ (((NOZ* EYH)* (IUF- (EYI* EYI)))* EYF);
 		EYK=EYJ;
-		JUR=NQG;
+		JUR=NPA;
 		}
 		let EYL=F+ (EYK.powf(ESH));
 		let EYM=EYL.powf(EVZ);
 		let EYN=EYF/ EYM;
 		let EYO=EVH* EYN;
-		let NQJ=((NQF- (((JUR* (ESH* ((EYK+ (((EYK== KOL) as u8 as f64)* KUP)).powf(NOX))))* (EVZ* ((EYL+ (((EYL== KOL) as u8 as f64)* KUP)).powf(NOY))))* EYN))/ EYM)* EVH;
+		let NPD=((NOZ).product_sum_div(IUF,((JUR* (ESH* ((EYK+ (((EYK== KOL) as u8 as f64)* KUP)).powf(NNV))))* (EVZ* ((EYL+ (((EYL== KOL) as u8 as f64)* KUP)).powf(NNW)))),(-EYN),EYM))* EVH;
 		let EYP=((JE* O)* P)* JW;
 		let EYQ=EYP* (EYB+ EYD);
 		let EYR=EYQ* EYO;
-		let NQK=(((JUL+ JUP)* EYP)* EYO)+ (((NOM* EYN)+ NQJ)* EYQ);
-		let NQL=KQH* D;
-		let NQM=NQK+ L6([0.0,0.0,0.0,NQL[0],NQL[1],0.0]);
+		let NPE=(((JUL+ JUP)* EYP)* EYO)+ (((NNK* EYN)+ NPD)* EYQ);
+		let NPF=KQH* D;
+		let NPG=NPE+ L6([0.0,0.0,0.0,NPF[0],NPF[1],0.0]);
 		let EYS=A+ (EYR+ (D* PN));
 		IDF=EYR;
 		IKB=EYS;
 		IKC=A;
 		ION=A;
-		JTX=NQK;
-		JTY=NQM;
+		JTX=NPE;
+		JTY=NPG;
 		}else{
 		IDF=A;
 		IKB=A;
 		IKC=EYT;
 		ION=F;
-		JTX=NMS;
-		JTY=NMS;
+		JTX=NLQ;
+		JTY=NLQ;
 		}
 		let EZI;
 		let JUS;
 		if JM{
-		let NQO=KMP* JI;
+		let NPI=KMP* JI;
 		let EZE=((JI* JI)+ JV).sqrt();
-		let NQP=(NQO+ NQO)* (IUF/ (KNB* EZE));
+		let NPJ=(NPI+ NPI)* (IUF/ (KNB* EZE));
 		EZI=EZE;
-		JUS=NQP;
+		JUS=NPJ;
 		}else{
 		let EZF=KB/ JV;
 		let EZG=(EZF* JI).tanh();
 		let EZH=JI* EZG;
-		let NQN=(KMP* EZG)+ (((KMP* EZF)* (IUF- (EZG* EZG)))* JI);
+		let NPH=(KMP* EZG)+ (((KMP* EZF)* (IUF- (EZG* EZG)))* JI);
 		EZI=EZH;
-		JUS=NQN;
+		JUS=NPH;
 		}
 		let EZJ=JL- JI;
-		let NQQ=L3([0.0,KMR[0],KMR[1]]);
-		let NQR=NQQ- L3([KMP[0],0.0,KMP[1]]);
+		let NPK=L3([0.0,KMR[0],KMR[1]]);
+		let NPL=NPK- L3([KMP[0],0.0,KMP[1]]);
 		let EZK=EYX* AZ;
-		let NQS=KJT* EYX;
+		let NPM=KJT* EYX;
 		let EZL=TS* AZ;
 		let EZM=parameters[36]/ EZL;
-		let NQT=(((KJT* TS)* EZM)* KNJ)/ EZL;
-		let NQU=JUS* EYW;
+		let NPN=product_div((KJT* TS),(-EZM),EZL);
+		let NPO=JUS* EYW;
 		let EZN=EZM+ (EYW* EZI);
-		let NQV=L3([NQT,0.0,0.0])+ L3([0.0,NQU[0],NQU[1]]);
-		let NQW=IVA* ELS;
+		let NPP=L3([NPN,0.0,0.0])+ L3([0.0,NPO[0],NPO[1]]);
+		let NPQ=IVA* ELS;
 		let EZO=parameters[35]+ (ELS* BB);
 		let EZP=BE.powf(TI);
-		let NQX=KJV* (TI* ((BE+ (((BE== KOL) as u8 as f64)* KUP)).powf((TI- IUF))));
+		let NPR=KJV* (TI* ((BE+ (((BE== KOL) as u8 as f64)* KUP)).powf((TI- IUF))));
 		let EZQ=TH!= A;
 		let EZW;
 		let JUT;
@@ -11983,70 +11951,70 @@ impl Instance {
 		let EZT=F/ EYZ;
 		let EZU=EZS.powf(EZT);
 		let EZV=EZI/ EZU;
-		let NQZ=(((JUS/ TH)* (EYZ* ((EZR+ (((EZR== KOL) as u8 as f64)* KUP)).powf((EYZ- IUF)))))* (EZT* ((EZS+ (((EZS== KOL) as u8 as f64)* KUP)).powf((EZT- IUF)))))* EZV;
-		let NRA=(JUS- NQZ)/ EZU;
+		let NPT=(JUS).product_sum_div(IUF,(((JUS/ TH)* (EYZ* ((EZR+ (((EZR== KOL) as u8 as f64)* KUP)).powf((EYZ- IUF)))))* (EZT* ((EZS+ (((EZS== KOL) as u8 as f64)* KUP)).powf((EZT- IUF))))),(-EZV),EZU);
 		EZW=EZV;
-		JUT=NRA;
+		JUT=NPT;
 		}else{
 		EZW=A;
-		JUT=NQY;
+		JUT=NPS;
 		}
 		let EZX=parameters[37]- (EZW* EYV);
-		let NRB=(((JUT* EYV)* KNJ)* EZI)+ (JUS* EZX);
+		let NPU=(((JUT* EYV)* KNJ)* EZI)+ (JUS* EZX);
 		let EZY=EZO- (EZX* EZI);
-		let NRC=L3([NQW,0.0,0.0])- L3([0.0,NRB[0],NRB[1]]);
+		let NPV=L3([NPQ,0.0,0.0])- L3([0.0,NPU[0],NPU[1]]);
 		let EZZ=MC* EZN;
 		let FAA=EZZ* AZ;
-		let NRD=((NQV* MC)* AZ)+ L3([(KJT* EZZ),0.0,0.0]);
+		let NPW=((NPP* MC)* AZ)+ L3([(KJT* EZZ),0.0,0.0]);
 		let FAB=DP* FAA;
-		let NRE=L3([(KKR* FAA),0.0,0.0])+ (NRD* DP);
+		let NPX=L3([(KKR* FAA),0.0,0.0])+ (NPW* DP);
 		let FAC=(UK* EZK)/ MC;
-		let NRF=(NQS* UK)/ MC;
+		let NPY=(NPM* UK)/ MC;
 		let FAD=EZY- FAC;
-		let NRG=NRC- L3([NRF,0.0,0.0]);
+		let NPZ=NPV- L3([NPY,0.0,0.0]);
 		let FAL;
 		let JUU;
 		if JM{
 		let FAE=JL- EZJ;
-		let NRJ=(NQQ- NQR)* FAE;
+		let NQC=(NPK- NPL)* FAE;
 		let FAF=((FAE* FAE)+ JV).sqrt();
 		let FAG=JW* ((JL+ EZJ)+ FAF);
-		let NRK=((NQQ+ NQR)+ ((NRJ+ NRJ)* (IUF/ (KNB* FAF))))* JW;
+		let NQD=((NPK+ NPL)+ ((NQC+ NQC)* (IUF/ (KNB* FAF))))* JW;
 		FAL=FAG;
-		JUU=NRK;
+		JUU=NQD;
 		}else{
 		let FAH=JL- EZJ;
-		let NRH=NQQ- NQR;
+		let NQA=NPK- NPL;
 		let FAI=KB/ JV;
 		let FAJ=(FAI* FAH).tanh();
 		let FAK=JW* ((JL+ EZJ)+ (FAH* FAJ));
-		let NRI=((NQQ+ NQR)+ ((NRH* FAJ)+ (((NRH* FAI)* (IUF- (FAJ* FAJ)))* FAH)))* JW;
+		let NQB=((NPK+ NPL)+ ((NQA* FAJ)+ (((NQA* FAI)* (IUF- (FAJ* FAJ)))* FAH)))* JW;
 		FAL=FAK;
-		JUU=NRI;
+		JUU=NQB;
 		}
-		let NRL=L4([NRG[0],NRG[1],0.0,NRG[2]]);
+		let NQE=L4([NPZ[0],NPZ[1],0.0,NPZ[2]]);
 		let FAM=(FAL- FAD)/ EZK;
-		let NRM=((L4([0.0,JUU[0],JUU[1],JUU[2]])- NRL)- L4([(NQS* FAM),0.0,0.0,0.0]))/ EZK;
+		let NQF=L4([NPM,0.0,0.0,0.0]);
+		let NQG=((L4([0.0,JUU[0],JUU[1],JUU[2]])- NQE)).product_sum_div(IUF,NQF,(-FAM),EZK);
 		let FAN=FAM> LD;
 		let FBC;
 		let JUV;
 		if FAN{
 		FBC=A;
-		JUV=NRO;
+		JUV=NQI;
 		}else{
 		let FAO=FAM< -50f64;
 		let FBD;
 		let JUW;
 		if FAO{
 		FBD=F;
-		JUW=NRO;
+		JUW=NQI;
 		}else{
 		let FAP=FAM.exp();
 		let FAQ=F+ FAP;
 		let FAR=F/ FAQ;
-		let NRN=(((NRM* FAP)* FAR)* KNJ)/ FAQ;
+		let NQH=((NQG* FAP)).product_div((-FAR),FAQ);
 		FBD=FAR;
-		JUW=NRN;
+		JUW=NQH;
 		}
 		FBC=FBD;
 		JUV=JUW;
@@ -12055,38 +12023,38 @@ impl Instance {
 		let JUX;
 		if JM{
 		let FAS=JL- EZJ;
-		let NRR=(NQQ- NQR)* FAS;
+		let NQL=(NPK- NPL)* FAS;
 		let FAT=((FAS* FAS)+ JV).sqrt();
 		let FAU=JW* ((JL+ EZJ)+ FAT);
-		let NRS=((NQQ+ NQR)+ ((NRR+ NRR)* (IUF/ (KNB* FAT))))* JW;
+		let NQM=((NPK+ NPL)+ ((NQL+ NQL)* (IUF/ (KNB* FAT))))* JW;
 		FAZ=FAU;
-		JUX=NRS;
+		JUX=NQM;
 		}else{
 		let FAV=JL- EZJ;
-		let NRP=NQQ- NQR;
+		let NQJ=NPK- NPL;
 		let FAW=KB/ JV;
 		let FAX=(FAW* FAV).tanh();
 		let FAY=JW* ((JL+ EZJ)+ (FAV* FAX));
-		let NRQ=((NQQ+ NQR)+ ((NRP* FAX)+ (((NRP* FAW)* (IUF- (FAX* FAX)))* FAV)))* JW;
+		let NQK=((NPK+ NPL)+ ((NQJ* FAX)+ (((NQJ* FAW)* (IUF- (FAX* FAX)))* FAV)))* JW;
 		FAZ=FAY;
-		JUX=NRQ;
+		JUX=NQK;
 		}
 		let FBA=UK* AI;
 		let FBB=FBA* EZK;
-		let NRT=NQS* FBA;
-		let NRU=L4([NRC[0],NRC[1],0.0,NRC[2]]);
+		let NQN=NPM* FBA;
+		let NQO=L4([NPV[0],NPV[1],0.0,NPV[2]]);
 		let FBE=(FAZ- (EZY- (FBB* FBC)))/ FAA;
-		let NRV=NRD* FBE;
-		let NRW=((L4([0.0,JUX[0],JUX[1],JUX[2]])- (NRU- (L4([(NRT* FBC),0.0,0.0,0.0])+ (JUV* FBB))))- L4([NRV[0],NRV[1],0.0,NRV[2]]))/ FAA;
+		let NQP=L4([NPW[0],NPW[1],0.0,NPW[2]]);
+		let NQQ=((L4([0.0,JUX[0],JUX[1],JUX[2]])- (NQO- (L4([(NQN* FBC),0.0,0.0,0.0])+ (JUV* FBB))))).product_sum_div(IUF,NQP,(-FBE),FAA);
 		let FBF=FBE> LD;
 		let FBO;
 		let JUY;
 		if FBF{
 		let FBG=FAB* FBE;
-		let NSB=NRE* FBE;
-		let NSC=L4([NSB[0],NSB[1],0.0,NSB[2]])+ (NRW* FAB);
+		let NQV=NPX* FBE;
+		let NQW=L4([NQV[0],NQV[1],0.0,NQV[2]])+ (NQQ* FAB);
 		FBO=FBG;
-		JUY=NSC;
+		JUY=NQW;
 		}else{
 		let FBH=FBE< -50f64;
 		let FBP;
@@ -12094,164 +12062,162 @@ impl Instance {
 		if FBH{
 		let FBI=FBE.exp();
 		let FBJ=FAB* FBI;
-		let NRZ=NRE* FBI;
-		let NSA=L4([NRZ[0],NRZ[1],0.0,NRZ[2]])+ ((NRW* FBI)* FAB);
+		let NQT=NPX* FBI;
+		let NQU=L4([NQT[0],NQT[1],0.0,NQT[2]])+ ((NQQ* FBI)* FAB);
 		FBP=FBJ;
-		JUZ=NSA;
+		JUZ=NQU;
 		}else{
 		let FBK=FBE.exp();
 		let FBL=F+ FBK;
 		let FBM=FBL.ln();
 		let FBN=FAB* FBM;
-		let NRX=NRE* FBM;
-		let NRY=L4([NRX[0],NRX[1],0.0,NRX[2]])+ (((NRW* FBK)* (IUF/ FBL))* FAB);
+		let NQR=NPX* FBM;
+		let NQS=L4([NQR[0],NQR[1],0.0,NQR[2]])+ (((NQQ* FBK)* (IUF/ FBL))* FAB);
 		FBP=FBN;
-		JUZ=NRY;
+		JUZ=NQS;
 		}
 		FBO=FBP;
 		JUY=JUZ;
 		}
 		let FBQ=(EZA* FBO)/ DP;
+		let NQX=L4([KKR,0.0,0.0,0.0]);
 		let FBR=F+ FBQ;
 		let FBS=EZP* FBR;
 		let FBT=KI/ FBS;
-		let NSD=(((L4([(NQX* FBR),0.0,0.0,0.0])+ ((((JUY* EZA)- L4([(KKR* FBQ),0.0,0.0,0.0]))/ DP)* EZP))* FBT)* KNJ)/ FBS;
+		let NQY=((L4([(NPR* FBR),0.0,0.0,0.0])+ ((((JUY* EZA)).product_sum_div(IUF,NQX,(-FBQ),DP))* EZP))).product_div((-FBT),FBS);
 		let FBU=F+ (TJ* AC);
 		let FBV=(F+ (TJ* E))/ FBU;
 		let FBW=EYY* FBV;
-		let NSE=((((IVA* TJ)* FBV)* KNJ)/ FBU)* EYY;
+		let NQZ=(product_div((IVA* TJ),(-FBV),FBU))* EYY;
 		let FBX=F+ ((TK* EZI)/ EYU);
-		let NSF=((JUS* TK)/ EYU)* FBW;
-		let NSG=L3([(NSE* FBX),0.0,0.0])+ L3([0.0,NSF[0],NSF[1]]);
+		let NRA=((JUS* TK)/ EYU)* FBW;
+		let NRB=L3([(NQZ* FBX),0.0,0.0])+ L3([0.0,NRA[0],NRA[1]]);
 		let FBY=(EZB* FBO)/ DP;
 		let FBZ=F+ FBY;
 		let FCA=(FBW* FBX)/ FBZ;
-		let NSH=(L4([NSG[0],NSG[1],0.0,NSG[2]])- ((((JUY* EZB)- L4([(KKR* FBY),0.0,0.0,0.0]))/ DP)* FCA))/ FBZ;
+		let NRC=(L4([NRB[0],NRB[1],0.0,NRB[2]])).product_sum_div(IUF,(((JUY* EZB)).product_sum_div(IUF,NQX,(-FBY),DP)),(-FCA),FBZ);
 		let FCB=MC* FBC;
 		let FCC=FCB* AZ;
 		let FCD=F- FBC;
-		let NSI=JUV* KNJ;
+		let NRD=JUV* KNJ;
 		let FCE=((FCC* FBT)/ EYU)+ (FCD* FCA);
-		let NSJ=((((((JUV* MC)* AZ)+ L4([(KJT* FCB),0.0,0.0,0.0]))* FBT)+ (NSD* FCC))/ EYU)+ ((NSI* FCA)+ (NSH* FCD));
+		let NRE=((((((JUV* MC)* AZ)+ L4([(KJT* FCB),0.0,0.0,0.0]))* FBT)+ (NQY* FCC))/ EYU)+ ((NRD* FCA)+ (NRC* FCD));
 		let FCF=(FCA* EYU)/ FBT;
-		let NSK=((NSH* EYU)- (NSD* FCF))/ FBT;
+		let NRF=((NRC* EYU)).product_sum_div(IUF,NQY,(-FCF),FBT);
 		let FCG=(MC* FBO)/ DP;
 		let FCH=FCG/ FCF;
 		let FCI=(F+ FCH).sqrt();
 		let FCJ=(FCF* FCI)- FCF;
 		let FCK=FAA* FBC;
-		let NSL=NRD* FBC;
-		let NSM=L4([NSL[0],NSL[1],0.0,NSL[2]])+ (JUV* FAA);
+		let NRG=NPW* FBC;
+		let NRH=L4([NRG[0],NRG[1],0.0,NRG[2]])+ (JUV* FAA);
 		let FCL=(FCF* FCD)+ FCK;
-		let NSN=((NSK* FCD)+ (NSI* FCF))+ NSM;
-		let NSO=((((NSK* FCI)+ (((((((JUY* MC)- L4([(KKR* FCG),0.0,0.0,0.0]))/ DP)- (NSK* FCH))/ FCF)* (IUF/ (KNB* FCI)))* FCF))- NSK)* FCD)+ (NSI* FCJ);
+		let NRI=((NRF* FCD)+ (NRD* FCF))+ NRH;
+		let NRJ=((((NRF* FCI)+ (((((((JUY* MC)).product_sum_div(IUF,NQX,(-FCG),DP))).product_sum_div(IUF,NRF,(-FCH),FCF))* (IUF/ (KNB* FCI)))* FCF))- NRF)* FCD)+ (NRD* FCJ);
 		let FCM=(FCJ* FCD)+ FCK;
-		let NSP=NSO+ NSM;
+		let NRK=NRJ+ NRH;
 		let FCN=JI/ FCM;
-		let NSQ=L4([0.0,KMP[0],0.0,KMP[1]]);
-		let NSR=(NSQ- (NSP* FCN))/ FCM;
+		let NRL=L4([0.0,KMP[0],0.0,KMP[1]]);
+		let NRM=(NRL).product_sum_div(IUF,NRK,(-FCN),FCM);
 		let FCV;
 		let JVA;
 		if JM{
 		let FCO=A- FCN;
-		let NSU=(NSR* KNJ)* FCO;
+		let NRP=(NRM* KNJ)* FCO;
 		let FCP=((FCO* FCO)+ JV).sqrt();
 		let FCQ=JW* ((A+ FCN)+ FCP);
-		let NSV=(NSR+ ((NSU+ NSU)* (IUF/ (KNB* FCP))))* JW;
+		let NRQ=(NRM+ ((NRP+ NRP)* (IUF/ (KNB* FCP))))* JW;
 		FCV=FCQ;
-		JVA=NSV;
+		JVA=NRQ;
 		}else{
 		let FCR=A- FCN;
-		let NSS=NSR* KNJ;
+		let NRN=NRM* KNJ;
 		let FCS=KB/ JV;
 		let FCT=(FCS* FCR).tanh();
 		let FCU=JW* ((A+ FCN)+ (FCR* FCT));
-		let NST=(NSR+ ((NSS* FCT)+ (((NSS* FCS)* (IUF- (FCT* FCT)))* FCR)))* JW;
+		let NRO=(NRM+ ((NRN* FCT)+ (((NRN* FCS)* (IUF- (FCT* FCT)))* FCR)))* JW;
 		FCV=FCU;
-		JVA=NST;
+		JVA=NRO;
 		}
-		let NSW=EYZ- IUF;
+		let NRR=EYZ- IUF;
 		let FCW=F+ (FCV.powf(EYZ));
 		let FCX=F/ EYZ;
 		let FCY=FCW.powf(FCX);
-		let NSX=FCX- IUF;
+		let NRS=FCX- IUF;
 		let FCZ=F/ FCY;
 		let FDA=JI* FCZ;
-		let NSY=KMP* FCZ;
-		let NSZ=(((((JVA* (EYZ* ((FCV+ (((FCV== KOL) as u8 as f64)* KUP)).powf(NSW))))* (FCX* ((FCW+ (((FCW== KOL) as u8 as f64)* KUP)).powf(NSX))))* FCZ)* KNJ)/ FCY)* JI;
-		let NTA=L4([0.0,NSY[0],0.0,NSY[1]])+ NSZ;
+		let NRT=KMP* FCZ;
+		let NRU=L4([0.0,NRT[0],0.0,NRT[1]])+ (((((JVA* (EYZ* ((FCV+ (((FCV== KOL) as u8 as f64)* KUP)).powf(NRR))))* (FCX* ((FCW+ (((FCW== KOL) as u8 as f64)* KUP)).powf(NRS))))).product_div((-FCZ),FCY))* JI);
 		let FDB=-JI;
-		let NTB=KMP* KNJ;
+		let NRV=KMP* KNJ;
 		let FDC=FDB/ FCM;
-		let NTC=L4([0.0,NTB[0],0.0,NTB[1]]);
-		let NTD=(NTC- (NSP* FDC))/ FCM;
+		let NRW=L4([0.0,NRV[0],0.0,NRV[1]]);
+		let NRX=(NRW).product_sum_div(IUF,NRK,(-FDC),FCM);
 		let FDK;
 		let JVB;
 		if JM{
 		let FDD=A- FDC;
-		let NTG=(NTD* KNJ)* FDD;
+		let NSA=(NRX* KNJ)* FDD;
 		let FDE=((FDD* FDD)+ JV).sqrt();
 		let FDF=JW* ((A+ FDC)+ FDE);
-		let NTH=(NTD+ ((NTG+ NTG)* (IUF/ (KNB* FDE))))* JW;
+		let NSB=(NRX+ ((NSA+ NSA)* (IUF/ (KNB* FDE))))* JW;
 		FDK=FDF;
-		JVB=NTH;
+		JVB=NSB;
 		}else{
 		let FDG=A- FDC;
-		let NTE=NTD* KNJ;
+		let NRY=NRX* KNJ;
 		let FDH=KB/ JV;
 		let FDI=(FDH* FDG).tanh();
 		let FDJ=JW* ((A+ FDC)+ (FDG* FDI));
-		let NTF=(NTD+ ((NTE* FDI)+ (((NTE* FDH)* (IUF- (FDI* FDI)))* FDG)))* JW;
+		let NRZ=(NRX+ ((NRY* FDI)+ (((NRY* FDH)* (IUF- (FDI* FDI)))* FDG)))* JW;
 		FDK=FDJ;
-		JVB=NTF;
+		JVB=NRZ;
 		}
 		let FDL=F+ (FDK.powf(EYZ));
 		let FDM=FDL.powf(FCX);
 		let FDN=F/ FDM;
 		let FDO=FDB* FDN;
-		let NTI=NTB* FDN;
-		let NTJ=(((((JVB* (EYZ* ((FDK+ (((FDK== KOL) as u8 as f64)* KUP)).powf(NSW))))* (FCX* ((FDL+ (((FDL== KOL) as u8 as f64)* KUP)).powf(NSX))))* FDN)* KNJ)/ FDM)* FDB;
-		let NTK=L4([0.0,NTI[0],0.0,NTI[1]])+ NTJ;
-		let NTL=L4([0.0,0.0,KMR[0],KMR[1]]);
+		let NSC=NRV* FDN;
+		let NSD=L4([0.0,NSC[0],0.0,NSC[1]])+ (((((JVB* (EYZ* ((FDK+ (((FDK== KOL) as u8 as f64)* KUP)).powf(NRR))))* (FCX* ((FDL+ (((FDL== KOL) as u8 as f64)* KUP)).powf(NRS))))).product_div((-FDN),FDM))* FDB);
+		let NSE=L4([0.0,0.0,KMR[0],KMR[1]]);
 		let FDP=(JL- FAD)/ EZK;
-		let NTM=((NTL- NRL)- L4([(NQS* FDP),0.0,0.0,0.0]))/ EZK;
+		let NSF=((NSE- NQE)).product_sum_div(IUF,NQF,(-FDP),EZK);
 		let FDQ=FDP> LD;
 		let FDV;
 		let JVC;
 		if FDQ{
 		FDV=A;
-		JVC=NRO;
+		JVC=NQI;
 		}else{
 		let FDR=FDP< -50f64;
 		let FDW;
 		let JVD;
 		if FDR{
 		FDW=F;
-		JVD=NRO;
+		JVD=NQI;
 		}else{
 		let FDS=FDP.exp();
 		let FDT=F+ FDS;
 		let FDU=F/ FDT;
-		let NTN=(((NTM* FDS)* FDU)* KNJ)/ FDT;
+		let NSG=((NSF* FDS)).product_div((-FDU),FDT);
 		FDW=FDU;
-		JVD=NTN;
+		JVD=NSG;
 		}
 		FDV=FDW;
 		JVC=JVD;
 		}
-		let NTO=L4([0.0,NQR[0],NQR[1],NQR[2]]);
+		let NSH=L4([0.0,NPL[0],NPL[1],NPL[2]]);
 		let FDX=((EZJ- FDO)- (EZY- (FBB* FDV)))/ FAA;
-		let NTP=NRD* FDX;
-		let NTQ=(((NTO- NTK)- (NRU- (L4([(NRT* FDV),0.0,0.0,0.0])+ (JVC* FBB))))- L4([NTP[0],NTP[1],0.0,NTP[2]]))/ FAA;
+		let NSI=(((NSH- NSD)- (NQO- (L4([(NQN* FDV),0.0,0.0,0.0])+ (JVC* FBB))))).product_sum_div(IUF,NQP,(-FDX),FAA);
 		let FDY=FDX> LD;
 		let FEZ;
 		let JVE;
 		if FDY{
 		let FDZ=FAB* FDX;
-		let NTV=NRE* FDX;
-		let NTW=L4([NTV[0],NTV[1],0.0,NTV[2]])+ (NTQ* FAB);
+		let NSN=NPX* FDX;
+		let NSO=L4([NSN[0],NSN[1],0.0,NSN[2]])+ (NSI* FAB);
 		FEZ=FDZ;
-		JVE=NTW;
+		JVE=NSO;
 		}else{
 		let FEA=FDX< -50f64;
 		let FFA;
@@ -12259,61 +12225,60 @@ impl Instance {
 		if FEA{
 		let FEB=FDX.exp();
 		let FEC=FAB* FEB;
-		let NTT=NRE* FEB;
-		let NTU=L4([NTT[0],NTT[1],0.0,NTT[2]])+ ((NTQ* FEB)* FAB);
+		let NSL=NPX* FEB;
+		let NSM=L4([NSL[0],NSL[1],0.0,NSL[2]])+ ((NSI* FEB)* FAB);
 		FFA=FEC;
-		JVF=NTU;
+		JVF=NSM;
 		}else{
 		let FED=FDX.exp();
 		let FEE=F+ FED;
 		let FEF=FEE.ln();
 		let FEG=FAB* FEF;
-		let NTR=NRE* FEF;
-		let NTS=L4([NTR[0],NTR[1],0.0,NTR[2]])+ (((NTQ* FED)* (IUF/ FEE))* FAB);
+		let NSJ=NPX* FEF;
+		let NSK=L4([NSJ[0],NSJ[1],0.0,NSJ[2]])+ (((NSI* FED)* (IUF/ FEE))* FAB);
 		FFA=FEG;
-		JVF=NTS;
+		JVF=NSK;
 		}
 		FEZ=FFA;
 		JVE=JVF;
 		}
 		let FEH=(EZJ- FAD)/ EZK;
-		let NTX=((NTO- NRL)- L4([(NQS* FEH),0.0,0.0,0.0]))/ EZK;
+		let NSP=((NSH- NQE)).product_sum_div(IUF,NQF,(-FEH),EZK);
 		let FEI=FEH> LD;
 		let FEN;
 		let JVG;
 		if FEI{
 		FEN=A;
-		JVG=NRO;
+		JVG=NQI;
 		}else{
 		let FEJ=FEH< -50f64;
 		let FEO;
 		let JVH;
 		if FEJ{
 		FEO=F;
-		JVH=NRO;
+		JVH=NQI;
 		}else{
 		let FEK=FEH.exp();
 		let FEL=F+ FEK;
 		let FEM=F/ FEL;
-		let NTY=(((NTX* FEK)* FEM)* KNJ)/ FEL;
+		let NSQ=((NSP* FEK)).product_div((-FEM),FEL);
 		FEO=FEM;
-		JVH=NTY;
+		JVH=NSQ;
 		}
 		FEN=FEO;
 		JVG=JVH;
 		}
 		let FEP=((JL- FDA)- (EZY- (FBB* FEN)))/ FAA;
-		let NTZ=NRD* FEP;
-		let NUA=(((NTL- NTA)- (NRU- (L4([(NRT* FEN),0.0,0.0,0.0])+ (JVG* FBB))))- L4([NTZ[0],NTZ[1],0.0,NTZ[2]]))/ FAA;
+		let NSR=(((NSE- NRU)- (NQO- (L4([(NQN* FEN),0.0,0.0,0.0])+ (JVG* FBB))))).product_sum_div(IUF,NQP,(-FEP),FAA);
 		let FEQ=FEP> LD;
 		let FFB;
 		let JVI;
 		if FEQ{
 		let FER=FAB* FEP;
-		let NUF=NRE* FEP;
-		let NUG=L4([NUF[0],NUF[1],0.0,NUF[2]])+ (NUA* FAB);
+		let NSW=NPX* FEP;
+		let NSX=L4([NSW[0],NSW[1],0.0,NSW[2]])+ (NSR* FAB);
 		FFB=FER;
-		JVI=NUG;
+		JVI=NSX;
 		}else{
 		let FES=FEP< -50f64;
 		let FFC;
@@ -12321,105 +12286,105 @@ impl Instance {
 		if FES{
 		let FET=FEP.exp();
 		let FEU=FAB* FET;
-		let NUD=NRE* FET;
-		let NUE=L4([NUD[0],NUD[1],0.0,NUD[2]])+ ((NUA* FET)* FAB);
+		let NSU=NPX* FET;
+		let NSV=L4([NSU[0],NSU[1],0.0,NSU[2]])+ ((NSR* FET)* FAB);
 		FFC=FEU;
-		JVJ=NUE;
+		JVJ=NSV;
 		}else{
 		let FEV=FEP.exp();
 		let FEW=F+ FEV;
 		let FEX=FEW.ln();
 		let FEY=FAB* FEX;
-		let NUB=NRE* FEX;
-		let NUC=L4([NUB[0],NUB[1],0.0,NUB[2]])+ (((NUA* FEV)* (IUF/ FEW))* FAB);
+		let NSS=NPX* FEX;
+		let NST=L4([NSS[0],NSS[1],0.0,NSS[2]])+ (((NSR* FEV)* (IUF/ FEW))* FAB);
 		FFC=FEY;
-		JVJ=NUC;
+		JVJ=NST;
 		}
 		FFB=FFC;
 		JVI=JVJ;
 		}
 		let FFD=(FEZ- FFB)/ DP;
 		let FFE=FFD/ FCL;
-		let NUH=((((JVE- JVI)- L4([(KKR* FFD),0.0,0.0,0.0]))/ DP)- (NSN* FFE))/ FCL;
+		let NSY=((((JVE- JVI)).product_sum_div(IUF,NQX,(-FFD),DP))).product_sum_div(IUF,NRI,(-FFE),FCL);
 		let FFJ;
 		let JVK;
 		if JM{
-		let NUJ=NUH* FFE;
+		let NTA=NSY* FFE;
 		let FFF=((FFE* FFE)+ JV).sqrt();
-		let NUK=(NUJ+ NUJ)* (IUF/ (KNB* FFF));
+		let NTB=(NTA+ NTA)* (IUF/ (KNB* FFF));
 		FFJ=FFF;
-		JVK=NUK;
+		JVK=NTB;
 		}else{
 		let FFG=KB/ JV;
 		let FFH=(FFG* FFE).tanh();
 		let FFI=FFE* FFH;
-		let NUI=(NUH* FFH)+ (((NUH* FFG)* (IUF- (FFH* FFH)))* FFE);
+		let NSZ=(NSY* FFH)+ (((NSY* FFG)* (IUF- (FFH* FFH)))* FFE);
 		FFJ=FFI;
-		JVK=NUI;
+		JVK=NSZ;
 		}
 		let FFK=F+ (FFJ.powf(EYZ));
 		let FFL=FFK.powf(FCX);
 		let FFM=FFE/ FFL;
 		let FFN=FCE* FFM;
-		let NUL=((NUH- (((JVK* (EYZ* ((FFJ+ (((FFJ== KOL) as u8 as f64)* KUP)).powf(NSW))))* (FCX* ((FFK+ (((FFK== KOL) as u8 as f64)* KUP)).powf(NSX))))* FFM))/ FFL)* FCE;
+		let NTC=((NSY).product_sum_div(IUF,((JVK* (EYZ* ((FFJ+ (((FFJ== KOL) as u8 as f64)* KUP)).powf(NRR))))* (FCX* ((FFK+ (((FFK== KOL) as u8 as f64)* KUP)).powf(NRS)))),(-FFM),FFL))* FCE;
 		let FFO=(JE* O)* P;
 		let FFP=FFO* JW;
 		let FFQ=FFP* (FEZ+ FFB);
 		let FFR=FFQ* FFN;
 		let FFS=FFR* EZC;
-		let NUM=((((JVE+ JVI)* FFP)* FFN)+ (((NSJ* FFM)+ NUL)* FFQ))* EZC;
-		let NUN=IWW* FFR;
-		let NUO=L8([NUM[0],NUM[1],NUM[2],NUM[3],0.0,0.0,0.0,0.0])+ L8([0.0,0.0,0.0,0.0,NUN[0],NUN[1],NUN[2],NUN[3]]);
+		let NTD=((((JVE+ JVI)* FFP)* FFN)+ (((NRE* FFM)+ NTC)* FFQ))* EZC;
+		let NTE=IWW* FFR;
+		let NTF=L8([NTD[0],NTD[1],NTD[2],NTD[3],0.0,0.0,0.0,0.0])+ L8([0.0,0.0,0.0,0.0,NTE[0],NTE[1],NTE[2],NTE[3]]);
 		let FFT=MC* EZM;
 		let FFU=FFT* AZ;
-		let NUP=((NQT* MC)* AZ)+ (KJT* FFT);
+		let NTG=((NPN* MC)* AZ)+ (KJT* FFT);
 		let FFV=DP* FFU;
-		let NUQ=(KKR* FFU)+ (NUP* DP);
+		let NTH=(KKR* FFU)+ (NTG* DP);
 		let FFW=EZO- FAC;
-		let NUR=NQW- NRF;
+		let NTI=NPQ- NPY;
 		let FGE;
 		let JVL;
 		if JM{
 		let FFX=JL- EZJ;
-		let NUU=(NQQ- NQR)* FFX;
+		let NTL=(NPK- NPL)* FFX;
 		let FFY=((FFX* FFX)+ JV).sqrt();
 		let FFZ=JW* ((JL+ EZJ)+ FFY);
-		let NUV=((NQQ+ NQR)+ ((NUU+ NUU)* (IUF/ (KNB* FFY))))* JW;
+		let NTM=((NPK+ NPL)+ ((NTL+ NTL)* (IUF/ (KNB* FFY))))* JW;
 		FGE=FFZ;
-		JVL=NUV;
+		JVL=NTM;
 		}else{
 		let FGA=JL- EZJ;
-		let NUS=NQQ- NQR;
+		let NTJ=NPK- NPL;
 		let FGB=KB/ JV;
 		let FGC=(FGB* FGA).tanh();
 		let FGD=JW* ((JL+ EZJ)+ (FGA* FGC));
-		let NUT=((NQQ+ NQR)+ ((NUS* FGC)+ (((NUS* FGB)* (IUF- (FGC* FGC)))* FGA)))* JW;
+		let NTK=((NPK+ NPL)+ ((NTJ* FGC)+ (((NTJ* FGB)* (IUF- (FGC* FGC)))* FGA)))* JW;
 		FGE=FGD;
-		JVL=NUT;
+		JVL=NTK;
 		}
-		let NUW=L4([NUR,0.0,0.0,0.0]);
+		let NTN=L4([NTI,0.0,0.0,0.0]);
 		let FGF=(FGE- FFW)/ EZK;
-		let NUX=((L4([0.0,JVL[0],JVL[1],JVL[2]])- NUW)- L4([(NQS* FGF),0.0,0.0,0.0]))/ EZK;
+		let NTO=((L4([0.0,JVL[0],JVL[1],JVL[2]])- NTN)).product_sum_div(IUF,NQF,(-FGF),EZK);
 		let FGG=FGF> LD;
 		let FGT;
 		let JVM;
 		if FGG{
 		FGT=A;
-		JVM=NRO;
+		JVM=NQI;
 		}else{
 		let FGH=FGF< -50f64;
 		let FGU;
 		let JVN;
 		if FGH{
 		FGU=F;
-		JVN=NRO;
+		JVN=NQI;
 		}else{
 		let FGI=FGF.exp();
 		let FGJ=F+ FGI;
 		let FGK=F/ FGJ;
-		let NUY=(((NUX* FGI)* FGK)* KNJ)/ FGJ;
+		let NTP=((NTO* FGI)).product_div((-FGK),FGJ);
 		FGU=FGK;
-		JVN=NUY;
+		JVN=NTP;
 		}
 		FGT=FGU;
 		JVM=JVN;
@@ -12428,33 +12393,34 @@ impl Instance {
 		let JVO;
 		if JM{
 		let FGL=JL- EZJ;
-		let NVB=(NQQ- NQR)* FGL;
+		let NTS=(NPK- NPL)* FGL;
 		let FGM=((FGL* FGL)+ JV).sqrt();
 		let FGN=JW* ((JL+ EZJ)+ FGM);
-		let NVC=((NQQ+ NQR)+ ((NVB+ NVB)* (IUF/ (KNB* FGM))))* JW;
+		let NTT=((NPK+ NPL)+ ((NTS+ NTS)* (IUF/ (KNB* FGM))))* JW;
 		FGS=FGN;
-		JVO=NVC;
+		JVO=NTT;
 		}else{
 		let FGO=JL- EZJ;
-		let NUZ=NQQ- NQR;
+		let NTQ=NPK- NPL;
 		let FGP=KB/ JV;
 		let FGQ=(FGP* FGO).tanh();
 		let FGR=JW* ((JL+ EZJ)+ (FGO* FGQ));
-		let NVA=((NQQ+ NQR)+ ((NUZ* FGQ)+ (((NUZ* FGP)* (IUF- (FGQ* FGQ)))* FGO)))* JW;
+		let NTR=((NPK+ NPL)+ ((NTQ* FGQ)+ (((NTQ* FGP)* (IUF- (FGQ* FGQ)))* FGO)))* JW;
 		FGS=FGR;
-		JVO=NVA;
+		JVO=NTR;
 		}
-		let NVD=L4([NQW,0.0,0.0,0.0]);
+		let NTU=L4([NPQ,0.0,0.0,0.0]);
 		let FGV=(FGS- (EZO- (FBB* FGT)))/ FFU;
-		let NVE=((L4([0.0,JVO[0],JVO[1],JVO[2]])- (NVD- (L4([(NRT* FGT),0.0,0.0,0.0])+ (JVM* FBB))))- L4([(NUP* FGV),0.0,0.0,0.0]))/ FFU;
+		let NTV=L4([NTG,0.0,0.0,0.0]);
+		let NTW=((L4([0.0,JVO[0],JVO[1],JVO[2]])- (NTU- (L4([(NQN* FGT),0.0,0.0,0.0])+ (JVM* FBB))))).product_sum_div(IUF,NTV,(-FGV),FFU);
 		let FGW=FGV> LD;
 		let FHH;
 		let JVP;
 		if FGW{
 		let FGX=FFV* FGV;
-		let NVH=L4([(NUQ* FGV),0.0,0.0,0.0])+ (NVE* FFV);
+		let NTZ=L4([(NTH* FGV),0.0,0.0,0.0])+ (NTW* FFV);
 		FHH=FGX;
-		JVP=NVH;
+		JVP=NTZ;
 		}else{
 		let FGY=FGV< -50f64;
 		let FHI;
@@ -12462,128 +12428,127 @@ impl Instance {
 		if FGY{
 		let FGZ=FGV.exp();
 		let FHA=FFV* FGZ;
-		let NVG=L4([(NUQ* FGZ),0.0,0.0,0.0])+ ((NVE* FGZ)* FFV);
+		let NTY=L4([(NTH* FGZ),0.0,0.0,0.0])+ ((NTW* FGZ)* FFV);
 		FHI=FHA;
-		JVQ=NVG;
+		JVQ=NTY;
 		}else{
 		let FHB=FGV.exp();
 		let FHC=F+ FHB;
 		let FHD=FHC.ln();
 		let FHE=FFV* FHD;
-		let NVF=L4([(NUQ* FHD),0.0,0.0,0.0])+ (((NVE* FHB)* (IUF/ FHC))* FFV);
+		let NTX=L4([(NTH* FHD),0.0,0.0,0.0])+ (((NTW* FHB)* (IUF/ FHC))* FFV);
 		FHI=FHE;
-		JVQ=NVF;
+		JVQ=NTX;
 		}
 		FHH=FHI;
 		JVP=JVQ;
 		}
 		let FHF=KI/ EZP;
 		let FHG=(FBW* EYU)/ FHF;
-		let NVI=((NSE* EYU)- ((((NQX* FHF)* KNJ)/ EZP)* FHG))/ FHF;
+		let NUA=product_sum_div((NQZ* EYU),IUF,(product_div(NPR,(-FHF),EZP)),(-FHG),FHF);
 		let FHJ=(MC* FHH)/ DP;
 		let FHK=FHJ/ FHG;
+		let NUB=L4([NUA,0.0,0.0,0.0]);
 		let FHL=(F+ FHK).sqrt();
 		let FHM=(FHG* FHL)- FHG;
-		let NVJ=(L4([(NVI* FHL),0.0,0.0,0.0])+ (((((((JVP* MC)- L4([(KKR* FHJ),0.0,0.0,0.0]))/ DP)- L4([(NVI* FHK),0.0,0.0,0.0]))/ FHG)* (IUF/ (KNB* FHL)))* FHG))- L4([NVI,0.0,0.0,0.0]);
 		let FHN=F- FGT;
+		let NUC=(((L4([(NUA* FHL),0.0,0.0,0.0])+ (((((((JVP* MC)).product_sum_div(IUF,NQX,(-FHJ),DP))).product_sum_div(IUF,NUB,(-FHK),FHG))* (IUF/ (KNB* FHL)))* FHG))- NUB)* FHN)+ ((JVM* KNJ)* FHM);
 		let FHO=(FHM* FHN)+ (FFU* FGT);
-		let NVK=((NVJ* FHN)+ ((JVM* KNJ)* FHM))+ (L4([(NUP* FGT),0.0,0.0,0.0])+ (JVM* FFU));
+		let NUD=NUC+ (L4([(NTG* FGT),0.0,0.0,0.0])+ (JVM* FFU));
 		let FHP=JI/ FHO;
-		let NVL=(NSQ- (NVK* FHP))/ FHO;
+		let NUE=(NRL).product_sum_div(IUF,NUD,(-FHP),FHO);
 		let FHX;
 		let JVR;
 		if JM{
 		let FHQ=A- FHP;
-		let NVO=(NVL* KNJ)* FHQ;
+		let NUH=(NUE* KNJ)* FHQ;
 		let FHR=((FHQ* FHQ)+ JV).sqrt();
 		let FHS=JW* ((A+ FHP)+ FHR);
-		let NVP=(NVL+ ((NVO+ NVO)* (IUF/ (KNB* FHR))))* JW;
+		let NUI=(NUE+ ((NUH+ NUH)* (IUF/ (KNB* FHR))))* JW;
 		FHX=FHS;
-		JVR=NVP;
+		JVR=NUI;
 		}else{
 		let FHT=A- FHP;
-		let NVM=NVL* KNJ;
+		let NUF=NUE* KNJ;
 		let FHU=KB/ JV;
 		let FHV=(FHU* FHT).tanh();
 		let FHW=JW* ((A+ FHP)+ (FHT* FHV));
-		let NVN=(NVL+ ((NVM* FHV)+ (((NVM* FHU)* (IUF- (FHV* FHV)))* FHT)))* JW;
+		let NUG=(NUE+ ((NUF* FHV)+ (((NUF* FHU)* (IUF- (FHV* FHV)))* FHT)))* JW;
 		FHX=FHW;
-		JVR=NVN;
+		JVR=NUG;
 		}
 		let FHY=F+ (FHX.powf(EYZ));
 		let FHZ=FHY.powf(FCX);
 		let FIA=F/ FHZ;
 		let FIB=JI* FIA;
-		let NVQ=KMP* FIA;
-		let NVR=(((((JVR* (EYZ* ((FHX+ (((FHX== KOL) as u8 as f64)* KUP)).powf(NSW))))* (FCX* ((FHY+ (((FHY== KOL) as u8 as f64)* KUP)).powf(NSX))))* FIA)* KNJ)/ FHZ)* JI;
-		let NVS=L4([0.0,NVQ[0],0.0,NVQ[1]])+ NVR;
+		let NUJ=KMP* FIA;
+		let NUK=L4([0.0,NUJ[0],0.0,NUJ[1]])+ (((((JVR* (EYZ* ((FHX+ (((FHX== KOL) as u8 as f64)* KUP)).powf(NRR))))* (FCX* ((FHY+ (((FHY== KOL) as u8 as f64)* KUP)).powf(NRS))))).product_div((-FIA),FHZ))* JI);
 		let FIC=FDB/ FHO;
-		let NVT=(NTC- (NVK* FIC))/ FHO;
+		let NUL=(NRW).product_sum_div(IUF,NUD,(-FIC),FHO);
 		let FIK;
 		let JVS;
 		if JM{
 		let FID=A- FIC;
-		let NVW=(NVT* KNJ)* FID;
+		let NUO=(NUL* KNJ)* FID;
 		let FIE=((FID* FID)+ JV).sqrt();
 		let FIF=JW* ((A+ FIC)+ FIE);
-		let NVX=(NVT+ ((NVW+ NVW)* (IUF/ (KNB* FIE))))* JW;
+		let NUP=(NUL+ ((NUO+ NUO)* (IUF/ (KNB* FIE))))* JW;
 		FIK=FIF;
-		JVS=NVX;
+		JVS=NUP;
 		}else{
 		let FIG=A- FIC;
-		let NVU=NVT* KNJ;
+		let NUM=NUL* KNJ;
 		let FIH=KB/ JV;
 		let FII=(FIH* FIG).tanh();
 		let FIJ=JW* ((A+ FIC)+ (FIG* FII));
-		let NVV=(NVT+ ((NVU* FII)+ (((NVU* FIH)* (IUF- (FII* FII)))* FIG)))* JW;
+		let NUN=(NUL+ ((NUM* FII)+ (((NUM* FIH)* (IUF- (FII* FII)))* FIG)))* JW;
 		FIK=FIJ;
-		JVS=NVV;
+		JVS=NUN;
 		}
 		let FIL=F+ (FIK.powf(EYZ));
 		let FIM=FIL.powf(FCX);
 		let FIN=F/ FIM;
 		let FIO=FDB* FIN;
-		let NVY=NTB* FIN;
-		let NVZ=(((((JVS* (EYZ* ((FIK+ (((FIK== KOL) as u8 as f64)* KUP)).powf(NSW))))* (FCX* ((FIL+ (((FIL== KOL) as u8 as f64)* KUP)).powf(NSX))))* FIN)* KNJ)/ FIM)* FDB;
-		let NWA=L4([0.0,NVY[0],0.0,NVY[1]])+ NVZ;
-		let NWB=L3([0.0,KMR[0],KMR[1]]);
+		let NUQ=NRV* FIN;
+		let NUR=L4([0.0,NUQ[0],0.0,NUQ[1]])+ (((((JVS* (EYZ* ((FIK+ (((FIK== KOL) as u8 as f64)* KUP)).powf(NRR))))* (FCX* ((FIL+ (((FIL== KOL) as u8 as f64)* KUP)).powf(NRS))))).product_div((-FIN),FIM))* FDB);
+		let NUS=L3([0.0,KMR[0],KMR[1]]);
 		let FIP=(JL- FFW)/ EZK;
-		let NWC=((NWB- L3([NUR,0.0,0.0]))- L3([(NQS* FIP),0.0,0.0]))/ EZK;
+		let NUT=((NUS- L3([NTI,0.0,0.0]))).product_sum_div(IUF,L3([NPM,0.0,0.0]),(-FIP),EZK);
 		let FIQ=FIP> LD;
 		let FIV;
 		let JVT;
 		if FIQ{
 		FIV=A;
-		JVT=NWE;
+		JVT=NUV;
 		}else{
 		let FIR=FIP< -50f64;
 		let FIW;
 		let JVU;
 		if FIR{
 		FIW=F;
-		JVU=NWE;
+		JVU=NUV;
 		}else{
 		let FIS=FIP.exp();
 		let FIT=F+ FIS;
 		let FIU=F/ FIT;
-		let NWD=(((NWC* FIS)* FIU)* KNJ)/ FIT;
+		let NUU=((NUT* FIS)).product_div((-FIU),FIT);
 		FIW=FIU;
-		JVU=NWD;
+		JVU=NUU;
 		}
 		FIV=FIW;
 		JVT=JVU;
 		}
-		let NWF=L3([NQW,0.0,0.0])- (L3([(NRT* FIV),0.0,0.0])+ (JVT* FBB));
+		let NUW=L3([NPQ,0.0,0.0])- (L3([(NQN* FIV),0.0,0.0])+ (JVT* FBB));
 		let FIX=((EZJ- FIO)- (EZO- (FBB* FIV)))/ FFU;
-		let NWG=(((NTO- NWA)- L4([NWF[0],0.0,NWF[1],NWF[2]]))- L4([(NUP* FIX),0.0,0.0,0.0]))/ FFU;
+		let NUX=(((NSH- NUR)- L4([NUW[0],0.0,NUW[1],NUW[2]]))).product_sum_div(IUF,NTV,(-FIX),FFU);
 		let FIY=FIX> LD;
 		let FJZ;
 		let JVV;
 		if FIY{
 		let FIZ=FFV* FIX;
-		let NWJ=L4([(NUQ* FIX),0.0,0.0,0.0])+ (NWG* FFV);
+		let NVA=L4([(NTH* FIX),0.0,0.0,0.0])+ (NUX* FFV);
 		FJZ=FIZ;
-		JVV=NWJ;
+		JVV=NVA;
 		}else{
 		let FJA=FIX< -50f64;
 		let FKA;
@@ -12591,57 +12556,57 @@ impl Instance {
 		if FJA{
 		let FJB=FIX.exp();
 		let FJC=FFV* FJB;
-		let NWI=L4([(NUQ* FJB),0.0,0.0,0.0])+ ((NWG* FJB)* FFV);
+		let NUZ=L4([(NTH* FJB),0.0,0.0,0.0])+ ((NUX* FJB)* FFV);
 		FKA=FJC;
-		JVW=NWI;
+		JVW=NUZ;
 		}else{
 		let FJD=FIX.exp();
 		let FJE=F+ FJD;
 		let FJF=FJE.ln();
 		let FJG=FFV* FJF;
-		let NWH=L4([(NUQ* FJF),0.0,0.0,0.0])+ (((NWG* FJD)* (IUF/ FJE))* FFV);
+		let NUY=L4([(NTH* FJF),0.0,0.0,0.0])+ (((NUX* FJD)* (IUF/ FJE))* FFV);
 		FKA=FJG;
-		JVW=NWH;
+		JVW=NUY;
 		}
 		FJZ=FKA;
 		JVV=JVW;
 		}
 		let FJH=(EZJ- FFW)/ EZK;
-		let NWK=((NTO- NUW)- L4([(NQS* FJH),0.0,0.0,0.0]))/ EZK;
+		let NVB=((NSH- NTN)).product_sum_div(IUF,NQF,(-FJH),EZK);
 		let FJI=FJH> LD;
 		let FJN;
 		let JVX;
 		if FJI{
 		FJN=A;
-		JVX=NRO;
+		JVX=NQI;
 		}else{
 		let FJJ=FJH< -50f64;
 		let FJO;
 		let JVY;
 		if FJJ{
 		FJO=F;
-		JVY=NRO;
+		JVY=NQI;
 		}else{
 		let FJK=FJH.exp();
 		let FJL=F+ FJK;
 		let FJM=F/ FJL;
-		let NWL=(((NWK* FJK)* FJM)* KNJ)/ FJL;
+		let NVC=((NVB* FJK)).product_div((-FJM),FJL);
 		FJO=FJM;
-		JVY=NWL;
+		JVY=NVC;
 		}
 		FJN=FJO;
 		JVX=JVY;
 		}
 		let FJP=((JL- FIB)- (EZO- (FBB* FJN)))/ FFU;
-		let NWM=(((NTL- NVS)- (NVD- (L4([(NRT* FJN),0.0,0.0,0.0])+ (JVX* FBB))))- L4([(NUP* FJP),0.0,0.0,0.0]))/ FFU;
+		let NVD=(((NSE- NUK)- (NTU- (L4([(NQN* FJN),0.0,0.0,0.0])+ (JVX* FBB))))).product_sum_div(IUF,NTV,(-FJP),FFU);
 		let FJQ=FJP> LD;
 		let FKC;
 		let JVZ;
 		if FJQ{
 		let FJR=FFV* FJP;
-		let NWP=L4([(NUQ* FJP),0.0,0.0,0.0])+ (NWM* FFV);
+		let NVG=L4([(NTH* FJP),0.0,0.0,0.0])+ (NVD* FFV);
 		FKC=FJR;
-		JVZ=NWP;
+		JVZ=NVG;
 		}else{
 		let FJS=FJP< -50f64;
 		let FKD;
@@ -12649,51 +12614,51 @@ impl Instance {
 		if FJS{
 		let FJT=FJP.exp();
 		let FJU=FFV* FJT;
-		let NWO=L4([(NUQ* FJT),0.0,0.0,0.0])+ ((NWM* FJT)* FFV);
+		let NVF=L4([(NTH* FJT),0.0,0.0,0.0])+ ((NVD* FJT)* FFV);
 		FKD=FJU;
-		JWA=NWO;
+		JWA=NVF;
 		}else{
 		let FJV=FJP.exp();
 		let FJW=F+ FJV;
 		let FJX=FJW.ln();
 		let FJY=FFV* FJX;
-		let NWN=L4([(NUQ* FJX),0.0,0.0,0.0])+ (((NWM* FJV)* (IUF/ FJW))* FFV);
+		let NVE=L4([(NTH* FJX),0.0,0.0,0.0])+ (((NVD* FJV)* (IUF/ FJW))* FFV);
 		FKD=FJY;
-		JWA=NWN;
+		JWA=NVE;
 		}
 		FKC=FKD;
 		JVZ=JWA;
 		}
-		let NWQ=JVV* FJZ;
-		let NWR=NWQ+ NWQ;
+		let NVH=JVV* FJZ;
+		let NVI=NVH+ NVH;
 		let FKB=(FJZ* FJZ)+ AEI;
-		let NWS=JVZ* FKC;
-		let NWT=NWS+ NWS;
+		let NVJ=JVZ* FKC;
+		let NVK=NVJ+ NVJ;
 		let FKE=(FKC* FKC)+ AEI;
-		let NWU=(JVV* FKC)+ (JVZ* FJZ);
+		let NVL=(JVV* FKC)+ (JVZ* FJZ);
 		let FKF=(FJZ* FKC)+ AEI;
 		let FKH=FKB+ FKE;
-		let NWV=NWR+ NWT;
+		let NVM=NVI+ NVK;
 		let FKI=(FJZ+ FKC)+ AER;
 		let FKJ=(FKG* (FKH+ FKF))/ FKI;
 		let FKK=AEU* FKB;
 		let FKL=AEW* FKE;
-		let NWW=(((((NWR* FJZ)+ (JVV* FKB))* MC)+ (((NWT* FKC)+ (JVZ* FKE))* BF))+ (((NWR* AEU)* FKC)+ (JVZ* FKK)))+ (((NWT* AEW)* FJZ)+ (JVV* FKL));
+		let NVN=(((((NVI* FJZ)+ (JVV* FKB))* MC)+ (((NVK* FKC)+ (JVZ* FKE))* BF))+ (((NVI* AEU)* FKC)+ (JVZ* FKK)))+ (((NVK* AEW)* FJZ)+ (JVV* FKL));
 		let FKM=AEY* (FKH+ (MC* FKF));
 		let FKN=(MC* ((((MC* ((FKB* FJZ)+ AEK))+ (BF* ((FKE* FKC)+ AEK)))+ (FKK* FKC))+ (FKL* FJZ)))/ FKM;
-		let NWX=((NWW* MC)- (((NWV+ (NWU* MC))* AEY)* FKN))/ FKM;
+		let NVO=((NVN* MC)).product_sum_div(IUF,((NVM+ (NVL* MC))* AEY),(-FKN),FKM);
 		let FKO=O* P;
 		let FKP=(FKO* EYU)* JE;
 		let FKQ=FKP* (FKJ- FKN);
 		let FKR=FKQ* EZC;
-		let NWY=((((((NWV+ NWU)* FKG)- ((JVV+ JVZ)* FKJ))/ FKI)- NWX)* FKP)* EZC;
-		let NWZ=IWW* FKQ;
-		let NXA=L8([NWY[0],NWY[1],NWY[2],NWY[3],0.0,0.0,0.0,0.0])+ L8([0.0,0.0,0.0,0.0,NWZ[0],NWZ[1],NWZ[2],NWZ[3]]);
+		let NVP=((((((NVM+ NVL)* FKG)).product_sum_div(IUF,(JVV+ JVZ),(-FKJ),FKI))- NVO)* FKP)* EZC;
+		let NVQ=IWW* FKQ;
+		let NVR=L8([NVP[0],NVP[1],NVP[2],NVP[3],0.0,0.0,0.0,0.0])+ L8([0.0,0.0,0.0,0.0,NVQ[0],NVQ[1],NVQ[2],NVQ[3]]);
 		let FKS=FKP* FKN;
 		let FKT=FKS* EZC;
-		let NXB=(NWX* FKP)* EZC;
-		let NXC=IWW* FKS;
-		let NXD=L8([NXB[0],NXB[1],NXB[2],NXB[3],0.0,0.0,0.0,0.0])+ L8([0.0,0.0,0.0,0.0,NXC[0],NXC[1],NXC[2],NXC[3]]);
+		let NVS=(NVO* FKP)* EZC;
+		let NVT=IWW* FKS;
+		let NVU=L8([NVS[0],NVS[1],NVS[2],NVS[3],0.0,0.0,0.0,0.0])+ L8([0.0,0.0,0.0,0.0,NVT[0],NVT[1],NVT[2],NVT[3]]);
 		let FKV=parameters[322]== A;
 		let IKD;
 		let IKE;
@@ -12712,8 +12677,8 @@ impl Instance {
 		let JWF;
 		let JWG;
 		if FKV{
-		let NXO=KMO* D;
-		let NXP=NUO+ L8([0.0,NXO[0],0.0,NXO[1],0.0,0.0,0.0,0.0]);
+		let NWF=KMO* D;
+		let NWG=NTF+ L8([0.0,NWF[0],0.0,NWF[1],0.0,0.0,0.0,0.0]);
 		let FKY=A+ (FFS+ (D* JH));
 		IKD=FKW;
 		IKE=FKX;
@@ -12725,31 +12690,31 @@ impl Instance {
 		IOP=F;
 		ITY=A;
 		IUA=A;
-		JWB=NXP;
-		JWC=NXQ;
-		JWD=NXR;
-		JWE=NXS;
-		JWF=NXT;
-		JWG=NXU;
+		JWB=NWG;
+		JWC=NWH;
+		JWD=NWI;
+		JWE=NWJ;
+		JWF=NWK;
+		JWG=NWL;
 		}else{
-		let NXE=L9([NUO[0],NUO[1],NUO[2],NUO[3],NUO[4],NUO[5],NUO[6],NUO[7],0.0])- L9([0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,1f64]);
+		let NVV=L9([NTF[0],NTF[1],NTF[2],NTF[3],NTF[4],NTF[5],NTF[6],NTF[7],0.0])- L9([0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,1f64]);
 		let FLB=FKZ* FLA;
-		let NXF=1f64* FKZ;
+		let NVW=1f64* FKZ;
 		let FLC=ddt(132, FLB);
-		let NXG=L10([NXE[0],NXE[1],NXE[2],NXE[3],NXE[4],NXE[5],NXE[6],NXE[7],0.0,NXE[8]])- L10([0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,(NXF* KOI),0.0]);
+		let NVX=L10([NVV[0],NVV[1],NVV[2],NVV[3],NVV[4],NVV[5],NVV[6],NVV[7],0.0,NVV[8]])- L10([0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,(NVW* KOI),0.0]);
 		let ITX=-FLB;
-		let NXH=NXF* KNJ;
+		let NVY=NVW* KNJ;
 		let FLD=A+ ((FFS- FKU)- FLC);
 		let FLE=FKZ/ BF;
 		let FLF=FLE* FKU;
-		let NXI=1f64* FLE;
+		let NVZ=1f64* FLE;
 		let FLG=ddt(133, FLF);
-		let NXJ=(L2([1f64,0.0])- L2([0.0,1f64]))- L2([0.0,(NXI* KOI)]);
+		let NWA=(L2([1f64,0.0])- L2([0.0,1f64]))- L2([0.0,(NVZ* KOI)]);
 		let ITZ=-FLF;
-		let NXK=NXI* KNJ;
+		let NWB=NVZ* KNJ;
 		let FLH=A+ ((FLA- FKU)- FLG);
-		let NXL=KMO* D;
-		let NXM=L3([0.0,0.0,1f64])+ L3([NXL[0],NXL[1],0.0]);
+		let NWC=KMO* D;
+		let NWD=L3([0.0,0.0,1f64])+ L3([NWC[0],NWC[1],0.0]);
 		let FLI=A+ (FKU+ (D* JH));
 		IKD=A;
 		IKE=A;
@@ -12761,32 +12726,32 @@ impl Instance {
 		IOP=A;
 		ITY=ITX;
 		IUA=ITZ;
-		JWB=NXN;
-		JWC=NXG;
-		JWD=NXJ;
-		JWE=NXM;
-		JWF=NXH;
-		JWG=NXK;
+		JWB=NWE;
+		JWC=NVX;
+		JWD=NWA;
+		JWE=NWD;
+		JWF=NVY;
+		JWG=NWB;
 		}
 		let FLJ=ddt(134, FKR);
 		let FLK=AHC* JK;
-		let NXV=KMQ* AHC;
+		let NWM=KMQ* AHC;
 		let FLL=ddt(135, FLK);
-		let NXW=NXV* KOI;
-		let NXX=(NXA* KOI)+ L8([0.0,0.0,NXW[0],NXW[1],0.0,0.0,0.0,0.0]);
+		let NWN=NWM* KOI;
+		let NWO=(NVR* KOI)+ L8([0.0,0.0,NWN[0],NWN[1],0.0,0.0,0.0,0.0]);
 		let IUB=FKR+ FLK;
-		let NXY=NXA+ L8([0.0,0.0,NXV[0],NXV[1],0.0,0.0,0.0,0.0]);
+		let NWP=NVR+ L8([0.0,0.0,NWM[0],NWM[1],0.0,0.0,0.0,0.0]);
 		let FLM=A+ (FLJ+ FLL);
 		let FLN=ddt(136, FKT);
 		let FLO=JJ- JF;
-		let NXZ=L2([0.0,IUJ])- L2([IUH,0.0]);
+		let NWQ=L2([0.0,IUJ])- L2([IUH,0.0]);
 		let FLP=AHC* FLO;
-		let NYA=NXZ* AHC;
+		let NWR=NWQ* AHC;
 		let FLQ=ddt(137, FLP);
-		let NYB=NYA* KOI;
-		let NYC=(NXD* KOI)+ L8([0.0,NYB[0],NYB[1],0.0,0.0,0.0,0.0,0.0]);
+		let NWS=NWR* KOI;
+		let NWT=(NVU* KOI)+ L8([0.0,NWS[0],NWS[1],0.0,0.0,0.0,0.0,0.0]);
 		let IUC=FKT+ FLP;
-		let NYD=NXD+ L8([0.0,NYA[0],NYA[1],0.0,0.0,0.0,0.0,0.0]);
+		let NWU=NVU+ L8([0.0,NWR[0],NWR[1],0.0,0.0,0.0,0.0,0.0]);
 		let FLR=A+ (FLN+ FLQ);
 		let FLS=parameters[254]== F;
 		let IKJ;
@@ -12807,24 +12772,24 @@ impl Instance {
 		let JWO;
 		if FLS{
 		let FLT=JJ- KJ;
-		let NYH=L2([IUJ,0.0])- L2([0.0,IUN]);
+		let NWY=L2([IUJ,0.0])- L2([0.0,IUN]);
 		let FLU=JE* FLT;
-		let NYI=NYH* JE;
+		let NWZ=NWY* JE;
 		let FMC=F- FMB;
 		let FME=FMC* FMD;
 		let FMJ=FMC* FMI;
 		let FMM=parameters[257]/ AZ;
 		let FMN=-FML;
 		let FMO=FMM* FMN;
-		let NYJ=(((KJT* FMM)* KNJ)/ AZ)* FMN;
+		let NXA=(product_div(KJT,(-FMM),AZ))* FMN;
 		let FMP=FMO> LD;
 		let FMV;
 		let JWP;
 		if FMP{
 		let FMR=FMQ* (F+ (FMO- LD));
-		let NYL=NYJ* FMQ;
+		let NXC=NXA* FMQ;
 		FMV=FMR;
-		JWP=NYL;
+		JWP=NXC;
 		}else{
 		let FMS=FMO< -50f64;
 		let FMW;
@@ -12834,40 +12799,40 @@ impl Instance {
 		JWQ=KJQ;
 		}else{
 		let FMU=FMO.exp();
-		let NYK=NYJ* FMU;
+		let NXB=NXA* FMU;
 		FMW=FMU;
-		JWQ=NYK;
+		JWQ=NXB;
 		}
 		FMV=FMW;
 		JWP=JWQ;
 		}
 		let FMX=-FLU;
-		let NYM=NYI* KNJ;
-		let NYN=NYM* FLZ;
+		let NXD=NWZ* KNJ;
+		let NXE=NXD* FLZ;
 		let FMY=(FLZ* (FMX- FMA))+ FMO;
-		let NYO=L3([NYJ,0.0,0.0]);
-		let NYP=L3([0.0,NYN[0],NYN[1]])+ NYO;
+		let NXF=L3([NXA,0.0,0.0]);
+		let NXG=L3([0.0,NXE[0],NXE[1]])+ NXF;
 		let FMZ=((-FLZ)* FMA)+ FMO;
 		let FNA=FMY> LD;
 		let FNG;
 		let JWR;
 		if FNA{
 		let FNC=FNB* (F+ (FMY- LD));
-		let NYR=NYP* FNB;
+		let NXI=NXG* FNB;
 		FNG=FNC;
-		JWR=NYR;
+		JWR=NXI;
 		}else{
 		let FND=FMY< -50f64;
 		let FNH;
 		let JWS;
 		if FND{
 		FNH=FNE;
-		JWS=NYF;
+		JWS=NWW;
 		}else{
 		let FNF=FMY.exp();
-		let NYQ=NYP* FNF;
+		let NXH=NXG* FNF;
 		FNH=FNF;
-		JWS=NYQ;
+		JWS=NXH;
 		}
 		FNG=FNH;
 		JWR=JWS;
@@ -12877,9 +12842,9 @@ impl Instance {
 		let JWT;
 		if FNI{
 		let FNK=FNJ* (F+ (FMZ- LD));
-		let NYT=NYJ* FNJ;
+		let NXK=NXA* FNJ;
 		FNO=FNK;
-		JWT=NYT;
+		JWT=NXK;
 		}else{
 		let FNL=FMZ< -50f64;
 		let FNP;
@@ -12889,43 +12854,43 @@ impl Instance {
 		JWU=KJQ;
 		}else{
 		let FNN=FMZ.exp();
-		let NYS=NYJ* FNN;
+		let NXJ=NXA* FNN;
 		FNP=FNN;
-		JWU=NYS;
+		JWU=NXJ;
 		}
 		FNO=FNP;
 		JWT=JWU;
 		}
 		let FNQ=FNG- FNO;
-		let NYU=JWR- L3([JWT,0.0,0.0]);
+		let NXL=JWR- L3([JWT,0.0,0.0]);
 		let FNR=FFO* FME;
 		let FNS=FNR* BG;
-		let NYV=KJX* FNR;
+		let NXM=KJX* FNR;
 		let FNT=FLY/ AZ;
-		let NYW=((KJT* FNT)* KNJ)/ AZ;
-		let NYX=NYI* FNT;
+		let NXN=product_div(KJT,(-FNT),AZ);
+		let NXO=NWZ* FNT;
 		let FNU=(FNT* FLU)+ FMO;
-		let NYY=(L3([(NYW* FLU),0.0,0.0])+ L3([0.0,NYX[0],NYX[1]]))+ NYO;
+		let NXP=(L3([(NXN* FLU),0.0,0.0])+ L3([0.0,NXO[0],NXO[1]]))+ NXF;
 		let FNV=FNU> LD;
 		let FOB;
 		let JWV;
 		if FNV{
 		let FNX=FNW* (F+ (FNU- LD));
-		let NZA=NYY* FNW;
+		let NXR=NXP* FNW;
 		FOB=FNX;
-		JWV=NZA;
+		JWV=NXR;
 		}else{
 		let FNY=FNU< -50f64;
 		let FOC;
 		let JWW;
 		if FNY{
 		FOC=FNZ;
-		JWW=NYF;
+		JWW=NWW;
 		}else{
 		let FOA=FNU.exp();
-		let NYZ=NYY* FOA;
+		let NXQ=NXP* FOA;
 		FOC=FOA;
-		JWW=NYZ;
+		JWW=NXQ;
 		}
 		FOB=FOC;
 		JWV=JWW;
@@ -12936,9 +12901,9 @@ impl Instance {
 		if FOD{
 		let FOE=(FOB- (FMF* FNQ))- FMV;
 		let FOF=FNS* FOE;
-		let OAB=L3([(NYV* FOE),0.0,0.0])+ (((JWV- (NYU* FMF))- L3([JWP,0.0,0.0]))* FNS);
+		let NYS=L3([(NXM* FOE),0.0,0.0])+ (((JWV- (NXL* FMF))- L3([JWP,0.0,0.0]))* FNS);
 		FRO=FOF;
-		JWX=OAB;
+		JWX=NYS;
 		}else{
 		let FOG=(FLZ* ((-FLV)- FMA))+ FMO;
 		let FOH=FOG> LD;
@@ -12946,9 +12911,9 @@ impl Instance {
 		let JWY;
 		if FOH{
 		let FOJ=FOI* (F+ (FOG- LD));
-		let NZC=NYJ* FOI;
+		let NXT=NXA* FOI;
 		FON=FOJ;
-		JWY=NZC;
+		JWY=NXT;
 		}else{
 		let FOK=FOG< -50f64;
 		let FOO;
@@ -12958,25 +12923,25 @@ impl Instance {
 		JWZ=KJQ;
 		}else{
 		let FOM=FOG.exp();
-		let NZB=NYJ* FOM;
+		let NXS=NXA* FOM;
 		FOO=FOM;
-		JWZ=NZB;
+		JWZ=NXS;
 		}
 		FON=FOO;
 		JWY=JWZ;
 		}
 		let FOP=FON- FNO;
-		let NZD=JWY- JWT;
+		let NXU=JWY- JWT;
 		let FOQ=(FNT* FLV)+ FMO;
-		let NZE=(NYW* FLV)+ NYJ;
+		let NXV=(NXN* FLV)+ NXA;
 		let FOR=FOQ> LD;
 		let FOX;
 		let JXA;
 		if FOR{
 		let FOT=FOS* (F+ (FOQ- LD));
-		let NZG=NZE* FOS;
+		let NXX=NXV* FOS;
 		FOX=FOT;
-		JXA=NZG;
+		JXA=NXX;
 		}else{
 		let FOU=FOQ< -50f64;
 		let FOY;
@@ -12986,39 +12951,39 @@ impl Instance {
 		JXB=KJQ;
 		}else{
 		let FOW=FOQ.exp();
-		let NZF=NZE* FOW;
+		let NXW=NXV* FOW;
 		FOY=FOW;
-		JXB=NZF;
+		JXB=NXW;
 		}
 		FOX=FOY;
 		JXA=JXB;
 		}
 		let FOZ=FMF* FOP;
-		let NZH=NZD* FMF;
+		let NXY=NXU* FMF;
 		let FPA=(FOX- FOZ)- FMV;
-		let NZI=(JXA- NZH)- JWP;
+		let NXZ=(JXA- NXY)- JWP;
 		let FPB=FMF* FNQ;
-		let NZJ=NYU* FMF;
+		let NYA=NXL* FMF;
 		let FPC=(FOB- FPB)- FMV;
-		let NZK=L3([JWP,0.0,0.0]);
+		let NYB=L3([JWP,0.0,0.0]);
 		let FPD=FNS* FPC;
-		let NZL=L3([(NYV* FPC),0.0,0.0])+ (((JWV- NZJ)- NZK)* FNS);
+		let NYC=L3([(NXM* FPC),0.0,0.0])+ (((JWV- NYA)- NYB)* FNS);
 		let FPE=FLX> A;
 		let FQO;
 		let JXC;
 		if FPE{
 		let FPF=(FLX* FLY)/ AZ;
-		let NZN=((KJT* FPF)* KNJ)/ AZ;
+		let NYE=product_div(KJT,(-FPF),AZ);
 		let FPG=(FPF* FLV)+ FMO;
-		let NZO=(NZN* FLV)+ NYJ;
+		let NYF=(NYE* FLV)+ NXA;
 		let FPH=FPG> LD;
 		let FPN;
 		let JXD;
 		if FPH{
 		let FPJ=FPI* (F+ (FPG- LD));
-		let NZQ=NZO* FPI;
+		let NYH=NYF* FPI;
 		FPN=FPJ;
-		JXD=NZQ;
+		JXD=NYH;
 		}else{
 		let FPK=FPG< -50f64;
 		let FPO;
@@ -13028,38 +12993,38 @@ impl Instance {
 		JXE=KJQ;
 		}else{
 		let FPM=FPG.exp();
-		let NZP=NZO* FPM;
+		let NYG=NYF* FPM;
 		FPO=FPM;
-		JXE=NZP;
+		JXE=NYG;
 		}
 		FPN=FPO;
 		JXD=JXE;
 		}
 		let FPP=(FPN- FOZ)- FMV;
-		let NZR=(JXD- NZH)- JWP;
-		let NZS=NYI* FPF;
+		let NYI=(JXD- NXY)- JWP;
+		let NYJ=NWZ* FPF;
 		let FPQ=(FPF* FLU)+ FMO;
-		let NZT=(L3([(NZN* FLU),0.0,0.0])+ L3([0.0,NZS[0],NZS[1]]))+ NYO;
+		let NYK=(L3([(NYE* FLU),0.0,0.0])+ L3([0.0,NYJ[0],NYJ[1]]))+ NXF;
 		let FPR=FPQ> LD;
 		let FPX;
 		let JXF;
 		if FPR{
 		let FPT=FPS* (F+ (FPQ- LD));
-		let NZV=NZT* FPS;
+		let NYM=NYK* FPS;
 		FPX=FPT;
-		JXF=NZV;
+		JXF=NYM;
 		}else{
 		let FPU=FPQ< -50f64;
 		let FPY;
 		let JXG;
 		if FPU{
 		FPY=FPV;
-		JXG=NYF;
+		JXG=NWW;
 		}else{
 		let FPW=FPQ.exp();
-		let NZU=NZT* FPW;
+		let NYL=NYK* FPW;
 		FPY=FPW;
-		JXG=NZU;
+		JXG=NYL;
 		}
 		FPX=FPY;
 		JXF=JXG;
@@ -13067,123 +13032,123 @@ impl Instance {
 		let FPZ=(FNS* FPA)/ FPP;
 		let FQA=(FPX- FPB)- FMV;
 		let FQB=FPZ* FQA;
-		let NZW=L3([(((((NYV* FPA)+ (NZI* FNS))- (NZR* FPZ))/ FPP)* FQA),0.0,0.0])+ (((JXF- NZJ)- NZK)* FPZ);
+		let NYN=L3([((product_sum_div(((NXM* FPA)+ (NXZ* FNS)),IUF,NYI,(-FPZ),FPP))* FQA),0.0,0.0])+ (((JXF- NYA)- NYB)* FPZ);
 		FQO=FQB;
-		JXC=NZW;
+		JXC=NYN;
 		}else{
 		let FQC=FNS* FPA;
-		let NZM=L3([((NYV* FPA)+ (NZI* FNS)),0.0,0.0]);
+		let NYD=L3([((NXM* FPA)+ (NXZ* FNS)),0.0,0.0]);
 		FQO=FQC;
-		JXC=NZM;
+		JXC=NYD;
 		}
 		let FQD=FLW* FLW;
 		let FQE=FQD* AZ;
-		let NZX=KJT* FQD;
+		let NYO=KJT* FQD;
 		let FQF=(FLU- (FLV- (FQE/ MC)))/ FQE;
-		let NZY=((L3([0.0,NYI[0],NYI[1]])- L3([((NZX/ MC)* KNJ),0.0,0.0]))- L3([(NZX* FQF),0.0,0.0]))/ FQE;
+		let NYP=((L3([0.0,NWZ[0],NWZ[1]])- L3([((NYO/ MC)* KNJ),0.0,0.0]))).product_sum_div(IUF,L3([NYO,0.0,0.0]),(-FQF),FQE);
 		let FQG=FQF> LD;
 		let FQL;
 		let JXH;
 		if FQG{
 		FQL=A;
-		JXH=NYF;
+		JXH=NWW;
 		}else{
 		let FQH=FQF< -50f64;
 		let FQM;
 		let JXI;
 		if FQH{
 		FQM=F;
-		JXI=NYF;
+		JXI=NWW;
 		}else{
 		let FQI=FQF.exp();
 		let FQJ=F+ FQI;
 		let FQK=F/ FQJ;
-		let NZZ=(((NZY* FQI)* FQK)* KNJ)/ FQJ;
+		let NYQ=((NYP* FQI)).product_div((-FQK),FQJ);
 		FQM=FQK;
-		JXI=NZZ;
+		JXI=NYQ;
 		}
 		FQL=FQM;
 		JXH=JXI;
 		}
 		let FQN=F- FQL;
 		let FQP=(FQL* FPD)+ (FQN* FQO);
-		let OAA=((JXH* FPD)+ (NZL* FQL))+ (((JXH* KNJ)* FQO)+ (JXC* FQN));
+		let NYR=((JXH* FPD)+ (NYC* FQL))+ (((JXH* KNJ)* FQO)+ (JXC* FQN));
 		FRO=FQP;
-		JWX=OAA;
+		JWX=NYR;
 		}
 		let FQQ=FLU/ FMG;
-		let OAC=NYI/ FMG;
+		let NYT=NWZ/ FMG;
 		let FQV;
 		let JXJ;
 		if JM{
-		let OAE=OAC* FQQ;
+		let NYV=NYT* FQQ;
 		let FQR=((FQQ* FQQ)+ JV).sqrt();
-		let OAF=(OAE+ OAE)* (IUF/ (KNB* FQR));
+		let NYW=(NYV+ NYV)* (IUF/ (KNB* FQR));
 		FQV=FQR;
-		JXJ=OAF;
+		JXJ=NYW;
 		}else{
 		let FQS=KB/ JV;
 		let FQT=(FQS* FQQ).tanh();
 		let FQU=FQQ* FQT;
-		let OAD=(OAC* FQT)+ (((OAC* FQS)* (IUF- (FQT* FQT)))* FQQ);
+		let NYU=(NYT* FQT)+ (((NYT* FQS)* (IUF- (FQT* FQT)))* FQQ);
 		FQV=FQU;
-		JXJ=OAD;
+		JXJ=NYU;
 		}
-		let OAG=FMH- IUF;
+		let NYX=FMH- IUF;
 		let FQW=F+ (FQV.powf(FMH));
 		let FQX=F/ FMH;
 		let FQY=FQW.powf(FQX);
-		let OAH=FQX- IUF;
+		let NYY=FQX- IUF;
 		let FQZ=FMX/ FQY;
 		let FRA=((-JE)* O)* P;
 		let FRB=FRA* FMJ;
 		let FRC=FRB* BG;
-		let OAI=KJX* FRB;
+		let NYZ=KJX* FRB;
 		let FRD=FMK/ AZ;
-		let OAJ=((KJT* FRD)* KNJ)/ AZ;
+		let NZA=product_div(KJT,(-FRD),AZ);
 		let FRE=FRD* FQZ;
-		let OAK=((NYM- (((JXJ* (FMH* ((FQV+ (((FQV== KOL) as u8 as f64)* KUP)).powf(OAG))))* (FQX* ((FQW+ (((FQW== KOL) as u8 as f64)* KUP)).powf(OAH))))* FQZ))/ FQY)* FRD;
-		let OAL=L3([(OAJ* FQZ),0.0,0.0])+ L3([0.0,OAK[0],OAK[1]]);
+		let NZB=((NXD).product_sum_div(IUF,((JXJ* (FMH* ((FQV+ (((FQV== KOL) as u8 as f64)* KUP)).powf(NYX))))* (FQX* ((FQW+ (((FQW== KOL) as u8 as f64)* KUP)).powf(NYY)))),(-FQZ),FQY))* FRD;
+		let NZC=L3([(NZA* FQZ),0.0,0.0])+ L3([0.0,NZB[0],NZB[1]]);
 		let FRF=FRE> LD;
 		let FRL;
 		let JXK;
 		if FRF{
 		let FRH=FRG* (F+ (FRE- LD));
-		let OAN=OAL* FRG;
+		let NZE=NZC* FRG;
 		FRL=FRH;
-		JXK=OAN;
+		JXK=NZE;
 		}else{
 		let FRI=FRE< -50f64;
 		let FRM;
 		let JXL;
 		if FRI{
 		FRM=FRJ;
-		JXL=NYF;
+		JXL=NWW;
 		}else{
 		let FRK=FRE.exp();
-		let OAM=OAL* FRK;
+		let NZD=NZC* FRK;
 		FRM=FRK;
-		JXL=OAM;
+		JXL=NZD;
 		}
 		FRL=FRM;
 		JXK=JXL;
 		}
 		let FRN=FRL- F;
 		let FRP=FRO+ (FRC* FRN);
-		let OAO=JWX+ (L3([(OAI* FRN),0.0,0.0])+ (JXK* FRC));
+		let NZF=JWX+ (L3([(NYZ* FRN),0.0,0.0])+ (JXK* FRC));
 		let FRQ=JJ- OT;
-		let OAP=L2([IUJ,0.0])- L2([0.0,IUP]);
+		let NZG=L2([IUJ,0.0])- L2([0.0,IUP]);
 		let FRR=JE* FRQ;
-		let OAQ=OAP* JE;
+		let NZH=NZG* JE;
 		let FRZ=FMC* FRY;
 		let FSE=FMC* FSD;
 		let FSL;
 		let JXM;
 		if FMP{
 		let FSH=FSG* (F+ (FMO- LD));
-		let OAS=NYJ* FSG;
+		let NZJ=NXA* FSG;
 		FSL=FSH;
-		JXM=OAS;
+		JXM=NZJ;
 		}else{
 		let FSI=FMO< -50f64;
 		let FSM;
@@ -13193,40 +13158,40 @@ impl Instance {
 		JXN=KJQ;
 		}else{
 		let FSK=FMO.exp();
-		let OAR=NYJ* FSK;
+		let NZI=NXA* FSK;
 		FSM=FSK;
-		JXN=OAR;
+		JXN=NZI;
 		}
 		FSL=FSM;
 		JXM=JXN;
 		}
 		let FSN=-FRR;
-		let OAT=OAQ* KNJ;
-		let OAU=OAT* FRW;
+		let NZK=NZH* KNJ;
+		let NZL=NZK* FRW;
 		let FSO=(FRW* (FSN- FRX))+ FMO;
-		let OAV=L3([NYJ,0.0,0.0]);
-		let OAW=L3([0.0,OAU[0],OAU[1]])+ OAV;
+		let NZM=L3([NXA,0.0,0.0]);
+		let NZN=L3([0.0,NZL[0],NZL[1]])+ NZM;
 		let FSP=((-FRW)* FRX)+ FMO;
 		let FSQ=FSO> LD;
 		let FSW;
 		let JXO;
 		if FSQ{
 		let FSS=FSR* (F+ (FSO- LD));
-		let OAY=OAW* FSR;
+		let NZP=NZN* FSR;
 		FSW=FSS;
-		JXO=OAY;
+		JXO=NZP;
 		}else{
 		let FST=FSO< -50f64;
 		let FSX;
 		let JXP;
 		if FST{
 		FSX=FSU;
-		JXP=NYG;
+		JXP=NWX;
 		}else{
 		let FSV=FSO.exp();
-		let OAX=OAW* FSV;
+		let NZO=NZN* FSV;
 		FSX=FSV;
-		JXP=OAX;
+		JXP=NZO;
 		}
 		FSW=FSX;
 		JXO=JXP;
@@ -13236,9 +13201,9 @@ impl Instance {
 		let JXQ;
 		if FSY{
 		let FTA=FSZ* (F+ (FSP- LD));
-		let OBA=NYJ* FSZ;
+		let NZR=NXA* FSZ;
 		FTE=FTA;
-		JXQ=OBA;
+		JXQ=NZR;
 		}else{
 		let FTB=FSP< -50f64;
 		let FTF;
@@ -13248,43 +13213,43 @@ impl Instance {
 		JXR=KJQ;
 		}else{
 		let FTD=FSP.exp();
-		let OAZ=NYJ* FTD;
+		let NZQ=NXA* FTD;
 		FTF=FTD;
-		JXR=OAZ;
+		JXR=NZQ;
 		}
 		FTE=FTF;
 		JXQ=JXR;
 		}
 		let FTG=FSW- FTE;
-		let OBB=JXO- L3([JXQ,0.0,0.0]);
+		let NZS=JXO- L3([JXQ,0.0,0.0]);
 		let FTH=FFO* FRZ;
 		let FTI=FTH* BG;
-		let OBC=KJX* FTH;
+		let NZT=KJX* FTH;
 		let FTJ=FRV/ AZ;
-		let OBD=((KJT* FTJ)* KNJ)/ AZ;
-		let OBE=OAQ* FTJ;
+		let NZU=product_div(KJT,(-FTJ),AZ);
+		let NZV=NZH* FTJ;
 		let FTK=(FTJ* FRR)+ FMO;
-		let OBF=(L3([(OBD* FRR),0.0,0.0])+ L3([0.0,OBE[0],OBE[1]]))+ OAV;
+		let NZW=(L3([(NZU* FRR),0.0,0.0])+ L3([0.0,NZV[0],NZV[1]]))+ NZM;
 		let FTL=FTK> LD;
 		let FTR;
 		let JXS;
 		if FTL{
 		let FTN=FTM* (F+ (FTK- LD));
-		let OBH=OBF* FTM;
+		let NZY=NZW* FTM;
 		FTR=FTN;
-		JXS=OBH;
+		JXS=NZY;
 		}else{
 		let FTO=FTK< -50f64;
 		let FTS;
 		let JXT;
 		if FTO{
 		FTS=FTP;
-		JXT=NYG;
+		JXT=NWX;
 		}else{
 		let FTQ=FTK.exp();
-		let OBG=OBF* FTQ;
+		let NZX=NZW* FTQ;
 		FTS=FTQ;
-		JXT=OBG;
+		JXT=NZX;
 		}
 		FTR=FTS;
 		JXS=JXT;
@@ -13295,9 +13260,9 @@ impl Instance {
 		if FTT{
 		let FTU=(FTR- (FSA* FTG))- FSL;
 		let FTV=FTI* FTU;
-		let OCI=L3([(OBC* FTU),0.0,0.0])+ (((JXS- (OBB* FSA))- L3([JXM,0.0,0.0]))* FTI);
+		let OAZ=L3([(NZT* FTU),0.0,0.0])+ (((JXS- (NZS* FSA))- L3([JXM,0.0,0.0]))* FTI);
 		FXD=FTV;
-		JXU=OCI;
+		JXU=OAZ;
 		}else{
 		let FTW=(FRW* ((-FRS)- FRX))+ FMO;
 		let FTX=FTW> LD;
@@ -13305,9 +13270,9 @@ impl Instance {
 		let JXV;
 		if FTX{
 		let FTZ=FTY* (F+ (FTW- LD));
-		let OBJ=NYJ* FTY;
+		let OAA=NXA* FTY;
 		FUD=FTZ;
-		JXV=OBJ;
+		JXV=OAA;
 		}else{
 		let FUA=FTW< -50f64;
 		let FUE;
@@ -13317,25 +13282,25 @@ impl Instance {
 		JXW=KJQ;
 		}else{
 		let FUC=FTW.exp();
-		let OBI=NYJ* FUC;
+		let NZZ=NXA* FUC;
 		FUE=FUC;
-		JXW=OBI;
+		JXW=NZZ;
 		}
 		FUD=FUE;
 		JXV=JXW;
 		}
 		let FUF=FUD- FTE;
-		let OBK=JXV- JXQ;
+		let OAB=JXV- JXQ;
 		let FUG=(FTJ* FRS)+ FMO;
-		let OBL=(OBD* FRS)+ NYJ;
+		let OAC=(NZU* FRS)+ NXA;
 		let FUH=FUG> LD;
 		let FUN;
 		let JXX;
 		if FUH{
 		let FUJ=FUI* (F+ (FUG- LD));
-		let OBN=OBL* FUI;
+		let OAE=OAC* FUI;
 		FUN=FUJ;
-		JXX=OBN;
+		JXX=OAE;
 		}else{
 		let FUK=FUG< -50f64;
 		let FUO;
@@ -13345,39 +13310,39 @@ impl Instance {
 		JXY=KJQ;
 		}else{
 		let FUM=FUG.exp();
-		let OBM=OBL* FUM;
+		let OAD=OAC* FUM;
 		FUO=FUM;
-		JXY=OBM;
+		JXY=OAD;
 		}
 		FUN=FUO;
 		JXX=JXY;
 		}
 		let FUP=FSA* FUF;
-		let OBO=OBK* FSA;
+		let OAF=OAB* FSA;
 		let FUQ=(FUN- FUP)- FSL;
-		let OBP=(JXX- OBO)- JXM;
+		let OAG=(JXX- OAF)- JXM;
 		let FUR=FSA* FTG;
-		let OBQ=OBB* FSA;
+		let OAH=NZS* FSA;
 		let FUS=(FTR- FUR)- FSL;
-		let OBR=L3([JXM,0.0,0.0]);
+		let OAI=L3([JXM,0.0,0.0]);
 		let FUT=FTI* FUS;
-		let OBS=L3([(OBC* FUS),0.0,0.0])+ (((JXS- OBQ)- OBR)* FTI);
+		let OAJ=L3([(NZT* FUS),0.0,0.0])+ (((JXS- OAH)- OAI)* FTI);
 		let FUU=FRU> A;
 		let FWE;
 		let JXZ;
 		if FUU{
 		let FUV=(FRU* FRV)/ AZ;
-		let OBU=((KJT* FUV)* KNJ)/ AZ;
+		let OAL=product_div(KJT,(-FUV),AZ);
 		let FUW=(FUV* FRS)+ FMO;
-		let OBV=(OBU* FRS)+ NYJ;
+		let OAM=(OAL* FRS)+ NXA;
 		let FUX=FUW> LD;
 		let FVD;
 		let JYA;
 		if FUX{
 		let FUZ=FUY* (F+ (FUW- LD));
-		let OBX=OBV* FUY;
+		let OAO=OAM* FUY;
 		FVD=FUZ;
-		JYA=OBX;
+		JYA=OAO;
 		}else{
 		let FVA=FUW< -50f64;
 		let FVE;
@@ -13387,38 +13352,38 @@ impl Instance {
 		JYB=KJQ;
 		}else{
 		let FVC=FUW.exp();
-		let OBW=OBV* FVC;
+		let OAN=OAM* FVC;
 		FVE=FVC;
-		JYB=OBW;
+		JYB=OAN;
 		}
 		FVD=FVE;
 		JYA=JYB;
 		}
 		let FVF=(FVD- FUP)- FSL;
-		let OBY=(JYA- OBO)- JXM;
-		let OBZ=OAQ* FUV;
+		let OAP=(JYA- OAF)- JXM;
+		let OAQ=NZH* FUV;
 		let FVG=(FUV* FRR)+ FMO;
-		let OCA=(L3([(OBU* FRR),0.0,0.0])+ L3([0.0,OBZ[0],OBZ[1]]))+ OAV;
+		let OAR=(L3([(OAL* FRR),0.0,0.0])+ L3([0.0,OAQ[0],OAQ[1]]))+ NZM;
 		let FVH=FVG> LD;
 		let FVN;
 		let JYC;
 		if FVH{
 		let FVJ=FVI* (F+ (FVG- LD));
-		let OCC=OCA* FVI;
+		let OAT=OAR* FVI;
 		FVN=FVJ;
-		JYC=OCC;
+		JYC=OAT;
 		}else{
 		let FVK=FVG< -50f64;
 		let FVO;
 		let JYD;
 		if FVK{
 		FVO=FVL;
-		JYD=NYG;
+		JYD=NWX;
 		}else{
 		let FVM=FVG.exp();
-		let OCB=OCA* FVM;
+		let OAS=OAR* FVM;
 		FVO=FVM;
-		JYD=OCB;
+		JYD=OAS;
 		}
 		FVN=FVO;
 		JYC=JYD;
@@ -13426,116 +13391,116 @@ impl Instance {
 		let FVP=(FTI* FUQ)/ FVF;
 		let FVQ=(FVN- FUR)- FSL;
 		let FVR=FVP* FVQ;
-		let OCD=L3([(((((OBC* FUQ)+ (OBP* FTI))- (OBY* FVP))/ FVF)* FVQ),0.0,0.0])+ (((JYC- OBQ)- OBR)* FVP);
+		let OAU=L3([((product_sum_div(((NZT* FUQ)+ (OAG* FTI)),IUF,OAP,(-FVP),FVF))* FVQ),0.0,0.0])+ (((JYC- OAH)- OAI)* FVP);
 		FWE=FVR;
-		JXZ=OCD;
+		JXZ=OAU;
 		}else{
 		let FVS=FTI* FUQ;
-		let OBT=L3([((OBC* FUQ)+ (OBP* FTI)),0.0,0.0]);
+		let OAK=L3([((NZT* FUQ)+ (OAG* FTI)),0.0,0.0]);
 		FWE=FVS;
-		JXZ=OBT;
+		JXZ=OAK;
 		}
 		let FVT=FRT* FRT;
 		let FVU=FVT* AZ;
-		let OCE=KJT* FVT;
+		let OAV=KJT* FVT;
 		let FVV=(FRR- (FRS- (FVU/ MC)))/ FVU;
-		let OCF=((L3([0.0,OAQ[0],OAQ[1]])- L3([((OCE/ MC)* KNJ),0.0,0.0]))- L3([(OCE* FVV),0.0,0.0]))/ FVU;
+		let OAW=((L3([0.0,NZH[0],NZH[1]])- L3([((OAV/ MC)* KNJ),0.0,0.0]))).product_sum_div(IUF,L3([OAV,0.0,0.0]),(-FVV),FVU);
 		let FVW=FVV> LD;
 		let FWB;
 		let JYE;
 		if FVW{
 		FWB=A;
-		JYE=NYG;
+		JYE=NWX;
 		}else{
 		let FVX=FVV< -50f64;
 		let FWC;
 		let JYF;
 		if FVX{
 		FWC=F;
-		JYF=NYG;
+		JYF=NWX;
 		}else{
 		let FVY=FVV.exp();
 		let FVZ=F+ FVY;
 		let FWA=F/ FVZ;
-		let OCG=(((OCF* FVY)* FWA)* KNJ)/ FVZ;
+		let OAX=((OAW* FVY)).product_div((-FWA),FVZ);
 		FWC=FWA;
-		JYF=OCG;
+		JYF=OAX;
 		}
 		FWB=FWC;
 		JYE=JYF;
 		}
 		let FWD=F- FWB;
 		let FWF=(FWB* FUT)+ (FWD* FWE);
-		let OCH=((JYE* FUT)+ (OBS* FWB))+ (((JYE* KNJ)* FWE)+ (JXZ* FWD));
+		let OAY=((JYE* FUT)+ (OAJ* FWB))+ (((JYE* KNJ)* FWE)+ (JXZ* FWD));
 		FXD=FWF;
-		JXU=OCH;
+		JXU=OAY;
 		}
 		let FWG=FRR/ FSB;
-		let OCJ=OAQ/ FSB;
+		let OBA=NZH/ FSB;
 		let FWL;
 		let JYG;
 		if JM{
-		let OCL=OCJ* FWG;
+		let OBC=OBA* FWG;
 		let FWH=((FWG* FWG)+ JV).sqrt();
-		let OCM=(OCL+ OCL)* (IUF/ (KNB* FWH));
+		let OBD=(OBC+ OBC)* (IUF/ (KNB* FWH));
 		FWL=FWH;
-		JYG=OCM;
+		JYG=OBD;
 		}else{
 		let FWI=KB/ JV;
 		let FWJ=(FWI* FWG).tanh();
 		let FWK=FWG* FWJ;
-		let OCK=(OCJ* FWJ)+ (((OCJ* FWI)* (IUF- (FWJ* FWJ)))* FWG);
+		let OBB=(OBA* FWJ)+ (((OBA* FWI)* (IUF- (FWJ* FWJ)))* FWG);
 		FWL=FWK;
-		JYG=OCK;
+		JYG=OBB;
 		}
-		let OCN=FSC- IUF;
+		let OBE=FSC- IUF;
 		let FWM=F+ (FWL.powf(FSC));
 		let FWN=F/ FSC;
 		let FWO=FWM.powf(FWN);
-		let OCO=FWN- IUF;
+		let OBF=FWN- IUF;
 		let FWP=FSN/ FWO;
 		let FWQ=FRA* FSE;
 		let FWR=FWQ* BG;
-		let OCP=KJX* FWQ;
+		let OBG=KJX* FWQ;
 		let FWS=FSF/ AZ;
-		let OCQ=((KJT* FWS)* KNJ)/ AZ;
+		let OBH=product_div(KJT,(-FWS),AZ);
 		let FWT=FWS* FWP;
-		let OCR=((OAT- (((JYG* (FSC* ((FWL+ (((FWL== KOL) as u8 as f64)* KUP)).powf(OCN))))* (FWN* ((FWM+ (((FWM== KOL) as u8 as f64)* KUP)).powf(OCO))))* FWP))/ FWO)* FWS;
-		let OCS=L3([(OCQ* FWP),0.0,0.0])+ L3([0.0,OCR[0],OCR[1]]);
+		let OBI=((NZK).product_sum_div(IUF,((JYG* (FSC* ((FWL+ (((FWL== KOL) as u8 as f64)* KUP)).powf(OBE))))* (FWN* ((FWM+ (((FWM== KOL) as u8 as f64)* KUP)).powf(OBF)))),(-FWP),FWO))* FWS;
+		let OBJ=L3([(OBH* FWP),0.0,0.0])+ L3([0.0,OBI[0],OBI[1]]);
 		let FWU=FWT> LD;
 		let FXA;
 		let JYH;
 		if FWU{
 		let FWW=FWV* (F+ (FWT- LD));
-		let OCU=OCS* FWV;
+		let OBL=OBJ* FWV;
 		FXA=FWW;
-		JYH=OCU;
+		JYH=OBL;
 		}else{
 		let FWX=FWT< -50f64;
 		let FXB;
 		let JYI;
 		if FWX{
 		FXB=FWY;
-		JYI=NYG;
+		JYI=NWX;
 		}else{
 		let FWZ=FWT.exp();
-		let OCT=OCS* FWZ;
+		let OBK=OBJ* FWZ;
 		FXB=FWZ;
-		JYI=OCT;
+		JYI=OBK;
 		}
 		FXA=FXB;
 		JYH=JYI;
 		}
 		let FXC=FXA- F;
 		let FXE=D* FLT;
-		let OCV=NYH* D;
-		let OCW=L3([0.0,OCV[0],OCV[1]]);
-		let OCX=OAO+ OCW;
+		let OBM=NWY* D;
+		let OBN=L3([0.0,OBM[0],OBM[1]]);
+		let OBO=NZF+ OBN;
 		let FXF=A+ (FRP+ FXE);
 		let FXG=D* FRQ;
-		let OCY=OAP* D;
-		let OCZ=L3([0.0,OCY[0],OCY[1]]);
-		let ODA=(JXU+ (L3([(OCP* FXC),0.0,0.0])+ (JYH* FWR)))+ OCZ;
+		let OBP=NZG* D;
+		let OBQ=L3([0.0,OBP[0],OBP[1]]);
+		let OBR=(JXU+ (L3([(OBG* FXC),0.0,0.0])+ (JYH* FWR)))+ OBQ;
 		let FXH=A+ ((FXD+ (FWR* FXC))+ FXG);
 		let FXI=parameters[282]== F;
 		let IKM;
@@ -13548,9 +13513,9 @@ impl Instance {
 		let JYL;
 		if FMP{
 		let FXP=FXO* (F+ (FMO- LD));
-		let ODC=NYJ* FXO;
+		let OBT=NXA* FXO;
 		FXT=FXP;
-		JYL=ODC;
+		JYL=OBT;
 		}else{
 		let FXQ=FMO< -50f64;
 		let FXU;
@@ -13560,9 +13525,9 @@ impl Instance {
 		JYM=KJQ;
 		}else{
 		let FXS=FMO.exp();
-		let ODB=NYJ* FXS;
+		let OBS=NXA* FXS;
 		FXU=FXS;
-		JYM=ODB;
+		JYM=OBS;
 		}
 		FXT=FXU;
 		JYL=JYM;
@@ -13571,21 +13536,21 @@ impl Instance {
 		let JYN;
 		if FNA{
 		let FXW=FXV* (F+ (FMY- LD));
-		let ODE=NYP* FXV;
+		let OBV=NXG* FXV;
 		FYA=FXW;
-		JYN=ODE;
+		JYN=OBV;
 		}else{
 		let FXX=FMY< -50f64;
 		let FYB;
 		let JYO;
 		if FXX{
 		FYB=FXY;
-		JYO=NYF;
+		JYO=NWW;
 		}else{
 		let FXZ=FMY.exp();
-		let ODD=NYP* FXZ;
+		let OBU=NXG* FXZ;
 		FYB=FXZ;
-		JYO=ODD;
+		JYO=OBU;
 		}
 		FYA=FYB;
 		JYN=JYO;
@@ -13594,9 +13559,9 @@ impl Instance {
 		let JYP;
 		if FNI{
 		let FYD=FYC* (F+ (FMZ- LD));
-		let ODG=NYJ* FYC;
+		let OBX=NXA* FYC;
 		FYH=FYD;
-		JYP=ODG;
+		JYP=OBX;
 		}else{
 		let FYE=FMZ< -50f64;
 		let FYI;
@@ -13606,37 +13571,37 @@ impl Instance {
 		JYQ=KJQ;
 		}else{
 		let FYG=FMZ.exp();
-		let ODF=NYJ* FYG;
+		let OBW=NXA* FYG;
 		FYI=FYG;
-		JYQ=ODF;
+		JYQ=OBW;
 		}
 		FYH=FYI;
 		JYP=JYQ;
 		}
 		let FYJ=FYA- FYH;
-		let ODH=JYN- L3([JYP,0.0,0.0]);
+		let OBY=JYN- L3([JYP,0.0,0.0]);
 		let FYK=FFO* A;
 		let FYL=FYK* BG;
-		let ODI=KJX* FYK;
+		let OBZ=KJX* FYK;
 		let FYR;
 		let JYR;
 		if FNV{
 		let FYN=FYM* (F+ (FNU- LD));
-		let ODK=NYY* FYM;
+		let OCB=NXP* FYM;
 		FYR=FYN;
-		JYR=ODK;
+		JYR=OCB;
 		}else{
 		let FYO=FNU< -50f64;
 		let FYS;
 		let JYS;
 		if FYO{
 		FYS=FYP;
-		JYS=NYF;
+		JYS=NWW;
 		}else{
 		let FYQ=FNU.exp();
-		let ODJ=NYY* FYQ;
+		let OCA=NXP* FYQ;
 		FYS=FYQ;
-		JYS=ODJ;
+		JYS=OCA;
 		}
 		FYR=FYS;
 		JYR=JYS;
@@ -13646,9 +13611,9 @@ impl Instance {
 		if FYT{
 		let FYU=(FYR- (A* FYJ))- FXT;
 		let FYV=FYL* FYU;
-		let OEH=L3([(ODI* FYU),0.0,0.0])+ (((JYR- (ODH* A))- L3([JYL,0.0,0.0]))* FYL);
+		let OCY=L3([(OBZ* FYU),0.0,0.0])+ (((JYR- (OBY* A))- L3([JYL,0.0,0.0]))* FYL);
 		GBY=FYV;
-		JYT=OEH;
+		JYT=OCY;
 		}else{
 		let FYW=(FLZ* ((-FLV)- FMA))+ FMO;
 		let FYX=FYW> LD;
@@ -13656,9 +13621,9 @@ impl Instance {
 		let JYU;
 		if FYX{
 		let FYZ=FYY* (F+ (FYW- LD));
-		let ODM=NYJ* FYY;
+		let OCD=NXA* FYY;
 		FZD=FYZ;
-		JYU=ODM;
+		JYU=OCD;
 		}else{
 		let FZA=FYW< -50f64;
 		let FZE;
@@ -13668,25 +13633,25 @@ impl Instance {
 		JYV=KJQ;
 		}else{
 		let FZC=FYW.exp();
-		let ODL=NYJ* FZC;
+		let OCC=NXA* FZC;
 		FZE=FZC;
-		JYV=ODL;
+		JYV=OCC;
 		}
 		FZD=FZE;
 		JYU=JYV;
 		}
 		let FZF=FZD- FYH;
-		let ODN=JYU- JYP;
+		let OCE=JYU- JYP;
 		let FZG=(FNT* FLV)+ FMO;
-		let ODO=(NYW* FLV)+ NYJ;
+		let OCF=(NXN* FLV)+ NXA;
 		let FZH=FZG> LD;
 		let FZN;
 		let JYW;
 		if FZH{
 		let FZJ=FZI* (F+ (FZG- LD));
-		let ODQ=ODO* FZI;
+		let OCH=OCF* FZI;
 		FZN=FZJ;
-		JYW=ODQ;
+		JYW=OCH;
 		}else{
 		let FZK=FZG< -50f64;
 		let FZO;
@@ -13696,23 +13661,23 @@ impl Instance {
 		JYX=KJQ;
 		}else{
 		let FZM=FZG.exp();
-		let ODP=ODO* FZM;
+		let OCG=OCF* FZM;
 		FZO=FZM;
-		JYX=ODP;
+		JYX=OCG;
 		}
 		FZN=FZO;
 		JYW=JYX;
 		}
 		let FZP=A* FZF;
-		let ODR=ODN* A;
+		let OCI=OCE* A;
 		let FZQ=(FZN- FZP)- FXT;
-		let ODS=(JYW- ODR)- JYL;
+		let OCJ=(JYW- OCI)- JYL;
 		let FZR=A* FYJ;
-		let ODT=ODH* A;
+		let OCK=OBY* A;
 		let FZS=(FYR- FZR)- FXT;
-		let ODU=L3([JYL,0.0,0.0]);
+		let OCL=L3([JYL,0.0,0.0]);
 		let FZT=FYL* FZS;
-		let ODV=L3([(ODI* FZS),0.0,0.0])+ (((JYR- ODT)- ODU)* FYL);
+		let OCM=L3([(OBZ* FZS),0.0,0.0])+ (((JYR- OCK)- OCL)* FYL);
 		let GAZ;
 		let JYY;
 		if FZU{
@@ -13720,9 +13685,9 @@ impl Instance {
 		let JYZ;
 		if FZH{
 		let FZW=FZV* (F+ (FZG- LD));
-		let ODY=ODO* FZV;
+		let OCP=OCF* FZV;
 		GAA=FZW;
-		JYZ=ODY;
+		JYZ=OCP;
 		}else{
 		let FZX=FZG< -50f64;
 		let GAB;
@@ -13732,34 +13697,34 @@ impl Instance {
 		JZA=KJQ;
 		}else{
 		let FZZ=FZG.exp();
-		let ODX=ODO* FZZ;
+		let OCO=OCF* FZZ;
 		GAB=FZZ;
-		JZA=ODX;
+		JZA=OCO;
 		}
 		GAA=GAB;
 		JYZ=JZA;
 		}
 		let GAC=(GAA- FZP)- FXT;
-		let ODZ=(JYZ- ODR)- JYL;
+		let OCQ=(JYZ- OCI)- JYL;
 		let GAI;
 		let JZB;
 		if FNV{
 		let GAE=GAD* (F+ (FNU- LD));
-		let OEB=NYY* GAD;
+		let OCS=NXP* GAD;
 		GAI=GAE;
-		JZB=OEB;
+		JZB=OCS;
 		}else{
 		let GAF=FNU< -50f64;
 		let GAJ;
 		let JZC;
 		if GAF{
 		GAJ=GAG;
-		JZC=NYF;
+		JZC=NWW;
 		}else{
 		let GAH=FNU.exp();
-		let OEA=NYY* GAH;
+		let OCR=NXP* GAH;
 		GAJ=GAH;
-		JZC=OEA;
+		JZC=OCR;
 		}
 		GAI=GAJ;
 		JZB=JZC;
@@ -13767,115 +13732,115 @@ impl Instance {
 		let GAK=(FYL* FZQ)/ GAC;
 		let GAL=(GAI- FZR)- FXT;
 		let GAM=GAK* GAL;
-		let OEC=L3([(((((ODI* FZQ)+ (ODS* FYL))- (ODZ* GAK))/ GAC)* GAL),0.0,0.0])+ (((JZB- ODT)- ODU)* GAK);
+		let OCT=L3([((product_sum_div(((OBZ* FZQ)+ (OCJ* FYL)),IUF,OCQ,(-GAK),GAC))* GAL),0.0,0.0])+ (((JZB- OCK)- OCL)* GAK);
 		GAZ=GAM;
-		JYY=OEC;
+		JYY=OCT;
 		}else{
 		let GAN=FYL* FZQ;
-		let ODW=L3([((ODI* FZQ)+ (ODS* FYL)),0.0,0.0]);
+		let OCN=L3([((OBZ* FZQ)+ (OCJ* FYL)),0.0,0.0]);
 		GAZ=GAN;
-		JYY=ODW;
+		JYY=OCN;
 		}
 		let GAO=FLW* FLW;
 		let GAP=GAO* AZ;
-		let OED=KJT* GAO;
+		let OCU=KJT* GAO;
 		let GAQ=(FLU- (FLV- (GAP/ MC)))/ GAP;
-		let OEE=((L3([0.0,NYI[0],NYI[1]])- L3([((OED/ MC)* KNJ),0.0,0.0]))- L3([(OED* GAQ),0.0,0.0]))/ GAP;
+		let OCV=((L3([0.0,NWZ[0],NWZ[1]])- L3([((OCU/ MC)* KNJ),0.0,0.0]))).product_sum_div(IUF,L3([OCU,0.0,0.0]),(-GAQ),GAP);
 		let GAR=GAQ> LD;
 		let GAW;
 		let JZD;
 		if GAR{
 		GAW=A;
-		JZD=NYF;
+		JZD=NWW;
 		}else{
 		let GAS=GAQ< -50f64;
 		let GAX;
 		let JZE;
 		if GAS{
 		GAX=F;
-		JZE=NYF;
+		JZE=NWW;
 		}else{
 		let GAT=GAQ.exp();
 		let GAU=F+ GAT;
 		let GAV=F/ GAU;
-		let OEF=(((OEE* GAT)* GAV)* KNJ)/ GAU;
+		let OCW=((OCV* GAT)).product_div((-GAV),GAU);
 		GAX=GAV;
-		JZE=OEF;
+		JZE=OCW;
 		}
 		GAW=GAX;
 		JZD=JZE;
 		}
 		let GAY=F- GAW;
 		let GBA=(GAW* FZT)+ (GAY* GAZ);
-		let OEG=((JZD* FZT)+ (ODV* GAW))+ (((JZD* KNJ)* GAZ)+ (JYY* GAY));
+		let OCX=((JZD* FZT)+ (OCM* GAW))+ (((JZD* KNJ)* GAZ)+ (JYY* GAY));
 		GBY=GBA;
-		JYT=OEG;
+		JYT=OCX;
 		}
 		let GBB=FLU/ FXJ;
-		let OEI=NYI/ FXJ;
+		let OCZ=NWZ/ FXJ;
 		let GBG;
 		let JZF;
 		if JM{
-		let OEK=OEI* GBB;
+		let ODB=OCZ* GBB;
 		let GBC=((GBB* GBB)+ JV).sqrt();
-		let OEL=(OEK+ OEK)* (IUF/ (KNB* GBC));
+		let ODC=(ODB+ ODB)* (IUF/ (KNB* GBC));
 		GBG=GBC;
-		JZF=OEL;
+		JZF=ODC;
 		}else{
 		let GBD=KB/ JV;
 		let GBE=(GBD* GBB).tanh();
 		let GBF=GBB* GBE;
-		let OEJ=(OEI* GBE)+ (((OEI* GBD)* (IUF- (GBE* GBE)))* GBB);
+		let ODA=(OCZ* GBE)+ (((OCZ* GBD)* (IUF- (GBE* GBE)))* GBB);
 		GBG=GBF;
-		JZF=OEJ;
+		JZF=ODA;
 		}
 		let GBH=F+ (GBG.powf(FXK));
 		let GBI=F/ FXK;
 		let GBJ=GBH.powf(GBI);
 		let GBK=FMX/ GBJ;
-		let OEM=NYM- (((JZF* (FXK* ((GBG+ (((GBG== KOL) as u8 as f64)* KUP)).powf((FXK- IUF)))))* (GBI* ((GBH+ (((GBH== KOL) as u8 as f64)* KUP)).powf((GBI- IUF)))))* GBK);
+		let ODD=(NXD).product_sum_div(IUF,((JZF* (FXK* ((GBG+ (((GBG== KOL) as u8 as f64)* KUP)).powf((FXK- IUF)))))* (GBI* ((GBH+ (((GBH== KOL) as u8 as f64)* KUP)).powf((GBI- IUF))))),(-GBK),GBJ);
 		let GBL=FRA* FXM;
 		let GBM=GBL* BG;
-		let OEN=KJX* GBL;
+		let ODE=KJX* GBL;
 		let GBN=FXN/ AZ;
 		let GBO=GBN* GBK;
-		let OEO=(OEM/ GBJ)* GBN;
-		let OEP=L3([((((KJT* GBN)* KNJ)/ AZ)* GBK),0.0,0.0])+ L3([0.0,OEO[0],OEO[1]]);
+		let ODF=ODD* GBN;
+		let ODG=L3([((product_div(KJT,(-GBN),AZ))* GBK),0.0,0.0])+ L3([0.0,ODF[0],ODF[1]]);
 		let GBP=GBO> LD;
 		let GBV;
 		let JZG;
 		if GBP{
 		let GBR=GBQ* (F+ (GBO- LD));
-		let OER=OEP* GBQ;
+		let ODI=ODG* GBQ;
 		GBV=GBR;
-		JZG=OER;
+		JZG=ODI;
 		}else{
 		let GBS=GBO< -50f64;
 		let GBW;
 		let JZH;
 		if GBS{
 		GBW=GBT;
-		JZH=NYF;
+		JZH=NWW;
 		}else{
 		let GBU=GBO.exp();
-		let OEQ=OEP* GBU;
+		let ODH=ODG* GBU;
 		GBW=GBU;
-		JZH=OEQ;
+		JZH=ODH;
 		}
 		GBV=GBW;
 		JZG=JZH;
 		}
 		let GBX=GBV- F;
 		let GBZ=GBY+ (GBM* GBX);
-		let OES=JYT+ (L3([(OEN* GBX),0.0,0.0])+ (JZG* GBM));
+		let ODJ=JYT+ (L3([(ODE* GBX),0.0,0.0])+ (JZG* GBM));
 		let GCD=FMC* GCC;
 		let GCK;
 		let JZI;
 		if FMP{
 		let GCG=GCF* (F+ (FMO- LD));
-		let OEU=NYJ* GCF;
+		let ODL=NXA* GCF;
 		GCK=GCG;
-		JZI=OEU;
+		JZI=ODL;
 		}else{
 		let GCH=FMO< -50f64;
 		let GCL;
@@ -13885,9 +13850,9 @@ impl Instance {
 		JZJ=KJQ;
 		}else{
 		let GCJ=FMO.exp();
-		let OET=NYJ* GCJ;
+		let ODK=NXA* GCJ;
 		GCL=GCJ;
-		JZJ=OET;
+		JZJ=ODK;
 		}
 		GCK=GCL;
 		JZI=JZJ;
@@ -13896,21 +13861,21 @@ impl Instance {
 		let JZK;
 		if FSQ{
 		let GCN=GCM* (F+ (FSO- LD));
-		let OEW=OAW* GCM;
+		let ODN=NZN* GCM;
 		GCR=GCN;
-		JZK=OEW;
+		JZK=ODN;
 		}else{
 		let GCO=FSO< -50f64;
 		let GCS;
 		let JZL;
 		if GCO{
 		GCS=GCP;
-		JZL=NYG;
+		JZL=NWX;
 		}else{
 		let GCQ=FSO.exp();
-		let OEV=OAW* GCQ;
+		let ODM=NZN* GCQ;
 		GCS=GCQ;
-		JZL=OEV;
+		JZL=ODM;
 		}
 		GCR=GCS;
 		JZK=JZL;
@@ -13919,9 +13884,9 @@ impl Instance {
 		let JZM;
 		if FSY{
 		let GCU=GCT* (F+ (FSP- LD));
-		let OEY=NYJ* GCT;
+		let ODP=NXA* GCT;
 		GCY=GCU;
-		JZM=OEY;
+		JZM=ODP;
 		}else{
 		let GCV=FSP< -50f64;
 		let GCZ;
@@ -13931,34 +13896,34 @@ impl Instance {
 		JZN=KJQ;
 		}else{
 		let GCX=FSP.exp();
-		let OEX=NYJ* GCX;
+		let ODO=NXA* GCX;
 		GCZ=GCX;
-		JZN=OEX;
+		JZN=ODO;
 		}
 		GCY=GCZ;
 		JZM=JZN;
 		}
 		let GDA=GCR- GCY;
-		let OEZ=JZK- L3([JZM,0.0,0.0]);
+		let ODQ=JZK- L3([JZM,0.0,0.0]);
 		let GDG;
 		let JZO;
 		if FTL{
 		let GDC=GDB* (F+ (FTK- LD));
-		let OFB=OBF* GDB;
+		let ODS=NZW* GDB;
 		GDG=GDC;
-		JZO=OFB;
+		JZO=ODS;
 		}else{
 		let GDD=FTK< -50f64;
 		let GDH;
 		let JZP;
 		if GDD{
 		GDH=GDE;
-		JZP=NYG;
+		JZP=NWX;
 		}else{
 		let GDF=FTK.exp();
-		let OFA=OBF* GDF;
+		let ODR=NZW* GDF;
 		GDH=GDF;
-		JZP=OFA;
+		JZP=ODR;
 		}
 		GDG=GDH;
 		JZO=JZP;
@@ -13968,9 +13933,9 @@ impl Instance {
 		if GDI{
 		let GDJ=(GDG- (A* GDA))- GCK;
 		let GDK=FYL* GDJ;
-		let OFY=L3([(ODI* GDJ),0.0,0.0])+ (((JZO- (OEZ* A))- L3([JZI,0.0,0.0]))* FYL);
+		let OEP=L3([(OBZ* GDJ),0.0,0.0])+ (((JZO- (ODQ* A))- L3([JZI,0.0,0.0]))* FYL);
 		GGN=GDK;
-		JZQ=OFY;
+		JZQ=OEP;
 		}else{
 		let GDL=(FRW* ((-FRS)- FRX))+ FMO;
 		let GDM=GDL> LD;
@@ -13978,9 +13943,9 @@ impl Instance {
 		let JZR;
 		if GDM{
 		let GDO=GDN* (F+ (GDL- LD));
-		let OFD=NYJ* GDN;
+		let ODU=NXA* GDN;
 		GDS=GDO;
-		JZR=OFD;
+		JZR=ODU;
 		}else{
 		let GDP=GDL< -50f64;
 		let GDT;
@@ -13990,25 +13955,25 @@ impl Instance {
 		JZS=KJQ;
 		}else{
 		let GDR=GDL.exp();
-		let OFC=NYJ* GDR;
+		let ODT=NXA* GDR;
 		GDT=GDR;
-		JZS=OFC;
+		JZS=ODT;
 		}
 		GDS=GDT;
 		JZR=JZS;
 		}
 		let GDU=GDS- GCY;
-		let OFE=JZR- JZM;
+		let ODV=JZR- JZM;
 		let GDV=(FTJ* FRS)+ FMO;
-		let OFF=(OBD* FRS)+ NYJ;
+		let ODW=(NZU* FRS)+ NXA;
 		let GDW=GDV> LD;
 		let GEC;
 		let JZT;
 		if GDW{
 		let GDY=GDX* (F+ (GDV- LD));
-		let OFH=OFF* GDX;
+		let ODY=ODW* GDX;
 		GEC=GDY;
-		JZT=OFH;
+		JZT=ODY;
 		}else{
 		let GDZ=GDV< -50f64;
 		let GED;
@@ -14018,23 +13983,23 @@ impl Instance {
 		JZU=KJQ;
 		}else{
 		let GEB=GDV.exp();
-		let OFG=OFF* GEB;
+		let ODX=ODW* GEB;
 		GED=GEB;
-		JZU=OFG;
+		JZU=ODX;
 		}
 		GEC=GED;
 		JZT=JZU;
 		}
 		let GEE=A* GDU;
-		let OFI=OFE* A;
+		let ODZ=ODV* A;
 		let GEF=(GEC- GEE)- GCK;
-		let OFJ=(JZT- OFI)- JZI;
+		let OEA=(JZT- ODZ)- JZI;
 		let GEG=A* GDA;
-		let OFK=OEZ* A;
+		let OEB=ODQ* A;
 		let GEH=(GDG- GEG)- GCK;
-		let OFL=L3([JZI,0.0,0.0]);
+		let OEC=L3([JZI,0.0,0.0]);
 		let GEI=FYL* GEH;
-		let OFM=L3([(ODI* GEH),0.0,0.0])+ (((JZO- OFK)- OFL)* FYL);
+		let OED=L3([(OBZ* GEH),0.0,0.0])+ (((JZO- OEB)- OEC)* FYL);
 		let GFO;
 		let JZV;
 		if GEJ{
@@ -14042,9 +14007,9 @@ impl Instance {
 		let JZW;
 		if GDW{
 		let GEL=GEK* (F+ (GDV- LD));
-		let OFP=OFF* GEK;
+		let OEG=ODW* GEK;
 		GEP=GEL;
-		JZW=OFP;
+		JZW=OEG;
 		}else{
 		let GEM=GDV< -50f64;
 		let GEQ;
@@ -14054,34 +14019,34 @@ impl Instance {
 		JZX=KJQ;
 		}else{
 		let GEO=GDV.exp();
-		let OFO=OFF* GEO;
+		let OEF=ODW* GEO;
 		GEQ=GEO;
-		JZX=OFO;
+		JZX=OEF;
 		}
 		GEP=GEQ;
 		JZW=JZX;
 		}
 		let GER=(GEP- GEE)- GCK;
-		let OFQ=(JZW- OFI)- JZI;
+		let OEH=(JZW- ODZ)- JZI;
 		let GEX;
 		let JZY;
 		if FTL{
 		let GET=GES* (F+ (FTK- LD));
-		let OFS=OBF* GES;
+		let OEJ=NZW* GES;
 		GEX=GET;
-		JZY=OFS;
+		JZY=OEJ;
 		}else{
 		let GEU=FTK< -50f64;
 		let GEY;
 		let JZZ;
 		if GEU{
 		GEY=GEV;
-		JZZ=NYG;
+		JZZ=NWX;
 		}else{
 		let GEW=FTK.exp();
-		let OFR=OBF* GEW;
+		let OEI=NZW* GEW;
 		GEY=GEW;
-		JZZ=OFR;
+		JZZ=OEI;
 		}
 		GEX=GEY;
 		JZY=JZZ;
@@ -14089,118 +14054,118 @@ impl Instance {
 		let GEZ=(FYL* GEF)/ GER;
 		let GFA=(GEX- GEG)- GCK;
 		let GFB=GEZ* GFA;
-		let OFT=L3([(((((ODI* GEF)+ (OFJ* FYL))- (OFQ* GEZ))/ GER)* GFA),0.0,0.0])+ (((JZY- OFK)- OFL)* GEZ);
+		let OEK=L3([((product_sum_div(((OBZ* GEF)+ (OEA* FYL)),IUF,OEH,(-GEZ),GER))* GFA),0.0,0.0])+ (((JZY- OEB)- OEC)* GEZ);
 		GFO=GFB;
-		JZV=OFT;
+		JZV=OEK;
 		}else{
 		let GFC=FYL* GEF;
-		let OFN=L3([((ODI* GEF)+ (OFJ* FYL)),0.0,0.0]);
+		let OEE=L3([((OBZ* GEF)+ (OEA* FYL)),0.0,0.0]);
 		GFO=GFC;
-		JZV=OFN;
+		JZV=OEE;
 		}
 		let GFD=FRT* FRT;
 		let GFE=GFD* AZ;
-		let OFU=KJT* GFD;
+		let OEL=KJT* GFD;
 		let GFF=(FRR- (FRS- (GFE/ MC)))/ GFE;
-		let OFV=((L3([0.0,OAQ[0],OAQ[1]])- L3([((OFU/ MC)* KNJ),0.0,0.0]))- L3([(OFU* GFF),0.0,0.0]))/ GFE;
+		let OEM=((L3([0.0,NZH[0],NZH[1]])- L3([((OEL/ MC)* KNJ),0.0,0.0]))).product_sum_div(IUF,L3([OEL,0.0,0.0]),(-GFF),GFE);
 		let GFG=GFF> LD;
 		let GFL;
 		let KAA;
 		if GFG{
 		GFL=A;
-		KAA=NYG;
+		KAA=NWX;
 		}else{
 		let GFH=GFF< -50f64;
 		let GFM;
 		let KAB;
 		if GFH{
 		GFM=F;
-		KAB=NYG;
+		KAB=NWX;
 		}else{
 		let GFI=GFF.exp();
 		let GFJ=F+ GFI;
 		let GFK=F/ GFJ;
-		let OFW=(((OFV* GFI)* GFK)* KNJ)/ GFJ;
+		let OEN=((OEM* GFI)).product_div((-GFK),GFJ);
 		GFM=GFK;
-		KAB=OFW;
+		KAB=OEN;
 		}
 		GFL=GFM;
 		KAA=KAB;
 		}
 		let GFN=F- GFL;
 		let GFP=(GFL* GEI)+ (GFN* GFO);
-		let OFX=((KAA* GEI)+ (OFM* GFL))+ (((KAA* KNJ)* GFO)+ (JZV* GFN));
+		let OEO=((KAA* GEI)+ (OED* GFL))+ (((KAA* KNJ)* GFO)+ (JZV* GFN));
 		GGN=GFP;
-		JZQ=OFX;
+		JZQ=OEO;
 		}
 		let GFQ=FRR/ GCA;
-		let OFZ=OAQ/ GCA;
+		let OEQ=NZH/ GCA;
 		let GFV;
 		let KAC;
 		if JM{
-		let OGB=OFZ* GFQ;
+		let OES=OEQ* GFQ;
 		let GFR=((GFQ* GFQ)+ JV).sqrt();
-		let OGC=(OGB+ OGB)* (IUF/ (KNB* GFR));
+		let OET=(OES+ OES)* (IUF/ (KNB* GFR));
 		GFV=GFR;
-		KAC=OGC;
+		KAC=OET;
 		}else{
 		let GFS=KB/ JV;
 		let GFT=(GFS* GFQ).tanh();
 		let GFU=GFQ* GFT;
-		let OGA=(OFZ* GFT)+ (((OFZ* GFS)* (IUF- (GFT* GFT)))* GFQ);
+		let OER=(OEQ* GFT)+ (((OEQ* GFS)* (IUF- (GFT* GFT)))* GFQ);
 		GFV=GFU;
-		KAC=OGA;
+		KAC=OER;
 		}
 		let GFW=F+ (GFV.powf(GCB));
 		let GFX=F/ GCB;
 		let GFY=GFW.powf(GFX);
 		let GFZ=FSN/ GFY;
-		let OGD=OAT- (((KAC* (GCB* ((GFV+ (((GFV== KOL) as u8 as f64)* KUP)).powf((GCB- IUF)))))* (GFX* ((GFW+ (((GFW== KOL) as u8 as f64)* KUP)).powf((GFX- IUF)))))* GFZ);
+		let OEU=(NZK).product_sum_div(IUF,((KAC* (GCB* ((GFV+ (((GFV== KOL) as u8 as f64)* KUP)).powf((GCB- IUF)))))* (GFX* ((GFW+ (((GFW== KOL) as u8 as f64)* KUP)).powf((GFX- IUF))))),(-GFZ),GFY);
 		let GGA=FRA* GCD;
 		let GGB=GGA* BG;
-		let OGE=KJX* GGA;
+		let OEV=KJX* GGA;
 		let GGC=GCE/ AZ;
 		let GGD=GGC* GFZ;
-		let OGF=(OGD/ GFY)* GGC;
-		let OGG=L3([((((KJT* GGC)* KNJ)/ AZ)* GFZ),0.0,0.0])+ L3([0.0,OGF[0],OGF[1]]);
+		let OEW=OEU* GGC;
+		let OEX=L3([((product_div(KJT,(-GGC),AZ))* GFZ),0.0,0.0])+ L3([0.0,OEW[0],OEW[1]]);
 		let GGE=GGD> LD;
 		let GGK;
 		let KAD;
 		if GGE{
 		let GGG=GGF* (F+ (GGD- LD));
-		let OGI=OGG* GGF;
+		let OEZ=OEX* GGF;
 		GGK=GGG;
-		KAD=OGI;
+		KAD=OEZ;
 		}else{
 		let GGH=GGD< -50f64;
 		let GGL;
 		let KAE;
 		if GGH{
 		GGL=GGI;
-		KAE=NYG;
+		KAE=NWX;
 		}else{
 		let GGJ=GGD.exp();
-		let OGH=OGG* GGJ;
+		let OEY=OEX* GGJ;
 		GGL=GGJ;
-		KAE=OGH;
+		KAE=OEY;
 		}
 		GGK=GGL;
 		KAD=KAE;
 		}
 		let GGM=GGK- F;
-		let OGJ=OES+ OCW;
+		let OFA=ODJ+ OBN;
 		let GGO=A+ (GBZ+ FXE);
-		let OGK=(JZQ+ (L3([(OGE* GGM),0.0,0.0])+ (KAD* GGB)))+ OCZ;
+		let OFB=(JZQ+ (L3([(OEV* GGM),0.0,0.0])+ (KAD* GGB)))+ OBQ;
 		let GGP=A+ ((GGN+ (GGB* GGM))+ FXG);
 		IKM=GGO;
 		IKO=GGP;
-		JYJ=OGJ;
-		JYK=OGK;
+		JYJ=OFA;
+		JYK=OFB;
 		}else{
 		IKM=A;
 		IKO=A;
-		JYJ=NYF;
-		JYK=NYG;
+		JYJ=NWW;
+		JYK=NWX;
 		}
 		let GGQ=FMB!= A;
 		let IKQ;
@@ -14218,9 +14183,9 @@ impl Instance {
 		let KAJ;
 		if FMP{
 		let GGU=GGT* (F+ (FMO- LD));
-		let OGM=NYJ* GGT;
+		let OFD=NXA* GGT;
 		GGY=GGU;
-		KAJ=OGM;
+		KAJ=OFD;
 		}else{
 		let GGV=FMO< -50f64;
 		let GGZ;
@@ -14230,39 +14195,39 @@ impl Instance {
 		KAK=KJQ;
 		}else{
 		let GGX=FMO.exp();
-		let OGL=NYJ* GGX;
+		let OFC=NXA* GGX;
 		GGZ=GGX;
-		KAK=OGL;
+		KAK=OFC;
 		}
 		GGY=GGZ;
 		KAJ=KAK;
 		}
 		let GHA=-JL;
-		let OGN=KMR* KNJ;
-		let OGO=OGN* FLZ;
+		let OFE=KMR* KNJ;
+		let OFF=OFE* FLZ;
 		let GHB=(FLZ* (GHA- FMA))+ FMO;
-		let OGP=L3([NYJ,0.0,0.0]);
-		let OGQ=L3([0.0,OGO[0],OGO[1]])+ OGP;
+		let OFG=L3([NXA,0.0,0.0]);
+		let OFH=L3([0.0,OFF[0],OFF[1]])+ OFG;
 		let GHC=GHB> LD;
 		let GHI;
 		let KAL;
 		if GHC{
 		let GHE=GHD* (F+ (GHB- LD));
-		let OGS=OGQ* GHD;
+		let OFJ=OFH* GHD;
 		GHI=GHE;
-		KAL=OGS;
+		KAL=OFJ;
 		}else{
 		let GHF=GHB< -50f64;
 		let GHJ;
 		let KAM;
 		if GHF{
 		GHJ=GHG;
-		KAM=NWE;
+		KAM=NUV;
 		}else{
 		let GHH=GHB.exp();
-		let OGR=OGQ* GHH;
+		let OFI=OFH* GHH;
 		GHJ=GHH;
-		KAM=OGR;
+		KAM=OFI;
 		}
 		GHI=GHJ;
 		KAL=KAM;
@@ -14271,9 +14236,9 @@ impl Instance {
 		let KAN;
 		if FNI{
 		let GHL=GHK* (F+ (FMZ- LD));
-		let OGU=NYJ* GHK;
+		let OFL=NXA* GHK;
 		GHP=GHL;
-		KAN=OGU;
+		KAN=OFL;
 		}else{
 		let GHM=FMZ< -50f64;
 		let GHQ;
@@ -14283,41 +14248,41 @@ impl Instance {
 		KAO=KJQ;
 		}else{
 		let GHO=FMZ.exp();
-		let OGT=NYJ* GHO;
+		let OFK=NXA* GHO;
 		GHQ=GHO;
-		KAO=OGT;
+		KAO=OFK;
 		}
 		GHP=GHQ;
 		KAN=KAO;
 		}
 		let GHR=GHI- GHP;
-		let OGV=KAL- L3([KAN,0.0,0.0]);
+		let OFM=KAL- L3([KAN,0.0,0.0]);
 		let GHS=FFO* GGR;
 		let GHT=GHS* BG;
-		let OGW=KJX* GHS;
-		let OGX=KMR* FNT;
+		let OFN=KJX* GHS;
+		let OFO=KMR* FNT;
 		let GHU=(FNT* JL)+ FMO;
-		let OGY=(L3([(NYW* JL),0.0,0.0])+ L3([0.0,OGX[0],OGX[1]]))+ OGP;
+		let OFP=(L3([(NXN* JL),0.0,0.0])+ L3([0.0,OFO[0],OFO[1]]))+ OFG;
 		let GHV=GHU> LD;
 		let GIB;
 		let KAP;
 		if GHV{
 		let GHX=GHW* (F+ (GHU- LD));
-		let OHA=OGY* GHW;
+		let OFR=OFP* GHW;
 		GIB=GHX;
-		KAP=OHA;
+		KAP=OFR;
 		}else{
 		let GHY=GHU< -50f64;
 		let GIC;
 		let KAQ;
 		if GHY{
 		GIC=GHZ;
-		KAQ=NWE;
+		KAQ=NUV;
 		}else{
 		let GIA=GHU.exp();
-		let OGZ=OGY* GIA;
+		let OFQ=OFP* GIA;
 		GIC=GIA;
-		KAQ=OGZ;
+		KAQ=OFQ;
 		}
 		GIB=GIC;
 		KAP=KAQ;
@@ -14327,9 +14292,9 @@ impl Instance {
 		if FOD{
 		let GID=(GIB- (FMF* GHR))- GGY;
 		let GIE=GHT* GID;
-		let OIB=L3([(OGW* GID),0.0,0.0])+ (((KAP- (OGV* FMF))- L3([KAJ,0.0,0.0]))* GHT);
+		let OGS=L3([(OFN* GID),0.0,0.0])+ (((KAP- (OFM* FMF))- L3([KAJ,0.0,0.0]))* GHT);
 		GLK=GIE;
-		KAR=OIB;
+		KAR=OGS;
 		}else{
 		let GIF=(FLZ* ((-FLV)- FMA))+ FMO;
 		let GIG=GIF> LD;
@@ -14337,9 +14302,9 @@ impl Instance {
 		let KAS;
 		if GIG{
 		let GII=GIH* (F+ (GIF- LD));
-		let OHC=NYJ* GIH;
+		let OFT=NXA* GIH;
 		GIM=GII;
-		KAS=OHC;
+		KAS=OFT;
 		}else{
 		let GIJ=GIF< -50f64;
 		let GIN;
@@ -14349,25 +14314,25 @@ impl Instance {
 		KAT=KJQ;
 		}else{
 		let GIL=GIF.exp();
-		let OHB=NYJ* GIL;
+		let OFS=NXA* GIL;
 		GIN=GIL;
-		KAT=OHB;
+		KAT=OFS;
 		}
 		GIM=GIN;
 		KAS=KAT;
 		}
 		let GIO=GIM- GHP;
-		let OHD=KAS- KAN;
+		let OFU=KAS- KAN;
 		let GIP=(FNT* FLV)+ FMO;
-		let OHE=(NYW* FLV)+ NYJ;
+		let OFV=(NXN* FLV)+ NXA;
 		let GIQ=GIP> LD;
 		let GIW;
 		let KAU;
 		if GIQ{
 		let GIS=GIR* (F+ (GIP- LD));
-		let OHG=OHE* GIR;
+		let OFX=OFV* GIR;
 		GIW=GIS;
-		KAU=OHG;
+		KAU=OFX;
 		}else{
 		let GIT=GIP< -50f64;
 		let GIX;
@@ -14377,39 +14342,39 @@ impl Instance {
 		KAV=KJQ;
 		}else{
 		let GIV=GIP.exp();
-		let OHF=OHE* GIV;
+		let OFW=OFV* GIV;
 		GIX=GIV;
-		KAV=OHF;
+		KAV=OFW;
 		}
 		GIW=GIX;
 		KAU=KAV;
 		}
 		let GIY=FMF* GIO;
-		let OHH=OHD* FMF;
+		let OFY=OFU* FMF;
 		let GIZ=(GIW- GIY)- GGY;
-		let OHI=(KAU- OHH)- KAJ;
+		let OFZ=(KAU- OFY)- KAJ;
 		let GJA=FMF* GHR;
-		let OHJ=OGV* FMF;
+		let OGA=OFM* FMF;
 		let GJB=(GIB- GJA)- GGY;
-		let OHK=L3([KAJ,0.0,0.0]);
+		let OGB=L3([KAJ,0.0,0.0]);
 		let GJC=GHT* GJB;
-		let OHL=L3([(OGW* GJB),0.0,0.0])+ (((KAP- OHJ)- OHK)* GHT);
+		let OGC=L3([(OFN* GJB),0.0,0.0])+ (((KAP- OGA)- OGB)* GHT);
 		let GJD=FLX> A;
 		let GKN;
 		let KAW;
 		if GJD{
 		let GJE=(FLX* FLY)/ AZ;
-		let OHN=((KJT* GJE)* KNJ)/ AZ;
+		let OGE=product_div(KJT,(-GJE),AZ);
 		let GJF=(GJE* FLV)+ FMO;
-		let OHO=(OHN* FLV)+ NYJ;
+		let OGF=(OGE* FLV)+ NXA;
 		let GJG=GJF> LD;
 		let GJM;
 		let KAX;
 		if GJG{
 		let GJI=GJH* (F+ (GJF- LD));
-		let OHQ=OHO* GJH;
+		let OGH=OGF* GJH;
 		GJM=GJI;
-		KAX=OHQ;
+		KAX=OGH;
 		}else{
 		let GJJ=GJF< -50f64;
 		let GJN;
@@ -14419,38 +14384,38 @@ impl Instance {
 		KAY=KJQ;
 		}else{
 		let GJL=GJF.exp();
-		let OHP=OHO* GJL;
+		let OGG=OGF* GJL;
 		GJN=GJL;
-		KAY=OHP;
+		KAY=OGG;
 		}
 		GJM=GJN;
 		KAX=KAY;
 		}
 		let GJO=(GJM- GIY)- GGY;
-		let OHR=(KAX- OHH)- KAJ;
-		let OHS=KMR* GJE;
+		let OGI=(KAX- OFY)- KAJ;
+		let OGJ=KMR* GJE;
 		let GJP=(GJE* JL)+ FMO;
-		let OHT=(L3([(OHN* JL),0.0,0.0])+ L3([0.0,OHS[0],OHS[1]]))+ OGP;
+		let OGK=(L3([(OGE* JL),0.0,0.0])+ L3([0.0,OGJ[0],OGJ[1]]))+ OFG;
 		let GJQ=GJP> LD;
 		let GJW;
 		let KAZ;
 		if GJQ{
 		let GJS=GJR* (F+ (GJP- LD));
-		let OHV=OHT* GJR;
+		let OGM=OGK* GJR;
 		GJW=GJS;
-		KAZ=OHV;
+		KAZ=OGM;
 		}else{
 		let GJT=GJP< -50f64;
 		let GJX;
 		let KBA;
 		if GJT{
 		GJX=GJU;
-		KBA=NWE;
+		KBA=NUV;
 		}else{
 		let GJV=GJP.exp();
-		let OHU=OHT* GJV;
+		let OGL=OGK* GJV;
 		GJX=GJV;
-		KBA=OHU;
+		KBA=OGL;
 		}
 		GJW=GJX;
 		KAZ=KBA;
@@ -14458,115 +14423,115 @@ impl Instance {
 		let GJY=(GHT* GIZ)/ GJO;
 		let GJZ=(GJW- GJA)- GGY;
 		let GKA=GJY* GJZ;
-		let OHW=L3([(((((OGW* GIZ)+ (OHI* GHT))- (OHR* GJY))/ GJO)* GJZ),0.0,0.0])+ (((KAZ- OHJ)- OHK)* GJY);
+		let OGN=L3([((product_sum_div(((OFN* GIZ)+ (OFZ* GHT)),IUF,OGI,(-GJY),GJO))* GJZ),0.0,0.0])+ (((KAZ- OGA)- OGB)* GJY);
 		GKN=GKA;
-		KAW=OHW;
+		KAW=OGN;
 		}else{
 		let GKB=GHT* GIZ;
-		let OHM=L3([((OGW* GIZ)+ (OHI* GHT)),0.0,0.0]);
+		let OGD=L3([((OFN* GIZ)+ (OFZ* GHT)),0.0,0.0]);
 		GKN=GKB;
-		KAW=OHM;
+		KAW=OGD;
 		}
 		let GKC=FLW* FLW;
 		let GKD=GKC* AZ;
-		let OHX=KJT* GKC;
+		let OGO=KJT* GKC;
 		let GKE=(JL- (FLV- (GKD/ MC)))/ GKD;
-		let OHY=((NWB- L3([((OHX/ MC)* KNJ),0.0,0.0]))- L3([(OHX* GKE),0.0,0.0]))/ GKD;
+		let OGP=((NUS- L3([((OGO/ MC)* KNJ),0.0,0.0]))).product_sum_div(IUF,L3([OGO,0.0,0.0]),(-GKE),GKD);
 		let GKF=GKE> LD;
 		let GKK;
 		let KBB;
 		if GKF{
 		GKK=A;
-		KBB=NWE;
+		KBB=NUV;
 		}else{
 		let GKG=GKE< -50f64;
 		let GKL;
 		let KBC;
 		if GKG{
 		GKL=F;
-		KBC=NWE;
+		KBC=NUV;
 		}else{
 		let GKH=GKE.exp();
 		let GKI=F+ GKH;
 		let GKJ=F/ GKI;
-		let OHZ=(((OHY* GKH)* GKJ)* KNJ)/ GKI;
+		let OGQ=((OGP* GKH)).product_div((-GKJ),GKI);
 		GKL=GKJ;
-		KBC=OHZ;
+		KBC=OGQ;
 		}
 		GKK=GKL;
 		KBB=KBC;
 		}
 		let GKM=F- GKK;
 		let GKO=(GKK* GJC)+ (GKM* GKN);
-		let OIA=((KBB* GJC)+ (OHL* GKK))+ (((KBB* KNJ)* GKN)+ (KAW* GKM));
+		let OGR=((KBB* GJC)+ (OGC* GKK))+ (((KBB* KNJ)* GKN)+ (KAW* GKM));
 		GLK=GKO;
-		KAR=OIA;
+		KAR=OGR;
 		}
 		let GKP=JL/ FMG;
-		let OIC=KMR/ FMG;
+		let OGT=KMR/ FMG;
 		let GKU;
 		let KBD;
 		if JM{
-		let OIE=OIC* GKP;
+		let OGV=OGT* GKP;
 		let GKQ=((GKP* GKP)+ JV).sqrt();
-		let OIF=(OIE+ OIE)* (IUF/ (KNB* GKQ));
+		let OGW=(OGV+ OGV)* (IUF/ (KNB* GKQ));
 		GKU=GKQ;
-		KBD=OIF;
+		KBD=OGW;
 		}else{
 		let GKR=KB/ JV;
 		let GKS=(GKR* GKP).tanh();
 		let GKT=GKP* GKS;
-		let OID=(OIC* GKS)+ (((OIC* GKR)* (IUF- (GKS* GKS)))* GKP);
+		let OGU=(OGT* GKS)+ (((OGT* GKR)* (IUF- (GKS* GKS)))* GKP);
 		GKU=GKT;
-		KBD=OID;
+		KBD=OGU;
 		}
 		let GKV=F+ (GKU.powf(FMH));
 		let GKW=GKV.powf(FQX);
 		let GKX=GHA/ GKW;
 		let GKY=FRA* GGS;
 		let GKZ=GKY* BG;
-		let OIG=KJX* GKY;
+		let OGX=KJX* GKY;
 		let GLA=FRD* GKX;
-		let OIH=((OGN- (((KBD* (FMH* ((GKU+ (((GKU== KOL) as u8 as f64)* KUP)).powf(OAG))))* (FQX* ((GKV+ (((GKV== KOL) as u8 as f64)* KUP)).powf(OAH))))* GKX))/ GKW)* FRD;
-		let OII=L3([(OAJ* GKX),0.0,0.0])+ L3([0.0,OIH[0],OIH[1]]);
+		let OGY=((OFE).product_sum_div(IUF,((KBD* (FMH* ((GKU+ (((GKU== KOL) as u8 as f64)* KUP)).powf(NYX))))* (FQX* ((GKV+ (((GKV== KOL) as u8 as f64)* KUP)).powf(NYY)))),(-GKX),GKW))* FRD;
+		let OGZ=L3([(NZA* GKX),0.0,0.0])+ L3([0.0,OGY[0],OGY[1]]);
 		let GLB=GLA> LD;
 		let GLH;
 		let KBE;
 		if GLB{
 		let GLD=GLC* (F+ (GLA- LD));
-		let OIK=OII* GLC;
+		let OHB=OGZ* GLC;
 		GLH=GLD;
-		KBE=OIK;
+		KBE=OHB;
 		}else{
 		let GLE=GLA< -50f64;
 		let GLI;
 		let KBF;
 		if GLE{
 		GLI=GLF;
-		KBF=NWE;
+		KBF=NUV;
 		}else{
 		let GLG=GLA.exp();
-		let OIJ=OII* GLG;
+		let OHA=OGZ* GLG;
 		GLI=GLG;
-		KBF=OIJ;
+		KBF=OHA;
 		}
 		GLH=GLI;
 		KBE=KBF;
 		}
 		let GLJ=GLH- F;
 		let GLL=GLK+ (GKZ* GLJ);
-		let OIL=KAR+ (L3([(OIG* GLJ),0.0,0.0])+ (KBE* GKZ));
+		let OHC=KAR+ (L3([(OGX* GLJ),0.0,0.0])+ (KBE* GKZ));
 		let GLM=JE* FLO;
-		let OIM=NXZ* JE;
+		let OHD=NWQ* JE;
 		let GLN=FMB* FRY;
 		let GLO=FMB* FSD;
 		let GLU;
 		let KBG;
 		if FMP{
 		let GLQ=GLP* (F+ (FMO- LD));
-		let OIO=NYJ* GLP;
+		let OHF=NXA* GLP;
 		GLU=GLQ;
-		KBG=OIO;
+		KBG=OHF;
 		}else{
 		let GLR=FMO< -50f64;
 		let GLV;
@@ -14576,39 +14541,39 @@ impl Instance {
 		KBH=KJQ;
 		}else{
 		let GLT=FMO.exp();
-		let OIN=NYJ* GLT;
+		let OHE=NXA* GLT;
 		GLV=GLT;
-		KBH=OIN;
+		KBH=OHE;
 		}
 		GLU=GLV;
 		KBG=KBH;
 		}
 		let GLW=-GLM;
-		let OIP=OIM* KNJ;
-		let OIQ=OIP* FRW;
+		let OHG=OHD* KNJ;
+		let OHH=OHG* FRW;
 		let GLX=(FRW* (GLW- FRX))+ FMO;
-		let OIR=L3([NYJ,0.0,0.0]);
-		let OIS=L3([0.0,OIQ[0],OIQ[1]])+ OIR;
+		let OHI=L3([NXA,0.0,0.0]);
+		let OHJ=L3([0.0,OHH[0],OHH[1]])+ OHI;
 		let GLY=GLX> LD;
 		let GME;
 		let KBI;
 		if GLY{
 		let GMA=GLZ* (F+ (GLX- LD));
-		let OIU=OIS* GLZ;
+		let OHL=OHJ* GLZ;
 		GME=GMA;
-		KBI=OIU;
+		KBI=OHL;
 		}else{
 		let GMB=GLX< -50f64;
 		let GMF;
 		let KBJ;
 		if GMB{
 		GMF=GMC;
-		KBJ=NYE;
+		KBJ=NWV;
 		}else{
 		let GMD=GLX.exp();
-		let OIT=OIS* GMD;
+		let OHK=OHJ* GMD;
 		GMF=GMD;
-		KBJ=OIT;
+		KBJ=OHK;
 		}
 		GME=GMF;
 		KBI=KBJ;
@@ -14617,9 +14582,9 @@ impl Instance {
 		let KBK;
 		if FSY{
 		let GMH=GMG* (F+ (FSP- LD));
-		let OIW=NYJ* GMG;
+		let OHN=NXA* GMG;
 		GML=GMH;
-		KBK=OIW;
+		KBK=OHN;
 		}else{
 		let GMI=FSP< -50f64;
 		let GMM;
@@ -14629,41 +14594,41 @@ impl Instance {
 		KBL=KJQ;
 		}else{
 		let GMK=FSP.exp();
-		let OIV=NYJ* GMK;
+		let OHM=NXA* GMK;
 		GMM=GMK;
-		KBL=OIV;
+		KBL=OHM;
 		}
 		GML=GMM;
 		KBK=KBL;
 		}
 		let GMN=GME- GML;
-		let OIX=KBI- L3([KBK,0.0,0.0]);
+		let OHO=KBI- L3([KBK,0.0,0.0]);
 		let GMO=FFO* GLN;
 		let GMP=GMO* BG;
-		let OIY=KJX* GMO;
-		let OIZ=OIM* FTJ;
+		let OHP=KJX* GMO;
+		let OHQ=OHD* FTJ;
 		let GMQ=(FTJ* GLM)+ FMO;
-		let OJA=(L3([(OBD* GLM),0.0,0.0])+ L3([0.0,OIZ[0],OIZ[1]]))+ OIR;
+		let OHR=(L3([(NZU* GLM),0.0,0.0])+ L3([0.0,OHQ[0],OHQ[1]]))+ OHI;
 		let GMR=GMQ> LD;
 		let GMX;
 		let KBM;
 		if GMR{
 		let GMT=GMS* (F+ (GMQ- LD));
-		let OJC=OJA* GMS;
+		let OHT=OHR* GMS;
 		GMX=GMT;
-		KBM=OJC;
+		KBM=OHT;
 		}else{
 		let GMU=GMQ< -50f64;
 		let GMY;
 		let KBN;
 		if GMU{
 		GMY=GMV;
-		KBN=NYE;
+		KBN=NWV;
 		}else{
 		let GMW=GMQ.exp();
-		let OJB=OJA* GMW;
+		let OHS=OHR* GMW;
 		GMY=GMW;
-		KBN=OJB;
+		KBN=OHS;
 		}
 		GMX=GMY;
 		KBM=KBN;
@@ -14673,9 +14638,9 @@ impl Instance {
 		if FTT{
 		let GMZ=(GMX- (FSA* GMN))- GLU;
 		let GNA=GMP* GMZ;
-		let OKD=L3([(OIY* GMZ),0.0,0.0])+ (((KBM- (OIX* FSA))- L3([KBG,0.0,0.0]))* GMP);
+		let OIU=L3([(OHP* GMZ),0.0,0.0])+ (((KBM- (OHO* FSA))- L3([KBG,0.0,0.0]))* GMP);
 		GQG=GNA;
-		KBO=OKD;
+		KBO=OIU;
 		}else{
 		let GNB=(FRW* ((-FRS)- FRX))+ FMO;
 		let GNC=GNB> LD;
@@ -14683,9 +14648,9 @@ impl Instance {
 		let KBP;
 		if GNC{
 		let GNE=GND* (F+ (GNB- LD));
-		let OJE=NYJ* GND;
+		let OHV=NXA* GND;
 		GNI=GNE;
-		KBP=OJE;
+		KBP=OHV;
 		}else{
 		let GNF=GNB< -50f64;
 		let GNJ;
@@ -14695,25 +14660,25 @@ impl Instance {
 		KBQ=KJQ;
 		}else{
 		let GNH=GNB.exp();
-		let OJD=NYJ* GNH;
+		let OHU=NXA* GNH;
 		GNJ=GNH;
-		KBQ=OJD;
+		KBQ=OHU;
 		}
 		GNI=GNJ;
 		KBP=KBQ;
 		}
 		let GNK=GNI- GML;
-		let OJF=KBP- KBK;
+		let OHW=KBP- KBK;
 		let GNL=(FTJ* FRS)+ FMO;
-		let OJG=(OBD* FRS)+ NYJ;
+		let OHX=(NZU* FRS)+ NXA;
 		let GNM=GNL> LD;
 		let GNS;
 		let KBR;
 		if GNM{
 		let GNO=GNN* (F+ (GNL- LD));
-		let OJI=OJG* GNN;
+		let OHZ=OHX* GNN;
 		GNS=GNO;
-		KBR=OJI;
+		KBR=OHZ;
 		}else{
 		let GNP=GNL< -50f64;
 		let GNT;
@@ -14723,39 +14688,39 @@ impl Instance {
 		KBS=KJQ;
 		}else{
 		let GNR=GNL.exp();
-		let OJH=OJG* GNR;
+		let OHY=OHX* GNR;
 		GNT=GNR;
-		KBS=OJH;
+		KBS=OHY;
 		}
 		GNS=GNT;
 		KBR=KBS;
 		}
 		let GNU=FSA* GNK;
-		let OJJ=OJF* FSA;
+		let OIA=OHW* FSA;
 		let GNV=(GNS- GNU)- GLU;
-		let OJK=(KBR- OJJ)- KBG;
+		let OIB=(KBR- OIA)- KBG;
 		let GNW=FSA* GMN;
-		let OJL=OIX* FSA;
+		let OIC=OHO* FSA;
 		let GNX=(GMX- GNW)- GLU;
-		let OJM=L3([KBG,0.0,0.0]);
+		let OID=L3([KBG,0.0,0.0]);
 		let GNY=GMP* GNX;
-		let OJN=L3([(OIY* GNX),0.0,0.0])+ (((KBM- OJL)- OJM)* GMP);
+		let OIE=L3([(OHP* GNX),0.0,0.0])+ (((KBM- OIC)- OID)* GMP);
 		let GNZ=FRU> A;
 		let GPJ;
 		let KBT;
 		if GNZ{
 		let GOA=(FRU* FRV)/ AZ;
-		let OJP=((KJT* GOA)* KNJ)/ AZ;
+		let OIG=product_div(KJT,(-GOA),AZ);
 		let GOB=(GOA* FRS)+ FMO;
-		let OJQ=(OJP* FRS)+ NYJ;
+		let OIH=(OIG* FRS)+ NXA;
 		let GOC=GOB> LD;
 		let GOI;
 		let KBU;
 		if GOC{
 		let GOE=GOD* (F+ (GOB- LD));
-		let OJS=OJQ* GOD;
+		let OIJ=OIH* GOD;
 		GOI=GOE;
-		KBU=OJS;
+		KBU=OIJ;
 		}else{
 		let GOF=GOB< -50f64;
 		let GOJ;
@@ -14765,38 +14730,38 @@ impl Instance {
 		KBV=KJQ;
 		}else{
 		let GOH=GOB.exp();
-		let OJR=OJQ* GOH;
+		let OII=OIH* GOH;
 		GOJ=GOH;
-		KBV=OJR;
+		KBV=OII;
 		}
 		GOI=GOJ;
 		KBU=KBV;
 		}
 		let GOK=(GOI- GNU)- GLU;
-		let OJT=(KBU- OJJ)- KBG;
-		let OJU=OIM* GOA;
+		let OIK=(KBU- OIA)- KBG;
+		let OIL=OHD* GOA;
 		let GOL=(GOA* GLM)+ FMO;
-		let OJV=(L3([(OJP* GLM),0.0,0.0])+ L3([0.0,OJU[0],OJU[1]]))+ OIR;
+		let OIM=(L3([(OIG* GLM),0.0,0.0])+ L3([0.0,OIL[0],OIL[1]]))+ OHI;
 		let GOM=GOL> LD;
 		let GOS;
 		let KBW;
 		if GOM{
 		let GOO=GON* (F+ (GOL- LD));
-		let OJX=OJV* GON;
+		let OIO=OIM* GON;
 		GOS=GOO;
-		KBW=OJX;
+		KBW=OIO;
 		}else{
 		let GOP=GOL< -50f64;
 		let GOT;
 		let KBX;
 		if GOP{
 		GOT=GOQ;
-		KBX=NYE;
+		KBX=NWV;
 		}else{
 		let GOR=GOL.exp();
-		let OJW=OJV* GOR;
+		let OIN=OIM* GOR;
 		GOT=GOR;
-		KBX=OJW;
+		KBX=OIN;
 		}
 		GOS=GOT;
 		KBW=KBX;
@@ -14804,111 +14769,111 @@ impl Instance {
 		let GOU=(GMP* GNV)/ GOK;
 		let GOV=(GOS- GNW)- GLU;
 		let GOW=GOU* GOV;
-		let OJY=L3([(((((OIY* GNV)+ (OJK* GMP))- (OJT* GOU))/ GOK)* GOV),0.0,0.0])+ (((KBW- OJL)- OJM)* GOU);
+		let OIP=L3([((product_sum_div(((OHP* GNV)+ (OIB* GMP)),IUF,OIK,(-GOU),GOK))* GOV),0.0,0.0])+ (((KBW- OIC)- OID)* GOU);
 		GPJ=GOW;
-		KBT=OJY;
+		KBT=OIP;
 		}else{
 		let GOX=GMP* GNV;
-		let OJO=L3([((OIY* GNV)+ (OJK* GMP)),0.0,0.0]);
+		let OIF=L3([((OHP* GNV)+ (OIB* GMP)),0.0,0.0]);
 		GPJ=GOX;
-		KBT=OJO;
+		KBT=OIF;
 		}
 		let GOY=FRT* FRT;
 		let GOZ=GOY* AZ;
-		let OJZ=KJT* GOY;
+		let OIQ=KJT* GOY;
 		let GPA=(GLM- (FRS- (GOZ/ MC)))/ GOZ;
-		let OKA=((L3([0.0,OIM[0],OIM[1]])- L3([((OJZ/ MC)* KNJ),0.0,0.0]))- L3([(OJZ* GPA),0.0,0.0]))/ GOZ;
+		let OIR=((L3([0.0,OHD[0],OHD[1]])- L3([((OIQ/ MC)* KNJ),0.0,0.0]))).product_sum_div(IUF,L3([OIQ,0.0,0.0]),(-GPA),GOZ);
 		let GPB=GPA> LD;
 		let GPG;
 		let KBY;
 		if GPB{
 		GPG=A;
-		KBY=NYE;
+		KBY=NWV;
 		}else{
 		let GPC=GPA< -50f64;
 		let GPH;
 		let KBZ;
 		if GPC{
 		GPH=F;
-		KBZ=NYE;
+		KBZ=NWV;
 		}else{
 		let GPD=GPA.exp();
 		let GPE=F+ GPD;
 		let GPF=F/ GPE;
-		let OKB=(((OKA* GPD)* GPF)* KNJ)/ GPE;
+		let OIS=((OIR* GPD)).product_div((-GPF),GPE);
 		GPH=GPF;
-		KBZ=OKB;
+		KBZ=OIS;
 		}
 		GPG=GPH;
 		KBY=KBZ;
 		}
 		let GPI=F- GPG;
 		let GPK=(GPG* GNY)+ (GPI* GPJ);
-		let OKC=((KBY* GNY)+ (OJN* GPG))+ (((KBY* KNJ)* GPJ)+ (KBT* GPI));
+		let OIT=((KBY* GNY)+ (OIE* GPG))+ (((KBY* KNJ)* GPJ)+ (KBT* GPI));
 		GQG=GPK;
-		KBO=OKC;
+		KBO=OIT;
 		}
 		let GPL=GLM/ FSB;
-		let OKE=OIM/ FSB;
+		let OIV=OHD/ FSB;
 		let GPQ;
 		let KCA;
 		if JM{
-		let OKG=OKE* GPL;
+		let OIX=OIV* GPL;
 		let GPM=((GPL* GPL)+ JV).sqrt();
-		let OKH=(OKG+ OKG)* (IUF/ (KNB* GPM));
+		let OIY=(OIX+ OIX)* (IUF/ (KNB* GPM));
 		GPQ=GPM;
-		KCA=OKH;
+		KCA=OIY;
 		}else{
 		let GPN=KB/ JV;
 		let GPO=(GPN* GPL).tanh();
 		let GPP=GPL* GPO;
-		let OKF=(OKE* GPO)+ (((OKE* GPN)* (IUF- (GPO* GPO)))* GPL);
+		let OIW=(OIV* GPO)+ (((OIV* GPN)* (IUF- (GPO* GPO)))* GPL);
 		GPQ=GPP;
-		KCA=OKF;
+		KCA=OIW;
 		}
 		let GPR=F+ (GPQ.powf(FSC));
 		let GPS=GPR.powf(FWN);
 		let GPT=GLW/ GPS;
 		let GPU=FRA* GLO;
 		let GPV=GPU* BG;
-		let OKI=KJX* GPU;
+		let OIZ=KJX* GPU;
 		let GPW=FWS* GPT;
-		let OKJ=((OIP- (((KCA* (FSC* ((GPQ+ (((GPQ== KOL) as u8 as f64)* KUP)).powf(OCN))))* (FWN* ((GPR+ (((GPR== KOL) as u8 as f64)* KUP)).powf(OCO))))* GPT))/ GPS)* FWS;
-		let OKK=L3([(OCQ* GPT),0.0,0.0])+ L3([0.0,OKJ[0],OKJ[1]]);
+		let OJA=((OHG).product_sum_div(IUF,((KCA* (FSC* ((GPQ+ (((GPQ== KOL) as u8 as f64)* KUP)).powf(OBE))))* (FWN* ((GPR+ (((GPR== KOL) as u8 as f64)* KUP)).powf(OBF)))),(-GPT),GPS))* FWS;
+		let OJB=L3([(OBH* GPT),0.0,0.0])+ L3([0.0,OJA[0],OJA[1]]);
 		let GPX=GPW> LD;
 		let GQD;
 		let KCB;
 		if GPX{
 		let GPZ=GPY* (F+ (GPW- LD));
-		let OKM=OKK* GPY;
+		let OJD=OJB* GPY;
 		GQD=GPZ;
-		KCB=OKM;
+		KCB=OJD;
 		}else{
 		let GQA=GPW< -50f64;
 		let GQE;
 		let KCC;
 		if GQA{
 		GQE=GQB;
-		KCC=NYE;
+		KCC=NWV;
 		}else{
 		let GQC=GPW.exp();
-		let OKL=OKK* GQC;
+		let OJC=OJB* GQC;
 		GQE=GQC;
-		KCC=OKL;
+		KCC=OJC;
 		}
 		GQD=GQE;
 		KCB=KCC;
 		}
 		let GQF=GQD- F;
 		let GQH=D* JK;
-		let OKN=KMQ* D;
-		let OKO=L3([0.0,OKN[0],OKN[1]]);
-		let OKP=OIL+ OKO;
+		let OJE=KMQ* D;
+		let OJF=L3([0.0,OJE[0],OJE[1]]);
+		let OJG=OHC+ OJF;
 		let GQI=A+ (GLL+ GQH);
 		let GQJ=D* FLO;
-		let OKQ=NXZ* D;
-		let OKR=L3([0.0,OKQ[0],OKQ[1]]);
-		let OKS=(KBO+ (L3([(OKI* GQF),0.0,0.0])+ (KCB* GPV)))+ OKR;
+		let OJH=NWQ* D;
+		let OJI=L3([0.0,OJH[0],OJH[1]]);
+		let OJJ=(KBO+ (L3([(OIZ* GQF),0.0,0.0])+ (KCB* GPV)))+ OJI;
 		let GQK=A+ ((GQG+ (GPV* GQF))+ GQJ);
 		let IKV;
 		let IKY;
@@ -14920,9 +14885,9 @@ impl Instance {
 		let KCF;
 		if FMP{
 		let GQN=GQM* (F+ (FMO- LD));
-		let OKU=NYJ* GQM;
+		let OJL=NXA* GQM;
 		GQR=GQN;
-		KCF=OKU;
+		KCF=OJL;
 		}else{
 		let GQO=FMO< -50f64;
 		let GQS;
@@ -14932,9 +14897,9 @@ impl Instance {
 		KCG=KJQ;
 		}else{
 		let GQQ=FMO.exp();
-		let OKT=NYJ* GQQ;
+		let OJK=NXA* GQQ;
 		GQS=GQQ;
-		KCG=OKT;
+		KCG=OJK;
 		}
 		GQR=GQS;
 		KCF=KCG;
@@ -14943,21 +14908,21 @@ impl Instance {
 		let KCH;
 		if GHC{
 		let GQU=GQT* (F+ (GHB- LD));
-		let OKW=OGQ* GQT;
+		let OJN=OFH* GQT;
 		GQY=GQU;
-		KCH=OKW;
+		KCH=OJN;
 		}else{
 		let GQV=GHB< -50f64;
 		let GQZ;
 		let KCI;
 		if GQV{
 		GQZ=GQW;
-		KCI=NWE;
+		KCI=NUV;
 		}else{
 		let GQX=GHB.exp();
-		let OKV=OGQ* GQX;
+		let OJM=OFH* GQX;
 		GQZ=GQX;
-		KCI=OKV;
+		KCI=OJM;
 		}
 		GQY=GQZ;
 		KCH=KCI;
@@ -14966,9 +14931,9 @@ impl Instance {
 		let KCJ;
 		if FNI{
 		let GRB=GRA* (F+ (FMZ- LD));
-		let OKY=NYJ* GRA;
+		let OJP=NXA* GRA;
 		GRF=GRB;
-		KCJ=OKY;
+		KCJ=OJP;
 		}else{
 		let GRC=FMZ< -50f64;
 		let GRG;
@@ -14978,37 +14943,37 @@ impl Instance {
 		KCK=KJQ;
 		}else{
 		let GRE=FMZ.exp();
-		let OKX=NYJ* GRE;
+		let OJO=NXA* GRE;
 		GRG=GRE;
-		KCK=OKX;
+		KCK=OJO;
 		}
 		GRF=GRG;
 		KCJ=KCK;
 		}
 		let GRH=GQY- GRF;
-		let OKZ=KCH- L3([KCJ,0.0,0.0]);
+		let OJQ=KCH- L3([KCJ,0.0,0.0]);
 		let GRI=FFO* A;
 		let GRJ=GRI* BG;
-		let OLA=KJX* GRI;
+		let OJR=KJX* GRI;
 		let GRP;
 		let KCL;
 		if GHV{
 		let GRL=GRK* (F+ (GHU- LD));
-		let OLC=OGY* GRK;
+		let OJT=OFP* GRK;
 		GRP=GRL;
-		KCL=OLC;
+		KCL=OJT;
 		}else{
 		let GRM=GHU< -50f64;
 		let GRQ;
 		let KCM;
 		if GRM{
 		GRQ=GRN;
-		KCM=NWE;
+		KCM=NUV;
 		}else{
 		let GRO=GHU.exp();
-		let OLB=OGY* GRO;
+		let OJS=OFP* GRO;
 		GRQ=GRO;
-		KCM=OLB;
+		KCM=OJS;
 		}
 		GRP=GRQ;
 		KCL=KCM;
@@ -15018,9 +14983,9 @@ impl Instance {
 		if GRR{
 		let GRS=(GRP- (A* GRH))- GQR;
 		let GRT=GRJ* GRS;
-		let OLZ=L3([(OLA* GRS),0.0,0.0])+ (((KCL- (OKZ* A))- L3([KCF,0.0,0.0]))* GRJ);
+		let OKQ=L3([(OJR* GRS),0.0,0.0])+ (((KCL- (OJQ* A))- L3([KCF,0.0,0.0]))* GRJ);
 		GUW=GRT;
-		KCN=OLZ;
+		KCN=OKQ;
 		}else{
 		let GRU=(FLZ* ((-FLV)- FMA))+ FMO;
 		let GRV=GRU> LD;
@@ -15028,9 +14993,9 @@ impl Instance {
 		let KCO;
 		if GRV{
 		let GRX=GRW* (F+ (GRU- LD));
-		let OLE=NYJ* GRW;
+		let OJV=NXA* GRW;
 		GSB=GRX;
-		KCO=OLE;
+		KCO=OJV;
 		}else{
 		let GRY=GRU< -50f64;
 		let GSC;
@@ -15040,25 +15005,25 @@ impl Instance {
 		KCP=KJQ;
 		}else{
 		let GSA=GRU.exp();
-		let OLD=NYJ* GSA;
+		let OJU=NXA* GSA;
 		GSC=GSA;
-		KCP=OLD;
+		KCP=OJU;
 		}
 		GSB=GSC;
 		KCO=KCP;
 		}
 		let GSD=GSB- GRF;
-		let OLF=KCO- KCJ;
+		let OJW=KCO- KCJ;
 		let GSE=(FNT* FLV)+ FMO;
-		let OLG=(NYW* FLV)+ NYJ;
+		let OJX=(NXN* FLV)+ NXA;
 		let GSF=GSE> LD;
 		let GSL;
 		let KCQ;
 		if GSF{
 		let GSH=GSG* (F+ (GSE- LD));
-		let OLI=OLG* GSG;
+		let OJZ=OJX* GSG;
 		GSL=GSH;
-		KCQ=OLI;
+		KCQ=OJZ;
 		}else{
 		let GSI=GSE< -50f64;
 		let GSM;
@@ -15068,23 +15033,23 @@ impl Instance {
 		KCR=KJQ;
 		}else{
 		let GSK=GSE.exp();
-		let OLH=OLG* GSK;
+		let OJY=OJX* GSK;
 		GSM=GSK;
-		KCR=OLH;
+		KCR=OJY;
 		}
 		GSL=GSM;
 		KCQ=KCR;
 		}
 		let GSN=A* GSD;
-		let OLJ=OLF* A;
+		let OKA=OJW* A;
 		let GSO=(GSL- GSN)- GQR;
-		let OLK=(KCQ- OLJ)- KCF;
+		let OKB=(KCQ- OKA)- KCF;
 		let GSP=A* GRH;
-		let OLL=OKZ* A;
+		let OKC=OJQ* A;
 		let GSQ=(GRP- GSP)- GQR;
-		let OLM=L3([KCF,0.0,0.0]);
+		let OKD=L3([KCF,0.0,0.0]);
 		let GSR=GRJ* GSQ;
-		let OLN=L3([(OLA* GSQ),0.0,0.0])+ (((KCL- OLL)- OLM)* GRJ);
+		let OKE=L3([(OJR* GSQ),0.0,0.0])+ (((KCL- OKC)- OKD)* GRJ);
 		let GTX;
 		let KCS;
 		if GSS{
@@ -15092,9 +15057,9 @@ impl Instance {
 		let KCT;
 		if GSF{
 		let GSU=GST* (F+ (GSE- LD));
-		let OLQ=OLG* GST;
+		let OKH=OJX* GST;
 		GSY=GSU;
-		KCT=OLQ;
+		KCT=OKH;
 		}else{
 		let GSV=GSE< -50f64;
 		let GSZ;
@@ -15104,34 +15069,34 @@ impl Instance {
 		KCU=KJQ;
 		}else{
 		let GSX=GSE.exp();
-		let OLP=OLG* GSX;
+		let OKG=OJX* GSX;
 		GSZ=GSX;
-		KCU=OLP;
+		KCU=OKG;
 		}
 		GSY=GSZ;
 		KCT=KCU;
 		}
 		let GTA=(GSY- GSN)- GQR;
-		let OLR=(KCT- OLJ)- KCF;
+		let OKI=(KCT- OKA)- KCF;
 		let GTG;
 		let KCV;
 		if GHV{
 		let GTC=GTB* (F+ (GHU- LD));
-		let OLT=OGY* GTB;
+		let OKK=OFP* GTB;
 		GTG=GTC;
-		KCV=OLT;
+		KCV=OKK;
 		}else{
 		let GTD=GHU< -50f64;
 		let GTH;
 		let KCW;
 		if GTD{
 		GTH=GTE;
-		KCW=NWE;
+		KCW=NUV;
 		}else{
 		let GTF=GHU.exp();
-		let OLS=OGY* GTF;
+		let OKJ=OFP* GTF;
 		GTH=GTF;
-		KCW=OLS;
+		KCW=OKJ;
 		}
 		GTG=GTH;
 		KCV=KCW;
@@ -15139,115 +15104,115 @@ impl Instance {
 		let GTI=(GRJ* GSO)/ GTA;
 		let GTJ=(GTG- GSP)- GQR;
 		let GTK=GTI* GTJ;
-		let OLU=L3([(((((OLA* GSO)+ (OLK* GRJ))- (OLR* GTI))/ GTA)* GTJ),0.0,0.0])+ (((KCV- OLL)- OLM)* GTI);
+		let OKL=L3([((product_sum_div(((OJR* GSO)+ (OKB* GRJ)),IUF,OKI,(-GTI),GTA))* GTJ),0.0,0.0])+ (((KCV- OKC)- OKD)* GTI);
 		GTX=GTK;
-		KCS=OLU;
+		KCS=OKL;
 		}else{
 		let GTL=GRJ* GSO;
-		let OLO=L3([((OLA* GSO)+ (OLK* GRJ)),0.0,0.0]);
+		let OKF=L3([((OJR* GSO)+ (OKB* GRJ)),0.0,0.0]);
 		GTX=GTL;
-		KCS=OLO;
+		KCS=OKF;
 		}
 		let GTM=FLW* FLW;
 		let GTN=GTM* AZ;
-		let OLV=KJT* GTM;
+		let OKM=KJT* GTM;
 		let GTO=(JL- (FLV- (GTN/ MC)))/ GTN;
-		let OLW=((NWB- L3([((OLV/ MC)* KNJ),0.0,0.0]))- L3([(OLV* GTO),0.0,0.0]))/ GTN;
+		let OKN=((NUS- L3([((OKM/ MC)* KNJ),0.0,0.0]))).product_sum_div(IUF,L3([OKM,0.0,0.0]),(-GTO),GTN);
 		let GTP=GTO> LD;
 		let GTU;
 		let KCX;
 		if GTP{
 		GTU=A;
-		KCX=NWE;
+		KCX=NUV;
 		}else{
 		let GTQ=GTO< -50f64;
 		let GTV;
 		let KCY;
 		if GTQ{
 		GTV=F;
-		KCY=NWE;
+		KCY=NUV;
 		}else{
 		let GTR=GTO.exp();
 		let GTS=F+ GTR;
 		let GTT=F/ GTS;
-		let OLX=(((OLW* GTR)* GTT)* KNJ)/ GTS;
+		let OKO=((OKN* GTR)).product_div((-GTT),GTS);
 		GTV=GTT;
-		KCY=OLX;
+		KCY=OKO;
 		}
 		GTU=GTV;
 		KCX=KCY;
 		}
 		let GTW=F- GTU;
 		let GTY=(GTU* GSR)+ (GTW* GTX);
-		let OLY=((KCX* GSR)+ (OLN* GTU))+ (((KCX* KNJ)* GTX)+ (KCS* GTW));
+		let OKP=((KCX* GSR)+ (OKE* GTU))+ (((KCX* KNJ)* GTX)+ (KCS* GTW));
 		GUW=GTY;
-		KCN=OLY;
+		KCN=OKP;
 		}
 		let GTZ=JL/ FXJ;
-		let OMA=KMR/ FXJ;
+		let OKR=KMR/ FXJ;
 		let GUE;
 		let KCZ;
 		if JM{
-		let OMC=OMA* GTZ;
+		let OKT=OKR* GTZ;
 		let GUA=((GTZ* GTZ)+ JV).sqrt();
-		let OMD=(OMC+ OMC)* (IUF/ (KNB* GUA));
+		let OKU=(OKT+ OKT)* (IUF/ (KNB* GUA));
 		GUE=GUA;
-		KCZ=OMD;
+		KCZ=OKU;
 		}else{
 		let GUB=KB/ JV;
 		let GUC=(GUB* GTZ).tanh();
 		let GUD=GTZ* GUC;
-		let OMB=(OMA* GUC)+ (((OMA* GUB)* (IUF- (GUC* GUC)))* GTZ);
+		let OKS=(OKR* GUC)+ (((OKR* GUB)* (IUF- (GUC* GUC)))* GTZ);
 		GUE=GUD;
-		KCZ=OMB;
+		KCZ=OKS;
 		}
 		let GUF=F+ (GUE.powf(FXK));
 		let GUG=F/ FXK;
 		let GUH=GUF.powf(GUG);
 		let GUI=GHA/ GUH;
-		let OME=OGN- (((KCZ* (FXK* ((GUE+ (((GUE== KOL) as u8 as f64)* KUP)).powf((FXK- IUF)))))* (GUG* ((GUF+ (((GUF== KOL) as u8 as f64)* KUP)).powf((GUG- IUF)))))* GUI);
+		let OKV=(OFE).product_sum_div(IUF,((KCZ* (FXK* ((GUE+ (((GUE== KOL) as u8 as f64)* KUP)).powf((FXK- IUF)))))* (GUG* ((GUF+ (((GUF== KOL) as u8 as f64)* KUP)).powf((GUG- IUF))))),(-GUI),GUH);
 		let GUJ=FRA* GQL;
 		let GUK=GUJ* BG;
-		let OMF=KJX* GUJ;
+		let OKW=KJX* GUJ;
 		let GUL=FXN/ AZ;
 		let GUM=GUL* GUI;
-		let OMG=(OME/ GUH)* GUL;
-		let OMH=L3([((((KJT* GUL)* KNJ)/ AZ)* GUI),0.0,0.0])+ L3([0.0,OMG[0],OMG[1]]);
+		let OKX=OKV* GUL;
+		let OKY=L3([((product_div(KJT,(-GUL),AZ))* GUI),0.0,0.0])+ L3([0.0,OKX[0],OKX[1]]);
 		let GUN=GUM> LD;
 		let GUT;
 		let KDA;
 		if GUN{
 		let GUP=GUO* (F+ (GUM- LD));
-		let OMJ=OMH* GUO;
+		let OLA=OKY* GUO;
 		GUT=GUP;
-		KDA=OMJ;
+		KDA=OLA;
 		}else{
 		let GUQ=GUM< -50f64;
 		let GUU;
 		let KDB;
 		if GUQ{
 		GUU=GUR;
-		KDB=NWE;
+		KDB=NUV;
 		}else{
 		let GUS=GUM.exp();
-		let OMI=OMH* GUS;
+		let OKZ=OKY* GUS;
 		GUU=GUS;
-		KDB=OMI;
+		KDB=OKZ;
 		}
 		GUT=GUU;
 		KDA=KDB;
 		}
 		let GUV=GUT- F;
 		let GUX=GUW+ (GUK* GUV);
-		let OMK=KCN+ (L3([(OMF* GUV),0.0,0.0])+ (KDA* GUK));
+		let OLB=KCN+ (L3([(OKW* GUV),0.0,0.0])+ (KDA* GUK));
 		let GUY=FMB* GCC;
 		let GVE;
 		let KDC;
 		if FMP{
 		let GVA=GUZ* (F+ (FMO- LD));
-		let OMM=NYJ* GUZ;
+		let OLD=NXA* GUZ;
 		GVE=GVA;
-		KDC=OMM;
+		KDC=OLD;
 		}else{
 		let GVB=FMO< -50f64;
 		let GVF;
@@ -15257,9 +15222,9 @@ impl Instance {
 		KDD=KJQ;
 		}else{
 		let GVD=FMO.exp();
-		let OML=NYJ* GVD;
+		let OLC=NXA* GVD;
 		GVF=GVD;
-		KDD=OML;
+		KDD=OLC;
 		}
 		GVE=GVF;
 		KDC=KDD;
@@ -15268,21 +15233,21 @@ impl Instance {
 		let KDE;
 		if GLY{
 		let GVH=GVG* (F+ (GLX- LD));
-		let OMO=OIS* GVG;
+		let OLF=OHJ* GVG;
 		GVL=GVH;
-		KDE=OMO;
+		KDE=OLF;
 		}else{
 		let GVI=GLX< -50f64;
 		let GVM;
 		let KDF;
 		if GVI{
 		GVM=GVJ;
-		KDF=NYE;
+		KDF=NWV;
 		}else{
 		let GVK=GLX.exp();
-		let OMN=OIS* GVK;
+		let OLE=OHJ* GVK;
 		GVM=GVK;
-		KDF=OMN;
+		KDF=OLE;
 		}
 		GVL=GVM;
 		KDE=KDF;
@@ -15291,9 +15256,9 @@ impl Instance {
 		let KDG;
 		if FSY{
 		let GVO=GVN* (F+ (FSP- LD));
-		let OMQ=NYJ* GVN;
+		let OLH=NXA* GVN;
 		GVS=GVO;
-		KDG=OMQ;
+		KDG=OLH;
 		}else{
 		let GVP=FSP< -50f64;
 		let GVT;
@@ -15303,34 +15268,34 @@ impl Instance {
 		KDH=KJQ;
 		}else{
 		let GVR=FSP.exp();
-		let OMP=NYJ* GVR;
+		let OLG=NXA* GVR;
 		GVT=GVR;
-		KDH=OMP;
+		KDH=OLG;
 		}
 		GVS=GVT;
 		KDG=KDH;
 		}
 		let GVU=GVL- GVS;
-		let OMR=KDE- L3([KDG,0.0,0.0]);
+		let OLI=KDE- L3([KDG,0.0,0.0]);
 		let GWA;
 		let KDI;
 		if GMR{
 		let GVW=GVV* (F+ (GMQ- LD));
-		let OMT=OJA* GVV;
+		let OLK=OHR* GVV;
 		GWA=GVW;
-		KDI=OMT;
+		KDI=OLK;
 		}else{
 		let GVX=GMQ< -50f64;
 		let GWB;
 		let KDJ;
 		if GVX{
 		GWB=GVY;
-		KDJ=NYE;
+		KDJ=NWV;
 		}else{
 		let GVZ=GMQ.exp();
-		let OMS=OJA* GVZ;
+		let OLJ=OHR* GVZ;
 		GWB=GVZ;
-		KDJ=OMS;
+		KDJ=OLJ;
 		}
 		GWA=GWB;
 		KDI=KDJ;
@@ -15340,9 +15305,9 @@ impl Instance {
 		if GWC{
 		let GWD=(GWA- (A* GVU))- GVE;
 		let GWE=GRJ* GWD;
-		let ONQ=L3([(OLA* GWD),0.0,0.0])+ (((KDI- (OMR* A))- L3([KDC,0.0,0.0]))* GRJ);
+		let OMH=L3([(OJR* GWD),0.0,0.0])+ (((KDI- (OLI* A))- L3([KDC,0.0,0.0]))* GRJ);
 		GZH=GWE;
-		KDK=ONQ;
+		KDK=OMH;
 		}else{
 		let GWF=(FRW* ((-FRS)- FRX))+ FMO;
 		let GWG=GWF> LD;
@@ -15350,9 +15315,9 @@ impl Instance {
 		let KDL;
 		if GWG{
 		let GWI=GWH* (F+ (GWF- LD));
-		let OMV=NYJ* GWH;
+		let OLM=NXA* GWH;
 		GWM=GWI;
-		KDL=OMV;
+		KDL=OLM;
 		}else{
 		let GWJ=GWF< -50f64;
 		let GWN;
@@ -15362,25 +15327,25 @@ impl Instance {
 		KDM=KJQ;
 		}else{
 		let GWL=GWF.exp();
-		let OMU=NYJ* GWL;
+		let OLL=NXA* GWL;
 		GWN=GWL;
-		KDM=OMU;
+		KDM=OLL;
 		}
 		GWM=GWN;
 		KDL=KDM;
 		}
 		let GWO=GWM- GVS;
-		let OMW=KDL- KDG;
+		let OLN=KDL- KDG;
 		let GWP=(FTJ* FRS)+ FMO;
-		let OMX=(OBD* FRS)+ NYJ;
+		let OLO=(NZU* FRS)+ NXA;
 		let GWQ=GWP> LD;
 		let GWW;
 		let KDN;
 		if GWQ{
 		let GWS=GWR* (F+ (GWP- LD));
-		let OMZ=OMX* GWR;
+		let OLQ=OLO* GWR;
 		GWW=GWS;
-		KDN=OMZ;
+		KDN=OLQ;
 		}else{
 		let GWT=GWP< -50f64;
 		let GWX;
@@ -15390,23 +15355,23 @@ impl Instance {
 		KDO=KJQ;
 		}else{
 		let GWV=GWP.exp();
-		let OMY=OMX* GWV;
+		let OLP=OLO* GWV;
 		GWX=GWV;
-		KDO=OMY;
+		KDO=OLP;
 		}
 		GWW=GWX;
 		KDN=KDO;
 		}
 		let GWY=A* GWO;
-		let ONA=OMW* A;
+		let OLR=OLN* A;
 		let GWZ=(GWW- GWY)- GVE;
-		let ONB=(KDN- ONA)- KDC;
+		let OLS=(KDN- OLR)- KDC;
 		let GXA=A* GVU;
-		let ONC=OMR* A;
+		let OLT=OLI* A;
 		let GXB=(GWA- GXA)- GVE;
-		let OND=L3([KDC,0.0,0.0]);
+		let OLU=L3([KDC,0.0,0.0]);
 		let GXC=GRJ* GXB;
-		let ONE=L3([(OLA* GXB),0.0,0.0])+ (((KDI- ONC)- OND)* GRJ);
+		let OLV=L3([(OJR* GXB),0.0,0.0])+ (((KDI- OLT)- OLU)* GRJ);
 		let GYI;
 		let KDP;
 		if GXD{
@@ -15414,9 +15379,9 @@ impl Instance {
 		let KDQ;
 		if GWQ{
 		let GXF=GXE* (F+ (GWP- LD));
-		let ONH=OMX* GXE;
+		let OLY=OLO* GXE;
 		GXJ=GXF;
-		KDQ=ONH;
+		KDQ=OLY;
 		}else{
 		let GXG=GWP< -50f64;
 		let GXK;
@@ -15426,34 +15391,34 @@ impl Instance {
 		KDR=KJQ;
 		}else{
 		let GXI=GWP.exp();
-		let ONG=OMX* GXI;
+		let OLX=OLO* GXI;
 		GXK=GXI;
-		KDR=ONG;
+		KDR=OLX;
 		}
 		GXJ=GXK;
 		KDQ=KDR;
 		}
 		let GXL=(GXJ- GWY)- GVE;
-		let ONI=(KDQ- ONA)- KDC;
+		let OLZ=(KDQ- OLR)- KDC;
 		let GXR;
 		let KDS;
 		if GMR{
 		let GXN=GXM* (F+ (GMQ- LD));
-		let ONK=OJA* GXM;
+		let OMB=OHR* GXM;
 		GXR=GXN;
-		KDS=ONK;
+		KDS=OMB;
 		}else{
 		let GXO=GMQ< -50f64;
 		let GXS;
 		let KDT;
 		if GXO{
 		GXS=GXP;
-		KDT=NYE;
+		KDT=NWV;
 		}else{
 		let GXQ=GMQ.exp();
-		let ONJ=OJA* GXQ;
+		let OMA=OHR* GXQ;
 		GXS=GXQ;
-		KDT=ONJ;
+		KDT=OMA;
 		}
 		GXR=GXS;
 		KDS=KDT;
@@ -15461,125 +15426,125 @@ impl Instance {
 		let GXT=(GRJ* GWZ)/ GXL;
 		let GXU=(GXR- GXA)- GVE;
 		let GXV=GXT* GXU;
-		let ONL=L3([(((((OLA* GWZ)+ (ONB* GRJ))- (ONI* GXT))/ GXL)* GXU),0.0,0.0])+ (((KDS- ONC)- OND)* GXT);
+		let OMC=L3([((product_sum_div(((OJR* GWZ)+ (OLS* GRJ)),IUF,OLZ,(-GXT),GXL))* GXU),0.0,0.0])+ (((KDS- OLT)- OLU)* GXT);
 		GYI=GXV;
-		KDP=ONL;
+		KDP=OMC;
 		}else{
 		let GXW=GRJ* GWZ;
-		let ONF=L3([((OLA* GWZ)+ (ONB* GRJ)),0.0,0.0]);
+		let OLW=L3([((OJR* GWZ)+ (OLS* GRJ)),0.0,0.0]);
 		GYI=GXW;
-		KDP=ONF;
+		KDP=OLW;
 		}
 		let GXX=FRT* FRT;
 		let GXY=GXX* AZ;
-		let ONM=KJT* GXX;
+		let OMD=KJT* GXX;
 		let GXZ=(GLM- (FRS- (GXY/ MC)))/ GXY;
-		let ONN=((L3([0.0,OIM[0],OIM[1]])- L3([((ONM/ MC)* KNJ),0.0,0.0]))- L3([(ONM* GXZ),0.0,0.0]))/ GXY;
+		let OME=((L3([0.0,OHD[0],OHD[1]])- L3([((OMD/ MC)* KNJ),0.0,0.0]))).product_sum_div(IUF,L3([OMD,0.0,0.0]),(-GXZ),GXY);
 		let GYA=GXZ> LD;
 		let GYF;
 		let KDU;
 		if GYA{
 		GYF=A;
-		KDU=NYE;
+		KDU=NWV;
 		}else{
 		let GYB=GXZ< -50f64;
 		let GYG;
 		let KDV;
 		if GYB{
 		GYG=F;
-		KDV=NYE;
+		KDV=NWV;
 		}else{
 		let GYC=GXZ.exp();
 		let GYD=F+ GYC;
 		let GYE=F/ GYD;
-		let ONO=(((ONN* GYC)* GYE)* KNJ)/ GYD;
+		let OMF=((OME* GYC)).product_div((-GYE),GYD);
 		GYG=GYE;
-		KDV=ONO;
+		KDV=OMF;
 		}
 		GYF=GYG;
 		KDU=KDV;
 		}
 		let GYH=F- GYF;
 		let GYJ=(GYF* GXC)+ (GYH* GYI);
-		let ONP=((KDU* GXC)+ (ONE* GYF))+ (((KDU* KNJ)* GYI)+ (KDP* GYH));
+		let OMG=((KDU* GXC)+ (OLV* GYF))+ (((KDU* KNJ)* GYI)+ (KDP* GYH));
 		GZH=GYJ;
-		KDK=ONP;
+		KDK=OMG;
 		}
 		let GYK=GLM/ GCA;
-		let ONR=OIM/ GCA;
+		let OMI=OHD/ GCA;
 		let GYP;
 		let KDW;
 		if JM{
-		let ONT=ONR* GYK;
+		let OMK=OMI* GYK;
 		let GYL=((GYK* GYK)+ JV).sqrt();
-		let ONU=(ONT+ ONT)* (IUF/ (KNB* GYL));
+		let OML=(OMK+ OMK)* (IUF/ (KNB* GYL));
 		GYP=GYL;
-		KDW=ONU;
+		KDW=OML;
 		}else{
 		let GYM=KB/ JV;
 		let GYN=(GYM* GYK).tanh();
 		let GYO=GYK* GYN;
-		let ONS=(ONR* GYN)+ (((ONR* GYM)* (IUF- (GYN* GYN)))* GYK);
+		let OMJ=(OMI* GYN)+ (((OMI* GYM)* (IUF- (GYN* GYN)))* GYK);
 		GYP=GYO;
-		KDW=ONS;
+		KDW=OMJ;
 		}
 		let GYQ=F+ (GYP.powf(GCB));
 		let GYR=F/ GCB;
 		let GYS=GYQ.powf(GYR);
 		let GYT=GLW/ GYS;
-		let ONV=OIP- (((KDW* (GCB* ((GYP+ (((GYP== KOL) as u8 as f64)* KUP)).powf((GCB- IUF)))))* (GYR* ((GYQ+ (((GYQ== KOL) as u8 as f64)* KUP)).powf((GYR- IUF)))))* GYT);
+		let OMM=(OHG).product_sum_div(IUF,((KDW* (GCB* ((GYP+ (((GYP== KOL) as u8 as f64)* KUP)).powf((GCB- IUF)))))* (GYR* ((GYQ+ (((GYQ== KOL) as u8 as f64)* KUP)).powf((GYR- IUF))))),(-GYT),GYS);
 		let GYU=FRA* GUY;
 		let GYV=GYU* BG;
-		let ONW=KJX* GYU;
+		let OMN=KJX* GYU;
 		let GYW=GCE/ AZ;
 		let GYX=GYW* GYT;
-		let ONX=(ONV/ GYS)* GYW;
-		let ONY=L3([((((KJT* GYW)* KNJ)/ AZ)* GYT),0.0,0.0])+ L3([0.0,ONX[0],ONX[1]]);
+		let OMO=OMM* GYW;
+		let OMP=L3([((product_div(KJT,(-GYW),AZ))* GYT),0.0,0.0])+ L3([0.0,OMO[0],OMO[1]]);
 		let GYY=GYX> LD;
 		let GZE;
 		let KDX;
 		if GYY{
 		let GZA=GYZ* (F+ (GYX- LD));
-		let OOA=ONY* GYZ;
+		let OMR=OMP* GYZ;
 		GZE=GZA;
-		KDX=OOA;
+		KDX=OMR;
 		}else{
 		let GZB=GYX< -50f64;
 		let GZF;
 		let KDY;
 		if GZB{
 		GZF=GZC;
-		KDY=NYE;
+		KDY=NWV;
 		}else{
 		let GZD=GYX.exp();
-		let ONZ=ONY* GZD;
+		let OMQ=OMP* GZD;
 		GZF=GZD;
-		KDY=ONZ;
+		KDY=OMQ;
 		}
 		GZE=GZF;
 		KDX=KDY;
 		}
 		let GZG=GZE- F;
-		let OOB=OMK+ OKO;
+		let OMS=OLB+ OJF;
 		let GZI=A+ (GUX+ GQH);
-		let OOC=(KDK+ (L3([(ONW* GZG),0.0,0.0])+ (KDX* GYV)))+ OKR;
+		let OMT=(KDK+ (L3([(OMN* GZG),0.0,0.0])+ (KDX* GYV)))+ OJI;
 		let GZJ=A+ ((GZH+ (GYV* GZG))+ GQJ);
 		IKV=GZI;
 		IKY=GZJ;
-		KCD=OOB;
-		KCE=OOC;
+		KCD=OMS;
+		KCE=OMT;
 		}else{
 		IKV=A;
 		IKY=A;
-		KCD=NWE;
-		KCE=NYE;
+		KCD=NUV;
+		KCE=NWV;
 		}
 		IKQ=GQI;
 		IKS=GQK;
 		IKU=IKV;
 		IKX=IKY;
-		KAF=OKP;
-		KAG=OKS;
+		KAF=OJG;
+		KAG=OJJ;
 		KAH=KCD;
 		KAI=KCE;
 		}else{
@@ -15587,10 +15552,10 @@ impl Instance {
 		IKS=A;
 		IKU=A;
 		IKX=A;
-		KAF=NWE;
-		KAG=NYE;
-		KAH=NWE;
-		KAI=NYE;
+		KAF=NUV;
+		KAG=NWV;
+		KAH=NUV;
+		KAI=NWV;
 		}
 		IKJ=FXF;
 		IKK=FXH;
@@ -15600,8 +15565,8 @@ impl Instance {
 		IKR=IKS;
 		IKT=IKU;
 		IKW=IKX;
-		JWH=OCX;
-		JWI=ODA;
+		JWH=OBO;
+		JWI=OBR;
 		JWJ=JYJ;
 		JWK=JYK;
 		JWL=KAF;
@@ -15617,14 +15582,14 @@ impl Instance {
 		IKR=A;
 		IKT=A;
 		IKW=A;
-		JWH=NYF;
-		JWI=NYG;
-		JWJ=NYF;
-		JWK=NYG;
-		JWL=NWE;
-		JWM=NYE;
-		JWN=NWE;
-		JWO=NYE;
+		JWH=NWW;
+		JWI=NWX;
+		JWJ=NWW;
+		JWK=NWX;
+		JWL=NUV;
+		JWM=NWV;
+		JWN=NUV;
+		JWO=NWV;
 		}
 		let GZK=parameters[291]== F;
 		let IKZ;
@@ -15641,23 +15606,23 @@ impl Instance {
 		let KED;
 		if GZK{
 		let GZL=JJ- PT;
-		let OOF=L2([0.0,IUJ])- L2([IUR,0.0]);
+		let OMW=L2([0.0,IUJ])- L2([IUR,0.0]);
 		let GZM=JE* GZL;
-		let OOG=OOF* JE;
+		let OMX=OMW* JE;
 		let GZS=F- GZR;
 		let GZT=O* GZS;
 		let GZW=A/ AZ;
-		let OOH=((KJT* GZW)* KNJ)/ AZ;
+		let OMY=product_div(KJT,(-GZW),AZ);
 		let GZX=GZW* -0f64;
-		let OOI=OOH* -0f64;
+		let OMZ=OMY* -0f64;
 		let GZY=GZX> LD;
 		let HAE;
 		let KEE;
 		if GZY{
 		let HAA=GZZ* (F+ (GZX- LD));
-		let OOK=OOI* GZZ;
+		let ONB=OMZ* GZZ;
 		HAE=HAA;
-		KEE=OOK;
+		KEE=ONB;
 		}else{
 		let HAB=GZX< -50f64;
 		let HAF;
@@ -15667,42 +15632,42 @@ impl Instance {
 		KEF=KJQ;
 		}else{
 		let HAD=GZX.exp();
-		let OOJ=OOI* HAD;
+		let ONA=OMZ* HAD;
 		HAF=HAD;
-		KEF=OOJ;
+		KEF=ONA;
 		}
 		HAE=HAF;
 		KEE=KEF;
 		}
 		let HAG=-GZM;
-		let OOL=OOG* KNJ;
+		let ONC=OMX* KNJ;
 		let HAH=AEU* (HAG- 600f64);
-		let OOM=OOL* AEU;
+		let OND=ONC* AEU;
 		let HAI=HAH+ GZX;
-		let OON=L3([0.0,OOM[0],OOM[1]]);
-		let OOO=L3([OOI,0.0,0.0]);
-		let OOP=OON+ OOO;
+		let ONE=L3([0.0,OND[0],OND[1]]);
+		let ONF=L3([OMZ,0.0,0.0]);
+		let ONG=ONE+ ONF;
 		let HAJ=-2400f64+ GZX;
 		let HAK=HAI> LD;
 		let HAQ;
 		let KEG;
 		if HAK{
 		let HAM=HAL* (F+ (HAI- LD));
-		let OOR=OOP* HAL;
+		let ONI=ONG* HAL;
 		HAQ=HAM;
-		KEG=OOR;
+		KEG=ONI;
 		}else{
 		let HAN=HAI< -50f64;
 		let HAR;
 		let KEH;
 		if HAN{
 		HAR=HAO;
-		KEH=OOD;
+		KEH=OMU;
 		}else{
 		let HAP=HAI.exp();
-		let OOQ=OOP* HAP;
+		let ONH=ONG* HAP;
 		HAR=HAP;
-		KEH=OOQ;
+		KEH=ONH;
 		}
 		HAQ=HAR;
 		KEG=KEH;
@@ -15712,9 +15677,9 @@ impl Instance {
 		let KEI;
 		if HAS{
 		let HAU=HAT* (F+ (HAJ- LD));
-		let OOT=OOI* HAT;
+		let ONK=OMZ* HAT;
 		HAY=HAU;
-		KEI=OOT;
+		KEI=ONK;
 		}else{
 		let HAV=HAJ< -50f64;
 		let HAZ;
@@ -15724,44 +15689,44 @@ impl Instance {
 		KEJ=KJQ;
 		}else{
 		let HAX=HAJ.exp();
-		let OOS=OOI* HAX;
+		let ONJ=OMZ* HAX;
 		HAZ=HAX;
-		KEJ=OOS;
+		KEJ=ONJ;
 		}
 		HAY=HAZ;
 		KEI=KEJ;
 		}
 		let HBA=HAQ- HAY;
-		let OOU=KEG- L3([KEI,0.0,0.0]);
+		let ONL=KEG- L3([KEI,0.0,0.0]);
 		let HBB=(JE* GZT)* P;
 		let HBC=HBB* parameters[293];
 		let HBD=HBC* BG;
-		let OOV=KJX* HBC;
+		let ONM=KJX* HBC;
 		let HBE=GZQ/ AZ;
-		let OOW=((KJT* HBE)* KNJ)/ AZ;
-		let OOX=OOG* HBE;
+		let ONN=product_div(KJT,(-HBE),AZ);
+		let ONO=OMX* HBE;
 		let HBF=(HBE* GZM)+ GZX;
-		let OOY=(L3([(OOW* GZM),0.0,0.0])+ L3([0.0,OOX[0],OOX[1]]))+ OOO;
+		let ONP=(L3([(ONN* GZM),0.0,0.0])+ L3([0.0,ONO[0],ONO[1]]))+ ONF;
 		let HBG=HBF> LD;
 		let HBM;
 		let KEK;
 		if HBG{
 		let HBI=HBH* (F+ (HBF- LD));
-		let OPA=OOY* HBH;
+		let ONR=ONP* HBH;
 		HBM=HBI;
-		KEK=OPA;
+		KEK=ONR;
 		}else{
 		let HBJ=HBF< -50f64;
 		let HBN;
 		let KEL;
 		if HBJ{
 		HBN=HBK;
-		KEL=OOD;
+		KEL=OMU;
 		}else{
 		let HBL=HBF.exp();
-		let OOZ=OOY* HBL;
+		let ONQ=ONP* HBL;
 		HBN=HBL;
-		KEL=OOZ;
+		KEL=ONQ;
 		}
 		HBM=HBN;
 		KEK=KEL;
@@ -15772,9 +15737,9 @@ impl Instance {
 		if HBO{
 		let HBP=(HBM- (A* HBA))- HAE;
 		let HBQ=HBD* HBP;
-		let OQB=L3([(OOV* HBP),0.0,0.0])+ (((KEK- (OOU* A))- L3([KEE,0.0,0.0]))* HBD);
+		let OOS=L3([(ONM* HBP),0.0,0.0])+ (((KEK- (ONL* A))- L3([KEE,0.0,0.0]))* HBD);
 		HEZ=HBQ;
-		KEM=OQB;
+		KEM=OOS;
 		}else{
 		let HBR=(AEU* ((-GZN)- 600f64))+ GZX;
 		let HBS=HBR> LD;
@@ -15782,9 +15747,9 @@ impl Instance {
 		let KEN;
 		if HBS{
 		let HBU=HBT* (F+ (HBR- LD));
-		let OPC=OOI* HBT;
+		let ONT=OMZ* HBT;
 		HBY=HBU;
-		KEN=OPC;
+		KEN=ONT;
 		}else{
 		let HBV=HBR< -50f64;
 		let HBZ;
@@ -15794,25 +15759,25 @@ impl Instance {
 		KEO=KJQ;
 		}else{
 		let HBX=HBR.exp();
-		let OPB=OOI* HBX;
+		let ONS=OMZ* HBX;
 		HBZ=HBX;
-		KEO=OPB;
+		KEO=ONS;
 		}
 		HBY=HBZ;
 		KEN=KEO;
 		}
 		let HCA=HBY- HAY;
-		let OPD=KEN- KEI;
+		let ONU=KEN- KEI;
 		let HCB=(HBE* GZN)+ GZX;
-		let OPE=(OOW* GZN)+ OOI;
+		let ONV=(ONN* GZN)+ OMZ;
 		let HCC=HCB> LD;
 		let HCI;
 		let KEP;
 		if HCC{
 		let HCE=HCD* (F+ (HCB- LD));
-		let OPG=OPE* HCD;
+		let ONX=ONV* HCD;
 		HCI=HCE;
-		KEP=OPG;
+		KEP=ONX;
 		}else{
 		let HCF=HCB< -50f64;
 		let HCJ;
@@ -15822,39 +15787,39 @@ impl Instance {
 		KEQ=KJQ;
 		}else{
 		let HCH=HCB.exp();
-		let OPF=OPE* HCH;
+		let ONW=ONV* HCH;
 		HCJ=HCH;
-		KEQ=OPF;
+		KEQ=ONW;
 		}
 		HCI=HCJ;
 		KEP=KEQ;
 		}
 		let HCK=A* HCA;
-		let OPH=OPD* A;
+		let ONY=ONU* A;
 		let HCL=(HCI- HCK)- HAE;
-		let OPI=(KEP- OPH)- KEE;
+		let ONZ=(KEP- ONY)- KEE;
 		let HCM=A* HBA;
-		let OPJ=OOU* A;
+		let OOA=ONL* A;
 		let HCN=(HBM- HCM)- HAE;
-		let OPK=L3([KEE,0.0,0.0]);
+		let OOB=L3([KEE,0.0,0.0]);
 		let HCO=HBD* HCN;
-		let OPL=L3([(OOV* HCN),0.0,0.0])+ (((KEK- OPJ)- OPK)* HBD);
+		let OOC=L3([(ONM* HCN),0.0,0.0])+ (((KEK- OOA)- OOB)* HBD);
 		let HCP=GZP> A;
 		let HDZ;
 		let KER;
 		if HCP{
 		let HCQ=(GZP* GZQ)/ AZ;
-		let OPN=((KJT* HCQ)* KNJ)/ AZ;
+		let OOE=product_div(KJT,(-HCQ),AZ);
 		let HCR=(HCQ* GZN)+ GZX;
-		let OPO=(OPN* GZN)+ OOI;
+		let OOF=(OOE* GZN)+ OMZ;
 		let HCS=HCR> LD;
 		let HCY;
 		let KES;
 		if HCS{
 		let HCU=HCT* (F+ (HCR- LD));
-		let OPQ=OPO* HCT;
+		let OOH=OOF* HCT;
 		HCY=HCU;
-		KES=OPQ;
+		KES=OOH;
 		}else{
 		let HCV=HCR< -50f64;
 		let HCZ;
@@ -15864,38 +15829,38 @@ impl Instance {
 		KET=KJQ;
 		}else{
 		let HCX=HCR.exp();
-		let OPP=OPO* HCX;
+		let OOG=OOF* HCX;
 		HCZ=HCX;
-		KET=OPP;
+		KET=OOG;
 		}
 		HCY=HCZ;
 		KES=KET;
 		}
 		let HDA=(HCY- HCK)- HAE;
-		let OPR=(KES- OPH)- KEE;
-		let OPS=OOG* HCQ;
+		let OOI=(KES- ONY)- KEE;
+		let OOJ=OMX* HCQ;
 		let HDB=(HCQ* GZM)+ GZX;
-		let OPT=(L3([(OPN* GZM),0.0,0.0])+ L3([0.0,OPS[0],OPS[1]]))+ OOO;
+		let OOK=(L3([(OOE* GZM),0.0,0.0])+ L3([0.0,OOJ[0],OOJ[1]]))+ ONF;
 		let HDC=HDB> LD;
 		let HDI;
 		let KEU;
 		if HDC{
 		let HDE=HDD* (F+ (HDB- LD));
-		let OPV=OPT* HDD;
+		let OOM=OOK* HDD;
 		HDI=HDE;
-		KEU=OPV;
+		KEU=OOM;
 		}else{
 		let HDF=HDB< -50f64;
 		let HDJ;
 		let KEV;
 		if HDF{
 		HDJ=HDG;
-		KEV=OOD;
+		KEV=OMU;
 		}else{
 		let HDH=HDB.exp();
-		let OPU=OPT* HDH;
+		let OOL=OOK* HDH;
 		HDJ=HDH;
-		KEV=OPU;
+		KEV=OOL;
 		}
 		HDI=HDJ;
 		KEU=KEV;
@@ -15903,125 +15868,125 @@ impl Instance {
 		let HDK=(HBD* HCL)/ HDA;
 		let HDL=(HDI- HCM)- HAE;
 		let HDM=HDK* HDL;
-		let OPW=L3([(((((OOV* HCL)+ (OPI* HBD))- (OPR* HDK))/ HDA)* HDL),0.0,0.0])+ (((KEU- OPJ)- OPK)* HDK);
+		let OON=L3([((product_sum_div(((ONM* HCL)+ (ONZ* HBD)),IUF,OOI,(-HDK),HDA))* HDL),0.0,0.0])+ (((KEU- OOA)- OOB)* HDK);
 		HDZ=HDM;
-		KER=OPW;
+		KER=OON;
 		}else{
 		let HDN=HBD* HCL;
-		let OPM=L3([((OOV* HCL)+ (OPI* HBD)),0.0,0.0]);
+		let OOD=L3([((ONM* HCL)+ (ONZ* HBD)),0.0,0.0]);
 		HDZ=HDN;
-		KER=OPM;
+		KER=OOD;
 		}
 		let HDO=GZO* GZO;
 		let HDP=HDO* AZ;
-		let OPX=KJT* HDO;
+		let OOO=KJT* HDO;
 		let HDQ=(GZM- (GZN- (HDP/ MC)))/ HDP;
-		let OPY=((L3([0.0,OOG[0],OOG[1]])- L3([((OPX/ MC)* KNJ),0.0,0.0]))- L3([(OPX* HDQ),0.0,0.0]))/ HDP;
+		let OOP=((L3([0.0,OMX[0],OMX[1]])- L3([((OOO/ MC)* KNJ),0.0,0.0]))).product_sum_div(IUF,L3([OOO,0.0,0.0]),(-HDQ),HDP);
 		let HDR=HDQ> LD;
 		let HDW;
 		let KEW;
 		if HDR{
 		HDW=A;
-		KEW=OOD;
+		KEW=OMU;
 		}else{
 		let HDS=HDQ< -50f64;
 		let HDX;
 		let KEX;
 		if HDS{
 		HDX=F;
-		KEX=OOD;
+		KEX=OMU;
 		}else{
 		let HDT=HDQ.exp();
 		let HDU=F+ HDT;
 		let HDV=F/ HDU;
-		let OPZ=(((OPY* HDT)* HDV)* KNJ)/ HDU;
+		let OOQ=((OOP* HDT)).product_div((-HDV),HDU);
 		HDX=HDV;
-		KEX=OPZ;
+		KEX=OOQ;
 		}
 		HDW=HDX;
 		KEW=KEX;
 		}
 		let HDY=F- HDW;
 		let HEA=(HDW* HCO)+ (HDY* HDZ);
-		let OQA=((KEW* HCO)+ (OPL* HDW))+ (((KEW* KNJ)* HDZ)+ (KER* HDY));
+		let OOR=((KEW* HCO)+ (OOC* HDW))+ (((KEW* KNJ)* HDZ)+ (KER* HDY));
 		HEZ=HEA;
-		KEM=OQA;
+		KEM=OOR;
 		}
 		let HEB=GZM/ GZU;
-		let OQC=OOG/ GZU;
+		let OOT=OMX/ GZU;
 		let HEG;
 		let KEY;
 		if JM{
-		let OQE=OQC* HEB;
+		let OOV=OOT* HEB;
 		let HEC=((HEB* HEB)+ JV).sqrt();
-		let OQF=(OQE+ OQE)* (IUF/ (KNB* HEC));
+		let OOW=(OOV+ OOV)* (IUF/ (KNB* HEC));
 		HEG=HEC;
-		KEY=OQF;
+		KEY=OOW;
 		}else{
 		let HED=KB/ JV;
 		let HEE=(HED* HEB).tanh();
 		let HEF=HEB* HEE;
-		let OQD=(OQC* HEE)+ (((OQC* HED)* (IUF- (HEE* HEE)))* HEB);
+		let OOU=(OOT* HEE)+ (((OOT* HED)* (IUF- (HEE* HEE)))* HEB);
 		HEG=HEF;
-		KEY=OQD;
+		KEY=OOU;
 		}
 		let HEH=F+ (HEG.powf(GZV));
 		let HEI=F/ GZV;
 		let HEJ=HEH.powf(HEI);
 		let HEK=HAG/ HEJ;
-		let OQG=OOL- (((KEY* (GZV* ((HEG+ (((HEG== KOL) as u8 as f64)* KUP)).powf((GZV- IUF)))))* (HEI* ((HEH+ (((HEH== KOL) as u8 as f64)* KUP)).powf((HEI- IUF)))))* HEK);
+		let OOX=(ONC).product_sum_div(IUF,((KEY* (GZV* ((HEG+ (((HEG== KOL) as u8 as f64)* KUP)).powf((GZV- IUF)))))* (HEI* ((HEH+ (((HEH== KOL) as u8 as f64)* KUP)).powf((HEI- IUF))))),(-HEK),HEJ);
 		let HEL=((-JE)* GZT)* P;
 		let HEM=HEL* parameters[298];
 		let HEN=HEM* BG;
-		let OQH=KJX* HEM;
+		let OOY=KJX* HEM;
 		let HEO=parameters[297]/ AZ;
 		let HEP=HEO* HEK;
-		let OQI=(OQG/ HEJ)* HEO;
-		let OQJ=L3([((((KJT* HEO)* KNJ)/ AZ)* HEK),0.0,0.0])+ L3([0.0,OQI[0],OQI[1]]);
+		let OOZ=OOX* HEO;
+		let OPA=L3([((product_div(KJT,(-HEO),AZ))* HEK),0.0,0.0])+ L3([0.0,OOZ[0],OOZ[1]]);
 		let HEQ=HEP> LD;
 		let HEW;
 		let KEZ;
 		if HEQ{
 		let HES=HER* (F+ (HEP- LD));
-		let OQL=OQJ* HER;
+		let OPC=OPA* HER;
 		HEW=HES;
-		KEZ=OQL;
+		KEZ=OPC;
 		}else{
 		let HET=HEP< -50f64;
 		let HEX;
 		let KFA;
 		if HET{
 		HEX=HEU;
-		KFA=OOD;
+		KFA=OMU;
 		}else{
 		let HEV=HEP.exp();
-		let OQK=OQJ* HEV;
+		let OPB=OPA* HEV;
 		HEX=HEV;
-		KFA=OQK;
+		KFA=OPB;
 		}
 		HEW=HEX;
 		KEZ=KFA;
 		}
 		let HEY=HEW- F;
 		let HFA=D* GZL;
-		let OQM=OOF* D;
-		let OQN=L3([0.0,OQM[0],OQM[1]]);
-		let OQO=(KEM+ (L3([(OQH* HEY),0.0,0.0])+ (KEZ* HEN)))+ OQN;
+		let OPD=OMW* D;
+		let OPE=L3([0.0,OPD[0],OPD[1]]);
+		let OPF=(KEM+ (L3([(OOY* HEY),0.0,0.0])+ (KEZ* HEN)))+ OPE;
 		let HFB=A+ ((HEZ+ (HEN* HEY))+ HFA);
 		let HFC=parameters[301]== F;
 		let ILB;
 		let KFB;
 		if HFC{
 		let HFF=GZW* -0f64;
-		let OQP=OOH* -0f64;
+		let OPG=OMY* -0f64;
 		let HFG=HFF> LD;
 		let HFM;
 		let KFC;
 		if HFG{
 		let HFI=HFH* (F+ (HFF- LD));
-		let OQR=OQP* HFH;
+		let OPI=OPG* HFH;
 		HFM=HFI;
-		KFC=OQR;
+		KFC=OPI;
 		}else{
 		let HFJ=HFF< -50f64;
 		let HFN;
@@ -16031,37 +15996,37 @@ impl Instance {
 		KFD=KJQ;
 		}else{
 		let HFL=HFF.exp();
-		let OQQ=OQP* HFL;
+		let OPH=OPG* HFL;
 		HFN=HFL;
-		KFD=OQQ;
+		KFD=OPH;
 		}
 		HFM=HFN;
 		KFC=KFD;
 		}
 		let HFO=HAH+ HFF;
-		let OQS=L3([OQP,0.0,0.0]);
-		let OQT=OON+ OQS;
+		let OPJ=L3([OPG,0.0,0.0]);
+		let OPK=ONE+ OPJ;
 		let HFP=-2400f64+ HFF;
 		let HFQ=HFO> LD;
 		let HFW;
 		let KFE;
 		if HFQ{
 		let HFS=HFR* (F+ (HFO- LD));
-		let OQV=OQT* HFR;
+		let OPM=OPK* HFR;
 		HFW=HFS;
-		KFE=OQV;
+		KFE=OPM;
 		}else{
 		let HFT=HFO< -50f64;
 		let HFX;
 		let KFF;
 		if HFT{
 		HFX=HFU;
-		KFF=OOD;
+		KFF=OMU;
 		}else{
 		let HFV=HFO.exp();
-		let OQU=OQT* HFV;
+		let OPL=OPK* HFV;
 		HFX=HFV;
-		KFF=OQU;
+		KFF=OPL;
 		}
 		HFW=HFX;
 		KFE=KFF;
@@ -16071,9 +16036,9 @@ impl Instance {
 		let KFG;
 		if HFY{
 		let HGA=HFZ* (F+ (HFP- LD));
-		let OQX=OQP* HFZ;
+		let OPO=OPG* HFZ;
 		HGE=HGA;
-		KFG=OQX;
+		KFG=OPO;
 		}else{
 		let HGB=HFP< -50f64;
 		let HGF;
@@ -16083,41 +16048,41 @@ impl Instance {
 		KFH=KJQ;
 		}else{
 		let HGD=HFP.exp();
-		let OQW=OQP* HGD;
+		let OPN=OPG* HGD;
 		HGF=HGD;
-		KFH=OQW;
+		KFH=OPN;
 		}
 		HGE=HGF;
 		KFG=KFH;
 		}
 		let HGG=HFW- HGE;
-		let OQY=KFE- L3([KFG,0.0,0.0]);
+		let OPP=KFE- L3([KFG,0.0,0.0]);
 		let HGH=HBB* A;
 		let HGI=HGH* BG;
-		let OQZ=KJX* HGH;
-		let ORA=OOG* GZW;
+		let OPQ=KJX* HGH;
+		let OPR=OMX* GZW;
 		let HGJ=(GZW* GZM)+ HFF;
-		let ORB=(L3([(OOH* GZM),0.0,0.0])+ L3([0.0,ORA[0],ORA[1]]))+ OQS;
+		let OPS=(L3([(OMY* GZM),0.0,0.0])+ L3([0.0,OPR[0],OPR[1]]))+ OPJ;
 		let HGK=HGJ> LD;
 		let HGQ;
 		let KFI;
 		if HGK{
 		let HGM=HGL* (F+ (HGJ- LD));
-		let ORD=ORB* HGL;
+		let OPU=OPS* HGL;
 		HGQ=HGM;
-		KFI=ORD;
+		KFI=OPU;
 		}else{
 		let HGN=HGJ< -50f64;
 		let HGR;
 		let KFJ;
 		if HGN{
 		HGR=HGO;
-		KFJ=OOD;
+		KFJ=OMU;
 		}else{
 		let HGP=HGJ.exp();
-		let ORC=ORB* HGP;
+		let OPT=OPS* HGP;
 		HGR=HGP;
-		KFJ=ORC;
+		KFJ=OPT;
 		}
 		HGQ=HGR;
 		KFI=KFJ;
@@ -16127,9 +16092,9 @@ impl Instance {
 		if HGS{
 		let HGT=(HGQ- (A* HGG))- HFM;
 		let HGU=HGI* HGT;
-		let OSE=L3([(OQZ* HGT),0.0,0.0])+ (((KFI- (OQY* A))- L3([KFC,0.0,0.0]))* HGI);
+		let OQV=L3([(OPQ* HGT),0.0,0.0])+ (((KFI- (OPP* A))- L3([KFC,0.0,0.0]))* HGI);
 		HKB=HGU;
-		KFK=OSE;
+		KFK=OQV;
 		}else{
 		let HGV=-2404f64+ HFF;
 		let HGW=HGV> LD;
@@ -16137,9 +16102,9 @@ impl Instance {
 		let KFL;
 		if HGW{
 		let HGY=HGX* (F+ (HGV- LD));
-		let ORF=OQP* HGX;
+		let OPW=OPG* HGX;
 		HHC=HGY;
-		KFL=ORF;
+		KFL=OPW;
 		}else{
 		let HGZ=HGV< -50f64;
 		let HHD;
@@ -16149,25 +16114,25 @@ impl Instance {
 		KFM=KJQ;
 		}else{
 		let HHB=HGV.exp();
-		let ORE=OQP* HHB;
+		let OPV=OPG* HHB;
 		HHD=HHB;
-		KFM=ORE;
+		KFM=OPV;
 		}
 		HHC=HHD;
 		KFL=KFM;
 		}
 		let HHE=HHC- HGE;
-		let ORG=KFL- KFG;
+		let OPX=KFL- KFG;
 		let HHF=GZW+ HFF;
-		let ORH=OOH+ OQP;
+		let OPY=OMY+ OPG;
 		let HHG=HHF> LD;
 		let HHM;
 		let KFN;
 		if HHG{
 		let HHI=HHH* (F+ (HHF- LD));
-		let ORJ=ORH* HHH;
+		let OQA=OPY* HHH;
 		HHM=HHI;
-		KFN=ORJ;
+		KFN=OQA;
 		}else{
 		let HHJ=HHF< -50f64;
 		let HHN;
@@ -16177,38 +16142,38 @@ impl Instance {
 		KFO=KJQ;
 		}else{
 		let HHL=HHF.exp();
-		let ORI=ORH* HHL;
+		let OPZ=OPY* HHL;
 		HHN=HHL;
-		KFO=ORI;
+		KFO=OPZ;
 		}
 		HHM=HHN;
 		KFN=KFO;
 		}
 		let HHO=A* HHE;
-		let ORK=ORG* A;
+		let OQB=OPX* A;
 		let HHP=(HHM- HHO)- HFM;
-		let ORL=(KFN- ORK)- KFC;
+		let OQC=(KFN- OQB)- KFC;
 		let HHQ=A* HGG;
-		let ORM=OQY* A;
+		let OQD=OPP* A;
 		let HHR=(HGQ- HHQ)- HFM;
-		let ORN=L3([KFC,0.0,0.0]);
+		let OQE=L3([KFC,0.0,0.0]);
 		let HHS=HGI* HHR;
-		let ORO=L3([(OQZ* HHR),0.0,0.0])+ (((KFI- ORM)- ORN)* HGI);
+		let OQF=L3([(OPQ* HHR),0.0,0.0])+ (((KFI- OQD)- OQE)* HGI);
 		let HJC;
 		let KFP;
 		if HHT{
 		let HHU=0f64/ AZ;
-		let ORQ=((KJT* HHU)* KNJ)/ AZ;
+		let OQH=product_div(KJT,(-HHU),AZ);
 		let HHV=HHU+ HFF;
-		let ORR=ORQ+ OQP;
+		let OQI=OQH+ OPG;
 		let HHW=HHV> LD;
 		let HIC;
 		let KFQ;
 		if HHW{
 		let HHY=HHX* (F+ (HHV- LD));
-		let ORT=ORR* HHX;
+		let OQK=OQI* HHX;
 		HIC=HHY;
-		KFQ=ORT;
+		KFQ=OQK;
 		}else{
 		let HHZ=HHV< -50f64;
 		let HID;
@@ -16218,38 +16183,38 @@ impl Instance {
 		KFR=KJQ;
 		}else{
 		let HIB=HHV.exp();
-		let ORS=ORR* HIB;
+		let OQJ=OQI* HIB;
 		HID=HIB;
-		KFR=ORS;
+		KFR=OQJ;
 		}
 		HIC=HID;
 		KFQ=KFR;
 		}
 		let HIE=(HIC- HHO)- HFM;
-		let ORU=(KFQ- ORK)- KFC;
-		let ORV=OOG* HHU;
+		let OQL=(KFQ- OQB)- KFC;
+		let OQM=OMX* HHU;
 		let HIF=(HHU* GZM)+ HFF;
-		let ORW=(L3([(ORQ* GZM),0.0,0.0])+ L3([0.0,ORV[0],ORV[1]]))+ OQS;
+		let OQN=(L3([(OQH* GZM),0.0,0.0])+ L3([0.0,OQM[0],OQM[1]]))+ OPJ;
 		let HIG=HIF> LD;
 		let HIM;
 		let KFS;
 		if HIG{
 		let HII=HIH* (F+ (HIF- LD));
-		let ORY=ORW* HIH;
+		let OQP=OQN* HIH;
 		HIM=HII;
-		KFS=ORY;
+		KFS=OQP;
 		}else{
 		let HIJ=HIF< -50f64;
 		let HIN;
 		let KFT;
 		if HIJ{
 		HIN=HIK;
-		KFT=OOD;
+		KFT=OMU;
 		}else{
 		let HIL=HIF.exp();
-		let ORX=ORW* HIL;
+		let OQO=OQN* HIL;
 		HIN=HIL;
-		KFT=ORX;
+		KFT=OQO;
 		}
 		HIM=HIN;
 		KFS=KFT;
@@ -16257,111 +16222,111 @@ impl Instance {
 		let HIO=(HGI* HHP)/ HIE;
 		let HIP=(HIM- HHQ)- HFM;
 		let HIQ=HIO* HIP;
-		let ORZ=L3([(((((OQZ* HHP)+ (ORL* HGI))- (ORU* HIO))/ HIE)* HIP),0.0,0.0])+ (((KFS- ORM)- ORN)* HIO);
+		let OQQ=L3([((product_sum_div(((OPQ* HHP)+ (OQC* HGI)),IUF,OQL,(-HIO),HIE))* HIP),0.0,0.0])+ (((KFS- OQD)- OQE)* HIO);
 		HJC=HIQ;
-		KFP=ORZ;
+		KFP=OQQ;
 		}else{
 		let HIR=HGI* HHP;
-		let ORP=L3([((OQZ* HHP)+ (ORL* HGI)),0.0,0.0]);
+		let OQG=L3([((OPQ* HHP)+ (OQC* HGI)),0.0,0.0]);
 		HJC=HIR;
-		KFP=ORP;
+		KFP=OQG;
 		}
 		let HIS=100f64* AZ;
-		let OSA=KJT* 100f64;
+		let OQR=KJT* 100f64;
 		let HIT=(GZM- (F- (HIS/ MC)))/ HIS;
-		let OSB=((L3([0.0,OOG[0],OOG[1]])- L3([((OSA/ MC)* KNJ),0.0,0.0]))- L3([(OSA* HIT),0.0,0.0]))/ HIS;
+		let OQS=((L3([0.0,OMX[0],OMX[1]])- L3([((OQR/ MC)* KNJ),0.0,0.0]))).product_sum_div(IUF,L3([OQR,0.0,0.0]),(-HIT),HIS);
 		let HIU=HIT> LD;
 		let HIZ;
 		let KFU;
 		if HIU{
 		HIZ=A;
-		KFU=OOD;
+		KFU=OMU;
 		}else{
 		let HIV=HIT< -50f64;
 		let HJA;
 		let KFV;
 		if HIV{
 		HJA=F;
-		KFV=OOD;
+		KFV=OMU;
 		}else{
 		let HIW=HIT.exp();
 		let HIX=F+ HIW;
 		let HIY=F/ HIX;
-		let OSC=(((OSB* HIW)* HIY)* KNJ)/ HIX;
+		let OQT=((OQS* HIW)).product_div((-HIY),HIX);
 		HJA=HIY;
-		KFV=OSC;
+		KFV=OQT;
 		}
 		HIZ=HJA;
 		KFU=KFV;
 		}
 		let HJB=F- HIZ;
 		let HJD=(HIZ* HHS)+ (HJB* HJC);
-		let OSD=((KFU* HHS)+ (ORO* HIZ))+ (((KFU* KNJ)* HJC)+ (KFP* HJB));
+		let OQU=((KFU* HHS)+ (OQF* HIZ))+ (((KFU* KNJ)* HJC)+ (KFP* HJB));
 		HKB=HJD;
-		KFK=OSD;
+		KFK=OQU;
 		}
 		let HJE=GZM/ HFD;
-		let OSF=OOG/ HFD;
+		let OQW=OMX/ HFD;
 		let HJJ;
 		let KFW;
 		if JM{
-		let OSH=OSF* HJE;
+		let OQY=OQW* HJE;
 		let HJF=((HJE* HJE)+ JV).sqrt();
-		let OSI=(OSH+ OSH)* (IUF/ (KNB* HJF));
+		let OQZ=(OQY+ OQY)* (IUF/ (KNB* HJF));
 		HJJ=HJF;
-		KFW=OSI;
+		KFW=OQZ;
 		}else{
 		let HJG=KB/ JV;
 		let HJH=(HJG* HJE).tanh();
 		let HJI=HJE* HJH;
-		let OSG=(OSF* HJH)+ (((OSF* HJG)* (IUF- (HJH* HJH)))* HJE);
+		let OQX=(OQW* HJH)+ (((OQW* HJG)* (IUF- (HJH* HJH)))* HJE);
 		HJJ=HJI;
-		KFW=OSG;
+		KFW=OQX;
 		}
 		let HJK=F+ (HJJ.powf(HFE));
 		let HJL=F/ HFE;
 		let HJM=HJK.powf(HJL);
 		let HJN=HAG/ HJM;
-		let OSJ=OOL- (((KFW* (HFE* ((HJJ+ (((HJJ== KOL) as u8 as f64)* KUP)).powf((HFE- IUF)))))* (HJL* ((HJK+ (((HJK== KOL) as u8 as f64)* KUP)).powf((HJL- IUF)))))* HJN);
+		let ORA=(ONC).product_sum_div(IUF,((KFW* (HFE* ((HJJ+ (((HJJ== KOL) as u8 as f64)* KUP)).powf((HFE- IUF)))))* (HJL* ((HJK+ (((HJK== KOL) as u8 as f64)* KUP)).powf((HJL- IUF))))),(-HJN),HJM);
 		let HJO=HEL* parameters[303];
 		let HJP=HJO* BG;
-		let OSK=KJX* HJO;
+		let ORB=KJX* HJO;
 		let HJQ=parameters[302]/ AZ;
 		let HJR=HJQ* HJN;
-		let OSL=(OSJ/ HJM)* HJQ;
-		let OSM=L3([((((KJT* HJQ)* KNJ)/ AZ)* HJN),0.0,0.0])+ L3([0.0,OSL[0],OSL[1]]);
+		let ORC=ORA* HJQ;
+		let ORD=L3([((product_div(KJT,(-HJQ),AZ))* HJN),0.0,0.0])+ L3([0.0,ORC[0],ORC[1]]);
 		let HJS=HJR> LD;
 		let HJY;
 		let KFX;
 		if HJS{
 		let HJU=HJT* (F+ (HJR- LD));
-		let OSO=OSM* HJT;
+		let ORF=ORD* HJT;
 		HJY=HJU;
-		KFX=OSO;
+		KFX=ORF;
 		}else{
 		let HJV=HJR< -50f64;
 		let HJZ;
 		let KFY;
 		if HJV{
 		HJZ=HJW;
-		KFY=OOD;
+		KFY=OMU;
 		}else{
 		let HJX=HJR.exp();
-		let OSN=OSM* HJX;
+		let ORE=ORD* HJX;
 		HJZ=HJX;
-		KFY=OSN;
+		KFY=ORE;
 		}
 		HJY=HJZ;
 		KFX=KFY;
 		}
 		let HKA=HJY- F;
-		let OSP=(KFK+ (L3([(OSK* HKA),0.0,0.0])+ (KFX* HJP)))+ OQN;
+		let ORG=(KFK+ (L3([(ORB* HKA),0.0,0.0])+ (KFX* HJP)))+ OPE;
 		let HKC=A+ ((HKB+ (HJP* HKA))+ HFA);
 		ILB=HKC;
-		KFB=OSP;
+		KFB=ORG;
 		}else{
 		ILB=A;
-		KFB=OOD;
+		KFB=OMU;
 		}
 		let HKF=HKD* HKE;
 		let HKG=GZM<= HKF;
@@ -16371,9 +16336,9 @@ impl Instance {
 		let HKI=(((((JE* MC)* HKH)* O)* GZS)* P)* HKE;
 		let HKJ=(F- (GZM/ HKE)).sqrt();
 		let HKK=HKI* (F- HKJ);
-		let OTA=((((OOG/ HKE)* KNJ)* (IUF/ (KNB* HKJ)))* KNJ)* HKI;
+		let ORR=((((OMX/ HKE)* KNJ)* (IUF/ (KNB* HKJ)))* KNJ)* HKI;
 		HMA=HKK;
-		KFZ=OTA;
+		KFZ=ORR;
 		}else{
 		let HKL=F- HKD;
 		let HKM=HKL.sqrt();
@@ -16394,7 +16359,7 @@ impl Instance {
 		let HKR=F/ (HKQ* HKM);
 		let HKS=GZM- HKF;
 		let HKT=HKR* HKS;
-		let OSQ=OOG* HKR;
+		let ORH=OMX* HKR;
 		let HKU=HKO>= MC;
 		let HLM;
 		let HLO;
@@ -16407,10 +16372,10 @@ impl Instance {
 		if HKU{
 		let HKV=HKR/ ((AEU* HKE)* HKL);
 		let HKW=HKS* HKS;
-		let OSR=OOG* HKS;
-		let OSS=OSR+ OSR;
+		let ORI=OMX* HKS;
+		let ORJ=ORI+ ORI;
 		let HKX=HKV* HKW;
-		let OST=OSS* HKV;
+		let ORK=ORJ* HKV;
 		let HKY=HKO>= BF;
 		let HLP;
 		let HLS;
@@ -16421,9 +16386,9 @@ impl Instance {
 		if HKY{
 		let HKZ=HKV/ (HKQ* HKL);
 		let HLA=HKW* HKS;
-		let OSU=(OSS* HKS)+ (OOG* HKW);
+		let ORL=(ORJ* HKS)+ (OMX* HKW);
 		let HLB=HKZ* HLA;
-		let OSV=OSU* HKZ;
+		let ORM=ORL* HKZ;
 		let HLC=HKO>= AEU;
 		let HLT;
 		let HLX;
@@ -16432,51 +16397,51 @@ impl Instance {
 		if HLC{
 		let HLD=(5f64* HKZ)/ ((8f64* HKE)* HKL);
 		let HLE=HLA* HKS;
-		let OSW=(OSU* HKS)+ (OOG* HLA);
+		let ORN=(ORL* HKS)+ (OMX* HLA);
 		let HLF=HLD* HLE;
-		let OSX=OSW* HLD;
+		let ORO=ORN* HLD;
 		let HLG=HKO>= 5f64;
 		let HLY;
 		let KGO;
 		if HLG{
 		let HLH=(7f64* HLD)/ ((10f64* HKE)* HKL);
 		let HLI=HLH* (HLE* HKS);
-		let OSY=((OSW* HKS)+ (OOG* HLE))* HLH;
+		let ORP=((ORN* HKS)+ (OMX* HLE))* HLH;
 		HLY=HLI;
-		KGO=OSY;
+		KGO=ORP;
 		}else{
 		HLY=A;
-		KGO=OOE;
+		KGO=OMV;
 		}
 		HLT=HLF;
 		HLX=HLY;
-		KGM=OSX;
+		KGM=ORO;
 		KGN=KGO;
 		}else{
 		HLT=A;
 		HLX=A;
-		KGM=OOE;
-		KGN=OOE;
+		KGM=OMV;
+		KGN=OMV;
 		}
 		HLP=HLB;
 		HLS=HLT;
 		HLW=HLX;
-		KGJ=OSV;
+		KGJ=ORM;
 		KGK=KGM;
 		KGL=KGN;
 		}else{
 		HLP=A;
 		HLS=A;
 		HLW=A;
-		KGJ=OOE;
-		KGK=OOE;
-		KGL=OOE;
+		KGJ=OMV;
+		KGK=OMV;
+		KGL=OMV;
 		}
 		HLM=HKX;
 		HLO=HLP;
 		HLR=HLS;
 		HLV=HLW;
-		KGF=OST;
+		KGF=ORK;
 		KGG=KGJ;
 		KGH=KGK;
 		KGI=KGL;
@@ -16485,17 +16450,17 @@ impl Instance {
 		HLO=A;
 		HLR=A;
 		HLV=A;
-		KGF=OOE;
-		KGG=OOE;
-		KGH=OOE;
-		KGI=OOE;
+		KGF=OMV;
+		KGG=OMV;
+		KGH=OMV;
+		KGI=OMV;
 		}
 		HLK=HKT;
 		HLL=HLM;
 		HLN=HLO;
 		HLQ=HLR;
 		HLU=HLV;
-		KGA=OSQ;
+		KGA=ORH;
 		KGB=KGF;
 		KGC=KGG;
 		KGD=KGH;
@@ -16506,33 +16471,33 @@ impl Instance {
 		HLN=A;
 		HLQ=A;
 		HLU=A;
-		KGA=OOE;
-		KGB=OOE;
-		KGC=OOE;
-		KGD=OOE;
-		KGE=OOE;
+		KGA=OMV;
+		KGB=OMV;
+		KGC=OMV;
+		KGD=OMV;
+		KGE=OMV;
 		}
 		let HLJ=(((((JE* MC)* HKH)* O)* GZS)* P)* HKE;
 		let HLZ=HLJ* (((((HKN+ HLK)+ HLL)+ HLN)+ HLQ)+ HLU);
-		let OSZ=((((KGA+ KGB)+ KGC)+ KGD)+ KGE)* HLJ;
+		let ORQ=((((KGA+ KGB)+ KGC)+ KGD)+ KGE)* HLJ;
 		HMA=HLZ;
-		KFZ=OSZ;
+		KFZ=ORQ;
 		}
 		let HMB=ddt(138, HMA);
-		let OTB=KFZ* KOI;
+		let ORS=KFZ* KOI;
 		let HMC=A+ HMB;
 		let HME=(HMD!= A)&& (GZR!= A);
 		let ILE;
 		let KGP;
 		if HME{
 		let HMF=HMD/ ((O* GZR)* P);
-		let OTC=OOF/ HMF;
+		let ORT=OMW/ HMF;
 		let HMG=A+ (GZL/ HMF);
 		ILE=HMG;
-		KGP=OTC;
+		KGP=ORT;
 		}else{
 		ILE=A;
-		KGP=OOE;
+		KGP=OMV;
 		}
 		IKZ=HFB;
 		ILA=ILB;
@@ -16541,9 +16506,9 @@ impl Instance {
 		ILF=A;
 		IOQ=A;
 		IUD=HMA;
-		KDZ=OQO;
+		KDZ=OPF;
 		KEA=KFB;
-		KEB=OTB;
+		KEB=ORS;
 		KEC=KGP;
 		KED=KFZ;
 		}else{
@@ -16554,22 +16519,22 @@ impl Instance {
 		ILF=HMH;
 		IOQ=F;
 		IUD=A;
-		KDZ=OOD;
-		KEA=OOD;
-		KEB=OOE;
-		KEC=OOE;
-		KED=OOE;
+		KDZ=OMU;
+		KEA=OMU;
+		KEB=OMV;
+		KEC=OMV;
+		KED=OMV;
 		}
-		let OTD=L2([0.0,IUK]);
-		let OTE=L2([IUQ,0.0]);
-		let OTF=OTD- OTE;
-		let OTG=L2([0.0,IUK])- L2([IUJ,0.0]);
+		let ORU=L2([0.0,IUK]);
+		let ORV=L2([IUQ,0.0]);
+		let ORW=ORU- ORV;
+		let ORX=L2([0.0,IUK])- L2([IUJ,0.0]);
 		let HMI=JE* ((JN- PM)+ (JN- JJ));
-		let OTH=(L3([0.0,OTF[0],OTF[1]])+ L3([OTG[0],0.0,OTG[1]]))* JE;
-		let OTI=OTE- OTD;
-		let OTJ=L2([0.0,IUQ])- L2([IUJ,0.0]);
+		let ORY=(L3([0.0,ORW[0],ORW[1]])+ L3([ORX[0],0.0,ORX[1]]))* JE;
+		let ORZ=ORV- ORU;
+		let OSA=L2([0.0,IUQ])- L2([IUJ,0.0]);
 		let HMJ=JE* ((PM- JN)+ (PM- JJ));
-		let OTK=(L3([0.0,OTI[0],OTI[1]])+ L3([OTJ[0],OTJ[1],0.0]))* JE;
+		let OSB=(L3([0.0,ORZ[0],ORZ[1]])+ L3([OSA[0],OSA[1],0.0]))* JE;
 		let HMK=parameters[312]== F;
 		let ILG;
 		let ILI;
@@ -16586,43 +16551,43 @@ impl Instance {
 		let KGU;
 		let KGV;
 		if HML{
-		let OTO=L2([0.0,IUM]);
-		let OTP=L2([IUL,0.0]);
-		let OTQ=OTO- OTP;
-		let OTR=L2([IUM,0.0])- L2([0.0,IUJ]);
+		let OSF=L2([0.0,IUM]);
+		let OSG=L2([IUL,0.0]);
+		let OSH=OSF- OSG;
+		let OSI=L2([IUM,0.0])- L2([0.0,IUJ]);
 		let HMM=JE* ((JQ- JO)+ (JQ- JJ));
-		let OTS=(L3([OTQ[0],OTQ[1],0.0])+ L3([0.0,OTR[0],OTR[1]]))* JE;
-		let OTT=OTP- OTO;
-		let OTU=L2([IUL,0.0])- L2([0.0,IUJ]);
+		let OSJ=(L3([OSH[0],OSH[1],0.0])+ L3([0.0,OSI[0],OSI[1]]))* JE;
+		let OSK=OSG- OSF;
+		let OSL=L2([IUL,0.0])- L2([0.0,IUJ]);
 		let HMN=JE* ((JO- JQ)+ (JO- JJ));
-		let OTV=(L3([OTT[0],OTT[1],0.0])+ L3([OTU[0],0.0,OTU[1]]))* JE;
-		let OTW=L5([OTS[0],OTS[1],OTS[2],0.0,0.0]);
-		let OTX=L5([OTV[0],OTV[1],OTV[2],0.0,0.0]);
+		let OSM=(L3([OSK[0],OSK[1],0.0])+ L3([OSL[0],0.0,OSL[1]]))* JE;
+		let OSN=L5([OSJ[0],OSJ[1],OSJ[2],0.0,0.0]);
+		let OSO=L5([OSM[0],OSM[1],OSM[2],0.0,0.0]);
 		HMO=HMM;
 		HRR=HMN;
-		KGU=OTW;
-		KGV=OTX;
+		KGU=OSN;
+		KGV=OSO;
 		}else{
-		let OTM=L5([0.0,0.0,OTH[0],OTH[1],OTH[2]]);
-		let OTN=L5([0.0,0.0,OTK[0],OTK[1],OTK[2]]);
+		let OSD=L5([0.0,0.0,ORY[0],ORY[1],ORY[2]]);
+		let OSE=L5([0.0,0.0,OSB[0],OSB[1],OSB[2]]);
 		HMO=HMI;
 		HRR=HMJ;
-		KGU=OTM;
-		KGV=OTN;
+		KGU=OSD;
+		KGV=OSE;
 		}
 		let HMR=A/ AZ;
-		let OTY=((KJT* HMR)* KNJ)/ AZ;
+		let OSP=product_div(KJT,(-HMR),AZ);
 		let HMS=-FML;
 		let HMT=HMR* HMS;
-		let OTZ=OTY* HMS;
+		let OSQ=OSP* HMS;
 		let HMU=HMT> LD;
 		let HNA;
 		let KGW;
 		if HMU{
 		let HMW=HMV* (F+ (HMT- LD));
-		let OUB=OTZ* HMV;
+		let OSS=OSQ* HMV;
 		HNA=HMW;
-		KGW=OUB;
+		KGW=OSS;
 		}else{
 		let HMX=HMT< -50f64;
 		let HNB;
@@ -16632,40 +16597,40 @@ impl Instance {
 		KGX=KJQ;
 		}else{
 		let HMZ=HMT.exp();
-		let OUA=OTZ* HMZ;
+		let OSR=OSQ* HMZ;
 		HNB=HMZ;
-		KGX=OUA;
+		KGX=OSR;
 		}
 		HNA=HNB;
 		KGW=KGX;
 		}
 		let HNC=-HMO;
-		let OUC=KGU* KNJ;
-		let OUD=OUC* HMP;
+		let OST=KGU* KNJ;
+		let OSU=OST* HMP;
 		let HND=(HMP* (HNC- HMQ))+ HMT;
-		let OUE=L6([0.0,0.0,OTZ,0.0,0.0,0.0]);
-		let OUF=L6([OUD[0],OUD[1],0.0,OUD[2],OUD[3],OUD[4]])+ OUE;
+		let OSV=L6([0.0,0.0,OSQ,0.0,0.0,0.0]);
+		let OSW=L6([OSU[0],OSU[1],0.0,OSU[2],OSU[3],OSU[4]])+ OSV;
 		let HNE=((-HMP)* HMQ)+ HMT;
 		let HNF=HND> LD;
 		let HNL;
 		let KGY;
 		if HNF{
 		let HNH=HNG* (F+ (HND- LD));
-		let OUH=OUF* HNG;
+		let OSY=OSW* HNG;
 		HNL=HNH;
-		KGY=OUH;
+		KGY=OSY;
 		}else{
 		let HNI=HND< -50f64;
 		let HNM;
 		let KGZ;
 		if HNI{
 		HNM=HNJ;
-		KGZ=OTL;
+		KGZ=OSC;
 		}else{
 		let HNK=HND.exp();
-		let OUG=OUF* HNK;
+		let OSX=OSW* HNK;
 		HNM=HNK;
-		KGZ=OUG;
+		KGZ=OSX;
 		}
 		HNL=HNM;
 		KGY=KGZ;
@@ -16675,9 +16640,9 @@ impl Instance {
 		let KHA;
 		if HNN{
 		let HNP=HNO* (F+ (HNE- LD));
-		let OUJ=OTZ* HNO;
+		let OTA=OSQ* HNO;
 		HNT=HNP;
-		KHA=OUJ;
+		KHA=OTA;
 		}else{
 		let HNQ=HNE< -50f64;
 		let HNU;
@@ -16687,41 +16652,41 @@ impl Instance {
 		KHB=KJQ;
 		}else{
 		let HNS=HNE.exp();
-		let OUI=OTZ* HNS;
+		let OSZ=OSQ* HNS;
 		HNU=HNS;
-		KHB=OUI;
+		KHB=OSZ;
 		}
 		HNT=HNU;
 		KHA=KHB;
 		}
 		let HNV=HNL- HNT;
-		let OUK=KGY- L6([0.0,0.0,KHA,0.0,0.0,0.0]);
+		let OTB=KGY- L6([0.0,0.0,KHA,0.0,0.0,0.0]);
 		let HNW=FFO* parameters[314];
 		let HNX=HNW* BG;
-		let OUL=KJX* HNW;
-		let OUM=KGU* HMR;
+		let OTC=KJX* HNW;
+		let OTD=KGU* HMR;
 		let HNY=(HMR* HMO)+ HMT;
-		let OUN=(L6([0.0,0.0,(OTY* HMO),0.0,0.0,0.0])+ L6([OUM[0],OUM[1],0.0,OUM[2],OUM[3],OUM[4]]))+ OUE;
+		let OTE=(L6([0.0,0.0,(OSP* HMO),0.0,0.0,0.0])+ L6([OTD[0],OTD[1],0.0,OTD[2],OTD[3],OTD[4]]))+ OSV;
 		let HNZ=HNY> LD;
 		let HOF;
 		let KHC;
 		if HNZ{
 		let HOB=HOA* (F+ (HNY- LD));
-		let OUP=OUN* HOA;
+		let OTG=OTE* HOA;
 		HOF=HOB;
-		KHC=OUP;
+		KHC=OTG;
 		}else{
 		let HOC=HNY< -50f64;
 		let HOG;
 		let KHD;
 		if HOC{
 		HOG=HOD;
-		KHD=OTL;
+		KHD=OSC;
 		}else{
 		let HOE=HNY.exp();
-		let OUO=OUN* HOE;
+		let OTF=OTE* HOE;
 		HOG=HOE;
-		KHD=OUO;
+		KHD=OTF;
 		}
 		HOF=HOG;
 		KHC=KHD;
@@ -16732,9 +16697,9 @@ impl Instance {
 		if HOH{
 		let HOI=(HOF- HNV)- HNA;
 		let HOJ=HNX* HOI;
-		let OVO=L6([0.0,0.0,(OUL* HOI),0.0,0.0,0.0])+ (((KHC- OUK)- L6([0.0,0.0,KGW,0.0,0.0,0.0]))* HNX);
+		let OUF=L6([0.0,0.0,(OTC* HOI),0.0,0.0,0.0])+ (((KHC- OTB)- L6([0.0,0.0,KGW,0.0,0.0,0.0]))* HNX);
 		HRP=HOJ;
-		KHE=OVO;
+		KHE=OUF;
 		}else{
 		let HOK=(HMP* ((-FLV)- HMQ))+ HMT;
 		let HOL=HOK> LD;
@@ -16742,9 +16707,9 @@ impl Instance {
 		let KHF;
 		if HOL{
 		let HON=HOM* (F+ (HOK- LD));
-		let OUR=OTZ* HOM;
+		let OTI=OSQ* HOM;
 		HOR=HON;
-		KHF=OUR;
+		KHF=OTI;
 		}else{
 		let HOO=HOK< -50f64;
 		let HOS;
@@ -16754,25 +16719,25 @@ impl Instance {
 		KHG=KJQ;
 		}else{
 		let HOQ=HOK.exp();
-		let OUQ=OTZ* HOQ;
+		let OTH=OSQ* HOQ;
 		HOS=HOQ;
-		KHG=OUQ;
+		KHG=OTH;
 		}
 		HOR=HOS;
 		KHF=KHG;
 		}
 		let HOT=HOR- HNT;
-		let OUS=KHF- KHA;
+		let OTJ=KHF- KHA;
 		let HOU=(HMR* FLV)+ HMT;
-		let OUT=(OTY* FLV)+ OTZ;
+		let OTK=(OSP* FLV)+ OSQ;
 		let HOV=HOU> LD;
 		let HPB;
 		let KHH;
 		if HOV{
 		let HOX=HOW* (F+ (HOU- LD));
-		let OUV=OUT* HOW;
+		let OTM=OTK* HOW;
 		HPB=HOX;
-		KHH=OUV;
+		KHH=OTM;
 		}else{
 		let HOY=HOU< -50f64;
 		let HPC;
@@ -16782,35 +16747,35 @@ impl Instance {
 		KHI=KJQ;
 		}else{
 		let HPA=HOU.exp();
-		let OUU=OUT* HPA;
+		let OTL=OTK* HPA;
 		HPC=HPA;
-		KHI=OUU;
+		KHI=OTL;
 		}
 		HPB=HPC;
 		KHH=KHI;
 		}
 		let HPD=(HPB- HOT)- HNA;
-		let OUW=(KHH- OUS)- KGW;
+		let OTN=(KHH- OTJ)- KGW;
 		let HPE=(HOF- HNV)- HNA;
-		let OUX=L6([0.0,0.0,KGW,0.0,0.0,0.0]);
+		let OTO=L6([0.0,0.0,KGW,0.0,0.0,0.0]);
 		let HPF=HNX* HPE;
-		let OUY=L6([0.0,0.0,(OUL* HPE),0.0,0.0,0.0])+ (((KHC- OUK)- OUX)* HNX);
+		let OTP=L6([0.0,0.0,(OTC* HPE),0.0,0.0,0.0])+ (((KHC- OTB)- OTO)* HNX);
 		let HPG=FLX> A;
 		let HQQ;
 		let KHJ;
 		if HPG{
 		let HPH=(FLX* A)/ AZ;
-		let OVA=((KJT* HPH)* KNJ)/ AZ;
+		let OTR=product_div(KJT,(-HPH),AZ);
 		let HPI=(HPH* FLV)+ HMT;
-		let OVB=(OVA* FLV)+ OTZ;
+		let OTS=(OTR* FLV)+ OSQ;
 		let HPJ=HPI> LD;
 		let HPP;
 		let KHK;
 		if HPJ{
 		let HPL=HPK* (F+ (HPI- LD));
-		let OVD=OVB* HPK;
+		let OTU=OTS* HPK;
 		HPP=HPL;
-		KHK=OVD;
+		KHK=OTU;
 		}else{
 		let HPM=HPI< -50f64;
 		let HPQ;
@@ -16820,38 +16785,38 @@ impl Instance {
 		KHL=KJQ;
 		}else{
 		let HPO=HPI.exp();
-		let OVC=OVB* HPO;
+		let OTT=OTS* HPO;
 		HPQ=HPO;
-		KHL=OVC;
+		KHL=OTT;
 		}
 		HPP=HPQ;
 		KHK=KHL;
 		}
 		let HPR=(HPP- HOT)- HNA;
-		let OVE=(KHK- OUS)- KGW;
-		let OVF=KGU* HPH;
+		let OTV=(KHK- OTJ)- KGW;
+		let OTW=KGU* HPH;
 		let HPS=(HPH* HMO)+ HMT;
-		let OVG=(L6([0.0,0.0,(OVA* HMO),0.0,0.0,0.0])+ L6([OVF[0],OVF[1],0.0,OVF[2],OVF[3],OVF[4]]))+ OUE;
+		let OTX=(L6([0.0,0.0,(OTR* HMO),0.0,0.0,0.0])+ L6([OTW[0],OTW[1],0.0,OTW[2],OTW[3],OTW[4]]))+ OSV;
 		let HPT=HPS> LD;
 		let HPZ;
 		let KHM;
 		if HPT{
 		let HPV=HPU* (F+ (HPS- LD));
-		let OVI=OVG* HPU;
+		let OTZ=OTX* HPU;
 		HPZ=HPV;
-		KHM=OVI;
+		KHM=OTZ;
 		}else{
 		let HPW=HPS< -50f64;
 		let HQA;
 		let KHN;
 		if HPW{
 		HQA=HPX;
-		KHN=OTL;
+		KHN=OSC;
 		}else{
 		let HPY=HPS.exp();
-		let OVH=OVG* HPY;
+		let OTY=OTX* HPY;
 		HQA=HPY;
-		KHN=OVH;
+		KHN=OTY;
 		}
 		HPZ=HQA;
 		KHM=KHN;
@@ -16859,114 +16824,114 @@ impl Instance {
 		let HQB=(HNX* HPD)/ HPR;
 		let HQC=(HPZ- HNV)- HNA;
 		let HQD=HQB* HQC;
-		let OVJ=L6([0.0,0.0,(((((OUL* HPD)+ (OUW* HNX))- (OVE* HQB))/ HPR)* HQC),0.0,0.0,0.0])+ (((KHM- OUK)- OUX)* HQB);
+		let OUA=L6([0.0,0.0,((product_sum_div(((OTC* HPD)+ (OTN* HNX)),IUF,OTV,(-HQB),HPR))* HQC),0.0,0.0,0.0])+ (((KHM- OTB)- OTO)* HQB);
 		HQQ=HQD;
-		KHJ=OVJ;
+		KHJ=OUA;
 		}else{
 		let HQE=HNX* HPD;
-		let OUZ=L6([0.0,0.0,((OUL* HPD)+ (OUW* HNX)),0.0,0.0,0.0]);
+		let OTQ=L6([0.0,0.0,((OTC* HPD)+ (OTN* HNX)),0.0,0.0,0.0]);
 		HQQ=HQE;
-		KHJ=OUZ;
+		KHJ=OTQ;
 		}
 		let HQF=FLW* FLW;
 		let HQG=HQF* AZ;
-		let OVK=KJT* HQF;
+		let OUB=KJT* HQF;
 		let HQH=(HMO- (FLV- (HQG/ MC)))/ HQG;
-		let OVL=((L6([KGU[0],KGU[1],0.0,KGU[2],KGU[3],KGU[4]])- L6([0.0,0.0,((OVK/ MC)* KNJ),0.0,0.0,0.0]))- L6([0.0,0.0,(OVK* HQH),0.0,0.0,0.0]))/ HQG;
+		let OUC=((L6([KGU[0],KGU[1],0.0,KGU[2],KGU[3],KGU[4]])- L6([0.0,0.0,((OUB/ MC)* KNJ),0.0,0.0,0.0]))).product_sum_div(IUF,L6([0.0,0.0,OUB,0.0,0.0,0.0]),(-HQH),HQG);
 		let HQI=HQH> LD;
 		let HQN;
 		let KHO;
 		if HQI{
 		HQN=A;
-		KHO=OTL;
+		KHO=OSC;
 		}else{
 		let HQJ=HQH< -50f64;
 		let HQO;
 		let KHP;
 		if HQJ{
 		HQO=F;
-		KHP=OTL;
+		KHP=OSC;
 		}else{
 		let HQK=HQH.exp();
 		let HQL=F+ HQK;
 		let HQM=F/ HQL;
-		let OVM=(((OVL* HQK)* HQM)* KNJ)/ HQL;
+		let OUD=((OUC* HQK)).product_div((-HQM),HQL);
 		HQO=HQM;
-		KHP=OVM;
+		KHP=OUD;
 		}
 		HQN=HQO;
 		KHO=KHP;
 		}
 		let HQP=F- HQN;
 		let HQR=(HQN* HPF)+ (HQP* HQQ);
-		let OVN=((KHO* HPF)+ (OUY* HQN))+ (((KHO* KNJ)* HQQ)+ (KHJ* HQP));
+		let OUE=((KHO* HPF)+ (OTP* HQN))+ (((KHO* KNJ)* HQQ)+ (KHJ* HQP));
 		HRP=HQR;
-		KHE=OVN;
+		KHE=OUE;
 		}
 		let HQS=HMO/ FMG;
-		let OVP=KGU/ FMG;
+		let OUG=KGU/ FMG;
 		let HQX;
 		let KHQ;
 		if JM{
-		let OVR=OVP* HQS;
+		let OUI=OUG* HQS;
 		let HQT=((HQS* HQS)+ JV).sqrt();
-		let OVS=(OVR+ OVR)* (IUF/ (KNB* HQT));
+		let OUJ=(OUI+ OUI)* (IUF/ (KNB* HQT));
 		HQX=HQT;
-		KHQ=OVS;
+		KHQ=OUJ;
 		}else{
 		let HQU=KB/ JV;
 		let HQV=(HQU* HQS).tanh();
 		let HQW=HQS* HQV;
-		let OVQ=(OVP* HQV)+ (((OVP* HQU)* (IUF- (HQV* HQV)))* HQS);
+		let OUH=(OUG* HQV)+ (((OUG* HQU)* (IUF- (HQV* HQV)))* HQS);
 		HQX=HQW;
-		KHQ=OVQ;
+		KHQ=OUH;
 		}
 		let HQY=F+ (HQX.powf(FMH));
 		let HQZ=F/ FMH;
 		let HRA=HQY.powf(HQZ);
 		let HRB=HNC/ HRA;
-		let OVT=OUC- (((KHQ* (FMH* ((HQX+ (((HQX== KOL) as u8 as f64)* KUP)).powf((FMH- IUF)))))* (HQZ* ((HQY+ (((HQY== KOL) as u8 as f64)* KUP)).powf((HQZ- IUF)))))* HRB);
+		let OUK=(OST).product_sum_div(IUF,((KHQ* (FMH* ((HQX+ (((HQX== KOL) as u8 as f64)* KUP)).powf((FMH- IUF)))))* (HQZ* ((HQY+ (((HQY== KOL) as u8 as f64)* KUP)).powf((HQZ- IUF))))),(-HRB),HRA);
 		let HRC=(((-JE)* O)* P)* A;
 		let HRD=HRC* BG;
-		let OVU=KJX* HRC;
+		let OUL=KJX* HRC;
 		let HRE=FMK/ AZ;
 		let HRF=HRE* HRB;
-		let OVV=(OVT/ HRA)* HRE;
-		let OVW=L6([0.0,0.0,((((KJT* HRE)* KNJ)/ AZ)* HRB),0.0,0.0,0.0])+ L6([OVV[0],OVV[1],0.0,OVV[2],OVV[3],OVV[4]]);
+		let OUM=OUK* HRE;
+		let OUN=L6([0.0,0.0,((product_div(KJT,(-HRE),AZ))* HRB),0.0,0.0,0.0])+ L6([OUM[0],OUM[1],0.0,OUM[2],OUM[3],OUM[4]]);
 		let HRG=HRF> LD;
 		let HRM;
 		let KHR;
 		if HRG{
 		let HRI=HRH* (F+ (HRF- LD));
-		let OVY=OVW* HRH;
+		let OUP=OUN* HRH;
 		HRM=HRI;
-		KHR=OVY;
+		KHR=OUP;
 		}else{
 		let HRJ=HRF< -50f64;
 		let HRN;
 		let KHS;
 		if HRJ{
 		HRN=HRK;
-		KHS=OTL;
+		KHS=OSC;
 		}else{
 		let HRL=HRF.exp();
-		let OVX=OVW* HRL;
+		let OUO=OUN* HRL;
 		HRN=HRL;
-		KHS=OVX;
+		KHS=OUO;
 		}
 		HRM=HRN;
 		KHR=KHS;
 		}
 		let HRO=HRM- F;
 		let HRQ=HRP+ (HRD* HRO);
-		let OVZ=KHE+ (L6([0.0,0.0,(OVU* HRO),0.0,0.0,0.0])+ (KHR* HRD));
+		let OUQ=KHE+ (L6([0.0,0.0,(OUL* HRO),0.0,0.0,0.0])+ (KHR* HRD));
 		let HRZ;
 		let KHT;
 		if HMU{
 		let HRV=HRU* (F+ (HMT- LD));
-		let OWB=OTZ* HRU;
+		let OUS=OSQ* HRU;
 		HRZ=HRV;
-		KHT=OWB;
+		KHT=OUS;
 		}else{
 		let HRW=HMT< -50f64;
 		let HSA;
@@ -16976,39 +16941,39 @@ impl Instance {
 		KHU=KJQ;
 		}else{
 		let HRY=HMT.exp();
-		let OWA=OTZ* HRY;
+		let OUR=OSQ* HRY;
 		HSA=HRY;
-		KHU=OWA;
+		KHU=OUR;
 		}
 		HRZ=HSA;
 		KHT=KHU;
 		}
 		let HSB=-HRR;
-		let OWC=KGV* KNJ;
-		let OWD=OWC* HRS;
+		let OUT=KGV* KNJ;
+		let OUU=OUT* HRS;
 		let HSC=(HRS* (HSB- HRT))+ HMT;
-		let OWE=L6([OWD[0],OWD[1],0.0,OWD[2],OWD[3],OWD[4]])+ OUE;
+		let OUV=L6([OUU[0],OUU[1],0.0,OUU[2],OUU[3],OUU[4]])+ OSV;
 		let HSD=((-HRS)* HRT)+ HMT;
 		let HSE=HSC> LD;
 		let HSK;
 		let KHV;
 		if HSE{
 		let HSG=HSF* (F+ (HSC- LD));
-		let OWG=OWE* HSF;
+		let OUX=OUV* HSF;
 		HSK=HSG;
-		KHV=OWG;
+		KHV=OUX;
 		}else{
 		let HSH=HSC< -50f64;
 		let HSL;
 		let KHW;
 		if HSH{
 		HSL=HSI;
-		KHW=OTL;
+		KHW=OSC;
 		}else{
 		let HSJ=HSC.exp();
-		let OWF=OWE* HSJ;
+		let OUW=OUV* HSJ;
 		HSL=HSJ;
-		KHW=OWF;
+		KHW=OUW;
 		}
 		HSK=HSL;
 		KHV=KHW;
@@ -17018,9 +16983,9 @@ impl Instance {
 		let KHX;
 		if HSM{
 		let HSO=HSN* (F+ (HSD- LD));
-		let OWI=OTZ* HSN;
+		let OUZ=OSQ* HSN;
 		HSS=HSO;
-		KHX=OWI;
+		KHX=OUZ;
 		}else{
 		let HSP=HSD< -50f64;
 		let HST;
@@ -17030,41 +16995,41 @@ impl Instance {
 		KHY=KJQ;
 		}else{
 		let HSR=HSD.exp();
-		let OWH=OTZ* HSR;
+		let OUY=OSQ* HSR;
 		HST=HSR;
-		KHY=OWH;
+		KHY=OUY;
 		}
 		HSS=HST;
 		KHX=KHY;
 		}
 		let HSU=HSK- HSS;
-		let OWJ=KHV- L6([0.0,0.0,KHX,0.0,0.0,0.0]);
+		let OVA=KHV- L6([0.0,0.0,KHX,0.0,0.0,0.0]);
 		let HSV=FFO* parameters[315];
 		let HSW=HSV* BG;
-		let OWK=KJX* HSV;
-		let OWL=KGV* HMR;
+		let OVB=KJX* HSV;
+		let OVC=KGV* HMR;
 		let HSX=(HMR* HRR)+ HMT;
-		let OWM=(L6([0.0,0.0,(OTY* HRR),0.0,0.0,0.0])+ L6([OWL[0],OWL[1],0.0,OWL[2],OWL[3],OWL[4]]))+ OUE;
+		let OVD=(L6([0.0,0.0,(OSP* HRR),0.0,0.0,0.0])+ L6([OVC[0],OVC[1],0.0,OVC[2],OVC[3],OVC[4]]))+ OSV;
 		let HSY=HSX> LD;
 		let HTE;
 		let KHZ;
 		if HSY{
 		let HTA=HSZ* (F+ (HSX- LD));
-		let OWO=OWM* HSZ;
+		let OVF=OVD* HSZ;
 		HTE=HTA;
-		KHZ=OWO;
+		KHZ=OVF;
 		}else{
 		let HTB=HSX< -50f64;
 		let HTF;
 		let KIA;
 		if HTB{
 		HTF=HTC;
-		KIA=OTL;
+		KIA=OSC;
 		}else{
 		let HTD=HSX.exp();
-		let OWN=OWM* HTD;
+		let OVE=OVD* HTD;
 		HTF=HTD;
-		KIA=OWN;
+		KIA=OVE;
 		}
 		HTE=HTF;
 		KHZ=KIA;
@@ -17075,9 +17040,9 @@ impl Instance {
 		if HTG{
 		let HTH=(HTE- HSU)- HRZ;
 		let HTI=HSW* HTH;
-		let OXN=L6([0.0,0.0,(OWK* HTH),0.0,0.0,0.0])+ (((KHZ- OWJ)- L6([0.0,0.0,KHT,0.0,0.0,0.0]))* HSW);
+		let OWE=L6([0.0,0.0,(OVB* HTH),0.0,0.0,0.0])+ (((KHZ- OVA)- L6([0.0,0.0,KHT,0.0,0.0,0.0]))* HSW);
 		HWM=HTI;
-		KIB=OXN;
+		KIB=OWE;
 		}else{
 		let HTJ=(HRS* ((-FRS)- HRT))+ HMT;
 		let HTK=HTJ> LD;
@@ -17085,9 +17050,9 @@ impl Instance {
 		let KIC;
 		if HTK{
 		let HTM=HTL* (F+ (HTJ- LD));
-		let OWQ=OTZ* HTL;
+		let OVH=OSQ* HTL;
 		HTQ=HTM;
-		KIC=OWQ;
+		KIC=OVH;
 		}else{
 		let HTN=HTJ< -50f64;
 		let HTR;
@@ -17097,25 +17062,25 @@ impl Instance {
 		KID=KJQ;
 		}else{
 		let HTP=HTJ.exp();
-		let OWP=OTZ* HTP;
+		let OVG=OSQ* HTP;
 		HTR=HTP;
-		KID=OWP;
+		KID=OVG;
 		}
 		HTQ=HTR;
 		KIC=KID;
 		}
 		let HTS=HTQ- HSS;
-		let OWR=KIC- KHX;
+		let OVI=KIC- KHX;
 		let HTT=(HMR* FRS)+ HMT;
-		let OWS=(OTY* FRS)+ OTZ;
+		let OVJ=(OSP* FRS)+ OSQ;
 		let HTU=HTT> LD;
 		let HUA;
 		let KIE;
 		if HTU{
 		let HTW=HTV* (F+ (HTT- LD));
-		let OWU=OWS* HTV;
+		let OVL=OVJ* HTV;
 		HUA=HTW;
-		KIE=OWU;
+		KIE=OVL;
 		}else{
 		let HTX=HTT< -50f64;
 		let HUB;
@@ -17125,35 +17090,35 @@ impl Instance {
 		KIF=KJQ;
 		}else{
 		let HTZ=HTT.exp();
-		let OWT=OWS* HTZ;
+		let OVK=OVJ* HTZ;
 		HUB=HTZ;
-		KIF=OWT;
+		KIF=OVK;
 		}
 		HUA=HUB;
 		KIE=KIF;
 		}
 		let HUC=(HUA- HTS)- HRZ;
-		let OWV=(KIE- OWR)- KHT;
+		let OVM=(KIE- OVI)- KHT;
 		let HUD=(HTE- HSU)- HRZ;
-		let OWW=L6([0.0,0.0,KHT,0.0,0.0,0.0]);
+		let OVN=L6([0.0,0.0,KHT,0.0,0.0,0.0]);
 		let HUE=HSW* HUD;
-		let OWX=L6([0.0,0.0,(OWK* HUD),0.0,0.0,0.0])+ (((KHZ- OWJ)- OWW)* HSW);
+		let OVO=L6([0.0,0.0,(OVB* HUD),0.0,0.0,0.0])+ (((KHZ- OVA)- OVN)* HSW);
 		let HUF=FRU> A;
 		let HVP;
 		let KIG;
 		if HUF{
 		let HUG=(FRU* A)/ AZ;
-		let OWZ=((KJT* HUG)* KNJ)/ AZ;
+		let OVQ=product_div(KJT,(-HUG),AZ);
 		let HUH=(HUG* FRS)+ HMT;
-		let OXA=(OWZ* FRS)+ OTZ;
+		let OVR=(OVQ* FRS)+ OSQ;
 		let HUI=HUH> LD;
 		let HUO;
 		let KIH;
 		if HUI{
 		let HUK=HUJ* (F+ (HUH- LD));
-		let OXC=OXA* HUJ;
+		let OVT=OVR* HUJ;
 		HUO=HUK;
-		KIH=OXC;
+		KIH=OVT;
 		}else{
 		let HUL=HUH< -50f64;
 		let HUP;
@@ -17163,38 +17128,38 @@ impl Instance {
 		KII=KJQ;
 		}else{
 		let HUN=HUH.exp();
-		let OXB=OXA* HUN;
+		let OVS=OVR* HUN;
 		HUP=HUN;
-		KII=OXB;
+		KII=OVS;
 		}
 		HUO=HUP;
 		KIH=KII;
 		}
 		let HUQ=(HUO- HTS)- HRZ;
-		let OXD=(KIH- OWR)- KHT;
-		let OXE=KGV* HUG;
+		let OVU=(KIH- OVI)- KHT;
+		let OVV=KGV* HUG;
 		let HUR=(HUG* HRR)+ HMT;
-		let OXF=(L6([0.0,0.0,(OWZ* HRR),0.0,0.0,0.0])+ L6([OXE[0],OXE[1],0.0,OXE[2],OXE[3],OXE[4]]))+ OUE;
+		let OVW=(L6([0.0,0.0,(OVQ* HRR),0.0,0.0,0.0])+ L6([OVV[0],OVV[1],0.0,OVV[2],OVV[3],OVV[4]]))+ OSV;
 		let HUS=HUR> LD;
 		let HUY;
 		let KIJ;
 		if HUS{
 		let HUU=HUT* (F+ (HUR- LD));
-		let OXH=OXF* HUT;
+		let OVY=OVW* HUT;
 		HUY=HUU;
-		KIJ=OXH;
+		KIJ=OVY;
 		}else{
 		let HUV=HUR< -50f64;
 		let HUZ;
 		let KIK;
 		if HUV{
 		HUZ=HUW;
-		KIK=OTL;
+		KIK=OSC;
 		}else{
 		let HUX=HUR.exp();
-		let OXG=OXF* HUX;
+		let OVX=OVW* HUX;
 		HUZ=HUX;
-		KIK=OXG;
+		KIK=OVX;
 		}
 		HUY=HUZ;
 		KIJ=KIK;
@@ -17202,104 +17167,104 @@ impl Instance {
 		let HVA=(HSW* HUC)/ HUQ;
 		let HVB=(HUY- HSU)- HRZ;
 		let HVC=HVA* HVB;
-		let OXI=L6([0.0,0.0,(((((OWK* HUC)+ (OWV* HSW))- (OXD* HVA))/ HUQ)* HVB),0.0,0.0,0.0])+ (((KIJ- OWJ)- OWW)* HVA);
+		let OVZ=L6([0.0,0.0,((product_sum_div(((OVB* HUC)+ (OVM* HSW)),IUF,OVU,(-HVA),HUQ))* HVB),0.0,0.0,0.0])+ (((KIJ- OVA)- OVN)* HVA);
 		HVP=HVC;
-		KIG=OXI;
+		KIG=OVZ;
 		}else{
 		let HVD=HSW* HUC;
-		let OWY=L6([0.0,0.0,((OWK* HUC)+ (OWV* HSW)),0.0,0.0,0.0]);
+		let OVP=L6([0.0,0.0,((OVB* HUC)+ (OVM* HSW)),0.0,0.0,0.0]);
 		HVP=HVD;
-		KIG=OWY;
+		KIG=OVP;
 		}
 		let HVE=FRT* FRT;
 		let HVF=HVE* AZ;
-		let OXJ=KJT* HVE;
+		let OWA=KJT* HVE;
 		let HVG=(HRR- (FRS- (HVF/ MC)))/ HVF;
-		let OXK=((L6([KGV[0],KGV[1],0.0,KGV[2],KGV[3],KGV[4]])- L6([0.0,0.0,((OXJ/ MC)* KNJ),0.0,0.0,0.0]))- L6([0.0,0.0,(OXJ* HVG),0.0,0.0,0.0]))/ HVF;
+		let OWB=((L6([KGV[0],KGV[1],0.0,KGV[2],KGV[3],KGV[4]])- L6([0.0,0.0,((OWA/ MC)* KNJ),0.0,0.0,0.0]))).product_sum_div(IUF,L6([0.0,0.0,OWA,0.0,0.0,0.0]),(-HVG),HVF);
 		let HVH=HVG> LD;
 		let HVM;
 		let KIL;
 		if HVH{
 		HVM=A;
-		KIL=OTL;
+		KIL=OSC;
 		}else{
 		let HVI=HVG< -50f64;
 		let HVN;
 		let KIM;
 		if HVI{
 		HVN=F;
-		KIM=OTL;
+		KIM=OSC;
 		}else{
 		let HVJ=HVG.exp();
 		let HVK=F+ HVJ;
 		let HVL=F/ HVK;
-		let OXL=(((OXK* HVJ)* HVL)* KNJ)/ HVK;
+		let OWC=((OWB* HVJ)).product_div((-HVL),HVK);
 		HVN=HVL;
-		KIM=OXL;
+		KIM=OWC;
 		}
 		HVM=HVN;
 		KIL=KIM;
 		}
 		let HVO=F- HVM;
 		let HVQ=(HVM* HUE)+ (HVO* HVP);
-		let OXM=((KIL* HUE)+ (OWX* HVM))+ (((KIL* KNJ)* HVP)+ (KIG* HVO));
+		let OWD=((KIL* HUE)+ (OVO* HVM))+ (((KIL* KNJ)* HVP)+ (KIG* HVO));
 		HWM=HVQ;
-		KIB=OXM;
+		KIB=OWD;
 		}
 		let HVR=HRR/ FSB;
-		let OXO=KGV/ FSB;
+		let OWF=KGV/ FSB;
 		let HVW;
 		let KIN;
 		if JM{
-		let OXQ=OXO* HVR;
+		let OWH=OWF* HVR;
 		let HVS=((HVR* HVR)+ JV).sqrt();
-		let OXR=(OXQ+ OXQ)* (IUF/ (KNB* HVS));
+		let OWI=(OWH+ OWH)* (IUF/ (KNB* HVS));
 		HVW=HVS;
-		KIN=OXR;
+		KIN=OWI;
 		}else{
 		let HVT=KB/ JV;
 		let HVU=(HVT* HVR).tanh();
 		let HVV=HVR* HVU;
-		let OXP=(OXO* HVU)+ (((OXO* HVT)* (IUF- (HVU* HVU)))* HVR);
+		let OWG=(OWF* HVU)+ (((OWF* HVT)* (IUF- (HVU* HVU)))* HVR);
 		HVW=HVV;
-		KIN=OXP;
+		KIN=OWG;
 		}
 		let HVX=F+ (HVW.powf(FSC));
 		let HVY=F/ FSC;
 		let HVZ=HVX.powf(HVY);
 		let HWA=HSB/ HVZ;
-		let OXS=OWC- (((KIN* (FSC* ((HVW+ (((HVW== KOL) as u8 as f64)* KUP)).powf((FSC- IUF)))))* (HVY* ((HVX+ (((HVX== KOL) as u8 as f64)* KUP)).powf((HVY- IUF)))))* HWA);
+		let OWJ=(OUT).product_sum_div(IUF,((KIN* (FSC* ((HVW+ (((HVW== KOL) as u8 as f64)* KUP)).powf((FSC- IUF)))))* (HVY* ((HVX+ (((HVX== KOL) as u8 as f64)* KUP)).powf((HVY- IUF))))),(-HWA),HVZ);
 		let HWB=FSF/ AZ;
 		let HWC=HWB* HWA;
-		let OXT=(OXS/ HVZ)* HWB;
-		let OXU=L6([0.0,0.0,((((KJT* HWB)* KNJ)/ AZ)* HWA),0.0,0.0,0.0])+ L6([OXT[0],OXT[1],0.0,OXT[2],OXT[3],OXT[4]]);
+		let OWK=OWJ* HWB;
+		let OWL=L6([0.0,0.0,((product_div(KJT,(-HWB),AZ))* HWA),0.0,0.0,0.0])+ L6([OWK[0],OWK[1],0.0,OWK[2],OWK[3],OWK[4]]);
 		let HWD=HWC> LD;
 		let HWJ;
 		let KIO;
 		if HWD{
 		let HWF=HWE* (F+ (HWC- LD));
-		let OXW=OXU* HWE;
+		let OWN=OWL* HWE;
 		HWJ=HWF;
-		KIO=OXW;
+		KIO=OWN;
 		}else{
 		let HWG=HWC< -50f64;
 		let HWK;
 		let KIP;
 		if HWG{
 		HWK=HWH;
-		KIP=OTL;
+		KIP=OSC;
 		}else{
 		let HWI=HWC.exp();
-		let OXV=OXU* HWI;
+		let OWM=OWL* HWI;
 		HWK=HWI;
-		KIP=OXV;
+		KIP=OWM;
 		}
 		HWJ=HWK;
 		KIO=KIP;
 		}
 		let HWL=HWJ- F;
 		let HWN=HWM+ (HRD* HWL);
-		let OXX=KIB+ (L6([0.0,0.0,(OVU* HWL),0.0,0.0,0.0])+ (KIO* HRD));
+		let OWO=KIB+ (L6([0.0,0.0,(OUL* HWL),0.0,0.0,0.0])+ (KIO* HRD));
 		let ILH;
 		let ILJ;
 		let ILL;
@@ -17315,10 +17280,10 @@ impl Instance {
 		ILJ=HWP;
 		ILL=A;
 		ILN=A;
-		KIQ=OVZ;
-		KIR=OXX;
-		KIS=OTL;
-		KIT=OTL;
+		KIQ=OUQ;
+		KIR=OWO;
+		KIS=OSC;
+		KIT=OSC;
 		}else{
 		let HWQ=A+ HRQ;
 		let HWR=A+ HWN;
@@ -17326,10 +17291,10 @@ impl Instance {
 		ILJ=A;
 		ILL=HWQ;
 		ILN=HWR;
-		KIQ=OTL;
-		KIR=OTL;
-		KIS=OVZ;
-		KIT=OXX;
+		KIQ=OSC;
+		KIR=OSC;
+		KIS=OUQ;
+		KIT=OWO;
 		}
 		ILG=ILH;
 		ILI=ILJ;
@@ -17344,48 +17309,48 @@ impl Instance {
 		ILI=A;
 		ILK=A;
 		ILM=A;
-		KGQ=OTL;
-		KGR=OTL;
-		KGS=OTL;
-		KGT=OTL;
+		KGQ=OSC;
+		KGR=OSC;
+		KGS=OSC;
+		KGT=OSC;
 		}
 		let ILO;
 		let ILP;
 		let IOR;
 		let KIU;
 		if AM{
-		let OXZ=L2([IUL,0.0])- L2([0.0,IUQ]);
+		let OWQ=L2([IUL,0.0])- L2([0.0,IUQ]);
 		let HWU=(JO- PM)/ HWS;
-		let OYA=(L3([OXZ[0],0.0,OXZ[1]])- L3([0.0,(IVE* HWU),0.0]))/ HWS;
+		let OWR=(L3([OWQ[0],0.0,OWQ[1]])).product_sum_div(IUF,L3([0.0,IVE,0.0]),(-HWU),HWS);
 		let HWV=A+ HWU;
 		ILO=HWV;
 		ILP=A;
 		IOR=A;
-		KIU=OYA;
+		KIU=OWR;
 		}else{
 		ILO=A;
 		ILP=HWW;
 		IOR=F;
-		KIU=OXY;
+		KIU=OWP;
 		}
 		let ILQ;
 		let ILR;
 		let IOS;
 		let KIV;
 		if AA{
-		let OYC=L2([0.0,IUK])- L2([IUM,0.0]);
+		let OWT=L2([0.0,IUK])- L2([IUM,0.0]);
 		let HWZ=(JN- JQ)/ HWX;
-		let OYD=(L3([OYC[0],0.0,OYC[1]])- L3([0.0,(IVC* HWZ),0.0]))/ HWX;
+		let OWU=(L3([OWT[0],0.0,OWT[1]])).product_sum_div(IUF,L3([0.0,IVC,0.0]),(-HWZ),HWX);
 		let HXA=A+ HWZ;
 		ILQ=HXA;
 		ILR=A;
 		IOS=A;
-		KIV=OYD;
+		KIV=OWU;
 		}else{
 		ILQ=A;
 		ILR=HXB;
 		IOS=F;
-		KIV=OYB;
+		KIV=OWS;
 		}
 		let HXC=(AV>= Z)&& (AV> A);
 		let ILS;
@@ -17393,17 +17358,17 @@ impl Instance {
 		let IOT;
 		let KIW;
 		if HXC{
-		let OYF=(L2([1f64,0.0])- L2([0.0,IUZ]))/ AV;
+		let OWW=(L2([1f64,0.0])- L2([0.0,IUZ]))/ AV;
 		let HXE=A+ ((KX- HXD)/ AV);
 		ILS=HXE;
 		ILT=A;
 		IOT=A;
-		KIW=OYF;
+		KIW=OWW;
 		}else{
 		ILS=A;
 		ILT=HXF;
 		IOT=F;
-		KIW=OYE;
+		KIW=OWV;
 		}
 		let HXG=(AW>= Z)&& (AW> A);
 		let ILU;
@@ -17411,293 +17376,293 @@ impl Instance {
 		let IOU;
 		let KIX;
 		if HXG{
-		let OYH=(L2([IUZ,0.0])- L2([0.0,IUR]))/ AW;
+		let OWY=(L2([IUZ,0.0])- L2([0.0,IUR]))/ AW;
 		let HXH=A+ ((HXD- PT)/ AW);
 		ILU=HXH;
 		ILV=A;
 		IOU=A;
-		KIX=OYH;
+		KIX=OWY;
 		}else{
 		ILU=A;
 		ILV=HXI;
 		IOU=F;
-		KIX=OYG;
+		KIX=OWX;
 		}
 		let HXJ=HXD- JQ;
-		let OYI=L2([0.0,IUZ])- L2([IUM,0.0]);
+		let OWZ=L2([0.0,IUZ])- L2([IUM,0.0]);
 		let HXL=HXJ- HXK;
 		let HXN=HXL/ HXM;
-		let OYJ=OYI/ HXM;
+		let OXA=OWZ/ HXM;
 		let HXO=HXN> LD;
 		let HXZ;
 		let KIY;
 		if HXO{
-		let OYQ=OYI* CU;
-		let OYR=OYI* BN;
+		let OXH=OWZ* CU;
+		let OXI=OWZ* BN;
 		let HXP=FKO* ((CU* HXJ)+ (BN* HXL));
-		let OYS=((L3([0.0,(KKK* HXJ),0.0])+ L3([OYQ[0],0.0,OYQ[1]]))+ (L3([0.0,(KJZ* HXL),0.0])+ L3([OYR[0],0.0,OYR[1]])))* FKO;
+		let OXJ=((L3([0.0,(KKK* HXJ),0.0])+ L3([OXH[0],0.0,OXH[1]]))+ (L3([0.0,(KJZ* HXL),0.0])+ L3([OXI[0],0.0,OXI[1]])))* FKO;
 		HXZ=HXP;
-		KIY=OYS;
+		KIY=OXJ;
 		}else{
 		let HXQ=HXN< -50f64;
 		let HYA;
 		let KIZ;
 		if HXQ{
-		let OYN=OYI* CU;
+		let OXE=OWZ* CU;
 		let HXR=BN* HXM;
 		let HXS=HXN.exp();
-		let OYO=(OYJ* HXS)* HXR;
+		let OXF=(OXA* HXS)* HXR;
 		let HXT=FKO* ((CU* HXJ)+ (HXR* HXS));
-		let OYP=((L3([0.0,(KKK* HXJ),0.0])+ L3([OYN[0],0.0,OYN[1]]))+ (L3([0.0,((KJZ* HXM)* HXS),0.0])+ L3([OYO[0],0.0,OYO[1]])))* FKO;
+		let OXG=((L3([0.0,(KKK* HXJ),0.0])+ L3([OXE[0],0.0,OXE[1]]))+ (L3([0.0,((KJZ* HXM)* HXS),0.0])+ L3([OXF[0],0.0,OXF[1]])))* FKO;
 		HYA=HXT;
-		KIZ=OYP;
+		KIZ=OXG;
 		}else{
-		let OYK=OYI* CU;
+		let OXB=OWZ* CU;
 		let HXU=BN* HXM;
 		let HXV=HXN.exp();
 		let HXW=F+ HXV;
 		let HXX=HXW.ln();
-		let OYL=((OYJ* HXV)* (IUF/ HXW))* HXU;
+		let OXC=((OXA* HXV)* (IUF/ HXW))* HXU;
 		let HXY=FKO* ((CU* HXJ)+ (HXU* HXX));
-		let OYM=((L3([0.0,(KKK* HXJ),0.0])+ L3([OYK[0],0.0,OYK[1]]))+ (L3([0.0,((KJZ* HXM)* HXX),0.0])+ L3([OYL[0],0.0,OYL[1]])))* FKO;
+		let OXD=((L3([0.0,(KKK* HXJ),0.0])+ L3([OXB[0],0.0,OXB[1]]))+ (L3([0.0,((KJZ* HXM)* HXX),0.0])+ L3([OXC[0],0.0,OXC[1]])))* FKO;
 		HYA=HXY;
-		KIZ=OYM;
+		KIZ=OXD;
 		}
 		HXZ=HYA;
 		KIY=KIZ;
 		}
 		let HYB=ddt(139, HXZ);
-		let OYT=KIY* KOI;
+		let OXK=KIY* KOI;
 		let HYC=A+ HYB;
 		let HYD=HXD- JO;
-		let OYU=L2([0.0,IUZ])- L2([IUL,0.0]);
+		let OXL=L2([0.0,IUZ])- L2([IUL,0.0]);
 		let HYE=HYD- HXK;
 		let HYF=HYE/ HXM;
-		let OYV=OYU/ HXM;
+		let OXM=OXL/ HXM;
 		let HYG=HYF> LD;
 		let HYR;
 		let KJA;
 		if HYG{
-		let OZC=OYU* CX;
-		let OZD=OYU* BT;
+		let OXT=OXL* CX;
+		let OXU=OXL* BT;
 		let HYH=FKO* ((CX* HYD)+ (BT* HYE));
-		let OZE=((L3([0.0,(KKL* HYD),0.0])+ L3([OZC[0],0.0,OZC[1]]))+ (L3([0.0,(KKB* HYE),0.0])+ L3([OZD[0],0.0,OZD[1]])))* FKO;
+		let OXV=((L3([0.0,(KKL* HYD),0.0])+ L3([OXT[0],0.0,OXT[1]]))+ (L3([0.0,(KKB* HYE),0.0])+ L3([OXU[0],0.0,OXU[1]])))* FKO;
 		HYR=HYH;
-		KJA=OZE;
+		KJA=OXV;
 		}else{
 		let HYI=HYF< -50f64;
 		let HYS;
 		let KJB;
 		if HYI{
-		let OYZ=OYU* CX;
+		let OXQ=OXL* CX;
 		let HYJ=BT* HXM;
 		let HYK=HYF.exp();
-		let OZA=(OYV* HYK)* HYJ;
+		let OXR=(OXM* HYK)* HYJ;
 		let HYL=FKO* ((CX* HYD)+ (HYJ* HYK));
-		let OZB=((L3([0.0,(KKL* HYD),0.0])+ L3([OYZ[0],0.0,OYZ[1]]))+ (L3([0.0,((KKB* HXM)* HYK),0.0])+ L3([OZA[0],0.0,OZA[1]])))* FKO;
+		let OXS=((L3([0.0,(KKL* HYD),0.0])+ L3([OXQ[0],0.0,OXQ[1]]))+ (L3([0.0,((KKB* HXM)* HYK),0.0])+ L3([OXR[0],0.0,OXR[1]])))* FKO;
 		HYS=HYL;
-		KJB=OZB;
+		KJB=OXS;
 		}else{
-		let OYW=OYU* CX;
+		let OXN=OXL* CX;
 		let HYM=BT* HXM;
 		let HYN=HYF.exp();
 		let HYO=F+ HYN;
 		let HYP=HYO.ln();
-		let OYX=((OYV* HYN)* (IUF/ HYO))* HYM;
+		let OXO=((OXM* HYN)* (IUF/ HYO))* HYM;
 		let HYQ=FKO* ((CX* HYD)+ (HYM* HYP));
-		let OYY=((L3([0.0,(KKL* HYD),0.0])+ L3([OYW[0],0.0,OYW[1]]))+ (L3([0.0,((KKB* HXM)* HYP),0.0])+ L3([OYX[0],0.0,OYX[1]])))* FKO;
+		let OXP=((L3([0.0,(KKL* HYD),0.0])+ L3([OXN[0],0.0,OXN[1]]))+ (L3([0.0,((KKB* HXM)* HYP),0.0])+ L3([OXO[0],0.0,OXO[1]])))* FKO;
 		HYS=HYQ;
-		KJB=OYY;
+		KJB=OXP;
 		}
 		HYR=HYS;
 		KJA=KJB;
 		}
 		let HYT=ddt(140, HYR);
-		let OZF=KJA* KOI;
+		let OXW=KJA* KOI;
 		let HYU=A+ HYT;
 		let HYV=JQ- JO;
-		let OZG=L2([0.0,IUM])- L2([IUL,0.0]);
+		let OXX=L2([0.0,IUM])- L2([IUL,0.0]);
 		let HYW=HYV- HXK;
 		let HYX=HYW/ HXM;
-		let OZH=OZG/ HXM;
+		let OXY=OXX/ HXM;
 		let HYY=HYX> LD;
 		let HZJ;
 		let KJC;
 		if HYY{
-		let OZO=OZG* DA;
-		let OZP=OZG* BZ;
+		let OYF=OXX* DA;
+		let OYG=OXX* BZ;
 		let HYZ=FKO* ((DA* HYV)+ (BZ* HYW));
-		let OZQ=((L3([0.0,0.0,(KKM* HYV)])+ L3([OZO[0],OZO[1],0.0]))+ (L3([0.0,0.0,(KKD* HYW)])+ L3([OZP[0],OZP[1],0.0])))* FKO;
+		let OYH=((L3([0.0,0.0,(KKM* HYV)])+ L3([OYF[0],OYF[1],0.0]))+ (L3([0.0,0.0,(KKD* HYW)])+ L3([OYG[0],OYG[1],0.0])))* FKO;
 		HZJ=HYZ;
-		KJC=OZQ;
+		KJC=OYH;
 		}else{
 		let HZA=HYX< -50f64;
 		let HZK;
 		let KJD;
 		if HZA{
-		let OZL=OZG* DA;
+		let OYC=OXX* DA;
 		let HZB=BZ* HXM;
 		let HZC=HYX.exp();
-		let OZM=(OZH* HZC)* HZB;
+		let OYD=(OXY* HZC)* HZB;
 		let HZD=FKO* ((DA* HYV)+ (HZB* HZC));
-		let OZN=((L3([0.0,0.0,(KKM* HYV)])+ L3([OZL[0],OZL[1],0.0]))+ (L3([0.0,0.0,((KKD* HXM)* HZC)])+ L3([OZM[0],OZM[1],0.0])))* FKO;
+		let OYE=((L3([0.0,0.0,(KKM* HYV)])+ L3([OYC[0],OYC[1],0.0]))+ (L3([0.0,0.0,((KKD* HXM)* HZC)])+ L3([OYD[0],OYD[1],0.0])))* FKO;
 		HZK=HZD;
-		KJD=OZN;
+		KJD=OYE;
 		}else{
-		let OZI=OZG* DA;
+		let OXZ=OXX* DA;
 		let HZE=BZ* HXM;
 		let HZF=HYX.exp();
 		let HZG=F+ HZF;
 		let HZH=HZG.ln();
-		let OZJ=((OZH* HZF)* (IUF/ HZG))* HZE;
+		let OYA=((OXY* HZF)* (IUF/ HZG))* HZE;
 		let HZI=FKO* ((DA* HYV)+ (HZE* HZH));
-		let OZK=((L3([0.0,0.0,(KKM* HYV)])+ L3([OZI[0],OZI[1],0.0]))+ (L3([0.0,0.0,((KKD* HXM)* HZH)])+ L3([OZJ[0],OZJ[1],0.0])))* FKO;
+		let OYB=((L3([0.0,0.0,(KKM* HYV)])+ L3([OXZ[0],OXZ[1],0.0]))+ (L3([0.0,0.0,((KKD* HXM)* HZH)])+ L3([OYA[0],OYA[1],0.0])))* FKO;
 		HZK=HZI;
-		KJD=OZK;
+		KJD=OYB;
 		}
 		HZJ=HZK;
 		KJC=KJD;
 		}
 		let HZL=ddt(141, HZJ);
-		let OZR=KJC* KOI;
+		let OYI=KJC* KOI;
 		let HZM=A+ HZL;
 		let HZN=QB- JQ;
-		let OZS=L2([0.0,IUT])- L2([IUM,0.0]);
+		let OYJ=L2([0.0,IUT])- L2([IUM,0.0]);
 		let HZO=HZN- HXK;
 		let HZP=HZO/ HXM;
-		let OZT=OZS/ HXM;
+		let OYK=OYJ/ HXM;
 		let HZQ=HZP> LD;
 		let IAB;
 		let KJE;
 		if HZQ{
-		let PAA=OZS* DD;
-		let PAB=OZS* CF;
+		let OYR=OYJ* DD;
+		let OYS=OYJ* CF;
 		let HZR=FKO* ((DD* HZN)+ (CF* HZO));
-		let PAC=((L3([0.0,0.0,(KKN* HZN)])+ L3([PAA[0],PAA[1],0.0]))+ (L3([0.0,0.0,(KKF* HZO)])+ L3([PAB[0],PAB[1],0.0])))* FKO;
+		let OYT=((L3([0.0,0.0,(KKN* HZN)])+ L3([OYR[0],OYR[1],0.0]))+ (L3([0.0,0.0,(KKF* HZO)])+ L3([OYS[0],OYS[1],0.0])))* FKO;
 		IAB=HZR;
-		KJE=PAC;
+		KJE=OYT;
 		}else{
 		let HZS=HZP< -50f64;
 		let IAC;
 		let KJF;
 		if HZS{
-		let OZX=OZS* DD;
+		let OYO=OYJ* DD;
 		let HZT=CF* HXM;
 		let HZU=HZP.exp();
-		let OZY=(OZT* HZU)* HZT;
+		let OYP=(OYK* HZU)* HZT;
 		let HZV=FKO* ((DD* HZN)+ (HZT* HZU));
-		let OZZ=((L3([0.0,0.0,(KKN* HZN)])+ L3([OZX[0],OZX[1],0.0]))+ (L3([0.0,0.0,((KKF* HXM)* HZU)])+ L3([OZY[0],OZY[1],0.0])))* FKO;
+		let OYQ=((L3([0.0,0.0,(KKN* HZN)])+ L3([OYO[0],OYO[1],0.0]))+ (L3([0.0,0.0,((KKF* HXM)* HZU)])+ L3([OYP[0],OYP[1],0.0])))* FKO;
 		IAC=HZV;
-		KJF=OZZ;
+		KJF=OYQ;
 		}else{
-		let OZU=OZS* DD;
+		let OYL=OYJ* DD;
 		let HZW=CF* HXM;
 		let HZX=HZP.exp();
 		let HZY=F+ HZX;
 		let HZZ=HZY.ln();
-		let OZV=((OZT* HZX)* (IUF/ HZY))* HZW;
+		let OYM=((OYK* HZX)* (IUF/ HZY))* HZW;
 		let IAA=FKO* ((DD* HZN)+ (HZW* HZZ));
-		let OZW=((L3([0.0,0.0,(KKN* HZN)])+ L3([OZU[0],OZU[1],0.0]))+ (L3([0.0,0.0,((KKF* HXM)* HZZ)])+ L3([OZV[0],OZV[1],0.0])))* FKO;
+		let OYN=((L3([0.0,0.0,(KKN* HZN)])+ L3([OYL[0],OYL[1],0.0]))+ (L3([0.0,0.0,((KKF* HXM)* HZZ)])+ L3([OYM[0],OYM[1],0.0])))* FKO;
 		IAC=IAA;
-		KJF=OZW;
+		KJF=OYN;
 		}
 		IAB=IAC;
 		KJE=KJF;
 		}
 		let IAD=ddt(142, IAB);
-		let PAD=KJE* KOI;
+		let OYU=KJE* KOI;
 		let IAE=A+ IAD;
 		let IAF=QB- JO;
-		let PAE=L2([0.0,IUT])- L2([IUL,0.0]);
+		let OYV=L2([0.0,IUT])- L2([IUL,0.0]);
 		let IAG=IAF- HXK;
 		let IAH=IAG/ HXM;
-		let PAF=PAE/ HXM;
+		let OYW=OYV/ HXM;
 		let IAI=IAH> LD;
 		let IAT;
 		let KJG;
 		if IAI{
-		let PAM=PAE* DG;
-		let PAN=PAE* CL;
+		let OZD=OYV* DG;
+		let OZE=OYV* CL;
 		let IAJ=FKO* ((DG* IAF)+ (CL* IAG));
-		let PAO=((L3([0.0,0.0,(KKO* IAF)])+ L3([PAM[0],PAM[1],0.0]))+ (L3([0.0,0.0,(KKH* IAG)])+ L3([PAN[0],PAN[1],0.0])))* FKO;
+		let OZF=((L3([0.0,0.0,(KKO* IAF)])+ L3([OZD[0],OZD[1],0.0]))+ (L3([0.0,0.0,(KKH* IAG)])+ L3([OZE[0],OZE[1],0.0])))* FKO;
 		IAT=IAJ;
-		KJG=PAO;
+		KJG=OZF;
 		}else{
 		let IAK=IAH< -50f64;
 		let IAU;
 		let KJH;
 		if IAK{
-		let PAJ=PAE* DG;
+		let OZA=OYV* DG;
 		let IAL=CL* HXM;
 		let IAM=IAH.exp();
-		let PAK=(PAF* IAM)* IAL;
+		let OZB=(OYW* IAM)* IAL;
 		let IAN=FKO* ((DG* IAF)+ (IAL* IAM));
-		let PAL=((L3([0.0,0.0,(KKO* IAF)])+ L3([PAJ[0],PAJ[1],0.0]))+ (L3([0.0,0.0,((KKH* HXM)* IAM)])+ L3([PAK[0],PAK[1],0.0])))* FKO;
+		let OZC=((L3([0.0,0.0,(KKO* IAF)])+ L3([OZA[0],OZA[1],0.0]))+ (L3([0.0,0.0,((KKH* HXM)* IAM)])+ L3([OZB[0],OZB[1],0.0])))* FKO;
 		IAU=IAN;
-		KJH=PAL;
+		KJH=OZC;
 		}else{
-		let PAG=PAE* DG;
+		let OYX=OYV* DG;
 		let IAO=CL* HXM;
 		let IAP=IAH.exp();
 		let IAQ=F+ IAP;
 		let IAR=IAQ.ln();
-		let PAH=((PAF* IAP)* (IUF/ IAQ))* IAO;
+		let OYY=((OYW* IAP)* (IUF/ IAQ))* IAO;
 		let IAS=FKO* ((DG* IAF)+ (IAO* IAR));
-		let PAI=((L3([0.0,0.0,(KKO* IAF)])+ L3([PAG[0],PAG[1],0.0]))+ (L3([0.0,0.0,((KKH* HXM)* IAR)])+ L3([PAH[0],PAH[1],0.0])))* FKO;
+		let OYZ=((L3([0.0,0.0,(KKO* IAF)])+ L3([OYX[0],OYX[1],0.0]))+ (L3([0.0,0.0,((KKH* HXM)* IAR)])+ L3([OYY[0],OYY[1],0.0])))* FKO;
 		IAU=IAS;
-		KJH=PAI;
+		KJH=OYZ;
 		}
 		IAT=IAU;
 		KJG=KJH;
 		}
 		let IAV=ddt(143, IAT);
-		let PAP=KJG* KOI;
+		let OZG=KJG* KOI;
 		let IAW=A+ IAV;
 		let IAX=HXD- QB;
-		let PAQ=L2([0.0,IUZ])- L2([IUT,0.0]);
+		let OZH=L2([0.0,IUZ])- L2([IUT,0.0]);
 		let IAY=IAX- HXK;
 		let IAZ=IAY/ HXM;
-		let PAR=PAQ/ HXM;
+		let OZI=OZH/ HXM;
 		let IBA=IAZ> LD;
 		let IBL;
 		let KJI;
 		if IBA{
-		let PAY=PAQ* DJ;
-		let PAZ=PAQ* CR;
+		let OZP=OZH* DJ;
+		let OZQ=OZH* CR;
 		let IBB=FKO* ((DJ* IAX)+ (CR* IAY));
-		let PBA=((L3([0.0,(KKP* IAX),0.0])+ L3([PAY[0],0.0,PAY[1]]))+ (L3([0.0,(KKJ* IAY),0.0])+ L3([PAZ[0],0.0,PAZ[1]])))* FKO;
+		let OZR=((L3([0.0,(KKP* IAX),0.0])+ L3([OZP[0],0.0,OZP[1]]))+ (L3([0.0,(KKJ* IAY),0.0])+ L3([OZQ[0],0.0,OZQ[1]])))* FKO;
 		IBL=IBB;
-		KJI=PBA;
+		KJI=OZR;
 		}else{
 		let IBC=IAZ< -50f64;
 		let IBM;
 		let KJJ;
 		if IBC{
-		let PAV=PAQ* DJ;
+		let OZM=OZH* DJ;
 		let IBD=CR* HXM;
 		let IBE=IAZ.exp();
-		let PAW=(PAR* IBE)* IBD;
+		let OZN=(OZI* IBE)* IBD;
 		let IBF=FKO* ((DJ* IAX)+ (IBD* IBE));
-		let PAX=((L3([0.0,(KKP* IAX),0.0])+ L3([PAV[0],0.0,PAV[1]]))+ (L3([0.0,((KKJ* HXM)* IBE),0.0])+ L3([PAW[0],0.0,PAW[1]])))* FKO;
+		let OZO=((L3([0.0,(KKP* IAX),0.0])+ L3([OZM[0],0.0,OZM[1]]))+ (L3([0.0,((KKJ* HXM)* IBE),0.0])+ L3([OZN[0],0.0,OZN[1]])))* FKO;
 		IBM=IBF;
-		KJJ=PAX;
+		KJJ=OZO;
 		}else{
-		let PAS=PAQ* DJ;
+		let OZJ=OZH* DJ;
 		let IBG=CR* HXM;
 		let IBH=IAZ.exp();
 		let IBI=F+ IBH;
 		let IBJ=IBI.ln();
-		let PAT=((PAR* IBH)* (IUF/ IBI))* IBG;
+		let OZK=((OZI* IBH)* (IUF/ IBI))* IBG;
 		let IBK=FKO* ((DJ* IAX)+ (IBG* IBJ));
-		let PAU=((L3([0.0,(KKP* IAX),0.0])+ L3([PAS[0],0.0,PAS[1]]))+ (L3([0.0,((KKJ* HXM)* IBJ),0.0])+ L3([PAT[0],0.0,PAT[1]])))* FKO;
+		let OZL=((L3([0.0,(KKP* IAX),0.0])+ L3([OZJ[0],0.0,OZJ[1]]))+ (L3([0.0,((KKJ* HXM)* IBJ),0.0])+ L3([OZK[0],0.0,OZK[1]])))* FKO;
 		IBM=IBK;
-		KJJ=PAU;
+		KJJ=OZL;
 		}
 		IBL=IBM;
 		KJI=KJJ;
 		}
 		let IBN=ddt(144, IBL);
-		let PBB=KJI* KOI;
+		let OZS=KJI* KOI;
 		let IBO=A+ IBN;
 		let IBP=parameters[347]== F;
 		let ILW;
@@ -17826,66 +17791,66 @@ impl Instance {
 		IMS=A;
 		IMU=A;
 		}
-		let PBC=KMO* FFS;
-		let PBD=(NUO* JH)+ L8([0.0,PBC[0],0.0,PBC[1],0.0,0.0,0.0,0.0]);
-		let PBE=KQH* IDF;
-		let PBF=(JTX* PN)+ L6([0.0,0.0,0.0,PBE[0],PBE[1],0.0]);
-		let PBG=L13([0.0,0.0,PBD[0],PBD[1],PBD[2],PBD[3],0.0,0.0,0.0,PBD[4],PBD[5],PBD[6],PBD[7]])+ L13([PBF[0],PBF[1],PBF[2],0.0,0.0,0.0,PBF[3],PBF[4],PBF[5],0.0,0.0,0.0,0.0]);
-		let PBH=KNH* IDG;
-		let PBI=(JTC* KK)+ L5([0.0,0.0,0.0,PBH[0],PBH[1]]);
-		let PBJ=L15([PBG[0],PBG[1],PBG[2],PBG[3],PBG[4],PBG[5],0.0,PBG[6],PBG[7],0.0,PBG[8],PBG[9],PBG[10],PBG[11],PBG[12]])+ L15([PBI[0],PBI[1],PBI[2],0.0,0.0,0.0,PBI[3],0.0,0.0,PBI[4],0.0,0.0,0.0,0.0,0.0]);
-		let PBK=KSC* IDH;
-		let PBL=(JQU* RD)+ L5([0.0,0.0,0.0,PBK[0],PBK[1]]);
-		let PBM=L17([PBJ[0],PBJ[1],PBJ[2],PBJ[3],0.0,PBJ[4],PBJ[5],0.0,PBJ[6],PBJ[7],PBJ[8],PBJ[9],PBJ[10],PBJ[11],PBJ[12],PBJ[13],PBJ[14]])+ L17([0.0,PBL[0],PBL[1],0.0,PBL[2],0.0,0.0,PBL[3],PBL[4],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]);
-		let PBN=KRQ* IDI;
-		let PBO=(JOH* QU)+ L5([0.0,0.0,0.0,PBN[0],PBN[1]]);
-		let PBP=L18([PBM[0],PBM[1],PBM[2],PBM[3],PBM[4],PBM[5],PBM[6],0.0,PBM[7],PBM[8],PBM[9],PBM[10],PBM[11],PBM[12],PBM[13],PBM[14],PBM[15],PBM[16]])+ L18([0.0,PBO[0],PBO[1],0.0,PBO[2],0.0,0.0,PBO[3],PBO[4],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]);
-		let PBQ=KRE* IDJ;
-		let PBR=(JLU* QK)+ L5([0.0,0.0,0.0,PBQ[0],PBQ[1]]);
-		let PBS=KQS* IDK;
-		let PBT=(JJH* PZ)+ L5([0.0,0.0,0.0,PBS[0],PBS[1]]);
-		let PBU=(L19([PBP[0],PBP[1],PBP[2],PBP[3],PBP[4],PBP[5],PBP[6],0.0,PBP[7],PBP[8],PBP[9],PBP[10],PBP[11],PBP[12],PBP[13],PBP[14],PBP[15],PBP[16],PBP[17]])+ L19([0.0,PBR[0],PBR[1],0.0,PBR[2],0.0,0.0,PBR[3],PBR[4],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]))+ L19([0.0,PBT[0],PBT[1],0.0,PBT[2],0.0,PBT[3],PBT[4],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]);
-		let PBV=KSO* IDL;
-		let PBW=(JGU* RN)+ L5([0.0,0.0,PBV[0],0.0,PBV[1]]);
-		let PBX=L20([PBU[0],PBU[1],PBU[2],PBU[3],PBU[4],PBU[5],PBU[6],PBU[7],PBU[8],PBU[9],PBU[10],0.0,PBU[11],PBU[12],PBU[13],PBU[14],PBU[15],PBU[16],PBU[17],PBU[18]])+ L20([0.0,PBW[0],PBW[1],PBW[2],PBW[3],0.0,0.0,0.0,0.0,0.0,0.0,PBW[4],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]);
-		let PBY=KTA* IDM;
-		let PBZ=(JEH* RX)+ L5([0.0,0.0,0.0,PBY[0],PBY[1]]);
+		let OZT=KMO* FFS;
+		let OZU=(NTF* JH)+ L8([0.0,OZT[0],0.0,OZT[1],0.0,0.0,0.0,0.0]);
+		let OZV=KQH* IDF;
+		let OZW=(JTX* PN)+ L6([0.0,0.0,0.0,OZV[0],OZV[1],0.0]);
+		let OZX=L13([0.0,0.0,OZU[0],OZU[1],OZU[2],OZU[3],0.0,0.0,0.0,OZU[4],OZU[5],OZU[6],OZU[7]])+ L13([OZW[0],OZW[1],OZW[2],0.0,0.0,0.0,OZW[3],OZW[4],OZW[5],0.0,0.0,0.0,0.0]);
+		let OZY=KNH* IDG;
+		let OZZ=(JTC* KK)+ L5([0.0,0.0,0.0,OZY[0],OZY[1]]);
+		let PAA=L15([OZX[0],OZX[1],OZX[2],OZX[3],OZX[4],OZX[5],0.0,OZX[6],OZX[7],0.0,OZX[8],OZX[9],OZX[10],OZX[11],OZX[12]])+ L15([OZZ[0],OZZ[1],OZZ[2],0.0,0.0,0.0,OZZ[3],0.0,0.0,OZZ[4],0.0,0.0,0.0,0.0,0.0]);
+		let PAB=KSC* IDH;
+		let PAC=(JQU* RD)+ L5([0.0,0.0,0.0,PAB[0],PAB[1]]);
+		let PAD=L17([PAA[0],PAA[1],PAA[2],PAA[3],0.0,PAA[4],PAA[5],0.0,PAA[6],PAA[7],PAA[8],PAA[9],PAA[10],PAA[11],PAA[12],PAA[13],PAA[14]])+ L17([0.0,PAC[0],PAC[1],0.0,PAC[2],0.0,0.0,PAC[3],PAC[4],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]);
+		let PAE=KRQ* IDI;
+		let PAF=(JOH* QU)+ L5([0.0,0.0,0.0,PAE[0],PAE[1]]);
+		let PAG=L18([PAD[0],PAD[1],PAD[2],PAD[3],PAD[4],PAD[5],PAD[6],0.0,PAD[7],PAD[8],PAD[9],PAD[10],PAD[11],PAD[12],PAD[13],PAD[14],PAD[15],PAD[16]])+ L18([0.0,PAF[0],PAF[1],0.0,PAF[2],0.0,0.0,PAF[3],PAF[4],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]);
+		let PAH=KRE* IDJ;
+		let PAI=(JLU* QK)+ L5([0.0,0.0,0.0,PAH[0],PAH[1]]);
+		let PAJ=KQS* IDK;
+		let PAK=(JJH* PZ)+ L5([0.0,0.0,0.0,PAJ[0],PAJ[1]]);
+		let PAL=(L19([PAG[0],PAG[1],PAG[2],PAG[3],PAG[4],PAG[5],PAG[6],0.0,PAG[7],PAG[8],PAG[9],PAG[10],PAG[11],PAG[12],PAG[13],PAG[14],PAG[15],PAG[16],PAG[17]])+ L19([0.0,PAI[0],PAI[1],0.0,PAI[2],0.0,0.0,PAI[3],PAI[4],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]))+ L19([0.0,PAK[0],PAK[1],0.0,PAK[2],0.0,PAK[3],PAK[4],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]);
+		let PAM=KSO* IDL;
+		let PAN=(JGU* RN)+ L5([0.0,0.0,PAM[0],0.0,PAM[1]]);
+		let PAO=L20([PAL[0],PAL[1],PAL[2],PAL[3],PAL[4],PAL[5],PAL[6],PAL[7],PAL[8],PAL[9],PAL[10],0.0,PAL[11],PAL[12],PAL[13],PAL[14],PAL[15],PAL[16],PAL[17],PAL[18]])+ L20([0.0,PAN[0],PAN[1],PAN[2],PAN[3],0.0,0.0,0.0,0.0,0.0,0.0,PAN[4],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]);
+		let PAP=KTA* IDM;
+		let PAQ=(JEH* RX)+ L5([0.0,0.0,0.0,PAP[0],PAP[1]]);
 		let IDN=((((((((FFS* JH)+ (IDF* PN))+ (IDG* KK))+ (IDH* RD))+ (IDI* QU))+ (IDJ* QK))+ (IDK* PZ))+ (IDL* RN))+ (IDM* RX);
-		let PCA=L21([PBX[0],PBX[1],PBX[2],PBX[3],PBX[4],PBX[5],PBX[6],PBX[7],PBX[8],PBX[9],PBX[10],PBX[11],0.0,PBX[12],PBX[13],PBX[14],PBX[15],PBX[16],PBX[17],PBX[18],PBX[19]])+ L21([0.0,PBZ[0],PBZ[1],0.0,PBZ[2],0.0,0.0,0.0,0.0,0.0,0.0,PBZ[3],PBZ[4],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]);
-		let PCB=KTM* IDO;
-		let PCC=(JBU* SH)+ L5([0.0,0.0,0.0,PCB[0],PCB[1]]);
-		let PCD=KTY* IDP;
-		let PCE=(IZH* SQ)+ L5([0.0,0.0,0.0,PCD[0],PCD[1]]);
+		let PAR=L21([PAO[0],PAO[1],PAO[2],PAO[3],PAO[4],PAO[5],PAO[6],PAO[7],PAO[8],PAO[9],PAO[10],PAO[11],0.0,PAO[12],PAO[13],PAO[14],PAO[15],PAO[16],PAO[17],PAO[18],PAO[19]])+ L21([0.0,PAQ[0],PAQ[1],0.0,PAQ[2],0.0,0.0,0.0,0.0,0.0,0.0,PAQ[3],PAQ[4],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]);
+		let PAS=KTM* IDO;
+		let PAT=(JBU* SH)+ L5([0.0,0.0,0.0,PAS[0],PAS[1]]);
+		let PAU=KTY* IDP;
+		let PAV=(IZH* SQ)+ L5([0.0,0.0,0.0,PAU[0],PAU[1]]);
 		let IDQ=(IDN+ (IDO* SH))+ (IDP* SQ);
-		let PCF=(L22([PCA[0],PCA[1],PCA[2],PCA[3],PCA[4],PCA[5],PCA[6],PCA[7],PCA[8],PCA[9],PCA[10],PCA[11],PCA[12],0.0,PCA[13],PCA[14],PCA[15],PCA[16],PCA[17],PCA[18],PCA[19],PCA[20]])+ L22([0.0,PCC[0],PCC[1],0.0,PCC[2],0.0,0.0,0.0,0.0,0.0,0.0,0.0,PCC[3],PCC[4],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]))+ L22([0.0,PCE[0],PCE[1],0.0,PCE[2],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,PCE[3],PCE[4],0.0,0.0,0.0,0.0,0.0,0.0,0.0]);
+		let PAW=(L22([PAR[0],PAR[1],PAR[2],PAR[3],PAR[4],PAR[5],PAR[6],PAR[7],PAR[8],PAR[9],PAR[10],PAR[11],PAR[12],0.0,PAR[13],PAR[14],PAR[15],PAR[16],PAR[17],PAR[18],PAR[19],PAR[20]])+ L22([0.0,PAT[0],PAT[1],0.0,PAT[2],0.0,0.0,0.0,0.0,0.0,0.0,0.0,PAT[3],PAT[4],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]))+ L22([0.0,PAV[0],PAV[1],0.0,PAV[2],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,PAV[3],PAV[4],0.0,0.0,0.0,0.0,0.0,0.0,0.0]);
 		let IDU;
 		let KJK;
 		if AM{
 		let IDR=PM- JO;
-		let PCG=(L2([0.0,IUQ])- L2([IUL,0.0]))* IDR;
-		let PCH=PCG+ PCG;
+		let PAX=(L2([0.0,IUQ])- L2([IUL,0.0]))* IDR;
+		let PAY=PAX+ PAX;
 		let IDS=(IDR* IDR)/ HWS;
-		let PCI=(L3([PCH[0],0.0,PCH[1]])- L3([0.0,(IVE* IDS),0.0]))/ HWS;
+		let PAZ=(L3([PAY[0],0.0,PAY[1]])).product_sum_div(IUF,L3([0.0,IVE,0.0]),(-IDS),HWS);
 		let IDT=IDQ+ IDS;
-		let PCJ=PCF+ L22([PCI[0],0.0,PCI[1],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,PCI[2],0.0,0.0,0.0,0.0,0.0,0.0]);
+		let PBA=PAW+ L22([PAZ[0],0.0,PAZ[1],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,PAZ[2],0.0,0.0,0.0,0.0,0.0,0.0]);
 		IDU=IDT;
-		KJK=PCJ;
+		KJK=PBA;
 		}else{
 		IDU=IDQ;
-		KJK=PCF;
+		KJK=PAW;
 		}
 		let IEE;
 		let KJL;
 		if AA{
 		let IDV=JN- JQ;
-		let PCK=(L2([0.0,IUK])- L2([IUM,0.0]))* IDV;
-		let PCL=PCK+ PCK;
+		let PBB=(L2([0.0,IUK])- L2([IUM,0.0]))* IDV;
+		let PBC=PBB+ PBB;
 		let IDW=(IDV* IDV)/ HWX;
-		let PCM=(L3([PCL[0],0.0,PCL[1]])- L3([0.0,(IVC* IDW),0.0]))/ HWX;
+		let PBD=(L3([PBC[0],0.0,PBC[1]])).product_sum_div(IUF,L3([0.0,IVC,0.0]),(-IDW),HWX);
 		let IDX=IDU+ IDW;
-		let PCN=KJK+ L22([0.0,PCM[0],PCM[1],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,PCM[2],0.0,0.0,0.0,0.0,0.0]);
+		let PBE=KJK+ L22([0.0,PBD[0],PBD[1],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,PBD[2],0.0,0.0,0.0,0.0,0.0]);
 		IEE=IDX;
-		KJL=PCN;
+		KJL=PBE;
 		}else{
 		IEE=IDU;
 		KJL=KJK;
@@ -17903,13 +17868,13 @@ impl Instance {
 		let KJP;
 		if IDZ{
 		let IEB=IEA* G;
-		let PCP=IUG* IEA;
+		let PBG=IUG* IEA;
 		let IEC=ddt(145, IEB);
-		let PCQ=PCP* KOI;
+		let PBH=PBG* KOI;
 		let IED=A+ IEC;
-		let PCR=KJL* KNJ;
+		let PBI=KJL* KNJ;
 		let IEF=A+ (-IEE);
-		let PCS=IUG/ IDY;
+		let PBJ=IUG/ IDY;
 		let IEG=A+ (G/ IDY);
 		IMW=IED;
 		IMX=IEF;
@@ -17917,10 +17882,10 @@ impl Instance {
 		IMZ=A;
 		IOV=A;
 		IUE=IEB;
-		KJM=PCQ;
-		KJN=PCR;
-		KJO=PCS;
-		KJP=PCP;
+		KJM=PBH;
+		KJN=PBI;
+		KJO=PBJ;
+		KJP=PBG;
 		}else{
 		IMW=A;
 		IMX=A;
@@ -17929,860 +17894,860 @@ impl Instance {
 		IOV=F;
 		IUE=A;
 		KJM=KJQ;
-		KJN=PCO;
+		KJN=PBF;
 		KJO=KJQ;
 		KJP=KJQ;
 		}
-		let PCT=IWX[0];
-		let PCU=IWX[1];
-		let PCV=IWX[2];
-		let PCW=IWY;
-		let PCX=IWZ[0];
-		let PCY=IWZ[1];
-		let PCZ=IXA;
-		let PDA=IXB;
-		let PDB=IXC[0];
-		let PDC=IXC[1];
-		let PDD=IXD[0];
-		let PDE=IXD[1];
-		let PDF=IXD[2];
-		let PDG=IXE[0];
-		let PDH=IXE[1];
-		let PDI=IXF[0];
-		let PDJ=IXF[1];
-		let PDK=IXG[0];
-		let PDL=IXG[1];
-		let PDM=IXH[0];
-		let PDN=IXH[1];
-		let PDO=IXI[0];
-		let PDP=IXI[1];
-		let PDQ=IXI[2];
-		let PDR=IXJ[0];
-		let PDS=IXJ[1];
-		let PDT=IXK[0];
-		let PDU=IXK[1];
-		let PDV=IXL[0];
-		let PDW=IXL[1];
-		let PDX=IZI[0];
-		let PDY=IZI[1];
-		let PDZ=IZI[2];
-		let PEA=IZI[3];
-		let PEB=IZI[4];
-		let PEC=JBB[0];
-		let PED=JBB[1];
-		let PEE=JBB[2];
-		let PEF=JBB[3];
-		let PEG=JBB[4];
-		let PEH=JBC[0];
-		let PEI=JBC[1];
-		let PEJ=JBC[2];
-		let PEK=JBC[3];
-		let PEL=JBC[4];
-		let PEM=JBD[0];
-		let PEN=JBD[1];
-		let PEO=JBD[2];
-		let PEP=JBD[3];
-		let PEQ=JBE[0];
-		let PER=JBE[1];
-		let PES=JBE[2];
-		let PET=JBE[3];
-		let PEU=JBE[4];
-		let PEV=JBF[0];
-		let PEW=JBF[1];
-		let PEX=JBF[2];
-		let PEY=JBF[3];
-		let PEZ=JBF[4];
-		let PFA=JBG[0];
-		let PFB=JBG[1];
-		let PFC=JBG[2];
-		let PFD=JBG[3];
-		let PFE=JBG[4];
-		let PFF=JBH[0];
-		let PFG=JBH[1];
-		let PFH=JBH[2];
-		let PFI=JBH[3];
-		let PFJ=LCK[0];
-		let PFK=LCK[1];
-		let PFL=LCK[2];
-		let PFM=JBV[0];
-		let PFN=JBV[1];
-		let PFO=JBV[2];
-		let PFP=JBV[3];
-		let PFQ=JBV[4];
-		let PFR=JDO[0];
-		let PFS=JDO[1];
-		let PFT=JDO[2];
-		let PFU=JDO[3];
-		let PFV=JDO[4];
-		let PFW=JDP[0];
-		let PFX=JDP[1];
-		let PFY=JDP[2];
-		let PFZ=JDP[3];
-		let PGA=JDP[4];
-		let PGB=JDQ[0];
-		let PGC=JDQ[1];
-		let PGD=JDQ[2];
-		let PGE=JDQ[3];
-		let PGF=JDR[0];
-		let PGG=JDR[1];
-		let PGH=JDR[2];
-		let PGI=JDR[3];
-		let PGJ=JDR[4];
-		let PGK=JDS[0];
-		let PGL=JDS[1];
-		let PGM=JDS[2];
-		let PGN=JDS[3];
-		let PGO=JDS[4];
-		let PGP=JDT[0];
-		let PGQ=JDT[1];
-		let PGR=JDT[2];
-		let PGS=JDT[3];
-		let PGT=JDT[4];
-		let PGU=JDU[0];
-		let PGV=JDU[1];
-		let PGW=JDU[2];
-		let PGX=JDU[3];
-		let PGY=LKT[0];
-		let PGZ=LKT[1];
-		let PHA=LKT[2];
-		let PHB=JEI[0];
-		let PHC=JEI[1];
-		let PHD=JEI[2];
-		let PHE=JEI[3];
-		let PHF=JEI[4];
-		let PHG=JGB[0];
-		let PHH=JGB[1];
-		let PHI=JGB[2];
-		let PHJ=JGB[3];
-		let PHK=JGB[4];
-		let PHL=JGC[0];
-		let PHM=JGC[1];
-		let PHN=JGC[2];
-		let PHO=JGC[3];
-		let PHP=JGC[4];
-		let PHQ=JGD[0];
-		let PHR=JGD[1];
-		let PHS=JGD[2];
-		let PHT=JGD[3];
-		let PHU=JGE[0];
-		let PHV=JGE[1];
-		let PHW=JGE[2];
-		let PHX=JGE[3];
-		let PHY=JGE[4];
-		let PHZ=JGF[0];
-		let PIA=JGF[1];
-		let PIB=JGF[2];
-		let PIC=JGF[3];
-		let PID=JGF[4];
-		let PIE=JGG[0];
-		let PIF=JGG[1];
-		let PIG=JGG[2];
-		let PIH=JGG[3];
-		let PII=JGG[4];
-		let PIJ=JGH[0];
-		let PIK=JGH[1];
-		let PIL=JGH[2];
-		let PIM=JGH[3];
-		let PIN=LTC[0];
-		let PIO=LTC[1];
-		let PIP=LTC[2];
-		let PIQ=JGV[0];
-		let PIR=JGV[1];
-		let PIS=JGV[2];
-		let PIT=JGV[3];
-		let PIU=JGV[4];
-		let PIV=JIO[0];
-		let PIW=JIO[1];
-		let PIX=JIO[2];
-		let PIY=JIO[3];
-		let PIZ=JIO[4];
-		let PJA=JIP[0];
-		let PJB=JIP[1];
-		let PJC=JIP[2];
-		let PJD=JIP[3];
-		let PJE=JIP[4];
-		let PJF=JIQ[0];
-		let PJG=JIQ[1];
-		let PJH=JIQ[2];
-		let PJI=JIQ[3];
-		let PJJ=JIR[0];
-		let PJK=JIR[1];
-		let PJL=JIR[2];
-		let PJM=JIR[3];
-		let PJN=JIR[4];
-		let PJO=JIS[0];
-		let PJP=JIS[1];
-		let PJQ=JIS[2];
-		let PJR=JIS[3];
-		let PJS=JIS[4];
-		let PJT=JIT[0];
-		let PJU=JIT[1];
-		let PJV=JIT[2];
-		let PJW=JIT[3];
-		let PJX=JIT[4];
-		let PJY=JIU[0];
-		let PJZ=JIU[1];
-		let PKA=JIU[2];
-		let PKB=JIU[3];
-		let PKC=MBL[0];
-		let PKD=MBL[1];
-		let PKE=MBL[2];
-		let PKF=JJI[0];
-		let PKG=JJI[1];
-		let PKH=JJI[2];
-		let PKI=JJI[3];
-		let PKJ=JJI[4];
-		let PKK=JLB[0];
-		let PKL=JLB[1];
-		let PKM=JLB[2];
-		let PKN=JLB[3];
-		let PKO=JLB[4];
-		let PKP=JLC[0];
-		let PKQ=JLC[1];
-		let PKR=JLC[2];
-		let PKS=JLC[3];
-		let PKT=JLC[4];
-		let PKU=JLD[0];
-		let PKV=JLD[1];
-		let PKW=JLD[2];
-		let PKX=JLD[3];
-		let PKY=JLE[0];
-		let PKZ=JLE[1];
-		let PLA=JLE[2];
-		let PLB=JLE[3];
-		let PLC=JLE[4];
-		let PLD=JLF[0];
-		let PLE=JLF[1];
-		let PLF=JLF[2];
-		let PLG=JLF[3];
-		let PLH=JLF[4];
-		let PLI=JLG[0];
-		let PLJ=JLG[1];
-		let PLK=JLG[2];
-		let PLL=JLG[3];
-		let PLM=JLG[4];
-		let PLN=JLH[0];
-		let PLO=JLH[1];
-		let PLP=JLH[2];
-		let PLQ=JLH[3];
-		let PLR=MJT[0];
-		let PLS=MJT[1];
-		let PLT=MJT[2];
-		let PLU=JLV[0];
-		let PLV=JLV[1];
-		let PLW=JLV[2];
-		let PLX=JLV[3];
-		let PLY=JLV[4];
-		let PLZ=JNO[0];
-		let PMA=JNO[1];
-		let PMB=JNO[2];
-		let PMC=JNO[3];
-		let PMD=JNO[4];
-		let PME=JNP[0];
-		let PMF=JNP[1];
-		let PMG=JNP[2];
-		let PMH=JNP[3];
-		let PMI=JNP[4];
-		let PMJ=JNQ[0];
-		let PMK=JNQ[1];
-		let PML=JNQ[2];
-		let PMM=JNQ[3];
-		let PMN=JNR[0];
-		let PMO=JNR[1];
-		let PMP=JNR[2];
-		let PMQ=JNR[3];
-		let PMR=JNR[4];
-		let PMS=JNS[0];
-		let PMT=JNS[1];
-		let PMU=JNS[2];
-		let PMV=JNS[3];
-		let PMW=JNS[4];
-		let PMX=JNT[0];
-		let PMY=JNT[1];
-		let PMZ=JNT[2];
-		let PNA=JNT[3];
-		let PNB=JNT[4];
-		let PNC=JNU[0];
-		let PND=JNU[1];
-		let PNE=JNU[2];
-		let PNF=JNU[3];
-		let PNG=MSC[0];
-		let PNH=MSC[1];
-		let PNI=MSC[2];
-		let PNJ=JOI[0];
-		let PNK=JOI[1];
-		let PNL=JOI[2];
-		let PNM=JOI[3];
-		let PNN=JOI[4];
-		let PNO=JQB[0];
-		let PNP=JQB[1];
-		let PNQ=JQB[2];
-		let PNR=JQB[3];
-		let PNS=JQB[4];
-		let PNT=JQC[0];
-		let PNU=JQC[1];
-		let PNV=JQC[2];
-		let PNW=JQC[3];
-		let PNX=JQC[4];
-		let PNY=JQD[0];
-		let PNZ=JQD[1];
-		let POA=JQD[2];
-		let POB=JQD[3];
-		let POC=JQE[0];
-		let POD=JQE[1];
-		let POE=JQE[2];
-		let POF=JQE[3];
-		let POG=JQE[4];
-		let POH=JQF[0];
-		let POI=JQF[1];
-		let POJ=JQF[2];
-		let POK=JQF[3];
-		let POL=JQF[4];
-		let POM=JQG[0];
-		let PON=JQG[1];
-		let POO=JQG[2];
-		let POP=JQG[3];
-		let POQ=JQG[4];
-		let POR=JQH[0];
-		let POS=JQH[1];
-		let POT=JQH[2];
-		let POU=JQH[3];
-		let POV=NAL[0];
-		let POW=NAL[1];
-		let POX=NAL[2];
-		let POY=JQV[0];
-		let POZ=JQV[1];
-		let PPA=JQV[2];
-		let PPB=JQV[3];
-		let PPC=JQV[4];
-		let PPD=JSO[0];
-		let PPE=JSO[1];
-		let PPF=JSO[2];
-		let PPG=JSO[3];
-		let PPH=JSO[4];
-		let PPI=JSP[0];
-		let PPJ=JSP[1];
-		let PPK=JSP[2];
-		let PPL=JSP[3];
-		let PPM=JSP[4];
-		let PPN=JSQ[0];
-		let PPO=JSQ[1];
-		let PPP=JSQ[2];
-		let PPQ=JSQ[3];
-		let PPR=JSR[0];
-		let PPS=JSR[1];
-		let PPT=JSR[2];
-		let PPU=JSR[3];
-		let PPV=JSR[4];
-		let PPW=JSS[0];
-		let PPX=JSS[1];
-		let PPY=JSS[2];
-		let PPZ=JSS[3];
-		let PQA=JSS[4];
-		let PQB=JST[0];
-		let PQC=JST[1];
-		let PQD=JST[2];
-		let PQE=JST[3];
-		let PQF=JST[4];
-		let PQG=JSU[0];
-		let PQH=JSU[1];
-		let PQI=JSU[2];
-		let PQJ=JSU[3];
-		let PQK=NIU[0];
-		let PQL=NIU[1];
-		let PQM=NIU[2];
-		let PQN=JTD[0];
-		let PQO=JTD[1];
-		let PQP=JTD[2];
-		let PQQ=JTD[3];
-		let PQR=JTD[4];
-		let PQS=JTY[0];
-		let PQT=JTY[1];
-		let PQU=JTY[2];
-		let PQV=JTY[3];
-		let PQW=JTY[4];
-		let PQX=JTY[5];
-		let PQY=JWB[0];
-		let PQZ=JWB[1];
-		let PRA=JWB[2];
-		let PRB=JWB[3];
-		let PRC=JWB[4];
-		let PRD=JWB[5];
-		let PRE=JWB[6];
-		let PRF=JWB[7];
-		let PRG=JWC[0];
-		let PRH=JWC[1];
-		let PRI=JWC[2];
-		let PRJ=JWC[3];
-		let PRK=JWC[4];
-		let PRL=JWC[5];
-		let PRM=JWC[6];
-		let PRN=JWC[7];
-		let PRO=JWC[8];
-		let PRP=JWC[9];
-		let PRQ=JWD[0];
-		let PRR=JWD[1];
-		let PRS=JWE[0];
-		let PRT=JWE[1];
-		let PRU=JWE[2];
-		let PRV=NXX[0];
-		let PRW=NXX[1];
-		let PRX=NXX[2];
-		let PRY=NXX[3];
-		let PRZ=NXX[4];
-		let PSA=NXX[5];
-		let PSB=NXX[6];
-		let PSC=NXX[7];
-		let PSD=NYC[0];
-		let PSE=NYC[1];
-		let PSF=NYC[2];
-		let PSG=NYC[3];
-		let PSH=NYC[4];
-		let PSI=NYC[5];
-		let PSJ=NYC[6];
-		let PSK=NYC[7];
-		let PSL=JWH[0];
-		let PSM=JWH[1];
-		let PSN=JWH[2];
-		let PSO=JWI[0];
-		let PSP=JWI[1];
-		let PSQ=JWI[2];
-		let PSR=JWJ[0];
-		let PSS=JWJ[1];
-		let PST=JWJ[2];
-		let PSU=JWK[0];
-		let PSV=JWK[1];
-		let PSW=JWK[2];
-		let PSX=JWL[0];
-		let PSY=JWL[1];
-		let PSZ=JWL[2];
-		let PTA=JWM[0];
-		let PTB=JWM[1];
-		let PTC=JWM[2];
-		let PTD=JWN[0];
-		let PTE=JWN[1];
-		let PTF=JWN[2];
-		let PTG=JWO[0];
-		let PTH=JWO[1];
-		let PTI=JWO[2];
-		let PTJ=KDZ[0];
-		let PTK=KDZ[1];
-		let PTL=KDZ[2];
-		let PTM=KEA[0];
-		let PTN=KEA[1];
-		let PTO=KEA[2];
-		let PTP=KEB[0];
-		let PTQ=KEB[1];
-		let PTR=KEC[0];
-		let PTS=KEC[1];
-		let PTT=KGQ[0];
-		let PTU=KGQ[1];
-		let PTV=KGQ[2];
-		let PTW=KGQ[3];
-		let PTX=KGQ[4];
-		let PTY=KGQ[5];
-		let PTZ=KGR[0];
-		let PUA=KGR[1];
-		let PUB=KGR[2];
-		let PUC=KGR[3];
-		let PUD=KGR[4];
-		let PUE=KGR[5];
-		let PUF=KGS[0];
-		let PUG=KGS[1];
-		let PUH=KGS[2];
-		let PUI=KGS[3];
-		let PUJ=KGS[4];
-		let PUK=KGS[5];
-		let PUL=KGT[0];
-		let PUM=KGT[1];
-		let PUN=KGT[2];
-		let PUO=KGT[3];
-		let PUP=KGT[4];
-		let PUQ=KGT[5];
-		let PUR=KIU[0];
-		let PUS=KIU[1];
-		let PUT=KIU[2];
-		let PUU=KIV[0];
-		let PUV=KIV[1];
-		let PUW=KIV[2];
-		let PUX=KIW[0];
-		let PUY=KIW[1];
-		let PUZ=KIX[0];
-		let PVA=KIX[1];
-		let PVB=OYT[0];
-		let PVC=OYT[1];
-		let PVD=OYT[2];
-		let PVE=OZF[0];
-		let PVF=OZF[1];
-		let PVG=OZF[2];
-		let PVH=OZR[0];
-		let PVI=OZR[1];
-		let PVJ=OZR[2];
-		let PVK=PAD[0];
-		let PVL=PAD[1];
-		let PVM=PAD[2];
-		let PVN=PAP[0];
-		let PVO=PAP[1];
-		let PVP=PAP[2];
-		let PVQ=PBB[0];
-		let PVR=PBB[1];
-		let PVS=PBB[2];
-		let PVT=KJM;
-		let PVU=KJN[0];
-		let PVV=KJN[1];
-		let PVW=KJN[2];
-		let PVX=KJN[3];
-		let PVY=KJN[4];
-		let PVZ=KJN[5];
-		let PWA=KJN[6];
-		let PWB=KJN[7];
-		let PWC=KJN[8];
-		let PWD=KJN[9];
-		let PWE=KJN[10];
-		let PWF=KJN[11];
-		let PWG=KJN[12];
-		let PWH=KJN[13];
-		let PWI=KJN[14];
-		let PWJ=KJN[15];
-		let PWK=KJN[16];
-		let PWL=KJN[17];
-		let PWM=KJN[18];
-		let PWN=KJN[19];
-		let PWO=KJN[20];
-		let PWP=KJN[21];
-		let PWQ=KJO;
-		let PWR=IXM[0];
-		let PWS=IXM[1];
-		let PWT=IXN;
-		let PWU=IXO;
-		let PWV=IXP;
-		let PWW=JBI[0];
-		let PWX=JBI[1];
-		let PWY=JBI[2];
-		let PWZ=JBI[3];
-		let PXA=JBI[4];
-		let PXB=JBJ[0];
-		let PXC=JBJ[1];
-		let PXD=JBJ[2];
-		let PXE=JBJ[3];
-		let PXF=JBJ[4];
-		let PXG=JBK[0];
-		let PXH=JBK[1];
-		let PXI=JBK[2];
-		let PXJ=JBK[3];
-		let PXK=JBL[0];
-		let PXL=JBL[1];
-		let PXM=JBL[2];
-		let PXN=JBL[3];
-		let PXO=JBL[4];
-		let PXP=JBM[0];
-		let PXQ=JBM[1];
-		let PXR=JBM[2];
-		let PXS=JBM[3];
-		let PXT=JBM[4];
-		let PXU=JBN[0];
-		let PXV=JBN[1];
-		let PXW=JBN[2];
-		let PXX=JBN[3];
-		let PXY=JBN[4];
-		let PXZ=JBO[0];
-		let PYA=JBO[1];
-		let PYB=JBO[2];
-		let PYC=JBO[3];
-		let PYD=LCL[0];
-		let PYE=LCL[1];
-		let PYF=LCL[2];
-		let PYG=JDV[0];
-		let PYH=JDV[1];
-		let PYI=JDV[2];
-		let PYJ=JDV[3];
-		let PYK=JDV[4];
-		let PYL=JDW[0];
-		let PYM=JDW[1];
-		let PYN=JDW[2];
-		let PYO=JDW[3];
-		let PYP=JDW[4];
-		let PYQ=JDX[0];
-		let PYR=JDX[1];
-		let PYS=JDX[2];
-		let PYT=JDX[3];
-		let PYU=JDY[0];
-		let PYV=JDY[1];
-		let PYW=JDY[2];
-		let PYX=JDY[3];
-		let PYY=JDY[4];
-		let PYZ=JDZ[0];
-		let PZA=JDZ[1];
-		let PZB=JDZ[2];
-		let PZC=JDZ[3];
-		let PZD=JDZ[4];
-		let PZE=JEA[0];
-		let PZF=JEA[1];
-		let PZG=JEA[2];
-		let PZH=JEA[3];
-		let PZI=JEA[4];
-		let PZJ=JEB[0];
-		let PZK=JEB[1];
-		let PZL=JEB[2];
-		let PZM=JEB[3];
-		let PZN=LKU[0];
-		let PZO=LKU[1];
-		let PZP=LKU[2];
-		let PZQ=JGI[0];
-		let PZR=JGI[1];
-		let PZS=JGI[2];
-		let PZT=JGI[3];
-		let PZU=JGI[4];
-		let PZV=JGJ[0];
-		let PZW=JGJ[1];
-		let PZX=JGJ[2];
-		let PZY=JGJ[3];
-		let PZZ=JGJ[4];
-		let QAA=JGK[0];
-		let QAB=JGK[1];
-		let QAC=JGK[2];
-		let QAD=JGK[3];
-		let QAE=JGL[0];
-		let QAF=JGL[1];
-		let QAG=JGL[2];
-		let QAH=JGL[3];
-		let QAI=JGL[4];
-		let QAJ=JGM[0];
-		let QAK=JGM[1];
-		let QAL=JGM[2];
-		let QAM=JGM[3];
-		let QAN=JGM[4];
-		let QAO=JGN[0];
-		let QAP=JGN[1];
-		let QAQ=JGN[2];
-		let QAR=JGN[3];
-		let QAS=JGN[4];
-		let QAT=JGO[0];
-		let QAU=JGO[1];
-		let QAV=JGO[2];
-		let QAW=JGO[3];
-		let QAX=LTD[0];
-		let QAY=LTD[1];
-		let QAZ=LTD[2];
-		let QBA=JIV[0];
-		let QBB=JIV[1];
-		let QBC=JIV[2];
-		let QBD=JIV[3];
-		let QBE=JIV[4];
-		let QBF=JIW[0];
-		let QBG=JIW[1];
-		let QBH=JIW[2];
-		let QBI=JIW[3];
-		let QBJ=JIW[4];
-		let QBK=JIX[0];
-		let QBL=JIX[1];
-		let QBM=JIX[2];
-		let QBN=JIX[3];
-		let QBO=JIY[0];
-		let QBP=JIY[1];
-		let QBQ=JIY[2];
-		let QBR=JIY[3];
-		let QBS=JIY[4];
-		let QBT=JIZ[0];
-		let QBU=JIZ[1];
-		let QBV=JIZ[2];
-		let QBW=JIZ[3];
-		let QBX=JIZ[4];
-		let QBY=JJA[0];
-		let QBZ=JJA[1];
-		let QCA=JJA[2];
-		let QCB=JJA[3];
-		let QCC=JJA[4];
-		let QCD=JJB[0];
-		let QCE=JJB[1];
-		let QCF=JJB[2];
-		let QCG=JJB[3];
-		let QCH=MBM[0];
-		let QCI=MBM[1];
-		let QCJ=MBM[2];
-		let QCK=JLI[0];
-		let QCL=JLI[1];
-		let QCM=JLI[2];
-		let QCN=JLI[3];
-		let QCO=JLI[4];
-		let QCP=JLJ[0];
-		let QCQ=JLJ[1];
-		let QCR=JLJ[2];
-		let QCS=JLJ[3];
-		let QCT=JLJ[4];
-		let QCU=JLK[0];
-		let QCV=JLK[1];
-		let QCW=JLK[2];
-		let QCX=JLK[3];
-		let QCY=JLL[0];
-		let QCZ=JLL[1];
-		let QDA=JLL[2];
-		let QDB=JLL[3];
-		let QDC=JLL[4];
-		let QDD=JLM[0];
-		let QDE=JLM[1];
-		let QDF=JLM[2];
-		let QDG=JLM[3];
-		let QDH=JLM[4];
-		let QDI=JLN[0];
-		let QDJ=JLN[1];
-		let QDK=JLN[2];
-		let QDL=JLN[3];
-		let QDM=JLN[4];
-		let QDN=JLO[0];
-		let QDO=JLO[1];
-		let QDP=JLO[2];
-		let QDQ=JLO[3];
-		let QDR=MJU[0];
-		let QDS=MJU[1];
-		let QDT=MJU[2];
-		let QDU=JNV[0];
-		let QDV=JNV[1];
-		let QDW=JNV[2];
-		let QDX=JNV[3];
-		let QDY=JNV[4];
-		let QDZ=JNW[0];
-		let QEA=JNW[1];
-		let QEB=JNW[2];
-		let QEC=JNW[3];
-		let QED=JNW[4];
-		let QEE=JNX[0];
-		let QEF=JNX[1];
-		let QEG=JNX[2];
-		let QEH=JNX[3];
-		let QEI=JNY[0];
-		let QEJ=JNY[1];
-		let QEK=JNY[2];
-		let QEL=JNY[3];
-		let QEM=JNY[4];
-		let QEN=JNZ[0];
-		let QEO=JNZ[1];
-		let QEP=JNZ[2];
-		let QEQ=JNZ[3];
-		let QER=JNZ[4];
-		let QES=JOA[0];
-		let QET=JOA[1];
-		let QEU=JOA[2];
-		let QEV=JOA[3];
-		let QEW=JOA[4];
-		let QEX=JOB[0];
-		let QEY=JOB[1];
-		let QEZ=JOB[2];
-		let QFA=JOB[3];
-		let QFB=MSD[0];
-		let QFC=MSD[1];
-		let QFD=MSD[2];
-		let QFE=JQI[0];
-		let QFF=JQI[1];
-		let QFG=JQI[2];
-		let QFH=JQI[3];
-		let QFI=JQI[4];
-		let QFJ=JQJ[0];
-		let QFK=JQJ[1];
-		let QFL=JQJ[2];
-		let QFM=JQJ[3];
-		let QFN=JQJ[4];
-		let QFO=JQK[0];
-		let QFP=JQK[1];
-		let QFQ=JQK[2];
-		let QFR=JQK[3];
-		let QFS=JQL[0];
-		let QFT=JQL[1];
-		let QFU=JQL[2];
-		let QFV=JQL[3];
-		let QFW=JQL[4];
-		let QFX=JQM[0];
-		let QFY=JQM[1];
-		let QFZ=JQM[2];
-		let QGA=JQM[3];
-		let QGB=JQM[4];
-		let QGC=JQN[0];
-		let QGD=JQN[1];
-		let QGE=JQN[2];
-		let QGF=JQN[3];
-		let QGG=JQN[4];
-		let QGH=JQO[0];
-		let QGI=JQO[1];
-		let QGJ=JQO[2];
-		let QGK=JQO[3];
-		let QGL=NAM[0];
-		let QGM=NAM[1];
-		let QGN=NAM[2];
-		let QGO=JSV[0];
-		let QGP=JSV[1];
-		let QGQ=JSV[2];
-		let QGR=JSV[3];
-		let QGS=JSV[4];
-		let QGT=JSW[0];
-		let QGU=JSW[1];
-		let QGV=JSW[2];
-		let QGW=JSW[3];
-		let QGX=JSW[4];
-		let QGY=JSX[0];
-		let QGZ=JSX[1];
-		let QHA=JSX[2];
-		let QHB=JSX[3];
-		let QHC=JSY[0];
-		let QHD=JSY[1];
-		let QHE=JSY[2];
-		let QHF=JSY[3];
-		let QHG=JSY[4];
-		let QHH=JSZ[0];
-		let QHI=JSZ[1];
-		let QHJ=JSZ[2];
-		let QHK=JSZ[3];
-		let QHL=JSZ[4];
-		let QHM=JTA[0];
-		let QHN=JTA[1];
-		let QHO=JTA[2];
-		let QHP=JTA[3];
-		let QHQ=JTA[4];
-		let QHR=JTB[0];
-		let QHS=JTB[1];
-		let QHT=JTB[2];
-		let QHU=JTB[3];
-		let QHV=NIV[0];
-		let QHW=NIV[1];
-		let QHX=NIV[2];
-		let QHY=JWF;
-		let QHZ=JWG;
-		let QIA=NXY[0];
-		let QIB=NXY[1];
-		let QIC=NXY[2];
-		let QID=NXY[3];
-		let QIE=NXY[4];
-		let QIF=NXY[5];
-		let QIG=NXY[6];
-		let QIH=NXY[7];
-		let QII=NYD[0];
-		let QIJ=NYD[1];
-		let QIK=NYD[2];
-		let QIL=NYD[3];
-		let QIM=NYD[4];
-		let QIN=NYD[5];
-		let QIO=NYD[6];
-		let QIP=NYD[7];
-		let QIQ=KED[0];
-		let QIR=KED[1];
-		let QIS=KIY[0];
-		let QIT=KIY[1];
-		let QIU=KIY[2];
-		let QIV=KJA[0];
-		let QIW=KJA[1];
-		let QIX=KJA[2];
-		let QIY=KJC[0];
-		let QIZ=KJC[1];
-		let QJA=KJC[2];
-		let QJB=KJE[0];
-		let QJC=KJE[1];
-		let QJD=KJE[2];
-		let QJE=KJG[0];
-		let QJF=KJG[1];
-		let QJG=KJG[2];
-		let QJH=KJI[0];
-		let QJI=KJI[1];
-		let QJJ=KJI[2];
-		let QJK=KJP;
+		let PBK=IWX[0];
+		let PBL=IWX[1];
+		let PBM=IWX[2];
+		let PBN=IWY;
+		let PBO=IWZ[0];
+		let PBP=IWZ[1];
+		let PBQ=IXA;
+		let PBR=IXB;
+		let PBS=IXC[0];
+		let PBT=IXC[1];
+		let PBU=IXD[0];
+		let PBV=IXD[1];
+		let PBW=IXD[2];
+		let PBX=IXE[0];
+		let PBY=IXE[1];
+		let PBZ=IXF[0];
+		let PCA=IXF[1];
+		let PCB=IXG[0];
+		let PCC=IXG[1];
+		let PCD=IXH[0];
+		let PCE=IXH[1];
+		let PCF=IXI[0];
+		let PCG=IXI[1];
+		let PCH=IXI[2];
+		let PCI=IXJ[0];
+		let PCJ=IXJ[1];
+		let PCK=IXK[0];
+		let PCL=IXK[1];
+		let PCM=IXL[0];
+		let PCN=IXL[1];
+		let PCO=IZI[0];
+		let PCP=IZI[1];
+		let PCQ=IZI[2];
+		let PCR=IZI[3];
+		let PCS=IZI[4];
+		let PCT=JBB[0];
+		let PCU=JBB[1];
+		let PCV=JBB[2];
+		let PCW=JBB[3];
+		let PCX=JBB[4];
+		let PCY=JBC[0];
+		let PCZ=JBC[1];
+		let PDA=JBC[2];
+		let PDB=JBC[3];
+		let PDC=JBC[4];
+		let PDD=JBD[0];
+		let PDE=JBD[1];
+		let PDF=JBD[2];
+		let PDG=JBD[3];
+		let PDH=JBE[0];
+		let PDI=JBE[1];
+		let PDJ=JBE[2];
+		let PDK=JBE[3];
+		let PDL=JBE[4];
+		let PDM=JBF[0];
+		let PDN=JBF[1];
+		let PDO=JBF[2];
+		let PDP=JBF[3];
+		let PDQ=JBF[4];
+		let PDR=JBG[0];
+		let PDS=JBG[1];
+		let PDT=JBG[2];
+		let PDU=JBG[3];
+		let PDV=JBG[4];
+		let PDW=JBH[0];
+		let PDX=JBH[1];
+		let PDY=JBH[2];
+		let PDZ=JBH[3];
+		let PEA=LCH[0];
+		let PEB=LCH[1];
+		let PEC=LCH[2];
+		let PED=JBV[0];
+		let PEE=JBV[1];
+		let PEF=JBV[2];
+		let PEG=JBV[3];
+		let PEH=JBV[4];
+		let PEI=JDO[0];
+		let PEJ=JDO[1];
+		let PEK=JDO[2];
+		let PEL=JDO[3];
+		let PEM=JDO[4];
+		let PEN=JDP[0];
+		let PEO=JDP[1];
+		let PEP=JDP[2];
+		let PEQ=JDP[3];
+		let PER=JDP[4];
+		let PES=JDQ[0];
+		let PET=JDQ[1];
+		let PEU=JDQ[2];
+		let PEV=JDQ[3];
+		let PEW=JDR[0];
+		let PEX=JDR[1];
+		let PEY=JDR[2];
+		let PEZ=JDR[3];
+		let PFA=JDR[4];
+		let PFB=JDS[0];
+		let PFC=JDS[1];
+		let PFD=JDS[2];
+		let PFE=JDS[3];
+		let PFF=JDS[4];
+		let PFG=JDT[0];
+		let PFH=JDT[1];
+		let PFI=JDT[2];
+		let PFJ=JDT[3];
+		let PFK=JDT[4];
+		let PFL=JDU[0];
+		let PFM=JDU[1];
+		let PFN=JDU[2];
+		let PFO=JDU[3];
+		let PFP=LKN[0];
+		let PFQ=LKN[1];
+		let PFR=LKN[2];
+		let PFS=JEI[0];
+		let PFT=JEI[1];
+		let PFU=JEI[2];
+		let PFV=JEI[3];
+		let PFW=JEI[4];
+		let PFX=JGB[0];
+		let PFY=JGB[1];
+		let PFZ=JGB[2];
+		let PGA=JGB[3];
+		let PGB=JGB[4];
+		let PGC=JGC[0];
+		let PGD=JGC[1];
+		let PGE=JGC[2];
+		let PGF=JGC[3];
+		let PGG=JGC[4];
+		let PGH=JGD[0];
+		let PGI=JGD[1];
+		let PGJ=JGD[2];
+		let PGK=JGD[3];
+		let PGL=JGE[0];
+		let PGM=JGE[1];
+		let PGN=JGE[2];
+		let PGO=JGE[3];
+		let PGP=JGE[4];
+		let PGQ=JGF[0];
+		let PGR=JGF[1];
+		let PGS=JGF[2];
+		let PGT=JGF[3];
+		let PGU=JGF[4];
+		let PGV=JGG[0];
+		let PGW=JGG[1];
+		let PGX=JGG[2];
+		let PGY=JGG[3];
+		let PGZ=JGG[4];
+		let PHA=JGH[0];
+		let PHB=JGH[1];
+		let PHC=JGH[2];
+		let PHD=JGH[3];
+		let PHE=LST[0];
+		let PHF=LST[1];
+		let PHG=LST[2];
+		let PHH=JGV[0];
+		let PHI=JGV[1];
+		let PHJ=JGV[2];
+		let PHK=JGV[3];
+		let PHL=JGV[4];
+		let PHM=JIO[0];
+		let PHN=JIO[1];
+		let PHO=JIO[2];
+		let PHP=JIO[3];
+		let PHQ=JIO[4];
+		let PHR=JIP[0];
+		let PHS=JIP[1];
+		let PHT=JIP[2];
+		let PHU=JIP[3];
+		let PHV=JIP[4];
+		let PHW=JIQ[0];
+		let PHX=JIQ[1];
+		let PHY=JIQ[2];
+		let PHZ=JIQ[3];
+		let PIA=JIR[0];
+		let PIB=JIR[1];
+		let PIC=JIR[2];
+		let PID=JIR[3];
+		let PIE=JIR[4];
+		let PIF=JIS[0];
+		let PIG=JIS[1];
+		let PIH=JIS[2];
+		let PII=JIS[3];
+		let PIJ=JIS[4];
+		let PIK=JIT[0];
+		let PIL=JIT[1];
+		let PIM=JIT[2];
+		let PIN=JIT[3];
+		let PIO=JIT[4];
+		let PIP=JIU[0];
+		let PIQ=JIU[1];
+		let PIR=JIU[2];
+		let PIS=JIU[3];
+		let PIT=MAZ[0];
+		let PIU=MAZ[1];
+		let PIV=MAZ[2];
+		let PIW=JJI[0];
+		let PIX=JJI[1];
+		let PIY=JJI[2];
+		let PIZ=JJI[3];
+		let PJA=JJI[4];
+		let PJB=JLB[0];
+		let PJC=JLB[1];
+		let PJD=JLB[2];
+		let PJE=JLB[3];
+		let PJF=JLB[4];
+		let PJG=JLC[0];
+		let PJH=JLC[1];
+		let PJI=JLC[2];
+		let PJJ=JLC[3];
+		let PJK=JLC[4];
+		let PJL=JLD[0];
+		let PJM=JLD[1];
+		let PJN=JLD[2];
+		let PJO=JLD[3];
+		let PJP=JLE[0];
+		let PJQ=JLE[1];
+		let PJR=JLE[2];
+		let PJS=JLE[3];
+		let PJT=JLE[4];
+		let PJU=JLF[0];
+		let PJV=JLF[1];
+		let PJW=JLF[2];
+		let PJX=JLF[3];
+		let PJY=JLF[4];
+		let PJZ=JLG[0];
+		let PKA=JLG[1];
+		let PKB=JLG[2];
+		let PKC=JLG[3];
+		let PKD=JLG[4];
+		let PKE=JLH[0];
+		let PKF=JLH[1];
+		let PKG=JLH[2];
+		let PKH=JLH[3];
+		let PKI=MJE[0];
+		let PKJ=MJE[1];
+		let PKK=MJE[2];
+		let PKL=JLV[0];
+		let PKM=JLV[1];
+		let PKN=JLV[2];
+		let PKO=JLV[3];
+		let PKP=JLV[4];
+		let PKQ=JNO[0];
+		let PKR=JNO[1];
+		let PKS=JNO[2];
+		let PKT=JNO[3];
+		let PKU=JNO[4];
+		let PKV=JNP[0];
+		let PKW=JNP[1];
+		let PKX=JNP[2];
+		let PKY=JNP[3];
+		let PKZ=JNP[4];
+		let PLA=JNQ[0];
+		let PLB=JNQ[1];
+		let PLC=JNQ[2];
+		let PLD=JNQ[3];
+		let PLE=JNR[0];
+		let PLF=JNR[1];
+		let PLG=JNR[2];
+		let PLH=JNR[3];
+		let PLI=JNR[4];
+		let PLJ=JNS[0];
+		let PLK=JNS[1];
+		let PLL=JNS[2];
+		let PLM=JNS[3];
+		let PLN=JNS[4];
+		let PLO=JNT[0];
+		let PLP=JNT[1];
+		let PLQ=JNT[2];
+		let PLR=JNT[3];
+		let PLS=JNT[4];
+		let PLT=JNU[0];
+		let PLU=JNU[1];
+		let PLV=JNU[2];
+		let PLW=JNU[3];
+		let PLX=MRK[0];
+		let PLY=MRK[1];
+		let PLZ=MRK[2];
+		let PMA=JOI[0];
+		let PMB=JOI[1];
+		let PMC=JOI[2];
+		let PMD=JOI[3];
+		let PME=JOI[4];
+		let PMF=JQB[0];
+		let PMG=JQB[1];
+		let PMH=JQB[2];
+		let PMI=JQB[3];
+		let PMJ=JQB[4];
+		let PMK=JQC[0];
+		let PML=JQC[1];
+		let PMM=JQC[2];
+		let PMN=JQC[3];
+		let PMO=JQC[4];
+		let PMP=JQD[0];
+		let PMQ=JQD[1];
+		let PMR=JQD[2];
+		let PMS=JQD[3];
+		let PMT=JQE[0];
+		let PMU=JQE[1];
+		let PMV=JQE[2];
+		let PMW=JQE[3];
+		let PMX=JQE[4];
+		let PMY=JQF[0];
+		let PMZ=JQF[1];
+		let PNA=JQF[2];
+		let PNB=JQF[3];
+		let PNC=JQF[4];
+		let PND=JQG[0];
+		let PNE=JQG[1];
+		let PNF=JQG[2];
+		let PNG=JQG[3];
+		let PNH=JQG[4];
+		let PNI=JQH[0];
+		let PNJ=JQH[1];
+		let PNK=JQH[2];
+		let PNL=JQH[3];
+		let PNM=MZQ[0];
+		let PNN=MZQ[1];
+		let PNO=MZQ[2];
+		let PNP=JQV[0];
+		let PNQ=JQV[1];
+		let PNR=JQV[2];
+		let PNS=JQV[3];
+		let PNT=JQV[4];
+		let PNU=JSO[0];
+		let PNV=JSO[1];
+		let PNW=JSO[2];
+		let PNX=JSO[3];
+		let PNY=JSO[4];
+		let PNZ=JSP[0];
+		let POA=JSP[1];
+		let POB=JSP[2];
+		let POC=JSP[3];
+		let POD=JSP[4];
+		let POE=JSQ[0];
+		let POF=JSQ[1];
+		let POG=JSQ[2];
+		let POH=JSQ[3];
+		let POI=JSR[0];
+		let POJ=JSR[1];
+		let POK=JSR[2];
+		let POL=JSR[3];
+		let POM=JSR[4];
+		let PON=JSS[0];
+		let POO=JSS[1];
+		let POP=JSS[2];
+		let POQ=JSS[3];
+		let POR=JSS[4];
+		let POS=JST[0];
+		let POT=JST[1];
+		let POU=JST[2];
+		let POV=JST[3];
+		let POW=JST[4];
+		let POX=JSU[0];
+		let POY=JSU[1];
+		let POZ=JSU[2];
+		let PPA=JSU[3];
+		let PPB=NHW[0];
+		let PPC=NHW[1];
+		let PPD=NHW[2];
+		let PPE=JTD[0];
+		let PPF=JTD[1];
+		let PPG=JTD[2];
+		let PPH=JTD[3];
+		let PPI=JTD[4];
+		let PPJ=JTY[0];
+		let PPK=JTY[1];
+		let PPL=JTY[2];
+		let PPM=JTY[3];
+		let PPN=JTY[4];
+		let PPO=JTY[5];
+		let PPP=JWB[0];
+		let PPQ=JWB[1];
+		let PPR=JWB[2];
+		let PPS=JWB[3];
+		let PPT=JWB[4];
+		let PPU=JWB[5];
+		let PPV=JWB[6];
+		let PPW=JWB[7];
+		let PPX=JWC[0];
+		let PPY=JWC[1];
+		let PPZ=JWC[2];
+		let PQA=JWC[3];
+		let PQB=JWC[4];
+		let PQC=JWC[5];
+		let PQD=JWC[6];
+		let PQE=JWC[7];
+		let PQF=JWC[8];
+		let PQG=JWC[9];
+		let PQH=JWD[0];
+		let PQI=JWD[1];
+		let PQJ=JWE[0];
+		let PQK=JWE[1];
+		let PQL=JWE[2];
+		let PQM=NWO[0];
+		let PQN=NWO[1];
+		let PQO=NWO[2];
+		let PQP=NWO[3];
+		let PQQ=NWO[4];
+		let PQR=NWO[5];
+		let PQS=NWO[6];
+		let PQT=NWO[7];
+		let PQU=NWT[0];
+		let PQV=NWT[1];
+		let PQW=NWT[2];
+		let PQX=NWT[3];
+		let PQY=NWT[4];
+		let PQZ=NWT[5];
+		let PRA=NWT[6];
+		let PRB=NWT[7];
+		let PRC=JWH[0];
+		let PRD=JWH[1];
+		let PRE=JWH[2];
+		let PRF=JWI[0];
+		let PRG=JWI[1];
+		let PRH=JWI[2];
+		let PRI=JWJ[0];
+		let PRJ=JWJ[1];
+		let PRK=JWJ[2];
+		let PRL=JWK[0];
+		let PRM=JWK[1];
+		let PRN=JWK[2];
+		let PRO=JWL[0];
+		let PRP=JWL[1];
+		let PRQ=JWL[2];
+		let PRR=JWM[0];
+		let PRS=JWM[1];
+		let PRT=JWM[2];
+		let PRU=JWN[0];
+		let PRV=JWN[1];
+		let PRW=JWN[2];
+		let PRX=JWO[0];
+		let PRY=JWO[1];
+		let PRZ=JWO[2];
+		let PSA=KDZ[0];
+		let PSB=KDZ[1];
+		let PSC=KDZ[2];
+		let PSD=KEA[0];
+		let PSE=KEA[1];
+		let PSF=KEA[2];
+		let PSG=KEB[0];
+		let PSH=KEB[1];
+		let PSI=KEC[0];
+		let PSJ=KEC[1];
+		let PSK=KGQ[0];
+		let PSL=KGQ[1];
+		let PSM=KGQ[2];
+		let PSN=KGQ[3];
+		let PSO=KGQ[4];
+		let PSP=KGQ[5];
+		let PSQ=KGR[0];
+		let PSR=KGR[1];
+		let PSS=KGR[2];
+		let PST=KGR[3];
+		let PSU=KGR[4];
+		let PSV=KGR[5];
+		let PSW=KGS[0];
+		let PSX=KGS[1];
+		let PSY=KGS[2];
+		let PSZ=KGS[3];
+		let PTA=KGS[4];
+		let PTB=KGS[5];
+		let PTC=KGT[0];
+		let PTD=KGT[1];
+		let PTE=KGT[2];
+		let PTF=KGT[3];
+		let PTG=KGT[4];
+		let PTH=KGT[5];
+		let PTI=KIU[0];
+		let PTJ=KIU[1];
+		let PTK=KIU[2];
+		let PTL=KIV[0];
+		let PTM=KIV[1];
+		let PTN=KIV[2];
+		let PTO=KIW[0];
+		let PTP=KIW[1];
+		let PTQ=KIX[0];
+		let PTR=KIX[1];
+		let PTS=OXK[0];
+		let PTT=OXK[1];
+		let PTU=OXK[2];
+		let PTV=OXW[0];
+		let PTW=OXW[1];
+		let PTX=OXW[2];
+		let PTY=OYI[0];
+		let PTZ=OYI[1];
+		let PUA=OYI[2];
+		let PUB=OYU[0];
+		let PUC=OYU[1];
+		let PUD=OYU[2];
+		let PUE=OZG[0];
+		let PUF=OZG[1];
+		let PUG=OZG[2];
+		let PUH=OZS[0];
+		let PUI=OZS[1];
+		let PUJ=OZS[2];
+		let PUK=KJM;
+		let PUL=KJN[0];
+		let PUM=KJN[1];
+		let PUN=KJN[2];
+		let PUO=KJN[3];
+		let PUP=KJN[4];
+		let PUQ=KJN[5];
+		let PUR=KJN[6];
+		let PUS=KJN[7];
+		let PUT=KJN[8];
+		let PUU=KJN[9];
+		let PUV=KJN[10];
+		let PUW=KJN[11];
+		let PUX=KJN[12];
+		let PUY=KJN[13];
+		let PUZ=KJN[14];
+		let PVA=KJN[15];
+		let PVB=KJN[16];
+		let PVC=KJN[17];
+		let PVD=KJN[18];
+		let PVE=KJN[19];
+		let PVF=KJN[20];
+		let PVG=KJN[21];
+		let PVH=KJO;
+		let PVI=IXM[0];
+		let PVJ=IXM[1];
+		let PVK=IXN;
+		let PVL=IXO;
+		let PVM=IXP;
+		let PVN=JBI[0];
+		let PVO=JBI[1];
+		let PVP=JBI[2];
+		let PVQ=JBI[3];
+		let PVR=JBI[4];
+		let PVS=JBJ[0];
+		let PVT=JBJ[1];
+		let PVU=JBJ[2];
+		let PVV=JBJ[3];
+		let PVW=JBJ[4];
+		let PVX=JBK[0];
+		let PVY=JBK[1];
+		let PVZ=JBK[2];
+		let PWA=JBK[3];
+		let PWB=JBL[0];
+		let PWC=JBL[1];
+		let PWD=JBL[2];
+		let PWE=JBL[3];
+		let PWF=JBL[4];
+		let PWG=JBM[0];
+		let PWH=JBM[1];
+		let PWI=JBM[2];
+		let PWJ=JBM[3];
+		let PWK=JBM[4];
+		let PWL=JBN[0];
+		let PWM=JBN[1];
+		let PWN=JBN[2];
+		let PWO=JBN[3];
+		let PWP=JBN[4];
+		let PWQ=JBO[0];
+		let PWR=JBO[1];
+		let PWS=JBO[2];
+		let PWT=JBO[3];
+		let PWU=LCI[0];
+		let PWV=LCI[1];
+		let PWW=LCI[2];
+		let PWX=JDV[0];
+		let PWY=JDV[1];
+		let PWZ=JDV[2];
+		let PXA=JDV[3];
+		let PXB=JDV[4];
+		let PXC=JDW[0];
+		let PXD=JDW[1];
+		let PXE=JDW[2];
+		let PXF=JDW[3];
+		let PXG=JDW[4];
+		let PXH=JDX[0];
+		let PXI=JDX[1];
+		let PXJ=JDX[2];
+		let PXK=JDX[3];
+		let PXL=JDY[0];
+		let PXM=JDY[1];
+		let PXN=JDY[2];
+		let PXO=JDY[3];
+		let PXP=JDY[4];
+		let PXQ=JDZ[0];
+		let PXR=JDZ[1];
+		let PXS=JDZ[2];
+		let PXT=JDZ[3];
+		let PXU=JDZ[4];
+		let PXV=JEA[0];
+		let PXW=JEA[1];
+		let PXX=JEA[2];
+		let PXY=JEA[3];
+		let PXZ=JEA[4];
+		let PYA=JEB[0];
+		let PYB=JEB[1];
+		let PYC=JEB[2];
+		let PYD=JEB[3];
+		let PYE=LKO[0];
+		let PYF=LKO[1];
+		let PYG=LKO[2];
+		let PYH=JGI[0];
+		let PYI=JGI[1];
+		let PYJ=JGI[2];
+		let PYK=JGI[3];
+		let PYL=JGI[4];
+		let PYM=JGJ[0];
+		let PYN=JGJ[1];
+		let PYO=JGJ[2];
+		let PYP=JGJ[3];
+		let PYQ=JGJ[4];
+		let PYR=JGK[0];
+		let PYS=JGK[1];
+		let PYT=JGK[2];
+		let PYU=JGK[3];
+		let PYV=JGL[0];
+		let PYW=JGL[1];
+		let PYX=JGL[2];
+		let PYY=JGL[3];
+		let PYZ=JGL[4];
+		let PZA=JGM[0];
+		let PZB=JGM[1];
+		let PZC=JGM[2];
+		let PZD=JGM[3];
+		let PZE=JGM[4];
+		let PZF=JGN[0];
+		let PZG=JGN[1];
+		let PZH=JGN[2];
+		let PZI=JGN[3];
+		let PZJ=JGN[4];
+		let PZK=JGO[0];
+		let PZL=JGO[1];
+		let PZM=JGO[2];
+		let PZN=JGO[3];
+		let PZO=LSU[0];
+		let PZP=LSU[1];
+		let PZQ=LSU[2];
+		let PZR=JIV[0];
+		let PZS=JIV[1];
+		let PZT=JIV[2];
+		let PZU=JIV[3];
+		let PZV=JIV[4];
+		let PZW=JIW[0];
+		let PZX=JIW[1];
+		let PZY=JIW[2];
+		let PZZ=JIW[3];
+		let QAA=JIW[4];
+		let QAB=JIX[0];
+		let QAC=JIX[1];
+		let QAD=JIX[2];
+		let QAE=JIX[3];
+		let QAF=JIY[0];
+		let QAG=JIY[1];
+		let QAH=JIY[2];
+		let QAI=JIY[3];
+		let QAJ=JIY[4];
+		let QAK=JIZ[0];
+		let QAL=JIZ[1];
+		let QAM=JIZ[2];
+		let QAN=JIZ[3];
+		let QAO=JIZ[4];
+		let QAP=JJA[0];
+		let QAQ=JJA[1];
+		let QAR=JJA[2];
+		let QAS=JJA[3];
+		let QAT=JJA[4];
+		let QAU=JJB[0];
+		let QAV=JJB[1];
+		let QAW=JJB[2];
+		let QAX=JJB[3];
+		let QAY=MBA[0];
+		let QAZ=MBA[1];
+		let QBA=MBA[2];
+		let QBB=JLI[0];
+		let QBC=JLI[1];
+		let QBD=JLI[2];
+		let QBE=JLI[3];
+		let QBF=JLI[4];
+		let QBG=JLJ[0];
+		let QBH=JLJ[1];
+		let QBI=JLJ[2];
+		let QBJ=JLJ[3];
+		let QBK=JLJ[4];
+		let QBL=JLK[0];
+		let QBM=JLK[1];
+		let QBN=JLK[2];
+		let QBO=JLK[3];
+		let QBP=JLL[0];
+		let QBQ=JLL[1];
+		let QBR=JLL[2];
+		let QBS=JLL[3];
+		let QBT=JLL[4];
+		let QBU=JLM[0];
+		let QBV=JLM[1];
+		let QBW=JLM[2];
+		let QBX=JLM[3];
+		let QBY=JLM[4];
+		let QBZ=JLN[0];
+		let QCA=JLN[1];
+		let QCB=JLN[2];
+		let QCC=JLN[3];
+		let QCD=JLN[4];
+		let QCE=JLO[0];
+		let QCF=JLO[1];
+		let QCG=JLO[2];
+		let QCH=JLO[3];
+		let QCI=MJF[0];
+		let QCJ=MJF[1];
+		let QCK=MJF[2];
+		let QCL=JNV[0];
+		let QCM=JNV[1];
+		let QCN=JNV[2];
+		let QCO=JNV[3];
+		let QCP=JNV[4];
+		let QCQ=JNW[0];
+		let QCR=JNW[1];
+		let QCS=JNW[2];
+		let QCT=JNW[3];
+		let QCU=JNW[4];
+		let QCV=JNX[0];
+		let QCW=JNX[1];
+		let QCX=JNX[2];
+		let QCY=JNX[3];
+		let QCZ=JNY[0];
+		let QDA=JNY[1];
+		let QDB=JNY[2];
+		let QDC=JNY[3];
+		let QDD=JNY[4];
+		let QDE=JNZ[0];
+		let QDF=JNZ[1];
+		let QDG=JNZ[2];
+		let QDH=JNZ[3];
+		let QDI=JNZ[4];
+		let QDJ=JOA[0];
+		let QDK=JOA[1];
+		let QDL=JOA[2];
+		let QDM=JOA[3];
+		let QDN=JOA[4];
+		let QDO=JOB[0];
+		let QDP=JOB[1];
+		let QDQ=JOB[2];
+		let QDR=JOB[3];
+		let QDS=MRL[0];
+		let QDT=MRL[1];
+		let QDU=MRL[2];
+		let QDV=JQI[0];
+		let QDW=JQI[1];
+		let QDX=JQI[2];
+		let QDY=JQI[3];
+		let QDZ=JQI[4];
+		let QEA=JQJ[0];
+		let QEB=JQJ[1];
+		let QEC=JQJ[2];
+		let QED=JQJ[3];
+		let QEE=JQJ[4];
+		let QEF=JQK[0];
+		let QEG=JQK[1];
+		let QEH=JQK[2];
+		let QEI=JQK[3];
+		let QEJ=JQL[0];
+		let QEK=JQL[1];
+		let QEL=JQL[2];
+		let QEM=JQL[3];
+		let QEN=JQL[4];
+		let QEO=JQM[0];
+		let QEP=JQM[1];
+		let QEQ=JQM[2];
+		let QER=JQM[3];
+		let QES=JQM[4];
+		let QET=JQN[0];
+		let QEU=JQN[1];
+		let QEV=JQN[2];
+		let QEW=JQN[3];
+		let QEX=JQN[4];
+		let QEY=JQO[0];
+		let QEZ=JQO[1];
+		let QFA=JQO[2];
+		let QFB=JQO[3];
+		let QFC=MZR[0];
+		let QFD=MZR[1];
+		let QFE=MZR[2];
+		let QFF=JSV[0];
+		let QFG=JSV[1];
+		let QFH=JSV[2];
+		let QFI=JSV[3];
+		let QFJ=JSV[4];
+		let QFK=JSW[0];
+		let QFL=JSW[1];
+		let QFM=JSW[2];
+		let QFN=JSW[3];
+		let QFO=JSW[4];
+		let QFP=JSX[0];
+		let QFQ=JSX[1];
+		let QFR=JSX[2];
+		let QFS=JSX[3];
+		let QFT=JSY[0];
+		let QFU=JSY[1];
+		let QFV=JSY[2];
+		let QFW=JSY[3];
+		let QFX=JSY[4];
+		let QFY=JSZ[0];
+		let QFZ=JSZ[1];
+		let QGA=JSZ[2];
+		let QGB=JSZ[3];
+		let QGC=JSZ[4];
+		let QGD=JTA[0];
+		let QGE=JTA[1];
+		let QGF=JTA[2];
+		let QGG=JTA[3];
+		let QGH=JTA[4];
+		let QGI=JTB[0];
+		let QGJ=JTB[1];
+		let QGK=JTB[2];
+		let QGL=JTB[3];
+		let QGM=NHX[0];
+		let QGN=NHX[1];
+		let QGO=NHX[2];
+		let QGP=JWF;
+		let QGQ=JWG;
+		let QGR=NWP[0];
+		let QGS=NWP[1];
+		let QGT=NWP[2];
+		let QGU=NWP[3];
+		let QGV=NWP[4];
+		let QGW=NWP[5];
+		let QGX=NWP[6];
+		let QGY=NWP[7];
+		let QGZ=NWU[0];
+		let QHA=NWU[1];
+		let QHB=NWU[2];
+		let QHC=NWU[3];
+		let QHD=NWU[4];
+		let QHE=NWU[5];
+		let QHF=NWU[6];
+		let QHG=NWU[7];
+		let QHH=KED[0];
+		let QHI=KED[1];
+		let QHJ=KIY[0];
+		let QHK=KIY[1];
+		let QHL=KIY[2];
+		let QHM=KJA[0];
+		let QHN=KJA[1];
+		let QHO=KJA[2];
+		let QHP=KJC[0];
+		let QHQ=KJC[1];
+		let QHR=KJC[2];
+		let QHS=KJE[0];
+		let QHT=KJE[1];
+		let QHU=KJE[2];
+		let QHV=KJG[0];
+		let QHW=KJG[1];
+		let QHX=KJG[2];
+		let QHY=KJI[0];
+		let QHZ=KJI[1];
+		let QIA=KJI[2];
+		let QIB=KJP;
         if (INA != 0.0) || (INK != 0.0) || (INS != 0.0) {
             stamper.stamp_potential_branch_local(Some(22), None, 0, multiplicity);
         } else {
@@ -18988,7 +18953,7 @@ impl Instance {
             None,
             multiplicity * (IEO),
             [0, 1, 21],
-            [PCT, PCU, PCV],
+            [PBK, PBL, PBM],
             [],
             [],
             multiplicity,
@@ -18998,7 +18963,7 @@ impl Instance {
             None,
             multiplicity * (IEP),
             [21],
-            [PCW],
+            [PBN],
             [],
             [],
             multiplicity,
@@ -19008,7 +18973,7 @@ impl Instance {
             Some(20),
             multiplicity * (IEQ),
             [20, 21],
-            [PCX, PCY],
+            [PBO, PBP],
             [],
             [],
             multiplicity,
@@ -19018,7 +18983,7 @@ impl Instance {
             None,
             multiplicity * (IER),
             [20],
-            [PCZ],
+            [PBQ],
             [],
             [],
             multiplicity,
@@ -19028,7 +18993,7 @@ impl Instance {
             None,
             multiplicity * (IES),
             [20],
-            [PDA],
+            [PBR],
             [],
             [],
             multiplicity,
@@ -19058,7 +19023,7 @@ impl Instance {
             0,
             IEX,
             [0, 2],
-            [PDB, PDC],
+            [PBS, PBT],
             [],
             [],
         );
@@ -19068,7 +19033,7 @@ impl Instance {
             Some(23),
             multiplicity * (IEZ),
             [4, 23, 24],
-            [PDD, PDE, PDF],
+            [PBU, PBV, PBW],
             [],
             [],
             multiplicity,
@@ -19078,7 +19043,7 @@ impl Instance {
             Some(24),
             multiplicity * (IFB),
             [22, 24],
-            [PDG, PDH],
+            [PBX, PBY],
             [],
             [],
             multiplicity,
@@ -19088,7 +19053,7 @@ impl Instance {
             Some(23),
             multiplicity * (IFD),
             [22, 23],
-            [PDI, PDJ],
+            [PBZ, PCA],
             [],
             [],
             multiplicity,
@@ -19098,7 +19063,7 @@ impl Instance {
             None,
             multiplicity * (IFF),
             [4, 23],
-            [PDK, PDL],
+            [PCB, PCC],
             [],
             [],
             multiplicity,
@@ -19108,7 +19073,7 @@ impl Instance {
             3,
             IFH,
             [1, 2],
-            [PDM, PDN],
+            [PCD, PCE],
             [],
             [],
         );
@@ -19118,7 +19083,7 @@ impl Instance {
             Some(27),
             multiplicity * (IFJ),
             [4, 26, 27],
-            [PDO, PDP, PDQ],
+            [PCF, PCG, PCH],
             [],
             [],
             multiplicity,
@@ -19128,7 +19093,7 @@ impl Instance {
             Some(27),
             multiplicity * (IFL),
             [25, 27],
-            [PDR, PDS],
+            [PCI, PCJ],
             [],
             [],
             multiplicity,
@@ -19138,7 +19103,7 @@ impl Instance {
             Some(26),
             multiplicity * (IFN),
             [25, 26],
-            [PDT, PDU],
+            [PCK, PCL],
             [],
             [],
             multiplicity,
@@ -19148,7 +19113,7 @@ impl Instance {
             None,
             multiplicity * (IFP),
             [4, 26],
-            [PDV, PDW],
+            [PCM, PCN],
             [],
             [],
             multiplicity,
@@ -19238,7 +19203,7 @@ impl Instance {
             Some(16),
             multiplicity * (IGH),
             [2, 4, 7, 16, 17],
-            [PDX, PDY, PDZ, PEA, PEB],
+            [PCO, PCP, PCQ, PCR, PCS],
             [],
             [],
             multiplicity,
@@ -19258,7 +19223,7 @@ impl Instance {
             Some(16),
             multiplicity * (IGJ),
             [2, 4, 7, 16, 17],
-            [PEC, PED, PEE, PEF, PEG],
+            [PCT, PCU, PCV, PCW, PCX],
             [],
             [],
             multiplicity,
@@ -19268,7 +19233,7 @@ impl Instance {
             Some(17),
             multiplicity * (IGK),
             [2, 4, 7, 16, 17],
-            [PEH, PEI, PEJ, PEK, PEL],
+            [PCY, PCZ, PDA, PDB, PDC],
             [],
             [],
             multiplicity,
@@ -19278,7 +19243,7 @@ impl Instance {
             Some(16),
             multiplicity * (IGL),
             [2, 4, 7, 16],
-            [PEM, PEN, PEO, PEP],
+            [PDD, PDE, PDF, PDG],
             [],
             [],
             multiplicity,
@@ -19298,7 +19263,7 @@ impl Instance {
             Some(9),
             multiplicity * (IGN),
             [2, 4, 7, 9, 16],
-            [PEQ, PER, PES, PET, PEU],
+            [PDH, PDI, PDJ, PDK, PDL],
             [],
             [],
             multiplicity,
@@ -19308,7 +19273,7 @@ impl Instance {
             Some(16),
             multiplicity * (IGO),
             [2, 4, 7, 16, 17],
-            [PEV, PEW, PEX, PEY, PEZ],
+            [PDM, PDN, PDO, PDP, PDQ],
             [],
             [],
             multiplicity,
@@ -19318,7 +19283,7 @@ impl Instance {
             Some(17),
             multiplicity * (IGP),
             [2, 4, 7, 16, 17],
-            [PFA, PFB, PFC, PFD, PFE],
+            [PDR, PDS, PDT, PDU, PDV],
             [],
             [],
             multiplicity,
@@ -19328,7 +19293,7 @@ impl Instance {
             Some(16),
             multiplicity * (IGQ),
             [2, 4, 7, 16],
-            [PFF, PFG, PFH, PFI],
+            [PDW, PDX, PDY, PDZ],
             [],
             [],
             multiplicity,
@@ -19358,7 +19323,7 @@ impl Instance {
             Some(16),
             multiplicity * (AIO),
             [3, 4, 16],
-            [PFJ, PFK, PFL],
+            [PEA, PEB, PEC],
             [],
             [],
             multiplicity,
@@ -19368,7 +19333,7 @@ impl Instance {
             Some(15),
             multiplicity * (IGT),
             [2, 4, 7, 15, 16],
-            [PFM, PFN, PFO, PFP, PFQ],
+            [PED, PEE, PEF, PEG, PEH],
             [],
             [],
             multiplicity,
@@ -19388,7 +19353,7 @@ impl Instance {
             Some(15),
             multiplicity * (IGV),
             [2, 4, 7, 15, 16],
-            [PFR, PFS, PFT, PFU, PFV],
+            [PEI, PEJ, PEK, PEL, PEM],
             [],
             [],
             multiplicity,
@@ -19398,7 +19363,7 @@ impl Instance {
             Some(16),
             multiplicity * (IGW),
             [2, 4, 7, 15, 16],
-            [PFW, PFX, PFY, PFZ, PGA],
+            [PEN, PEO, PEP, PEQ, PER],
             [],
             [],
             multiplicity,
@@ -19408,7 +19373,7 @@ impl Instance {
             Some(15),
             multiplicity * (IGX),
             [2, 4, 7, 15],
-            [PGB, PGC, PGD, PGE],
+            [PES, PET, PEU, PEV],
             [],
             [],
             multiplicity,
@@ -19428,7 +19393,7 @@ impl Instance {
             Some(9),
             multiplicity * (IGZ),
             [2, 4, 7, 9, 15],
-            [PGF, PGG, PGH, PGI, PGJ],
+            [PEW, PEX, PEY, PEZ, PFA],
             [],
             [],
             multiplicity,
@@ -19438,7 +19403,7 @@ impl Instance {
             Some(15),
             multiplicity * (IHA),
             [2, 4, 7, 15, 16],
-            [PGK, PGL, PGM, PGN, PGO],
+            [PFB, PFC, PFD, PFE, PFF],
             [],
             [],
             multiplicity,
@@ -19448,7 +19413,7 @@ impl Instance {
             Some(16),
             multiplicity * (IHB),
             [2, 4, 7, 15, 16],
-            [PGP, PGQ, PGR, PGS, PGT],
+            [PFG, PFH, PFI, PFJ, PFK],
             [],
             [],
             multiplicity,
@@ -19458,7 +19423,7 @@ impl Instance {
             Some(15),
             multiplicity * (IHC),
             [2, 4, 7, 15],
-            [PGU, PGV, PGW, PGX],
+            [PFL, PFM, PFN, PFO],
             [],
             [],
             multiplicity,
@@ -19488,7 +19453,7 @@ impl Instance {
             Some(15),
             multiplicity * (AXV),
             [3, 4, 15],
-            [PGY, PGZ, PHA],
+            [PFP, PFQ, PFR],
             [],
             [],
             multiplicity,
@@ -19498,7 +19463,7 @@ impl Instance {
             Some(14),
             multiplicity * (IHF),
             [2, 4, 7, 14, 15],
-            [PHB, PHC, PHD, PHE, PHF],
+            [PFS, PFT, PFU, PFV, PFW],
             [],
             [],
             multiplicity,
@@ -19518,7 +19483,7 @@ impl Instance {
             Some(14),
             multiplicity * (IHH),
             [2, 4, 7, 14, 15],
-            [PHG, PHH, PHI, PHJ, PHK],
+            [PFX, PFY, PFZ, PGA, PGB],
             [],
             [],
             multiplicity,
@@ -19528,7 +19493,7 @@ impl Instance {
             Some(15),
             multiplicity * (IHI),
             [2, 4, 7, 14, 15],
-            [PHL, PHM, PHN, PHO, PHP],
+            [PGC, PGD, PGE, PGF, PGG],
             [],
             [],
             multiplicity,
@@ -19538,7 +19503,7 @@ impl Instance {
             Some(14),
             multiplicity * (IHJ),
             [2, 4, 7, 14],
-            [PHQ, PHR, PHS, PHT],
+            [PGH, PGI, PGJ, PGK],
             [],
             [],
             multiplicity,
@@ -19558,7 +19523,7 @@ impl Instance {
             Some(9),
             multiplicity * (IHL),
             [2, 4, 7, 9, 14],
-            [PHU, PHV, PHW, PHX, PHY],
+            [PGL, PGM, PGN, PGO, PGP],
             [],
             [],
             multiplicity,
@@ -19568,7 +19533,7 @@ impl Instance {
             Some(14),
             multiplicity * (IHM),
             [2, 4, 7, 14, 15],
-            [PHZ, PIA, PIB, PIC, PID],
+            [PGQ, PGR, PGS, PGT, PGU],
             [],
             [],
             multiplicity,
@@ -19578,7 +19543,7 @@ impl Instance {
             Some(15),
             multiplicity * (IHN),
             [2, 4, 7, 14, 15],
-            [PIE, PIF, PIG, PIH, PII],
+            [PGV, PGW, PGX, PGY, PGZ],
             [],
             [],
             multiplicity,
@@ -19588,7 +19553,7 @@ impl Instance {
             Some(14),
             multiplicity * (IHO),
             [2, 4, 7, 14],
-            [PIJ, PIK, PIL, PIM],
+            [PHA, PHB, PHC, PHD],
             [],
             [],
             multiplicity,
@@ -19618,7 +19583,7 @@ impl Instance {
             Some(14),
             multiplicity * (BNC),
             [3, 4, 14],
-            [PIN, PIO, PIP],
+            [PHE, PHF, PHG],
             [],
             [],
             multiplicity,
@@ -19628,7 +19593,7 @@ impl Instance {
             Some(5),
             multiplicity * (IHR),
             [2, 4, 5, 7, 14],
-            [PIQ, PIR, PIS, PIT, PIU],
+            [PHH, PHI, PHJ, PHK, PHL],
             [],
             [],
             multiplicity,
@@ -19648,7 +19613,7 @@ impl Instance {
             Some(5),
             multiplicity * (IHT),
             [2, 4, 5, 7, 14],
-            [PIV, PIW, PIX, PIY, PIZ],
+            [PHM, PHN, PHO, PHP, PHQ],
             [],
             [],
             multiplicity,
@@ -19658,7 +19623,7 @@ impl Instance {
             Some(14),
             multiplicity * (IHU),
             [2, 4, 5, 7, 14],
-            [PJA, PJB, PJC, PJD, PJE],
+            [PHR, PHS, PHT, PHU, PHV],
             [],
             [],
             multiplicity,
@@ -19668,7 +19633,7 @@ impl Instance {
             Some(5),
             multiplicity * (IHV),
             [2, 4, 5, 7],
-            [PJF, PJG, PJH, PJI],
+            [PHW, PHX, PHY, PHZ],
             [],
             [],
             multiplicity,
@@ -19688,7 +19653,7 @@ impl Instance {
             Some(9),
             multiplicity * (IHX),
             [2, 4, 5, 7, 9],
-            [PJJ, PJK, PJL, PJM, PJN],
+            [PIA, PIB, PIC, PID, PIE],
             [],
             [],
             multiplicity,
@@ -19698,7 +19663,7 @@ impl Instance {
             Some(5),
             multiplicity * (IHY),
             [2, 4, 5, 7, 14],
-            [PJO, PJP, PJQ, PJR, PJS],
+            [PIF, PIG, PIH, PII, PIJ],
             [],
             [],
             multiplicity,
@@ -19708,7 +19673,7 @@ impl Instance {
             Some(14),
             multiplicity * (IHZ),
             [2, 4, 5, 7, 14],
-            [PJT, PJU, PJV, PJW, PJX],
+            [PIK, PIL, PIM, PIN, PIO],
             [],
             [],
             multiplicity,
@@ -19718,7 +19683,7 @@ impl Instance {
             Some(5),
             multiplicity * (IIA),
             [2, 4, 5, 7],
-            [PJY, PJZ, PKA, PKB],
+            [PIP, PIQ, PIR, PIS],
             [],
             [],
             multiplicity,
@@ -19748,7 +19713,7 @@ impl Instance {
             Some(5),
             multiplicity * (CCJ),
             [3, 4, 5],
-            [PKC, PKD, PKE],
+            [PIT, PIU, PIV],
             [],
             [],
             multiplicity,
@@ -19758,7 +19723,7 @@ impl Instance {
             Some(10),
             multiplicity * (IID),
             [2, 4, 7, 9, 10],
-            [PKF, PKG, PKH, PKI, PKJ],
+            [PIW, PIX, PIY, PIZ, PJA],
             [],
             [],
             multiplicity,
@@ -19778,7 +19743,7 @@ impl Instance {
             Some(10),
             multiplicity * (IIF),
             [2, 4, 7, 9, 10],
-            [PKK, PKL, PKM, PKN, PKO],
+            [PJB, PJC, PJD, PJE, PJF],
             [],
             [],
             multiplicity,
@@ -19788,7 +19753,7 @@ impl Instance {
             Some(9),
             multiplicity * (IIG),
             [2, 4, 7, 9, 10],
-            [PKP, PKQ, PKR, PKS, PKT],
+            [PJG, PJH, PJI, PJJ, PJK],
             [],
             [],
             multiplicity,
@@ -19798,7 +19763,7 @@ impl Instance {
             Some(10),
             multiplicity * (IIH),
             [2, 4, 7, 10],
-            [PKU, PKV, PKW, PKX],
+            [PJL, PJM, PJN, PJO],
             [],
             [],
             multiplicity,
@@ -19818,7 +19783,7 @@ impl Instance {
             Some(9),
             multiplicity * (IIJ),
             [2, 4, 7, 9, 10],
-            [PKY, PKZ, PLA, PLB, PLC],
+            [PJP, PJQ, PJR, PJS, PJT],
             [],
             [],
             multiplicity,
@@ -19828,7 +19793,7 @@ impl Instance {
             Some(10),
             multiplicity * (IIK),
             [2, 4, 7, 9, 10],
-            [PLD, PLE, PLF, PLG, PLH],
+            [PJU, PJV, PJW, PJX, PJY],
             [],
             [],
             multiplicity,
@@ -19838,7 +19803,7 @@ impl Instance {
             Some(9),
             multiplicity * (IIL),
             [2, 4, 7, 9, 10],
-            [PLI, PLJ, PLK, PLL, PLM],
+            [PJZ, PKA, PKB, PKC, PKD],
             [],
             [],
             multiplicity,
@@ -19848,7 +19813,7 @@ impl Instance {
             Some(10),
             multiplicity * (IIM),
             [2, 4, 7, 10],
-            [PLN, PLO, PLP, PLQ],
+            [PKE, PKF, PKG, PKH],
             [],
             [],
             multiplicity,
@@ -19878,7 +19843,7 @@ impl Instance {
             Some(10),
             multiplicity * (CRP),
             [3, 4, 10],
-            [PLR, PLS, PLT],
+            [PKI, PKJ, PKK],
             [],
             [],
             multiplicity,
@@ -19888,7 +19853,7 @@ impl Instance {
             Some(11),
             multiplicity * (IIP),
             [2, 4, 7, 10, 11],
-            [PLU, PLV, PLW, PLX, PLY],
+            [PKL, PKM, PKN, PKO, PKP],
             [],
             [],
             multiplicity,
@@ -19908,7 +19873,7 @@ impl Instance {
             Some(11),
             multiplicity * (IIR),
             [2, 4, 7, 10, 11],
-            [PLZ, PMA, PMB, PMC, PMD],
+            [PKQ, PKR, PKS, PKT, PKU],
             [],
             [],
             multiplicity,
@@ -19918,7 +19883,7 @@ impl Instance {
             Some(10),
             multiplicity * (IIS),
             [2, 4, 7, 10, 11],
-            [PME, PMF, PMG, PMH, PMI],
+            [PKV, PKW, PKX, PKY, PKZ],
             [],
             [],
             multiplicity,
@@ -19928,7 +19893,7 @@ impl Instance {
             Some(11),
             multiplicity * (IIT),
             [2, 4, 7, 11],
-            [PMJ, PMK, PML, PMM],
+            [PLA, PLB, PLC, PLD],
             [],
             [],
             multiplicity,
@@ -19948,7 +19913,7 @@ impl Instance {
             Some(9),
             multiplicity * (IIV),
             [2, 4, 7, 9, 11],
-            [PMN, PMO, PMP, PMQ, PMR],
+            [PLE, PLF, PLG, PLH, PLI],
             [],
             [],
             multiplicity,
@@ -19958,7 +19923,7 @@ impl Instance {
             Some(11),
             multiplicity * (IIW),
             [2, 4, 7, 10, 11],
-            [PMS, PMT, PMU, PMV, PMW],
+            [PLJ, PLK, PLL, PLM, PLN],
             [],
             [],
             multiplicity,
@@ -19968,7 +19933,7 @@ impl Instance {
             Some(10),
             multiplicity * (IIX),
             [2, 4, 7, 10, 11],
-            [PMX, PMY, PMZ, PNA, PNB],
+            [PLO, PLP, PLQ, PLR, PLS],
             [],
             [],
             multiplicity,
@@ -19978,7 +19943,7 @@ impl Instance {
             Some(11),
             multiplicity * (IIY),
             [2, 4, 7, 11],
-            [PNC, PND, PNE, PNF],
+            [PLT, PLU, PLV, PLW],
             [],
             [],
             multiplicity,
@@ -20008,7 +19973,7 @@ impl Instance {
             Some(11),
             multiplicity * (DGW),
             [3, 4, 11],
-            [PNG, PNH, PNI],
+            [PLX, PLY, PLZ],
             [],
             [],
             multiplicity,
@@ -20018,7 +19983,7 @@ impl Instance {
             Some(12),
             multiplicity * (IJB),
             [2, 4, 7, 11, 12],
-            [PNJ, PNK, PNL, PNM, PNN],
+            [PMA, PMB, PMC, PMD, PME],
             [],
             [],
             multiplicity,
@@ -20038,7 +20003,7 @@ impl Instance {
             Some(12),
             multiplicity * (IJD),
             [2, 4, 7, 11, 12],
-            [PNO, PNP, PNQ, PNR, PNS],
+            [PMF, PMG, PMH, PMI, PMJ],
             [],
             [],
             multiplicity,
@@ -20048,7 +20013,7 @@ impl Instance {
             Some(11),
             multiplicity * (IJE),
             [2, 4, 7, 11, 12],
-            [PNT, PNU, PNV, PNW, PNX],
+            [PMK, PML, PMM, PMN, PMO],
             [],
             [],
             multiplicity,
@@ -20058,7 +20023,7 @@ impl Instance {
             Some(12),
             multiplicity * (IJF),
             [2, 4, 7, 12],
-            [PNY, PNZ, POA, POB],
+            [PMP, PMQ, PMR, PMS],
             [],
             [],
             multiplicity,
@@ -20078,7 +20043,7 @@ impl Instance {
             Some(9),
             multiplicity * (IJH),
             [2, 4, 7, 9, 12],
-            [POC, POD, POE, POF, POG],
+            [PMT, PMU, PMV, PMW, PMX],
             [],
             [],
             multiplicity,
@@ -20088,7 +20053,7 @@ impl Instance {
             Some(12),
             multiplicity * (IJI),
             [2, 4, 7, 11, 12],
-            [POH, POI, POJ, POK, POL],
+            [PMY, PMZ, PNA, PNB, PNC],
             [],
             [],
             multiplicity,
@@ -20098,7 +20063,7 @@ impl Instance {
             Some(11),
             multiplicity * (IJJ),
             [2, 4, 7, 11, 12],
-            [POM, PON, POO, POP, POQ],
+            [PND, PNE, PNF, PNG, PNH],
             [],
             [],
             multiplicity,
@@ -20108,7 +20073,7 @@ impl Instance {
             Some(12),
             multiplicity * (IJK),
             [2, 4, 7, 12],
-            [POR, POS, POT, POU],
+            [PNI, PNJ, PNK, PNL],
             [],
             [],
             multiplicity,
@@ -20138,7 +20103,7 @@ impl Instance {
             Some(12),
             multiplicity * (DWD),
             [3, 4, 12],
-            [POV, POW, POX],
+            [PNM, PNN, PNO],
             [],
             [],
             multiplicity,
@@ -20148,7 +20113,7 @@ impl Instance {
             Some(13),
             multiplicity * (IJN),
             [2, 4, 7, 12, 13],
-            [POY, POZ, PPA, PPB, PPC],
+            [PNP, PNQ, PNR, PNS, PNT],
             [],
             [],
             multiplicity,
@@ -20168,7 +20133,7 @@ impl Instance {
             Some(13),
             multiplicity * (IJP),
             [2, 4, 7, 12, 13],
-            [PPD, PPE, PPF, PPG, PPH],
+            [PNU, PNV, PNW, PNX, PNY],
             [],
             [],
             multiplicity,
@@ -20178,7 +20143,7 @@ impl Instance {
             Some(12),
             multiplicity * (IJQ),
             [2, 4, 7, 12, 13],
-            [PPI, PPJ, PPK, PPL, PPM],
+            [PNZ, POA, POB, POC, POD],
             [],
             [],
             multiplicity,
@@ -20188,7 +20153,7 @@ impl Instance {
             Some(13),
             multiplicity * (IJR),
             [2, 4, 7, 13],
-            [PPN, PPO, PPP, PPQ],
+            [POE, POF, POG, POH],
             [],
             [],
             multiplicity,
@@ -20208,7 +20173,7 @@ impl Instance {
             Some(9),
             multiplicity * (IJT),
             [2, 4, 7, 9, 13],
-            [PPR, PPS, PPT, PPU, PPV],
+            [POI, POJ, POK, POL, POM],
             [],
             [],
             multiplicity,
@@ -20218,7 +20183,7 @@ impl Instance {
             Some(13),
             multiplicity * (IJU),
             [2, 4, 7, 12, 13],
-            [PPW, PPX, PPY, PPZ, PQA],
+            [PON, POO, POP, POQ, POR],
             [],
             [],
             multiplicity,
@@ -20228,7 +20193,7 @@ impl Instance {
             Some(12),
             multiplicity * (IJV),
             [2, 4, 7, 12, 13],
-            [PQB, PQC, PQD, PQE, PQF],
+            [POS, POT, POU, POV, POW],
             [],
             [],
             multiplicity,
@@ -20238,7 +20203,7 @@ impl Instance {
             Some(13),
             multiplicity * (IJW),
             [2, 4, 7, 13],
-            [PQG, PQH, PQI, PQJ],
+            [POX, POY, POZ, PPA],
             [],
             [],
             multiplicity,
@@ -20268,7 +20233,7 @@ impl Instance {
             Some(13),
             multiplicity * (ELK),
             [3, 4, 13],
-            [PQK, PQL, PQM],
+            [PPB, PPC, PPD],
             [],
             [],
             multiplicity,
@@ -20278,7 +20243,7 @@ impl Instance {
             Some(19),
             multiplicity * (IJZ),
             [0, 2, 4, 13, 19],
-            [PQN, PQO, PQP, PQQ, PQR],
+            [PPE, PPF, PPG, PPH, PPI],
             [],
             [],
             multiplicity,
@@ -20298,7 +20263,7 @@ impl Instance {
             Some(17),
             multiplicity * (IKB),
             [0, 2, 4, 17, 18, 20],
-            [PQS, PQT, PQU, PQV, PQW, PQX],
+            [PPJ, PPK, PPL, PPM, PPN, PPO],
             [],
             [],
             multiplicity,
@@ -20338,7 +20303,7 @@ impl Instance {
             Some(9),
             multiplicity * (IKF),
             [4, 5, 8, 9, 22, 23, 25, 26],
-            [PQY, PQZ, PRA, PRB, PRC, PRD, PRE, PRF],
+            [PPP, PPQ, PPR, PPS, PPT, PPU, PPV, PPW],
             [],
             [],
             multiplicity,
@@ -20348,7 +20313,7 @@ impl Instance {
             None,
             multiplicity * (IKG),
             [4, 5, 8, 9, 22, 23, 25, 26, 28, 29],
-            [PRG, PRH, PRI, PRJ, PRK, PRL, PRM, PRN, PRO, PRP],
+            [PPX, PPY, PPZ, PQA, PQB, PQC, PQD, PQE, PQF, PQG],
             [],
             [],
             multiplicity,
@@ -20358,7 +20323,7 @@ impl Instance {
             None,
             multiplicity * (IKH),
             [28, 29],
-            [PRQ, PRR],
+            [PQH, PQI],
             [],
             [],
             multiplicity,
@@ -20368,7 +20333,7 @@ impl Instance {
             Some(9),
             multiplicity * (IKI),
             [5, 9, 29],
-            [PRS, PRT, PRU],
+            [PQJ, PQK, PQL],
             [],
             [],
             multiplicity,
@@ -20378,7 +20343,7 @@ impl Instance {
             Some(9),
             multiplicity * (FLM),
             [4, 5, 8, 9, 22, 23, 25, 26],
-            [PRV, PRW, PRX, PRY, PRZ, PSA, PSB, PSC],
+            [PQM, PQN, PQO, PQP, PQQ, PQR, PQS, PQT],
             [],
             [],
             multiplicity,
@@ -20388,7 +20353,7 @@ impl Instance {
             Some(5),
             multiplicity * (FLR),
             [4, 5, 8, 9, 22, 23, 25, 26],
-            [PSD, PSE, PSF, PSG, PSH, PSI, PSJ, PSK],
+            [PQU, PQV, PQW, PQX, PQY, PQZ, PRA, PRB],
             [],
             [],
             multiplicity,
@@ -20398,7 +20363,7 @@ impl Instance {
             Some(13),
             multiplicity * (IKJ),
             [4, 8, 13],
-            [PSL, PSM, PSN],
+            [PRC, PRD, PRE],
             [],
             [],
             multiplicity,
@@ -20408,7 +20373,7 @@ impl Instance {
             Some(17),
             multiplicity * (IKK),
             [4, 8, 17],
-            [PSO, PSP, PSQ],
+            [PRF, PRG, PRH],
             [],
             [],
             multiplicity,
@@ -20418,7 +20383,7 @@ impl Instance {
             Some(13),
             multiplicity * (IKL),
             [4, 8, 13],
-            [PSR, PSS, PST],
+            [PRI, PRJ, PRK],
             [],
             [],
             multiplicity,
@@ -20428,7 +20393,7 @@ impl Instance {
             Some(17),
             multiplicity * (IKN),
             [4, 8, 17],
-            [PSU, PSV, PSW],
+            [PRL, PRM, PRN],
             [],
             [],
             multiplicity,
@@ -20438,7 +20403,7 @@ impl Instance {
             Some(9),
             multiplicity * (IKP),
             [4, 8, 9],
-            [PSX, PSY, PSZ],
+            [PRO, PRP, PRQ],
             [],
             [],
             multiplicity,
@@ -20448,7 +20413,7 @@ impl Instance {
             Some(5),
             multiplicity * (IKR),
             [4, 5, 8],
-            [PTA, PTB, PTC],
+            [PRR, PRS, PRT],
             [],
             [],
             multiplicity,
@@ -20458,7 +20423,7 @@ impl Instance {
             Some(9),
             multiplicity * (IKT),
             [4, 8, 9],
-            [PTD, PTE, PTF],
+            [PRU, PRV, PRW],
             [],
             [],
             multiplicity,
@@ -20468,7 +20433,7 @@ impl Instance {
             Some(5),
             multiplicity * (IKW),
             [4, 5, 8],
-            [PTG, PTH, PTI],
+            [PRX, PRY, PRZ],
             [],
             [],
             multiplicity,
@@ -20478,7 +20443,7 @@ impl Instance {
             Some(7),
             multiplicity * (IKZ),
             [4, 7, 8],
-            [PTJ, PTK, PTL],
+            [PSA, PSB, PSC],
             [],
             [],
             multiplicity,
@@ -20488,7 +20453,7 @@ impl Instance {
             Some(7),
             multiplicity * (ILA),
             [4, 7, 8],
-            [PTM, PTN, PTO],
+            [PSD, PSE, PSF],
             [],
             [],
             multiplicity,
@@ -20498,7 +20463,7 @@ impl Instance {
             Some(7),
             multiplicity * (ILC),
             [7, 8],
-            [PTP, PTQ],
+            [PSG, PSH],
             [],
             [],
             multiplicity,
@@ -20508,7 +20473,7 @@ impl Instance {
             Some(7),
             multiplicity * (ILD),
             [7, 8],
-            [PTR, PTS],
+            [PSI, PSJ],
             [],
             [],
             multiplicity,
@@ -20528,7 +20493,7 @@ impl Instance {
             Some(0),
             multiplicity * (ILG),
             [0, 2, 4, 8, 18, 19],
-            [PTT, PTU, PTV, PTW, PTX, PTY],
+            [PSK, PSL, PSM, PSN, PSO, PSP],
             [],
             [],
             multiplicity,
@@ -20538,7 +20503,7 @@ impl Instance {
             Some(2),
             multiplicity * (ILI),
             [0, 2, 4, 8, 18, 19],
-            [PTZ, PUA, PUB, PUC, PUD, PUE],
+            [PSQ, PSR, PSS, PST, PSU, PSV],
             [],
             [],
             multiplicity,
@@ -20548,7 +20513,7 @@ impl Instance {
             Some(18),
             multiplicity * (ILK),
             [0, 2, 4, 8, 18, 19],
-            [PUF, PUG, PUH, PUI, PUJ, PUK],
+            [PSW, PSX, PSY, PSZ, PTA, PTB],
             [],
             [],
             multiplicity,
@@ -20558,7 +20523,7 @@ impl Instance {
             Some(19),
             multiplicity * (ILM),
             [0, 2, 4, 8, 18, 19],
-            [PUL, PUM, PUN, PUO, PUP, PUQ],
+            [PTC, PTD, PTE, PTF, PTG, PTH],
             [],
             [],
             multiplicity,
@@ -20568,7 +20533,7 @@ impl Instance {
             Some(18),
             multiplicity * (ILO),
             [0, 4, 18],
-            [PUR, PUS, PUT],
+            [PTI, PTJ, PTK],
             [],
             [],
             multiplicity,
@@ -20588,7 +20553,7 @@ impl Instance {
             Some(2),
             multiplicity * (ILQ),
             [2, 4, 19],
-            [PUU, PUV, PUW],
+            [PTL, PTM, PTN],
             [],
             [],
             multiplicity,
@@ -20608,7 +20573,7 @@ impl Instance {
             Some(6),
             multiplicity * (ILS),
             [1, 6],
-            [PUX, PUY],
+            [PTO, PTP],
             [],
             [],
             multiplicity,
@@ -20628,7 +20593,7 @@ impl Instance {
             Some(7),
             multiplicity * (ILU),
             [6, 7],
-            [PUZ, PVA],
+            [PTQ, PTR],
             [],
             [],
             multiplicity,
@@ -20648,7 +20613,7 @@ impl Instance {
             Some(2),
             multiplicity * (HYC),
             [2, 4, 6],
-            [PVB, PVC, PVD],
+            [PTS, PTT, PTU],
             [],
             [],
             multiplicity,
@@ -20658,7 +20623,7 @@ impl Instance {
             Some(0),
             multiplicity * (HYU),
             [0, 4, 6],
-            [PVE, PVF, PVG],
+            [PTV, PTW, PTX],
             [],
             [],
             multiplicity,
@@ -20668,7 +20633,7 @@ impl Instance {
             Some(0),
             multiplicity * (HZM),
             [0, 2, 4],
-            [PVH, PVI, PVJ],
+            [PTY, PTZ, PUA],
             [],
             [],
             multiplicity,
@@ -20678,7 +20643,7 @@ impl Instance {
             Some(2),
             multiplicity * (IAE),
             [2, 3, 4],
-            [PVK, PVL, PVM],
+            [PUB, PUC, PUD],
             [],
             [],
             multiplicity,
@@ -20688,7 +20653,7 @@ impl Instance {
             Some(0),
             multiplicity * (IAW),
             [0, 3, 4],
-            [PVN, PVO, PVP],
+            [PUE, PUF, PUG],
             [],
             [],
             multiplicity,
@@ -20698,7 +20663,7 @@ impl Instance {
             Some(3),
             multiplicity * (IBO),
             [3, 4, 6],
-            [PVQ, PVR, PVS],
+            [PUH, PUI, PUJ],
             [],
             [],
             multiplicity,
@@ -20868,7 +20833,7 @@ impl Instance {
             None,
             multiplicity * (IMW),
             [4],
-            [PVT],
+            [PUK],
             [],
             [],
             multiplicity,
@@ -20878,7 +20843,7 @@ impl Instance {
             None,
             multiplicity * (IMX),
             [0, 2, 4, 5, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 22, 23, 25, 26],
-            [PVU, PVV, PVW, PVX, PVY, PVZ, PWA, PWB, PWC, PWD, PWE, PWF, PWG, PWH, PWI, PWJ, PWK, PWL, PWM, PWN, PWO, PWP],
+            [PUL, PUM, PUN, PUO, PUP, PUQ, PUR, PUS, PUT, PUU, PUV, PUW, PUX, PUY, PUZ, PVA, PVB, PVC, PVD, PVE, PVF, PVG],
             [],
             [],
             multiplicity,
@@ -20888,7 +20853,7 @@ impl Instance {
             None,
             multiplicity * (IMY),
             [4],
-            [PWQ],
+            [PVH],
             [],
             [],
             multiplicity,
@@ -20912,10 +20877,10 @@ impl Instance {
         self.canonical_reactive[6] = IEO;
         self.canonical_reactive[7] = IEP;
         self.canonical_reactive[8] = IOW;
-        self.canonical_reactive[9] = PWR;
-        self.canonical_reactive[10] = PWS;
+        self.canonical_reactive[9] = PVI;
+        self.canonical_reactive[10] = PVJ;
         self.canonical_reactive[11] = IOX;
-        self.canonical_reactive[12] = PWT;
+        self.canonical_reactive[12] = PVK;
         self.canonical_reactive[13] = IES;
         self.canonical_reactive[14] = IET;
         self.canonical_reactive[15] = IEV;
@@ -20924,13 +20889,13 @@ impl Instance {
         self.canonical_reactive[18] = IFB;
         self.canonical_reactive[19] = IFD;
         self.canonical_reactive[20] = IPC;
-        self.canonical_reactive[21] = PWU;
+        self.canonical_reactive[21] = PVL;
         self.canonical_reactive[22] = IFH;
         self.canonical_reactive[23] = IFJ;
         self.canonical_reactive[24] = IFL;
         self.canonical_reactive[25] = IFN;
         self.canonical_reactive[26] = IPG;
-        self.canonical_reactive[27] = PWV;
+        self.canonical_reactive[27] = PVM;
         self.canonical_reactive[28] = IFR;
         self.canonical_reactive[29] = IFT;
         self.canonical_reactive[30] = IFV;
@@ -20942,395 +20907,395 @@ impl Instance {
         self.canonical_reactive[36] = IGH;
         self.canonical_reactive[37] = IGI;
         self.canonical_reactive[38] = IPI;
-        self.canonical_reactive[39] = PWW;
-        self.canonical_reactive[40] = PWX;
-        self.canonical_reactive[41] = PWY;
-        self.canonical_reactive[42] = PWZ;
-        self.canonical_reactive[43] = PXA;
+        self.canonical_reactive[39] = PVN;
+        self.canonical_reactive[40] = PVO;
+        self.canonical_reactive[41] = PVP;
+        self.canonical_reactive[42] = PVQ;
+        self.canonical_reactive[43] = PVR;
         self.canonical_reactive[44] = IPK;
-        self.canonical_reactive[45] = PXB;
-        self.canonical_reactive[46] = PXC;
-        self.canonical_reactive[47] = PXD;
-        self.canonical_reactive[48] = PXE;
-        self.canonical_reactive[49] = PXF;
+        self.canonical_reactive[45] = PVS;
+        self.canonical_reactive[46] = PVT;
+        self.canonical_reactive[47] = PVU;
+        self.canonical_reactive[48] = PVV;
+        self.canonical_reactive[49] = PVW;
         self.canonical_reactive[50] = IPM;
-        self.canonical_reactive[51] = PXG;
-        self.canonical_reactive[52] = PXH;
-        self.canonical_reactive[53] = PXI;
-        self.canonical_reactive[54] = PXJ;
+        self.canonical_reactive[51] = PVX;
+        self.canonical_reactive[52] = PVY;
+        self.canonical_reactive[53] = PVZ;
+        self.canonical_reactive[54] = PWA;
         self.canonical_reactive[55] = IGM;
         self.canonical_reactive[56] = IPO;
-        self.canonical_reactive[57] = PXK;
-        self.canonical_reactive[58] = PXL;
-        self.canonical_reactive[59] = PXM;
-        self.canonical_reactive[60] = PXN;
-        self.canonical_reactive[61] = PXO;
+        self.canonical_reactive[57] = PWB;
+        self.canonical_reactive[58] = PWC;
+        self.canonical_reactive[59] = PWD;
+        self.canonical_reactive[60] = PWE;
+        self.canonical_reactive[61] = PWF;
         self.canonical_reactive[62] = IPQ;
-        self.canonical_reactive[63] = PXP;
-        self.canonical_reactive[64] = PXQ;
-        self.canonical_reactive[65] = PXR;
-        self.canonical_reactive[66] = PXS;
-        self.canonical_reactive[67] = PXT;
+        self.canonical_reactive[63] = PWG;
+        self.canonical_reactive[64] = PWH;
+        self.canonical_reactive[65] = PWI;
+        self.canonical_reactive[66] = PWJ;
+        self.canonical_reactive[67] = PWK;
         self.canonical_reactive[68] = IPS;
-        self.canonical_reactive[69] = PXU;
-        self.canonical_reactive[70] = PXV;
-        self.canonical_reactive[71] = PXW;
-        self.canonical_reactive[72] = PXX;
-        self.canonical_reactive[73] = PXY;
+        self.canonical_reactive[69] = PWL;
+        self.canonical_reactive[70] = PWM;
+        self.canonical_reactive[71] = PWN;
+        self.canonical_reactive[72] = PWO;
+        self.canonical_reactive[73] = PWP;
         self.canonical_reactive[74] = IPU;
-        self.canonical_reactive[75] = PXZ;
-        self.canonical_reactive[76] = PYA;
-        self.canonical_reactive[77] = PYB;
-        self.canonical_reactive[78] = PYC;
+        self.canonical_reactive[75] = PWQ;
+        self.canonical_reactive[76] = PWR;
+        self.canonical_reactive[77] = PWS;
+        self.canonical_reactive[78] = PWT;
         self.canonical_reactive[79] = IGR;
         self.canonical_reactive[80] = IGS;
         self.canonical_reactive[81] = IPV;
-        self.canonical_reactive[82] = PYD;
-        self.canonical_reactive[83] = PYE;
-        self.canonical_reactive[84] = PYF;
+        self.canonical_reactive[82] = PWU;
+        self.canonical_reactive[83] = PWV;
+        self.canonical_reactive[84] = PWW;
         self.canonical_reactive[85] = IGT;
         self.canonical_reactive[86] = IGU;
         self.canonical_reactive[87] = IPX;
-        self.canonical_reactive[88] = PYG;
-        self.canonical_reactive[89] = PYH;
-        self.canonical_reactive[90] = PYI;
-        self.canonical_reactive[91] = PYJ;
-        self.canonical_reactive[92] = PYK;
+        self.canonical_reactive[88] = PWX;
+        self.canonical_reactive[89] = PWY;
+        self.canonical_reactive[90] = PWZ;
+        self.canonical_reactive[91] = PXA;
+        self.canonical_reactive[92] = PXB;
         self.canonical_reactive[93] = IPZ;
-        self.canonical_reactive[94] = PYL;
-        self.canonical_reactive[95] = PYM;
-        self.canonical_reactive[96] = PYN;
-        self.canonical_reactive[97] = PYO;
-        self.canonical_reactive[98] = PYP;
+        self.canonical_reactive[94] = PXC;
+        self.canonical_reactive[95] = PXD;
+        self.canonical_reactive[96] = PXE;
+        self.canonical_reactive[97] = PXF;
+        self.canonical_reactive[98] = PXG;
         self.canonical_reactive[99] = IQB;
-        self.canonical_reactive[100] = PYQ;
-        self.canonical_reactive[101] = PYR;
-        self.canonical_reactive[102] = PYS;
-        self.canonical_reactive[103] = PYT;
+        self.canonical_reactive[100] = PXH;
+        self.canonical_reactive[101] = PXI;
+        self.canonical_reactive[102] = PXJ;
+        self.canonical_reactive[103] = PXK;
         self.canonical_reactive[104] = IGY;
         self.canonical_reactive[105] = IQD;
-        self.canonical_reactive[106] = PYU;
-        self.canonical_reactive[107] = PYV;
-        self.canonical_reactive[108] = PYW;
-        self.canonical_reactive[109] = PYX;
-        self.canonical_reactive[110] = PYY;
+        self.canonical_reactive[106] = PXL;
+        self.canonical_reactive[107] = PXM;
+        self.canonical_reactive[108] = PXN;
+        self.canonical_reactive[109] = PXO;
+        self.canonical_reactive[110] = PXP;
         self.canonical_reactive[111] = IQF;
-        self.canonical_reactive[112] = PYZ;
-        self.canonical_reactive[113] = PZA;
-        self.canonical_reactive[114] = PZB;
-        self.canonical_reactive[115] = PZC;
-        self.canonical_reactive[116] = PZD;
+        self.canonical_reactive[112] = PXQ;
+        self.canonical_reactive[113] = PXR;
+        self.canonical_reactive[114] = PXS;
+        self.canonical_reactive[115] = PXT;
+        self.canonical_reactive[116] = PXU;
         self.canonical_reactive[117] = IQH;
-        self.canonical_reactive[118] = PZE;
-        self.canonical_reactive[119] = PZF;
-        self.canonical_reactive[120] = PZG;
-        self.canonical_reactive[121] = PZH;
-        self.canonical_reactive[122] = PZI;
+        self.canonical_reactive[118] = PXV;
+        self.canonical_reactive[119] = PXW;
+        self.canonical_reactive[120] = PXX;
+        self.canonical_reactive[121] = PXY;
+        self.canonical_reactive[122] = PXZ;
         self.canonical_reactive[123] = IQJ;
-        self.canonical_reactive[124] = PZJ;
-        self.canonical_reactive[125] = PZK;
-        self.canonical_reactive[126] = PZL;
-        self.canonical_reactive[127] = PZM;
+        self.canonical_reactive[124] = PYA;
+        self.canonical_reactive[125] = PYB;
+        self.canonical_reactive[126] = PYC;
+        self.canonical_reactive[127] = PYD;
         self.canonical_reactive[128] = IHD;
         self.canonical_reactive[129] = IHE;
         self.canonical_reactive[130] = IQK;
-        self.canonical_reactive[131] = PZN;
-        self.canonical_reactive[132] = PZO;
-        self.canonical_reactive[133] = PZP;
+        self.canonical_reactive[131] = PYE;
+        self.canonical_reactive[132] = PYF;
+        self.canonical_reactive[133] = PYG;
         self.canonical_reactive[134] = IHF;
         self.canonical_reactive[135] = IHG;
         self.canonical_reactive[136] = IQM;
-        self.canonical_reactive[137] = PZQ;
-        self.canonical_reactive[138] = PZR;
-        self.canonical_reactive[139] = PZS;
-        self.canonical_reactive[140] = PZT;
-        self.canonical_reactive[141] = PZU;
+        self.canonical_reactive[137] = PYH;
+        self.canonical_reactive[138] = PYI;
+        self.canonical_reactive[139] = PYJ;
+        self.canonical_reactive[140] = PYK;
+        self.canonical_reactive[141] = PYL;
         self.canonical_reactive[142] = IQO;
-        self.canonical_reactive[143] = PZV;
-        self.canonical_reactive[144] = PZW;
-        self.canonical_reactive[145] = PZX;
-        self.canonical_reactive[146] = PZY;
-        self.canonical_reactive[147] = PZZ;
+        self.canonical_reactive[143] = PYM;
+        self.canonical_reactive[144] = PYN;
+        self.canonical_reactive[145] = PYO;
+        self.canonical_reactive[146] = PYP;
+        self.canonical_reactive[147] = PYQ;
         self.canonical_reactive[148] = IQQ;
-        self.canonical_reactive[149] = QAA;
-        self.canonical_reactive[150] = QAB;
-        self.canonical_reactive[151] = QAC;
-        self.canonical_reactive[152] = QAD;
+        self.canonical_reactive[149] = PYR;
+        self.canonical_reactive[150] = PYS;
+        self.canonical_reactive[151] = PYT;
+        self.canonical_reactive[152] = PYU;
         self.canonical_reactive[153] = IHK;
         self.canonical_reactive[154] = IQS;
-        self.canonical_reactive[155] = QAE;
-        self.canonical_reactive[156] = QAF;
-        self.canonical_reactive[157] = QAG;
-        self.canonical_reactive[158] = QAH;
-        self.canonical_reactive[159] = QAI;
+        self.canonical_reactive[155] = PYV;
+        self.canonical_reactive[156] = PYW;
+        self.canonical_reactive[157] = PYX;
+        self.canonical_reactive[158] = PYY;
+        self.canonical_reactive[159] = PYZ;
         self.canonical_reactive[160] = IQU;
-        self.canonical_reactive[161] = QAJ;
-        self.canonical_reactive[162] = QAK;
-        self.canonical_reactive[163] = QAL;
-        self.canonical_reactive[164] = QAM;
-        self.canonical_reactive[165] = QAN;
+        self.canonical_reactive[161] = PZA;
+        self.canonical_reactive[162] = PZB;
+        self.canonical_reactive[163] = PZC;
+        self.canonical_reactive[164] = PZD;
+        self.canonical_reactive[165] = PZE;
         self.canonical_reactive[166] = IQW;
-        self.canonical_reactive[167] = QAO;
-        self.canonical_reactive[168] = QAP;
-        self.canonical_reactive[169] = QAQ;
-        self.canonical_reactive[170] = QAR;
-        self.canonical_reactive[171] = QAS;
+        self.canonical_reactive[167] = PZF;
+        self.canonical_reactive[168] = PZG;
+        self.canonical_reactive[169] = PZH;
+        self.canonical_reactive[170] = PZI;
+        self.canonical_reactive[171] = PZJ;
         self.canonical_reactive[172] = IQY;
-        self.canonical_reactive[173] = QAT;
-        self.canonical_reactive[174] = QAU;
-        self.canonical_reactive[175] = QAV;
-        self.canonical_reactive[176] = QAW;
+        self.canonical_reactive[173] = PZK;
+        self.canonical_reactive[174] = PZL;
+        self.canonical_reactive[175] = PZM;
+        self.canonical_reactive[176] = PZN;
         self.canonical_reactive[177] = IHP;
         self.canonical_reactive[178] = IHQ;
         self.canonical_reactive[179] = IQZ;
-        self.canonical_reactive[180] = QAX;
-        self.canonical_reactive[181] = QAY;
-        self.canonical_reactive[182] = QAZ;
+        self.canonical_reactive[180] = PZO;
+        self.canonical_reactive[181] = PZP;
+        self.canonical_reactive[182] = PZQ;
         self.canonical_reactive[183] = IHR;
         self.canonical_reactive[184] = IHS;
         self.canonical_reactive[185] = IRB;
-        self.canonical_reactive[186] = QBA;
-        self.canonical_reactive[187] = QBB;
-        self.canonical_reactive[188] = QBC;
-        self.canonical_reactive[189] = QBD;
-        self.canonical_reactive[190] = QBE;
+        self.canonical_reactive[186] = PZR;
+        self.canonical_reactive[187] = PZS;
+        self.canonical_reactive[188] = PZT;
+        self.canonical_reactive[189] = PZU;
+        self.canonical_reactive[190] = PZV;
         self.canonical_reactive[191] = IRD;
-        self.canonical_reactive[192] = QBF;
-        self.canonical_reactive[193] = QBG;
-        self.canonical_reactive[194] = QBH;
-        self.canonical_reactive[195] = QBI;
-        self.canonical_reactive[196] = QBJ;
+        self.canonical_reactive[192] = PZW;
+        self.canonical_reactive[193] = PZX;
+        self.canonical_reactive[194] = PZY;
+        self.canonical_reactive[195] = PZZ;
+        self.canonical_reactive[196] = QAA;
         self.canonical_reactive[197] = IRF;
-        self.canonical_reactive[198] = QBK;
-        self.canonical_reactive[199] = QBL;
-        self.canonical_reactive[200] = QBM;
-        self.canonical_reactive[201] = QBN;
+        self.canonical_reactive[198] = QAB;
+        self.canonical_reactive[199] = QAC;
+        self.canonical_reactive[200] = QAD;
+        self.canonical_reactive[201] = QAE;
         self.canonical_reactive[202] = IHW;
         self.canonical_reactive[203] = IRH;
-        self.canonical_reactive[204] = QBO;
-        self.canonical_reactive[205] = QBP;
-        self.canonical_reactive[206] = QBQ;
-        self.canonical_reactive[207] = QBR;
-        self.canonical_reactive[208] = QBS;
+        self.canonical_reactive[204] = QAF;
+        self.canonical_reactive[205] = QAG;
+        self.canonical_reactive[206] = QAH;
+        self.canonical_reactive[207] = QAI;
+        self.canonical_reactive[208] = QAJ;
         self.canonical_reactive[209] = IRJ;
-        self.canonical_reactive[210] = QBT;
-        self.canonical_reactive[211] = QBU;
-        self.canonical_reactive[212] = QBV;
-        self.canonical_reactive[213] = QBW;
-        self.canonical_reactive[214] = QBX;
+        self.canonical_reactive[210] = QAK;
+        self.canonical_reactive[211] = QAL;
+        self.canonical_reactive[212] = QAM;
+        self.canonical_reactive[213] = QAN;
+        self.canonical_reactive[214] = QAO;
         self.canonical_reactive[215] = IRL;
-        self.canonical_reactive[216] = QBY;
-        self.canonical_reactive[217] = QBZ;
-        self.canonical_reactive[218] = QCA;
-        self.canonical_reactive[219] = QCB;
-        self.canonical_reactive[220] = QCC;
+        self.canonical_reactive[216] = QAP;
+        self.canonical_reactive[217] = QAQ;
+        self.canonical_reactive[218] = QAR;
+        self.canonical_reactive[219] = QAS;
+        self.canonical_reactive[220] = QAT;
         self.canonical_reactive[221] = IRN;
-        self.canonical_reactive[222] = QCD;
-        self.canonical_reactive[223] = QCE;
-        self.canonical_reactive[224] = QCF;
-        self.canonical_reactive[225] = QCG;
+        self.canonical_reactive[222] = QAU;
+        self.canonical_reactive[223] = QAV;
+        self.canonical_reactive[224] = QAW;
+        self.canonical_reactive[225] = QAX;
         self.canonical_reactive[226] = IIB;
         self.canonical_reactive[227] = IIC;
         self.canonical_reactive[228] = IRO;
-        self.canonical_reactive[229] = QCH;
-        self.canonical_reactive[230] = QCI;
-        self.canonical_reactive[231] = QCJ;
+        self.canonical_reactive[229] = QAY;
+        self.canonical_reactive[230] = QAZ;
+        self.canonical_reactive[231] = QBA;
         self.canonical_reactive[232] = IID;
         self.canonical_reactive[233] = IIE;
         self.canonical_reactive[234] = IRQ;
-        self.canonical_reactive[235] = QCK;
-        self.canonical_reactive[236] = QCL;
-        self.canonical_reactive[237] = QCM;
-        self.canonical_reactive[238] = QCN;
-        self.canonical_reactive[239] = QCO;
+        self.canonical_reactive[235] = QBB;
+        self.canonical_reactive[236] = QBC;
+        self.canonical_reactive[237] = QBD;
+        self.canonical_reactive[238] = QBE;
+        self.canonical_reactive[239] = QBF;
         self.canonical_reactive[240] = IRS;
-        self.canonical_reactive[241] = QCP;
-        self.canonical_reactive[242] = QCQ;
-        self.canonical_reactive[243] = QCR;
-        self.canonical_reactive[244] = QCS;
-        self.canonical_reactive[245] = QCT;
+        self.canonical_reactive[241] = QBG;
+        self.canonical_reactive[242] = QBH;
+        self.canonical_reactive[243] = QBI;
+        self.canonical_reactive[244] = QBJ;
+        self.canonical_reactive[245] = QBK;
         self.canonical_reactive[246] = IRU;
-        self.canonical_reactive[247] = QCU;
-        self.canonical_reactive[248] = QCV;
-        self.canonical_reactive[249] = QCW;
-        self.canonical_reactive[250] = QCX;
+        self.canonical_reactive[247] = QBL;
+        self.canonical_reactive[248] = QBM;
+        self.canonical_reactive[249] = QBN;
+        self.canonical_reactive[250] = QBO;
         self.canonical_reactive[251] = III;
         self.canonical_reactive[252] = IRW;
-        self.canonical_reactive[253] = QCY;
-        self.canonical_reactive[254] = QCZ;
-        self.canonical_reactive[255] = QDA;
-        self.canonical_reactive[256] = QDB;
-        self.canonical_reactive[257] = QDC;
+        self.canonical_reactive[253] = QBP;
+        self.canonical_reactive[254] = QBQ;
+        self.canonical_reactive[255] = QBR;
+        self.canonical_reactive[256] = QBS;
+        self.canonical_reactive[257] = QBT;
         self.canonical_reactive[258] = IRY;
-        self.canonical_reactive[259] = QDD;
-        self.canonical_reactive[260] = QDE;
-        self.canonical_reactive[261] = QDF;
-        self.canonical_reactive[262] = QDG;
-        self.canonical_reactive[263] = QDH;
+        self.canonical_reactive[259] = QBU;
+        self.canonical_reactive[260] = QBV;
+        self.canonical_reactive[261] = QBW;
+        self.canonical_reactive[262] = QBX;
+        self.canonical_reactive[263] = QBY;
         self.canonical_reactive[264] = ISA;
-        self.canonical_reactive[265] = QDI;
-        self.canonical_reactive[266] = QDJ;
-        self.canonical_reactive[267] = QDK;
-        self.canonical_reactive[268] = QDL;
-        self.canonical_reactive[269] = QDM;
+        self.canonical_reactive[265] = QBZ;
+        self.canonical_reactive[266] = QCA;
+        self.canonical_reactive[267] = QCB;
+        self.canonical_reactive[268] = QCC;
+        self.canonical_reactive[269] = QCD;
         self.canonical_reactive[270] = ISC;
-        self.canonical_reactive[271] = QDN;
-        self.canonical_reactive[272] = QDO;
-        self.canonical_reactive[273] = QDP;
-        self.canonical_reactive[274] = QDQ;
+        self.canonical_reactive[271] = QCE;
+        self.canonical_reactive[272] = QCF;
+        self.canonical_reactive[273] = QCG;
+        self.canonical_reactive[274] = QCH;
         self.canonical_reactive[275] = IIN;
         self.canonical_reactive[276] = IIO;
         self.canonical_reactive[277] = ISD;
-        self.canonical_reactive[278] = QDR;
-        self.canonical_reactive[279] = QDS;
-        self.canonical_reactive[280] = QDT;
+        self.canonical_reactive[278] = QCI;
+        self.canonical_reactive[279] = QCJ;
+        self.canonical_reactive[280] = QCK;
         self.canonical_reactive[281] = IIP;
         self.canonical_reactive[282] = IIQ;
         self.canonical_reactive[283] = ISF;
-        self.canonical_reactive[284] = QDU;
-        self.canonical_reactive[285] = QDV;
-        self.canonical_reactive[286] = QDW;
-        self.canonical_reactive[287] = QDX;
-        self.canonical_reactive[288] = QDY;
+        self.canonical_reactive[284] = QCL;
+        self.canonical_reactive[285] = QCM;
+        self.canonical_reactive[286] = QCN;
+        self.canonical_reactive[287] = QCO;
+        self.canonical_reactive[288] = QCP;
         self.canonical_reactive[289] = ISH;
-        self.canonical_reactive[290] = QDZ;
-        self.canonical_reactive[291] = QEA;
-        self.canonical_reactive[292] = QEB;
-        self.canonical_reactive[293] = QEC;
-        self.canonical_reactive[294] = QED;
+        self.canonical_reactive[290] = QCQ;
+        self.canonical_reactive[291] = QCR;
+        self.canonical_reactive[292] = QCS;
+        self.canonical_reactive[293] = QCT;
+        self.canonical_reactive[294] = QCU;
         self.canonical_reactive[295] = ISJ;
-        self.canonical_reactive[296] = QEE;
-        self.canonical_reactive[297] = QEF;
-        self.canonical_reactive[298] = QEG;
-        self.canonical_reactive[299] = QEH;
+        self.canonical_reactive[296] = QCV;
+        self.canonical_reactive[297] = QCW;
+        self.canonical_reactive[298] = QCX;
+        self.canonical_reactive[299] = QCY;
         self.canonical_reactive[300] = IIU;
         self.canonical_reactive[301] = ISL;
-        self.canonical_reactive[302] = QEI;
-        self.canonical_reactive[303] = QEJ;
-        self.canonical_reactive[304] = QEK;
-        self.canonical_reactive[305] = QEL;
-        self.canonical_reactive[306] = QEM;
+        self.canonical_reactive[302] = QCZ;
+        self.canonical_reactive[303] = QDA;
+        self.canonical_reactive[304] = QDB;
+        self.canonical_reactive[305] = QDC;
+        self.canonical_reactive[306] = QDD;
         self.canonical_reactive[307] = ISN;
-        self.canonical_reactive[308] = QEN;
-        self.canonical_reactive[309] = QEO;
-        self.canonical_reactive[310] = QEP;
-        self.canonical_reactive[311] = QEQ;
-        self.canonical_reactive[312] = QER;
+        self.canonical_reactive[308] = QDE;
+        self.canonical_reactive[309] = QDF;
+        self.canonical_reactive[310] = QDG;
+        self.canonical_reactive[311] = QDH;
+        self.canonical_reactive[312] = QDI;
         self.canonical_reactive[313] = ISP;
-        self.canonical_reactive[314] = QES;
-        self.canonical_reactive[315] = QET;
-        self.canonical_reactive[316] = QEU;
-        self.canonical_reactive[317] = QEV;
-        self.canonical_reactive[318] = QEW;
+        self.canonical_reactive[314] = QDJ;
+        self.canonical_reactive[315] = QDK;
+        self.canonical_reactive[316] = QDL;
+        self.canonical_reactive[317] = QDM;
+        self.canonical_reactive[318] = QDN;
         self.canonical_reactive[319] = ISR;
-        self.canonical_reactive[320] = QEX;
-        self.canonical_reactive[321] = QEY;
-        self.canonical_reactive[322] = QEZ;
-        self.canonical_reactive[323] = QFA;
+        self.canonical_reactive[320] = QDO;
+        self.canonical_reactive[321] = QDP;
+        self.canonical_reactive[322] = QDQ;
+        self.canonical_reactive[323] = QDR;
         self.canonical_reactive[324] = IIZ;
         self.canonical_reactive[325] = IJA;
         self.canonical_reactive[326] = ISS;
-        self.canonical_reactive[327] = QFB;
-        self.canonical_reactive[328] = QFC;
-        self.canonical_reactive[329] = QFD;
+        self.canonical_reactive[327] = QDS;
+        self.canonical_reactive[328] = QDT;
+        self.canonical_reactive[329] = QDU;
         self.canonical_reactive[330] = IJB;
         self.canonical_reactive[331] = IJC;
         self.canonical_reactive[332] = ISU;
-        self.canonical_reactive[333] = QFE;
-        self.canonical_reactive[334] = QFF;
-        self.canonical_reactive[335] = QFG;
-        self.canonical_reactive[336] = QFH;
-        self.canonical_reactive[337] = QFI;
+        self.canonical_reactive[333] = QDV;
+        self.canonical_reactive[334] = QDW;
+        self.canonical_reactive[335] = QDX;
+        self.canonical_reactive[336] = QDY;
+        self.canonical_reactive[337] = QDZ;
         self.canonical_reactive[338] = ISW;
-        self.canonical_reactive[339] = QFJ;
-        self.canonical_reactive[340] = QFK;
-        self.canonical_reactive[341] = QFL;
-        self.canonical_reactive[342] = QFM;
-        self.canonical_reactive[343] = QFN;
+        self.canonical_reactive[339] = QEA;
+        self.canonical_reactive[340] = QEB;
+        self.canonical_reactive[341] = QEC;
+        self.canonical_reactive[342] = QED;
+        self.canonical_reactive[343] = QEE;
         self.canonical_reactive[344] = ISY;
-        self.canonical_reactive[345] = QFO;
-        self.canonical_reactive[346] = QFP;
-        self.canonical_reactive[347] = QFQ;
-        self.canonical_reactive[348] = QFR;
+        self.canonical_reactive[345] = QEF;
+        self.canonical_reactive[346] = QEG;
+        self.canonical_reactive[347] = QEH;
+        self.canonical_reactive[348] = QEI;
         self.canonical_reactive[349] = IJG;
         self.canonical_reactive[350] = ITA;
-        self.canonical_reactive[351] = QFS;
-        self.canonical_reactive[352] = QFT;
-        self.canonical_reactive[353] = QFU;
-        self.canonical_reactive[354] = QFV;
-        self.canonical_reactive[355] = QFW;
+        self.canonical_reactive[351] = QEJ;
+        self.canonical_reactive[352] = QEK;
+        self.canonical_reactive[353] = QEL;
+        self.canonical_reactive[354] = QEM;
+        self.canonical_reactive[355] = QEN;
         self.canonical_reactive[356] = ITC;
-        self.canonical_reactive[357] = QFX;
-        self.canonical_reactive[358] = QFY;
-        self.canonical_reactive[359] = QFZ;
-        self.canonical_reactive[360] = QGA;
-        self.canonical_reactive[361] = QGB;
+        self.canonical_reactive[357] = QEO;
+        self.canonical_reactive[358] = QEP;
+        self.canonical_reactive[359] = QEQ;
+        self.canonical_reactive[360] = QER;
+        self.canonical_reactive[361] = QES;
         self.canonical_reactive[362] = ITE;
-        self.canonical_reactive[363] = QGC;
-        self.canonical_reactive[364] = QGD;
-        self.canonical_reactive[365] = QGE;
-        self.canonical_reactive[366] = QGF;
-        self.canonical_reactive[367] = QGG;
+        self.canonical_reactive[363] = QET;
+        self.canonical_reactive[364] = QEU;
+        self.canonical_reactive[365] = QEV;
+        self.canonical_reactive[366] = QEW;
+        self.canonical_reactive[367] = QEX;
         self.canonical_reactive[368] = ITG;
-        self.canonical_reactive[369] = QGH;
-        self.canonical_reactive[370] = QGI;
-        self.canonical_reactive[371] = QGJ;
-        self.canonical_reactive[372] = QGK;
+        self.canonical_reactive[369] = QEY;
+        self.canonical_reactive[370] = QEZ;
+        self.canonical_reactive[371] = QFA;
+        self.canonical_reactive[372] = QFB;
         self.canonical_reactive[373] = IJL;
         self.canonical_reactive[374] = IJM;
         self.canonical_reactive[375] = ITH;
-        self.canonical_reactive[376] = QGL;
-        self.canonical_reactive[377] = QGM;
-        self.canonical_reactive[378] = QGN;
+        self.canonical_reactive[376] = QFC;
+        self.canonical_reactive[377] = QFD;
+        self.canonical_reactive[378] = QFE;
         self.canonical_reactive[379] = IJN;
         self.canonical_reactive[380] = IJO;
         self.canonical_reactive[381] = ITJ;
-        self.canonical_reactive[382] = QGO;
-        self.canonical_reactive[383] = QGP;
-        self.canonical_reactive[384] = QGQ;
-        self.canonical_reactive[385] = QGR;
-        self.canonical_reactive[386] = QGS;
+        self.canonical_reactive[382] = QFF;
+        self.canonical_reactive[383] = QFG;
+        self.canonical_reactive[384] = QFH;
+        self.canonical_reactive[385] = QFI;
+        self.canonical_reactive[386] = QFJ;
         self.canonical_reactive[387] = ITL;
-        self.canonical_reactive[388] = QGT;
-        self.canonical_reactive[389] = QGU;
-        self.canonical_reactive[390] = QGV;
-        self.canonical_reactive[391] = QGW;
-        self.canonical_reactive[392] = QGX;
+        self.canonical_reactive[388] = QFK;
+        self.canonical_reactive[389] = QFL;
+        self.canonical_reactive[390] = QFM;
+        self.canonical_reactive[391] = QFN;
+        self.canonical_reactive[392] = QFO;
         self.canonical_reactive[393] = ITN;
-        self.canonical_reactive[394] = QGY;
-        self.canonical_reactive[395] = QGZ;
-        self.canonical_reactive[396] = QHA;
-        self.canonical_reactive[397] = QHB;
+        self.canonical_reactive[394] = QFP;
+        self.canonical_reactive[395] = QFQ;
+        self.canonical_reactive[396] = QFR;
+        self.canonical_reactive[397] = QFS;
         self.canonical_reactive[398] = IJS;
         self.canonical_reactive[399] = ITP;
-        self.canonical_reactive[400] = QHC;
-        self.canonical_reactive[401] = QHD;
-        self.canonical_reactive[402] = QHE;
-        self.canonical_reactive[403] = QHF;
-        self.canonical_reactive[404] = QHG;
+        self.canonical_reactive[400] = QFT;
+        self.canonical_reactive[401] = QFU;
+        self.canonical_reactive[402] = QFV;
+        self.canonical_reactive[403] = QFW;
+        self.canonical_reactive[404] = QFX;
         self.canonical_reactive[405] = ITR;
-        self.canonical_reactive[406] = QHH;
-        self.canonical_reactive[407] = QHI;
-        self.canonical_reactive[408] = QHJ;
-        self.canonical_reactive[409] = QHK;
-        self.canonical_reactive[410] = QHL;
+        self.canonical_reactive[406] = QFY;
+        self.canonical_reactive[407] = QFZ;
+        self.canonical_reactive[408] = QGA;
+        self.canonical_reactive[409] = QGB;
+        self.canonical_reactive[410] = QGC;
         self.canonical_reactive[411] = ITT;
-        self.canonical_reactive[412] = QHM;
-        self.canonical_reactive[413] = QHN;
-        self.canonical_reactive[414] = QHO;
-        self.canonical_reactive[415] = QHP;
-        self.canonical_reactive[416] = QHQ;
+        self.canonical_reactive[412] = QGD;
+        self.canonical_reactive[413] = QGE;
+        self.canonical_reactive[414] = QGF;
+        self.canonical_reactive[415] = QGG;
+        self.canonical_reactive[416] = QGH;
         self.canonical_reactive[417] = ITV;
-        self.canonical_reactive[418] = QHR;
-        self.canonical_reactive[419] = QHS;
-        self.canonical_reactive[420] = QHT;
-        self.canonical_reactive[421] = QHU;
+        self.canonical_reactive[418] = QGI;
+        self.canonical_reactive[419] = QGJ;
+        self.canonical_reactive[420] = QGK;
+        self.canonical_reactive[421] = QGL;
         self.canonical_reactive[422] = IJX;
         self.canonical_reactive[423] = IJY;
         self.canonical_reactive[424] = ITW;
-        self.canonical_reactive[425] = QHV;
-        self.canonical_reactive[426] = QHW;
-        self.canonical_reactive[427] = QHX;
+        self.canonical_reactive[425] = QGM;
+        self.canonical_reactive[426] = QGN;
+        self.canonical_reactive[427] = QGO;
         self.canonical_reactive[428] = IJZ;
         self.canonical_reactive[429] = IKA;
         self.canonical_reactive[430] = IKB;
@@ -21339,28 +21304,28 @@ impl Instance {
         self.canonical_reactive[433] = IKE;
         self.canonical_reactive[434] = IKF;
         self.canonical_reactive[435] = ITY;
-        self.canonical_reactive[436] = QHY;
+        self.canonical_reactive[436] = QGP;
         self.canonical_reactive[437] = IUA;
-        self.canonical_reactive[438] = QHZ;
+        self.canonical_reactive[438] = QGQ;
         self.canonical_reactive[439] = IKI;
         self.canonical_reactive[440] = IUB;
-        self.canonical_reactive[441] = QIA;
-        self.canonical_reactive[442] = QIB;
-        self.canonical_reactive[443] = QIC;
-        self.canonical_reactive[444] = QID;
-        self.canonical_reactive[445] = QIE;
-        self.canonical_reactive[446] = QIF;
-        self.canonical_reactive[447] = QIG;
-        self.canonical_reactive[448] = QIH;
+        self.canonical_reactive[441] = QGR;
+        self.canonical_reactive[442] = QGS;
+        self.canonical_reactive[443] = QGT;
+        self.canonical_reactive[444] = QGU;
+        self.canonical_reactive[445] = QGV;
+        self.canonical_reactive[446] = QGW;
+        self.canonical_reactive[447] = QGX;
+        self.canonical_reactive[448] = QGY;
         self.canonical_reactive[449] = IUC;
-        self.canonical_reactive[450] = QII;
-        self.canonical_reactive[451] = QIJ;
-        self.canonical_reactive[452] = QIK;
-        self.canonical_reactive[453] = QIL;
-        self.canonical_reactive[454] = QIM;
-        self.canonical_reactive[455] = QIN;
-        self.canonical_reactive[456] = QIO;
-        self.canonical_reactive[457] = QIP;
+        self.canonical_reactive[450] = QGZ;
+        self.canonical_reactive[451] = QHA;
+        self.canonical_reactive[452] = QHB;
+        self.canonical_reactive[453] = QHC;
+        self.canonical_reactive[454] = QHD;
+        self.canonical_reactive[455] = QHE;
+        self.canonical_reactive[456] = QHF;
+        self.canonical_reactive[457] = QHG;
         self.canonical_reactive[458] = IKJ;
         self.canonical_reactive[459] = IKK;
         self.canonical_reactive[460] = IKL;
@@ -21372,8 +21337,8 @@ impl Instance {
         self.canonical_reactive[466] = IKZ;
         self.canonical_reactive[467] = ILA;
         self.canonical_reactive[468] = IUD;
-        self.canonical_reactive[469] = QIQ;
-        self.canonical_reactive[470] = QIR;
+        self.canonical_reactive[469] = QHH;
+        self.canonical_reactive[470] = QHI;
         self.canonical_reactive[471] = ILD;
         self.canonical_reactive[472] = ILF;
         self.canonical_reactive[473] = ILG;
@@ -21389,29 +21354,29 @@ impl Instance {
         self.canonical_reactive[483] = ILU;
         self.canonical_reactive[484] = ILV;
         self.canonical_reactive[485] = HXZ;
-        self.canonical_reactive[486] = QIS;
-        self.canonical_reactive[487] = QIT;
-        self.canonical_reactive[488] = QIU;
+        self.canonical_reactive[486] = QHJ;
+        self.canonical_reactive[487] = QHK;
+        self.canonical_reactive[488] = QHL;
         self.canonical_reactive[489] = HYR;
-        self.canonical_reactive[490] = QIV;
-        self.canonical_reactive[491] = QIW;
-        self.canonical_reactive[492] = QIX;
+        self.canonical_reactive[490] = QHM;
+        self.canonical_reactive[491] = QHN;
+        self.canonical_reactive[492] = QHO;
         self.canonical_reactive[493] = HZJ;
-        self.canonical_reactive[494] = QIY;
-        self.canonical_reactive[495] = QIZ;
-        self.canonical_reactive[496] = QJA;
+        self.canonical_reactive[494] = QHP;
+        self.canonical_reactive[495] = QHQ;
+        self.canonical_reactive[496] = QHR;
         self.canonical_reactive[497] = IAB;
-        self.canonical_reactive[498] = QJB;
-        self.canonical_reactive[499] = QJC;
-        self.canonical_reactive[500] = QJD;
+        self.canonical_reactive[498] = QHS;
+        self.canonical_reactive[499] = QHT;
+        self.canonical_reactive[500] = QHU;
         self.canonical_reactive[501] = IAT;
-        self.canonical_reactive[502] = QJE;
-        self.canonical_reactive[503] = QJF;
-        self.canonical_reactive[504] = QJG;
+        self.canonical_reactive[502] = QHV;
+        self.canonical_reactive[503] = QHW;
+        self.canonical_reactive[504] = QHX;
         self.canonical_reactive[505] = IBL;
-        self.canonical_reactive[506] = QJH;
-        self.canonical_reactive[507] = QJI;
-        self.canonical_reactive[508] = QJJ;
+        self.canonical_reactive[506] = QHY;
+        self.canonical_reactive[507] = QHZ;
+        self.canonical_reactive[508] = QIA;
         self.canonical_reactive[509] = ILW;
         self.canonical_reactive[510] = ILX;
         self.canonical_reactive[511] = ILY;
@@ -21429,7 +21394,7 @@ impl Instance {
         self.canonical_reactive[523] = IMS;
         self.canonical_reactive[524] = IMU;
         self.canonical_reactive[525] = IUE;
-        self.canonical_reactive[526] = QJK;
+        self.canonical_reactive[526] = QIB;
         self.canonical_reactive[527] = IMX;
         self.canonical_reactive[528] = IMY;
         self.canonical_reactive[529] = IMZ;

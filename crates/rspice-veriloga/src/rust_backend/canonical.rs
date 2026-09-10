@@ -527,6 +527,12 @@ fn kernel_region_metrics(
             }
             CfgValueKind::Unary { op, .. } => write!(out, "unary:{op:?}"),
             CfgValueKind::Binary { op, .. } => write!(out, "binary:{op:?}"),
+            CfgValueKind::SumProductsDiv { terms, .. } => {
+                write!(out, "sum-products-div:{}", terms.len())
+            }
+            CfgValueKind::LaneSumProductsDiv { terms, .. } => {
+                write!(out, "lane-sum-products-div:{}", terms.len())
+            }
             CfgValueKind::Select { .. } => write!(out, "select"),
             CfgValueKind::IntegerArithmetic { op, .. } => write!(out, "integer-arithmetic:{op:?}"),
             CfgValueKind::IntegerBitwise { op, .. } => write!(out, "integer-bitwise:{op:?}"),
@@ -2381,6 +2387,26 @@ impl ModelPlan {
         {
             runtime_support.push("integer".to_string());
         }
+        if std::iter::once(&self.function)
+            .chain(self.stages.iter().map(|stage| &stage.function))
+            .chain(self.initialization.iter().map(|plan| &plan.function))
+            .any(|function| {
+                function.values.iter().any(|value| {
+                    matches!(
+                        value.kind,
+                        CfgValueKind::SumProductsDiv { .. }
+                            | CfgValueKind::LaneSumProductsDiv { .. }
+                    )
+                })
+            })
+        {
+            runtime_support.extend([
+                "arithmetic::product_div".to_string(),
+                "arithmetic::product_sum_div".to_string(),
+                "arithmetic::sum_products_div".to_string(),
+                "arithmetic::sum_products_div_lanes".to_string(),
+            ]);
+        }
         runtime_support.extend([
             "evaluate_generated_above".to_string(),
             "evaluate_generated_cross".to_string(),
@@ -3047,6 +3073,23 @@ impl ModelPlan {
         let uses_math_helper =
             |helper: &str| body.contains(helper) || grouped_noise.contains(helper);
         let mut math_support = Vec::new();
+        for helper in [
+            "product_div",
+            "product_sum_div",
+            "sum_products_div",
+            "sum_products_div_lanes",
+        ] {
+            let call = format!("{helper}(");
+            let uses_free_helper = |source: &str| {
+                source.match_indices(&call).any(|(index, _)| {
+                    index == 0
+                        || !matches!(source.as_bytes()[index - 1], b'.' | b'_' | b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9')
+                })
+            };
+            if uses_free_helper(&body) || uses_free_helper(&grouped_noise) {
+                math_support.push(format!("arithmetic::{helper}"));
+            }
+        }
         if uses_math_helper("integer::") {
             math_support.push("integer".to_string());
         }

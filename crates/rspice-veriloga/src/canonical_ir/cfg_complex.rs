@@ -327,6 +327,22 @@ mod tests {
     use super::*;
 
     #[test]
+    fn quotient_sum_retains_complex_perturbations() {
+        let result = ComplexStep::sum_products_div(
+            &[
+                [
+                    ComplexStep::new(1e200, 1e-100),
+                    ComplexStep::new(2e200, 0.0),
+                ],
+                [ComplexStep::new(1e200, 0.0), ComplexStep::new(-1e200, 0.0)],
+            ],
+            ComplexStep::new(1e200, 0.0),
+        );
+        assert!((result.re / 1e200 - 1.0).abs() < 1e-14);
+        assert!((result.im / 2e-100 - 1.0).abs() < 1e-14);
+    }
+
+    #[test]
     fn product_ratio_retains_complex_perturbations_at_extreme_scales() {
         for (scale, step) in [(1e200, 1.0), (1e-200, 1e-220)] {
             let constant = ComplexStep::from_f64(scale);

@@ -971,6 +971,10 @@ fn validate_linear_noise_routing(
                 let _ = (left, right);
                 true
             }
+            CfgValueKind::SumProductsDiv { terms, divisor }
+            | CfgValueKind::LaneSumProductsDiv { terms, divisor } => {
+                !depends(*divisor) && terms.iter().all(|&(a, b)| !(depends(a) && depends(b)))
+            }
             CfgValueKind::Binary {
                 op: CfgBinaryOp::Mul,
                 left,

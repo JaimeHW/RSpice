@@ -14,6 +14,9 @@
     new URL(location.href).searchParams.get("expectedAbi") || "",
     10,
   );
+  const expectedAbiChecks = Number(
+    new URL(location.href).searchParams.get("expectedAbiChecks"),
+  );
   const workerUrl = new URL(
     new URL(location.href).searchParams.get("worker") || "./simulation-worker.js",
     location.href,
@@ -85,10 +88,13 @@
     worker.terminate();
     abiWorker = new Worker("/wasm-jit-abi-probe.mjs", { type: "module" });
     abiWorker.addEventListener("message", ({ data }) => {
-      if (data?.status === "qualified" && data.abiVersion === expectedAbiVersion && data.checks === 19) {
+      if (data?.status === "qualified" && data.abiVersion === expectedAbiVersion &&
+          Number.isSafeInteger(expectedAbiChecks) && expectedAbiChecks > 0 &&
+          data.checks === expectedAbiChecks) {
         finish("qualified", "RSpice WASM JIT qualification passed.", { ...capability, abiChecks: data.checks });
       } else {
-        finish("rejected", data?.error || "Independent ABI evidence was incomplete.");
+        finish("rejected", data?.error ||
+          `Independent ABI evidence was incomplete: expected ABI ${expectedAbiVersion} and ${expectedAbiChecks} checks; received ${data?.abiVersion} and ${data?.checks}.`);
       }
     });
     abiWorker.addEventListener("error", (event) => finish("error", event.message || "ABI fixture failed."));

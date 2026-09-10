@@ -62,7 +62,17 @@ pub(crate) fn operand_array_call(
             rspice_zi_derivative_native
                 as unsafe extern "C" fn(*const f64, *const EvalContext, usize) -> f64,
         ),
-
+        NativeOp::SumProductsDiv(terms) => {
+            let count = terms
+                .checked_mul(2)
+                .and_then(|n| n.checked_add(1))
+                .ok_or_else(|| invalid("sum-products quotient operand count overflow".into()))?;
+            return Ok(Some(OperandArrayCall {
+                count,
+                descriptor: terms,
+                helper: rspice_sum_products_div_native,
+            }));
+        }
         _ => return Ok(None),
     };
     let count = layout
@@ -1103,6 +1113,26 @@ pub unsafe extern "C" fn rspice_product_ratio_native(
     }
     let [a, b, c, d] = unsafe { *(operands.cast::<[f64; 4]>()) };
     rspice_veriloga_runtime::arithmetic::product_ratio(a, b, c, d)
+}
+
+/// One-rounding sum of products divided by a scalar.
+///
+/// # Safety
+/// `operands` is null or points to `2 * terms + 1` initialized f64 values.
+/// The generated caller validates the term count and operand storage.
+#[unsafe(export_name = "rspice_sum_products_div_native")]
+pub unsafe extern "C" fn rspice_sum_products_div_native(
+    operands: *const f64,
+    _ctx: *const EvalContext,
+    terms: usize,
+) -> f64 {
+    if operands.is_null() {
+        return f64::NAN;
+    }
+    // Arrays have contiguous, ordered elements and the same alignment as f64.
+    let pairs = unsafe { std::slice::from_raw_parts(operands.cast::<[f64; 2]>(), terms) };
+    let divisor = unsafe { *operands.add(2 * terms) };
+    rspice_veriloga_runtime::arithmetic::sum_products_div(pairs, divisor)
 }
 
 /// External helper function for Verilog-A remainder.

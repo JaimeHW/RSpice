@@ -1699,6 +1699,7 @@ impl FunctionCompiler {
             }
             NativeOp::UnaryMath(math) => self.emit_unary_math(prepared, math)?,
             NativeOp::BinaryMath(math) => self.emit_binary_math(prepared, math)?,
+            NativeOp::SumProductsDiv(_) => unreachable!("operand-array helper prepared separately"),
             NativeOp::ProductRatio => self.emit_operand_context_helper(
                 prepared,
                 4,
@@ -3691,6 +3692,20 @@ mod cross_target_contract_tests {
                 "island {marker} marker"
             );
             assert_eq!(marker % 8, 4, "island {marker} data is not eight-aligned");
+        }
+    }
+
+    #[test]
+    fn quotient_sum_variable_arity_helper_is_encodable() {
+        for terms in [1, 2, 4, 16, 511, 1023] {
+            let count = 2 * terms + 1;
+            let mut ops = (0..count).map(NativeOp::LoadVariable).collect::<Vec<_>>();
+            ops.push(NativeOp::SumProductsDiv(terms));
+            let program = NativeProgram::from_ops_for_test(ops, count, Vec::new(), Vec::new());
+            let bytes = compile_value_function(&program).unwrap();
+            verify_exact_function(&bytes, "sum-products quotient").unwrap();
+            let segmented = super::compile_segmented_program(&program).unwrap();
+            assert!(!segmented.functions.is_empty());
         }
     }
 

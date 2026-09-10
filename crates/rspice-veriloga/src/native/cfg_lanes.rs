@@ -363,6 +363,15 @@ impl<'a> Scalarizer<'a> {
                 left: self.lane_of(*input, lane, 0)?,
                 right: self.plain_of(*scalar)?,
             },
+            CfgValueKind::LaneSumProductsDiv { terms, divisor } => CfgValueKind::SumProductsDiv {
+                terms: terms
+                    .iter()
+                    .map(|&(input, scalar)| {
+                        Ok((self.lane_of(input, lane, 0)?, self.plain_of(scalar)?))
+                    })
+                    .collect::<JitResult<Vec<_>>>()?,
+                divisor: self.plain_of(*divisor)?,
+            },
             // The stateful operators' Jacobian actions. Their `*_derivative`
             // operands carry this value's lanes and take the lane; everything
             // else is a primal scalar the runtime reads its local coefficient

@@ -824,6 +824,96 @@ fn homogeneous_math_device_values_and_gradients_preserve_extreme_scales() {
 }
 
 #[test]
+fn ac_quotient_preserves_common_scale_and_dynamic_phase() {
+    for gain in [-1e200, -1e-200, 1e-308, 1e-200, 1.0, 1e200] {
+        for dynamic in [false, true] {
+            for assigned in [false, true] {
+                let input = if dynamic { "V(p)+ddt(V(p))" } else { "V(p)" };
+                let denominator = format!("{gain:e}*({input})");
+                let body = if assigned {
+                    format!("r={denominator}; I(p)<+{gain:e}/r;")
+                } else {
+                    format!("I(p)<+{gain:e}/({denominator});")
+                };
+                let fixture = compile(&format!(
+                    "module quotient_ac(p); inout p; electrical p; real r; analog begin {body} end endmodule"
+                ));
+                for bias in [-0.01_f64, 0.01] {
+                    for omega in [1.0, 10.0] {
+                        let mut device = fixture.device("AC", &[1]);
+                        device.set_analysis_type(1);
+                        let mut admittance = (0.0, 0.0);
+                        device
+                            .try_stamp_small_signal_complex(
+                                &[bias],
+                                omega / std::f64::consts::TAU,
+                                |row, col, re, im| {
+                                    assert_eq!((row, col), (0, 0));
+                                    admittance.0 += re;
+                                    admittance.1 += im;
+                                },
+                            )
+                            .unwrap_or_else(|error| {
+                                panic!("{body}, bias={bias}, omega={omega}: {error}")
+                            });
+                        let slope = -1.0 / (bias * bias);
+                        assert!(
+                            (admittance.0 / slope - 1.0).abs() < 1e-11,
+                            "{body}: {admittance:?}"
+                        );
+                        if dynamic {
+                            assert!(
+                                (admittance.1 / (slope * omega) - 1.0).abs() < 1e-11,
+                                "{body}: {admittance:?}"
+                            );
+                        } else {
+                            assert_eq!(admittance.1, 0.0, "{body}");
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn quotient_range_preserves_values_and_curvature() {
+    for (expression, bias, expected) in [
+        ("ddx(1e308/(1e308*V(p)),V(p))", 0.01, [-1e4, 2e6]),
+        ("ddx(1.6e308*V(p)/(3*V(p)-1),V(p))", 1.0, [-4e307, 1.2e308]),
+        ("ddx(V(p)/V(p),V(p))", 1e-309, [0.0, 0.0]),
+        ("ddx((2*V(p))/(3*V(p)),V(p))", 1e-309, [0.0, 0.0]),
+        ("ddx((5*V(p))/(7*V(p)),V(p))", -1e-309, [0.0, 0.0]),
+        ("ddx((2*V(p))/(3*V(p)),V(p))", 1e-100, [0.0, 0.0]),
+        ("ddx((5*V(p))/(7*V(p)),V(p))", 1.0, [0.0, 0.0]),
+        ("ddx(1e308/(1e200+1e-200*V(p)),V(p))", 0.0, [-1e-292, 0.0]),
+    ] {
+        let fixture = compile(&format!(
+            "module quotient(p); inout p; electrical p; analog I(p)<+{expression}; endmodule"
+        ));
+        let mut device = fixture.device("X", &[1]);
+        device.update_voltages(&[bias]);
+        let current = device
+            .try_evaluate()
+            .unwrap_or_else(|error| panic!("{expression}: {error}"))[0];
+        let (matrix, _) = collect_stamps(&mut device, &[bias]);
+        for (actual, expected) in [current, matrix.get(&(0, 0)).copied().unwrap_or(0.0)]
+            .into_iter()
+            .zip(expected)
+        {
+            if expected == 0.0 {
+                assert_eq!(actual, expected, "{expression}");
+            } else {
+                assert!(
+                    (actual / expected - 1.0).abs() < 1e-12,
+                    "{expression}: {actual:e} != {expected:e}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn quotient_mixed_partials_preserve_representable_results() {
     for derivative in 0..3 {
         let expression = "1e200*V(p)*V(p)/(V(q)*V(q))";
@@ -2521,59 +2611,6 @@ endmodule
         g_fd,
         rel_err
     );
-}
-
-#[test]
-fn ac_quotient_preserves_common_scale_and_dynamic_phase() {
-    for gain in [-1e200, -1e-200, 1e-308, 1e-200, 1.0, 1e200] {
-        for dynamic in [false, true] {
-            for assigned in [false, true] {
-                let input = if dynamic { "V(p)+ddt(V(p))" } else { "V(p)" };
-                let denominator = format!("{gain:e}*({input})");
-                let body = if assigned {
-                    format!("r={denominator}; I(p)<+{gain:e}/r;")
-                } else {
-                    format!("I(p)<+{gain:e}/({denominator});")
-                };
-                let fixture = compile(&format!(
-                    "module quotient_ac(p); inout p; electrical p; real r; analog begin {body} end endmodule"
-                ));
-                for bias in [-0.01_f64, 0.01] {
-                    for omega in [1e-200, 1.0, 10.0, 1e200] {
-                        let mut device = fixture.device("AC", &[1]);
-                        device.set_analysis_type(1);
-                        let mut admittance = (0.0, 0.0);
-                        device
-                            .try_stamp_small_signal_complex(
-                                &[bias],
-                                omega / std::f64::consts::TAU,
-                                |row, col, re, im| {
-                                    assert_eq!((row, col), (0, 0));
-                                    admittance.0 += re;
-                                    admittance.1 += im;
-                                },
-                            )
-                            .unwrap_or_else(|error| {
-                                panic!("{body}, bias={bias}, omega={omega}: {error}")
-                            });
-                        let slope = -1.0 / (bias * bias);
-                        assert!(
-                            (admittance.0 / slope - 1.0).abs() < 1e-11,
-                            "{body}: {admittance:?}"
-                        );
-                        if dynamic {
-                            assert!(
-                                (admittance.1 / (slope * omega) - 1.0).abs() < 1e-11,
-                                "{body}: {admittance:?}"
-                            );
-                        } else {
-                            assert_eq!(admittance.1, 0.0, "{body}");
-                        }
-                    }
-                }
-            }
-        }
-    }
 }
 
 #[test]

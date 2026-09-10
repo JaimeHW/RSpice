@@ -262,6 +262,22 @@ fn value_powers(
             independent_powers(kind, &[*condition], powers)?;
             at(then_value).union(at(else_value)).copied().collect()
         }
+        CfgValueKind::SumProductsDiv { terms, divisor }
+        | CfgValueKind::LaneSumProductsDiv { terms, divisor } => {
+            independent_powers(kind, &[*divisor], powers)?;
+            if at(divisor).is_empty() {
+                Powers::new()
+            } else {
+                terms
+                    .iter()
+                    .flat_map(|(a, b)| {
+                        at(a)
+                            .iter()
+                            .flat_map(|a| at(b).iter().map(move |b| a.product(*b)))
+                    })
+                    .collect()
+            }
+        }
         CfgValueKind::Binary { op, left, right }
         | CfgValueKind::LaneBinary { op, left, right }
         | CfgValueKind::LaneScalar {
@@ -388,6 +404,32 @@ impl Expansion<'_> {
                 then_value: self.coefficient(*then_value, power, ty),
                 else_value: self.coefficient(*else_value, power, ty),
             },
+            CfgValueKind::SumProductsDiv { terms, divisor }
+            | CfgValueKind::LaneSumProductsDiv { terms, divisor } => {
+                let mut products = Vec::new();
+                for &(left, right) in terms {
+                    for (&a_power, &a) in &self.coefficients[usize::from(left)] {
+                        for (&b_power, &b) in &self.coefficients[usize::from(right)] {
+                            if a_power.product(b_power) == power {
+                                products.push((a, b));
+                            }
+                        }
+                    }
+                }
+                let divisor =
+                    self.coefficient(*divisor, DynamicPower::default(), CfgValueType::Real);
+                if ty.shape().is_some() {
+                    CfgValueKind::LaneSumProductsDiv {
+                        terms: products,
+                        divisor,
+                    }
+                } else {
+                    CfgValueKind::SumProductsDiv {
+                        terms: products,
+                        divisor,
+                    }
+                }
+            }
             CfgValueKind::Binary {
                 op: CfgBinaryOp::Mul,
                 left,

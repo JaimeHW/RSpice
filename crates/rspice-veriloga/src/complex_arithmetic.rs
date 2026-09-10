@@ -90,6 +90,54 @@ pub(crate) fn divide_complex(left: Complex64, right: Complex64) -> Complex64 {
     Complex64::new(quotient(real), quotient(imaginary))
 }
 
+pub(crate) fn sum_complex_products_div(pairs: &[[Complex64; 2]], divisor: Complex64) -> Complex64 {
+    use rspice_veriloga_runtime::arithmetic::{sum_products_div_iter, sum_triple_products_ratio};
+    if divisor.im == 0.0 {
+        // Index the flattened components without allocating temporary vectors.
+        let real = (0..pairs.len() * 2).map(|index| {
+            let [a, b] = pairs[index / 2];
+            if index % 2 == 0 {
+                [a.re, b.re]
+            } else {
+                [-a.im, b.im]
+            }
+        });
+        let imaginary = (0..pairs.len() * 2).map(|index| {
+            let [a, b] = pairs[index / 2];
+            if index % 2 == 0 {
+                [a.re, b.im]
+            } else {
+                [a.im, b.re]
+            }
+        });
+        return Complex64::new(
+            sum_products_div_iter(real, divisor.re),
+            sum_products_div_iter(imaginary, divisor.re),
+        );
+    }
+    let denominator = [[divisor.re, divisor.re, 1.0], [divisor.im, divisor.im, 1.0]];
+    let real = pairs.iter().flat_map(|&[a, b]| {
+        [
+            [a.re, b.re, divisor.re],
+            [-a.im, b.im, divisor.re],
+            [a.re, b.im, divisor.im],
+            [a.im, b.re, divisor.im],
+        ]
+    });
+    let imaginary = pairs.iter().flat_map(|&[a, b]| {
+        [
+            [a.re, b.im, divisor.re],
+            [a.im, b.re, divisor.re],
+            [-a.re, b.re, divisor.im],
+            [a.im, b.im, divisor.im],
+        ]
+    });
+    Complex64::new(
+        arithmetic_value(sum_triple_products_ratio(real, denominator)),
+        arithmetic_value(sum_triple_products_ratio(imaginary, denominator)),
+    )
+}
+
 /// Complex AC value whose components can cross binary64 range boundaries
 /// independently. Conversion is deferred across arithmetic and assignments.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -99,6 +147,59 @@ pub(crate) struct FrequencyValue {
 }
 
 impl FrequencyValue {
+    pub(crate) fn sum_products_div(
+        pairs: &[[Self; 2]],
+        divisor: Self,
+    ) -> Result<Self, ArithmeticError> {
+        if divisor.is_real() {
+            let real = (0..pairs.len() * 2).map(|index| {
+                let [a, b] = pairs[index / 2];
+                if index % 2 == 0 {
+                    [a.real, b.real]
+                } else {
+                    [a.imaginary.negated(), b.imaginary]
+                }
+            });
+            let imaginary = (0..pairs.len() * 2).map(|index| {
+                let [a, b] = pairs[index / 2];
+                if index % 2 == 0 {
+                    [a.real, b.imaginary]
+                } else {
+                    [a.imaginary, b.real]
+                }
+            });
+            return Ok(Self {
+                real: Component::sum_products_div(real, divisor.real)?,
+                imaginary: Component::sum_products_div(imaginary, divisor.real)?,
+            });
+        }
+        let one = Component::new(1.0);
+        let real = pairs.iter().flat_map(|&[a, b]| {
+            [
+                [a.real, b.real, divisor.real],
+                [a.imaginary.negated(), b.imaginary, divisor.real],
+                [a.real, b.imaginary, divisor.imaginary],
+                [a.imaginary, b.real, divisor.imaginary],
+            ]
+        });
+        let imaginary = pairs.iter().flat_map(|&[a, b]| {
+            [
+                [a.real, b.imaginary, divisor.real],
+                [a.imaginary, b.real, divisor.real],
+                [a.real.negated(), b.real, divisor.imaginary],
+                [a.imaginary, b.imaginary, divisor.imaginary],
+            ]
+        });
+        let denominator = [
+            [divisor.real, divisor.real, one],
+            [divisor.imaginary, divisor.imaginary, one],
+        ];
+        Ok(Self {
+            real: Component::sum_triple_products_ratio(real, denominator.into_iter())?,
+            imaginary: Component::sum_triple_products_ratio(imaginary, denominator.into_iter())?,
+        })
+    }
+
     #[inline]
     pub(crate) fn new(real: f64, imaginary: f64) -> Self {
         Self {

@@ -215,7 +215,7 @@ impl Instance {
 		let AW=parameters[18]/ AV;
 		let AX=T+ AW;
 		let AY=AU* AX;
-		let MJ=((((MI+ MI)* AW)* LX)/ AV)* AU;
+		let MJ=(((MI+ MI)).product_div((-AW),AV))* AU;
 		let MK=L3([0.0,0.0,(LM* AX)])+ L3([MJ[0],MJ[1],0.0]);
 		let BC=(BB* G).tanh();
 		let ML=((LZ* BB)* (LK- (BC* BC)))* BA;

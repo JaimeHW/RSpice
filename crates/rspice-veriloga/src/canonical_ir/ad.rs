@@ -394,6 +394,15 @@ fn lane_liveness_with_control(
                     CfgValueKind::Unary { input, .. } | CfgValueKind::Ddt { input, .. } => {
                         changed |= live.union_from(value.id, *input);
                     }
+                    CfgValueKind::SumProductsDiv { terms, divisor } => {
+                        for operand in terms
+                            .iter()
+                            .flat_map(|&(a, b)| [a, b])
+                            .chain(std::iter::once(*divisor))
+                        {
+                            changed |= live.union_from(value.id, operand);
+                        }
+                    }
                     CfgValueKind::Binary { left, right, .. }
                     | CfgValueKind::Select {
                         then_value: left,
@@ -493,6 +502,7 @@ fn differentiable(kind: &CfgValueKind) -> bool {
                 | CfgUnaryOp::LimitedExpDerivative
         ),
         CfgValueKind::Binary { op, .. } => !is_predicate(*op),
+        CfgValueKind::SumProductsDiv { .. } => true,
         // `$limit` is differentiable, but [`lane_liveness`] answers it ahead of
         // this rather than through it: its lanes are `proposed`'s plus the
         // correction lane, not every operand's.
@@ -864,6 +874,15 @@ fn ddx_direction_liveness(
                     changed |= needed.union_from(*then_value, value.id);
                     changed |= needed.union_from(*else_value, value.id);
                 }
+                CfgValueKind::SumProductsDiv { terms, divisor } => {
+                    for operand in terms
+                        .iter()
+                        .flat_map(|&(a, b)| [a, b])
+                        .chain(std::iter::once(*divisor))
+                    {
+                        changed |= needed.union_from(operand, value.id);
+                    }
+                }
                 CfgValueKind::Binary { left, right, op } if !is_predicate(*op) => {
                     changed |= needed.union_from(*left, value.id);
                     changed |= needed.union_from(*right, value.id);
@@ -1138,7 +1157,7 @@ impl<'a> ScalarDdxBuilder<'a> {
                 }
                 self.emitted.push(CfgInstruction { result });
                 for lane in self.live.lanes(result) {
-                    let derivative = self.scalar_rule(&original, lane);
+                    let derivative = self.scalar_rule(result, &original, lane);
                     self.set_derivative(result, lane, derivative);
                 }
             }
@@ -1257,7 +1276,12 @@ impl<'a> ScalarDdxBuilder<'a> {
             .collect()
     }
 
-    fn scalar_rule(&mut self, kind: &CfgValueKind, lane: usize) -> Option<ValueId> {
+    fn scalar_rule(
+        &mut self,
+        result: ValueId,
+        kind: &CfgValueKind,
+        lane: usize,
+    ) -> Option<ValueId> {
         match kind {
             CfgValueKind::Unary { op, input } => {
                 let derivative = self.derivative(*input, lane)?;
@@ -1265,6 +1289,32 @@ impl<'a> ScalarDdxBuilder<'a> {
                 Some(self.push_binary(CfgBinaryOp::Mul, derivative, factor))
             }
             CfgValueKind::Binary { op, left, right } => self.binary_rule(*op, *left, *right, lane),
+            CfgValueKind::SumProductsDiv { terms, divisor } => {
+                let mut differentiated = Vec::new();
+                for &(a, b) in terms {
+                    if let Some(da) = self.derivative(a, lane) {
+                        differentiated.push((da, b));
+                    }
+                    if let Some(db) = self.derivative(b, lane) {
+                        differentiated.push((a, db));
+                    }
+                }
+                if let Some(dd) = self.derivative(*divisor, lane) {
+                    let negative = self.push_unary(CfgUnaryOp::Neg, result);
+                    differentiated.push((negative, dd));
+                }
+                if differentiated.is_empty() {
+                    None
+                } else {
+                    Some(self.push(
+                        CfgValueType::Real,
+                        CfgValueKind::SumProductsDiv {
+                            terms: differentiated,
+                            divisor: *divisor,
+                        },
+                    ))
+                }
+            }
             CfgValueKind::Select {
                 condition,
                 then_value,
@@ -1524,21 +1574,23 @@ impl<'a> ScalarDdxBuilder<'a> {
                 (None, None) => None,
             },
             CfgBinaryOp::Div => {
-                let numerator = match (d_left, d_right) {
-                    (Some(a), Some(b)) => {
-                        let quotient = self.push_binary(CfgBinaryOp::Div, left, right);
-                        let scaled = self.push_binary(CfgBinaryOp::Mul, quotient, b);
-                        self.push_binary(CfgBinaryOp::Sub, a, scaled)
-                    }
-                    (Some(a), None) => a,
-                    (None, Some(b)) => {
-                        let quotient = self.push_binary(CfgBinaryOp::Div, left, right);
-                        let scaled = self.push_binary(CfgBinaryOp::Mul, quotient, b);
-                        self.push_unary(CfgUnaryOp::Neg, scaled)
-                    }
-                    (None, None) => return None,
+                let Some(d_right) = d_right else {
+                    return d_left.map(|d_left| self.push_binary(CfgBinaryOp::Div, d_left, right));
                 };
-                Some(self.push_binary(CfgBinaryOp::Div, numerator, right))
+                let quotient = self.push_binary(CfgBinaryOp::Div, left, right);
+                let negative = self.push_unary(CfgUnaryOp::Neg, quotient);
+                let mut terms = Vec::with_capacity(2);
+                if let Some(d_left) = d_left {
+                    terms.push((d_left, self.one));
+                }
+                terms.push((negative, d_right));
+                Some(self.push(
+                    CfgValueType::Real,
+                    CfgValueKind::SumProductsDiv {
+                        terms,
+                        divisor: right,
+                    },
+                ))
             }
             CfgBinaryOp::Pow => {
                 let from_base = d_left.map(|derivative| {
@@ -2206,6 +2258,25 @@ impl<'a> AdBuilder<'a> {
         )
     }
 
+    fn sum_products_div(
+        &mut self,
+        terms: Vec<(ValueId, ValueId)>,
+        divisor: ValueId,
+        target: ShapeId,
+    ) -> Option<ValueId> {
+        if terms.is_empty() {
+            return None;
+        }
+        let terms = terms
+            .into_iter()
+            .map(|(input, scalar)| (self.widen(input, target), scalar))
+            .collect();
+        Some(self.push(
+            CfgValueType::Lanes(target),
+            CfgValueKind::LaneSumProductsDiv { terms, divisor },
+        ))
+    }
+
     fn scale(&mut self, input: ValueId, scalar: ValueId) -> ValueId {
         self.lane_scalar(CfgBinaryOp::Mul, input, scalar)
     }
@@ -2430,7 +2501,7 @@ impl<'a> AdBuilder<'a> {
     fn rule(&mut self, result: ValueId) -> Option<ValueId> {
         let target = self.target[usize::from(result)]?;
         let kind = self.source.value(result).kind.clone();
-        let natural = self.natural_rule(&kind, target);
+        let natural = self.natural_rule(result, &kind, target);
         // A shape wider than the rule produced means an operand the derivative
         // does not flow through carried lanes anyway — `$limit`'s proposed
         // value, `%`'s divisor. Those lanes are genuinely zero here.
@@ -2438,7 +2509,12 @@ impl<'a> AdBuilder<'a> {
         Some(self.widen(natural, target))
     }
 
-    fn natural_rule(&mut self, kind: &CfgValueKind, target: ShapeId) -> Option<ValueId> {
+    fn natural_rule(
+        &mut self,
+        result: ValueId,
+        kind: &CfgValueKind,
+        target: ShapeId,
+    ) -> Option<ValueId> {
         match kind {
             CfgValueKind::Unary { op, input } => {
                 let derivative = self.derivatives[usize::from(*input)]?;
@@ -2447,6 +2523,22 @@ impl<'a> AdBuilder<'a> {
             }
             CfgValueKind::Binary { op, left, right } => {
                 self.binary_rule(*op, *left, *right, target)
+            }
+            CfgValueKind::SumProductsDiv { terms, divisor } => {
+                let mut differentiated = Vec::new();
+                for &(a, b) in terms {
+                    if let Some(da) = self.derivatives[usize::from(a)] {
+                        differentiated.push((da, b));
+                    }
+                    if let Some(db) = self.derivatives[usize::from(b)] {
+                        differentiated.push((db, a));
+                    }
+                }
+                if let Some(dd) = self.derivatives[usize::from(*divisor)] {
+                    let negative = self.push_unary(CfgUnaryOp::Neg, result);
+                    differentiated.push((dd, negative));
+                }
+                self.sum_products_div(differentiated, *divisor, target)
             }
             CfgValueKind::Select {
                 condition,
@@ -2764,24 +2856,18 @@ impl<'a> AdBuilder<'a> {
                 (None, Some(d_right)) => Some(self.scale(d_right, left)),
                 (None, None) => None,
             },
-            // (da - (a/b) db) / b, which is the quotient rule with one division
-            // rather than two and no b squared to overflow.
             CfgBinaryOp::Div => {
-                let numerator = match (d_left, d_right) {
-                    (Some(d_left), Some(d_right)) => {
-                        let quotient = self.push_binary(CfgBinaryOp::Div, left, right);
-                        let scaled = self.scale(d_right, quotient);
-                        self.lane_binary(CfgBinaryOp::Sub, d_left, scaled, target)
-                    }
-                    (Some(d_left), None) => d_left,
-                    (None, Some(d_right)) => {
-                        let quotient = self.push_binary(CfgBinaryOp::Div, left, right);
-                        let scaled = self.scale(d_right, quotient);
-                        self.negate(scaled)
-                    }
-                    (None, None) => return None,
+                let Some(d_right) = d_right else {
+                    return d_left.map(|d_left| self.lane_scalar(CfgBinaryOp::Div, d_left, right));
                 };
-                Some(self.lane_scalar(CfgBinaryOp::Div, numerator, right))
+                let quotient = self.push_binary(CfgBinaryOp::Div, left, right);
+                let negative = self.push_unary(CfgUnaryOp::Neg, quotient);
+                let mut terms = Vec::with_capacity(2);
+                if let Some(d_left) = d_left {
+                    terms.push((d_left, self.one));
+                }
+                terms.push((d_right, negative));
+                self.sum_products_div(terms, right, target)
             }
             // d(a^b) = b*a^(b-1)*da + a^b*ln(a)*db. Written as two terms so a
             // constant exponent — which is almost all of them — costs one power

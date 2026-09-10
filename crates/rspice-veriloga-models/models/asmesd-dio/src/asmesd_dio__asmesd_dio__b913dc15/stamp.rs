@@ -2,7 +2,7 @@
 #![allow(dead_code, non_snake_case, unused_imports, unused_mut, unused_parens, unused_variables)]
 
 use super::state::{CanonicalModelValues, Instance, PARAMETER_MODEL_FLAGS};
-use rspice_veriloga_runtime::{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, install_generated_stage_values, L2, L3, L4, L5, integer, evaluate_generated_above, evaluate_generated_cross, evaluate_generated_timer, rspice_eval_ddt, rspice_eval_idt, rspice_limexp, rspice_limited_exp, rspice_limited_exp_derivative};
+use rspice_veriloga_runtime::{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, install_generated_stage_values, L2, L3, L4, L5, integer, arithmetic::product_div, arithmetic::product_sum_div, arithmetic::sum_products_div, arithmetic::sum_products_div_lanes, evaluate_generated_above, evaluate_generated_cross, evaluate_generated_timer, rspice_eval_ddt, rspice_eval_idt, rspice_limexp, rspice_limited_exp, rspice_limited_exp_derivative};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 pub(super) const CANONICAL_MODEL_STAGE_SLOTS: [u32; 32] = [0, 1, 2, 3, 4, 16, 5, 17, 18, 19, 20, 6, 7, 32, 33, 23, 24, 25, 26, 27, 34, 35, 36, 37, 38, 9, 10, 11, 12, 13, 14, 15];
@@ -466,7 +466,7 @@ impl Instance {
 		let AC=(AB* AA)/ Q;
 		let AE=((Y* V)+ AC).exp();
 		let AG=AF* AE;
-		let AH=(((X* Y)+ (((U* AB)- (R* AC))/ Q))* AE)* AF;
+		let AH=(((X* Y)+ (product_sum_div((U* AB),W,R,(-AC),Q)))* AE)* AF;
 		let AI=(AD* V).exp();
 		let AK=AJ* AI;
 		let AL=((X* AD)* AI)* AJ;
@@ -485,7 +485,7 @@ impl Instance {
 		let BH=(-(1.16f64- BD))/ BG;
 		let BI=-(Q+ Q);
 		let BK=(1.5f64* (AZ.ln()))+ (BJ* (BH+ 134544423989414690000f64));
-		let BL=((BA* (W/ AZ))* 1.5f64)+ ((((((((((K* 7.02e-4f64)* J)+ (K* BB))- (K* BD))/ BC)* BE)* BE)- (((K+ K)* BF)* BH))/ BG)* BJ);
+		let BL=((BA* (W/ AZ))* 1.5f64)+ ((product_sum_div((((product_sum_div((((K* 7.02e-4f64)* J)+ (K* BB)),W,K,(-BD),BC))* BE)* BE),W,((K+ K)* BF),(-BH),BG))* BJ);
 		let BM=BI* BK;
 		let BN=(((R+ R)* BE)* BK)+ (BL* BI);
 		let BQ=(BO- BM)/ BP;
@@ -498,7 +498,7 @@ impl Instance {
 		let BY=(BW- BQ)/ BQ;
 		let BZ=Z+ (BT* ((4e-4f64* (J- AY))- BY));
 		let CA=BV* BZ;
-		let CB=(((((((((BR* BE)- (BR* BS))/ BQ)* BE)* BT)* BV)* BE)/ BU)* BZ)+ ((((K* 4e-4f64)- (((BX- BR)- (BR* BY))/ BQ))* BT)* BV);
+		let CB=((product_div((((product_sum_div((BR* BE),W,BR,(-BS),BQ))* BE)* BT),(-BV),BU))* BZ)+ ((((K* 4e-4f64)- (product_sum_div((BX- BR),W,BR,(-BY),BQ)))* BT)* BV);
 		let CE=CC- CD;
 		let CF=L2([1f64,0.0])- L2([0.0,1f64]);
 		let CH=CG* CE;
@@ -517,14 +517,14 @@ impl Instance {
 		if CU{
 		let CW=CV* Q;
 		let CX=CH/ CW;
-		let CY=(L3([0.0,CI[0],CI[1]])- L3([((R* CV)* CX),0.0,0.0]))/ CW;
+		let CY=(L3([0.0,CI[0],CI[1]])).product_sum_div(W,L3([(R* CV),0.0,0.0]),(-CX),CW);
 		let CZ=CI* BE;
 		let DB=DA* Q;
 		let DC=R* DA;
 		let DD=((-CH)- AS)/ DB;
-		let DE=((L3([0.0,CZ[0],CZ[1]])- L3([AT,0.0,0.0]))- L3([(DC* DD),0.0,0.0]))/ DB;
+		let DE=((L3([0.0,CZ[0],CZ[1]])- L3([AT,0.0,0.0]))).product_sum_div(W,L3([DC,0.0,0.0]),(-DD),DB);
 		let DF=(-AS)/ DB;
-		let DG=((AT* BE)- (DC* DF))/ DB;
+		let DG=product_sum_div((AT* BE),W,DC,(-DF),DB);
 		let DI=CX> DH;
 		let DO;
 		let DP;
@@ -604,7 +604,7 @@ impl Instance {
 		let ES=(CI* ((EP* ((CH>= EO) as u8 as f64))- W))* (AW* ((EN+ (((EN== EO) as u8 as f64)* ER)).powf((AW- W))));
 		let EU=Z+ (ET* EQ);
 		let EV=(AO* EL)/ EU;
-		let EW=((L3([(AP* EL),0.0,0.0])+ ((DY- L3([EK,0.0,0.0]))* AO))- (((L3([0.0,ES[0],ES[1]])+ L3([(AX* (EQ* (((if !(EN).is_nan()&&(EN>=ER||(ER).is_nan()){EN}else{ER}).ln())* ((EN> EO) as u8 as f64)))),0.0,0.0]))* ET)* EV))/ EU;
+		let EW=((L3([(AP* EL),0.0,0.0])+ ((DY- L3([EK,0.0,0.0]))* AO))).product_sum_div(W,((L3([0.0,ES[0],ES[1]])+ L3([(AX* (EQ* (((if !(EN).is_nan()&&(EN>=ER||(ER).is_nan()){EN}else{ER}).ln())* ((EN> EO) as u8 as f64)))),0.0,0.0]))* ET),(-EV),EU);
 		let EX=(AG* EM)- EV;
 		let EY=(L3([(AH* EM),0.0,0.0])+ (DU* AG))- EW;
 		DK=EX;
@@ -624,7 +624,7 @@ impl Instance {
 		let FN=FM* FJ;
 		let FO=(if (FJ== FI){(CI* BE)}else{L2([0f64;2])})* FM;
 		let FP=((-1f64* CH)* FH)/ FN;
-		let FQ=(L3([0.0,FK[0],FK[1]])- ((L3([((R* FL)* FJ),0.0,0.0])+ L3([0.0,FO[0],FO[1]]))* FP))/ FN;
+		let FQ=(L3([0.0,FK[0],FK[1]])).product_sum_div(W,(L3([((R* FL)* FJ),0.0,0.0])+ L3([0.0,FO[0],FO[1]])),(-FP),FN);
 		let FR=FP> DH;
 		let HC;
 		let HD;
@@ -730,7 +730,7 @@ impl Instance {
 		let IZ=(IN.abs())/ IY;
 		let JB=Z+ (IZ.powf(JA));
 		let JC=HM/ JB;
-		let JD=(L4([HO[0],HO[1],HO[2],0.0])- L4([0.0,0.0,0.0,((((IQ* ((EP* ((IN>= EO) as u8 as f64))- W))/ IY)* (JA* ((IZ+ (((IZ== EO) as u8 as f64)* ER)).powf(staged[15]))))* JC)]))/ JB;
+		let JD=(L4([HO[0],HO[1],HO[2],0.0])).product_sum_div(W,L4([0.0,0.0,0.0,(((IQ* ((EP* ((IN>= EO) as u8 as f64))- W))/ IY)* (JA* ((IZ+ (((IZ== EO) as u8 as f64)* ER)).powf(staged[15]))))]),(-JC),JB);
 		JI=JC;
 		JJ=IM;
 		JK=IO;
@@ -772,7 +772,7 @@ impl Instance {
 		let KD=(KC* JT)/ BW;
 		let KE=JX+ KD;
 		let KF=(JT* KE)* JY;
-		let KG=((JV* KE)+ ((((JV* KC)- L3([(BX* KD),0.0,0.0]))/ BW)* JT))* JY;
+		let KG=((JV* KE)+ ((((JV* KC)).product_sum_div(W,L3([BX,0.0,0.0]),(-KD),BW))* JT))* JY;
 		let KH=L3([((BX* JZ)/ KA),0.0,0.0]);
 		KP=KB;
 		KQ=KF;
@@ -785,7 +785,7 @@ impl Instance {
 		let KL=(KI* (KK.ln())).exp();
 		let KM=Z- KL;
 		let KN=(BW* KM)/ KI;
-		let KO=(L3([(BX* KM),0.0,0.0])+ ((((((((JU- L3([(BX* KJ),0.0,0.0]))/ BW)* BE)* (W/ KK))* KI)* KL)* BE)* BW))/ KI;
+		let KO=(L3([(BX* KM),0.0,0.0])+ ((((((((JU).product_sum_div(W,L3([BX,0.0,0.0]),(-KJ),BW))* BE)* (W/ KK))* KI)* KL)* BE)* BW))/ KI;
 		KP=KN;
 		KQ=CT;
 		KR=KO;
@@ -990,7 +990,7 @@ impl Instance {
 		OW=OR;
 		}
 		let OX=CK/ OV;
-		let OY=(L4([CL[0],0.0,CL[1],0.0])- (OW* OX))/ OV;
+		let OY=(L4([CL[0],0.0,CL[1],0.0])).product_sum_div(W,OW,(-OX),OV);
 		let OZ=CT+ OX;
 		OS=OZ;
 		OT=OY;
@@ -1014,7 +1014,7 @@ impl Instance {
 		PT=PD;
 		}
 		let PU=CP/ PS;
-		let PV=(L3([CQ[0],0.0,CQ[1]])- (PT* PU))/ PS;
+		let PV=(L3([CQ[0],0.0,CQ[1]])).product_sum_div(W,PT,(-PU),PS);
 		let PW=CT+ PU;
 		PE=PW;
 		PF=PV;

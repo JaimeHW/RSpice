@@ -166,6 +166,8 @@ pub(crate) enum NativeOp {
     BinaryMath(BinaryMathOp),
     /// One-rounding (a*b)/(c*d), used after symbolic differentiation.
     ProductRatio,
+    /// Range-protected sum of `terms` products divided by the final operand.
+    SumProductsDiv(usize),
     CheckedValue,
     IntegerCast,
     IntegerBinary(IntegerBinaryOp),
@@ -1651,6 +1653,18 @@ impl NativeProgram {
                     pop_binary_stack(model.clone(), entry_kind, "CheckedValue", depth)?;
                     depth -= 1;
                     ops.push(NativeOp::CheckedValue);
+                }
+                Instruction::SumProductsDiv(terms) => {
+                    let count = terms
+                        .checked_mul(2)
+                        .and_then(|n| n.checked_add(1))
+                        .filter(|&n| n <= depth)
+                        .ok_or_else(|| JitError::Encoding {
+                            model: model.clone(),
+                            detail: "sum-products quotient operand count exceeds the stack".into(),
+                        })?;
+                    depth -= count - 1;
+                    ops.push(NativeOp::SumProductsDiv(*terms));
                 }
                 Instruction::Atan2 | Instruction::Hypot | Instruction::Mod => {
                     pop_binary_stack(
@@ -4129,23 +4143,20 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                     self.lower(right)?;
                     return self.append_arithmetic("Div");
                 }
-                // dq = (dl - q*dr)/r, with q=l/r. The raw quotient
-                // rule's r*r can overflow even when dq is representable.
+                // Keep the numerator exact: q*dr may overflow before the
+                // subtraction or final division returns to the finite range.
+                let terms = if left_zero { 1 } else { 2 };
                 if !left_zero {
                     self.lower_derivative(left, wrt)?;
+                    self.push(NativeOp::Const(1.0))?;
                 }
                 self.lower(left)?;
                 self.lower(right)?;
                 self.append_arithmetic("Div")?;
+                self.append_unary(NativeOp::Neg)?;
                 self.lower_derivative(right, wrt)?;
-                self.append_arithmetic("Mul")?;
-                if left_zero {
-                    self.append_unary(NativeOp::Neg)?;
-                } else {
-                    self.append_arithmetic("Sub")?;
-                }
                 self.lower(right)?;
-                self.append_arithmetic("Div")
+                self.append_sum_products_div(terms)
             }
             "Pow" => self.lower_pow_derivative(left, right, wrt),
             "Mod" => {
@@ -4312,25 +4323,20 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         let right_b_zero = self.expr_derivative_is_zero(right, second)?;
 
         // From l=q*r: q_ab=(l_ab-q*r_ab-q_a*r_b-q_b*r_a)/r.
-        // Reuse the normalized first derivative instead of r*r, r*r*r,
-        // or 2*l, each of which can overflow independently of the result.
-        let mut emitted = false;
+        // Accumulate every product before rounding the final quotient.
+        let mut terms = 0;
         if !left_ab_zero {
             self.lower_second_derivative(left, first, second)?;
-            emitted = true;
+            self.push(NativeOp::Const(1.0))?;
+            terms += 1;
         }
         if !right_ab_zero {
             self.lower(left)?;
             self.lower(right)?;
             self.append_arithmetic("Div")?;
+            self.append_unary(NativeOp::Neg)?;
             self.lower_second_derivative(right, first, second)?;
-            self.append_arithmetic("Mul")?;
-            if emitted {
-                self.append_arithmetic("Sub")?;
-            } else {
-                self.append_unary(NativeOp::Neg)?;
-                emitted = true;
-            }
+            terms += 1;
         }
         for (quotient_axis, denominator_axis, zero) in [
             (first, second, right_b_zero || (left_a_zero && right_a_zero)),
@@ -4340,21 +4346,24 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 continue;
             }
             self.lower_binary_derivative("Div", left, right, quotient_axis)?;
+            self.append_unary(NativeOp::Neg)?;
             self.lower_derivative(right, denominator_axis)?;
-            self.append_arithmetic("Mul")?;
-            if emitted {
-                self.append_arithmetic("Sub")?;
-            } else {
-                self.append_unary(NativeOp::Neg)?;
-                emitted = true;
-            }
+            terms += 1;
         }
-        if emitted {
-            self.lower(right)?;
-            self.append_arithmetic("Div")
-        } else {
+        if terms == 0 {
             self.push(NativeOp::Const(0.0))
+        } else {
+            self.lower(right)?;
+            self.append_sum_products_div(terms)
         }
+    }
+
+    fn append_sum_products_div(&mut self, terms: usize) -> JitResult<()> {
+        for _ in 0..2 * terms {
+            self.pop_binary("sum-products quotient")?;
+        }
+        self.ops.push(NativeOp::SumProductsDiv(terms));
+        Ok(())
     }
 
     fn lower_pow_derivative(
@@ -8389,6 +8398,7 @@ fn is_parameter_default_op(op: &NativeOp) -> bool {
             | NativeOp::UnaryMath(_)
             | NativeOp::BinaryMath(_)
             | NativeOp::ProductRatio
+            | NativeOp::SumProductsDiv(_)
             | NativeOp::IntegerCast
             | NativeOp::CheckedValue
             | NativeOp::IntegerBinary(_)
@@ -8456,6 +8466,7 @@ pub(crate) fn native_op_name(op: &NativeOp) -> &'static str {
         NativeOp::UnaryMath(_) => "UnaryMath",
         NativeOp::BinaryMath(_) => "BinaryMath",
         NativeOp::ProductRatio => "ProductRatio",
+        NativeOp::SumProductsDiv(_) => "SumProductsDiv",
         NativeOp::CheckedValue => "CheckedValue",
         NativeOp::IntegerCast => "IntegerCast",
         NativeOp::IntegerBinary(_) => "IntegerBinary",
@@ -8510,6 +8521,7 @@ fn is_parameter_default_instruction(instruction: &Instruction) -> bool {
             | Instruction::FnPow
             | Instruction::Atan2
             | Instruction::Hypot
+            | Instruction::SumProductsDiv(_)
             | Instruction::Mod
             | Instruction::Shl
             | Instruction::Shr
@@ -8605,6 +8617,7 @@ fn is_static_condition_instruction(instruction: &Instruction) -> bool {
             | Instruction::Atanh
             | Instruction::Atan2
             | Instruction::Hypot
+            | Instruction::SumProductsDiv(_)
             | Instruction::Floor
             | Instruction::Ceil
             | Instruction::FnPow
@@ -9459,6 +9472,7 @@ pub(crate) fn native_op_stack_effect(op: &NativeOp) -> (usize, usize) {
         | NativeOp::AbsDelayStateDerivative(_)
         | NativeOp::IdtModState(_)
         | NativeOp::ProductRatio => (4, 1),
+        NativeOp::SumProductsDiv(terms) => (terms.saturating_mul(2).saturating_add(1), 1),
         NativeOp::TransitionStateDerivative(_)
         | NativeOp::AbsDelayStateDerivativeMax(_)
         | NativeOp::CrossState(_) => (5, 1),
@@ -9637,6 +9651,7 @@ fn instruction_name(instruction: &Instruction) -> &'static str {
         Instruction::Atanh => "Atanh",
         Instruction::Atan2 => "Atan2",
         Instruction::Hypot => "Hypot",
+        Instruction::SumProductsDiv(_) => "SumProductsDiv",
         Instruction::Floor => "Floor",
         Instruction::Ceil => "Ceil",
         Instruction::FnPow => "FnPow",

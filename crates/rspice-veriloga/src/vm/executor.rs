@@ -445,6 +445,22 @@ impl<'a> Vm<'a> {
             Instruction::Atanh => self.unary_op(|a| a.atanh())?,
             Instruction::Atan2 => self.binary_op(|y, x| y.atan2(x))?,
             Instruction::Hypot => self.binary_op(f64::hypot)?,
+            Instruction::SumProductsDiv(terms) => {
+                let count = terms.checked_mul(2).and_then(|n| n.checked_add(1)).ok_or(
+                    VmError::InvalidInstruction("sum-products quotient count overflow"),
+                )?;
+                let start = self
+                    .stack
+                    .len()
+                    .checked_sub(count)
+                    .ok_or(VmError::StackUnderflow("sum-products quotient"))?;
+                let divisor = self.stack[start + count - 1];
+                let (pairs, remainder) = self.stack[start..start + count - 1].as_chunks::<2>();
+                debug_assert!(remainder.is_empty());
+                let result = rspice_veriloga_runtime::arithmetic::sum_products_div(pairs, divisor);
+                self.stack.truncate(start);
+                self.stack.push(result);
+            }
 
             // Rounding functions
             Instruction::Floor => self.unary_op(|a| a.floor())?,

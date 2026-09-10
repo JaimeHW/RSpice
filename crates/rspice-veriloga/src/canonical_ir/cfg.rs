@@ -697,6 +697,14 @@ pub enum CfgValueKind {
         left: ValueId,
         right: ValueId,
     },
+    /// Range-protected sum of products divided by a scalar. Products and sums
+    /// retain ordinary rounding in range; an intermediate overflow/underflow
+    /// uses an exact numerator before division. This internal operation remains
+    /// closed under repeated automatic differentiation.
+    SumProductsDiv {
+        terms: Vec<(ValueId, ValueId)>,
+        divisor: ValueId,
+    },
     /// Choose one already evaluated value without arithmetic on the losing arm.
     /// Both arms have the result's scalar or packed type; the condition is a
     /// scalar Boolean. In particular, a zero mask times infinity is not a select.
@@ -771,6 +779,12 @@ pub enum CfgValueKind {
         op: CfgBinaryOp,
         input: ValueId,
         scalar: ValueId,
+    },
+    /// Packed sum of products divided by a scalar. Each pair is one packed
+    /// operand in the result's shape and one scalar coefficient.
+    LaneSumProductsDiv {
+        terms: Vec<(ValueId, ValueId)>,
+        divisor: ValueId,
     },
     /// One lane of a packed value, named by the unknown rather than by its
     /// position, so a reader does not have to know the shape's layout.
@@ -1144,6 +1158,8 @@ impl CfgValueKind {
             | Self::LimitPrevious { .. }
             | Self::Unary { .. }
             | Self::Binary { .. }
+            | Self::SumProductsDiv { .. }
+            | Self::LaneSumProductsDiv { .. }
             | Self::Select { .. }
             | Self::IntegerArithmetic { .. }
             | Self::IntegerBitwise { .. }
@@ -1260,6 +1276,12 @@ impl CfgValueKind {
                 vec![*left, *right]
             }
             Self::LaneScalar { input, scalar, .. } => vec![*input, *scalar],
+            Self::SumProductsDiv { terms, divisor }
+            | Self::LaneSumProductsDiv { terms, divisor } => terms
+                .iter()
+                .flat_map(|&(a, b)| [a, b])
+                .chain(std::iter::once(*divisor))
+                .collect(),
             Self::Select {
                 condition,
                 then_value,
@@ -1453,6 +1475,14 @@ impl CfgValueKind {
             Self::LaneScalar { input, scalar, .. } => {
                 *input = map(*input);
                 *scalar = map(*scalar);
+            }
+            Self::SumProductsDiv { terms, divisor }
+            | Self::LaneSumProductsDiv { terms, divisor } => {
+                for (a, b) in terms {
+                    *a = map(*a);
+                    *b = map(*b);
+                }
+                *divisor = map(*divisor);
             }
             Self::Select {
                 condition,
@@ -2087,6 +2117,28 @@ impl CfgFunction {
                 }
                 CfgValueKind::LaneBinary { left, right, .. } => {
                     if self.value_lanes(*left) != lanes || self.value_lanes(*right) != lanes {
+                        return Err(CfgValidationError::LaneShapeMismatch(value.id));
+                    }
+                }
+                CfgValueKind::SumProductsDiv { terms, divisor } => {
+                    if value.value_type != CfgValueType::Real
+                        || self.value(*divisor).value_type != CfgValueType::Real
+                        || terms.iter().any(|&(a, b)| {
+                            self.value(a).value_type != CfgValueType::Real
+                                || self.value(b).value_type != CfgValueType::Real
+                        })
+                    {
+                        return Err(CfgValidationError::LaneShapeMismatch(value.id));
+                    }
+                }
+                CfgValueKind::LaneSumProductsDiv { terms, divisor } => {
+                    if !matches!(value.value_type, CfgValueType::Lanes(_))
+                        || self.value(*divisor).value_type != CfgValueType::Real
+                        || terms.iter().any(|&(a, b)| {
+                            self.value(a).value_type != value.value_type
+                                || self.value(b).value_type != CfgValueType::Real
+                        })
+                    {
                         return Err(CfgValidationError::LaneShapeMismatch(value.id));
                     }
                 }

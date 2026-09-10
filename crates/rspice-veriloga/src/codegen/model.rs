@@ -780,6 +780,8 @@ pub enum Instruction {
     Atanh,
     Atan2, // 2-argument arctangent(y, x)
     Hypot, // Euclidean norm without raw-square overflow/underflow
+    /// `2 * terms + 1` stack operands: product pairs and the final divisor.
+    SumProductsDiv(usize),
     /// Rounding functions
     Floor,
     Ceil,

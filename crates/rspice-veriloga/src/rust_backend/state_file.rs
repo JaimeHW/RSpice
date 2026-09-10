@@ -1554,9 +1554,9 @@ fn finalize_checkpoint_identity_with_compatibility(
     Ok(())
 }
 
-// Version 11 preserves generated noise transfer range through frequency
-// conversion and instance multiplicity scaling.
-const GENERATED_MODEL_SEMANTICS_VERSION: u32 = 11;
+// Version 12 retains range-protected quotient numerators and derivatives
+// alongside the frequency and noise scaling semantics from versions 10 and 11.
+const GENERATED_MODEL_SEMANTICS_VERSION: u32 = 12;
 
 fn generated_model_semantic_identity(device: &GeneratedRustDevice) -> String {
     let mut hasher = blake3::Hasher::new();

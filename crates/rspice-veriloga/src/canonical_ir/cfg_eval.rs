@@ -45,6 +45,9 @@ pub trait CfgScalar: Copy {
     fn product_ratio(self, b: Self, c: Self, d: Self) -> Self {
         scaled_product_ratio(self, b, c, d)
     }
+    fn sum_products_div(terms: &[[Self; 2]], divisor: Self) -> Self {
+        scaled_sum_products_div(terms, divisor)
+    }
     fn rem(self, rhs: Self) -> Self;
     fn powf(self, rhs: Self) -> Self;
     fn hypot(self, rhs: Self) -> Self;
@@ -118,15 +121,7 @@ pub(crate) fn scaled_product_ratio<S: CfgScalar>(a: S, b: S, c: S, d: S) -> S {
     }
     let mut exponent = 0;
     let normalized = factors.map(|value| {
-        let bits = value.real().abs().to_bits();
-        let biased = (bits >> 52) as i32;
-        let power = if bits == 0 {
-            0
-        } else if biased == 0 {
-            63 - bits.leading_zeros() as i32 - 1074
-        } else {
-            biased - 1023
-        };
+        let power = reference_exponent(value.real());
         (scale_reference(value, -power), power)
     });
     for (index, (_, power)) in normalized.iter().enumerate() {
@@ -139,6 +134,51 @@ pub(crate) fn scaled_product_ratio<S: CfgScalar>(a: S, b: S, c: S, d: S) -> S {
             .div(normalized[2].0.mul(normalized[3].0)),
         exponent,
     )
+}
+
+fn scaled_sum_products_div<S: CfgScalar>(terms: &[[S; 2]], divisor: S) -> S {
+    if !divisor.real().is_finite()
+        || divisor.real() == 0.0
+        || terms.iter().flatten().any(|x| !x.real().is_finite())
+    {
+        return terms
+            .iter()
+            .map(|&[a, b]| a.mul(b))
+            .reduce(|a, b| a.add(b))
+            .unwrap_or_else(|| S::from_f64(0.0))
+            .div(divisor);
+    }
+    let powers = terms
+        .iter()
+        .map(|&[a, b]| (reference_exponent(a.real()), reference_exponent(b.real())))
+        .collect::<Vec<_>>();
+    let largest = powers.iter().map(|&(a, b)| a + b).max().unwrap_or(0);
+    let sum = terms
+        .iter()
+        .zip(powers)
+        .map(|(&[a, b], (pa, pb))| {
+            let product = scale_reference(a, -pa).mul(scale_reference(b, -pb));
+            scale_reference(product, pa + pb - largest)
+        })
+        .reduce(|a, b| a.add(b))
+        .unwrap_or_else(|| S::from_f64(0.0));
+    let denominator_power = reference_exponent(divisor.real());
+    scale_reference(
+        sum.div(scale_reference(divisor, -denominator_power)),
+        largest - denominator_power,
+    )
+}
+
+fn reference_exponent(value: f64) -> i32 {
+    let bits = value.abs().to_bits();
+    let biased = (bits >> 52) as i32;
+    if bits == 0 {
+        0
+    } else if biased == 0 {
+        63 - bits.leading_zeros() as i32 - 1074
+    } else {
+        biased - 1023
+    }
 }
 
 fn scale_reference<S: CfgScalar>(mut value: S, mut power: i32) -> S {
@@ -176,6 +216,9 @@ impl CfgScalar for f64 {
     }
     fn product_ratio(self, b: Self, c: Self, d: Self) -> Self {
         rspice_veriloga_runtime::arithmetic::product_ratio(self, b, c, d)
+    }
+    fn sum_products_div(terms: &[[Self; 2]], divisor: Self) -> Self {
+        rspice_veriloga_runtime::arithmetic::sum_products_div(terms, divisor)
     }
     fn rem(self, rhs: Self) -> Self {
         self % rhs
@@ -647,6 +690,22 @@ impl<S: CfgScalar> Evaluator<'_, S> {
                     .map(|(left, right)| apply_binary(op, left, right))
                     .collect()
             }
+            CfgValueKind::LaneSumProductsDiv { terms, divisor } => {
+                let terms = terms
+                    .into_iter()
+                    .map(|(input, scalar)| Ok((self.read_lanes(input)?, self.read(scalar)?)))
+                    .collect::<Result<Vec<_>, CfgEvalError>>()?;
+                let divisor = self.read(divisor)?;
+                (0..width)
+                    .map(|lane| {
+                        let terms = terms
+                            .iter()
+                            .map(|(input, scalar)| [input[lane], *scalar])
+                            .collect::<Vec<_>>();
+                        S::sum_products_div(&terms, divisor)
+                    })
+                    .collect()
+            }
             CfgValueKind::LaneScalar { op, input, scalar } => {
                 let input = self.read_lanes(input)?;
                 let scalar = self.read(scalar)?;
@@ -1112,6 +1171,13 @@ impl<S: CfgScalar> Evaluator<'_, S> {
                 };
                 self.read(selected)?
             }
+            CfgValueKind::SumProductsDiv { terms, divisor } => {
+                let terms = terms
+                    .into_iter()
+                    .map(|(a, b)| Ok([self.read(a)?, self.read(b)?]))
+                    .collect::<Result<Vec<_>, CfgEvalError>>()?;
+                S::sum_products_div(&terms, self.read(divisor)?)
+            }
             CfgValueKind::Binary { op, left, right } => {
                 let left = self.read(left)?;
                 let right = self.read(right)?;
@@ -1165,7 +1231,10 @@ impl<S: CfgScalar> Evaluator<'_, S> {
             CfgValueKind::LaneSplat(_)
             | CfgValueKind::LaneWiden { .. }
             | CfgValueKind::LaneBinary { .. }
-            | CfgValueKind::LaneScalar { .. } => return Err(CfgEvalError::UndefinedValue(id)),
+            | CfgValueKind::LaneScalar { .. }
+            | CfgValueKind::LaneSumProductsDiv { .. } => {
+                return Err(CfgEvalError::UndefinedValue(id));
+            }
 
             // Discrete-domain kinds. `CfgScalar` is a real-arithmetic trait —
             // it has `exp`, `ln`, and a chain rule — and there is no honest
