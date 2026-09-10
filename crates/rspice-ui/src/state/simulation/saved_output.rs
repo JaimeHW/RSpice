@@ -10,7 +10,10 @@ use crate::state::{
     SavedOutputStreaming,
 };
 
+mod source_bindings;
 mod validation;
+pub(crate) use source_bindings::saved_output_references;
+pub use source_bindings::{SavedOutputAxis, SavedOutputBoundSource, SavedOutputSourceBindings};
 
 /// Durable outcome of applying one immutable saved-output contract to an
 /// analysis result. Receipts are persisted with the dataset so result viewers
@@ -82,5 +85,12 @@ pub struct SavedOutputReceipt {
     pub streaming: SavedOutputStreaming,
     #[serde(default)]
     pub display_intent: SavedOutputDisplayIntent,
+    /// Absent only for historical receipts whose physical bindings are unknown.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "source_bindings::deserialize_bindings"
+    )]
+    pub source_bindings: Option<SavedOutputSourceBindings>,
     pub status: SavedOutputMaterializationStatus,
 }

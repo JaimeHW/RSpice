@@ -55,13 +55,19 @@ fn resolve_output(
     analysis: &AnalysisResult,
     source: &[WaveformData],
     family: Option<&Result<Sources<'_>, String>>,
+    bindings: Option<&crate::state::SavedOutputSourceBindings>,
 ) -> Result<ResolvedOutput, String> {
     if let Some(family) = family {
         family
             .as_ref()
             .map_err(Clone::clone)?
-            .resolve(contract)
+            .resolve(
+                contract,
+                bindings.ok_or_else(|| "DC output has no source bindings".to_owned())?,
+            )
             .map(ResolvedOutput::DcFamily)
+    } else if let Some(bindings) = bindings {
+        super::bindings::resolve(contract, analysis, source, bindings).map(ResolvedOutput::Single)
     } else {
         resolve_contract_waveform(contract, analysis, source).map(ResolvedOutput::Single)
     }
@@ -80,9 +86,10 @@ fn prepare_output(
     source: &[WaveformData],
     preserve_engine: bool,
     family: Option<&Result<Sources<'_>, String>>,
+    bindings: Option<&crate::state::SavedOutputSourceBindings>,
     destinations: &HashMap<String, usize>,
 ) -> Result<ResolvedOutput, String> {
-    let mut output = resolve_output(contract, analysis, source, family)?;
+    let mut output = resolve_output(contract, analysis, source, family, bindings)?;
     for waveform in output.waveforms_mut() {
         if contract.policy == SavedOutputPolicy::SelectedAndFinalPoints
             && let Some(grid) = contract.selection_grid
@@ -192,7 +199,12 @@ fn materialize_with_engine_policy(
     let family = Sources::new(analysis, &source);
     let mut destinations = destinations(analysis);
     for contract in contracts {
-        let status = if contract.policy == SavedOutputPolicy::OnDemandFromRetainedState {
+        let captured = bindings::capture(contract, analysis, &source, family.as_ref());
+        let status = if let Err(reason) = &captured {
+            SavedOutputMaterializationStatus::Unavailable {
+                reason: reason.clone(),
+            }
+        } else if contract.policy == SavedOutputPolicy::OnDemandFromRetainedState {
             SavedOutputMaterializationStatus::Deferred
         } else if contract.policy == SavedOutputPolicy::FailureDiagnosticsOnly && analysis.success {
             SavedOutputMaterializationStatus::SuppressedOnSuccess
@@ -203,6 +215,7 @@ fn materialize_with_engine_policy(
                 &source,
                 preserve_engine,
                 family.as_ref(),
+                captured.as_ref().ok().and_then(Option::as_ref),
                 &destinations,
             ) {
                 Ok(output) => adopt_output(analysis, output, &mut destinations),
@@ -211,7 +224,7 @@ fn materialize_with_engine_policy(
         };
         analysis
             .saved_output_receipts
-            .push(receipt(contract, status));
+            .push(receipt(contract, status, captured.ok().flatten()));
     }
 }
 
@@ -288,7 +301,17 @@ pub(in crate::simulation) fn materialize_live_saved_outputs(
     let source = source_waveforms(source_analysis);
     let family = Sources::new(source_analysis, &source);
     for contract in live {
-        let Ok(output) = resolve_output(contract, source_analysis, &source, family.as_ref()) else {
+        let Ok(bindings) = bindings::capture(contract, source_analysis, &source, family.as_ref())
+        else {
+            continue;
+        };
+        let Ok(output) = resolve_output(
+            contract,
+            source_analysis,
+            &source,
+            family.as_ref(),
+            bindings.as_ref(),
+        ) else {
             continue;
         };
         for mut waveform in output.into_waveforms() {
@@ -330,10 +353,24 @@ pub(crate) fn materialize_deferred_saved_output(
         streaming: receipt.streaming,
         display_intent: receipt.display_intent,
         selection_grid: None,
+        candidates: None,
         digest: receipt.contract_digest,
     };
     let source = source_waveforms(analysis);
     let family = Sources::new(analysis, &source);
+    let bindings = if receipt.source_bindings.is_some() {
+        receipt.source_bindings
+    } else if matches!(
+        contract.kind,
+        SavedOutputKind::RawVoltageOrCurrent | SavedOutputKind::DerivedExpression
+    ) {
+        if analysis.dc_op.is_none() && family.is_none() {
+            return Err("this historical output has no physical source bindings; rerun its original deck to evaluate it".to_owned());
+        }
+        bindings::capture(&contract, analysis, &source, family.as_ref())?
+    } else {
+        None
+    };
     let mut destinations = destinations(analysis);
     let output = prepare_output(
         &contract,
@@ -341,6 +378,7 @@ pub(crate) fn materialize_deferred_saved_output(
         &source,
         false,
         family.as_ref(),
+        bindings.as_ref(),
         &destinations,
     )?;
     let mut candidate = analysis.clone();

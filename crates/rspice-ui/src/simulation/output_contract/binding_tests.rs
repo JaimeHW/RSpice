@@ -6,9 +6,9 @@ use super::fixtures::{output, run};
 use super::*;
 use crate::state::{OutputSelectionMode, SimulationRun};
 
-const HIERARCHY: &str = "Scoped probes\nV1 in 0 DC 4 AC 1\nV2 bias 0 DC -1 AC 0\nX1 in bias divider\nX2 bias in divider\n.subckt divider a b\nR1 a mid 1k\nR2 mid b 1k\nVprobe sensed mid 0\nR3 sensed b 1k\n.ends\n.end\n";
+pub(super) const HIERARCHY: &str = "Scoped probes\nV1 in 0 DC 4 AC 1\nV2 bias 0 DC -1 AC 0\nX1 in bias divider\nX2 bias in divider\n.subckt divider a b\nR1 a mid 1k\nR2 mid b 1k\nVprobe sensed mid 0\nR3 sensed b 1k\n.ends\n.end\n";
 
-fn dc() -> AnalysisSpec {
+pub(super) fn dc() -> AnalysisSpec {
     AnalysisSpec::DcSweep {
         source_name: "V1".to_owned(),
         start: 1.0,
@@ -22,7 +22,7 @@ fn dc() -> AnalysisSpec {
     }
 }
 
-fn ac() -> AnalysisSpec {
+pub(super) fn ac() -> AnalysisSpec {
     AnalysisSpec::Ac {
         start_freq: 1.0,
         stop_freq: 10.0,
@@ -31,7 +31,7 @@ fn ac() -> AnalysisSpec {
     }
 }
 
-fn execute(deck: &str, spec: AnalysisSpec, outputs: &[SavedOutput]) -> SimulationRun {
+pub(super) fn execute(deck: &str, spec: AnalysisSpec, outputs: &[SavedOutput]) -> SimulationRun {
     let line = match spec {
         AnalysisSpec::DcOp { .. } => ".op",
         AnalysisSpec::Ac { .. } => ".ac lin 3 1 10",
@@ -48,11 +48,11 @@ fn execute(deck: &str, spec: AnalysisSpec, outputs: &[SavedOutput]) -> Simulatio
     )
 }
 
-fn close(actual: f64, expected: f64) {
+pub(super) fn close(actual: f64, expected: f64) {
     assert!((actual - expected).abs() < 1e-10, "{actual} != {expected}");
 }
 
-fn check_value(run: &SimulationRun, index: usize, expected: f64) {
+pub(super) fn check_value(run: &SimulationRun, index: usize, expected: f64) {
     let analysis = &run.analyses[0];
     let receipt = &analysis.saved_output_receipts[index];
     let names = receipt.status.materialized_waveforms().collect::<Vec<_>>();
@@ -518,5 +518,84 @@ fn deferred_op_outputs_use_physical_tables_after_renaming_and_project_reload() {
                 }
             }
         }
+    }
+}
+
+#[test]
+fn ngspice_ground_aliases_bind_against_the_decks_policy() {
+    let deck = "Ground alias\nV1 in GND 4\nR1 in GND 1k\n.end\n";
+    assert!(
+        rspice_core::Netlist::parse(deck)
+            .unwrap()
+            .ground_policy()
+            .is_ground("GND")
+    );
+    let outputs = ["V(in,GND)", "V(GND,in)", "V(GND)"]
+        .map(|expr| output(SavedOutputKind::RawVoltageOrCurrent, expr, expr));
+    let run = execute(deck, AnalysisSpec::dc_op(), &outputs);
+    run.validate_provenance().unwrap();
+    for (index, value) in [4.0, -4.0, 0.0].into_iter().enumerate() {
+        check_value(&run, index, value);
+    }
+}
+
+#[test]
+fn preprocess_ground_aliases_bind_against_the_decks_policy() {
+    let deck =
+        "Replaced ground\n.PREPROCESS REPLACEGROUND TRUE\nV1 in GROUND 4\nR1 in GROUND 1k\n.end\n";
+    assert!(
+        rspice_core::Netlist::parse(deck)
+            .unwrap()
+            .ground_policy()
+            .is_ground("GROUND")
+    );
+    let outputs = ["V(in,GROUND)", "V(GROUND,in)", "V(GROUND)"]
+        .map(|expr| output(SavedOutputKind::RawVoltageOrCurrent, expr, expr));
+    let run = execute(deck, AnalysisSpec::dc_op(), &outputs);
+    run.validate_provenance().unwrap();
+    for (index, value) in [4.0, -4.0, 0.0].into_iter().enumerate() {
+        check_value(&run, index, value);
+    }
+}
+
+#[test]
+fn replacement_ground_bang_alias_is_accepted_and_bound() {
+    let deck = "Bang ground\n.PREPROCESS REPLACEGROUND TRUE\nV1 in GND! 4\nR1 in GND! 1k\n.end\n";
+    assert!(
+        rspice_core::Netlist::parse(deck)
+            .unwrap()
+            .ground_policy()
+            .is_ground("GND!")
+    );
+    let run = execute(
+        deck,
+        AnalysisSpec::dc_op(),
+        &[output(
+            SavedOutputKind::RawVoltageOrCurrent,
+            "Bang ground",
+            "V(in,GND!)",
+        )],
+    );
+    check_value(&run, 0, 4.0);
+}
+
+#[test]
+fn formal_port_probes_bind_to_the_instantiating_nodes() {
+    let outputs = ["V(X1.a)", "V(X1.b)", "V(/top/X1/a)", "V(/X1/b)"]
+        .map(|expr| output(SavedOutputKind::RawVoltageOrCurrent, expr, expr));
+    let run = execute(HIERARCHY, AnalysisSpec::dc_op(), &outputs);
+    run.validate_provenance().unwrap();
+    for (index, expected) in [4.0, -1.0, 4.0, -1.0].into_iter().enumerate() {
+        check_value(&run, index, expected);
+    }
+}
+
+#[test]
+fn scoped_canonical_ground_uses_the_owning_analysis_axis() {
+    let outputs =
+        ["V(/0)", "V(/top/0)"].map(|expr| output(SavedOutputKind::RawVoltageOrCurrent, expr, expr));
+    let run = execute(HIERARCHY, AnalysisSpec::dc_op(), &outputs);
+    for index in 0..outputs.len() {
+        check_value(&run, index, 0.0);
     }
 }

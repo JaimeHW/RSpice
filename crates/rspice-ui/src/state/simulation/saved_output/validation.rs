@@ -34,6 +34,9 @@ impl AnalysisResult {
         let mut digests = HashSet::new();
         let mut raw_dc_axis: Option<&[f64]> = None;
         for receipt in &self.saved_output_receipts {
+            if let Some(bindings) = &receipt.source_bindings {
+                bindings.validate(receipt, self)?;
+            }
             if !identities.insert(receipt.output_id) {
                 return Err(format!(
                     "duplicate saved-output identity {}",

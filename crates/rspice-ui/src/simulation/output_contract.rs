@@ -20,6 +20,7 @@ use crate::state::{
 
 const MAX_SELECTED_POINT_COUNT: usize = 10_000_000;
 
+mod bindings;
 mod dc_family;
 mod materialize;
 mod probe;
@@ -29,12 +30,14 @@ use materialize::materialize_saved_outputs;
 pub(in crate::simulation) use materialize::{
     apply_saved_output_policy, materialize_live_saved_outputs, retain_plan_saved_outputs,
 };
-use probe::{resolve_raw_probe, resolve_raw_probe_with};
+use probe::resolve_raw_probe;
 
 #[cfg(test)]
 mod binding_tests;
 #[cfg(test)]
 mod dc_family_tests;
+#[cfg(test)]
+mod durable_binding_tests;
 #[cfg(test)]
 mod fixtures;
 #[cfg(test)]
@@ -178,6 +181,7 @@ pub(in crate::simulation) struct PreparedSavedOutput {
     streaming: SavedOutputStreaming,
     display_intent: crate::state::SavedOutputDisplayIntent,
     selection_grid: Option<TransientSelectionGrid>,
+    candidates: Option<Arc<bindings::Candidates>>,
     digest: ContentDigest,
 }
 
@@ -259,6 +263,7 @@ impl PreparedSavedOutput {
             streaming: output.streaming,
             display_intent: output.display_intent,
             selection_grid,
+            candidates: None,
             digest,
         }))
     }
@@ -816,6 +821,7 @@ fn stores_complex_components(kind: SavedOutputKind, run_type: AnalysisRunType) -
 fn receipt(
     contract: &PreparedSavedOutput,
     status: SavedOutputMaterializationStatus,
+    source_bindings: Option<crate::state::SavedOutputSourceBindings>,
 ) -> SavedOutputReceipt {
     SavedOutputReceipt {
         output_id: contract.output_id,
@@ -829,6 +835,7 @@ fn receipt(
         stored_precision: contract.precision,
         streaming: contract.streaming,
         display_intent: contract.display_intent,
+        source_bindings,
         status,
     }
 }

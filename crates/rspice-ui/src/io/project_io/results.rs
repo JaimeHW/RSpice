@@ -44,7 +44,7 @@ use legacy_digests::{
     validate_v8_result_digests, validate_v9_result_digests, validate_v10_result_digests,
     validate_v11_result_digests, validate_v12_result_digests, validate_v13_to_v15_result_digests,
     validate_v16_result_digests, validate_v17_result_digests, validate_v18_result_digests,
-    validate_v19_result_digests, validate_v20_result_digests,
+    validate_v19_result_digests, validate_v20_result_digests, validate_v21_to_v23_result_digests,
 };
 pub use provenance::*;
 use provenance::{
@@ -161,6 +161,18 @@ impl ProjectSimulationResultsData {
 
     fn migrate_to_current_in_place(&mut self, project_id: ProjectId) -> Result<(), String> {
         let source_schema = self.schema_version;
+        if source_schema < BOUND_OUTPUT_RESULTS_SCHEMA_VERSION
+            && self
+                .runs
+                .iter()
+                .flat_map(|run| &run.analyses)
+                .flat_map(|analysis| &analysis.saved_output_receipts)
+                .any(|receipt| receipt.source_bindings.is_some())
+        {
+            return Err(
+                "result schemas before v24 cannot contain saved-output source bindings".to_owned(),
+            );
+        }
         if source_schema < DC_FAMILY_OUTPUT_RESULTS_SCHEMA_VERSION
             && self
                 .runs
@@ -197,10 +209,18 @@ impl ProjectSimulationResultsData {
         }
         if matches!(
             source_schema,
-            CONVERGENCE_RESULTS_SCHEMA_VERSION | DC_SWEEP_RESULTS_SCHEMA_VERSION
+            CONVERGENCE_RESULTS_SCHEMA_VERSION
+                | DC_SWEEP_RESULTS_SCHEMA_VERSION
+                | DC_FAMILY_OUTPUT_RESULTS_SCHEMA_VERSION
         ) {
-            // No old field or digest encoding changed. Authenticate the
-            // unchanged history under the current schema without resealing.
+            // Authenticate the original encoding before resealing. Unknown
+            // historical bindings stay unknown; the current deck is unrelated.
+            for run in &self.runs {
+                validate_v21_to_v23_result_digests(run, source_schema)?;
+            }
+            for run in &mut self.runs {
+                seal_project_result_digests(run)?;
+            }
             self.schema_version = PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION;
             return self.validate();
         }

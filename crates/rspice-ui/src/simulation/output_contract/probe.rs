@@ -10,21 +10,34 @@ pub(super) fn resolve_raw_probe(
     output_name: &str,
     complex_domain: bool,
 ) -> Result<WaveformData, String> {
-    resolve_raw_probe_with(
+    resolve_bound_raw_probe(
         expression,
         output_name,
         waveforms.first(),
         complex_domain,
-        |name| find_waveform(waveforms, name),
+        |signal| {
+            if signal.eq_ignore_ascii_case("V(0)") {
+                Ok(Source::Ground)
+            } else {
+                find_waveform(waveforms, signal)
+                    .map(Source::Waveform)
+                    .ok_or_else(|| format!("source probe '{signal}' is absent"))
+            }
+        },
     )
 }
 
-pub(super) fn resolve_raw_probe_with<'a>(
+pub(super) enum Source<'a> {
+    Ground,
+    Waveform(&'a WaveformData),
+}
+
+pub(super) fn resolve_bound_raw_probe<'a>(
     expression: &str,
     output_name: &str,
     axis: Option<&WaveformData>,
     complex_domain: bool,
-    find: impl Fn(&str) -> Option<&'a WaveformData>,
+    resolve: impl Fn(&str) -> Result<Source<'a>, String>,
 ) -> Result<WaveformData, String> {
     let (function, arguments) = parse_probe(expression)?;
     let voltage = function.eq_ignore_ascii_case("V");
@@ -33,26 +46,25 @@ pub(super) fn resolve_raw_probe_with<'a>(
     {
         return Err("probe must use V(node), V(node+, node-), or I(source)".to_owned());
     }
-    let source = |node: &str| {
-        find(&format!("{}({node})", if voltage { "V" } else { "I" }))
-            .ok_or_else(|| format!("source probe '{function}({node})' is absent"))
+    let positive = resolve(&format!(
+        "{}({})",
+        if voltage { "V" } else { "I" },
+        arguments[0]
+    ))?;
+    let negative = if arguments.len() == 2 {
+        resolve(&format!("V({})", arguments[1]))?
+    } else {
+        Source::Ground
     };
-    match arguments.as_slice() {
-        [positive, negative] if positive == "0" && negative == "0" => {
-            ground_waveform(axis, output_name, complex_domain)
+    match (positive, negative) {
+        (Source::Ground, Source::Ground) => ground_waveform(axis, output_name, complex_domain),
+        (Source::Ground, Source::Waveform(negative)) => {
+            negate_waveform(negative, output_name, complex_domain)
         }
-        [positive, negative] if positive == "0" => {
-            negate_waveform(source(negative)?, output_name, complex_domain)
+        (Source::Waveform(positive), Source::Ground) => Ok(clone_with_name(positive, output_name)),
+        (Source::Waveform(positive), Source::Waveform(negative)) => {
+            subtract_waveforms(positive, negative, output_name, complex_domain)
         }
-        [positive, negative] if negative != "0" => subtract_waveforms(
-            source(positive)?,
-            source(negative)?,
-            output_name,
-            complex_domain,
-        ),
-        [node] if voltage && node == "0" => ground_waveform(axis, output_name, complex_domain),
-        [node] | [node, _] => Ok(clone_with_name(source(node)?, output_name)),
-        _ => unreachable!("probe arity was validated"),
     }
 }
 

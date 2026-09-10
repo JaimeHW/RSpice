@@ -1153,6 +1153,18 @@ mod tests {
                 WaveformData::new("out", vec![0.0, 1.0], vec![0.0, 2.0], "#fff"),
             ]);
         analysis.saved_output_receipts.push(SavedOutputReceipt {
+            source_bindings: Some(crate::state::SavedOutputSourceBindings {
+                axis: crate::state::SavedOutputAxis::Waveform {
+                    name: "out".to_owned(),
+                },
+                references: [(
+                    "v(out)".to_owned(),
+                    crate::state::SavedOutputBoundSource::Waveform {
+                        name: "out".to_owned(),
+                    },
+                )]
+                .into(),
+            }),
             output_id: crate::product::SavedOutputId::new(),
             output_revision: crate::product::ObjectRevision::INITIAL,
             analysis_id: crate::product::AnalysisInstanceId::new(),

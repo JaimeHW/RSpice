@@ -387,6 +387,7 @@ fn a_saved_output_trace_is_resolved_from_the_receipt_not_the_waveform_names() {
     app.state.simulation.runs[0].analyses[0]
         .saved_output_receipts
         .push(SavedOutputReceipt {
+            source_bindings: None,
             output_id: output.id,
             output_revision: output.revision,
             analysis_id: crate::product::AnalysisInstanceId::new(),
@@ -491,6 +492,7 @@ fn a_saved_output_dc_family_reveals_all_members_without_changing_retained_data()
         .instances()[0]
         .id();
     analysis.saved_output_receipts.push(SavedOutputReceipt {
+        source_bindings: None,
         output_id: output.id,
         output_revision: output.revision,
         analysis_id,

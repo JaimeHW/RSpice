@@ -37,6 +37,8 @@ const RESULT_DIGEST_ENCODING_VERSION_V10: u16 = 10;
 const RESULT_DIGEST_ENCODING_VERSION_V11: u16 = 11;
 /// v12 binds numerical quality and its original transient time basis.
 const RESULT_DIGEST_ENCODING_VERSION_V12: u16 = 12;
+// Physical source bindings for durable saved-output evaluation.
+const RESULT_DIGEST_ENCODING_VERSION_V13: u16 = 13;
 const CANONICAL_NAN_BITS: u64 = 0x7ff8_0000_0000_0000;
 
 struct ResultDigestWriter {
@@ -174,7 +176,7 @@ impl AnalysisResult {
     /// derived display caches are intentionally not part of the identity.
     #[must_use]
     pub fn result_data_digest(&self) -> ContentDigest {
-        self.result_data_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V12)
+        self.result_data_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V13)
     }
 
     /// Logical bytes occupied by all authoritative retained result evidence.
@@ -186,7 +188,7 @@ impl AnalysisResult {
     /// excluded from immutable content identity.
     #[must_use]
     pub fn retained_storage_bytes(&self) -> u64 {
-        let writer = self.result_data_writer_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V12);
+        let writer = self.result_data_writer_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V13);
         let cache_bytes = self.waveforms.iter().fold(0_u64, |total, waveform| {
             let bytes = waveform.display_cache.as_ref().map_or(0_u64, |cache| {
                 u64::try_from(cache.x.len())
@@ -276,6 +278,11 @@ impl AnalysisResult {
         self.result_data_writer_with_encoding(version).finish()
     }
 
+    /// Digest used by project schemas 21 through 23, before physical bindings.
+    pub(crate) fn legacy_v12_result_data_digest(&self) -> ContentDigest {
+        self.result_data_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V12)
+    }
+
     fn result_data_writer_with_encoding(&self, version: u16) -> ResultDigestWriter {
         let domain = match version {
             RESULT_DIGEST_ENCODING_VERSION_V1 => "rspice.analysis-result-data/v1",
@@ -290,6 +297,7 @@ impl AnalysisResult {
             RESULT_DIGEST_ENCODING_VERSION_V10 => "rspice.analysis-result-data/v10",
             RESULT_DIGEST_ENCODING_VERSION_V11 => "rspice.analysis-result-data/v11",
             RESULT_DIGEST_ENCODING_VERSION_V12 => "rspice.analysis-result-data/v12",
+            RESULT_DIGEST_ENCODING_VERSION_V13 => "rspice.analysis-result-data/v13",
             _ => unreachable!("supported result digest encoding"),
         };
         let mut writer = ResultDigestWriter::new(domain, version);
@@ -382,6 +390,36 @@ impl AnalysisResult {
             writer.u8(saved_output_precision_tag(receipt.stored_precision));
             writer.u8(saved_output_streaming_tag(receipt.streaming));
             encode_saved_output_status(&mut writer, &receipt.status);
+            if version >= RESULT_DIGEST_ENCODING_VERSION_V13 {
+                writer.option(receipt.source_bindings.as_ref(), |writer, bindings| {
+                    use super::{SavedOutputAxis, SavedOutputBoundSource};
+                    match &bindings.axis {
+                        SavedOutputAxis::Missing => writer.u8(0),
+                        SavedOutputAxis::OperatingPoint => writer.u8(1),
+                        SavedOutputAxis::Waveform { name } => {
+                            writer.u8(2);
+                            writer.string(name);
+                        }
+                        SavedOutputAxis::DcFamily => writer.u8(3),
+                    }
+                    writer.sequence(bindings.references.len());
+                    for (reference, source) in &bindings.references {
+                        writer.string(reference);
+                        match source {
+                            SavedOutputBoundSource::Missing => writer.u8(0),
+                            SavedOutputBoundSource::Ground => writer.u8(1),
+                            SavedOutputBoundSource::Waveform { name } => {
+                                writer.u8(2);
+                                writer.string(name);
+                            }
+                            SavedOutputBoundSource::DcQuantity { quantity } => {
+                                writer.u8(3);
+                                writer.u64(*quantity as u64);
+                            }
+                        }
+                    }
+                });
+            }
         }
 
         writer
@@ -394,7 +432,7 @@ impl SimulationRun {
     /// they address the dataset but do not define its sample content.
     #[must_use]
     pub fn dataset_content_digest(&self) -> ContentDigest {
-        self.dataset_content_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V12)
+        self.dataset_content_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V13)
     }
 
     /// Schema-v8 dataset digest retained solely for authenticated migration.
@@ -462,6 +500,11 @@ impl SimulationRun {
         self.dataset_content_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V11)
     }
 
+    /// Dataset digest used by project schemas 21 through 23.
+    pub(crate) fn legacy_v12_dataset_content_digest(&self) -> ContentDigest {
+        self.dataset_content_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V12)
+    }
+
     fn dataset_content_digest_with_encoding(&self, version: u16) -> ContentDigest {
         let domain = match version {
             RESULT_DIGEST_ENCODING_VERSION_V1 => "rspice.simulation-dataset-data/v1",
@@ -476,6 +519,7 @@ impl SimulationRun {
             RESULT_DIGEST_ENCODING_VERSION_V10 => "rspice.simulation-dataset-data/v10",
             RESULT_DIGEST_ENCODING_VERSION_V11 => "rspice.simulation-dataset-data/v11",
             RESULT_DIGEST_ENCODING_VERSION_V12 => "rspice.simulation-dataset-data/v12",
+            RESULT_DIGEST_ENCODING_VERSION_V13 => "rspice.simulation-dataset-data/v13",
             _ => unreachable!("supported dataset digest encoding"),
         };
         let mut writer = ResultDigestWriter::new(domain, version);
@@ -494,7 +538,8 @@ impl SimulationRun {
                 RESULT_DIGEST_ENCODING_VERSION_V9 => analysis.legacy_v9_result_data_digest(),
                 RESULT_DIGEST_ENCODING_VERSION_V10 => analysis.legacy_v10_result_data_digest(),
                 RESULT_DIGEST_ENCODING_VERSION_V11 => analysis.legacy_v11_result_data_digest(),
-                RESULT_DIGEST_ENCODING_VERSION_V12 => analysis.result_data_digest(),
+                RESULT_DIGEST_ENCODING_VERSION_V12 => analysis.legacy_v12_result_data_digest(),
+                RESULT_DIGEST_ENCODING_VERSION_V13 => analysis.result_data_digest(),
                 _ => unreachable!("supported dataset digest encoding"),
             });
         }

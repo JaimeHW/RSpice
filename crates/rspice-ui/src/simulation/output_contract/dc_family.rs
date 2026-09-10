@@ -67,39 +67,42 @@ impl<'a> Sources<'a> {
         })
     }
 
-    fn find(&self, member: usize, signal: &str) -> Option<&'a WaveformData> {
+    pub(super) fn quantity(&self, signal: &str) -> Option<usize> {
         let (current, name) = probe_identity(signal.trim());
-        let quantity = self
-            .quantities
+        self.quantities
             .get(&(current, name.to_ascii_lowercase()))
-            .or_else(|| {
-                let engine = crate::state::ProbeTarget::engine_alias(name)?;
-                self.quantities.get(&(current, engine))
-            })?;
-        self.curves.get(&(*quantity, member)).copied()
+            .copied()
+    }
+
+    pub(super) fn curve(&self, quantity: usize, member: usize) -> Option<&'a WaveformData> {
+        self.curves.get(&(quantity, member)).copied()
     }
 
     pub(super) fn resolve(
         &self,
         contract: &PreparedSavedOutput,
+        bindings: &crate::state::SavedOutputSourceBindings,
     ) -> Result<Vec<WaveformData>, String> {
         let mut outputs = Vec::new();
         for member in 0..self.evidence.member_count() {
+            let context = super::bindings::Context {
+                bindings,
+                waveforms: &[],
+                family: Some((self, member)),
+                axis: self.axes.get(&member).copied(),
+            };
             let result = match contract.kind {
-                SavedOutputKind::RawVoltageOrCurrent => resolve_raw_probe_with(
+                SavedOutputKind::RawVoltageOrCurrent => probe::resolve_bound_raw_probe(
                     &contract.source_expression,
                     &contract.name,
                     self.axes.get(&member).copied(),
                     false,
-                    |name| self.find(member, name),
+                    |name| context.resolve(name),
                 ),
                 SavedOutputKind::DerivedExpression => resolve_derived_with(
                     &contract.source_expression,
                     &contract.name,
-                    &MemberContext {
-                        sources: self,
-                        member,
-                    },
+                    &context,
                     self.axes.get(&member).copied(),
                 ),
                 _ => Err("this output kind has no DC member source".to_owned()),
@@ -110,41 +113,5 @@ impl<'a> Sources<'a> {
             outputs.push(output);
         }
         Ok(outputs)
-    }
-}
-
-struct MemberContext<'a, 'b> {
-    sources: &'b Sources<'a>,
-    member: usize,
-}
-
-impl calculator::EvaluationContext for MemberContext<'_, '_> {
-    fn get_waveform(
-        &self,
-        signal: &str,
-        _dataset: Option<&str>,
-    ) -> Result<CalcValue, calculator::EvaluationError> {
-        if matches!(
-            signal.to_ascii_uppercase().as_str(),
-            "TIME" | "T" | "FREQ" | "FREQUENCY"
-        ) {
-            return self
-                .sources
-                .axes
-                .get(&self.member)
-                .map(|waveform| {
-                    CalcValue::create_waveform(waveform.x.to_vec(), waveform.x.to_vec())
-                })
-                .ok_or_else(|| calculator::EvaluationError::IdentifierNotFound(signal.to_owned()));
-        }
-        if let Some(value) =
-            calculator::canonical_ground_value(signal, self.sources.axes.get(&self.member).copied())
-        {
-            return value;
-        }
-        self.sources
-            .find(self.member, signal)
-            .map(|waveform| CalcValue::create_waveform(waveform.x.to_vec(), waveform.y.to_vec()))
-            .ok_or_else(|| calculator::EvaluationError::IdentifierNotFound(signal.to_owned()))
     }
 }

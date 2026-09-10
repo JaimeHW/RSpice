@@ -1360,6 +1360,22 @@ impl PreparedRunSnapshot {
                     format!("Prepared executable netlist is invalid: {error}"),
                 )
             })?;
+        for task in &mut parts.tasks {
+            if task.saved_output_contracts.is_empty() {
+                continue;
+            }
+            let override_netlist;
+            let source = if let Some(text) = &task.executable_netlist_override {
+                override_netlist = rspice_core::Netlist::parse(text).map_err(|error| {
+                    PreparationError::new(PreparationStage::Netlist, error.to_string())
+                })?;
+                &override_netlist
+            } else {
+                &parsed_netlist
+            };
+            PreparedSavedOutput::bind_deck(&mut task.saved_output_contracts, source)
+                .map_err(|error| PreparationError::new(PreparationStage::AnalysisPlan, error))?;
+        }
         let model_bin_config = rspice_core::SimulationConfig {
             temperature: rspice_core::constants::celsius_to_kelvin(
                 parts.reference_temperature_celsius,

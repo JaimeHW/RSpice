@@ -422,6 +422,9 @@ fn dc_family_receipts_round_trip_every_member_and_reject_schema_downgrades() {
     for schema in [21, 22] {
         let mut downgraded = snapshot.clone();
         downgraded.schema_version = schema;
+        for receipt in &mut downgraded.runs[0].analyses[0].saved_output_receipts {
+            receipt.source_bindings = None;
+        }
         assert!(
             downgraded
                 .migrate_to_current(crate::product::ProjectId::new())
@@ -432,7 +435,7 @@ fn dc_family_receipts_round_trip_every_member_and_reject_schema_downgrades() {
 }
 
 #[test]
-fn schema_22_saved_outputs_migrate_without_resealing_their_result_digests() {
+fn schema_22_saved_outputs_authenticate_and_reseal_their_result_digests() {
     for nested in [false, true] {
         let mut output = output(
             SavedOutputKind::RawVoltageOrCurrent,
@@ -442,10 +445,16 @@ fn schema_22_saved_outputs_migrate_without_resealing_their_result_digests() {
         if nested {
             output.save_policy = SavedOutputPolicy::OnDemandFromRetainedState;
         }
-        let run = run(spec(nested, false), &[output]);
-        let digest = run.analyses[0].result_data_digest();
+        let mut run = run(spec(nested, false), &[output]);
+        run.analyses[0].saved_output_receipts[0].source_bindings = None;
+        let digest = run.analyses[0].legacy_v12_result_data_digest();
+        let dataset_digest = run.legacy_v12_dataset_content_digest();
         let mut snapshot = stored(run);
         snapshot.schema_version = 22;
+        snapshot.runs[0].analyses[0].result_data_digest =
+            crate::io::project_io::PersistedField::Value(digest);
+        snapshot.runs[0].dataset_content_digest =
+            crate::io::project_io::PersistedField::Value(dataset_digest);
         let mut corrupted = snapshot.clone();
         Arc::make_mut(&mut corrupted.runs[0].analyses[0].waveforms[0].y)[0] += 0.1;
         assert!(
@@ -457,10 +466,10 @@ fn schema_22_saved_outputs_migrate_without_resealing_their_result_digests() {
         snapshot
             .migrate_to_current(crate::product::ProjectId::new())
             .unwrap();
-        assert_eq!(snapshot.schema_version, 23);
+        assert_eq!(snapshot.schema_version, 24);
         let mut state = crate::state::SimulationState::default();
         snapshot.apply_to_state(&mut state).unwrap();
-        assert_eq!(state.runs[0].analyses[0].result_data_digest(), digest);
+        assert_ne!(state.runs[0].analyses[0].result_data_digest(), digest);
     }
 }
 

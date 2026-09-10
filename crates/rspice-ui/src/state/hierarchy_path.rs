@@ -545,7 +545,7 @@ pub enum HierarchyPathError {
     EmptyLeaf,
     #[error(
         "signal name {leaf:?} contains unsupported character {character:?}; signal names use \
-         Unicode letters, digits, '_', '$', '+', and '-'"
+         Unicode letters, digits, '_', '$', '+', '-', '#', and '!'"
     )]
     InvalidLeaf { leaf: String, character: char },
 }
@@ -658,7 +658,7 @@ fn is_leaf_char(character: char) -> bool {
     // `#` is the deck's own spelling for bus bits (`data#3`) and branch
     // currents (`v1#branch`); a leaf grammar that refuses it cannot name the
     // very signals the engine solves for.
-    is_segment_char(character) || matches!(character, '$' | '+' | '-' | '#')
+    is_segment_char(character) || matches!(character, '$' | '+' | '-' | '#' | '!')
 }
 
 /// Length of the canonical rendering, without building it.

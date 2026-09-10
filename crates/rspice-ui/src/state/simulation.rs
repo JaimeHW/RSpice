@@ -91,7 +91,11 @@ pub use run_receipt::{
     PreparedRunTaskReceipt, PreparedSourceCheckReceipt, PreparedSpecification,
     PreparedSpecificationPolicy, SignOffStanding, SimulationRunProvenance,
 };
-pub use saved_output::{SavedOutputDcMember, SavedOutputMaterializationStatus, SavedOutputReceipt};
+pub(crate) use saved_output::saved_output_references;
+pub use saved_output::{
+    SavedOutputAxis, SavedOutputBoundSource, SavedOutputDcMember, SavedOutputMaterializationStatus,
+    SavedOutputReceipt, SavedOutputSourceBindings,
+};
 pub use specification_verdict::{SpecificationVerdict, SpecificationVerdictStatus};
 pub use state_impl::EvidenceDomain;
 pub use state_model::{SimulationRunIntent, SimulationState};
