@@ -331,6 +331,13 @@ values and `$param_given` bits, so devices bound to the same card reuse one
 Verilog-derived preprocessing result; instance geometry and solver state are
 never shared.
 
+Generated devices retain `$bound_step` requests across conditional calls,
+runtime loops, and nested analog instances. The transient engine uses the
+smallest active bound, including zero as a request for its supported minimum;
+rollback and checkpoints preserve accepted bounds. Generated `$discontinuity`
+remains explicitly unsupported. Its degree-specific behavior, including the
+`-1` Newton-limiting hint, still requires implementation and qualification.
+
 Automatic differentiation keeps exact sparse lane shapes. Its fixed point uses
 a bounded compact bit matrix for ordinary compact models and falls back to
 sparse storage before hostile lane counts can force an oversized dense
