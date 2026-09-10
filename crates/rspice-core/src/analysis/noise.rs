@@ -1249,7 +1249,10 @@ pub struct IntegratedContribution {
     pub mechanism: String,
     /// Broad physical noise class.
     pub noise_type: NoiseSourceType,
-    /// Output-referred noise power integrated over the band (V²).
+    /// Output-referred noise power integrated over the band (V²). Positive
+    /// overflow is infinity; invalid data or positive underflow rounding to
+    /// zero is NaN. Contributor ordering and percentages retain the scaled
+    /// power even when this field cannot represent it.
     pub integrated_power: Value,
     /// Share of total integrated output noise (percent).
     pub percentage: Value,
@@ -1494,16 +1497,24 @@ impl ScaledPositiveSum {
         let Some((significand, exponent)) = self.parts() else {
             return 0.0;
         };
+        Self::rounded_value(significand, exponent)
+    }
+
+    /// Materialize one normalized positive value, distinguishing exact zero
+    /// from a positive value whose correctly rounded result would be zero.
+    fn rounded_value(significand: Value, exponent: i32) -> Value {
         if exponent > 1023 {
             return Value::INFINITY;
         }
-        if exponent < -1074 {
-            // The positive integrated power is not representable. Returning
-            // NaN makes that loss explicit rather than fabricating zero.
+        if exponent < -1075 {
             return Value::NAN;
         }
-        let power_of_two = Self::binary_power(exponent);
-        significand * power_of_two
+        let rounded = if exponent == -1075 {
+            (significand * 0.5) * Value::from_bits(1)
+        } else {
+            significand * Self::binary_power(exponent)
+        };
+        if rounded == 0.0 { Value::NAN } else { rounded }
     }
 
     pub(crate) fn square_root(self) -> Value {
@@ -1514,17 +1525,18 @@ impl ScaledPositiveSum {
         let root_significand = (significand * if odd == 0 { 1.0 } else { 2.0 }).sqrt();
         let root_exponent = exponent.div_euclid(2);
         let (root_significand, root_exponent) = Self::normalized(root_significand, root_exponent);
-        if root_exponent > 1023 {
-            return Value::INFINITY;
-        }
-        if root_exponent < -1075 {
-            return Value::NAN;
-        }
-        if root_exponent == -1075 {
-            let rounded = (root_significand * 0.5) * Value::from_bits(1);
-            if rounded == 0.0 { Value::NAN } else { rounded }
-        } else {
-            root_significand * Self::binary_power(root_exponent)
+        Self::rounded_value(root_significand, root_exponent)
+    }
+
+    fn compare_power(self, other: Self) -> std::cmp::Ordering {
+        use std::cmp::Ordering;
+        match (self.parts(), other.parts()) {
+            (Some((left, left_exponent)), Some((right, right_exponent))) => left_exponent
+                .cmp(&right_exponent)
+                .then_with(|| left.total_cmp(&right)),
+            (Some(_), None) => Ordering::Greater,
+            (None, Some(_)) => Ordering::Less,
+            (None, None) => Ordering::Equal,
         }
     }
 
@@ -1733,6 +1745,16 @@ impl IntegratedNoise {
                 .as_deref()
                 .unwrap_or_else(|| contribution.noise_type.label())
         }
+        fn compare_identity(left: (&str, &str), right: (&str, &str)) -> std::cmp::Ordering {
+            fn folded_cmp(left: &str, right: &str) -> std::cmp::Ordering {
+                left.bytes()
+                    .map(|byte| byte.to_ascii_lowercase())
+                    .cmp(right.bytes().map(|byte| byte.to_ascii_lowercase()))
+            }
+            folded_cmp(left.0, right.0)
+                .then_with(|| folded_cmp(left.1, right.1))
+                .then_with(|| left.cmp(&right))
+        }
         let invalid_series = self.results.windows(2).any(|window| {
             let left = &window[0];
             let right = &window[1];
@@ -1774,16 +1796,10 @@ impl IntegratedNoise {
                 )
                 .collect::<Vec<_>>();
             invalid.sort_by(|left, right| {
-                left.device_name
-                    .to_ascii_lowercase()
-                    .cmp(&right.device_name.to_ascii_lowercase())
-                    .then_with(|| {
-                        left.mechanism
-                            .to_ascii_lowercase()
-                            .cmp(&right.mechanism.to_ascii_lowercase())
-                    })
-                    .then_with(|| left.device_name.cmp(&right.device_name))
-                    .then_with(|| left.mechanism.cmp(&right.mechanism))
+                compare_identity(
+                    (&left.device_name, &left.mechanism),
+                    (&right.device_name, &right.mechanism),
+                )
             });
             return invalid;
         }
@@ -1793,10 +1809,6 @@ impl IntegratedNoise {
         for window in self.results.windows(2) {
             let (a, b) = (&window[0], &window[1]);
             let df = b.frequency - a.frequency;
-            if df <= 0.0 {
-                continue;
-            }
-
             // Integrating every endpoint term independently makes an absent
             // sparse mechanism exactly zero at that edge, preserves right-only
             // onsets, and avoids materializing a duplicate-identity endpoint
@@ -1814,45 +1826,35 @@ impl IntegratedNoise {
             }
         }
 
+        // Rank before rounding powers to f64: distinct tiny or huge powers
+        // can materialize as the same subnormal, NaN or infinity. Stable
+        // identity tie-breaking also makes the percentage sum deterministic.
+        let mut totals = totals.into_iter().collect::<Vec<_>>();
+        totals.sort_by(
+            |(left_name, (_, left_power)), (right_name, (_, right_power))| {
+                right_power.compare_power(*left_power).then_with(|| {
+                    compare_identity((&left_name.0, &left_name.1), (&right_name.0, &right_name.1))
+                })
+            },
+        );
         let mut total_scaled = ScaledPositiveSum::default();
-        for (_, power) in totals.values() {
+        for (_, (_, power)) in &totals {
             if let Some((significand, exponent)) = power.parts() {
                 total_scaled.add_scaled(significand, exponent);
             }
         }
-        let mut summary: Vec<IntegratedContribution> = totals
+        totals
             .into_iter()
             .map(
-                |((device_name, mechanism), (noise_type, integrated_power))| {
-                    let percentage = integrated_power.percentage_of(total_scaled);
-                    let integrated_power = integrated_power.value();
-                    IntegratedContribution {
-                        device_name,
-                        mechanism,
-                        noise_type,
-                        integrated_power,
-                        percentage,
-                    }
+                |((device_name, mechanism), (noise_type, power))| IntegratedContribution {
+                    device_name,
+                    mechanism,
+                    noise_type,
+                    integrated_power: power.value(),
+                    percentage: power.percentage_of(total_scaled),
                 },
             )
-            .collect();
-        summary.sort_by(|x, y| {
-            y.integrated_power
-                .total_cmp(&x.integrated_power)
-                .then_with(|| {
-                    x.device_name
-                        .to_ascii_lowercase()
-                        .cmp(&y.device_name.to_ascii_lowercase())
-                })
-                .then_with(|| {
-                    x.mechanism
-                        .to_ascii_lowercase()
-                        .cmp(&y.mechanism.to_ascii_lowercase())
-                })
-                .then_with(|| x.device_name.cmp(&y.device_name))
-                .then_with(|| x.mechanism.cmp(&y.mechanism))
-        });
-        summary
+            .collect()
     }
 
     /// Calculate integrated input-referred noise (V RMS)
@@ -2254,6 +2256,78 @@ mod summary_tests {
                     percentage: 0.0,
                 },
             ],
+        }
+    }
+
+    #[test]
+    fn contribution_report_rounds_positive_subnormal_power() {
+        let minimum = Value::from_bits(1);
+        for (units, expected_units) in [
+            (3_u64, Some(1)),
+            (5, Some(1)),
+            (7, Some(2)),
+            (2, None),
+            (0, Some(0)),
+        ] {
+            let density = Value::from_bits(units);
+            let source = NoiseContribution {
+                identity: NoiseSourceIdentity::device("R1"),
+                noise_type: NoiseSourceType::Thermal,
+                output_contribution: density,
+                input_contribution: density,
+                percentage: 100.0,
+            };
+            // A triangular PSD over 0.5 Hz has power density/4. In
+            // particular, 3*minimum/4 rounds to minimum, not zero or NaN.
+            let summary = IntegratedNoise::new(vec![
+                custom_result(0.0, density, density, vec![source]),
+                custom_result(0.5, 0.0, 0.0, Vec::new()),
+            ])
+            .contribution_summary();
+            let power = summary[0].integrated_power;
+            if let Some(expected_units) = expected_units {
+                assert_eq!(power, expected_units as Value * minimum);
+            } else {
+                assert!(
+                    power.is_nan(),
+                    "a positive power rounding to zero stays explicit"
+                );
+            }
+            assert_eq!(summary[0].percentage, if units == 0 { 0.0 } else { 100.0 });
+        }
+    }
+
+    #[test]
+    fn contribution_report_ranks_before_materializing_power() {
+        for (small, large, width) in [
+            (1e300, 2e300, 1e100),
+            (1e-300, 2e-300, 1e-300),
+            (Value::from_bits(3), Value::from_bits(4), 0.25),
+            (1e-300, 1e100, 1e-100),
+        ] {
+            let sources = [("A", small), ("Z", large)].map(|(name, density)| NoiseContribution {
+                identity: NoiseSourceIdentity::device(name),
+                noise_type: NoiseSourceType::Thermal,
+                output_contribution: density,
+                input_contribution: density,
+                percentage: 0.0,
+            });
+            let total_density = small + large;
+            let summary = IntegratedNoise::new(vec![
+                custom_result(0.0, total_density, total_density, sources.to_vec()),
+                custom_result(width, total_density, total_density, sources.to_vec()),
+            ])
+            .contribution_summary();
+            assert_eq!(
+                summary
+                    .iter()
+                    .map(|row| row.device_name.as_str())
+                    .collect::<Vec<_>>(),
+                ["Z", "A"],
+                "{small:e}, {large:e} over {width:e}"
+            );
+            let expected_share = 100.0 / (1.0 + small / large);
+            assert!((summary[0].percentage - expected_share).abs() < 3e-14);
         }
     }
 

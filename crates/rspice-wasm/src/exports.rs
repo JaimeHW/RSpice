@@ -209,6 +209,48 @@ mod wasm_tests {
     use crate::js_interop::{js_array_property, js_property};
 
     #[wasm_bindgen_test]
+    fn integrated_noise_contribution_range_and_ranking_in_wasm() {
+        use rspice_core::analysis::{
+            IntegratedNoise, NoiseContribution, NoiseResult, NoiseSourceIdentity, NoiseSourceType,
+        };
+        for (small, large, width) in [
+            (1e300, 2e300, 1e100),
+            (f64::from_bits(3), f64::from_bits(4), 0.25),
+        ] {
+            let left = NoiseResult {
+                frequency: 0.0,
+                node_names: Vec::new(),
+                branch_names: Vec::new(),
+                voltages: Vec::new(),
+                currents: Vec::new(),
+                output_noise_density: small + large,
+                input_referred_density: small + large,
+                input_gain_squared: 1.0,
+                contribution_catalog: Vec::new(),
+                mechanisms_unavailable: Vec::new(),
+                contributions: [("A", small), ("Z", large)]
+                    .map(|(name, density)| NoiseContribution {
+                        identity: NoiseSourceIdentity::device(name),
+                        noise_type: NoiseSourceType::Thermal,
+                        output_contribution: density,
+                        input_contribution: density,
+                        percentage: 0.0,
+                    })
+                    .to_vec(),
+            };
+            let mut right = left.clone();
+            right.frequency = width;
+            let rows = IntegratedNoise::new(vec![left, right]).contribution_summary();
+            assert_eq!(rows[0].device_name, "Z");
+            assert!((rows[0].percentage - 100.0 / (1.0 + small / large)).abs() < 3e-14);
+            if width == 0.25 {
+                assert_eq!(rows[0].integrated_power, f64::from_bits(1));
+                assert_eq!(rows[1].integrated_power, f64::from_bits(1));
+            }
+        }
+    }
+
+    #[wasm_bindgen_test]
     fn phase_noise_spot_and_sideband_range_in_wasm() {
         use rspice_core::analysis::pnoise::{PhaseNoisePoint, PnoiseResult};
         let mut result = PnoiseResult::new(1e6, "out");
