@@ -85,13 +85,13 @@ pub struct PacConfig {
     /// Publish the sideband-zero spectra. The lifted system always spans
     /// `sideband_min..=sideband_max`, because dropping a sideband from it
     /// would change the answer at the sidebands that remain; this selects
-    /// what the result reports, and travels on [`PacResult::include_dc`].
+    /// what the result reports, and travels on [`super::PacResult::include_dc`].
     pub include_dc: bool,
 
     /// Amplitude of the small-signal drive applied at `input_source`, in the
     /// source's own unit. The solve itself uses a unit excitation so the
     /// conversion matrix stays a transfer function; the amplitude travels on
-    /// [`PacResult::pac_magnitude`] and scales the published responses.
+    /// [`super::PacResult::pac_magnitude`] and scales the published responses.
     pub pac_magnitude: Value,
 
     /// Fundamental frequency from PSS (will be set from PSS result)

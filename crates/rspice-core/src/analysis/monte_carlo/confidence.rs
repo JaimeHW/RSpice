@@ -1,7 +1,7 @@
 //! Mean uncertainty estimators. Student-t limits follow the NIST engineering
-//! statistics handbook: https://www.itl.nist.gov/div898/handbook/eda/section3/eda352.htm.
+//! statistics handbook: <https://www.itl.nist.gov/div898/handbook/eda/section3/eda352.htm>.
 //! The incomplete beta evaluation uses the continued fraction in DLMF 8.17:
-//! https://dlmf.nist.gov/8.17#v.
+//! <https://dlmf.nist.gov/8.17#v>.
 
 use super::{
     CompensatedSum, MonteCarloResult, VariableStatistics, Xorshift128Plus,

@@ -113,7 +113,8 @@ impl Engine {
     ///
     /// The card describes a periodic AC solve and one path through its
     /// conversion matrix; this runs that solve and reads that path. The
-    /// element is taken straight from [`ConversionMatrix::get_transfer`],
+    /// element is taken straight from
+    /// [`crate::analysis::pac::ConversionMatrix::get_transfer`],
     /// which is the only code that knows how a sideband pair maps onto the
     /// matrix's storage — reassembling the matrix into a dense cube first, as
     /// a caller once did, both costs `O(F*S^2)` and re-states that mapping in
