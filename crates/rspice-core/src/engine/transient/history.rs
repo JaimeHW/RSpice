@@ -63,14 +63,10 @@ pub(super) const BJT_VEI_STATE_INDEX: usize = 4;
 pub(super) const BJT_VBP_STATE_INDEX: usize = 5;
 pub(super) const BJT_VSI_STATE_INDEX: usize = 6;
 pub(super) const BJT_THERMAL_STATE_INDEX: usize = BJT_INTERNAL_STATE_DIM - 3;
-pub(super) const BJT_DELAY_XF1_BRANCH_INDEX: usize = BJT_DYNAMIC_CHARGE_COUNT - 2;
-pub(super) const BJT_DELAY_XF2_BRANCH_INDEX: usize = BJT_DYNAMIC_CHARGE_COUNT - 1;
 pub(super) const BJT_QBE_BRANCH_INDEX: usize = 0;
 pub(super) const BJT_QBC_BRANCH_INDEX: usize = 2;
 pub(super) const BJT_QBCX_BRANCH_INDEX: usize = 3;
 pub(super) const BJT_QBCP_BRANCH_INDEX: usize = 7;
-pub(super) const BJT_DELAY_XF1_STATE_INDEX: usize = BJT_INTERNAL_STATE_DIM - 2;
-pub(super) const BJT_DELAY_XF2_STATE_INDEX: usize = BJT_INTERNAL_STATE_DIM - 1;
 pub(super) const BJT_STATIC_CORE_STATE_DIM: usize = BJT_INTERNAL_STATE_DIM - 2;
 pub(super) const BJT_EXT_C_INDEX: usize = 0;
 pub(super) const BJT_EXT_B_INDEX: usize = 1;
@@ -226,8 +222,8 @@ pub(in crate::engine) struct BjtTransientHistory {
     pub(super) accepted_terminal_currents: Vec<Option<[Value; BJT_EXTERNAL_STATE_DIM]>>,
     pub(super) dynamic_internal_prev: Vec<[Value; BJT_INTERNAL_STATE_DIM]>,
     pub(super) dynamic_internal_prev_prev: Vec<[Value; BJT_INTERNAL_STATE_DIM]>,
-    pub(super) dynamic_linear_prev: Vec<VbicPredictorLinearBranchState>,
-    pub(super) dynamic_linear_prev_prev: Vec<VbicPredictorLinearBranchState>,
+    pub(super) dynamic_linear_prev: Vec<BjtPredictorLinearBranchState>,
+    pub(super) dynamic_linear_prev_prev: Vec<BjtPredictorLinearBranchState>,
     pub(super) accepted_dt_prev: Value,
     pub(super) accepted_dt_prev_prev: Value,
 }
@@ -295,7 +291,7 @@ pub(super) struct TrapezoidalOrderTrial {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub(super) struct VbicTransientLinearization {
+pub(super) struct BjtTransientLinearization {
     pub(super) g_ii: [[Value; BJT_INTERNAL_STATE_DIM]; BJT_INTERNAL_STATE_DIM],
     pub(super) g_ie: [[Value; BJT_EXTERNAL_STATE_DIM]; BJT_INTERNAL_STATE_DIM],
     pub(super) g_ei: [[Value; BJT_INTERNAL_STATE_DIM]; BJT_EXTERNAL_STATE_DIM],
@@ -305,7 +301,7 @@ pub(super) struct VbicTransientLinearization {
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
-pub(super) struct VbicPredictorLinearBranchState {
+pub(super) struct BjtPredictorLinearBranchState {
     pub(super) vrcx: Value,
     pub(super) vrci: Value,
     pub(super) vrbx: Value,
@@ -1037,7 +1033,7 @@ D1 b 0 DM
             }))],
             dynamic_internal_prev: vec![std::array::from_fn(|index| 100.0 + index as Value)],
             dynamic_internal_prev_prev: vec![std::array::from_fn(|index| 130.0 + index as Value)],
-            dynamic_linear_prev: vec![VbicPredictorLinearBranchState {
+            dynamic_linear_prev: vec![BjtPredictorLinearBranchState {
                 vrcx: 160.0,
                 vrci: 161.0,
                 vrbx: 162.0,
@@ -1046,7 +1042,7 @@ D1 b 0 DM
                 vrbp: 165.0,
                 vrs: 166.0,
             }],
-            dynamic_linear_prev_prev: vec![VbicPredictorLinearBranchState {
+            dynamic_linear_prev_prev: vec![BjtPredictorLinearBranchState {
                 vrcx: 170.0,
                 vrci: 171.0,
                 vrbx: 172.0,

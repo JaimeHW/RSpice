@@ -407,8 +407,8 @@ mod truncation;
 use truncation::{
     NgspiceChargeTruncationContext, NgspiceTruncationTolerances, TruncationStep, VoltageLteConfig,
 };
-mod vbic;
-use vbic::{VbicChargeStep, VbicPredictorHistory};
+mod bjt;
+use bjt::{BjtChargeStep, BjtPredictorHistory};
 
 pub use self::{
     checkpoint::{

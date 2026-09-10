@@ -394,10 +394,10 @@ impl Engine {
                 history.dynamic_internal_prev_prev.push(internal);
                 history
                     .dynamic_linear_prev
-                    .push(VbicPredictorLinearBranchState::default());
+                    .push(BjtPredictorLinearBranchState::default());
                 history
                     .dynamic_linear_prev_prev
-                    .push(VbicPredictorLinearBranchState::default());
+                    .push(BjtPredictorLinearBranchState::default());
                 continue;
             }
 
@@ -424,7 +424,7 @@ impl Engine {
             charge_values[BJT_QBC_BRANCH_INDEX] = charges.qbc;
             charge_values[BJT_QBCX_BRANCH_INDEX] = charges.qbx;
             charge_values[BJT_QBCP_BRANCH_INDEX] = charges.qcs;
-            let predictor_linear = Self::vbic_predictor_linear_branch_state(
+            let predictor_linear = Self::bjt_predictor_linear_branch_state(
                 bjt,
                 [vc, vb, ve, vs],
                 charge_snapshot.reduction.internal_voltages,
@@ -939,14 +939,14 @@ impl Engine {
             let Some(snapshot) = Self::resolve_legacy_bjt_transient_snapshot(
                 bjt,
                 [vc, vb, ve, vs],
-                VbicChargeStep {
+                BjtChargeStep {
                     coeff,
                     dt,
                     q_prev: &history.charge_q_prev[idx],
                     q_prev_prev: &history.charge_q_prev_prev[idx],
                     cq_prev: &history.charge_cq_prev[idx],
                 },
-                VbicPredictorHistory {
+                BjtPredictorHistory {
                     internal_prev: history.dynamic_internal_prev.get(idx),
                     linear_prev: history.dynamic_linear_prev.get(idx),
                     linear_prev_prev: history.dynamic_linear_prev_prev.get(idx),
@@ -965,10 +965,10 @@ impl Engine {
                 vbic_snapshot_cache[idx] = None;
                 continue;
             }
-            let Some(linearization) = Self::assemble_vbic_transient_linearization(
+            let Some(linearization) = Self::assemble_legacy_bjt_transient_linearization(
                 bjt,
                 &snapshot,
-                VbicChargeStep {
+                BjtChargeStep {
                     coeff,
                     dt,
                     q_prev: &history.charge_q_prev[idx],
@@ -983,10 +983,10 @@ impl Engine {
                 )));
             };
             let (base_static_g, base_static_i_eq) =
-                Self::vbic_static_stamped_external_system(bjt, &[vc, vb, ve, vs]);
+                Self::bjt_static_stamped_external_system(bjt, &[vc, vb, ve, vs]);
             vbic_snapshot_cache[idx] = Some(snapshot);
             let Some((mut y_total, mut reduced_i_eq)) =
-                Self::vbic_reduce_transient_external_system(&linearization)
+                Self::reduce_bjt_transient_external_system(&linearization)
             else {
                 vbic_snapshot_cache[idx] = None;
                 return Err(SimulationError::Circuit(format!(
@@ -1003,7 +1003,7 @@ impl Engine {
                             bjt.name
                         ))
                     })?;
-                let previous_external = Self::vbic_external_from_linear_history(
+                let previous_external = Self::bjt_external_from_linear_history(
                     bjt,
                     &history.dynamic_internal_prev[idx],
                     &history.dynamic_linear_prev[idx],
@@ -2091,7 +2091,7 @@ mod tests {
             std::array::from_fn(|idx| 20.0 + idx as Value);
         let accepted_terminal: [Value; BJT_EXTERNAL_STATE_DIM] =
             std::array::from_fn(|idx| 30.0 + idx as Value);
-        let accepted_linear = VbicPredictorLinearBranchState {
+        let accepted_linear = BjtPredictorLinearBranchState {
             vrcx: 41.0,
             vrci: 42.0,
             vrbx: 43.0,
@@ -2118,7 +2118,7 @@ mod tests {
             dynamic_internal_prev: vec![accepted_internal],
             dynamic_internal_prev_prev: vec![[-6.0; BJT_INTERNAL_STATE_DIM]],
             dynamic_linear_prev: vec![accepted_linear],
-            dynamic_linear_prev_prev: vec![VbicPredictorLinearBranchState::default()],
+            dynamic_linear_prev_prev: vec![BjtPredictorLinearBranchState::default()],
             accepted_dt_prev: 105.0,
             accepted_dt_prev_prev: 106.0,
         };

@@ -1296,16 +1296,19 @@ mod tests {
                     );
                     let mut residual = [0.0; BJT_INTERNAL_STATE_DIM];
                     residual[..INTERNAL_DIM].copy_from_slice(&static_residual);
-                    let mut external_residual = [0.0; EXTERNAL_DIM];
-                    for branch in bjt.vbic_delay_static_branches(&reduction) {
-                        branch.accumulate_source(
-                            branch.current,
-                            &mut residual,
-                            &mut external_residual,
-                        );
-                    }
                     let heat = bjt.vbic_delay_static_thermal_branch(&reduction);
-                    heat.accumulate_source(heat.current, &mut residual, &mut external_residual);
+                    for branch in bjt
+                        .vbic_delay_static_branches(&reduction)
+                        .into_iter()
+                        .chain([heat])
+                    {
+                        for (sign, row) in [(1.0, branch.pos_internal), (-1.0, branch.neg_internal)]
+                        {
+                            if let Some(row) = row {
+                                residual[row] += sign * branch.current;
+                            }
+                        }
+                    }
                     heat.accumulate_derivatives(
                         &mut reduction.g_ii,
                         &mut reduction.g_ie,

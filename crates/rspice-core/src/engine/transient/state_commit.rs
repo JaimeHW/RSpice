@@ -262,14 +262,14 @@ impl Engine {
             let Some(snapshot) = Self::resolve_legacy_bjt_transient_snapshot(
                 bjt,
                 external,
-                VbicChargeStep {
+                BjtChargeStep {
                     coeff,
                     dt,
                     q_prev: &bjt_history.charge_q_prev[idx],
                     q_prev_prev: &bjt_history.charge_q_prev_prev[idx],
                     cq_prev: &bjt_history.charge_cq_prev[idx],
                 },
-                VbicPredictorHistory {
+                BjtPredictorHistory {
                     internal_prev: bjt_history.dynamic_internal_prev.get(idx),
                     linear_prev: bjt_history.dynamic_linear_prev.get(idx),
                     linear_prev_prev: bjt_history.dynamic_linear_prev_prev.get(idx),
@@ -293,7 +293,7 @@ impl Engine {
                 Some(Self::reduced_bjt_transient_terminal_currents(
                     bjt,
                     &snapshot,
-                    VbicChargeStep {
+                    BjtChargeStep {
                         coeff,
                         dt,
                         q_prev: &bjt_history.charge_q_prev[idx],
@@ -333,7 +333,7 @@ impl Engine {
             }
             bjt_history.dynamic_internal_prev_prev[idx] = bjt_history.dynamic_internal_prev[idx];
             bjt_history.dynamic_internal_prev[idx] = snapshot.reduction.internal_voltages;
-            let predictor_linear = Self::vbic_predictor_linear_branch_state(
+            let predictor_linear = Self::bjt_predictor_linear_branch_state(
                 bjt,
                 external,
                 snapshot.reduction.internal_voltages,

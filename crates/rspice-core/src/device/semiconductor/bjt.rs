@@ -267,26 +267,6 @@ impl BjtChargeBranch {
             || self.neg_external.is_some()
     }
 
-    pub(crate) fn linearization_dot(
-        &self,
-        internal_voltages: &[Value; BJT_INTERNAL_STATE_DIM],
-        external_voltages: &[Value; EXTERNAL_DIM],
-    ) -> Value {
-        let internal = self
-            .d_internal
-            .iter()
-            .zip(internal_voltages.iter())
-            .map(|(d, v)| d * v)
-            .sum::<Value>();
-        let external = self
-            .d_external
-            .iter()
-            .zip(external_voltages.iter())
-            .map(|(d, v)| d * v)
-            .sum::<Value>();
-        internal + external
-    }
-
     pub(crate) fn accumulate_derivatives(
         &self,
         c_ii: &mut [[Value; BJT_INTERNAL_STATE_DIM]; BJT_INTERNAL_STATE_DIM],
@@ -334,24 +314,6 @@ impl BjtChargeBranch {
             }
         }
     }
-
-    pub(crate) fn accumulate_source(
-        &self,
-        current: Value,
-        z_i: &mut [Value; BJT_INTERNAL_STATE_DIM],
-        z_e: &mut [Value; EXTERNAL_DIM],
-    ) {
-        for (sign, row) in [(1.0, self.pos_internal), (-1.0, self.neg_internal)] {
-            if let Some(row) = row {
-                z_i[row] += sign * current;
-            }
-        }
-        for (sign, row) in [(1.0, self.pos_external), (-1.0, self.neg_external)] {
-            if let Some(row) = row {
-                z_e[row] += sign * current;
-            }
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -391,24 +353,6 @@ impl BjtCurrentBranch {
             .map(|(d, v)| d * v)
             .sum::<Value>();
         internal + external
-    }
-
-    pub(crate) fn accumulate_source(
-        &self,
-        current: Value,
-        z_i: &mut [Value; BJT_INTERNAL_STATE_DIM],
-        z_e: &mut [Value; BJT_EXTERNAL_STATE_DIM],
-    ) {
-        for (sign, row) in [(1.0, self.pos_internal), (-1.0, self.neg_internal)] {
-            if let Some(row) = row {
-                z_i[row] += sign * current;
-            }
-        }
-        for (sign, row) in [(1.0, self.pos_external), (-1.0, self.neg_external)] {
-            if let Some(row) = row {
-                z_e[row] += sign * current;
-            }
-        }
     }
 
     pub(crate) fn accumulate_derivatives(

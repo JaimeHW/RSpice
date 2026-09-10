@@ -1041,14 +1041,14 @@ impl Engine {
             let snapshot = Self::resolve_legacy_bjt_transient_snapshot(
                 bjt,
                 candidate_external,
-                VbicChargeStep {
+                BjtChargeStep {
                     coeff: &coeff,
                     dt,
                     q_prev: &history.charge_q_prev[idx],
                     q_prev_prev: &history.charge_q_prev_prev[idx],
                     cq_prev: &history.charge_cq_prev[idx],
                 },
-                VbicPredictorHistory {
+                BjtPredictorHistory {
                     internal_prev: history.dynamic_internal_prev.get(idx),
                     linear_prev: history.dynamic_linear_prev.get(idx),
                     linear_prev_prev: history.dynamic_linear_prev_prev.get(idx),

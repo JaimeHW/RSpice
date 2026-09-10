@@ -93,8 +93,8 @@ use std::io::Read;
 use super::damped_status::XyceDampedAcceptedBoundaryCheckpoint;
 use super::history::RestoredJunctionTransientHistories;
 use super::{
-    AcceptedJunctionTransientHistoryCheckpoint, BjtTransientHistory, DiodeTransientHistory, Engine,
-    JfetTransientHistory, SimulationError, TransientStartupMode, VbicPredictorLinearBranchState,
+    AcceptedJunctionTransientHistoryCheckpoint, BjtPredictorLinearBranchState, BjtTransientHistory,
+    DiodeTransientHistory, Engine, JfetTransientHistory, SimulationError, TransientStartupMode,
 };
 
 const CHECKPOINT_ABORT_POLL_INTERVAL: usize = 64;
@@ -1209,7 +1209,8 @@ pub(crate) fn simulation_checkpoint_identity(config: &SimulationConfig) -> Strin
     // v74 preserves semiconductor flicker laws and configured JFET junction GMIN.
     // v84 preserves flicker density through cancellation of extreme logarithms.
     // v85 preserves private BJT node constraints and thermal bias recovery.
-    hasher.update(b"rspice-transient-resolved-config-v85\0");
+    // v86 removes environment-controlled legacy BJT transient equations.
+    hasher.update(b"rspice-transient-resolved-config-v86\0");
     hash_field(&mut hasher, "temperature", config.temperature.to_bits());
     hash_field(&mut hasher, "ramptime", config.ramptime.to_bits());
     hash_field(&mut hasher, "digital_delay_type", config.digital_delay_type);
@@ -2844,7 +2845,7 @@ fn read_accepted_junction_transient_history(
         )?;
         bjt_history
             .dynamic_linear_prev
-            .push(VbicPredictorLinearBranchState {
+            .push(BjtPredictorLinearBranchState {
                 vrcx: linear_prev[0],
                 vrci: linear_prev[1],
                 vrbx: linear_prev[2],
@@ -2861,7 +2862,7 @@ fn read_accepted_junction_transient_history(
         )?;
         bjt_history
             .dynamic_linear_prev_prev
-            .push(VbicPredictorLinearBranchState {
+            .push(BjtPredictorLinearBranchState {
                 vrcx: linear_prev_prev[0],
                 vrci: linear_prev_prev[1],
                 vrbx: linear_prev_prev[2],
@@ -9756,7 +9757,7 @@ mod tests {
     }
 
     fn sample_junction_history() -> AcceptedJunctionTransientHistoryCheckpoint {
-        let linear = |offset: Value| VbicPredictorLinearBranchState {
+        let linear = |offset: Value| BjtPredictorLinearBranchState {
             vrcx: offset + 0.01,
             vrci: offset + 0.02,
             vrbx: offset + 0.03,

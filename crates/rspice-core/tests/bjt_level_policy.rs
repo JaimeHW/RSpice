@@ -2755,6 +2755,36 @@ fn private_bjt_transient_small_instances_preserve_rc_response() {
 }
 
 #[test]
+fn private_bjt_charge_solver_cannot_be_disabled_by_obsolete_flags() {
+    let executable = std::env::current_exe().expect("integration test executable");
+    for flag in [
+        "RSPICE_LEGACY_BJT_BACKEND",
+        "RSPICE_EXPERIMENTAL_NGSPICE_BJT",
+    ] {
+        // A separate process isolates the environment and the old OnceLock.
+        // Reuse the physical RC curve across dialects, polarities and sizes.
+        let output = std::process::Command::new(&executable)
+            .args([
+                "--exact",
+                "private_bjt_transient_small_instances_preserve_rc_response",
+                "--nocapture",
+            ])
+            .env_remove("RSPICE_LEGACY_BJT_BACKEND")
+            .env_remove("RSPICE_EXPERIMENTAL_NGSPICE_BJT")
+            .env(flag, "0")
+            .output()
+            .expect("run isolated private-charge regression");
+        assert!(
+            output.status.success()
+                && String::from_utf8_lossy(&output.stdout).contains("test result: ok. 1 passed"),
+            "{flag}=0 changed the physical RC response:\n{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+        );
+    }
+}
+
+#[test]
 fn xyce_private_bjt_transient_matches_explicit_base_resistor() {
     let mut config = SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce);
     config.convergence_config.gmin_target = 0.0;

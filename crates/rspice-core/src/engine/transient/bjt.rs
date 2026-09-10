@@ -9,7 +9,7 @@ use crate::device::BjtType;
 /// against. A solve that had four of these and not the fifth would be
 /// integrating against a step it was not built for, so they travel together.
 #[derive(Clone, Copy)]
-pub(in crate::engine::transient) struct VbicChargeStep<'a> {
+pub(in crate::engine::transient) struct BjtChargeStep<'a> {
     pub coeff: &'a CompanionCoefficients,
     pub dt: Value,
     pub q_prev: &'a [Value; BJT_DYNAMIC_CHARGE_COUNT],
@@ -20,10 +20,10 @@ pub(in crate::engine::transient) struct VbicChargeStep<'a> {
 /// Accepted state for the private BJT predictor: the latest internal nodes,
 /// the previous two linear branch states, and the step size separating them.
 #[derive(Clone, Copy)]
-pub(in crate::engine::transient) struct VbicPredictorHistory<'a> {
+pub(in crate::engine::transient) struct BjtPredictorHistory<'a> {
     pub internal_prev: Option<&'a [Value; BJT_INTERNAL_STATE_DIM]>,
-    pub linear_prev: Option<&'a VbicPredictorLinearBranchState>,
-    pub linear_prev_prev: Option<&'a VbicPredictorLinearBranchState>,
+    pub linear_prev: Option<&'a BjtPredictorLinearBranchState>,
+    pub linear_prev_prev: Option<&'a BjtPredictorLinearBranchState>,
     pub previous_dt: Value,
 }
 
@@ -32,7 +32,7 @@ pub(in crate::engine::transient) struct VbicPredictorHistory<'a> {
 /// current vectors that go with them. A branch always writes the block its
 /// terminals fall in and the vector on that side, so the six are one
 /// destination, not six.
-pub(in crate::engine::transient) struct VbicCompanionSystem<'a> {
+pub(in crate::engine::transient) struct BjtCompanionSystem<'a> {
     pub g_ii: &'a mut [[Value; BJT_INTERNAL_STATE_DIM]; BJT_INTERNAL_STATE_DIM],
     pub g_ie: &'a mut [[Value; BJT_EXTERNAL_STATE_DIM]; BJT_INTERNAL_STATE_DIM],
     pub g_ei: &'a mut [[Value; BJT_INTERNAL_STATE_DIM]; BJT_EXTERNAL_STATE_DIM],
@@ -41,5 +41,5 @@ pub(in crate::engine::transient) struct VbicCompanionSystem<'a> {
     pub z_e: &'a mut [Value; BJT_EXTERNAL_STATE_DIM],
 }
 
-mod continuation;
 mod linearization;
+mod snapshot;

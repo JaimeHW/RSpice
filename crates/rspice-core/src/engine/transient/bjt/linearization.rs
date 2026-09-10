@@ -5,186 +5,12 @@ use super::*;
 
 impl Engine {
     #[inline]
-    pub(in crate::engine::transient) fn assemble_vbic_transient_linearization(
+    pub(in crate::engine::transient) fn assemble_legacy_bjt_transient_linearization(
         bjt: &crate::device::Bjt,
         snapshot: &crate::device::semiconductor::BjtChargeSnapshot,
-        step: VbicChargeStep<'_>,
-    ) -> Option<VbicTransientLinearization> {
-        let VbicChargeStep {
-            coeff,
-            dt,
-            q_prev,
-            q_prev_prev,
-            cq_prev,
-        } = step;
-        let charge_factor = Self::jfet_companion_geq(coeff, 1.0, dt);
-        if charge_factor <= 0.0 {
-            return None;
-        }
-
-        if !bjt.uses_vbic_dynamic_charges() && Self::legacy_bjt_ngspice_backend_enabled() {
-            return Self::assemble_legacy_bjt_ngspice_transient_linearization(
-                bjt,
-                snapshot,
-                VbicChargeStep {
-                    coeff,
-                    dt,
-                    q_prev,
-                    q_prev_prev,
-                    cq_prev,
-                },
-            );
-        }
-
-        let mut g_ii = snapshot.reduction.g_ii;
-        let mut g_ie = snapshot.reduction.g_ie;
-        let mut g_ei = snapshot.reduction.g_ei;
-        let mut g_ee = snapshot.reduction.g_ee;
-        let mut c_ii = [[0.0; BJT_INTERNAL_STATE_DIM]; BJT_INTERNAL_STATE_DIM];
-        let mut c_ie = [[0.0; BJT_EXTERNAL_STATE_DIM]; BJT_INTERNAL_STATE_DIM];
-        let mut c_ei = [[0.0; BJT_INTERNAL_STATE_DIM]; BJT_EXTERNAL_STATE_DIM];
-        let mut c_ee = [[0.0; BJT_EXTERNAL_STATE_DIM]; BJT_EXTERNAL_STATE_DIM];
-        let mut z_i = snapshot.reduction.z_i_static;
-        let mut z_e = snapshot.reduction.z_e_static;
-        let mut has_dynamic_charge = false;
-        let use_vbic_dynamic_charges = bjt.uses_vbic_dynamic_charges();
-
-        if use_vbic_dynamic_charges {
-            for branch in bjt.vbic_delay_static_branches(&snapshot.reduction) {
-                if !branch.is_active() {
-                    continue;
-                }
-                let i_eq = branch.linearization_dot(
-                    &snapshot.reduction.internal_voltages,
-                    &snapshot.reduction.external_voltages,
-                ) - branch.current;
-                branch.accumulate_source(i_eq, &mut z_i, &mut z_e);
-            }
-            let thermal_branch = bjt.vbic_delay_static_thermal_branch(&snapshot.reduction);
-            if thermal_branch.is_active() {
-                // The dynamic reduction already carries the collector/emitter and xf delay
-                // branch Jacobians. The excess-phase thermal-power correction is a separate
-                // delta branch that must be stamped here to keep the temperature row
-                // consistent with the delayed transport path.
-                thermal_branch.accumulate_derivatives(&mut g_ii, &mut g_ie, &mut g_ei, &mut g_ee);
-                let i_eq = thermal_branch.linearization_dot(
-                    &snapshot.reduction.internal_voltages,
-                    &snapshot.reduction.external_voltages,
-                ) - thermal_branch.current;
-                thermal_branch.accumulate_source(i_eq, &mut z_i, &mut z_e);
-            }
-        }
-
-        for (branch_idx, full_branch) in snapshot.branches.iter().enumerate() {
-            let (branch, ccap_history_sign) = if use_vbic_dynamic_charges {
-                let Some(branch) =
-                    Self::vbic_transient_owning_charge_branch(bjt, branch_idx, full_branch)
-                else {
-                    continue;
-                };
-                (
-                    branch,
-                    Self::vbic_transient_owning_charge_ccap_sign(bjt, branch_idx),
-                )
-            } else {
-                if !full_branch.is_active() {
-                    continue;
-                }
-                // Legacy private KCL rows balance entering current, while
-                // external rows balance leaving current. Retain the complete
-                // charge gradient and reverse only the private incidence.
-                (
-                    BjtChargeBranch {
-                        pos_internal: full_branch.neg_internal,
-                        neg_internal: full_branch.pos_internal,
-                        ..*full_branch
-                    },
-                    1.0,
-                )
-            };
-            branch.accumulate_derivatives(&mut c_ii, &mut c_ie, &mut c_ei, &mut c_ee);
-            let cq_curr = Self::jfet_companion_ccap(
-                coeff,
-                dt,
-                branch.charge,
-                BranchChargeHistory {
-                    q_prev: q_prev[branch_idx],
-                    q_prev_prev: q_prev_prev[branch_idx],
-                    cq_prev: cq_prev[branch_idx],
-                },
-            );
-            let i_eq = charge_factor
-                * branch.linearization_dot(
-                    &snapshot.reduction.internal_voltages,
-                    &snapshot.reduction.external_voltages,
-                )
-                - ccap_history_sign * cq_curr;
-            branch.accumulate_source(i_eq, &mut z_i, &mut z_e);
-            has_dynamic_charge = true;
-        }
-
-        if !has_dynamic_charge {
-            return None;
-        }
-
-        for row in 0..BJT_INTERNAL_STATE_DIM {
-            for col in 0..BJT_INTERNAL_STATE_DIM {
-                g_ii[row][col] += charge_factor * c_ii[row][col];
-            }
-            for col in 0..BJT_EXTERNAL_STATE_DIM {
-                g_ie[row][col] += charge_factor * c_ie[row][col];
-            }
-        }
-        for row in 0..BJT_EXTERNAL_STATE_DIM {
-            for col in 0..BJT_INTERNAL_STATE_DIM {
-                g_ei[row][col] += charge_factor * c_ei[row][col];
-            }
-            for col in 0..BJT_EXTERNAL_STATE_DIM {
-                g_ee[row][col] += charge_factor * c_ee[row][col];
-            }
-        }
-
-        Some(VbicTransientLinearization {
-            g_ii,
-            g_ie,
-            g_ei,
-            g_ee,
-            z_i,
-            z_e,
-        })
-    }
-
-    #[inline]
-    pub(in crate::engine::transient) fn legacy_bjt_ngspice_backend_enabled() -> bool {
-        static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-        *ENABLED.get_or_init(|| {
-            // The ngspice-compatible path is the production backend for legacy
-            // Gummel-Poon BJTs. Keep an opt-out for bisecting numerical issues.
-            let configured = std::env::var("RSPICE_LEGACY_BJT_BACKEND")
-                .or_else(|_| std::env::var("RSPICE_EXPERIMENTAL_NGSPICE_BJT"));
-            configured
-                .ok()
-                .and_then(|value| Self::parse_legacy_bjt_backend_flag(&value))
-                .unwrap_or(true)
-        })
-    }
-
-    #[inline]
-    fn parse_legacy_bjt_backend_flag(value: &str) -> Option<bool> {
-        match value.trim() {
-            "1" | "true" | "TRUE" | "yes" | "YES" | "on" | "ON" => Some(true),
-            "0" | "false" | "FALSE" | "no" | "NO" | "off" | "OFF" => Some(false),
-            _ => None,
-        }
-    }
-
-    #[inline]
-    pub(in crate::engine::transient) fn assemble_legacy_bjt_ngspice_transient_linearization(
-        bjt: &crate::device::Bjt,
-        snapshot: &crate::device::semiconductor::BjtChargeSnapshot,
-        step: VbicChargeStep<'_>,
-    ) -> Option<VbicTransientLinearization> {
-        let VbicChargeStep {
+        step: BjtChargeStep<'_>,
+    ) -> Option<BjtTransientLinearization> {
+        let BjtChargeStep {
             coeff,
             dt,
             q_prev,
@@ -236,7 +62,7 @@ impl Engine {
                 BJT_VEI_STATE_INDEX,
                 geqbe,
                 i_eq,
-                VbicCompanionSystem {
+                BjtCompanionSystem {
                     g_ii: &mut g_ii,
                     g_ie: &mut g_ie,
                     g_ei: &mut g_ei,
@@ -261,7 +87,7 @@ impl Engine {
                     BJT_VCI_STATE_INDEX,
                     geqcb,
                     i_eq,
-                    VbicCompanionSystem {
+                    BjtCompanionSystem {
                         g_ii: &mut g_ii,
                         g_ie: &mut g_ie,
                         g_ei: &mut g_ei,
@@ -299,7 +125,7 @@ impl Engine {
                 BJT_VCI_STATE_INDEX,
                 geqbc,
                 i_eq,
-                VbicCompanionSystem {
+                BjtCompanionSystem {
                     g_ii: &mut g_ii,
                     g_ie: &mut g_ie,
                     g_ei: &mut g_ei,
@@ -328,7 +154,7 @@ impl Engine {
                 &qbx_branch,
                 geqbx,
                 i_eq,
-                VbicCompanionSystem {
+                BjtCompanionSystem {
                     g_ii: &mut g_ii,
                     g_ie: &mut g_ie,
                     g_ei: &mut g_ei,
@@ -357,7 +183,7 @@ impl Engine {
                 &qcs_branch,
                 geqcs,
                 i_eq,
-                VbicCompanionSystem {
+                BjtCompanionSystem {
                     g_ii: &mut g_ii,
                     g_ie: &mut g_ie,
                     g_ei: &mut g_ei,
@@ -369,7 +195,7 @@ impl Engine {
             has_dynamic_charge = true;
         }
 
-        has_dynamic_charge.then_some(VbicTransientLinearization {
+        has_dynamic_charge.then_some(BjtTransientLinearization {
             g_ii,
             g_ie,
             g_ei,
@@ -395,9 +221,9 @@ impl Engine {
         control_neg_internal: usize,
         geq: Value,
         i_eq: Value,
-        system: VbicCompanionSystem<'_>,
+        system: BjtCompanionSystem<'_>,
     ) {
-        let VbicCompanionSystem {
+        let BjtCompanionSystem {
             g_ii,
             g_ie,
             g_ei,
@@ -411,7 +237,7 @@ impl Engine {
             control_neg_internal,
             geq,
             i_eq,
-            VbicCompanionSystem {
+            BjtCompanionSystem {
                 g_ii,
                 g_ie,
                 g_ei,
@@ -429,9 +255,9 @@ impl Engine {
         control_neg_internal: usize,
         transconductance: Value,
         i_eq: Value,
-        system: VbicCompanionSystem<'_>,
+        system: BjtCompanionSystem<'_>,
     ) {
-        let VbicCompanionSystem {
+        let BjtCompanionSystem {
             g_ii,
             g_ie,
             g_ei,
@@ -448,7 +274,7 @@ impl Engine {
             &d_internal,
             &d_external,
             i_eq,
-            VbicCompanionSystem {
+            BjtCompanionSystem {
                 g_ii,
                 g_ie,
                 g_ei,
@@ -464,9 +290,9 @@ impl Engine {
         branch: &BjtChargeBranch,
         transconductance: Value,
         i_eq: Value,
-        system: VbicCompanionSystem<'_>,
+        system: BjtCompanionSystem<'_>,
     ) {
-        let VbicCompanionSystem {
+        let BjtCompanionSystem {
             g_ii,
             g_ie,
             g_ei,
@@ -495,7 +321,7 @@ impl Engine {
             &d_internal,
             &d_external,
             i_eq,
-            VbicCompanionSystem {
+            BjtCompanionSystem {
                 g_ii,
                 g_ie,
                 g_ei,
@@ -527,9 +353,9 @@ impl Engine {
         d_internal: &[Value; BJT_INTERNAL_STATE_DIM],
         d_external: &[Value; BJT_EXTERNAL_STATE_DIM],
         i_eq: Value,
-        system: VbicCompanionSystem<'_>,
+        system: BjtCompanionSystem<'_>,
     ) {
-        let VbicCompanionSystem {
+        let BjtCompanionSystem {
             g_ii,
             g_ie,
             g_ei,
@@ -574,194 +400,8 @@ impl Engine {
     }
 
     #[inline]
-    pub(in crate::engine::transient) fn vbic_transient_owning_charge_branch(
-        bjt: &crate::device::Bjt,
-        branch_idx: usize,
-        branch: &BjtChargeBranch,
-    ) -> Option<BjtChargeBranch> {
-        if !branch.is_active() {
-            return None;
-        }
-
-        let p = match bjt.bjt_type {
-            crate::device::BjtType::Npn => 1.0,
-            crate::device::BjtType::Pnp => -1.0,
-        };
-        match branch_idx {
-            // ngspice transient integrates Qbe only against Vbei and injects the
-            // resulting companion into the Ibe equation. The matrix stamp remains
-            // a positive two-terminal conductance for both NPN and PNP; VBICtype
-            // only changes the RHS current orientation.
-            0 => Self::vbic_branch_voltage_charge_branch(
-                branch.charge,
-                branch.pos_internal,
-                branch.neg_internal,
-                branch.pos_external,
-                branch.neg_external,
-                1.0,
-                -p * branch.d_internal[BJT_VEI_STATE_INDEX],
-            ),
-            // Qbex is integrated only against Vbex.
-            1 => Self::vbic_branch_voltage_charge_branch(
-                branch.charge,
-                branch.pos_internal,
-                branch.neg_internal,
-                branch.pos_external,
-                branch.neg_external,
-                1.0,
-                -p * branch.d_internal[BJT_VEI_STATE_INDEX],
-            ),
-            // Qbc is integrated only against Vbci.
-            2 => Self::vbic_branch_voltage_charge_branch(
-                branch.charge,
-                branch.pos_internal,
-                branch.neg_internal,
-                branch.pos_external,
-                branch.neg_external,
-                1.0,
-                -p * branch.d_internal[BJT_VCI_STATE_INDEX],
-            ),
-            // Qbcx is integrated only against Vbcx.
-            3 => Self::vbic_branch_voltage_charge_branch(
-                branch.charge,
-                branch.pos_internal,
-                branch.neg_internal,
-                branch.pos_external,
-                branch.neg_external,
-                1.0,
-                -p * branch.d_internal[BJT_VCX_STATE_INDEX],
-            ),
-            // Qbep is integrated only against Vbep.
-            4 => Self::vbic_branch_voltage_charge_branch(
-                branch.charge,
-                branch.pos_internal,
-                branch.neg_internal,
-                branch.pos_external,
-                branch.neg_external,
-                1.0,
-                -p * branch.d_internal[BJT_VBP_STATE_INDEX],
-            ),
-            // Qbeo is integrated only against the external Vbe branch voltage.
-            5 => Self::vbic_branch_voltage_charge_branch(
-                branch.charge,
-                branch.pos_internal,
-                branch.neg_internal,
-                branch.pos_external,
-                branch.neg_external,
-                1.0,
-                -p * branch.d_external[BJT_EXT_E_INDEX],
-            ),
-            // Qbco is integrated only against the external Vbc branch voltage.
-            6 => Self::vbic_branch_voltage_charge_branch(
-                branch.charge,
-                branch.pos_internal,
-                branch.neg_internal,
-                branch.pos_external,
-                branch.neg_external,
-                1.0,
-                -p * branch.d_external[BJT_EXT_C_INDEX],
-            ),
-            // Qbcp is integrated only against Vbcp.
-            7 => Self::vbic_branch_voltage_charge_branch(
-                branch.charge,
-                branch.pos_internal,
-                branch.neg_internal,
-                branch.pos_external,
-                branch.neg_external,
-                1.0,
-                -p * branch.d_internal[BJT_VBP_STATE_INDEX],
-            ),
-            // Qcth, Qxf1, and Qxf2 are single-state companions in ngspice.
-            idx if idx == BJT_DYNAMIC_CHARGE_COUNT - 3 => Self::vbic_branch_voltage_charge_branch(
-                branch.charge,
-                branch.pos_internal,
-                branch.neg_internal,
-                branch.pos_external,
-                branch.neg_external,
-                1.0,
-                branch.d_internal[BJT_THERMAL_STATE_INDEX],
-            ),
-            idx if idx == BJT_DELAY_XF1_BRANCH_INDEX => Self::vbic_branch_voltage_charge_branch(
-                branch.charge,
-                branch.pos_internal,
-                branch.neg_internal,
-                branch.pos_external,
-                branch.neg_external,
-                1.0,
-                branch.d_internal[BJT_DELAY_XF1_STATE_INDEX],
-            ),
-            idx if idx == BJT_DELAY_XF2_BRANCH_INDEX => Self::vbic_branch_voltage_charge_branch(
-                branch.charge,
-                branch.pos_internal,
-                branch.neg_internal,
-                branch.pos_external,
-                branch.neg_external,
-                1.0,
-                branch.d_internal[BJT_DELAY_XF2_STATE_INDEX],
-            ),
-            _ => None,
-        }
-    }
-
-    #[inline]
-    pub(in crate::engine::transient) fn vbic_transient_owning_charge_ccap_sign(
-        bjt: &crate::device::Bjt,
-        branch_idx: usize,
-    ) -> Value {
-        let p = match bjt.bjt_type {
-            crate::device::BjtType::Npn => 1.0,
-            crate::device::BjtType::Pnp => -1.0,
-        };
-        match branch_idx {
-            // ngspice keeps the owning-capacitance matrix orientation positive for
-            // both NPN and PNP, but the companion history current enters through
-            // branch RHS terms that are multiplied by VBICtype for these branches.
-            0 | 1 | 2 | 4 | 5 | 6 | 7 => p,
-            // Qbcx, Qcth, Qxf1, and Qxf2 are stamped without VBICtype on the RHS.
-            _ => 1.0,
-        }
-    }
-
-    #[inline]
-    pub(in crate::engine::transient) fn vbic_branch_voltage_charge_branch(
-        charge: Value,
-        pos_internal: Option<usize>,
-        neg_internal: Option<usize>,
-        pos_external: Option<usize>,
-        neg_external: Option<usize>,
-        voltage_sign: Value,
-        dq_dv: Value,
-    ) -> Option<BjtChargeBranch> {
-        if !dq_dv.is_finite() || dq_dv.abs() <= 0.0 {
-            return None;
-        }
-
-        let mut branch = BjtChargeBranch {
-            charge,
-            pos_internal,
-            neg_internal,
-            pos_external,
-            neg_external,
-            ..Default::default()
-        };
-        if let Some(idx) = pos_internal {
-            branch.d_internal[idx] += voltage_sign * dq_dv;
-        }
-        if let Some(idx) = neg_internal {
-            branch.d_internal[idx] -= voltage_sign * dq_dv;
-        }
-        if let Some(idx) = pos_external {
-            branch.d_external[idx] += voltage_sign * dq_dv;
-        }
-        if let Some(idx) = neg_external {
-            branch.d_external[idx] -= voltage_sign * dq_dv;
-        }
-        Some(branch)
-    }
-
-    #[inline]
-    pub(in crate::engine::transient) fn solve_vbic_static_core_from_linearization(
-        linearization: &VbicTransientLinearization,
+    pub(in crate::engine::transient) fn solve_bjt_static_core_from_linearization(
+        linearization: &BjtTransientLinearization,
         external_voltages: &[Value; BJT_EXTERNAL_STATE_DIM],
         internal_voltages: &[Value; BJT_INTERNAL_STATE_DIM],
     ) -> Option<[Value; BJT_INTERNAL_STATE_DIM]> {
@@ -794,8 +434,8 @@ impl Engine {
     }
 
     #[inline]
-    pub(in crate::engine::transient) fn vbic_internal_equation_residual(
-        linearization: &VbicTransientLinearization,
+    pub(in crate::engine::transient) fn bjt_internal_equation_residual(
+        linearization: &BjtTransientLinearization,
         external_voltages: &[Value; BJT_EXTERNAL_STATE_DIM],
         internal_voltages: &[Value; BJT_INTERNAL_STATE_DIM],
     ) -> [Value; BJT_INTERNAL_STATE_DIM] {
@@ -818,15 +458,15 @@ impl Engine {
     }
 
     #[inline]
-    pub(in crate::engine::transient) fn vbic_dynamic_static_core_residual_norm(
+    pub(in crate::engine::transient) fn bjt_static_core_residual_norm(
         residual: &[Value; BJT_INTERNAL_STATE_DIM],
     ) -> Value {
         crate::numerics::infinity_norm(&residual[..BJT_STATIC_CORE_STATE_DIM])
     }
 
     #[inline]
-    pub(in crate::engine::transient) fn vbic_reduce_transient_external_system(
-        linearization: &VbicTransientLinearization,
+    pub(in crate::engine::transient) fn reduce_bjt_transient_external_system(
+        linearization: &BjtTransientLinearization,
     ) -> Option<(
         [[Value; BJT_EXTERNAL_STATE_DIM]; BJT_EXTERNAL_STATE_DIM],
         [Value; BJT_EXTERNAL_STATE_DIM],
@@ -888,9 +528,9 @@ impl Engine {
     pub(in crate::engine::transient) fn reduced_bjt_transient_terminal_currents(
         bjt: &crate::device::Bjt,
         snapshot: &crate::device::semiconductor::BjtChargeSnapshot,
-        step: VbicChargeStep<'_>,
+        step: BjtChargeStep<'_>,
     ) -> Result<[Value; BJT_EXTERNAL_STATE_DIM], SimulationError> {
-        let VbicChargeStep {
+        let BjtChargeStep {
             coeff,
             dt,
             q_prev,
@@ -900,10 +540,10 @@ impl Engine {
         if !snapshot.branches.iter().any(BjtChargeBranch::is_active) {
             return Ok(bjt.operating_point_terminal_currents());
         }
-        let linearization = Self::assemble_vbic_transient_linearization(
+        let linearization = Self::assemble_legacy_bjt_transient_linearization(
             bjt,
             snapshot,
-            VbicChargeStep {
+            BjtChargeStep {
                 coeff,
                 dt,
                 q_prev,
@@ -917,7 +557,7 @@ impl Engine {
                 bjt.name
             ))
         })?;
-        let (admittance, source) = Self::vbic_reduce_transient_external_system(&linearization)
+        let (admittance, source) = Self::reduce_bjt_transient_external_system(&linearization)
             .ok_or_else(|| {
                 SimulationError::Circuit(format!(
                     "BJT '{}' transient lead-current companion could not be reduced",
@@ -936,7 +576,7 @@ impl Engine {
     }
 
     #[inline]
-    pub(in crate::engine::transient) fn vbic_static_stamped_external_system(
+    pub(in crate::engine::transient) fn bjt_static_stamped_external_system(
         bjt: &crate::device::Bjt,
         external: &[Value; BJT_EXTERNAL_STATE_DIM],
     ) -> (
@@ -1006,7 +646,7 @@ mod tests {
 
     #[test]
     fn private_bjt_residual_norm_includes_invalid_equations() {
-        let mut linearization = VbicTransientLinearization {
+        let mut linearization = BjtTransientLinearization {
             g_ii: [[0.0; BJT_INTERNAL_STATE_DIM]; BJT_INTERNAL_STATE_DIM],
             g_ie: [[0.0; BJT_EXTERNAL_STATE_DIM]; BJT_INTERNAL_STATE_DIM],
             g_ei: [[0.0; BJT_INTERNAL_STATE_DIM]; BJT_EXTERNAL_STATE_DIM],
@@ -1020,9 +660,9 @@ mod tests {
             linearization.z_i = [0.0; BJT_INTERNAL_STATE_DIM];
             linearization.z_i[lane] = Value::NAN;
             let residual =
-                Engine::vbic_internal_equation_residual(&linearization, &external, &internal);
+                Engine::bjt_internal_equation_residual(&linearization, &external, &internal);
             assert_eq!(
-                Engine::vbic_dynamic_static_core_residual_norm(&residual),
+                Engine::bjt_static_core_residual_norm(&residual),
                 if lane < BJT_STATIC_CORE_STATE_DIM {
                     Value::INFINITY
                 } else {
@@ -1080,10 +720,10 @@ mod tests {
                     (CompanionCoefficients::trapezoidal(), [2.0, -2.0, 0.0, -1.0]),
                     (CompanionCoefficients::gear2(), [1.5, -2.0, 0.5, 0.0]),
                 ] {
-                    let linearization = Engine::assemble_vbic_transient_linearization(
+                    let linearization = Engine::assemble_legacy_bjt_transient_linearization(
                         &bjt,
                         &snapshot,
-                        VbicChargeStep {
+                        BjtChargeStep {
                             coeff: &coeff,
                             dt,
                             q_prev: &previous,
@@ -1150,17 +790,5 @@ mod tests {
                 }
             }
         }
-    }
-
-    #[test]
-    fn legacy_bjt_backend_flag_accepts_enable_and_disable_tokens() {
-        for value in ["1", "true", "TRUE", "yes", "YES", "on", "ON"] {
-            assert_eq!(Engine::parse_legacy_bjt_backend_flag(value), Some(true));
-        }
-        for value in ["0", "false", "FALSE", "no", "NO", "off", "OFF"] {
-            assert_eq!(Engine::parse_legacy_bjt_backend_flag(value), Some(false));
-        }
-        assert_eq!(Engine::parse_legacy_bjt_backend_flag(""), None);
-        assert_eq!(Engine::parse_legacy_bjt_backend_flag("maybe"), None);
     }
 }

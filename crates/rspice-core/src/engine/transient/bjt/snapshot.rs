@@ -4,16 +4,16 @@ use super::*;
 
 impl Engine {
     #[inline]
-    pub(in crate::engine::transient) fn vbic_predictor_linear_branch_state(
+    pub(in crate::engine::transient) fn bjt_predictor_linear_branch_state(
         bjt: &crate::device::Bjt,
         external: [Value; BJT_EXTERNAL_STATE_DIM],
         internal: [Value; BJT_INTERNAL_STATE_DIM],
-    ) -> VbicPredictorLinearBranchState {
+    ) -> BjtPredictorLinearBranchState {
         let polarity = match bjt.bjt_type {
             BjtType::Npn => 1.0,
             BjtType::Pnp => -1.0,
         };
-        VbicPredictorLinearBranchState {
+        BjtPredictorLinearBranchState {
             vrcx: polarity * (external[BJT_EXT_C_INDEX] - internal[BJT_VCX_STATE_INDEX]),
             vrci: polarity * (internal[BJT_VCX_STATE_INDEX] - internal[BJT_VCI_STATE_INDEX]),
             vrbx: polarity * (external[1] - internal[BJT_VBX_STATE_INDEX]),
@@ -25,10 +25,10 @@ impl Engine {
     }
 
     #[inline]
-    pub(in crate::engine::transient) fn vbic_external_from_linear_history(
+    pub(in crate::engine::transient) fn bjt_external_from_linear_history(
         bjt: &crate::device::Bjt,
         internal: &[Value; BJT_INTERNAL_STATE_DIM],
-        linear: &VbicPredictorLinearBranchState,
+        linear: &BjtPredictorLinearBranchState,
     ) -> [Value; BJT_EXTERNAL_STATE_DIM] {
         let polarity = match bjt.bjt_type {
             BjtType::Npn => 1.0,
@@ -45,8 +45,8 @@ impl Engine {
     fn solve_legacy_bjt_ngspice_transient_snapshot(
         bjt: &crate::device::Bjt,
         external: [Value; BJT_EXTERNAL_STATE_DIM],
-        step: VbicChargeStep<'_>,
-        predictor: VbicPredictorHistory<'_>,
+        step: BjtChargeStep<'_>,
+        predictor: BjtPredictorHistory<'_>,
         cached_snapshot: Option<BjtChargeSnapshot>,
     ) -> Option<BjtChargeSnapshot> {
         let cached_seed = cached_snapshot.map(|snapshot| snapshot.reduction.internal_voltages);
@@ -68,10 +68,10 @@ impl Engine {
     fn solve_legacy_bjt_ngspice_transient_snapshot_from_seed(
         bjt: &crate::device::Bjt,
         external: [Value; BJT_EXTERNAL_STATE_DIM],
-        step: VbicChargeStep<'_>,
+        step: BjtChargeStep<'_>,
         seed: [Value; BJT_INTERNAL_STATE_DIM],
     ) -> Option<BjtChargeSnapshot> {
-        let VbicChargeStep {
+        let BjtChargeStep {
             coeff,
             dt,
             q_prev,
@@ -80,10 +80,10 @@ impl Engine {
         } = step;
         let [vc, vb, ve, vs] = external;
         let mut snapshot = bjt.charge_snapshot_for_dynamic_state(vc, vb, ve, vs, seed);
-        let mut linearization = Self::assemble_vbic_transient_linearization(
+        let mut linearization = Self::assemble_legacy_bjt_transient_linearization(
             bjt,
             &snapshot,
-            VbicChargeStep {
+            BjtChargeStep {
                 coeff,
                 dt,
                 q_prev,
@@ -91,14 +91,14 @@ impl Engine {
                 cq_prev,
             },
         )?;
-        let residual = Self::vbic_internal_equation_residual(
+        let residual = Self::bjt_internal_equation_residual(
             &linearization,
             &snapshot.reduction.external_voltages,
             &snapshot.reduction.internal_voltages,
         );
-        let mut norm = Self::vbic_dynamic_static_core_residual_norm(&residual);
+        let mut norm = Self::bjt_static_core_residual_norm(&residual);
         for _ in 0..18 {
-            let target_internal = Self::solve_vbic_static_core_from_linearization(
+            let target_internal = Self::solve_bjt_static_core_from_linearization(
                 &linearization,
                 &snapshot.reduction.external_voltages,
                 &snapshot.reduction.internal_voltages,
@@ -133,27 +133,28 @@ impl Engine {
                 }
                 let candidate_snapshot =
                     bjt.charge_snapshot_for_dynamic_state(vc, vb, ve, vs, candidate_internal);
-                let Some(candidate_linearization) = Self::assemble_vbic_transient_linearization(
-                    bjt,
-                    &candidate_snapshot,
-                    VbicChargeStep {
-                        coeff,
-                        dt,
-                        q_prev,
-                        q_prev_prev,
-                        cq_prev,
-                    },
-                ) else {
+                let Some(candidate_linearization) =
+                    Self::assemble_legacy_bjt_transient_linearization(
+                        bjt,
+                        &candidate_snapshot,
+                        BjtChargeStep {
+                            coeff,
+                            dt,
+                            q_prev,
+                            q_prev_prev,
+                            cq_prev,
+                        },
+                    )
+                else {
                     alpha *= 0.5;
                     continue;
                 };
-                let candidate_residual = Self::vbic_internal_equation_residual(
+                let candidate_residual = Self::bjt_internal_equation_residual(
                     &candidate_linearization,
                     &candidate_snapshot.reduction.external_voltages,
                     &candidate_snapshot.reduction.internal_voltages,
                 );
-                let candidate_norm =
-                    Self::vbic_dynamic_static_core_residual_norm(&candidate_residual);
+                let candidate_norm = Self::bjt_static_core_residual_norm(&candidate_residual);
 
                 if candidate_norm.is_finite() && candidate_norm <= norm * 0.8 {
                     accepted = Some((candidate_snapshot, candidate_linearization, candidate_norm));
@@ -179,15 +180,12 @@ impl Engine {
     pub(in crate::engine::transient) fn resolve_legacy_bjt_transient_snapshot(
         bjt: &crate::device::Bjt,
         external: [Value; BJT_EXTERNAL_STATE_DIM],
-        step: VbicChargeStep<'_>,
-        predictor: VbicPredictorHistory<'_>,
+        step: BjtChargeStep<'_>,
+        predictor: BjtPredictorHistory<'_>,
         cached_snapshot: Option<BjtChargeSnapshot>,
     ) -> Option<BjtChargeSnapshot> {
         if bjt.uses_vbic_dynamic_charges() {
             return None;
-        }
-        if !Self::legacy_bjt_ngspice_backend_enabled() {
-            return Some(bjt.charge_snapshot(external[0], external[1], external[2], external[3]));
         }
 
         // Equal external voltages do not authenticate an internal charge
@@ -209,13 +207,13 @@ impl Engine {
     }
 
     #[inline]
-    pub(in crate::engine::transient) fn vbic_dynamic_internal_seed_from_linear_history(
+    pub(in crate::engine::transient) fn bjt_internal_seed_from_linear_history(
         bjt: &crate::device::Bjt,
         target_external: [Value; BJT_EXTERNAL_STATE_DIM],
         history_internal_prev: &[Value; BJT_INTERNAL_STATE_DIM],
-        history_linear_prev: &VbicPredictorLinearBranchState,
+        history_linear_prev: &BjtPredictorLinearBranchState,
     ) -> Option<[Value; BJT_INTERNAL_STATE_DIM]> {
-        Self::vbic_dynamic_internal_seed_from_predicted_linear_history(
+        Self::bjt_internal_seed_from_predicted_linear_history(
             bjt,
             target_external,
             history_internal_prev,
@@ -227,8 +225,8 @@ impl Engine {
     }
 
     #[inline]
-    pub(in crate::engine::transient) fn vbic_predictor_linear_branch_state_is_finite(
-        linear: &VbicPredictorLinearBranchState,
+    pub(in crate::engine::transient) fn bjt_predictor_linear_branch_state_is_finite(
+        linear: &BjtPredictorLinearBranchState,
     ) -> bool {
         [
             linear.vrcx,
@@ -244,17 +242,17 @@ impl Engine {
     }
 
     #[inline]
-    pub(in crate::engine::transient) fn predict_vbic_linear_branch_state_from_history(
-        history_linear_prev: &VbicPredictorLinearBranchState,
-        history_linear_prev_prev: Option<&VbicPredictorLinearBranchState>,
+    pub(in crate::engine::transient) fn predict_bjt_linear_branch_state_from_history(
+        history_linear_prev: &BjtPredictorLinearBranchState,
+        history_linear_prev_prev: Option<&BjtPredictorLinearBranchState>,
         dt: Value,
         previous_dt: Value,
-    ) -> VbicPredictorLinearBranchState {
+    ) -> BjtPredictorLinearBranchState {
         let predict_component = |previous: Value, previous_previous: Option<Value>| {
             Self::predict_transient_history_value(previous, previous_previous, dt, previous_dt)
         };
 
-        VbicPredictorLinearBranchState {
+        BjtPredictorLinearBranchState {
             vrcx: predict_component(
                 history_linear_prev.vrcx,
                 history_linear_prev_prev.map(|prev_prev| prev_prev.vrcx),
@@ -287,22 +285,22 @@ impl Engine {
     }
 
     #[inline]
-    pub(in crate::engine::transient) fn vbic_dynamic_internal_seed_from_predicted_linear_history(
+    pub(in crate::engine::transient) fn bjt_internal_seed_from_predicted_linear_history(
         bjt: &crate::device::Bjt,
         target_external: [Value; BJT_EXTERNAL_STATE_DIM],
         history_internal_prev: &[Value; BJT_INTERNAL_STATE_DIM],
-        history_linear_prev: &VbicPredictorLinearBranchState,
-        history_linear_prev_prev: Option<&VbicPredictorLinearBranchState>,
+        history_linear_prev: &BjtPredictorLinearBranchState,
+        history_linear_prev_prev: Option<&BjtPredictorLinearBranchState>,
         dt: Value,
         previous_dt: Value,
     ) -> Option<[Value; BJT_INTERNAL_STATE_DIM]> {
-        let predicted_linear = Self::predict_vbic_linear_branch_state_from_history(
+        let predicted_linear = Self::predict_bjt_linear_branch_state_from_history(
             history_linear_prev,
             history_linear_prev_prev,
             dt,
             previous_dt,
         );
-        if !Self::vbic_predictor_linear_branch_state_is_finite(&predicted_linear) {
+        if !Self::bjt_predictor_linear_branch_state_is_finite(&predicted_linear) {
             return None;
         }
 
@@ -338,10 +336,10 @@ impl Engine {
     fn legacy_bjt_internal_seed_from_history(
         bjt: &crate::device::Bjt,
         target_external: [Value; BJT_EXTERNAL_STATE_DIM],
-        history: VbicPredictorHistory<'_>,
+        history: BjtPredictorHistory<'_>,
         dt: Value,
     ) -> [Value; BJT_INTERNAL_STATE_DIM] {
-        let VbicPredictorHistory {
+        let BjtPredictorHistory {
             internal_prev: history_internal_prev,
             linear_prev: history_linear_prev,
             linear_prev_prev: history_linear_prev_prev,
@@ -356,15 +354,15 @@ impl Engine {
             return live_seed;
         }
         let history_linear_prev = history_linear_prev
-            .filter(|linear| Self::vbic_predictor_linear_branch_state_is_finite(linear));
+            .filter(|linear| Self::bjt_predictor_linear_branch_state_is_finite(linear));
         let history_linear_prev_prev = history_linear_prev_prev
-            .filter(|linear| Self::vbic_predictor_linear_branch_state_is_finite(linear));
+            .filter(|linear| Self::bjt_predictor_linear_branch_state_is_finite(linear));
 
         // Reconstruct private nodes from accepted branch-voltage history,
         // then refine that seed against this step's charge equations.
         history_linear_prev
             .and_then(|history_linear_prev| {
-                Self::vbic_dynamic_internal_seed_from_predicted_linear_history(
+                Self::bjt_internal_seed_from_predicted_linear_history(
                     bjt,
                     target_external,
                     history_internal_prev,
@@ -376,7 +374,7 @@ impl Engine {
             })
             .or_else(|| {
                 history_linear_prev.and_then(|history_linear_prev| {
-                    Self::vbic_dynamic_internal_seed_from_linear_history(
+                    Self::bjt_internal_seed_from_linear_history(
                         bjt,
                         target_external,
                         history_internal_prev,
@@ -418,14 +416,14 @@ mod tests {
     fn resolve_rc_snapshot(
         bjt: &crate::device::Bjt,
         polarity: Value,
-        step: VbicChargeStep<'_>,
+        step: BjtChargeStep<'_>,
         cached: Option<BjtChargeSnapshot>,
     ) -> BjtChargeSnapshot {
         Engine::resolve_legacy_bjt_transient_snapshot(
             bjt,
             [0.0, polarity * 0.001, 0.0, 0.0],
             step,
-            VbicPredictorHistory {
+            BjtPredictorHistory {
                 internal_prev: None,
                 linear_prev: None,
                 linear_prev_prev: None,
@@ -450,7 +448,7 @@ mod tests {
                         let snapshot = resolve_rc_snapshot(
                             &bjt,
                             polarity,
-                            VbicChargeStep {
+                            BjtChargeStep {
                                 coeff: &coeff,
                                 dt: 15e-9,
                                 q_prev: &zero,
@@ -479,7 +477,7 @@ mod tests {
         let zero = [0.0; BJT_DYNAMIC_CHARGE_COUNT];
         let be = CompanionCoefficients::backward_euler();
         let trap = CompanionCoefficients::trapezoidal();
-        let step = VbicChargeStep {
+        let step = BjtChargeStep {
             coeff: &be,
             dt: 15e-9,
             q_prev: &zero,
@@ -491,15 +489,15 @@ mod tests {
         previous[BJT_QBE_BRANCH_INDEX] = 3e-12 * 0.00075;
         for (changed, expected) in [
             (
-                VbicChargeStep {
+                BjtChargeStep {
                     coeff: &trap,
                     ..step
                 },
                 0.001 / 3.0,
             ),
-            (VbicChargeStep { dt: 30e-9, ..step }, 0.002 / 3.0),
+            (BjtChargeStep { dt: 30e-9, ..step }, 0.002 / 3.0),
             (
-                VbicChargeStep {
+                BjtChargeStep {
                     q_prev: &previous,
                     ..step
                 },
