@@ -806,13 +806,10 @@ impl Engine {
         );
         let live_seed = bjt.dynamic_internal_state_seed(vc, vb, ve, vs);
 
-        let mut best_snapshot = None;
-        let mut best_norm = Value::INFINITY;
-        for seed in [cached_seed, Some(predicted_seed), Some(live_seed)]
+        [cached_seed, Some(predicted_seed), Some(live_seed)]
             .into_iter()
             .flatten()
-        {
-            let Some((snapshot, norm)) =
+            .find_map(|seed| {
                 Self::solve_legacy_bjt_ngspice_transient_snapshot_from_seed(
                     bjt,
                     external,
@@ -825,20 +822,7 @@ impl Engine {
                     },
                     seed,
                 )
-            else {
-                continue;
-            };
-
-            if norm < best_norm {
-                best_norm = norm;
-                best_snapshot = Some(snapshot);
-            }
-            if norm <= 1e-11 {
-                break;
-            }
-        }
-
-        best_snapshot
+            })
     }
 
     #[inline]
@@ -847,7 +831,7 @@ impl Engine {
         external: [Value; BJT_EXTERNAL_STATE_DIM],
         step: VbicChargeStep<'_>,
         seed: [Value; BJT_INTERNAL_STATE_DIM],
-    ) -> Option<(BjtChargeSnapshot, Value)> {
+    ) -> Option<BjtChargeSnapshot> {
         let VbicChargeStep {
             coeff,
             dt,
@@ -874,14 +858,7 @@ impl Engine {
             &snapshot.reduction.internal_voltages,
         );
         let mut norm = Self::vbic_dynamic_static_core_residual_norm(&residual);
-        let mut best_snapshot = snapshot;
-        let mut best_norm = norm;
-
         for _ in 0..18 {
-            if norm <= 1e-11 {
-                return Some((snapshot, norm));
-            }
-
             let target_internal = Self::solve_vbic_static_core_from_linearization(
                 &linearization,
                 &snapshot.reduction.external_voltages,
@@ -894,8 +871,14 @@ impl Engine {
                 .take(BJT_STATIC_CORE_STATE_DIM)
                 .map(|(target, current)| (target - current).abs())
                 .fold(0.0_f64, Value::max);
-            if !max_delta.is_finite() || max_delta <= 1e-12 {
-                break;
+            if !max_delta.is_finite() {
+                return None;
+            }
+            // A small instance has small KCL currents even far from its
+            // private voltage root. Certify the voltage correction from the
+            // scaled linear solve, independently of AREA/M and row units.
+            if max_delta <= 1e-12 {
+                return Some(snapshot);
             }
 
             let mut accepted = None;
@@ -933,13 +916,7 @@ impl Engine {
                 let candidate_norm =
                     Self::vbic_dynamic_static_core_residual_norm(&candidate_residual);
 
-                if candidate_norm.is_finite() && candidate_norm < best_norm {
-                    best_norm = candidate_norm;
-                    best_snapshot = candidate_snapshot;
-                }
-                if candidate_norm.is_finite()
-                    && (candidate_norm <= norm * 0.8 || candidate_norm <= 1e-11)
-                {
+                if candidate_norm.is_finite() && candidate_norm <= norm * 0.8 {
                     accepted = Some((candidate_snapshot, candidate_linearization, candidate_norm));
                     break;
                 }
@@ -955,11 +932,7 @@ impl Engine {
             norm = next_norm;
         }
 
-        if best_norm.is_finite() && best_norm <= 1e-8 {
-            Some((best_snapshot, best_norm))
-        } else {
-            None
-        }
+        None
     }
 
     #[inline]
@@ -1000,21 +973,9 @@ impl Engine {
                 ));
             }
 
-            let cached_snapshot_matches = |snapshot: &BjtChargeSnapshot| match cache_reuse {
-                VbicCachedSnapshotReuse::SeedOnly => {
-                    Self::vbic_snapshot_matches_external_bias_exact(snapshot, &external)
-                }
-                VbicCachedSnapshotReuse::NewtonBypass => Self::vbic_snapshot_matches_external_bias(
-                    snapshot,
-                    &external,
-                    voltage_abstol,
-                    reltol,
-                ),
-            };
-            if let Some(snapshot) = cached_snapshot.filter(cached_snapshot_matches) {
-                return Some(snapshot);
-            }
-
+            // Equal external voltages do not authenticate an internal charge
+            // state: dt, coefficients or accepted history may have changed.
+            // Reuse the cached voltage as a Newton seed, then check the root.
             return Self::solve_legacy_bjt_ngspice_transient_snapshot(
                 bjt,
                 external,
@@ -1035,7 +996,11 @@ impl Engine {
                 cached_snapshot,
             )
             .or_else(|| {
-                Some(bjt.charge_snapshot(external[0], external[1], external[2], external[3]))
+                let snapshot =
+                    bjt.charge_snapshot(external[0], external[1], external[2], external[3]);
+                // A chargeless device legitimately has no dynamic companion.
+                // An active charge solve must not fall back to its DC root.
+                (!snapshot.branches.iter().any(BjtChargeBranch::is_active)).then_some(snapshot)
             });
         }
 
@@ -1548,5 +1513,147 @@ impl Engine {
         }
 
         bjt.limit_vbic_dynamic_internal_state_to_previous(seed_internal, *history_internal_prev)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn private_rc_bjt(m: Value, polarity: Value, xyce: bool) -> crate::device::Bjt {
+        let mut bjt = if polarity > 0.0 {
+            crate::device::Bjt::new_npn("q".into(), 1, 2, 0)
+        } else {
+            crate::device::Bjt::new_pnp("q".into(), 1, 2, 0)
+        }
+        .with_params(
+            &[
+                ("IS".into(), 0.0),
+                ("RB".into(), 5e3),
+                ("RBM".into(), 1e3),
+                ("CJE".into(), 3e-12),
+                ("MJE".into(), 0.0),
+            ]
+            .into_iter()
+            .collect(),
+        )
+        .with_instance_params(&[("M".into(), m)]);
+        bjt.set_xyce_compatibility(xyce);
+        bjt.set_junction_gmin(0.0);
+        bjt
+    }
+
+    fn resolve_rc_snapshot(
+        bjt: &crate::device::Bjt,
+        polarity: Value,
+        step: VbicChargeStep<'_>,
+        cached: Option<BjtChargeSnapshot>,
+        reuse: VbicCachedSnapshotReuse,
+    ) -> BjtChargeSnapshot {
+        Engine::resolve_vbic_snapshot_for_external_bias_with_linear_history(
+            bjt,
+            [0.0, polarity * 0.001, 0.0, 0.0],
+            step,
+            VbicPredictorHistory {
+                internal_prev: None,
+                internal_prev_prev: None,
+                linear_prev: None,
+                linear_prev_prev: None,
+                previous_dt: 0.0,
+            },
+            cached,
+            reuse,
+            VbicSnapshotTolerances {
+                voltage_abstol: 1e-12,
+                reltol: 1e-9,
+            },
+        )
+        .expect("private RC state must solve")
+    }
+
+    #[test]
+    fn private_bjt_transient_internal_voltage_preserves_instance_scaling() {
+        let zero = [0.0; BJT_DYNAMIC_CHARGE_COUNT];
+        for xyce in [false, true] {
+            for polarity in [1.0, -1.0] {
+                for m in [1.0, 1e-20, 1e-200] {
+                    let bjt = private_rc_bjt(m, polarity, xyce);
+                    for coeff in [
+                        CompanionCoefficients::backward_euler(),
+                        CompanionCoefficients::trapezoidal(),
+                    ] {
+                        let snapshot = resolve_rc_snapshot(
+                            &bjt,
+                            polarity,
+                            VbicChargeStep {
+                                coeff: &coeff,
+                                dt: 15e-9,
+                                q_prev: &zero,
+                                q_prev_prev: &zero,
+                                cq_prev: &zero,
+                            },
+                            None,
+                            VbicCachedSnapshotReuse::SeedOnly,
+                        );
+                        // tau=RC=15ns: one step from zero charge is
+                        // Vin/(1+ag0*tau), independently of instance size.
+                        let expected = polarity * 0.001 / (1.0 + coeff.coeff_g);
+                        let actual = snapshot.reduction.internal_voltages[BJT_VBI_STATE_INDEX];
+                        assert!(
+                            (actual - expected).abs() < 2e-12,
+                            "xyce={xyce} polarity={polarity} M={m:e} {coeff:?}: {actual:e} vs {expected:e}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn private_bjt_cached_voltage_does_not_authenticate_charge_step() {
+        let bjt = private_rc_bjt(1.0, 1.0, false);
+        let zero = [0.0; BJT_DYNAMIC_CHARGE_COUNT];
+        let be = CompanionCoefficients::backward_euler();
+        let trap = CompanionCoefficients::trapezoidal();
+        let step = VbicChargeStep {
+            coeff: &be,
+            dt: 15e-9,
+            q_prev: &zero,
+            q_prev_prev: &zero,
+            cq_prev: &zero,
+        };
+        let cached = resolve_rc_snapshot(&bjt, 1.0, step, None, VbicCachedSnapshotReuse::SeedOnly);
+        let mut previous = zero;
+        previous[BJT_QBE_BRANCH_INDEX] = 3e-12 * 0.00075;
+        for reuse in [
+            VbicCachedSnapshotReuse::SeedOnly,
+            VbicCachedSnapshotReuse::NewtonBypass,
+        ] {
+            for (changed, expected) in [
+                (
+                    VbicChargeStep {
+                        coeff: &trap,
+                        ..step
+                    },
+                    0.001 / 3.0,
+                ),
+                (VbicChargeStep { dt: 30e-9, ..step }, 0.002 / 3.0),
+                (
+                    VbicChargeStep {
+                        q_prev: &previous,
+                        ..step
+                    },
+                    0.000875,
+                ),
+            ] {
+                let actual = resolve_rc_snapshot(&bjt, 1.0, changed, Some(cached), reuse)
+                    .reduction
+                    .internal_voltages[BJT_VBI_STATE_INDEX];
+                assert!(
+                    (actual - expected).abs() < 2e-12,
+                    "{reuse:?}: {actual:e} vs {expected:e}"
+                );
+            }
+        }
     }
 }

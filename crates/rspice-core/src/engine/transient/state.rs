@@ -966,9 +966,16 @@ impl Engine {
                 },
             ) else {
                 vbic_snapshot_cache[idx] = None;
-                continue;
+                return Err(SimulationError::Circuit(format!(
+                    "BJT '{}' private transient state did not converge for dt={dt:e}",
+                    bjt.name
+                )));
             };
 
+            if !snapshot.branches.iter().any(BjtChargeBranch::is_active) {
+                vbic_snapshot_cache[idx] = None;
+                continue;
+            }
             let Some(linearization) = Self::assemble_vbic_transient_linearization(
                 bjt,
                 &snapshot,
@@ -981,7 +988,10 @@ impl Engine {
                 },
             ) else {
                 vbic_snapshot_cache[idx] = None;
-                continue;
+                return Err(SimulationError::Circuit(format!(
+                    "BJT '{}' transient companion could not be assembled for dt={dt:e}",
+                    bjt.name
+                )));
             };
             let (base_static_g, base_static_i_eq) =
                 Self::vbic_static_stamped_external_system(bjt, &[vc, vb, ve, vs]);
@@ -990,7 +1000,10 @@ impl Engine {
                 Self::vbic_reduce_transient_external_system(&linearization)
             else {
                 vbic_snapshot_cache[idx] = None;
-                continue;
+                return Err(SimulationError::Circuit(format!(
+                    "BJT '{}' transient companion could not be reduced for dt={dt:e}",
+                    bjt.name
+                )));
             };
 
             if xyce_one_step_order2 {

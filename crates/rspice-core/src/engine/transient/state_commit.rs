@@ -290,7 +290,10 @@ impl Engine {
                     reltol: snapshot_reuse_reltol,
                 },
             ) else {
-                continue;
+                return Err(SimulationError::Circuit(format!(
+                    "BJT '{}' accepted private transient state did not converge for dt={dt:e}",
+                    bjt.name
+                )));
             };
             let (legacy_vbe, legacy_vbc, legacy_vbx, legacy_vcs) =
                 Self::legacy_bjt_charge_branch_voltages_with_vbx(&snapshot);

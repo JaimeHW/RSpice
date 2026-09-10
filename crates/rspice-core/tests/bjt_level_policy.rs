@@ -2761,11 +2761,11 @@ fn xyce_private_bjt_transient_matches_explicit_base_resistor() {
     config.convergence_config.junction_gmin_target = 0.0;
     config.convergence_config.voltage_abstol = 1e-12;
     config.convergence_config.voltage_reltol = 1e-9;
-    config.convergence_config.current_abstol = 1e-14;
+    config.convergence_config.current_abstol = 1e-220;
     config.convergence_config.residual_reltol = 1e-9;
     config.transient_nonlinear_abstol = Some(1e-12);
     config.transient_nonlinear_reltol = Some(1e-9);
-    config.transient_nonlinear_rhstol = Some(1e-14);
+    config.transient_nonlinear_rhstol = Some(1e-220);
     let engine = Engine::new(config);
     for (kind, polarity) in [("NPN", 1.0), ("PNP", -1.0)] {
         let sources = format!(
@@ -2777,26 +2777,47 @@ fn xyce_private_bjt_transient_matches_explicit_base_resistor() {
         // though RBM<RB selects a private base. Diffusion and depletion
         // charge still depend nonlinearly on the evolving private voltage.
         let model = "IS=1e-14 BF=100 CJE=1p CJC=2p TF=1n";
-        let private = Netlist::parse(&format!(
-            "{sources}Q1 c b 0 mm\n.model mm {kind}({model} RB=5k RBM=1k)\n.end\n"
-        ))
-        .unwrap();
+        // Use the independently resolved unit RC/transistor circuit for every
+        // scale, so its outer MNA current weights do not change with the
+        // private instance being qualified.
         let explicit = Netlist::parse(&format!(
             "{sources}RB b bi 5k\nQ1 c bi 0 mm\n.model mm {kind}({model})\n.end\n"
         ))
         .unwrap();
-        let actual = engine.run_tran(&private, 100e-9, 0.05e-9).unwrap();
         let expected = engine.run_tran(&explicit, 100e-9, 0.05e-9).unwrap();
-        assert_eq!(actual.time, expected.time);
-        for branch in ["VB", "VC"] {
-            let a = actual.try_branch_current_waveform_named(branch).unwrap();
-            let b = expected.try_branch_current_waveform_named(branch).unwrap();
-            for ((&time, &a), &b) in actual.time.iter().zip(a).zip(b) {
-                assert!(
-                    (a - b).abs() < 1e-11,
-                    "{kind} {branch} t={time:e}: {a:e} vs {b:e}"
-                );
+        for scale in [1.0, 1e-20, 1e-200] {
+            let private = Netlist::parse(&format!(
+                "{sources}Q1 c b 0 mm M={scale}\n.model mm {kind}({model} RB=5k RBM=1k)\n.end\n"
+            ))
+            .unwrap();
+            let actual = engine.run_tran(&private, 100e-9, 0.05e-9).unwrap();
+            assert_eq!(actual.time, expected.time);
+            for branch in ["VB", "VC"] {
+                let a = actual.try_branch_current_waveform_named(branch).unwrap();
+                let b = expected.try_branch_current_waveform_named(branch).unwrap();
+                for ((&time, &a), &b) in actual.time.iter().zip(a).zip(b) {
+                    assert!(
+                        (a / scale - b).abs() < 1e-11,
+                        "{kind} M={scale:e} {branch} t={time:e}: {a:e} vs {b:e}"
+                    );
+                }
             }
         }
     }
+}
+
+#[test]
+fn private_bjt_transient_reports_unresolvable_charge_instead_of_using_dc() {
+    let mut config = SimulationConfig::default();
+    config.convergence_config.gmin_target = 0.0;
+    config.convergence_config.junction_gmin_target = 0.0;
+    let deck = Netlist::parse("Invalid private BJT transient\nVB b 0 PWL(0 0 1n .001)\nQ1 0 b 0 mm\n.model mm NPN(IS=0 RB=1k RBM=100 CJE=1e308 MJE=0)\n.end\n").unwrap();
+    let error = Engine::new(config)
+        .run_tran(&deck, 1e-9, 1e-12)
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains("Q1") && error.contains("private transient state did not converge"),
+        "{error}"
+    );
 }
