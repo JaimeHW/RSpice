@@ -3,82 +3,6 @@
 use super::*;
 
 #[test]
-fn new_saved_outputs_follow_both_directions_of_a_past_component_rename() {
-    let (mut fixture, _, child, _) = reused_master_fixture(["X1", "X2"]);
-    let state = &mut fixture.state;
-    state.activate_history_document(&child, "Edit reused master");
-    let expected = state
-        .schematic
-        .components
-        .iter()
-        .find(|component| component.id == fixture.sources[0])
-        .unwrap()
-        .clone();
-    state
-        .rename_component_transaction(&expected, "V9".to_owned())
-        .unwrap();
-    let output = SavedOutput::new(
-        SavedOutputKind::RawVoltageOrCurrent,
-        "Added after rename",
-        "I(/X1/V9)",
-        SavedOutputCompatibility::OpTranAc,
-        SavedOutputPolicy::EveryAcceptedPoint,
-        SavedOutputPrecision::FullSourcePrecision,
-        SavedOutputStreaming::StoreOnly,
-    )
-    .unwrap();
-    let output_id = output.id;
-    state
-        .workspace
-        .add_saved_output(fixture.plan, output)
-        .unwrap();
-    assert!(state.undo_project_design().unwrap().is_some());
-    assert_eq!(
-        state
-            .workspace
-            .plan_data(fixture.plan)
-            .unwrap()
-            .saved_outputs
-            .iter()
-            .find(|output| output.id == output_id)
-            .unwrap()
-            .source_expression,
-        "I(/X1/V42)"
-    );
-    let second = SavedOutput::new(
-        SavedOutputKind::RawVoltageOrCurrent,
-        "Added after undo",
-        "I(/X2/V42)",
-        SavedOutputCompatibility::OpTranAc,
-        SavedOutputPolicy::EveryAcceptedPoint,
-        SavedOutputPrecision::FullSourcePrecision,
-        SavedOutputStreaming::StoreOnly,
-    )
-    .unwrap();
-    let second_id = second.id;
-    state
-        .workspace
-        .add_saved_output(fixture.plan, second)
-        .unwrap();
-    assert!(state.redo_project_design().unwrap().is_some());
-    let outputs = &state
-        .workspace
-        .plan_data(fixture.plan)
-        .unwrap()
-        .saved_outputs;
-    for (id, path) in [(output_id, "I(/X1/V9)"), (second_id, "I(/X2/V9)")] {
-        assert_eq!(
-            outputs
-                .iter()
-                .find(|output| output.id == id)
-                .unwrap()
-                .source_expression,
-            path
-        );
-    }
-}
-
-#[test]
 fn editing_a_reused_master_renames_saved_outputs_and_inactive_probes() {
     let (mut fixture, root, child, other) = reused_master_fixture(["X1", "X2"]);
     fixture
@@ -465,11 +389,30 @@ fn reused_master_property_edits_and_bound_outputs_survive_native_reopen() {
         .state
         .edit_component_transaction(&expected, candidate, "Edit source properties")
         .unwrap();
+    let mut late_outputs = Vec::new();
     let path = std::env::temp_dir().join(format!(
         "rspice-reused-rename-{}.rspiceproj",
         uuid::Uuid::new_v4()
     ));
     for (step, name) in ["V9", "V42", "V9"].into_iter().enumerate() {
+        if step < 2 {
+            let output = SavedOutput::new(
+                SavedOutputKind::RawVoltageOrCurrent,
+                format!("Later reference {step}"),
+                format!("I(/X1/{name})"),
+                SavedOutputCompatibility::OpTranAc,
+                SavedOutputPolicy::EveryAcceptedPoint,
+                SavedOutputPrecision::FullSourcePrecision,
+                SavedOutputStreaming::StoreOnly,
+            )
+            .unwrap();
+            late_outputs.push(output.id);
+            fixture
+                .state
+                .workspace
+                .add_saved_output(second_plan, output)
+                .unwrap();
+        }
         project_lifecycle::save_native(
             &mut fixture.state,
             SaveScope::AllDocuments,
@@ -526,6 +469,18 @@ fn reused_master_property_edits_and_bound_outputs_survive_native_reopen() {
             let saved = &loaded.workspace.plan_data(plan).unwrap().saved_outputs[0];
             assert_eq!(saved.id, output);
             assert_eq!(saved.source_expression, format!("I(/{parent}/{name})"));
+        }
+        let second_outputs = &loaded
+            .workspace
+            .plan_data(second_plan)
+            .unwrap()
+            .saved_outputs;
+        for output in &late_outputs {
+            let saved = second_outputs
+                .iter()
+                .find(|saved| saved.id == *output)
+                .unwrap();
+            assert_eq!(saved.source_expression, format!("I(/X1/{name})"));
         }
         assert_eq!(source.probes[0].saved_output_id, Some(second_output));
         assert_eq!(source.probes[0].plan_id, Some(second_plan));

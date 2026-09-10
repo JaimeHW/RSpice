@@ -94,6 +94,13 @@ enum ProjectDesignBody {
     ModelResolutions(Box<ModelResolutionRecordsRecord>),
 }
 
+/// Reference-changing history is prepared exactly once before navigation or a
+/// stack transition. Other project edits retain their existing commit paths.
+enum PreparedReferenceMutation {
+    ComponentRename(Box<component_rename::PreparedComponentRename>),
+    DesignManagement(Box<reference_preparation::PreparedReferenceHistory>),
+}
+
 #[derive(Debug, Clone)]
 struct HierarchyExtractionRecord {
     description: String,
@@ -916,7 +923,10 @@ impl AppState {
         if !record.after_design_matches(self) {
             return Ok(None);
         }
-        record.validate_mutation(self, "undone")?;
+        let prepared = record.body.prepare_reference_mutation(self, false)?;
+        if prepared.is_none() {
+            record.validate_mutation(self, "undone")?;
+        }
         let destination = record.header.undo_activates().cloned();
         if let Some(destination) = destination {
             self.activate_history_document(&destination, "Undo");
@@ -927,7 +937,13 @@ impl AppState {
             .pop()
             .expect("the guarded project transaction remains present");
         let cells_before = library_cell_keys(self);
-        record.body.apply_before(self)?;
+        if let Some(prepared) = prepared {
+            record
+                .body
+                .apply_prepared_reference(self, prepared, false)?;
+        } else {
+            record.body.apply_before(self)?;
+        }
         record.body.include_reference_documents(&mut record.header);
         for document in record.header.documents() {
             document.restore_recorded_sheets(self)?;
@@ -947,7 +963,10 @@ impl AppState {
         if !record.before_design_matches(self) {
             return Ok(None);
         }
-        record.validate_mutation(self, "redone")?;
+        let prepared = record.body.prepare_reference_mutation(self, true)?;
+        if prepared.is_none() {
+            record.validate_mutation(self, "redone")?;
+        }
         let destination = record.header.redo_activates().cloned();
         if let Some(destination) = destination {
             self.activate_history_document(&destination, "Redo");
@@ -958,7 +977,11 @@ impl AppState {
             .pop()
             .expect("the guarded project transaction remains present");
         let cells_before = library_cell_keys(self);
-        record.body.apply_after(self)?;
+        if let Some(prepared) = prepared {
+            record.body.apply_prepared_reference(self, prepared, true)?;
+        } else {
+            record.body.apply_after(self)?;
+        }
         record.body.include_reference_documents(&mut record.header);
         self.restore_stranded_placements(std::mem::take(&mut record.stranded));
         record.stranded = self.repair_placements_stranded_since(&cells_before);
@@ -1093,6 +1116,56 @@ impl ProjectDesignRecord {
 }
 
 impl ProjectDesignBody {
+    fn prepare_reference_mutation(
+        &self,
+        state: &AppState,
+        forward: bool,
+    ) -> Result<Option<PreparedReferenceMutation>, String> {
+        match self {
+            Self::ComponentRename(record) => record.prepare(state, forward).map(|prepared| {
+                Some(PreparedReferenceMutation::ComponentRename(Box::new(
+                    prepared,
+                )))
+            }),
+            Self::DesignManagement(record) => {
+                record.prepare_history(state, forward).map(|prepared| {
+                    Some(PreparedReferenceMutation::DesignManagement(Box::new(
+                        prepared,
+                    )))
+                })
+            }
+            _ => Ok(None),
+        }
+    }
+
+    fn apply_prepared_reference(
+        &mut self,
+        state: &mut AppState,
+        prepared: PreparedReferenceMutation,
+        forward: bool,
+    ) -> Result<(), String> {
+        match (self, prepared) {
+            (
+                Self::ComponentRename(record),
+                PreparedReferenceMutation::ComponentRename(prepared),
+            ) => {
+                **record = prepared.publish(state, forward)?;
+                Ok(())
+            }
+            (
+                Self::DesignManagement(record),
+                PreparedReferenceMutation::DesignManagement(history),
+            ) => {
+                if forward {
+                    record.apply_after(state, *history)
+                } else {
+                    record.apply_before(state, *history)
+                }
+            }
+            _ => unreachable!("reference history preparation retains its record kind"),
+        }
+    }
+
     fn include_reference_documents(&self, header: &mut RecordHeader) {
         let schematics = match self {
             Self::ComponentRename(record) => record.reference_schematics(),
@@ -1161,9 +1234,10 @@ impl ProjectDesignBody {
 
     fn apply_before(&mut self, state: &mut AppState) -> Result<(), String> {
         match self {
-            Self::ComponentRename(record) => record.apply_before(state),
             Self::HierarchyExtraction(record) => record.apply_before(state),
-            Self::DesignManagement(record) => record.apply_before(state),
+            Self::ComponentRename(_) | Self::DesignManagement(_) => {
+                unreachable!("reference history is prepared before applying")
+            }
             Self::InstanceRemoval(record) => record.apply_before(state),
             Self::SymbolDefinition(record) => record.apply_before(state),
             Self::ModelDefinition(record) => record.apply_before(state),
@@ -1174,9 +1248,10 @@ impl ProjectDesignBody {
 
     fn apply_after(&mut self, state: &mut AppState) -> Result<(), String> {
         match self {
-            Self::ComponentRename(record) => record.apply_after(state),
             Self::HierarchyExtraction(record) => record.apply_after(state),
-            Self::DesignManagement(record) => record.apply_after(state),
+            Self::ComponentRename(_) | Self::DesignManagement(_) => {
+                unreachable!("reference history is prepared before applying")
+            }
             Self::InstanceRemoval(record) => record.apply_after(state),
             Self::SymbolDefinition(record) => record.apply_after(state),
             Self::ModelDefinition(record) => record.apply_after(state),
@@ -1817,11 +1892,7 @@ impl DesignManagementRecord {
                 .is_some_and(|revision| state.workspace.project.revision() == revision)
     }
 
-    fn prepare_history(
-        &self,
-        state: &AppState,
-        forward: bool,
-    ) -> Result<reference_preparation::PreparedReferenceHistory, String> {
+    fn validate_authority(&self, state: &AppState, forward: bool) -> Result<(), String> {
         let operation = if forward { "redone" } else { "undone" };
         if !state.project_lifecycle.project_open {
             return Err(format!(
@@ -1834,11 +1905,13 @@ impl DesignManagementRecord {
                 self.owner.display_path()
             ));
         }
-        if !self.references.matches(state, forward) {
-            return Err(
-                "The configuration or saved-output references changed before commit.".to_owned(),
-            );
+        for key in self.before_schematics.keys() {
+            let reference = reference_preparation::reference_from_key(key)?;
+            let source = schematic_for_reference(state, &reference)
+                .ok_or_else(|| format!("Reference document '{key}' is unavailable."))?;
+            reference_preparation::validate_reference_document(state, key, source)?;
         }
+        self.references.prepare(state, forward)?;
         let current = &state.workspace.design_management;
         let mut prepared_catalog = current.clone();
         prepared_catalog
@@ -1853,22 +1926,27 @@ impl DesignManagementRecord {
             .revision()
             .next()
             .map_err(|error| error.to_string())?;
+        Ok(())
+    }
+
+    fn prepare_history(
+        &self,
+        state: &AppState,
+        forward: bool,
+    ) -> Result<reference_preparation::PreparedReferenceHistory, String> {
+        self.validate_authority(state, forward)?;
         state.prepare_reference_history(&self.before_schematics, &self.after_schematics, forward)
     }
 
     fn validate_mutation(&self, state: &AppState, operation: &str) -> Result<(), String> {
-        self.prepare_history(state, operation != "undone")
-            .map(|_| ())
+        self.validate_authority(state, operation != "undone")
     }
 
-    fn apply_before(&mut self, state: &mut AppState) -> Result<(), String> {
-        if !self.after_design_matches(state) {
-            return Err(
-                "Design management cannot be undone because project configuration changed."
-                    .to_owned(),
-            );
-        }
-        let history = self.prepare_history(state, false)?;
+    fn apply_before(
+        &mut self,
+        state: &mut AppState,
+        history: reference_preparation::PreparedReferenceHistory,
+    ) -> Result<(), String> {
         let revision = state
             .workspace
             .replace_design_management(self.before.clone())
@@ -1885,14 +1963,11 @@ impl DesignManagementRecord {
         Ok(())
     }
 
-    fn apply_after(&mut self, state: &mut AppState) -> Result<(), String> {
-        if !self.before_design_matches(state) {
-            return Err(
-                "Design management cannot be redone because project configuration changed."
-                    .to_owned(),
-            );
-        }
-        let history = self.prepare_history(state, true)?;
+    fn apply_after(
+        &mut self,
+        state: &mut AppState,
+        history: reference_preparation::PreparedReferenceHistory,
+    ) -> Result<(), String> {
         let revision = state
             .workspace
             .replace_design_management(self.after.clone())

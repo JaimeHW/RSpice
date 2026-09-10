@@ -1,7 +1,7 @@
 //! One publication boundary for a component name and the live references
 //! carried with it. History owns exact affected content, never retained runs.
 
-use super::reference_preparation::reference_from_key;
+use super::reference_preparation::{reference_from_key, validate_reference_document};
 use super::references::PreparedReferences;
 use super::*;
 use crate::state::{AnnotationState, Component, SchematicObjectKey};
@@ -25,7 +25,7 @@ struct AnnotationChange {
     after_revision: ObjectRevision,
 }
 
-struct PreparedComponentRename {
+pub(super) struct PreparedComponentRename {
     record: ComponentRenameRecord,
     references: PreparedReferences,
     annotation: Option<DesignManagementCatalog>,
@@ -226,15 +226,13 @@ impl ComponentRenameRecord {
             })
     }
 
-    pub(super) fn validate_mutation(
+    /// Availability checks inspect retained owners; command execution separately
+    /// prepares the complete live dependency closure before navigation.
+    fn validate_authority(
         &self,
         state: &AppState,
-        operation: &str,
-    ) -> Result<(), String> {
-        self.prepare(state, operation != "undone").map(|_| ())
-    }
-
-    fn prepare(&self, state: &AppState, forward: bool) -> Result<PreparedComponentRename, String> {
+        forward: bool,
+    ) -> Result<Option<DesignManagementCatalog>, String> {
         if !state.project_lifecycle.project_open || document_read_only(state, &self.document) {
             return Err(
                 "Component rename requires an open, writable project and document.".to_owned(),
@@ -246,6 +244,31 @@ impl ComponentRenameRecord {
                     .to_owned(),
             );
         }
+        for key in self.before.keys() {
+            let reference = reference_from_key(key)?;
+            let source = schematic_for_reference(state, &reference)
+                .ok_or_else(|| format!("Reference document '{key}' is unavailable."))?;
+            validate_reference_document(state, key, source)?;
+        }
+        self.references.prepare(state, forward)?;
+        self.prepare_annotation(state, forward)
+    }
+
+    pub(super) fn validate_mutation(
+        &self,
+        state: &AppState,
+        operation: &str,
+    ) -> Result<(), String> {
+        self.validate_authority(state, operation != "undone")
+            .map(|_| ())
+    }
+
+    pub(super) fn prepare(
+        &self,
+        state: &AppState,
+        forward: bool,
+    ) -> Result<PreparedComponentRename, String> {
+        let annotation = self.validate_authority(state, forward)?;
         let history = state.prepare_reference_history(&self.before, &self.after, forward)?;
         let record = Self {
             description: self.description.clone(),
@@ -256,7 +279,7 @@ impl ComponentRenameRecord {
             annotation: self.annotation.clone(),
         };
         Ok(PreparedComponentRename {
-            annotation: record.prepare_annotation(state, forward)?,
+            annotation,
             references: history.references,
             record,
         })
@@ -312,20 +335,10 @@ impl ComponentRenameRecord {
             }
         }
     }
-
-    pub(super) fn apply_before(&mut self, state: &mut AppState) -> Result<(), String> {
-        *self = self.prepare(state, false)?.publish(state, false)?;
-        Ok(())
-    }
-
-    pub(super) fn apply_after(&mut self, state: &mut AppState) -> Result<(), String> {
-        *self = self.prepare(state, true)?.publish(state, true)?;
-        Ok(())
-    }
 }
 
 impl PreparedComponentRename {
-    fn publish(
+    pub(super) fn publish(
         mut self,
         state: &mut AppState,
         forward: bool,

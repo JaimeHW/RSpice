@@ -2,6 +2,7 @@
 
 use super::*;
 
+mod live_references;
 mod manual_edit;
 mod reused_rename;
 use crate::product::{ObjectRevision, SimulationPlanId};
