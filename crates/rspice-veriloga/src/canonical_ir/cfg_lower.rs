@@ -43,7 +43,7 @@ use super::hir::{
     HirExpression, HirLimiterArgument, HirModel, HirRegion, HirStatement,
 };
 use super::mir::{MirEquationKind, MirModel};
-use super::noise::{contains_noise, is_noise_call, string_literal, uses_grouped_noise_transfer};
+use super::noise::{contains_noise, is_noise_call, string_literal};
 use super::{
     BlockId, BranchId, BranchUnknownId, CanonicalNoiseSourceKind, CompilerPhase, ContributionId,
     DiagnosticSeverity, ExprId, IrDiagnostic, NodeId, ParamId, SourceSpanRef, ValueId, VariableId,
@@ -1686,9 +1686,9 @@ impl<'a> CfgLowerer<'a> {
             HirExprKind::Call { name, args } if name == "slew" && args.len() == 1 => {
                 self.noise_term(contribution, args[0], amplitude);
             }
-            HirExprKind::Call { name, args } if uses_grouped_noise_transfer(name, args.len()) => {
-                // Match the static HIR projection: grouped process lowering
-                // retains this operator and its state or frequency response.
+            HirExprKind::Call { .. } => {
+                // Match the partial HIR projection. General call linearization
+                // belongs to the grouped plan, which reads the original HIR.
             }
             _ => self.unsupported_noise(span, "nonlinear or dynamic position"),
         }

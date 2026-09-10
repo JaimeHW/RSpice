@@ -375,6 +375,9 @@ fn direct_integrated_and_delayed_noise_preserves_complex_transfer() {
             (omega != 0.0).then(|| (0.0, -1.0 / omega))
         });
     }
+    assert_noise_transfer("idtmod", ",0.25,2.0", &[0.0, 0.1, 1.0, 1000.0], |omega| {
+        (omega != 0.0).then(|| (0.0, -1.0 / omega))
+    });
     for (arguments, delay) in [
         (",1.0e-3", 1.0e-3),
         (",2.0e-3,1.0e-3", 1.0e-3),
@@ -456,6 +459,155 @@ fn routed_filter_noise_observes_accepted_history_without_committing() {
                     accepted,
                     "{case}"
                 );
+            }
+        }
+    }
+}
+
+#[test]
+fn direct_nonlinear_noise_preserves_bias_dependent_small_signal_gain() {
+    type ResponseCase = (&'static str, &'static str, fn(f64) -> f64);
+    let cases: &[ResponseCase] = &[
+        ("sin", "", f64::cos),
+        ("cos", "", |x| -x.sin()),
+        ("exp", "", f64::exp),
+        ("ln", "", |x| 1.0 / x),
+        ("sqrt", "", |x| 0.5 / x.sqrt()),
+        ("tanh", "", |x| 1.0 / x.cosh().powi(2)),
+        ("abs", "", f64::signum),
+        ("pow", ",2.0", |x| 2.0 * x),
+        ("hypot", ",2.0", |x| x / x.hypot(2.0)),
+        ("atan2", ",2.0", |x| 2.0 / (x * x + 4.0)),
+        ("max", ",0.0", |x| if x > 0.0 { 1.0 } else { 0.0 }),
+    ];
+    for &(operator, arguments, derivative) in cases {
+        for contribution in ["I", "V"] {
+            for assigned in [false, true] {
+                let (assignment, input) = if assigned {
+                    ("source=white_noise(2.0/V(p,n),\"n\");", "source")
+                } else {
+                    ("", "white_noise(2.0/V(p,n),\"n\")")
+                };
+                let source = format!(
+                    "module nonlinear_noise(p,n); inout p,n; electrical p,n; parameter integer enabled=1; real source; analog if(enabled>0) begin {assignment} {contribution}(p,n)<+{operator}(V(p,n)+{input}{arguments}); end endmodule"
+                );
+                let case = format!("{operator} {contribution} assigned={assigned}");
+                let report = VerilogACompiler::default()
+                    .compile_runtime_with_qualifications(
+                        &source,
+                        None,
+                        rspice_veriloga::RuntimeQualificationOptions {
+                            generated_rust: true,
+                            ..rspice_veriloga::RuntimeQualificationOptions::NONE
+                        },
+                    )
+                    .unwrap_or_else(|error| panic!("{case}: {error}"));
+                assert_eq!(report.abi.noise_source_count, 1, "{case}");
+                // General linearization is implemented by the runtime. The
+                // generated backend still accepts only its qualified affine
+                // routing subset and must continue to report that limitation.
+                assert!(report.generated_rust.is_none(), "{case}");
+                assert_eq!(
+                    report
+                        .targets
+                        .get(rspice_veriloga::RuntimeTarget::GeneratedRust)
+                        .readiness,
+                    rspice_veriloga::RuntimeTargetReadiness::Rejected,
+                    "{case}",
+                );
+                report.validate_integrity().unwrap();
+                #[cfg(feature = "wasm-jit")]
+                rspice_veriloga::wasm_jit::compile_model_value_module(
+                    &report.model,
+                    &report.canonical_ir,
+                )
+                .unwrap();
+                let mut device =
+                    rspice_veriloga::device::VerilogADevice::try_new_with_canonical_ir(
+                        "A1",
+                        report.model,
+                        &report.canonical_ir,
+                        &[1, 0],
+                    )
+                    .unwrap_or_else(|error| panic!("{case}: {error}"));
+                device.try_set_analysis_type(3).unwrap();
+                let sign = if contribution == "I" { -1.0 } else { 1.0 };
+                for bias in [0.5, 1.0, 3.0] {
+                    for frequency in [0.0, 17.0] {
+                        let processes = device
+                            .try_noise_processes_at_frequency(&[bias], frequency)
+                            .unwrap_or_else(|error| panic!("{case}: {error}"));
+                        assert_eq!(processes.len(), 1, "{case}");
+                        assert_eq!(processes[0].psd, 2.0 / bias, "{case}");
+                        assert_eq!(processes[0].injections.len(), 1, "{case}");
+                        let gain = processes[0].injections[0].gain;
+                        let expected = sign * derivative(bias);
+                        assert!(
+                            (gain.re - expected).abs() <= 1.0e-13 * expected.abs().max(1.0),
+                            "{case}: {gain:?}, expected {expected}"
+                        );
+                        assert_eq!(gain.im, 0.0, "{case}");
+                    }
+                }
+                device.try_set_parameter("enabled", 0.0).unwrap();
+                device.try_resolve_parameter_defaults().unwrap();
+                assert!(
+                    device
+                        .try_noise_processes_at_frequency(&[0.0], 0.0)
+                        .unwrap()
+                        .is_empty(),
+                    "{case}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn nonlinear_noise_queries_preserve_primal_and_derivative_domain_errors() {
+    for operator in ["sqrt", "ln"] {
+        for assigned in [false, true] {
+            let (assignment, input) = if assigned {
+                ("source=white_noise(1.0,\"n\");", "source")
+            } else {
+                ("", "white_noise(1.0,\"n\")")
+            };
+            let source = format!(
+                "module noise_domain(p,n); inout p,n; electrical p,n; real source; analog begin {assignment} I(p,n)<+{operator}(V(p,n)+{input}); end endmodule"
+            );
+            let case = format!("{operator} assigned={assigned}");
+            let report = VerilogACompiler::default()
+                .compile_runtime_with_qualifications(
+                    &source,
+                    None,
+                    rspice_veriloga::RuntimeQualificationOptions::NONE,
+                )
+                .unwrap_or_else(|error| panic!("{case}: {error}"));
+            let mut device = rspice_veriloga::device::VerilogADevice::try_new_with_canonical_ir(
+                "A1",
+                report.model,
+                &report.canonical_ir,
+                &[1, 0],
+            )
+            .unwrap_or_else(|error| panic!("{case}: {error}"));
+            device.try_set_analysis_type(3).unwrap();
+            // Negative bias is outside both primal domains. At zero, sqrt's
+            // primal is valid but its noise derivative is singular. Recover
+            // between errors to catch stale numerical state in either route.
+            for bias in [-1.0, 1.0, 0.0, 1.0] {
+                let result = device.try_noise_processes_at_frequency(&[bias], 1.0);
+                if bias <= 0.0 {
+                    result.expect_err(&format!("{case}: invalid bias {bias}"));
+                } else {
+                    let processes = result.unwrap_or_else(|error| panic!("{case}: {error}"));
+                    assert_eq!(processes.len(), 1, "{case}");
+                    assert_eq!(processes[0].psd, 1.0, "{case}");
+                    assert_eq!(
+                        processes[0].injections[0].gain.re,
+                        if operator == "sqrt" { -0.5 } else { -1.0 },
+                        "{case}"
+                    );
+                }
             }
         }
     }

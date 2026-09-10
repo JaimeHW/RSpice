@@ -516,22 +516,24 @@ endmodule
 }
 
 #[test]
-fn canonical_noise_plan_rejects_nonlinear_noise_placement() {
-    let error = VerilogACompiler::default()
+fn canonical_static_noise_plan_defers_general_call_linearization() {
+    let artifact = VerilogACompiler::default()
         .compile_canonical_ir(
             r#"
-module canonical_bad_noise(p, n);
+module canonical_nonlinear_noise(p, n);
     inout p, n;
     electrical p, n;
-    analog I(p, n) <+ sqrt(white_noise(1.0, "bad placement"));
+    analog I(p, n) <+ sqrt(V(p,n) + white_noise(1.0, "source"));
 endmodule
 "#,
         )
-        .expect_err("nonlinear noise placement must fail");
-
-    let message = error.to_string();
-    assert!(message.contains("noise function in a nonlinear or dynamic position"));
-    assert!(message.contains("must enter contributions additively"));
+        .expect("the static projection must not reject a general call");
+    assert!(artifact.noise_sources.sources.is_empty());
+    assert!(artifact.hir.expressions.iter().any(|expression| matches!(
+        expression.kind,
+        rspice_veriloga::canonical_ir::HirExprKind::NoiseSource { .. }
+    )));
+    artifact.validate().unwrap();
 }
 
 #[test]
