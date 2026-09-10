@@ -715,22 +715,25 @@ impl AnnotationState {
             .iter()
             .map(|object| object.object.clone())
             .collect::<HashSet<_>>();
+        let retains_reference = |object: &AnnotationObject| {
+            ((object.locked || object.external)
+                && request.protected_references
+                    == ProtectedReferencePolicy::RetainLockedAndExternalIds)
+                || (object.imported
+                    && self.policy.definition.imported_ids
+                        == ImportedReferencePolicy::PreserveWithSourceMap)
+        };
+        // Retained names are occupied even when their owners sort after an
+        // editable object. Otherwise preview can allocate the same name twice.
         let mut occupied = request
             .objects
             .iter()
-            .filter(|object| !selected_ids.contains(&object.object))
+            .filter(|object| !selected_ids.contains(&object.object) || retains_reference(object))
             .map(|object| case_fold(&object.current_reference))
             .collect::<HashSet<_>>();
         let mut mappings = BTreeMap::new();
         for object in selected {
             let protected = object.locked || object.external;
-            if protected
-                && request.protected_references
-                    == ProtectedReferencePolicy::RetainLockedAndExternalIds
-            {
-                occupied.insert(case_fold(&object.current_reference));
-                continue;
-            }
             if protected
                 && request.protected_references == ProtectedReferencePolicy::IncludeAfterReview
                 && !request.protected_reviewed
@@ -739,11 +742,7 @@ impl AnnotationState {
                     object.object.clone(),
                 ));
             }
-            if object.imported
-                && self.policy.definition.imported_ids
-                    == ImportedReferencePolicy::PreserveWithSourceMap
-            {
-                occupied.insert(case_fold(&object.current_reference));
+            if retains_reference(&object) {
                 continue;
             }
             let prefix = annotation_prefix(&object, self.policy.definition.prefix_allocation)?;
