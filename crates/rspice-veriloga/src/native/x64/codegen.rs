@@ -9879,7 +9879,13 @@ mod tests {
         let mut state_values = [0.0_f64, 0.0_f64];
         let mut state_initialized = [0_u8, 0_u8];
         let mut limiter_active = 0_u8;
+        let mut history = [0.0; 2];
+        let mut status = [0_u8; 2];
         let mut ctx = eval_context(&[], &[], &[], &[]);
+        ctx.state_older_candidate = history.as_mut_ptr();
+        ctx.state_older_candidate_len = history.len();
+        ctx.state_candidate_valid = status.as_mut_ptr();
+        ctx.state_candidate_valid_len = status.len();
         ctx.limiter_active = &mut limiter_active;
         ctx.limiting_enabled = 1;
         ctx.state_values = state_values.as_mut_ptr();
@@ -9892,15 +9898,23 @@ mod tests {
         assert_eq!(state_values[1].to_bits(), 10.0_f64.to_bits());
         assert_eq!(state_initialized[1], 1);
 
+        status.fill(0); // Begin the next Newton evaluation.
         let vars = [11.0_f64];
         assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 10.5_f64.to_bits());
         assert_eq!(state_values[1].to_bits(), 10.5_f64.to_bits());
         assert_eq!(state_initialized[1], 1);
+        assert_eq!(
+            f(&ctx, vars.as_ptr()),
+            10.5,
+            "repeated reads share this pass's history"
+        );
 
+        status.fill(0);
         let vars = [0.0_f64];
         assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 10.0_f64.to_bits());
         assert_eq!(state_values[1].to_bits(), 10.0_f64.to_bits());
 
+        status.fill(0);
         state_values[1] = 0.0;
         state_initialized[1] = 1;
         assert_eq!(state_initialized[1], 1);
@@ -10022,7 +10036,13 @@ mod tests {
         let mut state_values = [0.0_f64, 10.0_f64];
         let mut state_initialized = [0_u8, 1_u8];
         let mut limiter_active = 0_u8;
+        let mut history = [0.0; 2];
+        let mut status = [0_u8; 2];
         let mut ctx = eval_context(&[], &[], &[], &[]);
+        ctx.state_older_candidate = history.as_mut_ptr();
+        ctx.state_older_candidate_len = history.len();
+        ctx.state_candidate_valid = status.as_mut_ptr();
+        ctx.state_candidate_valid_len = status.len();
         ctx.limiter_active = &mut limiter_active;
         ctx.limiting_enabled = 1;
         ctx.state_values = state_values.as_mut_ptr();
@@ -10061,7 +10081,13 @@ mod tests {
 
         let mut state_values = [0.0_f64, 0.0_f64];
         let mut state_initialized = [0_u8, 0_u8];
+        let mut history = [0.0; 2];
+        let mut status = [0_u8; 2];
         let mut ctx = eval_context(&[], &[], &[], &[]);
+        ctx.state_older_candidate = history.as_mut_ptr();
+        ctx.state_older_candidate_len = history.len();
+        ctx.state_candidate_valid = status.as_mut_ptr();
+        ctx.state_candidate_valid_len = status.len();
         ctx.state_values = state_values.as_mut_ptr();
         ctx.state_values_len = state_values.len();
         ctx.state_initialized = state_initialized.as_mut_ptr();
@@ -10077,9 +10103,15 @@ mod tests {
         assert_eq!(limiter_active, 1);
 
         limiter_active = 0;
+        status.fill(0); // Begin the next Newton evaluation.
         let second_vars = [20.0_f64];
         assert_eq!(f(&ctx, second_vars.as_ptr()).to_bits(), 11.0_f64.to_bits());
         assert_eq!(state_values[1].to_bits(), 11.0_f64.to_bits());
+        assert_eq!(
+            f(&ctx, second_vars.as_ptr()),
+            11.0,
+            "repeated callback reads share history"
+        );
         assert_eq!(state_initialized[1], 1);
         assert_eq!(limiter_active, 1);
 

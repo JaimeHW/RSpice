@@ -455,14 +455,14 @@ pub struct EvalContext {
     /// native calls.
     #[doc(hidden)]
     pub runtime_status: NativeRuntimeStatus,
-    /// Per-integration-state marker written by a speculative native
-    /// evaluation. These flags are committed by the owning `VmContext`, never
-    /// by generated code.
+    /// Per-slot integration candidate or limiter history status, managed by
+    /// the runtime helpers and owning `VmContext`.
     pub state_candidate_valid: *mut u8,
     /// Length of `state_candidate_valid`.
     pub state_candidate_valid_len: usize,
     /// Per-state older-history lane proposed by the current integration
     /// evaluation and consumed only when the owning VM accepts the point.
+    /// Limiter slots use this lane to pin the previous Newton value instead.
     pub state_older_candidate: *mut f64,
     /// Length of `state_older_candidate`.
     pub state_older_candidate_len: usize,
@@ -700,7 +700,7 @@ pub extern "C" fn rspice_native_limit_state_bounds_error(ctx: *const EvalContext
 unsafe fn native_limiter_storage(
     ctx: *const EvalContext,
     state_id: usize,
-) -> Option<(*mut f64, *mut u8)> {
+) -> Option<(*mut f64, *mut u8, *mut f64, *mut u8)> {
     if ctx.is_null() {
         rspice_native_limit_state_values_error(ctx);
         return None;
@@ -734,9 +734,25 @@ unsafe fn native_limiter_storage(
         );
         return None;
     }
-    Some((unsafe { ctx.state_values.add(state_id) }, unsafe {
-        ctx.state_initialized.add(state_id)
-    }))
+    if ctx.state_candidate_valid.is_null()
+        || state_id >= ctx.state_candidate_valid_len
+        || ctx.state_older_candidate.is_null()
+        || state_id >= ctx.state_older_candidate_len
+    {
+        set_native_context_error(
+            ctx,
+            "native limit state missing iteration history storage; no interpreter fallback",
+        );
+        return None;
+    }
+    Some(unsafe {
+        (
+            ctx.state_values.add(state_id),
+            ctx.state_initialized.add(state_id),
+            ctx.state_older_candidate.add(state_id),
+            ctx.state_candidate_valid.add(state_id),
+        )
+    })
 }
 
 /// Read the previous Newton value for a named limiter, or use the oriented
@@ -760,14 +776,16 @@ pub unsafe extern "C" fn rspice_limiter_previous_native(
         return proposed;
     }
 
-    let Some((state_value, initialized)) = (unsafe { native_limiter_storage(ctx, state_id) })
+    let Some((state_value, initialized, previous, status)) =
+        (unsafe { native_limiter_storage(ctx, state_id) })
     else {
         return 0.0;
     };
-    if unsafe { *initialized } == 0 {
-        proposed
-    } else {
-        unsafe { *state_value }
+    match unsafe { *status } {
+        crate::vm::LIMITER_HISTORY_UNINITIALIZED => proposed,
+        crate::vm::LIMITER_HISTORY_VALID => unsafe { *previous },
+        _ if unsafe { *initialized } == 0 => proposed,
+        _ => unsafe { *state_value },
     }
 }
 
@@ -812,7 +830,8 @@ pub unsafe extern "C" fn rspice_limiter_store_native(
         );
         return 0.0;
     }
-    let Some((state_value, initialized)) = (unsafe { native_limiter_storage(ctx, state_id) })
+    let Some((state_value, initialized, previous, status)) =
+        (unsafe { native_limiter_storage(ctx, state_id) })
     else {
         return 0.0;
     };
@@ -822,6 +841,12 @@ pub unsafe extern "C" fn rspice_limiter_store_native(
         return 0.0;
     }
     unsafe {
+        crate::vm::pin_limiter_history(
+            &mut *status,
+            &mut *previous,
+            *state_value,
+            *initialized != 0,
+        );
         *limiter_active |= u8::from(candidate != proposed);
         *state_value = candidate;
         *initialized = 1;
@@ -849,15 +874,10 @@ pub unsafe extern "C" fn rspice_default_limit_native(
     if context.limiting_enabled == 0 {
         return proposed;
     }
-    let Some((state_value, initialized)) = (unsafe { native_limiter_storage(ctx, state_id) })
-    else {
+    if unsafe { native_limiter_storage(ctx, state_id) }.is_none() {
         return 0.0;
-    };
-    let previous = if unsafe { *initialized } == 0 {
-        proposed
-    } else {
-        unsafe { *state_value }
-    };
+    }
+    let previous = unsafe { rspice_limiter_previous_native(proposed, ctx, state_id) };
     let candidate =
         rspice_veriloga_runtime::arithmetic::default_limit_candidate(proposed, previous, unsafe {
             *operands.add(1)
@@ -3022,7 +3042,13 @@ mod tests {
         let mut value = [0.0];
         let mut initialized = [1_u8];
         let mut active = 0_u8;
+        let mut previous = [0.0];
+        let mut status = [0_u8];
         let mut ctx = empty_eval_context();
+        ctx.state_older_candidate = previous.as_mut_ptr();
+        ctx.state_older_candidate_len = 1;
+        ctx.state_candidate_valid = status.as_mut_ptr();
+        ctx.state_candidate_valid_len = 1;
         ctx.state_values = value.as_mut_ptr();
         ctx.state_values_len = 1;
         ctx.state_initialized = initialized.as_mut_ptr();
@@ -3048,6 +3074,26 @@ mod tests {
         );
         assert_eq!(value, [0.25]);
         assert_eq!(active, 1);
+        for (history_len, status_len) in [(0, 1), (1, 0)] {
+            ctx.state_older_candidate_len = history_len;
+            ctx.state_candidate_valid_len = status_len;
+            assert_eq!(
+                unsafe { rspice_default_limit_native([2.0, 0.25].as_ptr(), &ctx, 0) },
+                0.0
+            );
+            assert!(
+                ctx.take_runtime_error()
+                    .unwrap()
+                    .contains("iteration history storage")
+            );
+            assert_eq!(
+                value,
+                [0.25],
+                "incomplete storage cannot publish a candidate"
+            );
+        }
+        ctx.state_older_candidate_len = 1;
+        ctx.state_candidate_valid_len = 1;
         ctx.limiting_enabled = 0;
         assert_eq!(
             unsafe { rspice_default_limit_native([2.0, -1.0].as_ptr(), &ctx, usize::MAX) },
@@ -3063,7 +3109,13 @@ mod tests {
         let mut state_values = [0.0_f64];
         let mut state_initialized = [0_u8];
         let mut limiter_active = 0_u8;
+        let mut previous = [0.0];
+        let mut status = [0_u8];
         let mut ctx = empty_eval_context();
+        ctx.state_older_candidate = previous.as_mut_ptr();
+        ctx.state_older_candidate_len = 1;
+        ctx.state_candidate_valid = status.as_mut_ptr();
+        ctx.state_candidate_valid_len = 1;
         ctx.state_values = state_values.as_mut_ptr();
         ctx.state_values_len = state_values.len();
         ctx.state_initialized = state_initialized.as_mut_ptr();

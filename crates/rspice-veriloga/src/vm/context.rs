@@ -7,11 +7,10 @@
 //! The compiled model stays shared and immutable; this is the only mutable
 //! half, which is what lets a thousand instances share one compilation.
 //!
-//! The state follows a candidate/commit discipline. Newton re-evaluates the
-//! same timepoint repeatedly, so evaluation computes from the last *accepted*
-//! state and never advances history; the engine commits only once a step is
-//! accepted. Any operator with memory must respect that or iteration count
-//! would change results.
+//! Time-dependent operators compute from accepted state; only acceptance
+//! commits their candidates. Limiters instead advance once per Newton
+//! evaluation. Their assignment, value, and derivative programs share a pinned
+//! previous-iteration value, independent of how often a program reads it.
 
 use super::error::VmError;
 use super::filters::{
@@ -26,6 +25,28 @@ use rspice_veriloga_runtime::AnalogAnalysisPhase;
 pub(crate) const INTEGRATION_CANDIDATE_NONE: u8 = 0;
 pub(crate) const INTEGRATION_CANDIDATE_VALID: u8 = 1;
 pub(crate) const INTEGRATION_CANDIDATE_IDLE: u8 = 2;
+pub(crate) const LIMITER_HISTORY_UNINITIALIZED: u8 = 3;
+pub(crate) const LIMITER_HISTORY_VALID: u8 = 4;
+pub(crate) const LIMITER_HISTORY_IDLE: u8 = 5;
+
+pub(crate) fn pin_limiter_history(
+    status: &mut u8,
+    previous: &mut f64,
+    current: f64,
+    initialized: bool,
+) {
+    if !matches!(
+        *status,
+        LIMITER_HISTORY_UNINITIALIZED | LIMITER_HISTORY_VALID
+    ) {
+        *previous = current;
+        *status = if initialized {
+            LIMITER_HISTORY_VALID
+        } else {
+            LIMITER_HISTORY_UNINITIALIZED
+        };
+    }
+}
 
 pub const CURRENT_PAIR_GROUND: usize = usize::MAX;
 
@@ -352,16 +373,19 @@ pub struct VmContext {
     /// this only for accepted history; limiters also use their dedicated slots
     /// as immediate Newton-iteration history.
     pub state_initialized: Vec<bool>,
-    /// Per-slot integration candidate status. Zero denotes a non-integration
-    /// or not-yet-observed slot, one a candidate from the latest evaluation,
-    /// and two a known integration slot with no current candidate. This state
-    /// is runtime-only and is never serialized.
+    /// Per-slot evaluation status. Integration uses zero for an unseen slot,
+    /// one for a candidate, and two for an idle integration slot. Limiters use
+    /// three/four for an uninitialized/initialized previous-Newton snapshot
+    /// and five for a limiter whose snapshot is idle.
+    /// These operator families own disjoint slots. Runtime-only.
     pub(crate) state_candidate_valid: Vec<u8>,
     /// Exact older-history lane proposed by the current integration-state
     /// evaluation. This is transactional Newton state: `ddt` and `idt` use the
     /// logical previous value (including startup seeding), while `idtmod` uses
     /// that value translated onto the wrapped candidate's common branch.
-    /// Runtime-only; accepted history lanes are serialized by checkpoints.
+    /// A limiter slot instead holds its previous Newton value, pinned before
+    /// its first publication in this evaluation. Repeated primal/AD reads must
+    /// all use that same history. Runtime-only; never serialized.
     pub(crate) state_older_candidate: Vec<f64>,
     /// Per-evaluation slots the CFG route's prelude publishes into.
     ///
@@ -882,7 +906,7 @@ impl VmContext {
         if self
             .state_candidate_valid
             .iter()
-            .any(|status| *status > INTEGRATION_CANDIDATE_IDLE)
+            .any(|status| *status > LIMITER_HISTORY_IDLE)
         {
             return Err(invalid(
                 "candidate integration-state validity storage is malformed".into(),
@@ -900,6 +924,13 @@ impl VmContext {
             ));
         }
         for index in 0..state_count {
+            if self.state_candidate_valid[index] >= LIMITER_HISTORY_UNINITIALIZED
+                && !self.state_values[index].is_finite()
+            {
+                return Err(invalid(format!(
+                    "limiter state {index} contains a non-finite value"
+                )));
+            }
             if self.state_candidate_valid[index] == INTEGRATION_CANDIDATE_VALID
                 && (!self.state_values[index].is_finite()
                     || !self.state_derivatives[index].is_finite()
@@ -972,6 +1003,10 @@ impl VmContext {
         for index in 0..self.state_candidate_valid.len() {
             match self.state_candidate_valid[index] {
                 INTEGRATION_CANDIDATE_NONE => continue,
+                LIMITER_HISTORY_UNINITIALIZED | LIMITER_HISTORY_VALID | LIMITER_HISTORY_IDLE => {
+                    self.state_values_prev[index] = self.state_values[index];
+                    continue;
+                }
                 INTEGRATION_CANDIDATE_IDLE => {
                     self.state_values[index] = self.state_values_prev[index];
                     self.state_derivatives[index] = self.state_derivatives_prev[index];
@@ -1031,6 +1066,7 @@ impl VmContext {
         self.validate_event_state_layout()?;
         if self.state_candidate_valid.len() != self.state_values.len()
             || self.state_older_candidate.len() != self.state_values.len()
+            || self.state_values_prev.len() != self.state_values.len()
         {
             return Err(invalid(
                 "integration candidate-valid storage shape is inconsistent".into(),
@@ -1039,7 +1075,7 @@ impl VmContext {
         if self
             .state_candidate_valid
             .iter()
-            .any(|status| *status > INTEGRATION_CANDIDATE_IDLE)
+            .any(|status| *status > LIMITER_HISTORY_IDLE)
         {
             return Err(invalid(
                 "integration candidate-valid storage is malformed".into(),
@@ -1053,7 +1089,12 @@ impl VmContext {
                 "integration state has an in-flight Newton candidate".into(),
             ));
         }
-        if self.state_older_candidate.iter().any(|value| *value != 0.0) {
+        if self
+            .state_older_candidate
+            .iter()
+            .zip(&self.state_candidate_valid)
+            .any(|(value, status)| *status <= INTEGRATION_CANDIDATE_IDLE && *value != 0.0)
+        {
             return Err(invalid(
                 "integration state has an unapplied older-history candidate".into(),
             ));
@@ -1096,10 +1137,19 @@ impl VmContext {
         {
             variables[index] = accepted;
         }
+        let mut state_values_prev = self.state_values_prev.clone();
+        for (index, status) in self.state_candidate_valid.iter().enumerate() {
+            if matches!(
+                *status,
+                LIMITER_HISTORY_UNINITIALIZED | LIMITER_HISTORY_VALID | LIMITER_HISTORY_IDLE
+            ) {
+                state_values_prev[index] = self.state_values[index];
+            }
+        }
         let checkpoint = VmAcceptedCheckpoint {
             time: self.time,
             variables,
-            state_values_prev: self.state_values_prev.clone(),
+            state_values_prev,
             state_values_older: self.state_values_older.clone(),
             state_derivatives_prev: self.state_derivatives_prev.clone(),
             state_initialized: self.state_initialized.clone(),
@@ -1397,15 +1447,18 @@ impl VmContext {
         self.timer_event_bound = f64::INFINITY;
     }
 
-    /// Invalidate every speculative operator candidate before each complete
-    /// device evaluation. Only candidates recreated by the final Newton pass
-    /// may be committed when the point is accepted.
-    #[cfg(test)]
-    pub(crate) fn begin_stateful_evaluation(&mut self) {
+    /// Begin one complete model evaluation, using `evaluation_mode`. Call once
+    /// before its assignment, contribution, and derivative programs, rather
+    /// than before each program. This invalidates speculative integration
+    /// candidates and starts a new previous-Newton history for limiters.
+    pub fn begin_stateful_evaluation(&mut self) {
         self.begin_stateful_evaluation_with_tasks(true);
     }
 
     pub(crate) fn begin_stateful_evaluation_with_tasks(&mut self, record_tasks: bool) {
+        if self.evaluation_mode.limiting_enabled() {
+            self.limiter_active = 0;
+        }
         self.numerical_evaluation_valid = false;
         self.record_task_effects = record_tasks;
         if record_tasks && let Some(journal) = &mut self.analog_effects {
@@ -1427,6 +1480,11 @@ impl VmContext {
         {
             if *status == INTEGRATION_CANDIDATE_VALID {
                 *status = INTEGRATION_CANDIDATE_IDLE;
+            } else if matches!(
+                *status,
+                LIMITER_HISTORY_UNINITIALIZED | LIMITER_HISTORY_VALID
+            ) {
+                *status = LIMITER_HISTORY_IDLE;
             }
             *older_candidate = 0.0;
         }
@@ -1667,6 +1725,42 @@ impl VmContext {
     pub(crate) fn timer_event_step_bound(&self) -> Option<f64> {
         let bound = self.timer_event_bound - self.time;
         (bound.is_finite() && bound > 0.0).then_some(bound)
+    }
+
+    /// Read a limiter's history without publishing or allocating. The first
+    /// successful publication pins the previous Newton state for this pass.
+    pub(crate) fn limiter_previous(&self, index: usize, proposed: f64) -> Result<f64, VmError> {
+        match self.state_candidate_valid.get(index).copied() {
+            Some(LIMITER_HISTORY_UNINITIALIZED) => Ok(proposed),
+            Some(LIMITER_HISTORY_VALID) => {
+                self.state_older_candidate
+                    .get(index)
+                    .copied()
+                    .ok_or(VmError::InvalidInstruction(
+                        "limiter iteration history is missing",
+                    ))
+            }
+            _ if self.state_initialized.get(index) == Some(&true) => self
+                .state_values
+                .get(index)
+                .copied()
+                .ok_or(VmError::InvalidInstruction("limiter history is missing")),
+            _ => Ok(proposed),
+        }
+    }
+
+    /// Pin history before replacing the candidate. Call only after validating
+    /// all operands and ensuring the slot's runtime storage is allocated.
+    pub(crate) fn publish_limiter(&mut self, index: usize, proposed: f64, candidate: f64) {
+        pin_limiter_history(
+            &mut self.state_candidate_valid[index],
+            &mut self.state_older_candidate[index],
+            self.state_values[index],
+            self.state_initialized[index],
+        );
+        self.limiter_active |= u8::from(candidate != proposed);
+        self.state_values[index] = candidate;
+        self.state_initialized[index] = true;
     }
 
     /// Allocate state variables.
@@ -2744,6 +2838,53 @@ mod tests {
     }
 
     #[test]
+    fn limiter_history_survives_queries_acceptance_and_checkpoint_restore() {
+        let mut context = VmContext::with_states(0, 1);
+        assert_eq!(context.limiter_previous(0, 2.0).unwrap(), 2.0);
+        context.publish_limiter(0, 2.0, 2.0);
+        assert_eq!(context.limiter_previous(0, 3.0).unwrap(), 3.0);
+        context.begin_stateful_evaluation();
+        context.publish_limiter(0, 4.0, 2.25);
+        assert_eq!(context.limiter_previous(0, 4.0).unwrap(), 2.0);
+        assert_eq!(context.clone().limiter_previous(0, 4.0).unwrap(), 2.0);
+        context.advance_state().unwrap();
+        assert_eq!(context.limiter_previous(0, 4.0).unwrap(), 2.0);
+        let checkpoint = context.accepted_checkpoint().unwrap();
+        let mut malformed = context.clone();
+        malformed.state_values_prev.clear();
+        assert!(
+            malformed
+                .accepted_checkpoint()
+                .unwrap_err()
+                .to_string()
+                .contains("shape is inconsistent")
+        );
+        let mut malformed = context.clone();
+        malformed.state_values[0] = f64::NAN;
+        assert!(
+            malformed
+                .advance_state()
+                .unwrap_err()
+                .to_string()
+                .contains("limiter state 0")
+        );
+        assert_eq!(malformed.state_values_prev, context.state_values_prev);
+        let mut resumed = VmContext::with_states(0, 1);
+        resumed.restore_accepted_checkpoint(&checkpoint);
+        assert_eq!(resumed.limiter_previous(0, 4.0).unwrap(), 2.25);
+        context.begin_stateful_evaluation();
+        assert_eq!(context.limiter_previous(0, 4.0).unwrap(), 2.25);
+        // An inactive/probe pass must retain the limiter's identity and value.
+        context.begin_stateful_evaluation();
+        assert_eq!(
+            context.accepted_checkpoint().unwrap().state_values_prev,
+            [2.25]
+        );
+        context.reset_analysis_state();
+        assert_eq!(context.limiter_previous(0, 4.0).unwrap(), 4.0);
+    }
+
+    #[test]
     fn accepted_checkpoint_rejects_malformed_candidate_status_storage() {
         let mut context = VmContext::with_states(0, 1);
         context.state_candidate_valid.clear();
@@ -2752,7 +2893,7 @@ mod tests {
             .expect_err("candidate-status shape mismatch must block checkpoint capture");
         assert!(error.to_string().contains("shape is inconsistent"));
 
-        context.state_candidate_valid = vec![3];
+        context.state_candidate_valid = vec![6];
         let error = context
             .accepted_checkpoint()
             .expect_err("invalid candidate status must block checkpoint capture");

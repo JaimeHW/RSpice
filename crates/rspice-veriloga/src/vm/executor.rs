@@ -726,15 +726,7 @@ impl<'a> Vm<'a> {
                     return Ok(());
                 }
 
-                let previous = if self.context.state_initialized.get(*idx) == Some(&true) {
-                    *self
-                        .context
-                        .state_values
-                        .get(*idx)
-                        .ok_or(VmError::InvalidInstruction("limiter history is missing"))?
-                } else {
-                    new_value
-                };
+                let previous = self.context.limiter_previous(*idx, new_value)?;
                 let limited_value = rspice_veriloga_runtime::arithmetic::default_limit_candidate(
                     new_value, previous, step_limit,
                 );
@@ -751,13 +743,12 @@ impl<'a> Vm<'a> {
                     || self.context.state_derivatives_prev.len() <= *idx
                     || self.context.state_initialized.len() <= *idx
                     || self.context.state_candidate_valid.len() <= *idx
+                    || self.context.state_older_candidate.len() <= *idx
                 {
                     self.context.allocate_states(*idx + 1);
                 }
 
-                self.context.limiter_active |= u8::from(limited_value != new_value);
-                self.context.state_values[*idx] = limited_value;
-                self.context.state_initialized[*idx] = true;
+                self.context.publish_limiter(*idx, new_value, limited_value);
                 self.stack.push(limited_value);
             }
 
@@ -2254,7 +2245,10 @@ mod tests {
         assert_eq!(context.state_derivatives.len(), 3);
         assert_eq!(context.state_derivatives_prev.len(), 3);
         assert_eq!(context.state_initialized.len(), 3);
-        assert_eq!(context.state_candidate_valid, vec![0; 3]);
+        assert_eq!(
+            context.state_candidate_valid,
+            vec![0, 0, super::super::context::LIMITER_HISTORY_UNINITIALIZED]
+        );
         context.advance_state().unwrap();
         assert_eq!(context.state_values[2].to_bits(), 5.0_f64.to_bits());
     }
@@ -2273,6 +2267,7 @@ mod tests {
             )
         };
         assert_eq!(evaluate(&mut context, 0.0, 0.25).unwrap(), 0.0);
+        context.begin_stateful_evaluation();
         for (proposed, step) in [
             (1.0, -1.0),
             (1.0, f64::NAN),

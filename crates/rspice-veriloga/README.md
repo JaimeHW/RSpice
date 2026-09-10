@@ -351,10 +351,14 @@ portable VM, native backend, and generated Rust. Nonnegative degrees request a
 transient restart on a rising edge; `-1` prevents Newton convergence without
 requesting a time event. Degree expressions must be constant, numeric, and
 finite integers at least `-1`; instance-dependent values are checked during
-evaluation. Custom `$limit` function callbacks still require separate support
-for their convergence hints and standard function-identifier selectors.
-Runtime state version 9 and transient checkpoint format 40 keep older boolean
-discontinuity state from being reinterpreted as the new degree semantics.
+evaluation. Custom `$limit` callbacks accept function-identifier selectors;
+structured callback bodies and their convergence hints remain incomplete.
+Runtime state version 10 and transient checkpoint format 41 preserve limiter
+history and reject older payloads that omitted it or used older discontinuity
+semantics. Executable limiter value and derivative programs share the previous
+Newton history throughout one evaluation. Generated Rust also applies the
+limiter's affine RHS correction; integrating that correction into the executable
+VM, native, and WebAssembly stamping paths remains outstanding.
 
 Automatic differentiation keeps exact sparse lane shapes. Its fixed point uses
 a bounded compact bit matrix for ordinary compact models and falls back to

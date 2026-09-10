@@ -551,11 +551,15 @@ fn require_limit_state(
 ) -> Result<(), HelperError> {
     let values_len = session.context.state_values.len();
     let initialized_len = session.context.state_initialized.len();
-    if index < values_len && index < initialized_len {
+    if index < values_len
+        && index < initialized_len
+        && index < session.context.state_candidate_valid.len()
+        && index < session.context.state_older_candidate.len()
+    {
         Ok(())
     } else {
         Err(session.fail(format!(
-            "WASM JIT limiter state {index} exceeds value/init lengths {values_len}/{initialized_len}"
+            "WASM JIT limiter state {index} is not fully preallocated (value/init lengths {values_len}/{initialized_len})"
         )))
     }
 }
@@ -595,11 +599,10 @@ fn limiter_previous(
         return Ok(proposed);
     }
     require_limit_state(session, index)?;
-    Ok(if session.context.state_initialized[index] {
-        session.context.state_values[index]
-    } else {
-        proposed
-    })
+    session
+        .context
+        .limiter_previous(index, proposed)
+        .map_err(|error| session.fail(error.to_string()))
 }
 
 fn limiter_store(
@@ -615,9 +618,7 @@ fn limiter_store(
     if !proposed.is_finite() || !candidate.is_finite() {
         return Err(session.fail("$limit proposed value and candidate must be finite"));
     }
-    session.context.limiter_active |= u8::from(candidate != proposed);
-    session.context.state_values[index] = candidate;
-    session.context.state_initialized[index] = true;
+    session.context.publish_limiter(index, proposed, candidate);
     Ok(candidate)
 }
 

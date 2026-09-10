@@ -1921,6 +1921,11 @@ endmodule
             let export = harness.stamp_value_export(0);
             for (proposed, expected) in [(0.0, 0.0), (2.0, 0.5), (2.0, 1.0), (2.0, 1.5), (2.0, 2.0)]
             {
+                harness
+                    .store
+                    .data_mut()
+                    .context_mut()
+                    .begin_stateful_evaluation();
                 harness.write_f64(
                     FusedKernelHarness::VOLTAGES as usize,
                     if typed { -proposed } else { proposed },
@@ -1954,6 +1959,7 @@ endmodule
             ] {
                 let context = harness.store.data_mut().context_mut();
                 context.evaluation_mode = mode;
+                context.begin_stateful_evaluation();
                 if mode.limiting_enabled() {
                     context.limiter_active = 0;
                 }
@@ -1970,6 +1976,55 @@ endmodule
                     harness.store.data_mut().context_mut().limiter_active,
                     active
                 );
+            }
+        }
+    }
+
+    #[test]
+    fn wasm_nonlinear_limit_reuses_previous_newton_history_for_derivatives() {
+        use super::abi::FRAME_RESULT_OFFSET;
+        for body in [
+            "limited=$limit(V(p,n),0.25); I(p,n)<+limited*limited;",
+            "limited=pow($limit(V(p,n),0.25),2); I(p,n)<+limited;",
+            "I(p,n)<+pow($limit(V(p,n),0.25),2);",
+            "I(p,n)<+pow($limit(V(p,n),clip),2);",
+            "I(p,n)<+pow($limit(V(n,p),\"clip\",\"typed\",-1.0),2);",
+        ] {
+            let source = format!(
+                "module bounded(p,n,c); inout p,n,c; electrical p,n,c; real limited; analog function real clip; input real proposed,previous; clip=min(proposed,previous+0.25); endfunction analog begin {body} end endmodule"
+            );
+            for postfix in [false, true] {
+                let mut harness =
+                    FusedKernelHarness::for_source_with_plan(&source, "bounded", postfix);
+                harness.reset();
+                let value = harness.stamp_value_export(0);
+                let derivative = harness.jacobian_export(0, 0);
+                for (proposed, limited) in
+                    [(0.0, 0.0), (1.0, 0.25), (1.0, 0.5), (1.0, 0.75), (1.0, 1.0)]
+                {
+                    harness
+                        .store
+                        .data_mut()
+                        .context_mut()
+                        .begin_stateful_evaluation();
+                    harness.write_f64(FusedKernelHarness::VOLTAGES as usize, proposed);
+                    harness.call_assignments();
+                    harness.call_prelude();
+                    for _ in 0..2 {
+                        assert_eq!(harness.call(&value), 0);
+                        assert_eq!(
+                            harness.read_f64(FRAME_RESULT_OFFSET as usize),
+                            limited * limited,
+                            "{body}; postfix={postfix}"
+                        );
+                        assert_eq!(harness.call(&derivative), 0);
+                        assert_eq!(
+                            harness.read_f64(FRAME_RESULT_OFFSET as usize),
+                            2.0 * limited,
+                            "{body}; postfix={postfix}"
+                        );
+                    }
+                }
             }
         }
     }

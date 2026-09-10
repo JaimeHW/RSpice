@@ -521,6 +521,116 @@ fn default_limit_preserves_probe_history_and_reports_clipping() {
 }
 
 #[test]
+fn limiter_values_and_jacobians_share_previous_newton_history() {
+    use rspice_veriloga::vm::VerilogAEvaluationMode as Mode;
+    for body in [
+        "limited=$limit(V(p,n),0.25); I(p,n)<+limited*limited;",
+        "limited=$limit(V(p,n),0.25)*$limit(V(p,n),0.25); I(p,n)<+limited;",
+        "I(p,n)<+pow($limit(V(p,n),0.25),2);",
+        #[cfg(feature = "native")]
+        "I(p,n)<+pow($limit(V(p,n),clip),2);",
+        #[cfg(feature = "native")]
+        "I(p,n)<+pow($limit(V(n,p),\"clip\",\"typed\",-1.0),2);",
+    ] {
+        let source = format!(
+            "module bounded(p,n); inout p,n; electrical p,n; real limited;
+             analog function real clip; input real proposed,previous;
+              clip=min(proposed,previous+0.25); endfunction
+             analog begin {body} end endmodule"
+        );
+        for stamp in [false, true] {
+            let mut device = compile_device("HISTORY", &source);
+            device.update_voltages(&[0.0]);
+            assert_eq!(
+                device.try_evaluate_with_mode(Mode::NewtonLimited).unwrap(),
+                [0.0]
+            );
+            for limited in [0.25_f64, 0.5, 0.75, 1.0] {
+                device.update_voltages(&[1.0]);
+                if stamp {
+                    let mut matrix = 0.0;
+                    device
+                        .try_stamp_with_mode(
+                            &[1.0],
+                            |_, _, value| matrix += value,
+                            |_, _| {},
+                            Mode::NewtonLimited,
+                        )
+                        .unwrap();
+                    assert_eq!(matrix, 2.0 * limited, "stamped derivative: {body}");
+                } else {
+                    assert_eq!(
+                        device.try_evaluate_with_mode(Mode::NewtonLimited).unwrap(),
+                        [limited * limited],
+                        "value: {body}"
+                    );
+                }
+                for _ in 0..2 {
+                    let derivative: f64 = device
+                        .try_compute_jacobian()
+                        .unwrap()
+                        .iter()
+                        .filter(|entry| {
+                            matches!(entry.row, rspice_veriloga::codegen::StampIndex::Terminal(0))
+                                && matches!(
+                                    entry.col,
+                                    rspice_veriloga::codegen::StampIndex::Terminal(0)
+                                )
+                        })
+                        .map(|entry| entry.value)
+                        .sum();
+                    assert_eq!(derivative, 2.0 * limited, "queried derivative: {body}");
+                }
+                assert_eq!(device.limiter_converged(), limited == 1.0);
+            }
+        }
+    }
+}
+
+#[test]
+fn limiter_checkpoint_restores_the_previous_newton_value() {
+    use rspice_veriloga::vm::VerilogAEvaluationMode as Mode;
+    let source = "module bounded(p,n); inout p,n; electrical p,n;
+        analog I(p,n)<+$limit(V(p,n),0.25); endmodule";
+    let mut original = compile_device("RESUME", source);
+    for (proposed, expected) in [(2.0, 2.0), (4.0, 2.25)] {
+        original.update_voltages(&[proposed]);
+        assert_eq!(
+            original
+                .try_evaluate_with_mode(Mode::NewtonLimited)
+                .unwrap(),
+            [expected]
+        );
+    }
+    // Probing must preserve both history and its classification for saving.
+    assert_eq!(
+        original.try_evaluate_with_mode(Mode::StaticProbe).unwrap(),
+        [4.0]
+    );
+    let saved = original.checkpoint_state().unwrap();
+    let decoded = rspice_veriloga::device::VerilogADeviceCheckpoint::from_words(
+        saved.instance_name.clone(),
+        saved.model_name.clone(),
+        saved.source_digest.clone(),
+        saved.shape_identity.clone(),
+        &saved.to_words(),
+    )
+    .unwrap();
+    let mut resumed = compile_device("RESUME", source);
+    resumed.validate_checkpoint_state(&decoded).unwrap();
+    resumed.apply_validated_checkpoint_state(&decoded);
+    for expected in [2.5, 2.75, 3.0] {
+        for device in [&mut original, &mut resumed] {
+            device.update_voltages(&[4.0]);
+            assert_eq!(
+                device.try_evaluate_with_mode(Mode::NewtonLimited).unwrap(),
+                [expected]
+            );
+        }
+    }
+}
+
+#[test]
 fn default_limit_recovers_after_an_invalid_step_without_changing_history() {
     use rspice_veriloga::vm::VerilogAEvaluationMode as Mode;
     let mut device = compile_device(

@@ -177,7 +177,11 @@ fn checkpoint_operation_result<T>(
 /// Version 38 adds complete accepted JFET nonlinear and integration history.
 /// Version 39 retains JFET terminal displacement currents across integration resets.
 /// Version 40 separates runtime Verilog-A transient and Newton discontinuity hints.
-const FORMAT_VERSION: u32 = 40;
+/// Version 41 retains runtime Verilog-A limiter history across checkpoint restore.
+const FORMAT_VERSION: u32 = 41;
+
+#[cfg(feature = "veriloga")]
+const RUNTIME_VERILOGA_LIMITER_HISTORY_FORMAT_VERSION: u32 = 41;
 #[cfg(feature = "veriloga")]
 const RUNTIME_VERILOGA_DISCONTINUITY_FORMAT_VERSION: u32 = 40;
 const JFET_CURRENT_HISTORY_FORMAT_VERSION: u32 = 39;
@@ -3684,6 +3688,8 @@ fn read_runtime_veriloga_states(
             Some(7)
         } else if checkpoint_version < RUNTIME_VERILOGA_DISCONTINUITY_FORMAT_VERSION {
             Some(8)
+        } else if checkpoint_version < RUNTIME_VERILOGA_LIMITER_HISTORY_FORMAT_VERSION {
+            Some(9)
         } else {
             None
         };
@@ -3774,6 +3780,7 @@ fn read_runtime_veriloga_states(
                 6 => VerilogADeviceCheckpoint::validate_legacy_v6_words(&words),
                 7 => VerilogADeviceCheckpoint::validate_legacy_v7_words(&words),
                 8 => VerilogADeviceCheckpoint::validate_legacy_v8_words(&words),
+                9 => VerilogADeviceCheckpoint::validate_legacy_v9_words(&words),
                 _ => unreachable!("known legacy runtime Verilog-A state version"),
             }
             .map_err(|error| {
@@ -3808,8 +3815,9 @@ fn read_runtime_veriloga_states(
     // generator's per-emission state slots rather than the canonical per-site
     // ones the compiler now numbers records with, so a record it holds cannot
     // be told which operator owns it. Version 8 does not distinguish transient
-    // discontinuities from Newton convergence hints. All remain parseable for
-    // diagnostics but cannot be promoted into exact current accepted state.
+    // discontinuities from Newton convergence hints. Version 9 omitted limiter
+    // history. All remain parseable for diagnostics but cannot be promoted
+    // into exact current accepted state.
     Ok((states, legacy_state_version.is_some() && count != 0))
 }
 
@@ -12521,7 +12529,7 @@ mod tests {
     /// asserting current-format behaviour after two renumberings moved it into
     /// the legacy ladder.
     #[cfg(feature = "veriloga")]
-    const RUNTIME_VERILOGA_FORMAT_STATE_CONTRACTS: [(u32, u32); 24] = [
+    const RUNTIME_VERILOGA_FORMAT_STATE_CONTRACTS: [(u32, u32); 25] = [
         (17, 1),
         (18, 1),
         (19, 1),
@@ -12546,6 +12554,7 @@ mod tests {
         (38, 8),
         (39, 8),
         (40, 9),
+        (41, 10),
     ];
 
     #[cfg(feature = "veriloga")]
@@ -12697,6 +12706,24 @@ mod tests {
             error.contains("legacy payload is invalid")
                 && error.contains("Laplace filter 0 state contains a non-finite value"),
             "unexpected error: {error}"
+        );
+    }
+
+    #[cfg(feature = "veriloga")]
+    #[test]
+    fn v40_runtime_veriloga_state_without_limiter_history_is_validated_then_discarded() {
+        let checkpoint = sample_without_generated_veriloga_state();
+        let mut words = runtime_veriloga_idtmod_words(9, checkpoint.time);
+        let fixture = replace_empty_runtime_veriloga_tail(legacy_text(&checkpoint, 40), 9, &words);
+        let restored = TransientCheckpoint::from_text(&fixture).unwrap();
+        assert!(!restored.runtime_veriloga_state_available);
+        assert!(restored.runtime_veriloga_instance_states.is_empty());
+        words.push(0);
+        let corrupt = replace_empty_runtime_veriloga_tail(legacy_text(&checkpoint, 40), 9, &words);
+        assert!(
+            TransientCheckpoint::from_text(&corrupt)
+                .unwrap_err()
+                .contains("legacy payload is invalid")
         );
     }
 

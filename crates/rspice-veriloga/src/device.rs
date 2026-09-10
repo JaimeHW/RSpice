@@ -703,12 +703,27 @@ mod runtime_checkpoint_codec_tests {
         );
     }
 
-    /// Version 7 is the one legacy payload whose *words* are current: every
-    /// field, in the same order, with the same encoding. What it does not carry
-    /// is the numbering — its slot arrays are indexed by the bytecode
-    /// generator's per-emission allocation rather than the canonical per-site
-    /// one — so the payload has to validate for diagnostics and refuse to
-    /// resume, and nothing but the version word can tell the two apart.
+    #[test]
+    fn legacy_v9_payload_cannot_restore_missing_limiter_history() {
+        let checkpoint = checkpoint_with_slew_entries();
+        let mut words = checkpoint.to_words();
+        words[0] = 9;
+        VerilogADeviceCheckpoint::validate_legacy_v9_words(&words).unwrap();
+        assert!(
+            VerilogADeviceCheckpoint::from_words(
+                checkpoint.instance_name,
+                checkpoint.model_name,
+                checkpoint.source_digest,
+                checkpoint.shape_identity,
+                &words,
+            )
+            .unwrap_err()
+            .contains("unsupported runtime Verilog-A state version 9")
+        );
+        words.push(0);
+        assert!(VerilogADeviceCheckpoint::validate_legacy_v9_words(&words).is_err());
+    }
+
     #[test]
     fn legacy_v8_payload_validates_but_cannot_restore_ambiguous_discontinuity() {
         let checkpoint = checkpoint_with_slew_entries();
@@ -730,6 +745,12 @@ mod runtime_checkpoint_codec_tests {
         assert!(VerilogADeviceCheckpoint::validate_legacy_v8_words(&words).is_err());
     }
 
+    /// Version 7 is the one legacy payload whose *words* are current: every
+    /// field, in the same order, with the same encoding. What it does not carry
+    /// is the numbering — its slot arrays are indexed by the bytecode
+    /// generator's per-emission allocation rather than the canonical per-site
+    /// one — so the payload has to validate for diagnostics and refuse to
+    /// resume, and nothing but the version word can tell the two apart.
     #[test]
     fn legacy_v7_payload_validates_but_cannot_be_read_as_the_per_site_numbering() {
         let checkpoint = checkpoint_with_slew_entries();
@@ -965,7 +986,9 @@ pub struct VerilogADevice {
 /// is what refuses the modules whose length happens not to move.
 /// Version 9 separates transient discontinuities from Newton convergence hints.
 /// Version 8 cannot distinguish an accepted `-1` hint from a time discontinuity.
-pub const RUNTIME_CHECKPOINT_STATE_VERSION: u32 = 9;
+/// Version 10 retains each limiter's previous Newton value. Earlier payloads
+/// saved its unused integration history instead, so they cannot resume it.
+pub const RUNTIME_CHECKPOINT_STATE_VERSION: u32 = 10;
 
 /// Versioned accepted runtime state for one compiled Verilog-A instance.
 /// Compiled programs, topology, and solver caches are intentionally absent.
@@ -1611,6 +1634,19 @@ impl VerilogADeviceCheckpoint {
             SmolStr::new_inline("legacy"),
             words,
             8,
+        )
+        .map(drop)
+    }
+
+    /// Validate version 9 for diagnostics; its limiter history was not saved.
+    pub fn validate_legacy_v9_words(words: &[u64]) -> Result<(), String> {
+        Self::from_words_with_expected_version(
+            SmolStr::new_inline("legacy"),
+            SmolStr::new_inline("legacy"),
+            SmolStr::new_inline("legacy"),
+            SmolStr::new_inline("legacy"),
+            words,
+            9,
         )
         .map(drop)
     }
@@ -4702,17 +4738,11 @@ impl VerilogADevice {
     ///
     /// It advances no state the evaluation owns, and that is a claim about
     /// what can reach this pass rather than about analog operators in general.
-    /// Two facts make it true. Since W-F12 the CFG route has executed the
-    /// module body twice per evaluation — the assignment pass, then the
-    /// prelude — so every operator a CFG-planned module has is already being
-    /// run twice at an unchanged operating point, and a third execution is the
-    /// same class. And the one operator that is *not* idempotent under a second
-    /// execution, a named `$limit`, cannot appear in a CFG-planned module at
-    /// all: `$limit` is one of the constructs the CFG lowering refuses. Its
-    /// candidate is stored as the previous value for the *next* Newton
-    /// evaluation, so re-running the assignment that computes it moves the
-    /// limiter — which is why the guard below is a correctness rule and not an
-    /// optimization.
+    /// The assignment pass and CFG prelude already share one evaluation.
+    /// Observation reuses that evaluation without beginning another stateful
+    /// pass: time-dependent operators read accepted history, and limiters read
+    /// the pinned previous-Newton snapshot. The CFG route still refuses
+    /// limiters, so their modules currently use the postfix plan below.
     ///
     /// A module the CFG route refused keeps the postfix plan, whose assignment
     /// pass is rooted on the observable set as well as on its entries' reads.
@@ -5515,9 +5545,6 @@ impl VerilogADevice {
         self.context.evaluation_mode = mode;
         self.context
             .begin_stateful_evaluation_with_tasks(record_tasks);
-        if mode.limiting_enabled() {
-            self.context.limiter_active = 0;
-        }
     }
 
     /// Build a native evaluation-context snapshot over the VM context.
@@ -6519,10 +6546,9 @@ impl VerilogADevice {
         observation.record_task_effects = false;
         // A standalone Jacobian query belongs to the current nonlinear
         // evaluation and must not erase the convergence result established by
-        // its value pass or advance limiter history a second time. Canonical
-        // limiter Jacobians use the oriented proposal directly, so bypassing
-        // candidate publication here preserves that contract.
-        observation.evaluation_mode = crate::vm::VerilogAEvaluationMode::StaticProbe;
+        // its value pass or advance limiter history a second time. Reuse its
+        // pinned previous-Newton history and mode: nonlinear derivatives need
+        // the same limited primal values that the value pass evaluated.
         let context = &mut observation;
         if replay {
             context.begin_stateful_evaluation_with_tasks(false);
@@ -9436,9 +9462,8 @@ endmodule
     /// Both halves are load-bearing. The first keeps the observation from
     /// becoming a no-op for the modules that need it — a pin that read a
     /// variable back would otherwise still pass with the whole mechanism
-    /// disconnected. The second is a correctness rule: a named `$limit` stores
-    /// its candidate as the previous value for the next Newton evaluation, so
-    /// re-running the pass that computes it moves the limiter. `$limit` is also
+    /// disconnected. The second avoids replaying a postfix assignment pass
+    /// that has already published every observable variable. `$limit` is also
     /// what makes this module take the postfix plan in the first place, which
     /// is why the two halves are one test.
     #[test]

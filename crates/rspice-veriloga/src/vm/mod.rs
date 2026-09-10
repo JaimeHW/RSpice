@@ -16,6 +16,10 @@ pub use context::{
     VmContext, terminal_pair_current_endpoints, terminal_pair_current_index,
     terminal_pair_current_len,
 };
+#[cfg(feature = "native")]
+pub(crate) use context::{
+    LIMITER_HISTORY_UNINITIALIZED, LIMITER_HISTORY_VALID, pin_limiter_history,
+};
 pub use error::VmError;
 pub use executor::Vm;
 #[cfg(all(feature = "wasm-jit", any(target_arch = "wasm32", test)))]
