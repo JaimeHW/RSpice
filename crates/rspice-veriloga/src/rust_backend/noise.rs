@@ -22,7 +22,7 @@ use crate::canonical_ir::{
 };
 use crate::metrics::PipelineControl;
 
-use super::emit::{EmitBindings, emit_body, lane_runtime_types};
+use super::emit::{EmitBindings, emit_body, lane_runtime_types, math_runtime_imports};
 use super::expr::{
     BranchCurrentSlot, LoweredVariable, branch_pair_key, lower_noise_value_expr,
     parameter_field_names,
@@ -113,6 +113,7 @@ pub(super) fn generate_noise_file(
     options: &RustTranspileOptions,
     control: &dyn PipelineControl,
 ) -> Result<GeneratedRustFile, RustBackendError> {
+    let grouped_noise = grouped_noise_extension(artifact, options, control)?;
     let parameter_fields = parameter_field_names(artifact);
     let variables = noise_variables(artifact);
     let branch_unknowns = noise_branch_unknowns(artifact);
@@ -133,6 +134,16 @@ pub(super) fn generate_noise_file(
         options.runtime_path, options.runtime_path
     )
     .expect("write generated noise imports");
+    let math_support = math_runtime_imports(&[&grouped_noise], []);
+    if !math_support.is_empty() {
+        writeln!(
+            out,
+            "use {}::{{{}}};",
+            options.runtime_path,
+            math_support.join(", ")
+        )
+        .expect("write grouped noise math imports");
+    }
     // Literal text for the same reason as `expr.rs`'s thresholds: these bytes
     // are in the bundle digest. The assertion is what ties them to the ruling.
     const _: () = assert!(rspice_veriloga_runtime::LIMEXP_MAX == 5.54062238439351e34);
@@ -153,7 +164,7 @@ pub(super) fn generate_noise_file(
              \x20   }\n\
              }\n",
         );
-        out.push_str(&grouped_noise_extension(artifact, options, control)?);
+        out.push_str(&grouped_noise);
         return Ok(GeneratedRustFile {
             relative_path: "noise.rs".to_string(),
             contents: out,
@@ -376,7 +387,7 @@ pub(super) fn generate_noise_file(
     out.push_str("        Ok(())\n    }\n");
     out.push_str(&helper_methods);
     out.push_str("}\n");
-    out.push_str(&grouped_noise_extension(artifact, options, control)?);
+    out.push_str(&grouped_noise);
 
     Ok(GeneratedRustFile {
         relative_path: "noise.rs".to_string(),

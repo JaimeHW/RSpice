@@ -253,6 +253,45 @@ impl std::fmt::Display for EmitError {
 
 impl std::error::Error for EmitError {}
 
+/// Collect only the free math helpers used by the completed evaluators.
+/// Intermediate imports retain the ordering of the generated runtime bindings.
+pub(super) fn math_runtime_imports(
+    bodies: &[&str],
+    intermediate: impl IntoIterator<Item = String>,
+) -> Vec<String> {
+    let mut imports = Vec::new();
+    for helper in [
+        "product_div",
+        "product_sum_div",
+        "sum_products_div",
+        "sum_products_div_lanes",
+    ] {
+        let call = format!("{helper}(");
+        if bodies.iter().any(|source| {
+            source.match_indices(&call).any(|(index, _)| {
+                index == 0
+                    || !matches!(source.as_bytes()[index - 1], b'.' | b'_' | b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9')
+            })
+        }) {
+            imports.push(format!("arithmetic::{helper}"));
+        }
+    }
+    imports.extend(intermediate);
+    for helper in [
+        "rspice_limexp",
+        "rspice_limited_exp",
+        "rspice_limited_exp_derivative",
+    ] {
+        if bodies
+            .iter()
+            .any(|source| source.contains(&format!("{helper}(")))
+        {
+            imports.push(helper.to_string());
+        }
+    }
+    imports
+}
+
 /// Emit the body of a function computing `outputs`.
 ///
 /// The returned source is statements, not a complete item: the caller supplies

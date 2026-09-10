@@ -81,7 +81,7 @@ use crate::metrics::{
     PipelinePhase,
 };
 
-use super::emit::{EmitBindings, emit_body, lane_runtime_types};
+use super::emit::{EmitBindings, emit_body, lane_runtime_types, math_runtime_imports};
 use super::expr::parameter_field_names;
 use super::stamp_plan::{StampPlan, StampRow, split_row};
 use super::{GeneratedRustDevice, GeneratedRustFile, RustBackendError, RustDeviceNames};
@@ -3120,46 +3120,19 @@ impl ModelPlan {
         // bounded-exponential derivative without importing it. Looking at the
         // completed bodies is exact (so no unused imports) and remains closed
         // over future emitter rewrites.
-        let uses_math_helper =
-            |helper: &str| body.contains(helper) || grouped_noise.contains(helper);
-        let mut math_support = Vec::new();
-        for helper in [
-            "product_div",
-            "product_sum_div",
-            "sum_products_div",
-            "sum_products_div_lanes",
-        ] {
-            let call = format!("{helper}(");
-            let uses_free_helper = |source: &str| {
-                source.match_indices(&call).any(|(index, _)| {
-                    index == 0
-                        || !matches!(source.as_bytes()[index - 1], b'.' | b'_' | b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9')
-                })
-            };
-            if uses_free_helper(&body) || uses_free_helper(&grouped_noise) {
-                math_support.push(format!("arithmetic::{helper}"));
-            }
-        }
+        let mut runtime_support = Vec::new();
         if body.contains("integer::") {
-            math_support.push("integer".to_string());
+            runtime_support.push("integer".to_string());
         }
         if !shared_stages.is_empty() {
-            math_support.push("install_generated_stage_values".to_string());
+            runtime_support.push("install_generated_stage_values".to_string());
         }
-        math_support.extend(
+        runtime_support.extend(
             lane_runtime_types(function)
                 .into_iter()
                 .filter(|name| body.contains(&format!("{name}("))),
         );
-        if uses_math_helper("rspice_limexp(") {
-            math_support.push("rspice_limexp".to_string());
-        }
-        if uses_math_helper("rspice_limited_exp(") {
-            math_support.push("rspice_limited_exp".to_string());
-        }
-        if uses_math_helper("rspice_limited_exp_derivative(") {
-            math_support.push("rspice_limited_exp_derivative".to_string());
-        }
+        let math_support = math_runtime_imports(&[&body, &grouped_noise], runtime_support);
         if !math_support.is_empty() {
             if math_support.len() == 1 {
                 let _ = writeln!(out, "use {}::{};", options.runtime_path, math_support[0]);

@@ -2708,6 +2708,46 @@ assert_eq!(disabled.0, vec![(true, 1.5), (false, 0.0)]);
 }
 
 #[test]
+fn generated_unused_noise_processes_import_and_evaluate_math_helpers() {
+    for (index, (power, expected)) in [
+        ("limexp(V(p,n))", "2.0_f64.exp()"),
+        ("limexp(-V(p,n))", "(-2.0_f64).exp()"),
+        ("limexp(45.0*V(p,n))", "80.0_f64.exp()*11.0"),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        // An unused process has no source-wise injection plan. Its grouped
+        // evaluator still computes the power, including any runtime helpers.
+        let source = format!(
+            "module unused_noise(p,n); inout p,n; electrical p,n; real d; analog begin d=white_noise({power},\"input\"); I(p,n)<+V(p,n); end endmodule"
+        );
+        let name = format!("unused noise math {index}");
+        let (state, stamp, noise) = generated_parts(&source, &name);
+        run_generated_main(&name, &state, &stamp, &noise, &format!(r#"
+#[derive(Default)]
+struct Capture(Vec<f64>);
+impl runtime::GeneratedNoiseProcessVisitor for Capture {{
+    fn visit_process(&mut self, _: usize, process: runtime::GeneratedNoiseProcessEvaluationRef<'_>) -> bool {{
+        assert!(process.active);
+        assert!(process.injections.is_empty());
+        self.0.push(process.psd);
+        true
+    }}
+}}
+let mut instance=device::state::Instance::new(&[0,1]);
+instance.finalize_parameters().unwrap();
+let ctx=runtime::GeneratedEvalContext {{ voltages:&[2.0,0.0], temperature:300.15 }};
+let mut capture=Capture::default();
+instance.evaluate_noise_processes_at_frequency(&ctx,1.0,&mut capture).unwrap();
+assert_eq!(capture.0.len(),1);
+assert!((capture.0[0]/({expected})-1.0).abs() <= 8.0*f64::EPSILON);
+assert!(!ctx.evaluation_failed());
+"#)).unwrap_or_else(|report| panic!("{name}: {report}"));
+    }
+}
+
+#[test]
 fn generated_grouped_noise_preserves_frequency_and_multiplicity_range() {
     for (kind, current) in [("I", true), ("V", false)] {
         let source = format!(
