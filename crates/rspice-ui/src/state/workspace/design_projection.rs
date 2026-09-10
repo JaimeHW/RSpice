@@ -414,6 +414,13 @@ impl ProjectWorkspace {
             .borrow_mut()
             .retain(|cell_view_key, _| schematic_buffers.contains_key(cell_view_key));
 
+        self.preserve_variant_connections(
+            libraries,
+            active_reference,
+            active_schematic,
+            &mut schematic_buffers,
+        )?;
+
         // Resolve the exact circuit that the netlister receives. Variants can
         // remove instances, replace masters or introduce new child instances;
         // the raw authored hierarchy is not their execution authority.
@@ -436,6 +443,193 @@ impl ProjectWorkspace {
             ));
         }
         Ok(projection)
+    }
+
+    /// Pin geometry belongs to the authored occurrence. Apply it after the
+    /// per-document materialization cache: library symbols and other masters'
+    /// live interfaces participate in the complete projection key, not in one
+    /// document's source-only memo key.
+    fn preserve_variant_connections(
+        &self,
+        libraries: &LibraryManager,
+        active_reference: &CellViewRef,
+        active_schematic: &SchematicState,
+        projected: &mut HashMap<String, SchematicState>,
+    ) -> Result<(), ConfigurationExecutionPlanError> {
+        use crate::state::{
+            ComponentType, Point, PortSpec, Rotation, SymbolResolver, VariantObjectOverride,
+        };
+
+        let variants = self.design_management.variants();
+        let Some(active_variant) = variants.active_variant_id() else {
+            return Ok(());
+        };
+        let variant = variants.resolve(active_variant).map_err(|error| {
+            ConfigurationExecutionPlanError::DesignManagement(error.to_string())
+        })?;
+        let source_symbols = SymbolResolver::new(libraries, &self.schematic_buffers)
+            .with_active_schematic(active_reference, active_schematic);
+        let target_symbols = SymbolResolver::new(libraries, projected);
+        let mut updates = Vec::new();
+        for (object, change) in &variant.overrides {
+            let VariantObjectOverride::Substitute { replacement } = change else {
+                continue;
+            };
+            let refusal = |reason: String| {
+                ConfigurationExecutionPlanError::DesignManagement(format!(
+                    "Replacement of {} object {}: {reason}",
+                    object.cell_view_key(),
+                    object.object_id()
+                ))
+            };
+            let (key, projected_document) = projected
+                .iter()
+                .find(|(key, _)| key.eq_ignore_ascii_case(object.cell_view_key()))
+                .ok_or_else(|| refusal("source document is unavailable".to_owned()))?;
+            let source_document = if key.eq_ignore_ascii_case(&active_reference.key()) {
+                active_schematic
+            } else {
+                self.schematic_buffers
+                    .get(key)
+                    .ok_or_else(|| refusal("authored document is unavailable".to_owned()))?
+            };
+            let source = source_document
+                .components
+                .iter()
+                .find(|component| component.id == object.object_id())
+                .ok_or_else(|| refusal("source component is unavailable".to_owned()))?;
+            if !projected_document
+                .components
+                .iter()
+                .any(|component| component.id == source.id)
+            {
+                return Err(refusal("projected component is unavailable".to_owned()));
+            }
+            let source_symbol = source
+                .library_cell
+                .as_ref()
+                .and_then(|binding| source_symbols.resolve_binding(binding));
+            if source.kind == ComponentType::CellInstance
+                && source_symbol.is_none()
+                && source
+                    .library_cell
+                    .as_ref()
+                    .is_none_or(|binding| binding.terminal_order.is_empty())
+            {
+                return Err(refusal(
+                    "source instance has no resolved pin contract".to_owned(),
+                ));
+            }
+            if let Some(symbol) = &source_symbol
+                && !symbol.issues().is_empty()
+            {
+                return Err(refusal(format!(
+                    "source symbol has invalid pin metadata: {:?}",
+                    symbol.issues()
+                )));
+            }
+            let target_reference =
+                CellViewRef::new(&replacement.library, &replacement.cell, &replacement.view);
+            let target_symbol = target_symbols
+                .resolve_reference(&target_reference)
+                .ok_or_else(|| {
+                    refusal(format!(
+                        "{} has no resolved pin contract",
+                        target_reference.display_path()
+                    ))
+                })?;
+            if !target_symbol.issues().is_empty() {
+                return Err(refusal(format!(
+                    "replacement symbol has invalid pin metadata: {:?}",
+                    target_symbol.issues()
+                )));
+            }
+            // Resolve local offsets, so the projected occurrence applies its
+            // own rotation, mirrors and sheet translation exactly once.
+            let mut local_source = source.clone();
+            local_source.pos = Point::origin();
+            local_source.rotation = Rotation::R0;
+            local_source.mirror_h = false;
+            local_source.mirror_v = false;
+            local_source.execution_terminal_layout = None;
+            let mut source_pins = local_source.terminal_positions_resolved(source_symbol.as_ref());
+            if source_symbol.is_none()
+                && let Some(binding) = &source.library_cell
+                && binding.terminal_order.len() == source_pins.len()
+            {
+                for ((name, _), bound) in source_pins.iter_mut().zip(&binding.terminal_order) {
+                    name.clone_from(bound);
+                }
+            }
+            let target_pins = target_symbol.connectable_pins().collect::<Vec<_>>();
+            if source_pins.len() != target_pins.len() {
+                return Err(refusal(format!(
+                    "source has {} terminals but replacement has {}",
+                    source_pins.len(),
+                    target_pins.len()
+                )));
+            }
+            let named = source.kind == ComponentType::CellInstance
+                && (source_symbol.is_some()
+                    || source
+                        .library_cell
+                        .as_ref()
+                        .is_some_and(|binding| !binding.terminal_order.is_empty()));
+            let mut used = std::collections::HashSet::new();
+            let mut target_names = std::collections::HashSet::new();
+            let mut layout = Vec::with_capacity(target_pins.len());
+            let mut ports = Vec::with_capacity(target_pins.len());
+            for (index, pin) in target_pins.into_iter().enumerate() {
+                let source_index = if named {
+                    source_pins
+                        .iter()
+                        .position(|(name, _)| name.eq_ignore_ascii_case(&pin.name))
+                        .ok_or_else(|| {
+                            refusal(format!(
+                                "replacement terminal '{}' has no matching source terminal",
+                                pin.name
+                            ))
+                        })?
+                } else {
+                    index
+                };
+                let (source_name, offset) = &source_pins[source_index];
+                if !used.insert(source_index) || !target_names.insert(pin.name.to_ascii_lowercase())
+                {
+                    return Err(refusal("terminal mapping is not one-to-one".to_owned()));
+                }
+                if crate::state::declared_width(source_name)
+                    != crate::state::declared_width(&pin.name)
+                {
+                    return Err(refusal(format!(
+                        "terminal '{}' changes conductor width",
+                        pin.name
+                    )));
+                }
+                layout.push((pin.name.clone(), *offset));
+                ports.push(PortSpec {
+                    name: pin.name.clone(),
+                    direction: pin.direction,
+                });
+            }
+            updates.push((key.clone(), source.id, layout, ports));
+        }
+        for (key, component_id, layout, ports) in updates {
+            let component = projected
+                .get_mut(&key)
+                .expect("prepared document")
+                .components
+                .iter_mut()
+                .find(|component| component.id == component_id)
+                .expect("prepared component");
+            component
+                .library_cell
+                .as_mut()
+                .expect("materialized substitution")
+                .bind_interface(&ports);
+            component.execution_terminal_layout = Some(layout);
+        }
+        Ok(())
     }
 
     /// One cell view's design-management projection, reused while its source

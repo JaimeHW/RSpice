@@ -574,6 +574,12 @@ pub struct Component {
     #[serde(default)]
     pub library_cell: Option<LibraryCellInstance>,
 
+    /// Source pin offsets retained by an immutable execution projection when
+    /// a variant replaces this component's master. These never enter authored
+    /// documents; replacement artwork must not move an existing connection.
+    #[serde(skip)]
+    pub(crate) execution_terminal_layout: Option<Vec<(String, Point)>>,
+
     /// Typed instance multiplicity emitted as `m=` on a cell instance line.
     ///
     /// `None` is the engine's implicit one. Holding the value here instead of
@@ -646,6 +652,7 @@ impl From<PersistedComponent> for Component {
             mirror_h: persisted.mirror_h,
             mirror_v: persisted.mirror_v,
             library_cell: persisted.library_cell,
+            execution_terminal_layout: None,
             multiplicity: persisted.multiplicity,
             stimulus_provenance: persisted.stimulus_provenance,
         };
@@ -680,6 +687,7 @@ impl Component {
             library_cell: None,
             multiplicity: None,
             stimulus_provenance: None,
+            execution_terminal_layout: None,
         }
     }
 
@@ -861,6 +869,21 @@ impl Component {
         &self,
         resolved_symbol: Option<&crate::state::ResolvedCellSymbol>,
     ) -> Vec<(String, Point)> {
+        if let Some(layout) = &self.execution_terminal_layout {
+            return layout
+                .iter()
+                .map(|(name, offset)| {
+                    let transformed = self.transform_point(*offset);
+                    (
+                        name.clone(),
+                        Point::new(
+                            self.pos.x.saturating_add(transformed.x),
+                            self.pos.y.saturating_add(transformed.y),
+                        ),
+                    )
+                })
+                .collect();
+        }
         if self.kind == ComponentType::CellInstance
             && let Some(resolved_symbol) = resolved_symbol
         {
@@ -892,6 +915,12 @@ impl Component {
     /// Drawing and terminal extraction both read this, so the symbol and
     /// the connectivity can never disagree.
     pub(crate) fn instance_pin_layout(&self) -> Vec<(Option<String>, Point)> {
+        if let Some(layout) = &self.execution_terminal_layout {
+            return layout
+                .iter()
+                .map(|(name, point)| (Some(name.clone()), *point))
+                .collect();
+        }
         self.instance_block_pins()
             .into_iter()
             .map(|pin| ((!pin.name.is_empty()).then_some(pin.name), pin.offset))
