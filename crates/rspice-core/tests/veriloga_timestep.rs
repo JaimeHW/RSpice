@@ -5,8 +5,9 @@
 //! larger than the bound (the stepper would otherwise stride far wider).
 #![cfg(feature = "veriloga")]
 
-use rspice_core::engine::{Engine, SimulationConfig};
+use rspice_core::engine::{Engine, SimulationConfig, SpiceDialect};
 use rspice_core::netlist::Netlist;
+use rspice_veriloga_runtime::GENERATED_DDT_TIMESTEP_FLOOR;
 use std::io::Write;
 
 fn write_model(name: &str, source: &str) -> String {
@@ -24,13 +25,121 @@ module bres(p, n);
     inout p, n;
     electrical p, n;
     parameter real r = 1000.0 from (0:inf);
-    parameter real maxstep = 1.0e-7 from (0:inf);
+    parameter real maxstep = 1.0e-7 from [0:inf);
     analog begin
         $bound_step(maxstep);
         I(p, n) <+ V(p, n) / r;
     end
 endmodule
 "#;
+
+#[test]
+fn nonconvergence_stops_at_the_veriloga_integration_floor() {
+    let model = write_model(
+        &format!("floor_recovery_{}.va", std::process::id()),
+        "module floor_recovery(p); inout p; electrical p; analog begin if ($abstime >= 1e-9) I(p)<+V(p)*V(p)+V(p)+1; else I(p)<+V(p); end endmodule\n",
+    );
+    let netlist = Netlist::parse(&format!(
+        "integration floor\nX1 p floor_recovery\n.va \"{model}\" floor_recovery\n.end\n"
+    ))
+    .unwrap();
+    for spice_dialect in [SpiceDialect::Ngspice, SpiceDialect::Xyce] {
+        let error = Engine::new(SimulationConfig {
+            spice_dialect,
+            ..SimulationConfig::default()
+        })
+        .run_tran(&netlist, 3e-9, 1e-10)
+        .expect_err("the post-switch equation has no real equilibrium");
+        assert!(
+            matches!(error, rspice_core::SimulationError::ConvergenceFailed(_)),
+            "{spice_dialect:?} recovery must stop before requesting unsupported integration coefficients: {error}"
+        );
+    }
+    let _ = std::fs::remove_file(model);
+}
+
+#[test]
+fn bound_step_at_or_below_the_integration_floor_uses_the_minimum() {
+    let model = write_model(
+        &format!("floor_bound_{}.va", std::process::id()),
+        BOUNDED_RES,
+    );
+    let floor = GENERATED_DDT_TIMESTEP_FLOOR;
+    for spice_dialect in [SpiceDialect::Ngspice, SpiceDialect::Xyce] {
+        for (bound, maximum) in [
+            (0.0, 10.0 * floor),
+            (0.5 * floor, 10.0 * floor),
+            (floor, 10.0 * floor),
+            (1e-7, floor),
+        ] {
+            let netlist = Netlist::parse(&format!(
+                "bounded minimum\nv1 in 0 dc 1\nr1 in out 1k\nX1 out 0 bres maxstep={bound:e}\n.va \"{model}\" bres\n.end\n"
+            ))
+            .unwrap();
+            let result = Engine::new(SimulationConfig {
+                spice_dialect,
+                ..SimulationConfig::default()
+            })
+            .run_tran(&netlist, 100.0 * floor, maximum)
+            .unwrap_or_else(|error| panic!("{spice_dialect:?}, bound={bound:e}: {error}"));
+            assert_eq!(result.time.last(), Some(&(100.0 * floor)));
+            assert!(result.time.len() >= 100, "{:?}", result.time);
+            for pair in result.time.windows(2) {
+                let dt = pair[1] - pair[0];
+                assert!((dt / floor - 1.0).abs() < 1e-10, "dt={dt:e}");
+            }
+            let out = result
+                .node_names
+                .iter()
+                .position(|name| name.eq_ignore_ascii_case("out"))
+                .unwrap();
+            for voltage in &result.voltages[out] {
+                assert!((voltage - 0.5).abs() < 1e-8, "{voltage}");
+            }
+        }
+    }
+    let _ = std::fs::remove_file(model);
+}
+
+#[test]
+fn unsupported_maximum_and_locked_intervals_are_refused() {
+    let model = write_model(
+        &format!("floor_grid_{}.va", std::process::id()),
+        BOUNDED_RES,
+    );
+    let netlist = Netlist::parse(&format!(
+        "minimum grid\nv1 p 0 dc 1\nX1 p 0 bres\n.va \"{model}\" bres\n.end\n"
+    ))
+    .unwrap();
+    let floor = GENERATED_DDT_TIMESTEP_FLOOR;
+    for spice_dialect in [SpiceDialect::Ngspice, SpiceDialect::Xyce] {
+        let error = Engine::new(SimulationConfig {
+            spice_dialect,
+            ..SimulationConfig::default()
+        })
+        .run_tran(&netlist, 20.0 * floor, 0.5 * floor)
+        .expect_err("the requested maximum cannot fit a supported interval");
+        assert!(error.to_string().contains("maximum timestep"), "{error}");
+
+        let error = Engine::new(SimulationConfig {
+            spice_dialect,
+            locked_time_grid: Some(std::sync::Arc::new(vec![0.5 * floor, 20.0 * floor])),
+            ..SimulationConfig::default()
+        })
+        .run_tran(&netlist, 20.0 * floor, 10.0 * floor)
+        .expect_err("the locked target must not be silently skipped");
+        assert!(error.to_string().contains("cannot integrate"), "{error}");
+
+        let error = Engine::new(SimulationConfig {
+            spice_dialect,
+            ..SimulationConfig::default()
+        })
+        .run_tran(&netlist, 20.5 * floor, floor)
+        .expect_err("a genuinely short final interval must not be enlarged");
+        assert!(error.to_string().contains("cannot integrate"), "{error}");
+    }
+    let _ = std::fs::remove_file(model);
+}
 
 #[test]
 fn bound_step_caps_transient_steps() {

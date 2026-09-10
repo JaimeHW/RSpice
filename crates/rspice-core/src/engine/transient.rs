@@ -4163,11 +4163,13 @@ impl Engine {
             tran_step_hint,
         );
         let preferred_min_dt = practical_min.max(self.config.min_timestep.max(1e-15));
-        let hard_min_dt = if self.config.spice_dialect == SpiceDialect::Xyce {
+        let model_min_dt = circuit.veriloga_integration_timestep_floor();
+        let mut dialect_min_dt = if self.config.spice_dialect == SpiceDialect::Xyce {
             xyce_hard_min_timestep(resume_time)
         } else {
             Self::ngspice_hard_min_timestep(hinted_max_step, preferred_min_dt)
         };
+        let hard_min_dt = dialect_min_dt.max(model_min_dt);
         let mut xyce_breakpoint_span_ceiling = XyceBreakpointSpanCeiling::new(
             self.config
                 .effective_transient_min_steps_between_breakpoints(),
@@ -4200,6 +4202,12 @@ impl Engine {
         let startup_controller_max_dt = resume_continuation
             .map(|continuation| continuation.controller_max_step)
             .unwrap_or(startup_raw_max_dt);
+        let effective_max_dt = hinted_max_step.min(startup_controller_max_dt);
+        if effective_max_dt < model_min_dt {
+            return Err(SimulationError::Circuit(format!(
+                "Verilog-A transient maximum timestep {effective_max_dt:e}s is below the supported integration minimum {model_min_dt:e}s"
+            )));
+        }
         let mut timestep = TimestepController::new_with_preferred_min(
             initial_step,
             hard_min_dt,
@@ -4236,7 +4244,7 @@ impl Engine {
         }
 
         // Floor-dt livelock detection: dozens of consecutive accepted points
-        // at the hard-minimum timestep mean the step controller is trapped —
+        // at the hard-minimum timestep can mean the controller is trapped —
         // forced accepts feed the truncation estimators garbage history,
         // which pins the next dt right back at the floor (observed on
         // diode-bridge dead-zone crossings, where the cap-companion/bleeder
@@ -5443,7 +5451,21 @@ impl Engine {
         macro_rules! livelock_check {
             ($dt:expr) => {
                 if locked_grid.is_none() {
-                    if $dt <= livelock_dt_ceiling {
+                    // Honouring an explicit maximum or a model's bound is
+                    // progress, even at the integration floor. Count only
+                    // steps from which the controller was allowed to grow.
+                    let trapped_at_floor = $dt <= livelock_dt_ceiling && {
+                        let requested_max_dt = timestep.max_dt();
+                        #[cfg(feature = "veriloga")]
+                        let requested_max_dt = circuit
+                            .veriloga_timestep_bound()
+                            .map_err(SimulationError::Circuit)?
+                            .map_or(requested_max_dt, |bound| {
+                                requested_max_dt.min(bound.max(timestep.hard_min_dt()))
+                            });
+                        requested_max_dt > $dt * (1.0 + 1e-12)
+                    };
+                    if trapped_at_floor {
                         livelock_streak += 1;
                     } else {
                         livelock_streak = 0;
@@ -5536,9 +5558,9 @@ impl Engine {
                 // Stiff state devices can legitimately require steps far below
                 // ngspice's max-step-derived `delmin` while crossing a narrow
                 // physical boundary layer.
-                let hard_min_timestep = xyce_hard_min_timestep(t);
-                timestep.set_hard_min_dt(hard_min_timestep);
-                let breakpoint_tolerance = 2.0 * hard_min_timestep;
+                dialect_min_dt = xyce_hard_min_timestep(t);
+                timestep.set_hard_min_dt(dialect_min_dt.max(model_min_dt));
+                let breakpoint_tolerance = 2.0 * dialect_min_dt;
                 circuit
                     .voltage_sources
                     .set_xyce_breakpoint_tolerance(breakpoint_tolerance);
@@ -5607,20 +5629,13 @@ impl Engine {
                         .min(span_ceiling.unwrap_or(Value::INFINITY)),
                 );
             }
-            // A locked grid is often built from another tool's printed table,
-            // and rounded timestamps can put a target within the solver's own
-            // clock resolution of the accepted time. Advancing to it would
-            // request a step the controller refuses everywhere else it looks
-            // (`hard_min_dt` already governs device events and every LTE
-            // clamp): the interval is not representable as a difference of
-            // times at this magnitude, and every companion conductance built
-            // from `1/dt` is noise. The target names the point already
-            // accepted, so consume it here rather than solving for it.
+            // Preserve the dialect's tolerance for rounded locked-grid times.
+            // A model's larger integration floor must not silently consume
+            // additional targets: an unsupported interval still needs refusal.
             if let Some(grid) = locked_grid.as_ref() {
-                let hard_min_dt = timestep.hard_min_dt();
                 while grid
                     .get(locked_cursor)
-                    .is_some_and(|&target| target - t < hard_min_dt)
+                    .is_some_and(|&target| target - t < dialect_min_dt)
                 {
                     locked_cursor += 1;
                 }
@@ -5725,7 +5740,22 @@ impl Engine {
                 }
                 None => breakpoints.limit_step(t, timestep.dt()),
             };
-            dt = dt.min(tstop - t); // Don't overshoot tstop
+            let remaining = tstop - t;
+            // Repeated additions of the minimum interval can leave the final
+            // gap a few ulps short of that same interval. Keep its supported
+            // coefficients and canonical stop time instead of manufacturing
+            // a subminimum step. Locked replay and genuine short gaps retain
+            // their exact intervals and the model's normal refusal.
+            let endpoint_roundoff = 64.0 * Value::EPSILON * t.abs().max(tstop.abs());
+            dt = if locked_grid.is_none()
+                && (dt >= model_min_dt || dt == remaining)
+                && remaining < model_min_dt
+                && model_min_dt - remaining <= endpoint_roundoff
+            {
+                model_min_dt
+            } else {
+                dt.min(remaining)
+            };
             let mut exact_veriloga_event_time = None;
             if let Some(target) = pending_veriloga_event_time
                 && target > t
@@ -8303,7 +8333,11 @@ impl Engine {
                     );
                     if hit_breakpoint {
                         if scheduled_breakpoint && !landed_veriloga_event && !analysis_final_step {
-                            t = breakpoints.snap_to_breakpoint(t);
+                            let snapped = breakpoints.snap_to_breakpoint(t);
+                            // The endpoint needs its own final-step solve.
+                            if snapped != tstop {
+                                t = snapped;
+                            }
                         }
                         let restart_dt = if landed_veriloga_event {
                             breakpoints.mark_external_breakpoint_solved(t, dt)
@@ -9016,7 +9050,11 @@ impl Engine {
                 && !locked_step_lands_on_grid
                 && !analysis_final_step
             {
-                t = breakpoints.snap_to_breakpoint(t);
+                let snapped = breakpoints.snap_to_breakpoint(t);
+                // The endpoint needs its own final-step solve.
+                if snapped != tstop {
+                    t = snapped;
+                }
             }
             let method_after_step = current_integration_method(&trapgear);
             if circuit.has_nonlinear_devices() && !nonlinear_state_matches_new_solution {

@@ -382,6 +382,16 @@ impl CircuitData {
         false
     }
 
+    /// Smallest interval supported by every installed Verilog-A execution path.
+    #[inline]
+    pub(crate) fn veriloga_integration_timestep_floor(&self) -> Value {
+        #[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
+        if self.has_any_veriloga_devices() {
+            return rspice_veriloga_runtime::GENERATED_DDT_TIMESTEP_FLOOR;
+        }
+        0.0
+    }
+
     /// Whether any model supplies its own initial equilibrium nodeset.
     pub(crate) fn veriloga_requires_nodeset_phase(&self) -> bool {
         #[cfg(feature = "veriloga")]
