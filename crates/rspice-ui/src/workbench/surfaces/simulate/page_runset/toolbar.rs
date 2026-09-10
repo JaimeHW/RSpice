@@ -63,9 +63,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp, validation: &RunSetValidati
             // status group. Long revisions and changed fonts reflow too.
             let single_row = command_width + status_width + 5.0 * ui.spacing().item_spacing.x + 4.0
                 <= inner_width;
-            let status = egui::RichText::new(status_text)
-                .font(status_font)
-                .color(t.color.text_faint);
+            let status = egui::RichText::new(status_text).color(t.color.text_faint);
             ui.horizontal_wrapped(|ui| {
                 // The leading glyph was U+FF0B, which the bundled faces do not
                 // carry: the page's first control opened with a replacement
@@ -98,7 +96,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp, validation: &RunSetValidati
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let clicked = preview.show(ui).clicked();
                         ui.add_space(4.0);
-                        ui.label(status.clone());
+                        ui.label(status.clone().font(status_font.clone()));
                         clicked
                     })
                     .inner
@@ -110,7 +108,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp, validation: &RunSetValidati
                 }
             });
             if !single_row {
-                ui.add(egui::Label::new(status).wrap());
+                ui.add(egui::Label::new(status.font(status_font)).wrap());
             }
         });
 

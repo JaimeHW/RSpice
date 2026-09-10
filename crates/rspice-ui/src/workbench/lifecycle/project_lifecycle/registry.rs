@@ -89,7 +89,8 @@ impl DocumentRegistry {
         }
     }
 
-    pub(crate) fn rebuild(
+    #[cfg(test)]
+    fn rebuild(
         &mut self,
         current: &ProjectFile,
         accepted: Option<&DocumentFingerprints>,
