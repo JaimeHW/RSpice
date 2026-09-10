@@ -6,7 +6,70 @@ use crate::state::{InstancePath, remap_instance_probes_many};
 
 type PathMappings = Vec<(InstancePath, InstancePath)>;
 
+pub(super) struct PreparedReferenceHistory {
+    pub(super) before: BTreeMap<String, SchematicSnapshot>,
+    pub(super) after: BTreeMap<String, SchematicSnapshot>,
+    pub(super) changes: ReferenceChanges,
+    pub(super) references: super::references::PreparedReferences,
+}
+
+impl SchematicReferenceTransaction {
+    fn into_history(self, forward: bool) -> PreparedReferenceHistory {
+        let (before, after, changes) = if forward {
+            (self.before, self.after, self.references)
+        } else {
+            (self.after, self.before, self.references.reversed())
+        };
+        PreparedReferenceHistory {
+            before: capture_schematic_map(before),
+            after: capture_schematic_map(after),
+            changes,
+            references: self.prepared_references,
+        }
+    }
+}
+
 impl AppState {
+    /// Restore the guarded design edit while resolving its current consumers.
+    /// Outputs, configurations and other documents can acquire references after
+    /// the original commit; their current roots and occurrences remain authority.
+    pub(super) fn prepare_reference_history(
+        &self,
+        before: &BTreeMap<String, SchematicSnapshot>,
+        after: &BTreeMap<String, SchematicSnapshot>,
+        forward: bool,
+    ) -> Result<PreparedReferenceHistory, String> {
+        let (expected, destination) = if forward {
+            (before, after)
+        } else {
+            (after, before)
+        };
+        if !expected.keys().eq(destination.keys()) || !schematic_map_matches(self, expected) {
+            return Err(
+                "The reference edit's documents changed before history could be applied."
+                    .to_owned(),
+            );
+        }
+        let mut sources = BTreeMap::new();
+        let mut candidates = BTreeMap::new();
+        for (key, target) in destination {
+            let reference = reference_from_key(key)?;
+            let source = schematic_for_reference(self, &reference)
+                .ok_or_else(|| format!("Reference document '{key}' is unavailable."))?;
+            validate_reference_document(self, key, source)?;
+            let mut candidate = source.clone();
+            target.apply(&mut candidate);
+            // A probe follows its current occurrence. Restoring a captured
+            // expression first would apply the inverse mapping twice or carry
+            // an old root's meaning into a newly selected configuration.
+            candidate.probes.clone_from(&source.probes);
+            sources.insert(key.clone(), source.clone());
+            candidates.insert(key.clone(), candidate);
+        }
+        self.prepare_schematic_reference_transaction(sources, candidates)
+            .map(|transaction| transaction.into_history(forward))
+    }
+
     pub(super) fn schematic_reference_sources(&self) -> BTreeMap<String, &SchematicState> {
         let active = self.workspace.active_schematic_reference().key();
         let mut sources: BTreeMap<_, _> = self

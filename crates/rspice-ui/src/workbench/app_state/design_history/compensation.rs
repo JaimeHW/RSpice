@@ -166,6 +166,19 @@ impl RecordHeader {
         &self.documents
     }
 
+    /// A reference history step can acquire consumers after its first commit.
+    /// Retain existing sheet compensation while naming those additional owners.
+    pub(super) fn include_reference_document(&mut self, reference: CellViewRef) {
+        if !self.documents.iter().any(|document| {
+            document
+                .reference
+                .key()
+                .eq_ignore_ascii_case(&reference.key())
+        }) {
+            self.documents.push(DocumentCompensation::naming(reference));
+        }
+    }
+
     pub(super) fn undo_activates(&self) -> Option<&CellViewRef> {
         self.activated_before.as_ref()
     }

@@ -3,6 +3,82 @@
 use super::*;
 
 #[test]
+fn new_saved_outputs_follow_both_directions_of_a_past_component_rename() {
+    let (mut fixture, _, child, _) = reused_master_fixture(["X1", "X2"]);
+    let state = &mut fixture.state;
+    state.activate_history_document(&child, "Edit reused master");
+    let expected = state
+        .schematic
+        .components
+        .iter()
+        .find(|component| component.id == fixture.sources[0])
+        .unwrap()
+        .clone();
+    state
+        .rename_component_transaction(&expected, "V9".to_owned())
+        .unwrap();
+    let output = SavedOutput::new(
+        SavedOutputKind::RawVoltageOrCurrent,
+        "Added after rename",
+        "I(/X1/V9)",
+        SavedOutputCompatibility::OpTranAc,
+        SavedOutputPolicy::EveryAcceptedPoint,
+        SavedOutputPrecision::FullSourcePrecision,
+        SavedOutputStreaming::StoreOnly,
+    )
+    .unwrap();
+    let output_id = output.id;
+    state
+        .workspace
+        .add_saved_output(fixture.plan, output)
+        .unwrap();
+    assert!(state.undo_project_design().unwrap().is_some());
+    assert_eq!(
+        state
+            .workspace
+            .plan_data(fixture.plan)
+            .unwrap()
+            .saved_outputs
+            .iter()
+            .find(|output| output.id == output_id)
+            .unwrap()
+            .source_expression,
+        "I(/X1/V42)"
+    );
+    let second = SavedOutput::new(
+        SavedOutputKind::RawVoltageOrCurrent,
+        "Added after undo",
+        "I(/X2/V42)",
+        SavedOutputCompatibility::OpTranAc,
+        SavedOutputPolicy::EveryAcceptedPoint,
+        SavedOutputPrecision::FullSourcePrecision,
+        SavedOutputStreaming::StoreOnly,
+    )
+    .unwrap();
+    let second_id = second.id;
+    state
+        .workspace
+        .add_saved_output(fixture.plan, second)
+        .unwrap();
+    assert!(state.redo_project_design().unwrap().is_some());
+    let outputs = &state
+        .workspace
+        .plan_data(fixture.plan)
+        .unwrap()
+        .saved_outputs;
+    for (id, path) in [(output_id, "I(/X1/V9)"), (second_id, "I(/X2/V9)")] {
+        assert_eq!(
+            outputs
+                .iter()
+                .find(|output| output.id == id)
+                .unwrap()
+                .source_expression,
+            path
+        );
+    }
+}
+
+#[test]
 fn editing_a_reused_master_renames_saved_outputs_and_inactive_probes() {
     let (mut fixture, root, child, other) = reused_master_fixture(["X1", "X2"]);
     fixture

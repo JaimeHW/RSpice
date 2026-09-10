@@ -1,7 +1,7 @@
 //! One publication boundary for a component name and the live references
 //! carried with it. History owns exact affected content, never retained runs.
 
-use super::reference_preparation::{reference_from_key, validate_reference_document};
+use super::reference_preparation::reference_from_key;
 use super::references::PreparedReferences;
 use super::*;
 use crate::state::{AnnotationState, Component, SchematicObjectKey};
@@ -26,6 +26,7 @@ struct AnnotationChange {
 }
 
 struct PreparedComponentRename {
+    record: ComponentRenameRecord,
     references: PreparedReferences,
     annotation: Option<DesignManagementCatalog>,
 }
@@ -157,7 +158,7 @@ impl AppState {
                 })
             })
             .transpose()?;
-        let mut record = ComponentRenameRecord {
+        let record = ComponentRenameRecord {
             description: description.to_owned(),
             document: document.clone(),
             before: capture_schematic_map(transaction.before),
@@ -165,16 +166,17 @@ impl AppState {
             references: transaction.references,
             annotation,
         };
-        let prepared = PreparedComponentRename {
-            references: transaction.prepared_references,
-            annotation: record.prepare_annotation(self, true)?,
-        };
         let documents = record
             .after
             .keys()
             .map(|key| reference_from_key(key).map(DocumentCompensation::naming))
             .collect::<Result<Vec<_>, _>>()?;
-        record.publish(self, true, prepared)?;
+        let prepared = PreparedComponentRename {
+            references: transaction.prepared_references,
+            annotation: record.prepare_annotation(self, true)?,
+            record,
+        };
+        let record = prepared.publish(self, true)?;
         for key in record.after.keys() {
             if key.eq_ignore_ascii_case(&document.key()) {
                 self.schematic.undo_history.clear_redo();
@@ -244,18 +246,24 @@ impl ComponentRenameRecord {
                     .to_owned(),
             );
         }
-        for key in self.before.keys() {
-            let reference = reference_from_key(key)?;
-            let source = schematic_for_reference(state, &reference)
-                .ok_or_else(|| format!("Reference document '{key}' is unavailable."))?;
-            validate_reference_document(state, key, source)?;
-        }
-        let references = self.references.prepare(state, forward)?;
-        let annotation = self.prepare_annotation(state, forward)?;
+        let history = state.prepare_reference_history(&self.before, &self.after, forward)?;
+        let record = Self {
+            description: self.description.clone(),
+            document: self.document.clone(),
+            before: history.before,
+            after: history.after,
+            references: history.changes,
+            annotation: self.annotation.clone(),
+        };
         Ok(PreparedComponentRename {
-            references,
-            annotation,
+            annotation: record.prepare_annotation(state, forward)?,
+            references: history.references,
+            record,
         })
+    }
+
+    pub(super) fn reference_schematics(&self) -> &BTreeMap<String, SchematicSnapshot> {
+        &self.after
     }
 
     fn prepare_annotation(
@@ -291,39 +299,6 @@ impl ComponentRenameRecord {
             .transpose()
     }
 
-    fn publish(
-        &mut self,
-        state: &mut AppState,
-        forward: bool,
-        prepared: PreparedComponentRename,
-    ) -> Result<(), String> {
-        if let Some(candidate) = prepared.annotation {
-            state
-                .workspace
-                .replace_design_management(candidate)
-                .map_err(|error| error.to_string())?;
-        }
-        apply_schematic_map(
-            state,
-            if forward { &self.after } else { &self.before },
-            true,
-        )?;
-        prepared.references.publish(state);
-        state.design_execution_epoch = state.design_execution_epoch.wrapping_add(1);
-        state.ui.netlist.current_generation_input_digest = None;
-        if let Some(change) = &mut self.annotation {
-            let restored = if forward {
-                &mut change.after_revision
-            } else {
-                &mut change.before_revision
-            };
-            let revision = state.workspace.project.revision();
-            state.reanchor_annotation_history_revision(*restored, revision);
-            *restored = revision;
-        }
-        Ok(())
-    }
-
     pub(super) fn reanchor_annotation_revision(
         &mut self,
         previous: ObjectRevision,
@@ -339,12 +314,51 @@ impl ComponentRenameRecord {
     }
 
     pub(super) fn apply_before(&mut self, state: &mut AppState) -> Result<(), String> {
-        let prepared = self.prepare(state, false)?;
-        self.publish(state, false, prepared)
+        *self = self.prepare(state, false)?.publish(state, false)?;
+        Ok(())
     }
 
     pub(super) fn apply_after(&mut self, state: &mut AppState) -> Result<(), String> {
-        let prepared = self.prepare(state, true)?;
-        self.publish(state, true, prepared)
+        *self = self.prepare(state, true)?.publish(state, true)?;
+        Ok(())
+    }
+}
+
+impl PreparedComponentRename {
+    fn publish(
+        mut self,
+        state: &mut AppState,
+        forward: bool,
+    ) -> Result<ComponentRenameRecord, String> {
+        if let Some(candidate) = self.annotation {
+            state
+                .workspace
+                .replace_design_management(candidate)
+                .map_err(|error| error.to_string())?;
+        }
+        let record = &mut self.record;
+        apply_schematic_map(
+            state,
+            if forward {
+                &record.after
+            } else {
+                &record.before
+            },
+            true,
+        )?;
+        self.references.publish(state);
+        state.design_execution_epoch = state.design_execution_epoch.wrapping_add(1);
+        state.ui.netlist.current_generation_input_digest = None;
+        if let Some(change) = &mut record.annotation {
+            let restored = if forward {
+                &mut change.after_revision
+            } else {
+                &mut change.before_revision
+            };
+            let revision = state.workspace.project.revision();
+            state.reanchor_annotation_history_revision(*restored, revision);
+            *restored = revision;
+        }
+        Ok(self.record)
     }
 }

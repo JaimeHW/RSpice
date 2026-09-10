@@ -45,6 +45,19 @@ pub(super) struct PreparedReferences {
 }
 
 impl ReferenceChanges {
+    pub(super) fn reversed(mut self) -> Self {
+        for change in &mut self.configurations {
+            std::mem::swap(&mut change.before, &mut change.after);
+        }
+        for change in &mut self.outputs {
+            std::mem::swap(&mut change.before, &mut change.after);
+        }
+        for change in &mut self.instances {
+            std::mem::swap(&mut change.before, &mut change.after);
+        }
+        self
+    }
+
     pub(super) fn between(
         state: &AppState,
         configurations: &ConfigurationSetCatalog,

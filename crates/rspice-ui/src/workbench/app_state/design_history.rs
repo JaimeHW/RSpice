@@ -928,6 +928,7 @@ impl AppState {
             .expect("the guarded project transaction remains present");
         let cells_before = library_cell_keys(self);
         record.body.apply_before(self)?;
+        record.body.include_reference_documents(&mut record.header);
         for document in record.header.documents() {
             document.restore_recorded_sheets(self)?;
         }
@@ -958,6 +959,7 @@ impl AppState {
             .expect("the guarded project transaction remains present");
         let cells_before = library_cell_keys(self);
         record.body.apply_after(self)?;
+        record.body.include_reference_documents(&mut record.header);
         self.restore_stranded_placements(std::mem::take(&mut record.stranded));
         record.stranded = self.repair_placements_stranded_since(&cells_before);
         record.header.restamp();
@@ -1091,6 +1093,20 @@ impl ProjectDesignRecord {
 }
 
 impl ProjectDesignBody {
+    fn include_reference_documents(&self, header: &mut RecordHeader) {
+        let schematics = match self {
+            Self::ComponentRename(record) => record.reference_schematics(),
+            Self::DesignManagement(record) => &record.after_schematics,
+            _ => return,
+        };
+        for key in schematics.keys() {
+            header.include_reference_document(
+                reference_preparation::reference_from_key(key)
+                    .expect("prepared reference document key"),
+            );
+        }
+    }
+
     fn after_design_matches(&self, state: &AppState) -> bool {
         match self {
             Self::ComponentRename(record) => record.after_design_matches(state),
@@ -1801,7 +1817,12 @@ impl DesignManagementRecord {
                 .is_some_and(|revision| state.workspace.project.revision() == revision)
     }
 
-    fn validate_mutation(&self, state: &AppState, operation: &str) -> Result<(), String> {
+    fn prepare_history(
+        &self,
+        state: &AppState,
+        forward: bool,
+    ) -> Result<reference_preparation::PreparedReferenceHistory, String> {
+        let operation = if forward { "redone" } else { "undone" };
         if !state.project_lifecycle.project_open {
             return Err(format!(
                 "Design management cannot be {operation} without an open project."
@@ -1813,27 +1834,31 @@ impl DesignManagementRecord {
                 self.owner.display_path()
             ));
         }
-        for key in self
-            .before_schematics
-            .keys()
-            .chain(self.after_schematics.keys())
-        {
-            let active_key = state.workspace.active_schematic_reference().key();
-            let schematic = if key.eq_ignore_ascii_case(&active_key) {
-                Some(&state.schematic)
-            } else {
-                state
-                    .workspace
-                    .schematic_buffers
-                    .iter()
-                    .find(|(candidate, _)| candidate.eq_ignore_ascii_case(key))
-                    .map(|(_, schematic)| schematic)
-            }
-            .ok_or_else(|| format!("Annotation schematic '{key}' is no longer available."))?;
-            reference_preparation::validate_reference_document(state, key, schematic)?;
+        if !self.references.matches(state, forward) {
+            return Err(
+                "The configuration or saved-output references changed before commit.".to_owned(),
+            );
         }
-        self.references.prepare(state, operation != "undone")?;
-        Ok(())
+        let current = &state.workspace.design_management;
+        let mut prepared_catalog = current.clone();
+        prepared_catalog
+            .publish_reviewed_candidate(
+                current.revision(),
+                if forward { &self.after } else { &self.before }.clone(),
+            )
+            .map_err(|error| error.to_string())?;
+        state
+            .workspace
+            .project
+            .revision()
+            .next()
+            .map_err(|error| error.to_string())?;
+        state.prepare_reference_history(&self.before_schematics, &self.after_schematics, forward)
+    }
+
+    fn validate_mutation(&self, state: &AppState, operation: &str) -> Result<(), String> {
+        self.prepare_history(state, operation != "undone")
+            .map(|_| ())
     }
 
     fn apply_before(&mut self, state: &mut AppState) -> Result<(), String> {
@@ -1843,14 +1868,16 @@ impl DesignManagementRecord {
                     .to_owned(),
             );
         }
-        self.validate_mutation(state, "undone")?;
-        let references = self.references.prepare(state, false)?;
+        let history = self.prepare_history(state, false)?;
         let revision = state
             .workspace
             .replace_design_management(self.before.clone())
             .map_err(|error| error.to_string())?;
-        apply_schematic_map(state, &self.before_schematics, false)?;
-        references.publish(state);
+        apply_schematic_map(state, &history.before, false)?;
+        history.references.publish(state);
+        self.before_schematics = history.before;
+        self.after_schematics = history.after;
+        self.references = history.changes;
         state.reanchor_annotation_history_revision(self.before_project_revision, revision);
         self.before_project_revision = revision;
         self.redo_guard_revision = Some(revision);
@@ -1865,14 +1892,16 @@ impl DesignManagementRecord {
                     .to_owned(),
             );
         }
-        self.validate_mutation(state, "redone")?;
-        let references = self.references.prepare(state, true)?;
+        let history = self.prepare_history(state, true)?;
         let revision = state
             .workspace
             .replace_design_management(self.after.clone())
             .map_err(|error| error.to_string())?;
-        apply_schematic_map(state, &self.after_schematics, false)?;
-        references.publish(state);
+        apply_schematic_map(state, &history.after, false)?;
+        history.references.publish(state);
+        self.before_schematics = history.before;
+        self.after_schematics = history.after;
+        self.references = history.changes;
         state.reanchor_annotation_history_revision(self.undo_guard_revision, revision);
         self.undo_guard_revision = revision;
         state.design_execution_epoch = state.design_execution_epoch.wrapping_add(1);
