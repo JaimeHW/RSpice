@@ -334,9 +334,16 @@ never shared.
 Generated devices retain `$bound_step` requests across conditional calls,
 runtime loops, and nested analog instances. The transient engine uses the
 smallest active bound, including zero as a request for its supported minimum;
-rollback and checkpoints preserve accepted bounds. Generated `$discontinuity`
-remains explicitly unsupported. Its degree-specific behavior, including the
-`-1` Newton-limiting hint, still requires implementation and qualification.
+rollback and checkpoints preserve accepted bounds. Ordinary analog
+`$discontinuity` calls preserve independent transient and Newton hints in the
+portable VM, native backend, and generated Rust. Nonnegative degrees request a
+transient restart on a rising edge; `-1` prevents Newton convergence without
+requesting a time event. Degree expressions must be constant, numeric, and
+finite integers at least `-1`; instance-dependent values are checked during
+evaluation. Custom `$limit` function callbacks still require separate support
+for their convergence hints and standard function-identifier selectors.
+Runtime state version 9 and transient checkpoint format 40 keep older boolean
+discontinuity state from being reinterpreted as the new degree semantics.
 
 Automatic differentiation keeps exact sparse lane shapes. Its fixed point uses
 a bounded compact bit matrix for ordinary compact models and falls back to
