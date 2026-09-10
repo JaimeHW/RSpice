@@ -315,6 +315,43 @@ mod wasm_tests {
     }
 
     #[wasm_bindgen_test]
+    fn parameter_ac_sensitivity_at_output_null_in_wasm() {
+        use rspice_core::abort_signal::NoAbort;
+        use rspice_core::analysis::SensitivityValue;
+        let netlist = rspice_core::Netlist::parse(
+            "AC null\n.param gain=1\nV1 in 0 AC 1 60\nE1 out 0 in 0 {gain}\n.end\n",
+        )
+        .unwrap();
+        let engine = rspice_core::Engine::default();
+        let error = engine
+            .run_sensitivity_ac_with_abort(&netlist, 2, "gain", 0.0, &[1.0], None, &NoAbort)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("nondifferentiable-magnitude"), "{error}");
+        for nominal in [-1e-4_f64, 1e-4] {
+            let values = engine
+                .run_sensitivity_ac_with_abort(
+                    &netlist,
+                    2,
+                    "gain",
+                    nominal,
+                    &[1.0],
+                    Some(1e-3),
+                    &NoAbort,
+                )
+                .unwrap();
+            assert!((values[0] / nominal.signum() - 1.0).abs() < 2e-12);
+        }
+        let projected = SensitivityValue::magnitude(
+            rspice_core::Complex64::new(1.5e308, 1.5e308),
+            rspice_core::Complex64::new(1.0, -0.5),
+        )
+        .value()
+        .unwrap();
+        assert!((projected * 2.0_f64.sqrt() - 0.5).abs() < 2e-14);
+    }
+
+    #[wasm_bindgen_test]
     fn sensitivity_availability_in_wasm() {
         use rspice_core::abort_signal::NoAbort;
         use rspice_core::analysis::{AcSensitivityOutput, SensitivityUnavailability as Reason};

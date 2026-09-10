@@ -925,26 +925,6 @@ impl Engine {
         }
     }
 
-    fn sensitivity_ac_voltage_magnitude(
-        result: &crate::analysis::AcResult,
-        output_node: usize,
-    ) -> Result<Value, SimulationError> {
-        if output_node == 0 {
-            return Ok(0.0);
-        }
-
-        result
-            .voltages
-            .get(output_node - 1)
-            .map(|voltage| voltage.norm())
-            .ok_or_else(|| {
-                SimulationError::Circuit(format!(
-                    "Sensitivity output node {output_node} is outside circuit node range 0..={}",
-                    result.voltages.len()
-                ))
-            })
-    }
-
     /// Run sensitivity analysis
     ///
     /// Computes dVout/dparam using finite differences.
@@ -1026,8 +1006,10 @@ impl Engine {
 
     /// Run AC sensitivity analysis for a parameter across frequencies.
     ///
-    /// Computes central differences of output voltage magnitude:
-    /// d|Vout|/dp ~= (|Vout(p+h)| - |Vout(p-h)|) / (2h)
+    /// Differentiates the complex output voltage, then projects that derivative
+    /// onto the nominal output phasor to compute d|Vout|/dp. A zero nominal
+    /// output with a nonzero complex derivative has no magnitude derivative;
+    /// this numeric-only API returns a diagnostic in that case.
     pub fn run_sensitivity_ac(
         &self,
         netlist: &Netlist,
@@ -1064,43 +1046,57 @@ impl Engine {
             return Err(SimulationError::Aborted);
         }
         let h = Self::sensitivity_step(param_value, delta)?;
-
-        let (netlist_plus, rebuilt_plus) = Self::create_perturbed_netlist_with_limits_and_abort(
-            netlist,
-            param_name,
-            param_value + h,
-            self.config.resource_limits,
+        super::ac::validate_ac_frequencies(frequencies)?;
+        self.ensure_analysis_points(frequencies.len())?;
+        self.ensure_batch_runs(3)?;
+        let output = AcSensitivityOutput::Voltage {
+            positive: output_node,
+            negative: None,
+        };
+        // Replay at every coordinate, including the requested nominal value:
+        // it need not equal the value originally authored in the netlist.
+        // Retain only this probe between runs, not every node's AC traces.
+        let evaluate = |candidate| {
+            let (perturbed, references) = Self::create_perturbed_netlist_with_limits_and_abort(
+                netlist,
+                param_name,
+                candidate,
+                self.config.resource_limits,
+                abort,
+            )?;
+            if netlist.source_text.is_some() && references == 0 {
+                return Err(SimulationError::Circuit(format!(
+                    "Parameter '{param_name}' is not bound to any netlist expression"
+                )));
+            }
+            let results = self.run_ac_with_abort(&perturbed, frequencies, abort)?;
+            Self::ac_sensitivity_outputs(&results, &output, frequencies, abort)
+        };
+        let nominal = evaluate(param_value)?;
+        let minus = evaluate(param_value - h)?;
+        let plus = evaluate(param_value + h)?;
+        let derivatives = sensitivity_complex_stencil(
+            [param_value, param_value - h, param_value + h],
+            [&nominal, &minus, &plus],
             abort,
         )?;
-        let (netlist_minus, rebuilt_minus) = Self::create_perturbed_netlist_with_limits_and_abort(
-            netlist,
-            param_name,
-            param_value - h,
-            self.config.resource_limits,
-            abort,
-        )?;
-
-        if netlist.source_text.is_some() && rebuilt_plus == 0 && rebuilt_minus == 0 {
-            return Err(SimulationError::Circuit(format!(
-                "Parameter '{}' is not bound to any netlist expression",
-                param_name
-            )));
-        }
-
-        let plus = self.run_ac_with_abort(&netlist_plus, frequencies, abort)?;
-        let minus = self.run_ac_with_abort(&netlist_minus, frequencies, abort)?;
-        if plus.len() != minus.len() {
-            return Err(SimulationError::Circuit(
-                "AC sensitivity produced inconsistent sweep lengths".to_string(),
-            ));
-        }
-
-        plus.iter()
-            .zip(minus.iter())
-            .map(|(p, m)| {
-                let p_mag = Self::sensitivity_ac_voltage_magnitude(p, output_node)?;
-                let m_mag = Self::sensitivity_ac_voltage_magnitude(m, output_node)?;
-                sensitivity_secant([param_value - h, param_value + h], [m_mag, p_mag])
+        nominal
+            .iter()
+            .zip(derivatives)
+            .zip(frequencies)
+            .map(|((&value, derivative), frequency)| {
+                if abort.is_aborted() {
+                    return Err(SimulationError::Aborted);
+                }
+                match SensitivityValue::magnitude(value, derivative) {
+                    SensitivityValue::Available(value) => Ok(value),
+                    SensitivityValue::Unavailable { unavailable } => {
+                        Err(SimulationError::Circuit(format!(
+                            "AC sensitivity of |V({output_node})| to parameter '{param_name}' at {frequency} Hz is unavailable ({})",
+                            unavailable.as_str()
+                        )))
+                    }
+                }
             })
             .collect()
     }
@@ -2406,6 +2402,7 @@ impl Engine {
         results: &[crate::analysis::AcResult],
         output: &AcSensitivityOutput,
         expected_frequencies: &[Value],
+        abort: &dyn AbortSignal,
     ) -> Result<Vec<Complex64>, SimulationError> {
         if results.len() != expected_frequencies.len() {
             return Err(SimulationError::Circuit(format!(
@@ -2418,6 +2415,9 @@ impl Engine {
             .iter()
             .zip(expected_frequencies)
             .map(|(result, expected)| {
+                if abort.is_aborted() {
+                    return Err(SimulationError::Aborted);
+                }
                 let tolerance = expected.abs().max(1.0) * 1.0e-12;
                 if (result.frequency - expected).abs() > tolerance {
                     return Err(SimulationError::Circuit(format!(
@@ -2460,6 +2460,7 @@ impl Engine {
                     target.vector_name
                 )));
             }
+            magnitude.push(SensitivityValue::magnitude(output, sensitivity));
             let scale = output.re.abs().max(output.im.abs());
             if scale != 0.0 {
                 let one = ScaledValue::new(1.0);
@@ -2480,13 +2481,6 @@ impl Engine {
                     )?)
                     .map(|(re, im)| Complex64::new(re, im)),
                 );
-                let norm = ScaledValue::new(scale).multiply(ScaledValue::new(
-                    (output.re / scale).hypot(output.im / scale),
-                ));
-                magnitude.push(derived_sensitivity_ratio(
-                    [[re, dr, one], [im, di, one]].into_iter(),
-                    [[norm, one, one]].into_iter(),
-                )?);
                 phase.push(derived_sensitivity_ratio(
                     [[re, di, one], [im.negated(), dr, one]].into_iter(),
                     norm_squared.into_iter(),
@@ -2495,13 +2489,6 @@ impl Engine {
                 normalized.push(SensitivityValue::unavailable(
                     SensitivityUnavailability::ZeroOutput,
                 ));
-                magnitude.push(if sensitivity == Complex64::new(0.0, 0.0) {
-                    SensitivityValue::Available(0.0)
-                } else {
-                    SensitivityValue::unavailable(
-                        SensitivityUnavailability::NondifferentiableMagnitude,
-                    )
-                });
                 phase.push(SensitivityValue::unavailable(
                     SensitivityUnavailability::ZeroOutput,
                 ));
@@ -2860,7 +2847,8 @@ impl Engine {
         )?;
 
         let nominal_results = self.run_ac_with_abort(&flat, frequencies, abort)?;
-        let nominal_output = Self::ac_sensitivity_outputs(&nominal_results, &output, frequencies)?;
+        let nominal_output =
+            Self::ac_sensitivity_outputs(&nominal_results, &output, frequencies, abort)?;
 
         let output_name = match &output {
             AcSensitivityOutput::Voltage { positive, negative } => negative.map_or_else(
@@ -2894,8 +2882,8 @@ impl Engine {
                 sensitivity_trial(self.run_ac_with_abort(&minus_netlist, frequencies, abort))?;
             let derivative = match (plus, minus) {
                 (Ok(plus), Ok(minus)) => {
-                    let plus = Self::ac_sensitivity_outputs(&plus, &output, frequencies)?;
-                    let minus = Self::ac_sensitivity_outputs(&minus, &output, frequencies)?;
+                    let plus = Self::ac_sensitivity_outputs(&plus, &output, frequencies, abort)?;
+                    let minus = Self::ac_sensitivity_outputs(&minus, &output, frequencies, abort)?;
                     sensitivity_complex_stencil(
                         [
                             target.nominal_value,
@@ -2924,8 +2912,9 @@ impl Engine {
                                 target.vector_name, minus_error, plus_two_error
                             ))
                         })?;
-                    let plus = Self::ac_sensitivity_outputs(&plus, &output, frequencies)?;
-                    let plus_two = Self::ac_sensitivity_outputs(&plus_two, &output, frequencies)?;
+                    let plus = Self::ac_sensitivity_outputs(&plus, &output, frequencies, abort)?;
+                    let plus_two =
+                        Self::ac_sensitivity_outputs(&plus_two, &output, frequencies, abort)?;
                     sensitivity_complex_stencil(
                         [
                             target.nominal_value,
@@ -2954,8 +2943,9 @@ impl Engine {
                                 target.vector_name, plus_error, minus_two_error
                             ))
                         })?;
-                    let minus = Self::ac_sensitivity_outputs(&minus, &output, frequencies)?;
-                    let minus_two = Self::ac_sensitivity_outputs(&minus_two, &output, frequencies)?;
+                    let minus = Self::ac_sensitivity_outputs(&minus, &output, frequencies, abort)?;
+                    let minus_two =
+                        Self::ac_sensitivity_outputs(&minus_two, &output, frequencies, abort)?;
                     sensitivity_complex_stencil(
                         [
                             target.nominal_value,

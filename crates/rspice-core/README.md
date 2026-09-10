@@ -362,12 +362,19 @@ complete-sensitivity engine APIs.
 
 Finite-difference sensitivity uses the evaluated parameter coordinates rather
 than an assumed symmetric spacing. Central and one-sided complete studies share
-a quadratic interpolation formula; scalar studies use a secant. Scaled arithmetic
+a quadratic interpolation formula; scalar DC studies use a secant. Scaled arithmetic
 retains finite derivatives through overflowing spans and cancelling weighted
 sums. AC normalized, magnitude and phase derivatives preserve finite nonzero
 signals across extreme scales, and nonfinite or unrepresentable results are
 diagnosed. Postprocessing polls cancellation, and fatal perturbation failures
 stop the study before another trial is attempted.
+
+Single-parameter AC sensitivity also interpolates complex voltages before
+projecting onto the nominal phasor. It replays the requested nominal parameter
+override, even when it differs from the authored value. It does not difference
+magnitudes across an output null: its numeric-only API diagnoses undefined or
+out-of-range magnitude derivatives, identifying the parameter and frequency.
+The nominal solve and two perturbations require a batch-run budget of three.
 
 Derived sensitivities use `SensitivityValue<T>`: an available number or an
 explicit reason. Relative sensitivity and phase are undefined at zero output;

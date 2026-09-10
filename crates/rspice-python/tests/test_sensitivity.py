@@ -9,6 +9,18 @@ import rspice
 
 
 class TestSensitivity:
+    def test_parameter_ac_magnitude_sensitivity_uses_the_nominal_phasor(self, engine):
+        netlist = rspice.Netlist.parse_spice(
+            "AC null\n.param gain=1\nV1 in 0 AC 1 60\nE1 out 0 in 0 {gain}\n.end\n"
+        )
+        with pytest.raises(rspice.SimulationError, match="nondifferentiable-magnitude"):
+            engine.run_sensitivity_ac(netlist, "out", "gain", 0.0, [1.0])
+        for nominal in [-1e-4, 1e-4]:
+            values = engine.run_sensitivity_ac(
+                netlist, "out", "gain", nominal, [1.0, 2.0], delta=1e-3
+            )
+            assert values == pytest.approx([np.sign(nominal)] * 2, rel=2e-12)
+
     def test_zero_output_availability_survives_python_and_pickle(self, engine):
         netlist = rspice.Netlist.parse_spice("Zero output\nV1 out 0 DC 0 AC 0\nR1 out 0 1\n.end\n")
         dc = engine.run_sensitivity_dc_complete(netlist, "out")

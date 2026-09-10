@@ -1568,7 +1568,7 @@ impl PyEngine {
     ///     output_node: Output node index or name
     ///     param_name: Name of the .param to vary (e.g. "rval")
     ///     param_value: Nominal parameter value
-    ///     delta: Optional perturbation size (default: 1% of value)
+    ///     delta: Optional perturbation size (default: 0.1% of nonzero value; 1e-12 at zero)
     ///
     /// Returns:
     ///     float: dV/dParam sensitivity value
@@ -1663,8 +1663,10 @@ impl PyEngine {
 
     /// Run AC sensitivity analysis
     ///
-    /// Computes d|V(output)|/d(param) at each frequency by central finite
-    /// differences. Same parameter-binding rules as `run_sensitivity`.
+    /// Computes d|V(output)|/d(param) by differentiating the complex voltage
+    /// and projecting at the requested nominal parameter value. Reports an
+    /// error if that magnitude derivative is undefined (an output-null cusp)
+    /// or out of range. Same binding rules as `run_sensitivity`.
     ///
     /// Args:
     ///     netlist: Parsed netlist to simulate
@@ -1672,7 +1674,7 @@ impl PyEngine {
     ///     param_name: Name of the .param to vary
     ///     param_value: Nominal parameter value
     ///     frequencies: Frequencies in Hz
-    ///     delta: Optional perturbation size (default: 1% of value)
+    ///     delta: Optional perturbation size (default: 0.1% of nonzero value; 1e-12 at zero)
     ///
     /// Returns:
     ///     numpy.ndarray: Sensitivity at each frequency

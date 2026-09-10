@@ -45,6 +45,66 @@ fn assert_relative(actual: f64, expected: f64, relative_tolerance: f64, quantity
 }
 
 #[test]
+fn parameter_ac_magnitude_sensitivity_reports_the_null_cusp() {
+    let netlist =
+        Netlist::parse("AC output null\n.param gain=1\nV1 in 0 AC 1\nE1 out 0 in 0 {gain}\n.end\n")
+            .unwrap();
+    let engine = physical_engine();
+    let output = node_id(&engine, &netlist, "out");
+    // The API's nominal override is zero even though the authored value is one.
+    // Vout=gain, so |Vout| has opposing one-sided derivatives at this point.
+    let error = engine
+        .run_sensitivity_ac(&netlist, output, "gain", 0.0, &[1.0], None)
+        .expect_err("a cusp cannot be reported as zero sensitivity")
+        .to_string();
+    assert!(error.contains("gain"), "{error}");
+    assert!(error.contains("nondifferentiable-magnitude"), "{error}");
+}
+
+#[test]
+fn parameter_ac_magnitude_sensitivity_respects_the_run_budget() {
+    let netlist = Netlist::parse(
+        "AC study budget\n.param gain=1\nV1 in 0 AC 1\nE1 out 0 in 0 {gain}\n.end\n",
+    )
+    .unwrap();
+    let mut config = SimulationConfig::default();
+    config.resource_limits.max_batch_runs = 2;
+    let engine = Engine::try_new(config).unwrap();
+    let output = node_id(&engine, &netlist, "out");
+    assert!(matches!(
+        engine.run_sensitivity_ac(&netlist, output, "gain", 1.0, &[1.0], None),
+        Err(rspice_core::SimulationError::ResourceLimit(_))
+    ));
+}
+
+#[test]
+fn parameter_ac_magnitude_sensitivity_projects_at_the_nominal_point() {
+    let netlist = Netlist::parse(
+        "AC near an output null\n.param gain=1\nV1 in 0 AC 1 60\nE1 out 0 in 0 {gain}\n.end\n",
+    )
+    .unwrap();
+    let engine = physical_engine();
+    let output = node_id(&engine, &netlist, "out");
+    for nominal in [-1e-4_f64, 1e-4] {
+        // The complex transfer is exactly linear even when the stencil crosses
+        // its null. Differencing magnitudes gives +/-0.1 instead of +/-1.
+        let derivative = engine
+            .run_sensitivity_ac(&netlist, output, "gain", nominal, &[1.0], Some(1e-3))
+            .unwrap()[0];
+        assert_relative(derivative, nominal.signum(), 2e-12, "magnitude derivative");
+    }
+
+    let stationary = Netlist::parse(
+        "Smooth zero magnitude\n.param gain=1\nV1 in 0 AC 1\nE1 out 0 in 0 {gain*gain}\n.end\n",
+    )
+    .unwrap();
+    let derivative = engine
+        .run_sensitivity_ac(&stationary, output, "gain", 0.0, &[1.0], None)
+        .unwrap();
+    assert_eq!(derivative, [0.0], "|gain squared| has a zero derivative");
+}
+
+#[test]
 fn ideal_voltage_short_has_exactly_zero_output_noise() {
     let netlist = Netlist::parse(
         "* an ideal voltage source shorts every parallel noise source\n\

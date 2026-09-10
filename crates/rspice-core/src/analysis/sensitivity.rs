@@ -145,6 +145,50 @@ impl SensitivityValue<Value> {
         }
     }
 
+    /// Derivative of `|output|` from a complex output derivative.
+    /// At zero output the magnitude is differentiable only if the complex
+    /// derivative is also zero. Intermediate norms and products retain their
+    /// exponents, so a finite derivative does not require a finite norm.
+    pub fn magnitude(output: Complex64, derivative: Complex64) -> Self {
+        if [output.re, output.im, derivative.re, derivative.im]
+            .iter()
+            .any(|value| !value.is_finite())
+        {
+            return Self::unavailable(SensitivityUnavailability::InvalidInput);
+        }
+        let scale = output.re.abs().max(output.im.abs());
+        if scale == 0.0 {
+            return if derivative == Complex64::new(0.0, 0.0) {
+                Self::Available(0.0)
+            } else {
+                Self::unavailable(SensitivityUnavailability::NondifferentiableMagnitude)
+            };
+        }
+        let norm = ScaledValue::new(scale).multiply(ScaledValue::new(
+            (output.re / scale).hypot(output.im / scale),
+        ));
+        let one = ScaledValue::new(1.0);
+        match ScaledValue::sum_triple_products_ratio(
+            [
+                [
+                    ScaledValue::new(output.re),
+                    ScaledValue::new(derivative.re),
+                    one,
+                ],
+                [
+                    ScaledValue::new(output.im),
+                    ScaledValue::new(derivative.im),
+                    one,
+                ],
+            ]
+            .into_iter(),
+            [[norm, one, one]].into_iter(),
+        ) {
+            Ok(value) => Self::from_scaled(value),
+            Err(_) => Self::unavailable(SensitivityUnavailability::InvalidInput),
+        }
+    }
+
     /// Derivative of `20 log10 |output|` from a complex output derivative.
     /// The dot product and squared norm retain their exponents, including
     /// when the output's magnitude itself exceeds the binary64 range.
@@ -1033,6 +1077,47 @@ fn poll_sensitivity_work(
 mod tests {
     use super::*;
     use crate::abort_signal::CountingAbort;
+
+    #[test]
+    fn magnitude_sensitivity_preserves_scale_and_reports_undefined_values() {
+        for scale in [1e-300, 1.0, 1.5e308] {
+            let output = Complex64::new(scale, scale);
+            let derivative = SensitivityValue::magnitude(output, Complex64::new(1.0, -0.5));
+            let expected = 0.5 / 2.0_f64.sqrt();
+            assert!((derivative.value().unwrap() / expected - 1.0).abs() < 2e-14);
+        }
+        assert_eq!(
+            SensitivityValue::magnitude(Complex64::new(0.0, 0.0), Complex64::new(0.0, 0.0)),
+            SensitivityValue::Available(0.0)
+        );
+        for (output, derivative, reason) in [
+            (
+                Complex64::new(0.0, 0.0),
+                Complex64::new(0.0, 1.0),
+                SensitivityUnavailability::NondifferentiableMagnitude,
+            ),
+            (
+                Complex64::new(1.0, 1.0),
+                Complex64::new(f64::MAX, f64::MAX),
+                SensitivityUnavailability::OutOfRange,
+            ),
+            (
+                Complex64::new(1.0, 1.0),
+                Complex64::new(f64::NAN, 0.0),
+                SensitivityUnavailability::InvalidInput,
+            ),
+            (
+                Complex64::new(f64::INFINITY, 1.0),
+                Complex64::new(1.0, 0.0),
+                SensitivityUnavailability::InvalidInput,
+            ),
+        ] {
+            assert_eq!(
+                SensitivityValue::magnitude(output, derivative).reason(),
+                Some(reason)
+            );
+        }
+    }
 
     #[test]
     fn adjoint_refuses_malformed_systems_and_element_descriptions_without_panicking() {
