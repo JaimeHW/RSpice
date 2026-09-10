@@ -99,10 +99,10 @@ impl<'a> NetlistGenerator<'a> {
             .filter(|value| !value.is_empty())
             .unwrap_or("0.999");
         if let Ok(value) = coupling.parse::<f64>()
-            && (!value.is_finite() || value <= 0.0 || value > 1.0)
+            && (!value.is_finite() || !(-1.0..=1.0).contains(&value))
         {
             self.errors.push(format!(
-                "Transformer '{}' has invalid coupling factor {} (expected 0 < k <= 1)",
+                "Transformer '{}' has invalid coupling factor {} (expected -1 <= k <= 1)",
                 component.spice_instance_name(),
                 coupling
             ));
@@ -305,10 +305,10 @@ impl<'a> NetlistGenerator<'a> {
             return None;
         }
         if let Ok(value) = coefficient.parse::<f64>()
-            && (!value.is_finite() || value <= 0.0 || value > 1.0)
+            && (!value.is_finite() || !(-1.0..=1.0).contains(&value))
         {
             self.errors.push(format!(
-                "Coupled inductor '{}' has invalid coupling coefficient {} (expected 0 < k <= 1)",
+                "Coupled inductor '{}' has invalid coupling coefficient {} (expected -1 <= k <= 1)",
                 component.spice_instance_name(),
                 coefficient
             ));
@@ -366,7 +366,7 @@ impl<'a> NetlistGenerator<'a> {
         };
         let Some(factor) = factor else {
             self.errors.push(format!(
-                "Inductor '{}' references '{}' but is missing a non-zero coupling factor",
+                "Inductor '{}' references '{}' but is missing a coupling factor",
                 component.spice_instance_name(),
                 coupled_to
             ));
@@ -380,9 +380,9 @@ impl<'a> NetlistGenerator<'a> {
             ));
             return None;
         };
-        if !factor_value.is_finite() || factor_value <= 0.0 || factor_value > 1.0 {
+        if !factor_value.is_finite() || !(-1.0..=1.0).contains(&factor_value) {
             self.errors.push(format!(
-                "Inductor '{}' has invalid coupling factor {} (expected 0 < k <= 1)",
+                "Inductor '{}' has invalid coupling factor {} (expected -1 <= k <= 1)",
                 component.spice_instance_name(),
                 factor
             ));
@@ -498,5 +498,208 @@ impl<'a> NetlistGenerator<'a> {
             kind,
             ComponentType::Inductor | ComponentType::SaturableInductor
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::NetLabel;
+    use num_complex::Complex64;
+    use rspice_core::{Engine, Netlist};
+
+    fn circuit(kind: ComponentType, coefficient: &str, reversed: bool) -> SchematicState {
+        let mut schematic = SchematicState::default();
+        let mut source = Component::new(1, ComponentType::VoltageSource, Point::origin())
+            .with_name_value("V1", "0.5");
+        source.params = "ac=1".to_owned();
+        let resistor = Component::new(2, ComponentType::Resistor, Point::new(200, 0))
+            .with_name_value("R1", "50");
+        let mut add = |component: Component, nodes: &[&str]| {
+            for ((_, point), node) in component.terminal_positions().iter().zip(nodes) {
+                schematic.net_labels.push(NetLabel::new(
+                    schematic.net_labels.len() as u64 + 1,
+                    *point,
+                    *node,
+                ));
+            }
+            schematic.components.push(component);
+        };
+        add(source, &["in", "0"]);
+        add(resistor, &["in", "p"]);
+        let secondary = if reversed { ["0", "s"] } else { ["s", "0"] };
+        if kind == ComponentType::Transformer {
+            let mut transformer =
+                Component::new(3, kind, Point::new(400, 0)).with_name_value("T1", "10m");
+            transformer.params = format!("ls=40m k={coefficient}");
+            add(transformer, &["p", "0", secondary[0], secondary[1]]);
+        } else {
+            let mut primary = Component::new(3, ComponentType::Inductor, Point::new(400, 0))
+                .with_name_value("L1", "10m");
+            if kind == ComponentType::Inductor {
+                primary.params = format!("coupled_to=L2 coupling_factor={coefficient}");
+            }
+            add(primary, &["p", "0"]);
+            add(
+                Component::new(4, ComponentType::Inductor, Point::new(600, 0))
+                    .with_name_value("L2", "40m"),
+                &secondary,
+            );
+            if kind == ComponentType::CoupledInductor {
+                let mut coupling =
+                    Component::new(5, kind, Point::new(800, 0)).with_name_value("K1", coefficient);
+                coupling.params = "inductors=\"L1 L2\"".to_owned();
+                add(coupling, &[]);
+            }
+        }
+        schematic
+    }
+
+    fn generated(schematic: &SchematicState) -> super::super::NetlistResult {
+        let buffers = HashMap::new();
+        let hierarchy = HierarchySource::from_buffers(&buffers);
+        generate_netlist_hierarchical(schematic, &[], &hierarchy)
+    }
+
+    #[test]
+    fn signed_schematic_coupling_preserves_observable_secondary_polarity() {
+        for kind in [
+            ComponentType::CoupledInductor,
+            ComponentType::Inductor,
+            ComponentType::Transformer,
+        ] {
+            for coefficient in [-1.0, -0.75, 0.0, 0.75, 1.0] {
+                for reversed in [false, true] {
+                    let schematic = circuit(kind, &coefficient.to_string(), reversed);
+                    let generated = generated(&schematic);
+                    assert!(
+                        generated.errors.is_empty(),
+                        "{kind:?}, {coefficient}: {:?}",
+                        generated.errors
+                    );
+                    let deck = Netlist::parse(&generated.netlist).unwrap();
+                    let engine = Engine::default();
+                    for point in engine.run_ac(&deck, &[100.0, 1000.0, 10000.0]).unwrap() {
+                        let omega = std::f64::consts::TAU * point.frequency;
+                        let orientation = if reversed { -1.0 } else { 1.0 };
+                        let mutual = coefficient * orientation * 0.02;
+                        let expected = Complex64::new(0.0, omega * mutual)
+                            / Complex64::new(50.0, omega * 0.01);
+                        let secondary = point
+                            .node_names
+                            .iter()
+                            .position(|node| node.eq_ignore_ascii_case("s"))
+                            .unwrap_or_else(|| {
+                                panic!(
+                                    "Secondary node missing from {:?}:\n{}",
+                                    point.node_names, generated.netlist
+                                )
+                            });
+                        assert!(
+                            (point.voltages[secondary] - expected).norm() < 2e-12,
+                            "{kind:?}, k={coefficient}, reversed={reversed}: {} vs {expected}\n{}",
+                            point.voltages[secondary],
+                            generated.netlist
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn invalid_schematic_coupling_is_refused_without_clamping() {
+        for kind in [
+            ComponentType::CoupledInductor,
+            ComponentType::Inductor,
+            ComponentType::Transformer,
+        ] {
+            for coefficient in ["-1.01", "1.01", "NaN", "inf", "-inf"] {
+                let schematic = circuit(kind, coefficient, false);
+                let before = schematic.components.clone();
+                let result = generated(&schematic);
+                assert!(
+                    result
+                        .errors
+                        .iter()
+                        .any(|error| error.contains("invalid coupling")),
+                    "{kind:?}, k={coefficient}: {:?}",
+                    result.errors
+                );
+                assert_eq!(schematic.components, before);
+            }
+        }
+    }
+
+    #[test]
+    fn inductor_coupling_property_accepts_signed_values_and_keeps_absence_distinct() {
+        use crate::state::property_types::{PropertyRegistry, PropertyValue};
+
+        let registry = PropertyRegistry::new();
+        let definition = registry
+            .get(ComponentType::Inductor)
+            .unwrap()
+            .get("coupling_factor")
+            .unwrap();
+        for value in [-1.0, -0.75, -0.0, 0.0, 0.75, 1.0] {
+            definition.validate(&PropertyValue::number(value)).unwrap();
+        }
+        for value in [-1.01, 1.01, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert!(definition.validate(&PropertyValue::number(value)).is_err());
+        }
+
+        for params in ["", "coupling_factor=0", "coupling_factor=-0"] {
+            let mut schematic = circuit(ComponentType::Inductor, "0", false);
+            schematic.components[2].params = params.to_owned();
+            let result = generated(&schematic);
+            assert!(result.errors.is_empty(), "{:?}", result.errors);
+            let deck = Netlist::parse(&result.netlist).unwrap();
+            assert!(!deck.elements.iter().any(|element| matches!(
+                element.kind,
+                rspice_core::netlist::ElementKind::Coupling { .. }
+            )));
+        }
+        let mut schematic = circuit(ComponentType::Inductor, "-0.75", false);
+        schematic.components[2].params = "coupling_factor=-0.75".to_owned();
+        assert!(
+            generated(&schematic)
+                .errors
+                .iter()
+                .any(|error| error.contains("no target winding"))
+        );
+        schematic.components[2].params = "coupled_to=L2".to_owned();
+        assert!(
+            generated(&schematic)
+                .errors
+                .iter()
+                .any(|error| error.contains("missing a coupling factor"))
+        );
+    }
+
+    #[test]
+    fn reciprocal_coupling_definitions_must_agree_in_polarity() {
+        let mut schematic = circuit(ComponentType::Inductor, "-0.75", false);
+        schematic.components[3].params = "coupled_to=L1 coupling_factor=-0.75".to_owned();
+        let result = generated(&schematic);
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
+        let deck = Netlist::parse(&result.netlist).unwrap();
+        assert_eq!(
+            deck.elements
+                .iter()
+                .filter(|element| matches!(
+                    element.kind,
+                    rspice_core::netlist::ElementKind::Coupling { .. }
+                ))
+                .count(),
+            1
+        );
+
+        schematic.components[3].params = "coupled_to=L1 coupling_factor=0.75".to_owned();
+        assert!(
+            generated(&schematic)
+                .errors
+                .iter()
+                .any(|error| error.contains("Conflicting coupling definitions"))
+        );
     }
 }

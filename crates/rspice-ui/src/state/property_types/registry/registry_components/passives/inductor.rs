@@ -160,10 +160,12 @@ impl PropertyRegistry {
         sheet.add(
             PropertyDefinition::new("coupling_factor")
                 .with_display_name("Coupling Factor")
-                .with_description("K-factor for mutual inductance (0-1)")
+                .with_description(
+                    "Signed mutual coupling (-1 to 1); negative values reverse mutual polarity",
+                )
                 .with_type(PropertyType::Number)
                 .with_default(PropertyValue::number(0.0))
-                .with_range(0.0, 1.0)
+                .with_range(-1.0, 1.0)
                 .with_order(31)
                 .with_category("Coupling"),
         );

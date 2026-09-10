@@ -58,10 +58,12 @@ impl PropertyRegistry {
         sheet.add(
             PropertyDefinition::new("k")
                 .with_display_name("Coupling Factor")
-                .with_description("Magnetic coupling coefficient (0 < k <= 1)")
+                .with_description(
+                    "Signed magnetic coupling (-1 to 1); negative values reverse mutual polarity",
+                )
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::expression("0.999"))
-                .with_range(0.0, 1.0)
+                .with_range(-1.0, 1.0)
                 .with_order(13)
                 .with_category("Electrical")
                 .required(),
@@ -128,9 +130,12 @@ impl PropertyRegistry {
         sheet.add(
             PropertyDefinition::new("k")
                 .with_display_name("Coupling Coefficient")
-                .with_description("Mutual coupling coefficient (0 < k <= 1)")
+                .with_description(
+                    "Signed mutual coupling (-1 to 1); zero leaves the windings uncoupled",
+                )
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::expression("0.99"))
+                .with_range(-1.0, 1.0)
                 .with_order(10)
                 .with_category("Electrical")
                 .required(),
