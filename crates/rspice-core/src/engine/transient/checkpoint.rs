@@ -1207,8 +1207,8 @@ pub(crate) fn simulation_checkpoint_identity(config: &SimulationConfig) -> Strin
     // v70 applies ngspice MOS3 noise width narrowing independently of mask shifts.
     // v73 retains out-of-range MOS flicker coefficients until frequency evaluation.
     // v74 preserves semiconductor flicker laws and configured JFET junction GMIN.
-    // v75 removes artificial BJT geometry, saturation and knee-current floors.
-    hasher.update(b"rspice-transient-resolved-config-v75\0");
+    // v76 corrects legacy BJT junction-capacitance temperature scaling.
+    hasher.update(b"rspice-transient-resolved-config-v76\0");
     hash_field(&mut hasher, "temperature", config.temperature.to_bits());
     hash_field(&mut hasher, "ramptime", config.ramptime.to_bits());
     hash_field(&mut hasher, "digital_delay_type", config.digital_delay_type);

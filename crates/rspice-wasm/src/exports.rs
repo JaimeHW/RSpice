@@ -422,6 +422,40 @@ mod wasm_tests {
     }
 
     #[wasm_bindgen_test]
+    fn legacy_bjt_capacitance_temperature_in_wasm() {
+        use rspice_core::engine::{SimulationConfig, SpiceDialect};
+        // Same isolated CJE case as the native independent-reference test:
+        // ngspice 46 binary and Xyce 7.10 source-derived AC capacitance.
+        for (dialect, expected, tolerance) in [
+            (SpiceDialect::Ngspice, 2.1805869065275923e-12, 3e-8),
+            (SpiceDialect::Xyce, 1.9906878749375348e-12, 2e-12),
+        ] {
+            let mut config = SimulationConfig::default().with_spice_dialect(dialect);
+            config.convergence_config.gmin_target = 0.0;
+            config.convergence_config.junction_gmin_target = 0.0;
+            let engine = rspice_core::Engine::new(config);
+            for (kind, p) in [("NPN", 1.0), ("PNP", -1.0)] {
+                let deck = rspice_core::Netlist::parse(&format!(
+                    "GP capacitor temperature\nVBE be 0 DC {} AC 1\nQBE 0 be 0 me AREA=3 M=2e-20\n.model me {kind}(IS=0 CJE=2p VJE=.83 MJE=.37 FC=.4 TNOM=27)\n.temp 70\n.options GMIN=0\n.end\n", p * 0.1
+                )).unwrap();
+                let ac = engine
+                    .run_ac_with_abort(&deck, &[1e6], &rspice_core::abort_signal::NoAbort)
+                    .unwrap();
+                let column = ac[0]
+                    .branch_names
+                    .iter()
+                    .position(|branch| branch.eq_ignore_ascii_case("VBE"))
+                    .unwrap();
+                let actual = -ac[0].currents[column].im / (std::f64::consts::TAU * 1e6 * 6e-20);
+                assert!(
+                    (actual - expected).abs() < expected * tolerance,
+                    "{dialect:?} {kind}: {actual:e} vs {expected:e}"
+                );
+            }
+        }
+    }
+
+    #[wasm_bindgen_test]
     fn small_bjt_instances_preserve_dc_and_ac_in_wasm() {
         let mut config = rspice_core::engine::SimulationConfig::default();
         config.convergence_config.gmin_target = 0.0;

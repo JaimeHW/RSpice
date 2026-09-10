@@ -2224,3 +2224,202 @@ fn zero_gummel_poon_saturation_current_stays_disabled() {
         assert!(result.branch_currents.iter().all(|&current| current == 0.0));
     }
 }
+
+#[test]
+fn legacy_junction_capacitance_temperature_matches_spice_references() {
+    use SpiceDialect::{Ngspice, Xyce};
+    // Independent ngspice 46 AC measurements (IS=TF=TR=0), in farads.
+    // Xyce values are derived from N_DEV_BJT.C in the 7.10 source:
+    // operating pbfact is also used in the nominal inversion, and CJS/VJS
+    // remain nominal. Biases avoid its inconsistent nominal BC join.
+    for (dialect, tnom, temperature, bias, expected) in [
+        (
+            Ngspice,
+            27.0,
+            -40.0,
+            -0.4,
+            [
+                1.6592826985669354e-12,
+                2.3187629982831146e-12,
+                4.504768623867699e-12,
+            ],
+        ),
+        (
+            Xyce,
+            27.0,
+            -40.0,
+            -0.4,
+            [
+                1.8462098259680166e-12,
+                2.7014861553409653e-12,
+                4.598086389211355e-12,
+            ],
+        ),
+        (Ngspice, 27.0, 27.0, 0.0, [2e-12, 3e-12, 5e-12]),
+        (Xyce, 27.0, 27.0, 0.0, [2e-12, 3e-12, 5e-12]),
+        (
+            Ngspice,
+            27.0,
+            70.0,
+            0.1,
+            [
+                2.1805869065275923e-12,
+                3.4267504027453357e-12,
+                5.223725774666841e-12,
+            ],
+        ),
+        (
+            Xyce,
+            27.0,
+            70.0,
+            0.1,
+            [
+                1.9906878749375348e-12,
+                3.017356268296936e-12,
+                5.126373626373625e-12,
+            ],
+        ),
+        (
+            Ngspice,
+            27.0,
+            125.0,
+            0.6,
+            [
+                3.3938210663884363e-12,
+                6.647798973415988e-12,
+                6.11777066335303e-12,
+            ],
+        ),
+        (
+            Xyce,
+            27.0,
+            125.0,
+            0.6,
+            [
+                2.30151257189782e-12,
+                3.724231648825904e-12,
+                5.758241758241757e-12,
+            ],
+        ),
+        (
+            Ngspice,
+            50.0,
+            27.0,
+            -0.4,
+            [
+                1.707690473743761e-12,
+                2.4362058346267156e-12,
+                4.568111350869261e-12,
+            ],
+        ),
+        (
+            Xyce,
+            50.0,
+            27.0,
+            -0.4,
+            [
+                1.7572808847689595e-12,
+                2.523123224854252e-12,
+                4.598086389211355e-12,
+            ],
+        ),
+        (
+            Ngspice,
+            50.0,
+            -40.0,
+            0.0,
+            [
+                1.8724352634309237e-12,
+                2.6888696309844536e-12,
+                4.839825827878507e-12,
+            ],
+        ),
+        (
+            Xyce,
+            50.0,
+            -40.0,
+            0.0,
+            [2.2530437202648688e-12, 3.490055296764453e-12, 5e-12],
+        ),
+        (
+            Ngspice,
+            50.0,
+            70.0,
+            0.6,
+            [
+                2.978859243920323e-12,
+                5.169633039750461e-12,
+                5.821664385549351e-12,
+            ],
+        ),
+        (
+            Xyce,
+            50.0,
+            70.0,
+            0.6,
+            [
+                2.763039693056152e-12,
+                4.648400104490727e-12,
+                5.758241758241757e-12,
+            ],
+        ),
+        (
+            Ngspice,
+            50.0,
+            50.0,
+            0.1,
+            [
+                2.097294565936023e-12,
+                3.202170347382517e-12,
+                5.126373626373625e-12,
+            ],
+        ),
+        (
+            Xyce,
+            50.0,
+            50.0,
+            0.1,
+            [
+                2.097294565936024e-12,
+                3.202170347382517e-12,
+                5.126373626373625e-12,
+            ],
+        ),
+    ] {
+        let mut config = SimulationConfig::default().with_spice_dialect(dialect);
+        config.convergence_config.gmin_target = 0.0;
+        config.convergence_config.junction_gmin_target = 0.0;
+        let engine = Engine::new(config);
+        for (kind, p) in [("NPN", 1.0), ("PNP", -1.0)] {
+            for m in [2.0, 2e-20] {
+                let voltage = p * bias;
+                let deck = Netlist::parse(&format!(
+                    "GP junction temperature\nVBE be 0 DC {voltage} AC 1\nVBC bc 0 DC {voltage} AC 1\nVSC sc 0 DC {voltage} AC 1\n\
+                     QBE 0 be 0 0 me AREA=3 M={m}\nQBC 0 bc 0 0 mc AREA=3 M={m}\nQSC 0 0 0 sc ms AREA=3 M={m}\n\
+                     .model me {kind}(IS=0 SUBS=1 CJE=2p VJE=.83 MJE=.37 FC=.4 TNOM={tnom})\n\
+                     .model mc {kind}(IS=0 SUBS=1 CJC=3p VJC=.68 MJC=.41 FC=.4 TNOM={tnom})\n\
+                     .model ms {kind}(IS=0 SUBS=1 CJS=5p VJS=.91 MJS=.23 FC=.4 TNOM={tnom})\n\
+                     .temp {temperature}\n.options GMIN=0\n.end\n"
+                )).unwrap();
+                let ac = engine.run_ac(&deck, &[1e6]).unwrap();
+                for (name, expected) in ["VBE", "VBC", "VSC"].into_iter().zip(expected) {
+                    let column = ac[0]
+                        .branch_names
+                        .iter()
+                        .position(|branch| branch.eq_ignore_ascii_case(name))
+                        .unwrap();
+                    let current = ac[0].currents[column];
+                    let actual = -current.im / (std::f64::consts::TAU * 1e6 * 3.0 * m);
+                    // Ngspice uses older k/q constants; RSpice intentionally
+                    // uses current SI constants outside the Xyce dialect.
+                    let tolerance = if dialect == Ngspice { 3e-8 } else { 2e-12 };
+                    assert!(
+                        (actual - expected).abs() < expected * tolerance,
+                        "{dialect:?} {kind} {name} TNOM={tnom} TEMP={temperature} V={bias} M={m}: {actual:e} vs {expected:e}"
+                    );
+                    assert_eq!(current.re, 0.0);
+                }
+            }
+        }
+    }
+}

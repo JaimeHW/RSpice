@@ -812,9 +812,59 @@ impl Bjt {
         } else {
             0.0
         };
-        let vje_temp = Self::vbic_temp_scaled_potential(self.vje_nominal, ratio, vt, self.eaie);
-        let vjc_temp = Self::vbic_temp_scaled_potential(self.vjc_nominal, ratio, vt, self.eaic);
-        let ps_temp = Self::vbic_temp_scaled_potential(self.ps_nominal, ratio, vt, self.eais);
+        let legacy_shifts = legacy_model.then(|| {
+            // bjttemp.c / N_DEV_BJT.C silicon bandgap correction. Xyce
+            // uses the operating-temperature shift in the nominal inversion
+            // as well; ngspice evaluates that shift at TNOM instead.
+            let shift = |temperature: Value| {
+                let reference_ratio = temperature / crate::constants::TEMP_REFERENCE;
+                let bandgap = 1.16 - 7.02e-4 * temperature * temperature / (temperature + 1108.0);
+                bandgap
+                    - reference_ratio * 1.115_087_7
+                    - 3.0 * self.thermal_voltage_at(temperature) * reference_ratio.ln()
+            };
+            let operating = shift(temp);
+            let nominal = if self.xyce_compatibility {
+                operating
+            } else {
+                shift(tnom)
+            };
+            (nominal, operating)
+        });
+        let junction = |potential: Value, capacitance: Value, grading: Value, energy: Value| {
+            if let Some((nominal_shift, operating_shift)) = legacy_shifts {
+                let reference = crate::constants::TEMP_REFERENCE;
+                let pbo = (potential - nominal_shift) / (tnom / reference);
+                let mapped = (temp / reference) * pbo + operating_shift;
+                let old_gamma = (potential - pbo) / pbo;
+                let new_gamma = (mapped - pbo) / pbo;
+                let denominator = 1.0 + grading * (4e-4 * (tnom - reference) - old_gamma);
+                let numerator = 1.0 + grading * (4e-4 * (temp - reference) - new_gamma);
+                let capacitance = crate::numerics::scaled_exp_product(
+                    &[capacitance, numerator, self.area, self.m],
+                    &[denominator],
+                    0.0,
+                );
+                (mapped, capacitance)
+            } else {
+                let mapped = Self::vbic_temp_scaled_potential(potential, ratio, vt, energy);
+                (
+                    mapped,
+                    (capacitance * (potential / mapped.max(1e-18)).powf(grading) * scale).max(0.0),
+                )
+            }
+        };
+        let (vje_temp, cje_temp) =
+            junction(self.vje_nominal, self.cje_nominal, self.mje, self.eaie);
+        let (vjc_temp, cjc_temp) =
+            junction(self.vjc_nominal, self.cjc_nominal, self.mjc, self.eaic);
+        let (ps_temp, cjcp_temp) = if legacy_model && self.xyce_compatibility {
+            // Xyce's legacy substrate charge uses nominal CJS and VJS.
+            (self.ps_nominal, self.cjcp_nominal * scale)
+        } else {
+            junction(self.ps_nominal, self.cjcp_nominal, self.ms, self.eais)
+        };
+        let (_, cjep_temp) = junction(self.vjc_nominal, self.cjep_nominal, self.mjc, self.eaic);
         let nf_temp = self.nf_nominal * (1.0 + delta_t * self.tnf);
         let nr_temp = self.nr_nominal * (1.0 + delta_t * self.tnf);
         let avc2_temp = self.avc2_nominal * (1.0 + (temp - self.tnom) * self.tavc);
@@ -854,18 +904,10 @@ impl Bjt {
         self.vje = vje_temp;
         self.vjc = vjc_temp;
         self.ps = ps_temp;
-        self.cje =
-            (self.cje_nominal * (self.vje_nominal / vje_temp.max(1e-18)).powf(self.mje) * scale)
-                .max(0.0);
-        self.cjc =
-            (self.cjc_nominal * (self.vjc_nominal / vjc_temp.max(1e-18)).powf(self.mjc) * scale)
-                .max(0.0);
-        self.cjcp =
-            (self.cjcp_nominal * (self.ps_nominal / ps_temp.max(1e-18)).powf(self.ms) * scale)
-                .max(0.0);
-        self.cjep =
-            (self.cjep_nominal * (self.vjc_nominal / vjc_temp.max(1e-18)).powf(self.mjc) * scale)
-                .max(0.0);
+        self.cje = cje_temp;
+        self.cjc = cjc_temp;
+        self.cjcp = cjcp_temp;
+        self.cjep = cjep_temp;
         self.cbeo = (self.cbeo_nominal * scale).max(0.0);
         self.cbco = (self.cbco_nominal * scale).max(0.0);
         self.qco = (self.qco_nominal * scale).max(0.0);
@@ -1947,6 +1989,64 @@ impl Bjt {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn legacy_temperature_mapped_charges_have_continuous_consistent_derivatives() {
+        for xyce in [false, true] {
+            let mut model = model_with(&[
+                ("IS", 0.0),
+                ("CJE", 2e-12),
+                ("VJE", 0.83),
+                ("MJE", 0.37),
+                ("CJC", 3e-12),
+                ("VJC", 0.68),
+                ("MJC", 0.41),
+                ("XCJC", 0.3),
+                ("CJS", 5e-12),
+                ("VJS", 0.91),
+                ("MJS", 0.23),
+                ("FC", 0.4),
+                ("TNOM", 50.0),
+            ]);
+            model.set_xyce_compatibility(xyce);
+            model.set_junction_gmin(0.0);
+            for temperature in [233.15, 300.15, 323.15, 398.15] {
+                model.set_temperature(temperature);
+                let sample = |v| {
+                    let state = model.legacy_transient_charge_state_with_vbx(v, v, v, -v);
+                    [
+                        (state.qbe, state.capbe),
+                        (state.qbc, state.capbc),
+                        (state.qbx, state.capbx),
+                        (-state.qcs, state.capcs),
+                    ]
+                };
+                // Keep each charge and its Jacobian continuous at the mapped
+                // junction transition, including the external BC partition.
+                for join in [model.fc * model.vje, model.fc * model.vjc, 0.0] {
+                    let h = 1e-6;
+                    for v in [-0.4, join - 1e-5, join, join + 1e-5, 0.6] {
+                        for ((_, derivative), ((left, _), (right, _))) in sample(v)
+                            .into_iter()
+                            .zip(sample(v - h).into_iter().zip(sample(v + h)))
+                        {
+                            let finite_difference = (right - left) / (2.0 * h);
+                            assert!(
+                                (finite_difference - derivative).abs() < derivative * 2e-8,
+                                "Xyce={xyce} T={temperature} V={v}: {finite_difference:e} vs {derivative:e}"
+                            );
+                        }
+                    }
+                    for ((ql, cl), (qr, cr)) in
+                        sample(join - 1e-9).into_iter().zip(sample(join + 1e-9))
+                    {
+                        assert!((cl - cr).abs() < cl * 2e-8);
+                        assert!(((qr - ql) / 2e-9 - cl).abs() < cl * 2e-6);
+                    }
+                }
+            }
+        }
+    }
 
     #[test]
     fn bjt_small_instances_preserve_currents_knees_capacitances_and_resistances() {
