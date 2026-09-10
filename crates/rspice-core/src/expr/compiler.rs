@@ -52,7 +52,10 @@ pub(crate) fn constant_value(expr: &Expr, context: &Context<'_>) -> Option<Value
     if !constant_over_time(expr) {
         return None;
     }
-    let value = Vm::new().execute(&compile(expr), context);
+    // This result may be an operand inside a larger expression. Xyce's
+    // nonfinite replacement belongs only at the completed source boundary;
+    // applying it here would turn, for example, time/exp(1000) into time/1e50.
+    let value = Vm::new().execute_raw(&compile(expr), context);
     value.is_finite().then_some(value)
 }
 
@@ -250,6 +253,45 @@ mod tests {
     use super::*;
     use crate::config::ExpressionDialect;
     use crate::expr::{TimeEnclosure, parse_expression_strict};
+
+    #[test]
+    fn fixed_environment_keeps_nonfinite_intermediates_until_the_final_boundary() {
+        for dialect in [ExpressionDialect::Ngspice, ExpressionDialect::Xyce] {
+            let context = Context::transient(&[], &[], 0.0).with_expression_dialect(dialect);
+            for expression in [
+                "time/exp(1000)",
+                "exp(1000)/(exp(1000)+time)",
+                "0*exp(1000)+time",
+                "exp(1000)>time",
+                "if(exp(1000)>time,time,-time)",
+                "time/(0*exp(1000))",
+            ] {
+                let ast = parse_expression_strict(expression).unwrap();
+                let original = compile(&ast);
+                let specialized = compile_time_expression(&ast, &context);
+                for time in [-1e100, -1.0, 0.0, 1.0, 1e100] {
+                    let point = Context { time, ..context };
+                    let expected = Vm::new().execute(&original, &point);
+                    let actual = Vm::new().execute(&specialized, &point);
+                    if expected.is_nan() {
+                        assert!(actual.is_nan(), "{dialect:?}: {expression} at {time}");
+                    } else {
+                        assert_eq!(
+                            actual.to_bits(),
+                            expected.to_bits(),
+                            "{dialect:?}: {expression} at {time}"
+                        );
+                    }
+                }
+            }
+            for expression in ["exp(1000)", "0*exp(1000)"] {
+                assert!(
+                    constant_value(&parse_expression_strict(expression).unwrap(), &context)
+                        .is_none()
+                );
+            }
+        }
+    }
 
     #[test]
     fn fixed_environment_reuses_stateless_siblings_bit_exactly() {
