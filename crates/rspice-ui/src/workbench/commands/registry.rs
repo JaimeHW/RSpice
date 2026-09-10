@@ -898,7 +898,8 @@ impl Command {
             Self::OpenWorkspace(workspace) if workspace != Workspace::Project => {
                 "no project is open"
             }
-            Self::Save | Self::SaveAs | Self::SaveAll | Self::CloseProject => "no project is open",
+            Self::SaveAll => "no unsaved project changes",
+            Self::Save | Self::SaveAs | Self::CloseProject => "no project is open",
             Self::RevertActiveDocument => "active document has no changes to revert",
             Self::CloseActiveDocument => "no closable document is active",
             Self::DetachDocument => "no active document is available to detach",

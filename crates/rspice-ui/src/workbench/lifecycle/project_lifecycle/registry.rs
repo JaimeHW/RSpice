@@ -229,12 +229,13 @@ fn document_digests_with_results_cache(
     );
     documents.insert(
         ProjectDocumentId::ModelCatalog,
-        digest(
-            &project
-                .execution_context
-                .as_ref()
-                .map(|context| &context.model_libraries),
-        )?,
+        digest(&project.execution_context.as_ref().map(|context| {
+            (
+                &context.model_libraries,
+                &context.model_resolution_records,
+                &context.model_validation_receipt,
+            )
+        }))?,
     );
     documents.insert(
         ProjectDocumentId::ResultHistory,

@@ -314,6 +314,11 @@ pub(crate) fn generated_netlist_input_digest(
 ) -> Result<crate::product::ContentDigest, ProjectLifecycleError> {
     let mut project = snapshot(state)?;
     project.simulation_results = ProjectSimulationResults::default();
+    // A receipt records validation of the existing inputs. Provider decisions
+    // still participate because they select the source emitted to the engine.
+    if let Some(context) = project.execution_context.as_mut() {
+        context.model_validation_receipt = None;
+    }
     // Annotating a plot must never change what the netlist generator is
     // asked to produce.
     project.result_presentation = Default::default();
@@ -1955,16 +1960,21 @@ fn overlay_document(
             }
         }
         ProjectDocumentId::ModelCatalog => {
-            ensure_execution_context(target, working)?.model_libraries = working
-                .execution_context
-                .as_ref()
-                .ok_or_else(|| {
-                    ProjectLifecycleError::InvalidState(
-                        "working project has no model catalog".to_owned(),
-                    )
-                })?
+            let source = working.execution_context.as_ref().ok_or_else(|| {
+                ProjectLifecycleError::InvalidState(
+                    "working project has no model catalog".to_owned(),
+                )
+            })?;
+            let destination = ensure_execution_context(target, working)?;
+            destination
                 .model_libraries
-                .clone();
+                .clone_from(&source.model_libraries);
+            destination
+                .model_resolution_records
+                .clone_from(&source.model_resolution_records);
+            destination
+                .model_validation_receipt
+                .clone_from(&source.model_validation_receipt);
         }
         ProjectDocumentId::ResultHistory => {
             target.simulation_results = working.simulation_results.clone();
