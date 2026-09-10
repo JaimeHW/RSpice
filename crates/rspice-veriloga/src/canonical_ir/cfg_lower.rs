@@ -3620,9 +3620,15 @@ impl<'a> CfgLowerer<'a> {
                 proposed,
                 candidate,
                 selector,
-                ..
+                type_metadata,
             } => {
                 let proposed = self.expr(*proposed);
+                let proposed = if let Some(polarity) = type_metadata {
+                    let polarity = self.expr(*polarity);
+                    self.binary(CfgBinaryOp::Mul, polarity, proposed)
+                } else {
+                    proposed
+                };
                 // The candidate is the limiter's inlined body; its implicit
                 // arguments are resolved against this call, so the enclosing
                 // operator has to be on the stack while it is walked.

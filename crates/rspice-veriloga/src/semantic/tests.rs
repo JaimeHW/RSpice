@@ -2085,7 +2085,7 @@ fn limit_accepts_source_defined_all_input_limiter() {
 }
 
 #[test]
-fn named_limit_requires_literal_string_selector() {
+fn named_limit_rejects_runtime_selector_values() {
     let error = analyze(&module_src(
         r#"
             real x, selector;
@@ -2269,23 +2269,27 @@ fn source_defined_typed_limit_requires_type_metadata_and_forwarded_signature() {
 }
 
 #[test]
-fn named_limit_unknown_selector_requires_source_function() {
-    let error = analyze(&module_src(
-        r#"
-            real x;
-            analog begin
-                x = $limit(V(p, n), "missing_limiter");
-                I(p, n) <+ x;
-            end
-            "#,
-    ))
-    .expect_err("an unknown named limiter must resolve to an analog function");
-    assert!(
-        error
-            .to_string()
-            .contains("Unknown function: 'missing_limiter'"),
-        "unexpected diagnostic: {error}"
-    );
+fn named_limit_unknown_string_selectors_use_default_without_hiding_errors() {
+    for call in [
+        "$limit(V(p,n), \"missing_limiter\")",
+        "$limit(V(p,n), \"missing_limiter\", 0.5)",
+    ] {
+        let module = analyze_one(&module_src(&format!("real x; analog x = {call};")));
+        let assignment = flat_assignments(&module)
+            .into_iter()
+            .find(|assignment| assignment.target == "x")
+            .unwrap();
+        let Expression::SystemFunction(function) = &assignment.expression else {
+            panic!("default limiter must remain stateful");
+        };
+        assert_eq!(function.name, "$limit");
+        assert_eq!(function.args.len(), 1);
+    }
+    crate::VerilogACompiler::default()
+        .compile(&module_src(
+            "real x; analog x = $limit(V(p,n), \"missing_limiter\", unknown_function(1));",
+        ))
+        .expect_err("unused recommendation arguments still require valid expressions");
 }
 
 #[test]
@@ -2341,54 +2345,20 @@ fn source_defined_limit_requires_matching_all_input_signature() {
 }
 
 #[test]
-fn source_defined_limit_requires_real_return_and_formals() {
-    let integer_return = analyze(&module_src(
-        r#"
-            analog function integer wrong_return;
-                input proposed, previous;
-                real proposed, previous;
-                begin
-                    wrong_return = 0;
-                end
-            endfunction
-            real x;
-            analog begin
-                x = $limit(V(p, n), "wrong_return");
-                I(p, n) <+ x;
-            end
-            "#,
-    ))
-    .expect_err("a named limiter must return real");
-    assert!(
-        integer_return
-            .to_string()
-            .contains("named $limit function 'wrong_return' must return real"),
-        "unexpected diagnostic: {integer_return}"
-    );
-
-    let integer_formal = analyze(&module_src(
-        r#"
-            analog function real wrong_formal;
+fn source_defined_limit_accepts_numeric_return_and_input_types() {
+    for selector in ["numeric", "\"numeric\""] {
+        analyze(&module_src(&format!(
+            r#"
+            analog function integer numeric;
                 input real proposed;
                 input integer previous;
-                begin
-                    wrong_formal = proposed;
-                end
+                numeric = proposed + previous;
             endfunction
-            real x;
-            analog begin
-                x = $limit(V(p, n), "wrong_formal");
-                I(p, n) <+ x;
-            end
-            "#,
-    ))
-    .expect_err("a named limiter must receive real values");
-    assert!(
-        integer_formal
-            .to_string()
-            .contains("requires real formal 'previous'"),
-        "unexpected diagnostic: {integer_formal}"
-    );
+            analog I(p,n) <+ $limit(V(p,n), {selector});
+        "#
+        )))
+        .expect("numeric analog-function coercions also apply to limiter callbacks");
+    }
 }
 
 // ---------------------------------------------------------------------------

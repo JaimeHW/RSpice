@@ -2122,24 +2122,20 @@ impl<'a> ExprConverter<'a> {
         arena: &mut ExprArena,
         op: &AnalogOperator,
     ) -> CompileResult<NodeId> {
-        // Only the `native` build of the `$limit` arm writes a node; without
-        // that feature every arm here refuses, and the parameter is still part
-        // of the signature every other converter method has.
+        // Portable-only builds refuse every arm; the JIT builds also write
+        // the metadata node below.
         let _ = &arena;
         match op {
-            #[cfg(feature = "native")]
+            #[cfg(any(feature = "native", feature = "wasm-jit"))]
             AnalogOperator::Limit { proposed, .. } => {
-                // The native runtime still consumes CompiledModel for
-                // topology and state-slot metadata, while the executable
-                // expression comes exclusively from canonical MIR. Emit a
-                // pass-through legacy limit solely to allocate the matching
-                // state slot; native construction requires every executable
-                // entry point to compile from canonical IR, so this bytecode
-                // is never a semantic fallback.
+                // Both JITs consume CompiledModel for topology and state slots,
+                // with executable expressions supplied by canonical IR. This
+                // instruction reserves the matching slot and deliberately
+                // cannot execute as an interpreter fallback.
                 let proposed = self.convert(arena, proposed)?;
                 Ok(arena.push(Node::CanonicalLimit(proposed)))
             }
-            #[cfg(not(feature = "native"))]
+            #[cfg(not(any(feature = "native", feature = "wasm-jit")))]
             AnalogOperator::Limit { selector, .. } => Err(CodeGenError::new(
                 CodeGenErrorKind::UnsupportedFeature(format!(
                     "stateful named $limit selector '{selector}' requires the canonical backend"

@@ -59,7 +59,7 @@ module clamped_diode(p, n);
 
     real vd;
     analog begin
-        vd = $limit(V(p, n), "clampv", vmax);
+        vd = $limit(V(p, n), clampv, vmax);
         I(p, n) <+ is_sat * (exp(vd / vt) - 1.0);
     end
 endmodule
@@ -132,6 +132,25 @@ endmodule
     assert!(
         !limits(&cfg.function),
         "a resistor should not lower a limiter"
+    );
+}
+
+#[test]
+fn typed_custom_limit_orients_the_proposal_before_state_and_differentiation() {
+    let source = CLAMPED_DIODE.replace("clampv, vmax", "\"clampv\", \"typed\", -1.0, vmax");
+    let artifact = artifact(&source);
+    let cfg = CfgModel::from_hir(&artifact.hir, &artifact.mir).unwrap();
+    let mut differentiated =
+        differentiate(&cfg.function, &[AdSeed::NodePotential(0.into())]).unwrap();
+    let row = differentiated.derivative_row(cfg.residuals[0]);
+    let mut inputs = inputs(&artifact);
+    inputs.node_potentials[0] = -0.2;
+    let snapshot = evaluate_cfg(&differentiated.function, &inputs).unwrap();
+    let expected = -IS / VT * (0.2 / VT).exp();
+    let actual = snapshot.value(row[0].unwrap()).unwrap();
+    assert!(
+        (actual / expected - 1.0).abs() < TOLERANCE,
+        "{actual:e} != {expected:e}"
     );
 }
 

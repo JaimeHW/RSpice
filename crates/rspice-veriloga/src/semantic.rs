@@ -5047,15 +5047,37 @@ impl SemanticAnalyzer {
             // call, so there is nothing to materialize out of one.
             | Expression::Digital(_)
             | Expression::BranchAccess(_) => expr.clone(),
-            Expression::SystemFunction(function) => Expression::SystemFunction(SystemFunction {
-                name: function.name.clone(),
-                args: function
-                    .args
-                    .iter()
-                    .map(|arg| self.materialize_output_function_calls(arg, module, sink))
-                    .collect::<CompileResult<Vec<_>>>()?,
-                span: function.span,
-            }),
+            Expression::SystemFunction(function) => {
+                let mut function = SystemFunction {
+                    name: function.name.clone(),
+                    args: function.args.iter()
+                        .map(|arg| self.materialize_output_function_calls(arg, module, sink))
+                        .collect::<CompileResult<Vec<_>>>()?,
+                    span: function.span,
+                };
+                if self.uses_default_limit_recommendation(&function) {
+                    // Preserve evaluation and name checking of recommendation
+                    // operands even though the chosen default does not use
+                    // their values. Literal metadata needs no runtime storage.
+                    for argument in &function.args[2..] {
+                        if matches!(argument, Expression::Number(_) | Expression::StringLit(_)) {
+                            continue;
+                        }
+                        self.local_counter += 1;
+                        let name: SmolStr = format!("__limit_argument{}", self.local_counter).into();
+                        let var_type = if self.infer_type(argument)? == ValueType::Integer {
+                            VarType::Integer
+                        } else { VarType::Real };
+                        self.register_function_temp(module, name.clone(), var_type, argument.span())?;
+                        self.analyze_assignment(&AssignmentStmt {
+                            target: LValue::Variable { name, span: argument.span() },
+                            value: argument.clone(), span: argument.span(),
+                        }, module, sink)?;
+                    }
+                    function.args.truncate(1);
+                }
+                Expression::SystemFunction(function)
+            }
             Expression::Binary(_) | Expression::Unary(_) => {
                 unreachable!("operator expressions use the iterative materialization path")
             }
@@ -5359,10 +5381,13 @@ impl SemanticAnalyzer {
                         .iter()
                         .any(|arg| self.expression_contains_output_function_call(arg))
             }
-            Expression::SystemFunction(function) => function
-                .args
-                .iter()
-                .any(|arg| self.expression_contains_output_function_call(arg)),
+            Expression::SystemFunction(function) => {
+                self.uses_default_limit_recommendation(function)
+                    || function
+                        .args
+                        .iter()
+                        .any(|arg| self.expression_contains_output_function_call(arg))
+            }
             Expression::Binary(binary) => {
                 self.expression_contains_output_function_call(&binary.left)
                     || self.expression_contains_output_function_call(&binary.right)
@@ -5644,6 +5669,23 @@ impl SemanticAnalyzer {
                 self.validate_limit_call(f)?;
                 if let Some(limit) = self.lower_custom_limit_call(f)? {
                     return Ok(limit);
+                }
+                if f.name == "$limit"
+                    && let Some(Expression::StringLit(selector)) = f.args.get(1)
+                    && Self::builtin_limit_arity(&selector.value).is_none()
+                {
+                    // Validate the expressions in an unsupported recommendation
+                    // before lowering the documented default algorithm.
+                    let lowered = f
+                        .args
+                        .iter()
+                        .map(|arg| self.lower_expression(arg))
+                        .collect::<CompileResult<Vec<_>>>()?;
+                    return Ok(Expression::SystemFunction(SystemFunction {
+                        name: f.name.clone(),
+                        args: lowered.into_iter().take(1).collect(),
+                        span: f.span,
+                    }));
                 }
                 let args = f
                     .args
@@ -6221,13 +6263,15 @@ impl SemanticAnalyzer {
             return Ok(());
         }
 
+        let named_function = matches!(function.args.get(1), Some(Expression::Identifier(id)) if self.user_functions.contains_key(&id.name));
         let selector = match function.args.get(1) {
             Some(Expression::StringLit(selector)) => selector.value.as_str(),
+            Some(Expression::Identifier(selector)) if named_function => selector.name.as_str(),
             _ if function.args.len() <= 2 => return Ok(()),
             _ => {
                 return Err(CompileError::Semantic(SemanticError::new(
                     SemanticErrorKind::InvalidAnalogOperator(
-                        "named $limit requires a literal string selector as its second argument"
+                        "named $limit requires a function identifier or literal string selector as its second argument"
                             .into(),
                     ),
                     function.span,
@@ -6239,12 +6283,7 @@ impl SemanticAnalyzer {
         // Typed built-ins carry one additional type/polarity argument; dummy
         // selectors retain the same shape for initialization bookkeeping even
         // though they intentionally leave the proposed value unchanged.
-        let expected_total = match selector {
-            "pnjlim" | "pnjlim_new" | "dummy" => Some(4),
-            "typedpnjlim" | "typedpnjlim_new" | "typeddummy" => Some(5),
-            _ => None,
-        };
-        if let Some(expected) = expected_total {
+        if let Some(expected) = Self::builtin_limit_arity(selector).filter(|_| !named_function) {
             if function.args.len() != expected {
                 return Err(CompileError::Semantic(SemanticError::new(
                     SemanticErrorKind::ArgumentCountMismatch {
@@ -6259,16 +6298,21 @@ impl SemanticAnalyzer {
         }
 
         let Some(limiter) = self.user_functions.get(selector) else {
+            // Unknown string recommendations use the simulator's default
+            // algorithm (VAMS-2023 9.17.3). An identifier must name a function.
+            if matches!(function.args.get(1), Some(Expression::StringLit(_))) {
+                return Ok(());
+            }
             return Err(CompileError::Semantic(SemanticError::new(
                 SemanticErrorKind::UnknownFunction(selector.to_string()),
                 function.span,
             )));
         };
 
-        if limiter.return_type != VarType::Real {
+        if !matches!(limiter.return_type, VarType::Real | VarType::Integer) {
             return Err(CompileError::Semantic(SemanticError::new(
                 SemanticErrorKind::InvalidAnalogOperator(format!(
-                    "named $limit function '{selector}' must return real"
+                    "named $limit function '{selector}' must return a numeric value"
                 )),
                 function.span,
             )));
@@ -6278,12 +6322,13 @@ impl SemanticAnalyzer {
         // previous values. In Xyce's typed custom-limiter convention, the
         // literal `"typed"` and the following type/polarity expression are
         // metadata and are not forwarded to the analog function.
-        let typed_custom = function.args.get(2).is_some_and(|argument| {
-            matches!(
-                argument,
-                Expression::StringLit(marker) if marker.value == "typed"
-            )
-        });
+        let typed_custom = !named_function
+            && function.args.get(2).is_some_and(|argument| {
+                matches!(
+                    argument,
+                    Expression::StringLit(marker) if marker.value == "typed"
+                )
+            });
         if typed_custom && function.args.len() < 4 {
             return Err(CompileError::Semantic(SemanticError::new(
                 SemanticErrorKind::InvalidAnalogOperator(format!(
@@ -6328,11 +6373,11 @@ impl SemanticAnalyzer {
         if let Some(param) = limiter
             .params
             .iter()
-            .find(|param| param.param_type != VarType::Real)
+            .find(|param| !matches!(param.param_type, VarType::Real | VarType::Integer))
         {
             return Err(CompileError::Semantic(SemanticError::new(
                 SemanticErrorKind::InvalidAnalogOperator(format!(
-                    "named $limit function '{selector}' requires real formal '{}', found {:?}",
+                    "named $limit function '{selector}' requires numeric formal '{}', found {:?}",
                     param.name, param.param_type
                 )),
                 function.span,
@@ -6342,13 +6387,25 @@ impl SemanticAnalyzer {
         Ok(())
     }
 
-    /// Lower a user-defined named `$limit` into an explicit stateful operator.
-    ///
-    /// Xyce supplies the first two analog-function inputs implicitly: the
-    /// (possibly polarity-oriented) proposed value and the previous Newton
-    /// iterate's limited value. Typed custom limiters encode the literal
-    /// `"typed"` and the following polarity expression as call metadata; those
-    /// two arguments are deliberately not forwarded to the source function.
+    fn uses_default_limit_recommendation(&self, function: &SystemFunction) -> bool {
+        function.name == "$limit"
+            && matches!(function.args.get(1), Some(Expression::StringLit(selector))
+                if Self::builtin_limit_arity(&selector.value).is_none()
+                    && !self.user_functions.contains_key(&selector.value))
+    }
+
+    /// Built-in string recommendations retained for Xyce model compatibility.
+    fn builtin_limit_arity(selector: &str) -> Option<usize> {
+        match selector {
+            "pnjlim" | "pnjlim_new" | "dummy" => Some(4),
+            "typedpnjlim" | "typedpnjlim_new" | "typeddummy" => Some(5),
+            _ => None,
+        }
+    }
+
+    /// Lower a callback into a stateful operator with implicit proposed and
+    /// previous values. Quoted custom selectors additionally accept Xyce's
+    /// `"typed"` marker and polarity expression as metadata, not formals.
     fn lower_custom_limit_call(
         &mut self,
         function: &SystemFunction,
@@ -6356,22 +6413,22 @@ impl SemanticAnalyzer {
         if function.name != "$limit" {
             return Ok(None);
         }
-        let Some(Expression::StringLit(selector_literal)) = function.args.get(1) else {
-            return Ok(None);
+        let (selector, named_function) = match function.args.get(1) {
+            Some(Expression::StringLit(literal)) => (literal.value.clone(), false),
+            Some(Expression::Identifier(id)) if self.user_functions.contains_key(&id.name) => {
+                (id.name.clone(), true)
+            }
+            _ => return Ok(None),
         };
-        let selector = selector_literal.value.clone();
-        if matches!(
-            selector.as_str(),
-            "pnjlim" | "pnjlim_new" | "dummy" | "typedpnjlim" | "typedpnjlim_new" | "typeddummy"
-        ) {
+        if !named_function && Self::builtin_limit_arity(&selector).is_some() {
             return Ok(None);
         }
         if !self.user_functions.contains_key(&selector) {
-            // Validation reports the authoritative unknown-function error.
+            // An unknown string recommendation selects the default algorithm.
             return Ok(None);
         }
 
-        let typed = function.args.get(2).is_some_and(
+        let typed = !named_function && function.args.get(2).is_some_and(
             |argument| matches!(argument, Expression::StringLit(marker) if marker.value == "typed"),
         );
         let proposed = self.lower_expression(

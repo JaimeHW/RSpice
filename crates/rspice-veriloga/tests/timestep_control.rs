@@ -388,3 +388,111 @@ fn discontinuity_checkpoints_reject_old_semantics_and_invalid_flags() {
     );
     assert_eq!(device.checkpoint_state().unwrap(), accepted);
 }
+
+#[cfg(feature = "native")]
+#[test]
+fn custom_limit_function_identifiers_do_not_select_builtin_names() {
+    let source = r#"
+module custom_name(p,n);
+ inout p,n; electrical p,n;
+ analog function real pnjlim;
+  input proposed,previous,increment;
+  real proposed,previous,increment;
+  pnjlim=min(proposed,previous+increment);
+ endfunction
+ analog I(p,n)<+$limit(V(p,n),pnjlim,0.25);
+endmodule
+"#;
+    let mut device = compile_device("NAME", source);
+    device.update_voltages(&[0.0]);
+    assert_eq!(device.try_evaluate().unwrap(), [0.0]);
+    device.update_voltages(&[1.0]);
+    assert_eq!(device.try_evaluate().unwrap(), [0.25]);
+}
+
+#[cfg(feature = "native")]
+#[test]
+fn custom_limit_callbacks_coerce_integer_formals_and_return_values() {
+    for (signature, body, expected) in [
+        (
+            "real proposed; input integer previous,increment",
+            "min(proposed,previous+0.25*increment)",
+            [0.0, 0.5, 1.5, 1.75],
+        ),
+        (
+            "real proposed,previous,increment",
+            "proposed",
+            [0.0, 2.0, 2.0, 2.0],
+        ),
+    ] {
+        let return_type = if body == "proposed" {
+            "integer"
+        } else {
+            "real"
+        };
+        let source = format!(
+            r#"
+module numeric_limit(p,n);
+ inout p,n; electrical p,n;
+ analog function {return_type} numeric;
+  input {signature};
+  numeric={body};
+ endfunction
+ analog I(p,n)<+$limit(V(p,n),numeric,1.6);
+endmodule
+"#
+        );
+        let mut device = compile_device("NUMERIC", &source);
+        for (voltage, expected) in [0.0, 1.75, 1.75, 1.75].into_iter().zip(expected) {
+            device.update_voltages(&[voltage]);
+            assert_eq!(device.try_evaluate().unwrap(), [expected]);
+        }
+    }
+}
+
+#[test]
+fn unknown_limit_string_selectors_use_the_default_algorithm() {
+    let source = r#"
+module fallback_limit(p,n);
+ inout p,n; electrical p,n;
+ analog I(p,n)<+$limit(V(p,n),"unavailable_vendor_algorithm",0.1);
+endmodule
+"#;
+    let plain = source.replace(",\"unavailable_vendor_algorithm\",0.1", "");
+    let mut fallback = compile_device("FALLBACK", source);
+    let mut reference = compile_device("DEFAULT", &plain);
+    for voltage in [0.0, 2.0, 2.0, -2.0, -2.0] {
+        fallback.update_voltages(&[voltage]);
+        reference.update_voltages(&[voltage]);
+        assert_eq!(
+            fallback.try_evaluate().unwrap(),
+            reference.try_evaluate().unwrap()
+        );
+        assert_eq!(fallback.limiter_converged(), reference.limiter_converged());
+    }
+}
+
+#[test]
+fn default_limit_recommendations_preserve_argument_effects_and_guards() {
+    let source = r#"
+module fallback_effect(p,n);
+ inout p,n; electrical p,n;
+ real observed,value;
+ analog function real touch;
+  input real input_value;
+  output real observed;
+  begin observed=7; touch=input_value; end
+ endfunction
+ analog begin
+  observed=0;
+  value=V(p,n)>0?$limit(V(p,n),"unavailable",touch(2,observed)):0;
+  I(p,n)<+observed;
+ end
+endmodule
+"#;
+    let mut device = compile_device("EFFECT", source);
+    for (voltage, expected) in [(-1.0, 0.0), (1.0, 7.0), (-1.0, 0.0)] {
+        device.update_voltages(&[voltage]);
+        assert_eq!(device.try_evaluate().unwrap(), [expected]);
+    }
+}

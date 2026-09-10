@@ -22,6 +22,53 @@ use std::process::Command;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 #[test]
+fn generated_limit_function_identifiers_preserve_state_and_unit_slope() {
+    let source = r#"
+module callback(p);
+ inout p; electrical p;
+ analog function real pnjlim;
+  input real proposed,previous;
+  input integer increment;
+  pnjlim=min(proposed,previous+0.25*increment);
+ endfunction
+ analog I(p)<+$limit(V(p),pnjlim,1.6);
+endmodule
+"#;
+    for typed in [false, true] {
+        let source = if typed {
+            source
+                .replace("pnjlim", "clip")
+                .replace("clip,1.6", "\"clip\",\"typed\",-1.0,1.6")
+        } else {
+            source.into()
+        };
+        let (state, stamp, noise) = generated_parts(&source, "limiter callback");
+        let main = r#"
+let mut instance=device::state::Instance::new(&[0]);
+instance.finalize_parameters().unwrap();
+for (proposed,expected) in [(0.0,0.0),(2.0,0.5),(2.0,1.0),(2.0,1.5),(2.0,2.0)] {
+ let voltages=[proposed];
+ let ctx=runtime::GeneratedEvalContext {voltages:&voltages,temperature:300.0};
+ let mut sink=[0.0;12];
+ instance.stamp(&ctx,&mut runtime::GeneratedStamper {sink:Some(&mut sink)});
+ assert_eq!(instance.canonical_limit.previous.as_slice(),[expected]);
+ assert_eq!(instance.limiter_converged(),proposed==expected);
+ assert_eq!(sink[10],1.0,"limiter callback slope must not replace the proposed-value Jacobian");
+ assert!(!ctx.evaluation_failed());
+}
+"#;
+        let main = if typed {
+            main.replace("voltages=[proposed]", "voltages=[-proposed]")
+                .replace("sink[10],1.0", "sink[10],-1.0")
+        } else {
+            main.into()
+        };
+        run_generated_main("limiter callback", &state, &stamp, &noise, &main)
+            .unwrap_or_else(|report| panic!("{report}"));
+    }
+}
+
+#[test]
 fn generated_quotient_range_preserves_higher_derivatives() {
     for (expression, bias, expected) in [
         ("ddx(1e308/(1e308*V(p)),V(p))", 0.01, [-1e4, 2e6]),
@@ -6941,6 +6988,7 @@ pub mod runtime {
     }
 
     impl GeneratedEvalContext<'_> {
+        pub fn limiting_enabled(&self) -> bool { true }
         pub fn node_voltage(&self, node: usize) -> Value {
             self.voltages.get(node).copied().unwrap_or(0.0)
         }

@@ -1895,6 +1895,45 @@ endmodule
     }
 
     #[test]
+    fn wasm_limit_function_identifiers_preserve_previous_iteration_state() {
+        use super::abi::FRAME_RESULT_OFFSET;
+        let source = r#"
+module callback(p,n,c);
+ inout p,n,c; electrical p,n,c;
+ analog function real pnjlim;
+  input real proposed,previous;
+  input integer increment;
+  pnjlim=min(proposed,previous+0.25*increment);
+ endfunction
+ analog I(p,n)<+$limit(V(p,n),pnjlim,1.6);
+endmodule
+"#;
+        for typed in [false, true] {
+            let source = if typed {
+                source
+                    .replace("pnjlim", "clip")
+                    .replace("clip,1.6", "\"clip\",\"typed\",-1.0,1.6")
+            } else {
+                source.into()
+            };
+            let mut harness = FusedKernelHarness::for_source(&source, "callback");
+            harness.reset();
+            let export = harness.stamp_value_export(0);
+            for (proposed, expected) in [(0.0, 0.0), (2.0, 0.5), (2.0, 1.0), (2.0, 1.5), (2.0, 2.0)]
+            {
+                harness.write_f64(
+                    FusedKernelHarness::VOLTAGES as usize,
+                    if typed { -proposed } else { proposed },
+                );
+                harness.call_assignments();
+                harness.call_prelude();
+                assert_eq!(harness.call(&export), 0);
+                assert_eq!(harness.read_f64(FRAME_RESULT_OFFSET as usize), expected);
+            }
+        }
+    }
+
+    #[test]
     fn wasm_reactive_stamping_holds_external_derivative_coefficients_at_the_bias_point() {
         use super::abi::FRAME_RESULT_OFFSET;
         for (expression, capacitances) in [
