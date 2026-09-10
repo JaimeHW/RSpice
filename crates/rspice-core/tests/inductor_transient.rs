@@ -14,6 +14,43 @@
 use rspice_core::{Engine, Netlist};
 
 #[test]
+fn mutual_inductance_extremes_preserve_ac_transfer() {
+    let engine = Engine::default();
+    for (inductance, turns) in [
+        (1e200, 1.0_f64),
+        (1e200, 2.0),
+        (1e-200, 1.0),
+        (1e-200, 2.0),
+        (1e-160, 1.0),
+        (1e-160, 2.0),
+    ] {
+        let secondary = inductance * turns * turns;
+        for coupling in [-0.5, 0.0, 0.5] {
+            let deck = Netlist::parse(&format!(
+                "mutual product range\nV1 in 0 AC 1\nR1 in p 1\nL1 p 0 {inductance:e}\nL2 s 0 {secondary:e}\nK1 L1 L2 {coupling}\n.end\n"
+            )).unwrap();
+            let point = engine
+                .run_ac(&deck, &[1.0 / inductance])
+                .unwrap()
+                .pop()
+                .unwrap();
+            let output = point
+                .node_names
+                .iter()
+                .position(|name| name.eq_ignore_ascii_case("s"))
+                .unwrap();
+            let expected = Complex64::new(0.0, std::f64::consts::TAU * coupling * turns)
+                / Complex64::new(1.0, std::f64::consts::TAU);
+            assert!(
+                (point.voltages[output] - expected).norm() < 2e-14,
+                "L={inductance:e}, k={coupling}: {} vs {expected}",
+                point.voltages[output]
+            );
+        }
+    }
+}
+
+#[test]
 fn signed_coupling_preserves_ac_phase_and_transient_startup() {
     use rspice_core::engine::{SimulationConfig, SpiceDialect};
     for dialect in [SpiceDialect::Ngspice, SpiceDialect::Xyce] {

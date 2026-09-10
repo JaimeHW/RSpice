@@ -208,6 +208,42 @@ mod wasm_tests {
     use crate::js_interop::{js_array_property, js_property};
 
     #[wasm_bindgen_test]
+    fn mutual_inductance_extremes_preserve_ac_transfer_in_wasm() {
+        use rspice_core::Complex64;
+        let engine = rspice_core::Engine::default();
+        for (inductance, turns) in [
+            (1e200, 1.0_f64),
+            (1e200, 2.0),
+            (1e-200, 1.0),
+            (1e-200, 2.0),
+            (1e-160, 1.0),
+            (1e-160, 2.0),
+        ] {
+            let secondary = inductance * turns * turns;
+            let deck = rspice_core::Netlist::parse(&format!(
+                "mutual range in WASM\nV1 in 0 AC 1\nR1 in p 1\nL1 p 0 {inductance:e}\nL2 s 0 {secondary:e}\nK1 L1 L2 -0.5\n.end\n"
+            )).unwrap();
+            let point = engine
+                .run_ac_with_abort(
+                    &deck,
+                    &[1.0 / inductance],
+                    &rspice_core::abort_signal::NoAbort,
+                )
+                .unwrap()
+                .pop()
+                .unwrap();
+            let output = point
+                .node_names
+                .iter()
+                .position(|name| name.eq_ignore_ascii_case("s"))
+                .unwrap();
+            let expected = Complex64::new(0.0, -std::f64::consts::PI * turns)
+                / Complex64::new(1.0, std::f64::consts::TAU);
+            assert!((point.voltages[output] - expected).norm() < 2e-14);
+        }
+    }
+
+    #[wasm_bindgen_test]
     fn signed_coupling_preserves_ac_phase_in_wasm() {
         use rspice_core::Complex64;
         let engine = rspice_core::Engine::default();

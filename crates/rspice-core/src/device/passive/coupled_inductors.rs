@@ -68,6 +68,24 @@ pub(crate) struct CoupledWinding {
     pub inductance: Value,
 }
 
+fn mutual_inductance_value(k: Value, l1: Value, l2: Value) -> Value {
+    let product = l1 * l2;
+    if product.is_normal() || !l1.is_finite() || !l2.is_finite() || l1 <= 0.0 || l2 <= 0.0 {
+        return k * product.sqrt();
+    }
+    if l1 == l2 {
+        return k * l1;
+    }
+    // The self-inductance product may overflow, underflow, or lose precision
+    // in the subnormal range while its square root remains representable.
+    // Keep the geometric mean and k scaled until the final conversion.
+    use rspice_veriloga_runtime::arithmetic::ScaledValue;
+    ScaledValue::new(l1.sqrt())
+        .multiply(ScaledValue::new(l2.sqrt()))
+        .multiply(ScaledValue::new(k))
+        .binary64()
+}
+
 impl InductorCoupling {
     /// Create a new inductor coupling
     pub fn new(name: String, inductor_names: Vec<String>, coefficient: Value) -> Self {
@@ -80,7 +98,7 @@ impl InductorCoupling {
 
     /// Calculate mutual inductance between two inductors
     pub fn mutual_inductance(&self, l1: Value, l2: Value) -> Value {
-        self.coefficient * (l1 * l2).sqrt()
+        mutual_inductance_value(self.coefficient, l1, l2)
     }
 }
 
@@ -142,7 +160,7 @@ impl CoupledInductorPair {
             node_neg: node2_neg,
             inductance: l2,
         } = second;
-        let m = k * (l1 * l2).sqrt();
+        let m = mutual_inductance_value(k, l1, l2);
 
         Self {
             name,
@@ -185,7 +203,12 @@ impl CoupledInductorPair {
 
     /// Get turns ratio (approximate, for ideal transformer)
     pub fn turns_ratio(&self) -> Value {
-        (self.l1 / self.l2).sqrt()
+        let ratio = self.l1 / self.l2;
+        if ratio.is_normal() {
+            ratio.sqrt()
+        } else {
+            self.l1.sqrt() / self.l2.sqrt()
+        }
     }
 
     /// DC stamp for the coupling: intentionally nothing.
@@ -430,7 +453,7 @@ impl MultiWindingTransformer {
                     l_matrix[i][j] = inductances[i];
                 } else {
                     let k = coupling_coefficients[i][j];
-                    l_matrix[i][j] = k * (inductances[i] * inductances[j]).sqrt();
+                    l_matrix[i][j] = mutual_inductance_value(k, inductances[i], inductances[j]);
                 }
             }
         }
@@ -647,6 +670,83 @@ impl DynamicDevice for MultiWindingTransformer {
 #[cfg(test)]
 mod correction_tests {
     use super::*;
+
+    #[test]
+    fn winding_turns_ratio_extremes_preserve_representable_results() {
+        for (first, second, expected) in [(1e200, 1e-200, 1e200), (1e-200, 1e200, 1e-200)] {
+            let pair = CoupledInductorPair::new(
+                "K1".into(),
+                CoupledWinding {
+                    node_pos: 1,
+                    node_neg: 0,
+                    inductance: first,
+                },
+                CoupledWinding {
+                    node_pos: 2,
+                    node_neg: 0,
+                    inductance: second,
+                },
+                0.5,
+            );
+            assert!((pair.turns_ratio() / expected - 1.0).abs() < 1e-14);
+        }
+    }
+
+    #[test]
+    fn mutual_inductance_extremes_preserve_range_sign_and_subnormal_rounding() {
+        let smallest = Value::from_bits(1);
+        for (first, second, coefficient, expected) in [
+            (2.0, 8.0, -0.5, -2.0),
+            (1e200, 1e200, -0.5, -5e199),
+            (1e200, 4e200, -0.5, -1e200),
+            (1e-200, 4e-200, -0.5, -1e-200),
+            (1e-160, 4e-160, 0.5, 1e-160),
+            (1e300, 1e300, 1e-300, 1.0),
+            (1e300, 4e300, 0.0, 0.0),
+            (smallest, 4.0 * smallest, 0.5, smallest),
+            (smallest, 4.0 * smallest, 0.25, 0.0),
+            (smallest, 4.0 * smallest, 0.75, 2.0 * smallest),
+        ] {
+            for (l1, l2) in [(first, second), (second, first)] {
+                let coupling =
+                    InductorCoupling::new("K1".into(), vec!["L1".into(), "L2".into()], coefficient);
+                let pair = CoupledInductorPair::new(
+                    "K1".into(),
+                    CoupledWinding {
+                        node_pos: 1,
+                        node_neg: 0,
+                        inductance: l1,
+                    },
+                    CoupledWinding {
+                        node_pos: 2,
+                        node_neg: 0,
+                        inductance: l2,
+                    },
+                    coefficient,
+                );
+                let transformer = MultiWindingTransformer::new(
+                    "T1".into(),
+                    vec![(1, 0), (2, 0)],
+                    vec![l1, l2],
+                    vec![vec![1.0, coefficient], vec![coefficient, 1.0]],
+                );
+                for actual in [
+                    coupling.mutual_inductance(l1, l2),
+                    pair.m,
+                    transformer.mutual_inductance(0, 1),
+                ] {
+                    if expected == 0.0 {
+                        assert_eq!(actual, 0.0);
+                    } else {
+                        assert!(
+                            (actual / expected - 1.0).abs() < 1e-14,
+                            "k={coefficient}, L1={l1:e}, L2={l2:e}: {actual:e} vs {expected:e}"
+                        );
+                    }
+                }
+            }
+        }
+    }
 
     #[test]
     fn signed_coupling_preserves_constructor_polarity() {
