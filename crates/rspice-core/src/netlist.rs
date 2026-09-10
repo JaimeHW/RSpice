@@ -10093,6 +10093,42 @@ mod tests {
     }
 
     #[test]
+    fn bjt_optional_connections_preserve_numeric_nodes_and_parameter_tails() {
+        for (connections, expected_nodes) in [
+            ("", vec![]),
+            ("s", vec!["S"]),
+            ("[s]", vec!["S"]),
+            ("0 0 0 0 0 0 0", vec!["0"; 7]),
+            (
+                "s th cx ci bx bi ei",
+                vec!["S", "TH", "CX", "CI", "BX", "BI", "EI"],
+            ),
+            ("s 0 cx 0 0 bi 0", vec!["S", "0", "CX", "0", "0", "BI", "0"]),
+        ] {
+            for tail in ["2 OFF M=3", "-2", "AREA=2 IC=0.6,1"] {
+                let netlist = Netlist::parse(&format!(
+                    "BJT optional connections\nQ1 c b e {connections} BC337-25 {tail}\n.model BC337-25 NPN\n.end\n"
+                )).unwrap();
+                let element = &netlist.elements[0];
+                let mut expected = vec!["C", "B", "E"];
+                expected.extend(expected_nodes.iter().copied());
+                assert_eq!(element.nodes, expected, "{connections} / {tail}");
+                let ElementKind::Bjt {
+                    model,
+                    instance_params,
+                    ..
+                } = &element.kind
+                else {
+                    unreachable!()
+                };
+                assert_eq!(model, "BC337-25");
+                let area = if tail == "-2" { -2.0 } else { 2.0 };
+                assert!(instance_params.contains(&("AREA".to_string(), area)));
+            }
+        }
+    }
+
+    #[test]
     fn bjt_off_flag_stays_instance_parameter() {
         let netlist = Netlist::parse(
             "bjt off\n\

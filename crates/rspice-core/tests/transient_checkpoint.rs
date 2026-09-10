@@ -561,7 +561,12 @@ fn promoted_vbic_thermal_and_excess_phase_checkpoints_resume_every_state_exactly
                         ..Default::default()
                     },
                 );
-                for state in ["rth", "xf1", "xf2"] {
+                let thermal_state = if dialect == SpiceDialect::Xyce {
+                    "dt"
+                } else {
+                    "rth"
+                };
+                for state in [thermal_state, "xf1", "xf2"] {
                     let name = format!("Q1.__{state}.internal");
                     let column = full
                         .node_names

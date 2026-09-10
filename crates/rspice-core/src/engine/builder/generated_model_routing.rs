@@ -11,6 +11,7 @@ struct GeneratedTarget {
     model_name: &'static str,
     pass_level_parameter: bool,
     consumes_geometry_bin_metadata: bool,
+    optional_internal_nodes: &'static [&'static str],
 }
 
 impl GeneratedTarget {
@@ -19,6 +20,7 @@ impl GeneratedTarget {
             model_name,
             pass_level_parameter: false,
             consumes_geometry_bin_metadata: false,
+            optional_internal_nodes: &[],
         }
     }
 
@@ -27,6 +29,7 @@ impl GeneratedTarget {
             model_name,
             pass_level_parameter: true,
             consumes_geometry_bin_metadata: false,
+            optional_internal_nodes: &[],
         }
     }
 
@@ -35,7 +38,13 @@ impl GeneratedTarget {
             model_name,
             pass_level_parameter: false,
             consumes_geometry_bin_metadata: true,
+            optional_internal_nodes: &[],
         }
+    }
+
+    const fn with_optional_internal_nodes(mut self, names: &'static [&'static str]) -> Self {
+        self.optional_internal_nodes = names;
+        self
     }
 
     fn is_available(self) -> bool {
@@ -363,9 +372,11 @@ fn generated_diode_target(
 /// Resolve explicit generated BJT types and dialect-owned Q-level devices.
 ///
 /// Xyce 7.10 registers its ADMS VBIC 1.3 devices directly as Q LEVEL=11
-/// (three electrical terminals, with an optional external thermal terminal)
-/// and Q LEVEL=12 (four electrical terminals). Selecting those modules is
-/// dialect semantics, not an opportunistic fallback. A build lacking that
+/// (three electrical terminals) and Q LEVEL=12 (four electrical terminals).
+/// Both expose optional internal nodes in order: dt, cx, ci, bx, bi, ei.
+/// The LEVEL=11 thermal variant already declares dt as its fourth terminal.
+/// Selecting those modules is dialect semantics, not an opportunistic fallback.
+/// A build lacking that
 /// exact generated module must fail explicitly rather than silently selecting
 /// another BJT implementation. ngspice and BestAvailable selectors remain on
 /// the native BJT policy, while explicit module types remain available in
@@ -424,9 +435,15 @@ fn generated_bjt_target(
     }
 
     Ok(match checked_model_level("BJT", model_name, model)? {
-        Some(11) if instance_terminal_count >= 4 => Some(GeneratedTarget::new("vbic13_3t_et")),
+        Some(11) if instance_terminal_count >= 4 => Some(
+            GeneratedTarget::new("vbic13_3t_et")
+                .with_optional_internal_nodes(&["cx", "ci", "bx", "bi", "ei"]),
+        ),
         Some(11) => Some(GeneratedTarget::new("vbic13")),
-        Some(12) => Some(GeneratedTarget::new("vbic13_4t")),
+        Some(12) => Some(
+            GeneratedTarget::new("vbic13_4t")
+                .with_optional_internal_nodes(&["dt", "cx", "ci", "bx", "bi", "ei"]),
+        ),
         _ => None,
     })
 }
@@ -602,6 +619,7 @@ fn add_generated_instance(
         &params,
         &netlist.params,
         circuit,
+        target.optional_internal_nodes,
     )?
     else {
         return Ok(());
@@ -1177,7 +1195,20 @@ fn exact_or_ground_padded_nodes(
     max_implicit_ground_nodes: usize,
 ) -> Result<Vec<String>, SimulationError> {
     let expected = expected_terminal_count(element, target)?;
-    if element.nodes.len() > expected {
+    let maximum = expected + target.optional_internal_nodes.len();
+    if element.nodes.len() > maximum {
+        if !target.optional_internal_nodes.is_empty() {
+            return Err(SimulationError::Circuit(format!(
+                "{} '{}': generated Verilog-A model '{}' accepts at most {} terminals ({} declared and {} optional internal nodes), found {}",
+                element_kind_name(element),
+                element.name,
+                target.model_name,
+                maximum,
+                expected,
+                target.optional_internal_nodes.len(),
+                element.nodes.len()
+            )));
+        }
         return Err(generated_terminal_error(
             element,
             target,
@@ -1185,7 +1216,7 @@ fn exact_or_ground_padded_nodes(
             expected,
         ));
     }
-    let missing = expected - element.nodes.len();
+    let missing = expected.saturating_sub(element.nodes.len());
     if missing > max_implicit_ground_nodes {
         return Err(SimulationError::Circuit(format!(
             "{} '{}': generated Verilog-A model '{}' expects {} terminals, found {}; missing terminals cannot be inferred for .model routing",
@@ -1458,6 +1489,7 @@ mod card_keyword_tests {
             &params,
             &netlist.params,
             &mut circuit,
+            &[],
         )
         .expect_err("ekv_va declares no NRD")
         .to_string();

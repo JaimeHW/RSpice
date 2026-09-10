@@ -4267,114 +4267,69 @@ pub(super) fn parse_bjt(
     let base = expect_node(stream, line_num)?;
     let emitter = expect_node(stream, line_num)?;
 
-    // BJT can have optional substrate node: Q1 C B E [S] model
-    // We need to peek ahead to determine if next is substrate or model
-    let mut numeric_thermal = None;
-    let (substrate, mut model) = match &stream.peek().kind {
-        TokenKind::Number(_) => {
-            // It's a numeric node (substrate like "0")
-            let substrate = expect_node(stream, line_num)?;
-            // A second numeric node is a grounded thermal terminal:
-            // Q1 C B E 0 0 model
-            if matches!(stream.peek().kind, TokenKind::Number(_)) {
-                numeric_thermal = Some(expect_node(stream, line_num)?);
-            }
-            let model = expect_model_name(stream, line_num)?;
-            (Some(substrate), model)
-        }
-        TokenKind::LBracket => {
-            stream.advance();
-            let substrate = expect_node_before_rbracket(stream, line_num)?;
-            if !stream.consume(&TokenKind::RBracket) {
-                return Err(ParseError::Syntax {
-                    line: line_num,
-                    message: "Expected closing ']' after BJT substrate node".to_string(),
-                });
-            }
-            let model = expect_model_name(stream, line_num)?;
-            (Some(substrate), model)
-        }
-        TokenKind::Ident(_) => {
-            // Consume the complete first label, including punctuation that is
-            // source-adjacent to its first identifier.  Real BJT identities
-            // such as BC337-25 otherwise stop at `BC337`, leaving `-25` to be
-            // misread as a positional AREA.  `expect_model_name` only joins
-            // touching tokens, so `Q1 C B E QMOD -25` keeps the whitespace-
-            // separated signed AREA semantics below.
-            let first_ident = expect_model_name(stream, line_num)?;
-
-            // Now peek at next token
-            match &stream.peek().kind {
-                TokenKind::Ident(next_s) => {
-                    // Two identifiers in a row - BUT need to check if second is a parameter name
-                    // If the token AFTER the second ident is '=', then second is a param name
-                    // and first_ident is the model name (not substrate)
-                    let next_ident = next_s.clone();
-                    let next_upper = next_ident.to_ascii_uppercase();
-
-                    // Peek ahead: is there an '=' after the next ident?
-                    // stream.peek_n(1) would be the token after the current peek
-                    if matches!(stream.peek_n(1).kind, TokenKind::Equals)
-                        // OFF is an optional BJT instance keyword, not a model name.
-                        || next_upper == "OFF"
-                    {
-                        // Pattern: model_name param=value
-                        // first_ident is the model, don't treat next_ident as model
-                        (None, first_ident)
-                    } else if is_bjt_assignment_name(&next_upper)
-                        && token_starts_unassigned_value(&stream.peek_n(1).kind, params)
-                    {
-                        return Err(ParseError::Syntax {
-                            line: line_num,
-                            message: format!(
-                                "BJT parameter '{}' expected '=' before value",
-                                next_ident
-                            ),
-                        });
-                    } else {
-                        // Pattern: substrate model_name
-                        // first is substrate node, second is model
-                        stream.advance();
-                        (Some(first_ident), next_ident)
-                    }
-                }
-                TokenKind::Newline | TokenKind::Eof | TokenKind::Comma => {
-                    // Only one identifier: it's the model name
-                    (None, first_ident)
-                }
-                _ => {
-                    // Assume first_ident is the model, any params follow
-                    (None, first_ident)
-                }
-            }
-        }
-        _ => {
+    // Q cards may expose model-specific internal nodes after C, B, E.
+    // Preserve every connection here; the selected model validates its count.
+    let mut nodes = vec![collector, base, emitter];
+    if stream.consume(&TokenKind::LBracket) {
+        nodes.push(expect_node_before_rbracket(stream, line_num)?);
+        if !stream.consume(&TokenKind::RBracket) {
             return Err(ParseError::Syntax {
                 line: line_num,
-                message: format!("Expected BJT model name, found {:?}", stream.peek().kind),
+                message: "Expected closing ']' after BJT substrate node".to_string(),
             });
         }
-    };
-
-    let mut thermal = numeric_thermal;
-    if substrate.is_some()
-        && thermal.is_none()
-        && let TokenKind::Ident(next_model) = &stream.peek().kind
-    {
-        let next_upper = next_model.to_ascii_uppercase();
-        if !matches!(stream.peek_n(1).kind, TokenKind::Equals) && next_upper != "OFF" {
-            thermal = Some(model);
-            model = next_model.clone();
-            stream.advance();
+    }
+    while matches!(stream.peek().kind, TokenKind::Number(_)) {
+        nodes.push(expect_node(stream, line_num)?);
+    }
+    let mut model = expect_model_name(stream, line_num)?;
+    loop {
+        match &stream.peek().kind {
+            TokenKind::Ident(next) => {
+                let next_upper = next.to_ascii_uppercase();
+                if matches!(stream.peek_n(1).kind, TokenKind::Equals) || next_upper == "OFF" {
+                    break;
+                }
+                if is_bjt_assignment_name(&next_upper)
+                    && token_starts_unassigned_value(&stream.peek_n(1).kind, params)
+                {
+                    return Err(ParseError::Syntax {
+                        line: line_num,
+                        message: format!("BJT parameter '{}' expected '=' before value", next),
+                    });
+                }
+            }
+            TokenKind::Number(_) => {
+                // A number after the model is positional AREA. It is a node
+                // only if a further bare model label follows the numeric run.
+                let mut offset = 0;
+                while matches!(stream.peek_n(offset).kind, TokenKind::Number(_)) {
+                    offset += 1;
+                }
+                let TokenKind::Ident(next) = &stream.peek_n(offset).kind else {
+                    break;
+                };
+                let next_upper = next.to_ascii_uppercase();
+                if matches!(stream.peek_n(offset + 1).kind, TokenKind::Equals)
+                    || next_upper == "OFF"
+                    || (is_bjt_assignment_name(&next_upper)
+                        && token_starts_unassigned_value(&stream.peek_n(offset + 1).kind, params))
+                {
+                    break;
+                }
+                nodes.push(model);
+                while matches!(stream.peek().kind, TokenKind::Number(_)) {
+                    nodes.push(expect_node(stream, line_num)?);
+                }
+                model = expect_model_name(stream, line_num)?;
+                continue;
+            }
+            _ => break,
         }
-    }
-
-    let mut nodes = vec![collector, base, emitter];
-    if let Some(sub) = substrate {
-        nodes.push(sub);
-    }
-    if let Some(thermal) = thermal {
-        nodes.push(thermal);
+        nodes.push(model);
+        // Reassemble punctuation-rich labels at every optional position,
+        // including model names such as BC337-25 after a substrate node.
+        model = expect_model_name(stream, line_num)?;
     }
 
     let mut instance_params = Vec::new();

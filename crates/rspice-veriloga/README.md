@@ -331,6 +331,15 @@ values and `$param_given` bits, so devices bound to the same card reuse one
 Verilog-derived preprocessing result; instance geometry and solver state are
 never shared.
 
+Xyce Q `LEVEL=11` and `LEVEL=12` route to the generated VBIC 1.3 modules.
+After the three or four electrical terminals, respectively, a card may expose
+six optional internal connections in order: `dt`, `cx`, `ci`, `bx`, `bi`, `ei`.
+The three-terminal thermal variant supplies `dt` through its declared fourth
+terminal; other optional connections bind existing generated node slots. Omitted
+connections retain their internal equations and state, and excess terminals are
+rejected. This mapping reuses the shipped model equations and requires no
+additional generated model variant.
+
 Generated devices retain `$bound_step` requests across conditional calls,
 runtime loops, and nested analog instances. The transient engine uses the
 smallest active bound, including zero as a request for its supported minimum;

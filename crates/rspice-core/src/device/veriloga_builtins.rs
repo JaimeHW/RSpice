@@ -2156,6 +2156,7 @@ pub fn instantiate_builtin(
         &scoped,
         param_ctx,
         circuit,
+        &[],
     )
 }
 
@@ -2167,6 +2168,7 @@ pub(crate) fn instantiate_builtin_scoped(
     params: &[BuiltinParameterAssignment],
     param_ctx: &crate::netlist::ParamContext,
     circuit: &mut crate::CircuitData,
+    optional_internal_nodes: &[&str],
 ) -> Result<Option<BuiltinVerilogAInstance>, BuiltinInstantiationError> {
     let Some(descriptor_name) = builtins::builtin_names()
         .iter()
@@ -2184,11 +2186,16 @@ pub(crate) fn instantiate_builtin_scoped(
     })?;
     let external_terminals = descriptor.terminals;
     let expected_nodes = external_terminals.len();
-    if node_names.len() != expected_nodes {
+    let maximum_nodes = expected_nodes + optional_internal_nodes.len();
+    if !(expected_nodes..=maximum_nodes).contains(&node_names.len()) {
         return Err(BuiltinInstantiationError(format!(
             "Generated Verilog-A instance '{}' expects {} terminals for model '{}', found {}",
             instance_name,
-            expected_nodes,
+            if optional_internal_nodes.is_empty() {
+                expected_nodes.to_string()
+            } else {
+                format!("{expected_nodes}..={maximum_nodes}")
+            },
             model_name,
             node_names.len()
         )));
@@ -2205,8 +2212,19 @@ pub(crate) fn instantiate_builtin_scoped(
         )));
     }
 
+    // Optional SPICE connections bind existing local slots; they must not
+    // change the generated descriptor's node order or lead-current layout.
+    for (index, name) in optional_internal_nodes.iter().enumerate() {
+        if !internal_node_names.contains(name) || optional_internal_nodes[..index].contains(name) {
+            return Err(BuiltinInstantiationError(format!(
+                "Generated Verilog-A model '{}' has an invalid optional internal node '{}'",
+                descriptor_name, name
+            )));
+        }
+    }
+    let supplied_internal_nodes = &node_names[expected_nodes..];
     let mut nodes = Vec::with_capacity(total_nodes);
-    for node_name in node_names {
+    for node_name in &node_names[..expected_nodes] {
         nodes.push(if node_name.eq_ignore_ascii_case("0") {
             0
         } else {
@@ -2214,8 +2232,18 @@ pub(crate) fn instantiate_builtin_scoped(
         });
     }
     for internal_name in internal_node_names {
-        let node_name = format!("{instance_name}.__{internal_name}.internal");
-        nodes.push(circuit.get_or_create_node(&node_name));
+        let supplied = optional_internal_nodes
+            .iter()
+            .position(|name| name == internal_name)
+            .and_then(|index| supplied_internal_nodes.get(index));
+        let node = match supplied {
+            Some(name) if name == "0" => 0,
+            Some(name) => circuit.get_or_create_node(name),
+            None => {
+                circuit.get_or_create_node(&format!("{instance_name}.__{internal_name}.internal"))
+            }
+        };
+        nodes.push(node);
     }
     debug_assert_eq!(
         nodes.len(),
@@ -2487,6 +2515,87 @@ mod tests {
                 assert!(!terminal.name.is_empty());
                 assert!(current_names.insert(terminal.current_parameter));
             }
+        }
+    }
+
+    #[cfg(feature = "veriloga-model-vbic13-4t")]
+    #[test]
+    fn optional_internal_connections_preserve_generated_node_slots() {
+        let optional = ["dt", "cx", "ci", "bx", "bi", "ei"];
+        for count in 0..=optional.len() {
+            let mut circuit = crate::CircuitData::new();
+            let mut terminals = ["c", "b", "e", "0"].map(str::to_string).to_vec();
+            terminals.extend((0..count).map(|index| {
+                if index == 2 {
+                    "0".to_string()
+                } else {
+                    format!("exposed_{index}")
+                }
+            }));
+            let instance = super::instantiate_builtin_scoped(
+                "vbic13_4t",
+                "Q1",
+                &terminals,
+                &[],
+                &crate::netlist::ParamContext::new(),
+                &mut circuit,
+                &optional,
+            )
+            .unwrap()
+            .unwrap();
+            let descriptor = super::builtins::descriptor("vbic13_4t").unwrap();
+            assert_eq!(instance.nodes.len(), descriptor.total_node_count);
+            assert_eq!(instance.terminal_currents.len(), descriptor.terminals.len());
+            for (name, node) in instance.internal_nodes() {
+                let internal_name = format!("Q1.__{name}.internal");
+                let position = optional.iter().position(|candidate| *candidate == name);
+                if let Some(index) = position.filter(|index| *index < count) {
+                    let expected = if index == 2 {
+                        0
+                    } else {
+                        circuit
+                            .get_node_by_name(&format!("exposed_{index}"))
+                            .unwrap()
+                    };
+                    assert_eq!(
+                        node, expected,
+                        "binding {name} with {count} optional connections"
+                    );
+                    assert!(circuit.get_node_by_name(&internal_name).is_none());
+                } else {
+                    assert_eq!(Some(node), circuit.get_node_by_name(&internal_name));
+                }
+            }
+        }
+    }
+
+    #[cfg(feature = "veriloga-model-vbic13-4t")]
+    #[test]
+    fn invalid_optional_connections_fail_before_allocating_nodes() {
+        for (optional, count) in [
+            (&["dt", "dt"][..], 4),
+            (&["not_a_model_node"][..], 4),
+            (&["dt"][..], 6),
+            (&[][..], 5),
+            (&["dt"][..], 3),
+        ] {
+            let mut circuit = crate::CircuitData::new();
+            let initial_nodes = circuit.num_nodes();
+            let terminals = (0..count)
+                .map(|index| format!("n{index}"))
+                .collect::<Vec<_>>();
+            let error = super::instantiate_builtin_scoped(
+                "vbic13_4t",
+                "Q1",
+                &terminals,
+                &[],
+                &crate::netlist::ParamContext::new(),
+                &mut circuit,
+                optional,
+            )
+            .unwrap_err();
+            assert!(error.to_string().contains("vbic13_4t"));
+            assert_eq!(circuit.num_nodes(), initial_nodes);
         }
     }
 

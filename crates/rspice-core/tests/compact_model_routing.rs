@@ -317,3 +317,106 @@ Q1 cx bx 0 0 qmod
         );
     }
 }
+
+#[cfg(all(
+    feature = "veriloga-model-vbic13",
+    feature = "veriloga-model-vbic13-3t-et",
+    feature = "veriloga-model-vbic13-4t"
+))]
+mod xyce_vbic_optional_nodes {
+    use super::*;
+    use rspice_core::engine::SpiceDialect;
+
+    #[test]
+    fn every_optional_node_connects_to_the_generated_equations() {
+        let engine = Engine::new(SimulationConfig {
+            spice_dialect: SpiceDialect::Xyce,
+            ..Default::default()
+        });
+        let optional = [
+            ("dt", 20.0),
+            ("cx", 1.4),
+            ("ci", 1.3),
+            ("bx", 0.58),
+            ("bi", 0.55),
+            ("ei", 0.01),
+        ];
+        for level in [11, 12] {
+            let substrate = if level == 12 { " 0" } else { "" };
+            for count in 0..=optional.len() {
+                // Independently attach the same voltage sources to the
+                // canonical internal names and to the optional Q terminals.
+                let deck = |exposed: bool| {
+                    let connections = if exposed {
+                        (0..count)
+                            .map(|index| format!(" exposed_{index}"))
+                            .collect::<String>()
+                    } else {
+                        String::new()
+                    };
+                    let mut deck = format!(
+                        "VBIC optional connections\nVc c 0 1.5\nVb b 0 0.6\nQ1 c b 0{substrate}{connections} vm SW_ET=0\n\
+                         .model vm NPN LEVEL={level} IS=1e-16 IBEI=1e-18 IBCI=1e-18 RCX=10 RCI=10 RBX=10 RBI=10 RE=10 RBP=10 RS=10 RTH=1000\n"
+                    );
+                    for (index, (name, value)) in optional[..count].iter().enumerate() {
+                        let node = if exposed {
+                            format!("exposed_{index}")
+                        } else {
+                            format!("Q1.__{name}.internal")
+                        };
+                        deck.push_str(&format!("Vdrive{index} {node} 0 {value}\n"));
+                    }
+                    deck.push_str(".end\n");
+                    let mut netlist = Netlist::parse(&deck).unwrap();
+                    if !exposed {
+                        // Authored labels are normalized by the parser; use
+                        // the generated adapter's exact internal spelling.
+                        for element in &mut netlist.elements {
+                            for node in &mut element.nodes {
+                                for (name, _) in &optional[..count] {
+                                    let internal = format!("Q1.__{name}.internal");
+                                    if node.eq_ignore_ascii_case(&internal) {
+                                        *node = internal;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    netlist
+                };
+                let reference = engine.run_dc_op(&deck(false)).unwrap();
+                let actual = engine.run_dc_op(&deck(true)).unwrap();
+                for branch in &reference.branch_names {
+                    let expected = reference.branch_current_named(branch).unwrap();
+                    let value = actual.branch_current_named(branch).unwrap();
+                    assert!(
+                        (expected - value).abs() <= 1e-10 * expected.abs().max(1e-10),
+                        "LEVEL={level}, {count} optional nodes, {branch}: {expected:e} != {value:e}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn too_many_optional_q_terminals_are_rejected() {
+        let engine = Engine::new(SimulationConfig {
+            spice_dialect: SpiceDialect::Xyce,
+            ..Default::default()
+        });
+        for (level, maximum) in [(11, 9), (12, 10)] {
+            let nodes = (0..=maximum)
+                .map(|index| format!(" n{index}"))
+                .collect::<String>();
+            let netlist = Netlist::parse(&format!(
+                "VBIC terminal count\nQ1{nodes} vm\n.model vm NPN LEVEL={level}\n.end\n"
+            ))
+            .unwrap();
+            let error = engine.build_circuit(&netlist).unwrap_err().to_string();
+            assert!(
+                error.contains(&format!("at most {maximum} terminals")),
+                "{error}"
+            );
+        }
+    }
+}
