@@ -13,7 +13,7 @@ use super::{
     MAX_PARAMETER_ARRAY_ELEMENTS, MAX_PARAMETER_ARRAY_RANK, SemanticAnalyzer, ValueType,
 };
 use crate::ast::{
-    AnalogOperator, ArrayAccessExpr, ArrayLiteralElement, ArrayLiteralExpr, BinaryExpr,
+    AnalogOperator, ArrayAccessExpr, ArrayLiteralElement, ArrayLiteralExpr, BinaryExpr, BinaryOp,
     BranchAccess, CallExpr, ConditionalExpr, Connection, Expression, Identifier, Item, Module,
     ModuleInstance, NoiseSource, NumberLit, SystemFunction, UnaryExpr, VarType,
 };
@@ -263,11 +263,20 @@ impl<'a> HierarchyElaborator<'a> {
                 let mut next = Vec::with_capacity(values.len().div_ceil(2));
                 while let Some(left) = values.next() {
                     next.push(if let Some(right) = values.next() {
-                        Expression::Call(CallExpr {
-                            name: if task == "$bound_step" { "min" } else { "max" }.into(),
-                            args: vec![left, right],
-                            span,
-                        })
+                        if task == "$bound_step" {
+                            Expression::Call(CallExpr {
+                                name: "min".into(),
+                                args: vec![left, right],
+                                span,
+                            })
+                        } else {
+                            Expression::Binary(BinaryExpr {
+                                op: BinaryOp::BitOr,
+                                left: Box::new(left),
+                                right: Box::new(right),
+                                span,
+                            })
+                        }
                     } else {
                         left
                     });

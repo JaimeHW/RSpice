@@ -226,3 +226,165 @@ endmodule
     assert_eq!(device.try_transient_bound_step().unwrap(), Some(3e-9));
     assert!(!device.discontinuity_pending());
 }
+
+#[test]
+fn negative_discontinuity_requests_newton_iteration_without_a_time_event() {
+    let source = r#"
+module limiting(p,n);
+ inout p,n; electrical p,n;
+ analog begin
+  if(V(p,n)>0.5) $discontinuity(-1);
+  I(p,n)<+V(p,n)*1e-3;
+ end
+endmodule
+"#;
+    let mut device = compile_device("LIMITING", source);
+    stamp_once(&mut device, &[1.0]);
+    assert!(
+        !device.limiter_converged(),
+        "an active -1 hint must prevent Newton convergence"
+    );
+    assert!(
+        !device.discontinuity_pending(),
+        "a Newton hint must not become a transient restart"
+    );
+    stamp_once(&mut device, &[0.0]);
+    assert!(
+        device.limiter_converged(),
+        "the hint must reset on the next evaluation"
+    );
+    assert!(!device.discontinuity_pending());
+}
+
+#[test]
+fn discontinuity_rejects_nonconstant_and_invalid_degrees() {
+    for degree in ["V(p,n)", "$abstime", "-2", "0.5", "1.0/0.0"] {
+        let source = format!(
+            "module invalid(p,n); inout p,n; electrical p,n; analog begin $discontinuity({degree}); I(p,n)<+V(p,n); end endmodule"
+        );
+        let error = VerilogACompiler::default()
+            .compile(&source)
+            .expect_err("invalid discontinuity degree must be rejected");
+        assert!(
+            error.to_string().contains("$discontinuity"),
+            "{degree}: {error}"
+        );
+    }
+}
+
+#[test]
+fn discontinuity_parameter_degrees_and_overlapping_hints_are_checked() {
+    let source = r#"
+module hints(p,n);
+ inout p,n; electrical p,n;
+ parameter real degree=0.0;
+ analog begin
+  $discontinuity(degree);
+  if(V(p,n)>0.5) $discontinuity(-1);
+  I(p,n)<+V(p,n);
+ end
+endmodule
+"#;
+    let mut device = compile_device("HINTS", source);
+    stamp_once(&mut device, &[1.0]);
+    assert!(device.discontinuity_pending());
+    assert!(!device.limiter_converged());
+    device.try_set_parameter("degree", -1.0).unwrap();
+    stamp_once(&mut device, &[0.0]);
+    assert!(!device.discontinuity_pending());
+    assert!(!device.limiter_converged());
+    device.try_set_parameter("degree", 3.0).unwrap();
+    stamp_once(&mut device, &[0.0]);
+    assert!(device.discontinuity_pending());
+    assert!(device.limiter_converged());
+    device.try_set_parameter("degree", 0.5).unwrap();
+    let mut matrix_entries = 0;
+    let mut rhs_entries = 0;
+    let error = device
+        .try_stamp(
+            &[0.0],
+            |_, _, _| matrix_entries += 1,
+            |_, _| rhs_entries += 1,
+        )
+        .expect_err("invalid overridden degree must fail evaluation");
+    assert_eq!(
+        (matrix_entries, rhs_entries),
+        (0, 0),
+        "a failed evaluation must not publish matrix entries"
+    );
+    assert!(error.to_string().contains("$discontinuity"), "{error}");
+    let error = device
+        .try_evaluate()
+        .expect_err("a finite contribution must not hide an invalid degree");
+    assert!(error.to_string().contains("$discontinuity"), "{error}");
+}
+
+#[test]
+fn discontinuity_in_children_preserves_transient_and_newton_hints() {
+    let source = r#"
+module leaf(p,n);
+ inout p,n; electrical p,n;
+ parameter real degree=0;
+ analog begin
+  if(V(p,n)>0.0) $discontinuity(degree);
+  I(p,n)<+V(p,n)*1e-3;
+ end
+endmodule
+module top(p,n);
+ inout p,n; electrical p,n;
+ leaf #(.degree(2)) transient_hint(p,n);
+ leaf #(.degree(-1)) newton_hint(p,n);
+endmodule
+"#;
+    let mut device = compile_selected_device("hierarchical hints", source, Some("top"));
+    for voltage in [1.0, -1.0, 1.0] {
+        stamp_once(&mut device, &[voltage]);
+        assert_eq!(device.discontinuity_rising(), voltage > 0.0);
+        assert_eq!(device.limiter_converged(), voltage < 0.0);
+        device.advance_state();
+    }
+}
+
+#[test]
+fn discontinuity_accepts_omitted_and_parameter_expression_degrees() {
+    for degree in ["", "(abs(degree))", "(degree+1)", "(degree>0 ? degree : 1)"] {
+        let source = format!(
+            "module constants(p,n); inout p,n; electrical p,n; parameter real degree=1; analog begin $discontinuity{degree}; I(p,n)<+V(p,n); end endmodule"
+        );
+        let mut device = compile_device("constants", &source);
+        stamp_once(&mut device, &[0.0]);
+        assert!(device.discontinuity_pending());
+        assert!(device.limiter_converged());
+    }
+}
+
+#[test]
+fn discontinuity_checkpoints_reject_old_semantics_and_invalid_flags() {
+    let mut device = compile_device("CHECKPOINT", DISCONTINUOUS);
+    stamp_once(&mut device, &[1.5]);
+    device.advance_state();
+    let accepted = device.checkpoint_state().unwrap();
+    let mut old = accepted.clone();
+    old.state_version = 8;
+    assert!(
+        device
+            .validate_checkpoint_state(&old)
+            .unwrap_err()
+            .to_string()
+            .contains("version")
+    );
+    let slot = device
+        .variables()
+        .position(|(name, _)| name == "$discontinuity")
+        .unwrap();
+    let mut invalid = accepted.clone();
+    invalid.accepted.variables[slot] = 4.0;
+    assert!(
+        device
+            .validate_checkpoint_state(&invalid)
+            .unwrap_err()
+            .to_string()
+            .contains("$discontinuity")
+    );
+    assert_eq!(device.checkpoint_state().unwrap(), accepted);
+}

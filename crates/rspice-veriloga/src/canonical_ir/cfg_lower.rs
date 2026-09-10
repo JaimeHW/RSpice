@@ -74,6 +74,8 @@ pub struct CfgModel {
     pub event_state_candidates: Vec<ValueId>,
     /// Smallest active `$bound_step` request, including its per-evaluation reset.
     pub timestep_bound: Option<ValueId>,
+    /// Per-evaluation transient/Newton discontinuity request bits.
+    pub discontinuity: Option<ValueId>,
     /// Static source-wise projection of directly contributed noise, in source
     /// order. Assigned reuse and frequency-dependent routing are retained in
     /// `noise_processes` and the original CFG instead of folded into this PSD.
@@ -233,7 +235,7 @@ impl CfgModel {
             event_state_candidates,
             noise,
             noise_processes,
-            timestep_bound,
+            [timestep_bound, discontinuity],
         ) = lowerer.lower()?;
         // Errors only. A warning that failed the lowering would be an error
         // wearing a different word.
@@ -251,6 +253,7 @@ impl CfgModel {
             activations,
             event_state_candidates,
             timestep_bound,
+            discontinuity,
             noise,
             noise_processes,
             warnings: lowerer.diagnostics,
@@ -1081,7 +1084,7 @@ impl<'a> CfgLowerer<'a> {
             Vec<ValueId>,
             Vec<CfgNoiseSource>,
             Vec<CfgNoiseProcess>,
-            Option<ValueId>,
+            [Option<ValueId>; 2],
         ),
         Vec<IrDiagnostic>,
     > {
@@ -1234,21 +1237,23 @@ impl<'a> CfgLowerer<'a> {
         for process in &pending_processes {
             outputs.extend(process.site_values());
         }
-        let timestep_bound = if self.record_tasks
-            && self.phase == rspice_veriloga_runtime::AnalogEvaluationPhase::Evaluation
-        {
-            self.hir
-                .variables
-                .iter()
-                .find(|variable| variable.name == "$bound_step")
-                .and_then(|variable| {
-                    self.builder
-                        .read_variable(CfgVariable::Local(variable.id), exit)
-                })
-        } else {
-            None
-        };
-        outputs.extend(timestep_bound);
+        let controls = crate::analog_tasks::SIMULATOR_CONTROL_TASK_VARIABLES.map(|name| {
+            if self.record_tasks
+                && self.phase == rspice_veriloga_runtime::AnalogEvaluationPhase::Evaluation
+            {
+                self.hir
+                    .variables
+                    .iter()
+                    .find(|variable| variable.name == name)
+                    .and_then(|variable| {
+                        self.builder
+                            .read_variable(CfgVariable::Local(variable.id), exit)
+                    })
+            } else {
+                None
+            }
+        });
+        outputs.extend(controls.into_iter().flatten());
         self.builder.set_terminator(exit, CfgTerminator::Return);
 
         // Through `finish_with_outputs`, because finishing renumbers values and
@@ -1256,12 +1261,12 @@ impl<'a> CfgLowerer<'a> {
         let builder = std::mem::take(&mut self.builder);
         match builder.finish_with_outputs(entry, &outputs) {
             Ok((function, outputs)) => {
-                let (outputs, timestep_bound) = if timestep_bound.is_some() {
-                    let (bound, remaining) = outputs.split_last().expect("timestep bound output");
-                    (remaining, Some(*bound))
-                } else {
-                    (outputs.as_slice(), None)
-                };
+                let control_count = controls.iter().flatten().count();
+                let (outputs, control_outputs) = outputs.split_at(outputs.len() - control_count);
+                let mut control_outputs = control_outputs.iter().copied();
+                let controls = controls.map(|value| {
+                    value.map(|_| control_outputs.next().expect("simulator control output"))
+                });
                 let contribution_count = self.hir.contributions.len();
                 let (residuals, remaining) = outputs.split_at(contribution_count);
                 let activation_count = activations.iter().flatten().count();
@@ -1293,7 +1298,7 @@ impl<'a> CfgLowerer<'a> {
                     event_state_candidates.to_vec(),
                     resolve_noise(pending, noise),
                     resolve_noise_processes(pending_processes, noise_processes, process_sites),
-                    timestep_bound,
+                    controls,
                 ))
             }
             Err(error) => Err(vec![IrDiagnostic::global_error(

@@ -477,7 +477,7 @@ impl Instance {
 	pub const EVENT_STATE_COUNT: usize = 0;
 	pub const ONE_STEP_DAE_SPLIT_SAFE: bool = false;
 	pub const REQUIRES_NODESET_PHASE: bool = false;
-	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "00efad75e737b48be28cbbf922e83c39a87ea95cdc3623103dc4409560d96114";
+	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "28557e7bdb64c04bd5404fc94af29902150afe88c9d8a40ac265dbdf5001f54b";
 	pub const MAX_ANALOG_LOOP_ITERATIONS: usize = 1_000_000;
 
 	pub fn new(nodes: &[usize]) -> Self {
@@ -988,6 +988,8 @@ impl Instance {
 	}
 	#[inline]
 	pub fn transient_step_bound(&self) -> Result<Option<f64>, String> { Ok(None) }
+	#[inline]
+	pub fn discontinuity_rising(&self) -> bool { false }
 	#[inline]
 pub fn transient_event_refinement_time(&self) -> Option<f64> { None }
 	#[inline]

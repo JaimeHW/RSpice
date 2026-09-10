@@ -402,6 +402,13 @@ impl BuiltinVerilogADevices {
             .any(|device| device.kind.requires_nodeset_phase())
     }
 
+    /// Whether an accepted step should restart transient integration history.
+    pub(crate) fn discontinuity_rising(&self) -> bool {
+        self.devices
+            .iter()
+            .any(|device| device.kind.discontinuity_rising())
+    }
+
     /// Tightest active generated `$bound_step` request, including zero.
     pub(crate) fn transient_step_bound(&self) -> Result<Option<Value>, String> {
         let mut tightest: Option<Value> = None;

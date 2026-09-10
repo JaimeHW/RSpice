@@ -176,7 +176,10 @@ fn checkpoint_operation_result<T>(
 /// so exact continuation follows the uninterrupted numerical path.
 /// Version 38 adds complete accepted JFET nonlinear and integration history.
 /// Version 39 retains JFET terminal displacement currents across integration resets.
-const FORMAT_VERSION: u32 = 39;
+/// Version 40 separates runtime Verilog-A transient and Newton discontinuity hints.
+const FORMAT_VERSION: u32 = 40;
+#[cfg(feature = "veriloga")]
+const RUNTIME_VERILOGA_DISCONTINUITY_FORMAT_VERSION: u32 = 40;
 const JFET_CURRENT_HISTORY_FORMAT_VERSION: u32 = 39;
 const JFET_STATE_FORMAT_VERSION: u32 = 38;
 const SOLVER_STATE_FORMAT_VERSION: u32 = 37;
@@ -3679,6 +3682,8 @@ fn read_runtime_veriloga_states(
             Some(6)
         } else if checkpoint_version < RUNTIME_VERILOGA_CANONICAL_SITE_STATE_FORMAT_VERSION {
             Some(7)
+        } else if checkpoint_version < RUNTIME_VERILOGA_DISCONTINUITY_FORMAT_VERSION {
+            Some(8)
         } else {
             None
         };
@@ -3768,6 +3773,7 @@ fn read_runtime_veriloga_states(
                 5 => VerilogADeviceCheckpoint::validate_legacy_v5_words(&words),
                 6 => VerilogADeviceCheckpoint::validate_legacy_v6_words(&words),
                 7 => VerilogADeviceCheckpoint::validate_legacy_v7_words(&words),
+                8 => VerilogADeviceCheckpoint::validate_legacy_v8_words(&words),
                 _ => unreachable!("known legacy runtime Verilog-A state version"),
             }
             .map_err(|error| {
@@ -3801,7 +3807,8 @@ fn read_runtime_veriloga_states(
     // carried every field version 8 does, but indexed by the bytecode
     // generator's per-emission state slots rather than the canonical per-site
     // ones the compiler now numbers records with, so a record it holds cannot
-    // be told which operator owns it. All remain fully parseable for
+    // be told which operator owns it. Version 8 does not distinguish transient
+    // discontinuities from Newton convergence hints. All remain parseable for
     // diagnostics but cannot be promoted into exact current accepted state.
     Ok((states, legacy_state_version.is_some() && count != 0))
 }
@@ -12514,7 +12521,7 @@ mod tests {
     /// asserting current-format behaviour after two renumberings moved it into
     /// the legacy ladder.
     #[cfg(feature = "veriloga")]
-    const RUNTIME_VERILOGA_FORMAT_STATE_CONTRACTS: [(u32, u32); 23] = [
+    const RUNTIME_VERILOGA_FORMAT_STATE_CONTRACTS: [(u32, u32); 24] = [
         (17, 1),
         (18, 1),
         (19, 1),
@@ -12538,6 +12545,7 @@ mod tests {
         (37, 8),
         (38, 8),
         (39, 8),
+        (40, 9),
     ];
 
     #[cfg(feature = "veriloga")]
@@ -12689,6 +12697,33 @@ mod tests {
             error.contains("legacy payload is invalid")
                 && error.contains("Laplace filter 0 state contains a non-finite value"),
             "unexpected error: {error}"
+        );
+    }
+
+    #[cfg(feature = "veriloga")]
+    #[test]
+    fn pre_v40_runtime_veriloga_discontinuity_state_is_validated_then_discarded() {
+        let checkpoint = sample_without_generated_veriloga_state();
+        let words = runtime_veriloga_idtmod_words(8, checkpoint.time);
+        for outer_version in 34..40 {
+            let fixture = replace_empty_runtime_veriloga_tail(
+                legacy_text(&checkpoint, outer_version),
+                8,
+                &words,
+            );
+            let restored = TransientCheckpoint::from_text(&fixture)
+                .expect("v8 runtime state remains readable");
+            assert!(!restored.runtime_veriloga_state_available);
+            assert!(restored.runtime_veriloga_instance_states.is_empty());
+        }
+        let mut invalid = words;
+        invalid.push(0);
+        let fixture =
+            replace_empty_runtime_veriloga_tail(legacy_text(&checkpoint, 39), 8, &invalid);
+        assert!(
+            TransientCheckpoint::from_text(&fixture)
+                .unwrap_err()
+                .contains("legacy payload is invalid")
         );
     }
 
@@ -13158,8 +13193,7 @@ mod tests {
     }
 
     #[test]
-    fn version_twenty_six_and_twenty_seven_generated_identities_migrate_only_through_catalog_alias()
-    {
+    fn version_twenty_six_and_twenty_seven_generated_identities_honor_catalog_target_abi() {
         assert_eq!(GENERATED_VERILOGA_COMPATIBILITY_CATALOG.len(), 43);
         for legacy_version in [
             GENERATED_EVENT_STATE_FORMAT_VERSION,
@@ -13190,6 +13224,18 @@ mod tests {
                     .expect("catalog shape identity");
 
                 let legacy = legacy_text(&checkpoint, legacy_version);
+                if alias.target_descriptor_abi_version != GENERATED_VERILOGA_DESCRIPTOR_ABI_VERSION
+                {
+                    let error = TransientCheckpoint::from_text(&legacy).expect_err(
+                        "a catalog qualified for another descriptor ABI cannot authorize migration",
+                    );
+                    assert!(
+                        error.contains("generated compatibility target descriptor ABI"),
+                        "{} v{legacy_version}: {error}",
+                        alias.public_model_name
+                    );
+                    continue;
+                }
                 let migrated = TransientCheckpoint::from_text(&legacy).unwrap_or_else(|error| {
                     panic!(
                         "{} v{legacy_version} alias did not migrate: {error}",

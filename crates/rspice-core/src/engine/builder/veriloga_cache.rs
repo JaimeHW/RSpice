@@ -271,7 +271,8 @@ use super::*;
 // equation; older records irrecoverably substitute an explicit zero IC.
 // Version 63 binds an explicit module selection into memory and disk identities.
 // Version 64 resets simulator-control tasks once before all runtime loops.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 64;
+// Version 65 distinguishes transient discontinuities from Newton convergence hints.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 65;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]

@@ -2949,6 +2949,8 @@ impl CircuitData {
             .any(rspice_veriloga::device::VerilogADevice::discontinuity_rising);
         #[cfg(not(feature = "veriloga"))]
         let discontinuity = false;
+        #[cfg(feature = "veriloga-builtins-base")]
+        let discontinuity = discontinuity || self.generated_veriloga_devices.discontinuity_rising();
 
         #[cfg(feature = "veriloga")]
         self.veriloga_devices.apply_validated_timestep_acceptance();

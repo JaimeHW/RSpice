@@ -2944,23 +2944,24 @@ fn write_registry(
         out.push_str("    }\n");
         out.push('\n');
     }
-    out.push_str("    pub fn limiter_converged(&self) -> bool {\n");
-    if devices.is_empty() {
-        out.push_str("        let _ = self;\n");
-        out.push_str("        true\n");
-    } else {
-        out.push_str("        match self {\n");
-        for (index, feature) in feature_names.iter().enumerate() {
-            writeln!(
-                out,
-                "            #[cfg(feature = {feature:?})]\n            Self::Device{index}(device) => device.limiter_converged(),"
-            )?;
+    for (method, empty) in [("limiter_converged", true), ("discontinuity_rising", false)] {
+        writeln!(out, "    pub fn {method}(&self) -> bool {{")?;
+        if devices.is_empty() {
+            writeln!(out, "        let _ = self;\n        {empty}")?;
+        } else {
+            out.push_str("        match self {\n");
+            for (index, feature) in feature_names.iter().enumerate() {
+                writeln!(
+                    out,
+                    "            #[cfg(feature = {feature:?})]\n            Self::Device{index}(device) => device.{method}(),"
+                )?;
+            }
+            out.push_str(
+                "            Self::__NonExhaustive(value) => match *value {},\n        }\n",
+            );
         }
-        out.push_str("            Self::__NonExhaustive(value) => match *value {},\n");
-        out.push_str("        }\n");
+        out.push_str("    }\n\n");
     }
-    out.push_str("    }\n");
-    out.push('\n');
     out.push_str(
         "    pub fn noise_descriptors(&self) -> &'static [super::GeneratedNoiseDescriptor] {\n",
     );

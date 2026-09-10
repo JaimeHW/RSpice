@@ -1981,6 +1981,7 @@ pub enum GeneratedEvaluationError {
     Integer {
         reason: &'static str,
     },
+    DiscontinuityDegree,
     SmallSignal {
         reason: &'static str,
     },
@@ -2026,6 +2027,9 @@ impl std::fmt::Display for GeneratedEvaluationError {
             }
             Self::Integer { reason } => {
                 write!(f, "generated Verilog-A integer evaluation failed: {reason}")
+            }
+            Self::DiscontinuityDegree => {
+                f.write_str("$discontinuity degree must have a finite integer value >= -1")
             }
             Self::SmallSignal { reason } => write!(
                 f,
@@ -2862,6 +2866,15 @@ impl<'a> GeneratedEvalContext<'a> {
         if self.evaluation_error.get().is_none() {
             self.evaluation_error
                 .set(Some(GeneratedEvaluationError::AnalogTask { site, source }));
+        }
+    }
+
+    /// Retain an invalid instance-dependent `$discontinuity` operand even
+    /// when the surrounding contribution remains numerically finite.
+    pub fn report_discontinuity_degree_error(&self) {
+        if self.evaluation_error.get().is_none() {
+            self.evaluation_error
+                .set(Some(GeneratedEvaluationError::DiscontinuityDegree));
         }
     }
 
@@ -8234,6 +8247,23 @@ mod fixed_lane_tests {
         }
         ctx.report_initialization_error(1);
         ctx.checked_derivative_value(f64::INFINITY, 0.0);
+        assert_eq!(
+            ctx.take_evaluation_error(),
+            Some(GeneratedEvaluationError::Initialization { slot: 1 })
+        );
+    }
+
+    #[test]
+    fn generated_discontinuity_degree_errors_preserve_the_first_failure() {
+        let ctx = GeneratedEvalContext::new(&[0.0], 300.15, 1);
+        ctx.report_discontinuity_degree_error();
+        ctx.report_initialization_error(0);
+        assert!(ctx.evaluation_failed());
+        let error = ctx.take_evaluation_error().unwrap();
+        assert_eq!(error, GeneratedEvaluationError::DiscontinuityDegree);
+        assert!(error.to_string().contains("$discontinuity"));
+        ctx.report_initialization_error(1);
+        ctx.report_discontinuity_degree_error();
         assert_eq!(
             ctx.take_evaluation_error(),
             Some(GeneratedEvaluationError::Initialization { slot: 1 })

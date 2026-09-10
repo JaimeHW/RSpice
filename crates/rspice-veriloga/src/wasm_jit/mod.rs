@@ -1957,6 +1957,43 @@ endmodule
     }
 
     #[test]
+    fn wasm_discontinuity_preserves_degree_flags_and_resets_in_both_plans() {
+        let source = "module hints(p,n); inout p,n; electrical p,n; parameter real degree=0; analog begin if(V(p,n)>0) $discontinuity(degree); if(V(p,n)>1) $discontinuity(-1); I(p,n)<+V(p,n); end endmodule";
+        let report = VerilogACompiler::default()
+            .compile_runtime(source, Some("hints"))
+            .unwrap();
+        let slot = report
+            .model
+            .variable_names
+            .iter()
+            .position(|name| name == "$discontinuity")
+            .unwrap();
+        for postfix in [false, true] {
+            let mut harness = FusedKernelHarness::for_source_with_plan(source, "hints", postfix);
+            harness.reset();
+            for (degree, voltage, expected) in [
+                (-1.0, 1.0, 2.0),
+                (0.0, 1.0, 1.0),
+                (2.0, 2.0, 3.0),
+                (0.5, 1.0, 4.0),
+                (f64::INFINITY, 1.0, 4.0),
+                (-2.0, 0.0, 0.0),
+                (3.0, 1.0, 1.0),
+            ] {
+                harness.write_f64(FusedKernelHarness::PARAMETERS as usize, degree);
+                harness.write_f64(FusedKernelHarness::VOLTAGES as usize, voltage);
+                harness.write_f64(FusedKernelHarness::VOLTAGES as usize + 8, 0.0);
+                harness.call_assignments();
+                assert_eq!(
+                    harness.read_f64(FusedKernelHarness::VARIABLES as usize + slot * 8),
+                    expected,
+                    "postfix={postfix}, degree={degree}, voltage={voltage}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn wasm_implicit_integrator_uses_its_solver_unknown_in_both_plans() {
         use super::abi::{
             FRAME_INTERNAL_VOLTAGES_LEN_OFFSET, FRAME_INTERNAL_VOLTAGES_PTR_OFFSET,

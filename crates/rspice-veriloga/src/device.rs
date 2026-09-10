@@ -710,6 +710,27 @@ mod runtime_checkpoint_codec_tests {
     /// one — so the payload has to validate for diagnostics and refuse to
     /// resume, and nothing but the version word can tell the two apart.
     #[test]
+    fn legacy_v8_payload_validates_but_cannot_restore_ambiguous_discontinuity() {
+        let checkpoint = checkpoint_with_slew_entries();
+        let mut words = checkpoint.to_words();
+        words[0] = 8;
+        VerilogADeviceCheckpoint::validate_legacy_v8_words(&words).unwrap();
+        assert!(
+            VerilogADeviceCheckpoint::from_words(
+                checkpoint.instance_name,
+                checkpoint.model_name,
+                checkpoint.source_digest,
+                checkpoint.shape_identity,
+                &words,
+            )
+            .unwrap_err()
+            .contains("unsupported runtime Verilog-A state version 8")
+        );
+        words.push(0);
+        assert!(VerilogADeviceCheckpoint::validate_legacy_v8_words(&words).is_err());
+    }
+
+    #[test]
     fn legacy_v7_payload_validates_but_cannot_be_read_as_the_per_site_numbering() {
         let checkpoint = checkpoint_with_slew_entries();
         let words = checkpoint.to_legacy_v7_words_for_test();
@@ -921,6 +942,8 @@ pub struct VerilogADevice {
     /// Dense semantic export table for the worker-installed secondary module.
     #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
     wasm_jit_model: std::sync::Arc<WasmJitExecutable>,
+    /// Resolved once so Newton convergence checks do not scan model variables.
+    discontinuity_slot: Option<usize>,
     /// $discontinuity level at the last accepted timestep (edge detector)
     prev_discontinuity: bool,
 }
@@ -940,7 +963,9 @@ pub struct VerilogADevice {
 /// `checkpoint_shape_identity` already refuses a version-7 payload for those
 /// twelve on array length alone. The version is the explicit statement, and it
 /// is what refuses the modules whose length happens not to move.
-pub const RUNTIME_CHECKPOINT_STATE_VERSION: u32 = 8;
+/// Version 9 separates transient discontinuities from Newton convergence hints.
+/// Version 8 cannot distinguish an accepted `-1` hint from a time discontinuity.
+pub const RUNTIME_CHECKPOINT_STATE_VERSION: u32 = 9;
 
 /// Versioned accepted runtime state for one compiled Verilog-A instance.
 /// Compiled programs, topology, and solver caches are intentionally absent.
@@ -1572,6 +1597,20 @@ impl VerilogADeviceCheckpoint {
             SmolStr::new_inline("legacy"),
             words,
             7,
+        )
+        .map(drop)
+    }
+
+    /// Validate a version-8 payload without treating its single discontinuity
+    /// bit as the independent transient and Newton hints used by version 9.
+    pub fn validate_legacy_v8_words(words: &[u64]) -> Result<(), String> {
+        Self::from_words_with_expected_version(
+            SmolStr::new_inline("legacy"),
+            SmolStr::new_inline("legacy"),
+            SmolStr::new_inline("legacy"),
+            SmolStr::new_inline("legacy"),
+            words,
+            8,
         )
         .map(drop)
     }
@@ -2655,6 +2694,10 @@ impl VerilogADevice {
             .sum();
         let mut device = Self {
             name: name.into(),
+            discontinuity_slot: model
+                .variable_names
+                .iter()
+                .position(|name| name == "$discontinuity"),
             model,
             context,
             node_mapping,
@@ -3182,9 +3225,28 @@ impl VerilogADevice {
         self.context.cross_event_refinement_time()
     }
 
-    /// Whether `$discontinuity` fired during the latest evaluation
+    #[inline]
+    fn discontinuity_flags(&self) -> Option<f64> {
+        self.discontinuity_slot
+            .and_then(|slot| self.context.variables.get(slot).copied())
+    }
+
+    /// Whether a nonnegative `$discontinuity` hint fired during the latest evaluation
     pub fn discontinuity_pending(&self) -> bool {
-        self.variable("$discontinuity").is_some_and(|v| v != 0.0)
+        matches!(self.discontinuity_flags(), Some(1.0 | 3.0))
+    }
+
+    fn validate_discontinuity_state(&self) -> Result<(), VmError> {
+        if matches!(
+            self.discontinuity_flags(),
+            None | Some(0.0 | 1.0 | 2.0 | 3.0)
+        ) {
+            Ok(())
+        } else {
+            Err(VmError::InvalidNumericResult(
+                "$discontinuity degree must have a finite integer value >= -1".into(),
+            ))
+        }
     }
 
     /// Number of native assignment chunks the JIT produced for this model
@@ -3963,6 +4025,7 @@ impl VerilogADevice {
     /// Validate an accepted-state commit without mutating this instance.
     pub fn validate_advance_state(&self) -> Result<(), VmError> {
         self.validate_initialization_ready()?;
+        self.validate_discontinuity_state()?;
         self.context.validate_advance_state()
     }
 
@@ -4117,6 +4180,11 @@ impl VerilogADevice {
             .iter()
             .position(|name| name == "$bound_step");
         for (index, value) in checkpoint.accepted.variables.iter().copied().enumerate() {
+            if Some(index) == self.discontinuity_slot && !matches!(value, 0.0 | 1.0 | 2.0 | 3.0) {
+                return Err(invalid(
+                    "checkpoint $discontinuity flags are invalid".into(),
+                ));
+            }
             let allowed_bound_infinity = Some(index) == bound_step_index && value == f64::INFINITY;
             if !value.is_finite() && !allowed_bound_infinity {
                 return Err(invalid(format!(
@@ -5208,7 +5276,12 @@ impl VerilogADevice {
         &mut self,
         mode: crate::vm::VerilogAEvaluationMode,
     ) -> Result<Vec<f64>, VmError> {
-        let result = self.try_evaluate_with_task_recording(mode, true);
+        let result = self
+            .try_evaluate_with_task_recording(mode, true)
+            .and_then(|values| {
+                self.validate_discontinuity_state()?;
+                Ok(values)
+            });
         self.context.numerical_evaluation_valid = result.is_ok();
         if result.is_err() {
             self.context.invalidate_task_candidate();
@@ -5417,11 +5490,12 @@ impl VerilogADevice {
         Ok(self.context.currents.clone())
     }
 
-    /// Whether no named limiter changed its proposal during the latest
-    /// limited Newton evaluation.
+    /// Whether the latest evaluation neither limited a proposal nor requested
+    /// another Newton iteration with `$discontinuity(-1)`.
     #[inline]
     pub fn limiter_converged(&self) -> bool {
         self.context.limiter_active == 0
+            && matches!(self.discontinuity_flags(), None | Some(0.0 | 1.0))
     }
 
     #[inline]
@@ -6904,6 +6978,7 @@ impl VerilogADevice {
             }
             jacobian_base += program.jacobian_programs.len();
         }
+        self.validate_discontinuity_state()?;
         for &(row, col, value) in &self.stamp_matrix_buffer {
             matrix_add(row, col, value);
         }
@@ -7107,6 +7182,7 @@ impl VerilogADevice {
         Self::run_post_assignment_pass(&mut vm, model, native)?;
         #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
         Self::run_post_assignment_pass(&mut vm, model, wasm)?;
+        self.validate_discontinuity_state()?;
         for &(row, col, value) in &self.stamp_matrix_buffer {
             matrix_add(row, col, value);
         }
@@ -9156,6 +9232,10 @@ endmodule
 
         let mut device = VerilogADevice {
             name: SmolStr::new("NTEST"),
+            discontinuity_slot: model
+                .variable_names
+                .iter()
+                .position(|name| name == "$discontinuity"),
             model,
             context,
             node_mapping: vec![0; num_terminals],

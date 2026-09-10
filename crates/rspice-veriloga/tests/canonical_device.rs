@@ -4883,34 +4883,96 @@ fn transpiler_reports_hot_phases_and_exact_output_size() {
 }
 
 #[test]
-fn generated_discontinuity_is_refused_until_degree_semantics_are_supported() {
-    for argument in ["-1", "0", "1"] {
-        let task = "$discontinuity";
-        let source = format!(
-            r#"
-module stepped(p, n);
-    inout p, n;
-    electrical p, n;
-    parameter real g = 1.0e-3;
-    analog begin
-        {task}({argument});
-        I(p, n) <+ g * V(p, n);
-    end
+fn generated_discontinuity_preserves_degrees_and_transactional_state() {
+    let source = r#"
+module controlled(p,n);
+ inout p,n; electrical p,n;
+ parameter real degree=0.0;
+ parameter integer passes=1;
+ integer i;
+ real ticks;
+ analog begin
+  for(i=0;i<passes;i=i+1) begin
+   $bound_step(1e-9);
+   if(V(p,n)>0.0) $discontinuity(degree);
+  end
+  if(V(p,n)>1.0) $discontinuity(-1);
+  @(timer(1.0,2.0)) ticks=ticks+1;
+  I(p,n)<+V(p,n)*1e-3;
+ end
 endmodule
-"#
-        );
-        let artifact = VerilogACompiler::default()
-            .compile_canonical_ir(&source)
-            .unwrap_or_else(|error| panic!("{task}: front end: {error}"));
-        let error = RustTranspiler::new(options())
-            .transpile(&artifact)
-            .expect_err("a simulator-control task must not be dropped in silence");
-        assert_eq!(error.kind, RustBackendErrorKind::Unsupported);
-        assert!(
-            error.message.contains(task),
-            "the refusal must name the task it cannot honour, got {error}"
-        );
-    }
+"#;
+    let (state, stamp, noise) = generated_parts(source, "discontinuity state");
+    run_generated_main(
+        "discontinuity state",
+        &state,
+        &stamp,
+        &noise,
+        r#"
+fn stamp(instance: &mut device::state::Instance, voltage:f64) -> bool {
+ runtime::clear_evaluation_error();
+ let voltages=[voltage,0.0];
+ let ctx=runtime::GeneratedEvalContext { voltages:&voltages, temperature:300.0 };
+ instance.begin_stateful_evaluation();
+ instance.stamp(&ctx,&mut runtime::GeneratedStamper::default());
+ !ctx.evaluation_failed()
+}
+runtime::set_event_analysis(true,false);
+let mut instance=device::state::Instance::new(&[0,1]);
+instance.finalize_parameters().unwrap();
+instance.set_timepoint(0.0,0.0,runtime::GeneratedDdtCoefficients::inactive());
+assert!(stamp(&mut instance,0.0));
+assert!(!instance.discontinuity_rising());
+assert!(instance.limiter_converged());
+assert!(stamp(&mut instance,1.0));
+assert!(instance.discontinuity_rising());
+assert!(instance.limiter_converged());
+instance.validate_advance_state().unwrap();
+instance.apply_validated_advance_state();
+let accepted=instance.capture_persistent_state();
+let rollback=instance.capture_rollback_state();
+assert!(stamp(&mut instance,2.0));
+assert!(!instance.discontinuity_rising());
+assert!(!instance.limiter_converged());
+assert_eq!(instance.capture_persistent_state(),accepted);
+assert!(!instance.clone().limiter_converged());
+instance.restore_rollback_state(&rollback);
+assert!(instance.limiter_converged());
+assert!(!instance.discontinuity_rising());
+instance.set_parameter("degree",-1.0).unwrap();
+assert!(stamp(&mut instance,1.0));
+assert!(!instance.discontinuity_rising());
+assert!(!instance.limiter_converged());
+instance.set_parameter("passes",0.0).unwrap();
+assert!(stamp(&mut instance,1.0));
+assert!(!instance.discontinuity_rising());
+assert!(instance.limiter_converged());
+assert_eq!(instance.transient_step_bound().unwrap(),None);
+instance.validate_advance_state().unwrap();
+instance.apply_validated_advance_state();
+instance.restore_persistent_state(&accepted).unwrap();
+assert!(instance.limiter_converged());
+assert!(!instance.discontinuity_rising());
+assert_eq!(instance.transient_step_bound().unwrap(),Some(1e-9));
+assert_eq!(instance.transient_timer_step_bound(),Some(1.0));
+let mut invalid=accepted.clone();
+invalid.event_variables[2]=2.0;
+assert!(instance.restore_persistent_state(&invalid).unwrap_err().contains("discontinuity"));
+assert_eq!(instance.capture_persistent_state(),accepted);
+instance.set_parameter("passes",1.0).unwrap();
+instance.set_parameter("degree",0.5).unwrap();
+assert!(!stamp(&mut instance,1.0));
+assert!(instance.validate_advance_state().unwrap_err().contains("$discontinuity"));
+assert!(!instance.limiter_converged());
+assert_eq!(instance.capture_persistent_state(),accepted);
+runtime::clear_evaluation_error();
+let ctx=runtime::GeneratedEvalContext { voltages:&[0.0,0.0],temperature:300.0 };
+instance.begin_analysis(&ctx);
+assert!(!instance.discontinuity_rising());
+assert!(instance.limiter_converged());
+"#,
+    )
+    .unwrap_or_else(|error| panic!("{error}"));
 }
 
 #[test]
@@ -5049,12 +5111,6 @@ for voltage in [1.0,-1.0,1.0] {
 "#,
     )
     .unwrap_or_else(|error| panic!("{error}"));
-    let source = source.replace("$bound_step(cap)", "$discontinuity(0)");
-    let artifact = VerilogACompiler::default()
-        .compile_canonical_ir_module(&source, Some("top"))
-        .unwrap();
-    let error = canonical::generate_device(&artifact, &options()).unwrap_err();
-    assert!(error.message.contains("$discontinuity"), "{error}");
 }
 
 struct ImmediatePipelineCancellation;
@@ -6953,6 +7009,7 @@ pub mod runtime {
         pub fn check_noise_evaluation(&self) -> Result<(), GeneratedNoiseEvaluationError> {
             if self.evaluation_failed() { Err(GeneratedNoiseEvaluationError::NonFinite { index:0,quantity:"evaluation",value:f64::NAN }) } else { Ok(()) }
         }
+        pub fn report_discontinuity_degree_error(&self) { EVALUATION_FAILED.store(true, std::sync::atomic::Ordering::SeqCst); }
         pub fn report_initialization_error(&self, _slot: usize) { EVALUATION_FAILED.store(true, std::sync::atomic::Ordering::SeqCst); }
         pub fn report_analog_task_error(&self, _site: u32, _source: AnalogEffectError) { EVALUATION_FAILED.store(true, std::sync::atomic::Ordering::SeqCst); }
     }
@@ -7237,3 +7294,45 @@ pub mod runtime {
 }
 "#
 );
+
+#[test]
+fn generated_discontinuity_in_children_preserves_both_hints() {
+    let source = r#"
+module leaf(p,n);
+ inout p,n; electrical p,n;
+ parameter real degree=0;
+ analog begin
+  if(V(p,n)>0.0) $discontinuity(degree);
+  I(p,n)<+V(p,n)*1e-3;
+ end
+endmodule
+module top(p,n);
+ inout p,n; electrical p,n;
+ leaf #(.degree(1)) transient_hint(p,n);
+ leaf #(.degree(-1)) newton_hint(p,n);
+endmodule
+"#;
+    let (state, stamp, noise) =
+        generated_parts_selected(source, "hierarchical discontinuity", Some("top"));
+    run_generated_main(
+        "hierarchical discontinuity",
+        &state,
+        &stamp,
+        &noise,
+        r#"
+let mut instance=device::state::Instance::new(&[0,1]);
+instance.finalize_parameters().unwrap();
+for voltage in [1.0,-1.0,1.0] {
+ let voltages=[voltage,0.0];
+ let ctx=runtime::GeneratedEvalContext { voltages:&voltages,temperature:300.0 };
+ instance.stamp(&ctx,&mut runtime::GeneratedStamper::default());
+ assert!(!ctx.evaluation_failed());
+ assert_eq!(instance.discontinuity_rising(),voltage>0.0);
+ assert_eq!(instance.limiter_converged(),voltage<0.0);
+ instance.validate_advance_state().unwrap();
+ instance.apply_validated_advance_state();
+}
+"#,
+    )
+    .unwrap_or_else(|error| panic!("{error}"));
+}

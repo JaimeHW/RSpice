@@ -4219,30 +4219,54 @@ impl SemanticAnalyzer {
         Ok(())
     }
 
-    /// `$discontinuity(degree)`: flag a topology/regime change so the
-    /// transient stepper places a breakpoint. Lowers to a hidden flag
-    /// reset to 0 every evaluation and set to 1 while the call is active.
+    /// A discontinuity publishes independent transient and Newton hints.
+    /// Bit 2 is reserved for invalid instance-dependent degree values.
     fn analyze_discontinuity(
         &mut self,
         call: &CallStmt,
         module: &mut AnalyzedModule,
         sink: &mut Vec<AnalyzedStatement>,
     ) -> CompileResult<()> {
-        if let Some(arg) = call.args.first() {
-            let degree = self.lower_expression_with_side_effects(arg, module, sink)?;
-            let degree_type = self.infer_type(&degree)?;
-            if !degree_type.is_numeric() {
-                self.record_error_at(
-                    SemanticErrorKind::TypeMismatch {
-                        expected: "numeric".to_string(),
-                        found: degree_type.to_string(),
-                        context: "$discontinuity argument".to_string(),
-                    },
-                    call.span,
-                );
-            }
-        }
-
+        let degree = self.discontinuity_degree(call)?;
+        let binary = |op, left, right| {
+            Expression::Binary(BinaryExpr {
+                op,
+                left: Box::new(left),
+                right: Box::new(right),
+                span: call.span,
+            })
+        };
+        let number = |value| Self::number_expr(value, call.span);
+        let mask = if let Some(value) = self.eval_const_invariant(&degree) {
+            number(if value == -1.0 { 2.0 } else { 1.0 })
+        } else {
+            let integral = binary(
+                BinaryOp::Eq,
+                degree.clone(),
+                Expression::Call(CallExpr {
+                    name: "floor".into(),
+                    args: vec![degree.clone()],
+                    span: call.span,
+                }),
+            );
+            let finite = binary(BinaryOp::Lt, degree.clone(), number(f64::INFINITY));
+            let valid = binary(
+                BinaryOp::And,
+                binary(BinaryOp::Ge, degree.clone(), number(-1.0)),
+                binary(BinaryOp::And, finite, integral),
+            );
+            Expression::Conditional(ConditionalExpr {
+                condition: Box::new(valid),
+                then_expr: Box::new(Expression::Conditional(ConditionalExpr {
+                    condition: Box::new(binary(BinaryOp::Eq, degree, number(-1.0))),
+                    then_expr: Box::new(number(2.0)),
+                    else_expr: Box::new(number(1.0)),
+                    span: call.span,
+                })),
+                else_expr: Box::new(number(4.0)),
+                span: call.span,
+            })
+        };
         let var_index = self.ensure_task_variable("$discontinuity", 0.0, module, call.span);
         let current = Expression::Identifier(Identifier {
             name: "$discontinuity".into(),
@@ -4253,7 +4277,7 @@ impl SemanticAnalyzer {
             target: "$discontinuity".into(),
             var_index,
             index: None,
-            expression: Self::number_expr(1.0, call.span),
+            expression: binary(BinaryOp::BitOr, current.clone(), mask),
             site: self.next_analog_site(),
             expression_guard,
             expr_type: ValueType::Real,
@@ -4264,6 +4288,60 @@ impl SemanticAnalyzer {
         assignment.expression = self.apply_guard(assignment.expression, current);
         sink.push(AnalyzedStatement::Assignment(assignment));
         Ok(())
+    }
+
+    fn discontinuity_degree(&mut self, call: &CallStmt) -> CompileResult<Expression> {
+        let degree = match call.args.first() {
+            Some(value) => {
+                self.lower_expression_without_side_effects(value, "$discontinuity degree")?
+            }
+            None => Self::number_expr(0.0, call.span),
+        };
+        let invalid = || {
+            CompileError::Semantic(SemanticError::new(
+            SemanticErrorKind::InvalidAnalogOperator(
+                "$discontinuity degree must be a numeric constant expression with a finite integer value >= -1".into(),
+            ), call.span,
+        ))
+        };
+        let mut pending = vec![&degree];
+        while let Some(value) = pending.pop() {
+            match value {
+                Expression::Number(_) => {}
+                Expression::Identifier(id)
+                    if id.name == "inf"
+                        || self.invariant_consts.contains_key(&id.name)
+                        || self
+                            .symbols
+                            .lookup(&id.name)
+                            .is_some_and(|symbol| symbol.kind == SymbolKind::Parameter) => {}
+                Expression::Unary(value) => pending.push(&value.operand),
+                Expression::Binary(value) => {
+                    pending.push(&value.left);
+                    pending.push(&value.right);
+                }
+                Expression::Conditional(value) => {
+                    pending.extend([&*value.condition, &*value.then_expr, &*value.else_expr]);
+                }
+                Expression::Call(value)
+                    if self
+                        .functions
+                        .get(&value.name)
+                        .is_some_and(|function| !function.is_analog_operator) =>
+                {
+                    pending.extend(&value.args)
+                }
+                _ => return Err(invalid()),
+            }
+        }
+        if !self.infer_type(&degree)?.is_numeric()
+            || self
+                .eval_const_invariant(&degree)
+                .is_some_and(|value| !value.is_finite() || value.fract() != 0.0 || value < -1.0)
+        {
+            return Err(invalid());
+        }
+        Ok(degree)
     }
 
     /// Register a hidden system-task variable on first use and emit its

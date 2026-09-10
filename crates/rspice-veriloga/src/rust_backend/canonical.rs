@@ -49,11 +49,9 @@
 //!
 //! ## What it refuses
 //!
-//! Indirect contributions, an unresolved flow probe, and the simulator-control
-//! tasks `$bound_step` and `$discontinuity`. Each is a piece the canonical
-//! level has not finished, and a device that quietly computed something else
-//! would be worse than one that is not generated: the caller falls back to a
-//! tier, which is what the tiers are still there for.
+//! Unsupported operators, indirect contributions, and unresolved flow probes
+//! produce explicit diagnostics. Timestep and discontinuity controls retain
+//! their trial and accepted state in the generated device contract.
 
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write as _;
@@ -875,6 +873,7 @@ struct ModelPlan {
     /// in dense accepted-state slot order.
     event_state_candidate_positions: Vec<usize>,
     timestep_bound_position: Option<usize>,
+    discontinuity_position: Option<usize>,
     /// The noise magnitudes, as their own body.
     ///
     /// `None` where the canonical level cannot express them and the generator
@@ -1257,6 +1256,7 @@ impl ModelPlan {
         let activation_wanted = activations.iter().flatten().count();
         wanted.extend(cfg.event_state_candidates.iter().copied());
         wanted.extend(cfg.timestep_bound);
+        wanted.extend(cfg.discontinuity);
         // Side effects are explicit optimization roots. They remain in their
         // source blocks, including repeated calls on loop back edges.
         wanted.extend(cfg.function.values.iter().filter_map(|value| {
@@ -1315,7 +1315,9 @@ impl ModelPlan {
         let event_state_end = activation_end + cfg.event_state_candidates.len();
         let event_state_candidates = mapped[activation_end..event_state_end].to_vec();
         let timestep_bound = cfg.timestep_bound.map(|_| mapped[event_state_end]);
-        let task_effects = &mapped[event_state_end + usize::from(timestep_bound.is_some())..];
+        let bound_end = event_state_end + usize::from(timestep_bound.is_some());
+        let discontinuity = cfg.discontinuity.map(|_| mapped[bound_end]);
+        let task_effects = &mapped[bound_end + usize::from(discontinuity.is_some())..];
         conduction.drop_zeros(&function);
         reactive.drop_zeros(&function);
         let mut scalar_derivatives = 0usize;
@@ -1386,6 +1388,10 @@ impl ModelPlan {
             .collect();
         let timestep_bound_position = timestep_bound.map(|bound| {
             outputs.push(bound);
+            outputs.len() - 1
+        });
+        let discontinuity_position = discontinuity.map(|flags| {
+            outputs.push(flags);
             outputs.len() - 1
         });
         // These positions keep execution live through scheduling and emission;
@@ -1568,6 +1574,7 @@ impl ModelPlan {
             activation_positions,
             event_state_candidate_positions,
             timestep_bound_position,
+            discontinuity_position,
             noise,
             ddt_slots,
             idt_slots,
@@ -2784,6 +2791,9 @@ impl ModelPlan {
         if self.timestep_bound_position.is_some() {
             out.push_str("        self.timestep_bound_candidate = f64::NAN;\n");
         }
+        if self.discontinuity_position.is_some() {
+            out.push_str("        self.discontinuity_candidate = f64::NAN;\n");
+        }
         if !self.initialization.is_empty() {
             out.push_str("        self.initialize_analysis(ctx);\n        if ctx.evaluation_failed() || !self.canonical_initialization_valid { return; }\n");
         }
@@ -2824,6 +2834,14 @@ impl ModelPlan {
             let _ = writeln!(
                 out,
                 "        self.timestep_bound_candidate = {};",
+                values[position]
+            );
+        }
+
+        if let Some(position) = self.discontinuity_position {
+            let _ = writeln!(
+                out,
+                "        self.discontinuity_candidate = {};\n        if !matches!(self.discontinuity_candidate, 0.0 | 1.0 | 2.0 | 3.0) {{ ctx.report_discontinuity_degree_error(); return; }}",
                 values[position]
             );
         }
@@ -4066,6 +4084,7 @@ impl ModelPlan {
         }
         self.push_limit_state_fields(&mut extensions);
         self.push_timestep_bound_state_fields(&mut extensions);
+        self.push_discontinuity_state_fields(&mut extensions);
         self.push_event_control_state_fields(&mut extensions);
         if !self.initialization.is_empty() {
             extensions
@@ -4382,6 +4401,50 @@ impl ModelPlan {
                  if !bound.is_finite() || bound < 0.0 { return Err(format!(\"generated $bound_step request is invalid: {bound}\")); }\n\
                  Ok(Some(bound))\n\
              }\n",
+        );
+    }
+
+    fn push_discontinuity_state_fields(&self, extensions: &mut state_file::StateFileExtensions) {
+        if self.discontinuity_position.is_none() {
+            extensions.impl_methods.push_str(
+                "    #[inline]\n    pub fn discontinuity_rising(&self) -> bool { false }\n",
+            );
+            return;
+        }
+        extensions.instance_fields.push_str("    pub(crate) discontinuity_candidate: f64,\n    pub(crate) discontinuity_previous: bool,\n");
+        extensions.clone_fields.push_str("            discontinuity_candidate: self.discontinuity_candidate,\n            discontinuity_previous: self.discontinuity_previous,\n");
+        extensions.new_initializers.push_str("            discontinuity_candidate: 0.0,\n            discontinuity_previous: false,\n");
+        extensions.reset_analysis_state.push_str("        self.discontinuity_candidate = 0.0;\n        self.discontinuity_previous = false;\n");
+        extensions.validate_advance_state.push_str("        if !matches!(self.discontinuity_candidate, 0.0 | 1.0 | 2.0 | 3.0) { return Err(\"$discontinuity degree must have a finite integer value >= -1\".to_string()); }\n");
+        extensions.apply_advance_state.push_str("        self.discontinuity_previous = matches!(self.discontinuity_candidate, 1.0 | 3.0);\n");
+        let converged = "matches!(self.discontinuity_candidate, 0.0 | 1.0)";
+        extensions.limiter_converged_expr = if self.limit_slots.is_empty() {
+            converged.to_string()
+        } else {
+            format!("({}) && {converged}", extensions.limiter_converged_expr)
+        };
+        extensions.impl_methods.push_str("    #[inline]\n    pub fn discontinuity_rising(&self) -> bool { matches!(self.discontinuity_candidate, 1.0 | 3.0) && !self.discontinuity_previous }\n");
+        extensions.rollback_value_count += 1;
+        extensions.rollback_flag_count += 1;
+        extensions
+            .rollback_capture_values
+            .push_str("        values.push(self.discontinuity_candidate);\n");
+        extensions
+            .rollback_capture_flags
+            .push_str("        flags.push(self.discontinuity_previous);\n");
+        extensions.rollback_restore_fields.push_str("        let (candidate, remaining) = rollback_values.split_first().expect(\"generated discontinuity rollback\");\n        self.discontinuity_candidate = *candidate;\n        rollback_values = remaining;\n        let (previous, remaining) = rollback_flags.split_first().expect(\"generated accepted discontinuity rollback\");\n        self.discontinuity_previous = *previous;\n        rollback_flags = remaining;\n");
+        let lane = Self::event_checkpoint_index(extensions.persistent_event_lane_count);
+        extensions.persistent_event_lane_count += 1;
+        extensions.checkpoint_event_capture.push_str(
+            "        event_variables.push(if self.discontinuity_previous { 1.0 } else { 0.0 });\n",
+        );
+        let _ = writeln!(
+            extensions.checkpoint_event_validate,
+            "        if !matches!(state.event_variables[{lane}], 0.0 | 1.0) {{ return Err(\"generated discontinuity checkpoint is invalid\".to_string()); }}"
+        );
+        let _ = writeln!(
+            extensions.checkpoint_event_restore,
+            "        self.discontinuity_previous = state.event_variables[{lane}] == 1.0;\n        self.discontinuity_candidate = state.event_variables[{lane}];"
         );
     }
 
@@ -5648,18 +5711,6 @@ fn reject_unsupported_kinds(
         .any(|equation| equation.kind == MirEquationKind::Indirect)
     {
         return Err(unsupported(artifact, "an indirect contribution"));
-    }
-    // Discontinuity degree and Newton-limiting semantics are not implemented here.
-    if let Some(variable) = artifact
-        .hir
-        .variables
-        .iter()
-        .find(|variable| variable.name == "$discontinuity")
-    {
-        return Err(unsupported(
-            artifact,
-            format!("the {} simulator-control task", variable.name),
-        ));
     }
     Ok(())
 }

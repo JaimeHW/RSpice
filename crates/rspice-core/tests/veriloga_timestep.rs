@@ -176,3 +176,45 @@ fn bound_step_caps_transient_steps() {
         "largest accepted step {max_step:.3e} exceeds the $bound_step cap"
     );
 }
+
+#[test]
+fn discontinuity_newton_hint_prevents_false_dc_convergence() {
+    let model = write_model(
+        &format!("newton_hint_{}.va", std::process::id()),
+        "module hint(p,n); inout p,n; electrical p,n; parameter real degree=0; analog begin $discontinuity(degree); I(p,n)<+V(p,n); end endmodule",
+    );
+    for spice_dialect in [SpiceDialect::Ngspice, SpiceDialect::Xyce] {
+        for degree in [0, 1, -1] {
+            let netlist = Netlist::parse(&format!(
+                "Newton convergence hint\nI1 0 p 1\nX1 p 0 hint degree={degree}\n.va \"{model}\" hint\n.end\n"
+            )).unwrap();
+            let result = Engine::new(SimulationConfig {
+                spice_dialect,
+                ..SimulationConfig::default()
+            })
+            .run_dc_op(&netlist);
+            if degree == -1 {
+                let error = result.expect_err(
+                    "the active hint must prevent convergence even with zero KCL residual",
+                );
+                assert!(
+                    matches!(error, rspice_core::SimulationError::ConvergenceFailed(_)),
+                    "{spice_dialect:?}: {error}"
+                );
+            } else {
+                let point = result.unwrap();
+                let node = point
+                    .node_names
+                    .iter()
+                    .position(|name| name.eq_ignore_ascii_case("p"))
+                    .unwrap();
+                assert!(
+                    (point.node_voltages[node] - 1.0).abs() < 1e-8,
+                    "{spice_dialect:?}, degree={degree}: {:?}",
+                    point.node_voltages
+                );
+            }
+        }
+    }
+    let _ = std::fs::remove_file(model);
+}
