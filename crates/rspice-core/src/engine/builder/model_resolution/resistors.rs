@@ -5,7 +5,8 @@ use crate::circuit::ThermalResistorState;
 /// `(coefficient, AF, EF)` where the density is
 /// `coefficient·|I|^AF / f^EF`, with the model KF and the effective noise
 /// area `(L − 2·SHORT)^LF · (W − 2·NARROW)^WF` (1.0 when no geometry is
-/// given, per ressetup.c) folded into the coefficient. Returns `None`
+/// given, per ressetup.c) and `M^(1-AF)` folded into the coefficient for the
+/// total instance current. Returns `None`
 /// when the model carries no KF.
 pub(in crate::engine::builder) fn resolve_resistor_flicker_noise(
     netlist: &Netlist,
@@ -72,7 +73,31 @@ pub(in crate::engine::builder) fn resolve_resistor_flicker_noise(
         1.0
     };
 
-    Ok(Some((kf / eff_noise_area, af, ef)))
+    // resnoise.c evaluates M * KF * |I_total/M|^AF / area. The circuit
+    // stores the aggregate current, so the coefficient must include M^(1-AF).
+    let multiplicity = instance_param(instance_params, &["M", "MULT"]).unwrap_or(1.0);
+    if !multiplicity.is_finite() || multiplicity <= 0.0 {
+        return Err(SimulationError::Circuit(format!(
+            "Resistor model '{model_name}' flicker noise has invalid multiplicity M={multiplicity}"
+        )));
+    }
+    let coefficient = if multiplicity == 1.0 || af == 1.0 {
+        kf / eff_noise_area
+    } else if af == 2.0 {
+        let (mantissa, exponent) =
+            crate::numerics::product_binary_normalization(&[kf], &[eff_noise_area, multiplicity]);
+        libm::scalbn(mantissa, exponent)
+    } else {
+        let (mantissa, exponent) =
+            crate::numerics::product_binary_normalization(&[kf], &[eff_noise_area]);
+        crate::numerics::scaled_power_law(mantissa, exponent, multiplicity, 1.0 - af, 1.0, 0.0)
+    };
+    if !coefficient.is_finite() || coefficient <= 0.0 {
+        return Err(SimulationError::Circuit(format!(
+            "Resistor model '{model_name}' nonzero flicker coefficient is outside the supported finite range after geometry and M scaling"
+        )));
+    }
+    Ok(Some((coefficient, af, ef)))
 }
 
 fn resolve_resistor_model_level(

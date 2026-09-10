@@ -240,6 +240,33 @@ fn branch_form_noise_honors_quiet_dtemp_and_absolute_temp_precedence() {
 }
 
 #[test]
+fn resistor_flicker_multiplicity_counts_independent_parallel_instances() {
+    for af in [1.0_f64, 1.3, 2.0] {
+        for multiplicity in [0.2, 5.0] {
+            for branch_form in [false, true] {
+                let tolerance = if branch_form { 10 } else { 0 };
+                let deck = Netlist::parse(&format!(
+                    "Parallel resistor flicker\nVP p 0 1.2\nR1 p 0 RM 0.6 M={multiplicity}\n.model RM R(KF=1e-6 AF={af} EF=.8)\n.options device zeroresistancetol={tolerance}\n.end\n"
+                )).unwrap();
+                let result = Engine::default()
+                    .run_port_noise_correlation(&deck, &["VP".into()], &[10.0], TEMPERATURE)
+                    .unwrap();
+                // Each parallel copy carries 2 A, with independent noise.
+                let expected = multiplicity
+                    * (1e-6 * 2.0_f64.powf(af) / 10.0_f64.powf(0.8)
+                        + 4.0 * K_BOLTZMANN * TEMPERATURE / 0.6);
+                assert_relative(
+                    result[0].current_correlation[0][0].re,
+                    expected,
+                    2e-12,
+                    "parallel resistor port noise",
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn resistor_flicker_preserves_cancelling_power_laws() {
     for (voltage, resistance, af, frequency, ef, expected) in [
         (16.0, 1.0, 1e308, 256.0, 5e307, 1.0),
