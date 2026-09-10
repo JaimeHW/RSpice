@@ -132,6 +132,7 @@ pub(super) struct MirPoint<'a> {
     pub(super) temperature: f64,
     pub(super) time: f64,
     pub(super) multiplicity: f64,
+    pub(super) simparams: rspice_veriloga_runtime::GeneratedSimulationParameters,
     pub(super) analysis_mask: u32,
 }
 
@@ -457,6 +458,15 @@ impl<'a, S: CfgScalar> PlanWalk<'a, S> {
             NativeOp::LoadTime => stack.push(S::from_f64(self.point.time)),
             NativeOp::Analysis(id) => stack.push(S::from_f64(self.point.analysis_value(id))),
             NativeOp::LoadMfactor => stack.push(S::from_f64(self.point.multiplicity)),
+            NativeOp::LoadSimParamValue(parameter) => stack.push(S::from_f64(
+                self.point
+                    .simparams
+                    .get_parameter(parameter)
+                    .ok_or(PostfixRefusal::RuntimeError(name))?,
+            )),
+            NativeOp::LoadSimParamPresent(parameter) => stack.push(S::from_f64(f64::from(
+                self.point.simparams.get_parameter(parameter).is_some(),
+            ))),
             NativeOp::LoadPreludeSlot(index) => {
                 let value = *self
                     .prelude
@@ -773,6 +783,7 @@ mod tests {
             temperature: 300.15,
             time: 1.0e-9,
             multiplicity: 1.0,
+            simparams: Default::default(),
             analysis_mask: rspice_veriloga_runtime::analysis_query_mask(
                 2,
                 rspice_veriloga_runtime::AnalogAnalysisPhase::Point,

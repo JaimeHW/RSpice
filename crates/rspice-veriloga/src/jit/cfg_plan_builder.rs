@@ -1568,8 +1568,8 @@ pub(crate) fn build_model_plan_from_canonical_cfg(
 ///   every instance it evaluates. It is a runtime leaf for a backend that
 ///   cannot promise that —
 ///   [`CfgModel::from_hir_for_executable_backend`](crate::canonical_ir::CfgModel::from_hir_for_executable_backend)
-///   is where the two consumers part company — and `$simparam` with no source
-///   now reads the same `simparam_source_default` table on both routes. (W-F4)
+///   is where the two consumers part company. `$simparam` reads the shared
+///   simulator environment; explicit fallbacks follow runtime availability.
 /// * A **prologue-only definition** — a localparam or a declaration initializer
 ///   the body reads — took Verilog-AMS zero because the CFG had no definition of
 ///   it at all. The executable lowering now evaluates
@@ -2543,7 +2543,7 @@ endmodule
                 multiplicity: 1.0,
                 time: 0.0,
                 analyses: HashSet::new(),
-                simparams: HashMap::new(),
+                simparams: Default::default(),
                 ddt: 0.0,
                 ddt_scale: 0.0,
                 idt: 0.0,

@@ -470,6 +470,21 @@ impl<'a> SmallSignalVm<'a> {
             Instruction::PushTime => {
                 self.stack.push(Complex64::new(self.context.time, 0.0));
             }
+            Instruction::PushSimParamValue(parameter) => {
+                self.stack
+                    .push(Complex64::new(self.context.simparam(*parameter)?, 0.0));
+            }
+            Instruction::PushSimParamPresent(parameter) => {
+                self.stack.push(Complex64::new(
+                    f64::from(
+                        self.context
+                            .simulation_parameters
+                            .get_parameter(*parameter)
+                            .is_some(),
+                    ),
+                    0.0,
+                ));
+            }
             Instruction::PushMfactor => {
                 self.stack
                     .push(Complex64::new(self.context.multiplicity, 0.0));

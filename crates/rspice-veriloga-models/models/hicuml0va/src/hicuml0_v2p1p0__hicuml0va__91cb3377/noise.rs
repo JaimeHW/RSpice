@@ -174,11 +174,12 @@ impl Instance {
 		BK=BH;
 		}else{
 		let BI=BF> 600f64;
-		let BL=if BI{
-		BJ
+		let BL;
+		if BI{
+		BL=BJ;
 		}else{
-		BF
-		};
+		BL=BF;
+		}
 		BK=BL;
 		}
 		let BM=(1.3806226e-23f64* BK)/ 1.602176462e-19f64;
@@ -228,13 +229,14 @@ impl Instance {
 		let CV=parameters[45]* ((parameters[47]* ((parameters[46]/ CU).ln())).exp());
 		let CW=parameters[7]* ((parameters[97]* BQ).exp());
 		let CX=parameters[6]/ (((AM* BN)* (((parameters[84]* BQ).exp())- I)).exp());
-		let DA=if AY{
+		let DA;
+		if AY{
 		let CY=I+ (BO* (parameters[101]+ (parameters[102]* BO)));
-		CY
+		DA=CY;
 		}else{
 		let CZ=(parameters[98]* BQ).exp();
-		CZ
-		};
+		DA=CZ;
+		}
 		let DB=parameters[12]* DA;
 		let DC=(parameters[13]* DA)* ((staged[12]* BR).exp());
 		let DD=parameters[29]* ((parameters[93]* BQ).exp());
@@ -322,21 +324,23 @@ impl Instance {
 		let DY=DS* (((DU- AI)* ((DK/ DL).ln())).exp());
 		let DZ=(DW- D)* DN;
 		let EA=DZ< DO;
-		let ED=if EA{
+		let ED;
+		if EA{
 		let EB=DW- (DP* ((I+ (DZ.exp())).ln()));
-		EB
+		ED=EB;
 		}else{
-		D
-		};
+		ED=D;
+		}
 		let EC=(0.1f64* DV)+ (V* DP);
 		let EE=(DV+ ED)/ EC;
 		let EF=EE< DO;
-		let EH=if EF{
+		let EH;
+		if EF{
 		let EG=(-DV)+ (EC* (((I+ (EE.exp())).ln())- (((-(DV+ DW))/ EC).exp())));
-		EG
+		EH=EG;
 		}else{
-		ED
-		};
+		EH=ED;
+		}
 		let EI=(I- (EH/ DL)).ln();
 		let EJ=I- AI;
 		let EK=I- DU;
@@ -349,37 +353,40 @@ impl Instance {
 		ET=EU;
 		}else{
 		let EN=DS> A;
-		let EV=if EN{
+		let EV;
+		if EN{
 		let EO=DL* (I- ((-0.8754687373538999f64/ AI).exp()));
 		let EP=(EO- D)* DN;
 		let EQ=EO- (DP* ((EP+ (((EP* EP)+ DQ).sqrt()))* H));
 		let ER=I- AI;
 		let ES=DS* (((DL* (I- ((((I- (EQ/ DL)).ln())* ER).exp())))/ ER)+ (DM* (D- EQ)));
-		ES
+		EV=ES;
 		}else{
-		A
-		};
+		EV=A;
+		}
 		ET=EV;
 		}
 		let EW=DS> A;
-		let FT=if EW{
+		let FT;
+		if EW{
 		let EX=DL* (I- ((-0.8754687373538999f64/ AI).exp()));
 		let EY=(EX- D)* DN;
 		let EZ=((EY* EY)+ DQ).sqrt();
 		let FA=(EY+ EZ)* H;
 		let FB=FA/ EZ;
 		let FC=((DS* (((-AI)* ((I- ((EX- (DP* FA))/ DL)).ln())).exp()))* FB)+ ((DM* DS)* (I- FB));
-		FC
+		FT=FC;
 		}else{
-		A
-		};
-		let FL=if AS{
+		FT=A;
+		}
+		let FL;
+		if AS{
 		let FG=FD- D;
-		FG
+		FL=FG;
 		}else{
 		let FK=F- FH;
-		FK
-		};
+		FL=FK;
+		}
 		let FM=(FL* DN)- I;
 		let FN=(I+ ((FM+ (((FM* FM)+ DQ).sqrt()))/ 2f64))* DP;
 		let FR=(FN- FO)/ parameters[63];
@@ -397,31 +404,33 @@ impl Instance {
 		HK=I;
 		}
 		let FY=FX> A;
-		let GG=if FY{
+		let GG;
+		if FY{
 		let GB=FZ* (I- (((-(GA.ln()))/ X).exp()));
 		let GC=(GB- E)* DN;
 		let GD=GB- (DP* ((GC+ (((GC* GC)+ DQ).sqrt()))* H));
 		let GE=I- X;
 		let GF=FX* (((FZ* (I- ((((I- (GD/ FZ)).ln())* GE).exp())))/ GE)+ (GA* (E- GD)));
-		GF
+		GG=GF;
 		}else{
-		A
-		};
+		GG=A;
+		}
 		let GH=GG/ FX;
 		let GV;
 		let HE;
 		if AY{
 		let GJ=GI> A;
-		let GR=if GJ{
+		let GR;
+		if GJ{
 		let GM=GK* (I- (((-(GL.ln()))/ AC).exp()));
 		let GN=(GM- E)* DN;
 		let GO=GM- (DP* ((GN+ (((GN* GN)+ DQ).sqrt()))* H));
 		let GP=I- AC;
 		let GQ=GI* (((GK* (I- ((((I- (GO/ GK)).ln())* GP).exp())))/ GP)+ (GL* (E- GO)));
-		GQ
+		GR=GQ;
 		}else{
-		A
-		};
+		GR=A;
+		}
 		let GS=GR/ GI;
 		GV=GK;
 		HE=GS;
@@ -437,24 +446,26 @@ impl Instance {
 		let GW=(GV- E)/ GU;
 		let GY=GX* (I- ((staged[19]* ((I- ((GV- ((GU* (GW+ (((GW* GW)+ DQ).sqrt())))* H))/ GV)).ln())).exp()));
 		let GZ=(GY.abs())>= 1e-3f64;
-		let HD=if GZ{
+		let HD;
+		if GZ{
 		let HA=((GY.exp())- I)/ GY;
-		HA
+		HD=HA;
 		}else{
 		let HB=I+ (GY* H);
-		HB
-		};
+		HD=HB;
+		}
 		HC=HD;
 		}
 		let HH=(20f64* ((I+ ((HC* HE)/ HF))+ (HG/ parameters[5])))- I;
 		let HI=0.025f64* (I+ ((HH+ (((HH* HH)+ DQ).sqrt()))/ 2f64));
 		let HL=(HJ+ (parameters[55]* (HK- I)))+ (parameters[56]* ((I/ HK)- I));
-		let IE=if HM{
+		let IE;
+		if HM{
 		let HO=HN/ (I+ ((HL/ HJ)- I));
-		HO
+		IE=HO;
 		}else{
-		HN
-		};
+		IE=HN;
+		}
 		let HQ=E/ (parameters[3]* DP);
 		let HR=HQ> DO;
 		let HT;
@@ -500,33 +511,36 @@ impl Instance {
 		let IP=HI+ ((IN+ IO).sqrt());
 		let IR=HI+ ((IN+ IQ).sqrt());
 		let IS=((IQ- IO).abs())> 1e-8f64;
-		let IX=if IS{
+		let IX;
+		if IS{
 		let IT=(FS/ (I+ parameters[14]))/ HW;
 		let IU=(I- (IT* IP))/ (I+ (IT* (IR- IP)));
 		let IV=((((IU* IU)+ 0.01f64).sqrt())+ IU)/ 2.004987562112089f64;
-		IV
+		IX=IV;
 		}else{
-		A
-		};
+		IX=A;
+		}
 		let KL;
 		if IW{
-		let JA=if ID{
+		let JA;
+		if ID{
 		let IY=(((HW/ IE)+ (IC/ HP))+ (((HW/ IH)* IX)* IX))+ ((0.6666f64* (((HW* (HW/ FS))* (IG/ IH)).ln())).exp());
-		IY
+		JA=IY;
 		}else{
 		let IZ=((HW/ IE)+ (IC/ HP))+ (((HW/ IH)* IX)* IX);
-		IZ
-		};
+		JA=IZ;
+		}
 		let JB=HI+ ((IN+ JA).sqrt());
 		KL=JB;
 		}else{
 		let JD=-2f64* HI;
-		let JH=if JE{
-		A
+		let JH;
+		if JE{
+		JH=A;
 		}else{
 		let JF=-(((HW/ IE)+ (IC/ HP))+ (((HW/ IH)* IX)* IX));
-		JF
-		};
+		JH=JF;
+		}
 		let JG=JD* JD;
 		let JI=JH- (JG* JC);
 		let JJ=((((2f64* JD)* JG)/ 27f64)- ((JD* JH)* JC))+ (((((-HW)* HW)/ FS)* IG)/ IH);
@@ -545,35 +559,38 @@ impl Instance {
 		let JQ=JL.sqrt();
 		let JR=JP+ JQ;
 		let JS=JR> A;
-		let JZ=if JS{
+		let JZ;
+		if JS{
 		let JT=(JC* (JR.ln())).exp();
-		JT
+		JZ=JT;
 		}else{
 		let JU=-((JC* ((-JR).ln())).exp());
-		JU
-		};
+		JZ=JU;
+		}
 		let JV=JP- JQ;
 		let JW=JV> A;
-		let KA=if JW{
+		let KA;
+		if JW{
 		let JX=(JC* (JV.ln())).exp();
-		JX
+		KA=JX;
 		}else{
 		let JY=-((JC* ((-JV).ln())).exp());
-		JY
-		};
+		KA=JY;
+		}
 		let KB=(JZ+ KA)- (JD* JC);
 		KK=KB;
 		}else{
 		let KC=((-JJ)* H)* ((-27f64/ JK).sqrt());
 		let KD=KC* KC;
 		let KE=KC>= A;
-		let KH=if KE{
+		let KH;
+		if KE{
 		let KF=1.5707963267948966f64- (((KD/ (I- KD)).sqrt()).atan());
-		KF
+		KH=KF;
 		}else{
 		let KG=1.5707963267948966f64+ (((KD/ (I- KD)).sqrt()).atan());
-		KG
-		};
+		KH=KG;
+		}
 		let KI=((((-4f64* JI)* JC).sqrt())* ((JC* KH).cos()))- (JD* JC);
 		KK=KI;
 		}
@@ -582,19 +599,21 @@ impl Instance {
 		KL=KJ;
 		}
 		let KN=KL< KM;
-		let KO=if KN{
-		KM
+		let KO;
+		if KN{
+		KO=KM;
 		}else{
-		KL
-		};
+		KO=KL;
+		}
 		let KP=HW/ KO;
 		let KQ=IC/ KO;
 		let KR=KP< KM;
-		let KS=if KR{
-		KM
+		let KS;
+		if KR{
+		KS=KM;
 		}else{
-		KP
-		};
+		KS=KP;
+		}
 		let LJ;
 		if KT{
 		let KU=E/ (parameters[16]* DP);
@@ -722,6 +741,7 @@ impl Instance {
 		let NA=parameters[74]* (MZ.powf(parameters[75]));
 		let NC=NB* MZ;
 		let ND=NB* (MO.abs());
+		ctx.check_noise_evaluation()?;
 		if !(NE != 0.0) {
 			if !visitor.visit(0, GeneratedNoiseEvaluationRef { active: false, psd: 0.0, exponent: None, table_operands: &[] }) { return Ok(()); }
 		} else {

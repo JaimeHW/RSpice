@@ -426,7 +426,12 @@ fn kernel_region_metrics(
             CfgValueKind::Multiplicity => write!(out, "multiplicity"),
             CfgValueKind::Time => write!(out, "time"),
             CfgValueKind::Analysis(name) => write!(out, "analysis:{name}"),
-            CfgValueKind::SimParam { name, .. } => write!(out, "simparam:{name}"),
+            CfgValueKind::SimParamValue(parameter) => {
+                write!(out, "simparam-value:{}", parameter.name())
+            }
+            CfgValueKind::SimParamPresent(parameter) => {
+                write!(out, "simparam-present:{}", parameter.name())
+            }
             CfgValueKind::NodePotential(node) => write!(out, "node:{}", node_indices[node]),
             CfgValueKind::BranchFlow(branch) => {
                 write!(out, "branch:{}", branch_indices[branch])
@@ -1487,7 +1492,9 @@ impl ModelPlan {
                     CfgValueKind::Analysis(_) => {
                         initialization_inputs.insert(InitializationInput::Analysis);
                     }
-                    CfgValueKind::SimParam { name, .. } => {
+                    CfgValueKind::SimParamValue(parameter)
+                    | CfgValueKind::SimParamPresent(parameter) => {
+                        let name = smol_str::SmolStr::new(parameter.name());
                         initialization_inputs
                             .insert(InitializationInput::SimParamPresent(name.clone()));
                         initialization_inputs
@@ -3041,7 +3048,11 @@ impl ModelPlan {
         if !shared_stages.is_empty() {
             math_support.push("install_generated_stage_values".to_string());
         }
-        math_support.extend(lane_runtime_types(function));
+        math_support.extend(
+            lane_runtime_types(function)
+                .into_iter()
+                .filter(|name| body.contains(&format!("{name}("))),
+        );
         if uses_math_helper("rspice_limexp(") {
             math_support.push("rspice_limexp".to_string());
         }
@@ -5601,7 +5612,8 @@ fn bindings() -> EmitBindings {
         integer_result: "ctx.integer_result".into(),
         checked_value: "ctx.checked_derivative_value".into(),
         analysis: "ctx.analysis".into(),
-        simparam: "ctx.simparam_or".into(),
+        simparam_required: "ctx.simparam_required".into(),
+        simparam_present: "ctx.has_simparam".into(),
         cross: "rspice_cross!".into(),
         above: "rspice_above!".into(),
         timer: "rspice_timer!".into(),
@@ -5619,6 +5631,8 @@ fn uses_checked_operations(function: &CfgFunction) -> bool {
             } | CfgValueKind::IntegerArithmetic { .. }
                 | CfgValueKind::IntegerBitwise { .. }
                 | CfgValueKind::IntegerBitwiseNot { .. }
+                | CfgValueKind::SimParamValue(_)
+                | CfgValueKind::SimParamPresent(_)
         )
     })
 }
@@ -5796,7 +5810,7 @@ endmodule
                 multiplicity: 1.0,
                 time: 0.0,
                 analyses: HashSet::new(),
-                simparams: HashMap::new(),
+                simparams: Default::default(),
                 ddt: 0.0,
                 ddt_scale: 0.0,
                 idt: 0.0,

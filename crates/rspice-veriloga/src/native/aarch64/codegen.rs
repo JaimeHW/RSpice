@@ -1751,7 +1751,10 @@ impl FunctionCompiler {
                 filter_id,
                 rspice_laplace_derivative_native as *const () as usize,
             )?,
-            NativeOp::ZiState(_) | NativeOp::ZiStateDerivative(_) => {
+            NativeOp::ZiState(_)
+            | NativeOp::ZiStateDerivative(_)
+            | NativeOp::LoadSimParamValue(_)
+            | NativeOp::LoadSimParamPresent(_) => {
                 unreachable!("operand-array helpers are emitted before register preparation")
             }
             NativeOp::TimerState(timer_id) => self.emit_operand_context_helper(
@@ -2011,7 +2014,7 @@ impl FunctionCompiler {
                 "AArch64 operand-array helper requires saved entry arguments",
             ));
         }
-        if count == 0 || count != call.count || count > MAX_EXPRESSION_STACK_DEPTH {
+        if count != call.count || count > MAX_EXPRESSION_STACK_DEPTH {
             return Err(encoding_error("operand-array helper count mismatch"));
         }
         let frame_bytes = (count * WORD_BYTES).div_ceil(STACK_ALIGNMENT) * STACK_ALIGNMENT;

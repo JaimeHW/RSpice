@@ -272,9 +272,8 @@ pub struct CfgEvalInputs<S> {
     pub time: S,
     /// Analysis names that are active, lowercased.
     pub analyses: HashSet<SmolStr>,
-    /// `$simparam` overrides, lowercased. Missing names use the fallback the
-    /// source supplied.
-    pub simparams: HashMap<SmolStr, f64>,
+    /// Simulator values and availability, shared with executable backends.
+    pub simparams: rspice_veriloga_runtime::GeneratedSimulationParameters,
     /// What `ddt` returns. Zero for a static evaluation, which is what the
     /// primal goldens are; the transient companion form is the backend's job,
     /// not the interpreter's.
@@ -322,6 +321,7 @@ impl<S: Copy> CfgEvalSnapshot<S> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CfgEvalError {
+    SimulationParameter(rspice_veriloga_runtime::SimulationParameter),
     InvalidDerivative {
         reason: &'static str,
     },
@@ -370,6 +370,11 @@ pub enum CfgEvalError {
 impl std::fmt::Display for CfgEvalError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::SimulationParameter(parameter) => write!(
+                f,
+                "simulation parameter '{}' is unavailable and has no fallback",
+                parameter.name()
+            ),
             Self::InvalidDerivative { reason } => {
                 write!(f, "derivative evaluation failed: {reason}")
             }
@@ -795,10 +800,15 @@ impl<S: CfgScalar> Evaluator<'_, S> {
             CfgValueKind::Analysis(name) => {
                 S::from_f64(f64::from(u8::from(self.inputs.analyses.contains(&name))))
             }
-            CfgValueKind::SimParam { name, fallback } => match self.inputs.simparams.get(&name) {
-                Some(value) => S::from_f64(*value),
-                None => self.read(fallback)?,
-            },
+            CfgValueKind::SimParamValue(parameter) => S::from_f64(
+                self.inputs
+                    .simparams
+                    .get_parameter(parameter)
+                    .ok_or(CfgEvalError::SimulationParameter(parameter))?,
+            ),
+            CfgValueKind::SimParamPresent(parameter) => S::from_f64(f64::from(
+                self.inputs.simparams.get_parameter(parameter).is_some(),
+            )),
             CfgValueKind::NodePotential(node) => *self
                 .inputs
                 .node_potentials

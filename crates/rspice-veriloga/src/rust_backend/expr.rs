@@ -608,17 +608,40 @@ impl ExprEmitter<'_> {
     }
 
     fn lower_simparam_value(&mut self, args: &[ExprId]) -> Result<String, RustBackendError> {
-        match args {
-            [name] => Ok(format_f64(self.simparam_default(*name)?)),
-            [_, default] => {
-                let default = self.lower(*default)?;
-                Ok(default.value)
-            }
-            _ => Err(self.unsupported(format!(
+        if !(1..=2).contains(&args.len()) {
+            return Err(self.unsupported(format!(
                 "$simparam expects one or two arguments, found {}",
                 args.len()
-            ))),
+            )));
         }
+        let expression = self
+            .artifact
+            .mir
+            .expressions
+            .get(usize::from(args[0]))
+            .ok_or_else(|| self.internal("simparam name is outside MIR arena"))?;
+        let HirExprKind::StringLiteral { value: name } = &expression.kind else {
+            return Err(self.unsupported("$simparam requires a literal query name"));
+        };
+        let Some(parameter) = rspice_veriloga_runtime::SimulationParameter::from_name(name) else {
+            return match args.get(1) {
+                Some(fallback) => Ok(self.lower(*fallback)?.value),
+                None => {
+                    Err(self.unsupported(format!("simulation parameter '{name}' has no fallback")))
+                }
+            };
+        };
+        let name = parameter.name();
+        let required = format!("ctx.simparam_required({name:?})");
+        let Some(fallback) = args.get(1) else {
+            return Ok(required);
+        };
+        let fallback = self.lower_isolated_branch(*fallback)?;
+        Ok(format!(
+            "if ctx.has_simparam({name:?}) {{ {required} }} else {{ {} {} }}",
+            fallback.lines.join(" "),
+            fallback.value.value
+        ))
     }
 
     fn lower_analysis_value(
@@ -657,24 +680,6 @@ impl ExprEmitter<'_> {
         } else {
             Ok(format!("({})", predicates.join(" || ")))
         }
-    }
-
-    fn simparam_default(&self, name: ExprId) -> Result<f64, RustBackendError> {
-        let expression = self
-            .artifact
-            .mir
-            .expressions
-            .get(usize::from(name))
-            .ok_or_else(|| self.internal(format!("simparam name {name} is outside MIR arena")))?;
-        let HirExprKind::StringLiteral { value } = &expression.kind else {
-            return Ok(0.0);
-        };
-        Ok(match value.as_str() {
-            "gmin" => 1.0e-12,
-            "tnom" => 300.15,
-            "simulatorVersion" => 1.0,
-            _ => 0.0,
-        })
     }
 
     fn param_given_index(&self, args: &[ExprId]) -> Result<usize, RustBackendError> {
@@ -1049,8 +1054,9 @@ mod tests {
 
     #[test]
     fn mathematical_noise_values_preserve_zero_signs_and_domains() {
-        let mut source =
-            String::from("fn main() { for x in [-2.0_f64,2.0,-0.0,0.0] { let params=[x];\n");
+        let mut source = String::from(
+            "struct Context; impl Context { fn has_simparam(&self, name: &str) -> bool { matches!(name, \"tnom\"|\"pnjmaxi\") } fn simparam_required(&self, name: &str) -> f64 { match name { \"tnom\"=>27.0, \"pnjmaxi\"=>2.0, _=>panic!(\"missing query\") } } } fn main() { let ctx=Context; for x in [-2.0_f64,2.0,-0.0,0.0] { let params=[x];\n",
+        );
         for (index, expression) in [
             "atan2(0.0*x,-1.0)",
             "atan2(0.0/x,-1.0)",
@@ -1059,6 +1065,9 @@ mod tests {
             "atan2(x-(-0.0),-1.0)",
             "atan2(x>0.0 ? -0.0 : 0.0,-1.0)",
             "0.0/(x-x)",
+            "$simparam(\"tnom\",x)",
+            "$simparam(\"pnjmaxi\",1.0/(x-x))",
+            "$simparam(\"unavailable\",x)",
         ]
         .into_iter()
         .enumerate()
@@ -1082,7 +1091,10 @@ mod tests {
                 3 => "(0.0+x).atan2(-1.0)",
                 4 => "(x-(-0.0)).atan2(-1.0)",
                 5 => "(if x>0.0 {-0.0_f64} else {0.0_f64}).atan2(-1.0)",
-                _ => "0.0/(x-x)",
+                6 => "0.0/(x-x)",
+                7 => "27.0_f64",
+                8 => "2.0_f64",
+                _ => "x",
             };
             source.push_str(&format!(
                 "{{ {} let actual={}; let expected=4.0+({expected}); assert!((expected.is_nan() && actual.is_nan()) || expected.to_bits()==actual.to_bits(),\"case {index}, x={{x:?}}, expected {{expected:?}}, got {{actual:?}}\"); }}\n",

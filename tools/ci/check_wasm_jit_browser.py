@@ -18,10 +18,11 @@ import urllib.parse
 EXPECTED_STAMPS = 20000
 # An independent release contract: changing the compiler ABI also requires
 # reviewing the worker qualification expectations.
-# ABI 10 integer arithmetic, ABI 11 checked derivatives and ABI 12 product ratios
+# ABI 10 integer arithmetic, ABI 11 checked derivatives, ABI 12 product ratios
+# and ABI 13 simulator queries
 # are exercised by an independent secondary module against the actual worker.
-EXPECTED_WASM_JIT_ABI_VERSION = 12
-EXPECTED_ABI_CHECKS = 17
+EXPECTED_WASM_JIT_ABI_VERSION = 13
+EXPECTED_ABI_CHECKS = 19
 
 # The page runs on a real clock, so the runner cannot bound it with
 # --virtual-time-budget and read the DOM afterwards: a virtual clock reports a

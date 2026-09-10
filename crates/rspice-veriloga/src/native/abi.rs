@@ -43,6 +43,14 @@ pub(crate) fn operand_array_call(
         model: "native".into(),
         detail: detail.into(),
     };
+    if let NativeOp::LoadSimParamValue(parameter) | NativeOp::LoadSimParamPresent(parameter) = op {
+        return Ok(Some(OperandArrayCall {
+            count: 0,
+            descriptor: (parameter as usize) * 2
+                + usize::from(matches!(op, NativeOp::LoadSimParamPresent(_))),
+            helper: rspice_simparam_native,
+        }));
+    }
     let (layout, helper) = match op {
         NativeOp::ZiState(layout) => (
             layout,
@@ -69,6 +77,51 @@ pub(crate) fn operand_array_call(
         helper,
     }))
 }
+
+/// Query the simulator environment without evaluating a model fallback.
+///
+/// # Safety
+/// `ctx` and its simulation-parameter pointer must remain readable throughout
+/// the call. The zero-operand instruction never dereferences `operands`.
+unsafe extern "C" fn rspice_simparam_native(
+    _operands: *const f64,
+    ctx: *const EvalContext,
+    descriptor: usize,
+) -> f64 {
+    // SAFETY: live frames satisfy the native dispatch contract above.
+    let Some(context) = (unsafe { ctx.as_ref() }) else {
+        return 0.0;
+    };
+    let Some(parameter) = rspice_veriloga_runtime::SimulationParameter::ALL.get(descriptor >> 1)
+    else {
+        set_native_context_error(context, "invalid simulation parameter descriptor");
+        return 0.0;
+    };
+    // SAFETY: the owning VM keeps its parameter store alive during dispatch.
+    let Some(parameters) = (unsafe { context.simulation_parameters.as_ref() }) else {
+        set_native_context_error(context, "simulation parameter store is unavailable");
+        return 0.0;
+    };
+    let value = parameters.get_parameter(*parameter);
+    if descriptor & 1 != 0 {
+        return f64::from(value.is_some());
+    }
+    value.unwrap_or_else(|| {
+        set_native_context_error(
+            context,
+            format!(
+                "simulation parameter '{}' is unavailable and has no fallback",
+                parameter.name()
+            ),
+        );
+        0.0
+    })
+}
+
+#[cfg(test)]
+pub(crate) static DEFAULT_SIMULATION_PARAMETERS:
+    rspice_veriloga_runtime::GeneratedSimulationParameters =
+    rspice_veriloga_runtime::GeneratedSimulationParameters::new();
 
 fn integration_coefficients(ctx: &EvalContext) -> IntegrationCoefficients {
     IntegrationCoefficients {
@@ -415,6 +468,8 @@ pub struct EvalContext {
     /// Exclusive journal slot for this dispatch, or null for observations.
     /// The slot is lazy; numerical models never allocate task storage.
     pub analog_effects: *mut Option<Box<rspice_veriloga_runtime::AnalogEffectJournal>>,
+    /// Simulator-owned numeric queries, borrowed for the duration of dispatch.
+    pub simulation_parameters: *const rspice_veriloga_runtime::GeneratedSimulationParameters,
 }
 
 impl EvalContext {
@@ -484,6 +539,7 @@ impl EvalContext {
             prelude_slots: std::ptr::null_mut(),
             prelude_slots_len: 0,
             analog_effects: std::ptr::null_mut(),
+            simulation_parameters: &crate::native::abi::DEFAULT_SIMULATION_PARAMETERS,
         }
     }
 
@@ -2718,12 +2774,13 @@ mod tests {
         assert_eq!(offset_of!(EvalContext, prelude_slots), 488);
         assert_eq!(offset_of!(EvalContext, prelude_slots_len), 496);
         assert_eq!(offset_of!(EvalContext, analog_effects), 504);
+        assert_eq!(offset_of!(EvalContext, simulation_parameters), 512);
         assert_eq!(offset_of!(NativeRuntimeStatus, failed), 0);
         assert_eq!(
             NativeRuntimeStatus::failed_offset(),
             offset_of!(NativeRuntimeStatus, failed)
         );
-        assert_eq!(size_of::<EvalContext>(), 512);
+        assert_eq!(size_of::<EvalContext>(), 520);
         assert_eq!(align_of::<EvalContext>(), 8);
     }
 
@@ -3160,6 +3217,7 @@ mod tests {
             prelude_slots: std::ptr::null_mut(),
             prelude_slots_len: 0,
             analog_effects: std::ptr::null_mut(),
+            simulation_parameters: &crate::native::abi::DEFAULT_SIMULATION_PARAMETERS,
         };
 
         assert_eq!(

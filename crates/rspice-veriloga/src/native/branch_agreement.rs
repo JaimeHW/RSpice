@@ -117,6 +117,8 @@ fn is_executable_here(program: &NativeProgram) -> bool {
                 | NativeOp::LoadThermalVoltage
                 | NativeOp::LoadTime
                 | NativeOp::LoadMfactor
+                | NativeOp::LoadSimParamValue(_)
+                | NativeOp::LoadSimParamPresent(_)
                 | NativeOp::Analysis(_)
                 | NativeOp::Add
                 | NativeOp::Sub

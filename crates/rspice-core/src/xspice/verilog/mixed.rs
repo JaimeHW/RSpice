@@ -844,6 +844,7 @@ impl MixedSignalHost {
             canonical_ir,
             terminal_nodes,
             scheduler_limits,
+            Default::default(),
             control,
             &mut |device| {
                 if device.num_internal_nodes() != 0 || device.num_branch_unknowns() != 0 {
@@ -857,12 +858,14 @@ impl MixedSignalHost {
 
     /// Bind internal-node and branch-current indices before cross-domain
     /// probes are resolved. The owning solver allocates these unknowns.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn from_compiled_with_analog_setup(
         instance: &str,
         model: Arc<rspice_veriloga::CompiledModel>,
         canonical_ir: &rspice_veriloga::canonical_ir::CanonicalIrArtifact,
         terminal_nodes: &[usize],
         scheduler_limits: SchedulerLimits,
+        simulation_parameters: rspice_veriloga_runtime::GeneratedSimulationParameters,
         control: &dyn rspice_veriloga::PipelineControl,
         setup: &mut dyn FnMut(&mut VerilogADevice) -> Result<(), String>,
     ) -> Result<Self, MixedSignalError> {
@@ -879,11 +882,13 @@ impl MixedSignalHost {
         // is one more Verilog-A instance as far as the continuous half is
         // concerned, so it must not reach a different runtime than the analog
         // instance beside it would.
-        let analog = VerilogADevice::try_new_with_canonical_ir_and_control(
+        let analog = VerilogADevice::try_new_with_simulation_parameters_and_control(
             instance,
             model,
-            canonical_ir,
+            Some(canonical_ir),
             terminal_nodes,
+            &[],
+            simulation_parameters,
             control,
         );
         let mut analog = analog.map_err(|error| MixedSignalError::Compile {
@@ -1030,6 +1035,13 @@ impl MixedSignalHost {
     /// The deck's name for this instance.
     pub(crate) fn instance_name(&self) -> &str {
         &self.instance
+    }
+
+    pub(crate) fn set_simulation_parameters(
+        &mut self,
+        parameters: rspice_veriloga_runtime::GeneratedSimulationParameters,
+    ) {
+        self.analog.make_mut().set_simulation_parameters(parameters);
     }
 
     pub(crate) fn analog_device(&self) -> &VerilogADevice {

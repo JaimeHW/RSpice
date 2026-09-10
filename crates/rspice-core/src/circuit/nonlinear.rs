@@ -777,8 +777,10 @@ impl CircuitData {
         for dev in &mut self.ekv26s.devices {
             dev.set_eval_gmin(gmin);
         }
-        #[cfg(feature = "veriloga-builtins-base")]
+        #[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
         self.generated_simulation_parameters.set_gmin(gmin);
+        #[cfg(feature = "veriloga")]
+        self.sync_veriloga_simulation_parameters();
     }
 
     /// Return true when any JFET-family compact model exposes a stiff gate
@@ -1072,6 +1074,7 @@ impl CircuitData {
         #[cfg(feature = "veriloga")]
         {
             self.veriloga_devices = snapshot.veriloga_devices;
+            self.sync_veriloga_simulation_parameters();
         }
         #[cfg(feature = "veriloga-builtins-base")]
         {

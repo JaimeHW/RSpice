@@ -977,7 +977,7 @@ pub(super) fn lift_inputs(real: &CfgEvalInputs<f64>) -> CfgEvalInputs<DoubleDoub
         multiplicity: DoubleDouble::from_f64(real.multiplicity),
         time: DoubleDouble::from_f64(real.time),
         analyses: real.analyses.clone(),
-        simparams: real.simparams.clone(),
+        simparams: real.simparams,
         ddt: DoubleDouble::from_f64(real.ddt),
         ddt_scale: DoubleDouble::from_f64(real.ddt_scale),
         idt: DoubleDouble::from_f64(real.idt),

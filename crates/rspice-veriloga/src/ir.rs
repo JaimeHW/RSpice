@@ -1479,6 +1479,8 @@ impl DeviceIR {
                 | Node::Time
                 | Node::Temperature
                 | Node::Vt
+                | Node::SimParamValue(_)
+                | Node::SimParamPresent(_)
                 | Node::Mfactor
                 | Node::PortConnected(_)
                 | Node::Analysis(_) => false,
@@ -1724,6 +1726,8 @@ impl DeviceIR {
             | Node::ParamGiven(_)
             | Node::Temperature
             | Node::Vt
+            | Node::SimParamValue(_)
+            | Node::SimParamPresent(_)
             | Node::Mfactor
             | Node::PortConnected(_) => true,
             // No variable is instance-static here, so an element read is
@@ -2240,6 +2244,8 @@ pub mod autodiff {
             | Node::Time
             | Node::Temperature
             | Node::Vt
+            | Node::SimParamValue(_)
+            | Node::SimParamPresent(_)
             | Node::Mfactor
             | Node::PortConnected(_)
             | Node::Analysis(_) => 0,
@@ -3405,6 +3411,8 @@ pub mod autodiff {
             | Node::Time
             | Node::Temperature
             | Node::Vt
+            | Node::SimParamValue(_)
+            | Node::SimParamPresent(_)
             | Node::Mfactor
             | Node::PortConnected(_)
             | Node::LastCrossing { .. }
@@ -4268,6 +4276,8 @@ pub mod autodiff {
             | Node::Temperature
             | Node::Vt
             | Node::Time
+            | Node::SimParamValue(_)
+            | Node::SimParamPresent(_)
             | Node::Mfactor
             | Node::PortConnected(_) => constant!(0.0),
 

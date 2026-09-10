@@ -3399,13 +3399,13 @@ fn native_device_with_canonical_ir_executes_simparam_current_without_fallback() 
             "SIMPARAMGMIN1",
             "native_canonical_simparam_gmin",
             r#"$simparam("gmin")"#,
-            1.0e-12,
+            1.0e-12_f64,
         ),
         (
             "SIMPARAMTNOM1",
             "native_canonical_simparam_tnom",
             r#"$simparam("tnom")"#,
-            300.15,
+            27.0,
         ),
         (
             "SIMPARAMVERSION1",
@@ -3416,14 +3416,14 @@ fn native_device_with_canonical_ir_executes_simparam_current_without_fallback() 
         (
             "SIMPARAMUNKNOWN1",
             "native_canonical_simparam_unknown",
-            r#"$simparam("unknown")"#,
+            r#"$simparam("unknown", 0.0)"#,
             0.0,
         ),
         (
             "SIMPARAMFALLBACK1",
             "native_canonical_simparam_fallback",
             r#"$simparam("gmin", (V(p, n) * 0.25) + 7.0)"#,
-            (input * 0.25) + 7.0,
+            1.0e-12,
         ),
     ];
 

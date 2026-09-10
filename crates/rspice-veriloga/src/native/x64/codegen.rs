@@ -1295,7 +1295,10 @@ impl FunctionCompiler {
                         NativeOp::LaplaceStateDerivative(filter_id) => {
                             self.emit_laplace_derivative(filter_id)?
                         }
-                        NativeOp::ZiState(_) | NativeOp::ZiStateDerivative(_) => {
+                        NativeOp::ZiState(_)
+                        | NativeOp::ZiStateDerivative(_)
+                        | NativeOp::LoadSimParamValue(_)
+                        | NativeOp::LoadSimParamPresent(_) => {
                             unreachable!(
                                 "operand-array helpers are emitted before register preparation"
                             )
@@ -1607,7 +1610,7 @@ impl FunctionCompiler {
         call: &OperandArrayCall,
     ) -> JitResult<()> {
         let count = call.count;
-        if count == 0 || count != allocated.operands().len() || count > MAX_EXPRESSION_STACK_DEPTH {
+        if count != allocated.operands().len() || count > MAX_EXPRESSION_STACK_DEPTH {
             return Err(register_allocation_error(
                 "operand-array helper count mismatch".into(),
             ));
@@ -14146,6 +14149,7 @@ mod tests {
             prelude_slots: std::ptr::null_mut(),
             prelude_slots_len: 0,
             analog_effects: std::ptr::null_mut(),
+            simulation_parameters: &crate::native::abi::DEFAULT_SIMULATION_PARAMETERS,
         }
     }
 

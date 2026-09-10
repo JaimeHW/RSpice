@@ -64,6 +64,64 @@ endmodule
 "#;
 
 #[test]
+fn simparam_environment_reaches_analog_and_mixed_parameter_defaults() {
+    for mixed in [false, true] {
+        let model = write_model(
+            "parameter_environment",
+            &format!(
+                r#"module parameter_environment(out);
+inout out; electrical out;
+parameter real gain=$simparam("tnom")+50+1000*$simparam("pnjmaxi");
+{}
+analog V(out)<+gain+$simparam("tnom")+50;
+endmodule"#,
+                if mixed {
+                    "initial begin integer digital; digital=1; end"
+                } else {
+                    ""
+                }
+            ),
+        );
+        for junction_limit in [None, Some(0.003)] {
+            let mut netlist = Netlist::parse(&format!(
+                "* simulator-owned defaults\nX1 out parameter_environment\n.va \"{}\" parameter_environment\n.end\n",
+                deck_path(&model)
+            ))
+            .unwrap();
+            netlist.options.tnom = Some(-40.0);
+            netlist.options.device_pnjmaxi = junction_limit;
+            let engine = Engine::default();
+            if junction_limit.is_none() {
+                let error = engine.build_circuit(&netlist).unwrap_err();
+                assert!(
+                    error.to_string().contains("pnjmaxi"),
+                    "mixed={mixed}: {error}"
+                );
+                continue;
+            }
+            if !mixed {
+                let result = engine.run_dc_op(&netlist).unwrap();
+                assert!((node_voltage(&result, "out") - 23.0).abs() < 1e-10);
+            }
+            let result = engine.run_tran(&netlist, 1e-6, 1e-7).unwrap();
+            let output = result
+                .node_names
+                .iter()
+                .position(|name| name.eq_ignore_ascii_case("out"))
+                .unwrap_or_else(|| panic!("node out is absent from {:?}", result.node_names));
+            assert!(
+                result.voltages[output]
+                    .iter()
+                    .all(|value| (*value - 23.0).abs() < 1e-10),
+                "mixed={mixed}: {:?}",
+                result.voltages[output]
+            );
+        }
+        let _ = std::fs::remove_file(model);
+    }
+}
+
+#[test]
 fn model_defined_nodeset_selects_an_equilibrium_without_a_netlist_hint() {
     let model = write_model(
         "intrinsic_nodeset",

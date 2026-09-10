@@ -2224,13 +2224,19 @@ pub(crate) fn instantiate_builtin_scoped(
         branches.push(circuit.allocate_branch());
     }
 
-    let Some(kind) = builtins::instantiate_scoped(descriptor_name, &nodes, &branches, &resolved)
-        .map_err(|error| {
-            BuiltinInstantiationError(format!(
-                "Failed to instantiate generated Verilog-A instance '{}': {}",
-                instance_name, error
-            ))
-        })?
+    let Some(kind) = builtins::instantiate_scoped_with_simulation_parameters(
+        descriptor_name,
+        &nodes,
+        &branches,
+        &resolved,
+        &circuit.generated_simulation_parameters,
+    )
+    .map_err(|error| {
+        BuiltinInstantiationError(format!(
+            "Failed to instantiate generated Verilog-A instance '{}': {}",
+            instance_name, error
+        ))
+    })?
     else {
         return Ok(None);
     };
@@ -2745,6 +2751,13 @@ mod tests {
 
         let mut invalid_cases = Vec::new();
         invalid_cases.push(Vec::new());
+
+        // Version 8 predates runtime simulator queries and their selected
+        // fallbacks. Matching source and state shape cannot bridge that change.
+        let mut previous_simparam_semantics = baseline.clone();
+        previous_simparam_semantics[0].model_identity =
+            "53b042acb05222ed6c23bedc359fc1178ee680daf3a7ce9d64f38998fc719ecc".to_string();
+        invalid_cases.push(previous_simparam_semantics);
 
         let mut reordered = baseline.clone();
         reordered.swap(0, 1);

@@ -2374,7 +2374,7 @@ mod tests {
             "{registry}"
         );
         assert!(
-            registry.contains("::Instance::try_new_with_parameters(nodes, &device_params)?"),
+            registry.contains("::Instance::try_new_with_simulation_parameters(nodes, &device_params, simulation_parameters)?"),
             "{registry}"
         );
         assert!(
@@ -3347,7 +3347,9 @@ fn write_registry(
     out.push_str(
         "pub fn instantiate_scoped(model_name: &str, nodes: &[usize], branches: &[usize], params: &[crate::GeneratedParameterAssignment<'_>]) -> Result<Option<GeneratedBuiltinKind>, String> {\n",
     );
-    out.push_str("    let _ = (nodes, branches, params);\n");
+    out.push_str("    instantiate_scoped_with_simulation_parameters(model_name, nodes, branches, params, &crate::GeneratedSimulationParameters::default())\n}\n\n");
+    out.push_str("pub fn instantiate_scoped_with_simulation_parameters(model_name: &str, nodes: &[usize], branches: &[usize], params: &[crate::GeneratedParameterAssignment<'_>], simulation_parameters: &crate::GeneratedSimulationParameters) -> Result<Option<GeneratedBuiltinKind>, String> {\n");
+    out.push_str("    let _ = (nodes, branches, params, simulation_parameters);\n");
     if devices.is_empty() {
         out.push_str("    let _ = (model_name, nodes, branches, params);\n");
         out.push_str("    Ok(None)\n");
@@ -3384,7 +3386,7 @@ fn write_registry(
             out.push_str("            }\n");
             writeln!(
                 out,
-                "            let mut instance = Box::new({}::Instance::try_new_with_parameters(nodes, &device_params)?);",
+                "            let mut instance = Box::new({}::Instance::try_new_with_simulation_parameters(nodes, &device_params, simulation_parameters)?);",
                 device.folder_name
             )?;
             out.push_str("            instance.set_branch_indices(branches);\n");

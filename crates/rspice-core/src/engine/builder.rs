@@ -4723,10 +4723,28 @@ impl Engine {
                 "DEVICE.PNJMAXI must be a finite scalar greater than zero".into(),
             ));
         }
-        #[cfg(feature = "veriloga-builtins-base")]
-        circuit
-            .generated_simulation_parameters
-            .set_pnjmaxi(netlist.options.device_pnjmaxi);
+        #[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
+        {
+            let nominal_temperature = netlist.options.tnom.unwrap_or(27.0);
+            if !nominal_temperature.is_finite() || nominal_temperature <= -273.15 {
+                return Err(SimulationError::Circuit(
+                    "Verilog-A nominal temperature must be finite and above absolute zero".into(),
+                ));
+            }
+            circuit
+                .generated_simulation_parameters
+                .set_pnjmaxi(netlist.options.device_pnjmaxi);
+            circuit
+                .generated_simulation_parameters
+                .set_gmin(self.config.convergence_config.junction_gmin_target);
+            circuit
+                .generated_simulation_parameters
+                .try_set(
+                    rspice_veriloga_runtime::SimulationParameter::Tnom,
+                    Some(nominal_temperature),
+                )
+                .map_err(|error| SimulationError::Circuit(error.into()))?;
+        }
         circuit.global_shunt_conductance = self.nodal_shunt_conductance();
         circuit.b3soi_gmin_scale = if self.config.b3soi_gmin_scaling {
             1.0e-6
@@ -7561,12 +7579,13 @@ impl Engine {
                                     element.name, model.name
                                 )));
                             }
-                            let mut device = crate::device::veriloga::VerilogADevice::try_new_with_parameters_and_control(
+                            let mut device = crate::device::veriloga::VerilogADevice::try_new_with_simulation_parameters_and_control(
                                 element.name.clone(),
                                 std::sync::Arc::clone(model),
                                 entry.canonical_ir.as_deref(),
                                 &node_ids,
                                 &overrides,
+                                circuit.generated_simulation_parameters,
                                 &veriloga_cache::VerilogACompileControl { abort },
                             )
                             .map_err(|err| {
@@ -8895,13 +8914,23 @@ mod tests {
     use super::*;
     use crate::SimulationConfig;
 
-    #[cfg(feature = "veriloga-builtins-base")]
+    #[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
     #[test]
-    fn pnjmaxi_option_reaches_generated_model_simparams() {
+    fn simparam_environment_receives_nominal_temperature_and_junction_options() {
         for option in [None, Some(1e-6)] {
             let mut netlist = Netlist::parse("PNJMAXI context\nR1 out 0 1k\n.end\n").unwrap();
             netlist.options.device_pnjmaxi = option;
-            let mut circuit = Engine::default().build_circuit(&netlist).unwrap();
+            netlist.options.tnom = Some(-40.0);
+            let engine = Engine::default();
+            let mut circuit = engine.build_circuit(&netlist).unwrap();
+            assert_eq!(
+                circuit.generated_simulation_parameters.get("tnom"),
+                Some(-40.0)
+            );
+            assert_eq!(
+                circuit.generated_simulation_parameters.get("gmin"),
+                Some(engine.config.convergence_config.junction_gmin_target)
+            );
             circuit.generated_simulation_parameters.set_gmin(1e-9);
             assert_eq!(
                 circuit.generated_simulation_parameters.get("pnjmaxi"),

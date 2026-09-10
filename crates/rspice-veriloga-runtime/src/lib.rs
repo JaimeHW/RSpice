@@ -24,6 +24,9 @@ pub mod arithmetic;
 mod compatibility_catalog;
 pub mod integer;
 pub mod polynomial;
+mod simparam;
+
+pub use simparam::{GeneratedSimulationParameters, SimulationParameter};
 
 pub use analog_effects::{
     AnalogEffectError, AnalogEffectJournal, AnalogEffectLimits, AnalogTaskArgument,
@@ -1946,6 +1949,9 @@ pub enum GeneratedStampLane {
 /// A recoverable failure reported while evaluating generated device code.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GeneratedEvaluationError {
+    SimulationParameter {
+        name: &'static str,
+    },
     Derivative {
         reason: &'static str,
     },
@@ -1985,6 +1991,10 @@ pub enum GeneratedEvaluationError {
 impl std::fmt::Display for GeneratedEvaluationError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::SimulationParameter { name } => write!(
+                f,
+                "simulation parameter '{name}' is unavailable and has no fallback"
+            ),
             Self::Derivative { reason } => {
                 write!(
                     f,
@@ -2559,54 +2569,6 @@ impl GeneratedEvaluationMode {
     }
 }
 
-/// Simulator-owned parameters visible to generated Verilog-A `$simparam` calls.
-///
-/// `Option` distinguishes an explicitly configured zero from an unavailable
-/// parameter, in which case the model-provided fallback remains authoritative.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct GeneratedSimulationParameters {
-    gmin: Option<Value>,
-    pnjmaxi: Option<Value>,
-}
-
-impl GeneratedSimulationParameters {
-    #[inline]
-    pub const fn new() -> Self {
-        Self {
-            gmin: Some(DEFAULT_GMIN),
-            pnjmaxi: None,
-        }
-    }
-
-    #[inline]
-    pub fn set_gmin(&mut self, value: Value) {
-        self.gmin = value.is_finite().then_some(value.max(0.0));
-    }
-
-    #[inline]
-    pub fn set_pnjmaxi(&mut self, value: Option<Value>) {
-        self.pnjmaxi = value.filter(|value| value.is_finite() && *value >= 0.0);
-    }
-
-    #[inline]
-    pub fn get(&self, name: &str) -> Option<Value> {
-        if name.eq_ignore_ascii_case("gmin") {
-            self.gmin
-        } else if name.eq_ignore_ascii_case("pnjmaxi") {
-            self.pnjmaxi
-        } else {
-            None
-        }
-    }
-}
-
-impl Default for GeneratedSimulationParameters {
-    #[inline]
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl GeneratedAnalysisKind {
     #[inline]
     pub const fn code(self) -> u8 {
@@ -2891,6 +2853,17 @@ impl<'a> GeneratedEvalContext<'a> {
             self.evaluation_error
                 .set(Some(GeneratedEvaluationError::SmallSignal { reason }));
         }
+    }
+
+    #[inline]
+    pub fn simparam_required(&self, name: &'static str) -> Value {
+        self.simparams.get(name).unwrap_or_else(|| {
+            if self.evaluation_error.get().is_none() {
+                self.evaluation_error
+                    .set(Some(GeneratedEvaluationError::SimulationParameter { name }));
+            }
+            Value::NAN
+        })
     }
 
     #[inline]

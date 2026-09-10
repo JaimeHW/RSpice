@@ -766,9 +766,6 @@ impl<'a> ExprConverter<'a> {
             }
             "$simparam" => {
                 validate_arg_range(&func.name, func.args.len(), 1, Some(2))?;
-                // $simparam("name"[, default]) - simulator parameter query.
-                // The explicit default argument wins; otherwise return a
-                // sensible engine value for well-known names, else 0.
                 let name = match func.args.first() {
                     Some(Expression::StringLit(s)) => s.value.as_str(),
                     _ => {
@@ -778,16 +775,26 @@ impl<'a> ExprConverter<'a> {
                         .into());
                     }
                 };
-                if let Some(default) = func.args.get(1) {
-                    return self.convert(arena, default);
-                }
-                let value = match name {
-                    "gmin" => 1e-12,
-                    "tnom" => 300.15,
-                    "simulatorVersion" => 1.0,
-                    _ => 0.0,
+                let Some(parameter) = rspice_veriloga_runtime::SimulationParameter::from_name(name)
+                else {
+                    if let Some(fallback) = func.args.get(1) {
+                        return self.convert(arena, fallback);
+                    }
+                    return Err(
+                        CodeGenError::new(CodeGenErrorKind::InvalidExpression(format!(
+                            "unsupported simulation parameter '{name}' has no fallback"
+                        )))
+                        .into(),
+                    );
                 };
-                Ok(arena.push(Node::Const(value)))
+                let value = arena.push(Node::SimParamValue(parameter));
+                if let Some(fallback) = func.args.get(1) {
+                    let present = arena.push(Node::SimParamPresent(parameter));
+                    let fallback = self.convert(arena, fallback)?;
+                    Ok(arena.push(Node::Conditional(present, value, fallback)))
+                } else {
+                    Ok(value)
+                }
             }
             "$param_given" => {
                 validate_arg_range(&func.name, func.args.len(), 1, Some(1))?;

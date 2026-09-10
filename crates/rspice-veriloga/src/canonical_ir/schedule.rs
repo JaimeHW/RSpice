@@ -1822,7 +1822,8 @@ fn leaf_class(kind: &CfgValueKind, parameter_scopes: &[ParameterScope]) -> Inval
         // handful of times per model — and the failure they avoid is a
         // convergence bug that looks like a model problem.
         | CfgValueKind::Analysis(_)
-        | CfgValueKind::SimParam { .. } => InvalidationClass::Newton,
+        | CfgValueKind::SimParamValue(_)
+        | CfgValueKind::SimParamPresent(_) => InvalidationClass::Newton,
 
         CfgValueKind::Time | CfgValueKind::DdtScale | CfgValueKind::IdtScale => {
             InvalidationClass::Timestep

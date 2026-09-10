@@ -340,6 +340,8 @@ pub struct VmContext {
     pub time: f64,
     /// Temperature in Kelvin
     pub temperature: f64,
+    /// Simulator-owned values sampled by `$simparam` during evaluation.
+    pub simulation_parameters: rspice_veriloga_runtime::GeneratedSimulationParameters,
     /// State variable values (current timestep) - for ddt/idt
     pub state_values: Vec<f64>,
     /// State variable values (previous timestep) - for ddt/idt
@@ -460,6 +462,7 @@ impl Default for VmContext {
             analog_effects: None,
             record_task_effects: false,
             time: 0.0,
+            simulation_parameters: Default::default(),
             temperature: 300.15, // 27C default
             state_values: Vec::new(),
             state_values_prev: Vec::new(),
@@ -601,6 +604,7 @@ impl VmContext {
             analog_effects: None,
             record_task_effects: false,
             time: 0.0,
+            simulation_parameters: Default::default(),
             temperature: 300.15,
             state_values: Vec::new(),
             state_values_prev: Vec::new(),
@@ -653,6 +657,7 @@ impl VmContext {
             analog_effects: None,
             record_task_effects: false,
             time: 0.0,
+            simulation_parameters: Default::default(),
             temperature: 300.15,
             state_values: Vec::new(),
             state_values_prev: Vec::new(),
@@ -705,6 +710,7 @@ impl VmContext {
             analog_effects: None,
             record_task_effects: false,
             time: 0.0,
+            simulation_parameters: Default::default(),
             temperature: 300.15,
             state_values: vec![0.0; num_states],
             state_values_prev: vec![0.0; num_states],
@@ -1838,6 +1844,22 @@ impl VmContext {
     #[inline]
     pub fn port_connected(&self, terminal: usize) -> bool {
         self.port_connected.get(terminal).copied().unwrap_or(0) != 0
+    }
+
+    /// Read a required simulator parameter with an actionable missing-value error.
+    #[inline]
+    pub fn simparam(
+        &self,
+        parameter: rspice_veriloga_runtime::SimulationParameter,
+    ) -> Result<f64, super::VmError> {
+        self.simulation_parameters
+            .get_parameter(parameter)
+            .ok_or_else(|| {
+                super::VmError::InvalidRuntimeConfiguration(format!(
+                    "simulation parameter '{}' is unavailable and has no fallback",
+                    parameter.name()
+                ))
+            })
     }
 
     /// Get thermal voltage kT/q.

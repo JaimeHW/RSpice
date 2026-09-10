@@ -114,8 +114,10 @@ pub struct EmitBindings {
     pub timer_slots: HashMap<crate::canonical_ir::ExprId, usize>,
     /// Called as `analysis("dc")`.
     pub analysis: String,
-    /// Called as `simparam("gmin", fallback)`.
-    pub simparam: String,
+    /// Required query; called as `simparam_required("gmin")`.
+    pub simparam_required: String,
+    /// Availability query; called as `has_simparam("gmin")`.
+    pub simparam_present: String,
     /// Called as `limit(operator, proposed, candidate)`.
     pub limit: String,
     pub limit_slots: HashMap<crate::canonical_ir::ExprId, usize>,
@@ -160,7 +162,8 @@ impl Default for EmitBindings {
             timer: "timer".into(),
             timer_slots: HashMap::new(),
             analysis: "analysis".into(),
-            simparam: "simparam".into(),
+            simparam_required: "simparam_required".into(),
+            simparam_present: "has_simparam".into(),
             limit: "limit".into(),
             limit_slots: HashMap::new(),
             limit_previous: "limit_previous".into(),
@@ -1736,11 +1739,12 @@ impl Emitter<'_> {
             CfgValueKind::Multiplicity => bindings.multiplicity.clone(),
             CfgValueKind::Time => bindings.time.clone(),
             CfgValueKind::Analysis(name) => analysis_expression(&bindings.analysis, name),
-            CfgValueKind::SimParam { name, fallback } => format!(
-                "{}({name:?}, {})",
-                bindings.simparam,
-                self.numeric_operand(*fallback)
-            ),
+            CfgValueKind::SimParamValue(parameter) => {
+                format!("{}({:?})", bindings.simparam_required, parameter.name())
+            }
+            CfgValueKind::SimParamPresent(parameter) => {
+                format!("{}({:?})", bindings.simparam_present, parameter.name())
+            }
             CfgValueKind::NodePotential(node) => {
                 format!("{}[{}]", bindings.node_potentials, usize::from(*node))
             }

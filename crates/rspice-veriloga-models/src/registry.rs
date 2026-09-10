@@ -3197,7 +3197,11 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
 }
 
 pub fn instantiate_scoped(model_name: &str, nodes: &[usize], branches: &[usize], params: &[crate::GeneratedParameterAssignment<'_>]) -> Result<Option<GeneratedBuiltinKind>, String> {
-    let _ = (nodes, branches, params);
+    instantiate_scoped_with_simulation_parameters(model_name, nodes, branches, params, &crate::GeneratedSimulationParameters::default())
+}
+
+pub fn instantiate_scoped_with_simulation_parameters(model_name: &str, nodes: &[usize], branches: &[usize], params: &[crate::GeneratedParameterAssignment<'_>], simulation_parameters: &crate::GeneratedSimulationParameters) -> Result<Option<GeneratedBuiltinKind>, String> {
+    let _ = (nodes, branches, params, simulation_parameters);
     match model_name.to_ascii_uppercase().as_str() {
         #[cfg(feature = "veriloga-model-diode-cmc")]
         "DIODE_CMC" => {
@@ -3216,7 +3220,7 @@ pub fn instantiate_scoped(model_name: &str, nodes: &[usize], branches: &[usize],
                     device_params.push(*assignment);
                 }
             }
-            let mut instance = Box::new(diode_cmc__diode_cmc__cdfab304::Instance::try_new_with_parameters(nodes, &device_params)?);
+            let mut instance = Box::new(diode_cmc__diode_cmc__cdfab304::Instance::try_new_with_simulation_parameters(nodes, &device_params, simulation_parameters)?);
             instance.set_branch_indices(branches);
             if let Some(multiplicity) = multiplicity {
                 instance.set_multiplicity(multiplicity)?;
@@ -3240,7 +3244,7 @@ pub fn instantiate_scoped(model_name: &str, nodes: &[usize], branches: &[usize],
                     device_params.push(*assignment);
                 }
             }
-            let mut instance = Box::new(epfl_hemt__epfl_hemt_10a__671606cd::Instance::try_new_with_parameters(nodes, &device_params)?);
+            let mut instance = Box::new(epfl_hemt__epfl_hemt_10a__671606cd::Instance::try_new_with_simulation_parameters(nodes, &device_params, simulation_parameters)?);
             instance.set_branch_indices(branches);
             if let Some(multiplicity) = multiplicity {
                 instance.set_multiplicity(multiplicity)?;
@@ -3264,7 +3268,7 @@ pub fn instantiate_scoped(model_name: &str, nodes: &[usize], branches: &[usize],
                     device_params.push(*assignment);
                 }
             }
-            let mut instance = Box::new(juncap200__juncap200__94ba75b4::Instance::try_new_with_parameters(nodes, &device_params)?);
+            let mut instance = Box::new(juncap200__juncap200__94ba75b4::Instance::try_new_with_simulation_parameters(nodes, &device_params, simulation_parameters)?);
             instance.set_branch_indices(branches);
             if let Some(multiplicity) = multiplicity {
                 instance.set_multiplicity(multiplicity)?;
@@ -3288,7 +3292,7 @@ pub fn instantiate_scoped(model_name: &str, nodes: &[usize], branches: &[usize],
                     device_params.push(*assignment);
                 }
             }
-            let mut instance = Box::new(psp104t__psp104tva__0878692d::Instance::try_new_with_parameters(nodes, &device_params)?);
+            let mut instance = Box::new(psp104t__psp104tva__0878692d::Instance::try_new_with_simulation_parameters(nodes, &device_params, simulation_parameters)?);
             instance.set_branch_indices(branches);
             if let Some(multiplicity) = multiplicity {
                 instance.set_multiplicity(multiplicity)?;
@@ -3312,7 +3316,7 @@ pub fn instantiate_scoped(model_name: &str, nodes: &[usize], branches: &[usize],
                     device_params.push(*assignment);
                 }
             }
-            let mut instance = Box::new(psp104__psp104va__75652357::Instance::try_new_with_parameters(nodes, &device_params)?);
+            let mut instance = Box::new(psp104__psp104va__75652357::Instance::try_new_with_simulation_parameters(nodes, &device_params, simulation_parameters)?);
             instance.set_branch_indices(branches);
             if let Some(multiplicity) = multiplicity {
                 instance.set_multiplicity(multiplicity)?;
@@ -3336,7 +3340,7 @@ pub fn instantiate_scoped(model_name: &str, nodes: &[usize], branches: &[usize],
                     device_params.push(*assignment);
                 }
             }
-            let mut instance = Box::new(psp104_nqs__pspnqs104va__1d25ee14::Instance::try_new_with_parameters(nodes, &device_params)?);
+            let mut instance = Box::new(psp104_nqs__pspnqs104va__1d25ee14::Instance::try_new_with_simulation_parameters(nodes, &device_params, simulation_parameters)?);
             instance.set_branch_indices(branches);
             if let Some(multiplicity) = multiplicity {
                 instance.set_multiplicity(multiplicity)?;
@@ -3360,7 +3364,7 @@ pub fn instantiate_scoped(model_name: &str, nodes: &[usize], branches: &[usize],
                     device_params.push(*assignment);
                 }
             }
-            let mut instance = Box::new(angelov__angelov__98b92059::Instance::try_new_with_parameters(nodes, &device_params)?);
+            let mut instance = Box::new(angelov__angelov__98b92059::Instance::try_new_with_simulation_parameters(nodes, &device_params, simulation_parameters)?);
             instance.set_branch_indices(branches);
             if let Some(multiplicity) = multiplicity {
                 instance.set_multiplicity(multiplicity)?;
@@ -3384,7 +3388,7 @@ pub fn instantiate_scoped(model_name: &str, nodes: &[usize], branches: &[usize],
                     device_params.push(*assignment);
                 }
             }
-            let mut instance = Box::new(angelov_gan__angelov_gan__98687686::Instance::try_new_with_parameters(nodes, &device_params)?);
+            let mut instance = Box::new(angelov_gan__angelov_gan__98687686::Instance::try_new_with_simulation_parameters(nodes, &device_params, simulation_parameters)?);
             instance.set_branch_indices(branches);
             if let Some(multiplicity) = multiplicity {
                 instance.set_multiplicity(multiplicity)?;
@@ -3408,7 +3412,7 @@ pub fn instantiate_scoped(model_name: &str, nodes: &[usize], branches: &[usize],
                     device_params.push(*assignment);
                 }
             }
-            let mut instance = Box::new(asmesd__asmesd__fbe2f3a4::Instance::try_new_with_parameters(nodes, &device_params)?);
+            let mut instance = Box::new(asmesd__asmesd__fbe2f3a4::Instance::try_new_with_simulation_parameters(nodes, &device_params, simulation_parameters)?);
             instance.set_branch_indices(branches);
             if let Some(multiplicity) = multiplicity {
                 instance.set_multiplicity(multiplicity)?;
@@ -3432,7 +3436,7 @@ pub fn instantiate_scoped(model_name: &str, nodes: &[usize], branches: &[usize],
                     device_params.push(*assignment);
                 }
             }
-            let mut instance = Box::new(asmesd_dio__asmesd_dio__b913dc15::Instance::try_new_with_parameters(nodes, &device_params)?);
+            let mut instance = Box::new(asmesd_dio__asmesd_dio__b913dc15::Instance::try_new_with_simulation_parameters(nodes, &device_params, simulation_parameters)?);
             instance.set_branch_indices(branches);
             if let Some(multiplicity) = multiplicity {
                 instance.set_multiplicity(multiplicity)?;
@@ -3456,7 +3460,7 @@ pub fn instantiate_scoped(model_name: &str, nodes: &[usize], branches: &[usize],
                     device_params.push(*assignment);
                 }
             }
-            let mut instance = Box::new(asmhemt__asmhemt__9d86ed5b::Instance::try_new_with_parameters(nodes, &device_params)?);
+            let mut instance = Box::new(asmhemt__asmhemt__9d86ed5b::Instance::try_new_with_simulation_parameters(nodes, &device_params, simulation_parameters)?);
             instance.set_branch_indices(branches);
             if let Some(multiplicity) = multiplicity {
                 instance.set_multiplicity(multiplicity)?;
@@ -3480,7 +3484,7 @@ pub fn instantiate_scoped(model_name: &str, nodes: &[usize], branches: &[usize],
                     device_params.push(*assignment);
                 }
             }
-            let mut instance = Box::new(bjt505__bjt505_va__6ac090e2::Instance::try_new_with_parameters(nodes, &device_params)?);
+            let mut instance = Box::new(bjt505__bjt505_va__6ac090e2::Instance::try_new_with_simulation_parameters(nodes, &device_params, simulation_parameters)?);
             instance.set_branch_indices(branches);
             if let Some(multiplicity) = multiplicity {
                 instance.set_multiplicity(multiplicity)?;
@@ -3504,7 +3508,7 @@ pub fn instantiate_scoped(model_name: &str, nodes: &[usize], branches: &[usize],
                     device_params.push(*assignment);
                 }
             }
-            let mut instance = Box::new(bjt505t__bjt505t_va__48d754e7::Instance::try_new_with_parameters(nodes, &device_params)?);
+            let mut instance = Box::new(bjt505t__bjt505t_va__48d754e7::Instance::try_new_with_simulation_parameters(nodes, &device_params, simulation_parameters)?);
             instance.set_branch_indices(branches);
             if let Some(multiplicity) = multiplicity {
                 instance.set_multiplicity(multiplicity)?;
@@ -3528,7 +3532,7 @@ pub fn instantiate_scoped(model_name: &str, nodes: &[usize], branches: &[usize],
                     device_params.push(*assignment);
                 }
             }
-            let mut instance = Box::new(bjtd505__bjtd505_va__3cb9ae22::Instance::try_new_with_parameters(nodes, &device_params)?);
+            let mut instance = Box::new(bjtd505__bjtd505_va__3cb9ae22::Instance::try_new_with_simulation_parameters(nodes, &device_params, simulation_parameters)?);
             instance.set_branch_indices(branches);
             if let Some(multiplicity) = multiplicity {
                 instance.set_multiplicity(multiplicity)?;
@@ -3552,7 +3556,7 @@ pub fn instantiate_scoped(model_name: &str, nodes: &[usize], branches: &[usize],
                     device_params.push(*assignment);
                 }
             }
-            let mut instance = Box::new(bjtd505t__bjtd505t_va__06e24760::Instance::try_new_with_parameters(nodes, &device_params)?);
+            let mut instance = Box::new(bjtd505t__bjtd505t_va__06e24760::Instance::try_new_with_simulation_parameters(nodes, &device_params, simulation_parameters)?);
             instance.set_branch_indices(branches);
             if let Some(multiplicity) = multiplicity {
                 instance.set_multiplicity(multiplicity)?;
@@ -3576,7 +3580,7 @@ pub fn instantiate_scoped(model_name: &str, nodes: &[usize], branches: &[usize],
                     device_params.push(*assignment);
                 }
             }
-            let mut instance = Box::new(bsimbulk__bsimbulk__0f953aae::Instance::try_new_with_parameters(nodes, &device_params)?);
+            let mut instance = Box::new(bsimbulk__bsimbulk__0f953aae::Instance::try_new_with_simulation_parameters(nodes, &device_params, simulation_parameters)?);
             instance.set_branch_indices(branches);
             if let Some(multiplicity) = multiplicity {
                 instance.set_multiplicity(multiplicity)?;
@@ -3600,7 +3604,7 @@ pub fn instantiate_scoped(model_name: &str, nodes: &[usize], branches: &[usize],
                     device_params.push(*assignment);
                 }
             }
-            let mut instance = Box::new(bsimcmg__bsimcmg_va__f3a4082f::Instance::try_new_with_parameters(nodes, &device_params)?);
+            let mut instance = Box::new(bsimcmg__bsimcmg_va__f3a4082f::Instance::try_new_with_simulation_parameters(nodes, &device_params, simulation_parameters)?);
             instance.set_branch_indices(branches);
             if let Some(multiplicity) = multiplicity {
                 instance.set_multiplicity(multiplicity)?;
@@ -3624,7 +3628,7 @@ pub fn instantiate_scoped(model_name: &str, nodes: &[usize], branches: &[usize],
                     device_params.push(*assignment);
                 }
             }
-            let mut instance = Box::new(bsimimg__bsimimg__25eb6a31::Instance::try_new_with_parameters(nodes, &device_params)?);
+            let mut instance = Box::new(bsimimg__bsimimg__25eb6a31::Instance::try_new_with_simulation_parameters(nodes, &device_params, simulation_parameters)?);
             instance.set_branch_indices(branches);
             if let Some(multiplicity) = multiplicity {
                 instance.set_multiplicity(multiplicity)?;
@@ -3648,7 +3652,7 @@ pub fn instantiate_scoped(model_name: &str, nodes: &[usize], branches: &[usize],
                     device_params.push(*assignment);
                 }
             }
-            let mut instance = Box::new(bsimsoi__bsimsoi__18c250bc::Instance::try_new_with_parameters(nodes, &device_params)?);
+            let mut instance = Box::new(bsimsoi__bsimsoi__18c250bc::Instance::try_new_with_simulation_parameters(nodes, &device_params, simulation_parameters)?);
             instance.set_branch_indices(branches);
             if let Some(multiplicity) = multiplicity {
                 instance.set_multiplicity(multiplicity)?;
@@ -3672,7 +3676,7 @@ pub fn instantiate_scoped(model_name: &str, nodes: &[usize], branches: &[usize],
                     device_params.push(*assignment);
                 }
             }
-            let mut instance = Box::new(bsimsoi__bsimsoi__e2aff994::Instance::try_new_with_parameters(nodes, &device_params)?);
+            let mut instance = Box::new(bsimsoi__bsimsoi__e2aff994::Instance::try_new_with_simulation_parameters(nodes, &device_params, simulation_parameters)?);
             instance.set_branch_indices(branches);
             if let Some(multiplicity) = multiplicity {
                 instance.set_multiplicity(multiplicity)?;
@@ -3696,7 +3700,7 @@ pub fn instantiate_scoped(model_name: &str, nodes: &[usize], branches: &[usize],
                     device_params.push(*assignment);
                 }
             }
-            let mut instance = Box::new(bsimsoi__bsimsoi_va__3b1f6b5e::Instance::try_new_with_parameters(nodes, &device_params)?);
+            let mut instance = Box::new(bsimsoi__bsimsoi_va__3b1f6b5e::Instance::try_new_with_simulation_parameters(nodes, &device_params, simulation_parameters)?);
             instance.set_branch_indices(branches);
             if let Some(multiplicity) = multiplicity {
                 instance.set_multiplicity(multiplicity)?;
@@ -3720,7 +3724,7 @@ pub fn instantiate_scoped(model_name: &str, nodes: &[usize], branches: &[usize],
                     device_params.push(*assignment);
                 }
             }
-            let mut instance = Box::new(ekv3__ekv3_rf__958cd2b2::Instance::try_new_with_parameters(nodes, &device_params)?);
+            let mut instance = Box::new(ekv3__ekv3_rf__958cd2b2::Instance::try_new_with_simulation_parameters(nodes, &device_params, simulation_parameters)?);
             instance.set_branch_indices(branches);
             if let Some(multiplicity) = multiplicity {
                 instance.set_multiplicity(multiplicity)?;
@@ -3744,7 +3748,7 @@ pub fn instantiate_scoped(model_name: &str, nodes: &[usize], branches: &[usize],
                     device_params.push(*assignment);
                 }
             }
-            let mut instance = Box::new(ekv26_sdext_verilog_a__ekv_va__0f1ec77e::Instance::try_new_with_parameters(nodes, &device_params)?);
+            let mut instance = Box::new(ekv26_sdext_verilog_a__ekv_va__0f1ec77e::Instance::try_new_with_simulation_parameters(nodes, &device_params, simulation_parameters)?);
             instance.set_branch_indices(branches);
             if let Some(multiplicity) = multiplicity {
                 instance.set_multiplicity(multiplicity)?;
@@ -3768,7 +3772,7 @@ pub fn instantiate_scoped(model_name: &str, nodes: &[usize], branches: &[usize],
                     device_params.push(*assignment);
                 }
             }
-            let mut instance = Box::new(hicuml0_v2p1p0__hicuml0va__91cb3377::Instance::try_new_with_parameters(nodes, &device_params)?);
+            let mut instance = Box::new(hicuml0_v2p1p0__hicuml0va__91cb3377::Instance::try_new_with_simulation_parameters(nodes, &device_params, simulation_parameters)?);
             instance.set_branch_indices(branches);
             if let Some(multiplicity) = multiplicity {
                 instance.set_multiplicity(multiplicity)?;
@@ -3792,7 +3796,7 @@ pub fn instantiate_scoped(model_name: &str, nodes: &[usize], branches: &[usize],
                     device_params.push(*assignment);
                 }
             }
-            let mut instance = Box::new(hicuml2_v320__hicuml2va__25e676cf::Instance::try_new_with_parameters(nodes, &device_params)?);
+            let mut instance = Box::new(hicuml2_v320__hicuml2va__25e676cf::Instance::try_new_with_simulation_parameters(nodes, &device_params, simulation_parameters)?);
             instance.set_branch_indices(branches);
             if let Some(multiplicity) = multiplicity {
                 instance.set_multiplicity(multiplicity)?;
@@ -3816,7 +3820,7 @@ pub fn instantiate_scoped(model_name: &str, nodes: &[usize], branches: &[usize],
                     device_params.push(*assignment);
                 }
             }
-            let mut instance = Box::new(hisimhv_n4__hisimhv_n4_va__69344dcf::Instance::try_new_with_parameters(nodes, &device_params)?);
+            let mut instance = Box::new(hisimhv_n4__hisimhv_n4_va__69344dcf::Instance::try_new_with_simulation_parameters(nodes, &device_params, simulation_parameters)?);
             instance.set_branch_indices(branches);
             if let Some(multiplicity) = multiplicity {
                 instance.set_multiplicity(multiplicity)?;
@@ -3840,7 +3844,7 @@ pub fn instantiate_scoped(model_name: &str, nodes: &[usize], branches: &[usize],
                     device_params.push(*assignment);
                 }
             }
-            let mut instance = Box::new(hisimhv_n5__hisimhv_n5_va__89bf8539::Instance::try_new_with_parameters(nodes, &device_params)?);
+            let mut instance = Box::new(hisimhv_n5__hisimhv_n5_va__89bf8539::Instance::try_new_with_simulation_parameters(nodes, &device_params, simulation_parameters)?);
             instance.set_branch_indices(branches);
             if let Some(multiplicity) = multiplicity {
                 instance.set_multiplicity(multiplicity)?;
@@ -3864,7 +3868,7 @@ pub fn instantiate_scoped(model_name: &str, nodes: &[usize], branches: &[usize],
                     device_params.push(*assignment);
                 }
             }
-            let mut instance = Box::new(hisimhv__hisimhv_va__57d0ff0e::Instance::try_new_with_parameters(nodes, &device_params)?);
+            let mut instance = Box::new(hisimhv__hisimhv_va__57d0ff0e::Instance::try_new_with_simulation_parameters(nodes, &device_params, simulation_parameters)?);
             instance.set_branch_indices(branches);
             if let Some(multiplicity) = multiplicity {
                 instance.set_multiplicity(multiplicity)?;
@@ -3888,7 +3892,7 @@ pub fn instantiate_scoped(model_name: &str, nodes: &[usize], branches: &[usize],
                     device_params.push(*assignment);
                 }
             }
-            let mut instance = Box::new(hisimsoi__hisimsoi_va__5be18005::Instance::try_new_with_parameters(nodes, &device_params)?);
+            let mut instance = Box::new(hisimsoi__hisimsoi_va__5be18005::Instance::try_new_with_simulation_parameters(nodes, &device_params, simulation_parameters)?);
             instance.set_branch_indices(branches);
             if let Some(multiplicity) = multiplicity {
                 instance.set_multiplicity(multiplicity)?;
@@ -3912,7 +3916,7 @@ pub fn instantiate_scoped(model_name: &str, nodes: &[usize], branches: &[usize],
                     device_params.push(*assignment);
                 }
             }
-            let mut instance = Box::new(hisimsoi_n4__hisimsoi_va__242bc21d::Instance::try_new_with_parameters(nodes, &device_params)?);
+            let mut instance = Box::new(hisimsoi_n4__hisimsoi_va__242bc21d::Instance::try_new_with_simulation_parameters(nodes, &device_params, simulation_parameters)?);
             instance.set_branch_indices(branches);
             if let Some(multiplicity) = multiplicity {
                 instance.set_multiplicity(multiplicity)?;
@@ -3936,7 +3940,7 @@ pub fn instantiate_scoped(model_name: &str, nodes: &[usize], branches: &[usize],
                     device_params.push(*assignment);
                 }
             }
-            let mut instance = Box::new(hisimsoi_n5__hisimsoi_va__38074d06::Instance::try_new_with_parameters(nodes, &device_params)?);
+            let mut instance = Box::new(hisimsoi_n5__hisimsoi_va__38074d06::Instance::try_new_with_simulation_parameters(nodes, &device_params, simulation_parameters)?);
             instance.set_branch_indices(branches);
             if let Some(multiplicity) = multiplicity {
                 instance.set_multiplicity(multiplicity)?;
@@ -3960,7 +3964,7 @@ pub fn instantiate_scoped(model_name: &str, nodes: &[usize], branches: &[usize],
                     device_params.push(*assignment);
                 }
             }
-            let mut instance = Box::new(hisimsotb__hisimsotb_va__41200697::Instance::try_new_with_parameters(nodes, &device_params)?);
+            let mut instance = Box::new(hisimsotb__hisimsotb_va__41200697::Instance::try_new_with_simulation_parameters(nodes, &device_params, simulation_parameters)?);
             instance.set_branch_indices(branches);
             if let Some(multiplicity) = multiplicity {
                 instance.set_multiplicity(multiplicity)?;
@@ -3984,7 +3988,7 @@ pub fn instantiate_scoped(model_name: &str, nodes: &[usize], branches: &[usize],
                     device_params.push(*assignment);
                 }
             }
-            let mut instance = Box::new(l_utsoi_102__l_utsoi__832ce87d::Instance::try_new_with_parameters(nodes, &device_params)?);
+            let mut instance = Box::new(l_utsoi_102__l_utsoi__832ce87d::Instance::try_new_with_simulation_parameters(nodes, &device_params, simulation_parameters)?);
             instance.set_branch_indices(branches);
             if let Some(multiplicity) = multiplicity {
                 instance.set_multiplicity(multiplicity)?;
@@ -4008,7 +4012,7 @@ pub fn instantiate_scoped(model_name: &str, nodes: &[usize], branches: &[usize],
                     device_params.push(*assignment);
                 }
             }
-            let mut instance = Box::new(l_utsoi_102_nqs__l_utsoi__485e0ac9::Instance::try_new_with_parameters(nodes, &device_params)?);
+            let mut instance = Box::new(l_utsoi_102_nqs__l_utsoi__485e0ac9::Instance::try_new_with_simulation_parameters(nodes, &device_params, simulation_parameters)?);
             instance.set_branch_indices(branches);
             if let Some(multiplicity) = multiplicity {
                 instance.set_multiplicity(multiplicity)?;
@@ -4032,7 +4036,7 @@ pub fn instantiate_scoped(model_name: &str, nodes: &[usize], branches: &[usize],
                     device_params.push(*assignment);
                 }
             }
-            let mut instance = Box::new(mosvar__mosvar__0a88ed4a::Instance::try_new_with_parameters(nodes, &device_params)?);
+            let mut instance = Box::new(mosvar__mosvar__0a88ed4a::Instance::try_new_with_simulation_parameters(nodes, &device_params, simulation_parameters)?);
             instance.set_branch_indices(branches);
             if let Some(multiplicity) = multiplicity {
                 instance.set_multiplicity(multiplicity)?;
@@ -4056,7 +4060,7 @@ pub fn instantiate_scoped(model_name: &str, nodes: &[usize], branches: &[usize],
                     device_params.push(*assignment);
                 }
             }
-            let mut instance = Box::new(mvsg_cmc_4__mvsg_cmc__7d7f784b::Instance::try_new_with_parameters(nodes, &device_params)?);
+            let mut instance = Box::new(mvsg_cmc_4__mvsg_cmc__7d7f784b::Instance::try_new_with_simulation_parameters(nodes, &device_params, simulation_parameters)?);
             instance.set_branch_indices(branches);
             if let Some(multiplicity) = multiplicity {
                 instance.set_multiplicity(multiplicity)?;
@@ -4080,7 +4084,7 @@ pub fn instantiate_scoped(model_name: &str, nodes: &[usize], branches: &[usize],
                     device_params.push(*assignment);
                 }
             }
-            let mut instance = Box::new(r2_cmc__r2_cmc__bc71a915::Instance::try_new_with_parameters(nodes, &device_params)?);
+            let mut instance = Box::new(r2_cmc__r2_cmc__bc71a915::Instance::try_new_with_simulation_parameters(nodes, &device_params, simulation_parameters)?);
             instance.set_branch_indices(branches);
             if let Some(multiplicity) = multiplicity {
                 instance.set_multiplicity(multiplicity)?;
@@ -4104,7 +4108,7 @@ pub fn instantiate_scoped(model_name: &str, nodes: &[usize], branches: &[usize],
                     device_params.push(*assignment);
                 }
             }
-            let mut instance = Box::new(r2_et_cmc__r2_et_cmc__a8425039::Instance::try_new_with_parameters(nodes, &device_params)?);
+            let mut instance = Box::new(r2_et_cmc__r2_et_cmc__a8425039::Instance::try_new_with_simulation_parameters(nodes, &device_params, simulation_parameters)?);
             instance.set_branch_indices(branches);
             if let Some(multiplicity) = multiplicity {
                 instance.set_multiplicity(multiplicity)?;
@@ -4128,7 +4132,7 @@ pub fn instantiate_scoped(model_name: &str, nodes: &[usize], branches: &[usize],
                     device_params.push(*assignment);
                 }
             }
-            let mut instance = Box::new(r3_cmc__r3_cmc__2e3554ae::Instance::try_new_with_parameters(nodes, &device_params)?);
+            let mut instance = Box::new(r3_cmc__r3_cmc__2e3554ae::Instance::try_new_with_simulation_parameters(nodes, &device_params, simulation_parameters)?);
             instance.set_branch_indices(branches);
             if let Some(multiplicity) = multiplicity {
                 instance.set_multiplicity(multiplicity)?;
@@ -4152,7 +4156,7 @@ pub fn instantiate_scoped(model_name: &str, nodes: &[usize], branches: &[usize],
                     device_params.push(*assignment);
                 }
             }
-            let mut instance = Box::new(vbic_3t__vbic13__aa00e2e7::Instance::try_new_with_parameters(nodes, &device_params)?);
+            let mut instance = Box::new(vbic_3t__vbic13__aa00e2e7::Instance::try_new_with_simulation_parameters(nodes, &device_params, simulation_parameters)?);
             instance.set_branch_indices(branches);
             if let Some(multiplicity) = multiplicity {
                 instance.set_multiplicity(multiplicity)?;
@@ -4176,7 +4180,7 @@ pub fn instantiate_scoped(model_name: &str, nodes: &[usize], branches: &[usize],
                     device_params.push(*assignment);
                 }
             }
-            let mut instance = Box::new(vbic_3t_et__vbic13_3t_et__bd2f63d4::Instance::try_new_with_parameters(nodes, &device_params)?);
+            let mut instance = Box::new(vbic_3t_et__vbic13_3t_et__bd2f63d4::Instance::try_new_with_simulation_parameters(nodes, &device_params, simulation_parameters)?);
             instance.set_branch_indices(branches);
             if let Some(multiplicity) = multiplicity {
                 instance.set_multiplicity(multiplicity)?;
@@ -4200,7 +4204,7 @@ pub fn instantiate_scoped(model_name: &str, nodes: &[usize], branches: &[usize],
                     device_params.push(*assignment);
                 }
             }
-            let mut instance = Box::new(vbic_1p3__vbic13_4t__132cb4e0::Instance::try_new_with_parameters(nodes, &device_params)?);
+            let mut instance = Box::new(vbic_1p3__vbic13_4t__132cb4e0::Instance::try_new_with_simulation_parameters(nodes, &device_params, simulation_parameters)?);
             instance.set_branch_indices(branches);
             if let Some(multiplicity) = multiplicity {
                 instance.set_multiplicity(multiplicity)?;
@@ -4224,7 +4228,7 @@ pub fn instantiate_scoped(model_name: &str, nodes: &[usize], branches: &[usize],
                     device_params.push(*assignment);
                 }
             }
-            let mut instance = Box::new(vbic_4t_et_cf__vbic_4t_et_cf__3990c5a1::Instance::try_new_with_parameters(nodes, &device_params)?);
+            let mut instance = Box::new(vbic_4t_et_cf__vbic_4t_et_cf__3990c5a1::Instance::try_new_with_simulation_parameters(nodes, &device_params, simulation_parameters)?);
             instance.set_branch_indices(branches);
             if let Some(multiplicity) = multiplicity {
                 instance.set_multiplicity(multiplicity)?;

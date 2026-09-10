@@ -50,8 +50,8 @@ use wasmparser::{Encoding, ExternalKind, Imports, Operator, Parser, Payload, Typ
 
 /// Version of the linear-memory and helper-function contract understood by
 /// emitted modules and the browser worker.
-/// Version 12 adds the exact product-ratio helper opcode.
-pub const WASM_JIT_ABI_VERSION: u32 = 12;
+/// Version 13 adds simulation-parameter helper opcodes 470 and 471.
+pub const WASM_JIT_ABI_VERSION: u32 = 13;
 
 /// Version of the deterministic encoder. It participates in cache identity
 /// independently of the ABI because code layout may change without changing
@@ -112,7 +112,8 @@ pub const WASM_JIT_ABI_VERSION: u32 = 12;
 /// 25 to 26 preserves Hypot bytecode and stabilizes legacy math derivatives.
 /// 26 to 27 avoids raw squares/cubes in legacy quotient derivatives.
 /// 27 to 28 preserves finite legacy hypot curvature at extreme input gains.
-pub const WASM_JIT_EMITTER_VERSION: u32 = 28;
+/// 28 to 29 evaluates simulator queries and their selected fallbacks at runtime.
+pub const WASM_JIT_EMITTER_VERSION: u32 = 29;
 
 /// Hard ceiling for one qualified shipped model's generated module.
 pub const SHIPPED_MODEL_WASM_CODE_SIZE_BUDGET_BYTES: usize = 32 * 1024 * 1024;

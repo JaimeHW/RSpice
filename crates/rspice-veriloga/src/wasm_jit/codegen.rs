@@ -2217,6 +2217,12 @@ fn helper_descriptor(op: NativeOp) -> WasmJitResult<HelperDescriptor> {
             descriptor.opcode = 320 + integer_code(kind);
             descriptor.aux2 = value;
         }
+        NativeOp::LoadSimParamValue(parameter) => {
+            set_index(&mut descriptor, 470, parameter as usize)?
+        }
+        NativeOp::LoadSimParamPresent(parameter) => {
+            set_index(&mut descriptor, 471, parameter as usize)?
+        }
         NativeOp::TableLookup(index) => set_index(&mut descriptor, 400, index)?,
         NativeOp::TableDerivative(index) => set_index(&mut descriptor, 401, index)?,
         NativeOp::LimitState(index) => set_index(&mut descriptor, 410, index)?,
@@ -3668,11 +3674,12 @@ endmodule
     fn instantiate_value_module(
         engine: &Engine,
         bytes: &[u8],
-    ) -> (Store<()>, Memory, wasmi::Instance) {
+    ) -> (Store<TestHostState>, Memory, wasmi::Instance) {
         let module = Module::new(engine, bytes).expect("compile module in wasmi");
-        let mut store = Store::new(engine, ());
+        let mut store = Store::new(engine, TestHostState::default());
         let memory = Memory::new(&mut store, MemoryType::new(1, None))
             .expect("allocate imported primary memory");
+        store.data_mut().memory = Some(memory);
         let mut linker = Linker::new(engine);
         linker
             .define(WASM_JIT_IMPORT_MODULE, WASM_JIT_MEMORY_IMPORT, memory)
@@ -3681,7 +3688,8 @@ endmodule
             .func_wrap(
                 WASM_JIT_IMPORT_MODULE,
                 WASM_JIT_EVAL_HELPER_IMPORT,
-                |_: i32,
+                |mut caller: Caller<'_, TestHostState>,
+                 frame_offset: i32,
                  opcode: i32,
                  aux0: i32,
                  aux1: i32,
@@ -3692,15 +3700,32 @@ endmodule
                  operand3: f64,
                  operand4: f64|
                  -> f64 {
-                    crate::wasm_jit::runtime::evaluate_helper(
+                    let result = crate::wasm_jit::runtime::evaluate_helper_with_session(
                         opcode,
                         aux0,
                         aux1,
                         aux2,
                         [operand0, operand1, operand2, operand3, operand4],
                         &[],
-                    )
-                    .expect("pure value helper")
+                        caller.data_mut().session.as_mut(),
+                    );
+                    match result {
+                        Ok(value) => value,
+                        Err(_) => {
+                            let memory = caller.data().memory.expect("installed test memory");
+                            let offset = usize::try_from(frame_offset)
+                                .expect("nonnegative test frame")
+                                + FRAME_ERROR_STATUS_OFFSET as usize;
+                            memory
+                                .write(
+                                    &mut caller,
+                                    offset,
+                                    &WASM_JIT_STATUS_RUNTIME_ERROR.to_le_bytes(),
+                                )
+                                .expect("publish helper error");
+                            0.0
+                        }
+                    }
                 },
             )
             .expect("define trap helper import");
@@ -3713,7 +3738,7 @@ endmodule
 
     /// Write `parameters` into a fresh frame and run the module's sole entry.
     fn call_value_entry(
-        store: &mut Store<()>,
+        store: &mut Store<TestHostState>,
         memory: &Memory,
         instance: &wasmi::Instance,
         parameters: &[f64],
@@ -3755,7 +3780,7 @@ endmodule
     /// loop that ran past its iteration limit — is what this one exists to
     /// read.
     fn call_value_entry_status(
-        store: &mut Store<()>,
+        store: &mut Store<TestHostState>,
         memory: &Memory,
         instance: &wasmi::Instance,
         parameters: &[f64],
@@ -3997,6 +4022,77 @@ endmodule
             .validate_all(&bytes)
             .expect("branch-form module is valid WebAssembly");
         bytes
+    }
+
+    #[test]
+    fn simparam_queries_execute_in_independent_wasm_engine_with_guarded_errors() {
+        use crate::wasm_jit::runtime::WasmJitRuntimeSession;
+        use rspice_veriloga_runtime::SimulationParameter;
+        let engine = Engine::default();
+        for fallback in [false, true] {
+            let parameter = SimulationParameter::Imax;
+            let ops = if fallback {
+                vec![
+                    NativeOp::LoadSimParamPresent(parameter),
+                    NativeOp::LoadSimParamValue(parameter),
+                    NativeOp::Const(7.0),
+                    NativeOp::IfElse,
+                ]
+            } else {
+                vec![NativeOp::LoadSimParamValue(parameter)]
+            };
+            let bytes = branching_value_module(&program(ops, if fallback { 3 } else { 1 }));
+            let (mut store, memory, instance) = instantiate_value_module(&engine, &bytes);
+            for value in [None, Some(0.0), Some(5.0), None] {
+                let mut context = crate::vm::VmContext::new(0);
+                context
+                    .simulation_parameters
+                    .try_set(parameter, value)
+                    .unwrap();
+                store.data_mut().session = Some(WasmJitRuntimeSession::new(context));
+                let (status, actual) = call_value_entry_status(&mut store, &memory, &instance, &[]);
+                if let Some(expected) = value.or(fallback.then_some(7.0)) {
+                    assert_eq!(status, WASM_JIT_STATUS_OK);
+                    assert_eq!(actual, expected);
+                    assert!(
+                        store
+                            .data_mut()
+                            .session
+                            .as_mut()
+                            .unwrap()
+                            .take_error()
+                            .is_none()
+                    );
+                } else {
+                    assert_eq!(status, WASM_JIT_STATUS_RUNTIME_ERROR);
+                    assert!(
+                        store
+                            .data_mut()
+                            .session
+                            .as_mut()
+                            .unwrap()
+                            .take_error()
+                            .unwrap()
+                            .contains("imax")
+                    );
+                }
+            }
+        }
+        let source = program(
+            vec![
+                NativeOp::LoadSimParamPresent(SimulationParameter::Gmin),
+                NativeOp::LoadSimParamValue(SimulationParameter::Gmin),
+                NativeOp::Const(1.0),
+                NativeOp::Const(0.0),
+                NativeOp::Div,
+                NativeOp::IfElse,
+            ],
+            4,
+        );
+        let (mut store, memory, instance) =
+            instantiate_value_module(&engine, &branching_value_module(&source));
+        store.data_mut().session = Some(WasmJitRuntimeSession::new(crate::vm::VmContext::new(0)));
+        assert_eq!(call_value_entry(&mut store, &memory, &instance, &[]), 1e-12);
     }
 
     #[test]

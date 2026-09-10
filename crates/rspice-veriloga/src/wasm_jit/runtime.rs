@@ -230,6 +230,20 @@ fn evaluate_stateful_helper(
         .and_then(|value| usize::try_from(value).ok())
         .ok_or_else(|| session.fail("WASM JIT stateful helper has a negative slot index"))?;
     let instruction = match opcode {
+        470 | 471 => {
+            let parameter = rspice_veriloga_runtime::SimulationParameter::ALL
+                .get(index)
+                .copied()
+                .ok_or_else(|| session.fail("invalid simulation parameter descriptor"))?;
+            (
+                if opcode == 470 {
+                    Instruction::PushSimParamValue(parameter)
+                } else {
+                    Instruction::PushSimParamPresent(parameter)
+                },
+                0,
+            )
+        }
         400 => {
             require_slot(
                 session,
@@ -871,7 +885,7 @@ pub fn math2_v1(opcode: i32, left: f64, right: f64) -> f64 {
 
 #[cfg(any(test, target_arch = "wasm32"))]
 fn is_stateful_opcode(opcode: i32) -> bool {
-    matches!(opcode, 400..=429 | 432 | 440..=449 | 460..=462)
+    matches!(opcode, 400..=429 | 432 | 440..=449 | 460..=462 | 470..=471)
 }
 
 #[cfg(target_arch = "wasm32")]

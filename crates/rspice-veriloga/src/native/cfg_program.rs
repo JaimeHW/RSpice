@@ -818,16 +818,12 @@ impl Lowerer<'_> {
                 // no runtime reports: it is not active.
                 None => push(NativeOp::Const(0.0), &[]),
             },
-            // The runtime leaf, answered by its source fallback. The shipped
-            // MIR route folds `$simparam` to a table of compile-time values
-            // instead, which `NativeProgram`'s own documentation records as a
-            // known divergence between the two backends; this route matches
-            // the CFG reference interpreter given no simulator override, which
-            // is the semantics the CFG carries.
-            // An alias rather than an instruction: the two values are the same
-            // number, and the obvious identity instruction is not one — adding
-            // zero to negative zero gives positive zero.
-            CfgValueKind::SimParam { fallback, .. } => operand(*fallback),
+            CfgValueKind::SimParamValue(parameter) => {
+                push(NativeOp::LoadSimParamValue(*parameter), &[])
+            }
+            CfgValueKind::SimParamPresent(parameter) => {
+                push(NativeOp::LoadSimParamPresent(*parameter), &[])
+            }
             CfgValueKind::NodePotential(node) => {
                 let pos = self.voltage_node(Some(*node))?;
                 push(
@@ -1505,7 +1501,8 @@ fn speculation_hazard(kind: &CfgValueKind) -> Option<&'static str> {
         | CfgValueKind::Multiplicity
         | CfgValueKind::Time
         | CfgValueKind::Analysis(_)
-        | CfgValueKind::SimParam { .. }
+        | CfgValueKind::SimParamValue(_)
+        | CfgValueKind::SimParamPresent(_)
         | CfgValueKind::NodePotential(_)
         | CfgValueKind::BranchUnknownFlow(_)
         // A read of storage the entry has already filled, exactly like the
@@ -1619,7 +1616,7 @@ mod tests {
             multiplicity: 1.0,
             time: 0.0,
             analyses: std::collections::HashSet::new(),
-            simparams: std::collections::HashMap::new(),
+            simparams: Default::default(),
             ddt: 0.0,
             ddt_scale: 0.0,
             idt: 0.0,
