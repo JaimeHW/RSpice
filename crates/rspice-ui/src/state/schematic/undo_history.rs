@@ -93,6 +93,9 @@ pub fn next_undo_sequence() -> UndoSequence {
 /// View state (zoom, pan, selection) is intentionally excluded.
 #[derive(Debug, Clone)]
 pub struct SchematicSnapshot {
+    /// Only a pending operation owns cancellation state. It is removed before
+    /// a snapshot enters retained undo history.
+    pub(super) cancel_state: Option<OperationCancelState>,
     /// Project-portable editor and connectivity semantics.
     pub document_policy: super::document_policy::SchematicDocumentPolicy,
     /// Canvas spacing derived from the document grid pitch.
@@ -131,10 +134,17 @@ pub struct SchematicSnapshot {
     pub sheet_assignments: BTreeMap<u64, SheetId>,
 }
 
+#[derive(Debug, Clone)]
+pub(super) struct OperationCancelState {
+    selection: super::selection::Selection,
+    was_dirty: bool,
+}
+
 impl SchematicSnapshot {
     /// Create a snapshot from the current schematic state
     pub fn capture(state: &super::state::SchematicState) -> Self {
         Self {
+            cancel_state: None,
             document_policy: state.document_policy,
             grid_size: state.grid_size,
             components: state.components.clone(),
@@ -148,6 +158,28 @@ impl SchematicSnapshot {
             probes: state.probes.clone(),
             connections: state.connections.clone(),
             sheet_assignments: BTreeMap::new(),
+        }
+    }
+
+    pub(super) fn capture_operation(state: &super::state::SchematicState) -> Self {
+        let mut snapshot = Self::capture(state);
+        snapshot.cancel_state = Some(OperationCancelState {
+            selection: state.selection.clone(),
+            was_dirty: state.is_dirty,
+        });
+        snapshot
+    }
+
+    /// Restore the document baseline while keeping the current viewport.
+    pub(super) fn restore_cancelled(&self, state: &mut super::state::SchematicState) {
+        if !self.is_equal_state(state) {
+            self.apply(state);
+            state.reconcile_grid_pitch_runtime();
+            state.recalculate_runtime_state();
+        }
+        if let Some(cancel) = &self.cancel_state {
+            state.selection.clone_from(&cancel.selection);
+            state.is_dirty = cancel.was_dirty;
         }
     }
 
@@ -417,8 +449,10 @@ impl UndoHistory {
     }
 
     /// Cancel a pending operation without creating an undo entry
-    pub fn cancel_operation(&mut self) {
-        self.pending = None;
+    pub fn cancel_operation(&mut self) -> Option<SchematicSnapshot> {
+        let pending = self.pending.take()?;
+        self.adopt_restored_sheet_assignments(&pending.before_snapshot.sheet_assignments);
+        Some(pending.before_snapshot)
     }
 
     /// A step that has just been applied makes its own membership the live
@@ -430,7 +464,8 @@ impl UndoHistory {
 
     /// The only way an [`UndoEntry`] comes into existence, so no stack can
     /// hold one that arbitration would sort as oldest by accident.
-    fn stamped(before: SchematicSnapshot, description: String) -> UndoEntry {
+    fn stamped(mut before: SchematicSnapshot, description: String) -> UndoEntry {
+        before.cancel_state = None;
         let entry = UndoEntry {
             before: Arc::new(before),
             description,
@@ -598,6 +633,7 @@ mod tests {
     /// Snapshot containing `n` distinct resistors (and nothing else).
     fn snapshot_with(n: usize) -> SchematicSnapshot {
         SchematicSnapshot {
+            cancel_state: None,
             document_policy: super::super::document_policy::SchematicDocumentPolicy::default(),
             grid_size: 10,
             components: (0..n)
@@ -669,7 +705,7 @@ mod tests {
 
         history.begin_operation(snapshot_with(0), "Cancelled drag");
         assert!(history.has_pending_operation());
-        history.cancel_operation();
+        assert!(history.cancel_operation().is_some());
 
         assert!(!history.has_pending_operation());
         // A later end_operation has no pending transaction to commit.
@@ -1084,7 +1120,95 @@ mod tests {
 
         assert!(!state.has_pending_operation());
         assert!(!state.can_undo());
-        // The (uncommitted) edit itself remains; only the undo entry is dropped.
-        assert_eq!(state.components.len(), 1);
+        assert!(state.components.is_empty());
+    }
+
+    #[test]
+    fn cancelled_operation_restores_selection_dirty_state_and_redo_without_rewinding_caches() {
+        for was_dirty in [false, true] {
+            let mut state = SchematicState::default();
+            let resistor = state.add_component(ComponentType::Resistor, Point::new(10, 20));
+            state.with_undo("add capacitor", |state| {
+                state.add_component(ComponentType::Capacitor, Point::new(100, 20));
+            });
+            assert!(state.undo());
+            state.selection.select_only_component(resistor);
+            state.is_dirty = was_dirty;
+            let before = SchematicSnapshot::capture(&state);
+            let selection = state.selection.clone();
+            let content_version = state.content_version();
+            state.begin_operation("drag selection");
+            state.components[0].pos = Point::new(80, 90);
+            state.is_dirty = true;
+            state.bump_topology_version();
+            let dragged_topology = state.topology_version();
+            state.pan = (123.0, 0.0);
+
+            assert!(state.cancel_operation());
+            assert!(before.is_equal_state(&state));
+            assert_eq!(state.selection, selection);
+            assert_eq!(state.is_dirty, was_dirty);
+            assert_eq!(state.pan, (123.0, 0.0));
+            assert_eq!(state.content_version(), content_version);
+            assert_ne!(state.topology_version(), dragged_topology);
+            assert_eq!(state.redo_description(), Some("add capacitor"));
+            assert!(!state.can_undo());
+            let cancelled_topology = state.topology_version();
+            assert!(!state.cancel_operation());
+            assert_eq!(state.topology_version(), cancelled_topology);
+            assert!(state.redo());
+            assert_eq!(state.components.len(), 2);
+            assert_eq!(state.components[0].pos, Point::new(10, 20));
+        }
+    }
+
+    #[test]
+    fn cancelled_nested_operation_restores_the_outer_baseline() {
+        let mut state = SchematicState::default();
+        state.is_dirty = false;
+        state.begin_operation("outer gesture");
+        state.add_component(ComponentType::Resistor, Point::origin());
+        state.begin_operation("nested helper");
+        state.add_component(ComponentType::Capacitor, Point::new(50, 0));
+        assert!(state.cancel_operation());
+        assert!(state.components.is_empty());
+        assert!(!state.is_dirty);
+        assert!(!state.has_pending_operation());
+        assert!(!state.end_operation());
+        assert!(!state.can_undo());
+    }
+
+    #[test]
+    fn cancelled_no_op_preserves_selection_and_does_not_dirty_or_invalidate_the_document() {
+        let mut state = SchematicState::default();
+        let resistor = state.add_component(ComponentType::Resistor, Point::origin());
+        state.selection.select_only_component(resistor);
+        state.is_dirty = false;
+        let selection = state.selection.clone();
+        let topology = state.topology_version();
+        state.begin_operation("stationary drag");
+        assert!(state.cancel_operation());
+        assert_eq!(state.selection, selection);
+        assert!(!state.is_dirty);
+        assert_eq!(state.topology_version(), topology);
+        assert!(!state.can_undo());
+    }
+
+    #[test]
+    fn committed_history_does_not_retain_gesture_cancellation_state() {
+        let mut state = SchematicState::default();
+        state.with_undo("add component", |state| {
+            state.add_component(ComponentType::Resistor, Point::origin());
+        });
+        assert!(
+            state
+                .undo_history
+                .undo_stack
+                .back()
+                .unwrap()
+                .before
+                .cancel_state
+                .is_none()
+        );
     }
 }

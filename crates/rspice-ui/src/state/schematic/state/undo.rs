@@ -38,7 +38,7 @@ impl SchematicState {
             self.init_undo_history();
         }
 
-        let snapshot = super::super::undo_history::SchematicSnapshot::capture(self);
+        let snapshot = super::super::undo_history::SchematicSnapshot::capture_operation(self);
         self.undo_history.begin_operation(snapshot, description);
     }
 
@@ -65,12 +65,16 @@ impl SchematicState {
         self.content_version
     }
 
-    /// Cancel a pending operation without creating an undo entry
+    /// Restore a pending operation's baseline without creating an undo entry.
     ///
     /// Use this if an operation was started but then cancelled (e.g., user
     /// pressed Escape during drag).
-    pub fn cancel_operation(&mut self) {
-        self.undo_history.cancel_operation();
+    pub fn cancel_operation(&mut self) -> bool {
+        let Some(snapshot) = self.undo_history.cancel_operation() else {
+            return false;
+        };
+        snapshot.restore_cancelled(self);
+        true
     }
 
     /// Convenience method for simple undoable operations

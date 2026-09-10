@@ -637,6 +637,7 @@ impl SchematicState {
             .map(|record| record.snapshot.clone())
             .ok_or(ValidatedRevisionError::RevisionNotFound)?;
         let target = SchematicSnapshot {
+            cancel_state: None,
             document_policy: snapshot.document_policy,
             grid_size: snapshot.grid_size,
             components: snapshot.components,
