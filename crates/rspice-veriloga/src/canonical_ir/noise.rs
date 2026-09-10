@@ -3,8 +3,8 @@
 //! [`CanonicalNoiseSourcePlan::from_hir_and_mir`] records directly contributed
 //! static sources, their injection endpoints, magnitudes, and activation guards.
 //! This projection serves the source-wise noise API. Assigned process reuse and
-//! frequency-dependent routing require the grouped CFG noise plan, which reads
-//! the original HIR/MIR and preserves process identity and complex transfer gains.
+//! history- or frequency-dependent routing require the grouped CFG noise plan.
+//! It reads the original HIR/MIR and preserves process identity and complex gains.
 //! Original expressions remain intact; extraction only appends expressions for
 //! the static magnitudes and guards to the shared expression arena.
 
@@ -572,9 +572,9 @@ fn extract_expression(
             )
         }
         HirExprKind::Call { name, args } if uses_grouped_noise_transfer(name, args.len()) => {
-            // A frequency-dependent transfer cannot be folded into a static
-            // PSD. Keep the original expression for grouped noise lowering,
-            // exactly as when its noise process is read through an assignment.
+            // Keep history and frequency-dependent operators in the original
+            // expression for grouped noise lowering, exactly as when its noise
+            // process is read through an assignment.
             // Each backend still validates the retained operator and routing.
             Ok(())
         }
@@ -736,14 +736,18 @@ pub(super) fn contains_noise(hir: &HirModel, root: ExprId) -> bool {
     false
 }
 
-/// Linear frequency-dependent operators whose routing belongs to the grouped
-/// process plan. Both static projections must defer the same expressions.
+/// Operators whose state or frequency response belongs to the grouped process
+/// plan. Both static projections must defer the same expressions. Transition
+/// keeps its transient state even though its small-signal approximation is unity;
+/// limited slew additionally depends on whether the accepted filter is slewing.
 pub(super) fn uses_grouped_noise_transfer(name: &str, arity: usize) -> bool {
     matches!(
         (name, arity),
         ("ddt", 1)
             | ("idt", 1 | 2)
             | ("absdelay", 2 | 3)
+            | ("transition", 1..=4)
+            | ("slew", 2 | 3)
             | ("laplace_nd" | "laplace_np" | "laplace_zd" | "laplace_zp", 3)
             | ("zi_nd" | "zi_np" | "zi_zd" | "zi_zp", 4..=6)
     )

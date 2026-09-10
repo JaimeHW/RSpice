@@ -1688,7 +1688,7 @@ impl<'a> CfgLowerer<'a> {
             }
             HirExprKind::Call { name, args } if uses_grouped_noise_transfer(name, args.len()) => {
                 // Match the static HIR projection: grouped process lowering
-                // retains this operator and its frequency-dependent gain.
+                // retains this operator and its state or frequency response.
             }
             _ => self.unsupported_noise(span, "nonlinear or dynamic position"),
         }

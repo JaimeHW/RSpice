@@ -387,6 +387,81 @@ fn direct_integrated_and_delayed_noise_preserves_complex_transfer() {
 }
 
 #[test]
+fn direct_transition_and_limited_slew_noise_preserves_small_signal_gain() {
+    // VAMS-2023 4.5.8 uses unity transmission for transition at all
+    // frequencies. Section 4.5.9 gives a settled slew filter the same gain.
+    for arguments in ["", ",1.0e-3", ",1.0e-3,2.0e-3", ",1.0e-3,2.0e-3,3.0e-3"] {
+        assert_noise_transfer("transition", arguments, &[0.0, 1.0, 1.0e9], |_| {
+            Some((1.0, 0.0))
+        });
+    }
+    for arguments in [",1.0", ",2.0,-3.0"] {
+        assert_noise_transfer("slew", arguments, &[0.0, 1.0, 1.0e9], |_| Some((1.0, 0.0)));
+    }
+}
+
+#[test]
+fn routed_filter_noise_observes_accepted_history_without_committing() {
+    for (operator, arguments, expected_gain) in
+        [("transition", ",0.0,2.0,2.0", -1.0), ("slew", ",0.5", 0.0)]
+    {
+        for assigned in [false, true] {
+            let (assignment, input) = if assigned {
+                ("source=white_noise(3.0,\"n\");", "source")
+            } else {
+                ("", "white_noise(3.0,\"n\")")
+            };
+            let source = format!(
+                "module retained_filter_noise(p,n); inout p,n; electrical p,n; real source; analog begin {assignment} I(p,n)<+{operator}(V(p,n)+{input}{arguments}); end endmodule"
+            );
+            let case = format!("{operator} assigned={assigned}");
+            let report = VerilogACompiler::default()
+                .compile_runtime_with_qualifications(
+                    &source,
+                    None,
+                    rspice_veriloga::RuntimeQualificationOptions::NONE,
+                )
+                .unwrap_or_else(|error| panic!("{case}: {error}"));
+            let mut device = rspice_veriloga::device::VerilogADevice::try_new_with_canonical_ir(
+                "A1",
+                report.model,
+                &report.canonical_ir,
+                &[1, 0],
+            )
+            .unwrap_or_else(|error| panic!("{case}: {error}"));
+            device.try_set_analysis_type(2).unwrap();
+            device.set_time(0.0);
+            device.try_update_all_voltages(&[0.0]).unwrap();
+            assert_eq!(device.try_evaluate().unwrap()[0], 0.0, "{case}");
+            device.try_advance_state().unwrap();
+            device.set_time(1.0);
+            device.try_update_all_voltages(&[2.0]).unwrap();
+            let first = device.try_evaluate().unwrap()[0];
+            assert_eq!(first, if operator == "slew" { 0.5 } else { 0.0 }, "{case}");
+            device.try_advance_state().unwrap();
+            device.try_set_analysis_type(3).unwrap();
+            let accepted = device.checkpoint_state().unwrap().to_words();
+            for frequency in [0.0, 1.0, 1.0e9] {
+                let processes = device
+                    .try_noise_processes_at_frequency(&[2.0], frequency)
+                    .unwrap_or_else(|error| panic!("{case}: {error}"));
+                assert_eq!(processes.len(), 1, "{case}");
+                assert_eq!(processes[0].psd, 3.0, "{case}");
+                assert_eq!(processes[0].injections.len(), 1, "{case}");
+                let gain = processes[0].injections[0].gain;
+                assert_eq!(gain.re, expected_gain, "{case}");
+                assert_eq!(gain.im, 0.0, "{case}");
+                assert_eq!(
+                    device.checkpoint_state().unwrap().to_words(),
+                    accepted,
+                    "{case}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn direct_zi_noise_preserves_complex_transfer() {
     // H(z)=(1+tap*z^-1)/(1-0.5*z^-1), z=exp(j*omega*T).
     for (operator, arguments, tap) in [
