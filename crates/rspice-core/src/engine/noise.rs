@@ -711,6 +711,41 @@ impl Engine {
         Ok(parameter)
     }
 
+    /// The diode, Gummel-Poon and JFET laws use per-instance current with
+    /// a 1e-38 A logarithm floor. Keep KF*M in binary-normalized form until
+    /// frequency evaluation; KF*M^(1-AF) can overflow even at ordinary KF.
+    fn semiconductor_flicker_source(
+        mut source: NoiseSource,
+        multiplicity: Value,
+    ) -> Result<NoiseSource, SimulationError> {
+        for (name, value, positive) in [
+            ("KF", source.parameter, true),
+            ("AF", source.af, false),
+            ("EF", source.ef, false),
+            ("multiplicity", multiplicity, true),
+            ("current", source.current, false),
+        ] {
+            if !value.is_finite() || (positive && value <= 0.0) {
+                return Err(SimulationError::Circuit(format!(
+                    "Noise source '{}': {name} must be finite{}; got {value:e}",
+                    Self::noise_source_label(&source.identity),
+                    if positive { " and positive" } else { "" },
+                )));
+            }
+        }
+        let current = source.current.abs() / multiplicity;
+        if !current.is_finite() {
+            return Err(SimulationError::Circuit(format!(
+                "Noise source '{}': per-instance current is not representable",
+                Self::noise_source_label(&source.identity),
+            )));
+        }
+        source.current = current.max(1e-38);
+        (source.parameter, source.parameter_exponent) =
+            crate::numerics::product_binary_normalization(&[source.parameter, multiplicity], &[]);
+        Ok(source)
+    }
+
     /// Select the evaluation temperature for an elementary source. An
     /// authored absolute `TEMP` bypasses the analysis ambient; sources without
     /// one retain the public `temperature + temperature_offset` contract.
@@ -2677,8 +2712,7 @@ impl Engine {
         // node_anode is the junction side and the series resistance already
         // contributes thermal noise through the resistor walk above —
         // dionoise.c's source set exactly). Flicker follows dionoise.c:
-        // m·KF·|Id/m|^AF / f, with the multiplicity folded into the
-        // coefficient as KF·m^(1−AF) on the folded junction current.
+        // m·KF·max(|Id/m|, 1e-38)^AF / f.
         for diode in &circuit.diodes.devices {
             let vd = Self::noise_node_voltage(dc_solution, diode.node_anode)
                 - Self::noise_node_voltage(dc_solution, diode.node_cathode);
@@ -2692,34 +2726,22 @@ impl Engine {
                         )),
                 );
             }
-            if let Some((kf, af)) = diode.flicker_noise_coefficients()
-                && id != 0.0
-            {
-                let m = diode.multiplicity;
-                if !m.is_finite() || m <= 0.0 {
-                    return Err(SimulationError::Circuit(format!(
-                        "Noise source '{}:FN' has invalid multiplicity {m:e}",
-                        diode.name
-                    )));
-                }
-                let coefficient = Self::checked_positive_noise_parameter(
-                    &format!("{}:FN", diode.name),
-                    kf * m.powf(1.0 - af),
-                )?;
-                noise_sources.push(
+            if let Some((kf, af)) = diode.flicker_noise_coefficients() {
+                noise_sources.push(Self::semiconductor_flicker_source(
                     NoiseSource::flicker_with_frequency_exponent(
                         diode.name.clone(),
                         diode.node_anode,
                         diode.node_cathode,
-                        coefficient,
+                        kf,
                         af,
                         1.0,
-                        id.abs(),
+                        id,
                     )
                     .with_identity(
                         crate::analysis::NoiseSourceIdentity::mechanism(&diode.name, "FN"),
                     ),
-                );
+                    diode.multiplicity,
+                )?);
             }
         }
 
@@ -2838,23 +2860,21 @@ impl Engine {
                 );
             }
             if let Some((kf, af, ef)) = bjt.flicker_noise_coefficients() {
-                let (_, ib, _) = bjt.operating_point_currents();
-                if ib != 0.0 {
-                    noise_sources.push(
-                        NoiseSource::flicker_with_frequency_exponent(
-                            format!("{}:flicker", bjt.name),
-                            bjt.node_base,
-                            bjt.node_emitter,
-                            kf,
-                            af,
-                            ef,
-                            ib,
-                        )
-                        .with_identity(
-                            crate::analysis::NoiseSourceIdentity::mechanism(&bjt.name, "FN"),
-                        ),
-                    );
-                }
+                noise_sources.push(Self::semiconductor_flicker_source(
+                    NoiseSource::flicker_with_frequency_exponent(
+                        bjt.name.clone(),
+                        bjt.node_base,
+                        bjt.node_emitter,
+                        kf,
+                        af,
+                        ef,
+                        ib,
+                    )
+                    .with_identity(
+                        crate::analysis::NoiseSourceIdentity::mechanism(&bjt.name, "FN"),
+                    ),
+                    bjt.m,
+                )?);
             }
         }
 
@@ -2965,39 +2985,25 @@ impl Engine {
                 );
             }
 
-            // jfetnoi.c rides flicker on the per-finger channel current with
-            // an explicit multiplicity factor: m·KF·|cd|^AF / f. This model
-            // folds m into beta, so the per-finger current and the factor
-            // recombine into KF·m^(1−AF) on the folded current — exact at
-            // AF=1, which is why the bare coefficient never showed.
-            if let Some((kf, af, ef)) = jfet.flicker_noise_coefficients()
-                && ids != 0.0
-            {
-                let m = jfet.m;
-                if !m.is_finite() || m <= 0.0 {
-                    return Err(SimulationError::Circuit(format!(
-                        "Noise source '{}:FN' has invalid multiplicity {m:e}",
-                        jfet.name
-                    )));
-                }
-                let coefficient = Self::checked_positive_noise_parameter(
-                    &format!("{}:FN", jfet.name),
-                    kf * m.powf(1.0 - af),
-                )?;
-                noise_sources.push(
+            // jfetnoi.c uses the drain terminal current (channel minus gate-drain
+            // leakage), per instance, with an explicit M factor.
+            // EF retains the native frequency-exponent extension (default 1).
+            if let Some((kf, af, ef)) = jfet.flicker_noise_coefficients() {
+                noise_sources.push(Self::semiconductor_flicker_source(
                     NoiseSource::flicker_with_frequency_exponent(
                         jfet.name.clone(),
                         jfet.drain,
                         jfet.source,
-                        coefficient,
+                        kf,
                         af,
                         ef,
-                        ids,
+                        ids - igd,
                     )
                     .with_identity(
                         crate::analysis::NoiseSourceIdentity::mechanism(&jfet.name, "FN"),
                     ),
-                );
+                    jfet.m,
+                )?);
             }
         }
 
@@ -4460,9 +4466,9 @@ mod tests {
     }
 
     #[test]
-    fn zero_semiconductor_noise_respects_the_classic_mos_current_floor() {
+    fn zero_semiconductor_noise_respects_reference_flicker_current_floors() {
         let sources = collected_noise_sources_for_deck(
-            "Exact zero is inactive, not a numerical floor\n\
+            "Zero-bias white noise and reference flicker floors\n\
              VDIO ad 0 0\n\
              D1 ad 0 DM\n\
              VBC c 0 0\n\
@@ -4483,10 +4489,10 @@ mod tests {
         );
 
         for (device, mechanisms) in [
-            ("D1", &["ID", "FN"][..]),
-            ("Q1", &["IC", "IB", "FN"][..]),
+            ("D1", &["ID"][..]),
+            ("Q1", &["IC", "IB"][..]),
             ("M1", &["ID"][..]),
-            ("J1", &["ID", "IGS", "IGD", "FN"][..]),
+            ("J1", &["ID", "IGS", "IGD"][..]),
         ] {
             for mechanism_name in mechanisms {
                 assert!(
@@ -4494,6 +4500,11 @@ mod tests {
                     "exact-zero {device}:{mechanism_name} must be absent"
                 );
             }
+        }
+        for device in ["D1", "Q1", "J1"] {
+            let flicker = mechanism(&sources, device, "FN").unwrap();
+            let expected = 1e-53;
+            assert!((flicker.spectral_density(1000.0, 300.15) - expected).abs() < expected * 1e-12);
         }
         // The classic MOS current law includes the reference N_MINLOG
         // floor even at zero Id; it is not an exactly disabled source.

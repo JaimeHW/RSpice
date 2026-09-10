@@ -280,18 +280,15 @@ impl Jfet {
 
     /// Return the flicker-noise coefficients `(KF, AF, EF)`.
     ///
-    /// jfetnoi.c applies KF directly — `m·KF·|cd|^AF / f` — with no
-    /// geometry normalization; the caller folds the multiplicity.
+    /// jfetnoi.c uses `m·KF·max(|cd|, 1e-38)^AF / f` without geometry
+    /// normalization. The collector validates authored controls and applies M.
+    /// EF is the native frequency-law extension; KF=0 disables the source.
     pub fn flicker_noise_coefficients(&self) -> Option<(Value, Value, Value)> {
-        if self.params.kf <= 0.0 || !self.params.kf.is_finite() {
+        if self.params.kf == 0.0 {
             return None;
         }
 
-        Some((
-            self.params.kf,
-            self.params.af.max(1e-12),
-            self.params.ef.max(1e-12),
-        ))
+        Some((self.params.kf, self.params.af, self.params.ef))
     }
 
     /// Calculate gate junction currents and conductances.

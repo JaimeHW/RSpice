@@ -1243,25 +1243,13 @@ impl Bjt {
         {
             self.vbic_model_gmin = Some(v);
         }
-        if let Some(v) = params
-            .get("KF")
-            .copied()
-            .filter(|v| v.is_finite() && *v >= 0.0)
-        {
+        if let Some(&v) = params.get("KF") {
             self.kf = v;
         }
-        if let Some(v) = params
-            .get("AF")
-            .copied()
-            .filter(|v| v.is_finite() && *v > 0.0)
-        {
+        if let Some(&v) = params.get("AF") {
             self.af = v;
         }
-        if let Some(v) = params
-            .get("EF")
-            .copied()
-            .filter(|v| v.is_finite() && *v > 0.0)
-        {
+        if let Some(&v) = params.get("EF") {
             self.ef = v;
         }
         // Defaults 0/1/1 per vbicsetup.c. Model policy validates the domain:

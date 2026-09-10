@@ -422,6 +422,48 @@ mod wasm_tests {
     }
 
     #[wasm_bindgen_test]
+    fn semiconductor_flicker_controls_and_scale_in_wasm() {
+        let mut config = rspice_core::engine::SimulationConfig::default();
+        config.convergence_config.gmin_target = 0.0;
+        config.convergence_config.junction_gmin_target = 0.0;
+        let engine = rspice_core::Engine::new(config);
+        for (device, model) in [
+            ("D1 p 0 mm", "D"),
+            ("Q1 0 p 0 mm", "NPN"),
+            ("J1 p 0 0 mm", "NJF"),
+        ] {
+            for (kf, m, af, frequency, expected) in [
+                (1e-20, 1e-6, -1.0, 1e3, 1e9),
+                (1e308, 5.0, 0.0, 1e4, 5e304),
+                (
+                    f64::from_bits(1),
+                    1e-20,
+                    -10.0,
+                    1e20,
+                    f64::from_bits(1) * 1e300 * 1e40,
+                ),
+            ] {
+                let deck = rspice_core::Netlist::parse(&format!(
+                    "Semiconductor flicker\nVP p 0 0\n{device} M={m}\n.model mm {model}(KF={kf} AF={af})\n.options GMIN=0\n.end\n")).unwrap();
+                let result = engine
+                    .run_port_noise_correlation_with_abort(
+                        &deck,
+                        &["VP".into()],
+                        &[frequency],
+                        300.15,
+                        &rspice_core::abort_signal::NoAbort,
+                    )
+                    .unwrap();
+                let actual = result[0].current_correlation[0][0].re;
+                assert!(
+                    (actual - expected).abs() < expected * 2e-12,
+                    "{device}: {actual:e} vs {expected:e}"
+                );
+            }
+        }
+    }
+
+    #[wasm_bindgen_test]
     fn mos_flicker_binary_normalization_in_wasm() {
         for (kind, p) in [("NMOS", 1.0), ("PMOS", -1.0)] {
             for (kf, m, ef) in [(1e308, 5.0, 10), (f64::from_bits(1), 1e-20, -10)] {

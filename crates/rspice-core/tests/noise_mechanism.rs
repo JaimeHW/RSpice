@@ -558,3 +558,178 @@ fn mos_flicker_coefficients_outside_f64_range_preserve_in_band_noise() {
         }
     }
 }
+
+fn semiconductor_flicker_deck(family: &str, m: f64, kf: f64, af: f64, zero: bool) -> Netlist {
+    let (bias, device, model) = match family {
+        "D" => (0.1, format!("D1 p 0 mm M={m}"), "D(IS=1e-14"),
+        "Q" => (
+            0.1,
+            format!("VC c 0 {}\nQ1 c p 0 mm M={m}", if zero { 0 } else { 1 }),
+            "NPN(IS=1e-14 BF=100",
+        ),
+        "JR" => (
+            -0.1,
+            format!("VG g 0 0\nJ1 p g 0 mm M={m}"),
+            "NJF(VTO=-2 BETA=1m IS=1e-6",
+        ),
+        "J" => (
+            1.0,
+            format!("VG g 0 0\nJ1 p g 0 mm M={m}"),
+            "NJF(VTO=-2 BETA=1m",
+        ),
+        _ => unreachable!(),
+    };
+    Netlist::parse(&format!(
+        "Semiconductor flicker\nVP p 0 {}\n{device}\n.model mm {model} KF={kf} AF={af})\n.options GMIN=0\n.end\n",
+        if zero { 0.0 } else { bias },
+    )).unwrap()
+}
+
+#[test]
+fn semiconductor_flicker_preserves_signed_exponents_floor_and_multiplicity() {
+    use rspice_core::engine::SpiceDialect;
+    for dialect in [SpiceDialect::Ngspice, SpiceDialect::Xyce] {
+        let mut config = SimulationConfig::default().with_spice_dialect(dialect);
+        config.convergence_config.gmin_target = 0.0;
+        config.convergence_config.junction_gmin_target = 0.0;
+        let engine = Engine::new(config);
+        let frequencies = [1e3_f64, 1e4];
+        for family in ["D", "Q", "J", "JR"] {
+            for zero in [false, true] {
+                let dc = engine
+                    .run_dc_op(&semiconductor_flicker_deck(family, 1.0, 0.0, 1.0, zero))
+                    .unwrap();
+                let current = dc.branch_currents[dc
+                    .branch_names
+                    .iter()
+                    .position(|name| name.eq_ignore_ascii_case("VP"))
+                    .unwrap()]
+                .abs()
+                .max(1e-38);
+                let white = engine
+                    .run_port_noise_correlation(
+                        &semiconductor_flicker_deck(family, 1.0, 0.0, 1.0, zero),
+                        &["VP".into()],
+                        &frequencies,
+                        300.15,
+                    )
+                    .unwrap();
+                for af in [-1.0, 0.0, 0.5, 3.0] {
+                    for m in [1.0, 4.0, if family == "Q" { 1e-6 } else { 1e-200 }] {
+                        let deck = semiconductor_flicker_deck(family, m, 1e20, af, zero);
+                        let noise = engine
+                            .run_port_noise_correlation(&deck, &["VP".into()], &frequencies, 300.15)
+                            .unwrap_or_else(|error| {
+                                panic!("{dialect:?} {family} zero={zero} AF={af} M={m:e}: {error}")
+                            });
+                        for ((row, white), frequency) in noise.iter().zip(&white).zip(frequencies) {
+                            // dionoise.c, bjtnoise.c, jfetnoi.c: independent
+                            // copies contribute M times the one-copy spectrum.
+                            let expected = (white.current_correlation[0][0].re
+                                + 1e20 * current.powf(af) / frequency)
+                                * m;
+                            let actual = row.current_correlation[0][0].re;
+                            assert!(expected > 0.0 && expected.is_finite());
+                            assert!(
+                                (actual - expected).abs() <= expected * 2e-8,
+                                "{dialect:?} {family} zero={zero} AF={af} M={m:e} f={frequency}: {actual:e} vs {expected:e}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn semiconductor_flicker_rejects_invalid_active_controls() {
+    for family in ["D", "Q", "J"] {
+        for (name, value) in [
+            ("KF", -1.0),
+            ("KF", f64::INFINITY),
+            ("KF", f64::NAN),
+            ("AF", f64::INFINITY),
+            ("AF", f64::NAN),
+        ] {
+            let mut deck = semiconductor_flicker_deck(family, 1.0, 1e-12, 1.0, false);
+            deck.models[0]
+                .params
+                .iter_mut()
+                .find(|(key, _)| key == name)
+                .unwrap()
+                .1 = value;
+            let error = Engine::default()
+                .run_port_noise_correlation(&deck, &["VP".into()], &[1e3], 300.15)
+                .expect_err("invalid authored controls must not disappear");
+            assert!(
+                error.to_string().contains(name),
+                "{family} {name}={value}: {error}"
+            );
+        }
+        // Disabled flicker does not consume AF, even if it is non-finite.
+        let mut deck = semiconductor_flicker_deck(family, 1.0, 0.0, 1.0, false);
+        deck.models[0]
+            .params
+            .iter_mut()
+            .find(|(key, _)| key == "AF")
+            .unwrap()
+            .1 = f64::NAN;
+        Engine::default()
+            .run_port_noise_correlation(&deck, &["VP".into()], &[1e3], 300.15)
+            .unwrap();
+    }
+}
+
+#[test]
+fn semiconductor_flicker_retains_coefficients_outside_f64_range() {
+    let mut config = SimulationConfig::default();
+    config.convergence_config.gmin_target = 0.0;
+    config.convergence_config.junction_gmin_target = 0.0;
+    let engine = Engine::new(config);
+    for family in ["D", "Q", "J"] {
+        for (kf, m, af, frequency, expected) in [
+            (1e308, 5.0, 0.0, 1e4, 5e304),
+            (
+                f64::from_bits(1),
+                1e-20,
+                -10.0,
+                1e20,
+                f64::from_bits(1) * 1e300 * 1e40,
+            ),
+        ] {
+            let deck = semiconductor_flicker_deck(family, m, kf, af, true);
+            let noise = engine
+                .run_port_noise_correlation(&deck, &["VP".into()], &[frequency], 300.15)
+                .unwrap();
+            let actual = noise[0].current_correlation[0][0].re;
+            assert!(
+                (actual - expected).abs() < expected * 2e-12,
+                "{family}: {actual:e} vs {expected:e}"
+            );
+        }
+    }
+}
+
+#[test]
+fn semiconductor_flicker_frequency_extension_preserves_signed_ef() {
+    let mut config = SimulationConfig::default();
+    config.convergence_config.gmin_target = 0.0;
+    config.convergence_config.junction_gmin_target = 0.0;
+    let engine = Engine::new(config);
+    for family in ["Q", "J"] {
+        for ef in [-2.0, 0.0, 1.5, f64::NAN, f64::INFINITY] {
+            let mut deck = semiconductor_flicker_deck(family, 4.0, 1e-12, 0.0, true);
+            deck.models[0].params.push(("EF".into(), ef));
+            let noise = engine.run_port_noise_correlation(&deck, &["VP".into()], &[1e3], 300.15);
+            if ef.is_finite() {
+                let actual = noise.unwrap()[0].current_correlation[0][0].re;
+                let expected = 4e-12 / 1e3_f64.powf(ef);
+                assert!((actual - expected).abs() < expected * 2e-13);
+            } else {
+                let error = noise.expect_err("invalid EF must not default");
+                assert!(error.to_string().contains("EF"), "{error}");
+            }
+        }
+    }
+}

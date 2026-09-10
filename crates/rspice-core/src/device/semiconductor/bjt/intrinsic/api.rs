@@ -36,10 +36,11 @@ impl Bjt {
         (self.ic.abs(), self.ib.abs(), 0.0)
     }
 
-    /// Return flicker-noise coefficients, if enabled by the model card.
+    /// Return authored flicker controls unless KF=0 disables the source.
+    /// The collector validates them; EF is the native frequency-law extension.
     pub fn flicker_noise_coefficients(&self) -> Option<(Value, Value, Value)> {
-        if self.kf > 0.0 && self.kf.is_finite() {
-            Some((self.kf, self.af.max(1e-12), self.ef.max(1e-12)))
+        if self.kf != 0.0 {
+            Some((self.kf, self.af, self.ef))
         } else {
             None
         }

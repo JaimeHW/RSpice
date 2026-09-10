@@ -275,7 +275,7 @@ impl Jfet {
         terms: XyceJfet1TemperatureTerms,
     ) -> (Value, Value) {
         let gmin = if self.junction_gmin.is_finite() {
-            self.junction_gmin.max(0.0)
+            self.junction_gmin.max(0.0) * self.m
         } else {
             0.0
         };
@@ -298,7 +298,7 @@ impl Jfet {
     /// - explicit `+ gmin` small-signal conductance floor
     #[inline]
     pub(super) fn junction_diode_terms(&self, v_ak: Value, temp: Value) -> (Value, Value) {
-        const JFET_GMIN: Value = 1e-12;
+        let gmin = self.junction_gmin * self.m;
         let temp_k = if temp.is_finite() && temp > 0.0 {
             temp
         } else {
@@ -312,22 +312,22 @@ impl Jfet {
             // arg = (3*vt/(v*e))^3
             let mut arg = 3.0 * nvt / (v_ak * std::f64::consts::E);
             arg = arg * arg * arg;
-            let i = -isat * (1.0 + arg) + JFET_GMIN * v_ak;
-            let g = isat * 3.0 * arg / v_ak + JFET_GMIN;
+            let i = -isat * (1.0 + arg) + gmin * v_ak;
+            let g = isat * 3.0 * arg / v_ak + gmin;
             if i.is_finite() && g.is_finite() {
-                (i, g.max(JFET_GMIN))
+                (i, g.max(gmin))
             } else {
-                (JFET_GMIN * v_ak, JFET_GMIN)
+                (gmin * v_ak, gmin)
             }
         } else {
             // Clamp exponent for robustness outside pnjlim/fetlim regimes.
             let exp_term = (v_ak / nvt).clamp(-80.0, 80.0).exp();
-            let i = isat * (exp_term - 1.0) + JFET_GMIN * v_ak;
-            let g = isat * exp_term / nvt + JFET_GMIN;
+            let i = isat * (exp_term - 1.0) + gmin * v_ak;
+            let g = isat * exp_term / nvt + gmin;
             if i.is_finite() && g.is_finite() {
-                (i, g.max(JFET_GMIN))
+                (i, g.max(gmin))
             } else {
-                (JFET_GMIN * v_ak, JFET_GMIN)
+                (gmin * v_ak, gmin)
             }
         }
     }
@@ -1703,6 +1703,31 @@ mod xyce_jfet1_tests {
             assert_close(p_charge.cgd, p_expected.1, 5.0e-13, "PJF Cgd");
             assert!(n_charge.qgs.is_finite() && n_charge.qgd.is_finite());
             assert!(p_charge.qgs.is_finite() && p_charge.qgd.is_finite());
+        }
+    }
+
+    #[test]
+    fn classic_jfet_gate_gmin_uses_configured_value_and_multiplicity() {
+        for xyce in [false, true] {
+            for m in [1e-200, 0.25, 4.0] {
+                let mut device = Jfet::njf("j", 1, 2, 3);
+                if xyce {
+                    device = device.enable_xyce_jfet1_model();
+                }
+                device.m = m;
+                device.params.is = 0.0;
+                for gmin in [0.0, 2.5e-6] {
+                    device.set_junction_gmin(gmin);
+                    for voltage in [-1.0, -0.01, 0.0, 0.1] {
+                        let (current, _, conductance, _) =
+                            device.gate_junctions(voltage, voltage, 300.15);
+                        let expected_g = gmin * m;
+                        let expected_i = expected_g * voltage;
+                        assert!((conductance - expected_g).abs() <= expected_g * 1e-14);
+                        assert!((current - expected_i).abs() <= expected_i.abs() * 1e-14);
+                    }
+                }
+            }
         }
     }
 

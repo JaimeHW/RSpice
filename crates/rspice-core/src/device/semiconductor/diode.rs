@@ -823,11 +823,11 @@ impl Diode {
 
     /// Return the flicker-noise coefficients `(KF, AF)`, if enabled by the
     /// model card. dionoise.c rides the source on the junction current as
-    /// `m·KF·|Id/m|^AF / f`, so the caller folds `self.multiplicity` into
-    /// the coefficient.
+    /// `m·KF·max(|Id/m|, 1e-38)^AF / f`. The collector validates authored
+    /// controls and applies multiplicity before evaluating the spectrum.
     pub fn flicker_noise_coefficients(&self) -> Option<(Value, Value)> {
-        if self.kf > 0.0 && self.kf.is_finite() {
-            Some((self.kf, self.af.max(1e-12)))
+        if self.kf != 0.0 {
+            Some((self.kf, self.af))
         } else {
             None
         }
@@ -889,18 +889,10 @@ impl Diode {
         if let Some(&v) = params.get("RS") {
             self.rs = v;
         }
-        if let Some(v) = params
-            .get("KF")
-            .copied()
-            .filter(|v| v.is_finite() && *v >= 0.0)
-        {
+        if let Some(&v) = params.get("KF") {
             self.kf = v;
         }
-        if let Some(v) = params
-            .get("AF")
-            .copied()
-            .filter(|v| v.is_finite() && *v > 0.0)
-        {
+        if let Some(&v) = params.get("AF") {
             self.af = v;
         }
         if let Some(&v) = params
