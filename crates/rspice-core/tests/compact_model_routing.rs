@@ -323,9 +323,68 @@ Q1 cx bx 0 0 qmod
     feature = "veriloga-model-vbic13-3t-et",
     feature = "veriloga-model-vbic13-4t"
 ))]
-mod xyce_vbic_optional_nodes {
+mod xyce_vbic_generated {
     use super::*;
-    use rspice_core::engine::SpiceDialect;
+    use rspice_core::engine::{ConvergenceConfig, SpiceDialect};
+
+    #[test]
+    fn multiplier_aliases_match_parallel_devices_in_dc_and_ac() {
+        let engine = Engine::new(SimulationConfig {
+            spice_dialect: SpiceDialect::Xyce,
+            convergence_config: ConvergenceConfig {
+                // A circuit-level shunt does not scale with device count.
+                gmin_target: 0.0,
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+        for (level, extra) in [(11, ""), (11, " th"), (12, " 0"), (12, " 0 th")] {
+            let deck = |parameters: &str| {
+                Netlist::parse(&format!(
+                "Generated VBIC multiplicity\nVc c 0 1.5\nVb b 0 DC 0.6 AC 1\nVth th 0 0\n\
+                 .param scale_a=2 scale_m=3\n\
+                 Q1 c b 0{extra} vm SW_ET=0 {parameters}\n\
+                 .model vm NPN LEVEL={level} IS=1e-16 IBEI=1e-18 IBCI=1e-18 RCX=10 RCI=10 RBX=10 RBI=10 RE=10 RBP=10 RS=10 CJE=1p CJC=1p\n.end\n"
+            )).unwrap()
+            };
+            let unit = deck("M=1");
+            let dc_unit = engine.run_dc_op(&unit).unwrap();
+            let ac_unit = engine.run_ac(&unit, &[1e7]).unwrap();
+            for parameters in [
+                "AREA=2 M=3 MULT=4",
+                "2 M=3 MULT=4",
+                "AREA={scale_a} M={scale_m} MULT=4",
+            ] {
+                let netlist = deck(parameters);
+                let dc = engine.run_dc_op(&netlist).unwrap();
+                let ac = engine.run_ac(&netlist, &[1e7]).unwrap();
+                for branch in ["VC", "VB"] {
+                    let expected = 24.0 * dc_unit.branch_current_named(branch).unwrap();
+                    let actual = dc.branch_current_named(branch).unwrap();
+                    assert!(
+                        (actual - expected).abs() <= 2e-9 * expected.abs().max(1e-20),
+                        "LEVEL={level}{extra}, {parameters}, DC {branch}: {actual:e} != {expected:e}"
+                    );
+                    let column = ac_unit[0]
+                        .branch_names
+                        .iter()
+                        .position(|name| name.eq_ignore_ascii_case(branch))
+                        .unwrap();
+                    let expected = ac_unit[0].currents[column] * 24.0;
+                    let column = ac[0]
+                        .branch_names
+                        .iter()
+                        .position(|name| name.eq_ignore_ascii_case(branch))
+                        .unwrap();
+                    let actual = ac[0].currents[column];
+                    assert!(
+                        (actual - expected).norm() <= 2e-9 * expected.norm().max(1e-20),
+                        "LEVEL={level}{extra}, {parameters}, AC {branch}: {actual:?} != {expected:?}"
+                    );
+                }
+            }
+        }
+    }
 
     #[test]
     fn every_optional_node_connects_to_the_generated_equations() {

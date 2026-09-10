@@ -338,7 +338,9 @@ The three-terminal thermal variant supplies `dt` through its declared fourth
 terminal; other optional connections bind existing generated node slots. Omitted
 connections retain their internal equations and state, and excess terminals are
 rejected. This mapping reuses the shipped model equations and requires no
-additional generated model variant.
+additional generated model variant. On every VBIC variant, the card's `AREA`,
+`M`, and `MULT` factors combine into the model multiplicity, including factors
+supplied through parameter expressions.
 
 Generated devices retain `$bound_step` requests across conditional calls,
 runtime loops, and nested analog instances. The transient engine uses the

@@ -1170,19 +1170,18 @@ fn is_internal_routing_param(name: &str) -> bool {
 }
 
 fn is_generated_bjt_target(model_name: &str) -> bool {
-    match_normalized(
-        model_name,
-        &[
-            "HICUML0VA",
-            "HICUML2VA",
-            "BJT505_VA",
-            "BJT505T_VA",
-            "BJTD505_VA",
-            "BJTD505T_VA",
-            "VBIC13_4T",
-            "VBIC_4T_ET_CF",
-        ],
-    )
+    needs_inferred_generated_bjt_type(model_name)
+        || match_normalized(
+            model_name,
+            &[
+                "HICUML0VA",
+                "HICUML2VA",
+                "BJT505_VA",
+                "BJT505T_VA",
+                "BJTD505_VA",
+                "BJTD505T_VA",
+            ],
+        )
 }
 
 fn is_bjt_multiplier_param(name: &str) -> bool {
