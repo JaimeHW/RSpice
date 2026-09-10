@@ -284,6 +284,8 @@ pub struct Flattener<'a> {
     /// External subcircuit/model names backed by out-of-line implementations
     /// (for example `.VERILOGA` includes).
     external_subckts: HashSet<String>,
+    /// Unselected Verilog-A imports may supply additional names at binding.
+    defer_external_module_binding: bool,
     /// Global nodes that must not be renamed while flattening hierarchy.
     global_nodes: HashSet<String>,
     /// Xyce's explicit ground-synonym preprocessing policy.
@@ -366,6 +368,7 @@ impl<'a> Flattener<'a> {
             param_resolver,
             instance_metadata: Vec::new(),
             external_subckts: HashSet::new(),
+            defer_external_module_binding: false,
             global_nodes: HashSet::new(),
             ground_policy: super::GroundPolicy::OnlyZero,
             expansion_stack: Vec::new(),
@@ -458,6 +461,7 @@ impl<'a> Flattener<'a> {
         }
         let mut flat_elements = Vec::new();
         self.external_subckts = Self::collect_external_subckts(netlist);
+        self.defer_external_module_binding = netlist.needs_veriloga_module_discovery();
         self.global_nodes = netlist
             .global_nodes
             .iter()
@@ -651,8 +655,11 @@ impl<'a> Flattener<'a> {
                         output,
                         abort,
                     )?;
-                } else if self.is_external_subckt(subckt_name) {
-                    // Preserve external instance (e.g. Verilog-A model) as a leaf.
+                } else if self.is_external_subckt(subckt_name) || self.defer_external_module_binding
+                {
+                    // External modules are linked after hierarchy expansion.
+                    // An unselected import may declare a name absent from the
+                    // deck; the builder must resolve every preserved leaf.
                     let new_element = self.resolve_external_subcircuit_params(
                         self.remap_element(element, prefix, node_map),
                         scope,
@@ -4361,6 +4368,34 @@ mod tests {
         assert_eq!(error.instance_name, "X1");
         assert_eq!(error.canonical_instance_name, "X1");
         assert_eq!(error.qualified_instance_name, "X1");
+    }
+
+    #[test]
+    fn unselected_veriloga_imports_defer_binding_only_for_the_current_deck() {
+        let mut flattener = Flattener::new(&[]);
+        for (include, deferred) in [
+            (".va source.va", cfg!(feature = "veriloga")),
+            (".va source.va module=Selected", false),
+            (".va source.va alias", cfg!(feature = "veriloga")),
+            ("", false),
+        ] {
+            let netlist = Netlist::parse(&format!(
+                "external discovery\n{include}\nX1 a 0 Missing\nD1 a 0 MissingDiode\n.end\n"
+            ))
+            .unwrap();
+            let diagnostics = netlist.lint_unknown_references();
+            assert!(diagnostics.iter().any(|item| item.element == "D1"));
+            assert_eq!(
+                diagnostics.iter().any(|item| item.element == "X1"),
+                !deferred
+            );
+            let result = flattener.flatten(&netlist);
+            if deferred {
+                assert_eq!(result.unwrap().len(), 2);
+            } else {
+                assert!(matches!(result, Err(ParseError::UndefinedSubcircuit(_))));
+            }
+        }
     }
 
     #[test]

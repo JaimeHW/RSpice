@@ -75,6 +75,7 @@ impl ParsedNetlistSourceMap {
     pub fn lint_unknown_references(&self, netlist: &Netlist) -> Vec<UnknownReferenceDiagnostic> {
         let known_models = known_model_names(netlist);
         let known_subckts = known_subckt_names(netlist);
+        let needs_module_discovery = netlist.needs_veriloga_module_discovery();
         let mut diagnostics = Vec::new();
 
         for reference in &self.references {
@@ -93,7 +94,12 @@ impl ParsedNetlistSourceMap {
                     }
                 }
                 ParsedNetlistReferenceKind::Subcircuit { element, name } => {
-                    if !subckt_reference_is_known(name, reference.scope.as_deref(), &known_subckts)
+                    if !needs_module_discovery
+                        && !subckt_reference_is_known(
+                            name,
+                            reference.scope.as_deref(),
+                            &known_subckts,
+                        )
                     {
                         diagnostics.push(UnknownReferenceDiagnostic {
                             kind: UnknownReferenceKind::Subcircuit,

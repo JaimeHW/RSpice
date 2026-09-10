@@ -1228,6 +1228,17 @@ struct NetlistSourceResolution {
 }
 
 impl Netlist {
+    /// An unselected import's module name becomes known only at compilation.
+    /// Hierarchy expansion and source-only diagnostics must leave such names
+    /// for the builder, which still requires an exact compiled-model binding.
+    pub(crate) fn needs_veriloga_module_discovery(&self) -> bool {
+        cfg!(feature = "veriloga")
+            && self
+                .veriloga_includes
+                .iter()
+                .any(|include| include.selected_module.is_none())
+    }
+
     /// Parse a netlist from a string.
     ///
     /// Follows the SPICE convention that the **first line is the title** and

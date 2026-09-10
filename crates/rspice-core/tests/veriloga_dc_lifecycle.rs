@@ -98,6 +98,51 @@ fn selected_veriloga_module_needs_no_separate_alias() {
 }
 
 #[test]
+fn inferred_veriloga_module_name_survives_hierarchy_flattening() {
+    let model = write_model(
+        "different_filename",
+        "module ActualDevice(p,n); inout p,n; electrical p,n; parameter real g=1; analog I(p,n)<+g*V(p,n); endmodule\n",
+    );
+    for alias in ["", " user_alias"] {
+        let deck = format!(
+            "* Resolve the compiled module name\n.va \"{}\"{alias}\n.subckt wrapper p n scale=2\nXmodel p n actualdevice g={{scale}}\n.ends\nI1 0 a 1\nX1 a 0 wrapper\n.end\n",
+            deck_path(&model)
+        );
+        let netlist = Netlist::parse_validated(&deck).unwrap();
+        assert!(netlist.lint_unknown_references().is_empty());
+        let result = Engine::default()
+            .run_dc_op(&netlist)
+            .expect("the compiled module name is an external device inside a subcircuit");
+        assert!((node_voltage(&result, "a") - 0.5).abs() < 1e-8);
+        let transient = Engine::default().run_tran(&netlist, 1e-6, 1e-7).unwrap();
+        let index = transient
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("a"))
+            .unwrap();
+        assert!(
+            transient.voltages[index]
+                .iter()
+                .all(|voltage| (voltage - 0.5).abs() < 1e-8)
+        );
+        rspice_core::execution::topology_fingerprint(&Engine::default(), &netlist)
+            .expect("execution planning uses the same external leaf semantics");
+
+        let misspelled =
+            Netlist::parse_validated(&deck.replace("actualdevice", "misspelled")).unwrap();
+        let error = Engine::default()
+            .run_dc_op(&misspelled)
+            .expect_err("unresolved leaves must fail at model binding");
+        let detail = error.to_string().to_ascii_lowercase();
+        assert!(
+            detail.contains("x1.xmodel") && detail.contains("misspelled"),
+            "{detail}"
+        );
+    }
+    let _ = std::fs::remove_file(model);
+}
+
+#[test]
 fn ambiguous_veriloga_bindings_never_select_the_first_loaded_module() {
     let model = write_model(
         "ambiguous_bindings",
