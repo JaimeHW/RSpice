@@ -13,8 +13,6 @@
 //! where each one lives in the source arrays. It is pure — caching it is the
 //! caller's business, because only the caller knows when its data changed.
 
-use std::ops::Range;
-
 use super::decimate::{SampleInterpolation, sample_at_with};
 
 /// Which way a monotone run of samples travels.
@@ -126,46 +124,6 @@ impl SweepShape {
     pub fn is_monotone(&self) -> bool {
         matches!(self.class, SweepClass::Ascending | SweepClass::Descending)
     }
-
-    /// The half-open index ranges, one per branch, whose samples fall inside
-    /// the closed window `[lo, hi]`.
-    ///
-    /// A series past the run cap keeps no branches, so its ranges are found by
-    /// a scan instead: the answer stays exact, it just costs O(n).
-    #[must_use]
-    pub fn window_ranges(&self, x: &[f64], lo: f64, hi: f64) -> Vec<Range<usize>> {
-        // NaN is refused explicitly rather than left to the negation. The
-        // window comes from view state, which is degenerate before a plot has
-        // been fitted; an unordered or NaN window selects no samples, and must
-        // not fall through to a scan whose every comparison is false.
-        if lo.is_nan() || hi.is_nan() || hi < lo {
-            return Vec::new();
-        }
-        if self.class == SweepClass::NonSweep {
-            return scanned_window_ranges(x, lo, hi);
-        }
-        self.runs
-            .iter()
-            .filter_map(|run| {
-                let end = run.end.min(x.len());
-                if run.start >= end {
-                    return None;
-                }
-                let slice = &x[run.start..end];
-                let (first, last) = match run.orientation {
-                    XOrientation::Ascending => (
-                        slice.partition_point(|&value| value < lo),
-                        slice.partition_point(|&value| value <= hi),
-                    ),
-                    XOrientation::Descending => (
-                        slice.partition_point(|&value| value > hi),
-                        slice.partition_point(|&value| value >= lo),
-                    ),
-                };
-                (first < last).then(|| (run.start + first)..(run.start + last))
-            })
-            .collect()
-    }
 }
 
 /// Split one all-finite segment into monotone runs, appending them to `runs`.
@@ -215,22 +173,6 @@ fn segment_runs(x: &[f64], start: usize, end: usize, runs: &mut Vec<MonotoneRun>
         orientation: orientation.unwrap_or(XOrientation::Ascending),
     });
     true
-}
-
-fn scanned_window_ranges(x: &[f64], lo: f64, hi: f64) -> Vec<Range<usize>> {
-    let mut ranges: Vec<Range<usize>> = Vec::new();
-    let mut open: Option<usize> = None;
-    for (index, value) in x.iter().enumerate() {
-        if value.is_finite() && (lo..=hi).contains(value) {
-            open.get_or_insert(index);
-        } else if let Some(start) = open.take() {
-            ranges.push(start..index);
-        }
-    }
-    if let Some(start) = open {
-        ranges.push(start..x.len());
-    }
-    ranges
 }
 
 /// One branch's answer at a queried X.
@@ -478,73 +420,6 @@ mod tests {
                 }
             }
         }
-    }
-
-    /// A NaN window selects nothing, on every path through the function.
-    ///
-    /// The guard is written `lo.is_nan() || hi.is_nan() || hi < lo` rather
-    /// than `!(hi >= lo)`. The forms agree, and this pins the NaN arm: view
-    /// state holds a degenerate window until a plot has been fitted, and a
-    /// bare `hi < lo` lets NaN past — the branch path then filters on
-    /// comparisons that are all false, while the scan path past the run cap
-    /// is a separate body with its own answer. Neither is a window, so both
-    /// must be refused before the split rather than after it.
-    #[test]
-    fn a_nan_window_selects_nothing_on_either_path() {
-        let branched = [0.0, 0.5, 1.0, 0.5, 0.0];
-        let shape = SweepShape::of(&branched);
-        assert_eq!(shape.window_ranges(&branched, 0.4, 0.6), vec![1..2, 3..4]);
-        for (lo, hi) in [(f64::NAN, 0.6), (0.4, f64::NAN), (f64::NAN, f64::NAN)] {
-            assert!(
-                shape.window_ranges(&branched, lo, hi).is_empty(),
-                "the branch path admitted the window [{lo}, {hi}]"
-            );
-        }
-
-        // Past the run cap the answer comes from the scan instead.
-        let sawtooth: Vec<f64> = (0..4_000)
-            .map(|index| f64::from(index % 2) + f64::from(index) * 1.0e-6)
-            .collect();
-        let scanned = SweepShape::of(&sawtooth);
-        assert_eq!(scanned.class(), SweepClass::NonSweep);
-        for (lo, hi) in [(f64::NAN, 1.1), (0.9, f64::NAN), (f64::NAN, f64::NAN)] {
-            assert!(
-                scanned.window_ranges(&sawtooth, lo, hi).is_empty(),
-                "the scan path admitted the window [{lo}, {hi}]"
-            );
-        }
-    }
-
-    /// Oracle 5: a window over a loop selects a range per branch.
-    #[test]
-    fn window_ranges_split_per_branch() {
-        let x = [0.0, 0.5, 1.0, 0.5, 0.0];
-        let shape = SweepShape::of(&x);
-        assert_eq!(shape.window_ranges(&x, 0.4, 0.6), vec![1..2, 3..4]);
-        assert_eq!(shape.window_ranges(&x, -1.0, 2.0), vec![0..3, 2..5]);
-        assert!(shape.window_ranges(&x, 2.0, 3.0).is_empty());
-        assert!(shape.window_ranges(&x, 0.6, 0.4).is_empty());
-
-        let ascending: Vec<f64> = (0..10).map(f64::from).collect();
-        assert_eq!(
-            SweepShape::of(&ascending).window_ranges(&ascending, 3.0, 5.0),
-            vec![3..6]
-        );
-
-        // A series past the cap still answers exactly, by scan.
-        let sawtooth: Vec<f64> = (0..4_000)
-            .map(|index| f64::from(index % 2) + f64::from(index) * 1.0e-6)
-            .collect();
-        let shape = SweepShape::of(&sawtooth);
-        assert_eq!(shape.class(), SweepClass::NonSweep);
-        let ranges = shape.window_ranges(&sawtooth, 0.9, 1.1);
-        assert!(!ranges.is_empty());
-        assert!(
-            ranges
-                .iter()
-                .flat_map(|range| range.clone())
-                .all(|index| (0.9..=1.1).contains(&sawtooth[index]))
-        );
     }
 
     #[test]
