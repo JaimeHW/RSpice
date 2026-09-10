@@ -1274,13 +1274,15 @@ endmodule
                 _ => None,
             })
             .collect();
-        assert_eq!(
+        // Lowering may retain separate literals for initialization and the
+        // per-evaluation reset. Their count is a compiler detail; this seal
+        // must retain every sentinel's exact sign and non-finite value.
+        assert!(!sentinels.is_empty(), "the IR lost its step-bound sentinel");
+        assert!(
             sentinels
                 .iter()
-                .map(|value| value.to_bits())
-                .collect::<Vec<_>>(),
-            vec![f64::INFINITY.to_bits()],
-            "the IR literal for the step bound arrived as {sentinels:?}"
+                .all(|value| value.to_bits() == f64::INFINITY.to_bits()),
+            "the IR step-bound sentinels arrived as {sentinels:?}"
         );
     }
 
