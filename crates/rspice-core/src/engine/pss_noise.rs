@@ -50,7 +50,7 @@ pub struct OscPnoiseResult {
     pub corner_hz: Value,
     /// RMS phase error over the swept offset band in radians,
     /// `sqrt(2 * integral L(f) df)`, when the run was asked to integrate.
-    /// `None` means the question was not asked.
+    /// `None` means integration was not requested or the sweep spans no band.
     pub integrated_phase_noise: Option<Value>,
 }
 
@@ -82,24 +82,35 @@ fn pnoise_card_output(card: &crate::netlist::PnoiseCard) -> String {
 /// A single-point sweep spans no band, so there is nothing to integrate and
 /// the answer is `None` rather than zero — the same distinction the card's
 /// `INTEGRATEDNOISE=NO` makes.
-fn integrate_spectral_density(offsets: &[Value], density: &[Value]) -> Option<Value> {
-    if offsets.len() < 2 || offsets.len() != density.len() {
-        return None;
+fn integrate_spectral_density(
+    offsets: &[Value],
+    density: &[Value],
+) -> Result<Option<Value>, SimulationError> {
+    if offsets.len() != density.len() {
+        return Err(noise_integration_error(
+            "frequency and density lengths differ",
+        ));
     }
-    let mut total = 0.0;
-    for index in 1..offsets.len() {
-        let width = offsets[index] - offsets[index - 1];
-        if !width.is_finite() || width <= 0.0 {
-            continue;
-        }
-        let left = density[index - 1];
-        let right = density[index];
-        if !left.is_finite() || !right.is_finite() {
-            return None;
-        }
-        total += 0.5 * (left + right) * width;
+    crate::analysis::noise::integrate_noise_density(
+        offsets.iter().copied().zip(density.iter().copied()),
+    )
+    .map_err(noise_integration_error)?
+    .map(|total| checked_noise_rms(total.square_root()))
+    .transpose()
+}
+
+fn noise_integration_error(message: &str) -> SimulationError {
+    SimulationError::Circuit(format!("cannot integrate periodic noise: {message}"))
+}
+
+fn checked_noise_rms(rms: Value) -> Result<Value, SimulationError> {
+    if rms.is_finite() {
+        Ok(rms)
+    } else {
+        Err(noise_integration_error(
+            "RMS is outside the representable range",
+        ))
     }
-    (total.is_finite() && total >= 0.0).then(|| total.sqrt())
 }
 
 /// RMS phase error over a swept single-sideband spectrum, in radians.
@@ -107,26 +118,22 @@ fn integrate_spectral_density(offsets: &[Value], density: &[Value]) -> Option<Va
 /// `L(f)` is the single-sideband, carrier-normalized density in dBc/Hz, so
 /// both sidebands contribute and the mean-square phase is
 /// `2 * integral L(f) df`.
-fn integrate_phase_noise(offsets: &[Value], phase_noise_dbc: &[Value]) -> Option<Value> {
+fn integrate_phase_noise(
+    offsets: &[Value],
+    phase_noise_dbc: &[Value],
+) -> Result<Option<Value>, SimulationError> {
     if offsets.len() != phase_noise_dbc.len() {
-        return None;
+        return Err(noise_integration_error(
+            "frequency and density lengths differ",
+        ));
     }
-    let mut linear = Vec::new();
-    linear.try_reserve_exact(phase_noise_dbc.len()).ok()?;
-    for &dbc in phase_noise_dbc {
-        // A floor of exactly zero density is representable; -inf dBc/Hz is
-        // the noiseless limit the Lorentzian reaches at infinite offset.
-        linear.push(if dbc.is_finite() {
-            10.0_f64.powf(dbc / 10.0)
-        } else if dbc == Value::NEG_INFINITY {
-            0.0
-        } else {
-            return None;
-        });
-    }
-    let rms = integrate_spectral_density(offsets, &linear)?;
-    let mean_square = 2.0 * rms * rms;
-    mean_square.is_finite().then(|| mean_square.sqrt())
+    crate::analysis::noise::integrate_decibel_noise(
+        offsets.iter().copied().zip(phase_noise_dbc.iter().copied()),
+        None,
+    )
+    .map_err(noise_integration_error)?
+    .map(|total| checked_noise_rms(total.phase_rms()))
+    .transpose()
 }
 
 /// Fill in whatever one authored `.PNOISE` card asked for beyond the
@@ -134,18 +141,21 @@ fn integrate_phase_noise(offsets: &[Value], phase_noise_dbc: &[Value]) -> Option
 fn apply_pnoise_card_reporting(
     card: &crate::netlist::PnoiseCard,
     result: &mut super::PnoiseAnalysisResult,
-) {
+) -> Result<(), SimulationError> {
     if !card.noise_summary {
         result.contributors.clear();
     }
     if card.integrated_noise {
         result.integrated_output_noise =
-            integrate_spectral_density(&result.frequencies, &result.output_noise);
+            integrate_spectral_density(&result.frequencies, &result.output_noise)?;
         result.integrated_input_noise = result
             .input_noise
             .as_ref()
-            .and_then(|density| integrate_spectral_density(&result.frequencies, density));
+            .map(|density| integrate_spectral_density(&result.frequencies, density))
+            .transpose()?
+            .flatten();
     }
+    Ok(())
 }
 
 /// Whether one authored `.PNOISE` card may be measured around this carrier.
@@ -272,7 +282,7 @@ impl Engine {
             )?;
             if card.integrated_noise {
                 result.integrated_phase_noise =
-                    integrate_phase_noise(&result.frequencies, &result.phase_noise_dbc);
+                    integrate_phase_noise(&result.frequencies, &result.phase_noise_dbc)?;
             }
             return Ok(PeriodicNoiseResult::Oscillator { output, result });
         }
@@ -286,7 +296,7 @@ impl Engine {
             operating_point,
             abort,
         )?;
-        apply_pnoise_card_reporting(card, &mut result);
+        apply_pnoise_card_reporting(card, &mut result)?;
         Ok(PeriodicNoiseResult::Driven { output, result })
     }
 
@@ -313,7 +323,7 @@ impl Engine {
             operating_point,
             abort,
         )?;
-        apply_pnoise_card_reporting(card, &mut result);
+        apply_pnoise_card_reporting(card, &mut result)?;
         Ok(PeriodicNoiseResult::Driven {
             output: pnoise_card_output(card),
             result,
@@ -942,4 +952,88 @@ fn pss_noise_is_colored(noise_type: NoiseSourceType) -> bool {
             | NoiseSourceType::Bsim4Flicker
             | NoiseSourceType::Bsim3Flicker
     )
+}
+
+#[cfg(test)]
+mod integration_tests {
+    use super::*;
+
+    #[test]
+    fn periodic_noise_integration_preserves_finite_rms_range() {
+        for (offsets, density, expected) in [
+            ([1.0, 2.0], Value::MAX, Value::MAX.sqrt()),
+            ([1e-300, 2e-300], 1e-300, 1e-300),
+            ([1e100, 2e100], 1e300, 1e200),
+            (
+                [Value::from_bits(1), Value::from_bits(2)],
+                Value::from_bits(1),
+                Value::from_bits(1),
+            ),
+        ] {
+            let actual = integrate_spectral_density(&offsets, &[density; 2])
+                .unwrap()
+                .unwrap();
+            assert!(
+                (actual / expected - 1.0).abs() < 3e-15,
+                "{actual:e} vs {expected:e}"
+            );
+        }
+    }
+
+    #[test]
+    fn periodic_phase_integration_keeps_decibels_and_sidebands_scaled() {
+        for (offsets, density, expected) in [
+            ([1.0, 2.0], 3080.0, 2.0_f64.sqrt() * 1e154),
+            ([1e100, 2e100], -4000.0, 2.0_f64.sqrt() * 1e-150),
+            ([1e-300, 2e-300], 4000.0, 2.0_f64.sqrt() * 1e50),
+            ([1.0, 2.0], -4000.0, 2.0_f64.sqrt() * 1e-200),
+        ] {
+            let actual = integrate_phase_noise(&offsets, &[density; 2])
+                .unwrap()
+                .unwrap();
+            assert!(
+                (actual / expected - 1.0).abs() < 3e-13,
+                "{actual:e} vs {expected:e}"
+            );
+        }
+        assert_eq!(
+            integrate_phase_noise(&[1.0, 2.0], &[Value::NEG_INFINITY; 2]).unwrap(),
+            Some(0.0)
+        );
+        for density in [10000.0, -10000.0, Value::MAX, -Value::MAX] {
+            assert!(
+                integrate_phase_noise(&[1.0, 2.0], &[density; 2])
+                    .unwrap_err()
+                    .to_string()
+                    .contains("representable range")
+            );
+        }
+    }
+
+    #[test]
+    fn periodic_noise_integration_distinguishes_invalid_zero_and_absent_bands() {
+        for offsets in [
+            [2.0, 1.0],
+            [1.0, 1.0],
+            [-1.0, 1.0],
+            [1.0, Value::INFINITY],
+            [1.0, Value::NAN],
+        ] {
+            assert!(integrate_spectral_density(&offsets, &[1.0; 2]).is_err());
+            assert!(integrate_phase_noise(&offsets, &[0.0; 2]).is_err());
+        }
+        assert!(integrate_spectral_density(&[1.0, 2.0], &[-1.0, 3.0]).is_err());
+        for density in [Value::NAN, Value::INFINITY] {
+            assert!(integrate_spectral_density(&[1.0, 2.0], &[density; 2]).is_err());
+            assert!(integrate_phase_noise(&[1.0, 2.0], &[density; 2]).is_err());
+        }
+        assert!(integrate_spectral_density(&[1.0, 2.0], &[1.0]).is_err());
+        assert!(integrate_phase_noise(&[1.0, 2.0], &[0.0]).is_err());
+        assert_eq!(integrate_spectral_density(&[1.0], &[1.0]).unwrap(), None);
+        assert_eq!(integrate_phase_noise(&[1.0], &[0.0]).unwrap(), None);
+        assert_eq!(
+            integrate_spectral_density(&[1.0, 2.0], &[0.0; 2]).unwrap(),
+            Some(0.0)
+        );
+    }
 }

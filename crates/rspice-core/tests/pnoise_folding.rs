@@ -825,3 +825,45 @@ fn mos_nlev3_periodic_noise_follows_modulated_inversion_charge_at_zero_vds() {
         }
     }
 }
+
+#[test]
+fn pnoise_card_reports_integrated_input_and_output_noise() {
+    use rspice_core::engine::PeriodicNoiseResult;
+    use rspice_core::netlist::AnalysisCommand;
+
+    let netlist = Netlist::parse(
+        "* integrated periodic thermal noise\nvin in 0 dc 0\nr1 in out 1k\nr2 out 0 1k\n\
+         .pnoise lin 3 1k 2k out=V(out) input=vin maxsideband=1 integratednoise=yes\n.end\n",
+    )
+    .unwrap();
+    let AnalysisCommand::Pnoise(card) = &netlist.analyses[0] else {
+        panic!("PNOISE card")
+    };
+    assert!(card.integrated_noise, "{card:?}");
+    let engine = Engine::default();
+    let hb = engine
+        .run_hb(&netlist, HbConfig::new(1e6).with_harmonics(8))
+        .unwrap();
+    let PeriodicNoiseResult::Driven { result, .. } = engine
+        .run_pnoise_card_from_hb_with_abort(&netlist, card, &hb.operating_point, &NoAbort)
+        .unwrap()
+    else {
+        panic!("driven result")
+    };
+    assert_eq!(result.frequencies, [1000.0, 1500.0, 2000.0], "{result:?}");
+    // Two 1 kohm resistors in parallel, with voltage gain 1/2 from VIN.
+    let expected = (4.0 * K_B * T_REF * 500.0 * 1000.0).sqrt();
+    assert!((result.integrated_output_noise.unwrap() / expected - 1.0).abs() < 1e-12);
+    assert!((result.integrated_input_noise.unwrap() / (2.0 * expected) - 1.0).abs() < 1e-12);
+
+    let mut disabled = card.clone();
+    disabled.integrated_noise = false;
+    let PeriodicNoiseResult::Driven { result, .. } = engine
+        .run_pnoise_card_from_hb_with_abort(&netlist, &disabled, &hb.operating_point, &NoAbort)
+        .unwrap()
+    else {
+        panic!("driven result")
+    };
+    assert_eq!(result.integrated_output_noise, None);
+    assert_eq!(result.integrated_input_noise, None);
+}

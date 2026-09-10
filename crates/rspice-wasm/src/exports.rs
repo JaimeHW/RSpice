@@ -209,6 +209,24 @@ mod wasm_tests {
     use crate::js_interop::{js_array_property, js_property};
 
     #[wasm_bindgen_test]
+    fn integrated_phase_noise_clipping_and_range_in_wasm() {
+        use rspice_core::analysis::pnoise::{PhaseNoisePoint, PnoiseResult};
+        let mut result = PnoiseResult::new(1e6, "out");
+        result.add_point(PhaseNoisePoint::new(1.0, 0.0));
+        result.add_point(PhaseNoisePoint::new(3.0, 10.0 * 9.0_f64.log10()));
+        let clipped = result.integrated_noise_power(1.0, 2.0).unwrap();
+        assert!((clipped - 10.0 * 3.0_f64.log10()).abs() < 2e-14);
+        result.spectral_points = vec![
+            PhaseNoisePoint::new(0.0, f64::NEG_INFINITY),
+            PhaseNoisePoint::new(1e300, 4000.0),
+        ];
+        let extreme = result.integrated_noise_power(0.0, 1e-100).unwrap();
+        assert!((extreme - (-1000.0 - 10.0 * 2.0_f64.log10())).abs() < 1e-12);
+        result.spectral_points[1].pn_dbc_hz = f64::NAN;
+        assert_eq!(result.integrated_noise_power(0.0, 1.0), None);
+    }
+
+    #[wasm_bindgen_test]
     fn stationary_bjt_bias_leaves_startup_in_wasm() {
         let engine = rspice_core::Engine::default();
         let abort = rspice_core::abort_signal::NoAbort;

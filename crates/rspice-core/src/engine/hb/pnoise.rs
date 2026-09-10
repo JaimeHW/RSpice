@@ -41,8 +41,8 @@ pub struct PnoiseAnalysisResult {
     /// Whether the operating-point solve converged.
     pub converged: bool,
     /// Total output noise over the swept band, in volts RMS, when the run was
-    /// asked to integrate. `None` means the question was not asked, never
-    /// that the total is zero.
+    /// asked to integrate. `None` means integration was not requested or the
+    /// sweep spans no band; an exactly noiseless band produces `Some(0.0)`.
     pub integrated_output_noise: Option<Value>,
     /// Total input-referred noise over the swept band, in volts RMS, when the
     /// run was asked to integrate and named an input source.

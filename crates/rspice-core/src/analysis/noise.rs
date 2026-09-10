@@ -1374,7 +1374,7 @@ pub struct IntegratedNoise {
 /// separate factors, so a representable integrated RMS is never lost merely
 /// because its mean-square power is smaller than the `f64` subnormal range.
 #[derive(Debug, Clone, Copy, Default)]
-struct ScaledPositiveSum {
+pub(crate) struct ScaledPositiveSum {
     significand: Value,
     compensation: Value,
     exponent: i32,
@@ -1429,21 +1429,21 @@ impl ScaledPositiveSum {
             return;
         }
         if exponent > self.exponent {
-            let difference = exponent - self.exponent;
+            let difference = i64::from(exponent) - i64::from(self.exponent);
             let scale = if difference > 1074 {
                 0.0
             } else {
-                Self::binary_power(-difference)
+                Self::binary_power(-difference as i32)
             };
             self.significand *= scale;
             self.compensation *= scale;
             self.exponent = exponent;
         } else {
-            let difference = self.exponent - exponent;
+            let difference = i64::from(self.exponent) - i64::from(exponent);
             significand *= if difference > 1074 {
                 0.0
             } else {
-                Self::binary_power(-difference)
+                Self::binary_power(-difference as i32)
             };
         }
         let updated = self.significand + significand;
@@ -1506,7 +1506,7 @@ impl ScaledPositiveSum {
         significand * power_of_two
     }
 
-    fn square_root(self) -> Value {
+    pub(crate) fn square_root(self) -> Value {
         let Some((significand, exponent)) = self.parts() else {
             return 0.0;
         };
@@ -1521,7 +1521,8 @@ impl ScaledPositiveSum {
             return Value::NAN;
         }
         if root_exponent == -1075 {
-            (root_significand * 0.5) * Value::from_bits(1)
+            let rounded = (root_significand * 0.5) * Value::from_bits(1);
+            if rounded == 0.0 { Value::NAN } else { rounded }
         } else {
             root_significand * Self::binary_power(root_exponent)
         }
@@ -1545,6 +1546,159 @@ impl ScaledPositiveSum {
     }
 }
 
+/// Integrate a strictly increasing, nonnegative-frequency linear PSD without
+/// materializing endpoint sums or mean-square power. No band means `None`;
+/// malformed data is an error even for a single sample.
+pub(crate) fn integrate_noise_density(
+    points: impl IntoIterator<Item = (Value, Value)>,
+) -> Result<Option<ScaledPositiveSum>, &'static str> {
+    let mut previous = None;
+    let mut total = ScaledPositiveSum::default();
+    let mut has_band = false;
+    for (frequency, density) in points {
+        if !frequency.is_finite() || frequency < 0.0 {
+            return Err("noise frequencies must be finite and nonnegative");
+        }
+        if !density.is_finite() || density < 0.0 {
+            return Err("noise densities must be finite and nonnegative");
+        }
+        if let Some((left_frequency, left_density)) = previous {
+            if frequency <= left_frequency {
+                return Err("noise frequencies must be strictly increasing");
+            }
+            let width = frequency - left_frequency;
+            total.add_product(left_density, width, 0.5);
+            total.add_product(density, width, 0.5);
+            has_band = true;
+        }
+        previous = Some((frequency, density));
+    }
+    Ok(has_band.then_some(total))
+}
+
+/// A linear-PSD integral normalized to a finite reference density in dB.
+/// Keeping that reference separate also permits dB results whose linear
+/// powers cannot be represented, without another accumulator or allocation.
+pub(crate) struct DecibelNoiseIntegral {
+    reference_db: Value,
+    power: ScaledPositiveSum,
+}
+
+impl DecibelNoiseIntegral {
+    pub(crate) fn decibels(self) -> Value {
+        let Some((significand, exponent)) = self.power.parts() else {
+            return Value::NEG_INFINITY;
+        };
+        self.reference_db
+            + 10.0 * (significand.log10() + Value::from(exponent) * std::f64::consts::LOG10_2)
+    }
+
+    pub(crate) fn phase_rms(self) -> Value {
+        let Some((significand, exponent)) = self.power.parts() else {
+            return 0.0;
+        };
+        // Both sidebands contribute. Apply their factor of two in the
+        // exponent before taking the root, never by squaring an RMS.
+        let binary_reference = (self.reference_db / 10.0) * std::f64::consts::LOG2_10;
+        let binary_power = binary_reference + Value::from(exponent) + 1.0;
+        if binary_power > 2048.0 {
+            return Value::INFINITY;
+        }
+        if binary_power < -2152.0 {
+            return Value::NAN;
+        }
+        let mut total = ScaledPositiveSum::default();
+        total.add_scaled(
+            significand * (binary_power - binary_power.floor()).exp2(),
+            binary_power.floor() as i32,
+        );
+        total.square_root()
+    }
+}
+
+/// Integrate the piecewise-linear PSD represented by dB samples, optionally
+/// clipped to a band. Frequencies must be finite, nonnegative and increasing;
+/// densities must be finite dB or negative infinity (exact zero). `None`
+/// denotes no positive-width overlap. The whole supplied series is validated.
+pub(crate) fn integrate_decibel_noise(
+    points: impl Iterator<Item = (Value, Value)> + Clone,
+    band: Option<(Value, Value)>,
+) -> Result<Option<DecibelNoiseIntegral>, &'static str> {
+    let (start, stop) = band.unwrap_or((0.0, Value::MAX));
+    if !start.is_finite() || start < 0.0 || !stop.is_finite() || stop <= start {
+        return Err("noise integration bounds must be finite, nonnegative and increasing");
+    }
+    let mut previous = None;
+    let mut reference_db = Value::NEG_INFINITY;
+    let mut has_band = false;
+    for (frequency, density) in points.clone() {
+        if !frequency.is_finite() || frequency < 0.0 {
+            return Err("noise frequencies must be finite and nonnegative");
+        }
+        if !density.is_finite() && density != Value::NEG_INFINITY {
+            return Err("noise densities must be finite dB or negative infinity");
+        }
+        if let Some((left_frequency, left_density)) = previous {
+            if frequency <= left_frequency {
+                return Err("noise frequencies must be strictly increasing");
+            }
+            if frequency.min(stop) > left_frequency.max(start) {
+                reference_db = reference_db.max(left_density).max(density);
+                has_band = true;
+            }
+        }
+        previous = Some((frequency, density));
+    }
+    if !has_band {
+        return Ok(None);
+    }
+    let mut power = ScaledPositiveSum::default();
+    for ((f0, d0), (f1, d1)) in points.clone().zip(points.skip(1)) {
+        let lower = f0.max(start);
+        let upper = f1.min(stop);
+        if upper <= lower {
+            continue;
+        }
+        let (width, width_exponent) = ScaledPositiveSum::decompose(upper - lower);
+        let (span, span_exponent) = ScaledPositiveSum::decompose(f1 - f0);
+        // Clipping a linear PSD gives four nonnegative endpoint terms:
+        // width/2 * [d0*((f1-lower)+(f1-upper))/span
+        //          + d1*((lower-f0)+(upper-f0))/span]. Keep every factor
+        // separate so even a subnormal interpolation weight can contribute.
+        for (density, distances) in [
+            (d0, [f1 - lower, f1 - upper]),
+            (d1, [lower - f0, upper - f0]),
+        ] {
+            if density == Value::NEG_INFINITY {
+                continue;
+            }
+            let binary_density = ((density - reference_db) / 10.0) * std::f64::consts::LOG2_10;
+            // The reference has a nonzero weight. Finite f64 segment factors
+            // can shift exponents by only a few thousand bits, so a relative
+            // exponent outside i32 cannot affect even its subnormal rounding.
+            if binary_density < Value::from(i32::MIN) + 4096.0 {
+                continue;
+            }
+            let density_exponent = binary_density.floor() as i32;
+            let density = (binary_density - binary_density.floor()).exp2();
+            for distance in distances {
+                if distance == 0.0 {
+                    continue;
+                }
+                let (distance, distance_exponent) = ScaledPositiveSum::decompose(distance);
+                power.add_scaled(
+                    density * width * distance / span,
+                    density_exponent + width_exponent + distance_exponent - span_exponent - 1,
+                );
+            }
+        }
+    }
+    Ok(Some(DecibelNoiseIntegral {
+        reference_db,
+        power,
+    }))
+}
+
 impl IntegratedNoise {
     /// Create from a vector of noise results
     pub fn new(results: Vec<NoiseResult>) -> Self {
@@ -1553,38 +1707,16 @@ impl IntegratedNoise {
 
     /// Calculate total integrated output noise over the frequency band (V RMS)
     /// Uses trapezoidal integration. Returns NaN when the supplied result
-    /// series contains non-finite/negative densities, non-finite frequencies,
+    /// series contains non-finite/negative densities or frequencies,
     /// or frequencies that are not strictly increasing.
     pub fn total_output_noise(&self) -> Value {
-        if self.results.len() < 2 {
-            return 0.0;
-        }
-
-        let mut total = ScaledPositiveSum::default();
-        for i in 1..self.results.len() {
-            let f1 = self.results[i - 1].frequency;
-            let f2 = self.results[i].frequency;
-            let s1 = self.results[i - 1].output_noise_density;
-            let s2 = self.results[i].output_noise_density;
-
-            let width = f2 - f1;
-            if !f1.is_finite()
-                || !f2.is_finite()
-                || width <= 0.0
-                || !s1.is_finite()
-                || s1 < 0.0
-                || !s2.is_finite()
-                || s2 < 0.0
-            {
-                return Value::NAN;
-            }
-            // Admit the two trapezoid halves separately: `(s1 + s2)` may
-            // overflow even when multiplication by 0.5 is finite.
-            total.add_product(s1, width, 0.5);
-            total.add_product(s2, width, 0.5);
-        }
-
-        total.square_root()
+        integrate_noise_density(
+            self.results
+                .iter()
+                .map(|r| (r.frequency, r.output_noise_density)),
+        )
+        .map(|total| total.unwrap_or_default().square_root())
+        .unwrap_or(Value::NAN)
     }
 
     /// Per-device, per-mechanism output-noise contributions integrated over
@@ -1604,7 +1736,8 @@ impl IntegratedNoise {
         let invalid_series = self.results.windows(2).any(|window| {
             let left = &window[0];
             let right = &window[1];
-            !left.frequency.is_finite()
+            left.frequency < 0.0
+                || !left.frequency.is_finite()
                 || !right.frequency.is_finite()
                 || right.frequency <= left.frequency
                 || left.contributions.iter().any(|contribution| {
@@ -1727,33 +1860,13 @@ impl IntegratedNoise {
     /// Returns NaN under the same invalid-series contract as
     /// [`Self::total_output_noise`].
     pub fn total_input_referred_noise(&self) -> Value {
-        if self.results.len() < 2 {
-            return 0.0;
-        }
-
-        let mut total = ScaledPositiveSum::default();
-        for i in 1..self.results.len() {
-            let f1 = self.results[i - 1].frequency;
-            let f2 = self.results[i].frequency;
-            let s1 = self.results[i - 1].input_referred_density;
-            let s2 = self.results[i].input_referred_density;
-
-            let width = f2 - f1;
-            if !f1.is_finite()
-                || !f2.is_finite()
-                || width <= 0.0
-                || !s1.is_finite()
-                || s1 < 0.0
-                || !s2.is_finite()
-                || s2 < 0.0
-            {
-                return Value::NAN;
-            }
-            total.add_product(s1, width, 0.5);
-            total.add_product(s2, width, 0.5);
-        }
-
-        total.square_root()
+        integrate_noise_density(
+            self.results
+                .iter()
+                .map(|r| (r.frequency, r.input_referred_density)),
+        )
+        .map(|total| total.unwrap_or_default().square_root())
+        .unwrap_or(Value::NAN)
     }
 
     /// Get all results

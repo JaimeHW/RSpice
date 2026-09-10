@@ -138,45 +138,23 @@ impl PnoiseResult {
         }
     }
 
-    /// Get total integrated noise power `dBc` over frequency range
+    /// Integrated single-sideband noise power in dBc, using linear-PSD
+    /// trapezoids clipped to the requested frequency range. This integration
+    /// policy is distinct from the log-frequency spot interpolation in
+    /// [`Self::phase_noise_at`]. No extrapolation is performed.
+    ///
+    /// Returns `None` for invalid bounds, an invalid/unordered spectrum, or
+    /// no positive-width overlap. An exactly noiseless band returns negative
+    /// infinity. Finite dB densities need not have representable linear powers.
     pub fn integrated_noise_power(&self, f_start: Value, f_stop: Value) -> Option<Value> {
-        if self.spectral_points.len() < 2 {
-            return None;
-        }
-
-        // Trapezoidal integration in linear power
-        let mut total_power = 0.0;
-
-        for i in 1..self.spectral_points.len() {
-            let p0 = &self.spectral_points[i - 1];
-            let p1 = &self.spectral_points[i];
-
-            // Check if segment overlaps integration range
-            if p1.offset_freq < f_start || p0.offset_freq > f_stop {
-                continue;
-            }
-
-            // Clamp to integration range
-            let f0 = p0.offset_freq.max(f_start);
-            let f1 = p1.offset_freq.min(f_stop);
-
-            if f1 <= f0 {
-                continue;
-            }
-
-            // Convert dBc/Hz to linear power spectral density
-            let psd0 = 10.0_f64.powf(p0.pn_dbc_hz / 10.0);
-            let psd1 = 10.0_f64.powf(p1.pn_dbc_hz / 10.0);
-
-            // Trapezoidal rule
-            total_power += (psd0 + psd1) / 2.0 * (f1 - f0);
-        }
-
-        if total_power > 0.0 {
-            Some(10.0 * total_power.log10())
-        } else {
-            None
-        }
+        crate::analysis::noise::integrate_decibel_noise(
+            self.spectral_points
+                .iter()
+                .map(|point| (point.offset_freq, point.pn_dbc_hz)),
+            Some((f_start, f_stop)),
+        )
+        .ok()?
+        .map(|total| total.decibels())
     }
 
     /// Number of spectral points
@@ -274,3 +252,89 @@ impl NoiseContributor {
 // =============================================================================
 // Tests
 // =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn spectrum(points: &[(Value, Value)]) -> PnoiseResult {
+        let mut result = PnoiseResult::new(1e6, "out");
+        for &(frequency, density) in points {
+            result.add_point(PhaseNoisePoint::new(frequency, density));
+        }
+        result
+    }
+
+    #[test]
+    fn integrated_noise_clips_linear_psd_at_both_band_edges() {
+        // PSD = 4*f - 3 on [1,3]; its primitive is 2*f^2 - 3*f.
+        let result = spectrum(&[(1.0, 0.0), (3.0, 10.0 * 9.0_f64.log10())]);
+        for (start, stop, expected_power) in [
+            (1.0, 2.0, 3.0_f64),
+            (2.0, 3.0, 7.0),
+            (1.5, 2.5, 5.0),
+            (0.0, 4.0, 10.0),
+        ] {
+            let actual = result.integrated_noise_power(start, stop).unwrap();
+            assert!((actual - 10.0 * expected_power.log10()).abs() < 2e-14);
+        }
+    }
+
+    #[test]
+    fn integrated_noise_keeps_extreme_density_bandwidth_and_clipping_factors() {
+        for (density, start, stop, expected) in [
+            (4000.0, 1e-300, 2e-300, 1000.0),
+            (-4000.0, 1e100, 2e100, -3000.0),
+            (Value::MAX, 1.0, 2.0, Value::MAX),
+            (-Value::MAX, 1.0, 2.0, -Value::MAX),
+        ] {
+            let actual = spectrum(&[(start, density), (stop, density)])
+                .integrated_noise_power(start, stop)
+                .unwrap();
+            assert!((actual - expected).abs() <= expected.abs() * 2e-15);
+        }
+        // A rising triangle clipped near zero: power = 10^400 * b^2/(2*10^300).
+        // b/span underflows; the integrated power and its dB value do not.
+        let result = spectrum(&[(0.0, Value::NEG_INFINITY), (1e300, 4000.0)]);
+        let actual = result.integrated_noise_power(0.0, 1e-100).unwrap();
+        assert!((actual - (-1000.0 - 10.0 * 2.0_f64.log10())).abs() < 1e-12);
+        // A relative density that underflows before multiplication by width
+        // still supplies half of the total area.
+        let result = spectrum(&[
+            (0.0, 0.0),
+            (1e-100, Value::NEG_INFINITY),
+            (2e-100, -4000.0),
+            (1e300, -4000.0),
+        ]);
+        let actual = result.integrated_noise_power(0.0, 1e300).unwrap();
+        assert!((actual - (-1000.0 + 10.0 * 1.5_f64.log10())).abs() < 2e-12);
+    }
+
+    #[test]
+    fn integrated_noise_rejects_invalid_series_and_distinguishes_noiseless_overlap() {
+        let zero = spectrum(&[(1.0, Value::NEG_INFINITY), (2.0, Value::NEG_INFINITY)]);
+        assert_eq!(
+            zero.integrated_noise_power(1.0, 2.0),
+            Some(Value::NEG_INFINITY)
+        );
+        for (start, stop) in [
+            (0.0, 1.0),
+            (2.0, 3.0),
+            (2.0, 1.0),
+            (-1.0, 2.0),
+            (Value::NAN, 2.0),
+            (1.0, Value::INFINITY),
+        ] {
+            assert_eq!(zero.integrated_noise_power(start, stop), None);
+        }
+        for points in [
+            [(2.0, 0.0), (1.0, 0.0)],
+            [(1.0, 0.0), (1.0, 0.0)],
+            [(1.0, Value::NAN), (2.0, 0.0)],
+            [(1.0, Value::INFINITY), (2.0, 0.0)],
+            [(Value::NEG_INFINITY, 0.0), (2.0, 0.0)],
+        ] {
+            assert_eq!(spectrum(&points).integrated_noise_power(1.0, 2.0), None);
+        }
+    }
+}
