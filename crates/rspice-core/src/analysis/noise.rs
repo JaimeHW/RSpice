@@ -615,6 +615,60 @@ pub struct NoiseSource {
     pub bsim3_flicker: Option<std::sync::Arc<Bsim3FlickerNoise>>,
 }
 
+/// Shared KF * |I|^AF / f^EF evaluation, including a retained coefficient scale.
+/// Callers choose their zero-frequency convention before using this function.
+pub(crate) fn flicker_density(
+    coefficient: Value,
+    binary_scale: i32,
+    current: Value,
+    af: Value,
+    ef: Value,
+    frequency: Value,
+) -> Value {
+    let current_power = current.abs().powf(af);
+    let frequency_power = frequency.powf(ef);
+    let numerator = coefficient * current_power;
+    let direct = numerator / frequency_power;
+    if binary_scale == 0
+        && current_power.is_normal()
+        && frequency_power.is_normal()
+        && numerator.is_normal()
+        && direct.is_normal()
+    {
+        return direct;
+    }
+    // Retain powf accuracy when only the product loses range; use the wider
+    // logarithm only when a power overflows, underflows or becomes subnormal.
+    let current = current.abs();
+    if !coefficient.is_finite()
+        || coefficient <= 0.0
+        || !current.is_finite()
+        || !frequency.is_finite()
+        || !af.is_finite()
+        || !ef.is_finite()
+    {
+        return direct;
+    }
+    if current_power.is_normal() && frequency_power.is_normal() {
+        return crate::numerics::scaled_exp_product_with_binary_scale(
+            &[coefficient, current_power],
+            &[frequency_power],
+            0.0,
+            binary_scale,
+        );
+    }
+    if current == 0.0 {
+        return if af > 0.0 {
+            0.0
+        } else if af < 0.0 {
+            Value::INFINITY
+        } else {
+            crate::numerics::scaled_power_law(coefficient, binary_scale, 1.0, 0.0, frequency, ef)
+        };
+    }
+    crate::numerics::scaled_power_law(coefficient, binary_scale, current, af, frequency, ef)
+}
+
 impl NoiseSource {
     /// Assign the canonical identity exported by the owning device model.
     pub fn with_identity(mut self, identity: NoiseSourceIdentity) -> Self {
@@ -889,27 +943,15 @@ impl NoiseSource {
                 2.0 * self.physical_constants.electron_charge * self.parameter
             }
             NoiseSourceType::Flicker => {
-                // Flicker noise: Si = KF * I^AF / f^EF (A²/Hz)
                 if frequency > 0.0 {
-                    let current_power = self.current.abs().powf(self.af);
-                    let frequency_power = frequency.powf(self.ef);
-                    let numerator = self.parameter * current_power;
-                    let density = numerator / frequency_power;
-                    if self.parameter_exponent == 0
-                        && current_power.is_normal()
-                        && frequency_power.is_normal()
-                        && numerator.is_normal()
-                        && density.is_normal()
-                    {
-                        density
-                    } else {
-                        self.flicker_density_scaled(
-                            frequency,
-                            current_power,
-                            frequency_power,
-                            density,
-                        )
-                    }
+                    flicker_density(
+                        self.parameter,
+                        self.parameter_exponent,
+                        self.current,
+                        self.af,
+                        self.ef,
+                        frequency,
+                    )
                 } else {
                     0.0 // Avoid division by zero
                 }
@@ -946,61 +988,6 @@ impl NoiseSource {
                 .unwrap_or(Value::NAN),
             NoiseSourceType::Bsim4CorrelatedThermal => 0.0,
         }
-    }
-
-    /// Restore range lost by intermediate powers/products. The common path
-    /// keeps powf accuracy; the wider logarithm is needed only when a power
-    /// itself overflows, underflows or rounds into the subnormal range.
-    #[cold]
-    fn flicker_density_scaled(
-        &self,
-        frequency: Value,
-        current_power: Value,
-        frequency_power: Value,
-        direct: Value,
-    ) -> Value {
-        let current = self.current.abs();
-        if !self.parameter.is_finite()
-            || self.parameter <= 0.0
-            || !current.is_finite()
-            || !frequency.is_finite()
-            || !self.af.is_finite()
-            || !self.ef.is_finite()
-        {
-            return direct;
-        }
-        if current_power.is_normal() && frequency_power.is_normal() {
-            return crate::numerics::scaled_exp_product_with_binary_scale(
-                &[self.parameter, current_power],
-                &[frequency_power],
-                0.0,
-                self.parameter_exponent,
-            );
-        }
-        if current == 0.0 {
-            return if self.af > 0.0 {
-                0.0
-            } else if self.af < 0.0 {
-                Value::INFINITY
-            } else {
-                crate::numerics::scaled_power_law(
-                    self.parameter,
-                    self.parameter_exponent,
-                    1.0,
-                    0.0,
-                    frequency,
-                    self.ef,
-                )
-            };
-        }
-        crate::numerics::scaled_power_law(
-            self.parameter,
-            self.parameter_exponent,
-            current,
-            self.af,
-            frequency,
-            self.ef,
-        )
     }
 
     /// Evaluate a source and require finite, nonnegative PSD evidence.

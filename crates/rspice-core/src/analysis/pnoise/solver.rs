@@ -12,6 +12,7 @@ use super::result::{NoiseContributor, PhaseNoisePoint, PnoiseResult};
 use crate::Value;
 use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::analysis::FrequencyGridError;
+use crate::analysis::noise::flicker_density;
 use std::f64::consts::PI;
 
 /// Phase noise solver state
@@ -152,17 +153,14 @@ pub enum NoisePsd {
 }
 
 impl NoisePsd {
-    /// Get PSD value at frequency
+    /// Get PSD value at frequency. Flicker models use their 1 Hz value for
+    /// nonpositive frequencies.
     pub fn at(&self, freq: Value) -> Value {
         match self {
             Self::White(psd) => *psd,
             Self::Flicker { kf, af, i_dc } => {
-                if freq > 0.0 {
-                    kf * i_dc.abs().powf(*af) / freq
-                } else {
-                    // Avoid division by zero - return value at 1 Hz
-                    kf * i_dc.abs().powf(*af)
-                }
+                let frequency = if freq > 0.0 { freq } else { 1.0 };
+                flicker_density(*kf, 0, *i_dc, *af, 1.0, frequency)
             }
             Self::Combined {
                 white,
@@ -170,11 +168,8 @@ impl NoisePsd {
                 af,
                 i_dc,
             } => {
-                let flicker = if freq > 0.0 {
-                    kf * i_dc.abs().powf(*af) / freq
-                } else {
-                    *kf * i_dc.abs().powf(*af)
-                };
+                let frequency = if freq > 0.0 { freq } else { 1.0 };
+                let flicker = flicker_density(*kf, 0, *i_dc, *af, 1.0, frequency);
                 white + flicker
             }
             Self::Custom(points) => {
@@ -222,7 +217,7 @@ impl NoisePsd {
             } => {
                 if *white > 0.0 {
                     // f_c where Kf * I^Af / f = white
-                    let f_c = kf * i_dc.abs().powf(*af) / white;
+                    let f_c = flicker_density(*kf, 0, *i_dc, *af, 1.0, *white);
                     Some(f_c)
                 } else {
                     None
@@ -459,6 +454,50 @@ impl std::error::Error for PnoiseError {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn flicker_density_and_corner_preserve_representable_products() {
+        for (kf, af, current, frequency, expected) in [
+            (1e-200, 2.0, 1e200, 1.0, 1e200),
+            (1e200, 2.0, 1e-200, 1.0, 1e-200),
+            (1e308, 1.0, 2.0, 1e308, 2.0),
+            (1e-300, 1.0, 1e-30, 1e-200, 1e-130),
+            (1.0, -2.0, 1e-200, 1e200, 1e200),
+        ] {
+            for i_dc in [current, -current] {
+                let flicker = NoisePsd::Flicker { kf, af, i_dc };
+                let combined = NoisePsd::Combined {
+                    white: frequency,
+                    kf,
+                    af,
+                    i_dc,
+                };
+                for actual in [flicker.at(frequency), combined.corner_freq().unwrap()] {
+                    assert!(
+                        (actual / expected - 1.0).abs() < 4.0 * Value::EPSILON,
+                        "KF={kf:e}, AF={af}, I={i_dc:e}, f={frequency:e}: {actual:e} vs {expected:e}"
+                    );
+                }
+                let sum = combined.at(frequency);
+                assert!((sum / (frequency + expected) - 1.0).abs() < 4.0 * Value::EPSILON);
+            }
+        }
+        let flicker = NoisePsd::Flicker {
+            kf: 2.0,
+            af: 2.0,
+            i_dc: -3.0,
+        };
+        let combined = NoisePsd::Combined {
+            white: 5.0,
+            kf: 2.0,
+            af: 2.0,
+            i_dc: -3.0,
+        };
+        for frequency in [0.0, -1.0, -1e300] {
+            assert_eq!(flicker.at(frequency), 18.0);
+            assert_eq!(combined.at(frequency), 23.0);
+        }
+    }
 
     fn solver_with_noise(carrier_freq: Value) -> PnoiseSolver {
         let config = PnoiseConfig::new("out", 1.0e3, 1.0e5);
