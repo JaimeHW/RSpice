@@ -11,6 +11,93 @@ const MAX_HB_APFT_MATRIX_VALUES: usize = 4_194_304;
 const MAX_HB_APFT_LATTICE_WORK: usize = 16_777_216;
 
 impl Engine {
+    /// Minimum basis for the authored clocks supported by the HB source
+    /// stamper. This is a lower bound, not a nonlinear spectral-error estimate.
+    fn hb_source_required_harmonic(
+        spec: &SourceSpec,
+        fundamental: Value,
+    ) -> Result<usize, SimulationError> {
+        let harmonic = |frequency, kind| {
+            Self::hb_periodic_source_harmonic(frequency, fundamental, usize::MAX, kind)
+        };
+        match spec {
+            SourceSpec::Distortion { inner, .. }
+            | SourceSpec::AcTransient { transient: inner, .. }
+            | SourceSpec::DcTransient { transient: inner, .. }
+            | SourceSpec::DcAcTransient { transient: inner, .. } => {
+                Self::hb_source_required_harmonic(inner, fundamental)
+            }
+            SourceSpec::RfPort { inner, port } => {
+                let inner = Self::hb_source_required_harmonic(inner, fundamental)?;
+                let drive = match port.drive_tone() {
+                    Some((amplitude, frequency, _)) if amplitude != 0.0 => {
+                        harmonic(frequency, "RF port")?
+                    }
+                    _ => 0,
+                };
+                Ok(inner.max(drive))
+            }
+            SourceSpec::Sin { amplitude, frequency, .. } if *amplitude != 0.0 => {
+                harmonic(*frequency, "SIN")
+            }
+            SourceSpec::Pulse { v1, v2, period, .. } if v1 != v2 => {
+                harmonic(period.recip(), "PULSE")
+            }
+            SourceSpec::Dc(_)
+            | SourceSpec::Ac { .. }
+            | SourceSpec::DcAc { .. }
+            | SourceSpec::Sin { .. }
+            | SourceSpec::Pulse { .. }
+            // Unsupported waveforms retain the source stamper's diagnostic.
+            | SourceSpec::Pwl { .. }
+            | SourceSpec::PwlFile { .. }
+            | SourceSpec::Pat { .. }
+            | SourceSpec::Exp { .. }
+            | SourceSpec::Sffm { .. }
+            | SourceSpec::Am { .. }
+            | SourceSpec::TrNoise { .. }
+            | SourceSpec::TrRandom { .. } => Ok(0),
+        }
+    }
+
+    /// A fresh or shooting-derived periodic basis must include the actual
+    /// carrier even when the requested conversion window is narrow. A retained
+    /// HB basis is authenticated separately and must never enter this path.
+    pub(in crate::engine::hb) fn hb_config_for_dependent_sources(
+        &self,
+        circuit: &CircuitData,
+        mut config: HbConfig,
+        retained_capacity: Option<usize>,
+        abort: &dyn AbortSignal,
+    ) -> Result<HbConfig, SimulationError> {
+        let sources = circuit
+            .voltage_sources
+            .source_specs
+            .iter()
+            .chain(&circuit.current_sources.source_specs);
+        for (index, spec) in sources.enumerate() {
+            if index.is_multiple_of(32) && abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
+            if let Some(spec) = spec {
+                config.num_harmonics = config.num_harmonics.max(Self::hb_source_required_harmonic(
+                    spec,
+                    config.fundamental_freq,
+                )?);
+            }
+        }
+        if let Some(capacity) = retained_capacity
+            && config.num_harmonics > capacity
+        {
+            return Err(SimulationError::Circuit(format!(
+                "dependent periodic source basis requires {} harmonics, but the retained orbit has sampling capacity {capacity}",
+                config.num_harmonics
+            )));
+        }
+        self.hb_validate_config(&config)?;
+        Ok(config)
+    }
+
     pub(in crate::engine::hb) fn hb_source_spectrum(
         fallback_dc: Value,
         ac_mag: Value,
@@ -363,13 +450,6 @@ impl Engine {
             .into());
         }
 
-        let source_frequency = period.recip();
-        let source_harmonic = Self::hb_periodic_source_harmonic(
-            source_frequency,
-            config.fundamental_freq,
-            config.num_harmonics,
-            "PULSE",
-        )?;
         let delta = v2 - v1;
         let dc = v1 + delta * (width + 0.5 * rise + 0.5 * fall) / period;
         if v2 == v1 {
@@ -378,6 +458,12 @@ impl Engine {
                 harmonics: Vec::new(),
             });
         }
+        let source_harmonic = Self::hb_periodic_source_harmonic(
+            period.recip(),
+            config.fundamental_freq,
+            config.num_harmonics,
+            "PULSE",
+        )?;
 
         if spice_dialect == crate::engine::SpiceDialect::Xyce {
             if config.tones.len() > 1 {

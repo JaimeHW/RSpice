@@ -122,6 +122,21 @@ impl Engine {
         }
 
         let (circuit, rf_ports) = self.build_circuit_with_rf_ports(netlist, &[], abort)?;
+        let hb_config = match &operating_point {
+            Some(PacOperatingPoint::HarmonicBalance(_)) => hb_config,
+            point => self.hb_config_for_dependent_sources(
+                &circuit,
+                hb_config,
+                match point {
+                    Some(PacOperatingPoint::Shooting(point)) => {
+                        Some(point.spectral_harmonic_capacity())
+                    }
+                    _ => None,
+                },
+                abort,
+            )?,
+        };
+        let op_harmonics = hb_config.num_harmonics;
         let num_nodes = circuit.num_nodes();
         if num_nodes == 0 {
             return Err(SimulationError::Circuit("Circuit has no nodes".to_string()));

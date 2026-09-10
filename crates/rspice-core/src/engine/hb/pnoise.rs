@@ -536,10 +536,6 @@ impl Engine {
         };
         let hb_config = self.hb_config_for_netlist(netlist, hb_config)?;
         self.hb_validate_config(&hb_config)?;
-        // A retained HB orbit can contain drive harmonics well beyond the
-        // conversion window. Preserve that complete basis for source
-        // modulation and account for its actual storage requirement.
-        let op_harmonics = hb_config.num_harmonics;
         if let Some(PnoiseOperatingPoint::HarmonicBalance(point)) = &operating_point {
             point.authenticate_for_reuse(netlist, &self.config, &hb_config)?;
         }
@@ -549,6 +545,23 @@ impl Engine {
 
         let circuit = self.build_circuit_with_abort(netlist, abort)?;
         validate_resistor_noise_metadata(&circuit)?;
+        let hb_config = match &operating_point {
+            Some(PnoiseOperatingPoint::HarmonicBalance(_)) => hb_config,
+            point => self.hb_config_for_dependent_sources(
+                &circuit,
+                hb_config,
+                match point {
+                    Some(PnoiseOperatingPoint::Shooting(point)) => {
+                        Some(point.spectral_harmonic_capacity())
+                    }
+                    _ => None,
+                },
+                abort,
+            )?,
+        };
+        // Preserve the complete selected carrier basis for modulation and
+        // storage accounting, independently of the conversion window.
+        let op_harmonics = hb_config.num_harmonics;
         let num_nodes = circuit.num_nodes();
         if num_nodes == 0 {
             return Err(SimulationError::Circuit("Circuit has no nodes".to_string()));

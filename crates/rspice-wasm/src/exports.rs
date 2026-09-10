@@ -635,6 +635,57 @@ mod wasm_tests {
     }
 
     #[wasm_bindgen_test]
+    fn dependent_carrier_basis_in_wasm() {
+        use rspice_core::abort_signal::NoAbort;
+        use rspice_core::analysis::{PacConfig, PssConfig};
+        let deck = rspice_core::Netlist::parse(
+            "Carrier bandwidth\nI1 0 out SIN(0 1 10)\nR1 out 0 RM 1\nC1 out 0 1u\n.model RM R(KF=1 AF=2 EF=1)\n.end\n",
+        ).unwrap();
+        let engine = rspice_core::Engine::default();
+        let point = engine
+            .run_pss_operating_point_with_abort(
+                &deck,
+                PssConfig::new(1.0)
+                    .with_harmonics(2)
+                    .with_points_per_period(1024)
+                    .with_tstab(0.0),
+                &NoAbort,
+            )
+            .unwrap();
+        let noise = engine
+            .run_pnoise_from_pss_with_abort(&deck, &[0.25], "out", None, None, 0, &point, &NoAbort)
+            .unwrap();
+        let flicker = noise
+            .contributors
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case("r1 flicker"))
+            .unwrap()
+            .1[0];
+        let omega_c = std::f64::consts::TAU * 1e-6;
+        let expected = 0.25 * (1.0 / 9.75 + 1.0 / 10.25)
+            / (1.0 + (10.0 * omega_c).powi(2))
+            / (1.0 + (0.25 * omega_c).powi(2));
+        assert!((flicker / expected - 1.0).abs() < 2e-9);
+        let pac = engine
+            .run_pac_from_pss_with_abort(
+                &deck,
+                PacConfig::new()
+                    .with_fundamental(1.0)
+                    .with_sweep(0.25, 0.25, 1)
+                    .with_sidebands(0, 0)
+                    .with_input_source("I1")
+                    .with_output_node("out"),
+                &point,
+                &NoAbort,
+            )
+            .unwrap();
+        let transfer = pac.result.conversion_matrix.get(0, 0, 0).unwrap();
+        let real = 1.0 / (1.0 + (0.25 * omega_c).powi(2));
+        assert!((transfer.re - real).abs() < 2e-12);
+        assert!((transfer.im + real * 0.25 * omega_c).abs() < 2e-12);
+    }
+
+    #[wasm_bindgen_test]
     fn retained_flicker_modulation_bandwidth_in_wasm() {
         for branch_form in [false, true] {
             let option = if branch_form {

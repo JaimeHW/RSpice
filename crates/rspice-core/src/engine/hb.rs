@@ -1659,6 +1659,67 @@ mod tests {
     use crate::{SimulationConfig, SpiceDialect};
 
     #[test]
+    fn dependent_source_basis_preserves_clock_wrappers_and_limits() {
+        let engine = Engine::default();
+        let config = HbConfig::new(1.0).with_harmonics(8).with_oversample(4);
+        for (source, expected) in [
+            ("I1 0 out DC 0 AC 1 SIN(0 1 10)", 10),
+            ("V1 out 0 PULSE(0 1 0 1m 1m 48m 100m)", 10),
+            ("V1 out 0 SIN(0 0.1 11) portnum 1 z0 50 pwr=50u freq=13", 13),
+            ("I1 0 out SIN(0 0 1e100)", 8),
+            ("V1 out 0 PULSE(1 1 0 0 0 0 1e-100)", 8),
+        ] {
+            let deck =
+                Netlist::parse(&format!("Carrier basis\n{source}\nR1 out 0 1\n.end\n")).unwrap();
+            let circuit = engine.build_circuit(&deck).unwrap();
+            let selected = engine
+                .hb_config_for_dependent_sources(&circuit, config.clone(), Some(16), &NoAbort)
+                .unwrap();
+            assert_eq!(selected.num_harmonics, expected, "{source}");
+            engine
+                .run_pnoise(&deck, 1.0, &[0.25], "out", None, None, 0)
+                .unwrap();
+        }
+
+        let deck =
+            Netlist::parse("Carrier limits\nI1 0 out SIN(0 1 200)\nR1 out 0 1\n.end\n").unwrap();
+        let circuit = engine.build_circuit(&deck).unwrap();
+        let error = engine
+            .hb_config_for_dependent_sources(&circuit, config.clone(), Some(128), &NoAbort)
+            .unwrap_err();
+        assert!(error.to_string().contains("sampling capacity 128"));
+        let mut limited = SimulationConfig::default();
+        limited.resource_limits.max_analysis_points = 128;
+        let error = Engine::new(limited)
+            .hb_config_for_dependent_sources(&circuit, config.clone(), None, &NoAbort)
+            .unwrap_err();
+        assert!(matches!(error, SimulationError::ResourceLimit(_)));
+        let abort = crate::abort_signal::CountingAbort::new(0);
+        assert!(matches!(
+            engine.hb_config_for_dependent_sources(&circuit, config.clone(), None, &abort,),
+            Err(SimulationError::Aborted)
+        ));
+        assert_eq!(abort.count(), 1);
+        for frequency in [10.25, 1e100] {
+            let source = SourceSpec::Sin {
+                offset: 0.0,
+                amplitude: 1.0,
+                frequency,
+                delay: 0.0,
+                damping: 0.0,
+                phase: 0.0,
+            };
+            let mut circuit = engine.build_circuit(&deck).unwrap();
+            circuit.current_sources.source_specs[0] = Some(source);
+            assert!(
+                engine
+                    .hb_config_for_dependent_sources(&circuit, config.clone(), None, &NoAbort,)
+                    .is_err()
+            );
+        }
+    }
+
+    #[test]
     fn retained_pss_projection_preserves_phase_at_extreme_periods() {
         let engine = Engine::new(SimulationConfig::default());
         for frequency in [1e-308, 1e3, 1e18] {
