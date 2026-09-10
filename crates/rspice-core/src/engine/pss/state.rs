@@ -26,6 +26,7 @@ enum VoltageBranch {
 
 #[derive(Debug, Clone, Copy)]
 enum ForestValue {
+    Zero,
     State(usize),
     Source(usize),
     BehavioralSource(usize),
@@ -41,7 +42,8 @@ struct ForestEdge {
 
 /// A spanning forest removes redundant electrical charge-voltage coordinates.
 /// Independent voltage sources enter the forest first: their prescribed
-/// voltages are constraints, never shooting unknowns. The remaining branch
+/// voltages are constraints, never shooting unknowns. Exact zero-ohm branches
+/// prescribe zero voltage in the same forest. The remaining branch
 /// voltages follow from this forest, including opposite terminal orientations
 /// and charge branches parallel to, or in loops with, other branches.
 #[derive(Debug, Clone)]
@@ -96,6 +98,20 @@ impl PssStateBasis {
                     source.node_neg,
                     ForestValue::BehavioralSource(index),
                 );
+            }
+        }
+        // Use the effective large-signal resistance, not the reported value,
+        // AC resistance or branch-selection tolerance. A finite nonzero R
+        // still leaves a charge coordinate free, however small it is.
+        for ((&pos, &neg), &resistance) in circuit
+            .resistor_branches
+            .node_pos
+            .iter()
+            .zip(&circuit.resistor_branches.node_neg)
+            .zip(&circuit.resistor_branches.resistances)
+        {
+            if resistance == 0.0 {
+                add(pos, neg, ForestValue::Zero);
             }
         }
         for (index, stamp) in circuit.capacitors.stamps.iter().enumerate() {
@@ -368,6 +384,7 @@ impl PssCircuit {
         self.solution_scratch.fill(0.0);
         for edge in &self.basis.forest {
             let value = match edge.value {
+                ForestValue::Zero => 0.0,
                 ForestValue::State(index) => state[index],
                 ForestValue::Source(index) => {
                     self.circuit.voltage_sources.transient_value_at(index, 0.0)
@@ -813,6 +830,35 @@ mod tests {
             circuit.set_state(&state).unwrap();
             assert_eq!(circuit.extract_state(), state);
             assert_eq!(circuit.clone().bjt_history, circuit.bjt_history);
+        }
+    }
+
+    #[test]
+    fn voltage_forest_reduces_exact_shorts_but_preserves_near_zero_charge() {
+        for resistance in [0.0_f64, -0.0, 1e-12, -1e-12] {
+            for (first, second) in [("a mid", "mid b"), ("mid a", "b mid")] {
+                let netlist = Netlist::parse(&format!(
+                    "Shorted charge forest\nV1 a 0 2\nRz1 {first} {resistance:e} AC=0\nRz2 {second} 0\nR1 c 0 1k\nC1 a b 1n\nC2 b c 2n\nC3 a c 3n\nD1 c a dm\n.model dm D(IS=0 CJO=1n M=0)\n.options device zeroresistancetol=1\n.end\n"
+                )).unwrap();
+                let mut circuit =
+                    PssCircuit::new(Engine::default().build_circuit(&netlist).unwrap());
+                let (names, values, first_voltage) = if resistance == 0.0 {
+                    (vec!["C:C2"], vec![0.5], 0.0)
+                } else {
+                    (vec!["C:C1", "C:C2"], vec![0.25, 0.5], 0.25)
+                };
+                assert_eq!(circuit.basis.names(&circuit), names, "R={resistance}");
+                circuit.set_state(&values).unwrap();
+                assert_eq!(circuit.extract_state(), values);
+                assert_eq!(
+                    circuit.capacitors.v_prev,
+                    [first_voltage, 0.5, first_voltage + 0.5]
+                );
+                assert_eq!(circuit.diode_history.vd_prev, [-first_voltage - 0.5]);
+                assert!(
+                    (circuit.diode_history.qd_prev[0] + (first_voltage + 0.5) * 1e-9).abs() < 1e-24
+                );
+            }
         }
     }
 

@@ -635,6 +635,54 @@ mod wasm_tests {
     }
 
     #[wasm_bindgen_test]
+    fn pss_zero_ohm_constraint_in_wasm() {
+        use rspice_core::abort_signal::NoAbort;
+        use rspice_core::analysis::{FloquetSpectrumEvidence, PssConfig};
+        let deck = rspice_core::Netlist::parse("Shorted charge\nI1 0 out SIN(0.5 1 10 0 0 37)\nR1 0 out RM 0 AC=2\nC1 out 0 1u\nD1 out 0 DM\n.model RM R(KF=1 AF=2 EF=1)\n.model DM D(IS=0 CJO=1n M=0)\n.end\n").unwrap();
+        let engine = rspice_core::Engine::default();
+        let point = engine
+            .run_pss_operating_point_with_abort(
+                &deck,
+                PssConfig::new(1.0)
+                    .with_harmonics(2)
+                    .with_points_per_period(1024)
+                    .with_tstab_periods(0),
+                &NoAbort,
+            )
+            .unwrap();
+        assert!(point.shooting_state_basis().is_empty());
+        let result = &point.analysis().result;
+        assert_eq!(
+            result.floquet_evidence,
+            FloquetSpectrumEvidence::NoDynamicModes
+        );
+        assert!(
+            result.waveforms[0]
+                .values
+                .iter()
+                .all(|voltage| *voltage == 0.0)
+        );
+        assert_eq!(result.branch_names, ["R1"]);
+        for (&time, &current) in result.time.iter().zip(&result.branch_waveforms[0].values) {
+            let expected =
+                -0.5 - (std::f64::consts::TAU * 10.0 * time + 37.0_f64.to_radians()).sin();
+            assert!((current - expected).abs() < 2e-12);
+        }
+        let noise = engine
+            .run_pnoise_from_pss_with_abort(&deck, &[0.25], "out", None, None, 0, &point, &NoAbort)
+            .unwrap();
+        let flicker = noise
+            .contributors
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case("r1 flicker"))
+            .unwrap()
+            .1[0];
+        let expected = (4.0 + 1.0 / 9.75 + 1.0 / 10.25)
+            / (1.0 + (std::f64::consts::TAU * 0.25 * 2.0 * 1.001e-6).powi(2));
+        assert!((flicker / expected - 1.0).abs() < 2e-12);
+    }
+
+    #[wasm_bindgen_test]
     fn dependent_carrier_basis_in_wasm() {
         use rspice_core::abort_signal::NoAbort;
         use rspice_core::analysis::{PacConfig, PssConfig};

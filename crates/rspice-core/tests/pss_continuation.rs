@@ -834,3 +834,47 @@ fn frozen_source_contract_rejects_ambiguous_or_unknown_names() {
             .contains("unknown independent source 'vmissing'")
     );
 }
+
+#[test]
+fn zero_ohm_charge_constraints_survive_transient_continuation() {
+    let deck = Netlist::parse("Shorted charge continuation\nI1 0 out SIN(0.5 1 1 0 0 37)\nR1 out 0 0 AC=2\nC1 out 0 1u\nD1 out 0 DM\n.model DM D(IS=0 CJO=1n M=0)\n.end\n").unwrap();
+    let engine = Engine::default();
+    let (analysis, state) = engine
+        .run_pss_with_continuation_state(
+            &deck,
+            PssConfig::new(1.0)
+                .with_points_per_period(128)
+                .with_tstab_periods(0),
+        )
+        .unwrap();
+    assert!(analysis.monodromy.is_empty());
+    let (continued, _) = engine
+        .run_tran_from_pss_state(&deck, &state, 0.1, 0.01)
+        .unwrap();
+    assert!(continued.voltages[0].iter().all(|voltage| *voltage == 0.0));
+    let branch = |name: &str| {
+        continued
+            .branch_names
+            .iter()
+            .position(|branch| branch.eq_ignore_ascii_case(name))
+            .unwrap()
+    };
+    for name in ["C1", "D1"] {
+        assert!(
+            continued.branch_currents[branch(name)]
+                .iter()
+                .all(|current| *current == 0.0)
+        );
+    }
+    for (&time, &current) in continued
+        .time
+        .iter()
+        .zip(&continued.branch_currents[branch("R1")])
+    {
+        let expected = 0.5 + (std::f64::consts::TAU * time + 37.0_f64.to_radians()).sin();
+        assert!(
+            (current - expected).abs() < 2e-12,
+            "t={time}: {current} vs {expected}"
+        );
+    }
+}

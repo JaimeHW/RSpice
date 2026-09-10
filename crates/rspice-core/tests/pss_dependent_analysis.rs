@@ -189,3 +189,88 @@ fn retained_pss_branch_currents_drive_flicker_including_zero_dc_resistance() {
         }
     }
 }
+
+#[test]
+fn zero_ohm_constraints_preserve_currents_without_spurious_charge_modes() {
+    for (terminals, polarity) in [("out 0", 1.0), ("0 out", -1.0)] {
+        let deck = Netlist::parse(&format!(
+            "Shorted charge\nI1 0 out SIN(0.5 1 10 0 0 37)\nR1 {terminals} RM 0 AC=2\nC1 out 0 1u\nD1 out 0 DM\n.model RM R(KF=1 AF=2 EF=1)\n.model DM D(IS=0 CJO=1n M=0)\n.end\n"
+        )).unwrap();
+        let engine = Engine::default();
+        let point = engine
+            .run_pss_operating_point_with_abort(
+                &deck,
+                PssConfig::new(1.0)
+                    .with_harmonics(2)
+                    .with_points_per_period(1024)
+                    .with_tstab_periods(0),
+                &NoAbort,
+            )
+            .expect("an ideal short prescribes zero voltage across both charge branches");
+        assert!(point.shooting_state_basis().is_empty());
+        assert!(point.shooting_state().is_empty());
+        assert!(point.analysis().monodromy.is_empty());
+        assert_eq!(
+            point.analysis().result.floquet_evidence,
+            rspice_core::analysis::FloquetSpectrumEvidence::NoDynamicModes
+        );
+        let result = &point.analysis().result;
+        assert_eq!(result.branch_names, ["R1"]);
+        for (&time, &current) in result.time.iter().zip(&result.branch_waveforms[0].values) {
+            let expected = polarity
+                * (0.5 + (std::f64::consts::TAU * 10.0 * time + 37.0_f64.to_radians()).sin());
+            assert!(
+                (current - expected).abs() < 2e-12,
+                "{terminals}, t={time}: {current} vs {expected}"
+            );
+        }
+        assert!(
+            result.waveforms[0]
+                .values
+                .iter()
+                .all(|voltage| *voltage == 0.0)
+        );
+        let noise = engine
+            .run_pnoise_from_pss_with_abort(&deck, &[0.25], "out", None, None, 0, &point, &NoAbort)
+            .unwrap();
+        let flicker = noise
+            .contributors
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case("r1 flicker"))
+            .unwrap()
+            .1[0];
+        let expected = (4.0 + 1.0 / 9.75 + 1.0 / 10.25)
+            / (1.0 + (std::f64::consts::TAU * 0.25 * 2.0 * 1.001e-6).powi(2));
+        assert!(
+            (flicker / expected - 1.0).abs() < 2e-12,
+            "{flicker} vs {expected}"
+        );
+    }
+}
+
+#[test]
+fn zero_ohm_reduction_does_not_accept_nonunique_or_contradictory_mna_constraints() {
+    for constraints in [
+        "R1 out 0 0\nR2 out 0 0",
+        "V1 out 0 0\nR1 out 0 0",
+        "V1 out 0 1\nR1 out 0 0",
+        "V1 a 0 1\nR1 a out 0\nR2 out 0 0",
+    ] {
+        let deck = Netlist::parse(&format!(
+            "Ideal constraint failure\nI1 0 out SIN(0 1 1)\nC1 out 0 1u\n{constraints}\n.end\n"
+        ))
+        .unwrap();
+        assert!(
+            Engine::default()
+                .run_pss_operating_point_with_abort(
+                    &deck,
+                    PssConfig::new(1.0)
+                        .with_points_per_period(16)
+                        .with_tstab_periods(0),
+                    &NoAbort
+                )
+                .is_err(),
+            "invalid ideal constraints must not publish an operating point: {constraints}"
+        );
+    }
+}
