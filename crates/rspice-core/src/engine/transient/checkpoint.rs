@@ -1205,8 +1205,10 @@ pub(crate) fn simulation_checkpoint_identity(config: &SimulationConfig) -> Strin
     // v68 preserves MOS noise parameters and their dialect-specific laws.
     // v69 retains representable flicker density across intermediate power overflow.
     // v70 applies ngspice MOS3 noise width narrowing independently of mask shifts.
-    // v71 implements MOS NLEV3 channel noise and consistent MOS1 body derivatives.
-    hasher.update(b"rspice-transient-resolved-config-v71\0");
+    // v73 retains out-of-range MOS flicker coefficients until frequency evaluation.
+    // v74 preserves semiconductor flicker laws and configured JFET junction GMIN.
+    // v78 equilibrates and verifies private BJT solves without absolute pivot floors.
+    hasher.update(b"rspice-transient-resolved-config-v78\0");
     hash_field(&mut hasher, "temperature", config.temperature.to_bits());
     hash_field(&mut hasher, "ramptime", config.ramptime.to_bits());
     hash_field(&mut hasher, "digital_delay_type", config.digital_delay_type);

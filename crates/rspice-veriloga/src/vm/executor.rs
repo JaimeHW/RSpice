@@ -335,6 +335,17 @@ impl<'a> Vm<'a> {
             Instruction::PushTime => {
                 self.stack.push(self.context.time);
             }
+            Instruction::PushSimParamValue(parameter) => {
+                self.stack.push(self.context.simparam(*parameter)?);
+            }
+            Instruction::PushSimParamPresent(parameter) => {
+                self.stack.push(f64::from(
+                    self.context
+                        .simulation_parameters
+                        .get_parameter(*parameter)
+                        .is_some(),
+                ));
+            }
             Instruction::PushMfactor => {
                 self.stack.push(self.context.multiplicity);
             }

@@ -8,7 +8,14 @@ impl Bjt {
         vbe_eff: Value,
         vbc_eff: Value,
     ) -> TransportChargeState {
-        let gmin = self.nonlinear_branch_gmin();
+        // Xyce N_DEV_BJT.C includes GMIN in iBE/iBC before transport and
+        // stored charge. Ngspice bjtload.c applies it to leakage branches
+        // instead, so it must not generate GP transport or diffusion charge.
+        let gmin = if self.xyce_compatibility {
+            self.nonlinear_branch_gmin()
+        } else {
+            0.0
+        };
         let ifi = self.diode_current(vbe_eff, self.nf) + gmin * vbe_eff;
         let iri = self.diode_current_with_is(self.is * self.isrr.max(0.0), vbc_eff, self.nr)
             + gmin * vbc_eff;
@@ -39,14 +46,17 @@ impl Bjt {
             0.0
         };
 
-        let inv_rolloff_f = if self.ikf > 0.0 { 1.0 / self.ikf } else { 0.0 };
-        let inv_rolloff_r = if self.ikr > 0.0 { 1.0 / self.ikr } else { 0.0 };
-        let (qb, dqb_dvbe_eff, dqb_dvbc_eff) = if inv_rolloff_f == 0.0 && inv_rolloff_r == 0.0 {
+        // Divide the already-scaled current by its scaled knee. Forming
+        // 1/IKF first overflows for small, valid parallel instances.
+        let normalized = |current: Value, knee: Value| {
+            if knee > 0.0 { current / knee } else { 0.0 }
+        };
+        let (qb, dqb_dvbe_eff, dqb_dvbc_eff) = if self.ikf == 0.0 && self.ikr == 0.0 {
             (q1.max(1e-12), dq1_dvbe_eff, dq1_dvbc_eff)
         } else {
-            let q2 = inv_rolloff_f * ifi + inv_rolloff_r * iri;
-            let dq2_dvbe_eff = inv_rolloff_f * gfi;
-            let dq2_dvbc_eff = inv_rolloff_r * gri;
+            let q2 = normalized(ifi, self.ikf) + normalized(iri, self.ikr);
+            let dq2_dvbe_eff = normalized(gfi, self.ikf);
+            let dq2_dvbc_eff = normalized(gri, self.ikr);
             let rolloff_arg = (1.0 + 4.0 * q2).max(0.0);
             let (rolloff_term, drolloff_dq2) = if self.nkf_given {
                 let nkf = self.nkf.clamp(1e-12, 1.0);
@@ -207,12 +217,15 @@ impl Bjt {
         );
 
         let (q1, dq1_dvbe_eff, dq1_dvbc_eff, _) = self.vbic_low_injection_charge(vbe_eff, vbc_eff);
-        let inv_rolloff_f = if self.ikf > 0.0 { 1.0 / self.ikf } else { 0.0 };
-        let inv_rolloff_r = if self.ikr > 0.0 { 1.0 / self.ikr } else { 0.0 };
-        let q2 = inv_rolloff_f * ifi + inv_rolloff_r * iri;
+        // Divide the already-scaled current by its scaled knee. Forming
+        // 1/IKF first overflows for small, valid parallel instances.
+        let normalized = |current: Value, knee: Value| {
+            if knee > 0.0 { current / knee } else { 0.0 }
+        };
+        let q2 = normalized(ifi, self.ikf) + normalized(iri, self.ikr);
         let (qb, dqb_dq1, dqb_dq2, _) = self.vbic_base_charge(q1, q2);
-        let dqb_dvbe_eff = dqb_dq1 * dq1_dvbe_eff + dqb_dq2 * inv_rolloff_f * gfi;
-        let dqb_dvbc_eff = dqb_dq1 * dq1_dvbc_eff + dqb_dq2 * inv_rolloff_r * gri;
+        let dqb_dvbe_eff = dqb_dq1 * dq1_dvbe_eff + dqb_dq2 * normalized(gfi, self.ikf);
+        let dqb_dvbc_eff = dqb_dq1 * dq1_dvbc_eff + dqb_dq2 * normalized(gri, self.ikr);
 
         let itzf = ifi / qb;
         let ditzf_dvbe_eff = gfi / qb - ifi * dqb_dvbe_eff / (qb * qb);
@@ -486,10 +499,8 @@ impl Bjt {
         let transport = self.transport_charge_state(vbe_eff, vbc_eff);
         let bc = self.base_collector_current_state(transport, vbc_eff);
 
-        // ngspice load discipline (bjtload.c / vbicload.c): every junction
-        // current carries a `CKTgmin` parallel. The parallels keep junction
-        // rows nonsingular at saturation boundaries, and gmin stepping ramps
-        // them through the device equations, not just the matrix diagonal.
+        // Numerical junction parallels participate in continuation and in
+        // the same branch currents and derivatives used for Newton loads.
         let gmin = self.nonlinear_branch_gmin();
         let (ibe_breakdown, dibe_breakdown_dvbe) =
             self.vbic13_reverse_be_breakdown_current(vbe_eff);
@@ -547,22 +558,21 @@ impl Bjt {
         } else {
             0.0
         };
-        // `transport.ifi` already contains the forward-junction GMIN and was
-        // divided by BF above for legacy GP.  Adding another parallel here
-        // would double-stamp that conductance.
-        let direct_be_gmin = if legacy_model { 0.0 } else { gmin };
-        // Legacy GP's reverse junction current already includes its GMIN
-        // parallel in `transport.iri`; the Xyce/Spice base and collector
-        // currents divide that complete I_BC branch by BR. VBIC keeps its
-        // independent direct junction GMIN path.
-        let direct_bc_gmin = if legacy_model { 0.0 } else { gmin };
-        let ib_be = wbe * ibe_normal + ibe_intrinsic_breakdown + direct_be_gmin * vbe_eff;
-        let dibe_dvbe = wbe * dibe_normal_dvbe + dibe_intrinsic_breakdown_dvbe + direct_be_gmin;
+        // Xyce GP already carries GMIN through transport. Ngspice GP
+        // adds it directly to the BE/BC leakage branches, without BF/BR
+        // division; VBIC also has direct junction parallels.
+        let direct_gmin = if legacy_model && self.xyce_compatibility {
+            0.0
+        } else {
+            gmin
+        };
+        let ib_be = wbe * ibe_normal + ibe_intrinsic_breakdown + direct_gmin * vbe_eff;
+        let dibe_dvbe = wbe * dibe_normal_dvbe + dibe_intrinsic_breakdown_dvbe + direct_gmin;
         let reverse_base_current = legacy_reverse_base_scale * transport.iri;
         let reverse_base_dvbc = legacy_reverse_base_scale * transport.gri;
-        let ibc = bc.ibc + reverse_base_current + direct_bc_gmin * vbc_eff;
+        let ibc = bc.ibc + reverse_base_current + direct_gmin * vbc_eff;
         let dibc_dvbe = bc.dibc_dvbe_eff;
-        let dibc_dvbc = bc.dibc_dvbc_eff + reverse_base_dvbc + direct_bc_gmin;
+        let dibc_dvbc = bc.dibc_dvbc_eff + reverse_base_dvbc + direct_gmin;
         let iciei = transport.itzf - transport.itzr;
         let diciei_dvbe = transport.ditzf_dvbe_eff - transport.ditzr_dvbe_eff;
         let diciei_dvbc = transport.ditzf_dvbc_eff - transport.ditzr_dvbc_eff;
@@ -613,10 +623,52 @@ mod tests {
     use std::collections::HashMap;
 
     #[test]
+    fn ngspice_gp_gmin_does_not_change_transport_or_stored_charge() {
+        let mut model = Bjt::new_npn("q".into(), 1, 2, 0).with_params(&HashMap::from([
+            ("IS".into(), 1e-14),
+            ("TF".into(), 1e-9),
+            ("TR".into(), 2e-9),
+            ("IKF".into(), 1e-3),
+            ("IKR".into(), 2e-3),
+            ("VAF".into(), 40.0),
+            ("VAR".into(), 10.0),
+            ("XTF".into(), 3.0),
+            ("ITF".into(), 1e-4),
+        ]));
+        model.set_junction_gmin(0.0);
+        let mut conditioned = model.clone();
+        conditioned.set_junction_gmin(1e-3);
+        for (vbe, vbc) in [(0.1, -0.9), (0.7, -0.3), (-0.2, 0.6)] {
+            let a = model.legacy_transport_charge_state(vbe, vbc);
+            let b = conditioned.legacy_transport_charge_state(vbe, vbc);
+            for (a, b) in [
+                (a.qb, b.qb),
+                (a.itzf, b.itzf),
+                (a.itzr, b.itzr),
+                (a.ditzf_dvbe_eff, b.ditzf_dvbe_eff),
+                (a.ditzr_dvbc_eff, b.ditzr_dvbc_eff),
+            ] {
+                assert_eq!(a, b);
+            }
+            let a = model.legacy_transient_charge_state_with_vbx(vbe, vbc, vbc, 0.0);
+            let b = conditioned.legacy_transient_charge_state_with_vbx(vbe, vbc, vbc, 0.0);
+            for (a, b) in [
+                (a.qbe, b.qbe),
+                (a.qbc, b.qbc),
+                (a.capbe, b.capbe),
+                (a.capbe_vbc, b.capbe_vbc),
+                (a.capbc, b.capbc),
+            ] {
+                assert_eq!(a, b);
+            }
+        }
+    }
+
+    #[test]
     fn legacy_itf_charge_and_derivatives_obey_instance_scaling() {
         for (isat, knee, scales) in [
-            (1e-16, 1e-4, &[1e-12, 0.1, 3.0, 1e12][..]),
-            (1e-26, 1e-26, &[0.1, 3.0, 1e12][..]),
+            (1e-16, 1e-4, &[1e-200, 1e-30, 1e-12, 0.1, 3.0, 1e12][..]),
+            (1e-26, 1e-26, &[1e-200, 1e-30, 0.1, 3.0, 1e12][..]),
         ] {
             for p in [1.0, -1.0] {
                 let mut unit = if p > 0.0 {

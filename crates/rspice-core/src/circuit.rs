@@ -656,9 +656,9 @@ pub struct CircuitData {
     /// Solver-controlled `$simparam` environment. This is deliberately not
     /// part of nonlinear device snapshots: rollback must not change the
     /// continuation stage selected by the engine.
-    #[cfg(feature = "veriloga-builtins-base")]
+    #[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
     pub(crate) generated_simulation_parameters:
-        crate::device::veriloga_builtins::GeneratedSimulationParameters,
+        rspice_veriloga_runtime::GeneratedSimulationParameters,
 }
 
 /// Stable probe metadata for inductor-backed branch measurements.

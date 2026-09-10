@@ -218,7 +218,7 @@ fn inputs<S: CfgScalar>(bias: &Bias, promote: impl Fn(f64) -> S) -> CfgEvalInput
         multiplicity: promote(1.0),
         time: promote(0.0),
         analyses: HashSet::new(),
-        simparams: HashMap::new(),
+        simparams: Default::default(),
         ddt: promote(0.0),
         ddt_scale: promote(0.0),
         idt: promote(0.0),

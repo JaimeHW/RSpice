@@ -138,6 +138,8 @@ pub(crate) enum NativeOp {
     LoadTime,
     Analysis(u8),
     LoadMfactor,
+    LoadSimParamValue(rspice_veriloga_runtime::SimulationParameter),
+    LoadSimParamPresent(rspice_veriloga_runtime::SimulationParameter),
     Add,
     Sub,
     Mul,
@@ -1581,6 +1583,14 @@ impl NativeProgram {
                 }
                 Instruction::Analysis(analysis_id) => {
                     ops.push(NativeOp::Analysis(*analysis_id));
+                    push_stack(&mut depth, &mut max_stack_depth);
+                }
+                Instruction::PushSimParamValue(parameter) => {
+                    ops.push(NativeOp::LoadSimParamValue(*parameter));
+                    push_stack(&mut depth, &mut max_stack_depth);
+                }
+                Instruction::PushSimParamPresent(parameter) => {
+                    ops.push(NativeOp::LoadSimParamPresent(*parameter));
                     push_stack(&mut depth, &mut max_stack_depth);
                 }
                 Instruction::PushMfactor => {
@@ -3296,6 +3306,9 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                             this.lower_third_derivative(temperature, first, second, third)
                         },
                     ),
+                    "simparam" => self.lower_simparam_action(name, args, true, |this, fallback| {
+                        this.lower_third_derivative(fallback, first, second, third)
+                    }),
                     "laplace_zp" | "laplace_zd" | "laplace_np" | "laplace_nd" => {
                         self.require_intrinsic_arity(name, args, 3)?;
                         let slot = self.laplace_slot(expr_id)?;
@@ -3639,9 +3652,12 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 [temperature] => self.expr_derivative_is_zero(*temperature, wrt),
                 _ => Ok(false),
             },
-            "simparam" | "white_noise" | "flicker_noise" | "noise_table" | "noise_table_log" => {
-                Ok(true)
-            }
+            "simparam" => match args {
+                [_] => Ok(true),
+                [_, fallback] => self.expr_derivative_is_zero(*fallback, wrt),
+                _ => Ok(false),
+            },
+            "white_noise" | "flicker_noise" | "noise_table" | "noise_table_log" => Ok(true),
             "slew" if (1..=3).contains(&args.len()) => {
                 for argument in args {
                     if !self.expr_derivative_is_zero(*argument, wrt)? {
@@ -3714,8 +3730,13 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 [temperature] => self.expr_second_derivative_is_zero(*temperature, first, second),
                 _ => Ok(false),
             },
-            "simparam" | "white_noise" | "flicker_noise" | "noise_table" | "noise_table_log"
-            | "floor" | "ceil" | "abs" | "fabs" => Ok(true),
+            "simparam" => match args {
+                [_] => Ok(true),
+                [_, fallback] => self.expr_second_derivative_is_zero(*fallback, first, second),
+                _ => Ok(false),
+            },
+            "white_noise" | "flicker_noise" | "noise_table" | "noise_table_log" | "floor"
+            | "ceil" | "abs" | "fabs" => Ok(true),
             "slew" if (1..=3).contains(&args.len()) => {
                 for argument in args {
                     if !self.expr_second_derivative_is_zero(*argument, first, second)? {
@@ -4877,7 +4898,10 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             }
             "atan2" => self.lower_atan2_derivative(name, args, wrt),
             "hypot" => self.lower_hypot_derivative(name, args, wrt),
-            "simparam" | "white_noise" | "flicker_noise" | "noise_table" | "noise_table_log" => {
+            "simparam" => self.lower_simparam_action(name, args, true, |this, fallback| {
+                this.lower_derivative(fallback, wrt)
+            }),
+            "white_noise" | "flicker_noise" | "noise_table" | "noise_table_log" => {
                 self.push(NativeOp::Const(0.0))
             }
             _ => Err(self.unsupported(format!("ddx derivative of intrinsic function '{name}'"))),
@@ -4901,7 +4925,9 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             ),
             "limit" => self.lower_limit_derivative(name, args, wrt),
             "table_model" => self.lower_table_model_derivative(expr_id, name, args, wrt),
-            "simparam" => self.push(NativeOp::Const(0.0)),
+            "simparam" => self.lower_simparam_action(name, args, true, |this, fallback| {
+                this.lower_derivative(fallback, wrt)
+            }),
             _ => Err(self.unsupported(format!("ddx derivative of system function '{name}'"))),
         }
     }
@@ -4929,7 +4955,9 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             "table_model" => Err(self.unsupported(format!(
                 "second derivative of system function '{name}' at expression {expr_id}"
             ))),
-            "simparam" => self.push(NativeOp::Const(0.0)),
+            "simparam" => self.lower_simparam_action(name, args, true, |this, fallback| {
+                this.lower_second_derivative(fallback, first, second)
+            }),
             _ => Err(self.unsupported(format!("second derivative of system function '{name}'"))),
         }
     }
@@ -5168,7 +5196,10 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 self.lower_second_derivative(args[1], first, second)?;
                 self.append_ifelse()
             }
-            "floor" | "ceil" | "simparam" | "white_noise" | "flicker_noise" | "noise_table"
+            "simparam" => self.lower_simparam_action(name, args, true, |this, fallback| {
+                this.lower_second_derivative(fallback, first, second)
+            }),
+            "floor" | "ceil" | "white_noise" | "flicker_noise" | "noise_table"
             | "noise_table_log" => self.push(NativeOp::Const(0.0)),
             "atan2" => self.lower_atan2_second_derivative(name, args, first, second),
             "hypot" => self.lower_hypot_second_derivative(name, args, first, second),
@@ -7151,7 +7182,9 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 self.require_intrinsic_arity(name, args, 0)?;
                 self.push(NativeOp::LoadMfactor)
             }
-            "simparam" => self.lower_simparam_intrinsic(name, args),
+            "simparam" => {
+                self.lower_simparam_action(name, args, false, |this, fallback| this.lower(fallback))
+            }
             "param_given" => self.lower_param_given_intrinsic(name, args),
             "port_connected" => self.lower_port_connected_intrinsic(name, args),
             "analysis" => self.lower_analysis_intrinsic(name, args),
@@ -7181,26 +7214,41 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         self.append_arithmetic("Mul")
     }
 
-    /// `$simparam`, answered at compile time.
-    ///
-    /// The generated-Rust backend answers it at run time instead — the CFG
-    /// carries a `SimParam` value and the emitter turns it into a
-    /// `simparam("gmin", fallback)` call — so the two backends disagree about
-    /// exactly the parameter that moves: a model reading `$simparam("gmin")`
-    /// follows gmin stepping when it is generated and does not when it is
-    /// compiled here. Closing that needs a `NativeOp` and a place for the
-    /// values in `EvalContext`, which is an ABI change across all three
-    /// emitters rather than a change to this function.
-    fn lower_simparam_intrinsic(&mut self, name: &str, args: &[ExprId]) -> JitResult<()> {
+    /// Lower the selected simulator value or model fallback. The derivative
+    /// routes share this branch so every order follows the same availability.
+    fn lower_simparam_action(
+        &mut self,
+        name: &str,
+        args: &[ExprId],
+        derivative: bool,
+        lower_fallback: impl FnOnce(&mut Self, ExprId) -> JitResult<()>,
+    ) -> JitResult<()> {
         self.require_intrinsic_arity_range(name, args, 1, 2)?;
-        let simparam_name = self.string_literal_argument(name, args[0])?;
-
-        if let Some(default) = args.get(1).copied() {
-            return self.lower(default);
+        let query = self.string_literal_argument(name, args[0])?;
+        let Some(parameter) = rspice_veriloga_runtime::SimulationParameter::from_name(query) else {
+            return if let Some(fallback) = args.get(1) {
+                lower_fallback(self, *fallback)
+            } else {
+                Err(self.unsupported(format!("simulation parameter '{query}' has no fallback")))
+            };
+        };
+        if let Some(fallback) = args.get(1) {
+            self.push(NativeOp::LoadSimParamPresent(parameter))?;
+            self.push(if derivative {
+                NativeOp::Const(0.0)
+            } else {
+                NativeOp::LoadSimParamValue(parameter)
+            })?;
+            lower_fallback(self, *fallback)?;
+            self.append_ifelse()
+        } else {
+            self.push(NativeOp::LoadSimParamValue(parameter))?;
+            if derivative {
+                self.push(NativeOp::Const(0.0))?;
+                self.append_checked_value()?;
+            }
+            Ok(())
         }
-
-        let value = crate::canonical_ir::cfg_lower::simparam_source_default(simparam_name);
-        self.push(NativeOp::Const(value))
     }
 
     fn lower_param_given_intrinsic(&mut self, name: &str, args: &[ExprId]) -> JitResult<()> {
@@ -8314,6 +8362,8 @@ fn is_parameter_default_op(op: &NativeOp) -> bool {
         NativeOp::Const(_)
             | NativeOp::LoadParam(_)
             | NativeOp::LoadParamGiven(_)
+            | NativeOp::LoadSimParamValue(_)
+            | NativeOp::LoadSimParamPresent(_)
             | NativeOp::Add
             | NativeOp::Sub
             | NativeOp::Mul
@@ -8379,6 +8429,8 @@ pub(crate) fn native_op_name(op: &NativeOp) -> &'static str {
         NativeOp::LoadTime => "LoadTime",
         NativeOp::Analysis(_) => "Analysis",
         NativeOp::LoadMfactor => "LoadMfactor",
+        NativeOp::LoadSimParamValue(_) => "LoadSimParamValue",
+        NativeOp::LoadSimParamPresent(_) => "LoadSimParamPresent",
         NativeOp::Add => "Add",
         NativeOp::Sub => "Sub",
         NativeOp::Mul => "Mul",
@@ -8448,6 +8500,8 @@ fn is_parameter_default_instruction(instruction: &Instruction) -> bool {
         Instruction::PushConst(_)
             | Instruction::PushParam(_)
             | Instruction::PushParamGiven(_)
+            | Instruction::PushSimParamValue(_)
+            | Instruction::PushSimParamPresent(_)
             | Instruction::Add
             | Instruction::Sub
             | Instruction::Mul
@@ -8511,6 +8565,8 @@ fn is_static_condition_instruction(instruction: &Instruction) -> bool {
             | Instruction::PushVariableDyn { .. }
             | Instruction::PushTemperature
             | Instruction::PushVt
+            | Instruction::PushSimParamValue(_)
+            | Instruction::PushSimParamPresent(_)
             | Instruction::PushMfactor
             | Instruction::Analysis(_)
             | Instruction::Add
@@ -9340,6 +9396,8 @@ pub(crate) fn native_op_stack_effect(op: &NativeOp) -> (usize, usize) {
         | NativeOp::LoadTime
         | NativeOp::Analysis(_)
         | NativeOp::LoadMfactor
+        | NativeOp::LoadSimParamValue(_)
+        | NativeOp::LoadSimParamPresent(_)
         | NativeOp::LoadPreludeSlot(_) => (0, 1),
 
         NativeOp::LoadVariableDyn { .. }
@@ -9537,6 +9595,8 @@ fn instruction_name(instruction: &Instruction) -> &'static str {
         Instruction::PushVt => "PushVt",
         Instruction::PushTime => "PushTime",
         Instruction::PushMfactor => "PushMfactor",
+        Instruction::PushSimParamValue(_) => "PushSimParamValue",
+        Instruction::PushSimParamPresent(_) => "PushSimParamPresent",
         Instruction::PushPortConnected(_) => "PushPortConnected",
         Instruction::ZiState(_) => "ZiState",
         Instruction::ZiStateDerivative(_) => "ZiStateDerivative",

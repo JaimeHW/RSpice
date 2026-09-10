@@ -190,6 +190,10 @@ pub enum Node {
     Vt,
     /// Instance multiplicity (`$mfactor`).
     Mfactor,
+    /// Required simulator-owned value; unavailable values are errors.
+    SimParamValue(rspice_veriloga_runtime::SimulationParameter),
+    /// Whether the simulator currently provides a numeric query.
+    SimParamPresent(rspice_veriloga_runtime::SimulationParameter),
     /// Whether an external terminal was connected on this instance.
     PortConnected(u32),
     /// Binary operation.
@@ -945,6 +949,8 @@ pub fn for_each_child<F: FnMut(NodeId)>(arena: &ExprArena, node: &Node, f: &mut 
         | Node::Time
         | Node::Temperature
         | Node::Vt
+        | Node::SimParamValue(_)
+        | Node::SimParamPresent(_)
         | Node::Mfactor
         | Node::PortConnected(_)
         | Node::Analysis(_)
@@ -1326,6 +1332,8 @@ pub fn rebuild_children(
         | Node::Time
         | Node::Temperature
         | Node::Vt
+        | Node::SimParamValue(_)
+        | Node::SimParamPresent(_)
         | Node::Mfactor
         | Node::PortConnected(_)
         | Node::Analysis(_)

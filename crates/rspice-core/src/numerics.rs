@@ -15,6 +15,153 @@ pub mod rustfft_qualification;
 
 use crate::Value;
 
+/// Scalar operations for the small, stack-allocated device reductions.
+pub(crate) trait DenseScalar:
+    Copy + Default + std::ops::SubAssign + std::ops::Mul<Output = Self>
+{
+    fn magnitude(self) -> Value;
+    fn finite(self) -> bool;
+    fn scale_down(self, scale: Value) -> Self;
+    fn quotient(self, divisor: Self) -> Self;
+}
+
+impl DenseScalar for Value {
+    fn magnitude(self) -> Value {
+        self.abs()
+    }
+    fn finite(self) -> bool {
+        self.is_finite()
+    }
+    fn scale_down(self, scale: Value) -> Self {
+        self / scale
+    }
+    fn quotient(self, divisor: Self) -> Self {
+        self / divisor
+    }
+}
+
+impl DenseScalar for crate::Complex64 {
+    fn magnitude(self) -> Value {
+        self.re.abs().max(self.im.abs())
+    }
+    fn finite(self) -> bool {
+        self.re.is_finite() && self.im.is_finite()
+    }
+    fn scale_down(self, scale: Value) -> Self {
+        self / scale
+    }
+    fn quotient(self, divisor: Self) -> Self {
+        // Complex's generic division squares its denominator and can lose
+        // a tiny numerator product even when that square is normal. Scale
+        // before either product, without forming a reciprocal first.
+        let scale = divisor.magnitude();
+        let b = divisor / scale;
+        let denominator = b.norm_sqr();
+        let a = self / scale;
+        let a = if a.finite() {
+            a / denominator
+        } else {
+            // The normalized denominator lies in [1, 2]. Apply it first
+            // when self/scale would overflow but the quotient may fit.
+            (self / denominator) / scale
+        };
+        Self::new(a.re * b.re + a.im * b.im, a.im * b.re - a.re * b.im)
+    }
+}
+
+/// Row-equilibrated partial-pivot solve for small private device systems.
+/// No physical-unit pivot floor: a nonzero pivot is usable only when the
+/// resulting finite solution passes a scale-independent backward-error check.
+/// Inactive rows/columns beyond `dim` are ignored, and inactive outputs are zero.
+pub(crate) fn solve_small_dense<T: DenseScalar, const N: usize>(
+    matrix: &[[T; N]; N],
+    rhs: &[T; N],
+    dim: usize,
+) -> Option<[T; N]> {
+    if dim > N {
+        return None;
+    }
+    let mut a = *matrix;
+    let mut b = *rhs;
+    let mut row_scale = [0.0; N];
+    for row in 0..dim {
+        if !b[row].finite() || a[row][..dim].iter().any(|v| !v.finite()) {
+            return None;
+        }
+        let scale = a[row][..dim]
+            .iter()
+            .fold(b[row].magnitude(), |s, v| s.max(v.magnitude()));
+        if scale == 0.0 {
+            return None;
+        }
+        row_scale[row] = scale;
+        for entry in &mut a[row][..dim] {
+            *entry = entry.scale_down(scale);
+        }
+        b[row] = b[row].scale_down(scale);
+    }
+    for pivot in 0..dim {
+        let mut best = pivot;
+        for row in (pivot + 1)..dim {
+            if a[row][pivot].magnitude() > a[best][pivot].magnitude() {
+                best = row;
+            }
+        }
+        if a[best][pivot].magnitude() == 0.0 || !a[best][pivot].finite() {
+            return None;
+        }
+        a.swap(pivot, best);
+        b.swap(pivot, best);
+        let pivot_value = a[pivot][pivot];
+        for row in (pivot + 1)..dim {
+            let factor = a[row][pivot].quotient(pivot_value);
+            if !factor.finite() {
+                return None;
+            }
+            let (above, below) = a.split_at_mut(row);
+            let pivot_row = &above[pivot];
+            let target = &mut below[0];
+            target[pivot] = T::default();
+            for col in (pivot + 1)..dim {
+                target[col] -= factor * pivot_row[col];
+            }
+            b[row] -= factor * b[pivot];
+        }
+    }
+    let mut solution = [T::default(); N];
+    for row in (0..dim).rev() {
+        let mut residual = b[row];
+        for col in (row + 1)..dim {
+            residual -= a[row][col] * solution[col];
+        }
+        solution[row] = residual.quotient(a[row][row]);
+        if !solution[row].finite() {
+            return None;
+        }
+    }
+    // Validate in the original equation order, with normalized x so neither
+    // the residual nor its absolute-sum denominator needs an overflowing dot.
+    let x_scale = solution[..dim]
+        .iter()
+        .fold(1.0_f64, |s, v| s.max(v.magnitude()));
+    let tolerance = 64.0 * Value::EPSILON * dim.max(1) as Value;
+    for row in 0..dim {
+        let mut residual = rhs[row].scale_down(row_scale[row]).scale_down(x_scale);
+        let mut bound = residual.magnitude();
+        for col in 0..dim {
+            let coefficient = matrix[row][col].scale_down(row_scale[row]);
+            let x = solution[col].scale_down(x_scale);
+            residual -= coefficient * x;
+            // For complex component-max magnitudes, |a*b| <= 2*|a|*|b|.
+            bound += 2.0 * coefficient.magnitude() * x.magnitude();
+        }
+        if !residual.finite() || residual.magnitude() > tolerance * bound {
+            return None;
+        }
+    }
+    Some(solution)
+}
+
 /// Evaluate a product/quotient times exp(exponent), retaining the ordinary
 /// arithmetic path unless an intermediate loses range or subnormal precision.
 #[inline]
@@ -40,8 +187,61 @@ pub(crate) fn scaled_exp_product(
     if ordinary {
         product
     } else {
-        scaled_exp_product_fallback(factors, divisors, exponent, exponential)
+        scaled_exp_product_fallback(factors, divisors, exponent, exponential, 0)
     }
+}
+
+/// Retain a product's binary scale when its value cannot be stored in f64.
+/// Inputs must be finite and nonzero. A normal product keeps its ordinary
+/// evaluation exactly; the normalized form also preserves subnormal precision.
+pub(crate) fn product_binary_normalization(factors: &[Value], divisors: &[Value]) -> (Value, i32) {
+    let product = scaled_exp_product(factors, divisors, 0.0);
+    if product.is_normal() {
+        return (product, 0);
+    }
+    debug_assert!(
+        factors
+            .iter()
+            .chain(divisors)
+            .all(|v| v.is_finite() && *v != 0.0)
+    );
+    let (mantissa, power) = product_binary_parts(factors, divisors);
+    (
+        mantissa,
+        power.try_into().expect("bounded device normalization"),
+    )
+}
+
+fn product_binary_parts(factors: &[Value], divisors: &[Value]) -> (Value, i64) {
+    let mut mantissa = 1.0;
+    let mut power = 0_i64;
+    for &factor in factors {
+        let e = libm::ilogb(factor);
+        mantissa *= libm::scalbn(factor, -e);
+        power += i64::from(e);
+    }
+    for &divisor in divisors {
+        let e = libm::ilogb(divisor);
+        mantissa /= libm::scalbn(divisor, -e);
+        power -= i64::from(e);
+    }
+    (mantissa, power)
+}
+
+/// Combine a separately retained binary scale before rounding the final value.
+pub(crate) fn scaled_exp_product_with_binary_scale(
+    factors: &[Value],
+    divisors: &[Value],
+    exponent: Value,
+    binary_scale: i32,
+) -> Value {
+    if binary_scale == 0 {
+        return scaled_exp_product(factors, divisors, exponent);
+    }
+    if factors.contains(&0.0) {
+        return 0.0;
+    }
+    scaled_exp_product_fallback(factors, divisors, exponent, exponent.exp(), binary_scale)
 }
 
 #[cold]
@@ -50,6 +250,7 @@ fn scaled_exp_product_fallback(
     divisors: &[crate::Value],
     exponent: crate::Value,
     exponential: crate::Value,
+    binary_scale: i32,
 ) -> crate::Value {
     if exponent.is_nan()
         || factors.iter().any(|value| !value.is_finite())
@@ -59,34 +260,25 @@ fn scaled_exp_product_fallback(
     {
         return crate::Value::NAN;
     }
-    let mut mantissa = 1.0;
-    let mut power = 0;
-    for &factor in factors {
-        let e = libm::ilogb(factor);
-        mantissa *= libm::scalbn(factor, -e);
-        power += e;
-    }
-    for &divisor in divisors {
-        let e = libm::ilogb(divisor);
-        mantissa /= libm::scalbn(divisor, -e);
-        power -= e;
-    }
+    let (mut mantissa, mut power) = product_binary_parts(factors, divisors);
+    power += i64::from(binary_scale);
     if exponential.is_normal() {
         let e = libm::ilogb(exponential);
         mantissa *= libm::scalbn(exponential, -e);
-        power += e;
+        power += i64::from(e);
     } else {
         // No finite input factor can compensate an exponent beyond this
         // bound. It also keeps conversion/reduction within the integer range.
-        let bound =
-            (factors.len() + divisors.len() + 2) as crate::Value * 1075.0 * std::f64::consts::LN_2;
+        let bound = ((factors.len() + divisors.len() + 2) as crate::Value * 1075.0
+            + Value::from(binary_scale).abs())
+            * std::f64::consts::LN_2;
         if exponent > bound {
             return crate::Value::INFINITY.copysign(mantissa);
         }
         if exponent < -bound {
             return 0.0_f64.copysign(mantissa);
         }
-        let e = (exponent * std::f64::consts::LOG2_E).round() as i32;
+        let e = (exponent * std::f64::consts::LOG2_E).round() as i64;
         // Residual of ln(2) after rounding its high part to f64. FMA and the
         // low part prevent range reduction from discarding significant bits.
         const LN_2_LOW: crate::Value = 2.319_046_813_846_299_6e-17;
@@ -95,7 +287,10 @@ fn scaled_exp_product_fallback(
         mantissa *= reduced.exp();
         power += e;
     }
-    libm::scalbn(mantissa, power)
+    libm::scalbn(
+        mantissa,
+        power.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32,
+    )
 }
 
 /// Infinity norm for residual and state vectors. Nonfinite entries yield
@@ -373,6 +568,85 @@ pub fn xyce_hard_min_timestep(current_time: Value) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn small_dense_solves_preserve_row_scales_and_tiny_complex_pivots() {
+        use crate::Complex64;
+        for (first, second) in [
+            (1.0, 1.0),
+            (1e-300, 1e300),
+            (1e300, 1e-300),
+            (Value::from_bits(4), 1.0),
+        ] {
+            let matrix = [
+                [2.0 * first, first, Value::NAN],
+                [second, -3.0 * second, Value::NAN],
+                [Value::NAN; 3],
+            ];
+            let rhs = [first, 11.0 * second, Value::NAN];
+            let real = solve_small_dense(&matrix, &rhs, 2).unwrap();
+            let complex_matrix = matrix.map(|row| row.map(|v| Complex64::new(v, v)));
+            let complex_rhs = rhs.map(|v| Complex64::new(v, v));
+            let complex = solve_small_dense(&complex_matrix, &complex_rhs, 2).unwrap();
+            for ((a, b), expected) in real.into_iter().zip(complex).zip([2.0, -3.0, 0.0]) {
+                assert!((a - expected).abs() < 1e-13);
+                assert!((b - Complex64::new(expected, 0.0)).norm() < 1e-13);
+            }
+        }
+        for (pivot, drive) in [(1e-200, 1.0), (1e-300, 1.0), (1e-150, 1e-200)] {
+            let matrix = [
+                [Complex64::new(1.0, 0.0), Complex64::default()],
+                [Complex64::new(1.0, 0.0), Complex64::new(0.0, pivot)],
+            ];
+            let rhs = [Complex64::default(), Complex64::new(drive, 0.0)];
+            let solution = solve_small_dense(&matrix, &rhs, 2).unwrap();
+            assert_eq!(solution[0], rhs[0]);
+            assert!((solution[1].im / (drive / pivot) + 1.0).abs() < 1e-14);
+            assert_eq!(solution[1].re, 0.0);
+        }
+    }
+
+    #[test]
+    fn small_dense_solves_reject_invalid_or_singular_systems() {
+        use crate::Complex64;
+        assert_eq!(
+            solve_small_dense(&[[Value::NAN; 2]; 2], &[Value::NAN; 2], 0),
+            Some([0.0; 2])
+        );
+        assert!(solve_small_dense(&[[1.0; 2]; 2], &[1.0; 2], 3).is_none());
+        for rhs in [[0.0, 0.0], [1.0, 2.0]] {
+            assert!(solve_small_dense(&[[1.0; 2]; 2], &rhs, 2).is_none());
+            assert!(
+                solve_small_dense(
+                    &[[Complex64::new(1.0, 1.0); 2]; 2],
+                    &rhs.map(|x| Complex64::new(x, 0.0)),
+                    2
+                )
+                .is_none()
+            );
+        }
+        for invalid in [Value::NAN, Value::INFINITY, Value::NEG_INFINITY] {
+            for lane in 0..2 {
+                let mut rhs = [1.0, 2.0];
+                rhs[lane] = invalid;
+                assert!(solve_small_dense(&[[1.0, 0.0], [0.0, 1.0]], &rhs, 2).is_none());
+                for col in 0..2 {
+                    let mut matrix = [[1.0, 0.0], [0.0, 1.0]];
+                    matrix[lane][col] = invalid;
+                    assert!(solve_small_dense(&matrix, &[1.0, 2.0], 2).is_none());
+                    assert!(
+                        solve_small_dense(
+                            &matrix.map(|r| r.map(|x| Complex64::new(0.0, x))),
+                            &[Complex64::new(1.0, 0.0); 2],
+                            2
+                        )
+                        .is_none()
+                    );
+                }
+            }
+        }
+        assert!(solve_small_dense(&[[Value::MIN_POSITIVE]], &[Value::MAX], 1).is_none());
+    }
 
     #[test]
     fn residual_norms_preserve_finite_scale_and_reject_every_nonfinite_entry() {

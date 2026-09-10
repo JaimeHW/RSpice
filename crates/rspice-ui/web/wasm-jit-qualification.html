@@ -85,7 +85,7 @@
     worker.terminate();
     abiWorker = new Worker("/wasm-jit-abi-probe.mjs", { type: "module" });
     abiWorker.addEventListener("message", ({ data }) => {
-      if (data?.status === "qualified" && data.abiVersion === expectedAbiVersion && data.checks === 17) {
+      if (data?.status === "qualified" && data.abiVersion === expectedAbiVersion && data.checks === 19) {
         finish("qualified", "RSpice WASM JIT qualification passed.", { ...capability, abiChecks: data.checks });
       } else {
         finish("rejected", data?.error || "Independent ABI evidence was incomplete.");

@@ -1366,6 +1366,7 @@ mod tests {
             prelude_slots: std::ptr::null_mut(),
             prelude_slots_len: 0,
             analog_effects: std::ptr::null_mut(),
+            simulation_parameters: &crate::native::abi::DEFAULT_SIMULATION_PARAMETERS,
         };
 
         let mut encoder = X64Encoder::new();

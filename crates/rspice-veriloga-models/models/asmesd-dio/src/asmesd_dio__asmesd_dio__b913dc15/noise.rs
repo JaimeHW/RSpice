@@ -57,7 +57,7 @@ impl Instance {
 		let BQ=staged[17]!=0.0;
 		let BT=-1f64;
 		let BV=parameters[46];
-		let BW=staged[20]!=0.0;
+		let BW=staged[21]!=0.0;
 		let CC=staged[22]!=0.0;
 		let CJ=parameters[28];
 		let CK=parameters[27];

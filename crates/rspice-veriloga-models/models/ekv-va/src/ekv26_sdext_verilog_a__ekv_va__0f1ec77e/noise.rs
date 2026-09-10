@@ -349,8 +349,6 @@ impl Instance {
 	}
 }
 
-use rspice_veriloga_runtime::{L2};
-
 pub static GROUPED_NOISE_PROCESSES: [GeneratedNoiseProcessDescriptor; 2] = [
 	GeneratedNoiseProcessDescriptor { process_id: 0, label: Some("thermal"), kind: GeneratedNoiseKind::White, table_len: 0, table_log_interp: false },
 	GeneratedNoiseProcessDescriptor { process_id: 1, label: Some("flicker"), kind: GeneratedNoiseKind::Flicker, table_len: 0, table_log_interp: false },
@@ -771,3 +769,5 @@ impl Instance {
 		Ok(())
 	}
 }
+
+use rspice_veriloga_runtime::{L2};

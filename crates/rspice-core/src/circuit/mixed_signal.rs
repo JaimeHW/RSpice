@@ -149,7 +149,8 @@ impl CircuitData {
     }
 
     /// Register one elaborated mixed module.
-    pub(crate) fn add_mixed_signal_host(&mut self, host: MixedSignalHost) {
+    pub(crate) fn add_mixed_signal_host(&mut self, mut host: MixedSignalHost) {
+        host.set_simulation_parameters(self.generated_simulation_parameters);
         self.mixed_signal_hosts.push(host);
     }
 

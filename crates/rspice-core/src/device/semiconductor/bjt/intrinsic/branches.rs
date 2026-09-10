@@ -401,18 +401,30 @@ impl Bjt {
 
     pub(in crate::device::semiconductor::bjt) fn ibcp_branch(
         &self,
-        vbp: Value,
-        vsi: Value,
+        voltages: BjtNodeVoltages,
     ) -> BranchLinearization {
+        let BjtNodeVoltages { vbp, vsi, .. } = voltages;
         let mut branch = BranchLinearization::default();
-        // The substrate junction is a VBIC parasitic branch. Legacy
-        // Gummel-Poon BJT cards expose no substrate diode current; Xyce's
-        // legacy BJT load keeps the substrate lead current identically zero.
-        // Three-terminal VBIC also omits this branch, including its GMIN.
-        // Do not let the VBIC CKTgmin parallel leak through the collapsed
-        // three-terminal legacy topology, where it would double-count the
-        // collector/base reverse-junction GMIN and alter source currents.
-        if self.charge_model == BjtChargeModel::LegacyGummelPoon || self.vbic_three_terminal {
+        if self.charge_model == BjtChargeModel::LegacyGummelPoon {
+            // Ngspice's substrate parallel connects to the intrinsic
+            // collector (vertical) or base (lateral). Xyce GP omits it.
+            // Ngspice 46 omits this conductance in bjtacld.c. Retain the
+            // DC current's derivative here so AC and transient linearize
+            // the same substrate branch and preserve current conservation.
+            if !self.xyce_compatibility {
+                let (connection, index) = match self.substrate_topology {
+                    BjtSubstrateTopology::Vertical => (voltages.vci, IDX_VCI),
+                    BjtSubstrateTopology::Lateral => (voltages.vbi, IDX_VBI),
+                };
+                let gmin = self.nonlinear_branch_gmin();
+                branch.current = gmin * (vsi - connection);
+                branch.d_internal[IDX_VSI] = gmin;
+                branch.d_internal[index] = -gmin;
+            }
+            return branch;
+        }
+        // Three-terminal VBIC has no substrate branch, including GMIN.
+        if self.vbic_three_terminal {
             return branch;
         }
         // ngspice vbicload.c stamps the `CKTgmin` parallel on Vbcp

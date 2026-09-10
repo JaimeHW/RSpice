@@ -1536,77 +1536,13 @@ impl Engine {
         }
     }
 
-    fn solve_small_dense_complex_system<const N: usize>(
-        matrix: &[[Complex64; N]; N],
-        rhs: &[Complex64; N],
-        dim: usize,
-    ) -> Option<[Complex64; N]> {
-        if dim == 0 {
-            return Some([Complex64::new(0.0, 0.0); N]);
-        }
-
-        let mut a = *matrix;
-        let mut b = *rhs;
-
-        for pivot in 0..dim {
-            let mut best = pivot;
-            let mut best_abs = a[pivot][pivot].norm();
-            for (row, entries) in a.iter().enumerate().take(dim).skip(pivot + 1) {
-                let value = entries[pivot].norm();
-                if value > best_abs {
-                    best = row;
-                    best_abs = value;
-                }
-            }
-            if best_abs < 1e-18 {
-                return None;
-            }
-            if best != pivot {
-                a.swap(pivot, best);
-                b.swap(pivot, best);
-            }
-
-            let pivot_value = a[pivot][pivot];
-            for row in (pivot + 1)..dim {
-                // `row > pivot`, so the pivot row stays in `above`.
-                let (above, below) = a.split_at_mut(row);
-                let pivot_row = &above[pivot];
-                let target_row = &mut below[0];
-                let factor = target_row[pivot] / pivot_value;
-                target_row[pivot] = Complex64::new(0.0, 0.0);
-                for (target, &value) in target_row[(pivot + 1)..dim]
-                    .iter_mut()
-                    .zip(&pivot_row[(pivot + 1)..dim])
-                {
-                    *target -= factor * value;
-                }
-                b[row] -= factor * b[pivot];
-            }
-        }
-
-        let mut x = [Complex64::new(0.0, 0.0); N];
-        for row in (0..dim).rev() {
-            let mut sum = b[row];
-            for col in (row + 1)..dim {
-                sum -= a[row][col] * x[col];
-            }
-            let diag = a[row][row];
-            if diag.norm() < 1e-18 {
-                return None;
-            }
-            x[row] = sum / diag;
-        }
-
-        Some(x)
-    }
-
     fn stamp_bjt_dynamic_ac(
         matrix: &mut ComplexMatrix,
         bjt: &crate::device::Bjt,
         op_voltages: &[Value],
         omega: Value,
         include_delay_branches: bool,
-    ) {
+    ) -> Result<(), SimulationError> {
         if bjt.vbic_mna_promoted() {
             // Promoted BJT: the internal states are matrix unknowns, so each
             // charge branch stamps jw*C directly on its own nodes alongside
@@ -1676,7 +1612,7 @@ impl Engine {
                     stamp_row(row, -1.0);
                 }
             }
-            return;
+            return Ok(());
         }
 
         let [vc, vb, ve, vs] = [
@@ -1707,16 +1643,20 @@ impl Engine {
             has_dynamic_charge = true;
         }
         if !has_dynamic_charge {
-            return;
+            return Ok(());
         }
 
         let s = Complex64::new(0.0, omega);
+        // Legacy hidden rows use incoming branch balance, opposite to
+        // terminal KCL. Match stamp_legacy_bjt_companion's charge orientation
+        // before eliminating the private base-resistance state.
+        let internal_s = if bjt.uses_legacy_gummel_poon() { -s } else { s };
         let mut internal =
             [[Complex64::new(0.0, 0.0); BJT_INTERNAL_STATE_DIM]; BJT_INTERNAL_STATE_DIM];
         for row in 0..BJT_INTERNAL_STATE_DIM {
             for col in 0..BJT_INTERNAL_STATE_DIM {
-                internal[row][col] =
-                    Complex64::new(snapshot.reduction.g_ii[row][col], 0.0) + s * c_ii[row][col];
+                internal[row][col] = Complex64::new(snapshot.reduction.g_ii[row][col], 0.0)
+                    + internal_s * c_ii[row][col];
             }
         }
 
@@ -1725,15 +1665,15 @@ impl Engine {
         for col in 0..BJT_EXTERNAL_STATE_DIM {
             let mut rhs = [Complex64::new(0.0, 0.0); BJT_INTERNAL_STATE_DIM];
             for row in 0..BJT_INTERNAL_STATE_DIM {
-                rhs[row] =
-                    -(Complex64::new(snapshot.reduction.g_ie[row][col], 0.0) + s * c_ie[row][col]);
+                rhs[row] = -(Complex64::new(snapshot.reduction.g_ie[row][col], 0.0)
+                    + internal_s * c_ie[row][col]);
             }
 
-            let Some(solution) =
-                Self::solve_small_dense_complex_system(&internal, &rhs, BJT_INTERNAL_STATE_DIM)
-            else {
-                return;
-            };
+            let solution = crate::numerics::solve_small_dense(&internal, &rhs, BJT_INTERNAL_STATE_DIM)
+                .ok_or_else(|| SimulationError::Circuit(format!(
+                    "BJT '{}' AC private-state reduction failed at {:.16e} Hz: singular, nonfinite or unresolved internal system",
+                    bjt.name, omega / (2.0 * PI)
+                )))?;
 
             for row in 0..BJT_EXTERNAL_STATE_DIM {
                 let mut value =
@@ -1742,6 +1682,13 @@ impl Engine {
                     value += (Complex64::new(snapshot.reduction.g_ei[row][idx], 0.0)
                         + s * c_ei[row][idx])
                         * solution[idx];
+                }
+                if !value.re.is_finite() || !value.im.is_finite() {
+                    return Err(SimulationError::Circuit(format!(
+                        "BJT '{}' AC private-state reduction produced a nonfinite admittance at {:.16e} Hz",
+                        bjt.name,
+                        omega / (2.0 * PI)
+                    )));
                 }
                 y_total[row][col] = value;
             }
@@ -1765,11 +1712,19 @@ impl Engine {
         for row in 0..BJT_EXTERNAL_STATE_DIM {
             for col in 0..BJT_EXTERNAL_STATE_DIM {
                 let delta = y_total[row][col] - Complex64::new(base_static[row][col], 0.0);
+                if !delta.re.is_finite() || !delta.im.is_finite() {
+                    return Err(SimulationError::Circuit(format!(
+                        "BJT '{}' AC private-state reduction produced a nonfinite correction at {:.16e} Hz",
+                        bjt.name,
+                        omega / (2.0 * PI)
+                    )));
+                }
                 if delta.norm() > 0.0 && nodes[row] > 0 && nodes[col] > 0 {
                     matrix.add(nodes[row] - 1, nodes[col] - 1, delta);
                 }
             }
         }
+        Ok(())
     }
 
     #[inline]
@@ -2209,7 +2164,7 @@ impl Engine {
                         op_voltages,
                         omega,
                         include_vbic_delay_branches,
-                    );
+                    )?;
                 }
             }
         }
@@ -2292,7 +2247,7 @@ impl Engine {
                     &mut AcImagStamper { matrix: ac_matrix },
                 );
             } else {
-                let (cgs, cgd, cgb) = mos.ac_capacitances();
+                let (cgs, cgd, cgb) = mos.ac_capacitances_at(vgs_eval, vds_eval, vbs_eval);
                 Self::stamp_imag_two_terminal(ac_matrix, ng, ns, omega * cgs);
                 Self::stamp_imag_two_terminal(ac_matrix, ng, nd, omega * cgd);
                 Self::stamp_imag_two_terminal(ac_matrix, ng, nb, omega * cgb);

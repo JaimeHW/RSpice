@@ -633,7 +633,7 @@ fn inputs(artifact: &CanonicalIrArtifact) -> CfgEvalInputs<f64> {
         multiplicity: 1.0,
         time: 0.0,
         analyses: HashSet::new(),
-        simparams: HashMap::new(),
+        simparams: Default::default(),
         ddt: 0.0,
         ddt_scale: 0.0,
         idt: 0.0,

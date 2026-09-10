@@ -10,12 +10,289 @@
 use super::{VmContext, VmError, idtmod_wrapped_candidate};
 use crate::array_index::{ArrayIndexError, checked_array_slot, saturated_array_upper};
 use crate::codegen::{AssignmentStep, BytecodeProgram, Instruction, ZiRuntimeLayout};
-use crate::complex_arithmetic::{divide_complex, multiply_complex};
+use crate::complex_arithmetic::FrequencyValue;
 use crate::integer_runtime::{IntegerBinaryOperation, integer_binary};
 use crate::timing_contract::{NormalizedSlewRates, normalize_slew_rates};
 use num_complex::Complex64;
 
 const MAX_RUNTIME_LOOP_ITERATIONS: usize = 1_000_000;
+
+struct SmallSignalScratch<V> {
+    variables: Vec<V>,
+    stack: Vec<V>,
+    laplace_responses: Vec<Option<Complex64>>,
+    zi_responses: Vec<Option<Complex64>>,
+}
+
+impl<V> SmallSignalScratch<V> {
+    fn retained_bytes(&self) -> usize {
+        self.variables
+            .capacity()
+            .saturating_mul(std::mem::size_of::<V>())
+            .saturating_add(
+                self.stack
+                    .capacity()
+                    .saturating_mul(std::mem::size_of::<V>()),
+            )
+            .saturating_add(
+                self.laplace_responses
+                    .capacity()
+                    .saturating_mul(std::mem::size_of::<Option<Complex64>>()),
+            )
+            .saturating_add(
+                self.zi_responses
+                    .capacity()
+                    .saturating_mul(std::mem::size_of::<Option<Complex64>>()),
+            )
+    }
+}
+
+thread_local! {
+    // Shared by sequential device evaluations on this thread, without keeping
+    // a second variable image in every circuit instance. Only capacities are
+    // reused; no operating-point value or frequency response survives a call.
+    static SMALL_SIGNAL_SCRATCH: std::cell::RefCell<SmallSignalScratch<Complex64>> = Default::default();
+}
+
+impl<V> Default for SmallSignalScratch<V> {
+    fn default() -> Self {
+        Self {
+            variables: Vec::new(),
+            stack: Vec::new(),
+            laplace_responses: Vec::new(),
+            zi_responses: Vec::new(),
+        }
+    }
+}
+trait FrequencyScalar: Copy + std::fmt::Debug + std::ops::Neg<Output = Self> {
+    const TRACK_RANGE: bool;
+    fn new(real: f64, imaginary: f64) -> Self;
+    fn binary64(self) -> Complex64;
+    fn is_real(self) -> bool;
+    fn is_finite(self) -> bool;
+    fn add(self, other: Self, range_lost: &mut bool) -> Self;
+    fn subtract(self, other: Self, range_lost: &mut bool) -> Self;
+    fn multiply(self, other: Self, range_lost: &mut bool) -> Self;
+    fn divide(self, other: Self, range_lost: &mut bool) -> Self;
+    fn scale(self, scale: f64, range_lost: &mut bool) -> Self;
+
+    fn from_complex(value: Complex64) -> Self {
+        Self::new(value.re, value.im)
+    }
+    fn take_scratch() -> SmallSignalScratch<Self> {
+        SmallSignalScratch::default()
+    }
+    fn recycle_scratch(_scratch: SmallSignalScratch<Self>) {}
+}
+
+impl FrequencyScalar for Complex64 {
+    const TRACK_RANGE: bool = true;
+    #[inline]
+    fn new(real: f64, imaginary: f64) -> Self {
+        Self::new(real, imaginary)
+    }
+    #[inline]
+    fn binary64(self) -> Self {
+        self
+    }
+    #[inline]
+    fn is_real(self) -> bool {
+        self.im == 0.0
+    }
+    #[inline]
+    fn is_finite(self) -> bool {
+        self.re.is_finite() && self.im.is_finite()
+    }
+    #[inline]
+    fn add(self, other: Self, range_lost: &mut bool) -> Self {
+        let value = self + other;
+        if !value.is_finite() {
+            *range_lost = true;
+        }
+        value
+    }
+    #[inline]
+    fn subtract(self, other: Self, range_lost: &mut bool) -> Self {
+        self.add(-other, range_lost)
+    }
+    #[inline]
+    fn multiply(self, other: Self, range_lost: &mut bool) -> Self {
+        let value = crate::complex_arithmetic::multiply_complex(self, other);
+        if !FrequencyValue::regular_result(value, self, other) {
+            *range_lost = true;
+        }
+        value
+    }
+    #[inline]
+    fn divide(self, other: Self, range_lost: &mut bool) -> Self {
+        let value = crate::complex_arithmetic::divide_complex(self, other);
+        if !FrequencyValue::regular_result(value, self, other) {
+            *range_lost = true;
+        }
+        value
+    }
+    #[inline]
+    fn scale(self, scale: f64, range_lost: &mut bool) -> Self {
+        let value = self * scale;
+        if !((value.re.is_normal() || (value.re == 0.0 && (self.re == 0.0 || scale == 0.0)))
+            && (value.im.is_normal() || (value.im == 0.0 && (self.im == 0.0 || scale == 0.0))))
+        {
+            *range_lost = true;
+        }
+        value
+    }
+    #[inline]
+    fn take_scratch() -> SmallSignalScratch<Self> {
+        SMALL_SIGNAL_SCRATCH
+            .try_with(|cache| {
+                cache
+                    .try_borrow_mut()
+                    .map(|mut cache| std::mem::take(&mut *cache))
+                    .unwrap_or_default()
+            })
+            .unwrap_or_default()
+    }
+    #[inline]
+    fn recycle_scratch(scratch: SmallSignalScratch<Self>) {
+        if scratch.retained_bytes() <= 1024 * 1024 {
+            let _ = SMALL_SIGNAL_SCRATCH.try_with(|cache| {
+                if let Ok(mut cache) = cache.try_borrow_mut() {
+                    if scratch.retained_bytes() >= cache.retained_bytes() {
+                        *cache = scratch;
+                    }
+                }
+            });
+        }
+    }
+}
+
+impl FrequencyScalar for FrequencyValue {
+    const TRACK_RANGE: bool = false;
+    fn new(real: f64, imaginary: f64) -> Self {
+        Self::new(real, imaginary)
+    }
+    fn binary64(self) -> Complex64 {
+        self.binary64()
+    }
+    fn is_real(self) -> bool {
+        self.is_real()
+    }
+    fn is_finite(self) -> bool {
+        self.is_finite()
+    }
+    fn add(self, other: Self, _range_lost: &mut bool) -> Self {
+        self + other
+    }
+    fn subtract(self, other: Self, _range_lost: &mut bool) -> Self {
+        self - other
+    }
+    fn multiply(self, other: Self, _range_lost: &mut bool) -> Self {
+        self.multiply(other)
+    }
+    fn divide(self, other: Self, _range_lost: &mut bool) -> Self {
+        self.divide(other)
+    }
+    fn scale(self, scale: f64, _range_lost: &mut bool) -> Self {
+        self * scale
+    }
+}
+
+/// Read-only AC/noise evaluation with an ordinary binary64 path and a cold
+/// retry when an intermediate needs an exponent outside binary64's range.
+/// Both paths use the same dispatcher and replay from the same immutable seed.
+pub(crate) struct SmallSignalVm<'a> {
+    ordinary: SmallSignalEngine<'a, Complex64>,
+    wide: Option<Box<SmallSignalEngine<'a, FrequencyValue>>>,
+    seed: &'a [f64],
+    assignments: Option<&'a [AssignmentStep]>,
+}
+
+impl<'a> SmallSignalVm<'a> {
+    #[cfg(test)]
+    fn new(context: &'a VmContext, frequency_hz: f64) -> Result<Self, VmError> {
+        Self::with_variable_seed(context, frequency_hz, &context.variables)
+    }
+
+    #[inline]
+    pub(crate) fn with_variable_seed(
+        context: &'a VmContext,
+        frequency_hz: f64,
+        seed: &'a [f64],
+    ) -> Result<Self, VmError> {
+        Ok(Self {
+            ordinary: SmallSignalEngine::with_variable_seed(context, frequency_hz, seed)?,
+            wide: None,
+            seed,
+            assignments: None,
+        })
+    }
+
+    #[inline]
+    pub(crate) fn execute_assignments(
+        &mut self,
+        steps: &'a [AssignmentStep],
+    ) -> Result<(), VmError> {
+        if self.wide.is_some() || self.assignments.is_some() {
+            // A second assignment stream starts from the first stream's final
+            // image. Promote before it, so a later retry cannot omit that state.
+            self.promote()?;
+            return self
+                .wide
+                .as_mut()
+                .expect("promoted engine")
+                .execute_assignments(steps);
+        }
+        self.assignments = Some(steps);
+        let result = self.ordinary.execute_assignments(steps);
+        if self.ordinary.range_lost {
+            self.promote()
+        } else {
+            result
+        }
+    }
+
+    #[cfg(test)]
+    fn execute(&mut self, program: &BytecodeProgram) -> Result<Complex64, VmError> {
+        self.execute_scaled(program, 1.0)
+    }
+
+    #[inline]
+    pub(crate) fn execute_scaled(
+        &mut self,
+        program: &BytecodeProgram,
+        scale: f64,
+    ) -> Result<Complex64, VmError> {
+        if let Some(wide) = &mut self.wide {
+            return wide.execute_scaled(program, scale);
+        }
+        let result = self.ordinary.execute_scaled(program, scale);
+        if !self.ordinary.range_lost {
+            return result;
+        }
+        self.promote()?;
+        self.wide
+            .as_mut()
+            .expect("promoted engine")
+            .execute_scaled(program, scale)
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn promote(&mut self) -> Result<(), VmError> {
+        if self.wide.is_none() {
+            let mut wide = Box::new(SmallSignalEngine::with_variable_seed(
+                self.ordinary.context,
+                self.ordinary.frequency_hz,
+                self.seed,
+            )?);
+            if let Some(steps) = self.assignments {
+                wide.execute_assignments(steps)?;
+            }
+            self.wide = Some(wide);
+        }
+        Ok(())
+    }
+}
 
 /// Read-only complex evaluator used only for frequency-domain Jacobians.
 ///
@@ -23,10 +300,10 @@ const MAX_RUNTIME_LOOP_ITERATIONS: usize = 1_000_000;
 /// forward-mode derivative shadows retain the phase introduced by dynamic
 /// operators.  The real runtime context has already completed its normal
 /// native/VM/WASM operating-point evaluation and is never mutated here.
-pub(crate) struct SmallSignalVm<'a> {
+struct SmallSignalEngine<'a, V: FrequencyScalar> {
     context: &'a VmContext,
-    variables: Vec<Complex64>,
-    stack: Vec<Complex64>,
+    variables: Vec<V>,
+    stack: Vec<V>,
     // A VM borrows one immutable operating-point context at one frequency.
     // Cache transfer responses across assignment and Jacobian programs, while
     // keeping each instruction's input/action outside the cache.
@@ -34,14 +311,32 @@ pub(crate) struct SmallSignalVm<'a> {
     zi_responses: Vec<Option<Complex64>>,
     frequency_hz: f64,
     omega: f64,
+    range_lost: bool,
 }
 
-impl<'a> SmallSignalVm<'a> {
+impl<V: FrequencyScalar> Drop for SmallSignalEngine<'_, V> {
+    #[inline]
+    fn drop(&mut self) {
+        self.variables.clear();
+        self.stack.clear();
+        self.laplace_responses.clear();
+        self.zi_responses.clear();
+        let scratch = SmallSignalScratch {
+            variables: std::mem::take(&mut self.variables),
+            stack: std::mem::take(&mut self.stack),
+            laplace_responses: std::mem::take(&mut self.laplace_responses),
+            zi_responses: std::mem::take(&mut self.zi_responses),
+        };
+        V::recycle_scratch(scratch);
+    }
+}
+impl<'a, V: FrequencyScalar> SmallSignalEngine<'a, V> {
     #[cfg(test)]
     pub(crate) fn new(context: &'a VmContext, frequency_hz: f64) -> Result<Self, VmError> {
         Self::with_variable_seed(context, frequency_hz, &context.variables)
     }
 
+    #[inline]
     pub(crate) fn with_variable_seed(
         context: &'a VmContext,
         frequency_hz: f64,
@@ -64,18 +359,22 @@ impl<'a> SmallSignalVm<'a> {
                 "small-signal angular frequency overflows at {frequency_hz} Hz"
             )));
         }
-        Ok(Self {
-            context,
-            variables: variable_seed
+        let mut scratch = V::take_scratch();
+        scratch.variables.extend(
+            variable_seed
                 .iter()
                 .copied()
-                .map(|value| Complex64::new(value, 0.0))
-                .collect(),
-            stack: Vec::with_capacity(32),
-            laplace_responses: Vec::new(),
-            zi_responses: Vec::new(),
+                .map(|value| V::new(value, 0.0)),
+        );
+        Ok(Self {
+            context,
+            variables: scratch.variables,
+            stack: scratch.stack,
+            laplace_responses: scratch.laplace_responses,
+            zi_responses: scratch.zi_responses,
             frequency_hz,
             omega,
+            range_lost: false,
         })
     }
 
@@ -83,13 +382,30 @@ impl<'a> SmallSignalVm<'a> {
         self.execute_assignment_steps(steps)
     }
 
-    pub(crate) fn execute(&mut self, program: &BytecodeProgram) -> Result<Complex64, VmError> {
+    pub(crate) fn execute_scaled(
+        &mut self,
+        program: &BytecodeProgram,
+        scale: f64,
+    ) -> Result<Complex64, VmError> {
+        let value = self.execute_value(program)?;
+        let result = self.scale_value(value, scale).binary64();
+        if !result.re.is_finite() || !result.im.is_finite() {
+            return Err(VmError::InvalidNumericResult(format!(
+                "small-signal bytecode produced non-finite result {}+j{}",
+                result.re, result.im
+            )));
+        }
+        Ok(result)
+    }
+
+    fn execute_value(&mut self, program: &BytecodeProgram) -> Result<V, VmError> {
         self.stack.clear();
         let mut pc = 0;
         while let Some(instruction) = program.instructions.get(pc) {
             pc += 1;
             let skip = match instruction {
                 Instruction::JumpIfFalse(skip) => {
+                    self.check_range()?;
                     if self.pop_real("conditional jump")? == 0.0 {
                         *skip
                     } else {
@@ -109,6 +425,11 @@ impl<'a> SmallSignalVm<'a> {
                     "conditional jump is outside bytecode",
                 ))?;
         }
+        // Arithmetic only updates a sticky flag. Check once at each program
+        // boundary (and before conditional jumps), instead of returning an
+        // extra Result from every numerical operation. No assignment can
+        // publish a value from a program that lost range.
+        self.check_range()?;
         let result = self
             .stack
             .pop()
@@ -118,10 +439,9 @@ impl<'a> SmallSignalVm<'a> {
                 "small-signal bytecode left extra values on the stack",
             ));
         }
-        if !result.re.is_finite() || !result.im.is_finite() {
+        if !result.is_finite() {
             return Err(VmError::InvalidNumericResult(format!(
-                "small-signal bytecode produced non-finite result {}+j{}",
-                result.re, result.im
+                "small-signal bytecode produced non-finite intermediate {result:?}"
             )));
         }
         Ok(result)
@@ -133,7 +453,7 @@ impl<'a> SmallSignalVm<'a> {
                 // Linearization replays numerical assignments, not task effects.
                 AssignmentStep::Task(_) | AssignmentStep::Initialization { .. } => {}
                 AssignmentStep::Assign(assignment) => {
-                    let value = self.execute(&assignment.program)?;
+                    let value = self.execute_value(&assignment.program)?;
                     let slot = self.variables.get_mut(assignment.var_index).ok_or(
                         VmError::InvalidInstruction(
                             "small-signal assignment target is outside variable storage",
@@ -148,10 +468,10 @@ impl<'a> SmallSignalVm<'a> {
                     index,
                     value,
                 } => {
-                    let index_value = self.execute(index)?;
+                    let index_value = self.execute_value(index)?;
                     let raw = self.real_value(index_value, "array index")?;
                     let slot = Self::array_slot(raw, *base, *len, *lower)?;
-                    let value = self.execute(value)?;
+                    let value = self.execute_value(value)?;
                     let target = self.variables.get_mut(slot).ok_or(
                         VmError::InvalidInstruction(
                             "small-signal indexed assignment target is outside variable storage",
@@ -162,7 +482,7 @@ impl<'a> SmallSignalVm<'a> {
                 AssignmentStep::Loop { condition, body } => {
                     let mut iterations = 0usize;
                     loop {
-                        let condition_value = self.execute(condition)?;
+                        let condition_value = self.execute_value(condition)?;
                         let active = self.real_value(condition_value, "runtime-loop condition")?;
                         if active == 0.0 {
                             break;
@@ -204,18 +524,26 @@ impl<'a> SmallSignalVm<'a> {
     }
 
     #[inline]
-    fn pop(&mut self, operation: &'static str) -> Result<Complex64, VmError> {
+    fn pop(&mut self, operation: &'static str) -> Result<V, VmError> {
         self.stack.pop().ok_or(VmError::StackUnderflow(operation))
     }
 
-    fn real_value(&self, value: Complex64, label: &str) -> Result<f64, VmError> {
-        if value.im != 0.0 {
+    fn real_value(&self, value: V, label: &str) -> Result<f64, VmError> {
+        if !value.is_real() {
             return Err(VmError::InvalidNumericResult(format!(
-                "{label} is not a real operating-point value during small-signal evaluation: {}+j{}",
-                value.re, value.im
+                "{label} is not a real operating-point value during small-signal evaluation: {value:?}"
             )));
         }
-        Ok(value.re)
+        let real = value.binary64().re;
+        // Preserve ordinary IEEE operands, including an authored `inf` in a
+        // comparison. Only a finite extended value that cannot be represented
+        // as an operating-point scalar needs this conversion error.
+        if !V::TRACK_RANGE && value.is_finite() && !real.is_finite() {
+            return Err(VmError::InvalidNumericResult(format!(
+                "{label} is outside the finite operating-point range"
+            )));
+        }
+        Ok(real)
     }
 
     fn pop_real(&mut self, operation: &'static str) -> Result<f64, VmError> {
@@ -223,11 +551,7 @@ impl<'a> SmallSignalVm<'a> {
         self.real_value(value, operation)
     }
 
-    fn unary(
-        &mut self,
-        operation: &'static str,
-        f: impl FnOnce(Complex64) -> Complex64,
-    ) -> Result<(), VmError> {
+    fn unary(&mut self, operation: &'static str, f: impl FnOnce(V) -> V) -> Result<(), VmError> {
         let value = self.pop(operation)?;
         self.stack.push(f(value));
         Ok(())
@@ -236,12 +560,36 @@ impl<'a> SmallSignalVm<'a> {
     fn binary(
         &mut self,
         operation: &'static str,
-        f: impl FnOnce(Complex64, Complex64) -> Complex64,
+        f: impl FnOnce(V, V, &mut bool) -> V,
     ) -> Result<(), VmError> {
         let right = self.pop(operation)?;
         let left = self.pop(operation)?;
-        self.stack.push(f(left, right));
+        let result = f(left, right, &mut self.range_lost);
+        self.stack.push(result);
         Ok(())
+    }
+
+    #[inline]
+    fn check_range(&self) -> Result<(), VmError> {
+        if V::TRACK_RANGE && self.range_lost {
+            return Err(VmError::InvalidNumericResult(
+                "small-signal arithmetic requires exponent-range recovery".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    #[inline]
+    fn multiply_values(&mut self, left: V, right: V) -> V {
+        V::multiply(left, right, &mut self.range_lost)
+    }
+
+    #[inline]
+    fn scale_value(&mut self, value: V, scale: f64) -> V {
+        if scale == 1.0 {
+            return value;
+        }
+        V::scale(value, scale, &mut self.range_lost)
     }
 
     fn unary_real(
@@ -250,7 +598,7 @@ impl<'a> SmallSignalVm<'a> {
         f: impl FnOnce(f64) -> f64,
     ) -> Result<(), VmError> {
         let value = self.pop_real(operation)?;
-        self.stack.push(Complex64::new(f(value), 0.0));
+        self.stack.push(V::new(f(value), 0.0));
         Ok(())
     }
 
@@ -261,7 +609,7 @@ impl<'a> SmallSignalVm<'a> {
     ) -> Result<(), VmError> {
         let right = self.pop_real(operation)?;
         let left = self.pop_real(operation)?;
-        self.stack.push(Complex64::new(f(left, right), 0.0));
+        self.stack.push(V::new(f(left, right), 0.0));
         Ok(())
     }
 
@@ -274,7 +622,7 @@ impl<'a> SmallSignalVm<'a> {
         let left = self.pop_real(label)?;
         let value = integer_binary(operation, left, right)
             .map_err(|error| VmError::InvalidNumericResult(format!("{label} failed: {error}")))?;
-        self.stack.push(Complex64::new(value, 0.0));
+        self.stack.push(V::new(value, 0.0));
         Ok(())
     }
 
@@ -292,14 +640,14 @@ impl<'a> SmallSignalVm<'a> {
         let start = self.stack.len() - operand_count;
         let operands = &self.stack[start..];
         for (index, operand) in operands.iter().enumerate() {
-            if index != operands.len() - 2 && operand.im != 0.0 {
+            if index != operands.len() - 2 && !operand.is_real() {
                 return Err(VmError::InvalidNumericResult(format!(
                     "Zi definition/timing operand {index} is complex during small-signal evaluation"
                 )));
             }
         }
         let action = operands[operands.len() - 2];
-        let transition = operands[operands.len() - 1].re;
+        let transition = self.real_value(operands[operands.len() - 1], "Zi transition time")?;
         if !transition.is_finite() || transition < 0.0 {
             return Err(VmError::InvalidNumericResult(format!(
                 "Zi transition time must be finite and nonnegative, got {transition}"
@@ -329,12 +677,14 @@ impl<'a> SmallSignalVm<'a> {
                         .frequency_response_rectangular(self.frequency_hz)
                         .map_err(map_error)
                 },
-            )?
+            )
+            .map(V::from_complex)?
         } else {
-            Complex64::new(filter.dc_gain().map_err(map_error)?, 0.0)
+            V::new(filter.dc_gain().map_err(map_error)?, 0.0)
         };
         self.stack.truncate(start);
-        self.stack.push(multiply_complex(response, action));
+        let result = self.multiply_values(response, action);
+        self.stack.push(result);
 
         Ok(())
     }
@@ -375,12 +725,12 @@ impl<'a> SmallSignalVm<'a> {
                     self.frequency_hz
                 )));
             }
-            multiply_complex(
-                Complex64::from_polar(1.0, phase),
+            self.multiply_values(
+                V::from_complex(Complex64::from_polar(1.0, phase)),
                 input_derivative.expect("derivative operand was decoded"),
             )
         } else {
-            Complex64::new(input_real, 0.0)
+            V::new(input_real, 0.0)
         };
         self.stack.push(result);
         Ok(())
@@ -393,7 +743,7 @@ impl<'a> SmallSignalVm<'a> {
                     "conditional jump requires a bytecode program",
                 ));
             }
-            Instruction::PushConst(value) => self.stack.push(Complex64::new(*value, 0.0)),
+            Instruction::PushConst(value) => self.stack.push(V::new(*value, 0.0)),
             Instruction::PushParam(index) => {
                 let value = self
                     .context
@@ -401,7 +751,7 @@ impl<'a> SmallSignalVm<'a> {
                     .get(*index)
                     .copied()
                     .ok_or(VmError::InvalidInstruction("missing parameter slot"))?;
-                self.stack.push(Complex64::new(value, 0.0));
+                self.stack.push(V::new(value, 0.0));
             }
             Instruction::PushParamGiven(index) => {
                 let value = self
@@ -410,7 +760,7 @@ impl<'a> SmallSignalVm<'a> {
                     .get(*index)
                     .copied()
                     .ok_or(VmError::InvalidInstruction("missing parameter-given slot"))?;
-                self.stack.push(Complex64::new(f64::from(value != 0), 0.0));
+                self.stack.push(V::new(f64::from(value != 0), 0.0));
             }
             Instruction::PushBranchCurrent(index) => {
                 let value = self
@@ -419,15 +769,15 @@ impl<'a> SmallSignalVm<'a> {
                     .get(*index)
                     .copied()
                     .ok_or(VmError::InvalidInstruction("missing branch-current slot"))?;
-                self.stack.push(Complex64::new(value, 0.0));
+                self.stack.push(V::new(value, 0.0));
             }
             Instruction::PushVoltage(pos, neg) => {
                 self.stack
-                    .push(Complex64::new(self.context.try_voltage(*pos, *neg)?, 0.0));
+                    .push(V::new(self.context.try_voltage(*pos, *neg)?, 0.0));
             }
             Instruction::PushCurrent(pos, neg) => {
                 self.stack
-                    .push(Complex64::new(self.context.try_current(*pos, *neg)?, 0.0));
+                    .push(V::new(self.context.try_current(*pos, *neg)?, 0.0));
             }
             Instruction::PushInternalVoltage(index) => {
                 let value = self
@@ -436,7 +786,7 @@ impl<'a> SmallSignalVm<'a> {
                     .get(*index)
                     .copied()
                     .ok_or(VmError::InvalidInstruction("missing internal-voltage slot"))?;
-                self.stack.push(Complex64::new(value, 0.0));
+                self.stack.push(V::new(value, 0.0));
             }
             Instruction::PushVariable(index) => {
                 let value =
@@ -461,20 +811,33 @@ impl<'a> SmallSignalVm<'a> {
                 self.stack.push(value);
             }
             Instruction::PushTemperature => {
-                self.stack
-                    .push(Complex64::new(self.context.temperature, 0.0));
+                self.stack.push(V::new(self.context.temperature, 0.0));
             }
             Instruction::PushVt => {
-                self.stack.push(Complex64::new(self.context.vt(), 0.0));
+                self.stack.push(V::new(self.context.vt(), 0.0));
             }
             Instruction::PushTime => {
-                self.stack.push(Complex64::new(self.context.time, 0.0));
+                self.stack.push(V::new(self.context.time, 0.0));
+            }
+            Instruction::PushSimParamValue(parameter) => {
+                self.stack
+                    .push(V::new(self.context.simparam(*parameter)?, 0.0));
+            }
+            Instruction::PushSimParamPresent(parameter) => {
+                self.stack.push(V::new(
+                    f64::from(
+                        self.context
+                            .simulation_parameters
+                            .get_parameter(*parameter)
+                            .is_some(),
+                    ),
+                    0.0,
+                ));
             }
             Instruction::PushMfactor => {
-                self.stack
-                    .push(Complex64::new(self.context.multiplicity, 0.0));
+                self.stack.push(V::new(self.context.multiplicity, 0.0));
             }
-            Instruction::PushPortConnected(terminal) => self.stack.push(Complex64::new(
+            Instruction::PushPortConnected(terminal) => self.stack.push(V::new(
                 f64::from(self.context.port_connected(*terminal)),
                 0.0,
             )),
@@ -488,19 +851,22 @@ impl<'a> SmallSignalVm<'a> {
             Instruction::CheckedValue => {
                 let derivative = self.pop("ddx")?;
                 let primal = self.pop("ddx")?;
-                rspice_veriloga_runtime::checked_derivative_value(primal.re, derivative.re)
-                    .map_err(|reason| VmError::InvalidNumericResult(reason.into()))?;
-                if !primal.im.is_finite() || !derivative.im.is_finite() {
+                if !primal.is_finite() {
                     return Err(VmError::InvalidNumericResult(
-                        "ddx small-signal value is not finite".into(),
+                        "ddx operand is not finite".into(),
+                    ));
+                }
+                if !derivative.is_finite() {
+                    return Err(VmError::InvalidNumericResult(
+                        "ddx derivative is not finite".into(),
                     ));
                 }
                 self.stack.push(derivative);
             }
-            Instruction::Add => self.binary("Add", |left, right| left + right)?,
-            Instruction::Sub => self.binary("Sub", |left, right| left - right)?,
-            Instruction::Mul => self.binary("Mul", multiply_complex)?,
-            Instruction::Div => self.binary("Div", divide_complex)?,
+            Instruction::Add => self.binary("Add", V::add)?,
+            Instruction::Sub => self.binary("Sub", V::subtract)?,
+            Instruction::Mul => self.binary("Mul", V::multiply)?,
+            Instruction::Div => self.binary("Div", V::divide)?,
             Instruction::Pow | Instruction::FnPow => self.binary_real("Pow", f64::powf)?,
             Instruction::Mod => self.binary_real("Mod", |left, right| left % right)?,
             Instruction::Shl => self.integer_binary(IntegerBinaryOperation::Shl, "left shift")?,
@@ -573,12 +939,12 @@ impl<'a> SmallSignalVm<'a> {
             // carry the actual complex perturbation.
             Instruction::DdtState(_) => {
                 let _input = self.pop_real("DdtState")?;
-                self.stack.push(Complex64::new(0.0, 0.0));
+                self.stack.push(V::new(0.0, 0.0));
             }
             Instruction::IdtState(_) => {
                 let initial = self.pop_real("IdtState initial condition")?;
                 let _input = self.pop_real("IdtState input")?;
-                self.stack.push(Complex64::new(initial, 0.0));
+                self.stack.push(V::new(initial, 0.0));
             }
             Instruction::IdtModState(_) => {
                 let offset = self.pop_real("IdtModState offset")?;
@@ -592,12 +958,12 @@ impl<'a> SmallSignalVm<'a> {
                         ))
                     },
                 )?;
-                self.stack.push(Complex64::new(wrapped, 0.0));
+                self.stack.push(V::new(wrapped, 0.0));
             }
             Instruction::DdtJacobian => {
                 let input = self.pop("DdtJacobian")?;
-                self.stack
-                    .push(multiply_complex(Complex64::new(0.0, self.omega), input));
+                let result = self.multiply_values(V::new(0.0, self.omega), input);
+                self.stack.push(result);
             }
             Instruction::IdtJacobian => {
                 let input = self.pop("IdtJacobian")?;
@@ -606,8 +972,8 @@ impl<'a> SmallSignalVm<'a> {
                         "idt/idtmod small-signal transfer is singular at zero frequency".into(),
                     ));
                 }
-                self.stack
-                    .push(divide_complex(input, Complex64::new(0.0, self.omega)));
+                let result = V::divide(input, V::new(0.0, self.omega), &mut self.range_lost);
+                self.stack.push(result);
             }
             Instruction::TableDerivative(table_id) => {
                 let input = self.pop_real("TableDerivative")?;
@@ -616,8 +982,7 @@ impl<'a> SmallSignalVm<'a> {
                     .lookup_tables
                     .get(*table_id)
                     .ok_or(VmError::InvalidInstruction("missing lookup table"))?;
-                self.stack
-                    .push(Complex64::new(table.derivative(input), 0.0));
+                self.stack.push(V::new(table.derivative(input), 0.0));
             }
             Instruction::LimitState(_) => {
                 let _step = self.pop_real("LimitState step")?;
@@ -635,8 +1000,7 @@ impl<'a> SmallSignalVm<'a> {
                     .lookup_tables
                     .get(*table_id)
                     .ok_or(VmError::InvalidInstruction("missing lookup table"))?;
-                self.stack
-                    .push(Complex64::new(table.interpolate(input), 0.0));
+                self.stack.push(V::new(table.interpolate(input), 0.0));
             }
             Instruction::AbsDelayState(buffer_id) => {
                 self.execute_absdelay(*buffer_id, false, false)?
@@ -663,7 +1027,7 @@ impl<'a> SmallSignalVm<'a> {
                     fall,
                 )
                 .map_err(|error| VmError::InvalidNumericResult(format!("transition: {error}")))?;
-                self.stack.push(Complex64::new(input, 0.0));
+                self.stack.push(V::new(input, 0.0));
             }
             Instruction::TransitionStateDerivative(_) => {
                 let fall = self.pop_real("transition derivative fall time")?;
@@ -695,7 +1059,7 @@ impl<'a> SmallSignalVm<'a> {
                         "stateful slew instruction encoded passthrough rates",
                     ));
                 };
-                self.stack.push(Complex64::new(input, 0.0));
+                self.stack.push(V::new(input, 0.0));
             }
             Instruction::SlewStateDerivative(filter_id) => {
                 let _negative_derivative = self.pop("slew negative-rate derivative")?;
@@ -716,8 +1080,9 @@ impl<'a> SmallSignalVm<'a> {
                 let filter = self.context.slew_filters.get(*filter_id).ok_or(
                     VmError::InvalidInstruction("missing slew filter during small-signal replay"),
                 )?;
-                self.stack
-                    .push(derivative * filter.small_signal_input_gain(self.context.time));
+                let gain = filter.small_signal_input_gain(self.context.time);
+                let result = self.scale_value(derivative, gain);
+                self.stack.push(result);
             }
             Instruction::CrossState(_) => {
                 for label in [
@@ -729,26 +1094,26 @@ impl<'a> SmallSignalVm<'a> {
                 ] {
                     let _ = self.pop_real(label)?;
                 }
-                self.stack.push(Complex64::new(0.0, 0.0));
+                self.stack.push(V::new(0.0, 0.0));
             }
             Instruction::LastCrossingState(_) => {
                 let _direction = self.pop_real("last_crossing direction")?;
                 let _input = self.pop_real("last_crossing input")?;
-                self.stack.push(Complex64::new(-1.0, 0.0));
+                self.stack.push(V::new(-1.0, 0.0));
             }
             Instruction::WhiteNoise => {
                 let _power = self.pop_real("white_noise power")?;
-                self.stack.push(Complex64::new(0.0, 0.0));
+                self.stack.push(V::new(0.0, 0.0));
             }
             Instruction::FlickerNoise => {
                 let _exponent = self.pop_real("flicker_noise exponent")?;
                 let _power = self.pop_real("flicker_noise power")?;
-                self.stack.push(Complex64::new(0.0, 0.0));
+                self.stack.push(V::new(0.0, 0.0));
             }
             Instruction::Analysis(kind) => {
                 let bit = 1_u32.checked_shl(u32::from(*kind)).unwrap_or(0);
                 let active = self.context.analysis_query_mask() & bit != 0;
-                self.stack.push(Complex64::new(f64::from(active), 0.0));
+                self.stack.push(V::new(f64::from(active), 0.0));
             }
             Instruction::AboveState(_) => {
                 for label in [
@@ -759,7 +1124,7 @@ impl<'a> SmallSignalVm<'a> {
                 ] {
                     let _ = self.pop_real(label)?;
                 }
-                self.stack.push(Complex64::new(0.0, 0.0));
+                self.stack.push(V::new(0.0, 0.0));
             }
             Instruction::TimerState(_) => {
                 for label in [
@@ -770,7 +1135,7 @@ impl<'a> SmallSignalVm<'a> {
                 ] {
                     let _ = self.pop_real(label)?;
                 }
-                self.stack.push(Complex64::new(0.0, 0.0));
+                self.stack.push(V::new(0.0, 0.0));
             }
             Instruction::LaplaceState(filter_id) => {
                 let input = self.pop("LaplaceState")?;
@@ -782,7 +1147,8 @@ impl<'a> SmallSignalVm<'a> {
                 let gain = filter.dc_output(1.0).map_err(|error| {
                     VmError::InvalidNumericResult(format!("Laplace filter {filter_id}: {error}"))
                 })?;
-                self.stack.push(input * gain);
+                let result = self.scale_value(input, gain);
+                self.stack.push(result);
             }
             Instruction::LaplaceStateDerivative(filter_id) => {
                 let input = self.pop("LaplaceStateDerivative")?;
@@ -805,7 +1171,8 @@ impl<'a> SmallSignalVm<'a> {
                             })
                     },
                 )?;
-                self.stack.push(multiply_complex(response, input));
+                let result = self.multiply_values(V::from_complex(response), input);
+                self.stack.push(result);
             }
         }
         Ok(())
@@ -843,9 +1210,89 @@ mod tests {
     }
 
     #[test]
+    fn real_comparisons_accept_authored_infinity_before_and_after_recovery() {
+        let context = ac_context();
+        for recover_first in [false, true] {
+            let mut instructions = vec![Instruction::PushConst(f64::INFINITY)];
+            if recover_first {
+                // This operation invokes range recovery, which must retain
+                // the authored infinity's comparison semantics on replay.
+                instructions.extend([Instruction::PushConst(1.0), Instruction::Add]);
+            }
+            instructions.extend([Instruction::PushConst(2.0), Instruction::Gt]);
+            let mut vm = SmallSignalVm::new(&context, 1.0).unwrap();
+            assert_eq!(
+                vm.execute(&BytecodeProgram { instructions }).unwrap(),
+                Complex64::new(1.0, 0.0)
+            );
+        }
+    }
+
+    #[test]
+    fn range_recovery_replays_assignments_from_the_original_seed() {
+        use crate::codegen::AssignmentProgram;
+
+        let mut context = ac_context();
+        context.variables = vec![2.0, 0.0];
+        let increment = AssignmentStep::Assign(AssignmentProgram {
+            var_index: 0,
+            program: BytecodeProgram {
+                instructions: vec![
+                    Instruction::PushVariable(0),
+                    Instruction::PushConst(1.0),
+                    Instruction::Add,
+                ],
+            },
+        });
+        for gain in [1e-200, 1e200] {
+            let product = BytecodeProgram {
+                instructions: vec![
+                    Instruction::PushVariable(0),
+                    Instruction::PushConst(gain),
+                    Instruction::Mul,
+                    Instruction::DdtJacobian,
+                ],
+            };
+            let assignments = [
+                increment.clone(),
+                AssignmentStep::Assign(AssignmentProgram {
+                    var_index: 1,
+                    program: product.clone(),
+                }),
+            ];
+            let next_assignments = [increment.clone()];
+            // Exercise recovery both during assignments and in a subsequent
+            // Jacobian program, after ordinary assignments already completed.
+            for assign_product in [false, true] {
+                let mut vm = SmallSignalVm::new(&context, gain / std::f64::consts::TAU).unwrap();
+                vm.execute_assignments(&assignments[..if assign_product { 2 } else { 1 }])
+                    .unwrap();
+                let program = if assign_product {
+                    BytecodeProgram {
+                        instructions: vec![Instruction::PushVariable(1)],
+                    }
+                } else {
+                    product.clone()
+                };
+                let result = vm.execute_scaled(&program, 1.0 / gain).unwrap();
+                assert_eq!(result.re, 0.0);
+                assert!((result.im / gain - 3.0).abs() <= 8.0 * f64::EPSILON);
+                vm.execute_assignments(&next_assignments).unwrap();
+                let value = vm
+                    .execute(&BytecodeProgram {
+                        instructions: vec![Instruction::PushVariable(0)],
+                    })
+                    .unwrap();
+                assert_eq!(value, Complex64::new(4.0, 0.0));
+                assert_eq!(context.variables, [2.0, 0.0]);
+            }
+        }
+    }
+
+    #[test]
     fn complex_division_preserves_range_and_live_stack_values() {
         let context = ac_context();
-        let mut vm = SmallSignalVm::new(&context, 1.0).unwrap();
+        let mut vm = SmallSignalEngine::<FrequencyValue>::new(&context, 1.0).unwrap();
         for scale in [f64::from_bits(1), 1e-200, 1.0, 1e200, f64::MAX] {
             for (left, right, expected) in [
                 (
@@ -869,9 +1316,16 @@ mod tests {
                     Complex64::new(1.0, -1.0),
                 ),
             ] {
-                vm.stack = vec![Complex64::new(7.0, -3.0), left, right];
+                vm.stack = vec![
+                    FrequencyValue::new(7.0, -3.0),
+                    FrequencyValue::from_complex(left),
+                    FrequencyValue::from_complex(right),
+                ];
                 vm.execute_instruction(&Instruction::Div).unwrap();
-                assert_eq!(vm.stack, [Complex64::new(7.0, -3.0), expected]);
+                assert_eq!(
+                    vm.stack.iter().map(|v| v.binary64()).collect::<Vec<_>>(),
+                    [Complex64::new(7.0, -3.0), expected]
+                );
             }
         }
         for frequency in [1e-200, 1e200] {

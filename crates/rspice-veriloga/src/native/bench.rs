@@ -1382,6 +1382,7 @@ fn eval_context_from_vm_context(context: &mut VmContext) -> EvalContext {
         prelude_slots: std::ptr::null_mut(),
         prelude_slots_len: 0,
         analog_effects: context.analog_effects_ptr(),
+        simulation_parameters: &context.simulation_parameters,
     }
 }
 

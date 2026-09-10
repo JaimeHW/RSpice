@@ -2158,3 +2158,567 @@ fn stationary_zero_bjt_bias_leaves_the_startup_junction_state() {
         }
     }
 }
+
+#[test]
+fn small_gummel_poon_instances_scale_dc_and_ac_at_temperature() {
+    for dialect in [SpiceDialect::Ngspice, SpiceDialect::Xyce] {
+        for temperature in [280.15, 300.15, 340.15] {
+            let mut config = SimulationConfig::default().with_spice_dialect(dialect);
+            config.temperature = temperature;
+            config.convergence_config.gmin_target = 0.0;
+            config.convergence_config.junction_gmin_target = 0.0;
+            let engine = Engine::new(config);
+            for (kind, p) in [("NPN", 1.0), ("PNP", -1.0)] {
+                for (vc, vb) in [(1.0, 0.1), (2.0, 0.7), (0.1, 0.7), (-0.2, -0.4)] {
+                    let make = |parameter, scale| {
+                        Netlist::parse(&format!(
+                        "Small GP instance\nVC c 0 {}\nVB b 0 DC {} AC 1\nQ1 c b 0 mm {parameter}={scale}\n.model mm {kind}(LEVEL=1 IS=1e-14 BF=100 BR=2 IKF=1e-3 IKR=2e-3 VAF=40 VAR=20 CJE=2p CJC=1p TF=1n TR=2n)\n.options GMIN=0\n.end\n",p*vc,p*vb)).unwrap()
+                    };
+                    let unit = make("M", 1.0);
+                    let dc = engine.run_dc_op(&unit).unwrap();
+                    let ac = engine.run_ac(&unit, &[1e6]).unwrap();
+                    for parameter in ["M", "AREA"] {
+                        for scale in [1e-200, 1e-30, 1e-18, 0.25] {
+                            let deck = make(parameter, scale);
+                            let actual_dc = engine.run_dc_op(&deck).unwrap();
+                            let actual_ac = engine.run_ac(&deck, &[1e6]).unwrap();
+                            assert_eq!(actual_dc.branch_names, dc.branch_names);
+                            assert_eq!(actual_ac[0].branch_names, ac[0].branch_names);
+                            for (&actual, &expected) in
+                                actual_dc.branch_currents.iter().zip(&dc.branch_currents)
+                            {
+                                assert!(
+                                    (actual / scale - expected).abs() < expected.abs() * 3e-10,
+                                    "{dialect:?} {kind} T={temperature} ({vc},{vb}) {parameter}={scale:e} DC: {actual:e} vs {expected:e}*scale"
+                                );
+                            }
+                            for (actual, expected) in
+                                actual_ac[0].currents.iter().zip(&ac[0].currents)
+                            {
+                                for (actual, expected) in
+                                    [(actual.re, expected.re), (actual.im, expected.im)]
+                                {
+                                    assert!(
+                                        (actual / scale - expected).abs() <= expected.abs() * 3e-10,
+                                        "{dialect:?} {kind} T={temperature} ({vc},{vb}) {parameter}={scale:e} AC: {actual:e} vs {expected:e}*scale"
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn zero_gummel_poon_saturation_current_stays_disabled() {
+    let mut config = SimulationConfig::default();
+    config.convergence_config.gmin_target = 0.0;
+    config.convergence_config.junction_gmin_target = 0.0;
+    let engine = Engine::new(config);
+    for vb in [-0.1, 0.0, 0.7] {
+        let deck = Netlist::parse(&format!("Disabled BJT current\nVC c 0 1\nVB b 0 {vb}\nQ1 c b 0 mm\n.model mm NPN(IS=0)\n.options GMIN=0\n.end\n")).unwrap();
+        let result = engine.run_dc_op(&deck).unwrap();
+        assert!(result.branch_currents.iter().all(|&current| current == 0.0));
+    }
+}
+
+#[test]
+fn legacy_junction_capacitance_temperature_matches_spice_references() {
+    use SpiceDialect::{Ngspice, Xyce};
+    // Independent ngspice 46 AC measurements (IS=TF=TR=0), in farads.
+    // Xyce values are derived from N_DEV_BJT.C in the 7.10 source:
+    // operating pbfact is also used in the nominal inversion, and CJS/VJS
+    // remain nominal. Biases avoid its inconsistent nominal BC join.
+    for (dialect, tnom, temperature, bias, expected) in [
+        (
+            Ngspice,
+            27.0,
+            -40.0,
+            -0.4,
+            [
+                1.6592826985669354e-12,
+                2.3187629982831146e-12,
+                4.504768623867699e-12,
+            ],
+        ),
+        (
+            Xyce,
+            27.0,
+            -40.0,
+            -0.4,
+            [
+                1.8462098259680166e-12,
+                2.7014861553409653e-12,
+                4.598086389211355e-12,
+            ],
+        ),
+        (Ngspice, 27.0, 27.0, 0.0, [2e-12, 3e-12, 5e-12]),
+        (Xyce, 27.0, 27.0, 0.0, [2e-12, 3e-12, 5e-12]),
+        (
+            Ngspice,
+            27.0,
+            70.0,
+            0.1,
+            [
+                2.1805869065275923e-12,
+                3.4267504027453357e-12,
+                5.223725774666841e-12,
+            ],
+        ),
+        (
+            Xyce,
+            27.0,
+            70.0,
+            0.1,
+            [
+                1.9906878749375348e-12,
+                3.017356268296936e-12,
+                5.126373626373625e-12,
+            ],
+        ),
+        (
+            Ngspice,
+            27.0,
+            125.0,
+            0.6,
+            [
+                3.3938210663884363e-12,
+                6.647798973415988e-12,
+                6.11777066335303e-12,
+            ],
+        ),
+        (
+            Xyce,
+            27.0,
+            125.0,
+            0.6,
+            [
+                2.30151257189782e-12,
+                3.724231648825904e-12,
+                5.758241758241757e-12,
+            ],
+        ),
+        (
+            Ngspice,
+            50.0,
+            27.0,
+            -0.4,
+            [
+                1.707690473743761e-12,
+                2.4362058346267156e-12,
+                4.568111350869261e-12,
+            ],
+        ),
+        (
+            Xyce,
+            50.0,
+            27.0,
+            -0.4,
+            [
+                1.7572808847689595e-12,
+                2.523123224854252e-12,
+                4.598086389211355e-12,
+            ],
+        ),
+        (
+            Ngspice,
+            50.0,
+            -40.0,
+            0.0,
+            [
+                1.8724352634309237e-12,
+                2.6888696309844536e-12,
+                4.839825827878507e-12,
+            ],
+        ),
+        (
+            Xyce,
+            50.0,
+            -40.0,
+            0.0,
+            [2.2530437202648688e-12, 3.490055296764453e-12, 5e-12],
+        ),
+        (
+            Ngspice,
+            50.0,
+            70.0,
+            0.6,
+            [
+                2.978859243920323e-12,
+                5.169633039750461e-12,
+                5.821664385549351e-12,
+            ],
+        ),
+        (
+            Xyce,
+            50.0,
+            70.0,
+            0.6,
+            [
+                2.763039693056152e-12,
+                4.648400104490727e-12,
+                5.758241758241757e-12,
+            ],
+        ),
+        (
+            Ngspice,
+            50.0,
+            50.0,
+            0.1,
+            [
+                2.097294565936023e-12,
+                3.202170347382517e-12,
+                5.126373626373625e-12,
+            ],
+        ),
+        (
+            Xyce,
+            50.0,
+            50.0,
+            0.1,
+            [
+                2.097294565936024e-12,
+                3.202170347382517e-12,
+                5.126373626373625e-12,
+            ],
+        ),
+    ] {
+        let mut config = SimulationConfig::default().with_spice_dialect(dialect);
+        config.convergence_config.gmin_target = 0.0;
+        config.convergence_config.junction_gmin_target = 0.0;
+        let engine = Engine::new(config);
+        for (kind, p) in [("NPN", 1.0), ("PNP", -1.0)] {
+            for m in [2.0, 2e-20] {
+                let voltage = p * bias;
+                let deck = Netlist::parse(&format!(
+                    "GP junction temperature\nVBE be 0 DC {voltage} AC 1\nVBC bc 0 DC {voltage} AC 1\nVSC sc 0 DC {voltage} AC 1\n\
+                     QBE 0 be 0 0 me AREA=3 M={m}\nQBC 0 bc 0 0 mc AREA=3 M={m}\nQSC 0 0 0 sc ms AREA=3 M={m}\n\
+                     .model me {kind}(IS=0 SUBS=1 CJE=2p VJE=.83 MJE=.37 FC=.4 TNOM={tnom})\n\
+                     .model mc {kind}(IS=0 SUBS=1 CJC=3p VJC=.68 MJC=.41 FC=.4 TNOM={tnom})\n\
+                     .model ms {kind}(IS=0 SUBS=1 CJS=5p VJS=.91 MJS=.23 FC=.4 TNOM={tnom})\n\
+                     .temp {temperature}\n.options GMIN=0\n.end\n"
+                )).unwrap();
+                let ac = engine.run_ac(&deck, &[1e6]).unwrap();
+                for (name, expected) in ["VBE", "VBC", "VSC"].into_iter().zip(expected) {
+                    let column = ac[0]
+                        .branch_names
+                        .iter()
+                        .position(|branch| branch.eq_ignore_ascii_case(name))
+                        .unwrap();
+                    let current = ac[0].currents[column];
+                    let actual = -current.im / (std::f64::consts::TAU * 1e6 * 3.0 * m);
+                    // Ngspice uses older k/q constants; RSpice intentionally
+                    // uses current SI constants outside the Xyce dialect.
+                    let tolerance = if dialect == Ngspice { 3e-8 } else { 2e-12 };
+                    assert!(
+                        (actual - expected).abs() < expected * tolerance,
+                        "{dialect:?} {kind} {name} TNOM={tnom} TEMP={temperature} V={bias} M={m}: {actual:e} vs {expected:e}"
+                    );
+                    assert_eq!(current.re, 0.0);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn legacy_gmin_placement_and_multiplicity_match_spice_dialects() {
+    for dialect in [
+        SpiceDialect::BestAvailable,
+        SpiceDialect::Ngspice,
+        SpiceDialect::Xyce,
+    ] {
+        for gmin in [1e-12, 1e-3] {
+            let mut config = SimulationConfig::default().with_spice_dialect(dialect);
+            config.convergence_config.gmin_target = 0.0;
+            config.convergence_config.junction_gmin_target = gmin;
+            let engine = Engine::new(config);
+            for (kind, p) in [("NPN", 1.0), ("PNP", -1.0)] {
+                for area in [1.0, 5.0] {
+                    for m in [1e-20, 0.5, 3.0] {
+                        // Tie the substrate to its collector connection to
+                        // isolate BE/BC GMIN. IS=0 eliminates physical current.
+                        let deck = Netlist::parse(&format!(
+                            "GP GMIN\nVC c 0 {}\nVB b 0 DC {} AC 1\nQ1 c b 0 c mm AREA={area} M={m}\n.model mm {kind}(IS=0 SUBS=1 BF=100 BR=2 TF=1n TR=2n)\n.end\n",p,p*0.1)).unwrap();
+                        let dc = engine.run_dc_op(&deck).unwrap();
+                        let ac = engine.run_ac(&deck, &[1e6]).unwrap();
+                        let g = gmin * m;
+                        let omega = std::f64::consts::TAU * 1e6;
+                        // Ngspice 46 binary captures: leakage parallels.
+                        // Xyce 7.10 N_DEV_BJT.C: GMIN enters transport and
+                        // diffusion charge, then BF/BR divide base currents.
+                        let expected = if dialect == SpiceDialect::Xyce {
+                            [
+                                ("VB", 0.449 * g, -0.51 * g, -omega * 3e-9 * g),
+                                ("VC", -1.45 * g, 0.5 * g, omega * 2e-9 * g),
+                            ]
+                        } else {
+                            [("VB", 0.8 * g, -2.0 * g, 0.0), ("VC", -0.9 * g, g, 0.0)]
+                        };
+                        for (branch, current, re, im) in expected {
+                            let actual = dc.branch_current_named(branch).unwrap();
+                            assert!(
+                                (actual - p * current).abs() < g * 2e-11,
+                                "{dialect:?} {kind} AREA={area} M={m} GMIN={gmin} DC {branch}: {actual:e} vs {:e}",
+                                p * current
+                            );
+                            let index = ac[0]
+                                .branch_names
+                                .iter()
+                                .position(|name| name.eq_ignore_ascii_case(branch))
+                                .unwrap();
+                            let actual = ac[0].currents[index];
+                            assert!(
+                                (actual.re - re).abs() < g * 2e-11
+                                    && (actual.im - im).abs() < g * 2e-11,
+                                "{dialect:?} {kind} AREA={area} M={m} GMIN={gmin} AC {branch}: {actual:?} vs ({re:e},{im:e})"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn ngspice_gp_gmin_substrate_and_series_network_match_explicit_resistors() {
+    let gmin = 1e-3;
+    let mut config = SimulationConfig::default().with_spice_dialect(SpiceDialect::Ngspice);
+    config.convergence_config.gmin_target = 0.0;
+    config.convergence_config.junction_gmin_target = gmin;
+    let engine = Engine::new(config);
+    for (kind, p) in [("NPN", 1.0), ("PNP", -1.0)] {
+        for subs in [1, -1] {
+            for series in [false, true] {
+                for (area, m) in [(1.0, 1.0), (5.0, 0.25), (2.0, 3.0)] {
+                    let (rc, rb, re, rbm) = if series {
+                        (20.0, 30.0, 10.0, 10.0)
+                    } else {
+                        (0.0, 0.0, 0.0, 0.0)
+                    };
+                    let sources = |vb: f64| {
+                        format!(
+                            "GP resistor equivalent\nVC c 0 {} AC .3\nVB b 0 DC {vb} AC 1\nVE e 0 {} AC .2\nVS s 0 {} AC .4\n",
+                            p,
+                            p * (-0.05),
+                            p * (-0.2)
+                        )
+                    };
+                    let actual = format!(
+                        "{}Q1 c b e s mm AREA={area} M={m}\n.model mm {kind}(IS=0 SUBS={subs} TF=1n TR=2n RC={rc} RB={rb} RBM={rbm} RE={re})\n.end\n",
+                        sources(p * 0.1)
+                    );
+                    let (ci, bi, ei) = if series {
+                        ("ci", "bi", "ei")
+                    } else {
+                        ("c", "b", "e")
+                    };
+                    let connection = if subs == 1 { ci } else { bi };
+                    let rg = 1.0 / (gmin * m);
+                    let mut resistors = format!(
+                        "Rbe {bi} {ei} {rg}\nRbc {bi} {ci} {rg}\nRsub s {connection} {rg}\n"
+                    );
+                    if series {
+                        resistors.push_str(&format!(
+                            "Rc c ci {}\nRb b bi {}\nRe e ei {}\n",
+                            rc / (area * m),
+                            rb / (area * m),
+                            re / (area * m)
+                        ));
+                    }
+                    let reference =
+                        Netlist::parse(&format!("{}{resistors}.end\n", sources(p * 0.1))).unwrap();
+                    let deck = Netlist::parse(&actual).unwrap();
+                    let expected_dc = engine.run_dc_op(&reference).unwrap();
+                    let actual_dc = engine.run_dc_op(&deck).unwrap();
+                    let expected_ac = engine.run_ac(&reference, &[1e6]).unwrap();
+                    let actual_ac = engine.run_ac(&deck, &[1e6]).unwrap();
+                    for branch in ["VC", "VB", "VE", "VS"] {
+                        let a = actual_dc.branch_current_named(branch).unwrap();
+                        let b = expected_dc.branch_current_named(branch).unwrap();
+                        assert!(
+                            (a - b).abs() < 1e-11 * m,
+                            "{kind} SUBS={subs} series={series} AREA={area} M={m} DC {branch}: {a:e} vs {b:e}"
+                        );
+                        let current = |ac: &rspice_core::analysis::ac::AcResult| {
+                            ac.currents[ac
+                                .branch_names
+                                .iter()
+                                .position(|name| name.eq_ignore_ascii_case(branch))
+                                .unwrap()]
+                        };
+                        let a = current(&actual_ac[0]);
+                        let b = current(&expected_ac[0]);
+                        assert!(
+                            (a - b).norm() < 1e-11 * m,
+                            "{kind} SUBS={subs} series={series} AREA={area} M={m} AC {branch}: {a:?} vs {b:?}"
+                        );
+                    }
+                    if series && area == 2.0 && p == 1.0 {
+                        // With IS=0, GMIN must not create a transient storage
+                        // term. A linear ramp follows the resistive endpoints.
+                        let final_reference =
+                            Netlist::parse(&format!("{}{resistors}.end\n", sources(p * 0.3)))
+                                .unwrap();
+                        let final_dc = engine.run_dc_op(&final_reference).unwrap();
+                        let ramp = Netlist::parse(
+                            &actual.replace("DC 0.1 AC 1", "PWL(0 0.1 20n 0.3) AC 1"),
+                        )
+                        .unwrap();
+                        let tran = engine.run_tran(&ramp, 20e-9, 1e-9).unwrap();
+                        assert!(tran.time.len() > 3);
+                        for branch in ["VC", "VB", "VE", "VS"] {
+                            let start = expected_dc.branch_current_named(branch).unwrap();
+                            let end = final_dc.branch_current_named(branch).unwrap();
+                            let values = tran.try_branch_current_waveform_named(branch).unwrap();
+                            for (&time, &actual) in tran.time.iter().zip(values) {
+                                let expected =
+                                    start + (end - start) * (time / 20e-9).clamp(0.0, 1.0);
+                                assert!(
+                                    (actual - expected).abs() < 1e-10 * m,
+                                    "SUBS={subs} transient {branch} at {time:e}: {actual:e} vs {expected:e}"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn legacy_private_base_ac_reduction_matches_explicit_rc_network() {
+    for dialect in [SpiceDialect::Ngspice, SpiceDialect::Xyce] {
+        let mut config = SimulationConfig::default().with_spice_dialect(dialect);
+        config.convergence_config.gmin_target = 0.0;
+        config.convergence_config.junction_gmin_target = 0.0;
+        let engine = Engine::new(config);
+        for kind in ["NPN", "PNP"] {
+            for subs in [1, -1] {
+                for (area, m) in [(1.0, 1.0), (5.0, 0.25), (1.0, 1e-20), (5.0, 1e-200)] {
+                    // Grading zero makes these pure capacitors. RBM<RB keeps
+                    // a private base node; IS=0 and no Early/knee terms make
+                    // the base resistance constant, so the RC oracle is exact.
+                    let sources = "Private BJT AC\nVC c 0 0 AC .3\nVB b 0 0 AC 1\nVE e 0 0 AC .2\nVS s 0 0 AC .4\n";
+                    let actual = Netlist::parse(&format!("{sources}Q1 c b e s mm AREA={area} M={m}\n.model mm {kind}(IS=0 SUBS={subs} RC=2k RB=5k RBM=1k RE=1k CJE=1p CJC=2p CJS=3p MJE=0 MJC=0 MJS=0)\n.end\n")).unwrap();
+                    let scale = area * m;
+                    let connection = if subs == 1 { "ci" } else { "bi" };
+                    let reference = Netlist::parse(&format!("{sources}RC c ci {}\nRB b bi {}\nRE e ei {}\nCBE bi ei {}\nCBC bi ci {}\nCS s {connection} {}\n.end\n",2e3/scale,5e3/scale,1e3/scale,1e-12*scale,2e-12*scale,3e-12*scale)).unwrap();
+                    let frequencies = [1e3, 1e6, 1e9];
+                    let expected = engine.run_ac(&reference, &frequencies).unwrap();
+                    let actual = engine.run_ac(&actual, &frequencies).unwrap();
+                    for (point, (actual, expected)) in actual.iter().zip(&expected).enumerate() {
+                        for branch in ["VC", "VB", "VE", "VS"] {
+                            let get = |result: &rspice_core::analysis::ac::AcResult| {
+                                result.currents[result
+                                    .branch_names
+                                    .iter()
+                                    .position(|name| name.eq_ignore_ascii_case(branch))
+                                    .unwrap()]
+                            };
+                            let a = get(actual) / scale;
+                            let b = get(expected) / scale;
+                            assert!(
+                                (a - b).norm() < 2e-11 * b.norm().max(1e-12),
+                                "{dialect:?} {kind} SUBS={subs} AREA={area} M={m} f={} {branch}: {a:?} vs {b:?}",
+                                frequencies[point]
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn legacy_private_base_ac_reduction_conserves_nonlinear_terminal_current() {
+    for dialect in [SpiceDialect::Ngspice, SpiceDialect::Xyce] {
+        for gmin in [0.0, 1e-3] {
+            let mut config = SimulationConfig::default().with_spice_dialect(dialect);
+            config.convergence_config.gmin_target = 0.0;
+            config.convergence_config.junction_gmin_target = gmin;
+            let engine = Engine::new(config);
+            for (kind, p) in [("NPN", 1.0), ("PNP", -1.0)] {
+                for subs in [1, -1] {
+                    let deck=Netlist::parse(&format!("Private BJT KCL\nVC c 0 {p}\nVB b 0 DC {} AC 1\nVE e 0 0\nVS s 0 {}\nQ1 c b e s mm AREA=5 M=3\n.model mm {kind}(IS=1e-14 BF=100 BR=2 VAF=40 VAR=20 IKF=1m IKR=2m SUBS={subs} RC=20 RB=30 RBM=10 RE=10 CJE=1p CJC=2p CJS=3p TF=1n TR=2n)\n.end\n",p*0.65,p*(-0.2))).unwrap();
+                    for ac in engine.run_ac(&deck, &[1.0, 1e3, 1e6, 1e9]).unwrap() {
+                        let sum = ac.currents.iter().copied().sum::<rspice_core::Complex64>();
+                        let scale = ac.currents.iter().map(|i| i.norm()).sum::<f64>();
+                        assert!(
+                            sum.norm() < 2e-11 * scale,
+                            "{dialect:?} {kind} SUBS={subs} GMIN={gmin}: terminal sum={sum:?}, scale={scale}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn private_bjt_small_instance_dc_and_ac_match_parallel_scaling() {
+    for dialect in [SpiceDialect::Ngspice, SpiceDialect::Xyce] {
+        let mut config = SimulationConfig::default().with_spice_dialect(dialect);
+        config.convergence_config.gmin_target = 0.0;
+        config.convergence_config.junction_gmin_target = 0.0;
+        let engine = Engine::new(config);
+        let make = |m| {
+            Netlist::parse(&format!("Private BJT scaling\nVC c 0 1\nVB b 0 DC .7 AC 1\nQ1 c b 0 mm M={m}\n.model mm NPN(IS=1e-14 BF=100 RB=5k RBM=1k CJE=1p CJC=2p TF=1n)\n.end\n")).unwrap()
+        };
+        let reference = make(1.0);
+        let reference_dc = engine.run_dc_op(&reference).unwrap();
+        let reference_ac = engine.run_ac(&reference, &[1e6]).unwrap();
+        for m in [1e-20, 1e-100, 1e-200] {
+            let deck = make(m);
+            let dc = engine.run_dc_op(&deck).unwrap();
+            let ac = engine.run_ac(&deck, &[1e6]).unwrap();
+            for branch in ["VC", "VB"] {
+                let a = dc.branch_current_named(branch).unwrap() / m;
+                let b = reference_dc.branch_current_named(branch).unwrap();
+                // Xyce's outer DC update uses its fixed 1e-3 relative gate.
+                // The private-voltage unit separately requires 2e-12 V;
+                // do not mistake the returned MNA iterate for that root.
+                let dc_tolerance = if dialect == SpiceDialect::Xyce {
+                    1e-6
+                } else {
+                    2e-8
+                };
+                assert!(
+                    (a - b).abs() < dc_tolerance * b.abs(),
+                    "{dialect:?} M={m} {branch} DC {a:e} vs {b:e}"
+                );
+                let index = ac[0]
+                    .branch_names
+                    .iter()
+                    .position(|name| name.eq_ignore_ascii_case(branch))
+                    .unwrap();
+                let a = ac[0].currents[index] / m;
+                let b = reference_ac[0].currents[index];
+                assert!(
+                    (a - b).norm() < 2e-8 * b.norm(),
+                    "{dialect:?} M={m} {branch} AC {a:?} vs {b:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn private_bjt_ac_reduction_errors_instead_of_dropping_invalid_charge() {
+    let mut config = SimulationConfig::default();
+    config.convergence_config.gmin_target = 0.0;
+    config.convergence_config.junction_gmin_target = 0.0;
+    let engine = Engine::new(config);
+    let deck=Netlist::parse("Invalid private BJT AC\nVC c 0 0\nVB b 0 0 AC 1\nQ1 c b 0 mm\n.model mm NPN(IS=0 RB=1k RBM=100 CJE=1e308 MJE=0)\n.end\n").unwrap();
+    let error = engine.run_ac(&deck, &[1e6]).unwrap_err().to_string();
+    assert!(
+        error.contains("Q1") && error.contains("AC private-state reduction"),
+        "{error}"
+    );
+}

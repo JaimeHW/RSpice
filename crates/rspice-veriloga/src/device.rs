@@ -2228,7 +2228,7 @@ impl CanonicalNoiseRuntimePlan {
             multiplicity: context.multiplicity,
             time: context.time,
             analyses,
-            simparams: Default::default(),
+            simparams: context.simulation_parameters,
             ddt: 0.0,
             ddt_scale: 0.0,
             idt: 0.0,
@@ -2395,7 +2395,15 @@ impl VerilogADevice {
         nodes: &[usize],
     ) -> Result<Self, VmError> {
         let model: std::sync::Arc<CompiledModel> = model.into();
-        Self::try_new_inner(name, model, nodes, None, &[], &crate::NoPipelineControl)
+        Self::try_new_inner(
+            name,
+            model,
+            nodes,
+            None,
+            &[],
+            Default::default(),
+            &crate::NoPipelineControl,
+        )
     }
 
     /// Checked constructor that compiles stamp values from canonical MIR when
@@ -2427,7 +2435,15 @@ impl VerilogADevice {
         control: &dyn crate::PipelineControl,
     ) -> Result<Self, VmError> {
         let model: std::sync::Arc<CompiledModel> = model.into();
-        Self::try_new_inner(name, model, nodes, Some(artifact), &[], control)
+        Self::try_new_inner(
+            name,
+            model,
+            nodes,
+            Some(artifact),
+            &[],
+            Default::default(),
+            control,
+        )
     }
 
     /// Apply instance overrides before resolving dependent defaults and ranges.
@@ -2440,7 +2456,37 @@ impl VerilogADevice {
         parameters: &[(&str, f64)],
         control: &dyn crate::PipelineControl,
     ) -> Result<Self, VmError> {
-        Self::try_new_inner(name, model.into(), nodes, artifact, parameters, control)
+        Self::try_new_inner(
+            name,
+            model.into(),
+            nodes,
+            artifact,
+            parameters,
+            Default::default(),
+            control,
+        )
+    }
+
+    /// Install the simulator environment before resolving dependent defaults.
+    /// Later runtime updates do not implicitly recompute instance parameters.
+    pub fn try_new_with_simulation_parameters_and_control(
+        name: impl Into<SmolStr>,
+        model: impl Into<std::sync::Arc<CompiledModel>>,
+        artifact: Option<&CanonicalIrArtifact>,
+        nodes: &[usize],
+        parameters: &[(&str, f64)],
+        simulation_parameters: rspice_veriloga_runtime::GeneratedSimulationParameters,
+        control: &dyn crate::PipelineControl,
+    ) -> Result<Self, VmError> {
+        Self::try_new_inner(
+            name,
+            model.into(),
+            nodes,
+            artifact,
+            parameters,
+            simulation_parameters,
+            control,
+        )
     }
 
     fn try_new_inner(
@@ -2449,6 +2495,7 @@ impl VerilogADevice {
         nodes: &[usize],
         canonical_artifact: Option<&CanonicalIrArtifact>,
         parameters: &[(&str, f64)],
+        simulation_parameters: rspice_veriloga_runtime::GeneratedSimulationParameters,
         control: &dyn crate::PipelineControl,
     ) -> Result<Self, VmError> {
         if control.is_cancelled() {
@@ -2511,6 +2558,7 @@ impl VerilogADevice {
         // Create context with terminal count and internal nodes
         let num_internal_nodes = model.internal_nodes;
         let mut context = VmContext::with_internal_nodes(num_terminals, num_internal_nodes);
+        context.simulation_parameters = simulation_parameters;
         context.port_connected = (0..num_terminals)
             .map(|terminal| u8::from(terminal < supplied_terminals))
             .collect();
@@ -3554,6 +3602,19 @@ impl VerilogADevice {
             .map_err(VmError::WasmJit)
     }
 
+    /// Install the simulator values for the next evaluation. The store admits
+    /// only finite values, and missing queries remain explicitly unavailable.
+    pub fn set_simulation_parameters(
+        &mut self,
+        parameters: rspice_veriloga_runtime::GeneratedSimulationParameters,
+    ) {
+        if self.context.simulation_parameters != parameters {
+            self.context.simulation_parameters = parameters;
+            self.context.analysis_initialized = false;
+            self.context.numerical_evaluation_valid = false;
+        }
+    }
+
     /// Set simulation temperature in Kelvin
     pub fn set_temperature(&mut self, temp_k: f64) {
         self.try_set_temperature(temp_k).unwrap_or_else(|err| {
@@ -4472,6 +4533,10 @@ impl VerilogADevice {
         let mut program_active = vec![true; model.stamp_programs.len()];
         let mut branch_active = vec![false; model.branch_sources.len()];
 
+        if model
+            .stamp_programs
+            .iter()
+            .any(|program| program.static_condition.is_some())
         {
             let mut refresh_context = self.context.clone();
             refresh_context.record_task_effects = false;
@@ -4493,6 +4558,15 @@ impl VerilogADevice {
                 program_active[idx] = active;
                 if active
                     && let Some(ordinal) = program.branch_ordinal
+                    && ordinal < branch_active.len()
+                {
+                    branch_active[ordinal] = true;
+                }
+            }
+        } else {
+            // Dynamic-only models need no speculative assignment evaluation.
+            for program in &model.stamp_programs {
+                if let Some(ordinal) = program.branch_ordinal
                     && ordinal < branch_active.len()
                 {
                     branch_active[ordinal] = true;
@@ -4969,7 +5043,8 @@ impl VerilogADevice {
             };
             for mapped_entry in &matrix_indices.jacobian[program_idx] {
                 let model_entry = &program.jacobian_programs[mapped_entry.jacobian_idx];
-                let derivative = vm.execute(&model_entry.program)? * (mapped_entry.sign * scale);
+                let derivative =
+                    vm.execute_scaled(&model_entry.program, mapped_entry.sign * scale)?;
                 if !derivative.re.is_finite() || !derivative.im.is_finite() {
                     return Err(VmError::InvalidNumericResult(format!(
                         "complex small-signal Jacobian {}:{} is non-finite at {frequency_hz} Hz",
@@ -5469,6 +5544,7 @@ impl VerilogADevice {
             },
             prelude_slots_len: context.prelude_slots.len(),
             analog_effects: context.analog_effects_ptr(),
+            simulation_parameters: &context.simulation_parameters,
         }
     }
 
@@ -7535,7 +7611,8 @@ impl VerilogADevice {
                         injection.rhs_sign
                     )));
                 }
-                let gain = vm.execute(&injection.gain_program)? * gain_scale * injection.rhs_sign;
+                let gain =
+                    vm.execute_scaled(&injection.gain_program, gain_scale * injection.rhs_sign)?;
                 if !gain.re.is_finite() || !gain.im.is_finite() {
                     return Err(VmError::InvalidNumericResult(format!(
                         "noise process {expected} injection gain is non-finite at {frequency_hz} Hz"
@@ -7734,7 +7811,8 @@ impl VerilogADevice {
                         source.process_id, injection.rhs_sign
                     )));
                 }
-                let gain = vm.execute(&injection.gain_program)? * gain_scale * injection.rhs_sign;
+                let gain =
+                    vm.execute_scaled(&injection.gain_program, gain_scale * injection.rhs_sign)?;
                 if !gain.re.is_finite() || !gain.im.is_finite() {
                     return Err(VmError::InvalidNumericResult(format!(
                         "noise process {} injection gain is non-finite at {frequency_hz} Hz",

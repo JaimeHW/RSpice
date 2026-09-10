@@ -36,10 +36,11 @@ impl Bjt {
         (self.ic.abs(), self.ib.abs(), 0.0)
     }
 
-    /// Return flicker-noise coefficients, if enabled by the model card.
+    /// Return authored flicker controls unless KF=0 disables the source.
+    /// The collector validates them; EF is the native frequency-law extension.
     pub fn flicker_noise_coefficients(&self) -> Option<(Value, Value, Value)> {
-        if self.kf > 0.0 && self.kf.is_finite() {
-            Some((self.kf, self.af.max(1e-12), self.ef.max(1e-12)))
+        if self.kf != 0.0 {
+            Some((self.kf, self.af, self.ef))
         } else {
             None
         }
@@ -466,6 +467,18 @@ mod tests {
             ]);
             assert!(off_branches.vbe.abs() <= 1e-14);
             assert!(off_branches.vbc.abs() <= 1e-14);
+        }
+    }
+
+    #[test]
+    fn small_saturation_bjt_limiting_keeps_the_logarithmic_threshold() {
+        for vt in [0.005_f64, 0.02585, 0.2] {
+            for isat in [1e-20, 1e-200, 1e-310, Value::from_bits(1)] {
+                let expected = vt * (vt.ln() - core::f64::consts::LN_2 * 0.5 - isat.ln());
+                let actual = Bjt::junction_critical_voltage(vt, isat);
+                assert!((actual - expected).abs() < expected * 1e-14);
+            }
+            assert_eq!(Bjt::junction_critical_voltage(vt, 0.0), Value::INFINITY);
         }
     }
 

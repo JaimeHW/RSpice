@@ -6595,6 +6595,7 @@ endmodule
             prelude_slots,
             prelude_slots_len,
             analog_effects: std::ptr::null_mut(),
+            simulation_parameters: &context.simulation_parameters,
         }
     }
 
@@ -7023,6 +7024,7 @@ endmodule
             prelude_slots,
             prelude_slots_len,
             analog_effects: std::ptr::null_mut(),
+            simulation_parameters: &crate::native::abi::DEFAULT_SIMULATION_PARAMETERS,
         }
     }
 }

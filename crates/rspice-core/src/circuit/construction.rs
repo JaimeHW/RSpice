@@ -100,9 +100,9 @@ impl CircuitData {
             #[cfg(feature = "veriloga-builtins-base")]
             generated_veriloga_devices:
                 crate::device::veriloga_builtins::BuiltinVerilogADevices::new(),
-            #[cfg(feature = "veriloga-builtins-base")]
+            #[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
             generated_simulation_parameters:
-                crate::device::veriloga_builtins::GeneratedSimulationParameters::default(),
+                rspice_veriloga_runtime::GeneratedSimulationParameters::default(),
         }
     }
 

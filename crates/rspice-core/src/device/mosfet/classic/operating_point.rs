@@ -14,9 +14,9 @@ pub(crate) struct MosfetOpValues {
     pub vds: Value,
     /// Bulk-source voltage (V).
     pub vbs: Value,
-    /// Threshold voltage at the operating back-bias (V).
+    /// Threshold at the effective source back-bias, with physical polarity (V).
     pub vth: Value,
-    /// Drain saturation voltage (V).
+    /// Drain saturation voltage with physical polarity (V).
     pub vdsat: Value,
     /// Transconductance dId/dVgs (S).
     pub gm: Value,
@@ -26,10 +26,20 @@ pub(crate) struct MosfetOpValues {
     pub gmb: Value,
 }
 
+/// A model-selected flicker law whose coefficient need not fit in f64.
+#[derive(Debug)]
+pub(crate) struct FlickerNoiseTerms {
+    pub coefficient: Value,
+    pub binary_scale: i32,
+    pub current: Value,
+    pub af: Value,
+    pub ef: Value,
+}
+
 impl Mosfet {
     /// Cached operating-point values from the last accepted Newton solution.
     pub(crate) fn op_values(&self) -> MosfetOpValues {
-        let (vth, vdsat, gm, gds, gmb) = self.model_space_op_values();
+        let (vth, vdsat, gm, gds, gmb) = self.reported_op_values();
         let id = if self.uses_mos3_core() {
             self.polarity() * self.id
         } else {
@@ -53,21 +63,21 @@ impl Mosfet {
         }
     }
 
-    fn model_space_op_values(&self) -> (Value, Value, Value, Value, Value) {
+    fn reported_op_values(&self) -> (Value, Value, Value, Value, Value) {
         if self.uses_mos3_core() {
             let state = self.mos3_state(self.eval_vgs, self.eval_vds, self.eval_vbs);
             return (state.von, state.vdsat, state.gm, state.gds, state.gmb);
         }
 
-        if self.level == 2 {
-            let eval = self.level2_evaluate(self.eval_vgs, self.eval_vds, self.eval_vbs);
-            return (eval.von, eval.vdsat, self.gm, self.gds, self.gmb);
-        }
-
-        if self.level == 6 {
-            let (_, von, vdsat) =
-                self.level6_meyer_state(self.eval_vgs, self.eval_vds, self.eval_vbs);
-            return (von, vdsat, self.gm, self.gds, self.gmb);
+        if matches!(self.level, 1 | 2 | 6) {
+            let (_, von, vdsat) = self.classic_meyer_state(
+                self.eval_vgs,
+                self.eval_vds,
+                self.eval_vbs,
+                self.phi.sqrt(),
+            );
+            let p = self.polarity();
+            return (p * von, p * vdsat, self.gm, self.gds, self.gmb);
         }
 
         let p = self.polarity();
@@ -180,7 +190,7 @@ impl Mosfet {
     }
 
     /// Flicker terms `(coefficient, current, af, ef)` for
-    /// `coefficient * |current|^af / f^ef`. Each parallel instance contributes
+    /// `coefficient * 2^binary_scale * |current|^af / f^ef`. Each parallel instance contributes
     /// independently. Ngspice levels 1/2/3 use NLEV (default 2); native MOS6
     /// extends that law because ngspice supplies no MOS6 noise callback.
     /// Xyce levels 1/2/3/6 use current^AF divided by W*Leff*Cox²*f.
@@ -190,8 +200,8 @@ impl Mosfet {
     pub(crate) fn flicker_noise_source_terms(
         &self,
         dialect: crate::config::SpiceDialect,
-    ) -> Result<Option<(Value, Value, Value, Value)>, &'static str> {
-        use crate::numerics::scaled_exp_product;
+    ) -> Result<Option<FlickerNoiseTerms>, &'static str> {
+        use crate::numerics::product_binary_normalization;
         let xyce =
             dialect == crate::config::SpiceDialect::Xyce && matches!(self.level, 1 | 2 | 3 | 6);
         let fixed_current_law = xyce || self.level == 9;
@@ -213,11 +223,11 @@ impl Mosfet {
         // Cached id enters the physical drain for every family, including
         // MOS3/9; the OP display converts those families to model polarity.
         let (coefficient, current, af, ef) = if let Some(model) = &self.legacy_bsim_model {
-            let denominator = model.flicker_noise_denominator(self.w, self.l).ok_or(
-                "legacy BSIM flicker noise requires positive effective W, L and TOX with representable normalization",
-            )?;
+            let divisors = model
+                .flicker_noise_divisors(self.w, self.l)
+                .ok_or("legacy BSIM flicker noise requires positive effective W, L and TOX")?;
             let coefficient =
-                scaled_exp_product(&[self.kf, self.multiplicity], &[denominator], 0.0);
+                product_binary_normalization(&[self.kf, self.multiplicity], &divisors);
             // B1cd/B2cd are net drain current, including the body diode.
             // The ngspice-46 noise routines accidentally use the state offset
             // as a number; use the current that the load routine stores there.
@@ -251,7 +261,7 @@ impl Mosfet {
                     [width, leff, cox, 1.0]
                 };
                 (
-                    scaled_exp_product(&[self.kf, self.multiplicity], &divisors, 0.0),
+                    product_binary_normalization(&[self.kf, self.multiplicity], &divisors),
                     (self.id - self.polarity() * self.ibd) / self.multiplicity,
                     self.af,
                     if fixed_current_law { 1.0 } else { self.ef },
@@ -267,10 +277,9 @@ impl Mosfet {
                     return Ok(None);
                 }
                 (
-                    scaled_exp_product(
+                    product_binary_normalization(
                         &[self.kf, gm, gm],
                         &[self.multiplicity, width, leff, cox],
-                        0.0,
                     ),
                     1.0,
                     1.0,
@@ -284,31 +293,32 @@ impl Mosfet {
         if !current.is_finite() {
             return Err("MOS flicker noise drain current must be finite");
         }
+        let (coefficient, binary_scale) = coefficient;
         if !coefficient.is_finite() || coefficient <= 0.0 {
             return Err("MOS flicker noise coefficient is not representable");
         }
         // Both references use exp(AF*log(max(|Id|, N_MINLOG))). This
         // preserves the authored noise source at cutoff, including AF <= 0.
-        Ok(Some((coefficient, current.abs().max(1e-38), af, ef)))
+        Ok(Some(FlickerNoiseTerms {
+            coefficient,
+            binary_scale,
+            current: current.abs().max(1e-38),
+            af,
+            ef,
+        }))
     }
 
     //=========================================================================
-    // BSIM4-style charge-based model for transient analysis
-    // Q = ∫C dV ensures charge conservation (dQ/dt = I)
+    // Gate-charge estimates for device inspection.
     //=========================================================================
 
-    /// Calculate total gate charges (Qgs, Qgd, Qgb) using charge-based formulation
+    /// Estimate physical gate-to-source/drain/bulk charges in coulombs.
     ///
-    /// # BSIM4 Charge Model
-    /// The charge-based model ensures:
-    /// - Charge conservation: Qg = Qgs + Qgd + Qgb
-    /// - Correct transient currents: Igs = dQgs/dt
-    /// - Smooth transitions between operating regions
-    ///
-    /// Returns (Qgs, Qgd, Qgb) in Coulombs
-    ///
-    /// Legacy BSIM returns its physical terminal-charge flows, including
-    /// overlap. Classic Meyer models retain their historical charge estimate.
+    /// Legacy BSIM returns its terminal-charge flows, including overlap.
+    /// Classic MOS retains a region-based estimate using its channel onset
+    /// and saturation voltage. Meyer capacitances are not an integrable
+    /// terminal-charge model: transient simulation integrates the accepted
+    /// capacitance/voltage history instead of differentiating this estimate.
     pub fn gate_charges(&self) -> (Value, Value, Value) {
         if let Some(charge) = self.legacy_gate_charge_at(self.vgs, self.vds, self.vbs) {
             let [qgs, qgd, qgb] = charge.charges;
@@ -326,69 +336,31 @@ impl Mosfet {
         let qgd_ov = cgd_ov * vgd;
         let qgb_ov = cgb_ov * vgb;
 
-        if self.uses_mos3_core() {
-            let oxide_cap = self.oxide_capacitance_total();
-            let state = self.mos3_state(self.vgs, self.vds, self.vbs);
-            let von = p * state.von;
-            let vdsat = (p * state.vdsat).max(0.0);
-            let intrinsic = |vg_active: Value, vd_active: Value| {
-                let vgt = vg_active - von;
-                if vgt <= 0.0 {
-                    (0.0, 0.0, oxide_cap * vgb)
-                } else if vd_active < vdsat {
-                    let veff = vgt - vd_active / 2.0;
-                    (
-                        0.5 * oxide_cap * veff,
-                        0.5 * oxide_cap * (veff - vd_active),
-                        0.0,
-                    )
-                } else {
-                    ((2.0 / 3.0) * oxide_cap * vgt, 0.0, 0.0)
-                }
-            };
-
-            let (qgs_int, qgd_int, qgb_int) = if vds >= 0.0 {
-                intrinsic(vgs, vds)
+        let oxide_cap = self.oxide_capacitance_total();
+        let (mode, von, vdsat) =
+            self.classic_meyer_state(self.vgs, self.vds, self.vbs, self.phi.sqrt());
+        let intrinsic = |vg_active: Value, vd_active: Value| {
+            let vgt = vg_active - von;
+            if vgt <= 0.0 {
+                (0.0, 0.0, oxide_cap * vgb)
+            } else if vd_active < vdsat {
+                let veff = vgt - vd_active / 2.0;
+                (
+                    0.5 * oxide_cap * veff,
+                    0.5 * oxide_cap * (veff - vd_active),
+                    0.0,
+                )
             } else {
-                let (qgd_int, qgs_int, qgb_int) = intrinsic(vgd, -vds);
-                (qgs_int, qgd_int, qgb_int)
-            };
-            return (qgs_int + qgs_ov, qgd_int + qgd_ov, qgb_int + qgb_ov);
-        }
-
-        // The intrinsic gate charge rides the *effective* oxide capacitance,
-        // the same `Cox·Weff·Leff` the Meyer capacitances above are built from
-        // and the same quantity ngspice forms as
-        // `oxideCapFactor · EffectiveLength · W · m`. Using the drawn `L` here
-        // instead silently inflated the intrinsic charge by `L/(L − 2·LD)` —
-        // 1.63x on `general/mosamp.cir`, whose devices are drawn at L=12.7 µm
-        // with LD=2.4485 µm. Too much gate charge is a slower switch, so it
-        // showed up as a growing lag through the amplifier's turnover rather
-        // than as a wrong level anywhere.
-        let cox_wl = self.oxide_capacitance_total();
-
-        let vth = p * self.vth(self.vbs);
-        let vgt = vgs - vth;
-
-        if vgt <= 0.0 {
-            // Cutoff: Qgb = Cox * W * L * Vgb, Qgs = Qgd = overlap only
-            let qgb_int = cox_wl * vgb;
-            (qgs_ov, qgd_ov, qgb_int + qgb_ov)
-        } else if vds < vgt {
-            // Linear region: symmetric charge sharing
-            // Qgs = Qgd = (Cox*W*L/2) * (Vgs - Vth + Vds/2)
-            let veff = vgt - vds / 2.0;
-            let qgs_int = 0.5 * cox_wl * veff;
-            let qgd_int = 0.5 * cox_wl * (veff - vds);
-            (qgs_int + qgs_ov, qgd_int + qgd_ov, qgb_ov)
+                ((2.0 / 3.0) * oxide_cap * vgt, 0.0, 0.0)
+            }
+        };
+        let (qgs, qgd, qgb) = if mode > 0.0 {
+            intrinsic(vgs, vds)
         } else {
-            // Saturation: 2/3 of channel charge to source
-            // Qgs = (2/3) * Cox * W * L * Vgt
-            // Qgd = 0 (pinched off)
-            let qgs_int = (2.0 / 3.0) * cox_wl * vgt;
-            let qgd_int = 0.0;
-            (qgs_int + qgs_ov, qgd_int + qgd_ov, qgb_ov)
-        }
+            let (qgd, qgs, qgb) = intrinsic(vgd, -vds);
+            (qgs, qgd, qgb)
+        };
+        (p * (qgs + qgs_ov), p * (qgd + qgd_ov), p * (qgb + qgb_ov))
     }
 
     /// Calculate W/L ratio
@@ -503,10 +475,11 @@ mod tests {
             mos.w = width;
             mos.cox = 1.0;
             mos.gm = gm;
-            let (coefficient, _, _, _) = mos
+            let terms = mos
                 .flicker_noise_source_terms(SpiceDialect::Ngspice)
                 .unwrap()
                 .unwrap();
+            let coefficient = libm::scalbn(terms.coefficient, terms.binary_scale);
             assert!(
                 (coefficient - expected).abs() < expected * 2e-15,
                 "NLEV={nlev}: {coefficient:e} vs {expected:e}"
@@ -595,6 +568,45 @@ mod tests {
             )
         } else {
             ((2.0 / 3.0) * oxide_cap * vgt + qgs_ov, qgd_ov, qgb_ov)
+        }
+    }
+
+    #[test]
+    fn classic_gate_charge_estimates_preserve_physical_polarity_and_orientation() {
+        for mut mos in [
+            Mosfet::new_nmos("M1".into(), 1, 2, 3, 4),
+            Mosfet::new_pmos("M1".into(), 1, 2, 3, 4),
+        ] {
+            let p = mos.polarity();
+            mos.gamma = 0.4;
+            mos.phi = 0.6;
+            mos.cox = 1.0;
+            mos.w = 1.0;
+            mos.l = 1.0;
+            mos.cgso = 0.1;
+            mos.cgdo = 0.2;
+            mos.cgbo = 0.3;
+            for vto in [-0.3, 1.0] {
+                mos.vto = p * vto;
+                let gate = vto - 0.4 * 0.2 / (2.0 * 0.6_f64.sqrt()) + 0.4;
+                for reverse in [false, true] {
+                    let (vg, vd, vb) = if reverse {
+                        (gate - 2.0, -2.0, -1.8)
+                    } else {
+                        (gate, 2.0, 0.2)
+                    };
+                    mos.vgs = p * vg;
+                    mos.vds = p * vd;
+                    mos.vbs = p * vb;
+                    let q = 2.0 / 3.0 * 0.4;
+                    let expected = (
+                        p * (if reverse { 0.0 } else { q }) + 0.1 * mos.vgs,
+                        p * (if reverse { q } else { 0.0 }) + 0.2 * (mos.vgs - mos.vds),
+                        0.3 * (mos.vgs - mos.vbs),
+                    );
+                    assert_charges_close(mos.gate_charges(), expected, 1e-14, 1e-14);
+                }
+            }
         }
     }
 

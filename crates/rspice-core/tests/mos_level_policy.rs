@@ -1777,3 +1777,346 @@ fn legacy_bsim_transient_preserves_charge_when_c_phi_overflows() {
         assert_eq!(engine.convergence_quality().force_accepted_points, 0);
     }
 }
+
+#[test]
+fn classic_mos_ac_and_op_follow_independent_meyer_references() {
+    // Ngspice 46: physical VON/VDSAT and AC gate-drive lead currents / omega.
+    // MOS6 has no AC callback there; its capacitances below apply DEVqmeyer
+    // to the independently measured MOS6 onset and saturation voltage.
+    let biases = [
+        (1.0, -0.2, 0.1, 0.0),
+        (1.0, 0.55, 0.01, 0.2),
+        (1.0, 0.9, 0.01, 0.2),
+        (1.0, 1.4, 0.1, 0.2),
+        (1.0, 1.4, 2.0, -0.5),
+        (1.0, 1.2, -0.2, -0.2),
+        (-0.3, 0.2, 0.1, 0.2),
+        (1.0, 1.4, 0.1, 1.3),
+    ];
+    // [VON, VDSAT, Cgs, Cgd, Cgb], including explicit unequal overlaps.
+    let references = [
+        (1, 0, [1.0, 0.0, 6e-16, 9e-16, 4.623772559627999e-15]),
+        (
+            1,
+            1,
+            [
+                0.9483602220505678,
+                0.0,
+                6e-16,
+                9e-16,
+                3.2311902616340984e-15,
+            ],
+        ),
+        (
+            1,
+            2,
+            [
+                0.9483602220505678,
+                0.0,
+                2.591339943499157e-15,
+                2.312041050844856e-15,
+                8.139896018510994e-16,
+            ],
+        ),
+        (
+            1,
+            3,
+            [
+                0.9483602220505678,
+                0.45163977794943233,
+                2.833135420268339e-15,
+                2.789230858093746e-15,
+                4.8e-16,
+            ],
+        ),
+        (
+            1,
+            4,
+            [
+                1.1096848715714673,
+                0.2903151284285328,
+                3.3625150397519996e-15,
+                9e-16,
+                4.8e-16,
+            ],
+        ),
+        (
+            1,
+            5,
+            [
+                1.0,
+                0.40000000000000013,
+                2.13473057764e-15,
+                3.3555689242239995e-15,
+                4.8e-16,
+            ],
+        ),
+        (
+            1,
+            6,
+            [
+                -0.3516397779494323,
+                0.5516397779494323,
+                2.8026993110724675e-15,
+                2.827350827839698e-15,
+                4.8e-16,
+            ],
+        ),
+        (
+            1,
+            7,
+            [
+                0.6901613323034066,
+                0.7098386676965935,
+                2.772586983779021e-15,
+                2.863254371506118e-15,
+                4.8e-16,
+            ],
+        ),
+        (2, 0, [1.0, 0.0, 6e-16, 9e-16, 4.623772559627999e-15]),
+        (
+            2,
+            1,
+            [
+                0.9557373331862009,
+                0.0,
+                6e-16,
+                9e-16,
+                3.2821387127893695e-15,
+            ],
+        ),
+        (
+            2,
+            2,
+            [
+                0.9557373331862009,
+                0.0,
+                2.5329615098837426e-15,
+                2.2706454342811986e-15,
+                8.649380530063705e-16,
+            ],
+        ),
+        (
+            2,
+            3,
+            [
+                0.9557373331862009,
+                0.360916545591129,
+                2.876152371827154e-15,
+                2.731898909133527e-15,
+                4.8e-16,
+            ],
+        ),
+        (
+            2,
+            4,
+            [
+                1.1096848715714673,
+                0.24580357063809033,
+                3.3625150397519996e-15,
+                9e-16,
+                4.8e-16,
+            ],
+        ),
+        (
+            2,
+            5,
+            [
+                1.0,
+                0.3251084375291823,
+                1.922000671714375e-15,
+                3.449193694807468e-15,
+                4.8e-16,
+            ],
+        ),
+        (
+            2,
+            6,
+            [
+                -0.3442626668137992,
+                0.4426539331276963,
+                2.8365750445372287e-15,
+                2.784800261874656e-15,
+                4.8e-16,
+            ],
+        ),
+        (
+            2,
+            7,
+            [
+                0.8388838927977714,
+                0.7005403651849837,
+                2.773968827627156e-15,
+                2.8616441827938974e-15,
+                4.8e-16,
+            ],
+        ),
+        (6, 0, [0.997, 0.0, 6e-16, 9e-16, 4.623772559627999e-15]),
+        (
+            6,
+            1,
+            [
+                0.9280602220505678,
+                0.0,
+                6e-16,
+                9e-16,
+                3.0909926233666853e-15,
+            ],
+        ),
+        (
+            6,
+            2,
+            [
+                0.9280602220505678,
+                0.0,
+                2.7519830706805677e-15,
+                2.4259516319371304e-15,
+                6.737919635836856e-16,
+            ],
+        ),
+        (
+            6,
+            3,
+            [
+                0.9253602220505678,
+                0.32713495030723677,
+                2.898609035545466e-15,
+                2.7002029274942396e-15,
+                4.8e-16,
+            ],
+        ),
+        (
+            6,
+            4,
+            [
+                1.0996848715714673,
+                0.18887854975421942,
+                3.3625150397519993e-15,
+                9e-16,
+                4.8e-16,
+            ],
+        ),
+        (
+            6,
+            5,
+            [
+                0.994,
+                0.27121969752250935,
+                1.6295904537134215e-15,
+                3.543023417166021e-15,
+                4.8e-16,
+            ],
+        ),
+        (
+            6,
+            6,
+            [
+                -0.3746397779494323,
+                0.4114952341958265,
+                2.849721765438642e-15,
+                2.7676261278713278e-15,
+                4.8e-16,
+            ],
+        ),
+        (
+            6,
+            7,
+            [
+                0.5571613323034066,
+                0.6516033813312232,
+                2.7819137955989517e-15,
+                2.8523177589510917e-15,
+                4.8e-16,
+            ],
+        ),
+    ];
+    for (level, case, reference) in references {
+        for (kind, p) in [("NMOS", 1.0), ("PMOS", -1.0)] {
+            let (vto, vg, vd, vb) = biases[case];
+            let extra = if level == 6 {
+                "KC=100u KV=.8 NV=1.2 GAMMA1=.1 SIGMA=.03"
+            } else {
+                "KP=100u"
+            };
+            let deck = Netlist::parse(&format!(
+                "Meyer reference\nVD d 0 {}\nVS s 0 0\nVG g 0 {} AC 1\nVB b 0 {}\nM1 d g s b mm W=2u L=1u M=1.5\n.model mm {kind}(LEVEL={level} VTO={} {extra} GAMMA=.4 PHI=.6 TOX=20n LD=.1u IS=0 CGSO=2e-10 CGDO=3e-10 CGBO=4e-10)\n.options GMIN=0\n.end\n",
+                p*vd,p*vg,p*vb,p*vto)).unwrap();
+            let engine = Engine::default();
+            let (_, report) = engine.run_dc_op_with_report(&deck).unwrap();
+            let entry = report
+                .entries
+                .iter()
+                .find(|entry| entry.name.eq_ignore_ascii_case("M1"))
+                .unwrap();
+            for (name, expected) in [("vth", p * reference[0]), ("vdsat", p * reference[1])] {
+                let actual = entry.params.iter().find(|(key, _)| *key == name).unwrap().1;
+                assert!(
+                    (actual - expected).abs() < 2e-9,
+                    "L{level} {kind} case {case} {name}: {actual} vs {expected}"
+                );
+            }
+            if level == 2 && case == 6 {
+                // Independently measured -I(VD), including the depletion PMOS.
+                let current = entry.params.iter().find(|(key, _)| *key == "id").unwrap().1;
+                assert!((current - p * 2.120_703_382_256_14e-5).abs() < 2e-13);
+            }
+            let ac = engine.run_ac(&deck, &[1e6]).unwrap();
+            for (source, expected) in ["VS", "VD", "VB", "VG"].into_iter().zip([
+                reference[2],
+                reference[3],
+                reference[4],
+                -reference[2] - reference[3] - reference[4],
+            ]) {
+                let index = ac[0]
+                    .branch_names
+                    .iter()
+                    .position(|name| name.eq_ignore_ascii_case(source))
+                    .unwrap();
+                let actual = ac[0].currents[index].im / (2.0 * std::f64::consts::PI * 1e6);
+                assert!(
+                    (actual - expected).abs() < 2e-23,
+                    "L{level} {kind} case {case} {source}: {actual:e} vs {expected:e}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn mos1_transient_weak_inversion_charge_uses_the_continued_body_threshold() {
+    use rspice_core::numerics::integration::IntegrationMethod;
+    let oxide = 3.9 * 8.854_214_871e-12 / 20e-9 * 2e-6 * 0.8e-6 * 1.5;
+    for (kind, p) in [("NMOS", 1.0), ("PMOS", -1.0)] {
+        for vto in [-0.3, 1.0] {
+            // Forward body bias .2 V gives a threshold shift -gamma*Vbs/(2*sqrt(phi)).
+            let von = vto - 0.4 * 0.2 / (2.0 * 0.6_f64.sqrt());
+            let start = von - 0.25;
+            let deck=Netlist::parse(&format!(
+                "Meyer ramp charge\nVD d 0 0\nVS s 0 0\nVB b 0 {}\nVG g 0 DC {} PWL(0 {} 1u {})\nM1 d g s b mm W=2u L=1u M=1.5\n.model mm {kind}(LEVEL=1 VTO={} KP=100u GAMMA=.4 PHI=.6 TOX=20n LD=.1u IS=0)\n.options GMIN=0\n.end\n",p*0.2,p*start,p*start,p*(start+0.1),p*vto)).unwrap();
+            let mut config = SimulationConfig {
+                integration_method: IntegrationMethod::BackwardEuler,
+                locked_time_grid: Some(std::sync::Arc::new(vec![
+                    0.0, 0.2e-6, 0.4e-6, 0.6e-6, 0.8e-6, 1e-6,
+                ])),
+                ..Default::default()
+            };
+            config.convergence_config.gmin_target = 0.0;
+            config.convergence_config.junction_gmin_target = 0.0;
+            let engine = Engine::new(config);
+            let result = engine.run_tran(&deck, 1e-6, 0.2e-6).unwrap();
+            let gate = result.try_branch_current_waveform_named("VG").unwrap();
+            // Gate-only motion at zero VDS integrates Cg=Cox*(1+overdrive/phi).
+            for (i, &current) in gate.iter().enumerate().skip(1) {
+                let mean_time = 0.5 * (result.time[i - 1] + result.time[i]);
+                let expected = -p * oxide * (1.0 + (-0.25 + 1e5 * mean_time) / 0.6) * 1e5;
+                assert!(
+                    (current - expected).abs() < 1e-19,
+                    "{kind} VTO={vto} t={}: {} vs {expected}",
+                    result.time[i],
+                    current
+                );
+            }
+            assert_eq!(engine.convergence_quality().force_accepted_points, 0);
+        }
+    }
+}

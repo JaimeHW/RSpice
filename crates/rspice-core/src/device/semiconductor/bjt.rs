@@ -2204,18 +2204,20 @@ impl Bjt {
 
     #[inline]
     fn instance_scale(&self) -> Value {
-        (self.area * self.m).max(1e-18)
+        self.area * self.m
     }
 
     /// Conductance carried by each intrinsic nonlinear junction branch.
     ///
     /// Xyce's VBIC 1.3 model chooses an explicitly given model `GMIN` ahead
     /// of the device-option value and multiplies the completed branch current
-    /// by instance `M`.  Native ngspice/legacy BJT paths continue to consume
-    /// the engine-supplied circuit junction GMIN directly.
+    /// by instance `M`. Legacy GP multiplies circuit GMIN by M only:
+    /// it is a numerical junction parallel, independent of device AREA.
     #[inline]
     fn nonlinear_branch_gmin(&self) -> Value {
-        if self.vbic_13 || (self.xyce_compatibility && self.charge_model == BjtChargeModel::Vbic) {
+        if self.charge_model == BjtChargeModel::LegacyGummelPoon {
+            self.junction_gmin * self.m
+        } else if self.vbic_13 || self.xyce_compatibility {
             self.vbic_model_gmin.unwrap_or(self.junction_gmin) * self.instance_scale()
         } else {
             self.junction_gmin

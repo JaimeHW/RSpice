@@ -724,6 +724,10 @@ pub enum Instruction {
     PushTime,
     /// Push the instance multiplicity ($mfactor)
     PushMfactor,
+    /// Required simulator-owned value.
+    PushSimParamValue(rspice_veriloga_runtime::SimulationParameter),
+    /// Query availability, as zero or one.
+    PushSimParamPresent(rspice_veriloga_runtime::SimulationParameter),
     /// Push whether an external terminal is connected on this instance.
     PushPortConnected(usize),
     /// Z-domain filter: lazily freeze its leading definition operands, then

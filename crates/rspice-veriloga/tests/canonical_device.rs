@@ -22,6 +22,193 @@ use std::process::Command;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 #[test]
+fn generated_simparam_noise_apis_preserve_values_and_required_query_errors() {
+    let source = r#"module query_noise(p); inout p; electrical p;
+analog I(p)<+white_noise($simparam("pnjmaxi",1/V(p))+$simparam("tnom",1000)+$simparam("unavailable",25),"query");
+endmodule"#;
+    let (state, stamp, noise) = generated_parts(source, "query noise values");
+    let capture = r#"
+struct Capture(f64);
+impl runtime::GeneratedNoiseVisitor for Capture {
+    fn visit(&mut self,_:usize,value:runtime::GeneratedNoiseEvaluationRef<'_>)->bool { self.0=value.psd; true }
+}
+impl runtime::GeneratedNoiseProcessVisitor for Capture {
+    fn visit_process(&mut self,_:usize,value:runtime::GeneratedNoiseProcessEvaluationRef<'_>)->bool { self.0=value.psd; true }
+}
+"#;
+    let values = format!(
+        r#"{capture}
+let instance=device::state::Instance::new(&[0]);
+for value in [None,Some(0.0),Some(3.0)] {{
+    runtime::set_simparam_override(value);
+    for voltage in [0.0,2.0] {{
+        let ctx=runtime::GeneratedEvalContext {{voltages:&[voltage],temperature:300.15}};
+        let expected=52.0+value.unwrap_or(1.0/voltage);
+        for grouped in [false,true] {{
+            runtime::clear_evaluation_error();
+            let mut actual=Capture(-1.0);
+            let result=if grouped {{instance.evaluate_noise_processes_at_frequency(&ctx,1.0,&mut actual)}}
+                else {{instance.evaluate_noise_sources(&ctx,&mut actual)}};
+            assert_eq!(result.is_ok(),expected.is_finite(),"grouped={{grouped}}, value={{value:?}}, voltage={{voltage}}");
+            if expected.is_finite() {{ assert_eq!(actual.0,expected); assert!(!ctx.evaluation_failed()); }}
+        }}
+    }}
+}}
+"#
+    );
+    run_generated_main("query noise values", &state, &stamp, &noise, &values).unwrap();
+    let source = r#"module query_guard(p); inout p; electrical p;
+analog if ($simparam("imax")>0) I(p)<+white_noise(1,"guard"); endmodule"#;
+    let (state, stamp, noise) = generated_parts(source, "required noise query");
+    let required = format!(
+        r#"{capture}
+let instance=device::state::Instance::new(&[0]);
+let ctx=runtime::GeneratedEvalContext {{voltages:&[0.0],temperature:300.15}};
+for grouped in [false,true] {{
+    runtime::clear_evaluation_error();
+    let mut actual=Capture(-1.0);
+    let result=if grouped {{instance.evaluate_noise_processes_at_frequency(&ctx,1.0,&mut actual)}}
+        else {{instance.evaluate_noise_sources(&ctx,&mut actual)}};
+    assert!(result.is_err(),"missing query hidden in noise predicate: grouped={{grouped}}");
+    assert_eq!(actual.0,-1.0,"an invalid evaluation must not publish noise");
+}}
+"#
+    );
+    run_generated_main("required noise query", &state, &stamp, &noise, &required).unwrap();
+}
+
+#[test]
+fn generated_simparam_defaults_capture_environment_and_validate_ranges() {
+    let source = r#"module queries(p); inout p; electrical p;
+parameter real supplied=0.0;
+parameter real x=$simparam("imax",1.0/supplied);
+parameter real y=2*x from [0:x*3];
+analog I(p)<+x+y;
+endmodule"#;
+    let (state, stamp, noise) = generated_parts(source, "parameter query capture");
+    let main = r#"
+use runtime::{GeneratedSimulationParameters,SimulationParameter,GeneratedParameterAssignment as Assignment};
+let mut environment=GeneratedSimulationParameters::default();
+assert!(device::state::Instance::try_new_with_simulation_parameters(&[0],&[],&environment).is_err());
+environment.try_set(SimulationParameter::Imax,Some(2.0)).unwrap();
+let mut instance=device::state::Instance::try_new_with_simulation_parameters(&[0],&[],&environment).unwrap();
+let bias=[0.0];
+let ctx=runtime::GeneratedEvalContext {voltages:&bias,temperature:300.15};
+let mut sink=[0.0;12];
+instance.stamp(&ctx,&mut runtime::GeneratedStamper {sink:Some(&mut sink)});
+assert_eq!(sink[9],6.0);
+environment.try_set(SimulationParameter::Imax,Some(9.0)).unwrap();
+instance.finalize_parameters().unwrap();
+assert_eq!(instance.params.values[1],2.0);
+let before=instance.params.values;
+assert!(instance.apply_parameters(&[Assignment::for_declared_scope("y",7.0)]).is_err());
+assert_eq!(instance.params.values,before);
+instance.apply_parameters(&[Assignment::for_declared_scope("y",5.0)]).unwrap();
+let mut cloned=instance.clone();
+cloned.finalize_parameters().unwrap();
+assert_eq!(cloned.params.values,[0.0,2.0,5.0]);
+let next=device::state::Instance::try_new_with_simulation_parameters(&[0],&[],&environment).unwrap();
+assert_eq!(next.params.values,[0.0,9.0,18.0]);
+"#;
+    run_generated_main("parameter query capture", &state, &stamp, &noise, main)
+        .unwrap_or_else(|report| panic!("{report}"));
+}
+
+#[test]
+fn generated_simparam_required_defaults_respect_explicit_parameter_overrides() {
+    let source = "module required(p); inout p; electrical p; parameter real x=$simparam(\"imax\"); analog I(p)<+x; endmodule";
+    let (state, stamp, noise) = generated_parts(source, "required parameter query");
+    let main = r#"
+use runtime::{GeneratedSimulationParameters,SimulationParameter,GeneratedParameterAssignment as Assignment};
+let mut environment=GeneratedSimulationParameters::default();
+let error=device::state::Instance::try_new_with_simulation_parameters(&[0],&[],&environment).err().unwrap();
+assert!(error.contains("imax"));
+let mut given=device::state::Instance::try_new_with_simulation_parameters(&[0],&[Assignment::for_declared_scope("x",4.0)],&environment).unwrap();
+given.finalize_parameters().unwrap();
+assert_eq!(given.params.values,[4.0]);
+environment.try_set(SimulationParameter::Imax,Some(0.0)).unwrap();
+let zero=device::state::Instance::try_new_with_simulation_parameters(&[0],&[],&environment).unwrap();
+assert_eq!(zero.params.values,[0.0]);
+"#;
+    run_generated_main("required parameter query", &state, &stamp, &noise, main)
+        .unwrap_or_else(|report| panic!("{report}"));
+}
+
+#[test]
+fn generated_simparams_preserve_selected_values_derivatives_and_missing_errors() {
+    for order in 0..=2 {
+        let mut expression = "$simparam(\"pnjmaxi\",V(p)*V(p)*V(p))".to_owned();
+        for _ in 0..order {
+            expression = format!("ddx({expression},V(p))");
+        }
+        let source = format!(
+            "module queries(p); inout p; electrical p; analog I(p)<+{expression}; endmodule"
+        );
+        let (state, stamp, noise) = generated_parts(&source, "simulation parameter fallback");
+        let main = r#"
+let mut instance=device::state::Instance::new(&[0]);
+instance.finalize_parameters().unwrap();
+for configured in [f64::NAN,0.0,9.0,f64::NAN] {
+    runtime::set_simparam_override((!configured.is_nan()).then_some(configured));
+    for v in [0.25_f64,2.0,-3.0] {
+        runtime::clear_evaluation_error();
+        let bias=[v];
+        let ctx=runtime::GeneratedEvalContext {voltages:&bias,temperature:300.15};
+        let (expected,slope)=if configured.is_nan() {
+            match ORDER {0=>(v.powi(3),3.0*v*v),1=>(3.0*v*v,6.0*v),_=>(6.0*v,6.0)}
+        } else { (if ORDER==0 {configured} else {0.0},0.0) };
+        let mut sink=[0.0;12];
+        instance.stamp(&ctx,&mut runtime::GeneratedStamper {sink:Some(&mut sink)});
+        assert_eq!(sink[9],expected,"value at {v}");
+        assert_eq!(sink[10],slope,"derivative at {v}");
+        assert!(!ctx.evaluation_failed());
+    }
+}
+"#
+        .replace("ORDER", &order.to_string());
+        run_generated_main(
+            "simulation parameter fallback",
+            &state,
+            &stamp,
+            &noise,
+            &main,
+        )
+        .unwrap_or_else(|report| panic!("{report}"));
+    }
+    for (expression, expected, failed) in [
+        ("$simparam(\"gmin\",1.0/V(p))", 1e-12, false),
+        ("$simparam(\"tnom\")", 27.0, false),
+        ("$simparam(\"imax\")", 0.0, true),
+    ] {
+        let source = format!(
+            "module queries(p); inout p; electrical p; analog I(p)<+{expression}; endmodule"
+        );
+        let (state, stamp, noise) = generated_parts(&source, "required simulation parameter");
+        let main = format!(
+            r#"
+let mut instance=device::state::Instance::new(&[0]);
+instance.finalize_parameters().unwrap();
+let bias=[0.0];
+let ctx=runtime::GeneratedEvalContext {{voltages:&bias,temperature:300.15}};
+runtime::clear_evaluation_error();
+let mut sink=[0.0;12];
+instance.stamp(&ctx,&mut runtime::GeneratedStamper {{sink:Some(&mut sink)}});
+assert_eq!(ctx.evaluation_failed(),{failed});
+if !{failed} {{ assert_eq!(sink[9],{expected:?}); }}
+"#
+        );
+        run_generated_main(
+            "required simulation parameter",
+            &state,
+            &stamp,
+            &noise,
+            &main,
+        )
+        .unwrap_or_else(|report| panic!("{report}"));
+    }
+}
+
+#[test]
 fn generated_homogeneous_math_preserves_values_and_derivatives_across_scales() {
     for op in ["hypot", "atan2"] {
         for derivative in 0..3 {
@@ -3579,13 +3766,12 @@ fn repeated_structure_source() -> String {
     let mut guarded_work = String::new();
     for branch in 0..3 {
         guarded_work.push_str("        if (mode > 0.0) begin\n");
-        for index in 0..16 {
-            // Long runtime query leaves make the byte budget meaningfully
-            // larger than the fixed indentation/scaffolding cost of the two
-            // variants, without manufacturing thousands of CFG statements.
-            let query = format!("specialization_{}_{}_{}", branch, index, "x".repeat(1024));
+        for index in 0..64 {
+            // Distinct nonlinear work gives specialization a realistic source
+            // budget; unavailable simulator queries fold to their fallbacks.
+            let factor = branch * 64 + index + 1;
             guarded_work.push_str(&format!(
-                "            current = current + $simparam(\"{query}\", 1.0e-9) * coefficient * V(p, n);\n"
+                "            current = current + limexp(V(p, n) * {factor}.0e-3) * 1.0e-9 * coefficient * V(p, n);\n"
             ));
         }
         guarded_work.push_str("        end\n");
@@ -4892,6 +5078,13 @@ const RUNTIME_STUB: &str = concat!(
     r#"
 #![allow(dead_code, non_snake_case, unused_parens, unused_variables, unused_mut, unused_imports)]
 
+pub type Value = f64;
+pub const DEFAULT_GMIN: f64 = 1e-12;
+mod simparam {
+"#,
+    include_str!("../../rspice-veriloga-runtime/src/simparam.rs"),
+    r#"
+}
 mod analog_effects {
 "#,
     include_str!("../../rspice-veriloga-runtime/src/analog_effects.rs"),
@@ -4904,6 +5097,7 @@ pub mod runtime {
     r#"
     }
     pub type Value = f64;
+    pub use crate::simparam::{GeneratedSimulationParameters,SimulationParameter};
     pub use crate::analog_effects::*;
 
     #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -5824,10 +6018,19 @@ pub mod runtime {
         }
         pub fn simparam_or(&self, name: &str, fallback: Value) -> Value {
             let value = f64::from_bits(SIMPARAM_OVERRIDE.load(std::sync::atomic::Ordering::SeqCst));
-            if name == "pnjmaxi" && !value.is_nan() { value } else { fallback }
+            match name {
+                "gmin" => 1e-12, "tnom" => 27.0, "simulatorVersion" => 1.0, "simulatorSubversion" => 0.0,
+                "pnjmaxi" if !value.is_nan() => value,
+                _ => fallback,
+            }
         }
         pub fn has_simparam(&self, name: &str) -> bool {
-            name == "pnjmaxi" && !f64::from_bits(SIMPARAM_OVERRIDE.load(std::sync::atomic::Ordering::SeqCst)).is_nan()
+            !self.simparam_or(name,f64::NAN).is_nan()
+        }
+        pub fn simparam_required(&self, name: &str) -> Value {
+            let value=self.simparam_or(name,f64::NAN);
+            if value.is_nan() { EVALUATION_FAILED.store(true,std::sync::atomic::Ordering::SeqCst); }
+            value
         }
         pub fn dynamic_operators_enabled(&self) -> bool {
             DYNAMIC_OPERATORS_ENABLED.load(std::sync::atomic::Ordering::SeqCst)

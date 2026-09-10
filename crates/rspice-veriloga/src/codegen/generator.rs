@@ -1256,6 +1256,16 @@ impl CodeGenerator {
                 Node::Time => {
                     program.instructions.push(Instruction::PushTime);
                 }
+                Node::SimParamValue(parameter) => {
+                    program
+                        .instructions
+                        .push(Instruction::PushSimParamValue(parameter));
+                }
+                Node::SimParamPresent(parameter) => {
+                    program
+                        .instructions
+                        .push(Instruction::PushSimParamPresent(parameter));
+                }
                 Node::Mfactor => {
                     program.instructions.push(Instruction::PushMfactor);
                 }

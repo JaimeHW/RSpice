@@ -3,71 +3,6 @@
 use super::*;
 
 impl Bjt {
-    pub(super) fn solve_small_dense_system<const N: usize>(
-        matrix: &[[Value; N]; N],
-        rhs: &[Value; N],
-        dim: usize,
-    ) -> Option<[Value; N]> {
-        if dim == 0 {
-            return Some([0.0; N]);
-        }
-
-        let mut a = *matrix;
-        let mut b = *rhs;
-
-        for pivot in 0..dim {
-            let mut best = pivot;
-            let mut best_abs = a[pivot][pivot].abs();
-            for (row, entries) in a.iter().enumerate().take(dim).skip(pivot + 1) {
-                let value = entries[pivot].abs();
-                if value > best_abs {
-                    best = row;
-                    best_abs = value;
-                }
-            }
-            if best_abs < 1e-18 {
-                return None;
-            }
-            if best != pivot {
-                a.swap(pivot, best);
-                b.swap(pivot, best);
-            }
-
-            let pivot_value = a[pivot][pivot];
-            for row in (pivot + 1)..dim {
-                // `row > pivot`, so the pivot row stays in `above` and the row
-                // being eliminated heads `below`.
-                let (above, below) = a.split_at_mut(row);
-                let pivot_row = &above[pivot];
-                let target_row = &mut below[0];
-                let factor = target_row[pivot] / pivot_value;
-                target_row[pivot] = 0.0;
-                for (target, &value) in target_row[(pivot + 1)..dim]
-                    .iter_mut()
-                    .zip(&pivot_row[(pivot + 1)..dim])
-                {
-                    *target -= factor * value;
-                }
-                b[row] -= factor * b[pivot];
-            }
-        }
-
-        let mut x = [0.0; N];
-        for row in (0..dim).rev() {
-            let mut sum = b[row];
-            for col in (row + 1)..dim {
-                sum -= a[row][col] * x[col];
-            }
-            let diag = a[row][row];
-            if diag.abs() < 1e-18 {
-                return None;
-            }
-            x[row] = sum / diag;
-        }
-
-        Some(x)
-    }
-
     pub(super) fn solve_intrinsic_terminal_state(
         &self,
         vc: Value,
@@ -185,6 +120,18 @@ impl Bjt {
             && (self.uses_legacy_junction_limiting() || self.initial_off)
         {
             let mut seed = self.legacy_startup_intrinsic_state_seed([vc, vb, ve, vs]);
+            // The global device initializer still applies SPICE's vcrit.
+            // The private resistive solve need not invent a larger forward
+            // drive than the terminals supply: vcrit grows with -ln(M) and
+            // otherwise consumes hundreds of Newton steps for tiny devices.
+            let applied_forward_bias = (self.polarity() * (vb - ve)).max(0.0);
+            let seeded_forward_bias = self.polarity() * (seed[IDX_VBI] - seed[IDX_VEI]);
+            if seeded_forward_bias > applied_forward_bias {
+                let base = seed[IDX_VEI] + self.polarity() * applied_forward_bias;
+                for index in [IDX_VCX, IDX_VCI, IDX_VBX, IDX_VBI, IDX_VBP] {
+                    seed[index] = base;
+                }
+            }
             if has_self_heat {
                 seed[IDX_VRTH] = vrth;
             }
@@ -338,11 +285,8 @@ impl Bjt {
             },
             state.vrth,
         );
-        let (collector_d, base_d, emitter_d) = self.intrinsic_terminal_derivatives(eval.linearized);
-        let collector_internal = Self::branch_from_internal(eval.linearized.ic, collector_d);
-        let base_internal = Self::branch_from_internal(eval.linearized.ib, base_d);
-        let emitter_internal =
-            Self::branch_from_internal(-(eval.linearized.ic + eval.linearized.ib), emitter_d);
+        let [collector_internal, base_internal, emitter_internal] =
+            self.intrinsic_terminal_branches(&eval);
         let thermal_sink = self.thermal_sink_branch(state.vrth);
         let thermal_power = self.thermal_power_branch(
             eval,
@@ -451,9 +395,17 @@ impl Bjt {
         let mut sensitivities = [[0.0; EXTERNAL_DIM]; INTERNAL_DIM];
         for external in 0..EXTERNAL_DIM {
             let rhs = external_partials.map(|partials| -partials[external]);
-            if let Some(solution) = Self::solve_small_dense_system(&jacobian, &rhs, INTERNAL_DIM) {
+            if let Some(solution) =
+                crate::numerics::solve_small_dense(&jacobian, &rhs, INTERNAL_DIM)
+            {
                 for idx in 0..INTERNAL_DIM {
                     sensitivities[idx][external] = solution[idx];
+                }
+            } else {
+                // A failed private solve is not a zero terminal derivative.
+                // Nonfinite reduction evidence must reach the engine checks.
+                for row in &mut sensitivities {
+                    row[external] = Value::NAN;
                 }
             }
         }
@@ -468,22 +420,45 @@ impl Bjt {
         &self,
         eval: &EvaluatedBjtState,
     ) -> BranchLinearization {
-        if self.vbic_solves_vbp() {
+        if self.charge_model == BjtChargeModel::LegacyGummelPoon {
+            // GP's substrate current is folded at its intrinsic connection.
+            BranchLinearization::default()
+        } else if self.vbic_solves_vbp() {
             eval.irbp
         } else {
             Self::add_branches(eval.ibep, eval.ibcp)
         }
     }
 
+    /// Intrinsic terminal rows shared by Newton, sensitivity and reduction.
+    /// GP's substrate branch shares the charge network's intrinsic endpoint;
+    /// it must flow through RC/RB before reaching the external terminal.
+    pub(super) fn intrinsic_terminal_branches(
+        &self,
+        eval: &EvaluatedBjtState,
+    ) -> [BranchLinearization; 3] {
+        let (collector_d, base_d, emitter_d) = self.intrinsic_terminal_derivatives(eval.linearized);
+        let mut collector = Self::branch_from_internal(eval.linearized.ic, collector_d);
+        let mut base = Self::branch_from_internal(eval.linearized.ib, base_d);
+        let emitter =
+            Self::branch_from_internal(-(eval.linearized.ic + eval.linearized.ib), emitter_d);
+        if self.charge_model == BjtChargeModel::LegacyGummelPoon {
+            match self.substrate_topology {
+                BjtSubstrateTopology::Vertical => {
+                    collector = Self::sub_branches(collector, eval.ibcp)
+                }
+                BjtSubstrateTopology::Lateral => base = Self::sub_branches(base, eval.ibcp),
+            }
+        }
+        [collector, base, emitter]
+    }
+
     pub(super) fn external_terminal_branches(
         &self,
         eval: EvaluatedBjtState,
     ) -> [BranchLinearization; EXTERNAL_DIM] {
-        let (collector_d, base_d, emitter_d) = self.intrinsic_terminal_derivatives(eval.linearized);
-        let collector_internal = Self::branch_from_internal(eval.linearized.ic, collector_d);
-        let base_internal = Self::branch_from_internal(eval.linearized.ib, base_d);
-        let emitter_internal =
-            Self::branch_from_internal(-(eval.linearized.ic + eval.linearized.ib), emitter_d);
+        let [collector_internal, base_internal, emitter_internal] =
+            self.intrinsic_terminal_branches(&eval);
 
         let collector = if Self::series_active(self.rcx) {
             eval.ircx

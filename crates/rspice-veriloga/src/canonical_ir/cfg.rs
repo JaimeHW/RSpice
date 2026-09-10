@@ -301,11 +301,11 @@ pub enum CfgValueKind {
     Multiplicity,
     Time,
     Analysis(smol_str::SmolStr),
-    /// `$simparam("name", fallback)`.
-    SimParam {
-        name: smol_str::SmolStr,
-        fallback: ValueId,
-    },
+    /// Required simulator value. Keep the read in its control-flow block so
+    /// an unavailable value is an error only when that branch executes.
+    SimParamValue(rspice_veriloga_runtime::SimulationParameter),
+    /// Whether a numeric simulator query is available, including zero.
+    SimParamPresent(rspice_veriloga_runtime::SimulationParameter),
     NodePotential(NodeId),
     BranchFlow(BranchId),
     BranchUnknownFlow(BranchUnknownId),
@@ -1115,7 +1115,8 @@ impl CfgValueKind {
             | Self::Multiplicity
             | Self::Time
             | Self::Analysis(_)
-            | Self::SimParam { .. }
+            | Self::SimParamValue(_)
+            | Self::SimParamPresent(_)
             | Self::NodePotential(_)
             | Self::BranchFlow(_)
             | Self::BranchUnknownFlow(_)
@@ -1252,7 +1253,6 @@ impl CfgValueKind {
             Self::LastCrossing {
                 input, direction, ..
             } => vec![*input, *direction],
-            Self::SimParam { fallback, .. } => vec![*fallback],
             Self::Binary { left, right, .. }
             | Self::IntegerArithmetic { left, right, .. }
             | Self::IntegerBitwise { left, right, .. }
@@ -1443,7 +1443,6 @@ impl CfgValueKind {
                 *input = map(*input);
                 *direction = map(*direction);
             }
-            Self::SimParam { fallback, .. } => *fallback = map(*fallback),
             Self::Binary { left, right, .. }
             | Self::IntegerArithmetic { left, right, .. }
             | Self::IntegerBitwise { left, right, .. }

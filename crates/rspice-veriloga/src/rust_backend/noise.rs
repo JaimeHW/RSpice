@@ -277,10 +277,7 @@ pub(super) fn generate_noise_file(
         "noise_metadata_schedule",
         Some("noise_source_active_mask"),
     )?;
-    if (out.contains("ctx.integer_result(") || out.contains("ctx.checked_derivative_value("))
-        || (helper_methods.contains("ctx.integer_result(")
-            || helper_methods.contains("ctx.checked_derivative_value("))
-    {
+    if uses_checked_runtime(&out) || uses_checked_runtime(&helper_methods) {
         out.push_str("        ctx.check_noise_evaluation()?;\n");
     }
     for (index, source) in artifact.noise_sources.sources.iter().enumerate() {
@@ -361,10 +358,7 @@ pub(super) fn generate_noise_file(
         };
         writeln!(out, "            let psd = {scaled_psd};").expect("write multiplicity scaling");
         emit_finite_check(&mut out, index, "scaled psd", "psd", 12);
-        if (out.contains("ctx.integer_result(") || out.contains("ctx.checked_derivative_value("))
-            || (helper_methods.contains("ctx.integer_result(")
-                || helper_methods.contains("ctx.checked_derivative_value("))
-        {
+        if uses_checked_runtime(&out) || uses_checked_runtime(&helper_methods) {
             out.push_str("            ctx.check_noise_evaluation()?;\n");
         }
         writeln!(
@@ -498,16 +492,6 @@ pub(super) fn grouped_noise_extension(
         );
     };
     let mut out = String::new();
-    let lane_types = lane_runtime_types(&plan.function);
-    if !lane_types.is_empty() {
-        writeln!(
-            out,
-            "\nuse {}::{{{}}};",
-            options.runtime_path,
-            lane_types.into_iter().collect::<Vec<_>>().join(", ")
-        )
-        .expect("write grouped lane imports");
-    }
     let potential_leaders = potential_branch_leaders(artifact);
     writeln!(
         out,
@@ -621,7 +605,8 @@ pub(super) fn grouped_noise_extension(
         integer_result: "ctx.integer_result".into(),
         checked_value: "ctx.checked_derivative_value".into(),
         analysis: "ctx.analysis".into(),
-        simparam: "ctx.simparam_or".into(),
+        simparam_required: "ctx.simparam_required".into(),
+        simparam_present: "ctx.has_simparam".into(),
         ..EmitBindings::default()
     };
     // The grouped slice rejects dynamic state below; these names make any
@@ -636,7 +621,7 @@ pub(super) fn grouped_noise_extension(
         &body.lines().map(str::to_owned).collect::<Vec<_>>(),
         8,
     );
-    if body.contains("ctx.integer_result(") || body.contains("ctx.checked_derivative_value(") {
+    if uses_checked_runtime(&body) {
         out.push_str("        ctx.check_noise_evaluation()?;\n");
     }
     out.push_str("        let omega = core::f64::consts::TAU * frequency_hz;\n");
@@ -739,7 +724,30 @@ pub(super) fn grouped_noise_extension(
         .expect("write grouped visitor");
     }
     out.push_str("        Ok(())\n    }\n}\n");
+    let lane_types = lane_runtime_types(&plan.function)
+        .into_iter()
+        .filter(|name| body.contains(&format!("{name}(")))
+        .collect::<Vec<_>>();
+    if !lane_types.is_empty() {
+        writeln!(
+            out,
+            "\nuse {}::{{{}}};",
+            options.runtime_path,
+            lane_types.join(", ")
+        )
+        .expect("write grouped lane imports");
+    }
     Ok(out)
+}
+
+fn uses_checked_runtime(body: &str) -> bool {
+    [
+        "ctx.integer_result(",
+        "ctx.checked_derivative_value(",
+        "ctx.simparam_required(",
+    ]
+    .iter()
+    .any(|call| body.contains(call))
 }
 
 fn plan_grouped_noise(
@@ -1926,7 +1934,7 @@ endmodule
 
 #[cfg(test)]
 mod grouped_process_tests {
-    use std::collections::{HashMap, HashSet};
+    use std::collections::HashSet;
 
     use crate::canonical_ir::{CfgEvalInputs, evaluate_cfg};
 
@@ -1955,7 +1963,7 @@ mod grouped_process_tests {
             multiplicity: 1.0,
             time: 0.0,
             analyses: HashSet::from(["noise".into(), "smallsig".into()]),
-            simparams: HashMap::new(),
+            simparams: Default::default(),
             ddt: 0.0,
             ddt_scale: 0.0,
             idt: 0.0,

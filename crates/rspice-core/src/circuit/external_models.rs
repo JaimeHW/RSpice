@@ -335,8 +335,20 @@ impl CircuitData {
     }
 
     #[cfg(feature = "veriloga")]
-    pub fn add_veriloga_device(&mut self, device: crate::device::veriloga::VerilogADevice) {
+    pub fn add_veriloga_device(&mut self, mut device: crate::device::veriloga::VerilogADevice) {
+        device.set_simulation_parameters(self.generated_simulation_parameters);
         self.veriloga_devices.add(device);
+    }
+
+    /// Continuation settings belong to the solver and survive device rollback.
+    #[cfg(feature = "veriloga")]
+    pub(crate) fn sync_veriloga_simulation_parameters(&mut self) {
+        for device in self.veriloga_devices.iter_mut() {
+            device.set_simulation_parameters(self.generated_simulation_parameters);
+        }
+        for host in &mut self.mixed_signal_hosts {
+            host.set_simulation_parameters(self.generated_simulation_parameters);
+        }
     }
 
     #[cfg(feature = "veriloga")]
@@ -3164,6 +3176,41 @@ mod tests {
     };
     use std::panic::{AssertUnwindSafe, catch_unwind};
     use std::sync::{Arc, Mutex};
+
+    #[cfg(feature = "veriloga")]
+    #[test]
+    fn simparam_gmin_updates_survive_nonlinear_device_rollback() {
+        use crate::device::veriloga::{Compiler, VerilogADevice};
+        let runtime=Compiler::default().compile_runtime("module query(p); inout p; electrical p; analog I(p)<+$simparam(\"gmin\",7.0)*V(p); endmodule",None).unwrap();
+        let mut circuit = CircuitData::new();
+        let node = circuit.get_or_create_node("p");
+        let device = VerilogADevice::try_new_with_canonical_ir(
+            "QUERY",
+            runtime.model,
+            &runtime.canonical_ir,
+            &[node],
+        )
+        .unwrap();
+        circuit.add_veriloga_device(device);
+        let mut snapshot = Some(circuit.nonlinear_state_snapshot());
+        for gmin in [0.0, 1e-9, 2e-6] {
+            circuit.set_semiconductor_junction_gmin(gmin);
+            if let Some(previous) = snapshot.take() {
+                circuit.restore_nonlinear_state(previous);
+            }
+            let device = circuit.veriloga_devices.get_mut(0).unwrap();
+            device.update_voltages(&[3.0]);
+            assert_eq!(device.try_evaluate().unwrap(), [3.0 * gmin]);
+            assert_eq!(
+                device
+                    .try_compute_jacobian()
+                    .unwrap()
+                    .first()
+                    .map_or(0.0, |entry| entry.value),
+                gmin
+            );
+        }
+    }
 
     #[cfg(feature = "veriloga")]
     #[test]

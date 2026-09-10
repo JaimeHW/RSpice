@@ -3651,6 +3651,8 @@ fn op_may_call(op: NativeOp) -> bool {
     matches!(
         op,
         NativeOp::BinaryMath(_)
+            | NativeOp::LoadSimParamValue(_)
+            | NativeOp::LoadSimParamPresent(_)
             | NativeOp::ProductRatio
             | NativeOp::CheckedValue
             | NativeOp::IntegerCast
@@ -3838,6 +3840,8 @@ fn op_may_fail(op: NativeOp) -> bool {
     matches!(
         op,
         NativeOp::LoadParamGiven(_)
+            | NativeOp::LoadSimParamValue(_)
+            | NativeOp::LoadSimParamPresent(_)
             | NativeOp::LoadPortConnected(_)
             | NativeOp::LoadCurrent(_)
             | NativeOp::LoadPriorCurrent(_)

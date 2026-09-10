@@ -888,27 +888,6 @@ fn compute_instance_static_guard_conditions(hir: &HirModel) -> HashSet<ExprId> {
     static_conditions
 }
 
-/// The value `$simparam("name")` means when the source names no fallback and
-/// the simulator offers no value for `name`.
-///
-/// One table rather than one per lowering: `$simparam` is answered at compile
-/// time by the bytecode route ([`crate::native`]'s `lower_simparam_intrinsic`),
-/// as a fallback under a runtime query by the generated-Rust backend, and by
-/// the closed defaults above under metadata-only noise lowering. The three
-/// answer the same question, so they read the same table — a second copy is
-/// how `$simparam("gmin")` came to mean 1e-12 on one route and 0.0 on another.
-///
-/// Names are matched as the source spells them, which is how the language
-/// spells them: `simulatorVersion` is not `simulatorversion`.
-pub(crate) fn simparam_source_default(name: &str) -> f64 {
-    match name {
-        "gmin" => 1.0e-12,
-        "tnom" => 300.15,
-        "simulatorVersion" => 1.0,
-        _ => 0.0,
-    }
-}
-
 /// What the consumer of a lowered CFG is, in the two respects the lowering has
 /// to know about.
 ///
@@ -2598,6 +2577,19 @@ impl<'a> CfgLowerer<'a> {
         else_expr: ExprId,
     ) -> ValueId {
         let condition = self.expr(condition);
+        self.conditional_value(
+            condition,
+            |this| this.expr(then_expr),
+            |this| this.expr(else_expr),
+        )
+    }
+
+    fn conditional_value(
+        &mut self,
+        condition: ValueId,
+        then_value: impl FnOnce(&mut Self) -> ValueId,
+        else_value: impl FnOnce(&mut Self) -> ValueId,
+    ) -> ValueId {
         let then_block = self.builder.create_block();
         let else_block = self.builder.create_block();
         let join = self.builder.create_block();
@@ -2621,7 +2613,7 @@ impl<'a> CfgLowerer<'a> {
         let result = CfgVariable::Local(self.result_variable());
 
         self.block = then_block;
-        let then_value = self.expr(then_expr);
+        let then_value = then_value(self);
         self.builder.write_variable(result, self.block, then_value);
         self.builder.set_terminator(
             self.block,
@@ -2632,7 +2624,7 @@ impl<'a> CfgLowerer<'a> {
         );
 
         self.block = else_block;
-        let else_value = self.expr(else_expr);
+        let else_value = else_value(self);
         self.builder.write_variable(result, self.block, else_value);
         self.builder.set_terminator(
             self.block,
@@ -3132,35 +3124,42 @@ impl<'a> CfgLowerer<'a> {
             self.unsupported(span, "$simparam with a non-literal name".to_string());
             return self.real_constant(0.0);
         };
-        if self.noise_metadata_only {
-            if let Some(fallback) = args.get(1) {
-                return self.expr(*fallback);
-            }
-            return self.real_constant(simparam_source_default(value.as_str()));
-        }
-
-        // Ordinary generated devices receive simulator-owned values (most
-        // importantly the gmin continuation value) on every Newton call. Keep
-        // the source fallback in the CFG, but do not replace the runtime leaf
-        // with it. Metadata-only noise evaluation has no such runtime input,
-        // so the closed defaults above are deliberately confined to that mode.
-        //
-        // A call that names no fallback still needs one, and it is not zero:
-        // the source says nothing, so the value the language defines for the
-        // parameter is what the call means. `simparam_source_default` is the
-        // same table the bytecode route folds at compile time, so a runtime
-        // with no value for the name and the compiled route answer alike.
-        let fallback = match args.get(1) {
-            Some(fallback) => self.expr(*fallback),
-            None => self.real_constant(simparam_source_default(value.as_str())),
+        let Some(parameter) = rspice_veriloga_runtime::SimulationParameter::from_name(&value)
+        else {
+            return if let Some(fallback) = args.get(1) {
+                self.expr(*fallback)
+            } else {
+                self.unsupported(
+                    span,
+                    format!("simulation parameter '{value}' has no fallback"),
+                );
+                self.real_constant(0.0)
+            };
         };
+        if let Some(fallback) = args.get(1) {
+            let present = self.builder.push(
+                self.block,
+                CfgValueType::Boolean,
+                CfgValueKind::SimParamPresent(parameter),
+            );
+            self.conditional_value(
+                present,
+                |this| this.simparam_value(parameter),
+                |this| this.expr(*fallback),
+            )
+        } else {
+            self.simparam_value(parameter)
+        }
+    }
+
+    fn simparam_value(
+        &mut self,
+        parameter: rspice_veriloga_runtime::SimulationParameter,
+    ) -> ValueId {
         self.builder.push(
             self.block,
             CfgValueType::Real,
-            CfgValueKind::SimParam {
-                name: SmolStr::new(value.to_ascii_lowercase()),
-                fallback,
-            },
+            CfgValueKind::SimParamValue(parameter),
         )
     }
 

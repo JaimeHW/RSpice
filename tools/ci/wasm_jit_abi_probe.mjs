@@ -1,6 +1,6 @@
-// Independent ABI 12 release fixture. Keep these bytes and opcodes explicit:
+// Independent ABI 13 release fixture. Keep these bytes and opcodes explicit:
 // deriving them from the compiler would let both sides drift together.
-const ABI = 12;
+const ABI = 13;
 const FRAME_BYTES = 168;
 const STACK_BYTES = 176; // Preserve the WASM stack's 16-byte alignment.
 const FRAME_MAGIC = 0x5253574a;
@@ -98,6 +98,8 @@ export async function qualifyAbi(wasm) {
       ["nonfinite integer", 300, [NaN]],
       ["invalid derivative primal", 340, [NaN, 0.25]],
       ["unknown operation", 249, [1]],
+      ["query value without a runtime session", 470, []],
+      ["query presence without a runtime session", 471, []],
     ]) {
       reset();
       expect(label, invoke(opcode, operands), 0, -2);

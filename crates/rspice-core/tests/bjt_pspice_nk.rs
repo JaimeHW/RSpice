@@ -1,8 +1,9 @@
 //! BJT deck-level agreement with the Xyce and ngspice references: PSpice
 //! NK/NKF high-current rolloff, and the OFF keyword's operating-point branch
-//! selection.
+//! selection. Xyce captures use the explicit Xyce dialect, including its
+//! transport-GMIN and thermal-voltage conventions.
 
-use rspice_core::engine::{Engine, SimulationConfig};
+use rspice_core::engine::{Engine, SimulationConfig, SpiceDialect};
 use rspice_core::netlist::Netlist;
 
 fn bjt_pspice_nk_deck() -> &'static str {
@@ -51,7 +52,7 @@ fn branch_index(result: &rspice_core::solver::SimulationResult, name: &str) -> u
 #[test]
 fn bjt_pspice_nk_matches_xyce_forward_gummel_collector_current() {
     let netlist = Netlist::parse(bjt_pspice_nk_deck()).expect("deck parses");
-    let results = Engine::new(SimulationConfig::default())
+    let results = Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce))
         .run_dc_sweep(&netlist, "vbb", 0.15, 0.95, 0.05)
         .expect("sweep converges");
 
@@ -82,7 +83,7 @@ fn bjt_pspice_nk_matches_xyce_forward_gummel_collector_current() {
 #[test]
 fn bjt_pspice_nk_matches_xyce_forward_gummel_base_current() {
     let netlist = Netlist::parse(bjt_pspice_nk_deck()).expect("deck parses");
-    let results = Engine::new(SimulationConfig::default())
+    let results = Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce))
         .run_dc_sweep(&netlist, "vbb", 0.15, 0.95, 0.05)
         .expect("sweep converges");
 
@@ -114,7 +115,7 @@ fn bjt_pspice_nk_matches_xyce_forward_gummel_base_current() {
 fn bjt_pspice_nkf_alias_matches_xyce_forward_gummel_collector_current() {
     let deck = bjt_pspice_nkf_deck();
     let netlist = Netlist::parse(&deck).expect("deck parses");
-    let results = Engine::new(SimulationConfig::default())
+    let results = Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce))
         .run_dc_sweep(&netlist, "vbb", 0.15, 0.95, 0.05)
         .expect("sweep converges");
 

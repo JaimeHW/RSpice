@@ -360,6 +360,41 @@ mod wasm_tests {
     }
 
     #[wasm_bindgen_test]
+    fn mos1_meyer_forward_body_and_inverse_ac_in_wasm() {
+        for (kind, p) in [("NMOS", 1.0), ("PMOS", -1.0)] {
+            for reverse in [false, true] {
+                let von = -0.3 - 0.4 * 0.2 / (2.0 * 0.6_f64.sqrt());
+                let (vg, vd, vb) = if reverse {
+                    (von + 0.2, -0.2, 0.0)
+                } else {
+                    (von + 0.4, 0.2, 0.2)
+                };
+                let deck=rspice_core::Netlist::parse(&format!(
+                    "Meyer polarity\nVD d 0 {}\nVS s 0 0\nVG g 0 {} AC 1\nVB b 0 {}\nM1 d g s b mm W=2u L=1u\n.model mm {kind}(LEVEL=1 VTO={} GAMMA=.4 PHI=.6 KP=100u TOX=20n IS=0)\n.options GMIN=0\n.end\n",p*vd,p*vg,p*vb,p*(-0.3))).unwrap();
+                let result = rspice_core::Engine::default()
+                    .run_ac_with_abort(&deck, &[1e6], &rspice_core::abort_signal::NoAbort)
+                    .unwrap();
+                let oxide = 3.9 * 8.854_214_871e-12 / 20e-9 * 2e-12;
+                let expected = if reverse {
+                    [10.0 / 27.0, 16.0 / 27.0]
+                } else {
+                    [16.0 / 27.0, 10.0 / 27.0]
+                };
+                for (source, fraction) in ["VS", "VD"].into_iter().zip(expected) {
+                    let index = result[0]
+                        .branch_names
+                        .iter()
+                        .position(|name| name.eq_ignore_ascii_case(source))
+                        .unwrap();
+                    let capacitance =
+                        result[0].currents[index].im / (2.0 * std::f64::consts::PI * 1e6);
+                    assert!((capacitance - oxide * fraction).abs() < oxide * 1e-10);
+                }
+            }
+        }
+    }
+
+    #[wasm_bindgen_test]
     fn mos_nlev3_channel_noise_at_zero_vds_in_wasm() {
         let mut config = rspice_core::engine::SimulationConfig::default();
         config.convergence_config.gmin_target = 0.0;
@@ -383,6 +418,223 @@ mod wasm_tests {
             let expected =
                 4.0 * 1.380649e-23 * 300.15 * (1e-3 + 3.0 * 0.4e-3) / (1.4e-3_f64).powi(2);
             assert!((result.output_noise[0] - expected).abs() < expected * 2e-10);
+        }
+    }
+
+    #[wasm_bindgen_test]
+    fn legacy_private_base_ac_conserves_current_in_wasm() {
+        let mut config = rspice_core::engine::SimulationConfig::default();
+        config.convergence_config.gmin_target = 0.0;
+        config.convergence_config.junction_gmin_target = 0.0;
+        let engine = rspice_core::Engine::new(config);
+        let deck=rspice_core::Netlist::parse("Private BJT AC\nVC c 0 1\nVB b 0 DC .65 AC 1\nVE e 0 0\nVS s 0 -.2\nQ1 c b e s mm AREA=5 M=3\n.model mm NPN(IS=1e-14 BF=100 VAF=40 VAR=20 IKF=1m RC=20 RB=30 RBM=10 RE=10 CJE=1p CJC=2p CJS=3p TF=1n TR=2n)\n.end\n").unwrap();
+        for ac in engine
+            .run_ac_with_abort(&deck, &[1e3, 1e6, 1e9], &rspice_core::abort_signal::NoAbort)
+            .unwrap()
+        {
+            let sum = ac.currents.iter().copied().sum::<rspice_core::Complex64>();
+            let scale = ac.currents.iter().map(|i| i.norm()).sum::<f64>();
+            assert!(sum.norm() < 2e-11 * scale, "terminal sum={sum:?}");
+        }
+    }
+
+    #[wasm_bindgen_test]
+    fn legacy_bjt_gmin_placement_and_substrate_in_wasm() {
+        use rspice_core::engine::{SimulationConfig, SpiceDialect};
+        for (dialect, dc_expected, ac_expected) in [
+            (
+                SpiceDialect::Ngspice,
+                [0.0008, -0.0021, 0.0012],
+                [-0.002, 0.001, 0.0],
+            ),
+            (
+                SpiceDialect::Xyce,
+                [0.000449, -0.00145, 0.0],
+                [-0.00051, 0.0005, 0.0],
+            ),
+        ] {
+            let mut config = SimulationConfig::default().with_spice_dialect(dialect);
+            config.convergence_config.gmin_target = 0.0;
+            config.convergence_config.junction_gmin_target = 1e-3;
+            let engine = rspice_core::Engine::new(config);
+            let abort = rspice_core::abort_signal::NoAbort;
+            for (kind, p) in [("NPN", 1.0), ("PNP", -1.0)] {
+                let deck = rspice_core::Netlist::parse(&format!(
+                    "GP GMIN\nVC c 0 {}\nVB b 0 DC {} AC 1\nVS s 0 {}\nQ1 c b 0 s mm AREA=5 M=3\n.model mm {kind}(IS=0 SUBS=1 BF=100 BR=2 TF=1n TR=2n)\n.end\n",p,p*0.1,p*(-0.2))).unwrap();
+                let dc = engine.run_dc_op_with_abort(&deck, &abort).unwrap();
+                let ac = engine.run_ac_with_abort(&deck, &[1e6], &abort).unwrap();
+                for (index, branch) in ["VB", "VC", "VS"].into_iter().enumerate() {
+                    assert!(
+                        (dc.branch_current_named(branch).unwrap() - 3.0 * p * dc_expected[index])
+                            .abs()
+                            < 1e-13
+                    );
+                    let column = ac[0]
+                        .branch_names
+                        .iter()
+                        .position(|name| name.eq_ignore_ascii_case(branch))
+                        .unwrap();
+                    assert!((ac[0].currents[column].re - 3.0 * ac_expected[index]).abs() < 1e-13);
+                    if dialect == SpiceDialect::Ngspice {
+                        assert_eq!(ac[0].currents[column].im, 0.0);
+                    }
+                }
+            }
+        }
+    }
+
+    #[wasm_bindgen_test]
+    fn legacy_bjt_capacitance_temperature_in_wasm() {
+        use rspice_core::engine::{SimulationConfig, SpiceDialect};
+        // Same isolated CJE case as the native independent-reference test:
+        // ngspice 46 binary and Xyce 7.10 source-derived AC capacitance.
+        for (dialect, expected, tolerance) in [
+            (SpiceDialect::Ngspice, 2.1805869065275923e-12, 3e-8),
+            (SpiceDialect::Xyce, 1.9906878749375348e-12, 2e-12),
+        ] {
+            let mut config = SimulationConfig::default().with_spice_dialect(dialect);
+            config.convergence_config.gmin_target = 0.0;
+            config.convergence_config.junction_gmin_target = 0.0;
+            let engine = rspice_core::Engine::new(config);
+            for (kind, p) in [("NPN", 1.0), ("PNP", -1.0)] {
+                let deck = rspice_core::Netlist::parse(&format!(
+                    "GP capacitor temperature\nVBE be 0 DC {} AC 1\nQBE 0 be 0 me AREA=3 M=2e-20\n.model me {kind}(IS=0 CJE=2p VJE=.83 MJE=.37 FC=.4 TNOM=27)\n.temp 70\n.options GMIN=0\n.end\n", p * 0.1
+                )).unwrap();
+                let ac = engine
+                    .run_ac_with_abort(&deck, &[1e6], &rspice_core::abort_signal::NoAbort)
+                    .unwrap();
+                let column = ac[0]
+                    .branch_names
+                    .iter()
+                    .position(|branch| branch.eq_ignore_ascii_case("VBE"))
+                    .unwrap();
+                let actual = -ac[0].currents[column].im / (std::f64::consts::TAU * 1e6 * 6e-20);
+                assert!(
+                    (actual - expected).abs() < expected * tolerance,
+                    "{dialect:?} {kind}: {actual:e} vs {expected:e}"
+                );
+            }
+        }
+    }
+
+    #[wasm_bindgen_test]
+    fn small_bjt_instances_preserve_dc_and_ac_in_wasm() {
+        let mut config = rspice_core::engine::SimulationConfig::default();
+        config.convergence_config.gmin_target = 0.0;
+        config.convergence_config.junction_gmin_target = 0.0;
+        // Resolve the outer operating point more tightly than the scaling
+        // assertion, including currents of the smallest tested instance.
+        config.convergence_config.voltage_reltol = 1e-10;
+        config.convergence_config.voltage_abstol = 1e-12;
+        config.convergence_config.current_abstol = 1e-220;
+        config.convergence_config.residual_reltol = 1e-10;
+        let engine = rspice_core::Engine::new(config);
+        let abort = rspice_core::abort_signal::NoAbort;
+        for resistance in ["", "RB=5k RBM=1k"] {
+            for (kind, p) in [("NPN", 1.0), ("PNP", -1.0)] {
+                let make = |parameter, scale| {
+                    rspice_core::Netlist::parse(&format!(
+                "Small BJT\nVC c 0 {p}\nVB b 0 DC {} AC 1\nQ1 c b 0 mm {parameter}={scale}\n.model mm {kind}(IS=1e-14 BF=100 {resistance} IKF=1m IKR=2m CJE=2p CJC=1p TF=1n)\n.options GMIN=0\n.end\n",p*0.7)).unwrap()
+                };
+                let unit = make("M", 1.0);
+                let dc = engine.run_dc_op_with_abort(&unit, &abort).unwrap();
+                let ac = engine.run_ac_with_abort(&unit, &[1e6], &abort).unwrap();
+                for parameter in ["M", "AREA"] {
+                    for scale in [1e-20, 1e-200] {
+                        let deck = make(parameter, scale);
+                        let actual_dc = engine.run_dc_op_with_abort(&deck, &abort).unwrap();
+                        let actual_ac = engine.run_ac_with_abort(&deck, &[1e6], &abort).unwrap();
+                        for (&actual, &expected) in
+                            actual_dc.branch_currents.iter().zip(&dc.branch_currents)
+                        {
+                            assert!(
+                                (actual / scale - expected).abs() < expected.abs() * 3e-10,
+                                "{kind} {resistance} {parameter}={scale:e} DC: {:e} vs {expected:e}",
+                                actual / scale
+                            );
+                        }
+                        for (actual, expected) in actual_ac[0].currents.iter().zip(&ac[0].currents)
+                        {
+                            for (actual, expected) in
+                                [(actual.re, expected.re), (actual.im, expected.im)]
+                            {
+                                assert!(
+                                    (actual / scale - expected).abs() <= expected.abs() * 3e-10
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[wasm_bindgen_test]
+    fn semiconductor_flicker_controls_and_scale_in_wasm() {
+        let mut config = rspice_core::engine::SimulationConfig::default();
+        config.convergence_config.gmin_target = 0.0;
+        config.convergence_config.junction_gmin_target = 0.0;
+        let engine = rspice_core::Engine::new(config);
+        for (device, model) in [
+            ("D1 p 0 mm", "D"),
+            ("Q1 0 p 0 mm", "NPN"),
+            ("J1 p 0 0 mm", "NJF"),
+        ] {
+            for (kf, m, af, frequency, expected) in [
+                (1e-20, 1e-6, -1.0, 1e3, 1e9),
+                (1e308, 5.0, 0.0, 1e4, 5e304),
+                (
+                    f64::from_bits(1),
+                    1e-20,
+                    -10.0,
+                    1e20,
+                    f64::from_bits(1) * 1e300 * 1e40,
+                ),
+            ] {
+                let deck = rspice_core::Netlist::parse(&format!(
+                    "Semiconductor flicker\nVP p 0 0\n{device} M={m}\n.model mm {model}(KF={kf} AF={af})\n.options GMIN=0\n.end\n")).unwrap();
+                let result = engine
+                    .run_port_noise_correlation_with_abort(
+                        &deck,
+                        &["VP".into()],
+                        &[frequency],
+                        300.15,
+                        &rspice_core::abort_signal::NoAbort,
+                    )
+                    .unwrap();
+                let actual = result[0].current_correlation[0][0].re;
+                assert!(
+                    (actual - expected).abs() < expected * 2e-12,
+                    "{device}: {actual:e} vs {expected:e}"
+                );
+            }
+        }
+    }
+
+    #[wasm_bindgen_test]
+    fn mos_flicker_binary_normalization_in_wasm() {
+        for (kind, p) in [("NMOS", 1.0), ("PMOS", -1.0)] {
+            for (kf, m, ef) in [(1e308, 5.0, 10), (f64::from_bits(1), 1e-20, -10)] {
+                let deck=rspice_core::Netlist::parse(&format!(
+                    "MOS coefficient scale\nVD d 0 {}\nVG g 0 {}\nM1 d g 0 0 mm W=2u L=1u M={m}\n.model mm {kind}(VTO={p} KP=100u TOX=20n IS=0 KF={kf} AF=0 EF={ef} NLEV=0 GAMMA_NOISE=0)\n.options GMIN=0\n.end\n",p*2.0,p*1.4)).unwrap();
+                let mut config = rspice_core::engine::SimulationConfig::default();
+                config.convergence_config.gmin_target = 0.0;
+                config.convergence_config.junction_gmin_target = 0.0;
+                let result = rspice_core::Engine::new(config)
+                    .run_port_noise_correlation_with_abort(
+                        &deck,
+                        &["VD".into()],
+                        &[1e4],
+                        300.15,
+                        &rspice_core::abort_signal::NoAbort,
+                    )
+                    .unwrap();
+                let cox = 3.9 * 8.854_214_871e-12 / 20e-9;
+                let expected = (kf / 1e4_f64.powi(ef)) / (1e-12 * cox) * m;
+                assert!(
+                    (result[0].current_correlation[0][0].re - expected).abs() < expected * 3e-12
+                );
+            }
         }
     }
 
