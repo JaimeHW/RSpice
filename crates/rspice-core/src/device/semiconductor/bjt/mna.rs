@@ -747,11 +747,10 @@ impl Bjt {
         [self.vc_ext, self.vb_ext, self.ve_ext, self.vs_ext]
     }
 
-    /// Re-impose the collapse manifold after junction limiting: the
-    /// least-squares projection may split aliased states, but aliased states
-    /// share one matrix column, so the linearization point must keep them
-    /// identical (mirroring the alias fixups of the reduced residual).
-    fn impose_vbic_collapse_manifold(
+    /// Keep ideal connections exact after prediction or junction limiting.
+    /// Shared by the promoted and private solves, since their projected
+    /// candidates can otherwise split nodes that denote the same wire.
+    pub(super) fn impose_intrinsic_node_constraints(
         &self,
         state: &mut [Value; INTERNAL_DIM],
         vc: Value,
@@ -860,7 +859,7 @@ impl Bjt {
             (false, true) => self.limit_vbic_internal_state_to_previous(raw, previous),
             (false, false) => raw,
         };
-        self.impose_vbic_collapse_manifold(&mut state, vc, vb, ve, vs);
+        self.impose_intrinsic_node_constraints(&mut state, vc, vb, ve, vs);
 
         let eval = self.evaluate_state_with_rbi_current(
             BjtNodeVoltages {

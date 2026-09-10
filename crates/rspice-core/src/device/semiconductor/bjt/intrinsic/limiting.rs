@@ -131,7 +131,7 @@ impl Bjt {
     /// self-heating instance the power sum turns that into watts on the thermal
     /// row — enough to walk the temperature away from an otherwise converged
     /// operating point. A collapsed state is stiffest of all: it shares a matrix
-    /// column with the node it aliases, so `impose_vbic_collapse_manifold`
+    /// column with the node it aliases, so `impose_intrinsic_node_constraints`
     /// discards whatever the projection put there.
     fn vbic_junction_node_stiffness(&self) -> [Value; VBIC_JUNCTION_NODE_DIM] {
         let series = |resistance: Value| {

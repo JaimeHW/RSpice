@@ -186,12 +186,11 @@ pub fn run_authored_deck_document_js(
     retain(&scope, execution)
 }
 
-/// Tests that exercise the real JavaScript boundary.
+/// Tests for the JavaScript boundary and numerical engine on WebAssembly.
 ///
-/// These run under `wasm-bindgen-test` on Node. Everything they assert is a
-/// property of the boundary itself -- typed-array columns, explicit `null`,
-/// the thrown error's shape, and the shared control word -- which is exactly
-/// what a native test cannot observe.
+/// These run under `wasm-bindgen-test` on Node, covering typed-array columns,
+/// explicit `null`, thrown errors, shared control words, and arithmetic paths
+/// whose WebAssembly compilation cannot be checked by native execution.
 #[cfg(all(test, target_arch = "wasm32"))]
 // Clippy's allow-*-in-tests policy recognizes #[test], but these functions
 // are registered by wasm-bindgen-test instead. Panics are test failures here.
@@ -207,6 +206,56 @@ mod wasm_tests {
 
     use super::*;
     use crate::js_interop::{js_array_property, js_property};
+
+    #[wasm_bindgen_test]
+    fn private_vbic_thermal_equilibrium_scales_in_wasm() {
+        use rspice_core::device::{Bjt, NonlinearDevice};
+
+        for level in [4.0, 9.0, 11.0, 12.0] {
+            let make = |m| {
+                let mut bjt = Bjt::new_npn("q".into(), 1, 2, 0)
+                    .with_params(
+                        &[
+                            ("LEVEL".into(), level),
+                            ("RTH".into(), 1000.0),
+                            ("SELFT".into(), 1.0),
+                            ("IS".into(), 1e-16),
+                        ]
+                        .into_iter()
+                        .collect(),
+                    )
+                    .with_instance_params(&[("M".into(), m)]);
+                bjt.set_junction_gmin(0.0);
+                bjt
+            };
+            for m in [1e-20, 1e-100, 1e-200] {
+                let mut reference = make(1.0);
+                let mut scaled = make(m);
+                // Direct devices retain the private thermal solver. Bias,
+                // cool, and rebias to exercise both fresh and cached states.
+                for base in [0.7, 0.0, 0.65] {
+                    reference.update(&[1.0, base]);
+                    scaled.update(&[1.0, base]);
+                    let (rc, rb, re) = reference.operating_point_currents();
+                    let (sc, sb, se) = scaled.operating_point_currents();
+                    if base == 0.0 {
+                        for current in [rc, rb, re, sc / m, sb / m, se / m] {
+                            assert!(current.abs() < 2e-13, "off current {current:e}");
+                        }
+                    }
+                    for (actual, expected) in [(sc, rc), (sb, rb), (se, re)] {
+                        // Include the voltage-resolution error of the
+                        // model's 0.1 ohm series branches near zero current.
+                        assert!(
+                            (actual / m - expected).abs() <= 2e-13 + 2e-10 * expected.abs(),
+                            "LEVEL={level} M={m:e} VB={base}: {} vs {expected}",
+                            actual / m,
+                        );
+                    }
+                }
+            }
+        }
+    }
 
     #[wasm_bindgen_test]
     fn integrated_noise_contribution_range_and_ranking_in_wasm() {

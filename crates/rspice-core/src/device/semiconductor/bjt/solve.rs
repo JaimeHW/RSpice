@@ -38,44 +38,42 @@ impl Bjt {
         let has_rs = self.has_substrate_resistance();
         let has_self_heat = self.thermal_model_enabled();
         let reuse_previous_state = self.reduced_linearization_cache_valid.get();
-        let solve_vbp = self.vbic_solves_vbp();
-
-        let mut vcx = if reuse_previous_state {
+        let vcx = if reuse_previous_state {
             self.vcx
         } else if has_rcx {
             vc - self.ic * self.rcx.max(0.0)
         } else {
             vc
         };
-        let mut vci = if reuse_previous_state {
+        let vci = if reuse_previous_state {
             self.vci
         } else if has_rci {
             vcx - self.ic * self.rci.max(0.0)
         } else {
             vcx
         };
-        let mut vbx = if reuse_previous_state {
+        let vbx = if reuse_previous_state {
             self.vbx
         } else if has_rbx {
             vb - self.ib * self.rbx.max(0.0)
         } else {
             vb
         };
-        let mut vbi = if reuse_previous_state {
+        let vbi = if reuse_previous_state {
             self.vbi
         } else if has_rbi {
             vbx - self.ib * self.rbi.max(0.0)
         } else {
             vbx
         };
-        let mut vei = if reuse_previous_state {
+        let vei = if reuse_previous_state {
             self.vei
         } else if has_re {
             ve - self.ie * self.re.max(0.0)
         } else {
             ve
         };
-        let mut vsi = if self.vbic_three_terminal {
+        let vsi = if self.vbic_three_terminal {
             0.0
         } else if reuse_previous_state {
             self.vsi
@@ -86,7 +84,7 @@ impl Bjt {
         };
         // The external-collector voltage seeds vbp whether or not the
         // parasitic node is solved this pass.
-        let mut vbp = if reuse_previous_state { self.vbp } else { vcx };
+        let vbp = if reuse_previous_state { self.vbp } else { vcx };
         let mut vrth = if reuse_previous_state {
             self.vrth
         } else if has_self_heat {
@@ -153,7 +151,24 @@ impl Bjt {
             if has_self_heat && !reuse_previous_state {
                 self.solve_intrinsic_state_with_self_heating_continuation(vc, vb, ve, vs, seed)
             } else {
-                self.solve_intrinsic_state_from_seed(vc, vb, ve, vs, seed)
+                let direct = self.solve_intrinsic_state_from_seed(vc, vb, ve, vs, seed);
+                // A warm prediction can fail after the terminals change.
+                // Judge that solve by its remaining state correction, not
+                // by a current residual whose size depends on multiplicity.
+                if has_self_heat {
+                    let (residual, jacobian) =
+                        self.intrinsic_state_residual_jacobian(vc, vb, ve, vs, direct.0);
+                    let rhs = residual.map(|value| -value);
+                    let unresolved =
+                        crate::numerics::solve_small_dense(&jacobian, &rhs, INTERNAL_DIM)
+                            .is_none_or(|delta| delta.iter().any(|value| value.abs() >= 1e-13));
+                    if unresolved {
+                        return self.solve_intrinsic_state_with_self_heating_continuation(
+                            vc, vb, ve, vs, seed,
+                        );
+                    }
+                }
+                direct
             }
         };
 
@@ -205,7 +220,7 @@ impl Bjt {
                     self.rebalance_intrinsic_thermal_state(vc, vb, ve, vs, best_state);
                 let (refined_state, refined_residual_norm) =
                     self.solve_intrinsic_state_from_seed(vc, vb, ve, vs, rebalanced_state);
-                if refined_residual_norm + 1e-15 < best_residual_norm {
+                if refined_residual_norm < best_residual_norm {
                     best_state = refined_state;
                     best_residual_norm = refined_residual_norm;
                     continue;
@@ -214,42 +229,8 @@ impl Bjt {
             }
         }
 
-        [vcx, vci, vbx, vbi, vei, vbp, vsi, vrth] = best_state;
-
-        if !has_rcx {
-            vcx = vc;
-        }
-        if !has_rci {
-            vci = vcx;
-        }
-        if !has_rbx {
-            vbx = vb;
-        }
-        if !has_rbi {
-            vbi = vbx;
-        }
-        if !has_re {
-            vei = ve;
-        }
-        if !has_rs {
-            vsi = if self.vbic_three_terminal { 0.0 } else { vs };
-        }
-        if !solve_vbp {
-            vbp = vcx;
-        }
-        if !has_self_heat {
-            vrth = 0.0;
-        }
-        IntrinsicTerminalState {
-            vcx,
-            vci,
-            vbx,
-            vbi,
-            vei,
-            vbp,
-            vsi,
-            vrth,
-        }
+        self.impose_intrinsic_node_constraints(&mut best_state, vc, vb, ve, vs);
+        self.intrinsic_state_from_internal_vector(best_state)
     }
 
     pub(super) fn internal_voltage_sensitivities(
@@ -709,12 +690,12 @@ impl Bjt {
 
     pub(crate) fn thermal_rebalance_step_limit(&self, rise: Value) -> Value {
         let minimum = self.minimum_thermal_rise();
-        let distance = if minimum.is_finite() {
-            rise - minimum
+        let half_distance = if minimum.is_finite() {
+            0.5 * rise - 0.5 * minimum
         } else {
-            rise.abs() + self.requested_temperature().abs()
+            0.5 * rise.abs() + 0.5 * self.requested_temperature().abs()
         };
-        (distance + 10.0).max(1.0) * 0.5
+        (half_distance + 5.0).max(0.5)
     }
 
     pub(crate) fn vbic_dynamic_thermal_residual_and_derivative(

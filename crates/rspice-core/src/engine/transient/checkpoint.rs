@@ -1208,7 +1208,8 @@ pub(crate) fn simulation_checkpoint_identity(config: &SimulationConfig) -> Strin
     // v73 retains out-of-range MOS flicker coefficients until frequency evaluation.
     // v74 preserves semiconductor flicker laws and configured JFET junction GMIN.
     // v84 preserves flicker density through cancellation of extreme logarithms.
-    hasher.update(b"rspice-transient-resolved-config-v84\0");
+    // v85 preserves private BJT node constraints and thermal bias recovery.
+    hasher.update(b"rspice-transient-resolved-config-v85\0");
     hash_field(&mut hasher, "temperature", config.temperature.to_bits());
     hash_field(&mut hasher, "ramptime", config.ramptime.to_bits());
     hash_field(&mut hasher, "digital_delay_type", config.digital_delay_type);

@@ -459,6 +459,7 @@ impl Bjt {
         thermal_scale: Value,
         mut state: [Value; INTERNAL_DIM],
     ) -> ([Value; INTERNAL_DIM], Value) {
+        self.impose_intrinsic_node_constraints(&mut state, vc, vb, ve, vs);
         let mut best_state = state;
         let mut best_residual_norm = Value::INFINITY;
 
@@ -522,6 +523,7 @@ impl Bjt {
                     candidate[idx] = state[idx] + alpha * delta[idx];
                 }
                 candidate = self.limit_intrinsic_state_against_previous(candidate, state);
+                self.impose_intrinsic_node_constraints(&mut candidate, vc, vb, ve, vs);
                 let (candidate_residual, _) = self
                     .intrinsic_state_residual_jacobian_with_thermal_scale(
                         vc,
@@ -630,8 +632,6 @@ impl Bjt {
         }
 
         let mut current_state = state;
-        let mut best_state = state;
-        let mut best_residual = Value::INFINITY;
         let minimum_vrth = self.minimum_thermal_rise();
 
         for _ in 0..8 {
@@ -639,15 +639,13 @@ impl Bjt {
                 self.intrinsic_state_residual_jacobian(vc, vb, ve, vs, current_state);
             let thermal_residual = residual[IDX_VRTH];
             let thermal_residual_abs = thermal_residual.abs();
-            if thermal_residual_abs.is_finite() && thermal_residual_abs < best_residual {
-                best_residual = thermal_residual_abs;
-                best_state = current_state;
-            }
             let thermal_derivative = jacobian[IDX_VRTH][IDX_VRTH];
+            // Residual and derivative both scale with instance multiplicity.
+            // Their absolute sizes cannot certify a temperature equilibrium.
             if !thermal_residual.is_finite()
                 || !thermal_derivative.is_finite()
-                || thermal_derivative.abs() < 1e-18
-                || thermal_residual_abs < 1e-12
+                || thermal_derivative == 0.0
+                || thermal_residual == 0.0
             {
                 break;
             }
@@ -655,19 +653,21 @@ impl Bjt {
             let current_vrth = current_state[IDX_VRTH];
             let max_step = self.thermal_rebalance_step_limit(current_vrth);
             let step = (-thermal_residual / thermal_derivative).clamp(-max_step, max_step);
-            if step.abs() < 1e-12 {
+            if step == 0.0 {
                 break;
             }
 
             let mut alpha = 1.0;
             let mut accepted = false;
-            let mut best_candidate = current_state;
-            let mut best_candidate_residual = thermal_residual_abs;
             for _ in 0..10 {
                 let raw_vrth = current_vrth + alpha * step;
+                if !raw_vrth.is_finite() {
+                    alpha *= 0.5;
+                    continue;
+                }
                 let candidate_vrth =
                     Self::limit_logarithmic_step(raw_vrth, current_vrth, 100.0).max(minimum_vrth);
-                if (candidate_vrth - current_vrth).abs() < 1e-12 {
+                if candidate_vrth == current_vrth {
                     break;
                 }
 
@@ -677,10 +677,6 @@ impl Bjt {
                     .intrinsic_state_residual_jacobian(vc, vb, ve, vs, candidate)
                     .0[IDX_VRTH]
                     .abs();
-                if candidate_residual.is_finite() && candidate_residual < best_candidate_residual {
-                    best_candidate = candidate;
-                    best_candidate_residual = candidate_residual;
-                }
                 if candidate_residual.is_finite() && candidate_residual < thermal_residual_abs {
                     current_state = candidate;
                     accepted = true;
@@ -689,17 +685,14 @@ impl Bjt {
                 alpha *= 0.5;
             }
 
-            if accepted {
-                continue;
+            if !accepted {
+                break;
             }
-            if best_candidate_residual + 1e-15 < thermal_residual_abs {
-                current_state = best_candidate;
-                continue;
-            }
-            break;
         }
 
-        best_state
+        // Every accepted candidate strictly improves the thermal residual,
+        // including the candidate accepted on the final allowed iteration.
+        current_state
     }
 
     pub(in crate::device::semiconductor::bjt) fn intrinsic_state_residual_jacobian_with_thermal_scale(
@@ -720,40 +713,10 @@ impl Bjt {
         let has_self_heat = self.thermal_model_enabled();
         let solve_vbp = self.vbic_solves_vbp();
 
-        let [
-            mut vcx,
-            mut vci,
-            mut vbx,
-            mut vbi,
-            mut vei,
-            mut vbp,
-            mut vsi,
-            mut vrth,
-        ] = state;
-        if !has_rcx {
-            vcx = vc;
-        }
-        if !has_rci {
-            vci = vcx;
-        }
-        if !has_rbx {
-            vbx = vb;
-        }
-        if !has_rbi {
-            vbi = vbx;
-        }
-        if !has_re {
-            vei = ve;
-        }
-        if !has_rs {
-            vsi = if self.vbic_three_terminal { 0.0 } else { vs };
-        }
-        if !solve_vbp {
-            vbp = vcx;
-        }
-        if !has_self_heat {
-            vrth = 0.0;
-        }
+        // Limiters and predictors can displace nodes joined by ideal wires.
+        // Evaluate the candidate itself so the identity rows below measure
+        // those displacements and agree with their Jacobian derivatives.
+        let [vcx, vci, vbx, vbi, vei, vbp, vsi, vrth] = state;
 
         let eval = self.evaluate_state(
             BjtNodeVoltages {
@@ -1282,6 +1245,146 @@ impl Bjt {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn thermal_rebalance_preserves_equilibrium_across_instance_and_rise_scales() {
+        for level in [4.0, 9.0, 11.0, 12.0] {
+            for m in [1.0, 1e-12, 1e-20, 1e-100, 1e-200] {
+                let mut bjt = Bjt::new_npn("q".into(), 1, 2, 0)
+                    .with_params(
+                        &[
+                            ("LEVEL".into(), level),
+                            ("RTH".into(), 1000.0),
+                            ("SELFT".into(), 1.0),
+                        ]
+                        .into_iter()
+                        .collect(),
+                    )
+                    .with_instance_params(&[("M".into(), m)]);
+                bjt.set_junction_gmin(0.0);
+                assert!(bjt.thermal_model_enabled());
+                for rise in [20.0, 1e-14, 800.0] {
+                    // At zero electrical bias there is no dissipated power.
+                    // M scales both thermal residual and derivative, while
+                    // the equilibrium temperature rise remains exactly zero.
+                    // An 800 K seed needs the last of the eight allowed
+                    // limited steps; do not return the preceding iterate.
+                    let mut state = [0.0; INTERNAL_DIM];
+                    state[IDX_VRTH] = rise;
+                    let residual = bjt
+                        .intrinsic_state_residual_jacobian(0.0, 0.0, 0.0, 0.0, state)
+                        .0[IDX_VRTH];
+                    assert!(residual.is_finite() && residual > 0.0);
+                    let actual = bjt.rebalance_intrinsic_thermal_state(0.0, 0.0, 0.0, 0.0, state);
+                    assert!(
+                        actual[IDX_VRTH].abs() <= rise * 4e-15,
+                        "LEVEL={level} M={m:e} initial rise={rise:e}: {}",
+                        actual[IDX_VRTH],
+                    );
+                    assert_eq!(&actual[..IDX_VRTH], &state[..IDX_VRTH]);
+
+                    // A cached warm state must retain the correction when
+                    // the coupled solver compares its refined candidate.
+                    bjt.vrth = rise;
+                    bjt.reduced_linearization_cache_valid.set(true);
+                    let solved = bjt.solve_intrinsic_terminal_state(0.0, 0.0, 0.0, 0.0);
+                    assert!(
+                        solved.vrth.abs() <= rise * 4e-15,
+                        "coupled LEVEL={level} M={m:e} initial rise={rise:e}: {}",
+                        solved.vrth,
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn private_intrinsic_identity_rows_measure_displaced_wire_nodes() {
+        let bjt = Bjt::new_npn("q".into(), 1, 2, 0)
+            .with_params(&[("IS".into(), 0.0)].into_iter().collect());
+        let state = [1.0, 2.0, 3.0, 5.0, 7.0, 11.0, 13.0, 17.0];
+        let (residual, jacobian) = bjt.intrinsic_state_residual_jacobian(1.0, 2.0, 0.0, 0.0, state);
+        assert_eq!(residual, [0.0, 1.0, 1.0, 2.0, 7.0, 10.0, 13.0, 17.0]);
+        for col in 0..INTERNAL_DIM {
+            let mut perturbed = state;
+            perturbed[col] += 0.25;
+            let shifted = bjt
+                .intrinsic_state_residual_jacobian(1.0, 2.0, 0.0, 0.0, perturbed)
+                .0;
+            for row in 0..INTERNAL_DIM {
+                assert_eq!((shifted[row] - residual[row]) / 0.25, jacobian[row][col]);
+            }
+        }
+    }
+
+    #[test]
+    fn private_vbic_cached_bias_preserves_instance_scaling() {
+        for level in [4.0, 9.0, 11.0, 12.0] {
+            let make = |m| {
+                let mut bjt = Bjt::new_npn("q".into(), 1, 2, 0)
+                    .with_params(
+                        &[
+                            ("LEVEL".into(), level),
+                            ("RTH".into(), 1000.0),
+                            ("SELFT".into(), 1.0),
+                            ("IS".into(), 1e-16),
+                        ]
+                        .into_iter()
+                        .collect(),
+                    )
+                    .with_instance_params(&[("M".into(), m)]);
+                bjt.set_junction_gmin(0.0);
+                bjt
+            };
+            for m in [1e-20, 1e-100, 1e-200] {
+                let mut reference = make(1.0);
+                let mut scaled = make(m);
+                for base in [0.7, 0.0, 0.65] {
+                    reference.update(&[1.0, base]);
+                    scaled.update(&[1.0, base]);
+                    let (rc, rb, re) = reference.operating_point_currents();
+                    let (sc, sb, se) = scaled.operating_point_currents();
+                    if base == 0.0 {
+                        assert!(scaled.vrth.abs() < 2e-10, "scaled off rise {}", scaled.vrth);
+                        assert!(
+                            reference.vrth.abs() < 2e-10,
+                            "reference off rise {}",
+                            reference.vrth
+                        );
+                        for current in [rc, rb, re, sc / m, sb / m, se / m] {
+                            assert!(current.abs() < 2e-13, "off current {current:e}");
+                        }
+                    }
+                    for (actual, expected) in [(sc, rc), (sb, rb), (se, re)] {
+                        // The 0.1 ohm series branches lose currents below
+                        // voltage resolution; allow that absolute floor.
+                        assert!(
+                            (actual / m - expected).abs() <= 2e-13 + 2e-10 * expected.abs(),
+                            "LEVEL={level} M={m:e} VB={base}: {} vs {expected}",
+                            actual / m,
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn thermal_rebalance_step_limit_preserves_finite_range() {
+        for level in [4.0, 9.0, 11.0, 12.0] {
+            let mut bjt = Bjt::new_npn("q".into(), 1, 2, 0).with_params(
+                &[("LEVEL".into(), level), ("TMAXCLIP".into(), 100.0)]
+                    .into_iter()
+                    .collect(),
+            );
+            assert_eq!(bjt.thermal_rebalance_step_limit(1e308), 5e307);
+            if bjt.vbic_13 {
+                bjt.set_temperature(1e308);
+                assert_eq!(bjt.thermal_rebalance_step_limit(1e308), 1e308);
+                assert_eq!(bjt.thermal_rebalance_step_limit(-1e308), 1e308);
+            }
+        }
+    }
 
     #[test]
     fn private_intrinsic_newton_preserves_voltage_across_instance_scales() {
