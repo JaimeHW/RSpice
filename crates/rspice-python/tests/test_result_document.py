@@ -301,6 +301,15 @@ def test_pss_local_source_mesh_survives_python_and_pickle(source):
     restored = pickle.loads(pickle.dumps(result))
     np.testing.assert_array_equal(restored.time, result.time)
     np.testing.assert_array_equal(restored.voltage_waveform("out"), result.voltage_waveform("out"))
+    assert len(result.branch_names) == 1
+    assert restored.branch_names == result.branch_names
+    branch = result.branch_names[0]
+    np.testing.assert_array_equal(restored.branch_current_waveform(branch), result.branch_current_waveform(branch))
+    np.testing.assert_allclose(result.branch_current_waveform(branch),
+                               -(result.voltage_waveform("in") - result.voltage_waveform("out")) / 1e3,
+                               atol=1e-12, rtol=1e-12)
+    assert any(signal.unit == "ampere" for signal in result.signals())
+
     for waveform in (result, restored):
         assert abs(waveform.dc("out") - 1.1e-4) < 1e-7
         assert abs(waveform.voltage_at("in", 460e-12) - 1.0) < 1e-10

@@ -260,18 +260,28 @@ fn run_pss_analysis_internal(
     }
 
     let mut waveforms: Vec<(String, Vec<Value>)> = Vec::new();
-    let node_names = &pss_result.result.node_names;
-    for (node_name, waveform) in node_names.iter().zip(&pss_result.result.waveforms) {
+    let result = &pss_result.result;
+    for (name, waveform, prefix) in result
+        .node_names
+        .iter()
+        .zip(&result.waveforms)
+        .filter(|(name, _)| name.as_str() != "0" && !name.eq_ignore_ascii_case("gnd"))
+        .map(|(name, waveform)| (name, waveform, "V"))
+        .chain(
+            result
+                .branch_names
+                .iter()
+                .zip(&result.branch_waveforms)
+                .map(|(name, waveform)| (name, waveform, "I")),
+        )
+    {
         ensure_not_aborted(abort)?;
-        if node_name == "0" || node_name.eq_ignore_ascii_case("gnd") {
-            continue;
-        }
         let mut values = Vec::with_capacity(waveform.values.len());
         for (sample_idx, sample) in waveform.values.iter().enumerate() {
             poll_periodically(abort, sample_idx)?;
             values.push(*sample);
         }
-        waveforms.push((format!("V({node_name})"), values));
+        waveforms.push((format!("{prefix}({name})"), values));
     }
     if waveforms.is_empty() {
         return Err(ServiceRunError::Failure(

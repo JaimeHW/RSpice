@@ -187,10 +187,23 @@ fn validate_pickled_pss_result(result: &rspice_core::analysis::PssResult) -> PyR
             "pickled PSS result contains non-finite values".to_string(),
         ));
     }
+    for names in [&result.node_names, &result.branch_names] {
+        let mut seen = std::collections::HashSet::with_capacity(names.len());
+        if names
+            .iter()
+            .any(|name| name.trim().is_empty() || !seen.insert(name.trim().to_ascii_uppercase()))
+        {
+            return Err(crate::errors::value_error(
+                "pickled PSS result contains an empty or duplicate waveform name",
+            ));
+        }
+    }
     if result.node_names.len() != result.waveforms.len()
+        || result.branch_names.len() != result.branch_waveforms.len()
         || result
             .waveforms
             .iter()
+            .chain(&result.branch_waveforms)
             .any(|waveform| waveform.values.len() != result.time.len())
     {
         return Err(crate::errors::value_error(
@@ -200,6 +213,7 @@ fn validate_pickled_pss_result(result: &rspice_core::analysis::PssResult) -> PyR
     if result
         .waveforms
         .iter()
+        .chain(&result.branch_waveforms)
         .flat_map(|waveform| &waveform.values)
         .any(|value| !value.is_finite())
     {
@@ -335,6 +349,29 @@ impl PyPssResult {
     #[getter]
     fn node_names(&self) -> Vec<String> {
         self.inner.node_names.clone()
+    }
+
+    #[getter]
+    fn branch_names(&self) -> Vec<String> {
+        self.inner.branch_names.clone()
+    }
+
+    /// Accepted MNA current samples, with the solver's branch polarity.
+    fn branch_current_waveform<'py>(
+        &self,
+        py: Python<'py>,
+        name: &str,
+    ) -> PyResult<Bound<'py, PyArray1<f64>>> {
+        let index = self
+            .inner
+            .branch_names
+            .iter()
+            .position(|branch| branch.eq_ignore_ascii_case(name))
+            .ok_or_else(|| crate::errors::value_error(format!("unknown PSS branch '{name}'")))?;
+        let waveform = self.inner.branch_waveforms.get(index).ok_or_else(|| {
+            crate::errors::value_error(format!("PSS branch '{name}' has no retained waveform"))
+        })?;
+        Ok(waveform.values.to_pyarray(py))
     }
 
     #[getter]
@@ -573,8 +610,10 @@ impl PyPssResult {
     ///
     /// The orbit group is the converged periodic solution; the diagnostics
     /// group is what the shooting run reported around it.
+    // Preserve positional compatibility with existing Python pickles.
+    #[allow(clippy::too_many_arguments)]
     #[staticmethod]
-    #[pyo3(signature = (orbit, time, waveforms, node_names, floquet_multipliers, diagnostics, floquet_contract=None))]
+    #[pyo3(signature = (orbit, time, waveforms, node_names, floquet_multipliers, diagnostics, floquet_contract=None, branch_state=None))]
     fn _unpickle(
         orbit: (f64, f64, usize, f64, bool),
         time: Vec<f64>,
@@ -583,6 +622,7 @@ impl PyPssResult {
         floquet_multipliers: Vec<(f64, f64)>,
         diagnostics: (usize, usize, f64, f64, bool),
         floquet_contract: Option<PssFloquetContractState>,
+        branch_state: Option<(Vec<String>, Vec<Vec<f64>>)>,
     ) -> PyResult<Self> {
         let (period, frequency, iterations, residual_norm, period_detected) = orbit;
         let (num_harmonics, run_iterations, run_residual, run_period, _legacy_is_stable) =
@@ -611,6 +651,7 @@ impl PyPssResult {
                     None,
                 ),
             };
+        let (branch_names, branch_waveforms) = branch_state.unwrap_or_default();
         let inner = rspice_core::analysis::PssResult {
             period,
             frequency,
@@ -622,6 +663,11 @@ impl PyPssResult {
                 .map(rspice_core::analysis::PeriodicWaveform::from_values)
                 .collect(),
             node_names,
+            branch_names,
+            branch_waveforms: branch_waveforms
+                .into_iter()
+                .map(rspice_core::analysis::PeriodicWaveform::from_values)
+                .collect(),
             period_detected,
             floquet_multipliers: complex_from_state(floquet_multipliers),
             floquet_evidence,
@@ -653,6 +699,7 @@ impl PyPssResult {
             Vec<(f64, f64)>,
             (usize, usize, f64, f64, bool),
             PssFloquetContractState,
+            (Vec<String>, Vec<Vec<f64>>),
         ),
     )> {
         Ok((
@@ -681,6 +728,14 @@ impl PyPssResult {
                     self.inner.is_stable(),
                 ),
                 self.floquet_contract_state()?,
+                (
+                    self.inner.branch_names.clone(),
+                    self.inner
+                        .branch_waveforms
+                        .iter()
+                        .map(|waveform| waveform.values.clone())
+                        .collect(),
+                ),
             ),
         ))
     }

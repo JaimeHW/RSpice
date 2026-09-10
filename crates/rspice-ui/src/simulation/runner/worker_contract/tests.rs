@@ -121,6 +121,8 @@ pub(super) fn retained_pss_operating_point() -> rspice_core::engine::PssOperatin
             waveform,
         )],
         node_names: vec!["out".to_owned()],
+        branch_names: Vec::new(),
+        branch_waveforms: Vec::new(),
         period_detected: false,
         floquet_multipliers: vec![num_complex::Complex64::new(0.9, 0.0)],
         floquet_evidence: rspice_core::analysis::FloquetSpectrumEvidence::Qualified { certificate },
@@ -299,7 +301,7 @@ pub(super) fn nondefault_op_config() -> crate::simulation::dialog::OpConfig {
 
 #[test]
 fn browser_worker_transfer_protocol_matches_rust_transport() {
-    assert_eq!(WORKER_RESPONSE_TRANSPORT_PROTOCOL, 19);
+    assert_eq!(WORKER_RESPONSE_TRANSPORT_PROTOCOL, 20);
     assert_eq!(WORKER_REQUEST_TRANSPORT_PROTOCOL, 9);
     let source = include_str!("../../../../web/simulation-worker.js");
     assert!(source.contains(&format!(

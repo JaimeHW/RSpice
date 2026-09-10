@@ -1653,6 +1653,8 @@ mod floquet_payload_conversion_tests {
                 waveform,
             )],
             node_names: vec!["out".to_owned()],
+            branch_names: Vec::new(),
+            branch_waveforms: Vec::new(),
             period_detected: false,
             floquet_multipliers: multipliers.clone(),
             floquet_evidence,

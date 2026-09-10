@@ -154,6 +154,8 @@ fn periodic_result() -> SimulationResult {
             values.clone(),
         )],
         node_names: vec!["out".to_owned()],
+        branch_names: Vec::new(),
+        branch_waveforms: Vec::new(),
         period_detected: false,
         floquet_multipliers: vec![num_complex::Complex64::new(0.9, 0.0)],
         floquet_evidence: rspice_core::analysis::FloquetSpectrumEvidence::Qualified { certificate },
@@ -953,6 +955,34 @@ fn authenticated_periodic_state_transfer_preserves_identity_and_rejects_tamper()
             .operating_point()
             .shooting_state_basis(),
         ["C:C1"]
+    );
+
+    let original = resolved.periodic_state().unwrap().operating_point();
+    let round_trip = restored.periodic_state().unwrap().operating_point();
+    assert_eq!(original.analysis().result.branch_names, ["V1"]);
+    assert_eq!(
+        round_trip.analysis().result.branch_names,
+        original.analysis().result.branch_names
+    );
+    assert_eq!(
+        round_trip.analysis().result.branch_waveforms,
+        original.analysis().result.branch_waveforms
+    );
+    let decoded: ResolvedExecutionDependenciesTransferMetadata =
+        serde_json::from_str(&metadata).unwrap();
+    let ExecutionArtifactPayloadTransferMetadata::PeriodicState(periodic) =
+        &decoded.artifacts[0].payload
+    else {
+        panic!("PSS metadata");
+    };
+    let mut branch_tamper = buffers.clone();
+    branch_tamper[periodic.branch_waveforms[0].values.buffer][0] += 0.5;
+    let error =
+        ResolvedExecutionDependencies::decode_transfer(&metadata, branch_tamper).unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("numerical payload does not match")
     );
 
     let mut state_tamper = buffers.clone();

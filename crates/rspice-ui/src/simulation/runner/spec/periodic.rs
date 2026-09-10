@@ -569,9 +569,10 @@ fn run_pss(
     for (name, values) in data.waveforms {
         super::ensure_not_aborted(abort)?;
         let waveform_time = clone_values_with_abort(&time, abort)?;
+        let unit = if name.starts_with("I(") { "A" } else { "V" };
         waveforms.insert(
             name.clone(),
-            WaveformData::new_time_domain(name, waveform_time, values),
+            WaveformData::new_time_domain_in_unit(name, waveform_time, values, unit),
         );
     }
 

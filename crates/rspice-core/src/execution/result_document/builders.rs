@@ -2717,6 +2717,12 @@ impl AnalysisResultDocument {
             &result.node_names,
             result.waveforms.len(),
         )?;
+        require_named_columns(
+            LOCATION,
+            "PSS branch currents",
+            &result.branch_names,
+            result.branch_waveforms.len(),
+        )?;
         let axis = ResultAxis::new(
             "time",
             "Time",
@@ -2726,25 +2732,35 @@ impl AnalysisResultDocument {
                 values: finite_axis(LOCATION, "time", &result.time)?,
             },
         )?;
-        let mut signals = Vec::with_capacity(result.waveforms.len());
-        for (name, waveform) in result.node_names.iter().zip(&result.waveforms) {
-            if waveform.values.len() != point_count {
-                return Err(source_error(
-                    LOCATION,
-                    format!(
-                        "periodic waveform '{name}' has {} samples for {point_count} times",
-                        waveform.values.len()
-                    ),
-                ));
+        let mut signals =
+            Vec::with_capacity(result.waveforms.len() + result.branch_waveforms.len());
+        for (names, waveforms, is_current) in [
+            (&result.node_names, &result.waveforms, false),
+            (&result.branch_names, &result.branch_waveforms, true),
+        ] {
+            for (name, waveform) in names.iter().zip(waveforms) {
+                if waveform.values.len() != point_count {
+                    return Err(source_error(
+                        LOCATION,
+                        format!(
+                            "periodic waveform '{name}' has {} samples for {point_count} times",
+                            waveform.values.len()
+                        ),
+                    ));
+                }
+                signals.push(ResultSignal::new(
+                    if is_current {
+                        current_descriptor(LOCATION, name, SignalValueType::Real, point_count)?
+                    } else {
+                        voltage_descriptor(LOCATION, name, SignalValueType::Real, point_count)?
+                    },
+                    None,
+                    SeriesAvailability::Available,
+                    SeriesValues::Real {
+                        samples: finite_samples(LOCATION, name, &waveform.values)?,
+                    },
+                )?);
             }
-            signals.push(ResultSignal::new(
-                voltage_descriptor(LOCATION, name, SignalValueType::Real, point_count)?,
-                None,
-                SeriesAvailability::Available,
-                SeriesValues::Real {
-                    samples: finite_samples(LOCATION, name, &waveform.values)?,
-                },
-            )?);
         }
 
         let scalars = vec![

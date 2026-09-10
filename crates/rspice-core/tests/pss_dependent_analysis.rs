@@ -129,3 +129,63 @@ fn dependent_basis_includes_the_carrier_outside_the_conversion_window() {
         assert!((transfer - expected).norm() < 2e-12);
     }
 }
+
+#[test]
+fn retained_pss_branch_currents_drive_flicker_including_zero_dc_resistance() {
+    for resistance in [1.0_f64, 0.0] {
+        let deck = Netlist::parse(&format!(
+            "Retained branch noise\nI1 0 input SIN(0 1 10)\nR2 input out 10\nR1 out 0 RM {resistance} AC=2\nC1 input 0 1u\n.model RM R(KF=1 AF=2 EF=1)\n.options device zeroresistancetol=2\n.end\n"
+        )).unwrap();
+        let engine = Engine::default();
+        let point = engine
+            .run_pss_operating_point_with_abort(
+                &deck,
+                PssConfig::new(1.0)
+                    .with_harmonics(2)
+                    .with_points_per_period(2048)
+                    .with_tstab(0.0),
+                &NoAbort,
+            )
+            .unwrap_or_else(|error| panic!("R={resistance}: {error}"));
+        let result = &point.analysis().result;
+        assert_eq!(result.branch_names, ["R1"]);
+        assert_eq!(result.branch_waveforms[0].values.len(), result.time.len());
+        let omega_c = std::f64::consts::TAU * 1e-6;
+        for (&time, &current) in result.time.iter().zip(&result.branch_waveforms[0].values) {
+            let angle = std::f64::consts::TAU * 10.0 * time;
+            let lag = 10.0 * omega_c * (10.0 + resistance);
+            let expected = (angle.sin() - lag * angle.cos()) / (1.0 + lag * lag);
+            assert!(
+                (current - expected).abs() < 1e-6,
+                "R={resistance}, t={time}: {current} vs {expected}"
+            );
+        }
+        let expected = (1.0 / 9.75 + 1.0 / 10.25) * (1.0 + (0.25 * omega_c * 10.0).powi(2))
+            / (1.0 + (10.0 * omega_c * (10.0 + resistance)).powi(2))
+            / (1.0 + (0.25 * omega_c * 12.0).powi(2));
+        for sidebands in [0, 8] {
+            let noise = engine
+                .run_pnoise_from_pss_with_abort(
+                    &deck,
+                    &[0.25],
+                    "out",
+                    None,
+                    None,
+                    sidebands,
+                    &point,
+                    &NoAbort,
+                )
+                .unwrap();
+            let actual = noise
+                .contributors
+                .iter()
+                .find(|(name, _)| name.eq_ignore_ascii_case("r1 flicker"))
+                .unwrap()
+                .1[0];
+            assert!(
+                (actual / expected - 1.0).abs() < 2e-9,
+                "R={resistance}, K={sidebands}: {actual} vs {expected}"
+            );
+        }
+    }
+}

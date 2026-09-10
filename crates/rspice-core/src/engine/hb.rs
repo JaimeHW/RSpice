@@ -935,6 +935,7 @@ impl Engine {
         operating_point: &super::PssOperatingPoint,
         config: &HbConfig,
         node_names: &[String],
+        branch_names: &[String],
         abort: &dyn AbortSignal,
     ) -> Result<HbSolverState, SimulationError> {
         use crate::analysis::fourier::{FourierError, FourierQuadrature};
@@ -959,12 +960,15 @@ impl Engine {
                 result.frequency, config.fundamental_freq
             )));
         }
-        if node_names.len() != result.waveforms.len() {
-            return Err(SimulationError::Circuit(format!(
-                "periodic operating point contains {} node waveforms for a {}-node dependent circuit",
-                result.waveforms.len(),
-                node_names.len()
-            )));
+        for (kind, count, expected) in [
+            ("node", result.waveforms.len(), node_names.len()),
+            ("branch", result.branch_waveforms.len(), branch_names.len()),
+        ] {
+            if count != expected {
+                return Err(SimulationError::Circuit(format!(
+                    "periodic operating point contains {count} {kind} waveforms for {expected} dependent-circuit {kind}s"
+                )));
+            }
         }
 
         let projection_error = |error| match error {
@@ -976,35 +980,60 @@ impl Engine {
         self.ensure_result_values(
             node_names
                 .len()
+                .saturating_add(branch_names.len())
                 .saturating_mul(config.num_harmonics.saturating_add(1))
                 .saturating_mul(2),
         )?;
         let mut state = HbSolverState::new(node_names.len(), config.num_harmonics);
-        for (target_index, target_name) in node_names.iter().enumerate() {
-            let source_index = result
-                .node_names
+        state
+            .try_prepare_mna_branches(branch_names.len(), config.num_harmonics)
+            .map_err(|error| {
+                SimulationError::Circuit(format!(
+                    "retained PSS branch projection allocation failed: {error}"
+                ))
+            })?;
+        for (kind, target_names, source_names, waveforms, spectra) in [
+            (
+                "node",
+                node_names,
+                &result.node_names,
+                &result.waveforms,
+                &mut state.x,
+            ),
+            (
+                "branch",
+                branch_names,
+                &result.branch_names,
+                &result.branch_waveforms,
+                &mut state.mna_branch_currents,
+            ),
+        ] {
+            let source_indices: std::collections::HashMap<_, _> = source_names
                 .iter()
-                .position(|source_name| source_name.eq_ignore_ascii_case(target_name))
-                .ok_or_else(|| {
-                    SimulationError::Circuit(format!(
-                        "periodic operating point has no waveform for dependent-circuit node '{target_name}'"
-                    ))
-                })?;
-            let waveform = &result.waveforms[source_index];
-            // Resampling onto the dependent collocation grid can miss an
-            // entire narrow source pulse present in the authenticated orbit.
-            let quadrature =
-                FourierQuadrature::new(&result.time, &waveform.values, analysis.period, abort)
-                    .map_err(projection_error)?;
-            for (harmonic, coefficient) in state.x[target_index].iter_mut().enumerate() {
-                let (magnitude, phase) = quadrature
-                    .component(harmonic as Value * result.frequency, harmonic, abort)
-                    .map_err(projection_error)?;
-                *coefficient = if harmonic == 0 {
-                    Complex64::new(magnitude, 0.0)
-                } else {
-                    Complex64::from_polar(0.5 * magnitude, phase.to_radians())
-                };
+                .enumerate()
+                .map(|(index, name)| (name.to_ascii_uppercase(), index))
+                .collect();
+            for (target_name, spectrum) in target_names.iter().zip(spectra) {
+                let source_index = source_indices.get(&target_name.to_ascii_uppercase())
+                    .copied().ok_or_else(|| SimulationError::Circuit(format!(
+                        "periodic operating point has no waveform for dependent-circuit {kind} '{target_name}'"
+                    )))?;
+                let waveform = &waveforms[source_index];
+                // Integrate the retained samples directly: resampling can miss
+                // an entire narrow source pulse on the dependent collocation grid.
+                let quadrature =
+                    FourierQuadrature::new(&result.time, &waveform.values, analysis.period, abort)
+                        .map_err(projection_error)?;
+                for (harmonic, coefficient) in spectrum.iter_mut().enumerate() {
+                    let (magnitude, phase) = quadrature
+                        .component(harmonic as Value * result.frequency, harmonic, abort)
+                        .map_err(projection_error)?;
+                    *coefficient = if harmonic == 0 {
+                        Complex64::new(magnitude, 0.0)
+                    } else {
+                        Complex64::from_polar(0.5 * magnitude, phase.to_radians())
+                    };
+                }
             }
         }
         state.iteration = analysis.iterations.max(1);
@@ -1741,6 +1770,7 @@ mod tests {
                     &point,
                     &HbConfig::new(frequency).with_harmonics(3),
                     &["IN".to_owned(), "OUT".to_owned()],
+                    &point.analysis().result.branch_names,
                     &NoAbort,
                 )
                 .unwrap();
@@ -1771,7 +1801,13 @@ mod tests {
                 .with_harmonics(3)
                 .with_collocation_points(collocation);
             let state = engine
-                .hb_state_from_pss_operating_point(&point, &config, &names, &NoAbort)
+                .hb_state_from_pss_operating_point(
+                    &point,
+                    &config,
+                    &names,
+                    &point.analysis().result.branch_names,
+                    &NoAbort,
+                )
                 .unwrap();
             for harmonic in 0..=3 {
                 let angle = std::f64::consts::PI * harmonic as Value;
@@ -1796,6 +1832,7 @@ mod tests {
                     &point,
                     &config,
                     &names,
+                    &point.analysis().result.branch_names,
                     &crate::abort_signal::CountingAbort::new(2)
                 ),
                 Err(SimulationError::Aborted)

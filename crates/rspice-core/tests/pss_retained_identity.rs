@@ -205,6 +205,28 @@ fn copied_pss_identity_cannot_authenticate_payload_or_basis_tamper() {
         );
     };
 
+    assert_eq!(point.analysis().result.branch_names, ["V1"]);
+    for mutation in 0..3 {
+        let mut analysis = point.analysis().clone();
+        match mutation {
+            0 => analysis.result.branch_waveforms[0].values[0] += 0.25,
+            1 => analysis.result.branch_names[0] = "Vother".to_owned(),
+            _ => {
+                analysis.result.branch_names.clear();
+                analysis.result.branch_waveforms.clear();
+            }
+        }
+        assert_payload_rejected(
+            reconstruct(
+                point.config().clone(),
+                analysis,
+                point.shooting_state_basis().to_vec(),
+                point.shooting_state().to_vec(),
+            ),
+            "branch current",
+        );
+    }
+
     let mut analysis = point.analysis().clone();
     analysis.result.waveforms[0].values[0] += 0.25;
     assert_payload_rejected(

@@ -1421,6 +1421,7 @@ pub(super) fn pss_operating_point_payload_bytes(
                 .result
                 .waveforms
                 .iter()
+                .chain(&analysis.result.branch_waveforms)
                 .map(|waveform| waveform.values.len())
                 .sum::<usize>(),
         )
@@ -1529,18 +1530,29 @@ pub(super) fn validate_pss_display_contract(
         .node_names
         .iter()
         .filter(|name| name.as_str() != "0" && !name.eq_ignore_ascii_case("gnd"))
-        .count();
+        .count()
+        + result.branch_names.len();
     if waveforms.len() != expected_count {
         return Err(SimulationError::InvalidConfig(format!(
             "PSS display contains {} waveforms, but its retained orbit requires {expected_count}",
             waveforms.len()
         )));
     }
-    for (name, periodic) in result.node_names.iter().zip(&result.waveforms) {
-        if name == "0" || name.eq_ignore_ascii_case("gnd") {
-            continue;
-        }
-        let display_name = format!("V({name})");
+    for (name, periodic, prefix, unit) in result
+        .node_names
+        .iter()
+        .zip(&result.waveforms)
+        .filter(|(name, _)| name.as_str() != "0" && !name.eq_ignore_ascii_case("gnd"))
+        .map(|(name, waveform)| (name, waveform, "V", "V"))
+        .chain(
+            result
+                .branch_names
+                .iter()
+                .zip(&result.branch_waveforms)
+                .map(|(name, waveform)| (name, waveform, "I", "A")),
+        )
+    {
+        let display_name = format!("{prefix}({name})");
         let display = waveforms.get(&display_name).ok_or_else(|| {
             SimulationError::InvalidConfig(format!(
                 "PSS display is missing retained-orbit waveform '{display_name}'"
@@ -1549,7 +1561,7 @@ pub(super) fn validate_pss_display_contract(
         if display.name != display_name
             || display.x_values.as_slice() != result.time.as_slice()
             || display.y_values.as_slice() != periodic.values.as_slice()
-            || display.y_unit != "V"
+            || display.y_unit != unit
             || display.is_complex
             || display.y_imag.is_some()
         {
@@ -1567,15 +1579,31 @@ pub(super) fn simulation_result_from_worker_pss(
 ) -> SimulationResult {
     let result = &operating_point.analysis().result;
     let time = result.time.clone();
-    let mut waveforms = HashMap::with_capacity(result.waveforms.len());
-    for (name, periodic) in result.node_names.iter().zip(&result.waveforms) {
-        if name == "0" || name.eq_ignore_ascii_case("gnd") {
-            continue;
-        }
-        let display_name = format!("V({name})");
+    let mut waveforms =
+        HashMap::with_capacity(result.waveforms.len() + result.branch_waveforms.len());
+    for (name, periodic, prefix, unit) in result
+        .node_names
+        .iter()
+        .zip(&result.waveforms)
+        .filter(|(name, _)| name.as_str() != "0" && !name.eq_ignore_ascii_case("gnd"))
+        .map(|(name, waveform)| (name, waveform, "V", "V"))
+        .chain(
+            result
+                .branch_names
+                .iter()
+                .zip(&result.branch_waveforms)
+                .map(|(name, waveform)| (name, waveform, "I", "A")),
+        )
+    {
+        let display_name = format!("{prefix}({name})");
         waveforms.insert(
             display_name.clone(),
-            WaveformData::new_time_domain(display_name, time.clone(), periodic.values.clone()),
+            WaveformData::new_time_domain_in_unit(
+                display_name,
+                time.clone(),
+                periodic.values.clone(),
+                unit,
+            ),
         );
     }
     SimulationResult::Transient {

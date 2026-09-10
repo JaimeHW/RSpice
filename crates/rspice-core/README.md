@@ -482,7 +482,12 @@ defaults still use the original `POINTS`. `MAXITER` applies to each grid solve,
 while the result reports total Newton corrections across all grids. Point and
 memory limits also apply to refinement, and cancellation remains available.
 Retained PSS operating points from earlier producer versions must be regenerated
-before dependent numerical reuse; the current producer identity is version 29.
+before dependent numerical reuse; the current producer identity is version 81.
+The retained orbit includes canonical MNA branch-current waveforms on the same
+time grid as node voltages. Both identities and samples are authenticated and
+projected into dependent analyses; omitted branch currents are never inferred
+to be zero. Current traces also survive result documents and worker, artifact,
+and Python pickle transport.
 This convergence check supplements the shooting residual, which measures closure
 of a discrete period map. It is not a proof of resolution for all nonlinear
 expressions and devices; independent waveform and

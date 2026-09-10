@@ -1390,3 +1390,19 @@ class TestRfProcessPool:
         assert result.thd_percent("out") == pytest.approx(
             local.thd_percent("out"), rel=1e-9
         )
+
+
+@pytest.mark.parametrize("branches, currents", [
+    (["V1"], [[0.0]]),
+    (["V1"], [[0.0, float("nan"), 0.0]]),
+    (["V1", "v1"], [[0.0] * 3, [0.0] * 3]),
+    ([""], [[0.0] * 3]),
+    ([], [[0.0] * 3]),
+])
+def test_pss_pickle_rejects_malformed_branch_currents(branches, currents):
+    with pytest.raises(ValueError):
+        rspice.PssResult._unpickle(
+            (1.0, 1.0, 1, 0.0, False), [0.0, 0.5, 1.0],
+            [[0.0] * 3], ["out"], [], (1, 1, 0.0, 1.0, True),
+            branch_state=(branches, currents),
+        )

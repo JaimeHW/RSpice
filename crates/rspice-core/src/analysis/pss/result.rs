@@ -42,6 +42,14 @@ pub struct PssResult {
     /// Node names (maps waveform index to node name)
     pub node_names: Vec<String>,
 
+    /// Canonical MNA branch names, in the same order as `branch_waveforms`.
+    #[cfg_attr(feature = "veriloga", serde(default))]
+    pub branch_names: Vec<String>,
+
+    /// Accepted branch-current samples on `time`, preserving solver polarity.
+    #[cfg_attr(feature = "veriloga", serde(default))]
+    pub branch_waveforms: Vec<PeriodicWaveform>,
+
     /// Whether period was auto-detected (autonomous circuit)
     pub period_detected: bool,
 
@@ -77,6 +85,8 @@ impl PssResult {
                 .map(|_| PeriodicWaveform::new(num_points))
                 .collect(),
             node_names: (1..=num_nodes).map(|i| format!("N{:03}", i)).collect(),
+            branch_names: Vec::new(),
+            branch_waveforms: Vec::new(),
             period_detected: false,
             floquet_multipliers: Vec::new(),
             floquet_evidence: FloquetSpectrumEvidence::NotComputed,

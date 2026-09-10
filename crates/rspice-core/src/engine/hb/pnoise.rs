@@ -668,9 +668,13 @@ impl Engine {
         let solve_operating_point = operating_point.is_none();
         let mut state = if let Some(operating_point) = operating_point {
             match operating_point {
-                PnoiseOperatingPoint::Shooting(point) => {
-                    self.hb_state_from_pss_operating_point(point, &hb_config, &node_names, abort)?
-                }
+                PnoiseOperatingPoint::Shooting(point) => self.hb_state_from_pss_operating_point(
+                    point,
+                    &hb_config,
+                    &node_names,
+                    &branch_names,
+                    abort,
+                )?,
                 PnoiseOperatingPoint::HarmonicBalance(point) => {
                     point.to_solver_state(&node_names, &branch_names)?
                 }

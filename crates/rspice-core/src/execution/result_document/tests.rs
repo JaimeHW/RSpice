@@ -390,6 +390,8 @@ fn pss_result() -> PssResult {
     result.time = vec![0.0, 5.0e-7, 1.0e-6];
     result.node_names = vec!["out".to_owned()];
     result.waveforms = vec![PeriodicWaveform::from_values(vec![0.0, 1.0, 0.0])];
+    result.branch_names = vec!["V1".to_owned()];
+    result.branch_waveforms = vec![PeriodicWaveform::from_values(vec![0.0, -1e-3, 0.0])];
     result.iterations = 4;
     result.residual_norm = 1.0e-9;
     result
@@ -1289,6 +1291,21 @@ fn monte_carlo_pss_pac_and_pnoise_documents_keep_their_typed_payloads() {
 
     let pss = document_for(AnalysisResultKind::Pss);
     assert_eq!(pss.axes()[0].unit(), &SignalUnit::Second);
+    assert_eq!(
+        samples_of(&pss, "i(v1)"),
+        SeriesValues::Real {
+            samples: vec![Some(0.0), Some(-1e-3), Some(0.0)],
+        }
+    );
+    assert_eq!(
+        pss.signals()
+            .iter()
+            .find(|signal| signal.descriptor().canonical_name() == "i(v1)")
+            .unwrap()
+            .descriptor()
+            .unit(),
+        &SignalUnit::Ampere
+    );
     assert_eq!(
         scalar_of(&pss, "period").value(),
         &ScalarValue::Real {

@@ -296,7 +296,8 @@ pub(super) fn validate_worker_response_before_transport(
         .result
         .waveforms
         .len()
-        .checked_add(analysis.monodromy.len())
+        .checked_add(analysis.result.branch_waveforms.len())
+        .and_then(|count| count.checked_add(analysis.monodromy.len()))
         .and_then(|count| count.checked_add(6))
         .ok_or_else(|| "retained PSS response buffer count overflows this platform".to_owned())?;
     if transfer_buffer_count > MAX_WORKER_TRANSFER_BUFFERS {
@@ -305,7 +306,12 @@ pub(super) fn validate_worker_response_before_transport(
         ));
     }
     let mut numeric_values = analysis.result.time.len();
-    for waveform in &analysis.result.waveforms {
+    for waveform in analysis
+        .result
+        .waveforms
+        .iter()
+        .chain(&analysis.result.branch_waveforms)
+    {
         numeric_values = numeric_values
             .checked_add(waveform.values.len())
             .ok_or_else(|| "retained PSS response size overflows this platform".to_owned())?;
@@ -662,6 +668,70 @@ pub(super) fn worker_transport_extracts_every_retained_pss_numeric_array_from_me
 
 #[cfg(test)]
 #[test]
+fn worker_pss_branch_currents_round_trip_and_reject_tamper() {
+    use rspice_core::{Engine, Netlist};
+    let deck = Netlist::parse(
+        "PSS worker currents\nV1 in 0 1\nR1 in out 1k\nR2 out 0 1k\nC1 out 0 1p\n.end\n",
+    )
+    .unwrap();
+    let point = Engine::default()
+        .run_pss_operating_point_with_abort(
+            &deck,
+            rspice_core::analysis::PssConfig::new(1e6)
+                .with_points_per_period(32)
+                .with_tstab_periods(0),
+            &rspice_core::abort_signal::NoAbort,
+        )
+        .unwrap();
+    let response = WorkerResponse {
+        id: 178,
+        outcome: WorkerOutcome::Success(Box::new(WorkerSimulationResult::Pss {
+            measurements: Vec::new(),
+            operating_point: point.clone(),
+        })),
+    };
+    let transport = WorkerResponseTransport::from_response(response.clone()).unwrap();
+    let WorkerOutcomeTransport::Success(WorkerSimulationResultTransport::Pss {
+        operating_point,
+        ..
+    }) = &transport.response.outcome
+    else {
+        panic!("PSS transport");
+    };
+    assert_eq!(operating_point.result_branch_waveforms[0].node_name, "V1");
+    let WorkerF64Series::Buffer { buffer, .. } = operating_point.result_branch_waveforms[0].values
+    else {
+        panic!("branch samples must be transferable");
+    };
+    assert_eq!(
+        transport.buffers[buffer],
+        point.analysis().result.branch_waveforms[0].values
+    );
+    assert_eq!(transport.clone().into_response().unwrap(), response);
+    let display = simulation_result_from_worker_pss(Vec::new(), point);
+    let SimulationResult::Transient {
+        waveforms,
+        periodic_state: Some(point),
+        time,
+        ..
+    } = display
+    else {
+        panic!("PSS display");
+    };
+    assert_eq!(waveforms["I(V1)"].y_unit, "A");
+    validate_pss_display_contract(&time, &waveforms, &point).unwrap();
+    let mut tampered = transport;
+    tampered.buffers[buffer][0] += 1.0;
+    assert!(
+        tampered
+            .into_response()
+            .unwrap_err()
+            .contains("numerical payload does not match")
+    );
+}
+
+#[cfg(test)]
+#[test]
 pub(super) fn worker_transport_extracts_and_authenticates_dc_op_mna_solution() {
     let configuration = tests::nondefault_op_config();
     let response = WorkerResponse {
@@ -768,6 +838,8 @@ pub(crate) struct WorkerPssOperatingPointTransport {
     result_residual_norm: f64,
     result_time: WorkerF64Series,
     result_waveforms: Vec<WorkerPeriodicWaveformTransport>,
+    #[serde(default)]
+    result_branch_waveforms: Vec<WorkerPeriodicWaveformTransport>,
     result_period_detected: bool,
     result_floquet_real: WorkerF64Series,
     result_floquet_imag: WorkerF64Series,
@@ -841,6 +913,16 @@ impl WorkerPssOperatingPointTransport {
                 values: WorkerF64Series::from_vec(waveform.values.clone(), buffers),
             })
             .collect();
+        let result_branch_waveforms = result
+            .branch_names
+            .iter()
+            .cloned()
+            .zip(result.branch_waveforms.iter())
+            .map(|(node_name, waveform)| WorkerPeriodicWaveformTransport {
+                node_name,
+                values: WorkerF64Series::from_vec(waveform.values.clone(), buffers),
+            })
+            .collect();
         let (result_floquet_real, result_floquet_imag): (Vec<_>, Vec<_>) = result
             .floquet_multipliers
             .iter()
@@ -860,6 +942,7 @@ impl WorkerPssOperatingPointTransport {
             result_residual_norm: result.residual_norm,
             result_time: WorkerF64Series::from_vec(result.time.clone(), buffers),
             result_waveforms,
+            result_branch_waveforms,
             result_period_detected: result.period_detected,
             result_floquet_real: WorkerF64Series::from_vec(result_floquet_real, buffers),
             result_floquet_imag: WorkerF64Series::from_vec(result_floquet_imag, buffers),
@@ -892,7 +975,10 @@ impl WorkerPssOperatingPointTransport {
         self,
         buffers: &[Vec<f64>],
     ) -> Result<rspice_core::engine::PssOperatingPoint, String> {
-        if self.result_waveforms.len() > 65_536 || self.analysis_monodromy.len() > 65_536 {
+        if self.result_waveforms.len() > 65_536
+            || self.result_branch_waveforms.len() > 65_536
+            || self.analysis_monodromy.len() > 65_536
+        {
             return Err("retained PSS worker metadata exceeds structural limits".to_owned());
         }
         let mut node_names = Vec::with_capacity(self.result_waveforms.len());
@@ -900,6 +986,14 @@ impl WorkerPssOperatingPointTransport {
         for waveform in self.result_waveforms {
             node_names.push(waveform.node_name);
             waveforms.push(rspice_core::analysis::pss::PeriodicWaveform::from_values(
+                waveform.values.into_vec(buffers)?,
+            ));
+        }
+        let mut branch_names = Vec::with_capacity(self.result_branch_waveforms.len());
+        let mut branch_waveforms = Vec::with_capacity(self.result_branch_waveforms.len());
+        for waveform in self.result_branch_waveforms {
+            branch_names.push(waveform.node_name);
+            branch_waveforms.push(rspice_core::analysis::pss::PeriodicWaveform::from_values(
                 waveform.values.into_vec(buffers)?,
             ));
         }
@@ -927,6 +1021,8 @@ impl WorkerPssOperatingPointTransport {
             time: self.result_time.into_vec(buffers)?,
             waveforms,
             node_names,
+            branch_names,
+            branch_waveforms,
             period_detected: self.result_period_detected,
             floquet_multipliers: result_floquet_multipliers,
             floquet_evidence: self.result_floquet_evidence,

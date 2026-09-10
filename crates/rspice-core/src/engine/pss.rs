@@ -111,7 +111,7 @@ impl PssAcceptedStepHistory {
 const PSS_FD_STEP: Value = 1e-8;
 const PSS_KRYLOV_STATE_THRESHOLD: usize = 12;
 const PSS_KRYLOV_REL_TOL: Value = 1e-9;
-const PSS_OPERATING_POINT_IDENTITY_VERSION: u32 = 80;
+const PSS_OPERATING_POINT_IDENTITY_VERSION: u32 = 81;
 
 fn pss_identity_field(hasher: &mut blake3::Hasher, name: &str, bytes: &[u8]) {
     hasher.update(&(name.len() as u64).to_le_bytes());
@@ -308,34 +308,41 @@ fn pss_retained_state_identity(
             &value.to_bits().to_le_bytes(),
         );
     }
-    pss_identity_field(
-        &mut hasher,
-        "result.waveform.count",
-        &(analysis.result.waveforms.len() as u64).to_le_bytes(),
-    );
-    for (index, (name, waveform)) in analysis
-        .result
-        .node_names
-        .iter()
-        .zip(&analysis.result.waveforms)
-        .enumerate()
-    {
+    for (kind, names, waveforms) in [
+        (
+            "node",
+            &analysis.result.node_names,
+            &analysis.result.waveforms,
+        ),
+        (
+            "branch",
+            &analysis.result.branch_names,
+            &analysis.result.branch_waveforms,
+        ),
+    ] {
         pss_identity_field(
             &mut hasher,
-            &format!("result.waveform[{index}].node"),
-            name.as_bytes(),
+            &format!("result.{kind}.count"),
+            &(waveforms.len() as u64).to_le_bytes(),
         );
-        pss_identity_field(
-            &mut hasher,
-            &format!("result.waveform[{index}].count"),
-            &(waveform.values.len() as u64).to_le_bytes(),
-        );
-        for (sample, value) in waveform.values.iter().enumerate() {
+        for (index, (name, waveform)) in names.iter().zip(waveforms).enumerate() {
             pss_identity_field(
                 &mut hasher,
-                &format!("result.waveform[{index}].value[{sample}]"),
-                &value.to_bits().to_le_bytes(),
+                &format!("result.{kind}[{index}].name"),
+                name.as_bytes(),
             );
+            pss_identity_field(
+                &mut hasher,
+                &format!("result.{kind}[{index}].count"),
+                &(waveform.values.len() as u64).to_le_bytes(),
+            );
+            for (sample, value) in waveform.values.iter().enumerate() {
+                pss_identity_field(
+                    &mut hasher,
+                    &format!("result.{kind}[{index}].value[{sample}]"),
+                    &value.to_bits().to_le_bytes(),
+                );
+            }
         }
     }
     pss_identity_field(
@@ -1234,6 +1241,7 @@ impl PssOperatingPoint {
         if analysis.result.time.len() < 2
             || analysis.result.waveforms.is_empty()
             || analysis.result.node_names.len() != analysis.result.waveforms.len()
+            || analysis.result.branch_names.len() != analysis.result.branch_waveforms.len()
         {
             return Err(SimulationError::Circuit(
                 "retained PSS operating point has an incomplete periodic orbit".to_owned(),
@@ -1297,14 +1305,18 @@ impl PssOperatingPoint {
                     .to_owned(),
             ));
         }
-        let mut normalized_node_names =
-            std::collections::HashSet::with_capacity(analysis.result.node_names.len());
-        for node_name in &analysis.result.node_names {
-            let normalized = node_name.trim().to_ascii_uppercase();
-            if normalized.is_empty() || !normalized_node_names.insert(normalized) {
-                return Err(SimulationError::Circuit(
-                    "retained PSS operating point has an empty or duplicate node name".to_owned(),
-                ));
+        for (kind, names) in [
+            ("node", &analysis.result.node_names),
+            ("branch", &analysis.result.branch_names),
+        ] {
+            let mut normalized_names = std::collections::HashSet::with_capacity(names.len());
+            for name in names {
+                let normalized = name.trim().to_ascii_uppercase();
+                if normalized.is_empty() || !normalized_names.insert(normalized) {
+                    return Err(SimulationError::Circuit(format!(
+                        "retained PSS operating point has an empty or duplicate {kind} name"
+                    )));
+                }
             }
         }
         if analysis.result.time.iter().any(|value| !value.is_finite())
@@ -1346,10 +1358,16 @@ impl PssOperatingPoint {
                     .to_owned(),
             ));
         }
-        if analysis.result.waveforms.iter().any(|waveform| {
-            waveform.values.len() != sample_count
-                || waveform.values.iter().any(|value| !value.is_finite())
-        }) {
+        if analysis
+            .result
+            .waveforms
+            .iter()
+            .chain(&analysis.result.branch_waveforms)
+            .any(|waveform| {
+                waveform.values.len() != sample_count
+                    || waveform.values.iter().any(|value| !value.is_finite())
+            })
+        {
             return Err(SimulationError::Circuit(
                 "retained PSS operating point has an invalid waveform payload".to_owned(),
             ));
@@ -4450,6 +4468,13 @@ impl Engine {
         result.iterations = iterations;
         result.residual_norm = residual_norm;
         result.node_names = waveform.node_names.clone();
+        result.branch_names = waveform.branch_names.clone();
+        result.branch_waveforms = waveform
+            .branch_currents
+            .iter()
+            .cloned()
+            .map(PeriodicWaveform::from_values)
+            .collect();
         result.period_detected = period_detected;
 
         for (i, wf) in result.waveforms.iter_mut().enumerate() {
@@ -4683,6 +4708,41 @@ mod tests {
         }
     }
 
+    #[test]
+    fn retained_pss_validates_branch_waveform_shape_values_and_names() {
+        let (config, mut analysis, state) = retained_parts();
+        analysis.result.branch_names = vec!["V1".to_owned()];
+        analysis.result.branch_waveforms = vec![PeriodicWaveform::from_values(vec![
+            1.0;
+            analysis
+                .result
+                .time
+                .len()
+        ])];
+        PssOperatingPoint::try_from_parts(config.clone(), analysis.clone(), state.clone()).unwrap();
+        for mutation in 0..5 {
+            let mut invalid = analysis.clone();
+            match mutation {
+                0 => {
+                    invalid.result.branch_waveforms[0].values.pop();
+                }
+                1 => invalid.result.branch_waveforms[0].values[0] = Value::NAN,
+                2 => invalid.result.branch_names[0] = " ".to_owned(),
+                3 => {
+                    invalid.result.branch_names.push("v1".to_owned());
+                    invalid
+                        .result
+                        .branch_waveforms
+                        .push(invalid.result.branch_waveforms[0].clone());
+                }
+                _ => invalid.result.branch_names.clear(),
+            }
+            assert!(
+                PssOperatingPoint::try_from_parts(config.clone(), invalid, state.clone()).is_err()
+            );
+        }
+    }
+
     fn retained_parts() -> (PssConfig, PssAnalysisResult, Vec<Value>) {
         let config = PssConfig::new(1.0)
             .with_harmonics(4)
@@ -4702,6 +4762,8 @@ mod tests {
             time,
             waveforms: vec![PeriodicWaveform::from_values(waveform)],
             node_names: vec!["out".to_owned()],
+            branch_names: Vec::new(),
+            branch_waveforms: Vec::new(),
             period_detected: false,
             floquet_multipliers: Vec::new(),
             floquet_evidence: FloquetSpectrumEvidence::NoDynamicModes,

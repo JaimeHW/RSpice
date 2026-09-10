@@ -482,7 +482,12 @@ impl PeriodicStateArtifact {
         )?;
 
         let mut value_count = analysis.result.time.len();
-        for waveform in &analysis.result.waveforms {
+        for waveform in analysis
+            .result
+            .waveforms
+            .iter()
+            .chain(&analysis.result.branch_waveforms)
+        {
             value_count = value_count
                 .checked_add(waveform.values.len())
                 .ok_or_else(|| {
@@ -524,7 +529,7 @@ impl PeriodicStateArtifact {
         let result = &analysis.result;
         let mut writer =
             CanonicalWriter::new(if self.operating_point.producer_identity().is_some() {
-                "rspice.periodic-state-artifact/v3"
+                "rspice.periodic-state-artifact/v4"
             } else {
                 "rspice.periodic-state-artifact/v2"
             });
@@ -575,6 +580,17 @@ impl PeriodicStateArtifact {
             writer.sequence(waveform.values.len());
             for value in &waveform.values {
                 writer.f64(*value);
+            }
+        }
+        if self.operating_point.producer_identity().is_some() || !result.branch_waveforms.is_empty()
+        {
+            writer.sequence(result.branch_names.len());
+            for (name, waveform) in result.branch_names.iter().zip(&result.branch_waveforms) {
+                writer.string(name);
+                writer.sequence(waveform.values.len());
+                for value in &waveform.values {
+                    writer.f64(*value);
+                }
             }
         }
         writer.bool(result.period_detected);
@@ -1447,6 +1463,15 @@ impl ResolvedExecutionDependencies {
                                 values: push_transfer_slice(&mut buffers, &waveform.values),
                             })
                             .collect();
+                        let branch_waveforms = result
+                            .branch_names
+                            .iter()
+                            .zip(&result.branch_waveforms)
+                            .map(|(node_name, waveform)| PeriodicWaveformTransferMetadata {
+                                node_name: node_name.clone(),
+                                values: push_transfer_slice(&mut buffers, &waveform.values),
+                            })
+                            .collect();
                         let result_floquet_real =
                             push_transfer_slice(&mut buffers, &periodic.result_floquet_real);
                         let result_floquet_imag =
@@ -1500,6 +1525,7 @@ impl ResolvedExecutionDependencies {
                                 result_residual_norm: result.residual_norm,
                                 time,
                                 waveforms,
+                                branch_waveforms,
                                 period_detected: result.period_detected,
                                 result_floquet_real,
                                 result_floquet_imag,
@@ -1692,6 +1718,16 @@ impl ResolvedExecutionDependencies {
                                 ),
                             );
                         }
+                        let mut branch_names = Vec::with_capacity(metadata.branch_waveforms.len());
+                        let mut branch_waveforms = Vec::with_capacity(metadata.branch_waveforms.len());
+                        for waveform in metadata.branch_waveforms {
+                            branch_names.push(waveform.node_name);
+                            branch_waveforms.push(
+                                rspice_core::analysis::pss::PeriodicWaveform::from_values(
+                                    take_transfer_buffer(&mut buffers, waveform.values)?,
+                                ),
+                            );
+                        }
                         let result_floquet_real = take_transfer_buffer(
                             &mut buffers,
                             metadata.result_floquet_real,
@@ -1733,6 +1769,8 @@ impl ResolvedExecutionDependencies {
                             time,
                             waveforms,
                             node_names,
+                            branch_names,
+                            branch_waveforms,
                             period_detected: metadata.period_detected,
                             floquet_multipliers: result_floquet_multipliers,
                             floquet_evidence: metadata.floquet_evidence.clone(),
@@ -2014,6 +2052,8 @@ struct PeriodicStateTransferMetadata {
     result_residual_norm: f64,
     time: TransferBufferRef,
     waveforms: Vec<PeriodicWaveformTransferMetadata>,
+    #[serde(default)]
+    branch_waveforms: Vec<PeriodicWaveformTransferMetadata>,
     period_detected: bool,
     result_floquet_real: TransferBufferRef,
     result_floquet_imag: TransferBufferRef,
