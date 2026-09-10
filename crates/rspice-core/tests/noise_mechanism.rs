@@ -322,3 +322,56 @@ fn classic_mos_signed_noise_reaches_output_and_port_analyses() {
         }
     }
 }
+
+#[test]
+fn extreme_mos_flicker_power_reaches_output_and_port_analyses() {
+    use rspice_core::analysis::NoiseContributionProbe;
+    let mut config = SimulationConfig::default();
+    config.convergence_config.gmin_target = 0.0;
+    config.convergence_config.junction_gmin_target = 0.0;
+    let engine = Engine::new(config);
+    for (kind, p) in [("NMOS", 1.0), ("PMOS", -1.0)] {
+        // Independent 100-digit evaluation of the square-law Id=16 uA
+        // and Cox=3.9*epsilon0/20 nm, with five parallel instances at 1 kHz.
+        for (kf, af, expected) in [
+            (1e-260, -80.0, 1.355_772_196_661_055_7e136),
+            (1e280, 80.0, 6.185_630_138_289_223e-92),
+        ] {
+            let deck = |port| {
+                let load = if port {
+                    format!("VD d 0 {}", p * 2.0)
+                } else {
+                    format!("VDD supply 0 {}\nRL supply d 1k", p * 3.0)
+                };
+                Netlist::parse(&format!(
+                    "Extreme MOS noise\n{load}\nVIN g 0 DC {} AC 1\nM1 d g 0 0 mm W=2u L=1u M=5\n.model mm {kind}(VTO={p} KP=100u TOX=20n IS=0 KF={kf} AF={af} NLEV=0)\n.options GMIN=0 RELTOL=1e-9 ABSTOL=1e-14 VNTOL=1e-11\n.end\n", p*1.4)).unwrap()
+            };
+            let result = engine
+                .run_noise_named_with_input_source(
+                    &deck(false),
+                    "d",
+                    None,
+                    "VIN",
+                    &[1000.0],
+                    300.15,
+                )
+                .unwrap();
+            let density = result[0]
+                .contribution(&NoiseContributionProbe::parse("DNO(M1,FN)").unwrap())
+                .unwrap();
+            // Lambda=0: the 1 kohm load supplies an exact 1e6 V^2/A^2 gain.
+            assert!(
+                (density / 1e6 - expected).abs() < expected * 5e-11,
+                "{kind} AF={af}: output PSD {density:e}, expected source {expected:e}"
+            );
+            if af < 0.0 {
+                let port = engine
+                    .run_port_noise_correlation(&deck(true), &["VD".into()], &[1000.0], 300.15)
+                    .unwrap();
+                // Here flicker is more than 150 decades above thermal noise.
+                let density = port[0].current_correlation[0][0].re;
+                assert!((density - expected).abs() < expected * 5e-11);
+            }
+        }
+    }
+}

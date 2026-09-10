@@ -360,6 +360,50 @@ mod wasm_tests {
     }
 
     #[wasm_bindgen_test]
+    fn extreme_flicker_density_and_mos_port_noise_in_wasm() {
+        use rspice_core::analysis::NoiseSource;
+        for (kf, current, af, frequency, ef, expected) in [
+            (1e-200, 1e-38, -10.0, 1.0, 1.0, 1e180),
+            (1e200, 1e-200, 2.0, 1.0, 1.0, 1e-200),
+            (1e-200, 1e200, 2.0, 1.0, 1.0, 1e200),
+            (1.0, 1e200, 2.0, 1e200, 2.0, 1.0),
+            (1e-200, 1e-200, 1.0, 1e-200, 1.0, 1e-200),
+            (1e100, 1e-160, 2.0, 1.0, 1.0, 1e-220),
+        ] {
+            let source = NoiseSource::flicker_with_frequency_exponent(
+                "range".into(),
+                1,
+                0,
+                kf,
+                af,
+                ef,
+                current,
+            );
+            let density = source.spectral_density(frequency, 300.15);
+            assert!((density - expected).abs() < expected * 3e-13);
+        }
+        for (kind, p) in [("NMOS", 1.0), ("PMOS", -1.0)] {
+            let netlist = rspice_core::Netlist::parse(&format!(
+                "Extreme MOS noise in WASM\nVD d 0 {}\nVG g 0 {}\nM1 d g 0 0 mm W=2u L=1u M=5\n.model mm {kind}(VTO={p} KP=100u TOX=20n IS=0 KF=1e-260 AF=-80 NLEV=0)\n.options GMIN=0\n.end\n", p*2.0, p*1.4)).unwrap();
+            let mut config = rspice_core::engine::SimulationConfig::default();
+            config.convergence_config.gmin_target = 0.0;
+            config.convergence_config.junction_gmin_target = 0.0;
+            let port = rspice_core::Engine::new(config)
+                .run_port_noise_correlation_with_abort(
+                    &netlist,
+                    &["VD".into()],
+                    &[1000.0],
+                    300.15,
+                    &rspice_core::abort_signal::NoAbort,
+                )
+                .unwrap();
+            let expected = 1.355_772_196_661_055_7e136;
+            let density = port[0].current_correlation[0][0].re;
+            assert!((density - expected).abs() < expected * 5e-11);
+        }
+    }
+
+    #[wasm_bindgen_test]
     fn classic_mos_signed_flicker_and_xyce_law_in_wasm() {
         use rspice_core::engine::{SimulationConfig, SpiceDialect};
         let abort = rspice_core::abort_signal::NoAbort;
