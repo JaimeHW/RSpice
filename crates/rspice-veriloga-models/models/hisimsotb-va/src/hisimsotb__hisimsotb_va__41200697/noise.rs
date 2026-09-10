@@ -16429,14 +16429,13 @@ impl Instance {
 		let FYI=1f64;
 		let FYJ=1f64;
 		ctx.check_noise_evaluation()?;
-		let omega = core::f64::consts::TAU * frequency_hz;
 		let process_0_active = H != 0.0;
 		let process_0_psd = (DFO).abs();
 		if !process_0_psd.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 0, quantity: "psd", value: process_0_psd }); }
 		let process_0_exponent: Option<f64> = Some(DFP);
 		if let Some(value) = process_0_exponent { if !value.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 0, quantity: "exponent", value }); } }
 		let process_0_table = [];
-		let process_0_gain_0 = GeneratedNoiseComplex { re: (FYC) * -1.0 * self.multiplicity.sqrt(), im: omega * (0.0) * -1.0 * self.multiplicity.sqrt() };
+		let process_0_gain_0 = GeneratedNoiseComplex::scaled_transfer(FYC, 0.0, frequency_hz, -1.0 * self.multiplicity.sqrt());
 		if !process_0_gain_0.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFiniteGain { process: 0, injection: 0, re: process_0_gain_0.re, im: process_0_gain_0.im }); }
 		let process_0_injections = [GeneratedNoiseInjectionEvaluation { descriptor: 0, gain: process_0_gain_0 }];
 		if !visitor.visit_process(0, GeneratedNoiseProcessEvaluationRef { active: process_0_active, psd: process_0_psd, exponent: process_0_exponent, table_operands: &process_0_table, injections: &process_0_injections }) { return Ok(()); }
@@ -16446,7 +16445,7 @@ impl Instance {
 		let process_1_exponent: Option<f64> = None;
 		if let Some(value) = process_1_exponent { if !value.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 1, quantity: "exponent", value }); } }
 		let process_1_table = [];
-		let process_1_gain_0 = GeneratedNoiseComplex { re: (FYD) * -1.0 * self.multiplicity.sqrt(), im: omega * (0.0) * -1.0 * self.multiplicity.sqrt() };
+		let process_1_gain_0 = GeneratedNoiseComplex::scaled_transfer(FYD, 0.0, frequency_hz, -1.0 * self.multiplicity.sqrt());
 		if !process_1_gain_0.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFiniteGain { process: 1, injection: 0, re: process_1_gain_0.re, im: process_1_gain_0.im }); }
 		let process_1_injections = [GeneratedNoiseInjectionEvaluation { descriptor: 1, gain: process_1_gain_0 }];
 		if !visitor.visit_process(1, GeneratedNoiseProcessEvaluationRef { active: process_1_active, psd: process_1_psd, exponent: process_1_exponent, table_operands: &process_1_table, injections: &process_1_injections }) { return Ok(()); }
@@ -16456,7 +16455,7 @@ impl Instance {
 		let process_2_exponent: Option<f64> = None;
 		if let Some(value) = process_2_exponent { if !value.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 2, quantity: "exponent", value }); } }
 		let process_2_table = [];
-		let process_2_gain_0 = GeneratedNoiseComplex { re: (FYE) * -1.0 * self.multiplicity.sqrt(), im: omega * (0.0) * -1.0 * self.multiplicity.sqrt() };
+		let process_2_gain_0 = GeneratedNoiseComplex::scaled_transfer(FYE, 0.0, frequency_hz, -1.0 * self.multiplicity.sqrt());
 		if !process_2_gain_0.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFiniteGain { process: 2, injection: 0, re: process_2_gain_0.re, im: process_2_gain_0.im }); }
 		let process_2_injections = [GeneratedNoiseInjectionEvaluation { descriptor: 2, gain: process_2_gain_0 }];
 		if !visitor.visit_process(2, GeneratedNoiseProcessEvaluationRef { active: process_2_active, psd: process_2_psd, exponent: process_2_exponent, table_operands: &process_2_table, injections: &process_2_injections }) { return Ok(()); }
@@ -16466,7 +16465,7 @@ impl Instance {
 		let process_3_exponent: Option<f64> = None;
 		if let Some(value) = process_3_exponent { if !value.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 3, quantity: "exponent", value }); } }
 		let process_3_table = [];
-		let process_3_gain_0 = GeneratedNoiseComplex { re: (FYF) * -1.0 * self.multiplicity.sqrt(), im: omega * (0.0) * -1.0 * self.multiplicity.sqrt() };
+		let process_3_gain_0 = GeneratedNoiseComplex::scaled_transfer(FYF, 0.0, frequency_hz, -1.0 * self.multiplicity.sqrt());
 		if !process_3_gain_0.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFiniteGain { process: 3, injection: 0, re: process_3_gain_0.re, im: process_3_gain_0.im }); }
 		let process_3_injections = [GeneratedNoiseInjectionEvaluation { descriptor: 3, gain: process_3_gain_0 }];
 		if !visitor.visit_process(3, GeneratedNoiseProcessEvaluationRef { active: process_3_active, psd: process_3_psd, exponent: process_3_exponent, table_operands: &process_3_table, injections: &process_3_injections }) { return Ok(()); }
@@ -16476,7 +16475,7 @@ impl Instance {
 		let process_4_exponent: Option<f64> = None;
 		if let Some(value) = process_4_exponent { if !value.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 4, quantity: "exponent", value }); } }
 		let process_4_table = [];
-		let process_4_gain_0 = GeneratedNoiseComplex { re: (FYG) * -1.0 * self.multiplicity.sqrt(), im: omega * (0.0) * -1.0 * self.multiplicity.sqrt() };
+		let process_4_gain_0 = GeneratedNoiseComplex::scaled_transfer(FYG, 0.0, frequency_hz, -1.0 * self.multiplicity.sqrt());
 		if !process_4_gain_0.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFiniteGain { process: 4, injection: 0, re: process_4_gain_0.re, im: process_4_gain_0.im }); }
 		let process_4_injections = [GeneratedNoiseInjectionEvaluation { descriptor: 4, gain: process_4_gain_0 }];
 		if !visitor.visit_process(4, GeneratedNoiseProcessEvaluationRef { active: process_4_active, psd: process_4_psd, exponent: process_4_exponent, table_operands: &process_4_table, injections: &process_4_injections }) { return Ok(()); }
@@ -16486,7 +16485,7 @@ impl Instance {
 		let process_5_exponent: Option<f64> = None;
 		if let Some(value) = process_5_exponent { if !value.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 5, quantity: "exponent", value }); } }
 		let process_5_table = [];
-		let process_5_gain_0 = GeneratedNoiseComplex { re: (FYH) * -1.0 * self.multiplicity.sqrt(), im: omega * (0.0) * -1.0 * self.multiplicity.sqrt() };
+		let process_5_gain_0 = GeneratedNoiseComplex::scaled_transfer(FYH, 0.0, frequency_hz, -1.0 * self.multiplicity.sqrt());
 		if !process_5_gain_0.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFiniteGain { process: 5, injection: 0, re: process_5_gain_0.re, im: process_5_gain_0.im }); }
 		let process_5_injections = [GeneratedNoiseInjectionEvaluation { descriptor: 5, gain: process_5_gain_0 }];
 		if !visitor.visit_process(5, GeneratedNoiseProcessEvaluationRef { active: process_5_active, psd: process_5_psd, exponent: process_5_exponent, table_operands: &process_5_table, injections: &process_5_injections }) { return Ok(()); }
@@ -16496,7 +16495,7 @@ impl Instance {
 		let process_6_exponent: Option<f64> = None;
 		if let Some(value) = process_6_exponent { if !value.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 6, quantity: "exponent", value }); } }
 		let process_6_table = [];
-		let process_6_gain_0 = GeneratedNoiseComplex { re: (FYI) * -1.0 * self.multiplicity.sqrt(), im: omega * (0.0) * -1.0 * self.multiplicity.sqrt() };
+		let process_6_gain_0 = GeneratedNoiseComplex::scaled_transfer(FYI, 0.0, frequency_hz, -1.0 * self.multiplicity.sqrt());
 		if !process_6_gain_0.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFiniteGain { process: 6, injection: 0, re: process_6_gain_0.re, im: process_6_gain_0.im }); }
 		let process_6_injections = [GeneratedNoiseInjectionEvaluation { descriptor: 6, gain: process_6_gain_0 }];
 		if !visitor.visit_process(6, GeneratedNoiseProcessEvaluationRef { active: process_6_active, psd: process_6_psd, exponent: process_6_exponent, table_operands: &process_6_table, injections: &process_6_injections }) { return Ok(()); }
@@ -16506,7 +16505,7 @@ impl Instance {
 		let process_7_exponent: Option<f64> = None;
 		if let Some(value) = process_7_exponent { if !value.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 7, quantity: "exponent", value }); } }
 		let process_7_table = [];
-		let process_7_gain_0 = GeneratedNoiseComplex { re: (FYJ) * -1.0 * self.multiplicity.sqrt(), im: omega * (0.0) * -1.0 * self.multiplicity.sqrt() };
+		let process_7_gain_0 = GeneratedNoiseComplex::scaled_transfer(FYJ, 0.0, frequency_hz, -1.0 * self.multiplicity.sqrt());
 		if !process_7_gain_0.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFiniteGain { process: 7, injection: 0, re: process_7_gain_0.re, im: process_7_gain_0.im }); }
 		let process_7_injections = [GeneratedNoiseInjectionEvaluation { descriptor: 7, gain: process_7_gain_0 }];
 		if !visitor.visit_process(7, GeneratedNoiseProcessEvaluationRef { active: process_7_active, psd: process_7_psd, exponent: process_7_exponent, table_operands: &process_7_table, injections: &process_7_injections }) { return Ok(()); }

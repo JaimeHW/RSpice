@@ -624,7 +624,6 @@ pub(super) fn grouped_noise_extension(
     if uses_checked_runtime(&body) {
         out.push_str("        ctx.check_noise_evaluation()?;\n");
     }
-    out.push_str("        let omega = core::f64::consts::TAU * frequency_hz;\n");
     for (process_index, process) in plan.processes.iter().enumerate() {
         let active = &values[process.active];
         let psd = &values[process.psd];
@@ -691,7 +690,7 @@ pub(super) fn grouped_noise_extension(
             };
             writeln!(
                 out,
-                "        let process_{process_index}_gain_{local} = GeneratedNoiseComplex {{ re: ({real}) * {rhs_sign:.1} * {multiplicity_scale}, im: omega * ({reactive}) * {rhs_sign:.1} * {multiplicity_scale} }};"
+                "        let process_{process_index}_gain_{local} = GeneratedNoiseComplex::scaled_transfer({real}, {reactive}, frequency_hz, {rhs_sign:.1} * {multiplicity_scale});"
             )
             .expect("write grouped gain");
             writeln!(
@@ -2066,7 +2065,7 @@ endmodule
         .expect("mixed grouped-noise emission succeeds");
         let gain_lines = generated
             .lines()
-            .filter(|line| line.contains("GeneratedNoiseComplex { re:"))
+            .filter(|line| line.contains("GeneratedNoiseComplex::scaled_transfer("))
             .collect::<Vec<_>>();
 
         assert_eq!(
@@ -2079,11 +2078,15 @@ endmodule
         );
         assert_eq!(gain_lines.len(), 2, "{generated}");
         assert!(
-            gain_lines.iter().any(|line| line.contains("* -1.0 *")),
+            gain_lines
+                .iter()
+                .any(|line| line.contains("frequency_hz, -1.0 *")),
             "current-equation gain must carry the -RHS orientation: {generated}"
         );
         assert!(
-            gain_lines.iter().any(|line| line.contains("* 1.0 *")),
+            gain_lines
+                .iter()
+                .any(|line| line.contains("frequency_hz, 1.0 *")),
             "potential-equation gain must carry the +RHS orientation: {generated}"
         );
         assert_eq!(

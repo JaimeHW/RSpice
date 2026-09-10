@@ -2621,6 +2621,52 @@ assert_eq!(disabled.0, vec![(true, 1.5), (false, 0.0)]);
 }
 
 #[test]
+fn generated_grouped_noise_preserves_frequency_and_multiplicity_range() {
+    for (kind, current) in [("I", true), ("V", false)] {
+        let source = format!(
+            "module ranged_noise(p,n); inout p,n; electrical p,n; parameter real gain=1.0; real source; analog begin source=white_noise(1.0,\"n\"); {kind}(p,n)<+0.25*source+gain*ddt(source); end endmodule"
+        );
+        let name = format!("ranged {kind} noise");
+        let (state, stamp, noise) = generated_parts(&source, &name);
+        run_generated_main(&name, &state, &stamp, &noise, &format!(r#"
+struct Capture(runtime::GeneratedNoiseComplex);
+impl runtime::GeneratedNoiseProcessVisitor for Capture {{
+    fn visit_process(&mut self, _: usize, process: runtime::GeneratedNoiseProcessEvaluationRef<'_>) -> bool {{
+        assert!(process.active);
+        assert_eq!(process.psd, 1.0);
+        assert_eq!(process.injections.len(), 1);
+        self.0=process.injections[0].gain;
+        true
+    }}
+}}
+for (gain, scale, frequency) in [
+    (1e200_f64,1e-100_f64,1e200_f64),
+    (1e-200,1e100,1e-200),
+    (0.1,1.0,1e308),
+    (1e308,1.0,f64::from_bits(1)),
+    (0.0,1.0,1e308),
+] {{
+    let mut instance=device::state::Instance::new(&[0,1]);
+    if !{current} {{ instance.set_branch_indices(&[2]); }}
+    instance.set_parameter("gain",gain).unwrap();
+    let multiplicity=if {current} {{ scale*scale }} else {{ scale.recip()*scale.recip() }};
+    instance.set_multiplicity(multiplicity).unwrap();
+    instance.finalize_parameters().unwrap();
+    let ctx=runtime::GeneratedEvalContext {{ voltages:&[0.0;3], temperature:300.15 }};
+    let mut capture=Capture(runtime::GeneratedNoiseComplex::default());
+    instance.evaluate_noise_processes_at_frequency(&ctx,frequency,&mut capture).unwrap();
+    let sign=if {current} {{ -1.0 }} else {{ 1.0 }};
+    let expected=((gain*scale)*frequency)*core::f64::consts::TAU*sign;
+    assert!((capture.0.re/(0.25*scale*sign)-1.0).abs()<=8.0*f64::EPSILON);
+    if expected==0.0 {{ assert_eq!(capture.0.im,0.0); }}
+    else {{ assert!((capture.0.im/expected-1.0).abs()<=8.0*f64::EPSILON,"{{gain}}, {{scale}}, {{frequency}}: {{:?}}, expected {{expected}}",capture.0); }}
+    assert!(!ctx.evaluation_failed());
+}}
+"#)).unwrap_or_else(|report| panic!("{name}: {report}"));
+    }
+}
+
+#[test]
 fn generated_grouped_noise_retains_static_and_reactive_paths_in_one_contribution() {
     let (state, stamp, noise) = generated_parts(
         r#"
@@ -6297,6 +6343,13 @@ pub mod runtime {
     #[derive(Debug, Clone, Copy, PartialEq, Default)]
     pub struct GeneratedNoiseComplex { pub re: Value, pub im: Value }
     impl GeneratedNoiseComplex {
+        pub fn scaled_transfer(real: Value, reactive: Value, frequency_hz: Value, scale: Value) -> Self {
+            let omega=core::f64::consts::TAU*frequency_hz;
+            let ordinary=(omega*reactive)*scale;
+            let im=if omega.is_normal() && ordinary.is_normal() { ordinary }
+                else { ((reactive*scale)*frequency_hz)*core::f64::consts::TAU };
+            Self { re: real*scale, im }
+        }
         pub fn is_finite(self) -> bool { self.re.is_finite() && self.im.is_finite() }
     }
 

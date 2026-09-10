@@ -2134,6 +2134,46 @@ pub struct GeneratedNoiseComplex {
 }
 
 impl GeneratedNoiseComplex {
+    /// Compose `(real + j*2*pi*frequency_hz*reactive) * scale`, converting
+    /// to binary64 only after all factors can restore an intermediate range.
+    #[inline]
+    pub fn scaled_transfer(
+        real: Value,
+        reactive: Value,
+        frequency_hz: Value,
+        scale: Value,
+    ) -> Self {
+        let im = if reactive == 0.0 || frequency_hz == 0.0 {
+            // A finite frequency needs no angular-frequency conversion for
+            // a structural zero. Invalid operands still propagate as NaN.
+            (frequency_hz * reactive) * scale
+        } else {
+            let omega = core::f64::consts::TAU * frequency_hz;
+            let partial = omega * reactive;
+            let value = partial * scale;
+            if omega.is_normal() && partial.is_normal() {
+                // The scale product is the final conversion boundary.
+                value
+            } else {
+                Self::wide_reactive_transfer(reactive, frequency_hz, scale)
+            }
+        };
+        Self {
+            re: real * scale,
+            im,
+        }
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn wide_reactive_transfer(reactive: Value, frequency_hz: Value, scale: Value) -> Value {
+        use arithmetic::ScaledValue;
+        ScaledValue::new(frequency_hz)
+            .multiply(ScaledValue::new(core::f64::consts::TAU))
+            .multiply(ScaledValue::new(reactive))
+            .multiply_binary64(scale)
+    }
+
     #[inline]
     pub fn is_finite(self) -> bool {
         self.re.is_finite() && self.im.is_finite()
@@ -7876,6 +7916,60 @@ impl<'a> GeneratedReactiveStamper<'a> {
 #[cfg(test)]
 mod fixed_lane_tests {
     use super::*;
+
+    #[test]
+    fn noise_transfers_preserve_intermediate_range_and_zero_axes() {
+        let tau = core::f64::consts::TAU;
+        for (reactive, frequency, scale, expected) in [
+            (1e200, 1e200, 1e-100, tau * 1e300),
+            (1e-200, 1e-200, 1e100, tau * 1e-300),
+            (1e200, 1e-200, 1e200, tau * 1e200),
+            (1e-200, 1e200, 1e-200, tau * 1e-200),
+            (0.1, 1e308, 1.0, tau * 1e307),
+            (
+                1e308,
+                f64::from_bits(1),
+                1.0,
+                f64::from_bits(0x3ceb_f60a_d470_bc60),
+            ),
+        ] {
+            for sign in [-1.0, 1.0] {
+                let actual =
+                    GeneratedNoiseComplex::scaled_transfer(0.25, reactive, frequency, sign * scale);
+                assert_eq!(actual.re, 0.25 * sign * scale);
+                assert!(
+                    (actual.im / (sign * expected) - 1.0).abs() <= 8.0 * f64::EPSILON,
+                    "{reactive}, {frequency}, {scale}, {sign}: {actual:?}, expected {expected}"
+                );
+            }
+        }
+        for reactive in [0.0_f64, -0.0] {
+            for scale in [1.0_f64, -1.0] {
+                let actual = GeneratedNoiseComplex::scaled_transfer(2.0, reactive, f64::MAX, scale);
+                assert_eq!(actual.re, 2.0 * scale);
+                assert_eq!(actual.im, 0.0);
+                assert_eq!(
+                    actual.im.is_sign_negative(),
+                    reactive.is_sign_negative() ^ scale.is_sign_negative()
+                );
+            }
+        }
+        for frequency in [0.0_f64, -0.0] {
+            let actual = GeneratedNoiseComplex::scaled_transfer(1.0, -2.0, frequency, 3.0);
+            assert_eq!(actual.im.to_bits(), (-frequency).to_bits());
+        }
+        for (real, reactive, frequency, scale) in [
+            (f64::NAN, 1.0, 1.0, 1.0),
+            (0.0, 0.0, f64::INFINITY, 1.0),
+            (0.0, 1.0, 1.0, f64::NAN),
+            (0.0, 1e200, 1e200, 1.0),
+        ] {
+            assert!(
+                !GeneratedNoiseComplex::scaled_transfer(real, reactive, frequency, scale)
+                    .is_finite()
+            );
+        }
+    }
 
     #[test]
     fn extrema_keep_selected_operand_bits() {

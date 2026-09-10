@@ -4985,14 +4985,13 @@ impl Instance {
 		}
 		let CCC=(DK* parameters[7])* (3.2043836e-19f64* (CCB.abs()));
 		let CCD=1f64;
-		let omega = core::f64::consts::TAU * frequency_hz;
 		let process_0_active = E != 0.0;
 		let process_0_psd = (CCC).abs();
 		if !process_0_psd.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 0, quantity: "psd", value: process_0_psd }); }
 		let process_0_exponent: Option<f64> = None;
 		if let Some(value) = process_0_exponent { if !value.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 0, quantity: "exponent", value }); } }
 		let process_0_table = [];
-		let process_0_gain_0 = GeneratedNoiseComplex { re: (CCD) * -1.0 * self.multiplicity.sqrt(), im: omega * (0.0) * -1.0 * self.multiplicity.sqrt() };
+		let process_0_gain_0 = GeneratedNoiseComplex::scaled_transfer(CCD, 0.0, frequency_hz, -1.0 * self.multiplicity.sqrt());
 		if !process_0_gain_0.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFiniteGain { process: 0, injection: 0, re: process_0_gain_0.re, im: process_0_gain_0.im }); }
 		let process_0_injections = [GeneratedNoiseInjectionEvaluation { descriptor: 0, gain: process_0_gain_0 }];
 		if !visitor.visit_process(0, GeneratedNoiseProcessEvaluationRef { active: process_0_active, psd: process_0_psd, exponent: process_0_exponent, table_operands: &process_0_table, injections: &process_0_injections }) { return Ok(()); }

@@ -1554,9 +1554,9 @@ fn finalize_checkpoint_identity_with_compatibility(
     Ok(())
 }
 
-// Version 10 composes frequency response and instance multiplicity before
-// converting reactive coefficients to the matrix's binary64 representation.
-const GENERATED_MODEL_SEMANTICS_VERSION: u32 = 10;
+// Version 11 preserves generated noise transfer range through frequency
+// conversion and instance multiplicity scaling.
+const GENERATED_MODEL_SEMANTICS_VERSION: u32 = 11;
 
 fn generated_model_semantic_identity(device: &GeneratedRustDevice) -> String {
     let mut hasher = blake3::Hasher::new();
