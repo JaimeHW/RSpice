@@ -22,7 +22,7 @@ mod nonlinear_api;
 mod periodic_ac;
 mod result_builder;
 
-pub use periodic_ac::{PeriodicAcExcitation, PeriodicNoiseSource};
+pub use periodic_ac::{PeriodicAcExcitation, PeriodicFlickerNoise, PeriodicNoiseSource};
 
 /// What one harmonic-balance Newton inner loop is allowed to do: the gmin it
 /// stamps with, the iteration ceiling, the relative and absolute convergence
