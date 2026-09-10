@@ -255,6 +255,93 @@ endmodule
     assert_eq!(processes[0].injections.len(), 2);
 }
 
+fn assert_noise_transfer(
+    operator: &str,
+    arguments: &str,
+    angular_frequencies: &[f64],
+    expected: impl Fn(f64) -> Option<(f64, f64)>,
+) {
+    for contribution in ["I", "V"] {
+        for assigned in [false, true] {
+            let (assignment, input) = if assigned {
+                ("source=white_noise(3.0/V(p,n),\"n\");", "source")
+            } else {
+                ("", "white_noise(3.0/V(p,n),\"n\")")
+            };
+            let source = format!(
+                "module noise_filter(p,n); inout p,n; electrical p,n; parameter integer enabled=1; real source; analog if(enabled>0) begin {assignment} {contribution}(p,n)<+{operator}({input}{arguments}); end endmodule"
+            );
+            let case = format!("{operator}({arguments}) {contribution} assigned={assigned}");
+            let report = VerilogACompiler::default()
+                .compile_runtime_with_qualifications(
+                    &source,
+                    None,
+                    rspice_veriloga::RuntimeQualificationOptions {
+                        generated_rust: true,
+                        ..rspice_veriloga::RuntimeQualificationOptions::NONE
+                    },
+                )
+                .unwrap_or_else(|error| panic!("{case}: {error}"));
+            assert_eq!(report.abi.noise_source_count, 1, "{case}");
+            // Retaining these operators must not silently qualify generated
+            // Rust while their stateful implementations remain unsupported.
+            assert_eq!(
+                report
+                    .targets
+                    .get(rspice_veriloga::RuntimeTarget::GeneratedRust)
+                    .readiness,
+                rspice_veriloga::RuntimeTargetReadiness::Rejected,
+                "{case}"
+            );
+            assert!(report.generated_rust.is_none());
+            #[cfg(feature = "wasm-jit")]
+            rspice_veriloga::wasm_jit::compile_model_value_module(
+                &report.model,
+                &report.canonical_ir,
+            )
+            .unwrap_or_else(|error| panic!("{case}: {error}"));
+            let mut device = rspice_veriloga::device::VerilogADevice::try_new_with_canonical_ir(
+                "A1",
+                report.model,
+                &report.canonical_ir,
+                &[1, 0],
+            )
+            .unwrap_or_else(|error| panic!("{case}: {error}"));
+            device.try_set_analysis_type(3).unwrap();
+            let sign = if contribution == "I" { -1.0 } else { 1.0 };
+            for &omega in angular_frequencies {
+                let evaluation =
+                    device.try_noise_processes_at_frequency(&[1.0], omega / std::f64::consts::TAU);
+                let Some((real, imaginary)) = expected(omega) else {
+                    let error = evaluation.expect_err("a singular response must fail explicitly");
+                    assert!(error.to_string().contains("singular"), "{case}: {error}");
+                    continue;
+                };
+                let processes = evaluation.unwrap_or_else(|error| panic!("{case}: {error}"));
+                assert_eq!(processes.len(), 1, "{case}");
+                assert_eq!(processes[0].psd, 3.0, "{case}");
+                assert_eq!(processes[0].injections.len(), 1, "{case}");
+                let gain = processes[0].injections[0].gain;
+                let expected_re = sign * real;
+                let expected_im = sign * imaginary;
+                assert!((gain.re - expected_re).abs() < 1e-13, "{case}: {gain:?}");
+                assert!((gain.im - expected_im).abs() < 1e-13, "{case}: {gain:?}");
+            }
+            device.try_set_parameter("enabled", 0.0).unwrap();
+            device.try_resolve_parameter_defaults().unwrap();
+            let disabled = device
+                .try_noise_processes_at_frequency(&[0.0], 0.0)
+                .unwrap_or_else(|error| {
+                    panic!("{case}: disabled branch evaluated singular data: {error}")
+                });
+            assert!(
+                disabled.is_empty(),
+                "{case}: disabled process remained active"
+            );
+        }
+    }
+}
+
 #[test]
 fn direct_laplace_noise_preserves_processes_and_complex_transfer() {
     // VAMS-2023 4.5.11 uses (1-s/root) for nonzero roots and permits
@@ -267,72 +354,62 @@ fn direct_laplace_noise_preserves_processes_and_complex_transfer() {
         ("laplace_zd", ",'{1.0,0.5}", 0.0),
         ("laplace_zp", ",'{-2.0,0.0}", 0.0),
     ] {
-        for contribution in ["I", "V"] {
-            for assigned in [false, true] {
-                let (assignment, input) = if assigned {
-                    ("source=white_noise(3.0,\"n\");", "source")
-                } else {
-                    ("", "white_noise(3.0,\"n\")")
-                };
-                let source = format!(
-                    "module noise_filter(p,n); inout p,n; electrical p,n; real source; analog begin {assignment} {contribution}(p,n)<+{operator}({input},{coefficients}); end endmodule"
-                );
-                let case = format!("{operator}({coefficients}) {contribution} assigned={assigned}");
-                let report = VerilogACompiler::default()
-                    .compile_runtime_with_qualifications(
-                        &source,
-                        None,
-                        rspice_veriloga::RuntimeQualificationOptions {
-                            generated_rust: true,
-                            ..rspice_veriloga::RuntimeQualificationOptions::NONE
-                        },
-                    )
-                    .unwrap_or_else(|error| panic!("{case}: {error}"));
-                assert_eq!(report.abi.noise_source_count, 1, "{case}");
-                // Retaining the filter must not silently qualify generated
-                // Rust, whose state-space realization is still unsupported.
-                assert_eq!(
-                    report
-                        .targets
-                        .get(rspice_veriloga::RuntimeTarget::GeneratedRust)
-                        .readiness,
-                    rspice_veriloga::RuntimeTargetReadiness::Rejected,
-                    "{case}"
-                );
-                assert!(report.generated_rust.is_none());
-                #[cfg(feature = "wasm-jit")]
-                rspice_veriloga::wasm_jit::compile_model_value_module(
-                    &report.model,
-                    &report.canonical_ir,
-                )
-                .unwrap_or_else(|error| panic!("{case}: {error}"));
-                let mut device =
-                    rspice_veriloga::device::VerilogADevice::try_new_with_canonical_ir(
-                        "A1",
-                        report.model,
-                        &report.canonical_ir,
-                        &[1, 0],
-                    )
-                    .unwrap_or_else(|error| panic!("{case}: {error}"));
-                device.try_set_analysis_type(3).unwrap();
-                let sign = if contribution == "I" { -1.0 } else { 1.0 };
-                for omega in [0.0, 1.0, 10.0] {
-                    let processes = device
-                        .try_noise_processes_at_frequency(&[0.0], omega / std::f64::consts::TAU)
-                        .unwrap();
-                    assert_eq!(processes.len(), 1, "{case}");
-                    assert_eq!(processes[0].psd, 3.0, "{case}");
-                    assert_eq!(processes[0].injections.len(), 1, "{case}");
-                    let gain = processes[0].injections[0].gain;
-                    let expected_re = sign * (1.0 + 0.5 * numerator_slope * omega * omega)
-                        / (1.0 + 0.25 * omega * omega);
-                    let expected_im =
-                        sign * (numerator_slope - 0.5) * omega / (1.0 + 0.25 * omega * omega);
-                    assert!((gain.re - expected_re).abs() < 1e-13, "{case}: {gain:?}");
-                    assert!((gain.im - expected_im).abs() < 1e-13, "{case}: {gain:?}");
-                }
-            }
-        }
+        assert_noise_transfer(
+            operator,
+            &format!(",{coefficients}"),
+            &[0.0, 1.0, 10.0],
+            |omega| {
+                Some((
+                    (1.0 + 0.5 * numerator_slope * omega * omega) / (1.0 + 0.25 * omega * omega),
+                    (numerator_slope - 0.5) * omega / (1.0 + 0.25 * omega * omega),
+                ))
+            },
+        );
+    }
+}
+
+#[test]
+fn direct_integrated_and_delayed_noise_preserves_complex_transfer() {
+    for arguments in ["", ",0.0"] {
+        assert_noise_transfer("idt", arguments, &[0.0, 0.1, 1.0, 1000.0], |omega| {
+            (omega != 0.0).then(|| (0.0, -1.0 / omega))
+        });
+    }
+    for (arguments, delay) in [
+        (",1.0e-3", 1.0e-3),
+        (",2.0e-3,1.0e-3", 1.0e-3),
+        (",5.0e-4,1.0e-3", 5.0e-4),
+    ] {
+        assert_noise_transfer("absdelay", arguments, &[0.0, 1.0, 500.0, 2000.0], |omega| {
+            Some(((omega * delay).cos(), -(omega * delay).sin()))
+        });
+    }
+}
+
+#[test]
+fn direct_zi_noise_preserves_complex_transfer() {
+    // H(z)=(1+tap*z^-1)/(1-0.5*z^-1), z=exp(j*omega*T).
+    for (operator, arguments, tap) in [
+        ("zi_nd", ",'{1.0,0.25},'{1.0,-0.5},1.0e-3", 0.25),
+        ("zi_np", ",'{1.0,0.25},'{0.5,0.0},1.0e-3", 0.25),
+        ("zi_zd", ",'{-0.25,0.0},'{1.0,-0.5},1.0e-3", 0.25),
+        ("zi_zp", ",'{-0.25,0.0},'{0.5,0.0},1.0e-3", 0.25),
+        ("zi_zd", ",,'{1.0,-0.5},1.0e-3", 0.0),
+        ("zi_zp", ",,'{0.5,0.0},1.0e-3", 0.0),
+        ("zi_nd", ",'{1.0,0.25},'{1.0,-0.5},1.0e-3,1.0e-4", 0.25),
+        (
+            "zi_nd",
+            ",'{1.0,0.25},'{1.0,-0.5},1.0e-3,1.0e-4,2.0e-3",
+            0.25,
+        ),
+    ] {
+        assert_noise_transfer(operator, arguments, &[0.0, 1.0, 500.0, 2000.0], |omega| {
+            let (sin, cos) = (omega * 1.0e-3).sin_cos();
+            Some((
+                (1.0 - 0.5 * tap + (tap - 0.5) * cos) / (1.25 - cos),
+                -(tap + 0.5) * sin / (1.25 - cos),
+            ))
+        });
     }
 }
 

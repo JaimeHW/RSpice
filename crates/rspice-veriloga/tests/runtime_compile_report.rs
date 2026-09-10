@@ -37,6 +37,7 @@ fn runtime_noise_count_tracks_processes_and_checks_both_artifacts() {
             "I(p,n)<+ddt(white_noise(1,\"same\"))+white_noise(2,\"same\");",
             2,
         ),
+        ("I(p,n)<+slew(slew(3*white_noise(1,\"same\")));", 1),
         ("for(i=0;i<3;i=i+1) I(p,n)<+white_noise(1,\"same\");", 3),
         ("source=white_noise(1,\"unused\"); I(p,n)<+V(p,n);", 1),
         ("if(0) I(p,n)<+white_noise(1,\"disabled\");", 1),

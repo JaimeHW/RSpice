@@ -2753,25 +2753,32 @@ for (gain, scale, frequency) in [
 }
 
 #[test]
-fn generated_direct_dynamic_noise_matches_assigned_routing() {
-    for contribution in ["I", "V"] {
-        for assigned in [false, true] {
-            let body = if assigned {
-                format!(
-                    "source=white_noise(2.0/V(p,n),\"same\"); {contribution}(p,n)<+ddt(3.0*source)+white_noise(5.0,\"same\");"
-                )
-            } else {
-                format!(
-                    "{contribution}(p,n)<+ddt(3.0*white_noise(2.0/V(p,n),\"same\"))+white_noise(5.0,\"same\");"
-                )
-            };
-            let source = format!(
-                "module direct_dynamic_noise(p,n); inout p,n; electrical p,n; parameter real enabled=1; real source; analog if(enabled>0) begin {body} end endmodule"
-            );
-            let name = format!("direct dynamic noise {contribution} assigned={assigned}");
-            let (state, stamp, noise) = generated_parts(&source, &name);
-            let sign = if contribution == "I" { -1.0 } else { 1.0 };
-            run_generated_main(&name, &state, &stamp, &noise, &format!(r#"
+fn generated_direct_noise_routing_matches_assigned_processes() {
+    for operator in ["ddt", "slew"] {
+        for contribution in ["I", "V"] {
+            for assigned in [false, true] {
+                let body = if assigned {
+                    format!(
+                        "source=white_noise(2.0/V(p,n),\"same\"); {contribution}(p,n)<+{operator}(3.0*source)+white_noise(5.0,\"same\");"
+                    )
+                } else {
+                    format!(
+                        "{contribution}(p,n)<+{operator}(3.0*white_noise(2.0/V(p,n),\"same\"))+white_noise(5.0,\"same\");"
+                    )
+                };
+                let source = format!(
+                    "module direct_dynamic_noise(p,n); inout p,n; electrical p,n; parameter real enabled=1; real source; analog if(enabled>0) begin {body} end endmodule"
+                );
+                let name = format!("direct {operator} noise {contribution} assigned={assigned}");
+                let (state, stamp, noise) = generated_parts(&source, &name);
+                let sign = if contribution == "I" { -1.0 } else { 1.0 };
+                let derivative = operator == "ddt";
+                let static_powers = if assigned || derivative {
+                    vec![5.0]
+                } else {
+                    vec![9.0, 5.0]
+                };
+                run_generated_main(&name, &state, &stamp, &noise, &format!(r#"
 #[derive(Default)]
 struct Capture(Vec<(usize, f64, f64, f64)>);
 impl runtime::GeneratedNoiseProcessVisitor for Capture {{
@@ -2784,17 +2791,29 @@ impl runtime::GeneratedNoiseProcessVisitor for Capture {{
         true
     }}
 }}
+#[derive(Default)]
+struct StaticCapture(Vec<f64>);
+impl runtime::GeneratedNoiseVisitor for StaticCapture {{
+    fn visit(&mut self, _: usize, value: runtime::GeneratedNoiseEvaluationRef<'_>) -> bool {{
+        if value.active {{ self.0.push(value.psd); }}
+        true
+    }}
+}}
 assert_eq!(device::noise::GROUPED_NOISE_PROCESSES.len(), 2, "equal labels must not merge distinct calls");
 let mut instance=device::state::Instance::new(&[0,1]);
 instance.finalize_parameters().unwrap();
 let ctx=runtime::GeneratedEvalContext {{voltages:&[2.0,0.0],temperature:300.15}};
+let mut static_capture=StaticCapture::default();
+instance.evaluate_noise_sources(&ctx,&mut static_capture).unwrap();
+assert_eq!(static_capture.0.as_slice(), &{static_powers:?});
 for frequency in [0.0,1.0,17.0] {{
     let mut capture=Capture::default();
     instance.evaluate_noise_processes_at_frequency(&ctx,frequency,&mut capture).unwrap();
     assert_eq!(capture.0.len(),2);
     for (index,psd,re,im) in capture.0 {{
         let (expected_psd,expected_re,expected_im)=if index==0 {{
-            (1.0,0.0,{sign:?}*3.0*std::f64::consts::TAU*frequency)
+            if {derivative} {{ (1.0,0.0,{sign:?}*3.0*std::f64::consts::TAU*frequency) }}
+            else {{ (1.0,{sign:?}*3.0,0.0) }}
         }} else {{ (5.0,{sign:?},0.0) }};
         assert_eq!(psd,expected_psd);
         assert_eq!(re,expected_re);
@@ -2807,8 +2826,12 @@ let disabled=runtime::GeneratedEvalContext {{voltages:&[0.0,0.0],temperature:300
 let mut capture=Capture::default();
 instance.evaluate_noise_processes_at_frequency(&disabled,1.0,&mut capture).unwrap();
 assert!(capture.0.is_empty(), "disabled sources must not evaluate their singular PSD");
+let mut static_capture=StaticCapture::default();
+instance.evaluate_noise_sources(&disabled,&mut static_capture).unwrap();
+assert!(static_capture.0.is_empty());
 assert!(!disabled.evaluation_failed());
 "#)).unwrap_or_else(|report| panic!("{name}: {report}"));
+            }
         }
     }
 }

@@ -1683,6 +1683,9 @@ impl<'a> CfgLowerer<'a> {
                 }
                 self.noise_conditional(contribution, condition, then_expr, else_expr, amplitude);
             }
+            HirExprKind::Call { name, args } if name == "slew" && args.len() == 1 => {
+                self.noise_term(contribution, args[0], amplitude);
+            }
             HirExprKind::Call { name, args } if uses_grouped_noise_transfer(name, args.len()) => {
                 // Match the static HIR projection: grouped process lowering
                 // retains this operator and its frequency-dependent gain.

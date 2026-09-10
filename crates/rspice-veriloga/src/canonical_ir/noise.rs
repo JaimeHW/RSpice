@@ -554,6 +554,23 @@ fn extract_expression(
             }
             Ok(())
         }
+        HirExprKind::Call { name, args } if name == "slew" && args.len() == 1 => {
+            // With both rates omitted, slew is an exact stateless identity.
+            // Retain its source in the static projection, including amplitude
+            // and activation, instead of treating it as a dynamic transfer.
+            extract_expression(
+                hir,
+                args[0],
+                amplitude,
+                activation,
+                equation,
+                is_current,
+                branch_ordinal,
+                pos,
+                neg,
+                sources,
+            )
+        }
         HirExprKind::Call { name, args } if uses_grouped_noise_transfer(name, args.len()) => {
             // A frequency-dependent transfer cannot be folded into a static
             // PSD. Keep the original expression for grouped noise lowering,
@@ -724,7 +741,11 @@ pub(super) fn contains_noise(hir: &HirModel, root: ExprId) -> bool {
 pub(super) fn uses_grouped_noise_transfer(name: &str, arity: usize) -> bool {
     matches!(
         (name, arity),
-        ("ddt", 1) | ("laplace_nd" | "laplace_np" | "laplace_zd" | "laplace_zp", 3)
+        ("ddt", 1)
+            | ("idt", 1 | 2)
+            | ("absdelay", 2 | 3)
+            | ("laplace_nd" | "laplace_np" | "laplace_zd" | "laplace_zp", 3)
+            | ("zi_nd" | "zi_np" | "zi_zd" | "zi_zp", 4..=6)
     )
 }
 
