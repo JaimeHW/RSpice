@@ -21,6 +21,7 @@
 //! the one part of a project step neither side of the design can re-derive.
 
 mod compensation;
+mod component_rename;
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -79,6 +80,7 @@ struct StrandedPlacement {
 
 #[derive(Debug, Clone)]
 enum ProjectDesignBody {
+    ComponentRename(Box<component_rename::ComponentRenameRecord>),
     HierarchyExtraction(Box<HierarchyExtractionRecord>),
     DesignManagement(Box<DesignManagementRecord>),
     InstanceRemoval(Box<InstanceRemovalRecord>),
@@ -1178,6 +1180,7 @@ impl ProjectDesignRecord {
 impl ProjectDesignBody {
     fn after_design_matches(&self, state: &AppState) -> bool {
         match self {
+            Self::ComponentRename(record) => record.after_design_matches(state),
             Self::HierarchyExtraction(record) => record.after_design_matches(state),
             Self::DesignManagement(record) => record.after_design_matches(state),
             Self::InstanceRemoval(record) => record.after_design_matches(state),
@@ -1190,6 +1193,7 @@ impl ProjectDesignBody {
 
     fn before_design_matches(&self, state: &AppState) -> bool {
         match self {
+            Self::ComponentRename(record) => record.before_design_matches(state),
             Self::HierarchyExtraction(record) => record.before_design_matches(state),
             Self::DesignManagement(record) => record.before_design_matches(state),
             Self::InstanceRemoval(record) => record.before_design_matches(state),
@@ -1202,6 +1206,7 @@ impl ProjectDesignBody {
 
     fn validate_mutation(&self, state: &AppState, operation: &str) -> Result<(), String> {
         match self {
+            Self::ComponentRename(record) => record.validate_mutation(state, operation),
             Self::HierarchyExtraction(record) => record.validate_mutation(state, operation),
             Self::DesignManagement(record) => record.validate_mutation(state, operation),
             Self::InstanceRemoval(record) => record.validate_mutation(state, operation),
@@ -1214,6 +1219,7 @@ impl ProjectDesignBody {
 
     fn description(&self) -> &str {
         match self {
+            Self::ComponentRename(_) => "rename component and references",
             Self::HierarchyExtraction(record) => &record.description,
             Self::DesignManagement(record) => &record.description,
             Self::InstanceRemoval(record) => &record.description,
@@ -1226,6 +1232,7 @@ impl ProjectDesignBody {
 
     fn apply_before(&mut self, state: &mut AppState) -> Result<(), String> {
         match self {
+            Self::ComponentRename(record) => record.apply_before(state),
             Self::HierarchyExtraction(record) => record.apply_before(state),
             Self::DesignManagement(record) => record.apply_before(state),
             Self::InstanceRemoval(record) => record.apply_before(state),
@@ -1238,6 +1245,7 @@ impl ProjectDesignBody {
 
     fn apply_after(&mut self, state: &mut AppState) -> Result<(), String> {
         match self {
+            Self::ComponentRename(record) => record.apply_after(state),
             Self::HierarchyExtraction(record) => record.apply_after(state),
             Self::DesignManagement(record) => record.apply_after(state),
             Self::InstanceRemoval(record) => record.apply_after(state),

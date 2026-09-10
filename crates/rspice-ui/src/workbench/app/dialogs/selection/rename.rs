@@ -10,9 +10,7 @@
 use egui::{Context, Frame, Response, Stroke, TextEdit, Ui, Vec2};
 
 use crate::diagnostics::ConsoleMessage;
-use crate::state::{
-    BusDeclaration, Component, InstancePath, NetLabel, ProbeTarget, SchematicState,
-};
+use crate::state::{BusDeclaration, Component, NetLabel, SchematicState};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogInitialFocus, DialogSize};
@@ -570,36 +568,7 @@ fn apply_commit(state: &mut AppState, commit: RenameCommit) -> Result<bool, Stri
     let schematic = &mut state.schematic;
     match commit {
         RenameCommit::Component { expected, name } => {
-            let Some(current) = schematic
-                .components
-                .iter()
-                .find(|component| component.id == expected.id)
-            else {
-                return Err("The selected component no longer exists.".to_owned());
-            };
-            if current != expected.as_ref() {
-                return Err("The selected component changed before commit.".to_owned());
-            }
-            let old_name = expected.name.clone();
-            let new_name = name.clone();
-            let changed = schematic.with_undo("rename component", move |schematic| {
-                if let Some(component) = schematic
-                    .components
-                    .iter_mut()
-                    .find(|component| component.id == expected.id)
-                {
-                    component.name = name;
-                    schematic.is_dirty = true;
-                    schematic.bump_topology_version();
-                }
-            });
-            if changed {
-                // Project-scoped paths are not schematic-local history, so
-                // they move as a sibling transaction rather than inside the
-                // undo closure.
-                carry_instance_rename(state, &old_name, &new_name);
-            }
-            Ok(changed)
+            state.rename_component_transaction(&expected, name)
         }
         RenameCommit::NetLabel { expected, name } => {
             let Some(current) = schematic
@@ -634,162 +603,6 @@ fn apply_commit(state: &mut AppState, commit: RenameCommit) -> Result<bool, Stri
             .edit_bus_properties(&expected, Some(declaration))
             .map_err(|error| format!("The bus rename was rejected: {error}.")),
     }
-}
-
-/// Carry one component rename into every project-scoped reference that named
-/// the instance by path: the configuration DUT and override paths, and the
-/// saved-output probe expressions.
-fn carry_instance_rename(state: &mut AppState, old_name: &str, new_name: &str) {
-    let occurrence = state.workspace.occurrence_path();
-    let (Ok(from), Ok(to)) = (occurrence.child(old_name), occurrence.child(new_name)) else {
-        return;
-    };
-
-    let configuration_remap = state
-        .workspace
-        .configuration_sets
-        .remap_instance_path_prefix(&from, &to);
-    let remapped_paths = match configuration_remap {
-        Ok(remapped) => remapped,
-        // A refused remap leaves the configured paths on the old name, which
-        // the reader has to know: the schematic rename itself already stands.
-        Err(error) => {
-            state.push_user_message(ConsoleMessage::warning(format!(
-                "Renaming '{old_name}' to '{new_name}' left the configuration paths on the \
-                 old name: {error}"
-            )));
-            0
-        }
-    };
-    let mut rewritten = 0usize;
-    for record in &mut state.workspace.simulation_plan_payloads {
-        for output in &mut record.payload.saved_outputs {
-            if let Some(expression) =
-                remap_probe_expression(&output.source_expression, &from, &to, new_name)
-            {
-                output.source_expression = expression;
-                rewritten += 1;
-            }
-        }
-    }
-    if rewritten == 0 && remapped_paths == 0 {
-        return;
-    }
-    state.workspace.project_metadata_dirty = true;
-    state.push_user_message(ConsoleMessage::info(format!(
-        "Renaming '{old_name}' to '{new_name}' rewrote {remapped_paths} configuration \
-         path{} and {rewritten} saved-output expression{}.",
-        if remapped_paths == 1 { "" } else { "s" },
-        if rewritten == 1 { "" } else { "s" }
-    )));
-}
-
-/// Rewrite every probe reference in one saved-output expression that names the
-/// renamed instance or something beneath it, or `None` when nothing moved.
-///
-/// Arguments that are not probe references — literals, parameters, nested
-/// function calls — are preserved exactly, and a nested call is descended into
-/// so `abs(V(/X1/n))` moves with `V(/X1/n)`.
-fn remap_probe_expression(
-    expression: &str,
-    from: &InstancePath,
-    to: &InstancePath,
-    new_leaf: &str,
-) -> Option<String> {
-    let mut rewritten = String::with_capacity(expression.len());
-    let mut changed = false;
-    let mut rest = expression;
-    while let Some(open) = rest.find('(') {
-        let Some(close) = matching_close_paren(rest, open) else {
-            break;
-        };
-        let is_call = rest[..open]
-            .chars()
-            .next_back()
-            .is_some_and(|character| character.is_alphanumeric() || character == '_');
-        rewritten.push_str(&rest[..=open]);
-        let inner = &rest[open + 1..close];
-        if is_call {
-            let arguments = inner
-                .split(',')
-                .map(|argument| {
-                    remap_probe_argument(argument, from, to, new_leaf)
-                        .or_else(|| remap_probe_expression(argument, from, to, new_leaf))
-                        .map_or_else(
-                            || argument.to_owned(),
-                            |moved| {
-                                changed = true;
-                                moved
-                            },
-                        )
-                })
-                .collect::<Vec<_>>();
-            rewritten.push_str(&arguments.join(","));
-        } else {
-            rewritten.push_str(inner);
-        }
-        rewritten.push(')');
-        rest = &rest[close + 1..];
-    }
-    rewritten.push_str(rest);
-    changed.then_some(rewritten)
-}
-
-fn matching_close_paren(text: &str, open: usize) -> Option<usize> {
-    let mut depth = 0usize;
-    for (offset, character) in text[open..].char_indices() {
-        match character {
-            '(' => depth += 1,
-            ')' => {
-                depth -= 1;
-                if depth == 0 {
-                    return Some(open + offset);
-                }
-            }
-            _ => {}
-        }
-    }
-    None
-}
-
-/// One probe argument moved onto the renamed instance, preserving the
-/// argument's surrounding whitespace, or `None` when it names something else.
-fn remap_probe_argument(
-    argument: &str,
-    from: &InstancePath,
-    to: &InstancePath,
-    new_leaf: &str,
-) -> Option<String> {
-    let trimmed = argument.trim();
-    let target = ProbeTarget::parse(trimmed).ok()?;
-    let moved = if target.scope.starts_with(from) {
-        ProbeTarget {
-            scope: target.scope.remap_prefix(from, to)?,
-            leaf: target.leaf.clone(),
-        }
-    } else if target
-        .scope
-        .child(&target.leaf)
-        .is_ok_and(|instance| instance.fold_key() == from.fold_key())
-    {
-        ProbeTarget {
-            scope: target.scope.clone(),
-            leaf: new_leaf.to_owned(),
-        }
-    } else {
-        return None;
-    };
-    let moved = moved.to_string();
-    if moved == trimmed {
-        return None;
-    }
-    let leading = argument.len() - argument.trim_start().len();
-    let trailing = argument.len() - argument.trim_end().len();
-    Some(format!(
-        "{}{moved}{}",
-        &argument[..leading],
-        &argument[argument.len() - trailing..]
-    ))
 }
 
 #[cfg(test)]
@@ -948,14 +761,14 @@ mod tests {
         assert!(apply_commit(&mut app.state, *commit).unwrap());
         assert_eq!(app.state.schematic.components[0].id, id);
         assert_eq!(app.state.schematic.components[0].name, "R_GAIN");
-        assert!(app.state.schematic.undo());
+        app.action_edit_undo();
         assert_eq!(app.state.schematic.components[0].id, id);
         assert_eq!(app.state.schematic.components[0].name, original_name);
         assert!(
-            !app.state.schematic.undo(),
+            app.state.project_undo_sequence().is_none() && !app.state.schematic.can_undo(),
             "rename created more than one undo step"
         );
-        assert!(app.state.schematic.redo());
+        app.action_edit_redo();
         assert_eq!(app.state.schematic.components[0].name, "R_GAIN");
     }
 
@@ -1170,27 +983,47 @@ mod tests {
             "the configuration DUT path follows the renamed instance"
         );
         assert!(app.state.workspace.project_metadata_dirty);
-    }
-
-    #[test]
-    fn probe_expression_remap_preserves_unrelated_and_unparsable_arguments() {
-        let from = InstancePath::parse("/X1").expect("source instance path");
-        let to = InstancePath::parse("/X9").expect("target instance path");
-
+        app.action_edit_undo();
+        assert_eq!(app.state.schematic.components[0].name, "R1");
         assert_eq!(
-            remap_probe_expression("V(/X1/n) - V(/X2/n)", &from, &to, "X9").as_deref(),
-            Some("V(/X9/n) - V(/X2/n)")
+            app.state
+                .workspace
+                .configuration_sets
+                .find(configuration)
+                .unwrap()
+                .dut_path(),
+            "/R1",
+            "Undo must restore the configuration together with the schematic"
         );
         assert_eq!(
-            remap_probe_expression("V( /X1/n , /X1/p )", &from, &to, "X9").as_deref(),
-            Some("V( /X9/n , /X9/p )")
+            app.state
+                .workspace
+                .plan_data(plan_id)
+                .unwrap()
+                .saved_outputs[0]
+                .source_expression,
+            "I(R1)",
+            "Undo must restore the executable saved output"
+        );
+        app.action_edit_redo();
+        assert_eq!(app.state.schematic.components[0].name, "RLOAD");
+        assert_eq!(
+            app.state
+                .workspace
+                .configuration_sets
+                .find(configuration)
+                .unwrap()
+                .dut_path(),
+            "/RLOAD"
         );
         assert_eq!(
-            remap_probe_expression("abs(V(/X1/n))", &from, &to, "X9").as_deref(),
-            Some("abs(V(/X9/n))"),
-            "a probe inside a nested call still names the renamed instance"
+            app.state
+                .workspace
+                .plan_data(plan_id)
+                .unwrap()
+                .saved_outputs[0]
+                .source_expression,
+            "I(RLOAD)"
         );
-        assert!(remap_probe_expression("(1+2)*V(out)", &from, &to, "X9").is_none());
-        assert!(remap_probe_expression("param(a b c)", &from, &to, "X9").is_none());
     }
 }

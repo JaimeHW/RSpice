@@ -18,6 +18,10 @@ pub(crate) struct PreparedCopyReferences {
 
 impl PreparedCopyReferences {
     pub(crate) fn new(sources: &[Component]) -> Result<Self, String> {
+        Self::for_operation(sources, "copy")
+    }
+
+    fn for_operation(sources: &[Component], operation: &str) -> Result<Self, String> {
         let mut card_names = HashMap::new();
         let mut winding_aliases = HashMap::new();
         for (index, source) in sources.iter().enumerate() {
@@ -44,7 +48,7 @@ impl PreparedCopyReferences {
                 continue;
             }
             let parsed = parse_replacement_parameters_strict(&source.params)
-                .map_err(|error| format!("Cannot copy {}: {error}", source.name))?;
+                .map_err(|error| format!("Cannot {operation} {}: {error}", source.name))?;
             for key in reference_keys(source.kind) {
                 if let Some(value) = parsed.get(*key) {
                     for token in value
@@ -57,7 +61,7 @@ impl PreparedCopyReferences {
                             == Some(&None)
                         {
                             return Err(format!(
-                                "Cannot copy {}: {key} reference '{token}' names more than one selected instance",
+                                "Cannot {operation} {}: {key} reference '{token}' names more than one selected instance",
                                 source.name
                             ));
                         }
@@ -80,6 +84,10 @@ impl PreparedCopyReferences {
 
     /// `copies` has the source order and final identities for one replica.
     pub(crate) fn apply(&self, copies: &mut [Component]) {
+        self.apply_selected(copies, |_| true);
+    }
+
+    fn apply_selected(&self, copies: &mut [Component], selected: impl Fn(usize) -> bool) {
         assert_eq!(copies.len(), self.parameters.len());
         let names: Vec<_> = copies
             .iter()
@@ -98,7 +106,8 @@ impl PreparedCopyReferences {
                 let remapped = map_reference_tokens(value, |token| {
                     self.aliases(copy.kind)
                         .get(&token.to_ascii_lowercase())
-                        .and_then(|index| index.map(|index| names[index].as_str()))
+                        .and_then(|index| index.filter(|index| selected(*index)))
+                        .map(|index| names[index].as_str())
                 });
                 if *value != remapped {
                     *value = remapped;
@@ -109,6 +118,43 @@ impl PreparedCopyReferences {
                 copy.params = format_replacement_parameters(&parameters);
             }
         }
+    }
+}
+
+impl super::SchematicState {
+    /// Prepare the complete local component/reference edit without publishing
+    /// geometry, history, or any project-level references.
+    pub(crate) fn prepare_component_rename(
+        &self,
+        expected: &Component,
+        name: String,
+    ) -> Result<Vec<Component>, String> {
+        let index = self
+            .components
+            .iter()
+            .position(|component| component.id == expected.id)
+            .ok_or("The selected component no longer exists.")?;
+        if &self.components[index] != expected {
+            return Err("The selected component changed before commit.".to_owned());
+        }
+        expected.validate_reference_designator(&name)?;
+        let mut components = self.components.clone();
+        components[index].name = name;
+        let emitted = components[index].emitted_instance_name();
+        if components.iter().enumerate().any(|(other, component)| {
+            other != index
+                && (component.name.eq_ignore_ascii_case(&components[index].name)
+                    || component
+                        .emitted_instance_name()
+                        .eq_ignore_ascii_case(&emitted))
+        }) {
+            return Err(
+                "The renamed component would duplicate an existing SPICE designator.".to_owned(),
+            );
+        }
+        PreparedCopyReferences::for_operation(&self.components, "rename")?
+            .apply_selected(&mut components, |target| target == index);
+        Ok(components)
     }
 }
 

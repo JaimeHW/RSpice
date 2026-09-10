@@ -36,6 +36,9 @@ use std::fmt;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use thiserror::Error;
 
+mod probe_rewrite;
+pub(crate) use probe_rewrite::remap_instance_probes;
+
 /// Maximum rendered length of a path or pattern, in bytes.
 ///
 /// This module owns the limit; a consumer that restates it can drift from it.

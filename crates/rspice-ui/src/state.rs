@@ -7,6 +7,7 @@ mod configuration_set;
 mod connectivity_contract;
 pub(crate) mod engineering_table;
 mod hierarchy_path;
+pub(crate) use hierarchy_path::remap_instance_probes;
 pub(crate) mod include_search;
 pub(crate) mod library_browser;
 mod model_bound_symbol;

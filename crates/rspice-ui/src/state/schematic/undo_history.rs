@@ -632,6 +632,12 @@ impl UndoHistory {
         self.restored_sheet_assignments.clear();
     }
 
+    /// A committed project transaction starts a new branch of this document's
+    /// history without discarding the preceding local undo steps.
+    pub(crate) fn clear_redo(&mut self) {
+        self.redo_stack.clear();
+    }
+
     /// Check if an operation is currently pending
     pub fn has_pending_operation(&self) -> bool {
         self.pending.is_some()

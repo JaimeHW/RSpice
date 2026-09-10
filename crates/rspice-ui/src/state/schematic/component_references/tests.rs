@@ -46,6 +46,28 @@ fn parameter(component: &Component, name: &str) -> String {
 }
 
 #[test]
+fn rename_preparation_rebinds_only_the_target_and_preserves_the_source() {
+    let state = coupled_selection();
+    for (old, new, owner, parameter_name, expected) in [
+        ("L2", "L9", "L1", "coupled_to", "L9"),
+        ("L2", "L9", "K1", "inductors", "l1, L9"),
+        ("V1", "V9", "F1", "vref", "V9"),
+    ] {
+        let original = state.components.clone();
+        let renamed = state
+            .prepare_component_rename(component(&original, old), new.to_owned())
+            .unwrap();
+        assert_eq!(
+            parameter(component(&renamed, owner), parameter_name),
+            expected
+        );
+        assert_eq!(component(&renamed, "H1").params, "vref=V_external");
+        assert_eq!(state.components, original);
+        assert!(!state.can_undo());
+    }
+}
+
+#[test]
 fn emitted_alias_handles_unprefixed_and_non_ascii_authored_names() {
     let inductor =
         Component::new(1, ComponentType::Inductor, Point::origin()).with_name_value("λ", "1u");

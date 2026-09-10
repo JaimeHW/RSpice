@@ -885,6 +885,11 @@ impl RSpiceApp {
                 self.state
                     .push_user_message(ConsoleMessage::info(format!("Undo: {description}")));
             }
+            Ok(None) if self.state.project_undo_sequence().is_some() => {
+                self.state.push_user_message(ConsoleMessage::warning(
+                    "Undo is unavailable because the latest project edit's document or references changed.",
+                ));
+            }
             Ok(None) => return false,
             Err(error) => self.state.push_user_message(ConsoleMessage::warning(error)),
         }
@@ -897,6 +902,11 @@ impl RSpiceApp {
                 self.invalidate_simulation_preflight();
                 self.state
                     .push_user_message(ConsoleMessage::info(format!("Redo: {description}")));
+            }
+            Ok(None) if self.state.project_redo_sequence().is_some() => {
+                self.state.push_user_message(ConsoleMessage::warning(
+                    "Redo is unavailable because the latest project edit's document or references changed.",
+                ));
             }
             Ok(None) => return false,
             Err(error) => self.state.push_user_message(ConsoleMessage::warning(error)),

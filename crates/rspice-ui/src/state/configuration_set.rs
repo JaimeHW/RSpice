@@ -463,10 +463,35 @@ impl ConfigurationSetCatalog {
         from: &InstancePath,
         to: &InstancePath,
     ) -> Result<usize, ConfigurationSetError> {
+        self.remap_selected_instance_paths(from, to, |_| true)
+    }
+
+    /// Instance paths are relative to an executable root. A same-spelled
+    /// instance in another root is a different design object.
+    pub(crate) fn remap_instance_paths_in_root(
+        &mut self,
+        root: &CellViewRef,
+        from: &InstancePath,
+        to: &InstancePath,
+    ) -> Result<usize, ConfigurationSetError> {
+        self.remap_selected_instance_paths(from, to, |candidate| {
+            candidate.key().eq_ignore_ascii_case(&root.key())
+        })
+    }
+
+    fn remap_selected_instance_paths(
+        &mut self,
+        from: &InstancePath,
+        to: &InstancePath,
+        selects: impl Fn(&CellViewRef) -> bool,
+    ) -> Result<usize, ConfigurationSetError> {
         self.validate()?;
         let mut candidate = self.clone();
         let mut changed = 0usize;
         for configuration in &mut candidate.configurations {
+            if !selects(configuration.root()) {
+                continue;
+            }
             let definition = &mut configuration.definition;
             let mut remapped = false;
 
