@@ -47,6 +47,7 @@ pub struct DesignProjection {
     root: CellViewRef,
     schematic_buffers: HashMap<String, SchematicState>,
     plan: ConfigurationExecutionPlan,
+    resolution: HierarchyResolution,
     connectivity: crate::state::ConnectivityContract,
     /// Inputs this projection was built from, or `None` when they could not be
     /// digested. A keyless projection is never cached.
@@ -73,6 +74,7 @@ impl std::fmt::Debug for DesignProjection {
             .field("root", &self.root)
             .field("schematic_buffers", &self.schematic_buffers)
             .field("plan", &self.plan)
+            .field("resolution", &self.resolution)
             .field("connectivity", &self.connectivity)
             .field("key", &self.key)
             .field(
@@ -111,6 +113,39 @@ impl DesignProjection {
     /// plan, and no surface has to state what it would show without one.
     pub const fn plan(&self) -> &ConfigurationExecutionPlan {
         &self.plan
+    }
+
+    /// Diagnostics from the same materialized hierarchy that owns the plan.
+    /// Inspection retains unresolved bindings so a UI can explain why this
+    /// circuit cannot execute without resolving a different authored design.
+    pub const fn hierarchy_resolution(&self) -> &HierarchyResolution {
+        &self.resolution
+    }
+
+    /// Admit an inspected projection through the existing execution contract.
+    /// Unconfigured missing instances retain their generator diagnostics;
+    /// configured circuits require their complete hierarchy to resolve.
+    pub fn into_execution(self: Arc<Self>) -> Result<Arc<Self>, ConfigurationExecutionPlanError> {
+        if self.plan.configuration_id().is_some() && !self.resolution.is_valid() {
+            let diagnostics = self
+                .resolution
+                .bindings
+                .iter()
+                .filter(|binding| !binding.status.is_resolved())
+                .map(|binding| {
+                    binding.diagnostic.clone().unwrap_or_else(|| {
+                        format!(
+                            "{} is {}",
+                            binding.reference.display_path(),
+                            binding.status.label()
+                        )
+                    })
+                })
+                .collect::<Vec<_>>()
+                .join("; ");
+            return Err(ConfigurationExecutionPlanError::Unresolved(diagnostics));
+        }
+        Ok(self)
     }
 
     pub const fn connectivity(&self) -> &crate::state::ConnectivityContract {
@@ -273,6 +308,19 @@ impl ProjectWorkspace {
         active_reference: &CellViewRef,
         active_schematic: &SchematicState,
     ) -> Result<Arc<DesignProjection>, ConfigurationExecutionPlanError> {
+        self.inspect_design_projection(libraries, active_reference, active_schematic)?
+            .into_execution()
+    }
+
+    /// Inspect the materialized circuit even when its configured hierarchy
+    /// cannot execute. The receipt and execution route share this cache;
+    /// structural materialization errors still refuse the entire projection.
+    pub fn inspect_design_projection(
+        &self,
+        libraries: &LibraryManager,
+        active_reference: &CellViewRef,
+        active_schematic: &SchematicState,
+    ) -> Result<Arc<DesignProjection>, ConfigurationExecutionPlanError> {
         let inputs = self.design_inputs(active_reference, active_schematic);
         let key = inputs.as_ref().map(|inputs| DesignProjectionKey {
             root: self.simulation_root_reference(),
@@ -346,37 +394,15 @@ impl ProjectWorkspace {
         // Resolve the exact circuit that the netlister receives. Variants can
         // remove instances, replace masters or introduce new child instances;
         // the raw authored hierarchy is not their execution authority.
-        let configured = self.configuration_sets.active().is_some();
         let (resolution, plan) = HierarchyResolver::new(self, libraries, None)
             .with_projected_buffers(&schematic_buffers)
             .resolve_all();
-        // Only a configuration blocks on an unresolved hierarchy. Without one,
-        // an unresolved cell is reported by the generator against the instance
-        // that could not be netlisted, which is the behaviour every legacy
-        // project already relies on.
-        if configured && !resolution.is_valid() {
-            let diagnostics = resolution
-                .bindings
-                .iter()
-                .filter(|binding| !binding.status.is_resolved())
-                .map(|binding| {
-                    binding.diagnostic.clone().unwrap_or_else(|| {
-                        format!(
-                            "{} is {}",
-                            binding.reference.display_path(),
-                            binding.status.label()
-                        )
-                    })
-                })
-                .collect::<Vec<_>>()
-                .join("; ");
-            return Err(ConfigurationExecutionPlanError::Unresolved(diagnostics));
-        }
 
         let projection = DesignProjection {
             root,
             schematic_buffers,
             plan,
+            resolution,
             connectivity: self.connectivity.clone(),
             key,
             nets: Mutex::new(HashMap::new()),

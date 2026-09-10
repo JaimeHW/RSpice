@@ -184,6 +184,62 @@ fn projection_is_not_rebuilt_without_a_key_change() {
 }
 
 #[test]
+fn unresolved_inspection_retains_diagnostics_and_reuses_the_execution_cache() {
+    let (workspace, libraries, reference, mut active) = workspace_with_two_cell_views();
+    let original = projection_of(&workspace, &libraries, &reference, &active);
+    active
+        .components
+        .retain(|component| component.name != INSTANCE_NAME);
+    reset_materialization_count();
+    let inspection = workspace
+        .inspect_design_projection(&libraries, &reference, &active)
+        .expect("an absent configured DUT retains its inspection receipt");
+    assert!(!inspection.hierarchy_resolution().is_valid());
+    assert!(
+        inspection
+            .hierarchy_resolution()
+            .bindings
+            .iter()
+            .any(|binding| {
+                binding
+                    .diagnostic
+                    .as_deref()
+                    .is_some_and(|message| message.contains("configured DUT path"))
+            })
+    );
+    assert!(
+        inspection
+            .plan()
+            .binding(&crate::state::InstancePath::parse("/X1").unwrap())
+            .is_none()
+    );
+    assert!(Arc::clone(&inspection).into_execution().is_err());
+    assert!(
+        workspace
+            .design_projection(&libraries, &reference, &active)
+            .is_err()
+    );
+    assert!(Arc::ptr_eq(
+        &inspection,
+        &workspace
+            .inspect_design_projection(&libraries, &reference, &active)
+            .unwrap()
+    ));
+    assert_eq!(
+        materialization_count(),
+        1,
+        "only the edited root is materialized once"
+    );
+    assert!(original.hierarchy_resolution().is_valid());
+    assert!(
+        original
+            .plan()
+            .binding(&crate::state::InstancePath::parse("/X1").unwrap())
+            .is_some()
+    );
+}
+
+#[test]
 fn projection_names_follow_a_property_rename() {
     let (workspace, libraries, reference, mut active) = workspace_with_two_cell_views();
 
