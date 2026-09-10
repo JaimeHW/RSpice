@@ -918,11 +918,41 @@ impl Engine {
         delta: Option<Value>,
         abort: &dyn AbortSignal,
     ) -> Result<Value, SimulationError> {
+        self.run_output_sensitivity_with_abort(
+            netlist,
+            AcSensitivityOutput::Voltage {
+                positive: output_node,
+                negative: None,
+            },
+            param_name,
+            param_value,
+            delta,
+            &mut 0,
+            abort,
+        )
+    }
+
+    /// Differentiate a DC voltage or branch-current probe with respect to an authored design parameter.
+    /// Expressions are replayed for each trial, using the shared refinement
+    /// driver. `runs` includes solver runs already consumed by the enclosing
+    /// study; nominal and attempted refinement runs consume the same budget.
+    #[allow(clippy::too_many_arguments)]
+    pub fn run_output_sensitivity_with_abort(
+        &self,
+        netlist: &Netlist,
+        output: AcSensitivityOutput,
+        param_name: &str,
+        param_value: Value,
+        delta: Option<Value>,
+        runs: &mut usize,
+        abort: &dyn AbortSignal,
+    ) -> Result<Value, SimulationError> {
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }
         let h = Self::sensitivity_step(param_value, delta)?;
-        self.ensure_batch_runs(1)?;
+        *runs = runs.saturating_add(1);
+        self.ensure_batch_runs(*runs)?;
         let evaluate = |candidate| {
             let (perturbed, references) = Self::create_perturbed_netlist_with_limits_and_abort(
                 netlist,
@@ -937,24 +967,12 @@ impl Engine {
                 )));
             }
             let result = self.run_dc_op_with_abort(&perturbed, abort)?;
-            let value = result.try_voltage(output_node).ok_or_else(|| {
-                SimulationError::Circuit(format!(
-                    "Sensitivity output node {output_node} is outside circuit node range 0..={}",
-                    result.node_voltages.len().saturating_sub(1)
-                ))
-            })?;
+            let value = Self::dc_sensitivity_output_value(&result, &output)?;
             Ok(vec![Complex64::new(value, 0.0)])
         };
         let nominal = evaluate(param_value)?;
-        let derivative = self.refine_sensitivity(
-            param_name,
-            param_value,
-            h,
-            &nominal,
-            &mut 1,
-            abort,
-            evaluate,
-        )?;
+        let derivative =
+            self.refine_sensitivity(param_name, param_value, h, &nominal, runs, abort, evaluate)?;
         Ok(derivative[0].re)
     }
 
@@ -996,17 +1014,45 @@ impl Engine {
         delta: Option<Value>,
         abort: &dyn AbortSignal,
     ) -> Result<Vec<Value>, SimulationError> {
+        self.run_output_sensitivity_ac_with_abort(
+            netlist,
+            AcSensitivityOutput::Voltage {
+                positive: output_node,
+                negative: None,
+            },
+            param_name,
+            param_value,
+            frequencies,
+            delta,
+            &mut 0,
+            abort,
+        )
+    }
+
+    /// Differentiate AC probe magnitude with respect to an authored design parameter.
+    /// Expressions are replayed for each trial, using the shared refinement
+    /// driver. `runs` includes solver runs already consumed by the enclosing
+    /// study; nominal and attempted refinement runs consume the same budget.
+    #[allow(clippy::too_many_arguments)]
+    pub fn run_output_sensitivity_ac_with_abort(
+        &self,
+        netlist: &Netlist,
+        output: AcSensitivityOutput,
+        param_name: &str,
+        param_value: Value,
+        frequencies: &[Value],
+        delta: Option<Value>,
+        runs: &mut usize,
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<Value>, SimulationError> {
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }
         let h = Self::sensitivity_step(param_value, delta)?;
         super::ac::validate_ac_frequencies(frequencies)?;
         self.ensure_analysis_points(frequencies.len())?;
-        self.ensure_batch_runs(1)?;
-        let output = AcSensitivityOutput::Voltage {
-            positive: output_node,
-            negative: None,
-        };
+        *runs = runs.saturating_add(1);
+        self.ensure_batch_runs(*runs)?;
         // Replay at every coordinate, including the requested nominal value:
         // it need not equal the value originally authored in the netlist.
         // Retain only this probe between runs, not every node's AC traces.
@@ -1027,15 +1073,8 @@ impl Engine {
             Self::ac_sensitivity_outputs(&results, &output, frequencies, abort)
         };
         let nominal = evaluate(param_value)?;
-        let derivatives = self.refine_sensitivity(
-            param_name,
-            param_value,
-            h,
-            &nominal,
-            &mut 1,
-            abort,
-            evaluate,
-        )?;
+        let derivatives =
+            self.refine_sensitivity(param_name, param_value, h, &nominal, runs, abort, evaluate)?;
         nominal
             .iter()
             .zip(derivatives)
@@ -1048,7 +1087,7 @@ impl Engine {
                     SensitivityValue::Available(value) => Ok(value),
                     SensitivityValue::Unavailable { unavailable } => {
                         Err(SimulationError::Circuit(format!(
-                            "AC sensitivity of |V({output_node})| to parameter '{param_name}' at {frequency} Hz is unavailable ({})",
+                            "AC output-magnitude sensitivity to parameter '{param_name}' at {frequency} Hz is unavailable ({})",
                             unavailable.as_str()
                         )))
                     }
@@ -2526,14 +2565,16 @@ impl Engine {
             AcSensitivityOutput::Voltage { positive, negative } => {
                 let positive_value = result.try_voltage(*positive).ok_or_else(|| {
                     SimulationError::Circuit(format!(
-                        "DC sensitivity output node {positive} is outside the solved node range"
+                        "Sensitivity output node {positive} is outside circuit node range 0..={}",
+                        result.node_voltages.len().saturating_sub(1)
                     ))
                 })?;
                 let negative_value = negative
                     .map(|node| {
                         result.try_voltage(node).ok_or_else(|| {
                             SimulationError::Circuit(format!(
-                                "DC sensitivity reference node {node} is outside the solved node range"
+                                "Sensitivity reference node {node} is outside circuit node range 0..={}",
+                                result.node_voltages.len().saturating_sub(1)
                             ))
                         })
                     })
