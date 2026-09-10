@@ -3772,7 +3772,16 @@ impl Engine {
                     None,
                 )
             } else {
-                self.solve_transient_initial_solution(netlist, &mut circuit, &mut matrix, abort)?
+                let initial = self.solve_transient_initial_solution(
+                    netlist,
+                    &mut circuit,
+                    &mut matrix,
+                    abort,
+                );
+                #[cfg(feature = "veriloga")]
+                let initial =
+                    initial.map_err(|error| circuit.annotate_mixed_convergence_failure(error, 0.0));
+                initial?
             };
         let mut origin_model_finish = None;
         if resume.is_none() && !uic_requested && circuit.has_any_veriloga_devices() {
@@ -7507,7 +7516,10 @@ impl Engine {
                             dt,
                             retry_count
                         );
-                        return Err(SimulationError::ConvergenceFailed(total_step_attempts));
+                        let error = SimulationError::ConvergenceFailed(total_step_attempts);
+                        #[cfg(feature = "veriloga")]
+                        let error = circuit.annotate_mixed_convergence_failure(error, step_time);
+                        return Err(error);
                     }
                     restore_rejected_transient_nonlinear_state!();
                     total_postloop_nanos += postloop_phase_start.elapsed().as_nanos();
@@ -7554,8 +7566,11 @@ impl Engine {
                         dt,
                         retry_count
                     );
+                    let error = SimulationError::ConvergenceFailed(total_step_attempts);
+                    #[cfg(feature = "veriloga")]
+                    let error = circuit.annotate_mixed_convergence_failure(error, step_time);
                     restore_rejected_transient_nonlinear_state!();
-                    return Err(SimulationError::ConvergenceFailed(total_step_attempts));
+                    return Err(error);
                 }
                 restore_rejected_transient_nonlinear_state!();
                 rejected_attempt_nonlinear_state_scratch = rejected_attempt_nonlinear_state.take();

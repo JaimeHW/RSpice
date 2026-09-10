@@ -92,8 +92,7 @@ use crate::xspice::threshold_crossing::threshold_crossing_time;
 /// negative costs the extra timepoints it takes to reach the ceiling.
 const MAX_CONSECUTIVE_BOUNDARY_FLIPS: u32 = 128;
 
-/// How many of a boundary net's most recent accepted values a diagnostic
-/// carries.
+/// How many of a boundary net's most recent values a diagnostic carries.
 ///
 /// Eight, because the evidence a reader needs from a chattering net is the
 /// *pattern* — an alternation says feedback, a run of one value says the count
@@ -102,17 +101,15 @@ const MAX_CONSECUTIVE_BOUNDARY_FLIPS: u32 = 128;
 /// a `u16` so an accepted timepoint costs a shift rather than an allocation.
 const BOUNDARY_VALUE_HISTORY: u32 = 8;
 
-/// One boundary net's recent history at accepted timepoints.
-///
-/// Kept in the accepted state, so a rejected trial's chatter is not counted:
-/// the whole question this answers is whether the *committed* boundary keeps
-/// moving.
+/// One boundary net's retained values and consecutive movement count.
+/// Accepted histories record every timepoint; diagnostic probe histories
+/// record only changes and are stored separately from accepted state.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 struct BoundaryNetHistory {
-    /// Consecutive accepted timepoints whose trial moved this net.
+    /// Consecutive recorded values that moved this net.
     run: u32,
-    /// The values it held at the last [`BOUNDARY_VALUE_HISTORY`] accepted
-    /// timepoints, two bits each, most recent in the low bits.
+    /// The last [`BOUNDARY_VALUE_HISTORY`] recorded values, two bits each,
+    /// most recent in the low bits.
     recent: u16,
     /// How many of those slots have been written, so a young net does not
     /// report seven zeroes it never held.
@@ -153,6 +150,17 @@ impl BoundaryNetHistory {
     }
 }
 
+/// Diagnostic-only transitions from completed, rejected solver probes.
+/// Retain changes so a failed damping attempt's repeated identical samples
+/// cannot erase earlier switching. Acceptance and checkpoints exclude this.
+#[derive(Clone, Default)]
+struct BoundaryProbeHistory {
+    time: Option<f64>,
+    probes: usize,
+    adc: Vec<BoundaryNetHistory>,
+    dac: Vec<BoundaryNetHistory>,
+}
+
 /// One boundary net's part in a settle that would not quiet.
 ///
 /// Crate-private, and rendered into the error rather than carried into it. The
@@ -172,7 +180,8 @@ struct BoundaryNetActivity {
     /// across a D/A one.
     read_by_module: bool,
     /// How many times the net moved: consecutive accepted timepoints for an
-    /// accepted-flip run, settle passes within one trial for a pass limit.
+    /// accepted-flip run, settle passes within one trial for a pass limit, or
+    /// transitions in the retained rejected-probe samples.
     moves: u32,
     /// The values it took, oldest first.
     recent: Vec<String>,
@@ -539,6 +548,7 @@ struct TrialScratch {
     /// anything is committed so a chattering boundary can still be refused.
     adc_history: Vec<BoundaryNetHistory>,
     dac_history: Vec<BoundaryNetHistory>,
+    probe_history: BoundaryProbeHistory,
     /// The five vectors of the last finished trial, ready to be refilled.
     trial: TrialVectors,
 }
@@ -985,6 +995,7 @@ impl MixedSignalHost {
         self.state.accepted_time = 0.0;
         self.state.started = false;
         self.digital_started = false;
+        self.scratch.probe_history.time = None;
         Ok(())
     }
 
@@ -1867,6 +1878,7 @@ impl MixedSignalHost {
             &mut trial.vectors.probe_values,
         );
         self.scratch.trial = trial.vectors;
+        self.scratch.probe_history.time = None;
         Ok(())
     }
 
@@ -1906,6 +1918,9 @@ impl MixedSignalHost {
                 detail: "there is no active trial to reject".into(),
             })?;
         let inputs = trial.analog_inputs;
+        if trial.probe && trial.bridges_quiet {
+            self.record_boundary_probe(trial.time_seconds);
+        }
         self.unwind(trial);
         // Reported here and swallowed in the other two unwinds, because this
         // is the one that has no refusal of its own to report.
@@ -1975,6 +1990,7 @@ impl MixedSignalHost {
         self.analog_inputs = checkpoint.analog_inputs;
         self.state = checkpoint.state.clone();
         self.digital_started = true;
+        self.scratch.probe_history.time = None;
         self.max_circuit_node = (0..self.analog.num_terminals())
             .map(|terminal| self.analog.node_for_terminal(terminal))
             .chain(
@@ -2005,6 +2021,102 @@ impl MixedSignalHost {
             .read(id)
             .map(FourStateValue::spelling)
             .unwrap_or_default())
+    }
+
+    fn record_boundary_probe(&mut self, time: f64) {
+        let history = &mut self.scratch.probe_history;
+        let bridges = &self.state.bridges;
+        if history.time != Some(time)
+            || history.adc.len() != bridges.adc.len()
+            || history.dac.len() != bridges.dac.len()
+        {
+            history.time = Some(time);
+            history.probes = 0;
+            history
+                .adc
+                .resize(bridges.adc.len(), BoundaryNetHistory::default());
+            history
+                .dac
+                .resize(bridges.dac.len(), BoundaryNetHistory::default());
+            history.adc.fill(BoundaryNetHistory::default());
+            history.dac.fill(BoundaryNetHistory::default());
+        }
+        let record = |signal, bit, entry: &mut BoundaryNetHistory| {
+            let bit = self
+                .state
+                .digital
+                .read(signal)
+                .map_or(FourStateBit::HighImpedance, |value| value.bit(bit));
+            if entry.filled == 0 || entry.recent & 3 != BoundaryNetHistory::code(bit) {
+                entry.push(bit, entry.filled != 0);
+            }
+        };
+        for (bridge, entry) in bridges.adc.iter().zip(&mut history.adc) {
+            record(bridge.signal, bridge.bit, entry);
+        }
+        for (bridge, entry) in bridges.dac.iter().zip(&mut history.dac) {
+            record(bridge.signal, bridge.bit, entry);
+        }
+        history.probes = history.probes.saturating_add(1);
+    }
+
+    /// Describe observed switching only after the caller has exhausted its
+    /// convergence recovery. These samples never decide whether a solve passes.
+    pub(crate) fn rejected_probe_activity(&self, time: f64) -> Option<String> {
+        let history = &self.scratch.probe_history;
+        if history.time != Some(time) {
+            return None;
+        }
+        let mut nets = Vec::new();
+        let mut elided = 0;
+        for (signal, node, read_by_module, entry) in self
+            .state
+            .bridges
+            .adc
+            .iter()
+            .zip(&history.adc)
+            .map(|(bridge, entry)| (&bridge.signal_name, bridge.positive, true, entry))
+            .chain(
+                self.state
+                    .bridges
+                    .dac
+                    .iter()
+                    .zip(&history.dac)
+                    .map(|(bridge, entry)| (&bridge.signal_name, bridge.positive, false, entry)),
+            )
+        {
+            if entry.run < 3 {
+                continue;
+            }
+            if nets.len() == 32 {
+                elided += 1;
+                continue;
+            }
+            nets.push(
+                BoundaryNetActivity {
+                    signal: signal.clone(),
+                    node,
+                    read_by_module,
+                    moves: entry.run,
+                    recent: entry.values(),
+                }
+                .to_string(),
+            );
+        }
+        if nets.is_empty() {
+            return None;
+        }
+        let omitted = if elided == 0 {
+            String::new()
+        } else {
+            format!("; {elided} additional switching nets omitted")
+        };
+        Some(format!(
+            "mixed Verilog-AMS instance '{}' observed repeated boundary switching at t={time:e}s during {} rejected solver probes (retaining the last transition values): {}{omitted}",
+            self.instance,
+            history.probes,
+            nets.join("; "),
+        ))
     }
 
     /// The boundary histories this trial's acceptance would produce.
@@ -2494,6 +2606,60 @@ endmodule
             .expect("bridges settle")
         {}
         host.accept_trial().expect("accept a quiet trial");
+    }
+
+    #[test]
+    fn rejected_probe_diagnostics_do_not_enter_accepted_state_or_checkpoints() {
+        let mut host = host();
+        let checkpoint = host.checkpoint().unwrap();
+        let adc = host.read_digital("adc");
+        let q = host.read_digital("q");
+        let sample = |host: &mut MixedSignalHost, time, voltage| {
+            host.begin_probe_trial(time, 0.0, IntegrationCoefficients::inactive(), true, false)
+                .unwrap();
+            while host
+                .settle_analog_bridges(&[0.0, 0.0, voltage, 0.0])
+                .unwrap()
+            {}
+            host.reject_trial().unwrap();
+        };
+        for _ in 0..4 {
+            sample(&mut host, 0.0, 0.0);
+            sample(&mut host, 0.0, 1.0);
+        }
+        // A later unsuccessful damping plateau must not erase observed flips.
+        for _ in 0..20 {
+            sample(&mut host, 0.0, 0.0);
+        }
+        let detail = host.rejected_probe_activity(0.0).unwrap();
+        assert!(detail.contains("0 1 0 1"), "{detail}");
+        assert!(detail.contains("28 rejected solver probes"), "{detail}");
+        assert_eq!(host.read_digital("adc"), adc);
+        assert_eq!(host.read_digital("q"), q);
+        assert_eq!(host.state.accepted_time, 0.0);
+        assert!(!host.state.started);
+        assert!(host.state.adc_history.iter().all(|entry| entry.filled == 0));
+        assert!(host.state.dac_history.iter().all(|entry| entry.filled == 0));
+        assert!(host.state.digital.next_tick().is_none());
+        let after_probes = host.checkpoint().unwrap();
+        host.restore(&after_probes).unwrap();
+        assert!(host.rejected_probe_activity(0.0).is_none());
+
+        for _ in 0..4 {
+            sample(&mut host, 0.0, 0.0);
+            sample(&mut host, 0.0, 1.0);
+        }
+        sample(&mut host, 1e-9, 0.0);
+        assert!(host.rejected_probe_activity(0.0).is_none());
+        assert!(host.rejected_probe_activity(1e-9).is_none());
+        host.restore(&checkpoint).unwrap();
+        for _ in 0..4 {
+            sample(&mut host, 0.0, 0.0);
+            sample(&mut host, 0.0, 1.0);
+        }
+        begin(&mut host, 0);
+        settle_and_accept(&mut host, &[0.0; 4]);
+        assert!(host.rejected_probe_activity(0.0).is_none());
     }
 
     #[test]

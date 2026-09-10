@@ -880,27 +880,9 @@ module inverting_loop(p, n, c, y);
 endmodule
 "#;
 
-/// **Cross-domain feedback.** A loop with no delay is diagnosed by name, not
-/// simulated.
-///
-/// The deck is the smallest honest form of the failure: the module reads `cin`
-/// across an A/D bridge, drives its inverse onto `yout` across a D/A bridge,
-/// and a one-ohm feedback resistor makes `cin` follow `yout`. Every accepted
-/// analog solution therefore flips the boundary, and the flipped boundary is
-/// what the next solution is solved against.
-///
-/// Three things this must *not* be, and each was a live possibility:
-///
-/// * a hang — the delta-cycle kernel never sees this loop, because the flip
-///   crosses a Newton solve rather than a delta cycle;
-/// * `MAX_BOUNDARY_SETTLE_PASSES` — that ceiling is unreachable here, because
-///   `settle_analog_bridges` is idempotent on one solution vector and the
-///   engine's settle loop hands it the same one every pass;
-/// * a trace — which is what it was. The run completed, with one boundary
-///   transition at every accepted timepoint and no diagnostic at all.
-///
-/// What it is now is the participants: both nets, the circuit node each is on,
-/// which way each faces, and the alternation each was holding.
+/// A zero-delay A/D-to-D/A loop has no consistent startup solution. Report
+/// its actual boundary transitions during rejected solver probes; no accepted
+/// timepoint exists from which an accepted-history diagnostic could be built.
 #[test]
 fn a_cross_domain_zero_delay_loop_is_refused_by_naming_its_participants() {
     let model = ModelFile::new("inverting_loop", INVERTING_LOOP);
@@ -937,9 +919,50 @@ fn a_cross_domain_zero_delay_loop_is_refused_by_naming_its_participants() {
          is measuring feedback rather than a fast signal: {error}"
     );
     assert!(
-        lowered.contains("consecutive accepted timepoints"),
-        "the diagnostic must say what it counted: {error}"
+        lowered.contains("rejected solver probes") && lowered.contains("t=0e0s"),
+        "the diagnostic must identify the rejected startup observations: {error}"
     );
+}
+
+#[test]
+fn a_cross_domain_loop_enabled_after_startup_names_its_rejected_probe_activity() {
+    let model = ModelFile::new(
+        "enabled_loop",
+        r#"
+module enabled_loop(p, n, c, en, y);
+    inout p, n; electrical p, n;
+    input c, en; output y;
+    wire c, en; reg y;
+    initial y = 1'b0;
+    always @(c or en) y = en ? ~c : 1'b0;
+    analog I(p,n) <+ V(p,n)/1000000.0;
+endmodule
+"#,
+    );
+    let deck = format!(
+        "* enable feedback after a valid operating point\n\
+         x1 p 0 cin en yout enabled_loop\n\
+         rp p 0 1meg\nrfb yout cin 1\nrin cin 0 1meg\n\
+         ven en 0 pulse(0 3.3 1n 0 0 10n 20n)\n\
+         .va \"{}\" enabled_loop\n.tran 0.1n 3n\n.end\n",
+        model.deck_path()
+    );
+    let error = error_for(&deck, 3e-9, 0.1e-9);
+    let lowered = error.to_ascii_lowercase();
+    assert!(
+        lowered.contains("mixed verilog-ams instance 'x1'"),
+        "{error}"
+    );
+    assert!(
+        lowered.contains("net `c`") && lowered.contains("net `y`"),
+        "{error}"
+    );
+    assert!(lowered.contains("rejected solver probes"), "{error}");
+    assert!(
+        !lowered.contains("t=0e0s"),
+        "startup must have succeeded: {error}"
+    );
+    assert!(error.contains("1 0 1 0"), "{error}");
 }
 
 /// **Cross-domain feedback, vacuity guard.** A boundary a resolved waveform

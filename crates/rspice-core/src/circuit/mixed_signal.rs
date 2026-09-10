@@ -132,6 +132,35 @@ fn settle_to_quiet(host: &mut MixedSignalHost, voltages: &[Value]) -> Result<(),
 }
 
 impl CircuitData {
+    /// Enrich a terminal solver failure without changing convergence recovery
+    /// or accepting any speculative boundary state.
+    pub(crate) fn annotate_mixed_convergence_failure(
+        &self,
+        error: SimulationError,
+        time: Value,
+    ) -> SimulationError {
+        if !matches!(error, SimulationError::ConvergenceFailed(_)) {
+            return error;
+        }
+        let mut context = self
+            .mixed_signal_hosts
+            .iter()
+            .filter_map(|host| host.rejected_probe_activity(time));
+        let Some(first) = context.next() else {
+            return error;
+        };
+        let mut detail = format!("{error}; {first}");
+        // Bound the rendered context even when a design has many instances.
+        for item in context.by_ref().take(7) {
+            detail.push_str("; ");
+            detail.push_str(&item);
+        }
+        if context.next().is_some() {
+            detail.push_str("; additional switching instances omitted");
+        }
+        SimulationError::Circuit(detail)
+    }
+
     /// Whether any mixed Verilog-AMS module is instantiated.
     #[inline]
     pub(crate) fn has_mixed_signal_hosts(&self) -> bool {
