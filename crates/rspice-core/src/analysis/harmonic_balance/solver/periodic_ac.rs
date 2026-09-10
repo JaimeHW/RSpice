@@ -196,9 +196,11 @@ fn scaled_complex_product3(
         exponent = exponent
             .checked_add(factor_exponent)
             .ok_or("the product exponent exceeds this platform")?;
+        // A small component can be the entire result after correlated paths
+        // cancel. Normalization must not erase or round it before that sum.
         *slot = Complex64::new(
-            libm::scalbn(value.re, -factor_exponent),
-            libm::scalbn(value.im, -factor_exponent),
+            scale_complex_component_exactly(value.re, -factor_exponent)?,
+            scale_complex_component_exactly(value.im, -factor_exponent)?,
         );
     }
 
@@ -215,8 +217,8 @@ fn scaled_complex_product3(
         .checked_add(mantissa_exponent)
         .ok_or("the normalized product exponent exceeds this platform")?;
     let normalized = Complex64::new(
-        libm::scalbn(mantissa.re, -mantissa_exponent),
-        libm::scalbn(mantissa.im, -mantissa_exponent),
+        scale_complex_component_exactly(mantissa.re, -mantissa_exponent)?,
+        scale_complex_component_exactly(mantissa.im, -mantissa_exponent)?,
     );
     Ok(ScaledComplex {
         mantissa: normalized,
@@ -3400,6 +3402,33 @@ mod matrix_free_tests {
                 scaled_flicker_density(gain.mantissa, gain.exponent, 1.0, -4 * exponent, 1.0, 0.0),
                 Ok(1.0)
             );
+        }
+    }
+
+    #[test]
+    fn periodic_flicker_modulation_does_not_erase_small_complex_components() {
+        let large = libm::scalbn(1.0, 800);
+        for rotation in [Complex64::new(1.0, 0.0), Complex64::new(0.0, 1.0)] {
+            for small in [libm::scalbn(1.0, -800), libm::scalbn(3.0, -275)] {
+                let gains = [
+                    Complex64::new(large, small) * rotation,
+                    Complex64::new(-large, small) * rotation,
+                ];
+                let error = modulated_noise_gain(&gains, &[Complex64::new(1.0, 0.0); 2], 0)
+                    .expect_err("normalization cannot discard the nonzero cancellation residue");
+                assert!(error.contains("nonzero term component"));
+            }
+            // The boundary that still aligns exactly remains supported: the
+            // tiny components become minimum subnormals at the common scale.
+            let small = libm::scalbn(1.0, -274);
+            let gains = [
+                Complex64::new(large, small) * rotation,
+                Complex64::new(-large, small) * rotation,
+            ];
+            let gain = modulated_noise_gain(&gains, &[Complex64::new(1.0, 0.0); 2], 0)
+                .expect("exact subnormal alignment preserves the cancellation residue");
+            let (physical, _) = materialize_scaled_complex_sum(&[gain]).unwrap();
+            assert_eq!(physical, Complex64::new(0.0, 2.0 * small) * rotation);
         }
     }
 
