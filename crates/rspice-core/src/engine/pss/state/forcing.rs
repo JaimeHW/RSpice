@@ -18,20 +18,20 @@ struct Derivatives {
 
 #[derive(Debug, Clone, Default)]
 pub(super) struct BehavioralForcing {
-    sources: BTreeMap<(PrescribedSource, usize), Derivatives>,
+    sources: BTreeMap<(ConstraintSource, usize), Derivatives>,
 }
 
 fn source(
     circuit: &CircuitData,
-    kind: PrescribedSource,
+    kind: ConstraintSource,
     index: usize,
 ) -> Result<(&str, &CompiledExpr, Context<'_>), SimulationError> {
     let (name, program) = match kind {
-        PrescribedSource::BehavioralVoltage => {
+        ConstraintSource::BehavioralVoltage => {
             let source = &circuit.behavioral_sources.voltage_sources[index];
             (source.name.as_str(), source.prescribed_time_program())
         }
-        PrescribedSource::BehavioralCurrent => {
+        ConstraintSource::BehavioralCurrent => {
             let source = &circuit.behavioral_sources.current_sources[index];
             (source.name.as_str(), source.prescribed_time_program())
         }
@@ -65,7 +65,7 @@ fn derivative_error(
 impl BehavioralForcing {
     pub(super) fn new(
         circuit: &CircuitData,
-        orders: &BTreeMap<(PrescribedSource, usize), usize>,
+        orders: &BTreeMap<(ConstraintSource, usize), usize>,
         retained_words: &mut usize,
         max_values: usize,
         abort: &dyn AbortSignal,
@@ -196,10 +196,10 @@ impl BehavioralForcing {
                 ))
             };
             let periodic = match kind {
-                PrescribedSource::BehavioralVoltage => circuit.behavioral_sources.voltage_sources
+                ConstraintSource::BehavioralVoltage => circuit.behavioral_sources.voltage_sources
                     [index]
                     .has_periodic_time_dependence(period, false),
-                PrescribedSource::BehavioralCurrent => circuit.behavioral_sources.current_sources
+                ConstraintSource::BehavioralCurrent => circuit.behavioral_sources.current_sources
                     [index]
                     .has_periodic_time_dependence(period, false),
                 _ => false,

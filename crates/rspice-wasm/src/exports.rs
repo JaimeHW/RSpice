@@ -315,6 +315,47 @@ mod wasm_tests {
     }
 
     #[wasm_bindgen_test]
+    fn pss_nonlinear_descriptor_in_wasm() {
+        use rspice_core::abort_signal::NoAbort;
+        use rspice_core::analysis::PssConfig;
+        let nvt = 300.15 * 1.38064852e-23 / 1.6021766208e-19;
+        let voltage = "(0.4+0.05*sin(2*pi*time))";
+        let deck=rspice_core::Netlist::parse(&format!("Implicit diode in WASM\nB1 0 in I={voltage}/100+1e-12*(exp({voltage}/{nvt:.17e})-1)\nR1 in 0 100\nD1 in 0 DM\n.model DM D(IS=1e-12)\nE1 out 0 in 0 2\nCout out 0 1u\n.end\n")).unwrap();
+        let mut config = rspice_core::engine::SimulationConfig::default();
+        config.convergence_config.gmin_target = 0.0;
+        config.convergence_config.junction_gmin_target = 0.0;
+        let point = rspice_core::Engine::new(config)
+            .run_pss_operating_point_with_abort(
+                &deck,
+                PssConfig::new(1.0)
+                    .with_points_per_period(64)
+                    .with_tstab_periods(0),
+                &NoAbort,
+            )
+            .unwrap();
+        assert!(point.shooting_state_basis().is_empty());
+        assert!(point.analysis().floquet_multipliers.is_empty());
+        let result = &point.analysis().result;
+        let output = result
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("out"))
+            .unwrap();
+        let branch = result
+            .branch_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("E1"))
+            .unwrap();
+        for (index, &time) in result.time.iter().enumerate() {
+            let omega = std::f64::consts::TAU;
+            let expected = 0.8 + 0.1 * (omega * time).sin();
+            assert!((result.waveforms[output].values[index] - expected).abs() < 2e-11);
+            let expected = -1e-7 * omega * (omega * time).cos();
+            assert!((result.branch_waveforms[branch].values[index] - expected).abs() < 2e-12);
+        }
+    }
+
+    #[wasm_bindgen_test]
     fn pss_behavioral_constant_rounding_does_not_create_current_in_wasm() {
         use rspice_core::abort_signal::NoAbort;
         use rspice_core::analysis::PssConfig;

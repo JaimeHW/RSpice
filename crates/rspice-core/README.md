@@ -516,8 +516,14 @@ derivatives through a bounded Taylor evaluator that preserves the selected
 dialect's constant-expression semantics. Periodicity and derivative regularity
 are checked across the complete orbit; poles and unresolved derivative jumps
 are diagnosed. Expressions outside this descriptor's supported operator set
-retain their existing path. Solution-dependent behavioral sources and nonlinear
-device manifolds still require further closure support. Behavioral displacement
+retain their existing path. Memoryless monotone C1 diode islands can also close
+algebraic control voltages: exact port dependencies exclude state or nonlinear
+current-derivative feedback, and an exact passivity check on each feedback
+component certifies a unique algebraic solution. Trial currents and their first
+time derivatives use the canonical full device law and its implicit Jacobian.
+Breakdown/recombination joins, injection knees, higher constitutive derivatives,
+solution-dependent behavioral sources and general nonlinear charge/flux
+manifolds still require further closure support. Behavioral displacement
 currents on the existing path require a qualified analytic outgoing derivative;
 unsupported derivatives are reported instead of using Newton's pointwise slope.
 This convergence check supplements the shooting residual, which measures closure

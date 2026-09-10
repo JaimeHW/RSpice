@@ -111,7 +111,7 @@ impl PssAcceptedStepHistory {
 const PSS_FD_STEP: Value = 1e-8;
 const PSS_KRYLOV_STATE_THRESHOLD: usize = 12;
 const PSS_KRYLOV_REL_TOL: Value = 1e-9;
-const PSS_OPERATING_POINT_IDENTITY_VERSION: u32 = 87;
+const PSS_OPERATING_POINT_IDENTITY_VERSION: u32 = 88;
 
 fn pss_identity_field(hasher: &mut blake3::Hasher, name: &str, bytes: &[u8]) {
     hasher.update(&(name.len() as u64).to_le_bytes());
@@ -2261,7 +2261,7 @@ impl Engine {
             },
         };
 
-        // A closed linear descriptor supplies a consistent instantaneous seed
+        // A closed descriptor supplies a consistent instantaneous seed
         // even when OP-only IC clamps would duplicate ideal source equations.
         self.pss_initialize_reactive_state(&mut circuit, &initial_solution);
         circuit.initialize_prescribed_currents()?;

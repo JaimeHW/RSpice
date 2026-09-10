@@ -13,14 +13,15 @@ mod forcing;
 use forcing::BehavioralForcing;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-enum PrescribedSource {
+enum ConstraintSource {
     Voltage,
     Current,
     BehavioralVoltage,
     BehavioralCurrent,
+    Diode,
 }
 
-impl PrescribedSource {
+impl ConstraintSource {
     fn is_behavioral(self) -> bool {
         matches!(self, Self::BehavioralVoltage | Self::BehavioralCurrent)
     }
@@ -52,17 +53,17 @@ enum ForestValue {
     SourceDerivative {
         index: usize,
         order: usize,
-        kind: PrescribedSource,
+        kind: ConstraintSource,
     },
     Source(usize),
     BehavioralSource(usize),
 }
 
 impl ForestValue {
-    fn source(self) -> Option<(PrescribedSource, usize, usize)> {
+    fn source(self) -> Option<(ConstraintSource, usize, usize)> {
         match self {
-            Self::Source(index) => Some((PrescribedSource::Voltage, index, 0)),
-            Self::BehavioralSource(index) => Some((PrescribedSource::BehavioralVoltage, index, 0)),
+            Self::Source(index) => Some((ConstraintSource::Voltage, index, 0)),
+            Self::BehavioralSource(index) => Some((ConstraintSource::BehavioralVoltage, index, 0)),
             Self::SourceDerivative { index, order, kind } => Some((kind, index, order)),
             _ => None,
         }
@@ -89,8 +90,9 @@ impl ForestValue {
         time: Value,
         extra_order: usize,
     ) -> Result<Value, SimulationError> {
-        let Some((kind, index, order)) = self.source().filter(|(kind, _, _)| !kind.is_behavioral())
-        else {
+        let Some((kind, index, order)) = self.source().filter(|(kind, _, _)| {
+            matches!(kind, ConstraintSource::Voltage | ConstraintSource::Current)
+        }) else {
             return Err(SimulationError::Circuit(
                 "PSS descriptor forcing is not an independent source".to_owned(),
             ));
@@ -98,7 +100,7 @@ impl ForestValue {
         let order = order.checked_add(extra_order).ok_or_else(|| {
             SimulationError::Circuit("PSS source derivative order overflow".to_owned())
         })?;
-        let (name, value) = if kind == PrescribedSource::Current {
+        let (name, value) = if kind == ConstraintSource::Current {
             (
                 &circuit.current_sources.names[index],
                 circuit
@@ -167,8 +169,10 @@ impl PssStateBasis {
         limits: crate::resource::ResourceLimits,
         abort: &dyn AbortSignal,
     ) -> Result<Self, SimulationError> {
-        if PssDescriptor::applies(circuit) {
-            return PssDescriptor::build(circuit, limits, abort);
+        if PssDescriptor::applies(circuit)
+            && let Some(basis) = PssDescriptor::build(circuit, limits, abort)?
+        {
+            return Ok(basis);
         }
         let node_count = circuit.num_nodes() + 1;
         let mut voltage_constraints = if circuit.vcvs.is_empty() {
@@ -1368,14 +1372,24 @@ mod tests {
                 let engine = Engine::new(
                     super::super::super::SimulationConfig::default().with_spice_dialect(dialect),
                 );
-                let mut circuit = PssCircuit::new(engine.build_circuit(&deck).unwrap()).unwrap();
-                circuit.set_state(&[]).unwrap();
-                let error = engine
-                    .pss_initial_node_solution(&mut circuit, &crate::abort_signal::NoAbort)
+                // The descriptor validates supported Taylor programs during
+                // construction; legacy operators are diagnosed during the
+                // augmented initialization solve. Both must name B2.
+                let error = PssCircuit::new(engine.build_circuit(&deck).unwrap())
+                    .and_then(|mut circuit| {
+                        circuit.set_state(&[])?;
+                        engine
+                            .pss_initial_node_solution(&mut circuit, &crate::abort_signal::NoAbort)
+                    })
                     .unwrap_err();
+                let required = if expression.starts_with("floor") {
+                    "analytic outgoing derivative"
+                } else {
+                    "analytic derivative through order 1"
+                };
                 assert!(
                     matches!(error, SimulationError::Circuit(ref message)
-                    if message.contains("source B2") && message.contains("analytic outgoing derivative")),
+                    if message.contains("source B2") && message.contains(required)),
                     "{error}"
                 );
             }

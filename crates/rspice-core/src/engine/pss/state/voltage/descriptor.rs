@@ -2,19 +2,24 @@
 
 use super::*;
 
+mod nonlinear;
+use nonlinear::NonlinearForcing;
+
 #[derive(Debug, Clone)]
 pub(in crate::engine::pss::state) struct PssDescriptor {
     solution: PssVoltageConstraints,
     charge_forcing: std::sync::Arc<Vec<Vec<(ForestValue, Value)>>>,
     behavioral: BehavioralForcing,
+    nonlinear: Option<NonlinearForcing>,
 }
 
 impl PssDescriptor {
     pub(in crate::engine::pss::state) fn applies(circuit: &CircuitData) -> bool {
         use crate::engine::periodic_capability::PeriodicDeviceFamily as F;
         // Ordinary independent-source networks retain their linear-time
-        // topological basis. Nonlinear/delayed devices need their own manifold
-        // closure; a DC linearization is not their large-signal descriptor.
+        // topological basis. Nonlinear current symbols are admitted only after
+        // their exact port dependencies certify a unique algebraic island.
+        // A DC linearization is never used as a large-signal rank certificate.
         (!circuit.vcvs.is_empty()
             || !circuit.vccs.is_empty()
             || !circuit.cccs.is_empty()
@@ -42,6 +47,11 @@ impl PssDescriptor {
                         .prescribed_time_program()
                         .is_some_and(|(program, _)| crate::expr::TimeDerivatives::supports(program))
                 })
+            && circuit
+                .diodes
+                .devices
+                .iter()
+                .all(|diode| diode.has_monotone_c1_conduction())
             && F::ALL.into_iter().all(|family| {
                 matches!(
                     family,
@@ -58,6 +68,7 @@ impl PssDescriptor {
                         | F::InductorCoupling
                         | F::CoupledInductorPair
                         | F::BehavioralSource
+                        | F::Diode
                 ) || family.instance_count(circuit) == 0
             })
     }
@@ -66,7 +77,7 @@ impl PssDescriptor {
         circuit: &CircuitData,
         limits: crate::resource::ResourceLimits,
         abort: &dyn AbortSignal,
-    ) -> Result<PssStateBasis, SimulationError> {
+    ) -> Result<Option<PssStateBasis>, SimulationError> {
         let size = circuit.matrix_size();
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
@@ -198,7 +209,7 @@ impl PssDescriptor {
                         Some(ForestValue::SourceDerivative {
                             index,
                             order: 0,
-                            kind: PrescribedSource::Current,
+                            kind: ConstraintSource::Current,
                         }),
                         sign,
                     )?;
@@ -239,7 +250,23 @@ impl PssDescriptor {
                         Some(ForestValue::SourceDerivative {
                             index,
                             order: 0,
-                            kind: PrescribedSource::BehavioralCurrent,
+                            kind: ConstraintSource::BehavioralCurrent,
+                        }),
+                        sign,
+                    )?;
+                }
+            }
+        }
+        for (index, diode) in circuit.diodes.devices.iter().enumerate() {
+            for (node, sign) in [(diode.node_anode, -1.0), (diode.node_cathode, 1.0)] {
+                if node != 0 {
+                    add(
+                        node - 1,
+                        0,
+                        Some(ForestValue::SourceDerivative {
+                            index,
+                            order: 0,
+                            kind: ConstraintSource::Diode,
                         }),
                         sign,
                     )?;
@@ -271,6 +298,11 @@ impl PssDescriptor {
             );
             if let Some(remainder) = algebraic.admit(row, 1, abort)? {
                 if !remainder.values.is_empty() {
+                    // A constitutive inverse or differential nonlinear closure
+                    // is needed here; do not certify it by linearization.
+                    if !circuit.diodes.is_empty() {
+                        return Ok(None);
+                    }
                     return Err(SimulationError::Circuit("PSS linear descriptor imposes an inconsistent or nonunique source constraint".to_owned()));
                 }
                 continue;
@@ -326,6 +358,9 @@ impl PssDescriptor {
         for unknown in 1..=size {
             let row = algebraic.port_row(unknown, 0, abort)?;
             if !row.nodes.is_empty() {
+                if !circuit.diodes.is_empty() {
+                    return Ok(None);
+                }
                 return Err(SimulationError::Circuit(
                     "PSS linear descriptor has an undetermined algebraic voltage or current"
                         .to_owned(),
@@ -357,6 +392,27 @@ impl PssDescriptor {
                 retained_words.saturating_add(form.len().saturating_mul(FORM_TERM_WORDS));
             charge_forcing.push(form);
         }
+        let port_headers = circuit.diodes.len().saturating_mul(3);
+        algebraic.reserve_retained_words(port_headers)?;
+        retained_words = retained_words.saturating_add(port_headers);
+        let mut nonlinear_ports = Vec::with_capacity(circuit.diodes.len());
+        for diode in &circuit.diodes.devices {
+            let row = algebraic.port_row(diode.node_anode, diode.node_cathode, abort)?;
+            // State dependence or derivatives of a nonlinear current can
+            // carry real charge/flux dynamics. Keep that existing basis.
+            if !row.nodes.is_empty()
+                || row.values.keys().any(|value| match value.source() {
+                    Some((ConstraintSource::Diode, _, order)) => order != 0,
+                    Some(_) => false,
+                    None => true,
+                })
+            {
+                return Ok(None);
+            }
+            retained_words =
+                retained_words.saturating_add(row.values.len().saturating_mul(FORM_TERM_WORDS));
+            nonlinear_ports.push(algebraic.compile_row(row)?);
+        }
         drop(algebraic);
         // Reserve source-order map nodes and traversal work before collecting
         // derivative requests. They coexist with compiled forms and caches.
@@ -365,11 +421,13 @@ impl PssDescriptor {
             .len()
             .saturating_add(circuit.current_sources.len())
             .saturating_add(circuit.behavioral_sources.voltage_sources.len())
-            .saturating_add(circuit.behavioral_sources.current_sources.len());
+            .saturating_add(circuit.behavioral_sources.current_sources.len())
+            .saturating_add(circuit.diodes.len());
         retained_words = retained_words.saturating_add(source_count.saturating_mul(64));
         PssVoltageConstraintBuilder::ensure_words(retained_words, limits.max_result_values)?;
         let mut descriptor = Self {
             behavioral: BehavioralForcing::default(),
+            nonlinear: None,
             charge_forcing: std::sync::Arc::new(charge_forcing),
             solution: PssVoltageConstraints {
                 node_forms: std::sync::Arc::new(forms),
@@ -380,20 +438,45 @@ impl PssDescriptor {
         // Exact closure determines the derivative orders. Evaluate each
         // prescribed B expression once at the initialization time, with the
         // same resource and cancellation contract as subsequent trial times.
+        let mut orders = descriptor.forcing_orders(circuit, abort)?;
+        if !nonlinear_ports.is_empty() {
+            let Some(nonlinear) = NonlinearForcing::new(
+                nonlinear_ports,
+                &mut orders,
+                &mut descriptor.solution.retained_words,
+                limits.max_result_values,
+                abort,
+            )?
+            else {
+                return Ok(None);
+            };
+            descriptor.nonlinear = Some(nonlinear);
+        }
         descriptor.behavioral = BehavioralForcing::new(
             circuit,
-            &descriptor.forcing_orders(circuit, abort)?,
+            &orders,
             &mut descriptor.solution.retained_words,
             limits.max_result_values,
             abort,
         )?;
-        Ok(PssStateBasis {
+        if let Some(nonlinear) = &mut descriptor.nonlinear {
+            nonlinear.initialize(
+                circuit,
+                &descriptor.behavioral,
+                descriptor
+                    .solution
+                    .max_values
+                    .saturating_sub(descriptor.solution.retained_words),
+                abort,
+            )?;
+        }
+        Ok(Some(PssStateBasis {
             voltage_branches,
             forest: Vec::new(),
             voltage_constraints: None,
             currents: PssCurrentBasis::from_descriptor(circuit, representatives),
             descriptor: Some(descriptor),
-        })
+        }))
     }
 
     pub(in crate::engine::pss::state) fn solve(
@@ -407,11 +490,8 @@ impl PssDescriptor {
             .ensure_evaluation_work(solution.len().saturating_mul(2), self.solution.max_terms())?;
         let mut trial = vec![0.0; solution.len()];
         self.solution.solve(&mut trial, |value| {
-            if value
-                .source()
-                .is_some_and(|(kind, _, _)| kind.is_behavioral())
-            {
-                self.behavioral.value(value, 0.0, 0)
+            if value.source().is_some() {
+                self.forcing_value(circuit, value, 0.0, 0)
             } else {
                 value.evaluate(circuit, state, voltage_count)
             }
@@ -482,7 +562,7 @@ impl PssDescriptor {
         &self,
         circuit: &CircuitData,
         abort: &dyn AbortSignal,
-    ) -> Result<BTreeMap<(PrescribedSource, usize), usize>, SimulationError> {
+    ) -> Result<BTreeMap<(ConstraintSource, usize), usize>, SimulationError> {
         let mut orders = BTreeMap::new();
         let mut count = 0_usize;
         let mut record = |value: ForestValue, extra: usize| -> Result<(), SimulationError> {
@@ -514,6 +594,9 @@ impl PssDescriptor {
                 record(value, 1)?;
             }
         }
+        if let Some(nonlinear) = &self.nonlinear {
+            nonlinear.extend_orders(&mut orders, abort)?;
+        }
         Ok(orders)
     }
 
@@ -525,13 +608,13 @@ impl PssDescriptor {
     ) -> Result<(), SimulationError> {
         self.behavioral.ensure_regular(circuit, period, abort)?;
         for ((kind, index), order) in self.forcing_orders(circuit, abort)? {
-            if kind.is_behavioral() {
+            if kind.is_behavioral() || kind == ConstraintSource::Diode {
                 continue;
             }
             if order == 0 {
                 continue;
             }
-            let (name, regular) = if kind == PrescribedSource::Current {
+            let (name, regular) = if kind == ConstraintSource::Current {
                 (
                     &circuit.current_sources.names[index],
                     circuit
@@ -568,7 +651,38 @@ impl PssDescriptor {
                 .max_values
                 .saturating_sub(self.solution.retained_words),
             abort,
-        )
+        )?;
+        if let Some(nonlinear) = &mut self.nonlinear {
+            nonlinear.prepare(
+                circuit,
+                &self.behavioral,
+                times,
+                self.solution
+                    .max_values
+                    .saturating_sub(self.solution.retained_words),
+                abort,
+            )?;
+        }
+        Ok(())
+    }
+
+    fn forcing_value(
+        &self,
+        circuit: &CircuitData,
+        value: ForestValue,
+        time: Value,
+        order: usize,
+    ) -> Result<Value, SimulationError> {
+        match value.source() {
+            Some((ConstraintSource::Diode, _, _)) => self
+                .nonlinear
+                .as_ref()
+                .ok_or_else(precision_error)?
+                .value(value, time, order),
+            Some((kind, _, _)) if kind.is_behavioral() => self.behavioral.value(value, time, order),
+            Some(_) => value.forcing(circuit, time, order),
+            None => Ok(0.0),
+        }
     }
 
     pub(in crate::engine::pss::state) fn source_companion(
@@ -607,12 +721,8 @@ impl PssDescriptor {
         let mut terms = Vec::with_capacity(max_terms);
         for (index, (rate, form)) in rates.iter_mut().zip(forms).enumerate() {
             let mut forcing = |time, order| -> Result<Value, SimulationError> {
-                evaluate_form(form, &mut terms, |value| match value.source() {
-                    Some((kind, _, _)) if kind.is_behavioral() => {
-                        self.behavioral.value(value, time, order)
-                    }
-                    Some(_) => value.forcing(circuit, time, order),
-                    None => Ok(0.0),
+                evaluate_form(form, &mut terms, |value| {
+                    self.forcing_value(circuit, value, time, order)
                 })
             };
             let previous = if step.coeff.coeff_i_n == 0.0 {
@@ -640,6 +750,129 @@ impl PssDescriptor {
 mod tests {
     use super::*;
     use crate::abort_signal::NoAbort;
+
+    #[test]
+    fn nonlinear_descriptor_solves_implicit_divider_and_controlled_charge() {
+        for dialect in [
+            crate::config::SpiceDialect::Ngspice,
+            crate::config::SpiceDialect::Xyce,
+        ] {
+            let (engine, mut circuit) = build(
+                "V1 src 0 SIN(0.8 0.4 1)\nR1 src in 100\nR2 in 0 200\nD1 in 0 DM\n.model DM D(IS=1e-12)\nE1 out 0 in 0 2\nCout out 0 1u",
+                dialect,
+            );
+            assert_eq!(circuit.state_dimension(), 0);
+            circuit
+                .ensure_regular_prescribed_currents(1.0, &NoAbort)
+                .unwrap();
+            circuit.set_state(&[]).unwrap();
+            let solution = engine
+                .pss_initial_node_solution(&mut circuit, &NoAbort)
+                .unwrap();
+            let voltage = solution[circuit.get_node_by_name("in").unwrap() - 1];
+            let diode = &circuit.diodes.devices[0];
+            let (current, slope) = diode.stamped_current_and_conductance(voltage);
+            close((0.8 - voltage) / 100.0, voltage / 200.0 + current);
+            let rate = 0.4 * std::f64::consts::TAU / (1.5 + 100.0 * slope);
+            close(circuit.capacitors.v_prev[0], 2.0 * voltage);
+            close(
+                solution[circuit.num_nodes() + circuit.vcvs.branch_indices[0] - 1],
+                -2e-6 * rate,
+            );
+            circuit.prepare_prescribed_forcing(0.25, &NoAbort).unwrap();
+            let descriptor = circuit.basis.descriptor.as_ref().unwrap();
+            let source = ForestValue::SourceDerivative {
+                kind: ConstraintSource::Diode,
+                index: 0,
+                order: 1,
+            };
+            close(
+                descriptor
+                    .nonlinear
+                    .as_ref()
+                    .unwrap()
+                    .value(source, 0.25, 0)
+                    .unwrap(),
+                0.0,
+            );
+        }
+    }
+
+    #[test]
+    fn nonlinear_descriptor_preserves_dynamic_and_nonpassive_feedback_modes() {
+        for devices in [
+            "I1 0 in SIN(0 1m 1)\nD1 in 0 DM\nL1 in 0 0.1\nH1 out 0 L1 2\nR1 out 0 1",
+            "V1 src 0 SIN(0 1 1)\nR1 src in 1\nD1 in 0 DM\nC1 in 0 0.1\nE1 out 0 in 0 2\nR2 out 0 1",
+        ] {
+            let netlist = Netlist::parse(&format!(
+                "Nonlinear mode\n{devices}\n.model DM D(IS=1e-12)\n.end\n"
+            ))
+            .unwrap();
+            let data = Engine::default().build_circuit(&netlist).unwrap();
+            assert!(PssDescriptor::applies(&data));
+            let circuit = PssCircuit::new(data).unwrap();
+            assert!(circuit.basis.descriptor.is_none());
+            assert_eq!(circuit.state_dimension(), 1);
+        }
+        let netlist = Netlist::parse("Positive feedback\nV1 src 0 SIN(0 1 1)\nR1 src in -1\nD1 in 0 DM\nE1 out 0 in 0 2\nCout out 0 1u\n.model DM D(IS=1e-12)\n.end\n").unwrap();
+        let data = Engine::default().build_circuit(&netlist).unwrap();
+        assert!(
+            PssDescriptor::build(&data, Default::default(), &NoAbort)
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn nonlinear_descriptor_cancellation_budget_and_retry() {
+        let (_, mut circuit) = build(
+            "V1 in 0 SIN(0 1 1)\nR1 in 0 1k\nH1 out 0 V1 2\nCout out 0 1u\nD1 out 0 DM\n.model DM D(IS=1e-12)",
+            crate::config::SpiceDialect::Ngspice,
+        );
+        let descriptor = circuit.basis.descriptor.as_ref().unwrap();
+        assert!(matches!(
+            PssStateBasis::new(
+                &circuit,
+                crate::resource::ResourceLimits {
+                    max_result_values: descriptor.solution.retained_words,
+                    ..Default::default()
+                },
+                &NoAbort
+            ),
+            Err(SimulationError::ResourceLimit(_))
+        ));
+        for calls in [1, 4, 8] {
+            assert!(matches!(
+                circuit.prepare_prescribed_forcing(
+                    0.125,
+                    &crate::abort_signal::CountingAbort::new(calls)
+                ),
+                Err(SimulationError::Aborted)
+            ));
+        }
+        circuit.prepare_prescribed_forcing(0.125, &NoAbort).unwrap();
+        assert!(
+            circuit
+                .basis
+                .descriptor
+                .as_ref()
+                .unwrap()
+                .nonlinear
+                .as_ref()
+                .unwrap()
+                .value(
+                    ForestValue::SourceDerivative {
+                        kind: ConstraintSource::Diode,
+                        index: 0,
+                        order: 0
+                    },
+                    0.125,
+                    0
+                )
+                .unwrap()
+                .is_finite()
+        );
+    }
 
     #[test]
     fn coupled_descriptor_limits_cancellation_and_failed_state_installation() {

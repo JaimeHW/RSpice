@@ -12,6 +12,164 @@ use rspice_core::netlist::Netlist;
 const F0: f64 = 1.0e6;
 
 #[test]
+fn nonlinear_descriptor_orbits_preserve_implicit_voltages_and_physical_currents() {
+    for dialect in [
+        rspice_core::config::SpiceDialect::Ngspice,
+        rspice_core::config::SpiceDialect::Xyce,
+    ] {
+        let mut config = SimulationConfig::default().with_spice_dialect(dialect);
+        config.convergence_config.gmin_target = 0.0;
+        config.convergence_config.junction_gmin_target = 0.0;
+        let engine = Engine::new(config);
+        for divider in [false, true] {
+            for source in ["V1 src 0 SIN(0 1 1)", "B1 src 0 V=sin(2*pi*time)"] {
+                let control = if source.starts_with('V') { "V1" } else { "B1" };
+                let devices = if divider {
+                    "R1 src in 1\nR2 in 0 1\nD1 in 0 DM\nE1 out 0 in 0 2".to_owned()
+                } else {
+                    format!("R1 src 0 1k\nH1 out 0 {control} 2\nD1 out 0 DM")
+                };
+                let deck = Netlist::parse(&format!("Implicit nonlinear orbit\n{source}\n{devices}\nCout out 0 1u\n.model DM D(IS=1e-12)\n.end\n")).unwrap();
+                // Authored N=1, IS=1e-12 at nominal 27C, with each dialect's
+                // published SPICE physical constants.
+                let nvt = 300.15
+                    * if dialect == rspice_core::config::SpiceDialect::Xyce {
+                        1.3806226e-23 / 1.6021918e-19
+                    } else {
+                        1.38064852e-23 / 1.6021766208e-19
+                    };
+                let isat = 1e-12;
+                // Independent closed-form junction law over this orbit's
+                // forward and reverse-leakage branches (below exp limiting).
+                let law = |v: f64| {
+                    if v >= -3.0 * nvt {
+                        let e = (v / nvt).exp();
+                        (isat * (e - 1.0), isat * e / nvt)
+                    } else {
+                        let a = (3.0 * nvt / (v * std::f64::consts::E)).powi(3);
+                        (-isat * (1.0 + a), 3.0 * isat * a / v)
+                    }
+                };
+                let point = engine
+                    .run_pss_operating_point_with_abort(
+                        &deck,
+                        PssConfig::new(1.0)
+                            .with_points_per_period(128)
+                            .with_tstab_periods(0),
+                        &NoAbort,
+                    )
+                    .unwrap();
+                assert!(point.shooting_state_basis().is_empty());
+                assert!(point.analysis().floquet_multipliers.is_empty());
+                let result = &point.analysis().result;
+                let output = result
+                    .node_names
+                    .iter()
+                    .position(|name| name.eq_ignore_ascii_case("out"))
+                    .unwrap();
+                let branch = result
+                    .branch_names
+                    .iter()
+                    .position(|name| name.eq_ignore_ascii_case(if divider { "E1" } else { "H1" }))
+                    .unwrap();
+                for (index, &time) in result.time.iter().enumerate() {
+                    let phase = std::f64::consts::TAU * time;
+                    let source = phase.sin();
+                    let source_rate = std::f64::consts::TAU * phase.cos();
+                    let (voltage, current) = if divider {
+                        let (mut lo, mut hi) = (-1.0, 1.0);
+                        for _ in 0..100 {
+                            let v = 0.5 * (lo + hi);
+                            if 2.0 * v + law(v).0 > source {
+                                hi = v;
+                            } else {
+                                lo = v;
+                            }
+                        }
+                        let v = 0.5 * (lo + hi);
+                        (2.0 * v, -2e-6 * source_rate / (2.0 + law(v).1))
+                    } else {
+                        let v = -0.002 * source;
+                        (v, 2e-9 * source_rate - law(v).0)
+                    };
+                    let actual = result.waveforms[output].values[index];
+                    assert!(
+                        (actual - voltage).abs() < 2e-11,
+                        "{dialect:?}, divider={divider}, t={time}: V {actual} vs {voltage}"
+                    );
+                    let actual = result.branch_waveforms[branch].values[index];
+                    assert!(
+                        (actual - current).abs() < 2e-12,
+                        "{dialect:?}, divider={divider}, t={time}: I {actual} vs {current}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn nonlinear_descriptor_coupled_diode_island_matches_authored_orbit() {
+    for dialect in [
+        rspice_core::config::SpiceDialect::Ngspice,
+        rspice_core::config::SpiceDialect::Xyce,
+    ] {
+        let mut config = SimulationConfig::default().with_spice_dialect(dialect);
+        config.convergence_config.gmin_target = 0.0;
+        config.convergence_config.junction_gmin_target = 0.0;
+        let engine = Engine::new(config);
+        let model = "D1 a 0 DM\nD2 b 0 DM\n.model DM D(IS=1e-12)";
+        let nvt = 300.15
+            * if dialect == rspice_core::config::SpiceDialect::Xyce {
+                1.3806226e-23 / 1.6021918e-19
+            } else {
+                1.38064852e-23 / 1.6021766208e-19
+            };
+        let isat = 1e-12;
+        let a = "(0.4+0.05*sin(2*pi*time))";
+        let b = "(0.3+0.03*cos(2*pi*time))";
+        let deck=Netlist::parse(&format!("Coupled nonlinear forcing\n{model}\nR1 a 0 100\nR2 b 0 200\nR3 a b 150\nB1 0 a I={a}/100+({a}-{b})/150+{isat:.17e}*(exp({a}/{nvt:.17e})-1)\nB2 0 b I={b}/200+({b}-{a})/150+{isat:.17e}*(exp({b}/{nvt:.17e})-1)\nE1 out 0 a b 2\nCout out 0 1u\n.end\n")).unwrap();
+        let point = engine
+            .run_pss_operating_point_with_abort(
+                &deck,
+                PssConfig::new(1.0)
+                    .with_points_per_period(64)
+                    .with_tstab_periods(0),
+                &NoAbort,
+            )
+            .unwrap();
+        assert!(point.shooting_state_basis().is_empty());
+        let result = &point.analysis().result;
+        let node = |name: &str| {
+            result
+                .node_names
+                .iter()
+                .position(|entry| entry.eq_ignore_ascii_case(name))
+                .unwrap()
+        };
+        let branch = result
+            .branch_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("E1"))
+            .unwrap();
+        for (index, &time) in result.time.iter().enumerate() {
+            let omega = std::f64::consts::TAU;
+            let a = 0.4 + 0.05 * (omega * time).sin();
+            let b = 0.3 + 0.03 * (omega * time).cos();
+            for (name, expected) in [("a", a), ("b", b), ("out", 2.0 * (a - b))] {
+                assert!(
+                    (result.waveforms[node(name)].values[index] - expected).abs() < 2e-11,
+                    "{dialect:?}, {name}, t={time}"
+                );
+            }
+            let expected =
+                -2e-6 * omega * (0.05 * (omega * time).cos() + 0.03 * (omega * time).sin());
+            assert!((result.branch_waveforms[branch].values[index] - expected).abs() < 2e-12);
+        }
+    }
+}
+
+#[test]
 fn behavioral_descriptor_orbits_preserve_physical_forcing_and_currents() {
     for dialect in [
         rspice_core::config::SpiceDialect::Ngspice,

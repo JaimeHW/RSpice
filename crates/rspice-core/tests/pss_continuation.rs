@@ -8,6 +8,67 @@ use std::sync::atomic::{AtomicU64, Ordering};
 const F0: f64 = 1.0e6;
 
 #[test]
+fn nonlinear_descriptor_preserves_physical_transient_continuation() {
+    let deck=Netlist::parse("Implicit nonlinear continuation\nV1 src 0 SIN(0.6 0.1 1)\nR1 src in 100\nR2 in 0 200\nD1 in 0 DM\n.model DM D(IS=1e-12)\nE1 out 0 in 0 2\nCout out 0 1u\n.end\n").unwrap();
+    let engine = Engine::default();
+    let (analysis, state) = engine
+        .run_pss_with_continuation_state(
+            &deck,
+            PssConfig::new(1.0)
+                .with_points_per_period(128)
+                .with_tstab_periods(0),
+        )
+        .unwrap();
+    assert!(analysis.monodromy.is_empty());
+    let (continued, _) = engine
+        .run_tran_from_pss_state(&deck, &state, 0.1, 0.001)
+        .unwrap();
+    let node = |name: &str| {
+        continued
+            .node_names
+            .iter()
+            .position(|entry| entry.eq_ignore_ascii_case(name))
+            .unwrap()
+    };
+    let branch = |name: &str| {
+        continued
+            .branch_names
+            .iter()
+            .position(|entry| entry.eq_ignore_ascii_case(name))
+            .unwrap()
+    };
+    let first = analysis
+        .result
+        .node_names
+        .iter()
+        .position(|entry| entry.eq_ignore_ascii_case("out"))
+        .unwrap();
+    assert!(
+        (continued.voltages[node("out")][0] - analysis.result.waveforms[first].values[0]).abs()
+            < 2e-11
+    );
+    for (index, &time) in continued.time.iter().enumerate() {
+        let input = continued.voltages[node("in")][index];
+        let output = continued.voltages[node("out")][index];
+        assert!((output - 2.0 * input).abs() < 2e-11, "t={time}");
+        assert!(
+            (continued.branch_currents[branch("E1")][index]
+                + continued.branch_currents[branch("Cout")][index])
+                .abs()
+                < 2e-11
+        );
+        let source = 0.6 + 0.1 * (std::f64::consts::TAU * time).sin();
+        assert!(
+            ((source - input) / 100.0
+                - input / 200.0
+                - continued.branch_currents[branch("D1")][index])
+                .abs()
+                < 2e-10
+        );
+    }
+}
+
+#[test]
 fn coupled_descriptor_winding_state_survives_transient_continuation() {
     for source in [
         "V1 in 0 SIN(0.7 1 1 0 0 37)",

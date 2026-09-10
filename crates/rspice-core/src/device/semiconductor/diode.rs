@@ -1881,6 +1881,48 @@ impl Diode {
         self.current(vd) + self.junction_gmin * vd
     }
 
+    /// Physical F and dF/dV at an arbitrary bias, without Newton limiting.
+    pub(crate) fn stamped_current_and_conductance(&self, vd: Value) -> (Value, Value) {
+        let (current, conductance) = self.current_and_conductance(vd);
+        (
+            current + self.junction_gmin * vd,
+            conductance + self.junction_gmin,
+        )
+    }
+
+    /// Sufficient, bias-independent certificate for the C1 monotone law used
+    /// by implicit algebraic PSS islands. Breakdown matching and recombination
+    /// have dialect-specific joins; injection knees need a separate proof.
+    /// This predicate does not alter the model law for any analysis.
+    pub(crate) fn has_monotone_c1_conduction(&self) -> bool {
+        let finite_nonnegative = |value: Value| value.is_finite() && value >= 0.0;
+        !self.has_charge_storage()
+            && self.bv.is_none()
+            && self.temperature_breakdown_voltage.is_none()
+            && self.forward_knee_current == 0.0
+            && self.reverse_knee_current == 0.0
+            && self.sidewall_knee_current == 0.0
+            && self.recombination_saturation_current == 0.0
+            && finite_nonnegative(self.is)
+            && finite_nonnegative(self.bottom_saturation_current())
+            && finite_nonnegative(self.sidewall_saturation_current * self.sidewall_perimeter)
+            && finite_nonnegative(self.junction_gmin)
+            && self.n.is_finite()
+            && self.n > 0.0
+            && self.vt.is_finite()
+            && self.vt > 0.0
+            && (self.n * self.vt).is_finite()
+            && self.n * self.vt > 0.0
+            && (!self.sidewall_emission_given
+                || (self.sidewall_emission_coefficient * self.vt).is_finite()
+                    && self.sidewall_emission_coefficient * self.vt > 0.0)
+            && (!self.tunneling.bottom_given || finite_nonnegative(self.tunnel_bottom()))
+            && (!self.tunneling.sidewall_given || finite_nonnegative(self.tunnel_sidewall()))
+            && (!(self.tunneling.bottom_given || self.tunneling.sidewall_given)
+                || (self.tunneling.emission.max(EPSMIN) * self.vt).is_finite()
+                    && self.tunneling.emission.max(EPSMIN) * self.vt > 0.0)
+    }
+
     /// Junction current and conductance in one evaluation.
     ///
     /// Xyce treats JSW without NS as extra saturation current on the bottom
