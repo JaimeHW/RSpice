@@ -4355,18 +4355,18 @@ impl ModelPlan {
             );
         }
         extensions.rollback_value_count += 2;
-        let lane = extensions.persistent_event_lane_count;
+        let lane = Self::event_checkpoint_index(extensions.persistent_event_lane_count);
         extensions.persistent_event_lane_count += 1;
         extensions
             .checkpoint_event_capture
             .push_str("        event_variables.push(self.timestep_bound_accepted);\n");
         let _ = writeln!(
             extensions.checkpoint_event_validate,
-            "        let bound = state.event_variables[Self::EVENT_STATE_COUNT + {lane}];\n        if bound.is_nan() || bound < 0.0 {{ return Err(format!(\"generated $bound_step checkpoint is invalid: {{bound}}\")); }}"
+            "        let bound = state.event_variables[{lane}];\n        if bound.is_nan() || bound < 0.0 {{ return Err(format!(\"generated $bound_step checkpoint is invalid: {{bound}}\")); }}"
         );
         let _ = writeln!(
             extensions.checkpoint_event_restore,
-            "        self.timestep_bound_accepted = state.event_variables[Self::EVENT_STATE_COUNT + {lane}];\n        self.timestep_bound_candidate = self.timestep_bound_accepted;"
+            "        self.timestep_bound_accepted = state.event_variables[{lane}];\n        self.timestep_bound_candidate = self.timestep_bound_accepted;"
         );
         extensions
             .validate_advance_state
@@ -4385,13 +4385,21 @@ impl ModelPlan {
         );
     }
 
+    fn event_checkpoint_index(extra_lanes: usize) -> String {
+        if extra_lanes == 0 {
+            "Self::EVENT_STATE_COUNT".to_string()
+        } else {
+            format!("Self::EVENT_STATE_COUNT + {extra_lanes}")
+        }
+    }
+
     fn push_event_control_state_fields(&self, extensions: &mut state_file::StateFileExtensions) {
         let cross_count = self.cross_slots.len();
         let has_timer = !self.timer_slots.is_empty();
         if cross_count > 0 || has_timer {
-            let offset = extensions.persistent_event_lane_count;
+            let offset = Self::event_checkpoint_index(extensions.persistent_event_lane_count);
             let prefix = format!(
-                "        let mut generated_event_lanes = &state.event_variables[Self::EVENT_STATE_COUNT + {offset}..];\n"
+                "        let mut generated_event_lanes = &state.event_variables[{offset}..];\n"
             );
             extensions.checkpoint_event_validate.push_str(&prefix);
             extensions.checkpoint_event_restore.push_str(&prefix);
