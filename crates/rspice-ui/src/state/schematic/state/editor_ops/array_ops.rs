@@ -463,6 +463,10 @@ impl SchematicState {
         if !capture.objects.has_content() {
             return Err(SchematicArrayError::EmptySelection);
         }
+        let references = super::super::super::component_references::PreparedCopyReferences::new(
+            &capture.objects.components,
+        )
+        .map_err(|reason| SchematicArrayError::InvalidComponentReference { reason })?;
         let electrical = capture_is_electrical(&capture.objects);
         if plan.kind == SchematicArrayKind::RadialDocumentation && electrical {
             return Err(SchematicArrayError::RadialDocumentationOnly {
@@ -531,6 +535,7 @@ impl SchematicState {
                 replica.selection.select_component(item.id);
                 replica.components.push(item);
             }
+            references.apply(&mut replica.components);
 
             for source in &capture.objects.wires {
                 let mut item = source.clone();

@@ -861,6 +861,9 @@ pub enum SchematicArrayError {
     IdentifierExhausted,
     DuplicateIdentity(u64),
     InvalidConnection(u64),
+    InvalidComponentReference {
+        reason: String,
+    },
     AmbiguousTerminalContact(Point),
     InvalidSourceName {
         name: String,
@@ -983,6 +986,7 @@ impl fmt::Display for SchematicArrayError {
                 formatter,
                 "Generated object identity {object_id} is already in use."
             ),
+            Self::InvalidComponentReference { reason } => formatter.write_str(reason),
             Self::InvalidConnection(connection_index) => write!(
                 formatter,
                 "Generated connection {connection_index} does not reference valid candidate objects."

@@ -1117,13 +1117,7 @@ impl Command {
                 if active_symbol_editor(app) {
                     app.paste_symbol_shape();
                 } else {
-                    let anchor = app.state.schematic_paste_anchor();
-                    if !app.state.schematic.paste_at(anchor) {
-                        app.state
-                            .push_user_message(crate::diagnostics::ConsoleMessage::warning(
-                                "Paste could not be completed at the current canvas target",
-                            ));
-                    }
+                    app.action_edit_paste();
                 }
             }
             Self::Duplicate => {

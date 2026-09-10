@@ -952,12 +952,13 @@ fn commit_duplicate(
         } else {
             0
         };
-    if !state.schematic.paste_at(draft.duplicate_anchor) {
+    let pasted = state.schematic.paste_at_checked(draft.duplicate_anchor);
+    if !matches!(pasted, Ok(true)) {
         state.schematic.clipboard = previous_clipboard;
         state.schematic.selection = previous_selection;
-        return Err(
-            "The duplicate could not be committed at the reviewed canvas target.".to_owned(),
-        );
+        return Err(pasted.err().unwrap_or_else(|| {
+            "The duplicate could not be committed at the reviewed canvas target.".to_owned()
+        }));
     }
     state.sync_active_schematic_to_workspace();
     Ok(format!(

@@ -21,6 +21,7 @@ mod bus;
 mod canvas_cache;
 mod clipboard;
 mod component;
+mod component_references;
 mod component_type;
 mod design_note;
 mod device_catalog;

@@ -25,23 +25,7 @@ impl<'a> NetlistGenerator<'a> {
     }
 
     pub(super) fn instance_name(&self, component: &Component) -> String {
-        let base = component.spice_instance_name();
-        let prefix = component
-            .library_cell
-            .as_ref()
-            .filter(|binding| binding.netlist_template.is_some() || binding.is_executable_builtin())
-            .and_then(crate::state::LibraryCellInstance::effective_reference_prefix)
-            .unwrap_or_else(|| component.kind.spice_prefix());
-
-        if prefix.is_empty() || base.is_empty() {
-            return base;
-        }
-
-        if base.len() >= prefix.len() && base[..prefix.len()].eq_ignore_ascii_case(prefix) {
-            base
-        } else {
-            format!("{}{}", prefix, base)
-        }
+        component.emitted_instance_name()
     }
 
     pub(super) fn filter_component_params(&self, params: &str, excluded: &[&str]) -> String {

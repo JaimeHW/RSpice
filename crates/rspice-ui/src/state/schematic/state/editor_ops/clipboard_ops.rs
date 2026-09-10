@@ -170,8 +170,13 @@ impl SchematicState {
 
     /// Paste clipboard contents at the given position (one undo entry)
     pub fn paste_at(&mut self, pos: Point) -> bool {
+        self.paste_at_checked(pos).unwrap_or(false)
+    }
+
+    /// Paste with a diagnostic when structural references cannot be preserved.
+    pub fn paste_at_checked(&mut self, pos: Point) -> Result<bool, String> {
         if self.read_only || !self.can_paste() {
-            return false;
+            return Ok(false);
         }
 
         let junction_only = self.clipboard.components.is_empty()
@@ -188,7 +193,7 @@ impl SchematicState {
         // unless at least one translated marker would create a new connection.
         let paste_pos = if junction_only {
             let Some(candidate) = self.nearest_junction_candidate(pos, self.grid_size) else {
-                return false;
+                return Ok(false);
             };
             candidate
         } else {
@@ -206,11 +211,14 @@ impl SchematicState {
                     && self.nearest_junction_candidate(target, 0) == Some(target)
             });
             if !has_valid_target {
-                return false;
+                return Ok(false);
             }
         }
 
-        self.with_undo("paste", |s| {
+        let references = super::super::super::component_references::PreparedCopyReferences::new(
+            &self.clipboard.components,
+        )?;
+        Ok(self.with_undo("paste", |s| {
             let clipboard_components = s.clipboard.components.clone();
             let clipboard_wires: Vec<Wire> = s
                 .clipboard
@@ -253,7 +261,8 @@ impl SchematicState {
             let mut committed = false;
             let mut electrical_committed = false;
 
-            // Paste components with new IDs
+            // Allocate every identity before remapping references within the copy.
+            let mut copied_components = Vec::with_capacity(clipboard_components.len());
             for comp in clipboard_components {
                 electrical_committed = true;
                 if !committed {
@@ -266,9 +275,11 @@ impl SchematicState {
                 new_comp.pos.x = new_comp.pos.x.saturating_add(offset_x);
                 new_comp.pos.y = new_comp.pos.y.saturating_add(offset_y);
                 new_comp.name = s.generate_name(new_comp.kind);
-                s.components.push(new_comp);
+                copied_components.push(new_comp);
                 s.selection.select_component(new_id);
             }
+            references.apply(&mut copied_components);
+            s.components.extend(copied_components);
 
             // Paste wires with new IDs
             for wire in clipboard_wires {
@@ -451,7 +462,7 @@ impl SchematicState {
                     s.bump_topology_version();
                 }
             }
-        })
+        }))
     }
 }
 

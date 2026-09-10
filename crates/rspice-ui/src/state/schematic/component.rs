@@ -1124,6 +1124,27 @@ impl Component {
         }
     }
 
+    /// Exact card identity shared by netlist emission and structural references.
+    pub(crate) fn emitted_instance_name(&self) -> String {
+        let base = self.spice_instance_name();
+        let prefix = self
+            .library_cell
+            .as_ref()
+            .filter(|binding| binding.netlist_template.is_some() || binding.is_executable_builtin())
+            .and_then(LibraryCellInstance::effective_reference_prefix)
+            .unwrap_or_else(|| self.kind.spice_prefix());
+        if prefix.is_empty()
+            || base.is_empty()
+            || base
+                .get(..prefix.len())
+                .is_some_and(|start| start.eq_ignore_ascii_case(prefix))
+        {
+            base
+        } else {
+            format!("{prefix}{base}")
+        }
+    }
+
     /// Validate against the effective emitted device prefix. Model-bound
     /// library cells own their declared primitive prefix rather than the
     /// generic `X` prefix of ordinary hierarchical instances.
