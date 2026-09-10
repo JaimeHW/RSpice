@@ -268,6 +268,7 @@ type WindowStats = Result<
     crate::analysis::measurements::IntervalStatistics,
     crate::analysis::measurements::MeasurementError,
 >;
+type CachedWindowStats = ((u64, u64), WindowStats);
 
 /// Whether retained evidence belongs to the stable analysis authored in the
 /// simulation plan. Deterministically expanded executions (for example PVT
@@ -3971,7 +3972,7 @@ pub struct DerivedSeries {
     ranges: std::collections::HashMap<u64, Option<(f64, f64)>>,
     /// Cached windowed (min, max, rms) measurements, keyed by
     /// (series key, window-start bits, window-end bits).
-    stats: std::collections::HashMap<WindowStatsKey, WindowStats>,
+    stats: std::collections::HashMap<(u64, usize), CachedWindowStats>,
     /// Cached monotone structure of a series' X column, per series key.
     ///
     /// Classifying costs one pass over the abscissa, and the renderer, the
@@ -4015,13 +4016,23 @@ impl DerivedSeries {
         *self.ranges.entry(key).or_insert_with(build)
     }
 
-    /// Fetch or compute interval statistics, including unavailable coverage.
+    /// Keep one interval per source/branch. Cursor dragging must not retain a
+    /// new measurement for every historical pointer position.
     pub fn stats_or(
         &mut self,
         key: WindowStatsKey,
         build: impl FnOnce() -> WindowStats,
     ) -> WindowStats {
-        *self.stats.entry(key).or_insert_with(build)
+        let (source, a, b, branch) = key;
+        let window = (a, b);
+        if let Some(&(cached_window, value)) = self.stats.get(&(source, branch))
+            && cached_window == window
+        {
+            return value;
+        }
+        let value = build();
+        self.stats.insert((source, branch), (window, value));
+        value
     }
 
     /// Fetch or build a derived series under `key`.

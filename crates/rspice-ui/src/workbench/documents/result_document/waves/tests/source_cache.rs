@@ -235,3 +235,46 @@ fn wave_cache_family_envelopes_follow_rebuilt_model_generations() {
         }
     }
 }
+
+#[test]
+fn measurement_cache_keeps_only_the_latest_window_per_trace_branch() {
+    let mut state = branches::hysteresis_run();
+    let models = cached_models(
+        &state.simulation,
+        &mut state.ui.results,
+        ComplexNumberDisplay::MagnitudePhaseDegrees,
+        &Tokens::default(),
+    );
+    let model = &models[0];
+    for step in 1..=1000 {
+        let upper = step as f64 / 1000.0;
+        for branch in 0..2 {
+            let stats = trace_interval_statistics(
+                &mut state.ui.results.derived,
+                model,
+                &model.traces[0],
+                Some((0.0, upper)),
+                Some(branch),
+            )
+            .unwrap();
+            let expected = if branch == 0 { upper } else { 4.0 - upper };
+            assert!((stats.mean - expected).abs() < 1e-14);
+        }
+    }
+    assert_eq!(state.ui.results.derived.stats.len(), 2);
+    let last = state
+        .ui
+        .results
+        .derived
+        .stats_or(
+            (
+                trace_key(model, &model.traces[0]),
+                0.0_f64.to_bits(),
+                1.0_f64.to_bits(),
+                0,
+            ),
+            || panic!("an unchanged interval must reuse its cached measurement"),
+        )
+        .unwrap();
+    assert_eq!(last.mean, 1.0);
+}
