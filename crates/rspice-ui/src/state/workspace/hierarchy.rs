@@ -48,10 +48,10 @@ impl ProjectWorkspace {
                     .ok_or_else(|| "The hierarchy configuration no longer exists.".to_owned())
             })
             .transpose()?;
-        if let Some(configuration) = configuration {
-            if !configuration.root().key().eq_ignore_ascii_case(&root.key()) {
-                return Err("The hierarchy configuration belongs to a different root.".to_owned());
-            }
+        if let Some(configuration) = configuration
+            && !configuration.root().key().eq_ignore_ascii_case(&root.key())
+        {
+            return Err("The hierarchy configuration belongs to a different root.".to_owned());
         }
         Ok(HierarchyResolver::with_authority(
             self,

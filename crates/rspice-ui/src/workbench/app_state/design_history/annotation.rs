@@ -99,7 +99,9 @@ impl AppState {
                 }
             }
             let root = self.workspace.simulation_root_reference();
-            if !probe_roots.contains_key(&root.key().to_ascii_lowercase()) {
+            if let std::collections::btree_map::Entry::Vacant(entry) =
+                probe_roots.entry(root.key().to_ascii_lowercase())
+            {
                 let resolution = self.workspace.resolve_hierarchy_for_reference(
                     &self.library_manager,
                     &root,
@@ -107,10 +109,7 @@ impl AppState {
                     &active,
                     &self.schematic,
                 )?;
-                probe_roots.insert(
-                    root.key().to_ascii_lowercase(),
-                    annotation_paths(&root, &resolution, &before, &after, true)?,
-                );
+                entry.insert(annotation_paths(&root, &resolution, &before, &after, true)?);
             }
             for (key, source) in &projected {
                 if source.probes.is_empty() {
@@ -314,6 +313,9 @@ fn append_document_paths(
         if component.name == candidate.name || component.kind.spice_prefix().is_empty() {
             continue;
         }
+        // Hierarchy resolution names placements by their authored instance
+        // names. Primitive current probes instead name emitted SPICE cards.
+        let emitted = emitted && component.kind != ComponentType::CellInstance;
         let from = if emitted {
             component.emitted_instance_name()
         } else {

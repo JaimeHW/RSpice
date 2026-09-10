@@ -334,6 +334,12 @@ fn annotation_history_refusal_does_not_partly_restore_names_or_catalogs() {
 
 #[test]
 fn annotation_updates_reused_masters_and_probes_in_independent_document_roots() {
+    for original_names in [["X1", "X2"], ["stage1", "stage2"]] {
+        verify_reused_master_annotation(original_names);
+    }
+}
+
+fn verify_reused_master_annotation(original_names: [&str; 2]) {
     use crate::state::{LibraryCellInstance, OpenCellView, View, ViewType};
     let mut fixture = fixture(&["V42"]);
     let state = &mut fixture.state;
@@ -362,14 +368,15 @@ fn annotation_updates_reused_masters_and_probes_in_independent_document_roots() 
         .find(|open| open.reference == child_ref)
         .unwrap();
     open.occurrence = crate::state::workspace::DocumentOccurrence::rooted(root.clone());
-    open.occurrence.descend("X1".to_owned(), child_ref.clone());
+    open.occurrence
+        .descend(original_names[0].to_owned(), child_ref.clone());
     let mut child = std::mem::take(&mut state.schematic);
     child.probes = vec![
         SchematicProbe::new(
             1000,
             Point::origin(),
-            "I(/X1/V42)",
-            Some("I(/X1/V42)".to_owned()),
+            format!("I(/{}/V42)", original_names[0]),
+            Some(format!("I(/{}/V42)", original_names[0])),
         )
         .unwrap(),
     ];
@@ -377,7 +384,7 @@ fn annotation_updates_reused_masters_and_probes_in_independent_document_roots() 
         .workspace
         .schematic_buffers
         .insert(child_ref.key(), child);
-    for (index, name) in ["X1", "X2"].iter().enumerate() {
+    for (index, name) in original_names.iter().enumerate() {
         let id = state.schematic.add_library_cell_component(
             Point::new((2 - index as i32) * 100, 0),
             LibraryCellInstance::new(&root.library, "child", "schematic"),
@@ -428,14 +435,14 @@ fn annotation_updates_reused_masters_and_probes_in_independent_document_roots() 
         .plan_data_mut(fixture.plan)
         .unwrap()
         .saved_outputs[0]
-        .source_expression = "I(/X2/V42)".to_owned();
+        .source_expression = format!("I(/{}/V42)", original_names[1]);
     let configuration = state
         .workspace
         .configuration_sets
         .find(fixture.configuration)
         .unwrap();
     let mut definition = configuration.definition().clone();
-    definition.dut_path = "/X1/V42".to_owned();
+    definition.dut_path = format!("/{}/V42", original_names[0]);
     state
         .workspace
         .configuration_sets
@@ -448,7 +455,7 @@ fn annotation_updates_reused_masters_and_probes_in_independent_document_roots() 
         current_reference: "V42".to_owned(),
         device_family: "V".to_owned(),
         sheet_id: None,
-        hierarchy_path: "/X1".to_owned(),
+        hierarchy_path: format!("/{}", original_names[0]),
         position: AnnotationPosition { x: 0, y: 0 },
         connectivity_order: Some(1),
         locked: false,
@@ -484,7 +491,7 @@ fn annotation_updates_reused_masters_and_probes_in_independent_document_roots() 
         let parents = if name == "V1" {
             ["X2", "X1"]
         } else {
-            ["X1", "X2"]
+            original_names
         };
         let child = &state.workspace.schematic_buffers[&child_ref.key()];
         assert_eq!(
