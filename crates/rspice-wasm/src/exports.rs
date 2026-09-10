@@ -1841,6 +1841,49 @@ mod wasm_tests {
     }
 
     #[wasm_bindgen_test]
+    fn vbic_flicker_multiplicity_range_in_wasm() {
+        let mut config = rspice_core::engine::SimulationConfig::default();
+        config.convergence_config.gmin_target = 0.0;
+        config.convergence_config.junction_gmin_target = 0.0;
+        config.convergence_config.voltage_abstol = 1e-13;
+        config.convergence_config.voltage_reltol = 1e-12;
+        config.convergence_config.current_abstol = 1e-40;
+        config.convergence_config.residual_reltol = 1e-12;
+        let engine = rspice_core::Engine::new(config);
+        for level in [4, 11] {
+            let run = |m| {
+                let substrate = if level == 11 { "" } else { " 0" };
+                let netlist = rspice_core::Netlist::parse(&format!(
+                    "VBIC flicker range in WASM\nVc c 0 0\nVb b 0 0.7\nQ1 c b 0{substrate} vm M={m}\n\
+                     .model vm NPN(LEVEL={level} IS=1e-40 IBEI=1e-18 IBCI=0 IBEIP=1e-18 ISP=0 WBE=1 RCX=0 RCI=0 RBX=0 RBI=0 RE=0 RBP=0 RS=0 GMIN=0 KFN=1e300 AFN=20 BFN=1 TNOM=27)\n.options gmin=0\n.end\n"
+                )).unwrap();
+                engine
+                    .run_port_noise_correlation_with_abort(
+                        &netlist,
+                        &["Vb".into()],
+                        &[1.0, 1e4],
+                        300.15,
+                        &rspice_core::abort_signal::NoAbort,
+                    )
+                    .unwrap()
+            };
+            let reference = run(1.0);
+            for m in [1e-20, 1e20] {
+                for (actual, expected) in run(m).iter().zip(&reference) {
+                    let scale = if level == 4 { m } else { m * (1.0 + m) * 0.5 };
+                    let expected = expected.current_correlation[0][0].re * scale;
+                    let actual = actual.current_correlation[0][0].re;
+                    assert!(expected.is_normal());
+                    assert!(
+                        (actual - expected).abs() < expected * 2e-10,
+                        "LEVEL={level} M={m:e}: {actual:e} vs {expected:e}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[wasm_bindgen_test]
     fn vbic13_extrinsic_flicker_matches_xyce_in_wasm() {
         let netlist = rspice_core::Netlist::parse(
             "VBIC extrinsic flicker in WASM\nVcc vcc 0 3\nRc vcc c 1k\nVb drive 0 DC 0.7 AC 1\nRb drive b 1k\nVth th 0 0\nQ1 c b 0 th vm SW_ET=0 M=3\n\

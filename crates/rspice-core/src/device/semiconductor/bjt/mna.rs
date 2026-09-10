@@ -32,7 +32,9 @@ pub(crate) struct VbicNoiseOperatingModel {
     pub thermal: [(&'static str, NodeId, NodeId, Value); 7],
     /// `(mechanism, node+, node-, noise current)` including model multiplicity.
     pub shot: [(&'static str, NodeId, NodeId, Value); 5],
-    /// `(mechanism, node+, node-, current, coefficient scale)` for KFN flicker.
+    /// Lower bound on per-copy flicker current, before applying AFN.
+    pub flicker_current_floor: Value,
+    /// `(mechanism, node+, node-, total current, coefficient scale)` for KFN flicker.
     pub flicker: [(&'static str, NodeId, NodeId, Value, Value); 3],
 }
 
@@ -466,15 +468,6 @@ impl Bjt {
         };
         let shot_scale = if self.vbic_13 { self.m } else { 1.0 };
         let four_terminal_noise = self.vbic_13 && !self.vbic_three_terminal;
-        let flicker_current = |current: Value| {
-            if self.vbic_13 {
-                current
-            } else {
-                // vbicnoise.c applies N_MINLOG to the per-copy current before
-                // the exponent; zero/negative AFN therefore still emits noise.
-                current.abs().max(self.m * 1e-38)
-            }
-        };
         Some(VbicNoiseOperatingModel {
             physical_constants: self
                 .vbic_13
@@ -571,14 +564,10 @@ impl Bjt {
                     },
                 ),
             ],
+            // vbicnoise.c uses N_MINLOG; VBIC 1.3 has no current floor.
+            flicker_current_floor: if self.vbic_13 { 0.0 } else { 1e-38 },
             flicker: [
-                (
-                    "FN",
-                    self.node_bi,
-                    self.node_ei,
-                    flicker_current(eval.ibe.current),
-                    1.0,
-                ),
+                ("FN", self.node_bi, self.node_ei, eval.ibe.current, 1.0),
                 (
                     "FN_BEX",
                     self.node_bx,
@@ -590,7 +579,7 @@ impl Bjt {
                     "FN_BEP",
                     self.node_bx,
                     self.node_bp,
-                    flicker_current(eval.ibep.current),
+                    eval.ibep.current,
                     shot_scale,
                 ),
             ],

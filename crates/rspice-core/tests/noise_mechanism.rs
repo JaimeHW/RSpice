@@ -559,6 +559,61 @@ fn mos_flicker_coefficients_outside_f64_range_preserve_in_band_noise() {
     }
 }
 
+#[test]
+fn vbic_flicker_port_spectrum_preserves_multiplicity_range() {
+    let mut config = SimulationConfig::default();
+    config.convergence_config.gmin_target = 0.0;
+    config.convergence_config.junction_gmin_target = 0.0;
+    config.convergence_config.voltage_abstol = 1e-13;
+    config.convergence_config.voltage_reltol = 1e-12;
+    config.convergence_config.current_abstol = 1e-40;
+    config.convergence_config.residual_reltol = 1e-12;
+    let engine = Engine::new(config);
+    let frequencies = [1.0_f64, 1e4];
+    for level in [4, 9, 11, 12] {
+        for (kind, p) in [("NPN", 1.0), ("PNP", -1.0)] {
+            let make = |m, kfn| {
+                let substrate = if level == 11 { "" } else { " 0" };
+                Netlist::parse(&format!(
+                    "VBIC flicker port range\nVc c 0 0\nVb b 0 {}\nQ1 c b 0{substrate} vm M={m}\n\
+                     .model vm {kind}(LEVEL={level} IS=1e-40 IBEI=1e-18 IBCI=0 IBEIP=1e-18 ISP=0 WBE=1 RCX=0 RCI=0 RBX=0 RBI=0 RE=0 RBP=0 RS=0 GMIN=0 KFN={kfn} AFN=20 BFN=1 TNOM=27)\n.options gmin=0\n.end\n",
+                    p * 0.7
+                )).unwrap()
+            };
+            for (m, kfn) in [(1e-20, 1e160), (1e20, 1e160), (1e20, 1e300)] {
+                // Retain the complete unit-port transfer: VBIC 1.3 inserts
+                // finite internal resistances even when authored as zero.
+                let reference = engine
+                    .run_port_noise_correlation(
+                        &make(1.0, kfn),
+                        &["Vb".into()],
+                        &frequencies,
+                        300.15,
+                    )
+                    .unwrap();
+                let points = engine
+                    .run_port_noise_correlation(&make(m, kfn), &["Vb".into()], &frequencies, 300.15)
+                    .unwrap();
+                for ((point, reference), frequency) in
+                    points.iter().zip(&reference).zip(frequencies)
+                {
+                    // Equal intrinsic/parasitic junctions contribute equally
+                    // at M=1. Only VBIC 1.3 scales the parasitic term by M twice.
+                    // White noise is negligible in these high-flicker fixtures.
+                    let scale = if level < 11 { m } else { m * (1.0 + m) * 0.5 };
+                    let expected = reference.current_correlation[0][0].re * scale;
+                    let actual = point.current_correlation[0][0].re;
+                    assert!(expected.is_normal());
+                    assert!(
+                        (actual - expected).abs() < expected * 2e-10,
+                        "LEVEL={level} {kind} M={m:e} KFN={kfn:e} f={frequency}: {actual:e} vs {expected:e}"
+                    );
+                }
+            }
+        }
+    }
+}
+
 fn semiconductor_flicker_deck(family: &str, m: f64, kf: f64, af: f64, zero: bool) -> Netlist {
     let (bias, device, model) = match family {
         "D" => (0.1, format!("D1 p 0 mm M={m}"), "D(IS=1e-14"),

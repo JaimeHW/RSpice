@@ -49,9 +49,9 @@ impl Bjt {
     /// Return the VBIC base-emitter flicker-noise coefficients
     /// `(KFN, AFN, BFN)`, if enabled by the model card.
     ///
-    /// The noise operating model supplies each junction's current and any
+    /// The noise operating model supplies each junction's total current and any
     /// additional coefficient scaling required by its model family. The
-    /// collector folds the common `m·KFN·|I/m|^AFN / f^BFN` factor.
+    /// collector retains coefficient range until evaluating `|I/m|^AFN / f^BFN`.
     pub fn vbic_flicker_noise_coefficients(&self) -> Option<(Value, Value, Value)> {
         if self.kfn > 0.0 && self.kfn.is_finite() {
             Some((self.kfn, self.afn, self.bfn))

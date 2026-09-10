@@ -2800,32 +2800,54 @@ impl Engine {
                             bjt.name
                         )));
                     }
-                    let coefficient = Self::checked_positive_noise_parameter(
-                        &format!("{}:FN", bjt.name),
-                        kfn * m.powf(1.0 - afn),
-                    )?;
                     for (mechanism, node_pos, node_neg, current, scale) in model.flicker {
-                        if current != 0.0 && scale > 0.0 {
-                            let coefficient = Self::checked_positive_noise_parameter(
+                        if (current != 0.0 || model.flicker_current_floor > 0.0) && scale > 0.0 {
+                            Self::checked_positive_noise_parameter(
                                 &format!("{}:{mechanism}", bjt.name),
-                                coefficient * scale,
+                                scale,
                             )?;
-                            noise_sources.push(
-                                NoiseSource::flicker_with_frequency_exponent(
-                                    bjt.name.clone(),
-                                    node_pos,
-                                    node_neg,
-                                    coefficient,
-                                    afn,
-                                    bfn,
-                                    current.abs(),
-                                )
-                                .with_identity(
-                                    crate::analysis::NoiseSourceIdentity::mechanism(
-                                        &bjt.name, mechanism,
-                                    ),
+                            let total_current = current.abs();
+                            let per_copy = total_current / m;
+                            let per_copy = if per_copy.is_nan() {
+                                per_copy
+                            } else {
+                                per_copy.max(model.flicker_current_floor)
+                            };
+                            let (current, multiplicity_factor) =
+                                if per_copy.is_normal() || total_current == 0.0 {
+                                    (per_copy, m)
+                                } else {
+                                    // Retain the total current if division by M
+                                    // loses range/precision. This alternative can
+                                    // still represent a finite spectrum (e.g. AFN=0.5).
+                                    let factor = Self::checked_positive_noise_parameter(
+                                        &format!("{}:{mechanism} current normalization", bjt.name),
+                                        m.powf(1.0 - afn),
+                                    )?;
+                                    (total_current, factor)
+                                };
+                            let mut source = NoiseSource::flicker_with_frequency_exponent(
+                                bjt.name.clone(),
+                                node_pos,
+                                node_neg,
+                                kfn,
+                                afn,
+                                bfn,
+                                current,
+                            )
+                            .with_identity(
+                                crate::analysis::NoiseSourceIdentity::mechanism(
+                                    &bjt.name, mechanism,
                                 ),
                             );
+                            // Retain coefficient range through the current
+                            // power and frequency law in either representation.
+                            (source.parameter, source.parameter_exponent) =
+                                crate::numerics::product_binary_normalization(
+                                    &[kfn, multiplicity_factor, scale],
+                                    &[],
+                                );
+                            noise_sources.push(source);
                         }
                     }
                 }
@@ -7868,17 +7890,17 @@ M1 D G S B N W=10u L=1u AS=0 AD=0 PS=0 PD=0
         }
     }
 
-    /// VBIC KFN/AFN/BFN flicker noise must ride the intrinsic B-E junction
-    /// with vbicnoise.c's multiplicity folding: `m·KFN·|Ibe/m|^AFN / f^BFN`,
-    /// i.e. an effective coefficient of `KFN·m^(1−AFN)` on the m-folded
-    /// junction current. The regression deck only exercises AFN=1 (where m
-    /// cancels), so the folding is pinned here at AFN≠1.
     #[test]
     fn ngspice_vbic_flicker_keeps_its_current_floor_and_signed_exponents() {
         // vbicnoise.c: M*KFN*max(abs(I/M), 1e-38)^AFN/f^BFN.
-        for (afn, kfn) in [(0.0, 1e-20), (-1.0, 1e-100)] {
+        for (m, afn, kfn) in [
+            (3.0, 0.0, 1e-20),
+            (3.0, -1.0, 1e-100),
+            (1e-300, 0.0, 1e300),
+            (1e-300, -1.0, 1e280),
+        ] {
             let sources = collected_noise_sources_for_deck(&format!(
-                "VBIC zero-current flicker\nVc c 0 0\nVb b 0 0\nQ1 c b 0 0 vm M=3\n\
+                "VBIC zero-current flicker\nVc c 0 0\nVb b 0 0\nQ1 c b 0 0 vm M={m}\n\
                  .model vm NPN(LEVEL=4 KFN={kfn} AFN={afn} BFN=-0.5 IBEI=0 IBCI=0 IBEIP=0 ISP=0 RCX=1 RCI=1 RBX=1 RBI=1 RE=1 RS=1 RBP=1)\n.end\n"
             ));
             for name in ["FN", "FN_BEP"] {
@@ -7886,11 +7908,11 @@ M1 D G S B N W=10u L=1u AS=0 AD=0 PS=0 PD=0
                     .iter()
                     .find(|source| source.identity.mechanism.as_deref() == Some(name))
                     .unwrap();
-                let expected = 3.0 * kfn * (1e-38_f64).powf(afn) * 2.0;
+                let expected = m * kfn * (1e-38_f64).powf(afn) * 2.0;
                 let actual = source.spectral_density(4.0, 300.15);
                 assert!(
                     (actual - expected).abs() < 1e-12 * expected,
-                    "{name}, AFN={afn}: {actual:e} != {expected:e}"
+                    "{name}, M={m:e} AFN={afn}: {actual:e} != {expected:e}"
                 );
             }
             assert!(
@@ -7898,6 +7920,76 @@ M1 D G S B N W=10u L=1u AS=0 AD=0 PS=0 PD=0
                     .iter()
                     .any(|source| source.identity.mechanism.as_deref() == Some("FN_BEX"))
             );
+        }
+    }
+
+    #[test]
+    fn vbic13_flicker_preserves_current_when_per_copy_division_underflows() {
+        for m in [1e200, 1e240] {
+            let sources = collected_noise_sources_for_deck(&format!(
+                "VBIC per-copy current range\nVc c 0 0\nVb b 0 1e-200\nQ1 c b 0 vm M={m}\n\
+                 .model vm NPN(LEVEL=11 IS=1e-300 IBEI=1e-300 IBCI=0 IBEIP=0 ISP=0 WBE=1 RCX=0 RCI=0 RBX=0 RBI=0 RE=0 RBP=0 RS=0 GMIN=0 KFN=1 AFN=0.5 BFN=1 TNOM=27)\n.end\n"
+            ));
+            let source = mechanism(&sources, "Q1", "FN")
+                .expect("nonzero total current must not disappear when I/M underflows");
+            // The per-copy Shockley current is below binary64, but its square
+            // root is ordinary. Reorder its independent small-bias expression.
+            let vt = 300.15 * 1.380662e-23 / 1.602189e-19;
+            let expected = 1e-150 * (1e-200_f64 / vt).sqrt() * m;
+            let actual = source.try_spectral_density(1.0, 300.15).unwrap();
+            assert!(expected.is_normal());
+            assert!(
+                (actual - expected).abs() < expected * 2e-12,
+                "M={m:e}: {actual:e} vs {expected:e}"
+            );
+        }
+    }
+
+    #[test]
+    fn vbic_flicker_retains_multiplicity_range_at_frequency() {
+        for level in [4, 11, 12] {
+            for (m, kfn, afn) in [
+                (1e-20, 1e160, 20.0),
+                (1e20, 1e160, 20.0),
+                (1e20, 1e300, 20.0),
+                (1e-20, 1e-300, -20.0),
+            ] {
+                if level != 4 && afn < 0.0 {
+                    continue; // VBIC 1.3 requires positive AFN.
+                }
+                let collect = |m| {
+                    let substrate = if level == 11 { "" } else { " 0" };
+                    collected_noise_sources_for_deck(&format!(
+                        "VBIC noise range\nVc c 0 0\nVb b 0 0.7\nQ1 c b 0{substrate} vm M={m}\n\
+                         .model vm NPN(LEVEL={level} IS=1e-40 IBEI=1e-18 IBCI=0 IBEIP=2e-18 ISP=0 WBE=0.5 RCX=0 RCI=0 RBX=0 RBI=0 RE=0 RBP=0 RS=0 GMIN=0 KFN={kfn} AFN={afn} BFN=1 TNOM=27)\n.end\n"
+                    ))
+                };
+                let reference = collect(1.0);
+                let actual = collect(m);
+                for name in ["FN", "FN_BEX", "FN_BEP"] {
+                    if level == 4 && name == "FN_BEX" {
+                        continue;
+                    }
+                    let expected = mechanism(&reference, "Q1", name).unwrap();
+                    let source = mechanism(&actual, "Q1", name).unwrap();
+                    // Independent copies add their spectra. VBIC 1.3's VA
+                    // law specifically multiplies its parasitic BE source by M again.
+                    let scale = if level != 4 && name == "FN_BEP" {
+                        m * m
+                    } else {
+                        m
+                    };
+                    for frequency in [1.0, 1e4] {
+                        let expected = expected.spectral_density(frequency, 300.15) * scale;
+                        let actual = source.try_spectral_density(frequency, 300.15).unwrap();
+                        assert!(expected.is_normal());
+                        assert!(
+                            (actual - expected).abs() < expected * 2e-10,
+                            "LEVEL={level} {name} M={m:e} KFN={kfn:e} AFN={afn} f={frequency}: {actual:e} vs {expected:e}"
+                        );
+                    }
+                }
+            }
         }
     }
 
@@ -7947,10 +8039,10 @@ Q1 C B E 0 N1 M=3
         let kfn = 2e-14;
         let afn = 1.5;
         let bfn = 0.8;
-        let expected_coefficient = kfn * m.powf(1.0 - afn);
+        let expected_coefficient = kfn * m;
         assert!(
             (flicker.parameter - expected_coefficient).abs() <= 1e-9 * expected_coefficient,
-            "coefficient must fold multiplicity as KFN*m^(1-AFN): got {:e}, want {:e}",
+            "coefficient must retain KFN*m with per-copy current: got {:e}, want {:e}",
             flicker.parameter,
             expected_coefficient,
         );
@@ -7958,7 +8050,7 @@ Q1 C B E 0 N1 M=3
         assert_eq!(flicker.ef, bfn);
         assert!(
             flicker.current > 1e-12,
-            "flicker rides the m-folded forward B-E junction current, got {:e}",
+            "flicker rides the per-copy forward B-E junction current, got {:e}",
             flicker.current,
         );
 
