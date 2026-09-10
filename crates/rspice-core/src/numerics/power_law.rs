@@ -243,12 +243,31 @@ pub(crate) fn scaled_power_law(
     frequency: Value,
     frequency_exponent: Value,
 ) -> Value {
+    let (mantissa, power) = power_product_binary_normalization(
+        coefficient,
+        binary_scale,
+        &[
+            (current, current_exponent),
+            (frequency, -frequency_exponent),
+        ],
+    );
+    libm::scalbn(mantissa, power)
+}
+
+/// Retain a product of real powers before crossing the binary64 range.
+/// Bases/coefficient must be finite and positive, and powers finite. A zero
+/// or infinite mantissa denotes a result beyond the retained i32 exponent.
+#[cold]
+pub(crate) fn power_product_binary_normalization(
+    coefficient: Value,
+    binary_scale: i32,
+    powers: &[(Value, Value)],
+) -> (Value, i32) {
     let scale = libm::ilogb(
-        current_exponent
-            .abs()
-            .max(frequency_exponent.abs())
-            .max(Value::from(binary_scale).abs())
-            .max(1.0),
+        powers
+            .iter()
+            .map(|(_, exponent)| exponent.abs())
+            .fold(Value::from(binary_scale).abs().max(1.0), Value::max),
     );
     let fraction_words = (scale as usize + 128).div_ceil(64);
     let ln_two = Fixed::logarithm_series(1, 3, fraction_words);
@@ -256,11 +275,7 @@ pub(crate) fn scaled_power_law(
         magnitude: Fixed::ZERO,
         negative: false,
     };
-    for (base, exponent) in [
-        (coefficient, 1.0),
-        (current, current_exponent),
-        (frequency, -frequency_exponent),
-    ] {
+    for (base, exponent) in std::iter::once((coefficient, 1.0)).chain(powers.iter().copied()) {
         if exponent != 0.0 && base != 1.0 {
             let term = SignedFixed::logarithm(base, &ln_two, fraction_words);
             logarithm.accumulate(&term, exponent, scale);
@@ -275,27 +290,35 @@ pub(crate) fn scaled_power_law(
         scale,
     );
     let Some(highest_bit) = logarithm.magnitude.highest_bit() else {
-        return 1.0;
+        return (1.0, 0);
     };
     let binary_scale = scale - (fraction_words * 64) as i32;
     let exponent = highest_bit as i32 + binary_scale;
-    // All factors have already been composed. These magnitudes unambiguously
-    // overflow/underflow exp(), or round exp() to one, respectively.
-    if exponent >= 10 {
+    // Bound the retained exponent rather than the materialized density, so
+    // later current/frequency factors can cancel a very large coefficient.
+    if exponent >= 31 {
         return if logarithm.negative {
-            0.0
+            (0.0, 0)
         } else {
-            Value::INFINITY
+            (Value::INFINITY, 0)
         };
     }
     if exponent < -56 {
-        return 1.0;
+        return (1.0, 0);
     }
     let value = logarithm.magnitude.rounded_float(binary_scale, highest_bit);
     let value = if logarithm.negative { -value } else { value };
     // Reduce before converting the residual to binary64. Rounding a large
     // logarithm directly would lose relative precision in the final density.
-    let power = (value / core::f64::consts::LN_2).round() as i32;
+    let power = (value / core::f64::consts::LN_2).round();
+    if power < Value::from(i32::MIN) || power > Value::from(i32::MAX) {
+        return if logarithm.negative {
+            (0.0, 0)
+        } else {
+            (Value::INFINITY, 0)
+        };
+    }
+    let power = power as i32;
     logarithm.accumulate(
         &SignedFixed {
             magnitude: ln_two,
@@ -308,5 +331,36 @@ pub(crate) fn scaled_power_law(
         let value = logarithm.magnitude.rounded_float(binary_scale, bit);
         if logarithm.negative { -value } else { value }
     });
-    libm::scalbn(residual.exp(), power)
+    (residual.exp(), power)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn retained_power_product_preserves_range_and_three_way_cancellation() {
+        for power in [-4000, 4000, i32::MIN, i32::MAX] {
+            assert_eq!(
+                power_product_binary_normalization(1.0, 0, &[(2.0, Value::from(power))]),
+                (1.0, power)
+            );
+        }
+        assert_eq!(
+            power_product_binary_normalization(
+                1.0,
+                0,
+                &[(2.0, 1e308), (4.0, -5e307), (2.0, 4000.0)]
+            ),
+            (1.0, 4000)
+        );
+        assert_eq!(
+            power_product_binary_normalization(1.0, 0, &[(2.0, Value::from(i32::MAX) + 1.0)]),
+            (Value::INFINITY, 0)
+        );
+        assert_eq!(
+            power_product_binary_normalization(1.0, 0, &[(2.0, Value::from(i32::MIN) - 1.0)]),
+            (0.0, 0)
+        );
+    }
 }

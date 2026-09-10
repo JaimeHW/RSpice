@@ -11,7 +11,7 @@
 
 pub(crate) mod eigenspectrum;
 mod power_law;
-pub(crate) use power_law::scaled_power_law;
+pub(crate) use power_law::{power_product_binary_normalization, scaled_power_law};
 pub mod integration;
 pub mod rustfft_qualification;
 
