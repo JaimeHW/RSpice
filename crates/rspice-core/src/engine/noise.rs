@@ -1746,8 +1746,12 @@ impl Engine {
         circuit: &CircuitData,
         dc_solution: &[Value],
     ) -> (Vec<NoiseSource>, Vec<CorrelatedNoisePair>) {
-        let collected = Self::try_collect_noise_sources(circuit, dc_solution)
-            .unwrap_or_else(|err| panic!("{err}"));
+        let collected = Self::try_collect_noise_sources(
+            circuit,
+            dc_solution,
+            crate::config::SpiceDialect::BestAvailable,
+        )
+        .unwrap_or_else(|err| panic!("{err}"));
         (collected.elementary, collected.correlated)
     }
 
@@ -2175,6 +2179,7 @@ impl Engine {
     pub(in crate::engine) fn try_collect_noise_sources(
         circuit: &CircuitData,
         dc_solution: &[Value],
+        dialect: crate::config::SpiceDialect,
     ) -> Result<CollectedNoiseSources, SimulationError> {
         Self::validate_resistor_noise_storage(circuit)?;
         let mut noise_sources = Vec::new();
@@ -2887,7 +2892,7 @@ impl Engine {
             }
 
             // The device selects its family's flicker law and normalization.
-            let flicker = mos.flicker_noise_source_terms().map_err(|reason| {
+            let flicker = mos.flicker_noise_source_terms(dialect).map_err(|reason| {
                 SimulationError::Circuit(format!("Noise source '{}:FN': {reason}", mos.name))
             })?;
             if let Some((coefficient, current, af, ef)) = flicker
@@ -3546,7 +3551,7 @@ impl Engine {
             elementary: mut noise_sources,
             elementary_absolute_temperatures,
             correlated: mut correlated_noise_sources,
-        } = Self::try_collect_noise_sources(&circuit, &dc_solution)?;
+        } = Self::try_collect_noise_sources(&circuit, &dc_solution, engine.config.spice_dialect)?;
         Self::configure_noise_physical_constants(
             &mut noise_sources,
             &mut correlated_noise_sources,
@@ -4327,6 +4332,7 @@ mod tests {
             let error = match Engine::try_collect_noise_sources(
                 &circuit,
                 &vec![0.0; circuit.matrix_size()],
+                crate::config::SpiceDialect::BestAvailable,
             ) {
                 Ok(_) => panic!("misaligned {label} unexpectedly passed validation"),
                 Err(error) => error,
@@ -4359,10 +4365,20 @@ mod tests {
     }
 
     fn collected_noise_sources_for_deck(deck: &str) -> Vec<crate::analysis::NoiseSource> {
+        collected_noise_sources_for_deck_with_dialect(
+            deck,
+            crate::config::SpiceDialect::BestAvailable,
+        )
+    }
+
+    fn collected_noise_sources_for_deck_with_dialect(
+        deck: &str,
+        dialect: crate::config::SpiceDialect,
+    ) -> Vec<crate::analysis::NoiseSource> {
         let netlist = Netlist::parse(deck).expect("noise catalog fixture parses");
         // Keep solver conditioning out of the deliberately sub-attoampere
         // device operating points. Numerical GMIN is not physical noise.
-        let mut config = crate::engine::SimulationConfig::default();
+        let mut config = crate::engine::SimulationConfig::default().with_spice_dialect(dialect);
         config.convergence_config.gmin_target = 0.0;
         config.convergence_config.junction_gmin_target = 0.0;
         let engine = Engine::new(config).resolved_for_netlist(&netlist);
@@ -4379,7 +4395,7 @@ mod tests {
         if circuit.has_nonlinear_devices() {
             circuit.update_nonlinear(&solution);
         }
-        Engine::try_collect_noise_sources(&circuit, &solution)
+        Engine::try_collect_noise_sources(&circuit, &solution, engine.config.spice_dialect)
             .expect("noise catalog collects")
             .elementary
     }
@@ -4448,7 +4464,7 @@ mod tests {
     }
 
     #[test]
-    fn exact_zero_semiconductor_mechanisms_remain_absent() {
+    fn zero_semiconductor_noise_respects_the_classic_mos_current_floor() {
         let sources = collected_noise_sources_for_deck(
             "Exact zero is inactive, not a numerical floor\n\
              VDIO ad 0 0\n\
@@ -4473,7 +4489,7 @@ mod tests {
         for (device, mechanisms) in [
             ("D1", &["ID", "FN"][..]),
             ("Q1", &["IC", "IB", "FN"][..]),
-            ("M1", &["ID", "FN"][..]),
+            ("M1", &["ID"][..]),
             ("J1", &["ID", "IGS", "IGD", "FN"][..]),
         ] {
             for mechanism_name in mechanisms {
@@ -4483,6 +4499,12 @@ mod tests {
                 );
             }
         }
+        // The classic MOS current law includes the reference N_MINLOG
+        // floor even at zero Id; it is not an exactly disabled source.
+        let flicker = mechanism(&sources, "M1", "FN").unwrap();
+        let cox = 3.9 * 8.854_214_871e-12 / 1e-7;
+        let expected = 1e-53 / cox;
+        assert!((flicker.spectral_density(1000.0, 300.15) - expected).abs() < expected * 1e-12);
     }
 
     #[test]
@@ -4528,9 +4550,12 @@ mod tests {
         circuit.non_electrical_state_nodes.insert(private_state);
         circuit.global_shunt_conductance = 1.0e-3;
 
-        let collected =
-            Engine::try_collect_noise_sources(&circuit, &vec![0.0; circuit.matrix_size()])
-                .expect("physical RSHUNT sources collect");
+        let collected = Engine::try_collect_noise_sources(
+            &circuit,
+            &vec![0.0; circuit.matrix_size()],
+            crate::config::SpiceDialect::BestAvailable,
+        )
+        .expect("physical RSHUNT sources collect");
         assert!(collected.correlated.is_empty());
         assert_eq!(collected.elementary.len(), 2);
         assert_eq!(collected.elementary_absolute_temperatures, vec![None, None]);
@@ -7117,6 +7142,116 @@ R2 OUT 0 1k
     }
 
     #[test]
+    fn classic_mos_flicker_uses_signed_exponents_terminal_current_and_dialect_laws() {
+        use crate::Value;
+        use crate::config::{SimulationConfig, SpiceDialect};
+        for dialect in [SpiceDialect::Ngspice, SpiceDialect::Xyce] {
+            for level in [1, 2, 3, 6, 9] {
+                if dialect == SpiceDialect::Xyce && level == 9 {
+                    continue;
+                }
+                for (kind, p) in [("NMOS", 1.0), ("PMOS", -1.0)] {
+                    let geometry = if level == 9 {
+                        "WD=0.1u XL=0.2u XW=0.3u"
+                    } else {
+                        ""
+                    };
+                    let deck = |gate: Value, noise: &str| {
+                        format!(
+                            "Classic MOS noise laws\nVD d 0 {}\nVG g 0 {}\nVB b 0 {}\nM1 d g 0 b mm W=2u L=1u M=2.5 NF=2\n.model mm {kind}(LEVEL={level} VTO=1 KP=100u KC=100u TOX=20n LD=0.1u IS=1n {geometry} {noise})\n.options GMIN=0 RELTOL=1e-9 ABSTOL=1e-14 VNTOL=1e-11\n.end\n",
+                            p * 0.2,
+                            p * gate,
+                            p * 0.4
+                        )
+                    };
+                    let current = |gate| {
+                        let result =
+                            Engine::new(SimulationConfig::default().with_spice_dialect(dialect))
+                                .run_dc_op(&Netlist::parse(&deck(gate, "")).unwrap())
+                                .unwrap();
+                        -result.branch_currents[result
+                            .branch_names
+                            .iter()
+                            .position(|s| s.eq_ignore_ascii_case("VD"))
+                            .unwrap()]
+                    };
+                    let id = current(1.4).abs() / 5.0;
+                    let gm = ((current(1.4 + 1e-5) - current(1.4 - 1e-5)) / 2e-5).abs() / 5.0;
+                    let cox = 3.9 * 8.854_214_871e-12 / 20e-9;
+                    for nlev in 0..=3 {
+                        for (af, ef) in [(-0.5, -0.25), (0.0, 0.0), (1.3, 1.2)] {
+                            let sources = collected_noise_sources_for_deck_with_dialect(
+                                &deck(1.4, &format!("KF=1e-24 AF={af} EF={ef} NLEV={nlev}")),
+                                dialect,
+                            );
+                            let source = mechanism(&sources, "M1", "FN").unwrap();
+                            for f in [0.1_f64, 1000.0, 1e6] {
+                                let expected = if dialect == SpiceDialect::Xyce || level == 9 {
+                                    let width = if level == 9 { 1.8e-6 } else { 2e-6 };
+                                    5e-24 * id.powf(af) / (f * width * 0.8e-6 * cox * cox)
+                                } else {
+                                    match nlev {
+                                        0 => {
+                                            5e-24 * id.powf(af)
+                                                / (f.powf(ef) * 0.8e-6 * 0.8e-6 * cox)
+                                        }
+                                        1 => {
+                                            5e-24 * id.powf(af) / (f.powf(ef) * 2e-6 * 0.8e-6 * cox)
+                                        }
+                                        _ => 5e-24 * gm * gm / (f.powf(af) * 2e-6 * 0.8e-6 * cox),
+                                    }
+                                };
+                                let actual = source.spectral_density(f, 300.15);
+                                assert!(
+                                    (actual - expected).abs() < expected * 2e-7,
+                                    "{dialect:?} L{level} {kind} NLEV={nlev} AF={af} EF={ef} f={f}: {actual:e} vs {expected:e}"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn classic_mos_flicker_retains_the_reference_current_floor_at_cutoff() {
+        use crate::config::SpiceDialect;
+        for dialect in [SpiceDialect::Ngspice, SpiceDialect::Xyce] {
+            for (kind, p) in [("NMOS", 1.0), ("PMOS", -1.0)] {
+                for nlev in 0..=3 {
+                    for af in [-0.5, 0.0, 1.0] {
+                        let sources = collected_noise_sources_for_deck_with_dialect(
+                            &format!(
+                                "MOS cutoff noise\nVG g 0 {}\nM1 0 g 0 0 mm W=2u L=1u M=5\n.model mm {kind}(VTO=1 TOX=20n KF=1e-24 NLEV={nlev} AF={af} EF=0)\n.end\n",
+                                -p
+                            ),
+                            dialect,
+                        );
+                        let source = mechanism(&sources, "M1", "FN");
+                        if dialect == SpiceDialect::Ngspice && nlev >= 2 {
+                            assert!(source.is_none(), "zero gm disables the gm-squared law");
+                        } else {
+                            let cox = 3.9 * 8.854_214_871e-12 / 20e-9;
+                            let expected = if dialect == SpiceDialect::Xyce {
+                                5e-24 * (1e-38_f64).powf(af) / (1000.0 * 2e-12 * cox * cox)
+                            } else {
+                                5e-24 * (1e-38_f64).powf(af)
+                                    / (if nlev == 0 { 1e-12 } else { 2e-12 } * cox)
+                            };
+                            let actual = source.unwrap().spectral_density(1000.0, 300.15);
+                            assert!(
+                                (actual - expected).abs() < expected * 1e-12,
+                                "{dialect:?} NLEV={nlev} AF={af}: {actual:e} vs {expected:e}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
     fn legacy_bsim_flicker_preserves_zero_current_floor_and_signed_exponents() {
         for level in [4, 5] {
             for af in [-0.5, 0.0, 1.3] {
@@ -7156,6 +7291,7 @@ R2 OUT 0 1k
                         let Err(error) = Engine::try_collect_noise_sources(
                             &circuit,
                             &vec![0.0; circuit.matrix_size()],
+                            engine.config.spice_dialect,
                         ) else {
                             panic!("L{level} {params}: invalid active flicker noise was accepted");
                         };

@@ -412,13 +412,13 @@ pub struct Mosfet {
     pub(crate) noise_absolute_temperature: Option<Value>,
     /// Flicker noise coefficient (KF)
     pub kf: Value,
-    /// Flicker noise current exponent (AF)
+    /// Flicker exponent: current for NLEV=0/1 and Xyce; frequency for NLEV=2/3.
     pub af: Value,
-    /// Flicker noise frequency exponent (EF)
+    /// Flicker frequency exponent for native NLEV=0/1 (EF).
     pub ef: Value,
     /// Channel thermal-noise coefficient (gamma)
     pub thermal_noise_gamma: Value,
-    /// Noise model selector (NLEV); mos1set.c defaults it to 2.
+    /// Noise model selector (NLEV); defaults to 2, with -1 retaining an invalid card.
     pub nlev: i32,
     /// NLEV=3 channel thermal-noise scale (GDSNOI)
     pub gdsnoi: Value,

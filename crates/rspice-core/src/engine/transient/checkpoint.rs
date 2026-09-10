@@ -1202,7 +1202,8 @@ pub(crate) fn simulation_checkpoint_identity(config: &SimulationConfig) -> Strin
     // v65 respects explicit zero MOS series resistances and checks their scaling.
     // v66 implements legacy BSIM body-junction potentials and charge laws.
     // v67 preserves representable shared depletion charge across the f64 range.
-    hasher.update(b"rspice-transient-resolved-config-v67\0");
+    // v68 preserves MOS noise parameters and their dialect-specific laws.
+    hasher.update(b"rspice-transient-resolved-config-v68\0");
     hash_field(&mut hasher, "temperature", config.temperature.to_bits());
     hash_field(&mut hasher, "ramptime", config.ramptime.to_bits());
     hash_field(&mut hasher, "digital_delay_type", config.digital_delay_type);

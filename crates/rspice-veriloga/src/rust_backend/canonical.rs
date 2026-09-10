@@ -5792,7 +5792,7 @@ endmodule
                 branch_flows: Vec::new(),
                 branch_unknown_flows: Vec::new(),
                 temperature: 300.15,
-                thermal_voltage: 300.15 * 8.617_333_262e-5,
+                thermal_voltage: 300.15 * rspice_veriloga_runtime::THERMAL_VOLTAGE_PER_K,
                 multiplicity: 1.0,
                 time: 0.0,
                 analyses: HashSet::new(),

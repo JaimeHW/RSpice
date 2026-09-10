@@ -263,7 +263,9 @@ use super::*;
 // Version 57 retains authored Laplace coefficients for range-safe AC responses;
 // older realizations cannot recover coefficients lost during normalization.
 // Version 58 normalizes language-level Laplace root factors as 1 - s/root.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 58;
+// Version 59 uses a consistently rounded thermal voltage scale for explicit
+// temperature arguments; older bytecode embeds a truncated k/q constant.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 59;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]

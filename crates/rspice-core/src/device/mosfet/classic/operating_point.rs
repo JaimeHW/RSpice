@@ -104,81 +104,116 @@ impl Mosfet {
         }
     }
 
-    /// Flicker-noise source terms `(coefficient, current, af, ef)` for a
-    /// density of `coefficient·|current|^af / f^ef`. BSIM1/2 use the
-    /// b1noi.c/b2noi.c law; other levels follow the SPICE NLEV laws of
-    /// mos1noi.c (mos2/mos3 are identical; NLEV defaults to 2
-    /// per mos1set.c). Evaluate the noise law at per-instance current or gm,
-    /// then sum the independent contributions of M·NF parallel instances.
-    ///
-    /// The NLEV laws use `Leff = L − 2·LATD`; a zero oxide capacitance
-    /// falls back to the 100 nm-oxide default exactly as mos1noi.c does.
+    /// Flicker terms `(coefficient, current, af, ef)` for
+    /// `coefficient * |current|^af / f^ef`. Each parallel instance contributes
+    /// independently. Ngspice levels 1/2/3 use NLEV (default 2); native MOS6
+    /// extends that law because ngspice supplies no MOS6 noise callback.
+    /// Xyce levels 1/2/3/6 use current^AF divided by W*Leff*Cox²*f.
+    /// MOS9 uses that current law with W-2*WD, without XL/XW mask shifts.
+    /// BSIM1/2 keep their own effective geometry and Cox units.
     pub(crate) fn flicker_noise_source_terms(
         &self,
+        dialect: crate::config::SpiceDialect,
     ) -> Result<Option<(Value, Value, Value, Value)>, &'static str> {
-        if let Some(model) = &self.legacy_bsim_model {
-            if !self.kf.is_finite() || self.kf < 0.0 {
-                return Err("legacy BSIM flicker noise requires finite KF >= 0");
-            }
-            if self.kf == 0.0 {
-                return Ok(None);
-            }
-            if !self.af.is_finite() {
-                return Err("legacy BSIM flicker noise requires finite AF");
-            }
+        use crate::numerics::scaled_exp_product;
+        let xyce =
+            dialect == crate::config::SpiceDialect::Xyce && matches!(self.level, 1 | 2 | 3 | 6);
+        let fixed_current_law = xyce || self.level == 9;
+        if self.legacy_bsim_model.is_none() && !fixed_current_law && !(0..=3).contains(&self.nlev) {
+            return Err("MOS noise requires integer NLEV in 0..=3");
+        }
+        if !self.kf.is_finite() || self.kf < 0.0 {
+            return Err("MOS flicker noise requires finite KF >= 0");
+        }
+        if self.kf == 0.0 {
+            return Ok(None);
+        }
+        if !self.af.is_finite() {
+            return Err("MOS flicker noise requires finite AF");
+        }
+        if !self.multiplicity.is_finite() || self.multiplicity <= 0.0 {
+            return Err("MOS flicker noise requires finite positive multiplicity");
+        }
+        // Cached id enters the physical drain for every family, including
+        // MOS3/9; the OP display converts those families to model polarity.
+        let (coefficient, current, af, ef) = if let Some(model) = &self.legacy_bsim_model {
             let denominator = model.flicker_noise_denominator(self.w, self.l).ok_or(
                 "legacy BSIM flicker noise requires positive effective W, L and TOX with representable normalization",
             )?;
-            let coefficient = self.kf * self.multiplicity / denominator;
-            if !coefficient.is_finite() || coefficient <= 0.0 {
-                return Err("legacy BSIM flicker noise coefficient is not representable");
-            }
-            // B1cd/B2cd in the load equations are net drain current, including
-            // the body-drain diode. Use its value, not the integer state offset
-            // accidentally used as a number by ngspice-46's noise routines.
-            let current = self.reported_currents(self.id)[0] / self.multiplicity;
-            if !current.is_finite() {
-                return Err("legacy BSIM flicker noise drain current is not finite");
-            }
-            // The legacy log floor keeps AF=0 and signed exponents defined
-            // even at zero drain current; AF never changes the 1/f exponent.
-            return Ok(Some((coefficient, current.abs().max(1e-38), self.af, 1.0)));
-        }
-        if self.kf <= 0.0 || !self.kf.is_finite() {
-            return Ok(None);
-        }
-
-        let cox = if self.cox > 0.0 {
-            self.cox
+            let coefficient =
+                scaled_exp_product(&[self.kf, self.multiplicity], &[denominator], 0.0);
+            // B1cd/B2cd are net drain current, including the body diode.
+            // The ngspice-46 noise routines accidentally use the state offset
+            // as a number; use the current that the load routine stores there.
+            let current = (self.id - self.polarity() * self.ibd) / self.multiplicity;
+            (coefficient, current, self.af, 1.0)
         } else {
-            3.9 * 8.854214871e-12 / 1e-7
-        };
-        let leff = (self.l - 2.0 * self.ld).max(1e-18);
-        let width = self.w.max(1e-18);
-        let m = self.multiplicity;
-        let af = self.af.max(1e-12);
-        let ef = self.ef.max(1e-12);
-
-        Ok(match self.nlev {
-            0 => Some((
-                self.kf * m / (leff * leff * cox),
-                self.drain_current().abs() / m,
-                af,
-                ef,
-            )),
-            1 => Some((
-                self.kf * m / (width * leff * cox),
-                self.drain_current().abs() / m,
-                af,
-                ef,
-            )),
-            // NLEV 2 and 3 share the gm²-based law; AF moves onto the
-            // frequency exponent; each instance contributes its own gm².
-            _ => {
-                let gm = self.transconductance() / m;
-                Some((self.kf * gm * gm * m / (width * leff * cox), 1.0, 1.0, af))
+            if !self.cox.is_finite() || self.cox < 0.0 {
+                return Err("MOS flicker noise requires finite nonnegative Cox");
             }
-        })
+            let cox = if self.cox == 0.0 {
+                // mos1noi.c and Xyce's MOS1/6 fallback: 100 nm oxide.
+                3.9 * 8.854214871e-12 / 1e-7
+            } else {
+                self.cox
+            };
+            let leff = self.l - 2.0 * self.ld;
+            let width = if self.level == 9 {
+                self.w - 2.0 * self.mos3_width_narrow
+            } else {
+                self.w
+            };
+            if !leff.is_finite() || leff <= 0.0 || !width.is_finite() || width <= 0.0 {
+                return Err("MOS flicker noise requires finite positive noise width and L-2*LD");
+            }
+            if fixed_current_law || self.nlev == 0 || self.nlev == 1 {
+                let divisors = if fixed_current_law {
+                    [width, leff, cox, cox]
+                } else if self.nlev == 0 {
+                    [leff, leff, cox, 1.0]
+                } else {
+                    [self.w, leff, cox, 1.0]
+                };
+                (
+                    scaled_exp_product(&[self.kf, self.multiplicity], &divisors, 0.0),
+                    (self.id - self.polarity() * self.ibd) / self.multiplicity,
+                    self.af,
+                    if fixed_current_law { 1.0 } else { self.ef },
+                )
+            } else {
+                // NLEV 2/3 use gm², with AF on frequency. Form the product
+                // from total gm to avoid rounding gm/M to zero prematurely.
+                let gm = self.transconductance();
+                if !gm.is_finite() {
+                    return Err("MOS flicker noise transconductance must be finite");
+                }
+                if gm == 0.0 {
+                    return Ok(None);
+                }
+                (
+                    scaled_exp_product(
+                        &[self.kf, gm, gm],
+                        &[self.multiplicity, self.w, leff, cox],
+                        0.0,
+                    ),
+                    1.0,
+                    1.0,
+                    self.af,
+                )
+            }
+        };
+        if !ef.is_finite() {
+            return Err("MOS flicker noise requires finite EF");
+        }
+        if !current.is_finite() {
+            return Err("MOS flicker noise drain current must be finite");
+        }
+        if !coefficient.is_finite() || coefficient <= 0.0 {
+            return Err("MOS flicker noise coefficient is not representable");
+        }
+        // Both references use exp(AF*log(max(|Id|, N_MINLOG))). This
+        // preserves the authored noise source at cutoff, including AF <= 0.
+        Ok(Some((coefficient, current.abs().max(1e-38), af, ef)))
     }
 
     //=========================================================================
@@ -294,6 +329,88 @@ impl Mosfet {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mos_noise_parameters_retain_authored_exponents_and_reject_active_invalid_values() {
+        use crate::config::SpiceDialect;
+        use std::collections::HashMap;
+        for level in [1, 2, 3, 4, 5, 6, 9] {
+            for (name, values) in [
+                ("KF", vec![-1.0, Value::NAN, Value::INFINITY]),
+                ("AF", vec![-1.0, 0.0, Value::NAN, Value::INFINITY]),
+                ("EF", vec![-1.0, 0.0, Value::NAN, Value::INFINITY]),
+            ] {
+                for value in values {
+                    let mut params = HashMap::from([
+                        ("LEVEL".into(), level as Value),
+                        ("TOX".into(), 0.03),
+                        ("KF".into(), 1e-20),
+                        ("NLEV".into(), 0.0),
+                    ]);
+                    params.insert(name.into(), value);
+                    let mos = Mosfet::new_nmos("M1".into(), 1, 2, 0, 0).with_params(&params);
+                    let retained = match name {
+                        "KF" => mos.kf,
+                        "AF" => mos.af,
+                        _ => mos.ef,
+                    };
+                    assert_eq!(retained.to_bits(), value.to_bits(), "L{level} {name}");
+                    let result = mos.flicker_noise_source_terms(SpiceDialect::Ngspice);
+                    if name == "KF"
+                        || (!value.is_finite() && (name != "EF" || !matches!(level, 4 | 5 | 9)))
+                    {
+                        assert!(
+                            result.unwrap_err().contains(name),
+                            "L{level} {name}={value}"
+                        );
+                    } else {
+                        assert!(result.is_ok(), "L{level} {name}={value}: {result:?}");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn classic_mos_invalid_noise_selector_is_not_truncated_or_defaulted() {
+        for value in [-1.0, 0.5, 4.0, Value::NAN, Value::INFINITY] {
+            let mos = Mosfet::new_nmos("M1".into(), 1, 2, 0, 0)
+                .with_params(&std::collections::HashMap::from([("NLEV".into(), value)]));
+            assert!(
+                mos.flicker_noise_source_terms(crate::config::SpiceDialect::Ngspice)
+                    .unwrap_err()
+                    .contains("NLEV")
+            );
+        }
+    }
+
+    #[test]
+    fn mos_flicker_normalization_preserves_representable_products() {
+        use crate::config::SpiceDialect;
+        for (nlev, kf, multiplicity, length, width, gm, expected) in [
+            (0, 1e-300, 1.0, 1e-200, 1e-200, 1.0, 1e100),
+            (1, 1e200, 1e200, 1e100, 1e100, 1.0, 1e200),
+            (2, 1e200, 1e200, 1e-150, 1e-150, 1e-200, 1e-100),
+            (3, 1e-200, 1e-200, 1e-200, 1e-200, 1e-200, 1.0),
+        ] {
+            let mut mos = Mosfet::new_nmos("M1".into(), 1, 2, 0, 0);
+            mos.nlev = nlev;
+            mos.kf = kf;
+            mos.multiplicity = multiplicity;
+            mos.l = length;
+            mos.w = width;
+            mos.cox = 1.0;
+            mos.gm = gm;
+            let (coefficient, _, _, _) = mos
+                .flicker_noise_source_terms(SpiceDialect::Ngspice)
+                .unwrap()
+                .unwrap();
+            assert!(
+                (coefficient - expected).abs() < expected * 2e-15,
+                "NLEV={nlev}: {coefficient:e} vs {expected:e}"
+            );
+        }
+    }
 
     fn assert_close(what: &str, actual: Value, expected: Value, rel: Value, abs: Value) {
         let diff = (actual - expected).abs();

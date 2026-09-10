@@ -1843,9 +1843,7 @@ impl VmContext {
     /// Get thermal voltage kT/q.
     #[inline]
     pub fn vt(&self) -> f64 {
-        const K_BOLTZMANN: f64 = 1.380649e-23;
-        const Q_ELECTRON: f64 = 1.602176634e-19;
-        K_BOLTZMANN * self.temperature / Q_ELECTRON
+        self.temperature * rspice_veriloga_runtime::THERMAL_VOLTAGE_PER_K
     }
 
     /// Set a parameter value.

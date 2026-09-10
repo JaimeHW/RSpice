@@ -2,11 +2,11 @@
 {
   "schema_version": 7,
   "source_tree_digest": "8df45ec06360bbd151ebdbbc41ef5fc08a914156e6d696ae626f667246bea520",
-  "generator_digest": "0b25073f31a38f95aa127bbc28e37703be625b449ed61c3ba7d213bc98427bfb",
-  "bundle_digest": "222003b41aa82a27de48f5f760235e95bd39e1874be038d0c673e0245b1e4903",
+  "generator_digest": "77f2e5c34489fc38030dfaab3652b1b7a76e07699cf3eb14cd1f7367210250f0",
+  "bundle_digest": "97254d9690b5c833560604781bac7357d77c42d401d93b3b601d718876ae6d73",
   "device_count": 43,
   "file_count": 347,
-  "source_bytes": 32969123,
+  "source_bytes": 32969161,
   "devices": [
     {
       "module_name": "DIODE_CMC",
@@ -42,7 +42,7 @@
       "feature_name": "veriloga-model-epfl-hemt-10a",
       "package_name": "rspice-veriloga-model-epfl-hemt-10a",
       "file_count": 5,
-      "source_bytes": 71627,
+      "source_bytes": 71619,
       "workspace": {
         "abi_version": 3,
         "variable_count": 199,
@@ -177,7 +177,7 @@
       "feature_name": "veriloga-model-angelov",
       "package_name": "rspice-veriloga-model-angelov",
       "file_count": 5,
-      "source_bytes": 189309,
+      "source_bytes": 189327,
       "workspace": {
         "abi_version": 3,
         "variable_count": 136,
@@ -204,7 +204,7 @@
       "feature_name": "veriloga-model-angelov-gan",
       "package_name": "rspice-veriloga-model-angelov-gan",
       "file_count": 5,
-      "source_bytes": 205479,
+      "source_bytes": 205497,
       "workspace": {
         "abi_version": 3,
         "variable_count": 156,
@@ -609,7 +609,7 @@
       "feature_name": "veriloga-model-ekv-va",
       "package_name": "rspice-veriloga-model-ekv-va",
       "file_count": 5,
-      "source_bytes": 115519,
+      "source_bytes": 115537,
       "workspace": {
         "abi_version": 3,
         "variable_count": 272,
@@ -1149,7 +1149,7 @@
       "feature_name": "veriloga-model-vbic-4t-et-cf",
       "package_name": "rspice-veriloga-model-vbic-4t-et-cf",
       "file_count": 5,
-      "source_bytes": 112575,
+      "source_bytes": 112567,
       "workspace": {
         "abi_version": 3,
         "variable_count": 171,
@@ -1198,13 +1198,13 @@
     },
     {
       "relative_path": "models/angelov-gan/src/angelov_gan__angelov_gan__98687686/noise.rs",
-      "bytes": 76582,
-      "blake3": "dc7954a21c105491b6ee124630fd40b62778875dc990e897ba382d5421ac9828"
+      "bytes": 76594,
+      "blake3": "2f6fd875f34131800467b965820cb1a0f4c6e6ede1cc903e30dff355be45597c"
     },
     {
       "relative_path": "models/angelov-gan/src/angelov_gan__angelov_gan__98687686/stamp.rs",
-      "bytes": 75530,
-      "blake3": "50f9ecdaae2b7b013e01869d54d056daf65eb39e31bf0a63df8ee90923116909"
+      "bytes": 75536,
+      "blake3": "20e0bdb29246ff6fbbabdb69d3e255802f2c8a4c194db73d5d08dfbf4934e9c4"
     },
     {
       "relative_path": "models/angelov-gan/src/angelov_gan__angelov_gan__98687686/state.rs",
@@ -1238,13 +1238,13 @@
     },
     {
       "relative_path": "models/angelov/src/angelov__angelov__98b92059/noise.rs",
-      "bytes": 74094,
-      "blake3": "44a96559de6e3fa3f3cbd4698db3eb015092d30add61132d6a92b0e2ac97bf7d"
+      "bytes": 74106,
+      "blake3": "25137cdbe2bb303e471303f9ef40821af24517b8a5c33696d779f696414b1454"
     },
     {
       "relative_path": "models/angelov/src/angelov__angelov__98b92059/stamp.rs",
-      "bytes": 64872,
-      "blake3": "16f5dba9812f2ff0967c584ea7ded7e071c0a7ed30d7d2065abc988c1501783c"
+      "bytes": 64878,
+      "blake3": "388fbe734e116731977ab8459272a545968dadd233387a55962ba14b6c95ec40"
     },
     {
       "relative_path": "models/angelov/src/angelov__angelov__98b92059/state.rs",
@@ -1838,13 +1838,13 @@
     },
     {
       "relative_path": "models/ekv-va/src/ekv26_sdext_verilog_a__ekv_va__0f1ec77e/noise.rs",
-      "bytes": 22646,
-      "blake3": "5a36b356a67c6cbacd1846c9d9e2c045fd5ce5efa24f407ff091a3ecdcf6c811"
+      "bytes": 22652,
+      "blake3": "fe188e08f4c9d7049f66d0724e2a5c870a6e861ae69d58e1cfe1f949a9a335eb"
     },
     {
       "relative_path": "models/ekv-va/src/ekv26_sdext_verilog_a__ekv_va__0f1ec77e/stamp.rs",
-      "bytes": 44643,
-      "blake3": "46dcfe6b06b2746374898a76b12abc6dd13a27df630e4ed17a5a1168ab7cbdee"
+      "bytes": 44655,
+      "blake3": "2b472841d4281b0777ec41838b0461f830b13434c65968f8c69375e044d27aa5"
     },
     {
       "relative_path": "models/ekv-va/src/ekv26_sdext_verilog_a__ekv_va__0f1ec77e/state.rs",
@@ -1918,8 +1918,8 @@
     },
     {
       "relative_path": "models/epfl-hemt-10a/src/epfl_hemt__epfl_hemt_10a__671606cd/noise.rs",
-      "bytes": 1557,
-      "blake3": "3630a061af49aa43dd73b0caa49e3c76ac9d51d8bda5f891b721e89408d20941"
+      "bytes": 1549,
+      "blake3": "c38b0a1723b85298d1e44badf680bd447ef51a14ee5c605d6c56c5758c63a920"
     },
     {
       "relative_path": "models/epfl-hemt-10a/src/epfl_hemt__epfl_hemt_10a__671606cd/stamp.rs",
@@ -2763,8 +2763,8 @@
     },
     {
       "relative_path": "models/vbic-4t-et-cf/src/vbic_4t_et_cf__vbic_4t_et_cf__3990c5a1/noise.rs",
-      "bytes": 1557,
-      "blake3": "3630a061af49aa43dd73b0caa49e3c76ac9d51d8bda5f891b721e89408d20941"
+      "bytes": 1549,
+      "blake3": "c38b0a1723b85298d1e44badf680bd447ef51a14ee5c605d6c56c5758c63a920"
     },
     {
       "relative_path": "models/vbic-4t-et-cf/src/vbic_4t_et_cf__vbic_4t_et_cf__3990c5a1/stamp.rs",

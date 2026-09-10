@@ -360,6 +360,98 @@ mod wasm_tests {
     }
 
     #[wasm_bindgen_test]
+    fn classic_mos_signed_flicker_and_xyce_law_in_wasm() {
+        use rspice_core::engine::{SimulationConfig, SpiceDialect};
+        let abort = rspice_core::abort_signal::NoAbort;
+        for dialect in [SpiceDialect::Ngspice, SpiceDialect::Xyce] {
+            let engine =
+                rspice_core::Engine::new(SimulationConfig::default().with_spice_dialect(dialect));
+            for (kind, p) in [("NMOS", 1.0), ("PMOS", -1.0)] {
+                for nlev in [0, 2] {
+                    for (af, ef) in [(-0.5, -0.25), (0.0, 0.0), (1.3, 1.2)] {
+                        let make = |kf| {
+                            rspice_core::Netlist::parse(&format!(
+                            "MOS flicker in WASM\nVD d 0 {}\nVG g 0 {}\nM1 d g 0 0 mm W=2u L=1u M=5\n.model mm {kind}(VTO={p} KP=100u TOX=20n IS=0 KF={kf} NLEV={nlev} AF={af} EF={ef})\n.options GMIN=0 RELTOL=1e-9 ABSTOL=1e-14 VNTOL=1e-11\n.end\n", p*2.0, p*1.4)).unwrap()
+                        };
+                        let noisy = engine
+                            .run_port_noise_correlation_with_abort(
+                                &make(1e-24),
+                                &["VD".into()],
+                                &[1000.0],
+                                300.15,
+                                &abort,
+                            )
+                            .unwrap();
+                        let quiet = engine
+                            .run_port_noise_correlation_with_abort(
+                                &make(0.0),
+                                &["VD".into()],
+                                &[1000.0],
+                                300.15,
+                                &abort,
+                            )
+                            .unwrap();
+                        let cox = 3.9 * 8.854_214_871e-12 / 20e-9;
+                        let expected = if dialect == SpiceDialect::Xyce {
+                            5e-24 * (16e-6_f64).powf(af) / (1000.0 * 2e-12 * cox * cox)
+                        } else if nlev == 0 {
+                            5e-24 * (16e-6_f64).powf(af) / (1000.0_f64.powf(ef) * 1e-12 * cox)
+                        } else {
+                            5e-24 * (80e-6_f64).powi(2) / (1000.0_f64.powf(af) * 2e-12 * cox)
+                        };
+                        let actual = noisy[0].current_correlation[0][0].re
+                            - quiet[0].current_correlation[0][0].re;
+                        assert!(
+                            (actual - expected).abs() < expected * 2e-7,
+                            "{dialect:?} NLEV={nlev} AF={af}: {actual:e} vs {expected:e}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[wasm_bindgen_test]
+    fn mos9_flicker_uses_narrowed_width_and_fixed_frequency_law_in_wasm() {
+        let abort = rspice_core::abort_signal::NoAbort;
+        for (kind, p) in [("NMOS", 1.0), ("PMOS", -1.0)] {
+            for nlev in [0, 2, 3] {
+                let make = |kf| {
+                    rspice_core::Netlist::parse(&format!(
+                    "MOS9 noise in WASM\nVD d 0 {}\nVG g 0 {}\nM1 d g 0 0 mm W=2u L=1u M=5\n.model mm {kind}(LEVEL=9 VTO={p} KP=100u TOX=20n WD=0.1u LD=0.1u XL=0.2u XW=0.3u KF={kf} AF=0 EF=5 NLEV={nlev})\n.options GMIN=0\n.end\n", p*2.0, p*1.4)).unwrap()
+                };
+                let engine = rspice_core::Engine::default();
+                let noisy = engine
+                    .run_port_noise_correlation_with_abort(
+                        &make(1e-24),
+                        &["VD".into()],
+                        &[1000.0],
+                        300.15,
+                        &abort,
+                    )
+                    .unwrap();
+                let quiet = engine
+                    .run_port_noise_correlation_with_abort(
+                        &make(0.0),
+                        &["VD".into()],
+                        &[1000.0],
+                        300.15,
+                        &abort,
+                    )
+                    .unwrap();
+                let cox = 3.9 * 8.854_214_871e-12 / 20e-9;
+                let expected = 5e-24 / (1000.0 * 1.8e-6 * 0.8e-6 * cox * cox);
+                let actual =
+                    noisy[0].current_correlation[0][0].re - quiet[0].current_correlation[0][0].re;
+                assert!(
+                    (actual - expected).abs() < expected * 1e-12,
+                    "{kind} NLEV={nlev}: {actual:e} vs {expected:e}"
+                );
+            }
+        }
+    }
+
+    #[wasm_bindgen_test]
     fn legacy_bsim_flicker_law_in_wasm() {
         let abort = rspice_core::abort_signal::NoAbort;
         for level in [4, 5] {

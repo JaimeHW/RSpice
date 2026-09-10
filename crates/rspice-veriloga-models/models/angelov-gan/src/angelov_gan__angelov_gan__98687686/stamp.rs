@@ -666,7 +666,7 @@ impl Instance {
 		let Y=1f64;
 		let AA=staged[0];
 		let AC=0f64;
-		let AF=8.617333262e-5f64;
+		let AF=8.617333262145177e-5f64;
 		let AL=0f64;
 		let AP=parameters[68];
 		let AQ=1f64;

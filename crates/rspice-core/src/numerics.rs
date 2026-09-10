@@ -15,6 +15,89 @@ pub mod rustfft_qualification;
 
 use crate::Value;
 
+/// Evaluate a product/quotient times exp(exponent), retaining the ordinary
+/// arithmetic path unless an intermediate loses range or subnormal precision.
+#[inline]
+pub(crate) fn scaled_exp_product(
+    factors: &[crate::Value],
+    divisors: &[crate::Value],
+    exponent: crate::Value,
+) -> crate::Value {
+    if factors.contains(&0.0) {
+        return 0.0;
+    }
+    let exponential = exponent.exp();
+    let mut product = exponential;
+    let mut ordinary = exponential.is_normal();
+    for &factor in factors {
+        product *= factor;
+        ordinary &= product.is_normal();
+    }
+    for &divisor in divisors {
+        product /= divisor;
+        ordinary &= product.is_normal();
+    }
+    if ordinary {
+        product
+    } else {
+        scaled_exp_product_fallback(factors, divisors, exponent, exponential)
+    }
+}
+
+#[cold]
+fn scaled_exp_product_fallback(
+    factors: &[crate::Value],
+    divisors: &[crate::Value],
+    exponent: crate::Value,
+    exponential: crate::Value,
+) -> crate::Value {
+    if exponent.is_nan()
+        || factors.iter().any(|value| !value.is_finite())
+        || divisors
+            .iter()
+            .any(|value| !value.is_finite() || *value == 0.0)
+    {
+        return crate::Value::NAN;
+    }
+    let mut mantissa = 1.0;
+    let mut power = 0;
+    for &factor in factors {
+        let e = libm::ilogb(factor);
+        mantissa *= libm::scalbn(factor, -e);
+        power += e;
+    }
+    for &divisor in divisors {
+        let e = libm::ilogb(divisor);
+        mantissa /= libm::scalbn(divisor, -e);
+        power -= e;
+    }
+    if exponential.is_normal() {
+        let e = libm::ilogb(exponential);
+        mantissa *= libm::scalbn(exponential, -e);
+        power += e;
+    } else {
+        // No finite input factor can compensate an exponent beyond this
+        // bound. It also keeps conversion/reduction within the integer range.
+        let bound =
+            (factors.len() + divisors.len() + 2) as crate::Value * 1075.0 * std::f64::consts::LN_2;
+        if exponent > bound {
+            return crate::Value::INFINITY.copysign(mantissa);
+        }
+        if exponent < -bound {
+            return 0.0_f64.copysign(mantissa);
+        }
+        let e = (exponent * std::f64::consts::LOG2_E).round() as i32;
+        // Residual of ln(2) after rounding its high part to f64. FMA and the
+        // low part prevent range reduction from discarding significant bits.
+        const LN_2_LOW: crate::Value = 2.319_046_813_846_299_6e-17;
+        let reduced = (-(e as crate::Value)).mul_add(std::f64::consts::LN_2, exponent)
+            - e as crate::Value * LN_2_LOW;
+        mantissa *= reduced.exp();
+        power += e;
+    }
+    libm::scalbn(mantissa, power)
+}
+
 /// Infinity norm for residual and state vectors. Nonfinite entries yield
 /// infinity, so an invalid equation cannot disappear from a maximum reduction.
 pub(crate) fn infinity_norm(values: &[Value]) -> Value {

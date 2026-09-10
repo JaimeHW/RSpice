@@ -1104,27 +1104,15 @@ impl Mosfet {
         if let Some(&v) = params.get("RS") {
             self.rs_model = v;
         }
-        // Legacy BSIM accepts signed AF. Preserve invalid authored noise
-        // values too, so source collection reports them instead of defaults.
-        if let Some(v) = params
-            .get("KF")
-            .copied()
-            .filter(|v| matches!(self.level, 4 | 5) || (v.is_finite() && *v >= 0.0))
-        {
+        // Noise exponents may be zero or negative. Preserve invalid authored
+        // values too, so active-source validation reports them contextually.
+        if let Some(&v) = params.get("KF") {
             self.kf = v;
         }
-        if let Some(v) = params
-            .get("AF")
-            .copied()
-            .filter(|v| matches!(self.level, 4 | 5) || (v.is_finite() && *v > 0.0))
-        {
+        if let Some(&v) = params.get("AF") {
             self.af = v;
         }
-        if let Some(v) = params
-            .get("EF")
-            .copied()
-            .filter(|v| v.is_finite() && *v > 0.0)
-        {
+        if let Some(&v) = params.get("EF") {
             self.ef = v;
         }
         if let Some(v) = params
@@ -1142,12 +1130,13 @@ impl Mosfet {
         {
             self.thermal_noise_gamma = v;
         }
-        if let Some(v) = params
-            .get("NLEV")
-            .copied()
-            .filter(|v| v.is_finite() && *v >= 0.0)
-        {
-            self.nlev = v as i32;
+        if let Some(&v) = params.get("NLEV") {
+            // Keep an invalid selector distinguishable from the default law.
+            self.nlev = if v.is_finite() && v.fract() == 0.0 && (0.0..=3.0).contains(&v) {
+                v as i32
+            } else {
+                -1
+            };
         }
         if let Some(v) = params
             .get("GDSNOI")

@@ -107,7 +107,7 @@ pub(super) fn canonical_model_preprocess(
 	O
 	};
 	let AY=AQ> O;
-	let AZ=AB/ (AA* 8.617333262e-5f64);
+	let AZ=AB/ (AA* 8.617333262145177e-5f64);
     [D, E, F, G, I, K, M, P as u8 as f64, S, U as u8 as f64, oV, X as u8 as f64, AA, AB, oAE as u8 as f64, oAI, oAF as u8 as f64, oAJ, AH as u8 as f64, oAK, AM as u8 as f64, oAN, AO as u8 as f64, AP as u8 as f64, AR, AY as u8 as f64, AZ, AX, AS]
 }
 
@@ -243,7 +243,7 @@ pub(super) fn canonical_temperature_preprocess(
 	}else{
 	D
 	};
-	let F=E* 8.617333262e-5f64;
+	let F=E* 8.617333262145177e-5f64;
 	let G=0.1f64* F;
 	let I=H/ F;
 	let J=F+ F;

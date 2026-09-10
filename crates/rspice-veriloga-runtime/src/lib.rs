@@ -45,6 +45,12 @@ pub use compatibility_catalog::{
 
 pub type Value = f64;
 
+/// Thermal voltage per kelvin (V/K), rounded once from the exact SI ratio k/q.
+/// The reduced integer operands are exactly representable in binary64. Using
+/// them avoids rounding k and q separately before division. Multiply temperature
+/// by this ratio to preserve subnormal results without an intermediate k*T.
+pub const THERMAL_VOLTAGE_PER_K: Value = 1_380_649.0 / 16_021_766_340.0;
+
 /// Numerical minimum with the compiler's explicit operand-selection contract:
 /// a number wins over NaN, equal numbers retain the left operand (including its
 /// zero sign), and two NaNs retain the right operand.
@@ -1070,8 +1076,6 @@ pub fn boxed_zero_bool_array<const N: usize>() -> Box<[bool; N]> {
 use rspice_matrix::{ComplexMatrix, CscIndex, StaticMatrix};
 
 const DEFAULT_GMIN: Value = 1.0e-12;
-const K_BOLTZMANN: Value = 1.380649e-23;
-const Q_ELECTRON: Value = 1.602176634e-19;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct GeneratedDdtCoefficients {
@@ -2915,7 +2919,7 @@ impl<'a> GeneratedEvalContext<'a> {
 
     #[inline]
     pub fn thermal_voltage(&self) -> Value {
-        self.temperature * K_BOLTZMANN / Q_ELECTRON
+        self.temperature * THERMAL_VOLTAGE_PER_K
     }
 
     #[inline]

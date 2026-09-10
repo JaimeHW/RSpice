@@ -81,7 +81,7 @@ use crate::jit::plan_program::PlanProgram;
 use crate::jit::ssa::{self, Terminator};
 
 /// The backend's own thermal-voltage coefficient, `k/q`.
-const THERMAL_VOLTAGE_PER_K: f64 = 1.380_649e-23 / 1.602_176_634e-19;
+use rspice_veriloga_runtime::THERMAL_VOLTAGE_PER_K;
 
 /// The runtime loop bound both native backends encode.
 const MAX_RUNTIME_LOOP_ITERATIONS: usize = 100_000;
@@ -829,7 +829,7 @@ mod tests {
         assert_eq!(run_f64(vec![NativeOp::LoadMfactor], 1), Ok(1.0));
         assert_eq!(
             run_f64(vec![NativeOp::LoadThermalVoltage], 1),
-            Ok(300.15 * (1.380_649e-23 / 1.602_176_634e-19))
+            Ok(300.15 * rspice_veriloga_runtime::THERMAL_VOLTAGE_PER_K)
         );
         // `tran` is analysis 2, `static` is 5, `smallsignal` is 6, and the
         // initial step is 7.
