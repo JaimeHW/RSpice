@@ -911,6 +911,9 @@ pub struct VerilogADevice {
     /// with exact source control flow and reaching definitions, or the reason
     /// one could not be built.
     canonical_noise_plan: CanonicalNoisePlan,
+    /// Required noise-gain variables, computed once on first noise observation.
+    /// Clones share the mask; compiled assignment programs are never copied.
+    noise_gain_live_variables: std::sync::OnceLock<std::sync::Arc<[bool]>>,
     /// Native compiled model. In native mode this is required: construction
     /// fails if a complete native image cannot be produced.
     #[cfg(feature = "native")]
@@ -2668,6 +2671,7 @@ impl VerilogADevice {
             #[cfg(any(feature = "native", all(feature = "wasm-jit", target_arch = "wasm32")))]
             fused_stamp_jacobians: vec![0.0; fused_jacobian_count],
             canonical_noise_plan,
+            noise_gain_live_variables: std::sync::OnceLock::new(),
             #[cfg(feature = "native")]
             native_model,
             #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
@@ -7510,6 +7514,43 @@ impl VerilogADevice {
         Self::execute_assignment_steps(&mut vm, &model.assignment_steps[split..])
     }
 
+    fn noise_gain_live_variables(&self) -> &[bool] {
+        use crate::codegen::assignment_liveness::{
+            AssignmentEffects, mark_program_variable_reads, propagate_live_assignment_slots,
+        };
+        self.noise_gain_live_variables.get_or_init(|| {
+            let gains = || {
+                self.model
+                    .noise_sources
+                    .iter()
+                    .flat_map(|source| &source.injections)
+                    .map(|injection| &injection.gain_program)
+            };
+            // Most compact models have direct injections and need no replay
+            // at all. They do not allocate a model-sized variable mask.
+            if !gains().any(|program| {
+                program.instructions.iter().any(|instruction| {
+                    matches!(
+                        instruction,
+                        Instruction::PushVariable(_) | Instruction::PushVariableDyn { .. }
+                    )
+                })
+            }) {
+                return std::sync::Arc::from([]);
+            }
+            let mut live = vec![false; self.model.num_variables];
+            for program in gains() {
+                mark_program_variable_reads(program, &mut live);
+            }
+            propagate_live_assignment_slots(
+                self.model.noise_assignment_replay(),
+                &mut live,
+                AssignmentEffects::SkipTasks,
+            );
+            live.into()
+        })
+    }
+
     fn try_grouped_noise_processes_from_canonical_cfg(
         &mut self,
         circuit_voltages: &[f64],
@@ -7542,17 +7583,15 @@ impl VerilogADevice {
                 "grouped-noise canonical runtime result shape changed after construction".into(),
             ));
         }
-        let variable_seed = self.context.variables.clone();
         let mut vm = crate::vm::SmallSignalVm::with_variable_seed(
             &self.context,
             frequency_hz,
-            &variable_seed,
+            &self.context.variables,
         )?;
-        vm.execute_assignments(if self.model.noise_assignment_steps.is_empty() {
-            &self.model.assignment_steps
-        } else {
-            &self.model.noise_assignment_steps
-        })?;
+        vm.execute_live_assignments(
+            self.model.noise_assignment_replay(),
+            Some(self.noise_gain_live_variables()),
+        )?;
         let circuit_node = |index: &StampIndex| -> Result<usize, VmError> {
             match index {
                 StampIndex::Terminal(terminal) => self
@@ -7730,11 +7769,10 @@ impl VerilogADevice {
             frequency_hz,
             &variable_seed,
         )?;
-        vm.execute_assignments(if self.model.noise_assignment_steps.is_empty() {
-            &self.model.assignment_steps
-        } else {
-            &self.model.noise_assignment_steps
-        })?;
+        vm.execute_live_assignments(
+            self.model.noise_assignment_replay(),
+            Some(self.noise_gain_live_variables()),
+        )?;
 
         let circuit_node = |index: &StampIndex| -> usize {
             match index {
@@ -9140,6 +9178,7 @@ endmodule
             fused_program_active: vec![1; num_stamp_programs],
             fused_stamp_jacobians: vec![0.0; native_jacobian_count],
             canonical_noise_plan,
+            noise_gain_live_variables: std::sync::OnceLock::new(),
             prev_discontinuity: false,
         };
         device.context.branch_current_values = vec![0.0; num_branch_unknowns];

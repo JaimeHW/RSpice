@@ -7,6 +7,119 @@ fn compile(source: &str) -> rspice_veriloga::CompiledModel {
 }
 
 #[test]
+fn metadata_only_integrators_do_not_create_noise_transfer_poles() {
+    for (body, expected_gain) in [
+        (
+            r#"I(p,n)<+V(p,n)+white_noise(limexp(V(p,n)+d),"input");"#,
+            -1.0,
+        ),
+        (
+            r#"gain=V(p,n); process=white_noise(limexp(V(p,n)+d),"input");
+            shaped=gain*process; I(p,n)<+V(p,n)+shaped;"#,
+            -2.0,
+        ),
+        (
+            r#"gain=d; process=white_noise(limexp(V(p,n)+d),"input");
+            shaped=gain*process; I(p,n)<+V(p,n)+shaped;"#,
+            -3.0,
+        ),
+        (
+            r#"gain=1.0; for(i=0;i<count;i=i+1) gain=gain*2.0;
+            process=white_noise(limexp(V(p,n)+d),"input");
+            I(p,n)<+V(p,n)+gain*process;"#,
+            -8.0,
+        ),
+    ] {
+        let source = format!(
+            "module metadata_integrator(p,n); inout p,n; electrical p,n;
+            parameter integer count=3; integer i; real d,gain,process,shaped;
+            analog begin d=idt(V(p,n),3.0); {body} end endmodule"
+        );
+        let report = VerilogACompiler::default()
+            .compile_runtime(&source, None)
+            .unwrap();
+        let mut device = rspice_veriloga::device::VerilogADevice::try_new_with_canonical_ir(
+            "NOISE",
+            report.model,
+            &report.canonical_ir,
+            &[1, 0],
+        )
+        .unwrap();
+        device.try_set_analysis_type(3).unwrap();
+        for frequency in [0.0, 1.0, 1e6] {
+            let processes = device
+                .try_noise_processes_at_frequency(&[2.0], frequency)
+                .unwrap_or_else(|error| panic!("{body}: {error}"));
+            assert_eq!(processes.len(), 1, "{body}");
+            assert!(
+                (processes[0].psd / 5.0_f64.exp() - 1.0).abs() < 1e-14,
+                "{body}"
+            );
+            assert_eq!(processes[0].injections.len(), 1, "{body}");
+            assert_eq!(processes[0].injections[0].gain.re, expected_gain, "{body}");
+            assert_eq!(processes[0].injections[0].gain.im, 0.0, "{body}");
+        }
+    }
+}
+
+#[test]
+fn noise_replay_preserves_active_integrator_poles_at_zero_gain() {
+    for route in [
+        "if(enabled>0) I(p,n)<+gain*idt(source,0.0); else I(p,n)<+source;",
+        "if(enabled>0) routed=gain*idt(source,0.0); else routed=source; I(p,n)<+routed;",
+        "routed=enabled>0 ? gain*idt(source,0.0) : source; I(p,n)<+routed;",
+        "if(enabled>0) routed=gain*idt(source,0.0); else routed=source; for(k=0;k<enabled;k=k+1) source=routed; I(p,n)<+source;",
+    ] {
+        let source = format!(
+            "module noise_integrator_activation(p,n); inout p,n; electrical p,n;
+            parameter integer enabled=0; parameter real gain=1; real source,routed; integer k;
+            analog begin source=white_noise(1.0,\"input\"); {route} end endmodule"
+        );
+        let report = VerilogACompiler::default()
+            .compile_runtime(&source, None)
+            .unwrap();
+        let mut device = rspice_veriloga::device::VerilogADevice::try_new_with_canonical_ir(
+            "NOISE",
+            report.model,
+            &report.canonical_ir,
+            &[1, 0],
+        )
+        .unwrap();
+        device.try_set_analysis_type(3).unwrap();
+        for enabled in [0.0, 1.0, 0.0] {
+            for gain in [1.0, 0.0] {
+                device.try_set_parameter("enabled", enabled).unwrap();
+                device.try_set_parameter("gain", gain).unwrap();
+                device.try_resolve_parameter_defaults().unwrap();
+                for frequency in [0.0, 1.0] {
+                    let result = device.try_noise_processes_at_frequency(&[1.0], frequency);
+                    if enabled > 0.0 && frequency == 0.0 {
+                        let error = result.expect_err(
+                            "an executed integral remains singular with a zero coefficient",
+                        );
+                        assert!(error.to_string().contains("singular"), "{route}: {error}");
+                    } else {
+                        let processes = result.unwrap_or_else(|error| panic!("{route}: {error}"));
+                        assert_eq!(processes.len(), 1, "{route}");
+                        let actual = processes[0]
+                            .injections
+                            .iter()
+                            .map(|injection| injection.gain)
+                            .sum::<num_complex::Complex64>();
+                        let expected = if enabled > 0.0 {
+                            (0.0, gain / std::f64::consts::TAU)
+                        } else {
+                            (-1.0, 0.0)
+                        };
+                        assert_eq!((actual.re, actual.im), expected, "{route}");
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn assigned_noise_reuse_is_one_process_with_two_coherent_injections() {
     let model = compile(
         r#"

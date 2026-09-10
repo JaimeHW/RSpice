@@ -908,6 +908,15 @@ pub enum Instruction {
 }
 
 impl CompiledModel {
+    /// Resolve the shared ordinary/noise assignment representation.
+    pub(crate) fn noise_assignment_replay(&self) -> &[AssignmentStep] {
+        if self.noise_assignment_steps.is_empty() {
+            &self.assignment_steps
+        } else {
+            &self.noise_assignment_steps
+        }
+    }
+
     /// Resolve a public parameter or alias, preferring exact spelling before
     /// the case-insensitive spelling used by SPICE instance assignments.
     pub fn parameter_index(&self, name: &str) -> Option<usize> {

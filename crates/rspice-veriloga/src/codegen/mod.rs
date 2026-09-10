@@ -12,6 +12,7 @@ use num_complex::Complex64;
 use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
 
+pub(crate) mod assignment_liveness;
 mod generator;
 mod lookup_table;
 mod model;

@@ -9,6 +9,7 @@
 
 use super::{VmContext, VmError, idtmod_wrapped_candidate};
 use crate::array_index::{ArrayIndexError, checked_array_slot, saturated_array_upper};
+use crate::codegen::assignment_liveness::{AssignmentEffects, assignment_step_is_live};
 use crate::codegen::{AssignmentStep, BytecodeProgram, Instruction, ZiRuntimeLayout};
 use crate::complex_arithmetic::FrequencyValue;
 use crate::integer_runtime::{IntegerBinaryOperation, integer_binary};
@@ -241,6 +242,7 @@ pub(crate) struct SmallSignalVm<'a> {
     wide: Option<Box<SmallSignalEngine<'a, FrequencyValue>>>,
     seed: &'a [f64],
     assignments: Option<&'a [AssignmentStep]>,
+    assignment_liveness: Option<&'a [bool]>,
 }
 
 impl<'a> SmallSignalVm<'a> {
@@ -260,6 +262,7 @@ impl<'a> SmallSignalVm<'a> {
             wide: None,
             seed,
             assignments: None,
+            assignment_liveness: None,
         })
     }
 
@@ -267,6 +270,16 @@ impl<'a> SmallSignalVm<'a> {
     pub(crate) fn execute_assignments(
         &mut self,
         steps: &'a [AssignmentStep],
+    ) -> Result<(), VmError> {
+        self.execute_live_assignments(steps, None)
+    }
+
+    /// Replay only variables required by the caller's frequency-domain outputs.
+    /// The same selection is retained if extended-range recovery replays it.
+    pub(crate) fn execute_live_assignments(
+        &mut self,
+        steps: &'a [AssignmentStep],
+        live: Option<&'a [bool]>,
     ) -> Result<(), VmError> {
         if self.wide.is_some() || self.assignments.is_some() {
             // A second assignment stream starts from the first stream's final
@@ -276,10 +289,11 @@ impl<'a> SmallSignalVm<'a> {
                 .wide
                 .as_mut()
                 .expect("promoted engine")
-                .execute_assignments(steps);
+                .execute_assignment_steps(steps, live);
         }
         self.assignments = Some(steps);
-        let result = self.ordinary.execute_assignments(steps);
+        self.assignment_liveness = live;
+        let result = self.ordinary.execute_assignment_steps(steps, live);
         if self.ordinary.range_lost {
             self.promote()
         } else {
@@ -322,7 +336,7 @@ impl<'a> SmallSignalVm<'a> {
                 self.seed,
             )?);
             if let Some(steps) = self.assignments {
-                wide.execute_assignments(steps)?;
+                wide.execute_assignment_steps(steps, self.assignment_liveness)?;
             }
             self.wide = Some(wide);
         }
@@ -414,10 +428,6 @@ impl<'a, V: FrequencyScalar> SmallSignalEngine<'a, V> {
         })
     }
 
-    pub(crate) fn execute_assignments(&mut self, steps: &[AssignmentStep]) -> Result<(), VmError> {
-        self.execute_assignment_steps(steps)
-    }
-
     pub(crate) fn execute_scaled(
         &mut self,
         program: &BytecodeProgram,
@@ -483,8 +493,20 @@ impl<'a, V: FrequencyScalar> SmallSignalEngine<'a, V> {
         Ok(result)
     }
 
-    fn execute_assignment_steps(&mut self, steps: &[AssignmentStep]) -> Result<(), VmError> {
+    fn execute_assignment_steps(
+        &mut self,
+        steps: &[AssignmentStep],
+        live: Option<&[bool]>,
+    ) -> Result<(), VmError> {
+        if live.is_some_and(<[bool]>::is_empty) {
+            return Ok(());
+        }
         for step in steps {
+            if live.is_some_and(|live| {
+                !assignment_step_is_live(step, live, AssignmentEffects::SkipTasks)
+            }) {
+                continue;
+            }
             match step {
                 // Linearization replays numerical assignments, not task effects.
                 AssignmentStep::Task(_) | AssignmentStep::Initialization { .. } => {}
@@ -523,7 +545,7 @@ impl<'a, V: FrequencyScalar> SmallSignalEngine<'a, V> {
                         if active == 0.0 {
                             break;
                         }
-                        self.execute_assignment_steps(body)?;
+                        self.execute_assignment_steps(body, live)?;
                         iterations += 1;
                         if iterations >= MAX_RUNTIME_LOOP_ITERATIONS {
                             return Err(VmError::InvalidInstruction(
@@ -1259,6 +1281,138 @@ mod tests {
         let mut context = VmContext::new(0);
         context.analysis_type = 1;
         context
+    }
+
+    #[test]
+    fn selective_replay_retains_runtime_loop_and_dynamic_array_dependencies() {
+        use crate::codegen::AssignmentProgram;
+        use crate::codegen::assignment_liveness::{
+            mark_program_variable_reads, propagate_live_assignment_slots,
+        };
+
+        let program = |instructions| BytecodeProgram { instructions };
+        let assign = |var_index, instructions| {
+            AssignmentStep::Assign(AssignmentProgram {
+                var_index,
+                program: program(instructions),
+            })
+        };
+        let dead_pole = program(vec![Instruction::PushConst(1.0), Instruction::IdtJacobian]);
+        let steps = [
+            assign(0, vec![Instruction::PushConst(0.0)]),
+            AssignmentStep::Loop {
+                condition: program(vec![
+                    Instruction::PushVariable(0),
+                    Instruction::PushConst(2.0),
+                    Instruction::Lt,
+                ]),
+                body: vec![
+                    AssignmentStep::AssignIndexed {
+                        base: 3,
+                        len: 2,
+                        lower: 0,
+                        index: program(vec![Instruction::PushVariable(0)]),
+                        value: program(vec![
+                            Instruction::PushVariable(0),
+                            Instruction::PushConst(1.0),
+                            Instruction::Add,
+                        ]),
+                    },
+                    assign(
+                        0,
+                        vec![
+                            Instruction::PushVariable(0),
+                            Instruction::PushConst(1.0),
+                            Instruction::Add,
+                        ],
+                    ),
+                ],
+            },
+            assign(
+                5,
+                vec![
+                    Instruction::PushConst(1.0),
+                    Instruction::PushVariableDyn {
+                        base: 3,
+                        len: 2,
+                        lower: 0,
+                    },
+                ],
+            ),
+            // Neither a dead assignment nor its enclosing loop condition may
+            // introduce a pole into the requested output.
+            AssignmentStep::Loop {
+                condition: dead_pole.clone(),
+                body: vec![AssignmentStep::Assign(AssignmentProgram {
+                    var_index: 2,
+                    program: dead_pole,
+                })],
+            },
+        ];
+        let output = program(vec![Instruction::PushVariable(5)]);
+        let mut live = vec![false; 6];
+        mark_program_variable_reads(&output, &mut live);
+        propagate_live_assignment_slots(&steps, &mut live, AssignmentEffects::SkipTasks);
+        let mut context = ac_context();
+        context.variables = vec![0.0; 6];
+        let mut vm = SmallSignalVm::new(&context, 0.0).unwrap();
+        vm.execute_live_assignments(&steps, Some(&live)).unwrap();
+        assert_eq!(vm.execute(&output).unwrap(), Complex64::new(2.0, 0.0));
+        assert_eq!(context.variables, [0.0; 6]);
+    }
+
+    #[test]
+    fn range_recovery_preserves_the_assignment_selection_and_original_seed() {
+        use crate::codegen::AssignmentProgram;
+        let mut context = ac_context();
+        context.variables = vec![2.0, 0.0, 0.0];
+        let product = BytecodeProgram {
+            instructions: vec![
+                Instruction::PushVariable(0),
+                Instruction::PushConst(1e200),
+                Instruction::Mul,
+                Instruction::PushConst(1e200),
+                Instruction::Mul,
+            ],
+        };
+        let steps = [
+            AssignmentStep::Assign(AssignmentProgram {
+                var_index: 0,
+                program: BytecodeProgram {
+                    instructions: vec![
+                        Instruction::PushVariable(0),
+                        Instruction::PushConst(1.0),
+                        Instruction::Add,
+                    ],
+                },
+            }),
+            AssignmentStep::Assign(AssignmentProgram {
+                var_index: 1,
+                program: product.clone(),
+            }),
+            AssignmentStep::Assign(AssignmentProgram {
+                var_index: 2,
+                program: BytecodeProgram {
+                    instructions: vec![Instruction::PushConst(1.0), Instruction::IdtJacobian],
+                },
+            }),
+        ];
+        for assign_product in [false, true] {
+            let live = [true, assign_product, false];
+            let mut vm = SmallSignalVm::new(&context, 0.0).unwrap();
+            vm.execute_live_assignments(&steps, Some(&live)).unwrap();
+            let output = if assign_product {
+                BytecodeProgram {
+                    instructions: vec![Instruction::PushVariable(1)],
+                }
+            } else {
+                product.clone()
+            };
+            let result = vm.execute_scaled(&output, 1e-200).unwrap();
+            assert!((result.re / 1e200 - 3.0).abs() < 1e-14);
+            assert_eq!(result.im, 0.0);
+            assert_eq!(context.variables, [2.0, 0.0, 0.0]);
+        }
     }
 
     #[test]

@@ -22,6 +22,10 @@ use crate::canonical_ir::{
     HirAssignment, HirExprKind, HirExprRef, HirExpression, HirLoop, HirModel, HirStatement,
     MirEquationKind, MirModel, NodeId, SourceSpanRef,
 };
+use crate::codegen::assignment_liveness::{
+    AssignmentEffects, assignment_range_live, assignment_step_is_live, mark_program_variable_reads,
+    propagate_live_assignment_slots,
+};
 use crate::codegen::{
     AssignmentStep, BytecodeProgram, ColumnAxis, CompiledModel, CompiledNoiseSource, Instruction,
     JacobianEntry, StampIndex, StampProgram,
@@ -2758,7 +2762,11 @@ fn refuse_pre_current_variable_produced_after_a_current(
 
     let mut pre_current_roots = vec![false; model.num_variables];
     mark_canonical_entry_variable_roots(model, mir, limits, false, &mut pre_current_roots)?;
-    propagate_live_assignment_slots(model, &mut pre_current_roots);
+    propagate_live_assignment_slots(
+        &model.assignment_steps,
+        &mut pre_current_roots,
+        AssignmentEffects::IncludeTasks,
+    );
 
     if let Some(slot) = post_targets
         .iter()
@@ -2795,7 +2803,7 @@ fn mark_assignment_targets_after_a_current_read(
     targets: &mut [bool],
 ) {
     for step in steps {
-        if !assignment_steps_write_live(std::slice::from_ref(step), emitted) {
+        if !assignment_step_is_live(step, emitted, AssignmentEffects::IncludeTasks) {
             continue;
         }
         if !*after_current && bytecode_assignment_step_reads_current(step) {
@@ -2935,7 +2943,11 @@ fn live_native_assignment_steps(model: &CompiledModel) -> Vec<AssignmentStep> {
 
 fn live_assignment_slots(model: &CompiledModel) -> Vec<bool> {
     let mut live = native_assignment_roots(model);
-    propagate_live_assignment_slots(model, &mut live);
+    propagate_live_assignment_slots(
+        &model.assignment_steps,
+        &mut live,
+        AssignmentEffects::IncludeTasks,
+    );
     live
 }
 
@@ -2964,18 +2976,12 @@ pub(crate) fn live_canonical_assignment_slots(
         #[cfg(feature = "native")]
         AssignmentRootPolicy::ObservationPass => mark_observable_variable_roots(model, &mut live),
     }
-    propagate_live_assignment_slots(model, &mut live);
+    propagate_live_assignment_slots(
+        &model.assignment_steps,
+        &mut live,
+        AssignmentEffects::IncludeTasks,
+    );
     Ok(live)
-}
-
-fn propagate_live_assignment_slots(model: &CompiledModel, live: &mut [bool]) {
-    loop {
-        let mut changed = false;
-        propagate_assignment_liveness(&model.assignment_steps, live, &mut changed);
-        if !changed {
-            break;
-        }
-    }
 }
 
 struct AssignmentShadowIndex {
@@ -4428,42 +4434,6 @@ fn native_assignment_root_is_externally_observable(name: &str) -> bool {
     !name.contains('@') && !name.starts_with("__guard")
 }
 
-fn propagate_assignment_liveness(steps: &[AssignmentStep], live: &mut [bool], changed: &mut bool) {
-    for step in steps.iter().rev() {
-        match step {
-            AssignmentStep::Initialization { .. } => {}
-            AssignmentStep::Task(task) => {
-                for program in task.expressions() {
-                    mark_program_variable_reads_changed(program, live, changed);
-                }
-            }
-            AssignmentStep::Assign(assignment) => {
-                if assignment.var_index < live.len() && live[assignment.var_index] {
-                    mark_program_variable_reads_changed(&assignment.program, live, changed);
-                }
-            }
-            AssignmentStep::AssignIndexed {
-                base,
-                len,
-                index,
-                value,
-                ..
-            } => {
-                if assignment_range_live(*base, *len, live) {
-                    mark_program_variable_reads_changed(index, live, changed);
-                    mark_program_variable_reads_changed(value, live, changed);
-                }
-            }
-            AssignmentStep::Loop { condition, body } => {
-                propagate_assignment_liveness(body, live, changed);
-                if assignment_steps_write_live(body, live) {
-                    mark_program_variable_reads_changed(condition, live, changed);
-                }
-            }
-        }
-    }
-}
-
 fn filter_live_assignment_steps(steps: &[AssignmentStep], live: &[bool]) -> Vec<AssignmentStep> {
     steps
         .iter()
@@ -4485,58 +4455,6 @@ fn filter_live_assignment_steps(steps: &[AssignmentStep], live: &[bool]) -> Vec<
             }
         })
         .collect()
-}
-
-fn assignment_steps_write_live(steps: &[AssignmentStep], live: &[bool]) -> bool {
-    steps.iter().any(|step| match step {
-        AssignmentStep::Initialization { .. } => false,
-        AssignmentStep::Task(_) => true,
-        AssignmentStep::Assign(assignment) => {
-            assignment.var_index < live.len() && live[assignment.var_index]
-        }
-        AssignmentStep::AssignIndexed { base, len, .. } => assignment_range_live(*base, *len, live),
-        AssignmentStep::Loop { body, .. } => assignment_steps_write_live(body, live),
-    })
-}
-
-fn assignment_range_live(base: usize, len: usize, live: &[bool]) -> bool {
-    base.checked_add(len)
-        .and_then(|end| live.get(base..end))
-        .is_some_and(|range| range.iter().any(|slot| *slot))
-}
-
-fn mark_program_variable_reads(program: &BytecodeProgram, live: &mut [bool]) {
-    let mut changed = false;
-    mark_program_variable_reads_changed(program, live, &mut changed);
-}
-
-fn mark_program_variable_reads_changed(
-    program: &BytecodeProgram,
-    live: &mut [bool],
-    changed: &mut bool,
-) {
-    for instruction in &program.instructions {
-        match *instruction {
-            Instruction::PushVariable(index) => mark_variable_live(index, live, changed),
-            Instruction::PushVariableDyn { base, len, .. } => {
-                if let Some(end) = base.checked_add(len) {
-                    for index in base..end.min(live.len()) {
-                        mark_variable_live(index, live, changed);
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-}
-
-fn mark_variable_live(index: usize, live: &mut [bool], changed: &mut bool) {
-    if let Some(slot) = live.get_mut(index)
-        && !*slot
-    {
-        *slot = true;
-        *changed = true;
-    }
 }
 
 #[cfg(all(test, target_arch = "x86_64"))]
