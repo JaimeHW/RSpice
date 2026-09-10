@@ -64,21 +64,21 @@ pub use initcond::{
 };
 pub use model_resolution::{UnresolvedDeviceModelReference, unresolved_device_model_references};
 pub use mutual_inductor::validate_mutual_inductor_references;
-pub(crate) use output_symbols::{
-    InterfaceNodeAliases, OutputNodeNamespace, OutputOperand, OutputOperandKind, canonical_symbol,
-    collect_output_node_namespace_from_elements_with_abort,
-    collect_output_node_namespace_with_limits_and_abort,
-    collect_requested_interface_node_aliases_with_abort, is_current_output_accessor,
-    is_current_projection_accessor, is_device_lead_current_accessor, measure_output_dependencies,
-    probe_specification_error,
-};
 pub use output_symbols::{
-    OutputAnalysisKind, OutputDirectiveKind, OutputExpressionIssue,
+    InterfaceNodeAliases, OutputAnalysisKind, OutputDirectiveKind, OutputExpressionIssue,
     OutputExpressionValidationError, OutputRequest, OutputSymbolDependency, OutputSymbolKind,
     OutputSymbolValidationError, PrintDelimiter, UnresolvedOutputSymbol,
-    validate_output_expressions, validate_output_expressions_with_abort, validate_output_requests,
+    collect_requested_interface_node_aliases_with_abort, validate_output_expressions,
+    validate_output_expressions_with_abort, validate_output_requests,
     validate_output_requests_with_abort, validate_output_symbols,
     validate_output_symbols_with_abort,
+};
+pub(crate) use output_symbols::{
+    OutputNodeNamespace, OutputOperand, OutputOperandKind, canonical_symbol,
+    collect_output_node_namespace_from_elements_with_abort,
+    collect_output_node_namespace_with_limits_and_abort, is_current_output_accessor,
+    is_current_projection_accessor, is_device_lead_current_accessor, measure_output_dependencies,
+    probe_specification_error,
 };
 pub use param_scope::{ParamResolver, ParamScope, ScopedParam};
 pub use parser::*;

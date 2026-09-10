@@ -1808,13 +1808,13 @@ pub(crate) fn canonical_symbol(symbol: &str) -> String {
 /// target can itself be a physical node whose spelling also happens to be an
 /// interface alias, and that physical node must win.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct InterfaceNodeAliases {
+pub struct InterfaceNodeAliases {
     targets: HashMap<String, String>,
 }
 
 impl InterfaceNodeAliases {
     /// Resolve an authored alias spelling to its direct flattened target.
-    pub(crate) fn resolve(&self, authored: &str) -> Option<&str> {
+    pub fn resolve(&self, authored: &str) -> Option<&str> {
         let canonical = canonical_symbol(authored);
         self.targets.get(&canonical).map(String::as_str)
     }
@@ -1860,7 +1860,8 @@ fn collect_requested_interface_node_aliases(
     ))
 }
 
-pub(crate) fn collect_requested_interface_node_aliases_with_abort(
+/// Resolve requested formal ports using the same validated hierarchy as output adapters.
+pub fn collect_requested_interface_node_aliases_with_abort(
     netlist: &Netlist,
     requested: &HashSet<String>,
     abort: &dyn AbortSignal,
