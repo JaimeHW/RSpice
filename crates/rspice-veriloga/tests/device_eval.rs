@@ -2539,7 +2539,7 @@ fn ac_quotient_preserves_common_scale_and_dynamic_phase() {
                     "module quotient_ac(p); inout p; electrical p; real r; analog begin {body} end endmodule"
                 ));
                 for bias in [-0.01_f64, 0.01] {
-                    for omega in [1.0, 10.0] {
+                    for omega in [1e-200, 1.0, 10.0, 1e200] {
                         let mut device = fixture.device("AC", &[1]);
                         device.set_analysis_type(1);
                         let mut admittance = (0.0, 0.0);
@@ -2573,5 +2573,100 @@ fn ac_quotient_preserves_common_scale_and_dynamic_phase() {
                 }
             }
         }
+    }
+}
+
+#[test]
+fn ac_intermediate_range_survives_indexed_assignments_and_multiplicity() {
+    for gain in [1e-200, 1e200] {
+        let fixture = compile(&format!(
+            "module ranged_assignment(p); inout p; electrical p;
+             real r[0:1]; integer k; analog begin
+             r[0]={gain:e}*(V(p)+ddt(V(p)));
+             for(k=0;k<1;k=k+1) r[k+1]=r[k];
+             I(p)<+{gain:e}/r[1]; end endmodule"
+        ));
+        for omega in [1e-200, 1e200] {
+            let mut device = fixture.device("RANGE", &[1]);
+            device.set_analysis_type(1);
+            let mut admittance = (0.0, 0.0);
+            device
+                .try_stamp_small_signal_complex(
+                    &[0.01],
+                    omega / std::f64::consts::TAU,
+                    |_, _, real, imaginary| {
+                        admittance.0 += real;
+                        admittance.1 += imaginary;
+                    },
+                )
+                .unwrap();
+            assert!((admittance.0 / -1e4 - 1.0).abs() < 1e-12);
+            assert!((admittance.1 / (-1e4 * omega) - 1.0).abs() < 1e-12);
+        }
+
+        let fixture = compile(&format!(
+            "module ranged_multiplicity(p); inout p; electrical p;
+             analog I(p)<+{gain:e}*(V(p)+ddt(V(p))); endmodule"
+        ));
+        let mut device = fixture.device("MULTIPLICITY", &[1]);
+        device.set_analysis_type(1);
+        device.try_set_multiplicity(1.0 / gain).unwrap();
+        let mut admittance = (0.0, 0.0);
+        device
+            .try_stamp_small_signal_complex(
+                &[0.01],
+                gain / std::f64::consts::TAU,
+                |_, _, real, imaginary| {
+                    admittance.0 += real;
+                    admittance.1 += imaginary;
+                },
+            )
+            .unwrap();
+        assert!((admittance.0 - 1.0).abs() < 1e-12);
+        assert!((admittance.1 / gain - 1.0).abs() < 1e-12);
+        if gain > 1.0 {
+            device.try_set_multiplicity(1.0).unwrap();
+            let mut published = 0;
+            assert!(
+                device
+                    .try_stamp_small_signal_complex(
+                        &[0.01],
+                        gain / std::f64::consts::TAU,
+                        |_, _, _, _| published += 1,
+                    )
+                    .is_err()
+            );
+            assert_eq!(
+                published, 0,
+                "unrepresentable final entries must not be published"
+            );
+        }
+    }
+}
+
+#[test]
+fn noise_injection_range_is_preserved_until_multiplicity_scaling() {
+    for (gain, omega, multiplicity) in [(1e150, 1e200, 1e-200_f64), (1e-150, 1e-200, 1e200_f64)] {
+        let fixture = compile(&format!(
+            "module ranged_noise(p); inout p; electrical p; real x,y;
+             analog begin x=white_noise(1.0,\"source\"); y={gain:e}*x;
+             I(p)<+ddt(y); end endmodule"
+        ));
+        let mut device = fixture.device("NOISE", &[1]);
+        device.set_analysis_type(3);
+        device.try_set_multiplicity(multiplicity).unwrap();
+        let processes = device
+            .try_noise_processes_at_frequency(&[0.01], omega / std::f64::consts::TAU)
+            .unwrap();
+        assert_eq!(processes.len(), 1);
+        assert_eq!(processes[0].injections.len(), 1);
+        assert_eq!(processes[0].psd, 1.0);
+        let actual = processes[0].injections[0].gain;
+        let expected = (gain * multiplicity.sqrt()) * omega;
+        assert_eq!(actual.re, 0.0);
+        assert!(
+            (actual.im.abs() / expected - 1.0).abs() < 1e-12,
+            "{actual:?} != {expected}"
+        );
     }
 }

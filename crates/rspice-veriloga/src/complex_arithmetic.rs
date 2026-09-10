@@ -31,6 +31,7 @@ fn arithmetic_value(result: Result<f64, ArithmeticError>) -> f64 {
 /// Recover finite complex products whose cross-products overflow, underflow,
 /// or cancel. An axis operand has only one nonzero product per component and
 /// can use ordinary multiplication without losing an intermediate sum.
+#[inline]
 pub(crate) fn multiply_complex(left: Complex64, right: Complex64) -> Complex64 {
     if left.im == 0.0
         || right.im == 0.0
@@ -54,6 +55,7 @@ pub(crate) fn multiply_complex(left: Complex64, right: Complex64) -> Complex64 {
 
 /// Use direct division on the axes and ordinary products in a safe range.
 /// Exact product sums recover intermediate overflow, underflow, and cancellation.
+#[inline]
 pub(crate) fn divide_complex(left: Complex64, right: Complex64) -> Complex64 {
     if ![left.re, left.im, right.re, right.im]
         .into_iter()
@@ -87,9 +89,414 @@ pub(crate) fn divide_complex(left: Complex64, right: Complex64) -> Complex64 {
     Complex64::new(quotient(real), quotient(imaginary))
 }
 
+/// A binary64 significand with a separate exponent for AC intermediates.
+/// Values in the normal binary64 range retain their ordinary representation.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Component {
+    value: f64,
+    exponent: i64,
+}
+
+impl Component {
+    #[inline]
+    fn new(value: f64) -> Self {
+        Self { value, exponent: 0 }
+    }
+
+    fn normalized(self) -> (f64, i64) {
+        if self.value == 0.0 || !self.value.is_finite() {
+            return (self.value, 0);
+        }
+        let (value, adjustment) = if self.value.is_subnormal() {
+            (self.value * 18014398509481984.0, -54)
+        } else {
+            (self.value, 0)
+        };
+        let bits = value.to_bits();
+        let exponent = ((bits >> 52) & 0x7ff) as i64 - 1023 + adjustment;
+        let significand = f64::from_bits((bits & 0x800f_ffff_ffff_ffff) | (1023_u64 << 52));
+        match self.exponent.checked_add(exponent) {
+            Some(exponent) => (significand, exponent),
+            None => (f64::NAN, 0),
+        }
+    }
+
+    fn scaled(value: f64, exponent: i64) -> Self {
+        let (value, exponent) = Self { value, exponent }.normalized();
+        if value == 0.0 || !value.is_finite() {
+            return Self::new(value);
+        }
+        if (-1022..=1023).contains(&exponent) {
+            return Self::new(value * f64::from_bits(((exponent + 1023) as u64) << 52));
+        }
+        Self { value, exponent }
+    }
+
+    #[inline]
+    fn binary64(self) -> f64 {
+        if self.exponent == 0 || self.value == 0.0 || !self.value.is_finite() {
+            return self.value;
+        }
+        let (value, exponent) = self.normalized();
+        if exponent > 1023 {
+            return f64::INFINITY.copysign(value);
+        }
+        if exponent < -1075 {
+            return 0.0_f64.copysign(value);
+        }
+        if exponent < -1022 {
+            // The first product is exact; only the final subnormal conversion
+            // rounds, including the half-minimum tie at exponent -1075.
+            return (value * f64::MIN_POSITIVE)
+                * f64::from_bits(((exponent + 1022 + 1023) as u64) << 52);
+        }
+        value * f64::from_bits(((exponent + 1023) as u64) << 52)
+    }
+
+    #[inline]
+    fn neg(self) -> Self {
+        Self {
+            value: -self.value,
+            ..self
+        }
+    }
+
+    #[inline]
+    fn add(self, other: Self) -> Self {
+        if self.exponent == 0 && other.exponent == 0 {
+            let sum = self.value + other.value;
+            if sum.is_finite() || !self.value.is_finite() || !other.value.is_finite() {
+                return Self::new(sum);
+            }
+        }
+        Self::product_sum(self, Self::new(1.0), other, Self::new(1.0))
+    }
+
+    #[inline]
+    fn mul(self, other: Self) -> Self {
+        if self.exponent == 0 && other.exponent == 0 {
+            let product = self.value * other.value;
+            if product.is_normal()
+                || self.value == 0.0
+                || other.value == 0.0
+                || !self.value.is_finite()
+                || !other.value.is_finite()
+            {
+                return Self::new(product);
+            }
+        }
+        let (a, ae) = self.normalized();
+        let (b, be) = other.normalized();
+        match ae.checked_add(be) {
+            Some(exponent) => Self::scaled(a * b, exponent),
+            None => Self::new(f64::NAN),
+        }
+    }
+
+    #[inline]
+    fn div(self, other: Self) -> Self {
+        if self.exponent == 0 && other.exponent == 0 {
+            let quotient = self.value / other.value;
+            if quotient.is_normal()
+                || self.value == 0.0
+                || other.value == 0.0
+                || !self.value.is_finite()
+                || !other.value.is_finite()
+            {
+                return Self::new(quotient);
+            }
+        }
+        let (a, ae) = self.normalized();
+        let (b, be) = other.normalized();
+        match ae.checked_sub(be) {
+            Some(exponent) => Self::scaled(a / b, exponent),
+            None => Self::new(f64::NAN),
+        }
+    }
+
+    #[inline]
+    fn product_sum(a: Self, b: Self, c: Self, d: Self) -> Self {
+        if (a.exponent | b.exponent | c.exponent | d.exponent) == 0 {
+            if let Some(value) = ordinary_product_sum([(a.value, b.value), (c.value, d.value)]) {
+                return Self::new(value);
+            }
+        }
+        Self::wide_product_sum(a, b, c, d)
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn wide_product_sum(a: Self, b: Self, c: Self, d: Self) -> Self {
+        if [a, b, c, d].iter().any(|x| !x.value.is_finite()) {
+            return Self::new(a.binary64() * b.binary64() + c.binary64() * d.binary64());
+        }
+        let (a, ae) = a.normalized();
+        let (b, be) = b.normalized();
+        let (c, ce) = c.normalized();
+        let (d, de) = d.normalized();
+        let (Some(ab), Some(cd)) = (ae.checked_add(be), ce.checked_add(de)) else {
+            return Self::new(f64::NAN);
+        };
+        let common = if a == 0.0 || b == 0.0 {
+            cd
+        } else if c == 0.0 || d == 0.0 {
+            ab
+        } else {
+            ab.max(cd)
+        };
+        let align = |value: f64, exponent: i64| {
+            if value == 0.0 {
+                return value;
+            }
+            let shift = exponent.saturating_sub(common);
+            if shift < -1074 {
+                0.0_f64.copysign(value)
+            } else if shift < -1022 {
+                value * f64::from_bits(1_u64 << (shift + 1074))
+            } else {
+                value * f64::from_bits(((shift + 1023) as u64) << 52)
+            }
+        };
+        let first = if a == 0.0 || b == 0.0 {
+            (a * b, 1.0)
+        } else {
+            (align(a, ab), b)
+        };
+        let second = if c == 0.0 || d == 0.0 {
+            (c * d, 1.0)
+        } else {
+            (align(c, cd), d)
+        };
+        let value = arithmetic_value(sum_products([first, second].into_iter()));
+        Self::scaled(value, common)
+    }
+}
+
+/// Complex AC value whose components can cross binary64 range boundaries
+/// independently. Conversion is deferred across arithmetic and assignments.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct FrequencyValue {
+    real: Component,
+    imaginary: Component,
+}
+
+impl FrequencyValue {
+    #[inline]
+    pub(crate) fn new(real: f64, imaginary: f64) -> Self {
+        Self {
+            real: Component::new(real),
+            imaginary: Component::new(imaginary),
+        }
+    }
+
+    #[inline]
+    pub(crate) fn from_complex(value: Complex64) -> Self {
+        Self::new(value.re, value.im)
+    }
+
+    #[inline]
+    pub(crate) fn binary64(self) -> Complex64 {
+        Complex64::new(self.real.binary64(), self.imaginary.binary64())
+    }
+
+    #[inline]
+    pub(crate) fn is_real(self) -> bool {
+        self.imaginary.value == 0.0
+    }
+
+    #[inline]
+    pub(crate) fn is_finite(self) -> bool {
+        self.real.value.is_finite() && self.imaginary.value.is_finite()
+    }
+
+    #[inline]
+    pub(crate) fn has_regular_components(self) -> bool {
+        (self.real.exponent | self.imaginary.exponent) == 0
+    }
+
+    #[inline]
+    pub(crate) fn regular_result(value: Complex64, a: Complex64, b: Complex64) -> bool {
+        let real_zero = (a.re == 0.0 || b.re == 0.0) && (a.im == 0.0 || b.im == 0.0);
+        let imaginary_zero = (a.re == 0.0 || b.im == 0.0) && (a.im == 0.0 || b.re == 0.0);
+        (value.re.is_normal() || (value.re == 0.0 && real_zero))
+            && (value.im.is_normal() || (value.im == 0.0 && imaginary_zero))
+    }
+
+    #[inline]
+    pub(crate) fn multiply(self, other: Self) -> Self {
+        if self.has_regular_components() && other.has_regular_components() {
+            let a = Complex64::new(self.real.value, self.imaginary.value);
+            let b = Complex64::new(other.real.value, other.imaginary.value);
+            let value = multiply_complex(a, b);
+            if Self::regular_result(value, a, b) {
+                return Self::from_complex(value);
+            }
+        }
+        self.multiply_wide(other)
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn multiply_wide(self, other: Self) -> Self {
+        Self {
+            real: Component::product_sum(
+                self.real,
+                other.real,
+                self.imaginary.neg(),
+                other.imaginary,
+            ),
+            imaginary: Component::product_sum(
+                self.real,
+                other.imaginary,
+                self.imaginary,
+                other.real,
+            ),
+        }
+    }
+
+    #[inline]
+    pub(crate) fn divide(self, other: Self) -> Self {
+        if self.has_regular_components() && other.has_regular_components() {
+            let a = Complex64::new(self.real.value, self.imaginary.value);
+            let b = Complex64::new(other.real.value, other.imaginary.value);
+            let value = divide_complex(a, b);
+            if Self::regular_result(value, a, b) {
+                return Self::from_complex(value);
+            }
+        }
+        self.divide_wide(other)
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn divide_wide(self, other: Self) -> Self {
+        if !self.is_finite()
+            || !other.is_finite()
+            || (other.real.value == 0.0 && other.imaginary.value == 0.0)
+        {
+            return Self::from_complex(divide_complex(self.binary64(), other.binary64()));
+        }
+        if other.imaginary.value == 0.0 {
+            return Self {
+                real: self.real.div(other.real),
+                imaginary: self.imaginary.div(other.real),
+            };
+        }
+        if other.real.value == 0.0 {
+            return Self {
+                real: self.imaginary.div(other.imaginary),
+                imaginary: self.real.neg().div(other.imaginary),
+            };
+        }
+        let denominator =
+            Component::product_sum(other.real, other.real, other.imaginary, other.imaginary);
+        Self {
+            real: Component::product_sum(self.real, other.real, self.imaginary, other.imaginary)
+                .div(denominator),
+            imaginary: Component::product_sum(
+                self.imaginary,
+                other.real,
+                self.real.neg(),
+                other.imaginary,
+            )
+            .div(denominator),
+        }
+    }
+}
+
+impl std::ops::Neg for FrequencyValue {
+    type Output = Self;
+    #[inline]
+    fn neg(self) -> Self {
+        Self {
+            real: self.real.neg(),
+            imaginary: self.imaginary.neg(),
+        }
+    }
+}
+
+impl std::ops::Add for FrequencyValue {
+    type Output = Self;
+    #[inline]
+    fn add(self, other: Self) -> Self {
+        Self {
+            real: self.real.add(other.real),
+            imaginary: self.imaginary.add(other.imaginary),
+        }
+    }
+}
+
+impl std::ops::Sub for FrequencyValue {
+    type Output = Self;
+    #[inline]
+    fn sub(self, other: Self) -> Self {
+        self + -other
+    }
+}
+
+impl std::ops::Mul<f64> for FrequencyValue {
+    type Output = Self;
+    #[inline]
+    fn mul(self, other: f64) -> Self {
+        if other == 1.0 {
+            return self;
+        }
+        Self {
+            real: self.real.mul(Component::new(other)),
+            imaginary: self.imaginary.mul(Component::new(other)),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn frequency_intermediates_preserve_independent_component_ranges() {
+        for gain in [1e-200, 1.0, 1e200] {
+            for omega in [1e-200, 1.0, 1e200] {
+                let action =
+                    FrequencyValue::new(1.0, omega).multiply(FrequencyValue::new(gain, 0.0));
+                let result = action.divide(FrequencyValue::new(gain, 0.0)).binary64();
+                assert!((result.re - 1.0).abs() <= 4.0 * f64::EPSILON);
+                assert!((result.im / omega - 1.0).abs() <= 4.0 * f64::EPSILON);
+            }
+        }
+        let huge = FrequencyValue::new(1e300, 1e-300).multiply(FrequencyValue::new(1e300, 0.0));
+        let result = huge.divide(FrequencyValue::new(1e300, 0.0)).binary64();
+        assert!((result.re / 1e300 - 1.0).abs() <= 4.0 * f64::EPSILON);
+        assert!((result.im / 1e-300 - 1.0).abs() <= 4.0 * f64::EPSILON);
+        assert_eq!((huge - huge).binary64(), Complex64::new(0.0, 0.0));
+    }
+
+    #[test]
+    fn frequency_conversion_preserves_subnormal_rounding_and_signed_zero() {
+        let tiny = f64::from_bits(1);
+        for sign in [1.0, -1.0] {
+            let half = FrequencyValue::new(sign * tiny, 0.0) * 0.5;
+            assert_eq!(
+                half.binary64().re.to_bits(),
+                (0.0_f64.copysign(sign)).to_bits()
+            );
+            assert_eq!(
+                (half * 2.0).binary64().re.to_bits(),
+                (sign * tiny).to_bits()
+            );
+            let above = FrequencyValue::new(sign * tiny, 0.0) * (0.5 + f64::EPSILON);
+            assert_eq!(above.binary64().re.to_bits(), (sign * tiny).to_bits());
+        }
+        let value = FrequencyValue::new(tiny, tiny)
+            .multiply(FrequencyValue::new(0.5, 0.5))
+            .binary64();
+        assert_eq!(value, Complex64::new(0.0, tiny));
+        for value in [0.0, -0.0, tiny, f64::MIN_POSITIVE, f64::MAX] {
+            assert_eq!(
+                FrequencyValue::new(value, 0.0).binary64().re.to_bits(),
+                value.to_bits()
+            );
+        }
+    }
 
     #[test]
     fn complex_products_preserve_range_and_cancellation() {

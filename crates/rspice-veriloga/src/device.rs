@@ -5043,7 +5043,8 @@ impl VerilogADevice {
             };
             for mapped_entry in &matrix_indices.jacobian[program_idx] {
                 let model_entry = &program.jacobian_programs[mapped_entry.jacobian_idx];
-                let derivative = vm.execute(&model_entry.program)? * (mapped_entry.sign * scale);
+                let derivative =
+                    vm.execute_scaled(&model_entry.program, mapped_entry.sign * scale)?;
                 if !derivative.re.is_finite() || !derivative.im.is_finite() {
                     return Err(VmError::InvalidNumericResult(format!(
                         "complex small-signal Jacobian {}:{} is non-finite at {frequency_hz} Hz",
@@ -7610,7 +7611,8 @@ impl VerilogADevice {
                         injection.rhs_sign
                     )));
                 }
-                let gain = vm.execute(&injection.gain_program)? * gain_scale * injection.rhs_sign;
+                let gain =
+                    vm.execute_scaled(&injection.gain_program, gain_scale * injection.rhs_sign)?;
                 if !gain.re.is_finite() || !gain.im.is_finite() {
                     return Err(VmError::InvalidNumericResult(format!(
                         "noise process {expected} injection gain is non-finite at {frequency_hz} Hz"
@@ -7809,7 +7811,8 @@ impl VerilogADevice {
                         source.process_id, injection.rhs_sign
                     )));
                 }
-                let gain = vm.execute(&injection.gain_program)? * gain_scale * injection.rhs_sign;
+                let gain =
+                    vm.execute_scaled(&injection.gain_program, gain_scale * injection.rhs_sign)?;
                 if !gain.re.is_finite() || !gain.im.is_finite() {
                     return Err(VmError::InvalidNumericResult(format!(
                         "noise process {} injection gain is non-finite at {frequency_hz} Hz",
