@@ -37,6 +37,7 @@ pub mod ids;
 pub mod metadata;
 pub mod mir;
 pub mod noise;
+mod noise_liveness;
 mod parameter_array;
 pub mod schedule;
 pub mod state;

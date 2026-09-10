@@ -44,6 +44,7 @@ use super::hir::{
 };
 use super::mir::{MirEquationKind, MirModel};
 use super::noise::{contains_noise, is_noise_call, string_literal};
+use super::noise_liveness::NoiseMetadataLiveness;
 use super::{
     BlockId, BranchId, BranchUnknownId, CanonicalNoiseSourceKind, CompilerPhase, ContributionId,
     DiagnosticSeverity, ExprId, IrDiagnostic, NodeId, ParamId, SourceSpanRef, ValueId, VariableId,
@@ -447,6 +448,7 @@ struct CfgLowerer<'a> {
     /// Scoped mode used only by the grouped-noise metadata slicer. It never
     /// changes ordinary canonical residual lowering or its diagnostics.
     noise_metadata_only: bool,
+    noise_metadata_liveness: Option<NoiseMetadataLiveness>,
     /// Whether this graph owns task execution. Executable JIT plans run their
     /// ordered assignment pass; numerical and noise slices must not replay it.
     phase: rspice_veriloga_runtime::AnalogEvaluationPhase,
@@ -1039,6 +1041,9 @@ impl<'a> CfgLowerer<'a> {
             noise: Vec::new(),
             noise_processes: Vec::new(),
             noise_metadata_only: mode.noise_metadata_only,
+            noise_metadata_liveness: mode
+                .noise_metadata_only
+                .then(|| NoiseMetadataLiveness::for_model(hir)),
             phase: mode.phase,
             record_tasks: mode.record_tasks,
             noise_site_values: mode.noise_site_values,
@@ -1298,6 +1303,13 @@ impl<'a> CfgLowerer<'a> {
                 else_body,
                 ..
             } => {
+                if self
+                    .noise_metadata_liveness
+                    .as_ref()
+                    .is_some_and(|live| !live.condition_is_live(condition.id))
+                {
+                    return;
+                }
                 let condition_static = self.condition_is_instance_static(condition.id);
                 if !condition_static && !dynamic_topology_ancestor {
                     self.activate_potential_descendants(then_body);
@@ -1313,6 +1325,13 @@ impl<'a> CfgLowerer<'a> {
             HirRegion::Loop {
                 condition, body, ..
             } => {
+                if self
+                    .noise_metadata_liveness
+                    .as_ref()
+                    .is_some_and(|live| !live.condition_is_live(condition.id))
+                {
+                    return;
+                }
                 let condition_static = self.condition_is_instance_static(condition.id);
                 if !condition_static && !dynamic_topology_ancestor {
                     self.activate_potential_descendants(body);
@@ -1334,6 +1353,19 @@ impl<'a> CfgLowerer<'a> {
     /// same [`HirAssignment`], so there is one lowering of it rather than two
     /// that could drift.
     fn assignment(&mut self, assignment: &HirAssignment) {
+        if self
+            .noise_metadata_liveness
+            .as_ref()
+            .is_some_and(|live| !live.assignment_is_live(self.hir, assignment))
+            && !(assignment.index.is_some() && contains_noise(self.hir, assignment.expr.id))
+        {
+            // Preserve syntactic process identities and activation even when
+            // the assigned primal is needed only by the gain replay. Indexed
+            // assignments of noise still require array-shadow support and
+            // retain the explicit refusal below.
+            self.metadata_noise_expr(assignment.expr.id);
+            return;
+        }
         if assignment.index.is_some() {
             self.unsupported(
                 assignment.span,
@@ -1483,6 +1515,11 @@ impl<'a> CfgLowerer<'a> {
         };
         match expression.kind {
             HirExprKind::NoiseSource { .. } => {
+                let _ = self.expr(id);
+            }
+            HirExprKind::Call { ref name, .. } | HirExprKind::SystemFunction { ref name, .. }
+                if is_noise_call(name) =>
+            {
                 let _ = self.expr(id);
             }
             HirExprKind::Conditional {

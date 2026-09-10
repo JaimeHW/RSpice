@@ -711,29 +711,35 @@ pub(super) fn contains_noise(hir: &HirModel, root: ExprId) -> bool {
             {
                 return true;
             }
-            HirExprKind::Binary { left, right, .. } => stack.extend([*left, *right]),
-            HirExprKind::Unary { operand, .. } => stack.push(*operand),
-            HirExprKind::Conditional {
-                condition,
-                then_expr,
-                else_expr,
-            } => stack.extend([*condition, *then_expr, *else_expr]),
-            HirExprKind::Call { args, .. }
-            | HirExprKind::SystemFunction { args, .. }
-            | HirExprKind::ArrayLiteral { elements: args, .. } => {
-                stack.extend(args.iter().copied())
-            }
-            HirExprKind::ArrayAccess { index, .. } => stack.push(*index),
-            HirExprKind::AnalogOperator { op } => push_analog_children(op, &mut stack),
-            HirExprKind::NullArgument
-            | HirExprKind::Number { .. }
-            | HirExprKind::StringLiteral { .. }
-            | HirExprKind::Identifier { .. }
-            | HirExprKind::BranchAccess { .. }
-            | HirExprKind::NamedBranchAccess { .. } => {}
+            kind => push_expression_children(kind, &mut stack),
         }
     }
     false
+}
+
+/// Append operand IDs without allocating an expression copy.
+pub(super) fn push_expression_children(kind: &HirExprKind, stack: &mut Vec<ExprId>) {
+    match kind {
+        HirExprKind::Binary { left, right, .. } => stack.extend([*left, *right]),
+        HirExprKind::Unary { operand, .. } => stack.push(*operand),
+        HirExprKind::Conditional {
+            condition,
+            then_expr,
+            else_expr,
+        } => stack.extend([*condition, *then_expr, *else_expr]),
+        HirExprKind::Call { args, .. }
+        | HirExprKind::SystemFunction { args, .. }
+        | HirExprKind::ArrayLiteral { elements: args, .. } => stack.extend(args.iter().copied()),
+        HirExprKind::ArrayAccess { index, .. } => stack.push(*index),
+        HirExprKind::AnalogOperator { op } => push_analog_children(op, stack),
+        HirExprKind::NullArgument
+        | HirExprKind::Number { .. }
+        | HirExprKind::StringLiteral { .. }
+        | HirExprKind::Identifier { .. }
+        | HirExprKind::BranchAccess { .. }
+        | HirExprKind::NamedBranchAccess { .. } => {}
+        HirExprKind::NoiseSource { operands, .. } => stack.extend(operands.iter().copied()),
+    }
 }
 
 pub(super) fn is_noise_call(name: &str) -> bool {

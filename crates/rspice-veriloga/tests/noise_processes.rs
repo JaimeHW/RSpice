@@ -120,6 +120,103 @@ fn noise_replay_preserves_active_integrator_poles_at_zero_gain() {
 }
 
 #[test]
+fn noise_gain_arrays_do_not_block_scalar_metadata() {
+    for (body, accumulate_power) in [
+        (
+            "for(i=0;i<count;i=i+1) gains[i]=i+V(p,n); gain=gains[count-1];",
+            false,
+        ),
+        (
+            "for(i=0;i<count;i=i+1) begin gains[i]=i+V(p,n); power=power*2.0; end gain=gains[count-1];",
+            true,
+        ),
+        (
+            "for(i=0;i<count;i=i+1) gains[i]=i+V(p,n); if(gains[count-1]>3.0) gain=4.0; else gain=3.0;",
+            false,
+        ),
+    ] {
+        let source = format!(
+            "module array_noise_gain(p,n); inout p,n; electrical p,n;
+            parameter integer count=3; integer i; real power,gain,process,gains[0:2];
+            analog begin power=V(p,n); {body}
+            process=white_noise(power,\"input\"); I(p,n)<+V(p,n)+gain*process; end endmodule"
+        );
+        let report = VerilogACompiler::default()
+            .compile_runtime(&source, None)
+            .unwrap();
+        let mut device = rspice_veriloga::device::VerilogADevice::try_new_with_canonical_ir(
+            "NOISE",
+            report.model,
+            &report.canonical_ir,
+            &[1, 0],
+        )
+        .unwrap();
+        device.try_set_analysis_type(3).unwrap();
+        for count in [2, 3, 2] {
+            device.try_set_parameter("count", count as f64).unwrap();
+            device.try_resolve_parameter_defaults().unwrap();
+            for frequency in [0.0, 1.0, 1e6] {
+                let processes = device
+                    .try_noise_processes_at_frequency(&[2.0], frequency)
+                    .unwrap_or_else(|error| panic!("{body}: {error}"));
+                assert_eq!(processes.len(), 1, "{body}");
+                assert_eq!(
+                    processes[0].psd,
+                    if accumulate_power {
+                        2.0 * 2.0_f64.powi(count)
+                    } else {
+                        2.0
+                    }
+                );
+                assert_eq!(processes[0].injections.len(), 1);
+                assert_eq!(
+                    processes[0].injections[0].gain.re,
+                    -(count as f64 + 1.0),
+                    "{body}"
+                );
+                assert_eq!(processes[0].injections[0].gain.im, 0.0);
+            }
+        }
+        device.try_set_parameter("count", 4.0).unwrap();
+        device.try_resolve_parameter_defaults().unwrap();
+        let error = device
+            .try_noise_processes_at_frequency(&[2.0], 1.0)
+            .expect_err("slicing metadata must retain faults from the actual model body");
+        assert!(error.to_string().contains("index"), "{error}");
+    }
+}
+
+#[test]
+fn runtime_array_metadata_dependencies_remain_explicit() {
+    for body in [
+        r#"I(p,n)<+V(p,n)+white_noise(values[index],"array_psd");"#,
+        r#"power=values[index]; copy=power; I(p,n)<+V(p,n)+white_noise(copy,"array_psd");"#,
+        r#"I(p,n)<+V(p,n); if(values[index]>0.0) I(p,n)<+white_noise(1.0,"array_guard");"#,
+    ] {
+        let source = format!(
+            "module array_metadata(p,n); inout p,n; electrical p,n;
+            real values[0:1],power,copy; integer index;
+            analog begin index=V(p,n)>0.0; values[index]=2.0; {body} end endmodule"
+        );
+        let report = VerilogACompiler::default()
+            .compile_runtime(&source, None)
+            .unwrap();
+        let mut device = rspice_veriloga::device::VerilogADevice::try_new_with_canonical_ir(
+            "NOISE",
+            report.model,
+            &report.canonical_ir,
+            &[1, 0],
+        )
+        .unwrap();
+        device.try_set_analysis_type(3).unwrap();
+        let error = device
+            .try_noise_processes_at_frequency(&[1.0], 1.0)
+            .expect_err("runtime arrays actually used by metadata still need CFG support");
+        assert!(error.to_string().contains("array"), "{body}: {error}");
+    }
+}
+
+#[test]
 fn assigned_noise_reuse_is_one_process_with_two_coherent_injections() {
     let model = compile(
         r#"
