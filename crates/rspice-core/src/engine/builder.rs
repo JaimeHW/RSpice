@@ -4955,10 +4955,28 @@ impl Engine {
         // Load and cache Verilog-A models referenced by .VERILOGA directives.
         #[cfg(feature = "veriloga")]
         {
+            let mut connect_source_modules = HashMap::new();
             for include in &netlist.veriloga_includes {
                 if connect_modules::DesignConnectRules::may_declare(&include.file_path) {
-                    let specification = design_connect_rules.read(&include.file_path)?;
-                    if !specification.declares_module {
+                    // One file can supply several explicitly selected devices,
+                    // but its design-wide connect rules must be registered once.
+                    let source = veriloga_cache::canonicalize_for_cache(&include.file_path);
+                    let declares_module = match connect_source_modules.entry(source) {
+                        std::collections::hash_map::Entry::Occupied(entry) => *entry.get(),
+                        std::collections::hash_map::Entry::Vacant(entry) => *entry.insert(
+                            design_connect_rules
+                                .read(&include.file_path)?
+                                .declares_module,
+                        ),
+                    };
+                    if !declares_module {
+                        if let Some(module) = &include.selected_module {
+                            return Err(SimulationError::Netlist(format!(
+                                "Verilog-A source '{}' declares no device module, so module '{}' cannot be selected",
+                                include.file_path.display(),
+                                module
+                            )));
+                        }
                         // A file that declares only connect modules is a
                         // connect library. It contributes rules and no device,
                         // and asking the compiler for a model would fail on a
@@ -4972,6 +4990,7 @@ impl Engine {
                 }
                 let entry = resolve_cached_or_compile_veriloga_with_limits_and_abort(
                     &include.file_path,
+                    include.selected_module.as_deref(),
                     self.config.resource_limits,
                     abort,
                 )?;

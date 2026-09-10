@@ -35,6 +35,89 @@ fn node_voltage(result: &rspice_core::solver::SimulationResult, name: &str) -> f
 }
 
 #[test]
+fn disk_includes_select_modules_independently_of_model_aliases() {
+    let model = write_model(
+        "module_selection",
+        r#"
+module first_load(p,n); inout p,n; electrical p,n; analog I(p,n)<+V(p,n); endmodule
+module second_load(p,n); inout p,n; electrical p,n; analog I(p,n)<+2.0*V(p,n); endmodule
+"#,
+    );
+    for reversed in [false, true, false] {
+        let first = format!(
+            ".va \"{}\" first_alias module=first_load",
+            deck_path(&model)
+        );
+        let second = format!(
+            ".va \"{}\" second_alias module=second_load",
+            deck_path(&model)
+        );
+        let includes = if reversed {
+            format!("{second}\n{first}")
+        } else {
+            format!("{first}\n{second}")
+        };
+        let deck = format!(
+            "* Module selection\n{includes}\nI1 0 a 1\nI2 0 b 1\nX1 a 0 first_alias\nX2 b 0 second_alias\n.op\n.end\n"
+        );
+        let netlist = Netlist::parse_validated(&deck).unwrap();
+        let engine = Engine::default();
+        let result = engine.run_dc_op(&netlist).unwrap();
+        assert!((node_voltage(&result, "a") - 1.0).abs() < 1e-8);
+        assert!((node_voltage(&result, "b") - 0.5).abs() < 1e-8);
+    }
+    for selector in ["", " module=missing", " module=FIRST_LOAD"] {
+        let deck = format!(
+            "* Invalid selection must not reuse another module\n.va \"{}\" alias{selector}\nI1 0 a 1\nX1 a 0 alias\n.end\n",
+            deck_path(&model)
+        );
+        let netlist = Netlist::parse_validated(&deck).unwrap();
+        let error = Engine::default()
+            .run_dc_op(&netlist)
+            .expect_err("missing, ambiguous and case-mismatched selectors must fail");
+        assert!(error.to_string().contains("Module selection"), "{error}");
+    }
+    let _ = std::fs::remove_file(model);
+}
+
+#[test]
+fn module_selection_reads_connect_rules_once_and_requires_a_device() {
+    let mut source = String::new();
+    for (_, module) in rspice_veriloga::connect::library::BUILTIN_CONNECT_MODULES {
+        source.push_str(module);
+    }
+    source.push_str("connectrules deck; connect a2d; connect d2a; endconnectrules\n");
+    let connect_only = write_model("selected_connect_library", &source);
+    let deck = |path: &std::path::Path, selector: &str| {
+        format!(
+            "* Connect library selection\n.va \"{}\"{selector}\nV1 a 0 1\nR1 a 0 1k\n.end\n",
+            deck_path(path)
+        )
+    };
+    Engine::default()
+        .run_dc_op(&Netlist::parse_validated(&deck(&connect_only, "")).unwrap())
+        .expect("a connect-only library needs no device selection");
+    let error = Engine::default()
+        .run_dc_op(&Netlist::parse_validated(&deck(&connect_only, " module=missing")).unwrap())
+        .expect_err("an explicit device selection must not be silently ignored");
+    assert!(error.to_string().contains("no device module"), "{error}");
+
+    source.push_str("module one(p,n); inout p,n; electrical p,n; analog I(p,n)<+V(p,n); endmodule\nmodule two(p,n); inout p,n; electrical p,n; analog I(p,n)<+2*V(p,n); endmodule\n");
+    let devices = write_model("selected_modules_with_connect_rules", &source);
+    let deck = format!(
+        "* Selected modules share one connect specification\n.va \"{path}\" first module=one\n.va \"{path}\" second module=two\nI1 0 a 1\nI2 0 b 1\nX1 a 0 first\nX2 b 0 second\n.end\n",
+        path = deck_path(&devices)
+    );
+    let result = Engine::default()
+        .run_dc_op(&Netlist::parse_validated(&deck).unwrap())
+        .expect("two modules from one source must register its connect rules only once");
+    assert!((node_voltage(&result, "a") - 1.0).abs() < 1e-8);
+    assert!((node_voltage(&result, "b") - 0.5).abs() < 1e-8);
+    let _ = std::fs::remove_file(connect_only);
+    let _ = std::fs::remove_file(devices);
+}
+
+#[test]
 fn implicit_integrator_initial_condition_is_determined_by_feedback() {
     for (body, enabled, expected) in [
         ("V(output_node)<+idt(V(input_node,output_node));", 1, None),

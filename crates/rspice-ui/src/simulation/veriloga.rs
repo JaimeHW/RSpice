@@ -657,7 +657,23 @@ pub(crate) fn compile_model_library_source_runtimes(
                     root.path.display()
                 ))
             })?;
-        let selected = if let Some(alias) = root.netlist_alias.as_deref() {
+        let selected = if let Some(module) = root.selected_module.as_deref() {
+            if !discovery
+                .module_names
+                .iter()
+                .any(|candidate| candidate == module)
+            {
+                return Err(PreparedRuntimeError::SourceIdentity(format!(
+                    "Model-library Verilog-A source '{}' does not declare module '{}'",
+                    root.path.display(),
+                    module
+                )));
+            }
+            vec![(
+                module.to_owned(),
+                root.netlist_alias.as_deref().unwrap_or(module).to_owned(),
+            )]
+        } else if let Some(alias) = root.netlist_alias.as_deref() {
             let [module] = discovery.module_names.as_slice() else {
                 return Err(PreparedRuntimeError::SourceIdentity(format!(
                     "Model-library .veriloga source '{}' declares {} modules, so alias '{}' is ambiguous",

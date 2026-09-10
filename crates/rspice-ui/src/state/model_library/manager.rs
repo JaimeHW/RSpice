@@ -410,6 +410,7 @@ pub struct SealedModelExecutionSources {
 pub(crate) struct SealedModelLibraryVerilogARoot {
     pub(crate) path: PathBuf,
     pub(crate) netlist_alias: Option<String>,
+    pub(crate) selected_module: Option<String>,
 }
 
 /// Exact model-library bytes and AHDL roots authenticated by one run seal.
@@ -952,20 +953,25 @@ impl SealedModelExecutionSources {
                 roots.push(SealedModelLibraryVerilogARoot {
                     path: edge.target.clone(),
                     netlist_alias: include.model_name,
+                    selected_module: include.selected_module,
                 });
             }
         }
         roots.sort_by(|left, right| {
-            left.path.cmp(&right.path).then_with(|| {
-                left.netlist_alias
-                    .as_deref()
-                    .unwrap_or_default()
-                    .cmp(right.netlist_alias.as_deref().unwrap_or_default())
-            })
+            left.path
+                .cmp(&right.path)
+                .then_with(|| left.selected_module.cmp(&right.selected_module))
+                .then_with(|| {
+                    left.netlist_alias
+                        .as_deref()
+                        .unwrap_or_default()
+                        .cmp(right.netlist_alias.as_deref().unwrap_or_default())
+                })
         });
         roots.dedup();
         for pair in roots.windows(2) {
             if portable_path_key(&pair[0].path) == portable_path_key(&pair[1].path)
+                && pair[0].selected_module == pair[1].selected_module
                 && pair[0].netlist_alias != pair[1].netlist_alias
             {
                 return Err(format!(
@@ -979,7 +985,7 @@ impl SealedModelExecutionSources {
         }
 
         let mut hasher = Sha256::new();
-        hasher.update(b"rspice.sealed-model-library-veriloga/v1\0");
+        hasher.update(b"rspice.sealed-model-library-veriloga/v2\0");
         for (path, source) in &sources {
             let path = portable_path_key(path);
             hasher.update((path.len() as u64).to_le_bytes());
@@ -991,6 +997,12 @@ impl SealedModelExecutionSources {
             let path = portable_path_key(&root.path);
             hasher.update((path.len() as u64).to_le_bytes());
             hasher.update(path.as_bytes());
+            if let Some(module) = &root.selected_module {
+                hasher.update((module.len() as u64).to_le_bytes());
+                hasher.update(module.as_bytes());
+            } else {
+                hasher.update(0_u64.to_le_bytes());
+            }
             if let Some(alias) = &root.netlist_alias {
                 hasher.update((alias.len() as u64).to_le_bytes());
                 hasher.update(alias.as_bytes());

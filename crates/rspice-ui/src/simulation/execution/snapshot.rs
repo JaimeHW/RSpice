@@ -1388,6 +1388,12 @@ impl PreparedRunSnapshot {
             .collect::<HashSet<_>>();
         let mut observed_veriloga_bindings = HashSet::new();
         for include in &parsed_netlist.veriloga_includes {
+            if include.selected_module.is_some() {
+                return Err(PreparationError::new(
+                    PreparationStage::ModelBindings,
+                    "Prepared Verilog-A runtimes already fix their modules; module overrides are not permitted",
+                ));
+            }
             let Some(source_key) = include.file_path.to_str() else {
                 return Err(PreparationError::new(
                     PreparationStage::ModelBindings,

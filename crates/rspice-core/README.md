@@ -226,6 +226,14 @@ on-disk caching of compiled models) and build-time generated Verilog-A built-ins
 [`../rspice-veriloga-models/models/`](../rspice-veriloga-models) and
 instantiated by model name when the feature is enabled).
 
+Disk model includes accept `.va filename [MODELNAME] [module=MODULE]` (or
+`.veriloga`). `MODULE` selects a Verilog module by its exact, case-sensitive name;
+`MODELNAME` is an independent SPICE model alias. For example, two devices from
+one source can be loaded with `.va devices.va fast module=FastDevice` and
+`.va devices.va slow module=SlowDevice`, then instantiated as `X1 p n fast` and
+`X2 p n slow`. Without `module=`, a disk source must declare exactly one device
+module. Connect-only libraries can be included without a device selection.
+
 ## Analyses
 
 Core analyses, driven from `engine/`:

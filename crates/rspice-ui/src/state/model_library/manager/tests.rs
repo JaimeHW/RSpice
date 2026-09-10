@@ -35,6 +35,50 @@ fn model_fixture() -> (std::path::PathBuf, std::path::PathBuf) {
 }
 
 #[test]
+fn sealed_library_module_selection_keeps_aliases_and_module_identity() {
+    let mut manager = ModelLibraryManager::new();
+    manager.load_library_bundle(
+        "selected-modules.lib",
+        vec![
+            ("root.lib".to_owned(), b".va \"devices.va\" first_alias module=first_load\n.va \"devices.va\" second_alias module=second_load\n.model fallback_d D\n".to_vec()),
+            ("devices.va".to_owned(), b"module first_load(p,n); inout p,n; electrical p,n; analog I(p,n)<+V(p,n); endmodule\nmodule second_load(p,n); inout p,n; electrical p,n; analog I(p,n)<+2*V(p,n); endmodule\n".to_vec()),
+        ],
+        None,
+    ).unwrap();
+    let sealed = manager.seal_execution_sources().unwrap();
+    let authority = sealed.model_library_veriloga_authority().unwrap().unwrap();
+    assert_eq!(authority.roots.len(), 2);
+    assert_eq!(
+        authority.roots[0].selected_module.as_deref(),
+        Some("first_load")
+    );
+    assert_eq!(
+        authority.roots[1].selected_module.as_deref(),
+        Some("second_load")
+    );
+    let runtimes =
+        crate::simulation::veriloga::compile_model_library_source_runtimes(&authority).unwrap();
+    let aliases = runtimes
+        .iter()
+        .map(|runtime| runtime.netlist_alias())
+        .collect::<Vec<_>>();
+    assert_eq!(aliases, ["first_alias", "second_alias"]);
+    let keys = runtimes
+        .iter()
+        .map(|runtime| runtime.source_key())
+        .collect::<Vec<_>>();
+    assert_ne!(keys[0], keys[1]);
+    let mut missing = authority.clone();
+    missing.roots[0].selected_module = Some("FIRST_LOAD".to_owned());
+    let error =
+        crate::simulation::veriloga::compile_model_library_source_runtimes(&missing).unwrap_err();
+    assert!(
+        error.to_string().contains("does not declare module"),
+        "{error}"
+    );
+}
+
+#[test]
 fn changing_corner_rebuilds_the_effective_model_catalog() {
     let mut manager = ModelLibraryManager::new();
     let library_name = manager

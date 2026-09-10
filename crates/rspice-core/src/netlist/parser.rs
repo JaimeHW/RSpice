@@ -87,7 +87,9 @@ use values::*;
 /// Library acquisition uses the same tokenizer as executable-netlist parsing
 /// so authenticated AHDL dependency edges cannot disagree with execution.
 pub fn parse_veriloga_source_directive(line: &str) -> Option<VerilogAInclude> {
-    line::parse_veriloga_directive(line)
+    line::parse_veriloga_directive(
+        line::strip_inline_semicolon_comment_with_non_semicolon_comments(line, true),
+    )
 }
 
 /// Whether one SPICE body record is a terminal `.end` card.
@@ -804,7 +806,11 @@ fn parse_netlist_impl(
         }
 
         // Handle .VERILOGA directive directly (before continuation handling)
-        if let Some(include) = parse_veriloga_directive(trimmed) {
+        if head.eq_ignore_ascii_case(".veriloga") || head.eq_ignore_ascii_case(".va") {
+            let include = parse_veriloga_directive(trimmed).ok_or_else(|| ParseError::Syntax {
+                line: line_num,
+                message: "Invalid Verilog-A include; expected .VERILOGA filename [MODELNAME] [module=MODULE] with closed quotes and no extra fields".to_owned(),
+            })?;
             log::debug!("Found .VERILOGA include: {:?}", include.file_path);
             state.push_veriloga_include(include);
             continue; // Skip normal processing

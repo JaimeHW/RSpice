@@ -84,15 +84,40 @@ pub(super) fn parse_veriloga_directive(line: &str) -> Option<VerilogAInclude> {
         return None;
     }
 
-    let model_name = rest
-        .split_whitespace()
-        .next()
-        .map(|s| s.trim_matches(|c| c == '"' || c == '\'').to_string())
-        .filter(|s| !s.is_empty());
+    let mut model_name = None;
+    let mut selected_module = None;
+    let mut rest = rest.trim();
+    while !rest.is_empty() {
+        if rest
+            .get(..7)
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case("module="))
+        {
+            if selected_module.is_some() {
+                return None;
+            }
+            let (module, suffix) = consume_quoted_or_token(&rest[7..])?;
+            if module.is_empty() {
+                return None;
+            }
+            selected_module = Some(module);
+            rest = suffix.trim();
+        } else {
+            if model_name.is_some() || selected_module.is_some() {
+                return None;
+            }
+            let (alias, suffix) = consume_quoted_or_token(rest)?;
+            if alias.is_empty() || alias.contains('=') {
+                return None;
+            }
+            model_name = Some(alias);
+            rest = suffix.trim();
+        }
+    }
 
     Some(VerilogAInclude {
         file_path: std::path::PathBuf::from(path),
         model_name,
+        selected_module,
     })
 }
 
@@ -115,13 +140,15 @@ pub(super) fn consume_quoted_or_token(input: &str) -> Option<(String, &str)> {
                 continue;
             }
             if ch == quote {
-                let rest = trimmed[idx + ch.len_utf8()..].trim_start();
-                return Some((value, rest));
+                let rest = &trimmed[idx + ch.len_utf8()..];
+                if !rest.is_empty() && !rest.starts_with(char::is_whitespace) {
+                    return None;
+                }
+                return Some((value, rest.trim_start()));
             }
             value.push(ch);
         }
-        // Unclosed quote: consume remaining text as path body.
-        return Some((value, ""));
+        return None;
     }
 
     let end = trimmed.find(char::is_whitespace).unwrap_or(trimmed.len());
@@ -829,6 +856,47 @@ fn upsert_case_insensitive<T>(items: &mut Vec<(String, T)>, name: String, value:
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn veriloga_module_selection_preserves_aliases_and_rejects_malformed_options() {
+        for (line, alias, module) in [
+            (
+                r#".va "models/two devices.va" Alias module=Device"#,
+                Some("Alias"),
+                Some("Device"),
+            ),
+            (
+                r#".VERILOGA model.va MODULE="Device"; comment"#,
+                None,
+                Some("Device"),
+            ),
+            (".va model.va Alias // comment", Some("Alias"), None),
+            (".va model.va", None, None),
+        ] {
+            let include = crate::netlist::parse_veriloga_source_directive(line).unwrap();
+            assert_eq!(include.model_name.as_deref(), alias, "{line}");
+            assert_eq!(include.selected_module.as_deref(), module, "{line}");
+        }
+        for line in [
+            ".va model.va module=",
+            ".va model.va module=\"\"",
+            ".va model.va module=\"unterminated",
+            ".va \"unterminated",
+            ".va model.va alias extra",
+            ".va model.va alias unknown=Device",
+            ".va model.va module=first module=second",
+            ".va model.va module=Device alias",
+            ".va \"model.va\"alias",
+            ".va model.va module=\"Device\"extra",
+        ] {
+            assert!(
+                crate::netlist::parse_veriloga_source_directive(line).is_none(),
+                "{line}"
+            );
+            let deck = format!("* malformed Verilog-A include\n{line}\n.end\n");
+            assert!(crate::Netlist::parse_validated(&deck).is_err(), "{line}");
+        }
+    }
 
     #[test]
     fn subcircuit_body_parameter_names_cover_every_equals_spacing() {

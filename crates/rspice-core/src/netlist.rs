@@ -1194,13 +1194,15 @@ pub struct ControlCommandRecord {
 /// Verilog-A model include directive
 ///
 /// References an external Verilog-A file to be compiled and used as a model.
-/// Usage in netlist: `.VERILOGA filename.va [MODELNAME]`
+/// Usage: `.VERILOGA filename.va [MODELNAME] [module=MODULE]`.
 #[derive(Debug, Clone)]
 pub struct VerilogAInclude {
     /// Path to the Verilog-A source file
     pub file_path: std::path::PathBuf,
     /// Optional model name override (defaults to module name in VA file)
     pub model_name: Option<String>,
+    /// Explicit, case-sensitive Verilog module selection, independent of the alias.
+    pub selected_module: Option<String>,
 }
 
 /// Where a root parse resolves its dependencies from: the include processor

@@ -269,7 +269,8 @@ use super::*;
 // Version 61 retains range-protected sum-products quotient bytecode and derivatives.
 // Version 62 represents idt without an explicit IC by an internal solver
 // equation; older records irrecoverably substitute an explicit zero IC.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 62;
+// Version 63 binds an explicit module selection into memory and disk identities.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 63;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
@@ -440,6 +441,7 @@ pub(super) struct VerilogADependencyFingerprint {
 pub(super) struct VerilogADiskCacheRecord {
     pub(super) version: u32,
     pub(super) source_path: PathBuf,
+    pub(super) selected_module: Option<String>,
     pub(super) dependencies: Vec<VerilogADependencyFingerprint>,
     pub(super) model: rspice_veriloga::CompiledModel,
     pub(super) canonical_ir: Option<rspice_veriloga::canonical_ir::CanonicalIrArtifact>,
@@ -458,13 +460,42 @@ pub(super) struct CachedVerilogAModel {
 }
 
 #[cfg(feature = "veriloga")]
-type VerilogAModelCache = crate::resource::BoundedCache<PathBuf, CachedVerilogAModel>;
+type VerilogAModelCache = crate::resource::BoundedCache<VerilogASourceKey, CachedVerilogAModel>;
+
+#[cfg(feature = "veriloga")]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(super) struct VerilogASourceKey {
+    source_path: PathBuf,
+    selected_module: Option<String>,
+}
+
+#[cfg(feature = "veriloga")]
+impl VerilogASourceKey {
+    fn new(path: &Path, selected_module: Option<&str>) -> Self {
+        Self {
+            source_path: canonicalize_for_cache(path),
+            selected_module: selected_module.map(str::to_owned),
+        }
+    }
+
+    fn display(&self) -> std::path::Display<'_> {
+        self.source_path.display()
+    }
+}
+
+#[cfg(feature = "veriloga")]
+impl From<PathBuf> for VerilogASourceKey {
+    fn from(path: PathBuf) -> Self {
+        Self::new(&path, None)
+    }
+}
 
 #[cfg(feature = "veriloga")]
 #[derive(Serialize)]
 struct BorrowedVerilogACacheRecord<'a> {
     version: u32,
     source_path: &'a Path,
+    selected_module: Option<&'a str>,
     dependencies: &'a [VerilogADependencyFingerprint],
     model: &'a rspice_veriloga::CompiledModel,
     canonical_ir: Option<&'a rspice_veriloga::canonical_ir::CanonicalIrArtifact>,
@@ -472,10 +503,11 @@ struct BorrowedVerilogACacheRecord<'a> {
 
 #[cfg(feature = "veriloga")]
 impl<'a> BorrowedVerilogACacheRecord<'a> {
-    fn new(source_path: &'a Path, entry: &'a CachedVerilogAModel) -> Self {
+    fn new(source: &'a VerilogASourceKey, entry: &'a CachedVerilogAModel) -> Self {
         Self {
             version: VERILOGA_CACHE_RECORD_VERSION,
-            source_path,
+            source_path: &source.source_path,
+            selected_module: source.selected_module.as_deref(),
             dependencies: &entry.dependencies,
             model: entry.model.as_ref(),
             canonical_ir: entry.canonical_ir.as_deref(),
@@ -503,27 +535,32 @@ impl std::io::Write for CountingWriter {
 
 #[cfg(feature = "veriloga")]
 fn veriloga_model_cache_entry_bytes(
-    key: &Path,
+    key: &VerilogASourceKey,
     entry: &CachedVerilogAModel,
 ) -> Result<usize, String> {
     let record = BorrowedVerilogACacheRecord::new(key, entry);
     let mut counter = CountingWriter::default();
     serde_json::to_writer(&mut counter, &record)
         .map_err(|error| format!("failed to size Verilog-A cache entry: {error}"))?;
-    let key_bytes = key.to_string_lossy().len();
+    let key_bytes = key
+        .source_path
+        .to_string_lossy()
+        .len()
+        .saturating_add(key.selected_module.as_ref().map_or(0, String::len));
     Ok(crate::resource::estimated_cache_entry_bytes::<
-        PathBuf,
+        VerilogASourceKey,
         CachedVerilogAModel,
     >(key_bytes, counter.bytes))
 }
 
 #[cfg(feature = "veriloga")]
 fn retain_veriloga_model(
-    key: PathBuf,
+    key: impl Into<VerilogASourceKey>,
     entry: CachedVerilogAModel,
     max_bytes: usize,
     required: bool,
 ) -> Result<bool, String> {
+    let key = key.into();
     let retained_bytes = veriloga_model_cache_entry_bytes(&key, &entry)?;
     if let Err(error) =
         ResourceLimitError::ensure(ResourceKind::SharedCacheBytes, retained_bytes, max_bytes)
@@ -851,10 +888,18 @@ pub(super) fn veriloga_cache_root() -> PathBuf {
 }
 
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
-pub(super) fn cache_record_path_with_root(source_path: &Path, cache_root: &Path) -> PathBuf {
-    let canonical = canonicalize_for_cache(source_path);
+pub(super) fn cache_record_path_with_root(
+    source: &VerilogASourceKey,
+    cache_root: &Path,
+) -> PathBuf {
     let mut hasher = blake3::Hasher::new();
-    hasher.update(canonical.to_string_lossy().as_bytes());
+    hasher.update(source.source_path.to_string_lossy().as_bytes());
+    if let Some(module) = &source.selected_module {
+        // The zero delimiter cannot occur in a filesystem path. Module names
+        // retain Verilog's case sensitivity, independently of SPICE aliases.
+        hasher.update(b"\0module\0");
+        hasher.update(module.as_bytes());
+    }
     let key = hasher.finalize().to_hex().to_string();
     cache_root.join(format!("{key}.json"))
 }
@@ -1176,7 +1221,7 @@ impl<W: std::io::Write> std::io::Write for LimitedWriter<W> {
 
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 fn persist_model_to_disk_locked_with_limits(
-    source_path: &Path,
+    source_path: &VerilogASourceKey,
     entry: &CachedVerilogAModel,
     cache_root: &Path,
     limits: ResourceLimits,
@@ -1187,8 +1232,7 @@ fn persist_model_to_disk_locked_with_limits(
             .map_err(|e| format!("failed to create cache directory: {}", e))?;
     }
 
-    let canonical_source = canonicalize_for_cache(source_path);
-    let record = BorrowedVerilogACacheRecord::new(&canonical_source, entry);
+    let record = BorrowedVerilogACacheRecord::new(source_path, entry);
     let tmp_path = cache_path.with_extension(format!("tmp.{}", std::process::id()));
     let (_, disk_max_bytes) = veriloga_cache_limits();
     let resource_max_bytes = u64::try_from(limits.max_shared_cache_bytes).unwrap_or(u64::MAX);
@@ -1249,7 +1293,7 @@ pub(super) fn persist_model_to_disk_locked(
     cache_root: &Path,
 ) -> Result<(), String> {
     persist_model_to_disk_locked_with_limits(
-        source_path,
+        &VerilogASourceKey::new(source_path, None),
         entry,
         cache_root,
         ResourceLimits::default(),
@@ -1328,7 +1372,7 @@ pub(super) fn prune_veriloga_cache_locked(
 
 #[cfg(feature = "veriloga")]
 fn persist_model_to_disk_with_limits(
-    source_path: &Path,
+    source_path: &VerilogASourceKey,
     entry: &CachedVerilogAModel,
     limits: ResourceLimits,
 ) -> Result<(), String> {
@@ -1355,12 +1399,16 @@ pub(super) fn persist_model_to_disk(
     source_path: &Path,
     entry: &CachedVerilogAModel,
 ) -> Result<(), String> {
-    persist_model_to_disk_with_limits(source_path, entry, ResourceLimits::default())
+    persist_model_to_disk_with_limits(
+        &VerilogASourceKey::new(source_path, None),
+        entry,
+        ResourceLimits::default(),
+    )
 }
 
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 fn load_model_from_disk_locked_with_limits(
-    source_path: &Path,
+    source_path: &VerilogASourceKey,
     cache_root: &Path,
     limits: ResourceLimits,
     abort: &dyn AbortSignal,
@@ -1396,9 +1444,15 @@ fn load_model_from_disk_locked_with_limits(
         return Ok(None);
     }
 
-    let requested_source = canonicalize_for_cache(source_path);
+    let requested_source = &source_path.source_path;
     let record_source = canonicalize_for_cache(&record.source_path);
-    if requested_source != record_source {
+    if *requested_source != record_source
+        || source_path.selected_module != record.selected_module
+        || source_path
+            .selected_module
+            .as_ref()
+            .is_some_and(|module| record.model.name.as_str() != module)
+    {
         remove_cache_file(&cache_path);
         return Ok(None);
     }
@@ -1431,7 +1485,7 @@ fn load_model_from_disk_locked_with_limits(
 
 #[cfg(feature = "veriloga")]
 fn load_model_from_disk_with_limits_and_abort(
-    source_path: &Path,
+    source_path: &VerilogASourceKey,
     limits: ResourceLimits,
     abort: &dyn AbortSignal,
 ) -> Result<Option<CachedVerilogAModel>, SimulationError> {
@@ -1466,7 +1520,7 @@ pub(super) fn load_model_from_disk_locked(
     cache_root: &Path,
 ) -> Result<Option<CachedVerilogAModel>, String> {
     load_model_from_disk_locked_with_limits(
-        source_path,
+        &VerilogASourceKey::new(source_path, None),
         cache_root,
         ResourceLimits::default(),
         &NoAbort,
@@ -1651,12 +1705,13 @@ pub(super) fn resolve_cached_or_compile_veriloga_with_limits(
     path: &Path,
     limits: ResourceLimits,
 ) -> Result<CachedVerilogAModel, SimulationError> {
-    resolve_cached_or_compile_veriloga_with_limits_and_abort(path, limits, &NoAbort)
+    resolve_cached_or_compile_veriloga_with_limits_and_abort(path, None, limits, &NoAbort)
 }
 
 #[cfg(feature = "veriloga")]
 pub(super) fn resolve_cached_or_compile_veriloga_with_limits_and_abort(
     path: &Path,
+    selected_module: Option<&str>,
     limits: ResourceLimits,
     abort: &dyn AbortSignal,
 ) -> Result<CachedVerilogAModel, SimulationError> {
@@ -1664,7 +1719,13 @@ pub(super) fn resolve_cached_or_compile_veriloga_with_limits_and_abort(
 
     VERILOGA_CACHE_TELEMETRY.lookups.fetch_add(1, Relaxed);
     check_build_abort(abort)?;
-    let canonical = canonicalize_for_cache(path);
+    if selected_module.is_some() && is_sealed_veriloga_virtual_path(path) {
+        return Err(SimulationError::Netlist(format!(
+            "Sealed Verilog-A runtime '{}' already fixes its module; a module override is not permitted",
+            path.display()
+        )));
+    }
+    let canonical = VerilogASourceKey::new(path, selected_module);
     let memory_entry = if let Ok(mut cache) = veriloga_model_cache().write() {
         cache.enforce_limit(limits.max_shared_cache_bytes);
         cache.get_cloned(&canonical)
@@ -1722,7 +1783,7 @@ pub(super) fn resolve_cached_or_compile_veriloga_with_limits_and_abort(
 
     VERILOGA_CACHE_TELEMETRY.misses.fetch_add(1, Relaxed);
     check_build_abort(abort)?;
-    let source_metadata = std::fs::metadata(&canonical).map_err(|error| {
+    let source_metadata = std::fs::metadata(&canonical.source_path).map_err(|error| {
         SimulationError::Netlist(format!(
             "Verilog-A source '{}' does not exist or is unreadable: {}",
             canonical.display(),
@@ -1742,7 +1803,8 @@ pub(super) fn resolve_cached_or_compile_veriloga_with_limits_and_abort(
         .compilations_started
         .fetch_add(1, Relaxed);
     let compile_started = crate::time_compat::Instant::now();
-    let compiled = compiler.compile_file_runtime_with_metadata_and_control(path, None, &control);
+    let compiled =
+        compiler.compile_file_runtime_with_metadata_and_control(path, selected_module, &control);
     let compilation_nanos = u64::try_from(compile_started.elapsed().as_nanos()).unwrap_or(u64::MAX);
     let _ = VERILOGA_CACHE_TELEMETRY
         .total_compilation_nanos
@@ -2094,7 +2156,12 @@ fn register_project_veriloga_runtimes_for_session_with_limit(
 
     let incoming_bytes = prepared
         .iter()
-        .map(|runtime| veriloga_model_cache_entry_bytes(&runtime.key, &runtime.entry))
+        .map(|runtime| {
+            veriloga_model_cache_entry_bytes(
+                &VerilogASourceKey::new(&runtime.key, None),
+                &runtime.entry,
+            )
+        })
         .collect::<Result<Vec<_>, _>>()?;
     let aggregate_incoming_bytes = incoming_bytes
         .iter()
@@ -2114,10 +2181,11 @@ fn register_project_veriloga_runtimes_for_session_with_limit(
     // Compare the whole candidate set against the live registry while holding
     // the one cache lock. Nothing can change between validation and commit.
     for (cached_key, cached_entry) in cache.iter() {
-        if !is_sealed_veriloga_virtual_path(cached_key) {
+        if !is_sealed_veriloga_virtual_path(&cached_key.source_path) {
             continue;
         }
-        let (_, cached_folded_key, _) = validate_sealed_runtime_source_key(cached_key)?;
+        let (_, cached_folded_key, _) =
+            validate_sealed_runtime_source_key(&cached_key.source_path)?;
         let cached_fingerprint = runtime_artifact_fingerprint(
             cached_entry.model.as_ref(),
             cached_entry.canonical_ir.as_deref(),
@@ -2136,7 +2204,8 @@ fn register_project_veriloga_runtimes_for_session_with_limit(
 
     let mut replacements = Vec::with_capacity(prepared.len());
     for runtime in prepared {
-        let entry = if let Some(installed) = cache.get(&runtime.key) {
+        let entry = if let Some(installed) = cache.get(&VerilogASourceKey::new(&runtime.key, None))
+        {
             let installed_fingerprint = runtime_artifact_fingerprint(
                 installed.model.as_ref(),
                 installed.canonical_ir.as_deref(),
@@ -2151,8 +2220,9 @@ fn register_project_veriloga_runtimes_for_session_with_limit(
         } else {
             runtime.entry
         };
-        let retained_bytes = veriloga_model_cache_entry_bytes(&runtime.key, &entry)?;
-        replacements.push((runtime.key, entry, retained_bytes));
+        let retained_bytes =
+            veriloga_model_cache_entry_bytes(&VerilogASourceKey::new(&runtime.key, None), &entry)?;
+        replacements.push((runtime.key.into(), entry, retained_bytes));
     }
 
     let replacement_bytes = replacements
@@ -2295,6 +2365,84 @@ endmodule
         }
     }
 
+    #[test]
+    fn selected_modules_have_distinct_validated_disk_cache_entries() {
+        let root = unique_test_root("module-selection");
+        assert!(
+            root.is_absolute()
+                && root.starts_with(std::env::temp_dir())
+                && root != std::env::temp_dir()
+        );
+        std::fs::create_dir_all(&root).unwrap();
+        let source = root.join("modules.va");
+        std::fs::write(&source, "module one(p,n); inout p,n; electrical p,n; analog I(p,n)<+V(p,n); endmodule\nmodule two(p,n); inout p,n; electrical p,n; analog I(p,n)<+2*V(p,n); endmodule\n").unwrap();
+        let compiler = rspice_veriloga::VerilogACompiler::default();
+        let keys = ["one", "two"].map(|name| VerilogASourceKey::new(&source, Some(name)));
+        assert_ne!(
+            cache_record_path_with_root(&keys[0], &root),
+            cache_record_path_with_root(&keys[1], &root)
+        );
+        for key in &keys {
+            let report = compiler
+                .compile_file_runtime_with_metadata(&source, key.selected_module.as_deref())
+                .unwrap();
+            let entry = CachedVerilogAModel {
+                dependencies: fingerprint_paths(&report.dependencies).unwrap(),
+                model: std::sync::Arc::new(report.model),
+                canonical_ir: Some(std::sync::Arc::new(report.canonical_ir)),
+            };
+            persist_model_to_disk_locked_with_limits(key, &entry, &root, ResourceLimits::default())
+                .unwrap();
+        }
+        for key in keys.iter().rev() {
+            let entry = load_model_from_disk_locked_with_limits(
+                key,
+                &root,
+                ResourceLimits::default(),
+                &NoAbort,
+            )
+            .unwrap()
+            .unwrap();
+            assert_eq!(
+                Some(entry.model.name.as_str()),
+                key.selected_module.as_deref()
+            );
+        }
+        for selection in [None, Some("ONE"), Some("missing")] {
+            let key = VerilogASourceKey::new(&source, selection);
+            assert!(
+                load_model_from_disk_locked_with_limits(
+                    &key,
+                    &root,
+                    ResourceLimits::default(),
+                    &NoAbort
+                )
+                .unwrap()
+                .is_none()
+            );
+        }
+        let cache_path = cache_record_path_with_root(&keys[0], &root);
+        let mut record: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&cache_path).unwrap()).unwrap();
+        record["selected_module"] = serde_json::json!("two");
+        std::fs::write(&cache_path, serde_json::to_vec(&record).unwrap()).unwrap();
+        assert!(
+            load_model_from_disk_locked_with_limits(
+                &keys[0],
+                &root,
+                ResourceLimits::default(),
+                &NoAbort
+            )
+            .unwrap()
+            .is_none()
+        );
+        assert!(
+            !cache_path.exists(),
+            "a mismatched module identity is discarded"
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     fn project_registration(
         source_key: impl Into<PathBuf>,
         module_name: &str,
@@ -2319,7 +2467,7 @@ endmodule
     fn remove_project_runtime_keys(keys: &[&Path]) {
         let mut cache = veriloga_model_cache().write().expect("cache lock");
         for key in keys {
-            cache.remove(&canonicalize_for_cache(key));
+            cache.remove(&VerilogASourceKey::new(key, None));
         }
     }
 
@@ -2368,7 +2516,8 @@ endmodule
         );
         artifact.hir_digest = "stale-hir-digest".into();
         let cache_root = root.join("cache");
-        let cache_path = cache_record_path_with_root(&source_path, &cache_root);
+        let cache_path =
+            cache_record_path_with_root(&VerilogASourceKey::new(&source_path, None), &cache_root);
 
         persist_model_to_disk_locked(&source_path, &entry, &cache_root)
             .expect("persist stale cache record");
@@ -2394,7 +2543,8 @@ endmodule
         std::fs::create_dir_all(&root).expect("create temporary cache root");
         let entry = compiled_entry(&source_path);
         let cache_root = root.join("cache");
-        let cache_path = cache_record_path_with_root(&source_path, &cache_root);
+        let cache_path =
+            cache_record_path_with_root(&VerilogASourceKey::new(&source_path, None), &cache_root);
 
         for (version, omit_canonical) in [
             (19_u32, false),
@@ -2445,7 +2595,8 @@ endmodule
         let cache_root = root.join("cache");
         persist_model_to_disk_locked(&source_path, &entry, &cache_root)
             .expect("persist valid cache record");
-        let cache_path = cache_record_path_with_root(&source_path, &cache_root);
+        let cache_path =
+            cache_record_path_with_root(&VerilogASourceKey::new(&source_path, None), &cache_root);
         let cache_bytes = usize::try_from(
             std::fs::metadata(&cache_path)
                 .expect("cache metadata")
@@ -2458,9 +2609,14 @@ endmodule
         };
 
         assert!(
-            load_model_from_disk_locked_with_limits(&source_path, &cache_root, limits, &NoAbort,)
-                .expect("an oversized optimization is a recoverable cache miss")
-                .is_none()
+            load_model_from_disk_locked_with_limits(
+                &VerilogASourceKey::new(&source_path, None),
+                &cache_root,
+                limits,
+                &NoAbort,
+            )
+            .expect("an oversized optimization is a recoverable cache miss")
+            .is_none()
         );
         assert!(
             cache_path.is_file(),
@@ -2477,15 +2633,20 @@ endmodule
         std::fs::create_dir_all(&root).expect("create temporary cache root");
         let entry = compiled_entry(&source_path);
         let cache_root = root.join("cache");
-        let cache_path = cache_record_path_with_root(&source_path, &cache_root);
+        let cache_path =
+            cache_record_path_with_root(&VerilogASourceKey::new(&source_path, None), &cache_root);
         let limits = ResourceLimits {
             max_shared_cache_bytes: 1,
             ..ResourceLimits::default()
         };
 
-        let error =
-            persist_model_to_disk_locked_with_limits(&source_path, &entry, &cache_root, limits)
-                .expect_err("oversized cache record must not be persisted");
+        let error = persist_model_to_disk_locked_with_limits(
+            &VerilogASourceKey::new(&source_path, None),
+            &entry,
+            &cache_root,
+            limits,
+        )
+        .expect_err("oversized cache record must not be persisted");
         assert!(error.contains("exceeds the 1 byte write limit"), "{error}");
         assert!(!cache_path.exists());
         assert!(
@@ -2529,7 +2690,7 @@ endmodule
         let source_path = root.join("model.va");
         std::fs::create_dir_all(&root).expect("create temporary cache root");
         let entry = compiled_entry(&source_path);
-        let key = canonicalize_for_cache(&source_path);
+        let key = VerilogASourceKey::new(&source_path, None);
         let retained_bytes =
             veriloga_model_cache_entry_bytes(&key, &entry).expect("size compiled model");
 
@@ -2579,7 +2740,19 @@ endmodule
         )
         .expect("register in-memory project runtime");
 
-        let key = canonicalize_for_cache(&source_key);
+        let error = resolve_cached_or_compile_veriloga_with_limits_and_abort(
+            &source_key,
+            Some("owned"),
+            ResourceLimits::default(),
+            &NoAbort,
+        )
+        .expect_err("sealed runtimes must not accept a module override");
+        assert!(
+            error.to_string().contains("already fixes its module"),
+            "{error}"
+        );
+
+        let key = VerilogASourceKey::new(&source_key, None);
         let mut cache = veriloga_model_cache().write().expect("cache lock");
         let entry = cache.get(&key).expect("session entry");
         assert!(entry.dependencies.is_empty());
@@ -2607,7 +2780,7 @@ endmodule
         )
         .expect("register sealed model-library runtime");
 
-        let key = canonicalize_for_cache(&source_key);
+        let key = VerilogASourceKey::new(&source_key, None);
         let mut cache = veriloga_model_cache().write().expect("cache lock");
         let entry = cache.get(&key).expect("session entry");
         assert!(entry.dependencies.is_empty());
@@ -2662,8 +2835,8 @@ endmodule
         );
 
         let mut cache = veriloga_model_cache().write().unwrap();
-        cache.remove(&canonicalize_for_cache(&first_key));
-        cache.remove(&canonicalize_for_cache(&second_key));
+        cache.remove(&VerilogASourceKey::new(&first_key, None));
+        cache.remove(&VerilogASourceKey::new(&second_key, None));
     }
 
     #[test]
@@ -2750,8 +2923,11 @@ endmodule
         let candidate = project_registration(&candidate_key, "resource_candidate", &[]);
         let prepared = prepare_project_veriloga_registration(candidate.clone())
             .expect("prepare candidate runtime");
-        let required = veriloga_model_cache_entry_bytes(&prepared.key, &prepared.entry)
-            .expect("size candidate runtime");
+        let required = veriloga_model_cache_entry_bytes(
+            &VerilogASourceKey::new(&prepared.key, None),
+            &prepared.entry,
+        )
+        .expect("size candidate runtime");
         let error = register_project_veriloga_runtimes_for_session_with_limit(
             [candidate],
             required.saturating_sub(1),
@@ -2851,6 +3027,7 @@ endmodule
         let before = veriloga_cache_telemetry();
         let error = resolve_cached_or_compile_veriloga_with_limits_and_abort(
             Path::new("must-not-be-read.va"),
+            None,
             ResourceLimits::default(),
             &crate::abort_signal::ImmediateAbort,
         )
@@ -2895,6 +3072,7 @@ endmodule
 
         let error = resolve_cached_or_compile_veriloga_with_limits_and_abort(
             &source,
+            None,
             ResourceLimits::default(),
             &abort,
         )
