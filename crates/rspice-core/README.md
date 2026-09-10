@@ -360,6 +360,15 @@ cancellation remains a distinct error. The dense path verifies its original
 transpose residual. Authored device/model-parameter studies use the separate
 complete-sensitivity engine APIs.
 
+Finite-difference sensitivity uses the evaluated parameter coordinates rather
+than an assumed symmetric spacing. Central and one-sided complete studies share
+a quadratic interpolation formula; scalar studies use a secant. Scaled arithmetic
+retains finite derivatives through overflowing spans and cancelling weighted
+sums. AC normalized, magnitude and phase derivatives preserve finite nonzero
+signals across extreme scales, and nonfinite or unrepresentable results are
+diagnosed. Postprocessing polls cancellation, and fatal perturbation failures
+stop the study before another trial is attempted.
+
 ### Periodic large-signal cards
 
 `.PSS`, `.PAC`, `.PNOISE` and `.ENVELOPE` are parsed into typed, fully

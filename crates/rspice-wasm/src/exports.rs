@@ -315,6 +315,55 @@ mod wasm_tests {
     }
 
     #[wasm_bindgen_test]
+    fn sensitivity_stencil_and_derived_scale_in_wasm() {
+        use rspice_core::abort_signal::NoAbort;
+        use rspice_core::analysis::sensitivity::AcSensitivityOutput;
+        let engine = rspice_core::Engine::default();
+        for current in [1e-200, 1e200] {
+            let netlist = rspice_core::Netlist::parse(&format!(
+                "AC sensitivity scale\nI1 0 out AC {current:e}\nR1 out 0 1\n.end\n"
+            ))
+            .unwrap();
+            let result = engine
+                .run_sensitivity_ac_complete_with_abort(
+                    &netlist,
+                    AcSensitivityOutput::Voltage {
+                        positive: 1,
+                        negative: None,
+                    },
+                    &[1.0],
+                    &["R1".into()],
+                    &NoAbort,
+                )
+                .unwrap();
+            let trace = result.get("R1").unwrap();
+            assert!((trace.normalized[0].re - 1.0).abs() < 2e-10);
+            assert!((trace.magnitude[0] / current - 1.0).abs() < 2e-10);
+        }
+        let netlist = rspice_core::Netlist::parse(
+            "Boundary capacitance\nI1 0 out AC 1e308\nR1 out 0 1\nC1 out 0 0\n.end\n",
+        )
+        .unwrap();
+        let result = engine
+            .run_sensitivity_ac_complete_with_abort(
+                &netlist,
+                AcSensitivityOutput::Voltage {
+                    positive: 1,
+                    negative: None,
+                },
+                &[0.01],
+                &["C1".into()],
+                &NoAbort,
+            )
+            .unwrap();
+        let trace = result.get("C1").unwrap();
+        let omega = std::f64::consts::TAU * 0.01;
+        assert_eq!(trace.absolute[0].re, 0.0);
+        assert!((trace.absolute[0].im / (-omega * 1e308) - 1.0).abs() < 2e-12);
+        assert!((trace.phase[0] / -omega - 1.0).abs() < 2e-12);
+    }
+
+    #[wasm_bindgen_test]
     fn adjoint_sensitivity_boundaries_and_scale_in_wasm() {
         use rspice_core::analysis::sensitivity::SensitivityAnalyzer;
         assert!(

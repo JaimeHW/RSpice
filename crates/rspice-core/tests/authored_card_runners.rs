@@ -100,6 +100,50 @@ fn an_authored_sens_ac_card_selects_the_ac_driver_and_publishes_a_document() {
 }
 
 #[test]
+fn authored_sens_ac_extreme_scales_publish_finite_physical_derivatives() {
+    let engine = Engine::default();
+    for (current, capacitor) in [(1e-200, ""), (1e200, ""), (1e308, "C1 out 0 0\n")] {
+        let netlist = Netlist::parse(&format!(
+            "AC sensitivity result scale\nI1 0 out AC {current:e}\nR1 out 0 1\n{capacitor}.sens V(out) AC LIN 1 0.01 0.01\n.end\n"
+        )).unwrap();
+        let result = engine
+            .run_sensitivity_from_card_with_abort(
+                &netlist,
+                &card(&netlist, |command| {
+                    matches!(command, AnalysisCommand::Sensitivity { .. })
+                }),
+                &NoAbort,
+            )
+            .unwrap();
+        let SensitivityCardResult::Ac(ac) = result else {
+            panic!("AC card result");
+        };
+        let trace = ac.get("R1").unwrap();
+        assert!((trace.normalized[0].re - 1.0).abs() < 2e-10);
+        assert!((trace.magnitude[0] / current - 1.0).abs() < 2e-10);
+        if !capacitor.is_empty() {
+            let trace = ac.get("C1").unwrap();
+            assert_eq!(trace.absolute[0].re, 0.0);
+            assert!((trace.phase[0] / (-0.01 * std::f64::consts::TAU) - 1.0).abs() < 2e-12);
+        }
+        let document =
+            AnalysisResultDocument::from_ac_sensitivity(instance(&netlist, "sens-001"), &ac)
+                .unwrap()
+                .build()
+                .unwrap();
+        let ResultPayload::Sensitivity(payload) = document.payload() else {
+            panic!("sensitivity payload");
+        };
+        let published = payload
+            .ac_entries
+            .iter()
+            .find(|entry| entry.vector_name == "R1")
+            .unwrap();
+        assert_eq!(published.magnitude, trace.magnitude);
+    }
+}
+
+#[test]
 fn an_authored_pz_card_resolves_all_four_of_its_ports() {
     let source = DIVIDER.replace(".sens V(out)", ".pz in 0 out 0 vol pz");
     let netlist = Netlist::parse(&source).expect("deck parses");

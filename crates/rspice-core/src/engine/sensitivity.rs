@@ -7,7 +7,132 @@ use crate::analysis::sensitivity::{
 use crate::netlist::{ElementKind, SourceSpec};
 use crate::solver::SimulationResult;
 use crate::{CircuitData, Complex64, Netlist, Value};
+use rspice_veriloga_runtime::arithmetic::ScaledValue;
 use std::collections::{HashMap, HashSet};
+
+fn finite_sensitivity(value: ScaledValue) -> Result<Value, SimulationError> {
+    let result = value.binary64();
+    if !result.is_finite() || (result == 0.0 && !value.is_zero()) {
+        return Err(SimulationError::Circuit(
+            "Sensitivity value exceeds finite representable precision".to_owned(),
+        ));
+    }
+    Ok(result)
+}
+
+fn sensitivity_ratio(
+    numerator: impl Iterator<Item = [ScaledValue; 3]> + Clone,
+    denominator: impl Iterator<Item = [ScaledValue; 3]> + Clone,
+) -> Result<Value, SimulationError> {
+    let result = ScaledValue::sum_triple_products_ratio(numerator, denominator)
+        .map_err(|error| SimulationError::Circuit(format!("Sensitivity arithmetic: {error:?}")))?;
+    finite_sensitivity(result)
+}
+
+/// Use the actual rounded parameter coordinates, retaining wide differences.
+fn sensitivity_secant(points: [Value; 2], values: [Value; 2]) -> Result<Value, SimulationError> {
+    if points.iter().chain(&values).any(|value| !value.is_finite()) || points[0] == points[1] {
+        return Err(SimulationError::Circuit(
+            "Sensitivity stencil needs distinct finite coordinates and finite samples".to_owned(),
+        ));
+    }
+    let one = ScaledValue::new(1.0);
+    sensitivity_ratio(
+        [
+            [ScaledValue::new(values[1]), one, one],
+            [ScaledValue::new(-values[0]), one, one],
+        ]
+        .into_iter(),
+        [
+            [ScaledValue::new(points[1]), one, one],
+            [ScaledValue::new(-points[0]), one, one],
+        ]
+        .into_iter(),
+    )
+}
+
+/// Derivative of the quadratic interpolant at points[0], for either a
+/// central or one-sided stencil. Nonuniform representable spacing is valid.
+fn sensitivity_three_point(
+    points: [Value; 3],
+    values: [Value; 3],
+) -> Result<Value, SimulationError> {
+    if points.iter().chain(&values).any(|value| !value.is_finite())
+        || points[0] == points[1]
+        || points[0] == points[2]
+        || points[1] == points[2]
+    {
+        return Err(SimulationError::Circuit(
+            "Sensitivity stencil needs three distinct finite coordinates and finite samples"
+                .to_owned(),
+        ));
+    }
+    let one = ScaledValue::new(1.0);
+    let difference = |left: Value, right: Value| {
+        ScaledValue::product_sum(ScaledValue::new(left), one, ScaledValue::new(-right), one)
+    };
+    let a = difference(points[1], points[0]);
+    let b = difference(points[2], points[0]);
+    let distance = difference(points[2], points[1]);
+    sensitivity_ratio(
+        [
+            [ScaledValue::new(values[1]), b, b],
+            [ScaledValue::new(-values[0]), b, b],
+            [ScaledValue::new(-values[2]), a, a],
+            [ScaledValue::new(values[0]), a, a],
+        ]
+        .into_iter(),
+        [[a, b, distance]].into_iter(),
+    )
+}
+
+fn sensitivity_complex_stencil(
+    points: [Value; 3],
+    samples: [&[Complex64]; 3],
+    abort: &dyn AbortSignal,
+) -> Result<Vec<Complex64>, SimulationError> {
+    if abort.is_aborted() {
+        return Err(SimulationError::Aborted);
+    }
+    if samples
+        .iter()
+        .any(|sample| sample.len() != samples[0].len())
+    {
+        return Err(SimulationError::Circuit(
+            "Sensitivity stencil sample counts differ".to_owned(),
+        ));
+    }
+    (0..samples[0].len())
+        .map(|index| {
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
+            Ok(Complex64::new(
+                sensitivity_three_point(points, samples.map(|sample| sample[index].re))?,
+                sensitivity_three_point(points, samples.map(|sample| sample[index].im))?,
+            ))
+        })
+        .collect()
+}
+
+/// Fatal study failures stop before another perturbation is attempted;
+/// physical-domain failures remain available to the one-sided fallback.
+fn sensitivity_trial<T>(
+    sample: Result<T, SimulationError>,
+) -> Result<Result<T, SimulationError>, SimulationError> {
+    match sample {
+        Err(error)
+            if error.is_stopped()
+                || matches!(
+                    error,
+                    SimulationError::ResourceLimit(_) | SimulationError::Configuration(_)
+                ) =>
+        {
+            Err(error)
+        }
+        sample => Ok(sample),
+    }
+}
 
 #[derive(Debug, Clone, Copy)]
 enum AcSensitivityElementField {
@@ -772,11 +897,7 @@ impl Engine {
         }
         let lower = param_value - h;
         let upper = param_value + h;
-        if !lower.is_finite()
-            || !upper.is_finite()
-            || lower >= param_value
-            || upper <= param_value
-            || !(upper - lower).is_finite()
+        if !lower.is_finite() || !upper.is_finite() || lower >= param_value || upper <= param_value
         {
             return Err(SimulationError::Circuit(
                 "Sensitivity perturbations must be distinct, finite, representable values around the nominal parameter".to_owned(),
@@ -890,7 +1011,7 @@ impl Engine {
             ))
         })?;
 
-        Ok((v_plus - v_minus) / ((param_value + h) - (param_value - h)))
+        sensitivity_secant([param_value - h, param_value + h], [v_minus, v_plus])
     }
 
     /// Run AC sensitivity analysis for a parameter across frequencies.
@@ -969,7 +1090,7 @@ impl Engine {
             .map(|(p, m)| {
                 let p_mag = Self::sensitivity_ac_voltage_magnitude(p, output_node)?;
                 let m_mag = Self::sensitivity_ac_voltage_magnitude(m, output_node)?;
-                Ok((p_mag - m_mag) / ((param_value + h) - (param_value - h)))
+                sensitivity_secant([param_value - h, param_value + h], [m_mag, p_mag])
             })
             .collect()
     }
@@ -2303,24 +2424,69 @@ impl Engine {
         target: &AcSensitivityTarget,
         nominal_output: &[Complex64],
         derivative: Vec<Complex64>,
-    ) -> AcSensitivity {
+        abort: &dyn AbortSignal,
+    ) -> Result<AcSensitivity, SimulationError> {
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
+        if nominal_output.len() != derivative.len() || !target.nominal_value.is_finite() {
+            return Err(SimulationError::Circuit(
+                "AC sensitivity trace shape or parameter is invalid".to_owned(),
+            ));
+        }
         let mut normalized = Vec::with_capacity(derivative.len());
         let mut magnitude = Vec::with_capacity(derivative.len());
         let mut phase = Vec::with_capacity(derivative.len());
         for (&output, &sensitivity) in nominal_output.iter().zip(&derivative) {
-            let norm_sqr = output.norm_sqr();
-            if norm_sqr > 1.0e-60 {
-                normalized.push(sensitivity * target.nominal_value / output);
-                let product = output.conj() * sensitivity;
-                magnitude.push(product.re / norm_sqr.sqrt());
-                phase.push(product.im / norm_sqr);
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
+            if [output.re, output.im, sensitivity.re, sensitivity.im]
+                .iter()
+                .any(|value| !value.is_finite())
+            {
+                return Err(SimulationError::Circuit(format!(
+                    "AC sensitivity '{}' contains a non-finite output or derivative",
+                    target.vector_name
+                )));
+            }
+            let scale = output.re.abs().max(output.im.abs());
+            if scale != 0.0 {
+                let one = ScaledValue::new(1.0);
+                let re = ScaledValue::new(output.re);
+                let im = ScaledValue::new(output.im);
+                let dr = ScaledValue::new(sensitivity.re);
+                let di = ScaledValue::new(sensitivity.im);
+                let parameter = ScaledValue::new(target.nominal_value);
+                let norm_squared = [[re, re, one], [im, im, one]];
+                normalized.push(Complex64::new(
+                    sensitivity_ratio(
+                        [[re, dr, parameter], [im, di, parameter]].into_iter(),
+                        norm_squared.into_iter(),
+                    )?,
+                    sensitivity_ratio(
+                        [[re, di, parameter], [im.negated(), dr, parameter]].into_iter(),
+                        norm_squared.into_iter(),
+                    )?,
+                ));
+                let norm = ScaledValue::new(scale).multiply(ScaledValue::new(
+                    (output.re / scale).hypot(output.im / scale),
+                ));
+                magnitude.push(sensitivity_ratio(
+                    [[re, dr, one], [im, di, one]].into_iter(),
+                    [[norm, one, one]].into_iter(),
+                )?);
+                phase.push(sensitivity_ratio(
+                    [[re, di, one], [im.negated(), dr, one]].into_iter(),
+                    norm_squared.into_iter(),
+                )?);
             } else {
                 normalized.push(Complex64::new(0.0, 0.0));
                 magnitude.push(0.0);
                 phase.push(0.0);
             }
         }
-        AcSensitivity {
+        Ok(AcSensitivity {
             vector_name: target.vector_name.clone(),
             element: target.element.clone(),
             element_type: target.element_type,
@@ -2330,7 +2496,7 @@ impl Engine {
             normalized,
             magnitude,
             phase,
-        }
+        })
     }
 
     fn dc_sensitivity_output_value(
@@ -2500,34 +2666,21 @@ impl Engine {
                 target.nominal_value - h,
             )?;
 
-            let plus = self.run_dc_op_with_abort(&plus_netlist, abort);
-            let minus = self.run_dc_op_with_abort(&minus_netlist, abort);
+            let plus = sensitivity_trial(self.run_dc_op_with_abort(&plus_netlist, abort))?;
+            let minus = sensitivity_trial(self.run_dc_op_with_abort(&minus_netlist, abort))?;
             let derivative = match (plus, minus) {
-                (
-                    Err(
-                        error @ (SimulationError::Aborted
-                        | SimulationError::TimeLimitExceeded
-                        | SimulationError::ResourceLimit(_)
-                        | SimulationError::Configuration(_)),
-                    ),
-                    _,
-                )
-                | (
-                    _,
-                    Err(
-                        error @ (SimulationError::Aborted
-                        | SimulationError::TimeLimitExceeded
-                        | SimulationError::ResourceLimit(_)
-                        | SimulationError::Configuration(_)),
-                    ),
-                ) => {
-                    return Err(error);
-                }
-                (Ok(plus), Ok(minus)) => {
-                    (Self::dc_sensitivity_output_value(&plus, &output)?
-                        - Self::dc_sensitivity_output_value(&minus, &output)?)
-                        / (2.0 * h)
-                }
+                (Ok(plus), Ok(minus)) => sensitivity_three_point(
+                    [
+                        target.nominal_value,
+                        target.nominal_value + h,
+                        target.nominal_value - h,
+                    ],
+                    [
+                        nominal_output,
+                        Self::dc_sensitivity_output_value(&plus, &output)?,
+                        Self::dc_sensitivity_output_value(&minus, &output)?,
+                    ],
+                )?,
                 (Ok(plus), Err(minus_error)) => {
                     let mut plus_two_netlist = flat.clone();
                     Self::apply_ac_sensitivity_target(
@@ -2546,10 +2699,18 @@ impl Engine {
                                 target.vector_name, minus_error, plus_two_error
                             ))
                         })?;
-                    (-3.0 * nominal_output
-                        + 4.0 * Self::dc_sensitivity_output_value(&plus, &output)?
-                        - Self::dc_sensitivity_output_value(&plus_two, &output)?)
-                        / (2.0 * h)
+                    sensitivity_three_point(
+                        [
+                            target.nominal_value,
+                            target.nominal_value + h,
+                            target.nominal_value + 2.0 * h,
+                        ],
+                        [
+                            nominal_output,
+                            Self::dc_sensitivity_output_value(&plus, &output)?,
+                            Self::dc_sensitivity_output_value(&plus_two, &output)?,
+                        ],
+                    )?
                 }
                 (Err(plus_error), Ok(minus)) => {
                     let mut minus_two_netlist = flat.clone();
@@ -2569,10 +2730,18 @@ impl Engine {
                                 target.vector_name, plus_error, minus_two_error
                             ))
                         })?;
-                    (3.0 * nominal_output
-                        - 4.0 * Self::dc_sensitivity_output_value(&minus, &output)?
-                        + Self::dc_sensitivity_output_value(&minus_two, &output)?)
-                        / (2.0 * h)
+                    sensitivity_three_point(
+                        [
+                            target.nominal_value,
+                            target.nominal_value - h,
+                            target.nominal_value - 2.0 * h,
+                        ],
+                        [
+                            nominal_output,
+                            Self::dc_sensitivity_output_value(&minus, &output)?,
+                            Self::dc_sensitivity_output_value(&minus_two, &output)?,
+                        ],
+                    )?
                 }
                 (Err(plus_error), Err(minus_error)) => {
                     return Err(SimulationError::Circuit(format!(
@@ -2694,36 +2863,23 @@ impl Engine {
                 target.nominal_value - h,
             )?;
 
-            let plus = self.run_ac_with_abort(&plus_netlist, frequencies, abort);
-            let minus = self.run_ac_with_abort(&minus_netlist, frequencies, abort);
+            let plus =
+                sensitivity_trial(self.run_ac_with_abort(&plus_netlist, frequencies, abort))?;
+            let minus =
+                sensitivity_trial(self.run_ac_with_abort(&minus_netlist, frequencies, abort))?;
             let derivative = match (plus, minus) {
-                (
-                    Err(
-                        error @ (SimulationError::Aborted
-                        | SimulationError::TimeLimitExceeded
-                        | SimulationError::ResourceLimit(_)
-                        | SimulationError::Configuration(_)),
-                    ),
-                    _,
-                )
-                | (
-                    _,
-                    Err(
-                        error @ (SimulationError::Aborted
-                        | SimulationError::TimeLimitExceeded
-                        | SimulationError::ResourceLimit(_)
-                        | SimulationError::Configuration(_)),
-                    ),
-                ) => {
-                    return Err(error);
-                }
                 (Ok(plus), Ok(minus)) => {
                     let plus = Self::ac_sensitivity_outputs(&plus, &output, frequencies)?;
                     let minus = Self::ac_sensitivity_outputs(&minus, &output, frequencies)?;
-                    plus.iter()
-                        .zip(&minus)
-                        .map(|(plus, minus)| (*plus - *minus) / (2.0 * h))
-                        .collect()
+                    sensitivity_complex_stencil(
+                        [
+                            target.nominal_value,
+                            target.nominal_value + h,
+                            target.nominal_value - h,
+                        ],
+                        [&nominal_output, &plus, &minus],
+                        abort,
+                    )?
                 }
                 (Ok(plus), Err(minus_error)) => {
                     let mut plus_two_netlist = flat.clone();
@@ -2745,14 +2901,15 @@ impl Engine {
                         })?;
                     let plus = Self::ac_sensitivity_outputs(&plus, &output, frequencies)?;
                     let plus_two = Self::ac_sensitivity_outputs(&plus_two, &output, frequencies)?;
-                    nominal_output
-                        .iter()
-                        .zip(&plus)
-                        .zip(&plus_two)
-                        .map(|((nominal, plus), plus_two)| {
-                            (-3.0 * *nominal + 4.0 * *plus - *plus_two) / (2.0 * h)
-                        })
-                        .collect()
+                    sensitivity_complex_stencil(
+                        [
+                            target.nominal_value,
+                            target.nominal_value + h,
+                            target.nominal_value + 2.0 * h,
+                        ],
+                        [&nominal_output, &plus, &plus_two],
+                        abort,
+                    )?
                 }
                 (Err(plus_error), Ok(minus)) => {
                     let mut minus_two_netlist = flat.clone();
@@ -2774,14 +2931,15 @@ impl Engine {
                         })?;
                     let minus = Self::ac_sensitivity_outputs(&minus, &output, frequencies)?;
                     let minus_two = Self::ac_sensitivity_outputs(&minus_two, &output, frequencies)?;
-                    nominal_output
-                        .iter()
-                        .zip(&minus)
-                        .zip(&minus_two)
-                        .map(|((nominal, minus), minus_two)| {
-                            (3.0 * *nominal - 4.0 * *minus + *minus_two) / (2.0 * h)
-                        })
-                        .collect()
+                    sensitivity_complex_stencil(
+                        [
+                            target.nominal_value,
+                            target.nominal_value - h,
+                            target.nominal_value - 2.0 * h,
+                        ],
+                        [&nominal_output, &minus, &minus_two],
+                        abort,
+                    )?
                 }
                 (Err(plus_error), Err(minus_error)) => {
                     return Err(SimulationError::Circuit(format!(
@@ -2794,7 +2952,8 @@ impl Engine {
                 &target,
                 &nominal_output,
                 derivative,
-            ));
+                abort,
+            )?);
         }
 
         Ok(AcSensitivityResult {
@@ -2886,10 +3045,11 @@ pub enum SensitivityCardResult {
 #[cfg(test)]
 mod tests {
     use super::super::super::Engine;
-    use crate::Netlist;
+    use super::{sensitivity_secant, sensitivity_three_point};
     use crate::analysis::AcSensitivityOutput;
     use crate::netlist::AnalysisCommand;
     use crate::netlist::{StepCommand, StepSweep, StepTarget};
+    use crate::{Complex64, Netlist};
 
     #[test]
     fn parameter_replay_preserves_the_runtime_statistical_seed() {
@@ -2981,14 +3141,130 @@ mod tests {
     }
 
     #[test]
-    fn sensitivity_refuses_unrepresentable_perturbations() {
-        for (nominal, step) in [
-            (1.0, Some(f64::MIN_POSITIVE)),
-            (f64::MAX, None),
-            (0.0, Some(f64::MAX)),
+    fn sensitivity_postprocessing_preserves_cancellation_and_rejects_nonfinite_derivatives() {
+        let netlist = Netlist::parse("Postprocessing\nR1 out 0 1\n.end\n").unwrap();
+        let target = Engine::collect_ac_sensitivity_targets(
+            &netlist,
+            crate::resource::ResourceLimits::default(),
+        )
+        .unwrap()
+        .remove(0);
+        let one = Complex64::new(1.0, 0.0);
+        let result = Engine::complete_ac_sensitivity_trace(
+            &target,
+            &[one],
+            vec![Complex64::new(f64::NAN, 0.0)],
+            &crate::abort_signal::NoAbort,
+        );
+        assert!(result.unwrap_err().to_string().contains("non-finite"));
+        let abort = crate::abort_signal::CountingAbort::new(1);
+        let result = Engine::complete_ac_sensitivity_trace(&target, &[one], vec![one], &abort);
+        assert!(matches!(result, Err(crate::SimulationError::Aborted)));
+        assert_eq!(abort.count(), 2);
+    }
+
+    #[test]
+    fn sensitivity_stencils_preserve_nonuniform_coordinates_and_wide_cancellation() {
+        for (points, values, expected) in [
+            ([1.0, 2.0, 4.0], [1.0, 4.0, 16.0], 2.0),
+            ([1.0, 0.0, -2.0], [1.0, 0.0, 4.0], 2.0),
+            ([0.0, -1e308, 1e308], [0.0, -1e308, 1e308], 1.0),
+            ([0.0, 1e-300, 2e-300], [1e308; 3], 0.0),
         ] {
+            assert_eq!(sensitivity_three_point(points, values).unwrap(), expected);
+        }
+        assert_eq!(
+            sensitivity_secant([-1e308, 1e308], [-1e308, 1e308]).unwrap(),
+            1.0
+        );
+        assert!(sensitivity_three_point([0.0, 1.0, 1.0], [0.0, 1.0, 1.0]).is_err());
+        assert!(sensitivity_secant([0.0, 1e308], [0.0, 1e-308]).is_err());
+    }
+
+    #[test]
+    fn sensitivity_scalar_accepts_finite_samples_with_an_overflowing_span() {
+        let netlist =
+            Netlist::parse("Wide scalar sensitivity\n.param p=0\nV1 out 0 {p}\n.end\n").unwrap();
+        assert_eq!(
+            Engine::default()
+                .run_sensitivity(&netlist, 1, "p", 0.0, Some(1e308))
+                .unwrap(),
+            1.0
+        );
+    }
+
+    #[test]
+    fn complete_ac_sensitivity_preserves_derived_traces_at_extreme_scales() {
+        let engine = Engine::default();
+        for current in [1e-200, 1e200] {
+            for phase in [0, 60] {
+                let netlist = Netlist::parse(&format!(
+                    "AC sensitivity scale\nI1 0 out AC {current:e} {phase}\nR1 out 0 1\n.end\n"
+                ))
+                .unwrap();
+                let result = engine
+                    .run_sensitivity_ac_complete(
+                        &netlist,
+                        AcSensitivityOutput::Voltage {
+                            positive: 1,
+                            negative: None,
+                        },
+                        &[1.0],
+                        &["R1".into()],
+                    )
+                    .unwrap();
+                let trace = result.get("R1").unwrap();
+                assert!(
+                    (trace.normalized[0] - Complex64::new(1.0, 0.0)).norm() < 2e-10,
+                    "{trace:?}"
+                );
+                assert!(
+                    (trace.magnitude[0] / current - 1.0).abs() < 2e-10,
+                    "{trace:?}"
+                );
+                assert!(trace.phase[0].abs() < 2e-10, "{trace:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn complete_ac_sensitivity_one_sided_capacitance_keeps_finite_large_output_derivatives() {
+        let netlist = Netlist::parse(
+            "Boundary capacitance\nI1 0 out AC 1e308\nR1 out 0 1\nC1 out 0 0\n.end\n",
+        )
+        .unwrap();
+        let result = Engine::default()
+            .run_sensitivity_ac_complete(
+                &netlist,
+                AcSensitivityOutput::Voltage {
+                    positive: 1,
+                    negative: None,
+                },
+                &[0.01],
+                &["C1".into()],
+            )
+            .unwrap();
+        let trace = result.get("C1").unwrap();
+        let omega = std::f64::consts::TAU * 0.01;
+        assert_eq!(trace.absolute[0].re, 0.0);
+        assert!(
+            (trace.absolute[0].im / (-omega * 1e308) - 1.0).abs() < 2e-12,
+            "{trace:?}"
+        );
+        assert_eq!(trace.normalized[0], Complex64::new(0.0, 0.0));
+        assert_eq!(trace.magnitude[0], 0.0);
+        assert!((trace.phase[0] / -omega - 1.0).abs() < 2e-12);
+    }
+
+    #[test]
+    fn sensitivity_refuses_unrepresentable_perturbations() {
+        for (nominal, step) in [(1.0, Some(f64::MIN_POSITIVE)), (f64::MAX, None)] {
             assert!(Engine::sensitivity_step(nominal, step).is_err());
         }
+        assert_eq!(
+            Engine::sensitivity_step(0.0, Some(f64::MAX)).unwrap(),
+            f64::MAX
+        );
         assert!(Engine::sensitivity_step(f64::from_bits(2), None).unwrap() > 0.0);
     }
 
