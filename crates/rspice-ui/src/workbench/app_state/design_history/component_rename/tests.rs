@@ -490,3 +490,30 @@ fn imported_primitive_current_probes_follow_the_emitted_card_identity() {
     );
     assert_eq!(app.state.schematic.components[0].name, "bias");
 }
+
+#[test]
+fn an_unchanged_name_preserves_authored_reference_spelling_and_history() {
+    let (mut app, expected, _, _) = fixture();
+    let id = app
+        .state
+        .schematic
+        .add_component(ComponentType::Cccs, Point::new(100, 0));
+    app.state
+        .schematic
+        .components
+        .iter_mut()
+        .find(|component| component.id == id)
+        .unwrap()
+        .params = "vref=v1".to_owned();
+    let before = SchematicSnapshot::capture(&app.state.schematic);
+    let epoch = app.state.design_execution_epoch;
+    assert!(
+        !app.state
+            .rename_component_transaction(&expected, expected.name.clone())
+            .unwrap()
+    );
+    assert!(before.is_equal_state(&app.state.schematic));
+    assert_eq!(app.state.design_execution_epoch, epoch);
+    assert!(app.state.project_undo_sequence().is_none());
+    assert!(!app.state.workspace.project_metadata_dirty);
+}

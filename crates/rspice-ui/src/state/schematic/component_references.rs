@@ -137,6 +137,9 @@ impl super::SchematicState {
         if &self.components[index] != expected {
             return Err("The selected component changed before commit.".to_owned());
         }
+        if name == expected.name {
+            return Ok(self.components.clone());
+        }
         expected.validate_reference_designator(&name)?;
         let mut components = self.components.clone();
         components[index].name = name;
