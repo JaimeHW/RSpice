@@ -7,6 +7,11 @@ use crate::expr::{constant_value, function_uses_implicit_time as implicit_time};
 use crate::numerics::is_integral_cycle_count;
 
 impl BehavioralVoltageSource {
+    pub(crate) fn prescribed_time_program(&self) -> Option<(&CompiledExpr, Context<'_>)> {
+        (!self.is_solution_dependent() && self.program.sdt_count == 0)
+            .then(|| (&self.program, self.periodicity_context()))
+    }
+
     pub(crate) fn minimum_pss_interval(&self, events_resolved: bool) -> Option<Value> {
         minimum_pss_interval(&self.ast, &self.periodicity_context(), events_resolved)
     }
@@ -31,6 +36,11 @@ impl BehavioralVoltageSource {
 }
 
 impl BehavioralCurrentSource {
+    pub(crate) fn prescribed_time_program(&self) -> Option<(&CompiledExpr, Context<'_>)> {
+        (!self.is_solution_dependent() && self.program.sdt_count == 0)
+            .then(|| (&self.program, self.periodicity_context()))
+    }
+
     pub(crate) fn minimum_pss_interval(&self, events_resolved: bool) -> Option<Value> {
         minimum_pss_interval(&self.ast, &self.periodicity_context(), events_resolved)
     }

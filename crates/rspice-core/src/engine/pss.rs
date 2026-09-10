@@ -111,7 +111,7 @@ impl PssAcceptedStepHistory {
 const PSS_FD_STEP: Value = 1e-8;
 const PSS_KRYLOV_STATE_THRESHOLD: usize = 12;
 const PSS_KRYLOV_REL_TOL: Value = 1e-9;
-const PSS_OPERATING_POINT_IDENTITY_VERSION: u32 = 86;
+const PSS_OPERATING_POINT_IDENTITY_VERSION: u32 = 87;
 
 fn pss_identity_field(hasher: &mut blake3::Hasher, name: &str, bytes: &[u8]) {
     hasher.update(&(name.len() as u64).to_le_bytes());
@@ -2185,7 +2185,7 @@ impl Engine {
         circuit.link_indices(&matrix);
 
         let mut circuit = PssCircuit::new_with_abort(circuit, self.config.resource_limits, abort)?;
-        circuit.ensure_regular_prescribed_currents(config.period())?;
+        circuit.ensure_regular_prescribed_currents(config.period(), abort)?;
         // Validate circuit has reactive elements
         let state_dimension = circuit.state_dimension();
         if circuit
@@ -2986,7 +2986,7 @@ impl Engine {
                 true,
                 abort,
             )?;
-            circuit.ensure_regular_prescribed_currents(period)?;
+            circuit.ensure_regular_prescribed_currents(period, abort)?;
         }
 
         // Node voltages consistent with the frozen reactive state: they seed
@@ -3869,6 +3869,7 @@ impl Engine {
         start: &[Value],
         abort: &dyn AbortSignal,
     ) -> Result<Option<Vec<Value>>, SimulationError> {
+        circuit.prepare_prescribed_forcing(step.t_next, abort)?;
         let accepted_state = circuit.transient_trial_state_snapshot();
         match self.pss_newton_solve(circuit, matrix, step, start, abort) {
             Ok(Some(solution)) => Ok(Some(solution)),

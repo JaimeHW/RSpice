@@ -496,7 +496,7 @@ defaults still use the original `POINTS`. `MAXITER` applies to each grid solve,
 while the result reports total Newton corrections across all grids. Point and
 memory limits also apply to refinement, and cancellation remains available.
 Retained PSS operating points from earlier producer versions must be regenerated
-before dependent numerical reuse; the current producer identity is version 83.
+with the current engine before dependent numerical reuse.
 The retained orbit includes canonical MNA branch-current waveforms on the same
 time grid as node voltages. Both identities and samples are authenticated and
 projected into dependent analyses; omitted branch currents are never inferred
@@ -507,11 +507,19 @@ used to select the branch representation do not impose this constraint. Cascaded
 and differential VCVS relations also constrain charge coordinates. Their exact
 binary64 coefficient rank is reduced once during setup, and initialization
 projects device charge derivatives into the independent voltage rates to retain
-physical displacement currents. Coupled algebraic constraints involving current
-controls or loading of otherwise algebraic control nodes remain incomplete. Behavioral
-source displacement currents require a qualified analytic outgoing derivative;
-unqualified lookup, discontinuity and regularized-function derivatives are
-reported explicitly instead of using Newton's pointwise slope.
+physical displacement currents. Constant RLC networks with E/F/G/H controls use
+an exact MNA descriptor to close hidden charge and flux constraints, including
+loading of algebraic control nodes. Prescribed capacitor voltages and winding
+currents use analytic forcing derivatives in their transient companions.
+Qualified time-only behavioral voltage and current sources supply higher
+derivatives through a bounded Taylor evaluator that preserves the selected
+dialect's constant-expression semantics. Periodicity and derivative regularity
+are checked across the complete orbit; poles and unresolved derivative jumps
+are diagnosed. Expressions outside this descriptor's supported operator set
+retain their existing path. Solution-dependent behavioral sources and nonlinear
+device manifolds still require further closure support. Behavioral displacement
+currents on the existing path require a qualified analytic outgoing derivative;
+unsupported derivatives are reported instead of using Newton's pointwise slope.
 This convergence check supplements the shooting residual, which measures closure
 of a discrete period map. It is not a proof of resolution for all nonlinear
 expressions and devices; independent waveform and

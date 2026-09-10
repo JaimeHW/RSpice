@@ -12,6 +12,7 @@ mod compiler;
 mod file_table;
 mod parser;
 mod power;
+mod time_derivatives;
 mod time_enclosure;
 mod vm;
 
@@ -28,6 +29,7 @@ pub(crate) use power::{
     real_function_pow_with_derivative, real_function_pwr, real_function_pwr_with_derivative,
     real_function_pwrs, real_function_pwrs_with_derivative, real_pow, real_pow_with_derivative,
 };
+pub(crate) use time_derivatives::{TimeDerivativeError, TimeDerivatives};
 pub(crate) use time_enclosure::{TimeEnclosure, TimeInterval};
 pub use vm::{CompiledExpr, Context, Instruction, Vm};
 pub(crate) use vm::{

@@ -12,6 +12,85 @@ use rspice_core::netlist::Netlist;
 const F0: f64 = 1.0e6;
 
 #[test]
+fn behavioral_descriptor_orbits_preserve_physical_forcing_and_currents() {
+    for dialect in [
+        rspice_core::config::SpiceDialect::Ngspice,
+        rspice_core::config::SpiceDialect::Xyce,
+    ] {
+        for current_source in [false, true] {
+            let devices = if current_source {
+                "B1 in 0 I=exp(0.2*sin(2*pi*time))\nL1 in 0 0.1\nH1 out 0 L1 2\nCout out 0 0.2"
+            } else {
+                "B1 in 0 V=exp(0.2*sin(2*pi*time))\nR1 in 0 4\nCin in 0 0.3 IC=0\nH1 out 0 B1 2\nCout out 0 0.2 IC=0"
+            };
+            let deck = Netlist::parse(&format!("Analytic B forcing\n{devices}\n.end\n")).unwrap();
+            let point = Engine::new(SimulationConfig::default().with_spice_dialect(dialect))
+                .run_pss_operating_point_with_abort(
+                    &deck,
+                    PssConfig::new(1.0)
+                        .with_points_per_period(128)
+                        .with_tstab_periods(0),
+                    &NoAbort,
+                )
+                .unwrap_or_else(|error| panic!("{dialect:?}, current={current_source}: {error}"));
+            assert!(point.shooting_state_basis().is_empty());
+            let result = &point.analysis().result;
+            let node = |name: &str| {
+                result
+                    .node_names
+                    .iter()
+                    .position(|entry| entry.eq_ignore_ascii_case(name))
+                    .unwrap()
+            };
+            let branch = |name: &str| {
+                result
+                    .branch_names
+                    .iter()
+                    .position(|entry| entry.eq_ignore_ascii_case(name))
+                    .unwrap()
+            };
+            for (index, &time) in result.time.iter().enumerate() {
+                let omega = std::f64::consts::TAU;
+                let phase = omega * time;
+                let value = (0.2 * phase.sin()).exp();
+                let rate = 0.2 * omega * phase.cos() * value;
+                let acceleration = ((0.2 * omega * phase.cos()).powi(2)
+                    - 0.2 * omega * omega * phase.sin())
+                    * value;
+                let (input_voltage, input_current, output_voltage, output_current) =
+                    if current_source {
+                        (-0.1 * rate, -value, -2.0 * value, 0.4 * rate)
+                    } else {
+                        (
+                            value,
+                            -value / 4.0 - 0.3 * rate,
+                            -value / 2.0 - 0.6 * rate,
+                            0.4 * (rate / 4.0 + 0.3 * acceleration),
+                        )
+                    };
+                for (name, expected) in [("in", input_voltage), ("out", output_voltage)] {
+                    let actual = result.waveforms[node(name)].values[index];
+                    assert!(
+                        (actual - expected).abs() < 2e-9,
+                        "{name}, t={time}: {actual} vs {expected}"
+                    );
+                }
+                for (name, expected) in [
+                    (if current_source { "L1" } else { "B1" }, input_current),
+                    ("H1", output_current),
+                ] {
+                    let actual = result.branch_waveforms[branch(name)].values[index];
+                    assert!(
+                        (actual - expected).abs() < 2e-8,
+                        "{name}, t={time}: {actual} vs {expected}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn coupled_descriptor_controlled_cutsets_preserve_mutual_flux_and_forcing() {
     let deck = Netlist::parse("Controlled current cutsets\nV1 in 0 SIN(0.7 1 1 0 0 37)\nRin in 0 4\nG1 0 a in 0 2\nL1 a b 0.2\nR1 b 0 3\nF1 0 c V1 3\nL2 c d 0.8\nR2 d 0 5\nK1 L1 L2 0.25\nH1 out 0 L1 2\nCout out 0 0.2\n.end\n").unwrap();
     let point = Engine::default()

@@ -9,52 +9,57 @@ const F0: f64 = 1.0e6;
 
 #[test]
 fn coupled_descriptor_winding_state_survives_transient_continuation() {
-    let deck = Netlist::parse("Coupled flux continuation\nV1 in 0 SIN(0.7 1 1 0 0 37)\nL1 in mid 0.1\nR1 mid 0 1\nH1 out 0 L1 2\nCout out 0 0.2\n.end\n").unwrap();
-    let engine = Engine::default();
-    let (analysis, state) = engine
-        .run_pss_with_continuation_state(
-            &deck,
-            PssConfig::new(1.0)
-                .with_points_per_period(1024)
-                .with_tstab_periods(0),
-        )
-        .unwrap();
-    assert_eq!(analysis.monodromy.len(), 1);
-    let (continued, _) = engine
-        .run_tran_from_pss_state(&deck, &state, 0.1, 0.001)
-        .unwrap();
-    let output = continued
-        .node_names
-        .iter()
-        .position(|name| name.eq_ignore_ascii_case("out"))
-        .unwrap();
-    let branch = |name: &str| {
-        continued
-            .branch_names
+    for source in [
+        "V1 in 0 SIN(0.7 1 1 0 0 37)",
+        "B1 in 0 V=0.7+sin(2*pi*time+37*pi/180)",
+    ] {
+        let deck = Netlist::parse(&format!("Coupled flux continuation\n{source}\nL1 in mid 0.1\nR1 mid 0 1\nH1 out 0 L1 2\nCout out 0 0.2\n.end\n")).unwrap();
+        let engine = Engine::default();
+        let (analysis, state) = engine
+            .run_pss_with_continuation_state(
+                &deck,
+                PssConfig::new(1.0)
+                    .with_points_per_period(1024)
+                    .with_tstab_periods(0),
+            )
+            .unwrap();
+        assert_eq!(analysis.monodromy.len(), 1);
+        let (continued, _) = engine
+            .run_tran_from_pss_state(&deck, &state, 0.1, 0.001)
+            .unwrap();
+        let output = continued
+            .node_names
             .iter()
-            .position(|entry| entry.eq_ignore_ascii_case(name))
-            .unwrap()
-    };
-    for (index, &time) in continued.time.iter().enumerate() {
-        let omega = std::f64::consts::TAU;
-        let phase = omega * time + 37_f64.to_radians();
-        let lag = omega * 0.1;
-        let expected = 0.7 + (phase.sin() - lag * phase.cos()) / (1.0 + lag * lag);
-        let current = continued.branch_currents[branch("L1")][index];
-        assert!(
-            (current - expected).abs() < 2e-5,
-            "t={time}: {current} vs {expected}"
-        );
-        assert!((continued.voltages[output][index] - 2.0 * current).abs() < 2e-12);
-        assert!(
-            (continued.branch_currents[branch("H1")][index]
-                + continued.branch_currents[branch("Cout")][index])
-                .abs()
-                < 1e-10
-                    * continued.branch_currents[branch("H1")][index]
-                        .abs()
-                        .max(1.0)
-        );
+            .position(|name| name.eq_ignore_ascii_case("out"))
+            .unwrap();
+        let branch = |name: &str| {
+            continued
+                .branch_names
+                .iter()
+                .position(|entry| entry.eq_ignore_ascii_case(name))
+                .unwrap()
+        };
+        for (index, &time) in continued.time.iter().enumerate() {
+            let omega = std::f64::consts::TAU;
+            let phase = omega * time + 37_f64.to_radians();
+            let lag = omega * 0.1;
+            let expected = 0.7 + (phase.sin() - lag * phase.cos()) / (1.0 + lag * lag);
+            let current = continued.branch_currents[branch("L1")][index];
+            assert!(
+                (current - expected).abs() < 2e-5,
+                "t={time}: {current} vs {expected}"
+            );
+            assert!((continued.voltages[output][index] - 2.0 * current).abs() < 2e-12);
+            assert!(
+                (continued.branch_currents[branch("H1")][index]
+                    + continued.branch_currents[branch("Cout")][index])
+                    .abs()
+                    < 1e-10
+                        * continued.branch_currents[branch("H1")][index]
+                            .abs()
+                            .max(1.0)
+            );
+        }
     }
 }
 

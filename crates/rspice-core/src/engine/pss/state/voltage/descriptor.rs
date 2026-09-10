@@ -6,6 +6,7 @@ use super::*;
 pub(in crate::engine::pss::state) struct PssDescriptor {
     solution: PssVoltageConstraints,
     charge_forcing: std::sync::Arc<Vec<Vec<(ForestValue, Value)>>>,
+    behavioral: BehavioralForcing,
 }
 
 impl PssDescriptor {
@@ -23,6 +24,24 @@ impl PssDescriptor {
                 .value_expressions
                 .iter()
                 .all(Option::is_none)
+            && circuit
+                .behavioral_sources
+                .voltage_sources
+                .iter()
+                .all(|source| {
+                    source
+                        .prescribed_time_program()
+                        .is_some_and(|(program, _)| crate::expr::TimeDerivatives::supports(program))
+                })
+            && circuit
+                .behavioral_sources
+                .current_sources
+                .iter()
+                .all(|source| {
+                    source
+                        .prescribed_time_program()
+                        .is_some_and(|(program, _)| crate::expr::TimeDerivatives::supports(program))
+                })
             && F::ALL.into_iter().all(|family| {
                 matches!(
                     family,
@@ -38,6 +57,7 @@ impl PssDescriptor {
                         | F::Ccvs
                         | F::InductorCoupling
                         | F::CoupledInductorPair
+                        | F::BehavioralSource
                 ) || family.instance_count(circuit) == 0
             })
     }
@@ -178,7 +198,48 @@ impl PssDescriptor {
                         Some(ForestValue::SourceDerivative {
                             index,
                             order: 0,
-                            current: true,
+                            kind: PrescribedSource::Current,
+                        }),
+                        sign,
+                    )?;
+                }
+            }
+        }
+        for (index, source) in circuit
+            .behavioral_sources
+            .voltage_sources
+            .iter()
+            .enumerate()
+        {
+            let branch = nodes + source.branch_ordinal;
+            for (node, sign) in [(source.node_pos, 1.0), (source.node_neg, -1.0)] {
+                if node != 0 {
+                    add(node - 1, branch, None, sign)?;
+                    add(branch - 1, node, None, sign)?;
+                }
+            }
+            add(
+                branch - 1,
+                0,
+                Some(ForestValue::BehavioralSource(index)),
+                1.0,
+            )?;
+        }
+        for (index, source) in circuit
+            .behavioral_sources
+            .current_sources
+            .iter()
+            .enumerate()
+        {
+            for (node, sign) in [(source.node_pos, -1.0), (source.node_neg, 1.0)] {
+                if node != 0 {
+                    add(
+                        node - 1,
+                        0,
+                        Some(ForestValue::SourceDerivative {
+                            index,
+                            order: 0,
+                            kind: PrescribedSource::BehavioralCurrent,
                         }),
                         sign,
                     )?;
@@ -296,19 +357,42 @@ impl PssDescriptor {
                 retained_words.saturating_add(form.len().saturating_mul(FORM_TERM_WORDS));
             charge_forcing.push(form);
         }
+        drop(algebraic);
+        // Reserve source-order map nodes and traversal work before collecting
+        // derivative requests. They coexist with compiled forms and caches.
+        let source_count = circuit
+            .voltage_sources
+            .len()
+            .saturating_add(circuit.current_sources.len())
+            .saturating_add(circuit.behavioral_sources.voltage_sources.len())
+            .saturating_add(circuit.behavioral_sources.current_sources.len());
+        retained_words = retained_words.saturating_add(source_count.saturating_mul(64));
+        PssVoltageConstraintBuilder::ensure_words(retained_words, limits.max_result_values)?;
+        let mut descriptor = Self {
+            behavioral: BehavioralForcing::default(),
+            charge_forcing: std::sync::Arc::new(charge_forcing),
+            solution: PssVoltageConstraints {
+                node_forms: std::sync::Arc::new(forms),
+                max_values: limits.max_result_values,
+                retained_words,
+            },
+        };
+        // Exact closure determines the derivative orders. Evaluate each
+        // prescribed B expression once at the initialization time, with the
+        // same resource and cancellation contract as subsequent trial times.
+        descriptor.behavioral = BehavioralForcing::new(
+            circuit,
+            &descriptor.forcing_orders(circuit, abort)?,
+            &mut descriptor.solution.retained_words,
+            limits.max_result_values,
+            abort,
+        )?;
         Ok(PssStateBasis {
             voltage_branches,
             forest: Vec::new(),
             voltage_constraints: None,
             currents: PssCurrentBasis::from_descriptor(circuit, representatives),
-            descriptor: Some(Self {
-                charge_forcing: std::sync::Arc::new(charge_forcing),
-                solution: PssVoltageConstraints {
-                    node_forms: std::sync::Arc::new(forms),
-                    max_values: limits.max_result_values,
-                    retained_words,
-                },
-            }),
+            descriptor: Some(descriptor),
         })
     }
 
@@ -323,7 +407,14 @@ impl PssDescriptor {
             .ensure_evaluation_work(solution.len().saturating_mul(2), self.solution.max_terms())?;
         let mut trial = vec![0.0; solution.len()];
         self.solution.solve(&mut trial, |value| {
-            value.evaluate(circuit, state, voltage_count)
+            if value
+                .source()
+                .is_some_and(|(kind, _, _)| kind.is_behavioral())
+            {
+                self.behavioral.value(value, 0.0, 0)
+            } else {
+                value.evaluate(circuit, state, voltage_count)
+            }
         })?;
         solution.copy_from_slice(&trial);
         Ok(())
@@ -387,41 +478,60 @@ impl PssDescriptor {
         )
     }
 
-    pub(in crate::engine::pss::state) fn ensure_regular_forcing(
+    fn forcing_orders(
         &self,
         circuit: &CircuitData,
-        period: Value,
-    ) -> Result<(), SimulationError> {
+        abort: &dyn AbortSignal,
+    ) -> Result<BTreeMap<(PrescribedSource, usize), usize>, SimulationError> {
         let mut orders = BTreeMap::new();
+        let mut count = 0_usize;
+        let mut record = |value: ForestValue, extra: usize| -> Result<(), SimulationError> {
+            if count.is_multiple_of(64) && abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
+            count += 1;
+            if let Some((kind, index, order)) = value.source() {
+                let order = order.checked_add(extra).ok_or_else(|| {
+                    SimulationError::Circuit("PSS source derivative order overflow".to_owned())
+                })?;
+                let maximum = orders.entry((kind, index)).or_insert(0);
+                *maximum = (*maximum).max(order);
+            }
+            Ok(())
+        };
         for form in self.solution.node_forms.iter() {
             for &(value, _) in form {
-                if let Some((current, index, order)) = value.source() {
-                    let max_order = orders.entry((current, index)).or_insert(0);
-                    *max_order = (*max_order).max(order);
-                }
+                record(value, 0)?;
             }
         }
         for index in 0..circuit.inductors.len() {
             for &(value, _) in self.winding_form(circuit, index) {
-                if let Some((current, index, order)) = value.source() {
-                    let max_order = orders.entry((current, index)).or_insert(0);
-                    *max_order = (*max_order).max(order.saturating_add(1));
-                }
+                record(value, 1)?;
             }
         }
         for form in self.charge_forcing.iter() {
             for &(value, _) in form {
-                if let Some((current, index, order)) = value.source() {
-                    let max_order = orders.entry((current, index)).or_insert(0);
-                    *max_order = (*max_order).max(order.saturating_add(1));
-                }
+                record(value, 1)?;
             }
         }
-        for ((current, index), order) in orders {
+        Ok(orders)
+    }
+
+    pub(in crate::engine::pss::state) fn ensure_regular_forcing(
+        &self,
+        circuit: &CircuitData,
+        period: Value,
+        abort: &dyn AbortSignal,
+    ) -> Result<(), SimulationError> {
+        self.behavioral.ensure_regular(circuit, period, abort)?;
+        for ((kind, index), order) in self.forcing_orders(circuit, abort)? {
+            if kind.is_behavioral() {
+                continue;
+            }
             if order == 0 {
                 continue;
             }
-            let (name, regular) = if current {
+            let (name, regular) = if kind == PrescribedSource::Current {
                 (
                     &circuit.current_sources.names[index],
                     circuit
@@ -443,6 +553,22 @@ impl PssDescriptor {
             }
         }
         Ok(())
+    }
+
+    pub(in crate::engine::pss::state) fn prepare_forcing(
+        &mut self,
+        circuit: &CircuitData,
+        times: [Value; 3],
+        abort: &dyn AbortSignal,
+    ) -> Result<(), SimulationError> {
+        self.behavioral.prepare(
+            circuit,
+            times,
+            self.solution
+                .max_values
+                .saturating_sub(self.solution.retained_words),
+            abort,
+        )
     }
 
     pub(in crate::engine::pss::state) fn source_companion(
@@ -481,12 +607,12 @@ impl PssDescriptor {
         let mut terms = Vec::with_capacity(max_terms);
         for (index, (rate, form)) in rates.iter_mut().zip(forms).enumerate() {
             let mut forcing = |time, order| -> Result<Value, SimulationError> {
-                evaluate_form(form, &mut terms, |value| {
-                    if value.source().is_some() {
-                        value.forcing(circuit, time, order)
-                    } else {
-                        Ok(0.0)
+                evaluate_form(form, &mut terms, |value| match value.source() {
+                    Some((kind, _, _)) if kind.is_behavioral() => {
+                        self.behavioral.value(value, time, order)
                     }
+                    Some(_) => value.forcing(circuit, time, order),
+                    None => Ok(0.0),
                 })
             };
             let previous = if step.coeff.coeff_i_n == 0.0 {
@@ -568,7 +694,7 @@ mod tests {
             crate::config::SpiceDialect::Ngspice,
         );
         let error = circuit
-            .ensure_regular_prescribed_currents(1.0)
+            .ensure_regular_prescribed_currents(1.0, &NoAbort)
             .unwrap_err()
             .to_string();
         assert!(error.contains("order 2") && error.contains("V1"), "{error}");
@@ -615,7 +741,9 @@ mod tests {
                         dialect,
                     );
                     assert_eq!(circuit.state_dimension(), 0);
-                    circuit.ensure_regular_prescribed_currents(1.0).unwrap();
+                    circuit
+                        .ensure_regular_prescribed_currents(1.0, &NoAbort)
+                        .unwrap();
                     circuit.set_state(&[]).unwrap();
                     let solution = engine
                         .pss_initial_node_solution(&mut circuit, &NoAbort)
@@ -688,6 +816,166 @@ mod tests {
         close(
             solution[circuit.num_nodes() + circuit.vcvs.branch_indices[0] - 1],
             -0.2 * std::f64::consts::TAU * 37_f64.to_radians().cos(),
+        );
+    }
+
+    #[test]
+    fn behavioral_descriptor_resolves_higher_charge_derivatives_and_current_forcing() {
+        for dialect in [
+            crate::config::SpiceDialect::Ngspice,
+            crate::config::SpiceDialect::Xyce,
+        ] {
+            let (engine, mut circuit) = build(
+                "B1 in 0 V=0.7+sin(2*pi*time+0.3)\nR1 in 0 4\nCin in 0 0.3\nH1 out 0 B1 2\nCout out 0 0.2 IC=0",
+                dialect,
+            );
+            assert_eq!(circuit.state_dimension(), 0);
+            circuit
+                .ensure_regular_prescribed_currents(1.0, &NoAbort)
+                .unwrap();
+            circuit.set_state(&[]).unwrap();
+            let solution = engine
+                .pss_initial_node_solution(&mut circuit, &NoAbort)
+                .unwrap();
+            let omega = std::f64::consts::TAU;
+            let v = 0.7 + 0.3_f64.sin();
+            let slope = omega * 0.3_f64.cos();
+            let acceleration = -omega * omega * 0.3_f64.sin();
+            let current = -v / 4.0 - 0.3 * slope;
+            let output_current = 0.4 * (slope / 4.0 + 0.3 * acceleration);
+            close(circuit.capacitors.v_prev[1], 2.0 * current);
+            close(
+                solution[circuit.num_nodes()
+                    + circuit.behavioral_sources.voltage_sources[0].branch_ordinal
+                    - 1],
+                current,
+            );
+            close(
+                solution[circuit.num_nodes() + circuit.ccvs.branch_indices[0] - 1],
+                output_current,
+            );
+            if let Some(branch) = circuit.capacitors.ic_branch_indices[1] {
+                close(solution[circuit.num_nodes() + branch - 1], -output_current);
+            }
+            circuit.prepare_prescribed_forcing(0.17, &NoAbort).unwrap();
+            let source = ForestValue::BehavioralSource(0)
+                .differentiated()
+                .unwrap()
+                .differentiated()
+                .unwrap();
+            close(
+                circuit
+                    .basis
+                    .descriptor
+                    .as_ref()
+                    .unwrap()
+                    .behavioral
+                    .value(source, 0.17, 0)
+                    .unwrap(),
+                -omega * omega * (omega * 0.17 + 0.3).sin(),
+            );
+
+            let (engine, mut circuit) = build(
+                "B1 in 0 I=sin(2*pi*time+0.3)\nL1 in 0 0.1\nH1 out 0 L1 2\nCout out 0 0.2",
+                dialect,
+            );
+            assert_eq!(circuit.state_dimension(), 0);
+            circuit
+                .ensure_regular_prescribed_currents(1.0, &NoAbort)
+                .unwrap();
+            circuit.set_state(&[]).unwrap();
+            let solution = engine
+                .pss_initial_node_solution(&mut circuit, &NoAbort)
+                .unwrap();
+            close(circuit.inductors.i_prev[0], -0.3_f64.sin());
+            close(circuit.capacitors.v_prev[0], -2.0 * 0.3_f64.sin());
+            close(
+                solution[circuit.get_node_by_name("in").unwrap() - 1],
+                -0.1 * slope,
+            );
+            close(
+                solution[circuit.num_nodes() + circuit.ccvs.branch_indices[0] - 1],
+                0.4 * slope,
+            );
+        }
+    }
+
+    #[test]
+    fn behavioral_descriptor_certifies_the_orbit_and_preserves_solution_dependent_modes() {
+        let (_, circuit) = build(
+            "B1 in 0 V=abs(sin(2*pi*time))\nR1 in 0 4\nH1 out 0 B1 2\nCout out 0 0.2",
+            crate::config::SpiceDialect::Ngspice,
+        );
+        circuit
+            .ensure_regular_prescribed_currents(1.0, &NoAbort)
+            .unwrap();
+        for expression in ["abs(sin(2*pi*time))", "1/(0.125+sin(2*pi*time))"] {
+            let (_, circuit) = build(
+                &format!(
+                    "B1 in 0 V={expression}\nR1 in 0 4\nCin in 0 0.3\nH1 out 0 B1 2\nCout out 0 0.2"
+                ),
+                crate::config::SpiceDialect::Ngspice,
+            );
+            let error = circuit
+                .ensure_regular_prescribed_currents(1.0, &NoAbort)
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains("B1") && error.contains("order 2"), "{error}");
+        }
+        let netlist = Netlist::parse(
+            "Feedback mode\nB1 in 0 V=sin(v(out))\nCin in 0 0.3\nH1 out 0 B1 2\n.end\n",
+        )
+        .unwrap();
+        let circuit = Engine::default().build_circuit(&netlist).unwrap();
+        assert!(!PssDescriptor::applies(&circuit));
+        let circuit = PssCircuit::new(circuit).unwrap();
+        assert_eq!(circuit.state_dimension(), 1);
+        let netlist = Netlist::parse("Legacy conditional\nB1 in 0 V=if(sin(2*pi*time)>0,1,0)\nR1 in 0 4\nH1 out 0 B1 2\n.end\n").unwrap();
+        assert!(!PssDescriptor::applies(
+            &Engine::default().build_circuit(&netlist).unwrap()
+        ));
+    }
+
+    #[test]
+    fn behavioral_descriptor_cancellation_and_storage_are_bounded() {
+        let (_, mut circuit) = build(
+            "B1 in 0 V=sin(2*pi*time)\nCin in 0 0.3\nH1 out 0 B1 2\nCout out 0 0.2",
+            crate::config::SpiceDialect::Ngspice,
+        );
+        let descriptor = circuit.basis.descriptor.as_ref().unwrap();
+        let budget = descriptor.solution.retained_words;
+        let error = PssStateBasis::new(
+            &circuit,
+            crate::resource::ResourceLimits {
+                max_result_values: budget,
+                ..Default::default()
+            },
+            &NoAbort,
+        )
+        .unwrap_err();
+        assert!(matches!(error, SimulationError::ResourceLimit(_)));
+        assert!(matches!(
+            circuit.prepare_prescribed_forcing(0.125, &crate::abort_signal::CountingAbort::new(3)),
+            Err(SimulationError::Aborted)
+        ));
+        assert!(matches!(
+            circuit.ensure_regular_prescribed_currents(
+                1.0,
+                &crate::abort_signal::CountingAbort::new(1)
+            ),
+            Err(SimulationError::Aborted)
+        ));
+        circuit.prepare_prescribed_forcing(0.125, &NoAbort).unwrap();
+        close(
+            circuit
+                .basis
+                .descriptor
+                .as_ref()
+                .unwrap()
+                .behavioral
+                .value(ForestValue::BehavioralSource(0), 0.125, 0)
+                .unwrap(),
+            std::f64::consts::FRAC_1_SQRT_2,
         );
     }
 }

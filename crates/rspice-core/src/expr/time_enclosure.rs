@@ -1479,7 +1479,7 @@ impl<'a> TimeEnclosure<'a> {
     }
 
     pub fn evaluate(&mut self, time: TimeInterval, context: &Context<'_>) -> Option<TimeBounds> {
-        self.evaluate_internal(time, context, false)
+        self.evaluate_internal(time, context, false, None)
     }
 
     pub fn evaluate_centered(
@@ -1487,7 +1487,96 @@ impl<'a> TimeEnclosure<'a> {
         time: TimeInterval,
         context: &Context<'_>,
     ) -> Option<TimeBounds> {
-        self.evaluate_internal(time, context, true)
+        self.evaluate_internal(time, context, true, None)
+    }
+
+    /// A finite first derivative permits corners in a continuous source.
+    /// Higher derivatives require a single analytic branch on the interval.
+    /// Unresolved domains are not evidence of regularity.
+    pub(crate) fn regular_on(
+        &mut self,
+        time: TimeInterval,
+        context: &Context<'_>,
+        order: usize,
+        abort: &dyn crate::abort_signal::AbortSignal,
+    ) -> bool {
+        self.evaluate_internal(time, context, false, Some((abort, order > 1)))
+            .is_some_and(|bounds| {
+                bounds.continuous && bounds.value.is_finite() && bounds.slope.is_finite()
+            })
+    }
+
+    fn analytic_instruction(&self, instruction: &Instruction, context: &Context<'_>) -> Option<()> {
+        let last = || self.stack.last().copied();
+        let strictly_outside = |range: TimeInterval, limit: Value| {
+            range.upper < -limit
+                || range.lower > limit
+                || (range.lower > -limit && range.upper < limit)
+        };
+        let regular = match instruction {
+            Instruction::Div => !last()?.value.contains(0.0),
+            Instruction::Pow | Instruction::FunctionPow | Instruction::Pwr | Instruction::Pwrs => {
+                let exponent = last()?;
+                let base = self.stack.get(self.stack.len().checked_sub(2)?)?;
+                if !base.value.contains(0.0) || base.constant && exponent.constant {
+                    true
+                } else {
+                    let power = exponent.center;
+                    let integer = exponent.constant && power >= 0.0 && power.fract() == 0.0;
+                    let xyce = context.expression_dialect == crate::config::ExpressionDialect::Xyce;
+                    let signed = matches!(instruction, Instruction::Pwrs)
+                        || (!xyce && matches!(instruction, Instruction::Pwr));
+                    let absolute = !xyce && matches!(instruction, Instruction::FunctionPow);
+                    integer
+                        && if signed {
+                            power.rem_euclid(2.0) == 1.0
+                        } else if absolute {
+                            power.rem_euclid(2.0) == 0.0
+                        } else {
+                            true
+                        }
+                }
+            }
+            Instruction::Abs | Instruction::Sqrt => {
+                let a = last()?;
+                a.constant || !a.value.contains(0.0)
+            }
+            Instruction::Ln | Instruction::Log | Instruction::Log10 => {
+                let a = last()?;
+                a.constant || !a.value.contains(super::LOGARITHM_MIN_ARGUMENT)
+            }
+            Instruction::Asin | Instruction::Acos => {
+                let a = last()?;
+                a.constant || strictly_outside(a.value, 1.0)
+            }
+            Instruction::Acosh => {
+                let a = last()?;
+                a.constant || a.value.lower > 1.0
+            }
+            Instruction::Atanh => {
+                let a = last()?;
+                a.constant
+                    || if context.expression_dialect == crate::config::ExpressionDialect::Xyce {
+                        strictly_outside(a.value, 1.0 - super::XYCE_ATANH_EPSILON)
+                    } else {
+                        a.value.lower > -1.0 && a.value.upper < 1.0
+                    }
+            }
+            Instruction::Tanh
+                if context.expression_dialect == crate::config::ExpressionDialect::Xyce =>
+            {
+                let a = last()?;
+                a.constant || strictly_outside(a.value, super::XYCE_TANH_SATURATION_THRESHOLD)
+            }
+            Instruction::Atan2 => {
+                let x = last()?;
+                let y = self.stack.get(self.stack.len().checked_sub(2)?)?;
+                (x.constant && y.constant) || x.value.lower > 0.0 || !y.value.contains(0.0)
+            }
+            Instruction::Min(_) | Instruction::Max(_) => false,
+            _ => true,
+        };
+        regular.then_some(())
     }
 
     fn evaluate_internal(
@@ -1495,12 +1584,21 @@ impl<'a> TimeEnclosure<'a> {
         time: TimeInterval,
         context: &Context<'_>,
         centered: bool,
+        analytic: Option<(&dyn crate::abort_signal::AbortSignal, bool)>,
     ) -> Option<TimeBounds> {
         let center = time.lower + 0.5 * (time.upper - time.lower);
         let radius =
             (((center - time.lower).abs().max((time.upper - center).abs())) / self.stop).next_up();
         self.stack.clear();
-        for instruction in &self.program.instructions {
+        for (index, instruction) in self.program.instructions.iter().enumerate() {
+            if let Some((abort, higher)) = analytic {
+                if index.is_multiple_of(64) && abort.is_aborted() {
+                    return None;
+                }
+                if higher {
+                    self.analytic_instruction(instruction, context)?;
+                }
+            }
             let mut value = match instruction {
                 Instruction::PushConst(value) => Dual::constant(*value),
                 Instruction::Dup => *self.stack.last()?,
@@ -2473,6 +2571,7 @@ mod tests {
                                     TimeInterval { lower, upper },
                                     &context,
                                     centered,
+                                    None,
                                 )
                                 .unwrap();
                             let error = domain.interpolation_error((upper - lower) / stop);

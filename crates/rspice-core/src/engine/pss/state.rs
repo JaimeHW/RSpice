@@ -9,6 +9,22 @@ mod voltage;
 use voltage::{
     InitialChargeRates, PssDescriptor, PssVoltageConstraintBuilder, PssVoltageConstraints,
 };
+mod forcing;
+use forcing::BehavioralForcing;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum PrescribedSource {
+    Voltage,
+    Current,
+    BehavioralVoltage,
+    BehavioralCurrent,
+}
+
+impl PrescribedSource {
+    fn is_behavioral(self) -> bool {
+        matches!(self, Self::BehavioralVoltage | Self::BehavioralCurrent)
+    }
+}
 
 #[derive(Debug, Clone, Copy)]
 enum VoltageBranch {
@@ -36,27 +52,24 @@ enum ForestValue {
     SourceDerivative {
         index: usize,
         order: usize,
-        current: bool,
+        kind: PrescribedSource,
     },
     Source(usize),
     BehavioralSource(usize),
 }
 
 impl ForestValue {
-    fn source(self) -> Option<(bool, usize, usize)> {
+    fn source(self) -> Option<(PrescribedSource, usize, usize)> {
         match self {
-            Self::Source(index) => Some((false, index, 0)),
-            Self::SourceDerivative {
-                index,
-                order,
-                current,
-            } => Some((current, index, order)),
+            Self::Source(index) => Some((PrescribedSource::Voltage, index, 0)),
+            Self::BehavioralSource(index) => Some((PrescribedSource::BehavioralVoltage, index, 0)),
+            Self::SourceDerivative { index, order, kind } => Some((kind, index, order)),
             _ => None,
         }
     }
 
     fn differentiated(self) -> Result<Self, SimulationError> {
-        let Some((current, index, order)) = self.source() else {
+        let Some((kind, index, order)) = self.source() else {
             return Err(SimulationError::Circuit(
                 "PSS descriptor attempted to differentiate a free state as forcing".to_owned(),
             ));
@@ -66,7 +79,7 @@ impl ForestValue {
             order: order.checked_add(1).ok_or_else(|| {
                 SimulationError::Circuit("PSS source derivative order overflow".to_owned())
             })?,
-            current,
+            kind,
         })
     }
 
@@ -76,7 +89,8 @@ impl ForestValue {
         time: Value,
         extra_order: usize,
     ) -> Result<Value, SimulationError> {
-        let Some((current, index, order)) = self.source() else {
+        let Some((kind, index, order)) = self.source().filter(|(kind, _, _)| !kind.is_behavioral())
+        else {
             return Err(SimulationError::Circuit(
                 "PSS descriptor forcing is not an independent source".to_owned(),
             ));
@@ -84,7 +98,7 @@ impl ForestValue {
         let order = order.checked_add(extra_order).ok_or_else(|| {
             SimulationError::Circuit("PSS source derivative order overflow".to_owned())
         })?;
-        let (name, value) = if current {
+        let (name, value) = if kind == PrescribedSource::Current {
             (
                 &circuit.current_sources.names[index],
                 circuit
@@ -921,13 +935,33 @@ impl PssCircuit {
     pub(super) fn ensure_regular_prescribed_currents(
         &self,
         period: Value,
+        abort: &dyn AbortSignal,
     ) -> Result<(), SimulationError> {
         if let Some(descriptor) = &self.basis.descriptor {
-            return descriptor.ensure_regular_forcing(&self.circuit, period);
+            return descriptor.ensure_regular_forcing(&self.circuit, period, abort);
         }
         self.basis
             .currents
             .ensure_regular_forcing(&self.circuit.current_sources, period)
+    }
+
+    pub(in crate::engine) fn prepare_prescribed_forcing(
+        &mut self,
+        time: Value,
+        abort: &dyn AbortSignal,
+    ) -> Result<(), SimulationError> {
+        if let Some(descriptor) = &mut self.basis.descriptor {
+            descriptor.prepare_forcing(
+                &self.circuit,
+                [
+                    time,
+                    self.current_source_times[0],
+                    self.current_source_times[1],
+                ],
+                abort,
+            )?;
+        }
+        Ok(())
     }
 
     pub(super) fn stamp_prescribed_current_correction(

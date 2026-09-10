@@ -688,6 +688,7 @@ impl Engine {
             self.pss_set_reactive_state(&mut circuit, &base.states[k])?;
             let solution = base.solutions[k].clone();
             let mut rhs_scratch = vec![0.0; size];
+            circuit.prepare_prescribed_forcing(base.times[k] + dt_freeze, abort)?;
             self.pss_stamp_system(
                 &mut circuit,
                 &mut matrix,

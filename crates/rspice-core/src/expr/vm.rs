@@ -287,7 +287,16 @@ impl Vm {
     }
 
     /// Execute a compiled expression
+    #[inline]
     pub fn execute(&mut self, program: &CompiledExpr, ctx: &Context) -> Value {
+        let value = self.execute_raw(program, ctx);
+        super::normalize_expression_boundary(value, ctx.expression_dialect)
+    }
+
+    /// Evaluate bytecode inside an expression, retaining the raw result until
+    /// its actual public boundary. Constant folding must not apply Xyce's
+    /// nonfinite replacement to individual operators.
+    pub(crate) fn execute_raw(&mut self, program: &CompiledExpr, ctx: &Context) -> Value {
         self.stack.clear();
 
         for instr in &program.instructions {
@@ -605,10 +614,7 @@ impl Vm {
             }
         }
 
-        super::normalize_expression_boundary(
-            self.stack.pop().unwrap_or(0.0),
-            ctx.expression_dialect,
-        )
+        self.stack.pop().unwrap_or(0.0)
     }
 
     #[inline]

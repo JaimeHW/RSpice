@@ -263,7 +263,7 @@ fn legacy_real_pow_with_derivative(
 /// The exact integer path is important for negative integer powers: otherwise
 /// a tiny library `sin(n*pi)` residue leaks into the exponent derivative and
 /// the cosine can perturb an otherwise exact signed power value.
-fn sin_cos_pi(value: Value) -> (Value, Value) {
+pub(super) fn sin_cos_pi(value: Value) -> (Value, Value) {
     if value.is_finite() && value.fract() == 0.0 {
         let cosine = if value.rem_euclid(2.0) == 0.0 {
             1.0
