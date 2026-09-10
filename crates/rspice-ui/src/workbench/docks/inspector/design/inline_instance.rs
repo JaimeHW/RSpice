@@ -64,7 +64,7 @@ fn prepare_field_edit(
             .map(crate::properties::property_bridge::property_value_to_string)
             .unwrap_or_default();
     }
-    let candidate = edited_component(component, field, &authored);
+    let candidate = edited_component(component, field, &authored)?;
     if let Some(refusal) = source_contract_rejection(state, &candidate, field, typed_value.as_ref())
     {
         return Err(refusal);
@@ -100,7 +100,7 @@ fn prepare_field_edit(
 /// reads the fields as they will stand *after* the commit rather than as they
 /// stand now: an inline edit moves exactly one field, and a rule that spans two
 /// of them has to see the new value in place. The copy is built by the same
-/// `write_param` the commit uses, so the gate can never judge a string the
+/// `edited_component` preparation the commit uses, so the gate can never judge a string the
 /// commit would not have written.
 fn source_contract_rejection(
     state: &AppState,
@@ -201,53 +201,29 @@ fn parameter_source_value(
 }
 
 /// Build the complete component candidate without publishing draft text.
-pub(super) fn edited_component(
+fn edited_component(
     component: &Component,
     field: &InlineEditField,
     candidate: &str,
-) -> Component {
+) -> Result<Component, String> {
     let mut component = component.clone();
     match field {
-        InlineEditField::Instance => {
-            component.name = candidate.trim().to_owned();
-        }
-        InlineEditField::Value => {
-            component.value = candidate.to_owned();
-        }
+        InlineEditField::Instance => component.name = candidate.trim().to_owned(),
+        InlineEditField::Value => component.value = candidate.to_owned(),
         InlineEditField::Parameters => {
+            crate::state::params_string::validate_parameter_text(candidate)?;
             component.params = candidate.trim().to_owned();
         }
         InlineEditField::Parameter(key) => {
-            component.params = write_param(&component.params, key, candidate);
+            component.params = crate::state::params_string::set_parameter_value(
+                &component.params,
+                key,
+                candidate,
+            )?;
         }
     }
-    component
+    Ok(component)
 }
-
-/// Set `key` to `value` in a `key=value key=value` parameter string,
-/// preserving the order of the other entries. An empty value removes the
-/// entry, returning the instance to whatever it inherits.
-pub(super) fn write_param(params: &str, key: &str, value: &str) -> String {
-    let value = value.trim();
-    let mut parts: Vec<String> = Vec::new();
-    let mut replaced = false;
-    for entry in params.split_whitespace() {
-        let entry_key = entry.split_once('=').map_or(entry, |(name, _)| name);
-        if entry_key.eq_ignore_ascii_case(key) {
-            replaced = true;
-            if !value.is_empty() {
-                parts.push(format!("{key}={value}"));
-            }
-        } else {
-            parts.push(entry.to_owned());
-        }
-    }
-    if !replaced && !value.is_empty() {
-        parts.push(format!("{key}={value}"));
-    }
-    parts.join(" ")
-}
-
 /// Finish the previous field before opening a draft against the live component.
 pub(super) fn begin_edit(app: &mut RSpiceApp, component_id: u64, field: InlineEditField) -> bool {
     if app.state.schematic_edit_read_only() {

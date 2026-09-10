@@ -68,6 +68,22 @@ impl Editor {
                         "Value",
                         "",
                     );
+                    edit_row_with_hint(
+                        ui,
+                        &mut self.app,
+                        &component,
+                        InlineEditField::Parameter("note".to_owned()),
+                        "Note",
+                        "",
+                    );
+                    edit_row_with_hint(
+                        ui,
+                        &mut self.app,
+                        &component,
+                        InlineEditField::Parameters,
+                        "Parameters",
+                        "",
+                    );
                 });
             },
         );
@@ -127,6 +143,87 @@ fn key(key: egui::Key, modifiers: egui::Modifiers) -> egui::Event {
         repeat: false,
         modifiers,
     }
+}
+
+#[test]
+fn parameter_field_commit_preserves_quoted_neighbors_and_undo_restores_duplicate_source() {
+    let mut editor = Editor::new();
+    let original = r#"label="a  b" note="before" NOTE='stale'"#;
+    editor.app.state.schematic.components[0].params = original.to_owned();
+    let note = r#"["a b" "C:\my data"] w=0"#;
+    editor.edit("Note", note);
+    assert_eq!(editor.app.state.schematic.components[0].params, original);
+    editor.pass(vec![key(egui::Key::Enter, egui::Modifiers::NONE)]);
+    let committed = editor.app.state.schematic.components[0].params.clone();
+    assert!(committed.starts_with(r#"label="a  b" note="#));
+    assert_eq!(
+        crate::state::parse_params_string(&committed),
+        HashMap::from([
+            ("label".to_owned(), "a  b".to_owned()),
+            ("note".to_owned(), note.to_owned()),
+        ])
+    );
+    assert_eq!(
+        crate::state::params_string::parameter_entries(&committed).count(),
+        2
+    );
+    assert_eq!(
+        field_value(
+            &editor.app.state.schematic.components[0],
+            &InlineEditField::Parameter("note".to_owned())
+        ),
+        note
+    );
+    assert!(editor.app.state.schematic.undo());
+    assert_eq!(editor.app.state.schematic.components[0].params, original);
+    assert!(!editor.app.state.schematic.can_undo());
+    assert!(editor.app.state.schematic.redo());
+    assert_eq!(editor.app.state.schematic.components[0].params, committed);
+}
+
+#[test]
+fn malformed_parameter_text_retains_the_field_draft_until_raw_text_is_repaired() {
+    let mut editor = Editor::new();
+    let original = "note='unterminated";
+    editor.app.state.schematic.components[0].params = original.to_owned();
+    editor.edit("Note", "repair");
+    editor.pass(vec![key(egui::Key::Enter, egui::Modifiers::NONE)]);
+    assert_eq!(editor.app.state.schematic.components[0].params, original);
+    let draft = editor.app.state.workbench.inline_edit.session().unwrap();
+    assert_eq!(draft.buffer, "repair");
+    assert!(draft.error.as_ref().unwrap().contains("unterminated"));
+    assert!(!editor.app.state.schematic.can_undo());
+    editor.pass(vec![key(egui::Key::Escape, egui::Modifiers::NONE)]);
+    let repaired = r#"note="repaired" label=" a  b ""#;
+    editor.edit("Parameters", repaired);
+    editor.pass(vec![key(egui::Key::Enter, egui::Modifiers::NONE)]);
+    assert_eq!(editor.app.state.schematic.components[0].params, repaired);
+    assert_eq!(
+        crate::state::parse_params_string(repaired)["label"],
+        " a  b "
+    );
+    assert!(editor.app.state.workbench.inline_edit.session().is_none());
+
+    editor.edit("Parameters", "note=one NOTE=two");
+    editor.pass(vec![key(egui::Key::Enter, egui::Modifiers::NONE)]);
+    assert_eq!(editor.app.state.schematic.components[0].params, repaired);
+    assert!(
+        editor
+            .app
+            .state
+            .workbench
+            .inline_edit
+            .session()
+            .unwrap()
+            .error
+            .as_ref()
+            .unwrap()
+            .contains("more than once")
+    );
+    editor.pass(vec![key(egui::Key::Escape, egui::Modifiers::NONE)]);
+    assert!(editor.app.state.schematic.undo());
+    assert_eq!(editor.app.state.schematic.components[0].params, original);
+    assert!(!editor.app.state.schematic.can_undo());
 }
 
 #[test]

@@ -514,30 +514,6 @@ fn soa_display_does_not_invent_evidence() {
 }
 
 #[test]
-fn writing_a_parameter_preserves_the_other_entries_and_their_order() {
-    assert_eq!(write_param("w=2u l=180n", "l", "220n"), "w=2u l=220n");
-    assert_eq!(write_param("w=2u l=180n", "m", "4"), "w=2u l=180n m=4");
-    assert_eq!(write_param("", "temp", "85"), "temp=85");
-}
-
-#[test]
-fn clearing_a_parameter_removes_it_so_the_instance_inherits_again() {
-    assert_eq!(
-        write_param("w=2u temp=85 l=180n", "temp", ""),
-        "w=2u l=180n"
-    );
-    assert_eq!(write_param("temp=85", "temp", "   "), "");
-    // A bare flag with no value is left untouched by an unrelated write.
-    assert_eq!(write_param("off w=2u", "w", "3u"), "off w=3u");
-}
-
-#[test]
-fn a_parameter_key_matches_case_insensitively_and_is_written_back_once() {
-    assert_eq!(write_param("TEMP=85", "temp", "27"), "temp=27");
-    assert_eq!(write_param("W=2u w=3u", "w", "4u"), "w=4u w=4u");
-}
-
-#[test]
 fn inherited_temperature_materializes_one_undoable_instance_override() {
     let mut app = RSpiceApp::test_instance();
     let id = app

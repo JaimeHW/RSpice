@@ -556,126 +556,24 @@ pub(crate) fn default_component_terminals(
 pub(crate) fn parse_replacement_parameters_strict(
     input: &str,
 ) -> Result<std::collections::HashMap<String, String>, SchematicReplacementError> {
-    let chars: Vec<char> = input.chars().collect();
-    let mut index = 0;
+    let malformed = |reason| SchematicReplacementError::MalformedParameterString { reason };
     let mut result = std::collections::HashMap::new();
-    while index < chars.len() {
-        while index < chars.len() && (chars[index].is_whitespace() || chars[index] == ',') {
-            index += 1;
+    for entry in crate::state::params_string::parameter_entries(input) {
+        let entry = entry.map_err(malformed)?;
+        if !valid_replacement_parameter_name(entry.key) {
+            return Err(malformed(format!(
+                "'{}' is not a valid parameter name",
+                entry.key
+            )));
         }
-        if index == chars.len() {
-            break;
-        }
-        let key_start = index;
-        while index < chars.len()
-            && chars[index] != '='
-            && !chars[index].is_whitespace()
-            && chars[index] != ','
-        {
-            index += 1;
-        }
-        let key: String = chars[key_start..index].iter().collect();
-        if !valid_replacement_parameter_name(&key) {
-            return Err(SchematicReplacementError::MalformedParameterString {
-                reason: format!("'{key}' is not a valid parameter name"),
-            });
-        }
-        while index < chars.len() && chars[index].is_whitespace() {
-            index += 1;
-        }
-        if index >= chars.len() || chars[index] != '=' {
-            return Err(SchematicReplacementError::MalformedParameterString {
-                reason: format!("parameter '{key}' is missing '='"),
-            });
-        }
-        index += 1;
-        while index < chars.len() && chars[index].is_whitespace() {
-            index += 1;
-        }
-        if index >= chars.len() || chars[index] == ',' {
-            return Err(SchematicReplacementError::MalformedParameterString {
-                reason: format!("parameter '{key}' has no value"),
-            });
-        }
-        let value_start = index;
-        match chars[index] {
-            quote @ ('\'' | '"') => {
-                index += 1;
-                let mut escaped = false;
-                while index < chars.len() {
-                    let character = chars[index];
-                    index += 1;
-                    if escaped {
-                        escaped = false;
-                    } else if character == '\\' {
-                        escaped = true;
-                    } else if character == quote {
-                        break;
-                    }
-                }
-                if chars.get(index.saturating_sub(1)) != Some(&quote) {
-                    return Err(SchematicReplacementError::MalformedParameterString {
-                        reason: format!("parameter '{key}' has an unterminated quoted value"),
-                    });
-                }
-            }
-            '{' => {
-                let mut depth = 0usize;
-                let mut quote = None;
-                let mut escaped = false;
-                while index < chars.len() {
-                    let character = chars[index];
-                    index += 1;
-                    if let Some(active_quote) = quote {
-                        if escaped {
-                            escaped = false;
-                        } else if character == '\\' {
-                            escaped = true;
-                        } else if character == active_quote {
-                            quote = None;
-                        }
-                        continue;
-                    }
-                    match character {
-                        '\'' | '"' => quote = Some(character),
-                        '{' => depth += 1,
-                        '}' => {
-                            depth = depth.saturating_sub(1);
-                            if depth == 0 {
-                                break;
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-                if depth != 0 || quote.is_some() {
-                    return Err(SchematicReplacementError::MalformedParameterString {
-                        reason: format!("parameter '{key}' has an unterminated brace expression"),
-                    });
-                }
-            }
-            _ => {
-                while index < chars.len() && !chars[index].is_whitespace() && chars[index] != ',' {
-                    index += 1;
-                }
-            }
-        }
-        let value: String = chars[value_start..index].iter().collect();
-        if value.is_empty() {
-            return Err(SchematicReplacementError::MalformedParameterString {
-                reason: format!("parameter '{key}' has an empty value"),
-            });
-        }
-        let key = key.trim().to_ascii_lowercase();
-        if result.insert(key.clone(), value).is_some() {
-            return Err(SchematicReplacementError::MalformedParameterString {
-                reason: format!("parameter '{key}' is assigned more than once"),
-            });
-        }
-        if index < chars.len() && !chars[index].is_whitespace() && chars[index] != ',' {
-            return Err(SchematicReplacementError::MalformedParameterString {
-                reason: format!("parameter '{key}' is not followed by a separator"),
-            });
+        let value = entry
+            .value
+            .ok_or_else(|| malformed(format!("parameter '{}' is missing '='", entry.key)))?;
+        let key = entry.key.to_ascii_lowercase();
+        if result.insert(key.clone(), value.to_owned()).is_some() {
+            return Err(malformed(format!(
+                "parameter '{key}' is assigned more than once"
+            )));
         }
     }
     Ok(result)
@@ -694,12 +592,7 @@ pub(crate) fn format_replacement_parameters(
 }
 
 pub(crate) fn valid_replacement_parameter_name(name: &str) -> bool {
-    let mut bytes = name.bytes();
-    let Some(first) = bytes.next() else {
-        return false;
-    };
-    (first.is_ascii_alphabetic() || first == b'_')
-        && bytes.all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+    crate::state::params_string::valid_parameter_name(name)
 }
 
 #[cfg(test)]
@@ -735,5 +628,10 @@ mod tests {
         assert!(parse_replacement_parameters_strict("corner=\"tt").is_err());
         assert!(parse_replacement_parameters_strict("m=1 M=2").is_err());
         assert!(parse_replacement_parameters_strict("m = , gain=2").is_err());
+        assert!(parse_replacement_parameters_strict("note='").is_err());
+        assert!(parse_replacement_parameters_strict(r#"note="a\""#).is_err());
+        assert!(parse_replacement_parameters_strict("expr={a + (b]} ").is_err());
+        assert!(parse_replacement_parameters_strict("off m=2").is_err());
+        assert!(parse_replacement_parameters_strict("note='a'b").is_err());
     }
 }
