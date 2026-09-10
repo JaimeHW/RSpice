@@ -1855,6 +1855,65 @@ mod tests {
     use super::*;
 
     #[test]
+    fn dc_triplet_voltage_sources_preserve_branch_offsets_and_orientation() {
+        for reversed_first in [false, true] {
+            for reversed_second in [false, true] {
+                let first = if reversed_first {
+                    "V1 0 a -2"
+                } else {
+                    "V1 a 0 2"
+                };
+                let second = if reversed_second {
+                    "V2 c b -3"
+                } else {
+                    "V2 b c 3"
+                };
+                let netlist = crate::netlist::Netlist::parse(&format!(
+                    "DC triplet voltage branches\n{first}\n{second}\nR1 a b 4\nR2 c 0 8\nR3 b 0 16\n.end\n"
+                )).unwrap();
+                let engine = Engine::default();
+                let mut circuit = engine.build_circuit(&netlist).unwrap();
+                let mut triplets = circuit.create_matrix();
+                let mut rhs = circuit.create_rhs();
+                circuit.stamp_dc(&mut triplets, &mut rhs);
+                let mut direct = engine.build_matrix(&circuit).unwrap();
+                circuit.link_indices(&direct);
+                // Topology construction seeds diagonals; real assemblies
+                // clear those values before stamping the physical equations.
+                direct.clear_values();
+                let mut direct_rhs = circuit.create_rhs();
+                circuit.stamp_dc_direct(&mut direct, &mut direct_rhs);
+                assert_eq!(rhs, direct_rhs);
+                assert_eq!(&rhs[..circuit.num_nodes()], &[0.0; 3]);
+                assert_eq!(rhs[3], if reversed_first { -2.0 } else { 2.0 });
+                assert_eq!(rhs[4], if reversed_second { -3.0 } else { 3.0 });
+                let positions: Vec<_> = direct.stored_positions().collect();
+                for ((row, col), &expected) in positions.into_iter().zip(direct.values_mut().iter())
+                {
+                    let actual: Value = triplets
+                        .entries()
+                        .filter(|&(r, c, _)| r == row && c == col)
+                        .map(|(_, _, value)| value)
+                        .sum();
+                    assert_eq!(actual, expected, "entry ({row}, {col})");
+                }
+                let mut matrix = triplets.to_static().unwrap();
+                let mut solution = Vec::new();
+                matrix.solve_into(&rhs, &mut solution).unwrap();
+                for (name, expected) in [("a", 2.0), ("b", 2.0), ("c", -1.0)] {
+                    let actual = solution[circuit.get_node_by_name(name).unwrap() - 1];
+                    assert!(
+                        (actual - expected).abs() < 2e-14,
+                        "{name}: {actual} vs {expected}"
+                    );
+                }
+                assert!(solution[3].abs() < 2e-14);
+                assert!((solution[4] - if reversed_second { 0.125 } else { -0.125 }).abs() < 2e-14);
+            }
+        }
+    }
+
+    #[test]
     fn xyce_profile_configures_the_serial_amesos_klu_compatibility_policy() {
         let mut options = SolverOptions::default();
 

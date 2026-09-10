@@ -1049,7 +1049,7 @@ impl CircuitData {
         self.inductors.stamp_dc_short(matrix, rhs, num_nodes);
         self.stamp_coupled_inductors_dc(matrix, rhs);
         self.stamp_multi_winding_transformers_dc(matrix, rhs);
-        self.voltage_sources.stamp_all(matrix, rhs);
+        self.voltage_sources.stamp_all(matrix, rhs, num_nodes);
         self.current_sources.stamp_all(rhs);
         self.vcvs.stamp_all(matrix, num_nodes);
         self.vccs.stamp_all(matrix);

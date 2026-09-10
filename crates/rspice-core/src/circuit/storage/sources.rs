@@ -956,13 +956,18 @@ impl VoltageSources {
         }
     }
 
-    /// Stamp all voltage sources
+    /// Stamp voltage-source branch equations after the node-voltage rows.
+    /// Stored branch indices are one-based ordinals, as in direct stamping.
     #[inline]
-    pub fn stamp_all(&self, matrix: &mut TripletMatrix, rhs: &mut [Value]) {
+    pub fn stamp_all(&self, matrix: &mut TripletMatrix, rhs: &mut [Value], num_nodes: usize) {
         for i in 0..self.names.len() {
             let np = self.node_pos[i];
             let nn = self.node_neg[i];
-            let br = self.branch_indices[i];
+            let ordinal = self.branch_indices[i];
+            if ordinal == 0 {
+                continue;
+            }
+            let br = num_nodes + ordinal;
             let v = self.dc_values[i];
 
             // MNA stamp: add branch equation V(n+) - V(n-) = Vs
