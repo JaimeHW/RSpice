@@ -7151,7 +7151,7 @@ R2 OUT 0 1k
                     continue;
                 }
                 for (kind, p) in [("NMOS", 1.0), ("PMOS", -1.0)] {
-                    let geometry = if level == 9 {
+                    let geometry = if matches!(level, 3 | 9) {
                         "WD=0.1u XL=0.2u XW=0.3u"
                     } else {
                         ""
@@ -7186,6 +7186,7 @@ R2 OUT 0 1k
                             );
                             let source = mechanism(&sources, "M1", "FN").unwrap();
                             for f in [0.1_f64, 1000.0, 1e6] {
+                                let ng_width = if level == 3 { 1.8e-6 } else { 2e-6 };
                                 let expected = if dialect == SpiceDialect::Xyce || level == 9 {
                                     let width = if level == 9 { 1.8e-6 } else { 2e-6 };
                                     5e-24 * id.powf(af) / (f * width * 0.8e-6 * cox * cox)
@@ -7196,9 +7197,12 @@ R2 OUT 0 1k
                                                 / (f.powf(ef) * 0.8e-6 * 0.8e-6 * cox)
                                         }
                                         1 => {
-                                            5e-24 * id.powf(af) / (f.powf(ef) * 2e-6 * 0.8e-6 * cox)
+                                            5e-24 * id.powf(af)
+                                                / (f.powf(ef) * ng_width * 0.8e-6 * cox)
                                         }
-                                        _ => 5e-24 * gm * gm / (f.powf(af) * 2e-6 * 0.8e-6 * cox),
+                                        _ => {
+                                            5e-24 * gm * gm / (f.powf(af) * ng_width * 0.8e-6 * cox)
+                                        }
                                     }
                                 };
                                 let actual = source.spectral_density(f, 300.15);

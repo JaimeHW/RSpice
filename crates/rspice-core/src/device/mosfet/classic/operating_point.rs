@@ -110,6 +110,7 @@ impl Mosfet {
     /// extends that law because ngspice supplies no MOS6 noise callback.
     /// Xyce levels 1/2/3/6 use current^AF divided by W*Leff*Cox²*f.
     /// MOS9 uses that current law with W-2*WD, without XL/XW mask shifts.
+    /// Ngspice MOS3 also uses W-2*WD for its width-dependent NLEV laws.
     /// BSIM1/2 keep their own effective geometry and Cox units.
     pub(crate) fn flicker_noise_source_terms(
         &self,
@@ -158,7 +159,7 @@ impl Mosfet {
                 self.cox
             };
             let leff = self.l - 2.0 * self.ld;
-            let width = if self.level == 9 {
+            let width = if self.level == 9 || (self.level == 3 && !xyce && self.nlev != 0) {
                 self.w - 2.0 * self.mos3_width_narrow
             } else {
                 self.w
@@ -172,7 +173,7 @@ impl Mosfet {
                 } else if self.nlev == 0 {
                     [leff, leff, cox, 1.0]
                 } else {
-                    [self.w, leff, cox, 1.0]
+                    [width, leff, cox, 1.0]
                 };
                 (
                     scaled_exp_product(&[self.kf, self.multiplicity], &divisors, 0.0),
@@ -193,7 +194,7 @@ impl Mosfet {
                 (
                     scaled_exp_product(
                         &[self.kf, gm, gm],
-                        &[self.multiplicity, self.w, leff, cox],
+                        &[self.multiplicity, width, leff, cox],
                         0.0,
                     ),
                     1.0,

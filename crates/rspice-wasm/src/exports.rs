@@ -456,6 +456,34 @@ mod wasm_tests {
     }
 
     #[wasm_bindgen_test]
+    fn mos3_flicker_noise_uses_narrowed_width_in_wasm() {
+        for (kind, p) in [("NMOS", 1.0), ("PMOS", -1.0)] {
+            let make = |kf| {
+                rspice_core::Netlist::parse(&format!(
+                    "MOS3 narrowed noise width\nVD d 0 {}\nVG g 0 {}\nM1 d g 0 0 mm W=2u L=1u M=5\n.model mm {kind}(LEVEL=3 VTO={p} KP=100u TOX=20n WD=0.1u LD=0.1u XL=0.2u XW=0.3u KF={kf} AF=0 NLEV=1)\n.options GMIN=0\n.end\n", p*2.0,p*1.4)).unwrap()
+            };
+            let engine = rspice_core::Engine::default();
+            let density = |kf| {
+                engine
+                    .run_port_noise_correlation_with_abort(
+                        &make(kf),
+                        &["VD".into()],
+                        &[1000.0],
+                        300.15,
+                        &rspice_core::abort_signal::NoAbort,
+                    )
+                    .unwrap()[0]
+                    .current_correlation[0][0]
+                    .re
+            };
+            let actual = density(1e-24) - density(0.0);
+            let cox = 3.9 * 8.854_214_871e-12 / 20e-9;
+            let expected = 5e-24 / (1000.0 * 1.8e-6 * 0.8e-6 * cox);
+            assert!((actual - expected).abs() < expected * 1e-12);
+        }
+    }
+
+    #[wasm_bindgen_test]
     fn mos9_flicker_uses_narrowed_width_and_fixed_frequency_law_in_wasm() {
         let abort = rspice_core::abort_signal::NoAbort;
         for (kind, p) in [("NMOS", 1.0), ("PMOS", -1.0)] {
