@@ -16,22 +16,40 @@ fn interpolate_over_frequency(
     f1: Value,
     y1: Value,
 ) -> Value {
-    if (f1 - f0).abs() < 1e-18 {
+    if query_freq == f0 || y0 == y1 {
         return y0;
     }
+    if query_freq == f1 {
+        return y1;
+    }
+    // Interior interpolation in dB is geometric in linear power: a zero
+    // endpoint dominates, including a segment that is noiseless throughout.
+    if y0 == Value::NEG_INFINITY || y1 == Value::NEG_INFINITY {
+        return Value::NEG_INFINITY;
+    }
 
-    let (x, x0, x1) = if query_freq > 0.0 && f0 > 0.0 && f1 > 0.0 {
-        (query_freq.log10(), f0.log10(), f1.log10())
+    let (left_weight, right_weight, width) = if f0 > 0.0 {
+        fn log_ratio(upper: Value, lower: Value) -> Value {
+            let relative = (upper - lower) / lower;
+            if relative.is_finite() {
+                relative.ln_1p()
+            } else {
+                upper.ln() - lower.ln()
+            }
+        }
+        // Separate distances preserve close positive frequencies and both
+        // endpoint weights; subtracting rounded logarithms can collapse them.
+        let left = log_ratio(f1, query_freq);
+        let right = log_ratio(query_freq, f0);
+        (left, right, left + right)
     } else {
-        (query_freq, f0, f1)
+        (f1 - query_freq, query_freq - f0, f1 - f0)
     };
-
-    if (x1 - x0).abs() < 1e-18 {
-        return y0;
-    }
-
-    let t = (x - x0) / (x1 - x0);
-    y0 + t * (y1 - y0)
+    let left = crate::numerics::scaled_exp_product(&[y0, left_weight], &[width], 0.0);
+    let right = crate::numerics::scaled_exp_product(&[y1, right_weight], &[width], 0.0);
+    // A convex combination cannot leave its endpoints, even if rounding an
+    // extreme finite endpoint sum overflows by an ulp.
+    (left + right).clamp(y0.min(y1), y0.max(y1))
 }
 
 /// Complete phase noise analysis result
@@ -94,9 +112,12 @@ impl PnoiseResult {
         self.jitter_bandwidth = Some(bw);
     }
 
-    /// Get phase noise at specific offset frequency (interpolated)
+    /// Interpolate dB noise against log frequency, using linear frequency for
+    /// a segment starting at zero. Queries outside the sampled range clamp to
+    /// its nearest endpoint. Invalid frequencies/densities return `None`;
+    /// negative infinity is accepted as exactly noiseless. Samples may be unordered.
     pub fn phase_noise_at(&self, offset_freq: Value) -> Option<Value> {
-        if self.spectral_points.is_empty() || !offset_freq.is_finite() {
+        if self.spectral_points.is_empty() || !offset_freq.is_finite() || offset_freq < 0.0 {
             return None;
         }
 
@@ -105,6 +126,12 @@ impl PnoiseResult {
         let mut above: Option<&PhaseNoisePoint> = None;
 
         for point in &self.spectral_points {
+            if !point.offset_freq.is_finite()
+                || point.offset_freq < 0.0
+                || (!point.pn_dbc_hz.is_finite() && point.pn_dbc_hz != Value::NEG_INFINITY)
+            {
+                return None;
+            }
             if point.offset_freq <= offset_freq
                 && below
                     .map(|b| point.offset_freq > b.offset_freq)
@@ -122,9 +149,7 @@ impl PnoiseResult {
         }
 
         match (below, above) {
-            (Some(b), Some(a)) if (a.offset_freq - b.offset_freq).abs() < 1e-10 => {
-                Some(b.pn_dbc_hz)
-            }
+            (Some(b), Some(a)) if a.offset_freq == b.offset_freq => Some(b.pn_dbc_hz),
             (Some(b), Some(a)) => Some(interpolate_over_frequency(
                 offset_freq,
                 b.offset_freq,
@@ -201,10 +226,18 @@ impl PhaseNoisePoint {
 
     /// Create with sideband breakdown
     pub fn with_sidebands(offset_freq: Value, upper: Value, lower: Value) -> Self {
-        // Combine sidebands: power adds linearly
-        let upper_linear = 10.0_f64.powf(upper / 10.0);
-        let lower_linear = 10.0_f64.powf(lower / 10.0);
-        let combined = 10.0 * (upper_linear + lower_linear).log10();
+        // Add powers relative to the larger dB value. Neither absolute
+        // linear power needs to fit in f64, and ln_1p retains a weak sideband.
+        let largest = upper.max(lower);
+        let combined = if upper.is_nan() || lower.is_nan() {
+            Value::NAN
+        } else if !largest.is_finite() {
+            largest
+        } else {
+            largest
+                + (10.0 / std::f64::consts::LN_10)
+                    * 10.0_f64.powf((upper.min(lower) - largest) / 10.0).ln_1p()
+        };
 
         Self {
             offset_freq,
@@ -263,6 +296,83 @@ mod tests {
             result.add_point(PhaseNoisePoint::new(frequency, density));
         }
         result
+    }
+
+    #[test]
+    fn spot_noise_interpolation_preserves_frequency_and_density_range() {
+        for (f0, fm, f1) in [
+            (1e-14, 1e-13, 1e-12),
+            (1e-300, 1.0, 1e300),
+            (
+                Value::from_bits(1),
+                Value::from_bits(2),
+                Value::from_bits(4),
+            ),
+        ] {
+            let result = spectrum(&[(f1, -160.0), (f0, -100.0)]);
+            assert!((result.phase_noise_at(fm).unwrap() + 130.0).abs() < 3e-14);
+        }
+        let f0 = 1.0_f64;
+        let fm = Value::from_bits(f0.to_bits() + 1);
+        let f1 = Value::from_bits(f0.to_bits() + 2);
+        assert!(
+            (spectrum(&[(f0, -100.0), (f1, -160.0)])
+                .phase_noise_at(fm)
+                .unwrap()
+                + 130.0)
+                .abs()
+                < 3e-14
+        );
+        let result = spectrum(&[(1.0, Value::MAX), (100.0, -Value::MAX)]);
+        assert_eq!(result.phase_noise_at(10.0), Some(0.0));
+        let result = spectrum(&[(0.0, 0.0), (1e300, 1e300)]);
+        assert_eq!(result.phase_noise_at(1e-300), Some(1e-300));
+    }
+
+    #[test]
+    fn spot_noise_interpolation_handles_zero_power_and_invalid_samples() {
+        let result = spectrum(&[(1.0, Value::NEG_INFINITY), (100.0, Value::NEG_INFINITY)]);
+        assert_eq!(result.phase_noise_at(10.0), Some(Value::NEG_INFINITY));
+        let result = spectrum(&[(1.0, Value::NEG_INFINITY), (100.0, -100.0)]);
+        assert_eq!(result.phase_noise_at(10.0), Some(Value::NEG_INFINITY));
+        assert_eq!(result.phase_noise_at(100.0), Some(-100.0));
+        assert_eq!(result.phase_noise_at(1000.0), Some(-100.0));
+        assert_eq!(result.phase_noise_at(-1.0), None);
+        for invalid in [Value::NAN, Value::INFINITY] {
+            assert_eq!(
+                spectrum(&[(1.0, invalid), (2.0, -100.0)]).phase_noise_at(2.0),
+                None
+            );
+        }
+        assert_eq!(
+            spectrum(&[(-1.0, -100.0), (2.0, -100.0)]).phase_noise_at(2.0),
+            None
+        );
+    }
+
+    #[test]
+    fn sideband_power_sum_preserves_extreme_decibels_and_weak_terms() {
+        for db in [4000.0, -4000.0, 0.0, Value::MAX, -Value::MAX] {
+            let actual = PhaseNoisePoint::with_sidebands(1.0, db, db).pn_dbc_hz;
+            let expected = db + 10.0 * 2.0_f64.log10();
+            assert!((actual - expected).abs() <= 2.0 * Value::EPSILON * expected.abs());
+            assert_eq!(
+                PhaseNoisePoint::with_sidebands(1.0, db, Value::NEG_INFINITY).pn_dbc_hz,
+                db
+            );
+        }
+        let weak = PhaseNoisePoint::with_sidebands(1.0, 0.0, -200.0).pn_dbc_hz;
+        assert!((weak / (1e-20 * 10.0 / std::f64::consts::LN_10) - 1.0).abs() < 2e-15);
+        assert_eq!(
+            PhaseNoisePoint::with_sidebands(1.0, Value::NEG_INFINITY, Value::NEG_INFINITY)
+                .pn_dbc_hz,
+            Value::NEG_INFINITY
+        );
+        assert!(
+            PhaseNoisePoint::with_sidebands(1.0, Value::NAN, 0.0)
+                .pn_dbc_hz
+                .is_nan()
+        );
     }
 
     #[test]

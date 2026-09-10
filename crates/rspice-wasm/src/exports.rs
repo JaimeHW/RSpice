@@ -209,6 +209,19 @@ mod wasm_tests {
     use crate::js_interop::{js_array_property, js_property};
 
     #[wasm_bindgen_test]
+    fn phase_noise_spot_and_sideband_range_in_wasm() {
+        use rspice_core::analysis::pnoise::{PhaseNoisePoint, PnoiseResult};
+        let mut result = PnoiseResult::new(1e6, "out");
+        result.add_point(PhaseNoisePoint::new(1e-14, -100.0));
+        result.add_point(PhaseNoisePoint::new(1e-12, -160.0));
+        assert!((result.phase_noise_at(1e-13).unwrap() + 130.0).abs() < 3e-14);
+        for db in [4000.0, -4000.0] {
+            let combined = PhaseNoisePoint::with_sidebands(1.0, db, db).pn_dbc_hz;
+            assert_eq!(combined, db + 10.0 * 2.0_f64.log10());
+        }
+    }
+
+    #[wasm_bindgen_test]
     fn integrated_phase_noise_clipping_and_range_in_wasm() {
         use rspice_core::analysis::pnoise::{PhaseNoisePoint, PnoiseResult};
         let mut result = PnoiseResult::new(1e6, "out");
