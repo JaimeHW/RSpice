@@ -1166,8 +1166,12 @@ pub struct NonlinearDeviceParams {
     /// Channel length modulation (MOSFET)
     pub lambda: Value,
     /// Channel thermal-noise coefficient gamma. The white drain-source
-    /// density is `4*k*T*gamma*|gm|`; Level-1 MOS and JFET defaults use 2/3.
+    /// density uses `4*k*T*gamma*|gm|` unless channel_noise_gdsnoi selects
+    /// the MOS NLEV=3 law. MOS/JFET defaults use gamma=2/3.
     pub channel_noise_gamma: Value,
+    /// Some(GDSNOI) selects the MOS1 NLEV=3 inversion-charge noise law;
+    /// None retains the transconductance law. Some(0) disables that source.
+    pub channel_noise_gdsnoi: Option<Value>,
     /// Body-effect coefficient gamma (MOSFET, V^0.5)
     pub gamma: Value,
     /// Surface potential phi (MOSFET, V)
@@ -1204,6 +1208,7 @@ impl Default for NonlinearDeviceParams {
             kp: 2e-5,
             lambda: 0.0,
             channel_noise_gamma: 2.0 / 3.0,
+            channel_noise_gdsnoi: None,
             gamma: 0.0,
             phi: 0.6,
             ron: 1.0,

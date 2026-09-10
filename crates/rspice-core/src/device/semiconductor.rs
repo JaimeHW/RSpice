@@ -1,6 +1,6 @@
 //! Semiconductor device models and shared junction equations.
 //!
-//! Includes diodes and bipolar junction transistors (BJTs).
+//! Includes diode/BJT models and equations shared by native and periodic solvers.
 
 mod bjt;
 mod diode;
@@ -21,6 +21,69 @@ pub(crate) use diode::{
     ResolvedDiodeJunction,
 };
 pub use diode::{Diode, DiodeLevel};
+
+/// MOS1 body-effect threshold and -dVth/dVbs in the effective polarity
+/// frame. Forward body bias uses the same linear continuation as mos1load.c.
+/// Its derivative follows that continuation (the reference's 1/(2*sarg)
+/// approximation is not the derivative of its forward-bias threshold).
+#[inline]
+pub(crate) fn mos1_threshold(
+    vto: crate::Value,
+    gamma: crate::Value,
+    phi: crate::Value,
+    sqrt_phi: crate::Value,
+    vbs: crate::Value,
+) -> (crate::Value, crate::Value) {
+    // A disabled body effect must not evaluate an irrelevant barrier whose
+    // intermediate phi-Vbs can overflow for finite terminal voltages.
+    if gamma == 0.0 {
+        return (vto, 0.0);
+    }
+    let sarg = if vbs == 0.0 {
+        sqrt_phi
+    } else if vbs < 0.0 {
+        (phi - vbs).max(0.0).sqrt()
+    } else {
+        (sqrt_phi - vbs / (sqrt_phi + sqrt_phi)).max(0.0)
+    };
+    let slope = if sarg <= 0.0 {
+        0.0
+    } else if vbs > 0.0 {
+        gamma / (sqrt_phi + sqrt_phi)
+    } else {
+        gamma / (sarg + sarg)
+    };
+    (vto + gamma * (sarg - sqrt_phi), slope)
+}
+
+/// Dimensionless NLEV=3 channel-noise shape, to be multiplied by
+/// gamma_noise * GDSNOI * beta * overdrive. Keep the factors separate so a
+/// small model coefficient can compensate a large geometry or bias factor.
+pub(crate) fn mos_nlev3_noise_shape(
+    overdrive: crate::Value,
+    vds: crate::Value,
+    vdsat: crate::Value,
+) -> Result<crate::Value, &'static str> {
+    if !overdrive.is_finite() || !vds.is_finite() || vds < 0.0 || !vdsat.is_finite() {
+        return Err("MOS NLEV=3 channel-noise bias must be finite with nonnegative active VDS");
+    }
+    if overdrive <= 0.0 {
+        return Ok(0.0);
+    }
+    if overdrive <= vds {
+        return Ok(1.0);
+    }
+    if vdsat <= 0.0 {
+        return Err("MOS NLEV=3 channel noise requires positive saturation voltage in triode");
+    }
+    let alpha = 1.0 - vds / vdsat;
+    // (1+alpha+alpha^2)/(1+alpha), without squaring a large alpha.
+    let shape = alpha + 1.0 / (1.0 + alpha);
+    if !shape.is_finite() || shape < 0.0 {
+        return Err("MOS NLEV=3 channel-noise shape is not finite and nonnegative");
+    }
+    Ok(shape)
+}
 
 /// Graded-junction depletion charge and its voltage derivative. The forward
 /// continuation is anchored at the knee so both quantities remain continuous.

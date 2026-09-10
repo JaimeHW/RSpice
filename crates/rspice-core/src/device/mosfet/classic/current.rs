@@ -156,12 +156,13 @@ impl Mosfet {
         (id, region)
     }
 
-    /// Source-matched ngspice MOS1 operating point.
+    /// Ngspice MOS1 channel law with a consistent analytic Jacobian.
     ///
     /// The Level-1 path follows the Shichman-Hodges block in
     /// `mos1load.c`: polarity folding, explicit normal/inverse mode
     /// selection, body-effect onset voltage, and the original analytic
     /// derivatives transformed back to the instance terminal orientation.
+    /// The forward-body continuation uses its exact threshold derivative.
     pub(in crate::device::mosfet::classic) fn level1_operating_point(
         &self,
         vgs: Value,
@@ -200,26 +201,18 @@ impl Mosfet {
         let vbsvbd = if mode > 0.0 { vbs_m } else { vbd_m };
         let vg_active = if mode > 0.0 { vgs_m } else { vgd_m };
 
-        let phi = self.phi;
-        let sarg = if vbsvbd == 0.0 {
-            sqrt_phi
-        } else if vbsvbd < 0.0 {
-            (phi - vbsvbd).max(0.0).sqrt()
-        } else {
-            (sqrt_phi - vbsvbd / (sqrt_phi + sqrt_phi)).max(0.0)
-        };
-
-        let von = p * self.vto + self.gamma * (sarg - sqrt_phi);
+        let (von, arg) = crate::device::semiconductor::mos1_threshold(
+            p * self.vto,
+            self.gamma,
+            self.phi,
+            sqrt_phi,
+            vbsvbd,
+        );
         let vgst = vg_active - von;
         if !vgst.is_finite() || vgst <= 0.0 {
             return (0.0, MosRegion::Cutoff, 0.0, 0.0, 0.0, 0.0);
         }
 
-        let arg = if sarg <= 0.0 {
-            0.0
-        } else {
-            self.gamma / (sarg + sarg)
-        };
         let betap = beta * (1.0 + self.lambda * vdshere);
 
         let (cdrain, region, gm_model, gds_model, gmb_model) = if vgst <= vdshere {
@@ -547,6 +540,55 @@ impl Mosfet {
 mod tests {
     use super::*;
     use std::collections::HashMap;
+
+    #[test]
+    fn mos1_forward_body_current_derivatives_follow_the_continued_threshold() {
+        for p in [1.0, -1.0] {
+            let mut mos = if p > 0.0 {
+                Mosfet::new_nmos("M1".into(), 1, 2, 0, 3)
+            } else {
+                Mosfet::new_pmos("M1".into(), 1, 2, 0, 3)
+            };
+            mos.vto = p;
+            mos.gamma = 0.4;
+            mos.phi = 0.6;
+            mos.kp = 1e-3;
+            mos.lambda = 0.1;
+            for inverse in [false, true] {
+                for active_vbs in [-0.5, 0.2, 1.1, 1.3] {
+                    for vd in [0.1, 2.0] {
+                        let (vgs, vds, vbs) = if inverse {
+                            (p * (1.4 - vd), -p * vd, p * (active_vbs - vd))
+                        } else {
+                            (p * 1.4, p * vd, p * active_vbs)
+                        };
+                        let (_, _, gm, gds, gmb, _) = mos.level1_operating_point(vgs, vds, vbs);
+                        for (axis, expected) in [(0, gm), (1, gds), (2, gmb)] {
+                            let mut hi = [vgs, vds, vbs];
+                            let mut lo = hi;
+                            hi[axis] += 1e-6;
+                            lo[axis] -= 1e-6;
+                            let actual = (mos.level1_operating_point(hi[0], hi[1], hi[2]).0
+                                - mos.level1_operating_point(lo[0], lo[1], lo[2]).0)
+                                / 2e-6;
+                            assert!(
+                                (actual - expected).abs() < 1e-9 * expected.abs().max(1e-3),
+                                "p={p} inverse={inverse} Vbs={active_vbs} Vds={vd} axis={axis}: {actual:e} vs {expected:e}"
+                            );
+                        }
+                    }
+                }
+            }
+            mos.gamma = 0.0;
+            mos.phi = Value::MAX;
+            let expected = mos.level1_operating_point(p * 1.4, p * 2.0, 0.0);
+            let actual = mos.level1_operating_point(p * 1.4, p * 2.0, -p * Value::MAX);
+            assert_eq!(
+                actual, expected,
+                "disabled body effect must ignore its terminal bias"
+            );
+        }
+    }
 
     fn simplified_nmos() -> Mosfet {
         let mut params = HashMap::new();

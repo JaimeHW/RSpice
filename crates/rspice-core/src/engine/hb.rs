@@ -47,7 +47,7 @@ pub use pnoise::PnoiseAnalysisResult;
 pub use psp::{PreparedPsp, PspAnalysisResult};
 pub use state::{HbEnvelopeContinuationState, HbEnvelopeStateGuarantee};
 
-const HB_OPERATING_POINT_IDENTITY_VERSION: u32 = 16;
+const HB_OPERATING_POINT_IDENTITY_VERSION: u32 = 17;
 
 fn hb_identity_field(hasher: &mut blake3::Hasher, name: &str, bytes: &[u8]) {
     hasher.update(&(name.len() as u64).to_le_bytes());
@@ -1476,7 +1476,7 @@ impl Engine {
         self.hb_stamp_periodic_mna_branches(&circuit, &mut solver)?;
         self.hb_stamp_current_sources(&circuit, &mut solver, &config, &drive_tones)?;
         if has_supported_nonlinear {
-            self.hb_stamp_supported_nonlinear_devices(&circuit, &mut solver, num_nodes);
+            self.hb_stamp_supported_nonlinear_devices(&circuit, &mut solver, num_nodes)?;
         }
         let periodic_branch_names = solver.try_periodic_mna_branch_names().map_err(|error| {
             SimulationError::Circuit(format!(

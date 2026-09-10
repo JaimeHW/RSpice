@@ -2864,11 +2864,11 @@ impl Engine {
         // `m1:thermal`, which no `DNO(M1)` can resolve and which no
         // whole-device sum can reach.
         for mos in &circuit.mosfets.devices {
-            let gm = mos.transconductance();
-            let gamma = mos.channel_thermal_noise_gamma();
-            if gm != 0.0 && gamma != 0.0 {
+            let conductance = mos.channel_noise_conductance(dialect).map_err(|reason| {
+                SimulationError::Circuit(format!("Noise source '{}:ID': {reason}", mos.name))
+            })?;
+            if conductance != 0.0 {
                 let label = format!("{}:ID", mos.name);
-                let conductance = Self::checked_noise_product(&label, gamma, gm)?;
                 let resistance = Self::noise_resistance_from_conductance(&label, conductance)?
                     .ok_or_else(|| {
                         SimulationError::Circuit(format!(
@@ -7137,6 +7137,54 @@ R2 OUT 0 1k
                         "L{level} {kind} VDS={vds} thermal: {actual:e} vs {expected:e}"
                     );
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn mos_nlev3_channel_noise_matches_independent_ngspice_reference() {
+        // ngspice-46 intrinsic drain-noise density divided by 4*kB*T.
+        // A unit-gain CCVS observes current through the clamped drain source.
+        let references = [
+            (1, 1.4, 0.0, 0.0, 0.0010000000000000005),
+            (1, 1.4, 0.1, 0.0, 0.0008809523809523815),
+            (1, 1.4, 2.0, 0.0, 0.000666666666666667),
+            (1, 1.4, 0.1, 0.2, 0.0010092865141025549),
+            (1, 1.4, 0.1, -0.5, 0.0006094569936987759),
+            (1, 1.2, -0.2, -0.2, 0.0007777777777777783),
+            (2, 1.4, 0.0, 0.0, 0.0009929314165294236),
+            (2, 1.4, 0.1, 0.0, 0.0008300142534355684),
+            (2, 1.4, 2.0, 0.0, 0.000661954277686282),
+            (2, 1.4, 0.1, 0.2, 0.0009359458690425503),
+            (2, 1.4, 0.1, -0.5, 0.0005660329944891453),
+            (2, 1.2, -0.2, -0.2, 0.0007059349196179217),
+            (3, 1.4, 0.0, 0.0, 0.0009865360314846151),
+            (3, 1.4, 0.1, 0.0, 0.0008386600588941182),
+            (3, 1.4, 2.0, 0.0, 0.0006576906876564103),
+            (3, 1.4, 0.1, 0.2, 0.000947672581782392),
+            (3, 1.4, 0.1, -0.5, 0.0005654887205203613),
+            (3, 1.2, -0.2, -0.2, 0.0007202905401095076),
+        ];
+        for (level, vg, vd, vb, expected) in references {
+            for (kind, p) in [("NMOS", 1.0), ("PMOS", -1.0)] {
+                let extra = match level {
+                    1 => "",
+                    2 => "VMAX=1e5 DELTA=0.2",
+                    _ => "VMAX=1e5 DELTA=0.2 THETA=0.1 KAPPA=0.2 WD=0.1u XL=0.2u XW=0.3u",
+                };
+                let sources = collected_noise_sources_for_deck(&format!(
+                    "NLEV3 reference\nVD d 0 {}\nVG g 0 {}\nVB b 0 {}\nM1 d g 0 b mm W=2u L=1u M=5\n.model mm {kind}(LEVEL={level} VTO={p} KP=100u TOX=20n GAMMA=0.4 PHI=0.6 LAMBDA=0.1 LD=0.1u IS=0 NLEV=3 GDSNOI=2 {extra})\n.options GMIN=0 RELTOL=1e-9 ABSTOL=1e-14 VNTOL=1e-11\n.end\n",
+                    p * vd,
+                    p * vg,
+                    p * vb
+                ));
+                let source = mechanism(&sources, "M1", "ID").unwrap();
+                let actual = source.spectral_density(1000.0, 300.15)
+                    / (4.0 * crate::constants::K_BOLTZMANN * 300.15);
+                assert!(
+                    (actual - expected).abs() < expected * 5e-8,
+                    "L{level} {kind} Vg={vg} Vd={vd} Vb={vb}: {actual:e} vs {expected:e}"
+                );
             }
         }
     }

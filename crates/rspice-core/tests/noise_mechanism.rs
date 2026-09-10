@@ -375,3 +375,106 @@ fn extreme_mos_flicker_power_reaches_output_and_port_analyses() {
         }
     }
 }
+
+#[test]
+fn mos1_nlev3_channel_noise_matches_charge_in_triode_and_saturation() {
+    use rspice_core::analysis::noise::NoisePhysicalConstants;
+    use rspice_core::engine::SpiceDialect;
+    for dialect in [
+        SpiceDialect::BestAvailable,
+        SpiceDialect::Ngspice,
+        SpiceDialect::Xyce,
+    ] {
+        let mut config = SimulationConfig::default().with_spice_dialect(dialect);
+        config.convergence_config.gmin_target = 0.0;
+        config.convergence_config.junction_gmin_target = 0.0;
+        let engine = Engine::new(config);
+        let kb = if dialect == SpiceDialect::Xyce {
+            NoisePhysicalConstants::XYCE_7_10.boltzmann
+        } else {
+            NoisePhysicalConstants::MODERN.boltzmann
+        };
+        for (kind, p) in [("NMOS", 1.0), ("PMOS", -1.0)] {
+            for inverse in [false, true] {
+                for body in [-0.5_f64, 0.0, 0.2] {
+                    for vds in [0.0_f64, 0.1, 0.4, 2.0] {
+                        for nlev in [2, 3] {
+                            for gdsnoi in [0.0, 1.0, 10.0] {
+                                let netlist = Netlist::parse(&format!(
+                                    "MOS channel charge noise\nVD d 0 {}\nVS s 0 {}\nVG g 0 {}\nVB b 0 {}\nM1 d g s b mm W=2u L=1u M=2.5 NF=2\n.model mm {kind}(LEVEL=1 VTO={p} KP=100u LD=0.1u GAMMA=0.4 PHI=0.6 LAMBDA=0.1 IS=0 NLEV={nlev} GDSNOI={gdsnoi})\n.options GMIN=0\n.end\n",
+                                    if inverse {0.0} else {p*vds},if inverse {p*vds} else {0.0},p*1.4,p*body)).unwrap();
+                                let value = engine
+                                    .run_port_noise_correlation(
+                                        &netlist,
+                                        &["VD".into()],
+                                        &[1000.0],
+                                        300.15,
+                                    )
+                                    .unwrap()[0]
+                                    .current_correlation[0][0]
+                                    .re;
+                                let sqrt_phi = 0.6_f64.sqrt();
+                                let vth = if body > 0.0 {
+                                    1.0 - 0.4 * body / (2.0 * sqrt_phi)
+                                } else {
+                                    1.0 + 0.4 * ((0.6 - body).sqrt() - sqrt_phi)
+                                };
+                                let overdrive = 1.4 - vth;
+                                let beta = 100e-6 * 2e-6 / 0.8e-6 * 5.0;
+                                let conductance = if nlev == 3 && dialect != SpiceDialect::Xyce {
+                                    let alpha = if vds >= overdrive {
+                                        0.0
+                                    } else {
+                                        1.0 - vds / overdrive
+                                    };
+                                    (2.0 / 3.0)
+                                        * gdsnoi
+                                        * beta
+                                        * overdrive
+                                        * (1.0 + alpha + alpha * alpha)
+                                        / (1.0 + alpha)
+                                } else {
+                                    (2.0 / 3.0) * beta * vds.min(overdrive) * (1.0 + 0.1 * vds)
+                                };
+                                let expected = 4.0 * kb * 300.15 * conductance;
+                                assert!(
+                                    (value - expected).abs() <= expected * 2e-10,
+                                    "{dialect:?} {kind} inverse={inverse} body={body} Vds={vds} NLEV={nlev} GDSNOI={gdsnoi}: {value:e} vs {expected:e}"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn invalid_mos_channel_noise_controls_fail_in_stationary_and_periodic_analyses() {
+    for control in [
+        "NLEV=3 GDSNOI=-1",
+        "NLEV=3 TNOIA=-1",
+        "NLEV=3 GAMMA_NOISE=-1",
+        "NLEV=0.5",
+    ] {
+        let netlist=Netlist::parse(&format!(
+            "Invalid MOS noise control\nVG g 0 1.4\nVD d 0 2\nM1 d g 0 0 mm\n.model mm NMOS(VTO=1 KP=100u IS=0 {control})\n.end\n")).unwrap();
+        let engine = Engine::default();
+        let errors = [
+            engine
+                .run_port_noise_correlation(&netlist, &["VD".into()], &[1000.0], 300.15)
+                .unwrap_err(),
+            engine
+                .run_pnoise(&netlist, 1e6, &[1e4], "d", None, None, 0)
+                .unwrap_err(),
+        ];
+        for error in errors {
+            let message = error.to_string();
+            assert!(
+                message.contains("M1:ID") && message.contains("MOS"),
+                "{control}: {message}"
+            );
+        }
+    }
+}

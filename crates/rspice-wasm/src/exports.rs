@@ -360,6 +360,33 @@ mod wasm_tests {
     }
 
     #[wasm_bindgen_test]
+    fn mos_nlev3_channel_noise_at_zero_vds_in_wasm() {
+        let mut config = rspice_core::engine::SimulationConfig::default();
+        config.convergence_config.gmin_target = 0.0;
+        config.convergence_config.junction_gmin_target = 0.0;
+        let engine = rspice_core::Engine::new(config);
+        for (kind, p) in [("NMOS", 1.0), ("PMOS", -1.0)] {
+            let deck=rspice_core::Netlist::parse(&format!(
+                "MOS inversion charge noise\nVG g 0 {}\nRL out 0 1k\nM1 out g 0 0 mm W=2u L=1u M=5\n.model mm {kind}(LEVEL=1 VTO={p} KP=100u IS=0 NLEV=3 GDSNOI=3)\n.options GMIN=0\n.end\n",p*1.4)).unwrap();
+            let result = engine
+                .run_pnoise_with_abort(
+                    &deck,
+                    1e6,
+                    &[1e4],
+                    "out",
+                    None,
+                    None,
+                    0,
+                    &rspice_core::abort_signal::NoAbort,
+                )
+                .unwrap();
+            let expected =
+                4.0 * 1.380649e-23 * 300.15 * (1e-3 + 3.0 * 0.4e-3) / (1.4e-3_f64).powi(2);
+            assert!((result.output_noise[0] - expected).abs() < expected * 2e-10);
+        }
+    }
+
+    #[wasm_bindgen_test]
     fn extreme_flicker_density_and_mos_port_noise_in_wasm() {
         use rspice_core::analysis::NoiseSource;
         for (kf, current, af, frequency, ef, expected) in [

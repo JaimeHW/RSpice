@@ -776,3 +776,52 @@ c1 mid 0 1n
         );
     }
 }
+
+#[test]
+fn mos_nlev3_periodic_noise_follows_modulated_inversion_charge_at_zero_vds() {
+    let mut config = SimulationConfig::default();
+    config.convergence_config.gmin_target = 0.0;
+    config.convergence_config.junction_gmin_target = 0.0;
+    let engine = Engine::new(config);
+    for (kind, p) in [("NMOS", 1.0), ("PMOS", -1.0)] {
+        for amplitude in [0.0, 0.1, 0.25] {
+            for gdsnoi in [0.0, 1.0, 3.0] {
+                // With TOX/overlap/junction charge absent, VDS stays exactly
+                // zero and the output is a resistor in parallel with g(t).
+                let deck=Netlist::parse(&format!(
+                    "Modulated NLEV3 noise\nVG g 0 SIN({} {} 1meg)\nRL out 0 1k\nM1 out g 0 0 mm W=2u L=1u M=5\n.model mm {kind}(LEVEL=1 VTO={p} KP=100u IS=0 NLEV=3 GDSNOI={gdsnoi})\n.options GMIN=0\n.end\n",p*1.4,p*amplitude)).unwrap();
+                let result = engine
+                    .run_pnoise(&deck, 1e6, &[1e4], "out", None, None, 8)
+                    .unwrap();
+                let beta = 1e-3_f64;
+                let a = 1e-3 + beta * 0.4;
+                let b = beta * amplitude;
+                let d = (a * a - b * b).sqrt();
+                // Exact averages: <1/(a+b*sin)>=1/d and
+                // <1/(a+b*sin)^2>=a/d^3. MOS Sid(t)=4kT*g(t)*GDSNOI.
+                let resistor = 1e-3 * a / (d * d * d);
+                let channel = 1.0 / d - resistor;
+                let expected = 4.0 * K_B * T_REF * (resistor + gdsnoi * channel);
+                assert!(
+                    (result.output_noise[0] - expected).abs() < expected * 2e-7,
+                    "{kind} amplitude={amplitude} GDSNOI={gdsnoi}: {:e} vs {expected:e}",
+                    result.output_noise[0]
+                );
+                if amplitude == 0.0 {
+                    let dc = engine.run_dc_op(&deck).unwrap();
+                    let out = dc
+                        .node_names
+                        .iter()
+                        .position(|n| n.eq_ignore_ascii_case("out"))
+                        .unwrap();
+                    let stationary = engine
+                        .run_noise_ports(&deck, out, None, &[1e4], T_REF)
+                        .unwrap();
+                    assert!(
+                        (stationary[0].output_noise_density - expected).abs() < expected * 2e-10
+                    );
+                }
+            }
+        }
+    }
+}
