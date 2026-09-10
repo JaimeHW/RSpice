@@ -657,6 +657,7 @@ fn commit_governed_page_setup_candidate(
             after,
             before_schematics: schematic_tx.before,
             after_schematics: schematic_tx.after,
+            references: schematic_tx.references,
             committed_revision,
         });
     app.state.ui.preferences = personal_candidate;
@@ -1054,6 +1055,7 @@ fn apply_legacy_sheet_setup(
             after,
             before_schematics: schematic_tx.before,
             after_schematics: schematic_tx.after,
+            references: schematic_tx.references,
             committed_revision,
         });
     app.state.ui.preferences = personal_candidate;

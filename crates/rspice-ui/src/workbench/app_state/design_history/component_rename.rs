@@ -1,12 +1,9 @@
 //! One publication boundary for a component name and the live references
 //! carried with it. History owns exact affected content, never retained runs.
 
+use super::references::PreparedReferences;
 use super::*;
-use crate::product::{SavedOutputId, SimulationPlanId};
-use crate::state::{
-    Component, ConfigurationSetCatalog, ConfigurationSetDefinition, ConfigurationSetId,
-    SavedOutput, remap_instance_probes,
-};
+use crate::state::{Component, remap_instance_probes};
 use crate::workbench::state::InlineEditAuthority;
 
 #[derive(Debug, Clone)]
@@ -15,29 +12,7 @@ pub(super) struct ComponentRenameRecord {
     document: CellViewRef,
     before: SchematicSnapshot,
     after: SchematicSnapshot,
-    configurations: Vec<ConfigurationChange>,
-    outputs: Vec<OutputChange>,
-}
-
-#[derive(Debug, Clone)]
-struct ConfigurationChange {
-    id: ConfigurationSetId,
-    before: ConfigurationSetDefinition,
-    after: ConfigurationSetDefinition,
-}
-
-#[derive(Debug, Clone)]
-struct OutputChange {
-    plan: SimulationPlanId,
-    id: SavedOutputId,
-    before: String,
-    after: String,
-}
-
-/// Fallible work is completed before either the schematic or metadata moves.
-struct PreparedReferences {
-    configurations: ConfigurationSetCatalog,
-    outputs: Vec<(SimulationPlanId, SavedOutput)>,
+    references: ReferenceChanges,
 }
 
 impl AppState {
@@ -160,18 +135,6 @@ impl AppState {
         configurations
             .remap_instance_paths_in_root(&root, &from, &to)
             .map_err(|error| error.to_string())?;
-        let configurations = configurations
-            .configurations()
-            .iter()
-            .filter_map(|after| {
-                let before = self.workspace.configuration_sets.find(after.id())?;
-                (before.definition() != after.definition()).then(|| ConfigurationChange {
-                    id: after.id(),
-                    before: before.definition().clone(),
-                    after: after.definition().clone(),
-                })
-            })
-            .collect();
         let mut outputs = Vec::new();
         if root
             .key()
@@ -182,12 +145,9 @@ impl AppState {
                     if let Some(after) =
                         remap_instance_probes(&output.source_expression, &probe_from, &to)?
                     {
-                        outputs.push(OutputChange {
-                            plan: record.plan_id,
-                            id: output.id,
-                            before: output.source_expression.clone(),
-                            after,
-                        });
+                        let mut replacement = output.clone();
+                        replacement.source_expression = after;
+                        outputs.push((record.plan_id, replacement));
                     }
                 }
             }
@@ -203,13 +163,14 @@ impl AppState {
                 probe.validate()?;
             }
         }
+        let mut references = ReferenceChanges::between(self, &configurations, outputs);
+        references.add_instance_renames(&document, &before.components, &after.components);
         let record = ComponentRenameRecord {
             description: description.to_owned(),
             document: document.clone(),
             before,
             after,
-            configurations,
-            outputs,
+            references,
         };
         let prepared = record.prepare(self, true)?;
         record.publish(self, true, prepared);
@@ -239,40 +200,7 @@ impl ComponentRenameRecord {
         let expected = if forward { &self.before } else { &self.after };
         schematic_for_reference(state, &self.document)
             .is_some_and(|schematic| expected.is_equal_state(schematic))
-            && self.configurations.iter().all(|change| {
-                state
-                    .workspace
-                    .configuration_sets
-                    .find(change.id)
-                    .is_some_and(|current| {
-                        current.definition()
-                            == if forward {
-                                &change.before
-                            } else {
-                                &change.after
-                            }
-                    })
-            })
-            && self.outputs.iter().all(|change| {
-                state
-                    .workspace
-                    .plan_data(change.plan)
-                    .and_then(|payload| {
-                        payload
-                            .saved_outputs
-                            .iter()
-                            .find(|output| output.id == change.id)
-                    })
-                    .is_some_and(|output| {
-                        output.source_expression
-                            == if forward {
-                                &change.before
-                            } else {
-                                &change.after
-                            }
-                            .as_str()
-                    })
-            })
+            && self.references.matches(state, forward)
     }
 
     pub(super) fn validate_mutation(
@@ -302,50 +230,7 @@ impl ComponentRenameRecord {
                 "Finish or cancel the active schematic gesture before renaming.".to_owned(),
             );
         }
-        let mut configurations = state.workspace.configuration_sets.clone();
-        for change in &self.configurations {
-            let revision = configurations
-                .find(change.id)
-                .expect("guarded configuration")
-                .revision();
-            configurations
-                .update(
-                    change.id,
-                    revision,
-                    if forward {
-                        &change.after
-                    } else {
-                        &change.before
-                    }
-                    .clone(),
-                )
-                .map_err(|error| error.to_string())?;
-        }
-        let mut outputs = Vec::with_capacity(self.outputs.len());
-        for change in &self.outputs {
-            let mut output = state
-                .workspace
-                .plan_data(change.plan)
-                .expect("guarded plan")
-                .saved_outputs
-                .iter()
-                .find(|output| output.id == change.id)
-                .expect("guarded output")
-                .clone();
-            output.source_expression = if forward {
-                &change.after
-            } else {
-                &change.before
-            }
-            .clone();
-            output.revision = output.revision.next().map_err(|error| error.to_string())?;
-            output.validate()?;
-            outputs.push((change.plan, output));
-        }
-        Ok(PreparedReferences {
-            configurations,
-            outputs,
-        })
+        self.references.prepare(state, forward)
     }
 
     fn publish(&self, state: &mut AppState, forward: bool, prepared: PreparedReferences) {
@@ -365,19 +250,7 @@ impl ComponentRenameRecord {
         if state.workspace.active_schematic_reference() == self.document {
             state.workspace.save_active_schematic(&state.schematic);
         }
-        state.workspace.configuration_sets = prepared.configurations;
-        for (plan, replacement) in prepared.outputs {
-            let target = state
-                .workspace
-                .plan_data_mut(plan)
-                .expect("guarded plan")
-                .saved_outputs
-                .iter_mut()
-                .find(|output| output.id == replacement.id)
-                .expect("guarded output");
-            *target = replacement;
-        }
-        state.workspace.project_metadata_dirty = true;
+        prepared.publish(state);
         state.design_execution_epoch = state.design_execution_epoch.wrapping_add(1);
         state.ui.netlist.current_generation_input_digest = None;
     }

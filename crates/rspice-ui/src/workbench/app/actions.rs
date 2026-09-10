@@ -1209,6 +1209,7 @@ mod shortcut_ownership_tests {
             after,
             before_schematics: std::collections::BTreeMap::new(),
             after_schematics: std::collections::BTreeMap::new(),
+            references: Default::default(),
             committed_revision,
         });
         owner

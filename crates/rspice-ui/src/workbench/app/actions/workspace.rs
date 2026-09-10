@@ -825,6 +825,7 @@ impl AppState {
             after,
             before_schematics: BTreeMap::from([(active.key(), before_schematic)]),
             after_schematics: BTreeMap::from([(active.key(), self.schematic.clone())]),
+            references: Default::default(),
             committed_revision,
         });
         let subject = if removed_ports == 1 {

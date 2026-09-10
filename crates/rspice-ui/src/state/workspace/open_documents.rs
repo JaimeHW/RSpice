@@ -1299,6 +1299,27 @@ impl ProjectWorkspace {
             .collect();
     }
 
+    /// Publish prepared instance-name changes while retaining each tab's
+    /// chosen root and master. Breadcrumbs derive from the resulting records.
+    pub(crate) fn replace_document_occurrences(
+        &mut self,
+        occurrences: Vec<(CellViewRef, DocumentOccurrence)>,
+    ) {
+        if occurrences.is_empty() {
+            return;
+        }
+        for (reference, occurrence) in occurrences {
+            if let Some(open) = self
+                .open_views
+                .iter_mut()
+                .find(|open| open.reference == reference)
+            {
+                open.occurrence = occurrence;
+            }
+        }
+        self.project_active_occurrence();
+    }
+
     /// Display labels for the active occurrence: the root cell, then the
     /// instance descended through at each level.
     pub fn occurrence_labels(&self) -> Vec<String> {

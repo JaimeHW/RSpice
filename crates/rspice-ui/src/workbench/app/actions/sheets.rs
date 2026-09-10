@@ -568,6 +568,7 @@ fn commit(
         after,
         before_schematics: schematic_tx.before,
         after_schematics: schematic_tx.after,
+        references: schematic_tx.references,
         committed_revision,
     });
     Ok(())

@@ -600,6 +600,7 @@ fn state_with_design_management_record()
         after: after.clone(),
         before_schematics: BTreeMap::new(),
         after_schematics: BTreeMap::new(),
+        references: Default::default(),
         committed_revision,
     });
     (state, before, after)
@@ -668,99 +669,6 @@ fn design_management_history_refuses_read_only_project_without_mutation() {
         &state.workspace.design_management,
         &after
     ));
-}
-
-#[test]
-fn annotation_publish_and_history_update_the_scoped_schematic_atomically() {
-    use crate::state::{
-        AnnotationObject, AnnotationPosition, ProtectedReferencePolicy, RenumberOrder,
-        RenumberRequest, RenumberScope, SchematicObjectKey,
-    };
-
-    let mut state = AppState::default();
-    state.project_lifecycle.project_open = true;
-    let owner = state.workspace.active_schematic_reference();
-    let object_id = state
-        .schematic
-        .add_component(ComponentType::Resistor, Point::origin());
-    state
-        .schematic
-        .components
-        .iter_mut()
-        .find(|component| component.id == object_id)
-        .expect("component")
-        .name = "R42".to_owned();
-    state.sync_active_schematic_to_workspace();
-
-    let before_catalog = state.workspace.design_management.clone();
-    let mut draft = before_catalog.clone();
-    let request = RenumberRequest {
-        scope: RenumberScope::WholeProject,
-        order: RenumberOrder::HierarchyThenCoordinates,
-        protected_references: ProtectedReferencePolicy::RetainLockedAndExternalIds,
-        protected_reviewed: false,
-        objects: vec![AnnotationObject {
-            object: SchematicObjectKey::new(&owner.key(), object_id).expect("scoped object"),
-            current_reference: "R42".to_owned(),
-            device_family: "R".to_owned(),
-            sheet_id: None,
-            hierarchy_path: "/top".to_owned(),
-            position: AnnotationPosition { x: 0, y: 0 },
-            connectivity_order: Some(1),
-            locked: false,
-            external: false,
-            imported: false,
-        }],
-    };
-    let preview = draft
-        .annotation()
-        .preview_renumbering(&request)
-        .expect("preview");
-    let expected_reference = preview
-        .mappings
-        .values()
-        .next()
-        .expect("annotation mapping")
-        .new_reference
-        .clone();
-    draft
-        .annotation_mut()
-        .commit_renumbering(&preview, &request)
-        .expect("journal commit");
-    let schematic_tx = state
-        .prepare_design_management_schematic_transaction(&draft)
-        .expect("preflight schematic annotation");
-    let committed_revision = state
-        .workspace
-        .replace_design_management(draft)
-        .expect("publish catalog");
-    state.apply_design_management_schematic_transaction(&schematic_tx);
-    let after_catalog = state.workspace.design_management.clone();
-    state.record_design_management_transaction(DesignManagementHistoryEntry {
-        description: "renumber schematic references".to_owned(),
-        owner,
-        before: before_catalog,
-        after: after_catalog,
-        before_schematics: schematic_tx.before,
-        after_schematics: schematic_tx.after,
-        committed_revision,
-    });
-
-    let reference = |state: &AppState| {
-        state
-            .schematic
-            .components
-            .iter()
-            .find(|component| component.id == object_id)
-            .expect("annotated component")
-            .name
-            .clone()
-    };
-    assert_eq!(reference(&state), expected_reference);
-    assert!(state.undo_project_design().expect("undo").is_some());
-    assert_eq!(reference(&state), "R42");
-    assert!(state.redo_project_design().expect("redo").is_some());
-    assert_eq!(reference(&state), expected_reference);
 }
 
 #[test]

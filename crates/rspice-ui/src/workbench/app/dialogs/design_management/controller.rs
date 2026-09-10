@@ -247,6 +247,7 @@ impl RSpiceApp {
                 after: candidate.clone(),
                 before_schematics: schematic_tx.before,
                 after_schematics: schematic_tx.after,
+                references: schematic_tx.references,
                 committed_revision,
             });
         self.state.design_execution_epoch = self.state.design_execution_epoch.wrapping_add(1);

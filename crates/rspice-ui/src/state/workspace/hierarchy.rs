@@ -27,6 +27,43 @@ use crate::state::{HierarchyPathError, InstancePath, InstancePathPattern};
 #[cfg(test)]
 mod tests;
 
+impl ProjectWorkspace {
+    /// Inspect an exact root/configuration without changing the active plan
+    /// or cloning retained project data. Reference-changing edits use the
+    /// same resolver as netlisting for each affected executable authority.
+    pub(crate) fn resolve_hierarchy_for_reference<'a>(
+        &'a self,
+        libraries: &'a LibraryManager,
+        root: &CellViewRef,
+        configuration: Option<crate::state::ConfigurationSetId>,
+        active_reference: &'a CellViewRef,
+        active_schematic: &'a SchematicState,
+    ) -> Result<HierarchyResolution, String> {
+        root.validate_name_segments()
+            .map_err(|error| error.to_string())?;
+        let configuration = configuration
+            .map(|id| {
+                self.configuration_sets
+                    .find(id)
+                    .ok_or_else(|| "The hierarchy configuration no longer exists.".to_owned())
+            })
+            .transpose()?;
+        if let Some(configuration) = configuration {
+            if !configuration.root().key().eq_ignore_ascii_case(&root.key()) {
+                return Err("The hierarchy configuration belongs to a different root.".to_owned());
+            }
+        }
+        Ok(HierarchyResolver::with_authority(
+            self,
+            libraries,
+            Some((active_reference, active_schematic)),
+            root.clone(),
+            configuration,
+        )
+        .resolve())
+    }
+}
+
 /// Revision of the authority governing an unconfigured resolution. Nothing has
 /// ever revised the absence of a configuration.
 const UNCONFIGURED_PLAN_REVISION: u64 = 0;
@@ -363,6 +400,8 @@ pub(super) struct HierarchyResolver<'a> {
     workspace: &'a ProjectWorkspace,
     libraries: &'a LibraryManager,
     active_overlay: Option<(&'a CellViewRef, &'a SchematicState)>,
+    root: CellViewRef,
+    configuration: Option<&'a crate::state::ConfigurationSet>,
     /// The active configuration's overrides with their patterns canonicalized,
     /// so selection compares one grammar against itself.
     overrides: Vec<crate::state::ConfigurationSetOverride>,
@@ -397,13 +436,29 @@ impl<'a> HierarchyResolver<'a> {
         libraries: &'a LibraryManager,
         active_overlay: Option<(&'a CellViewRef, &'a SchematicState)>,
     ) -> Self {
+        Self::with_authority(
+            workspace,
+            libraries,
+            active_overlay,
+            workspace.simulation_root_reference(),
+            workspace.configuration_sets.active(),
+        )
+    }
+
+    pub(super) fn with_authority(
+        workspace: &'a ProjectWorkspace,
+        libraries: &'a LibraryManager,
+        active_overlay: Option<(&'a CellViewRef, &'a SchematicState)>,
+        root: CellViewRef,
+        configuration: Option<&'a crate::state::ConfigurationSet>,
+    ) -> Self {
         Self {
             workspace,
             libraries,
             active_overlay,
-            overrides: workspace
-                .configuration_sets
-                .active()
+            root,
+            configuration,
+            overrides: configuration
                 .map(|configuration| {
                     configuration
                         .overrides()
@@ -428,17 +483,8 @@ impl<'a> HierarchyResolver<'a> {
     }
 
     pub(super) fn resolve_all(mut self) -> (HierarchyResolution, ConfigurationExecutionPlan) {
-        let active_configuration = self.workspace.configuration_sets.active();
-        let root = active_configuration.map_or_else(
-            || {
-                CellViewRef::new(
-                    &self.workspace.project.root_library,
-                    &self.workspace.project.top_cell,
-                    DEFAULT_SCHEMATIC_VIEW,
-                )
-            },
-            |configuration| configuration.root().clone(),
-        );
+        let active_configuration = self.configuration;
+        let root = self.root.clone();
         let required_paths = active_configuration
             .map(|configuration| {
                 let mut paths = vec![(
@@ -499,7 +545,7 @@ impl<'a> HierarchyResolver<'a> {
             );
             self.upsert(row, &design_root);
         }
-        let active_configuration = self.workspace.configuration_sets.active();
+        let active_configuration = self.configuration;
         let resolution = HierarchyResolution {
             bindings: self.rows,
             total_instances: self.total_instances,
@@ -1087,7 +1133,7 @@ impl<'a> HierarchyResolver<'a> {
         // The column names a view, never a view type: a configured stop selects
         // the view it spells, and an unresolved row still shows which stop its
         // ordered search would reach.
-        let stop_view = if self.workspace.configuration_sets.active().is_some() {
+        let stop_view = if self.configuration.is_some() {
             self.configured_stop_views(instance_path)
                 .into_iter()
                 .find(|stop| {
@@ -1128,7 +1174,7 @@ impl<'a> HierarchyResolver<'a> {
         is_root: bool,
         instance_path: &InstancePath,
     ) -> Vec<String> {
-        let Some(configuration) = self.workspace.configuration_sets.active() else {
+        let Some(configuration) = self.configuration else {
             return hierarchy_view_search_order(requested, is_root);
         };
         let mut order = Vec::new();
@@ -1155,7 +1201,7 @@ impl<'a> HierarchyResolver<'a> {
         is_root: bool,
         instance_path: &InstancePath,
     ) -> Vec<String> {
-        let Some(configuration) = self.workspace.configuration_sets.active() else {
+        let Some(configuration) = self.configuration else {
             return hierarchy_view_search_order(requested, is_root);
         };
         let mut order = self.configured_primary_views(requested, is_root, instance_path);
@@ -1175,7 +1221,7 @@ impl<'a> HierarchyResolver<'a> {
         is_root: bool,
         instance_path: &InstancePath,
     ) -> bool {
-        let Some(configuration) = self.workspace.configuration_sets.active() else {
+        let Some(configuration) = self.configuration else {
             return false;
         };
         configuration.definition().unresolved_policy
@@ -1187,7 +1233,7 @@ impl<'a> HierarchyResolver<'a> {
     }
 
     fn configured_stop_views(&self, instance_path: &InstancePath) -> Vec<String> {
-        let Some(configuration) = self.workspace.configuration_sets.active() else {
+        let Some(configuration) = self.configuration else {
             return Vec::new();
         };
         if let Some(scoped) = self.configured_override(instance_path)
@@ -1315,7 +1361,7 @@ impl<'a> HierarchyResolver<'a> {
         // Compatibility mode retains the historical placed-binding authority.
         // Configuration mode below instead materializes each selected L/C/V
         // from the authoritative library view.
-        if self.workspace.configuration_sets.active().is_none() && source_bound {
+        if self.configuration.is_none() && source_bound {
             if !search_order
                 .iter()
                 .any(|candidate| candidate.eq_ignore_ascii_case(&requested.view))
@@ -1374,9 +1420,7 @@ impl<'a> HierarchyResolver<'a> {
                 }
                 continue;
             }
-            if self.workspace.configuration_sets.active().is_some()
-                && hierarchy_stop_view(view_type)
-            {
+            if self.configuration.is_some() && hierarchy_stop_view(view_type) {
                 let Some(placed) = binding else {
                     return Err(format!(
                         "configuration root {} cannot materialize source view '{}' without an instance interface",
@@ -1459,9 +1503,7 @@ impl<'a> HierarchyResolver<'a> {
             .source_path
             .as_deref()
             .expect("validated only for source-backed bindings");
-        if view.view_type == ViewType::VerilogA
-            && self.workspace.configuration_sets.active().is_some()
-        {
+        if view.view_type == ViewType::VerilogA && self.configuration.is_some() {
             let reference = CellViewRef::new(&library.name, &cell.name, &view.name);
             let project_binding =
                 project_veriloga_binding_for_view(self.workspace, self.libraries, &reference)?;

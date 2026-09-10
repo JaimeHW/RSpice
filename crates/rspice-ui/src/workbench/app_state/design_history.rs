@@ -20,12 +20,15 @@
 //! has been applied, and each carries what its sweep cleared: that identity is
 //! the one part of a project step neither side of the design can re-derive.
 
+mod annotation;
 mod compensation;
 mod component_rename;
+mod references;
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use compensation::{DocumentCompensation, RecordHeader};
+use references::ReferenceChanges;
 
 use crate::diagnostics::ConsoleMessage;
 use crate::product::ObjectRevision;
@@ -120,6 +123,7 @@ struct DesignManagementRecord {
     after: DesignManagementCatalog,
     before_schematics: BTreeMap<String, SchematicSnapshot>,
     after_schematics: BTreeMap<String, SchematicSnapshot>,
+    references: ReferenceChanges,
     undo_guard_revision: ObjectRevision,
     redo_guard_revision: Option<ObjectRevision>,
 }
@@ -618,12 +622,15 @@ pub(crate) struct DesignManagementHistoryEntry {
     pub(crate) after: DesignManagementCatalog,
     pub(crate) before_schematics: BTreeMap<String, SchematicState>,
     pub(crate) after_schematics: BTreeMap<String, SchematicState>,
+    pub(crate) references: ReferenceChanges,
     pub(crate) committed_revision: ObjectRevision,
 }
 
 pub(crate) struct DesignManagementSchematicTransaction {
     pub(crate) before: BTreeMap<String, SchematicState>,
     pub(crate) after: BTreeMap<String, SchematicState>,
+    pub(crate) references: ReferenceChanges,
+    prepared_references: references::PreparedReferences,
 }
 
 pub(crate) struct HierarchyExtractionHistoryEntry {
@@ -652,120 +659,6 @@ impl AppState {
         description: impl Into<String>,
     ) -> Result<ObjectRevision, String> {
         publish_model_definition_candidate(self, candidate, commit, description)
-    }
-
-    /// Preflight the component-name changes represented by the candidate's
-    /// effective annotation journal. Every scoped object must still exist and
-    /// retain either the journal's old or already-applied reference; a
-    /// conflicting external edit blocks the whole project transaction.
-    pub(crate) fn prepare_design_management_schematic_transaction(
-        &self,
-        candidate: &DesignManagementCatalog,
-    ) -> Result<DesignManagementSchematicTransaction, String> {
-        let active_key = self.workspace.active_schematic_reference().key();
-        let mut projected = self.workspace.schematic_buffers.clone();
-        projected.insert(active_key, self.schematic.clone());
-        let mut before = BTreeMap::new();
-
-        let existing_mappings = self
-            .workspace
-            .design_management
-            .annotation()
-            .effective_mappings();
-        for (object, mapping) in candidate.annotation().effective_mappings() {
-            if existing_mappings.get(&object) == Some(&mapping) {
-                continue;
-            }
-            let key = object.cell_view_key();
-            let existing_key = projected
-                .keys()
-                .find(|candidate| candidate.eq_ignore_ascii_case(key))
-                .cloned()
-                .ok_or_else(|| {
-                    format!(
-                        "Annotation cannot be published because schematic '{}' is unavailable.",
-                        key
-                    )
-                })?;
-            let schematic = projected
-                .get_mut(&existing_key)
-                .expect("the resolved schematic key remains present");
-            let component_index = schematic
-                .components
-                .iter()
-                .position(|component| component.id == object.object_id())
-                .ok_or_else(|| {
-                    format!(
-                        "Annotation cannot be published because object {} no longer exists in '{}'.",
-                        object.object_id(),
-                        key
-                    )
-                })?;
-            let current_reference = schematic.components[component_index].name.clone();
-            if current_reference == mapping.new_reference {
-                continue;
-            }
-            if current_reference != mapping.old_reference {
-                return Err(format!(
-                    "Annotation cannot be published because {} in '{}' changed from '{}' to '{}'.",
-                    current_reference, key, mapping.old_reference, mapping.new_reference
-                ));
-            }
-            before
-                .entry(existing_key.clone())
-                .or_insert_with(|| schematic.clone());
-            schematic.components[component_index]
-                .name
-                .clone_from(&mapping.new_reference);
-            schematic.is_dirty = true;
-        }
-
-        let after = before
-            .keys()
-            .map(|key| {
-                (
-                    key.clone(),
-                    projected
-                        .get(key)
-                        .expect("changed schematic remains projected")
-                        .clone(),
-                )
-            })
-            .collect();
-        Ok(DesignManagementSchematicTransaction { before, after })
-    }
-
-    pub(crate) fn apply_design_management_schematic_transaction(
-        &mut self,
-        transaction: &DesignManagementSchematicTransaction,
-    ) {
-        let active_key = self.workspace.active_schematic_reference().key();
-        for (key, schematic) in &transaction.after {
-            if key.eq_ignore_ascii_case(&active_key) {
-                self.schematic = schematic.clone();
-                self.workspace
-                    .schematic_buffers
-                    .insert(active_key.clone(), schematic.clone());
-            } else if let Some(existing_key) = self
-                .workspace
-                .schematic_buffers
-                .keys()
-                .find(|candidate| candidate.eq_ignore_ascii_case(key))
-                .cloned()
-            {
-                self.workspace
-                    .schematic_buffers
-                    .insert(existing_key, schematic.clone());
-            }
-            if let Some(open) = self
-                .workspace
-                .open_views
-                .iter_mut()
-                .find(|open| open.reference.key().eq_ignore_ascii_case(key))
-            {
-                open.dirty = true;
-            }
-        }
     }
 
     pub(crate) fn clear_project_design_history(&mut self) {
@@ -831,8 +724,22 @@ impl AppState {
         // The catalog this record restores carries its own sheet membership,
         // so the compensation only names the document; reconciling it again
         // would be a second owner of the same fact.
+        let documents = entry
+            .before_schematics
+            .keys()
+            .chain(entry.after_schematics.keys())
+            .cloned()
+            .chain(std::iter::once(entry.owner.key()))
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .map(|key| {
+                DocumentCompensation::naming(
+                    annotation::reference_from_key(&key).expect("validated schematic document key"),
+                )
+            })
+            .collect();
         let header = RecordHeader::committed(
-            vec![DocumentCompensation::naming(entry.owner.clone())],
+            documents,
             Some(entry.owner.clone()),
             Some(entry.owner.clone()),
         );
@@ -845,6 +752,7 @@ impl AppState {
                 after: entry.after,
                 before_schematics: capture_schematic_map(entry.before_schematics),
                 after_schematics: capture_schematic_map(entry.after_schematics),
+                references: entry.references,
                 undo_guard_revision: entry.committed_revision,
                 redo_guard_revision: None,
             })),
@@ -1875,12 +1783,14 @@ impl DesignManagementRecord {
     fn after_design_matches(&self, state: &AppState) -> bool {
         design_management_semantics_match(&state.workspace.design_management, &self.after)
             && schematic_map_matches(state, &self.after_schematics)
+            && self.references.matches(state, false)
             && state.workspace.project.revision() == self.undo_guard_revision
     }
 
     fn before_design_matches(&self, state: &AppState) -> bool {
         design_management_semantics_match(&state.workspace.design_management, &self.before)
             && schematic_map_matches(state, &self.before_schematics)
+            && self.references.matches(state, true)
             && self
                 .redo_guard_revision
                 .is_some_and(|revision| state.workspace.project.revision() == revision)
@@ -1898,6 +1808,26 @@ impl DesignManagementRecord {
                 self.owner.display_path()
             ));
         }
+        for key in self
+            .before_schematics
+            .keys()
+            .chain(self.after_schematics.keys())
+        {
+            let active_key = state.workspace.active_schematic_reference().key();
+            let schematic = if key.eq_ignore_ascii_case(&active_key) {
+                Some(&state.schematic)
+            } else {
+                state
+                    .workspace
+                    .schematic_buffers
+                    .iter()
+                    .find(|(candidate, _)| candidate.eq_ignore_ascii_case(key))
+                    .map(|(_, schematic)| schematic)
+            }
+            .ok_or_else(|| format!("Annotation schematic '{key}' is no longer available."))?;
+            annotation::validate_annotation_document(state, key, schematic)?;
+        }
+        self.references.prepare(state, operation != "undone")?;
         Ok(())
     }
 
@@ -1909,11 +1839,13 @@ impl DesignManagementRecord {
             );
         }
         self.validate_mutation(state, "undone")?;
+        let references = self.references.prepare(state, false)?;
         let revision = state
             .workspace
             .replace_design_management(self.before.clone())
             .map_err(|error| error.to_string())?;
         apply_schematic_map(state, &self.before_schematics)?;
+        references.publish(state);
         self.redo_guard_revision = Some(revision);
         state.design_execution_epoch = state.design_execution_epoch.wrapping_add(1);
         Ok(())
@@ -1927,11 +1859,13 @@ impl DesignManagementRecord {
             );
         }
         self.validate_mutation(state, "redone")?;
+        let references = self.references.prepare(state, true)?;
         let revision = state
             .workspace
             .replace_design_management(self.after.clone())
             .map_err(|error| error.to_string())?;
         apply_schematic_map(state, &self.after_schematics)?;
+        references.publish(state);
         self.undo_guard_revision = revision;
         state.design_execution_epoch = state.design_execution_epoch.wrapping_add(1);
         Ok(())
