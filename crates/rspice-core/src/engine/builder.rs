@@ -79,6 +79,56 @@ mod connect_modules;
 #[cfg(feature = "veriloga")]
 mod mixed_modules;
 
+#[cfg(feature = "veriloga")]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum VerilogABindingPriority {
+    FileStem,
+    ModuleName,
+    ExplicitAlias,
+}
+
+#[cfg(feature = "veriloga")]
+struct VerilogAModelBinding {
+    priority: VerilogABindingPriority,
+    /// None means multiple differing artifacts claim this name at this priority.
+    model: Option<veriloga_cache::CachedVerilogAModel>,
+}
+
+#[cfg(feature = "veriloga")]
+fn bind_veriloga_model(
+    bindings: &mut HashMap<String, VerilogAModelBinding>,
+    name: &str,
+    priority: VerilogABindingPriority,
+    model: &veriloga_cache::CachedVerilogAModel,
+) -> Result<(), SimulationError> {
+    use std::collections::hash_map::Entry;
+    match bindings.entry(normalize_model_key(name)) {
+        Entry::Vacant(slot) => {
+            slot.insert(VerilogAModelBinding {
+                priority,
+                model: Some(model.clone()),
+            });
+        }
+        Entry::Occupied(mut slot) => {
+            let binding = slot.get_mut();
+            if priority > binding.priority {
+                binding.priority = priority;
+                binding.model = Some(model.clone());
+            } else if priority == binding.priority
+                && let Some(previous) = &binding.model
+                && !previous
+                    .has_same_artifact(model)
+                    .map_err(SimulationError::Netlist)?
+            {
+                // Keep ambiguity until a higher-priority binding
+                // resolves it. Include order must never choose the device.
+                binding.model = None;
+            }
+        }
+    }
+    Ok(())
+}
+
 mod model_policy;
 use model_policy::*;
 mod advanced_mos;
@@ -4932,8 +4982,7 @@ impl Engine {
         // One shared Arc per model: instances share the (megabyte-scale)
         // program and a single JIT compilation
         #[cfg(feature = "veriloga")]
-        let mut veriloga_models: HashMap<String, veriloga_cache::CachedVerilogAModel> =
-            HashMap::new();
+        let mut veriloga_models = HashMap::new();
 
         // One shared BSIM3v3.3 card + temperature block per .model name,
         // with the (W, L) size knots memoized across instances.
@@ -4994,28 +5043,34 @@ impl Engine {
                     self.config.resource_limits,
                     abort,
                 )?;
-                let model = std::sync::Arc::clone(&entry.model);
-
-                let model_key = normalize_model_key(model.name.as_str());
-                veriloga_models
-                    .entry(model_key)
-                    .or_insert_with(|| entry.clone());
+                bind_veriloga_model(
+                    &mut veriloga_models,
+                    entry.model.name.as_str(),
+                    VerilogABindingPriority::ModuleName,
+                    &entry,
+                )?;
 
                 if let Some(alias) = include.model_name.as_deref() {
-                    veriloga_models
-                        .entry(normalize_model_key(alias))
-                        .or_insert_with(|| entry.clone());
+                    bind_veriloga_model(
+                        &mut veriloga_models,
+                        alias,
+                        VerilogABindingPriority::ExplicitAlias,
+                        &entry,
+                    )?;
                 }
 
                 if let Some(stem) = include.file_path.file_stem().and_then(|s| s.to_str()) {
-                    veriloga_models
-                        .entry(normalize_model_key(stem))
-                        .or_insert_with(|| entry.clone());
+                    bind_veriloga_model(
+                        &mut veriloga_models,
+                        stem,
+                        VerilogABindingPriority::FileStem,
+                        &entry,
+                    )?;
                 }
 
                 log::info!(
                     "Loaded Verilog-A model '{}' from {}",
-                    model.name,
+                    entry.model.name,
                     include.file_path.display()
                 );
             }
@@ -7481,28 +7536,17 @@ impl Engine {
                     #[cfg(not(any(feature = "veriloga-builtins-base", feature = "veriloga")))]
                     let _ = params;
 
-                    #[cfg(feature = "veriloga-builtins-base")]
-                    {
-                        if let Some(mut device) =
-                            crate::device::veriloga_builtins::instantiate_builtin(
-                                subckt_name,
-                                &element.name,
-                                &element.nodes,
-                                params,
-                                &netlist.params,
-                                &mut circuit,
-                            )?
-                        {
-                            device.set_temperature(self.config.temperature);
-                            circuit.add_generated_veriloga_device(device);
-                            continue;
-                        }
-                    }
-
                     #[cfg(feature = "veriloga")]
                     {
-                        if let Some(entry) = veriloga_models.get(&normalize_model_key(subckt_name))
+                        if let Some(binding) =
+                            veriloga_models.get(&normalize_model_key(subckt_name))
                         {
+                            let entry = binding.model.as_ref().ok_or_else(|| {
+                                SimulationError::Circuit(format!(
+                                    "Instance '{}' references ambiguous Verilog-A model '{}'; assign distinct explicit aliases in the .VERILOGA includes",
+                                    element.name, subckt_name
+                                ))
+                            })?;
                             // A module whose canonical artifact carries a
                             // discrete plan is elaborated as a mixed instance:
                             // same cache entry, same compile, different half of
@@ -7627,6 +7671,24 @@ impl Engine {
                                     ))
                                 })?;
                             circuit.add_veriloga_device(device);
+                            continue;
+                        }
+                    }
+
+                    #[cfg(feature = "veriloga-builtins-base")]
+                    {
+                        if let Some(mut device) =
+                            crate::device::veriloga_builtins::instantiate_builtin(
+                                subckt_name,
+                                &element.name,
+                                &element.nodes,
+                                params,
+                                &netlist.params,
+                                &mut circuit,
+                            )?
+                        {
+                            device.set_temperature(self.config.temperature);
+                            circuit.add_generated_veriloga_device(device);
                             continue;
                         }
                     }

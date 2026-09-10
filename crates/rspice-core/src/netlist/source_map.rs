@@ -474,9 +474,7 @@ fn known_model_names(netlist: &Netlist) -> HashSet<String> {
         names.insert(model.name.to_ascii_uppercase());
     }
     for include in &netlist.veriloga_includes {
-        if let Some(model_name) = &include.model_name {
-            names.insert(model_name.to_ascii_uppercase());
-        }
+        names.extend(include.declared_model_names().map(str::to_ascii_uppercase));
     }
     names
 }
@@ -490,9 +488,7 @@ fn known_subckt_names(netlist: &Netlist) -> HashSet<String> {
         collect_subckt_names(subckt, &mut names);
     }
     for include in &netlist.veriloga_includes {
-        if let Some(model_name) = &include.model_name {
-            names.insert(model_name.to_ascii_uppercase());
-        }
+        names.extend(include.declared_model_names().map(str::to_ascii_uppercase));
     }
     names
 }
@@ -781,16 +777,21 @@ mod tests {
     }
 
     #[test]
-    fn veriloga_alias_is_known_as_external_subcircuit() {
-        let deck = "source map\n\
-            .va \"amp.va\" va_amp\n\
-            X1 in out va_amp\n\
-            .end\n";
-
-        let netlist = Netlist::parse(deck).expect("deck parses");
-        let diagnostics = netlist.lint_unknown_references();
-
-        assert_eq!(diagnostics, Vec::new());
+    fn veriloga_declared_names_are_known_as_external_subcircuits() {
+        for (include, name) in [
+            (".va \"amp.va\" va_amp", "va_amp"),
+            (".va \"amp.va\" module=SelectedAmp", "selectedamp"),
+            (".va \"amp.va\" alias module=SelectedAmp", "SelectedAmp"),
+            (".va \"amp.va\" alias module=SelectedAmp", "alias"),
+            (".va \"amp.va\"", "amp"),
+        ] {
+            let deck = format!("source map\n{include}\nX1 in out {name}\n.end\n");
+            let netlist = Netlist::parse(&deck).expect("deck parses");
+            assert!(
+                netlist.lint_unknown_references().is_empty(),
+                "{include}: {name}"
+            );
+        }
     }
 
     #[test]

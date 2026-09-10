@@ -233,6 +233,10 @@ one source can be loaded with `.va devices.va fast module=FastDevice` and
 `.va devices.va slow module=SlowDevice`, then instantiated as `X1 p n fast` and
 `X2 p n slow`. Without `module=`, a disk source must declare exactly one device
 module. Connect-only libraries can be included without a device selection.
+Explicit aliases take precedence over module names, which take precedence over
+file stems. Conflicting bindings at the same priority are rejected when used;
+identical compiled models may share a name. An authored include takes precedence
+over a generated built-in with the same name.
 
 ## Analyses
 

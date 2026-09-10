@@ -255,9 +255,7 @@ impl DeclaredModels {
             names.insert(name);
         }
         for include in &netlist.veriloga_includes {
-            if let Some(model_name) = &include.model_name {
-                names.insert(model_name.to_ascii_uppercase());
-            }
+            names.extend(include.declared_model_names().map(str::to_ascii_uppercase));
         }
         Self {
             names,

@@ -460,6 +460,29 @@ pub(super) struct CachedVerilogAModel {
 }
 
 #[cfg(feature = "veriloga")]
+impl CachedVerilogAModel {
+    /// Compare executable artifacts only when independent includes share a name.
+    /// Repeated includes normally share their Arcs and need no serialization.
+    pub(super) fn has_same_artifact(&self, other: &Self) -> Result<bool, String> {
+        if self.model.name != other.model.name {
+            return Ok(false);
+        }
+        let same_canonical = match (&self.canonical_ir, &other.canonical_ir) {
+            (Some(left), Some(right)) => std::sync::Arc::ptr_eq(left, right),
+            (None, None) => true,
+            _ => false,
+        };
+        if std::sync::Arc::ptr_eq(&self.model, &other.model) && same_canonical {
+            return Ok(true);
+        }
+        Ok(
+            runtime_artifact_fingerprint(&self.model, self.canonical_ir.as_deref())?
+                == runtime_artifact_fingerprint(&other.model, other.canonical_ir.as_deref())?,
+        )
+    }
+}
+
+#[cfg(feature = "veriloga")]
 type VerilogAModelCache = crate::resource::BoundedCache<VerilogASourceKey, CachedVerilogAModel>;
 
 #[cfg(feature = "veriloga")]

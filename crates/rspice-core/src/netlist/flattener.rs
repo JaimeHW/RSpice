@@ -921,12 +921,7 @@ impl<'a> Flattener<'a> {
     pub(super) fn collect_external_subckts(netlist: &Netlist) -> HashSet<String> {
         let mut names = HashSet::new();
         for include in &netlist.veriloga_includes {
-            if let Some(model_name) = &include.model_name {
-                names.insert(model_name.to_ascii_uppercase());
-            }
-            if let Some(stem) = include.file_path.file_stem().and_then(|s| s.to_str()) {
-                names.insert(stem.to_ascii_uppercase());
-            }
+            names.extend(include.declared_model_names().map(str::to_ascii_uppercase));
         }
         #[cfg(feature = "veriloga-builtins-base")]
         {

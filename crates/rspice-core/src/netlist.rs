@@ -1205,6 +1205,17 @@ pub struct VerilogAInclude {
     pub selected_module: Option<String>,
 }
 
+impl VerilogAInclude {
+    /// Names known before compilation, shared by flattening and diagnostics.
+    pub(crate) fn declared_model_names(&self) -> impl Iterator<Item = &str> {
+        self.model_name
+            .as_deref()
+            .into_iter()
+            .chain(self.selected_module.as_deref())
+            .chain(self.file_path.file_stem().and_then(|stem| stem.to_str()))
+    }
+}
+
 /// Where a root parse resolves its dependencies from: the include processor
 /// for `.INCLUDE`/`.LIB`, the separate processor `.IC` file references use,
 /// whether SPEF may be read from the filesystem, and the replay context that

@@ -81,6 +81,145 @@ module second_load(p,n); inout p,n; electrical p,n; analog I(p,n)<+2.0*V(p,n); e
 }
 
 #[test]
+fn selected_veriloga_module_needs_no_separate_alias() {
+    let model = write_model(
+        "no_alias",
+        "module Chosen(p,n); inout p,n; electrical p,n; analog I(p,n)<+V(p,n); endmodule\nmodule Other(p,n); inout p,n; electrical p,n; analog I(p,n)<+2*V(p,n); endmodule\n",
+    );
+    let deck = format!(
+        "* Module selection without an alias\n.va \"{}\" module=Chosen\nI1 0 a 1\nX1 a 0 chosen\n.end\n",
+        deck_path(&model)
+    );
+    let netlist = Netlist::parse_validated(&deck).unwrap();
+    assert!(netlist.lint_unknown_references().is_empty());
+    let result = Engine::default().run_dc_op(&netlist).unwrap();
+    assert!((node_voltage(&result, "a") - 1.0).abs() < 1e-8);
+    let _ = std::fs::remove_file(model);
+}
+
+#[test]
+fn ambiguous_veriloga_bindings_never_select_the_first_loaded_module() {
+    let model = write_model(
+        "ambiguous_bindings",
+        "module First(p,n); inout p,n; electrical p,n; analog I(p,n)<+V(p,n); endmodule\nmodule FIRST(p,n); inout p,n; electrical p,n; analog I(p,n)<+2*V(p,n); endmodule\nmodule Second(p,n); inout p,n; electrical p,n; analog I(p,n)<+2*V(p,n); endmodule\n",
+    );
+    let stem = model.file_stem().unwrap().to_str().unwrap();
+    for (first, second, binding) in [
+        ("Shared module=First", "SHARED module=Second", "shared"),
+        ("module=First", "module=FIRST", "First"),
+        ("a_model module=First", "b_model module=Second", stem),
+    ] {
+        for reversed in [false, true] {
+            let (first, second) = if reversed {
+                (second, first)
+            } else {
+                (first, second)
+            };
+            let deck = format!(
+                "* Ambiguous bindings must be refused\n.va \"{path}\" {first}\n.va \"{path}\" {second}\nI1 0 a 1\nX1 a 0 {binding}\n.end\n",
+                path = deck_path(&model)
+            );
+            let error = Engine::default()
+                .run_dc_op(&Netlist::parse_validated(&deck).unwrap())
+                .expect_err("an ambiguous alias must not choose a model by include order");
+            assert!(
+                error.to_string().contains("ambiguous Verilog-A model"),
+                "{error}"
+            );
+        }
+    }
+    let _ = std::fs::remove_file(model);
+}
+
+#[test]
+fn authored_veriloga_aliases_take_precedence_over_implicit_names() {
+    let model = write_model(
+        "alias_precedence",
+        "module First(p,n); inout p,n; electrical p,n; analog I(p,n)<+V(p,n); endmodule\nmodule Second(p,n); inout p,n; electrical p,n; analog I(p,n)<+2*V(p,n); endmodule\n",
+    );
+    for (first_alias, second_alias) in [
+        ("Second", "First"),
+        (model.file_stem().unwrap().to_str().unwrap(), "other_model"),
+    ] {
+        for reversed in [false, true] {
+            let first = format!(".va \"{}\" {first_alias} module=First", deck_path(&model));
+            let second = format!(".va \"{}\" {second_alias} module=Second", deck_path(&model));
+            let includes = if reversed {
+                format!("{second}\n{first}")
+            } else {
+                format!("{first}\n{second}")
+            };
+            let deck = format!(
+                "* Explicit aliases precede implicit names\n{includes}\nI1 0 a 1\nI2 0 b 1\nX1 a 0 {first_alias}\nX2 b 0 {second_alias}\n.end\n"
+            );
+            let result = Engine::default()
+                .run_dc_op(&Netlist::parse_validated(&deck).unwrap())
+                .unwrap();
+            assert!((node_voltage(&result, "a") - 1.0).abs() < 1e-8);
+            assert!((node_voltage(&result, "b") - 0.5).abs() < 1e-8);
+        }
+    }
+    let _ = std::fs::remove_file(model);
+}
+
+#[test]
+fn identical_veriloga_bindings_allow_default_and_explicit_module_selection() {
+    let model = write_model(
+        "identical_bindings",
+        "module Same(p,n); inout p,n; electrical p,n; analog I(p,n)<+V(p,n); endmodule\n",
+    );
+    for reversed in [false, true] {
+        let default = format!(".va \"{}\" shared", deck_path(&model));
+        let explicit = format!(".va \"{}\" SHARED module=Same", deck_path(&model));
+        let includes = if reversed {
+            format!("{explicit}\n{default}")
+        } else {
+            format!("{default}\n{explicit}")
+        };
+        let deck = format!(
+            "* Identical artifacts may share an alias\n{includes}\nI1 0 a 1\nX1 a 0 shared\n.end\n"
+        );
+        let result = Engine::default()
+            .run_dc_op(&Netlist::parse_validated(&deck).unwrap())
+            .unwrap();
+        assert!((node_voltage(&result, "a") - 1.0).abs() < 1e-8);
+    }
+    let _ = std::fs::remove_file(model);
+}
+
+#[cfg(feature = "veriloga-model-diode-cmc")]
+#[test]
+fn authored_veriloga_aliases_take_precedence_over_generated_builtins() {
+    let builtin_deck = Netlist::parse_validated(
+        "* Built-in fallback remains available\nI1 0 a 1\nX1 a 0 DIODE_CMC\n.end\n",
+    )
+    .unwrap();
+    assert!(
+        Engine::default()
+            .build_circuit(&builtin_deck)
+            .unwrap()
+            .has_generated_veriloga_devices()
+    );
+    let model = write_model(
+        "builtin_alias",
+        "module Authored(p,n); inout p,n; electrical p,n; analog I(p,n)<+V(p,n); endmodule\n",
+    );
+    let deck = format!(
+        "* Authored source must be executed\n.va \"{}\" DIODE_CMC\nI1 0 a 1\nX1 a 0 DIODE_CMC\n.end\n",
+        deck_path(&model)
+    );
+    let result = Engine::default()
+        .run_dc_op(&Netlist::parse_validated(&deck).unwrap())
+        .unwrap();
+    assert!(
+        (node_voltage(&result, "a") - 1.0).abs() < 1e-8,
+        "the authored one-siemens model must be used: {}",
+        node_voltage(&result, "a")
+    );
+    let _ = std::fs::remove_file(model);
+}
+
+#[test]
 fn module_selection_reads_connect_rules_once_and_requires_a_device() {
     let mut source = String::new();
     for (_, module) in rspice_veriloga::connect::library::BUILTIN_CONNECT_MODULES {
