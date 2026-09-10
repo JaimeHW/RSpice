@@ -175,9 +175,13 @@ fn preparation_failure_never_publishes_any_owner_or_history() {
         let payloads = app.state.workspace.simulation_plan_payloads.clone();
         let dirty = app.state.schematic.is_dirty;
         let epoch = app.state.design_execution_epoch;
+        let mut candidate = expected.clone();
+        candidate.name = "V9".to_owned();
+        candidate.value = "12".to_owned();
+        candidate.params = "ac=1".to_owned();
         assert!(
             app.state
-                .rename_component_transaction(&expected, "V9".to_owned())
+                .edit_component_transaction(&expected, candidate, "edit properties")
                 .is_err(),
             "{refusal}"
         );

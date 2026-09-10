@@ -54,8 +54,11 @@ fn rename_preparation_rebinds_only_the_target_and_preserves_the_source() {
         ("V1", "V9", "F1", "vref", "V9"),
     ] {
         let original = state.components.clone();
+        let expected_component = component(&original, old);
+        let mut candidate = expected_component.clone();
+        candidate.name = new.to_owned();
         let renamed = state
-            .prepare_component_rename(component(&original, old), new.to_owned())
+            .prepare_component_edit(expected_component, candidate)
             .unwrap();
         assert_eq!(
             parameter(component(&renamed, owner), parameter_name),
@@ -65,6 +68,30 @@ fn rename_preparation_rebinds_only_the_target_and_preserves_the_source() {
         assert_eq!(state.components, original);
         assert!(!state.can_undo());
     }
+}
+
+#[test]
+fn property_rename_keeps_edited_parameters_while_remapping_references() {
+    let mut state = coupled_selection();
+    let index = state
+        .components
+        .iter()
+        .position(|component| component.name == "L1")
+        .unwrap();
+    state.components[index].params = "coupled_to=L1 coupling_factor=0.9".to_owned();
+    let expected = state.components[index].clone();
+    let mut candidate = expected.clone();
+    candidate.name = "L9".to_owned();
+    candidate.value = "8u".to_owned();
+    candidate.params = "coupled_to=L1 coupling_factor=0.8 temp=30".to_owned();
+    let result = state.prepare_component_edit(&expected, candidate).unwrap();
+    let edited = component(&result, "L9");
+    assert_eq!(edited.value, "8u");
+    assert_eq!(parameter(edited, "coupled_to"), "L9");
+    assert_eq!(parameter(edited, "coupling_factor"), "0.8");
+    assert_eq!(parameter(edited, "temp"), "30");
+    assert_eq!(parameter(component(&result, "K1"), "inductors"), "L9, L2");
+    assert_eq!(state.components[index], expected);
 }
 
 #[test]

@@ -1219,7 +1219,7 @@ impl ProjectDesignBody {
 
     fn description(&self) -> &str {
         match self {
-            Self::ComponentRename(_) => "rename component and references",
+            Self::ComponentRename(record) => record.description,
             Self::HierarchyExtraction(record) => &record.description,
             Self::DesignManagement(record) => &record.description,
             Self::InstanceRemoval(record) => &record.description,

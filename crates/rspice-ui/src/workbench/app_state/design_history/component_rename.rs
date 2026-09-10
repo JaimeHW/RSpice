@@ -10,6 +10,7 @@ use crate::state::{
 
 #[derive(Debug, Clone)]
 pub(super) struct ComponentRenameRecord {
+    pub(super) description: &'static str,
     document: CellViewRef,
     before: SchematicSnapshot,
     after: SchematicSnapshot,
@@ -44,20 +45,53 @@ impl AppState {
         expected: &Component,
         name: String,
     ) -> Result<bool, String> {
+        let mut candidate = expected.clone();
+        candidate.name = name;
+        self.edit_component_transaction(expected, candidate, "rename component and references")
+    }
+
+    /// Commit a complete property candidate, carrying any renamed references
+    /// in the same history entry. Value-only edits keep document-local history.
+    pub(crate) fn edit_component_transaction(
+        &mut self,
+        expected: &Component,
+        candidate: Component,
+        description: &'static str,
+    ) -> Result<bool, String> {
         let document = self.workspace.active_schematic_reference();
         let before = SchematicSnapshot::capture(&self.schematic);
         let mut after = before.clone();
         after.components = self
             .schematic
-            .prepare_component_rename(expected, name.clone())?;
+            .prepare_component_edit(expected, candidate.clone())?;
         if before.is_equal(&after) {
             return Ok(false);
+        }
+        if !self.project_lifecycle.project_open || document_read_only(self, &document) {
+            return Err(
+                "Component editing requires an open, writable project and document.".to_owned(),
+            );
+        }
+        if self.schematic.has_pending_operation() {
+            return Err(
+                "Finish or cancel the active schematic gesture before editing properties."
+                    .to_owned(),
+            );
+        }
+        if candidate.name == expected.name || expected.kind.spice_prefix().is_empty() {
+            self.schematic.components = after.components;
+            self.schematic.is_dirty = true;
+            self.schematic.bump_topology_version();
+            self.schematic.commit_undo_from(before, description);
+            return Ok(true);
         }
         let occurrence = self.workspace.occurrence_path();
         let from = occurrence
             .child(&expected.name)
             .map_err(|error| error.to_string())?;
-        let to = occurrence.child(&name).map_err(|error| error.to_string())?;
+        let to = occurrence
+            .child(&candidate.name)
+            .map_err(|error| error.to_string())?;
         // Primitive current probes name the emitted SPICE card, which may
         // differ from a legacy/imported component's display name.
         let probe_from = if expected.kind == ComponentType::CellInstance {
@@ -119,6 +153,7 @@ impl AppState {
             }
         }
         let record = ComponentRenameRecord {
+            description,
             document: document.clone(),
             before,
             after,

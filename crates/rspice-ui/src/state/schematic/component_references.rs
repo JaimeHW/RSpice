@@ -124,10 +124,10 @@ impl PreparedCopyReferences {
 impl super::SchematicState {
     /// Prepare the complete local component/reference edit without publishing
     /// geometry, history, or any project-level references.
-    pub(crate) fn prepare_component_rename(
+    pub(crate) fn prepare_component_edit(
         &self,
         expected: &Component,
-        name: String,
+        candidate: Component,
     ) -> Result<Vec<Component>, String> {
         let index = self
             .components
@@ -137,12 +137,17 @@ impl super::SchematicState {
         if &self.components[index] != expected {
             return Err("The selected component changed before commit.".to_owned());
         }
-        if name == expected.name {
-            return Ok(self.components.clone());
+        if candidate.id != expected.id || candidate.kind != expected.kind {
+            return Err(
+                "A property edit cannot replace the component's identity or type.".to_owned(),
+            );
         }
-        expected.validate_reference_designator(&name)?;
         let mut components = self.components.clone();
-        components[index].name = name;
+        components[index] = candidate;
+        if components[index].name == expected.name || expected.kind.spice_prefix().is_empty() {
+            return Ok(components);
+        }
+        components[index].validate_reference_designator(&components[index].name)?;
         let emitted = components[index].emitted_instance_name();
         if components.iter().enumerate().any(|(other, component)| {
             other != index
@@ -155,8 +160,13 @@ impl super::SchematicState {
                 "The renamed component would duplicate an existing SPICE designator.".to_owned(),
             );
         }
-        PreparedCopyReferences::for_operation(&self.components, "rename")?
-            .apply_selected(&mut components, |target| target == index);
+        // Resolve references using the old identities, but keep the complete
+        // edited parameter draft. Preparing from the old component would
+        // overwrite simultaneous parameter edits when a reference is remapped.
+        let name = std::mem::replace(&mut components[index].name, expected.name.clone());
+        let references = PreparedCopyReferences::for_operation(&components, "rename")?;
+        components[index].name = name;
+        references.apply_selected(&mut components, |target| target == index);
         Ok(components)
     }
 }
