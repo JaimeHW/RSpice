@@ -18,8 +18,8 @@ pub(super) fn canonical_model_preprocess(
     thermal_voltage: f64,
 ) -> [f64; 7] {
 	let B=parameter_given[11] as u8 as f64;
-	let G=0.0;
-	let I=0.0;
+	let G=0f64;
+	let I=0f64;
 	let mut oC=0.0;
 	let A=parameters[15]!= 1002f64;
 	if parameter_given[11]{

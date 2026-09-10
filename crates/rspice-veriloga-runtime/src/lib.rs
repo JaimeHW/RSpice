@@ -23,6 +23,7 @@ mod analog_lifecycle;
 pub mod arithmetic;
 mod compatibility_catalog;
 pub mod integer;
+mod noise_frequency;
 pub mod polynomial;
 mod simparam;
 

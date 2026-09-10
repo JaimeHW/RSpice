@@ -157,10 +157,10 @@ pub(super) fn canonical_instance_preprocess(
 	let CR=parameters[65];
 	let CW=parameters[26];
 	let DB=parameters[13];
-	let DG=0.0;
-	let DI=0.0;
-	let DK=0.0;
-	let DM=0.0;
+	let DG=0f64;
+	let DI=0f64;
+	let DK=0f64;
+	let DM=0f64;
 	let mut oAL=false;
 	let mut oAS=false;
 	let mut oAW=false;
@@ -829,8 +829,8 @@ impl Instance {
 		let ASL=L2([0f64;2]);
 		let ASR=ddt_scale();
 		let ATA=parameters[13];
-		let ATD=0.0;
-		let ATG=0.0;
+		let ATD=0f64;
+		let ATG=0f64;
 		let A=ctx.has_simparam("gmin");
 		let D=if A{
 		let B=ctx.simparam_required("gmin");

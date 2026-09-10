@@ -246,7 +246,7 @@ pub(super) fn canonical_instance_preprocess(
 	let LN=-1.000000082740371e-11f64;
 	let OK=0.2f64;
 	let ON=-5.000000413701855e-12f64;
-	let RN=0.0;
+	let RN=0f64;
 	let RU=1f64;
 	let SE=staged[26];
 	let SU=staged[39];

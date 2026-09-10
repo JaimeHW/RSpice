@@ -12,11 +12,15 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 
+use crate::canonical_ir::ad::{DifferentiationError, differentiate_with_control};
+use crate::canonical_ir::cfg::{CfgInstruction, CfgValue, CfgValueType};
+use crate::canonical_ir::frequency::{self, DynamicPower};
 use crate::canonical_ir::{
     AdSeed, CanonicalIrArtifact, CanonicalNoiseSourceKind, CfgBinaryOp, CfgFunction, CfgTerminator,
     CfgUnaryOp, CfgValueKind, ExprId, HirAnalogOperator, HirAssignment, HirExprKind, HirLoop,
-    HirStatement, MirEquationKind, NodeId, ValueId, differentiate,
+    HirStatement, MirEquationKind, NodeId, ValueId,
 };
+use crate::metrics::PipelineControl;
 
 use super::emit::{EmitBindings, emit_body, lane_runtime_types};
 use super::expr::{
@@ -107,6 +111,7 @@ impl MergedNoiseSchedule {
 pub(super) fn generate_noise_file(
     artifact: &CanonicalIrArtifact,
     options: &RustTranspileOptions,
+    control: &dyn PipelineControl,
 ) -> Result<GeneratedRustFile, RustBackendError> {
     let parameter_fields = parameter_field_names(artifact);
     let variables = noise_variables(artifact);
@@ -148,7 +153,7 @@ pub(super) fn generate_noise_file(
              \x20   }\n\
              }\n",
         );
-        out.push_str(&grouped_noise_extension(artifact, options)?);
+        out.push_str(&grouped_noise_extension(artifact, options, control)?);
         return Ok(GeneratedRustFile {
             relative_path: "noise.rs".to_string(),
             contents: out,
@@ -371,7 +376,7 @@ pub(super) fn generate_noise_file(
     out.push_str("        Ok(())\n    }\n");
     out.push_str(&helper_methods);
     out.push_str("}\n");
-    out.push_str(&grouped_noise_extension(artifact, options)?);
+    out.push_str(&grouped_noise_extension(artifact, options, control)?);
 
     Ok(GeneratedRustFile {
         relative_path: "noise.rs".to_string(),
@@ -460,6 +465,7 @@ struct GroupedNoiseInjectionPlan {
     descriptor: usize,
     real: Option<usize>,
     reactive: Option<usize>,
+    frequency: Vec<(DynamicPower, usize)>,
 }
 
 #[derive(Debug)]
@@ -468,6 +474,7 @@ struct GroupedNoisePlan {
     outputs: Vec<ValueId>,
     processes: Vec<GroupedNoiseProcessPlan>,
     descriptors: Vec<(usize, usize)>,
+    primal_checks: Vec<usize>,
 }
 
 /// Emit the additive grouped-noise ABI implemented by newly generated model
@@ -477,8 +484,9 @@ struct GroupedNoisePlan {
 pub(super) fn grouped_noise_extension(
     artifact: &CanonicalIrArtifact,
     options: &RustTranspileOptions,
+    control: &dyn PipelineControl,
 ) -> Result<String, RustBackendError> {
-    let Some(plan) = plan_grouped_noise(artifact)? else {
+    let Some(plan) = plan_grouped_noise(artifact, control)? else {
         return Ok(
             "\npub static GROUPED_NOISE_PROCESSES: [GeneratedNoiseProcessDescriptor; 0] = [];\n\
              pub static GROUPED_NOISE_INJECTIONS: [GeneratedNoiseInjectionDescriptor; 0] = [];\n\n\
@@ -609,8 +617,8 @@ pub(super) fn grouped_noise_extension(
         simparam_present: "ctx.has_simparam".into(),
         ..EmitBindings::default()
     };
-    // The grouped slice rejects dynamic state below; these names make any
-    // accidental reintroduction a generated compile error instead of silently
+    // The grouped slice freezes primal dynamic values below; these names make any
+    // accidental omission a generated compile error instead of silently
     // binding transient history during a noise sweep.
     bindings.ddt = "grouped_noise_ddt_is_unsupported".into();
     bindings.idt = "grouped_noise_idt_is_unsupported".into();
@@ -621,7 +629,15 @@ pub(super) fn grouped_noise_extension(
         &body.lines().map(str::to_owned).collect::<Vec<_>>(),
         8,
     );
-    if uses_checked_runtime(&body) {
+    for &position in &plan.primal_checks {
+        writeln!(
+            out,
+            "        ctx.checked_derivative_value({}, 0.0);",
+            values[position]
+        )
+        .expect("write grouped primal validation");
+    }
+    if uses_checked_runtime(&body) || !plan.primal_checks.is_empty() {
         out.push_str("        ctx.check_noise_evaluation()?;\n");
     }
     for (process_index, process) in plan.processes.iter().enumerate() {
@@ -688,11 +704,25 @@ pub(super) fn grouped_noise_extension(
             } else {
                 "self.multiplicity.sqrt().recip()"
             };
-            writeln!(
-                out,
-                "        let process_{process_index}_gain_{local} = GeneratedNoiseComplex::scaled_transfer({real}, {reactive}, frequency_hz, {rhs_sign:.1} * {multiplicity_scale});"
-            )
-            .expect("write grouped gain");
+            if injection.frequency.is_empty() {
+                writeln!(
+                    out,
+                    "        let process_{process_index}_gain_{local} = GeneratedNoiseComplex::scaled_transfer({real}, {reactive}, frequency_hz, {rhs_sign:.1} * {multiplicity_scale});"
+                )
+                .expect("write grouped gain");
+            } else {
+                let coefficients = injection
+                    .frequency
+                    .iter()
+                    .map(|(power, position)| {
+                        format!("({}, {}, {})", values[*position], power.ddt, power.idt)
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                writeln!(out, "        let process_{process_index}_gain_{local} = if process_{process_index}_active {{ GeneratedNoiseComplex::frequency_transfer(ctx, &[({real}, 0, 0), {coefficients}], frequency_hz, {rhs_sign:.1} * {multiplicity_scale}) }} else {{ GeneratedNoiseComplex::default() }};")
+                    .expect("write grouped frequency gain");
+                out.push_str("        ctx.check_noise_evaluation()?;\n");
+            }
             writeln!(
                 out,
                 "        if !process_{process_index}_gain_{local}.is_finite() {{ return Err(GeneratedNoiseEvaluationError::NonFiniteGain {{ process: {process_index}, injection: {local}, re: process_{process_index}_gain_{local}.re, im: process_{process_index}_gain_{local}.im }}); }}"
@@ -751,6 +781,7 @@ fn uses_checked_runtime(body: &str) -> bool {
 
 fn plan_grouped_noise(
     artifact: &CanonicalIrArtifact,
+    control: &dyn PipelineControl,
 ) -> Result<Option<GroupedNoisePlan>, RustBackendError> {
     let mut cfg = crate::canonical_ir::CfgModel::from_hir(&artifact.hir, &artifact.mir).map_err(
         |diagnostics| unsupported(artifact, format!("grouped noise CFG: {diagnostics:?}")),
@@ -818,11 +849,53 @@ fn plan_grouped_noise(
     // or a process's own metadata are observable by noise analysis.
     let (validation_function, _) =
         crate::canonical_ir::prune_cfg_to_outputs(&cfg.function, &validation_roots);
-    validate_linear_noise_routing(artifact, &validation_function)?;
-    let charges = super::canonical::stored_charges(&mut cfg.function, &residuals);
-    let mut differentiated = differentiate(&cfg.function, &seeds).map_err(|error| {
-        unsupported(artifact, format!("grouped noise differentiation: {error}"))
-    })?;
+    let linear = validate_noise_routing(artifact, &validation_function)?;
+    let general = !linear;
+    // First-order noise needs only the dynamic inputs validated, not a replay
+    // of every deterministic circuit equation. Keep those roots before AD and
+    // charge recovery append values, preserving the compact shipped path.
+    let live_ddt = validation_function
+        .values
+        .iter()
+        .filter_map(|value| {
+            if let CfgValueKind::Ddt { operator, .. } = value.kind {
+                Some(operator)
+            } else {
+                None
+            }
+        })
+        .collect::<HashSet<_>>();
+    let noise_dependent = raw_noise_dependencies(&cfg.function);
+    let primal_roots = if general {
+        residuals.clone()
+    } else {
+        cfg.function
+            .values
+            .iter()
+            .filter_map(|value| {
+                (noise_dependent[usize::from(value.id)]
+                    && matches!(value.kind, CfgValueKind::Ddt { operator, .. } if live_ddt.contains(&operator)))
+                .then_some(value.id)
+            })
+            .collect()
+    };
+    let charges = if general {
+        vec![None; residuals.len()]
+    } else {
+        super::canonical::stored_charges(&mut cfg.function, &residuals)
+    };
+    let mut differentiated = differentiate_with_control(&cfg.function, &seeds, control).map_err(
+        |error| match error {
+            DifferentiationError::Validation(error) => {
+                unsupported(artifact, format!("grouped noise differentiation: {error}"))
+            }
+            DifferentiationError::Cancelled(error) => RustBackendError::cancelled(
+                artifact.metadata.source_package.as_str(),
+                artifact.mir.module_name.as_str(),
+                error,
+            ),
+        },
+    )?;
     let conduction_rows = residuals
         .iter()
         .map(|residual| differentiated.derivative_row(*residual))
@@ -831,6 +904,38 @@ fn plan_grouped_noise(
         .iter()
         .map(|charge| charge.map_or_else(Vec::new, |charge| differentiated.derivative_row(charge)))
         .collect::<Vec<_>>();
+    let mut frequency_rows = vec![vec![Vec::new(); seeds.len()]; residuals.len()];
+    if general {
+        let roots = conduction_rows
+            .iter()
+            .enumerate()
+            .flat_map(|(equation, row)| {
+                row.iter().enumerate().filter_map(move |(process, value)| {
+                    value.map(|value| (equation, process, value))
+                })
+            })
+            .collect::<Vec<_>>();
+        let coefficients = frequency::expand(
+            &mut differentiated.function,
+            cfg.function.values.len(),
+            &roots.iter().map(|(_, _, value)| *value).collect::<Vec<_>>(),
+            control,
+        )
+        .map_err(|error| match error {
+            frequency::FrequencyError::Unsupported(error) => unsupported(
+                artifact,
+                format!("grouped noise frequency coefficients: {error}"),
+            ),
+            frequency::FrequencyError::Cancelled(error) => RustBackendError::cancelled(
+                artifact.metadata.source_package.as_str(),
+                artifact.mir.module_name.as_str(),
+                error,
+            ),
+        })?;
+        for ((equation, process, _), coefficients) in roots.into_iter().zip(coefficients) {
+            frequency_rows[equation][process] = coefficients.into_iter().collect();
+        }
+    }
 
     // The real routing gain is the residual derivative at the DC operating
     // point, even when that same contribution also carries charge. Clear the
@@ -852,22 +957,18 @@ fn plan_grouped_noise(
     if metadata.values.iter().any(|value| {
         matches!(
             value.kind,
-            CfgValueKind::Ddt { .. } | CfgValueKind::DdtScale
+            CfgValueKind::Ddt { .. }
+                | CfgValueKind::DdtScale
+                | CfgValueKind::Idt { .. }
+                | CfgValueKind::IdtScale
         )
     }) {
         return Err(unsupported(
             artifact,
-            "a time derivative in generated noise magnitude or activation metadata",
+            "a time derivative or integral in generated noise magnitude or activation metadata",
         ));
     }
-    for value in &mut differentiated.function.values {
-        if matches!(
-            value.kind,
-            CfgValueKind::Ddt { .. } | CfgValueKind::DdtScale
-        ) {
-            value.kind = CfgValueKind::RealConstant(0.0);
-        }
-    }
+    freeze_noise_primal(&mut differentiated.function);
 
     let mut wanted = Vec::new();
     let mut processes = Vec::with_capacity(cfg.noise_processes.len());
@@ -898,7 +999,8 @@ fn plan_grouped_noise(
             };
             let real = nonzero(real);
             let reactive = nonzero(reactive);
-            if real.is_none() && reactive.is_none() {
+            let frequency = &frequency_rows[equation][process_index];
+            if real.is_none() && reactive.is_none() && frequency.is_empty() {
                 continue;
             }
             let descriptor = descriptors.len();
@@ -907,6 +1009,10 @@ fn plan_grouped_noise(
                 descriptor,
                 real: real.map(&mut place),
                 reactive: reactive.map(&mut place),
+                frequency: frequency
+                    .iter()
+                    .map(|(power, value)| (*power, place(*value)))
+                    .collect(),
             });
         }
         processes.push(GroupedNoiseProcessPlan {
@@ -921,19 +1027,23 @@ fn plan_grouped_noise(
             injections,
         });
     }
+    let primal_checks = primal_roots.into_iter().map(&mut place).collect();
     let (function, outputs) = crate::canonical_ir::optimize_cfg(&differentiated.function, &wanted);
     Ok(Some(GroupedNoisePlan {
         function,
         outputs,
         processes,
         descriptors,
+        primal_checks,
     }))
 }
 
-fn validate_linear_noise_routing(
+/// Retain the compact affine path when it suffices. General differentiable
+/// routing shares AC's frequency expansion; stochastic control remains explicit.
+fn validate_noise_routing(
     artifact: &CanonicalIrArtifact,
     function: &CfgFunction,
-) -> Result<(), RustBackendError> {
+) -> Result<bool, RustBackendError> {
     let noise_dependent = raw_noise_dependencies(function);
     let dynamic_dependent = super::canonical::values_reaching_a_ddt(function);
     let depends = |value: ValueId| noise_dependent[usize::from(value)];
@@ -947,6 +1057,7 @@ fn validate_linear_noise_routing(
             ));
         }
     }
+    let mut linear = true;
     for value in &function.values {
         if !depends(value.id) {
             continue;
@@ -988,16 +1099,66 @@ fn validate_linear_noise_routing(
             _ => false,
         };
         if !valid {
-            return Err(unsupported(
-                artifact,
-                format!(
-                    "nonlinear or stateful generated-Rust routing of noise process at CFG value {} ({:?})",
-                    value.id, value.kind
-                ),
-            ));
+            let differentiable = matches!(
+                value.kind,
+                CfgValueKind::Ddt { .. }
+                    | CfgValueKind::Idt { .. }
+                    | CfgValueKind::Binary {
+                        op: CfgBinaryOp::Mul
+                            | CfgBinaryOp::Div
+                            | CfgBinaryOp::Pow
+                            | CfgBinaryOp::Min
+                            | CfgBinaryOp::Max
+                            | CfgBinaryOp::Hypot
+                            | CfgBinaryOp::Atan2
+                            | CfgBinaryOp::CheckedValue,
+                        ..
+                    }
+                    | CfgValueKind::SumProductsDiv { .. }
+            ) || matches!(value.kind, CfgValueKind::Unary { op, .. } if op != CfgUnaryOp::Not);
+            if !differentiable {
+                return Err(unsupported(
+                    artifact,
+                    format!(
+                        "nonlinear or stateful generated-Rust routing of noise process at CFG value {} ({:?})",
+                        value.id, value.kind
+                    ),
+                ));
+            }
+            linear = false;
         }
     }
-    Ok(())
+    Ok(linear)
+}
+
+/// Freeze the large-signal body at its DC values without losing validation of
+/// an operator's input. No noise query reads or advances transient companions.
+fn freeze_noise_primal(function: &mut CfgFunction) {
+    let zero = ValueId::from(function.values.len());
+    function.values.push(CfgValue {
+        id: zero,
+        value_type: CfgValueType::Real,
+        kind: CfgValueKind::RealConstant(0.0),
+    });
+    function.blocks[usize::from(function.entry)]
+        .instructions
+        .insert(0, CfgInstruction { result: zero });
+    for value in &mut function.values {
+        value.kind = match value.kind {
+            CfgValueKind::Ddt { input, .. } => CfgValueKind::Binary {
+                op: CfgBinaryOp::CheckedValue,
+                left: input,
+                right: zero,
+            },
+            CfgValueKind::Idt { input, ic, .. } => CfgValueKind::Binary {
+                op: CfgBinaryOp::CheckedValue,
+                left: input,
+                right: ic,
+            },
+            CfgValueKind::DdtScale | CfgValueKind::IdtScale => CfgValueKind::RealConstant(0.0),
+            _ => continue,
+        };
+    }
 }
 
 /// Track structural dependence on a stochastic realization through every CFG
@@ -1883,6 +2044,7 @@ endmodule
         let generated = super::generate_noise_file(
             &artifact,
             &crate::rust_backend::RustTranspileOptions::default(),
+            &crate::metrics::NoPipelineControl,
         )
         .expect("fallback noise emission succeeds")
         .contents;
@@ -1945,7 +2107,7 @@ mod grouped_process_tests {
         let artifact = crate::VerilogACompiler::default()
             .compile_canonical_ir(source)
             .expect("grouped-noise fixture compiles");
-        let plan = super::plan_grouped_noise(&artifact)
+        let plan = super::plan_grouped_noise(&artifact, &crate::metrics::NoPipelineControl)
             .expect("grouped-noise planning succeeds")
             .expect("fixture has a grouped process");
         let inputs = CfgEvalInputs {
@@ -2065,6 +2227,7 @@ endmodule
         let generated = super::grouped_noise_extension(
             &artifact,
             &crate::rust_backend::RustTranspileOptions::default(),
+            &crate::metrics::NoPipelineControl,
         )
         .expect("mixed grouped-noise emission succeeds");
         let gain_lines = generated
@@ -2111,36 +2274,39 @@ module dead_noise_report(p, n);
     analog begin
         x = white_noise(1.0, "linear");
         I(p, n) <+ x;
+        I(p, n) <+ idt(V(p,n), 0.25);
         report = (x + 1.0) / (x + 2.0);
+        report = ddt(sqrt(V(p,n)) + x);
     end
 endmodule
 "#,
             )
             .expect("dead-report fixture compiles");
 
-        let plan = super::plan_grouped_noise(&artifact)
+        let plan = super::plan_grouped_noise(&artifact, &crate::metrics::NoPipelineControl)
             .expect("dead nonlinear report is irrelevant to circuit noise")
             .expect("fixture has a grouped process");
         assert_eq!(plan.processes.len(), 1);
         assert_eq!(plan.processes[0].injections.len(), 1);
+        assert!(
+            plan.primal_checks.is_empty(),
+            "deterministic integrators and dead reports must not enter the noise slice"
+        );
     }
 
     #[test]
-    fn static_noise_projection_does_not_mask_dynamic_metadata_or_nested_routing() {
+    fn static_noise_projection_does_not_mask_dynamic_metadata() {
         for body in [
             "I(p,n) <+ white_noise(1.0 + ddt(V(p,n)), \"psd\");",
             "if (ddt(V(p,n)) > 0.0) I(p,n) <+ white_noise(1.0, \"guard\");",
-            "source = white_noise(1.0, \"nested\"); I(p,n) <+ ddt(ddt(source));",
-            "I(p,n) <+ ddt(ddt(white_noise(1.0, \"nested\")));",
             "I(p,n) <+ ddt(white_noise(1.0 + ddt(V(p,n)), \"psd\"));",
-            "I(p,n) <+ ddt(white_noise(1.0, \"a\") * white_noise(1.0, \"b\"));",
         ] {
             let artifact = crate::VerilogACompiler::default()
                 .compile_canonical_ir(&format!(
                     "module dynamic_noise(p,n); inout p,n; electrical p,n; real source; analog begin {body} end endmodule"
                 ))
                 .unwrap_or_else(|error| panic!("{body}: {error}"));
-            let error = super::plan_grouped_noise(&artifact)
+            let error = super::plan_grouped_noise(&artifact, &crate::metrics::NoPipelineControl)
                 .expect_err("unsupported dynamic noise must remain explicit");
             assert!(
                 error.to_string().contains("time derivative")
@@ -2151,7 +2317,7 @@ endmodule
     }
 
     #[test]
-    fn live_nonlinear_noise_routing_is_rejected() {
+    fn live_nonlinear_noise_routing_is_differentiated() {
         let artifact = crate::VerilogACompiler::default()
             .compile_canonical_ir(
                 r#"
@@ -2166,12 +2332,11 @@ endmodule
             )
             .expect("nonlinear-routing fixture compiles");
 
-        let error = super::plan_grouped_noise(&artifact)
-            .expect_err("nonlinear realization routing must fail closed");
-        assert!(
-            error.to_string().contains("nonlinear or stateful"),
-            "{error}"
-        );
+        let plan = super::plan_grouped_noise(&artifact, &crate::metrics::NoPipelineControl)
+            .expect("smooth nonlinear routing has a small-signal tangent")
+            .expect("fixture has a process");
+        assert_eq!(plan.processes[0].injections.len(), 1);
+        assert!(!plan.primal_checks.is_empty());
     }
 
     #[test]
@@ -2190,7 +2355,7 @@ endmodule
 "#,
             )
             .expect("dead-control fixture compiles");
-        super::plan_grouped_noise(&dead)
+        super::plan_grouped_noise(&dead, &crate::metrics::NoPipelineControl)
             .expect("dead report-only control flow is not circuit-observable")
             .expect("fixture has a grouped process");
 
@@ -2207,7 +2372,7 @@ endmodule
 "#,
             )
             .expect("live-control fixture compiles");
-        let error = super::plan_grouped_noise(&live)
+        let error = super::plan_grouped_noise(&live, &crate::metrics::NoPipelineControl)
             .expect_err("noise-dependent circuit control flow must fail closed");
         assert!(error.to_string().contains("control flow"), "{error}");
     }

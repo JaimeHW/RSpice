@@ -29,8 +29,8 @@ pub(super) fn canonical_model_preprocess(
 	let AT=0f64;
 	let AU=0f64;
 	let AV=0f64;
-	let BE=0.0;
-	let BG=0.0;
+	let BE=0f64;
+	let BG=0f64;
 	let mut oU=0.0;
 	let mut oAD=false;
 	let mut oAM=false;
@@ -153,9 +153,9 @@ pub(super) fn canonical_instance_preprocess(
 	let E=parameters[46];
 	let G=0f64;
 	let H=1f64;
-	let M=0.0;
+	let M=0f64;
 	let O=0f64;
-	let S=0.0;
+	let S=0f64;
 	let A=parameters[43]* parameters[42];
 	let B=staged[6]/ A;
 	let C=staged[7]/ A;

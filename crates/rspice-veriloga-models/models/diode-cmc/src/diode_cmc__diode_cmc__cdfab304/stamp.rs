@@ -85,11 +85,11 @@ pub(super) fn canonical_model_preprocess(
 	let HQ=parameters[94];
 	let HY=1e-6f64;
 	let ID=parameters[85];
-	let IG=0.0;
-	let II=0.0;
+	let IG=0f64;
+	let II=0f64;
 	let IX=parameters[92];
 	let JB=parameters[95];
-	let JF=0.0;
+	let JF=0f64;
 	let JI=0f64;
 	let JJ=0f64;
 	let JP=0f64;

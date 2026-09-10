@@ -167,7 +167,7 @@ pub(crate) fn generate_device_measured(
     )?;
     checkpoint_phase(artifact, measurements, PipelinePhase::NoiseEmission)?;
     let phase_started = web_time::Instant::now();
-    let noise = plan.noise_file(artifact, options)?;
+    let noise = plan.noise_file(artifact, options, measurements.control())?;
     record_phase(
         artifact,
         measurements,
@@ -3026,9 +3026,10 @@ impl ModelPlan {
         &self,
         artifact: &CanonicalIrArtifact,
         options: &RustTranspileOptions,
+        control: &dyn crate::metrics::PipelineControl,
     ) -> Result<GeneratedRustFile, RustBackendError> {
         let Some(noise) = &self.noise else {
-            return super::noise::generate_noise_file(artifact, options);
+            return super::noise::generate_noise_file(artifact, options, control);
         };
         let function = &noise.function;
         let mut out = String::new();
@@ -3062,7 +3063,7 @@ impl ModelPlan {
         }
         let (body, values) = emit_body(function, &noise.outputs, &self.emit_bindings())
             .map_err(|error| unsupported(artifact, format!("noise body: {error}")))?;
-        let grouped_noise = super::noise::grouped_noise_extension(artifact, options)?;
+        let grouped_noise = super::noise::grouped_noise_extension(artifact, options, control)?;
         // Import from both emitted evaluators, not only from the compact
         // source-wise noise slice's CFG value kinds. The coherent-process
         // extension is emitted from its own differentiated replay plan; the

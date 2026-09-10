@@ -2753,6 +2753,173 @@ for (gain, scale, frequency) in [
 }
 
 #[test]
+fn generated_grouped_noise_propagates_cancellation() {
+    #[derive(Default)]
+    struct CancelDuringNoise {
+        state_emitted: AtomicBool,
+        polls: AtomicUsize,
+    }
+    impl PipelineControl for CancelDuringNoise {
+        fn is_cancelled(&self) -> bool {
+            self.state_emitted.load(Ordering::Relaxed)
+                && self.polls.fetch_add(1, Ordering::Relaxed) > 0
+        }
+        fn phase_completed(
+            &self,
+            timing: rspice_veriloga::PhaseTiming,
+            _: &rspice_veriloga::PipelineMetrics,
+        ) {
+            if timing.phase == PipelinePhase::StateEmission {
+                self.state_emitted.store(true, Ordering::Relaxed);
+            }
+        }
+    }
+    let source = "module cancel_noise(p,n); inout p,n; electrical p,n; analog I(p,n)<+sin(V(p,n)+ddt(white_noise(1.0,\"n\"))); endmodule";
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(source)
+        .unwrap();
+    let control = CancelDuringNoise::default();
+    let error = RustTranspiler::new(options())
+        .transpile_measured_with_control(&artifact, &control)
+        .expect_err("cancellation inside grouped noise must propagate");
+    assert_eq!(error.kind, RustBackendErrorKind::Cancelled);
+    assert!(control.polls.load(Ordering::Relaxed) >= 2);
+}
+
+#[test]
+fn generated_nonlinear_noise_preserves_primal_domain_errors() {
+    for (index, (expression, invalid_at_zero)) in [
+        ("sqrt(V(p,n)+source)", true),
+        ("ln(V(p,n)+source)", true),
+        ("ddt(sqrt(V(p,n))+source)", false),
+        ("ddt(sqrt(V(p,n))+sin(source))", false),
+        ("idt(ln(V(p,n))+source,0.25)", true),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let source = format!(
+            "module noise_domain(p,n); inout p,n; electrical p,n; parameter integer enabled=1; real source; analog if(enabled>0) begin source=white_noise(1.0,\"n\"); I(p,n)<+{expression}; end endmodule"
+        );
+        let name = format!("noise domain {index}");
+        let (state, stamp, noise) = generated_parts(&source, &name);
+        run_generated_main(&name, &state, &stamp, &noise, &format!(r#"
+struct Capture;
+impl runtime::GeneratedNoiseProcessVisitor for Capture {{
+    fn visit_process(&mut self, _: usize, _: runtime::GeneratedNoiseProcessEvaluationRef<'_>) -> bool {{ true }}
+}}
+let mut instance=device::state::Instance::new(&[0,1]);
+instance.finalize_parameters().unwrap();
+for (bias, invalid) in [(-1.0,true),(1.0,false),(0.0,{invalid_at_zero}),(2.0,false)] {{
+    runtime::clear_evaluation_error();
+    let ctx=runtime::GeneratedEvalContext {{voltages:&[bias,0.0],temperature:300.15}};
+    let result=instance.evaluate_noise_processes_at_frequency(&ctx,1.0,&mut Capture);
+    assert_eq!(result.is_err(),invalid,"bias={{bias}}: {{result:?}}");
+}}
+instance.set_parameter("enabled",0.0).unwrap();
+instance.finalize_parameters().unwrap();
+runtime::clear_evaluation_error();
+let ctx=runtime::GeneratedEvalContext {{voltages:&[-1.0,0.0],temperature:300.15}};
+instance.evaluate_noise_processes_at_frequency(&ctx,0.0,&mut Capture).unwrap();
+assert!(!ctx.evaluation_failed());
+"#)).unwrap_or_else(|report| panic!("{name}: {report}"));
+    }
+}
+
+#[test]
+fn generated_nonlinear_noise_uses_complex_frequency_coefficients() {
+    // Each expression contains one syntactic source. Reusing an assigned
+    // realization and spelling the primitive directly must linearize alike.
+    for (case, (expression, expected, integral)) in [
+        ("sin(V(p,n)+N)", "(bias.cos(),0.0)", false),
+        ("cos(V(p,n)+N)", "(-bias.sin(),0.0)", false),
+        ("exp(V(p,n)+N)", "(bias.exp(),0.0)", false),
+        ("ln(V(p,n)+N)", "(bias.recip(),0.0)", false),
+        ("sqrt(V(p,n)+N)", "(0.5/bias.sqrt(),0.0)", false),
+        ("tanh(V(p,n)+N)", "(1.0/bias.cosh().powi(2),0.0)", false),
+        ("abs(V(p,n)+N)", "(1.0,0.0)", false),
+        ("pow(V(p,n)+N,2.0)", "(2.0*bias,0.0)", false),
+        ("hypot(V(p,n)+N,2.0)", "(bias/bias.hypot(2.0),0.0)", false),
+        ("atan2(V(p,n)+N,2.0)", "(2.0/(bias*bias+4.0),0.0)", false),
+        ("max(V(p,n)+N,0.0)", "(1.0,0.0)", false),
+        ("sin(V(p,n)+ddt(N))", "(0.0,omega*bias.cos())", false),
+        ("ddt(sin(V(p,n)+N))", "(0.0,omega*bias.cos())", false),
+        ("ddt(ddt(N))", "(-omega*omega,0.0)", false),
+        ("idt(N,0.25)", "(0.0,-1.0/omega)", true),
+        (
+            "sin(V(p,n)+idt(N,0.25))",
+            "(0.0,-(bias+0.25).cos()/omega)",
+            true,
+        ),
+        ("ddt(idt(N,0.25))", "(1.0,0.0)", true),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        for contribution in ["I", "V"] {
+            for assigned in [false, true] {
+                let primitive = "white_noise(2.0/V(p,n),\"n\")";
+                let assignment = if assigned {
+                    format!("source={primitive};")
+                } else {
+                    String::new()
+                };
+                let expression =
+                    expression.replace('N', if assigned { "source" } else { primitive });
+                let source = format!(
+                    "module general_noise(p,n); inout p,n; electrical p,n; parameter integer enabled=1; real source; analog if(enabled>0) begin {assignment} {contribution}(p,n)<+{expression}; end endmodule"
+                );
+                let name = format!("general noise {case} {contribution} {assigned}");
+                let (state, stamp, noise) = generated_parts(&source, &name);
+                let scale = if contribution == "I" { -2.0 } else { 0.5 };
+                run_generated_main(&name, &state, &stamp, &noise, &format!(r#"
+#[derive(Default)]
+struct Capture(Vec<runtime::GeneratedNoiseComplex>);
+impl runtime::GeneratedNoiseProcessVisitor for Capture {{
+    fn visit_process(&mut self, _: usize, process: runtime::GeneratedNoiseProcessEvaluationRef<'_>) -> bool {{
+        if process.active {{
+            assert_eq!(process.injections.len(),1);
+            self.0.push(process.injections[0].gain);
+        }}
+        true
+    }}
+}}
+let mut instance=device::state::Instance::new(&[0,1]);
+instance.set_multiplicity(4.0).unwrap();
+instance.finalize_parameters().unwrap();
+for bias in [0.25_f64,0.75,2.0] {{
+    for frequency in [0.0,0.1,1.0,1000.0] {{
+        runtime::clear_evaluation_error();
+        let ctx=runtime::GeneratedEvalContext {{voltages:&[bias,0.0],temperature:300.15}};
+        let mut capture=Capture::default();
+        let result=instance.evaluate_noise_processes_at_frequency(&ctx,frequency,&mut capture);
+        if {integral} && frequency==0.0 {{
+            assert!(result.is_err(),"integrator must remain singular even when D and I cancel");
+            continue;
+        }}
+        result.unwrap();
+        assert_eq!(capture.0.len(),1);
+        let omega=std::f64::consts::TAU*frequency;
+        let (re,im)={expected};
+        for (actual,expected) in [(capture.0[0].re,re*{scale:?}),(capture.0[0].im,im*{scale:?})] {{
+            assert!((actual-expected).abs()<=expected.abs()*2e-13+1e-14,"bias={{bias}} f={{frequency}} actual={{actual}} expected={{expected}}");
+        }}
+    }}
+}}
+instance.set_parameter("enabled",0.0).unwrap();
+instance.finalize_parameters().unwrap();
+let ctx=runtime::GeneratedEvalContext {{voltages:&[0.0,0.0],temperature:300.15}};
+let mut capture=Capture::default();
+instance.evaluate_noise_processes_at_frequency(&ctx,0.0,&mut capture).unwrap();
+assert!(capture.0.is_empty());
+assert!(!ctx.evaluation_failed());
+"#)).unwrap_or_else(|report| panic!("{name}: {report}"));
+            }
+        }
+    }
+}
+
+#[test]
 fn generated_direct_noise_routing_matches_assigned_processes() {
     for operator in ["ddt", "slew"] {
         for contribution in ["I", "V"] {
@@ -5333,8 +5500,22 @@ mod analog_effects {
 }
 pub mod runtime {
     pub mod arithmetic {
+        mod scalar {
 "#,
     include_str!("../../rspice-veriloga-runtime/src/arithmetic/scalar.rs"),
+    r#"
+        }
+        pub use scalar::*;
+        mod scaled {
+"#,
+    include_str!("../../rspice-veriloga-runtime/src/arithmetic/scaled.rs"),
+    r#"
+        }
+        pub use scaled::ScaledValue;
+    }
+    mod noise_frequency {
+"#,
+    include_str!("../../rspice-veriloga-runtime/src/noise_frequency.rs"),
     r#"
     }
     pub mod integer {
@@ -6304,6 +6485,7 @@ pub mod runtime {
             if primal.is_finite() && derivative.is_finite() { derivative }
             else { EVALUATION_FAILED.store(true, std::sync::atomic::Ordering::SeqCst); f64::NAN }
         }
+        pub fn report_small_signal_error(&self, _: &'static str) { EVALUATION_FAILED.store(true,std::sync::atomic::Ordering::SeqCst); }
         pub fn check_noise_evaluation(&self) -> Result<(), GeneratedNoiseEvaluationError> {
             if self.evaluation_failed() { Err(GeneratedNoiseEvaluationError::NonFinite { index:0,quantity:"evaluation",value:f64::NAN }) } else { Ok(()) }
         }

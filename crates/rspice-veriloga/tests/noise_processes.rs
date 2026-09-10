@@ -283,17 +283,9 @@ fn assert_noise_transfer(
                 )
                 .unwrap_or_else(|error| panic!("{case}: {error}"));
             assert_eq!(report.abi.noise_source_count, 1, "{case}");
-            // Retaining these operators must not silently qualify generated
-            // Rust while their stateful implementations remain unsupported.
-            assert_eq!(
-                report
-                    .targets
-                    .get(rspice_veriloga::RuntimeTarget::GeneratedRust)
-                    .readiness,
-                rspice_veriloga::RuntimeTargetReadiness::Rejected,
-                "{case}"
-            );
-            assert!(report.generated_rust.is_none());
+            // Ordinary idt now uses the generated frequency expansion; the
+            // remaining stateful operators still require implementations.
+            assert_eq!(report.generated_rust.is_some(), operator == "idt", "{case}");
             #[cfg(feature = "wasm-jit")]
             rspice_veriloga::wasm_jit::compile_model_value_module(
                 &report.model,
@@ -503,18 +495,7 @@ fn direct_nonlinear_noise_preserves_bias_dependent_small_signal_gain() {
                     )
                     .unwrap_or_else(|error| panic!("{case}: {error}"));
                 assert_eq!(report.abi.noise_source_count, 1, "{case}");
-                // General linearization is implemented by the runtime. The
-                // generated backend still accepts only its qualified affine
-                // routing subset and must continue to report that limitation.
-                assert!(report.generated_rust.is_none(), "{case}");
-                assert_eq!(
-                    report
-                        .targets
-                        .get(rspice_veriloga::RuntimeTarget::GeneratedRust)
-                        .readiness,
-                    rspice_veriloga::RuntimeTargetReadiness::Rejected,
-                    "{case}",
-                );
+                assert!(report.generated_rust.is_some(), "{case}");
                 report.validate_integrity().unwrap();
                 #[cfg(feature = "wasm-jit")]
                 rspice_veriloga::wasm_jit::compile_model_value_module(

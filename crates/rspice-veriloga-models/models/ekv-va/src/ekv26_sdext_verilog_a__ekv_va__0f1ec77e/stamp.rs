@@ -35,8 +35,8 @@ pub(super) fn canonical_model_preprocess(
 	let AL=parameters[40];
 	let AQ=parameters[37];
 	let AT=parameters[1];
-	let AU=0.0;
-	let AV=0.0;
+	let AU=0f64;
+	let AV=0f64;
 	let mut oV=0.0;
 	let mut oAE=false;
 	let mut oAF=false;
