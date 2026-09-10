@@ -150,6 +150,9 @@ impl RSpiceApp {
             self.state.deny_read_only_edit();
             return;
         }
+        if command.commits_inspector_edit() && !self.state.commit_pending_inspector_edit() {
+            return;
+        }
 
         match command {
             ShortcutCommand::ProjectLauncher => self.state.workbench.open_project_launcher(),
@@ -292,7 +295,11 @@ impl RSpiceApp {
                 crate::workbench::app::open_selected_object_properties(&mut self.state);
             }
             ShortcutCommand::Cancel => {
-                if self.state.dialogs.move_selection.armed {
+                if self.state.workbench.workspace == crate::workbench::state::Workspace::Design
+                    && self.state.workbench.inline_edit.session().is_some()
+                {
+                    self.state.workbench.inline_edit.end();
+                } else if self.state.dialogs.move_selection.armed {
                     crate::workbench::app::cancel_armed_move_selection(&mut self.state);
                 } else if self.state.dialogs.stretch_selection.armed {
                     crate::workbench::app::cancel_armed_stretch_selection(&mut self.state);

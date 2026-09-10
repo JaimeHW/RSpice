@@ -477,6 +477,9 @@ pub(crate) fn open_property_editor(state: &mut AppState, component_id: u64) {
     {
         return;
     }
+    if !state.commit_pending_inspector_edit() {
+        return;
+    }
     if state.deny_read_only_edit() {
         return;
     }

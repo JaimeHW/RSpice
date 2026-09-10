@@ -33,6 +33,9 @@ pub(crate) fn dispatch_file_menu_action(
     file_workflow_io: &(impl FileWorkflowIo + ?Sized),
     export_workflow_io: &(impl ExportWorkflowIo + ?Sized),
 ) {
+    if !state.commit_pending_inspector_edit() {
+        return;
+    }
     match action {
         FileMenuAction::NewProject => {
             if require_project_save_confirmation_if_dirty(state, ConfirmationAction::ProjectNew) {
@@ -189,6 +192,107 @@ mod tests {
         assert_eq!(
             state.dialogs.confirmation_dialog.pending_action,
             Some(ConfirmationAction::ImportNetlist)
+        );
+    }
+    struct NoIo;
+
+    impl crate::workbench::workflows::file_workflow::FileWorkflowIo for NoIo {
+        #[cfg(not(target_arch = "wasm32"))]
+        fn show_open_dialog(&self) -> Result<std::path::PathBuf, crate::io::SchematicIoError> {
+            panic!("unexpected file I/O")
+        }
+        fn show_save_dialog(
+            &self,
+            _: Option<&str>,
+        ) -> Result<std::path::PathBuf, crate::io::SchematicIoError> {
+            panic!("unexpected file I/O")
+        }
+        fn load_schematic(
+            &self,
+            _: &std::path::Path,
+        ) -> Result<crate::state::SchematicState, crate::io::SchematicIoError> {
+            panic!("unexpected file I/O")
+        }
+        fn save_schematic(
+            &self,
+            _: &crate::state::SchematicState,
+            _: &std::path::Path,
+        ) -> Result<(), crate::io::SchematicIoError> {
+            panic!("unexpected file I/O")
+        }
+    }
+
+    impl crate::workbench::workflows::export_workflow::ExportWorkflowIo for NoIo {
+        fn show_save_dialog(
+            &self,
+            _: crate::workbench::workflows::export_workflow::SaveDialogConfig<'_>,
+        ) -> Result<Option<std::path::PathBuf>, String> {
+            panic!("unexpected export I/O")
+        }
+        fn write_text_file(&self, _: &std::path::Path, _: &str) -> Result<(), String> {
+            panic!("unexpected export I/O")
+        }
+        fn write_waveform_csv(
+            &self,
+            _: &crate::io::WaveformDataset,
+            _: &std::path::Path,
+        ) -> Result<(), String> {
+            panic!("unexpected export I/O")
+        }
+    }
+
+    #[test]
+    fn file_actions_resolve_the_draft_before_saving_or_asking_about_unsaved_changes() {
+        use crate::workbench::state::{InlineEditField, InlineEditSession};
+        let mut state = AppState::default();
+        state.schematic.components.clear();
+        state.schematic.add_component(
+            crate::state::ComponentType::VoltageSource,
+            crate::state::Point::origin(),
+        );
+        state.schematic.clear_undo_history();
+        state.schematic.is_dirty = false;
+        let expected = state.schematic.components[0].clone();
+        let mut candidate = expected.clone();
+        candidate.name = "V9".to_owned();
+        let authority = state.inline_edit_authority();
+        state.workbench.inline_edit.begin(InlineEditSession {
+            expected,
+            field: InlineEditField::Instance,
+            authority,
+            description: "rename instance".to_owned(),
+            buffer: "invalid name".to_owned(),
+            candidate: None,
+            error: Some("Invalid instance designator".to_owned()),
+            widget: None,
+        });
+        // Keep a regressed dispatch on the injectable standalone-file backend;
+        // a failed assertion must never open a native project-save picker.
+        state.project_lifecycle.project_open = false;
+        dispatch_file_menu_action(&mut state, FileMenuAction::Save, &NoIo, &NoIo);
+        assert_eq!(state.schematic.components[0].name, "V1");
+        assert!(
+            state
+                .workbench
+                .inline_edit
+                .session()
+                .unwrap()
+                .error
+                .is_some()
+        );
+        assert!(!state.schematic.can_undo());
+        assert!(state.project_undo_sequence().is_none());
+        state.project_lifecycle.project_open = true;
+        state
+            .workbench
+            .inline_edit
+            .set_draft("V9".to_owned(), Ok(candidate));
+        dispatch_file_menu_action(&mut state, FileMenuAction::NewProject, &NoIo, &NoIo);
+        assert_eq!(state.schematic.components[0].name, "V9");
+        assert!(state.workbench.inline_edit.session().is_none());
+        assert_eq!(
+            state.dialogs.confirmation_dialog.pending_action,
+            Some(ConfirmationAction::ProjectNew)
         );
     }
 }

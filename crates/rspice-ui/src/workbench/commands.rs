@@ -979,6 +979,39 @@ impl Command {
         }
     }
 
+    /// Shared by menu/palette dispatch and the keyboard dispatcher.
+    pub(crate) fn commits_inspector_edit(self) -> bool {
+        command_edits_schematic(self)
+            || matches!(
+                self,
+                Self::Copy
+                    | Self::OpenWorkspace(_)
+                    | Self::ProjectLauncher
+                    | Self::RecentProjects
+                    | Self::PreviousWorkspace
+                    | Self::NextWorkspace
+                    | Self::PreviousDocument
+                    | Self::NextDocument
+                    | Self::CloseOtherDocuments
+                    | Self::CloseAllDocuments
+                    | Self::AscendHierarchy
+                    | Self::DescendHierarchy
+                    | Self::DescendHierarchyDirect
+                    | Self::RunSimulation
+                    | Self::GenerateNetlist
+                    | Self::RunChecks
+                    | Self::PreflightChecks
+                    | Self::ShowInNetlist
+                    | Self::SimulationPage(_)
+                    | Self::ModelsPage(_)
+                    | Self::VerificationPage(_)
+                    | Self::ProjectPage(_)
+                    | Self::ToggleInspector
+                    | Self::ToggleFocusMode
+                    | Self::ResetLayout
+            )
+    }
+
     pub fn execute(self, app: &mut RSpiceApp) {
         if crate::workbench::lifecycle::project_lifecycle::operation_in_progress(&app.state)
             && self.blocked_by_project_operation()
@@ -1001,6 +1034,9 @@ impl Command {
             && app.state.schematic_edit_read_only()
         {
             app.state.deny_read_only_edit();
+            return;
+        }
+        if self.commits_inspector_edit() && !app.state.commit_pending_inspector_edit() {
             return;
         }
         match self {
@@ -1683,7 +1719,11 @@ impl Command {
                 }
             }
             Self::Cancel => {
-                if app.state.cancel_schematic_drag() {
+                if app.state.workbench.workspace == Workspace::Design
+                    && app.state.workbench.inline_edit.session().is_some()
+                {
+                    app.state.workbench.inline_edit.end();
+                } else if app.state.cancel_schematic_drag() {
                     // A pointer edit is the innermost active interaction.
                 } else if app.state.dialogs.descend_hierarchy.open {
                     app.state.dialogs.descend_hierarchy.close();

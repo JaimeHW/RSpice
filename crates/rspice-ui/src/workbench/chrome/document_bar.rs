@@ -217,6 +217,9 @@ pub(crate) fn close_other_documents(state: &mut AppState) -> usize {
 }
 
 pub(crate) fn close_all_documents(state: &mut AppState) -> usize {
+    if !state.commit_pending_inspector_edit() {
+        return 0;
+    }
     reconcile_document_registry(state);
     let documents = owned_available_documents(state);
     let root = documents
@@ -722,7 +725,7 @@ fn activate_document(state: &mut AppState, document: &WorkspaceDocumentId) -> bo
                 .any(|open| open.reference == *reference)
             {
                 state.open_workspace_view(reference.clone());
-                true
+                state.workspace.active_view == *reference
             } else {
                 false
             }
@@ -854,6 +857,9 @@ fn close_document(
         return false;
     };
     if !document_is_closable(state, document) || document.workspace() != state.workbench.workspace {
+        return false;
+    }
+    if !state.commit_pending_inspector_edit() {
         return false;
     }
     let was_active = authoritative_active_document(state, documents).as_ref() == Some(document);

@@ -298,8 +298,18 @@ fn live_mirror_save_block(state: &AppState, project_copy: bool) -> Option<&'stat
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn save_scope_outcome(state: &mut AppState, scope: SaveScope) -> SaveRequestOutcome {
+    if let Err(error) = state.commit_inline_component_edit() {
+        state.push_user_message(ConsoleMessage::warning(format!(
+            "Inspector edit was not applied: {error}"
+        )));
+        return SaveRequestOutcome::Failed(error);
+    }
+    save_scope_for_platform(state, scope)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn save_scope_for_platform(state: &mut AppState, scope: SaveScope) -> SaveRequestOutcome {
     if let Some(message) = live_mirror_save_block(state, false) {
         state.push_user_message(ConsoleMessage::warning(message));
         return SaveRequestOutcome::Failed(message.to_owned());
@@ -335,6 +345,7 @@ fn save_native_scope(
     path: &Path,
     authority: DestinationAuthority,
 ) -> Result<(), String> {
+    state.commit_inline_component_edit()?;
     match crate::workbench::lifecycle::project_lifecycle::save_native(state, scope, path, authority)
     {
         Ok(()) => {
@@ -359,7 +370,7 @@ fn save_native_scope(
 }
 
 #[cfg(target_arch = "wasm32")]
-fn save_scope_outcome(state: &mut AppState, scope: SaveScope) -> SaveRequestOutcome {
+fn save_scope_for_platform(state: &mut AppState, scope: SaveScope) -> SaveRequestOutcome {
     if let Some(message) = live_mirror_save_block(state, false) {
         state.push_user_message(ConsoleMessage::warning(message));
         return SaveRequestOutcome::Failed(message.to_owned());
@@ -803,6 +814,9 @@ fn canonical_save_continuation_event(
 }
 
 pub(crate) fn save_project_as(state: &mut AppState) -> bool {
+    if !state.commit_pending_inspector_edit() {
+        return false;
+    }
     if let Some(message) = live_mirror_save_block(state, true) {
         state.push_user_message(ConsoleMessage::warning(message));
         return false;

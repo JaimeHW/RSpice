@@ -951,6 +951,9 @@ impl AppState {
 
     pub(crate) fn open_workspace_view(&mut self, reference: CellViewRef) {
         if self.workspace.active_view != reference {
+            if !self.commit_pending_inspector_edit() {
+                return;
+            }
             self.cancel_schematic_drag();
         }
         self.sync_active_schematic_to_workspace();
@@ -988,6 +991,9 @@ impl AppState {
         instance: Option<String>,
         reference: CellViewRef,
     ) {
+        if !self.commit_pending_inspector_edit() {
+            return;
+        }
         self.cancel_schematic_drag();
         self.sync_active_schematic_to_workspace();
         let view_type = view_type_for_reference(self, &reference);
@@ -2081,6 +2087,9 @@ impl AppState {
     }
 
     pub(crate) fn focus_workspace_breadcrumb(&mut self, index: usize) {
+        if !self.commit_pending_inspector_edit() {
+            return;
+        }
         self.cancel_schematic_drag();
         self.sync_active_schematic_to_workspace();
         if let Some(reference) = self.workspace.focus_breadcrumb(index) {

@@ -8,6 +8,9 @@
 
 use super::*;
 
+#[cfg(test)]
+mod tests;
+
 pub(super) fn field_value(component: &Component, field: &InlineEditField) -> String {
     match field {
         InlineEditField::Instance => component.name.clone(),
