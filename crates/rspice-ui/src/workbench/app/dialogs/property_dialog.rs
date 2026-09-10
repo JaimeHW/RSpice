@@ -112,19 +112,14 @@ pub fn render_property_dialog(ctx: &egui::Context, state: &mut AppState) -> Tabb
         }
         let changed_port_contract =
             candidate.kind == crate::state::ComponentType::Port && &candidate != component;
-        if &candidate != component {
-            let before = crate::state::SchematicSnapshot::capture(&state.schematic);
-            if let Some(component) = state
-                .schematic
-                .components
-                .iter_mut()
-                .find(|component| component.id == comp_id)
-            {
-                *component = candidate;
-            }
-            state.schematic.is_dirty = true;
-            state.schematic.bump_topology_version();
-            state.schematic.commit_undo_from(before, "edit properties");
+        let expected = component.clone();
+        if let Err(error) =
+            state.edit_component_transaction(&expected, candidate, "edit properties")
+        {
+            state.tabbed_property_dialog.open = true;
+            state.tabbed_property_dialog.commit_error =
+                Some(format!("The component was not changed: {error}"));
+            return TabbedDialogResult::None;
         }
         if changed_port_contract {
             state.sync_active_schematic_to_workspace();
@@ -134,15 +129,31 @@ pub fn render_property_dialog(ctx: &egui::Context, state: &mut AppState) -> Tabb
         if close_after_commit {
             state.tabbed_property_dialog.clear_after_apply();
         } else if state.tabbed_property_dialog.open {
-            state.tabbed_property_dialog.component_baseline = state
+            let component = state
                 .schematic
                 .components
                 .iter()
                 .find(|component| component.id == comp_id)
-                .cloned();
+                .expect("committed component retains its identity");
+            let values = crate::properties::property_bridge::collect_properties_from_component(
+                component,
+                &state.property_registry,
+            );
+            state.tabbed_property_dialog.component_baseline = Some(component.clone());
+            state.tabbed_property_dialog.component_name = Some(component.name.clone());
+            state.tabbed_property_dialog.design_execution_epoch = state.design_execution_epoch;
             state
                 .tabbed_property_dialog
                 .mark_fields_applied(committed_names);
+            state.tabbed_property_dialog.rebase_applied_values(
+                values,
+                state
+                    .property_registry
+                    .get(component.kind)
+                    .expect("validated schema"),
+                quantity_policy,
+                number_locale,
+            );
         }
     }
 
@@ -943,6 +954,22 @@ mod tests {
         state
     }
 
+    fn add_current_output(state: &mut AppState) -> crate::product::SimulationPlanId {
+        let plan = state.sim_setup.stable_analysis_plan().unwrap().id();
+        let output = crate::state::SavedOutput::new(
+            crate::state::SavedOutputKind::RawVoltageOrCurrent,
+            "resistor current",
+            "I(R1)",
+            crate::state::SavedOutputCompatibility::OpTranAc,
+            crate::state::SavedOutputPolicy::EveryAcceptedPoint,
+            crate::state::SavedOutputPrecision::FullSourcePrecision,
+            crate::state::SavedOutputStreaming::StoreOnly,
+        )
+        .unwrap();
+        state.workspace.add_saved_output(plan, output).unwrap();
+        plan
+    }
+
     #[test]
     fn cross_field_validation_includes_unserialized_schema_defaults() {
         let registry = crate::state::PropertyRegistry::new();
@@ -1042,10 +1069,14 @@ mod tests {
         let ctx = egui::Context::default();
         crate::ui::Theme::default().apply(&ctx);
         let mut state = state_with_resistor();
+        let plan = add_current_output(&mut state);
         open_property_editor(&mut state, 44);
         state
             .tabbed_property_dialog
             .set_value("name", PropertyValue::String("R99".to_owned()));
+        state
+            .tabbed_property_dialog
+            .set_value("r", PropertyValue::Expression("2k".to_owned()));
 
         let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| {
             render_property_dialog(ctx, &mut state);
@@ -1056,9 +1087,67 @@ mod tests {
 
         assert!(!state.tabbed_property_dialog.open);
         assert_eq!(state.schematic.components[0].name, "R99");
-        assert!(state.schematic.can_undo());
-        assert!(state.schematic.undo());
+        assert_eq!(state.schematic.components[0].value, "2k");
+        assert_eq!(
+            state.workspace.plan_data(plan).unwrap().saved_outputs[0].source_expression,
+            "I(R99)"
+        );
+        assert!(!state.schematic.can_undo());
+        assert_eq!(
+            state.undo_project_design().unwrap(),
+            Some("edit properties".to_owned())
+        );
         assert_eq!(state.schematic.components[0].name, "R1");
+        assert_eq!(state.schematic.components[0].value, "1k");
+        assert_eq!(
+            state.workspace.plan_data(plan).unwrap().saved_outputs[0].source_expression,
+            "I(R1)"
+        );
+        assert!(state.project_undo_sequence().is_none());
+        assert!(state.redo_project_design().unwrap().is_some());
+        assert_eq!(state.schematic.components[0].name, "R99");
+        assert_eq!(state.schematic.components[0].value, "2k");
+        assert_eq!(
+            state.workspace.plan_data(plan).unwrap().saved_outputs[0].source_expression,
+            "I(R99)"
+        );
+    }
+
+    #[test]
+    fn rendered_property_commit_refusal_keeps_the_design_and_draft_intact() {
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let mut state = state_with_resistor();
+        let plan = add_current_output(&mut state);
+        state.workspace.plan_data_mut(plan).unwrap().saved_outputs[0].revision =
+            crate::product::ObjectRevision::new(u64::MAX).unwrap();
+        let before = crate::state::SchematicSnapshot::capture(&state.schematic);
+        let payloads = state.workspace.simulation_plan_payloads.clone();
+        open_property_editor(&mut state, 44);
+        state
+            .tabbed_property_dialog
+            .set_value("name", PropertyValue::String("R99".to_owned()));
+        state
+            .tabbed_property_dialog
+            .set_value("r", PropertyValue::Expression("2k".to_owned()));
+        let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| {
+            render_property_dialog(ctx, &mut state);
+        });
+        let _ = ctx.run_ui(dialog_input(vec![key_event(egui::Key::Enter)]), |ctx| {
+            render_property_dialog(ctx, &mut state);
+        });
+        assert!(before.is_equal_state(&state.schematic));
+        assert_eq!(state.workspace.simulation_plan_payloads, payloads);
+        assert!(state.tabbed_property_dialog.open);
+        assert!(state.tabbed_property_dialog.commit_error.is_some());
+        assert!(state.tabbed_property_dialog.is_modified("name"));
+        assert!(state.tabbed_property_dialog.is_modified("r"));
+        assert_eq!(
+            state.tabbed_property_dialog.values["name"],
+            PropertyValue::String("R99".to_owned())
+        );
+        assert!(!state.schematic.can_undo());
+        assert!(state.project_undo_sequence().is_none());
     }
 
     #[test]
@@ -1178,7 +1267,7 @@ mod tests {
         open_property_editor(&mut state, 44);
         state
             .tabbed_property_dialog
-            .set_value("name", PropertyValue::String("R99".to_owned()));
+            .set_value("name", PropertyValue::String(" R99 ".to_owned()));
         state.tabbed_property_dialog.update_numeric_text_draft(
             "m",
             "0".to_owned(),
@@ -1195,7 +1284,17 @@ mod tests {
         assert!(state.tabbed_property_dialog.open);
         assert_eq!(state.schematic.components[0].name, "R99");
         assert_eq!(state.schematic.components[0].params, "");
-        assert_eq!(state.schematic.undo_history.undo_count(), 1);
+        assert_eq!(state.schematic.undo_history.undo_count(), 0);
+        assert!(state.project_undo_sequence().is_some());
+        assert!(component_property_session_error(&state).is_none());
+        assert_eq!(
+            state.tabbed_property_dialog.values["name"],
+            PropertyValue::String("R99".to_owned())
+        );
+        assert_eq!(
+            state.tabbed_property_dialog.original_values["name"],
+            PropertyValue::String("R99".to_owned())
+        );
         assert_eq!(
             state.tabbed_property_dialog.numeric_text_draft("m"),
             Some("0")
@@ -1219,12 +1318,12 @@ mod tests {
         assert!(!state.tabbed_property_dialog.open);
         assert_eq!(state.schematic.components[0].name, "R99");
         assert_eq!(state.schematic.components[0].params, "m=2");
-        assert_eq!(state.schematic.undo_history.undo_count(), 2);
+        assert_eq!(state.schematic.undo_history.undo_count(), 1);
 
         assert!(state.schematic.undo());
         assert_eq!(state.schematic.components[0].name, "R99");
         assert_eq!(state.schematic.components[0].params, "");
-        assert!(state.schematic.undo());
+        assert!(state.undo_project_design().unwrap().is_some());
         assert_eq!(state.schematic.components[0].name, "R1");
     }
 }

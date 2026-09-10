@@ -372,6 +372,42 @@ impl TabbedPropertyDialogState {
         self.refresh_validation_summary();
     }
 
+    /// Rebase the accepted fields on what the host actually published, including
+    /// normalized names and rewritten references. Rejected drafts stay isolated.
+    pub(crate) fn rebase_applied_values(
+        &mut self,
+        values: HashMap<String, PropertyValue>,
+        sheet: &PropertySheet,
+        quantity_policy: QuantityPresentationPolicy,
+        number_locale: UiNumberLocale,
+    ) {
+        let prior = std::mem::replace(&mut self.original_values, values);
+        self.values.retain(|name, _| self.modified.contains(name));
+        for (name, value) in &self.original_values {
+            if !self.modified.contains(name) {
+                self.values.insert(name.clone(), value.clone());
+            }
+        }
+        for def in sheet.iter().filter(|def| {
+            matches!(
+                def.prop_type,
+                PropertyType::Number | PropertyType::Expression
+            ) && prior.get(&def.name) != self.original_values.get(&def.name)
+        }) {
+            let value = self
+                .original_values
+                .get(&def.name)
+                .unwrap_or(&def.default_value);
+            let text =
+                super::editors::editor_source_text(def, value, quantity_policy, number_locale);
+            self.original_numeric_text_drafts
+                .insert(def.name.clone(), text.clone());
+            if !self.modified.contains(&def.name) {
+                self.numeric_text_drafts.insert(def.name.clone(), text);
+            }
+        }
+    }
+
     /// Revert all changes to original values
     #[cfg(test)]
     pub fn revert(&mut self) {
