@@ -1613,10 +1613,16 @@ pub(super) fn run_sensitivity_from_command(
             let combined = &trace.magnitude;
 
             if !ctx.quiet {
-                let first = combined.first().copied().unwrap_or(0.0);
-                let last = combined.last().copied().unwrap_or(0.0);
+                let first = combined
+                    .first()
+                    .map(|value| format!("{value:.6e}"))
+                    .unwrap_or_else(|| "not retained".to_owned());
+                let last = combined
+                    .last()
+                    .map(|value| format!("{value:.6e}"))
+                    .unwrap_or_else(|| "not retained".to_owned());
                 println!(
-                    "  d|{}|/d{}: {:.6e} {} per native parameter unit @ {:e} Hz, {:.6e} @ {:e} Hz",
+                    "  d|{}|/d{}: {} {} per native parameter unit @ {:e} Hz, {} @ {:e} Hz",
                     output_label,
                     trace.vector_name,
                     first,
@@ -1628,13 +1634,26 @@ pub(super) fn run_sensitivity_from_command(
             }
 
             if ctx.verbose && !ctx.quiet {
-                let peak = combined
-                    .iter()
-                    .map(|v| v.abs())
-                    .fold(0.0_f64, |acc, v| acc.max(v));
+                let (peak, available) = combined.iter().filter_map(|value| value.value()).fold(
+                    (None::<f64>, 0usize),
+                    |(peak, count), value| {
+                        (
+                            Some(peak.map_or(value.abs(), |peak| peak.max(value.abs()))),
+                            count + 1,
+                        )
+                    },
+                );
+                let peak = peak
+                    .map(|value| format!("{value:.6e}"))
+                    .unwrap_or_else(|| "unavailable".to_owned());
                 println!(
-                    "    peak |d|{}|/d{}| = {:.6e} {} per native parameter unit",
-                    output_label, trace.vector_name, peak, output_unit
+                    "    peak |d|{}|/d{}| = {} {} per native parameter unit ({} of {} points available)",
+                    output_label,
+                    trace.vector_name,
+                    peak,
+                    output_unit,
+                    available,
+                    combined.len()
                 );
             }
         }

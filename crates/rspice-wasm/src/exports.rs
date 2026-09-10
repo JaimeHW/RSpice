@@ -315,6 +315,61 @@ mod wasm_tests {
     }
 
     #[wasm_bindgen_test]
+    fn sensitivity_availability_in_wasm() {
+        use rspice_core::abort_signal::NoAbort;
+        use rspice_core::analysis::{AcSensitivityOutput, SensitivityUnavailability as Reason};
+        use rspice_core::execution::{AnalysisResultDocument, DeckPlan};
+        let netlist = rspice_core::Netlist::parse(
+            "Zero sensitivity\nV1 out 0 DC 0 AC 0\nR1 out 0 1\n.sens V(out) AC LIN 1 1 1\n.end\n",
+        )
+        .unwrap();
+        let result = rspice_core::Engine::default()
+            .run_sensitivity_ac_complete_with_abort(
+                &netlist,
+                AcSensitivityOutput::Voltage {
+                    positive: 1,
+                    negative: None,
+                },
+                &[1.0],
+                &[],
+                &NoAbort,
+            )
+            .unwrap();
+        let trace = result
+            .sensitivities
+            .iter()
+            .find(|trace| trace.absolute[0].re == 1.0)
+            .unwrap();
+        assert_eq!(trace.normalized[0].reason(), Some(Reason::ZeroOutput));
+        assert_eq!(trace.phase[0].reason(), Some(Reason::ZeroOutput));
+        assert_eq!(
+            trace.magnitude[0].reason(),
+            Some(Reason::NondifferentiableMagnitude)
+        );
+        let plan = DeckPlan::from_netlist_with_abort(
+            &netlist,
+            &rspice_core::resource::ResourceLimits::default(),
+            &NoAbort,
+        )
+        .unwrap();
+        let id = plan
+            .analyses()
+            .iter()
+            .find(|analysis| analysis.id().tag() == "sens-001")
+            .unwrap()
+            .id();
+        let document = AnalysisResultDocument::from_ac_sensitivity(id, &result)
+            .unwrap()
+            .build()
+            .unwrap();
+        let json = document.to_json_with_abort(&NoAbort, u64::MAX).unwrap();
+        assert_eq!(
+            AnalysisResultDocument::from_json_with_abort(&json, &NoAbort, u64::MAX).unwrap(),
+            document
+        );
+    }
+
+    #[wasm_bindgen_test]
     fn sensitivity_stencil_and_derived_scale_in_wasm() {
         use rspice_core::abort_signal::NoAbort;
         use rspice_core::analysis::sensitivity::AcSensitivityOutput;
@@ -337,8 +392,8 @@ mod wasm_tests {
                 )
                 .unwrap();
             let trace = result.get("R1").unwrap();
-            assert!((trace.normalized[0].re - 1.0).abs() < 2e-10);
-            assert!((trace.magnitude[0] / current - 1.0).abs() < 2e-10);
+            assert!((trace.normalized[0].value().unwrap().re - 1.0).abs() < 2e-10);
+            assert!((trace.magnitude[0].value().unwrap() / current - 1.0).abs() < 2e-10);
         }
         let netlist = rspice_core::Netlist::parse(
             "Boundary capacitance\nI1 0 out AC 1e308\nR1 out 0 1\nC1 out 0 0\n.end\n",
@@ -360,7 +415,7 @@ mod wasm_tests {
         let omega = std::f64::consts::TAU * 0.01;
         assert_eq!(trace.absolute[0].re, 0.0);
         assert!((trace.absolute[0].im / (-omega * 1e308) - 1.0).abs() < 2e-12);
-        assert!((trace.phase[0] / -omega - 1.0).abs() < 2e-12);
+        assert!((trace.phase[0].value().unwrap() / -omega - 1.0).abs() < 2e-12);
     }
 
     #[wasm_bindgen_test]
@@ -407,7 +462,7 @@ mod wasm_tests {
                 .unwrap();
             let resistor = result.get("R1").unwrap();
             assert!((resistor.absolute / current - 1.0).abs() < 2e-12);
-            assert!((resistor.normalized - 1.0).abs() < 2e-12);
+            assert!((resistor.normalized.value().unwrap() - 1.0).abs() < 2e-12);
         }
     }
 

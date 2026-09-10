@@ -4462,7 +4462,7 @@ impl XyceTestRunner {
                         row_index,
                         None,
                         phase_output_radians,
-                    );
+                    )?;
                     Self::record_sensitivity_mismatch(
                         self,
                         &mut mismatches,
@@ -4506,7 +4506,7 @@ impl XyceTestRunner {
                                 row_index,
                                 Some(trace),
                                 phase_output_radians,
-                            );
+                            )?;
                             Self::record_sensitivity_mismatch(
                                 self,
                                 &mut mismatches,

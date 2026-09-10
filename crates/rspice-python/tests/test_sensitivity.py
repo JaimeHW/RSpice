@@ -1,6 +1,7 @@
 """DC and AC sensitivity analysis (`.SENS`)."""
 
 import numpy as np
+import pickle
 import pytest
 
 import rspice
@@ -8,6 +9,56 @@ import rspice
 
 
 class TestSensitivity:
+    def test_zero_output_availability_survives_python_and_pickle(self, engine):
+        netlist = rspice.Netlist.parse_spice("Zero output\nV1 out 0 DC 0 AC 0\nR1 out 0 1\n.end\n")
+        dc = engine.run_sensitivity_dc_complete(netlist, "out")
+        assert dc.top() == []
+        assert any(entry.absolute == 1.0 for entry in dc.sensitivities)
+        for entry in dc.sensitivities:
+            restored = pickle.loads(pickle.dumps(entry))
+            assert restored.absolute == entry.absolute
+            assert restored.normalized is None
+            assert restored.percent_per_percent is None
+            assert restored.normalized_unavailability == "zero-output"
+        assert dc.document()["payload"]["entries"][0]["normalized"] == {"unavailable": "zero-output"}
+
+        ac = engine.run_sensitivity_ac_complete(netlist, "out", [1.0, 2.0])
+        assert ac.top(0) == []
+        amplitude = next(entry for entry in ac.sensitivities if entry.absolute[0] == 1.0)
+        for trace in [amplitude, pickle.loads(pickle.dumps(amplitude))]:
+            assert np.all(trace.absolute == 1.0)
+            assert np.all(np.isnan(trace.normalized))
+            assert np.all(np.isnan(trace.magnitude))
+            assert np.all(np.isnan(trace.phase))
+            assert np.all(np.isnan(trace.db))
+            assert trace.normalized_unavailability == ["zero-output"] * 2
+            assert trace.magnitude_unavailability == ["nondifferentiable-magnitude"] * 2
+            assert trace.phase_unavailability == ["zero-output"] * 2
+            assert trace.phase_degrees_unavailability == ["zero-output"] * 2
+            assert trace.db_unavailability == ["zero-output"] * 2
+        assert ac.document()["schemaVersion"] == 5
+        with pytest.raises(ValueError, match="rerun"):
+            rspice.ElementSensitivity._unpickle(("V1", "V1", "VoltageSource", "dc"), 0.0, 1.0, 0.0)
+
+    @pytest.mark.parametrize("current", [1e-300, 1e200])
+    def test_decibel_sensitivity_preserves_extreme_output_scales(self, engine, current):
+        netlist = rspice.Netlist.parse_spice(f"Scale\nI1 0 out AC {current}\nR1 out 0 1\n.end\n")
+        trace = engine.run_sensitivity_ac_complete(netlist, "out", [1.0], filters=["R1"]).get("R1")
+        assert trace.db == pytest.approx([20.0 / np.log(10.0)], rel=2e-10)
+        assert trace.db_unavailability == [None]
+
+    def test_sensitivity_ranking_compares_large_complex_magnitudes(self):
+        def trace(name, component):
+            return rspice.AcSensitivity._unpickle(
+                (name, name, "Resistor", "value"), 1.0,
+                ([(1.0, 0.0)], [(component, component)]),
+                ([1.0], [0.0], [0.0]), (1, [None], [None], [None], [None]),
+            )
+        result = rspice.AcSensitivityResult._unpickle(
+            "V(out)", [1.0], [(1.0, 0.0)], [trace("A", 1.3e308), trace("B", 1.7e308)]
+        )
+        assert [value.vector_name for value in result.top(0)] == ["B", "A"]
+
     def test_linearized_sensitivity_reports_all_elements(self, engine, divider):
         result = engine.run_sensitivity_linearized(divider, "out")
         assert isinstance(result, rspice.SensitivityResult)

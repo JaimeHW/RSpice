@@ -369,6 +369,18 @@ signals across extreme scales, and nonfinite or unrepresentable results are
 diagnosed. Postprocessing polls cancellation, and fatal perturbation failures
 stop the study before another trial is attempted.
 
+Derived sensitivities use `SensitivityValue<T>`: an available number or an
+explicit reason. Relative sensitivity and phase are undefined at zero output;
+the magnitude derivative is nondifferentiable there when the complex derivative
+is nonzero. A zero complex derivative retains a zero magnitude derivative.
+Unrepresentable derived values report `OutOfRange` while preserving the absolute
+derivative. Invalid inputs remain errors at the result-document boundary.
+Shared result documents use version 5; sensitivity documents from earlier
+versions require a rerun because their zero values do not establish availability.
+Other supported legacy result families remain readable. Python exposes missing
+DC normalization as `None`, and unavailable AC samples as NumPy NaNs paired with
+`*_unavailability` reason arrays; rankings include only available normalization.
+
 ### Periodic large-signal cards
 
 `.PSS`, `.PAC`, `.PNOISE` and `.ENVELOPE` are parsed into typed, fully

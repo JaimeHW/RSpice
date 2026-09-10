@@ -28,6 +28,164 @@
 use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::{Complex64, Value};
 use rspice_veriloga_runtime::arithmetic::ScaledValue;
+use serde::{Deserialize, Serialize};
+
+/// A sensitivity quantity, or the reason it has no representable value.
+/// Available samples serialize as ordinary numbers (or complex samples).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(untagged, deny_unknown_fields)]
+pub enum SensitivityValue<T> {
+    Available(T),
+    Unavailable {
+        unavailable: SensitivityUnavailability,
+    },
+}
+
+/// Why a derived sensitivity cannot be reported as a number.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SensitivityUnavailability {
+    ZeroOutput,
+    NondifferentiableMagnitude,
+    OutOfRange,
+    /// Malformed input, not a mathematical determination about a circuit.
+    InvalidInput,
+}
+
+impl SensitivityUnavailability {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::ZeroOutput => "zero-output",
+            Self::NondifferentiableMagnitude => "nondifferentiable-magnitude",
+            Self::OutOfRange => "out-of-range",
+            Self::InvalidInput => "invalid-input",
+        }
+    }
+}
+
+impl<T> SensitivityValue<T> {
+    pub const fn unavailable(reason: SensitivityUnavailability) -> Self {
+        Self::Unavailable {
+            unavailable: reason,
+        }
+    }
+
+    pub const fn reason(&self) -> Option<SensitivityUnavailability> {
+        match self {
+            Self::Available(_) => None,
+            Self::Unavailable { unavailable } => Some(*unavailable),
+        }
+    }
+
+    pub fn value(self) -> Option<T> {
+        match self {
+            Self::Available(value) => Some(value),
+            Self::Unavailable { .. } => None,
+        }
+    }
+
+    pub fn map<U>(self, map: impl FnOnce(T) -> U) -> SensitivityValue<U> {
+        match self {
+            Self::Available(value) => SensitivityValue::Available(map(value)),
+            Self::Unavailable { unavailable } => SensitivityValue::unavailable(unavailable),
+        }
+    }
+
+    pub fn zip<U>(self, other: SensitivityValue<U>) -> SensitivityValue<(T, U)> {
+        match (self, other) {
+            (Self::Available(left), SensitivityValue::Available(right)) => {
+                SensitivityValue::Available((left, right))
+            }
+            (Self::Unavailable { unavailable }, _)
+            | (_, SensitivityValue::Unavailable { unavailable }) => {
+                SensitivityValue::unavailable(unavailable)
+            }
+        }
+    }
+}
+
+impl SensitivityValue<Value> {
+    pub(crate) fn from_scaled(value: ScaledValue) -> Self {
+        let result = value.binary64();
+        if !result.is_finite() || (result == 0.0 && !value.is_zero()) {
+            Self::unavailable(SensitivityUnavailability::OutOfRange)
+        } else {
+            Self::Available(result)
+        }
+    }
+
+    /// Relative output change per relative parameter change. Zero output has
+    /// no relative scale, even when the parameter or derivative is also zero.
+    pub fn normalized(nominal: Value, absolute: Value, output: Value) -> Self {
+        if [nominal, absolute, output]
+            .iter()
+            .any(|value| !value.is_finite())
+        {
+            return Self::unavailable(SensitivityUnavailability::InvalidInput);
+        }
+        if output == 0.0 {
+            return Self::unavailable(SensitivityUnavailability::ZeroOutput);
+        }
+        Self::from_scaled(
+            ScaledValue::new(nominal)
+                .multiply(ScaledValue::new(absolute))
+                .divide(ScaledValue::new(output)),
+        )
+    }
+
+    /// Convert a derived real quantity's units without losing availability or
+    /// rounding a nonzero value below the representable range to zero.
+    pub fn scaled(self, factor: Value) -> Self {
+        match self {
+            Self::Available(value) if value.is_finite() && factor.is_finite() => {
+                Self::from_scaled(ScaledValue::new(value).multiply(ScaledValue::new(factor)))
+            }
+            Self::Available(_) => Self::unavailable(SensitivityUnavailability::InvalidInput),
+            unavailable => unavailable,
+        }
+    }
+
+    /// Derivative of `20 log10 |output|` from a complex output derivative.
+    /// The dot product and squared norm retain their exponents, including
+    /// when the output's magnitude itself exceeds the binary64 range.
+    pub fn decibels(output: Complex64, derivative: Complex64) -> Self {
+        if [output.re, output.im, derivative.re, derivative.im]
+            .iter()
+            .any(|value| !value.is_finite())
+        {
+            return Self::unavailable(SensitivityUnavailability::InvalidInput);
+        }
+        if output == Complex64::new(0.0, 0.0) {
+            return Self::unavailable(SensitivityUnavailability::ZeroOutput);
+        }
+        let re = ScaledValue::new(output.re);
+        let im = ScaledValue::new(output.im);
+        let factor = ScaledValue::new(20.0 / std::f64::consts::LN_10);
+        let one = ScaledValue::new(1.0);
+        match ScaledValue::sum_triple_products_ratio(
+            [
+                [re, ScaledValue::new(derivative.re), factor],
+                [im, ScaledValue::new(derivative.im), factor],
+            ]
+            .into_iter(),
+            [[re, re, one], [im, im, one]].into_iter(),
+        ) {
+            Ok(value) => Self::from_scaled(value),
+            Err(_) => Self::unavailable(SensitivityUnavailability::InvalidInput),
+        }
+    }
+}
+
+impl<T: std::fmt::LowerExp> std::fmt::LowerExp for SensitivityValue<T> {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Available(value) => std::fmt::LowerExp::fmt(value, formatter),
+            Self::Unavailable { unavailable } => {
+                write!(formatter, "unavailable ({})", unavailable.as_str())
+            }
+        }
+    }
+}
 
 //=============================================================================
 // Data Structures
@@ -89,11 +247,11 @@ pub struct AcSensitivity {
     /// Complex derivative of the selected output at every frequency.
     pub absolute: Vec<Complex64>,
     /// Complex normalized derivative `(p / output) * d(output)/dp`.
-    pub normalized: Vec<Complex64>,
+    pub normalized: Vec<SensitivityValue<Complex64>>,
     /// Derivative of output magnitude with respect to the parameter.
-    pub magnitude: Vec<Value>,
+    pub magnitude: Vec<SensitivityValue<Value>>,
     /// Derivative of output phase in radians with respect to the parameter.
-    pub phase: Vec<Value>,
+    pub phase: Vec<SensitivityValue<Value>>,
 }
 
 /// Complete netlist-wide AC sensitivity result.
@@ -144,7 +302,7 @@ pub struct Sensitivity {
     /// Absolute sensitivity: ∂output/∂param
     pub absolute: Value,
     /// Normalized sensitivity: (param/output) · ∂output/∂param
-    pub normalized: Value,
+    pub normalized: SensitivityValue<Value>,
 }
 
 impl Sensitivity {
@@ -157,19 +315,7 @@ impl Sensitivity {
         absolute: Value,
         output_value: Value,
     ) -> Self {
-        let normalized = if output_value != 0.0 {
-            ScaledValue::new(nominal)
-                .multiply(ScaledValue::new(absolute))
-                .divide(ScaledValue::new(output_value))
-                .binary64()
-        } else {
-            0.0
-        };
-        let normalized = if normalized.is_finite() {
-            normalized
-        } else {
-            0.0
-        };
+        let normalized = SensitivityValue::normalized(nominal, absolute, output_value);
 
         Self {
             vector_name: element.to_string(),
@@ -183,7 +329,7 @@ impl Sensitivity {
     }
 
     /// Get sensitivity in percent per percent
-    pub fn percent_per_percent(&self) -> Value {
+    pub fn percent_per_percent(&self) -> SensitivityValue<Value> {
         // If dy/y = S * dp/p, then a one-percent parameter change produces
         // S percent output change. The numeric percent-per-percent value is
         // therefore the normalized sensitivity itself, not 100*S.
@@ -966,7 +1112,7 @@ mod tests {
                     (resistor.absolute * resistance - 1.0).abs() < 2e-14,
                     "R={resistance:e}: {resistor:?}"
                 );
-                assert!((resistor.normalized - 1.0).abs() < 2e-14);
+                assert!((resistor.normalized.value().unwrap() - 1.0).abs() < 2e-14);
             }
         }
         let element = ElementDesc::resistor("R", Some(0), Some(1), 1e200);
@@ -997,10 +1143,43 @@ mod tests {
                 output,
             );
             assert!(
-                (result.normalized / expected - 1.0).abs() < 2e-14,
+                (result.normalized.value().unwrap() / expected - 1.0).abs() < 2e-14,
                 "{result:?}"
             );
         }
+    }
+
+    #[test]
+    fn sensitivity_availability_distinguishes_zero_scale_range_and_invalid_input() {
+        use super::{SensitivityUnavailability as Reason, SensitivityValue};
+        for (parameter, derivative, output, reason) in [
+            (1.0, 2.0, 0.0, Reason::ZeroOutput),
+            (0.0, 0.0, 0.0, Reason::ZeroOutput),
+            (1e200, 1e200, 1.0, Reason::OutOfRange),
+            (1e-200, 1e-200, 1.0, Reason::OutOfRange),
+            (1.0, 2.0, f64::NAN, Reason::InvalidInput),
+        ] {
+            let result = Sensitivity::new(
+                "R",
+                ElementType::Resistor,
+                "value",
+                parameter,
+                derivative,
+                output,
+            );
+            assert_eq!(result.absolute, derivative);
+            assert_eq!(result.normalized.reason(), Some(reason));
+            assert_eq!(result.percent_per_percent().value(), None);
+        }
+        assert_eq!(
+            SensitivityValue::normalized(0.0, 2.0, 1.0).value(),
+            Some(0.0)
+        );
+        // The final ratio is finite despite the overflowing intermediate product.
+        assert_eq!(
+            SensitivityValue::normalized(1e200, 1e200, 1e200).value(),
+            Some(1e200)
+        );
     }
 
     #[test]

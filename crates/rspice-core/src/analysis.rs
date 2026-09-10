@@ -85,7 +85,8 @@ pub use s_param::{
 };
 pub use sensitivity::{
     AcSensitivity, AcSensitivityOutput, AcSensitivityResult, ElementDesc, ElementType, Sensitivity,
-    SensitivityAnalysisError, SensitivityAnalyzer, SensitivityResult,
+    SensitivityAnalysisError, SensitivityAnalyzer, SensitivityResult, SensitivityUnavailability,
+    SensitivityValue,
 };
 pub use stb::{
     BodePoint, NyquistPoint, StabilityMargins, StbAnalysisError, StbAnalyzer, StbConfig,

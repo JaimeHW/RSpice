@@ -20,6 +20,59 @@ fn assert_passing_continuous_record_without_fail_value(
 }
 
 #[test]
+fn xyce_sensitivity_availability_refuses_undefined_comparisons() {
+    use rspice_core::analysis::{
+        AcSensitivity, ElementType, SensitivityUnavailability as Reason, SensitivityValue,
+    };
+    let zero = Complex64::new(0.0, 0.0);
+    let mut trace = AcSensitivity {
+        vector_name: "V1".into(),
+        element: "V1".into(),
+        element_type: ElementType::VoltageSource,
+        parameter: "ac".into(),
+        nominal_value: 0.0,
+        absolute: vec![Complex64::new(1.0, 0.0)],
+        normalized: vec![SensitivityValue::unavailable(Reason::ZeroOutput)],
+        magnitude: vec![SensitivityValue::unavailable(
+            Reason::NondifferentiableMagnitude,
+        )],
+        phase: vec![SensitivityValue::unavailable(Reason::ZeroOutput)],
+    };
+    assert_eq!(
+        XyceTestRunner::xyce_sensitivity_value("re", zero, 0, Some(&trace), true).unwrap(),
+        1.0
+    );
+    for (component, reason) in [
+        ("mag", "nondifferentiable-magnitude"),
+        ("ph", "zero-output"),
+    ] {
+        let error = XyceTestRunner::xyce_sensitivity_value(component, zero, 0, Some(&trace), true)
+            .unwrap_err();
+        assert!(error.contains("V1") && error.contains(reason), "{error}");
+    }
+    assert!(
+        XyceTestRunner::xyce_sensitivity_value("ph", zero, 0, None, true)
+            .unwrap_err()
+            .contains("zero-output")
+    );
+    trace.phase[0] = SensitivityValue::Available(1e308);
+    assert_eq!(
+        XyceTestRunner::xyce_sensitivity_value("ph", zero, 0, Some(&trace), true).unwrap(),
+        1e308
+    );
+    assert!(
+        XyceTestRunner::xyce_sensitivity_value("ph", zero, 0, Some(&trace), false)
+            .unwrap_err()
+            .contains("out-of-range")
+    );
+    assert!(
+        XyceTestRunner::xyce_sensitivity_value("re", zero, 1, Some(&trace), true)
+            .unwrap_err()
+            .contains("no sample")
+    );
+}
+
+#[test]
 fn xyce_runner_retains_one_mismatch_when_configured_limit_is_zero() {
     let runner = XyceTestRunner::new(
         ".",

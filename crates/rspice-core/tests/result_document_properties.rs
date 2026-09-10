@@ -495,7 +495,9 @@ fn document(family: usize, shape: &Shape) -> AnalysisResultDocument {
                     parameter: "r".to_owned(),
                     nominal_value: 1000.0,
                     absolute: shape.magnitudes[0],
-                    normalized: shape.magnitudes[0] * 0.001,
+                    normalized: rspice_core::analysis::SensitivityValue::Available(
+                        shape.magnitudes[0] * 0.001,
+                    ),
                 }],
             }),
         ),
@@ -757,6 +759,18 @@ fn document(family: usize, shape: &Shape) -> AnalysisResultDocument {
         ),
     };
 
+    let mut retained_scalars = scalars(shape);
+    if analysis == AnalysisKind::Sensitivity {
+        retained_scalars.push(
+            ResultScalar::new(
+                "output_value",
+                "Output value",
+                None,
+                ScalarValue::Real { value: Some(1e6) },
+            )
+            .unwrap(),
+        );
+    }
     let mut builder =
         AnalysisResultDocument::builder(analysis_id(analysis), payload, shape.point_count)
             .axis(
@@ -764,7 +778,7 @@ fn document(family: usize, shape: &Shape) -> AnalysisResultDocument {
                     .expect("a generated axis is valid"),
             )
             .signals(signals(shape))
-            .scalars(scalars(shape));
+            .scalars(retained_scalars);
     if let Some(parent) = parent {
         builder = builder.parent_analysis(parent);
     }

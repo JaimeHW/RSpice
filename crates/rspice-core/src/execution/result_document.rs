@@ -15,7 +15,7 @@
 //! ```text
 //! {
 //!   "schema":        "rspice-analysis-result"   fixed identifier
-//!   "schemaVersion": 4                          this build's exact version
+//!   "schemaVersion": 5                          this build's exact version
 //!   "resultKind":    "op" | "dc" | "ac" | "tran" | "noise" | "sp" |
 //!                    "port-noise" | "distortion" | "tf" | "stb" |
 //!                    "sensitivity" | "pole-zero" | "fourier" | "fft" |
@@ -206,7 +206,7 @@ use crate::execution::topology::TopologyFingerprint;
 pub const ANALYSIS_RESULT_DOCUMENT_SCHEMA: &str = "rspice-analysis-result";
 
 /// Schema version this build produces.
-pub const ANALYSIS_RESULT_DOCUMENT_VERSION: u32 = 4;
+pub const ANALYSIS_RESULT_DOCUMENT_VERSION: u32 = 5;
 
 /// Every schema version this build decodes, oldest first.
 ///
@@ -224,7 +224,9 @@ pub const ANALYSIS_RESULT_DOCUMENT_VERSION: u32 = 4;
 /// includes early model finish and resume without the earlier sample history.
 /// A stop-exclusive FFT is complete once its last required sample is available.
 /// Versions 1–3 omit `status` and retain their completed spectral data unchanged.
-const DECODABLE_ANALYSIS_RESULT_DOCUMENT_VERSIONS: [u32; 4] = [1, 2, 3, 4];
+/// Version 5 adds sensitivity availability. Earlier sensitivity documents
+/// require a rerun because their zeros do not distinguish undefined values.
+const DECODABLE_ANALYSIS_RESULT_DOCUMENT_VERSIONS: [u32; 5] = [1, 2, 3, 4, 5];
 
 /// First version whose transient payload may declare a digital bus.
 const FIRST_DIGITAL_BUS_DOCUMENT_VERSION: u32 = 2;
@@ -463,6 +465,15 @@ impl AnalysisResultDocument {
                 current: ANALYSIS_RESULT_DOCUMENT_VERSION,
             });
         }
+        // Earlier sensitivity producers used ambiguous zeros for undefined
+        // quantities. Keep other old studies readable, but require a rerun of
+        // sensitivities rather than certifying those historical values.
+        if self.schema_version < 5 && matches!(self.payload, ResultPayload::Sensitivity(_)) {
+            return Err(ResultDocumentError::Malformed {
+                location: "sensitivity availability",
+                detail: "sensitivity documents before version 5 lack qualified availability; rerun the sensitivity analysis".into(),
+            });
+        }
         // A defaulted field decodes an older document as one that declares
         // nothing, which is what makes reading version 1 sound. It also lets a
         // document declare the older version and carry the newer content, and
@@ -529,7 +540,99 @@ impl AnalysisResultDocument {
         }
         check_abort(abort)?;
         self.payload.validate()?;
+        if let ResultPayload::Sensitivity(payload) = &self.payload {
+            self.validate_sensitivity_availability(payload, abort)?;
+        }
         check_abort(abort)
+    }
+
+    fn validate_sensitivity_availability(
+        &self,
+        payload: &SensitivityPayload,
+        abort: &dyn AbortSignal,
+    ) -> Result<(), ResultDocumentError> {
+        use crate::analysis::{SensitivityUnavailability as Reason, SensitivityValue};
+        let malformed = || {
+            ResultDocumentError::Malformed {
+            location: "sensitivity availability",
+            detail: "derived sensitivity availability does not match its nominal output and absolute derivative".into(),
+        }
+        };
+        if !payload.entries.is_empty() {
+            let output = self
+                .scalars
+                .iter()
+                .find_map(|scalar| {
+                    if scalar.name == "output_value"
+                        && let ScalarValue::Real { value } = scalar.value
+                    {
+                        value
+                    } else {
+                        None
+                    }
+                })
+                .ok_or_else(malformed)?;
+            for entry in &payload.entries {
+                check_abort(abort)?;
+                if entry.normalized.reason()
+                    != SensitivityValue::normalized(entry.nominal_value, entry.absolute, output)
+                        .reason()
+                {
+                    return Err(malformed());
+                }
+            }
+        }
+        if !payload.ac_entries.is_empty() {
+            let output = self
+                .signals
+                .iter()
+                .find_map(|signal| {
+                    if signal.descriptor.canonical_name() == "output"
+                        && let SeriesValues::Complex { samples } = &signal.values
+                    {
+                        Some(samples)
+                    } else {
+                        None
+                    }
+                })
+                .ok_or_else(malformed)?;
+            for entry in &payload.ac_entries {
+                if entry.absolute.len() != self.point_count || output.len() != self.point_count {
+                    return Err(malformed());
+                }
+                for ((((output, derivative), normalized), magnitude), phase) in output
+                    .iter()
+                    .zip(&entry.absolute)
+                    .zip(&entry.normalized)
+                    .zip(&entry.magnitude)
+                    .zip(&entry.phase)
+                {
+                    check_abort(abort)?;
+                    let output = output.as_ref().ok_or_else(malformed)?;
+                    let zero = output.real == 0.0 && output.imaginary == 0.0;
+                    if zero {
+                        let magnitude_valid =
+                            if derivative.real == 0.0 && derivative.imaginary == 0.0 {
+                                magnitude.value() == Some(0.0)
+                            } else {
+                                magnitude.reason() == Some(Reason::NondifferentiableMagnitude)
+                            };
+                        if normalized.reason() != Some(Reason::ZeroOutput)
+                            || phase.reason() != Some(Reason::ZeroOutput)
+                            || !magnitude_valid
+                        {
+                            return Err(malformed());
+                        }
+                    } else if [normalized.reason(), magnitude.reason(), phase.reason()]
+                        .iter()
+                        .any(|reason| !matches!(reason, None | Some(Reason::OutOfRange)))
+                    {
+                        return Err(malformed());
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 
     fn validate_identity(&self) -> Result<(), ResultDocumentError> {

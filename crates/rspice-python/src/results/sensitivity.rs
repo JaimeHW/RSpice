@@ -8,6 +8,86 @@
 //! tolerance budgets.
 
 use super::*;
+use numpy::IntoPyArray;
+use rspice_core::analysis::{SensitivityUnavailability, SensitivityValue};
+
+// Arrays keep their NumPy numeric dtype. Unavailable samples are NaN and have
+// an explicit reason at the same index; they never participate in rankings.
+type AcAvailability = (
+    u32,
+    Vec<Option<String>>,
+    Vec<Option<String>>,
+    Vec<Option<String>>,
+    Vec<Option<String>>,
+);
+
+fn sensitivity_reasons<T>(values: &[SensitivityValue<T>]) -> Vec<Option<String>> {
+    values
+        .iter()
+        .map(|value| value.reason().map(|reason| reason.as_str().to_owned()))
+        .collect()
+}
+
+fn restore_sensitivity_samples<T>(
+    values: Vec<T>,
+    reasons: Vec<Option<String>>,
+    finite: impl Fn(&T) -> bool,
+    missing: impl Fn(&T) -> bool,
+) -> PyResult<Vec<SensitivityValue<T>>> {
+    if values.len() != reasons.len() {
+        return Err(crate::errors::value_error(
+            "sensitivity samples and availability lengths disagree",
+        ));
+    }
+    values
+        .into_iter()
+        .zip(reasons)
+        .map(|(value, reason)| {
+            if let Some(reason) = reason {
+                let reason = match reason.as_str() {
+                    "zero-output" => SensitivityUnavailability::ZeroOutput,
+                    "nondifferentiable-magnitude" => {
+                        SensitivityUnavailability::NondifferentiableMagnitude
+                    }
+                    "out-of-range" => SensitivityUnavailability::OutOfRange,
+                    _ => {
+                        return Err(crate::errors::value_error(
+                            "invalid sensitivity availability reason",
+                        ));
+                    }
+                };
+                if missing(&value) {
+                    return Ok(SensitivityValue::unavailable(reason));
+                }
+            } else if finite(&value) {
+                return Ok(SensitivityValue::Available(value));
+            }
+            Err(crate::errors::value_error(
+                "sensitivity sample and availability reason disagree",
+            ))
+        })
+        .collect()
+}
+
+fn real_sensitivity_samples(values: &[SensitivityValue<f64>]) -> Vec<f64> {
+    values
+        .iter()
+        .map(|value| value.value().unwrap_or(f64::NAN))
+        .collect()
+}
+
+fn complex_sensitivity_samples(
+    values: &[SensitivityValue<rspice_core::Complex64>],
+) -> Vec<rspice_core::Complex64> {
+    values
+        .iter()
+        .map(|value| {
+            value
+                .value()
+                .unwrap_or(rspice_core::Complex64::new(f64::NAN, f64::NAN))
+        })
+        .collect()
+}
 
 /// Frequency-dependent complex sensitivity to one circuit parameter.
 #[pyclass(name = "AcSensitivity", module = "rspice", from_py_object)]
@@ -24,10 +104,10 @@ pub struct PyAcSensitivity {
     #[pyo3(get)]
     pub nominal_value: f64,
     absolute: Vec<rspice_core::Complex64>,
-    normalized: Vec<rspice_core::Complex64>,
-    magnitude: Vec<f64>,
-    phase: Vec<f64>,
-    db: Vec<f64>,
+    normalized: Vec<SensitivityValue<rspice_core::Complex64>>,
+    magnitude: Vec<SensitivityValue<f64>>,
+    phase: Vec<SensitivityValue<f64>>,
+    db: Vec<SensitivityValue<f64>>,
 }
 
 #[pymethods]
@@ -41,19 +121,19 @@ impl PyAcSensitivity {
     /// Complex normalized derivative `(parameter/output) * d(output)/dp`.
     #[getter]
     fn normalized<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<rspice_core::Complex64>> {
-        self.normalized.to_pyarray(py)
+        complex_sensitivity_samples(&self.normalized).into_pyarray(py)
     }
 
     /// Derivative of output magnitude per unit parameter.
     #[getter]
     fn magnitude<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f64>> {
-        self.magnitude.to_pyarray(py)
+        real_sensitivity_samples(&self.magnitude).into_pyarray(py)
     }
 
     /// Derivative of output phase in radians per unit parameter.
     #[getter]
     fn phase<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f64>> {
-        self.phase.to_pyarray(py)
+        real_sensitivity_samples(&self.phase).into_pyarray(py)
     }
 
     /// Derivative of output phase in degrees per unit parameter.
@@ -61,7 +141,12 @@ impl PyAcSensitivity {
     fn phase_degrees<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f64>> {
         self.phase
             .iter()
-            .map(|value| value.to_degrees())
+            .map(|value| {
+                value
+                    .scaled(180.0 / std::f64::consts::PI)
+                    .value()
+                    .unwrap_or(f64::NAN)
+            })
             .collect::<Vec<_>>()
             .to_pyarray(py)
     }
@@ -69,7 +154,7 @@ impl PyAcSensitivity {
     /// Derivative of `20*log10(|output|)` per unit parameter.
     #[getter]
     fn db<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f64>> {
-        self.db.to_pyarray(py)
+        real_sensitivity_samples(&self.db).into_pyarray(py)
     }
 
     /// Complex percent output change for a one-percent parameter change.
@@ -79,7 +164,41 @@ impl PyAcSensitivity {
         &self,
         py: Python<'py>,
     ) -> Bound<'py, PyArray1<rspice_core::Complex64>> {
-        self.normalized.to_pyarray(py)
+        complex_sensitivity_samples(&self.normalized).into_pyarray(py)
+    }
+
+    /// Reason at each unavailable normalized sample; None for available samples.
+    #[getter]
+    fn normalized_unavailability(&self) -> Vec<Option<String>> {
+        sensitivity_reasons(&self.normalized)
+    }
+
+    #[getter]
+    fn magnitude_unavailability(&self) -> Vec<Option<String>> {
+        sensitivity_reasons(&self.magnitude)
+    }
+
+    #[getter]
+    fn phase_unavailability(&self) -> Vec<Option<String>> {
+        sensitivity_reasons(&self.phase)
+    }
+
+    #[getter]
+    fn db_unavailability(&self) -> Vec<Option<String>> {
+        sensitivity_reasons(&self.db)
+    }
+
+    #[getter]
+    fn phase_degrees_unavailability(&self) -> Vec<Option<String>> {
+        self.phase
+            .iter()
+            .map(|value| {
+                value
+                    .scaled(180.0 / std::f64::consts::PI)
+                    .reason()
+                    .map(|reason| reason.as_str().to_owned())
+            })
+            .collect()
     }
 
     fn __len__(&self) -> usize {
@@ -97,17 +216,63 @@ impl PyAcSensitivity {
 
     /// Rebuild from pickled state. Not part of the public API.
     #[staticmethod]
+    #[pyo3(signature = (names, nominal_value, complex_series, real_series, availability=None))]
     fn _unpickle(
         names: (String, String, String, String),
         nominal_value: f64,
         complex_series: ComplexSeriesPair,
         real_series: (Vec<f64>, Vec<f64>, Vec<f64>),
-    ) -> Self {
+        availability: Option<AcAvailability>,
+    ) -> PyResult<Self> {
         let (vector_name, element, element_type, parameter) = names;
         let (absolute, normalized) = complex_series;
         let (absolute, normalized) = (complex_from_state(absolute), complex_from_state(normalized));
         let (magnitude, phase, db) = real_series;
-        Self {
+        let Some((1, normalized_reasons, magnitude_reasons, phase_reasons, db_reasons)) =
+            availability
+        else {
+            return Err(crate::errors::value_error(
+                "legacy sensitivity pickle lacks qualified availability; rerun the sensitivity analysis",
+            ));
+        };
+        let length = absolute.len();
+        if !nominal_value.is_finite()
+            || absolute
+                .iter()
+                .any(|value| !value.re.is_finite() || !value.im.is_finite())
+            || [normalized.len(), magnitude.len(), phase.len(), db.len()]
+                .iter()
+                .any(|count| *count != length)
+        {
+            return Err(crate::errors::value_error(
+                "invalid sensitivity trace shape or absolute derivative",
+            ));
+        }
+        let normalized = restore_sensitivity_samples(
+            normalized,
+            normalized_reasons,
+            |value| value.re.is_finite() && value.im.is_finite(),
+            |value| value.re.is_nan() && value.im.is_nan(),
+        )?;
+        let magnitude = restore_sensitivity_samples(
+            magnitude,
+            magnitude_reasons,
+            |value| value.is_finite(),
+            |value| value.is_nan(),
+        )?;
+        let phase = restore_sensitivity_samples(
+            phase,
+            phase_reasons,
+            |value| value.is_finite(),
+            |value| value.is_nan(),
+        )?;
+        let db = restore_sensitivity_samples(
+            db,
+            db_reasons,
+            |value| value.is_finite(),
+            |value| value.is_nan(),
+        )?;
+        Ok(Self {
             vector_name,
             element,
             element_type,
@@ -118,7 +283,7 @@ impl PyAcSensitivity {
             magnitude,
             phase,
             db,
-        }
+        })
     }
 
     #[allow(clippy::type_complexity)]
@@ -132,6 +297,7 @@ impl PyAcSensitivity {
             f64,
             ComplexSeriesPair,
             (Vec<f64>, Vec<f64>, Vec<f64>),
+            AcAvailability,
         ),
     )> {
         Ok((
@@ -146,9 +312,20 @@ impl PyAcSensitivity {
                 self.nominal_value,
                 (
                     complex_state(&self.absolute),
-                    complex_state(&self.normalized),
+                    complex_state(&complex_sensitivity_samples(&self.normalized)),
                 ),
-                (self.magnitude.clone(), self.phase.clone(), self.db.clone()),
+                (
+                    real_sensitivity_samples(&self.magnitude),
+                    real_sensitivity_samples(&self.phase),
+                    real_sensitivity_samples(&self.db),
+                ),
+                (
+                    1,
+                    sensitivity_reasons(&self.normalized),
+                    sensitivity_reasons(&self.magnitude),
+                    sensitivity_reasons(&self.phase),
+                    sensitivity_reasons(&self.db),
+                ),
             ),
         ))
     }
@@ -198,18 +375,11 @@ impl PyAcSensitivityResult {
             .sensitivities
             .iter()
             .map(|trace| {
-                let db = trace
-                    .magnitude
+                let db: Vec<_> = trace
+                    .absolute
                     .iter()
                     .zip(&result.output_values)
-                    .map(|(derivative, output)| {
-                        let magnitude = output.norm();
-                        if magnitude > 1.0e-300 {
-                            20.0 / std::f64::consts::LN_10 * derivative / magnitude
-                        } else {
-                            0.0
-                        }
-                    })
+                    .map(|(derivative, output)| SensitivityValue::decibels(*output, *derivative))
                     .collect();
                 PyAcSensitivity {
                     vector_name: trace.vector_name.clone(),
@@ -333,22 +503,35 @@ impl PyAcSensitivityResult {
                 self.frequencies.len()
             )));
         }
-        let mut traces = self.sensitivities.clone();
-        traces.sort_by(|left, right| {
-            let left_norm = left
-                .normalized
-                .get(frequency_index)
-                .map_or(0.0, |value| value.norm());
-            let right_norm = right
-                .normalized
-                .get(frequency_index)
-                .map_or(0.0, |value| value.norm());
+        let mut traces: Vec<_> = self
+            .sensitivities
+            .iter()
+            .filter_map(|trace| Some((trace, trace.normalized.get(frequency_index)?.value()?)))
+            .collect();
+        traces.sort_by(|(left, left_value), (right, right_value)| {
+            // A common scale preserves ordering when both magnitudes exceed
+            // the largest f64; overflowing both to infinity would tie them.
+            let scale = left_value
+                .re
+                .abs()
+                .max(left_value.im.abs())
+                .max(right_value.re.abs())
+                .max(right_value.im.abs());
+            let norm = |value: rspice_core::Complex64| {
+                if scale == 0.0 {
+                    0.0
+                } else {
+                    (value.re / scale).hypot(value.im / scale)
+                }
+            };
+            let left_norm = norm(*left_value);
+            let right_norm = norm(*right_value);
             right_norm
                 .total_cmp(&left_norm)
                 .then_with(|| left.vector_name.cmp(&right.vector_name))
         });
         traces.truncate(count);
-        Ok(traces)
+        Ok(traces.into_iter().map(|(trace, _)| trace.clone()).collect())
     }
 
     fn __len__(&self) -> usize {
@@ -417,8 +600,7 @@ pub struct PyElementSensitivity {
     pub nominal_value: f64,
     #[pyo3(get)]
     pub absolute: f64,
-    #[pyo3(get)]
-    pub normalized: f64,
+    normalized: SensitivityValue<f64>,
 }
 
 impl PyElementSensitivity {
@@ -438,8 +620,18 @@ impl PyElementSensitivity {
 #[pymethods]
 impl PyElementSensitivity {
     #[getter]
-    fn percent_per_percent(&self) -> f64 {
-        self.normalized
+    fn normalized(&self) -> Option<f64> {
+        self.normalized.value()
+    }
+
+    #[getter]
+    fn normalized_unavailability(&self) -> Option<&'static str> {
+        self.normalized.reason().map(|reason| reason.as_str())
+    }
+
+    #[getter]
+    fn percent_per_percent(&self) -> Option<f64> {
+        self.normalized.value()
     }
 
     fn __repr__(&self) -> String {
@@ -451,14 +643,31 @@ impl PyElementSensitivity {
 
     /// Rebuild from pickled state. Not part of the public API.
     #[staticmethod]
+    #[pyo3(signature = (names, nominal_value, absolute, normalized, availability=None))]
     fn _unpickle(
         names: (String, String, String, String),
         nominal_value: f64,
         absolute: f64,
-        normalized: f64,
-    ) -> Self {
+        normalized: Option<f64>,
+        availability: Option<(u32, Option<String>)>,
+    ) -> PyResult<Self> {
         let (vector_name, element, element_type, parameter) = names;
-        Self {
+        let Some((1, normalized_unavailability)) = availability else {
+            return Err(crate::errors::value_error(
+                "legacy sensitivity pickle lacks qualified availability; rerun the sensitivity analysis",
+            ));
+        };
+        if !nominal_value.is_finite() || !absolute.is_finite() {
+            return Err(crate::errors::value_error("non-finite sensitivity input"));
+        }
+        let normalized = restore_sensitivity_samples(
+            vec![normalized.unwrap_or(f64::NAN)],
+            vec![normalized_unavailability],
+            |value| value.is_finite(),
+            |value| value.is_nan(),
+        )?
+        .remove(0);
+        Ok(Self {
             vector_name,
             element,
             element_type,
@@ -466,7 +675,7 @@ impl PyElementSensitivity {
             nominal_value,
             absolute,
             normalized,
-        }
+        })
     }
 
     #[allow(clippy::type_complexity)]
@@ -475,7 +684,13 @@ impl PyElementSensitivity {
         py: Python<'py>,
     ) -> PyResult<(
         Bound<'py, PyAny>,
-        ((String, String, String, String), f64, f64, f64),
+        (
+            (String, String, String, String),
+            f64,
+            f64,
+            Option<f64>,
+            (u32, Option<String>),
+        ),
     )> {
         Ok((
             unpickler::<Self>(py)?,
@@ -488,7 +703,13 @@ impl PyElementSensitivity {
                 ),
                 self.nominal_value,
                 self.absolute,
-                self.normalized,
+                self.normalized.value(),
+                (
+                    1,
+                    self.normalized
+                        .reason()
+                        .map(|reason| reason.as_str().to_owned()),
+                ),
             ),
         ))
     }
@@ -614,15 +835,19 @@ impl PySensitivityResult {
     /// Most influential entries by absolute normalized sensitivity.
     #[pyo3(signature = (count=10))]
     fn top(&self, count: usize) -> Vec<PyElementSensitivity> {
-        let mut values = self.sensitivities.clone();
-        values.sort_by(|a, b| {
-            b.normalized
+        let mut values: Vec<_> = self
+            .sensitivities
+            .iter()
+            .filter_map(|value| Some((value, value.normalized.value()?)))
+            .collect();
+        values.sort_by(|(a, a_value), (b, b_value)| {
+            b_value
                 .abs()
-                .total_cmp(&a.normalized.abs())
+                .total_cmp(&a_value.abs())
                 .then_with(|| a.vector_name.cmp(&b.vector_name))
         });
         values.truncate(count);
-        values
+        values.into_iter().map(|(value, _)| value.clone()).collect()
     }
 
     fn __repr__(&self) -> String {

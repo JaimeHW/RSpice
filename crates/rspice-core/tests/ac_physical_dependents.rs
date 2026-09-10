@@ -115,7 +115,7 @@ fn adjoint_sensitivity_preserves_extreme_resistors_and_small_outputs() {
             .expect("finite nonzero conductance must remain eligible");
         assert_relative(resistor.absolute, current, 2e-12, "dV/dR=I");
         assert_relative(
-            resistor.normalized,
+            resistor.normalized.value().unwrap(),
             1.0,
             2e-12,
             "normalized resistance derivative",
@@ -123,7 +123,7 @@ fn adjoint_sensitivity_preserves_extreme_resistors_and_small_outputs() {
         let source = result.get("I1").unwrap();
         assert_relative(source.absolute, resistance, 2e-12, "dV/dI=R");
         assert_relative(
-            source.normalized,
+            source.normalized.value().unwrap(),
             1.0,
             2e-12,
             "normalized source derivative",
@@ -153,7 +153,7 @@ fn high_impedance_adjoint_sensitivity_matches_closed_form() {
     let resistor = result.get("RLOAD").expect("resistor sensitivity");
     assert_relative(resistor.absolute, 1.0e-18, 1.0e-10, "dV(out)/dRLOAD");
     assert_relative(
-        resistor.normalized,
+        resistor.normalized.value().unwrap(),
         1.0,
         1.0e-10,
         "normalized RLOAD sensitivity",
@@ -166,7 +166,7 @@ fn high_impedance_adjoint_sensitivity_matches_closed_form() {
         "dV(out)/dIBIAS",
     );
     assert_relative(
-        source.normalized,
+        source.normalized.value().unwrap(),
         1.0,
         1.0e-10,
         "normalized IBIAS sensitivity",

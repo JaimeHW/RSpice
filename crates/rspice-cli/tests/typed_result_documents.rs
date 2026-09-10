@@ -627,3 +627,42 @@ fn the_parameter_sensitivity_probe_publishes_the_shared_document() {
         "the normalized derivative has no operating point to be relative to"
     );
 }
+
+#[test]
+fn zero_output_sensitivity_reports_unavailability_in_console_and_json() {
+    for (label, clause, entries) in [("dc", "", "entries"), ("ac", " AC LIN 2 1 2", "acEntries")] {
+        let dir = test_dir(&format!("sens_zero_{label}"));
+        let deck = dir.join("deck.sp");
+        let artifact = dir.join("result.json");
+        std::fs::write(
+            &deck,
+            format!("Zero output\nV1 out 0 DC 0 AC 0\nR1 out 0 1\n.sens V(out){clause}\n.end\n"),
+        )
+        .unwrap();
+        let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+            .args(["--verbose", "run"])
+            .arg(&deck)
+            .arg("-o")
+            .arg(&artifact)
+            .args(["-f", "json"])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let console = String::from_utf8_lossy(&output.stdout);
+        assert!(console.contains("unavailable"), "{console}");
+        let document = read_json(&artifact);
+        for entry in document["payload"][entries].as_array().unwrap() {
+            let normalized = &entry["normalized"];
+            let normalized = if label == "ac" {
+                &normalized[0]
+            } else {
+                normalized
+            };
+            assert_eq!(normalized["unavailable"], "zero-output");
+        }
+    }
+}

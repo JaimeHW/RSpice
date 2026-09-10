@@ -1165,6 +1165,64 @@ fn sensitivity_transfer_and_pole_zero_documents_have_no_series() {
 }
 
 #[test]
+fn sensitivity_availability_survives_document_round_trip_and_rejects_legacy_zeros() {
+    use crate::analysis::{SensitivityUnavailability as Reason, SensitivityValue};
+    for (nominal, derivative, output, expected) in [
+        (
+            0.0,
+            1.0,
+            0.0,
+            SensitivityValue::unavailable(Reason::ZeroOutput),
+        ),
+        (
+            1e200,
+            1e200,
+            1.0,
+            SensitivityValue::unavailable(Reason::OutOfRange),
+        ),
+        (
+            1e-200,
+            1e-200,
+            1.0,
+            SensitivityValue::unavailable(Reason::OutOfRange),
+        ),
+        (1e200, 1e200, 1e200, SensitivityValue::Available(1e200)),
+    ] {
+        let document = AnalysisResultDocument::from_parameter_sensitivity(
+            instance(AnalysisKind::Sensitivity),
+            "V(out)",
+            output,
+            "p",
+            nominal,
+            derivative,
+        )
+        .unwrap()
+        .build()
+        .unwrap();
+        let ResultPayload::Sensitivity(payload) = document.payload() else {
+            panic!("sensitivity payload");
+        };
+        assert_eq!(payload.entries[0].absolute, derivative);
+        assert_eq!(payload.entries[0].normalized, expected);
+        let json = document.to_json().unwrap();
+        assert_eq!(AnalysisResultDocument::from_json(&json).unwrap(), document);
+        let mut raw: serde_json::Value = serde_json::from_str(&json).unwrap();
+        raw["schemaVersion"] = serde_json::json!(4);
+        assert!(
+            AnalysisResultDocument::from_json(&raw.to_string())
+                .unwrap_err()
+                .to_string()
+                .contains("rerun")
+        );
+        if expected.reason().is_some() {
+            raw["schemaVersion"] = serde_json::json!(ANALYSIS_RESULT_DOCUMENT_VERSION);
+            raw["payload"]["entries"][0]["normalized"] = serde_json::json!(0.0);
+            assert!(AnalysisResultDocument::from_json(&raw.to_string()).is_err());
+        }
+    }
+}
+
+#[test]
 fn incomplete_fft_documents_preserve_status_without_spectral_data() {
     use crate::engine::TransientFftStatus;
     let mut result = transient_fft_result();

@@ -144,9 +144,9 @@ def test_every_family_publishes_the_shared_document(results):
     for kind, result in results:
         document = result.document()
         assert document["schema"] == "rspice-analysis-result", kind
-        # Version 4 adds explicit FFT completion status; older readers must
+        # Version 5 adds explicit sensitivity availability; older readers must
         # reject it before trying to decode the new payload fields.
-        assert document["schemaVersion"] == 4, kind
+        assert document["schemaVersion"] == 5, kind
         assert document["resultKind"] == kind, kind
         assert document["analysis"]["tag"], kind
 

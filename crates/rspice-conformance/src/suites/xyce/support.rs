@@ -3825,30 +3825,53 @@ impl XyceTestRunner {
         row_index: usize,
         trace: Option<&rspice_core::analysis::AcSensitivity>,
         phase_output_radians: bool,
-    ) -> Value {
-        let value = trace.map_or(output, |trace| {
-            // The sensitivity trace stores the complex derivative in
-            // `absolute`; the other fields are derivatives of magnitude and
-            // phase and are selected below.
-            trace.absolute[row_index]
-        });
-        if let Some(trace) = trace {
-            return match component {
-                "re" => trace.absolute[row_index].re,
-                "im" => trace.absolute[row_index].im,
-                "mag" => trace.magnitude[row_index],
-                "ph" if phase_output_radians => trace.phase[row_index],
-                "ph" => trace.phase[row_index].to_degrees(),
-                _ => 0.0,
-            };
-        }
-        match component {
-            "re" => value.re,
-            "im" => value.im,
-            "mag" => value.norm(),
-            "ph" if phase_output_radians => value.arg(),
-            "ph" => value.arg().to_degrees(),
-            _ => 0.0,
+    ) -> Result<Value, String> {
+        use rspice_core::analysis::{SensitivityUnavailability as Reason, SensitivityValue};
+        let identity = trace.map_or("nominal output", |trace| trace.vector_name.as_str());
+        let context =
+            || format!("AC sensitivity '{identity}' component '{component}' at row {row_index}");
+        let value = if let Some(trace) = trace {
+            match component {
+                "re" => trace
+                    .absolute
+                    .get(row_index)
+                    .map(|value| SensitivityValue::Available(value.re)),
+                "im" => trace
+                    .absolute
+                    .get(row_index)
+                    .map(|value| SensitivityValue::Available(value.im)),
+                "mag" => trace.magnitude.get(row_index).copied(),
+                "ph" => trace.phase.get(row_index).copied().map(|value| {
+                    if phase_output_radians {
+                        value
+                    } else {
+                        value.scaled(180.0 / std::f64::consts::PI)
+                    }
+                }),
+                _ => return Err(format!("{} has an unknown component", context())),
+            }
+            .ok_or_else(|| format!("{} has no sample", context()))?
+        } else {
+            match component {
+                "re" => SensitivityValue::Available(output.re),
+                "im" => SensitivityValue::Available(output.im),
+                "mag" => SensitivityValue::Available(output.norm()),
+                "ph" if output == Complex64::new(0.0, 0.0) => {
+                    SensitivityValue::unavailable(Reason::ZeroOutput)
+                }
+                "ph" if phase_output_radians => SensitivityValue::Available(output.arg()),
+                "ph" => SensitivityValue::Available(output.arg().to_degrees()),
+                _ => return Err(format!("{} has an unknown component", context())),
+            }
+        };
+        match value {
+            SensitivityValue::Available(value) if value.is_finite() => Ok(value),
+            SensitivityValue::Available(_) => Err(format!("{} is non-finite", context())),
+            SensitivityValue::Unavailable { unavailable } => Err(format!(
+                "{} is unavailable: {}",
+                context(),
+                unavailable.as_str()
+            )),
         }
     }
 

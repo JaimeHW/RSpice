@@ -19,7 +19,7 @@ use crate::analysis::harmonic_balance::{HbContinuationLimitation, HbReactiveKind
 use crate::analysis::noise::NoiseSourceType;
 use crate::analysis::pole_zero::{RootSetEvidence, SpectrumCertificate};
 use crate::analysis::pstb::StabilityType;
-use crate::analysis::sensitivity::ElementType;
+use crate::analysis::sensitivity::{ElementType, SensitivityUnavailability, SensitivityValue};
 use crate::engine::waveform::{
     TransientCompressionAlgorithm, TransientCompressionErrorObservation,
     TransientCompressionPolicy, TransientCompressionReport, TransientCompressionSampleDomain,
@@ -125,7 +125,17 @@ impl ResultPayload {
                 .fold(0, usize::saturating_add),
             Self::Tf(_) => 0,
             Self::Stb(payload) => payload.nyquist.len().saturating_mul(3),
-            Self::Sensitivity(payload) => payload.entries.len().saturating_mul(3),
+            Self::Sensitivity(payload) => payload.ac_entries.iter().fold(
+                payload.entries.len().saturating_mul(3),
+                |count, entry| {
+                    count
+                        .saturating_add(1)
+                        .saturating_add(entry.absolute.len().saturating_mul(2))
+                        .saturating_add(entry.normalized.len().saturating_mul(2))
+                        .saturating_add(entry.magnitude.len())
+                        .saturating_add(entry.phase.len())
+                },
+            ),
             Self::PoleZero(payload) => payload
                 .poles
                 .len()
@@ -1453,6 +1463,23 @@ pub struct SensitivityPayload {
     pub ac_entries: Vec<AcSensitivityEntry>,
 }
 
+fn validate_sensitivity_value<T>(
+    location: &'static str,
+    value: SensitivityValue<T>,
+    validate: impl FnOnce(T) -> Result<(), ResultDocumentError>,
+) -> Result<(), ResultDocumentError> {
+    match value {
+        SensitivityValue::Available(value) => validate(value),
+        SensitivityValue::Unavailable {
+            unavailable: SensitivityUnavailability::InvalidInput,
+        } => Err(ResultDocumentError::Malformed {
+            location,
+            detail: "sensitivity input is invalid".to_owned(),
+        }),
+        SensitivityValue::Unavailable { .. } => Ok(()),
+    }
+}
+
 impl SensitivityPayload {
     fn validate(&self) -> Result<(), ResultDocumentError> {
         super::require_name("sensitivity output", &self.output)?;
@@ -1467,7 +1494,9 @@ impl SensitivityPayload {
             super::require_name("sensitivity element", &entry.element)?;
             finite("sensitivity nominal value", entry.nominal_value)?;
             finite("absolute sensitivity", entry.absolute)?;
-            finite("normalized sensitivity", entry.normalized)?;
+            validate_sensitivity_value("normalized sensitivity", entry.normalized, |value| {
+                finite("normalized sensitivity", value)
+            })?;
         }
         for entry in &self.ac_entries {
             super::require_name("AC sensitivity vector name", &entry.vector_name)?;
@@ -1486,9 +1515,17 @@ impl SensitivityPayload {
                 });
             }
             for value in entry.magnitude.iter().chain(&entry.phase) {
-                finite("AC sensitivity derivative", *value)?;
+                validate_sensitivity_value("AC sensitivity derivative", *value, |value| {
+                    finite("AC sensitivity derivative", value)
+                })?;
             }
-            for sample in entry.absolute.iter().chain(&entry.normalized) {
+            for sample in &entry.normalized {
+                validate_sensitivity_value("normalized AC sensitivity", *sample, |sample| {
+                    finite("AC sensitivity derivative", sample.real)?;
+                    finite("AC sensitivity derivative", sample.imaginary)
+                })?;
+            }
+            for sample in &entry.absolute {
                 finite("AC sensitivity derivative", sample.real)?;
                 finite("AC sensitivity derivative", sample.imaginary)?;
             }
@@ -1510,11 +1547,11 @@ pub struct AcSensitivityEntry {
     /// `d(output)/d(parameter)` at every frequency of the document's axis.
     pub absolute: Vec<ComplexSample>,
     /// `(parameter / output) * d(output)/d(parameter)`.
-    pub normalized: Vec<ComplexSample>,
+    pub normalized: Vec<SensitivityValue<ComplexSample>>,
     /// Derivative of the output magnitude.
-    pub magnitude: Vec<f64>,
+    pub magnitude: Vec<SensitivityValue<f64>>,
     /// Derivative of the output phase, in radians.
-    pub phase: Vec<f64>,
+    pub phase: Vec<SensitivityValue<f64>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1529,7 +1566,7 @@ pub struct SensitivityEntry {
     /// `d(output)/d(parameter)`.
     pub absolute: f64,
     /// `(parameter/output) * d(output)/d(parameter)`.
-    pub normalized: f64,
+    pub normalized: SensitivityValue<f64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

@@ -168,7 +168,7 @@ def test_resumed_fft_without_earlier_history_preserves_waveform_and_status(engin
     assert_fft_equal(round_trip(fft), fft)
     assert_fft_equal(round_trip(resumed).fft(0), fft)
     document = fft.document()
-    assert document["schemaVersion"] == 4
+    assert document["schemaVersion"] == 5
     assert document["pointCount"] == 0
     assert document["axes"] == document["signals"] == []
     assert document["payload"]["status"] == {

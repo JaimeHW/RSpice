@@ -54,7 +54,7 @@ use crate::analysis::pole_zero::PoleZeroResult;
 use crate::analysis::pss::PssResult;
 use crate::analysis::pxf::PxfResult;
 use crate::analysis::s_param::{PortNoiseAssembly, SParameterResult};
-use crate::analysis::sensitivity::{AcSensitivityResult, SensitivityResult};
+use crate::analysis::sensitivity::{AcSensitivityResult, SensitivityResult, SensitivityValue};
 use crate::analysis::stb::StbResult;
 use crate::analysis::transfer::TransferFunctionResult;
 use crate::circuit::DeviceOpReport;
@@ -1944,7 +1944,6 @@ impl AnalysisResultDocument {
             for (label, value) in [
                 ("nominal value", sensitivity.nominal_value),
                 ("absolute sensitivity", sensitivity.absolute),
-                ("normalized sensitivity", sensitivity.normalized),
             ] {
                 if !value.is_finite() {
                     return Err(source_error(
@@ -2010,27 +2009,7 @@ impl AnalysisResultDocument {
                 ));
             }
         }
-        // The normalized derivative is a relative-change ratio, so it is only
-        // defined where the operating-point output is non-zero. A zero output
-        // is a real study whose relative sensitivity does not exist; reporting
-        // an infinity or a zero for it would be a claim the numbers do not
-        // support.
-        if output_value == 0.0 {
-            return Err(source_error(
-                LOCATION,
-                format!(
-                    "the operating-point value of '{output}' is zero, so the normalized \
-                     sensitivity to '{parameter}' is undefined"
-                ),
-            ));
-        }
-        let normalized = absolute * nominal_value / output_value;
-        if !normalized.is_finite() {
-            return Err(source_error(
-                LOCATION,
-                format!("normalized sensitivity of '{parameter}' is {normalized}"),
-            ));
-        }
+        let normalized = SensitivityValue::normalized(nominal_value, absolute, output_value);
         let scalars = vec![real_scalar(
             LOCATION,
             "output_value",
@@ -2107,11 +2086,11 @@ impl AnalysisResultDocument {
 
         let mut ac_entries = Vec::with_capacity(result.sensitivities.len());
         for trace in &result.sensitivities {
-            for (label, values) in [
-                ("absolute sensitivity", &trace.absolute),
-                ("normalized sensitivity", &trace.normalized),
+            for (label, length) in [
+                ("absolute sensitivity", trace.absolute.len()),
+                ("normalized sensitivity", trace.normalized.len()),
             ] {
-                if values.len() != point_count {
+                if length != point_count {
                     return Err(source_error(
                         LOCATION,
                         format!(
@@ -2151,9 +2130,18 @@ impl AnalysisResultDocument {
                 parameter: trace.parameter.clone(),
                 nominal_value: trace.nominal_value,
                 absolute: finite_complex_entries(LOCATION, "absolute", &trace.absolute)?,
-                normalized: finite_complex_entries(LOCATION, "normalized", &trace.normalized)?,
-                magnitude: finite_axis(LOCATION, "magnitude", &trace.magnitude)?,
-                phase: finite_axis(LOCATION, "phase", &trace.phase)?,
+                normalized: trace
+                    .normalized
+                    .iter()
+                    .map(|value| {
+                        value.map(|value| ComplexSample {
+                            real: value.re,
+                            imaginary: value.im,
+                        })
+                    })
+                    .collect(),
+                magnitude: trace.magnitude.clone(),
+                phase: trace.phase.clone(),
             });
         }
 

@@ -2,7 +2,8 @@ use super::{Engine, SimulationError};
 use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::analysis::sensitivity::{
     AcSensitivity, AcSensitivityOutput, AcSensitivityResult, ElementDesc, ElementType, Sensitivity,
-    SensitivityAnalysisError, SensitivityAnalyzer, SensitivityResult,
+    SensitivityAnalysisError, SensitivityAnalyzer, SensitivityResult, SensitivityUnavailability,
+    SensitivityValue,
 };
 use crate::netlist::{ElementKind, SourceSpec};
 use crate::solver::SimulationResult;
@@ -27,6 +28,15 @@ fn sensitivity_ratio(
     let result = ScaledValue::sum_triple_products_ratio(numerator, denominator)
         .map_err(|error| SimulationError::Circuit(format!("Sensitivity arithmetic: {error:?}")))?;
     finite_sensitivity(result)
+}
+
+fn derived_sensitivity_ratio(
+    numerator: impl Iterator<Item = [ScaledValue; 3]> + Clone,
+    denominator: impl Iterator<Item = [ScaledValue; 3]> + Clone,
+) -> Result<SensitivityValue<Value>, SimulationError> {
+    ScaledValue::sum_triple_products_ratio(numerator, denominator)
+        .map(SensitivityValue::from_scaled)
+        .map_err(|error| SimulationError::Circuit(format!("Sensitivity arithmetic: {error:?}")))
 }
 
 /// Use the actual rounded parameter coordinates, retaining wide differences.
@@ -2459,31 +2469,42 @@ impl Engine {
                 let di = ScaledValue::new(sensitivity.im);
                 let parameter = ScaledValue::new(target.nominal_value);
                 let norm_squared = [[re, re, one], [im, im, one]];
-                normalized.push(Complex64::new(
-                    sensitivity_ratio(
+                normalized.push(
+                    derived_sensitivity_ratio(
                         [[re, dr, parameter], [im, di, parameter]].into_iter(),
                         norm_squared.into_iter(),
-                    )?,
-                    sensitivity_ratio(
+                    )?
+                    .zip(derived_sensitivity_ratio(
                         [[re, di, parameter], [im.negated(), dr, parameter]].into_iter(),
                         norm_squared.into_iter(),
-                    )?,
-                ));
+                    )?)
+                    .map(|(re, im)| Complex64::new(re, im)),
+                );
                 let norm = ScaledValue::new(scale).multiply(ScaledValue::new(
                     (output.re / scale).hypot(output.im / scale),
                 ));
-                magnitude.push(sensitivity_ratio(
+                magnitude.push(derived_sensitivity_ratio(
                     [[re, dr, one], [im, di, one]].into_iter(),
                     [[norm, one, one]].into_iter(),
                 )?);
-                phase.push(sensitivity_ratio(
+                phase.push(derived_sensitivity_ratio(
                     [[re, di, one], [im.negated(), dr, one]].into_iter(),
                     norm_squared.into_iter(),
                 )?);
             } else {
-                normalized.push(Complex64::new(0.0, 0.0));
-                magnitude.push(0.0);
-                phase.push(0.0);
+                normalized.push(SensitivityValue::unavailable(
+                    SensitivityUnavailability::ZeroOutput,
+                ));
+                magnitude.push(if sensitivity == Complex64::new(0.0, 0.0) {
+                    SensitivityValue::Available(0.0)
+                } else {
+                    SensitivityValue::unavailable(
+                        SensitivityUnavailability::NondifferentiableMagnitude,
+                    )
+                });
+                phase.push(SensitivityValue::unavailable(
+                    SensitivityUnavailability::ZeroOutput,
+                ));
             }
         }
         Ok(AcSensitivity {
@@ -2829,9 +2850,13 @@ impl Engine {
             )));
         }
         self.ensure_batch_runs(targets.len().saturating_mul(3).saturating_add(1))?;
-        self.ensure_result_shape(
-            frequencies.len(),
-            targets.len().saturating_mul(6).saturating_add(3),
+        // Count numerical slots, including unavailable derived samples and
+        // each retained nominal parameter; a complex sample occupies two.
+        self.ensure_result_values(
+            frequencies
+                .len()
+                .saturating_mul(targets.len().saturating_mul(6).saturating_add(3))
+                .saturating_add(targets.len()),
         )?;
 
         let nominal_results = self.run_ac_with_abort(&flat, frequencies, abort)?;
@@ -3194,6 +3219,76 @@ mod tests {
     }
 
     #[test]
+    fn sensitivity_availability_preserves_absolute_ac_derivatives() {
+        use crate::analysis::{SensitivityUnavailability as Reason, SensitivityValue};
+        let netlist =
+            Netlist::parse("Zero output\nV1 out 0 DC 0 AC 0\nR1 out 0 1\n.end\n").unwrap();
+        let result = Engine::default()
+            .run_sensitivity_ac_complete(
+                &netlist,
+                AcSensitivityOutput::Voltage {
+                    positive: 1,
+                    negative: None,
+                },
+                &[1.0],
+                &[],
+            )
+            .unwrap();
+        assert_eq!(result.output_values[0], Complex64::new(0.0, 0.0));
+        for trace in &result.sensitivities {
+            assert_eq!(trace.normalized[0].reason(), Some(Reason::ZeroOutput));
+            assert_eq!(trace.phase[0].reason(), Some(Reason::ZeroOutput));
+            if trace.absolute[0] == Complex64::new(0.0, 0.0) {
+                assert_eq!(trace.magnitude[0].value(), Some(0.0));
+            } else {
+                assert_eq!(
+                    trace.magnitude[0].reason(),
+                    Some(Reason::NondifferentiableMagnitude)
+                );
+            }
+        }
+        let amplitude = result
+            .sensitivities
+            .iter()
+            .find(|trace| trace.absolute[0] == Complex64::new(1.0, 0.0))
+            .unwrap();
+        assert_eq!(amplitude.magnitude[0].value(), None);
+
+        let mut target = Engine::collect_ac_sensitivity_targets(
+            &netlist,
+            crate::resource::ResourceLimits::default(),
+        )
+        .unwrap()
+        .remove(0);
+        target.nominal_value = 1e200;
+        let trace = Engine::complete_ac_sensitivity_trace(
+            &target,
+            &[Complex64::new(1e-200, 0.0)],
+            vec![Complex64::new(1e200, 1e200)],
+            &crate::abort_signal::NoAbort,
+        )
+        .unwrap();
+        assert_eq!(trace.absolute[0], Complex64::new(1e200, 1e200));
+        assert_eq!(trace.normalized[0].reason(), Some(Reason::OutOfRange));
+        assert_eq!(trace.magnitude[0].value(), Some(1e200));
+        assert_eq!(trace.phase[0].reason(), Some(Reason::OutOfRange));
+        assert_eq!(
+            SensitivityValue::decibels(Complex64::new(0.0, 0.0), amplitude.absolute[0]).reason(),
+            Some(Reason::ZeroOutput)
+        );
+        for scale in [1e-300, 1.0, 1e308] {
+            let value = Complex64::new(scale, scale);
+            assert!(
+                (SensitivityValue::decibels(value, value).value().unwrap()
+                    / (20.0 / std::f64::consts::LN_10)
+                    - 1.0)
+                    .abs()
+                    < 1e-14
+            );
+        }
+    }
+
+    #[test]
     fn complete_ac_sensitivity_preserves_derived_traces_at_extreme_scales() {
         let engine = Engine::default();
         for current in [1e-200, 1e200] {
@@ -3215,14 +3310,15 @@ mod tests {
                     .unwrap();
                 let trace = result.get("R1").unwrap();
                 assert!(
-                    (trace.normalized[0] - Complex64::new(1.0, 0.0)).norm() < 2e-10,
+                    (trace.normalized[0].value().unwrap() - Complex64::new(1.0, 0.0)).norm()
+                        < 2e-10,
                     "{trace:?}"
                 );
                 assert!(
-                    (trace.magnitude[0] / current - 1.0).abs() < 2e-10,
+                    (trace.magnitude[0].value().unwrap() / current - 1.0).abs() < 2e-10,
                     "{trace:?}"
                 );
-                assert!(trace.phase[0].abs() < 2e-10, "{trace:?}");
+                assert!(trace.phase[0].value().unwrap().abs() < 2e-10, "{trace:?}");
             }
         }
     }
@@ -3251,9 +3347,12 @@ mod tests {
             (trace.absolute[0].im / (-omega * 1e308) - 1.0).abs() < 2e-12,
             "{trace:?}"
         );
-        assert_eq!(trace.normalized[0], Complex64::new(0.0, 0.0));
-        assert_eq!(trace.magnitude[0], 0.0);
-        assert!((trace.phase[0] / -omega - 1.0).abs() < 2e-12);
+        assert_eq!(
+            trace.normalized[0].value().unwrap(),
+            Complex64::new(0.0, 0.0)
+        );
+        assert_eq!(trace.magnitude[0].value().unwrap(), 0.0);
+        assert!((trace.phase[0].value().unwrap() / -omega - 1.0).abs() < 2e-12);
     }
 
     #[test]
@@ -3363,7 +3462,7 @@ R2 out 0 1k
         assert!((r1.absolute + 2.5e-3).abs() < 1e-8);
         assert!((r2.absolute - 2.5e-3).abs() < 1e-8);
         assert!((v1.absolute - 0.5).abs() < 1e-9);
-        assert!((r1.normalized + 0.5).abs() < 2e-7);
+        assert!((r1.normalized.value().unwrap() + 0.5).abs() < 2e-7);
     }
 
     #[test]
