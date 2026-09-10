@@ -1,10 +1,9 @@
 //! Property Bridge Module
 //!
-//! Commercial-grade bidirectional mapping between Component structs and PropertyValue HashMaps.
-//! This module provides the bridge layer for comprehensive property persistence, enabling
-//! all properties edited in the property dialog to be saved back to components.
+//! Mapping between stored component fields and typed property-dialog values.
+//! Applying a property map checks the existing parameter text before mutation.
 //!
-//! # Architecture (Cadence Spectre Parity)
+//! # Representation
 //!
 //! SPICE simulators store component parameters in a standardized format:
 //! - Primary value: The main parameter (R for resistor, C for capacitor, etc.)
@@ -21,7 +20,7 @@
 //! let properties = collect_properties_from_component(&component, &registry);
 //!
 //! // Saving changes: PropertyValue HashMap → Component
-//! apply_properties_to_component(&mut component, &properties);
+//! apply_properties_to_component(&mut component, &properties, &registry)?;
 //! ```
 
 use crate::state::{
