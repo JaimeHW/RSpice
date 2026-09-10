@@ -300,6 +300,64 @@ impl Mosfet {
         (mode, von, vdsat)
     }
 
+    /// Onset in the effective source frame used by the MOS1 channel law.
+    #[inline]
+    pub(in crate::device::mosfet::classic) fn level1_onset_with_sqrt_phi(
+        &self,
+        vds: Value,
+        vbs: Value,
+        sqrt_phi: Value,
+    ) -> Value {
+        let p = self.polarity();
+        let body = if p * vds >= 0.0 {
+            p * vbs
+        } else {
+            p * vbs - p * vds
+        };
+        crate::device::semiconductor::mos1_threshold(
+            p * self.vto,
+            self.gamma,
+            self.phi,
+            sqrt_phi,
+            body,
+        )
+        .0
+    }
+
+    /// Mode, onset and saturation voltage in the model's effective source frame.
+    pub(in crate::device::mosfet::classic) fn classic_meyer_state(
+        &self,
+        vgs: Value,
+        vds: Value,
+        vbs: Value,
+        sqrt_phi: Value,
+    ) -> (Value, Value, Value) {
+        let p = self.polarity();
+        let mode = if p * vds >= 0.0 { 1.0 } else { -1.0 };
+        if self.level == 6 {
+            return self.level6_meyer_state(vgs, vds, vbs);
+        }
+        if self.level == 2 {
+            let eval = self.level2_evaluate(vgs, vds, vbs);
+            return (mode, eval.von, eval.vdsat);
+        }
+        if self.uses_mos3_core() {
+            let state = self.mos3_state(vgs, vds, vbs);
+            return (mode, p * state.von, p * state.vdsat);
+        }
+        let von = if self.level == 1 {
+            self.level1_onset_with_sqrt_phi(vds, vbs, sqrt_phi)
+        } else {
+            self.vth(vbs)
+        };
+        let vg_active = if mode > 0.0 {
+            p * vgs
+        } else {
+            p * vgs - p * vds
+        };
+        (mode, von, (vg_active - von).max(0.0))
+    }
+
     pub(crate) fn transient_capacitance_halves_at(
         &self,
         vgs: Value,
@@ -310,7 +368,23 @@ impl Mosfet {
             // Legacy BSIM uses terminal charge and a coupled Jacobian instead.
             return (0.0, 0.0, 0.0);
         }
-        let oxide_cap = self.oxide_capacitance_total();
+        self.meyer_capacitance_halves_at(
+            vgs,
+            vds,
+            vbs,
+            self.oxide_capacitance_total(),
+            self.phi.sqrt(),
+        )
+    }
+
+    fn meyer_capacitance_halves_at(
+        &self,
+        vgs: Value,
+        vds: Value,
+        vbs: Value,
+        oxide_cap: Value,
+        sqrt_phi: Value,
+    ) -> (Value, Value, Value) {
         let phi = if self.level == 1 {
             self.phi
         } else {
@@ -318,58 +392,27 @@ impl Mosfet {
         };
         let p = self.polarity();
         let vgs_m = p * vgs;
-        let vds_m = p * vds;
-        let vbs_m = p * vbs;
-        let vgd_m = vgs_m - vds_m;
-        let vgb_m = vgs_m - vbs_m;
-
-        let (mode, von, vdsat) = if self.level == 6 {
-            self.level6_meyer_state(vgs, vds, vbs)
-        } else if self.level == 2 {
-            let eval = self.level2_evaluate(vgs, vds, vbs);
-            let mode = if vds_m >= 0.0 { 1.0 } else { -1.0 };
-            (mode, eval.von, eval.vdsat)
-        } else if self.uses_mos3_core() {
-            let state = self.mos3_state(vgs, vds, vbs);
-            let mode = if vds_m >= 0.0 { 1.0 } else { -1.0 };
-            let p = self.polarity();
-            (mode, p * state.von, p * state.vdsat)
-        } else {
-            let mode = if vds_m >= 0.0 { 1.0 } else { -1.0 };
-            let vg_active = if mode > 0.0 { vgs_m } else { vgd_m };
-            let von = self.vth(vbs);
-            let vdsat = (vg_active - von).max(0.0);
-            (mode, von, vdsat)
-        };
-
-        let use_xyce_meyer =
-            self.body_junction_model == MosBodyJunctionModel::XyceClassicLinearizedReverse;
-        let (cgs_int, cgd_int, cgb_int) = if mode > 0.0 {
-            if use_xyce_meyer {
+        let vgd_m = vgs_m - p * vds;
+        let vgb_m = vgs_m - p * vbs;
+        let (mode, von, vdsat) = self.classic_meyer_state(vgs, vds, vbs, sqrt_phi);
+        let partition = |gate, drain| {
+            if self.body_junction_model == MosBodyJunctionModel::XyceClassicLinearizedReverse {
                 Self::xyce_meyer_intrinsic_capacitances(
-                    vgs_m, vgd_m, vgb_m, von, vdsat, phi, oxide_cap,
+                    gate, drain, vgb_m, von, vdsat, phi, oxide_cap,
                 )
             } else {
-                Self::meyer_intrinsic_capacitances(vgs_m, vgd_m, vgb_m, von, vdsat, phi, oxide_cap)
+                Self::meyer_intrinsic_capacitances(gate, drain, vgb_m, von, vdsat, phi, oxide_cap)
             }
-        } else {
-            let (capgd_int, capgs_int, capgb_int) = if use_xyce_meyer {
-                Self::xyce_meyer_intrinsic_capacitances(
-                    vgd_m, vgs_m, vgb_m, von, vdsat, phi, oxide_cap,
-                )
-            } else {
-                Self::meyer_intrinsic_capacitances(vgd_m, vgs_m, vgb_m, von, vdsat, phi, oxide_cap)
-            };
-            (capgs_int, capgd_int, capgb_int)
         };
-
-        (cgs_int, cgd_int, cgb_int)
+        if mode > 0.0 {
+            partition(vgs_m, vgd_m)
+        } else {
+            let (cgd, cgs, cgb) = partition(vgd_m, vgs_m);
+            (cgs, cgd, cgb)
+        }
     }
 
-    /// Level-1 Meyer capacitances using the transient topology cache for
-    /// setup-invariant geometry and surface-potential terms. Other levels
-    /// retain the canonical evaluator because their onset laws carry
-    /// additional model-specific state.
+    /// Reuse setup-invariant geometry and surface potential for MOS1.
     pub(crate) fn transient_capacitance_halves_with_constants(
         &self,
         vgs: Value,
@@ -380,76 +423,13 @@ impl Mosfet {
         if self.level != 1 || self.legacy_bsim_sized.is_some() {
             return self.transient_capacitance_halves_at(vgs, vds, vbs);
         }
-
-        let phi = self.phi;
-        let p = self.polarity();
-        let vgs_m = p * vgs;
-        let vds_m = p * vds;
-        let vbs_m = p * vbs;
-        let vgd_m = vgs_m - vds_m;
-        let vgb_m = vgs_m - vbs_m;
-        let mode = if vds_m >= 0.0 { 1.0 } else { -1.0 };
-        let vg_active = if mode > 0.0 { vgs_m } else { vgd_m };
-        let vto_eff = match self.mos_type {
-            MosType::Nmos => self.vto,
-            MosType::Pmos => self.vto.abs(),
-        };
-        let von = if vbs_m == 0.0 {
-            vto_eff
-        } else {
-            let phi_vbs = (self.phi - vbs_m).max(0.0);
-            vto_eff + self.gamma * (phi_vbs.sqrt() - constants.sqrt_phi)
-        };
-        let vdsat = (vg_active - von).max(0.0);
-
-        let use_xyce_meyer =
-            self.body_junction_model == MosBodyJunctionModel::XyceClassicLinearizedReverse;
-        if mode > 0.0 {
-            if use_xyce_meyer {
-                Self::xyce_meyer_intrinsic_capacitances(
-                    vgs_m,
-                    vgd_m,
-                    vgb_m,
-                    von,
-                    vdsat,
-                    phi,
-                    constants.oxide_capacitance_total,
-                )
-            } else {
-                Self::meyer_intrinsic_capacitances(
-                    vgs_m,
-                    vgd_m,
-                    vgb_m,
-                    von,
-                    vdsat,
-                    phi,
-                    constants.oxide_capacitance_total,
-                )
-            }
-        } else {
-            let (capgd_int, capgs_int, capgb_int) = if use_xyce_meyer {
-                Self::xyce_meyer_intrinsic_capacitances(
-                    vgd_m,
-                    vgs_m,
-                    vgb_m,
-                    von,
-                    vdsat,
-                    phi,
-                    constants.oxide_capacitance_total,
-                )
-            } else {
-                Self::meyer_intrinsic_capacitances(
-                    vgd_m,
-                    vgs_m,
-                    vgb_m,
-                    von,
-                    vdsat,
-                    phi,
-                    constants.oxide_capacitance_total,
-                )
-            };
-            (capgs_int, capgd_int, capgb_int)
-        }
+        self.meyer_capacitance_halves_at(
+            vgs,
+            vds,
+            vbs,
+            constants.oxide_capacitance_total,
+            constants.sqrt_phi,
+        )
     }
 
     #[inline]
@@ -481,51 +461,17 @@ impl Mosfet {
         (cgs, cgd, cgb)
     }
 
-    /// Calculate total AC small-signal capacitances using Meyer model
-    ///
-    /// Returns (Cgs, Cgd, Cgb) including both intrinsic channel capacitances
-    /// and overlap capacitances. Values depend on operating region.
-    ///
-    /// # Meyer Capacitance Model
-    /// - Cutoff: Cgb dominates, Cgs = Cgd = overlap only
-    /// - Linear: Cgs = Cgd = Cox*W*L/2 + overlap
-    /// - Saturation: Cgs = 2/3*Cox*W*L + overlap, Cgd = overlap only
-    pub(crate) fn ac_capacitances(&self) -> (Value, Value, Value) {
+    /// Total AC Meyer capacitances (Cgs, Cgd, Cgb), including overlap,
+    /// at the same evaluated bias used by the current linearization.
+    pub(crate) fn ac_capacitances_at(
+        &self,
+        vgs: Value,
+        vds: Value,
+        vbs: Value,
+    ) -> (Value, Value, Value) {
         let (cgs_ov, cgd_ov, cgb_ov) = self.overlap_capacitances();
-
-        if self.uses_mos3_core() {
-            let (cgs_int, cgd_int, cgb_int) =
-                self.transient_capacitance_halves_at(self.vgs, self.vds, self.vbs);
-            return (
-                2.0 * cgs_int + cgs_ov,
-                2.0 * cgd_int + cgd_ov,
-                2.0 * cgb_int + cgb_ov,
-            );
-        }
-
-        // Intrinsic gate oxide capacitance
-        let cox_wl = self.oxide_capacitance_total();
-
-        // Determine operating region from stored values
-        let vgs_eff = self.polarity() * self.vgs;
-        let vds_eff = self.polarity() * self.vds;
-        let vth = self.vth(self.vbs);
-        let vgt = vgs_eff - self.polarity() * vth;
-
-        if vgt <= 0.0 {
-            // Cutoff region: only overlap capacitances, Cgb = Cox*W*L
-            (cgs_ov, cgd_ov, cox_wl + cgb_ov)
-        } else if vds_eff < vgt {
-            // Linear region: symmetric distribution
-            let cgs_int = 0.5 * cox_wl;
-            let cgd_int = 0.5 * cox_wl;
-            (cgs_int + cgs_ov, cgd_int + cgd_ov, cgb_ov)
-        } else {
-            // Saturation region: 2/3 to source, nearly zero to drain
-            let cgs_int = (2.0 / 3.0) * cox_wl;
-            let cgd_int = 0.0; // Small in saturation
-            (cgs_int + cgs_ov, cgd_int + cgd_ov, cgb_ov)
-        }
+        let (cgs, cgd, cgb) = self.transient_capacitance_halves_at(vgs, vds, vbs);
+        (2.0 * cgs + cgs_ov, 2.0 * cgd + cgd_ov, 2.0 * cgb + cgb_ov)
     }
 
     #[inline]
@@ -979,6 +925,75 @@ mod tests {
     }
 
     #[test]
+    fn mos1_meyer_regions_use_effective_source_and_cached_threshold() {
+        for mut mos in [
+            Mosfet::new_nmos("M1".into(), 1, 2, 3, 4),
+            Mosfet::new_pmos("M1".into(), 1, 2, 3, 4),
+        ] {
+            let p = mos.polarity();
+            mos.gamma = 0.4;
+            mos.phi = 0.6;
+            mos.cox = 1.0;
+            mos.w = 1.0;
+            mos.l = 1.0;
+            for vto in [-0.3, 1.0] {
+                mos.vto = p * vto;
+                let von = vto - 0.4 * 0.2 / (2.0 * 0.6_f64.sqrt());
+                for xyce in [false, true] {
+                    mos.body_junction_model = if xyce {
+                        MosBodyJunctionModel::XyceClassicLinearizedReverse
+                    } else {
+                        MosBodyJunctionModel::NgspiceReverseClamp
+                    };
+                    let constants = mos.classic_transient_constants();
+                    for (overdrive, drain, caps) in [
+                        (-1.0, 0.1, (0.0, 0.0, 1.0)),
+                        (-0.45, 0.1, (0.0, 0.0, 0.75)),
+                        (
+                            -0.15,
+                            0.0,
+                            if xyce {
+                                (1.0 / 3.0, 0.0, 0.25)
+                            } else {
+                                (0.25, 0.25, 0.25)
+                            },
+                        ),
+                        (0.4, 0.2, (16.0 / 27.0, 10.0 / 27.0, 0.0)),
+                        (0.4, 2.0, (2.0 / 3.0, 0.0, 0.0)),
+                    ] {
+                        for reverse in [false, true] {
+                            let (vg, vd, vb) = if reverse {
+                                (von + overdrive - drain, -drain, 0.2 - drain)
+                            } else {
+                                (von + overdrive, drain, 0.2)
+                            };
+                            let (vg, vd, vb) = (p * vg, p * vd, p * vb);
+                            let expected = if reverse && drain > 0.0 {
+                                (caps.1, caps.0, caps.2)
+                            } else {
+                                caps
+                            };
+                            assert_caps_close(
+                                mos.ac_capacitances_at(vg, vd, vb),
+                                expected,
+                                2e-14,
+                                2e-15,
+                            );
+                            let cached = mos.transient_capacitance_halves_with_constants(
+                                vg, vd, vb, &constants,
+                            );
+                            assert_eq!(cached, mos.transient_capacitance_halves_at(vg, vd, vb));
+                            assert!(
+                                (mos.model_space_onset_voltage(vg, vd, vb) - von).abs() < 1e-14
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
     fn level1_meyer_capacitance_uses_lateral_diffusion_effective_length() {
         let mut mos = Mosfet::new_nmos("m1".to_string(), 1, 2, 3, 0);
         mos.level = 1;
@@ -1208,6 +1223,11 @@ mod tests {
             (expected.0 - expected.1).abs() > 1.0e-16,
             "inverse-mode fixture must expose source/drain Meyer cap swapping"
         );
-        assert_caps_close(mos.ac_capacitances(), expected, 1.0e-12, 1.0e-24);
+        assert_caps_close(
+            mos.ac_capacitances_at(mos.vgs, mos.vds, mos.vbs),
+            expected,
+            1.0e-12,
+            1.0e-24,
+        );
     }
 }

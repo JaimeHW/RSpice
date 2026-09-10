@@ -360,6 +360,41 @@ mod wasm_tests {
     }
 
     #[wasm_bindgen_test]
+    fn mos1_meyer_forward_body_and_inverse_ac_in_wasm() {
+        for (kind, p) in [("NMOS", 1.0), ("PMOS", -1.0)] {
+            for reverse in [false, true] {
+                let von = -0.3 - 0.4 * 0.2 / (2.0 * 0.6_f64.sqrt());
+                let (vg, vd, vb) = if reverse {
+                    (von + 0.2, -0.2, 0.0)
+                } else {
+                    (von + 0.4, 0.2, 0.2)
+                };
+                let deck=rspice_core::Netlist::parse(&format!(
+                    "Meyer polarity\nVD d 0 {}\nVS s 0 0\nVG g 0 {} AC 1\nVB b 0 {}\nM1 d g s b mm W=2u L=1u\n.model mm {kind}(LEVEL=1 VTO={} GAMMA=.4 PHI=.6 KP=100u TOX=20n IS=0)\n.options GMIN=0\n.end\n",p*vd,p*vg,p*vb,p*(-0.3))).unwrap();
+                let result = rspice_core::Engine::default()
+                    .run_ac_with_abort(&deck, &[1e6], &rspice_core::abort_signal::NoAbort)
+                    .unwrap();
+                let oxide = 3.9 * 8.854_214_871e-12 / 20e-9 * 2e-12;
+                let expected = if reverse {
+                    [10.0 / 27.0, 16.0 / 27.0]
+                } else {
+                    [16.0 / 27.0, 10.0 / 27.0]
+                };
+                for (source, fraction) in ["VS", "VD"].into_iter().zip(expected) {
+                    let index = result[0]
+                        .branch_names
+                        .iter()
+                        .position(|name| name.eq_ignore_ascii_case(source))
+                        .unwrap();
+                    let capacitance =
+                        result[0].currents[index].im / (2.0 * std::f64::consts::PI * 1e6);
+                    assert!((capacitance - oxide * fraction).abs() < oxide * 1e-10);
+                }
+            }
+        }
+    }
+
+    #[wasm_bindgen_test]
     fn mos_nlev3_channel_noise_at_zero_vds_in_wasm() {
         let mut config = rspice_core::engine::SimulationConfig::default();
         config.convergence_config.gmin_target = 0.0;

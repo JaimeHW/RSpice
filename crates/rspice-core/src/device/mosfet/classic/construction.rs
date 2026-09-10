@@ -287,6 +287,8 @@ impl Mosfet {
             } else {
                 self.polarity() * self.vto
             }
+        } else if self.level == 1 {
+            self.level1_onset_with_sqrt_phi(vds, vbs, self.phi.sqrt())
         } else if self.level == 6 {
             self.level6_meyer_state(vgs, vds, vbs).1
         } else if self.level == 2 {
@@ -506,17 +508,7 @@ impl Mosfet {
         let vgdo = vold_vgs - vold_vds;
         let von = if self.level == 1 && self.legacy_bsim_sized.is_none() {
             if let Some(constants) = constants {
-                let vbs_eff = p * old_vbs;
-                let vto_eff = match self.mos_type {
-                    MosType::Nmos => self.vto,
-                    MosType::Pmos => self.vto.abs(),
-                };
-                if vbs_eff == 0.0 {
-                    vto_eff
-                } else {
-                    let phi_vbs = (self.phi - vbs_eff).max(0.0);
-                    vto_eff + self.gamma * (phi_vbs.sqrt() - constants.sqrt_phi)
-                }
+                self.level1_onset_with_sqrt_phi(old_vds, old_vbs, constants.sqrt_phi)
             } else {
                 self.model_space_onset_voltage(old_vgs, old_vds, old_vbs)
             }

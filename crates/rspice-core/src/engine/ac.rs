@@ -2292,7 +2292,7 @@ impl Engine {
                     &mut AcImagStamper { matrix: ac_matrix },
                 );
             } else {
-                let (cgs, cgd, cgb) = mos.ac_capacitances();
+                let (cgs, cgd, cgb) = mos.ac_capacitances_at(vgs_eval, vds_eval, vbs_eval);
                 Self::stamp_imag_two_terminal(ac_matrix, ng, ns, omega * cgs);
                 Self::stamp_imag_two_terminal(ac_matrix, ng, nd, omega * cgd);
                 Self::stamp_imag_two_terminal(ac_matrix, ng, nb, omega * cgb);

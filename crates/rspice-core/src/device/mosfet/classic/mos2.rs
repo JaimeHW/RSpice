@@ -283,12 +283,7 @@ impl Mosfet {
         let oxide_cap = cox * effective_length * effective_width;
         let beta = self.kp * effective_width / effective_length * self.multiplicity;
         let xd = self.level2_depletion_width_factor();
-        let model_vto = if self.polarity() < 0.0 {
-            -self.vto.abs()
-        } else {
-            self.vto
-        };
-        let t_vbi = model_vto - self.polarity() * self.gamma * sqrt_phi;
+        let t_vbi = self.vto - self.polarity() * self.gamma * sqrt_phi;
 
         let sarg = if lvbs <= 0.0 {
             phi_min_vbs.sqrt()
