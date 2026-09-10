@@ -830,11 +830,7 @@ impl Bjt {
         self.temperature = temp;
         self.bf = (self.bf_nominal * beta_scale).max(1e-18);
         self.br = (self.br_nominal * beta_scale).max(1e-18);
-        self.is = if self.vbic_13 {
-            is_temp * scale
-        } else {
-            (is_temp * scale).max(1e-30)
-        };
+        self.is = is_temp * scale;
         self.nf = nf_temp.max(1e-12);
         self.nr = nr_temp.max(1e-12);
         // Xyce's VBIC equations multiply every completed current branch by
@@ -877,12 +873,12 @@ impl Bjt {
         self.vo = vo_temp.max(0.0);
         self.gamm = gamm_temp.max(0.0);
         self.ikf = if ikf_temp > 0.0 {
-            (ikf_temp * scale).max(1e-18)
+            ikf_temp * scale
         } else {
             0.0
         };
         self.ikr = if self.ikr_nominal > 0.0 {
-            (self.ikr_nominal * scale).max(1e-18)
+            self.ikr_nominal * scale
         } else {
             0.0
         };
@@ -1951,6 +1947,98 @@ impl Bjt {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bjt_small_instances_preserve_currents_knees_capacitances_and_resistances() {
+        for level in [1.0, 4.0, 11.0, 12.0] {
+            let base = model_with(&[
+                ("LEVEL", level),
+                ("IS", 1e-14),
+                ("IKF", 1e-3),
+                ("IKR", 2e-3),
+                ("CJE", 1e-12),
+                ("CJC", 2e-12),
+                ("RE", 2.0),
+                ("RCX", 3.0),
+                ("TF", 1e-9),
+            ]);
+            for parameter in ["M", "AREA"] {
+                for scale in [1e-200, 1e-30, 1e-18, 0.25, 4.0] {
+                    for temperature in [280.15, 300.15, 340.15] {
+                        let mut unit = base.clone();
+                        unit.set_junction_gmin(0.0);
+                        unit.set_temperature(temperature);
+                        let scaled = unit
+                            .clone()
+                            .with_instance_params(&[(parameter.into(), scale)]);
+                        for (actual, expected) in [
+                            (scaled.is, unit.is),
+                            (scaled.ikf, unit.ikf),
+                            (scaled.ikr, unit.ikr),
+                            (scaled.cje, unit.cje),
+                            (scaled.cjc, unit.cjc),
+                        ] {
+                            assert!(
+                                (actual / scale - expected).abs() <= expected.abs() * 2e-14,
+                                "LEVEL={level} {parameter}={scale:e} T={temperature}: {actual:e} vs {expected:e}*scale"
+                            );
+                        }
+                        for (actual, expected) in [(scaled.re, unit.re), (scaled.rcx, unit.rcx)] {
+                            assert!((actual * scale - expected).abs() <= expected.abs() * 2e-14);
+                        }
+                        for (vbe, vbc) in [(0.1, -0.3), (0.7, -1.0), (-0.2, 0.7)] {
+                            let expected = unit.transport_charge_state(vbe, vbc);
+                            let actual = scaled.transport_charge_state(vbe, vbc);
+                            for (actual, expected) in [
+                                (actual.itzf, expected.itzf),
+                                (actual.itzr, expected.itzr),
+                                (actual.ditzf_dvbe_eff, expected.ditzf_dvbe_eff),
+                                (actual.ditzr_dvbc_eff, expected.ditzr_dvbc_eff),
+                            ] {
+                                assert!(
+                                    (actual / scale - expected).abs() <= expected.abs() * 2e-13,
+                                    "LEVEL={level} {parameter}={scale:e} T={temperature} bias=({vbe},{vbc}): {actual:e} vs {expected:e}*scale"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn bjt_subnormal_knees_keep_finite_transport_and_derivatives() {
+        for level in [1.0, 4.0, 11.0, 12.0] {
+            let make = |isat| {
+                let mut model =
+                    model_with(&[("LEVEL", level), ("IS", isat), ("IKF", isat), ("IKR", isat)]);
+                model.set_junction_gmin(0.0);
+                model
+            };
+            let base = make(1e-10);
+            let small = make(1e-310);
+            for (vbe, vbc) in [(0.1, -0.1), (0.7, -0.2), (-0.1, 0.7)] {
+                let reference = base.transport_charge_state(vbe, vbc);
+                let actual = small.transport_charge_state(vbe, vbc);
+                for (actual, expected) in [
+                    (actual.itzf, reference.itzf),
+                    (actual.itzr, reference.itzr),
+                    (actual.ditzf_dvbe_eff, reference.ditzf_dvbe_eff),
+                    (actual.ditzr_dvbc_eff, reference.ditzr_dvbc_eff),
+                ] {
+                    let expected = expected * 1e-300;
+                    // Final subnormal currents have a fixed spacing; allow
+                    // rounding in the current and derivative arithmetic.
+                    let tolerance = (expected.abs() * 2e-11).max(Value::from_bits(4));
+                    assert!(
+                        (actual - expected).abs() <= tolerance,
+                        "LEVEL={level} bias=({vbe},{vbc}): {actual:e} vs {expected:e}"
+                    );
+                }
+            }
+        }
+    }
 
     #[test]
     fn temperature_refresh_invalidates_bjt_currents_and_charges_at_unchanged_bias() {

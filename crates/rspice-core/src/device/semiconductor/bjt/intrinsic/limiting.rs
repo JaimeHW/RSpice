@@ -32,7 +32,7 @@ impl Bjt {
         isat: Value,
     ) -> Value {
         let vt = vt.max(1e-18);
-        let isat = isat.abs().max(1e-18);
+        let isat = isat.abs();
         // pnjlim's forward logarithm requires a positive trial voltage. A
         // negative critical voltage can send a return to zero through log(0)
         // and prevent the limiter from ever releasing that bias. Start at
@@ -41,7 +41,17 @@ impl Bjt {
         if isat.is_finite() && isat >= vt / core::f64::consts::SQRT_2 {
             return 0.0;
         }
-        vt * (vt / (core::f64::consts::SQRT_2 * isat)).ln()
+        if isat == 0.0 {
+            return Value::INFINITY;
+        }
+        let ratio = vt / (core::f64::consts::SQRT_2 * isat);
+        if ratio.is_finite() && isat.is_normal() {
+            vt * ratio.ln()
+        } else {
+            // The logarithm remains finite when the intermediate ratio does
+            // not. Separate the logs without rounding sqrt(2)*subnormal IS.
+            vt * (vt.ln() - core::f64::consts::SQRT_2.ln() - isat.ln())
+        }
     }
 
     #[inline]
@@ -51,7 +61,7 @@ impl Bjt {
     ) -> (Value, Value) {
         self.with_temperature_variant(previous_vrth, |model| {
             let vt = model.vt.max(1e-18);
-            let nominal_is = (model.is_nominal * model.instance_scale()).max(1e-18);
+            let nominal_is = model.is_nominal * model.instance_scale();
             let vcrit = Self::junction_critical_voltage(vt, nominal_is);
             (vt, vcrit)
         })

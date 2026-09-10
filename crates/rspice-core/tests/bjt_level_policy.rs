@@ -2158,3 +2158,69 @@ fn stationary_zero_bjt_bias_leaves_the_startup_junction_state() {
         }
     }
 }
+
+#[test]
+fn small_gummel_poon_instances_scale_dc_and_ac_at_temperature() {
+    for dialect in [SpiceDialect::Ngspice, SpiceDialect::Xyce] {
+        for temperature in [280.15, 300.15, 340.15] {
+            let mut config = SimulationConfig::default().with_spice_dialect(dialect);
+            config.temperature = temperature;
+            config.convergence_config.gmin_target = 0.0;
+            config.convergence_config.junction_gmin_target = 0.0;
+            let engine = Engine::new(config);
+            for (kind, p) in [("NPN", 1.0), ("PNP", -1.0)] {
+                for (vc, vb) in [(1.0, 0.1), (2.0, 0.7), (0.1, 0.7), (-0.2, -0.4)] {
+                    let make = |parameter, scale| {
+                        Netlist::parse(&format!(
+                        "Small GP instance\nVC c 0 {}\nVB b 0 DC {} AC 1\nQ1 c b 0 mm {parameter}={scale}\n.model mm {kind}(LEVEL=1 IS=1e-14 BF=100 BR=2 IKF=1e-3 IKR=2e-3 VAF=40 VAR=20 CJE=2p CJC=1p TF=1n TR=2n)\n.options GMIN=0\n.end\n",p*vc,p*vb)).unwrap()
+                    };
+                    let unit = make("M", 1.0);
+                    let dc = engine.run_dc_op(&unit).unwrap();
+                    let ac = engine.run_ac(&unit, &[1e6]).unwrap();
+                    for parameter in ["M", "AREA"] {
+                        for scale in [1e-200, 1e-30, 1e-18, 0.25] {
+                            let deck = make(parameter, scale);
+                            let actual_dc = engine.run_dc_op(&deck).unwrap();
+                            let actual_ac = engine.run_ac(&deck, &[1e6]).unwrap();
+                            assert_eq!(actual_dc.branch_names, dc.branch_names);
+                            assert_eq!(actual_ac[0].branch_names, ac[0].branch_names);
+                            for (&actual, &expected) in
+                                actual_dc.branch_currents.iter().zip(&dc.branch_currents)
+                            {
+                                assert!(
+                                    (actual / scale - expected).abs() < expected.abs() * 3e-10,
+                                    "{dialect:?} {kind} T={temperature} ({vc},{vb}) {parameter}={scale:e} DC: {actual:e} vs {expected:e}*scale"
+                                );
+                            }
+                            for (actual, expected) in
+                                actual_ac[0].currents.iter().zip(&ac[0].currents)
+                            {
+                                for (actual, expected) in
+                                    [(actual.re, expected.re), (actual.im, expected.im)]
+                                {
+                                    assert!(
+                                        (actual / scale - expected).abs() <= expected.abs() * 3e-10,
+                                        "{dialect:?} {kind} T={temperature} ({vc},{vb}) {parameter}={scale:e} AC: {actual:e} vs {expected:e}*scale"
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn zero_gummel_poon_saturation_current_stays_disabled() {
+    let mut config = SimulationConfig::default();
+    config.convergence_config.gmin_target = 0.0;
+    config.convergence_config.junction_gmin_target = 0.0;
+    let engine = Engine::new(config);
+    for vb in [-0.1, 0.0, 0.7] {
+        let deck = Netlist::parse(&format!("Disabled BJT current\nVC c 0 1\nVB b 0 {vb}\nQ1 c b 0 mm\n.model mm NPN(IS=0)\n.options GMIN=0\n.end\n")).unwrap();
+        let result = engine.run_dc_op(&deck).unwrap();
+        assert!(result.branch_currents.iter().all(|&current| current == 0.0));
+    }
+}

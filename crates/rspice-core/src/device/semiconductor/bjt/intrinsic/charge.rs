@@ -39,14 +39,17 @@ impl Bjt {
             0.0
         };
 
-        let inv_rolloff_f = if self.ikf > 0.0 { 1.0 / self.ikf } else { 0.0 };
-        let inv_rolloff_r = if self.ikr > 0.0 { 1.0 / self.ikr } else { 0.0 };
-        let (qb, dqb_dvbe_eff, dqb_dvbc_eff) = if inv_rolloff_f == 0.0 && inv_rolloff_r == 0.0 {
+        // Divide the already-scaled current by its scaled knee. Forming
+        // 1/IKF first overflows for small, valid parallel instances.
+        let normalized = |current: Value, knee: Value| {
+            if knee > 0.0 { current / knee } else { 0.0 }
+        };
+        let (qb, dqb_dvbe_eff, dqb_dvbc_eff) = if self.ikf == 0.0 && self.ikr == 0.0 {
             (q1.max(1e-12), dq1_dvbe_eff, dq1_dvbc_eff)
         } else {
-            let q2 = inv_rolloff_f * ifi + inv_rolloff_r * iri;
-            let dq2_dvbe_eff = inv_rolloff_f * gfi;
-            let dq2_dvbc_eff = inv_rolloff_r * gri;
+            let q2 = normalized(ifi, self.ikf) + normalized(iri, self.ikr);
+            let dq2_dvbe_eff = normalized(gfi, self.ikf);
+            let dq2_dvbc_eff = normalized(gri, self.ikr);
             let rolloff_arg = (1.0 + 4.0 * q2).max(0.0);
             let (rolloff_term, drolloff_dq2) = if self.nkf_given {
                 let nkf = self.nkf.clamp(1e-12, 1.0);
@@ -207,12 +210,15 @@ impl Bjt {
         );
 
         let (q1, dq1_dvbe_eff, dq1_dvbc_eff, _) = self.vbic_low_injection_charge(vbe_eff, vbc_eff);
-        let inv_rolloff_f = if self.ikf > 0.0 { 1.0 / self.ikf } else { 0.0 };
-        let inv_rolloff_r = if self.ikr > 0.0 { 1.0 / self.ikr } else { 0.0 };
-        let q2 = inv_rolloff_f * ifi + inv_rolloff_r * iri;
+        // Divide the already-scaled current by its scaled knee. Forming
+        // 1/IKF first overflows for small, valid parallel instances.
+        let normalized = |current: Value, knee: Value| {
+            if knee > 0.0 { current / knee } else { 0.0 }
+        };
+        let q2 = normalized(ifi, self.ikf) + normalized(iri, self.ikr);
         let (qb, dqb_dq1, dqb_dq2, _) = self.vbic_base_charge(q1, q2);
-        let dqb_dvbe_eff = dqb_dq1 * dq1_dvbe_eff + dqb_dq2 * inv_rolloff_f * gfi;
-        let dqb_dvbc_eff = dqb_dq1 * dq1_dvbc_eff + dqb_dq2 * inv_rolloff_r * gri;
+        let dqb_dvbe_eff = dqb_dq1 * dq1_dvbe_eff + dqb_dq2 * normalized(gfi, self.ikf);
+        let dqb_dvbc_eff = dqb_dq1 * dq1_dvbc_eff + dqb_dq2 * normalized(gri, self.ikr);
 
         let itzf = ifi / qb;
         let ditzf_dvbe_eff = gfi / qb - ifi * dqb_dvbe_eff / (qb * qb);
@@ -615,8 +621,8 @@ mod tests {
     #[test]
     fn legacy_itf_charge_and_derivatives_obey_instance_scaling() {
         for (isat, knee, scales) in [
-            (1e-16, 1e-4, &[1e-12, 0.1, 3.0, 1e12][..]),
-            (1e-26, 1e-26, &[0.1, 3.0, 1e12][..]),
+            (1e-16, 1e-4, &[1e-200, 1e-30, 1e-12, 0.1, 3.0, 1e12][..]),
+            (1e-26, 1e-26, &[1e-200, 1e-30, 0.1, 3.0, 1e12][..]),
         ] {
             for p in [1.0, -1.0] {
                 let mut unit = if p > 0.0 {

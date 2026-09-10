@@ -615,7 +615,7 @@ fn semiconductor_flicker_preserves_signed_exponents_floor_and_multiplicity() {
                     )
                     .unwrap();
                 for af in [-1.0, 0.0, 0.5, 3.0] {
-                    for m in [1.0, 4.0, if family == "Q" { 1e-6 } else { 1e-200 }] {
+                    for m in [1.0, 4.0, 1e-200] {
                         let deck = semiconductor_flicker_deck(family, m, 1e20, af, zero);
                         let noise = engine
                             .run_port_noise_correlation(&deck, &["VP".into()], &frequencies, 300.15)

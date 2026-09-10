@@ -2204,7 +2204,7 @@ impl Bjt {
 
     #[inline]
     fn instance_scale(&self) -> Value {
-        (self.area * self.m).max(1e-18)
+        self.area * self.m
     }
 
     /// Conductance carried by each intrinsic nonlinear junction branch.

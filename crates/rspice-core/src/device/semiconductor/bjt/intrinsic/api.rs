@@ -471,6 +471,18 @@ mod tests {
     }
 
     #[test]
+    fn small_saturation_bjt_limiting_keeps_the_logarithmic_threshold() {
+        for vt in [0.005_f64, 0.02585, 0.2] {
+            for isat in [1e-20, 1e-200, 1e-310, Value::from_bits(1)] {
+                let expected = vt * (vt.ln() - core::f64::consts::LN_2 * 0.5 - isat.ln());
+                let actual = Bjt::junction_critical_voltage(vt, isat);
+                assert!((actual - expected).abs() < expected * 1e-14);
+            }
+            assert_eq!(Bjt::junction_critical_voltage(vt, 0.0), Value::INFINITY);
+        }
+    }
+
+    #[test]
     fn high_saturation_bjt_limiting_returns_to_equilibrium() {
         for vt in [0.005, 0.02585, 0.2] {
             for isat in [1.0, 1e20, 1e100, f64::MAX] {
