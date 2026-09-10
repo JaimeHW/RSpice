@@ -331,7 +331,10 @@ pub(super) fn validate_renumber_request(
         if let Some(sheet_id) = object.sheet_id {
             require_non_nil(sheet_id.as_uuid(), "annotation sheet")?;
         }
-        if !references.insert(case_fold(&object.current_reference)) {
+        if !references.insert((
+            object.object.cell_view_key(),
+            case_fold(&object.current_reference),
+        )) {
             return Err(DesignManagementError::DuplicateReferenceDesignator(
                 object.current_reference.clone(),
             ));
@@ -357,20 +360,19 @@ pub(super) fn validate_annotation_mappings(
     Ok(())
 }
 
+fn hierarchy_contains(path: &str, occurrence: &str) -> bool {
+    path == "/"
+        || occurrence == path
+        || occurrence
+            .strip_prefix(path)
+            .is_some_and(|suffix| suffix.starts_with('/'))
+}
+
 pub(super) fn object_in_scope(object: &AnnotationObject, scope: &RenumberScope) -> bool {
     match scope {
         RenumberScope::WholeProject => true,
-        // The design root is written `/` and encloses every occurrence. Prefix
-        // stripping cannot say so on its own: the remainder of `/X1` under `/`
-        // is `X1`, which carries no separator to distinguish an enclosed
-        // occurrence from a longer sibling name.
-        RenumberScope::CurrentHierarchy { path } if path == "/" => true,
         RenumberScope::CurrentHierarchy { path } => {
-            object.hierarchy_path == *path
-                || object
-                    .hierarchy_path
-                    .strip_prefix(path)
-                    .is_some_and(|suffix| suffix.starts_with('/'))
+            hierarchy_contains(path, &object.hierarchy_path)
         }
         RenumberScope::CurrentSheet { sheet_id } => object.sheet_id == Some(*sheet_id),
     }
@@ -442,11 +444,7 @@ pub(super) fn matching_annotation_ranges<'a>(
                     AnnotationRangeScope::Project => true,
                     AnnotationRangeScope::Sheet { sheet_id } => object.sheet_id == Some(*sheet_id),
                     AnnotationRangeScope::Hierarchy { path } => {
-                        object.hierarchy_path == *path
-                            || object
-                                .hierarchy_path
-                                .strip_prefix(path)
-                                .is_some_and(|suffix| suffix.starts_with('/'))
+                        hierarchy_contains(path, &object.hierarchy_path)
                     }
                 }
         })
@@ -459,11 +457,16 @@ pub(super) fn matching_annotation_ranges<'a>(
     matches
 }
 
-pub(super) fn annotation_scope_specificity(scope: &AnnotationRangeScope) -> u8 {
+fn annotation_scope_specificity(scope: &AnnotationRangeScope) -> (u8, usize) {
     match scope {
-        AnnotationRangeScope::Project => 0,
-        AnnotationRangeScope::Sheet { .. } => 1,
-        AnnotationRangeScope::Hierarchy { .. } => 2,
+        AnnotationRangeScope::Project => (0, 0),
+        AnnotationRangeScope::Sheet { .. } => (1, 0),
+        AnnotationRangeScope::Hierarchy { path } => (
+            2,
+            path.split('/')
+                .filter(|segment| !segment.is_empty())
+                .count(),
+        ),
     }
 }
 
