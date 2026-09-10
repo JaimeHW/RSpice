@@ -2752,6 +2752,22 @@ fn write_registry(
         }
         out.push_str("    }\n\n");
     }
+    out.push_str(
+        "    pub fn transient_step_bound(&self) -> Result<Option<crate::Value>, String> {\n",
+    );
+    if devices.is_empty() {
+        out.push_str("        let _ = self;\n        unreachable!(\"empty generated Verilog-A registry has no timestep state\")\n");
+    } else {
+        out.push_str("        match self {\n");
+        for (index, feature) in feature_names.iter().enumerate() {
+            writeln!(
+                out,
+                "            #[cfg(feature = {feature:?})]\n            Self::Device{index}(device) => device.transient_step_bound(),"
+            )?;
+        }
+        out.push_str("            Self::__NonExhaustive(value) => match *value {},\n        }\n");
+    }
+    out.push_str("    }\n\n");
     out.push_str("    pub fn transient_event_refinement_time(&self) -> Option<crate::Value> {\n");
     if devices.is_empty() {
         out.push_str("        let _ = self;\n");

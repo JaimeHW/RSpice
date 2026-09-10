@@ -4242,25 +4242,12 @@ fn mark_cfg_plan_variable_roots(
         }
     }
     for (slot, name) in model.variable_names.iter().enumerate().take(live.len()) {
-        if SIMULATOR_CONTROL_TASK_VARIABLES.contains(&name.as_str()) {
+        if crate::analog_tasks::SIMULATOR_CONTROL_TASK_VARIABLES.contains(&name.as_str()) {
             live[slot] = true;
         }
     }
     Ok(())
 }
-
-/// The hidden variables a simulator-control task writes, named exactly as
-/// [`VerilogADevice`](crate::device::VerilogADevice) reads them back.
-///
-/// The source of truth is `SIMULATOR_CONTROL_TASK_VARIABLES` at
-/// `rust_backend/canonical.rs:4891`, where the same two names are what the
-/// generated-Rust backend refuses a model for. That constant is private, in a
-/// module of `GENERATOR_SOURCE_DIGEST_INPUTS`, and re-exporting it would move
-/// `source_tree_digest` and force a built-ins restamp for a rename this file
-/// could do without. So the two names are spelled again here, and the two
-/// spellings are held together by
-/// [`the_two_root_lists_of_simulator_control_variables_agree`](self::tests::the_two_root_lists_of_simulator_control_variables_agree).
-const SIMULATOR_CONTROL_TASK_VARIABLES: [&str; 2] = ["$bound_step", "$discontinuity"];
 
 fn mark_canonical_entry_variable_roots(
     model: &CompiledModel,
@@ -4986,45 +4973,6 @@ endmodule
         assert!(
             targets[copy + 1..].contains(&tmp),
             "and before the statement that overwrites it: {targets:?}"
-        );
-    }
-
-    /// The copy of [`SIMULATOR_CONTROL_TASK_VARIABLES`] and the original say
-    /// the same two names.
-    ///
-    /// Read out of the source because that is the only way to reach the
-    /// original: it is private to `rust_backend::canonical`, and giving it a
-    /// visibility this module could use would edit a generator digest input and
-    /// force a built-ins restamp. A rename there that this file did not follow
-    /// would otherwise silently stop rooting the task the device reads back.
-    #[test]
-    fn the_two_root_lists_of_simulator_control_variables_agree() {
-        let source = std::fs::read_to_string(
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("src")
-                .join("rust_backend")
-                .join("canonical.rs"),
-        )
-        .expect("the generator's canonical module is readable");
-        let declaration = source
-            .lines()
-            .find_map(|line| {
-                line.trim()
-                    .strip_prefix("const SIMULATOR_CONTROL_TASK_VARIABLES: [&str; 2] = [")
-            })
-            .and_then(|rest| rest.strip_suffix("];"))
-            .expect(
-                "rust_backend::canonical declares SIMULATOR_CONTROL_TASK_VARIABLES as a \
-                 two-element array on one line",
-            );
-        let original: Vec<&str> = declaration
-            .split(',')
-            .map(|name| name.trim().trim_matches('"'))
-            .collect();
-        assert_eq!(
-            original, SIMULATOR_CONTROL_TASK_VARIABLES,
-            "the CFG plan roots a different set of simulator-control tasks than the generator \
-             refuses"
         );
     }
 

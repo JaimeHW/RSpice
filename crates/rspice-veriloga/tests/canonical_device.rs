@@ -4882,17 +4882,10 @@ fn transpiler_reports_hot_phases_and_exact_output_size() {
     );
 }
 
-/// A model that asks for its own time step must not be generated silently.
-///
-/// `$bound_step` reaches the runtime as a hidden variable the front end writes
-/// only into the flat statement stream; the structured body the CFG is built
-/// from carries no trace of it. A generated device would therefore compile,
-/// run, and take whatever step the engine felt like — the failure mode that is
-/// hardest to notice and worst to debug. Refusing hands the model to a backend
-/// that honours the request.
 #[test]
-fn a_model_that_bounds_its_own_time_step_is_refused_rather_than_generated() {
-    for (task, argument) in [("$bound_step", "1.0e-9"), ("$discontinuity", "1")] {
+fn generated_discontinuity_is_refused_until_degree_semantics_are_supported() {
+    for argument in ["-1", "0", "1"] {
+        let task = "$discontinuity";
         let source = format!(
             r#"
 module stepped(p, n);
@@ -4918,6 +4911,150 @@ endmodule
             "the refusal must name the task it cannot honour, got {error}"
         );
     }
+}
+
+#[test]
+fn generated_bound_step_preserves_loop_minimum_and_transactional_state() {
+    let source = r#"
+module controlled(p,n);
+ inout p,n; electrical p,n;
+ parameter integer passes=3;
+ integer i;
+ real ticks;
+ analog begin
+  for(i=1;i<=passes;i=i+1) $bound_step(i*1e-9);
+  if(V(p,n)>0.0) $bound_step(ddx(V(p,n)*V(p,n),V(p,n))*1e-10);
+  @(timer(1.0,2.0)) ticks=ticks+1;
+  I(p,n)<+V(p,n)*1e-3;
+ end
+endmodule
+"#;
+    let (state, stamp, noise) = generated_parts(source, "bound step");
+    run_generated_main(
+        "bound step",
+        &state,
+        &stamp,
+        &noise,
+        r#"
+fn stamp(instance: &mut device::state::Instance, voltage:f64) {
+ let voltages=[voltage,0.0];
+ let ctx=runtime::GeneratedEvalContext { voltages:&voltages, temperature:300.0 };
+ instance.begin_stateful_evaluation();
+ instance.stamp(&ctx,&mut runtime::GeneratedStamper::default());
+ assert!(!ctx.evaluation_failed());
+ instance.validate_advance_state().unwrap();
+}
+runtime::set_event_analysis(true,false);
+let mut instance=device::state::Instance::new(&[0,1]);
+instance.finalize_parameters().unwrap();
+instance.set_timepoint(0.0,0.0,runtime::GeneratedDdtCoefficients::inactive());
+stamp(&mut instance,-1.0);
+assert_eq!(instance.transient_step_bound().unwrap(),Some(1e-9));
+instance.apply_validated_advance_state();
+let accepted=instance.capture_persistent_state();
+let rollback=instance.capture_rollback_state();
+stamp(&mut instance,2.0);
+assert_eq!(instance.transient_step_bound().unwrap(),Some(4e-10));
+assert_eq!(instance.capture_persistent_state(),accepted);
+assert_eq!(instance.clone().transient_step_bound().unwrap(),Some(4e-10));
+instance.restore_rollback_state(&rollback);
+assert_eq!(instance.transient_step_bound().unwrap(),Some(1e-9));
+instance.set_parameter("passes",0.0).unwrap();
+stamp(&mut instance,-1.0);
+assert_eq!(instance.transient_step_bound().unwrap(),None);
+instance.restore_persistent_state(&accepted).unwrap();
+assert_eq!(instance.transient_step_bound().unwrap(),Some(1e-9));
+assert_eq!(instance.transient_timer_step_bound(),Some(1.0));
+let mut invalid=accepted.clone();
+invalid.event_variables[1]=-1.0;
+assert!(instance.restore_persistent_state(&invalid).is_err());
+"#,
+    )
+    .unwrap_or_else(|error| panic!("{error}"));
+}
+
+#[test]
+fn generated_bound_step_preserves_zero_and_rejects_invalid_trials() {
+    let (state, stamp, noise) = generated_parts(
+        "module bounded(p,n); inout p,n; electrical p,n; analog begin $bound_step(V(p,n)); I(p,n)<+V(p,n); end endmodule",
+        "bound validation",
+    );
+    run_generated_main(
+        "bound validation",
+        &state,
+        &stamp,
+        &noise,
+        r#"
+let mut instance=device::state::Instance::new(&[0,1]);
+instance.finalize_parameters().unwrap();
+for voltage in [0.0, 1e-30, -1.0] {
+ let voltages=[voltage,0.0];
+ let ctx=runtime::GeneratedEvalContext { voltages:&voltages,temperature:300.0 };
+ instance.stamp(&ctx,&mut runtime::GeneratedStamper::default());
+ assert!(!ctx.evaluation_failed());
+ if voltage>=0.0 {
+  assert_eq!(instance.transient_step_bound().unwrap(),Some(voltage));
+  instance.validate_advance_state().unwrap();
+  instance.apply_validated_advance_state();
+ } else {
+  assert!(instance.transient_step_bound().unwrap_err().contains("$bound_step"));
+  assert!(instance.validate_advance_state().is_err());
+ }
+}
+assert_eq!(instance.capture_persistent_state().event_variables,[1e-30]);
+"#,
+    )
+    .unwrap_or_else(|error| panic!("{error}"));
+}
+
+#[test]
+fn generated_bound_step_in_child_modules_reaches_the_parent() {
+    let source = r#"
+module leaf(p,n);
+ inout p,n; electrical p,n;
+ parameter real cap=2e-9;
+ analog begin
+  if(V(p,n)>0.0) $bound_step(cap);
+  I(p,n)<+V(p,n)*1e-3;
+ end
+endmodule
+module nested(p,n);
+ inout p,n; electrical p,n;
+ leaf inner(p,n);
+endmodule
+module top(p,n);
+ inout p,n; electrical p,n;
+ nested a(p,n);
+ leaf #(.cap(1e-9)) b(p,n);
+endmodule
+"#;
+    let (state, stamp, noise) = generated_parts_selected(source, "hierarchical bound", Some("top"));
+    run_generated_main(
+        "hierarchical bound",
+        &state,
+        &stamp,
+        &noise,
+        r#"
+let mut instance=device::state::Instance::new(&[0,1]);
+instance.finalize_parameters().unwrap();
+for voltage in [1.0,-1.0,1.0] {
+ let voltages=[voltage,0.0];
+ let ctx=runtime::GeneratedEvalContext { voltages:&voltages,temperature:300.0 };
+ instance.stamp(&ctx,&mut runtime::GeneratedStamper::default());
+ assert!(!ctx.evaluation_failed());
+ assert_eq!(instance.transient_step_bound().unwrap(),(voltage>0.0).then_some(1e-9));
+ instance.validate_advance_state().unwrap();
+ instance.apply_validated_advance_state();
+}
+"#,
+    )
+    .unwrap_or_else(|error| panic!("{error}"));
+    let source = source.replace("$bound_step(cap)", "$discontinuity(0)");
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir_module(&source, Some("top"))
+        .unwrap();
+    let error = canonical::generate_device(&artifact, &options()).unwrap_err();
+    assert!(error.message.contains("$discontinuity"), "{error}");
 }
 
 struct ImmediatePipelineCancellation;
@@ -5042,8 +5179,16 @@ fn find<'a>(files: &[(&'a str, &'a str)], name: &str, model: &str) -> &'a str {
 }
 
 fn generated_parts(source: &str, model: &str) -> (String, String, String) {
+    generated_parts_selected(source, model, None)
+}
+
+fn generated_parts_selected(
+    source: &str,
+    model: &str,
+    selected: Option<&str>,
+) -> (String, String, String) {
     let artifact = VerilogACompiler::default()
-        .compile_canonical_ir(source)
+        .compile_canonical_ir_module(source, selected)
         .unwrap_or_else(|error| panic!("{model}: front end failed: {error:?}"));
     let device = canonical::generate_device(&artifact, &options())
         .unwrap_or_else(|error| panic!("{model}: generation failed: {error}"));

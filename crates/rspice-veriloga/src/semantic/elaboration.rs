@@ -7,15 +7,15 @@
 //! nodes, and equations.
 
 use super::{
-    AnalogSiteId, AnalyzedArray, AnalyzedAssignment, AnalyzedBranch, AnalyzedContribution,
-    AnalyzedFile, AnalyzedInternalNode, AnalyzedLoop, AnalyzedModule, AnalyzedParameter,
-    AnalyzedRegion, AnalyzedStatement, ConstantValue, MAX_PARAMETER_ARRAY_ELEMENTS,
-    MAX_PARAMETER_ARRAY_RANK, SemanticAnalyzer,
+    AnalogSiteGuard, AnalogSiteId, AnalyzedArray, AnalyzedAssignment, AnalyzedBranch,
+    AnalyzedContribution, AnalyzedFile, AnalyzedInternalNode, AnalyzedLoop, AnalyzedModule,
+    AnalyzedParameter, AnalyzedRegion, AnalyzedStatement, AnalyzedVariable, ConstantValue,
+    MAX_PARAMETER_ARRAY_ELEMENTS, MAX_PARAMETER_ARRAY_RANK, SemanticAnalyzer, ValueType,
 };
 use crate::ast::{
     AnalogOperator, ArrayAccessExpr, ArrayLiteralElement, ArrayLiteralExpr, BinaryExpr,
     BranchAccess, CallExpr, ConditionalExpr, Connection, Expression, Identifier, Item, Module,
-    ModuleInstance, NoiseSource, NumberLit, SystemFunction, UnaryExpr,
+    ModuleInstance, NoiseSource, NumberLit, SystemFunction, UnaryExpr, VarType,
 };
 use crate::error::{CompileError, CompileResult, SemanticError, SemanticErrorKind};
 use crate::source::Span;
@@ -75,7 +75,7 @@ pub(crate) fn elaborate_executable_module<'a>(
         selected.name.as_str(),
         true,
     )?;
-    Ok(Cow::Owned(elaborator.finish()))
+    Ok(Cow::Owned(elaborator.finish()?))
 }
 
 fn source_modules<'a>(analyzed: &'a AnalyzedFile) -> CompileResult<HashMap<SmolStr, &'a Module>> {
@@ -190,6 +190,7 @@ struct HierarchyElaborator<'a> {
     used_names: HashSet<SmolStr>,
     next_name: usize,
     next_noise_process: u32,
+    child_control_variables: [Vec<SmolStr>; 2],
 }
 
 impl<'a> HierarchyElaborator<'a> {
@@ -219,12 +220,84 @@ impl<'a> HierarchyElaborator<'a> {
             used_names,
             next_name: 0,
             next_noise_process,
+            child_control_variables: Default::default(),
         }
     }
 
-    fn finish(mut self) -> AnalyzedModule {
+    fn finish(mut self) -> CompileResult<AnalyzedModule> {
         self.flattened.noise_process_count = self.next_noise_process;
-        self.flattened
+        // Child control variables remain independent, including their resets.
+        // Publish one aggregate under the names executable backends consume.
+        for (task, children) in crate::analog_tasks::SIMULATOR_CONTROL_TASK_VARIABLES
+            .into_iter()
+            .zip(self.child_control_variables)
+        {
+            if children.is_empty() {
+                continue;
+            }
+            let span = self.source_modules[&self.flattened.name].span;
+            let existing = self
+                .flattened
+                .variables
+                .iter()
+                .position(|variable| variable.name == task);
+            let var_index = existing.unwrap_or_else(|| {
+                let index = self.flattened.variables.len();
+                self.flattened.variables.push(AnalyzedVariable {
+                    name: task.into(),
+                    var_type: VarType::Real,
+                    value_type: ValueType::Real,
+                    is_state: false,
+                });
+                index
+            });
+            let mut expressions = children
+                .into_iter()
+                .chain(existing.map(|_| SmolStr::from(task)))
+                .map(|name| Expression::Identifier(Identifier { name, span }))
+                .collect::<Vec<_>>();
+            // Balance large hierarchies so their reduction does not introduce
+            // expression depth proportional to the number of instances.
+            while expressions.len() > 1 {
+                let mut values = expressions.into_iter();
+                let mut next = Vec::with_capacity(values.len().div_ceil(2));
+                while let Some(left) = values.next() {
+                    next.push(if let Some(right) = values.next() {
+                        Expression::Call(CallExpr {
+                            name: if task == "$bound_step" { "min" } else { "max" }.into(),
+                            args: vec![left, right],
+                            span,
+                        })
+                    } else {
+                        left
+                    });
+                }
+                expressions = next;
+            }
+            let site = AnalogSiteId(self.flattened.analog_site_count);
+            self.flattened.analog_site_count = site
+                .0
+                .checked_add(1)
+                .ok_or_else(|| internal_error("hierarchy control-task site overflow".into()))?;
+            let assignment = AnalyzedAssignment {
+                target: task.into(),
+                var_index,
+                index: None,
+                expression: expressions.pop().expect("nonempty child control reduction"),
+                site,
+                expression_guard: AnalogSiteGuard::None,
+                expr_type: ValueType::Real,
+                span,
+                unfiltered_initial_step_guard: None,
+            };
+            self.flattened
+                .body
+                .push(AnalyzedRegion::Assignment(assignment.clone()));
+            self.flattened
+                .statements
+                .push(AnalyzedStatement::Assignment(assignment));
+        }
+        Ok(self.flattened)
     }
 
     /// Flatten one module's instances.
@@ -461,6 +534,12 @@ impl<'a> HierarchyElaborator<'a> {
             let mut variable = variable.clone();
             let original = variable.name.clone();
             variable.name = self.fresh_name(&original);
+            if let Some(task) = crate::analog_tasks::SIMULATOR_CONTROL_TASK_VARIABLES
+                .iter()
+                .position(|name| *name == original)
+            {
+                self.child_control_variables[task].push(variable.name.clone());
+            }
             scope.variables.insert(original, variable.name.clone());
             self.flattened.variables.push(variable);
         }

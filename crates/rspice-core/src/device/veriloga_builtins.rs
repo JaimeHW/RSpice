@@ -402,6 +402,22 @@ impl BuiltinVerilogADevices {
             .any(|device| device.kind.requires_nodeset_phase())
     }
 
+    /// Tightest active generated `$bound_step` request, including zero.
+    pub(crate) fn transient_step_bound(&self) -> Result<Option<Value>, String> {
+        let mut tightest: Option<Value> = None;
+        for device in &self.devices {
+            if let Some(bound) = device.kind.transient_step_bound().map_err(|error| {
+                format!(
+                    "generated Verilog-A instance '{}' ({}) timestep bound failed: {error}",
+                    device.instance_name, device.model_name
+                )
+            })? {
+                tightest = Some(tightest.map_or(bound, |current| current.min(bound)));
+            }
+        }
+        Ok(tightest)
+    }
+
     /// Earliest interior `cross`/`above` root produced by the latest complete
     /// generated-model evaluation.
     #[inline]

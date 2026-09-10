@@ -4504,7 +4504,6 @@ impl Engine {
                     .map_err(SimulationError::Circuit)?;
                 pending_veriloga_event_time =
                     accepted_veriloga_event_time(&circuit, resume_time, timestep.hard_min_dt())?;
-                #[cfg(feature = "veriloga")]
                 if circuit.has_any_veriloga_devices()
                     && let Some(bound) = circuit
                         .veriloga_timestep_bound()
@@ -4913,7 +4912,6 @@ impl Engine {
                 .map_err(SimulationError::Circuit)?;
             pending_veriloga_event_time =
                 accepted_veriloga_event_time(&circuit, resume_time, timestep.hard_min_dt())?;
-            #[cfg(feature = "veriloga")]
             if circuit.has_any_veriloga_devices()
                 && let Some(bound) = circuit
                     .veriloga_timestep_bound()
@@ -5465,7 +5463,6 @@ impl Engine {
                     // steps from which the controller was allowed to grow.
                     let trapped_at_floor = $dt <= livelock_dt_ceiling && {
                         let requested_max_dt = timestep.max_dt();
-                        #[cfg(feature = "veriloga")]
                         let requested_max_dt = circuit
                             .veriloga_timestep_bound()
                             .map_err(SimulationError::Circuit)?
@@ -9507,7 +9504,6 @@ impl Engine {
             // Verilog-A `$bound_step(0)` requests the solver's smallest
             // supported step. Invalid negative/non-finite requests fail in
             // the device API rather than disappearing here.
-            #[cfg(feature = "veriloga")]
             if circuit.has_any_veriloga_devices()
                 && let Some(bound) = circuit
                     .veriloga_timestep_bound()

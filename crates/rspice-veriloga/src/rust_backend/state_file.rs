@@ -1570,7 +1570,8 @@ fn finalize_checkpoint_identity_with_compatibility(
 // emits general nonlinear noise frequency coefficients. Earlier artifacts can
 // suppress invalid operator inputs and must not share this semantic identity.
 // Version 15 preserves feedback-determined initial conditions for implicit idt.
-const GENERATED_MODEL_SEMANTICS_VERSION: u32 = 15;
+// Version 16 retains generated timestep-control requests and timer-only checkpoints.
+const GENERATED_MODEL_SEMANTICS_VERSION: u32 = 16;
 
 fn generated_model_semantic_identity(device: &GeneratedRustDevice) -> String {
     let mut hasher = blake3::Hasher::new();

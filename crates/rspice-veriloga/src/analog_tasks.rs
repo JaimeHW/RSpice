@@ -4,6 +4,9 @@ pub use rspice_veriloga_runtime::AnalogTaskKind;
 use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
 
+/// Hidden scalar results read by simulator-control task consumers.
+pub(crate) const SIMULATOR_CONTROL_TASK_VARIABLES: [&str; 2] = ["$bound_step", "$discontinuity"];
+
 /// An argument's language type must survive numerical backend lowering.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AnalogTaskOperand<E> {

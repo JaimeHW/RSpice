@@ -2960,20 +2960,30 @@ impl CircuitData {
 
     /// Tightest `$bound_step` request across Verilog-A devices at the
     /// latest evaluation (None when nothing bounds the next step)
-    #[cfg(feature = "veriloga")]
     pub(crate) fn veriloga_timestep_bound(&self) -> Result<Option<Value>, String> {
-        let mut tightest: Option<Value> = None;
-        for device in self.veriloga_analog_devices() {
-            let instance = &device.name;
-            let Some(bound) = device.try_transient_bound_step().map_err(|error| {
-                format!("Verilog-A device '{instance}' timestep bound failed: {error}")
-            })?
-            else {
-                continue;
-            };
-            tightest = Some(tightest.map_or(bound, |current| current.min(bound)));
+        #[cfg(not(any(feature = "veriloga", feature = "veriloga-builtins-base")))]
+        return Ok(None);
+
+        #[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
+        {
+            let mut tightest: Option<Value> = None;
+            #[cfg(feature = "veriloga")]
+            for device in self.veriloga_analog_devices() {
+                let instance = &device.name;
+                let Some(bound) = device.try_transient_bound_step().map_err(|error| {
+                    format!("Verilog-A device '{instance}' timestep bound failed: {error}")
+                })?
+                else {
+                    continue;
+                };
+                tightest = Some(tightest.map_or(bound, |current| current.min(bound)));
+            }
+            #[cfg(feature = "veriloga-builtins-base")]
+            if let Some(bound) = self.generated_veriloga_devices.transient_step_bound()? {
+                tightest = Some(tightest.map_or(bound, |current| current.min(bound)));
+            }
+            Ok(tightest)
         }
-        Ok(tightest)
     }
 
     #[cfg(feature = "veriloga")]

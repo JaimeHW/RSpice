@@ -270,7 +270,8 @@ use super::*;
 // Version 62 represents idt without an explicit IC by an internal solver
 // equation; older records irrecoverably substitute an explicit zero IC.
 // Version 63 binds an explicit module selection into memory and disk identities.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 63;
+// Version 64 resets simulator-control tasks once before all runtime loops.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 64;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]

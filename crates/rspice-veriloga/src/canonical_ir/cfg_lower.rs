@@ -72,6 +72,8 @@ pub struct CfgModel {
     /// Final values of event-controlled procedural variables at function exit,
     /// in dense accepted-state slot order.
     pub event_state_candidates: Vec<ValueId>,
+    /// Smallest active `$bound_step` request, including its per-evaluation reset.
+    pub timestep_bound: Option<ValueId>,
     /// Static source-wise projection of directly contributed noise, in source
     /// order. Assigned reuse and frequency-dependent routing are retained in
     /// `noise_processes` and the original CFG instead of folded into this PSD.
@@ -224,8 +226,15 @@ impl CfgModel {
         mode: CfgLowerMode,
     ) -> Result<Self, Vec<IrDiagnostic>> {
         let mut lowerer = CfgLowerer::new(hir, mir, mode);
-        let (function, residuals, activations, event_state_candidates, noise, noise_processes) =
-            lowerer.lower()?;
+        let (
+            function,
+            residuals,
+            activations,
+            event_state_candidates,
+            noise,
+            noise_processes,
+            timestep_bound,
+        ) = lowerer.lower()?;
         // Errors only. A warning that failed the lowering would be an error
         // wearing a different word.
         if lowerer
@@ -241,6 +250,7 @@ impl CfgModel {
             residuals,
             activations,
             event_state_candidates,
+            timestep_bound,
             noise,
             noise_processes,
             warnings: lowerer.diagnostics,
@@ -1071,6 +1081,7 @@ impl<'a> CfgLowerer<'a> {
             Vec<ValueId>,
             Vec<CfgNoiseSource>,
             Vec<CfgNoiseProcess>,
+            Option<ValueId>,
         ),
         Vec<IrDiagnostic>,
     > {
@@ -1223,6 +1234,21 @@ impl<'a> CfgLowerer<'a> {
         for process in &pending_processes {
             outputs.extend(process.site_values());
         }
+        let timestep_bound = if self.record_tasks
+            && self.phase == rspice_veriloga_runtime::AnalogEvaluationPhase::Evaluation
+        {
+            self.hir
+                .variables
+                .iter()
+                .find(|variable| variable.name == "$bound_step")
+                .and_then(|variable| {
+                    self.builder
+                        .read_variable(CfgVariable::Local(variable.id), exit)
+                })
+        } else {
+            None
+        };
+        outputs.extend(timestep_bound);
         self.builder.set_terminator(exit, CfgTerminator::Return);
 
         // Through `finish_with_outputs`, because finishing renumbers values and
@@ -1230,6 +1256,12 @@ impl<'a> CfgLowerer<'a> {
         let builder = std::mem::take(&mut self.builder);
         match builder.finish_with_outputs(entry, &outputs) {
             Ok((function, outputs)) => {
+                let (outputs, timestep_bound) = if timestep_bound.is_some() {
+                    let (bound, remaining) = outputs.split_last().expect("timestep bound output");
+                    (remaining, Some(*bound))
+                } else {
+                    (outputs.as_slice(), None)
+                };
                 let contribution_count = self.hir.contributions.len();
                 let (residuals, remaining) = outputs.split_at(contribution_count);
                 let activation_count = activations.iter().flatten().count();
@@ -1261,6 +1293,7 @@ impl<'a> CfgLowerer<'a> {
                     event_state_candidates.to_vec(),
                     resolve_noise(pending, noise),
                     resolve_noise_processes(pending_processes, noise_processes, process_sites),
+                    timestep_bound,
                 ))
             }
             Err(error) => Err(vec![IrDiagnostic::global_error(

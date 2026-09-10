@@ -874,6 +874,7 @@ struct ModelPlan {
     /// Output position of each event-controlled procedural variable candidate,
     /// in dense accepted-state slot order.
     event_state_candidate_positions: Vec<usize>,
+    timestep_bound_position: Option<usize>,
     /// The noise magnitudes, as their own body.
     ///
     /// `None` where the canonical level cannot express them and the generator
@@ -1255,6 +1256,7 @@ impl ModelPlan {
         wanted.extend(activations.iter().flatten().copied());
         let activation_wanted = activations.iter().flatten().count();
         wanted.extend(cfg.event_state_candidates.iter().copied());
+        wanted.extend(cfg.timestep_bound);
         // Side effects are explicit optimization roots. They remain in their
         // source blocks, including repeated calls on loop back edges.
         wanted.extend(cfg.function.values.iter().filter_map(|value| {
@@ -1312,7 +1314,8 @@ impl ModelPlan {
         debug_assert!(mapped_activations.next().is_none());
         let event_state_end = activation_end + cfg.event_state_candidates.len();
         let event_state_candidates = mapped[activation_end..event_state_end].to_vec();
-        let task_effects = &mapped[event_state_end..];
+        let timestep_bound = cfg.timestep_bound.map(|_| mapped[event_state_end]);
+        let task_effects = &mapped[event_state_end + usize::from(timestep_bound.is_some())..];
         conduction.drop_zeros(&function);
         reactive.drop_zeros(&function);
         let mut scalar_derivatives = 0usize;
@@ -1381,6 +1384,10 @@ impl ModelPlan {
                 outputs.len() - 1
             })
             .collect();
+        let timestep_bound_position = timestep_bound.map(|bound| {
+            outputs.push(bound);
+            outputs.len() - 1
+        });
         // These positions keep execution live through scheduling and emission;
         // they produce no numerical stamp or exported device state.
         outputs.extend(task_effects.iter().copied());
@@ -1560,6 +1567,7 @@ impl ModelPlan {
             potential_groups,
             activation_positions,
             event_state_candidate_positions,
+            timestep_bound_position,
             noise,
             ddt_slots,
             idt_slots,
@@ -2773,6 +2781,9 @@ impl ModelPlan {
         out.push_str(
             "    pub fn stamp(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedStamper<'_>) {\n",
         );
+        if self.timestep_bound_position.is_some() {
+            out.push_str("        self.timestep_bound_candidate = f64::NAN;\n");
+        }
         if !self.initialization.is_empty() {
             out.push_str("        self.initialize_analysis(ctx);\n        if ctx.evaluation_failed() || !self.canonical_initialization_valid { return; }\n");
         }
@@ -2808,6 +2819,14 @@ impl ModelPlan {
         let (body, values) = self.newton_outputs(artifact, newton, control)?;
         self.emit_prologue(artifact, function, 2, out, false)?;
         out.push_str(&indent(&body, 2));
+
+        if let Some(position) = self.timestep_bound_position {
+            let _ = writeln!(
+                out,
+                "        self.timestep_bound_candidate = {};",
+                values[position]
+            );
+        }
 
         for (slot, position) in self
             .event_state_candidate_positions
@@ -4046,6 +4065,7 @@ impl ModelPlan {
                 .push_str("            analog_effects: None,\n");
         }
         self.push_limit_state_fields(&mut extensions);
+        self.push_timestep_bound_state_fields(&mut extensions);
         self.push_event_control_state_fields(&mut extensions);
         if !self.initialization.is_empty() {
             extensions
@@ -4306,9 +4326,76 @@ impl ModelPlan {
         );
     }
 
+    fn push_timestep_bound_state_fields(&self, extensions: &mut state_file::StateFileExtensions) {
+        if self.timestep_bound_position.is_none() {
+            extensions.impl_methods.push_str("    #[inline]\n    pub fn transient_step_bound(&self) -> Result<Option<f64>, String> { Ok(None) }\n");
+            return;
+        }
+        for field in ["timestep_bound_accepted", "timestep_bound_candidate"] {
+            let _ = writeln!(extensions.instance_fields, "    pub(crate) {field}: f64,");
+            let _ = writeln!(
+                extensions.clone_fields,
+                "            {field}: self.{field},"
+            );
+            let _ = writeln!(
+                extensions.new_initializers,
+                "            {field}: f64::INFINITY,"
+            );
+            let _ = writeln!(
+                extensions.reset_analysis_state,
+                "        self.{field} = f64::INFINITY;"
+            );
+            let _ = writeln!(
+                extensions.rollback_capture_values,
+                "        values.push(self.{field});"
+            );
+            let _ = writeln!(
+                extensions.rollback_restore_fields,
+                "        let (value, remaining) = rollback_values.split_first().expect(\"generated timestep rollback bound\");\n        self.{field} = *value;\n        rollback_values = remaining;"
+            );
+        }
+        extensions.rollback_value_count += 2;
+        let lane = extensions.persistent_event_lane_count;
+        extensions.persistent_event_lane_count += 1;
+        extensions
+            .checkpoint_event_capture
+            .push_str("        event_variables.push(self.timestep_bound_accepted);\n");
+        let _ = writeln!(
+            extensions.checkpoint_event_validate,
+            "        let bound = state.event_variables[Self::EVENT_STATE_COUNT + {lane}];\n        if bound.is_nan() || bound < 0.0 {{ return Err(format!(\"generated $bound_step checkpoint is invalid: {{bound}}\")); }}"
+        );
+        let _ = writeln!(
+            extensions.checkpoint_event_restore,
+            "        self.timestep_bound_accepted = state.event_variables[Self::EVENT_STATE_COUNT + {lane}];\n        self.timestep_bound_candidate = self.timestep_bound_accepted;"
+        );
+        extensions
+            .validate_advance_state
+            .push_str("        self.transient_step_bound()?;\n");
+        extensions
+            .apply_advance_state
+            .push_str("        self.timestep_bound_accepted = self.timestep_bound_candidate;\n");
+        extensions.impl_methods.push_str(
+            "    #[inline]\n\
+             pub fn transient_step_bound(&self) -> Result<Option<f64>, String> {\n\
+                 let bound = self.timestep_bound_candidate;\n\
+                 if bound == f64::INFINITY { return Ok(None); }\n\
+                 if !bound.is_finite() || bound < 0.0 { return Err(format!(\"generated $bound_step request is invalid: {bound}\")); }\n\
+                 Ok(Some(bound))\n\
+             }\n",
+        );
+    }
+
     fn push_event_control_state_fields(&self, extensions: &mut state_file::StateFileExtensions) {
         let cross_count = self.cross_slots.len();
         let has_timer = !self.timer_slots.is_empty();
+        if cross_count > 0 || has_timer {
+            let offset = extensions.persistent_event_lane_count;
+            let prefix = format!(
+                "        let mut generated_event_lanes = &state.event_variables[Self::EVENT_STATE_COUNT + {offset}..];\n"
+            );
+            extensions.checkpoint_event_validate.push_str(&prefix);
+            extensions.checkpoint_event_restore.push_str(&prefix);
+        }
 
         if cross_count > 0 {
             extensions.reset_analysis_state.push_str("        self.cross_event_accepted.fill(GeneratedCrossState::INITIAL);\n        self.cross_event_candidate.fill(GeneratedCrossState::INITIAL);\n        self.event_refinement_time = f64::INFINITY;\n");
@@ -4386,8 +4473,7 @@ impl ModelPlan {
             );
             let _ = write!(
                 extensions.checkpoint_event_validate,
-                "        let mut generated_event_lanes = &state.event_variables[Self::EVENT_STATE_COUNT..];\n\
-                         for index in 0..{cross_count} {{\n\
+                "        for index in 0..{cross_count} {{\n\
                              let (lanes, remaining) = generated_event_lanes.split_at(GeneratedCrossState::CHECKPOINT_LANES);\n\
                              GeneratedCrossState::from_checkpoint_lanes(lanes).map_err(|error| format!(\"generated crossing checkpoint slot {{index}}: {{error}}\"))?;\n\
                              generated_event_lanes = remaining;\n\
@@ -4395,8 +4481,7 @@ impl ModelPlan {
             );
             let _ = write!(
                 extensions.checkpoint_event_restore,
-                "        let mut generated_event_lanes = &state.event_variables[Self::EVENT_STATE_COUNT..];\n\
-                         for target in self.cross_event_accepted.iter_mut() {{\n\
+                "        for target in self.cross_event_accepted.iter_mut() {{\n\
                              let (lanes, remaining) = generated_event_lanes.split_at(GeneratedCrossState::CHECKPOINT_LANES);\n\
                              *target = GeneratedCrossState::from_checkpoint_lanes(lanes)?;\n\
                              generated_event_lanes = remaining;\n\
@@ -5556,21 +5641,12 @@ fn reject_unsupported_kinds(
     {
         return Err(unsupported(artifact, "an indirect contribution"));
     }
-    // Simulator-control tasks, which this backend would otherwise drop in
-    // silence rather than refuse.
-    //
-    // The front end lowers `$bound_step` and `$discontinuity` into hidden
-    // variables named after the task, writes them only into the flat statement
-    // stream, and the runtime reads them back under those exact names. The
-    // structured body carries neither, so the CFG built from it is a faithful
-    // graph of a model that has stopped asking for the time step it needs — a
-    // model that compiles, runs, and steps wrongly. Refusing sends it to a
-    // backend that honours the request instead.
+    // Discontinuity degree and Newton-limiting semantics are not implemented here.
     if let Some(variable) = artifact
         .hir
         .variables
         .iter()
-        .find(|variable| SIMULATOR_CONTROL_TASK_VARIABLES.contains(&variable.name.as_str()))
+        .find(|variable| variable.name == "$discontinuity")
     {
         return Err(unsupported(
             artifact,
@@ -5579,10 +5655,6 @@ fn reject_unsupported_kinds(
     }
     Ok(())
 }
-
-/// Hidden variables the front end creates for a simulator-control task, named
-/// exactly as `VerilogADevice` reads them back.
-const SIMULATOR_CONTROL_TASK_VARIABLES: [&str; 2] = ["$bound_step", "$discontinuity"];
 
 fn stage_fn_name(class: InvalidationClass) -> &'static str {
     match class {

@@ -7,14 +7,18 @@ use rspice_veriloga::device::VerilogADevice;
 use rspice_veriloga::{CompilerOptions, VerilogACompiler};
 
 fn compile_device(instance: &str, source: &str) -> VerilogADevice {
+    compile_selected_device(instance, source, None)
+}
+
+fn compile_selected_device(instance: &str, source: &str, module: Option<&str>) -> VerilogADevice {
     let compiler = VerilogACompiler::new(CompilerOptions::default());
     let model = compiler
-        .compile(source)
+        .compile_module(source, module)
         .expect("compile timestep-control model");
     #[cfg(feature = "native")]
     {
         let canonical_ir = compiler
-            .compile_canonical_ir(source)
+            .compile_canonical_ir_module(source, module)
             .expect("compile timestep-control canonical IR");
         VerilogADevice::try_new_with_canonical_ir(instance, model, &canonical_ir, &[1, 0])
             .expect("construct timestep-control device from canonical IR")
@@ -60,6 +64,42 @@ fn bound_step_takes_the_min_of_active_calls() {
     // And it resets per evaluation rather than latching
     stamp_once(&mut device, &[0.2]);
     assert_eq!(device.transient_bound_step(), Some(1.0e-6));
+}
+
+#[test]
+fn control_tasks_inside_runtime_loops_reset_once_per_evaluation() {
+    let mut device = compile_device(
+        "LOOP",
+        r#"
+module loop_controls(p,n);
+    inout p,n; electrical p,n;
+    parameter integer passes=3;
+    integer i;
+    analog begin
+        for (i=1; i<=passes; i=i+1) begin
+            $bound_step(i*1e-9);
+            if (i==1) $discontinuity(0);
+        end
+        I(p,n) <+ V(p,n)*1e-3;
+    end
+endmodule
+"#,
+    );
+    stamp_once(&mut device, &[0.5]);
+    assert_eq!(device.try_transient_bound_step().unwrap(), Some(1e-9));
+    assert!(device.discontinuity_pending());
+    device.advance_state();
+
+    assert!(device.try_set_parameter("passes", 0.0).unwrap());
+    stamp_once(&mut device, &[0.5]);
+    assert_eq!(device.try_transient_bound_step().unwrap(), None);
+    assert!(!device.discontinuity_pending());
+    device.advance_state();
+
+    assert!(device.try_set_parameter("passes", 2.0).unwrap());
+    stamp_once(&mut device, &[0.5]);
+    assert_eq!(device.try_transient_bound_step().unwrap(), Some(1e-9));
+    assert!(device.discontinuity_rising());
 }
 
 const UNBOUNDED: &str = r#"
@@ -148,4 +188,41 @@ fn discontinuity_reports_rising_edges_only() {
     device.advance_state();
     stamp_once(&mut device, &[1.2]);
     assert!(device.discontinuity_rising());
+}
+
+#[test]
+fn child_control_tasks_reach_the_solver_after_hierarchy_flattening() {
+    let source = r#"
+module leaf(p,n);
+ inout p,n; electrical p,n;
+ parameter real bound=1e-9;
+ analog begin
+  if(V(p,n)>0.0) begin $bound_step(bound); $discontinuity(0); end
+  I(p,n)<+V(p,n)*1e-3;
+ end
+endmodule
+module nested(p,n);
+ inout p,n; electrical p,n;
+ leaf #(.bound(2e-9)) inner(p,n);
+endmodule
+module top(p,n);
+ inout p,n; electrical p,n;
+ nested a(p,n);
+ leaf #(.bound(1e-9)) b(p,n);
+ analog $bound_step(3e-9);
+endmodule
+"#;
+    let mut device = compile_selected_device("hierarchy", source, Some("top"));
+    stamp_once(&mut device, &[1.0]);
+    assert_eq!(
+        device.try_transient_bound_step().unwrap(),
+        Some(1e-9),
+        "{:?}",
+        device.variables().collect::<Vec<_>>()
+    );
+    assert!(device.discontinuity_pending());
+    device.advance_state();
+    stamp_once(&mut device, &[-1.0]);
+    assert_eq!(device.try_transient_bound_step().unwrap(), Some(3e-9));
+    assert!(!device.discontinuity_pending());
 }

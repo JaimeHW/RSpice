@@ -446,6 +446,8 @@ pub struct SemanticAnalyzer {
     /// Hidden system-task variables ($bound_step, $discontinuity)
     /// registered on first use
     task_vars: HashMap<SmolStr, usize>,
+    /// Resets belong to the evaluation prologue even when first used in a loop.
+    task_resets: Vec<AnalyzedAssignment>,
     /// Snapshotted guards for enclosing unfiltered `initial_step` events.
     unfiltered_initial_step_guards: Vec<SmolStr>,
     /// Non-fatal findings for the whole file under analysis, deduplicated by
@@ -506,6 +508,7 @@ impl SemanticAnalyzer {
             arrays: HashMap::new(),
             parameter_arrays: HashSet::new(),
             task_vars: HashMap::new(),
+            task_resets: Vec::new(),
             unfiltered_initial_step_guards: Vec::new(),
             warnings: Vec::new(),
             digital_scopes: Vec::new(),
@@ -800,6 +803,7 @@ impl SemanticAnalyzer {
         self.implicit_integrators.clear();
         self.arrays.clear();
         self.task_vars.clear();
+        self.task_resets.clear();
 
         // Phase 1: Collect port names from module header
         let port_names: Vec<SmolStr> = module.ports.iter().map(|p| p.name.clone()).collect();
@@ -1680,6 +1684,7 @@ impl SemanticAnalyzer {
         self.finish_implicit_integrators(&mut analyzed);
         analyzed.statements = statements;
         analyzed.body = self.take_body();
+        Self::prepend_task_resets(&mut analyzed, std::mem::take(&mut self.task_resets));
         analyzed.analog_site_count = self.next_analog_site;
 
         // Surface every recorded diagnostic instead of silently succeeding
@@ -1694,6 +1699,86 @@ impl SemanticAnalyzer {
         analyzed.symbol_table = self.symbols.clone();
         analyzed.noise_process_count = self.next_noise_process;
         Ok(analyzed)
+    }
+
+    fn prepend_task_resets(module: &mut AnalyzedModule, resets: Vec<AnalyzedAssignment>) {
+        if resets.is_empty() {
+            return;
+        }
+        let sites = resets
+            .iter()
+            .map(|assignment| assignment.site)
+            .collect::<Vec<_>>();
+        let remap = |site: AnalogSiteId| match sites.binary_search(&site) {
+            Ok(index) => AnalogSiteId(index as u32),
+            Err(before) => AnalogSiteId(site.0 - before as u32 + sites.len() as u32),
+        };
+        // Reaching definitions rely on site order matching execution order.
+        // Move the reset sites to the front in both representations, retaining
+        // the relative order and identity correspondence of every other site.
+        fn statements(
+            body: &mut [AnalyzedStatement],
+            remap: &impl Fn(AnalogSiteId) -> AnalogSiteId,
+        ) {
+            for statement in body {
+                match statement {
+                    AnalyzedStatement::Assignment(assignment) => {
+                        assignment.site = remap(assignment.site)
+                    }
+                    AnalyzedStatement::Loop(loop_) => {
+                        loop_.site = remap(loop_.site);
+                        statements(&mut loop_.body, remap);
+                    }
+                    AnalyzedStatement::Task(task) => task.site = remap(AnalogSiteId(task.site)).0,
+                    AnalyzedStatement::Initialization { site, body, .. } => {
+                        *site = remap(*site);
+                        statements(body, remap);
+                    }
+                }
+            }
+        }
+        fn regions(body: &mut [AnalyzedRegion], remap: &impl Fn(AnalogSiteId) -> AnalogSiteId) {
+            for region in body {
+                match region {
+                    AnalyzedRegion::Assignment(assignment) => {
+                        assignment.site = remap(assignment.site)
+                    }
+                    AnalyzedRegion::Contribution(contribution) => {
+                        contribution.site = remap(contribution.site)
+                    }
+                    AnalyzedRegion::Conditional {
+                        condition_site,
+                        then_body,
+                        else_body,
+                        ..
+                    } => {
+                        *condition_site = condition_site.map(remap);
+                        regions(then_body, remap);
+                        regions(else_body, remap);
+                    }
+                    AnalyzedRegion::Loop { site, body, .. } => {
+                        *site = remap(*site);
+                        regions(body, remap);
+                    }
+                    AnalyzedRegion::Task(task) => task.site = remap(AnalogSiteId(task.site)).0,
+                    AnalyzedRegion::Initialization { body, .. } => regions(body, remap),
+                }
+            }
+        }
+        for index in &mut module.prologue_statements {
+            *index += resets.len();
+        }
+        module
+            .body
+            .splice(0..0, resets.iter().cloned().map(AnalyzedRegion::Assignment));
+        module
+            .statements
+            .splice(0..0, resets.into_iter().map(AnalyzedStatement::Assignment));
+        statements(&mut module.statements, &remap);
+        regions(&mut module.body, &remap);
+        for contribution in &mut module.contributions {
+            contribution.site = remap(contribution.site);
+        }
     }
 
     /// Interpret the CMC parameter storage convention without letting backend
@@ -4105,8 +4190,7 @@ impl SemanticAnalyzer {
             );
             return Ok(());
         };
-        let var_index =
-            self.ensure_task_variable("$bound_step", f64::INFINITY, module, sink, call.span);
+        let var_index = self.ensure_task_variable("$bound_step", f64::INFINITY, module, call.span);
         let bound = self.lower_expression_with_side_effects(arg, module, sink)?;
         let current = Expression::Identifier(Identifier {
             name: "$bound_step".into(),
@@ -4118,18 +4202,20 @@ impl SemanticAnalyzer {
             span: call.span,
         });
         let expression_guard = self.active_site_guard();
-        let expression = self.apply_guard(min, current);
-        sink.push(AnalyzedStatement::Assignment(AnalyzedAssignment {
+        let mut assignment = AnalyzedAssignment {
             target: "$bound_step".into(),
             var_index,
             index: None,
-            expression,
+            expression: min,
             site: self.next_analog_site(),
             expression_guard,
             expr_type: ValueType::Real,
             span: call.span,
             unfiltered_initial_step_guard: None,
-        }));
+        };
+        self.record_region(AnalyzedRegion::Assignment(assignment.clone()));
+        assignment.expression = self.apply_guard(assignment.expression, current);
+        sink.push(AnalyzedStatement::Assignment(assignment));
         Ok(())
     }
 
@@ -4157,24 +4243,26 @@ impl SemanticAnalyzer {
             }
         }
 
-        let var_index = self.ensure_task_variable("$discontinuity", 0.0, module, sink, call.span);
+        let var_index = self.ensure_task_variable("$discontinuity", 0.0, module, call.span);
         let current = Expression::Identifier(Identifier {
             name: "$discontinuity".into(),
             span: call.span,
         });
         let expression_guard = self.active_site_guard();
-        let expression = self.apply_guard(Self::number_expr(1.0, call.span), current);
-        sink.push(AnalyzedStatement::Assignment(AnalyzedAssignment {
+        let mut assignment = AnalyzedAssignment {
             target: "$discontinuity".into(),
             var_index,
             index: None,
-            expression,
+            expression: Self::number_expr(1.0, call.span),
             site: self.next_analog_site(),
             expression_guard,
             expr_type: ValueType::Real,
             span: call.span,
             unfiltered_initial_step_guard: None,
-        }));
+        };
+        self.record_region(AnalyzedRegion::Assignment(assignment.clone()));
+        assignment.expression = self.apply_guard(assignment.expression, current);
+        sink.push(AnalyzedStatement::Assignment(assignment));
         Ok(())
     }
 
@@ -4186,7 +4274,6 @@ impl SemanticAnalyzer {
         name: &str,
         reset: f64,
         module: &mut AnalyzedModule,
-        sink: &mut Vec<AnalyzedStatement>,
         span: Span,
     ) -> usize {
         if let Some(&idx) = self.task_vars.get(name) {
@@ -4202,17 +4289,18 @@ impl SemanticAnalyzer {
         self.task_vars.insert(name.into(), var_index);
         // The reset runs unconditionally: every evaluation starts neutral
         // and only active calls move the value
-        sink.push(AnalyzedStatement::Assignment(AnalyzedAssignment {
+        let site = self.next_analog_site();
+        self.task_resets.push(AnalyzedAssignment {
             target: name.into(),
             var_index,
             index: None,
             expression: Self::number_expr(reset, span),
-            site: self.next_analog_site(),
+            site,
             expression_guard: AnalogSiteGuard::None,
             expr_type: ValueType::Real,
             span,
             unfiltered_initial_step_guard: None,
-        }));
+        });
         var_index
     }
 
